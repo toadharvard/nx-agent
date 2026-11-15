@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gen_combridge.py SPEC OUTDIR: the COM bridge of the platform's objects, generated from the interface table (nothing per method).
+"""gen_combridge.py SPEC ROWS WORDS OUTDIR: the COM bridge of the platform's objects, generated from the interface table (nothing per method).
 
 Same model as the Direct3D 9 bridge of the render lead (render/d3d9/gen/gen_bridge.py, dev/face.h): the game holds a "face" whose
 first word is the key table of the interface; the key of slot s is the import key of the thunk nxb_<Interface>_<Method> (dll
@@ -8,10 +8,9 @@ interface pointers at the boundary in both directions and calls the C++ method. 
 is welded to the d3d9 generator (gen_impl, gen_expr, NxObj with the face in front of every object: our objects are plain C++ classes,
 so faces here are records per (object, interface), platform/com/combridge.h); the vocabulary of spec and rows is theirs.
 
-  OUTDIR/combridge_rows.tsv   rows of the bridge table (bridge.tsv format, 8 TAB columns, no header): one per method of every
-                              non-hidden interface (dll `!<Interface>`, name, ordinal = slot, stdcall, ret v|i, args = slot
-                              letters with the `this` first, native symbol nxb_<Interface>_<Method>, bind sym) and one per export
-                              (dll, name, ordinal, stdcall, ret, args, nxb_<Export>, sym): the row REPLACES the base row of that export.
+  ROWS, WORDS                 inputs, produced once by bridgefacts/com/comrows.py (the rows of the bridge table and the words of every
+                              method; the signature derivation is not repeated here): the thunk's return kind is the ret column of its row
+                              (native symbol column), the proxy width check reads the words of each method.
   OUTDIR/combridge.gen.cpp    the thunks, the proxy classes of the game's objects, the interface / IID / key tables, and the checks of
                               the spec against the C++ declarations (static_asserts and nxcom::selfcheck).
 
@@ -43,35 +42,6 @@ E_NOINTERFACE, E_POINTER, E_OUTOFMEMORY = "0x80004002u", "0x80004003u", "0x80070
 def die(msg):
     sys.stderr.write("gen_combridge: " + msg + "\n")
     sys.exit(2)
-
-
-def words_of(p, what):
-    """the x86 stack words of a parameter: list of letters"""
-    k = p["kind"]
-    if k in ("value", "flags", "enum", "buffer", "callback", "handle", "giface", "handle_array"):
-        return ["i"]
-    if k == "struct":
-        if p["byref"]:
-            return ["i"]
-        if p["size"] % 4:
-            die(f"{what}: struct {p['name']} by value of {p['size']} bytes has no rule")
-        return ["i"] * (p["size"] // 4)
-    if k == "float":
-        return ["f"]
-    if k == "double":
-        return ["d"]
-    if k == "int64":
-        return ["q"]
-    die(f"{what}: kind {k} has no rule")
-
-
-def ret_letter(what, m):
-    rk = m["ret_kind"]
-    if rk == "void":
-        return "v"
-    if rk in ("hresult", "value"):
-        return "i"
-    die(f"{what}: return kind {rk} has no rule")
 
 
 FAMILY = {"ds": 1, "di": 1, "dsh": 2}
@@ -111,11 +81,10 @@ class Gen:
         die(f"{what}: iface ${pname} names no parameter")
 
     # ---- a thunk: game -> platform
-    def thunk(self, what, sym, m, callee, this_if):
+    def thunk(self, what, sym, m, callee, this_if, rl):
         fam = FAMILY[self.spec["interfaces"][this_if]["family"]] if this_if else 0
         P = m["params"]
         decl, args, pre, post = [], [], [], []
-        letters = ["i"] if this_if else []
         if this_if:
             decl.append("uintptr_t t")
         nin = 0
@@ -127,8 +96,6 @@ class Gen:
                 return f"a{k}"
         var_of = V()
         for k, p in enumerate(P):
-            ws = words_of(p, what)
-            letters += ws
             kd, ct, a = p["kind"], p["ctype"], f"a{k}"
             if kd in ("float",):
                 decl.append(f"float {a}")
@@ -208,7 +175,6 @@ class Gen:
                 die(f"{what}: kind {kd} has no rule")
         if nin > 4:
             die(f"{what}: more than 4 borrowed interface arguments")
-        rl = ret_letter(what, m)
         L = [f"{'void' if rl == 'v' else 'uintptr_t'} {sym}({', '.join(decl) or 'void'}) {{"]
         bad = "" if rl == "v" else f"{E_POINTER}"
         if this_if:
@@ -225,7 +191,7 @@ class Gen:
             L += ["    " + x for x in post]
             L.append("    return nxcom::ret_word((uint32_t)r);")
         L.append("}")
-        return "\n".join(L), "".join(letters), rl
+        return "\n".join(L)
 
     # ---- the proxy of a game object: platform -> game
     def proxy_method(self, iname, m):
@@ -296,10 +262,22 @@ class Gen:
 
 
 def main():
-    spec_path, out = sys.argv[1], sys.argv[2]
+    spec_path, rows_path, words_path, out = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
     spec = json.load(open(spec_path))
+    # the return letter of every thunk is a column of the bridge rows (bridgefacts/com/comrows.py derives it once)
+    ret_of = {}
+    for ln in open(rows_path).read().split("\n"):
+        if ln:
+            f = ln.split("\t")
+            ret_of[f[6]] = f[4]
+    # the words of every method of every interface, hidden ones included (one derivation: comrows.py)
+    nwords = {}
+    for ln in open(words_path).read().split("\n"):
+        if ln:
+            f = ln.split("\t")
+            nwords[(f[0], f[1])] = int(f[2])
     g = Gen(spec)
-    rows, cpp, hdr, exp = [], [], [], []
+    cpp, hdr, exp = [], [], []
     hdr.append(HEAD)
     hdr.append("#ifndef FNVNX_COMBRIDGE_IF_GEN_H\n#define FNVNX_COMBRIDGE_IF_GEN_H")
     for h in spec["headers"]:
@@ -365,23 +343,21 @@ template <class MP> int vslot(MP mp)
                     body += f'    nxcom::face_ref(f_);\n    return nxcom::ret_word((uint32_t)(({C} *)f_->obj)->AddRef());\n}}'
                 else:
                     body += f'    void *o = f_->obj;\n    nxcom::face_unref(f_);   /* the face goes with the last reference the game holds; the object\'s count is the object\'s */\n    return nxcom::ret_word((uint32_t)(({C} *)o)->Release());\n}}'
-                text, letters, rl = body, "i", "i"
+                text = body
             else:
-                text, letters, rl = g.thunk(what, sym, m, f"(({C} *)o)->{m['name']}", n)
+                text = g.thunk(what, sym, m, f"(({C} *)o)->{m['name']}", n, ret_of[sym])
             cpp.append('extern "C" ' + text)
-            rows.append((f"!{n}", m["name"], str(m["slot"]), "stdcall", rl, letters, sym, "sym"))
     for e in spec["exports"]:
         what = e["name"]
         sym = f"nxb_{what}"
-        text, letters, rl = g.thunk(what, sym, e, what, None)
+        text = g.thunk(what, sym, e, what, None, ret_of[sym])
         exp.append('extern "C" ' + text)
-        rows.append((e["dll"], e["name"], str(e["ordinal"]), "stdcall", rl, letters, sym, "sym"))
     # ---- proxies: a method of a game object is one boundary call of at most FNVNX_BND_MAX_WORDS words (this included); an
     # interface with a wider method (IFilterMapper::EnumMatchingFilters: 22 words) is the platform's own service object, no game
     # object implements it, and the runtime consumes no game object of it (px_get: no maker)
     no_proxy = set()
     for n in g.names:
-        if any(1 + sum(len(words_of(p, n)) for p in m["params"]) > 16 for m in g.by[n]):
+        if any(nwords[(n, m["name"])] > 16 for m in g.by[n]):
             no_proxy.add(n)
     for n in g.names:
         info = spec["interfaces"][n]
@@ -434,9 +410,7 @@ template <class MP> int vslot(MP mp)
     open(os.path.join(out, "combridge.gen.cpp"), "w").write("\n".join(cpp) + "\n")
     open(os.path.join(out, "combridge_exports.gen.cpp"), "w").write("\n".join(exp) + "\n")
     open(os.path.join(out, "combridge_if.gen.h"), "w").write("\n".join(hdr) + "\n")
-    open(os.path.join(out, "combridge_rows.tsv"), "w").write("".join("\t".join(r) + "\n" for r in rows))
-    nm = sum(1 for r in rows if r[0][0] == "!")
-    print(f"gen_combridge: {len(rows)} rows ({nm} methods of {sum(1 for n in g.names if not spec['interfaces'][n]['hidden'])} interfaces, {len(rows) - nm} exports)")
+    print(f"gen_combridge: {len(ret_of)} thunks")
 
 
 if __name__ == "__main__":

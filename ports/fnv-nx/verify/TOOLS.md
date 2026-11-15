@@ -64,7 +64,10 @@ Bridge table of the import guest entries, pure derivation (rows: dll, name, ordi
 A pure function of its arguments (no file, no process): the driver verify/gate_imports.py reads the declared inputs and calls derive().
   names       text of sys_names.tsv (dll TAB name per line) from the private manifest
   spec_text   function dll -> text of the export specification of the reference environment (Wine 9.0 dlls/<dll>/<dll>.spec)
-  syms        the set of symbol names that the product objects define or reference (objects.json defined + undefined)
+  syms        the set of symbol names that the product objects define or reference (objects.json defined + undefined); None = the rows table
+              (stage A): every row binds by rule alone (sym, data, lookup, l3), no symbol table is read and none is judged; the table is then a
+              function of the names, the specs, the name table and the extra rows only, so the import keys (contract/iat.py) are too.  The
+              symbols are judged against the rows by the gate `imports` (stage B: contract/imports.judge over derive(syms=the objects' symbols))
   name_table  {msvcrt name: (symbol, kind)} of the name table the product serves msvcrt names from (read_name_table)
   extra       texts of rows in this 8-column format (other owners' rows: COM interfaces); a row of the same (dll, name) replaces the derived one
 bind  sym    native_symbol is a symbol of the product objects     lookup  msvcrt name served by the name table (native_symbol `-`)
@@ -2641,4 +2644,56 @@ is another symbol than `_start`), nothing else.
 Rule (red otherwise): link/guest.json is exactly {script}; every derived start/end file lies under the pinned runtime external (recipe.outside_files) and in
 the multilib directory the flags select (stage `mld:<root>`, `-print-multi-directory`; recipe.in_multilib). Items: every derived entry; certified = all when
 the rule holds. A red guest root build or a failing driver run is red with the reason.
+```
+
+## link/milestones.py
+
+```text
+milestones - milestones.tsv for the emulator stage: addresses of the guest's boot milestones, each from a fact.
+
+    milestones.py --exe FalloutNV.exe --modules modules.tsv --n1 n1.json --keys keys.tsv --entries entries.tsv --out milestones.tsv
+
+Rows `name<TAB>kind<TAB>value<TAB>source` (value: 8 hex digits, the address in the guest's address space or the import key); the last
+line is `# table_id <id>`, the id of keys.tsv, which must equal the id of entries.tsv.  The rows, in this order:
+  exe_entry              exe_entry  PE ImageBase + AddressOfEntryPoint of the exe file.
+  module_entry:<name>    module_entry  assigned_base + entry rva of every modules.tsv row with a non-zero entry rva (sorted by name);
+                         a 5th column holds the row's `static` flag (1 = in the exe's import closure).
+  WinMain                winmain  the address of the N1 function whose decorated name is the global function WinMain
+                         (`?WinMain@@...` or `_WinMain@N`).  N1 (n1.py) holds a function only when its MSVC object bytes equal the exe's
+                         bytes at that address, so the name -> address binding is proven; the certificate must carry the sha256 of this
+                         exe.  No such function: no row (nothing is substituted).  Two with different addresses: stage error.
+  import:<dll>!<name>    import  the import key of keys.tsv for the D3D9 calls that mark the first frame: dll `!idirect3ddevice9.dll` and
+                         `!idirect3dswapchain9.dll`, name `Present`; a missing row is no row.
+A pure function of its inputs; a violated precondition is a stage error.
+```
+
+## contract/bridgegen.py
+
+```text
+bridgegen - the rows table (stage A of the bridge table): bridge.tsv without any symbol table (contract/bridgetable.derive with syms=None).
+
+    bridgegen.py --names sys_names.tsv --specs DIR --name-table msvcrt_names.tsv --va msvcrt_va.tsv --out bridge.tsv [--extra rows.tsv ...]
+
+DIR holds the Wine 9.0 `<dll>.spec` files (dlls/<dll>/<dll>.spec copied by name); `--extra` files are 8-column rows of other owners (COM interfaces,
+the d3d9 exports), each replacing the derived row of the same (dll, name).  The output is the 8-column table with the header line iat.py reads;
+a row binds by rule (sym, data, lookup, l3), so the table does not depend on the product's objects and its sha256 is the table_id of the keys.
+A violated precondition (a name missing from its spec, a stub, a forward that cannot be followed, a duplicate in the extra rows) is a stage error.
+The native symbol of a data export of msvcrt is the `data` row of the name table (a data export without one is an error); the forwarder of an msvcrt
+export whose body reads the x86 stack words of the call (the printf family) is its row of the va record `name TAB symbol` (a varargs export without
+one is an error). Both records are tracked files of the tool root `bridgefacts`; there is no table of them in bridgetable.py.
+```
+
+## bridgefacts (tool root)
+
+```text
+ports/fnv-nx/bridgefacts: the inputs the bridge table derives from, in a root below every consumer of the table (RECIPE.md "Outputs and uses"). Tracked:
+com/com_spec.json (the COM interface spec; com/spec_extract.py derives it from the platform's declarations, com/com_spec_mutate.py is the
+compile-failure test's mutation), crt/msvcrt_names.tsv (name, provider symbol, func|data) and crt/msvcrt_va.tsv (the va forwarders). Its recipe runs one
+stage, com/comrows.py SPEC ROWS WORDS, the one derivation of the signature of every COM thunk, and declares the outputs COM_ROWS (the bridge rows of
+the COM methods and exports, the `extra` rows of bridgegen) and COM_WORDS (`Interface Method words` for every method, hidden interfaces too).
+The platform's C++ half (platform/com/gen_combridge.py SPEC ROWS WORDS OUTDIR) reads them through `uses` and never recomputes a signature; the
+loader's stage A reads COM_ROWS through `uses`; the gate `imports` names the same files in platform/imports.in.json ({stage, path} for the rows,
+{root, path} for the records; recipe.resolve_input reads a tracked file of an admitted tool root). Ownership is unchanged: L5 owns the COM and msvcrt
+files, L6 the d3d9 rows (still taken from the manifest external's d9bridge_rows.tsv until its generator moves here).
+Test: verify/tests/test_bridgefacts.py.
 ```
