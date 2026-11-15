@@ -103,8 +103,10 @@ def bt(c):
 def bs(c):
     F, d, s = c.F, c.ops[0], c.ops[1]; w = d.w; a = rd(s); r = C(0, w)
     for i in (range(w - 1, -1, -1) if c.m == 'bsf' else range(w)): r = ite(bit(a, i), C(i, w), r)
-    z = eq(a, 0); F.flag('zf', z); undef(F, ('cf', 'of', 'sf', 'af', 'pf'), UNDEF_BS)
-    F.model_gap('BSF/BSR: with a zero source the destination is undefined and the flags other than ZF are undefined; the pinned model cannot state this refinement (L3b, batched IR bump)')
+    # a zero source (the pinned model defines it, L3b IR 7c097d301 / ca469d14, ACL2 bit.lisp 3ccb342c): the destination is unchanged (DEFPRIOR: the write has when = ~z), ZF = 1, and
+    # CF/OF/SF/AF/PF are undefined (DEF0: 0) only then; with a non-zero source they keep their prior value. Every width (16/32); tzcnt/lzcnt alias while CPUREF's BMI1/ABM bits are clear.
+    z = eq(a, 0); F.flag('zf', z)
+    for f in ('cf', 'of', 'sf', 'af', 'pf'): F.undefined(f, UNDEF_BS, when=z)
     wr(F, d, ite(z, rd(d), r), when=~z)
 
 @handler('xadd')
