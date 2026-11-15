@@ -345,3 +345,10 @@ After the first frame:
     - name the 10 in Graph::build;
     - merge cand2's gate, with no in-branch copy, and rerun test_order_local and test_sdd_order;
     - A and C are with L1 w15 (RO-IDX, RO-PTR, G-IDX, SPILL).
+
+## 2026-11-15 10:45Z stage: HOST1 + MLIB1 accepted
+- HOST1: done, w3 bb05b694f (on L5 12695dba3). Platform root by recipe.py: green, 113 objects, 0 HOST1, 0 CONT-P.
+- MLIB1: done, w3 02fe9be65 (msvcmodel.patch sha 012e5925…). The farm is rebuilding stage 1 and the libraries for the none-elf pin, phase B.
+- objstub reach-not-exit: blocked by L1 (gate_objstub.py @2548e6128 input errors: an x86-64 gl4 object in the guest universe; the loader gen has no TMPDIR). Reported to the L1 lead.
+- MLIB1 flag-copy deletions (guest_compiler.json, targets.py:32, test_targets.py:26/28, test_datamodel.py:49): sent to L1 for cand3.
+- w3 next: test_names, test_pi, test_sdd, then the S23 tree regeneration. w2: NO-MIX follow-ups (PD-STACK-REUSE, cand2 gate merge, the 10 Graph::build B).
