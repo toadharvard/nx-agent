@@ -22,7 +22,7 @@ weakly: the linker resolves such a reference to 0 and drops it from the symbol t
 `header:..`.  Exit 1 on any id; the ids are printed on stderr, the summary line last.
 The ELF is exe-derived (lifted code): container and fnv-nx-build only.
 """
-import argparse, os, shutil, struct, sys
+import argparse, os, re, shutil, struct, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'contract'))
@@ -242,12 +242,26 @@ def symbol_ids(objs, have, elf_bytes):
     defs, strong, weak = (set().union(*(o[i] for o in objs.values())) for i in range(3))
     out_strong, out_weak = symtab_info(elf_bytes)[1:3]
     weak_only = {n for n in weak if n not in strong}
-    wnames = (weak_only - set(have)) | out_weak
+    wnames = weak_only - set(have)    # ruling A: a weak undefined that only the output's table holds is a reference of a startfile or runtime file (the pinned toolchain's own), value 0 by the gABI
     refs = lambda n: ', '.join(sorted(p for p, o in objs.items() if n in o[2])) or '(none: the output\'s symbol table only)'  # noqa: E731
     ids = ['weak-undefined:%s <- %s' % (n, refs(n)) for n in sorted(wnames)]
     ids += ['cover:' + n for n in sorted(((defs | strong | weak) - set(have)) - wnames)]
     ids += ['output-undefined:' + n for n in sorted(out_strong - set(have) - out_weak)]
     return ids
+
+
+def script_entry(text):
+    """The entry symbol of a link script: its ENTRY(sym), else the linker's default `_start`."""
+    m = re.search(r'^\s*ENTRY\s*\(\s*([A-Za-z_.$][\w.$]*)\s*\)', re.sub(r'/\*.*?\*/', '', text, flags=re.S), re.M)
+    return m.group(1) if m else '_start'
+
+
+def entry_ids(objs, entry):
+    """Rule "one entry": the entry symbol ENTRY of the link is defined by exactly one input object of the product (OBJS, the objects of the product roots;
+    the startfiles, libraries and runtime files of the link are not among them). entry-none:<sym>: no product object defines it (a definition only in a
+    startfile or library, or none); entry-duplicate:<sym> <- <objects>: more than one does."""
+    d = sorted(p for p, o in objs.items() if entry in o[0])
+    return ['entry-none:' + entry] if not d else ['entry-duplicate:%s <- %s' % (entry, ', '.join(d))] if len(d) > 1 else []
 
 
 def write_list(path, rows):
@@ -369,7 +383,7 @@ def host_main(a):
     with open(a.elf, 'rb') as fh:
         dd = fh.read()
     cls, etype, entry, _, _ = elf_any(dd)
-    defs, strong, weak, targets = set(), set(), set(), set()
+    defs, strong, weak, targets, wobj = set(), set(), set(), set(), {}
     for p in object_files(a.objs):
         with open(p, 'rb') as fh:
             d = fh.read()
@@ -378,14 +392,19 @@ def host_main(a):
             if typ in (STT_SECTION, STT_FILE) or bind not in (1, 2):
                 continue
             (defs if shndx != SHN_UNDEF else strong if bind == 1 else weak).add(n)
+            if shndx == SHN_UNDEF and bind == 2:
+                wobj.setdefault(n, set()).add(os.path.relpath(p, a.objs))
     libdef = loader_names(a.loader_defs)
     for p in a.lib:
         with open(p, 'rb') as fh:
             libdef |= {n for n, _, _, shndx, _ in syms_any(fh.read(), 11) if shndx != SHN_UNDEF}
     dyn = syms_any(dd, 11)
     out_def = {n for n, bind, _, shndx, _ in dyn + syms_any(dd, 2) if shndx != SHN_UNDEF}
-    ids = ['cover:' + n for n in sorted((defs | strong | weak) - out_def - libdef)]
-    ids += ['output-undefined:' + n for n in sorted({n for n, _, _, shndx, _ in dyn if shndx == SHN_UNDEF} - libdef)]
+    ids = ['cover:' + n for n in sorted((defs | strong) - out_def - libdef)]
+    # ruling A: a WEAK undefined dynamic reference of a host image is accepted iff no product object references it (the driver's crt objects carry several:
+    # __gmon_start__, __cxa_finalize, _ITM_*; the gABI gives an unresolved weak symbol the value 0). One a product object references is red, like the guest's.
+    ids += ['weak-undefined:%s <- %s' % (n, ', '.join(sorted(wobj[n]))) for n in sorted(wobj) if n not in out_def and n not in libdef and n not in strong and n not in defs]
+    ids += ['output-undefined:' + n for n in sorted({n for n, bind, _, shndx, _ in dyn if shndx == SHN_UNDEF and bind != 2} - libdef)]
     tags = dyn_tags(dd)
     if 22 in tags or tags.get(30, 0) & 4:
         ids.append('textrel')
@@ -426,6 +445,7 @@ def main():
     ap.add_argument('--out', required=True)
     ap.add_argument('--name', required=True)
     ap.add_argument('--kind', default='pie', choices=('pie', 'exe', 'shared'))
+    ap.add_argument('--script', default=None, help='the link script (its ENTRY is the entry symbol; default _start)')
     ap.add_argument('--version-script', default=None)
     ap.add_argument('--loader-defs', default=None, help='a file of the names the declared loader root defines, one per line (a shared image may leave them undefined)')
     ap.add_argument('--lib', action='append', default=[], help='a shared library of the link (its .dynsym defines names the image may leave undefined)')
@@ -447,6 +467,7 @@ def main():
     names = defs | strong | weak
     out = symbols(a.elf)
     ids = symbol_ids(objs, all_defined(a.elf), open(a.elf, 'rb').read())
+    ids += entry_ids(objs, script_entry(open(a.script).read()) if a.script else '_start')
     cnt, badrel = dyn_relocs(a.elf)
     ids += badrel
     if not is_pie(a.elf):

@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 
@@ -164,6 +165,14 @@ def main():
     check("link.libs: a library that is not there is a red ld:<root>", rl2["status"] == "red" and rl2["failure"]["stage"] == "ld:" + ROOT, err_text(rl2))
     rl3 = build(mk("libs-none", main_rec(), L), SS)
     check("without the library the same undefined reference is red (ld)", rl3["status"] == "red" and rl3["failure"]["stage"] == "ld:" + ROOT, err_text(rl3))
+    L2 = {"toy/a.c": TR.HDR + '#include "toy.h"\nint lib_fn(void);\nextern char _GLOBAL_OFFSET_TABLE_[];\nint f_a(void) { return lib_fn() + TOY + (int)(long)_GLOBAL_OFFSET_TABLE_; }\n'}
+    rl4 = build(mk("libs-none-got", main_rec(), L2), SS)
+    fu4 = (rl4.get("failed_units") or [{}])[0]
+    check("the static undefined set omits a name the pinned ld defines itself (_GLOBAL_OFFSET_TABLE_, read from a reference link of an empty product), and keeps the owned one",
+          [u["symbol"] for u in fu4.get("undefined", [])] == ["lib_fn"], (fu4.get("undefined"), fu4.get("findings")))
+    fu = (rl3.get("failed_units") or [{}])[0]
+    check("a red link record carries the full static undefined set, each symbol with its referencing objects (never from ld's text)",
+          [u["symbol"] for u in fu.get("undefined", [])] == ["lib_fn"] and "a.c" in fu["undefined"][0]["referencers"][0], fu.get("undefined"))
 
 
     # (k) kinds: exe and shared host images (LP64), and the target of the link
@@ -174,9 +183,28 @@ def main():
         r["link"] = dict({"output": "x.exe" if kind == "exe" else "x.so", "kind": kind, "flags": ["-m", "aarch64linux"]}, **kw)
         return r
     NONE = {"toy/a.c": None, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None, "toy/link.ld": None}
-    re_ = build(mk("exe", host_rec("exe"), dict(NONE, **{"toy/e.c": "void _start(void) { for (;;) ; }\n"})), SS)
-    check("kind exe: a host executable (ELF64, no script, entry set) links green; no crt0 header rule", re_["status"] == "green"
+    re_ = build(mk("exe", host_rec("exe"), dict(NONE, **{"toy/e.c": "int main(void) { return 0; }\nint __libc_start_main(void *m) { return ((int (*)(void))m)(); }\nvoid abort(void) { for (;;) ; }\n"})), SS)
+    check("kind exe: a host executable links green with the start files, end files and dynamic linker of the pinned driver's -### (no recipe path); entry _start comes from its crt", re_["status"] == "green"
+          and "_start" in syms(re_["elf"]["path"]) and (os.stat(re_["elf"]["path"]).st_mode & 0o111)
           and TR.elf_class(re_["elf"]["path"]) == 64 and json.load(open(re_["ld_gate"]["ld.json"]["path"]))["status"] == "green", err_text(re_))
+    # a host exe's start files, dirs and default libraries are the driver's answer: a recipe that declares them is red
+    try:
+        build(mk("exe-crt", host_rec("exe", libs={"startfiles": ["crt1.o"], "endfiles": [], "dirs": [], "names": [], "external": "x"}), dict(NONE, **{"toy/e.c": "int main(void) { return 0; }\n"})), SS)
+        ex_ = []
+    except recipe.RecipeError as e:
+        ex_ = [str(x) for x in e.args]
+    check("link.libs of an exe naming start files is red: they are the pinned driver's -### answer", any("an exe's start and end files" in e for e in ex_), ex_)
+    def interp(path):
+        d = open(path, "rb").read()
+        ph, es, n = struct.unpack_from("<Q", d, 32)[0], struct.unpack_from("<H", d, 54)[0], struct.unpack_from("<H", d, 56)[0]
+        for i in range(n):
+            t, _, off, _, _, fsz = struct.unpack_from("<IIQQQQ", d, ph + i * es)[:6]
+            if t == 3:
+                return d[off:off + fsz].rstrip(b"\0").decode()
+    drv = subprocess.run([CC, "-pie", "-###", "-x", "c", "/dev/null", "-o", "/dev/null"], capture_output=True, text=True).stderr.replace('"', "").split()
+    want = drv[drv.index("-dynamic-linker") + 1] if "-dynamic-linker" in drv else None
+    check("kind exe: PT_INTERP equals the dynamic linker of the pinned driver's -### (not a recipe or linker default)",
+          re_["status"] == "green" and want is not None and interp(re_["elf"]["path"]) == want, (want, re_["status"]))
     SH = {"toy/s.c": "int f_a(void) { return 1; }\nint f_hidden(void) { return 2; }\n", "toy/exp.map": "{ global: f_a; local: *; };\n"}
     rs = build(mk("shared", host_rec("shared", version_script="exp.map"), dict(NONE, **SH)), SS)
     d = syms(rs["elf"]["path"]) if rs["status"] == "green" else {}
@@ -276,7 +304,7 @@ def main():
             r["compiler"] = cc
         return r
     IMG = {"toy/a.c": None, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None, "toy/link.ld": None,
-           "toy/e.c": "int f_b(void);\nvoid _start(void) { f_b(); for (;;) ; }\n"}
+           "toy/e.c": "int f_b(void);\nint main(void) { f_b(); return 0; }\nint __libc_start_main(void *m) { return ((int (*)(void))m)(); }\nvoid abort(void) { for (;;) ; }\n"}
     IB, IC = T + "imgx", T + "imgbad"
     vrepo = mk("variants", image("toy", "aarch64linux", [VROOT + "@lp64"]), IMG,
               libs=[(VROOT, (vlib, VF)), (IB, (dict(image("imgx", "elf_x86_64", [VROOT + "@x86"], X86), flags={"c": FL, "cxx": [], "asm": []}, include=[]), {"e.c": IMG["toy/e.c"]})),

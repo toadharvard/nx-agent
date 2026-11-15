@@ -926,6 +926,18 @@
     "ports/fnv-nx/verify/puregate_policy.py"
    ]
   },
+  "test_undefset.py": {
+   "references": [
+    {
+     "anchor": "## Link: the guest ELF",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/undefset.py"
+   ]
+  },
   "test_unitstage.py": {
    "references": [
     {

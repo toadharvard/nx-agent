@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Tests for verify/gate_guestlink.py and the derivation helpers of recipe.py: parse_driver_link (the driver's -### line -> profile libs), onedef (the
-one-definition exclusion), judge (derived against profile). Pure: a canned driver line, no build."""
+one-definition exclusion), outside_files and in_multilib. Pure: a canned driver line, no build."""
 import os
 import sys
 
@@ -41,14 +41,19 @@ check("onedef: the objects that define a symbol a root defines, sorted", recipe.
 check("onedef: no symbol shared, nothing is excluded (no name decides)", recipe.onedef(o, {"zzz"}) == [], "")
 check("onedef: a weak definition counts as a definition (the caller passes global and weak symbols)", recipe.onedef({"p.o": {"_cpu_init_hook"}}, {"_cpu_init_hook"}) == ["p.o"], "")
 
-P = {"dirs": ["d1", "d2"], "names": ["c", "m"], "startfiles": ["s.o"], "endfiles": ["e.o"]}
-items, finds = G.judge(dict(P), dict(P))
-check("judge: equal lists are green with every entry an item", finds == [] and len(items) == 6, (items, finds))
-items, finds = G.judge(dict(P, dirs=["d1"]), dict(P))
-check("judge: a missing derived directory is a finding naming the key", len(finds) == 1 and finds[0].startswith("dirs:"), finds)
-items, finds = G.judge(dict(P), dict(P, names=["m", "c"]))
-check("judge: the order of the libraries is part of the profile", len(finds) == 1 and finds[0].startswith("names:"), finds)
-items, finds = G.judge(dict(P), dict(P, startfiles=["s.o", "hand.o"]))
-check("judge: a hand-added startfile is a finding", len(finds) == 1 and finds[0].startswith("startfiles:"), finds)
+crt = {"crt0.o": {"_start", "__libc_start_main"}, "crti.o": set(), "crtbegin.o": {"__do_global_dtors_aux"}}
+check("entry_object: ENTRY names another symbol, the startfile that defines _start is the runtime's own process start and is excluded",
+      recipe.entry_object(crt, "__fnvnx_guest_start") == ["crt0.o"], recipe.entry_object(crt, "__fnvnx_guest_start"))
+check("entry_object: the default entry _start keeps it", recipe.entry_object(crt, "_start") == [], "")
+
+check("outside_files: every .o of the link under the runtime external (the program's /tmp/cc*.o excepted): none", recipe.outside_files(TEXT, AT) == [], recipe.outside_files(TEXT, AT))
+check("outside_files: a start file of another place is reported", recipe.outside_files(TEXT.replace(AT + "/bin/../lib/gcc/aarch64-none-elf/15.2.0/../../../../aarch64-none-elf/lib/ilp32/pic/crt0.o", "/usr/lib/crt1.o"), AT) == ["/usr/lib/crt1.o"], "")
+ML = "ilp32/wchar16/schar/pic"
+check("in_multilib: a crtbegin in the multilib directory the flags select is accepted",
+      recipe.in_multilib(["lib/gcc/aarch64-none-elf/13.3.0/ilp32/wchar16/schar/pic/crtbegin.o"], ML) == [], "")
+check("in_multilib: a crtbegin of another multilib (e.g. the flags select wchar16/schar and the file is ilp32/pic) is reported",
+      recipe.in_multilib(["lib/gcc/aarch64-none-elf/15.2.0/ilp32/pic/crtbegin.o"], ML) == ["lib/gcc/aarch64-none-elf/15.2.0/ilp32/pic/crtbegin.o"], "")
+check("in_multilib: the default multilib (.) has no directory to hold", recipe.in_multilib(["lib/crtbegin.o"], ".") == [], "")
+
 print("FAILED %d" % fails if fails else "all pass")
 sys.exit(1 if fails else 0)
