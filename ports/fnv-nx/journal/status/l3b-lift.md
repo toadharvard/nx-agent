@@ -354,3 +354,8 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - 22:28Z SIMD non-FP: 26/29 done, all 58/58 proved, 0 errors. Only the reruns of 7, 8 and 9 remain (farm 21). Farms 19 and 22 are done and archived.
 - 22:29Z SIMD non-FP queue complete: 29/29 shards, 1,682/1,682 proved, 0 errors (tree simdfarm 0bcc5af13 and 04d2aaaad, subject w7 9c97f84b). SIMD over the 4,290 shapes: proved 1,288 + 1,682 = 2,970, ud-class 330 (331 with vpavgw), w10's FP split 867 (761 FP + 106 timeouts), noform 123, now fixed by L3a w13 (122 built + vpavgw). Farm 21 archived. Open farm defect: resume reused a stale error row from another tree; w4 keys resume on the tree commit.
 - 22:30Z L1 789ef219c makes the pack a uses root (admit.json pack = lift/liftsrc), which turns formgate.py red: it still resolves cxx_origin.pack through fetch_externals. New worker w15 (session pending) moves formgate onto gate_build.published_output(cache, root, PACK) and deletes the external path. This blocks cand3. Workers: w4, w10, w14, w15 (4 of 4).
+- 22:31Z merged w4 d09b9c39f into the lead:
+  - every git command on the shared clone runs under one flock;
+  - records carry tree, and treeid.resume keeps only complete, non-error records of the running tree (test_treeid);
+  - aggregation takes exactly one complete content per shard, and two different ones are a failure.
+  The rcpref reader fix (04d2aaaad) is not applicable to the lead: the lead still has rcpref.h checked in and lacks L3a's rtgen/gen_cpuref. It joins with the post-v3 merge of L3a's line.
