@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gate "d3d9total" (fnvnx-gate/1, VERDICT class 7): the D3D9 -> backend translation is total by construction.
-    GATE_OUT=<dir> [GATE_CACHE=<dir>] [ARTIFACTS_URL=<git url>] python3 -I ports/fnv-nx/render/total/gate_d3d9total.py
+    GATE_OUT=<dir> GATE_CACHE=<dir> ARTIFACTS_URL=<git url> python3 -I ports/fnv-nx/render/total/gate_d3d9total.py
 Run in the checkout root (verify/verdict.py does). Writes GATE_OUT/d3d9total.json; exit 0 iff green, 2 red.
 Universe = every (enumeration, enumerator) of the enumerations the translation consumes by switch (SWITCHED of
 render/d3d9/front/gen_enums.py, enumerators from the interface table that bridgefacts/d3d9/d3d9_spec.py generates plus VENDOR_FOURCC for D3DFORMAT), ids "enum:E:N",
@@ -8,7 +8,7 @@ render/d3d9/front/gen_enums.py, enumerators from the interface table that bridge
 
 Declared inputs (nothing else is read): the tracked files (git ls-files) of INPUTS below (the d3d9 and translator recipes and the d3d9 root's include lists), copied into GATE_OUT/d3d9total.work;
 the external "mojoshader" of the translator root's recipe (render/shaders/translator/build.json: fnv-nx-build commit + tree_sha256, fetched by exact commit from
-ARTIFACTS_URL, default the fnv-nx-build repository, into GATE_CACHE/external/<commit> or the work dir; its tree hash, the hash of
+ARTIFACTS_URL (required, no default), into GATE_CACHE/external/<commit>; its tree hash, the hash of
 verify/cas.py, must equal tree_sha256); the programs /usr/bin/gcc, /usr/bin/clang, git of verify/env.json (absolute paths, compile only:
 nothing is linked or run) with the C headers of the pinned /usr/include tree and clang's resource headers.
 
@@ -42,6 +42,10 @@ PORT_REL = os.path.relpath(PORT, REPO)
 D3D9_REC, TRANSLATOR_REC = "render/d3d9/build.json", "render/shaders/translator/build.json"
 PORT_PFX = "ports/fnv-nx/"
 TOTAL_ROOT = PORT_PFX + "render/shaders/total"
+sys.path.append(os.path.join(PORT, "verify"))
+import recipe  # noqa: E402
+from hostprofile import HOST  # noqa: E402
+GCC, CLANG, GIT = (os.path.join(HOST["bindir"], x) for x in ("gcc", "clang", "git"))   # the host programs of verify/env.json (record `host`)
 
 
 def recipe_includes(path):
@@ -55,8 +59,6 @@ TR_GEN = {os.path.dirname(os.path.dirname(TRANSLATOR_REC) + "/" + o) for g in js
 TR_INCLUDES = [i for i in recipe_includes(TRANSLATOR_REC) if i not in TR_GEN]   # the translator's own tracked include dirs (the patched MojoShader includes fnvnx_dk_layout.h from them)
 INPUTS = ["render/d3d9/front", "bridgefacts/d3d9", D3D9_REC, TRANSLATOR_REC,
           "contract/treehash.py"] + INCLUDES + [i for i in TR_INCLUDES if i not in INCLUDES]
-GCC, CLANG, GIT = "/usr/bin/gcc", "/usr/bin/clang", "/usr/bin/git"
-ARTIFACTS_URL = "https://github.com/toadharvard/fnv-nx-build"
 STRICT = ["-Wall", "-Wextra", "-Werror", "-Werror=switch", "-Werror=switch-enum"]
 PLAIN = ["-Wall", "-Wextra", "-Werror", "-Wno-switch", "-Wno-switch-enum"]
 SM_CC_BASE = [GCC, "-fsyntax-only", "-Wall", "-fmax-errors=0", "-fdiagnostics-format=json"]
@@ -114,8 +116,6 @@ def copy_tree(src, dst):
 
 
 # ---------------------------------------------------------------- tree hash (the one home: contract/treehash.py; a test cross-checks it with cas)
-sys.path.append(os.path.join(PORT, "verify"))
-import recipe  # noqa: E402
 sys.path.append(os.path.join(PORT, "contract"))
 import treehash  # noqa: E402
 
@@ -321,7 +321,7 @@ def enum_part(inp, work):
 def fetch_external(e, cache, dest, scratch):
     """the recipe form: bare EXTCACHE/<commit> fetched by exact commit, checked out by read-tree + checkout-index"""
     bare = os.path.join(cache, e["commit"])
-    url = os.environ.get("ARTIFACTS_URL", ARTIFACTS_URL)
+    url = os.environ["ARTIFACTS_URL"]   # the artifacts repository: an argument of the run, no default
     if not os.path.isdir(bare):
         tmp = bare + ".tmp"
         if os.path.isdir(tmp):
@@ -456,7 +456,7 @@ def main():
     if os.path.isdir(work):
         shutil.rmtree(work)
     os.makedirs(work)
-    cache = os.path.join(os.environ["GATE_CACHE"], "external") if os.environ.get("GATE_CACHE") else os.path.join(work, "external")
+    cache = os.path.join(os.environ["GATE_CACHE"], "external")
     os.makedirs(cache, exist_ok=True)
     inp = os.path.join(work, "in")
     parts, universe, uncert, err = {}, [], [], ""

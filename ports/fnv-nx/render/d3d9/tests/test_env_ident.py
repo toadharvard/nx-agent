@@ -7,10 +7,15 @@ sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ENV = os.path.normpath(os.path.join(HERE, "..", "env"))
 
 
+PORT = os.path.normpath(os.path.join(HERE, "..", "..", ".."))
+SPEC = os.path.join(tempfile.mkdtemp(prefix="t-env-spec-"), "d3d9_spec.json")   # the interface table, generated as the d3d9 recipe's D9_SPEC is
+with open(SPEC, "wb") as _f:
+    _f.write(subprocess.run([sys.executable, "-I", os.path.join(PORT, "bridgefacts", "d3d9", "d3d9_spec.py"), "--stdout", os.path.join(PORT, "shim", "include")],
+                            check=True, capture_output=True).stdout)
+
+
 def gen(out, tsv_dir=None):
-    env = dict(os.environ)
-    if tsv_dir: env["ENV_TSV_DIR"] = tsv_dir
-    return subprocess.run([sys.executable, "-I", os.path.join(ENV, "gen_env.py"), out], capture_output=True, text=True, env=env)
+    return subprocess.run([sys.executable, "-I", os.path.join(ENV, "gen_env.py"), out, SPEC, tsv_dir or ENV], capture_output=True, text=True)
 
 
 def t_ident(cpp):
