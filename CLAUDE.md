@@ -586,6 +586,27 @@ The owner's words: "Это переделка хуйни не дающей пр�
 - A lead asks itself before starting an item: "which step does this unblock, and when?" If it unblocks none, the item
   waits.
 
+## Owner order of 2026-11-15 21:00Z: the compiler key cannot be wrong (binding for L1, L2)
+
+The owner's words: "По построению не должно быть неправильного ключа".
+
+- **The guest compiler is a recipe stage, like any unit.**
+  - Stage 1 is the compiler; stage 2 is the plugins and the runtime.
+  - Each stage runs in the hermetic sandbox (`sandbox.py`). Its key is the content of exactly what the sandbox mounts for
+    it.
+  - The stage cannot read anything outside its key, so a key that misses an input is impossible.
+  - There are no input lists kept by hand in `stamp.py` or `build.sh`: no env flags, no dpkg versions, no patch hashes.
+    Rule 1 forbids them.
+- **No pin is handed over.**
+  - A candidate names no compiler commit to wait for.
+  - Its recipe computes the stage keys from its own tree. It takes the compiler from `GATE_CACHE` on a hit and builds it
+    on a miss: one farm build, stage 2 only when only a plugin changed.
+  - A mirror in fnv-nx-build is a copy of that cache entry under its key.
+  - "The candidate needs a pin with key X" is therefore no longer a state. A changed plugin is a cache miss, built
+    once.
+- **Owners:** L2 (stages, PINKEY becomes this) and L1 (the recipe takes the compiler by stage key, `admit`, envcheck).
+  Lands with cand3. The cand2 pin 56a4d09c stands; cand2 is not reopened.
+
 ## Orchestrator decision of 2026-11-15 09:20Z: weekly budget (binding for every session)
 
 - The owner's usage page reads: weekly 29 % used, reset on Saturday 2026-11-21 18:00Z. At the pace so far the limit ends
