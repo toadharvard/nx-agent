@@ -324,3 +324,8 @@ After the first frame:
     - The *l subset check now comes from math.h's declarations.
   - libgcc, libstdc++ and the smoke test wait on MLIB1.
 - Farm 9e3b6ce9: newlib-guest.patch (sha256 7a9b0a61) = NL-LDBL + NL-SECT (newlib's -ffunction-sections and -fdata-sections removed, configure.host:647). Long double: math.h declares 60 functions with a long double parameter or result, and 0 are missing from libm.a/libc.a (ILP32 schar multilib, before MLIB1). The stage-1 rebuild waits on w3's MLIB1 sha.
+- VEC1 fix: w3 944ca7412, test_layout passes 132 checks.
+  - SVE poly vector sizes are spelled `c0+c1x`, compared coefficient-wise, as GCC's known_eq does. Unnamed elements are spelled bool_bits_N, int_bits_N and uint_bits_N. nullptr_t has a row.
+  - `opaque:` is removed, with a proof from the GCC 13.3 source: the front end's compatibility check ignores TYPE_VECTOR_OPAQUE, and dl_type takes the main variant.
+  - The totality reasons now cite pinned-source lines. REFERENCE_TYPE in C is the deliberate error arm.
+  - Note: the SVE types came from glibc's math-vector.h. That means the translator unit was built against the current linux-gnu msvcmodel mirror (b4057704). The none-elf repin removes glibc from guest units; that is the runtime path already in progress.
