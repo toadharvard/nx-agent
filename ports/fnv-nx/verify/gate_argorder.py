@@ -38,9 +38,6 @@ def judge_root(root, repo, cache, plugin=ORDER):
     want = list(recipe.PLUGIN_SOURCES)
     if names != want:
         return len(cxx), 0, cxx, "plugins %s are not the rule's %s in the rule's order" % (names, want)
-    od = next(p for p in rec["plugins"] if p["name"] == plugin)
-    if od["args"] != recipe.PLUGIN_ARGS[plugin]:
-        return len(cxx), 0, cxx, "%s arguments %s are not the rule's %s" % (plugin, od["args"], recipe.PLUGIN_ARGS[plugin])
     try:
         res, _ = gate_build.ensure(root, cache, repo)
     except recipe.RecipeError as e:

@@ -29,8 +29,7 @@ BASE = tempfile.mkdtemp(prefix="plugin-test-")
 FAILED = []
 T = "ports/fnv-nx/"
 ROOT = T + "toy"
-PLUGS = [dict({"name": n, "source": recipe.PLUGIN_SOURCES[n], "args": dict(recipe.PLUGIN_ARGS[n])},
-              **({"inputs": recipe.PLUGIN_INPUTS[n]} if n in recipe.PLUGIN_INPUTS else {})) for n in recipe.PLUGIN_SOURCES]
+PLUGS = [{"name": n} for n in recipe.PLUGIN_SOURCES]   # a root names only the plugin: source, inputs and arguments are fixed by recipe.py
 P = {p["name"]: p for p in PLUGS}
 SRC = "volatile int g;\nint rd() { return g; }\nvoid wr(int v) { g = v; }\nint f2i(float f) { return (int)f; }\nint ic(int (*f)(int)) { return f(1); }\nstruct S { int a; char b; };\nS gs;\nregister int hr asm(\"x27\");\nregister unsigned eax asm(\"x19\");\nint hrw(int v) { hr = v; eax = v + 1; return hr + eax; }\n"
 REC = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
@@ -109,10 +108,20 @@ def main():
         e = errs(repo, r)
         check("native root without %s is red" % gone, any("does not load plugin " + gone in x for x in e), e)
     check("native root without plugins is red", len([x for x in errs(repo, mut(plugins=[])) if "does not load" in x]) == len(recipe.PLUGIN_SOURCES))
-    r = mut(plugins=[dict(p, args=dict(p["args"], args="ltr")) if p["name"] == "fnvnx_order" else p for p in PLUGS])
-    check("A/B-only argument value is red", any("arguments must be" in x for x in errs(repo, r)), errs(repo, r))
-    check("plugin source outside the pinned file is red", any("source must be" in x or "not a tracked" in x for x in errs(
-        repo, mut(plugins=[dict(p, source=recipe.PLUGIN_SOURCES["fnvnx_ftoi"]) if p["name"] == "fnvnx_order" else p for p in PLUGS]))))
+    # recipe.py is the only declaration of source, inputs and arguments: an entry that carries one is red, whatever its value (never compared)
+    for key, val, pin in (("args", {"args": "ltr"}, "PLUGIN_ARGS"), ("args", dict(recipe.PLUGIN_ARGS["fnvnx_order"]), "PLUGIN_ARGS"),
+                          ("source", recipe.PLUGIN_SOURCES["fnvnx_order"], "PLUGIN_SOURCES"), ("inputs", [], "PLUGIN_INPUTS"),
+                          ("inputs", list(recipe.PLUGIN_INPUTS["fnvnx_ftoi"]), "PLUGIN_INPUTS")):
+        nm = "fnvnx_ftoi" if key == "inputs" else "fnvnx_order"
+        e = errs(repo, mut(plugins=[dict(p, **{key: val}) if p["name"] == nm else p for p in PLUGS]))
+        check("a root entry with %s=%r is red: fixed by recipe.py (%s)" % (key, val, pin), any(("plugin %s: %s %s fixed by recipe.py (%s)" % (nm, key, "are" if key == "inputs" else "is", pin)) in x for x in e), e)
+    check("a plugin outside recipe.PLUGIN_SOURCES is red", any("is not a plugin of recipe.py" in x for x in errs(repo, mut(plugins=PLUGS + [{"name": "fnvnx_other"}]))))
+    # the stage construction takes source, inputs and arguments from recipe.py alone
+    dec = {d["name"]: d for d in recipe.plugin_decls(PLUGS, "native")}
+    check("plugin_decls: source, inputs and arguments are recipe.py's", all(dec[n]["source"] == recipe.PLUGIN_SOURCES[n] and dec[n]["inputs"] == recipe.PLUGIN_INPUTS.get(n, [])
+          and dec[n]["args"] == recipe.plugin_args("native")[n] for n in recipe.PLUGIN_SOURCES))
+    check("plugin_decls: fnvnx_ftoi has f2i_builtins.inc as input, so changing it changes the key of every root that loads the plugin",
+          any(i.endswith("f2i_builtins.inc") for i in dec["fnvnx_ftoi"]["inputs"]), dec["fnvnx_ftoi"]["inputs"])
     check("plugins out of load order are red", any("order" in x for x in errs(repo, mut(plugins=PLUGS[::-1]))))
     check("native root without a semantics flag is red", any("lacks -fno-devirtualize" in x for x in errs(repo, mut(
         flags={"c": [], "cxx": [f for f in REC["flags"]["cxx"] if f != "-fno-devirtualize"], "asm": []}))))
@@ -221,7 +230,7 @@ def main():
     subprocess.run(["git", "-C", ext, "checkout-index", "-a", "-f", "--prefix=" + chk + "/"], check=True)
     tree = cas.ingest(chk, os.path.join(BASE, "ingest-store"))
     lrec = {"format": "fnvnx-recipe/1", "compiler": REC["compiler"], "flags": REC["flags"], "include": [], "units": "all",
-            "plugins": [dict(P["fnvnx_ftoi"], args=dict(recipe.plugin_args("lifted")["fnvnx_ftoi"]))],
+            "plugins": [dict(P["fnvnx_ftoi"])],
             "generated": [{"tool": T + "gen/lift.py", "args": [], "inputs": [], "outputs": ["gen/a.cc"]}],
             "external": [{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": commit, "tree_sha256": tree, "at": "/ext/pack"}]}
     LSRC = SRC.replace("int f2i(float f)", "__attribute__((fnvnx_f2i)) int f2i(float f)")   # lifted C++ converts inside a helper only
@@ -229,8 +238,7 @@ def main():
     lrepo = make_repo("lifted", lrec, {"lifted_by": T + "gen/lift.py", "pack": "pack"}, {T + "gen/lift.py": lift, ROOT + "/a.cc": None})
     check("lifted root with fnvnx_ftoi in mode lifted is valid", errs(lrepo, lrec) == [], errs(lrepo, lrec))
     check("lifted root without fnvnx_ftoi is red", any("does not load plugin fnvnx_ftoi" in x for x in errs(lrepo, dict(lrec, plugins=[]))))
-    check("lifted root with fnvnx_ftoi in mode native is red", any("arguments of a lifted root" in x for x in errs(lrepo, dict(
-        lrec, plugins=[dict(P["fnvnx_ftoi"], args=dict(recipe.PLUGIN_ARGS["fnvnx_ftoi"]))]))))
+    check("a lifted root's ftoi mode is the origin's: plugin_decls gives mode lifted", recipe.plugin_decls([P["fnvnx_ftoi"]], {"lifted_by": "x.py", "pack": "p"})[0]["args"]["mode"] == "lifted")
     os.environ["ARTIFACTS_URL"] = ext
     rl, _ = build(lrepo, "L")
     check("lifted root builds green with only fnvnx_ftoi (lifted)", rl["status"] == "green" and [p["name"] for p in rl["plugins"]] == ["fnvnx_ftoi"], rl.get("failure"))
