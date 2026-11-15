@@ -5,7 +5,7 @@
     python3 -I sdmfeat.py partition OUT_ROWS.tsv SITES.tsv OUT.tsv  # the cleared sites, from the rows file ONLY
 
 SDM.txt: `pdftotext -layout` of the Intel(R) 64 and IA-32 Architectures SDM, combined volumes (its sha256 is in every output header; the page numbers cited are those of that edition).
-SITES.tsv: packuniverse.py's sites file (`module:address<TAB>shape key<TAB>family`).
+SITES.tsv: factsites.py's sites file (`module:address<TAB>shape key<TAB>family`): the instructions the lift facts decode, over the loader's module table.
 
 Source of each fact:
  * the opcode forms and their `CPUID Feature Flag`: the opcode tables of the instruction reference (Vol. 2A-2D).  A table with a `CPUID Feature Flag` column gives the flag in that column.  A table without that

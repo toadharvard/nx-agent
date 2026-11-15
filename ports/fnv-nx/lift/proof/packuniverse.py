@@ -6,7 +6,7 @@ PACKDIR: the pack (u/*.cpp).  Every lifted instruction has one label line `L_<8 
 (a parent range shared by several entries is lifted once per entry: the same address under several entries is one instruction).  No form name, no census, no facts list is consulted.
 IMAGES.tsv: `module<TAB>image path<TAB>load base<TAB>preferred base` (hex), one row per image of the pack; a label address a belongs to the image with load <= a < load + image size,
 and the bytes of the instruction are those of the image at the preferred base (a - load + preferred; the relocation patches only fields, which the shape key masks).
-SITES.tsv (optional 4th argument): every lifted instruction address with its shape key and family.
+The site list of the #UD classification is not produced here (it is derived from the lift facts: factsites.py); this tool writes the shape census only.
 A label whose whole body is `fnvl_raise(KIND, ...)` (undecodable bytes, an invalid LOCK) is not a lifted instruction: it is counted in the header (raise_only, by kind) and not in the universe.
 Every other label address must belong to exactly one image and decode to one instruction (capstone, or the reserved-NOP gap fnvlift.f_sys.nop_gap, counted separately as family `nop-gap`); otherwise the run fails.
 OUT.tsv: the format of census.py (`shape<TAB>family<TAB>form_key<TAB>count<TAB>first_address`, count = distinct label addresses), header with the sha256 of every input."""
@@ -64,7 +64,7 @@ def image_of(a):
 def work(chunk):
     md = shape.decoder()
     from fnvlift import f_sys
-    shapes, nop, bad, sites = {}, [], [], []
+    shapes, nop, bad = {}, [], []
     for a in chunk:
         i = image_of(a)
         if i < 0:
@@ -86,16 +86,15 @@ def work(chunk):
                 bad.append((a, 'undecodable')); continue
             nop.append((a, bytes(g.bytes).hex())); continue
         k = shape.shape_key(ins); e = shapes.get(k)
-        sites.append((a, k, shape.family(ins)))
         if e is None:
             shapes[k] = [shape.family(ins), 1, a]
         else:
             e[1] += 1; e[2] = min(e[2], a)
-    return shapes, nop, bad, sites
+    return shapes, nop, bad
 
 
 def main(argv):
-    if len(argv) not in (3, 4):
+    if len(argv) != 3:
         sys.stderr.write(__doc__); return 2
     pack, imgs, out = argv[:3]
     shas = {}
@@ -119,9 +118,9 @@ def main(argv):
     chunks = [ls[i::n] for i in range(n)]
     with multiprocessing.Pool(4) as p:
         res = p.map(work, chunks)
-    shapes, nop, bad, sites = {}, [], [], []
-    for s, np_, b, st in res:
-        nop += np_; bad += b; sites += st
+    shapes, nop, bad = {}, [], []
+    for s, np_, b in res:
+        nop += np_; bad += b
         for k, (fam, c, a) in s.items():
             e = shapes.get(k)
             if e is None:
@@ -152,11 +151,6 @@ def main(argv):
             f, c, a = shapes[k]
             fh.write('%s\t%s\t%s\t%d\t%08x\n' % (k, f, fk[k], c, a))
     sys.stdout.write('labels %d raise_only %d shapes %d nop_gap %d %s\n' % (len(ls), len(raised), len(shapes), len(nop), ' '.join('%s=%d' % x for x in sorted(fam.items()))))
-    if len(argv) == 4:                                        # SITES.tsv: every lifted instruction address of the pack: module:address<TAB>shape key<TAB>family
-        with open(argv[3], 'w', newline='\n') as fh:
-            fh.write('# fnvnx-packsites/2 every lifted instruction of the pack, module:address (pack load address)\tshape\tfamily\n')
-            for a, k, f in sorted(sites):
-                fh.write('%s:%08x\t%s\t%s\n' % (IMGS[image_of(a)][0], a, k, f))
     return 0
 
 
