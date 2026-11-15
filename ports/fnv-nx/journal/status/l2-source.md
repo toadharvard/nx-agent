@@ -477,3 +477,7 @@ After the first frame:
   - (3) gate_rtasm's 150 all-member reds:
     - 125 are the relaxed `__aarch64_have_lse_atomics` flag read. They are correct reds for an unpulled object.
     - 25 are a gate defect: the _sync loops' trailing `dmb ish` is not modelled. Deferred until lse objects are pulled or the first frame lands. The pulled universe under -mno-outline-atomics is 0.
+- 2026-11-15 19:22Z: 6315e193a (key ce90987b0e40af95, w3) is the build base for the farm's one rebuild.
+  - Layout: after the empty-base step, offset_align = MIN(offset_align, 8*least_bit(offset)), so GCC's place_field invariant holds again. UTwoEmpty is now (8,4,a:4), per cpp-docs empty-bases Derived4. The UBits rows come from the cpp-docs padding rule, with a citation per row.
+  - DECLTYPE-COMPLETE: one line per symtab symbol, with reasons from the closed set FNVNX_DECLTYPE_REASONS (mangled, builtin, libcall, noname, cxx). Three universe gaps are closed by rule: back-end libcalls (external_libcall hook), referenced builtins, and asm-label decls (interned at finish_decl; a real SYMSET gap, it also fixes sympair). dsound repro: 84 symtab = 84 lines.
+  - Open: the global test_layout count and the libstdc++.a section size, both measured on the rebuilt pin.
