@@ -121,8 +121,6 @@ static std::map<UidKey, int> scope_no;    /* a function-local static or class ->
  */
 static std::map<UidKey, bool> ref_class_key;      /* class (type uid) -> the reference key is `class` */
 static std::map<UidKey, bool> def_class_key;      /* class (type uid) -> its definition had the key `class` */
-static std::map<UidKey, bool> attr_class_key;     /* union (type uid) -> the key of its first declaration (fnvnx_key), true = class */
-static std::map<UidKey, bool> attr_key_present;
 static printer_fn old_decoder;
 
 static bool key_decoder(pretty_printer *pp, text_info *text, const char *spec, int precision, bool wide,
@@ -159,12 +157,16 @@ static bool declared_class(tree t)
 
 /* A union whose first declaration was `class N;` or `struct N;` (the prepare rule UNION1 rewrote that declaration to
  * `union __attribute__((fnvnx_key("class"))) N;`, since GCC rejects an elaborated declaration of another kind) is
- * spelled with that key, as cl spells it; any other union is `T`. */
+ * spelled with that key, as cl spells it; any other union is `T`. The key is kept in the type's own attribute list, not in
+ * plugin state: the names code is compiled into more than one plugin (the layout plugin includes it), and each copy
+ * has its own statics, while the attribute is on the tree they all read. The handler adds an attribute only to a
+ * type that has none (the first declaration wins). */
 static char union_letter(tree t)
 {
-  auto it = attr_class_key.find(uid_type(TYPE_MAIN_VARIANT(t)));
-  if (it == attr_class_key.end()) return 'T';
-  return it->second ? 'V' : 'U';
+  tree a = lookup_attribute("fnvnx_key", TYPE_ATTRIBUTES(TYPE_MAIN_VARIANT(t)));
+  if (!a) return 'T';
+  const char *k = TREE_STRING_POINTER(TREE_VALUE(TREE_VALUE(a)));
+  return !strcmp(k, "class") ? 'V' : !strcmp(k, "struct") ? 'U' : 'T';
 }
 
 static void start_unit(void *, void *)
@@ -1346,12 +1348,10 @@ static tree handle_key(tree *node, tree name, tree args, int, bool *no_add_attrs
   tree v = args ? TREE_VALUE(args) : NULL_TREE;
   tree t = TYPE_P(*node) ? *node : (DECL_P(*node) ? TREE_TYPE(*node) : NULL_TREE);
   if (!v || TREE_CODE(v) != STRING_CST || !t || TREE_CODE(t) != UNION_TYPE
-      || (strcmp(TREE_STRING_POINTER(v), "class") && strcmp(TREE_STRING_POINTER(v), "struct"))) {
-    error("%qE takes \"class\" or \"struct\" on a union", name); *no_add_attrs = true; return NULL_TREE;
+      || (strcmp(TREE_STRING_POINTER(v), "class") && strcmp(TREE_STRING_POINTER(v), "struct") && strcmp(TREE_STRING_POINTER(v), "union"))) {
+    error("%qE takes \"class\", \"struct\" or \"union\" on a union", name); *no_add_attrs = true; return NULL_TREE;
   }
-  UidKey k = uid_type(TYPE_MAIN_VARIANT(t));
-  if (!attr_key_present[k]) { attr_key_present[k] = true; attr_class_key[k] = !strcmp(TREE_STRING_POINTER(v), "class"); }   /* the first wins */
-  *no_add_attrs = true;
+  if (lookup_attribute("fnvnx_key", TYPE_ATTRIBUTES(TYPE_MAIN_VARIANT(t)))) *no_add_attrs = true;   /* the first declaration wins */
   return NULL_TREE;
 }
 

@@ -251,3 +251,7 @@ void nk_u(NkU *p) {}
 union __attribute__((fnvnx_key("struct"))) NkS;
 union NkS { int a; float b; };
 void nk_s(NkS *p) {}
+union __attribute__((fnvnx_key("struct"))) NkF;
+union __attribute__((fnvnx_key("class"))) NkF;
+union NkF { int a; };
+void nk_f(NkF *p) {}
