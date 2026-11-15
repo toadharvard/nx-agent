@@ -35,6 +35,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
+import gate_admit  # noqa: E402
 import envcheck  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "link"))
 import relocs  # noqa: E402
@@ -230,13 +231,14 @@ def under(p, d):
 
 def tree_of(roots, p):
     """The admitted root path or tree (admit.json `trees`) that holds repo path P, or None: a tool file is admitted iff it is a tracked file
-    under a tree of an admitted tool root; membership is over the trees, not over the root paths only (link/ is a tree of the tool root contract)."""
-    return next((t for r in roots for t in (roots[r].get("trees") or [r]) if under(p, t)), None)
+    under a tree of an admitted tool root; membership is over the trees, not over the root paths only (link/ is a tree of the tool root contract). The trees of a
+    root are gate_admit.trees: the one function the admit gate resolves them with."""
+    return next((t for r in roots for t in gate_admit.trees(roots[r]) if under(p, t)), None)
 
 
 def tool_file(roots, files, p):
     """P is a tracked file (of FILES, the repo paths) under a tree of an admitted root of class tool."""
-    return isinstance(p, str) and p in files and any(roots[r]["class"] == "tool" and any(under(p, t) for t in (roots[r].get("trees") or [r])) for r in roots)
+    return isinstance(p, str) and p in files and any(roots[r]["class"] == "tool" and any(under(p, t) for t in gate_admit.trees(roots[r])) for r in roots)
 
 
 def link_file(rec_file, root, mine, roots, files):
