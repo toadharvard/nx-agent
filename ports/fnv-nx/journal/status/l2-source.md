@@ -299,3 +299,8 @@ After the first frame:
   - Still to do: the opaque row needs a test or a cited-proof error, and the "cannot reach" proofs must cite GCC 13.3 lines.
   - After the first frame: filter decltype rows to the symbols a unit uses (arm_neon.h gives 290 KB per unit).
 - S23 (b) source: fnv-nx-build t/8f324ec cee201aa1 tree/. It gets one test root, verify/roots/s23-layout, built through the recipe, with its 896 units chosen by the selection rule.
+- HOST1 plugin: w3 834dcab86, rebased onto L5 a7b7805fe. test_dispatch passes 50 checks, and the harness is fixed (plugbuild.py follows c8d7f22dc).
+  - `-D__FNVNX_HOST_ATTR__=1` goes in guest_compiler.json, given to L1, because PP runs before plugins load.
+  - Platform root through the recipe: 111 objects, red with 2 units. Both are HOST1 working: 4 slot null tests, now L5's job, by FNVNX_HOST_HAS over the size field. A second red is the Wine-citation generator stage, 10 of 63 (L5/L1).
+  - objstub reach-not-exit can be measured once those are green.
+  - Next for w3: CONT-P, then the opaque fix, then the S23 root.
