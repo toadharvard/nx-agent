@@ -1,12 +1,15 @@
-// Shader bytecode: token walk (spec rule sm_bytes), table-driven validator (tables generated from render/shaders/total/sm_table.json by res_smgen.py)
-// and the parsed interface the draw path needs. Pure C++ (no libc beyond string.h), -m32 freestanding-safe.
+// nx_smscan.h: the shader bytecode scanner of render/smscan (smscan.c, C11; the guest ILP32 and the host LP64 build the same source and the same layouts). Token walk (spec rule sm_bytes), table-driven validator (tables generated from render/shaders/total/sm_table.json by res_smgen.py)
+// and the parsed interface the draw path needs. Pure C (no libc beyond string.h), -m32 freestanding-safe. Every struct shared by the guest and the host holds fixed-width integers only.
 #pragma once
 #include <stdint.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
 enum NxSmErr {
     NX_SM_OK = 0, NX_SM_E_UNTERMINATED, NX_SM_E_VERSION, NX_SM_E_STAGE, NX_SM_E_OPCODE, NX_SM_E_OP_MODEL, NX_SM_E_LENGTH, NX_SM_E_DST_REG, NX_SM_E_SRC_REG,
     NX_SM_E_REG_INDEX, NX_SM_E_SRCMOD, NX_SM_E_DSTMOD, NX_SM_E_RELADDR, NX_SM_E_PRED, NX_SM_E_DCL, NX_SM_E_TEXLD_OPERAND
 };
-struct NxSmIface {
+typedef struct NxSmIface {
     uint32_t stage;                 // 0 vertex, 1 pixel
     uint32_t major, minor;
     uint32_t n_instr;               // instruction tokens (declarations and comments excluded)
@@ -19,15 +22,22 @@ struct NxSmIface {
     uint32_t def_f, def_i, def_b;   // number of def / defi / defb in the shader
     uint32_t pair_set[7];           // bit (usage * 16 + index) = the (usage, index) pair is a varying of the stage: vertex = a written output (declared with dcl in sm3, written in sm < 3: oPos POSITION0, oFog FOG0, oPts PSIZE0, oD# COLOR#, oT# TEXCOORD#),
                                     // pixel = a read input (sm3 dcl'd v#; sm < 3 the t# / v# registers used or dcl'd: TEXCOORD# / COLOR#). vPos / vFace and oC / oDepth are not pairs. The mapping of mojoshader's attribute / output lists (render/shaders/src/frontend.c)
-};
-// The resumable scanner behind nx_sm_check (res_smcheck.cpp): the same rules, fed in pieces. A scan is exactly one call of nx_sm_check on the concatenation of its feeds:
+} NxSmIface;
+// The resumable scanner behind nx_sm_check (smscan.c): the same rules, fed in pieces. A scan is exactly one call of nx_sm_check on the concatenation of its feeds:
 // nx_sm_scan_feed returns the first violation (sticky) as soon as the instruction holding it is complete, 0 while the stream is legal so far; nx_sm_scan_end additionally requires the closing END (UNTERMINATED otherwise).
 // Words after END = NX_SM_E_LENGTH; the stream may not be longer than NX_SM_MAX_TOKENS before its END (the limit of nx_sm_bytes). stage_expect: 0 / 1 as nx_sm_check, -1 = the stage the version token names.
+#ifdef __cplusplus
+#define NX_SM_ASSERT(c, m) static_assert(c, m)
+#else
+#define NX_SM_ASSERT(c, m) _Static_assert(c, m)
+#endif
 enum { NX_SM_MAX_TOKENS = 1 << 20 };
-struct NxSmScan {
+typedef struct NxSmScan {
     NxSmIface ifc;                  // what the legal prefix declared (valid after nx_sm_scan_end returned 0)
-    const void* M; uint32_t pos, skip, optok, len, npend, pend[16]; int stage_expect, err; uint8_t state;
-};
+    uint32_t model;                 // index in the generated model table, set by the version token
+    uint32_t pos, skip, optok, len, npend, pend[16]; int32_t stage_expect, err; uint8_t state;
+} NxSmScan;
+NX_SM_ASSERT(sizeof(NxSmIface) == 128 && sizeof(NxSmScan) == 228, "the guest ILP32 and the host LP64 lay out the scanner structs alike (fixed-width integers only)");
 void nx_sm_scan_begin(NxSmScan* s, int stage_expect);
 int nx_sm_scan_feed(NxSmScan* s, const uint32_t* tokens, uint32_t n);
 int nx_sm_scan_end(NxSmScan* s);
@@ -35,3 +45,6 @@ uint32_t nx_sm_bytes(const uint32_t* tokens);                                   
 int nx_sm_check(const uint32_t* tokens, uint32_t bytes, int stage_expect, NxSmIface* out);   // stage_expect: 0 vertex, 1 pixel; returns NxSmErr
 uint32_t nx_sm_pairs(const NxSmIface* i, uint8_t* out);                       // the pair_set as FNVNX_DK_PAIR codes (usage * 16 + index), ascending; returns the count (<= 224)
 uint32_t nx_sm_rules_covered(const char* what);                                 // introspection for the tests: number of table rows of a rule family
+#ifdef __cplusplus
+}
+#endif

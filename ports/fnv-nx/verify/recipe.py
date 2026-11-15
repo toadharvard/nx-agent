@@ -86,7 +86,8 @@ _T = TREE + "/toolchain/"
 PLUGIN_SOURCES = {"fnvnx_ftoi": _T + "ftoi/fnvnx_ftoi.cc", "fnvnx_order": _T + "order/fnvnx_order.cc", "fnvnx_sdd": _T + "sdd/fnvnx_sdd.cc",
                   "fnvnx_pi": _T + "pi/fnvnx_pi.cc", "fnvnx_dispatch": _T + "dispatch/fnvnx_dispatch.cc", "fnvnx_addr": _T + "addr/fnvnx_addr.cc",
                   "fnvnx_names": _T + "names/fnvnx_names.cc", "fnvnx_layout": _T + "layout/fnvnx_layout.cc"}
-PLUGIN_INPUTS = {"fnvnx_ftoi": [_T + "ftoi/f2i_builtins.inc"], "fnvnx_layout": [_T + "names/fnvnx_names.cc", _T + "layout/crossing_terms.inc"]}
+PLUGIN_INPUTS = {"fnvnx_ftoi": [_T + "ftoi/f2i_builtins.inc"], "fnvnx_layout": [_T + "names/fnvnx_names.cc", _T + "layout/crossing_terms.inc"],
+                 "fnvnx_names": [_T + "layout/crossing_terms.inc"]}
 PLUGIN_ARGS = {n: {} for n in PLUGIN_SOURCES}
 ANALYSIS_PLUGIN = ("objstub_plugin", TREE + "/verify/objstub_plugin.cc")   # the gate objstub's plugin (RECIPE.md "Plugins"): built for every root with C/C++ units, loaded by no compile stage
 PLUGIN_ARGS["fnvnx_ftoi"] = {"mode": "native"}
@@ -978,8 +979,9 @@ def include_closure(inc, root, roots, repo, tg, variant_rec=None):
     todo = [d for d in inc if isinstance(d, str) and not d.startswith("/")]
     while todo:
         d = todo.pop(0)
+        home = max((q for q in roots if under(d, q)), key=len, default=None)   # the nearest admitted root owns the directory (a header root nested in a product root owns its own tree)
         for p, r in roots.items():
-            if p == root or r.get("class") != "product" or tg not in targets_of(r) or not under(d, p):
+            if p != home or p == root or r.get("class") != "product" or tg not in targets_of(r):
                 continue
             paths = [r.get("recipe") if r.get("target") == tg else None] + [q for t, q in own_recipes(r).values() if t == tg]
             for path in paths:
@@ -991,7 +993,7 @@ def include_closure(inc, root, roots, repo, tg, variant_rec=None):
                 except (OSError, ValueError, AttributeError):
                     continue
                 for m in more:
-                    if isinstance(m, str) and not m.startswith("/") and m not in seen:
+                    if isinstance(m, str) and not m.startswith("/") and m not in seen and os.path.isdir(os.path.join(repo, m)):   # a directory of the checkout: P's generated output is no header of P's (another root's output enters only through `uses`)
                         seen.add(m)
                         out.append(m)
                         todo.append(m)
@@ -1048,7 +1050,7 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
                     if p["external"] not in [e.get("name") for e in rec.get("external", []) if isinstance(e, dict)]:
                         err.append("run[%d].inputs: external %r is not declared" % (i, p["external"]))
                 elif not (isinstance(p, dict) and set(p) == {"stage", "path"} and all(isinstance(v, str) for v in p.values())):
-                    err.append("run[%d].inputs: %r is neither a path, {external, path} nor {stage, path}" % (i, p))
+                    err.append("run[%d].inputs: %r is neither a path, {root, path}, {root, output}, {external, path} nor {stage, path}" % (i, p))
         outs = g["outputs"]
         if not (isinstance(outs, list) and outs and all(isinstance(o, str) and rel_ok(o) for o in outs)):
             err.append("run[%d].outputs must be a non-empty list of root-relative paths" % i)
@@ -1913,7 +1915,7 @@ class Job:
             # linking a shared object also needs collect2 and ld, which gcc_set (compile only) does not list
             q = lambda n: subprocess.run([host, "-print-prog-name=" + n], capture_output=True, text=True).stdout.strip()  # noqa: E731
             exes = [e if e.startswith("/") else "/usr/bin/" + e for e in exes + [q("collect2"), q("ld")]]
-            return self.plus(runtime.build_tool(self.store, sorted(set(exes)), sorted(set(ts + [t for t in trees if not any(under(t, x) for x in ts)]))))   # the plugin headers of the host compiler itself are in its own tree already
+            return self.plus(runtime.build_tool(self.store, sorted(set(exes)), sorted(set(ts + [t for t in trees if not any(under(t, x) for x in ts)]))), [x for x in [self.rec["compiler"].get("external")] if x])   # the compiler's own external only (its plugin headers); no other external is an input of a plugin build; the plugin headers of the host compiler itself are in its own tree already
         rt = self.cached_rt("tool-plugin-" + hashlib.sha256(repr((host, pdir, sorted((e["at"], e["tree"]) for e in self.ext.values()))).encode()).hexdigest()[:16], make)[1]
         # A plugin is linked against nothing (its symbols come from the compiler that loads it): -nostdlib, with the startup files the
         # driver would pass (crti/crtbeginS ... crtendS/crtn: __dso_handle, .init/.fini). crtbeginS/crtendS are in the driver's own
@@ -2191,12 +2193,15 @@ class Job:
         pn = subprocess.run([self.hostpath(self.drivers()[0]), "-print-prog-name=ld"], capture_output=True, text=True).stdout.strip()
         d, b = posixpath.split(posixpath.normpath(unitstage.prog(pn)))
         rd = posixpath.join(d, b[:-2] + "readelf") if b.endswith("ld") else ""
-        in_ext = bool(rd) and any(under(rd, e["host"]) or under(rd, e["at"]) for e in self.ext.values())   # a file of a declared external tree is pinned by its commit and tree_sha256
+        ex_ = next((e for e in self.ext.values() if rd and (under(rd, e["host"]) or under(rd, e["at"]))), None)
+        in_ext = ex_ is not None   # a file of a declared external tree is pinned by its commit and tree_sha256; it runs at the tree's own mount point
+        if in_ext and under(rd, ex_["host"]):
+            rd = posixpath.join(ex_["at"], posixpath.relpath(rd, ex_["host"]))
         bad = [] if in_ext else envcheck.system_lib_errors([rd], json.load(open(os.path.join(self.repo, ENV_JSON)))["packages"], envcheck.file_owners()) if rd else ["the linker %r has no readelf beside it" % b]
         if bad:
             raise BuildRed({"stage": stage, "exit": None, "stderr": ["the pinned readelf beside the linker: %s" % x for x in bad]})
         rt = self.cached_rt("tool-readelf-" + hashlib.sha256(repr((rd, sorted((e["at"], e["tree"]) for e in self.ext.values()))).encode()).hexdigest()[:16],
-                            lambda: self.plus(runtime.build_tool(self.store, [rd], [])))[1]
+                            lambda: self.plus(runtime.build_tool(self.store, [rd], [ex_["host"] + "@" + ex_["at"]] if in_ext else []), [n for n, e in self.ext.items() if e is ex_]))[1]
         doc = {"format": "fnvnx-stage/1", "stage": stage, "argv": [rd, "-W", "-h", "-S", "-r", "-s", "/linked/" + name], "cwd": "/", "class": "build", "tool": "readelf",
                "env": dict(unitstage.ENV, PATH=os.path.dirname(rd)), "outputs": [],
                "inputs": merge_inputs(rt["inputs"] + [{"at": "/linked", "tree": fin}], [], self.store, ws)}
@@ -2464,12 +2469,32 @@ def resolve_foreign(root, ref, repo=".", cache=None, rec=None):
 
 def resolve_input(root, ref, repo=".", cache=None, rec=None):
     """THE reader of a path named by an input file of a gate (imports.in.json, registry.in.json, ...); no gate opens one itself.
-    REF is a bare string (a tracked file or directory of ROOT) or {"external": NAME, "path": P}: NAME must be an `external` of ROOT's recipe,
+    REF is a bare string (a tracked file or directory of ROOT), {"root": R, "path": P} (a tracked file or directory of the admitted TOOL root R: the
+    inputs a declaration derives from live in a root below its consumers, RECIPE.md "Outputs and uses") or {"root": R, "output": NAME} (the declared output NAME of root R, which ROOT's recipe `uses`: the stage index is not part of the contract) or {"external": NAME, "path": P}: NAME must be an `external` of ROOT's recipe,
     its tree is mounted from the pinned commit and checked against its tree_sha256. Red (ValueError) for: an undeclared external, a path that
     is absolute or leaves the tree (.. or a symlink), a missing path, an untracked path, a tree_sha256 mismatch.
     -> (host path, ident); IDENT is "tree_sha256:path" of an external, "root/path" of a tracked file: the gate key takes it."""
     if isinstance(ref, str):
         base, p, kind = os.path.join(repo, root), ref, None
+    elif isinstance(ref, dict) and set(ref) == {"root", "path"} and all(isinstance(v, str) for v in ref.values()):
+        roots = load_admit(repo)
+        if ref["root"] not in roots or roots[ref["root"]].get("class") != "tool":
+            raise ValueError("%s: input %r names %r, which is not an admitted tool root" % (root, ref, ref["root"]))
+        root, base, p, kind = ref["root"], os.path.join(repo, ref["root"]), ref["path"], None
+    elif isinstance(ref, dict) and set(ref) == {"root", "output"} and all(isinstance(v, str) for v in ref.values()):
+        roots = load_admit(repo)
+        if rec is None:
+            rec = load_recipe(repo, roots, root)
+        if {"root": ref["root"], "output": ref["output"]} not in (rec.get("uses") or []):
+            raise ValueError("%s: input %r is an output of another root that the recipe does not `uses`" % (root, ref))
+        prod = load_recipe(repo, roots, ref["root"])
+        path = (prod.get("outputs") or {}).get(ref["output"])
+        if path is None:
+            raise ValueError("%s: root %s declares no output %r" % (root, ref["root"], ref["output"]))
+        idx = next((i for i, g in enumerate(prod.get("generated", [])) if path in g["outputs"]), None)
+        if idx is None:
+            raise ValueError("%s: output %r of %s is made by no generate stage" % (root, ref["output"], ref["root"]))
+        return stage_output(root, {"stage": "%s:gen:%d" % (ref["root"], idx), "path": path}, repo, cache)
     elif isinstance(ref, dict) and set(ref) == {"external", "path"} and all(isinstance(v, str) for v in ref.values()):
         kind, p = ref["external"], ref["path"]
         if rec is None:
@@ -2487,7 +2512,7 @@ def resolve_input(root, ref, repo=".", cache=None, rec=None):
     elif isinstance(ref, dict) and set(ref) == {"stage", "path"} and all(isinstance(v, str) for v in ref.values()):
         return stage_output(root, ref, repo, cache)
     else:
-        raise ValueError("%s: input %r is neither a path, {external, path} nor {stage, path}" % (root, ref))
+        raise ValueError("%s: input %r is neither a path, {root, path}, {root, output}, {external, path} nor {stage, path}" % (root, ref))
     if not p or os.path.isabs(p) or ".." in p.split("/"):
         raise ValueError("%s: input path %r is absolute or leaves the tree" % (root, p))
     full = os.path.join(base, p)
