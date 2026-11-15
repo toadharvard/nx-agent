@@ -6,59 +6,33 @@
  },
  "rows": [
   {
-   "function": "cpuid",
-   "ufs": [
-    "cpuid0",
-    "cpuid1",
-    "cpuid2",
-    "cpuid3"
-   ],
-   "source": "rt/cpumodel.c",
    "basis": "SDM vol. 2A CPUID Operation: (EAX, EBX, ECX, EDX) := CPUID_INFO(EAX, ECX)",
+   "function": "cpuid",
    "outputs": [
     "eax",
     "ebx",
     "ecx",
     "edx"
+   ],
+   "source": "rt/cpumodel.c",
+   "ufs": [
+    "cpuid0",
+    "cpuid1",
+    "cpuid2",
+    "cpuid3"
    ]
   },
   {
-   "function": "rdtsc",
-   "ufs": [
-    "rdtsc"
-   ],
-   "source": "rt/cpumodel.c",
    "basis": "SDM vol. 2B RDTSC Operation: EDX:EAX := TimeStampCounter (64-bit result of fnvl_rdtsc)",
+   "function": "rdtsc",
    "outputs": [
     "eax",
     "edx"
+   ],
+   "source": "rt/cpumodel.c",
+   "ufs": [
+    "rdtsc"
    ]
-  }
- ],
- "facts": [
-  {
-   "name": "cpl",
-   "value": 3,
-   "source": "CLAUDE.md 'The declared machine': the game is a Windows (Wine 9.0) user process",
-   "basis": "Windows user mode runs at CPL 3 (SDM vol. 3A 5.5 privilege levels)"
-  },
-  {
-   "name": "iopl",
-   "value": 0,
-   "source": "CLAUDE.md 'The declared machine': EFLAGS.IOPL of an NT user process",
-   "basis": "Windows (and Wine 9.0) user threads run with EFLAGS.IOPL = 0"
-  },
-  {
-   "name": "io_bitmap_grants",
-   "value": "none",
-   "source": "CLAUDE.md 'The declared machine'",
-   "basis": "an NT user process has an empty I/O permission bitmap: every port is denied at CPL 3 > IOPL"
-  },
-  {
-   "name": "umip",
-   "value": "clear",
-   "source": "rt/cpumodel.c CPUID.07H.0:ECX[2], read by proof/sysspec.py (a leaf above the max leaf is absent)",
-   "basis": "SDM vol. 3A 2.5 CR4.UMIP; the declared CPU reports no UMIP"
   }
  ]
 }
