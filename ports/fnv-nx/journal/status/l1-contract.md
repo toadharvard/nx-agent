@@ -1481,3 +1481,4 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Rule: the recipe creates the parent directory of every declared output, and every per-generator makedirs is deleted. Assigned to w12.
   - L4 w6 then relinks bootguest and returns the undefined set.
 - 01:11 **w23 8b6b7ed0.** The rtasm universe is read from DWARF DW_AT_language. An object with no DWARF is red. (b) and (a') wait for w25 and w20.
+- 01:12 **L4 defect 2: the mld: argv lacks PROBE_FLAGS.** Rule: one argv constructor for every driver stage. Assigned to w12, together with defect 1; it blocks icount and the bootguest link.
