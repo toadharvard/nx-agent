@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""spec_extract.py OUT.json: derives bridgefacts/com/com_spec.json from the platform's own interface declarations.
+"""spec_extract.py SHIM_DIR AUDIO_DIR OUT.json (a library of gen_combridge.py; the generated com_spec.json is not a tracked file): derives the spec from the platform's own interface declarations.
 
 The COM interfaces the platform implements are C++ abstract classes (shim/include/dsound.h, dinput.h, platform/audio/
 dsound_fx.h, dshow_int.h); this tool reads their `virtual` declarations in vtable order (a base class's methods first) and writes
@@ -19,8 +19,7 @@ interface are the ones named in OVERLAY: one entry per interface class, stating 
 import json, re, sys, os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SHIM = os.path.join(HERE, "..", "..", "shim", "include")
-AUDIO = os.path.join(HERE, "..", "..", "platform", "audio")
+HEADERS = {"dsound.h": "shim", "dinput.h": "shim", "dsound_fx.h": "audio", "dshow_int.h": "audio"}   # header -> the directory that holds it
 
 # ---- the interfaces: spec name -> (header, C++ struct text name, cxx type, base spec name, family, IID symbol, extra IID symbols)
 # family: ds (dsound.h: GUID layout), di (dinput.h), dsh (dshow_int.h: raw 16-byte Guid)
@@ -250,13 +249,12 @@ def ret_of(r):
     return text, "hresult" if r in ("HRESULT", "HR") else "value"
 
 
-def main(out):
+def extract(dirs):
+    """the spec (a dict) from the four headers; dirs: {"shim": directory of dsound.h and dinput.h, "audio": directory of dsound_fx.h and dshow_int.h}"""
     texts = {}
     CB.clear()
-    for h in ("dsound.h", "dinput.h"):
-        texts[h] = open(os.path.join(SHIM, h)).read()
-    for h in ("dsound_fx.h", "dshow_int.h"):
-        texts[h] = open(os.path.join(AUDIO, h)).read()
+    for h, d in HEADERS.items():
+        texts[h] = open(os.path.join(dirs[d], h)).read()
     for h, t in texts.items():
         for m in re.finditer(r"FNVNX_CALLBACK_T\((\w+),\s*(\w+),\s*\(([^)]*)\)\)", t):
             CB[m.group(1)] = "%s(%s)" % (m.group(2), m.group(3).strip())
@@ -351,11 +349,16 @@ def main(out):
     spec = {"schema": "fnvnx-com-spec/1",
             "headers": ["dsound.h", "dinput.h", "dsound_fx.h", "dshow_int.h"],
             "interfaces": interfaces, "methods": methods, "exports": exports}
+    return spec
+
+
+def main(shim, audio, out):
+    spec = extract({"shim": shim, "audio": audio})
     with open(out, "w") as f:
         json.dump(spec, f, indent=1, sort_keys=True)
         f.write("\n")
-    print("spec_extract: %d interfaces, %d methods, %d exports" % (len(interfaces), len(methods), len(exports)))
+    print("spec_extract: %d interfaces, %d methods, %d exports" % (len(spec["interfaces"]), len(spec["methods"]), len(spec["exports"])))
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "com_spec.json"))
+    main(sys.argv[1], sys.argv[2], sys.argv[3])

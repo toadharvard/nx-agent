@@ -19,7 +19,7 @@ Certified iff the two contracts are equal; the verdict names the first differing
 result, pop, variadic, aggregate, undecoded name).  Equal contracts mean every argument and the result travel in the same place on both machines,
 so no bridge exists to be generated: where the legacy model produced `bridge` / `manual` / `x86-inconsistent`, the pair is uncertified.
 UNIVERSE.  Every row that is a ref or a non-canonical def of a symbol that has a definition row somewhere in obj.json and is a function-kind row
-(func, ctor.*, dtor.*) with an MSVC name, or an `unnamed:` row; item id `object:symbol`.  An `unnamed:` row, or a row of a symbol whose canonical
+(func, ctor.*, dtor.*) with an MSVC name, or a `nodecor:` row; item id `object:symbol`.  A `nodecor:` row, or a row of a symbol whose canonical
 definition has no MSVC name, is uncertified (no contract can be compared).  Symbols with no definition row at all are linkstrict's business (class 3).  Rows of kind
 thunk/vtable/gcc/internal/data are outside (no function contract of the exe).
 PROOF.  Parameters are placed by the calling convention as a function of the ordered class list, so equal class lists under equal conventions
@@ -152,6 +152,20 @@ def contract(name):
 
 def compare(ref, dfn):
     """None when the two MSVC names have equal contracts, else the first differing component."""
+    if not ref.startswith('?') or not dfn.startswith('?'):   # a C decoration (abi_msvcname.parse_c) encodes the calling convention and the argument bytes only
+        try:
+            if ref.startswith('?') or dfn.startswith('?'):
+                raise ValueError('%s vs %s: a C name against a C++ name' % (ref, dfn))
+            r, d = abi_msvcname.parse_c(ref), abi_msvcname.parse_c(dfn)
+        except ValueError as e:
+            return 'undecoded name: %s' % e
+        if r.name != d.name:
+            return 'C name %s vs %s' % (r.name, d.name)
+        if r.cc != d.cc:
+            return 'cc %s vs %s' % (r.cc, d.cc)
+        if r.arg_bytes != d.arg_bytes:
+            return 'argument bytes %s vs %s' % (r.arg_bytes, d.arg_bytes)
+        return None
     try:
         r, d = contract(ref), contract(dfn)
     except ValueError as e:
@@ -189,7 +203,7 @@ def check(obj):
             continue
         canon = defs[0]
         for r in rs:
-            unnamed = r[2].startswith('unnamed:')
+            unnamed = r[2].startswith('nodecor:')
             if r is canon or not (unnamed or (r[2] in FUNC_KINDS and r[1])):
                 continue
             i = '%s:%s' % (r[0], sym)

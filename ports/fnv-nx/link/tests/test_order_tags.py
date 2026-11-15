@@ -16,6 +16,7 @@ import gate_order
 
 fails = []
 tmp = tempfile.mkdtemp(prefix='ordertags-')
+__import__('atexit').register(__import__('shutil').rmtree, tmp, True)   # a test leaves no scratch behind
 
 
 def check(what, got, want):

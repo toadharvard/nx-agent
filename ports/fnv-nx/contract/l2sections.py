@@ -7,17 +7,25 @@
     read(path)                 -> {'sympair': [...], 'vtpair': [...], 'n3': [...]}; an absent section gives []
 
 Format: plain text, LF-terminated lines, TAB-separated.  sympair: exactly 4 fields, kind one of KINDS or
-`unnamed:<reason>` (reason not empty); the name may be empty only for the kinds in NAMELESS.  vtpair: exactly 4
+`nodecor:<reason>` (reason not empty); the name may be empty only for the kinds in NAMELESS.  vtpair: exactly 4
 fields, offsets decimal.  n3: 2..5 fields (the producer omits trailing empty ones), verdict not empty, inlined a
 `,`-separated list of symbols, kind one of N3_KINDS or a clone suffix (not empty, no blank), types `,`-separated
 Itanium type strings (the producer's own separator; the task brief said `;`).  Any other line is an error
 `<where>: line N: <what>`; no line is skipped, a final line without LF is an error, an empty section is [].
 Pure: bytes in, tuples out (rows keep the section's order).
 """
-import os, sys
+import os, re, sys
 
-KINDS = frozenset(('func', 'data', 'ctor.c1', 'ctor.c2', 'dtor.d2', 'dtor.d1', 'dtor.d0', 'dtor.sdd', 'dtor.sdd.thunk',
-                   'thunk', 'vtable', 'gcc', 'internal'))     # `vtable`: NAMES1 writes it for the table groups
+def _sympair_kinds():
+    """the closed set of sympair kinds, read from where the names plugin defines it once (toolchain/names/sympair_kinds.inc, FNVNX_SYMPAIR_KINDS)"""
+    inc = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'toolchain', 'names', 'sympair_kinds.inc')
+    m = re.search(r'#define FNVNX_SYMPAIR_KINDS\(X\)(.*?)\n\n|#define FNVNX_SYMPAIR_KINDS\(X\)(.*)\Z', open(inc).read(), re.S)
+    if not m:
+        raise ValueError('%s: no FNVNX_SYMPAIR_KINDS' % inc)
+    return frozenset(re.findall(r'X\(([^,()\s]+),', m.group(1) or m.group(2)))
+
+
+KINDS = _sympair_kinds()     # `vtable`: NAMES1 writes it for the table groups; `noemit`: a function the unit defines with no symbol in the object (the .inc)
 NAMELESS = frozenset(('thunk', 'vtable', 'gcc', 'internal'))
 N3_KINDS = frozenset(('', 'thunk', 'inline', 'sdd', 'alias'))
 
@@ -55,11 +63,11 @@ def parse_sympair(data, where):
     for n, ln in enumerate(_lines(data, where), 1):
         sym, ms, kind, df = _fields(ln, where, n, 4, 4)
         _need(sym, where, n, 'symbol')
-        if kind not in KINDS and not (kind.startswith('unnamed:') and len(kind) > 8):
+        if kind not in KINDS and not (kind.startswith('nodecor:') and len(kind) > 8):
             raise ValueError('%s: line %d: unknown kind %r' % (where, n, kind))
         if df not in ('def', 'ref'):
             raise ValueError('%s: line %d: %r is neither def nor ref' % (where, n, df))
-        if not ms and kind not in NAMELESS and kind[:8] != 'unnamed:':
+        if not ms and kind not in NAMELESS and kind[:8] != 'nodecor:':
             raise ValueError('%s: line %d: kind %s without an MSVC name' % (where, n, kind))
         out.append((sym, ms, kind, df))
     return out

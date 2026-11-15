@@ -212,6 +212,21 @@ for abi in ("ilp32", "lp64"):
     cs = [a - sec[3] for a in cs]
     check(T("LLVM (a64access) decodes the same words as objdump"), od == cs and len(od) > 10, (len(od), len(cs)))
 
+# --- the target profile of a root decides how its objects are judged (gate_objstub.profile_findings)
+import gate_objstub
+def hdr(cls, machine):
+    pth = tempfile.mkstemp(dir=ROOT, suffix=".o")[1]
+    open(pth, "wb").write(b"\x7fELF" + bytes([cls, 1, 1]) + bytes(9) + (1).to_bytes(2, "little") + machine.to_bytes(2, "little") + bytes(40))
+    return pth
+g32, g64, x64 = hdr(1, 183), hdr(2, 183), hdr(2, 62)
+check("profile: a guest root with ELF32 AArch64 objects has no finding (its bodies are analysed)", gate_objstub.profile_findings("r", "guest", [("a", g32)]) == [])
+check("profile: a host root with an x86-64 object has no finding (its bodies get the x86-64 analysis)", gate_objstub.profile_findings("r", "host", [("a", x64)]) == [])
+
+f = gate_objstub.profile_findings("r", "guest", [("a", g32), ("b", x64)])
+check("profile: an object whose e_machine is not the guest profile's is red, named by its id", [x[:3] for x in f] == [("b", "e_machine", "target-mismatch")], f)
+f = gate_objstub.profile_findings("r", "host", [("a", g32)])
+check("profile: a host root with an ELF32 object is a mismatch (the host profile is ELF64)", [x[:3] for x in f] == [("a", "e_machine", "target-mismatch")], f)
+
 # determinism, CLI, gate wrapper, verdict acceptance
 o1 = build("void f(void){__builtin_trap();}\nint r(int a){return a+1;}", "lp64")
 cmd = [sys.executable, "-I", os.path.join(VERIFY, "objstub.py"), "check", "--terminators", tf, o1]
@@ -486,12 +501,12 @@ except ValueError:
     check("wine table: missing file is an error", True)
 
 # --- declared machine (CLAUDE.md "The declared machine") and terminators: rule C, the FNVNX_CITE records of hostabi/include/fnvnx/cite.h
-DT = {31: ("f", "registry", "win-doc:sysinfo/regopenkeyex:RegOpenKeyExA", "u32", "2"),
-      32: ("conn", "no-network", "win-doc:winsock/connect:connect", "u32", "0xFFFFFFFF"),
-      33: ("cleanup", "no-network", "wine-9.0:dlls/ws2_32/socket.c:WSACleanup", "void", ""),
-      34: ("die", "process-end", "win-doc:processthreadsapi/exitprocess:ExitProcess", "noreturn", "-"),
-      35: ("tend", "thread-end", "posix-2017:pthread_exit:pthread_exit", "noreturn", "-"),
-      36: ("mixed3", "single-process", "win-doc:processthreadsapi/terminateprocess:TerminateProcess", "u32", "0")}
+DT = {31: ("f", "registry", "win-doc:sysinfo/regopenkeyex:RegOpenKeyExA", "u32", "2", "-"),
+      32: ("conn", "no-network", "win-doc:winsock/connect:connect", "u32", "0xFFFFFFFF", "-"),
+      33: ("cleanup", "no-network", "wine-9.0:dlls/ws2_32/socket.c:WSACleanup", "void", "", "-"),
+      34: ("die", "process-end", "win-doc:processthreadsapi/exitprocess:ExitProcess", "noreturn", "-", "-"),
+      35: ("tend", "thread-end", "std:POSIX.1-2017:pthread_exit", "noreturn", "-", "-"),
+      36: ("mixed3", "single-process", "win-doc:processthreadsapi/terminateprocess:TerminateProcess", "u32", "0", "ERROR_INVALID_HANDLE=6")}
 CH = ('#define FNVNX_CITE(fn, id) __asm__(".pushsection .fnvnx.cite,\\"\\",%progbits\\n\\t.balign 4\\n\\t.4byte " #fn "\\n\\t.4byte 2f-1f\\n1:\\t.ascii \\"" id "\\"\\n2:\\t.balign 4\\n\\t.popsection")\n'
       "void fnvnx_wine_fixme(unsigned);\n")
 for abi in ("ilp32", "lp64"):
@@ -558,61 +573,64 @@ for abi in ("ilp32", "lp64"):
     check(T("coverage: a declared-noreturn definition that ends in an unwinder (longjmp, throw) on every path is a control transfer, covered, no record"), not k, f)
     k, f = dk(NR + 'void die(void) __attribute__((noreturn));\nvoid die(void) { host_exit(); __builtin_unreachable(); }\nvoid die3(void) __attribute__((noreturn));\nvoid die3(void) { die(); }', terms=("die", "die3", "abort"))
     check(T("coverage: a declared-noreturn body that ends in an uncited defined terminator is uncovered too"), ("die3", "noreturn-uncited") in k, f)
+STD_FIX = ({"7.22.4.4", "7.22.4.1"}, {"pthread_exit"})   # the pinned std index, as the loaders return it (std_index_load is tested below on fixture trees)
+WIN_FIX = {"ERROR_INVALID_HANDLE": 6, "WSAHOST_NOT_FOUND": 11001}   # the pinned winerror.h/winsock2.h, as winerror_load returns it
+rdt = lambda path, std=STD_FIX, win=WIN_FIX: objstub.read_declared_table(path, (lambda: std) if std is not None else None, (lambda: win) if win is not None else None)
 HDR_REAL = ('# fact: no-network | time-zone | registry | no-galaxy | single-process | process-end | thread-end (CLAUDE.md "The declared machine"); source: win-doc:<documentation page or header path>:<function> | '
-            'wine-9.0:<path>:<function> | c11:<clause>:<function> | posix-2017:<page>:<function> | galaxy-sdk:<page>:<function>; kind void|u32|u64|addr|u32nz<N>|noreturn')
-GOODS = ("31\tRegOpenKeyExA\tregistry\twin-doc:sysinfo/regopenkeyex:RegOpenKeyExA\tu32\t2",
-         "32\tconnect\tno-network\twine-9.0:dlls/ws2_32/socket.c:connect\tu32\t0xFFFFFFFF",
-         "33\tGetTimeZoneInformation\ttime-zone\twin-doc:timezoneapi/gettimezoneinformation:GetTimeZoneInformation\tu32nz0\t0,1")
-for bad in ("31\tx\tnetwork\twin-doc:a/b:f\tu32\t1", "31\tx\tno-network\thttp://example.com\tu32\t1", "31\tx\tno-network\twin-doc:a/b:f\tu32",
-            "31\tx\tno-network\twin-doc:a/b:f\tvoid\t1", "x\tx\tregistry\twin-doc:a/b:f\tu32\t1", "31\tx\tregistry\twine:a.c:f\tu32\t1",
-            "31\tx\tregistry\twin-doc:a/b:f\tu32\t1\n31\ty\tregistry\twin-doc:a/b:g\tu32\t1", "31\tx\tregistry\tu32\t1"):
+            'wine-9.0:<path>:<function> | std:<doc>:<section> | galaxy-sdk:<page>:<function>; kind void|u32|u64|addr|u32nz<N>|noreturn')
+GOODS = ("31\tRegOpenKeyExA\tregistry\twin-doc:sysinfo/regopenkeyex:RegOpenKeyExA\tu32\t2\t-",
+         "32\tconnect\tno-network\twine-9.0:dlls/ws2_32/socket.c:connect\tu32\t0xFFFFFFFF\t-",
+         "33\tGetTimeZoneInformation\ttime-zone\twin-doc:timezoneapi/gettimezoneinformation:GetTimeZoneInformation\tu32nz0\t0,1\t-")
+for bad in ("31\tx\tnetwork\twin-doc:a/b:f\tu32\t1\t-", "31\tx\tno-network\thttp://example.com\tu32\t1\t-", "31\tx\tno-network\twin-doc:a/b:f\tu32\t-",
+            "31\tx\tno-network\twin-doc:a/b:f\tvoid\t1\t-", "x\tx\tregistry\twin-doc:a/b:f\tu32\t1\t-", "31\tx\tregistry\twine:a.c:f\tu32\t1\t-",
+            "31\tx\tregistry\twin-doc:a/b:f\tu32\t1\t-\n31\ty\tregistry\twin-doc:a/b:g\tu32\t1\t-", "31\tx\tregistry\tu32\t1\t-"):
     tf_ = os.path.join(ROOT, "d.tsv")
     open(tf_, "w").write(HDR_REAL + "\n" + bad + "\n")
     try:
-        objstub.read_declared_table(tf_)
+        rdt(tf_)
         check("declared table: malformed row rejected: %r" % bad[:36], False)
     except ValueError:
         check("declared table: malformed row rejected: %r" % bad[:36], True)
 open(tf_, "w").write(HDR_REAL + "\n" + "\n".join(GOODS) + "\n")
-got = objstub.read_declared_table(tf_)
+got = rdt(tf_)
 check("declared table: header comment and three valid rows (win-doc and wine-9.0 sources, three facts)",
       set(got) == {31, 32, 33} and got[32][1:3] == ("no-network", "wine-9.0:dlls/ws2_32/socket.c:connect"), got)
 # the facts and sources come from the header line of the table itself
-GAL = "34\tGalaxyInit\tno-galaxy\tgalaxy-sdk:IGalaxy/Init:Init\tu32\t1"
+GAL = "34\tGalaxyInit\tno-galaxy\tgalaxy-sdk:IGalaxy/Init:Init\tu32\t1\t-"
 open(tf_, "w").write(HDR_REAL + "\n" + GAL + "\n")
-check("declared table: a galaxy-sdk row with fact no-galaxy is accepted", objstub.read_declared_table(tf_).get(34, ("",))[1:3] == ("no-galaxy", "galaxy-sdk:IGalaxy/Init:Init"), "")
-for what, row in (("an undeclared fact", "35\tx\tno-wifi\twin-doc:a/b:f\tu32\t1"), ("an undeclared source prefix", "35\tx\tno-galaxy\tgog-sdk:a/b:f\tu32\t1")):
+check("declared table: a galaxy-sdk row with fact no-galaxy is accepted", rdt(tf_).get(34, ("",))[1:3] == ("no-galaxy", "galaxy-sdk:IGalaxy/Init:Init"), "")
+for what, row in (("an undeclared fact", "35\tx\tno-wifi\twin-doc:a/b:f\tu32\t1\t-"), ("an undeclared source prefix", "35\tx\tno-galaxy\tgog-sdk:a/b:f\tu32\t1\t-")):
     open(tf_, "w").write(HDR_REAL + "\n" + row + "\n")
     try:
-        objstub.read_declared_table(tf_)
+        rdt(tf_)
         check("declared table: a row with " + what + " is red", False)
     except ValueError:
         check("declared table: a row with " + what + " is red", True)
-for what, row, good in (("c11 clause digits and dots", "36\texit\tprocess-end\tc11:7.22.4.4:exit\tnoreturn\t-", True),
-                        ("c11 clause that is not digits and dots", "36\texit\tprocess-end\tc11:7.x:exit\tnoreturn\t-", False),
-                        ("posix-2017 page name", "37\tpthread_exit\tthread-end\tposix-2017:pthread_exit:pthread_exit\tnoreturn\t-", True),
-                        ("posix-2017 page that is not a name", "37\tpthread_exit\tthread-end\tposix-2017:p/q:pthread_exit\tnoreturn\t-", False),
-                        ("process-end with a kind that returns", "38\texit\tprocess-end\tc11:7.22.4.4:exit\tu32\t0", False),
-                        ("noreturn with a fact that is not a terminator", "38\texit\tregistry\tc11:7.22.4.4:exit\tnoreturn\t-", False),
-                        ("noreturn with a value", "38\texit\tprocess-end\tc11:7.22.4.4:exit\tnoreturn\t0", False),
-                        ("sources joined by | (sorted, unique, each token valid)", "39\tx\tregistry\twin-doc:a/b:f|wine-9.0:dlls/a.c:f\tu32\t1", True),
-                        ("sources joined by | with a token that fails the grammar", "39\tx\tregistry\twin-doc:a/b:f|http://x\tu32\t1", False),
-                        ("sources joined by | not in sorted order", "39\tx\tregistry\twine-9.0:dlls/a.c:f|win-doc:a/b:f\tu32\t1", False),
-                        ("sources joined by | with a repeated token", "39\tx\tregistry\twin-doc:a/b:f|win-doc:a/b:f\tu32\t1", False)):
+for what, row, good in (("c11 clause digits and dots", "36\texit\tprocess-end\tstd:C11:7.22.4.4\tnoreturn\t-\t-", True),
+                        ("c11 clause that is not digits and dots", "36\texit\tprocess-end\tstd:C11:7.x\tnoreturn\t-\t-", False),
+                        ("posix-2017 page name", "37\tpthread_exit\tthread-end\tstd:POSIX.1-2017:pthread_exit\tnoreturn\t-\t-", True),
+                        ("posix-2017 page that is not a name", "37\tpthread_exit\tthread-end\tstd:POSIX.1-2017:p/q\tnoreturn\t-\t-", False),
+                        ("process-end with a kind that returns", "38\texit\tprocess-end\tstd:C11:7.22.4.4\tu32\t0\t-", False),
+                        ("noreturn with a fact that is not a terminator", "38\texit\tregistry\tstd:C11:7.22.4.4\tnoreturn\t-\t-", False),
+                        ("noreturn with a value", "38\texit\tprocess-end\tstd:C11:7.22.4.4\tnoreturn\t0\t-", False),
+                        ("sources joined by | (sorted, unique, each token valid)", "39\tx\tregistry\twin-doc:a/b:f|wine-9.0:dlls/a.c:f\tu32\t1\t-", True),
+                        ("sources joined by | with a token that fails the grammar", "39\tx\tregistry\twin-doc:a/b:f|http://x\tu32\t1\t-", False),
+                        ("sources joined by | not in sorted order", "39\tx\tregistry\twine-9.0:dlls/a.c:f|win-doc:a/b:f\tu32\t1\t-", False),
+                        ("sources joined by | with a repeated token", "39\tx\tregistry\twin-doc:a/b:f|win-doc:a/b:f\tu32\t1\t-", False)):
     open(tf_, "w").write(HDR_REAL + "\n" + row + "\n")
     try:
-        objstub.read_declared_table(tf_)
+        rdt(tf_)
         got_ = True
     except ValueError:
         got_ = False
     check("declared table: " + what + (" is accepted" if good else " is red"), got_ == good, row)
 HDR_HOST = HDR_REAL.replace(" | galaxy-sdk:<page>:<function>", " | galaxy-sdk:<page>:<function> | hostabi:<header>:<service>")
-for what, row, good in (("hostabi source for a noreturn property of our own symbol", "40\tfnvnx_thread_exit\tthread-end\thostabi:hostabi/include/fnvnx/hostapi.h:thread_exit\tnoreturn\t-", True),
-                        ("hostabi source as the source of a Win32 value (a return value)", "41\tx\tno-network\thostabi:hostabi/include/fnvnx/hostapi.h:connect\tu32\t0xFFFFFFFF", False),
-                        ("hostabi joined to a wine source for a Win32 value", "41\tx\tno-network\thostabi:a.h:s|wine-9.0:dlls/a.c:f\tu32\t1", False)):
+for what, row, good in (("hostabi source for a noreturn property of our own symbol", "40\tfnvnx_thread_exit\tthread-end\thostabi:hostabi/include/fnvnx/hostapi.h:thread_exit\tnoreturn\t-\t-", True),
+                        ("hostabi source as the source of a Win32 value (a return value)", "41\tx\tno-network\thostabi:hostabi/include/fnvnx/hostapi.h:connect\tu32\t0xFFFFFFFF\t-", False),
+                        ("hostabi joined to a wine source for a Win32 value", "41\tx\tno-network\thostabi:a.h:s|wine-9.0:dlls/a.c:f\tu32\t1\t-", False)):
     open(tf_, "w").write(HDR_HOST + "\n" + row + "\n")
     try:
-        objstub.read_declared_table(tf_)
+        rdt(tf_)
         got_ = True
     except ValueError:
         got_ = False
@@ -620,13 +638,13 @@ for what, row, good in (("hostabi source for a noreturn property of our own symb
 slim = HDR_REAL.replace(" | no-galaxy", "").replace(" | galaxy-sdk:<page>:<function>", "")
 open(tf_, "w").write(slim + "\n" + GAL + "\n")
 try:
-    objstub.read_declared_table(tf_)
+    rdt(tf_)
     check("declared table: without no-galaxy in its header a galaxy row is red (table and check agree)", False)
 except ValueError:
     check("declared table: without no-galaxy in its header a galaxy row is red (table and check agree)", True)
 open(tf_, "w").write("# header\n" + "\n".join(GOODS) + "\n")
 try:
-    objstub.read_declared_table(tf_)
+    rdt(tf_)
     check("declared table: no header line is an error", False)
 except ValueError:
     check("declared table: no header line is an error", True)
@@ -635,6 +653,71 @@ try:
     check("declared table: missing file is an error", False)
 except ValueError:
     check("declared table: missing file is an error", True)
+
+# lasterror (7th column), the std: citations against the pinned index, and the pinned loaders
+for what, row, good in (("lasterror ERROR_INVALID_HANDLE=6 (a define of the pinned header)", "50\tx\tsingle-process\twin-doc:a/b:f\tu32\t0\tERROR_INVALID_HANDLE=6", True),
+                        ("lasterror WSAHOST_NOT_FOUND=11001 (winsock2.h)", "50\tx\tno-network\twin-doc:a/b:f\tu32\t0xFFFFFFFF\tWSAHOST_NOT_FOUND=11001", True),
+                        ("lasterror - on a returning row", "50\tx\tno-network\twin-doc:a/b:f\tu32\t0\t-", True),
+                        ("lasterror with a lower-case name", "50\tx\tsingle-process\twin-doc:a/b:f\tu32\t0\terror_invalid_handle=6", False),
+                        ("lasterror with a malformed name (starts with a digit)", "50\tx\tsingle-process\twin-doc:a/b:f\tu32\t0\t6ERROR=6", False),
+                        ("lasterror with a name and no =N", "50\tx\tsingle-process\twin-doc:a/b:f\tu32\t0\tERROR_INVALID_HANDLE", False),
+                        ("lasterror with = and no number", "50\tx\tsingle-process\twin-doc:a/b:f\tu32\t0\tERROR_INVALID_HANDLE=", False),
+                        ("lasterror with a hex number", "50\tx\tsingle-process\twin-doc:a/b:f\tu32\t0\tERROR_INVALID_HANDLE=0x6", False),
+                        ("lasterror with a number that is not the header's value", "50\tx\tsingle-process\twin-doc:a/b:f\tu32\t0\tERROR_INVALID_HANDLE=7", False),
+                        ("lasterror with a name that is no define of the pinned headers", "50\tx\tsingle-process\twin-doc:a/b:f\tu32\t0\tERROR_NO_SUCH_THING=6", False),
+                        ("a noreturn row with a non-- lasterror", "50\texit\tprocess-end\tstd:C11:7.22.4.4\tnoreturn\t-\tERROR_INVALID_HANDLE=6", False),
+                        ("a row with six fields (no lasterror column)", "50\tx\tsingle-process\twin-doc:a/b:f\tu32\t0", False),
+                        ("a row with eight fields", "50\tx\tsingle-process\twin-doc:a/b:f\tu32\t0\t-\t-", False),
+                        ("a hostabi: source with a non-- lasterror", "50\tx\tsingle-process\thostabi:a.h:s\tu32\t0\tERROR_INVALID_HANDLE=6", False),
+                        ("a hostabi: noreturn row with lasterror -", "50\tfnvnx_thread_exit\tthread-end\thostabi:hostabi/include/fnvnx/hostapi.h:thread_exit\tnoreturn\t-\t-", True),
+                        ("std:C11 clause that is in the pinned index", "50\texit\tprocess-end\tstd:C11:7.22.4.1\tnoreturn\t-\t-", True),
+                        ("std:C11 clause that is not in the pinned index", "50\texit\tprocess-end\tstd:C11:7.22.4.9\tnoreturn\t-\t-", False),
+                        ("std:POSIX.1-2017 page that is not in the pinned index", "50\tx\tthread-end\tstd:POSIX.1-2017:pthread_nothing\tnoreturn\t-\t-", False),
+                        ("std with an unknown document", "50\tx\tprocess-end\tstd:C99:7.22.4.4\tnoreturn\t-\t-", False)):
+    open(tf_, "w").write(HDR_HOST + "\n" + row + "\n")
+    try:
+        rdt(tf_)
+        got_ = True
+    except ValueError:
+        got_ = False
+    check("declared table: " + what + (" is accepted" if good else " is red"), got_ == good, row)
+open(tf_, "w").write(HDR_HOST + "\n50\texit\tprocess-end\tstd:C11:7.22.4.4\tnoreturn\t-\t-\n")
+try:
+    rdt(tf_, std=None)
+    check("declared table: a std: citation with no pinned index given is red", False)
+except ValueError:
+    check("declared table: a std: citation with no pinned index given is red", True)
+open(tf_, "w").write(HDR_HOST + "\n50\tx\tsingle-process\twin-doc:a/b:f\tu32\t0\tERROR_INVALID_HANDLE=6\n")
+try:
+    rdt(tf_, win=None)
+    check("declared table: a lasterror with no pinned headers given is red", False)
+except ValueError:
+    check("declared table: a lasterror with no pinned headers given is red", True)
+got = rdt(tf_)
+check("declared table: the row tuple is (name, fact, source, kind, value, lasterror)", got[50] == ("x", "single-process", "win-doc:a/b:f", "u32", "0", "ERROR_INVALID_HANDLE=6"), got)
+# the loaders of the pinned documents: fixture trees, sha256 of every file checked
+import hashlib as _hl  # noqa: E402
+fx = os.path.join(ROOT, "stdfix")
+os.makedirs(fx, exist_ok=True)
+open(os.path.join(fx, "c11.tsv"), "w").write("7.22.4.4\tThe exit function\n")
+open(os.path.join(fx, "posix2017.tsv"), "w").write("pthread_exit\n")
+sha = lambda p_: _hl.sha256(open(os.path.join(fx, p_), "rb").read()).hexdigest()
+pin = {"files": {"c11": {"path": "c11.tsv", "sha256": sha("c11.tsv")}, "posix": {"path": "posix2017.tsv", "sha256": sha("posix2017.tsv")}}}
+check("std_index_load: the pinned files give the clause and page sets", objstub.std_index_load(fx, pin) == ({"7.22.4.4"}, {"pthread_exit"}), "")
+open(os.path.join(fx, "c11.tsv"), "a").write("7.22.4.1\tThe abort function\n")
+try:
+    objstub.std_index_load(fx, pin)
+    check("std_index_load: a file that differs from its pinned sha256 is an error", False)
+except ValueError:
+    check("std_index_load: a file that differs from its pinned sha256 is an error", True)
+wx = os.path.join(ROOT, "wdkfix")
+os.makedirs(wx, exist_ok=True)
+open(os.path.join(wx, "winerror.h"), "w", newline="").write("#define ERROR_INVALID_HANDLE             6L\r\n#define HR_X ((HRESULT)0x80070005L)\r\n#define ERROR_ALIAS ERROR_INVALID_HANDLE\r\n")
+open(os.path.join(wx, "winsock2.h"), "w", newline="").write("#define WSABASEERR              10000\n#define WSAEINTR                (WSABASEERR+4)\n#define EINTR_ALIAS WSAEINTR\n")
+wsha = lambda p_: _hl.sha256(open(os.path.join(wx, p_), "rb").read()).hexdigest()
+wpin = {"files": {"winerror": {"path": "winerror.h", "sha256": wsha("winerror.h")}, "winsock2": {"path": "winsock2.h", "sha256": wsha("winsock2.h")}}}
+wv = objstub.winerror_load(wx, wpin)
+check("winerror_load: decimals, hex with a cast, (WSABASEERR+N) and an alias of another define", wv["ERROR_INVALID_HANDLE"] == 6 and wv["HR_X"] == 0x80070005 and wv["WSAEINTR"] == 10004 and wv["EINTR_ALIAS"] == 10004 and wv["ERROR_ALIAS"] == 6, wv)
 
 # gate on the toy product root of test_recipe.py
 import verdict  # noqa: E402
@@ -656,15 +739,15 @@ def tree_of(repo):
 
 
 for what in ("empty",):
-    empty = TR.make_repo("os-empty")
+    empty = TR.make_guest_repo("os-empty")
     TR.w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": TR.T + "toy", "class": "doc"}]}))
     rc, g, _, txt, st = gate(empty, ROOT + "/g0")
     check("gate with no product root: universe 0, green, accepted by verdict", rc == 0 and g["universe"] == 0 and st[0] == "green", (g, txt))
 GC = ROOT + "/gcache"
-repo = TR.make_repo("os-toy", files={"toy/constants.tsv": CONST})
+repo = TR.make_guest_repo("os-toy", files={"toy/constants.tsv": CONST})
 rc, g, secs, txt, st = gate(repo, ROOT + "/g1", GC)
-# the toy's functions: f_a, f_b, f_c, os_svc, plus the functions of the product's crt0 the toy links (rt/guest/crt0.s, %function symbols)
-NTOY = 5 + len(re.findall(r"^\s*\.type\s+\S+,\s*%function", open(os.path.join(os.path.dirname(HERE), "..", "rt", "guest", "crt0.s")).read(), re.M))
+# the toy's functions: f_a, f_b, f_c, os_svc and the OS layer's one more (a guest toy has no crt0: the runtime is the image's)
+NTOY = 5
 # (+1: the `<root>:product-units` item that the no-doubles rule, doubles.py, adds per root)
 check("gate on the toy root (os_layer, constants row, terminators from its own units): green NTOY/NTOY, accepted by verdict",
       rc == 0 and g["universe"] == NTOY == g["certified"] and st[0] == "green", (g, txt))
@@ -672,18 +755,18 @@ print("INFO toy gate cold (with build) %.1f s" % secs)
 rc, g, secs, txt, st = gate(repo, ROOT + "/g2", GC)
 print("INFO toy gate warm %.1f s" % secs)
 check("gate again with the cache: same result", rc == 0 and g["universe"] == NTOY == g["certified"], (g, txt))
-repo2 = TR.make_repo("os-toy2", files={"toy/constants.tsv": ""})
+repo2 = TR.make_guest_repo("os-toy2", files={"toy/constants.tsv": ""})
 rc, g, _, txt, st = gate(repo2, ROOT + "/g3", GC)
 check("toy root without the constants row of f_b: red, names the function by unit path", rc == 2 and g["uncertified"] == [TR.ROOT + "/b.c:f_b"]
       and st[0] == "red", (g, txt))
 IDB = '#include "toy.h"\nint f_b(int x) { return x; }\n'
 for tag, tbl, want in (("identity row", "b.c\tf_b\tidentity\t0\tref b\n", "green"), ("void row also matches the same body", "b.c\tf_b\tvoid\t\tref b\n", "green"),
                        ("no row", "", "red"), ("identity of another argument is no V row", "b.c\tf_b\tidentity\t1\tref b\n", "input")):
-    ri_ = TR.make_repo("os-id-" + tag.replace(" ", "-"), files={"toy/constants.tsv": tbl, "toy/b.c": IDB})
+    ri_ = TR.make_guest_repo("os-id-" + tag.replace(" ", "-"), files={"toy/constants.tsv": tbl, "toy/b.c": IDB})
     rc, g, _, txt, st = gate(ri_, ROOT + "/gid-" + tag.replace(" ", "-"), GC)
     check("constants kind identity, case %s: %s" % (tag, want), (rc == 0 and g["certified"] == g["universe"]) if want == "green" else
           (rc == 2 and g["uncertified"] == [TR.ROOT + "/b.c:f_b"]) if want == "red" else (rc == 2 and "input error" in g["detail"]), (g, txt))
-repo3 = TR.make_repo("os-reach", files={"toy/constants.tsv": CONST, "toy/c.c": RV, "toy/os.S": OS})
+repo3 = TR.make_guest_repo("os-reach", files={"toy/constants.tsv": CONST, "toy/c.c": RV, "toy/os.S": OS})
 rc, g, _, txt, st = gate(repo3, ROOT + "/g4", GC)
 check("reach call in the toy root with no reach facts file: red reach-uncertified, REACH's own definition and the terminator exemption accepted",
       rc == 2 and g["uncertified"] == [TR.ROOT + "/c.c:f_c"] and "reach-uncertified 1" in g["detail"], (g, txt))
@@ -695,7 +778,7 @@ check("with the fact 42 in the facts file of the same tree: green", rc == 0 and 
 open(facts, "w").write("42\t" + "a" * 64 + "\n43\t" + "b" * 64 + "\n")
 rc, g, _, txt, st = gate(repo3, ROOT + "/g6", GC)
 check("a fact without a call site: red reach-stale", rc == 2 and "reach-stale 1" in g["detail"], (g, txt))
-repo4 = TR.make_repo("os-abort", rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": '#include <stdlib.h>\nint f_c(int x) { abort(); }\n'})
+repo4 = TR.make_guest_repo("os-abort", rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": '#include <stdlib.h>\nint f_c(int x) { abort(); }\n'})
 rc, g, _, txt, st = gate(repo4, ROOT + "/g8", GC)
 check("terminators come from the headers the unit includes (stdlib.h via the unit's preprocessed text): abort -> T2 in f_c, nothing else red",
       rc == 2 and g["uncertified"] == [TR.ROOT + "/c.c:f_c"] and "T2 1" in g["detail"], (g, txt))
@@ -707,23 +790,23 @@ check("a malformed facts file: red, input error", rc == 2 and g["status"] == "re
 WC = '#include "toy.h"\nvoid fnvnx_wine_fixme(unsigned);\nint f_c(int x) { (void)x; fnvnx_wine_fixme(5); return 7; }\n'
 for tag, tbl, want in (("row matches", "5\tm\twine-9.0:dlls/x/y.c:f\tu32\t7\n", "green"), ("row value differs", "5\tm\twine-9.0:dlls/x/y.c:f\tu32\t8\n", "red"),
                        ("malformed table", "5\tm\tnot-a-ref\tu32\t7\n", "input")):
-    wr = TR.make_repo("os-wine-" + tag.replace(" ", "-"), rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": WC, "verify/wine_fixme.tsv": tbl})
+    wr = TR.make_guest_repo("os-wine-" + tag.replace(" ", "-"), rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": WC, "verify/wine_fixme.tsv": tbl})
     rc, g, _, txt, st = gate(wr, ROOT + "/gw" + tag.replace(" ", "-"), GC)
     check("gate, wine_fixme table, case %s: expected %s" % (tag, want), (rc == 0 and g["certified"] == g["universe"] and g["wine_fixme"] == {"5": 1} and st[0] == "green") if want == "green" else
           (rc == 2 and ("wine-fixme-mismatch 1" in g["detail"] if want == "red" else "input error" in g["detail"])), (g, txt))
-r32 = TR.make_repo("os-toy32", rec=TR.abi_rec("ilp32"), files={"toy/constants.tsv": CONST})
+r32 = TR.make_guest_repo("os-toy32", rec=TR.abi_rec("ilp32"), files={"toy/constants.tsv": CONST})
 t0 = time.time()
 rc, g, secs, txt, st = gate(r32, ROOT + "/g32", GC)
 check("ILP32 toy root (ELF32 objects, aarch64linux32 link): gate green NTOY/NTOY, accepted by verdict", rc == 0 and g["universe"] == NTOY == g["certified"] and st[0] == "green", (g, txt))
 print("INFO ILP32 toy gate cold %.1f s" % secs)
 rc, g, secs, txt, st = gate(r32, ROOT + "/g32b", GC)
 print("INFO ILP32 toy gate warm %.1f s" % secs)
-r32r = TR.make_repo("os-reach32", rec=TR.abi_rec("ilp32"), files={"toy/constants.tsv": CONST, "toy/c.c": RV, "toy/os.S": OS.replace("ldr x1, [x1, :lo12:hostslot]", "ldr w1, [x1, :lo12:hostslot]").replace("blr x1", "blr x1").replace(".quad 0", ".word 0")})
+r32r = TR.make_guest_repo("os-reach32", rec=TR.abi_rec("ilp32"), files={"toy/constants.tsv": CONST, "toy/c.c": RV, "toy/os.S": OS.replace("ldr x1, [x1, :lo12:hostslot]", "ldr w1, [x1, :lo12:hostslot]").replace("blr x1", "blr x1").replace(".quad 0", ".word 0")})
 rc, g, _, txt, st = gate(r32r, ROOT + "/g32r", GC)
 check("ILP32 reach call (P32 CALL26 relocation) is judged by the reach rule: reach-uncertified, nothing else red", rc == 2 and g["uncertified"] == [TR.ROOT + "/c.c:f_c"] and "reach-uncertified 1" in g["detail"], (g, txt))
 
 # a failing unit is a red finding of that unit, never a gate crash (exit 2 from an exception)
-rb = TR.make_repo("os-buildred", rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": "int f_c(int x) { return x +; }\n"})
+rb = TR.make_guest_repo("os-buildred", rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": "int f_c(int x) { return x +; }\n"})
 rc, g, _, txt, st = gate(rb, ROOT + "/gbr", GC)
 check("a build-red unit: red finding build-red naming the unit, not an input error", rc == 2 and g["status"] == "red" and "build-red" in g["detail"]
       and "input error" not in g["detail"] and any(u.endswith("c.c") for u in g["uncertified"]), (g, txt))
@@ -734,19 +817,19 @@ check("a unit the terminator plugin cannot process: a failure of that unit in th
 
 # the final image: every function body of the linked ELF is judged for the fixed-failure class (a weak `errno = ENOSYS; return -1` fallback left in it is red;
 # the same image with a strong override is green, the weak body is not in the image)
-ERR = '#include "toy.h"\nint e;\nint *__errno_location(void) { return &e; }\n'
-WEAK = '#include "toy.h"\nint *__errno_location(void);\nint __attribute__((weak)) sched_getcpu(void) { *__errno_location() = 38; return -1; }\n'
+ERR = '#include "toy.h"\nstatic int e;\nint *__errno(void) { return &e; }\n'
+WEAK = '#include "toy.h"\nint *__errno(void);\nint __attribute__((weak)) sched_getcpu(void) { *__errno() = 38; return -1; }\n'
 USE = '#include "toy.h"\nint sched_getcpu(void);\nint f_c(int x) { return x + TOY + sched_getcpu(); }\n'
-ri = TR.make_repo("os-image-weak", files={"toy/constants.tsv": CONST + "e.c\t__errno_location\taddr\te\tref e\n", "toy/c.c": USE, "toy/e.c": ERR, "toy/w.c": WEAK})
+ri = TR.make_guest_repo("os-image-weak", files={"toy/constants.tsv": CONST + "e.c\t__errno\taddr\te\tref e\n", "toy/c.c": USE, "toy/e.c": ERR, "toy/w.c": WEAK}, image="f_a")
 rc, g, _, txt, st = gate(ri, ROOT + "/gi1", GC)
 check("image with a weak errno/-1 fallback: red fixed-failure, the function named under the image", rc == 2 and g["uncertified"] == [TR.ROOT + "/toy.elf:sched_getcpu"]
       and "fixed-failure 1" in g["detail"] and g["image"]["fixed_failure"] == 1 and g["image"]["bodies"] > 0, (g, txt))
-rs = TR.make_repo("os-image-strong", files={"toy/constants.tsv": CONST + "e.c\t__errno_location\taddr\te\tref e\n", "toy/c.c": USE, "toy/e.c": ERR, "toy/w.c": WEAK, "toy/s.c": '#include "toy.h"\nint *__errno_location(void);\nint sched_getcpu(void) { return *__errno_location() + 3; }\n'})
+rs = TR.make_guest_repo("os-image-strong", files={"toy/constants.tsv": CONST + "e.c\t__errno\taddr\te\tref e\n", "toy/c.c": USE, "toy/e.c": ERR, "toy/w.c": WEAK, "toy/s.c": '#include "toy.h"\nint *__errno(void);\nint sched_getcpu(void) { return *__errno() + 3; }\n'}, image="f_a")
 rc, g, _, txt, st = gate(rs, ROOT + "/gi2", GC)
 check("the same image with a strong override: green, the weak body is not in the image", rc == 0 and g["image"]["fixed_failure"] == 0 and g["image"]["bodies"] > 0, (g, txt))
 # errno is derived by a probe compile with the root's own flags: an errno.h the root cannot compile is a red finding `errno-probe`, not a crash
 rn2 = TR.mut(); rn2["flags"] = {k: v + ["-D_ERRNO_H"] for k, v in rn2["flags"].items()}   # errno.h becomes empty: `errno` is undeclared
-rd = TR.make_repo("os-image-noprobe", rec=rn2, files={"toy/constants.tsv": CONST})
+rd = TR.make_guest_repo("os-image-noprobe", rec=rn2, files={"toy/constants.tsv": CONST}, image="f_a")
 rc, g, _, txt, st = gate(rd, ROOT + "/gi3", GC)
 check("a root whose errno.h does not compile: red errno-probe (the probe does not compile with the root's flags), never green", rc == 2 and "errno-probe" in g["detail"], (g, txt))
 # the accessor is derived, no root declares it: a host root and a target root get theirs from their own libc's errno.h, and the key is no recipe key any more
@@ -759,7 +842,7 @@ rk = TR.mut(); rk["errno_accessor"] = "__errno"
 check("a recipe that declares errno_accessor is rejected (the accessor is derived, the key does not exist)", any("errno_accessor" in e_ for e_ in TR.errs(rk)), TR.errs(rk))
 # a body with a data island in the final image is unjudged, and unjudged is red
 ISL = '.text\n.globl isl\n.type isl,%function\nisl:\n mov w0, #1\n ret\n .word 0x12345678\n.size isl,.-isl\n'
-rj = TR.make_repo("os-image-island", files={"toy/constants.tsv": CONST + "e.c\t__errno_location\taddr\te\tref e\n", "toy/c.c": USE.replace("sched_getcpu()", "0"), "toy/e.c": ERR, "toy/isl.S": ISL})
+rj = TR.make_guest_repo("os-image-island", files={"toy/constants.tsv": CONST + "e.c\t__errno\taddr\te\tref e\n", "toy/c.c": USE.replace("sched_getcpu()", "0"), "toy/e.c": ERR, "toy/isl.S": ISL}, image="f_a")
 rc, g, _, txt, st = gate(rj, ROOT + "/gi4", GC)
 check("an image body with a data island is red unjudged", rc == 2 and "unjudged" in g["detail"] and g["image"]["unjudged"] >= 1, (g, txt))
 

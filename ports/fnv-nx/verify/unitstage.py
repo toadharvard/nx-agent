@@ -195,11 +195,24 @@ class Build:
                         raise
         return None
 
-    def pp(self, rel, files):
-        """One PP run on the views of FILES (set of sandbox paths of real files; None = the real trees)."""
+    def pp_doc(self, rel, files):
+        """The PP stage document of unit REL on the views of FILES (set of sandbox paths of real files; None = the real trees)."""
         ins = [(at, t if files is None else unitview.view(self.store, t, [p[len(at) + 1:] for p in files if p.startswith(at + "/")],
                                                           self.cache)) for at, t in self.roots]
-        return run_stage(self.store, self.doc("pp", rel, ins, self.lang(rel)[0] + PP_TAIL, sandbox_src(rel)), self.cold)
+        return self.doc("pp", rel, ins, self.lang(rel)[0] + PP_TAIL, sandbox_src(rel))
+
+    def pp(self, rel, files):
+        """One PP run on the views of FILES (set of sandbox paths of real files; None = the real trees)."""
+        return run_stage(self.store, self.pp_doc(rel, files), self.cold)
+
+    def first_key(self, rel):
+        """The key of the first stage of unit REL, computed and not run (the shard rule, recipe.shard_of): the PP stage on the whole trees, which is a
+        function of the unit name, the flags and the content of the declared trees only (no hint, no store state). A .s unit has no PP: its one stage."""
+        if rel.endswith(".s"):
+            real = unitview.resolve(self.store, self.roots[0][1], rel, self.cache)
+            v = unitview.view(self.store, self.roots[0][1], [real], self.cache)
+            return sandbox.key_of(self.doc("cc", rel, [("/src", v)], self.lang(rel)[1] + ["-c", "-o", "/out/unit.o"], sandbox_src(rel), inc=False))
+        return sandbox.key_of(self.pp_doc(rel, None))
 
     def du(self, rel, files):
         """The macro-use fact of the unit: a `-dU` run on the same minimal view as the last PP run -> (key, result)."""

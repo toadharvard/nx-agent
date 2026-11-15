@@ -72,6 +72,18 @@
     "ports/fnv-nx/contract/gpa_names.py"
    ]
   },
+  "test_gatecert.py": {
+   "references": [
+    {
+     "anchor": "## contract/gatecert.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/gatecert.py"
+   ]
+  },
   "test_gates.py": {
    "references": [
     {

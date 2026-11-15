@@ -91,7 +91,10 @@ def make_repo(name, gen_extra="", rec=None, files=None, extra_roots=()):
     repo = os.path.join(BASE, name)
     os.makedirs(repo)
     git(repo, "init", "-q")
-    for k, v in dict(FILES, **(files or {})).items():
+    base = dict(FILES)
+    if not (rec or RECIPE).get("link"):   # nothing is linked: the OS layer unit has no crt0 (its header names linker-script symbols that only a link defines)
+        base["toy/os.S"] = OS_NOLINK
+    for k, v in dict(base, **(files or {})).items():
         if v is not None:
             w(repo, k, v)
     for f in LINK_TOOLS:
@@ -106,6 +109,42 @@ def make_repo(name, gen_extra="", rec=None, files=None, extra_roots=()):
         {"path": T + "link", "class": "tool"}, {"path": T + "contract", "class": "tool"}] + list(extra_roots)}))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "toy")
+    return repo
+
+
+def guest_rec(rec=None, image=None):
+    """RECIPE (or REC) as a guest-profile root: the compiler, plugins and runtime come from the profile (verify/guest_compiler.json); the per-root flags keep only what a guest
+    build.json may carry (recipe.PER_ROOT), plus -Werror=attributes and the sdd define the rule requires. The semantic flags (ILP32, PIE, freestanding, ...) are the pin's."""
+    r = json.loads(json.dumps(rec or RECIPE))
+    for k in ("compiler", "plugins"):
+        r.pop(k, None)
+    r["profile"] = "guest"
+    r.pop("link", None)   # a guest image is linked by the runtime (link.entry, link/guest.json, the pinned libraries): the toy roots are object roots unless IMAGE names the entry symbol
+    if image:
+        r["link"] = {"output": "toy.elf", "flags": ["-m", "aarch64linux32"], "entry": image}
+    keep = lambda fs: [f for f in fs if recipe.PER_ROOT.fullmatch(f)]  # noqa: E731
+    r["flags"] = {"c": keep(r["flags"]["c"]) + [recipe.WERROR_ATTR], "cxx": keep(r["flags"]["cxx"]) + [recipe.SDD_DEFINE, recipe.WERROR_ATTR], "asm": keep(r["flags"]["asm"])}
+    return r
+
+
+def make_guest_repo(name, gen_extra="", rec=None, files=None, extra_roots=(), image=None):
+    """make_repo as a GUEST root (admit target guest, the game's compiler from the real pin, the real env.json): the objects are the game's ELF32 AArch64 ones."""
+    repo = make_repo(name, gen_extra, guest_rec(rec, image), files, extra_roots)
+    ad = json.load(open(os.path.join(repo, T + "verify/admit.json")))
+    for r in ad["roots"]:
+        if r["path"] == ROOT:
+            r["target"] = "guest"
+    w(repo, "verify/admit.json", json.dumps(ad))
+    w(repo, "verify/guest_compiler.json", open(os.path.join(VERIFY, "guest_compiler.json")).read())
+    if image:   # the guest link profile (script and libraries of every guest link) and the script it names
+        for n in ("link/guest.json", "link/guest.ld"):
+            w(repo, n, open(os.path.join(VERIFY, "..", n)).read())
+    real = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))   # checkout root
+    for n in recipe.plugin_files(real):   # the real plugin sources and inputs: the profile's plugins are built from them
+        os.makedirs(os.path.dirname(os.path.join(repo, n)), exist_ok=True)
+        shutil.copyfile(os.path.join(real, n), os.path.join(repo, n))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "guest")
     return repo
 
 
@@ -358,7 +397,55 @@ def main():
         ok3, k3, r3, d3 = run()
         check("determinism, one changed unit: exactly the stages with new keys executed", ok3 and 0 < r3 <= len(k3 - k1) < len(k3) and r3 < r1, (r3, len(k3 - k1), len(k3), r1, d3))
 
-    for fn in (gate_toy, gate_bad, gate_nd, gate_cases, gate_inc):
+    def shard_merge():
+        """RECIPE.md "Shards": `build --shard i/N` partitions the units by first-stage key, `store-merge` imports the shard stores, the unsharded build on the merge is all hits."""
+        rec = {k: v for k, v in RECIPE.items() if k != "link"}
+        files = {"toy/d%d.c" % i: '#include "toy.h"\nint f_d%d(void) { return TOY + %d; }\n' % (i, i) for i in range(6)}
+        sr = make_repo("shard", rec=rec, files=files)
+        n = 3
+        ref = recipe.build(sr, ROOT, BASE + "/sh-ref", BASE + "/sh-refout")
+        units = sorted(o["unit"] for o in ref["objects"])
+        check("shard toy root has >= 8 units", ref["status"] == "green" and len(units) >= 8, (ref["status"], len(units)))
+        parts = []
+        for i in range(n):
+            r = recipe.build(sr, ROOT, BASE + "/sh-s%d" % i, BASE + "/sh-o%d" % i, shard=(i, n))
+            check("shard %d/%d: green, no ELF, no test, its objects are its shard_units" % (i, n), r["status"] == "green" and r["elf"] is None and not r["tests"]
+                  and sorted(o["unit"] for o in r["objects"]) == sorted(r["shard_units"] or []), (r["status"], r.get("failure")))
+            parts.append(sorted(o["unit"] for o in r["objects"]))
+        flat = [u for p in parts for u in p]
+        check("shards are disjoint and cover the unit set", len(flat) == len(set(flat)) and sorted(flat) == units, (parts, units))
+        check("shard assignment is deterministic: a second shard-0 build gives the same units", sorted(o["unit"] for o in recipe.build(sr, ROOT, BASE + "/sh-s0", BASE + "/sh-o0b", shard=(0, n))["objects"]) == parts[0])
+        for i in range(n):
+            recipe.store_merge(BASE + "/sh-s%d" % i, BASE + "/sh-m")
+        m = recipe.build(sr, ROOT, BASE + "/sh-m", BASE + "/sh-mout")
+        check("merge of the shard stores: object hashes equal the unsharded build's", m["status"] == "green" and [o["sha256"] for o in m["objects"]] == [o["sha256"] for o in ref["objects"]]
+              and m["stage_keys"] == ref["stage_keys"], m.get("failure"))
+        check("the unsharded build on the merged store runs no unit stage (every unit a hit)", m["stages"]["run"] == 0, m["stages"])
+        # a forged record of the same key is red on merge and leaves the target unchanged
+        shutil.copytree(BASE + "/sh-s0", BASE + "/sh-forge", symlinks=True)
+        kd = BASE + "/sh-forge/keys"
+        k = sorted(os.listdir(kd))[0]
+        rp = "%s/%s/result.json" % (kd, k)
+        rec_ = json.load(open(rp))
+        rec_["rc"] = rec_["rc"] + 1
+        os.chmod(rp, 0o644)
+        open(rp, "wb").write(cas.canon(rec_))
+        before = sorted(os.listdir(BASE + "/sh-m/keys"))
+        try:
+            recipe.store_merge(BASE + "/sh-forge", BASE + "/sh-m")
+            got = None
+        except recipe.RecipeError as e:
+            got = " ".join(e.errors)
+        check("store-merge: a forged differing key record is red `store-merge: key <k> differs`", got and "store-merge: key %s differs" % k in got and sorted(os.listdir(BASE + "/sh-m/keys")) == before, got)
+        for bad in ("0/0", "3/3", "1/9", "x", "-1/2"):
+            try:
+                recipe.shard_spec(bad)
+                got = None
+            except recipe.RecipeError:
+                got = "red"
+            check("--shard %s is refused" % bad, got == "red")
+
+    for fn in (gate_toy, gate_bad, gate_nd, gate_cases, gate_inc, shard_merge):
         later(fn)
 
     # --- toy root, shared store: cold, then cached

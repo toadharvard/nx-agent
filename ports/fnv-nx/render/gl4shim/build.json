@@ -51,6 +51,7 @@
   }
  ],
  "outputs": {
+  "INCLUDE": "include",
   "FFP_LAYOUT": "gen/layout"
  }
 }

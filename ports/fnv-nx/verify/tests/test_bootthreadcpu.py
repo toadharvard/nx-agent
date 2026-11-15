@@ -20,6 +20,12 @@ import boothost  # noqa: E402
 import bootmachine  # noqa: E402
 from test_bootlayout import make_elf  # noqa: E402
 
+
+def _scratch(prefix):
+    d = tempfile.mkdtemp(prefix=prefix)
+    __import__('atexit').register(__import__('shutil').rmtree, d, True)   # a test leaves no scratch behind
+    return d
+
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))
 INC = os.path.join(REPO, "ports", "fnv-nx", "hostabi", "include", "fnvnx")
 FAILED, N = [], [0]
@@ -55,7 +61,7 @@ def main():
     plan = bootlayout.plan(bootlayout.parse_elf(elf), rows, 4 << 20)
 
     def machine():
-        svc = boothost.Services(tempfile.mkdtemp(prefix="tc-"))
+        svc = boothost.Services(_scratch("tc-"))
         m = bootmachine.Machine(elf, plan, svc, quantum=QUANTUM)
         m.threads[1] = bootmachine.Thread(1)   # as run() starts main
         m.order, m.cur = [1], m.threads[1]

@@ -23,13 +23,15 @@ def err(what, fn, data, part):
     fails.append('%s: no error' % what)
 
 
-SP = b'_Z1fv\t?f@@YAXXZ\tfunc\tdef\n_ZTV1A\t\tvtable\tdef\n_ZN1AC1Ev\t??0A@@QAE@XZ\tctor.c1\tref\n_Z3gccv\t\tunnamed:local scope number\tdef\n'
+SP = b'_Z1fv\t?f@@YAXXZ\tfunc\tdef\n_ZTV1A\t\tvtable\tdef\n_ZN1AC1Ev\t??0A@@QAE@XZ\tctor.c1\tref\n_Z3gccv\t\tnodecor:localscope\tdef\n'
 check('sympair', L.parse_sympair(SP, 'o.o'), [('_Z1fv', '?f@@YAXXZ', 'func', 'def'), ('_ZTV1A', '', 'vtable', 'def'),
-                                              ('_ZN1AC1Ev', '??0A@@QAE@XZ', 'ctor.c1', 'ref'), ('_Z3gccv', '', 'unnamed:local scope number', 'def')])
+                                              ('_ZN1AC1Ev', '??0A@@QAE@XZ', 'ctor.c1', 'ref'), ('_Z3gccv', '', 'nodecor:localscope', 'def')])
 check('sympair empty', L.parse_sympair(b'', 'o.o'), [])
 err('sympair 3 fields', L.parse_sympair, SP + b'a\tb\tfunc\n', 'line 5')
+check('sympair noemit', L.parse_sympair(b'_Z1gv\t?g@@YAXXZ\tnoemit\tref\n', 'o.o'), [('_Z1gv', '?g@@YAXXZ', 'noemit', 'ref')])
+err('sympair noemit no name', L.parse_sympair, b'_Z1gv\t\tnoemit\tref\n', 'without an MSVC name')
 err('sympair kind', L.parse_sympair, b'a\tb\tfunx\tdef\n', 'unknown kind')
-err('sympair unnamed no reason', L.parse_sympair, b'a\t\tunnamed:\tdef\n', 'unknown kind')
+err('sympair unnamed no reason', L.parse_sympair, b'a\t\tnodecor:\tdef\n', 'unknown kind')
 err('sympair defref', L.parse_sympair, b'a\tb\tfunc\tdefx\n', 'neither def nor ref')
 err('sympair no name', L.parse_sympair, b'a\t\tfunc\tdef\n', 'without an MSVC name')
 err('sympair no symbol', L.parse_sympair, b'\tb\tfunc\tdef\n', 'symbol')
@@ -37,8 +39,8 @@ err('sympair no LF', L.parse_sympair, b'a\tb\tfunc\tdef', 'no final LF')
 err('sympair blank line', L.parse_sympair, b'a\tb\tfunc\tdef\n\n', 'line 2')
 err('sympair utf8', L.parse_sympair, b'\xff\n', 'UTF-8')
 
-VT = b'_ZTV2D1\t8\t??_7D1@@6BB1@@@\t0\n_ZTV2D1\t24\tunnamed:why\t-4\n_ZTV1X\t8\t\t4\n'
-check('vtpair', L.parse_vtpair(VT, 'o.o'), [('_ZTV2D1', 8, '??_7D1@@6BB1@@@', 0), ('_ZTV2D1', 24, 'unnamed:why', -4), ('_ZTV1X', 8, '', 4)])
+VT = b'_ZTV2D1\t8\t??_7D1@@6BB1@@@\t0\n_ZTV2D1\t24\tnodecor:why\t-4\n_ZTV1X\t8\t\t4\n'
+check('vtpair', L.parse_vtpair(VT, 'o.o'), [('_ZTV2D1', 8, '??_7D1@@6BB1@@@', 0), ('_ZTV2D1', 24, 'nodecor:why', -4), ('_ZTV1X', 8, '', 4)])
 err('vtpair fields', L.parse_vtpair, b'a\t8\tb\n', 'line 1')
 err('vtpair offset', L.parse_vtpair, b'a\tx8\tb\t0\n', 'address point')
 err('vtpair vfptr', L.parse_vtpair, b'a\t8\tb\t\n', 'vfptr offset')
@@ -82,6 +84,13 @@ if gcc and oc:
             fails.append('read of a malformed section: no error')
         except ValueError as e:
             check('read error names object and section', str(e).startswith('t3.o:.fnvnx.vtpair: line 1'), True)
+
+import re as _re
+_inc = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'toolchain', 'names', 'sympair_kinds.inc')).read()
+check('the kind set is the plugin definition (one X(name, "meaning") per kind of sympair_kinds.inc), noemit among them',
+      (L.KINDS == frozenset(_re.findall(r'^\s*(?:#define FNVNX_SYMPAIR_KINDS\(X\)\s*\\\n\s*)?X\(([^,()\s]+),', _inc, _re.M)) and 'noemit' in L.KINDS and len(L.KINDS) == _inc.count('X(') - 1), True)
+check('sympair noemit row', L.parse_sympair(b'_Z1fv\t?f@@YAXXZ\tnoemit\tref\n', 'o.o'), [('_Z1fv', '?f@@YAXXZ', 'noemit', 'ref')])
+err('sympair noemit needs the cl name', L.parse_sympair, b'_Z1fv\t\tnoemit\tref\n', 'without an MSVC name')
 
 for f in fails:
     print('FAIL', f)

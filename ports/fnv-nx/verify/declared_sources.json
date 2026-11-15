@@ -1,0 +1,24 @@
+{
+ "format": "fnvnx-declared-sources/1",
+ "note": "The pinned documents that declared_machine.tsv cites (objstub.read_declared_table). std_index: the `std:<doc>:<section>` citations (C11 = ISO/IEC 9899:2011 draft N1570 clause numbers, POSIX.1-2017 = System Interfaces function pages), built from the public documents by the generator in the mirror (MANIFEST.json there records the source hashes). wdk: the `lasterror` values NAME=<decimal> are the values of winerror.h and winsock2.h of the WDK 7.1 headers (the declared OS is Windows 7). Each file is checked by sha256 before it is read.",
+ "std_index": {
+  "repo": "fnv-nx-build",
+  "ref": "tools/std-index",
+  "commit": "f81a84ba1c38b24055c4287b7ea1e670ea80d8e8",
+  "tree_sha256": "95179abd50b11d0d7e8cc41f3fe2a864f2a511e4c2db19c821d8113f7bebf450",
+  "files": {
+   "c11": {"path": "c11.tsv", "sha256": "76db80e6404c9b0a5b502373a2b362a214a6498b3fcf7c42cefd14c75c376036"},
+   "posix": {"path": "posix2017.tsv", "sha256": "593134b32d41daf3f0e5afb84f18c59dd86355dc4e34c72cfe37cf47a787165a"}
+  }
+ },
+ "wdk": {
+  "repo": "fnv-nx-build",
+  "ref": "tools/wdk71-headers",
+  "commit": "09a54d413da7a42d1956b5d675033e71941ae4da",
+  "tree_sha256": "301fc827dd66a386a425a67cdf586bdd81fac68168c114bc6d8e2b833e302770",
+  "files": {
+   "winerror": {"path": "headers/_WINERROR.H_00687", "sha256": "f7164539c42c290d7b8136d8a477e863b30c3707c60ed91a9b281f0e071bbb5c"},
+   "winsock2": {"path": "headers/_winsock2.h_01111", "sha256": "7a1f0b4aca8c7d2bb31745661553f9f50194cf3c9234b552e7aca5a84175e459"}
+  }
+ }
+}

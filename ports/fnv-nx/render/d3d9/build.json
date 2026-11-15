@@ -21,7 +21,7 @@
  },
  "include": [
   "ports/fnv-nx/shim/include",
-  "ports/fnv-nx/render/nxgpu",
+  "ports/fnv-nx/render/nxgpu/include",
   "ports/fnv-nx/render/shaders/translator/include",
   "ports/fnv-nx/lib/sha256/include",
   "ports/fnv-nx/render/d3d9/gen",
@@ -126,6 +126,34 @@
   {
    "root": "ports/fnv-nx/render/gl4shim",
    "output": "FFP_LAYOUT"
+  },
+  {
+   "root": "ports/fnv-nx/render/gl4shim",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/shim",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/render/nxgpu",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/render/shaders/translator",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/lib/sha256",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/render/pair",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/render/smscan",
+   "output": "INCLUDE"
   }
  ],
  "include_uses": [

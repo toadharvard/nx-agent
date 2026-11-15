@@ -465,6 +465,67 @@ rc_ = subprocess.run([sys.executable, '-s', '-B', '-I', RR, '--requests', os.pat
 check('reachreq CLI on a malformed table exits 2', rc_, 2)
 shutil.rmtree(tdir, ignore_errors=True)
 
+# ---- gate_cert=<gate>: the producers of the argument of a native site are in the universe of a green gate
+import json
+import runpy
+GC = runpy.run_path(os.path.join(HERE, 'test_gatecert.py'))
+GCR = ('REACH_GL_SHADER_SOURCE', '-', 'glsrc', '0', 'gate_cert', 'gate_cert=sm_link', 'n')
+UNI = sorted([dict(kind='glsl_table', id='progs', sha256='aa'), dict(kind='glsl_table', id='ffp_blob', sha256='bb'), dict(kind='bytecode', id='vs0', sha256='cc')],
+             key=lambda u: (u['kind'], u['id'], u['sha256']))
+VID = 'verdict-1'
+
+
+def summary(**kw):
+    d = dict(gate='sm_link', verdict=VID, universe=UNI, universe_hash=gate_reach.universe_hash(UNI), producers=GC['PRODUCERS'])
+    d.update(kw)
+    return json.dumps(d)
+
+
+GREEN = json.dumps(dict(name='sm_link', status='green', universe=3, certified=3))
+RED = json.dumps(dict(name='sm_link', status='red', universe=3, certified=2))
+
+
+def gc(funcs=None, summ=None, res=GREEN, objd=True, gates=True, verdict=VID, gpa=None, site_row=GCR):
+    ctx = {'gates': {'sm_link': (summ or summary(), res)} if gates else {}, 'verdict': verdict,
+           'prog': gate_reach.gatecert.parse_objdump(GC['obj']('a.o', funcs or GC['base'](), GC['SYMS'])) if objd else None}
+    rs = reqs(site_row)
+    facts, certs, g = gate_reach.run(rs, {}, [], gpa or [], ctx)
+    return facts, certs
+
+
+facts, certs = gc()
+check('gate_cert: green gate, covered callers, certified', (len(certs), sorted(facts[0].reasons)), (1, []))
+check('gate_cert: certificate carries the hash of the universe, the callers and the values',
+      (facts[0].sites[0]['universe_hash'], len(facts[0].sites[0]['callers']), facts[0].sites[0]['values']),
+      (gate_reach.universe_hash(UNI), 4, ['addr:ffp_blob', 'data:progs', 'prod:translate']))
+f2, c2 = gc()
+check('gate_cert: the certificate is a function of its inputs', c2, certs)
+facts, certs = gc(res=RED)
+check('gate_cert: a red gate', (certs, [r[0] for r in sorted(facts[0].reasons)]), ({}, ['gate-not-green']))
+facts, certs = gc(gates=False)
+check('gate_cert: the gate named is not given', (certs, [r[0] for r in facts[0].reasons]), ({}, ['gate-missing']))
+facts, certs = gc(summ=summary(verdict='verdict-2'))
+check('gate_cert: a summary of another verdict', (certs, [r[0] for r in facts[0].reasons]), ({}, ['summary-other-verdict']))
+facts, certs = gc(verdict=None)
+check('gate_cert: no verdict id is red', certs, {})
+facts, certs = gc(summ=summary(universe_hash='0' * 64))
+check('gate_cert: universe hash that does not match', (certs, [r[0] for r in facts[0].reasons]), ({}, ['universe-hash']))
+facts, certs = gc(summ=summary(universe=UNI[:2]))
+check('gate_cert: a producer data symbol not in the universe', sorted(r[0] for r in facts[0].reasons), ['producer-not-in-universe', 'universe-hash'])
+facts, certs = gc(summ=summary(producers=[]))
+check('gate_cert: no producers', (certs, [r[0] for r in facts[0].reasons]), ({}, ['summary-format']))
+facts, certs = gc(objd=False)
+check('gate_cert: no objects', (certs, [r[0] for r in facts[0].reasons]), ({}, ['objects-missing']))
+facts, certs = gc(funcs=GC['base']() + [('rogue_c', [GC['SAVE'], ('adrp\tx0, 0 <r>', (GC['PG'], 'rogue')), ('add\tx0, x0, #0x0', (GC['ADD'], 'rogue')),
+                                                       ('bl\t0 <from_glsl>', (GC['CALL'], 'from_glsl')), GC['REST'], GC['RET']])])
+check('gate_cert: a caller outside the universe', (certs, [r[0] for r in facts[0].reasons]), ({}, ['not-producer']))
+facts, certs = gc(gpa=[])
+gpa_open = [('gpa-open', 'x.dll', '0x1000')]
+ctx = {'gates': {'sm_link': (summary(), GREEN)}, 'verdict': VID, 'prog': gate_reach.gatecert.parse_objdump(GC['obj']('a.o', GC['base'](), GC['SYMS']))}
+f3 = gate_reach.check_request(reqs(GCR)[0], {}, gpa_open, [], ctx)
+check('gate_cert: an open GetProcAddress is measurement, as for closure_key', ([r[0] for r in sorted(f3.reasons)], gate_reach.MEASUREMENT.__contains__('gpa-open')), (['gpa-open'], True))
+check('gate_cert: request kind in the header', 'FNVNX_REACH_GL_SHADER_SOURCE' in gate_reach.header(reqs(GCR)), True)
+
 if fails:
     print('FAIL\n' + '\n'.join(fails))
     sys.exit(1)

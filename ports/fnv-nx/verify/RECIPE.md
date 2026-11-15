@@ -445,3 +445,18 @@ The same rule covers every other write into `GATE_CACHE`, the directory form and
 Test: `tests/test_gate_publish.py` (two processes build one root on one cache at once: both green, one published dir, no temporary name left, the same store content as one sequential build).
 
 **Gate items are results of the same store.** `gate_build.memo(cache, gate, key_doc, make, keep)` keeps one item of a gate as `GATE_CACHE/memo/<gate>/<key>.json`, published by `cas.publish_file`; the key is the sha256 of `key_doc`, which holds everything the item reads and nothing else: the sha256 of each input file, `gate_build.tool_digest` of the tool's sources, the declared environment (env.json). A hit reads the file and runs nothing; a miss runs `make()`; a value `keep` refuses (a result that may be a transient failure: a red determinism check) is not stored. The items: `abi` (one root's C++ objects, a set: the ODR and layout joins read all of them), `fpexact` (one object: its sha256, its f2i report's sha256, unit, tool and library versions), `determinism` (one root: its stage keys, objects and ELF, the digest of the code that executes and stores stages), `exepin` (the whole-program flow over the universe: the sha256 of every source). A gate without a cache (`GATE_CACHE` unset) makes every item. Test: `tests/test_gate_memo.py`.
+
+## Guest compile hermeticity
+A guest root's compile reads the pinned runtime's own headers. The compiler's search list is derived from its own answers (`unitstage.gcc_set`); a directory of it outside every external of the recipe, by its real path too, makes the tool runtime red (`recipe.foreign_search_dirs`, stage `toolrt`) instead of being mounted. So the headers of a guest compile are the external's (`verify/guest_compiler.json`); the sandbox holds only declared mounts, so the PP depfile can list nothing else.
+
+## Shards and store merge
+
+A cold build of a large root is split over farms by one rule, with no second build path.
+- `recipe build --root R --shard i/N` (N <= 8, 0 <= i < N) builds the units whose first-stage key satisfies `int(key, 16) mod N == i`. The first-stage
+  key is the PP stage key on the whole declared trees (`unitstage.Build.first_key`; a `.s` unit: its one stage), computed before anything runs, so every
+  shard of one checkout agrees. The recipe asserts from the unit list that the shards are disjoint and together the unit set (`shard_partition`).
+  All stages of a unit run in its shard. Root-level stages (tests, link, link tables, gates) do not run in a shard build; its `objects.json` has `shard`.
+- `recipe store-merge SRC [--store DST]` (DST defaults to `$GATE_CACHE/store`) imports the objects, trees, stage documents and key records of the store SRC
+  by content. A name in both must hold the same bytes, else red `store-merge: key <k> differs` and DST is unchanged. It is the only import path.
+- The link is the normal `recipe build --root R` on the merged store: every unit is a hit; a missing unit builds.
+Tests: `tests/test_shard.py` (partition, merge, forged record, no compiler) and the `shard_merge` scenario of `tests/test_recipe.py` (toy root of 10 units).
