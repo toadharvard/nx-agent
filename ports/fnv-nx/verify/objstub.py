@@ -97,6 +97,12 @@ noreturn (below). Exactly one record per body (`cite-mismatch`), the row's contr
 call, so a row saying success is not rejected; only a body that differs from its row is. A body with no record that is V needs a constants row as before.
 The gate result counts records per id ("declared_machine"). The calls of `fnvnx_wine_fixme` keep rule (W).
 
+(O) OWNER DECISION (CLAUDE.md "GL keeps its branch ..."). `FNVNX_CITE(fn, "od:<id>")` cites a body that an owner decision keeps although the stub gate would flag it.
+`<id>` must be an anchor line of the CLAUDE.md of the tree under test, `<!-- fnvnx-owner-decision: ID | class: CLASS | root: ROOT -->` (read_owner_decisions: the only
+source, no list in the gate; a duplicate or malformed anchor is an error, red). The decision names the class of the branch; the body's object must lie under ROOT
+(`owner-decision-wrong-root`), the id must be an anchor (`owner-decision-unknown-id`), and the record is the body's only one (`cite-mismatch`). Then every finding of
+that body is accepted; the gate result counts them as "owner_decision". An uncited body keeps its findings.
+
 TERMINATING BODIES AND T2 (replaces "a reference to a terminator is a finding"). A REAL terminator is a function declared noreturn in a header of the unit that
 is either cited by a record whose row has fact process-end/thread-end (kind noreturn), or a library routine that no object of the root defines (documented by the
 pinned library). A cited terminator body is certified iff it is declared noreturn (`cite-not-declared-noreturn`) and no path of it returns
@@ -522,7 +528,8 @@ WINE = "fnvnx_wine_fixme"   # the one log function of the Wine-9.0-simplified bo
 CITE = (WINE,)   # the citation function: a body that calls it is judged against wine_fixme.tsv by rule (W). The declared machine and the terminators are cited by RECORDS (rule C)
 CITE_SEC = ".fnvnx.cite"   # rule C: the non-alloc section of the FNVNX_CITE records (hostabi/include/fnvnx/cite.h)
 ASSUME = "fnvnx_assume_violation"   # the second symbol of class R (the exit of a value outside an OWNER-accepted domain (ASM-004)): a declared noreturn function that needs no citation
-CITE_ID = re.compile(r"(dm|wf):([0-9]+)")
+CITE_ID = re.compile(r"(?:(?:dm|wf):[0-9]+|od:[a-z0-9]+(?:-[a-z0-9]+)*)")
+OWNER_ANCHOR = re.compile(r"<!-- fnvnx-owner-decision: ([a-z0-9]+(?:-[a-z0-9]+)*) \| class: ([^|]+?) \| root: (\S+) -->")
 REACH = "fnvnx_reach_violation"   # the one contract symbol of the proven-unreachable assertion (owner decision 2026-11-11, option iii)
 # Branch relocations of both ABIs. LP64 (ELF64): R_AARCH64_JUMP26 = 282, CALL26 = 283 (elf.h). ILP32 (ELF32, r_info = sym << 8 | type):
 # R_AARCH64_P32_JUMP26 = 20, P32_CALL26 = 21 (AAELF64 ILP32 tables; checked against the names binutils' readelf prints for objects the
@@ -1249,7 +1256,7 @@ def read_cites(o):
             if key not in fn:
                 bad.append((nm, "the record's relocation does not name the start of a function defined in this object (symbol %s)" % sy[0]))
             elif not m:
-                bad.append((nm, "the id %r is not dm:<decimal> or wf:<decimal>" % buf[p + 8:p + 8 + n].decode("latin-1")[:40]))
+                bad.append((nm, "the id %r is not dm:<decimal>, wf:<decimal> or od:<id>" % buf[p + 8:p + 8 + n].decode("latin-1")[:40]))
             else:
                 at.setdefault(key, []).append(m.group(0))
             p += (8 + n + 3) & ~3
@@ -1692,7 +1699,26 @@ def assume_counts(results, assume):
     return {"sites": n, "accepted": acc, "red": n - acc, "by_id": dict(sorted(by.items()))}
 
 
-def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=None, stats=None, extconv=None, assume=None):
+def read_owner_decisions(path):
+    """OWNER DECISION anchors of the trunk's CLAUDE.md (the one source; the gate holds no list): the lines
+    `<!-- fnvnx-owner-decision: ID | class: CLASS | root: ROOT -->` -> {id: (class, root)}.  A missing file is {} (every citation is then unknown);
+    a duplicate id is an error (ValueError).  A line that starts the comment but has another shape is malformed (ValueError)."""
+    out = {}
+    if not os.path.exists(path):
+        return out
+    for ln in open(path, encoding="utf-8"):
+        if not ln.lstrip().startswith("<!-- fnvnx-owner-decision"):
+            continue   # prose that mentions the marker is no anchor
+        m = OWNER_ANCHOR.fullmatch(ln.strip())
+        if not m or not m.group(2).strip():
+            raise ValueError("malformed owner-decision anchor in %s: %r" % (path, ln.strip()[:120]))
+        if m.group(1) in out:
+            raise ValueError("duplicate owner-decision id %s in %s" % (m.group(1), path))
+        out[m.group(1)] = (m.group(2).strip(), m.group(3).rstrip("/"))
+    return out
+
+
+def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=None, stats=None, extconv=None, assume=None, owners=None):
     """RESULTS {id: analysis}, ROWS {(id, symbol): (kind, value, ref)}, FACTS None (no reach facts file) or a set of fact ids
     -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). Pure function.
     V: certified iff its row equals the result. indirect-noreturn-tail: certified iff every path ends in the tail and the function is
@@ -1703,11 +1729,14 @@ def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=N
     definition is checked by error_abi_findings (once, global, and by kind: noreturn from the code, flag from the DWARF field and the stores).
     HANDLERS {object id: records of read_handler_records}: a V function with no constants row is certified iff handler_ok (rule H).
     STATS, a dict, receives the counts "trap_body", "handler_a", "handler_b".
+    OWNERS ({id: (class, root)} of read_owner_decisions, None = none): a body cited by an `od:<id>` record (FNVNX_CITE(fn, "od:<id>")) has every finding
+    of the stub gate accepted iff it is the body's only record (`cite-mismatch`), the id is an anchor of CLAUDE.md (`owner-decision-unknown-id`) and the
+    object lies under the anchor's root (`owner-decision-wrong-root`); the anchor names the branch's class.  There is no list in the gate.
     `ASSUME` = ({record id: status}, {ids of the objects of generated units}), None = both empty: a call of `fnvnx_assume_violation` is accepted
     iff it lies in an object of a unit that a generator stage of the root's recipe outputs (else `assume-direct-call`) and its first argument
     is a literal id whose record is OWNER (`assume-id-nonliteral`, `assume-id-not-owner`); see (A) above and `assume_verdict`."""
     registry, gen = assume if assume else ({}, set())
-    items, out, vflag, exited, used = [], [], set(), set(), set()
+    items, out, vflag, exited, used, out_od = [], [], set(), set(), set(), []
     wine, fails, handlers, stats = wine or {}, fails or {}, handlers or {}, stats if stats is not None else {}
     allv = {(oid, n) for oid, r in results.items() for n, k, _, _ in r["finds"] if k == "V"}
     root_of = {}   # records object -> the object ids that share it (one root)
@@ -1717,6 +1746,20 @@ def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=N
     # RULE C and the terminator rule: the facts of the whole set of objects
     defined_all = {n for r in results.values() for n in r["items"]}
     stops_all = {n for r in results.values() for n in r["terms"]}   # the declared-noreturn names that any object mentions
+    owners, od_ok = owners or {}, set()
+    for oid, r in sorted(results.items()):   # RULE O: bodies cited by an owner-decision record
+        for name, ids in r["cite"].items():
+            if not any(i.startswith("od:") for i in ids):
+                continue
+            a = owners.get(ids[0][3:])
+            bad = (("cite-mismatch", "an owner-decision body is cited by exactly one record, has %s" % ids) if len(ids) != 1 else
+                   ("owner-decision-unknown-id", "id %s is not an anchor of CLAUDE.md" % ids[0]) if a is None else
+                   ("owner-decision-wrong-root", "id %s is for the root %s, the body is in %s" % (ids[0], a[1], oid)) if not oid.startswith(a[1] + "/") else None)
+            if bad:
+                out_od.append((oid, name, bad[0], bad[1]))
+            else:
+                od_ok.add((oid, name))
+                stats["owner_decision"] = stats.get("owner_decision", 0) + 1
     cited_ids = {i for r in results.values() for ids in r["cite"].values() for i in ids}
     cited_term = set()   # the names that a record cites with a process-end/thread-end row (kind noreturn): REAL terminators
     for r in results.values():
@@ -1760,6 +1803,8 @@ def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=N
         exit_ok = set(r["exit_ok"])
         for name, kind, detail, v in r["finds"]:
             row = rows.get((oid, name))
+            if name in r["cite"] and any(i.startswith("od:") for i in r["cite"][name]):
+                continue   # decided by rule O above
             if kind == "V":
                 vflag.add((oid, name))
                 if row and row[0] != "exit" and matches(row, v):
@@ -1871,7 +1916,8 @@ def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=N
     if results:   # rule C: a row of the declared-machine table that no record cites
         out += [("-", "dm:%d" % i, "declared-machine-uncited", "row %d (%s) is cited by no record" % (i, declared[i][0])) for i in sorted(declared) if "dm:%d" % i not in cited_ids]
     out += [("-", "fact:%d" % c, "reach-stale", "fact in the reach facts with no call site of %s" % REACH) for c in sorted((facts or set()) - used)]
-    return items, sorted(set(out))
+    out = [f for f in out if (f[0], f[1]) not in od_ok]   # rule O: every finding of a body cited by a valid owner decision is accepted
+    return items, sorted(set(out) | set(out_od))
 
 
 def noreturn_set(results, oids):
@@ -1914,12 +1960,12 @@ def error_abi_findings(results, oids, abi):
     return []
 
 
-def run_check(objs, terms, rows, os_layer_ids, facts=None, cache=None, jobs=1, wine=None, declared=None, abi=None, records=None, stats=None, tables=None, extconv=None):
+def run_check(objs, terms, rows, os_layer_ids, facts=None, cache=None, jobs=1, wine=None, declared=None, abi=None, records=None, stats=None, tables=None, extconv=None, owners=None):
     """OBJS [(id, path)] -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). ABI: the `error_abi` of the one root OBJS form; TABLES: the `empty_handlers.tables` of it;
     RECORDS: read_handler_records of it."""
     probe = dict(abi or {}, tables=tables or {}) if (abi or tables) else None
     res = analyse_all(objs, set(terms), set(os_layer_ids), cache, jobs, probe)
-    items, finds = judge(res, rows, facts, wine, declared, {o: abi for o in res} if abi else None, {o: records for o in res} if records else None, stats, extconv)
+    items, finds = judge(res, rows, facts, wine, declared, {o: abi for o in res} if abi else None, {o: records for o in res} if records else None, stats, extconv, None, owners)
     return items, sorted(set(finds) | set(error_abi_findings(res, list(res), abi) if abi else ()) | set(handler_row_findings(records, res) if records else ()))
 
 
