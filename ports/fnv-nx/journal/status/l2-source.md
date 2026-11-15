@@ -304,3 +304,8 @@ After the first frame:
   - Platform root through the recipe: 111 objects, red with 2 units. Both are HOST1 working: 4 slot null tests, now L5's job, by FNVNX_HOST_HAS over the size field. A second red is the Wine-citation generator stage, 10 of 63 (L5/L1).
   - objstub reach-not-exit can be measured once those are green.
   - Next for w3: CONT-P, then the opaque fix, then the S23 root.
+- HOST1 records for L1's per-row dispatch gate.
+  - `.fnvnx.dispatch` gets one host row per call, `symbol host <tag>.<field>`.
+  - `.fnvnx.decltype` spells `host:` on the slot scalar.
+  - The carrier is the slot field type, not the callee type, which cannot carry the attribute.
+  - Assigned to w3 with CONT-P. L1 w15 adds the -D and -Werror=attributes on cand2.
