@@ -54,7 +54,7 @@ check("... linkstrict has no comdat finding", g["status"] == "green", (g, txt))
 OPT = "#pragma GCC optimize(\"O0\")\n"
 st, (uni, red), g, txt = run({"toy/x1.cc": TEMPLATE % "A", "toy/x2.cc": OPT + TEMPLATE % "B"})
 check("a unit built with another optimisation level (O0 against the root's O2): odr red, both objects named", any("x1.cc" in r and "x2.cc" in r for r in red.values()), (uni, red))
-check("... linkstrict: comdat-differs", g["status"] == "red" and "comdat-differs" in g["detail"], (g, txt))
+check("... linkstrict: undecidable: no definition record", g["status"] == "red" and "undecidable: no definition record" in g["detail"], (g, txt))
 
 
 def asm(body):
@@ -111,7 +111,7 @@ check("same bytes, same symbols: green", "sigD" in uni and not red, (uni, red))
 st, (uni, red), g, txt = run({"toy/x1.cc": asm(SYM("") + ".size sigD, 4\n"), "toy/x2.cc": asm(SYM("") + ".size sigD, 8\n")})
 check("same bytes, another st_size: red, both digests named", "sigD" in red and "x1.cc" in red["sigD"] and "x2.cc" in red["sigD"], (uni, red))
 st, (uni, red), g, txt = run({"toy/x1.cc": asm(SYM("") + ".size sigD, 4\n"), "toy/x2.cc": asm(SYM(".hidden sigD\n") + ".size sigD, 4\n")})
-check("same bytes, a hidden against a default signature: red; linkstrict comdat-differs", "sigD" in red and "comdat-differs" in g["detail"], (uni, red, g))
+check("same bytes, a hidden against a default signature: red; linkstrict undecidable", "sigD" in red and "undecidable: no definition record" in g["detail"], (uni, red, g))
 
 # 5. typeinfo and DW.ref groups (exceptions + RTTI need the unwinder symbols: only the typeinfo of an object is compared, nothing is linked to run)
 TI = "struct S { virtual ~S(); virtual int f(); };\nint use%s(S* s) { return s->f(); }\nstruct P : S { int f() { return 1; } };\nint t%s(S* s) { return dynamic_cast<P*>(s) != 0; }\n"
