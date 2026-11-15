@@ -119,12 +119,10 @@ static size_t refused(const uint16_t *t, size_t n)
 
 extern "C" int fnvnx_swkbd_enter(void)
 {
-    uint16_t text[FNVNX_SWKBD_MAX_LEN + 1], keep[FNVNX_SWKBD_MAX_LEN];
-    size_t n = 0;
-    const uint16_t *init = NULL;
-    size_t init_n = 0;
+    fnvnx_text text, keep;
+    const fnvnx_text *init = NULL;
     for (;;) {   /* the text is ours to validate: a refused one is shown again, until it has strokes or the player cancels (a rule, not a count) */
-        int r = os_text_entry(FNVNX_SWKBD_MAX_LEN, init, init_n, text, &n);
+        int r = os_text_entry(init, &text);
         if (r == 0) return 0;
         if (r < 0) {   /* an applet failure (a libnx swkbdShow Result, -r) is a documented console result: the guest sees no text, as when the player cancels; no keystroke is invented */
             char l[64];
@@ -132,16 +130,15 @@ extern "C" int fnvnx_swkbd_enter(void)
             os_debug_print(l);
             return 0;
         }
-        if (!refused(text, n)) break;
-        memcpy(keep, text, n * 2);   /* init must not alias out */
-        init = keep;
-        init_n = n;
+        if (!refused(text.u, text.n)) break;
+        keep = text;   /* init must not alias out */
+        init = &keep;
     }
     std::vector<uint8_t> e;   /* built outside the lock: fnvnx_swkbd_stroke takes it */
-    for (size_t i = 0; i < n; i++) {
+    for (size_t i = 0; i < text.n; i++) {
         unsigned vk, sc;
         int sh;
-        fnvnx_swkbd_stroke(text[i], &vk, &sc, &sh);   /* every unit passed check */
+        fnvnx_swkbd_stroke(text.u[i], &vk, &sc, &sh);   /* every unit passed check */
         auto put = [&e](unsigned v, unsigned s, unsigned d) { e.push_back((uint8_t)v); e.push_back((uint8_t)s); e.push_back((uint8_t)d); };
         if (sh) put(VK_SHIFT_, SCAN_LSHIFT, 1);
         put(vk, sc, 1);
