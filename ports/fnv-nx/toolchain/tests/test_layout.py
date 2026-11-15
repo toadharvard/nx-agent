@@ -6,6 +6,7 @@ collection after every function (--param ggc-min-expand=0 ggc-min-heapsize=0), a
 object: key (MSVC's decorated type name), size, align, members, bases; every type of pi's `types` column has a layout line; an
 unknown plugin argument is an error. No network, no game data. Run: python3 -I <this file> from the checkout root."""
 import re
+import glob
 import os
 import shutil
 import sys
@@ -171,7 +172,8 @@ TCC_TYPE_ERROR = {
 
 
 def tcc_type_codes():
-    inc = subprocess.run([os.environ.get('FNVNX_GXX', 'aarch64-linux-gnu-g++-13'), '-print-file-name=plugin'], capture_output=True, text=True).stdout.strip()
+    co = os.path.dirname(os.path.dirname(pb.driver()))   # the pinned compiler tree (the recipe has fetched it): its own plugin headers, not a distribution compiler's
+    inc = glob.glob(os.path.join(co, 'lib', 'gcc', '*', '*', 'plugin'))[0]
     codes = set()
     for rel in ('include/tree.def', 'include/c-family/c-common.def', 'include/cp/cp-tree.def'):
         f = os.path.join(inc, rel)
