@@ -1,7 +1,7 @@
 /* rcpgen.c: derives the RCPSS / RSQRTSS lookup tables of the reference CPU from the real instructions and prints the
  * generated region of rt/rcptab.c (tables only; the logic is in rt/rcptab.c). Run via tools/rcpgen.py, or by hand:
  *   gcc -O2 -msse2 tools/rcpgen.c -o rcpgen && ./rcpgen            (native x86-64 host = the reference CPU)
- * Structure of the hardware functions (all of it is proven equal on all 2^32 inputs by test/rcptest.py):
+ * Structure of the hardware functions (all of it is proven equal on all 2^32 inputs by its exhaustive 2^32 certification):
  *   rcp:   normal input (exponent e in 1..254): result exponent 253-e, 23-bit mantissa = table[m >> 12] (2048 entries)
  *   rsqrt: normal input: result exponent (380-e)>>1, mantissa = table[(e&1)<<10 | m>>13] (2048 entries)
  * Table entries are mantissa bits 22..11 (12 bits); the low 11 mantissa bits of every hardware result are 0 or 0x400/0x800 patterns

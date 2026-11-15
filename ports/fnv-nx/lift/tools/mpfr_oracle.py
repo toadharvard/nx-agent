@@ -1,5 +1,5 @@
 """mpfr_oracle - the MPFR oracles of the x87 transcendentals and the msvcrt math functions: the true value (an mpfr of 400+ bits, or an exact Fraction where it is
-exactly known), its one rounding to binary64 (rnd) and the x87 exception flags that value implies (expect_flags). One definition, used by test/fmathtest.py (rt/fmath.c)
+exactly known), its one rounding to binary64 (rnd) and the x87 exception flags that value implies (expect_flags). One definition, used by the fmath tests (rt/fmath.c)
 and by the generated stage of the lift tests (tests/guest/*/gen.py), so an expected value is computed in one place. MPFR is the reference; its version is the pinned wheel's (env.json python.modules gmpy2)."""
 import math, struct
 import gmpy2

@@ -84,12 +84,12 @@ Cause of 3acf7d99 (README) vs 66cf6d73 (farm): the old script passed the splice 
 ### Sail model patches (W9b)
 `proof/sail_patches/rotate_count.sail` (rotate_left_bits/rotate_right_bits reduce the count mod width) and `ror_cf.sail` (ROR CF = msb of the result for masked
 count >= 2) are spliced in by `sail_build.sh` (default; `x86_proof.ir` sha256 55f87ab6... since the path-independent build, was 3acf7d99... / 66cf6d73... with absolute paths); `sail_build.sh --stock` builds the unpatched `x86_proof_stock.ir`
-(sha256 1de1cdc6...). `test/rothost.py` compares the patched model with the native host exhaustively (8/16-bit rol ror rcl rcr shl shr sar, all values x counts 0..255 x
+(sha256 1de1cdc6...). the retired host comparison (test/rothost.py, deleted: a second path outside the recipe) compared the patched model with the native host exhaustively (8/16-bit rol ror rcl rcr shl shr sar, all values x counts 0..255 x
 CF-in, cl and imm8 forms, second pre-flag pattern too): 488,112,128 cases, diff 0 on every SDM-defined output; `mfree` = model leaves a defined output
 undefined (shl/shr/sar CF beyond the width), `undef-info` = host value of an SDM-undefined output differing from the model's.
 Third patch (L3b, `sail_patches/bt_bitnumber.sail`): `x86_bt_0f_a3` (BT r/m, r with a memory operand) took `bitnumber = mod(abs(signed(offset)), 8)` while the byte
 address is `floor(offset / 8)`: for a negative offset it selected the mirror bit (offset -1: bit 1 of byte -1; SDM and hardware: bit 7). The patch uses
-`offset - 8 * floor2(offset, 8)`. The SDM says the addressed unit is `EA + size/8 * (BitOffset DIV size)` and the bit `BitOffset MOD size` (floor); `test/bthost.py` runs the real
+`offset - 8 * floor2(offset, 8)`. The SDM says the addressed unit is `EA + size/8 * (BitOffset DIV size)` and the bit `BitOffset MOD size` (floor); the retired host run (test/bthost.py, deleted: a second path outside the recipe) ran the real
 instruction on the host (bt/bts/btr/btc, m16 and m32, register offset, memory window compared byte by byte, two memory patterns) against the DSL: m16 all 2^16 offsets,
 m32 a class cover (all 32 residues x q in -4096..4095 and every power-of-two boundary up to 2^26 and both extremes), 2,642,944 cases, 0 disagreements; the stock formula
 disagrees with the host in 123,756 of the bt cases. The DSL (and the hand emitter `fnvlift/f_int.py bitstr`, which uses the same word-wise rule) is right. The model implements only 0F A3 and 0F BA /4 of the bit group;

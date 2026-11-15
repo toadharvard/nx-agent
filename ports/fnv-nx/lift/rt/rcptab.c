@@ -9,7 +9,7 @@
  *          else (380-e)>>1 << 23 | rsqrt_tab[(e&1)<<10 | m>>13]<<11
  * Integer only. Tables: 2 x 2048 x 12 bit stored as unsigned short = 8 KiB.
  * Tables regenerated from the host by tools/rcpgen.py (gcc -O2 -msse2 tools/rcpgen.c; runs the real instructions).
- * Proof of equality with the hardware on all 2^32 inputs of both functions: test/rcptest.py; the pinned certificate
+ * Proof of equality with the hardware on all 2^32 inputs of both functions: the exhaustive 2^32 certification of tools/rcpgen.c; the pinned certificate
  * rt/rcptab.cert.json is made by farm/rcpcert.sh (tools/rcpcert.c) and judged by proof/gate_fpexact.py. */
 #include "rcpref.h"
 typedef unsigned int u32;

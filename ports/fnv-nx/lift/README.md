@@ -10,7 +10,7 @@ What lives where:
 |---|---|
 | `fnvlift/` | the lifter: `image.py` (PE, .reloc), `core.py` (descent, emit loop, handler registry), one module per instruction family (`f_int`, `f_flow`, `f_string`, `f_x87`, `f_sse`, `f_sys`) |
 | `rt/` | the runtime: `fnvl.h` (state and inline semantics every lifted file includes), `x87.c` (exact 80-bit arithmetic), `rt.c` (dispatch, bridges' helpers, host calls) |
-| `test/` | `golden.py` (output digest of a lifter over all functions), `instest.py` (every instruction form against Unicorn), unit tests of the runtime |
+| `test/` | `instest.py` (every instruction form against Unicorn), unit tests of the runtime |
 | `tools/` | `universe.py` (every entry the exe needs a body for), `census.py`, `cache.py`, `bridges.py`, `report.py` |
 
 The tools are ours. Their **output is exe-derived** (lifted C, entry lists, per-function tables, objects) and is
@@ -195,5 +195,4 @@ A lifted object is keyed by (function bytes, relocation mask inside them, lifter
 | gate | command | number |
 |---|---|---|
 | coverage | `tools/census.py` | entries lifted / entries, failure reasons |
-| golden (refactors) | `test/golden.py <dir>` | sha256 of all outputs |
 | instruction | `test/instest.py` | forms tested, cases equal / different, per mnemonic |

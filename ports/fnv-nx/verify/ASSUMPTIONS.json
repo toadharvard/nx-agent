@@ -1387,8 +1387,7 @@
    "id": "ASM-230",
    "text": "The truncation error of the generated pi/ln2 table is within its stated bound.",
    "used_by": [
-    "ports/fnv-nx/lift/rt/fmath.c",
-    "ports/fnv-nx/lift/tools/tests/fmathtest.py"
+    "ports/fnv-nx/lift/rt/fmath.c"
    ],
    "aliases": [],
    "status": "REMOVE",
