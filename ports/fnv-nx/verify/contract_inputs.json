@@ -53,7 +53,7 @@
  "ehfacts": "facts",
  "sites": "facts/sites.tsv",
  "exe": "exe/FalloutNV.exe",
- "msvc": "msvc/obj",
+ "msvc": "msvc",
  "universe": "facts/universe.tsv",
  "reach_requests": "manifest/manifest/reach_requests.tsv",
  "dynsites": "manifest/manifest/dynsites.tsv",
