@@ -35,6 +35,7 @@ class Res:
     def __init__(s, d, store=None, gpr=None, fault=None):
         s.d, s.store, s.gpr = d, store, gpr
         s.fault = z3.BoolVal(False) if fault is None else fault
+        s.flags = None                  # {'cf','pf','zf','of','sf','af': BV1} the instruction writes; the other status flags keep their value
         s.env = And(K(0, 1) == z3.BitVec('cr0_em', 1), K(0, 1) == z3.BitVec('cr0_ts', 1), K(1, 1) == z3.BitVec('cr4_osfxsr', 1))
 
 
@@ -62,7 +63,8 @@ class Enc:
             if code[i] in (0x66, 0xF2, 0xF3): s.pfx = '%02X' % code[i]
             i += 1
         assert code[i] == 0x0F, code.hex()
-        s.op = code[i + 1]; s.modrm = code[i + 2]; s.mod, s.reg, s.rm = s.modrm >> 6, (s.modrm >> 3) & 7, s.modrm & 7
+        s.op = code[i + 1]; s.modrm = code[i + 2] if len(code) > i + 2 else 0xC0;      # EMMS (0F 77) has no ModRM byte
+        s.modrm = s.modrm; s.mod, s.reg, s.rm = s.modrm >> 6, (s.modrm >> 3) & 7, s.modrm & 7
         s.mem = s.mod != 3
         s.imm = None              # run() sets the immediate operand (a BV8, symbolic in a shape)
 
@@ -430,7 +432,7 @@ def _fparith(name, w, scalar):
         out = Concat(Extract(127, w, dst), res) if scalar else res
         r = Res(put_xmm(d, e.reg, out))
         r.d['mxcsr'] = mx | ZeroExt(26, fl)
-        r.env = And(r.env, F.masks_set(mx))
+        r.env = And(r.env, F.masks_set(mx), F.mxcsr_in_mask(mx))
         if e.mem and not scalar: r.fault = misaligned(a)
         return r
     return f
@@ -447,6 +449,146 @@ for _op, _nm in _FPOPS.items():
         _spec = ('sse-sqrt-spec', '(sse-sqrt-comp adaz mxcsr f)') if _nm == 'sqrt' else (('sse-max/min', '(sse-max/min-special kind1 sign1 exp1 implicit1 frac1') if _nm in ('min', 'max') else ('sse-binary-spec', '(sse-binary-comp op adaz bdaz mxcsr f)'))
         _c.append(cite(_RTL if _nm not in ('min', 'max') else 'fp/arith-spec.lisp', *_spec))
         row(_p, _op, _nm + ('s' if _sc else 'p') + ('s' if _fw == 32 else 'd'), _c, mw=(_fw if _sc else 128))(_fparith(_nm, _fw, _sc))
+
+
+def _fpcmp(w, scalar):
+    def f(e, d, m, a, g):
+        src = m if (scalar and e.mem) else _src(e, d, m, 128); dst = xmm(d, e.reg); mx = d['mxcsr']
+        n = 1 if scalar else 128 // w
+        sl = [src] if (scalar and e.mem) else lanes(src, w)[:n]; dl = lanes(dst, w)[:n]
+        pred = Extract(2, 0, e.imm); outs, fl = [], K(0, 6)
+        for x, y in zip(dl, sl):
+            o, fg = F.cmp_lane(pred, x, y, mx, w); outs.append(o); fl = fl | fg
+        res = join(outs); out = Concat(Extract(127, w, dst), res) if scalar else res
+        r = Res(put_xmm(d, e.reg, out)); r.d['mxcsr'] = mx | ZeroExt(26, fl)
+        r.env = And(r.env, F.masks_set(mx), F.mxcsr_in_mask(mx))
+        if e.mem and not scalar: r.fault = misaligned(a)
+        return r
+    return f
+
+
+def _fpcomis(w, ordered):
+    def f(e, d, m, a, g):
+        src = m if e.mem else Extract(w - 1, 0, xmm(d, e.rm)); dst = Extract(w - 1, 0, xmm(d, e.reg)); mx = d['mxcsr']
+        (zf, pf, cf), fl = F.comis(dst, src, mx, w, ordered)
+        r = Res(dict(d)); r.d['mxcsr'] = mx | ZeroExt(26, fl)
+        r.flags = {'zf': zf, 'pf': pf, 'cf': cf, 'of': K(0, 1), 'sf': K(0, 1), 'af': K(0, 1)}
+        r.env = And(r.env, F.masks_set(mx), F.mxcsr_in_mask(mx))
+        return r
+    return f
+
+
+# CMPPS CMPPD CMPSS CMPSD: ACL2 fp/logical.lisp x86-cmpps / x86-cmppd / x86-cmpss/cmpsd; COMIS / UCOMIS: x86-comis?/ucomis?-Op/En-RM
+_CMPQ = {(32, True): ('x86-cmpss/cmpsd-Op/En-RMI', '(sp-sse-cmp (n03 imm) xmm xmm/mem (mxcsr x86))'), (64, True): ('x86-cmpss/cmpsd-Op/En-RMI', '(dp-sse-cmp (n03 imm) xmm xmm/mem (mxcsr x86))'),
+         (32, False): ('x86-cmpps-Op/En-RMI', '(sp-sse-cmp operation xmm3 xmm/mem3 mxcsr)'), (64, False): ('x86-cmppd-Op/En-RMI', '(dp-sse-cmp operation xmm1 xmm/mem1 mxcsr)')}
+for _p, (_fw, _sc) in _FPFMT.items():
+    row(_p, 0xC2, 'cmp' + ('s' if _sc else 'p') + ('s' if _fw == 32 else 'd'), [cite('fp/logical.lisp', *_CMPQ[(_fw, _sc)])], mw=(_fw if _sc else 128), imm=True)(_fpcmp(_fw, _sc))
+for _p, _fw in (('', 32), ('66', 64)):
+    for _op, _ord in ((0x2F, True), (0x2E, False)):
+        row(_p, _op, ('' if _ord else 'u') + 'comis' + ('s' if _fw == 32 else 'd'),
+            [cite('fp/logical.lisp', 'x86-comis?/ucomis?-Op/En-RM', '(%sp-sse-cmp operation xmm xmm/mem (mxcsr x86))' % ('s' if _fw == 32 else 'd'))], mw=_fw)(_fpcomis(_fw, _ord))
+
+
+def _mxcsr_grp(e, d, m, a, g):
+    """0F AE /2 LDMXCSR m32, 0F AE /3 STMXCSR m32 (ACL2 fp/mxcsr.lisp x86-ldmxcsr/stmxcsr-Op/En-M): a load of a bit outside CPUREF's MXCSR_MASK is #GP(0) (SDM 2A:LDMXCSR),
+    reported as the access violation like the misaligned SSE operand; the loaded value keeps every exception masked (ASM-204, an environment row on the value)"""
+    if e.reg == 2:
+        r = Res(dict(d)); r.d['mxcsr'] = m
+        r.fault = (m & K(~F.cpuref_mxcsr_mask() & 0xFFFFFFFF, 32)) != K(0, 32)
+        r.env = And(r.env, F.masks_set(m))
+        return r
+    if e.reg == 3: return Res(d, store=(a, d['mxcsr'], 32))
+    raise KeyError('0F AE /%d is not an MXCSR row' % e.reg)
+
+
+row('', 0xAE, 'ldmxcsr/stmxcsr', [cite('fp/mxcsr.lisp', 'x86-ldmxcsr/stmxcsr-Op/En-M', '0F AE /2: LDMXCSR m32'), cite('fp/mxcsr.lisp', 'x86-ldmxcsr/stmxcsr-Op/En-M', '0F AE /3: STMXCSR m32')], form='m', mw=32, al=False)(_mxcsr_grp)
+
+
+# ==== conversions: ACL2 fp/convert.lisp (cvt rows), lane functions in ssefp.py ==============================================================================================
+_CV = 'fp/convert.lisp'
+
+
+def _cvt_fin(r, d, mx, fl, e, a, fault128=False):
+    r.d['mxcsr'] = mx | ZeroExt(26, fl)
+    r.env = And(r.env, F.masks_set(mx), F.mxcsr_in_mask(mx))
+    if fault128 and e.mem: r.fault = misaligned(a)
+    return r
+
+
+def _cvt_xx(srcw, srcn, lane, dstw, dstn, keep_hi):
+    """xmm := lane-wise lane(src lanes of srcw bits, n = srcn) into dstn lanes of dstw bits (the rest of the 128-bit register: zero, or kept when keep_hi); the memory operand is srcw*srcn bits"""
+    def f(e, d, m, a, g):
+        mx = d['mxcsr']; dst = xmm(d, e.reg)
+        src = m if e.mem else Extract(srcw * srcn - 1, 0, xmm(d, e.rm))
+        outs, fl = [], K(0, 6)
+        for x in lanes(src, srcw)[:srcn]:
+            o, fg = lane(x, mx); outs.append(o); fl = fl | fg
+        res = join(outs); used = dstw * dstn
+        out = Concat(Extract(127, used, dst), res) if keep_hi else (ZeroExt(128 - used, res) if used < 128 else res)
+        return _cvt_fin(Res(put_xmm(d, e.reg, out)), d, mx, fl, e, a, fault128=(srcw * srcn == 128))
+    return f
+
+
+def _f2i_lane(w, trunc): return lambda x, mx: F.f2i(x, mx, w, trunc)
+
+
+_CVT_XX = [
+    # prefix, opcode, name, srcw, srcn, lane, dstw, dstn, keep_hi, ACL2 instruction, quote
+    ('', 0x5B, 'cvtdq2ps', 32, 4, lambda x, mx: F.i2f(x, mx, 32), 32, 4, False, None, 'SDM 2A:CVTDQ2PS'),
+    ('66', 0x5B, 'cvtps2dq', 32, 4, _f2i_lane(32, False), 32, 4, False, None, 'SDM 2A:CVTPS2DQ'),
+    ('F3', 0x5B, 'cvttps2dq', 32, 4, _f2i_lane(32, True), 32, 4, False, None, 'SDM 2A:CVTTPS2DQ'),
+    ('F3', 0xE6, 'cvtdq2pd', 32, 2, lambda x, mx: F.i2f(x, mx, 64), 64, 2, False, None, 'SDM 2A:CVTDQ2PD'),
+    ('F2', 0xE6, 'cvtpd2dq', 64, 2, _f2i_lane(64, False), 32, 2, False, None, 'SDM 2A:CVTPD2DQ'),
+    ('66', 0xE6, 'cvttpd2dq', 64, 2, _f2i_lane(64, True), 32, 2, False, None, 'SDM 2A:CVTTPD2DQ'),
+    ('', 0x5A, 'cvtps2pd', 32, 2, lambda x, mx: F.f2f_up(x, mx), 64, 2, False, 'x86-cvtps2pd-Op/En-RM', '(sse-cvt-sp-to-dp xmm/mem0 mxcsr))'),
+    ('66', 0x5A, 'cvtpd2ps', 64, 2, lambda x, mx: F.f2f_down(x, mx), 32, 2, False, 'x86-cvtpd2ps-Op/En-RM', '(sse-cvt-dp-to-sp xmm/mem0 mxcsr))'),
+    ('F3', 0x5A, 'cvtss2sd', 32, 1, lambda x, mx: F.f2f_up(x, mx), 64, 1, True, 'x86-cvts?2s?-Op/En-RM', '(sse-cvt-sp-to-dp xmm/mem (mxcsr x86))'),
+    ('F2', 0x5A, 'cvtsd2ss', 64, 1, lambda x, mx: F.f2f_down(x, mx), 32, 1, True, 'x86-cvts?2s?-Op/En-RM', '(sse-cvt-dp-to-sp xmm/mem (mxcsr x86))'),
+]
+for _p, _op, _nm, _sw, _sn, _ln, _dw, _dn, _kh, _inst, _q in _CVT_XX:
+    row(_p, _op, _nm, [cite(_CV, _inst, _q)] if _inst else [], mw=_sw * _sn)(_cvt_xx(_sw, _sn, _ln, _dw, _dn, _kh))
+
+
+def _cvtsi2s(w):
+    def f(e, d, m, a, g):
+        mx = d['mxcsr']; dst = xmm(d, e.reg); v = m if e.mem else g[e.rm]
+        o, fl = F.i2f(v, mx, w)
+        return _cvt_fin(Res(put_xmm(d, e.reg, Concat(Extract(127, w, dst), o))), d, mx, fl, e, a)
+    return f
+
+
+def _cvts2si(w, trunc):
+    def f(e, d, m, a, g):
+        mx = d['mxcsr']; v = m if e.mem else Extract(w - 1, 0, xmm(d, e.rm))
+        o, fl = F.f2i(v, mx, w, trunc)
+        r = Res(dict(d), gpr=(e.reg, o)); return _cvt_fin(r, d, mx, fl, e, a)
+    return f
+
+
+for _p, _w2 in (('F3', 32), ('F2', 64)):
+    _s = 's' if _w2 == 32 else 'd'
+    row(_p, 0x2A, 'cvtsi2s' + _s, [cite(_CV, 'x86-cvtsi2s?-Op/En-RM', '(%sp-sse-cvt-int-to-fp reg/mem (mxcsr x86))' % _s)], mw=32)(_cvtsi2s(_w2))
+    row(_p, 0x2D, 'cvts%s2si' % _s, [cite(_CV, 'x86-cvts?2si/cvtts?2si-Op/En-RM', '(%sp-sse-cvt-fp-to-int reg-size xmm/mem (mxcsr x86) trunc)' % _s)], mw=_w2)(_cvts2si(_w2, False))
+    row(_p, 0x2C, 'cvtts%s2si' % _s, [cite(_CV, 'x86-cvts?2si/cvtts?2si-Op/En-RM', '(%sp-sse-cvt-fp-to-int reg-size xmm/mem (mxcsr x86) trunc)' % _s)], mw=_w2)(_cvts2si(_w2, True))
+
+
+def _rcprow(fn, scalar):
+    def f(e, d, m, a, g):
+        F.rcp_tables()                                          # Uncertified unless rcptab.c is the certified table of the reference CPU
+        src = m if (scalar and e.mem) else _src(e, d, m, 128); dst = xmm(d, e.reg)
+        sl = [src] if (scalar and e.mem) else lanes(src, 32)[:1 if scalar else 4]
+        res = join([fn(x) for x in sl])
+        out = Concat(Extract(127, 32, dst), res) if scalar else res
+        r = Res(put_xmm(d, e.reg, out))
+        if e.mem and not scalar: r.fault = misaligned(a)
+        return r
+    return f
+
+
+# no ACL2 instruction (grep of machine/instructions: none); the source is the pinned external lift/rt/rcptab.c (ssefp.rcp_tables)
+for _p, _sc in (('', False), ('F3', True)):
+    row(_p, 0x53, 'rcp' + ('ss' if _sc else 'ps'), [], mw=(32 if _sc else 128))(_rcprow(F.rcp32, _sc))
+    row(_p, 0x52, 'rsqrt' + ('ss' if _sc else 'ps'), [], mw=(32 if _sc else 128))(_rcprow(F.rsqrt32, _sc))
 
 
 # ==== execution ===============================================================================================================================================
@@ -480,3 +622,7 @@ def mem_imm(code):
     e = Enc(code)
     k = (e.pfx, e.op, e.mod == 3) if (e.pfx, e.op, e.mod == 3) in ROWS else (e.pfx, e.op, None)
     return ROWS[k].imm
+
+
+import simdsdm
+simdsdm.register(sys.modules[__name__])

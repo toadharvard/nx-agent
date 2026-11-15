@@ -31,6 +31,7 @@ def _obligation(rep, F, sins_ops, imm, timeout):
         w = S.mem_width(rep)
         m = z3.Concat(*[z3.Select(M0, a + i) for i in reversed(range(w // 8))])
     try: r = S.run(rep, d, m, a, gpr, imm)
+    except S.F.Uncertified as ex: return 'uncertified', 'uncertified: ' + str(ex)
     except KeyError: return 'no-row', None
     nf = P['fault'] == 0
     spec_fault = z3.If(r.fault, z3.BitVecVal(S.AV, 8), z3.BitVecVal(0, 8))
@@ -43,6 +44,8 @@ def _obligation(rep, F, sins_ops, imm, timeout):
         v = gpr[i]
         if r.gpr and r.gpr[0] == i: v = r.gpr[1]
         eq.append(P['regs'][rn] == v)
+    if r.flags:
+        for fn in ('cf', 'pf', 'af', 'zf', 'sf', 'of'): eq.append(P['flags'][fn] == r.flags[fn])          # a row that writes EFLAGS (comis/ucomis): the six status flags; (rows that do not write it leave them to the DSL's own frame rule)
     mem = M0
     if r.store:
         sa, sv, sb = r.store
@@ -68,10 +71,21 @@ def check(key, timeout=60000):
     imm = z3.BitVec('fld_imm', 8) if S.mem_imm(rep) else None
     try: sf = symform.symbuild(key)
     except KeyError: return 'no-form', None
+    except symform.FieldDecodeError:
+        if imm is None: return 'no-form', None
+        return _concrete(rep, timeout)
     except (symform.SymbolicBranch, TypeError, AssertionError) as ex:
         if imm is None: return 'builder-branches-on-field', str(ex)[:120]
         return _by_cases(key, rep, timeout)
     return _obligation(rep, sf.form, symform.symins(key)[0], imm, timeout)
+
+
+def _concrete(rep, timeout):
+    """a shape whose immediate byte is part of the mnemonic (the cmpeqps ... cmpnleps / cmpeqpd ... pseudo-ops: one predicate each): the immediate is the shape's fixed byte, not a field"""
+    md = shape.decoder(); ins = list(md.disasm(rep, 0))[0]
+    try: F = forms.build(ins, 0)
+    except KeyError: return 'no-form', None
+    return _obligation(rep, F, ins, z3.BitVecVal(rep[-1], 8), timeout)
 
 
 def _by_cases(key, rep, timeout):
