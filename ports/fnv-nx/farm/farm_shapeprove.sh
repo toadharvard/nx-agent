@@ -116,13 +116,7 @@ OUT="$W/out/$ID"; mkdir -p "$OUT"
 J="$OUT/shapeprove_${K}_of_$N.jsonl"
 # a results branch is WRITE-ONCE (the git proxy refuses deletes and forced updates): its name carries the content, <prefix>/<ID>/<K>of<N>-<sha12 of the jsonl>.  A rerun writes a new branch.  A branch counts as
 # published only when its record count equals the shard's queue rows and it has no error record (shardok); any other branch (empty, short, with errors) is ignored by rule, by every reader.
-ROWS=$(python3 -I - "$QUEUE" "$K" "$N" "${SLICE:-1}" <<'PY'
-import sys
-q, k, n, sl = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
-rows = [l for l in open(q) if l.strip() and l[0] != '#'][::sl]
-print(len([1 for i, _ in enumerate(rows) if i % n == k - 1]))
-PY
-)
+ROWS=$(python3 -I "$HERE/shardok.py" rows "$QUEUE" "$K" "$N" "${SLICE:-1}")
 [ -n "${LIMIT:-}" ] && [ "$LIMIT" -lt "$ROWS" ] && ROWS=$LIMIT
 shardok() { python3 -I "$HERE/shardok.py" "$1" "$ROWS"; }     # exit 0 iff the jsonl has exactly ROWS records and no error record
 publish() {   # an orphan commit holding the jsonl only, on a NEW branch named by its content

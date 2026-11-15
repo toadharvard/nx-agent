@@ -101,6 +101,31 @@ def check_str(key, rec):
     return ('proved', 'SDM STR: DEST := TR(SegmentSelector), the record selectors.tr') if r == 'ok' else ('FAILED(dsl)', STR_TEXT[r])
 
 
+def far_kind(key):
+    """-> None, or (call?, immediate form?) for a far CALL / JMP: 9A / EA (ptr16:32), FF /3 and FF /5 with a memory operand (m16:32); decided by the encoding bytes (SDM Vol 2 CALL, JMP)"""
+    b = [x for x in shape.rep_bytes(key) if x not in (0x66, 0x67, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65, 0xf0, 0xf2, 0xf3)]
+    if b[0] in (0x9a, 0xea): return b[0] == 0x9a, True
+    if b[0] == 0xff and len(b) > 1 and (b[1] >> 3) & 7 in (3, 5) and b[1] >> 6 != 3: return (b[1] >> 3) & 7 == 3, False
+
+
+def check_far(key, fk, rec):
+    """a far transfer: the cases the record decides (the selector of selectors.cs, the NULL selector) against the cited SDM text (sysspec_far.py); every other selector is defined by descriptor rows the record leaves undecided: the shape is
+    uncertified, the undecided sites are counted by the caller (the selector of an immediate form is a site field, that of a memory form is data)"""
+    call, imm = fk
+    try:
+        x86sys.get(rec, 'selectors', 'cs'); x86sys.get(rec, 'sgdt')
+        return 'uncertified', 'uncertified: far transfer to a selector other than selectors.cs: descriptor rows undecided (sgdt)'      # unreachable until sgdt is decided: kept to name the rule
+    except x86sys.Undecided as e:
+        why = str(e)
+    if not imm: return 'uncertified', 'uncertified: far transfer through memory: the selector is data, defined by the descriptor rows: %s' % why
+    import sysspec_far
+    try: cases = sysspec_far.check(key, call, rec)
+    except (KeyError, AttributeError, AssertionError) as e: return 'not-covered', 'no Form for the far transfer (%s)' % type(e).__name__
+    bad = [c for c, r in cases if r != 'proved']
+    if bad: return 'FAILED(dsl)', 'far transfer differs from the SDM in: %s' % ','.join(bad)
+    return 'uncertified', 'uncertified: far transfer to a selector other than selectors.cs / NULL (proved: %s): %s' % (','.join(c for c, _ in cases), why)
+
+
 def decl_spec(m):
     """the SDM semantics of a DECL instruction as {register: z3 term} over the declared function of declared.json (the uninterpreted function named by the row's ufs): RDTSC `EDX:EAX := TimeStampCounter` (high:low in the basis text),
     CPUID `(EAX, EBX, ECX, EDX) := CPUID_INFO(EAX, ECX)` (the i-th function is the i-th register of the tuple)"""
@@ -134,6 +159,11 @@ def rec_name(m): return 'no fault row: ' + '.'.join(FAULTROW[m])
 def check(key):
     import z3
     m = mnemonic(key)
+    fk = far_kind(key) if m in ('call', 'jmp', 'lcall', 'ljmp') else None
+    if fk is not None:
+        try: rec = x86sys.load()
+        except x86sys.Undecided as e: return 'uncertified', 'uncertified: %s' % e
+        return check_far(key, fk, rec)
     if m not in PRIV and m not in COND and m not in CLASS_B and m not in DECL and m not in LARFAM and not needs_any(m):
         return 'not-covered', 'no spec for %s' % m
     if m in CLASS_B:
