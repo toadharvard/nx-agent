@@ -30,5 +30,31 @@
     "edx"
    ]
   }
+ ],
+ "facts": [
+  {
+   "name": "cpl",
+   "value": 3,
+   "source": "CLAUDE.md 'The declared machine': the game is a Windows (Wine 9.0) user process",
+   "basis": "Windows user mode runs at CPL 3 (SDM vol. 3A 5.5 privilege levels)"
+  },
+  {
+   "name": "iopl",
+   "value": 0,
+   "source": "CLAUDE.md 'The declared machine': EFLAGS.IOPL of an NT user process",
+   "basis": "Windows (and Wine 9.0) user threads run with EFLAGS.IOPL = 0"
+  },
+  {
+   "name": "io_bitmap_grants",
+   "value": "none",
+   "source": "CLAUDE.md 'The declared machine'",
+   "basis": "an NT user process has an empty I/O permission bitmap: every port is denied at CPL 3 > IOPL"
+  },
+  {
+   "name": "umip",
+   "value": "clear",
+   "source": "rt/cpumodel.c CPUID.07H.0:ECX[2], read by proof/sysspec.py (a leaf above the max leaf is absent)",
+   "basis": "SDM vol. 3A 2.5 CR4.UMIP; the declared CPU reports no UMIP"
+  }
  ]
 }
