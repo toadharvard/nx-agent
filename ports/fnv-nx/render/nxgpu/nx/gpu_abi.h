@@ -17,6 +17,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "state.h"
+#include "fnvnx_sha256.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -62,10 +63,7 @@ typedef struct NxImageDesc {
 /* ---- shaders ------------------------------------------------------------------------------------------------ */
 enum NxStage { NxStage_Vertex = 0, NxStage_Fragment = 1 };
 typedef struct NxShaderDesc {
-    uint32_t stage;        /* NxStage */
-    uint32_t glsl_size;
-    uint64_t glsl;         /* GLSL 4.60 source in the deko3d flavour (the GL backend rewrites version + bindings) */
-    uint8_t key[32];       /* sha256 of the glsl_size bytes at glsl */
+    uint32_t row;          /* a stage row of the one GLSL table of render/gl4shim (enum nx_gl4shim_stage_id); its stage is a fact of the row. Callers never supply GLSL */
 } NxShaderDesc;
 /* Resource bindings in the GLSL: UBO and sampler `binding = n` are deko3d per-stage slots; the GL backend maps
  * them to GL binding stage * 16 + n. */
@@ -82,38 +80,43 @@ typedef struct NxVtxLayout {   /* up to 8 attributes from one interleaved buffer
 /* ---- command stream ------------------------------------------------------------------------------------------ */
 /* An array of 32-bit words: [opcode | (argument word count << 16)] followed by its arguments. A backend skips
  * unknown opcodes by their count. Floats travel as their bit patterns. */
-enum NxOp {
-    NxOp_End = 0,
-    NxOp_DefineState,   /* id, vs, ps, layoutId, then NxRenderState w[0..3] as lo/hi word pairs (12 words) */
-    NxOp_DefineLayout,  /* id, NxVtxLayout (9 words) */
-    NxOp_BeginPass,     /* colorImage, depthImage, clearFlags (1 colour, 2 depth, 4 stencil), clear RGBA8 (R in the
-                           low byte), clear depth f32, clear stencil, width, height. Then viewport = (0.5, 0.5, w,
-                           h, 0, 1) (D3D9's full viewport, see NxViewport), scissor = (0, 0, w, h), blend constant
-                           (1,1,1,1), depth bias 0, stencil ref from the bound state; no state bound. */
-    NxOp_EndPass,
-    NxOp_Barrier,       /* kind: 0 = render targets written so far become sampleable */
-    NxOp_BindState,     /* state id; also sets stencil ref/masks from the state's w[1] bits 32-55 */
-    NxOp_BindUbo,       /* stage mask (1 vertex, 2 fragment), slot, memBlock, offset, size */
-    NxOp_BindVtx,       /* memBlock, offset, size */
-    NxOp_BindIdx,       /* memBlock, offset, size, type (0 u16, 1 u32) */
-    NxOp_BindTextures,  /* stage (NxStage), first slot, count, handles[count] */
-    NxOp_Draw,          /* prim, vertexCount, instanceCount, firstVertex, firstInstance */
-    NxOp_DrawIndexed,   /* prim, indexCount, instanceCount, firstIndex, baseVertex, firstInstance */
-    NxOp_Viewport,      /* NxViewport: x, y, w, h, minZ, maxZ (float bits) */
-    NxOp_Scissor,       /* x, y, w, h (int32); effective while the bound state has the scissor bit */
-    NxOp_StencilRef,    /* ref (both faces; until the next BindState) */
-    NxOp_BlendConst,    /* r, g, b, a (float bits) */
-    NxOp_DepthBias,     /* units, slope, clamp (float bits; units as NxDynamicState.depthBiasUnits) */
-    NxOp_Clear,         /* flags (NxClear_*: 1 colour, 2 depth, 4 stencil, 8 sRGB), RGBA8 (R low), depth f32, stencil,
-                           x, y, w, h (pixels, top-left origin): clears that rectangle of the pass's targets; ignores
-                           the bound state's masks and scissor (v3). With NxClear_Srgb the colour goes through the
-                           target's sRGB view when it has one (D3D9 Clear under SRGBWRITEENABLE, Nine
-                           nine_context_clear_fb): 0x80 is stored as 188 */
-    NxOp_Marker,        /* tag (fourcc), a, b: a no-op for the backends, kept by captures (v3, additive). Tag
-                           NX_MARKER_PASS: a = the engine pass id of the draws that follow in this pass (0..758, the
-                           numbering of docs/RENDER_NATIVE.md §1.3; NX_PASS_UNKNOWN = none), b = NxFamilyId
-                           (nx/families.h). Emitted by the front before the first draw of each run of draws with the
+/* The v3 op list: THE definition of the op numbers (ascending from 0; NxOp_Count follows the last). A backend
+ * table over the ops is expanded from it, never retyped. */
+#define NXGPU_OP_LIST_V3(X) \
+    X(End) \
+    X(DefineState)   /* id, vs, ps, layoutId, then NxRenderState w[0..3] as lo/hi word pairs (12 words) */ \
+    X(DefineLayout)  /* id, NxVtxLayout (9 words) */ \
+    X(BeginPass)     /* colorImage, depthImage, clearFlags (1 colour, 2 depth, 4 stencil), clear RGBA8 (R in the \
+                           low byte), clear depth f32, clear stencil, width, height. Then viewport = (0.5, 0.5, w, \
+                           h, 0, 1) (D3D9's full viewport, see NxViewport), scissor = (0, 0, w, h), blend constant \
+                           (1,1,1,1), depth bias 0, stencil ref from the bound state; no state bound. */ \
+    X(EndPass) \
+    X(Barrier)       /* kind: 0 = render targets written so far become sampleable */ \
+    X(BindState)     /* state id; also sets stencil ref/masks from the state's w[1] bits 32-55 */ \
+    X(BindUbo)       /* stage mask (1 vertex, 2 fragment), slot, memBlock, offset, size */ \
+    X(BindVtx)       /* memBlock, offset, size */ \
+    X(BindIdx)       /* memBlock, offset, size, type (0 u16, 1 u32) */ \
+    X(BindTextures)  /* stage (NxStage), first slot, count, handles[count] */ \
+    X(Draw)          /* prim, vertexCount, instanceCount, firstVertex, firstInstance */ \
+    X(DrawIndexed)   /* prim, indexCount, instanceCount, firstIndex, baseVertex, firstInstance */ \
+    X(Viewport)      /* NxViewport: x, y, w, h, minZ, maxZ (float bits) */ \
+    X(Scissor)       /* x, y, w, h (int32); effective while the bound state has the scissor bit */ \
+    X(StencilRef)    /* ref (both faces; until the next BindState) */ \
+    X(BlendConst)    /* r, g, b, a (float bits) */ \
+    X(DepthBias)     /* units, slope, clamp (float bits; units as NxDynamicState.depthBiasUnits) */ \
+    X(Clear)         /* flags (NxClear_*: 1 colour, 2 depth, 4 stencil, 8 sRGB), RGBA8 (R low), depth f32, stencil, \
+                           x, y, w, h (pixels, top-left origin): clears that rectangle of the pass's targets; ignores \
+                           the bound state's masks and scissor (v3). With NxClear_Srgb the colour goes through the \
+                           target's sRGB view when it has one (D3D9 Clear under SRGBWRITEENABLE, Nine \
+                           nine_context_clear_fb): 0x80 is stored as 188 */ \
+    X(Marker)        /* tag (fourcc), a, b: a no-op for the backends, kept by captures (v3, additive). Tag \
+                           NX_MARKER_PASS: a = the engine pass id of the draws that follow in this pass (0..758, the \
+                           numbering of docs/RENDER_NATIVE.md §1.3; NX_PASS_UNKNOWN = none), b = NxFamilyId \
+                           (nx/families.h). Emitted by the front before the first draw of each run of draws with the \
                            same (pass id, family); a pass with no tagged draw has no marker */
+#define NXGPU_OP_ENUM_(n) NxOp_##n,
+enum NxOp {
+    NXGPU_OP_LIST_V3(NXGPU_OP_ENUM_)
     NxOp_Count
 };
 #define NX_FOURCC(a, b, c, d) ((uint32_t)(a) | (uint32_t)(b) << 8 | (uint32_t)(c) << 16 | (uint32_t)(d) << 24)
@@ -181,10 +184,17 @@ typedef struct NxGpuApi {
 } NxGpuApi;
 
 /* ext_call function numbers; the arguments are those of the NxGpuApi slot, in order. */
+/* The v3 backend functions between INFO (0) and SHUTDOWN: X(id suffix, NxGpuApi member, argument count). THE definition of
+ * their numbers and arities; a backend table is expanded from it. */
+#define NXGPU_FN_LIST_V3(X) \
+    X(MEM_CREATE, mem_create, 1) X(MEM_GPU_ADDR, mem_gpu_addr, 1) X(IMAGE_CREATE, image_create, 1) \
+    X(SAMPLER_CREATE, sampler_create, 1) X(SHADER_CREATE, shader_create, 1) X(SUBMIT, submit, 1) \
+    X(WAIT_FRAME, wait_frame, 1) X(READBACK, readback, 1)
+#define NXGPU_FN_ENUM_(id, m, n) NXGPU_FN_##id,
 enum NxGpuFn {
     NXGPU_FN_INFO = 0,    /* (NxGpuInfo* out) -> 0 */
-    NXGPU_FN_MEM_CREATE, NXGPU_FN_MEM_GPU_ADDR, NXGPU_FN_IMAGE_CREATE, NXGPU_FN_SAMPLER_CREATE,
-    NXGPU_FN_SHADER_CREATE, NXGPU_FN_SUBMIT, NXGPU_FN_WAIT_FRAME, NXGPU_FN_READBACK, NXGPU_FN_SHUTDOWN,
+    NXGPU_FN_LIST_V3(NXGPU_FN_ENUM_)
+    NXGPU_FN_SHUTDOWN,
     NXGPU_FN_COUNT
 };
 #define NXGPU_BAD_CALL 0xFFFFFFFFFFFFFF02ull
@@ -197,11 +207,8 @@ enum NxGpuFn {
 #endif
 NX_ASSERT_(sizeof(NxMemBlockDesc) == 16, "NxMemBlockDesc");
 NX_ASSERT_(sizeof(NxImageDesc) == 32, "NxImageDesc");
-NX_ASSERT_(sizeof(NxShaderDesc) == 48, "NxShaderDesc");
-NX_ASSERT_(offsetof(NxShaderDesc, stage) == 0, "NxShaderDesc.stage");
-NX_ASSERT_(offsetof(NxShaderDesc, glsl_size) == 4, "NxShaderDesc.glsl_size");
-NX_ASSERT_(offsetof(NxShaderDesc, glsl) == 8, "NxShaderDesc.glsl");
-NX_ASSERT_(offsetof(NxShaderDesc, key) == 16, "NxShaderDesc.key");
+NX_ASSERT_(sizeof(NxShaderDesc) == 4, "NxShaderDesc");
+NX_ASSERT_(offsetof(NxShaderDesc, row) == 0, "NxShaderDesc.row");
 NX_ASSERT_(sizeof(NxVtxLayout) == 36, "NxVtxLayout");
 NX_ASSERT_(sizeof(NxFrameStats) == 32, "NxFrameStats");
 NX_ASSERT_(sizeof(NxSubmit) == 32, "NxSubmit");

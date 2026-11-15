@@ -2,7 +2,7 @@
 // Link note: these classes are the NX_BASES_<Class> of res_hooks.h (the one-line change of d9impl_hooks.h).
 #pragma once
 #include "state_rt.h"
-#include "res_sm.h"
+#include "nx_smscan.h"
 #define NX_MAX_BUFFER_BYTES 0x40000000u  // largest buffer we allocate (1 GiB: Switch memory bound; above = D3DERR_OUTOFVIDEOMEMORY)
 
 // backend hooks of the GPU mirrors of buffers and queries (glue_buf.cpp / glue_query.cpp; the tests define their own)
@@ -40,7 +40,7 @@ HRESULT nx_decl_validate(const D3DVERTEXELEMENT9* e, uint32_t* n_incl_end);   //
 void nx_ffp_decl_from_elements(const D3DVERTEXELEMENT9* e, NxFfpVsDecl* out); // pure and total (ffp_vs_state.h)
 bool nx_env_decltype_supported(uint32_t type);             // ENV (caps DeclTypes): declared here, defined by the environment module
 
-// ---- shaders: bytecode copy, content key (SHA-256 of the bytecode, fnvnx_sha256 of lib/sha256), parsed interface (res_sm.h)
+// ---- shaders: bytecode copy, content key (SHA-256 of the bytecode, fnvnx_sha256 of lib/sha256), parsed interface (nx_smscan.h)
 struct NxShaderCore;
 void nxd3d_shader_ids_destroy(NxShaderCore* s);            // draw_prog.cpp: the object dies: the backend shader ids made for it (NXGPU_FN_SHADER_DESTROY after a flush of the stream that may use them); only called when `nprogs` > 0
 struct NxShaderProg { uint8_t variant, n_l, l[31]; uint32_t id; };   // a backend shader of this shader object: (variant bit0 = VS complete, bit1 = D3DSHADE_FLAT colours, link set L = FNVNX_DK_PAIR codes ascending) -> id (>= 1), made at the first draw that needs it

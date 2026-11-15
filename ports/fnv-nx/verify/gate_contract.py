@@ -22,7 +22,7 @@ entries.tsv (liftall's entries, gate disp only). A file the root's recipe/link d
 Inputs shared by every root (verify/contract_inputs.json, "fnvnx-contract-inputs/1"; no other source, nothing comes from an argument):
   external     content-pinned inputs of fnv-nx-build, the same keys and the same fetch as a recipe's externals (recipe.fetch_externals:
                exact commit, tree_sha256 checked): the exe-derived private facts never enter this repository
-  exe msvc universe   `NAME/path` inside an external: FalloutNV.exe, the pristine MSVC objects (dir of u<i>.obj), L3's universe.tsv
+  exe msvc universe   `NAME/path` inside an external: FalloutNV.exe, L3's universe.tsv; `msvc` is the bare NAME of the pristine-objects external (its ROOT: meta.json and obj/u<i>.obj; n1 appends obj)
   root_results {units, addrmap, aliases[, entries]} file names in the root's out dir
   ranges       {exe: NAME/path, module: NAME/path with %s = the dll's stem}: where an image's range facts are in an external
   The image set of gpa/reach/reachlink is not an input: contract/images.py derives it (transitive closure of the normal and delay-load import
@@ -45,6 +45,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "contract"))
+import cas  # noqa: E402
 import exepin  # noqa: E402
 import gate_build  # noqa: E402
 import iat  # noqa: E402
@@ -103,7 +104,7 @@ def load_inputs(path):
             err.append("external names are not unique")
         for k in PATHS + tuple(k for k in ("reach_requests", "dynsites", "keys", "bridge", "ehfacts", "sites") if k in doc):
             v = doc.get(k)
-            if not isinstance(v, str) or ("/" not in v and k != "ehfacts") or v.split("/", 1)[0] not in names or ".." in v.split("/"):
+            if not isinstance(v, str) or ("/" not in v and k not in ("ehfacts", "msvc")) or v.split("/", 1)[0] not in names or ".." in v.split("/"):
                 err.append("%s must be NAME/path inside a declared external" % k)
     rg = doc.get("ranges")
     if not (isinstance(rg, dict) and set(rg) == {"exe", "module"} and all(isinstance(v, str) and "/" in v and ".." not in v.split("/")
@@ -143,15 +144,18 @@ def assemble(link, res, game, out, rr):
         if is_game:
             os.symlink(o["object"], os.path.join(link, "game", name))
     os.symlink(res["elf"]["path"], os.path.join(link, "guest", "fnvnx.elf"))
-    with open(os.path.join(os.path.dirname(link), "inputs.rsp"), "w") as f:      # the link's response file: one quoted path per object of the link
-        f.write("".join('"%s"\n' % o["object"] for o in res["objects"] + [x for lr in res.get("link_roots", []) for x in lr["objects"]]))   # in link order
+    os.symlink(res["elf_facts"]["path"], os.path.join(link, "guest", "elffacts.json"))   # the link record: consumers of the linked ELF read it, never nm or readelf
+    # the link's response file: one quoted path per object of the link, in link order; published whole (cas.publish_file)
+    cas.publish_file(os.path.join(os.path.dirname(link), "inputs.rsp"),
+                     "".join('"%s"\n' % o["object"] for o in res["objects"] + [x for lr in res.get("link_roots", []) for x in lr["objects"]]).encode())
     for k, dst in (("addrmap", "out/addrmap.tsv"), ("aliases", "out/aliases.ld")):
         os.symlink(os.path.join(out, rr[k]), os.path.join(link, dst))
 
 
 def P2(ext, v):
-    n, rel = v.split("/", 1)
-    return os.path.join(ext[n]["host"], rel)
+    """NAME[/path]: the path inside the external NAME, or the external's root for a bare NAME."""
+    n, _, rel = v.partition("/")
+    return os.path.join(ext[n]["host"], rel) if rel else ext[n]["host"]
 
 
 def py(script, *args):
@@ -188,7 +192,9 @@ def stages(w, doc, ext, rp, only=None):
     imgs = []
     if only is None or only in IMAGE_GATES:
         for name, pe, rg in images_of(doc, ext)[0]:
-            imgs += ["--image", "%s=%s,%s" % (name, pe, rg)]
+            imgs += ["--image", "%s=%s" % (name, pe)]
+        fx = ext[doc["ranges"]["exe"].split("/", 1)[0]]     # the facts external: contract/imagerec.py checks its tree_sha256 and the images' sha256
+        imgs += ["--facts", fx["host"], "--facts-tree", fx["tree"]]
     bridge = ["--bridge", P2(ext, doc["bridge"])] if doc.get("bridge") else []
     opt = lambda k: P2(ext, doc[k]) if k in doc else None
     st = {
@@ -200,7 +206,7 @@ def stages(w, doc, ext, rp, only=None):
         "xunit": (py("gate_xunit.py", "--objects", link + "/game", "--nm", NM), ["gate/xunit.json"]),
         "rtti": (py("gate_rtti.py", "--objects", link + "/game", "--readelf", READELF), ["gate/rtti.json"]),
         "pcrel": (py("gate_pcrel.py", "--elf", link + "/guest/fnvnx.elf", "--objects", link + "/fixed", "--work", w + "/pcrel",
-                     "--readelf", READELF, "--nm", NM), ["gate/pcrel.json"]),
+                     "--readelf", READELF, "--facts", link + "/guest/elffacts.json"), ["gate/pcrel.json"]),
         "bind": (py("bind.py", "--obj", w + "/obj.json", "--n1", w + "/n1.json", "--units", rp["units"], "--out", w + "/bind.json", "--n3-out", w + "/n3.tsv"),
                  ["bind.json", "n3.tsv"]),
         "bodysel": (py("bodysel.py", "--universe", P("universe"), "--n1", w + "/n1.json", "--gates", w + "/gates", "--n3", w + "/n3.tsv",
@@ -224,18 +230,53 @@ NEEDS.update({g: NEEDS["bodysel"] for g in REGISTRY})
 NEEDS.update({"abs": ["abs"], "disp": ["disp"], "gpa": ["gpa"], "reach": ["gpa", "reach"], "reachlink": ["gpa", "reach", "reachlink"]})
 
 
+def _seed(w, pw):
+    """The published files of the shared work dir W as hard links in the private run dir PW (the stage reads its predecessors' outputs there); LINK is the
+    published directory itself."""
+    for d, dirs, files in os.walk(w):
+        rel = os.path.relpath(d, w)
+        if rel == ".":
+            dirs[:] = [x for x in dirs if x != "link" and ".tmp" not in x and ".run" not in x]
+        for n in files:
+            if ".tmp-" in n:
+                continue
+            dst = os.path.join(pw, rel, n)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            os.link(os.path.join(d, n), dst)
+    if os.path.isdir(w + "/link"):
+        os.symlink(w + "/link", pw + "/link")
+
+
 def run_stage(name, w, doc, ext, rp):
+    """One stage of the shared work dir W (GATE_CACHE/contract/<key>). Every write into W is a publication: the stage runs in a private dir PW beside W (a
+    hard-linked copy of W's published files), and each file it made is published by cas.publish_file (a private sibling, then rename), so a concurrent
+    reader or a second process never sees a partial file; the stage is a function of the key, two runs publish the same bytes."""
     argv, outs = stages(w, doc, ext, rp, name)[name]
     if all(os.path.isfile(os.path.join(w, o)) for o in outs):
         return
-    gdir = os.path.join(w, "gate")
-    os.makedirs(gdir, exist_ok=True)
-    # a gate file of a stage is written to the shared gate dir; xunit/rtti/pcrel/n1/bodysel exit 1 when red and still write it
-    r = subprocess.run(argv, cwd=w, env=dict(os.environ, GATE_OUT=gdir), capture_output=True, text=True)
-    missing = [o for o in outs if not os.path.isfile(os.path.join(w, o))]
-    if missing:
-        tail = (r.stderr.strip().splitlines() or r.stdout.strip().splitlines() or ["?"])[-1][:200]
-        raise Red("stage %s failed (exit %d, no %s): %s" % (name, r.returncode, ", ".join(missing), tail))
+    pw = tempfile.mkdtemp(prefix=os.path.basename(w) + ".run", dir=os.path.dirname(w))
+    try:
+        _seed(w, pw)
+        argv, outs = stages(pw, doc, ext, rp, name)[name]
+        gdir = os.path.join(pw, "gate")
+        os.makedirs(gdir, exist_ok=True)
+        # a gate file of a stage is written to the shared gate dir; xunit/rtti/pcrel/n1/bodysel exit 1 when red and still write it
+        r = subprocess.run(argv, cwd=pw, env=dict(os.environ, GATE_OUT=gdir), capture_output=True, text=True)
+        missing = [o for o in outs if not os.path.isfile(os.path.join(pw, o))]
+        if missing:
+            tail = (r.stderr.strip().splitlines() or r.stdout.strip().splitlines() or ["?"])[-1][:200]
+            raise Red("stage %s failed (exit %d, no %s): %s" % (name, r.returncode, ", ".join(missing), tail))
+        for d, dirs, files in os.walk(pw):
+            rel = os.path.relpath(d, pw)
+            if rel == ".":
+                dirs[:] = [x for x in dirs if x != "link"]
+            for n in files:
+                src, dst = os.path.join(d, n), os.path.normpath(os.path.join(w, rel, n))
+                if os.path.exists(dst) and os.path.samefile(src, dst):
+                    continue   # a seeded file: already published
+                cas.publish_file(dst, src=src)
+    finally:
+        shutil.rmtree(pw, ignore_errors=True)
 
 
 def main(argv):
@@ -313,9 +354,9 @@ def chain(gate, repo, cache, root):
         ext = recipe.fetch_externals(doc["external"], os.path.join(cache, "store"), os.path.join(cache, "external"), ws)
         os.makedirs(w, exist_ok=True)
         if not os.path.isdir(os.path.join(w, "link")):
-            tmpl = w + "/link.tmp%d" % os.getpid()
+            tmpl = "%s/link.tmp-%d-%s" % (w, os.getpid(), os.urandom(4).hex())
             assemble(tmpl, objs, rec["game"], out, rr)
-            os.rename(tmpl, w + "/link")
+            recipe.publish_dir(tmpl, w + "/link")
         for st in NEEDS[gate]:
             run_stage(st, w, doc, ext, rp)
         yield doc, rec, objs, out, rp, ext, w
@@ -336,8 +377,7 @@ def _judge(gate, repo, cache, root, doc, rp, ext, w):
     tree = gate_build.tree_of(repo)
     if gate == "reach":       # the facts file the objstub gate reads (gate_objstub.py): written only from a reach run of this tree
         d = os.path.join(cache, "reach", tree)
-        os.makedirs(d, exist_ok=True)
-        shutil.copyfile(w + "/reach/reach.facts.tsv", d + "/reach.facts.tsv")
+        cas.publish_file(d + "/reach.facts.tsv", src=w + "/reach/reach.facts.tsv")
     if gate not in REGISTRY:
         r = json.load(open(os.path.join(w, "gate", gate + ".json")))
         u, c, ids, detail = r["universe"], r["certified"], [root + ":" + i for i in r["uncertified"]], r["detail"]

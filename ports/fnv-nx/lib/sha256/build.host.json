@@ -6,6 +6,15 @@
  },
  "flags": {
   "c": [
+   "-fms-extensions",
+   "-fshort-wchar",
+   "-frounding-math",
+   "-fsigned-char",
+   "-fno-strict-aliasing",
+   "-fwrapv",
+   "-fno-delete-null-pointer-checks",
+   "-fno-lifetime-dse",
+   "-ffp-contract=off",
    "-O2",
    "-Werror=attributes",
    "-Wall",
@@ -18,7 +27,6 @@
    "-fPIC"
   ],
   "cxx": [
-   "-Werror=attributes",
    "-fPIC"
   ],
   "asm": []
@@ -26,6 +34,5 @@
  "include": [
   "ports/fnv-nx/lib/sha256/include"
  ],
- "units": "all",
- "external": []
+ "units": "all"
 }

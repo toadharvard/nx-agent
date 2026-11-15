@@ -23,6 +23,8 @@
 #define FNVNX_SD_EXE       FNVNX_SD_DIR "/FalloutNV.exe"
 #define FNVNX_SD_DATA      FNVNX_SD_DIR "/Data"
 #define FNVNX_SD_USER      FNVNX_SD_DIR "/user"
+/* the declared font directory: the files of the pinned fnv-nx-build tools/fonts-wine9 mirror, as manifest/fonts_mirror.json lists them */
+#define FNVNX_SD_FONTS     FNVNX_SD_DIR "/fonts"
 #define FNVNX_SD_CONFIG    FNVNX_SD_DIR "/fnvnx.ini"
 #define FNVNX_SD_HOST_LOG  FNVNX_SD_DIR "/host.log"
 #define FNVNX_SD_CRASH_LOG FNVNX_SD_DIR "/crash.log"
@@ -43,7 +45,7 @@
 /* Names under FNVNX_SD_DIR that belong to the port; everything else there is the player's install (C:\FalloutNV).
  * tests/s5/datapath.py (S5-data) keeps these on the card, tests/nx1/check_fs.py checks the list covers every
  * FNVNX_SD_* above. drive_* = drive_<x> for any other Windows drive (path.cpp). */
-#define FNVNX_SD_PORT_NAMES "fnv.nro fnv-exefs.nsp guest.nso fnvnx.ini user drive_* host.log crash.log launcher.log " \
+#define FNVNX_SD_PORT_NAMES "fnv.nro fnv-exefs.nsp guest.nso fnvnx.ini user fonts drive_* host.log crash.log launcher.log " \
                             "override.txt README.txt nxgpu.log translated.nxsp translated.json"
 
 /* Memory the game process needs from the application pool (docs/NRO.md, check 2): the 32BitNoReserved heap region

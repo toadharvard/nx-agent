@@ -86,7 +86,7 @@ def emit():
     return "\n".join(o) + "\n"
 
 
-SPEC = os.path.join(HERE, "..", "spec", "d3d9_spec.json")
+SPEC = None   # the interface table (D9_SPEC of bridgefacts): set by the caller from its argument
 OUT_STRUCTS = ["D3DCAPS9", "D3DADAPTER_IDENTIFIER9", "D3DDISPLAYMODE", "D3DDISPLAYMODEEX", "LUID"]
 
 

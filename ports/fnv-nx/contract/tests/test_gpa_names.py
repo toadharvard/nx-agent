@@ -2,7 +2,7 @@
 """Synthetic check of gpa_names.py / argflow.py on a hand-assembled PE32 image (no game data)."""
 import os, struct, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-import argflow, gpa_names
+import argflow, gpa_names, imagerec
 
 BASE, TEXT, RD, DATA = 0x400000, 0x1000, 0x2000, 0x3000
 LL, GPA = BASE + RD, BASE + RD + 4            # IAT slots of LoadLibraryA, GetProcAddress
@@ -37,6 +37,14 @@ class Asm:
     def ret(self):                    self.raw(0xc3)
 
 
+
+def reloc_size(b):
+    """The exact size of a base relocation table that is followed by zero padding."""
+    pos = 0
+    while pos + 8 <= len(b) and struct.unpack_from('<I', b, pos + 4)[0] >= 8:
+        pos += struct.unpack_from('<I', b, pos + 4)[0]
+    return pos
+
 def build():
     a = Asm()
     a.func('f_const')                      # LoadLibraryA("mod.dll"); GetProcAddress(h, "Foo")
@@ -59,6 +67,10 @@ def build():
     a.func('f_taken')                      # same as f_param, but its address is a relocated word
     a.push_s(S_MOD); a.call_slot(LL); a.raw(0xff, 0x74, 0x24, 0x04, 0x50); a.call_slot(GPA); a.ret(); a.end('f_taken')
     a.func('caller3'); a.push_s(S_FOO); a.imm([0xe8], 0, False); a.raw(0x59, 0xc3); a.end('caller3')
+    a.func('f_llopen')                     # LoadLibraryA(writable string); GetProcAddress(h, "Foo")
+    a.push_s(S_BAZ); a.call_slot(LL); a.push_s(S_FOO); a.raw(0x50); a.call_slot(GPA); a.ret(); a.end('f_llopen')
+    a.func('f_memh')                       # GetProcAddress([S_BAZ], "Foo"): the handle is read from memory
+    a.imm([0xa1], S_BAZ); a.push_s(S_FOO); a.raw(0x50); a.call_slot(GPA); a.ret(); a.end('f_memh')
     a.func('thunk'); a.imm([0xff, 0x25], GPA); a.end('thunk')   # jmp [GPA]; no code reaches it
     # direct calls
     for c, f in (('caller1', 'f_param'), ('caller2', 'f_param'), ('caller3', 'f_taken')):
@@ -93,7 +105,7 @@ def build():
     struct.pack_into('<II', hdr, o + 56, 0x5000, 0x200)
     struct.pack_into('<I', hdr, o + 92, 16)
     struct.pack_into('<II', hdr, o + 96 + 8, RD + 0x10, 40)            # import directory
-    struct.pack_into('<II', hdr, o + 96 + 40, 0x4000, len(reloc))      # base relocations
+    struct.pack_into('<II', hdr, o + 96 + 40, 0x4000, reloc_size(reloc))      # base relocations
     sh = o + 224
     out, fo = bytearray(hdr), 0x200
     for i, (nm, rva, body, ch) in enumerate(secs):
@@ -114,7 +126,7 @@ def check(name, got, want):
 
 data, a = build()
 ranges = {s: [(s, e)] for s, e in a.funcs.values() if s != a.funcs['thunk'][0]}
-img = argflow.Image(data, 'syn.exe', ranges)
+img = argflow.Image(imagerec.ImageRec(data, 'syn.exe', ranges))
 img.import_stack = gpa_names.import_stacks('dll\tname\tordinal\tconv\tret\targs\nkernel32.dll\tLoadLibraryA\t\tstdcall\ti\ti\nkernel32.dll\tGetProcAddress\t\tstdcall\ti\tii\n')
 
 
@@ -146,6 +158,19 @@ check('param names', sorted(n for _, n in d['pairs']), ['Bar', 'Foo'])
 check('param status', d['status'], 'closed')
 d = pairs('f_taken')
 check('address-taken param is open', d['status'], 'open')
+# may-load superset: an undecided LoadLibrary name is the set of the declared machine plus NULL
+d = pairs('f_llopen')
+check('undecided LoadLibrary without a set: module unknown, pairs (*, name)', (d['status'], sorted(d['pairs']), d['mod_unknown']), ('closed', [('*', 'Foo')], True))
+img.mayload = ['a.dll', 'b.dll']
+d = pairs('f_llopen')
+check('undecided LoadLibrary resolves over the set: a name exported by two images gives both', (d['status'], sorted(d['pairs'])), ('closed', [('a.dll', 'Foo'), ('b.dll', 'Foo')]))
+d = pairs('f_writable')
+check('an undecided GetProcAddress name stays open with a set', d['status'], 'open')
+d = pairs('f_memh')
+check('a handle read from memory is not placed even in the set', d['status'], 'open')
+d = pairs('f_const')
+check('a decided name is unchanged by the set', (d['status'], sorted(d['pairs'])), ('closed', [('mod.dll', 'Foo')]))
+img.mayload = None
 thunk_ref = a.funcs['thunk'][0] + 2
 d = gpa_names.derive_site(img, thunk_ref)
 check('unreached thunk', (d['status'], d['note'], d['pairs']), ('closed', 'unreached', set()))

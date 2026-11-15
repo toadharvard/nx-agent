@@ -1,0 +1,89 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "external": "gcc-msvcmodel",
+  "cc": "bin/aarch64-linux-gnu-gcc",
+  "cxx": "bin/aarch64-linux-gnu-g++"
+ },
+ "flags": {
+  "c": [
+   "-Werror=attributes",
+   "-Wall",
+   "-Werror",
+   "-O2",
+   "-std=gnu11"
+  ],
+  "cxx": [
+   "-Werror=attributes"
+  ],
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/render/smscan/include",
+  "ports/fnv-nx/render/smscan/gen"
+ ],
+ "units": "all",
+ "external": [
+  {
+   "name": "gcc-msvcmodel",
+   "repo": "fnv-nx-build",
+   "ref": "tools/gcc-ilp32-msvcmodel",
+   "commit": "b274ec067a2f965807a359853f456e31c67a49af",
+   "tree_sha256": "a1eeb84d83a6ecfa631643575c49581dc72a48b961b6e6db31ad2a63436debec",
+   "at": "/ext/gcc"
+  }
+ ],
+ "plugins": [
+  {
+   "name": "fnvnx_ftoi"
+  },
+  {
+   "name": "fnvnx_order"
+  },
+  {
+   "name": "fnvnx_sdd"
+  },
+  {
+   "name": "fnvnx_pi"
+  },
+  {
+   "name": "fnvnx_dispatch"
+  },
+  {
+   "name": "fnvnx_addr"
+  },
+  {
+   "name": "fnvnx_names"
+  },
+  {
+   "name": "fnvnx_layout"
+  }
+ ],
+ "link": null,
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/render/smscan/res_smgen.py",
+   "args": [
+    "/out/gen",
+    "/uses/ports/fnv-nx/render/shaders/total/sm_table.json",
+    "/in/ports/fnv-nx/bridgefacts/d3d9/d3d9_tables.py"
+   ],
+   "inputs": [
+    "ports/fnv-nx/bridgefacts/d3d9/d3d9_tables.py"
+   ],
+   "outputs": [
+    "gen/res_smtab.gen.h"
+   ]
+  }
+ ],
+ "uses": [
+  {
+   "root": "ports/fnv-nx/render/shaders/total",
+   "output": "sm_table.json"
+  },
+  {
+   "root": "ports/fnv-nx/render/shaders/total",
+   "output": "sm_illegal.tsv"
+  }
+ ]
+}

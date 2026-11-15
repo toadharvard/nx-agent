@@ -1,0 +1,19 @@
+{
+ "format": "fnvnx-recipe/1",
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/lift/descs/descs.py",
+   "args": [],
+   "inputs": [],
+   "objects_of": {
+    "section": ".fnvnx.disp"
+   },
+   "outputs": [
+    "descs.tsv"
+   ]
+  }
+ ],
+ "outputs": {
+  "descs": "descs.tsv"
+ }
+}

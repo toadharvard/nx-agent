@@ -26,7 +26,7 @@ def check(name, ok, detail=""):
 
 FL = ["-O1", "-ffreestanding", "-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"]
 LIB_REC = {"format": "fnvnx-recipe/1", "compiler": TR.RECIPE["compiler"], "flags": {"c": FL, "cxx": [], "asm": []}, "include": [], "units": "all"}
-IMG = dict(LIB_REC, include=[], link={"output": "x.exe", "kind": "exe", "flags": ["-m", "aarch64linux"], "roots": [T + "lib1", T + "lib2"]})
+IMG = dict(LIB_REC, include=[], link={"output": "x.exe", "kind": "exe", "flags": ["-m", "aarch64linux"]})
 NONE = {"toy/a.c": None, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None, "toy/link.ld": None, "toy/constants.tsv": None, "gen/gen.py": None,
         "toy/inc/toy.h": None, "toy/inc/gen.h": None}
 START = "void _start(void) { for (;;) ; }\n"
@@ -36,15 +36,18 @@ H_INC = '.section .text.h,"axG",@progbits,h,comdat\n.weak h\n.type h,%function\n
 
 def mkrepo(name, libs, extra=None, img=IMG):
     """libs {path: (recipe, {file: text})}; extra {repo file: text} (e.g. headers); the image is the toy root."""
-    repo = TR.make_repo(name, rec=img, files=dict(NONE, **{"toy/e.c": START}))
+    pulls = sorted(p[len(T):] for p in libs)     # the image calls one function of each lib root: the definer closure links exactly these roots (no list names them)
+    e_c = "".join("int pull_%s(void);\n" % n for n in pulls) + "void _start(void) { %sfor (;;) ; }\n" % "".join("pull_%s(); " % n for n in pulls)
+    repo = TR.make_repo(name, rec=img, files=dict(NONE, **{"toy/e.c": e_c}))
     adm = json.load(open(repo + "/" + T + "verify/admit.json"))
     for path, (r, fs) in libs.items():
-        adm["roots"].append({"path": path, "class": "product", "target": "host", "gates": [], "recipe": path + "/build.json"})
+        adm["roots"].append({"path": path, "class": "product", "target": "host", "recipe": path + "/build.json"})
         TR.w(repo, path[len(T):] + "/build.json", json.dumps(r))
         for f, text in fs.items():
             TR.w(repo, path[len(T):] + "/" + f, text)
+        TR.w(repo, path[len(T):] + "/pull.c", "int pull_%s(void) { return 0; }\n" % path[len(T):])
     if any(p.startswith(T + "hdr") for p in (extra or {})) or any(T + "hdr" in r["include"] for r, _ in libs.values()):
-        adm["roots"].append({"path": T + "hdr", "class": "product", "target": "host", "gates": [], "recipe": T + "hdr/build.json"})   # a header home is a product root
+        adm["roots"].append({"path": T + "hdr", "class": "product", "target": "host", "recipe": T + "hdr/build.json"})   # a header home is a product root
         TR.w(repo, "hdr/build.json", json.dumps(dict(LIB_REC, include=[])))
     for f, text in (extra or {}).items():
         TR.w(repo, f[len(T):], text)

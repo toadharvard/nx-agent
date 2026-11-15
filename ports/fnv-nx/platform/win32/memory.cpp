@@ -12,17 +12,17 @@
  * Memory the platform or the loader got elsewhere is entered with fnvnx_win32_vm_note (flag F_FOREIGN: the OS
  * range is not ours to release); file views are entered by filemap.cpp through w32_vm_view_*. */
 #include "w32.h"
+#include "fnvnx/hostvm.h"
 #include "w32_reach.h"
+#include "declared_os.h"   /* generated from declared/os.json */
 
 #include <malloc.h>
 #include <stdlib.h>
 
-#define GRAN 0x10000u
-#define PAGE 0x1000u
 #define UMIN 0x00010000u     /* lowest user address */
 #define UEND 0x7FFF0000u     /* one past the highest user address (lpMaximumApplicationAddress + 1) */
-#define NPAGES ((UEND - UMIN) / PAGE)
-#define PPG (GRAN / PAGE)    /* pages per granule */
+#define NPAGES ((UEND - UMIN) / FNVNX_PAGE_SIZE)
+#define PPG (FNVNX_VM_ALIGN / FNVNX_PAGE_SIZE)    /* pages per granule */
 
 enum { ST_FREE = 0, ST_RESERVE = 1, ST_COMMIT = 2 };
 enum { TY_PRIVATE = 0, TY_MAPPED = 1, TY_IMAGE = 2 };
@@ -82,14 +82,14 @@ static bool pg_init(void)   /* under the lock */
         g_pg = (struct pg *)calloc(NPAGES, sizeof(struct pg));
     return g_pg != NULL;
 }
-static inline size_t pidx(uintptr_t a) { return (size_t)((a - UMIN) / PAGE); }
-static inline uintptr_t paddr(size_t i) { return (uintptr_t)i * PAGE + UMIN; }
+static inline size_t pidx(uintptr_t a) { return (size_t)((a - UMIN) / FNVNX_PAGE_SIZE); }
+static inline uintptr_t paddr(size_t i) { return (uintptr_t)i * FNVNX_PAGE_SIZE + UMIN; }
 
 static void pg_set(size_t i, uintptr_t base, uint8_t state, uint8_t type, DWORD cur, DWORD aprot, uint8_t flags, uint32_t caller)
 {
     if (g_pg[i].state == ST_FREE)
         g_free_pages--;
-    g_pg[i].base = (uint32_t)(base / PAGE);
+    g_pg[i].base = (uint32_t)(base / FNVNX_PAGE_SIZE);
     g_pg[i].caller = caller;
     g_pg[i].cur = (uint16_t)cur;
     g_pg[i].aprot = (uint16_t)aprot;
@@ -118,7 +118,7 @@ static void mem_account(size_t first, size_t n, bool committed, long long sign)
         size_t j = i;
         while (j < first + n && (g_pg[j].state == ST_COMMIT) == committed && g_pg[j].caller == g_pg[i].caller)
             j++;
-        fnvnx_mem_delta(MEMK_VIRTUAL, sign * (long long)((j - i) * PAGE), g_pg[i].caller);
+        fnvnx_mem_delta(MEMK_VIRTUAL, sign * (long long)((j - i) * FNVNX_PAGE_SIZE), g_pg[i].caller);
         i = j;
     }
 }
@@ -181,7 +181,7 @@ static size_t find_free(size_t n, bool top_down, size_t lo, size_t hi)
 }
 
 typedef void *(*osmap_fn)(void *hint, size_t size, void *ctx);
-static void *os_reserve_cb(void *hint, size_t size, void *) { return os_vm_reserve(hint, (size + GRAN - 1) & ~(size_t)(GRAN - 1)); }   /* the OS holds the whole granule */
+static void *os_reserve_cb(void *hint, size_t size, void *) { return os_vm_reserve(hint, (size + FNVNX_VM_ALIGN - 1) & ~(size_t)(FNVNX_VM_ALIGN - 1)); }   /* the OS holds the whole granule */
 
 /* places an allocation of n pages: at the granule of want (0: first fit or top down) with the OS range obtained by
  * osmap (hinted: exactly there). Returns the page index of the base or NPAGES with the last error set. */
@@ -189,12 +189,12 @@ static size_t place(uintptr_t want, size_t n, bool top_down, osmap_fn osmap, voi
 {
     size_t span = (n + PPG - 1) / PPG * PPG;
     if (want) {
-        size_t first = pidx(want & ~(uintptr_t)(GRAN - 1));
+        size_t first = pidx(want & ~(uintptr_t)(FNVNX_VM_ALIGN - 1));
         if (!granules_free(first, n)) {
             SetLastError(ERROR_INVALID_ADDRESS);
             return NPAGES;
         }
-        void *p = osmap((void *)paddr(first), n * PAGE, ctx);
+        void *p = osmap((void *)paddr(first), n * FNVNX_PAGE_SIZE, ctx);
         if (!p || p == W32_VIEW_FAIL) {
             if (!p)
                 SetLastError(ERROR_INVALID_ADDRESS);
@@ -210,7 +210,7 @@ static size_t place(uintptr_t want, size_t n, bool top_down, osmap_fn osmap, voi
             return NPAGES;
         }
         /* the OS may hold the address (the host's own mappings): the map is the rule, the next free fit is the answer */
-        void *p = osmap((void *)paddr(at), n * PAGE, ctx);
+        void *p = osmap((void *)paddr(at), n * FNVNX_PAGE_SIZE, ctx);
         if (p == W32_VIEW_FAIL)   /* no range will do: the osmap has set the error */
             return NPAGES;
         if (p)
@@ -240,7 +240,7 @@ static int commit_pages(size_t first, size_t last, DWORD prot)
         size_t q = p;
         while (q <= last && g_pg[q].state != ST_COMMIT)
             q++;
-        if (os_vm_commit((void *)paddr(p), (q - p) * PAGE)) {
+        if (os_vm_commit((void *)paddr(p), (q - p) * FNVNX_PAGE_SIZE)) {
             fail = true;
             break;
         }
@@ -256,7 +256,7 @@ static int commit_pages(size_t first, size_t last, DWORD prot)
         for (size_t p = first; p <= last; p++)
             if (g_pg[p].flags & F_NEW) {
                 mem_account(p, 1, true, -1);
-                os_vm_decommit((void *)paddr(p), PAGE);
+                os_vm_decommit((void *)paddr(p), FNVNX_PAGE_SIZE);
                 g_pg[p].state = ST_RESERVE;
                 g_pg[p].cur = 0;
                 g_pg[p].flags &= ~F_NEW;
@@ -282,7 +282,7 @@ static int commit_pages(size_t first, size_t last, DWORD prot)
                 break;
             q++;
         }
-        os_vm_protect((void *)paddr(p), (q - p) * PAGE, want_p);
+        os_vm_protect((void *)paddr(p), (q - p) * FNVNX_PAGE_SIZE, want_p);
         p = q;
     }
     for (size_t p = first; p <= last; p++) {
@@ -296,7 +296,7 @@ static void release_alloc(size_t first)   /* a private allocation, all of it */
 {
     size_t n = alloc_pages(first);
     mem_account(first, n, true, -1);
-    os_vm_release((void *)paddr(first), (n + PPG - 1) / PPG * PPG * PAGE);
+    os_vm_release((void *)paddr(first), (n + PPG - 1) / PPG * PPG * FNVNX_PAGE_SIZE);
     for (size_t i = 0; i < n; i++)
         pg_clear(first + i);
 }
@@ -346,11 +346,11 @@ extern "C" LPVOID VirtualAlloc(LPVOID addr, SIZE_T size, DWORD type, DWORD prote
         goto bad;
     }
     if (type & (MEM_RESET | MEM_RESET_UNDO)) {
-        uint64_t pa = a & ~(uint64_t)(PAGE - 1), pe = (a + sz + PAGE - 1) & ~(uint64_t)(PAGE - 1);
+        uint64_t pa = a & ~(uint64_t)(FNVNX_PAGE_SIZE - 1), pe = (a + sz + FNVNX_PAGE_SIZE - 1) & ~(uint64_t)(FNVNX_PAGE_SIZE - 1);
         err = ERROR_INVALID_ADDRESS;
         if (pa < UMIN || pe > UEND || pe < pa)
             goto unlock_bad;
-        size_t f = pidx((uintptr_t)pa), n = (size_t)((pe - pa) / PAGE);
+        size_t f = pidx((uintptr_t)pa), n = (size_t)((pe - pa) / FNVNX_PAGE_SIZE);
         for (size_t i = f; i < f + n; i++)
             if (g_pg[i].state != ST_COMMIT || g_pg[i].base != g_pg[f].base)
                 goto unlock_bad;
@@ -370,20 +370,20 @@ extern "C" LPVOID VirtualAlloc(LPVOID addr, SIZE_T size, DWORD type, DWORD prote
         goto unlock_ok;
     }
     if ((type & MEM_RESERVE) || !a) {   /* a new allocation (a commit without an address reserves too) */
-        uint64_t base = a & ~(uint64_t)(GRAN - 1), end = a ? (a + sz + PAGE - 1) & ~(uint64_t)(PAGE - 1) : sz;
+        uint64_t base = a & ~(uint64_t)(FNVNX_VM_ALIGN - 1), end = a ? (a + sz + FNVNX_PAGE_SIZE - 1) & ~(uint64_t)(FNVNX_PAGE_SIZE - 1) : sz;
         size_t np;
         if (a) {
             if (a + sz < a || base < UMIN || end > UEND) {
                 err = ERROR_INVALID_PARAMETER;
                 goto unlock_bad;
             }
-            np = (size_t)((end - base) / PAGE);
+            np = (size_t)((end - base) / FNVNX_PAGE_SIZE);
         } else {
             if (sz > (uint64_t)(UEND - UMIN)) {
                 err = ERROR_NOT_ENOUGH_MEMORY;
                 goto unlock_bad;
             }
-            np = (size_t)((sz + PAGE - 1) / PAGE);
+            np = (size_t)((sz + FNVNX_PAGE_SIZE - 1) / FNVNX_PAGE_SIZE);
         }
         size_t at = place(a ? (uintptr_t)base : 0, np, (type & MEM_TOP_DOWN) != 0, os_reserve_cb, NULL);
         if (at == NPAGES) {
@@ -394,7 +394,7 @@ extern "C" LPVOID VirtualAlloc(LPVOID addr, SIZE_T size, DWORD type, DWORD prote
         for (size_t i = 0; i < np; i++)
             pg_set(at + i, ab, ST_RESERVE, TY_PRIVATE, 0, protect, (type & MEM_WRITE_WATCH) ? F_WATCH : 0, caller);
         if (type & MEM_COMMIT) {
-            size_t f = a ? pidx((uintptr_t)(a & ~(uint64_t)(PAGE - 1))) : at, l = at + np - 1;
+            size_t f = a ? pidx((uintptr_t)(a & ~(uint64_t)(FNVNX_PAGE_SIZE - 1))) : at, l = at + np - 1;
             if (commit_pages(f, l, protect)) {
                 release_alloc(at);
                 err = ERROR_NOT_ENOUGH_MEMORY;
@@ -403,7 +403,7 @@ extern "C" LPVOID VirtualAlloc(LPVOID addr, SIZE_T size, DWORD type, DWORD prote
         }
         res = (LPVOID)ab;
     } else {   /* commit inside an existing reservation */
-        uint64_t pa = a & ~(uint64_t)(PAGE - 1), pe = (a + sz + PAGE - 1) & ~(uint64_t)(PAGE - 1);
+        uint64_t pa = a & ~(uint64_t)(FNVNX_PAGE_SIZE - 1), pe = (a + sz + FNVNX_PAGE_SIZE - 1) & ~(uint64_t)(FNVNX_PAGE_SIZE - 1);
         err = ERROR_INVALID_ADDRESS;
         if (pa < UMIN || a + sz < a || pe > UEND)
             goto unlock_bad;
@@ -425,7 +425,7 @@ extern "C" LPVOID VirtualAlloc(LPVOID addr, SIZE_T size, DWORD type, DWORD prote
                 g_pg[i].state = ST_COMMIT;
                 g_pg[i].cur = (uint16_t)protect;
             }
-            os_vm_protect((void *)paddr(f), (l - f + 1) * PAGE, os_prot_of(protect));
+            os_vm_protect((void *)paddr(f), (l - f + 1) * FNVNX_PAGE_SIZE, os_prot_of(protect));
         } else if (commit_pages(f, l, protect)) {
             err = ERROR_NOT_ENOUGH_MEMORY;
             goto unlock_bad;
@@ -463,7 +463,7 @@ extern "C" BOOL VirtualFree(LPVOID addr, SIZE_T size, DWORD type)
         if (a < UMIN || a >= UEND || g_pg[pidx((uintptr_t)a)].state == ST_FREE)
             goto unlock_bad;
         size_t i = pidx((uintptr_t)a);
-        size_t first = pidx((uintptr_t)((uint64_t)g_pg[i].base * PAGE));   /* the allocation's first page */
+        size_t first = pidx((uintptr_t)((uint64_t)g_pg[i].base * FNVNX_PAGE_SIZE));   /* the allocation's first page */
         err = ERROR_INVALID_PARAMETER;
         if (g_pg[i].type != TY_PRIVATE || (g_pg[i].flags & (F_FOREIGN | F_VIEW)))
             goto unlock_bad;   /* views end with UnmapViewOfFile, noted memory is not ours */
@@ -479,15 +479,15 @@ extern "C" BOOL VirtualFree(LPVOID addr, SIZE_T size, DWORD type)
                 f = first;
                 l = first + n - 1;
             } else {
-                uint64_t pa = a & ~(uint64_t)(PAGE - 1), pe = (a + sz + PAGE - 1) & ~(uint64_t)(PAGE - 1);
+                uint64_t pa = a & ~(uint64_t)(FNVNX_PAGE_SIZE - 1), pe = (a + sz + FNVNX_PAGE_SIZE - 1) & ~(uint64_t)(FNVNX_PAGE_SIZE - 1);
                 err = ERROR_INVALID_ADDRESS;
-                if (a + sz < a || pe > paddr(first) + (uint64_t)n * PAGE)
+                if (a + sz < a || pe > paddr(first) + (uint64_t)n * FNVNX_PAGE_SIZE)
                     goto unlock_bad;
                 f = pidx((uintptr_t)pa);
                 l = pidx((uintptr_t)pe) - 1;
             }
             mem_account(f, l - f + 1, true, -1);
-            os_vm_decommit((void *)paddr(f), (l - f + 1) * PAGE);
+            os_vm_decommit((void *)paddr(f), (l - f + 1) * FNVNX_PAGE_SIZE);
             for (size_t k = f; k <= l; k++) {
                 g_pg[k].state = ST_RESERVE;
                 g_pg[k].cur = 0;
@@ -520,7 +520,7 @@ static int range_access(uint64_t a, uint64_t n, int access, bool consume_guard)
         if (p->cur & PAGE_GUARD) {
             if (consume_guard) {
                 p->cur &= ~PAGE_GUARD;
-                os_vm_protect((void *)paddr(i), PAGE, os_prot_pg(*p));
+                os_vm_protect((void *)paddr(i), FNVNX_PAGE_SIZE, os_prot_pg(*p));
             }
             return 0;
         }
@@ -551,8 +551,8 @@ int w32_vm_probe(const void *p, size_t n, int access)
  * and only when the call is otherwise valid (every error of the contract above it keeps its answer). */
 static DWORD protect_pages(uint64_t a, uint64_t sz, DWORD prot, DWORD *was)
 {
-    uint32_t reach = 0;
-    uint64_t pa = a & ~(uint64_t)(PAGE - 1), pe = (a + sz + PAGE - 1) & ~(uint64_t)(PAGE - 1);
+    enum w32_reach_kind reach = W32R_NONE;
+    uint64_t pa = a & ~(uint64_t)(FNVNX_PAGE_SIZE - 1), pe = (a + sz + FNVNX_PAGE_SIZE - 1) & ~(uint64_t)(FNVNX_PAGE_SIZE - 1);
     DWORD err = 0;
     os_lock(&g_vm_lock);
     if (!pg_init() || pa < UMIN || a + sz < a || pe > UEND) {
@@ -566,10 +566,10 @@ static DWORD protect_pages(uint64_t a, uint64_t sz, DWORD prot, DWORD *was)
             err = ERROR_INVALID_PARAMETER;   /* beyond what the section / view grants */
         for (size_t i = f; i <= l && !err && !reach; i++)
             if (g_pg[i].flags & F_ALIAS_FILE)
-                reach = REACH_KERNEL32_CreateFileMappingA_PROT;
+                reach = W32R_CFM_PROT;
             else if (g_pg[i].flags & F_ALIAS_PF)
-                reach = REACH_KERNEL32_CreateFileMappingA_HFILE;
-        if (!err && !reach && !(g_pg[f].flags & F_WATCH) && os_vm_protect((void *)paddr(f), (l - f + 1) * PAGE, os_prot_of(prot)))
+                reach = W32R_CFM_HFILE;
+        if (!err && !reach && !(g_pg[f].flags & F_WATCH) && os_vm_protect((void *)paddr(f), (l - f + 1) * FNVNX_PAGE_SIZE, os_prot_of(prot)))
             err = ERROR_INVALID_PARAMETER;
         if (!err && !reach) {
             *was = g_pg[f].cur;
@@ -577,13 +577,13 @@ static DWORD protect_pages(uint64_t a, uint64_t sz, DWORD prot, DWORD *was)
                 g_pg[i].cur = (uint16_t)prot;
             if (g_pg[f].flags & F_WATCH)   /* each page by its own tracking state */
                 for (size_t i = f; i <= l && !err; i++)
-                    if (os_vm_protect((void *)paddr(i), PAGE, os_prot_pg(g_pg[i])))
+                    if (os_vm_protect((void *)paddr(i), FNVNX_PAGE_SIZE, os_prot_pg(g_pg[i])))
                         err = ERROR_INVALID_PARAMETER;
         }
     }
     os_unlock(&g_vm_lock);
     if (reach)
-        w32_reach(reach);
+        w32_reach_if(reach);
     return err;
 }
 
@@ -633,11 +633,11 @@ extern "C" SIZE_T VirtualQuery(LPCVOID addr, PMEMORY_BASIC_INFORMATION mbi, SIZE
     os_unlock(&g_vm_lock);
     memset(mbi, 0, sizeof *mbi);
     mbi->BaseAddress = (PVOID)(uintptr_t)paddr(p);
-    mbi->RegionSize = (q - p) * PAGE;
+    mbi->RegionSize = (q - p) * FNVNX_PAGE_SIZE;
     if (c.state == ST_FREE) {
         mbi->Protect = PAGE_NOACCESS;
     } else {
-        mbi->AllocationBase = (PVOID)(uintptr_t)((uint64_t)c.base * PAGE);
+        mbi->AllocationBase = (PVOID)(uintptr_t)((uint64_t)c.base * FNVNX_PAGE_SIZE);
         mbi->AllocationProtect = c.aprot;
         mbi->State = c.state == ST_COMMIT ? MEM_COMMIT : MEM_RESERVE;
         mbi->Protect = c.state == ST_COMMIT ? c.cur : 0;
@@ -659,12 +659,12 @@ extern "C" int fnvnx_win32_vm_fault(uintptr_t addr, int access, uint32_t *code_o
         struct pg *p = &g_pg[pidx((uintptr_t)a)];
         if (p->cur & PAGE_GUARD) {
             p->cur &= ~PAGE_GUARD;   /* once: the access is retried after the handler */
-            os_vm_protect((void *)(uintptr_t)(a & ~(uint64_t)(PAGE - 1)), PAGE, os_prot_pg(*p));
+            os_vm_protect((void *)(uintptr_t)(a & ~(uint64_t)(FNVNX_PAGE_SIZE - 1)), FNVNX_PAGE_SIZE, os_prot_pg(*p));
             code = STATUS_GUARD_PAGE_VIOLATION;
             r = 1;
         } else if (access == 1 && (p->flags & F_WATCH) && !p->wdirty && prot_write(p->cur)) {
             p->wdirty = 1;   /* the first write since the reset: record it, let the page be written, retry */
-            os_vm_protect((void *)(uintptr_t)(a & ~(uint64_t)(PAGE - 1)), PAGE, os_prot_pg(*p));
+            os_vm_protect((void *)(uintptr_t)(a & ~(uint64_t)(FNVNX_PAGE_SIZE - 1)), FNVNX_PAGE_SIZE, os_prot_pg(*p));
             r = 2;
         } else if (access == 1 ? prot_write(p->cur) : access == 8 ? prot_exec(p->cur) : prot_read(p->cur)) {
             r = 2;   /* the map permits it: another thread cleared the guard first */
@@ -679,7 +679,7 @@ extern "C" int fnvnx_win32_vm_fault(uintptr_t addr, int access, uint32_t *code_o
 /* The pages [pa, pe) as map indices, when they lie in one MEM_WRITE_WATCH allocation (under the lock). */
 static bool watch_range(uint64_t a, uint64_t sz, size_t *f, size_t *l)
 {
-    uint64_t pa = a & ~(uint64_t)(PAGE - 1), pe = (a + sz + PAGE - 1) & ~(uint64_t)(PAGE - 1);
+    uint64_t pa = a & ~(uint64_t)(FNVNX_PAGE_SIZE - 1), pe = (a + sz + FNVNX_PAGE_SIZE - 1) & ~(uint64_t)(FNVNX_PAGE_SIZE - 1);
     if (!sz || a + sz < a || pa < UMIN || pe > UEND || !pg_init())
         return false;
     *f = pidx((uintptr_t)pa);
@@ -694,7 +694,7 @@ static void watch_rearm(size_t i)
 {
     g_pg[i].wdirty = 0;
     if (g_pg[i].state == ST_COMMIT)
-        os_vm_protect((void *)paddr(i), PAGE, os_prot_pg(g_pg[i]));
+        os_vm_protect((void *)paddr(i), FNVNX_PAGE_SIZE, os_prot_pg(g_pg[i]));
 }
 
 /* GetWriteWatch: the page addresses in [base, base + size) written since allocation or the last reset, in address order
@@ -724,7 +724,7 @@ extern "C" UINT GetWriteWatch(DWORD flags, PVOID base, SIZE_T size, PVOID *addre
         }
     os_unlock(&g_vm_lock);
     *count = n;
-    *granularity = PAGE;
+    *granularity = FNVNX_PAGE_SIZE;
     return 0;
 }
 
@@ -747,7 +747,7 @@ extern "C" UINT ResetWriteWatch(PVOID base, SIZE_T size)
 /* memory that did not come from VirtualAlloc: the loader's image sections, heap regions and thread stacks */
 extern "C" void fnvnx_win32_vm_note(uintptr_t base, size_t size, DWORD type, DWORD protect)
 {
-    uint64_t pa = (uint64_t)base & ~(uint64_t)(PAGE - 1), pe = ((uint64_t)base + size + PAGE - 1) & ~(uint64_t)(PAGE - 1);
+    uint64_t pa = (uint64_t)base & ~(uint64_t)(FNVNX_PAGE_SIZE - 1), pe = ((uint64_t)base + size + FNVNX_PAGE_SIZE - 1) & ~(uint64_t)(FNVNX_PAGE_SIZE - 1);
     protect = W32_DW(protect);
     type = W32_DW(type);
     uint8_t ty = type == MEM_IMAGE ? TY_IMAGE : type == MEM_MAPPED ? TY_MAPPED : TY_PRIVATE;
@@ -772,7 +772,7 @@ extern "C" void fnvnx_win32_vm_note(uintptr_t base, size_t size, DWORD type, DWO
 
 extern "C" void fnvnx_win32_vm_unnote(uintptr_t base, size_t size)
 {
-    uint64_t pa = (uint64_t)base & ~(uint64_t)(PAGE - 1), pe = ((uint64_t)base + size + PAGE - 1) & ~(uint64_t)(PAGE - 1);
+    uint64_t pa = (uint64_t)base & ~(uint64_t)(FNVNX_PAGE_SIZE - 1), pe = ((uint64_t)base + size + FNVNX_PAGE_SIZE - 1) & ~(uint64_t)(FNVNX_PAGE_SIZE - 1);
     if (!size || pa < UMIN || pe > UEND || pe < pa)
         return;
     os_lock(&g_vm_lock);
@@ -794,7 +794,7 @@ static void *view_osmap(void *hint, size_t size, void *c)
 void *w32_vm_view_place(uintptr_t want, size_t size, w32_view_osmap osmap, void *ctx, DWORD alloc_prot, DWORD page_prot,
                         int committed, int image, int reserve_section)
 {
-    size_t np = (size + PAGE - 1) / PAGE;
+    size_t np = (size + FNVNX_PAGE_SIZE - 1) / FNVNX_PAGE_SIZE;
     void *res = NULL;
     os_lock(&g_vm_lock);
     if (!pg_init()) {
@@ -822,16 +822,16 @@ size_t w32_vm_view_remove(uintptr_t base)
 {
     size_t n = 0;
     os_lock(&g_vm_lock);
-    if (pg_init() && base >= UMIN && base < UEND && !(base & (PAGE - 1))) {
+    if (pg_init() && base >= UMIN && base < UEND && !(base & (FNVNX_PAGE_SIZE - 1))) {
         size_t i = pidx(base);
-        if (g_pg[i].state != ST_FREE && (g_pg[i].flags & F_VIEW) && paddr(i) == (uintptr_t)((uint64_t)g_pg[i].base * PAGE)) {
+        if (g_pg[i].state != ST_FREE && (g_pg[i].flags & F_VIEW) && paddr(i) == (uintptr_t)((uint64_t)g_pg[i].base * FNVNX_PAGE_SIZE)) {
             n = alloc_pages(i);
             for (size_t k = 0; k < n; k++)
                 pg_clear(i + k);
         }
     }
     os_unlock(&g_vm_lock);
-    return n * PAGE;
+    return n * FNVNX_PAGE_SIZE;
 }
 
 void w32_vm_view_alias(uintptr_t base, size_t size, int file)
@@ -861,14 +861,7 @@ void w32_vm_view_prot(uintptr_t base, size_t size, DWORD prot)
 #ifndef STATUS_NO_MEMORY
 #define STATUS_NO_MEMORY 0xC0000017u
 #endif
-#ifndef HEAP_NO_SERIALIZE
-#define HEAP_NO_SERIALIZE 0x00000001
-#endif
-#ifndef HEAP_GENERATE_EXCEPTIONS
-#define HEAP_GENERATE_EXCEPTIONS 0x00000004
-#endif
 #define HEAP_MAX_BLOCK 0x7FFF8u   /* the largest single block of a fixed-size heap (MSDN) */
-#define HEAP_PAGE 4096u
 
 struct w32_heap;
 struct alignas(16) heap_blk {
@@ -966,7 +959,7 @@ extern "C" HANDLE HeapCreate(DWORD f, SIZE_T i, SIZE_T m)
     h->flags = W32_DW(f) & (HEAP_NO_SERIALIZE | HEAP_GENERATE_EXCEPTIONS);
     if (m) {   /* fixed size: rounded up to pages, and at least the initial size */
         size_t lim = m < i ? i : m;
-        h->limit = (lim + HEAP_PAGE - 1) & ~(size_t)(HEAP_PAGE - 1);
+        h->limit = (lim + FNVNX_PAGE_SIZE - 1) & ~(size_t)(FNVNX_PAGE_SIZE - 1);
         if (!h->limit) h->limit = lim;   /* wrapped around: the largest size */
     }
     os_lock(&g_heaps_lock);
@@ -1114,7 +1107,7 @@ static uint64_t virt_avail(void)
     os_lock(&g_vm_lock);
     uint64_t n = pg_init() ? g_free_pages : NPAGES;
     os_unlock(&g_vm_lock);
-    return n * PAGE;
+    return n * FNVNX_PAGE_SIZE;
 }
 
 extern "C" void GlobalMemoryStatus(LPMEMORYSTATUS ms)
@@ -1156,14 +1149,13 @@ extern "C" BOOL GlobalMemoryStatusEx(LPMEMORYSTATUSEX ms)
 extern "C" void GetSystemInfo(LPSYSTEM_INFO si)
 {
     memset(si, 0, sizeof *si);
-    si->wProcessorArchitecture = 0; /* PROCESSOR_ARCHITECTURE_INTEL: what the game was built for */
-    si->dwPageSize = PAGE;
+    si->wProcessorArchitecture = FNVNX_OS_NATIVE_ARCH; /* declared/os.json native_arch */
+    si->dwPageSize = FNVNX_PAGE_SIZE;
     si->lpMinimumApplicationAddress = (LPVOID)(uintptr_t)0x00010000u;
     si->lpMaximumApplicationAddress = (LPVOID)(uintptr_t)0x7FFEFFFFu;
-    unsigned n = os_cpu_count();
-    si->dwActiveProcessorMask = ((DWORD_PTR)1 << n) - 1;
-    si->dwNumberOfProcessors = n;
+    si->dwActiveProcessorMask = os_cpu_mask();
+    si->dwNumberOfProcessors = os_cpu_count();
     si->dwProcessorType = 586; /* PROCESSOR_INTEL_PENTIUM */
-    si->dwAllocationGranularity = GRAN;
+    si->dwAllocationGranularity = FNVNX_VM_ALIGN;
     si->wProcessorLevel = 6;
 }

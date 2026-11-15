@@ -13,11 +13,11 @@ lib-dynload, PY_MODULES); (3) UNIT_CC through unitstage.gcc_set(): driver, `as`,
 FILE under its trees (the unit stage ingests them whole: /usr/include, GCC install dir with plugin headers, libexec); the host
 gcc's HOST_GCC_PROGS/HOST_GCC_FILES and every file of its plugin directory (HOST_GCC_PLUGIN_DIRS: the plugin headers of the host-root compiler); (4) the renderer's host libraries: RENDER_LIBS (loader cache names, with their loader closure) and RENDER_FILES. The trees also get a listing digest (an extra package adding files there is a mismatch).
 A file without a dpkg owner outside python's prefix is an error. Programs and who executes them: strace opentrace.py; busybox
-tests/test_graph,test_sandbox; gcc,as,ld test_sandbox,test_sdcheck; aarch64-linux-gnu-g++ test_unitstage (unitstage.py);
-aarch64-linux-gnu-nm,readelf icount.py,test_unitstage; aarch64-linux-gnu-as,ld,objcopy test_icount; ar,clang test_coffnorm;
+tests/test_sandbox; gcc,as,ld test_sandbox,test_sdcheck; aarch64-linux-gnu-g++ test_unitstage (unitstage.py);
+aarch64-linux-gnu-nm,readelf icount.py,test_unitstage; aarch64-linux-gnu-as,ld,objcopy test_icount;
 git verdict.py,l1.py,test_gates; ldd,true test_runtime; g++,llvm-config-18 build a64access.cc (objstub.py, test_a64access).
 The a64access build set is derived the same way: every header `g++ -M` reports for a64access.cc under `llvm-config-18 --cxxflags`,
-and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). The clang set (clang-18 plugins such as vtnames; clang -m32 compiles) is derived the same way: the headers under `llvm-config-18 --includedir` that a plugin includes (CLANG_API) with the whole clang/ tree they sit in, the libraries of CLANG_LIBS under `--libdir`, and every header `clang -m32 -M` reports for a C probe including stdint.h and stdlib.h (gnu/stubs-32.h: libc6-dev-i386). Python modules (version in python.modules, installed-files sha256 in python.installed_files_sha256, see wheel_digest; wheel file sha256 in python.wheel_sha256): capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts, perf, check_mirror); pefile (platform/manifest/regsites.py); numpy (lift/test/instest.py packer); z3-solver, keystone-engine, gmpy2 (lift/proof, lift/bench, lift/test)."""
+and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). The clang set (clang-18 plugins such as vtnames; clang -m32 compiles) is derived the same way: the headers under `llvm-config-18 --includedir` that a plugin includes (CLANG_API) with the whole clang/ tree they sit in, the libraries of CLANG_LIBS under `--libdir`, and every header `clang -m32 -M` reports for a C probe including stdint.h and stdlib.h (gnu/stubs-32.h: libc6-dev-i386). Python modules (version in python.modules, installed-files sha256 in python.installed_files_sha256, see wheel_digest; wheel file sha256 in python.wheel_sha256): capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts, perf, check_mirror); pefile (manifest/regsites.py); numpy (lift/test/instest.py packer); z3-solver, keystone-engine, gmpy2 (lift/proof, lift/bench, lift/test)."""
 import argparse
 import csv
 import ctypes
@@ -59,28 +59,6 @@ KERNEL = ["unshare mount+pid+net+uts+ipc namespaces as root", "seccomp filter", 
 
 def env_id(doc):
     return hashlib.sha256(json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-
-def wheel_files(dist):
-    """{path: sha256 hex} of the installed files of distribution DIST that its RECORD hashes (no .pyc, no installer-written files), read from
-    the disk: a file that differs from its RECORD entry makes the digest differ (the entry is not trusted, the content is hashed)."""
-    import base64
-    import csv
-    d, out = metadata.distribution(dist), {}
-    for row in csv.reader(d.read_text("RECORD").splitlines()):
-        path, h = row[0], row[1] if len(row) > 1 else ""
-        if not h.startswith("sha256=") or path.endswith(".pyc") or "__pycache__" in path.split("/"):
-            continue
-        f = d.locate_file(path)
-        have = hashlib.sha256(open(f, "rb").read()).hexdigest() if os.path.isfile(f) else "missing"
-        want = base64.urlsafe_b64decode(h[7:] + "=" * (-len(h[7:]) % 4)).hex()
-        out[path] = have if have == want else "differs-from-record:" + have
-    return out
-
-
-def wheel_digest(dist):
-    """sha256 over the sorted (path, content hash) lines of wheel_files(DIST): names the installed wheel by its content."""
-    return hashlib.sha256("".join("%s %s\n" % kv for kv in sorted(wheel_files(dist).items())).encode()).hexdigest()
-
 
 def file_owners():
     """{path: {dpkg package names}} from /var/lib/dpkg/info/*.list (arch qualifier dropped); a path owned by several packages has all of them."""
@@ -225,29 +203,71 @@ PROBES = {KERNEL[0]: lambda: os.geteuid() == 0 and _children(_unshare), KERNEL[1
 # files the installer writes into .dist-info (not the wheel's content: they name the installer and how it was asked)
 INSTALLER_FILES = ("INSTALLER", "REQUESTED", "direct_url.json")
 
-def wheel_files(dist):
-    """{path: sha256 hex} of the installed files of distribution DIST that its RECORD hashes, hashed from the DISK (a file that differs
-    from its RECORD entry shows as `differs-from-record:<hash>`, a missing one as `missing`): the RECORD entry is the wheel's own hash,
-    the content is what is verified. Not content, so not listed: .pyc and __pycache__, the files pip/uv write themselves (INSTALLER,
-    REQUESTED, direct_url.json, RECORD) and rows outside the site directory (`../`: console scripts, whose shebang the installer
-    rewrites). The digest is the same for pip, uv, --no-compile, --target."""
+def _record_rows(dist):
+    """[(path, sha256 hex | None)] of the RECORD of distribution DIST, whose paths are relative to the site directory that holds the
+    distribution; RecordError if the distribution has no RECORD."""
     import base64
-    d, out = metadata.distribution(dist), {}
-    for line in d.read_text("RECORD").splitlines():
+    d = metadata.distribution(dist)
+    text = d.read_text("RECORD")
+    if text is None:
+        raise RecordError("%s: the distribution has no RECORD" % dist)
+    out = []
+    for line in text.splitlines():
         row = next(csv.reader([line]), [])
-        path, h = row[0], row[1] if len(row) > 1 else ""
-        if (not h.startswith("sha256=") or path.endswith(".pyc") or "__pycache__" in path.split("/") or path.startswith("../")
-                or path.rsplit("/", 1)[-1] in INSTALLER_FILES + ("RECORD",)):
+        if not row:
+            continue
+        h = row[1] if len(row) > 1 else ""
+        out.append((row[0], base64.urlsafe_b64decode(h[7:] + "=" * (-len(h[7:]) % 4)).hex() if h.startswith("sha256=") else None))
+    return d, out
+
+class RecordError(ValueError):
+    """A pinned module's installed files are not what its RECORD lists."""
+
+def _content(path):
+    """Is PATH wheel content (not .pyc / __pycache__, not a file pip or uv writes itself, not the RECORD, not a console script row `../`)?"""
+    return not (path.endswith(".pyc") or "__pycache__" in path.split("/") or path.startswith("../")
+                or path.rsplit("/", 1)[-1] in INSTALLER_FILES + ("RECORD",))
+
+def record_files(dist):
+    """{path: sha256 hex} of the installed files of distribution DIST that its RECORD hashes, hashed from the DISK: a file that differs from its
+    RECORD entry shows as `differs-from-record:<hash>`, a missing one as `missing`. The RECORD entry is the wheel's own hash, the content is
+    what is verified. This is THE set of files of a pinned python module: the wheel's whole installed content (the package, the sibling
+    *.libs directory, top-level .so and .pth files, the dist-info), never "the package directory". Three things use it: the sandbox mount of
+    a stage that declares the module (recipe.pinned_modules, runtime.build), the stage key (the digest below) and envcheck's check. The digest
+    is the same for pip, uv, --no-compile, --target."""
+    d, rows = _record_rows(dist)
+    out = {}
+    for path, want in rows:
+        if want is None or not _content(path):
             continue
         f = d.locate_file(path)
         have = hashlib.sha256(open(f, "rb").read()).hexdigest() if os.path.isfile(f) else "missing"
-        want = base64.urlsafe_b64decode(h[7:] + "=" * (-len(h[7:]) % 4)).hex()
-        out[path] = have if have == want else "differs-from-record:" + have
+        out[path] = have if have in (want, "missing") else "differs-from-record:" + have
     return out
 
+def record_tops(dist):
+    """Sorted top-level site-relative paths (a directory or a file) of record_files(DIST): what is mounted for the module."""
+    return sorted({p.split("/", 1)[0] for p in record_files(dist)})
+
+def record_problems(dist):
+    """[line] for a module whose installed files are not exactly its RECORD: a RECORD entry that is missing on disk or whose hash differs, and a
+    file under one of the module's top-level paths that the RECORD does not list (a file the wheel did not ship). Empty = the module is the wheel."""
+    d = metadata.distribution(dist)
+    bad = ["%s: RECORD entry %s is %s" % (dist, p, "missing" if h == "missing" else "different from its RECORD hash") for p, h in sorted(record_files(dist).items()) if len(h) != 64 or h.startswith("differs") or h == "missing"]
+    listed = {p for p, _ in _record_rows(dist)[1]}
+    for top in record_tops(dist):
+        root = str(d.locate_file(top))
+        for r, ds, fs in os.walk(root) if os.path.isdir(root) else [(os.path.dirname(root), [], [os.path.basename(root)])]:
+            ds[:] = [x for x in ds if x != "__pycache__"]
+            for f in fs:
+                rel = os.path.relpath(os.path.join(r, f), str(d.locate_file(".")))
+                if _content(rel) and rel not in listed:
+                    bad.append("%s: %s is installed but not listed in the RECORD" % (dist, rel))
+    return bad
+
 def wheel_digest(dist):
-    """sha256 over the sorted (path, content hash) lines of wheel_files(DIST): names the installed wheel by its content."""
-    return hashlib.sha256("".join("%s %s\n" % kv for kv in sorted(wheel_files(dist).items())).encode()).hexdigest()
+    """sha256 over the sorted (path, content hash) lines of record_files(DIST): names the installed wheel by its content."""
+    return hashlib.sha256("".join("%s %s\n" % kv for kv in sorted(record_files(dist).items())).encode()).hexdigest()
 
 def _root_compilers(repo=None):
     """Driver names of the distribution compilers (no external) of the admitted product roots of the checkout, from admit.json and the recipes."""

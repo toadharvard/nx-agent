@@ -6,8 +6,14 @@ The external is the pinned tree tools/mojoshader-glsldk of fnv-nx-build, which h
 (render/shaders/translator/PATCHES.md), so every C file of it is a unit; there is no selection here."""
 import os, sys
 ext, out = sys.argv[1], sys.argv[2]
-rows = sorted(os.path.relpath(os.path.join(d, f), ext).replace(os.sep, "/") for d, _, fs in os.walk(ext) for f in fs if f.endswith(".c"))
-os.makedirs(os.path.dirname(out), exist_ok=True)
+rows = []
+for d, dirs, files in os.walk(ext):
+    dirs.sort()
+    files.sort()
+    for f in files:
+        if f.endswith(".c"):
+            rows.append(os.path.relpath(os.path.join(d, f), ext).replace(os.sep, "/"))
+rows.sort()
 with open(out, "w") as o:
     for r in rows:
         o.write("mojoshader:%s\n" % r)

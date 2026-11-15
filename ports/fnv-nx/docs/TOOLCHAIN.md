@@ -277,7 +277,7 @@ Failure signs: back to HOME / error at launch = NSO or NPDM rejected by ldr (che
 `-DFNVNX_HOST_NO_CONSOLE` builds the host without the libnx text console (graphics owns the display); output then
 goes to `sdmc:/fnvnx/host.log` and svcOutputDebugString only.
 
-### Guest runtime (`toolchain/guest/`, `toolchain/guest/build.sh` -> `crt0.o`, `libfnvnx-guest.a`)
+### Guest runtime (`rt/guest/`, `the recipe (rt/guest/build.json)` -> `crt0.o`, `libfnvnx-guest.a`)
 
 * `threads.c`: guest threads = host threads with their own static TLS block (TPIDR_EL0) and newlib reent; futex
   locks (normal + recursive) and sequence condvars on `wait_on_address`; all devkitPro libsysbase hooks
@@ -348,7 +348,7 @@ writing through a null pointer in `FUN_00404d00_class::FUN_00404d00_class` [orig
 `GetGameSettingCollection` [00404a70] <- `FUN_0040c150(int,int)` [0040c150] <- a static initialiser. The null comes
 from the empty image (a global the real exe provides) or a trapped allocator returning 0. Not reached: WinMain.
 
-What blocks a boot, in order: (1) the player's `FalloutNV.exe` in `sdmc:/fnvnx/game/` (data image; the emulator run
+What blocks a boot, in order: (1) the player's `FalloutNV.exe` at `FNVNX_SD_EXE` (data image; the emulator run
 had none); (2) the 7,300 + 984 + 53 address references without native code, among them whatever the static
 initialisers call; (3) WinMain's unit; (4) S4's CRT start running the image's `__xi`/`__xc` tables (not done:
 `boot.cpp` TODO); (5) D3DX9 and the vtables/typeinfo of uncompiled classes.
@@ -746,7 +746,7 @@ DEVKITPRO=<dkp> toolchain/package/build.sh <g>/guest.nso <pkg> <program id> <g>/
    mounts it at the root). The profile
    (`My Games/FalloutNV`, Fallout.ini, saves) is `sdmc:/switch/fnv/user`. It is one folder for the port and the
    game, as in NX1's `toolchain/include/fnvnx/sdlayout.h`. Guests built before this layout read
-   `sdmc:/fnvnx/game` and `sdmc:/fnvnx/user`. Without the exe the guest boots in trace mode with an empty data image.
+   the game directory the older layout named and its `user` directory (the paths are now `FNVNX_SD_DIR` and `FNVNX_SD_USER`). Without the exe the guest boots in trace mode with an empty data image.
 4. Launch the title from HOME without holding R. Clean up afterwards by deleting
    `atmosphere/contents/<program id>/exefs.nsp`.
 
@@ -977,8 +977,8 @@ those vftables can a hand vptr into the image work at all.
   4,343 skips, the same stop.
 
 **Startup order of the guest** (S1's INIT question):
-1. `__fnvnx_guest_entry` (`toolchain/guest/runtime.c:167`): bss, self-relocation, host API, TLS, newlib, files.
-2. `__libc_init_array()` (`runtime.c:199`): `.preinit_array`, `_init`, then `.init_array`. `toolchain/guest/guest.ld:95-96`
+1. `__fnvnx_guest_entry` (`rt/guest/runtime.c:167`): bss, self-relocation, host API, TLS, newlib, files.
+2. `__libc_init_array()` (`runtime.c:199`): `.preinit_array`, `_init`, then `.init_array`. `rt/guest/guest.ld:95-96`
    orders it: prioritized entries first, then the rest in link order. On the 9a0243c7eabe guest it has 19 entries:
    - `register_fini`;
    - `boot_banner`, `constructor(101)` (now 110, see below) (`toolchain/game/boot.cpp:339`): it maps the data image (`load_image`, :349)
@@ -1003,7 +1003,7 @@ What that means for the INIT fix:
      `time.cpp` `time_init`), module/COM registrations 103 (`input/register.cpp`);
   3. `boot_banner` 110;
   4. the runtime libraries' unprioritized constructors (crtbegin, libstdc++ `eh_alloc`/`eh_globals`, newlib's
-     stack guard), which `toolchain/guest/guest.ld` now places ahead of the rest. It needs one input section per
+     stack guard), which `rt/guest/guest.ld` now places ahead of the rest. It needs one input section per
      `KEEP`, and `libstdc??.a`, because `+` is not a pattern character;
   5. the game units' constructors.
 
@@ -1128,9 +1128,9 @@ python3 -I tests/s5/emu_guest.py guest.nso --elf fnvnx.elf --skip-faulting-init 
     --game <game dir> --budget 6000000000 [--stub-faults tests/s5/known_faults.txt] --summary-json boot.json
 ```
 
-`--game` mounts the install (FalloutNV.exe, Fallout_default.ini, Data/) in place at the guest's `sdmc:/switch/fnv`
-and the older `sdmc:/fnvnx/game`. The port's own entries there (user/, fnvnx.ini, guest.nso, the logs) stay in
-`--root`; without it both are `<sdmc>/fnvnx/game`. Paths fold case as on the SD card
+`--game` mounts the install (FalloutNV.exe, Fallout_default.ini, Data/) in place at the guest's `FNVNX_SD_DIR`
+(sdlayout.h; the older layout's game directory is retired). The port's own entries there (user/, fnvnx.ini, guest.nso, the logs) stay in
+`--root`; without it both are `<sdmc>` plus `FNVNX_SD_DIR` without its device prefix. Paths fold case as on the SD card
 (`tests/s5/datapath.py`). `farm_boot.sh` takes the same as `FARM_GAME=<game dir>`. The data milestones (`data` lines
 of `tests/s5/milestones.txt`: ini-read, archive-list, bsa-opened, esm-header, masters-loaded) and the file faults
 (`data-counts`, `file-fault` lines; `data` and `file_faults` in the summary JSON) come from the guest's host file

@@ -198,6 +198,19 @@
     "ports/fnv-nx/verify/bootsock.py"
    ]
   },
+  "test_bridgefacts.py": {
+   "references": [
+    {
+     "anchor": "## bridgefacts (tool root)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/bridgefacts/com/comrows.py",
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
   "test_cas.py": {
    "references": [
     {
@@ -222,6 +235,20 @@
     "ports/fnv-nx/verify/coffnorm.py"
    ]
   },
+  "test_comdat.py": {
+   "references": [
+    {
+     "anchor": "## link/odr.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/comdat.py",
+    "ports/fnv-nx/link/odr.py",
+    "ports/fnv-nx/verify/gate_linkstrict.py"
+   ]
+  },
   "test_datamodel.py": {
    "references": [
     {
@@ -233,6 +260,54 @@
    "subject": [
     "ports/fnv-nx/verify/gate_datamodel.py",
     "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
+  "test_descs.py": {
+   "references": [
+    {
+     "anchor": "### Objects of every admitted product root (`objects_of`): the fact universe",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/descs/descs.py",
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
+  "test_doubles.py": {
+   "references": [
+    {
+     "anchor": "## verify/doubles.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## verify/recipe.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/doubles.py",
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
+  "test_elffacts.py": {
+   "references": [
+    {
+     "anchor": "### ELF facts of a linked output (the link record)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    },
+    {
+     "anchor": "## verify/elffacts.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/elffacts.py"
    ]
   },
   "test_envcheck.py": {
@@ -253,6 +328,18 @@
     "ports/fnv-nx/farm/setup_verdict_env.sh",
     "ports/fnv-nx/verify/env.json",
     "ports/fnv-nx/verify/a64access.cc"
+   ]
+  },
+  "test_extcache_race.py": {
+   "references": [
+    {
+     "anchor": "## Externals in a shared store",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
    ]
   },
   "test_fpbound.py": {
@@ -357,6 +444,33 @@
     "ports/fnv-nx/contract/hive.py"
    ]
   },
+  "test_gate_memo.py": {
+   "references": [
+    {
+     "anchor": "## Externals in a shared store",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_build.py",
+    "ports/fnv-nx/verify/gate_exepin.py"
+   ]
+  },
+  "test_gate_publish.py": {
+   "references": [
+    {
+     "anchor": "## Externals in a shared store",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_build.py",
+    "ports/fnv-nx/verify/cas.py",
+    "ports/fnv-nx/verify/gate_contract.py"
+   ]
+  },
   "test_gate_pure.py": {
    "references": [
     {
@@ -403,18 +517,6 @@
     "ports/fnv-nx/verify/env.json",
     "ports/fnv-nx/verify/puregate.py",
     "ports/fnv-nx/verify/puregate_policy.py"
-   ]
-  },
-  "test_graph.py": {
-   "references": [
-    {
-     "anchor": "## verify/graph.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/graph.py"
    ]
   },
   "test_guest.py": {
@@ -479,20 +581,13 @@
     "ports/fnv-nx/verify/icount.py"
    ]
   },
-  "test_l1graph.py": {
+  "test_includeuses.py": {
    "references": [
     {
-     "anchor": "## verify/l1graph.py",
+     "anchor": "## Outputs and uses",
      "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
+     "path": "ports/fnv-nx/verify/RECIPE.md"
     }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/l1graph.py",
-    "ports/fnv-nx/verify/graph.py",
-    "ports/fnv-nx/verify/runtime.py",
-    "ports/fnv-nx/verify/toolflags.py",
-    "ports/fnv-nx/verify/toolflags_policy.py"
    ]
   },
   "test_l2gates.py": {
@@ -597,6 +692,21 @@
     "ports/fnv-nx/verify/recipe.py"
    ]
   },
+  "test_loader_tables.py": {
+   "references": [
+    {
+     "anchor": "## contract/modules.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/loader/build.json",
+    "ports/fnv-nx/contract/modules.py",
+    "ports/fnv-nx/contract/mkidentity.py",
+    "ports/fnv-nx/contract/iat.py"
+   ]
+  },
   "test_n3wiring.py": {
    "references": [
     {
@@ -637,6 +747,58 @@
     "ports/fnv-nx/verify/verdict.py"
    ]
   },
+  "test_objstub_assume.py": {
+   "references": [
+    {
+     "anchor": "## verify/objstub.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## verify/objstub_plugin.cc",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## verify/gate_objstub.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/objstub.py",
+    "ports/fnv-nx/verify/objstub_plugin.cc",
+    "ports/fnv-nx/verify/gate_objstub.py",
+    "ports/fnv-nx/verify/a64access.cc",
+    "ports/fnv-nx/verify/verdict.py"
+   ]
+  },
+  "test_objstub_rules.py": {
+   "references": [
+    {
+     "anchor": "## verify/objstub.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/objstub.py",
+    "ports/fnv-nx/verify/gate_objstub.py",
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
+  "test_onedef.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_onedef.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_onedef.py"
+   ]
+  },
   "test_opentrace.py": {
    "references": [
     {
@@ -673,6 +835,18 @@
     "ports/fnv-nx/verify/oraclecheck.py"
    ]
   },
+  "test_pathrules.py": {
+   "references": [
+    {
+     "anchor": "## Include",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
   "test_plugins.py": {
    "references": [
     {
@@ -697,6 +871,18 @@
    "subject": [
     "ports/fnv-nx/verify/producers.py",
     "ports/fnv-nx/verify/gate_linkstrict.py"
+   ]
+  },
+  "test_profile.py": {
+   "references": [
+    {
+     "anchor": "## Profiles",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
    ]
   },
   "test_puregate.py": {
@@ -741,6 +927,15 @@
     "ports/fnv-nx/verify/unitstage.py",
     "ports/fnv-nx/verify/gate_determinism.py",
     "ports/fnv-nx/verify/verdict.py"
+   ]
+  },
+  "test_resolve_dot.py": {
+   "references": [
+    {
+     "anchor": "## Outputs and uses",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
    ]
   },
   "test_resolve_input.py": {
@@ -849,6 +1044,18 @@
     "ports/fnv-nx/verify/puregate_policy.py"
    ]
   },
+  "test_undefset.py": {
+   "references": [
+    {
+     "anchor": "## Link: the guest ELF",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/undefset.py"
+   ]
+  },
   "test_unitstage.py": {
    "references": [
     {
@@ -898,18 +1105,6 @@
     "ports/fnv-nx/verify/sandbox.py",
     "ports/fnv-nx/verify/unitview.py",
     "ports/fnv-nx/verify/unitstage.py"
-   ]
-  },
-  "test_onedef.py": {
-   "references": [
-    {
-     "anchor": "## verify/gate_onedef.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/gate_onedef.py"
    ]
   }
  }

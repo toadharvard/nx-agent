@@ -145,9 +145,9 @@ def main():
     ap.add_argument("--legacy-dir", dest="legacy_dir", default=HERE)
     a = ap.parse_args(); p = pins(a.recipe); a.docs_commit = p["msdocs-win32-d3d9"]; a.vkd3d_commit = a.wine_commit = p["wine-9.0-d3d9"]      # one tree: wine-9.0 holds the decoder table (wined3d) and the bundled vkd3d-shader
     T, regx = build(a)
-    os.makedirs(a.out, exist_ok=True); tj = os.path.join(a.out, "sm_table.json")
+    tj = os.path.join(a.out, "sm_table.json")
     json.dump(T, open(tj, "w"), indent=1, sort_keys=True)
-    import gen_sm_rows; open(os.path.join(a.out, "fnvnx_sm_rows.h"), "w").write(gen_sm_rows.render(tj))
+    import gen_sm_rows; open(os.path.join(a.out, "inc", "fnvnx_sm_rows.h"), "w").write(gen_sm_rows.render(tj))
     leg = T["legacy"]
     with open(os.path.join(a.out, "sm_legacy.tsv"), "w") as o:
         o.write("model\tkind\tfeature\tstatus\tsource\n")

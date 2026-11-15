@@ -94,7 +94,7 @@ guest text, and reports **dynamic instructions per subsystem per interval** and 
 
 ```sh
 tools/perf/frameprof.py guest.nso --elf fnvnx.elf --map fnvnx.map --units <decomp>/build/units.json \
-    --file fnvnx/game/FalloutNV.exe=<exe> --skip-faulting-init --budget 6000000000 \
+    --file <FNVNX_SD_DIR without the device prefix>/FalloutNV.exe=<exe> --skip-faulting-init --budget 6000000000 \
     --frame __fnv_0086e650 [--frame <Present>] --mark main --mark __fnv_0086a850 \
     [--nine-ids <nine build>/gen/nine_proxy_ids.h] --top 20 --json out.json
 ```
@@ -229,7 +229,7 @@ occlusion), not threading. The setting objects behind these names are not identi
 
 ### 6.3 What our platform layer implements, and the gaps
 
-| primitive | implementation (`platform/win32`, `toolchain/guest`, `toolchain/host`) | verdict |
+| primitive | implementation (`platform/win32`, `rt/guest`, `toolchain/host`) | verdict |
 |---|---|---|
 | CRITICAL_SECTION | 24-byte PC layout (D15), recursive, owner/recursion in place, futex word in `LockSemaphore`; spins up to SpinCount (capped at 4,000, not on one core) before `svcWaitForAddress` (S5 `31cdca3`) | works |
 | Interlocked* | `ldaxr/stlxr` loops, full barrier; 6 instructions + call (fnvnx-a64, inline LL/SC; A57 has no LSE) | fine |
@@ -470,7 +470,7 @@ shader accumulator's list pools (0x011c5f80), Havok collision objects, fonts and
 There is no ILP32 TSan and no hardware. `linhost` is a freestanding LP64 Linux stand-in for the Switch host module:
 threads by `clone`, address wait/wake by futexes, `placement.h` applied with `sched_setaffinity` (Switch cores 0-3 ->
 host CPUs 0-3). `guest.elf` is ILP32 code over the real `platform/win32` (sync, thread, handles),
-`toolchain/guest/os_guest.c` and `threads.c`. The test is compiled with GCC's `-fsanitize=thread`, and `hb.c` is the
+`rt/guest/os_guest.c` and `threads.c`. The test is compiled with GCC's `-fsanitize=thread`, and `hb.c` is the
 runtime behind its hooks: a vector-clock happens-before checker with edges from C11 atomics by memory order and from
 the Win32 calls (wrapped at link time, like TSan's interceptors). Under `qemu-aarch64 -R 0xC0000000` every guest
 thread is a host thread, so the cases run in parallel on the container's cores. Build in seconds, run 2-6 s.

@@ -3,7 +3,7 @@
     GATE_OUT=<dir> [GATE_CACHE=<dir>] [ARTIFACTS_URL=<git url>] python3 -I ports/fnv-nx/render/total/gate_d3d9total.py
 Run in the checkout root (verify/verdict.py does). Writes GATE_OUT/d3d9total.json; exit 0 iff green, 2 red.
 Universe = every (enumeration, enumerator) of the enumerations the translation consumes by switch (SWITCHED of
-render/d3d9/front/gen_enums.py, enumerators from render/d3d9/spec/d3d9_spec.json plus VENDOR_FOURCC for D3DFORMAT), ids "enum:E:N",
+render/d3d9/front/gen_enums.py, enumerators from the interface table that bridgefacts/d3d9/d3d9_spec.py generates plus VENDOR_FOURCC for D3DFORMAT), ids "enum:E:N",
 + every row of the table the total root generates (render/shaders/total, sm_table.json; the SM1-3 commands, (stage, opcode form)), ids "sm:K".
 
 Declared inputs (nothing else is read): the tracked files (git ls-files) of INPUTS below (the d3d9 and translator recipes and the d3d9 root's include lists), copied into GATE_OUT/d3d9total.work;
@@ -52,8 +52,10 @@ def recipe_includes(path):
 
 # the inputs are the roots' own records: the d3d9 root's recipe and its include lists, the translator root's recipe (its mojoshader external)
 INCLUDES = recipe_includes(D3D9_REC)
-INPUTS = ["render/d3d9/front", "render/d3d9/spec/d3d9_spec.json", D3D9_REC, TRANSLATOR_REC,
-          TOTAL_DIR] + INCLUDES
+TR_GEN = {os.path.dirname(os.path.dirname(TRANSLATOR_REC) + "/" + o) for g in json.load(open(os.path.join(PORT, TRANSLATOR_REC))).get("generated", []) for o in g["outputs"]}   # build outputs: no tracked files
+TR_INCLUDES = [i for i in recipe_includes(TRANSLATOR_REC) if i not in TR_GEN]   # the translator's own tracked include dirs (the patched MojoShader includes fnvnx_dk_layout.h from them)
+INPUTS = ["render/d3d9/front", "bridgefacts/d3d9", D3D9_REC, TRANSLATOR_REC,
+          TOTAL_DIR, "contract/treehash.py"] + INCLUDES + [i for i in TR_INCLUDES if i not in INCLUDES]
 GCC, CLANG, GIT = "/usr/bin/gcc", "/usr/bin/clang", "/usr/bin/git"
 ARTIFACTS_URL = "https://github.com/toadharvard/fnv-nx-build"
 STRICT = ["-Wall", "-Wextra", "-Werror", "-Werror=switch", "-Werror=switch-enum"]
@@ -112,30 +114,16 @@ def copy_tree(src, dst):
             shutil.copymode(s, d)
 
 
-# ---------------------------------------------------------------- tree hash (the definition of verify/cas.py; a test cross-checks it)
-def canon(obj):
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("ascii")
-
-
-def tree_entry(path):
-    m = os.lstat(path).st_mode
-    if stat.S_ISLNK(m):
-        return {"t": "l", "to": os.readlink(path)}
-    if stat.S_ISREG(m):
-        h = hashlib.sha256()
-        with open(path, "rb") as f:
-            for b in iter(lambda: f.read(1 << 20), b""):
-                h.update(b)
-        return {"t": "f", "h": h.hexdigest(), "x": 1 if m & 0o111 else 0}
-    if stat.S_ISDIR(m):
-        entries = {name: tree_entry(os.path.join(path, name)) for name in sorted(os.listdir(path))}
-        return {"t": "d", "h": hashlib.sha256(canon({"format": "fnvnx-tree/1", "entries": entries})).hexdigest()}
-    raise Red("unsupported file type: " + path)
+# ---------------------------------------------------------------- tree hash (the one home: contract/treehash.py; a test cross-checks it with cas)
+sys.path.append(os.path.join(PORT, "contract"))
+import treehash  # noqa: E402
 
 
 def tree_hash(path):
-    e = tree_entry(path)
-    return e["h"] if e["t"] == "d" else hashlib.sha256(canon(e)).hexdigest()
+    try:
+        return treehash.tree_hash(path)
+    except treehash.CasError as e:
+        raise Red(str(e))
 
 
 # ---------------------------------------------------------------- declared inputs
@@ -238,16 +226,20 @@ def front_build(front, incs, flags):
 def enum_part(inp, work):
     front, backend = os.path.join(inp, "render", "d3d9", "front"), [os.path.join(inp, i) for i in INCLUDES]
     gen = module_lists(os.path.join(front, "gen_enums.py"), ["SWITCHED", "INDEXED", "VENDOR_FOURCC"])
-    spec = json.load(open(os.path.join(inp, "render", "d3d9", "spec", "d3d9_spec.json")))["enums"]
+    os.makedirs(work)
+    # the interface table is a build output (bridgefacts D9_SPEC): the gate runs the same generator on the same tree
+    specp = os.path.join(work, "d3d9_spec.json")
+    if run([sys.executable, "-I", os.path.join(inp, "bridgefacts", "d3d9", "d3d9_spec.py"), specp, os.path.join(work, "d9bridge_rows.tsv"), os.path.join(inp, "shim", "include")]).returncode:
+        raise Red("d3d9_spec.py failed")
+    spec = json.load(open(specp))["enums"]
     names = gen["SWITCHED"] + gen["INDEXED"]
     want_names = {e: list(spec[e]) for e in names}
     want_names["D3DFORMAT"] = want_names["D3DFORMAT"] + ["D3DFMT_" + s.strip() for s in gen["VENDOR_FOURCC"]]
-    os.makedirs(work)
     # the header is a build output (render/d3d9/build.json generated stage): the gate runs the same generator on the same tree
     gdir = os.path.join(work, "gen")
     os.makedirs(gdir)
     hpath = os.path.join(gdir, "d3d9_enums.gen.h")
-    if run([sys.executable, "-I", os.path.join(front, "gen_enums.py"), hpath]).returncode:
+    if run([sys.executable, "-I", os.path.join(front, "gen_enums.py"), hpath, specp]).returncode:
         raise Red("gen_enums.py failed")
     inc = ["-m32", "-ffreestanding", "-I", gdir, "-I", os.path.join(inp, "shim", "include")]
     ginc = [gdir, os.path.join(inp, "shim", "include")]
@@ -363,11 +355,22 @@ def row_layout(ops):
     return out
 
 
-def sm_compile(tree, defs, extra=()):
+def sm_incs(inp, tree):
+    """-I list of the translator recipe's include list: /ext/mojoshader[/sub] is the fetched tree, a tracked directory is the gate's copy of it"""
+    out = []
+    for i in json.load(open(os.path.join(inp, TRANSLATOR_REC)))["include"]:
+        if i == "/ext/mojoshader" or i.startswith("/ext/mojoshader/"):
+            out.append(tree + i[len("/ext/mojoshader"):])
+        elif i.startswith(PORT_PFX):
+            out.append(os.path.join(inp, i[len(PORT_PFX):]))
+    return out
+
+
+def sm_compile(tree, defs, extra=(), incs=()):
     """-> (ok, error diagnostics) of the translator sources"""
     ok, errs = True, []
     for s in SM_SOURCES:
-        r = run(SM_CC_BASE + defs + list(extra) + ["-I", tree, "-I", os.path.join(tree, "profiles"), os.path.join(tree, s)])
+        r = run(SM_CC_BASE + defs + list(extra) + ["-I", tree, "-I", os.path.join(tree, "profiles")] + [x for i in incs for x in ("-I", i)] + [os.path.join(tree, s)])
         ok = ok and r.returncode == 0
         errs += [d for d in diags(r.stderr) if d.get("kind") == "error"]
     return ok, errs
@@ -419,7 +422,8 @@ def sm_part(inp, work, cache):
         rows = os.path.join(tree, ROWS)
         write(rows, rows_text)
         write(os.path.join(tree, "mojoshader_version.h"), '#define MOJOSHADER_VERSION -1\n#define MOJOSHADER_CHANGESET "gate"\n')  # cmake-generated
-        base_ok, base_errs = sm_compile(tree, defs)
+        incs = sm_incs(inp, tree)
+        base_ok, base_errs = sm_compile(tree, defs, (), incs)
         info["baseline_compiles"] = base_ok
         if not base_ok:
             raise Red("patched translator does not compile: " + "; ".join(d.get("message", "") for d in base_errs[:3]))
@@ -439,7 +443,7 @@ def sm_part(inp, work, cache):
             inc = os.path.join(work, "mut_%s.h" % m)
             write(inc, MUTATIONS[m])
             write(rows, mutated)
-            _, errs = sm_compile(tree, defs, ["-include", inc])
+            _, errs = sm_compile(tree, defs, ["-include", inc], incs)
             hit = {line for d in errs for f, line in locs(d) if f == os.path.normpath(rows)}
             for ln in sorted(hit):
                 if ln in killed and m in need[ln]:
@@ -450,7 +454,7 @@ def sm_part(inp, work, cache):
             if kind == "TOKEN":
                 write(rows, "\n".join("FNVNX_GATE_TOKEN" + l[len("FNVNX_SM_TOKEN"):] if i == ln else l
                                       for i, l in enumerate(lines, 1)))
-                if not sm_compile(tree, defs, ["-include", inc])[0]:
+                if not sm_compile(tree, defs, ["-include", inc], incs)[0]:
                     killed[ln].append("token")
         write(rows, rows_text)
         ok_rows = {k for k in ops}

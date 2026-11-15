@@ -28,6 +28,12 @@ int fnvnx_shader_translate_glsl(const void *bc, size_t n, const fnvnx_shader_opt
 {
     static const fnvnx_shader_opts defaults = { 0, NULL, NULL, 0 };
     if (!opts) opts = &defaults;
+    /* The translation is a function of (bytecode, flags & FNVNX_SHADER_KEY_FLAGS, link pairs, backend) only: the cache key is sha256 over exactly
+     * those (fnvnx_shaders.h). From here on the function sees the reduced options, so a NONKEY bit cannot reach the frontend, the profile or the
+     * dk config; a bit that must change the GLSL has to be a KEY bit. */
+    fnvnx_shader_opts key_opts = *opts;
+    key_opts.flags &= FNVNX_SHADER_KEY_FLAGS;
+    opts = &key_opts;
     memset(r, 0, sizeof(*r));
     r->stage = FNVNX_STAGE_UNKNOWN;
     if (!bc) { snprintf(r->error, sizeof r->error, "null bytecode"); return 0; }
@@ -39,13 +45,12 @@ int fnvnx_shader_translate_glsl(const void *bc, size_t n, const fnvnx_shader_opt
     if (!be) { snprintf(r->error, sizeof r->error, "unknown backend '%s'", opts->backend); return 0; }
 
     fnvnx_reflection refl;
-    if (fnvnx_frontend_parse(bc, n, opts->link_pairs, opts->n_link_pairs, &refl, &r->reflection_json, r->error, sizeof r->error)) return 0;
+    if (fnvnx_frontend_parse(bc, n, opts->link_pairs, opts->n_link_pairs, (opts->flags & FNVNX_SHADER_VS_COMPLETE) != 0, (opts->flags & FNVNX_SHADER_FLAT_COLOR) != 0,
+                             &refl, &r->reflection_json, r->error, sizeof r->error)) return 0;
     r->stage = refl.stage; r->major = refl.major; r->minor = refl.minor;
-    refl.vs_complete = refl.stage == FNVNX_STAGE_VERTEX && (opts->flags & FNVNX_SHADER_VS_COMPLETE) != 0;
-    refl.flat_color = (opts->flags & FNVNX_SHADER_FLAT_COLOR) != 0;
     r->stats.d3d_instructions = refl.d3d_instructions;
 
-    char *glsl = be->emit(bc, n, &refl, r->error, sizeof r->error);
+    char *glsl = be->emit(&refl, r->error, sizeof r->error);
     fnvnx_frontend_release(&refl);
     if (!glsl) return 0;
     {   /* build-time defines go right after the #version line: the static epilogue variant, the numerics */

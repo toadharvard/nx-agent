@@ -10,6 +10,10 @@ Registry: verify/ASSUMPTIONS.json ("fnvnx-assumptions/1"; the accepted entries a
     REMOVE  + "removed_by": STR, "owner": LEAD | LEAD+LEAD      the discharge and the stream lead(s) who owe it
     optional: "note": STR. The registry holds exactly the entries that files of THIS tree rely on: the entry of an unmerged
               branch enters with that branch's merge, and every rule below applies to every entry without exception.
+Perf debt: verify/PERFDEBT.json ("fnvnx-perfdebt/1": {"first_frame": BOOL, "entries": [{"id", "fast_path", "rule", "owner"}]}) records a
+switch-off of a fast path that was needed before the class rule restoring it exists. Red when: the file is missing or does not parse; the format or
+first_frame is wrong; an entry lacks a unique id, the fast_path, the rule that restores it, or an owner that is a layer of LEADS; or first_frame is
+true and any entry is open. The report carries perfdebt.open. An entry and its switch-off are deleted in the commit that lands the rule.
 Universe: the MENTIONS of the tree. A text file is a tracked file below ports/fnv-nx that decodes as UTF-8 without NUL
 bytes and is not data (suffix .json); a file of a root of verify/admit.json marked "record": true is an append-only log
 (its dated entries state what was said then; the owner forbids editing it) and is not scanned. CLAUDE.md (the owner's
@@ -17,7 +21,7 @@ words) is read for the decisions, not scanned. A BLOCK is the unit of a text fil
 blank line) cut further at every list item and every table row; in any other file the maximal run of non-blank lines. A
 mention is a block whose PROSE matches `assum` or `допущени` at a word start (case-insensitive). PROSE is defined by one lexer per
 file kind, chosen by the extension from the one table LEXER: python = COMMENT tokens and docstring STRING tokens (tokenize + ast); c, c++,
-headers, .inc, .ld, .s = // and /* */ comments (string and char literals skipped); markdown = text outside fenced code blocks; shell and toml =
+headers, .inc, .s, .glsl = // and /* */ comments (string and char literals skipped); linker scripts (.ld, .map: ld scripts and version scripts, ld doc "Simple Linker Script Commands" / "Version Script") = /* */ comments only, the rest is code (`//` is not a comment there; a double-quoted string has no escapes and is skipped); markdown = text outside fenced code blocks; shell and toml =
 # comments (quoted strings and heredoc bodies skipped); asm = ; comments; sail = as c without char literals; data (.json .tsv .txt .expect .patch) = never prose. In every prose span the
 backticked spans are dropped. Totality: a text file whose extension is not in the table, or that its lexer cannot read, is red (codes
 ext-unknown, lex-error); nothing is skipped silently. An item of the
@@ -64,6 +68,8 @@ import gatesdir  # noqa: E402
 TREE = "ports/fnv-nx"
 REGISTRY = TREE + "/verify/ASSUMPTIONS.json"
 ADMIT = TREE + "/verify/admit.json"
+PERFDEBT = TREE + "/verify/PERFDEBT.json"
+PERFDEBT_FORMAT = "fnvnx-perfdebt/1"
 FORMAT = "fnvnx-assumptions/1"
 OWNER_FILE = "CLAUDE.md"
 OWNER_HEAD = "OWNER, the only accepted ones:"
@@ -91,7 +97,7 @@ ITEM = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
 ROW = re.compile(r"\s*\|")
 
 
-LEXER = {".py": "python", ".c": "c", ".cc": "c", ".cpp": "c", ".cxx": "c", ".h": "c", ".hh": "c", ".inc": "c", ".hpp": "c", ".ld": "c", ".s": "c", ".sail": "sail", ".asm": "semi",
+LEXER = {".py": "python", ".c": "c", ".cc": "c", ".cpp": "c", ".cxx": "c", ".h": "c", ".hh": "c", ".inc": "c", ".hpp": "c", ".ld": "ld", ".s": "c", ".glsl": "c", ".map": "ld", ".ver": "ld", ".sail": "sail", ".asm": "semi",
          ".md": "markdown", ".sh": "shell", ".gitignore": "shell", ".toml": "toml",
          ".json": "data", ".tsv": "data", ".txt": "data", ".expect": "data", ".patch": "data"}
 CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)
@@ -104,7 +110,11 @@ class LexError(Exception):
 def suffix_of(path):
     """the key of the one lexer table: the extension, or the whole name of a file with no extension (.gitignore)"""
     base = os.path.basename(path)
-    return os.path.splitext(base)[1] or base
+    ext = os.path.splitext(base)[1] or base
+    if ext == ".in":  # a template takes the lexer of its inner extension (foo.h.in lexes as .h); a bare x.in has none and stays unknown
+        inner = os.path.splitext(os.path.splitext(base)[0])[1]
+        return inner if inner and inner != ".in" else ext
+    return ext
 
 
 def lexer_of(path):
@@ -137,6 +147,27 @@ def py_spans(body, lines, off):
         return out
     except (SyntaxError, ValueError, tokenize.TokenError) as e:
         raise LexError("python: %s" % e)
+
+
+def ld_spans(body):
+    """the comments of a GNU ld linker script or version script: /* */ only (binutils ld, Scripts: "comments ... in C style"); everything else is
+    code. A double-quoted string runs to the next quote with no escapes (a file name or symbol pattern) and is skipped."""
+    n, i, out = len(body), 0, []
+    while i < n:
+        if body.startswith("/*", i):
+            j = body.find("*/", i + 2)
+            if j < 0:
+                raise LexError("ld: unterminated /* comment")
+            out.append((i, j + 2))
+            i = j + 2
+        elif body[i] == '"':
+            j = body.find('"', i + 1)
+            if j < 0:
+                raise LexError("ld: unterminated string")
+            i = j + 1
+        else:
+            i += 1
+    return out
 
 
 def c_spans(body, chars=True):
@@ -290,7 +321,7 @@ def strip_code(body, spans):
 
 def prose_lines(path, body):
     """the lines of a file with everything that is not prose replaced by spaces (a mention is a statement in prose). Prose is defined by one
-    lexer per file kind (LEXER, by extension): python = COMMENT tokens and docstring STRING tokens; c = // and /* */ comments; markdown = the
+    lexer per file kind (LEXER, by extension): python = COMMENT tokens and docstring STRING tokens; c = // and /* */ comments; ld = /* */ comments; markdown = the
     text outside fenced code; shell and toml = # comments; data = none. In every prose span the backticked spans are dropped.
     A suffix not in the table or a file the lexer cannot read raises LexError."""
     kind = lexer_of(path)
@@ -303,7 +334,7 @@ def prose_lines(path, body):
         o += len(ln) + 1
     if kind == "data":
         return [" " * len(ln) for ln in lines]
-    spans = {"python": lambda: py_spans(body, lines, off), "c": lambda: c_spans(body), "sail": lambda: c_spans(body, False), "markdown": lambda: md_spans(body),
+    spans = {"python": lambda: py_spans(body, lines, off), "c": lambda: c_spans(body), "ld": lambda: ld_spans(body), "sail": lambda: c_spans(body, False), "markdown": lambda: md_spans(body),
              "shell": lambda: hash_spans(body, False), "toml": lambda: hash_spans(body, True), "semi": lambda: hash_spans(body, True, ";")}[kind]()
     keep = bytearray(len(body))
     for s, e in strip_code(body, spans):
@@ -575,6 +606,49 @@ def judge_registry(doc, tracked, read, gate_names):
     return err, count
 
 
+def judge_perfdebt(doc):
+    """DOC (verify/PERFDEBT.json parsed, None if missing or unparseable) -> (findings [F], open count). The file records the switch-offs of a fast path that a
+    green trunk needs before the class rule that restores it exists (CLAUDE.md "Correctness never switches off a fast path"). Format
+    fnvnx-perfdebt/1: {"first_frame": bool, "entries": [{"id", "fast_path", "rule", "owner"}]}; an entry that exists is open (it is deleted in the
+    commit that lands its rule). Rules: the file parses with that format and a boolean first_frame; every entry has a unique non-empty id, the fast path
+    it switched off, the class rule that restores it, and the owner layer (one of LEADS); with first_frame true every open entry is a finding."""
+    if not isinstance(doc, dict):
+        return [finding("perfdebt-unreadable", PERFDEBT, "%s is missing or is not a JSON object (duplicate keys count as unparseable)" % PERFDEBT)], 0
+    errs = []
+    if doc.get("format") != PERFDEBT_FORMAT:
+        errs.append(finding("perfdebt-format", PERFDEBT, "format is not %s" % PERFDEBT_FORMAT))
+    if not isinstance(doc.get("first_frame"), bool):
+        errs.append(finding("perfdebt-format", PERFDEBT, "first_frame is not a boolean"))
+    ents = doc.get("entries")
+    if not isinstance(ents, list):
+        return errs + [finding("perfdebt-format", PERFDEBT, "entries is not a list")], 0
+    seen = set()
+    for i, e in enumerate(ents):
+        eid = e.get("id") if isinstance(e, dict) else None
+        sub = eid if isinstance(eid, str) and eid else "entry %d" % i
+        if not isinstance(e, dict):
+            errs.append(finding("perfdebt-entry", sub, "entry %d is not an object" % i))
+            continue
+        if not isinstance(eid, str) or not eid.strip():
+            errs.append(finding("perfdebt-entry", sub, "entry %d has no id" % i))
+        elif eid in seen:
+            errs.append(finding("perfdebt-entry", sub, "%s: id used twice" % eid))
+        seen.add(eid)
+        for k, why in (("fast_path", "the fast path that was switched off"), ("rule", "the class rule that restores it")):
+            if not isinstance(e.get(k), str) or not e[k].strip():
+                errs.append(finding("perfdebt-no-" + k.replace("_", "-"), sub, "%s has no %s (%s)" % (sub, k, why)))
+        if e.get("owner") not in LEADS:
+            errs.append(finding("perfdebt-no-owner", sub, "%s: owner is not a layer (%s)" % (sub, ", ".join(LEADS))))
+        extra = sorted(set(e) - {"id", "fast_path", "rule", "owner"})
+        if extra:
+            errs.append(finding("perfdebt-entry", sub, "%s: unknown fields %s" % (sub, ", ".join(map(str, extra)))))
+    if doc.get("first_frame") is True:
+        errs += [finding("perfdebt-open-at-first-frame", e.get("id") if isinstance(e, dict) and isinstance(e.get("id"), str) else "entry %d" % i,
+                         "open entry with first_frame set: the fast path must be restored before the first frame is measured")
+                 for i, e in enumerate(ents)]
+    return errs, len(ents)
+
+
 def judge_stray(files, ids, read):
     """every id written in any tracked text file is an id of the registry -> {path: [ids]}"""
     bad = {}
@@ -652,6 +726,8 @@ def main():
         if isinstance(doc, dict) and isinstance(doc.get("entries"), list) else set()
     retired = retired_of(doc.get("retired"))[0] if isinstance(doc, dict) else {}
     errors += judge_retired([p for p in scanned_all if p != REGISTRY], retired, read)
+    pd_errs, pd_open = judge_perfdebt(load(PERFDEBT))
+    errors += pd_errs
     mentions, bad = judge_mentions(scanned, ids, read)
     stray = judge_stray(text_files, ids | set(retired), read)
     for f, x in sorted(stray.items()):
@@ -667,11 +743,12 @@ def main():
             count.get("planned", 0), count.get("no gate yet", 0), count.get("OPEN", 0))
     allf = sorted([e for e in errors] + [bad[k] for k in sorted(bad)], key=lambda x: (x.code, x.subject, str(x)))
     where = write_findings(allf)
+    detail += "; perfdebt: %d open" % pd_open
     detail += "; %d findings, full list: %s" % (len(allf), where)
     res = {"format": "fnvnx-gate/1", "name": "assumptions", "status": status, "universe": len(mentions), "certified": n,
            "uncertified": ["%s:%d" % k for k in sorted(bad)][:50], "detail": "; ".join(errors[:20] + [detail])[:2000],
            "reasons": {"%s:%d" % k: bad[k] for k in sorted(bad)[:50]}, "errors": errors[:50],
-           "entries": count}
+           "entries": count, "perfdebt": {"open": pd_open, "first_frame": (load(PERFDEBT) or {}).get("first_frame") is True}}
     with open(os.path.join(out, "assumptions.json"), "w") as fh:
         json.dump(res, fh, indent=1, sort_keys=True)
         fh.write("\n")

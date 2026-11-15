@@ -9,7 +9,7 @@
 ## admit.json root entry
 
 ```json
-{"path": "ports/fnv-nx/render/total", "class": "tool", "gates": ["pure", "selftests"]}
+{"path": "ports/fnv-nx/render/total", "class": "tool"}
 ```
 
 L1 also adds `ports/fnv-nx/render/total` to the argv of the `pure` and `selftests` gates.
@@ -18,7 +18,7 @@ L1 also adds `ports/fnv-nx/render/total` to the argv of the `pure` and `selftest
 
 The gate reads only the git-tracked files of these paths (`git ls-files`). It copies them to `GATE_OUT/d3d9total.work/in`, and a declared path with no tracked file makes the gate red:
 
-- `render/d3d9/front`, `render/d3d9/spec/d3d9_spec.json`
+- `render/d3d9/front`, `bridgefacts/d3d9` (generator of D9_SPEC)
 - the roots' own records: `render/d3d9/build.json` and the directories of its `include` list (nothing restated in the gate), `render/shaders/translator/build.json`
 - `render/shaders/total` (the generator of the SM table and rows header, `build.json`: the gate runs the root's generate stage over the pinned mirrors; the table and the header are not tracked files)
 

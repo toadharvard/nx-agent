@@ -22,7 +22,7 @@ uint64_t os_tick_freq(void);                /* ticks per second */
 uint64_t os_monotonic_ns(void);
 uint64_t os_cycle_counter(void);            /* cheap free-running counter (rdtsc stand-in) */
 int64_t os_wall_time_us(void);              /* microseconds since 1970-01-01 UTC */
-int32_t os_tz_offset_minutes(void);         /* local = UTC + offset */
+int32_t os_zone_offset_minutes(void);         /* local = UTC + offset */
 /* The zone's rule in the terms of a Windows TIME_ZONE_INFORMATION (derived from the platform's own time zone data). A date is
  * recurring (year == 0: `week` = 1..5 is the n-th, 5 the last, `wday` of `month`) or absolute (year != 0: `week` is the day of
  * the month); `hour`:`minute` is the wall time just before the transition. dst_begin is in standard wall time, dst_end in

@@ -190,6 +190,28 @@ echo "mounts=$(wc -l < /proc/mounts)"'''
     check("3e environment is exactly the declared one",
           rc == 0 and _sorted_hash(store, res["stdout"]) == sorted([b"PATH=/bin", b"A=1", b"Z=two words"]), str(res)[:300])
 
+    # (3f) /dev/shm of a ro_root stage: a fresh private tmpfs, writable (semaphores), empty at the start of every stage, not the host's
+    def ro(path):
+        d = json.load(open(path))
+        d["ro_root"] = True
+        json.dump(d, open(path, "w"))
+        return path
+    shm_host = set(os.listdir("/dev/shm")) if os.path.isdir("/dev/shm") else set()
+    wa = ro(mkstage(store, "shmA", {"/bin": bb}, ["/out"], sh('ls /dev/shm > /out/before; echo A > /dev/shm/leak_from_A && cat /dev/shm/leak_from_A > /out/mine; echo x > /tmp/t 2>/dev/null && echo TMPW > /out/tmp; true', store)))
+    ra = run(store, wa)
+    wb = ro(mkstage(store, "shmB", {"/bin": bb}, ["/out"], sh('ls /dev/shm > /out/before; echo B > /dev/shm/leak_from_B; ls /dev/shm > /out/after', store)))
+    rb = run(store, wb)
+    da, db = fresh("shmA"), fresh("shmB")
+    if ra[0] == 0 and rb[0] == 0:
+        cas.materialize(ra[1]["outputs"]["/out"], store, os.path.join(da, "o"))
+        cas.materialize(rb[1]["outputs"]["/out"], store, os.path.join(db, "o"))
+    rd = lambda d, n: open(os.path.join(d, "o", n)).read() if os.path.exists(os.path.join(d, "o", n)) else None
+    check("3f /dev/shm of a ro_root stage is writable, empty at the start, private: A's file is not in B, B sees only its own; /tmp stays read-only; the host's /dev/shm is untouched",
+          ra[0] == 0 and rb[0] == 0 and rd(da, "mine") == "A\n" and rd(da, "before") == "" and rd(da, "tmp") is None
+          and rd(db, "before") == "" and rd(db, "after") == "leak_from_B\n"
+          and not any(n.startswith("leak_from") for n in os.listdir("/dev/shm")) and (set(os.listdir("/dev/shm")) == shm_host),
+          "%s %s" % (ra[0], rb[0]))
+
     # (4) inputs are read-only
     st4 = mkstage(store, "ro", {"/bin": bb, "/in/a": a, "/in/d": os.path.dirname(a)}, ["/out"],
                   sh('(echo x > /in/a) 2>/dev/null && echo W1; rm /in/a 2>/dev/null && echo W2; '

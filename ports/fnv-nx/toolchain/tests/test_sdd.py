@@ -19,8 +19,11 @@ FIX = os.path.join(HERE, 'sdd', 'sdd.cpp')
 
 
 def slot_loads(obj, sym):
-    """byte offsets of the loads `ldr wN, [xM, #off]` / `[xM]` that are followed by `mov x16, ...` (the tail-call through a slot), i.e. table slots"""
-    return [int(o or '0', 0) for o in re.findall(r'ldr w\d+, \[x\d+(?:, #(-?(?:0x)?[0-9a-f]+))?\] mov x16,', pb.insns(obj, sym))]
+    """byte offsets of the slot loads of the virtual calls and deletes of SYM: every call loads the vptr and then the slot, both as
+    `ldar w, [x]` (R9: sdd and fnvnx_order create them ordered); the slot load is the second of each pair, its offset the `add` right before it"""
+    s = pb.insns(obj, sym)
+    ms = list(re.finditer(r'(?:add x(\d+), x\d+, #(0x[0-9a-f]+|\d+) )?ldar w\d+, \[x(\d+)\]', s))
+    return [int(m.group(2), 0) if m.group(1) and m.group(1) == m.group(3) else 0 for m in ms[1::2]]
 
 
 def relocs_in(obj, sym):
@@ -47,15 +50,18 @@ def checks(obj):
     check('pointer to virtual member: comparison', re.search(r'cmp w0, #0x8\b', ins('_Z2eqM1AFivE')))
     check('pointer to virtual member: template argument', slot_loads(obj, '_Z5use_tP1A') == [8])
     check('instantiated class template', slot_loads(obj, '_Z6use_ttP2TTIiE') == [4] and slot_loads(obj, '_Z6del_ttP2TTIiE') == [0])
-    uj = re.findall(r'ldr w\d+, \[x\d+, #(\d+)\]', ins('_Z5use_jP1J'))
-    check('inline member bodies: g() slot 2, J::w() slot 3', uj == ['8', '12'], str(uj))
+    uj = slot_loads(obj, '_Z5use_jP1J')
+    check('inline member bodies: g() slot 2, J::w() slot 3', uj == [8, 12], str(uj))
     ap8, ap36, tv = syms['_ZTV1M.fnvnx_ap8'], syms['_ZTV1M.fnvnx_ap36'], syms['_ZTV1M']
     check('address points: own symbols', ap8['value'] == tv['value'] + 8 and ap36['value'] == tv['value'] + 36 and ap8['sec'] == ap36['sec'] == tv['sec'],
           str((ap8, ap36, tv)))
     ctor = [(t, n) for t, n in relocs_in(obj, '_ZN1MC2Ev')]
-    check('constructor: one relocation per address point, no immediate',
-          sorted(n for t, n in ctor if t == 'R_AARCH64_P32_LD32_GOT_LO12_NC') == ['_ZTV1M.fnvnx_ap36', '_ZTV1M.fnvnx_ap8']
-          and not [1 for t, n in ctor if n == '_ZTV1M'], str(ctor))
+    # the product flags include -fPIC (flags.semantics of verify/guest_compiler.json): a symbol address is GOT-relative, one ADR_GOT_PAGE and one
+    # LD32_GOT_LO12_NC per reference.  The constructor writes the vptr of every address point it constructs (the inlined base constructors' too)
+    aps = sorted({n for t, n in ctor if '.fnvnx_ap' in n})
+    pairs = all(sorted(t for t, n in ctor if n == a_) == ['R_AARCH64_P32_ADR_GOT_PAGE', 'R_AARCH64_P32_LD32_GOT_LO12_NC'] for a_ in aps)
+    check('constructor: one GOT-relative relocation pair per address point, no immediate and no reference to a table itself',
+          {'_ZTV1M.fnvnx_ap36', '_ZTV1M.fnvnx_ap8'} <= set(aps) and pairs and not [1 for t, n in ctor if '.fnvnx_ap' not in n and n.startswith('_ZTV')], str(ctor))
     th = ins('_ZN1MD1Ev.fnvnx_sdd')
     check('??_E flags 0: the destructor; flags 1: the deleting destructor; returns this',
           'tst w1, #0x3 b.ne L1 bl _ZN1MD1Ev b L5 L1: mov w20, w0 tbnz w21, #1, L2 bl _ZN1MD0Ev b L5' in th
@@ -87,6 +93,22 @@ def checks(obj):
           vm == ['_ZTV1M\t8\t0\t1M\t1M\n', '_ZTV1M\t36\t8\t1M\t1M;2S2\n'], str(vm))
 
 
+def crossing(obj):
+    """.fnvnx.crossing has a row for EVERY function the unit pairs with an MSVC name in .fnvnx.sympair (one universe: the row is made where the pair is made),
+    so every destructor variant is covered whatever emits it: the complete/base/deleting ones GCC emits (dtor.d0/d1/d2, in a class with a virtual base too), the
+    vector deleting destructor ??_E the plugin writes as assembly (dtor.sdd, its this-adjusting thunk dtor.sdd.thunk), and the ones inlined everywhere (noemit)"""
+    pairs = [l.split('\t') for l in pb.section(obj, '.fnvnx.sympair').splitlines()]
+    cross = {l.split('\t')[0] for l in pb.section(obj, '.fnvnx.crossing').splitlines()}
+    boundary = [p for p in pairs if len(p) == 4 and p[1] and p[2] != 'data']
+    missing = [p[0] for p in boundary if p[0] not in cross]
+    check('crossing: every sympair row with an MSVC name has a crossing row', boundary and not missing, missing[:10])
+    kinds = {p[2] for p in boundary}
+    for k in ('dtor.d0', 'dtor.d1', 'dtor.d2', 'dtor.sdd', 'dtor.sdd.thunk', 'noemit'):
+        check('crossing: the fixture has a %s row and it has its crossing row' % k, k in kinds and all(p[0] in cross for p in boundary if p[2] == k), sorted(kinds))
+    vb = [p for p in boundary if p[2].startswith('dtor') and p[1].startswith('??_EVB@@')]
+    check('crossing: the vector deleting destructor of a class with a virtual base (VB) is paired and has its row', vb and all(p[0] in cross for p in vb), vb)
+
+
 def main():
     td = tempfile.mkdtemp(prefix='test-sdd-')
     try:
@@ -96,8 +118,9 @@ def main():
         check('compiles', r.returncode == 0, r.stderr[:3000])
         if r.returncode == 0:
             checks(out)
+            crossing(out)
         r = pb.compile(FIX, os.path.join(td, 'x.o'), [so], args=['-fplugin-arg-fnvnx_sdd-mode=1'])
-        check('an unknown plugin argument is an error', r.returncode != 0 and 'unknown plugin argument' in r.stderr, r.stderr[:500])
+        check('an unknown plugin argument is an error', pb.argument_refused(r, 'sdd'), r.stderr[:500])
     finally:
         shutil.rmtree(td, ignore_errors=True)
     return check.done()

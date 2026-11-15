@@ -1,0 +1,61 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "cc": "aarch64-linux-gnu-gcc-13",
+  "cxx": "aarch64-linux-gnu-g++-13"
+ },
+ "flags": {
+  "c": [
+   "-mabi=ilp32"
+  ],
+  "cxx": [
+   "-mabi=ilp32"
+  ],
+  "asm": [
+   "-mabi=ilp32"
+  ]
+ },
+ "include": [],
+ "units": "all",
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/bridgefacts/com/comrows.py",
+   "args": [
+    "/in/ports/fnv-nx/bridgefacts/com/com_spec.json",
+    "/out/com_rows.tsv",
+    "/out/com_words.tsv"
+   ],
+   "inputs": [
+    "ports/fnv-nx/bridgefacts/com/com_spec.json"
+   ],
+   "outputs": [
+    "com_rows.tsv",
+    "com_words.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.py",
+   "args": [
+    "/out/d3d9_spec.json",
+    "/out/d9bridge_rows.tsv",
+    "/in/ports/fnv-nx/shim/include"
+   ],
+   "inputs": [
+    "ports/fnv-nx/shim/include/d3d9.h",
+    "ports/fnv-nx/shim/include/d3d9caps.h",
+    "ports/fnv-nx/shim/include/d3d9types.h",
+    "ports/fnv-nx/shim/include/fnvnx_win32.h"
+   ],
+   "outputs": [
+    "d3d9_spec.json",
+    "d9bridge_rows.tsv"
+   ]
+  }
+ ],
+ "outputs": {
+  "COM_ROWS": "com_rows.tsv",
+  "COM_WORDS": "com_words.tsv",
+  "D9_ROWS": "d9bridge_rows.tsv",
+  "D9_SPEC": "d3d9_spec.json"
+ }
+}

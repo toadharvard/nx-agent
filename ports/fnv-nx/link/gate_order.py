@@ -49,6 +49,8 @@ def scan_object(path):
         s = a64order.scan(path)
     except ValueError as e:
         return [('', str(e))], {}
+    except Exception as e:   # a crash of the gate is a red finding naming the object, never an exception
+        return [('', 'scan failed (%s: %s)' % (type(e).__name__, str(e)[:200]))], {}
     return list(s.rows), s.stats
 
 

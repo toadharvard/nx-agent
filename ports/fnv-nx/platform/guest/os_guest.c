@@ -14,7 +14,9 @@
 #include <malloc.h>
 
 #include "fnvnx/guest.h"
+#include "fnvnx/cite.h"
 #include "fnvnx/hostapi.h"
+#include "fnvnx/placement.h"
 #include "fnvnx/sdlayout.h"
 
 static int64_t hs(uint64_t v) { return (int64_t)v; }
@@ -30,8 +32,10 @@ void os_exit_process(int code) {
     fflush(NULL);
     exit(code);
 }
+FNVNX_CITE(os_exit_process, "dm:6");
 
-unsigned os_cpu_count(void) { return (unsigned)fnvnx_hcall0(fnvnx_host->cpu_count); }
+unsigned os_cpu_count(void) { return FNVNX_NPROC; }          /* the declared processors (fnvnx/placement.h) */
+uint32_t os_cpu_mask(void) { return FNVNX_APP_CORES; }
 uint32_t os_process_id(void) { return 0x51; }   /* any stable non-zero id */
 
 void os_memory_info(uint64_t *total, uint64_t *avail) {
@@ -170,9 +174,9 @@ void os_thread_exit(void) {
     if (g_me) thread_done(g_me);
     fnvnx_thread_exit(NULL);
 }
+FNVNX_CITE(os_thread_exit, "dm:8");
 /* the host's platform services (toolchain/host/host.c platform_ext): appletSetCpuBoostMode, unless the config
  * (sdmc:/switch/fnv/fnvnx.ini boost_loading=0) turns it off */
-_Static_assert(OS_ROLE_AUDIO == FNVNX_ROLE_AUDIO, "platform/os/os.h OS_ROLE_AUDIO = hostapi.h FNVNX_ROLE_AUDIO");
 void os_cpu_boost(int fast_load) {
     if (!fnvnx_host->ext_call) return;
     uint64_t arg[1] = {fast_load ? 1u : 0u};
@@ -185,12 +189,12 @@ void os_show_message(const char *caption, const char *text) {
     fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_MESSAGE, FNVNX_ADDR(arg), 2);
 }
 /* the system software keyboard: host service FNVNX_PLAT_TEXT_ENTRY (hostapi.h), whose result is this function's: 1 entered, 0 cancelled,
- * negative = -FNVNX_HE_BADINPUT or -(the applet's Horizon result) */
-int os_text_entry(unsigned max_len, const uint16_t *init, size_t init_n, uint16_t *out, size_t *n) {
-    uint32_t cnt = 0;
-    uint64_t arg[5] = {max_len, init ? FNVNX_ADDR(init) : 0u, init ? init_n : 0u, out ? FNVNX_ADDR(out) : 0u, n ? FNVNX_ADDR(&cnt) : 0u};
+ * negative = -(the applet's Horizon result). The service's argument checks (max_len 1..FNVNX_TEXT_ENTRY_MAX, out and n non-null)
+ * hold by the types: the max length is a constant, out and n are the addresses of members of a reference. */
+_Static_assert(FNVNX_SWKBD_MAX_LEN >= 1 && FNVNX_SWKBD_MAX_LEN <= FNVNX_TEXT_ENTRY_MAX, "the service takes max_len 1..500");
+int os_text_entry(const struct fnvnx_text *init, struct fnvnx_text *out) {
+    uint64_t arg[5] = {FNVNX_SWKBD_MAX_LEN, init ? FNVNX_ADDR(init->u) : 0u, init ? init->n : 0u, FNVNX_ADDR(out->u), FNVNX_ADDR(&out->n)};
     int64_t r = (int64_t)fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_TEXT_ENTRY, FNVNX_ADDR(arg), 5);
-    if (r == 1) *n = cnt;
     return (int)r;
 }
 /* the console's operation mode: host service FNVNX_PLAT_DISPLAY_DOCKED (hostapi.h), which every host implements
@@ -227,7 +231,7 @@ static int tzr_at(int64_t utc_s, int32_t *off_s, int *is_dst, char abbr[8]) {
     abbr[7] = 0;
     return 0;
 }
-int32_t os_tz_offset_minutes(void) {
+int32_t os_zone_offset_minutes(void) {
     int32_t off;
     int dst;
     char n[8];
@@ -306,7 +310,7 @@ void os_dir_close(os_dir *d) {
 /* FAT32/exFAT on the SD card fold case, but that is a property of Horizon's fs, not checked on hardware yet (NX1):
  * probe it once with the guest's own file. guest.nso found under its exact name but not as GUEST.NSO -> case-sensitive,
  * and path.cpp resolves every component against the directory (slower, correct). Without guest.nso under the root
- * (the emulator's sdmc tree) the SD behaviour is assumed. */
+ * (the emulator's sdmc tree) folds is 1: the case folding of the console's FAT, ASM-004. */
 int os_fs_case_insensitive(void) {
     static int folds = -1;
     if (folds < 0) {

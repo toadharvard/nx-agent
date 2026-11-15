@@ -1,4 +1,12 @@
 # id	contract_name	fact	source	kind	value
-# fact: no-network | time-zone | registry | no-galaxy (CLAUDE.md "The declared machine", "GOG Galaxy is not lifted"); source: win-doc:<documentation page or header path>:<function> | wine-9.0:<path>:<function> | galaxy-sdk:<page>:<function>; kind void|u32|u64|addr|u32nz<N> as in wine_fixme.tsv
+# fact: no-network | time-zone | registry | no-galaxy | single-process | process-end | thread-end (CLAUDE.md "The declared machine", "GOG Galaxy is not lifted"); source: win-doc:<documentation page or header path>:<function> | wine-9.0:<path>:<function> | galaxy-sdk:<page>:<function>; kind void|u32|u64|addr|u32nz<N> as in wine_fixme.tsv; kind noreturn (value `-`) for process-end/thread-end: a body declared noreturn in our headers that ends the process or the thread
 # rows come from the platform owner (L5) with the body that cites them; see VERDICT.md "Declared-machine bodies"
 # registry rows are never written by hand: the L5 tool derives them from the static Reg* reads of the exe and modules; hand-written rows are machine facts only (no-network, time-zone) with their source
+1	TerminateProcess	single-process	win-doc:MSDN TerminateProcess function (processthreadsapi.h) Return value / GetLastError: an invalid handle fails with ERROR_INVALID_HANDLE; wine-9.0:dlls/ntdll/unix/process.c:NtTerminateProcess: an invalid handle returns STATUS_INVALID_HANDLE (ERROR_INVALID_HANDLE); the declared machine runs one process, so every handle but the pseudo handle of the process is invalid	u32	0
+2	ExitProcess	process-end	win-doc:MSDN ExitProcess function (processthreadsapi.h): "does not return"; the process ends	noreturn	-
+3	c_exit	process-end	C11 7.22.4.4 exit: cannot return to its caller (the msvcrt export `exit`)	noreturn	-
+4	c_abort	process-end	C11 7.22.4.1 abort: cannot return to its caller (the msvcrt export `abort`)	noreturn	-
+5	c_amsg_exit	process-end	wine-9.0:dlls/msvcrt/exit.c:_amsg_exit ends in _exit (the msvcrt export `_amsg_exit`; unchecked: no Wine source in the container)	noreturn	-
+6	os_exit_process	process-end	C11 7.22.4.4 exit and 7.21.5.2 fflush: the body is fflush(NULL); exit(code)	noreturn	-
+7	ExitThread	thread-end	win-doc:MSDN ExitThread function (processthreadsapi.h): "does not return"; the calling thread ends	noreturn	-
+8	os_thread_exit	thread-end	IEEE Std 1003.1-2017 pthread_exit: the calling thread ends and does not return to its caller	noreturn	-

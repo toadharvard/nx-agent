@@ -1,13 +1,11 @@
 """toolflags policy table (data only): key -> (kind, requirement, citation). The reviewable statement of assumption A-env. (ASM-038)
-Rows citing VC9 are UNVERIFIED (no VC9 here); GCC 13.3 / binutils 2.42 rows were checked against the installed --help."""
+GCC 13.3 / binutils 2.42 rows were checked against the installed --help."""
 RB = "reproducible-builds.org"
 GCCENV = "GCC manual, Environment Variables"
-UNV = " (UNVERIFIED: VC9 not available here)"
 FORBID_ENV_GCC = "GCC_EXEC_PREFIX COMPILER_PATH LIBRARY_PATH CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH DEPENDENCIES_OUTPUT SUNPRO_DEPENDENCIES"
-KINDS_TXT = "gcc/as/ld/ar/objcopy/python/msvc-cl/msvc-link/msvc-lib/wine"
-KINDS = ("gcc", "as", "ld", "ar", "objcopy", "python", "msvc-cl", "msvc-link", "msvc-lib")
-MSVC = ("msvc-cl", "msvc-link", "msvc-lib")
-GNU = ("gcc", "as", "ld", "ar", "objcopy")
+KINDS_TXT = "gcc/as/ld/ar/objcopy/readelf/python"
+KINDS = ("gcc", "as", "ld", "ar", "objcopy", "readelf", "python")
+GNU = ("gcc", "as", "ld", "ar", "objcopy", "readelf")
 FIXED = (("TZ", "UTC"), ("LC_ALL", "C"), ("PYTHONHASHSEED", "0"))
 FORBID_ENV = ("LANG", "LANGUAGE", "PYTHONPATH", "HOME", "USER", "LOGNAME", "HOSTNAME", "PWD", "DISPLAY", "GCC_EXEC_PREFIX",
               "COMPILER_PATH", "LIBRARY_PATH", "CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "DEPENDENCIES_OUTPUT",
@@ -46,16 +44,10 @@ POLICY = {
     "ar.D": ("ar", "operation letters contain D and not U", "GNU ar manual, Modifiers (D deterministic mode, U real timestamps)"),
     "objcopy.D": ("objcopy", "-D/--enable-deterministic-archives present; -p/--preserve-dates, -U forbidden",
                   "GNU binutils objcopy manual (-D, -p, -U)"),
+    "readelf.args": ("readelf", "-W present; the only options are -W -h -S -r -s; every file under a declared input (a reader: it writes nothing)",
+                     "GNU binutils readelf manual, Options (-W --wide, -h --file-header, -S --section-headers, -r --relocs, -s --syms)"),
     "python.flags": ("python", "-s and (-B or env PYTHONDONTWRITEBYTECODE=1); -I and -E forbidden (they drop PYTHONHASHSEED, "
                      "measured: hash(\"a\") differs per run under -I); -c and -m forbidden",
                      "Python docs, Command line (-B, -E, -I, -s); PEP 552 (pyc embed source mtime)"),
     "python.script": ("python", "script path present, under a declared input", "Python docs, Command line (script)"),
-    "msvc.decl": ("msvc-*", "exactly one of msvc_brepro:true (then /Brepro in argv) or coff_normalize/pe_normalize:true",
-                  "MSVC /Brepro (VS2015+ linker, VS2017+ cl; not in VC9: use the normalize declaration)" + UNV),
-    "cl.forbid": ("msvc-cl", "forbidden: /Zi /ZI (PDB GUID and time stamp; /Z7 ok), /MP[N] (parallel order), /Fd", "MSVC cl /Z7 /Zi /MP /Fd docs" + UNV),
-    "cl.nodate": ("msvc-cl", "no_date_time_macros.checked_by non-empty (declared, not checked here)", "no VC9 switch for __DATE__/__TIME__" + UNV),
-    "link.incr": ("msvc-link", "/INCREMENTAL:NO present, no other /INCREMENTAL", "MSVC link /INCREMENTAL docs" + UNV),
-    "msvc.ltcg": ("msvc-link/lib", "/LTCG:PGINSTRUMENT, PGOPTIMIZE, PGUPDATE forbidden", "MSVC link /LTCG docs (profile data is an input)" + UNV),
-    "wine.env": ("wine", "WINEDEBUG=-all; WINEPREFIX under a declared input or output; wine_tool in msvc-*",
-                 "Wine User Guide, Environment variables (WINEDEBUG, WINEPREFIX)"),
 }
