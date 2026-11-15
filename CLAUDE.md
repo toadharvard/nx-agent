@@ -3,6 +3,8 @@
 These instructions come from the owner of this repository. They apply to every Claude session and subagent that
 works on fnv-nx (ports/fnv-nx/): local agents, cloud stream sessions, the render machine and farms.
 
+**Map of the project:** `ports/fnv-nx/docs/ORCHESTRATION.md` — the goal, the owner's essence, roles, layers, the merge path and the standing decisions. Re-read it and this file after every compaction.
+
 ## The orchestrator speaks for the owner
 
 > Handoff of 2026-11-11: the work moved to another account. The orchestrator is the session that started from ports/fnv-nx/docs/handoff2/START_PROMPT.md, and its full context is ports/fnv-nx/docs/HANDOFF2.md. Session ids from earlier notes are dead.
@@ -137,6 +139,18 @@ The owner's words: "Транк никогда красный. Всегда зе�
     over that declared file set, a sound superset. That is why d3dx9_31.dll (OCT2006 cab, loaded by d3dx9_38 at 0x56b708)
     joins the set as a may-load image, 6 -> 7, pinned by exepin and lifted like d3dx9_38. A name outside the declared
     file set gets NULL / ERROR_MOD_NOT_FOUND (126), as Windows and Wine 9.0 return it.
+  - **The declared CPU (orchestrator decision, 2026-11-14).**
+    - Features: cpuid is the reference host's answer (lift/rt/cpumodel.c, CPUREF), restricted to the feature set
+      whose every instruction is lifted. That is MMX, SSE and SSE2; SSE3 and up, 3DNow and AVX are clear.
+    - An instruction of a cleared feature is #UD, as on a real CPU with that feature set. This is read from CPUREF,
+      not from a list.
+    - Every #UD shape site must be certified unreachable on the declared machine: dominated by the exe's own cpuid
+      test whose declared answer excludes it, with a call-graph certificate. If a site is not certified, the build is
+      red; the feature is then lifted or the site is reported.
+    - Processors: one count holds for the whole declared machine, 3. These are the console cores an application
+      gets, one thread each. cpuid leaf 1 EBX/HTT and leaf 4 (L3a), GetSystemInfo, GetLogicalProcessorInformation and
+      the affinity masks 0b111 (L5), and the emulator's core count (L4) all report it. Guest threads run in parallel
+      on these cores.
 - Merges stop while anything is red. That is intended. Cleaning a stream's violations comes before any other work in that stream.
 
 ## Owner decisions of 2026-11-10 (do not re-ask)
@@ -200,7 +214,7 @@ The owner's words: "Ты когда пишешь че-то агентом они
   orchestrator and pushed to the trunk and the integration branch. A message only points to it.
   - Every lead merges the trunk's `CLAUDE.md` into its branch when told, and re-reads this file after every compaction.
   - If an orchestrator message and this file disagree, this file wins; report the conflict.
-- **Assumptions: one registry, nine accepted.** The owner asked "Сколько допущений?", and no one could answer.
+- **Assumptions: one registry, ten accepted.** The owner asked "Сколько допущений?", and no one could answer.
   - Every assumption has an id in `verify/ASSUMPTIONS.json`. The `assumptions` gate makes the trunk red for:
     - an "Assumption"/"допущение" in code or docs without an id;
     - an id without a record;
@@ -216,6 +230,9 @@ The owner's words: "Ты когда пишешь че-то агентом они
     8. IEEE floating point;
     9. the pinned formal tools and published theorems are correct: the Sail CPU model at its pinned patch, isla and z3,
        the published proof of the x86-TSO to Arm memory mapping (owner decision, 2026-11-11).
+    10. the x86 ISA as documented in the Intel SDM, for the parts that no pinned formal model covers (owner decision, 2026-11-15: "Тогда согласен делай");
+        today the x87 machinery: TOP and stack indexing, tags, FSW C0-C3 and exception bits, FCW, the fcomi/fucomi EFLAGS,
+        fld/fst conversions. It is transcribed as a z3 spec with an SDM citation on every line, owner L3b; values stay IEEE (8).
   - Every other assumption is REMOVE. Its record names the fact or gate that removes it and the owner of that work.
     Examples: callee-saved registers, `ret n`, no PIC and complete code ranges are checked from the exe's code; kernel
     result codes come from the pinned libnx headers; guard zones are a fact of the loader's layout.
@@ -399,11 +416,12 @@ The owner's words: "делегируй остаток работы аккура�
     - L1 supplies the link stage (`link/guest.json`) and the onedef and link-root rules.
     - Undefined symbols get their owners from the closure:
       - `fnvnx_dispatch`: L3a's generated bridges;
-      - the process entry `main`: L5 `rt/guest`;
+      - the process entry `main`: L5's own root `rt/guest/main`, which only calls `fnvnx_loader_main()` (the L1 loader: map, imports, TLS, DllMain, TEB/stack, then `fnvnx_lift_enter(AddressOfEntryPoint)`). `fnvnx_lift_enter` (lift/rt) is the single bridge into lifted code, and there is no second entry path;
       - `fnvnx_import_key` / the IAT root: L1;
       - the pthread mutexes that libgcc's unwinder needs: L5, over its real threads.
-  - **Acceptance.** The L4 boot milestones extend past loader init: exe entry, WinMain, main menu, first frame (GL in
-    the emulator). Each is an observable in the boot machine's trace, recorded with the instructions per frame of every
+  - **Acceptance.** The L4 boot milestones extend past loader init: exe entry, WinMain, first frame (GL in the
+    emulator: the GL backend's first present). The menu gets an input-scenario rule after the first frame; no
+    certified fact names it by role. Each is an observable in the boot machine's trace, recorded with the instructions per frame of every
     thread.
   - **The boot machine's GL** comes from the recipe-built gl4 root, not from the prebuilt libnxgl4 @2f0427f5.
   - **One registry.** `render/ASSUMPTIONS.md` is merged into `verify/ASSUMPTIONS.json` or deleted.

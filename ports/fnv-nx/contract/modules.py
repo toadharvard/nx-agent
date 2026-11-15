@@ -390,13 +390,32 @@ def tls_rows(exe, order, load_index):
     return rows
 
 
+def tls_slots(rows):
+    """{name: TLS index the loader assigns} of the rows of tls_rows: the exe 0 (loader/src/start.c:301, fnvnx_loaded_tls(p, &p->exe, 0)), then each
+    static image with a TLS directory 1, 2, ... in table order = load_index order (fnvnx_modules_prepare_tls, loader/src/modules.c:273-278: the
+    modules of fnvnx_modules[] in order, `next` starting at 1, incremented per image whose directory is present).  An image that is not static
+    (empty load_index) is loaded on demand and gets no slot (loader/src/modules.c:396): its slot is empty."""
+    out = {rows[0][0]: 0} if rows and rows[0][0] == exepin.NAME else {}
+    static = sorted((int(i), n) for n, i, _ in rows if i != '')
+    out.update({n: k for k, (_, n) in enumerate(static, 1)})
+    return out
+
+
+def align_bytes(raw):
+    """The alignment in bytes the loader applies for the raw IMAGE_SCN_ALIGN field RAW (bits 20-23 of the directory's Characteristics): 1 for 0,
+    else 1 << (RAW - 1) (loader/src/tls.c:38, `out->align = n ? 1 << (n - 1) : 1`)."""
+    return 1 << (raw - 1) if raw else 1
+
+
 def write_tls(out, rows):
-    """OUT/tls.tsv (columns below, hex for addresses and rvas, decimal for sizes) and OUT/tls/<name>.bin (the template bytes of each row)."""
+    """OUT/tls.tsv (columns below, hex for addresses and rvas, decimal for sizes) and OUT/tls/<name>.bin (the template bytes of each row).
+    tls_slot: the TLS index the loader assigns (tls_slots; empty for an image loaded on demand); align_bytes: align as the loader applies it (align_bytes)."""
     os.makedirs(os.path.join(out, 'tls'), exist_ok=True)
-    tsv(os.path.join(out, 'tls.tsv'), '# name\tload_index\tstart_va\tend_va\tindex_va\tcallbacks_va\ttemplate_rva\ttemplate_size\tzero_fill\talign\ttemplate_sha256\tcallbacks\n' +
-        ''.join('%s\t%s\t%08x\t%08x\t%08x\t%08x\t%08x\t%d\t%d\t%d\t%s\t%s\n' % (
+    slots = tls_slots(rows)
+    tsv(os.path.join(out, 'tls.tsv'), '# name\tload_index\tstart_va\tend_va\tindex_va\tcallbacks_va\ttemplate_rva\ttemplate_size\tzero_fill\talign\ttemplate_sha256\tcallbacks\ttls_slot\talign_bytes\n' +
+        ''.join('%s\t%s\t%08x\t%08x\t%08x\t%08x\t%08x\t%d\t%d\t%d\t%s\t%s\t%s\t%d\n' % (
             n, i, t['start_va'], t['end_va'], t['index_va'], t['callbacks_va'], t['template_rva'], t['template_size'], t['zero_fill'], t['align'],
-            hashlib.sha256(t['template']).hexdigest(), ';'.join('%08x' % c for c in t['callbacks'])) for n, i, t in rows))
+            hashlib.sha256(t['template']).hexdigest(), ';'.join('%08x' % c for c in t['callbacks']), slots.get(n, ''), align_bytes(t['align'])) for n, i, t in rows))
     for n, _, t in rows:
         with open(os.path.join(out, 'tls', n + '.bin'), 'wb') as fh:
             fh.write(t['template'])

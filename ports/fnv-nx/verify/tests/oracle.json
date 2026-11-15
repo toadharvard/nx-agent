@@ -456,6 +456,30 @@
     "ports/fnv-nx/verify/recipe.py"
    ]
   },
+  "test_guest_link.py": {
+   "references": [
+    {
+     "anchor": "## Link: the guest ELF",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
+  "test_guestlink.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_guestlink.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_guestlink.py"
+   ]
+  },
   "test_icount.py": {
    "references": [
     {
@@ -509,6 +533,18 @@
     "ports/fnv-nx/verify/gate_l2native.py"
    ]
   },
+  "test_ldcheck.py": {
+   "references": [
+    {
+     "anchor": "## Link: the guest ELF",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/ldcheck.py"
+   ]
+  },
   "test_link.py": {
    "references": [
     {
@@ -532,6 +568,18 @@
     "ports/fnv-nx/link/ldcheck.py"
    ]
   },
+  "test_linkroots.py": {
+   "references": [
+    {
+     "anchor": "## Link: the guest ELF",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
   "test_linkstrict.py": {
    "references": [
     {
@@ -548,6 +596,18 @@
    "subject": [
     "ports/fnv-nx/verify/gate_linkstrict.py",
     "ports/fnv-nx/verify/verdict.py"
+   ]
+  },
+  "test_loader.py": {
+   "references": [
+    {
+     "anchor": "## Link: the guest ELF",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
    ]
   },
   "test_n3wiring.py": {
@@ -590,6 +650,32 @@
     "ports/fnv-nx/verify/verdict.py"
    ]
   },
+  "test_objstub_assume.py": {
+   "references": [
+    {
+     "anchor": "## verify/objstub.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## verify/objstub_plugin.cc",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## verify/gate_objstub.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/objstub.py",
+    "ports/fnv-nx/verify/objstub_plugin.cc",
+    "ports/fnv-nx/verify/gate_objstub.py",
+    "ports/fnv-nx/verify/a64access.cc",
+    "ports/fnv-nx/verify/verdict.py"
+   ]
+  },
   "test_objstub_rules.py": {
    "references": [
     {
@@ -602,6 +688,18 @@
     "ports/fnv-nx/verify/objstub.py",
     "ports/fnv-nx/verify/gate_objstub.py",
     "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
+  "test_onedef.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_onedef.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_onedef.py"
    ]
   },
   "test_opentrace.py": {
@@ -772,6 +870,42 @@
     "ports/fnv-nx/verify/sdcheck.py"
    ]
   },
+  "test_stackuse.py": {
+   "references": [
+    {
+     "anchor": "## verify/stackuse.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/stackuse.py"
+   ]
+  },
+  "test_systemlibs.py": {
+   "references": [
+    {
+     "anchor": "## Link: the guest ELF",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/envcheck.py"
+   ]
+  },
+  "test_tlsmodel.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_tlsmodel.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_tlsmodel.py"
+   ]
+  },
   "test_toolflags.py": {
    "references": [
     {
@@ -841,18 +975,6 @@
     "ports/fnv-nx/verify/sandbox.py",
     "ports/fnv-nx/verify/unitview.py",
     "ports/fnv-nx/verify/unitstage.py"
-   ]
-  },
-  "test_onedef.py": {
-   "references": [
-    {
-     "anchor": "## verify/gate_onedef.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/gate_onedef.py"
    ]
   }
  }
