@@ -1525,7 +1525,8 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant="", repo=".
     admit.json entry of the root, "cxx_origin": "native" | {"lifted_by": TOOL.py, "pack": EXTERNAL} | {"lifted_by": TOOL.py, "stage": "gen:ROOT:I"} (exactly
     one of pack and stage; see lifted_origin), required when the root has a C++ unit.
     Consistency of a lifted declaration: no tracked C++ unit in the root, every C++ unit is an output of a `generated` step whose tool is
-    `lifted_by` (a tracked .py of an admitted tool root), `pack` names an external of the recipe (declared inputs of every generator); with `stage` the
+    `lifted_by` (a tracked .py of an admitted tool root), `pack` names an external of the recipe or an admitted root in its `uses` (the provenance is the output of a
+    generated step of `lifted_by`, never a name: the units are checked against every such step of this recipe, whichever kind `pack` is); with `stage` the
     units are the outputs of that one generated step (gen:ROOT:I, I its index in `generated`), and its tool is `lifted_by`."""
     err, pl = [], rec.get("plugins", [])
     if not isinstance(pl, list):
@@ -1584,8 +1585,9 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant="", repo=".
         if not (isinstance(tool, str) and tool in files and tool.endswith(".py") and owner and roots[owner]["class"] == "tool"):
             err.append("cxx_origin.lifted_by %r is not a tracked .py of an admitted tool root" % (tool,))
         steps = rec.get("generated", []) if isinstance(rec.get("generated"), list) else []
-        if "pack" in origin and pack not in ext_names:
-            err.append("cxx_origin.pack %r names no external of the recipe" % (pack,))
+        uses_roots = {u.get("root") for u in rec.get("uses", []) if isinstance(u, dict)}
+        if "pack" in origin and pack not in ext_names and not (pack in uses_roots and pack in roots):
+            err.append("cxx_origin.pack %r names neither an external of the recipe nor an admitted root in its `uses`" % (pack,))
         if "stage" in origin:
             m = re.fullmatch(re.escape("gen:%s:" % root) + r"(0|[1-9][0-9]*)", stage) if isinstance(stage, str) else None
             if not (m and int(m.group(1)) < len(steps) and isinstance(steps[int(m.group(1))], dict) and steps[int(m.group(1))].get("tool") == tool):

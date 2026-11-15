@@ -148,6 +148,23 @@ def file_sha(p):
     return h.hexdigest()
 
 
+def published_output(cache, root, name, repo="."):
+    """-> (path, sha256) of the declared output NAME of ROOT as published in GATE_CACHE (`outputs` of the root's objects.json, written by recipe.build: a
+    file or a directory of <root>/outputs). It never builds: a producer that is not published, or does not declare NAME, or whose file is gone, is
+    LookupError with the reason, and every reader of a root's output is red on it (an input that is absent is never skipped)."""
+    base = os.path.join(cache, "objects", tree_of(repo), root.replace("/", "__"))
+    try:
+        with open(os.path.join(base, "objects.json")) as f:
+            outs = json.load(f)["outputs"]
+        ent = outs[name]
+        path, sha = ent["path"], ent["sha256"]
+    except (OSError, ValueError, KeyError, TypeError):
+        raise LookupError("output %s of %s is not published in GATE_CACHE (%s)" % (name, root, base))
+    if not os.path.exists(path):
+        raise LookupError("output %s of %s: the published path %s is gone" % (name, root, path))
+    return path, sha
+
+
 def unitless(root, cache, repo="."):
     """True iff ROOT's green build has no unit and no link output: a header-only root (RECIPE.md "Header-only roots"). It holds no code, so by
     construction it references no import and reads no registry key; the imports and machine gates count 0 items for it and need no declaration.
