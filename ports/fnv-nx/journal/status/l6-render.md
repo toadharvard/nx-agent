@@ -729,3 +729,4 @@ Paused: w3b, w4, farm; no other work.
     - w6 (doing): merge w1b-root; L6A ABI dfe4b6a94 with the ASM-629 delete, ASM-628 rewrite, sha256 include and env_caps.gen.h; rebase onto the candidate with tlsmodel; builds and gates; 4 admit entries to L1.
     - w1b (doing): Wine 9.0 table (ASM-628 rest); sm_cases derivation; reader conversion and deletes; header items.
     - w5 (doing): sm_link on the current translator, nx_pair_variant, gates.d/sm_link.json with a hermetic sharded stage.
+- 09:13Z L6A: gl4_op_clear (gl4_pass.c:112-128) already clears exactly the op's rect, intersected with the attachments (scissor set, then restored). No defect. The nxgpu4.h Clear comment will state the rect semantics.
