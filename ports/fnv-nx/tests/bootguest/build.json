@@ -118,6 +118,7 @@
   "roots": [
    "ports/fnv-nx/rt/guest",
    "ports/fnv-nx/loader",
+   "ports/fnv-nx/lift/rt",
    "ports/fnv-nx/platform"
   ]
  },
