@@ -73,6 +73,8 @@ INPUT FACTS AND RULES.
          an access inside it that overlaps no recorded range is a frame access. Soundness: the area holds the call's own stack arguments, written by the
          caller before the call; an address-taken parameter in it is a recorded range, and any other slot has no name another thread could hold.
          A row with an `unk` token (a variable whose slot is not a constant frame offset) is `dynamic` for the gate: its ranges are not complete.
+ RO-REC  the `.fnvnx.ro` record of the order plugin (the bases it left plain as read-only) is advisory and no gate input: rule L reads the
+         section flags of the relocation target (SHF_ALLOC, no SHF_WRITE) from the object itself and never trusts the plugin for it.
  ROBND   input fact: a load through a read-only base register plus an index stays inside the object; the read-only sections and
          their objects are those of objects.json (the object's section table, flags without SHF_WRITE and PT_GNU_RELRO).
  RUN     part of rule R9 (docs/ORDERING.md, "Everything else is ordered", aggregates on the dmb fence path): the loads of one run
