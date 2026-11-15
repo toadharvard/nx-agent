@@ -4,8 +4,9 @@ function of (the image bytes, Wine's rules), compared with the EH tables that th
 lift/gates/gate_eh.py). It reads NOTHING of rt/seh.cc, rt/msvcrt_eh.cc or the lifter: the decision functions below are transcriptions of
 Wine 9.0 (tag wine-9.0, dlls/msvcrt/except_i386.c and cppexcept.h; line numbers cite that file) and the tables are parsed from the PE bytes.
 
-    python3 -I ehoracle.py --facts FACTS --game GAMEDIR --redist REDISTDIR [--out report.json]
+    python3 -I ehoracle.py --facts FACTS --game GAMEDIR --redist REDISTDIR --modules MODULES.tsv [--out report.json]
 
+MODULES.tsv  the loader's module table (contract/modules.py): the image set, read by imageset.py (no image is named here).
 FACTS   the facts tree (exe: FACTS/ehtables.json; module M: FACTS/M/ehtables.json), GAMEDIR holds FalloutNV.exe and the module dlls, REDISTDIR
         holds d3dx9_31.dll and d3dx9_38.dll. An image is mapped, relocated to its assigned base (the exe: preferred base; a module: the base
         whose .text lies where its facts say) and parsed with Wine's structure layouts.
@@ -30,6 +31,8 @@ import struct
 import sys
 
 import pefile
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import imageset
 
 CXX_FRAME_MAGIC_VC6, CXX_FRAME_MAGIC_VC7, CXX_FRAME_MAGIC_VC8 = 0x19930520, 0x19930521, 0x19930522   # cppexcept.h:22-24
 FUNC_DESCR_SYNCHRONOUS = 1                                                                      # cppexcept.h:27
@@ -758,18 +761,18 @@ def main(argv):
     ap.add_argument('--facts', required=True)
     ap.add_argument('--game', required=True)
     ap.add_argument('--redist', required=True)
+    ap.add_argument('--modules', required=True, help="the loader's module table (contract/modules.py modules.tsv): the image set")
     ap.add_argument('--wine', required=True, help='the pinned Wine 9.0 tree (external of wine_pin.json)')
     ap.add_argument('--out')
     a = ap.parse_args(argv)
-    images = [('FalloutNV', os.path.join(a.game, 'FalloutNV.exe'), os.path.join(a.facts, 'ehtables.json'))]
-    for m, f in (('atimgpud', 'atimgpud.dll'), ('binkw32', 'binkw32.dll'), ('d3dx9_31', 'd3dx9_31.dll'), ('d3dx9_38', 'd3dx9_38.dll'),
-                 ('gdffalloutnv', 'GDFFalloutNV.dll'), ('libvorbis', 'libvorbis.dll'), ('libvorbisfile', 'libvorbisfile.dll')):
-        d = a.redist if m.startswith('d3dx9') else a.game
-        images.append((m, os.path.join(d, f), os.path.join(a.facts, m, 'ehtables.json')))
+    images = [(n, path, os.path.join(a.facts, 'ehtables.json') if sub is None else os.path.join(a.facts, sub, 'ehtables.json'), sub)
+              for n, path, sub in imageset.images(os.path.join(a.game, 'FalloutNV.exe'), a.modules, [a.game, a.redist])]       # the image set is the loader's module table (imageset.py)
     loaded = []
-    for name, path, fp in images:
+    subdir = {}
+    for name, path, fp, sub in images:
+        subdir[name] = sub
         facts = load_facts(fp)
-        loaded.append((name, Image(path, text_lo=hx(facts['text'][0]) if name != 'FalloutNV' else None), facts))
+        loaded.append((name, Image(path, text_lo=hx(facts['text'][0]) if sub else None), facts))
     # the exception kinds: every ThrowInfo of the image set, parsed from the bytes
     throws, owner = [], []
     for name, img, facts in loaded:
@@ -785,7 +788,7 @@ def main(argv):
     wf, wsha = check_wine(a.wine)
     reps = []
     for name, img, facts in loaded:
-        up = os.path.join(a.facts, 'universe.tsv') if name == 'FalloutNV' else os.path.join(a.facts, name, 'universe.tsv')
+        up = os.path.join(a.facts, 'universe.tsv') if subdir[name] is None else os.path.join(a.facts, subdir[name], 'universe.tsv')
         reps.append(check_image(name, img, facts, throws, mangled_of, load_entries(up)))
     resolved = {x for r in reps for v in r['throw_resolved'].values() for x in v if x}
     known = {t['addr'] for t in throws}

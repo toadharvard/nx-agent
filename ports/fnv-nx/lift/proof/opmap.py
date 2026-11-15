@@ -4,6 +4,8 @@
 A form that the instruction pages do not list is 'defined by the opcode map' iff its cell is non-empty:
   - one-byte / two-byte (0F xx) opcode with no row in Table A-6: the cell of Table A-2 / A-3 at (opcode, prefix row) is non-empty and is not an escape, a group reference or a VEX/EVEX entry;
   - an opcode that Table A-6 lists (80-83, C0,C1, F6,F7, 0F 00, ...): the A-6 cell of (opcode, ModRM.reg) is non-empty in some row whose pfx is blank or equal to the form's mandatory prefix.
+The x87 escape opcodes D8-DF are defined by Vol. 2 Appendix A section A.5 "Escape Opcode Instructions", Tables A-7 to A-22 (per first byte: ModRM < C0 is a table of 8 cells by ModRM.reg, ModRM >= C0 a table by the two hex digits of ModRM); the ESC cell of
+Table A-2 only points there, so a D8-DF form is 'defined by the opcode map' iff its cell in A-7..A-22 is non-empty (all blanks are reserved: A.5 "NOTES").
 Cells of Table A-2 / A-3 are addressed by the header digit of their column and the hex digit of the row (the band of stacked pfx rows, np/66/F3/F2, belongs to the row digit of its first line)."""
 import re
 
@@ -13,7 +15,7 @@ NONCELL = re.compile(r'escape|ESC|Grp|VEX|EVEX|3DNow', re.I)
 def pages_of(txt_path):
     pages = open(txt_path, encoding='utf-8', errors='replace').read().split('\x0c')
     pick = lambda pat: [i for i, p in enumerate(pages) if re.search(pat, p)]
-    return pick(r'Table A-2\. One-byte Opcode Map'), pick(r'Table A-3\. Two-byte Opcode Map'), pick(r'Table A-6\. Opcode Extensions for One- and Two-byte')
+    return pick(r'Table A-2\. One-byte Opcode Map'), pick(r'Table A-3\. Two-byte Opcode Map'), pick(r'Table A-6\. Opcode Extensions for One- and Two-byte'), pick(r'Table A-\d+\. D[8-9A-F] Opcode Map When ModR/M Byte is (?:Within|Outside) 00H to BFH \*\s*\n')
 
 
 def cell(c): return ' '.join((c or '').split())
@@ -24,7 +26,7 @@ def lines_of(c): return [' '.join(x.split()) for x in (c or '').split('\n') if x
 
 def load(pdf_path, txt_path):
     import pdfplumber
-    a2, a3, a6 = pages_of(txt_path); pdf = pdfplumber.open(pdf_path); one, two, groups = {}, {}, []
+    a2, a3, a6, ax = pages_of(txt_path); pdf = pdfplumber.open(pdf_path); one, two, groups = {}, {}, []
     tabs = [(pi, t.extract()) for pi in a2 + a3 for t in pdf.pages[pi].find_tables()]
     for pi, rows in tabs:
         hdr = rows[0]
@@ -48,10 +50,62 @@ def load(pdf_path, txt_path):
             if re.search(r'\b([0-9A-F]{2})-([0-9A-F]{2})\b', lab):
                 a, b = re.search(r'\b([0-9A-F]{2})-([0-9A-F]{2})\b', lab).groups(); ops = list(range(int(a, 16), int(b, 16) + 1))
             groups.append(((two_b, tuple(ops)), cell(r[1]), cell(r[3]), [cell(c) for c in r[4:12]], pi))
-    return {'one': one, 'two': two, 'groups': groups}
+    return {'one': one, 'two': two, 'groups': groups, 'x87': x87_cells(pdf, ax)}
+
+
+X87 = re.compile(r'Table A-(\d+)\. (D[8-9A-F]) Opcode Map When ModR/M Byte is (Within|Outside) 00H to BFH')
+
+
+def x87_cells(pdf, pages):
+    """Tables A-7 .. A-22 (SDM Vol. 2 A.5.2): {(first byte, ModRM): (cell lines, PDF page index, table number)} for every non-empty cell, from the PDF's table cells.
+    Within 00H-BFH: one table of 8 cells, column nnn = ModRM.reg (header `000B`..`111B`); the cell holds for every ModRM with that reg and mod != 3 (key: (first byte, ('reg', nnn))).
+    Outside: tables whose header row is the hex digit of the ModRM low nibble (0-7 or 8-F); the first column is the high nibble (C-F); a row is a mnemonic line (its cell, or the mnemonic of the
+    first column when the row is one merged cell) followed by an operand line; a column is defined iff the mnemonic cell or the operand cell under it is non-empty."""
+    out = {}; title = None
+    for pi in pages:
+        pg = pdf.pages[pi]
+        ts = sorted(((m.get('top'), X87.search(m['text'])) for m in pg.search(r'Table A-\d+\. D[8-9A-F] Opcode Map When ModR/M Byte is (?:Within|Outside) 00H to BFH')), key=lambda x: x[0])
+        for t in sorted(pg.find_tables(), key=lambda t: t.bbox[1]):
+            above = [m for top, m in ts if top <= t.bbox[1] + 1]
+            if above: title = above[-1].groups()
+            if title is None: continue
+            num, fb, within = title; rows = t.extract(); fb = int(fb, 16)
+            if within == 'Within':
+                if not (len(rows) >= 3 and re.fullmatch(r'[01]{3}B', cell(rows[1][0]))): continue
+                for j, c in enumerate(rows[2]):
+                    ln = lines_of(c)
+                    if ln: out[(fb, ('reg', int(cell(rows[1][j])[:3], 2)))] = (ln, pi, int(num))
+            else:
+                hdr = rows[0]
+                if not all(re.fullmatch(r'[0-9A-F]', cell(h)) for h in hdr[1:]): continue
+                cols = [int(cell(h), 16) for h in hdr[1:]]; hi = None; i = 1
+                while i < len(rows):
+                    r = rows[i]
+                    if re.fullmatch(r'[0-9A-F]', cell(r[0])):
+                        hi = int(cell(r[0]), 16); i += 1
+                        op = rows[i] if i < len(rows) and not cell(rows[i][0]) else None
+                        mn = [lines_of(c) for c in r[1:]]
+                        merged = len(mn) > 1 and sum(1 for x in mn if x) == 1 and mn[0] and op is not None
+                        for k, col in enumerate(cols):
+                            ln = (mn[0] if merged else mn[k]) + (lines_of(op[k + 1]) if op is not None else [])
+                            if ln: out[(fb, hi * 16 + col)] = (ln, pi, int(num))
+                        if op is not None: i += 1
+                        continue
+                    i += 1
+    return out
+
+
+def lookup_x87(maps, body):
+    """D8-DF form -> (name, citation) or None, from Tables A-7..A-22"""
+    if len(body) < 2: return None
+    fb, mrm = body[0], body[1]
+    t = maps['x87'].get((fb, ('reg', (mrm >> 3) & 7))) if mrm < 0xc0 else maps['x87'].get((fb, mrm))
+    if not t: return None
+    return 'Table A-%d' % t[2], 'Table A-%d (PDF page index %d): %s %s = %s' % (t[2], t[1], ' '.join('%02X' % b for b in body[:2]), '/%d' % ((mrm >> 3) & 7) if mrm < 0xc0 else '', ' '.join(t[0]))
 
 
 def lookup(maps, mand, body):
+    if body[:1] and 0xd8 <= body[0] <= 0xdf: return lookup_x87(maps, body)
     two_b = body[:1] == b'\x0f'; ob = body[1] if two_b else body[0]; rest = body[2:] if two_b else body[1:]
     rows = [g for g in maps['groups'] if g[0][0] == two_b and ob in g[0][1]]
     if rows:
@@ -75,4 +129,6 @@ def dump(maps):
             out.append('%s\t%02X\t%s\t%d\t%s' % (name, op, pfx or '-', pi, ' | '.join(t)))
     for (two_b, ops), g, pfx, regs, pi in maps['groups']:
         out.append('group\t%s\t%s\t%s\t%s\t%d\t%s' % ('0F' if two_b else '-', ','.join('%02X' % o for o in ops), g, pfx or '-', pi, ' | '.join(regs)))
+    for (fb, k), (t, pi, num) in sorted(maps['x87'].items(), key=lambda x: (x[0][0], str(x[0][1]))):
+        out.append('x87\t%02X\t%s\t%d\tA-%d\t%s' % (fb, ('/%d' % k[1]) if isinstance(k, tuple) else '%02X' % k, pi, num, ' | '.join(t)))
     return '\n'.join(out) + '\n'
