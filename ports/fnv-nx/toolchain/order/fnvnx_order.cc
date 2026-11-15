@@ -99,20 +99,12 @@ static unsigned long calls_object_last, calls_operator, calls_prvalue_virtual, c
 
 // ---- what counts as shared memory
 
-// LOCAL: ordering exists only for memory another thread can observe. Two facts, both decided by the declaration alone:
-//  (1) a decl base that is not aliased (an automatic variable or parameter that no operand of this function's GIMPLE takes
-//      the address of, a gimple temporary) is visible to one thread only: no access to it is ordered and its address is never
-//      taken (local_unshared).  "Takes the address of" is decided on the GIMPLE of the function by address_taken_scan, NOT
-//      by TREE_ADDRESSABLE: the front end sets that flag whenever it formed `&x` at any point (for a trivial constructor or
-//      copy it later folds away: every aggregate local of C++ carries it), so it says nothing about a pointer that exists.
-//      PROOF.  A GIMPLE object that is neither static, external nor thread-local is named only by its own decl; another
-//      thread can reach it only through an address, and an address of a decl comes into being by exactly these operations:
-//      an ADDR_EXPR whose base is the decl (an rvalue operand: assignment, call argument, call function, static chain,
-//      constructor element, switch/cond/return operand; an ADDR_EXPR as the base of a MEM_REF/TARGET_MEM_REF is an access
-//      form, no pointer value); the hidden result pointer of a call whose result is returned in memory (aggregate_value_p)
-//      and whose lhs has the decl as base; an operand of an asm statement (a memory constraint takes the address implicitly).
-//      address_taken_scan collects the decls of all three over every statement; the scan covers every operand of every
-//      statement kind, so a decl outside the set has no pointer anywhere (ASM-001: the compiler's GIMPLE semantics).
+// LOCAL: ordering exists only for memory another thread can observe. (1) A local or parameter that is not one of the SHARED LOCALS is
+//      visible to one thread only: no access to it is ordered. The shared locals are the addressable locals and parameters that GCC's
+//      points-to solution of THIS body does not prove private (frame_escapes_compute, computed once before this pass adds a single
+//      atomic; the same fact is the `:n` of the frame record). A non-addressable decl has no pointer anywhere; a private addressable
+//      one has no pointer another thread can hold. A temporary this pass makes addressable is accessed plainly, so it is private by
+//      construction and recorded as such (force_addressable). ASM-001: the compiler's GIMPLE and points-to semantics.
 //  (2) a RESULT_DECL with DECL_BY_REFERENCE is the hidden result POINTER of the function (its type is the reference
 //      type; the object is at *<retval>): the decl itself is a value of this thread, never memory. Reading it (passing it
 //      on, `UVf::UVf (<retval>, x)`) is no load, and its address is never taken (&<retval> is the ICE in
@@ -134,80 +126,9 @@ static bool hard_register(tree base) {
 }
 
 // the decls whose address the function takes (see LOCAL above); valid between execute()'s scan and its end
-static std::set<tree> *addr_set;
-
-static void scan_operand(tree t, std::set<tree> &out) {
-  if (!t) return;
-  switch (TREE_CODE(t)) {
-    case ADDR_EXPR: {
-      tree b = get_base_address(TREE_OPERAND(t, 0));
-      if (b && DECL_P(b)) out.insert(b);
-      scan_operand(TREE_OPERAND(t, 0), out);
-      return;
-    }
-    case MEM_REF: case TARGET_MEM_REF: {
-      // MEM_REF[&x + c] is an access to x, not a pointer value: its ADDR_EXPR base takes no address
-      tree b = TREE_OPERAND(t, 0);
-      scan_operand(TREE_CODE(b) == ADDR_EXPR ? TREE_OPERAND(b, 0) : b, out);
-      for (int i = 1; i < TREE_OPERAND_LENGTH(t); i++) scan_operand(TREE_OPERAND(t, i), out);
-      return;
-    }
-    case CONSTRUCTOR: {
-      unsigned long i;
-      tree idx, val;
-      FOR_EACH_CONSTRUCTOR_ELT(CONSTRUCTOR_ELTS(t), i, idx, val) { scan_operand(idx, out); scan_operand(val, out); }
-      return;
-    }
-    case TREE_LIST:
-      for (; t; t = TREE_CHAIN(t)) scan_operand(TREE_VALUE(t), out);
-      return;
-    default:
-      if (EXPR_P(t) || handled_component_p(t))
-        for (int i = 0; i < TREE_OPERAND_LENGTH(t); i++) scan_operand(TREE_OPERAND(t, i), out);
-      return;
-  }
-}
-
-static void address_taken_scan(function *fun, std::set<tree> &out) {
-  basic_block bb;
-  FOR_EACH_BB_FN(bb, fun)
-    for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
-      gimple *st = gsi_stmt(gsi);
-      // NOESCAPE: an address passed to a builtin for an argument that GCC's own fnspec of the builtin says does not escape
-      // (the callee neither stores the pointer nor lets it outlive the call: memcpy, memset, memcmp, strlen, ...) forms no
-      // pointer another thread can hold, so it does not make its object shared (ASM-001: the compiler's builtin fnspecs).
-      gcall *bc = dyn_cast<gcall *>(st);
-      tree bfn = bc ? gimple_call_fndecl(bc) : NULL_TREE;
-      bool nb = bfn && fndecl_built_in_p(bfn, BUILT_IN_NORMAL) && gimple_call_fnspec(bc).known_p();
-      for (unsigned i = 0; i < gimple_num_ops(st); i++) {
-        if (nb && i >= 3 && i - 3 < gimple_call_num_args(bc)) {
-          attr_fnspec sp = gimple_call_fnspec(bc);
-          tree a = gimple_call_arg(bc, i - 3);
-          if (TREE_CODE(a) == ADDR_EXPR && sp.arg_specified_p(i - 3) && sp.arg_noescape_p(i - 3)) continue;
-        }
-        scan_operand(gimple_op(st, i), out);
-      }
-      if (gcall *call = dyn_cast<gcall *>(st)) {
-        scan_operand(gimple_call_chain(call), out);
-        tree lhs = gimple_call_lhs(call);
-        if (lhs && aggregate_value_p(TREE_TYPE(lhs), gimple_call_fntype(call))) {
-          tree b = get_base_address(lhs);
-          if (b && DECL_P(b)) out.insert(b);   // the hidden result pointer
-        }
-      } else if (gasm *as = dyn_cast<gasm *>(st)) {
-        auto asm_ops = [&](unsigned n, tree (*get)(const gasm *, unsigned)) {
-          for (unsigned i = 0; i < n; i++) {
-            tree v = TREE_VALUE(get(as, i));
-            tree b = get_base_address(v);
-            if (b && DECL_P(b)) out.insert(b);   // a memory constraint takes the address implicitly
-            scan_operand(v, out);
-          }
-        };
-        asm_ops(gimple_asm_noutputs(as), [](const gasm *a, unsigned i) { return gimple_asm_output_op(a, i); });
-        asm_ops(gimple_asm_ninputs(as), [](const gasm *a, unsigned i) { return gimple_asm_input_op(a, i); });
-      }
-    }
-}
+static std::set<tree> *shared_locals;
+static void frame_escapes_compute(function *fun);
+static std::map<tree, std::set<tree> > frame_private;   // per function: the address-taken locals with escapes=0, plus the temporaries order creates
 
 static bool local_unshared(tree base) {
   if (!base) return true;
@@ -216,7 +137,7 @@ static bool local_unshared(tree base) {
     // a result or parameter passed by invisible reference is the object the caller named (a return slot: `g = f()`
     // may construct f's result in g itself): a pointer dereference, not a frame variable of this function
     return !memory_result(base) && !TREE_STATIC(base) && !DECL_EXTERNAL(base) && !DECL_THREAD_LOCAL_P(base) &&
-           !(addr_set ? addr_set->count(base) != 0 : TREE_ADDRESSABLE(base));
+           !shared_locals->count(base);
   if (TREE_CODE(base) == CONST_DECL || TREE_CODE(base) == STRING_CST) return true;
   return false;
 }
@@ -327,6 +248,9 @@ static void force_addressable(tree d) {
   if (!d || !DECL_P(d)) return;
   DECL_NOT_GIMPLE_REG_P(d) = 1;
   ::mark_addressable(d);
+  // PRIVATE BY CONSTRUCTION: a decl order makes addressable that is not one of the shared locals (shared_locals) is accessed plainly
+  // by this pass, so the frame record must say `:n` for it
+  if (shared_locals && !shared_locals->count(d) && !TREE_STATIC(d) && !DECL_EXTERNAL(d)) frame_private[current_function_decl].insert(d);
 }
 
 static tree gimplify_to(tree e, gimple_seq *seq) {
@@ -910,6 +834,7 @@ static void order_single(gimple_stmt_iterator *gsi) {
   unit_copy(gsi, lhs, rhs, st, ld);
 }
 
+
 struct order_pass : gimple_opt_pass {
   order_pass(gcc::context *ctx, const pass_data &d) : gimple_opt_pass(d, ctx) {}
 
@@ -921,8 +846,18 @@ struct order_pass : gimple_opt_pass {
     // returns in memory, asm operands) are the shared locals; they are made addressable before any access is classified, so no
     // earlier statement keeps a plain access to them.  Every other local is unshared (local_unshared).
     std::set<tree> taken;
-    address_taken_scan(fun, taken);
-    addr_set = &taken;
+    {
+      // Late position (SSA, after every pass that creates address forms): the shared locals are the frame variables that GCC's points-to
+      // solution of THIS body, taken before this pass adds a single atomic, does not prove private (frame_escapes_compute). The same fact
+      // is the `:n` of the frame record, so a plain access to a recorded variable without `:n` cannot arise.
+      frame_escapes_compute(fun);
+      std::set<tree> &priv = frame_private[fun->decl];
+      unsigned ix;
+      tree d;
+      FOR_EACH_LOCAL_DECL(fun, ix, d) if (TREE_ADDRESSABLE(d) && !priv.count(d)) taken.insert(d);
+      for (tree p = DECL_ARGUMENTS(fun->decl); p; p = DECL_CHAIN(p)) if (TREE_ADDRESSABLE(p) && !priv.count(p)) taken.insert(p);
+    }
+    shared_locals = &taken;
     for (tree d : taken)
       if ((VAR_P(d) || TREE_CODE(d) == PARM_DECL || TREE_CODE(d) == RESULT_DECL) && !hard_register(d) && !TREE_STATIC(d) && !DECL_EXTERNAL(d))
         force_addressable(d);
@@ -936,7 +871,7 @@ struct order_pass : gimple_opt_pass {
     if (verbose && (c.ldar || c.stlr))
       inform(DECL_SOURCE_LOCATION(fun->decl), "%<fnvnx_order%>: %lu acquire loads, %lu release stores", c.ldar, c.stlr);
     cur = NULL;
-    addr_set = NULL;
+    shared_locals = NULL;
     generated_bbs.clear();
     return 0;
   }
@@ -973,7 +908,7 @@ static std::map<tree, std::vector<tree> > frame_vars;   // the local variables a
 //       or names ADDR_EXPR in such a position or in an asm operand; a pointer without points-to info points anywhere;
 // (3) restates (2) from the statements, so a solution that missed a use cannot make a variable private. Pointers carried in integers are
 // covered by (2) only (the PTA models the conversion). ASM-001: the compiler's GIMPLE and points-to semantics.
-static std::map<tree, std::set<tree> > frame_private;   // per function: the address-taken locals with escapes=0
+static std::set<tree> frame_private_done;   // functions whose escapes fact is already computed: it is computed ONCE, by whichever pass first needs it (order's rewrite, before it adds its atomics), and never recomputed on the rewritten body   // per function: the address-taken locals with escapes=0
 
 struct frame_vars_pass : gimple_opt_pass {
   frame_vars_pass(gcc::context *ctx, const pass_data &d) : gimple_opt_pass(d, ctx) {}
@@ -994,15 +929,18 @@ struct frame_vars_pass : gimple_opt_pass {
     return true;
   }
 
-  unsigned int execute(function *fun) final override {
+  static void compute(function *fun) {
     unsigned ix;
     tree d;
+    if (frame_private_done.count(fun->decl)) return;
     std::vector<tree> &v = frame_vars[fun->decl];
     FOR_EACH_LOCAL_DECL(fun, ix, d) v.push_back(d);
     std::vector<tree> cand = v;
     for (tree p = DECL_ARGUMENTS(fun->decl); p; p = DECL_CHAIN(p)) cand.push_back(p);
     std::set<tree> &priv = frame_private[fun->decl];
-    if (!flag_tree_pta || !gimple_in_ssa_p(fun) || !fun->gimple_df) return 0;          // (1): nothing is private
+    if (!flag_tree_pta || !gimple_in_ssa_p(fun) || !fun->gimple_df) return;          // (1): nothing is private
+    frame_private_done.insert(fun->decl);
+    compute_may_aliases();   // the solution of THIS body now, whichever pass calls (TODO_rebuild_alias is only the frame_vars pass's own request)
     std::set<tree> esc;
     bool all = false;
     struct pt_solution q;
@@ -1043,11 +981,25 @@ struct frame_vars_pass : gimple_opt_pass {
             note(gimple_assign_rhs1(a));
         }
       }
-    if (all) return 0;
+    if (all) return;
     for (tree c : cand) if (!esc.count(c)) priv.insert(c);
+    return;
+  }
+  unsigned int execute(function *fun) final override {
+    compute(fun);
+    // the frame row lists every local at the LAST GIMPLE point: also the ones a pass after the escapes fact created (order's copies of
+    // by-value parameters, its temporaries); they are not in `priv`, so they are recorded as escaping
+    if (frame_private_done.count(fun->decl)) {
+      std::vector<tree> &v = frame_vars[fun->decl];
+      v.clear();
+      unsigned ix;
+      tree d;
+      FOR_EACH_LOCAL_DECL(fun, ix, d) v.push_back(d);
+    }
     return 0;
   }
 };
+static void frame_escapes_compute(function *fun) { frame_vars_pass::compute(fun); }
 static const pass_data frame_vars_data = {
     GIMPLE_PASS, "fnvnx_frame_vars", OPTGROUP_NONE, TV_NONE, PROP_ssa, 0, 0, TODO_rebuild_alias, 0,
 };
