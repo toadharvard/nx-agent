@@ -9,9 +9,6 @@ below); the VEX second model was cancelled and `model_vex.py` was never finished
   cmovcc lea bswap cdq xchg push pop, plus mov and one memory form each way) built from a capstone decode; form keys are the
   ones of `test/instest.py` (`form_key` copied; prove.py does not import instest, which needs numpy/elftools/unicorn).
 * `enc_table.py`: 393 concrete encodings (keystone + a few raw hex), 270 form keys.
-* `prove.py --backends`: emitted C++ compiled with `g++ -std=c++17 -O1 -Wall -Wextra -Werror -fsanitize=undefined
-  -fno-sanitize-recover=all`, run on 1000 random inputs per form (half drawn from edge values), compared with the z3 term
-  (registers, six flags, eip, four probed memory bytes; memory is a hash function of the address, overlaid by the writes).
 * `prove.py --model MODULE`: the proof gate, model-agnostic; the plug-in interface is in the docstring of prove.py.
   Plumbing was checked only with a reference equal to the DSL (proves nothing) and with a deliberately broken copy of
   forms.py (AF/OF changed) which gives FAILED with a counterexample line.
