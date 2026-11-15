@@ -1105,3 +1105,11 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - cmp* instructions with imm > 7: 0 of 5,703,260 lifted instructions, on fixture lift-facts/2; re-run on the merged FACTS.
   - w8 merges it into base3 with L5 ad3af10c5.
   - The exe JTAB_RED classification (326 rows) moves to w13; w7 stays on the facts memory growth.
+- 22:25 base3 92b616340: L5 ad3af10c5 (gs = 0, null_seg row), w13 99b0218fd, gs reads ordinary, SEL_* from the row, the SEGWRITES fact (a lift/facts stage).
+  - packuses 38c6e711a: `recipe.py check lift/pack` valid on L1 789ef219c (pack from the liftsrc `uses` root). formgate.py is relayed to L3b.
+  - Segment write sites at facts 6944080:
+    - exe: es 2, ds 1;
+    - d3dx9_31: es 77, ds 20, fs 1, gs 1;
+    - d3dx9_38: es 146, ds 42;
+    - the other 6 images: 0.
+  - The guard rule is refined to a selector value rule (a write is non-null iff its source is a proven non-null selector) so the exe's default accesses are not guarded without proof.
