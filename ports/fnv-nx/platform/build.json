@@ -295,6 +295,20 @@
    ]
   },
   {
+   "tool": "ports/fnv-nx/manifest/gen_sysmetrics.py",
+   "args": [
+    "/ext/wine-9.0",
+    "/in/ports/fnv-nx/platform/win32/display.cpp",
+    "/out/win32/sysmetrics.gen.inc"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/win32/display.cpp"
+   ],
+   "outputs": [
+    "win32/sysmetrics.gen.inc"
+   ]
+  },
+  {
    "tool": "ports/fnv-nx/manifest/gen_registry_seed.py",
    "args": [
     "/ext/manifest/manifest/regsites.tsv",
