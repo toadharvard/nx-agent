@@ -120,7 +120,7 @@ Several native copies of one address: each is judged, the worst verdict stands.
 ```text
 gate_reach - certificates that a branch of a platform import body is unreachable (L1 CONTRACT, gate `reach`).
 
-    gate_reach.py --requests reach_requests.tsv --gpa gpa_names.tsv --image NAME=pe,ranges.tsv ... [--bridge bridge.tsv]
+    gate_reach.py --requests reach_requests.tsv --gpa gpa_names.tsv --image NAME=pe ... --facts DIR --facts-tree SHA [--bridge bridge.tsv]
                   [--out DIR/reach.tsv] [--facts-h reach_facts.h] [--facts-tsv reach.facts.tsv]
     gate_reach.py --objects <ld out>/inputs.rsp --requests reach_requests.tsv --certified reach.facts.tsv [--out reach.link.tsv]
 
@@ -293,7 +293,7 @@ Items of the universe and their certification:
   seed                            certified iff `seed` equals, byte for byte, the include generate() makes from (sites, declared)
   writer:<unit>                   every product object that references a hive-writing API (role create or write); certified iff it is the
                                   declared seed unit: no other code of the product makes a hive key
-generate() is the port of platform/manifest/gen_registry_seed.py (L5): it refuses a declared row that no static read site reads, a malformed or
+generate() is the port of manifest/gen_registry_seed.py (L5): it refuses a declared row that no static read site reads, a malformed or
 duplicate row, a value not valid for its type, and a `{` that is not `{game_dir}`. Assumptions (ASM-051): regsites.tsv is complete over the exe and the
 modules (the registry-site pass reports what it cannot bind as dynamic, never skips); the seed unit and the registry implementation are the only
 code that reaches the hive, and the implementation creates no key by itself (the writers rule closes the entry points, not the internals).
@@ -441,6 +441,24 @@ PE directories).  Assumptions (stated, not proven): P; the image's code ranges a
 callee preserves ebx/esi/edi/ebp (A1) and reads no register of an import call (the platform's calling convention); the
 platform implementation writes through a pointer argument only when ImportInfo says so (default: every pointer argument
 may be written); no code outside the images (the loader, the OS) writes L except through those imports.
+```
+
+## contract/modules.py
+
+```text
+modules - the module table of the guest (L1 CONTRACT), and, from the same PE reading, the facts the loader's start rules compare.
+
+TLS directory facts (tls.tsv, tls/<name>.bin; rule S5 of the loader, read by L4's bootstart.py).  Universe: the exe, then every image of
+modules.tsv whose has_tls column is 1 (data directory 9 has a nonzero size), sorted by name; so the DLL rows of tls.tsv number exactly the
+has_tls = 1 rows of modules.tsv.  The directory is IMAGE_TLS_DIRECTORY32 (StartAddressOfRawData, EndAddressOfRawData, AddressOfIndex,
+AddressOfCallBacks, SizeOfZeroFill, Characteristics), read raw: the four addresses are VAs at the PREFERRED base.
+Columns: name, load_index (as in modules.tsv; empty for the exe), start_va, end_va, index_va, callbacks_va (hex, raw), template_rva (start_va
+- preferred base, hex), template_size (end - start, decimal), zero_fill (SizeOfZeroFill, decimal), align (the IMAGE_SCN_ALIGN field of
+Characteristics, bits 20-23, the field itself: 0 stays 0), template_sha256, callbacks (;-list of the RVAs of the callback array up to its null word;
+empty when AddressOfCallBacks is 0 or the first word is 0).  tls/<name>.bin holds the template bytes as the mapped image has them (file bytes,
+then zeros).  Red, never clamped: a directory shorter than 24 bytes or outside the image, end < start, a template outside the image, a callback
+array with no null terminator inside the image, a callback outside the image.  Written to OUT only: nothing game-derived enters the repository.
+Test: contract/tests/test_modules.py on synthetic PE images built by the test.
 ```
 
 ## contract/objfacts_merge.py
@@ -1353,6 +1371,30 @@ what the source says; it does not follow a relocation into a non-group, non-merg
 Rule (c) groups by address: a body reached through two names of one address with the same body id is the owner's statement of one body.
 ```
 
+## verify/gate_onedef.py
+
+```text
+Gate "onedef" (fnvnx-gate/1): one definition, one source. A name, a COMDAT group, a source file and a header each come from ONE place.
+    python3 -I gate_onedef.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/onedef.json
+Rules (by symbol tables and file content, never by a name's text):
+  (a) Per linked image (a root with a `link`; its objects are those of the root itself and of every root of its `link.roots`): a GLOBAL or WEAK
+      definition outside every COMDAT group comes from exactly ONE root. Two roots defining one name is `dup-def`, whatever the binding (strong, weak):
+      the linker's choice between them would pick a body by link order.
+  (b) COMDAT groups of an image. The instances of one signature that come from different roots must be one definition: one digest of the group's
+      member sections (bytes, flags, alignment and relocations by offset, type, addend and target: gate_linkstrict.elf_comdat), else
+      `comdat-differs` (flags, plugins or a body differ: an ODR violation). Instances of one group inside ONE root need no comparison.
+      NOT EXACT (stated): this compares what the linker sees. "The same source definition" (same decl_file/decl_line) needs DWARF
+      `DW_AT_decl_file/line`, and the objects of a recipe carry no debug info (flags are the root's -O/-W/-std only): until a recipe
+      builds them with `-g1`-class line tables, a cross-root COMDAT group whose digests are equal is accepted on equal bytes alone.
+  (c') Every translation-unit source file (.c .cc .cpp .cxx .s .S) of a product root is a unit of exactly ONE root: the content sha256 of a unit
+      must not be the content of a unit of another root (`unit-copy`), and a path is a unit of one root only (`unit-path`).
+  (c'') Headers are shared by include, never copied: a tracked header (.h .hh .hpp .hxx .inc .inl) whose content sha256 appears under two
+      paths of the admitted roots is `header-copy` for every copy. Externals are pinned trees, outside this clause; generated outputs are
+      not tracked, a tool writes them from tracked inputs (they are checked through the sources and headers they are generated from).
+Universe = defined global names per image + COMDAT signatures per image + units of product roots + tracked headers. Certified = items with
+no finding. No product root: units/headers still count (clauses (c'), (c'') are about the tree), (a) and (b) are empty.
+```
+
 ## verify/gate_argorder.py
 
 ```text
@@ -1521,6 +1563,8 @@ and compares the tracked files it opened with subject + references (verify/oracl
 ## verify/gate_assumptions.py
 
 ```text
+Perf debt: verify/PERFDEBT.json (fnvnx-perfdebt/1) lists switched-off fast paths, each with id, fast_path, rule, owner (a layer); the report gives
+perfdebt.open; first_frame true makes any open entry red.
 Gate "assumptions" (fnvnx-gate/1): every assumption the rules rest on is in one registry, with an id and a status
 (verify/VERDICT.md class 18); the accepted ones are ASM-001 to ASM-009.
     python3 -I gate_assumptions.py   run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/assumptions.json

@@ -83,8 +83,8 @@ static bool is_shared(const struct fm_spec *sp) { return !sp->file || (writable_
 uint32_t fm_backing_reach(const struct fm_spec *sp)
 {
     if (is_shared(sp))
-        return sp->size > FNVNX_SEC_MAX_SIZE ? (sp->file ? REACH_KERNEL32_CreateFileMappingA_PROT : REACH_KERNEL32_CreateFileMappingA_HFILE) : 0;
-    return sp->writers ? REACH_KERNEL32_CreateFileMappingA_WRITER : 0;
+        return sp->size > FNVNX_SEC_MAX_SIZE ? (sp->file ? FNVNX_REACH_KERNEL32_CreateFileMappingA_PROT : FNVNX_REACH_KERNEL32_CreateFileMappingA_HFILE) : 0;
+    return sp->writers ? FNVNX_REACH_KERNEL32_CreateFileMappingA_WRITER : 0;
 }
 
 int fm_backing_alias(const struct fm_backing *b) { return b->alias; }
@@ -93,7 +93,7 @@ uint32_t fm_view_reach(const struct fm_backing *b, int os_prot, int priv)
 {
     if (!b->sec || ((os_prot & OS_VM_WRITE) && !priv))
         return 0;
-    return b->alias == FM_ALIAS_FILE ? REACH_KERNEL32_CreateFileMappingA_PROT : REACH_KERNEL32_CreateFileMappingA_HFILE;
+    return b->alias == FM_ALIAS_FILE ? FNVNX_REACH_KERNEL32_CreateFileMappingA_PROT : FNVNX_REACH_KERNEL32_CreateFileMappingA_HFILE;
 }
 
 /* the Win32 error of a section service error (-code as the wrappers return it) */

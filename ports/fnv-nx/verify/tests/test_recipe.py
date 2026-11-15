@@ -35,11 +35,11 @@ os.makedirs("/out/gen")
 open("/out/gen/gen.h", "w").write("#define NCONST %d\\n#define STAMP %dL\\n" % (n, @EXTRA@))
 '''
 # The toy root is a guest ELF in the sense of RECIPE.md "Link": ILP32, position independent, linked with the product's own link/guest.ld and
-# the product's own crt0 (toolchain/guest/crt0.s, read from the tree like guest.ld, so the fixture can never drift from the link contract): the
+# the product's own crt0 (rt/guest/crt0.s, read from the tree like guest.ld, so the fixture can never drift from the link contract): the
 # FNXG header at the first segment + 8, MOD0 behind it, the entry at the first segment. crt0 branches to __fnvnx_guest_entry, the entry every
 # guest program defines (in the product, runtime.c); the toy's program entry is f_a. The header is OS-layer code (os.S, an os_layer unit);
 # HDR is the same as one assembler statement for the roots that have no os.S (MINI).
-CRT0 = (open(os.path.join(VERIFY, "..", "toolchain", "guest", "crt0.s")).read()
+CRT0 = (open(os.path.join(VERIFY, "..", "rt", "guest", "crt0.s")).read()
         + "\n.text\n.global __fnvnx_guest_entry\n.set __fnvnx_guest_entry, f_a\n")
 OS_NOLINK = ".text\n.globl os_svc\n.type os_svc,%function\nos_svc:\n svc #0\n ret\n.size os_svc,.-os_svc\n"
 HDR = "__asm__(%s);\n" % json.dumps(CRT0 + ".text\n")
@@ -443,6 +443,26 @@ def main():
     check("include dir in a product root of the other target rejected", len(home("hdr_other")) == 1, home("hdr_other"))
     check("include dir in a tool root rejected", len(home("hdr_tool")) == 1, home("hdr_tool"))
     check("include dir in a doc root rejected", len(home("hdr_doc")) == 1, home("hdr_doc"))
+    # per-target recipes: the root hdr_other (the other target) with a recipe for this root's target too is a home; without it, none
+    both = recipe.norm_entry({"path": T + "hdr_other", "class": "product", "target": other, "recipe": {other: T + "hdr_other/b.json", own: T + "hdr_other/b2.json"}})
+    check("a per-target recipe {guest, host} parses to the base string plus a variant keyed by the other target",
+          both["recipe"] == T + "hdr_other/b.json" and both["variants"] == {own: {"target": own, "recipe": T + "hdr_other/b2.json"}}
+          and recipe.targets_of(both) == {own, other} and recipe.pairs_of({}, "r", both) == ["r", "r@" + own], both)
+    check("the spelling as a variant parses to the same structure",
+          recipe.norm_entry({"path": "x", "target": other, "recipe": "b.json", "variants": {own: {"target": own, "recipe": "b2.json"}}})["variants"]
+          == recipe.norm_entry({"path": "x", "target": other, "recipe": {other: "b.json", own: "b2.json"}})["variants"])
+    rr3 = dict(rr, **{T + "hdr_other": both})
+    pt = [e for e in recipe.check(mut(include=RECIPE["include"] + [T + "hdr_other"]), ROOT, rfiles, rr3, None, rk) if "lies in no admitted product root" in e]
+    check("an include into a root with a recipe for the including root's target is accepted", not pt, pt)
+    check("the same include without that recipe is rejected", len(home("hdr_other")) == 1, home("hdr_other"))
+    check("a plain-string recipe parses to itself", recipe.norm_entry({"path": "x", "target": own, "recipe": "b.json"}) == {"path": "x", "target": own, "recipe": "b.json"})
+    # every per-target rule judges the effective entry: the plugin rule of a variant follows the variant's target, not the base's
+    noplug = dict(RECIPE, plugins=[])
+    pe = lambda tg, vt, var: [e for e in recipe.plugin_errors(noplug, ROOT, rfiles, {ROOT: dict(base_roots[ROOT], target=tg, variants={"v": {"target": vt}})}, ["a.cc"], [], var)  # noqa: E731
+                              if "does not load plugin" in e]
+    check("plugins: a guest root without plugins is red; its host variant is green; a host root's guest variant is red",
+          len(pe("guest", "host", "")) > 0 and pe("guest", "host", "v") == [] and pe("host", "guest", "") == [] and len(pe("host", "guest", "v")) > 0,
+          (len(pe("guest", "host", "")), pe("guest", "host", "v"), pe("host", "guest", ""), len(pe("host", "guest", "v"))))
     # one name, one file: two include dirs of one recipe holding a header of the same include-relative path are red
     rr2 = dict(rr, **{T + "hdr_prod2": {"path": T + "hdr_prod2", "class": "product", "target": own}})
     rf2 = rfiles + [T + "hdr_prod2/h.h", T + "hdr_prod2/g.h"]

@@ -60,6 +60,9 @@ def _plugin(name, args):
     return p
 
 
+EXTRA = {'external': [], 'include': [], 'copy': []}   # a test of a header that needs more of the real tree: pinned externals, include dirs, (real repo dir, name under the toy root) copied whole
+
+
 def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=False, variant=''):
     """build the toy guest root: plugins [(name, {key: value})] in load order, fixtures {unit file name: text}; -> (objects.json dict, out dir)"""
     _N[0] += 1
@@ -84,6 +87,8 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
         os.makedirs(os.path.dirname(os.path.join(repo, rel)), exist_ok=True)
         shutil.copyfile(os.path.join(REAL, rel), os.path.join(repo, rel))
     _w(repo, T + 'verify/guest_compiler.json', json.dumps(pin))
+    for src, dst in EXTRA['copy']:   # the real tree under the toy root (a header dir needs a product root of the guest target as its home)
+        shutil.copytree(os.path.join(REAL, src), os.path.join(repo, ROOT, dst))
     if not any(k.endswith(('.cc', '.cpp', '.cxx')) for k in fixtures):   # a root with a C++ unit declares its origin: a C fixture comes with one
         fixtures = dict(fixtures, **{'zz_cxx.cpp': 'int zz_cxx() { return 0; }\n'})
     files = ({k: v for k, v in fixtures.items()} if native else {})
@@ -93,7 +98,7 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
            '    open("/out/" + n, "w").write(t)\n') % {'gen/' + k: v for k, v in fixtures.items()}
     _w(repo, T + 'gen/lift.py', gen)
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': ext['name'], 'cc': pin['cc'], 'cxx': pin['cxx']},
-           'flags': {'c': [f for f in flags if f not in CXX_ONLY_FLAGS], 'cxx': list(flags), 'asm': []}, 'include': [], 'units': 'all', 'external': [ext],
+           'flags': {'c': [f for f in flags if f not in CXX_ONLY_FLAGS], 'cxx': list(flags), 'asm': []}, 'include': list(EXTRA['include']), 'units': 'all', 'external': [ext] + list(EXTRA['external']),
            }
     if variant:   # the recipe's declared variant: the root's flags plus its own parameters (verify/recipe.py GCSTRESS_*), built as ROOT@VARIANT
         assert variant == recipe.GCSTRESS_VARIANT, variant
@@ -184,6 +189,29 @@ def cc_files(res):
     return out
 
 
+def argument_refused(r, plugin):
+    """True iff R (a compile() result) is the recipe's own refusal of an extra argument of the plugin: the recipe fixes every plugin's arguments by the root's origin
+    (recipe.plugin_args) and refuses any other (`plugin fnvnx_<name>: arguments must be <fixed>, are <given>`). One helper for every plugin test; a test never
+    carries its own expected text."""
+    return r.returncode != 0 and 'plugin fnvnx_%s: arguments must be ' % plugin in r.stderr
+
+
+def missing_plugin_refused(missing):
+    """True iff the recipe refuses a guest root whose plugin list lacks the product plugin MISSING (a name without the fnvnx_ prefix): the product set is
+    recipe.PLUGIN_SOURCES in its fixed order, every unit is compiled with all of it, so a root with fewer is an admission error naming the plugin."""
+    fixed = recipe.plugin_args('native')
+    tmp = tempfile.mkdtemp(prefix='plugbuild-missing-')
+    try:
+        try:
+            _recipe(tmp, [(n[len('fnvnx_'):], fixed[n]) for n in recipe.PLUGIN_SOURCES if n != 'fnvnx_' + missing], {'t.cpp': 'int t(int x) { return x; }\n'},
+                    PRODUCT_FLAGS, native=True, raw=True)
+        except recipe.RecipeError as e:
+            return any('does not load plugin fnvnx_%s' % missing in x for x in e.errors)
+        return False
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def objdump(obj):
     """the object read back with the pinned binutils (env.json): `objdump -dr` -> {symbol: [lines]} (a relocation is the line after its
     instruction). Disassembly is reading, not compiling: the object is the recipe's."""
@@ -198,6 +226,17 @@ def cstring(obj, sec, off):
     """the NUL-terminated string at offset OFF of section SEC of the object"""
     d = elfobj.read(obj).section(sec)
     return d[off:d.index(b'\0', off)].decode()
+
+
+def mnemonics(body):
+    """the set of instruction mnemonics of an objdump body (a list of instruction lines)"""
+    return {m.group(1) for l in body for m in [re.search(r'\t([a-z][a-z0-9.]*)\b', l)] if m}
+
+
+def rule_form(body):
+    """True when the body holds the in-range test of the float -> integer rule: a floating compare and a select (csel, fcsel, bit select, mask and, or a conditional branch)"""
+    ms = mnemonics(body)
+    return bool(ms & {'fcmp', 'fcmpe', 'fcmge', 'fcmgt', 'fcmle', 'fcmlt', 'fcmeq'}) and bool(ms & {'csel', 'fcsel', 'bsl', 'bif', 'bit', 'and', 'csinv', 'cinv'} or any(m.startswith('b.') for m in ms))
 
 
 def section_size(obj, name):

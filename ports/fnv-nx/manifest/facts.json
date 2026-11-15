@@ -1,0 +1,9 @@
+{
+ "format": "fnvnx-funcfacts-pin/1",
+ "external": {
+  "repo": "toadharvard/fnv-nx-build",
+  "branch": "l3a-lift/facts",
+  "commit": "2eeea27bb12a7448c3ca4dc8ed710c4e9bc08ad1",
+  "tree_sha256": "885e7632cb71a8ffc634d2d489e632f6f6cd86c6a1f5bfcd442692ba280dc91d"
+ }
+}

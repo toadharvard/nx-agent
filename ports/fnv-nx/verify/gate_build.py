@@ -24,7 +24,7 @@ import recipe  # noqa: E402
 def product_roots(repo="."):
     """Every (root, variant) pair of the admitted product roots, spelled `root` (the implicit variant) or `root@NAME` (recipe.split_spec)."""
     adm = recipe.load_admit(repo)
-    return sorted(s for p, r in adm.items() if r["class"] == "product" for s in recipe.pairs_of(_full(repo, r), p))
+    return sorted(s for p, r in adm.items() if r["class"] == "product" for s in recipe.pairs_of(_full(repo, r), p, r))
 
 
 def _full(repo, ent):

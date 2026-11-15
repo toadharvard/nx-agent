@@ -36,7 +36,7 @@
   {
    "name": "manifest",
    "repo": "fnv-nx-build",
-   "ref": "l5-platform/manifest",
+   "ref": "l5-manifest",
    "commit": "2ac3091b7095598d04dce6091b2012f7cfa14bc7",
    "tree_sha256": "4708f3d8d2dfa1adeab65fa4eeb4f994ad806372d49da392d22b4f93d2f169bb",
    "at": "/ext/manifest"

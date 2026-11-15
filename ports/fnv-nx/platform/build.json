@@ -32,6 +32,7 @@
  },
  "include": [
   "ports/fnv-nx/platform/include",
+  "ports/fnv-nx/loader/include",
   "ports/fnv-nx/hostabi/include",
   "ports/fnv-nx/shim/include",
   "/ext/a64/aarch64-none-elf/include/c++/15.2.0",
@@ -71,6 +72,40 @@
  "units": "all",
  "generated": [
   {
+   "tool": "ports/fnv-nx/contract/reachreq.py",
+   "args": [
+    "--requests",
+    "/in/ports/fnv-nx/manifest/reach_requests.tsv",
+    "--facts-h",
+    "/out/win32/reach_facts.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/manifest/reach_requests.tsv"
+   ],
+   "outputs": [
+    "win32/reach_facts.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/manifest/gen_wire_errno.py",
+   "args": [
+    "--libnx-convert",
+    "/ext/libnx/nx/source/runtime/devices/convert_errno.c",
+    "--newlib-errno",
+    "/ext/a64/aarch64-none-elf/include/sys/errno.h",
+    "--linux-errno-base",
+    "/ext/linuxerrno/asm-generic/errno-base.h",
+    "--linux-errno",
+    "/ext/linuxerrno/asm-generic/errno.h",
+    "--unit",
+    "/out/os/gen/dom_errno.c"
+   ],
+   "inputs": [],
+   "outputs": [
+    "os/gen/dom_errno.c"
+   ]
+  },
+  {
    "tool": "ports/fnv-nx/platform/win32/tools/gen_nls.py",
    "args": [
     "/ext/nls/nls",
@@ -93,105 +128,105 @@
    ]
   },
   {
-   "tool": "ports/fnv-nx/platform/manifest/gen_env_const.py",
+   "tool": "ports/fnv-nx/manifest/gen_env_const.py",
    "args": [
-    "/in/ports/fnv-nx/platform/manifest/env_const.tsv",
+    "/in/ports/fnv-nx/manifest/env_const.tsv",
     "/out/win32/env_const.gen.inc",
     "--only",
     "win32/"
    ],
    "inputs": [
-    "ports/fnv-nx/platform/manifest/env_const.tsv"
+    "ports/fnv-nx/manifest/env_const.tsv"
    ],
    "outputs": [
     "win32/env_const.gen.inc"
    ]
   },
   {
-   "tool": "ports/fnv-nx/platform/manifest/gen_env_const.py",
+   "tool": "ports/fnv-nx/manifest/gen_env_const.py",
    "args": [
-    "/in/ports/fnv-nx/platform/manifest/env_const.tsv",
+    "/in/ports/fnv-nx/manifest/env_const.tsv",
     "/out/crt/env_const.gen.inc",
     "--only",
     "crt/"
    ],
    "inputs": [
-    "ports/fnv-nx/platform/manifest/env_const.tsv"
+    "ports/fnv-nx/manifest/env_const.tsv"
    ],
    "outputs": [
     "crt/env_const.gen.inc"
    ]
   },
   {
-   "tool": "ports/fnv-nx/platform/manifest/gen_env_const.py",
+   "tool": "ports/fnv-nx/manifest/gen_env_const.py",
    "args": [
-    "/in/ports/fnv-nx/platform/manifest/env_const.tsv",
+    "/in/ports/fnv-nx/manifest/env_const.tsv",
     "/out/audio/dshow.env_const.gen.inc",
     "--only",
     "audio/dshow.cpp"
    ],
    "inputs": [
-    "ports/fnv-nx/platform/manifest/env_const.tsv"
+    "ports/fnv-nx/manifest/env_const.tsv"
    ],
    "outputs": [
     "audio/dshow.env_const.gen.inc"
    ]
   },
   {
-   "tool": "ports/fnv-nx/platform/manifest/gen_env_const.py",
+   "tool": "ports/fnv-nx/manifest/gen_env_const.py",
    "args": [
-    "/in/ports/fnv-nx/platform/manifest/env_const.tsv",
+    "/in/ports/fnv-nx/manifest/env_const.tsv",
     "/out/audio/dshow_filters.env_const.gen.inc",
     "--only",
     "audio/dshow_filters.cpp"
    ],
    "inputs": [
-    "ports/fnv-nx/platform/manifest/env_const.tsv"
+    "ports/fnv-nx/manifest/env_const.tsv"
    ],
    "outputs": [
     "audio/dshow_filters.env_const.gen.inc"
    ]
   },
   {
-   "tool": "ports/fnv-nx/platform/manifest/gen_env_const.py",
+   "tool": "ports/fnv-nx/manifest/gen_env_const.py",
    "args": [
-    "/in/ports/fnv-nx/platform/manifest/env_const.tsv",
+    "/in/ports/fnv-nx/manifest/env_const.tsv",
     "/out/audio/dsound.env_const.gen.inc",
     "--only",
     "audio/dsound.cpp"
    ],
    "inputs": [
-    "ports/fnv-nx/platform/manifest/env_const.tsv"
+    "ports/fnv-nx/manifest/env_const.tsv"
    ],
    "outputs": [
     "audio/dsound.env_const.gen.inc"
    ]
   },
   {
-   "tool": "ports/fnv-nx/platform/manifest/gen_env_const.py",
+   "tool": "ports/fnv-nx/manifest/gen_env_const.py",
    "args": [
-    "/in/ports/fnv-nx/platform/manifest/env_const.tsv",
+    "/in/ports/fnv-nx/manifest/env_const.tsv",
     "/out/audio/waveout.env_const.gen.inc",
     "--only",
     "audio/waveout.cpp"
    ],
    "inputs": [
-    "ports/fnv-nx/platform/manifest/env_const.tsv"
+    "ports/fnv-nx/manifest/env_const.tsv"
    ],
    "outputs": [
     "audio/waveout.env_const.gen.inc"
    ]
   },
   {
-   "tool": "ports/fnv-nx/platform/manifest/gen_env_const.py",
+   "tool": "ports/fnv-nx/manifest/gen_env_const.py",
    "args": [
-    "/in/ports/fnv-nx/platform/manifest/env_const.tsv",
+    "/in/ports/fnv-nx/manifest/env_const.tsv",
     "/out/input/dinput.env_const.gen.inc",
     "--only",
     "input/dinput.cpp"
    ],
    "inputs": [
-    "ports/fnv-nx/platform/manifest/env_const.tsv"
+    "ports/fnv-nx/manifest/env_const.tsv"
    ],
    "outputs": [
     "input/dinput.env_const.gen.inc"
@@ -227,21 +262,21 @@
    ]
   },
   {
-   "tool": "ports/fnv-nx/platform/manifest/gen_registry_seed.py",
+   "tool": "ports/fnv-nx/manifest/gen_registry_seed.py",
    "args": [
     "/ext/manifest/manifest/regsites.tsv",
-    "/in/ports/fnv-nx/platform/manifest/declared_registry.tsv",
+    "/in/ports/fnv-nx/manifest/declared_registry.tsv",
     "/out/win32/registry_seed.gen.inc"
    ],
    "inputs": [
-    "ports/fnv-nx/platform/manifest/declared_registry.tsv"
+    "ports/fnv-nx/manifest/declared_registry.tsv"
    ],
    "outputs": [
     "win32/registry_seed.gen.inc"
    ]
   },
   {
-   "tool": "ports/fnv-nx/platform/manifest/gen_fontmachine.py",
+   "tool": "ports/fnv-nx/manifest/gen_fontmachine.py",
    "args": [
     "/ext/fonts/inputs/wine.inf.in",
     "/ext/fonts/inputs/font.c",
@@ -281,7 +316,10 @@
    "source": "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc",
    "args": {
     "mode": "native"
-   }
+   },
+   "inputs": [
+    "ports/fnv-nx/toolchain/ftoi/f2i_builtins.inc"
+   ]
   },
   {
    "name": "fnvnx_order",
@@ -386,8 +424,8 @@
    "name": "manifest",
    "repo": "fnv-nx-build",
    "ref": "l5-platform/manifest",
-   "commit": "09fce9f909b5c5794a4f14af2768ef70cad5c5da",
-   "tree_sha256": "9bd6bbad4e97d71de622501afd24a405bad464402089d7c591789eedbf8165b9",
+   "commit": "9e4166eade58b561d3f4f16616e90326ea9f74fb",
+   "tree_sha256": "bfbbcea77548e59932f655968af8f943232787fe12ae0dd4a23f68654080bc6d",
    "at": "/ext/manifest"
   },
   {
@@ -421,6 +459,14 @@
    "commit": "7a4c65d2754f265193c2817b4d2f4ebd35bf299b",
    "tree_sha256": "592d5a50c32ded42e580da46f0f6539993b485583efa4392a940ba95fd0134f5",
    "at": "/ext/freetype-debian"
+  },
+  {
+   "name": "linux-uapi-errno",
+   "repo": "fnv-nx-build",
+   "ref": "tools/linux-uapi-errno",
+   "commit": "3e9232031fef9bc95abe37b397331abc95f28b62",
+   "tree_sha256": "16f47d88caf0811c24b580b594c25db06d8ab037d5e96efd5d92bac4e13496de",
+   "at": "/ext/linuxerrno"
   }
  ],
  "sources": "freetype/units.list"
