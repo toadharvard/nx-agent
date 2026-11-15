@@ -1611,3 +1611,4 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
     - a file belongs to its nearest admitted root;
     - bootguest waits for the lift/rt root (L3a).
   - Assumptions reds are routed: ASM-601..641 to L6, ORCHESTRATION.md to the orchestrator.
+- 09:52 **lib/sha256 host variant (L5).** Rule: a root has a variant for target T only if an admitted root of T consumes it. Owner: w15. cand2 also takes w12L2 a924103e0.
