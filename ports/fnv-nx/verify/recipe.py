@@ -1750,6 +1750,86 @@ def driver_doc(stage, drv, flags, mode, tail, inputs):
             "env": dict(unitstage.ENV, PATH=os.path.dirname(drv)), "outputs": ["/out"], "inputs": inputs}
 
 
+MAX_SHARDS = 8
+
+
+def shard_of(key, n):
+    """The shard of a unit whose first-stage key is KEY (hex): int(KEY, 16) mod N. The first-stage key is the PP stage key on the whole trees
+    (unitstage.Build.first_key), a function of the unit and the declared inputs, so every shard build of one checkout assigns the same shard."""
+    return int(key, 16) % n
+
+
+def shard_spec(text):
+    """`i/N` -> (i, N); N in 1..MAX_SHARDS, 0 <= i < N, else RecipeError."""
+    m = re.fullmatch(r"(0|[1-9][0-9]*)/([1-9][0-9]*)", text or "")
+    if not m or not (int(m.group(2)) <= MAX_SHARDS and int(m.group(1)) < int(m.group(2))):
+        raise RecipeError(["--shard %r: want i/N with 0 <= i < N <= %d" % (text, MAX_SHARDS)])
+    return int(m.group(1)), int(m.group(2))
+
+
+def shard_partition(keys, n):
+    """KEYS: {unit: first-stage key} -> N lists of units (sorted), shard i holding the units with shard_of == i. Asserts what the rule says: the
+    lists are pairwise disjoint and together exactly the unit set; a violation is a recipe defect, loud."""
+    parts = [sorted(u for u, k in keys.items() if shard_of(k, n) == i) for i in range(n)]
+    flat = [u for p in parts for u in p]
+    if len(flat) != len(set(flat)) or set(flat) != set(keys):
+        raise RecipeError(["shard partition is not a partition of the %d units: %d listed, %d distinct" % (len(keys), len(flat), len(set(flat)))])
+    return parts
+
+
+STORE_KINDS = ("obj", "tree", "stage-docs")   # content-named files of a store, copied before the key records that name them
+
+
+def _store_files(root, kind):
+    base = os.path.join(root, kind)
+    for d in sorted(os.listdir(base)) if os.path.isdir(base) else []:
+        for n in sorted(os.listdir(os.path.join(base, d))):
+            if not n.startswith(".tmp-"):
+                yield n, os.path.join(base, d, n)
+
+
+def store_merge(src, dst):
+    """Import the objects, trees, stage documents and key records of store SRC into store DST by content (the one import path). A name present in both
+    must hold the same bytes (a key's result record included), else RecipeError `store-merge: key <k> differs` and DST is unchanged (the check is
+    complete before the first copy). Objects are checked against their own name (sha256) on the way in. Files go in as the build writes them
+    (cas.publish_file, mode and mtime of the store), the key records last, so a key in DST always has its objects. -> {kind: files copied}."""
+    if not os.path.isdir(src):
+        raise RecipeError(["store-merge: %s is not a store directory" % src])
+    todo, bad = [], []
+    for kind in STORE_KINDS:
+        for n, p in _store_files(src, kind):
+            q = os.path.join(dst, kind, n[:2], n)
+            data = open(p, "rb").read()
+            if kind == "obj" and hashlib.sha256(data).hexdigest() != n.partition(".")[0]:
+                bad.append("store-merge: obj %s: content does not match its name" % n)
+            elif os.path.exists(q):
+                if open(q, "rb").read() != data:
+                    bad.append("store-merge: %s %s differs" % (kind, n))
+            else:
+                todo.append((kind, p, q, os.stat(p).st_mode & 0o777))
+    kd = os.path.join(src, "keys")
+    for k in sorted(os.listdir(kd)) if os.path.isdir(kd) else []:
+        p = os.path.join(kd, k, "result.json")
+        if not os.path.isfile(p):
+            continue
+        q = os.path.join(dst, "keys", k, "result.json")
+        if os.path.exists(q):
+            if open(p, "rb").read() != open(q, "rb").read():
+                bad.append("store-merge: key %s differs" % k)
+        else:
+            todo.append(("keys", p, q, None))
+    if bad:
+        raise RecipeError(bad[:20])
+    n = {k: 0 for k in STORE_KINDS + ("keys",)}
+    for kind, p, q, mode in sorted(todo, key=lambda t: (t[0] == "keys", t[2])):
+        cas.publish_file(q, src=p)
+        if mode is not None:
+            os.chmod(q, mode)
+            os.utime(q, (0, 0))
+        n[kind] += 1
+    return n
+
+
 class Job:
     def __init__(self, repo, spec, store, jobs, ext):
         root, self.variant = split_spec(spec)
@@ -1757,6 +1837,7 @@ class Job:
         self.roots, self.files = load_admit(repo), tracked(repo)
         self.rec = with_guest_link(load_recipe(repo, self.roots, spec), root, self.roots, repo)
         self.keys, self.run, self.hit, self.ext, self.ppkeys, self.built = set(), 0, 0, {}, {}, []
+        self.shard, self.shard_units = None, None   # (i, N) of a shard build (build(shard=...)); the units it compiled
         self.aux = []   # build(aux): AUX_FLAGS of the CC stage
         self.analysis = None   # tree of the objstub plugin's /out (analysis_plugin), built once per root that has C/C++ units
         self.dukeys = {}   # {unit: key of its macro-fact stage (-dU, unitstage.DU_TAIL)}
@@ -2268,6 +2349,12 @@ class Job:
                 ok = loadable[k]
                 builds[k].cc_flags = [f for n, _, fl in self.built if n in ok for f in fl] + list(self.aux)
                 builds[k].cc_inputs = [("/plug/" + n, t) for n, t, _ in self.built if n in ok]
+
+        if self.shard:   # the shard rule (shard_of): this build compiles the units of its shard only; the partition is asserted from the unit list
+            ukeys = {u: builds[kinds[u]].first_key(u) for u in units}
+            parts = shard_partition(ukeys, self.shard[1])
+            units = parts[self.shard[0]]
+            self.shard_units = list(units)
 
         def one(u):
             try:
@@ -2908,12 +2995,16 @@ def host_compilers(rec, cache):
     return os.path.join(dest, c["cc"]), os.path.join(dest, c["cxx"])
 
 
-def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True):
+def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=None):
     """Build product ROOT of the checkout REPO into STORE; write OUT/objects.json and the files it names. EXT: bare cache dir of
-    externals (default STORE/external). -> the objects dict; raises RecipeError for an invalid recipe."""
+    externals (default STORE/external). SHARD: (i, N), build only the units of shard i (shard_of); root-level stages (tests, link, tables) do not run
+    in a shard build, its objects.json says `shard`. -> the objects dict; raises RecipeError for an invalid recipe."""
     env_blocked(repo)   # BEFORE any stage: nothing below runs or stores on a machine that is not the declared one
     spec = root
     j = Job(repo, spec, store, jobs, ext or os.path.join(store, "external"))
+    j.shard = shard
+    if shard:
+        link = False
     j.aux = list(aux or [])   # AUX_FLAGS the caller asked for: extra outputs of the CC stage (in its key), never a change of the code generated
     root = j.root
     with open(os.path.join(repo, j.roots[root]["recipe"])) as f:
@@ -2942,7 +3033,7 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True):
                 units = sorted(set(units) | set(j.generated_sources(ws)))
             except BuildRed as r:   # the list of externally sourced units is itself not produced
                 j.red.append(dict(r.args[0]))
-            objs = j.compile(ws, units + sorted(test_units_of(j.rec)))
+            objs = j.compile(ws, units + ([] if shard else sorted(test_units_of(j.rec))))
         except BuildRed as r:   # an external is not available: no stage of the root has its inputs
             j.red.append(dict(r.args[0]))
             j.blocked.update({u: r.args[0]["stage"] for u in units})
@@ -3143,6 +3234,9 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True):
         res["failed_units"] = (res.get("failed_units") or []) + [f for f in j.failed if f not in res.get("failed_units", [])]
         res["blocked"] = [{"unit": u, "blocked_by": b} for u, b in sorted(j.blocked.items())]
         res.update(status="red", failure={k: v for k, v in first.items() if k in ("stage", "exit", "stderr")}, red_stages=[r["stage"] for r in j.red])
+    if shard:
+        res["shard"] = "%d/%d" % shard
+        res["shard_units"] = j.shard_units
     res.update(stage_keys=sorted(j.keys), stages={"run": j.run, "hit": j.hit}, units=all_units, pp_keys=dict(sorted(j.ppkeys.items())), du_keys=dict(sorted(j.dukeys.items())))
     with open(os.path.join(out, "objects.json"), "w") as f:
         json.dump(res, f, indent=1, sort_keys=True)
@@ -3154,6 +3248,10 @@ def main(argv):
     opt = dict(zip(argv[1::2], argv[2::2]))
     try:
         repo = "."
+        if argv[:1] == ["store-merge"]:   # recipe store-merge SRC [--store DST]: DST defaults to $GATE_CACHE/store
+            dst = dict(zip(argv[2::2], argv[3::2])).get("--store") or os.path.join(os.environ["GATE_CACHE"], "store")
+            print("store-merge: " + " ".join("%s %d" % kv for kv in sorted(store_merge(argv[1], dst).items())))
+            return 0
         if argv[:1] == ["check"]:
             roots = load_admit(repo)
             root, _ = split_spec(opt["--root"])   # the one place the spec is split: nothing below sees root@NAME
@@ -3161,10 +3259,10 @@ def main(argv):
             errs = check(rec, root, tracked(repo), roots, load_pin(repo), repo, _)
             print("\n".join(errs) or "recipe valid")
             return 2 if errs else 0
-        unknown = set(opt) - {"--root", "--store", "--out", "--jobs", "--ext", "--stack-usage"}
+        unknown = set(opt) - {"--root", "--store", "--out", "--jobs", "--ext", "--stack-usage", "--shard"}
         if unknown or opt.get("--stack-usage", "1") != "1":
             raise RecipeError(["unknown or bad option: %s" % ", ".join(sorted(unknown) or ["--stack-usage"])])
-        res = build(repo, opt["--root"], opt["--store"], opt["--out"], int(opt.get("--jobs", 4)), opt.get("--ext"), AUX_FLAGS if "--stack-usage" in opt else None)
+        res = build(repo, opt["--root"], opt["--store"], opt["--out"], int(opt.get("--jobs", 4)), opt.get("--ext"), AUX_FLAGS if "--stack-usage" in opt else None, shard=shard_spec(opt["--shard"]) if "--shard" in opt else None)
         print("%s: %d objects, stages run %d hit %d" % (res["status"], len(res["objects"]), res["stages"]["run"], res["stages"]["hit"]))
         if res["status"] == "red":
             print(json.dumps(res["failure"], indent=1))
