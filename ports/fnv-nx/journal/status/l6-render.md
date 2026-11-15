@@ -1133,3 +1133,11 @@ Paused: w3b, w4, farm; no other work.
     - assumptions gate: 130/130 mentions cite an id, 112 entries (10 OWNER, 102 REMOVE), 0 findings.
 - Owner order (integ 5c3e8e289): no rework without progress. L6 work is now only the cand3 base for the render roots, toward their entry into the trunk.
 - bottleneck: the w6 cand3 migration, then the farm pin 03eacf9d; L1 cand3 → trunk. 2 workers: w6 doing, w5 waiting on w6.
+- 21:00Z: w6 4bd215d1b. The render line is on cand3: w12L2 535ade3a5 merged whole, plus A3 and sm_link faabe016b.
+    - Green: gl4shim, gl4, nxgpu, pair@host, translator@host, the sm_link checker.
+    - Red, stamp only (9f0d vs fc2c): pair, d3d9, smscan, translator, lib/sha256.
+    - Not run: the sm_link run stages. They need the gamedata external, which is a farm job after the pin.
+    - Kept on purpose: one include_uses entry, for the generated FFP_LAYOUT. I've asked L1 for the canonical form.
+    - This head is the cand4 candidate once the b9f6b3a69 pin lands.
+    - w5 is merging it into w5-fbo.
+- bottleneck: the farm pin 03eacf9d (stamp); L1 cand3 → trunk. 2 workers busy.
