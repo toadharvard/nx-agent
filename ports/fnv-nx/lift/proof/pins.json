@@ -1,0 +1,32 @@
+{
+ "format": "fnvnx-pins/1",
+ "note": "files of other layers that this branch holds as a byte-identical copy: never edited here; when the owner changes one, merge the owner's commit and update this row (path, owner, the owner's commit it was taken from, git blob id, sha256); `external` rows are pinned inputs held in fnv-nx-build (repo, ref, commit, file, sha256), fetched and checked by their tests",
+ "files": [
+  {
+   "path": "ports/fnv-nx/lift/tools/udcert.py",
+   "blob": "ed58b0a8e581e9a1ba31f777557689fc5bf7ff72",
+   "sha256": "a4238e1be2d7c2f747a3d753cabdf61e76638698beffba81d92ee9f934a235cb",
+   "owner": "L3a",
+   "commit": "bd94fd02e92249ebc96983256143d985f7930c17"
+  },
+  {
+   "path": "ports/fnv-nx/platform/declared/x86sys.json",
+   "owner": "L5",
+   "blob": "146642e5b99bce67bb8e84cac6c513512879c525",
+   "sha256": "4ebe365ed3c9e33bdbf55d15aaeff9d6f7845299f7cf85dd62de2ee72384e265",
+   "commit": "1625dfd84005536f13b67c731f985efaaa18e529"
+  }
+ ],
+ "external": [
+  {
+   "name": "amd-apm",
+   "owner": "L3b",
+   "repo": "fnv-nx-build",
+   "ref": "tools/amd-apm",
+   "commit": "aa490c484c899d0097689845af971a2ff6712394",
+   "file": "amd64-apm-vol3.pdf",
+   "sha256": "cc08e3b58bb6d5026aa8737d41ddf35ef687adfaea5aeb1eed77e2e68f56c6e3",
+   "edition": "AMD64 Architecture Programmer's Manual Vol. 3, publication 24594 rev 3.14, September 2007"
+  }
+ ]
+}

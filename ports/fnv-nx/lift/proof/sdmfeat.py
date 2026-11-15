@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""The CPUID feature flag of every instruction form of the pack, read from the Intel SDM and from nothing else (OWNER 10, ASM-009: the x86 ISA as documented in the SDM).
+"""The CPUID feature flag of every instruction form of the pack, read from the Intel SDM (OWNER 10, ASM-009: the x86 ISA as documented in the SDM) and, for a form the SDM does not define, from the pinned AMD APM Vol. 3 (vendormap.py: a map cell that names a feature of its Table 3-1).
 
-    python3 -I sdmfeat.py rows SDM.txt SITES.tsv OUT_ROWS.tsv [PUBLIC_ROWS.tsv]   # the per-form feature rows; OUT_ROWS lists the shapes of each form (exe-derived: private), PUBLIC_ROWS (lift/proof/tests/sdm_cpuid_feature_rows.tsv) only their number
+    python3 -I sdmfeat.py rows SDM.txt SITES.tsv OUT_ROWS.tsv [PUBLIC_ROWS.tsv] --apm APM.pdf (APM.txt beside it)  # the per-form feature rows; OUT_ROWS lists the shapes of each form (exe-derived: private), PUBLIC_ROWS (lift/proof/tests/sdm_cpuid_feature_rows.tsv) only their number
+    python3 -I sdmfeat.py features SDM.txt APM.pdf OUT.tsv   # the feature -> CPUID leaf/reg/bit table (SDM U APM, a page cite per row)
     python3 -I sdmfeat.py partition OUT_ROWS.tsv SITES.tsv OUT.tsv  # the cleared sites, from the rows file ONLY
 
 SDM.txt: `pdftotext -layout` of the Intel(R) 64 and IA-32 Architectures SDM, combined volumes (its sha256 is in every output header; the page numbers cited are those of that edition).
-SITES.tsv: packuniverse.py's sites file (`module:address<TAB>shape key<TAB>family`).
+SITES.tsv: factsites.py's sites file (`module:address<TAB>shape key<TAB>family`): the instructions the lift facts decode, over the loader's module table.
 
 Source of each fact:
  * the opcode forms and their `CPUID Feature Flag`: the opcode tables of the instruction reference (Vol. 2A-2D).  A table with a `CPUID Feature Flag` column gives the flag in that column.  A table without that
@@ -58,6 +59,34 @@ def flag_table(lines):
         if m and leaf:
             out[m.group(3)].append((leaf[0], leaf[1], m.group(1), int(m.group(2))))
     return out
+
+
+def flag_rows(lines):
+    """[(NAME, leaf, sub, reg, bit, citation)]: flag_table with the Intel SDM table and page of every row"""
+    out = []; leaf = None; title = ''
+    for j, ln in enumerate(lines[20000:30000], 20000):
+        m = re.match(r'\s*(Table 21-\d+)\.\s+Leaf ([0-9A-F]+)H(?:\.([0-9A-F]+)H)?\s', ln)
+        if m:
+            leaf = (int(m.group(2), 16), int(m.group(3), 16) if m.group(3) else 0); title = m.group(1)
+            continue
+        m = re.match(r'\s*(EAX|EBX|ECX|EDX)\[(\d+)\]\s+([A-Za-z0-9_\.]+)\s', ln)
+        if m and leaf:
+            out.append((m.group(3), leaf[0], leaf[1], m.group(1), int(m.group(2)), 'Intel SDM %s, %s: %s[%s] %s' % (title, page_after(lines, j), m.group(1), m.group(2), m.group(3))))
+    return out
+
+
+def cmd_features(sdm, apm, out):
+    """the feature -> CPUID bit table of the partition: Intel SDM Vol. 1 ch. 21 leaf tables U AMD APM Vol. 3 Table 3-1, one row per (feature, leaf, sub, reg, bit), a page cite on every row"""
+    from proof import vendormap
+    import pdfplumber
+    rows = [(n, l, s_, r, b, c) for n, l, s_, r, b, c in flag_rows(load(sdm))]
+    rows += [(n, l, 0, r, b, c) for n, l, r, b, c in vendormap.features(pdfplumber.open(apm), apm.replace('.pdf', '.txt'))]
+    with open(out, 'w', newline='\n') as fh:
+        fh.write('# fnvnx-cpuid-feature-bits/1 sdm_sha256=%s apm_sha256=%s\n# feature\tleaf\tsub\treg\tbit\tcitation\n' % (sha_file(sdm.replace('.txt', '.pdf')), sha_file(apm)))
+        for n, l, s_, r, b, c in sorted(set(rows)):
+            fh.write('%s\t%08X\t%d\t%s\t%d\t%s\n' % (n, l, s_, r, b, c))
+    sys.stdout.write('features %d rows\n' % len(set(rows)))
+    return 0
 
 
 def declared_cpu():
@@ -405,9 +434,23 @@ def read_sites(path):
 
 # Forms with no row in the opcode tables of the instruction reference that the SDM still defines (so they are lifted with SDM semantics, not #UD): (name, matcher on (mandatory prefix, body bytes), the SDM text that
 # defines them: the line is searched in the SDM text and its page is cited).  Everything else without a row is SDM-undefined (class B: #UD on the declared machine).
-def cmd_rows(sdm, sites, out, public=None):
-    from proof import shape
-    lines = load(sdm); table = flag_table(lines); cpu = declared_cpu()
+def vendor_cell(cells, mand, body):
+    """the vendor map cell (vendormap.mapcells) of a two-byte form that names a feature, or None; the prefix column `n/a` / `none` is the no-mandatory-prefix row"""
+    if body[:1] != b'\x0f' or len(body) < 2:
+        return None
+    return next((cells[(body[1], p)] for p in ((mand,) if mand else ('n/a', 'none')) if (body[1], p) in cells), None)
+
+
+def cmd_rows(sdm, sites, out, public=None, apm=None):
+    from proof import shape, vendormap
+    import pdfplumber
+    lines = load(sdm); cpu = declared_cpu()
+    apdf = pdfplumber.open(apm); atxt = apm.replace('.pdf', '.txt')
+    afeat = vendormap.features(apdf, atxt)
+    table = vendormap.table(flag_table(lines), afeat)                         # Intel SDM CPUID tables U AMD APM Table 3-1: one table, one rule
+    fnames = {f[0] for f in afeat}
+    vnames = dict({x: x for x in fnames}, **{m: v[0] for m, v in vendormap.subsets(apdf, atxt, fnames).items()})
+    vcells = vendormap.mapcells(apdf, atxt, vnames)                           # vendor map cells that name a feature (APM Appendix A, with Table D-1 for cells that name an instruction)
     from proof import opmap
     maps = opmap.load(sdm.replace('.txt', '.pdf'), sdm)                       # Appendix A, from the PDF's table cells
     allrows = sdm_rows(lines, table)
@@ -440,9 +483,12 @@ def cmd_rows(sdm, sites, out, public=None):
         if not cand and mp:
             key = 'map|%s|%s' % (mp[0], ' '.join('%02X' % b for b in body[:3]))
             e = forms.setdefault(key, {'rows': [], 'shapes': [], 'fam': set(), 'map': mp})
+        elif not cand and vendor_cell(vcells, mand, body):
+            vc = vendor_cell(vcells, mand, body)
+            key = 'vendor|%s|%s' % (mand or '-', ' '.join('%02X' % b for b in body[:2]))
+            e = forms.setdefault(key, {'rows': [], 'shapes': [], 'fam': set(), 'vendor': vc})
         elif not cand:
             key = 'undefined|%s|%s' % (mand or '-', ' '.join('%02X' % b for b in body[:3]))
-            if kind == 'legacy' and False: pass
             e = forms.setdefault(key, {'rows': [], 'shapes': [], 'fam': set()})
         else:
             fids = sorted({form_id(r) for r in cand})
@@ -469,6 +515,10 @@ def cmd_rows(sdm, sites, out, public=None):
             if not rs and e.get('map'):
                 mp = e['map']
                 st, needs, val, ea, op, ins, cit = 'defined-by-opcode-map', '-', 'none', '-', mp[0], '-', 'SDM Vol. 2 Appendix A, %s' % mp[1]
+            elif e.get('vendor'):
+                feat, vcit = e['vendor']
+                ok = present(feat, table, cpu)                         # the cell's feature mnemonic is a key of the same table
+                st, needs, val, ea, op, ins, cit = 'defined-by-vendor-map', feat, 'present' if ok else 'absent', '-', '-', '-', vcit
             elif not rs:
                 st, needs, val, ea, op, ins, cit = 'undefined', '-', 'none', '-', '-', '-', 'no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")'
             else:
@@ -524,7 +574,10 @@ def cmd_partition(rows, sites, out):
 
 
 def main(argv):
-    if len(argv) in (4, 5) and argv[0] == 'rows': return cmd_rows(*argv[1:])
+    if '--apm' in argv:
+        i = argv.index('--apm'); apm = argv[i + 1]; argv = argv[:i] + argv[i + 2:]
+        if len(argv) in (4, 5) and argv[0] == 'rows': return cmd_rows(*argv[1:], apm=apm)
+    if len(argv) == 4 and argv[0] == 'features': return cmd_features(*argv[1:])
     if len(argv) == 4 and argv[0] == 'partition': return cmd_partition(*argv[1:])
     sys.stderr.write(__doc__); return 2
 
