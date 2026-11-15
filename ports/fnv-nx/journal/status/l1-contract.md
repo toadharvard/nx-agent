@@ -1866,3 +1866,5 @@ bottleneck: the complete cand3 (w12), and the cand2 verdict (w15).
 bottleneck: the complete cand3 (w12), and the cand2 verdict (w15).
 - 22:15 L4: the script-seeded closure made every test image pull the whole pack (crt0 -> guest_entry -> runtime -> dispatch). Rule, in cand3 (w12): (a) crt0 branches to __fnvnx_image_entry, defined by --defsym from link.entry, which is required for guest images (crt0.s is L5's; a one-line change, commit sent to L5); (b) per-object selection with archive semantics, each root an archive in --start-group and ld choosing the members (from the -Map).
 bottleneck: the complete cand3 (w12), and the cand2 verdict (w15).
+- 22:17 New red at cand3 41a8855d4: render/nxgpu pp:nxgpu4_check.c cannot find nxgpu4_check.h, caused by our c58c0a4f3 header move. w12 fixes it by the header-home rule. L4 bootrt is now w9 9e457ca on 41a8855d4 and goes into cand3.
+bottleneck: the complete cand3 (w12), and the cand2 verdict (w15).
