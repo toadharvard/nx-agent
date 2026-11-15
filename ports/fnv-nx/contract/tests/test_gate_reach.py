@@ -470,7 +470,7 @@ import json
 import runpy
 GC = runpy.run_path(os.path.join(HERE, 'test_gatecert.py'))
 GCR = ('REACH_GL_SHADER_SOURCE', '-', 'glsrc', '0', 'gate_cert', 'gate_cert=sm_link', 'n')
-UNI = sorted([dict(kind='glsl_table', id='progs', sha256='aa'), dict(kind='glsl_blob', id='ffp_blob', sha256='bb'), dict(kind='bytecode', id='vs0', sha256='cc')],
+UNI = sorted([dict(kind='glsl_table', id='progs', sha256='aa'), dict(kind='glsl_table', id='ffp_blob', sha256='bb'), dict(kind='bytecode', id='vs0', sha256='cc')],
              key=lambda u: (u['kind'], u['id'], u['sha256']))
 VID = 'verdict-1'
 

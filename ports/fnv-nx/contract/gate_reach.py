@@ -36,7 +36,7 @@ Request kinds (the TSV `values` column; `note` is free text and is not read):
              site of a platform backend) comes only from producers of the universe that gate <gate> declared.  Inputs: --gate-cert GATE=SUMMARY.json,RESULT.json (the
              summary and the gate file of the SAME verdict), --verdict ID, --cert-objdump (`objdump -dr -t --no-show-raw-insn` of the root's objects, pinned binutils).
              CERTIFIED iff (a) the gate file says green (certified == universe) and the summary is of this verdict (`gate-not-green`, `summary-other-verdict`);
-             (b) the summary declares `universe` [{kind bytecode|glsl_table|glsl_blob, id, sha256}] sorted, `universe_hash` = sha256 of the lines `kind\tid\tsha256\n`
+             (b) the summary declares `universe` [{kind bytecode|glsl_table, id, sha256}] sorted, `universe_hash` = sha256 of the lines `kind\tid\tsha256\n`
              (recomputed here: `universe-hash`) and `producers` [{symbol, kind function|data}], each data producer an id of the universe;
              (c) the proof of contract/gatecert.py (call graph by relocations, backward data flow of the argument register in every caller, recursion through
              parameters, an address taken only inside a producer data symbol): a caller outside the universe, a constant, an unbounded index, an unknown call result is
@@ -321,7 +321,7 @@ def check_closure_key(f, gpa_global, ctx):
         f.fail(reason, nm, addr)
 
 
-UNIVERSE_KINDS = ('bytecode', 'glsl_table', 'glsl_blob')
+UNIVERSE_KINDS = ('bytecode', 'glsl_table')
 
 
 def universe_hash(universe):
@@ -357,7 +357,7 @@ def check_gate_cert(f, gpa_global, ctx):
         return
     if summ.get('universe_hash') != universe_hash(uni):
         f.fail('universe-hash', gate, '-', 'declared %s' % str(summ.get('universe_hash'))[:16])
-    ids = {u['id'] for u in uni if u['kind'] in ('glsl_table', 'glsl_blob')}
+    ids = {u['id'] for u in uni if u['kind'] == 'glsl_table'}
     for p in prods:
         if p['kind'] == 'data' and p['symbol'] not in ids:
             f.fail('producer-not-in-universe', gate, p['symbol'])

@@ -16,7 +16,11 @@ VALUES found by a backward walk over the control-flow graph of the caller (every
   - `mov`/`orr` from a register: the value of that register before the instruction;
   - result of a call (x0 after `bl F`): value PROD(F); any other caller-saved register after a call is clobbered (`clobbered`);
   - `adrp` + `add :lo12:` of the same symbol, or `adrp` + `ldr :lo12:` : the address of / a load from a constant offset of symbol Y;
-  - `ldr` from a register that holds the address of Y plus a constant: load from Y at that offset; a register index is `index-unbounded`;
+  - `ldr` from a register that holds the address of Y plus a constant: load from Y at that offset; with a register index (`[b, i, lsl #s]`, uxtw/sxtw) the
+    index must be proven in [0, count), count = (st_size(Y) - offset) / elt: (a) every path to the load carries an unsigned compare-and-branch of the index (or of
+    a register it was copied/extended/masked from) against a constant <= count (cmp with b.lo/b.cc taken, b.hs/b.cs fallthrough; b.ls taken / b.hi fallthrough
+    bound c+1; cbz/tbz are not bounds), a must-analysis over the CFG (the weakest path counts); (b) a loop induction variable is the same proof: its entry edge
+    (a constant) and its back or exit edge carry the bounds, a loop back edge adds nothing by itself.  Anything else is `index-unbounded:<function>+<offset>`;
   - the value of an x0..x7 at the function entry: PARAM(j), judged by the callers of the function (the call graph, recursively);
   - anything else (constants, stack loads, arithmetic, an unknown call result) has no certificate (`constant`, `stack-load`, `computed`, ...).
 A value is accepted iff it is PROD(F) with F a producer of kind function, or an address of / load from Y at a constant offset < size(Y) with
@@ -168,6 +172,7 @@ class Prover:
         self.prod_d = {s['symbol'] for s in producers if s['kind'] == 'data'}
         self.reasons, self.callers, self.values = set(), set(), set()
         self.params_done = set()
+        self.cuts = 0
 
     # ------------------------------------------------------------ values of a register before instruction n of function f
     def value(self, f, n, r, depth=0):
@@ -245,8 +250,7 @@ class Prover:
             fails.add('stack-load')
             return
         if len(inner) > 1 and not inner[1].startswith('#') and not (ins.rel and 'LO12' in ins.rel[0]):
-            bv, bf = self.value(f, q, base, depth + 1)
-            fails.add('index-unbounded' if any(v[0] in ('addr', 'page') for v in bv) else 'load')
+            self.indexed(f, q, ins, inner, base, vals, fails, depth)
             return
         off = int(inner[1][1:], 0) if len(inner) > 1 and inner[1].startswith('#') else 0
         bv, bf = self.value(f, q, base, depth + 1)
@@ -258,6 +262,104 @@ class Prover:
                 vals.add(('data', v[1], v[2] + off))
             else:
                 fails.add('load')
+
+    # ------------------------------------------------------------ a variable index into a producer table
+    def indexed(self, f, q, ins, inner, base, vals, fails, depth):
+        """ldr from base + index*elt: accepted iff the index is proven in [0, count), count = (st_size(sym) - off) / elt (L1 rule: a dominating unsigned
+        compare-and-branch against a constant, through copies; a loop induction variable bounded by its exit test is the same proof at the loop head)."""
+        where = '%s+0x%x' % (f.key[1], ins.addr)
+        bv, bf = self.value(f, q, base, depth + 1)
+        fails |= bf
+        idx = reg(inner[1])
+        ext = inner[2].split() if len(inner) > 2 else []
+        sh = int(ext[1][1:], 0) if len(ext) == 2 and ext[1].startswith('#') else 0
+        okform = idx not in (None, 'zr', 'sp') and (not ext or ext[0] in ('lsl', 'uxtw', 'sxtw'))
+        need = 'w' if inner[1].startswith('w') else 'x'
+        for v in bv:
+            if v[0] != 'addr' or not okform:
+                fails.add('load')
+                continue
+            sym = self.sym(f.key[0], v[1])
+            u = self.bound(f, q, idx, need, set(), {}) if sym is not None else None
+            if u is not None and ext[:1] == ['sxtw'] and u > 0x80000000:
+                u = None
+            elt = 1 << sh
+            if u is None or u < 1 or v[2] + (u - 1) * elt + elt > sym['size']:
+                fails.add('index-unbounded:%s' % where)
+            else:
+                vals.add(('data', v[1], v[2] + (u - 1) * elt))
+
+    def bound(self, f, n, r, need, stack, memo):
+        """Exclusive unsigned upper bound U of register r (read as `need`, 'w' or 'x') before instruction n on EVERY path to it, or None (not provable)."""
+        key = (n, r, need)
+        if key in memo:
+            return memo[key]
+        if key in stack:
+            self.cuts += 1
+            return 0                       # a loop back edge adds no new information (least fixed point; the entry and exit edges carry the bounds)
+        if n == 0:
+            return None
+        stack.add(key)
+        best, cuts = 0, self.cuts
+        for q in sorted(f.preds[n]):
+            u = self.edge_bound(f, q, n, r, need)
+            if u is None:
+                u = self.through(f, q, r, need, stack, memo)
+            if u is None:
+                best = None
+                break
+            best = max(best, u)
+        stack.discard(key)
+        if self.cuts == cuts:              # a result that used the loop assumption is not final: not memoised
+            memo[key] = best
+        return best
+
+    def edge_bound(self, f, q, n, r, need):
+        """The bound that the branch q gives on the edge q -> n: q is `b.cond` right after `cmp r, #C` (the only way into q)."""
+        ins = f.insns[q]
+        if not ins.mn.startswith('b.') or ins.rel is not None or q == 0 or f.preds[q] != {q - 1} or f.insns[q - 1].mn != 'cmp':
+            return None
+        m = re.search(r'(?:^|[\s,])([0-9a-f]+)\s+<', ins.ops)
+        if not m or int(m.group(1), 16) not in f.at:
+            return None
+        taken, fall = f.at[int(m.group(1), 16)], q + 1
+        if taken == fall or n not in (taken, fall):
+            return None
+        ops = split_ops(f.insns[q - 1].ops)
+        if len(ops) != 2 or reg(ops[0]) != r or not ops[1].startswith('#') or not (ops[0][0] == need or ops[0][0] == 'x' and need == 'w'):
+            return None
+        c = int(ops[1][1:], 0)
+        cond, edge = ins.mn[2:], 'taken' if n == taken else 'fall'
+        if (cond in ('lo', 'cc') and edge == 'taken') or (cond in ('hs', 'cs') and edge == 'fall'):
+            return c
+        if (cond == 'ls' and edge == 'taken') or (cond == 'hi' and edge == 'fall'):
+            return c + 1
+        return None
+
+    def through(self, f, q, r, need, stack, memo):
+        """The bound of r before q's successor n, given instruction q: unchanged when q does not write r, a copy/extend/mask/constant otherwise."""
+        ins = f.insns[q]
+        if ins.mn in ('bl', 'blr'):
+            return self.bound(f, q, r, need, stack, memo) if r not in CALLER_SAVED else None
+        if writes(ins, r) is None:
+            return self.bound(f, q, r, need, stack, memo)
+        ops = split_ops(ins.ops)
+        mn = ins.mn
+        if mn == 'mov' and len(ops) == 2 and ops[1].startswith('#'):
+            c = int(ops[1][1:], 0)
+            return c + 1 if c >= 0 else None
+        if mn == 'movz' and len(ops) == 2 and ops[1].startswith('#'):
+            return int(ops[1][1:], 0) + 1
+        if mn == 'mov' and len(ops) == 2 and isinstance(reg(ops[1]), int):
+            return self.bound(f, q, reg(ops[1]), 'w' if ops[1][0] == 'w' else need, stack, memo)
+        if mn == 'uxtw' and len(ops) == 2 and isinstance(reg(ops[1]), int):
+            return self.bound(f, q, reg(ops[1]), 'w', stack, memo)
+        if mn == 'sxtw' and len(ops) == 2 and isinstance(reg(ops[1]), int):
+            u = self.bound(f, q, reg(ops[1]), 'w', stack, memo)
+            return u if u is not None and u <= 0x80000000 else None
+        if mn == 'and' and len(ops) == 3 and ops[2].startswith('#'):
+            return int(ops[2][1:], 0) + 1
+        return None
 
     # ------------------------------------------------------------ the proof
     def judge(self, key, vals, where):
