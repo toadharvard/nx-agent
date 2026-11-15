@@ -124,6 +124,11 @@ typedef struct fnvnx_ctab_entry {
 /* Returns the number of entries (>= 0) and a malloc'd array in *out, or -1 with err. */
 int fnvnx_shader_ctab(const void *d3d_bytecode, size_t n, fnvnx_ctab_entry **out, char *err, size_t errlen);
 
+/* The stage's declared pairs (FNVNX_DK_PAIR codes ascending, as the reflection field "declared_pairs"): a VS's declared outputs (POSITION0 / PSIZE0 included), a PS's
+ * declared inputs. *major = the shader model major version. Returns the count (<= 224) or -1 with err. THE one computation of the draw path's pairing sets
+ * (render/pair nx_pair_variant takes them as input). */
+int fnvnx_shader_declared_pairs(const void *d3d_bytecode, size_t n, unsigned char pairs[224], uint32_t *major, char *err, size_t errlen);
+
 /* Names of compiled-in GLSL backends, NULL-terminated. */
 extern const char *const fnvnx_shader_backend_names[];
 

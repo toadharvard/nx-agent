@@ -8,6 +8,7 @@
 #include "../gen/d9impl.gen.h"
 #include <string.h>
 #include "fnvnx_sha256.h"
+#include "fnvnx_shaders.h"
 
 HRESULT NxShaderCore::getFunction(void* d, UINT* sz) {
     if (!sz) return D3DERR_INVALIDCALL;
@@ -23,6 +24,7 @@ template <class S> static HRESULT make(NxObj* dev, const DWORD* bc, int stage, S
     const uint32_t* t = (const uint32_t*)bc; uint32_t nb = nx_sm_bytes(t); NxSmIface ifc;   // DWORD is a 4-byte type of the Windows ABI
     
     if (!nb || nx_sm_check(t, nb, stage, &ifc)) return D3DERR_INVALIDCALL;
+    { uint32_t major; char err[160]; const int np = fnvnx_shader_declared_pairs(bc, nb, ifc.pairs, &major, err, sizeof err); if (np < 0) return D3DERR_INVALIDCALL; ifc.n_pairs = (uint32_t)np; }   // the declared pairs come from the translator front end alone
     S* s = nx_make<S>(); if (!s) return E_OUTOFMEMORY;                                         // d3d9_device_CreateVertexShader / CreatePixelShader: calloc failure -> E_OUTOFMEMORY
     uint32_t* code = (uint32_t*)nxd3d_alloc(nb); if (!code) { nx_destroy(s); return E_OUTOFMEMORY; }   // wined3d shader_init: byte code copy failure -> E_OUTOFMEMORY
     s->asChild(dev, ~0u); s->code = code; memcpy(s->code, bc, nb); s->nbytes = nb; fnvnx_sha256(bc, nb, s->key); s->iface = ifc; *pp = s; return D3D_OK;

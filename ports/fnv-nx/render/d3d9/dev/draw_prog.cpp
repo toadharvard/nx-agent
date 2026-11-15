@@ -51,14 +51,14 @@ HRESULT nx_prog_resolve(NxDeviceCore* d, NxProg* p) {
     uint8_t vout[224], pin[224], l[FNVNX_DK_VARYING_SLOTS]; uint32_t nvo = 0, npi = 0, nl = 0;
     if (vsc) {
         p->vi = &vsc->iface; if (!nx_vs_sig(vsc->iface, &p->sig)) return D3DERR_DRIVERINTERNALERROR;
-        nvo = nx_sm_pairs(&vsc->iface, vout);
+        nvo = vsc->iface.n_pairs; memcpy(vout, vsc->iface.pairs, nvo);
     } else {
         p->vs = nx_ffp_vs_program(d, &p->fv); if (!p->vs) return D3DERR_DRIVERINTERNALERROR;
         p->sig.n = p->fv.n_in > 16 ? 16 : p->fv.n_in; memcpy(p->sig.pair, p->fv.in_pair, p->sig.n); memcpy(p->sig.loc, p->fv.in_loc, p->sig.n);
     }
     if (psc) {
         p->pi = &psc->iface; p->ps_version = psc->iface.major << 8 | psc->iface.minor;
-        npi = nx_sm_pairs(&psc->iface, pin);
+        npi = psc->iface.n_pairs; memcpy(pin, psc->iface.pairs, npi);
     } else {
         p->ps = nx_ffp_ps_program(d, &p->fp); if (!p->ps) return D3DERR_DRIVERINTERNALERROR;
         npi = p->fp.n_in > 31 ? 31 : p->fp.n_in; memcpy(pin, p->fp.in_pair, npi);
