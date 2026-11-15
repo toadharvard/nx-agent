@@ -152,13 +152,28 @@ static bool readonly_object(tree base) {
          decl_readonly_section(base, 0);
 }
 
+// The base object of a reference. GCC's get_base_address returns NULL for MEM[&obj.field] (the operand of the ADDR_EXPR is a component
+// reference, not the decl): strip the components of that operand too, so `MEM[(T *)&d.f + k]` has the base `d`.
+static tree ref_base(tree t) {
+  for (;;) {
+    while (handled_component_p(t)) t = TREE_OPERAND(t, 0);
+    if ((TREE_CODE(t) == MEM_REF || TREE_CODE(t) == TARGET_MEM_REF) && TREE_CODE(TREE_OPERAND(t, 0)) == ADDR_EXPR) {
+      t = TREE_OPERAND(TREE_OPERAND(t, 0), 0);
+      continue;
+    }
+    if (TREE_CODE(t) == SSA_NAME || DECL_P(t) || TREE_CODE(t) == STRING_CST || CONSTANT_CLASS_P(t) || TREE_CODE(t) == MEM_REF || TREE_CODE(t) == TARGET_MEM_REF)
+      return t;
+    return NULL_TREE;
+  }
+}
+
 static bool is_memory_ref(tree t) {
   switch (TREE_CODE(t)) {
     case MEM_REF: case TARGET_MEM_REF: case COMPONENT_REF: case ARRAY_REF: case ARRAY_RANGE_REF:
     case BIT_FIELD_REF: case REALPART_EXPR: case IMAGPART_EXPR: case VIEW_CONVERT_EXPR: {
       // a component reference is memory only when its base is: a lane of a vector value, a part of a complex register or a
       // view-conversion of an SSA name has an SSA_NAME (or constant) at the bottom and no location
-      tree b = get_base_address(t);
+      tree b = ref_base(t);
       return !b || !(TREE_CODE(b) == SSA_NAME || CONSTANT_CLASS_P(b) && TREE_CODE(b) != STRING_CST);
     }
     case VAR_DECL:
@@ -201,7 +216,7 @@ static void record_readonly(tree t, tree base) {
 
 static bool shared_ordered(tree t) {
   if (!t || !is_memory_ref(t)) return false;
-  tree base = get_base_address(t);
+  tree base = ref_base(t);
   if (readonly_object(base)) { record_readonly(t, base); return false; }
   return !local_unshared(base);
 }
@@ -269,7 +284,7 @@ static tree gimplify_to(tree e, gimple_seq *seq) {
 }
 
 static tree address_of(tree ref, gimple_seq *seq) {
-  tree base = get_base_address(ref);
+  tree base = ref_base(ref);
   if (base && DECL_P(base) && !hard_register(base)) force_addressable(base);
   return gimplify_to(build_fold_addr_expr(ref), seq);
 }
@@ -326,7 +341,7 @@ static bool operand_shared(gimple *, tree, tree op, void *) { return shared_orde
 // a pointer argument that cannot be shared memory: the address of a constant the compiler keeps read-only
 static bool pointer_to_constant(tree a) {
   if (TREE_CODE(a) != ADDR_EXPR) return false;
-  tree base = get_base_address(TREE_OPERAND(a, 0));
+  tree base = ref_base(TREE_OPERAND(a, 0));
   return base && (TREE_CODE(base) == STRING_CST || readonly_object(base));
 }
 
@@ -375,7 +390,7 @@ static void cas_expected(gimple_stmt_iterator *gsi, gcall *call, built_in_functi
     return;
   }
   tree e = gimple_call_arg(call, 1);
-  if (pointer_to_constant(e) || (TREE_CODE(e) == ADDR_EXPR && local_unshared(get_base_address(TREE_OPERAND(e, 0))))) return;
+  if (pointer_to_constant(e) || (TREE_CODE(e) == ADDR_EXPR && local_unshared(ref_base(TREE_OPERAND(e, 0))))) return;
   tree pt = TREE_TYPE(TREE_TYPE(e));
   tree tmp = make_tmp(pt, "order_e");
   force_addressable(tmp);
@@ -435,7 +450,7 @@ static void order_builtin_call(gimple_stmt_iterator *gsi, gcall *call) {
     tree a = gimple_call_arg(call, i);
     if (!POINTER_TYPE_P(TREE_TYPE(a)) || pointer_to_constant(a)) continue;
     // the address of an unshared local (the scan left it unshared because this argument does not escape)
-    if (TREE_CODE(a) == ADDR_EXPR && local_unshared(get_base_address(TREE_OPERAND(a, 0)))) continue;
+    if (TREE_CODE(a) == ADDR_EXPR && local_unshared(ref_base(TREE_OPERAND(a, 0)))) continue;
     bool known = spec.known_p() && spec.arg_specified_p(i);
     if (!known || spec.arg_maybe_read_p(i)) rd = true;
     if (!known || spec.arg_maybe_written_p(i)) wr = true;
@@ -587,7 +602,7 @@ static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bo
   gimple_seq pre = NULL;
   tree src = rhs;
   bool src_sh = ld;
-  tree rb = get_base_address(rhs);
+  tree rb = ref_base(rhs);
   if (!is_memory_ref(rhs) || (rb && hard_register(rb)) || TREE_CODE(rhs) == CONSTRUCTOR) {
     tree tmp = make_tmp(ty, "order_u");
     force_addressable(tmp);
@@ -620,7 +635,7 @@ static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bo
   // a reference to the unit at byte offset k of an unshared object, without a pointer value; NULL when the object's address is no valid
   // MEM_REF base (a reference with a variable part)
   auto direct = [&](tree obj, unsigned HOST_WIDE_INT k) -> tree {
-    tree base = get_base_address(obj);
+    tree base = ref_base(obj);
     if (!base || !DECL_P(base)) return NULL_TREE;
     tree a = build_fold_addr_expr(obj);
     if (!is_gimple_mem_ref_addr(a)) return NULL_TREE;
@@ -934,7 +949,7 @@ struct ordt_ctx { function *fun; ordt_counts c; bool gen; };
 static bool ordt_visit(gimple *stmt, tree, tree op, void *data) {
   ordt_ctx *x = (ordt_ctx *)data;
   int why = -1;
-  tree base = get_base_address(op);
+  tree base = ref_base(op);
   if (base && hard_register(base)) why = 3;
   else if (gimple_code(stmt) == GIMPLE_RETURN && TREE_CODE(op) == RESULT_DECL) why = 4;   // `return <retval>`: the result object is returned in place, no access
   else if (!is_memory_ref(op) && !(DECL_P(op) && !TREE_STATIC(op) && !DECL_EXTERNAL(op))) why = 4;
@@ -1068,7 +1083,7 @@ struct frame_vars_pass : gimple_opt_pass {
     return !(pt->anything || pt->nonlocal || pt->escaped || pt->ipa_escaped || pt->vars_contains_escaped || pt->vars_contains_escaped_heap);
   }
   static bool store_nonlocal(tree lhs) {
-    tree b = get_base_address(lhs);
+    tree b = ref_base(lhs);
     if (!b) return true;
     if (DECL_P(b)) return is_global_var(b) || DECL_EXTERNAL(b);
     if (TREE_CODE(b) == MEM_REF || TREE_CODE(b) == TARGET_MEM_REF) {
@@ -1102,7 +1117,7 @@ struct frame_vars_pass : gimple_opt_pass {
     auto note = [&](tree val) {                                                        // (3)
       if (!val) return;
       if (TREE_CODE(val) == ADDR_EXPR) {
-        tree b = get_base_address(TREE_OPERAND(val, 0));
+        tree b = ref_base(TREE_OPERAND(val, 0));
         if (b && DECL_P(b)) esc.insert(b);
         return;
       }
@@ -1136,7 +1151,7 @@ struct frame_vars_pass : gimple_opt_pass {
           for (unsigned i = 0; i < gimple_asm_ninputs(as); i++) note(TREE_VALUE(gimple_asm_input_op(as, i)));
           for (unsigned i = 0; i < gimple_asm_noutputs(as); i++) {
             tree o = TREE_VALUE(gimple_asm_output_op(as, i));
-            tree b = get_base_address(o);
+            tree b = ref_base(o);
             if (b && DECL_P(b)) esc.insert(b);
           }
         } else if (gassign *a = dyn_cast<gassign *>(st)) {
