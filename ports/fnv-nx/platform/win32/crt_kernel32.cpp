@@ -150,8 +150,6 @@ extern "C" BOOL SetConsoleCtrlHandler(ctrl_handler_fn fn, BOOL add)
     return r;
 }
 
-extern "C" UINT SetHandleCount(UINT n) { return n; }
-
 /* ---- files and modules by UTF-16 name: as the A functions, with the name in the ANSI code page */
 static bool narrow_name(LPCWSTR w, char *out, size_t n)
 {
