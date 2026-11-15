@@ -109,6 +109,8 @@ def build(sources, plugins=None, lifted=False, flags=()):
         root['cxx_origin'] = {'lifted_by': T + 'gen/lift.py', 'pack': 'pack'}
         # a lifted guest root loads the full set too; the origin fixes the arguments: recipe.plugin_args
         rec['plugins'] = [dict(p, args=dict(recipe.plugin_args('lifted')[p['name']])) for p in plugs]
+        # the game's compiler is in the external cache before ARTIFACTS_URL names the pack repo (which holds no compiler): mounted by the selftest gate (FNVNX_EXTCACHE), else fetched here
+        recipe.fetch_externals([ext], store, os.environ.get('FNVNX_EXTCACHE') or os.path.join(store, 'external'), base)
         os.environ['ARTIFACTS_URL'] = pack
     else:
         for n, text in sources.items():

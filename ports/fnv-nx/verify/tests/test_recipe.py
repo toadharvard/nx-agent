@@ -91,7 +91,10 @@ def make_repo(name, gen_extra="", rec=None, files=None, extra_roots=()):
     repo = os.path.join(BASE, name)
     os.makedirs(repo)
     git(repo, "init", "-q")
-    for k, v in dict(FILES, **(files or {})).items():
+    base = dict(FILES)
+    if not (rec or RECIPE).get("link"):   # nothing is linked: the OS layer unit has no crt0 (its header names linker-script symbols that only a link defines)
+        base["toy/os.S"] = OS_NOLINK
+    for k, v in dict(base, **(files or {})).items():
         if v is not None:
             w(repo, k, v)
     for f in LINK_TOOLS:
@@ -106,6 +109,42 @@ def make_repo(name, gen_extra="", rec=None, files=None, extra_roots=()):
         {"path": T + "link", "class": "tool"}, {"path": T + "contract", "class": "tool"}] + list(extra_roots)}))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "toy")
+    return repo
+
+
+def guest_rec(rec=None, image=None):
+    """RECIPE (or REC) as a guest-profile root: the compiler, plugins and runtime come from the profile (verify/guest_compiler.json); the per-root flags keep only what a guest
+    build.json may carry (recipe.PER_ROOT), plus -Werror=attributes and the sdd define the rule requires. The semantic flags (ILP32, PIE, freestanding, ...) are the pin's."""
+    r = json.loads(json.dumps(rec or RECIPE))
+    for k in ("compiler", "plugins"):
+        r.pop(k, None)
+    r["profile"] = "guest"
+    r.pop("link", None)   # a guest image is linked by the runtime (link.entry, link/guest.json, the pinned libraries): the toy roots are object roots unless IMAGE names the entry symbol
+    if image:
+        r["link"] = {"output": "toy.elf", "flags": ["-m", "aarch64linux32"], "entry": image}
+    keep = lambda fs: [f for f in fs if recipe.PER_ROOT.fullmatch(f)]  # noqa: E731
+    r["flags"] = {"c": keep(r["flags"]["c"]) + [recipe.WERROR_ATTR], "cxx": keep(r["flags"]["cxx"]) + [recipe.SDD_DEFINE, recipe.WERROR_ATTR], "asm": keep(r["flags"]["asm"])}
+    return r
+
+
+def make_guest_repo(name, gen_extra="", rec=None, files=None, extra_roots=(), image=None):
+    """make_repo as a GUEST root (admit target guest, the game's compiler from the real pin, the real env.json): the objects are the game's ELF32 AArch64 ones."""
+    repo = make_repo(name, gen_extra, guest_rec(rec, image), files, extra_roots)
+    ad = json.load(open(os.path.join(repo, T + "verify/admit.json")))
+    for r in ad["roots"]:
+        if r["path"] == ROOT:
+            r["target"] = "guest"
+    w(repo, "verify/admit.json", json.dumps(ad))
+    w(repo, "verify/guest_compiler.json", open(os.path.join(VERIFY, "guest_compiler.json")).read())
+    if image:   # the guest link profile (script and libraries of every guest link) and the script it names
+        for n in ("link/guest.json", "link/guest.ld"):
+            w(repo, n, open(os.path.join(VERIFY, "..", n)).read())
+    real = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))   # checkout root
+    for n in list(recipe.PLUGIN_SOURCES.values()) + [i for v in recipe.PLUGIN_INPUTS.values() for i in v]:   # the real plugin sources and inputs: the profile's plugins are built from them
+        os.makedirs(os.path.dirname(os.path.join(repo, n)), exist_ok=True)
+        shutil.copyfile(os.path.join(real, n), os.path.join(repo, n))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "guest")
     return repo
 
 

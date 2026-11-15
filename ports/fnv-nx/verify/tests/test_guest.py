@@ -18,8 +18,11 @@ from test_plugins import BASE, ROOT, T, REC, PLUGS, SRC, check, git, w, make_rep
 
 
 
+PIN = json.load(open(os.path.join(REAL, T + "verify/guest_compiler.json")))   # the drivers are the pin's: no test types them
+
+
 def guest_rec(ext, **kw):
-    r = mut(compiler={"external": "gcc-msvcmodel", "cc": "bin/aarch64-linux-gnu-gcc", "cxx": "bin/aarch64-linux-gnu-g++"}, external=[ext], **kw)
+    r = mut(compiler={"external": "gcc-msvcmodel", "cc": PIN["cc"], "cxx": PIN["cxx"]}, external=[ext], **kw)
     if "flags" not in kw:   # every guest root carries -Werror=attributes in flags.c and flags.cxx
         # a guest build.json holds only per-root flags (recipe.PER_ROOT); every semantic flag comes from the pin and is appended by the recipe
         r["flags"] = {"c": ["-O2", recipe.WERROR_ATTR], "cxx": ["-O2", recipe.SDD_DEFINE, recipe.WERROR_ATTR], "asm": []}
@@ -46,7 +49,7 @@ def guest_repo(name, rec, pin, target="guest", files=None):
 def main():
     pin_real = json.load(open(os.path.join(REAL, T + "verify/guest_compiler.json")))
     ext = {"name": "gcc-msvcmodel", "repo": "fnv-nx-build", "ref": "tools/gcc-ilp32-msvcmodel", "commit": "a" * 40, "tree_sha256": "b" * 64, "at": "/ext/gcc"}
-    pin = {"format": "fnvnx-guest-compiler/1", "external": ext, "cc": "bin/aarch64-linux-gnu-gcc", "cxx": "bin/aarch64-linux-gnu-g++"}
+    pin = {"format": "fnvnx-guest-compiler/1", "external": ext, "cc": PIN["cc"], "cxx": PIN["cxx"]}
     rec = guest_rec(ext)
     # --- the rule, validation only (no compiler needed)
     g = guest_repo("g1", rec, pin)
@@ -119,7 +122,7 @@ def main():
             ok["flags"][k] = ok["flags"][k] + [f]
             check("guest root with %s in flags.%s is accepted (per-root class)" % (f, k), not [x for x in errs(gr, ok) if "per-root" in x], errs(gr, ok))
     # the recipe's semantic set per language is the driver's own answer: C drops what the driver says is C++-only; C++ and asm keep all
-    drv = lambda n: os.path.join(prefix, "bin/aarch64-linux-gnu-" + n)  # noqa: E731
+    drv = lambda n: os.path.join(prefix, PIN["cc"] if n == "gcc" else PIN["cxx"])  # noqa: E731
     sc, sx, sa = (recipe.semantics_for(drv(d), k) for d, k in (("gcc", "c"), ("g++", "cxx"), ("gcc", "asm")))
     check("semantics_for: C++ and asm keep the whole set, C drops only what the driver says does not apply", sx == list(recipe.SEMANTICS_FLAGS) and sa == sx
           and sc == [f for f in sx if f != "-fno-sized-deallocation"], (len(sc), len(sx), len(sa), set(sx) - set(sc)))

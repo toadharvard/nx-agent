@@ -24,9 +24,12 @@ cannot run in this environment (root, namespaces, strace) is uncertified. Zero f
   objects are not files of the tree) is keyed by the tree hash of the commit as well (HEAD^{tree}): any change of the tree re-runs it. A failed file, a timeout
   and a leak are never recorded. No file is recorded without a trace (strace missing or a trace that cannot be read: the file is failed, never skipped).
   UNTRACED: a test that itself runs strace cannot run under it (one tracer per process). A file whose import closure over the tree reaches a module that runs strace (TRACERS) is such a file; it runs
-  untraced and their entry is keyed by whole directories: the tree hash (cas.tree_hash, no mtimes, __pycache__ skipped) of every --key-dirs directory
-  (default: the DIRs scanned) and the tree hash of the commit (HEAD^{tree}) in place of a read set: a test that runs the recipe runs strace itself (the env gate
-  `kernel ptrace` is red under another tracer), so its reads are the whole checkout. Detail of a green run: `N of M test files pass, K cached`.
+  untraced and runs on its MOUNT only: a directory holding its import closure (the modules of the tree it imports, the scripts it names) and the files under the
+  data roots it declares in `# reads: <path> <path>...` lines of its own text (repo-relative files or directories; a test runs the recipe and reads the toolchain,
+  the pins, the real sources its fixtures copy). A read outside the mount fails (the file is not there), so a missing declaration is a red test, never a silent
+  wide key; the entry is keyed by the content of the mount (path and sha256 of every file), so a change outside the mount does not run the file again.
+  CUT: a test file whose import closure names a root (a recipe directory, or tests/<name> of class test) that verify/admit.json does not admit belongs to the cut
+  of the branch: it is outside the universe (gate oracle judges the same list) and the detail lists `cut:test:<file> (root <r>)`. Detail of a green run: `N of M test files pass, K cached`.
 A test that needs game data declares it in DIR/tests/inputs.json ({"format": "fnvnx-selftest-inputs/1", "tests": {"test_x.py": ["exe"]}}); the names
 are externals of verify/contract_inputs.json (commit + tree_sha256, fetched like a recipe's external). The test gets FNVNX_INPUT_<NAME> = the checked-out
 directory. If the input cannot be fetched or its tree hash differs, the file's status is `blocked-env`: uncertified (the gate is red), never skipped.
@@ -100,20 +103,102 @@ def imports_of(path, scripts=False):
             out |= set(re.findall(r"[A-Za-z0-9_]+", line.split(" import ", 1)[1]))
     return out
 
-def untraced_of(path):
-    """True iff the test file can run strace itself (so it cannot run under it: one tracer per process): by the rule, its import closure over the checkout's modules
-    reaches a module of TRACERS. Over-approximate and so sound (an untraced file is keyed by the whole directories, coarser, never wrong). No list."""
+def closure_of(path):
+    """(module names, file paths) of the import closure of the test file PATH over the checkout's modules (imports_of: the file's own `name.py` references count as imports)."""
     root = os.path.realpath(os.getcwd())
     idx = module_index(root)
-    seen, todo = set(), sorted(imports_of(path, True))
+    seen, files, todo = set(), [path], sorted(imports_of(path, True))
     while todo:
         m = todo.pop()
         if m in seen:
             continue
         seen.add(m)
         for p in idx.get(m, []):
+            files.append(p)
             todo += sorted(imports_of(p) - seen)
-    return bool(seen & set(TRACERS))
+    return seen, files
+
+def untraced_of(path):
+    """True iff the test file can run strace itself (so it cannot run under it: one tracer per process): by the rule, its import closure over the checkout's modules
+    reaches a module of TRACERS. Over-approximate and so sound (an untraced file is keyed by the whole directories, coarser, never wrong). No list."""
+    return bool(closure_of(path)[0] & set(TRACERS))
+
+ROOT_LIT = re.compile(r"ports/fnv-nx/[A-Za-z0-9_./-]*[A-Za-z0-9_]")
+TEST_ROOT = re.compile(r"ports/fnv-nx/tests/[A-Za-z0-9_]+")   # the class test roots live at tests/<name> (admit.json: class test)
+
+def is_recipe(path):
+    try:
+        return json.load(open(path)).get("format") == "fnvnx-recipe/1"
+    except (OSError, ValueError, AttributeError):
+        return False
+
+def roots_of(path):
+    """The roots a test file needs, from the file and its import closure (closure_of): a literal path that names a directory holding a recipe (build.json of format fnvnx-recipe/1: one
+    rule over the tree), or a root of class test (ports/fnv-nx/tests/<name>, the place of those roots, whether or not the directory is in this tree). Over-approximate and so sound
+    for the cut below; no list."""
+    root = os.path.realpath(os.getcwd())
+    out = set()
+    for f in closure_of(path)[1]:
+        try:
+            text = open(f).read()
+        except OSError:
+            continue
+        out |= set(TEST_ROOT.findall(text))
+        for m in ROOT_LIT.findall(text):
+            for q in (m, os.path.dirname(m)):   # `<root>/build.json`, `<root>/inc`: the root is the nearest ancestor with a recipe
+                if is_recipe(os.path.join(root, q, "build.json")):
+                    out.add(q)
+                    break
+    return sorted(out)
+
+def cut_of(path, admitted):
+    """The roots of a test file that are not admitted (verify/admit.json): when there is one, the test belongs to the CUT of this branch (its root is not part of it), reported as
+    `cut:test:<file> (root <r>)` and never run: a test is certified against the roots it builds, and a root that is not admitted is not built."""
+    return [r for r in roots_of(path) if r not in admitted]
+
+READS = re.compile(r"^#[ \t]*reads:[ \t]*(.*)$", re.M)
+
+def reads_of(path):
+    """The data roots a test file declares (`# reads: <path> <path>...` lines of its text): repo-relative files or directories its run reads besides its import closure."""
+    try:
+        text = open(path).read()
+    except OSError:
+        return []
+    return sorted({x for m in READS.findall(text) for x in m.replace(",", " ").split()})
+
+def mount_files(path):
+    """{repo-relative path: absolute path} of the MOUNT of an untraced test file: its import closure (closure_of) and every file under its declared `# reads:` roots, without
+    __pycache__ and .git. An untraced test runs on this and nothing else of the checkout (mount_run): a read outside it fails, so a missing declaration is a red test."""
+    root = os.path.realpath(os.getcwd())
+    out = {}
+    for f in closure_of(path)[1]:
+        a = os.path.realpath(f)
+        if a.startswith(root + os.sep):
+            out[a[len(root) + 1:]] = a
+    for r in reads_of(path):
+        base = os.path.join(root, r)
+        if os.path.isfile(base):
+            out[r] = base
+        for d, ds, fs in os.walk(base):
+            ds[:] = sorted(x for x in ds if x not in ("__pycache__", ".git"))
+            for n in sorted(fs):
+                a = os.path.join(d, n)
+                out[os.path.relpath(a, root)] = a
+    return out
+
+def mount_digest(files, st):
+    """sha256 over (path, content hash) of a mount: the key of an untraced file's result."""
+    return hashlib.sha256(cas.canon(sorted((rel, st.of(rel)) for rel in files))).hexdigest()
+
+def mount_make(files, dest):
+    """The mount directory DEST: each file hard-linked (copied across devices) at its repo-relative path."""
+    for rel, a in files.items():
+        t = os.path.join(dest, rel)
+        os.makedirs(os.path.dirname(t), exist_ok=True)
+        try:
+            os.link(a, t)
+        except OSError:
+            shutil.copy2(a, t)
 
 def fetch_inputs(names, cache, ws):
     """{FNVNX_INPUT_<NAME>: host dir} of the pinned externals NAMES (recipe.fetch_externals, commit + tree_sha256 checked), or a string: why not."""
@@ -128,7 +213,38 @@ def fetch_inputs(names, cache, ws):
         return "inputs %s: %s" % (",".join(names), x)
     return {"FNVNX_INPUT_" + n.upper(): got[n]["host"] for n in names}
 
-def run_one(path, timeout, base, idx, extra=None, trace=None):
+GUEST_PIN = "ports/fnv-nx/verify/guest_compiler.json"   # the one record of the game's compiler (and the runtime that is the same tree): the external the recipe-running tests mount
+
+def guest_externals():
+    """The externals of the guest pin ([compiler, runtime] entries of verify/guest_compiler.json, deduplicated by commit), or [] when the checkout has none."""
+    try:
+        pin = json.load(open(GUEST_PIN))
+        out, seen = [], set()
+        for e in (pin["external"], pin["runtime"]):
+            if e["commit"] not in seen:
+                seen.add(e["commit"])
+                out.append(e)
+        return out
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+
+def fetch_guest(cache, ws):
+    """{FNVNX_EXTCACHE: the cache dir of the externals, FNVNX_INPUT_GUEST: the compiler's checked-out tree} of the guest pin (recipe.fetch_externals, commit + tree_sha256 checked), or a
+    string: why not. A test that runs the recipe finds the compiler in FNVNX_EXTCACHE (recipe.build's default external cache), so no test fetches it again."""
+    import recipe
+    exts = guest_externals()
+    if not exts:
+        return {}
+    ec = os.path.join(cache or ws, "external")
+    try:
+        got = recipe.fetch_externals(exts, os.path.join(cache or ws, "store"), ec, ws)
+    except recipe.BuildRed as x:
+        return "%s: %s" % (x.args[0].get("stage"), "; ".join(x.args[0].get("stderr", [])[-3:]))
+    except OSError as x:
+        return "guest external: %s" % x
+    return {"FNVNX_EXTCACHE": ec, "FNVNX_INPUT_GUEST": got[exts[0]["name"]]["host"]}
+
+def run_one(path, timeout, base, idx, extra=None, trace=None, cwd=None):
     """(passed, seconds, reason). The test runs with TMPDIR = its own directory BASE/tIDX, made here and removed here whatever the
     outcome (exit, failure, timeout kill, exception); EXTRA: the FNVNX_INPUT_<NAME> variables of the declared inputs: scratch cannot outlive a test. A test that leaves entries in it at exit is
     uncertified ("leaked"). reason: "" when passed, else the exit status, the leaked names and the tail of the test's output."""
@@ -147,7 +263,7 @@ def run_one(path, timeout, base, idx, extra=None, trace=None):
             if trace:
                 cmd = ["strace", "-f", "--seccomp-bpf", "-y", "-qq", "-e", "trace=" + opentrace.TRACE_SET + "," + opentrace.READ_EXTRA, "-o", trace] + cmd
             p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
-                                 start_new_session=True, env=env)
+                                 start_new_session=True, env=env, cwd=cwd)
             try:
                 rc = p.wait(timeout=timeout)
                 if rc:
@@ -295,7 +411,7 @@ def read_set(lines, root, skip, gits):
 def entry_dir(cache, key):
     return os.path.join(cache, "selftests", key)
 
-def lookup(cache, key, st, whole_dirs):
+def lookup(cache, key, st, whole_dirs, mount=None):
     """True iff an entry under KEY has the recorded state now (traced: every path of its read set; untraced: the trees of its directories)."""
     d = entry_dir(cache, key)
     try:
@@ -308,7 +424,7 @@ def lookup(cache, key, st, whole_dirs):
             if e["format"] != CACHE_FORMAT or e["status"] != "passed":
                 continue
             if e["untraced"]:
-                if e["trees"] == st.whole(whole_dirs) and e["tree"] == st.git_tree():
+                if mount is not None and e.get("mount") == mount:
                     return True
                 continue
             if all(st.of(r) == v for r, v in e["files"].items()) and all(st.listing(r) == v for r, v in e["dirs"].items()) and (not e["git"] or e["tree"] == st.git_tree()):
@@ -331,12 +447,35 @@ def record(cache, key, st, entry):
         with contextlib.suppress(OSError):
             os.unlink(os.path.join(d, n))
 
+def admitted_roots():
+    try:
+        return {r["path"] for r in json.load(open(os.path.join("ports", "fnv-nx", "verify", "admit.json")))["roots"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+def split_cut(files):
+    """(files to run, [(file, [roots])] of the cut): the test files of the universe whose roots are all admitted, and those that name a root that is not (cut_of)."""
+    adm = admitted_roots()
+    if adm is None:
+        return files, []
+    keep, cut = [], []
+    for f in files:
+        c = cut_of(f, adm)
+        (cut if c else keep).append((f, c) if c else f)
+    return keep, cut
+
 def universe(dirs):
-    """the test files of the doc comment's universe (gate "oracle" judges the same list)"""
+    """the test files of the doc comment's universe (gate "oracle" judges the same list): every tests/test_*.py of the scanned directories minus the cut (split_cut)"""
     files = []
     for d in dirs:
         files += sorted(os.path.normpath(f) for f in glob.glob(os.path.join(glob.escape(d), "tests", "test_*.py")))
-    return files
+    return split_cut(files)[0]
+
+def cut_lines(dirs):
+    files = []
+    for d in dirs:
+        files += sorted(os.path.normpath(f) for f in glob.glob(os.path.join(glob.escape(d), "tests", "test_*.py")))
+    return ["cut:test:%s (root %s)" % (f, ", ".join(r)) for f, r in split_cut(files)[1]]
 
 def main(argv):
     o, dirs = parse(argv)
@@ -353,8 +492,12 @@ def main(argv):
     for f in files:
         names = declared_inputs(f)
         pins = [[n, pinned.get(n, {}).get("commit"), pinned.get(n, {}).get("tree_sha256")] for n in (names or [])]
-        plan[f] = (key_of(f, sargv, pins, eid), untraced_of(f), names)
-    hit = {f for f in files if o["cache"] and plan[f][2] is not None and lookup(o["cache"], plan[f][0], st, whole_dirs)}
+        un = untraced_of(f)
+        if un:
+            pins += [["guest:" + e["name"], e["commit"], e["tree_sha256"]] for e in guest_externals()]
+        mf = mount_files(f) if un else None
+        plan[f] = (key_of(f, sargv, pins, eid), un, names, mf, mount_digest(mf, st) if un else None)
+    hit = {f for f in files if o["cache"] and plan[f][2] is not None and lookup(o["cache"], plan[f][0], st, whole_dirs, plan[f][4])}
     todo = [f for f in files if f not in hit]
     res = {}
     if todo:
@@ -365,23 +508,34 @@ def main(argv):
 
         def one(a):
             idx, f = a
-            key, untraced, names = plan[f]
+            key, untraced, names, mfiles, mdig = plan[f]
             if names is None:
                 return "failed", 0.0, "tests/inputs.json is not a valid fnvnx-selftest-inputs/1 file"
             extra = None
+            if untraced:   # a file that runs the recipe finds the game's compiler mounted (the guest pin), fetched once into the gate's cache
+                got = fetch_guest(o["cache"], ws)
+                if isinstance(got, str):
+                    return "blocked-env", 0.0, got
+                extra = got
             if names:
                 got = fetch_inputs(names, o["cache"], ws)   # a test that needs game data declares it; no data here: blocked, never green, never skipped
                 if isinstance(got, str):
                     return "blocked-env", 0.0, got
-                extra = got
+                extra = dict(extra or {}, **got)
             tracing = bool(o["cache"]) and not untraced
             if tracing and shutil.which("strace") is None:
                 return "failed", 0.0, "strace is not installed: the read set of the file cannot be recorded"
             tr = os.path.join(base, "t%d.strace" % idx) if tracing else None
-            ok, sec, why = run_one(f, o["timeout"], base, idx, extra, tr)
+            cwd = None
+            if untraced:   # the mount: the file's import closure and its declared reads, nothing else of the checkout
+                cwd = os.path.join(base, "m%d" % idx)
+                mount_make(mfiles, cwd)
+            ok, sec, why = run_one(f, o["timeout"], base, idx, extra, tr, cwd)
+            if cwd:
+                shutil.rmtree(cwd, ignore_errors=True)
             if ok and o["cache"]:
                 if untraced:
-                    record(o["cache"], key, st, {"untraced": True, "trees": st.whole(whole_dirs), "files": {}, "dirs": {}, "git": False, "tree": st.git_tree()})
+                    record(o["cache"], key, st, {"untraced": True, "mount": mdig, "files": {}, "dirs": {}, "git": False, "tree": None})
                 else:
                     try:
                         lines = open(tr, errors="replace").read().splitlines()
@@ -412,7 +566,10 @@ def main(argv):
     blocked = [r["name"] for r in rows if r["status"] == "blocked-env"]
     n = len(files) - len(unc)
     status = "green" if not unc else "red"
+    cuts = cut_lines(dirs)
     detail = ("%d of %d test files pass%s, %.1f s" % (n, len(files), note, secs)) if files else "no test files at this commit (nothing to certify yet)"
+    if cuts:
+        detail += "; %d in the cut: %s" % (len(cuts), "; ".join(cuts))
     if blocked:
         detail += "; blocked: env (declared input not available) for " + ", ".join(blocked)
     res = {"format": "fnvnx-gate/1", "name": "selftests", "status": status, "universe": len(files), "certified": n,

@@ -1957,8 +1957,9 @@ class Job:
         if not os.path.isfile(os.path.join(pdir, "include", "gcc-plugin.h")):
             raise BuildRed({"stage": "plugin", "exit": None, "stderr": ["no plugin headers of %s in %s (gcc-N-plugin-dev of env.json)" % (cxx, pdir)]})
         inc, trees = pdir, [pdir]
-        for e in self.ext.values():   # headers inside an external compiler: its tree is a declared input at `at` already
-            if under(pdir, e["host"]):
+        cext = self.rec["compiler"].get("external")
+        for n, e in self.ext.items():   # headers inside the compiler's own external (the one this stage mounts: when the runtime is the same tree under another name, its `at` is not mounted)
+            if n == cext and under(pdir, e["host"]):
                 inc, trees = e["at"] + pdir[len(e["host"]):], []
 
         def make():
@@ -2758,7 +2759,7 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True):
     externals (default STORE/external). -> the objects dict; raises RecipeError for an invalid recipe."""
     env_blocked(repo)   # BEFORE any stage: nothing below runs or stores on a machine that is not the declared one
     spec = root
-    j = Job(repo, spec, store, jobs, ext or os.path.join(store, "external"))
+    j = Job(repo, spec, store, jobs, ext or os.environ.get("FNVNX_EXTCACHE") or os.path.join(store, "external"))   # FNVNX_EXTCACHE: the cache a test gate mounts (gate_tests.fetch_guest)
     j.aux = list(aux or [])   # AUX_FLAGS the caller asked for: extra outputs of the CC stage (in its key), never a change of the code generated
     root = j.root
     with open(os.path.join(repo, j.roots[root]["recipe"])) as f:
