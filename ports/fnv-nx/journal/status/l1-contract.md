@@ -1551,3 +1551,5 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - 09:26 **w24 archived** at w24-gatekeys 0e00f9d38 (cand2 merged in, rtasm in REQUIRED, onedef/guest_link/uses fixed; bootmachine and bootunmap pass on cand2).
   - Left to w15: test_gates (2 per-file-cache cases), test_objstub errno_accessor, test_rtasm (a).
   - Off path for now: the selftests index cache, the warm timings.
+- 09:28 **w12 409f79837.** The gen-stage parent-dir rule and the one driver argv constructor are done, forwarded to L4 for the relink and merged into cand2 (w15).
+  - PT_INTERP ruling: pin base-files and resolve through the declared debs' symlinks. w15's directory-tuple alias (b6865471d) is deleted. Owner: w12.
