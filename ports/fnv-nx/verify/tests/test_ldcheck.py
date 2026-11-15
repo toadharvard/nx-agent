@@ -52,10 +52,9 @@ check("a weak undefined reference with no definition is red, naming the symbol a
 # the linker dropped it from the output (resolved to 0): the inputs' tables still show it
 ids = L.symbol_ids(objs(a=[("f", G, True), ("wf", W, False)]), {"f"}, elf([("f", G, True)]))
 check("a weak reference the linker dropped from the output is red too", ids == ["weak-undefined:wf <- a.o"], ids)
-# the output holds it undefined, but no input object names it (a library member): the symbol is reported, the objects are none
+# the output holds it undefined, but no product object names it (a startfile or runtime member of the pinned toolchain): accepted (ruling A)
 ids = L.symbol_ids(objs(a=[("f", G, True)]), {"f"}, elf([("f", G, True), ("lw", W, False)]))
-check("a weak undefined symbol only in the output's table is red, with no referencing input object",
-      len(ids) == 1 and ids[0].startswith("weak-undefined:lw <- (none"), ids)
+check("a weak undefined symbol only in the output's table (no product object references it) is accepted", ids == [], ids)
 # a weak reference that the output defines (another object defines it strongly)
 ids = L.symbol_ids(objs(a=[("wf", W, False)], b=[("wf", G, True)]), {"wf"}, elf([("wf", G, True)]))
 check("a weak reference that is defined is green", ids == [], ids)
@@ -159,5 +158,10 @@ rc, ids = run_host({"a": EX + REF + [("memcpy", G, False)]}, EX + REF + [("memcp
 check("undefined = system exports + loader's defined set: both together are green", rc == 0 and not ids, (rc, ids))
 rc, ids = run_host({"a": EX + REF}, EX + REF, loader=[])
 check("a declared loader that defines nothing covers nothing", rc == 1 and "output-undefined:nxgl4_guest_ptr" in ids, (rc, ids))
+# ruling A on a host image: a weak undefined only a startfile carries is accepted; one a product object references is red
+rc, ids = run_host({"a": EX}, EX + [("__gmon_start__", W, False)])
+check("host: a weak undefined dynamic reference no product object makes (a startfile's) is accepted", rc == 0 and not ids, (rc, ids))
+rc, ids = run_host({"a": EX + [("pw", W, False)]}, EX + [("pw", W, False)])
+check("host: a weak undefined that a product object references is red, naming the object", rc == 1 and ids == ["weak-undefined:pw <- a.o"], (rc, ids))
 print("FAILED %d" % fails if fails else "all pass")
 sys.exit(1 if fails else 0)

@@ -58,6 +58,26 @@ def syms(elf):
     return {l.split()[2]: int(l.split()[0], 16) for l in out.splitlines() if len(l.split()) == 3}
 
 
+def elf32_sections_symbols(path):
+    """([(name, address, size)] of the sections, {name: (value, size)} of the defined .symtab symbols) of an ELF32 little-endian file, read with struct
+    (the independent reader the ELF facts of the link record are compared with)."""
+    d = open(path, "rb").read()
+    shoff, = struct.unpack_from("<I", d, 0x20)
+    esz, num, stri = struct.unpack_from("<HHH", d, 0x2e)
+    sh = [struct.unpack_from("<IIIIIIIIII", d, shoff + i * esz) for i in range(num)]
+    names = d[sh[stri][4]:sh[stri][4] + sh[stri][5]]
+    nm = lambda o, t=names: t[o:t.index(b"\0", o)].decode()  # noqa: E731
+    secs = [(nm(x[0]), x[3], x[5]) for x in sh[1:]]
+    sy = next(x for x in sh if x[1] == 2)
+    stt = d[sh[sy[6]][4]:sh[sy[6]][4] + sh[sy[6]][5]]
+    out = {}
+    for k in range(sy[5] // 16):
+        n, val, size, info, other, shndx = struct.unpack_from("<IIIBBH", d, sy[4] + 16 * k)
+        if shndx != 0 and n:
+            out[nm(n, stt)] = (val, size)
+    return secs, out
+
+
 def words(path):
     """The eight words at the first PT_LOAD's file offset (the crt0 header)."""
     d = open(path, "rb").read()
@@ -95,6 +115,17 @@ def main():
     w = words(r["elf"]["path"])
     check("crt0 header words written: +8 FNXG, +16 link base 0, +20 page aligned span, +24 flags 1 (PIE)",
           w[2] == 0x47584e46 and w[4] == 0 and w[5] and w[5] % 0x1000 == 0 and w[6] == 1, w)
+    ef = json.load(open(r["elf_facts"]["path"]))
+    secs, esy = elf32_sections_symbols(r["elf"]["path"])
+    check("elf facts: the link record carries the sections (name, address, size) as the ELF's own section header table has them",
+          ef["format"] == "fnvnx-elffacts/1" and [(x["name"], x["address"], x["size"]) for x in ef["sections"]] == secs, (ef["sections"][:3], secs[:3]))
+    check("elf facts: every defined symbol with its value and size, and its type and binding as readelf prints them (f_a FUNC GLOBAL)",
+          {x["name"]: (x["value"], x["size"]) for x in ef["symbols"] if x["name"] in esy and x["section"] != "ABS"} == {n: v for n, v in esy.items() if n in {x["name"] for x in ef["symbols"] if x["section"] != "ABS"}}
+          and any(x["name"] == "f_a" and x["type"] == "FUNC" and x["bind"] == "GLOBAL" for x in ef["symbols"]), ef["symbols"][:3])
+    check("elf facts: the definer of an undefined reference of a product object is the defining input (f_b of a.c: the object of the input root; f_a of nothing else)",
+          {"symbol": "f_b", "definer": "/objs/01-ports__fnv-nx__lib/l.c.o"} in ef["references"]["00-own:a.c"], ef["references"])
+    r_ef = build(repo, SS, BASE + "/o-two3")
+    check("elf facts: cached with the stage (a second build runs no stage) and the same record", r_ef["stages"]["run"] == 0 and json.load(open(r_ef["elf_facts"]["path"])) == ef)
     ids = r["link_roots"]
     check("objects.json lists the input root with the digest of its objects.json content and its linked objects (kept beside the result)",
           len(ids) == 1 and ids[0]["root"] == LIB and re.fullmatch("[0-9a-f]{64}", ids[0]["sha256"]) and r["objects"][0]["unit"] == "a.c"
@@ -161,10 +192,21 @@ def main():
     rl = build(mk("libs", dict(main_rec(libs=libs), external=[ex]), L), SS)
     check("link.libs: a member of a guest library of an external is linked where an input needs it", rl["status"] == "green"
           and "lib_fn" in syms(rl["elf"]["path"]), err_text(rl))
+    lf = json.load(open(rl["elf_facts"]["path"]))
+    check("elf facts: the definer of lib_fn (an undefined reference of a.c) is the archive member /ext/gl/lib/libtoy.a(t.o), ld's own name for it",
+          {"symbol": "lib_fn", "definer": "/ext/gl/lib/libtoy.a(t.o)"} in lf["references"]["00-own:a.c"], lf["references"])
     rl2 = build(mk("libs-miss", dict(main_rec(libs=dict(libs, names=["nope"])), external=[ex]), L), SS)
     check("link.libs: a library that is not there is a red ld:<root>", rl2["status"] == "red" and rl2["failure"]["stage"] == "ld:" + ROOT, err_text(rl2))
     rl3 = build(mk("libs-none", main_rec(), L), SS)
     check("without the library the same undefined reference is red (ld)", rl3["status"] == "red" and rl3["failure"]["stage"] == "ld:" + ROOT, err_text(rl3))
+    L2 = {"toy/a.c": TR.HDR + '#include "toy.h"\nint lib_fn(void);\nextern char _GLOBAL_OFFSET_TABLE_[];\nint f_a(void) { return lib_fn() + TOY + (int)(long)_GLOBAL_OFFSET_TABLE_; }\n'}
+    rl4 = build(mk("libs-none-got", main_rec(), L2), SS)
+    fu4 = (rl4.get("failed_units") or [{}])[0]
+    check("the static undefined set omits a name the pinned ld defines itself (_GLOBAL_OFFSET_TABLE_, read from a reference link of an empty product), and keeps the owned one",
+          [u["symbol"] for u in fu4.get("undefined", [])] == ["lib_fn"], (fu4.get("undefined"), fu4.get("findings")))
+    fu = (rl3.get("failed_units") or [{}])[0]
+    check("a red link record carries the full static undefined set, each symbol with its referencing objects (never from ld's text)",
+          [u["symbol"] for u in fu.get("undefined", [])] == ["lib_fn"] and "a.c" in fu["undefined"][0]["referencers"][0], fu.get("undefined"))
 
 
     # (k) kinds: exe and shared host images (LP64), and the target of the link

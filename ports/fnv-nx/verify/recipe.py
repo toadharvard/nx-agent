@@ -36,10 +36,13 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
+import elffacts  # noqa: E402
 import gate_admit  # noqa: E402
 import envcheck  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "link"))
 import relocs  # noqa: E402
+import undefset  # noqa: E402
+from ldcheck import syms_any as ldcheck_syms  # noqa: E402
 import ldcheck  # noqa: E402
 import runtime  # noqa: E402
 import sandbox  # noqa: E402
@@ -273,10 +276,17 @@ def tool_file(roots, files, p):
 
 def link_file(rec_file, root, mine, roots, files):
     """The repo path of a link file (script, version_script) named REC_FILE, or None: a tracked file of the root (root-relative), else a tracked
-    file under a tree of an admitted tool root (repo-relative). One membership definition with the ldcheck tools."""
+    file under a tree of an admitted tool root (repo-relative). One membership definition with the ldcheck tools. A generated output of the
+    root (`link_generated`) is not a repo path: the link stage reads it from the root's build view."""
     if rel_ok(rec_file) and rec_file in mine:
         return root + "/" + rec_file
     return rec_file if rel_ok(rec_file) and tool_file(roots, files, rec_file) else None
+
+
+def link_generated(rec_file, mine, seen):
+    """REC_FILE is a generated output of the root (SEEN: the outputs of its generated and run stages, as for `constants`) and not a tracked file:
+    the link script or version script a generator writes. The ld stage mounts it from the root's view, so its content is in the stage key."""
+    return isinstance(rec_file, str) and rel_ok(rec_file) and rec_file in seen and rec_file not in mine
 
 
 PROBE_SRC = "int main(void) { return 0; }\n"
@@ -347,11 +357,31 @@ def merge_inputs(base, extra, store, ws):
     return sorted(out, key=lambda i: i["at"])
 
 
+def outside_files(text, at):
+    """The `.o` files of the driver's link command TEXT that lie outside the runtime external mounted at AT, the program's own object (the driver's
+    temporary /tmp/cc*.o) excepted: a start or end file the pinned runtime's driver names from elsewhere. Empty when every one is the runtime's."""
+    line = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("COLLECT_GCC_OPTIONS=")][-1]
+    toks = [posixpath.normpath(t.strip('"')) for t in line.split() if t.strip('"').endswith(".o") and t.strip('"').startswith("/")]
+    return sorted(t for t in toks if not t.startswith(at + "/") and not re.fullmatch(r"/tmp/cc[^/]*\.o", t))
+
+
 def entry_object(objs, entry):
     """The one-process-start rule on the objects OBJS ({path: defined symbols}) of the runtime's start files: when the link's entry ENTRY is not the
     driver's default `_start`, the object that defines `_start` is the runtime's own process start, which the link does not use (the product defines
     the entry): the paths that define `_start`, sorted. With the default entry there is none."""
     return sorted(p for p, d in objs.items() if "_start" in d) if entry != "_start" else []
+
+
+def in_multilib(paths, multidir):
+    """The paths of PATHS (relative to the runtime external) that do not lie in the multilib directory MULTIDIR the guest semantic flags select
+    (`-print-multi-directory`): a directory component run equal to MULTIDIR's components must occur in the path. Empty: every file is of that multilib."""
+    want = [c for c in multidir.split("/") if c and c != "."]
+    out = []
+    for p in paths:
+        parts = p.split("/")
+        if want and not any(parts[i:i + len(want)] == want for i in range(len(parts))):
+            out.append(p)
+    return out
 
 
 def onedef(objs, root_defined):
@@ -368,21 +398,15 @@ def load_guest_link(repo="."):
 
 
 def guest_link_errors(prof, pin, files, roots):
-    """Problems of the guest link profile PROF (load_guest_link): exactly {script, libs}; `script` a tracked file under a tree of an admitted tool root
-    (tool_file); `libs` {external, dirs, names, startfiles, endfiles} of LIBS_KEYS whose external is the pinned runtime of PIN (no hand path)."""
-    if not isinstance(prof, dict) or set(prof) != {"script", "libs"}:
-        return ["%s must be {script, libs}" % GUEST_LINK]
-    sc, lb, err = prof["script"], prof["libs"], []
+    """Problems of the guest link profile PROF (load_guest_link): exactly {script}; `script` a tracked file under a tree of an admitted tool root
+    (tool_file). The libraries are not stored anywhere: the link derives them (Job.guest_libs, a keyed stage)."""
+    if not isinstance(prof, dict) or set(prof) != {"script"}:
+        return ["%s must be {script}: the libraries are derived by the link from the pinned runtime's driver" % GUEST_LINK]
+    sc = prof["script"]
     full = TREE + "/" + sc if isinstance(sc, str) and rel_ok(sc) else None
     if not (full and tool_file(roots, files, full)):
-        err.append("%s: script %r is not a tracked file of an admitted tool root (a path inside %s)" % (GUEST_LINK, sc, TREE))
-    paths = lambda k: isinstance(lb.get(k), list) and all(rel_ok(x) for x in lb[k])  # noqa: E731
-    if not (isinstance(lb, dict) and set(lb) == LIBS_KEYS and paths("dirs") and paths("startfiles") and paths("endfiles")
-            and isinstance(lb.get("names"), list) and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9._+-]+", n) for n in lb["names"])):
-        err.append("%s: libs must be {external, dirs, names, startfiles, endfiles} (paths inside the external)" % GUEST_LINK)
-    elif not (isinstance(pin, dict) and isinstance(pin.get("runtime"), dict) and lb["external"] == pin["runtime"].get("name")):
-        err.append("%s: libs.external %r is not the pinned runtime external of %s" % (GUEST_LINK, lb["external"], GUEST_PIN))
-    return err
+        return ["%s: script %r is not a tracked file of an admitted tool root (a path inside %s)" % (GUEST_LINK, sc, TREE)]
+    return []
 
 
 def with_guest_link(rec, root, roots, repo):
@@ -391,7 +415,7 @@ def with_guest_link(rec, root, roots, repo):
     lk, prof = rec.get("link"), load_guest_link(repo)
     if not (isinstance(lk, dict) and prof and roots.get(root, {}).get("target") == "guest"):
         return rec
-    return dict(rec, link=dict(lk, script=TREE + "/" + prof["script"], libs=prof["libs"]))
+    return dict(rec, link=dict(lk, script=TREE + "/" + prof["script"], libs={"external": load_pin(repo)["runtime"]["name"], "derive": True}))
 
 
 def load_admit(repo="."):
@@ -512,8 +536,9 @@ def guest_link_part(rec, root, pin, prof, files, roots):
         return []
     bad = ["link.%s is declared: script and libs of a guest link come from %s" % (k, GUEST_LINK) for k in ("script", "libs") if k in lk]
     bad += guest_link_errors(prof, pin, files, roots) if prof is not None else ["%s is missing" % GUEST_LINK]
-    if isinstance(prof, dict) and isinstance(prof.get("libs"), dict) and prof["libs"].get("external") not in [e.get("name") for e in rec.get("external", []) if isinstance(e, dict)]:
-        bad.append("the runtime external %r of %s is not declared in external" % (prof["libs"].get("external"), GUEST_LINK))
+    rt = pin.get("runtime") if isinstance(pin, dict) else None
+    if isinstance(rt, dict) and rt.get("name") not in [e.get("name") for e in rec.get("external", []) if isinstance(e, dict)]:
+        bad.append("the runtime external %r of %s is not declared in external" % (rt.get("name"), GUEST_PIN))
     return ["guest root %s: %s" % (root, b) for b in bad]
 
 
@@ -670,7 +695,7 @@ def uses_errors(rec, root, roots, repo):
     return err
 
 
-def link_errors(lk, root, mine, roots, ext_names, repo, files=(), variant=""):
+def link_errors(lk, root, mine, roots, ext_names, repo, files=(), variant="", seen=()):
     """Problems of the `link` key: {script, output, flags} and optionally `roots` (admitted product roots whose objects are link inputs after
     the root's own, in list order) and `libs` ({external, dirs, names, startfiles, endfiles}: the guest libraries inside an external)."""
     kind = lk.get("kind", "pie") if isinstance(lk, dict) else None
@@ -678,10 +703,10 @@ def link_errors(lk, root, mine, roots, ext_names, repo, files=(), variant=""):
     if not (isinstance(lk, dict) and LINK_KEYS <= set(lk) <= LINK_KEYS | LINK_OPT and isinstance(lk["flags"], list)
             and all(isinstance(t, str) for t in lk["flags"]) and isinstance(lk["output"], str) and kind in KINDS
             and re.fullmatch(r"[A-Za-z0-9._-]+\.(elf|so|exe)", lk["output"])
-            and all(k not in lk or link_file(lk[k], root, mine, roots, files) for k in ("script", "version_script"))
+            and all(k not in lk or link_file(lk[k], root, mine, roots, files) or link_generated(lk[k], mine, seen) for k in ("script", "version_script"))
             and ("script" in lk or kind != "pie" or guest) and ("version_script" in lk) == (kind == "shared")):
-        return ["link must be {output: NAME.elf|.so|.exe, flags: [..]} with `script` (a tracked file of the root, or of a tree of an admitted tool root; required for kind pie, the default), kind pie|exe|shared, "
-                "`version_script` (a tracked file of the root or of a tool tree: required for, and only for, kind shared), optionally roots, libs"]
+        return ["link must be {output: NAME.elf|.so|.exe, flags: [..]} with `script` (a tracked file of the root, a generated output of the root, or a tracked file of a tree of an admitted tool root; required for kind pie, the default), kind pie|exe|shared, "
+                "`version_script` (a tracked file of the root, a generated output of the root, or of a tool tree: required for, and only for, kind shared), optionally roots, libs"]
     err = ["link.flags: %s is in the refusal set R" % t for t in refused(lk["flags"])] + emulation_flags(lk["flags"], kind)
     rent = entry_of(roots, root + "@" + variant if variant else root)
     if rent.get("target") == "guest" and kind == "exe":
@@ -1028,7 +1053,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             err.append("%s %r is neither a tracked file of the root nor a generated output" % (key, c))
     lk = rec.get("link")
     if lk is not None:
-        err += link_errors(lk, root, mine, roots, names, repo, files, variant)
+        err += link_errors(lk, root, mine, roots, names, repo, files, variant, seen)
         err += ["link: the ldcheck stage needs %s (a tracked file of an admitted tool root)" % p for p in (
             LD_TOOLS[0] + "/ldcheck.py", LD_TOOLS[0] + "/gateids.py", LD_TOOLS[1] + "/gatefile.py")
             if p not in files or not tree_of(roots, p)]
@@ -1757,8 +1782,13 @@ class Job:
         kind = lk.get("kind", "pie")
         for k in ("script", "version_script"):
             if k in lk:
-                shutil.copyfile(os.path.join(self.repo, link_file(lk[k], self.root, {f[len(self.root) + 1:] for f in self.files if under(f, self.root)}, self.roots, self.files)), os.path.join(sd, os.path.basename(lk[k])))
+                mine = {f[len(self.root) + 1:] for f in self.files if under(f, self.root)}
+                src = os.path.join(ws, "root", lk[k]) if link_generated(lk[k], mine, set(generated_outputs(self.rec))) else os.path.join(self.repo, link_file(lk[k], self.root, mine, self.roots, self.files))
+                shutil.copyfile(src, os.path.join(sd, os.path.basename(lk[k])))
         lb, pre, post, search, libs, sysin = lk.get("libs"), [], [], [], [], []
+        if lb and lb.get("derive"):     # a guest link: the libraries are the pinned driver's answer, derived here (keyed), never stored
+            rootdef = set().union(*(undefset.object_symbols(open(p, "rb").read())[0] for _, objs in groups for _, p in objs))
+            lb = dict(self.guest_libs(ws, rootdef, open(os.path.join(sd, os.path.basename(lk["script"]))).read())[0], external=lb["external"])
         if lb and "system" in lb:
             # the shared libraries of env.json packages: their content is the input, mounted at /syslib under their own file names
             yd = os.path.join(ws, "syslib")
@@ -1787,14 +1817,22 @@ class Job:
             at = self.ext[lb["external"]]["at"]
             pre, post = [at + "/" + p for p in lb["startfiles"]], [at + "/" + p for p in lb["endfiles"]]
             search, libs = ["-L" + at + "/" + d for d in lb["dirs"]], ["-l" + n for n in lb["names"]]
+        self.linkfacts = {"startend": [self.hostpath(x) for x in pre + post if not x.startswith("/syslib/")],
+                          "dirs": [self.hostpath(x[2:]) for x in search if x.startswith("-L") and x != "-L/syslib"], "names": [x[2:] for x in libs],
+                          "script": open(os.path.join(sd, os.path.basename(lk["script"]))).read() if "script" in lk else "",
+                          "system": list(lb["system"]) if lb and "system" in lb else []}
         vs = ["--version-script=/ld/" + os.path.basename(lk["version_script"])] if "version_script" in lk else []
         sc = ["-T", "/ld/" + os.path.basename(lk["script"])] if "script" in lk else []
-        argv = [ld] + LD_KIND[kind] + dl + lk["flags"] + sc + vs + ["-o", "/out/" + lk["output"], "-Map=/out/" + lk["output"] + ".map"] + pre + search + [
+        argv = [ld] + LD_KIND[kind] + dl + lk["flags"] + sc + vs + ["--cref", "--no-demangle", "-o", "/out/" + lk["output"], "-Map=/out/" + lk["output"] + ".map"] + pre + search + [
             "--whole-archive"] + args + ["--no-whole-archive"] + (["--start-group"] + libs + ["--end-group"] if libs else []) + post
         objs_tree, ld_tree = cas.ingest(od, self.store), cas.ingest(sd, self.store)
         doc = {"format": "fnvnx-stage/1", "stage": "ld:" + self.root, "argv": argv, "cwd": "/", "class": "build", "tool": "ld",
                "env": dict(unitstage.ENV, PATH=os.path.dirname(ld)), "outputs": ["/out"],
                "inputs": merge_inputs(rt["inputs"] + [{"at": "/objs", "tree": objs_tree}, {"at": "/ld", "tree": ld_tree}], sysin, self.store, ws)}
+        # the reference link (run only to read a failed link's linker-defined names): the same ld, flags, script, inputs, start files and libraries with
+        # unresolved symbols ignored; the names its output defines that no input defines are the ones the pinned ld synthesises for this link
+        self.ref_doc = dict(doc, stage="ldref:" + self.root, argv=[ld] + LD_KIND[kind] + dl + lk["flags"] + sc + vs + ["--unresolved-symbols=ignore-all", "-o", "/out/ref.elf"]
+                            + pre + search + ["--whole-archive"] + args + ["--no-whole-archive"] + (["--start-group"] + libs + ["--end-group"] if libs else []) + post)
         return self.stage(doc)[1]["outputs"]["/out"], objs_tree, [{"at": "/ld", "tree": ld_tree}] + sysin
 
     def host_startfiles(self, ws, kind):
@@ -1828,6 +1866,107 @@ class Job:
         text = open(cas._obj(self.store, cas.manifest(res["stderr"], self.store)), errors="replace").read()
         return parse_host_link(text, dirs), mnt
 
+    def link_undefined(self, groups, loader_defs=None):
+        """The full static undefined set of the link just attempted (undefset.closure over the symbol tables of its inputs): the objects of the product
+        roots (GROUPS), the start and end files, the archive members of the `-l` libraries (pulled by the closure's own rule), the .dynsym of the declared
+        system libraries and the declared loader's names, and the names the link script assigns. -> [{symbol, referencers}]."""
+        f = self.linkfacts
+        rd = lambda p: open(p, "rb").read()  # noqa: E731
+        prod = {"%s:%s" % (lab, u): undefset.object_symbols(rd(p)) for lab, objs in groups for u, p in objs}
+        rt = {os.path.basename(x): undefset.object_symbols(rd(x)) for x in f["startend"] if os.path.isfile(x)}
+        arch = []
+        for n in f["names"]:
+            ar = next((os.path.join(d, "lib%s.a" % n) for d in f["dirs"] if os.path.isfile(os.path.join(d, "lib%s.a" % n))), None)
+            if ar:
+                arch += [("lib%s.a(%s)" % (n, m), *undefset.object_symbols(b)) for m, _, b in relocs.ar_members(ar)]
+        dyn = set(loader_defs or ())
+        for p in f["system"]:
+            dyn |= {n for n, _, _, shndx, _ in ldcheck_syms(rd(os.path.realpath(p)), 11) if shndx != 0}
+        ld_defs = undefset.script_defined(f["script"]) | self.ld_synthesised(rt, arch)
+        u = undefset.closure(prod, rt, arch, dyn, ld_defs)
+        return [{"symbol": k, "referencers": v} for k, v in u.items()]
+
+    def elf_facts(self, ws, fin, elf_tree, groups):
+        """The ELF facts of the linked output (elffacts.py, RECIPE.md "ELF facts of a linked output"): stage `ldfacts:<root>` runs the PINNED readelf of
+        env.json (the one beside the linker the compiler names, `-W -S -s`) on the final ELF, and its stdout is cached with the stage; the definer of
+        every resolved undefined reference of a product object comes from ld's own cross reference table (`--cref`, in the map of the link stage).
+        -> the record (elffacts.record). BuildRed(stage ldfacts:<root>) if the pinned readelf is not a file of a pinned package, or a layout does not fit."""
+        lk, stage = self.rec["link"], "ldfacts:" + self.root
+        name = lk["output"]
+        pn = subprocess.run([self.hostpath(self.drivers()[0]), "-print-prog-name=ld"], capture_output=True, text=True).stdout.strip()
+        d, b = posixpath.split(posixpath.normpath(unitstage.prog(pn)))
+        rd = posixpath.join(d, b[:-2] + "readelf") if b.endswith("ld") else ""
+        bad = envcheck.system_lib_errors([rd], json.load(open(os.path.join(self.repo, ENV_JSON)))["packages"], envcheck.file_owners()) if rd else ["the linker %r has no readelf beside it" % b]
+        if bad:
+            raise BuildRed({"stage": stage, "exit": None, "stderr": ["the pinned readelf beside the linker: %s" % x for x in bad]})
+        rt = self.cached_rt("tool-readelf-" + hashlib.sha256(repr((rd, sorted((e["at"], e["tree"]) for e in self.ext.values()))).encode()).hexdigest()[:16],
+                            lambda: self.plus(runtime.build_tool(self.store, [rd], [])))[1]
+        doc = {"format": "fnvnx-stage/1", "stage": stage, "argv": [rd, "-W", "-S", "-s", "/linked/" + name], "cwd": "/", "class": "build", "tool": "readelf",
+               "env": dict(unitstage.ENV, PATH=os.path.dirname(rd)), "outputs": [],
+               "inputs": merge_inputs(rt["inputs"] + [{"at": "/linked", "tree": fin}], [], self.store, ws)}
+        res = self.stage(doc)[1]
+        text = open(cas._obj(self.store, cas.manifest(res["stdout"], self.store)), errors="replace").read()
+        mp = open(cas._obj(self.store, cas.manifest(elf_tree, self.store)["entries"][name + ".map"]), errors="replace").read()
+        f = self.linkfacts
+        rd_ = lambda p: open(p, "rb").read()  # noqa: E731
+        products, defs = {}, {}
+        for lab, objs in groups:
+            for u, p in objs:
+                products["/objs/%s/%s.o" % (lab, u)] = "%s:%s" % (lab, u)
+                defs["/objs/%s/%s.o" % (lab, u)] = undefset.object_symbols(rd_(p))[0]
+        base = {os.path.basename(x): undefset.object_symbols(rd_(x))[0] for x in f["startend"] if os.path.isfile(x)}
+        for n in f["names"]:
+            ar = next((os.path.join(dd, "lib%s.a" % n) for dd in f["dirs"] if os.path.isfile(os.path.join(dd, "lib%s.a" % n))), None)
+            if ar:
+                base.update({"lib%s.a(%s)" % (n, m): undefset.object_symbols(bb)[0] for m, _, bb in relocs.ar_members(ar)})
+        for p in f["system"]:
+            base[os.path.basename(p)] = {n_ for n_, _, _, shndx, _ in ldcheck_syms(rd_(os.path.realpath(p)), 11) if shndx != 0}
+
+        def defs_of(file):      # ld names an archive member ARCHIVE(MEMBER) with the archive's path, a product object by the path of the link line
+            if file in defs:
+                return defs[file]
+            m = re.fullmatch(r"(.*/)?(lib[^/()]*\.a)\((.*)\)", file)
+            return base.get("%s(%s)" % (m[2], m[3])) if m else base.get(posixpath.basename(file))
+        try:
+            return elffacts.record(name, text, text, mp, products, defs_of)
+        except elffacts.ElfFactsError as e:
+            raise BuildRed({"stage": stage, "exit": None, "stderr": [str(e)[-300:]]})
+
+    def guest_libs(self, ws, rootdef, script_text):
+        """The guest link's libraries, derived (keyed stages, nothing stored): the driver's `-###` link command read by parse_driver_link, minus the start
+        and end files that the one-definition rule (onedef over ROOTDEF, the symbols the product roots define) or the entry rule (entry_object, the ENTRY
+        of SCRIPT_TEXT) excludes. Every derived file must lie under the pinned runtime external and in the multilib the guest semantic flags select
+        (-print-multi-directory). -> ({dirs, names, startfiles, endfiles}, [excluded objects]); BuildRed otherwise."""
+        pin = load_pin(self.repo)
+        text, at = self.link_probe(ws)
+        raw = parse_driver_link(text, at)
+        bad = []
+        out = outside_files(text, at)
+        if out:
+            bad.append("start or end files of the driver's link outside the pinned runtime external: %s" % ", ".join(out))
+        stray = in_multilib([x for k in ("startfiles", "endfiles") for x in raw[k]] + raw["dirs"][:2], self.multidir)
+        if stray:
+            bad.append("derived files outside the multilib %r that flags.semantics selects: %s" % (self.multidir, ", ".join(stray)))
+        if bad:
+            raise BuildRed({"stage": "drv:" + self.root, "exit": None, "stderr": bad})
+        host = self.ext[pin["runtime"]["name"]]["host"]
+        objs = {p: {d["symbol"] for d in symbols(os.path.join(host, p), p)[0]} for p in raw["startfiles"] + raw["endfiles"]}
+        gone = sorted(set(onedef(objs, rootdef)) | set(entry_object(objs, ldcheck.script_entry(script_text))))
+        return {k: ([x for x in v if x not in gone] if k in ("startfiles", "endfiles") else v) for k, v in raw.items()}, gone
+
+    def ld_synthesised(self, rt, arch):
+        """The names the pinned ld defines itself for this link: the symbol table of the reference link's output (an empty product, same profile), minus every
+        name a start file or library member of the link defines. Read from the linker's output, never listed by hand; a reference link that fails gives
+        none (the record's finding names it)."""
+        try:
+            res = self.stage(self.ref_doc)[1]
+        except BuildRed as e:
+            self.ref_failure = e.args[0]
+            return set()
+        d = open(cas._obj(self.store, cas.manifest(res["outputs"]["/out"], self.store)["entries"]["ref.elf"]), "rb").read()
+        own = set().union(*(v[0] for v in rt.values()), *(a[1] for a in arch)) if (rt or arch) else set()
+        return {n for n, _, _, shndx, typ in ldcheck_syms(d, 2) if shndx != 0 and typ not in (3, 4)} - own
+
     def link_probe(self, ws):
         """Stage `drv:<root>`: the guest runtime's C++ driver (pin `runtime_driver`, inside the pinned runtime external) run with the guest semantic flags
         (the common set: the profile is one fact for every guest link, native and lifted alike) and `-###` on the link of a one-line C++ file, hermetic (the driver prints the commands it would run; none is run).
@@ -1847,6 +1986,8 @@ class Job:
                "env": dict(unitstage.ENV, PATH=os.path.dirname(drv)), "outputs": ["/out"],
                "inputs": sorted(tr["inputs"] + [{"at": "/probe", "tree": cas.ingest(pd, self.store)}], key=lambda i: i["at"])}
         res = self.stage(doc)[1]
+        md = self.stage(dict(doc, argv=[drv] + list(flags) + ["-print-multi-directory"], stage="mld:" + self.root))[1]   # the multilib directory the same flags select
+        self.multidir = open(cas._obj(self.store, cas.manifest(md["stdout"], self.store)), errors="replace").read().strip()
         return open(cas._obj(self.store, cas.manifest(res["stderr"], self.store)), errors="replace").read(), rt["at"]
 
     def archive_members(self, ent, name, out):
@@ -2327,9 +2468,28 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True):
               for f in ("ld.json", "ld.ids"):
                   shutil.copyfile(cas._obj(store, ent[f]), os.path.join(out, f))
                   res["ld_gate"][f] = {"path": os.path.abspath(os.path.join(out, f)), "sha256": ent[f]["h"]}
+              facts = j.elf_facts(ws, fin, elf_tree, groups)     # the link record: sections, defined symbols, definers (consumers never run readelf or nm)
+              fp = os.path.join(out, "elffacts.json")
+              with open(fp, "w") as fh:
+                  json.dump(facts, fh, indent=1, sort_keys=True)
+                  fh.write("\n")
+              res["elf_facts"] = {"path": os.path.abspath(fp), "sha256": hashlib.sha256(open(fp, "rb").read()).hexdigest()}
           except BuildRed as r:
             j.red.append(dict(r.args[0]))
-            res["failed_units"].append({"unit": j.rec["link"]["output"], "stage": r.args[0]["stage"], "exit": r.args[0].get("exit"), "stderr": list(r.args[0]["stderr"])[-20:]})
+            fu = {"unit": j.rec["link"]["output"], "stage": r.args[0]["stage"], "exit": r.args[0].get("exit"), "stderr": list(r.args[0]["stderr"])[-20:]}
+            if r.args[0]["stage"].startswith("ld:") and getattr(j, "linkfacts", None):
+                # the link record carries the full static undefined set (never ld's text: its status decides, its stderr is an attachment)
+                try:
+                    und = j.link_undefined(groups, loader_defs)
+                    fu["undefined"] = und
+                    if getattr(j, "ref_failure", None):
+                        fu["findings"] = ["reference link (names ld defines itself) failed at %s: %s" % (j.ref_failure["stage"], " | ".join(j.ref_failure["stderr"])[:300])]
+                    if not und and r.args[0].get("exit"):
+                        fu["findings"] = ["static closure disagrees with ld: ld exit %s with an empty static undefined set (the failure is not an undefined reference the symbol tables show)" % r.args[0]["exit"]]
+                except (OSError, ValueError, struct.error) as e:
+                    fu["findings"] = ["static undefined set not computed: %s" % e]
+                res["link_undefined"] = fu.get("undefined")
+            res["failed_units"].append(fu)
         for key in ("constants", "contract_names"):
             if j.rec.get(key):
                 shutil.copyfile(os.path.join(ws, "root", j.rec[key]), os.path.join(out, key + ".tsv"))
