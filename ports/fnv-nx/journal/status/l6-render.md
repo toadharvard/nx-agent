@@ -1003,3 +1003,21 @@ Paused: w3b, w4, farm; no other work.
         - The lead branch does not contain fa0f48e4f.
     - w5 and w6 are applying both fixes. The verify step is a background guest compile through recipe.py.
 - bottleneck: the guest compile result after the fixes, and L1 cand3 for the trunk (a5c8f427). 3 of 4 workers busy.
+
+## 2026-11-15 20:12Z
+- **w6 d9df55256:** toolchain/ and guest_compiler.json are taken whole from L2 a42ad8875, and the diff against a42ad8875 is empty.
+- **w6 93e63794b, item 622 done:** `nx_buf_mirror` now holds the B2 hazard rule. The draw path and nxd3d_preload both call it, and nx_buf_gpu_sync is called only from it. Not compiled yet; the guest build is blocked.
+- **620, my decision:** the LASTPIXEL fixme logs once per call, not once per process.
+    - The project's Wine rule fixes the log at one line per call.
+    - Wine 9.0 stateblock.c:2857-2866 is the cited source of the behaviour.
+- **619, a defect:** the cursor rule (P2) was written from memory.
+    - The new rule follows Wine 9.0 cs.c:649-700 and glsl_shader.c:13232-13279.
+        - Cursor texels with alpha != 0 are raw-copied into the back buffer before the present.
+        - The gamma ramp is then applied to the whole image.
+    - The old rule blended the cursor into the presented image after the gamma ramp.
+    - Who does what:
+        - w6: the ABI text and GL;
+        - L6A: deko3d.
+- **w5 ce670307c:** the Rule D guest test unit is written and unadmitted. It waits on the L4 harness.
+    - w5 is reverting the hand-listed hunk with a new commit, then cherry-picking 34a4a4b2a and taking toolchain/ whole from a42ad8875.
+- bottleneck: the guest compile after those fixes, and L1 cand3 for the trunk (a5c8f427). 3 of 4 workers busy.
