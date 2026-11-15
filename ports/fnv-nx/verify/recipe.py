@@ -179,7 +179,7 @@ LANG_X = {"c": "c", "cxx": "c++", "asm": "assembler-with-cpp"}   # the driver's 
 # diagnostics, defines, the language standard, the optimisation level (-O0..-O3, -Os, -Og: not -Ofast, which switches FP semantics), debug info,
 # section splitting. -Wa, -Wl, -Wp are driver pass-throughs, not warnings. `--param` with the compiler's own garbage-collector knobs
 # (ggc-min-expand, ggc-min-heapsize): they change when the compiler collects its memory, never the code it emits (the gcstress variant).
-PER_ROOT = re.compile(r"--param|ggc-min-(?:expand|heapsize)=[0-9]+|-W(?![alp],)[^\s]*|-D[^\s]+|-std=[^\s]+|-O[0-3sg]|-g[^\s]*|-ffunction-sections|-fdata-sections|-ftime-report")
+PER_ROOT = re.compile(r"--param|ggc-min-(?:expand|heapsize)=[0-9]+|-W(?![alp],)[^\s]*|-D[^\s]+|-std=[^\s]+|-O[0-3sg]|-g[^\s]*|-ffunction-sections|-fdata-sections|-ftime-report(?:-details)?")
 # The options of every link, fixed by the rule (RECIPE.md "Link"): the specs of the gcc driver for the ILP32 PIE multilib, no gc-sections, no id.
 AUX_FLAGS = ["-fstack-usage"]   # build --stack-usage 1: the CC stage also writes unit.su (documented: one line per function, its frame size and whether it is static); no code generation changes
 LD_FIXED = ["--build-id=none", "-pie", "--no-dynamic-linker", "-z", "text", "-z", "now", "-z", "pack-relative-relocs", "-z", "max-page-size=0x1000",
@@ -2643,6 +2643,7 @@ class Job:
             builds[k].rt = dict(builds[k].rt, inputs=sorted(builds[k].rt["inputs"] + ppin, key=lambda i: i["at"]))
             builds[k].variant = self.variant
             builds[k].compiler_key = self.compiler_key()
+            builds[k].pp_only = getattr(self, "pp_only", False)
             builds[k].cc_flags = list(self.aux)
             builds[k].hint_ns = self.root + ("@" + self.variant if self.variant else "")   # closure hints are per root (unitstage.hint_path)
             if k in pk:   # plugins are loaded by the CC stage only, never by preprocessing (guest roots: C and C++ units; host roots: C++ only)
@@ -2662,6 +2663,7 @@ class Job:
             except (sandbox.SbxError, unitstage.UnitError) as e:
                 return u, {"status": "cc-failed", "failure": {"stage": getattr(e, "stage", "cc:" + u), "exit": None, "stderr": [str(e)[-300:]]}}
         res, failed = {}, {}
+        self.prof = {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.jobs) as ex:
             for u, e in ex.map(one, units):   # every unit is judged, PP and CC alike: a failed unit never stops another
                 if e["status"] != "ok":
@@ -2673,10 +2675,15 @@ class Job:
                 self.run += (e.get("pp_status") == "run") + (e.get("cc_status") == "run")
                 self.hit += (e.get("pp_status") == "hit") + (e.get("cc_status") == "hit")
                 res[u] = e["object"]
+                if getattr(self, "prof_out", None):
+                    self.prof.setdefault(u, {k: e.get(k) for k in ("pp_seconds", "cc_seconds", "pp_status", "cc_status", "pp_key", "cc_key", "ii_bytes", "pp_iterations", "files")})
+                    json.dump(self.prof, open(self.prof_out, "w"), indent=1, sort_keys=True)   # rewritten per unit: a run that is stopped keeps what it measured
                 if e.get("pp_key"):
                     self.ppkeys[u] = e["pp_key"]
                 if e.get("du_key"):
                     self.dukeys[u] = e["du_key"]
+        if getattr(self, "prof_out", None):
+            json.dump(self.prof, open(self.prof_out, "w"), indent=1, sort_keys=True)
         self.failed = [{"unit": u, "stage": failed[u]["stage"], "exit": failed[u]["exit"], "stderr": list(failed[u]["stderr"])[-20:]} for u in units if u in failed]
         return res   # in unit order (UNITS is sorted), so the failures are deterministic
 
@@ -3304,7 +3311,7 @@ def host_compilers(rec, cache):
     return os.path.join(dest, c["cc"]), os.path.join(dest, c["cxx"])
 
 
-def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=None):
+def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=None, only=None, prof_out=None, pp_only=False):
     """Build product ROOT of the checkout REPO into STORE; write OUT/objects.json and the files it names. EXT: bare cache dir of
     externals (default STORE/external). SHARD: (i, N), build only the units of shard i (shard_of); root-level stages (tests, link, tables) do not run
     in a shard build, its objects.json says `shard`. -> the objects dict; raises RecipeError for an invalid recipe."""
@@ -3314,6 +3321,8 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=N
     j.shard = shard
     if shard:
         link = False
+    j.pp_only = pp_only
+    j.prof_out = prof_out   # --prof-out FILE (profiling): the per-unit PP/CC seconds of this run, written by compile()
     j.aux = list(aux or [])   # AUX_FLAGS the caller asked for: extra outputs of the CC stage (in its key), never a change of the code generated
     root = j.root
     with open(os.path.join(repo, j.roots[root]["recipe"])) as f:
@@ -3340,6 +3349,11 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=N
                 j.generate(ws)
                 j.run_all(ws)
                 units = sorted(set(units) | set(j.generated_sources(ws)))
+                if only:   # --units FILE (profiling): compile exactly the listed units (one per line); the stages, keys and flags are the root's own
+                    want = {l.strip() for l in open(only) if l.strip()}
+                    if want - set(units):
+                        raise RecipeError(["--units: not units of the root: %s" % ", ".join(sorted(want - set(units))[:5])])
+                    units = sorted(want)
             except BuildRed as r:   # the list of externally sourced units is itself not produced
                 j.red.append(dict(r.args[0]))
             objs = j.compile(ws, units + ([] if shard else sorted(test_units_of(j.rec))))
@@ -3612,10 +3626,10 @@ def main(argv):
             errs = check(rec, root, tracked(repo), roots, load_pin(repo), repo, _)
             print("\n".join(errs) or "recipe valid")
             return 2 if errs else 0
-        unknown = set(opt) - {"--root", "--store", "--out", "--jobs", "--ext", "--stack-usage", "--shard"}
+        unknown = set(opt) - {"--root", "--store", "--out", "--jobs", "--ext", "--stack-usage", "--shard", "--units", "--prof-out", "--prof-pp-only"}
         if unknown or opt.get("--stack-usage", "1") != "1":
             raise RecipeError(["unknown or bad option: %s" % ", ".join(sorted(unknown) or ["--stack-usage"])])
-        res = build(repo, opt["--root"], opt["--store"], opt["--out"], int(opt.get("--jobs", 4)), opt.get("--ext"), AUX_FLAGS if "--stack-usage" in opt else None, shard=shard_spec(opt["--shard"]) if "--shard" in opt else None)
+        res = build(repo, opt["--root"], opt["--store"], opt["--out"], int(opt.get("--jobs", 4)), opt.get("--ext"), AUX_FLAGS if "--stack-usage" in opt else None, shard=shard_spec(opt["--shard"]) if "--shard" in opt else None, only=opt.get("--units"), prof_out=opt.get("--prof-out"), pp_only="--prof-pp-only" in opt)
         print("%s: %d objects, stages run %d hit %d" % (res["status"], len(res["objects"]), res["stages"]["run"], res["stages"]["hit"]))
         if res["status"] == "red":
             print(json.dumps(res["failure"], indent=1))
