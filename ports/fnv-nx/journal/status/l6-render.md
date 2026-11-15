@@ -718,3 +718,8 @@ Paused: w3b, w4, farm; no other work.
     - Pages: SetRenderTarget and SetDepthStencilSurface: "depth ≥ RT", validated by the debug runtime only.
     - BeginPass4 size rule sent to L6A: any attachment sizes; render area = the intersection of the attachments (GL §9.4.2; wined3d).
     - Open part of ASM-628: sample mismatch and MSAA MRT. w1b cites the Wine 9.0 wined3d behaviour.
+- 01:12Z L6A dfe4b6a9 (D2): BeginPass4 intersection rule; start viewport and scissor from RT0 (depth-only: from depth).
+    - ASM-628 now covers only the sample-count clause.
+    - D3D9 Clear emits depth-only passes (copy_clear.cpp:31), so colorCount 0 stays.
+    - NxOp_Clear clears exactly its rect (R-C3, wined3d). gl4 must scissor the clear to the op's rect (GL 4.5 §17.4.3); L6A checks it.
+    - w6 base is now dfe4b6a9; it rewrites ASM-628 and the R-C4 comment.
