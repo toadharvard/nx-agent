@@ -1,4 +1,5 @@
 # id	contract_name	fact	source	kind	value
-# fact: no-network | time-zone | registry | no-galaxy (CLAUDE.md "The declared machine", "GOG Galaxy is not lifted"); source: win-doc:<documentation page or header path>:<function> | wine-9.0:<path>:<function> | galaxy-sdk:<page>:<function>; kind void|u32|u64|addr|u32nz<N> as in wine_fixme.tsv
+# fact: no-network | time-zone | registry | no-galaxy | single-process (CLAUDE.md "The declared machine", "GOG Galaxy is not lifted"); source: win-doc:<documentation page or header path>:<function> | wine-9.0:<path>:<function> | galaxy-sdk:<page>:<function>; kind void|u32|u64|addr|u32nz<N> as in wine_fixme.tsv
 # rows come from the platform owner (L5) with the body that cites them; see VERDICT.md "Declared-machine bodies"
 # registry rows are never written by hand: the L5 tool derives them from the static Reg* reads of the exe and modules; hand-written rows are machine facts only (no-network, time-zone) with their source
+1	TerminateProcess	single-process	win-doc:MSDN TerminateProcess function (processthreadsapi.h) Return value / GetLastError: an invalid handle fails with ERROR_INVALID_HANDLE; wine-9.0:dlls/ntdll/unix/process.c:NtTerminateProcess: an invalid handle returns STATUS_INVALID_HANDLE (ERROR_INVALID_HANDLE); the declared machine runs one process, so every handle but the pseudo handle of the process is invalid	u32	0

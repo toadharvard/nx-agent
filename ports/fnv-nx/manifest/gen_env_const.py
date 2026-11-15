@@ -17,7 +17,7 @@ environment of ENV_TRUTH.md, the function returns `value`. Columns (TAB separate
 Declared-machine citation (verify/VERDICT.md "Declared-machine bodies"): the table verify/declared_machine.tsv (default: next to this
 tree, ../verify/declared_machine.tsv; rows `id contract_name fact source kind value`) is read; a symbol that has a row there (contract_name ==
 symbol) gets `FNVNX_CITE(<symbol>, "<id>");` after its body (hostabi/include/fnvnx/cite.h: one record in the non-alloc section .fnvnx.cite, no call), and its row's kind/value must equal the row's constant; the symbol must have C linkage (the record names the assembler symbol)
-(false, NULL and 0 are 0). A value `identity:<k>` means the function returns its argument k unchanged (body `return <name of parameter k>;`, the parameter named in the params column). One rule for every row: no list of functions here.
+(false, NULL and 0 are 0). A row whose symbol has no body in this table is cited by a hand-written body (FNVNX_CITE there); the gate matches rows to records. A value `identity:<k>` means the function returns its argument k unchanged (body `return <name of parameter k>;`, the parameter named in the params column). One rule for every row: no list of functions here.
 Checks, each an error: a row without a source of one of the two forms, an empty value, a void return, a symbol
 given twice for one file, a column count other than 8. The output is a pure function of the table (rows in table order).
 --probe writes the probe form instead (the recipe's `probe` stage compiles the includer with it): the same bodies, and after them one record per row
@@ -145,9 +145,6 @@ def main(argv):
         out.append("/* %s */\n%s%s %s(%s)%s\n{\n    return %s;\n}\n%s" % (
             row["source"], head, row["ret"], row["symbol"], row["params"], quals, row["value"], cite))
         consts.append(RECORD % {"n": n, "ret": row["ret"], "value": row["value"]})
-    if only is None:
-        for sym in sorted(set(decl) - used):
-            errors.append("declared_machine.tsv row %s has no body in this table" % sym)
     if errors:
         for e in errors:
             sys.stderr.write("env_const: %s\n" % e)
