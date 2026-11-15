@@ -730,3 +730,10 @@ Paused: w3b, w4, farm; no other work.
     - w1b (doing): Wine 9.0 table (ASM-628 rest); sm_cases derivation; reader conversion and deletes; header items.
     - w5 (doing): sm_link on the current translator, nx_pair_variant, gates.d/sm_link.json with a hermetic sharded stage.
 - 09:13Z L6A: gl4_op_clear (gl4_pass.c:112-128) already clears exactly the op's rect, intersected with the attachments (scissor set, then restored). No defect. The nxgpu4.h Clear comment will state the rect semantics.
+- 09:16Z w1b Wine 9.0 table. Mirror: tools/wine-9.0-d3d9 4fdd8dda (wine-9.0 fd115355, tree 3f64af79…).
+    - Depth MS mismatch or depth < RT0: Wine unbinds depth at draw and warns (context_gl.c 654-672); the calls return D3D_OK.
+    - Colour sizes: not checked (GL intersection).
+    - SetRenderTarget(0) resets the viewport and scissor to RT0's size (device.c 2174-2189).
+    - Quality levels: 1 for every maskable type.
+    - Rule D (depth compatibility at draw, Wine-cited) goes to w6. Its effect: BeginPass4's sample-count precondition always holds for d3d9 depth.
+    - Open (f): Wine's behaviour on an incomplete FBO (colour MS mismatch). ASM-628 is deleted after (f).
