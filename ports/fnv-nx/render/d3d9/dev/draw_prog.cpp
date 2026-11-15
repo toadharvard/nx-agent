@@ -3,13 +3,14 @@
 //  P1 vertex inputs: the declared inputs of the VS (v<n> with their dcl (usage, index)); vs_1_x has no dcl: v<n> = the usage of the Shader Model 1 register table (v0 POSITION, v1 BLENDWEIGHT, v2 BLENDINDICES,
 //     v3 NORMAL, v4 PSIZE, v5 COLOR0, v6 COLOR1, v7-v14 TEXCOORD0-7, v15 POSITION1: mojoshader.c shader_model_1_input_usage, which the translator uses). Location of input k = fnvnx_dk_assign(ATTRIB) over the set.
 //  P2 L = the varying link set of the pair: (VS outputs without POSITION0 / PSIZE0) U (PS inputs), empty when every pair is canonical (fnvnx_dk_varying_location >= 0), else the set ascending (shcache_link_set).
-//  P3 variant bit 0 = fnvnx_dk_vs_needs_complete(VS written = declared outputs without POSITION0 / PSIZE0 plus FOG0, PS read = declared inputs plus FOG0 for ps < 3.0). A fixed-function VS is complete by construction
+//  P3 the variant is the translator's key flags (fnvnx_shaders.h): FNVNX_SHADER_VS_COMPLETE iff fnvnx_dk_vs_needs_complete(VS written = declared outputs without POSITION0 / PSIZE0 plus FOG0, PS read = declared inputs plus FOG0 for ps < 3.0). A fixed-function VS is complete by construction
 //     (draw_ffp.h): variant 0 and no pair of its own. A PS stage has variant 0.
 //  P4 a backend shader id is made at the first draw that needs the (shader, variant, L) and cached on the shader object (NxShaderCore::progs); it is destroyed with the object (nxd3d_shader_ids_destroy).
 //     A 0 from the backend = D3DERR_DRIVERINTERNALERROR (a backend defect, never a skipped draw); no backend memory for the bytecode copy = D3DERR_OUTOFVIDEOMEMORY (glue_stream.h exhaustion rules: the result of the call, nothing recorded).
 #include "draw_core.h"
 #include "../gen/d9impl.gen.h"
 #include "ffp_dev.h"
+#include "fnvnx_shaders.h"
 #include <string.h>
 
 bool nx_vs_sig(const NxSmIface& i, NxVsSig* out) {
@@ -42,7 +43,8 @@ int nx_pair_variant(const uint8_t* vs_pairs, uint32_t nv, uint8_t ps_major, cons
     bool fog = false; for (uint32_t i = 0; i < nvw; i++) fog |= vw[i] == FNVNX_DK_PAIR(FNVNX_USAGE_FOG, 0); if (!fog) vw[nvw++] = FNVNX_DK_PAIR(FNVNX_USAGE_FOG, 0);
     memcpy(pr, ps_pairs, np); npr = np;
     if (ps_major < 3) { fog = false; for (uint32_t i = 0; i < npr; i++) fog |= pr[i] == FNVNX_DK_PAIR(FNVNX_USAGE_FOG, 0); if (!fog) pr[npr++] = FNVNX_DK_PAIR(FNVNX_USAGE_FOG, 0); }
-    *vs_variant = (uint32_t)fnvnx_dk_vs_needs_complete(vw, (int)nvw, pr, (int)npr) | flat << 1; *ps_variant = flat << 1;
+    *vs_variant = (fnvnx_dk_vs_needs_complete(vw, (int)nvw, pr, (int)npr) ? (uint32_t)FNVNX_SHADER_VS_COMPLETE : 0u) | (flat ? (uint32_t)FNVNX_SHADER_FLAT_COLOR : 0u);
+    *ps_variant = flat ? (uint32_t)FNVNX_SHADER_FLAT_COLOR : 0u;
     return nx_link_set(vs_pairs, nv, ps_pairs, np, l, nl);
 }
 static uint32_t shader_prog(NxShaderCore* s, uint32_t stage, uint32_t variant, const uint8_t* l, uint32_t nl, HRESULT* hr) {
@@ -84,7 +86,7 @@ HRESULT nx_prog_resolve(NxDeviceCore* d, NxProg* p) {
         npi = p->fp.n_in > 31 ? 31 : p->fp.n_in; memcpy(pin, p->fp.in_pair, npi);
     }
     HRESULT hr = D3D_OK;
-    // D3DRS_SHADEMODE FLAT (Wine 9.0 state_shademode): both translated stages take the same variant bit 1 (the COLOR varyings are `flat`), from the one latch rule of the FFP
+    // D3DRS_SHADEMODE FLAT (Wine 9.0 state_shademode): both translated stages take the same FNVNX_SHADER_FLAT_COLOR (the COLOR varyings are `flat`), from the one latch rule of the FFP
     // programs (nx_ffp_flat), so the two stages of a pair, and a translated stage against an FFP one, always agree on the qualifier.
     uint32_t flat = 0; if ((vsc || psc) && !nx_ffp_flat(d, &flat)) return D3DERR_OUTOFVIDEOMEMORY;
     uint32_t vvar, pvar;   // the pair's selection, one pure function (nx_pair_variant): the link set, the VS variant and the PS variant
