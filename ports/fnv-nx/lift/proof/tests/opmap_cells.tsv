@@ -1,0 +1,579 @@
+one	00	-	2994	Eb, Gb
+one	01	-	2994	Ev, Gv
+one	02	-	2994	Gb, Eb
+one	03	-	2994	Gv, Ev
+one	04	-	2994	AL, Ib
+one	05	-	2994	rAX, Iz
+one	06	-	2994	PUSH | ESi64
+one	07	-	2994	POP | ESi64
+one	08	-	2995	OR | Eb, Gb Ev, Gv Gb, Eb Gv, Ev AL, Ib rAX, Iz
+one	0E	-	2995	PUSH | CSi64
+one	0F	-	2995	2-byte | escape | (Table A-3)
+one	10	-	2994	Eb, Gb
+one	11	-	2994	Ev, Gv
+one	12	-	2994	Gb, Eb
+one	13	-	2994	Gv, Ev
+one	14	-	2994	AL, Ib
+one	15	-	2994	rAX, Iz
+one	16	-	2994	PUSH | SSi64
+one	17	-	2994	POP | SSi64
+one	18	-	2995	SBB | Eb, Gb Ev, Gv Gb, Eb Gv, Ev AL, Ib rAX, Iz
+one	1E	-	2995	PUSH | DSi64
+one	1F	-	2995	POP | DSi64
+one	20	-	2994	Eb, Gb
+one	21	-	2994	Ev, Gv
+one	22	-	2994	Gb, Eb
+one	23	-	2994	Gv, Ev
+one	24	-	2994	AL, Ib
+one	25	-	2994	rAX, Iz
+one	26	-	2994	SEG=ES | (Prefix)
+one	27	-	2994	DAAi64
+one	28	-	2995	SUB | Eb, Gb Ev, Gv Gb, Eb Gv, Ev AL, Ib rAX, Iz
+one	2E	-	2995	SEG=CS | (Prefix)
+one	2F	-	2995	DASi64
+one	30	-	2994	Eb, Gb
+one	31	-	2994	Ev, Gv
+one	32	-	2994	Gb, Eb
+one	33	-	2994	Gv, Ev
+one	34	-	2994	AL, Ib
+one	35	-	2994	rAX, Iz
+one	36	-	2994	SEG=SS | (Prefix)
+one	37	-	2994	AAAi64
+one	38	-	2995	CMP | Eb, Gb Ev, Gv Gb, Eb Gv, Ev AL, Ib rAX, Iz
+one	3E	-	2995	SEG=DS | (Prefix)
+one	3F	-	2995	AASi64
+one	40	-	2994	eAX | REX
+one	41	-	2994	eCX | REX.B
+one	42	-	2994	eDX | REX.X
+one	43	-	2994	eBX | REX.XB
+one	44	-	2994	eSP | REX.R
+one	45	-	2994	eBP | REX.RB
+one	46	-	2994	eSI | REX.RX
+one	47	-	2994	eDI | REX.RXB
+one	48	-	2995	DECi64 general register / REXo64 Prefixes | eAX eCX eDX eBX eSP eBP eSI eDI | REX.W REX.WB REX.WX REX.WXB REX.WR REX.WRB REX.WRX REX.WRXB
+one	50	-	2994	rAX/r8
+one	51	-	2994	rCX/r9
+one	52	-	2994	rDX/r10
+one	53	-	2994	rBX/r11
+one	54	-	2994	rSP/r12
+one	55	-	2994	rBP/r13
+one	56	-	2994	rSI/r14
+one	57	-	2994	rDI/r15
+one	58	-	2995	POPd64 into general register | rAX/r8 rCX/r9 rDX/r10 rBX/r11 rSP/r12 rBP/r13 rSI/r14 rDI/r15
+one	60	-	2994	PUSHAi64/ | PUSHADi64
+one	61	-	2994	POPAi64/ | POPADi64
+one	62	-	2994	BOUNDi64 | Gv, Ma
+one	63	-	2994	ARPLi64 | Ew, Gw | MOVSXDo64 | Gv, Ev
+one	64	-	2994	SEG=FS | (Prefix)
+one	65	-	2994	SEG=GS | (Prefix)
+one	66	-	2994	Operand | Size | (Prefix)
+one	67	-	2994	Address | Size | (Prefix)
+one	68	-	2995	PUSHd64 | Iz
+one	69	-	2995	IMUL | Gv, Ev, Iz
+one	6A	-	2995	PUSHd64 | Ib
+one	6B	-	2995	IMUL | Gv, Ev, Ib
+one	6C	-	2995	INS/ | INSB | Yb, DX
+one	6D	-	2995	INS/ | INSW/ | INSD | Yz, DX
+one	6E	-	2995	OUTS/ | OUTSB | DX, Xb
+one	6F	-	2995	OUTS/ | OUTSW/ | OUTSD | DX, Xz
+one	70	-	2994	O
+one	71	-	2994	NO
+one	72	-	2994	B/NAE/C
+one	73	-	2994	NB/AE/NC
+one	74	-	2994	Z/E
+one	75	-	2994	NZ/NE
+one	76	-	2994	BE/NA
+one	77	-	2994	NBE/A
+one	78	-	2995	Jccf64, Jb- Short displacement jump on condition | S NS P/PE NP/PO L/NGE NL/GE LE/NG NLE/G
+one	80	-	2994	Eb, Ib
+one	81	-	2994	Ev, Iz
+one	82	-	2994	Eb, Ibi64
+one	83	-	2994	Ev, Ib
+one	84	-	2994	Eb, Gb
+one	85	-	2994	Ev, Gv
+one	86	-	2994	Eb, Gb
+one	87	-	2994	Ev, Gv
+one	88	-	2995	MOV | Eb, Gb Ev, Gv Gb, Eb Gv, Ev
+one	8C	-	2995	MOV | Ev, Sw
+one	8D	-	2995	LEA | Gv, M
+one	8E	-	2995	MOV | Sw, Ew
+one	8F	-	2995	Grp 1A1A POPd64 | Ev
+one	90	-	2994	NOP | PAUSE(F3) | XCHG r8, rAX
+one	91	-	2994	rCX/r9
+one	92	-	2994	rDX/r10
+one	93	-	2994	rBX/r11
+one	94	-	2994	rSP/r12
+one	95	-	2994	rBP/r13
+one	96	-	2994	rSI/r14
+one	97	-	2994	rDI/r15
+one	98	-	2995	CBW/ | CWDE/ | CDQE
+one	99	-	2995	CWD/ | CDQ/ | CQO
+one	9A	-	2995	far CALLi64 | Ap
+one	9B	-	2995	FWAIT/ | WAIT
+one	9C	-	2995	PUSHF/D/Q d64/ | Fv
+one	9D	-	2995	POPF/D/Q d64/ | Fv
+one	9E	-	2995	SAHF
+one	9F	-	2995	LAHF
+one	A0	-	2994	AL, Ob
+one	A1	-	2994	rAX, Ov
+one	A2	-	2994	Ob, AL
+one	A3	-	2994	Ov, rAX
+one	A4	-	2994	MOVS/B | Yb, Xb
+one	A5	-	2994	MOVS/W/D/Q | Yv, Xv
+one	A6	-	2994	CMPS/B | Xb, Yb
+one	A7	-	2994	CMPS/W/D/Q | Xv, Yv
+one	A8	-	2995	TEST | AL, Ib rAX, Iz
+one	AA	-	2995	STOS/B | Yb, AL
+one	AB	-	2995	STOS/W/D/Q | Yv, rAX
+one	AC	-	2995	LODS/B | AL, Xb
+one	AD	-	2995	LODS/W/D/Q | rAX, Xv
+one	AE	-	2995	SCAS/B | AL, Yb
+one	AF	-	2995	SCAS/W/D/Q | rAX, Yv
+one	B0	-	2994	AL/R8B, Ib
+one	B1	-	2994	CL/R9B, Ib
+one	B2	-	2994	DL/R10B, Ib
+one	B3	-	2994	BL/R11B, Ib
+one	B4	-	2994	AH/R12B, Ib
+one	B5	-	2994	CH/R13B, Ib
+one	B6	-	2994	DH/R14B, Ib
+one	B7	-	2994	BH/R15B, Ib
+one	B8	-	2995	MOV immediate word or double into word, double, or quad register | rAX/r8, Iv rCX/r9, Iv rDX/r10, Iv rBX/r11, Iv rSP/r12, Iv rBP/r13, Iv rSI/r14, Iv rDI/r15 , Iv
+one	C0	-	2994	Eb, Ib
+one	C1	-	2994	Ev, Ib
+one	C2	-	2994	near RETf64 | Iw
+one	C3	-	2994	near RETf64
+one	C4	-	2994	LESi64 | Gz, Mp | VEX+2byte
+one	C5	-	2994	LDSi64 | Gz, Mp | VEX+1byte
+one	C6	-	2994	Eb, Ib
+one	C7	-	2994	Ev, Iz
+one	C8	-	2995	ENTER | Iw, Ib
+one	C9	-	2995	LEAVEd64
+one	CA	-	2995	far RET | Iw
+one	CB	-	2995	far RET
+one	CC	-	2995	INT3
+one	CD	-	2995	INT | Ib
+one	CE	-	2995	INTOi64
+one	CF	-	2995	IRET/D/Q
+one	D0	-	2994	Eb, 1
+one	D1	-	2994	Ev, 1
+one	D2	-	2994	Eb, CL
+one	D3	-	2994	Ev, CL
+one	D4	-	2994	AAMi64 | Ib
+one	D5	-	2994	AADi64 | Ib
+one	D6	-	2994	SALCi64 | UDBo64,1B
+one	D7	-	2994	XLAT/ | XLATB
+one	D8	-	2995	ESC (Escape to coprocessor instruction set)
+one	E0	-	2994	LOOPNEf64/ | LOOPNZf64 | Jb
+one	E1	-	2994	LOOPEf64/ | LOOPZf64 | Jb
+one	E2	-	2994	LOOPf64 | Jb
+one	E3	-	2994	JrCXZf64/ | Jb
+one	E4	-	2994	AL, Ib
+one	E5	-	2994	eAX, Ib
+one	E6	-	2994	Ib, AL
+one	E7	-	2994	Ib, eAX
+one	E8	-	2995	near CALLf64 | Jz
+one	E9	-	2995	JMP | nearf64 fari64 shortf64 | Jz Ap Jb
+one	EC	-	2995	IN | AL, DX eAX, DX
+one	EE	-	2995	OUT | DX, AL DX, eAX
+one	F0	-	2994	LOCK | (Prefix)
+one	F1	-	2994	INT1
+one	F2	-	2994	REPNE | XACQUIRE | (Prefix)
+one	F3	-	2994	REP/REPE | XRELEASE | (Prefix)
+one	F4	-	2994	HLT
+one	F5	-	2994	CMC
+one	F6	-	2994	Eb
+one	F7	-	2994	Ev
+one	F8	-	2995	CLC
+one	F9	-	2995	STC
+one	FA	-	2995	CLI
+one	FB	-	2995	STI
+one	FC	-	2995	CLD
+one	FD	-	2995	STD
+one	FE	-	2995	Grp 41A
+one	FF	-	2995	Grp 51A
+two	00	-	2996	Grp 61A
+two	01	-	2996	Grp 71A
+two	02	-	2996	LAR | Gv, Ew
+two	03	-	2996	LSL | Gv, Ew
+two	05	-	2996	SYSCALLo64
+two	06	-	2996	CLTS
+two	07	-	2996	SYSRETo64
+two	08	-	2996	INVD
+two	09	-	2996	WBINVD
+two	09	F3	2996	WBNOINVD
+two	0B	-	2996	2-byte Illegal | Opcodes | UD21B
+two	0D	-	2996	prefetchw(/1) | Ev
+two	10	-	2996	vmovups | Vps, Wps
+two	10	66	2996	vmovupd | Vpd, Wpd
+two	10	F2	2996	vmovsd | Vx, Hx, Wsd
+two	10	F3	2996	vmovss | Vx, Hx, Wss
+two	11	-	2996	vmovups | Wps, Vps
+two	11	66	2996	vmovupd | Wpd,Vpd
+two	11	F2	2996	vmovsd | Wsd, Hx, Vsd
+two	11	F3	2996	vmovss | Wss, Hx, Vss
+two	12	-	2996	vmovlps | Vq, Hq, Mq | vmovhlps | Vq, Hq, Uq
+two	12	66	2996	vmovlpd | Vq, Hq, Mq
+two	12	F2	2996	vmovddup | Vx, Wx
+two	12	F3	2996	vmovsldup | Vx, Wx
+two	13	-	2996	vmovlps | Mq, Vq
+two	13	66	2996	vmovlpd | Mq, Vq
+two	14	-	2996	vunpcklps | Vx, Hx, Wx
+two	14	66	2996	vunpcklpd | Vx,Hx,Wx
+two	15	-	2996	vunpckhps | Vx, Hx, Wx
+two	15	66	2996	vunpckhpd | Vx,Hx,Wx
+two	16	-	2996	vmovhpsv1 | Vdq, Hq, Mq | vmovlhps | Vdq, Hq, Uq
+two	16	66	2996	vmovhpdv1 | Vdq, Hq, Mq
+two	16	F3	2996	vmovshdup | Vx, Wx
+two	17	-	2996	vmovhpsv1 | Mq, Vq
+two	17	66	2996	vmovhpdv1 | Mq, Vq
+two	18	-	2996	Prefetch1C | (Grp 161A)
+two	19	-	2996	Reserved-NOP
+two	1A	-	2996	bndldx
+two	1A	66	2996	bndmov
+two	1A	F2	2996	bndcu
+two	1A	F3	2996	bndcl
+two	1B	-	2996	bndstx
+two	1B	66	2996	bndmov
+two	1B	F2	2996	bndcn
+two	1B	F3	2996	bndmk
+two	1C	-	2996	(Grp 181A)
+two	1D	-	2996	Reserved-NOP
+two	1F	-	2996	NOP /0 Ev
+two	20	-	2996	MOV | Rd, Cd
+two	21	-	2996	MOV | Rd, Dd
+two	22	-	2996	MOV | Cd, Rd
+two	23	-	2996	MOV | Dd, Rd
+two	28	-	2997	vmovaps | Vps, Wps
+two	28	66	2997	vmovapd | Vpd, Wpd
+two	29	-	2997	vmovaps | Wps, Vps
+two	29	66	2997	vmovapd | Wpd,Vpd
+two	2A	-	2997	cvtpi2ps | Vps, Qpi
+two	2A	66	2997	cvtpi2pd | Vpd, Qpi
+two	2A	F2	2997	vcvtsi2sd | Vsd, Hsd, Ey
+two	2A	F3	2997	vcvtsi2ss | Vss, Hss, Ey
+two	2B	-	2997	vmovntps | Mps, Vps
+two	2B	66	2997	vmovntpd | Mpd, Vpd
+two	2C	-	2997	cvttps2pi | Ppi, Wps
+two	2C	66	2997	cvttpd2pi | Ppi, Wpd
+two	2C	F2	2997	vcvttsd2si | Gy, Wsd
+two	2C	F3	2997	vcvttss2si | Gy, Wss
+two	2D	-	2997	cvtps2pi | Ppi, Wps
+two	2D	66	2997	cvtpd2pi | Qpi, Wpd
+two	2D	F2	2997	vcvtsd2si | Gy, Wsd
+two	2D	F3	2997	vcvtss2si | Gy, Wss
+two	2E	-	2997	vucomiss | Vss, Wss
+two	2E	66	2997	vucomisd | Vsd, Wsd
+two	2F	-	2997	vcomiss | Vss, Wss
+two	2F	66	2997	vcomisd | Vsd, Wsd
+two	30	-	2996	WRMSR
+two	31	-	2996	RDTSC
+two	32	-	2996	RDMSR
+two	33	-	2996	RDPMC
+two	34	-	2996	SYSENTER
+two	35	-	2996	SYSEXIT
+two	37	-	2996	GETSEC
+two	38	-	2997	3-byte escape | (Table A-4)
+two	3A	-	2997	3-byte escape | (Table A-5)
+two	40	-	2996	CMOVcc, (Gv, Ev) - Conditional Move | O NO B/C/NAE AE/NB/NC E/Z NE/NZ BE/NA A/NBE
+two	48	-	2997	CMOVcc(Gv, Ev) - Conditional Move | S NS P/PE NP/PO L/NGE NL/GE LE/NG NLE/G
+two	50	-	2996	vmovmskps | Gy, Ups
+two	50	66	2996	vmovmskpd | Gy,Upd
+two	51	-	2996	vsqrtps | Vps, Wps
+two	51	66	2996	vsqrtpd | Vpd, Wpd
+two	51	F2	2996	vsqrtsd | Vsd, Hsd, Wsd
+two	51	F3	2996	vsqrtss | Vss, Hss, Wss
+two	52	-	2996	vrsqrtps | Vps, Wps
+two	52	F3	2996	vrsqrtss | Vss, Hss, Wss
+two	53	-	2996	vrcpps | Vps, Wps
+two	53	F3	2996	vrcpss | Vss, Hss, Wss
+two	54	-	2996	vandps | Vps, Hps, Wps
+two	54	66	2996	vandpd | Vpd, Hpd, Wpd
+two	55	-	2996	vandnps | Vps, Hps, Wps
+two	55	66	2996	vandnpd | Vpd, Hpd, Wpd
+two	56	-	2996	vorps | Vps, Hps, Wps
+two	56	66	2996	vorpd | Vpd, Hpd, Wpd
+two	57	-	2996	vxorps | Vps, Hps, Wps
+two	57	66	2996	vxorpd | Vpd, Hpd, Wpd
+two	58	-	2997	vaddps | Vps, Hps, Wps
+two	58	66	2997	vaddpd | Vpd, Hpd, Wpd
+two	58	F2	2997	vaddsd | Vsd, Hsd, Wsd
+two	58	F3	2997	vaddss | Vss, Hss, Wss
+two	59	-	2997	vmulps | Vps, Hps, Wps
+two	59	66	2997	vmulpd | Vpd, Hpd, Wpd
+two	59	F2	2997	vmulsd | Vsd, Hsd, Wsd
+two	59	F3	2997	vmulss | Vss, Hss, Wss
+two	5A	-	2997	vcvtps2pd | Vpd, Wps
+two	5A	66	2997	vcvtpd2ps | Vps, Wpd
+two	5A	F2	2997	vcvtsd2ss | Vss, Hx, Wsd
+two	5A	F3	2997	vcvtss2sd | Vsd, Hx, Wss
+two	5B	-	2997	vcvtdq2ps | Vps, Wdq
+two	5B	66	2997	vcvtps2dq | Vdq, Wps
+two	5B	F3	2997	vcvttps2dq | Vdq, Wps
+two	5C	-	2997	vsubps | Vps, Hps, Wps
+two	5C	66	2997	vsubpd | Vpd, Hpd, Wpd
+two	5C	F2	2997	vsubsd | Vsd, Hsd, Wsd
+two	5C	F3	2997	vsubss | Vss, Hss, Wss
+two	5D	-	2997	vminps | Vps, Hps, Wps
+two	5D	66	2997	vminpd | Vpd, Hpd, Wpd
+two	5D	F2	2997	vminsd | Vsd, Hsd, Wsd
+two	5D	F3	2997	vminss | Vss, Hss, Wss
+two	5E	-	2997	vdivps | Vps, Hps, Wps
+two	5E	66	2997	vdivpd | Vpd, Hpd, Wpd
+two	5E	F2	2997	vdivsd | Vsd, Hsd, Wsd
+two	5E	F3	2997	vdivss | Vss, Hss, Wss
+two	5F	-	2997	vmaxps | Vps, Hps, Wps
+two	5F	66	2997	vmaxpd | Vpd, Hpd, Wpd
+two	5F	F2	2997	vmaxsd | Vsd, Hsd, Wsd
+two	5F	F3	2997	vmaxss | Vss, Hss, Wss
+two	60	-	2996	punpcklbw | Pq, Qd
+two	60	66	2996	vpunpcklbw | Vx, Hx, Wx
+two	61	-	2996	punpcklwd | Pq, Qd
+two	61	66	2996	vpunpcklwd | Vx, Hx, Wx
+two	62	-	2996	punpckldq | Pq, Qd
+two	62	66	2996	vpunpckldq | Vx, Hx, Wx
+two	63	-	2996	packsswb | Pq, Qq
+two	63	66	2996	vpacksswb | Vx, Hx, Wx
+two	64	-	2996	pcmpgtb | Pq, Qq
+two	64	66	2996	vpcmpgtb | Vx, Hx, Wx
+two	65	-	2996	pcmpgtw | Pq, Qq
+two	65	66	2996	vpcmpgtw | Vx, Hx, Wx
+two	66	-	2996	pcmpgtd | Pq, Qq
+two	66	66	2996	vpcmpgtd | Vx, Hx, Wx
+two	67	-	2996	packuswb | Pq, Qq
+two	67	66	2996	vpackuswb | Vx, Hx, Wx
+two	68	-	2997	punpckhbw | Pq, Qd
+two	68	66	2997	vpunpckhbw | Vx, Hx, Wx
+two	69	-	2997	punpckhwd | Pq, Qd
+two	69	66	2997	vpunpckhwd | Vx, Hx, Wx
+two	6A	-	2997	punpckhdq | Pq, Qd
+two	6A	66	2997	vpunpckhdq | Vx, Hx, Wx
+two	6B	-	2997	packssdw | Pq, Qd
+two	6B	66	2997	vpackssdw | Vx, Hx, Wx
+two	6C	66	2997	vpunpcklqdq | Vx, Hx, Wx
+two	6D	66	2997	vpunpckhqdq | Vx, Hx, Wx
+two	6E	-	2997	movd/q | Pd, Ey
+two	6E	66	2997	vmovd/q | Vy, Ey
+two	6F	-	2997	movq | Pq, Qq
+two	6F	66	2997	vmovdqa | Vx, Wx
+two	6F	F3	2997	vmovdqu | Vx, Wx
+two	70	-	2996	pshufw | Pq, Qq, Ib
+two	70	66	2996	vpshufd | Vx, Wx, Ib
+two	70	F2	2996	vpshuflw | Vx, Wx, Ib
+two	70	F3	2996	vpshufhw | Vx, Wx, Ib
+two	71	-	2996	(Grp 121A)
+two	72	-	2996	(Grp 131A)
+two	73	-	2996	(Grp 141A)
+two	74	-	2996	pcmpeqb | Pq, Qq
+two	74	66	2996	vpcmpeqb | Vx, Hx, Wx
+two	75	-	2996	pcmpeqw | Pq, Qq
+two	75	66	2996	vpcmpeqw | Vx, Hx, Wx
+two	76	-	2996	pcmpeqd | Pq, Qq
+two	76	66	2996	vpcmpeqd | Vx, Hx, Wx
+two	77	-	2996	emms | vzeroupperv | vzeroallv
+two	78	-	2997	VMREAD | Ey, Gy
+two	79	-	2997	VMWRITE | Gy, Ey
+two	7C	66	2997	vhaddpd | Vpd, Hpd, Wpd
+two	7C	F2	2997	vhaddps | Vps, Hps, Wps
+two	7D	66	2997	vhsubpd | Vpd, Hpd, Wpd
+two	7D	F2	2997	vhsubps | Vps, Hps, Wps
+two	7E	-	2997	movd/q | Ey, Pd
+two	7E	66	2997	vmovd/q | Ey, Vy
+two	7E	F3	2997	vmovq | Vq, Wq
+two	7F	-	2997	movq | Qq, Pq
+two	7F	66	2997	vmovdqa | Wx,Vx
+two	7F	F3	2997	vmovdqu | Wx,Vx
+two	80	-	2998	Jccf64, Jz - Long-displacement jump on condition | O NO B/CNAE AE/NB/NC E/Z NE/NZ BE/NA A/NBE
+two	88	-	2999	Jccf64, Jz - Long-displacement jump on condition | S NS P/PE NP/PO L/NGE NL/GE LE/NG NLE/G
+two	90	-	2998	SETcc, Eb - Byte Set on condition | O NO B/C/NAE AE/NB/NC E/Z NE/NZ BE/NA A/NBE
+two	98	-	2999	SETcc, Eb - Byte Set on condition | S NS P/PE NP/PO L/NGE NL/GE LE/NG NLE/G
+two	A0	-	2998	PUSHd64 | FS
+two	A1	-	2998	POPd64 | FS
+two	A2	-	2998	CPUID
+two	A3	-	2998	BT | Ev, Gv
+two	A4	-	2998	SHLD | Ev, Gv, Ib
+two	A5	-	2998	SHLD | Ev, Gv, CL
+two	A8	-	2999	PUSHd64 | GS
+two	A9	-	2999	POPd64 | GS
+two	AA	-	2999	RSM
+two	AB	-	2999	BTS | Ev, Gv
+two	AC	-	2999	SHRD | Ev, Gv, Ib
+two	AD	-	2999	SHRD | Ev, Gv, CL
+two	AE	-	2999	(Grp 151A)1C
+two	AF	-	2999	IMUL | Gv, Ev
+two	B0	-	2998	CMPXCHG | Eb, Gb Ev, Gv
+two	B2	-	2998	LSS | Gv, Mp
+two	B3	-	2998	BTR | Ev, Gv
+two	B4	-	2998	LFS | Gv, Mp
+two	B5	-	2998	LGS | Gv, Mp
+two	B6	-	2998	MOVZX | Gv, Eb Gv, Ew
+two	B8	-	2999	JMPE | (reserved for | emulator on IPF)
+two	B8	F3	2999	POPCNT | Gv, Ev
+two	B9	-	2999	Grp 101A | Invalid Opcode1B
+two	BA	-	2999	Grp 81A | Ev, Ib
+two	BB	-	2999	BTC | Ev, Gv
+two	BC	-	2999	BSF | Gv, Ev
+two	BC	F3	2999	TZCNT | Gv, Ev
+two	BD	-	2999	BSR | Gv, Ev
+two	BD	F3	2999	LZCNT | Gv, Ev
+two	BE	-	2999	MOVSX | Gv, Eb Gv, Ew
+two	C0	-	2998	XADD | Eb, Gb
+two	C1	-	2998	XADD | Ev, Gv
+two	C2	-	2998	vcmpps | Vps,Hps,Wps,Ib
+two	C2	66	2998	vcmppd | Vpd,Hpd,Wpd,Ib
+two	C2	F2	2998	vcmpsd | Vsd,Hsd,Wsd,Ib
+two	C2	F3	2998	vcmpss | Vss,Hss,Wss,Ib
+two	C3	-	2998	movnti | My, Gy
+two	C4	-	2998	pinsrw | Pq,Ry/Mw,Ib
+two	C4	66	2998	vpinsrw | Vdq,Hdq,Ry/Mw,Ib
+two	C5	-	2998	pextrw | Gd, Nq, Ib
+two	C5	66	2998	vpextrw | Gd, Udq, Ib
+two	C6	-	2998	vshufps | Vps,Hps,Wps,Ib
+two	C6	66	2998	vshufpd | Vpd,Hpd,Wpd,Ib
+two	C7	-	2998	Grp 91A
+two	C8	-	2999	BSWAP | RAX/EAX/ RCX/ECX/ RDX/EDX/ RBX/EBX/ RSP/ESP/ RBP/EBP/ RSI/ESI/ RDI/EDI/ | R8/R8D R9/R9D R10/R10D R11/R11D R12/R12D R13/R13D R14/R14D R15/R15D
+two	D0	66	2998	vaddsubpd | Vpd, Hpd, Wpd
+two	D0	F2	2998	vaddsubps | Vps, Hps, Wps
+two	D1	-	2998	psrlw | Pq, Qq
+two	D1	66	2998	vpsrlw | Vx, Hx, Wx
+two	D2	-	2998	psrld | Pq, Qq
+two	D2	66	2998	vpsrld | Vx, Hx, Wx
+two	D3	-	2998	psrlq | Pq, Qq
+two	D3	66	2998	vpsrlq | Vx, Hx, Wx
+two	D4	-	2998	paddq | Pq, Qq
+two	D4	66	2998	vpaddq | Vx, Hx, Wx
+two	D5	-	2998	pmullw | Pq, Qq
+two	D5	66	2998	vpmullw | Vx, Hx, Wx
+two	D6	66	2998	vmovq | Wq, Vq
+two	D6	F2	2998	movdq2q | Pq, Uq
+two	D6	F3	2998	movq2dq | Vdq, Nq
+two	D7	-	2998	pmovmskb | Gd, Nq
+two	D7	66	2998	vpmovmskb | Gd, Ux
+two	D8	-	2999	psubusb | Pq, Qq
+two	D8	66	2999	vpsubusb | Vx, Hx, Wx
+two	D9	-	2999	psubusw | Pq, Qq
+two	D9	66	2999	vpsubusw | Vx, Hx, Wx
+two	DA	-	2999	pminub | Pq, Qq
+two	DA	66	2999	vpminub | Vx, Hx, Wx
+two	DB	-	2999	pand | Pq, Qq
+two	DB	66	2999	vpand | Vx, Hx, Wx
+two	DC	-	2999	paddusb | Pq, Qq
+two	DC	66	2999	vpaddusb | Vx, Hx, Wx
+two	DD	-	2999	paddusw | Pq, Qq
+two	DD	66	2999	vpaddusw | Vx, Hx, Wx
+two	DE	-	2999	pmaxub | Pq, Qq
+two	DE	66	2999	vpmaxub | Vx, Hx, Wx
+two	DF	-	2999	pandn | Pq, Qq
+two	DF	66	2999	vpandn | Vx, Hx, Wx
+two	E0	-	2998	pavgb | Pq, Qq
+two	E0	66	2998	vpavgb | Vx, Hx, Wx
+two	E1	-	2998	psraw | Pq, Qq
+two	E1	66	2998	vpsraw | Vx, Hx, Wx
+two	E2	-	2998	psrad | Pq, Qq
+two	E2	66	2998	vpsrad | Vx, Hx, Wx
+two	E3	-	2998	pavgw | Pq, Qq
+two	E3	66	2998	vpavgw | Vx, Hx, Wx
+two	E4	-	2998	pmulhuw | Pq, Qq
+two	E4	66	2998	vpmulhuw | Vx, Hx, Wx
+two	E5	-	2998	pmulhw | Pq, Qq
+two	E5	66	2998	vpmulhw | Vx, Hx, Wx
+two	E6	66	2998	vcvttpd2dq | Vx, Wpd
+two	E6	F2	2998	vcvtpd2dq | Vx, Wpd
+two	E6	F3	2998	vcvtdq2pd | Vx, Wpd
+two	E7	-	2998	movntq | Mq, Pq
+two	E7	66	2998	vmovntdq | Mx, Vx
+two	E8	-	2999	psubsb | Pq, Qq
+two	E8	66	2999	vpsubsb | Vx, Hx, Wx
+two	E9	-	2999	psubsw | Pq, Qq
+two	E9	66	2999	vpsubsw | Vx, Hx, Wx
+two	EA	-	2999	pminsw | Pq, Qq
+two	EA	66	2999	vpminsw | Vx, Hx, Wx
+two	EB	-	2999	por | Pq, Qq
+two	EB	66	2999	vpor | Vx, Hx, Wx
+two	EC	-	2999	paddsb | Pq, Qq
+two	EC	66	2999	vpaddsb | Vx, Hx, Wx
+two	ED	-	2999	paddsw | Pq, Qq
+two	ED	66	2999	vpaddsw | Vx, Hx, Wx
+two	EE	-	2999	pmaxsw | Pq, Qq
+two	EE	66	2999	vpmaxsw | Vx, Hx, Wx
+two	EF	-	2999	pxor | Pq, Qq
+two	EF	66	2999	vpxor | Vx, Hx, Wx
+two	F0	F2	2998	vlddqu | Vx, Mx
+two	F1	-	2998	psllw | Pq, Qq
+two	F1	66	2998	vpsllw | Vx, Hx, Wx
+two	F2	-	2998	pslld | Pq, Qq
+two	F2	66	2998	vpslld | Vx, Hx, Wx
+two	F3	-	2998	psllq | Pq, Qq
+two	F3	66	2998	vpsllq | Vx, Hx, Wx
+two	F4	-	2998	pmuludq | Pq, Qq
+two	F4	66	2998	vpmuludq | Vx, Hx, Wx
+two	F5	-	2998	pmaddwd | Pq, Qq
+two	F5	66	2998	vpmaddwd | Vx, Hx, Wx
+two	F6	-	2998	psadbw | Pq, Qq
+two	F6	66	2998	vpsadbw | Vx, Hx, Wx
+two	F7	-	2998	maskmovq | Pq, Nq
+two	F7	66	2998	vmaskmovdqu | Vdq, Udq
+two	F8	-	2999	psubb | Pq, Qq
+two	F8	66	2999	vpsubb | Vx, Hx, Wx
+two	F9	-	2999	psubw | Pq, Qq
+two	F9	66	2999	vpsubw | Vx, Hx, Wx
+two	FA	-	2999	psubd | Pq, Qq
+two	FA	66	2999	vpsubd | Vx, Hx, Wx
+two	FB	-	2999	psubq | Pq, Qq
+two	FB	66	2999	vpsubq | Vx, Hx, Wx
+two	FC	-	2999	paddb | Pq, Qq
+two	FC	66	2999	vpaddb | Vx, Hx, Wx
+two	FD	-	2999	paddw | Pq, Qq
+two	FD	66	2999	vpaddw | Vx, Hx, Wx
+two	FE	-	2999	paddd | Pq, Qq
+two	FE	66	2999	vpaddd | Vx, Hx, Wx
+two	FF	-	2999	UD01B
+group	-	80,81,82,83	1	-	3005	ADD | OR | ADC | SBB | AND | SUB | XOR | CMP
+group	-	8F	1A	-	3005	POP |  |  |  |  |  |  | 
+group	-	C0,C1,D0,D1,D2,D3	2	-	3005	ROL | ROR | RCL | RCR | SHL/SAL | SHR |  | SAR
+group	-	F6,F7	3	-	3005	TEST Ib/Iz |  | NOT | NEG | MUL AL/rAX | IMUL AL/rAX | DIV AL/rAX | IDIV AL/rAX
+group	-	FE	4	-	3005	INC Eb | DEC Eb |  |  |  |  |  | 
+group	-	FF	5	-	3005	INC Ev | DEC Ev | near CALLf64 Ev | far CALL Ep | near JMPf64 Ev | far JMP Mp | PUSHd64 Ev | 
+group	0F	00	6	-	3005	SLDT Rv/Mw | STR Rv/Mw | LLDT Ew | LTR Ew | VERR Ew | VERW Ew |  | 
+group	0F	00	6	F2	3005	 |  |  |  |  |  | LKGSo64 Ew | 
+group	0F	01	7	-	3005	SGDT Ms | SIDT Ms | LGDT Ms | LIDT Ms | SMSW Mw/Rv |  | LMSW Ew | INVLPG Mb
+group	0F	01	7	F3	3005	 |  |  |  |  | RSTORSSP Mq |  | 
+group	0F	01	7	-	3005	VMCALL (001) VMLAUNCH (010) VMRESUME (011) VMXOFF (100) PCONFIG (101) WRMSRNS (110) PBNDKB (111) | MONITOR (000) MWAIT (001) CLAC (010) STAC (011) ENCLS (111) | XGETBV (000) XSETBV (001) VMFUNC (100) XEND (101) XTEST (110) ENCLU(111) |  |  | SERIALIZE (000) RDPKRU (110) WRPKRU (111) |  | SWAPGS o64(000) RDTSCP (001)
+group	0F	01	7	66	3005	 | TDCALL (100) SEAMRET (101) SEAMOPS (110) SEAMCALLo64 (111) |  |  |  |  |  | 
+group	0F	01	7	F2	3005	RDMSRLIST (110)o64 | ERETSo64 (010) |  |  |  | XSUSLDTRK (000) XRESLDTRK (001) |  | 
+group	0F	01	7	F3	3005	WRMSRLIST (110)o64 | ERETUo64 (010) |  |  |  | SETSSBSY (000) SAVEPREVSSP (010) UIRET (100) CLUI (110) STUI (111) |  | 
+group	0F	BA	8	-	3005	 |  |  |  | BT | BTS | BTR | BTC
+group	0F	C7	9	-	3005	 | CMPXCH8B Mq CMPXCHG16B Mdq |  | XRSTORS | XSAVEC | XSAVES | VMPTRLD Mq | VMPTRST Mq
+group	0F	C7	9	66	3005	 |  |  |  |  |  | VMCLEAR Mq | 
+group	0F	C7	9	F3	3005	 |  |  |  |  |  | VMXON Mq | 
+group	0F	C7	9	-	3005	 |  |  |  |  |  | RDRAND Rv | RDSEED Rv
+group	0F	C7	9	F3	3005	 |  |  |  |  |  | SENDUIPIo64 Rq | RDPID Rd/q
+group	0F	B9	10	-	3005	UD11B |  |  |  |  |  |  | 
+group	0F	B9	10	-	3005	 |  |  |  |  |  |  | 
+group	-	C6	11	-	3005	MOV Eb, Ib |  |  |  |  |  |  | 
+group	-	C6	11	-	3005	 |  |  |  |  |  |  | XABORT (000) Ib
+group	-	C7		-	3005	MOV Ev, Iz |  |  |  |  |  |  | 
+group	-	C7		-	3005	 |  |  |  |  |  |  | XBEGIN (000) Jz
+group	0F	71	12	-	3006	 |  |  |  |  |  |  | 
+group	0F	71	12	-	3006	 |  | psrlw Nq, Ib |  | psraw Nq, Ib |  | psllw Nq, Ib | 
+group	0F	71	12	66	3006	 |  | vpsrlw Hx,Ux,Ib |  | vpsraw Hx,Ux,Ib |  | vpsllw Hx,Ux,Ib | 
+group	0F	72	13	-	3006	 |  |  |  |  |  |  | 
+group	0F	72	13	-	3006	 |  | psrld Nq, Ib |  | psrad Nq, Ib |  | pslld Nq, Ib | 
+group	0F	72	13	66	3006	 |  | vpsrld Hx,Ux,Ib |  | vpsrad Hx,Ux,Ib |  | vpslld Hx,Ux,Ib | 
+group	0F	73	14	-	3006	 |  |  |  |  |  |  | 
+group	0F	73	14	-	3006	 |  | psrlq Nq, Ib |  |  |  | psllq Nq, Ib | 
+group	0F	73	14	66	3006	 |  | vpsrlq Hx,Ux,Ib | vpsrldq Hx,Ux,Ib |  |  | vpsllq Hx,Ux,Ib | vpslldq Hx,Ux,Ib
+group	0F	73	14	-	3007	000 | 001 | 010 | 011 | 100 | 101 | 110 | 111
+group	0F	AE	15	-	3007	FXSAVE | FXRSTOR | LDMXCSR | STMXCSR | XSAVE | XRSTOR | XSAVEOPT | CLFLUSH
+group	0F	AE	15	66	3007	 |  |  |  |  |  | CLWB | CLFLUSHOPT
+group	0F	AE	15	F3	3007	 |  |  |  | PTWRITE My |  | CLRSSBSY | 
+group	0F	AE	15	-	3007	 |  |  |  |  | LFENCE (000) | MFENCE (000) | SFENCE (000)
+group	0F	AE	15	66	3007	 |  |  |  |  |  | TPAUSE Rd | 
+group	0F	AE	15	F2	3007	 |  |  |  |  |  | UMWAIT Rd | 
+group	0F	AE	15	F3	3007	RDFSBASE Ry | RDGSBASE Ry | WRFSBASE Ry | WRGSBASE Ry | PTWRITE Ry | INCSSP | UMONITOR Rv | 
+group	0F	18	16	-	3007	prefetch NTA | prefetch T0 | prefetch T1 | prefetch T2 | Reserved NOP |  |  | 
+group	0F	18	16	-	3007	Reserved NOP |  |  |  |  |  |  | 
+group	-	F3	17	-	3007	 | BLSRv By, Ey | BLSMSKv By, Ey | BLSIv By, Ey |  |  |  | 
+group	-	F3	17	-	3007	 |  |  |  |  |  |  | 
+group	0F	1C	18	-	3007	CLDEMOTE | Reserved NOP |  |  |  |  |  | 
+group	0F	1C	18	66, F2, F3	3007	Reserved NOP |  |  |  |  |  |  | 
+group	0F	1C	18	any	3007	 |  |  |  |  |  |  | 

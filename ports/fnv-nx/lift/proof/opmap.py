@@ -65,3 +65,14 @@ def lookup(maps, mand, body):
     if real:
         return 'Table A-%d' % (3 if two_b else 2), 'Table A-%d (PDF page index %d): %s = %s' % (3 if two_b else 2, t[1], ' '.join('%02X' % b for b in body[:1 + two_b]), ' '.join(real))
     return None
+
+
+def dump(maps):
+    """canonical text of the parsed maps (the reference file proof/tests/opmap_cells.tsv is this text for the pinned SDM)"""
+    out = []
+    for name in ('one', 'two'):
+        for (op, pfx), (t, pi) in sorted(maps[name].items()):
+            out.append('%s\t%02X\t%s\t%d\t%s' % (name, op, pfx or '-', pi, ' | '.join(t)))
+    for (two_b, ops), g, pfx, regs, pi in maps['groups']:
+        out.append('group\t%s\t%s\t%s\t%s\t%d\t%s' % ('0F' if two_b else '-', ','.join('%02X' % o for o in ops), g, pfx or '-', pi, ' | '.join(regs)))
+    return '\n'.join(out) + '\n'
