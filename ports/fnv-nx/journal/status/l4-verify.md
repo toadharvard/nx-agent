@@ -431,3 +431,5 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - The whole-tree objstub is red, 25 findings, none in L4 (8 in mojoshader, 17 unattributed).
 - bottleneck: waiting on L3a w8 (loader and descs includes on base3), on L1 w12 (link.entry, archive closure, the bootguest admit row) and on L1/L5 (platform gen:12) | 1 worker (w8)
 - 22:50: w8 took L5 a9cefdbec (loader, platform, hostabi), which closes the loader include. The icount link is now red at lift/bridges's recipe: a9cefdbec's platform dropped the INCLUDE output that base3's bridges uses. Owner L5, told. Checks: boot, bootguest, icount and gl4 all 0.
+- 23:05: w8 on cand3 41a8855d4 + base3 e92e86825 + L5 adba10d8e + L6A decb62ead. Checks: boot, bootguest, icount and gl4 all 0; 7224 stage hits. Loader, platform and descs are green.
+  - First red: gen:contract/facts:2 (l2sections.py reads toolchain/names/sympair_kinds.inc, which is not mounted in the stage). Owner L1/L2, told. It blocks lift/rt and every guest link.
