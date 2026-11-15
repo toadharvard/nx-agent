@@ -292,3 +292,4 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - 19:30Z v3 shard 4/54 done (farm 05): proved 337, gap 9, failed 0. Complete: 25/54.
 - 20:00Z workers (cap now 4): w4 (sysspec, v3 aggregation, fpexact test), w9 (SIMD rerun at w7 9c97f84b), w10 NEW session_01KmtZKS2tNWVFthT6Fj3JQU (566 SIMD FP timeouts, lane x operand-class split, simdsplit.py). Farms 05/07/11/12 on v3.
 - bottleneck: farm proving time. v3 is 25/54 shards after ~10 h; each shard takes 3,400-4,400 s, 2 at a time per farm, 4 farms, so about 4 h are left. The 4-farm cap limits it. Second: L3a (CODEMAP / SITES.tsv for the undecided and far sites; the lift/rt recipe root for the SEH CONTEXT test).
+- 20:10Z v3 shards 36 (proved 338, gap 7) and 37 (proved 336, gap 8, timeout 1) done (farm 11), failed 0. Complete: 27/54.
