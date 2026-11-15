@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 2026-11-15 12:30Z "call economy" rule (CLAUDE.md integ 0e4c31db2) applied; sent to w10, and w9/w14 get it in their next brief.
 - 2026-11-15 12:25Z cand2 frozen at verdict 62a24a5ec (CLAUDE.md integ 2cb25d1b4): only fixes of its own reds. New items go to cand3 (owner w12): cpuid_model mxcsr_mask is cand3 item 3; bridgefacts, IMPORT_KEYS_H and our w10-pending set go there unless already in cand2. The loader items land in cand2 only if they fix a red of 62a24a5ec. w10-pending rebases onto cand3 when it opens.
 - 2026-11-15 12:20Z w10-pending 12695dba3 (+ w3 944ca7412): green: translator 8, lib/sha256 1, rt/guest 6, rt/guest_main 1, platform 113, platform@vclock 113, hostabi/product 0, shim 0. Only loader red (modules tempfile; platform/include header root), both with L1 w15. Waiting: cand2 with af591d2c3 (bridgefacts), c22da059f (IMPORT_KEYS_H), 47b68e51c cpuid_model, profile, the loader fixes; L2 plugin rebuild on w10-pending.
 - 2026-11-15 12:15Z lead ids (orchestrator): L1 session_01KmtZKUn5UJpiHYPtNRT6p9, L2 session_01KmtZKRi5XRMhd5qzRaEyxC, L3a session_01KmtZKSANKhYEe4nVesF6Ho, L3b session_01KmtZKSQpF5Su9oG96Kbe4A, L4 session_01KmtZKUcrakBqKb1mC8iXp4, L6 session_01KmtZKRq7TGNHj6H8m8jpAZ, L6A session_01KmtZKSgdFAv1Sd3kGuQtHk.
