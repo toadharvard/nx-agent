@@ -30,13 +30,13 @@ function bsx_bsr64 (x) = {
     let s4 : bits(64) = s3 | (s3 >> 8);
     let s5 : bits(64) = s4 | (s4 >> 16);
     let s6 : bits(64) = s5 | (s5 >> 32);
-    bsx_popcount64(s6) - 0x0000000000000001
+    sub_bits(bsx_popcount64(s6), 0x0000000000000001)
 }
 
 val bsx_bsf64 : bits(64) -> bits(64)
 
 function bsx_bsf64 (x) = {
-    bsx_popcount64((~(x)) & (x - 0x0000000000000001))
+    bsx_popcount64(not_vec(x) & sub_bits(x, 0x0000000000000001))
 }
 
 val x86_bsx : (proc_mode, sbits(48), sbits(48), prefixes, bits(8), bits(8), modr_m, sib, bool) -> unit
