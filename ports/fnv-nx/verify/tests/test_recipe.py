@@ -4,6 +4,7 @@ pass, one PASS/FAIL line per case. Needs root (sandbox) and aarch64-linux-gnu-gc
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -334,7 +335,30 @@ def main():
                 check("generator embedding %s: sandbox makes it constant, so two cold builds are equal (closed channel); without GATE_CACHE there is no warm build" % label,
                       rc == 0 and "no warm" in g["detail"] and g["universe"] == 2, (g, txt))
 
-    for fn in (gate_toy, gate_bad, gate_nd, gate_cases):
+    def gate_inc():
+        # determinism is incremental, like every stage: a second run with nothing changed executes 0 stages in its store, and one changed unit executes
+        # exactly the stages whose keys are new (read from the two builds' stage_keys), never more
+        irepo, gc, n = make_repo("inc"), BASE + "/inccache", [0]
+
+        def run():
+            n[0] += 1
+            rc0, _, _, t0 = gate(irepo, "build", BASE + "/ib%d" % n[0], gc)
+            rc, g, _, txt = gate(irepo, "determinism", BASE + "/id%d" % n[0], gc)
+            tree = git(irepo, "rev-parse", "HEAD^{tree}").strip()
+            keys = set(json.load(open("%s/objects/%s/%s/objects.json" % (gc, tree, ROOT.replace("/", "__"))))["stage_keys"])
+            m = re.search(r"detstore: (\d+) stages executed", (g or {}).get("detail", ""))
+            return rc0 == 0 and rc == 0, keys, int(m.group(1)) if m else None, (g, txt, t0)
+        ok1, k1, r1, d1 = run()
+        check("determinism, first run: green, every stage executed in its own store", ok1 and r1 == len(k1) and r1 > 0, (r1, len(k1), d1))
+        ok2, k2, r2, d2 = run()
+        check("determinism, second run with nothing changed: 0 stages executed", ok2 and k2 == k1 and r2 == 0, (r2, d2))
+        w(irepo, "toy/b.c", '#include "toy.h"\nint f_b(void) { return TOY * 3; }\n')
+        git(irepo, "add", "-A")
+        git(irepo, "commit", "-q", "-m", "change b")
+        ok3, k3, r3, d3 = run()
+        check("determinism, one changed unit: exactly the stages with new keys executed", ok3 and 0 < r3 == len(k3 - k1) < len(k3), (r3, len(k3 - k1), len(k3), d3))
+
+    for fn in (gate_toy, gate_bad, gate_nd, gate_cases, gate_inc):
         later(fn)
 
     # --- toy root, shared store: cold, then cached
