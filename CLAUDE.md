@@ -570,8 +570,11 @@ a stale tree. The rules below make that class impossible. Adding checks on top o
 - The owner's usage page reads: weekly 29 % used, reset on Saturday 2026-11-21 18:00Z. At the pace so far the limit ends
   on 2026-11-16 at night, five days early. The budget is at most about 11 % of the week per day until the reset.
 - Until the orchestrator lifts this:
-  - **Workers:** at most 2 per lead, and each runs only a path item that blocks the next step: first root, packs as roots,
-    ELF, boot.
+  - **Workers:** at most 4 per lead (owner, 2026-11-15 20:00Z: "Разреши лидерам большее количество саб-агентов
+    реализаторов"; it was 2). Each runs only a path item that blocks the next step: first root, packs as roots, ELF, boot.
+    - A lead splits each path item into independent pieces and runs them in parallel, one worker each. While a build runs,
+      its worker prepares the next piece rather than waiting.
+    - A worker whose piece is done, or waits on another layer, is archived, not left idle.
   - **Farms:** at most 4 per layer. Never rerun on unchanged content; a farm stops as soon as its queue is done.
   - **Leads:**
     - one message per finished item, no interim reports;
