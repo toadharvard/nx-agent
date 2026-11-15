@@ -19,7 +19,7 @@ RULE -> OBSERVATION -> FIELD (E existing, N new; all N fields are recorded by th
   S3 map             every page of [ImageBase, +SizeOfImage): sha256 = headers / section bytes / zero (min(raw,virt) bytes, rest 0),
                      except the import slots and the TLS index word (S4, S5); every page mapped                                    N start_state.pages, runs
   S4 imports         every slot of iat.tsv holds its value (key or module export); data slots: the ELF address of the native_symbol of iat_data.tsv (table_id = the ELF's); slot set = the PE's  N start_state.dump
-  S5 TLS             per image of tls.tsv (exe: slot 0; static DLLs: their load_index): index word = the slot, main thread vec[slot] = block, block =
+  S5 TLS             per image of tls.tsv (slot = its tls_slot column: the exe 0, static images 1, 2, ...): index word = the slot, main thread vec[slot] = block, block =
                      sha-checked template + zero fill at the alignment; the exe's callbacks and entry
                      in executable sections                                                                       N start_state.dump, watch_log mem
   S6 protection      every page of the image range: headers R, section R/W by its characteristics, never X, claimed gaps none           N start_state.runs
@@ -28,9 +28,9 @@ RULE -> OBSERVATION -> FIELD (E existing, N new; all N fields are recorded by th
   S8 enter           the first exe-range fnvnx_lift_enter calls on one thread: the TLS callbacks (image_base, 1, 0) in list order, then
                      the entry (0, 0, 0); esp = (stack_base - 16) & ~15 holding the sentinel; console "enter <entry>"       N watch_log args, mem
 Rules no observation can decide are listed in the verdicts as undecided, with the reason.
-S5 details: align is the IMAGE_SCN_ALIGN field of the TLS Characteristics (0 = byte alignment, n = 1 << (n-1)); an image of tls.tsv without a load_index (a
-dynamic image) has no start state and is only fact-checked (sha256 of its template). The watch log captures a long block in chunks of boot.py MEM_MAX bytes (spec +DELTA), so the
-whole block is compared, never a prefix. Two rows on one vector slot (the exe's slot is 0) fail.
+S5 details: slot and alignment are read from the tls_slot and align_bytes columns (contract/modules.py: the loader's own numbers), never derived here; an image
+of tls.tsv without a tls_slot (loaded on demand) has no start state and is only fact-checked (sha256 of its template). The watch log captures a long block in chunks of boot.py MEM_MAX bytes (spec +DELTA), so the
+whole block is compared, never a prefix. A repeated tls_slot, a static image without one and an on-demand image with one are fact failures.
 """
 import argparse
 import hashlib
@@ -149,8 +149,8 @@ def tls_dir(pe):
         if not v:
             break
         cb.append(v)
-    a = (ch >> 20) & 15
-    return {"start": start, "size": end - start, "zero": zero, "index_va": idx, "callbacks": cb, "align": 1 << (a - 1) if a else 1}
+    a = (ch >> 20) & 15   # IMAGE_SCN_ALIGN field, raw: the exe row of tls.tsv is compared to it
+    return {"start": start, "size": end - start, "zero": zero, "index_va": idx, "callbacks": cb, "align_f": a}
 
 
 def import_slots(pe):
@@ -220,18 +220,19 @@ def read_modules(text):
 
 def read_tls(text, tls_dir_path):
     """tls.tsv (contract/modules.py write_tls) + tls/<name>.bin -> [row]: name, idx (load_index or None), start, end, index_va, cb_va, rva, size,
-    zero, align_f (the IMAGE_SCN_ALIGN field itself), sha, callbacks (RVAs), bin (the template file)"""
+    zero, align_f (the IMAGE_SCN_ALIGN field itself), sha, callbacks (RVAs), slot (tls_slot or None), align_bytes, bin (the template file)"""
     rows = []
     for no, line in enumerate(text.split("\n"), 1):
         if not line or line.startswith("#"):
             continue
         f = line.split("\t")
-        if len(f) != 12:
-            raise StartError("tls.tsv line %d: 12 tab-separated fields expected" % no)
-        name, li, sva, eva, iva, cva, rva, tsz, zf, al, sha, cbs = f
+        if len(f) != 14:
+            raise StartError("tls.tsv line %d: 14 tab-separated fields expected (tls_slot, align_bytes are the last two)" % no)
+        name, li, sva, eva, iva, cva, rva, tsz, zf, al, sha, cbs, slot, ab = f
         try:
             r = {"name": name, "idx": int(li) if li else None, "start": int(sva, 16), "end": int(eva, 16), "index_va": int(iva, 16), "cb_va": int(cva, 16),
-                 "rva": int(rva, 16), "size": int(tsz), "zero": int(zf), "align_f": int(al), "sha": sha, "callbacks": [int(x, 16) for x in cbs.split(";") if x]}
+                 "rva": int(rva, 16), "size": int(tsz), "zero": int(zf), "align_f": int(al), "sha": sha, "callbacks": [int(x, 16) for x in cbs.split(";") if x],
+                 "slot": int(slot) if slot else None, "align_bytes": int(ab)}
         except ValueError:
             raise StartError("tls.tsv line %d: bad number" % no) from None
         if not name or "/" in name or "\\" in name or name.startswith("."):
@@ -317,31 +318,38 @@ def tls_plan(pe, tls, mods):
         if hashlib.sha256(b).hexdigest() != r["sha"] or len(b) != r["size"] or r["end"] - r["start"] != r["size"]:
             errs.append("%s: tls/%s.bin does not match template_sha256 / template_size / end_va - start_va" % (r["name"], r["name"]))
             continue
-        al = 1 << (r["align_f"] - 1) if r["align_f"] else 1
         if is_exe:
-            pref = pe["base"]
             cb = [c - pe["base"] for c in t["callbacks"]]
-            if (r["start"], r["size"], r["zero"], r["index_va"], r["callbacks"], al) != (t["start"], t["size"], t["zero"], t["index_va"], cb, t["align"]) \
+            if (r["start"], r["size"], r["zero"], r["index_va"], r["callbacks"], r["align_f"]) != (t["start"], t["size"], t["zero"], t["index_va"], cb, t["align_f"]) \
                     or read_va(pe, t["start"], t["size"]) != b:
                 errs.append("exe: tls.tsv disagrees with the PE's TLS directory or the template bytes of the PE")
-                continue
-            obs.append({"name": "exe", "idx": 0, "index_addr": t["index_va"], "size": r["size"], "zero": r["zero"], "align": al, "tmpl": b, "dump": "tls_index"})
-        elif r["idx"] is not None:
-            m = mods.get(r["name"])
-            if m is None or not m["static"] or m["idx"] != r["idx"]:
-                errs.append("%s: tls.tsv load_index %s is not that of modules.tsv" % (r["name"], r["idx"]))
-                continue
-            pref = m["pref"]
-            if r["start"] - r["rva"] != pref or not pref <= r["index_va"] < pref + m["soi"]:
-                errs.append("%s: template_rva / index_va do not fit the preferred base 0x%08x" % (r["name"], pref))
-                continue
-            obs.append({"name": r["name"], "idx": r["idx"], "index_addr": m["base"] + r["index_va"] - pref, "size": r["size"], "zero": r["zero"],
-                        "align": al, "tmpl": b, "dump": "tls_index:" + r["name"]})
+            elif r["slot"] != 0:
+                errs.append("exe: tls_slot is %s, the exe's is 0" % r["slot"])
+            else:
+                obs.append({"name": "exe", "idx": r["slot"], "index_addr": t["index_va"], "size": r["size"], "zero": r["zero"], "align": r["align_bytes"],
+                            "tmpl": b, "dump": "tls_index"})
+            continue
+        m = mods.get(r["name"])
+        if m is None:
+            errs.append("%s: no row in modules.tsv" % r["name"])
+        elif not m["static"]:
+            if r["slot"] is not None or r["idx"] is not None:
+                errs.append("%s: an image loaded on demand has tls_slot %s, load_index %s" % (r["name"], r["slot"], r["idx"]))
+        elif r["slot"] is None:
+            errs.append("%s: a static image with a TLS directory has no tls_slot" % r["name"])
+        elif m["idx"] != r["idx"]:
+            errs.append("%s: tls.tsv load_index %s is not that of modules.tsv" % (r["name"], r["idx"]))
+        elif r["start"] - r["rva"] != m["pref"] or not m["pref"] <= r["index_va"] < m["pref"] + m["soi"]:
+            errs.append("%s: template_rva / index_va do not fit the preferred base 0x%08x" % (r["name"], m["pref"]))
+        else:
+            obs.append({"name": r["name"], "idx": r["slot"], "index_addr": m["base"] + r["index_va"] - m["pref"], "size": r["size"], "zero": r["zero"],
+                        "align": r["align_bytes"], "tmpl": b, "dump": "tls_index:" + r["name"]})
     seen = {}
-    for o in obs:
-        if o["idx"] in seen:
-            errs.append("%s and %s share vector slot %d" % (seen[o["idx"]], o["name"], o["idx"]))
-        seen[o["idx"]] = o["name"]
+    for r in tls:
+        if r["slot"] is not None:
+            if r["slot"] in seen:
+                errs.append("%s and %s repeat tls_slot %d" % (seen[r["slot"]], r["name"], r["slot"]))
+            seen[r["slot"]] = r["name"]
     return obs, errs
 
 
@@ -550,8 +558,9 @@ def check(doc, console, pe, expect_sha, iat, modules, modfacts, tls=None, iat_da
         s_ = va_to_off(pe, t["start"])
         if s_ is None or not s_["ch"] & MEM_READ:
             v.fail.append("the TLS template is not in a readable section")
-        if t["align"] > PAGE:
-            v.fail.append("TLS alignment above a page")
+    for o in obs:
+        if o["align"] > PAGE:
+            v.fail.append("%s: TLS alignment %d above a page" % (o["name"], o["align"]))
     if not calls:
         v.fail.append("no %s record in watch_log: the main thread block cannot be seen" % LIFT)
     else:

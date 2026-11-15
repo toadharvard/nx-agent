@@ -1134,7 +1134,7 @@ RULE -> OBSERVATION -> FIELD (E existing, N new; all N fields are recorded by th
   S3 map             every page of [ImageBase, +SizeOfImage): sha256 = headers / section bytes / zero (min(raw,virt) bytes, rest 0),
                      except the import slots and the TLS index word (S4, S5); every page mapped                                    N start_state.pages, runs
   S4 imports         every slot of iat.tsv holds its value (key or module export); data slots: the ELF address of the native_symbol of iat_data.tsv (table_id = the ELF's); slot set = the PE's  N start_state.dump
-  S5 TLS             per image of tls.tsv (exe: slot 0; static DLLs: their load_index): index word = the slot, main thread vec[slot] = block, block =
+  S5 TLS             per image of tls.tsv (slot = its tls_slot column: the exe 0, static images 1, 2, ...): index word = the slot, main thread vec[slot] = block, block =
                      sha-checked template + zero fill at the alignment; the exe's callbacks and entry
                      in executable sections                                                                       N start_state.dump, watch_log mem
   S6 protection      every page of the image range: headers R, section R/W by its characteristics, never X, claimed gaps none           N start_state.runs
@@ -1143,9 +1143,9 @@ RULE -> OBSERVATION -> FIELD (E existing, N new; all N fields are recorded by th
   S8 enter           the first exe-range fnvnx_lift_enter calls on one thread: the TLS callbacks (image_base, 1, 0) in list order, then
                      the entry (0, 0, 0); esp = (stack_base - 16) & ~15 holding the sentinel; console "enter <entry>"       N watch_log args, mem
 Rules no observation can decide are listed in the verdicts as undecided, with the reason.
-S5 details: align is the IMAGE_SCN_ALIGN field of the TLS Characteristics (0 = byte alignment, n = 1 << (n-1)); an image of tls.tsv without a load_index (a
-dynamic image) has no start state and is only fact-checked (sha256 of its template). The watch log captures a long block in chunks of boot.py MEM_MAX bytes (spec +DELTA), so the
-whole block is compared, never a prefix. Two rows on one vector slot (the exe's slot is 0) fail.
+S5 details: slot and alignment are read from the tls_slot and align_bytes columns (contract/modules.py: the loader's own numbers), never derived here; an image
+of tls.tsv without a tls_slot (loaded on demand) has no start state and is only fact-checked (sha256 of its template). The watch log captures a long block in chunks of boot.py MEM_MAX bytes (spec +DELTA), so the
+whole block is compared, never a prefix. A repeated tls_slot, a static image without one and an on-demand image with one are fact failures.
 ```
 
 ## verify/cas.py
