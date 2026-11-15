@@ -37,7 +37,7 @@ def check(name, ok, extra=""):
 
 
 N = [0]
-TEMPLATE = "template <class T> struct Box { T v; __attribute__((noinline)) T get() const { return v; } };\nint use%s(Box<int>& b) { return b.get(); }\n"
+TEMPLATE = "template <class T> struct Box { T v; __attribute__((noinline, noipa)) T get() const { return v; } };\nint use%s(Box<int>& b) { return b.get(); }\n"
 
 
 def run(files):
