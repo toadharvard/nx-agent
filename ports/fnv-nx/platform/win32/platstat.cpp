@@ -95,20 +95,28 @@ extern "C" void fnvnx_wine_fixme(uint32_t id)
 /* The one exit of the branches the reachability gate proves unreachable (contract/include/fnvnx/reach.h has the contract). Reached only
  * when a build invariant is violated: one log line through the same sink as the other lines, then the process ends through the
  * host's exit slot (violation_exit) with FNVNX_REACH_EXIT | fact_id. */
-extern "C" void fnvnx_reach_violation(uint32_t fact_id)
+static __attribute__((noinline)) void reach_log(uint32_t fact_id)
 {
     char l[48];
     snprintf(l, sizeof l, "reach violation fact %u", (unsigned)fact_id);
     emit(l);
+}
+extern "C" void fnvnx_reach_violation(uint32_t fact_id)
+{
+    reach_log(fact_id);   /* all locals and branches live in reach_log: the definition below is one call and the indirect exit (objstub exit_tail) */
     violation_exit(FNVNX_REACH_EXIT | fact_id);
 }
 
 /* The one assertion of an OWNER assumption (ASM-001..009, reach.h): the line carries the id and the value, the exit code the id and the low 16 bits. */
-extern "C" void fnvnx_assume_violation(uint32_t asm_id, uint64_t value)
+static __attribute__((noinline)) void assume_log(uint32_t asm_id, uint64_t value)
 {
     char l[64];
     snprintf(l, sizeof l, "assume violation ASM-%03u value %llu", (unsigned)asm_id, (unsigned long long)value);
     emit(l);
+}
+extern "C" void fnvnx_assume_violation(uint32_t asm_id, uint64_t value)
+{
+    assume_log(asm_id, value);
     violation_exit(FNVNX_ASSUME_EXIT | (asm_id & 0xFFu) << 16 | (uint32_t)(value & 0xFFFFu));
 }
 
