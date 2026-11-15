@@ -348,7 +348,7 @@ writing through a null pointer in `FUN_00404d00_class::FUN_00404d00_class` [orig
 `GetGameSettingCollection` [00404a70] <- `FUN_0040c150(int,int)` [0040c150] <- a static initialiser. The null comes
 from the empty image (a global the real exe provides) or a trapped allocator returning 0. Not reached: WinMain.
 
-What blocks a boot, in order: (1) the player's `FalloutNV.exe` in `sdmc:/fnvnx/game/` (data image; the emulator run
+What blocks a boot, in order: (1) the player's `FalloutNV.exe` at `FNVNX_SD_EXE` (data image; the emulator run
 had none); (2) the 7,300 + 984 + 53 address references without native code, among them whatever the static
 initialisers call; (3) WinMain's unit; (4) S4's CRT start running the image's `__xi`/`__xc` tables (not done:
 `boot.cpp` TODO); (5) D3DX9 and the vtables/typeinfo of uncompiled classes.
@@ -746,7 +746,7 @@ DEVKITPRO=<dkp> toolchain/package/build.sh <g>/guest.nso <pkg> <program id> <g>/
    mounts it at the root). The profile
    (`My Games/FalloutNV`, Fallout.ini, saves) is `sdmc:/switch/fnv/user`. It is one folder for the port and the
    game, as in NX1's `toolchain/include/fnvnx/sdlayout.h`. Guests built before this layout read
-   `sdmc:/fnvnx/game` and `sdmc:/fnvnx/user`. Without the exe the guest boots in trace mode with an empty data image.
+   the game directory the older layout named and its `user` directory (the paths are now `FNVNX_SD_DIR` and `FNVNX_SD_USER`). Without the exe the guest boots in trace mode with an empty data image.
 4. Launch the title from HOME without holding R. Clean up afterwards by deleting
    `atmosphere/contents/<program id>/exefs.nsp`.
 
@@ -1128,9 +1128,9 @@ python3 -I tests/s5/emu_guest.py guest.nso --elf fnvnx.elf --skip-faulting-init 
     --game <game dir> --budget 6000000000 [--stub-faults tests/s5/known_faults.txt] --summary-json boot.json
 ```
 
-`--game` mounts the install (FalloutNV.exe, Fallout_default.ini, Data/) in place at the guest's `sdmc:/switch/fnv`
-and the older `sdmc:/fnvnx/game`. The port's own entries there (user/, fnvnx.ini, guest.nso, the logs) stay in
-`--root`; without it both are `<sdmc>/fnvnx/game`. Paths fold case as on the SD card
+`--game` mounts the install (FalloutNV.exe, Fallout_default.ini, Data/) in place at the guest's `FNVNX_SD_DIR`
+(sdlayout.h; the older layout's game directory is retired). The port's own entries there (user/, fnvnx.ini, guest.nso, the logs) stay in
+`--root`; without it both are `<sdmc>` plus `FNVNX_SD_DIR` without its device prefix. Paths fold case as on the SD card
 (`tests/s5/datapath.py`). `farm_boot.sh` takes the same as `FARM_GAME=<game dir>`. The data milestones (`data` lines
 of `tests/s5/milestones.txt`: ini-read, archive-list, bsa-opened, esm-header, masters-loaded) and the file faults
 (`data-counts`, `file-fault` lines; `data` and `file_faults` in the summary JSON) come from the guest's host file

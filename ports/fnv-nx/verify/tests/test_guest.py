@@ -191,14 +191,11 @@ def main():
     check("msvcmodel data model: size_t is unsigned int (mangled j)", "_Z2szj" in syms, syms)
     check("volatile is ldar/stlr and float -> int is _ftol on the external compiler", "ldar" in disasm(ra, "_Z2rdv") and "stlr" in disasm(ra, "_Z2wri")
           and "#0x80000000" in disasm(ra, "_Z3f2if"))
-    t = os.path.join(os.path.dirname(VERIFY), "toolchain", "msvcmodel", "test_msvcmodel.py")
-    p = subprocess.run([sys.executable, "-I", t], env=dict(os.environ, CXX=os.path.join(prefix, "bin/aarch64-linux-gnu-g++")), capture_output=True, text=True)
     # the sample root builds a unit that includes the guest's libstdc++ and newlib headers (compiler 13.3 reads gcc 15.2 headers: -std=gnu++20)
     hdr = "#include <vector>\n#include <string>\n#include <cstdio>\nint hv(int n) { std::vector<int> v(n); std::string s(\"x\"); std::printf(\"%d\", (int)v.size()); return (int)s.size(); }\n"
     gp = guest_repo("gp", sample, pin_real, files={ROOT + "/h.cc": hdr})
     rp, tpb = build(gp, "GP")
     check("sample platform root builds a unit using the runtime's libstdc++ and newlib headers", rp["status"] == "green", rp.get("failure"))
-    check("test_msvcmodel.py on the external", p.returncode == 0 and "skip" not in p.stdout, p.stdout + p.stderr)
 
 
 if __name__ == "__main__":

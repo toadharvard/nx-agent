@@ -94,7 +94,7 @@ guest text, and reports **dynamic instructions per subsystem per interval** and 
 
 ```sh
 tools/perf/frameprof.py guest.nso --elf fnvnx.elf --map fnvnx.map --units <decomp>/build/units.json \
-    --file fnvnx/game/FalloutNV.exe=<exe> --skip-faulting-init --budget 6000000000 \
+    --file <FNVNX_SD_DIR without the device prefix>/FalloutNV.exe=<exe> --skip-faulting-init --budget 6000000000 \
     --frame __fnv_0086e650 [--frame <Present>] --mark main --mark __fnv_0086a850 \
     [--nine-ids <nine build>/gen/nine_proxy_ids.h] --top 20 --json out.json
 ```

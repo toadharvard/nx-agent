@@ -36,9 +36,9 @@ def checks(obj):
         check('%s: no indirect call without a site check' % f,
               len(re.findall(r'[0-9a-f]+: [0-9a-f]+ (?:blr|br) x\d+', b)) == n and len(re.findall(r'[0-9a-f]+: [0-9a-f]+ cmp w\d+, w\d+', b)) >= n, b)
     c1 = body(dis, '_Z2c1PFiiEi')
-    check('hit path: ONE 64-bit load of the site, compare the low half of that register, branch, shift the register',
-          re.search(r'ldr x(\d+), \[x\d+\] [0-9a-f]+: R_AARCH64_P32_LDST64_ABS_LO12_NC \.bss.*? cmp w0, w\1 [0-9a-f]+: [0-9a-f]+ b\.ne .*? lsr x\d+, x\1, #32', c1.replace('\n', ' '))
-          and len(re.findall(r'R_AARCH64_P32_LDST64_ABS_LO12_NC \.bss', c1)) == 1, c1)
+    check('hit path: ONE 64-bit acquire load (ldar: the slot is shared memory, R9) of the site, compare the low half of that register, branch, shift the register',
+          re.search(r'ldar x(\d+), \[x\d+\].*? cmp (?:w\d+, w\1|w\1, w\d+) [0-9a-f]+: [0-9a-f]+ b\.ne .*? lsr x\d+, x\1, #32', c1.replace('\n', ' '))
+          and len(re.findall(r'ldar x\d+, \[x\d+\]', c1)) == 1 and len(re.findall(r'R_AARCH64_P32_ADD_ABS_LO12_NC \.bss', c1)) == 1, c1)
     c6 = body(dis, '_Z2c6i')
     check('a direct call is untouched', calls(c6, '_Z6directi') == 1 and 'fnvnx_dispatch' not in c6, c6)
     n = sum(calls(body(dis, f)) for f in dis)
@@ -50,7 +50,7 @@ def checks(obj):
         return m and pb.cstring(obj, m.group(1), int(m.group(2) or '0', 16))
     shapes = {'_Z2c1PFiiEi': 'stack:i:i', '_Z2c2P1Ai': 'this:i:i,i', '_Z2c3P1A': 'this:i:i,i',
               '_Z2d1PFviifE': 'fast:v:i,i,f', '_Z2d2PFxdxE': 'stack:q:d,q',
-              '_Z2d3PF2V3S_2P23BigcES_S0_S1_': 'stack:a12:s12h,s8g,s32r,i', '_Z2d4PF3Big2NTERS0_': 'stack:m32:s4r',
+              '_Z2d3PF2V3S_2P23BigcES_S0_S1_': 'stack:a12Hhf:s12hf,s8g,s32r,i', '_Z2d4PF3Big2NTERS0_': 'stack:a32Hm:s4r',
               '_Z2d5P1BMS_FifdE': 'this:i:i,f,d'}
     for f, want_d in shapes.items():
         check('%s: descriptor %s' % (f, want_d), desc(f) == want_d, repr(desc(f)))
@@ -66,9 +66,8 @@ def main():
         if r.returncode == 0:
             checks(out)
         r = pb.compile(FIX, os.path.join(td, 'x.o'), so, args=['-fplugin-arg-fnvnx_dispatch-mode=1'])
-        check('an unknown plugin argument is an error', r.returncode != 0 and 'unknown plugin argument' in r.stderr, r.stderr[:500])
-        r = pb.compile(FIX, os.path.join(td, 'y.o'), [so[0], so[2]])
-        check('without the names plugin the dispatcher says so', r.returncode != 0 and 'fnvnx_names plugin is not loaded' in r.stderr, r.stderr[:500])
+        check('an unknown plugin argument is an error', pb.argument_refused(r, 'dispatch'), r.stderr[:500])
+        check('the recipe refuses a root that lacks a product plugin (the dispatcher needs names; the full set is the recipe\'s)', pb.missing_plugin_refused('names'))
     finally:
         shutil.rmtree(td, ignore_errors=True)
     return check.done()

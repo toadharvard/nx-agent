@@ -200,12 +200,12 @@ o = assemble('esc_norec', {'f': FUNCS['ok_escape']}, {'f': ''})
 check('escape of a slot the record lacks is red', red(o), {'f+0x10/escape': 'frame-escape-unrecorded'})
 o = assemble('esc_rec', {'f': FUNCS['ok_escape']}, {'f': '-8:4'})
 check('escape into a recorded slot is green', red(o), {})
-o = assemble('rec_overlap', {'f': ['sub sp, sp, #16', 'add x1, sp, #12', 'str w0, [sp, #4]', 'str w0, [sp, #12]', 'add sp, sp, #16', 'ret']}, {'f': '-4:4'})
-check('plain store beside a recorded slot is F, onto a slot whose address is formed it is not', red(o), {'f+0xc': 'plain-store'})
+o = assemble('rec_overlap', {'f': ['sub sp, sp, #16', 'add x1, sp, #12', 'str w0, [sp, #4]', 'stlr x1, [x3]', 'str w0, [sp, #12]', 'add sp, sp, #16', 'ret']}, {'f': '-4:4'})
+check('plain store beside a recorded slot is F, onto a slot whose address is formed it is not', red(o), {'f+0x10': 'plain-store'})
 o = assemble('rec_above', {'f': ['ldr w0, [sp, #8]', 'ret']}, {'f': ''})
 check('access above the CFA (incoming stack argument) is not F', red(o), {'f+0x0': 'plain-load'})
-o = assemble('rec_pair', {'f': ['sub sp, sp, #16', 'add x2, sp, #4', 'stp x0, x1, [sp, #0]', 'add sp, sp, #16', 'ret']}, {'f': '-12:4'})
-check('a pair store sizes 16 bytes', red(o), {'f+0x8': 'plain-store'})
+o = assemble('rec_pair', {'f': ['sub sp, sp, #16', 'add x2, sp, #4', 'stlr x2, [x3]', 'stp x0, x1, [sp, #0]', 'add sp, sp, #16', 'ret']}, {'f': '-12:4'})
+check('a pair store sizes 16 bytes', red(o), {'f+0xc': 'plain-store'})
 
 # frame record problems
 o = assemble('noline', {'fa': FUNCS['ok_frame'], 'fb': FUNCS['ok_frame']}, {'fa': ''})
@@ -285,7 +285,7 @@ if plug:
     esc = dis.split('<_Z3escv>:')[1].split('\n\n')[0]
     check('plugin: the writes to the escaped local are stlr', 'stlr\twzr' in esc and 'stlr\tw0' in esc, True)
     retf = dis.split('<_Z3retv>:')[1].split('\n\n')[0]
-    check('plugin: the return slot store is preceded by dmb ish', retf.index('dmb\tish\n') < retf.index('stp\tx2, x3, [x8]'), True)
+    check('plugin: the return slot aggregate is stored unit-wise, 5 stlr and no plain store of it', (retf.count('stlr'), 'stp\tx2, x3, [x8]' in retf), (5, False))
     r, j = gate(po)
     check('gate on plugin object is red for the two documented functions', (r.returncode, j['status']), (2, 'red'))
     r, j = gate(plain)
