@@ -6,12 +6,11 @@ D3DMULTISAMPLE_TYPE enum value + invalid ones; every single usage bit of the 32-
 (see render/d3d9/env/README.md for why single bits + pairs cover the usage function)."""
 import os, re, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.dont_write_bytecode = True
-HDR = sys.argv[4]   # the importing generator's argument: gen_env.py OUT SPEC TSV_DIR D3DTYPES_H (the mounted header; no default, no path of this file)
 fcc = lambda s: sum(ord(c) << (8 * i) for i, c in enumerate(s))
 
 
-def d3dformat_enum():
-    t = open(HDR).read(); t = t[t.index("typedef enum _D3DFORMAT"):]; t = t[:t.index("} D3DFORMAT;")]; out = []
+def d3dformat_enum(hdr):
+    t = open(hdr).read(); t = t[t.index("typedef enum _D3DFORMAT"):]; t = t[:t.index("} D3DFORMAT;")]; out = []
     for m in re.finditer(r"D3DFMT_\w+\s*=\s*(?:MAKEFOURCC\('(.)',\s*'(.)',\s*'(.)',\s*'(.)'\)|(0x[0-9A-Fa-f]+|\d+))", t):
         out.append(fcc("".join(m.group(i) for i in range(1, 5))) if m.group(1) else int(m.group(5), 0))
     return out
@@ -20,7 +19,7 @@ def d3dformat_enum():
 FOURCC_LIST = ["DXT1", "DXT2", "DXT3", "DXT4", "DXT5", "ATI1", "ATI2", "INTZ", "RAWZ", "DF16", "DF24", "NULL", "NVDB", "RESZ", "ATOC", "A2M0", "A2M1", "INST", "R2VB",
                "YUY2", "UYVY", "GRGB", "RGBG", "MET1", "NV12", "YV12", "AYUV", "NVHU", "NVHS", " R16", "AL16"]   # D3DFMT_G8R8_G8B8 = 'GRGB', R8G8_B8G8 = 'RGBG', MULTI2_ARGB8 = 'MET1'
 UNKNOWN_FMT = [fcc("ZZZZ"), fcc("abcd"), fcc("~!@#"), 1, 37, 255, 0x7fffffff, 0x41420143]
-FMT = sorted(set(d3dformat_enum()) | {fcc(s) for s in FOURCC_LIST} | set(UNKNOWN_FMT))
+FMT = None   # set by load(): every D3DFORMAT enum value of the header + FOURCC_LIST + UNKNOWN_FMT
 DEVT = [1, 2, 3, 4]; DEVT_BAD = [0, 5, 0x7fffffff]
 RTYPE = [1, 2, 3, 4, 5, 6, 7]; RTYPE_BAD = [0, 8, 11, 0x7fffffff]
 MSAA = list(range(0, 17)) + [17, 0x7fffffff]
@@ -69,6 +68,15 @@ OPS = ["GetAdapterCount", "GetAdapterIdentifier", "GetAdapterMonitor", "GetAdapt
 NARGS = {"GetAdapterCount": 0, "GetAdapterIdentifier": 2, "GetAdapterMonitor": 1, "GetAdapterDisplayMode": 1, "GetAdapterModeCount": 2, "EnumAdapterModes": 3, "GetDeviceCaps": 2,
          "CheckDeviceType": 5, "CheckDeviceFormat": 6, "CheckDepthStencilMatch": 5, "CheckDeviceMultiSampleType": 5, "CheckDeviceFormatConversion": 4, "GetAdapterModeCountEx": 3,
          "EnumAdapterModesEx": 4, "GetAdapterDisplayModeEx": 2, "GetAdapterLUID": 1, "Direct3DCreate9": 1, "Direct3DCreate9Ex": 1}
+
+
+def load(hdr, spec):
+    """the one entry: hdr = d3d9types.h, spec = the interface table (D9_SPEC); both are the caller's arguments (no default, no path of this file).
+    Builds FMT (and its domain D["FMT"]) and sets SPEC; nothing of this module is valid before it is called."""
+    global FMT, SPEC
+    FMT = sorted(set(d3dformat_enum(hdr)) | {fcc(s) for s in FOURCC_LIST} | set(UNKNOWN_FMT))
+    D["FMT"] = FMT
+    SPEC = spec
 
 
 def emit():
