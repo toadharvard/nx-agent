@@ -16,7 +16,10 @@ authorized).
 3. Do not edit any source, flag or key. A red unit is reported (its unit name, stage, first error line), not fixed or skipped.
 4. When it ends: publish STORE to fnv-nx-build branch `l3a-lift/packstore/<BUILD_COMMIT_SHORT>-s<i>of8`, with
    the recipe's result summary. Then report to the lead, with numbers from this run at <BUILD_COMMIT>:
-   units in the shard, built, red; total and p50/p99/max cpu_s from STORE/keys/*/result.json; wall time.
+   units in the shard, built, red; wall time; and the output of
+   `python3 -I ports/fnv-nx/verify/recipe.py timing --root ports/fnv-nx/lift/pack@time --store STORE`
+   (cand3 179158f99, RECIPE.md "Stage timing"): per-kind, per-unit and per-pass sums, the top 20 units. Shard 0
+   builds the @time variant; the others build the plain root.
 5. The lead (or the farm it names) runs `recipe.py store-merge <farm store>` once per shard store into one store, then
    `recipe.py build --root ports/fnv-nx/lift/pack` there: every unit must be a hit (0 compiles), and the link and gates run.
    That store is published for L4. This is the only store L4 uses.
