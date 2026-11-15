@@ -133,6 +133,11 @@ class Citations(unittest.TestCase):
         self.assertEqual(want, set(r[0] for r in tab))
         self.assertEqual([r for r in tab if not r[1].isdigit()], [])                              # the key is the PDF page index
         self.assertEqual([r for r in tab if r[2] and not r[2].startswith('Vol. ')], [])            # a printed page is read text or empty
+    def test_page_is_in_the_keys_volume(self):
+        """a key never resolves into another volume (the page table once put SDM 1:8.5 on a Vol. 3A page): where the page has a printed footer it names the key's volume"""
+        with open(os.path.join(os.path.dirname(HERE), 'sdm_pages.tsv'), encoding='utf-8') as fh: tab = [l.rstrip('\n').split('\t') for l in fh][1:]
+        bad = [r for r in tab if r[2] and not r[2].startswith('Vol. %s ' % r[0].split()[1].split(':')[0])]
+        self.assertEqual(bad, [])
 def snap(o, nd, n=2):
     """(TOP, FSW, ST(0..n-1) patterns) of the spec result with the nondeterministic variables set: nd = [(var, value)]"""
     s = o.s
@@ -199,6 +204,31 @@ class Constants(unittest.TestCase):
             half = Fraction(2) ** (e - 53)                                                                        # half the spacing of the 53-bit grid
             k = v / half; dist = abs(k - round(k)) * half
             self.assertGreater(dist, Fraction(1, 10 ** 100), name)
+class MmxAlias(unittest.TestCase):
+    """MMX aliasing, SDM 1:9.5.1 / 1:9.6.2 / 1:9.4.8: one copy of the effect, on the DSL names"""
+    def d(self):
+        return {k: z3.BitVec("p." + k, w) for k, w in X.DSL_WIDTH.items()}
+    def prove(self, f):
+        sv = z3.Solver(); sv.add(z3.Not(f)); self.assertEqual(sv.check(), z3.unsat)
+    def test_write(self):
+        d = self.d(); v = z3.BitVec("v", 64)
+        for n in (0, 3, 7):
+            r = X.mmx_write_effect(d, n, v)
+            self.prove(r["ftop"] == 0); self.prove(r["ftag"] == 0)
+            self.prove(r["fr%d" % n] == z3.Concat(z3.BitVecVal(0xFFFF, 16), v))
+            self.prove(X.mmx_read(r, n) == v)
+            for m in range(8):
+                if m != n: self.prove(r["fr%d" % m] == d["fr%d" % m])
+            for k in ("fcw", "fsw", "fip", "fdp", "fop", "fcs", "fds"): self.prove(r[k] == d[k])
+    def test_exec_other_registers_and_emms(self):
+        d = self.d(); r = X.mmx_exec_effect(d)
+        self.prove(r["ftop"] == 0); self.prove(r["ftag"] == 0)
+        for m in range(8): self.prove(r["fr%d" % m] == d["fr%d" % m])
+        e = X.emms_effect(d)
+        self.prove(e["ftag"] == 0xFFFF); self.prove(e["ftop"] == d["ftop"])
+        for m in range(8): self.prove(e["fr%d" % m] == d["fr%d" % m])
+
+
 class DslView(unittest.TestCase):
     """the L3a DSL names and widths (fnvlift/dsl.py XW) and fault kinds (dsl.FAULTS 12..18, Wine 9.0 get_fpu_code order IE/SF, DE, ZE, OE, UE, PE)"""
     def test_widths(self):

@@ -1580,7 +1580,7 @@ def fpatan(s):
 
 # --- control instructions -------------------------------------------------------------------------
 def fwait(s):
-    """SDM 2A:FWAIT: 'Checks for pending unmasked FPU exceptions'; no state change.  The #MF is the registry
+    """SDM 2D:FWAIT: 'Checks for pending unmasked FPU exceptions'; no state change.  The #MF is the registry
     wrapper's trap (all waiting instructions)."""
     return Out(s)
 
@@ -1897,6 +1897,41 @@ def dsl_pre(d):
         empty = Extract(2 * i + 1, 2 * i, d["ftag"]) == K(TAG_EMPTY, 2)
         c = And(c, Or(empty, And(supported_m80(reg), to_m80(from_m80(reg)) == reg)))
     return c
+
+
+# MMX aliases the x87 state (SDM 1:9.5: "The MMX state is aliased to the x87 FPU state").  One copy of the effect, here, on the DSL state names
+# above; the SIMD-integer specs import these.  mmN is the low 64 bits of the PHYSICAL register frN: every MMX instruction sets TOS to 0 first
+# (SDM 1:9.6.2), so ST(N) and physical register N coincide.
+def mmx_read(d, n):
+    """mmN: bits 0..63 of fr<n> (SDM 1:9.5 aliasing; SDM 1:9.6.2 'writes ... to the exponent part ... (bits 64 through 79)' fixes bits 0..63 as the MMX data)."""
+    return Extract(63, 0, d["fr%d" % n])
+
+
+def mmx_exec_effect(d):
+    """What EVERY MMX instruction other than EMMS does to the x87 state, read or write alike (SDM 1:9.6.2: 'The TOS (top of stack) value of the x87
+    FPU status word is set to 0. The entire x87 FPU tag word is set to the valid state (00B in all tag fields).'; SDM 1:9.5.1: 'After each MMX
+    instruction, the entire x87 FPU tag word is set to valid (00B).')."""
+    r = dict(d)
+    r["ftop"] = K(0, DSL_WIDTH["ftop"])
+    r["ftag"] = K(0, DSL_WIDTH["ftag"])
+    return r
+
+
+def mmx_write_effect(d, n, value):
+    """An MMX instruction that writes mmN := value (64 bits): mmx_exec_effect, then fr<n> := 0xFFFF:value (SDM 1:9.6.2: 'When an MMX instruction
+    writes to an MMX register, it writes ones (11B) to the exponent part of the corresponding floating-point register (bits 64 through 79).').
+    Other registers keep their bits."""
+    r = mmx_exec_effect(d)
+    r["fr%d" % n] = z3.Concat(K(0xFFFF, 16), value)
+    return r
+
+
+def emms_effect(d):
+    """EMMS: the entire tag word becomes empty, nothing else changes (SDM 1:9.4.8: 'setting the tags in x87 FPU tag word to 11B'; SDM 1:9.5.1:
+    'The EMMS instruction ... sets the entire x87 FPU tag word to empty (11B).')."""
+    r = dict(d)
+    r["ftag"] = K(0xFFFF, DSL_WIDTH["ftag"])
+    return r
 
 
 # DSL fault kinds (fnvlift/dsl.py FAULTS 12..18): one kind per NTSTATUS, in the order of Wine 9.0 get_fpu_code (dlls/ntdll/unix/signal_i386.c):
