@@ -133,6 +133,7 @@ def main(argv):
         wine = objstub.read_wine_table(os.path.join(repo, "ports/fnv-nx/verify/wine_fixme.tsv"))   # the table of the tree under test
         std_ix, winerr = declared_pins(repo, cache)
         declared = objstub.read_declared_table(os.path.join(repo, "ports/fnv-nx/verify/declared_machine.tsv"), std_ix, winerr)   # the table of the tree under test
+        owners = objstub.read_owner_decisions(os.path.join(repo, "CLAUDE.md"))   # the owner-decision anchors of the tree under test
         facts = objstub.read_facts(os.path.join(cache, "reach", gate_build.tree_of(repo), "reach.facts.tsv")) if roots else None
         for root in roots:
             r, w, gm, fs, abi, records, im, ex = root_check(root, repo, cache, jobs, built)
@@ -149,7 +150,7 @@ def main(argv):
             items += [(i, n) for i, n, _, _ in fs]
         rp = os.path.join(repo, "ports/fnv-nx/verify/ASSUMPTIONS.json")   # of the tree under test; a tree without one has no OWNER id: every `assume` call is red
         registry = {e["id"]: e["status"] for e in json.load(open(rp))["entries"]} if os.path.exists(rp) else {}
-        its, fs = objstub.judge(results, rows, facts, wine, declared, fails, handlers, stats, extconv, (registry, gen_ids))
+        its, fs = objstub.judge(results, rows, facts, wine, declared, fails, handlers, stats, extconv, (registry, gen_ids), owners)
         items, finds = items + its, finds + fs
         dit, dfs, dstats = doubles.judge(built)   # no doubles in tests (doubles.py)
         items, finds = items + dit, finds + dfs

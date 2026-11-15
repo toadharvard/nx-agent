@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """objstub for x86-64 (ELF64 relocatable objects of the host profile): the same classes and rules as objstub.py (T trap, V vacuous, R reach,
-(A) assume, (C) citation records, T-B trap body), producing the SAME per-object result (items, findings, extra) so that ONE `judge` covers both ISAs.
+(A) assume (ASM-004, as objstub.py), (C) citation records, T-B trap body), producing the SAME per-object result (items, findings, extra) so that ONE `judge` covers both ISAs.
 Nothing here decides a policy: the rules are the ones of objstub.py's docstring, restated over the x86-64 ISA below.
 
 Decoder: GNU objdump of the pinned binutils (env.json `packages` binutils-x86-64-linux-gnu, `programs` x86_64-linux-gnu-objdump, checked by envcheck.py),
@@ -15,7 +15,7 @@ decoder, INT3 bytes 0xCC, or zero bytes that decode as `add BYTE PTR [rax],al`).
 (T) T1: a function holds UD2/UD0/UD1, INT3, INT1, HLT, INTO, INT n, IRET, a privileged instruction (CLI, STI, IN, OUT, WRMSR, RDMSR, LGDT, LIDT, LTR, LLDT, LMSW,
 CLTS, INVD, WBINVD, INVLPG, SWAPGS, SYSRET, SYSEXIT, a MOV to or from a control/debug register) or an undecodable run. These raise a hardware exception in every
 execution of the instruction in user mode (SDM Vol. 2 instruction pages: #UD, #BP, #GP(0) at CPL 3). SYSCALL, SYSENTER and INT 0x80 are T1 unless the object is
-`--os-layer`. T2, T2-noreturn-tail, indirect-noreturn-tail, fallthrough, REACH, ASSUME and WINE call sites: as objstub.py, with CALL/JMP rel32 in place of BL/B
+`--os-layer`. T2, T2-noreturn-tail, indirect-noreturn-tail, fallthrough, REACH, ASSUME (ASM-004) and WINE call sites: as objstub.py, with CALL/JMP rel32 in place of BL/B
 and CALL r/m in place of BLR. The argument register of REACH/ASSUME/WINE is edi (the first integer argument, SysV x86-64).
 
 (V) VACUOUS. Forward dataflow to a fixed point over the CFG of direct branches inside the function, the same value lattice as objstub.py: E(r) entry value, K(c),
@@ -684,7 +684,7 @@ def trap_candidate(ins, a, b, rel, syms, fn_at):
 # ---- the per-object analysis (the result schema of objstub.check_obj) ---------------------------------------------------------------------
 
 def check_obj(o, path, terms, os_layer, probe, jsonv, read_cites_fn, assume_id):
-    """-> (items, findings, extra) exactly as objstub.check_obj. O is the objstub.Obj of the ELF64 x86-64 object; JSONV, READ_CITES_FN, ASSUME_ID are objstub's
+    """-> (items, findings, extra) exactly as objstub.check_obj. O is the objstub.Obj of the ELF64 x86-64 object; JSONV, READ_CITES_FN, ASSUME_ID (ASM-004) are objstub's
     (vjson, read_cites, assume_id): the rest of the result is the same for both ISAs."""
     if probe and (probe.get("kind") == "flag" or probe.get("tables")):
         raise ValueError("objstub: an error_abi flag probe or an instruction-table probe is not implemented for x86-64 objects (%s)" % path)

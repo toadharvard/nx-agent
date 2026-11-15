@@ -511,12 +511,22 @@ CH = ('#define FNVNX_CITE(fn, id) __asm__(".pushsection .fnvnx.cite,\\"\\",%prog
       "void fnvnx_wine_fixme(unsigned);\n")
 for abi in ("ilp32", "lp64"):
     T = lambda n: "%s/%s" % (abi, n)
-    def dk(src, tbl=DT, extra=(), wt=WT, terms=(), cited=True):
+    def dk(src, tbl=DT, extra=(), wt=WT, terms=(), cited=True, owners=None):
         o = build(CH + src, abi, extra=extra)
-        items, finds = objstub.run_check([(o, o)], set(terms), {}, set(), None, None, 1, wt, tbl)
+        own = {k: (c, r.replace('@', os.path.dirname(o))) for k, (c, r) in (owners or {}).items()}   # '@' = the directory of the object: its root
+        items, finds = objstub.run_check([(o, o)], set(terms), {}, set(), None, None, 1, wt, tbl, owners=own)
         if cited:   # the rows no record cites are a finding of their own: only the findings of the cases' own functions are compared
             finds = [f for f in finds if f[2] != "declared-machine-uncited"]
         return {(n, k) for _, n, k, _ in finds}, finds
+    OD = {"gl-x": ("GL shader compile/link failure", "@")}
+    k, f = dk('unsigned f(void) { return 0; }\nFNVNX_CITE(f, "od:gl-x");', owners=OD)
+    check(T("rule O: a body cited by an owner decision in the anchor's root: certified"), not k, f)
+    k, f = dk('unsigned f(void) { return 0; }\nFNVNX_CITE(f, "od:gl-x");', owners={})
+    check(T("rule O: unknown id: owner-decision-unknown-id"), k == {("f", "owner-decision-unknown-id")}, f)
+    k, f = dk('unsigned f(void) { return 0; }\nFNVNX_CITE(f, "od:gl-x");', owners={"gl-x": ("GL shader compile/link failure", "/elsewhere")})
+    check(T("rule O: a citation outside the anchor's root: owner-decision-wrong-root"), k == {("f", "owner-decision-wrong-root")}, f)
+    k, f = dk('unsigned f(void) { return 0; }', owners=OD)
+    check(T("rule O: the same body uncited keeps its finding"), k == {("f", "V")}, f)
     k, f = dk("unsigned f(void) { return 2; }")
     check(T("rule C: the bare constant body (a registry read of an undeclared key) with no record is V: flagged V"), k == {("f", "V")}, f)
     k, f = dk('unsigned f(void) { return 2; }\nFNVNX_CITE(f, "dm:31");')

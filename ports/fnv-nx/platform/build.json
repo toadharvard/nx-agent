@@ -526,6 +526,16 @@
     ],
     "asm": []
    }
+  },
+  "time": {
+   "flags_add": {
+    "c": [
+     "-ftime-report"
+    ],
+    "cxx": [
+     "-ftime-report"
+    ]
+   }
   }
  },
  "external_errors": {

@@ -313,16 +313,18 @@ echo "mounts=$(wc -l < /proc/mounts)"'''
         errs = [f.exception() for f in futs]
     check("11 same key run by 6 threads of one process: no collision, equal results", not any(errs)
           and len({json.dumps({k: v for k, v in f.result().items() if k != "cpu_s"}, sort_keys=True) for f in futs}) == 1, str(errs))   # cpu_s is a measurement
-    # (12) cpu_s: the child's user+sys seconds of the run (wait4 rusage, descendants included); a cache hit returns the recorded value
+    # (12) the timing of a run: the child's user+sys seconds (wait4 rusage, descendants included) and the wall seconds, in a sidecar store/<key>.time outside the key and the record
     s12 = os.path.join(fresh("s12"), "s.sh")
     open(s12, "w").write("i=0; while [ $i -lt 300000 ]; do i=$((i+1)); done\n")
     st12 = mkstage(store, "cpu", {"/bin/busybox": os.path.join(bb, "busybox"), "/in/s.sh": s12}, ["/out"], ["/bin/busybox", "sh", "/in/s.sh"], env={})
     d12 = json.load(open(st12))
     k12 = sandbox.key_of(d12)
-    r12 = sandbox.execute(store, d12, k12)
-    check("12a a run records cpu_s > 0 for a CPU-bound command", isinstance(r12.get("cpu_s"), float) and r12["cpu_s"] > 0, r12.get("cpu_s"))
+    r12, t12 = sandbox.execute_timed(store, d12, k12)
+    check("12a a run measures cpu_s > 0 for a CPU-bound command, and the record names no time", isinstance(t12.get("cpu_s"), float) and t12["cpu_s"] > 0
+          and t12["wall_s"] > 0 and "cpu_s" not in r12, (t12, sorted(r12)))
     sandbox._store_result(store, k12, r12)
-    check("12b the stored result is what a hit returns (the recorded cpu_s is kept)", sandbox._load(store, k12)["cpu_s"] == r12["cpu_s"], None)
+    sandbox.write_time(store, k12, t12)
+    check("12b the sidecar round-trips and a hit (the stored record) is unchanged by it", sandbox.read_time(store, k12)["cpu_s"] == t12["cpu_s"] and sandbox._load(store, k12) == r12, None)
     return 1 if FAILED else 0
 
 
