@@ -16,6 +16,12 @@
 # is all tools/link/compile.sh needs. Needs: g++, make, libgmp-dev, libmpfr-dev, libmpc-dev, zlib1g-dev,
 # g++-13-aarch64-linux-gnu (for its headers and binutils). About 30 minutes on 4 cores.
 set -euo pipefail
+# the reference compiler: the distribution's unversioned aarch64-linux-gnu-g++, else the versioned one the recipe pins
+REF=$(command -v aarch64-linux-gnu-g++ || command -v aarch64-linux-gnu-g++-13 || true)
+if [ -z "$REF" ]; then
+  echo "build.sh: no reference compiler: neither aarch64-linux-gnu-g++ nor aarch64-linux-gnu-g++-13 is on PATH (install g++-13-aarch64-linux-gnu)" >&2
+  exit 2
+fi
 W=$(mkdir -p "$1" && cd "$1" && pwd)
 P=$(mkdir -p "$2" && cd "$2" && pwd)
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -56,9 +62,9 @@ CXX=$P/bin/aarch64-linux-gnu-g++
 # the include search list must be the distribution compiler's, but for the compiler's own directory
 list() { echo | "$1" -mabi=ilp32 -xc++ -E -v - 2>&1 | sed -n '/#include <...> search starts here/,/End of search list/p' \
          | sed '1d;$d' | while read -r d; do readlink -m "$d"; done | grep -v '/lib/gcc' ; }
-if [ -z "$(list "$CXX")" ] || [ "$(list "$CXX")" != "$(list aarch64-linux-gnu-g++)" ]; then
-  echo "build.sh: the include search list differs from the distribution compiler's:" >&2
-  diff <(list "$CXX") <(list aarch64-linux-gnu-g++) >&2 || true
+if [ -z "$(list "$CXX")" ] || [ "$(list "$CXX")" != "$(list "$REF")" ]; then
+  echo "build.sh: the include search list differs from the distribution compiler's ($REF):" >&2
+  diff <(list "$CXX") <(list "$REF") >&2 || true
   exit 3
 fi
 echo "$CXX"
