@@ -175,7 +175,7 @@ def judge_root(root, repo, cache):
         bad.append(item)
         why.append("; ".join(g)[:300])
     cc, cxx = recipe.host_compilers(rec, cache)
-    sem = {k: recipe.semantics_for(cxx if k == "cxx" else cc, k, origin=roots[root].get("cxx_origin")) for k in ("c", "cxx", "asm")}   # the pinned driver's own answer per language
+    sem = {k: recipe.semantics_for(cxx if k == "cxx" else cc, k, origin=recipe.entry_of(roots, root).get("cxx_origin")) for k in ("c", "cxx", "asm")}   # the pinned driver's own answer per language
     sos = {p["name"]: p["path"] for p in res.get("plugins", [])}
     langs = recipe.plugin_languages(cc, cxx, sos) if sos else {"c": [], "cxx": []}   # the plugins each front end loads: a fact of the ELF files
     for u in res["units"]:
