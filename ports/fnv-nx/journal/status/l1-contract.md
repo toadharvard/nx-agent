@@ -1601,3 +1601,5 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
     - the empty dispatch table waits for L3a;
     - test_link's "Archive member included" failure is a cand2 baseline.
   - cand2 head 83816c91e already has deb_resolve and the L6 roots. Next for w12: bridge.tsv as a generated stage.
+- 09:48 **Defect (L5 w10): cand2 a3e251cfb is broken.** 978c17ea6 re-applied 7cece903a partly; envcheck.record_problems and RecordError are missing, so every generate stage dies.
+  - Fix: w15 merges the remaining envcheck, runtime and test_record changes. This comes first; L5 is blocked until then.
