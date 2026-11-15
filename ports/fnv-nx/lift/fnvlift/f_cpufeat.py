@@ -19,10 +19,6 @@ test/cpufeat_check.py lists, over every instruction of every module, the forms w
 # Rule: a feature's gate is its row in a CPUID feature-flag leaf (1, 7, 0x80000001); where the table cites both Intel SDM and AMD APM for one feature, the Intel row decides (the declared
 # machine's CPU is Intel-documented, source order of CLAUDE.md); several remaining rows that differ in register or bit, or no row, is an error at load; the same register and bit in two flag leaves counts as one row (lowest leaf) (never a silent default).
 FLAG_LEAVES = (1, 7, 0x80000001)
-# the name of a feature in this file -> its name in the table (the table's own spelling, Intel SDM / APM)
-TABLE_NAME = {'CX8': 'CMPXCHG8B', 'SSE4.1': 'SSE4_1', 'SSE4.2': 'SSE4_2', 'AES': 'AESNI', '3DNOW': '3DNow', '3DNOWEXT': '3DNowExt'}
-
-
 def _load_table(want):
     from . import inputs
     rows = {}
@@ -42,13 +38,6 @@ def _load_table(want):
     return out
 
 
-FEATURE_NAMES = ('FPU', 'TSC', 'CX8', 'CMOV', 'MMX', 'FXSR', 'SSE', 'SSE2', 'SSE3', 'PCLMULQDQ', 'SSSE3', 'FMA', 'SSE4.1', 'SSE4.2', 'MOVBE', 'POPCNT', 'AES', 'AVX', 'F16C', 'RDRAND',
-                 'BMI1', 'AVX2', 'BMI2', 'ADX', 'SHA', '3DNOW', '3DNOWEXT', 'SSE4A', 'XOP', 'FMA4')
-_T = _load_table({TABLE_NAME.get(f, f) for f in FEATURE_NAMES})
-_missing_rows = [f for f in FEATURE_NAMES if TABLE_NAME.get(f, f) not in _T]
-if _missing_rows:
-    raise ValueError('cpufeat: the table has no flag row for %s' % ', '.join(_missing_rows))
-FEATURES = {f: _T[TABLE_NAME.get(f, f)] for f in FEATURE_NAMES}
 # the model's answer, DERIVED from verify/cpuid_model.json by cpumodel_bits.model_words (the one derivation, shared with tools/gen_cpuref.py); leaf 7 is above the
 # model's max basic leaf (verify/cpuid_model.json max_basic), so every leaf-7 feature is absent. No hand-copied constant: a change of the reference CPU changes the gate.
 def _model_bits():
@@ -59,15 +48,22 @@ def _model_bits():
     w = model_words(json.load(open(path)))
     return {(1, 'EDX'): w['leaf1_edx'], (1, 'ECX'): w['leaf1_ecx'], (0x80000001, 'EDX'): w['ext1_edx'], (0x80000001, 'ECX'): w['ext1_ecx']}
 MODEL_BITS = _model_bits()
-MODEL = frozenset(f for f, (leaf, reg, bit) in FEATURES.items() if MODEL_BITS.get((leaf, reg), 0) >> bit & 1)
-ABSENT = frozenset(FEATURES) - MODEL
 
-# capstone group name -> feature
-GROUP_FEATURE = {'mmx': 'MMX', 'sse1': 'SSE', 'sse2': 'SSE2', 'sse3': 'SSE3', 'ssse3': 'SSSE3', 'sse41': 'SSE4.1', 'sse42': 'SSE4.2', 'sse4a': 'SSE4A', 'avx': 'AVX', 'avx2': 'AVX2',
-                 'fma': 'FMA', 'fma4': 'FMA4', 'bmi': 'BMI1', 'bmi2': 'BMI2', 'aes': 'AES', 'pclmul': 'PCLMULQDQ', '3dnow': '3DNOW', 'adx': 'ADX', 'sha': 'SHA', 'xop': 'XOP', 'f16c': 'F16C',
+# capstone group name -> feature (the table's own feature names: no translation exists)
+GROUP_FEATURE = {'mmx': 'MMX', 'sse1': 'SSE', 'sse2': 'SSE2', 'sse3': 'SSE3', 'ssse3': 'SSSE3', 'sse41': 'SSE4_1', 'sse42': 'SSE4_2', 'sse4a': 'SSE4A', 'avx': 'AVX', 'avx2': 'AVX2',
+                 'fma': 'FMA', 'fma4': 'FMA4', 'bmi': 'BMI1', 'bmi2': 'BMI2', 'aes': 'AESNI', 'pclmul': 'PCLMULQDQ', '3dnow': '3DNow', 'adx': 'ADX', 'sha': 'SHA', 'xop': 'XOP', 'f16c': 'F16C',
                  'rdrand': 'RDRAND', 'cmov': 'CMOV'}
 # forms capstone does not tag with the extension that the SDM gates them with
 MNEMONIC_FEATURE = {'fisttp': 'SSE3', 'popcnt': 'POPCNT', 'movbe': 'MOVBE'}
+
+# FEATURES: every feature a form can need (the values of the two tables above) -> (leaf, register, bit), from the generated table; a feature without a row is an error
+_T = _load_table(set(GROUP_FEATURE.values()) | set(MNEMONIC_FEATURE.values()))
+_no_row = sorted((set(GROUP_FEATURE.values()) | set(MNEMONIC_FEATURE.values())) - set(_T))
+if _no_row:
+    raise ValueError('cpufeat: the table has no flag row for %s' % ', '.join(_no_row))
+FEATURES = dict(_T)
+MODEL = frozenset(f for f, (leaf, reg, bit) in FEATURES.items() if MODEL_BITS.get((leaf, reg), 0) >> bit & 1)
+ABSENT = frozenset(FEATURES) - MODEL
 
 
 # forms that the SDM defines as ANOTHER legal instruction on a CPU without the feature (so the absent feature is not #UD): TZCNT F3 0F BC executes as BSF and LZCNT F3 0F BD as BSR (SDM Vol 2
