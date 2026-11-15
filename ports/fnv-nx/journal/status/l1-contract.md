@@ -1777,3 +1777,7 @@ bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
   - w26 has no path item. It is waiting; archive it once cand3 needs nothing from it.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 - 20:38 w26 archived (sharding done at ca3a256, lift-blr parked at 41b6d799a). Workers 3/4: w15, w12, w27.
+- 20:41 w12 efce93818: the bridgefacts BRIDGE stage is done; the loader reads BRIDGE (its pinned manifest bridge.tsv is deleted) and exports its tables again (test_loader_tables passes; unrun on build). CROSSING waits for its carriers.
+  - Orchestrator ruling: stage timing goes into cand3, and w12 does it. Wall and CPU time go in a sidecar <key>.time, which is not in the key or the record and which store-merge ignores. The plugin split comes from an @time flags variant whose TIMEREPORT output is -ftime-report, so product keys are unchanged. Summed by `recipe timing`.
+  - gate_imports bridge_of and gate_contract's manifest bridge.tsv join the import-table brief for w15.
+bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
