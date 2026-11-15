@@ -551,7 +551,7 @@ Stage table: env BOOT_STAGE_TABLE_BRANCH (default l4-verify/milestones), file st
    contract's rows (bootinputs.py milestones --stage-table: names unique, every exe address a lifted code entry). A missing branch: the
    job runs with the contract rows only and the final line says stage_table=absent; a present branch without the file fails the job.
 Env: ARTIFACTS (clone of the artifacts repository, default $FARM_HOME/artifacts; cloned --filter=blob:none --no-checkout
-when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build), FARM_HOME (default $HOME/fnvnx-farm),
+when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build), FARM_HOME (required),
 WORK (default $FARM_HOME/boot/<elf_id>), GAME_DIR (an installed game; never inside a git checkout). The profile is
 passed to boot.py, recorded in meta.json and exported as FNVNX_PROFILE (a render host library reads it).
 Exit 0 iff the result was published and boot.py exited 0 or 2; 1 otherwise (one-line reason on stderr).
@@ -583,7 +583,7 @@ Steps:
  5 final line: AFTERMERGE commit=<commit12> jobs=<n> violated=<names joined by ","|none> published=<branch>@<commit12>
    exit 0 = every job exited 0; 2 = at least one job reports a violation (the result is published either way);
    1 = usage, environment, tool or publishing error
-Env: FARM_HOME (~/fnvnx-farm), ARTIFACTS (/home/user/fnv-nx-build; a checkout whose origin is the artifacts repository),
+Env: FARM_HOME (required), ARTIFACTS (required; a checkout whose origin is the artifacts repository),
      ARTIFACTS_URL (default: that checkout's origin), RUNNER_JOBS.
 ```
 

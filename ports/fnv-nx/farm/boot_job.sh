@@ -49,7 +49,7 @@
 #    job runs with the contract rows only and the final line says stage_table=absent; a present branch without the file fails the job.
 # The declared inputs (verify/env.json, verify/boot_inputs.json) are read only from the tree the job runs from; no variable redirects them.
 # Env: ARTIFACTS (clone of the artifacts repository, default $FARM_HOME/artifacts; cloned --filter=blob:none --no-checkout
-# when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build), FARM_HOME (default $HOME/fnvnx-farm),
+# when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build), FARM_HOME (required),
 # WORK (default $FARM_HOME/boot/<elf_id>), GAME_DIR (an installed game; never inside a git checkout). The profile is
 # passed to boot.py, recorded in meta.json and exported as FNVNX_PROFILE (a render host library reads it).
 # --quantum N (required, no default): instructions per slice of a core's thread in the N-core machine (bootmachine.py rule 3); passed to boot.py
@@ -82,7 +82,7 @@ case $PROFILE in handheld|docked) ;; *) die "--profile '$PROFILE' is neither han
 export FNVNX_PROFILE=$PROFILE
 case $GPU_BRANCH in *[!A-Za-z0-9._/-]*|-*) die "--gpu-branch '$GPU_BRANCH' is not a branch name" ;; esac
 
-FARM_HOME=${FARM_HOME:-$HOME/fnvnx-farm}
+FARM_HOME=${FARM_HOME:?FARM_HOME (the farm work directory)}
 ARTIFACTS=${ARTIFACTS:-$FARM_HOME/artifacts}
 ARTIFACTS_URL=${ARTIFACTS_URL:-https://github.com/toadharvard/fnv-nx-build}
 WORK=${WORK:-$FARM_HOME/boot/$ELF_ID}
