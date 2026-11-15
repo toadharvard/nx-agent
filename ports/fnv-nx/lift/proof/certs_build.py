@@ -33,9 +33,9 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIFT = os.path.dirname(HERE)
 sys.path.insert(0, LIFT)
-from proof import model_sail, prove, shape, symform  # noqa: E402
+from proof import irdeps, model_sail, prove, shape, symform  # noqa: E402
 
-HEADER = '# shape_key\tfamily\tdsl_sha\tmodel_sha\treference\tresult\tobligations\tundef_flags\tdef0_witness\tdef0_free\tnonflag_free\n'
+HEADER = '# shape_key\tfamily\tdsl_sha\tmodel_sha\treference\tresult\tobligations\tundef_flags\tdef0_witness\tdef0_free\tnonflag_free\tdeclared\n'
 
 def _lst(x):
     return ','.join(x) if x else '-'
@@ -91,16 +91,33 @@ def current_sha(key, cache=_SHA):
     return cache[key]
 
 
-_ir_ok = {}
+IR_FILES = {}          # sha256 -> path of an IR file (--ir PATH, fetched by sha from the artifacts repository: tools/x86-proof-ir*); every file is hashed here, a file is never trusted by name
+_K = {}
+
+
+def add_ir(path):
+    with open(path, 'rb') as fh: sha = hashlib.sha256(fh.read()).hexdigest()
+    IR_FILES[sha] = path
+    return sha
+
+
+def _closure(sha, fns):
+    key = (sha, tuple(fns))
+    if key not in _K:
+        path = IR_FILES.get(sha) or (model_sail.ir_file() if model_sail.ir_sha() == sha else None)
+        if path is None: raise Refused('the IR %s of a record is not provided (--ir PATH: fetch it by sha, tools/x86-proof-ir*)' % sha)
+        _K[key] = irdeps.sha_of_file(path, fns, model_sail.run_env_sha())
+    return _K[key]
+
+
 def model_valid(r, model):
-    """K: a record is valid for the pinned model iff it was proved against it (model_sha), or its closure_sha (the definitions the isla run executed + the run environment) is unchanged
-    on the pinned IR (irdeps.py: the run is then step for step the same, so the shape's certificate is the same)"""
+    """K: a record is valid for the pinned model iff it was proved against it (model_sha), or the closure of the functions its isla run executed (model_fns, recorded) is the same on the IR of the
+    record (its model_sha) and on the pinned IR: both are COMPUTED here by irdeps (the stored closure_sha is informational), from IR files that are hashed to their sha.  Equal closure => the run is
+    step for step the same (irdeps.py), so the shape's certificate is the same."""
     if r.get('model_sha') == model: return True
-    fns, want = r.get('model_fns'), r.get('closure_sha')
-    if not fns or not want: return False
-    if model not in _ir_ok: _ir_ok[model] = model_sail.ir_sha() == model
-    if not _ir_ok[model]: raise Refused('the IR file %s is not the pinned model %s' % (model_sail.ir_file(), model))
-    return model_sail.closure_sha(fns) == want
+    fns = r.get('model_fns')
+    if not fns or not r.get('model_sha'): return False
+    return _closure(r['model_sha'], fns) == _closure(model, fns)
 
 
 def scan(files):
@@ -133,15 +150,20 @@ def scan(files):
             continue
         counts[res] = counts.get(res, 0) + 1
         k3 = (key, r['dsl_sha'], model)
-        ok = res == 'proved'
-        if res.startswith('FAILED') and status.get(k3) == 'proved' or ok and status.get(k3, '').startswith('FAILED'):
+        ok = res in ('proved', 'agree-except-declared')
+        if res == 'agree-except-declared' and r.get('platform_sha256') != prove.platform_sha(r.get('declared') or {}):
+            counts['stale-platform'] = counts.get('stale-platform', 0) + 1
+            continue
+        if res.startswith('FAILED') and status.get(k3) in ('proved', 'agree-except-declared') or ok and status.get(k3, '').startswith('FAILED'):
             raise Refused('%s: %s is proved in one record and %s in another' % (where, key, res if not ok else status[k3]))
         if ok or k3 not in status:
             status[k3] = res
         if ok:
             proved[key] = r['dsl_sha']
             d0 = r.get('def0') or {}
-            info[key] = (_lst(r.get('obligations')), _lst(d0.get('undef_flags')), str(d0.get('witness', 0)), str(d0.get('free', 0)), _lst(d0.get('nonflag_free')))
+            dc = r.get('declared') or {}
+            info[key] = (res, _lst(r.get('obligations')), _lst(d0.get('undef_flags')), str(d0.get('witness', 0)), str(d0.get('free', 0)), _lst(d0.get('nonflag_free')),
+                         ','.join('%s:%s' % x for x in sorted(dc.items())) + '@' + r['platform_sha256'] if dc else '-')
     return proved, counts, status, info
 
 
@@ -156,7 +178,7 @@ def build(files):
         ins = list(md.disasm(rep, shape.ADDR))
         if len(ins) != 1 or ins[0].size != len(rep) or shape.shape_key(ins[0]) != key:
             raise Refused('the representative of %s is not the shape' % key)
-        rows[key] = '%s\t%s\t%s\t%s\tsail\tproved\t%s\n' % ((key, shape.family(ins[0]), dsl, model) + ('\t'.join(info[key]),))
+        rows[key] = '%s\t%s\t%s\t%s\tsail\t%s\n' % (key, shape.family(ins[0]), dsl, model, '\t'.join(info[key]))
     return [rows[k] for k in sorted(rows)], counts, status
 
 
@@ -178,7 +200,7 @@ def forms_of(shapes_path):
             except shape.ShapeError:
                 continue
             d = current_sha(ck)
-            if fam == 'int' and d is not None:
+            if fam in ('int', 'sys') and d is not None:
                 out[ck] = d
     return out
 
@@ -216,7 +238,9 @@ def main(argv):
     ap.add_argument('--queue')
     ap.add_argument('--report')
     ap.add_argument('--coverage')
+    ap.add_argument('--ir', action='append', default=[], help='an IR file (hashed to its sha) that a record of another model_sha was proved against')
     a = ap.parse_args(argv)
+    for f in a.ir: add_ir(f)
     if a.id:
         sys.stdout.write(run_id() + '\n')
         return 0
@@ -260,7 +284,7 @@ def main(argv):
         with open(a.report, 'w', newline='\n') as fh:
             fh.write('# shape_key\tdsl_sha\tmodel_sha\tbest result in the shards\n')
             for k3 in sorted(status):
-                if status[k3] != 'proved':
+                if status[k3] not in ('proved', 'agree-except-declared'):
                     fh.write('%s\t%s\t%s\t%s\n' % (k3[0], k3[1], k3[2], status[k3]))
     sys.stdout.write('certs_build: %d shard files, %d proved rows; records by result: %s\n' % (len(files), len(rows), ' '.join('%s=%d' % x for x in sorted(counts.items()))))
     return 0

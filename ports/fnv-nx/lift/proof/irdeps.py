@@ -15,6 +15,7 @@ By induction over the steps of the run: step 1 evaluates the entry function (in 
 model_fns (it was called in the run on IR) with equal text; every declaration it touches is in the closure, equal.  So the run on IR' is
 step for step the run on IR: the same trace, the same model post-state, the same certificate.  A hunk in a function the run never called
 cannot change it; a hunk in a called function changes its text, hence closure_sha, hence the shape is requeued.
+isla's --probe-all run explores every feasible path, so the trace is a function of the executed functions' text, the declarations it names and env.  An uncalled function can become called only through an edit to an executed function, and that edit changes the key.
 What would break it (each is part of the key or of the pins, never a decision): a change of the isla binary or its config (isla and the config
 are pinned by sail_pins.txt and x86.toml, ASM-009), of the -I inputs or the splice registers (model_sail.SEG, sym_constraint: the run's inputs
 are part of the shape key and of model_terms_sha), of the position comments of the IR (stripped by norm(): a splice that moves lines does not change the key),
@@ -30,6 +31,12 @@ TOKEN = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
 def norm(text):
     """the text of an IR item without source positions and with single spaces"""
     return re.sub(r'[ \t]+', ' ', POS.sub('', text)).strip()
+
+GENID = re.compile(r'\bz3zE\d+\b')
+def alpha(text):
+    """the parameter ids Sail generates (z3zE<counter>: one per function that has a unit parameter, bound in that function only; the counter shifts with every line any patch adds anywhere before it) renamed by order of first occurrence in the item: alpha-renaming of a bound variable, a bijection inside one item"""
+    ids = {}
+    return GENID.sub(lambda m: ids.setdefault(m.group(0), 'z3zE#%d' % len(ids)), text)
 
 def encode(name):
     """Sail name (as isla prints it in a call event) -> IR name: z + name with z -> zz, < -> zI, > -> zK (sail_lib z-encoding of the characters that occur)"""
@@ -55,7 +62,7 @@ class IR:
             if m: (self.vals if m.group(1) == 'val' else self.regs)[m.group(2)] = norm(line)
         self.ids = None
     def _put(self, kind, name, text):
-        (self.fns if kind == 'fn' else self.types)[name] = norm(text)
+        (self.fns if kind == 'fn' else self.types)[name] = alpha(norm(text))
 
 _cache = {}
 def load(path):

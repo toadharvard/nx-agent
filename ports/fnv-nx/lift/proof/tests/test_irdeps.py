@@ -58,13 +58,13 @@ class Closure(unittest.TestCase):
 
 
 class Refusal(unittest.TestCase):
-    def test_an_ir_that_does_not_match_the_pin_is_refused(self):      # item 4: the IR file must hash to the pin, else REFUSED (never a silent stale)
+    def test_an_ir_that_does_not_match_the_pin_is_refused(self):      # item 4: the record's IR is fetched by sha, not trusted: a record whose IR is not provided is REFUSED (never a silent stale); the IR-edit case (an executed function edited in the record's IR -> invalid) is test_certs_build.test_closure_key_keeps_a_record_valid_across_an_ir_change
         from proof import certs_build
-        certs_build._ir_ok.clear()
+        certs_build._K.clear()
         rec = {'model_sha': '1' * 64, 'model_fns': ['f'], 'closure_sha': '2' * 64}
         with self.assertRaises(certs_build.Refused):
             certs_build.model_valid(rec, '0' * 64)
-        certs_build._ir_ok.clear()
+        certs_build._K.clear()
 
 if __name__ == '__main__':
     unittest.main()

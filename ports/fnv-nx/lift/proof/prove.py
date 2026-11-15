@@ -168,6 +168,36 @@ def users_of(users, names):
 def users_all(users):
     return {o for u in users.values() for o in u}
 
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'declared.json')) as _fh:
+    DECLARED = json.load(_fh)                                   # the contract of the declared outputs: function -> platform source, SDM / OWNER basis, the outputs it may define
+UFROW = {u: row for row in DECLARED['rows'] for u in row['ufs']}
+RT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))     # the lift tree: sources are relative to it
+
+def declared_outputs(F):
+    """{register: platform function name} of the registers whose written value is EXACTLY a platform-function result (a `uf` node, or an extract / zext of one, unconditional) of a function in
+    declared.json, written to an output that row allows.  A uf anywhere else in the outputs (another function, another output, mixed with other state) is not declared: the comparison with the model
+    stays strict, and the form is reported by declared_findings."""
+    out = {}
+    for name, v, when in F.regs:
+        n = v
+        while n.op in ('extract', 'zext'): n = n.a[0]
+        if n.op == 'uf' and when is None and n.x in UFROW and name in UFROW[n.x]['outputs'] and n is v: out[name] = n.x
+    return out
+
+def declared_findings(F):
+    """ufs of the Form's outputs that are not declared by contract (a platform function outside declared.json, or in an output it may not define)"""
+    d = declared_outputs(F); bad = []
+    for name, v, when in F.regs:
+        if any(n.op == 'uf' for n in _nodes([v])) and name not in d: bad.append((name, sorted({n.x for n in _nodes([v]) if n.op == 'uf'})))
+    return bad
+
+def platform_sha(declared, root=RT):
+    """sha256 over the source files of the declared.json rows the functions belong to (relative path + content): part of the certificate; formgate recomputes it from the tree it runs in"""
+    h = hashlib.sha256()
+    for src in sorted({UFROW[f]['source'] for f in declared.values()}):
+        h.update(src.encode()); h.update(open(os.path.join(root, src), 'rb').read())
+    return h.hexdigest()
+
 def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     """-> (result, note, certificate extras).  Shape proofs (shapeprove.py) pass pre = a pre-state with a symbolic eip, model = a thunk returning the model
     post-state of the shape, fields = {name: (offset, size)} of the symbolic encoding bytes (z3 variables fld_<name>, free = universally quantified)"""
@@ -183,11 +213,16 @@ def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     side = M.pop('side', z3.BoolVal(True)); nofault = M.pop('nofault', None)
     assume_d = z3.And(assume, D['fault'] == 0, domain) if F.faults else z3.And(assume, domain)
     probe = z3.BitVec('probe', 32); diffs = []                     # (field, dsl, model, strict difference)
-    for r in REGS: diffs.append((r, D['regs'][r], M['regs'][r], z3.And(D['rdefined'][r], D['regs'][r] != M['regs'][r])))
+    declared = declared_outputs(F)                                # outputs the Form takes from a platform function (uf): the model is not their reference
+    extra_declared = {}
+    for r in REGS:
+        if r in declared: extra_declared[r] = declared[r]; continue
+        diffs.append((r, D['regs'][r], M['regs'][r], z3.And(D['rdefined'][r], D['regs'][r] != M['regs'][r])))
     for f in FLAGS: diffs.append((f, D['flags'][f], M['flags'][f], z3.And(D['defined'][f], D['flags'][f] != M['flags'][f])))
     dm, mm = z3.Select(D['mem'], probe), z3.Select(M['mem'], probe)
     diffs += [('mem', dm, mm, dm != mm), ('eip', D['eip'], M['eip'], D['eip'] != M['eip'])]
     extra = {'model_sha256': hashlib.sha256(zser([(k, m) for k, _, m, _ in diffs]).encode()).hexdigest(), 'fault_checks': ''}
+    if extra_declared: extra['declared'] = extra_declared; extra['platform_sha256'] = platform_sha(extra_declared)
     if not complete:                                             # every model path faults (a declared fault, prove.Perm): nothing to compare, but the DSL must fault in every pre-state of the domain
         r0, _ = check([D['fault'] == 0], domain, args); extra['fault_checks'] = 'model never completes => DSL faults in every state: %s' % r0
         return ('proved', '', extra) if r0 == z3.unsat else ('timeout', '', extra) if r0 != z3.sat else ('FAILED(dsl)', 'the model faults on every path, the DSL does not: ' + extra['fault_checks'], extra)
@@ -220,7 +255,7 @@ def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     d0, dnote = def0(M, D, FLAGS, assume_d, side, args, extra, pre)      # DEF0: every architecturally undefined flag output is 0 in the lifted body; prove model[free := 0] == lifted
     if d0 != 'proved': return d0, dnote, extra
     if F.writes_unobserved(): return 'model-gap', 'post-state of df / other EFLAGS bits is not exposed by the model interface (other fields proved)', extra
-    return 'proved', '', extra
+    return ('agree-except-declared' if extra_declared else 'proved'), '', extra
 
 def prove(args):
     mod = MODELS[args.model]; os.makedirs(args.cert, exist_ok=True)

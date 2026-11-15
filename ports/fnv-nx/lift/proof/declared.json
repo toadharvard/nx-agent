@@ -1,0 +1,6 @@
+{"format": "fnvnx-declared/1",
+ "rows": [
+  {"function": "cpuid", "ufs": ["cpuid0", "cpuid1", "cpuid2", "cpuid3"], "source": "rt/cpumodel.c",
+   "basis": "CLAUDE.md 'The declared CPU': cpuid is the reference host's answer (CPUREF, lift/rt/cpumodel.c) restricted to MMX, SSE, SSE2; SDM vol. 2A CPUID: the instruction returns the processor identification in EAX, EBX, ECX, EDX",
+   "outputs": ["eax", "ebx", "ecx", "edx"]}
+ ]}

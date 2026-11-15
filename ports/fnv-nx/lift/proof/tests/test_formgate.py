@@ -16,7 +16,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, LIFT)
 sys.path.insert(0, os.path.join(LIFT, "..", "verify"))     # cas, recipe: the trunk loader the gate itself uses (-I drops PYTHONPATH)
 import fakeext
-from proof import formgate, shape
+from proof import formgate, prove, shape
 import recipe
 
 WORK = os.environ.get('FNVNX_TEST_WORK', '/home/user/l3work/proof/test_work')     # declared input: the directory the fixtures are written below
@@ -63,7 +63,7 @@ class Fixture:
         for k, f in self.keys:
             if certs_for is not None and k not in certs_for:
                 continue
-            rows.append('%s\t%s\t%s\t%s\tsail\t%s\tdef0\t-\t0\t0\t-\n' % (k, f, dsl_override or formgate.dsl_sha(k, MD) or 'none', model, result))
+            rows.append('%s\t%s\t%s\t%s\tsail\t%s\tdef0\t-\t0\t0\t-\t-\n' % (k, f, dsl_override or formgate.dsl_sha(k, MD) or 'none', model, result))
         self.art = fakeext.Artifacts(os.path.join(td, 'art'))
         os.makedirs(os.path.join(td, 'art'), exist_ok=True)
         self.art = fakeext.Artifacts(os.path.join(td, 'art'))
@@ -309,6 +309,19 @@ class Cli(unittest.TestCase):
     def test_arguments_are_refused(self):
         r = subprocess.run([sys.executable, '-I', os.path.join(PROOF, 'formgate.py'), '--shapes', 'x'], capture_output=True, text=True, env={'GATE_OUT': '/'})
         self.assertEqual(r.returncode, 1)
+
+
+class DeclaredOutputs(unittest.TestCase):
+    def test_platform_sha_agrees_with_the_prover(self):
+        self.assertEqual(formgate.platform_sha(['cpuid0', 'cpuid3']), prove.platform_sha({'eax': 'cpuid0', 'edx': 'cpuid3'}))
+
+    def test_declared_column_is_checked_against_the_contract_and_the_tree(self):
+        sha = formgate.platform_sha(['cpuid0'])
+        self.assertTrue(formgate.declared_ok('eax:cpuid0,edx:cpuid3@' + sha))
+        self.assertFalse(formgate.declared_ok('eax:cpuid0@' + '0' * 64))               # the platform source changed
+        self.assertFalse(formgate.declared_ok('esi:cpuid0@' + sha))                    # an output the contract does not allow
+        self.assertFalse(formgate.declared_ok('eax:rdtsc@' + sha))                     # a function that is not in declared.json
+        self.assertFalse(formgate.declared_ok('garbage'))
 
 
 class ObligationsPin(unittest.TestCase):

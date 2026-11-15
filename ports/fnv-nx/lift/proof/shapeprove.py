@@ -36,7 +36,7 @@ def load_shapes(path):
             ck = shp.shape_key(ins[0]); fam = shp.family(ins[0])
         except shp.ShapeError: out.add(('decode', k)); continue
         out.add((fam, ck))
-    return sorted(k for f, k in out if f == 'int'), sorted(k for f, k in out if f == 'decode')
+    return sorted(k for f, k in out if f in ('int', 'sys')), sorted(k for f, k in out if f == 'decode')
 
 def pre_state(eip_sym):
     p = {'regs': {r: z3.BitVec(r, 32) for r in prove.REGS}, 'flags': {f: z3.BitVec(f, 1) for f in prove.FLAGS}, 'mem': z3.Array('mem', z3.BitVecSort(32), z3.BitVecSort(8))}
@@ -70,12 +70,14 @@ def one(key, args):
     if model_sail.LAST.get('fault_paths'): asm.append('A-SEGLIM')
     ids = res[len('FAILED(model-defect:'):-1].split(',') if res.startswith('FAILED(model-defect:') else []
     return fin('FAILED(model-defect)' if ids else res, note, defects=ids, assumptions=asm,
-               model_terms_sha=extra.get('model_sha256'), def0=extra.get('def0'), obligations=list(prove.OBLIGATIONS), isla_paths=model_sail.LAST.get('paths'), isla_fault_paths=model_sail.LAST.get('fault_paths'), **fns_fields())
+               model_terms_sha=extra.get('model_sha256'), def0=extra.get('def0'), declared=extra.get('declared'), platform_sha256=extra.get('platform_sha256'), obligations=list(prove.OBLIGATIONS), isla_paths=model_sail.LAST.get('paths'), isla_fault_paths=model_sail.LAST.get('fault_paths'), **fns_fields())
 
 def migrate(rec, args):
     """K migration of a record of this model (model_sha = the pinned IR) made before the closure key: rerun ONLY the isla model run of its shape (deterministic: same IR, config, inputs; the run is cached by the
     same key) and add model_fns + closure_sha.  The proof is not redone: the run that is repeated is the run the proof used."""
-    if rec.get('closure_sha') or rec.get('model_sha') != model_sail.ir_sha() or rec.get('result') != 'proved': return rec
+    if rec.get('model_sha') != model_sail.ir_sha() or rec.get('result') != 'proved': return rec
+    if rec.get('model_fns'): return dict(rec, closure_sha=model_sail.closure_sha(rec['model_fns']))     # re-key (closure rule changed, env v2): pure recomputation over the recorded executed set, on the IR the record was proved against
+    if rec.get('closure_sha'): return rec
     rep, fields = symform.parse_key(rec['shape']); eip_sym = rec.get('eip_mode', 'sym') == 'sym'
     model_sail.LAST.clear(); model_sail.model_post_shape(rep, fields, pre_state(eip_sym), eip_sym, int(args.timeout))
     return dict(rec, **fns_fields())
