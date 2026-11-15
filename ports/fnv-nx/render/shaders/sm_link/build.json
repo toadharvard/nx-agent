@@ -22,7 +22,8 @@
  },
  "include": [
   "ports/fnv-nx/render/shaders/translator/include",
-  "ports/fnv-nx/lib/sha256/include"
+  "ports/fnv-nx/lib/sha256/include",
+  "ports/fnv-nx/render/pair/include"
  ],
  "units": "all",
  "external": [],
@@ -35,7 +36,8 @@
   ],
   "roots": [
    "ports/fnv-nx/render/shaders/translator@host",
-   "ports/fnv-nx/lib/sha256@host"
+   "ports/fnv-nx/lib/sha256@host",
+   "ports/fnv-nx/render/pair@host"
   ],
   "libs": {
    "system": [

@@ -17,6 +17,7 @@
 #include <string.h>
 #include "fnvnx_shaders.h"
 #include "fnvnx_sdp.h"
+#include "nx_pair.h"      /* the one selection function of the draw path: nx_pair_variant */
 #include "fnvnx_dk_layout.h"   /* the product header: fnvnx_dk_vs_needs_complete is called, not copied */
 #include "fnvnx_sha256.h"
 /* The flag bits the enum of fnvnx_shaders.h defines: bits 0..log2(FNVNX_SHADER_FLAT_COLOR). Relies on FLAT_COLOR being the highest bit of the enum (reported: the header should
@@ -131,14 +132,7 @@ static int read_sdp(Forms *F, const char *path, int *entries) {
     fnvnx_sdp_free(&p); free(b); return 0;
 }
 
-typedef struct { uint8_t p[225]; int n; } Pairs;   /* FNVNX_DK_PAIR codes of the translator's reflection ("varyings_written" of a VS, "varyings_read" of a PS) */
-static int reflect_pairs(const char *json, const char *key, Pairs *o) {
-    char pat[40]; snprintf(pat, sizeof pat, "\"%s\": [", key); o->n = 0;
-    const char *q = json ? strstr(json, pat) : NULL; if (!q) return -1;
-    q += strlen(pat);
-    while (*q && *q != ']') { char *e; long v = strtol(q, &e, 10); if (e == q || v < 0 || v > 255 || o->n >= 224) return -1; o->p[o->n++] = (uint8_t)v; q = e; while (*q == ',' || *q == ' ') q++; }
-    return *q == ']' ? 0 : -1;
-}
+typedef struct { uint8_t p[225]; int n; } Pairs;   /* the declared FNVNX_DK_PAIR codes of a shader (fnvnx_shader_declared_pairs) */
 
 /* The flag sets of the variant key: every subset of the key bits (fnvnx_shaders.h: KEY_FLAGS = complement of NONKEY_FLAGS) among the bits of the enum. */
 static unsigned fsets[SM_ALL_FLAGS + 1]; static int nfs;
@@ -175,7 +169,7 @@ static int load_forms(const char *sdir, Forms *F, int *entries) {
 
 /* One stage certificate: translate, compile, read the signature two ways. status: ok | translate_fail | compile_fail | grammar_fail | reflection_fail | signature_disagree.
  * Returns the compiled shader (0 if none) and fills sig / pairs. */
-typedef struct { const char *status; char why[400]; uint8_t sig[32]; Pairs pr; int active, disagree, ndecl; unsigned shader; } StageRes;
+typedef struct { const char *status; char why[400]; uint8_t sig[32]; Pairs pr; unsigned major; int active, disagree, ndecl; unsigned shader; } StageRes;
 static void do_stage(const Form *f, unsigned flags, StageRes *o) {
     fnvnx_shader_opts opt; fnvnx_shader_result r; Decl decls[64];
     memset(&opt, 0, sizeof opt); memset(&r, 0, sizeof r); memset(o, 0, sizeof *o); o->status = "ok";
@@ -189,7 +183,8 @@ static void do_stage(const Form *f, unsigned flags, StageRes *o) {
         if (!ok) { o->status = "compile_fail"; glGetShaderInfoLog(sh, (int)sizeof o->why, NULL, o->why); }
         else if (grammar_read(r.glsl, o->sig, decls, 64, &o->ndecl)) o->status = "grammar_fail";
         else {
-            if (reflect_pairs(r.reflection_json, f->stage ? "varyings_read" : "varyings_written", &o->pr)) o->status = "reflection_fail";
+            uint32_t mj = 0; char er[160]; int dn = fnvnx_shader_declared_pairs(f->bc, f->n, o->pr.p, &mj, er, sizeof er);   /* the declared pairs: the one source the draw path uses */
+            if (dn < 0) o->status = "reflection_fail"; else { o->pr.n = dn; o->major = mj; }
             o->disagree = query_read(sh, decls, o->ndecl, &o->active);
             if (o->disagree) o->status = "signature_disagree";
         }
@@ -198,7 +193,7 @@ static void do_stage(const Form *f, unsigned flags, StageRes *o) {
 }
 
 /* ---- the stage certificate lines ---- */
-typedef struct { uint8_t sha[32]; int stage; unsigned flags; int ok; uint8_t sig[32]; Pairs pr; int disagree; int active, ndecl; } SLine;
+typedef struct { uint8_t sha[32]; int stage; unsigned flags; int ok; uint8_t sig[32]; Pairs pr; unsigned major; int disagree; int active, ndecl; } SLine;
 static const char *jkey(const char *ln, const char *key) { char pat[48]; snprintf(pat, sizeof pat, "\"%s\": ", key); const char *q = strstr(ln, pat); return q ? q + strlen(pat) : NULL; }
 static int unhex(const char *h, uint8_t *o, int n) { for (int i = 0; i < n; i++) { unsigned v; if (sscanf(h + 2 * i, "%2x", &v) != 1) return -1; o[i] = (uint8_t)v; } return 0; }
 static int parse_sline(const char *ln, SLine *s) {
@@ -218,6 +213,8 @@ static int parse_sline(const char *ln, SLine *s) {
     s->ndecl = atoi(q);
     if (s->ok) {
         if (!(q = jkey(ln, "signature_sha256")) || unhex(q + 1, s->sig, 32)) return -1;
+        if (!(q = jkey(ln, "major"))) return -1;
+        s->major = (unsigned)strtoul(q, NULL, 10);
         if (!(q = jkey(ln, "pairs")) || *q != '[') return -1;
         for (q++; *q && *q != ']';) { char *e; long v = strtol(q, &e, 10); if (e == q || s->pr.n >= 224) return -1; s->pr.p[s->pr.n++] = (uint8_t)v; q = e; while (*q == ',' || *q == ' ') q++; }
     }
@@ -245,15 +242,18 @@ static int read_stage_files(int nf, char **fv, SLines *S) {
 typedef struct { uint8_t vsig[32], psig[32]; int fl, cb; } Prog;
 static int cmp_prog(const void *a, const void *b) { const Prog *x = a, *y = b; if (x->fl != y->fl) return x->fl - y->fl; int c = memcmp(x->vsig, y->vsig, 32); return c ? c : memcmp(x->psig, y->psig, 32); }
 typedef struct { uint8_t sb[32], sc[32]; Pairs w; int fl; } VCls;
-typedef struct { uint8_t sig[32]; Pairs pr; int fl; } PCls;
+typedef struct { uint8_t sig[32]; Pairs pr; unsigned major; int fl; } PCls;
 static int cmp_pairs(const Pairs *a, const Pairs *b) { if (a->n != b->n) return a->n - b->n; return memcmp(a->p, b->p, (size_t)a->n); }
 static int cmp_vcls(const void *a, const void *b) { const VCls *x = a, *y = b; int c; if (x->fl != y->fl) return x->fl - y->fl; if ((c = memcmp(x->sb, y->sb, 32))) return c; if ((c = memcmp(x->sc, y->sc, 32))) return c; return cmp_pairs(&x->w, &y->w); }
-static int cmp_pcls(const void *a, const void *b) { const PCls *x = a, *y = b; int c; if (x->fl != y->fl) return x->fl - y->fl; if ((c = memcmp(x->sig, y->sig, 32))) return c; return cmp_pairs(&x->pr, &y->pr); }
+static int cmp_pcls(const void *a, const void *b) { const PCls *x = a, *y = b; int c; if (x->fl != y->fl) return x->fl - y->fl; if ((c = memcmp(x->sig, y->sig, 32))) return c; if (x->major != y->major) return x->major < y->major ? -1 : 1; return cmp_pairs(&x->pr, &y->pr); }
+static long rejected_pairs;   /* nx_pair_variant refused the pair (outside the link slots): the draw path cannot build it */
+static long uncovered_L;   /* programs whose link set L is not empty: the draw path translates both stages per pair (link_pairs), which this certificate does not cover */
 static Prog *programs(const SLines *S, long *np) {
+    uncovered_L = 0; rejected_pairs = 0;
     VCls *v = NULL; long nv = 0; PCls *p = NULL; long npc = 0;
     for (long i = 0; i < S->n; i++) {
         const SLine *a = &S->l[i]; if (!a->ok) continue; int fl = (a->flags & FNVNX_SHADER_FLAT_COLOR) ? 1 : 0;
-        if (a->stage == 1) { p = realloc(p, sizeof(PCls) * (size_t)(npc + 1)); memcpy(p[npc].sig, a->sig, 32); p[npc].pr = a->pr; p[npc].fl = fl; npc++; }
+        if (a->stage == 1) { p = realloc(p, sizeof(PCls) * (size_t)(npc + 1)); memcpy(p[npc].sig, a->sig, 32); p[npc].pr = a->pr; p[npc].major = a->major; p[npc].fl = fl; npc++; }
         else if (!(a->flags & FNVNX_SHADER_VS_COMPLETE)) {   /* the complete variant of the same bytecode and the same other bits */
             SLine key; memcpy(key.sha, a->sha, 32); key.flags = a->flags | FNVNX_SHADER_VS_COMPLETE;
             const SLine *c = bsearch(&key, S->l, (size_t)S->n, sizeof(SLine), cmp_sline);
@@ -268,7 +268,10 @@ static Prog *programs(const SLines *S, long *np) {
         for (long b = 0; b < npc; b++) {
             if (b && !cmp_pcls(&p[b - 1], &p[b])) continue;
             if (v[a].fl != p[b].fl) continue;
-            int cb = fnvnx_dk_vs_needs_complete(v[a].w.p, v[a].w.n, p[b].pr.p, p[b].pr.n);   /* the product's rule (fnvnx_dk_layout.h) */
+            uint32_t vv, pv, nl = 0; uint8_t L[2 * 224];   /* the draw path's selection function, not a copy of its rule */
+            if (nx_pair_variant(v[a].w.p, (uint32_t)v[a].w.n, (uint8_t)p[b].major, p[b].pr.p, (uint32_t)p[b].pr.n, (uint32_t)v[a].fl, &vv, &pv, L, &nl) < 0) { rejected_pairs++; continue; }
+            if (nl) { uncovered_L++; continue; }
+            int cb = (vv & FNVNX_SHADER_VS_COMPLETE) != 0;
             pg = realloc(pg, sizeof(Prog) * (size_t)(n + 1)); memcpy(pg[n].vsig, cb ? v[a].sc : v[a].sb, 32); memcpy(pg[n].psig, p[b].sig, 32); pg[n].fl = v[a].fl; pg[n].cb = cb; n++;
         }
     }
@@ -291,7 +294,7 @@ static int mode_stage(int argc, char **argv) {
             StageRes r; do_stage(f, fsets[v], &r); char sg[FNVNX_SHADER_KEY_HEX]; hex(r.sig, 32, sg);
             fprintf(o, "{\"format\": \"fnvnx-sm-stage/1\", \"bytecode_sha256\": \"%s\", \"stage\": %d, \"variant_flags\": %u, \"status\": \"%s\", \"signature_sha256\": \"%s\", \"pairs\": [", hs, f->stage, fsets[v], r.status, sg);
             for (int k = 0; k < r.pr.n; k++) fprintf(o, "%s%d", k ? ", " : "", r.pr.p[k]);
-            fprintf(o, "], \"declared_varyings\": %d, \"active_varyings\": %d, \"disagreements\": %d, \"log\": ", r.ndecl, r.active, r.disagree); jstr(o, r.why); fprintf(o, "}\n");
+            fprintf(o, "], \"major\": %u, \"declared_varyings\": %d, \"active_varyings\": %d, \"disagreements\": %d, \"log\": ", r.major, r.ndecl, r.active, r.disagree); jstr(o, r.why); fprintf(o, "}\n");
             if (r.shader) glDeleteShader(r.shader);
         }
     }
@@ -372,12 +375,12 @@ static int mode_summary(int argc, char **argv) {
         free(ln); fclose(fp);
     }
     if (nlines != np) { if (nlines < np) missing += np - nlines; else extra += nlines - np; }
-    red = refused + bad_stage + disagree + lfail + lbad + missing + extra;
+    red = refused + bad_stage + disagree + lfail + lbad + missing + extra + rejected_pairs;
     FILE *s = fopen(argv[3], "w"); if (!s) return 2;
     fprintf(s, "{\"format\": \"fnvnx-sm-link-summary/1\", \"universe\": %d, \"red\": %ld, \"details\": {\"entries\": %d, \"unique_bytecodes\": %d, \"vs\": %ld, \"ps\": %ld, \"flag_sets\": %d, \"refused\": %ld, "
                "\"stage_certificates\": %ld, \"stage_not_ok\": %ld, \"signature_disagreements\": %ld, \"programs\": %ld, \"link_certificates\": %ld, \"linked\": %ld, \"link_fail\": %ld, "
-               "\"bad_link_lines\": %ld, \"missing_certificates\": %ld, \"unexpected_certificates\": %ld}}\n",
-            F.n, red, entries, F.n, nvs, nps, nfs, refused, S.n, bad_stage, disagree, np, nlines, linked, lfail, lbad, missing, extra);
+               "\"bad_link_lines\": %ld, \"missing_certificates\": %ld, \"unexpected_certificates\": %ld, \"link_set_programs_uncovered\": %ld, \"pairs_rejected\": %ld}}\n",
+            F.n, red, entries, F.n, nvs, nps, nfs, refused, S.n, bad_stage, disagree, np, nlines, linked, lfail, lbad, missing, extra, uncovered_L, rejected_pairs);
     return fclose(s) ? 2 : 0;
 }
 
