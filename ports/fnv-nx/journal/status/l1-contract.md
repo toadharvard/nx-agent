@@ -1514,3 +1514,10 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
     - PD-LOADER-SHA256-ISA closed (the body is selected by __ARM_FEATURE_SHA2 from console_cpu.features);
     - a host variant of a guest root gets host semantics.
   - Correction: the "ftoi inputs restored" change is reverted. w22 merges pluginfix b707cd5c4, after which plugin entries name only the plugin.
+- 09:19 **w22 8aeeabb6e.**
+  - host_gl gl/4.5/core is cited to gl.xml, and glmin derives 4.5 from 109 entry points (test 8/8).
+  - The construction register has a "read at" column: 256 rows at 8aeeabb6e, 12 gone.
+  - Next:
+    - the pluginfix correction;
+    - glmin as a gate on cand2, reading the generated gl4 loader table;
+    - the EGL-Registry mirror (tools/khronos-egl) for the surfaceless citation.
