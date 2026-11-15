@@ -1397,3 +1397,6 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - gate_order at w23 2e013ed9 over L2 w1 ba8ceff1 (platform root, 114 objects): 178724 accesses, 178030 certified (O 77083, F 95314, L 1114, R 2807, D 1712), 694 uncertified (was 2368).
   - Uncertified: nonframe 372 (L2 w2 placement), sp-known overlap after escape 238 (L2: the order plugin emits them ordered), tag-X 45 and tag-D 39 (being defined).
   - Tier 2 odrdef: w23 c9c20af8.
+- w12h d7bd67694 accepted: guest.json = script only, keyed drv/mld stages.
+- w12 continues with the loader generated tables on claude/fnv-l1-contract-w12L2 = L5 84f12313f + b707cd5c4 + d7bd67694 + w22 c4544e18b, using w22's existing external/{stage,path} generated-input mechanism (no second form).
+- Profile + delta variants go to a fresh worker once targets.json (w22) exists.
