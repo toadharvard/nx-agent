@@ -152,6 +152,20 @@ def contract(name):
 
 def compare(ref, dfn):
     """None when the two MSVC names have equal contracts, else the first differing component."""
+    if not ref.startswith('?') or not dfn.startswith('?'):   # a C decoration (abi_msvcname.parse_c) encodes the calling convention and the argument bytes only
+        try:
+            if ref.startswith('?') or dfn.startswith('?'):
+                raise ValueError('%s vs %s: a C name against a C++ name' % (ref, dfn))
+            r, d = abi_msvcname.parse_c(ref), abi_msvcname.parse_c(dfn)
+        except ValueError as e:
+            return 'undecoded name: %s' % e
+        if r.name != d.name:
+            return 'C name %s vs %s' % (r.name, d.name)
+        if r.cc != d.cc:
+            return 'cc %s vs %s' % (r.cc, d.cc)
+        if r.arg_bytes != d.arg_bytes:
+            return 'argument bytes %s vs %s' % (r.arg_bytes, d.arg_bytes)
+        return None
     try:
         r, d = contract(ref), contract(dfn)
     except ValueError as e:

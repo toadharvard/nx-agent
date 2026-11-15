@@ -29,6 +29,7 @@ destructors, operators (kept as ('op', code)), data symbols (kind 'data', no fur
 Pure: str in, tuple out.
 """
 import collections
+import re
 
 Decl = collections.namedtuple('Decl', 'kind scope access member static virtual thunk this_cv cc ret params varargs structor')
 
@@ -293,6 +294,32 @@ def parse(name):
     if p.i != len(name):
         p.err('trailing characters')
     return Decl('function', scope, access, member and not static, static, virtual, thunk, this_cv, cc, ret, params, var, structor)
+
+
+# The decoration of a C name (an `extern "C"` function or a C unit's function), the other form of Microsoft's x86 naming (Microsoft Learn, "Decorated names", section
+# "Format of a C decorated name", and "Argument passing and naming conventions"):
+#   __cdecl     `_name`            the name with one leading underscore; no argument information
+#   __stdcall   `_name@N`          leading underscore, then `@` and the number of bytes in the parameter list, in decimal
+#   __fastcall  `@name@N`          leading `@`, then `@` and the number of bytes in the parameter list, in decimal
+# Nothing else is a C decoration (a name starting with `?` is the C++ grammar above).  A C name encodes the calling convention and the argument byte count and
+# nothing about the types: that is all parse_c returns.  The identifier is the C identifier alphabet of the compiler (letters, digits, `_`, `$`; no leading digit).
+_C_IDENT = r'[A-Za-z_$][A-Za-z0-9_$]*'
+_C_NUM = r'(0|[1-9][0-9]*)'
+CDecl = collections.namedtuple('CDecl', 'kind cc name arg_bytes')
+
+
+def parse_c(name):
+    """A C decorated name -> CDecl('cfunction', cc, identifier, argument bytes or None for cdecl); ValueError('<name>: <what>') for anything that fits none of the three forms."""
+    m = re.fullmatch('@(%s)@%s' % (_C_IDENT, _C_NUM), name)
+    if m:
+        return CDecl('cfunction', 'fastcall', m.group(1), int(m.group(2)))
+    m = re.fullmatch('_(%s)@%s' % (_C_IDENT, _C_NUM), name)
+    if m:
+        return CDecl('cfunction', 'stdcall', m.group(1), int(m.group(2)))
+    m = re.fullmatch('_(%s)' % _C_IDENT, name)
+    if m:
+        return CDecl('cfunction', 'cdecl', m.group(1), None)
+    raise ValueError('%s: not a C decorated name (cdecl _name, stdcall _name@N, fastcall @name@N) and not a C++ name' % name)
 
 
 def parse_qualified_type_name(text):
