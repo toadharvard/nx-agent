@@ -1533,3 +1533,15 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - w24 (bd6646a1a): next would have been the selftests index;
   - w25 (547405ab): next would have been farm verification, relocations.
 - w19 is archived. These items resume after the first frame or when the budget lifts.
+- 09:24 **Archived with branches kept.** Resume points:
+  - **w22:** w22-construction d6dc466e7 (pluginfix merged, recipe check valid on 8 roots). Open: bridgetable rows 256-259, the glmin gate, the EGL mirror.
+  - **w25:** w25 7cf4bd302, elffacts/2. It has relocations, entry, call edges, address-taken symbols and archive members, plus profiles and variant deltas (with the w22 and L2 DATAMODEL merges); tlsmodel and pcrel_abs read the record.
+    - Verified on x86 toy links only. The test_recipe and test_link stage tests have never run.
+    - Open: the object-facts proposal; --emit-relocs for call edges; L5's roots on profiles; the elffacts.json publisher.
+  - **w20:** w20u 81b72e695. The a64access host root links through the recipe (LLVM external tools/llvm18-dev 2b9a44197); its ldcheck is red until ruling A (fe396a360, link/ldcheck.py) is applied at merge.
+    - Open: deleting A64_BUILD/tool(); unit_terminators as a stage; the probe stage; the ELF universe.
+  - **w23:** w23r 8b6b7ed0. The decltype sections parse on 52 of 112 objects (28510 rows, 1625 symbols); ctype n/N is not measured, and ctypes_compat needs a performance pass.
+    - Defect: gate_abi reads decltype only on linkage `c` rows; it must read it whenever the section is present.
+    - L2 w3's ODRDEF error on dshow_int.h:585 is still open.
+    - Open: crossing, rtasm (b) and (a').
+- w24: waiting for its stop line before archiving.
