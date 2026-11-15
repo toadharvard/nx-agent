@@ -222,7 +222,9 @@ def step(ins, st, u8, cells=True):
         if mn == 'mov' and c is not None and n == 2:
             src = ops[1]
             for k in [k for k in list(st.r) + list(st.al) if isinstance(k, tuple) and k[1] == c[1] and k != c and abs(k[2] - c[2]) < 4]: st.r.pop(k, None); st.al.pop(k, None); st.nz.pop(k, None); st.gt.pop(k, None)
-            if src.type == X.X86_OP_REG and src.size == 4: copy(st, c, FULL.get(ins.reg_name(src.reg)))
+            if src.type == X.X86_OP_REG and src.size == 4:
+                copy(st, c, FULL.get(ins.reg_name(src.reg)))
+                if c in st.gt: st.gt[c] = (st.gt[c][0], st.gt[c][1] + ((ins.address, 'store', 0),))
             else: setr(st, c, (src.imm & M32, 0) if src.type == X.X86_OP_IMM else TOP)
             return
         b = FULL.get(ins.reg_name(m.base)) if m.base else None
@@ -232,17 +234,23 @@ def step(ins, st, u8, cells=True):
         else: kill_cells(st)
     if mn == 'mov' and n == 2 and r32:
         s = ops[1]
-        if s.type == X.X86_OP_REG and s.size == 4: copy(st, reg, FULL.get(ins.reg_name(s.reg))); return
+        if s.type == X.X86_OP_REG and s.size == 4:
+            copy(st, reg, FULL.get(ins.reg_name(s.reg)))
+            if reg in st.gt: st.gt[reg] = (st.gt[reg][0], st.gt[reg][1] + ((ins.address, 'mov', 0),))
+            return
         if s.type == X.X86_OP_IMM: setr(st, reg, (s.imm & M32, 0)); return
         c = cell(ins, s, st, cells)
-        if c is not None: copy(st, reg, c); return
+        if c is not None:
+            copy(st, reg, c)
+            if reg in st.gt: st.gt[reg] = (st.gt[reg][0], st.gt[reg][1] + ((ins.address, 'load', c[2]),))
+            return
         setr(st, reg, TOP); return
     if mn in ('xor', 'sub') and r32 and n == 2 and ops[1].type == X.X86_OP_REG and ops[1].reg == d.reg: setr(st, reg, (0, 0)); return
     if mn in ('add', 'sub') and r32 and n == 2 and ops[1].type == X.X86_OP_IMM:
         c = ops[1].imm & M32; a = st.g(reg); tg = st.gt.get(reg)
         if mn == 'sub': setr(st, reg, add(a, -c)); st.f = ('sub', reg, a, c)
         else: setr(st, reg, add(a, c))
-        if tg is not None: st.gt[reg] = (tg[0], tg[1] + (('add', (c if mn == 'add' else -c) % N),))
+        if tg is not None: st.gt[reg] = (tg[0], tg[1] + ((ins.address, 'add', (c if mn == 'add' else -c) % N),))
         return
     if mn == 'cmp' and n == 2:
         l = locof(st, ins, d, cells) if d.type != X.X86_OP_IMM else None
@@ -296,7 +304,7 @@ def step(ins, st, u8, cells=True):
                 vs = [u8((D + q[0] + k) % N) for k in range(q[1] + 1)]
                 if None not in vs:
                     setr(st, reg, (min(vs), max(vs) - min(vs)))
-                    if tg is not None: st.gt[reg] = (tg[0], tg[1] + (('byte', D),))
+                    if tg is not None: st.gt[reg] = (tg[0], tg[1] + ((ins.address, 'byte', D),))
                     return
         setr(st, reg, (0, 255 if s.size == 1 else 65535)); return
     for w in wr:
@@ -353,7 +361,7 @@ def refine(ins, st, taken):
     o = st.cp()
     if kind == 'sub': setr_keep(o, loc, add(p, -c)); return o
     cid = o.al.get(loc)
-    tag = (ins.address, mn, taken, c, loc, c if cc == 'be' else c - 1) if kind == 'cmp' and not sg and cc in ('be', 'b') and isinstance(loc, tuple) and loc[1] == 'ebp' else None
+    tag = (ins.address, mn, taken, c, loc, c if cc == 'be' else c - 1, bytes(ins.bytes).hex(), 'inclusive' if cc == 'be' else 'exclusive') if kind == 'cmp' and not sg and cc in ('be', 'b') and isinstance(loc, tuple) and loc[1] == 'ebp' else None
     for k in [loc] + [k for k, v in o.al.items() if cid is not None and v == cid and k != loc]:
         q = join_meet(o.g(k), p) if o.g(k) != TOP else p
         setr_keep(o, k, q)
@@ -448,22 +456,28 @@ def _cert(st, ireg, v, T, words, ins, site, u8):
     """the 'jtab-guard' certificate of a resolution that relies on frame cells although a frame address is formed in the cone (OWNER 6: nothing but the function writes the cell between guard and reload).
     The index register holds the (unsigned, ja/jae/jbe/jb) guarded value of ONE ebp cell, through the recorded steps (add/sub constants, byte-table lookups): the guard dominates the jump (the tag survives
     a join only when every path carries the same guard), and no store to the cell, call, unknown store or write of ebp lies between the guard and the reload (each drops the tag). The interval the guard alone proves, pushed
-    through the steps, must be the interval of the resolution. -> a dict, or None (no certificate)."""
-    tg = st.gt.get(ireg)
-    if tg is None or ins.mnemonic != 'jmp' or ins.operands[0].mem.scale != 4: return None
-    (gva, jcc, taken, imm, loc, bound), steps = tg
-    q = (0, bound); b = None; bext = None
-    for k, a in steps:
-        if k == 'add': q = add(q, a)
-        else:
-            if q[1] >= (1 << 16): return None
-            vs = [u8((a + q[0] + i) % N) for i in range(q[1] + 1)]
-            if None in vs: return None
-            b = a; bext = q[1] + 1; q = (min(vs), max(vs) - min(vs))
-    if q != v: return None
+    through the steps, must be the interval of the resolution. -> (dict, None) or (None, reason code and text)."""
     import hashlib
-    return {'kind': 'jtab-guard', 'site_va': site, 'guard_va': gva, 'cell': loc[2], 'jcc': jcc, 'edge': 'taken' if taken else 'not-taken', 'N': imm, 'extent': v[1] + 1, 'index_lo': v[0] if v[0] < N // 2 else v[0] - N,
-            'T': T, 'scale': 4, 'steps': tuple(steps), 'B': b, 'b_extent': bext, 'entries_sha': hashlib.sha256(b''.join(w.to_bytes(4, 'little') for w in words)).hexdigest(), 'assumption': 'OWNER 6'}
+    tg = st.gt.get(ireg)
+    if tg is None: return None, 'C1/C2: no unsigned guard on one ebp cell dominates the jump with the cell unwritten up to the reload'
+    if ins.mnemonic != 'jmp' or ins.operands[0].mem.scale != 4: return None, 'C3: not a scale-4 table jump'
+    (gva, jcc, taken, imm, loc, bound, jbytes, rule), steps = tg
+    q = (0, bound); b = None; bext = None; bsha = None; st2 = []
+    for va, k, a in steps:
+        if k == 'add': q = add(q, a)
+        elif k == 'byte':
+            if q[1] >= (1 << 16): return None, 'C3: byte-table index interval too wide'
+            vs = [u8((a + q[0] + i) % N) for i in range(q[1] + 1)]
+            if None in vs: return None, 'C3: byte table outside the read-only image'
+            b = a; bext = q[1] + 1; bsha = hashlib.sha256(bytes(vs)).hexdigest(); q = (min(vs), max(vs) - min(vs))
+        st2.append((va, k, a))
+    if q != v: return None, 'C3: the guard alone gives %s after the steps, the resolution %s' % (q, v)
+    loads = [x for x in steps if x[1] == 'load']
+    return {'kind': 'jtab-guard', 'site_va': site, 'jmp_va': site, 'guard_va': gva, 'reload_va': loads[0][0] if loads else None,
+            'cell': {'base': 'ebp', 'disp': loc[2], 'width': 4}, 'guard_width': 4, 'reload_width': 4, 'jcc': jcc, 'jcc_bytes': jbytes, 'edge': 'taken' if taken else 'not-taken', 'N': imm,
+            'extent_rule': 'N+1 inclusive bound' if rule == 'inclusive' else 'N exclusive bound', 'guard_extent': bound + 1, 'extent': v[1] + 1, 'index_lo': v[0] if v[0] < N // 2 else v[0] - N,
+            'T': T, 'scale': 4, 'steps': tuple(st2), 'B': b, 'b_extent': bext, 'b_entries_sha': bsha,
+            'entries_sha': hashlib.sha256(b''.join(w.to_bytes(4, 'little') for w in words)).hexdigest(), 'assumption': 'OWNER 6'}, None
 
 
 def resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords):
@@ -544,8 +558,10 @@ def _resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords, 
         out.append(w); addrs.append(a)
     cert = None
     if need6:
-        cert = _cert(st, ireg, v, T, out, ins, site, u8)
-        if cert is None: return _resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords, True)
+        cert, why = _cert(st, ireg, v, T, out, ins, site, u8)
+        if cert is None:
+            STATS.setdefault('guard_residue', []).append((site, why))
+            return _resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords, True)
     r = Tg(out); r.cert = cert; r.addrs = tuple(addrs); r.base = T; r.dsite = site + ins.disp_offset; r.lo = v[0] if v[0] < N // 2 else v[0] - N; r.hi = r.lo + v[1]; return r, None
 
 

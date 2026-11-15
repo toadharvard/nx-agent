@@ -148,14 +148,14 @@ class F(unittest.TestCase):
     def test_owner6_certificate_for_an_escaped_frame_address(s):
         code = b'\x8d\x4d\xec\x89\x55\xec\x83\x7d\xec\x04\x77\x0a\x8b\x45\xec' + jmp_tab(TAB) + b'\xc3'
         c = s.cert(code, relocs=[FN + 18] + s.R5)
-        s.assertEqual((c['kind'], c['site_va'], c['guard_va'], c['cell'], c['jcc'], c['edge'], c['N'], c['extent'], c['B'], c['assumption']),
-                      ('jtab-guard', FN + 15, FN + 10, -0x14, 'ja', 'not-taken', 4, 5, None, 'OWNER 6'))
+        s.assertEqual((c['kind'], c['jmp_va'], c['guard_va'], c['reload_va'], c['cell'], c['jcc'], c['jcc_bytes'], c['edge'], c['N'], c['extent_rule'], c['guard_extent'], c['extent'], c['B'], c['assumption']),
+                      ('jtab-guard', FN + 15, FN + 10, FN + 12, {'base': 'ebp', 'disp': -0x14, 'width': 4}, 'ja', '770a', 'not-taken', 4, 'N+1 inclusive bound', 5, 5, None, 'OWNER 6'))
         with earlier(): s.red(code, tab(*OUT[:5]), relocs=[FN + 18] + s.R5)
     def test_certificate_through_a_byte_table(s):
         code = b'\x8d\x4d\xec\x89\x55\xec\x83\x7d\xec\x03\x77\x11\x8b\x45\xec' + b'\x0f\xb6\x88' + u32(RO) + jmp_tab(TAB, 0x8d) + b'\xc3'
         t, why = run(code, b'\x90' * 4 + tab(OUT[0], OUT[1]), ro=bytes([1, 2, 2, 1]), relocs=[FN + 25, TAB + 4, TAB + 8])
         s.assertIsNone(why); c = t.cert
-        s.assertEqual((c['B'], c['b_extent'], c['extent'], c['steps']), (RO, 4, 2, (('byte', RO),)))
+        s.assertEqual((c['B'], c['b_extent'], c['extent'], c['steps']), (RO, 4, 2, ((FN + 12, 'load', -0x14), (FN + 15, 'byte', RO))))
     def test_no_guard_on_the_cell_has_no_certificate(s):
         code = b'\x8d\x4d\xec\x89\x55\xec\x83\xfa\x04\x77\x0b\x8b\x45\xec' + jmp_tab(TAB) + b'\xc3'     # the guard is on edx, the reload is of the cell
         s.red(code, tab(*OUT[:5]), relocs=[FN + 17] + s.R5)
