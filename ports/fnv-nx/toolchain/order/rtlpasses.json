@@ -953,7 +953,7 @@
     },
     {
      "file": "function.cc",
-     "line": 1972,
+     "line": 1973,
      "ident": "INSN_P"
     }
    ]
@@ -1105,7 +1105,7 @@
   {
    "pass": "pass_free_cfg",
    "class": "no-mem",
-   "reason": "execute is free_bb_for_insn, which clears BLOCK_FOR_INSN of every insn (cfgrtl.cc:457-459), and, under DELAY_SLOTS (0 on aarch64), df_analyze; insert_section_boundary_note adds a note; no real insn is touched",
+   "reason": "execute is free_bb_for_insn, which clears BLOCK_FOR_INSN of every insn (cfgrtl.cc:457-459), and, under DELAY_SLOTS, df_analyze (analysis only); insert_section_boundary_note adds a note; no real insn is touched",
    "files": {
     "cfgrtl.cc": "8a2a734476807fc4958d4dced2346e1cbf098b7e4c6b09c588810b272139602a"
    },
