@@ -288,6 +288,10 @@ declared debs) in place of `artifact`: the way to run a build tool chain (bash, 
   they are no outputs; in the key); `timeout_s` (default 7200) kills the step, as a red `run:<root>:<name>`.
 - The job count is the environment variable `JOBS` of the step (the build's job count). It and the timeout are outside the key (sandbox `unkeyed`): they change how long a step
   takes, not what it computes. A step whose output depended on JOBS would be a non-deterministic build, and the determinism gate reds it.
+- An input `{"plugin": NAME}` (a name in the root's `plugins`) is the stage's `/out` tree of that plugin (`NAME.so`), built by the plugin stage against the root's `compiler`
+  external (its `-print-file-name=plugin` headers): a stage input, so the step's key holds the plugin's content, and a plugin source change re-runs that step and what reads it, not the steps before it.
+  A root that builds a compiler in two steps is two roots: the first (the stage-1 compiler, a directory output), the second with `compiler` = that output as a stage external
+  (`{name, root, output, at}`), `plugins` and the final step taking `{"plugin": NAME}` inputs.
 Tests: `tests/test_toolstep.py`, `tests/test_sandbox.py` case 13.
 
 ### Stage refs

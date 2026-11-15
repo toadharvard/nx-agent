@@ -1246,6 +1246,9 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
                 elif isinstance(p, dict) and set(p) == {"external", "path"}:
                     if p["external"] not in [e.get("name") for e in rec.get("external", []) if isinstance(e, dict)]:
                         err.append("run[%d].inputs: external %r is not declared" % (i, p["external"]))
+                elif isinstance(p, dict) and set(p) == {"plugin"}:   # the built plugin of this root (its .so), mounted like a stage input
+                    if not (tool and p["plugin"] in [x.get("name") for x in rec.get("plugins", []) if isinstance(x, dict)]):
+                        err.append("run[%d].inputs: plugin %r is not declared in this root's `plugins` (or the step is no tool step)" % (i, p["plugin"]))
                 elif not (isinstance(p, dict) and set(p) == {"stage", "path"} and all(isinstance(v, str) for v in p.values())):
                     err.append("run[%d].inputs: %r is neither a path, {external, path} nor {stage, path}" % (i, p))
         outs = g["outputs"]
@@ -2298,6 +2301,17 @@ class Job:
                 if ref["path"] in self.blocked:
                     raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["input %s is not produced: %s is red" % (ref["path"], self.blocked[ref["path"]])]})
                 ins.append({"at": at, "tree": cas.ingest(os.path.join(ws, "root", ref["path"]), self.store)})
+                continue
+            if isinstance(ref, dict) and set(ref) == {"plugin"}:   # the .so built by this root's plugin stage (against the root's compiler external): a stage input, so in the key
+                if not self.built:
+                    try:
+                        self.built = self.plugins(ws)
+                    except BuildRed as r:
+                        raise BuildRed(dict(r.args[0], stage="run:%s:%s" % (self.root, g["name"]) + " <- " + r.args[0]["stage"]))
+                tree = next((t for nm, t, _ in self.built if nm == ref["plugin"]), None)
+                if tree is None:
+                    raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["plugin %s is not built" % ref["plugin"]]})
+                ins.append({"at": at, "tree": tree})
                 continue
             if isinstance(ref, str):   # a repo-relative tracked file or directory (git ls-files only), like a generator input
                 sub = [f for f in self.files if f == ref or under(f, ref)]
