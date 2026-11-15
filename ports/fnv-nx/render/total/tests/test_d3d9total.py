@@ -27,9 +27,10 @@ REPO = os.path.normpath(os.path.join(PORT, "..", ".."))
 sys.path.insert(0, TOTAL)
 import gate_d3d9total as G  # noqa: E402
 
-SWITCHED = G.module_lists(os.path.join(PORT, "render", "d3d9", "front", "gen_enums.py"), ["SWITCHED", "INDEXED", "VENDOR_FOURCC"])["SWITCHED"]
+SWITCHED = G.module_lists(os.path.join(PORT, "render", "d3d9", "env", "gen_enums.py"), ["SWITCHED", "INDEXED"])["SWITCHED"]
 CACHE = os.path.join(tempfile.mkdtemp(prefix="t-d3d9total-"), "cache")   # the one cache of this test (a test does not see GATE_CACHE)
 os.makedirs(CACHE)
+VENDOR = G.vendor_fourcc(PORT, tempfile.mkdtemp(prefix="t-d3d9total-wine-"), CACHE)[0]   # the generator's own rule over the recipe's pinned Wine mirror
 OPS = json.load(open(G.total_output("gen/sm_table.json", CACHE)))["opcodes"]   # the generated table, read as the gate reads it
 SM_ALL = ["sm:" + k for k in sorted(OPS)]
 SM_OP = ["sm:" + k for k in sorted(OPS) if OPS[k]["opnum"] < 0xFFF0]
@@ -125,13 +126,12 @@ def enum_ids(e):
     spec = json.loads(subprocess.run([sys.executable, "-I", os.path.join(PORT, "bridgefacts", "d3d9", "d3d9_spec.py"), "--stdout", os.path.join(PORT, "shim", "include")],
                                      check=True, capture_output=True).stdout)["enums"][e]
     if e == "D3DFORMAT":
-        spec = spec + ["D3DFMT_" + s.strip() for s in G.module_lists(os.path.join(PORT, "render", "d3d9", "front", "gen_enums.py"),
-                                                                      ["SWITCHED", "INDEXED", "VENDOR_FOURCC"])["VENDOR_FOURCC"]]
+        spec = spec + ["D3DFMT_" + s.strip() for s in VENDOR]
     return ["enum:%s:%s" % (e, n) for n in spec]
 
 
 ENUM_ALL = [i for e in SWITCHED for i in enum_ids(e)]
-GEN = "render/d3d9/front/gen_enums.py"
+GEN = "render/d3d9/env/gen_enums.py"
 WRITE = 'open(argv[0], "w").write(render(build()))'
 
 

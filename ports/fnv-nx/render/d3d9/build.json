@@ -110,12 +110,17 @@
    ]
   },
   {
-   "tool": "ports/fnv-nx/render/d3d9/front/gen_enums.py",
+   "tool": "ports/fnv-nx/render/d3d9/env/gen_enums.py",
    "args": [
     "/out/gen/d3d9_enums.gen.h",
-    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC"
+    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC",
+    "/ext/wine-d3d9-formats",
+    "/in/ports/fnv-nx/shim/include/d3d9types.h"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/shim/include/d3d9types.h",
+    "ports/fnv-nx/render/d3d9/env"
+   ],
    "outputs": [
     "gen/d3d9_enums.gen.h"
    ]
