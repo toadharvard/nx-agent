@@ -392,3 +392,6 @@ After the first frame:
   - libstdc++ configure is blocked: link tests can't resolve fnvnx_dispatch/fnvnx_call_fp (TLS) until the product link.
   - Rejected: a configure-only provider (a stub) and a plugin-free newlib (a second path).
   - Rule: gcc_no_link=yes is correct by construction, and libstdc++ takes GCC's with_newlib table. The farm is finding the one unguarded AC_LINK check (macro and file:line) and whether one of our options enables it.
+  - Found: the unguarded check is AC_CHECK_FUNC(clock_gettime), acinclude.m4:1428, enabled by our own restated --enable-libstdcxx-time=yes (build.sh:186, inherited from L5 w14's toolchain/gcc/build.sh).
+  - Rule CFG-FUNC: every ac_cv_func_* the generated configure tests is answered from the built runtime archives' defined function symbols (nm), listed in the MANIFEST. The libstdc++ options move into the guest_compiler.json runtime_configure record.
+  - toolchain/gcc/build.sh (L5 w14) is deleted when the none-elf pin replaces msvcmodel13 (rule 3).
