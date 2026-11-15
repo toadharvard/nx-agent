@@ -1245,3 +1245,12 @@ Paused: w3b, w4, farm; no other work.
     - Global objstub: 2204/2208, 18 findings, 0 of them render (L5 w10 and L1 hold the rest). The assumptions gate is 135/136; the one finding is toolchain/names/plugsym.inc:1, from w12L2 6135d0bed, routed to L2.
     - Next: w6 merges w8 e3826a54 into w6-root and re-runs the builds and gates. That head is the cand4 candidate for L1.
 - bottleneck: the w6 merge of w8 (cand4 candidate); the L2 fix for plugsym.inc:1; L1 cand3/cand4 for the trunk (a5c8f427).
+- 21:19Z w6 a02e400ba: the cand4 candidate, sent to L1. It is w6-root merged with w8-keyed e3826a54.
+    - Builds green: total, translator, smscan, d3d9 (69 objects), gl4 (17), pair, pair@host, gl4shim, sm_link, lib/sha256.
+    - test_d3d9total: 332/332, 45/45 killed.
+    - objstub: 2204/2208, 18 findings, 0 render.
+    - abspath: 8 findings, 0 render (L3a lift/fnvlift, L1 recipe.py:3468/3472).
+    - assumptions: 135/136; plugsym.inc:1 is fixed at L2 6d9f72b18 and arrives with the pin.
+    - The 8 translator V findings L4 reported at cand3 41a8855d4 are closed at 717e82995. cand3 has no translator root.
+    - w6 next: a standalone gate_d3d9total result line, test_gl4_cursor, sm_link on farm1 once the w12 fixes land, then the COM_SPEC rebase.
+- bottleneck: L1 cand3 and cand4 (the trunk is at a5c8f427); the w12 recipe defects for sm_link. 2 of 4 workers busy (w6, farm1); w8 archived.
