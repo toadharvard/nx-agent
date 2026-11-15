@@ -937,3 +937,7 @@ Paused: w3b, w4, farm; no other work.
         1. merge L6A 1ca99e8bd and remove the -1 from nx_pair_ffp_row; w5's final run follows;
         2. row 15: the UBO block is generated from the C struct, with a std140 offset static_assert;
         3. the COM_SPEC rebase when cand3 lands.
+- 15:55Z w6 ece3d7b16: L6A 1ca99e8bd merged; nx_pair_ffp_row has no -1; d3d9total 332/332; pair@host and gl4shim green.
+    - w6 (doing): remove the __builtin_unreachable (undefined behaviour) by exact typing: nx_pair_ffp_vs_row and nx_pair_ffp_ps_row(bool flat), with the stage named statically at each call site.
+    - Gap: ffp_prog.cpp is compiled nowhere until L1's plugin mount fix (crossing_terms.inc).
+    - w5 (doing): final sm_link on ece3d7b16. The universe adds the 5 scale rows and the FFP × translator pairs per shade mode.
