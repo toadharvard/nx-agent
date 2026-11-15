@@ -406,3 +406,8 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - 21:57: The objstub red in tests/bootrt/rt.c blocks cand4 (uncited syscalls, an exit(1) fallback, reach_violation not via the host slot).
   - w9 session_01KmtZKQe9ND19VuBYDFeesS, branch claude/fnv-l4-verify-w9 from cand3: doing. It applies L1's accepted rule: the exit callback of nxgl4_shim_set is required, reach_violation exits only through it, logging goes through a second callback or is deleted, and rt.c has no syscall and no fallback.
 - bottleneck: waiting on L3a for the post-cand3 pack store | 2 workers (w8 intake, w9 bootrt)
+- 22:05: w8 at 478c8914b merges cand3 4952b11b3, w7-u and w6-r. recipe.check: gl4 0, bootguest 0, icount 0, boot 2 errors (cand3's loader lacks the KEYS/MODULES/IMPORTED/BRIDGE outputs).
+  - The icount link is red at guest.ld:50, undefined __fnvnx_guest_hdr (crt0). The objects' undefined set is empty, and the build did not pull lift/pack.
+  - Blocked on L1: cand3's recipe.py has no link.entry and lacks loader outputs that L3a's L1 copy has (two lineages), and the derived closure is not seeded from link-script symbols. Reported with the proposed rule.
+  - w9 12a285993: bootrt objstub fix. Under review, with the no-callback branches of guest_ptr and on_present still to remove, then checks on cand3 c0f504e2a.
+- bottleneck: waiting on L1 for one recipe lineage (link.entry, loader outputs) and the closure seed; waiting on L3a for the post-cand3 pack | 2 workers
