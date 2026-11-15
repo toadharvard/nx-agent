@@ -1663,3 +1663,8 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - cand3 (w12): x86-64 body analyzer (pinned binutils, same rule set); L5 3d1775bb6 declared_machine rows 3/4/6/8 (std:) and 12 (hostabi only for noreturn of own exit) after std: grammar.
 - L5 item 4 (TerminateProcess lasterror column): column accepted, L5 writes the row; parser fix if needed goes to w12.
 - lasterror grammar (to w9, for cand3 via w12): 7th column after value; `-` | `NAME=<decimal>` (NAME [A-Z][A-Z0-9_]*, winerror/winsock value); the error set on the path that returns the row's value; noreturn => `-`; others `-` only when the source leaves the last error unchanged; parser, header and 3 selftests in the same commit.
+- cand4 queue (L6, orchestrator-accepted 13:44Z), given to the cand4 opener after the cand3 merge:
+  1. claude/fnv-l6-render-w6-root de39fc7b0;
+  2. claude/fnv-l6-render-w5-smlink 2d61e9fb9. At the merge, keep w6-root's admit rows (gl4shim, smscan, pair, bridgefacts) and its gen_sm_rows.py; w5's sm_link host libs add libgcc_s.
+  - L6 numbers at 2d61e9fb9: 1809 bytecodes; 115776 stage certificates, 0 not ok; 120392 programs, all linked; sm_link red 0.
+  - The guest builds of d3d9, translator and sha256 stay measurements until cand3's hermetic guest stages.
