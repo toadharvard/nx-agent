@@ -14,6 +14,7 @@ A pair that is not proved leaves the part to the whole query (None): matching is
 import hashlib, os
 import z3
 
+_QCFILE = os.environ.get('SIMD_QCACHE')
 _PROVED, _UNDECIDED = set(), set()          # canonical piece queries of this process: proved (unsat) / not decided within the limit
 
 EXP = {32: (8, 23), 64: (11, 52)}
@@ -141,30 +142,46 @@ def _leaf_subst(pairs_ops):
 
 
 NORMAL = 4                      # classes(): index of the class 'exponent neither all zeros nor all ones'
+REFINE_MS = 3000               # time limit (ms) of a query over an interval of several exponent values; a single value gets the caller's full limit
 MAX_ASKS = 256                  # solver calls one case may use for its exponent refinement (a bound of work: a case that needs more is undecided)
 
 
+def _proved(qk):
+    """remember a proved (unsat) canonical query, in this process and in $SIMD_QCACHE (shared with simdcheck's own proved-query cache: sha256 of the SMT-LIB text of the assertions)"""
+    _PROVED.add(qk)
+    if _QCFILE: open(_QCFILE, 'a').write(qk + '\n')
+
+
+_MT = [0]
+
+
+def _load():
+    """proved queries of the shared file (other shards write it): re-read when its modification time changed"""
+    if _QCFILE and os.path.exists(_QCFILE) and os.path.getmtime(_QCFILE) != _MT[0]:
+        _MT[0] = os.path.getmtime(_QCFILE); _PROVED.update(l.strip() for l in open(_QCFILE))
+
+
 def _decide(mk_solver, cs, goal, nrm, timeout, _):
-    """'unsat' iff  cs /\ goal  is unsat.  When the solver does not decide it, the exponent interval of a normal operand is bisected: the two halves are a complete, disjoint partition of the interval (the base interval 1 .. 2^eb - 2 is
+    """'unsat' iff  cs and goal  is unsat.  When the solver does not decide it, the exponent interval of a normal operand is bisected: the two halves are a complete, disjoint partition of the interval (the base interval 1 .. 2^eb - 2 is
     the class itself), and the case holds iff both halves hold; sat in any piece is sat of the case.  A single exponent value that is still undecided, or more than MAX_ASKS calls, is 'unknown'."""
     asks = [0]
     def go(ivs):
         rng = [z3.And(z3.UGE(z3.Extract(w - 2, EXP[w][1], v), lo), z3.ULE(z3.Extract(w - 2, EXP[w][1], v), hi)) for (w, v), (lo, hi) in zip(nrm, ivs)] if ivs else []
-        q = list(cs) + rng + [goal]; qk = hashlib.sha256(z3.And(*q).sexpr().encode()).hexdigest()
+        _load(); q = list(cs) + rng + [goal]; qk = hashlib.sha256(z3.And(*q).sexpr().encode()).hexdigest()
         if qk in _PROVED: return 'unsat'
         if qk in _UNDECIDED: return 'unknown'
         asks[0] += 1
         if asks[0] > MAX_ASKS: return 'unknown'
-        res = mk_solver(q, timeout).check()
-        if res == z3.unsat: _PROVED.add(qk); return 'unsat'
-        if res == z3.sat: return 'sat'
         widths = [hi - lo for lo, hi in ivs]
+        res = mk_solver(q, timeout if not ivs or max(widths) == 0 else min(timeout, REFINE_MS)).check()          # an interval that is not a single exponent value is asked briefly: undecided means bisect
+        if res == z3.unsat: _proved(qk); return 'unsat'
+        if res == z3.sat: return 'sat'
         if not ivs or max(widths) == 0: _UNDECIDED.add(qk); return 'unknown'
         j = widths.index(max(widths)); lo, hi = ivs[j]; mid = (lo + hi) // 2
         for half in ((lo, mid), (mid + 1, hi)):
             r = go(ivs[:j] + [half] + ivs[j + 1:])
             if r != 'unsat': return r
-        _PROVED.add(qk); return 'unsat'
+        _proved(qk); return 'unsat'
     return go([(1, (1 << EXP[w][0]) - 2) for w, v in nrm])
 
 
@@ -213,14 +230,17 @@ def prove_flags(g0, nf, env, mx, fpl, mk_solver, timeout):
                 return t
             lt, rt = orr(ls), orr(rs)
             ovs = sorted(key)
+            ren = [(byname[k][1], z3.BitVec('lane%d' % i, byname[k][0])) for i, k in enumerate(ovs)]          # canonical names: the same lane function is one query whichever lane or register it came from
+            lt, rt = z3.substitute(lt, *ren), z3.substitute(rt, *ren); bn = {'lane%d' % i: (byname[k][0], v) for i, (k, (_, v)) in enumerate(zip(ovs, ren))}
+            ovs = ['lane%d' % i for i in range(len(ovs))]
             if len(ovs) > 2: return _no(6)
             facs = rc_ftz(mx)
-            for k in ovs: w, v = byname[k]; facs.append(classes(v, w))
+            for k in ovs: w, v = bn[k]; facs.append(classes(v, w))
             import itertools
             for idx in itertools.product(*[range(len(f)) for f in facs]):
                 cs = [f[i] for f, i in zip(facs, idx)]
-                nrm = [byname[k] for k, i in zip(ovs, idx[2:]) if i == NORMAL]            # the operands of the class 'exponent neither zeros nor ones': their exponent value is refined where the case is not decided
-                r = _decide(mk_solver, cs, z3.Not(lt == rt), nrm, timeout, [len(_PROVED)])
+                nrm = [bn[k] for k, i in zip(ovs, idx[2:]) if i == NORMAL]            # the operands of the class 'exponent neither zeros nor ones': their exponent value is refined where the case is not decided
+                r = _decide(mk_solver, cs, z3.Not(lt == rt), nrm, timeout, None)
                 if r == 'unsat': continue
                 if os.environ.get('SIMD_TRACE'): print('  simdsplit piece', sorted(key), r, [str(c)[:50] for c in cs])
                 return 'unknown' if r == 'unknown' else _no(7)             # unknown: a piece not decided leaves the shape timeout (the whole query reads more operands, no easier); sat: the matching of disjuncts is not the structure of the terms, the caller asks the whole part
