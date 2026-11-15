@@ -74,6 +74,7 @@ FNVNX_CXX_ONLY(uses_template_parms);
 #include "attribs.h"
 #include "cgraph.h"
 #include "varasm.h"
+#include "target.h"
 #include "output.h"
 #include "diagnostic-core.h"
 #include "stor-layout.h"
@@ -1345,7 +1346,33 @@ static bool sym_emitted(symtab_node *n, bool &def)
   def = false;
   if (!TREE_PUBLIC(d) || !VAR_OR_FUNCTION_DECL_P(d)) return false;
   def = n->definition && !DECL_EXTERNAL(d) && (TREE_ASM_WRITTEN(d) || n->alias);
-  return def || TREE_SYMBOL_REFERENCED(DECL_ASSEMBLER_NAME(d));
+  /* varasm.cc assemble_name marks the identifier of the STRIPPED name (targetm.strip_name_encoding: an assembler-label declaration, `__asm__("x")`, has the
+   * assembler name `*x`, and the object's symbol is `x`), so that identifier is the one that says the symbol was referenced; the layout plugin interns it when
+   * the declaration is finished (intern_label_name), which is the only way the mark is made for it. */
+  if (def) return true;
+  tree id = maybe_get_identifier(targetm.strip_name_encoding(IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d))));
+  return id && TREE_SYMBOL_REFERENCED(id);
+}
+
+/* The SDD2 slot functions of the unit: the functions named by the entries of the vtables the unit defines that carry the fnvnx_sdd attribute (the sdd plugin writes
+ * their bodies as assembly in the object that defines the table). One list for every section that is indexed by symbol. */
+static std::vector<tree> sdd_slot_decls()
+{
+  std::vector<tree> out;
+  varpool_node *v;
+  if (!is_cxx()) return out;
+  FOR_EACH_DEFINED_VARIABLE(v) {
+    tree vt = v->decl, init = DECL_INITIAL(vt);
+    if (!DECL_VTABLE_OR_VTT_P(vt) || !init || TREE_CODE(init) != CONSTRUCTOR) continue;
+    unsigned HOST_WIDE_INT ix; tree val;
+    FOR_EACH_CONSTRUCTOR_VALUE(CONSTRUCTOR_ELTS(init), ix, val) {
+      STRIP_NOPS(val);
+      if (TREE_CODE(val) != ADDR_EXPR || TREE_CODE(TREE_OPERAND(val, 0)) != FUNCTION_DECL) continue;
+      tree f = TREE_OPERAND(val, 0);
+      if (lookup_attribute("fnvnx_sdd", DECL_ATTRIBUTES(f))) out.push_back(f);
+    }
+  }
+  return out;
 }
 
 static void finish_unit(void *, void *)
@@ -1371,19 +1398,10 @@ static void finish_unit(void *, void *)
     }
   /* the SDD2 slot functions: that plugin writes them as assembly in the object that defines the table, and they
    * are named only by the table's entries */
-  varpool_node *v;
-  if (is_cxx()) FOR_EACH_DEFINED_VARIABLE(v) {
-    tree vt = v->decl, init = DECL_INITIAL(vt);
-    if (!DECL_VTABLE_OR_VTT_P(vt) || !init || TREE_CODE(init) != CONSTRUCTOR) continue;
-    unsigned HOST_WIDE_INT ix; tree val;
-    FOR_EACH_CONSTRUCTOR_VALUE(CONSTRUCTOR_ELTS(init), ix, val) {
-      STRIP_NOPS(val);
-      if (TREE_CODE(val) != ADDR_EXPR || TREE_CODE(TREE_OPERAND(val, 0)) != FUNCTION_DECL) continue;
-      tree f = TREE_OPERAND(val, 0);
-      if (!lookup_attribute("fnvnx_sdd", DECL_ATTRIBUTES(f)) || emitted.count(asmname(f))) continue;
-      name_decl(f, true);
-      emitted.insert(rows.back().sym);
-    }
+  for (tree f : sdd_slot_decls()) {
+    if (emitted.count(asmname(f))) continue;
+    name_decl(f, true);
+    emitted.insert(rows.back().sym);
   }
   if (is_cxx()) odr_emit();
   /* every unit the plugin compiles carries the sections, an empty one when the unit names nothing (an empty unit, a body that is #if'd out): the

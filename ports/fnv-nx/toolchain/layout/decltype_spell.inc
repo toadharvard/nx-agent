@@ -1,6 +1,15 @@
 /* decltype_spell.inc - the spelling of a type in `.fnvnx.decltype` (grammar: link/ctypes_compat.py), THE one implementation. Included by the layout
  * plugin (what the front end declares) and by the dispatch plugin (the dispatcher's own prototype, which no front end declares), so a type is spelled
  * by one function whoever owns the declaration. Needs tree.h, stor-layout.h, diagnostic-core.h, <string>, <vector>, <algorithm>. */
+/* RULE (DECLTYPE-COMPLETE): a symbol of the object has exactly one line, `symbol<TAB>type`, or `symbol<TAB>-reason` when no row is formed for it. The reasons are a
+ * closed set, defined here once (link/ctypes_compat.py reads this line; a reason outside it is a parse error there):
+ *   mangled  the assembler name is in the Itanium mangled-name space (`_Z`, Itanium C++ ABI 5.1; C11 7.1.3p1 / C++ [lex.name] reserve it), its type is in its name
+ *   builtin  the front end's own declaration of a library function (DECL_IS_UNDECLARED_BUILTIN): no declaration of the unit's text
+ *   libcall  a library function the back end calls implicitly (libfuncs.h): no declaration of the unit's text at all
+ *   noname   a declaration without a source name
+ *   cxx      a C++ name (not extern "C"): it has the ODR (.fnvnx.odrdef) and layout gates, not C11 6.2.7 (RULE DECLTYPE-LANG)
+ * A symbol with none of the two forms is an error of the plugin (emit_decltype). */
+#define FNVNX_DECLTYPE_REASONS(X) X(mangled) X(builtin) X(libcall) X(noname) X(cxx)
 static bool dl_failed = false;
 static void dl_error(const char *what, const std::string &name)
 {
