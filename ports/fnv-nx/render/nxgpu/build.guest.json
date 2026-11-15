@@ -12,6 +12,7 @@
  },
  "include": [
   "ports/fnv-nx/render/nxgpu",
+  "ports/fnv-nx/render/nxgpu/include",
   "ports/fnv-nx/lib/sha256/include"
  ],
  "units": "all",
