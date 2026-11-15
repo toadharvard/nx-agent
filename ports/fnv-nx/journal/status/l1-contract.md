@@ -1768,3 +1768,8 @@ bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 - 20:31 w12 535ade3a5: compiler-path brief sent to w15 (42 static sites in 22/188 test files at a1aa3932e). gate_abi judge_objects has universe and va_forwarders (4 selftests pass), and judge_root stays universe=None, the stricter state. Decision: a new bridgefacts output CROSSING = import-row native_symbol ∪ typed-dispatch entry symbols ∪ called exports. The import-table generation moves into that stage, and its outside path is deleted. A missing source is red crossing:source-missing.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
+- 20:34 Owner order (integ 5c3e8e289): no rework without progress. cand3 re-triaged.
+  - Keep: the pin/stamp rule; header roots and outputs form; bridgefacts with the import table and CROSSING; the decltype universe; the rtasm probe; cpu_s; sharding (w26); the typed dispatch gate (w27); the stub-gate owner-decision citation (w27).
+  - After the first frame: compiler-path test conversions and the execve gate (w12 brief); fpexact 1c445868e; gatecert x86-64 and the out-param shape; lift-blr (w26 41b6d799a, 11 selftests, capstone); the host image_check list; sysnames.
+  - w26's only item is sharding.
+bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
