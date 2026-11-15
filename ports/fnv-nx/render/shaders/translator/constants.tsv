@@ -1,7 +1,7 @@
-mojoshader/profiles/mojoshader_profile_glsl.c	emit_GLSL_NOP	void		mojoshader_internal.h:686 INSTRUCTION(NOP): the instruction has no output of its own; mojoshader.c parse_instruction_token calls the emitter
-mojoshader/profiles/mojoshader_profile_glsl.c	emit_GLSL_phase	void		mojoshader.c phase_emitter at the ps_1_4 phase token 0xFFFD (fnvnx_sm_rows.h FNVNX_SM_TOKEN_PHASE): a marker with no output in GLSL
-mojoshader/profiles/mojoshader_profile_glsl.c	emit_GLSL_TEXM3X2PAD	void		mojoshader_internal.h:757 INSTRUCTION_STATE(TEXM3X2PAD): state_TEXM3X2PAD stores dst0/src0, the output is emitted by emit_GLSL_TEXM3X2TEX
-mojoshader/profiles/mojoshader_profile_glsl.c	emit_GLSL_TEXM3X3PAD	void		mojoshader_internal.h:759 INSTRUCTION_STATE(TEXM3X3PAD): state_TEXM3X3PAD stores dst/src, the output is emitted by emit_GLSL_TEXM3X3*
-mojoshader/profiles/mojoshader_profile_glsl.c	emit_GLSL_DCL	void		mojoshader_internal.h:717 INSTRUCTION_STATE(DCL): state_DCL records the declaration, process_definitions emits it through emit_GLSL_attribute / emit_GLSL_uniform / emit_GLSL_sampler
-mojoshader/profiles/mojoshader_profile_glsl.c	dk_cfg.isra.0	identity	0	PATCHES.md 8th patch: dk_cfg returns ctx->dk (ISRA reduced the parameter to the field); reach_census.py requires every config read to go through it
-mojoshader/mojoshader.c	parse_args_NULL	u32	1	mojoshader.c parse_instruction_token: the argument parser of the rows with no operand tokens returns the instruction token only
+mojoshader/profiles/mojoshader_profile_glsl.c	emit_GLSL_NOP	void		msdocs-win32-d3d9@3fb42a59:desktop-src/direct3dhlsl/nop---ps.md#nop - ps; msdocs-win32-d3d9@3fb42a59:desktop-src/direct3dhlsl/nop---vs.md#nop - vs
+mojoshader/profiles/mojoshader_profile_glsl.c	emit_GLSL_phase	void		msdocs-win32-d3d9@3fb42a59:desktop-src/direct3dhlsl/phase---ps.md#phase - ps
+mojoshader/profiles/mojoshader_profile_glsl.c	emit_GLSL_TEXM3X2PAD	void		msdocs-win32-d3d9@3fb42a59:desktop-src/direct3dhlsl/texm3x2pad---ps.md#texm3x2pad - ps
+mojoshader/profiles/mojoshader_profile_glsl.c	emit_GLSL_TEXM3X3PAD	void		msdocs-win32-d3d9@3fb42a59:desktop-src/direct3dhlsl/texm3x3pad---ps.md#texm3x3pad - ps
+mojoshader/profiles/mojoshader_profile_glsl.c	emit_GLSL_DCL	void		msdocs-win32-d3d9@3fb42a59:desktop-src/direct3dhlsl/dcl---ps.md#dcl - (sm2, sm3 - ps asm); definitions phase: mojoshader.c process_definitions (4098-4104), PATCHES.md 8th patch
+mojoshader/profiles/mojoshader_profile_glsl.c	dk_cfg.isra.0	identity	0	PATCHES.md 8th patch; mojoshader_profile_glsl.c:37-40 dk_cfg returns ctx->dk (ISRA reduced the parameter to the field)
+mojoshader/mojoshader.c	parse_args_NULL	u32	1	mojoshader.c parse_instruction_token: returns the instruction token itself (no operand tokens); not in msdocs-win32-d3d9@3fb42a59 (only desktop-src/direct3dhlsl/dx9-graphics-reference-asm.md#Shader Binary Format, which defers to d3d9types.h)
