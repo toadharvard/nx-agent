@@ -108,6 +108,21 @@ rows, o = scan('arg4', ['ldr w0, [sp, #8]', 'ret'], 'f\t8:4\targs:16\n')
 check('A: onto a recorded address-taken parameter: not F (its address is not formed: rule D certifies it, never F)', rows.get('f+0x0'), '')
 rows, o = scan('unk', ['stp x29, x30, [sp, #-32]!', 'mov x29, sp', 'str w0, [sp, #16]', 'ldp x29, x30, [sp], #32', 'ret'], 'f\tunk:mem\targs:0\n')
 check('unk token: the row is dynamic, a frame store is red', bool(rows.get('f+0x8')), True)
+# `OFF:SIZE:n` (escapes=0): plain accesses to it are certified by its range, via sp or via a register holding the formed address; an escaping pair is not
+rows, o = scan('pn1', ['stp x29, x30, [sp, #-32]!', 'mov x29, sp', 'add x1, sp, #16', 'str w0, [x1]', 'ldr w2, [sp, #16]', 'ldp x29, x30, [sp], #32', 'ret'], 'f\t-16:8:n\n')
+check('n: private variable, accesses through x1 and sp are certified', {k: v for k, v in rows.items() if v}, {})
+rows, o = scan('pn2', ['stp x29, x30, [sp, #-32]!', 'mov x29, sp', 'add x1, sp, #16', 'str w0, [x1]', 'ldr w2, [sp, #16]', 'ldp x29, x30, [sp], #32', 'ret'], 'f\t-16:8\n')
+check('n: the same variable without :n escapes, its access after the formation is red', bool(rows.get('f+0xc')), True)
+rows, o = scan('pn3', ['stp x29, x30, [sp, #-32]!', 'mov x29, sp', 'add x1, sp, #18', 'ldr w2, [sp, #18]', 'ldp x29, x30, [sp], #32', 'ret'], 'f\t-16:2:n -14:4\n')
+check('n: an access overlapping an escaping pair is not certified by a :n pair', bool(rows.get('f+0xc')), True)
+import framesec as FS
+check('parse :n', [(tuple(q), q.priv) for q in FS.parse_frame(b'f\t-16:8:n -8:4\n', 'x')[0][1]], [((-16, 8), True), ((-8, 4), False)])
+for bad in (b'f\t-16:8:m\n', b'f\t-16:8:n:n\n', b'f\t-16:8: \n'):
+    try:
+        FS.parse_frame(bad, 'x')
+        fails.append('parse accepted %r' % bad)
+    except ValueError:
+        pass
 # a crash of the scan is a red row naming the object, never an exception
 orig = A.scan
 A.scan = lambda p: (_ for _ in ()).throw(TypeError('can only concatenate tuple (not "int") to tuple'))

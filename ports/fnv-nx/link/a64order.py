@@ -738,14 +738,16 @@ class Func:
         return res
 
     def frame_ok(self, i, sp, rg):
-        """rule F: the access is inside the function's own frame and overlaps no address-taken variable of the record"""
+        """rule F: the access is inside the function's own frame and overlaps no address-taken variable of the record, or only variables the record marks
+        `:n` (escapes=0): such an access is certified by its range, whether it goes through sp/x29 or through a register that holds the formed address (an
+        access that overlaps any escaping pair is never certified by a `:n` pair)"""
         if self.rec is None or self.rec == a64frame.DYNAMIC:
             return False
         cs = self.frame_offsets(i, sp, rg)
         sz = acc_size(i)
         if cs is None or sz is None:
             return False
-        return all(self.in_frame(c, sz) and not any(c < o + s and o < c + sz for o, s in self.rec) for c in cs)
+        return all(self.in_frame(c, sz) and all(getattr(r, 'priv', False) for r in self.rec if c < r[0] + r[1] and r[0] < c + sz) for c in cs)
 
     def in_frame(self, c, sz):
         """[c, c+sz) lies in the function's own frame (below the CFA) or in its incoming stack-argument area [CFA, CFA+args) (rule A: the argument area
