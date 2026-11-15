@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gate M (module universes):  modules_check.py [MODULE.dll ...] [--no-c]     (default: the six lifted modules; --modules modules.tsv, --moddirs D1:D2 (module files), --facts-out DIR = parent of the per-module dirs, the exe universe is DIR/universe.tsv;
---exe PATH the exe; --x86sys/--fpstate/--fpdepth are handed to universe_r3_check for (c); no environment variable)
+--exe PATH the exe; --fpstate/--fpdepth are handed to universe_r3_check for (c); no environment variable)
 Per module (file located by name, sha256 and size checked against modules.tsv; the image is the one at the base the loader assigned there):
   - the image range [assigned_base, assigned_base + SizeOfImage) is disjoint from the exe's [0x00400000, + its SizeOfImage) and from every other module of modules.tsv;
     every HIGHLOW relocation site has file bytes (the rebase can patch it);
@@ -18,7 +18,7 @@ def opt(name):
     a = sys.argv; return a[a.index(name) + 1] if name in a else None
 FACTS = opt('--facts-out'); EXE = opt('--exe')
 MODTSV = opt('--modules'); MODDIRS = (opt('--moddirs') or '').split(':')      # the loader's modules.tsv and the directories of the module files (declared inputs)
-FWD = [x for k in ('--x86sys', '--fpstate', '--fpdepth') if opt(k) for x in (k, opt(k))]
+FWD = [x for k in ('--fpstate', '--fpdepth') if opt(k) for x in (k, opt(k))]
 
 
 def universe(fd):
@@ -66,7 +66,7 @@ def one(name, ent_all, noc):
 
 def main():
     if not (FACTS and EXE and MODTSV): raise SystemExit('needs --facts-out DIR, --exe PATH and --modules modules.tsv [--moddirs D1:D2]')
-    a = [x for i, x in enumerate(sys.argv[1:], 1) if not x.startswith('-') and sys.argv[i - 1] not in ('--facts-out', '--exe', '--modules', '--moddirs', '--x86sys', '--fpstate', '--fpdepth')]; noc = '--no-c' in sys.argv; mods = a or MODS; bad = []; ent_all = {}
+    a = [x for i, x in enumerate(sys.argv[1:], 1) if not x.startswith('-') and sys.argv[i - 1] not in ('--facts-out', '--exe', '--modules', '--moddirs', '--fpstate', '--fpdepth')]; noc = '--no-c' in sys.argv; mods = a or MODS; bad = []; ent_all = {}
     exe = pemod.load(EXE); lo = exe.pref; ranges = [('FalloutNV.exe', lo, lo + exe.sizeimg)] + [(r.name, r.base, r.base + r.sizeimg) for r in pemod.modules(MODTSV).values()]
     ov = [(x[0], y[0]) for i, x in enumerate(ranges) for y in ranges[i + 1:] if x[1] < y[2] and y[1] < x[2]]
     print('image ranges: exe [%08x, %08x), %d modules of modules.tsv; overlapping pairs %d %s' % (lo, lo + exe.sizeimg, len(ranges) - 1, len(ov), ov[:4]))

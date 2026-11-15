@@ -9,6 +9,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.pat
 for p in ('tools', ''):
     sys.path.insert(0, os.path.join(LIFT, p))
 import fnvlift as L, lifted
+from fnvlift.tests._inputs import X86SYS
 from proof import shape
 
 
@@ -16,7 +17,7 @@ def main():
     import argparse, tempfile, liftgen
     exe = os.path.join(os.environ['FNVNX_INPUT_EXE'], 'FalloutNV.exe'); facts = os.environ['FNVNX_INPUT_FACTS']
     import fnvlift
-    fnvlift.inputs.configure(universe=facts + '/universe.tsv', fpstate=facts + '/fpstate', fpdepth=facts + '/fpmodes/depth.tsv', x86sys=sys.argv[1])      # the facts external holds fpstate/ and fpmodes/; argv[1] is the platform X86SYS output (a `uses` of the test root, not yet admitted)
+    fnvlift.inputs.configure(universe=facts + '/universe.tsv', fpstate=facts + '/fpstate', fpdepth=facts + '/fpmodes/depth.tsv', x86sys=X86SYS)      # the facts external holds fpstate/ and fpmodes/; X86SYS is the tracked platform/declared/x86sys.json
     emit, jtab = '', None
     out = tempfile.mkdtemp(); shapes = out + '/shapes_0.tsv'
     try:

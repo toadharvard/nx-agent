@@ -10,8 +10,8 @@ sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools')); sys.p
 import plugbuild as pb
 import fnvlift as L
 from fnvlift.tests import _inputs
-_inputs.configure()      # argv[1]: the X86SYS output of the platform root
-if len(sys.argv) != 2: sys.exit('usage: %s X86SYS GEN   (X86SYS: the platform root output; GEN: the GEN output of the lift/rt root, declared inputs of the test root)' % os.path.basename(__file__))
+_inputs.configure()
+if len(sys.argv) != 2: sys.exit('usage: %s GEN   (GEN: the GEN output of the lift/rt root, a declared input of the test root)' % os.path.basename(__file__))
 GEN = sys.argv[1]
 from fnvlift import core, dsl
 from proof import lift_dsl as f_dsl

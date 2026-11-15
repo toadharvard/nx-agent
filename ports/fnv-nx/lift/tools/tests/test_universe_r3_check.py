@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Gate R3 (exe universe):  universe_r3_check.py [FACTS_DIR] [--exe PATH] [--base HEX] [--x86sys FILE] [--fpstate DIR] [--fpdepth FILE] [--no-c]
+"""Gate R3 (exe universe):  universe_r3_check.py [FACTS_DIR] [--exe PATH] [--base HEX] [--fpstate DIR] [--fpdepth FILE] [--no-c]
 Defaults: FACTS_DIR and the exe are the declared inputs of this test (inputs.json: the gate gives them as FNVNX_INPUT_FACTS / FNVNX_INPUT_EXE, the checkouts pinned in
 verify/contract_inputs.json); --exe/--base name the image under test (modules_check passes a module and the base the loader assigned); fpstate and fpdepth default to
-FACTS_DIR/fpstate and FACTS_DIR/fpmodes/depth.tsv; --x86sys (the platform's X86SYS output) is required by (c).
+FACTS_DIR/fpstate and FACTS_DIR/fpmodes/depth.tsv; (c) reads the tracked platform/declared/x86sys.json.
 Recomputes from the exe alone the set of relocated pointer targets in executable sections (PE .reloc HIGHLOW fixups whose stored value lies
 in an executable section) and checks (a) every target is an entry of universe.tsv; (b) gate_codemap.json is green and codemap.tsv classifies
 every byte of the executable sections exactly once (contiguous runs, no UNEXPLAINED); (c) closure under direct targets: lifting every entry with fnvlift
@@ -16,7 +16,7 @@ def opt(name, default=None):
     a = sys.argv; return a[a.index(name) + 1] if name in a else default
 def conf():
     """(exe path, base or None, facts dir) from argv, else the declared inputs of the gate"""
-    pos = [x for i, x in enumerate(sys.argv[1:], 1) if not x.startswith('-') and sys.argv[i - 1] not in ('--exe', '--base', '--x86sys', '--fpstate', '--fpdepth')]
+    pos = [x for i, x in enumerate(sys.argv[1:], 1) if not x.startswith('-') and sys.argv[i - 1] not in ('--exe', '--base', '--fpstate', '--fpdepth')]
     fd = pos[0] if pos else os.environ['FNVNX_INPUT_FACTS']      # declared input of this test (inputs.json)
     exe = opt('--exe') or os.path.join(os.environ['FNVNX_INPUT_EXE'], 'FalloutNV.exe')
     b = opt('--base'); return exe, int(b, 16) if b else None, fd
@@ -36,8 +36,7 @@ def lift_part(arg):
         ne.update(m['noentry'])
     return miss, why, ok, seen, ne
 def check_c(exe, base, fd, ix):
-    x86sys = opt('--x86sys')
-    if not x86sys: raise SystemExit('(c) needs --x86sys (the platform X86SYS output); --no-c leaves (c) out of the run')
+    from fnvlift.tests._inputs import X86SYS as x86sys
     with mp.Pool(2) as p: rs = p.map(lift_part, [(exe, base, fd, x86sys, opt('--fpstate'), opt('--fpdepth'), k, 2) for k in range(2)])
     miss = Counter(); why = Counter(); ne = Counter()
     for m, w, o, s, n in rs: miss.update(m); why.update(w); ne.update(n)
