@@ -1734,3 +1734,4 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - 19:20 fpexact test (L3b w4 1c445868e) goes to cand3 (w12): cherry-pick and run it.
 - 19:50 Final pin: L2 a42ad8875, tools noneelf 05082bde6, tree da6a3d1b…, key 9f0d5729908efe09. w15 checks that DECLTYPE-COMPLETE is in it, then runs the pin commit → verdict → merge.
 - 19:54 L5 w9 on the final pin: platform root green (113 objects); abi red 326/449 from the sympair kind 'noemit' (61 items, 50 units). The rule: the reader takes the closed kind set and definitions from the plugin source; w15. The datamodel fix is still to be pushed; w15 sends it to w9 at once.
+- 19:58 decltype completeness moves to cand3 (w12): asm units by language field have no section, plus the plugin-written registry (L2 w3, next pin). At 05082bde, 4024/4640 members are complete. cand2 takes only the ctypes_compat reader (6315e193a); gate_abi:84 is unchanged.
