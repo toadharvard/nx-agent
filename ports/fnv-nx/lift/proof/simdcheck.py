@@ -16,6 +16,13 @@ from proof import forms, shape, symform, simdspec as S
 REG = ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi']
 
 
+def _load(M0, a, w):
+    """the memory operand of width w bits at a (little endian): None when the row reads no memory (mw None: an address-only operand), a single byte for w = 8, else the concatenation (a rule over mem_width)"""
+    if w is None: return None
+    bs = [z3.Select(M0, a + i) for i in reversed(range(w // 8))]
+    return bs[0] if len(bs) == 1 else z3.Concat(*bs)
+
+
 def _obligation(rep, F, sins_ops, imm, timeout):
     """refinement query of one Form F (symbolic or concrete) against the spec on the encoding rep; sins_ops: the instruction whose operands give the memory operand"""
     e = S.Enc(rep)
@@ -29,7 +36,7 @@ def _obligation(rep, F, sins_ops, imm, timeout):
         j = next(i for i, o in enumerate(sins_ops.operands) if o.type == 3)
         op = forms.Op(sins_ops, sins_ops.operands[j]); a = dsl.to_smt(forms.ea(op))
         w = S.mem_width(rep)
-        m = z3.Concat(*[z3.Select(M0, a + i) for i in reversed(range(w // 8))])
+        m = _load(M0, a, w)
     try: r = S.run(rep, d, m, a, gpr, imm)
     except S.F.Uncertified as ex: return 'uncertified', 'uncertified: ' + str(ex)
     except KeyError: return 'no-row', None
@@ -54,17 +61,19 @@ def _obligation(rep, F, sins_ops, imm, timeout):
     return _discharge(r.env, nf, goals, eq, timeout, r.fpl, d['mxcsr'])
 
 
-def _components(e):
-    """one equality `lhs == rhs` as the list of (equality, chunk) that together are equivalent to it (a complete partition of the bits: 32-bit chunks of a 64..128-bit value): the lanes of a packed
+def _components(e, bits=False):
+    """one equality `lhs == rhs` as the list of (equality, chunk) that together are equivalent to it (a complete partition of the bits: 32-bit chunks of a 64..128-bit value; with `bits`, every bit of a 32-bit value: the six exception flags of MXCSR are independent bits): the lanes of a packed
     operation do not depend on each other's bits of the DESTINATION, so each chunk is its own, smaller, query.  An equality of another sort stays whole (chunk None)."""
     lhs, rhs = e.arg(0), e.arg(1)
     if not z3.is_bv(lhs): return [(e, None)]
     w = lhs.size()
+    if w == 32 and bits: return [(z3.Extract(k, k, lhs) == z3.Extract(k, k, rhs), None) for k in range(32)]
     if 64 <= w <= 128: return [(z3.Extract(32 * k + 31, 32 * k, lhs) == z3.Extract(32 * k + 31, 32 * k, rhs), k) for k in range(w // 32)]
     return [(e, None)]
 
 
 _EXP = {32: (8, 23), 64: (11, 52)}
+_TAC = z3.Then('simplify', 'propagate-values', 'solve-eqs', 'fpa2bv', 'simplify', 'bit-blast', 'sat')
 
 
 def _classes(x, w):
@@ -89,14 +98,14 @@ def _case_partition(fpl, chunk, mx):
 def _discharge(env, nf, goals, eq, timeout, fpl=(), mx=None):
     """proved iff every part of every goal is unsat under env (and nf for the state parts), in every case of its case partition (FP rows: _case_partition; others: one case).  Parts that simplify to true
     (a register the instruction does not touch) are not asked."""
-    parts = [(g, False, None) for g in goals] + [(c, True, k) for e in eq for c, k in _components(e)]
+    parts = [(g, False, None) for g in goals] + [(c, True, k) for e in eq for c, k in _components(e, bool(fpl))]
     unknown = False
     for g, state, chunk in parts:
         g = z3.simplify(g)
         if z3.is_true(g): continue
         cases = _case_partition(fpl, chunk, mx) if fpl else [[]]
         for cs in cases:
-            s = z3.Solver(); s.set('timeout', timeout)
+            s = _TAC.solver(); s.set('timeout', timeout)          # FP terms are bit-blasted (fpa2bv) and decided by the SAT core: the same decision problem, ~15x faster than the default combination
             s.add(env, *cs, z3.And(nf, z3.Not(g)) if state else z3.Not(g))
             import time; t0 = time.time(); res = s.check()
             if os.environ.get('SIMD_TRACE') and (res != z3.unsat or time.time() - t0 > 2): print('  part', str(g)[:70].replace('\n', ' '), res, round(time.time() - t0, 1), flush=True)

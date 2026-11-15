@@ -172,4 +172,4 @@ def register(S):
     def prefetch(e, d, m, a, g):
         if e.reg >= 4: raise KeyError('0F 18 /%d is not a prefetch row' % e.reg)
         return Res(d)
-    row('', 0x18, 'prefetch', [], form='m', mw=8, al=False)(prefetch)
+    row('', 0x18, 'prefetch', [], form='m', mw=None, al=False)(prefetch)          # SDM 2B:PREFETCHh: the memory operand is an address only, nothing is read (mw None)
