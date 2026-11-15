@@ -76,6 +76,19 @@ def main():
     try: dispgen.table(ROWS, closure=allc + ['deadbee0\n']); ok = False
     except SystemExit as e: ok = 'deadbee0' in str(e) and 'no dispatch entry' in str(e)
     check('closure: a target with no entry exits naming it', ok)
+    # the rows file (fnvnx-disp-rows/1): one row per entry in key order, the same index and symbol as the entries array of the table
+    with tempfile.TemporaryDirectory() as d:
+        open(d + '/e.tsv', 'w').write(''.join(ROWS))
+        r = subprocess.run([sys.executable, '-I', os.path.join(LIFT, 'tools', 'dispgen.py'), '--prefix', 'fnvnx_native', '--rows', d + '/r.tsv', d + '/e.tsv', d + '/n.cc'], capture_output=True, text=True, env={})
+        rl = open(d + '/r.tsv').read().split('\n') if r.returncode == 0 else []
+        ncc = open(d + '/n.cc').read() if r.returncode == 0 else ''
+    body = [l.split('\t') for l in rl[2:] if l]
+    ents = re.findall(r'^  &(\w+),$', ncc, re.M)
+    check('rows: header, column line, one row per key', rl[:1] == ['# fnvnx-disp-rows/1'] and rl[1].startswith('# table') and len(body) == len(syms))
+    check('rows: table name, index = rank, address, symbol; the entries array lists the same symbols in the same order',
+          [(b[0], int(b[1]), int(b[2], 16), b[3]) for b in body] == [('fnvnx_native_disp_entries', j, a, syms[a]) for j, a in enumerate(sorted(syms))] and ents == [b[3] for b in body])
+    check('rows: the hash table stores index+1 for each row', all(phf.lookup(nh2, int(b[2], 16)) is not None for b in body) if (nh2 := dispgen.table(ROWS, 'fnvnx_native')[1]) else False)
+    check('rows: an empty list has the two header lines and no row', dispgen.rows_text({}, 'fnvl') == '# fnvnx-disp-rows/1\n# table\tindex\taddr\tsymbol\n')
     print('dispgentest: %d failed' % bad); sys.exit(1 if bad else 0)
 
 

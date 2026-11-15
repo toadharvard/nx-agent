@@ -4187,6 +4187,8 @@
    "tool": "ports/fnv-nx/lift/tools/packstage.py",
    "args": [
     "disp",
+    "--rows",
+    "/out/disp_rows.tsv",
     "/stage/entries.tsv",
     "/out/disp.cc"
    ],
@@ -4197,12 +4199,14 @@
     }
    ],
    "outputs": [
-    "disp.cc"
+    "disp.cc",
+    "disp_rows.tsv"
    ]
   }
  ],
  "outputs": {
-  "ENTRIES": "entries.tsv"
+  "ENTRIES": "entries.tsv",
+  "DISP_ROWS": "disp_rows.tsv"
  },
  "link": null,
  "external": [

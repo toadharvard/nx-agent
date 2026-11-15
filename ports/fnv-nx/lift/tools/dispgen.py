@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The dispatcher generator: ONE implementation of the table that rt/rt.c reads (fnvl_disp_table, fnvl_g, fnvl_phf_params in disp.cc).
-    dispgen.py [--prefix P] ENTRIES OUT.cc         ENTRIES = rows `addr<TAB>sym[<TAB>...]` (the format of the pack's entries.tsv; addr is hex; `#` lines and blank lines are ignored)
+    dispgen.py [--prefix P] [--rows OUT.tsv] ENTRIES OUT.cc         ENTRIES = rows `addr<TAB>sym[<TAB>...]` (the format of the pack's entries.tsv; addr is hex; `#` lines and blank lines are ignored)
 RULE: disp.cc is a pure function of the entry list. The keys are the set of addresses, the symbol of a key is the second column; the row order does not matter
 (phf.build sorts the keys). Same rows, same bytes: no clock, no environment variable, no path in the output. The hash is tools/phf.py (the minimal perfect hash,
 hash-and-displace); the only inputs of the program are this file, tools/phf.py and the entries file, so it is usable as a recipe `generated`-stage tool.
@@ -50,17 +50,31 @@ def table(rows, prefix='fnvl', closure=None):
     return phf.table_c(syms, h, prefix), h
 
 
+ROWS_FORMAT = 'fnvnx-disp-rows/1'
+
+
+def rows_text(syms, prefix):
+    """the rows file of one table (the declared stage output the layer-1 table gates compare the linked ELF with): `# fnvnx-disp-rows/1`, a column line, then
+    `<prefix>_disp_entries<TAB>index<TAB>addr<TAB>symbol` per entry, sorted by address (index = rank = the position phf.table_c gives the entry)."""
+    E = prefix + '_disp_entries'
+    return '\n'.join(['# ' + ROWS_FORMAT, '# table\tindex\taddr\tsymbol'] + ['%s\t%d\t%08x\t%s' % (E, j, a, syms[a]) for j, a in enumerate(sorted(syms))]) + '\n'
+
+
 def main(argv):
-    prefix, closure = 'fnvl', None
+    prefix, closure, rows = 'fnvl', None, None
     while argv[:1] and argv[0].startswith('--'):
         if argv[0] == '--prefix' and len(argv) >= 2: prefix, argv = argv[1], argv[2:]
         elif argv[0] == '--closure' and len(argv) >= 2:
             with open(argv[1]) as f: closure = f.readlines()
             argv = argv[2:]
+        elif argv[0] == '--rows' and len(argv) >= 2: rows, argv = argv[1], argv[2:]
         else: break
-    if len(argv) != 2: sys.exit('usage: dispgen.py [--prefix P] [--closure CLOSURE] ENTRIES OUT.S')
+    if len(argv) != 2: sys.exit('usage: dispgen.py [--prefix P] [--closure CLOSURE] [--rows OUT.tsv] ENTRIES OUT.cc')
     with open(argv[0]) as f: text, h = table(f, prefix, closure)
     with open(argv[1], 'w', newline='') as f: f.write(text)
+    if rows:
+        with open(argv[0]) as f: syms = parse(f)
+        with open(rows, 'w', newline='') as f: f.write(rows_text(syms, prefix))
     print('dispgen: %d slots, %d hash attempts' % (len(h['slots']), h['attempts']))
 
 
