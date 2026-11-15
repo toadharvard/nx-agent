@@ -1,15 +1,16 @@
-"""The entry universe (tools/universe.py output, FNVNX_UNIVERSE, default /home/user/l3facts/universe.tsv): entry -> (kind, extent, parent).
+"""The entry universe (tools/universe.py output, the explicit input `universe` of fnvlift/inputs.py): entry -> (kind, extent, parent).
 lift() consults it for the defaults: an entry with a parent is lifted from its label inside the parent's range, a function gets all its own labels."""
-import collections, os
+import collections
+from . import inputs
 
 _U = {}
 
 
 def load(path=None):
-    path = path or os.environ.get('FNVNX_UNIVERSE', '/home/user/l3facts/universe.tsv')
+    path = path or inputs.get('universe')
     if path not in _U:
         ent, kids = {}, collections.defaultdict(list)
-        if os.path.exists(path):
+        if path is not None:        # None: the empty universe, stated by the caller (inputs.configure(universe=None))
             for l in open(path):
                 if l[0] == '#':
                     continue

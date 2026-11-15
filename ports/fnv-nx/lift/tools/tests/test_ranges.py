@@ -4,6 +4,8 @@ import os, re, shutil, subprocess, sys, tempfile
 LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools')); sys.path.insert(0, os.path.join(LIFT, '..', 'toolchain', 'tests'))
 import fnvlift as L
+if len(sys.argv) != 2: sys.exit('usage: %s GEN   (GEN: the GEN output of the lift/rt root, a declared input of the test root)' % os.path.basename(__file__))
+GEN = sys.argv[1]
 import plugbuild as pb
 
 SRC = '''
@@ -19,7 +21,7 @@ extern "C" void L_t(u32 ft0){ u32 cf=0,zf=0,sf=0,of=0,pf=0,af=0,c0=0,c2=0,c3=0;
 def main():
     work = tempfile.mkdtemp(prefix='ranges-')
     src = os.path.join(work, 't.cc'); obj = os.path.join(work, 't.o')
-    open(src, 'w').write(L.prelude(os.path.join(LIFT, 'rt')) + SRC)
+    open(src, 'w').write(L.prelude(os.path.join(LIFT, 'rt'), GEN) + SRC)
     r = pb.compile(src, obj, [pb.build(n, work) for n in ('sdd', 'names', 'dispatch')])
     assert r.returncode == 0, r.stderr[-1500:]
     dis = subprocess.run(['aarch64-linux-gnu-objdump', '-d', obj], capture_output=True, text=True, check=True).stdout

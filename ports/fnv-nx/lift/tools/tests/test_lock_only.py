@@ -9,6 +9,8 @@ LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools')); sys.path.insert(0, os.path.join(LIFT, '..', 'toolchain', 'tests'))
 import plugbuild as pb
 import fnvlift as L
+if len(sys.argv) != 2: sys.exit('usage: %s GEN   (GEN: the GEN output of the lift/rt root, a declared input of the test root)' % os.path.basename(__file__))
+GEN = sys.argv[1]
 from fnvlift import core, dsl
 from proof import lift_dsl as f_dsl
 from fnvlift.core import Unsupported
@@ -26,7 +28,7 @@ PLUG = [pb.build(n, WORK) for n in ('sdd', 'names', 'dispatch')]
 
 def compiles(body):
     src, obj = os.path.join(WORK, 't.cc'), os.path.join(WORK, 't.o')
-    open(src, 'w').write(L.prelude(os.path.join(LIFT, 'rt')) + body)
+    open(src, 'w').write(L.prelude(os.path.join(LIFT, 'rt'), GEN) + body)
     return pb.compile(src, obj, PLUG)
 
 

@@ -1,8 +1,8 @@
 """The declared x86 system record (platform/declared/x86sys.json, owner: L5 platform) as the ONE source of the process's selectors, the user-callable int vectors and the facts a Form needs about the OS.
 Nothing is typed here: a field with status "undecided" is absent from SEL / INT_VECTORS and is listed in UNDECIDED; a Form or lifter row that needs it is not produced (the instruction is Unsupported)."""
-import json, os
-HERE = os.path.dirname(os.path.abspath(__file__))
-PATH = os.environ.get('FNVNX_X86SYS') or os.path.join(HERE, '..', '..', 'platform', 'declared', 'x86sys.json')
+import json
+from . import inputs
+PATH = inputs.get('x86sys')       # explicit: the platform X86SYS output, passed by the program that runs the lifter (fnvlift/inputs.py)
 REC = json.load(open(PATH))
 assert REC['format'] == 'fnvnx-x86sys/2', REC['format']
 SEL = {n: v['value'] for n, v in REC['selectors'].items() if 'value' in v}          # name -> selector (cs ds es ss fs tr; gs is undecided)

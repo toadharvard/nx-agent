@@ -1,34 +1,34 @@
 """x87, part 2: the stack-depth pre-pass, the per-site stack sync of the static path, and the control/status instructions.
 
 Two stack models (R8). STATIC: the pre-pass proves a depth 0..8 at every instruction (entry 0; a call changes it by the callee's net return depth from
-/home/user/l3facts/fpmodes/depth.tsv, tools/fpmodes.py: columns addr, status, max, min, ret=, conf=, ind=; override with FNVNX_FPDEPTH); each stack slot is a
+the explicit input `fpdepth` of fnvlift/inputs.py (tools/fpmodes.py depth.tsv: columns addr, status, max, min, ret=, conf=, ind=; None = no depth facts, so every callee has no usable row)); each stack slot is a
 C local s<j> (j = 0 is the bottom of the function's own stack, so st(i) at depth d is s<d-1-i>; GCC keeps them in registers); c->fx[] / c->ftop are touched
 only at calls, tail jumps, returns and non-local exits (store the live slots) and after a call or at a non-local re-entry (reload). ft0 is the physical
 register that the function's bottom slot sits above: slot j lives in c->fx[(ft0-1-j)&7], TOP = (ft0-depth)&7. DYNAMIC: everything goes through c->fx / c->ftop
 (fnvl_x87.h dyn_*), with tags (k==0 is empty) and the stack fault. A function is dynamic when the proof fails: a join conflict, a depth outside 0..8, a callee
-with a conflict or without a usable row (no file, or an address outside the image), an indirect call (result class unknown), or an instruction the static path
+with a conflict or without a usable row (no facts, or an address outside the image), an indirect call (result class unknown), or an instruction the static path
 does not model (ffree, fincstp, fdecstp: X87Dyn from the handlers)."""
 import os
 from capstone import x86 as X
 from .core import X87Dyn, Unsupported
-from . import sites
+from . import sites, inputs
 
 TAB = None
-DEFAULT = '/home/user/l3facts/fpmodes/depth.tsv'
 
 
 def table():
     """addr -> (status, net return depth), False when the file is missing"""
     global TAB
     if TAB is None:
-        TAB = {}
-        try:
-            for l in open(os.environ.get('FNVNX_FPDEPTH', DEFAULT)):
+        path = inputs.get('fpdepth')
+        if path is None:
+            TAB = False
+        else:
+            TAB = {}
+            for l in open(path):
                 f = l.rstrip('\n').split('\t')
                 kv = dict(x.split('=') for x in f[2:] if '=' in x)
                 TAB[int(f[0], 16)] = (f[1], int(kv['ret']))
-        except (OSError, ValueError, KeyError):
-            TAB = False
     return TAB
 
 

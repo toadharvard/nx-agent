@@ -14,8 +14,10 @@ class T(unittest.TestCase):
         self.assertEqual(set(pin), {"vendor_id", "family", "model", "stepping", "microcode", "model_name"})
         import sys, tempfile
         sys.path.insert(0, str(R / "lift"))
-        from fnvlift import rtgen
-        t = (Path(rtgen.tmpdir()) / "fnvl_cpuref.h").read_text()
+        import subprocess
+        gd = tempfile.mkdtemp(prefix="cpuref_")
+        subprocess.run([sys.executable, "-I", str(R / "lift/tools/gen_cpuref.py"), gd], check=True)      # the rt root's own generator stage
+        t = (Path(gd) / "fnvl_cpuref.h").read_text()
         eax = macro(t, "FNVL_CPUID1_EAX")
         fam = (eax >> 8 & 15) + ((eax >> 20 & 255) if (eax >> 8 & 15) == 15 else 0)
         mod = (eax >> 4 & 15) | ((eax >> 16 & 15) << 4 if (eax >> 8 & 15) in (6, 15) else 0)
