@@ -625,3 +625,10 @@ calls, not smaller ones.
     identifiers quoted verbatim, under 300 words.
   - Check every hash, address or id it returns with one targeted command before you commit or send it.
   - When you know the file and the place, do the one read or grep yourself.
+- **Addendum, 12:45Z (cand2 cannot go green on its own reds).** The candidate merges cut, under the trunk rule "code that
+  does not pass is removed from the trunk whole".
+  - admit.json keeps only the roots that are green over every gate.
+  - A test without a certified reference, and an uncertified generator together with the roots that use it, leave the
+    candidate. Their completion stays on the lead's branch.
+  - A gate's own failing selftest is fixed, not cut.
+  - The warm verdict stays at most 300 s.
