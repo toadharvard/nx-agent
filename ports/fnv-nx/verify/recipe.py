@@ -1959,6 +1959,35 @@ class Job:
         paths = {p for t in tokens if isinstance(t, str) for p in re.findall(r"/[^\s=:,;\"']+", t)}
         return {n for n, e in self.ext.items() if any(under(p, e["at"]) for p in paths)}
 
+    def pp_subtrees(self, tokens, skip=()):
+        """The declared inputs of a PP stage that the TOKENS (the include directories and the flags) name inside an external other than SKIP: the subtree each named path
+        denotes ({at: the path, tree: the content hash of that subtree or file}), a path nested in another named path folded into it, a path that is the whole external
+        the whole external. RULE (a stage is keyed by exactly what its sandbox can read): `-I /ext/x/inc` mounts that directory, not the external `x`; what is not mounted
+        is unreadable, so a PP that needed more fails loudly and never builds stale."""
+        paths = sorted({p.rstrip("/") for t in tokens if isinstance(t, str) for p in re.findall(r"/[^\s=:,;\"']+", t)})
+        out = []
+        for n, e in sorted(self.ext.items()):
+            if n in skip:
+                continue
+            kept = []
+            for p in (q for q in paths if under(q, e["at"])):
+                if not any(p == k or under(p, k) for k in kept):
+                    kept.append(p)
+            for p in kept:
+                host = e["host"] + p[len(e["at"]):]
+                if p == e["at"]:
+                    out.append({"at": p, "tree": e["tree"]})
+                elif os.path.exists(host):
+                    out.append({"at": p, "tree": cas.ingest(host, self.store)})
+        return sorted(out, key=lambda i: i["at"])
+
+    def pp_uses(self, tokens):
+        """The `uses` outputs a PP stage mounts: the `include_uses` ones (an include directory) and any the TOKENS name (a flag path such as -include); the other
+        `uses` outputs are read by generated stages, link and tests, not by preprocessing, so they are not in a PP key."""
+        iu = {"/uses/%s/%s" % (u["root"], u["output"]) for u in self.rec.get("include_uses", [])}
+        named = {p for t in tokens if isinstance(t, str) for p in re.findall(r"/[^\s=:,;\"']+", t)}
+        return [i for i in self.use_inputs_cached if i["at"] in iu or any(under(p, i["at"]) for p in named)]
+
     def toolrt(self, paths, names=None):
         """Tool runtime (runtime.py rules) of driver PATHS plus every external (NAMES: only those) as declared input. An external compiler is a tree
         mapped HOST@AT: the loader closure of its x86-64 ELF files is resolved as the loader resolves it inside the sandbox."""
@@ -2357,8 +2386,9 @@ class Job:
             return {}
         cc = self.rec["compiler"].get("external")
         flags = {k: unit_flags(rec, self.roots, self.root + ("@" + self.variant if self.variant else ""), self.hostpath(drv["c" if k == "asm" else k]), k) for k in sorted(set(kinds.values()))}
-        mount = ({cc} if cc else set()) | self.named_ext(list(rec["include"]) + [t for fl in flags.values() for t in fl])   # PP mounts what the include path and the flags name
-        rtp, _ = self.toolrt(used, mount)
+        named = list(rec["include"]) + [t for fl in flags.values() for t in fl]
+        rtp, _ = self.toolrt(used, {cc} if cc else set())   # PP mounts the compiler's external whole; any other external only by the subtree the include path and the flags name (pp_subtrees)
+        self.pp_sub = self.pp_subtrees(named, {cc} if cc else set())
         guest = entry_of(self.roots, self.root + "@" + self.variant if self.variant else self.root).get("target") == "guest"
         pk = ("c", "cxx") if guest else ("cxx",)   # guest: the plugins are loaded by the C and the C++ front end alike
         try:
@@ -2402,13 +2432,15 @@ class Job:
         # declared plugin .so files and unit.ii. Any other external is not mounted there: what is not mounted cannot be read, so the object
         # does not depend on it by construction (a new commit of such an external changes the PP keys, not the CC keys).
         drop = {e["at"] for n, e in self.ext.items() if n != cc}
+        self.use_inputs_cached = self.use_inputs(ws)
+        ppin = self.pp_sub + self.pp_uses(named)   # what PP mounts besides the compiler: external subtrees and `uses` outputs named by an include or a flag
         for k in sorted(set(kinds.values())):
             fp = os.path.join(ws, "flags-%s.json" % k)
             json.dump({"argv": flags[k]}, open(fp, "w"))   # semantics first, then the root's own
             builds[k] = unitstage.Build(argparse.Namespace(store=self.store, cold=False, cxx=drv["c" if k == "asm" else k], toolrt=rtp, flags_file=fp,
-                                                           src_root=os.path.join(ws, "root") + "@/src", include=self.includes(ws), mounted=[i["at"] for i in self.use_inputs(ws)]))
-            builds[k].cc_drop = drop | {i["at"] for i in self.use_inputs(ws)}
-            builds[k].rt = dict(builds[k].rt, inputs=builds[k].rt["inputs"] + self.use_inputs(ws))
+                                                           src_root=os.path.join(ws, "root") + "@/src", include=self.includes(ws), mounted=[i["at"] for i in ppin]))
+            builds[k].cc_drop = drop | {i["at"] for i in ppin}
+            builds[k].rt = dict(builds[k].rt, inputs=sorted(builds[k].rt["inputs"] + ppin, key=lambda i: i["at"]))
             builds[k].variant = self.variant
             builds[k].cc_flags = list(self.aux)
             builds[k].hint_ns = self.root + ("@" + self.variant if self.variant else "")   # closure hints are per root (unitstage.hint_path)
