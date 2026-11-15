@@ -64,7 +64,10 @@ Bridge table of the import guest entries, pure derivation (rows: dll, name, ordi
 A pure function of its arguments (no file, no process): the driver verify/gate_imports.py reads the declared inputs and calls derive().
   names       text of sys_names.tsv (dll TAB name per line) from the private manifest
   spec_text   function dll -> text of the export specification of the reference environment (Wine 9.0 dlls/<dll>/<dll>.spec)
-  syms        the set of symbol names that the product objects define or reference (objects.json defined + undefined)
+  syms        the set of symbol names that the product objects define or reference (objects.json defined + undefined); None = the rows table
+              (stage A): every row binds by rule alone (sym, data, lookup, l3), no symbol table is read and none is judged; the table is then a
+              function of the names, the specs, the name table and the extra rows only, so the import keys (contract/iat.py) are too.  The
+              symbols are judged against the rows by the gate `imports` (stage B: contract/imports.judge over derive(syms=the objects' symbols))
   name_table  {msvcrt name: (symbol, kind)} of the name table the product serves msvcrt names from (read_name_table)
   extra       texts of rows in this 8-column format (other owners' rows: COM interfaces); a row of the same (dll, name) replaces the derived one
 bind  sym    native_symbol is a symbol of the product objects     lookup  msvcrt name served by the name table (native_symbol `-`)
@@ -510,15 +513,14 @@ Kinds (the explicit per-file encoding):
 ```text
 boot_job.sh - L4 farm job: run the boot stage (verify/boot.py) on one real guest ELF and publish the result.
 
-  [ARTIFACTS=...] [GAME_DIR=...] bash <checkout>/ports/fnv-nx/farm/boot_job.sh <elf_id> --quantum N [--limit-instructions N] [--profile handheld|docked]
+  [ARTIFACTS=...] [GAME_DIR=...] bash <checkout>/ports/fnv-nx/farm/boot_job.sh <elf_id> [--limit-instructions N] [--profile handheld|docked]
                                [--gpu-branch <artifacts branch>]
 
 Steps:
- 1 setup: what the stage needs (python3, git, unicorn==2.1.4; no binutils: the ELF facts come from the link record)
+ 1 setup: what the stage needs (python3, git, the aarch64 binutils readelf/nm that icount.py spec runs, unicorn==2.1.4)
    is checked first; only what is missing is installed (apt-get, pip), and an install that fails fails the job
  2 branch l1-contract/elf/<elf_id> of the artifacts repository (the contract's own file formats; verify/bootinputs.py converts
-   them, and fails on any row or line it does not understand): elffacts.json (the link record of the ELF, L1: its sections and defined symbols, read through
-   bootfacts.py), guest.elf, or manifest.json + part.NNN (joined in manifest
+   them, and fails on any row or line it does not understand): guest.elf, or manifest.json + part.NNN (joined in manifest
    order, every part's and the whole sha256 and size checked; a mismatch fails the job); entries.tsv (addr, symbol, kind
    code|import, `# table_id` trailer); modules.tsv (name sha256 size preferred_base assigned_base size_of_image ...; reserved
    ranges = assigned_base .. + size_of_image, plus the exe's own PE image range); keys.tsv (import keys; the key range is
@@ -537,7 +539,7 @@ Steps:
  6 publish the orphan commit of OUT.json, OUT.console.txt, spec.json, meta.json to branch l4-verify/boot/<elf_id>
  7 final line: BOOT elf=<id> rc=<boot rc> reason=<r> last=<milestone|none> instr=<n> main=<n> threads=<n> seconds=<s> published=<branch>@<commit12>
 --gpu-branch B: the renderer. Branch B of the artifacts repository must hold libnxgl4.so (the renderer's host library, GL 4.5 on
-   Mesa llvmpipe). The job fetches it, requires the packages libegl1 and libegl-mesa0 at the
+   Mesa llvmpipe). The job fetches it, requires the packages gcc (the callback shim of verify/bootgpu.py), libegl1 and libegl-mesa0 at the
    versions of verify/env.json (installed by farm/setup_verdict_env.sh, never by the job; a missing or other version fails the job), checks that the library loads, and runs boot.py with --gpu LIB --frames DIR. The first 3
    frames (frame_*.rgba + .txt) are published under frames/ with the result; later ones are not. meta.json gains gpu_branch and
    gpu_branch_commit, the final line gains presents=<n>.
@@ -552,7 +554,6 @@ Env: ARTIFACTS (clone of the artifacts repository, default $FARM_HOME/artifacts;
 when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build), FARM_HOME (default $HOME/fnvnx-farm),
 WORK (default $FARM_HOME/boot/<elf_id>), GAME_DIR (an installed game; never inside a git checkout). The profile is
 passed to boot.py, recorded in meta.json and exported as FNVNX_PROFILE (a render host library reads it).
---quantum N (required, no default): instructions per slice of a core's thread in the N-core machine (bootmachine.py rule 3); passed to boot.py and recorded in meta.json (quantum).
 Exit 0 iff the result was published and boot.py exited 0 or 2; 1 otherwise (one-line reason on stderr).
 ```
 
@@ -714,9 +715,9 @@ Register ids are normalised through MCRegisterInfo super-register chains to the 
 ```text
 The boot stage CLI: runs the guest ELF under bootmachine.Machine, watches the milestone table, counts instructions.
 
-  boot.py run --elf GUEST.elf --facts elffacts.json --reserved modules.tsv --keys LO:HI --heap-size N --root SDROOT [--game DIR]
+  boot.py run --elf GUEST.elf --reserved modules.tsv --keys LO:HI --heap-size N --root SDROOT [--game DIR]
               --milestones TABLE --manifest entries.tsv [--icount-spec SPEC.json] [--limit-instructions N]
-              --quantum N [--profile handheld|docked] [--watch-log SYMS] --out OUT.json
+              [--hc-slice N] [--profile handheld|docked] [--watch-log SYMS] --out OUT.json
 
 plan = bootlayout (same rules as its CLI), watch points = bootmiles.resolve(table, manifest, ELF symbols, bias = image
 base). OUT.json ("fnvnx-boot/1", sorted keys, indent 1, no wall time) holds the plan, the run record, the milestone state
@@ -728,8 +729,8 @@ Watch log: --watch-log SYMS (text file, one ELF symbol per line, # starts a comm
 first instruction: OUT.json "watch_log" = [{"seq", "tid", "sym", "pc" (guest-relative), "sp"}], seq from 0 in machine order, no
 sampling, no cap, two names at one address in file order. A name that is absent or not STT_FUNC is an input error naming it.
 Without the option the key is absent.
-Memory at a watched call: a line `NAME [ret] [mem SPEC... [until REG=VALUE]]`, SPEC = `REG(->OFF)*:LEN` (REG x0..x7 as a 32-bit address; each `->OFF` loads the
-32-bit word at address+OFF and takes it as the address; LEN 1..65536 bytes are read there, protection ignored). A name with `mem` records
+Memory at a watched call: a line `NAME [ret] [mem SPEC... [until REG=VALUE]]`, SPEC = `REG(->OFF)*(+DELTA)?:LEN` (REG x0..x7 as a 32-bit address; each `->OFF` loads the
+32-bit word at address+OFF and takes it as the address; DELTA (default 0) is added; LEN 1..65536 bytes are read there, protection ignored; a longer object is several specs with growing DELTA). A name with `mem` records
 also "args" = [w0, w1, w2, w3] and "mem" = {SPEC: hex | null (a page on the way unmapped)}; other records keep their keys.
 `until REG=VALUE` (REG x0..x7): the first call whose REG equals VALUE is the last one recorded with "mem"; later calls of the name carry "args" only.
 State snapshot: --state-at SYM --state-request JSON ({"hash": [{name, lo, hi}], "dump": [{name, addr, len}]}): when SYM is first entered OUT.json
@@ -760,9 +761,8 @@ The renderer of the boot stage: ext module 10 (the guest's GPU calls) forwarded 
 The library exports nxgl4_create(width, height, err, errlen), nxgl4_destroy, nxgl4_ext(fn, args, nargs) and nxgl4_last_error, and
 leaves two symbols for the embedder: nxgl4_guest_ptr(addr, size) (guest range -> host pointer; NULL when the range is not wholly inside
 one mapping readable and writable for the guest: Machine.host_ptr) and nxgl4_on_present(frame). The library does not ship them, so
-this file loads the recipe product of the host-target root verify/bootrt (libnxgl4rt.so, built by recipe.py in the verdict's store, $GATE_CACHE;
-no compiler is called here) RTLD_GLOBAL, then the library. bootrt defines the two embedder symbols (forwarding to the function pointers set through
-nxgl4_shim_set(ptr, present, exit)) and fnvnx_reach_violation (hostabi/include/fnvnx/reach.h) for every host object. The environment of the library (LIBGL_ALWAYS_SOFTWARE,
+this file builds a tiny C shim once per process (the two symbols forwarding to function pointers set through nxgl4_shim_set), loads
+it RTLD_GLOBAL, then loads the library. The shim needs the host gcc. The environment of the library (LIBGL_ALWAYS_SOFTWARE,
 GALLIUM_DRIVER, EGL_PLATFORM, NXGL4_FRAMES) is the caller's: boot.py sets it before Gpu() loads the library.
 The library's host packages (libegl1, libegl-mesa0 and what they pull: libglvnd0, mesa-libgallium, libllvm20, ...) are part of the declared
 environment (verify/env.json, derived by envcheck.py snapshot from RENDER_LIBS/RENDER_FILES); nothing installs them at test or job time.
@@ -858,8 +858,9 @@ Address-space plan of the emulator boot stage for the guest ELF (elf32-littleaar
 
 Pure and stdlib-only: no unicorn, clock, environment or randomness; every iteration runs over sorted/ordered data.
 The guest loader later maps the original Windows exe image (0x00400000..) and the module images through a host call, so
-the stage must keep those ranges free. Library: parse_elf, normalize_reserved, plan, file_bytes. A condition that cannot be met raises
-LayoutError; there is no alternative placement and no default.
+the stage must keep those ranges free. Library: parse_elf, normalize_reserved, plan, reloc_census. CLI:
+`python3 -I verify/bootlayout.py plan -h`. A condition that cannot be met raises LayoutError (CLI: message, exit 1);
+there is no alternative placement and no default.
 
 Rules (each with its argument):
 1. parse_elf: EI_CLASS=ELFCLASS32, EI_DATA=little, e_machine=EM_AARCH64 (183), e_type=ET_DYN and DT_FLAGS_1 with
@@ -877,30 +878,17 @@ Rules (each with its argument):
    (4 KiB) at 0x3F000000, heap at 0x40000000, end <= 2^32. Fixed regions are not moved: a clash is an error. Totality:
    `checks` lists every unordered pair of {regions + reserved} exactly once, each verified disjoint here, so the
    plan's disjointness is auditable without re-deriving it. `free` repeats the (aligned) reserved ranges.
-4. crt0 header (parse_elf; the guest relocates itself at run time, so the stage applies no relocation and reads no relocation table): at +8 of the first executable PT_LOAD: magic 0x47584E46, u32 abi, u32 link_base (+16) ==
+4. reloc_census: the guest relocates itself at run time, so the stage applies no relocation; it only proves that the
+   image is self-contained. Counts of dynamic relocations per type from DT_RELA/DT_RELASZ (Elf32_Rela), DT_REL and
+   DT_JMPREL (decoded per DT_PLTREL) and the DT_RELR entry count (DT_RELRSZ / DT_RELRENT, default 4). Allowed: type
+   R_AARCH64_P32_RELATIVE = 183 in DT_RELA (AAELF64 ILP32 relocations, binutils include/elf/aarch64.h, glibc elf.h)
+   and any DT_RELR; anything else (other types, non-empty DT_REL / DT_JMPREL) is an error listing the counts.
+   The census is part of the plan.
+   crt0 header (parse_elf): at +8 of the first executable PT_LOAD: magic 0x47584E46, u32 abi, u32 link_base (+16) ==
    lowest PT_LOAD vaddr aligned down, u32 size (+20) == page-aligned span, u32 flags (+24) with bit0 (relocatable).
    Regions and reserved ranges all lie at or above 0x10000 (the guest's low pages stay unmapped).
-5. entry: plan() takes the image entry from its caller (`entry=`: header.entry of the link record, bootfacts.entry; the ELF header is not read for
-   it) and requires it to lie inside the image span; the plan's image.entry is base + entry. There is no CLI: boot.py builds the plan.
+5. CLI plan (--keys mandatory): deterministic JSON (sorted keys, indent 1, format "fnvnx-bootlayout/1").
 ```
-
-
-## verify/bootfacts.py
-
-The L4 views of the ELF facts of a linked output: lookups in the link record (L1's "fnvnx-elffacts/2", `elffacts.json` beside the linked ELF), which is
-the one source of sections and defined symbols (L4 reads no section or symbol table of an ELF, and runs no readelf or nm on one).
-
-```text
-load(path)                      the record, its format checked (FactError)
-sections_by_name(rec)             {section name: [(address, size), ...]}
-symbol_values(rec)            {symbol name: [value, ...]}   the record lists the defined symbols (L1 leaves out STT_SECTION and STT_FILE)
-entry(rec)                      header.entry of the record (FactError when absent)
-symbol(rec, name)               the one value; FactError unless the name is defined exactly once
-symbol_bytes(rec, data, name)   the st_size bytes of the symbol, read from the image DATA through its PT_LOAD program headers
-                                (bootlayout.file_bytes); FactError for a bss symbol
-```
-Consumers: icount.py spec, boot.py run, bootmiles.py resolve and lockobs.py (all take `--facts elffacts.json`; boot.py reads the image itself from `--elf` for its program headers only), tests/test_bootmachine.py
-(modes_of, symbol, facts_path). bootmiles.symbols / alloc_sections apply the symbol rules (global vs local, mapping symbols) to the record. Tests: tests/test_bootfacts.py (the guest image's own record).
 
 ## verify/bootmachine.py
 
@@ -914,22 +902,9 @@ Rules:
    host page / heap = the plan's regions. No relocation: the guest relocates itself. A segment outside the image region
    or sharing a page with another raises MachineError.
 2. Totality: all 50 slots resolve to services.h_<slot> at construction, else MachineError (the list is the header's struct, checked by the tests).
-3. N cores, parallel progress in rounds (CLAUDE.md "The declared CPU"). N = popcount(FNVNX_APP_CORES) (placement.h, read by name:
-   the declared machine; cores = its set bits, ascending). Every thread lives on its ideal core for ever (thread_create's
-   FNVNX_CPU_SPEC ideal, thread_set_cpu; the main thread FNVNX_DEFAULT_CORE): THREAD_CPU = ideal, there is no migration, the mask is not
-   used for placement. Per core the ready thread of the highest priority runs (Win32 scale, signed, higher first), FIFO within equal
-   priority (the order in which threads became ready; a thread that only used up its quantum keeps its place; thread_yield goes behind its
-   equals). A round visits the cores 0..N-1 in order and gives each core's chosen thread one slice of `quantum` instructions: the machine's
-   own count (block size / 4 per image block, the one block hook), ended at the first block boundary at or after the quantum (the block that
-   would run next is not run and not counted, so every block is counted once and icount stays exact). A thread leaves its core only at a
-   blocking host call, its end, or, at the next round boundary, when a thread of higher priority on the same core is ready. quantum is a
-   required argument (no default); a different quantum changes interleavings, not what a race-free guest computes. The pick is made at the
-   start of each core's turn, so it is a pure function of the machine's state: no wall clock, switch points repeat. Nothing ready on any
-   core: the virtual tick jumps to the earliest deadline; none: reason "deadlock" with a per-thread wait report. run()["cores"] has the
-   per-core numbers: {core: {"slices", "instructions", "switches", "pairs": {"from>to": n}}}; a switch is a core running another thread than
-   the one it ran last. quantum is a declared parameter of the instrument. The slice end is a function of the code's block extents and the
-   pinned Unicorn (env.json python.modules; its version is in OUT.json machine.unicorn), so switch points repeat for the same code and pin.
-   Memory ordering is proved by the plugin rule (R9, OWNER 9); the boot machine neither tests nor certifies it.
+3. One CPU. A thread switches only at a blocking host call and at a host call's return after `hc_slice` calls of its
+   slice while another thread is ready: no wall clock, no instruction counts, so switch points repeat. Nothing ready:
+   the virtual tick jumps to the earliest deadline; none: reason "deadlock" with a per-thread wait report.
 4. Any invalid access (unmapped or protection violation), Unicorn error, or host call on an unmapped guest pointer
    ends the run, reason "fault", record {kind, addr, size, pc, lr, tid}. There is no continue path.
 5. map_fixed(addr, size, src) follows svcMapMemory (hostapi.h): src is a page-aligned block of the heap region, wholly
@@ -1046,10 +1021,10 @@ bootpath.py - the guest-path rule of the boot stage: where a guest SD path lands
 A guest path is a string, "sdmc:/a/b" (prefix case-insensitive) or "/a/b"; "\" counts as "/". Components "" and "." are
 dropped; ".." removes the previous component and stops at the card's root, so nothing outside the mounts is reachable
 (the path is refused by clamping, not by an error: "/../x" is "/x").
-Mounts. The guest sees one SD card, mapped to `root`. The game install (`game`) is mounted at FNVNX_SD_DIR (sdlayout.h, read by
-name through hostabirec.py; sdmc:/switch/fnv): a path under that prefix (compared case-folded) continues inside `game`, except that
-the port's own entries of it (FNVNX_SD_PORT_NAMES: PORT_NAMES, PORT_PREFIXES: logs, profile, launcher files) stay on `root`. Without
-`game` it is <root>/FNVNX_SD_DIR, always, with no inspection of the directory. The header has no other name for the game directory.
+Mounts. The guest sees one SD card, mapped to `root`. The game install (`game`) is mounted at sdmc:/switch/fnv and at
+sdmc:/fnvnx/game: a path under either prefix (compared case-folded) continues inside `game`, except that the port's own
+entries of sdmc:/switch/fnv (PORT_NAMES, PORT_PREFIXES: logs, profile, launcher files) stay on `root`. Without `game`
+it is <root>/switch/fnv when that directory holds anything besides the port's own entries, else <root>/fnvnx/game.
 Case. The SD card folds case. Each component is matched against the host entries: if the exact spelling exists it is
 used (os.path.lexists); else the host entries equal under str.casefold() are collected and the first in sorted order
 (code-point order, deterministic) is taken; with no match the spelling given is kept (a path to be created).
@@ -1130,11 +1105,13 @@ Served per service (everything else listed here as NOT answered):
 ```text
 The loader's start rules S1..S8 (loader/include/fnvnx_start.h) as assertions over the boot machine's trace of the REAL image.
 
-  bootstart.py request --exe FalloutNV.exe --iat iat.tsv --watch-out W.txt --state-out S.json
+  bootstart.py request --exe FalloutNV.exe --iat iat.tsv --modules modules.tsv [--tls tls.tsv] --watch-out W.txt --state-out S.json
       the two observation requests the exe's own PE and the contract's iat.tsv imply: the --watch-log file (fnvnx_lift_enter with the
       memory it needs) and the --state-request file (hashes of every page of the image range, dumps of the import slots and the TLS
       index word); run boot.py with  --watch-log W.txt --state-at fnvnx_start_enter --state-request S.json
-  bootstart.py check --out OUT.json --exe FalloutNV.exe --iat iat.tsv --modules modules.tsv --sha256 HEX [--json VERDICT.json]
+  bootstart.py check --out OUT.json --exe FalloutNV.exe --iat iat.tsv --modules modules.tsv --sha256 HEX [--tls tls.tsv] [--iat-data iat_data.tsv --elf GUEST.elf]
+                     [--json VERDICT.json]
+      --tls is required when the exe or a module has a TLS directory, --iat-data and --elf when iat.tsv has data slots (exit 1 otherwise)
       one verdict per rule; exit 0 iff every rule is "pass"
 
 A verdict is pass, fail or undecided. fail: the trace contradicts the rule. undecided: the rule's value is not in the supplied facts
@@ -1145,8 +1122,9 @@ RULE -> OBSERVATION -> FIELD (E existing, N new; all N fields are recorded by th
   S2 PE headers      no "fnvnx-start: PE headers" line, "image mapped" present; the PE parses (sections in rva order inside SizeOfImage) E console.txt
   S3 map             every page of [ImageBase, +SizeOfImage): sha256 = headers / section bytes / zero (min(raw,virt) bytes, rest 0),
                      except the import slots and the TLS index word (S4, S5); every page mapped                                    N start_state.pages, runs
-  S4 imports         every slot of iat.tsv holds its value (key or module export); data slots: a mapped RW address; slot set = the PE's  N start_state.dump
-  S5 TLS             index word 0; main thread block vec[0] = block, block = template + zero fill at the alignment; callbacks and entry
+  S4 imports         every slot of iat.tsv holds its value (key or module export); data slots: the ELF address of the native_symbol of iat_data.tsv (table_id = the ELF's); slot set = the PE's  N start_state.dump
+  S5 TLS             per image of tls.tsv (slot = its tls_slot column: the exe 0, static images 1, 2, ...): index word = the slot, main thread vec[slot] = block, block =
+                     sha-checked template + zero fill at the alignment; the exe's callbacks and entry
                      in executable sections                                                                       N start_state.dump, watch_log mem
   S6 protection      every page of the image range: headers R, section R/W by its characteristics, never X, claimed gaps none           N start_state.runs
   S7 thread block    TEB +0 -1, +4 stack base, +8 limit, +0x18 self, +0x2c vector; guard page none, stack RW of SizeOfStackReserve; the
@@ -1154,6 +1132,9 @@ RULE -> OBSERVATION -> FIELD (E existing, N new; all N fields are recorded by th
   S8 enter           the first exe-range fnvnx_lift_enter calls on one thread: the TLS callbacks (image_base, 1, 0) in list order, then
                      the entry (0, 0, 0); esp = (stack_base - 16) & ~15 holding the sentinel; console "enter <entry>"       N watch_log args, mem
 Rules no observation can decide are listed in the verdicts as undecided, with the reason.
+S5 details: slot and alignment are read from the tls_slot and align_bytes columns (contract/modules.py: the loader's own numbers), never derived here; an image
+of tls.tsv without a tls_slot (loaded on demand) has no start state and is only fact-checked (sha256 of its template). The watch log captures a long block in chunks of boot.py MEM_MAX bytes (spec +DELTA), so the
+whole block is compared, never a prefix. A repeated tls_slot, a static image without one and an on-demand image with one are fact failures.
 ```
 
 ## verify/cas.py
@@ -1804,21 +1785,6 @@ Result extra key "files": [{"name","seconds","status"}] (status passed|failed|ca
 `recipe.semantics_for(pinned driver, language)` on `flags.semantics` of `guest_compiler.json` (the set minus the flags the driver itself says do not apply to the language).
 It is the one function the recipe uses; there is no second list. The pinned compiler is fetched by its pin into DIR (default `$GATE_CACHE`). For the runtime build of L5.
 
-## verify/hostabirec.py
-
-```text
-The one record of the host ABI as the boot machine uses it, parsed from hostabi/include/fnvnx/{hostapi,placement,reach,sockwire,sockwire_errno,
-sdlayout,hostvm}.h (the headers are L5's). Nothing of it is typed a second time in verify/.
-
-  record().define(NAME)   an object-like integer #define (constant expression of literals, earlier names, | & ^ << >> + - ~ * and casts)
-  record().string(NAME)   a string macro: the C concatenation of the adjacent string literals (no escapes) and earlier string macros of its body
-                          (FNVNX_SD_FONTS = FNVNX_SD_DIR "/fonts" is "sdmc:/switch/fnv/fonts"); a body with a literal that does not resolve
-                          completely is a RecordError at load, never skipped; a name that is no string macro is a KeyError
-  record().xlist(NAME), .services, .slots, .platform_services(), .sock_services(), .api_size()
-  python3 hostabirec.py [--include DIR] --out FILE.py   the same record as a Python module (DEFINES, LISTS, STRINGS, SERVICES, SLOTS, API_SIZE)
-Asking for anything absent raises: there is no default.
-```
-
 ## verify/icount.py
 
 ```text
@@ -1827,8 +1793,7 @@ Deterministic executed-instruction counter for a Unicorn AArch64 guest (the owne
 Library: attach(uc, lo, hi, spec=None, bias=0) installs one UC_HOOK_BLOCK over [lo, hi) and returns an Icount;
 the emulator tells it thread(tid), mark(name, out_of_order=False) and stop(reason, **events); write(path) or report()
 gives the OUT.json document ("fnvnx-icount/1", see report()). CLI: `python3 -I verify/icount.py spec ...` builds the
-SPEC.json that classes (ranges, entries) are read from, from the link record `--facts elffacts.json` of the ELF
-(bootfacts.py: the one source of sections and defined symbols; no ELF is read here); run `spec -h`.
+SPEC.json that classes (ranges, entries) are read from; run `spec -h`.
 
 Counting rule: a block of `size` bytes adds size/4 instructions. The static facts of a block (instructions per opcode
 class, per range class, entry) are computed once per (address, size) from the block's bytes and cached, so the hook
@@ -2679,4 +2644,56 @@ is another symbol than `_start`), nothing else.
 Rule (red otherwise): link/guest.json is exactly {script}; every derived start/end file lies under the pinned runtime external (recipe.outside_files) and in
 the multilib directory the flags select (stage `mld:<root>`, `-print-multi-directory`; recipe.in_multilib). Items: every derived entry; certified = all when
 the rule holds. A red guest root build or a failing driver run is red with the reason.
+```
+
+## link/milestones.py
+
+```text
+milestones - milestones.tsv for the emulator stage: addresses of the guest's boot milestones, each from a fact.
+
+    milestones.py --exe FalloutNV.exe --modules modules.tsv --n1 n1.json --keys keys.tsv --entries entries.tsv --out milestones.tsv
+
+Rows `name<TAB>kind<TAB>value<TAB>source` (value: 8 hex digits, the address in the guest's address space or the import key); the last
+line is `# table_id <id>`, the id of keys.tsv, which must equal the id of entries.tsv.  The rows, in this order:
+  exe_entry              exe_entry  PE ImageBase + AddressOfEntryPoint of the exe file.
+  module_entry:<name>    module_entry  assigned_base + entry rva of every modules.tsv row with a non-zero entry rva (sorted by name);
+                         a 5th column holds the row's `static` flag (1 = in the exe's import closure).
+  WinMain                winmain  the address of the N1 function whose decorated name is the global function WinMain
+                         (`?WinMain@@...` or `_WinMain@N`).  N1 (n1.py) holds a function only when its MSVC object bytes equal the exe's
+                         bytes at that address, so the name -> address binding is proven; the certificate must carry the sha256 of this
+                         exe.  No such function: no row (nothing is substituted).  Two with different addresses: stage error.
+  import:<dll>!<name>    import  the import key of keys.tsv for the D3D9 calls that mark the first frame: dll `!idirect3ddevice9.dll` and
+                         `!idirect3dswapchain9.dll`, name `Present`; a missing row is no row.
+A pure function of its inputs; a violated precondition is a stage error.
+```
+
+## contract/bridgegen.py
+
+```text
+bridgegen - the rows table (stage A of the bridge table): bridge.tsv without any symbol table (contract/bridgetable.derive with syms=None).
+
+    bridgegen.py --names sys_names.tsv --specs DIR --name-table msvcrt_names.tsv --va msvcrt_va.tsv --out bridge.tsv [--extra rows.tsv ...]
+
+DIR holds the Wine 9.0 `<dll>.spec` files (dlls/<dll>/<dll>.spec copied by name); `--extra` files are 8-column rows of other owners (COM interfaces,
+the d3d9 exports), each replacing the derived row of the same (dll, name).  The output is the 8-column table with the header line iat.py reads;
+a row binds by rule (sym, data, lookup, l3), so the table does not depend on the product's objects and its sha256 is the table_id of the keys.
+A violated precondition (a name missing from its spec, a stub, a forward that cannot be followed, a duplicate in the extra rows) is a stage error.
+The native symbol of a data export of msvcrt is the `data` row of the name table (a data export without one is an error); the forwarder of an msvcrt
+export whose body reads the x86 stack words of the call (the printf family) is its row of the va record `name TAB symbol` (a varargs export without
+one is an error). Both records are tracked files of the tool root `bridgefacts`; there is no table of them in bridgetable.py.
+```
+
+## bridgefacts (tool root)
+
+```text
+ports/fnv-nx/bridgefacts: the inputs the bridge table derives from, in a root below every consumer of the table (RECIPE.md "Outputs and uses"). Tracked:
+com/com_spec.json (the COM interface spec; com/spec_extract.py derives it from the platform's declarations, com/com_spec_mutate.py is the
+compile-failure test's mutation), crt/msvcrt_names.tsv (name, provider symbol, func|data) and crt/msvcrt_va.tsv (the va forwarders). Its recipe runs one
+stage, com/comrows.py SPEC ROWS WORDS, the one derivation of the signature of every COM thunk, and declares the outputs COM_ROWS (the bridge rows of
+the COM methods and exports, the `extra` rows of bridgegen) and COM_WORDS (`Interface Method words` for every method, hidden interfaces too).
+The platform's C++ half (platform/com/gen_combridge.py SPEC ROWS WORDS OUTDIR) reads them through `uses` and never recomputes a signature; the
+loader's stage A reads COM_ROWS through `uses`; the gate `imports` names the same files in platform/imports.in.json ({root, output} for the rows,
+{root, path} for the records; recipe.resolve_input reads a tracked file of an admitted tool root). Ownership is unchanged: L5 owns the COM and msvcrt
+files, L6 the d3d9 rows (still taken from the manifest external's d9bridge_rows.tsv until its generator moves here).
+Test: verify/tests/test_bridgefacts.py.
 ```

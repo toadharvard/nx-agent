@@ -56,7 +56,7 @@ def root_check(root, repo, cache, jobs, built=None):
     store, names, bad, rets = os.path.join(cache, "store"), set(), [], {}
     pin = recipe.load_pin(repo)   # a guest root's libc headers are the pinned runtime external's (guest_compiler.json "runtime"); a host root's the distribution's
     rt_at = ((pin or {}).get("runtime") or {}).get("at")
-    sjdirs = (rt_at,) if rt_at and roots.get(root, {}).get("target") == "guest" else objstub.SYSTEM_SJ
+    sjdirs = (rt_at,) if rt_at and recipe.entry_of(roots, root).get("target") == "guest" else objstub.SYSTEM_SJ
     for lang, ext in (("c", recipe.CC_EXT), ("c++", recipe.CXX_EXT)):
         us = [(k, unitstage.result_file(store, k, "unit.ii"), lang) for u, k in sorted(res["pp_keys"].items()) if u.endswith(ext)]
         if us:

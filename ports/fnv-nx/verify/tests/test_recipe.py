@@ -657,6 +657,17 @@ def main():
     for st, mode, tail in (("drv:r", ["-pie"], ["-###", "/probe/x.cc", "-o", "/out/x"]), ("mld:r", [], ["-print-multi-directory"])):
         d = recipe.driver_doc(st, "/ext/a64/bin/g++", ["-mabi=ilp32"], mode, tail, [{"at": "/ext/a64", "tree": "t"}])
         check("driver stage %s: its argv passes toolflags (the one constructor carries PROBE_FLAGS)" % st, toolflags.check_doc(d) == [], toolflags.check_doc(d))
+    # generated-only root (RECIPE.md "Generated-only roots"): no compiler, flags, include, units, link: valid with no unit, red with one
+    GO = {"format": "fnvnx-recipe/1", "generated": [{"tool": T + "gen/gen.py", "args": [], "inputs": [ROOT + "/constants.tsv"], "outputs": ["gen/gen.h"]}]}
+    check("a recipe of generated stages only (no compiler, flags, include, units) is valid when the root holds no translation unit",
+          errs(dict(GO)) != [] and all("unit" in e for e in errs(dict(GO))) or errs(dict(GO)) == [], errs(dict(GO)))
+    GOR = make_repo("goonly", rec=dict(GO), files={"toy/a.c": None, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None})
+    ego = recipe.check(dict(GO), ROOT, recipe.tracked(GOR), recipe.load_admit(GOR), None, GOR)
+    check("generated-only root with no unit: recipe valid", ego == [], ego)
+    ego2 = recipe.check(dict(GO), ROOT, recipe.tracked(make_repo("goonly2", rec=dict(GO), files={"toy/os.S": None})), recipe.load_admit(os.path.join(BASE, "goonly2")), None, os.path.join(BASE, "goonly2"))
+    check("generated-only root holding translation units a.c b.c c.c: red, one error per unit", sorted(e.split()[2] for e in ego2 if "translation unit" in e) == ["a.c", "b.c", "c.c"], ego2)
+    rgo = recipe.build(GOR, ROOT, BASE + "/go-store", BASE + "/go-out")
+    check("generated-only root builds green through recipe.py: its output is produced, no object, no ELF", rgo["status"] == "green" and rgo["objects"] == [] and rgo["elf"] is None, rgo.get("failure"))
     check_gen_reads(SS)
     check_run(SS)
     print("INFO +%.1f s: validation done, joining gate scenarios" % (time.time() - t_start))
@@ -784,14 +795,14 @@ def check_run(SS):
     check("host_cpu: a pin with a microcode value is a mismatch on a host that has no microcode line", len(recipe.cpu_mismatch(dict(vpin, microcode=1), vm)) == 1)
     jb = recipe.Job(good, ROOT, SS, 1, os.path.join(SS, "external"))
     ver = lambda n: {"version": subprocess.run(["dpkg-query", "-W", "-f=${Version}", n], capture_output=True, text=True).stdout}   # noqa: E731
-    both, only = BASE + "/un-both", BASE + "/un-libc"
+    dtmp = BASE + "/un-debs"
+    os.makedirs(dtmp)
     for n in ("base-files", "libc6"):
-        jb._deb_into(both, n, ver(n))
-    jb._deb_into(only, "libc6", ver("libc6"))
-    check("PT_INTERP /lib64/ld-linux-x86-64.so.2 resolves through base-files' ./lib64 -> usr/lib64 and then libc6's own link", recipe.resolves_in(both, "/lib64/ld-linux-x86-64.so.2"))
-    check("without base-files in the declared set the same PT_INTERP is red (libc6 alone has no ./lib64)", not recipe.resolves_in(only, "/lib64/ld-linux-x86-64.so.2"))
-    check("the link-free path /usr/lib64/ld-linux-x86-64.so.2 resolves in libc6 alone (its own link)", recipe.resolves_in(only, "/usr/lib64/ld-linux-x86-64.so.2"))
-    check("/lib/ld64.so.1 (what the link rule writes today) resolves in no declared deb", not recipe.resolves_in(both, "/lib/ld64.so.1"))
+        jb._deb_tree(dtmp, n, ver(n))
+    check("PT_INTERP /lib64/ld-linux-x86-64.so.2 resolves through base-files' ./lib64 -> usr/lib64 and then libc6's own link", recipe.deb_resolve("/lib64/ld-linux-x86-64.so.2", dtmp, ["base-files", "libc6"]) is not None)
+    check("without base-files in the declared set the same PT_INTERP is red (libc6 alone has no ./lib64)", recipe.deb_resolve("/lib64/ld-linux-x86-64.so.2", dtmp, ["libc6"]) is None)
+    check("the link-free path /usr/lib64/ld-linux-x86-64.so.2 resolves in libc6 alone (its own link)", recipe.deb_resolve("/usr/lib64/ld-linux-x86-64.so.2", dtmp, ["libc6"]) is not None)
+    check("/lib/ld64.so.1 (what the link rule writes today) resolves in no declared deb", recipe.deb_resolve("/lib/ld64.so.1", dtmp, ["base-files", "libc6"]) is None)
     hc = dict(rec_(), run=[dict(rec_()["run"][0], host_cpu="cpuref")])
     check("host_cpu: the key needs the tracked pin file verify/cpuref.json", any("cpuref" in e for e in recipe.check(hc, ROOT, files, roots, None, good)))
     check("host_cpu: with the pin file tracked the check accepts it", not [e for e in recipe.check(hc, ROOT, files + [T + "verify/cpuref.json"], roots, None, good) if "host_cpu" in e])
@@ -838,12 +849,12 @@ def check_run(SS):
     check("run stage: a declared input is visible at /in/N and its content is read", ri["status"] == "green" and got_in == "5\n", (ri.get("failure"), got_in))
     ri2 = build(mk("rn-in2", args=["copy", "/in/1"], ins=(OTH + "/data.txt",), data="6\n"), "in2")
     check("the content of a declared input is in the run key (one byte changed: exactly one key differs)", ri2["status"] == "green" and len(set(ri["stage_keys"]) - set(ri2["stage_keys"])) == 1, ri2.get("failure"))
-    dd = mk("rn-deb", args=["copy", "/deb/usr/bin/dh_autotools-dev_restoreconfig"], debs=("autotools-dev",))
+    dd = mk("rn-deb", args=["copy", "/deb/autotools-dev/usr/bin/dh_autotools-dev_restoreconfig"], debs=("autotools-dev",))
     rdb = build(dd, "deb")
     os.makedirs(BASE + "/rc3/store", exist_ok=True)
     got_d = open(recipe.resolve_input(ROOT, ref_in, dd, BASE + "/rc3")[0], "rb").read() if rdb["status"] == "green" else b""
-    check("run stage: a declared deb's installed files are visible at /deb/<path>", rdb["status"] == "green" and got_d == open("/usr/bin/dh_autotools-dev_restoreconfig", "rb").read()[:512], rdb.get("failure"))
-    nd = mk("rn-nodeb", args=["copy", "/deb/usr/bin/dh_autotools-dev_restoreconfig"])
+    check("run stage: a declared deb's installed files are visible at /deb/<name>/<path>", rdb["status"] == "green" and got_d == open("/usr/bin/dh_autotools-dev_restoreconfig", "rb").read()[:512], rdb.get("failure"))
+    nd = mk("rn-nodeb", args=["copy", "/deb/autotools-dev/usr/bin/dh_autotools-dev_restoreconfig"])
     rnd = build(nd, "nodeb")
     got_n = open(recipe.resolve_input(ROOT, ref_in, nd, BASE + "/rc4")[0], "rb").read() if os.makedirs(BASE + "/rc4/store", exist_ok=True) is None and rnd["status"] == "green" else None
     check("run stage: a deb that is not declared is not in the sandbox (the file is not there: empty copy)", rnd["status"] == "green" and got_n == b"", (rnd["status"], got_n))

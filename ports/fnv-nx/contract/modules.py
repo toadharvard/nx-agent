@@ -425,7 +425,7 @@ def exe_slots(exe):
     return {exe.base + slot: (dll, name) for dll, items in exe.import_directory() for slot, name in items}
 
 
-def run(exe_path, bridge_path, dirs, out, declared_path, c_out=None, keys_out=None, keys_tsv_out=None, data_out=None, keys_h_out=None):
+def run(exe_path, bridge_path, dirs, out, declared_path, c_out=None, keys_out=None, keys_tsv_out=None, data_out=None, keys_h_out=None, modules_tsv_out=None):
     exe = PE(exepin.load_exe(exe_path), exepin.NAME)
     brows, _ = iat.bridge_rows(bridge_path)
     bridge = [(r['dll'], r['name'], r['conv'], r['ordinal']) for r in brows]
@@ -443,10 +443,13 @@ def run(exe_path, bridge_path, dirs, out, declared_path, c_out=None, keys_out=No
     put = lambda path, text: tsv(path, text) if out else None   # noqa: E731
     write_table = lambda path, rows: iat.write_table(path, rows) if out else None   # noqa: E731
     load_index = {m.name: i for i, m in enumerate(m for m in order if m.static)}
-    put(os.path.join(out or '', 'modules.tsv'), '# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index\n' +
+    mtext = ('# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index\n' +
         ''.join('%s\t%s\t%d\t%08x\t%08x\t%08x\t%d\t%08x\t%d\t%s\n' % (
             m.name, m.sha256, m.size, m.pe.base, m.base, m.pe.size_of_image, 1 if m.pe.dirs[9][1] else 0, m.pe.entry_rva,
             int(m.static), load_index.get(m.name, '')) for m in sorted(order, key=lambda m: m.name)))
+    put(os.path.join(out or '', 'modules.tsv'), mtext)
+    if modules_tsv_out:   # modules.tsv as a declared stage output (the boot input of the emulator stage)
+        tsv(modules_tsv_out, mtext)
     if out:
         write_tls(out, tls_rows(exe, order, load_index))
     put(os.path.join(out or '', 'modules.c'), c_source(order))
@@ -515,13 +518,14 @@ def main():
     ap.add_argument('--c-out', help='modules.c: the loader module table (fnvnx_modules, fnvnx_module_count)')
     ap.add_argument('--keys-c-out', help='import_keys.c: the loader import table (fnvnx_import_rows, fnvnx_import_row_count, fnvnx_import_key_count, fnvnx_import_by_key_idx)')
     ap.add_argument('--keys-h-out', help='import_keys.h: FNVNX_KEY(dll, name), the key of every function row as a compile-time constant (iat.key_header)')
+    ap.add_argument('--modules-tsv-out', help='modules.tsv: the module set, bases and entries (the boot input of the emulator stage)')
     ap.add_argument('--keys-tsv-out', help='keys.tsv: the import keys for the lifter stubs (iat.keys_tsv)')
     ap.add_argument('--data-out', help='iat_data.tsv: the data rows of the import table (build fact of the loader start rule S4, iat.data_tsv)')
     a = ap.parse_args()
-    if not (a.out_dir or a.c_out or a.keys_c_out or a.keys_tsv_out or a.data_out or a.keys_h_out):
-        ap.error('one of --out-dir, --c-out, --keys-c-out, --keys-tsv-out, --data-out, --keys-h-out is required')
+    if not (a.out_dir or a.c_out or a.keys_c_out or a.keys_tsv_out or a.data_out or a.keys_h_out or a.modules_tsv_out):
+        ap.error('one of --out-dir, --c-out, --keys-c-out, --keys-tsv-out, --data-out, --keys-h-out, --modules-tsv-out is required')
     try:
-        text, bad = run(a.exe, a.bridge, a.dir, a.out_dir, a.declared, a.c_out, a.keys_c_out, a.keys_tsv_out, a.data_out, a.keys_h_out)
+        text, bad = run(a.exe, a.bridge, a.dir, a.out_dir, a.declared, a.c_out, a.keys_c_out, a.keys_tsv_out, a.data_out, a.keys_h_out, a.modules_tsv_out)
         if not a.out_dir:   # tables-only mode: a slot without a provider is the `iat` gate's finding (it needs the tables), not a failure of the generator
             bad = False
     except (StageError, ValueError, OSError, exepin.ExePinError) as e:

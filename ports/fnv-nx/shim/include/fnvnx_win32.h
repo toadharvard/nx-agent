@@ -181,7 +181,11 @@ LONG InterlockedCompareExchange(volatile LONG *, LONG, LONG);
 PVOID InterlockedCompareExchangePointer(PVOID volatile *, PVOID, PVOID);
 PVOID InterlockedExchangePointer(PVOID volatile *, PVOID);
 #else
+#ifdef __cplusplus
 #define FNVNX_ILK inline __attribute__((gnu_inline, always_inline))
+#else
+#define FNVNX_ILK extern inline __attribute__((gnu_inline, always_inline))   /* C: `inline` + gnu_inline would EMIT a definition in every C unit that includes this header; extern inline emits none */
+#endif
 #define FNVNX_ILK_MISALIGNED(p) __builtin_expect(((uintptr_t)(p) & (sizeof(*(p)) - 1)) != 0, 0)
 #define FNVNX_ILK_FULL(expr) ({ __typeof__(expr) r_ = (expr); __atomic_thread_fence(__ATOMIC_SEQ_CST); r_; })
 FNVNX_ILK LONG InterlockedIncrement(volatile LONG *p)
