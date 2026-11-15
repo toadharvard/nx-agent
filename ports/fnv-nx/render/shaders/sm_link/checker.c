@@ -17,6 +17,7 @@
 #include <string.h>
 #include "fnvnx_shaders.h"
 #include "fnvnx_sdp.h"
+#include "nx_smscan.h"    /* the one scanner of the draw path: nx_sm_check, nx_sm_pairs */
 #include "nx_pair.h"      /* the one selection function of the draw path: nx_pair_variant */
 #include "fnvnx_dk_layout.h"   /* the product header: fnvnx_dk_vs_needs_complete is called, not copied */
 #include "fnvnx_sha256.h"
@@ -187,8 +188,12 @@ static void do_stage(const Form *f, unsigned flags, StageRes *o) {
         if (!ok) { o->status = "compile_fail"; glGetShaderInfoLog(sh, (int)sizeof o->why, NULL, o->why); }
         else if (grammar_read(r.glsl, o->sig, decls, 64, &o->ndecl)) o->status = "grammar_fail";
         else {
-            uint32_t mj = 0; char er[160]; int dn = fnvnx_shader_declared_pairs(f->bc, f->n, o->pr.p, &mj, er, sizeof er);   /* the declared pairs: the one source the draw path uses */
-            if (dn < 0) o->status = "reflection_fail"; else { o->pr.n = dn; o->major = mj; }
+            NxSmIface ifc; uint32_t *tk = malloc(f->n + 4), nb;   /* the declared pairs: nx_sm_pairs of the scan the draw path makes (the bytecode bytes are 32-bit tokens) */
+            if (tk) memcpy(tk, f->bc, f->n);
+            int rc = 0; nb = 0;
+            if (!tk || !(nb = nx_sm_bytes(tk)) || (rc = nx_sm_check(tk, nb, f->stage, &ifc))) { o->status = "reflection_fail"; snprintf(o->why, sizeof o->why, "nx_sm_bytes %u nx_sm_check %d", nb, rc); }
+            else { o->pr.n = (int)nx_sm_pairs(&ifc, o->pr.p); o->major = ifc.major; }
+            free(tk);
             o->disagree = query_read(sh, decls, o->ndecl, &o->active);
             if (o->disagree) o->status = "signature_disagree";
         }

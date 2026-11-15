@@ -74,10 +74,10 @@ static int out_index(const MOJOSHADER_parseData *pd, const MOJOSHADER_attribute 
     return (pd->major_ver < 3 && (a->usage == MOJOSHADER_USAGE_FOG || a->usage == MOJOSHADER_USAGE_POINTSIZE)) ? 0 : a->index;
 }
 
-/* THE declared pairs of a stage, as FNVNX_DK_PAIR codes ascending (the one function: the reflection field "declared_pairs", the draw path's pairing
- * through fnvnx_shader_declared_pairs, and the sets below all come from here). VS: its declared outputs (oFog / oPts below sm3 normalised by
- * out_index; POSITION0 / PSIZE0 included). PS: its declared inputs (not vPos / vFace). Returns the count (<= 224). */
-static int declared_pairs(const MOJOSHADER_parseData *pd, int is_vs, unsigned char *out)
+/* The varyings a stage writes (VS) or reads (PS), as FNVNX_DK_PAIR codes, for the static variant rule fnvnx_dk_vs_needs_complete() (fnvnx_dk_layout.h).
+ * VS: its outputs except the built-ins POSITION0 / PSIZE0, and FOG0 always (every VS writes it, README "Varying completion"). PS: its inputs
+ * (not vPos / vFace), and FOG0 for a ps < 3.0 (its epilogue reads the fog factor). Returns the count. */
+static int stage_pairs(const MOJOSHADER_parseData *pd, int is_vs, unsigned char *out)
 {
     int n = 0, i, q;
     #define ADDP(pr) do { int d_ = 0; for (int k_ = 0; k_ < n; k_++) if (out[k_] == (pr)) d_ = 1; if (!d_ && n < 224) out[n++] = (unsigned char)(pr); } while (0)
@@ -85,29 +85,19 @@ static int declared_pairs(const MOJOSHADER_parseData *pd, int is_vs, unsigned ch
         for (i = 0; i < pd->output_count; i++) {
             const MOJOSHADER_attribute *a = &pd->outputs[i]; const int idx = out_index(pd, a);
             if (a->usage < 0 || a->usage > 13 || idx < 0 || idx > 15) continue;
+            if (idx == 0 && (a->usage == MOJOSHADER_USAGE_POSITION || a->usage == MOJOSHADER_USAGE_POINTSIZE)) continue;
             ADDP(FNVNX_DK_PAIR(a->usage, idx));
         }
+        ADDP(FNVNX_DK_PAIR(MOJOSHADER_USAGE_FOG, 0));
     } else {
         for (i = 0; i < pd->attribute_count; i++) {
             const MOJOSHADER_attribute *a = &pd->attributes[i];
             if (a->usage < 0 || a->usage > 13 || a->index < 0 || a->index > 15) continue;
             ADDP(FNVNX_DK_PAIR(a->usage, a->index));
         }
+        if (pd->major_ver < 3) ADDP(FNVNX_DK_PAIR(MOJOSHADER_USAGE_FOG, 0));
     }
     #undef ADDP
-    for (i = 1; i < n; i++) { unsigned char v = out[i]; for (q = i; q > 0 && out[q - 1] > v; q--) out[q] = out[q - 1]; out[q] = v; }   /* ascending */
-    return n;
-}
-
-/* The varyings a stage writes (VS) or reads (PS), as FNVNX_DK_PAIR codes, for the static variant rule fnvnx_dk_vs_needs_complete() (fnvnx_dk_layout.h):
- * the declared pairs, VS without the built-ins POSITION0 / PSIZE0 and with FOG0 always (every VS writes it, README "Varying completion"), PS with FOG0 for a
- * ps < 3.0 (its epilogue reads the fog factor). Returns the count. */
-static int stage_pairs(const MOJOSHADER_parseData *pd, int is_vs, unsigned char *out)
-{
-    unsigned char d[224]; int nd = declared_pairs(pd, is_vs, d), n = 0, i, q;
-    const int fog = FNVNX_DK_PAIR(MOJOSHADER_USAGE_FOG, 0);
-    for (i = 0; i < nd; i++) if (!(is_vs && (d[i] == FNVNX_DK_PAIR(MOJOSHADER_USAGE_POSITION, 0) || d[i] == FNVNX_DK_PAIR(MOJOSHADER_USAGE_POINTSIZE, 0)))) out[n++] = d[i];
-    if (is_vs || pd->major_ver < 3) { int have = 0; for (i = 0; i < n; i++) have |= out[i] == fog; if (!have && n < 224) out[n++] = (unsigned char)fog; }
     for (i = 1; i < n; i++) { unsigned char v = out[i]; for (q = i; q > 0 && out[q - 1] > v; q--) out[q] = out[q - 1]; out[q] = v; }   /* ascending */
     return n;
 }
@@ -194,10 +184,6 @@ int fnvnx_frontend_parse(const void *bc, size_t n, const unsigned char *link, ui
       sb_printf(&s, ",\n  \"%s\": [", is_vs ? "varyings_written" : "varyings_read");
       for (int i = 0; i < np; i++) sb_printf(&s, "%s%d", i ? ", " : "", pr[i]);
       sb_printf(&s, "]"); }
-    { unsigned char dp[224]; int nd = declared_pairs(pd, is_vs, dp);
-      sb_printf(&s, ",\n  \"major\": %d,\n  \"declared_pairs\": [", pd->major_ver);
-      for (int i = 0; i < nd; i++) sb_printf(&s, "%s%d", i ? ", " : "", dp[i]);
-      sb_printf(&s, "]"); }
     sb_printf(&s, ",\n  \"ctab\": [");
     for (int i = 0; i < pd->symbol_count; i++) {
         const MOJOSHADER_symbol *y = &pd->symbols[i];
@@ -211,19 +197,6 @@ int fnvnx_frontend_parse(const void *bc, size_t n, const unsigned char *link, ui
     if (!s.p) { snprintf(err, errlen, "out of memory"); fnvnx_frontend_release(refl); return -1; }
     *json = s.p;
     return 0;
-}
-
-int fnvnx_shader_declared_pairs(const void *bc, size_t n, unsigned char pairs[224], uint32_t *major, char *err, size_t errlen)
-{
-    fnvnx_reflection refl;
-    char *json;
-    if (fnvnx_frontend_parse(bc, n, NULL, 0, 0, 0, &refl, &json, err, errlen)) return -1;
-    free(json);
-    const MOJOSHADER_parseData *pd = (const MOJOSHADER_parseData *)refl.frontend_parse;
-    const int k = declared_pairs(pd, refl.stage == FNVNX_STAGE_VERTEX, pairs);
-    *major = (uint32_t)pd->major_ver;
-    fnvnx_frontend_release(&refl);
-    return k;
 }
 
 int fnvnx_shader_ctab(const void *bc, size_t n, fnvnx_ctab_entry **out, char *err, size_t errlen)
