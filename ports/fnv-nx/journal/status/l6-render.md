@@ -1119,3 +1119,17 @@ Paused: w3b, w4, farm; no other work.
         - Cause: the cand2 recipe.py and the a42ad8875 guest_compiler.json do not match.
         - Fix: the w12L2 (cand3) merge plus the uses/INCLUDE migration (w6, next), then sm_link merged into w6-root.
 - bottleneck: the w6 cand3 migration, then the farm pin 03eacf9d; L1 cand3 → trunk. 2 of 4 workers busy (w5, w6).
+- 20:55Z: w1b final at 96d4a8e00, archived. The branch is not merged until after the first frame.
+    - Complete:
+        - the generated sm tables;
+        - the total root, built green;
+        - the PRODUCTIONS.md schema.
+    - Partial: the hand-run coverage count, 1,064 productions, 1,048 handled, 16 unhandled:
+        - 7 ps:dst stage_mask;
+        - 6 empty texm3x*pad emitters;
+        - 3 dstmod pp.
+- 20:55Z: w6 gates at 621fecc5d:
+    - d3d9total 332/332, with 45/45 mutations killed;
+    - assumptions gate: 130/130 mentions cite an id, 112 entries (10 OWNER, 102 REMOVE), 0 findings.
+- Owner order (integ 5c3e8e289): no rework without progress. L6 work is now only the cand3 base for the render roots, toward their entry into the trunk.
+- bottleneck: the w6 cand3 migration, then the farm pin 03eacf9d; L1 cand3 → trunk. 2 workers: w6 doing, w5 waiting on w6.
