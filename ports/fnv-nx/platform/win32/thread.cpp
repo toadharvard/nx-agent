@@ -1,5 +1,6 @@
 /* thread.cpp - threads, thread ids, last error, TlsAlloc slots, the image's implicit TLS and the fake TEB
  * behind __readfsdword. */
+#include <fnvnx/cite.h>
 #include "w32.h"
 #include "fnvnx_boundary.h"
 #include "fnvl_host.h"
@@ -247,7 +248,7 @@ extern "C" unsigned long __readfsdword(unsigned long off)
 #define STACK_SIZE_PARAM_IS_A_RESERVATION_ 0x00010000
 
 /* Set by the game layer (toolchain/game/boot.cpp): the placement role of a new thread from its start routine and
- * argument, OS_THREAD_ROLE(r) or -1 (default placement); see toolchain/host/placement.h. */
+ * argument, FNVNX_THREAD_ROLE(r) or -1 (default placement); see toolchain/host/placement.h. */
 extern "C" { int (*fnvnx_thread_role_hook)(void *start, void *arg) = nullptr; }
 struct w32_thread_obj {
     struct w32_obj o;
@@ -304,7 +305,7 @@ static void thread_trampoline(void *p)
     struct w32_thread_obj *to = (struct w32_thread_obj *)p;
     struct w32_thread *self = w32_self();
     /* adopt the id handed out by CreateThread */
-    clk_thread_start(to->clk_parent);
+    VT_THREAD_START(to->clk_parent);
     self->tid = to->tid;
     self->self_obj = &to->o;
     if (to->tls_block) {
@@ -344,7 +345,7 @@ extern "C" HANDLE CreateThread(void *sa, SIZE_T stack, LPTHREAD_START_ROUTINE fn
     t->tid = __atomic_fetch_add(&g_next_tid, 4, __ATOMIC_RELAXED);
     t->exit_code = STILL_ACTIVE;
     t->cpu = -1;
-    t->clk_parent = clk_stamp();
+    t->clk_parent = VT_STAMP();
     if (!fnvnx_image_tls_hook && g_tls_total) {
         t->tls_block = tls_block_new();
         if (!t->tls_block) {
@@ -497,6 +498,7 @@ extern "C" void ExitThread(DWORD code)
     }
     os_thread_exit();
 }
+FNVNX_CITE(ExitThread, "dm:7");
 
 /* priority/ideal processor of threads CreateThread did not start (per host thread) */
 static __thread int g_main_prio;
@@ -541,7 +543,7 @@ extern "C" BOOL SetThreadPriorityBoost(HANDLE h, BOOL disable)
 
 extern "C" DWORD_PTR SetThreadAffinityMask(HANDLE h, DWORD_PTR mask)
 {
-    DWORD_PTR all = ((DWORD_PTR)1 << os_cpu_count()) - 1;
+    DWORD_PTR all = os_cpu_mask();
     if (!(mask & all))
         return 0;
     if (h == W32_PSEUDO_THREAD)

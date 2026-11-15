@@ -2,7 +2,7 @@
 """Gate "admit" (fnvnx-gate/1): nothing is in the trunk without the gates that close its classes of failure.
     python3 -I gate_admit.py        run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/admit.json
 
-Rule. verify/admit.json ("fnvnx-admit/1") lists the roots of the port tree: {"path", "class", "gates", ["recipe"], ["imports"], ["trees"], ["entry"]}.
+Rule. verify/admit.json ("fnvnx-admit/1") lists the roots of the port tree: {"path", "class", ["recipe"], ["imports"], ["trees"], ["entry"]}; the gate set is gate_admit.gates_of(row), a function of the class.
 `entry` (class tool: required, may be empty): the stage entry points of the root, .py files inside its trees. gate_pure's universe is the
 import closure of these and of the `generated` tools of the recipes; a script only a gate driver runs is not an entry point.
 `trees` (optional): the list of the directories (or exact files) of one root, at least two, the first equal to "path"; the root's
@@ -15,8 +15,8 @@ declared imports form no cycle (an error of the table: every file is uncertified
 Universe: every file git tracks below ports/fnv-nx (`git ls-files -z`), an item is its repo-relative path.
 A file is certified iff ALL hold:
   1. exactly one root contains it (a root is a directory prefix or one exact file path; roots do not nest);
-  2. the root's class is one of CLASSES and the root names every gate REQUIRED for that class;
-  3. every gate the root names is a gate file of verify/gates.d of this same tree;
+  2. the root's class is one of CLASSES, and its gates are gates_of(row) (a row that lists "gates" is red);
+  3. every gate of gates_of(row) is a gate file of verify/gates.d of this same tree;
   4. a product root names a "recipe": a file inside the root that the build gates read (how its code is compiled in the
      declared environment); the file exists.
 Classes:
@@ -28,6 +28,9 @@ Classes:
   test     tests linked against the real files of the product roots: REQUIRED_TEST gates (build, determinism, linkstrict, objstub, doubles,
            oracle, assumptions, pure), a "recipe" like a product root and a "target"; never REQUIRED_PRODUCT. The gates of
            REQUIRED_TEST that cover roots (build, determinism, linkstrict, objstub: gates.d `covers`) include class test.
+  header   headers shared by include (a directory of .h/.hh/.hpp/.hxx/.inc/.inl files that product and test roots name in `include`): no recipe, no
+           "target" (a root with no units has no target: both are derived from the recipes that include it), no translation unit, no build.json.
+           Gates: REQUIRED_HEADER (the gates that read sources). A header root is a home for `include` of every product and test root of either target.
   ref      reference files that tests/oracle.json records point at (spec, contract, model): no gate named, no recipe, no units, no link,
            no outputs. Every file of a ref root is the `path` of a reference of some tests/oracle.json, and none is a build.json or a
            test (is_test_file): a product or test root is never a ref root. The gates that cover class ref (gates.d `covers`) are the
@@ -37,6 +40,7 @@ missing gate, or a product root without its gates makes every merge red. The tab
 holds no exception for a file, a function or a finding.
 Assumption: `git ls-files` lists the tree under test (the verdict runs gates in a clean worktree of the commit). (ASM-041)"""
 import json
+import re
 import os
 import subprocess
 import sys
@@ -46,7 +50,7 @@ import gatesdir  # noqa: E402
 
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
-CLASSES = ("doc", "tool", "product", "ref", "test")
+CLASSES = ("doc", "tool", "product", "ref", "test", "header")
 # A product root names a gate for every run-time failure class of VERDICT.md. Wired on the trunk: objstub .. oracle,
 # the contract and link gates. Owned by other leads: imports, forms, d3d9total. L2's r7, namegate, argordergate, abi are wired.
 # Classes A-G of the owner's rule: datamodel, order, fpexact, eh, exepin, addr32, machine.
@@ -54,12 +58,28 @@ REQUIRED_PRODUCT = ("objstub", "linkstrict", "onedef", "determinism", "oracle",
                     "n1", "n2_data", "n2_call", "n2_vcall", "xc", "xunit", "rtti", "pcrel", "bodysel",
                     "abs", "disp", "reach", "reachlink", "gpa",
                     "imports", "forms", "d3d9total", "r7", "namegate", "argordergate", "abi",
-                    "datamodel", "order", "fpexact", "eh", "exepin", "addr32", "machine", "hostapi")
+                    "datamodel", "order", "fpexact", "eh", "exepin", "addr32", "machine", "hostapi", "tlsmodel", "rtasm")
 # A test root (class test) is a root that links the tests of the product against the product roots' real files (CLAUDE.md "no doubles in
 # tests"): it is judged by its own set, never by REQUIRED_PRODUCT. Its gates: the build gates, the doubles gate (symbols the test defines
 # intersect symbols of the product roots it links = empty), an oracle record for every test, the registry gate and pure (the stub gate is objstub; no Legal gate is built, owner decision of 2026-11-15).
 REQUIRED_TEST = ("build", "determinism", "linkstrict", "objstub", "doubles", "oracle", "assumptions", "pure")
-REQUIRED = {"doc": (), "tool": ("selftests",), "product": REQUIRED_PRODUCT, "ref": (), "test": REQUIRED_TEST}
+# A header root (class header) holds the headers that product and test roots include and no translation unit: it has no recipe, no target, no units, no link
+# (so no object gate applies), and is judged by the gates that read sources.
+REQUIRED_HEADER = ("assumptions", "pure", "oracle")
+REQUIRED = {"doc": (), "tool": ("selftests",), "product": REQUIRED_PRODUCT, "ref": (), "test": REQUIRED_TEST, "header": REQUIRED_HEADER}
+UNIT_EXTS = (".c", ".cc", ".cpp", ".cxx", ".s", ".S")   # a translation unit (the same set recipe.py compiles); a header root holds none
+# The roots whose python reads the host by design (the sandbox, the recipe, the gate drivers, the farm scripts): gate_pure.py HOST-READER modules.
+# Every other tool and product root is judged by "pure".
+HOST_READERS = (TREE + "/verify", TREE + "/farm")
+
+
+def gates_of(r):
+    """The gates of an admitted root: a function of its class (and nothing else): REQUIRED[class], plus "pure" for a tool or product root that is not a
+    host-reader root. An admit row names root and class only (judge: a row that lists "gates" is red), so no row can name fewer or other gates."""
+    cls = r.get("class")
+    if cls not in REQUIRED:
+        return []
+    return list(REQUIRED[cls]) + (["pure"] if cls in ("tool", "product") and r.get("path") not in HOST_READERS else [])
 
 
 def trees(r):
@@ -123,8 +143,10 @@ def judge(files, admit, gate_names, exists, ref_paths=frozenset()):
     if admit.get("format") != "fnvnx-admit/1":
         errors.append("admit.json: format is not fnvnx-admit/1")
     for r in admit.get("roots", []):
-        path, cls, gates = r.get("path", ""), r.get("class"), r.get("gates", [])
+        path, cls, gates = r.get("path", ""), r.get("class"), gates_of(r)
         why = []
+        if "gates" in r:
+            why.append('a row lists "gates": the gate set is a function of the class (gate_admit.gates_of); a row names root and class only')
         if "trees" in r and not (isinstance(r["trees"], list) and len(r["trees"]) >= 2 and r["trees"][0] == path
                                  and len(set(r["trees"])) == len(r["trees"]) and all(isinstance(t, str) for t in r["trees"])):
             why.append("trees is not a list of at least two distinct paths starting with path")
@@ -139,11 +161,20 @@ def judge(files, admit, gate_names, exists, ref_paths=frozenset()):
         if cls not in CLASSES:
             why.append("class %r is not one of %s" % (cls, ", ".join(CLASSES)))
         else:
-            why += ["required gate %s not named" % g for g in REQUIRED[cls] if g not in gates]
-            if cls == "ref" and ("recipe" in r or "gates" in r and r["gates"]):
-                why.append("a ref root has no recipe and names no gate (it has no units, no link and no outputs)")
+            if cls == "ref" and "recipe" in r:
+                why.append("a ref root has no recipe (it has no units, no link and no outputs)")
+            if cls == "header":
+                why += ['a header root has no "%s" (it has no units, so no target, recipe, variants or link: they are derived from the roots that include it)' % k
+                        for k in ("recipe", "target", "variants", "cxx_origin") if k in r]
+                why += ["a header root holds the translation unit %s (a root with a unit is a product or test root)" % f for f in files
+                        if any(f.startswith(t + "/") for t in trees(r)) and (f.endswith(UNIT_EXTS) or f.rsplit("/", 1)[-1] == "build.json")]
             if cls == "test" and r.get("target") not in ("guest", "host"):
                 why.append('a test root declares "target": "guest" or "host"')
+            if "variants" in r:   # the variants of a product root: {NAME: {"target": "guest"|"host"}}, addressed as root@NAME (recipe.entry_of); the recipe holds their flags
+                vs = r["variants"]
+                if cls != "product" or not (isinstance(vs, dict) and vs and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9_.-]+", n) and isinstance(e, dict)
+                                                                                   and set(e) <= {"target"} and e.get("target", "guest") in ("guest", "host") for n, e in vs.items())):
+                    why.append('"variants" is allowed on a product root only: {NAME: {"target": "guest"|"host"}}')
             if cls in ("product", "test"):
                 rc = r.get("recipe", "")
                 if isinstance(rc, dict):   # one recipe per target of the same units (recipe.norm_entry): both targets, the entry's target is one

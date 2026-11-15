@@ -1,0 +1,116 @@
+diff --git a/mojoshader.c b/mojoshader.c
+index 5cfc3a0..283696b 100644
+--- a/mojoshader.c
++++ b/mojoshader.c
+@@ -3050,6 +3050,9 @@ static void parse_preshader(Context *ctx, const uint32 *tokens, uint32 tokcount)
+ #endif
+ } // parse_preshader
+ 
++static void free_symbols(MOJOSHADER_free f, void *d, MOJOSHADER_symbol *syms,
++                         const int symcount);
++
+ static int parse_comment_token(Context *ctx)
+ {
+     uint32 commenttoks = 0;
+@@ -3057,6 +3060,14 @@ static int parse_comment_token(Context *ctx)
+     {
+         if ((commenttoks >= 2) && (commenttoks < ctx->tokencount))
+         {
++            // fnv-nx: a comment block is metadata, never an instruction (the D3D9 runtime and Wine 9.0 wined3d skip
++            //  every comment token). A block that does not parse (corrupt or multiple CTAB, a preshader that needs the effect
++            //  framework) is therefore dropped as a whole: its errors and its partial symbol table are removed, the shader's
++            //  instruction stream is unaffected. Only an allocation failure still fails the parse.
++            const int was_fail = ctx->isfail;
++            const int nerrors = errorlist_count(ctx->errors);
++            const CtabData saved_ctab = ctx->ctab;
++            const int saved_preshader = ctx->have_preshader;
+             const uint32 id = SWAP32(ctx->tokens[1]);
+             if (id == PRES_ID)
+                 parse_preshader(ctx, ctx->tokens + 2, commenttoks - 2);
+@@ -3065,6 +3076,18 @@ static int parse_comment_token(Context *ctx)
+                 parse_constant_table(ctx, ctx->tokens, commenttoks * 4,
+                                      ctx->version_token, 1, &ctx->ctab);
+             } // else if
++            if (ctx->isfail && !was_fail && !ctx->out_of_memory)
++            {
++                if (ctx->ctab.symbols != saved_ctab.symbols)
++                {
++                    MOJOSHADER_free f = ((ctx->free != NULL) ? ctx->free : MOJOSHADER_internal_free);
++                    free_symbols(f, ctx->malloc_data, ctx->ctab.symbols, ctx->ctab.symbol_count);
++                } // if
++                ctx->ctab = saved_ctab;
++                ctx->have_preshader = saved_preshader;
++                errorlist_truncate(ctx->errors, nerrors);
++                ctx->isfail = 0;
++            } // if
+         } // if
+         return commenttoks + 1;  // comment data plus the initial token.
+     } // if
+diff --git a/mojoshader_common.c b/mojoshader_common.c
+index bad72d2..f05551f 100644
+--- a/mojoshader_common.c
++++ b/mojoshader_common.c
+@@ -233,6 +233,29 @@ int errorlist_count(ErrorList *list)
+ } // errorlist_count
+ 
+ 
++void errorlist_truncate(ErrorList *list, int count)
++{
++    MOJOSHADER_free f = list->f;
++    void *d = list->d;
++    ErrorItem *last = &list->head;
++    int i;
++    for (i = 0; (i < count) && (last->next != NULL); i++)
++        last = last->next;
++    ErrorItem *item = last->next;
++    last->next = NULL;
++    list->tail = last;
++    list->count = i;
++    while (item != NULL)
++    {
++        ErrorItem *next = item->next;
++        f((void *) item->error.error, d);
++        f((void *) item->error.filename, d);
++        f(item, d);
++        item = next;
++    } // while
++} // errorlist_truncate
++
++
+ MOJOSHADER_error *errorlist_flatten(ErrorList *list)
+ {
+     if (list->count == 0)
+diff --git a/mojoshader_internal.h b/mojoshader_internal.h
+index e3fb764..123af32 100644
+--- a/mojoshader_internal.h
++++ b/mojoshader_internal.h
+@@ -396,6 +396,7 @@ int errorlist_add_fmt(ErrorList *list, const char *fname,
+ int errorlist_add_va(ErrorList *list, const char *_fname,
+                      const int errpos, const char *fmt, va_list va);
+ int errorlist_count(ErrorList *list);
++void errorlist_truncate(ErrorList *list, int count); // drops every error after the first COUNT
+ MOJOSHADER_error *errorlist_flatten(ErrorList *list); // resets the list!
+ void errorlist_destroy(ErrorList *list);
+ 
+diff --git a/profiles/mojoshader_profile_glsl.c b/profiles/mojoshader_profile_glsl.c
+index 27a9b59..ff45999 100644
+--- a/profiles/mojoshader_profile_glsl.c
++++ b/profiles/mojoshader_profile_glsl.c
+@@ -458,13 +458,11 @@ const char *make_GLSL_srcarg_string(Context *ctx, const size_t idx,
+             break;
+ 
+         case SRCMOD_DZ:
+-            fail(ctx, "SRCMOD_DZ unsupported"); return buf; // !!! FIXME
+-            postmod_str = "_dz";
+-            break;
+-
+         case SRCMOD_DW:
+-            fail(ctx, "SRCMOD_DW unsupported"); return buf; // !!! FIXME
+-            postmod_str = "_dw";
++            // fnv-nx: Wine 9.0 wined3d glsl_shader.c shader_glsl_gen_modifier (WINED3DSPSM_DZ / WINED3DSPSM_DW, "Need to handle this in
++            //  the instructions itself (texld & texcrd)"): outside texld / texcrd the register is used as is. emit_GLSL_TEXLD and
++            //  emit_GLSL_TEXCRD read the modifier themselves (shader_glsl_tex: WINED3D_GLSL_SAMPLE_PROJECTED), so no other
++            //  position divides.
+             break;
+ 
+         case SRCMOD_ABSNEGATE:

@@ -21,7 +21,7 @@ words) is read for the decisions, not scanned. A BLOCK is the unit of a text fil
 blank line) cut further at every list item and every table row; in any other file the maximal run of non-blank lines. A
 mention is a block whose PROSE matches `assum` or `допущени` at a word start (case-insensitive). PROSE is defined by one lexer per
 file kind, chosen by the extension from the one table LEXER: python = COMMENT tokens and docstring STRING tokens (tokenize + ast); c, c++,
-headers, .inc, .ld, .s, .glsl = // and /* */ comments (string and char literals skipped); markdown = text outside fenced code blocks; shell and toml =
+headers, .inc, .s, .glsl = // and /* */ comments (string and char literals skipped); linker scripts (.ld, .map: ld scripts and version scripts, ld doc "Simple Linker Script Commands" / "Version Script") = /* */ comments only, the rest is code (`//` is not a comment there; a double-quoted string has no escapes and is skipped); markdown = text outside fenced code blocks; shell and toml =
 # comments (quoted strings and heredoc bodies skipped); asm = ; comments; sail = as c without char literals; data (.json .tsv .txt .expect .patch) = never prose. In every prose span the
 backticked spans are dropped. Totality: a text file whose extension is not in the table, or that its lexer cannot read, is red (codes
 ext-unknown, lex-error); nothing is skipped silently. An item of the
@@ -97,7 +97,7 @@ ITEM = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
 ROW = re.compile(r"\s*\|")
 
 
-LEXER = {".py": "python", ".c": "c", ".cc": "c", ".cpp": "c", ".cxx": "c", ".h": "c", ".hh": "c", ".inc": "c", ".hpp": "c", ".ld": "c", ".s": "c", ".glsl": "c", ".map": "c", ".sail": "sail", ".asm": "semi",
+LEXER = {".py": "python", ".c": "c", ".cc": "c", ".cpp": "c", ".cxx": "c", ".h": "c", ".hh": "c", ".inc": "c", ".hpp": "c", ".ld": "ld", ".s": "c", ".glsl": "c", ".map": "ld", ".sail": "sail", ".asm": "semi",
          ".md": "markdown", ".sh": "shell", ".gitignore": "shell", ".toml": "toml",
          ".json": "data", ".tsv": "data", ".txt": "data", ".expect": "data", ".patch": "data"}
 CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)
@@ -147,6 +147,27 @@ def py_spans(body, lines, off):
         return out
     except (SyntaxError, ValueError, tokenize.TokenError) as e:
         raise LexError("python: %s" % e)
+
+
+def ld_spans(body):
+    """the comments of a GNU ld linker script or version script: /* */ only (binutils ld, Scripts: "comments ... in C style"); everything else is
+    code. A double-quoted string runs to the next quote with no escapes (a file name or symbol pattern) and is skipped."""
+    n, i, out = len(body), 0, []
+    while i < n:
+        if body.startswith("/*", i):
+            j = body.find("*/", i + 2)
+            if j < 0:
+                raise LexError("ld: unterminated /* comment")
+            out.append((i, j + 2))
+            i = j + 2
+        elif body[i] == '"':
+            j = body.find('"', i + 1)
+            if j < 0:
+                raise LexError("ld: unterminated string")
+            i = j + 1
+        else:
+            i += 1
+    return out
 
 
 def c_spans(body, chars=True):
@@ -300,7 +321,7 @@ def strip_code(body, spans):
 
 def prose_lines(path, body):
     """the lines of a file with everything that is not prose replaced by spaces (a mention is a statement in prose). Prose is defined by one
-    lexer per file kind (LEXER, by extension): python = COMMENT tokens and docstring STRING tokens; c = // and /* */ comments; markdown = the
+    lexer per file kind (LEXER, by extension): python = COMMENT tokens and docstring STRING tokens; c = // and /* */ comments; ld = /* */ comments; markdown = the
     text outside fenced code; shell and toml = # comments; data = none. In every prose span the backticked spans are dropped.
     A suffix not in the table or a file the lexer cannot read raises LexError."""
     kind = lexer_of(path)
@@ -313,7 +334,7 @@ def prose_lines(path, body):
         o += len(ln) + 1
     if kind == "data":
         return [" " * len(ln) for ln in lines]
-    spans = {"python": lambda: py_spans(body, lines, off), "c": lambda: c_spans(body), "sail": lambda: c_spans(body, False), "markdown": lambda: md_spans(body),
+    spans = {"python": lambda: py_spans(body, lines, off), "c": lambda: c_spans(body), "ld": lambda: ld_spans(body), "sail": lambda: c_spans(body, False), "markdown": lambda: md_spans(body),
              "shell": lambda: hash_spans(body, False), "toml": lambda: hash_spans(body, True), "semi": lambda: hash_spans(body, True, ";")}[kind]()
     keep = bytearray(len(body))
     for s, e in strip_code(body, spans):

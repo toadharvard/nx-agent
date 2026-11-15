@@ -134,7 +134,7 @@ def _target(o, rel_sec, rel, ordinal, undec, resolved, ents):
 def _entities(o, refs, undec, resolved):
     """Rule E (bisimulation).  The entities REFS (section, offset, size) a copy points to without a global name, and every entity they point to
     in turn: each is (section header, bytes, relocations with the targets normalised as above), its own references being entities again.
-    Two entities are the same iff they are bisimilar: equal content and pairwise the same entities, a cycle assumed the same (the GREATEST
+    Two entities are the same iff they are bisimilar: equal content and pairwise the same entities, a cycle counted as the same (the GREATEST
     fixed point).  Computed by colour refinement of the reachable graph until the number of classes stops growing; the colours are
     hashes, so they compare across objects.  Returns {ref: colour}.  Soundness: refinement from the one class converges to the coarsest stable
     partition (at most one round per entity); that partition is the greatest bisimulation, and bisimilar graphs have the same quotient, hence the

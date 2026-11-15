@@ -24,6 +24,15 @@
 #define FNVNX_GUEST_MAGIC     0x47584e46u /* "FNXG", at guest text + 8 */
 #define FNVNX_HOSTAPI_VERSION 3u
 
+/* HOST1: a function slot is a host address, never an exe code address, so the dispatch plugin must not rewrite a call through it
+ * (toolchain/dispatch: "exe code address -> guest entry"). The slot type carries the attribute fnvnx_host, spelled under the macro the
+ * plugin predefines (__FNVNX_HOST_ATTR__); a call is made only through FNVNX_HCALLn below, which forms the pointer from the slot lvalue. */
+#ifdef __FNVNX_HOST_ATTR__
+typedef uint64_t fnvnx_hslot __attribute__((fnvnx_host));
+#else
+typedef uint64_t fnvnx_hslot;
+#endif
+
 /* Function slots: host addresses of LP64 functions with the signature given in the comment
  * (all parameters uint64_t, result uint64_t). */
 typedef struct FnvnxHostApi {
@@ -39,81 +48,79 @@ typedef struct FnvnxHostApi {
                                       it is invalid: the guest runtime returns FNVNX_GUEST_ERR_API (0xF0000002) to the host without starting. */
     uint64_t heap_size;
 
-    uint64_t output_debug_string;  /* (str, len) -> Result of svcOutputDebugString */
-    uint64_t sleep_ns;             /* (ns) -> 0; ns above INT64_MAX sleeps INT64_MAX ns */
-    uint64_t exit;                 /* (code) -> does not return; ends the process through libnx */
-    uint64_t console_write;        /* (buf, len) -> bytes written to the host text console */
-    uint64_t system_tick;          /* () -> armGetSystemTick() */
-    uint64_t system_tick_freq;     /* () -> armGetSystemTickFreq() */
+    fnvnx_hslot output_debug_string;  /* (str, len) -> Result of svcOutputDebugString */
+    fnvnx_hslot sleep_ns;             /* (ns) -> 0; ns above INT64_MAX sleeps INT64_MAX ns */
+    fnvnx_hslot exit;                 /* (code) -> does not return; ends the process through libnx */
+    fnvnx_hslot console_write;        /* (buf, len) -> bytes written to the host text console */
+    fnvnx_hslot system_tick;          /* () -> armGetSystemTick() */
+    fnvnx_hslot system_tick_freq;     /* () -> armGetSystemTickFreq() */
 
     /* ---- version 2: threads, address wait/wake, time, files ---- */
-    uint64_t thread_create;        /* (entry, arg, stack_size, prio, cpu) -> host thread id (!= 0) or 0.
+    fnvnx_hslot thread_create;        /* (entry, arg, stack_size, prio, cpu) -> host thread id (!= 0) or 0.
                                       The new thread calls the guest function entry(arg) (u64 arg) and ends
                                       when it returns. prio: Win32 scale -15..15; cpu: FNVNX_CPU_SPEC(ideal, mask)
-                                      with ideal in mask and mask within FNVNX_APP_CORES (FNVNX_APP_CORES_CORE3 when the host is built with
-                                      FNVNX_CORE3_DEFAULT), else FNVNX_HE_BADINPUT and nothing is created (id 0). The placement is computed
+                                      with ideal in mask and mask within FNVNX_APP_CORES, else FNVNX_HE_BADINPUT and nothing is created (id 0). The placement is computed
                                       only in the guest (fnvnx_place_ex, fnvnx/placement.h); the host takes the spec as given. The main thread
                                       starts at FNVNX_DEFAULT_CORE, mask 1 << FNVNX_DEFAULT_CORE. Not started. The id is a table handle
                                       ((generation << 16) | slot, host_ids.inc), never an address; at most 1024
                                       live thread and directory ids together: 0 when the table is full. */
-    uint64_t thread_start;         /* (id) -> 0 or Result; an id that names no live thread -> FNVNX_HE_NOTFOUND; a thread that is already
+    fnvnx_hslot thread_start;         /* (id) -> 0 or Result; an id that names no live thread -> FNVNX_HE_NOTFOUND; a thread that is already
                                       started (also a THREAD_SELF record) -> FNVNX_HE_BADINPUT, nothing changed */
-    uint64_t thread_join;          /* (id) -> 0 when the thread has ended; unknown id -> FNVNX_HE_NOTFOUND; a thread
+    fnvnx_hslot thread_join;          /* (id) -> 0 when the thread has ended; unknown id -> FNVNX_HE_NOTFOUND; a thread
                                       that was never started, or a THREAD_SELF record -> FNVNX_HE_BADINPUT (it would never end) */
-    uint64_t thread_free;          /* (id) -> 0; after join, or detaches a running thread (a THREAD_SELF record: the record goes, the thread is not touched). The id dies at once: a second
+    fnvnx_hslot thread_free;          /* (id) -> 0; after join, or detaches a running thread (a THREAD_SELF record: the record goes, the thread is not touched). The id dies at once: a second
                                       free, or any later use of it -> FNVNX_HE_NOTFOUND */
-    uint64_t thread_exit;          /* () -> does not return; ends the calling host-created thread (a thread that thread_create did not
+    fnvnx_hslot thread_exit;          /* () -> does not return; ends the calling host-created thread (a thread that thread_create did not
                                       make, the main thread included, must not call it: not detected) */
-    uint64_t thread_yield;         /* () -> 0 */
-    uint64_t thread_set_priority;  /* (id or 0 = self, prio) -> 0 or Result; unknown id -> FNVNX_HE_NOTFOUND */
-    uint64_t thread_set_cpu;       /* (id or 0 = self, spec) -> 0 or Result; unknown id -> FNVNX_HE_NOTFOUND;
+    fnvnx_hslot thread_yield;         /* () -> 0 */
+    fnvnx_hslot thread_set_priority;  /* (id or 0 = self, prio) -> 0 or Result; unknown id -> FNVNX_HE_NOTFOUND */
+    fnvnx_hslot thread_set_cpu;       /* (id or 0 = self, spec) -> 0 or Result; unknown id -> FNVNX_HE_NOTFOUND;
                                       a negative spec (bits 40..62 set) -> 0, nothing changed. spec 0..63: that core only;
                                       FNVNX_CPU_SPEC(ideal, mask): ideal core (FNVNX_CPU_KEEP: keep) and
                                       affinity mask (0: keep), the ideal core joins the mask; the resulting ideal in the mask and the mask
-                                      within FNVNX_APP_CORES(_CORE3) (fnvnx/placement.h), else FNVNX_HE_BADINPUT, nothing changed */
-    uint64_t wait_on_address;      /* (addr, expected u32, timeout_ns) -> 0 woken, 1 timed out, 2 value != expected
+                                      within FNVNX_APP_CORES (fnvnx/placement.h), else FNVNX_HE_BADINPUT, nothing changed */
+    fnvnx_hslot wait_on_address;      /* (addr, expected u32, timeout_ns) -> 0 woken, 1 timed out, 2 value != expected
                                       (svcWaitForAddress WaitIfEqual; addr 4-aligned); timeout_ns above INT64_MAX waits
                                       forever; any other kernel result unchanged (0xCC01 addr not 4-aligned, 0xD401 addr
                                       not readable guest memory) */
-    uint64_t wake_address;         /* (addr, count; count > 0x7FFFFFFF: all) -> 0 or the kernel's result of
+    fnvnx_hslot wake_address;         /* (addr, count; count > 0x7FFFFFFF: all) -> 0 or the kernel's result of
                                       svcSignalToAddress (0xCC01 addr not 4-aligned, 0xD401 not guest memory) */
-    uint64_t wall_time_us;         /* () -> microseconds since 1970 UTC */
-    uint64_t random64;             /* () -> random u64 */
-    uint64_t memory_info;          /* (FnvnxMemInfo *) -> 0 (avail_phys = 0 when used > total) */
-    uint64_t cpu_count;            /* () -> cores the game may use: 3 (application cores 0-2), 4 with the platform config core3=1 */
-    uint64_t fs_open;              /* (path, OS_O_* flags) -> fd >= 0, or -errno (int64 as u64) */
-    uint64_t fs_read;              /* (fd, buf, n) -> bytes or -errno */
-    uint64_t fs_write;             /* (fd, buf, n) -> bytes or -errno */
-    uint64_t fs_pread;             /* (fd, buf, n, off) -> bytes or -errno */
-    uint64_t fs_pwrite;            /* (fd, buf, n, off) -> bytes or -errno */
-    uint64_t fs_seek;              /* (fd, off, whence) -> new position or -errno */
-    uint64_t fs_truncate;          /* (fd, size) -> 0 or -errno */
-    uint64_t fs_sync;              /* (fd) -> 0 or -errno */
-    uint64_t fs_fstat;             /* (fd, FnvnxStat *) -> 0 or -errno */
-    uint64_t fs_close;             /* (fd) -> 0 or -errno */
-    uint64_t fs_stat;              /* (path, FnvnxStat *) -> 0 or -errno */
-    uint64_t fs_mkdir;             /* (path) -> 0 or -errno */
-    uint64_t fs_rmdir;             /* (path) -> 0 or -errno */
-    uint64_t fs_remove;            /* (path) -> 0 or -errno */
-    uint64_t fs_rename;            /* (from, to) -> 0 or -errno */
-    uint64_t fs_dir_open;          /* (path) -> dir id (!= 0, a table handle like thread ids) or 0: not a directory, no such path or the
+    fnvnx_hslot wall_time_us;         /* () -> microseconds since 1970 UTC */
+    fnvnx_hslot random64;             /* () -> random u64 */
+    fnvnx_hslot memory_info;          /* (FnvnxMemInfo *) -> 0 (avail_phys = 0 when used > total) */
+    fnvnx_hslot fs_open;              /* (path, OS_O_* flags) -> fd >= 0, or -errno (int64 as u64) */
+    fnvnx_hslot fs_read;              /* (fd, buf, n) -> bytes or -errno */
+    fnvnx_hslot fs_write;             /* (fd, buf, n) -> bytes or -errno */
+    fnvnx_hslot fs_pread;             /* (fd, buf, n, off) -> bytes or -errno */
+    fnvnx_hslot fs_pwrite;            /* (fd, buf, n, off) -> bytes or -errno */
+    fnvnx_hslot fs_seek;              /* (fd, off, whence) -> new position or -errno */
+    fnvnx_hslot fs_truncate;          /* (fd, size) -> 0 or -errno */
+    fnvnx_hslot fs_sync;              /* (fd) -> 0 or -errno */
+    fnvnx_hslot fs_fstat;             /* (fd, FnvnxStat *) -> 0 or -errno */
+    fnvnx_hslot fs_close;             /* (fd) -> 0 or -errno */
+    fnvnx_hslot fs_stat;              /* (path, FnvnxStat *) -> 0 or -errno */
+    fnvnx_hslot fs_mkdir;             /* (path) -> 0 or -errno */
+    fnvnx_hslot fs_rmdir;             /* (path) -> 0 or -errno */
+    fnvnx_hslot fs_remove;            /* (path) -> 0 or -errno */
+    fnvnx_hslot fs_rename;            /* (from, to) -> 0 or -errno */
+    fnvnx_hslot fs_dir_open;          /* (path) -> dir id (!= 0, a table handle like thread ids) or 0: not a directory, no such path or the
                                       id table is full */
-    uint64_t fs_dir_next;          /* (dir, buf, cap) -> name length (without NUL), 0 at end; skips . and ..; a name longer than
+    fnvnx_hslot fs_dir_next;          /* (dir, buf, cap) -> name length (without NUL), 0 at end; skips . and ..; a name longer than
                                       cap - 1 is cut to cap - 1 bytes; cap 0 or an id that names no open directory -> 0 (nothing
                                       consumed) */
-    uint64_t fs_dir_close;         /* (dir) -> 0; the id dies; an id that names no open directory: 0, nothing done */
+    fnvnx_hslot fs_dir_close;         /* (dir) -> 0; the id dies; an id that names no open directory: 0, nothing done */
 
     /* ---- version 3: audio out and input (platform/audio, platform/input via platform/guest/platform_glue) */
-    uint64_t audio_open;           /* (rate = 48000, period frames 1..8192) -> 0 or negative (int64 as u64); stereo PCM16.
+    fnvnx_hslot audio_open;           /* (rate = 48000, period frames 1..8192) -> 0 or negative (int64 as u64); stereo PCM16.
                                       -1 rate != 48000 or period 0 or > 8192; -2 audren init failed; -3 driver create failed;
                                       -4 no memory for the pool; -5 renderer start failed. Already open: 0, arguments ignored */
-    uint64_t audio_submit;         /* (pcm, frames = period) -> 0; blocks until the device takes it; -1 not open or frames !=
+    fnvnx_hslot audio_submit;         /* (pcm, frames = period) -> 0; blocks until the device takes it; -1 not open or frames !=
                                       the open period (nothing read) */
-    uint64_t audio_close;          /* () -> 0; not open: 0, nothing done */
-    uint64_t pad_read;             /* (index 0..3, fnvnx_pad_raw *) -> 1 connected, 0 not; index > 3 -> 0, nothing written */
-    uint64_t pad_vibrate;          /* (index, float bits low, float bits high) -> 0; amplitudes 0..1; index > 3 -> 0, nothing done */
-    uint64_t input_poll;           /* (FnvnxInputEvent *, cap) -> events written (<= cap; cap 0: none) since the last poll */
-    uint64_t map_fixed;            /* (addr, size, src) -> 0 or Result: makes [addr, addr+size) read-write memory at exactly
+    fnvnx_hslot audio_close;          /* () -> 0; not open: 0, nothing done */
+    fnvnx_hslot pad_read;             /* (index 0..3, fnvnx_pad_raw *) -> 1 connected, 0 not; index > 3 -> 0, nothing written */
+    fnvnx_hslot pad_vibrate;          /* (index, float bits low, float bits high) -> 0; amplitudes 0..1; index > 3 -> 0, nothing done */
+    fnvnx_hslot input_poll;           /* (FnvnxInputEvent *, cap) -> events written (<= cap; cap 0: none) since the last poll */
+    fnvnx_hslot map_fixed;            /* (addr, size, src) -> 0 or Result: makes [addr, addr+size) read-write memory at exactly
                                       addr from src, a page-aligned guest heap block of the same size (it becomes
                                       inaccessible for the rest of the process). The mapping is reprotectable (VM_PROTECT). Checks in
                                       this order: size 0, addr+size wraps, addr or size not 4 KiB aligned -> FNVNX_HE_BADINPUT
@@ -124,7 +131,7 @@ typedef struct FnvnxHostApi {
                                       is mapped (svcQueryMemory type != unmapped, or the range crosses into a mapped page) ->
                                       FNVNX_HE_ALREADY (0x0F59), nothing mapped; else the kernel's result unchanged (0xDA01 addr
                                       outside the alias-code region, 0xD401 src is not ordinary heap). */
-    uint64_t ext_call;             /* (module, fn, const uint64_t *args, nargs) -> handler result. Generic extension point:
+    fnvnx_hslot ext_call;             /* (module, fn, const uint64_t *args, nargs) -> handler result. Generic extension point:
                                       host-side modules (e.g. the D3D9 proxy of render/nine) register with
                                       fnvnx_host_register_ext(). module >= 64 or not registered -> FNVNX_EXT_NO_MODULE; fn
                                       above UINT32_MAX -> FNVNX_EXT_NO_SERVICE (the handler is not called); nargs above
@@ -325,7 +332,7 @@ typedef struct FnvnxHostApi {
  *   thread_create, thread_start, thread_join, thread_free, thread_set_priority, thread_set_cpu ( , ids )  test:thread_slots test:thread_ids;
  *   thread_exit, thread_yield ( ) -;
  *   wait_on_address, wake_address ( )  test:wait_wake;
- *   wall_time_us, random64, memory_info ( ) -; cpu_count ( )  test:thread_slots;
+ *   wall_time_us, random64, memory_info ( ) -;
  *   fs_open, fs_read, fs_write, fs_pread, fs_pwrite, fs_seek, fs_truncate, fs_sync, fs_fstat, fs_close, fs_stat, fs_mkdir, fs_rmdir, fs_remove,
  *   fs_rename ( )  test:fs_errors; fs_dir_open, fs_dir_next, fs_dir_close ( )  test:dir_slots;
  *   audio_open, audio_submit, audio_close, pad_read, pad_vibrate, input_poll ( )  test:test_audio test:test_pads test:test_events;
@@ -488,11 +495,11 @@ typedef struct FnvnxMemInfo {
 } FnvnxMemInfo;
 
 #if defined(__cplusplus)
-static_assert(sizeof(FnvnxHostApi) == 0x1A0, "FnvnxHostApi layout");
+static_assert(sizeof(FnvnxHostApi) == 0x198, "FnvnxHostApi layout");
 static_assert(sizeof(FnvnxStat) == 40 && sizeof(FnvnxMemInfo) == 16 && sizeof(FnvnxInputEvent) == 24,
                "shared struct layout");
 #else
-_Static_assert(sizeof(FnvnxHostApi) == 0x1A0, "FnvnxHostApi layout");
+_Static_assert(sizeof(FnvnxHostApi) == 0x198, "FnvnxHostApi layout");
 _Static_assert(sizeof(FnvnxStat) == 40 && sizeof(FnvnxMemInfo) == 16 && sizeof(FnvnxInputEvent) == 24,
                "shared struct layout");
 #endif
@@ -512,21 +519,24 @@ typedef uint64_t (*fnvnx_hfn2)(uint64_t, uint64_t);
 typedef uint64_t (*fnvnx_hfn3)(uint64_t, uint64_t, uint64_t);
 typedef uint64_t (*fnvnx_hfn4)(uint64_t, uint64_t, uint64_t, uint64_t);
 typedef uint64_t (*fnvnx_hfn5)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
-static inline uint64_t fnvnx_hcall0(uint64_t fn) { return ((fnvnx_hfn0)(uintptr_t)fn)(); }
-static inline uint64_t fnvnx_hcall1(uint64_t fn, uint64_t a) { return ((fnvnx_hfn1)(uintptr_t)fn)(a); }
-static inline uint64_t fnvnx_hcall2(uint64_t fn, uint64_t a, uint64_t b) { return ((fnvnx_hfn2)(uintptr_t)fn)(a, b); }
-static inline uint64_t fnvnx_hcall3(uint64_t fn, uint64_t a, uint64_t b, uint64_t c) {
-    return ((fnvnx_hfn3)(uintptr_t)fn)(a, b, c);
-}
-static inline uint64_t fnvnx_hcall4(uint64_t fn, uint64_t a, uint64_t b, uint64_t c, uint64_t d) {
-    return ((fnvnx_hfn4)(uintptr_t)fn)(a, b, c, d);
-}
-static inline uint64_t fnvnx_hcall5(uint64_t fn, uint64_t a, uint64_t b, uint64_t c, uint64_t d, uint64_t e) {
-    return ((fnvnx_hfn5)(uintptr_t)fn)(a, b, c, d, e);
-}
+/* FNVNX_HCALLn(slot, args): the call of the host function in slot `slot` of *fnvnx_host; FNVNX_HCALLn_ON(api, slot, args): of the table `api`
+ * (a test that holds its own pointer). The slot is named, never passed as a value: no function takes a slot value. */
+#define FNVNX_HCALLn_PTR_(api, slot, T) ((T)(uintptr_t)((api)->slot))
+#define FNVNX_HCALL0_ON(api, slot) (FNVNX_HCALLn_PTR_(api, slot, fnvnx_hfn0)())
+#define FNVNX_HCALL1_ON(api, slot, a) (FNVNX_HCALLn_PTR_(api, slot, fnvnx_hfn1)(a))
+#define FNVNX_HCALL2_ON(api, slot, a, b) (FNVNX_HCALLn_PTR_(api, slot, fnvnx_hfn2)(a, b))
+#define FNVNX_HCALL3_ON(api, slot, a, b, c) (FNVNX_HCALLn_PTR_(api, slot, fnvnx_hfn3)(a, b, c))
+#define FNVNX_HCALL4_ON(api, slot, a, b, c, d) (FNVNX_HCALLn_PTR_(api, slot, fnvnx_hfn4)(a, b, c, d))
+#define FNVNX_HCALL5_ON(api, slot, a, b, c, d, e) (FNVNX_HCALLn_PTR_(api, slot, fnvnx_hfn5)(a, b, c, d, e))
 
 /* Set by the guest runtime before main() runs. */
 extern const FnvnxHostApi *fnvnx_host;
+#define FNVNX_HCALL0(slot) FNVNX_HCALL0_ON(fnvnx_host, slot)
+#define FNVNX_HCALL1(slot, a) FNVNX_HCALL1_ON(fnvnx_host, slot, a)
+#define FNVNX_HCALL2(slot, a, b) FNVNX_HCALL2_ON(fnvnx_host, slot, a, b)
+#define FNVNX_HCALL3(slot, a, b, c) FNVNX_HCALL3_ON(fnvnx_host, slot, a, b, c)
+#define FNVNX_HCALL4(slot, a, b, c, d) FNVNX_HCALL4_ON(fnvnx_host, slot, a, b, c, d)
+#define FNVNX_HCALL5(slot, a, b, c, d, e) FNVNX_HCALL5_ON(fnvnx_host, slot, a, b, c, d, e)
 #endif
 
 #endif /* FNVNX_HOSTAPI_H */

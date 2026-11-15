@@ -23,9 +23,12 @@
    "-Wconversion",
    "-Wno-sign-conversion",
    "-Werror",
-   "-std=c99"
+   "-std=c99",
+   "-fPIC"
   ],
-  "cxx": [],
+  "cxx": [
+   "-fPIC"
+  ],
   "asm": []
  },
  "include": [

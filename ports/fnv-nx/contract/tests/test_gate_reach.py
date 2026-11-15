@@ -405,12 +405,10 @@ else:
 SRC_OK = ''.join('%s\tclosed\n' % x for x in gate_reach.CLOSURE_SOURCES)
 CK = ('REACH_CLOSURE_KEY_LIFTED', '-', 'fnvl_dispatch', '0', 'closure_key', 'dispatcher=lifted', 'n')
 CK2 = ('REACH_CLOSURE_KEY_NATIVE', '-', 'fnvnx_dispatch', '0', 'closure_key', 'dispatcher=native', 'n')
-LL_OK = 'module\tsite\tcalls\tapi\tstatus\tnames\tbreaks\nexe\t401000\t1\tLoadLibraryA\tclosed\tx.dll\t-\n'
-LL_OPEN = LL_OK + 'exe\t402000\t1\tLoadLibraryA\topen\t-\tx\n'
 
 
-def ck(entries, closure, sources=SRC_OK, loadlib=LL_OK, rows=(CK,)):
-    ctx = {'dispatchers': {'lifted': (entries, closure, sources), 'native': (entries, closure, sources)}, 'loadlib': loadlib}
+def ck(entries, closure, sources=SRC_OK, rows=(CK,)):
+    ctx = {'dispatchers': {'lifted': (entries, closure, sources), 'native': (entries, closure, sources)}}
     rs = reqs(*rows)
     facts, certs, g = gate_reach.run(rs, {}, [], [], ctx)
     return rs, facts, certs
@@ -430,17 +428,10 @@ rs, facts, certs = ck(ENT, '00401000\n', sources=SRC_OK.replace('eh\tclosed', 'e
 check('closure_key: an open source of the closure is red', (certs, sorted(facts[0].reasons)), ({}, [('source-open', 'lifted', 'eh')]))
 rs, facts, certs = ck(ENT, '00401000\n', sources=SRC_OK.replace('tls\tclosed\n', ''))
 check('closure_key: an absent source is red', sorted(facts[0].reasons), [('source-open', 'lifted', 'tls')])
-rs, facts, certs = ck(ENT, '00401000\n', loadlib=LL_OPEN)
-check('closure_key: an open LoadLibrary site is measurement, never valid', (certs, sorted({r[0] for r in facts[0].reasons}),
-      gate_reach.report_tsv(facts, certs).split('\n')[1].split('\t')[5]), ({}, ['loadlib-open'], 'measurement'))
-rs, facts, certs = ck(ENT, '00401020\n', loadlib=LL_OPEN)
-check('closure_key: a missing key with open loads stays red (uncertified), not measurement', gate_reach.report_tsv(facts, certs).split('\n')[1].split('\t')[5], 'uncertified')
-rs, facts, certs = ck(ENT, '00401000\n', loadlib=None)
-check('closure_key: no loadlib.tsv is open', sorted({r[0] for r in facts[0].reasons}), ['loadlib-open'])
 rs, facts, certs = ck(ENT, '00401000\n', rows=(CK2,))
 check('closure_key: one id per dispatcher, names bound by --dispatcher', (len(certs), rs[0]['spec']), (1, {'dispatcher': 'native', 'fallthrough': False}))
 rs = reqs(CK, CK2)
-facts, certs, g = gate_reach.run(rs, {}, [], [], {'dispatchers': {'native': (ENT, '00401000\n', SRC_OK)}, 'loadlib': LL_OK})
+facts, certs, g = gate_reach.run(rs, {}, [], [], {'dispatchers': {'native': (ENT, '00401000\n', SRC_OK)}})
 check('closure_key: a dispatcher without inputs is red', (sorted(certs), [sorted(f.reasons)[0][0] for f in facts if f.reasons]), ([2], ['dispatcher-missing']))
 h = gate_reach.header(rs)
 check('closure_key: FNVNX_REACH_* macros, one id per dispatcher, each defined once', (h.count('#define FNVNX_REACH_CLOSURE_KEY_LIFTED 1 '), h.count('#define FNVNX_REACH_CLOSURE_KEY_NATIVE 2 '),
@@ -463,8 +454,9 @@ for nm, rows_ in (('one', (CK,)), ('two', (CK, CK2)), ('cfm', (R_H, R_P, R_W))):
     tsv = os.path.join(tdir, nm + '.tsv')
     open(tsv, 'w').write('\t'.join(gate_reach.COLUMNS) + '\n' + ''.join('\t'.join(r) + '\n' for r in rows_))
     outh = os.path.join(tdir, 'sub', nm + '.h')
+    os.makedirs(os.path.dirname(outh), exist_ok=True)   # the stage launcher creates the parent of a declared output; the generator does not
     rc_ = subprocess.run([sys.executable, '-s', '-B', '-I', RR, '--requests', tsv, '--facts-h', outh], capture_output=True).returncode
-    check('reachreq CLI %s: exit 0 and the header equals gate_reach.header(parse_requests(table)) (output dir created)' % nm,
+    check('reachreq CLI %s: exit 0 and the header equals gate_reach.header(parse_requests(table))' % nm,
           (rc_, open(outh).read()), (0, gate_reach.header(gate_reach.parse_requests(open(tsv).read()))))
 rc_ = subprocess.run([sys.executable, '-s', '-B', '-I', RR, '--requests', os.path.join(tdir, 'nope.tsv'), '--facts-h', outh], capture_output=True).returncode
 check('reachreq CLI on a missing table is an error', rc_ != 0, True)

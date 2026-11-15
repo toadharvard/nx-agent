@@ -59,6 +59,9 @@ def parse_crossing(data, where):
             raise ValueError("%s: line %d: %s twice" % (where, n, f[0]))
         out[f[0]] = () if f[1] == "-" else tuple(f[1].split(","))
     return out
+def envid():
+    """the declared environment of the result: env.json (the pinned toolchain the plugin's sections come from)"""
+    return gate_build.file_sha(os.path.join(HERE, "env.json"))
 
 
 def read_objects(objs):
@@ -74,12 +77,11 @@ def read_objects(objs):
                 continue
             store[(oid, "sympair")] = l2sections.parse_sympair(sp, oid + ":.fnvnx.sympair")
             lays = objsections.parse_layout(objsections.section(elf, ".fnvnx.layout"), oid + ":.fnvnx.layout")
-            if any(lay.linkage == "c" for lay in lays):     # a C unit: its declared types of external symbols are compared by C11 6.2.7 (link/ctypes_compat.py)
-                dt = elf.section(".fnvnx.decltype")
-                if dt is None:
-                    red[oid + ":decltype"] = "a C unit has no .fnvnx.decltype section"
-                else:
-                    decls[oid] = ctypes_compat.parse_decltype(dt, oid + ":.fnvnx.decltype")
+            dt = elf.section(".fnvnx.decltype")     # a C unit's declared types of external symbols, compared by C11 6.2.7 (link/ctypes_compat.py): the section's presence is the fact, whatever the linkage of the layout rows
+            if dt is not None:
+                decls[oid] = ctypes_compat.parse_decltype(dt, oid + ":.fnvnx.decltype")
+            elif any(lay.linkage == "c" for lay in lays):     # a unit of `c` records without its declared types: nothing to compare them with
+                red[oid + ":decltype"] = "a C unit has no .fnvnx.decltype section"
             cr = elf.section(".fnvnx.crossing")
             if cr is not None:
                 cross[oid] = parse_crossing(cr, oid + ":.fnvnx.crossing")
@@ -157,8 +159,11 @@ def judge_root(repo, cache, root):
         return 1, 0, [root + ":recipe"], "invalid recipe: %s" % "; ".join(e.errors)[:300]
     if res["status"] != "green":
         return 1, 0, [root + ":build"], "build %s" % res["status"]
-    objs = [(root + "/" + o["unit"], o["object"]) for o in res["objects"] if o["unit"].endswith(recipe.CXX_EXT)]
-    return judge_objects(objs)
+    objs = [(root + "/" + o["unit"], o["object"], o["sha256"]) for o in res["objects"] if o["unit"].endswith(recipe.CXX_EXT)]
+    # the item is the root's C++ objects as a set (the ODR and layout joins read all of them): keyed by their ids and sha256 and the tools that read them
+    key = {"gate": "abi", "objects": [[i, h] for i, _, h in objs], "tools": gate_build.tool_digest(__file__, abi, odr, elfobj, l2sections, objsections), "env": envid()}
+    v, _ = gate_build.memo(cache, "abi", key, lambda: list(judge_objects([(i, p) for i, p, _ in objs])))
+    return tuple(v)
 
 
 def main():

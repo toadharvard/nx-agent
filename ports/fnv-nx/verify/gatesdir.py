@@ -5,7 +5,7 @@ and two branches that add different gates never conflict. The verdict (l1.py) as
 document (format fnvnx-gates/1) of the commit under test; that document is a value in memory and in the verdict's temporary directory,
 never a tracked file.
 `covers` is the set of ROOT CLASSES the gate judges, declared from what the gate reads: a class is a predicate over root facts, not a list of
-roots. The classes of the admitted roots (verify/admit.json) are derived by one rule, root_classes: class doc -> doc; class tool -> tool; class ref -> ref (a reference root) and class test -> test (gate_admit.py);
+roots. The classes of the admitted roots (verify/admit.json) are derived by one rule, root_classes: class doc -> doc; class tool -> tool; class ref -> ref (a reference root) and class test -> test (gate_admit.py); a product root that holds imports.in.json / registry.in.json is also `import-provider` / `registry-reader` (see declares);
 class product with "target": "host" -> host-product; product with a guest target whose "cxx_origin" is {"lifted_by", "pack"} -> lifted; any
 other product -> product-guest; and a product root whose build.json declares a link stage (`link` not null) is also `linked`. The contract
 gates cover `linked`: a link-null root is outside their universe (they judge a link), and the other gates still cover it. verdict.py judges a gate
@@ -22,7 +22,7 @@ DIR = TREE + "/verify/gates.d"
 ADMIT = TREE + "/verify/admit.json"
 FILE_FORMAT = "fnvnx-gatefile/1"
 FORMAT = "fnvnx-gates/1"
-ROOT_CLASSES = ("doc", "tool", "ref", "test", "product-guest", "lifted", "host-product", "linked")
+ROOT_CLASSES = ("doc", "tool", "ref", "test", "header", "product-guest", "product-guest-exe", "lifted", "host-product", "linked", "import-provider", "registry-reader")
 
 
 class Bad(ValueError):
@@ -32,7 +32,7 @@ class Bad(ValueError):
 def root_class(root):
     """The root class of one admit.json entry (see the module docstring)."""
     c = root.get("class")
-    if c in ("doc", "tool", "ref", "test"):
+    if c in ("doc", "tool", "ref", "test", "header"):
         return c
     if c != "product":
         return None
@@ -51,8 +51,30 @@ def has_link(repo, path):
         return False
 
 
+def declares(repo, path, name):
+    """The root fact behind the classes `import-provider` (imports.in.json) and `registry-reader` (registry.in.json): the root holds the
+    gate's input declaration. The classes are also facts of the root's build (a root that defines a native symbol of the bridge table, or
+    defines or references a registry API): the gates imports and machine evaluate that fact from the build's symbol table, and a root
+    that has it without its declaration is a red item there; so a root outside both is outside the gate's universe by its symbol table."""
+    return os.path.isfile(os.path.join(repo, path, name))
+
+
+def has_exe_twin(repo, root):
+    """The root fact `exe twin`: the admitted root R is a native guest root whose build.json declares a `game` directory, i.e. its units are
+    the exe's own functions, which have cl twin objects (the pristine MSVC objects of the msvc external) to be compared with. A root without a `game`
+    directory has no exe function and no twin."""
+    if root.get("cxx_origin") != "native":
+        return False
+    try:
+        with open(os.path.join(repo, root["path"], "build.json"), encoding="utf-8") as fh:
+            g = json.load(fh).get("game")
+    except (OSError, ValueError, AttributeError):
+        return False
+    return isinstance(g, str) and bool(g)
+
+
 def root_classes(admit, repo=None):
-    """{root path: set of root classes} of a parsed admit.json: the one class of root_class, plus `linked` for a product root whose
+    """{root path: set of root classes} of a parsed admit.json: the one class of root_class, plus `product-guest-exe` for a native guest root with a `game` dir (an exe twin) and `linked` for a product root whose
     build.json (read under REPO) has a link stage. A class is a predicate over root facts, so a gate covers the roots that satisfy it."""
     out = {}
     for r in admit.get("roots", []):
@@ -61,6 +83,13 @@ def root_classes(admit, repo=None):
             s = {c} if c else set()
             if c in ("product-guest", "lifted", "host-product") and repo is not None and has_link(repo, r["path"]):
                 s.add("linked")
+            if c in ("product-guest", "lifted", "host-product") and repo is not None:
+                if declares(repo, r["path"], "imports.in.json"):
+                    s.add("import-provider")
+                if declares(repo, r["path"], "registry.in.json"):
+                    s.add("registry-reader")
+            if c == "product-guest" and repo is not None and has_exe_twin(repo, r):
+                s.add("product-guest-exe")
             out[r["path"]] = s
     return out
 
