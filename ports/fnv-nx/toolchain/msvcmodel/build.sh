@@ -355,7 +355,12 @@ m = {"format": "fnvnx-runtime-manifest/1",
      "flags": {"c": TLC.split(), "cxx": TLCXX.split()},
      "multilib": {"select": ML.split(), "dir": ml},
      "libraries": libs,
-     "cfg_func": json.load(open(os.path.join(P, "CFG-FUNC.json")))}
+     "cfg_func": json.load(open(os.path.join(P, "CFG-FUNC.json"))),
+     "notes": [{"id": "ld-2.42-tls-reloc-segv",
+                "text": "binutils 2.42 ld (elfnn-aarch64.c:5308 assertion, then SIGSEGV) on an error path: a final link of any guest object that reaches "
+                        "libc's __call_atexit.o without the product link fails first on the undefined thread-local fnvnx_call_fp and then crashes while "
+                        "reporting it. Reproduce: aarch64-none-elf-g++ -mabi=ilp32 hello.cc (std::string, std::vector, exception, new/delete). "
+                        "The undefined symbols fnvnx_dispatch and fnvnx_call_fp are the product link's protocol (dispatch plugin); not a defect of this tree."}]}
 open(os.path.join(P, "MANIFEST.json"), "w").write(json.dumps(m, indent=1, sort_keys=True) + "\n")
 print("MANIFEST.json: %d plugins, %d libraries" % (len(plugins), len(libs)))
 EOF
