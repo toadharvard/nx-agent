@@ -83,7 +83,7 @@ def lifted_repo(name, body, pack, ehfacts=None, rts=(RT,), image=True):
         files[r + "/build.json"] = json.dumps(REC_ASM)
     if image:
         files[T + "img/build.json"] = json.dumps({"format": "fnvnx-recipe/1", "link": {"roots": [ROOT] + rtroots}})
-    extra = [{"path": T + "lift/gates", "class": "tool", "gates": []}]
+    extra = [{"path": T + "lift/gates", "class": "tool", "gates": []}, {"path": T + "lift/proof", "class": "tool", "gates": []}, {"path": T + "lift/fnvlift", "class": "tool", "gates": []}]
     extra += [{"path": r, "class": "product", "target": "host", "gates": [], "recipe": r + "/build.json"} for r in rtroots]
     if image:
         extra.append({"path": T + "img", "class": "product", "target": "host", "gates": [], "recipe": T + "img/build.json"})

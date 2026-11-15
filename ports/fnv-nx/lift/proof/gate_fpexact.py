@@ -93,6 +93,7 @@ sys.path.insert(0, os.path.join(VERIFY, "..", "contract"))
 sys.path.insert(0, VERIFY)
 from proof import formgate  # noqa: E402
 import gate_build  # noqa: E402
+import factcache  # noqa: E402
 import gate_datamodel  # noqa: E402     (cc_docs: the reader of the CC stage documents, the one copy)
 import gatefile  # noqa: E402     (ports/fnv-nx/contract)
 import recipe  # noqa: E402
@@ -314,7 +315,15 @@ def ftoi_why(doc):
 TABLE_UNIT = "rcptab.c"
 
 
-def table_item(objs, image_dir):
+def symbols_memo(facts, path):
+    """symbols_of(path) as a fact of the object's bytes -> (defined set, referenced set)"""
+    if facts is None:
+        return symbols_of(path)
+    d, r = facts.get(["symbols", sha256_file(path)], lambda: [sorted(x) for x in symbols_of(path)])
+    return set(d), set(r)
+
+
+def table_item(objs, image_dir, facts=None):
     """-> None (no item) or [findings] of the item `<image>:rcpcert`. IMAGE_DIR: the directory of the root that is linked into one image, or None when
     the root links nothing. The table object is the object of the unit rcptab.c of the image; the symbols it defines come from its symbol table. The image
     needs the item iff another object of the image references one of those symbols (the link resolves the reference to the table). The certificate is
@@ -326,31 +335,42 @@ def table_item(objs, image_dir):
         return None
     defined = set()
     for _, p in tabs:
-        defined |= symbols_of(p)[0]
-    used = sorted({n for u, p in objs if os.path.basename(u) != TABLE_UNIT for n in symbols_of(p)[1] & defined})
+        defined |= symbols_memo(facts, p)[0]
+    used = sorted({n for u, p in objs if os.path.basename(u) != TABLE_UNIT for n in symbols_memo(facts, p)[1] & defined})
     if not used:
         return None
     return check_cert(os.path.join(image_dir, os.path.dirname(tabs[0][0])))
 
 
-def judge_objects_coded(root, objs, image_dir, forms_ok, docs=None):
+def judge_object_memo(facts, oid, path, asm, unit):
+    """judge_object_coded as a fact of the object: its key is the object's bytes, the plugin's f2i file beside it and the unit's kind and name
+    (what judge_object_coded reads); FACTS None: computed, nothing kept"""
+    if facts is None:
+        return judge_object_coded(oid, path, asm, unit)
+    f2i = path + ".f2i.json"
+    parts = ["object", oid, bool(asm), unit, sha256_file(path), sha256_file(f2i) if os.path.isfile(f2i) else None]
+    r = facts.get(parts, lambda: judge_object_coded(oid, path, asm, unit))
+    return {k: [tuple(x) for x in v] for k, v in r.items()}
+
+
+def judge_objects_coded(root, objs, image_dir, forms_ok, docs=None, facts=None):
     """-> {item id: [(code, text)]} of one root: OBJS [(unit, path)], IMAGE_DIR (see table_item), FORMS_OK (reason string or None: the dependency on the
     gate forms), DOCS ({unit: CC document} of a native root; None: lifted root)."""
     items = {root + ":forms": [("forms-not-green", forms_ok)] if forms_ok else []}
-    cert = table_item(objs, image_dir)
+    cert = table_item(objs, image_dir, facts)
     if cert is not None:
         items[root + ":rcpcert"] = [("rcpcert", t) for t in cert]
     for unit, path in objs:
-        r = judge_object_coded(root + "/" + unit, path, unit.endswith(recipe.ASM_EXT), unit)
+        r = judge_object_memo(facts, root + "/" + unit, path, unit.endswith(recipe.ASM_EXT), unit)
         if docs is not None and unit.endswith(recipe.CXX_EXT):
             r["f2i:" + root + "/" + unit] += [("ftoi-plugin-missing", t) for t in ftoi_why(docs.get(unit))]
         items.update(r)
     return items
 
 
-def judge_objects(root, objs, image_dir, forms_ok, docs=None):
+def judge_objects(root, objs, image_dir, forms_ok, docs=None, facts=None):
     """-> {item id: [findings]}, see judge_objects_coded"""
-    return {k: [t for _, t in v] for k, v in judge_objects_coded(root, objs, image_dir, forms_ok, docs).items()}
+    return {k: [t for _, t in v] for k, v in judge_objects_coded(root, objs, image_dir, forms_ok, docs, facts).items()}
 
 
 def fixture_findings(root, items):
@@ -372,7 +392,7 @@ def forms_reason(repo, cache):
 FINDINGS = []   # every finding of the run as {id, code}, written to fpexact.json (RECIPE.md "Fixtures")
 
 
-def judge_root(root, repo, cache, forms):
+def judge_root(root, repo, cache, forms, facts=None):
     """One admitted product ROOT -> (universe, certified, ids, detail); an input problem is one red item, never a skip"""
     try:
         rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
@@ -390,7 +410,7 @@ def judge_root(root, repo, cache, forms):
         image = os.path.join(repo, root) if res.get("elf") else None
         native = recipe.load_admit(repo).get(root, {}).get("cxx_origin") == "native"
         docs = gate_datamodel.cc_docs(os.path.join(cache, "store"), res) if native else None
-        coded = judge_objects_coded(root, read_inputs(res), image, forms(), docs)
+        coded = judge_objects_coded(root, read_inputs(res), image, forms(), docs, facts)
         FINDINGS.extend(fixture_findings(root, coded))
         items = {k: [t for _, t in v] for k, v in coded.items()}
     except (OSError, ValueError, ELFError) as e:
@@ -413,7 +433,13 @@ def main(argv):
         if not memo:
             memo.append(forms_reason(".", os.path.join(cache, "forms")))
         return memo[0]
-    u, c, ids, detail = gate_build.quantify(".", lambda root: judge_root(root, ".", cache, forms))
+    try:
+        facts = factcache.Facts(".", os.environ.get("GATE_CACHE"), NAME, "ports/fnv-nx/lift/proof/gate_fpexact.py")   # every per-object judgement is a fact of the object's bytes
+    except factcache.ClosureError as e:
+        gatefile.write(NAME, 1, 0, ["gate:closure"], str(e)[:600])
+        sys.stdout.write("%s: red 0/1 %s\n" % (NAME, str(e)[:200]))
+        return 2
+    u, c, ids, detail = gate_build.quantify(".", lambda root: judge_root(root, ".", cache, forms, facts))
     gatefile.write(NAME, u, c, ids, detail if u != c else ("rcp table certified, no rcp/rsqrt estimate instruction and no uncertified float->int conversion in %d items" % u if u else detail))
     st = "green" if u == c else "red"
     if os.environ.get("GATE_OUT"):     # also in normal mode: a whole-root fixture is judged in normal mode
@@ -424,7 +450,7 @@ def main(argv):
         with open(path, "w", newline="\n") as fh:
             json.dump(r, fh, sort_keys=True, separators=(",", ":"))
             fh.write("\n")
-    sys.stdout.write("%s: %s %d/%d %s\n" % (NAME, st, c, u, detail[:200]))
+    sys.stdout.write("%s: %s %d/%d %s [%s]\n" % (NAME, st, c, u, detail[:200], facts.stats()))
     return 0 if st == "green" else 2
 
 

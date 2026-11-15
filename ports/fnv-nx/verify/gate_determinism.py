@@ -24,6 +24,7 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import factcache  # noqa: E402
 import gate_build  # noqa: E402
 import recipe  # noqa: E402
 
@@ -39,21 +40,39 @@ def main():
     items, good, why, repo, secs = [], [], [], ".", []
     roots, files = recipe.load_admit(repo), recipe.tracked(repo)
     cache = os.environ.get("GATE_CACHE")
+    try:
+        facts = factcache.Facts(repo, cache, "determinism", "ports/fnv-nx/verify/gate_determinism.py")
+    except factcache.ClosureError as e:
+        res = {"format": "fnvnx-gate/1", "name": "determinism", "status": "red", "universe": 1, "certified": 0, "uncertified": ["gate:closure"], "detail": str(e)[:600]}
+        with open(os.path.join(os.environ["GATE_OUT"], "determinism.json"), "w") as f:
+            json.dump(res, f, sort_keys=True)
+        print("determinism: red 0/1 %s" % res["detail"][:200])
+        return 2
     ext = os.path.join(cache, "external") if cache else tempfile.mkdtemp(prefix="gate-det-ext-")   # the bare fetch cache is shared, stores are not
     for root in gate_build.buildable_roots(repo):
         rec = recipe.load_recipe(repo, roots, root)
         pre = [root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files)] if isinstance(rec, dict) else []
         runs = []
         try:
-            for n in range(2):
-                tmp, t0 = tempfile.mkdtemp(prefix="gate-det-"), time.time()
-                try:
-                    runs.append(recipe.build(repo, root, tmp + "/store", tmp + "/out", ext=ext))
-                finally:
-                    shutil.rmtree(tmp, ignore_errors=True)
-                secs.append(round(time.time() - t0, 1))
-            if cache:
-                runs.append(gate_build.ensure(root, cache, repo)[0])
+            warm = gate_build.ensure(root, cache, repo)[0] if cache else None
+            # FACT: the two cold builds of a root equal each other and the warm build, keyed by every stage key of the root (they cover the content of
+            # each unit's inputs, the flags, the tools and the environment) and the sha256 of every object and of the ELF. The same keys and shas were
+            # proven equal in two cold builds before: nothing differs by running them again. Only a mismatch-free result is kept.
+            fkey = ["root", root, sorted(warm.get("stage_keys", [])), sorted(shas(warm).items())] if warm and warm["status"] == "green" else None
+            known = fkey is not None and facts.known(fkey)
+            if known:
+                runs = [warm, warm, warm]
+                secs.append(0.0)
+            else:
+                for n in range(2):
+                    tmp, t0 = tempfile.mkdtemp(prefix="gate-det-"), time.time()
+                    try:
+                        runs.append(recipe.build(repo, root, tmp + "/store", tmp + "/out", ext=ext))
+                    finally:
+                        shutil.rmtree(tmp, ignore_errors=True)
+                    secs.append(round(time.time() - t0, 1))
+                if cache:
+                    runs.append(warm)
         except recipe.RecipeError as e:
             items += pre
             why.append("%s: invalid recipe: %s" % (root, "; ".join(e.errors)[:300]))
@@ -64,13 +83,15 @@ def main():
         if any(r["status"] == "red" for r in runs):
             why.append("%s: build red in %s" % (root, ",".join(n for n, r in zip(names, runs) if r["status"] == "red")))
             continue
-        ref, elf = shas(a), root + "/" + (rec["link"]["output"] if rec.get("link") else "")
+        ref, elf, seen = shas(a), root + "/" + (rec["link"]["output"] if rec.get("link") else ""), len(why)
         for k in sorted(ref):
             if all(shas(r).get(k) == ref[k] for r in runs):
                 good.append(elf if k == "<elf>" else root + "/" + k)
             else:
                 differ = [n for n, r in zip(names, runs) if shas(r).get(k) != ref[k]]
                 why.append("%s differs in %s" % (k, "/".join(differ)))
+        if fkey is not None and not known and len(why) == seen:   # every object and the ELF equal in all builds: a fact of these stage keys
+            facts.put(fkey, {"cold_equal": True})
     if not cache:
         shutil.rmtree(ext, ignore_errors=True)
     bad = sorted(set(items) - set(good))
@@ -81,7 +102,7 @@ def main():
            "certified": len(good), "uncertified": bad[:50], "detail": detail}
     with open(os.path.join(os.environ["GATE_OUT"], "determinism.json"), "w") as f:
         json.dump(res, f, sort_keys=True)
-    print("determinism: %s %d/%d %s" % (res["status"], res["certified"], res["universe"], detail[:200]))
+    print("determinism: %s %d/%d %s [%s]" % (res["status"], res["certified"], res["universe"], detail[:200], facts.stats()))
     return 2 if why else 0
 
 

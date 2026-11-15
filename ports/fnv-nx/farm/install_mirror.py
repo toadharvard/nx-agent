@@ -27,17 +27,8 @@ def installed(pkg):
     v = p.stdout.split("\t")
     return v[0] if p.returncode == 0 and len(v) == 2 and v[1].endswith("installed") else None
 
-def main(a):
-    work = tempfile.mkdtemp(prefix="debs-")
-    try:
-        return run(a, work)
-    finally:
-        shutil.rmtree(work, ignore_errors=True)   # on every outcome
-
-def run(a, work):
-    env = a[a.index("--env") + 1] if "--env" in a else os.path.join(os.path.dirname(HERE), "verify", "env.json")
-    doc = json.load(open(env))
-    m, pk = doc["debs"]["mirror"], doc["debs"]["packages"]
+def fetch(m, work):
+    """Check out the mirror commit M["commit"] of the artifacts repo (shallow, exact commit) into WORK/co; returns the checkout."""
     url = os.environ.get("ARTIFACTS_URL", "https://github.com/toadharvard/fnv-nx-build")
     genv = dict(os.environ, GIT_TERMINAL_PROMPT="0")
     bare = os.path.join(work, "bare")
@@ -49,6 +40,20 @@ def run(a, work):
     idx = dict(genv, GIT_INDEX_FILE=os.path.join(work, "idx"))
     subprocess.run(["git", "--git-dir", bare, "read-tree", m["commit"]], env=idx, check=True)
     subprocess.run(["git", "--git-dir", bare, "--work-tree", dest, "checkout-index", "-a", "-f"], env=idx, check=True)
+    return dest
+
+def main(a):
+    work = tempfile.mkdtemp(prefix="debs-")
+    try:
+        return run(a, work)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)   # on every outcome
+
+def run(a, work):
+    env = a[a.index("--env") + 1] if "--env" in a else os.path.join(os.path.dirname(HERE), "verify", "env.json")
+    doc = json.load(open(env))
+    m, pk = doc["debs"]["mirror"], doc["debs"]["packages"]
+    dest = fetch(m, work)
     tree = cas.tree_hash(os.path.join(dest, "debs"))
     if tree != m["tree_sha256"]:
         print("install_mirror: mirror tree_sha256 is %s, env.json says %s" % (tree, m["tree_sha256"]), file=sys.stderr)

@@ -6,7 +6,7 @@ Form-level conventions: fault(code, cond) = the instruction raises DE/BP/UD when
 `when` on a register/flag write = the SDM defines the value only when `when` holds; df / flo (other EFLAGS bits) are state the
 model driver does not expose, so a form that writes them can only be certified on its observable fields."""
 import os, sys
-sys.path.insert(0, os.environ.get('FNVLIFT_ROOT') or os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 from fnvlift.dsl import C, Form, V, bit, concat, eq, extract, load, msb, trunc
 from capstone import x86 as X
 

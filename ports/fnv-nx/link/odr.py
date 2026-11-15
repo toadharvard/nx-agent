@@ -148,9 +148,10 @@ def first_difference(a, b):
     return 'member count %d vs %d' % (len(a), len(b))
 
 
-def check(paths):
-    """-> (universe ids, {id: reason})"""
-    per = {p: copies(p) for p in sorted(set(paths))}
+def check(paths, copies_of=copies):
+    """-> (universe ids, {id: reason}). COPIES_OF(path) -> what copies(path) returns, or the same value after a JSON round trip (a gate keeps it as a
+    fact of the object's bytes: verify/gate_abi.py)"""
+    per = {p: copies_of(p) for p in sorted(set(paths))}
     sigs = {}
     for p, c in per.items():
         for s, fp in c.items():

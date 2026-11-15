@@ -25,8 +25,12 @@ import ast
 import collections
 import json
 import os
+import hashlib
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import factcache  # noqa: E402
 
 TREE = "ports/fnv-nx"
 SINK_NAMES = {"open", "Path", "PurePath", "system", "popen", "fromfile", "memmap", "mmap"}
@@ -234,7 +238,15 @@ def main():
     for f in files:
         with open(f, encoding="utf-8") as fh:
             sources[f] = fh.read()
-    bad, errors = judge(sources)
+    try:   # the flow is a function of all the sources together: one fact keyed by the content of every item and the gate's import closure
+        facts = factcache.Facts(".", os.environ.get("GATE_CACHE"), "exepin", "ports/fnv-nx/verify/gate_exepin.py")
+    except factcache.ClosureError as e:
+        res = {"format": "fnvnx-gate/1", "name": "exepin", "status": "red", "universe": 1, "certified": 0, "uncertified": ["gate:closure"], "detail": str(e)[:600]}
+        with open(os.path.join(out, "exepin.json"), "w") as f:
+            json.dump(res, f, indent=1, sort_keys=True)
+        print("exepin: red 0/1 %s" % res["detail"][:200])
+        return 2
+    bad, errors = facts.get([[p, hashlib.sha256(sources[p].encode("utf-8", "surrogateescape")).hexdigest()] for p in sorted(sources)], lambda: judge(sources))
     red = bool(bad or errors)
     uncert = ["%s:%s" % (p, bad[p]) for p in sorted(bad)][:50]
     detail = "; ".join(errors)[:400] if errors else (
@@ -244,7 +256,7 @@ def main():
     with open(os.path.join(out, "exepin.json"), "w") as f:
         json.dump(res, f, indent=1, sort_keys=True)
         f.write("\n")
-    print("exepin: %s %d/%d %s" % (res["status"], res["certified"], len(files), detail))
+    print("exepin: %s %d/%d %s [%s]" % (res["status"], res["certified"], len(files), detail, facts.stats()))
     return 2 if red else 0
 
 

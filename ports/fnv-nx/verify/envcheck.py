@@ -37,7 +37,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 FORMAT = "fnvnx-env/1"
 PROGRAMS = ["strace", "busybox", "gcc", "aarch64-linux-gnu-g++", "aarch64-linux-gnu-nm", "aarch64-linux-gnu-readelf",
-            "aarch64-linux-gnu-as", "aarch64-linux-gnu-ld", "aarch64-linux-gnu-objcopy", "ar", "as", "ld", "clang", "git", "ldd", "true", "g++", "llvm-config-18"]
+            "aarch64-linux-gnu-as", "aarch64-linux-gnu-ld", "aarch64-linux-gnu-objcopy", "ar", "as", "ld", "clang", "git", "ldd", "true", "g++", "llvm-config-18", "shfmt"]
 UNIT_CC = "aarch64-linux-gnu-g++"  # the unit stage ingests its trees whole
 HOST_GCC_PROGS = ["cc1", "cc1plus", "collect2"]  # gcc -print-prog-name=: what the host gcc runs for the static probe / -fsyntax-only
 HOST_GCC_FILES = ["libc.a", "crt1.o", "libgcc.a", "libgcc_eh.a", "libstdc++.so"]  # gcc -print-file-name=: what `gcc -static` links
@@ -267,6 +267,45 @@ def _root_compilers(repo=None):
     return sorted(out)
 
 
+READROOTS = os.path.join(HERE, "readroots.json")
+
+def read_roots(repo):
+    """[(root name, cwd, [system header path read], error or None)] for every root of verify/readroots.json whose cwd exists in REPO:
+    `gcc -M` of the root's flags and sources (globs expanded in its cwd); a root whose sources are not all in the checkout is skipped. The headers are the dependencies under
+    /usr (what the preprocessor read); an error is the first lines of gcc's diagnostics (a header that is not installed)."""
+    import glob
+    try:
+        roots = json.load(open(READROOTS))["roots"]
+    except (OSError, ValueError, KeyError):
+        return []
+    out = []
+    for r in roots:
+        cwd = os.path.join(repo, r["cwd"])
+        if not os.path.isdir(cwd):
+            continue
+        srcs = [sorted(glob.glob(os.path.join(cwd, g))) for g in r["sources"]]
+        if not all(srcs):   # the root's sources are not in this checkout (its branch has not landed): nothing to read
+            continue
+        args = r["flags"] + [os.path.relpath(x, cwd) for g in srcs for x in g]
+        p = subprocess.run(["gcc", "-M"] + args, cwd=cwd, capture_output=True, text=True)
+        if p.returncode != 0:
+            out.append((r["name"], cwd, [], p.stderr.strip().splitlines()[0] if p.stderr.strip() else "gcc -M failed"))
+            continue
+        toks = [t for t in p.stdout.replace("\\\n", " ").split() if not t.endswith(":")]
+        out.append((r["name"], cwd, sorted({os.path.realpath(os.path.join(cwd, t)) for t in toks if os.path.realpath(os.path.join(cwd, t)).startswith("/usr/")}), None))
+    return out
+
+def read_owner_packages(repo):
+    """The packages that own the system headers the read roots read (what snapshot pins): for each header its owners, the first by name
+    when several; headers of packages already chosen cost nothing."""
+    own, pk = _owners(), set()
+    for _, _, hs, _ in read_roots(repo):
+        for h in hs:
+            o = own.get(h, set())
+            if o and not (o & pk):
+                pk.add(sorted(o)[0])
+    return pk
+
 def check(doc, repo=None):
     """List of mismatch lines (empty = the machine is the declared environment)."""
     bad = []
@@ -301,6 +340,9 @@ def check(doc, repo=None):
         if not (isinstance(f, str) and f.endswith(".whl") and "/" not in f):
             bad.append("env: python module %s: no wheel file name in python.wheel_files (setup installs from the mirror)" % m)
     bad += deb_pins(doc)
+    bad += program_classes(doc)
+    for pn, pf in sorted(doc.get("profiles", {}).items()):
+        bad += profile_pins(pn, pf)
     pinned, owners = pinned_set(doc["packages"]), file_owners()
     for t, dg in sorted(doc["trees"].items()):
         cmp("tree " + t, dg[:12], (tree_digest(t, pinned, owners) if os.path.isdir(t) else "missing")[:12])
@@ -320,6 +362,12 @@ def check(doc, repo=None):
         files = HOST_GCC_PLUGIN_DIRS(shutil.which(drv) or drv)
         miss = sorted({p for f in files for p in [sorted(own.get(os.path.realpath(f), {"no package"}))[0]] if p not in doc["packages"]})
         cmp("plugin headers of " + drv, "owned by listed packages", "no plugin headers" if not files else ("owned by %s" % miss if miss else "owned by listed packages"))
+    pinned, own = pinned_set(doc["packages"]), own
+    for name, cwd, hs, err in read_roots(repo or os.path.dirname(os.path.dirname(os.path.dirname(HERE)))):
+        if err:
+            bad.append("env: read root %s: %s" % (name, err))
+        foreign = sorted({(h, sorted(own.get(h, {"no package"}))[0]) for h in hs if not (own.get(h, set()) & pinned)})
+        bad += ["env: read root %s reads %s, owned by %s (not a package of env.json)" % (name, h, o) for h, o in foreign]
     for need in doc["kernel"]["needs"]:
         ok = need in PROBES and PROBES[need]()
         cmp("kernel " + need, "available", "available" if ok else ("unavailable" if need in PROBES else "unknown capability"))
@@ -351,6 +399,111 @@ def deb_pins(doc):
             out.append("env: debs.packages.%s: needs version %s, file, sha256 (64 hex) and url" % (p, want[p]))
     return out
 
+def profile_pins(name, prof):
+    """Mismatch lines of the STRUCTURE of build profile NAME (doc["profiles"][NAME]; checked on every machine, in the verdict too): the
+    package set is the whole set (the base and the closure are in it, nothing is resolved at install time), each package has a version
+    and a deb pin {version, file, sha256 (64 hex), origin, url}, debs.packages and packages name the same packages at the same
+    versions, and debs.mirror names the commit and the tree sha256 of debs/. Programs the build invokes are listed."""
+    out, pre = [], "env: profile %s: " % name
+    pk, dp = prof.get("packages"), prof.get("debs")
+    if not (isinstance(pk, dict) and pk and isinstance(dp, dict) and isinstance(dp.get("packages"), dict) and isinstance(dp.get("mirror"), dict)):
+        return [pre + "needs packages, debs.mirror and debs.packages"]
+    m = dp["mirror"]
+    hx = lambda h, n: isinstance(h, str) and len(h) == n and all(c in HEX64 for c in h)
+    if not (isinstance(m.get("repo"), str) and hx(m.get("commit"), 40) and hx(m.get("tree_sha256"), 64)):
+        out.append(pre + "debs.mirror needs repo, a 40-hex commit and a 64-hex tree_sha256")
+    for p in sorted(set(pk) ^ set(dp["packages"])):
+        out.append(pre + "debs.packages: %s %s" % (p, "has no deb pin" if p in pk else "is not in packages"))
+    for p, e in sorted(dp["packages"].items()):
+        if p in pk and not (isinstance(e, dict) and e.get("version") == pk[p] and isinstance(e.get("file"), str)
+                            and hx(e.get("sha256"), 64) and isinstance(e.get("url"), str) and isinstance(e.get("origin"), str)):
+            out.append(pre + "debs.packages.%s: needs version %s, file, sha256 (64 hex), origin and url" % (p, pk[p]))
+    fa = prof.get("foreign_arch")
+    for p in sorted(pk):
+        if ":" in p and p.partition(":")[2] != fa:
+            out.append(pre + "package %s: a `name:ARCH` package needs foreign_arch = ARCH in the profile" % p)
+    if not (isinstance(prof.get("programs"), list) and prof["programs"]):
+        out.append(pre + "programs: the programs the build invokes (each must be owned by a pinned package)")
+    if not set(prof.get("prerequisites", [])) <= set(prof.get("programs", [])):
+        out.append(pre + "programs lack prerequisites %s" % sorted(set(prof.get("prerequisites", [])) - set(prof.get("programs", []))))
+    return out
+
+def program_classes(doc):
+    """Mismatch lines of farm/program_classes.json (the classification of the programs a scanned script may invoke): every record has a
+    class (leaf, runner, opaque), a doc citation, and a `package` that is a package of a build profile (the documentation is the pinned
+    version's); a runner has a rule of kind argv (skip, optarg), flag (flags) or string (flags)."""
+    try:
+        recs = json.load(open(os.path.join(os.path.dirname(HERE), "farm", "program_classes.json")))["programs"]
+    except (OSError, ValueError, KeyError):
+        return ["env: farm/program_classes.json: missing or not a classification"]
+    pk = {p for pf in doc.get("profiles", {}).values() for p in pf.get("packages", {})}
+    out = []
+    for n, r in sorted(recs.items()):
+        pre = "env: program_classes.%s: " % n
+        if r.get("class") not in ("leaf", "runner", "opaque") or not (isinstance(r.get("doc"), str) and r["doc"]):
+            out.append(pre + "needs class (leaf, runner, opaque) and a doc citation")
+        if pk and r.get("package") not in pk:
+            out.append(pre + "package %s is not a package of a build profile" % r.get("package"))
+        if r.get("class") == "runner":
+            rl = r.get("rule") or {}
+            ok = (rl.get("kind") == "argv" and isinstance(rl.get("skip"), int) and isinstance(rl.get("optarg"), list)) or \
+                 (rl.get("kind") in ("flag", "string") and isinstance(rl.get("flags"), list) and rl["flags"])
+            if not ok:
+                out.append(pre + "a runner needs a rule: argv (skip, optarg), flag (flags) or string (flags)")
+    for pn, pf in sorted(doc.get("profiles", {}).items()):   # totality: every program of a profile has a record
+        out += ["env: profile %s: program %s has no record in farm/program_classes.json" % (pn, x) for x in sorted(set(pf.get("programs", [])) - set(recs))]
+    return out
+
+def check_scripts(doc, name, files):
+    """Mismatch lines of the programs that shell scripts FILES invoke (farm/script_programs.py: a real shfmt parse) against build profile
+    NAME: every program must be in the profile's `programs` (which must be in PATH and owned by a pinned package in the chroot), and a
+    command whose name is not a literal (a variable, an expansion) is a mismatch: it cannot be derived statically."""
+    prof = doc.get("profiles", {}).get(name)
+    if prof is None:
+        return ["env: no profile %s" % name]
+    sys.path.insert(0, os.path.join(os.path.dirname(HERE), "farm"))
+    import script_programs
+    bad, have = [], set(prof.get("programs", []))
+    for f in files:
+        progs, dyn, unc = script_programs.programs(open(f, encoding="utf-8").read())
+        bad += ["env: profile %s: %s runs %s, not in the profile's programs" % (name, f, p) for p in sorted(progs - have)]
+        bad += ["env: profile %s: %s runs %s, which has no record in farm/program_classes.json" % (name, f, p) for p in sorted(unc)]
+        bad += ["env: profile %s: %s: command name is not literal: %s" % (name, f, d) for d in dyn]
+    return bad
+
+def check_profile(doc, name):
+    """Mismatch lines of THIS machine against build profile NAME: it is run inside the profile's chroot (farm/setup_verdict_env.sh
+    --profile). The installed package set must be EXACTLY the profile's (name and version, nothing else installed), the os and arch
+    must match, and every program the build invokes must be in PATH and owned by a pinned package (a program of no pinned package is
+    a build input that the profile does not declare)."""
+    prof = doc.get("profiles", {}).get(name)
+    if prof is None:
+        return ["env: no profile %s" % name]
+    bad = profile_pins(name, prof)
+    pre = "env: profile %s: " % name
+    def cmp(what, want, have):
+        if want != have:
+            bad.append("%s%s: want %s, have %s" % (pre, what, want, have))
+    cmp("os", _os(), prof.get("os"))
+    cmp("arch", prof.get("arch"), platform.machine())
+    have = {}
+    for ln in subprocess.run(["dpkg-query", "-W", "-f=${Package}\t${Architecture}\t${Version}\t${Status}\n"], capture_output=True, text=True).stdout.splitlines():
+        n, a, v, st = ln.split("\t")
+        if st.endswith(" installed"):
+            have[n if a in ("all", "amd64") else "%s:%s" % (n, a)] = v   # a foreign package is `name:ARCH`
+    for n in sorted(set(prof.get("packages", {})) | set(have)):
+        w, h = prof.get("packages", {}).get(n), have.get(n)
+        if w != h:
+            bad.append("%spackage %s: want %s, have %s" % (pre, n, w or "not installed", h or "not installed"))
+    own = _owners()
+    for prog in prof.get("programs", []):
+        path = shutil.which(prog)
+        if path is None:
+            bad.append("%sprogram %s: want in PATH, have missing" % (pre, prog))
+        elif not (own.get(os.path.realpath(path), set()) & set(prof.get("packages", {}))):
+            bad.append("%sprogram %s: %s is owned by no pinned package" % (pre, prog, os.path.realpath(path)))
+    return bad
+
 def wheel_pins(prev):
     """(python.wheel_sha256, python.wheel_files) of the new snapshot: the sha256 and the file name of each module's wheel FILE (what
     farm/install_mirror.py installs from the mirror's wheels/ with pip --no-index --require-hashes). The installed package does not
@@ -379,10 +532,15 @@ def snapshot(prev=None):
     def loads(roots, trees=()):
         for at in runtime.closure(sorted(roots), list(trees)):
             add(at)
-    py, mods = os.path.realpath(sys.executable), [os.path.dirname(__import__(PY_MODULES[m]).__file__) for m in sorted(PY_MODULES)]
+    py, mods = os.path.realpath(sys.executable), [str(metadata.distribution(m).locate_file(PY_MODULES[m])) for m in sorted(PY_MODULES)]   # the package directory of each pinned module
     dyn = sysconfig.get_config_var("DESTSHARED")
     roots = [py] + [f for d in [dyn] + mods for f in runtime.elf_files(d, runtime.ident(py))]
     loads(roots, [os.path.dirname(os.__file__), os.path.dirname(os.path.dirname(py))] + mods)
+    for name, _cwd, hs, err in read_roots(os.path.dirname(os.path.dirname(os.path.dirname(HERE)))):   # the system headers that the host roots read (readroots.json)
+        if err:
+            raise SystemExit("envcheck: read root %s: %s" % (name, err))
+        for h in hs:
+            add(h)
     for prog in PROGRAMS:
         real = os.path.realpath(shutil.which(prog) or sys.exit("envcheck: program %s not in PATH" % prog))
         add(real)
@@ -437,15 +595,17 @@ def snapshot(prev=None):
             "python": {"version": platform.python_version(), "modules": {m: metadata.version(m) for m in sorted(PY_MODULES)},
                        "installed_files_sha256": {m: wheel_digest(m) for m in sorted(PY_MODULES)},
                        "wheel_sha256": wheel_pins(prev)[0], "wheel_files": wheel_pins(prev)[1]},
-            "programs": sorted(PROGRAMS), "kernel": {"needs": KERNEL}, "debs": (prev or {}).get("debs")}
+            "programs": sorted(PROGRAMS), "kernel": {"needs": KERNEL}, "debs": (prev or {}).get("debs"), "profiles": (prev or {}).get("profiles", {})}
 
 def main(argv):
     ap = argparse.ArgumentParser(prog="envcheck.py")
-    ap.add_argument("cmd", choices=("check", "id", "snapshot"))
+    ap.add_argument("cmd", choices=("check", "id", "snapshot", "scripts"))
+    ap.add_argument("files", nargs="*", help="scripts: the shell scripts whose programs the profile must provide")
     ap.add_argument("--env", default=os.path.join(HERE, "env.json"))
     ap.add_argument("--json")
     ap.add_argument("-o")
     ap.add_argument("--from-code", action="store_true")
+    ap.add_argument("--profile", help="check/id of this build profile (doc[\"profiles\"][NAME]) instead of the verdict environment")
     a = ap.parse_args(argv)
     if a.cmd == "snapshot":
         if not (a.o and a.from_code):
@@ -453,10 +613,18 @@ def main(argv):
         open(a.o, "w").write(json.dumps(snapshot(json.load(open(a.env)) if os.path.exists(a.env) else None), sort_keys=True, indent=1) + "\n")
         return 0
     doc = json.load(open(a.env))
+    if a.profile and a.cmd == "id":
+        print(env_id(doc.get("profiles", {}).get(a.profile, {})))
+        return 0
     if a.cmd == "id":
         print(env_id(doc))
         return 0
-    bad = check(doc)
+    if a.cmd == "scripts":
+        if not a.profile:
+            ap.error("scripts needs --profile NAME FILE...")
+        bad = check_scripts(doc, a.profile, a.files)
+    else:
+        bad = check_profile(doc, a.profile) if a.profile else check(doc)
     print("\n".join(bad + ["envcheck: OK" if not bad else "envcheck: MISMATCH (%d)" % len(bad)]))
     if a.json:
         json.dump({"env_id": env_id(doc), "mismatches": bad}, open(a.json, "w"), sort_keys=True)
