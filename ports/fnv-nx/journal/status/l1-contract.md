@@ -1781,3 +1781,5 @@ bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
   - Orchestrator ruling: stage timing goes into cand3, and w12 does it. Wall and CPU time go in a sidecar <key>.time, which is not in the key or the record and which store-merge ignores. The plugin split comes from an @time flags variant whose TIMEREPORT output is -ftime-report, so product keys are unchanged. Summed by `recipe timing`.
   - gate_imports bridge_of and gate_contract's manifest bridge.tsv join the import-table brief for w15.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
+- 20:44 cand3 merge list (w12L2 598f540bf) accepted. Its stamp inputs are identical to cand2's, and both differ from L2 b9f6b3a69 in 5 covered files. Correction for cand2: w15 takes L2's toolchain/ and targets.json at b9f6b3a69, and stamp.py must print 03eacf9d before the verdict. cpuid goes with L3a's tree; the stub citation waits for w27.
+bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
