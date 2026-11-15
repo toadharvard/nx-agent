@@ -9,3 +9,6 @@ struct Api {
   const hslot cs;
 };
 extern const struct Api *host_api;
+/* host-ABI calls of two different callee types in one C unit: the compiler-internal marker of the pass pair is no declaration of the unit */
+unsigned long long hc1(unsigned long long a) { return ((unsigned long long (*)(unsigned long long))(unsigned long)host_api->open)(a); }
+unsigned long long hc2(unsigned long long a, unsigned long long b) { return ((unsigned long long (*)(unsigned long long, unsigned long long))(unsigned long)host_api->close)(a, b); }

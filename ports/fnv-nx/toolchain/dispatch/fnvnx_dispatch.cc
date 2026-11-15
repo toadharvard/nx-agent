@@ -711,6 +711,7 @@ static tree marker_decl(tree ptr_type)
   tree t = build_function_type_list(ptr_type, ptr_type, integer_type_node, NULL_TREE);
   tree d = build_fn_decl("fnvnx_host_ptr", t);
   DECL_EXTERNAL(d) = 1; TREE_PUBLIC(d) = 1; DECL_ARTIFICIAL(d) = 1; TREE_NOTHROW(d) = 1; TREE_READONLY(d) = 1; DECL_PURE_P(d) = 0;
+  DECL_SOURCE_LOCATION(d) = BUILTINS_LOCATION;   /* a compiler-internal declaration, as an undeclared builtin: no plugin that lists the unit's declarations sees it */
   return d;
 }
 

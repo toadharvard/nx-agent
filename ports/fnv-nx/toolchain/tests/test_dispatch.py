@@ -93,7 +93,7 @@ FORMS = [
 def decltype(td, so):
     obj = os.path.join(td, 'host_c.o')
     r = pb.compile(os.path.join(HERE, 'dispatch', 'host_c.c'), obj, so)
-    check('host_c.c compiles', r.returncode == 0, r.stderr[:2000])
+    check('host_c.c compiles (host-ABI calls of two callee types: the pass pair\'s marker is not a declaration of the unit)', r.returncode == 0, r.stderr[:2000])
     if r.returncode == 0:
         dt = dict(l.split('\t', 1) for l in pb.section(obj, '.fnvnx.decltype').splitlines() if '\t' in l)
         ty = dt.get('host_api', '')
