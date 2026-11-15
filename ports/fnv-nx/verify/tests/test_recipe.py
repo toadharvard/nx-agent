@@ -667,7 +667,7 @@ def main():
              T + "hdr_tool": {"path": T + "hdr_tool", "class": "tool"}, T + "hdr_doc": {"path": T + "hdr_doc", "class": "doc"},
              T + "hdr_head": {"path": T + "hdr_head", "class": "header"}}
     rr = dict(base_roots, **extra)
-    rfiles = list(recipe.tracked(rk)) + [T + n + "/h.h" for n in ("hdr_prod", "hdr_other", "hdr_tool", "hdr_doc", "hdr_head")]
+    rfiles = list(recipe.tracked(rk)) + [T + n + "/h.h" for n in ("hdr_prod", "hdr_other", "hdr_tool", "hdr_doc")] + [T + "hdr_head/hh.h"]
 
     def home(d):
         return [e for e in recipe.check(mut(include=RECIPE["include"] + [T + d]), ROOT, rfiles, rr, None, rk) if "lies in no admitted header root" in e]
