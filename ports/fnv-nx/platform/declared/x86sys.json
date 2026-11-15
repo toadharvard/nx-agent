@@ -28,7 +28,7 @@
    "value": 0
   },
   "umip": {
-   "source": "Intel SDM Vol 3A 2.5 CR4.UMIP: the bit is reserved (setting it is #GP) unless CPUID.(EAX=07H,ECX=0):ECX[2] is enumerated; the declared CPU's max basic leaf is 4 (ports/fnv-nx/verify/cpuid_model.json max_basic @ 47b68e51c4a3), below 7, so there is no leaf 7 and CR4.UMIP is 0",
+   "source": "Intel SDM Vol 3A 2.5 CR4.UMIP: the bit is reserved (setting it is #GP) unless CPUID.(EAX=07H,ECX=0):ECX[2] is enumerated; the declared CPU's max basic leaf is 4 (ports/fnv-nx/verify/cpuid_model.json max_basic @ 61e59c490028), below 7, so there is no leaf 7 and CR4.UMIP is 0",
    "value": 0
   }
  },
@@ -456,7 +456,7 @@
    },
    "11": {
     "name": "PF_SSE_DAZ_MODE_AVAILABLE",
-    "source": "Wine 9.0 programs/wineboot/wineboot.c line 421: CPU_FEATURE_DAZ = SSE2 && FXSR && MXCSR_MASK bit 6 (system.c line 386), MXCSR_MASK = 0x0000ffbf from ports/fnv-nx/verify/cpuid_model.json @ 47b68e51c4a3 (file sha256 fbb63bfffd35...; mxcsr_mask is a CPUREF field, not an x86sys row)",
+    "source": "Wine 9.0 programs/wineboot/wineboot.c line 421: CPU_FEATURE_DAZ = SSE2 && FXSR && MXCSR_MASK bit 6 (system.c line 386), MXCSR_MASK = 0x0000ffbf from ports/fnv-nx/verify/cpuid_model.json @ 61e59c490028 (file sha256 01c113c6d040...; mxcsr_mask is a CPUREF field, not an x86sys row)",
     "value": 0,
     "winnt_h_line": 8728
    },
@@ -611,10 +611,10 @@
  "sources": {
   "cpumodel": {
    "branch": "claude/fnv-l3a-lift-int3",
-   "commit": "47b68e51c4a32511ef553289c638c08e948141bc",
+   "commit": "61e59c490028b407404d63cd0d0407d8fa85df6c",
    "origin": "the declared CPU's cpuid as data (CPUREF: verify/cpuref.json + verify/cpuid_model.json); lift/rt/cpumodel.c is generated from it, not a source",
    "path": "ports/fnv-nx/verify/cpuid_model.json",
-   "sha256": "fbb63bfffd3505806c67805181689b318d8a33deceefb978eb99ddbab11f1800"
+   "sha256": "01c113c6d040b1d3ec65dac87a578f54b47fbf0261d4ec713c30076691f2c3d5"
   },
   "ks386": {
    "origin": "Windows Driver Kit 7.1.0 (7600.16385.1), ks386.inc",
