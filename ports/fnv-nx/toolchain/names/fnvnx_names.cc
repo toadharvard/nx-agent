@@ -1103,7 +1103,32 @@ static bool odr_targ(tree a, std::string &out, std::string &why)
     out = "L" + odr_type_name(TREE_TYPE(a)) + (tree_fits_shwi_p(a) ? std::to_string(tree_to_shwi(a)) : std::to_string(tree_to_uhwi(a))) + "E";
     return true;
   }
+  if (TREE_CODE(a) == TEMPLATE_DECL) {   /* a template template argument: the Itanium <template-name> of the template, a source-name per scope (<name> is N..E when qualified); it has no assembler name */
+    std::vector<std::string> parts;
+    for (tree x = a; x && x != global_namespace && TREE_CODE(x) != TRANSLATION_UNIT_DECL; x = DECL_CONTEXT(x)) {
+      if (TYPE_P(x)) { why = "a template template argument in a class scope"; return false; }
+      if (!DECL_NAME(x)) { why = "a template template argument in an unnamed scope"; return false; }
+      const char *id = IDENTIFIER_POINTER(DECL_NAME(x));
+      parts.insert(parts.begin(), std::to_string(strlen(id)) + id);
+    }
+    out.clear();
+    for (size_t k = 0; k < parts.size(); k++) out += parts[k];
+    if (parts.size() > 1) out = "N" + out + "E";
+    return true;
+  }
   if (DECL_P(a)) { out = odr_decl_name(a); return true; }
+  if (TREE_CODE(a) == PTRMEM_CST) {   /* a pointer to member: a function member by its assembler name, a data member by its class and name */
+    tree m = PTRMEM_CST_MEMBER(a);
+    if (TREE_CODE(m) == FUNCTION_DECL) { out = "&" + odr_decl_name(m); return true; }
+    if (!DECL_NAME(m)) { why = "a pointer to an unnamed data member"; return false; }
+    out = "&" + odr_type_name(PTRMEM_CST_CLASS(a)) + "::" + IDENTIFIER_POINTER(DECL_NAME(m));
+    return true;
+  }
+  if (TREE_CODE(a) == INDIRECT_REF) {   /* a reference argument: the object it names (through conversions of its address) */
+    tree p = TREE_OPERAND(a, 0);
+    while (CONVERT_EXPR_P(p) || TREE_CODE(p) == NON_LVALUE_EXPR || TREE_CODE(p) == VIEW_CONVERT_EXPR) p = TREE_OPERAND(p, 0);
+    if (TREE_CODE(p) == ADDR_EXPR && DECL_P(TREE_OPERAND(p, 0))) { out = odr_decl_name(TREE_OPERAND(p, 0)); return true; }
+  }
   if (TREE_CODE(a) == ADDR_EXPR && DECL_P(TREE_OPERAND(a, 0))) { out = "&" + odr_decl_name(TREE_OPERAND(a, 0)); return true; }
   why = std::string("a template argument of kind ") + get_tree_code_name(TREE_CODE(a));
   return false;
