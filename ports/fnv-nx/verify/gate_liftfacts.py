@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gate "liftfacts" (fnvnx-gate/1, VERDICT.md class 5: a code address without a dispatcher entry): the lift facts certify every image's code map and every
-code-address source. It reads the GATES output of the lift/facts root, as published in GATE_CACHE (it never runs the producer).
+code-address source. It reads the GATES output of the lift/facts root and the loader root's MODULES_TSV, as published in GATE_CACHE (it never runs a producer).
     python3 -I gate_liftfacts.py        cwd = checkout root, env GATE_OUT, GATE_COMMIT, GATE_CACHE; writes GATE_OUT/liftfacts.json
 Input: GATE_CACHE/objects/<tree>/<root>/GATES/ with
     summary.tsv                      tab separated, header line starts "# ": image status universe certified uncertified entries_on_data pcsrc_red
@@ -9,7 +9,7 @@ Input: GATE_CACHE/objects/<tree>/<root>/GATES/ with
     <dir>/gate_pcsrc.json            per image (pcsrc.py): {"status", "red", "s4_red", ...}
   <dir> is the image's lower-case name without its extension, "exe" for the one `.exe` (pcsrc.pin_of's rule).
 Universe: every image row of summary.tsv (never a list kept here); when the module table (modules.tsv, the exe row and the DLL rows by the dll column)
-is given, the images of the table, `exe` and the lower-case DLL names without extension, must equal the summary's rows exactly (an image cannot drop out or
+is given (main always gives it: the loader root's output MODULES_TSV; absent = red), the images of the table, `exe` and the lower-case DLL names without extension, must equal the summary's rows exactly (an image cannot drop out or
 appear). The summary rows themselves must show status green and 0 for uncertified, entries_on_data and s4_violations, and `total` green. An item is certified iff ALL hold:
   - gate_codemap.json and gate_pcsrc.json exist and parse as objects (a missing image, or a malformed file, is red, never skipped);
   - both have status "green";
@@ -32,6 +32,7 @@ import gate_build  # noqa: E402
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
 FACTS_ROOT = TREE + "/lift/facts"
+LOADER_ROOT = TREE + "/loader"   # the publisher of the module table: its declared output MODULES_TSV (a path in the root's out dir, read from its recipe)
 
 
 SUMMARY_COLS = ["image", "status", "universe", "certified", "uncertified", "entries_on_data", "pcsrc_red", "s4_violations"]
@@ -137,6 +138,24 @@ def judge(gates, modules_text=None):
     return len(by), len(by) - len([b for b in bad if not b.startswith("total:")]), bad, None
 
 
+def modules_text_of(cache, tree, roots):
+    """(text, error) of the loader root's published MODULES_TSV: the path comes from the root's recipe `outputs`, the file from the published out dir; absent is an error."""
+    ent = next((r for r in roots if r.get("path") == LOADER_ROOT), None)
+    if ent is None or not isinstance(ent.get("recipe"), str):
+        return None, "no loader root %s in admit.json" % LOADER_ROOT
+    try:
+        with open(ent["recipe"]) as f:
+            rel = json.load(f)["outputs"]["MODULES_TSV"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None, "the recipe of %s declares no output MODULES_TSV" % LOADER_ROOT
+    p = os.path.join(cache, "objects", tree, LOADER_ROOT.replace("/", "__"), rel)
+    try:
+        with open(p) as f:
+            return f.read(), None
+    except OSError:
+        return None, "MODULES_TSV of %s is not published in GATE_CACHE (%s)" % (LOADER_ROOT, p)
+
+
 def main():
     out = os.environ["GATE_OUT"]
     cache = os.environ["GATE_CACHE"]
@@ -147,11 +166,15 @@ def main():
         u, c, bad, err, status = 0, 0, [], None, "green"
         detail = "no lifted root: universe 0"
     else:
-        g = os.path.join(cache, "objects", gate_build.tree_of("."), FACTS_ROOT.replace("/", "__"), "GATES")
+        tree = gate_build.tree_of(".")
+        g = os.path.join(cache, "objects", tree, FACTS_ROOT.replace("/", "__"), "GATES")
+        mt, merr = modules_text_of(cache, tree, roots)
         if not os.path.isdir(g):
             u, c, bad, err = 0, 0, [], "no published GATES output of %s in GATE_CACHE (%s)" % (FACTS_ROOT, g)
+        elif merr:
+            u, c, bad, err = 0, 0, [], merr   # the comparison is never skipped: without the table the gate is red
         else:
-            u, c, bad, err = judge(g)
+            u, c, bad, err = judge(g, mt)
         status = "green" if not err and not bad and u else "red"
         detail = err or ("%d of %d images certified" % (c, u) + ("; " + "; ".join(bad[:5]) if bad else ""))
     doc = {"format": "fnvnx-gate/1", "name": "liftfacts", "status": status, "universe": u, "certified": c, "uncertified": [b.split(":")[0] for b in bad][:50],

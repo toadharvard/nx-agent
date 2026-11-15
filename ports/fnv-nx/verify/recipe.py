@@ -189,7 +189,7 @@ LD_KIND = {"pie": LD_FIXED, "exe": ["--build-id=none", "-pie", "-z", "text", "-z
 LD_TOOLS = (TREE + "/link", TREE + "/contract")   # tool roots of the ldcheck stage: link/ldcheck.py, and gatefile.py at /contract
 WERROR_ATTR = "-Werror=attributes"   # required in flags.c and flags.cxx of every guest root
 EXT_KEYS = {"name", "repo", "ref", "commit", "tree_sha256", "at"}
-SANDBOX_PATHS = ("/src", "/inc", "/in", "/uses", "/out", "/tool", "/objs", "/ld", "/syslib", "/linked", "/contract", "/work", "/proc", "/dev", "/tmp", "/oldroot")
+SANDBOX_PATHS = ("/src", "/inc", "/in", "/uses", "/out", "/tool", "/objs", "/ld", "/syslib", "/linked", "/arch", "/contract", "/work", "/proc", "/dev", "/tmp", "/oldroot")
 MOUNT_PREFIXES = SANDBOX_PATHS + ("/ext", "/launch", "/deb", "/plug", "/probe")   # every absolute path a stage can open: the stage paths above, the externals ("at": /ext/<name>) and the launcher (/launch/genlaunch.py), the debs of a run stage (/deb), the plugin objects (/plug) and the driver probe (/probe); gate_abspath.py reads this one constant
 def require_mounted(path):
     """PATH when it is under MOUNT_PREFIXES (the stage's own mount namespace), else ValueError: the one guard of a launcher that runs a tool by path (gate_abspath.py accepts a dynamic load only through it or require_under)."""
@@ -3606,16 +3606,23 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=N
     return res
 
 
+def need_store(opt):
+    """The --store of a store command: a required argument (no default from the environment)."""
+    if not opt.get("--store"):
+        raise RecipeError(["missing --store DIR"])
+    return opt["--store"]
+
+
 def main(argv):
     opt = dict(zip(argv[1::2], argv[2::2]))
     try:
         repo = "."
-        if argv[:1] == ["store-merge"]:   # recipe store-merge SRC [--store DST]: DST defaults to $GATE_CACHE/store
-            dst = dict(zip(argv[2::2], argv[3::2])).get("--store") or os.path.join(os.environ["GATE_CACHE"], "store")
+        if argv[:1] == ["store-merge"]:   # recipe store-merge SRC [--store DST]: --store DST is required
+            dst = need_store(dict(zip(argv[2::2], argv[3::2])))
             print("store-merge: " + " ".join("%s %d" % kv for kv in sorted(store_merge(argv[1], dst).items())))
             return 0
         if argv[:1] in (["store-export"], ["store-import"]):   # recipe store-export KEY DIR [--store S] / store-import DIR KEY [--store S]: one cache entry under its key
-            st = dict(zip(argv[3::2], argv[4::2])).get("--store") or os.path.join(os.environ["GATE_CACHE"], "store")
+            st = need_store(dict(zip(argv[3::2], argv[4::2])))
             if argv[0] == "store-export":
                 print("store-export: %d files" % store_export(st, argv[1], argv[2]))
             else:

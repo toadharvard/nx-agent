@@ -79,4 +79,19 @@ check("an empty image list is an error", G.judge(d)[3] is not None)
 d = toy()
 put(d, "summary.tsv", {"images": [{"image": "a.dll"}, {"nope": 1}]})
 check("a malformed image row is an error", G.judge(d)[3] is not None)
+
+# wiring: the loader root's MODULES_TSV is read from the published out dir; absent is an error
+import json as _j, tempfile as _t
+w = _t.mkdtemp()
+rec = os.path.join(w, "build.json")
+open(rec, "w").write(_j.dumps({"outputs": {"MODULES_TSV": "gen/modules.tsv"}}))
+roots = [{"path": G.LOADER_ROOT, "recipe": rec}]
+check("no loader root is an error", G.modules_text_of(w, "T", [])[1] is not None)
+check("an unpublished table is an error", G.modules_text_of(w, "T", roots)[1] is not None)
+pub = os.path.join(w, "objects", "T", G.LOADER_ROOT.replace("/", "__"), "gen")
+os.makedirs(pub)
+open(os.path.join(pub, "modules.tsv"), "w").write("# x\n")
+check("a published table is read", G.modules_text_of(w, "T", roots) == ("# x\n", None))
+open(rec, "w").write("{}")
+check("a recipe without the output is an error", G.modules_text_of(w, "T", roots)[1] is not None)
 sys.exit(1 if fails else 0)

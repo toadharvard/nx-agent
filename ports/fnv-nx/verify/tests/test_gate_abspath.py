@@ -69,5 +69,7 @@ r = run(["tool"], tool="import runpy, sys\ntool = sys.argv[1]\nrunpy.run_path(to
 check("an unguarded launch is red", [x.split(":")[1] for x in r["findings"]] == ["dynamic-import"], r)
 r = run(["tool"], tool="import runpy, sys\ntool = require_mounted(sys.argv[1])\ntool = sys.argv[2]\nrunpy.run_path(tool)\n")
 check("a name with one unguarded assignment is red", [x.split(":")[1] for x in r["findings"]] == ["dynamic-import"], r)
+r = run(["tool"], tool="import os\ntry:\n    x = os.environ['K']\nexcept ValueError:\n    x = 1\n")
+check("os.environ[k] in a try whose handlers do not catch a missing key is not a fallback", r["findings"] == [], r)
 if fails:
     sys.exit(1)

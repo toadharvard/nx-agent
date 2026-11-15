@@ -480,7 +480,7 @@ A cold build of a large root is split over farms by one rule, with no second bui
   key is the PP stage key on the whole declared trees (`unitstage.Build.first_key`; a `.s` unit: its one stage), computed before anything runs, so every
   shard of one checkout agrees. The recipe asserts from the unit list that the shards are disjoint and together the unit set (`shard_partition`).
   All stages of a unit run in its shard. Root-level stages (tests, link, link tables, gates) do not run in a shard build; its `objects.json` has `shard`.
-- `recipe store-merge SRC [--store DST]` (DST defaults to `$GATE_CACHE/store`) imports the objects, trees, stage documents and key records of the store SRC
+- `recipe store-merge SRC --store DST` (--store is required) imports the objects, trees, stage documents and key records of the store SRC
   by content. A name in both must hold the same bytes, else red `store-merge: key <k> differs` and DST is unchanged. It is the only import path.
 - The link is the normal `recipe build --root R` on the merged store: every unit is a hit; a missing unit builds.
 Tests: `tests/test_shard.py` (partition, merge, forged record, no compiler) and the `shard_merge` scenario of `tests/test_recipe.py` (toy root of 10 units).
