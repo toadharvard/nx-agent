@@ -1247,3 +1247,8 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - Owner decision 2026-11-15 (via the orchestrator): no quota on Legal gates. Legal rule L1 and the two classes are dropped. `legal` is deleted from REQUIRED_TEST in w23's stub→objstub commit, which goes into cand1. Keeping private data out of the public repo stays a discipline.
 - The msvcmodel compiler with binary64 long double is mirrored at fnv-nx-build tools/gcc-ilp32-msvcmodel b274ec067a2f (tree a1eeb84d…debec). Smoke test: ILP32 sizeof(long double) = 8. w24 does the pin bump on claude/fnv-l1-contract-w24-ldbl, outside cand1: it verifies the tree hash, runs a probe through the recipe, then goes to L5 for msvcmodel13.
 - L2 w2: the placement rule for the 500 accesses. The order rewrite moves to the last GIMPLE pass; the RTL argument goes into toolchain/order/README.md; the 23 ldxr/stxr follow the x86 mapping.
+
+### 2026-11-15 01:50 — w10 merge review; extract race
+- L5 w10 047dea8bc (the w20u + b25ddaac7 + w9 merge on root 7d90df67e): accepted except one lost property. A tracked directory must resolve to its tracked files only, with their content in the ident. Asked: a materialised ls-files copy keyed by (path, blob) — or, if no caller passes a directory, make directory refs red. Builds on fd4305ca0: 7 roots green.
+- L4: parallel builds race on external extraction (ENOTEMPTY). Rule: extract to a temporary sibling, verify, atomic rename; the loser discards. Assigned to w24 after the pin bump.
+- Compiler repin (b274ec067a2f / a1eeb84d) confirmed by the orchestrator and L2. w24 does it.
