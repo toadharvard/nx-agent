@@ -66,6 +66,12 @@ for t in as ld ld.bfd ar ranlib nm objcopy objdump strip readelf size strings ad
   cp -L "$(command -v aarch64-linux-gnu-$t)" "$P/$T/bin/$t"
 done
 export PATH=$P/bin:$PATH
+# The package's ld finds the scripts of its emulations relative to its own location (its SCRIPTDIR is /usr/lib/aarch64-linux-gnu, relocated
+# to <ld dir>/../lib/aarch64-linux-gnu). The ld is copied to $P/bin, so the scripts of the ILP32 emulation (aarch64elf32, the one the
+# aarch64-none-elf driver selects for -mabi=ilp32) are copied to the same relative place, taken from the package's file list (dpkg -L).
+PKG=$(dpkg -S "$(readlink -f "$LD")" | cut -d: -f1 | head -1)
+dpkg -L "$PKG" | grep '/ldscripts/aarch64elf32\.' | while read -r f; do d="$P/${f#/usr/}"; mkdir -p "$(dirname "$d")"; cp -L "$f" "$d"; done
+[ -f "$P/lib/aarch64-linux-gnu/ldscripts/aarch64elf32.xc" ] || { echo "build.sh: the ld package $PKG has no ldscripts/aarch64elf32.xc" >&2; exit 2; }
 
 # the multilib selector: the platform's code model (guest_platform.code holds -fPIC; the stop is the check)
 read -r MLFLAGS < <(python3 -I - "$TARGETS" <<'EOF'
@@ -177,7 +183,7 @@ fi
 GCC_CONF=(--target=$T --prefix="$P" --enable-languages=c,c++ --with-newlib=yes --disable-bootstrap
   --enable-multilib --enable-plugin --disable-nls --enable-checking=release --disable-werror
   --with-system-zlib --enable-threads=posix --disable-libssp --disable-libgomp --disable-libsanitizer --disable-libatomic
-  --disable-libquadmath --disable-libmudflap --disable-libstdcxx-pch --disable-libstdcxx-verbose --enable-libstdcxx-time=yes
+  --disable-libquadmath --disable-libmudflap
   --disable-win32-registry --disable-debug --disable-tm-clone-registry --disable-__cxa_atexit
   --with-gnu-as --with-gnu-ld --enable-poison-system-directories --with-bugurl=none
   --with-native-system-header-dir=/include --with-sysroot="$P/$T" --with-local-prefix="$P/no-local"
@@ -258,6 +264,43 @@ if ! step limits; then
 fi
 
 if ! step libs; then
+  # Rule CFG-FUNC. libstdc++'s configure answers `AC_CHECK_FUNC(f)` by linking a program, which cannot succeed before the product link
+  # brings the dispatch protocol (fnvnx_dispatch, fnvnx_call_fp are the lifted runtime's). The answer it computes is "is f defined in the
+  # runtime the target link uses", so it is taken from the objects themselves:
+  #   universe  every ac_cv_func_<name> that the pinned libstdc++-v3/configure tests (parsed from it),
+  #   answer    yes iff <name> is a defined global function symbol (nm, type T or W) of libc.a, libsysbase.a, libm.a or libgcc.a of the
+  #             default and the -fPIC multilib; the two multilibs must agree.
+  # The answers go to configure as a config.site, and with the defining archive member to $P/CFG-FUNC.json (the MANIFEST carries them).
+  note "target libraries: make -C b-gcc all-target-libgcc (the runtime archives CFG-FUNC reads)"
+  make -C b-gcc -j"$JOBS" CFLAGS_FOR_TARGET="$TLC" CXXFLAGS_FOR_TARGET="$TLCXX" all-target-libgcc > make-libgcc.log 2>&1
+  python3 -I - "$SRC/libstdc++-v3/configure" "$P/$T/lib" "$W/b-gcc/$T" "$P/bin/$T-nm" "$W/config.site" "$P/CFG-FUNC.json" <<'EOF3'
+import json, re, subprocess, sys
+conf, libdir, gccdir, nm, site, out = sys.argv[1:7]
+names = sorted(set(re.findall(r'ac_fn_c(?:xx)?_check_func "\$LINENO" "(\w+)" "ac_cv_func_\1"', open(conf).read())))
+assert names, "no ac_cv_func_ checks found in " + conf
+def defined(variant):  # name -> "archive:member" of the first definition
+    d = {}
+    dirs = (libdir, gccdir + "/libgcc") if not variant else (libdir + "/" + variant, gccdir + "/" + variant + "/libgcc")
+    for base, lib in ((dirs[0], "libc.a"), (dirs[0], "libsysbase.a"), (dirs[0], "libm.a"), (dirs[1], "libgcc.a")):
+        for line in subprocess.run([nm, "-A", "--defined-only", base + "/" + lib], capture_output=True, text=True, check=True).stdout.splitlines():
+            f = line.split()
+            if len(f) == 3 and f[1] in ("T", "W"):
+                arch, member = line.split(":")[0], line.split(":")[1]
+                d.setdefault(f[2], lib + "(" + member + ")")
+    return d
+a, b = defined(""), defined("pic")
+rows = []
+for n in names:
+    assert (n in a) == (n in b), "multilibs disagree on %s" % n
+    rows.append({"name": n, "answer": "yes" if n in a else "no", "member": a.get(n)})
+open(site, "w").write("".join("ac_cv_func_%s=%s\n" % (r["name"], r["answer"]) for r in rows))
+json.dump({"rule": "CFG-FUNC", "configure": "libstdc++-v3/configure", "funcs": rows}, open(out, "w"), indent=1)
+print("CFG-FUNC: %d functions, %d yes" % (len(rows), sum(r["answer"] == "yes" for r in rows)))
+EOF3
+  # The top Makefile runs every target configure with CONFIG_SITE=no-such-file, so the answers go in as the cache variables of the
+  # environment, which configure honours as presets (autoconf "Cache variables": a set ac_cv_* is not re-tested).
+  set -a; . "$W/config.site"; set +a
+  note "target libraries: configure answers ac_cv_func_* from the built runtime (environment presets, $P/CFG-FUNC.json)"
   note "target libraries: make -C b-gcc CFLAGS_FOR_TARGET='$TLC' CXXFLAGS_FOR_TARGET='$TLCXX'"
   make -C b-gcc -j"$JOBS" CFLAGS_FOR_TARGET="$TLC" CXXFLAGS_FOR_TARGET="$TLCXX" > make-libs.log 2>&1
   make -C b-gcc install CFLAGS_FOR_TARGET="$TLC" CXXFLAGS_FOR_TARGET="$TLCXX" > install-libs.log 2>&1
@@ -296,7 +339,8 @@ m = {"format": "fnvnx-runtime-manifest/1",
      "plugins": plugins,
      "flags": {"c": TLC.split(), "cxx": TLCXX.split()},
      "multilib": {"select": ML.split(), "dir": ml},
-     "libraries": libs}
+     "libraries": libs,
+     "cfg_func": json.load(open(os.path.join(P, "CFG-FUNC.json")))}
 open(os.path.join(P, "MANIFEST.json"), "w").write(json.dumps(m, indent=1, sort_keys=True) + "\n")
 print("MANIFEST.json: %d plugins, %d libraries" % (len(plugins), len(libs)))
 EOF
