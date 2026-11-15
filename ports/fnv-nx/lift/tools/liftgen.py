@@ -43,6 +43,7 @@ def bucket(a): return (a >> 4) & (NBUCKET - 1)
 
 
 def unit_names(): return ['u/%03x.cpp' % i for i in range(NBUCKET)] + ['disp.S', 'imp.cpp']
+def pack_outputs(): return unit_names() + ['entries.tsv']   # entries.tsv (addr, symbol, kind, table_id trailer) is written with the units by `finish`, so it comes from the same pack as the image
 
 
 def lift_one(a):
@@ -228,7 +229,7 @@ def finish(a):
         len(images), len(texts), len(imp), NBUCKET + 2, res['text_bytes'], max(sum(map(len, u)) for u in units.values()), len(forms), nc, len(h['slots']), h['attempts']))
 
 
-def recipe(ref, commit, tree):
+def recipe(ref, commit, tree, dest=None):
     """lift/pack/build.json. The recipe is the one definition of the semantic flags (verify/guest_compiler.json flags.semantics, appended to every guest compile stage), so
     the build.json holds only the per-root classes (PACK_ROOT_FLAGS; recipe.PER_ROOT: -O, -W, -D, -std ...), and the plugins are the full set of recipe.PLUGIN_SOURCES in
     load order with recipe.plugin_args(origin) of the pack's declared lifted origin (fnvnx_ftoi mode lifted); the units are the fixed names."""
@@ -236,20 +237,19 @@ def recipe(ref, commit, tree):
     import recipe as R
     keep = lambda fl: [f for f in fl if R.PER_ROOT.fullmatch(f)]
     gc = json.load(open(os.path.join(LIFT, '..', 'verify', 'guest_compiler.json')))   # the one source of the guest compiler (msvcmodel)
-    args = R.plugin_args('lifted')
     plugins = []
     for n, src in R.PLUGIN_SOURCES.items():
-        pl = {'name': n, 'source': src, 'args': args[n]}
-        if R.PLUGIN_INPUTS.get(n): pl['inputs'] = list(R.PLUGIN_INPUTS[n])
-        plugins.append(pl)
+        plugins.append({'name': n})      # source, args and inputs are fixed by recipe.py (PLUGIN_SOURCES/ARGS/INPUTS): a root names the plugin only
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': gc['external']['name'], 'cc': gc['cc'], 'cxx': gc['cxx']},
            'flags': {k: keep(v) for k, v in PACK_ROOT_FLAGS.items()},
            'include': ['/ext/liftpack/inc'], 'units': 'all', 'plugins': plugins,
-           'generated': [{'tool': 'ports/fnv-nx/lift/tools/packcopy.py', 'args': ['/ext/liftpack', '/out'], 'inputs': [], 'outputs': unit_names()}],
+           'generated': [{'tool': 'ports/fnv-nx/lift/tools/packcopy.py', 'args': ['/ext/liftpack', '/out'], 'inputs': [], 'outputs': pack_outputs()}],
+           'outputs': {'entries': 'entries.tsv'},
            'link': None,
            'external': [{'name': 'liftpack', 'repo': 'fnv-nx-build', 'ref': ref, 'commit': commit, 'tree_sha256': tree, 'at': '/ext/liftpack'}, gc['external']]}
-    os.makedirs(os.path.join(LIFT, 'pack'), exist_ok=True)
-    with open(os.path.join(LIFT, 'pack', 'build.json'), 'w') as f:
+    dest = dest or os.path.join(LIFT, 'pack', 'build.json')
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    with open(dest, 'w') as f:
         json.dump(rec, f, indent=1); f.write('\n')
 
 
