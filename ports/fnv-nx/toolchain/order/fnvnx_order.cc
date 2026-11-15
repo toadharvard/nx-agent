@@ -226,10 +226,37 @@ static bool is_memory_ref(tree t) {
   }
 }
 
+// READONLY RECORD (.fnvnx.ro, no SHF_ALLOC). One line per distinct (symbol, byte range) of a read-only object that an
+// access of this unit left plain because readonly_object judged the base read-only: `symbol<TAB>offset:size`, bytes
+// within the object. A range with a non-constant index or extent is the whole object (0:size of the decl). It is a
+// claim, not a verdict: the gate (link/gate_order.py) certifies a plain load against it only after checking from the
+// linked object that the symbol's section has SHF_ALLOC and not SHF_WRITE. The record is per unit, not per function:
+// the optimizers inline bodies, so an access reaches the object file in a function other than the one it was written in.
+static std::set<std::string> ro_lines;
+static void record_readonly(tree t, tree base) {
+  poly_int64 bitsize, bitpos;
+  tree off;
+  machine_mode mode;
+  int unsignedp, reversep, volatilep;
+  HOST_WIDE_INT lo = 0, size = 0;
+  tree inner = get_inner_reference(t, &bitsize, &bitpos, &off, &mode, &unsignedp, &reversep, &volatilep);
+  (void)inner;
+  tree dsz = DECL_SIZE_UNIT(base);
+  HOST_WIDE_INT whole = dsz && tree_fits_shwi_p(dsz) ? tree_to_shwi(dsz) : -1;
+  if (!off && bitpos.is_constant(&lo) && bitsize.is_constant(&size) && size >= 0) {
+    lo /= BITS_PER_UNIT;
+    size = (size + BITS_PER_UNIT - 1) / BITS_PER_UNIT;
+  } else { lo = 0; size = whole; }
+  char buf[64];
+  snprintf(buf, sizeof buf, "\t%ld:%ld", (long)lo, (long)size);
+  ro_lines.insert(std::string(IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(base))) + buf);
+}
+
 static bool shared_ordered(tree t) {
   if (!t || !is_memory_ref(t)) return false;
   tree base = get_base_address(t);
-  return !local_unshared(base) && !readonly_object(base);
+  if (readonly_object(base)) { record_readonly(t, base); return false; }
+  return !local_unshared(base);
 }
 
 // a naturally aligned scalar of 1/2/4/8 bytes that ldar/stlr can access: the size index 0..3, or -1
@@ -733,6 +760,13 @@ static const pass_data frame_data = {
     RTL_PASS, "fnvnx_frame", OPTGROUP_NONE, TV_NONE, 0, 0, 0, 0, 0,
 };
 
+static void emit_readonly_section() {
+  if (ro_lines.empty()) return;
+  fprintf(asm_out_file, "\t.pushsection\t.fnvnx.ro,\"\",%%progbits\n");
+  for (auto &l : ro_lines) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", l.c_str());
+  fprintf(asm_out_file, "\t.popsection\n");
+}
+
 static void emit_frame_section() {
   cgraph_node *n;
   std::map<std::string, std::string> pending;
@@ -759,6 +793,7 @@ static void emit_frame_section() {
 
 static void finish(void *, void *) {
   emit_frame_section();
+  emit_readonly_section();
   if (verbose)
     inform(UNKNOWN_LOCATION, "%<fnvnx_order%>: unit: %lu ldar, %lu stlr, %lu fenced loads, %lu fenced stores, %lu resume fences; "
            "%lu calls with arguments right to left, %lu left (class-type argument with side effects)",

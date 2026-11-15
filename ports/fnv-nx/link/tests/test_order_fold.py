@@ -34,6 +34,14 @@ def main():
             fails.append('%s: plain access %s' % (fn, mem))
         if not calls:
             fails.append('%s: no call to %s: %s' % (fn, callee, ins))
+    # READONLY RECORD: .fnvnx.ro names the table with its byte ranges (the whole 32 bytes for the indexed read)
+    import subprocess
+    sec = subprocess.run(['objdump', '-s', '-j', '.fnvnx.ro', obj], capture_output=True, text=True)
+    txt = sec.stdout if sec.returncode == 0 else ''
+    flat = ''.join(re.findall(r'^ [0-9a-f]+ ((?:[0-9a-f]{2,8} ?)+)', txt, re.M)).replace(' ', '')
+    rec = bytes.fromhex(flat).decode('latin1') if flat else ''
+    if '_ZL3tbl\t0:32\n' not in rec:
+        fails.append('.fnvnx.ro lacks the tbl ranges: %r' % rec)
     if fails:
         print('FAIL', *fails, sep='\n  ')
         return 1
