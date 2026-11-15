@@ -6,7 +6,7 @@
  *   VS: VS_COMPLETE x FLAT_COLOR (4);  PS: FLAT_COLOR x {runtime, EPI static none/alpha/fog/both} x NUMERICS_NINE (20).
  * Per stage form it compiles the GLSL on the pinned Mesa (GL 4.5 core, llvmpipe, EGL surfaceless), reads the interface signature two ways (the
  * declarations of the translator's emission grammar; the Mesa program-interface query of a separable single-stage program) and writes one
- * certificate stage/<bytecode sha256>.f<flags>.json. It then links one representative of every (VS signature, PS signature) class with equal FLAT_COLOR
+ * certificate stage/<bytecode sha256>.f<flags>.json. It then links, for every (vertex class, PS signature) with equal FLAT_COLOR, the program the draw path builds (complete variant iff the PS reads a canonical slot the base VS does not write)
  * and writes one certificate link/<vs sig>.<ps sig>.f<flat>.json. OUT_DIR/summary.json = {"universe", "red", "details"}. Exit 0 iff red == 0.
  * Output is a function of the inputs: sorted directory order, no times, no paths.
  * Not covered yet (rule text section 3/5): link set L and the draw path's complete bit per pair, FFP stages, the backend's own GLSL rewrite. */
@@ -133,14 +133,22 @@ static int read_sdp(Forms *F, const char *path, int *entries) {
     free(b); return 0;
 }
 
-typedef struct { uint8_t sig[32]; unsigned shader; int form; unsigned flags; } Rep;
+typedef struct { uint8_t sig[32]; unsigned shader; int form; unsigned flags; unsigned mask; } Rep;
 typedef struct { Rep *r; int n; } Reps;
-static int add_rep(Reps *R, const uint8_t sig[32], unsigned shader, int form, unsigned flags) {
+typedef struct { uint8_t sb[32], sc[32]; unsigned mask; } VFull;   /* a vertex class: the signatures of its base and complete variants, the slots (0..30) its base variant writes */
+typedef struct { VFull *v; int n; } VFulls;
+static unsigned slot_mask(const Decl *d, int nd, char dir) { unsigned m = 0; for (int i = 0; i < nd; i++) if (d[i].dir == dir && d[i].loc >= 0 && d[i].loc <= 30) m |= 1u << d[i].loc; return m; }
+static int add_rep(Reps *R, const uint8_t sig[32], unsigned shader, int form, unsigned flags, unsigned mask) {
     for (int i = 0; i < R->n; i++) if (!memcmp(R->r[i].sig, sig, 32)) return 0;
     R->r = realloc(R->r, sizeof(Rep) * (size_t)(R->n + 1)); if (!R->r) return -1;
-    memcpy(R->r[R->n].sig, sig, 32); R->r[R->n].shader = shader; R->r[R->n].form = form; R->r[R->n].flags = flags; R->n++; return 0;
+    memcpy(R->r[R->n].sig, sig, 32); R->r[R->n].shader = shader; R->r[R->n].form = form; R->r[R->n].flags = flags; R->r[R->n].mask = mask; R->n++; return 0;
 }
-static int cmp_rep(const void *a, const void *b) { return memcmp(((const Rep *)a)->sig, ((const Rep *)b)->sig, 32); }
+static int add_vfull(VFulls *V, const uint8_t sb[32], const uint8_t sc[32], unsigned mask) {
+    for (int i = 0; i < V->n; i++) if (!memcmp(V->v[i].sb, sb, 32) && !memcmp(V->v[i].sc, sc, 32) && V->v[i].mask == mask) return 0;
+    V->v = realloc(V->v, sizeof(VFull) * (size_t)(V->n + 1)); if (!V->v) return -1;
+    memcpy(V->v[V->n].sb, sb, 32); memcpy(V->v[V->n].sc, sc, 32); V->v[V->n].mask = mask; V->n++; return 0;
+}
+static const Rep *find_rep(const Reps *R, const uint8_t sig[32]) { for (int i = 0; i < R->n; i++) if (!memcmp(R->r[i].sig, sig, 32)) return &R->r[i]; return NULL; }
 
 int main(int argc, char **argv) {
     if (argc != 3) { fprintf(stderr, "usage: sm_link_check SHADER_DIR OUT_DIR\n"); return 2; }
@@ -166,6 +174,7 @@ int main(int argc, char **argv) {
     char path[1200]; snprintf(path, sizeof path, "%s/stage", odir); /* the output directories are made by the caller (declared outputs) */
 
     Reps rv[2] = { { 0, 0 }, { 0, 0 } }, rp[2] = { { 0, 0 }, { 0, 0 } };   /* by FLAT_COLOR */
+    VFulls vf[2] = { { 0, 0 }, { 0, 0 } };
     long red = 0, stage_certs = 0, link_certs = 0, nvs = 0, nps = 0, refused = 0; unsigned long long mism = 0;
     static const unsigned pv[4] = { 0, FNVNX_SHADER_VS_COMPLETE, FNVNX_SHADER_FLAT_COLOR, FNVNX_SHADER_VS_COMPLETE | FNVNX_SHADER_FLAT_COLOR };
     unsigned pp[20]; int npp = 0;
@@ -177,7 +186,7 @@ int main(int argc, char **argv) {
         Form *f = &F.forms[i]; char hs[65]; hex(f->sha, 32, hs);
         if (f->stage < 0) { red++; refused++; continue; }
         if (f->stage == 0) nvs++; else nps++;
-        int nv = f->stage == 0 ? 4 : npp;
+        int nv = f->stage == 0 ? 4 : npp; uint8_t bsig[2][32]; unsigned bmask[2] = { 0, 0 }; int bok[2] = { 0, 0 };
         for (int v = 0; v < nv; v++) {
             unsigned flags = f->stage == 0 ? pv[v] : pp[v];
             fnvnx_shader_opts o; fnvnx_shader_result r; memset(&o, 0, sizeof o); memset(&r, 0, sizeof r);
@@ -185,16 +194,15 @@ int main(int argc, char **argv) {
             fnvnx_shader_translate_glsl(f->bc, f->n, &o, &r);
             snprintf(path, sizeof path, "%s/stage/%s.f%u.json", odir, hs, flags);
             FILE *c = fopen(path, "w"); if (!c) { fprintf(stderr, "sm_link: cannot write %s\n", path); return 2; }
-            const char *status = "ok"; char why[400] = ""; uint8_t sig[32] = { 0 }; int active = 0, disagree = 0, ndecl = 0; unsigned sh = 0;
+            const char *status = "ok"; char why[400] = ""; uint8_t sig[32] = { 0 }; int active = 0, disagree = 0, ndecl = 0; unsigned sh = 0, mask = 0; Decl decls[64];
             if (!r.ok || !r.glsl) { status = "translate_fail"; snprintf(why, sizeof why, "%.399s", r.error); }
             else {
                 sh = glCreateShader(f->stage ? GL_FRAGMENT_SHADER : GL_VERTEX_SHADER); const char *src[1] = { r.glsl }; int ok = 0;
                 glShaderSource(sh, 1, src, NULL); glCompileShader(sh); glGetShaderiv(sh, GL_COMPILE_STATUS, &ok);
                 if (!ok) { status = "compile_fail"; glGetShaderInfoLog(sh, (int)sizeof why, NULL, why); }
                 else {
-                    Decl decls[64];
                     if (grammar_read(r.glsl, sig, decls, 64, &ndecl)) { status = "grammar_fail"; }
-                    else { disagree = query_read(sh, decls, ndecl, &active); if (disagree) { status = "signature_disagree"; mism += (unsigned long long)disagree; } }
+                    else { mask = slot_mask(decls, ndecl, f->stage ? 'i' : 'o'); disagree = query_read(sh, decls, ndecl, &active); if (disagree) { status = "signature_disagree"; mism += (unsigned long long)disagree; } }
                 }
             }
             { char sg[65]; hex(sig, 32, sg);
@@ -205,23 +213,34 @@ int main(int argc, char **argv) {
             if (strcmp(status, "ok")) { red++; if (sh) glDeleteShader(sh); }
             else {
                 int fl = (flags & FNVNX_SHADER_FLAT_COLOR) ? 1 : 0; Reps *R = f->stage ? &rp[fl] : &rv[fl];
-                if (add_rep(R, sig, sh, i, flags)) return 2;
+                if (add_rep(R, sig, sh, i, flags, mask)) return 2;
+                if (f->stage == 0) {
+                    int cb = (flags & FNVNX_SHADER_VS_COMPLETE) ? 1 : 0;
+                    if (!cb) { memcpy(bsig[fl], sig, 32); bmask[fl] = mask; bok[fl] = 1; }
+                    else if (bok[fl] && add_vfull(&vf[fl], bsig[fl], sig, bmask[fl])) return 2;
+                }
                 if (R->r[R->n - 1].shader != sh) glDeleteShader(sh);   /* not the class representative */
             }
             fnvnx_shader_result_free(&r);
         }
     }
     for (int fl = 0; fl < 2; fl++) {
-        qsort(rv[fl].r, (size_t)rv[fl].n, sizeof(Rep), cmp_rep); qsort(rp[fl].r, (size_t)rp[fl].n, sizeof(Rep), cmp_rep);
-        for (int a = 0; a < rv[fl].n; a++) for (int b = 0; b < rp[fl].n; b++) {
-            unsigned pr = glCreateProgram(); int ls = 0; char log[400] = "", sa[65], sb[65];
-            glAttachShader(pr, rv[fl].r[a].shader); glAttachShader(pr, rp[fl].r[b].shader); glLinkProgram(pr); glGetProgramiv(pr, GL_LINK_STATUS, &ls);
+        /* The program the draw path builds for (VS, PS): the VS variant is a pure function of the pair (fnvnx_dk_layout.h, fnvnx_dk_vs_needs_complete): the complete
+         * variant iff the PS reads a canonical slot the base VS does not write (FOG0, slot 18, is always written). Only that pair is linked and certified. */
+        for (int a = 0; a < vf[fl].n; a++) for (int b = 0; b < rp[fl].n; b++) {
+            const VFull *vc = &vf[fl].v[a]; const Rep *pc = &rp[fl].r[b];
+            int cb = (pc->mask & ~(vc->mask | (1u << 18))) != 0; const uint8_t *vsig = cb ? vc->sc : vc->sb;
+            const Rep *vr = find_rep(&rv[fl], vsig); char sa[65], sb[65];
+            if (!vr) { red++; continue; }
+            hex(vsig, 32, sa); hex(pc->sig, 32, sb);
+            snprintf(path, sizeof path, "%s/link/%s.%s.f%d.json", odir, sa, sb, fl);
+            { FILE *ex = fopen(path, "r"); if (ex) { fclose(ex); continue; } }   /* the same program of another vertex class */
+            unsigned pr = glCreateProgram(); int ls = 0; char log[400] = "";
+            glAttachShader(pr, vr->shader); glAttachShader(pr, pc->shader); glLinkProgram(pr); glGetProgramiv(pr, GL_LINK_STATUS, &ls);
             if (!ls) glGetProgramInfoLog(pr, (int)sizeof log, NULL, log);
             glDeleteProgram(pr);
-            hex(rv[fl].r[a].sig, 32, sa); hex(rp[fl].r[b].sig, 32, sb);
-            snprintf(path, sizeof path, "%s/link/%s.%s.f%d.json", odir, sa, sb, fl);
             FILE *c = fopen(path, "w"); if (!c) { fprintf(stderr, "sm_link: cannot write %s\n", path); return 2; }
-            fprintf(c, "{\"format\": \"fnvnx-sm-link/1\", \"vs_signature_sha256\": \"%s\", \"ps_signature_sha256\": \"%s\", \"flat_color\": %d, \"status\": \"%s\", \"log\": ", sa, sb, fl, ls ? "linked" : "link_fail");
+            fprintf(c, "{\"format\": \"fnvnx-sm-link/1\", \"vs_signature_sha256\": \"%s\", \"ps_signature_sha256\": \"%s\", \"flat_color\": %d, \"vs_complete\": %d, \"status\": \"%s\", \"log\": ", sa, sb, fl, cb, ls ? "linked" : "link_fail");
             jstr(c, log); fprintf(c, "}\n"); fclose(c); link_certs++;
             if (!ls) red++;
         }
@@ -230,7 +249,7 @@ int main(int argc, char **argv) {
     FILE *s = fopen(path, "w"); if (!s) return 2;
     fprintf(s, "{\"format\": \"fnvnx-sm-link-summary/1\", \"universe\": %d, \"red\": %ld, \"details\": {\"entries\": %d, \"unique_bytecodes\": %d, \"vs\": %ld, \"ps\": %ld, \"refused\": %ld, "
                "\"stage_certificates\": %ld, \"link_certificates\": %ld, \"vs_classes\": [%d, %d], \"ps_classes\": [%d, %d], \"signature_disagreements\": %llu}}\n",
-            F.n, red, entries, F.n, nvs, nps, refused, stage_certs, link_certs, rv[0].n, rv[1].n, rp[0].n, rp[1].n, mism);
+            F.n, red, entries, F.n, nvs, nps, refused, stage_certs, link_certs, vf[0].n, vf[1].n, rp[0].n, rp[1].n, mism);
     fclose(s);
     printf("unique %d (vs %ld ps %ld) stage certs %ld link certs %ld red %ld\n", F.n, nvs, nps, stage_certs, link_certs, red);
     return red ? 1 : 0;
