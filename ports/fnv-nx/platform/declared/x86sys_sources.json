@@ -1,0 +1,37 @@
+{
+ "format": "fnvnx-x86sys-sources/1",
+ "note": "The pinned sources of gen_x86sys.py. Trust chain (CLAUDE.md rule 7): documented Win32 (WDK 7.1 headers, MSDN), the Intel SDM, and Wine 9.0 under the owner's Wine rule. No other source. WDK mirror: fnv-nx-build tools/wdk71-headers (MANIFEST.json there records the ISO, cab and msi hashes). gen_x86sys.py checks the sha256 of every file it reads against this record.",
+ "mirror": {
+  "repo": "fnv-nx-build",
+  "ref": "tools/wdk71-headers",
+  "commit": "09a54d413da7a42d1956b5d675033e71941ae4da",
+  "tree_sha256": "301fc827dd66a386a425a67cdf586bdd81fac68168c114bc6d8e2b833e302770"
+ },
+ "files": {
+  "ks386": {
+   "path": "headers/_ks386.inc_00858",
+   "sha256": "21b726611a5608bcd21072901667fddca99bbbeb3eb4b944cf9c438b50bbab23",
+   "origin": "Windows Driver Kit 7.1.0 (7600.16385.1), ks386.inc"
+  }
+ },
+ "wine": {
+  "repo": "fnv-nx-build",
+  "ref": "tools/wine-9.0",
+  "commit": "c8373ee49fb674f3fe535904d24c5670513c56e1",
+  "upstream": "Wine 9.0 (fd1153552d77)",
+  "files": {
+   "signal_i386": {
+    "path": "dlls/ntdll/unix/signal_i386.c",
+    "sha256": "70245021f17fae5002aaf3f2ea76f2151eb4c900a83e8ee05225e74ebf9afd0d",
+    "origin": "Wine 9.0 dlls/ntdll/unix/signal_i386.c (initial thread context, is_privileged_instr)"
+   }
+  }
+ },
+ "cpumodel": {
+  "path": "ports/fnv-nx/lift/rt/cpumodel.c",
+  "commit": "b5af46461e81455567395e13acc8f94dee9517d2",
+  "branch": "claude/fnv-l3a-lift",
+  "sha256": "465fbd127dd3a55c204db5eb3fe5c20872b4a9bd6b66c752c60cd786e1d8f0e1",
+  "origin": "the declared CPU's cpuid (CPUREF), L3a rt/cpumodel.c"
+ }
+}

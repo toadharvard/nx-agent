@@ -25,6 +25,18 @@
     "ports/fnv-nx/contract/bodysel.py"
    ]
   },
+  "test_exepin.py": {
+   "references": [
+    {
+     "anchor": "## contract/exepin.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/exepin.py"
+   ]
+  },
   "test_gate_call_decl.py": {
    "references": [
     {
@@ -40,18 +52,6 @@
    ],
    "subject": [
     "ports/fnv-nx/contract/gate_call.py"
-   ]
-  },
-  "test_exepin.py": {
-   "references": [
-    {
-     "anchor": "## contract/exepin.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/contract/exepin.py"
    ]
   },
   "test_gate_reach.py": {
@@ -199,6 +199,18 @@
     "ports/fnv-nx/contract/memfx.py"
    ]
   },
+  "test_modules.py": {
+   "references": [
+    {
+     "anchor": "## contract/modules.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/modules.py"
+   ]
+  },
   "test_objmerge.py": {
    "references": [
     {
@@ -253,16 +265,18 @@
     "ports/fnv-nx/contract/gatefile.py"
    ]
   },
-  "test_modules.py": {
+  "test_treehash.py": {
    "references": [
     {
-     "anchor": "## contract/modules.py",
+     "anchor": "L1134-L1143",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
    ],
    "subject": [
-    "ports/fnv-nx/contract/modules.py"
+    "ports/fnv-nx/contract/treehash.py",
+    "ports/fnv-nx/verify/cas.py",
+    "ports/fnv-nx/contract/imagerec.py"
    ]
   }
  }

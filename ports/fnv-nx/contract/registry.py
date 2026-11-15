@@ -49,7 +49,6 @@ def main():
         sys.exit('___security_cookie is not one address in the N1 map: %r' % sorted(ck))
     facts['cookie'] = ck.pop()
     facts['pristine'] = gate_call.pristine_names(n1)
-    os.makedirs(a.out, exist_ok=True)
     summary = {}
     rows = []
     for g in (a.only.split(',') if a.only else ORDER):

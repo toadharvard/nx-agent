@@ -23,10 +23,14 @@ Result: universe = items, certified = items without a violation, uncertified = t
 """
 import ast
 import collections
+import hashlib
 import json
 import os
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gate_build  # noqa: E402
 
 TREE = "ports/fnv-nx"
 SINK_NAMES = {"open", "Path", "PurePath", "system", "popen", "fromfile", "memmap", "mmap"}
@@ -234,7 +238,9 @@ def main():
     for f in files:
         with open(f, encoding="utf-8") as fh:
             sources[f] = fh.read()
-    bad, errors = judge(sources)
+    # judge is a pure function of the sources of the universe: its result is an item of the verdict's store keyed by their content and this tool
+    key = {"gate": "exepin", "sources": sorted((p, hashlib.sha256(t.encode("utf-8")).hexdigest()) for p, t in sources.items()), "tool": gate_build.tool_digest(__file__)}
+    (bad, errors), _ = gate_build.memo(os.environ.get("GATE_CACHE"), "exepin", key, lambda: list(judge(sources)))
     red = bool(bad or errors)
     uncert = ["%s:%s" % (p, bad[p]) for p in sorted(bad)][:50]
     detail = "; ".join(errors)[:400] if errors else (

@@ -1,10 +1,6 @@
 {
  "format": "fnvnx-recipe/1",
- "compiler": {
-  "external": "gcc-msvcmodel",
-  "cc": "bin/aarch64-linux-gnu-gcc",
-  "cxx": "bin/aarch64-linux-gnu-g++"
- },
+ "profile": "guest",
  "flags": {
   "c": [
    "-O2",
@@ -26,49 +22,7 @@
   "ports/fnv-nx/lib/sha256/include"
  ],
  "units": "all",
- "plugins": [
-  {
-   "name": "fnvnx_ftoi"
-  },
-  {
-   "name": "fnvnx_order"
-  },
-  {
-   "name": "fnvnx_sdd"
-  },
-  {
-   "name": "fnvnx_pi"
-  },
-  {
-   "name": "fnvnx_dispatch"
-  },
-  {
-   "name": "fnvnx_addr"
-  },
-  {
-   "name": "fnvnx_names"
-  },
-  {
-   "name": "fnvnx_layout"
-  }
- ],
  "external": [
-  {
-   "name": "gcc-msvcmodel",
-   "repo": "fnv-nx-build",
-   "ref": "tools/gcc-ilp32-msvcmodel",
-   "commit": "b4057704c0babd012e466cc89181132e02542289",
-   "tree_sha256": "b60eafe7a5b0ae3dc679f9bf21e20d3363e3bac2af7379e34127ea5cf8455116",
-   "at": "/ext/gcc"
-  },
-  {
-   "name": "fnvnx-a64-msvcmodel",
-   "repo": "fnv-nx-build",
-   "ref": "tools/fnvnx-a64-msvcmodel",
-   "commit": "00e3d42acd10593d534b9a70bb8940cee7991436",
-   "tree_sha256": "3f25152cbc5a729d9e0a12fc5c62b6b912b6ab1571b6b3494de8f35e3904207d",
-   "at": "/ext/a64"
-  },
   {
    "name": "exe",
    "repo": "fnv-nx-build",
@@ -132,7 +86,15 @@
     "--c-out",
     "/out/gen/modules.c",
     "--keys-c-out",
-    "/out/gen/import_keys.c"
+    "/out/gen/import_keys.c",
+    "--modules-tsv-out",
+    "/out/gen/modules.tsv",
+    "--keys-h-out",
+    "/out/gen/import_keys.h",
+    "--keys-tsv-out",
+    "/out/gen/keys.tsv",
+    "--data-out",
+    "/out/gen/iat_data.tsv"
    ],
    "inputs": [
     {
@@ -142,7 +104,11 @@
    ],
    "outputs": [
     "gen/modules.c",
-    "gen/import_keys.c"
+    "gen/import_keys.c",
+    "gen/import_keys.h",
+    "gen/keys.tsv",
+    "gen/iat_data.tsv",
+    "gen/modules.tsv"
    ]
   },
   {
@@ -158,5 +124,11 @@
     "gen/identity.c"
    ]
   }
- ]
+ ],
+ "outputs": {
+  "IMPORT_KEYS_H": "gen/import_keys.h",
+  "KEYS_TSV": "gen/keys.tsv",
+  "MODULES_TSV": "gen/modules.tsv",
+  "IAT_DATA_TSV": "gen/iat_data.tsv"
+ }
 }

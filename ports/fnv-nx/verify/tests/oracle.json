@@ -283,6 +283,20 @@
     "ports/fnv-nx/verify/coffnorm.py"
    ]
   },
+  "test_comdat.py": {
+   "references": [
+    {
+     "anchor": "## link/odr.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/comdat.py",
+    "ports/fnv-nx/link/odr.py",
+    "ports/fnv-nx/verify/gate_linkstrict.py"
+   ]
+  },
   "test_datamodel.py": {
    "references": [
     {
@@ -309,6 +323,41 @@
     "ports/fnv-nx/verify/recipe.py"
    ]
   },
+  "test_doubles.py": {
+   "references": [
+    {
+     "anchor": "## verify/doubles.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## verify/recipe.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/doubles.py",
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
+  "test_elffacts.py": {
+   "references": [
+    {
+     "anchor": "### ELF facts of a linked output (the link record)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    },
+    {
+     "anchor": "## verify/elffacts.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/elffacts.py"
+   ]
+  },
   "test_envcheck.py": {
    "references": [
     {
@@ -327,6 +376,18 @@
     "ports/fnv-nx/farm/setup_verdict_env.sh",
     "ports/fnv-nx/verify/env.json",
     "ports/fnv-nx/verify/a64access.cc"
+   ]
+  },
+  "test_extcache_race.py": {
+   "references": [
+    {
+     "anchor": "## Externals in a shared store",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
    ]
   },
   "test_fpbound.py": {
@@ -431,6 +492,33 @@
     "ports/fnv-nx/contract/hive.py"
    ]
   },
+  "test_gate_memo.py": {
+   "references": [
+    {
+     "anchor": "## Externals in a shared store",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_build.py",
+    "ports/fnv-nx/verify/gate_exepin.py"
+   ]
+  },
+  "test_gate_publish.py": {
+   "references": [
+    {
+     "anchor": "## Externals in a shared store",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_build.py",
+    "ports/fnv-nx/verify/cas.py",
+    "ports/fnv-nx/verify/gate_contract.py"
+   ]
+  },
   "test_gate_pure.py": {
    "references": [
     {
@@ -477,18 +565,6 @@
     "ports/fnv-nx/verify/env.json",
     "ports/fnv-nx/verify/puregate.py",
     "ports/fnv-nx/verify/puregate_policy.py"
-   ]
-  },
-  "test_graph.py": {
-   "references": [
-    {
-     "anchor": "## verify/graph.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/graph.py"
    ]
   },
   "test_guest.py": {
@@ -563,22 +639,6 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/icount.py"
-   ]
-  },
-  "test_l1graph.py": {
-   "references": [
-    {
-     "anchor": "## verify/l1graph.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/l1graph.py",
-    "ports/fnv-nx/verify/graph.py",
-    "ports/fnv-nx/verify/runtime.py",
-    "ports/fnv-nx/verify/toolflags.py",
-    "ports/fnv-nx/verify/toolflags_policy.py"
    ]
   },
   "test_l2gates.py": {
@@ -852,6 +912,18 @@
     "ports/fnv-nx/verify/gate_linkstrict.py"
    ]
   },
+  "test_profile.py": {
+   "references": [
+    {
+     "anchor": "## Profiles",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
   "test_puregate.py": {
    "references": [
     {
@@ -956,18 +1028,6 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/sdcheck.py"
-   ]
-  },
-  "test_stackuse.py": {
-   "references": [
-    {
-     "anchor": "## verify/stackuse.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/stackuse.py"
    ]
   },
   "test_systemlibs.py": {

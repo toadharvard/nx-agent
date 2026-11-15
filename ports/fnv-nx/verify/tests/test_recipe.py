@@ -31,8 +31,12 @@ PY = [sys.executable, "-I"]
 GEN = '''import os
 @IMPORT@
 n = len([l for l in open("/in/ports/fnv-nx/toy/constants.tsv") if l.strip()])
-os.makedirs("/out/gen")
 open("/out/gen/gen.h", "w").write("#define NCONST %d\\n#define STAMP %dL\\n" % (n, @EXTRA@))
+'''
+GENLD = '''import os
+n = len([l for l in open("/in/ports/fnv-nx/toy/ldin.tsv") if l.strip()])
+os.makedirs("/out/gen")
+open("/out/gen/link.ld", "w").write(open("/in/ports/fnv-nx/link/guest.ld").read() + "\\n/* generated for %d rows */\\n" % n)
 '''
 # The toy root is a guest ELF in the sense of RECIPE.md "Link": ILP32, position independent, linked with the product's own link/guest.ld and
 # the product's own crt0 (rt/guest/crt0.s, read from the tree like guest.ld, so the fixture can never drift from the link contract): the
@@ -61,7 +65,7 @@ FILES = {
     "verify/declared_machine.tsv": "# id\tcontract_name\tfact\tsource\tkind\tvalue\n# fact: no-network | time-zone | registry | no-galaxy (fixture); source: win-doc:<page>:<function> | wine-9.0:<path>:<function> | galaxy-sdk:<page>:<function>; kind void|u32\n",
     "toy/link.ld": open(os.path.join(VERIFY, "..", "link", "guest.ld")).read(),
 }
-LINK_TOOLS = ("link/ldcheck.py", "link/gateids.py", "contract/gatefile.py")   # the real files of the tree: the ldcheck stage mounts them
+LINK_TOOLS = ("link/ldcheck.py", "link/gateids.py", "contract/gatefile.py", "verify/objstub_plugin.cc")   # the real files of the tree: the ldcheck stage mounts them; objstub_plugin.cc is the source of the analysis plugin every root with C/C++ units builds
 
 
 def check(name, ok, detail=""):
@@ -96,9 +100,9 @@ def make_repo(name, gen_extra="", rec=None, files=None, extra_roots=()):
     w(repo, "toy/build.json", json.dumps(rec or RECIPE, indent=1))
     w(repo, "verify/env.json", open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(VERIFY))), recipe.ENV_JSON)).read())   # the declared environment
     w(repo, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [
-        {"path": ROOT, "class": "product", "target": "host", "gates": [], "recipe": ROOT + "/build.json"},
-        {"path": T + "gen", "class": "tool", "gates": []}, {"path": T + "verify", "class": "tool", "gates": []},
-        {"path": T + "link", "class": "tool", "gates": []}, {"path": T + "contract", "class": "tool", "gates": []}] + list(extra_roots)}))
+        {"path": ROOT, "class": "product", "target": "host", "recipe": ROOT + "/build.json"},
+        {"path": T + "gen", "class": "tool"}, {"path": T + "verify", "class": "tool"},
+        {"path": T + "link", "class": "tool"}, {"path": T + "contract", "class": "tool"}] + list(extra_roots)}))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "toy")
     return repo
@@ -205,6 +209,7 @@ def main():
     erec = mut(external=[ex], include=RECIPE["include"] + ["/ext/tiny/inc"])
     ef = {"toy/b.c": '#include "toy.h"\n#include "ext.h"\nint f_b(void) { return TOY * 2 + EXTV; }\n'}
     futs = []
+    deferred = []   # scenarios that patch a module global: run after every concurrent scenario has joined
 
     def later(fn, *a):
         futs.append(pool.submit(fn, *a))
@@ -213,7 +218,7 @@ def main():
     def gate_cases():
         for n in ("build", "determinism"):
             empty = make_repo("empty-" + n)
-            w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": T + "toy", "class": "doc", "gates": []}]}))
+            w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": T + "toy", "class": "doc"}]}))
             rc, g, _, txt = gate(empty, n, BASE + "/ge" + n)
             check("%s gate with no product root: universe 0, green" % n, rc == 0 and g["universe"] == 0 and accepted(n, BASE + "/ge" + n)[0] == "green", txt)
 
@@ -243,18 +248,26 @@ def main():
         # the key of a generated stage holds the installed-files digest of EVERY python module pinned in env.json (and mounts them all)
         pm = recipe.pinned_modules(two)
         check("every module pinned in env.json is listed with its installed-files digest and top-level names",
-              [m for m, _, _, _ in pm] == sorted(json.load(open(os.path.join(two, recipe.ENV_JSON)))["python"]["modules"])
-              and all(len(d) == 64 and tops for _, _, d, tops in pm), pm)
-        base = recipe.build(two, ROOT, BASE + "/pm-store", BASE + "/pm-out0")
-        real = recipe.envcheck.wheel_digest
-        for target in [m for m, _, _, _ in pm]:
-            recipe.envcheck.wheel_digest = lambda dist, _t=target: real(dist) + ("x" if dist == _t else "")
-            try:
-                alt = recipe.build(two, ROOT, BASE + "/pm-store", BASE + "/pm-out1")
-            finally:
-                recipe.envcheck.wheel_digest = real
-            d1, d2 = set(base["stage_keys"]) - set(alt["stage_keys"]), set(alt["stage_keys"]) - set(base["stage_keys"])
-            check("changing the pinned digest of %s changes the generated-stage key (and only that stage's)" % target, len(d1) == 1 and len(d2) == 1, (d1, d2))
+              [m for m, _, _, _, _ in pm] == sorted(json.load(open(os.path.join(two, recipe.ENV_JSON)))["python"]["modules"])
+              and all(len(d) == 64 and tops and paths for _, _, d, tops, paths in pm), pm)
+        # the real pinned modules import inside a generate stage: gmpy2 and numpy keep their libraries in a sibling *.libs directory, which the mount
+        # takes from the RECORD (envcheck.record_files), not from the package directory
+        imp = "import gmpy2, numpy, z3, capstone, keystone, unicorn, pefile, elftools"
+        gi = make_repo("gi", gen_extra=imp + "|gmpy2.mpz(3) * 4")
+        rgi = recipe.build(gi, ROOT, BASE + "/gi-store", BASE + "/gi-out")
+        check("every pinned python module (gmpy2 and numpy with their sibling *.libs) imports inside a generate stage", rgi["status"] == "green", rgi.get("failure"))
+        def pm_keys():   # patches a module global: runs after every concurrent scenario has joined, never beside their builds
+            base = recipe.build(two, ROOT, BASE + "/pm-store", BASE + "/pm-out0")
+            real = recipe.envcheck.wheel_digest
+            for target in [m for m, _, _, _, _ in pm]:
+                recipe.envcheck.wheel_digest = lambda dist, _t=target: real(dist) + ("x" if dist == _t else "")
+                try:
+                    alt = recipe.build(two, ROOT, BASE + "/pm-store", BASE + "/pm-out1")
+                finally:
+                    recipe.envcheck.wheel_digest = real
+                d1, d2 = set(base["stage_keys"]) - set(alt["stage_keys"]), set(alt["stage_keys"]) - set(base["stage_keys"])
+                check("changing the pinned digest of %s changes the generated-stage key (and only that stage's)" % target, len(d1) == 1 and len(d2) == 1, (d1, d2))
+        deferred.append(pm_keys)
         # KEEP GOING: a red generator does not stop the other stages. Its output unit is blocked by it (never built), every other unit is
         # built, the ELF is blocked, and the root is red naming the red stage.
         kg = make_repo("kg", rec=dict(RECIPE, os_layer=[], generated=RECIPE["generated"] + [
@@ -358,7 +371,7 @@ def main():
                        files={"toy/a.c": a_c, "toy/b.c": None, "toy/c.c": None, "toy/constants.tsv": None, "toy/inc/toy.h": None,
                               "lib/l.c": "int f_lib(void) { return 1; }\n", "lib/build.json": json.dumps(librec)})
         ad = json.load(open(os.path.join(lr, T + "verify/admit.json")))
-        ad["roots"].append({"path": LIB, "class": "product", "target": "host", "gates": [], "recipe": LIB + "/build.json"})
+        ad["roots"].append({"path": LIB, "class": "product", "target": "host", "recipe": LIB + "/build.json"})
         w(lr, "verify/admit.json", json.dumps(ad))
         git(lr, "add", "-A")
         git(lr, "commit", "-q", "-m", "lib")
@@ -391,6 +404,47 @@ def main():
         check("link roots: a test-style link with --unresolved-symbols=ignore-all is refused before any stage", raised and "refusal set R" in raised, raised)
 
     later(link_roots)
+    LGS = BASE + "/ss-lg"
+
+    def link_generated():
+        """link.script from a generator of the root: the ld stage mounts the generated output, so a change of the generator's input changes the link key"""
+        rec = dict(RECIPE, generated=RECIPE["generated"] + [{"tool": T + "gen/linkgen.py", "args": [], "inputs": [ROOT + "/ldin.tsv", T + "link/guest.ld"], "outputs": ["gen/link.ld"]}],
+                   link=dict(RECIPE["link"], script="gen/link.ld"))
+        lg = make_repo("lg", rec=rec, files={"toy/ldin.tsv": "a\n", "gen/linkgen.py": GENLD, "link/guest.ld": open(os.path.join(VERIFY, "..", "link", "guest.ld")).read(), "toy/link.ld": None})
+        y1 = recipe.build(lg, ROOT, LGS, BASE + "/lg1")
+        check("generated link.script: a root whose script is generated links", y1["status"] == "green" and y1["elf"], y1.get("failure"))
+        w(lg, "toy/ldin.tsv", "a\nb\n")
+        git(lg, "add", "-A")
+        git(lg, "commit", "-q", "-m", "ldin changed")
+        y2 = recipe.build(lg, ROOT, LGS, BASE + "/lg2")
+        k1, k2 = set(y1["stage_keys"]), set(y2["stage_keys"])
+        # the output of the generator changed (one more row): its own stage and every stage that mounts it (ld, ldcheck) have new keys
+        w(lg, "toy/ldin.tsv", "a\nb\n\n")
+        git(lg, "add", "-A")
+        git(lg, "commit", "-q", "-m", "ldin: a blank line, the same generated script")
+        y3 = recipe.build(lg, ROOT, LGS, BASE + "/lg3")
+        k3 = set(y3["stage_keys"])
+        # an input change that leaves the generated output equal moves the generator's key only: the link stage is keyed by the content it mounts
+        check("generated link.script: a change of the generator input that changes the script changes the link key", y2["status"] == "green" and len(k2 - k1) > 1
+             , (len(k2 - k1), y2.get("failure")))
+        check("generated link.script: an input change with an equal script leaves the link key (the stage keys differ by the generator's alone)",
+              y3["status"] == "green" and len(k3 - k2) == 1, (len(k3 - k2), y3.get("failure")))
+
+    later(link_generated)
+
+    # --- declared tests (RECIPE.md "tests"): linked from the root's whole product unit set + the test's own units; the stub gate's doubles rule
+    trec = mut(tests=[{"name": "clean", "units": ["tests/t_clean.c"]}, {"name": "dbl", "units": ["tests/t_dbl.c"]}])
+    tfiles = {"toy/tests/t_clean.c": "int f_b(void);\nint t_only(void) { return f_b() + 1; }\n", "toy/tests/t_dbl.c": "__attribute__((weak)) int f_b(void) { return 99; }\n"}   # weak: the link succeeds, only the symbol rule sees it
+    rt = recipe.build(make_repo("tests", rec=trec, files=tfiles), ROOT, SS, BASE + "/outt")
+    tl = {t["name"]: t for t in rt.get("tests", [])}
+    check("tests: green; product units exclude the test units", rt["status"] == "green" and "tests/t_clean.c" not in rt["units"] and set(tl) == {"clean", "dbl"}, rt.get("failure"))
+    check("tests: each test is linked from every product unit plus its own units and has its own ELF",
+          all(set(t["linked"]) == set(rt["units"]) | set(t["units"]) and t["elf"] for t in tl.values())
+          and not any(d["object"].startswith("tests/") for d in rt["defined"]), tl)
+    import doubles
+    items, finds, st = doubles.judge({ROOT: rt})
+    check("tests + doubles.judge: the test that redefines product f_b is red; the clean one is not",
+          [f[0] for f in finds] == [ROOT + ":test:dbl"] and "f_b" in finds[0][3] and st["tests_with_doubles"] == 1, (finds, st))
 
     print("INFO +%.1f s: toy builds done" % (time.time() - t_start))
     tcc, tct = tc_fut.result()
@@ -446,6 +500,19 @@ def main():
                            ("include outside roots and externals", mut(external=[ex], include=["/ext/other/inc"]), "include")):
         check("external validation: %s" % what, any(want in x for x in errs(e2)), errs(e2))
 
+    # RULE (a stage is keyed by what it can read): PP mounts the compiler's external plus the externals the include path and flags name; a generated
+    # stage mounts the externals its args and inputs name. An external only the generator names changes that stage's key and no PP key.
+    def gdata(v):
+        return lambda d: open(d + "/f.txt", "w").write("v%d\n" % v)
+    gc1, gh1 = publish("gdata1", gdata(1))
+    gc2, gh2 = publish("gdata2", gdata(2))
+    gx = lambda c, h: {"name": "gdata", "repo": "fnv-nx-build", "ref": "gdata%d" % (1 if c == gc1 else 2), "commit": c, "tree_sha256": h, "at": "/ext/gdata"}  # noqa: E731
+    gen_ = [dict(RECIPE["generated"][0], args=["/ext/gdata/f.txt"])]
+    g1 = recipe.build(make_repo("gd1", rec=mut(external=[ex, gx(gc1, gh1)], include=erec["include"], generated=gen_), files=ef), ROOT, SS, BASE + "/gdo1", ext=ec)
+    g2 = recipe.build(make_repo("gd2", rec=mut(external=[ex, gx(gc2, gh2)], include=erec["include"], generated=gen_), files=ef), ROOT, SS, BASE + "/gdo2", ext=ec)
+    d1, d2 = set(g1["stage_keys"]) - set(g2["stage_keys"]), set(g2["stage_keys"]) - set(g1["stage_keys"])
+    check("an external that only the generated stage names: changing it re-runs that stage and no PP/CC stage (1 key differs, 1 run)",
+          g1["status"] == "green" and g2["status"] == "green" and len(d1) == 1 and len(d2) == 1 and g2["stages"]["run"] == 1, (g1.get("failure"), g2.get("failure"), d1, d2, g2.get("stages")))
     print("INFO +%.1f s: externals done" % (time.time() - t_start))
     # --- the compiler as an external tree at /opt/tc (real ELF closure of the cross gcc, pinned by commit and tree hash)
     crepo = make_repo("tc", rec=crec)
@@ -453,9 +520,9 @@ def main():
     rc_x = recipe.build(crepo, ROOT, SS, BASE + "/tco", ext=ec)
     print("INFO toy build with the external compiler %.1f s, stages %s" % (time.time() - t0, rc_x.get("stages")))
     check("external compiler at /opt/tc: toy root builds green (4 objects + ELF)", rc_x["status"] == "green" and len(rc_x["objects"]) == 4 and rc_x["elf"], rc_x.get("failure"))
-    check("external compiler: objects and ELF equal the system compiler's (same bytes of the tools, other path), other stage keys",
+    check("external compiler: objects and ELF equal the system compiler's (same bytes of the tools, other path), other stage keys (the compile and link stages mount the compiler's external; a generated stage that names none keeps its key)",
           [o["sha256"] for o in rc_x["objects"]] == [o["sha256"] for o in r1["objects"]] and rc_x["elf"]["sha256"] == r1["elf"]["sha256"]
-          and set(rc_x["stage_keys"]).isdisjoint(r1["stage_keys"]), rc_x.get("failure"))
+          and set(rc_x["stage_keys"]) != set(r1["stage_keys"]), rc_x.get("failure"))
     ran = []
     _rs = recipe.unitstage.run_stage
     recipe.unitstage.run_stage = lambda store, doc, *a, **k: (lambda r: (ran.append((doc["stage"], r[0][:12], r[2])) if r[2] == "run" else None) or r)(_rs(store, doc, *a, **k))
@@ -506,6 +573,23 @@ def main():
     mo["link"]["script"] = T + "other/x.ld"
     e5 = tree_errs("tr5", True, mo)
     check("link.script outside every tree and the root: red", any("link must be" in e for e in e5), e5)
+
+    # --- link.script and link.version_script: also a generated output of the same root (`seen`, as constants and contract_names)
+    glr = mut(generated=RECIPE["generated"] + [{"tool": T + "gen/linkgen.py", "args": [], "inputs": [ROOT + "/ldin.tsv", T + "link/guest.ld"], "outputs": ["gen/link.ld"]}])
+    glr["link"] = dict(RECIPE["link"], script="gen/link.ld")
+    gfiles = {"toy/ldin.tsv": "a\n", "gen/linkgen.py": GENLD, "link/guest.ld": open(os.path.join(VERIFY, "..", "link", "guest.ld")).read()}
+    gr = make_repo("gl", rec=glr, files=gfiles)
+    ge = recipe.check(glr, ROOT, recipe.tracked(gr), recipe.load_admit(gr), None, gr)
+    check("link.script a generated output of the root: green at check", not [e for e in ge if "link" in e and "must be" in e], ge)
+    gn = json.loads(json.dumps(glr))
+    gn["link"]["script"] = "gen/never.ld"
+    ge2 = recipe.check(gn, ROOT, recipe.tracked(gr), recipe.load_admit(gr), None, gr)
+    check("link.script that no generator produces and no file holds: red", any("link must be" in e for e in ge2), ge2)
+    gv = json.loads(json.dumps(glr))
+    gv["link"] = dict(gv["link"], kind="shared", version_script="gen/link.ld")
+    ge3 = recipe.check(gv, ROOT, recipe.tracked(gr), recipe.load_admit(gr), None, gr)
+    check("link.version_script a generated output of the root: accepted by the link rule", not [e for e in ge3 if "link must be" in e], ge3)
+    check("link_generated: a tracked file is not a generated output, a produced name is", not recipe.link_generated("link.ld", {"link.ld"}, {"link.ld"}) and recipe.link_generated("gen/link.ld", set(), {"gen/link.ld"}))
 
     # --- validation
     check("unknown key 'exclude' is a RecipeError", any("unknown key 'exclude'" in e for e in errs(mut(exclude=["a.c"]))))
@@ -569,12 +653,18 @@ def main():
     m["flags"]["c"] = ["-Ifoo", "-o"]
     check("flags that change a stage's job rejected, all problems listed", len([e for e in errs(m)]) >= 2)
 
+    import toolflags
+    for st, mode, tail in (("drv:r", ["-pie"], ["-###", "/probe/x.cc", "-o", "/out/x"]), ("mld:r", [], ["-print-multi-directory"])):
+        d = recipe.driver_doc(st, "/ext/a64/bin/g++", ["-mabi=ilp32"], mode, tail, [{"at": "/ext/a64", "tree": "t"}])
+        check("driver stage %s: its argv passes toolflags (the one constructor carries PROBE_FLAGS)" % st, toolflags.check_doc(d) == [], toolflags.check_doc(d))
     check_gen_reads(SS)
     check_run(SS)
     print("INFO +%.1f s: validation done, joining gate scenarios" % (time.time() - t_start))
     for f in futs:
         f.result()
     pool.shutdown()
+    for fn in deferred:
+        fn()
     print("INFO times: toy cold %.1f s, cached %.1f s; whole file %.1f s" % (cold, warm, time.time() - t_start))
     print("%d FAILED" % len(FAILED) if FAILED else "all passed")
     return 1 if FAILED else 0
@@ -584,9 +674,9 @@ def check_gen_reads(SS):
     """A generator stage reads, read-only, exactly its declared inputs, tracked files or directories of any admitted root (RECIPE.md "generated").
     The stage key holds the content of each; an undeclared read, a write outside /out, an untracked file and `uses` on a plain file are red."""
     OTH = T + "other"
-    ex = [{"path": OTH, "class": "doc", "gates": []}]
+    ex = [{"path": OTH, "class": "doc"}]
     rd = 'import sys\nn = int(open("/in/%s/data.txt").read())\n' % OTH
-    wr = 'os.makedirs("/out/gen")\nopen("/out/gen/gen.h", "w").write("#define NCONST 1\\n#define STAMP %dL\\n" % (n - n))\n'
+    wr = 'open("/out/gen/gen.h", "w").write("#define NCONST 1\\n#define STAMP %dL\\n" % (n - n))\n'
     def rec_(ins=(OTH + "/data.txt",), **kw):
         return dict(RECIPE, generated=[{"tool": T + "gen/xr.py", "args": [], "inputs": [ROOT + "/constants.tsv"] + list(ins),
                                                       "outputs": ["gen/gen.h"]}], **kw)
@@ -635,15 +725,15 @@ static long sc3(long n, long a, long b, long c) { long r; __asm__ volatile("sysc
 static int eq(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return *a == *b; }
 static void put(const char *path, const char *s, long n) { long fd = sc3(2, (long)path, 0x241, 0644); sc3(1, fd, (long)s, n); sc3(3, fd, 0, 0); }
 static void copy(const char *from, const char *to) { char b[512]; long fd = sc3(2, (long)from, 0, 0); long n = fd < 0 ? 0 : sc3(0, fd, (long)b, 512); put(to, b, n < 0 ? 0 : n); }
-void cmain(long *sp) {
-  long argc = sp[0]; char **argv = (char **)(sp + 1); const char *m = argc > 1 ? argv[1] : "ok";
+int main(int argc, char **argv) {
+  const char *m = argc > 1 ? argv[1] : "ok";
   if (eq(m, "ok")) put("/out/o.txt", "hello\n", 6);
   else if (eq(m, "copy")) copy(argv[2], "/out/o.txt");
   else if (eq(m, "bad")) sc3(231, 1, 0, 0);
   else if (eq(m, "extra")) { put("/out/o.txt", "a\n", 2); put("/out/x.txt", "b\n", 2); }
   sc3(231, 0, 0, 0);
+  return 0;
 }
-__asm__(".globl _start\n_start:\n mov %rsp, %rdi\n and $-16, %rsp\n call cmain\n");
 """
 
 
@@ -652,8 +742,8 @@ def check_run(SS):
     and /out; outputs are declared paths. A nonzero exit, an undeclared and a missing output are red; {stage, path} refs read a declared output."""
     HX, OTH = T + "hx", T + "other"
     hrec = {"format": "fnvnx-recipe/1", "compiler": {"cc": "gcc-13", "cxx": "g++-13"}, "flags": {"c": ["-fPIE", "-O1", "-ffreestanding", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"], "cxx": [], "asm": []},
-            "include": [], "units": "all", "link": {"kind": "exe", "output": "hx.exe", "flags": ["-m", "elf_x86_64"]}}
-    ex = [{"path": HX, "class": "product", "target": "host", "gates": [], "recipe": HX + "/build.json"}, {"path": OTH, "class": "doc", "gates": []}]
+            "include": [], "units": "all", "link": {"kind": "exe", "output": "hx.exe", "flags": ["-m", "elf_x86_64"], "libs": {"system": ["/lib/x86_64-linux-gnu/libc.so.6"]}}}
+    ex = [{"path": HX, "class": "product", "target": "host", "recipe": HX + "/build.json"}, {"path": OTH, "class": "doc"}]
 
     def rec_(args=("ok",), ins=(), debs=(), outs=("o.txt",), art=HX + ":hx.exe"):
         return dict(RECIPE, run=[{"name": "r", "artifact": art, "args": list(args), "inputs": list(ins), "debs": ["libc6"] + list(debs), "outputs": list(outs)}])
@@ -692,6 +782,16 @@ def check_run(SS):
     check("host_cpu: pin microcode null matches a VM cpuinfo with no microcode line", recipe.cpu_mismatch(vpin, vm) == [], recipe.cpu_mismatch(vpin, vm))
     check("host_cpu: pin microcode null is NOT a wildcard: a host with a microcode line is a mismatch", len(recipe.cpu_mismatch(vpin, vm.replace("stepping", "microcode\t: 0x1\nstepping"))) == 1, recipe.cpu_mismatch(vpin, vm.replace("stepping", "microcode\t: 0x1\nstepping")))
     check("host_cpu: a pin with a microcode value is a mismatch on a host that has no microcode line", len(recipe.cpu_mismatch(dict(vpin, microcode=1), vm)) == 1)
+    jb = recipe.Job(good, ROOT, SS, 1, os.path.join(SS, "external"))
+    ver = lambda n: {"version": subprocess.run(["dpkg-query", "-W", "-f=${Version}", n], capture_output=True, text=True).stdout}   # noqa: E731
+    both, only = BASE + "/un-both", BASE + "/un-libc"
+    for n in ("base-files", "libc6"):
+        jb._deb_into(both, n, ver(n))
+    jb._deb_into(only, "libc6", ver("libc6"))
+    check("PT_INTERP /lib64/ld-linux-x86-64.so.2 resolves through base-files' ./lib64 -> usr/lib64 and then libc6's own link", recipe.resolves_in(both, "/lib64/ld-linux-x86-64.so.2"))
+    check("without base-files in the declared set the same PT_INTERP is red (libc6 alone has no ./lib64)", not recipe.resolves_in(only, "/lib64/ld-linux-x86-64.so.2"))
+    check("the link-free path /usr/lib64/ld-linux-x86-64.so.2 resolves in libc6 alone (its own link)", recipe.resolves_in(only, "/usr/lib64/ld-linux-x86-64.so.2"))
+    check("/lib/ld64.so.1 (what the link rule writes today) resolves in no declared deb", not recipe.resolves_in(both, "/lib/ld64.so.1"))
     hc = dict(rec_(), run=[dict(rec_()["run"][0], host_cpu="cpuref")])
     check("host_cpu: the key needs the tracked pin file verify/cpuref.json", any("cpuref" in e for e in recipe.check(hc, ROOT, files, roots, None, good)))
     check("host_cpu: with the pin file tracked the check accepts it", not [e for e in recipe.check(hc, ROOT, files + [T + "verify/cpuref.json"], roots, None, good) if "host_cpu" in e])
@@ -738,12 +838,12 @@ def check_run(SS):
     check("run stage: a declared input is visible at /in/N and its content is read", ri["status"] == "green" and got_in == "5\n", (ri.get("failure"), got_in))
     ri2 = build(mk("rn-in2", args=["copy", "/in/1"], ins=(OTH + "/data.txt",), data="6\n"), "in2")
     check("the content of a declared input is in the run key (one byte changed: exactly one key differs)", ri2["status"] == "green" and len(set(ri["stage_keys"]) - set(ri2["stage_keys"])) == 1, ri2.get("failure"))
-    dd = mk("rn-deb", args=["copy", "/deb/autotools-dev/usr/bin/dh_autotools-dev_restoreconfig"], debs=("autotools-dev",))
+    dd = mk("rn-deb", args=["copy", "/deb/usr/bin/dh_autotools-dev_restoreconfig"], debs=("autotools-dev",))
     rdb = build(dd, "deb")
     os.makedirs(BASE + "/rc3/store", exist_ok=True)
     got_d = open(recipe.resolve_input(ROOT, ref_in, dd, BASE + "/rc3")[0], "rb").read() if rdb["status"] == "green" else b""
-    check("run stage: a declared deb's installed files are visible at /deb/<name>/<path>", rdb["status"] == "green" and got_d == open("/usr/bin/dh_autotools-dev_restoreconfig", "rb").read()[:512], rdb.get("failure"))
-    nd = mk("rn-nodeb", args=["copy", "/deb/autotools-dev/usr/bin/dh_autotools-dev_restoreconfig"])
+    check("run stage: a declared deb's installed files are visible at /deb/<path>", rdb["status"] == "green" and got_d == open("/usr/bin/dh_autotools-dev_restoreconfig", "rb").read()[:512], rdb.get("failure"))
+    nd = mk("rn-nodeb", args=["copy", "/deb/usr/bin/dh_autotools-dev_restoreconfig"])
     rnd = build(nd, "nodeb")
     got_n = open(recipe.resolve_input(ROOT, ref_in, nd, BASE + "/rc4")[0], "rb").read() if os.makedirs(BASE + "/rc4/store", exist_ok=True) is None and rnd["status"] == "green" else None
     check("run stage: a deb that is not declared is not in the sandbox (the file is not there: empty copy)", rnd["status"] == "green" and got_n == b"", (rnd["status"], got_n))

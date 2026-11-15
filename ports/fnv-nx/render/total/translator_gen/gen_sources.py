@@ -14,7 +14,6 @@ for d, dirs, files in os.walk(ext):
         if f.endswith(".c"):
             rows.append(os.path.relpath(os.path.join(d, f), ext).replace(os.sep, "/"))
 rows.sort()
-os.makedirs(os.path.dirname(out), exist_ok=True)
 with open(out, "w") as o:
     for r in rows:
         o.write("mojoshader:%s\n" % r)

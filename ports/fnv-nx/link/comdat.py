@@ -86,6 +86,7 @@ class Identity:
         self.sig, self.members, self.undecidable = sig, members, undecidable
         self.symbols, self.resolved = tuple(symbols), frozenset(resolved)    # symbols the group defines; names a section-symbol target was resolved to
         self.digest = hashlib.sha256(repr((members, self.symbols)).encode()).hexdigest()
+        self.defrec = None   # tier 2: ((symbol, sha256, targs, bindings), ...) sorted, the .fnvnx.odrdef rows of every symbol the group defines; None = no record
 
 
 def _signature(o, g):
@@ -133,7 +134,7 @@ def _target(o, rel_sec, rel, ordinal, undec, resolved, ents):
 def _entities(o, refs, undec, resolved):
     """Rule E (bisimulation).  The entities REFS (section, offset, size) a copy points to without a global name, and every entity they point to
     in turn: each is (section header, bytes, relocations with the targets normalised as above), its own references being entities again.
-    Two entities are the same iff they are bisimilar: equal content and pairwise the same entities, a cycle assumed the same (the GREATEST
+    Two entities are the same iff they are bisimilar: equal content and pairwise the same entities, a cycle counted as the same (the GREATEST
     fixed point).  Computed by colour refinement of the reachable graph until the number of classes stops growing; the colours are
     hashes, so they compare across objects.  Returns {ref: colour}.  Soundness: refinement from the one class converges to the coarsest stable
     partition (at most one round per entity); that partition is the greatest bisimulation, and bisimilar graphs have the same quotient, hence the
@@ -192,12 +193,44 @@ def comdat_identity(o, g):
     return Identity(_signature(o, g), members, [(o.path,) + u for u in undec], syms, resolved)
 
 
+def odrdef(o):
+    """{symbol: (sha256, targs, bindings)} of the object's `.fnvnx.odrdef` section (L2 fnvnx_names: one tab-separated row per function emitted as COMDAT:
+    symbol, sha256 of the definition's token sequence, mangled template arguments, sorted bindings); {} when the object has none.  ValueError when malformed."""
+    out = {}
+    for i, nm in enumerate(o.names):
+        if nm != ".fnvnx.odrdef":
+            continue
+        s = o.secs[i]
+        text = o.data[s[4]:s[4] + s[5]].decode("utf-8", "replace")
+        if text and not text.endswith("\n"):
+            raise ValueError("%s: .fnvnx.odrdef has no final LF" % o.path)
+        for n, ln in enumerate(text.split("\n")[:-1], 1):
+            f = ln.split("\t")
+            if len(f) != 4 or not f[0] or len(f[1]) != 64:
+                raise ValueError("%s: .fnvnx.odrdef line %d is not symbol, sha256, targs, bindings" % (o.path, n))
+            if f[0] in out and out[f[0]] != tuple(f[1:]):
+                raise ValueError("%s: .fnvnx.odrdef line %d repeats %s with another row" % (o.path, n, f[0]))
+            out[f[0]] = tuple(f[1:])
+    return out
+
+
+def _defrec(o, g, rec):
+    """the record of group G: the rows of every global or weak symbol defined in a member section; None unless there is at least one such symbol and every one has a row"""
+    gs = o.secs[g]
+    mem = {m for m in struct.unpack_from("<%dI" % (gs[5] // 4), o.data, gs[4])[1:] if o.secs[m][1] != SHT_RELA}
+    names = sorted({n for n, bind, typ, shn, val, size, oth in o.syms if shn in mem and bind in (STB_GLOBAL, STB_WEAK) and typ != STT_SECTION and n})
+    if not names or any(n not in rec for n in names):
+        return None
+    return tuple((n,) + rec[n] for n in names)
+
+
 def copies(path):
     """-> ({signature: Identity}, {member section index: signature}, {global/weak name defined in the object: signature of its group or None}) of
     the COMDAT groups of one object.  A signature in one object twice
     joins both (their members and findings concatenated: two copies in one object)."""
     o = Obj(path)
     out, member = {}, {}
+    rec = odrdef(o)
     for g, s in enumerate(o.secs):
         if s[1] != SHT_GROUP or s[5] < 4 or struct.unpack_from("<I", o.data, s[4])[0] & GRP_COMDAT == 0:
             continue
@@ -207,6 +240,7 @@ def copies(path):
             raise ValueError("%s: group %d: %s" % (path, g, e))
         if not ident.sig:
             raise ValueError("%s: group %d has an unnamed signature" % (path, g))
+        ident.defrec = _defrec(o, g, rec)
         for m in struct.unpack_from("<%dI" % (s[5] // 4 - 1), o.data, s[4] + 4):
             if o.secs[m][1] != SHT_RELA:
                 member[m] = ident.sig
@@ -214,6 +248,7 @@ def copies(path):
             prev = out[ident.sig]
             ident = Identity(ident.sig, prev.members + ident.members, prev.undecidable + ident.undecidable, prev.symbols + ident.symbols,
                              prev.resolved | ident.resolved)
+            ident.defrec = None if prev.defrec is None or ident.defrec is None else tuple(sorted(set(prev.defrec) | set(ident.defrec)))
         out[ident.sig] = ident
     defs = {n: member.get(shn) for n, bind, typ, shn, val, size, oth in o.syms if bind in (STB_GLOBAL, STB_WEAK) and 0 < shn < SHN_ABS and n}
     return out, member, defs
@@ -238,6 +273,19 @@ def name_not_unique(per_obj):
 
 def same(a, b):
     return a.digest == b.digest
+
+
+def entity(idents):
+    """The ONE decision of "the copies of a COMDAT signature are one entity" (gates odr, abi, linkstrict).  The entity is a source definition
+    ([basic.def.odr]); the bytes of two copies of it differ with the unit (IPA, inlining).  Tiers: (1) every copy has one digest (equal bytes, relocations,
+    symbols, and entities up to bisimulation): same; (2) otherwise every copy has an odrdef record (token hash, template arguments, bindings): equal
+    records are the same entity, different records are `differs`; (3) a copy without a record: `norecord`.  IDENTS: the Identity of each copy.
+    -> (tier 1 | 2 | 3, 'same' | 'differs' | 'norecord')."""
+    if len({i.digest for i in idents}) == 1:
+        return 1, "same"
+    if any(i.defrec is None for i in idents):
+        return 3, "norecord"
+    return 2, ("same" if len({i.defrec for i in idents}) == 1 else "differs")
 
 
 def first_difference(a, b):

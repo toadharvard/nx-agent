@@ -446,6 +446,7 @@ def main():
     ap.add_argument('--name', required=True)
     ap.add_argument('--kind', default='pie', choices=('pie', 'exe', 'shared'))
     ap.add_argument('--script', default=None, help='the link script (its ENTRY is the entry symbol; default _start)')
+    ap.add_argument('--entry', default=None, help='the image entry symbol the runtime calls (link.entry): exactly one product object defines it')
     ap.add_argument('--version-script', default=None)
     ap.add_argument('--loader-defs', default=None, help='a file of the names the declared loader root defines, one per line (a shared image may leave them undefined)')
     ap.add_argument('--lib', action='append', default=[], help='a shared library of the link (its .dynsym defines names the image may leave undefined)')
@@ -468,6 +469,8 @@ def main():
     out = symbols(a.elf)
     ids = symbol_ids(objs, all_defined(a.elf), open(a.elf, 'rb').read())
     ids += entry_ids(objs, script_entry(open(a.script).read()) if a.script else '_start')
+    if a.entry:
+        ids += entry_ids(objs, a.entry)
     cnt, badrel = dyn_relocs(a.elf)
     ids += badrel
     if not is_pie(a.elf):

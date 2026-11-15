@@ -38,7 +38,8 @@ check("the exe, redist, manifest and wine externals of the loader are exactly th
 tools = [g["tool"] for g in gen]
 check("one generator each: declareddlls, modules, mkidentity", sorted(tools) == sorted(["ports/fnv-nx/contract/declareddlls.py", "ports/fnv-nx/contract/modules.py", "ports/fnv-nx/contract/mkidentity.py"]), tools)
 check("the exe pin read by every generator is the external `exe`", all("/ext/exe/FalloutNV.exe" in g["args"] for g in gen if g["tool"].endswith(("modules.py", "mkidentity.py"))), "")
-check("the tables are outputs of the loader's own generators, named as units", {"gen/modules.c", "gen/import_keys.c", "gen/identity.c"} <= outs, outs)
+check("the tables are outputs of the loader's own generators, named as units", {"gen/modules.c", "gen/import_keys.c", "gen/import_keys.h", "gen/keys.tsv", "gen/iat_data.tsv", "gen/modules.tsv", "gen/identity.c"} <= outs, outs)
+check("the loader recipe exports the key header as output IMPORT_KEYS_H (a consumer root takes it through `uses`)", rec.get("outputs", {}).get("IMPORT_KEYS_H") == "gen/import_keys.h" and {"KEYS_TSV", "MODULES_TSV", "IAT_DATA_TSV"} <= set(rec["outputs"]), rec.get("outputs"))
 files = subprocess.run(["git", "-C", repo, "ls-files", "ports/fnv-nx/loader"], capture_output=True, text=True).stdout.split()
 SYMS = ["fnvnx_modules", "fnvnx_module_count", "fnvnx_import_rows", "fnvnx_import_row_count", "fnvnx_import_key_count", "fnvnx_import_by_key_idx", "fnvnx_exe_sha256", "fnvnx_exe_size"]
 import re  # noqa: E402

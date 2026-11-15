@@ -248,7 +248,7 @@ extern "C" unsigned long __readfsdword(unsigned long off)
 #define STACK_SIZE_PARAM_IS_A_RESERVATION_ 0x00010000
 
 /* Set by the game layer (toolchain/game/boot.cpp): the placement role of a new thread from its start routine and
- * argument, OS_THREAD_ROLE(r) or -1 (default placement); see toolchain/host/placement.h. */
+ * argument, FNVNX_THREAD_ROLE(r) or -1 (default placement); see toolchain/host/placement.h. */
 extern "C" { int (*fnvnx_thread_role_hook)(void *start, void *arg) = nullptr; }
 struct w32_thread_obj {
     struct w32_obj o;
