@@ -55,12 +55,10 @@ def patch(path):
             die("%s: the link call of %s is not the expected line" % (path, fn))
         s = s.replace(body, body.replace(TRY_LINK_CALL, TRY_LINK_NEW))
     n = len(GCC_NO_LINK_RE.findall(s))
-    if "CFG-LINK" not in s and not n and "try_link" not in s:
+    if "CFG-LINK" not in s and not n:
         print("cfg_link: %s has no link test (nothing to patch)" % path)
         return
-    if "CFG-LINK" not in s or not n:
-        die("%s: ac_fn_*_try_link and gcc_no_link=yes must both be present" % path)
-    s = GCC_NO_LINK_RE.sub(r"\1gcc_no_link=no", s)
+    s = GCC_NO_LINK_RE.sub(r"\1gcc_no_link=no", s)  # a subdir without ac_fn_*_try_link (libgcc) has no link test; its gate is only lifted
     open(path, "w").write(s)
     print("cfg_link: patched %s (gcc_no_link=yes x%d)" % (path, n))
 
