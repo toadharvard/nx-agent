@@ -20,10 +20,26 @@ def enum_domain(hdr, typedef, force):
 
 
 def d3dformat_enum(hdr):
-    t = open(hdr).read(); t = t[t.index("typedef enum _D3DFORMAT"):]; t = t[:t.index("} D3DFORMAT;")]; out = []
-    for m in re.finditer(r"D3DFMT_\w+\s*=\s*(?:MAKEFOURCC\('(.)',\s*'(.)',\s*'(.)',\s*'(.)'\)|(0x[0-9A-Fa-f]+|\d+))", t):
-        out.append(fcc("".join(m.group(i) for i in range(1, 5))) if m.group(1) else int(m.group(5), 0))
+    """{name: value} of the D3DFORMAT enumerators of the header (MAKEFOURCC ones evaluated)"""
+    t = open(hdr).read(); t = t[t.index("typedef enum _D3DFORMAT"):]; t = t[:t.index("} D3DFORMAT;")]; out = {}
+    for m in re.finditer(r"(D3DFMT_\w+)\s*=\s*(?:MAKEFOURCC\('(.)',\s*'(.)',\s*'(.)',\s*'(.)'\)|(0x[0-9A-Fa-f]+|\d+))", t):
+        out[m.group(1)] = fcc("".join(m.group(i) for i in range(2, 6))) if m.group(2) else int(m.group(6), 0)
     return out
+
+
+def d3d_results(d3d9h):
+    """{name: value} of the D3DERR_* / D3DOK_* defines of d3d9.h: MAKE_D3DHRESULT(code) / MAKE_D3DSTATUS(code) with _FACD3D, evaluated as the header's MAKE_HRESULT does"""
+    t = open(d3d9h).read(); fac = int(re.search(r"#define _FACD3D\s+(0x[0-9A-Fa-f]+)", t).group(1), 16)
+    return {n: ((1 if k == "HRESULT" else 0) << 31 | fac << 16 | int(c)) for n, k, c in re.findall(r"#define (D3D(?:ERR|OK)_\w+)\s+MAKE_D3D(HRESULT|STATUS)\(\s*(\d+)\s*\)", t)}
+
+
+def switch_formats(wine, fmtn):
+    """the D3DFORMAT values with a case in the switch of d3d9/device.c wined3dformat_from_d3dformat (Wine 9.0), but D3DFMT_UNKNOWN (the id UNKNOWN itself): the case labels resolved through the header"""
+    d = open(os.path.join(wine, "dlls", "d3d9", "device.c")).read()
+    i = d.index("switch(format)", d.index("wined3dformat_from_d3dformat(D3DFORMAT")); j = d.index("default:", i)
+    labels = re.findall(r"case (D3DFMT_\w+):", d[i:j])
+    if not labels or any(l not in fmtn for l in labels): raise SystemExit("envq: a case label of wined3dformat_from_d3dformat is not a D3DFORMAT enumerator")
+    return sorted(fmtn[l] for l in labels if fmtn[l] != fmtn["D3DFMT_UNKNOWN"])
 
 
 # UNKNOWN_FMT: representatives of the complement of (enum values + known FOURCCs). Closing proof, Wine 9.0 (tools/wine-9.0-d3d9-formats 348f306e, = tools/wine-9.0 c8373ee4):
@@ -39,15 +55,14 @@ MASK = 0x103ffff0 | 3     # WINED3DUSAGE_MASK | WINED3DUSAGE_QUERY_MASK (+ RT, D
 EFF = [b for b in USAGE_BITS if b & MASK]
 PAIRS = [a | b for i, a in enumerate(EFF) for b in EFF[i + 1:]]
 USAGE_ALL = [0] + USAGE_BITS
-X8, R5, X1 = 22, 23, 24
+X8 = R5 = X1 = A2R10 = None   # D3DFMT_X8R8G8B8, R5G6B5, X1R5G5B5, A2R10G10B10: read by name from the header in load()
 RT, DS = 1, 2
 QBITS = [0x8000, 0x10000, 0x20000, 0x40000, 0x80000, 0x100000, 0x200000]
-ADP_ADAPTER_FMT_SMALL = [X8, R5, X1]
 # (name, [per-argument domain: list of values or a domain name])
 D = dict(FMT=None, DEVT=None, DEVTX=None, RTYPE=None, RTYPEX=None, MSAA=None, USAGE_ALL=USAGE_ALL, PAIRS=PAIRS, WIN=[0, 1],
-         A0=[0], HAL=[1], X8=[X8], FMT_AD=[X8, R5, X1], SMALLRT=[1, 3, 4, 5, 6], RT2=[1, 3], USM3=[0, 1, 2], UNI=[0, 1, 3, 5, 6, 7], AFLAG=[0] + [1 << i for i in range(32)] + [0xffffffff], DISP4=[X8, R5, X1, 35],
-         SCAN=[0, 1, 2, 3, 0x7fffffff], NZ=[0, 1, 2, 5, 0xffffffff], SZ=[0x18, 0x10, 0, 0x1c, 0xffffffff], FMT12=[21, 22, 23, 75, 80, fcc("DXT1"), fcc("INTZ"), fcc("NULL"), 114, 0, fcc("ZZZZ"), 113],
-         USM=[0, 1, 2, 3, 0x40000 | 1, 0x20000, 0x10000, 0x200, 0x400, 0x400 | 1], FMT_SM=[0, 21, 22, 23, 75, 80, fcc("DXT1"), 0x7fffffff],
+         A0=[0], HAL=[1], X8=None, FMT_AD=None, SMALLRT=[1, 3, 4, 5, 6], RT2=[1, 3], USM3=[0, 1, 2], UNI=[0, 1, 3, 5, 6, 7], AFLAG=[0] + [1 << i for i in range(32)] + [0xffffffff], DISP4=None,
+         SCAN=[0, 1, 2, 3, 0x7fffffff], NZ=[0, 1, 2, 5, 0xffffffff], SZ=[0x18, 0x10, 0, 0x1c, 0xffffffff], FMT12=None,
+         USM=[0, 1, 2, 3, 0x40000 | 1, 0x20000, 0x10000, 0x200, 0x400, 0x400 | 1], FMT_SM=None,
          OORA=[1, 2, 0x7fffffff, 0xffffffff], SDK=[0, 1, 0x1f, 0x20, 0x21, 0x80000020, 0xffffffff])
 Q = []   # (op, [domains])
 Q += [("GetAdapterCount", [])]
@@ -94,13 +109,22 @@ def known_fourcc(wine):
     return out
 
 
-def load(hdr, spec, wine):
+def load(hdr, spec, wine, d3d9h):
     """the one entry: hdr = d3d9types.h, spec = the interface table (D9_SPEC), wine = the pinned Wine mirror directory; all are the caller's arguments (no default, no path of this file).
     Builds FMT (and its domain D["FMT"]) and sets SPEC; nothing of this module is valid before it is called."""
-    global FMT, SPEC
+    global FMT, SPEC, X8, R5, X1, A2R10, SWITCH, NA, INV, NOAUTOGEN
     global KNOWN_FCC
+    FN = d3dformat_enum(hdr)
     KNOWN_FCC = sorted(known_fourcc(wine))
-    FMT = sorted(set(d3dformat_enum(hdr)) | set(KNOWN_FCC) | set(UNKNOWN_FMT))
+    SWITCH = switch_formats(wine, FN)
+    X8, R5, X1, A2R10 = (FN["D3DFMT_" + n] for n in ("X8R8G8B8", "R5G6B5", "X1R5G5B5", "A2R10G10B10"))
+    R = d3d_results(d3d9h); NA, INV, NOAUTOGEN = R["D3DERR_NOTAVAILABLE"], R["D3DERR_INVALIDCALL"], R["D3DOK_NOAUTOGEN"]
+    D["X8"], D["FMT_AD"], D["DISP4"] = [X8], [X8, R5, X1], [X8, R5, X1, A2R10]
+    # FMT12 / FMT_SM: the formats of the 12-value and 8-value probe axes, each by its name in the header (a FOURCC by its four characters; a value of the complement by UNKNOWN_FMT)
+    f = lambda n: FN["D3DFMT_" + n]
+    D["FMT12"] = [f("A8R8G8B8"), f("X8R8G8B8"), f("R5G6B5"), f("D24S8"), f("D16"), fcc("DXT1"), fcc("INTZ"), fcc("NULL"), f("R32F"), f("UNKNOWN"), UNKNOWN_FMT[0], f("A16B16G16R16F")]
+    D["FMT_SM"] = [f("UNKNOWN"), f("A8R8G8B8"), f("X8R8G8B8"), f("R5G6B5"), f("D24S8"), f("D16"), fcc("DXT1"), 0x7fffffff]
+    FMT = sorted(set(FN.values()) | set(KNOWN_FCC) | set(UNKNOWN_FMT))
     D["FMT"] = FMT
     # D3DDEVTYPE: Wine 9.0 (tools/wine-9.0 c8373ee4) never reads the value except in dlls/wined3d/directx.c:2320 (wined3d_get_device_caps: DeviceType = HAL ? HAL : REF,
     #   the result is the same for every value other than HAL) and passes it through by cast (dlls/d3d9/d3d9_private.h:409); so every value outside the enum behaves as REF.

@@ -78,10 +78,12 @@
     "/uses/ports/fnv-nx/bridgefacts/D9_SPEC",
     "/in/ports/fnv-nx/render/d3d9/env",
     "/in/ports/fnv-nx/shim/include/d3d9types.h",
-    "/ext/wine-d3d9-formats"
+    "/ext/wine-d3d9-formats",
+    "/in/ports/fnv-nx/shim/include/d3d9.h"
    ],
    "inputs": [
     "ports/fnv-nx/shim/include/d3d9types.h",
+    "ports/fnv-nx/shim/include/d3d9.h",
     "ports/fnv-nx/render/d3d9/env"
    ],
    "outputs": [
