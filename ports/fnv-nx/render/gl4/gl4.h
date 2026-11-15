@@ -180,7 +180,6 @@ int gl4_swap_zero(void);   /* the swapchain image starts as RGBA 0; 1 = failed *
 /* gl4_check.c: whole-stream checks done before anything executes */
 int gl4_stream_check(const uint32_t* w, const uint32_t* end);
 /* gl4_shader.c */
-uint64_t gl4_api_shader_create(uint64_t desc);
 uint64_t gl4_api_shader_destroy(uint64_t id);
 uint32_t gl4_shader_from_glsl(const char* glsl, size_t n, uint32_t stage);   /* shim + compile + register: the id, or 0 with nothing registered and the log in gl4_err */
 /* gl4_d3dshader.c: NXGPU_FN_SHADER_CREATE_D3D */
@@ -189,7 +188,8 @@ void gl4_d3d_free(Gl4D3d* d);
 uint32_t gl4_program_for(uint32_t vs, uint32_t ps);
 /* Id tables: the id is the slot index (ids 1.., no bound in the ABI). Doubles *cap (at least 64 slots) and zeroes the new slots; 0 only when the host allocator fails (the table is unchanged). */
 int gl4_table_grow(void** tab, uint32_t* cap, size_t elem);
-GLuint gl4_compile_program(enum nx_gl4shim_pair_id id);   /* internal programs: a pair row of nx_gl4shim_pairs; 0 and an error when it fails */
+GLuint gl4_compile_pair(const struct nx_gl4shim_pair* row);   /* an internal program of the gl4shim table: 0 and an error when it fails */
+uint32_t gl4_compile_stage(uint32_t id, const struct nx_gl4shim_stage* row);   /* a stage row under its reserved shader id: the id, or 0 and an error */
 /* gl4_core.c */
 void gl4_upload_range(uint32_t block, uint32_t off, uint32_t size);
 const Gl4Mem* gl4_mem(uint32_t id);

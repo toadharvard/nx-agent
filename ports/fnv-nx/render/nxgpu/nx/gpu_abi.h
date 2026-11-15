@@ -62,9 +62,6 @@ typedef struct NxImageDesc {
 
 /* ---- shaders ------------------------------------------------------------------------------------------------ */
 enum NxStage { NxStage_Vertex = 0, NxStage_Fragment = 1 };
-typedef struct NxShaderDesc {
-    uint32_t row;          /* a stage row of the one GLSL table of render/gl4shim (enum nx_gl4shim_stage_id); its stage is a fact of the row. Callers never supply GLSL */
-} NxShaderDesc;
 /* Resource bindings in the GLSL: UBO and sampler `binding = n` are deko3d per-stage slots; the GL backend maps
  * them to GL binding stage * 16 + n. */
 
@@ -176,7 +173,6 @@ typedef struct NxGpuApi {
     uint64_t mem_gpu_addr;               /* (id) -> GPU address of byte 0 (GL: 0) */
     uint64_t image_create;               /* (NxImageDesc*) -> image id */
     uint64_t sampler_create;             /* (NxSamplerState*) -> sampler id (1..NX_MAX_SAMPLERS-1), 0 on failure */
-    uint64_t shader_create;              /* (NxShaderDesc*) -> shader id (1..), 0 on failure */
     uint64_t submit;                     /* (NxSubmit*) -> 0 once the backend took the stream */
     uint64_t wait_frame;                 /* (frame) -> 0 once the GPU finished that frame */
     uint64_t readback;                   /* (NxReadback*) -> 0 ok; waits for all submitted work */
@@ -188,7 +184,7 @@ typedef struct NxGpuApi {
  * their numbers and arities; a backend table is expanded from it. */
 #define NXGPU_FN_LIST_V3(X) \
     X(MEM_CREATE, mem_create, 1) X(MEM_GPU_ADDR, mem_gpu_addr, 1) X(IMAGE_CREATE, image_create, 1) \
-    X(SAMPLER_CREATE, sampler_create, 1) X(SHADER_CREATE, shader_create, 1) X(SUBMIT, submit, 1) \
+    X(SAMPLER_CREATE, sampler_create, 1) X(SUBMIT, submit, 1) \
     X(WAIT_FRAME, wait_frame, 1) X(READBACK, readback, 1)
 #define NXGPU_FN_ENUM_(id, m, n) NXGPU_FN_##id,
 enum NxGpuFn {
@@ -207,13 +203,11 @@ enum NxGpuFn {
 #endif
 NX_ASSERT_(sizeof(NxMemBlockDesc) == 16, "NxMemBlockDesc");
 NX_ASSERT_(sizeof(NxImageDesc) == 32, "NxImageDesc");
-NX_ASSERT_(sizeof(NxShaderDesc) == 4, "NxShaderDesc");
-NX_ASSERT_(offsetof(NxShaderDesc, row) == 0, "NxShaderDesc.row");
 NX_ASSERT_(sizeof(NxVtxLayout) == 36, "NxVtxLayout");
 NX_ASSERT_(sizeof(NxFrameStats) == 32, "NxFrameStats");
 NX_ASSERT_(sizeof(NxSubmit) == 32, "NxSubmit");
 NX_ASSERT_(sizeof(NxReadback) == 40, "NxReadback");
 NX_ASSERT_(sizeof(NxGpuInfo) == 32, "NxGpuInfo");
-NX_ASSERT_(sizeof(NxGpuApi) == 32 + 9 * 8, "NxGpuApi");
+NX_ASSERT_(sizeof(NxGpuApi) == 32 + 8 * 8, "NxGpuApi");
 
 #endif
