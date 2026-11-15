@@ -398,13 +398,13 @@
    "tool": "ports/fnv-nx/platform/declared/gen_export.py",
    "args": [
     "/in/ports/fnv-nx/platform/declared/x86sys.json",
-    "/out/declared/x86sys.json"
+    "/out/declared/x86sys.export.json"
    ],
    "inputs": [
     "ports/fnv-nx/platform/declared/x86sys.json"
    ],
    "outputs": [
-    "declared/x86sys.json"
+    "declared/x86sys.export.json"
    ]
   }
  ],
@@ -581,6 +581,6 @@
   }
  },
  "outputs": {
-  "X86SYS": "declared/x86sys.json"
+  "X86SYS": "declared/x86sys.export.json"
  }
 }
