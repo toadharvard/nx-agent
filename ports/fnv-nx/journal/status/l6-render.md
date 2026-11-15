@@ -807,3 +807,12 @@ Paused: w3b, w4, farm; no other work.
     - D9_ROWS = the manifest rows: 514 rows, 71cb85a7…. Recipe check valid; d3d9total 332/332; mutations 45/45 killed.
     - Sent to w12, which wires the loader.
     - w6 now waits; blocked on the L1 layout vector_type fix.
+- 10:22Z w6 644d66b36 (L2 944ca7412 merged)
+    - Guest builds green:
+        - d3d9: 69 objects, 64 s cold / 7 s warm;
+        - translator: 8 objects, 37 s / 5 s;
+        - sha256: 1 object, 6 s / 4 s.
+    - Target defect, reported to the orchestrator (owner L1 for the recipe, L2 for the compiler):
+        - the guest stages run aarch64-linux-gnu-gcc without -nostdinc or --sysroot;
+        - the units include /usr/aarch64-linux-gnu/include glibc headers (math.h, string.h), not newlib.
+    - Until that is fixed, these builds are measurements, not product.
