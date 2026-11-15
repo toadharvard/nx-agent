@@ -188,13 +188,13 @@ def launch(doc, run, root, srcs):
             os.write(efd[1], str(e).encode()[:1000])
             os._exit(126)
     os.close(efd[1])
-    _, st = os.waitpid(pid, 0)
+    _, st, ru = os.wait4(pid, 0)     # the usage of fork A includes the descendants it waited for (fork B, the command and what it reaped): the stage's CPU
     err = os.read(efd[0], 2000).decode()
     for f in logs + [efd[0]]:
         os.close(f)
     if err:
         raise SbxError("sandbox setup/exec failed: " + err)
-    return os.waitstatus_to_exitcode(st)
+    return os.waitstatus_to_exitcode(st), round(ru.ru_utime + ru.ru_stime, 3)
 
 def placed(store, tree):
     """Directory (or file) of the store that holds tree TREE placed as hardlinks of the objects: made once per store and tree (atomic
@@ -305,8 +305,8 @@ def execute(store, doc, key):
         for n in range(len(doc["outputs"])):
             os.makedirs(os.path.join(run, "out", str(n)))
         os.makedirs(root)
-        rc = launch(doc, run, root, srcs)
-        return {"format": "fnvnx-stage-result/1", "key": key, "stage": doc["stage"], "rc": rc,
+        rc, cpu = launch(doc, run, root, srcs)
+        return {"format": "fnvnx-stage-result/1", "key": key, "stage": doc["stage"], "rc": rc, "cpu_s": cpu,   # cpu_s: child user+sys seconds (wait4 rusage); a measurement, not part of the function of the key
                 "outputs": {o: cas.ingest(os.path.join(run, "out", str(n)), store) for n, o in enumerate(doc["outputs"])},
                 "stdout": cas.ingest(os.path.join(run, "stdout"), store),
                 "stderr": cas.ingest(os.path.join(run, "stderr"), store), "open_channels": list(OPEN_CHANNELS)}

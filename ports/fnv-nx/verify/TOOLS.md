@@ -2229,6 +2229,8 @@ key = cas.stage_key(document + {"sandbox": {sandbox.py sha256, cas.py sha256}}).
 Sandbox: new mount/net/uts/pid/ipc namespaces; tmpfs root; inputs hardlinked from the CAS and bound read-only;
 outputs fresh rw dirs; fresh /proc (time/stat/sys masked), /dev = null+zero, tmpfs /tmp; hostname fnvnx; no interface up;
 stdin /dev/null; umask 022; ASLR off; no core files; all capabilities dropped; seccomp: getrandom -> ENOSYS (x32 ABI and foreign arch killed).
+**CPU of a stage.** `result.json` (`STORE/keys/<key>/result.json`) carries `cpu_s`: the child's user + system CPU seconds of the run that produced the result (`os.wait4` rusage of the launching fork, descendants it waited for included), rounded to ms. It is a measurement, not part of the function of the key: the cold-run comparison ignores it, and a cache hit returns the value recorded by the run that stored the result (a result stored before this field has none). The stage document (`STORE/stage-docs/<aa>/<key>.json`) stays the pure document that the key is made of. Test: tests/test_sandbox.py case 12. A change of sandbox.py changes `sandbox_id`, so every stage key.
+
 Measured (tests/test_sandbox.py case 9), NOT closed, listed in result.json "open_channels":
   wall_clock           clock_gettime/time/statx show real time (vDSO). PR_SET_TSC=SIGSEGV + seccomp on the clock syscalls
                        was tried: dynamic date/python/gcc/make crash at startup (SIGSEGV), coarse clocks stay readable. Dropped.
