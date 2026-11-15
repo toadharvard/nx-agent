@@ -69,7 +69,7 @@ def root_check(root, repo, cache, jobs):
         n, ff = objstub.image_check(res["elf"]["path"], rec["errno_accessor"])
         image = {"bodies": n, "fixed_failure": len(ff)}
         finds = [(base + rec["link"]["output"], name, "fixed-failure", d) for name, d in ff]
-    gen = {base + u for u in recipe.generated_outputs(rec)}   # the units a generator stage of the recipe outputs: the domains of assume_violation
+    gen = {base + u for u in recipe.generated_outputs(rec)}   # the units a generator stage of the recipe outputs: the domains of `assume_violation`
     return objstub.analyse_all(objs, names, os_ids, cache, jobs, probe), rows, gen, finds, abi, records, image
 
 
@@ -97,7 +97,7 @@ def main(argv):
             rows.update(w)
             finds += fs
             items += [(i, n) for i, n, _, _ in fs]
-        rp = os.path.join(repo, "ports/fnv-nx/verify/ASSUMPTIONS.json")   # of the tree under test; a tree without one has no OWNER id: every assume call is red
+        rp = os.path.join(repo, "ports/fnv-nx/verify/ASSUMPTIONS.json")   # of the tree under test; a tree without one has no OWNER id: every `assume` call is red
         registry = {e["id"]: e["status"] for e in json.load(open(rp))["entries"]} if os.path.exists(rp) else {}
         its, fs = objstub.judge(results, rows, facts, wine, declared, fails, handlers, stats, (registry, gen_ids))
         items, finds = items + its, finds + fs
