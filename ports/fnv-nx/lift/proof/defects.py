@@ -6,10 +6,11 @@ The four former entries (rot-count-modulo, ror-cf, rot-of-count0, sar-cf-big-cou
 A region here is a MODEL GAP (the pinned model does not implement the instruction as the SDM states): the SDM text is the decision, the model source is cited.
 entry: id, keys (regex on the form key), parts = [(fields or None = every other field, region(ctx) -> z3 Bool)], sdm."""
 import re, z3
+from proof.shape import PFX
 ALL = None
 def prefix_skip(code):
     i = 0
-    while code[i] in (0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65): i += 1
+    while code[i] in PFX: i += 1
     return i
 class Ctx:
     def __init__(s, code, pre, key, fields=None):

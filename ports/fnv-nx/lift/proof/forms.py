@@ -13,7 +13,7 @@ from fnvlift import faults
 
 R8 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh']; R16 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di']
 SEGPFX = {0x64: 'fs', 0x65: 'gs', 0x2e: 'cs', 0x26: None, 0x36: None, 0x3e: None}
-PFX = {0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65}
+from proof.shape import PFX      # the legacy prefix set (SDM vol. 2 2.1.1): one table, shape.py
 SEGS = {'cs', 'ds', 'es', 'ss', 'fs', 'gs'}
 def form_key(ins):
     """same as form_key in tools/tests/instest.py (prove.py checks the two agree when instest imports)"""
