@@ -187,3 +187,9 @@ After the first frame:
   - Verdict: after the first frame.
   - Why: the trunk has 1 build.json and no guest root includes shim/ (trunk 407e93af6). The only user is rules/core.py's decomp rewriting, and decomp C++ is off the path.
   - Replacement when decomp resumes: a recipe stage generating the set from the pinned VC++ 2008 CRT headers' math declarations. Semantics come from the MSVC CRT docs under DATAMODEL and the ftoi/IEEE rules. The exe/module CRT imports ⊆ the set is a check.
+- 2026-11-15 00:52 DATAMODEL generated, w3 9c2874281.
+  - Sources: pinned cpp-docs af4947c4; universe = 135 tm.texi rows of GCC 13.3; 30 facts; generator rules U1/D1/M1/C1.
+  - crossing_forbidden: virtual base, pointer to member; va_list being added.
+  - Relayed to L1 w22 and w23.
+  - Next: cpp-docs mirror plus the recipe stage; S23 empty bases via the farm.
+- 2026-11-15 00:51 w1 RTL table 36a741b08: universe 87 passes, 8 classified (3 rows accepted). Calls given on store motion, fwprop/rtl-ssa and crossjump.
