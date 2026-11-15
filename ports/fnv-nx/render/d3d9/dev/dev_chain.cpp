@@ -1,4 +1,5 @@
 // D7: swap chains (IDirect3DSwapChain9 / 9Ex). Sources (Wine 9.0): d3d9/swapchain.c (d3d9_swapchain_*), wined3d/swapchain.c (wined3d_swapchain_present, _get_back_buffer, _get_front_buffer_data,
+// ASM-616 (verify/ASSUMPTIONS.json)
 // _get_raster_status, swapchain_gl_present -> wined3d_swapchain_gl_rotate), wined3d/directx.c wined3d_output_get_raster_status (the scan line is derived from QueryPerformanceCounter).
 // BACK BUFFER ROTATION RULE (source: wined3d_swapchain_gl_rotate, reached by every Present of the GL swap chain, whatever the swap effect): with count >= 2, after a Present the buffer i holds the former
 // contents of buffer i + 1 (mod count); the buffer OBJECTS (GetBackBuffer identity) never move, their images do. With count 1 nothing changes (DISCARD / COPY / FLIP alike). Lockable buffers: the CPU

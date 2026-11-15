@@ -66,33 +66,3 @@ No pure deletion. Reason: on my branch (5bc689044) none of the second paths or c
 1. #18/#19/#20: which head owns render/backend vs render/nxgpu, and shaders/include vs translator/include. The copies differ (nxgpu4.h, nxgpu4_shader.h, fnvnx_shaders.h), so one is stale; I cannot tell which from this pass.
 2. #1: the pinned doc edition. Is a Microsoft docs snapshot ingestible as an external (licence/legal: docs of a vendor, not game data)? sm_table.json's `src` strings name pages but no pin.
 3. #27: confirm the single-selection-function replacement before I touch the checker (w5's file).
-
-## Open records of the render layer (ASSUMPTIONS.json, all REMOVE)
-- ASM-601 (owner L6+L4): G-PIXEL compares frames against a "declared tolerance" that no rule derives.
-- ASM-602 (owner L6+L4): pix outputs (occlusion counts, render-target read-back, timing) cannot be equal across GPUs, so they are masked from stream equality.
-- ASM-603 (owner L6): Everything a translated program depends on beyond its bytecode is DATA in the driver UBO.
-- ASM-604 (owner L6+L6A): Every capability, format and mode that the llvmpipe-measured env table promises can be honoured by the deko3d backend on the console.
-- ASM-605 (owner L6): VideoMemorySize = 960 MiB is an L5 estimate that "may be revised".
-- ASM-606 (owner L6+L4): The original's d3d9 stream is not repeatable run to run without virtual clocks (B5): 163 927 of 1 345 369 records equal.
-- ASM-607 (owner L6+L1): A non-local unwind out of fnvnx_guest_invoke leaks one entry.
-- ASM-608 (owner L6+L6A): A point filter on an exact 2:1 downscale is inconsistent on llvmpipe, so its result is left unchecked.
-- ASM-609 (owner L6): A scaled depth Blit is exact only to Z24 ±1 LSB, and depth-stencil Blit between formats, BCn Blit with scaling and an MSAA Blit destination are open.
-- ASM-610 (owner L6): X channels of BGRX8/RGBX8 read back as 0xFF.
-- ASM-611 (owner L6): Invalid lock rect, lockable MSAA, Levels > 32 (NO source) and a standalone GetContainer were decided with doubt.
-- ASM-612 (owner L6): MIN/MAG filter NONE, BOTHSRCALPHA as destination and SRCCOLOR2 in an alpha slot follow Nine where Wine differs.
-- ASM-613 (owner L6): Out-of-range ZFUNC/CULLMODE/FILLMODE/SHADEMODE are a latch whose START value is invented.
-- ASM-614 (owner L6): The 16 vendor FOURCC formats are a hand list in gen_enums.py copied from Wine's table.
-- ASM-615 (owner L6+L6A): StretchRect into an MSAA destination and compressed <-> uncompressed StretchRect answer INVALIDCALL where Windows accepts.
-- ASM-616 (owner L6): Reset's back buffer count, GetLastPresentCount, Present with a NULL-format back buffer, X8R8G8B8 in GetFrontBufferData and the fullscreen rules: "Nothing was checked against Windows."
-- ASM-617 (owner L6+L6A): vblank on GL surfaceless is a MODELLED 60 Hz clock.
-- ASM-618 (owner L6): Present with a visible cursor allocates per call and can fail with OUTOFVIDEOMEMORY.
-- ASM-619 (owner L6): The Wine citation for the cursor blend order was written from memory.
-- ASM-620 (owner L6): D3DRS_LASTPIXEL = TRUE (the default) on line draws cannot be expressed on GL 4.5, and the backend makes the submit BAD_CALL.
-- ASM-621 (owner L6): Clip-plane equations, point size, a depth surface larger than the colour targets and the flat variants are not carried to the backend.
-- ASM-622 (owner L6): PreLoad of a managed buffer bypasses the draw path's buffer hazard table.
-- ASM-623 (owner L6): posfix = (0, 0, 1, 0) because the backend viewport carries the half pixel, which contradicts the shaders README.
-- ASM-624 (owner L6): A VS input that the declaration does not supply reads (0,0,0,0), as in Wine (Nine uses w = 1).
-- ASM-625 (owner L6+L4): An indexed draw with a NULL index buffer returns D3D_OK (the Windows row of Wine's test; Wine itself differs).
-- ASM-626 (owner L6): Because the shader cache cannot serve the GL backend, every shader is translated at first use, and that translation never fails at run time.
-- ASM-627 (owner L6): Variants keyed by a non-canonical link set are translated at the first draw of the pair.
-- ASM-641 (owner L6+L6A): nxd3d_frontbuffer_read relies on NxImageRead with image 0 = the swapchain image, which nxgpu4.h does not state.

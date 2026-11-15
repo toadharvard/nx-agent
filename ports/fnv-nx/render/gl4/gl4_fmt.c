@@ -1,4 +1,5 @@
 /* fnv-nx L6 GL 4.5 backend v4: NxFormat -> GL. The switches are total over the enums (-Werror=switch): a new
+ * ASM-610 (verify/ASSUMPTIONS.json)
  * enumerator is a compile error here, and a value outside the enum (never sent by the device) yields the zero
  * entry, which image creation reports as a failed create.
  *

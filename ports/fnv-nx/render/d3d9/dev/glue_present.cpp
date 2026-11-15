@@ -1,4 +1,5 @@
 // glue_present.cpp: the product definitions of the presentation hooks declared in dev_hooks.h (nxd3d_present, nxd3d_wait_idle, nxd3d_frontbuffer_read, nxd3d_wait_vblank), each as exactly the nxgpu4.h call it
+// ASM-618 ASM-641 (verify/ASSUMPTIONS.json)
 // names, through glue_stream.h (flush rule R1-R4, exhaustion rules E1-E3 there). The rules P1-P5 of the backend side are written at NxPresent in nxgpu4.h.
 //  present      R2d: the pending stream is submitted (nxs_flush), then NXGPU_FN_PRESENT(NxPresent). P1: the call is ordered after every submitted stream and consumes all its memory before it returns, so no
 //               NXGPU_FN_WAIT_FRAME is needed (the ring bounds the frames in flight, R4) and nothing outlives the call. The NxPresent is copied into the scratch (E2) with the gamma ramp behind it
