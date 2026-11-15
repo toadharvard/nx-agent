@@ -44,12 +44,12 @@ C_ANY = 'C'                                                                     
 class Image:
     """A PE mapped at BASE with its HIGHLOW base relocations applied (the loader's work, ASM-003 documented Win32)."""
 
-    def __init__(self, path, base=None, text_lo=None):
+    def __init__(self, path, base=None):
         self.pe = pefile.PE(path, fast_load=False)
         self.pref = self.pe.OPTIONAL_HEADER.ImageBase
         text = [s for s in self.pe.sections if s.Characteristics & 0x20000000]
         if base is None:
-            base = (text_lo - text[0].VirtualAddress) if text_lo is not None else self.pref
+            base = self.pref
         self.base = base
         self.size = self.pe.OPTIONAL_HEADER.SizeOfImage
         self.mem = bytearray(self.size)
@@ -765,6 +765,7 @@ def main(argv):
     ap.add_argument('--wine', required=True, help='the pinned Wine 9.0 tree (external of wine_pin.json)')
     ap.add_argument('--out')
     a = ap.parse_args(argv)
+    ab = imageset.assigned(a.modules)
     images = [(n, path, os.path.join(a.facts, 'ehtables.json') if sub is None else os.path.join(a.facts, sub, 'ehtables.json'), sub)
               for n, path, sub in imageset.images(os.path.join(a.game, 'FalloutNV.exe'), a.modules, [a.game, a.redist])]       # the image set is the loader's module table (imageset.py)
     loaded = []
@@ -772,7 +773,7 @@ def main(argv):
     for name, path, fp, sub in images:
         subdir[name] = sub
         facts = load_facts(fp)
-        loaded.append((name, Image(path, text_lo=hx(facts['text'][0]) if sub else None), facts))
+        loaded.append((name, Image(path, base=ab.get(name)), facts))      # the base is the module table's, not derived from the facts
     # the exception kinds: every ThrowInfo of the image set, parsed from the bytes
     throws, owner = [], []
     for name, img, facts in loaded:

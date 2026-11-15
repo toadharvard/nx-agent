@@ -87,7 +87,7 @@ def main():
     excluded = {int(k): "int_ring3.excluded.%s" % k for k in int_rec.get("excluded", {})}
     # images: the exe at its preferred base, each module at the assigned base of the loader's module table (imageset.py); the sites are the facts' decoded instructions (factsites.py)
     ims = imageset.images(a.exe, a.modules, a.dir)
-    base = {n: ab for n, _, _, ab in imageset.load(a.modules)}
+    base = imageset.assigned(a.modules)
     images = {n: (fnvlift.Image(path) if n not in base else fnvlift.Image(path, base[n])) for n, path, _ in ims}
     cnt = collections.Counter()
     for ln in open(a.sites):
@@ -152,7 +152,7 @@ def main():
         for o, va, sk, mn, detail, m in sorted(L, key=lambda x: (x[0], x[1])):
             lines.append("%s\t%s:%08x\t%s\t%s\t%s\t%d" % (row, o, va, sk, mn, detail, m))
     # class `reserved-encoding`: the sites whose encoding the SDM opcode tables do not define (sdmfeat.py partition, reason `undefined opcode`). The declared-CPU rule makes each of them #UD,
-    # so each needs a reach certificate like a cleared-feature site; the class is the partition's own, nothing is listed here.
+    # each needs a reach certificate like a cleared-feature site; the class is the partition's own, nothing is listed here and no semantics is attached to it (the pinned Sail model's decode will give them, OWNER 9).
     R = []
     for ln in open(a.cleared):
         if ln[0] == "#" or not ln.strip():
