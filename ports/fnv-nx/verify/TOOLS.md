@@ -2512,3 +2512,26 @@ regexes, the deleting-destructor byte patterns (`_FLAGS_TEST`), `delete_this`, `
 getter walker (GETTER_MAX), the constructor "last store wins" rule (exefacts records every vptr store in order), hard-coded
 TEXT/DATA ranges (the section table is used), the JSON cache keyed on mtime.
 ```
+
+## verify/stackuse.py
+
+```text
+stackuse - the stack growth a codegen flag causes, from the compiler's own reports (measurement, never a gate input).
+
+    python3 -I stackuse.py --base OBJECTS.json... --flag OBJECTS.json... [--json OUT]
+
+Inputs: the objects.json files of two builds of the same roots made with `recipe.py build --stack-usage 1` (RECIPE.md): BASE without the flag, FLAG with it.
+Every row of an objects.json names the unit's object (`object`) and its `-fstack-usage` report (`su`: `file:line:col:name TAB bytes TAB qualifier`).
+
+(a) Frame growth. A function is keyed by (unit, file:line:col, name), the compiler's own identity in both reports. Growth = FLAG bytes - BASE bytes. Reported: the
+    number of functions in both, the largest growth with its function, the sum of all growth, the functions in one report only, and the functions whose qualifier is
+    not `static` (dynamic frames have no byte bound: counted, never given a number).
+(b) The deepest native call chain. The call graph of the objects: an edge for every R_AARCH64_CALL26 / JUMP26 relocation, from the function symbol that contains the
+    relocated word to the function symbol the relocation names (a section symbol + addend resolves to the function at that offset); a function whose code contains a
+    BLR or BR instruction word (a superset of its indirect calls: a data word that looks like one only adds a report) has an INDIRECT call. A frame of a function is the
+    `.su` bytes of the function of that symbol name in that object (the C name is the symbol; a C++ name in the report is not the mangled symbol, so such a
+    function has no frame: it is counted as `noframe`). The depth of a function = its frame + the largest depth of its callees. A cycle, a function with an
+    indirect call, a dynamic frame, a callee with no definition among the objects (runtime library, other image) or a function with no frame makes the depth of
+    everything that reaches it `unbounded`, and it is listed; no value is guessed. Growth along the chain = the same walk over (FLAG - BASE) frame growth.
+Output: a JSON document and one summary line per number. Exit 0.
+```
