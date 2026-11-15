@@ -3,16 +3,17 @@
 
     gen_x86sys.py --os os.json --sources x86sys_sources.json --mirror DIR --wine DIR --cpumodel FILE --out x86sys.json
 
-DIR (--mirror) is a checkout of fnv-nx-build tools/wdk71-headers, --wine one of tools/wine-9.0, FILE the rt/cpumodel.c of the sources record. The sha256 of every
+DIR (--mirror) is a checkout of fnv-nx-build tools/wdk71-headers, --wine one of tools/wine-9.0, FILE the cpuid_model.json of the sources record. The sha256 of every
 file read is checked against the record. Defined only for a native 32-bit x86 machine record (native_arch 0, process_wow64 0). The output is a pure function
 of its inputs; every row cites its source; a state with no pinned source is written {"status": "undecided", "why": ...} and never given a value.
-Trust chain: documented Win32 (WDK 7.1 headers), the Intel SDM, Wine 9.0 under the owner's Wine rule. Nothing else.
+Trust chain / precedence (header of the record): (1) documented Win32 for build 7601 (MSDN, WDK 7.1) and the Intel SDM, (2) Wine 9.0 only where it contradicts neither (1) nor the declared OS, (3) nothing else.
+A row with both a Wine and a documented source takes the documented one (sources `doc_gates`: a documented since-build above the declared build excludes the Wine value).
 
 Rows:
   selectors      cs ds es ss fs: KGDT_R3_CODE / KGDT_R3_DATA / KGDT_R3_TEB of ks386.inc | RPL_MASK, by the role the WDK names (code segment -> cs, data segment
                  -> ds es ss, the TEB's segment -> fs); gs: undecided (no WDK role); tr = KGDT_TSS.
   mov_to_sreg    the selectors a `mov sreg, r` can load at CPL 3: null for es/ds/fs/gs; the ring-3 data selectors for every register; the code selector: undecided.
-  int_ring3      the vectors Wine 9.0 handles for a user-mode `int n` (handle_interrupt cases) and the traps it maps to #BP / #OF (vectors 3, 4); every other
+  int_ring3      the vectors Wine 9.0 handles, minus those a documented gate excludes at build 7601 (0x29: MSDN __fastfail, Windows 8+; undecided in `excluded`) for a user-mode `int n` (handle_interrupt cases) and the traps it maps to #BP / #OF (vectors 3, 4); every other
                  vector: undecided (no pinned source says whether Windows 7 has a ring-3 gate there).
   cr4            tsd 0 (Wine: rdtsc is not intercepted); umip 0 (SDM CR4.UMIP is reserved unless CPUID.07H:ECX[2], and the declared CPU's max basic leaf is below 7);
                  pce undecided.
@@ -76,27 +77,34 @@ def build(osrec, src, mirror, wine, cpumodel):
     ext_ops = sorted(int(x, 16) for x in re.findall(r"case (0x[0-9a-fA-F]+):\s*/\*", ext))
     ints = sorted(int(x, 16) for x in re.findall(r"^    case (0x[0-9a-fA-F]+):", hi.group(0), re.M))
     traps = {n for n, t in (("TRAP_x86_OFLOW", segv), ("TRAP_x86_BPTFLT", trap)) if "case %s:" % n in t.group(0)}
+    gates = {x["key"]: x for x in src["doc_gates"] if x["row"] == "int_ring3.vectors"}
+    build_no = fl["build"]["value"]
+    gated = sorted(v for v, x in gates.items() if build_no < x["since_build"])   # a documented gate that the declared build is below: the vector is out (precedence 1 over Wine)
+    ints = [i for i in ints if i not in gated]
     vec = sorted(set(ints) | ({3} if "TRAP_x86_BPTFLT" in traps else set()) | ({4} if "TRAP_x86_OFLOW" in traps else set()))
     cm = src["cpumodel"]
     ct = pinned(cpumodel, cm, cm["path"])
-    mb = re.search(r"#define FNVL_MAX_BASIC (\d+)u", ct)
-    if not mb:
-        raise SystemExit("gen_x86sys: cpumodel.c does not define FNVL_MAX_BASIC")
-    max_basic = int(mb.group(1))
+    if any(v in vec for v in gated) or not src.get("precedence"):   # precedence check: a value that a documented gate excludes never comes from Wine
+        raise SystemExit("gen_x86sys: a Wine-sourced vector contradicts a documented gate, or the sources record has no precedence")
+    max_basic = json.loads(ct).get("max_basic")
+    if not isinstance(max_basic, int):
+        raise SystemExit("gen_x86sys: cpuid_model.json has no max_basic")
     umip = 0 if max_basic < 7 else None
     eflags0 = int(m.group(1), 16)
     sanit = kg["EFLAGS_USER_SANITIZE"]
     return {
         "format": "fnvnx-x86sys/2",
+        "precedence": src["precedence"],
         "os": {"sha256": None, "build": fl["build"]["value"]},
         "sources": {"mirror": src["mirror"], "ks386": kf, "wine": {"commit": src["wine"]["commit"], "file": wf}, "cpumodel": cm},
         "selectors": sel,
         "mov_to_sreg": mov,
         "int_ring3": {"vectors": vec, "other_vectors": undec("no pinned source says whether Windows 7 has a ring-3 gate at any other vector; Wine 9.0 handles only these"),
-                      "source": "%s: handle_interrupt cases %s; segv_handler / trap_handler map %s to #OF / #BP" % (wsrc, [hex(i) for i in ints], sorted(traps))},
+                      "source": "%s: handle_interrupt cases %s; segv_handler / trap_handler map %s to #OF / #BP" % (wsrc, [hex(i) for i in ints], sorted(traps)),
+                      "excluded": {str(v): {"status": "undecided", "why": gates[v]["source"]} for v in gated}},
         "cr4": {"tsd": {"value": 0 if not {0x31, 0x33} & set(ext_ops) else None,
                         "source": "%s: is_privileged_instr intercepts only the 0F opcodes %s, so rdtsc (0F 31) runs in user mode; consistent with the owner's decision that rdtsc reads the platform timer" % (wsrc, [hex(o) for o in ext_ops])},
-                "umip": {"value": umip, "source": "Intel SDM Vol 3A 2.5 CR4.UMIP: the bit is reserved (setting it is #GP) unless CPUID.(EAX=07H,ECX=0):ECX[2] is enumerated; the declared CPU's max basic leaf is %d (%s FNVL_MAX_BASIC @ %s), below 7, so there is no leaf 7 and CR4.UMIP is 0" % (max_basic, cm["path"], cm["commit"][:12])},
+                "umip": {"value": umip, "source": "Intel SDM Vol 3A 2.5 CR4.UMIP: the bit is reserved (setting it is #GP) unless CPUID.(EAX=07H,ECX=0):ECX[2] is enumerated; the declared CPU's max basic leaf is %d (%s max_basic @ %s), below 7, so there is no leaf 7 and CR4.UMIP is 0" % (max_basic, cm["path"], cm["commit"][:12])},
                 "pce": undec("rdpmc at CPL 3 needs CR4.PCE = 1; the SDM only defines the bit, the declared CPU's cpuid does not state it, the WDK 7.1 constants name no PCE bit and Wine 9.0 has no rdpmc case")},
         "eflags": {"initial": {"value": eflags0, "source": "%s: the initial thread context, context.EFlags" % wsrc},
                    "iopl": {"value": (eflags0 & 0x3000) >> 12, "source": "bits 12-13 of the initial EFLAGS (%s)" % wsrc},
@@ -114,7 +122,7 @@ def main(argv):
     ap.add_argument("--sources", required=True)
     ap.add_argument("--mirror", required=True)
     ap.add_argument("--wine", required=True, help="checkout of fnv-nx-build tools/wine-9.0")
-    ap.add_argument("--cpumodel", required=True, help="rt/cpumodel.c of the sources record")
+    ap.add_argument("--cpumodel", required=True, help="verify/cpuid_model.json of the sources record")
     ap.add_argument("--out", required=True)
     a = ap.parse_args(argv)
     raw = open(a.os, "rb").read()

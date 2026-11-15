@@ -9,7 +9,7 @@
    "value": 0
   },
   "umip": {
-   "source": "Intel SDM Vol 3A 2.5 CR4.UMIP: the bit is reserved (setting it is #GP) unless CPUID.(EAX=07H,ECX=0):ECX[2] is enumerated; the declared CPU's max basic leaf is 4 (ports/fnv-nx/lift/rt/cpumodel.c FNVL_MAX_BASIC @ b5af46461e81), below 7, so there is no leaf 7 and CR4.UMIP is 0",
+   "source": "Intel SDM Vol 3A 2.5 CR4.UMIP: the bit is reserved (setting it is #GP) unless CPUID.(EAX=07H,ECX=0):ECX[2] is enumerated; the declared CPU's max basic leaf is 4 (ports/fnv-nx/verify/cpuid_model.json max_basic @ a3217cd2c604), below 7, so there is no leaf 7 and CR4.UMIP is 0",
    "value": 0
   }
  },
@@ -33,15 +33,20 @@
   "why": "the number of gates of the OS's IDT is not stated by a pinned source (the SDM allows 256 entries at most)"
  },
  "int_ring3": {
+  "excluded": {
+   "41": {
+    "status": "undecided",
+    "why": "MSDN __fastfail intrinsic: fast fail is supported from Windows 8 (build 9200); Windows 7 SP1 is build 7601, so int 0x29 is not a fast-fail gate there. What the instruction does on build 7601 is not stated by MSDN: undecided"
+   }
+  },
   "other_vectors": {
    "status": "undecided",
    "why": "no pinned source says whether Windows 7 has a ring-3 gate at any other vector; Wine 9.0 handles only these"
   },
-  "source": "Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6: handle_interrupt cases ['0x29', '0x2d']; segv_handler / trap_handler map ['TRAP_x86_BPTFLT', 'TRAP_x86_OFLOW'] to #OF / #BP",
+  "source": "Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6: handle_interrupt cases ['0x2d']; segv_handler / trap_handler map ['TRAP_x86_BPTFLT', 'TRAP_x86_OFLOW'] to #OF / #BP",
   "vectors": [
    3,
    4,
-   41,
    45
   ]
  },
@@ -97,6 +102,11 @@
   "build": 7601,
   "sha256": "623155df2ce5dec30006208c391dd9841f123ab5ca7c0153b246859fe617b460"
  },
+ "precedence": [
+  "(1) documented Win32 for Windows 7 SP1 build 7601: MSDN and WDK 7.1",
+  "(2) Wine 9.0, only where it contradicts neither (1) nor the declared OS",
+  "(3) nothing else (ReactOS is not a source)"
+ ],
  "selectors": {
   "cs": {
    "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_CODE = 0x18 (the ring-3 code segment) | RPL_MASK 3",
@@ -141,11 +151,11 @@
  },
  "sources": {
   "cpumodel": {
-   "branch": "claude/fnv-l3a-lift",
-   "commit": "b5af46461e81455567395e13acc8f94dee9517d2",
-   "origin": "the declared CPU's cpuid (CPUREF), L3a rt/cpumodel.c",
-   "path": "ports/fnv-nx/lift/rt/cpumodel.c",
-   "sha256": "465fbd127dd3a55c204db5eb3fe5c20872b4a9bd6b66c752c60cd786e1d8f0e1"
+   "branch": "claude/fnv-l3a-lift-int3",
+   "commit": "a3217cd2c6041b8cf455f8ef269e99747620e18f",
+   "origin": "the declared CPU's cpuid as data (CPUREF: verify/cpuref.json + verify/cpuid_model.json); lift/rt/cpumodel.c is generated from it, not a source",
+   "path": "ports/fnv-nx/verify/cpuid_model.json",
+   "sha256": "91f9b38f04a89fc967c9121d3bdeb8342034e91cd1fe87b8c194cea9061aec3c"
   },
   "ks386": {
    "origin": "Windows Driver Kit 7.1.0 (7600.16385.1), ks386.inc",

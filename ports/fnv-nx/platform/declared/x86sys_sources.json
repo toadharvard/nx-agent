@@ -28,10 +28,23 @@
   }
  },
  "cpumodel": {
-  "path": "ports/fnv-nx/lift/rt/cpumodel.c",
-  "commit": "b5af46461e81455567395e13acc8f94dee9517d2",
-  "branch": "claude/fnv-l3a-lift",
-  "sha256": "465fbd127dd3a55c204db5eb3fe5c20872b4a9bd6b66c752c60cd786e1d8f0e1",
-  "origin": "the declared CPU's cpuid (CPUREF), L3a rt/cpumodel.c"
- }
+  "path": "ports/fnv-nx/verify/cpuid_model.json",
+  "commit": "a3217cd2c6041b8cf455f8ef269e99747620e18f",
+  "branch": "claude/fnv-l3a-lift-int3",
+  "sha256": "91f9b38f04a89fc967c9121d3bdeb8342034e91cd1fe87b8c194cea9061aec3c",
+  "origin": "the declared CPU's cpuid as data (CPUREF: verify/cpuref.json + verify/cpuid_model.json); lift/rt/cpumodel.c is generated from it, not a source"
+ },
+ "precedence": [
+  "(1) documented Win32 for Windows 7 SP1 build 7601: MSDN and WDK 7.1",
+  "(2) Wine 9.0, only where it contradicts neither (1) nor the declared OS",
+  "(3) nothing else (ReactOS is not a source)"
+ ],
+ "doc_gates": [
+  {
+   "row": "int_ring3.vectors",
+   "key": 41,
+   "since_build": 9200,
+   "source": "MSDN __fastfail intrinsic: fast fail is supported from Windows 8 (build 9200); Windows 7 SP1 is build 7601, so int 0x29 is not a fast-fail gate there. What the instruction does on build 7601 is not stated by MSDN: undecided"
+  }
+ ]
 }
