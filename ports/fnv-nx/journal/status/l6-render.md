@@ -1021,3 +1021,4 @@ Paused: w3b, w4, farm; no other work.
 - **w5 ce670307c:** the Rule D guest test unit is written and unadmitted. It waits on the L4 harness.
     - w5 is reverting the hand-listed hunk with a new commit, then cherry-picking 34a4a4b2a and taking toolchain/ whole from a42ad8875.
 - bottleneck: the guest compile after those fixes, and L1 cand3 for the trunk (a5c8f427). 3 of 4 workers busy.
+- 20:15Z: L6A took the 619 deko3d side as an item for after the first frame. Reason: deko3d is off the path, and render/backend is not a product root yet, so no build turns red. Accepted.
