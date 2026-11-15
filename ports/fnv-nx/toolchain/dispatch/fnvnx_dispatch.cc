@@ -362,7 +362,9 @@ static tree descriptor(gcall *call)
 /* The descriptor of a function DEFINITION, from its own type with the same shape() as the call sites (a native body
  * that lifted code reaches through an exit bridge). The parameters are the declared ones: the list is the
  * definition's own, `this` first for a method. A type with no shape gives the row `-<reason>` (DEFDISP-NS): no x86 caller can reach a body that has
- * no x86 shape, and exitgen, which joins a definition to its exe address, is red for a joined `-` row. */
+ * no x86 shape, and exitgen, which joins a definition to its exe address, is red for a joined `-` row.
+ * Why this closes the class (DEFDISP-NS proof): an indirect call whose type has no shape is a build error at the call site, so the dispatcher can reach a shapeless
+ * definition only through a join to an exe address, and exitgen checks exactly that join. */
 static std::string def_descriptor(tree decl)
 {
   tree ft = TREE_TYPE(decl);
