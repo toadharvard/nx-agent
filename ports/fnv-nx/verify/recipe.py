@@ -534,7 +534,7 @@ def emulation_flags(toks, kind="pie"):
     return err
 
 
-OBJECTS_OF_KEYS = {"except", "target", "origin"}
+OBJECTS_OF_KEYS = {"except", "target", "origin", "dependents_of"}
 OBJECTS_OF_ORIGINS = ("native", "lifted")
 
 
@@ -568,9 +568,10 @@ def objects_of_roots(rec, root, roots, repo=None):
         if isinstance(oo, dict):
             ex = set(oo.get("except", [])) if isinstance(oo.get("except"), list) else set()
             sel = [k for k in ("target", "origin") if k in oo]
+            dep = oo.get("dependents_of")   # the complement of a producer's selection: only the roots that depend on DEP (the checker of what the producer left out)
             out |= {r for r, e in roots.items() if e.get("class") == "product" and e.get("recipe") and r != root and r not in ex
                     and all((e.get("target") == oo["target"]) if k == "target" else (origin_class(e.get("cxx_origin")) == oo["origin"]) for k in sel)
-                    and not (sel and repo is not None and depends_on(r, root, roots, repo))}
+                    and (repo is None or (depends_on(r, dep, roots, repo) if dep else not (sel and depends_on(r, root, roots, repo))))}
     return sorted(out)
 
 
@@ -938,8 +939,9 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
         if "objects_of" in g and not (isinstance(oo, dict) and set(oo) <= OBJECTS_OF_KEYS and isinstance(oo.get("except", []), list)
                                       and all(isinstance(r, str) and r in roots and roots[r].get("class") == "product" for r in oo.get("except", []))
                                       and oo.get("target", "guest") in GUEST_TARGETS and oo.get("origin", "native") in OBJECTS_OF_ORIGINS
-                                      ):
-            err.append('generated[%d].objects_of must be {"except": [admitted product roots], "target": guest|host, "origin": native|lifted} (the last two optional: select by declaration)' % i)
+                                      and ("dependents_of" not in oo or (oo["dependents_of"] in roots and oo["dependents_of"] != root))):
+            err.append('generated[%d].objects_of must be {"except": [admitted product roots], "target": guest|host, "origin": native|lifted, "dependents_of": another admitted root} '
+                       '(the rest optional: select by declaration; dependents_of takes only the roots that depend on that root)' % i)
         t, ins, outs = g["tool"], g["inputs"], g["outputs"]
         owner = next((r for r in roots if isinstance(t, str) and tree_of({r: roots[r]}, t)), None)
         if not (isinstance(t, str) and t in files and t.endswith(".py") and owner and roots[owner]["class"] in ("tool", "product")):

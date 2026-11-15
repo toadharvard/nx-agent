@@ -251,6 +251,11 @@ also leaves out every root that depends on the producing root through `link.root
 stage's output is never in its input set: no `except` list and no cycle. `contract/facts` selects `{"target": "guest", "origin": "native"}` (the native roots' objects, whose
 `.fnvnx.sympair` sections `bind` and `nativerows` read) and publishes `outputs: {"native": "native.tsv"}`: the address -> defined symbol rows of the native table of `lift/rt`.
 
+`depends_on` follows every input edge, `objects_of` included, so a root that reads the objects of a consumer of the producer is itself a dependent. `objects_of` may carry
+`dependents_of: ROOT`: the same selection, but only the roots that depend on ROOT, the complement of ROOT's own selection. `contract/factscheck` selects
+`{target: guest, origin: native, dependents_of: contract/facts}` and proves (`nobinding.py`: bind over those objects with facts' `n1` output, red on any bound symbol)
+that the roots facts leaves out contribute no row to `native.tsv`; it cannot be a stage of facts itself (those roots' builds need `native`: a cycle).
+
 ### Objects of every admitted product root (`objects_of`) and `forbid_sections`
 A generate stage may carry `objects_of: {"except": [R...]}` (every R an admitted product root). Its inputs then hold, at `/objs/<root with / as __>/<unit>.o`,
 the objects of every admitted product root with a recipe except the root itself and the R listed: the set is read from admit.json at the commit, so a

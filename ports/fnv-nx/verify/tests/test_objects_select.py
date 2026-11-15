@@ -66,6 +66,9 @@ with tempfile.TemporaryDirectory() as repo:
           [True, True, False, False])
     check("without a repo the selecting stage cannot read recipes: no consumer exclusion (the build always passes the repo)",
           recipe.objects_of_roots(gen(target="guest", origin="native"), F, ROOTS), sorted(want + [P + "consumer", P + "viaconsumer", P + "bridges"]))
+    check("dependents_of: only the roots that depend on the producer (the checker's set), the complement of the producer's own selection",
+          recipe.objects_of_roots(gen(target="guest", origin="native", dependents_of=F), P + "check", ROOTS, repo),
+          [P + "bridges", P + "consumer", P + "viaconsumer"])
     check("root_edges carries the selected roots as edges (cycle check)", set(recipe.root_edges(gen(target="guest", origin="native"), F, ROOTS, repo)), set(want))
 
     # check(): objects_of keys and stage refs of generator inputs, on the real recipe of contract/facts

@@ -226,6 +226,7 @@
   }
  ],
  "outputs": {
-  "native": "native.tsv"
+  "native": "native.tsv",
+  "n1": "n1.json"
  }
 }
