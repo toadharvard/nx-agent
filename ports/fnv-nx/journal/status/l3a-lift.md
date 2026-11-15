@@ -1127,3 +1127,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Second candidate: the guest semantic flag -fstack-reuse=none. If it is a correctness switch-off, it needs a PERFDEBT entry and a class rule; sent to L2.
   - base3 takes the current toolchain through L1 cand3 (w8).
   - The L3b cpuid table with the AMD rows is at fnv-nx-build 66d8109dfc33; w12 finishes N2 on it.
+- 22:41 w12 cpufeat: claude/fnv-l3a-lift-w12-cpufeat @ b80698ee1e0b accepted. There is no name map.
+  - FEATURES is derived from L3b's table, an fnv-nx-build external of lift/liftsrc: b30137748, tree f6ccfbb6…, passed as --cpufeat to 101 shards. The gating is unchanged.
+  - w8 merges it into base3.
+  - L3b adds a canonical-name column, because one bit has two spellings (SSE41/SSE4_1, AES/AESNI).
