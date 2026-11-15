@@ -271,3 +271,4 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - 14:00Z merged w4 7870c2fc9: 16 far shapes, cs-selector and NULL cases proved (EA from the FF /6 Form of the same ModRM), uncertified 16 on undecided descriptor rows, FAILED 0. Far certs depend on the FF /6 cert of the same ModRM shape, checked mechanically in the aggregation.
 - 14:05Z merged w4 944219378: ea-basis rule (far memory case counts only with its FF /6 basis in certs.tsv; basis in far.tsv). ESP-based far CALL (ff5c2c00) uncertified: SDM far CALL text does not state EA-before-decrement.
 - 14:00Z v3 shard 16/54 done (farm 07, resumed once): 346 rows, proved 334, model-gap 12, failed 0. Complete: 6/54 (15,16,17,29,30,42).
+- 14:10Z v3 shard 31/54 done (farm 11): 345 rows, proved 338, model-gap 6, timeout 1, failed 0. Complete: 7/54 (15,16,17,29,30,31,42).
