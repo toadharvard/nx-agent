@@ -1327,3 +1327,9 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - the L3a origin_class hunk of 8569a4dc0 is cherry-picked (stage-form lifted = lifted);
   - L4 w7 selftests on claude/fnv-l4-verify-cand1; deleting dead code is the rule for -Wunused-function.
 - w22 gets a 5th correction: excluded roots bind no exe address.
+- w22 c13ffa61b accepted (base for cand2, after pluginfix).
+  - gate_contract: one msvc convention. MSVC object found for 68508/68719 functions (was 0): N1 68076, symbol not in object 374, missing reloc 58, no object 211 (unit 2713 has no pristine object, lifted by bodysel's rule, recorded as a fact).
+  - It was green before because no admitted root declares `game` and n1 counted `why` as certified. n1 now checks the integrity of its inputs.
+  - /dev/shm is a private tmpfs per stage (test 3f). aliases.ld deleted, and gate_data reads it only for linked roots.
+  - Next for w22: a downstream bind gate over the roots objects_of excludes.
+- L2 w3 e46db69a6: linkage `c` and odrdef (test_odrdef 30 ok). w23 wires tier 2.
