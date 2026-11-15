@@ -1175,3 +1175,15 @@ Paused: w3b, w4, farm; no other work.
     - New worker w8 `session_01KmtZKQzoLfRjkzALV3LqLb` on claude/fnv-l6-render-w8-keyed. Its census covers both trees, and it prepares the farm job that re-derives sm_link.
 - 21:35Z: w12L2 2faf60c4e carries the pin (56a4d09c, stamp 74cafda2), the cite reloc table and the T2 tail-call rule. w6 is merging it for the first full guest rebuild.
 - bottleneck: the w6 guest rebuild on 2faf60c4e; L1 cand3 → trunk. 2 workers (w6, w8).
+- 21:40Z: **Every L6 root builds green on the none-elf pin** (w6 18973a7f2, w12L2 acf66e78b).
+    - 8 roots, recipe.py, fresh store, cold then warm: pair, d3d9 (69 objects), smscan, translator (8), lib/sha256, gl4 (17), gl4shim, pair@host.
+    - Warm runs: 0 stages run, 3-9 s per root.
+    - Rule D and the attach test unit are compiled for the first time.
+    - Objstub over the whole universe: 2,194/2,208 certified, 28 findings.
+        - L6 findings:
+            - fbo_blit T2: fixed by 2faf60c4e;
+            - Clear: wine-fixme-in-real-body. Fix: the Wine-simplified branch gets its own function;
+            - translator: 8 V findings on empty SM handlers and constants. Causes are being worked out.
+        - The rest are L1, L5 and bootrt, routed to L1.
+    - gl4's od:gl-shader-failure certifies. Its V findings are closed by constants.tsv citing gpu_abi.h:173/177.
+- bottleneck: L6's objstub findings to 0 (w6), then the cand4 hand-off; L1 cand3 → trunk. 2 workers (w6, w8).
