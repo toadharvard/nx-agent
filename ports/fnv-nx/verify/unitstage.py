@@ -125,16 +125,17 @@ def run_stage(store, doc, cold):
         return key, old, "hit", 0.0
     t0 = time.time()
     try:
-        res = sandbox.execute(store, doc, key)
+        res, tm = sandbox.execute_timed(store, doc, key)
     except OSError as e:   # EMLINK, ENOSPC, EXDEV ... of the store or the sandbox set-up: a red stage naming the stage, never a crash
         x = sandbox.SbxError("stage %s: %s (errno %s)" % (doc["stage"], e.strerror or e, e.errno))
         x.stage = doc["stage"]
         raise x
     sec = time.time() - t0
+    sandbox.write_time(store, key, tm)    # the timing sidecar of an execution (a miss); a hit wrote none
     if old is None:
         sandbox._store_result(store, key, res)
         return key, res, "run", sec
-    if any(res[k] != old[k] for k in ("rc", "stdout", "stderr", "outputs")):
+    if any(res[k] != old[k] for k in sandbox.compared(doc)):
         raise UnitError("NOT A FUNCTION OF THE KEY: stage %s differs between two runs" % doc["stage"])
     return key, old, "run", sec
 

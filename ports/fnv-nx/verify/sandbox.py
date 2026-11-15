@@ -32,6 +32,7 @@ import resource
 import shutil
 import struct
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
@@ -306,7 +307,46 @@ def placed_input(store, tree):
         return placed_base(store, base), [(p, cas._obj(store, e)) for p, e in sorted(reals)]
     return placed(store, tree), []
 
+TIME_FORMAT = "fnvnx-stage-time/1"
+
+
+def time_path(store, key):
+    """the timing sidecar of a stage key: store/<key>.time. NOT part of the key, NOT part of the record (keys/<key>/result.json) and NOT compared by store-merge"""
+    return os.path.join(store, key + ".time")
+
+
+def compared(doc):
+    """The record fields two executions of one key must agree on. A `-ftime-report` stage's stderr is a measurement, not a function of the key (the TIMEREPORT
+    of the @time variant): it is kept but not compared."""
+    return ("rc", "stdout", "outputs") if "-ftime-report" in doc.get("argv", []) else ("rc", "stdout", "stderr", "outputs")
+
+
+def write_time(store, key, t):
+    """publish the sidecar {wall_s, cpu_s} of one execution (a miss); a hit never calls this. Atomic (private temp name, rename)."""
+    p = time_path(store, key)
+    tmp = "%s.tmp-%d-%s" % (p, os.getpid(), os.urandom(4).hex())
+    with open(tmp, "w") as f:
+        json.dump({"format": TIME_FORMAT, "wall_s": t["wall_s"], "cpu_s": t["cpu_s"]}, f, sort_keys=True)
+    os.replace(tmp, p)
+
+
+def read_time(store, key):
+    """the sidecar of KEY or None (a stage that was only ever a hit in this store, or a store merged from one that did not time it)"""
+    try:
+        with open(time_path(store, key)) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return d if isinstance(d, dict) and d.get("format") == TIME_FORMAT else None
+
+
 def execute(store, doc, key):
+    return execute_timed(store, doc, key)[0]
+
+
+def execute_timed(store, doc, key):
+    """-> (result record, {wall_s, cpu_s}): the record is a function of the key; the timing (wall seconds of the launch, child user+sys seconds from wait4
+    rusage) is a measurement and goes to the sidecar (write_time), never into the record"""
     run = os.path.join(store, "run", "%s.%d.%s" % (key, os.getpid(), os.urandom(4).hex()))
     root = os.path.join(run, "root")
     try:
@@ -314,11 +354,13 @@ def execute(store, doc, key):
         for n in range(len(doc["outputs"])):
             os.makedirs(os.path.join(run, "out", str(n)))
         os.makedirs(root)
+        t0 = time.monotonic()
         rc, cpu = launch(doc, run, root, srcs)
-        return {"format": "fnvnx-stage-result/1", "key": key, "stage": doc["stage"], "rc": rc, "cpu_s": cpu,   # cpu_s: child user+sys seconds (wait4 rusage); a measurement, not part of the function of the key
+        wall = round(time.monotonic() - t0, 3)
+        return {"format": "fnvnx-stage-result/1", "key": key, "stage": doc["stage"], "rc": rc,
                 "outputs": {o: cas.ingest(os.path.join(run, "out", str(n)), store) for n, o in enumerate(doc["outputs"])},
                 "stdout": cas.ingest(os.path.join(run, "stdout"), store),
-                "stderr": cas.ingest(os.path.join(run, "stderr"), store), "open_channels": list(OPEN_CHANNELS)}
+                "stderr": cas.ingest(os.path.join(run, "stderr"), store), "open_channels": list(OPEN_CHANNELS)}, {"wall_s": wall, "cpu_s": cpu}
     finally:
         shutil.rmtree(run, ignore_errors=True)
 
@@ -342,11 +384,12 @@ def cmd_run(store, path, cold, result_path):
     if old is not None and not cold:
         res = old
     else:
-        res = execute(store, doc, key)
+        res, tm = execute_timed(store, doc, key)
+        write_time(store, key, tm)
         if old is None:
             _store_result(store, key, res)
         else:
-            bad = [k for k in ("rc", "stdout", "stderr", "outputs") if res[k] != old[k]]
+            bad = [k for k in compared(doc) if res[k] != old[k]]
             if bad:
                 lines = []
                 for o in doc["outputs"]:
