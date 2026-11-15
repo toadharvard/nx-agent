@@ -1313,3 +1313,4 @@ Paused: w3b, w4, farm; no other work.
     - Render cannot build on the cut trunk. Asked of L1 for cand3: admit entries, the host record or hostprofile, and gate_abspath in gates.d.
     - w6 (doing): remove ASM-614 (one FOURCC reader with envq), ASM-633 (MAXD3DDECLLENGTH), ASM-637 (make_env host check) and ASM-641 (nxgpu4.h states image 0 = swapchain; L6A told) by landing what each record asks.
 - bottleneck: L1 cand3 (admit, host record, platform, linking root), then cand4.
+- 22:39Z L1: the w6-cand4 base is the w28 head rebased onto the final cand3. It carries the host record and hostprofile, abspath in gates.d, liftfacts and the pack uses-root. cand3 itself carries the admit entries for the green roots it restores.
