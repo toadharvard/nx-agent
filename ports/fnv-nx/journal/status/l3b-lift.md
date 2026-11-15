@@ -273,3 +273,4 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - 14:00Z v3 shard 16/54 done (farm 07, resumed once): 346 rows, proved 334, model-gap 12, failed 0. Complete: 6/54 (15,16,17,29,30,42).
 - 14:10Z v3 shard 31/54 done (farm 11): 345 rows, proved 338, model-gap 6, timeout 1, failed 0. Complete: 7/54 (15,16,17,29,30,31,42).
 - 14:10Z v3 shards 43 (proved 337, gap 7, timeout 1) and 44 (proved 337, gap 8) done (farm 12), failed 0. Complete: 9/54 (15,16,17,29,30,31,42,43,44).
+- 15:15Z v3 shard 18/54 (farm 07): proved 337, gap 8, FAILED(model-defect) 1 (66f3ab rep stosw, defect rep-prefix-ignored). Decision: declared-model-defect shapes are certified against an SDM transcription (OWNER 10, citations per line), never passed; stringspec.py assigned to w4 after the aggregation. Complete: 10/54.
