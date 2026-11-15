@@ -162,6 +162,14 @@ def compile(src, out, plugins, flags=None, args=(), keep=None, files=None, nativ
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+
+def argument_refused(r, plugin):
+    """True iff R (a compile() result) is the recipe's own refusal of an extra argument of the plugin: the recipe fixes every plugin's arguments by the root's origin
+    (recipe.plugin_args) and refuses any other (`plugin fnvnx_<name>: arguments must be <fixed>, are <given>`). One helper for every plugin test; a test never
+    carries its own expected text."""
+    return r.returncode != 0 and 'plugin fnvnx_%s: arguments must be ' % plugin in r.stderr
+
+
 def cc_files(res):
     """{file name: path in the store} of the /out tree of the CC stage(s) of the recipe result RES (the unit object and what a plugin wrote
     next to it, e.g. out=/out/f2i.json): read from the store's stage documents and results, not by running anything"""
