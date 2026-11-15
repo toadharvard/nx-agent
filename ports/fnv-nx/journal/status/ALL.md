@@ -23,9 +23,8 @@ citation per line; values stay IEEE under OWNER 8. L1 adds the registry record, 
 Rule: the lifted depth is bounded by the guest stack (dwStackSize or the PE reserve) times the static A64/x86 frame ratio; the
 native code gets a sound call-graph bound, with recursion certified or rejected. Scheduled after the first frame, before Switch.
 
-**Open Legal classes with no gate yet (2026-11-15), owner L1, after the first frame:** (a) embedded content, a substring of an
-exe/DLL/decomp/gamedata file inside a tracked file; (b) decomp-derived VA→name pairings. Whole-file copies are gated now (legal
-rule L1: no tracked file's sha256 is in the private artifact manifest; hashes only).
+**Legal (owner, 2026-11-15: "Защита закрытых данных. Похуй."):** no Legal gates are built or scheduled; the `legal`
+admit requirement is deleted. The practice stays: private artifacts live in fnv-nx-build only.
 
 All work resumed at 2026-11-14 23:00Z on the candidate `claude/fnv-next3b` 141b07580. That is 224af83e plus L1
 w17m 4ee6cc10 plus CLAUDE.md. Its verdict v9 is running. The trunk is a5c8f427 (38 gates). The platform root is not
