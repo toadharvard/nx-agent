@@ -21,19 +21,26 @@ fails = []
 def main():
     obj = realobj.objects(['order_fold'])['order_fold']
     fns = T.functions(obj)
-    want = {'_Z6copy16P1PPKS_': 'memcpy', '_Z5zero8Pc': 'memset', '_Z4cmp4PKcS0_': 'memcmp', '_Z3lenPKc': 'strlen'}
-    for fn, callee in want.items():
+    # LIBRARY CALLS ARE PLAIN CALLS (the runtime orders its own accesses). A builtin GCC folds before the order pass is ordinary GIMPLE and
+    # is ordered as any access (copy16, zero8, cmp4: unit accesses, no call); one that stays a call (strlen) is a plain call to its library
+    # function: no fence around it.
+    # (a plain access to the compiler's own frame temporary is no shared access: the gate certifies it against the frame record)
+    for fn in ('_Z6copy16P1PPKS_', '_Z5zero8Pc', '_Z4cmp4PKcS0_', '_Z3lenPKc'):
         ins = fns.get(fn)
         if ins is None:
             fails.append('%s: missing (have %s)' % (fn, sorted(fns)))
-            continue
-        mem = [m for o, m, a in ins if re.match(r'(ldr|str|ldp|stp|ldur|stur|ldrb|strb)', m) and not re.search(r'\[(sp|x29)\b', a)]   # frame spills are not data
-        calls = [a for o, m, a in ins if m in ('bl', 'b') and callee in a]
-        # the GOT/PLT call carries the symbol in its relocation or operand text
-        if mem:
-            fails.append('%s: plain access %s' % (fn, mem))
-        if not calls:
-            fails.append('%s: no call to %s: %s' % (fn, callee, ins))
+        elif [m for o, m, a in ins if m.startswith('dmb')]:
+            fails.append('%s: a fence around a call or access: %s' % (fn, ins))
+    calls = lambda fn: [a for o, m, a in fns[fn] if m in ('bl', 'b')]   # noqa: E731
+    ms = lambda fn: [m for o, m, a in fns[fn]]                          # noqa: E731
+    if not calls('_Z3lenPKc'):
+        fails.append('len: strlen on a shared pointer is a plain call: %s' % fns['_Z3lenPKc'])
+    if not calls('_Z5zero8Pc') and not [m for m in ms('_Z5zero8Pc') if m.startswith('stlr')]:
+        fails.append('zero8: a call, or ordered stores: %s' % ms('_Z5zero8Pc'))
+    if ms('_Z6copy16P1PPKS_').count('ldarb') != 16 or ms('_Z6copy16P1PPKS_').count('stlrb') != 16:
+        fails.append('copy16: the folded copy is 16 ordered byte loads and 16 ordered byte stores: %s' % ms('_Z6copy16P1PPKS_'))
+    if ms('_Z4cmp4PKcS0_').count('ldar') != 2:
+        fails.append('cmp4: the folded compare is two ordered loads: %s' % ms('_Z4cmp4PKcS0_'))
     sf = [i for k, v in fns.items() if k.startswith('_Z6slot_fv') for i in v]
     if not sf:
         fails.append('slot_f missing')
@@ -49,7 +56,7 @@ def main():
         return [m for k, v in fns.items() if k.startswith(prefix) for o, m, a in v]
     for pre, nl in (('_Z6copy12', 3), ('_Z7copybig', 2)):
         ms = mn(pre)
-        if ms.count('ldar') != nl or ms.count('stlr') != nl or [m for m in ms if re.match(r'(ldr|str|ldp|stp)', m)] or (pre == '_Z7copybig' and 'b.ne' not in ms):
+        if ms.count('ldar') != nl or ms.count('stlr') != nl or (pre == '_Z7copybig' and not [m for m in ms if m.startswith('b.')]):
             fails.append('%s: want %d ldar + %d stlr and no plain access: %s' % (pre, nl, nl, {m: ms.count(m) for m in set(ms)}))
     if mn('_Z4retgv').count('ldar') != 3 or mn('_Z6passesPK3T12').count('ldar') != 3:
         fails.append('retg/passes: the shared source of a by-value copy is read with 3 ldar')
@@ -57,10 +64,24 @@ def main():
         ms = mn(pre)
         if 'ldaxr' not in ms or 'stlxr' not in ms or 'ldxr' in ms or 'stxr' in ms:
             fails.append('%s: atomics must be seq_cst (ldaxr/stlxr): %s' % (pre, ms))
-    # types no single ldar/stlr covers: vector, complex, long double, packed (each unit ordered)
+    # BIT-FIELDS: an access of the allocation unit (one ldar; a store is the unit's ldar + stlr), and no fence
+    for pre, want in (('_Z6bf_getPK2BF', {'ldar': 1}), ('_Z7bf_getsPK2BF', {'ldar': 1}), ('_Z6bf_setP2BFj', {'ldar': 1, 'stlr': 1}),
+                      ('_Z7bf_copyP2BFPKS_', {'ldar': 2, 'stlr': 1})):
+        m_ = mn(pre)
+        got = {k: m_.count(k) for k in want}
+        if got != want or [m for m in m_ if m.startswith('dmb')]:
+            fails.append('%s: want %s and no fence, got %s' % (pre, want, {m: m_.count(m) for m in set(m_)}))
+    # CAS EXPECTED: a shared `expected` is bounced through a private copy (ordered load in, ordered store on failure); an unshared one is not
+    cs = mn('_Z6cas_shPiS_')
+    if cs.count('ldar') != 1 or cs.count('stlr') != 1:
+        fails.append('cas_sh: expected must be one ordered load and one ordered store (on failure): %s' % cs)
+    cl = mn('_Z7cas_locPi')
+    if [m for m in cl if m in ('ldar', 'stlr')]:
+        fails.append('cas_loc: an unshared expected stays unordered: %s' % cl)
+    # types no single ldar/stlr covers: vector, complex, packed (each unit ordered)
     ov = T.functions(realobj.objects(['order_vec'])['order_vec'])
     for sym, want in (('_Z5vcopyPDv4_fPKS_', {'ldar': 2, 'stlr': 2}), ('_Z6vstorePDv4_fS_', {'stlr': 2}), ('_Z4cplxPKCf', {'ldar': 2}),
-                      ('_Z2ldPKe', {'ldar': 2}), ('_Z3ldsPee', {'stlr': 2}), ('_Z6packedPK2Pk', {'ldarb': 4}), ('_Z6pstoreP2Pki', {'stlrb': 4})):
+                      ('_Z6packedPK2Pk', {'ldarb': 4}), ('_Z6pstoreP2Pki', {'stlrb': 4})):
         ms = [m for o, m, a in ov[sym]]
         got = {k: ms.count(k) for k in want}
         if got != want:

@@ -65,6 +65,7 @@
 #include "dominance.h"
 #include "tree-cfg.h"
 #include "ssa.h"
+#include "tree-into-ssa.h"
 #include "varasm.h"
 #include "output.h"
 #include "attr-fnspec.h"
@@ -86,7 +87,7 @@
 int plugin_is_GPL_compatible;   // the plugin interface asks for it; the code is MIT (LICENSE), which is compatible
 
 static bool verbose, verbose_sites;
-struct counts { unsigned long ldar, stlr, fence_ld, fence_st, fence_resume; };
+struct counts { unsigned long ldar, stlr; };
 static counts unit_total;
 static bool args_rtl = true;
 static unsigned long calls_reordered, calls_skipped;
@@ -296,14 +297,28 @@ static bool bitfield_ref(tree t) {
   return TREE_CODE(t) == BIT_FIELD_REF || (TREE_CODE(t) == COMPONENT_REF && DECL_BIT_FIELD(TREE_OPERAND(t, 1)));
 }
 
+// BIT-FIELD UNIT. A possibly-shared bit-field access is an access of the field's allocation unit: DECL_BIT_FIELD_REPRESENTATIVE
+// (the layout's own representative, a naturally aligned integer field that contains the bit-field and nothing outside the record).
+// This is the x86 code's own access, which loads and stores the unit. Result: the representative's reference, the bit offset of
+// the field in it and its width. false when the field has no representative, or the unit is no ldar/stlr unit: compile error.
+static bool bitfield_unit(tree t, tree *ur, HOST_WIDE_INT *off, HOST_WIDE_INT *sz) {
+  if (TREE_CODE(t) != COMPONENT_REF) return false;
+  tree f = TREE_OPERAND(t, 1), r = DECL_BIT_FIELD_REPRESENTATIVE(f);
+  if (!r || !tree_fits_shwi_p(bit_position(f)) || !tree_fits_shwi_p(bit_position(r)) || !DECL_SIZE(f) || !tree_fits_uhwi_p(DECL_SIZE(f)) ||
+      !DECL_SIZE(r) || !tree_fits_uhwi_p(DECL_SIZE(r)))
+    return false;
+  *off = tree_to_shwi(bit_position(f)) - tree_to_shwi(bit_position(r));
+  *sz = tree_to_uhwi(DECL_SIZE(f));
+  if (*off < 0 || *sz <= 0 || *sz > 64 || *off + *sz > (HOST_WIDE_INT)tree_to_uhwi(DECL_SIZE(r))) return false;
+  *ur = build3(COMPONENT_REF, TREE_TYPE(r), unshare_expr(TREE_OPERAND(t, 0)), r, NULL_TREE);
+  return atomic_index(*ur) >= 0;
+}
+
 static tree uint_type(int idx) {
   static const int bits[] = {8, 16, 32, 64};
   return build_nonstandard_integer_type(bits[idx], 1);
 }
 
-static gimple *fence(enum memmodel m) {
-  return gimple_build_call(builtin_decl_explicit(BUILT_IN_ATOMIC_THREAD_FENCE), 1, build_int_cst(integer_type_node, m));
-}
 
 // force_gimple_operand replaces its sequence; gimplify into a fresh one and append it
 // mark a declaration as living in memory: its address is about to be taken. A gimplifier temporary of a register type is
@@ -340,93 +355,9 @@ static counts *cur;   // the counters of the function being ordered
 // totality (R9): `ref = ...` / `... = ref` forms ordered scalar-wise where expressible, fenced otherwise
 static void order_single(gimple_stmt_iterator *gsi);
 
-// ORDER-CONT: where the acquire fence after a load goes when the statement ends its block.
-//
-// The acquire fence (dmb ishld) after a load L orders L before every later access of the same thread. A later access
-// after a block-ending statement S is reached only along S's continuation:
-//   (a) S's fall-through edge, or
-//   (b) a resumption point: an EH landing pad, or the point after a returns-twice call (the setjmp family,
-//       __builtin_setjmp_receiver, a nonlocal-goto receiver) in this function or in another frame (longjmp, unwinding).
-// Rule: (1) a block-ending S with a fall-through edge gets the fence on that edge. (2) Every resumption point of every
-// function this plugin orders begins with the same acquire fence (add_resume_fences): the head of every block that is
-// the target of an EDGE_EH edge; right AFTER a returns-twice call or __builtin_setjmp_receiver (execution resumes after
-// the call, not before it); the head of every other block that is the target of an EDGE_ABNORMAL edge (a nonlocal
-// label). (3) A block-ending S without a fall-through edge (a noreturn call such as __builtin_longjmp, a resx) needs
-// nothing on its other paths: every continuation of S starts at a resumption point or does not exist. No error path.
-// Proof: TSO orders a thread's accesses in program order; every program-order successor of S lies on the fall-through
-// edge or after a resumption point; each of those begins with the fence; extra fences on other incoming paths of a
-// resumption point only add order. Scope: native code that loads fnvnx_order. Nonlocal entries land at native
-// receivers (which begin with the fence above), and every lifted access carries its own ordering (L3a, lifter rule R9).
-static void fence_after(gimple_stmt_iterator *gsi, enum memmodel m) {
-  gimple *stmt = gsi_stmt(*gsi);
-  if (stmt_ends_bb_p(stmt)) {
-    edge e = find_fallthru_edge(gimple_bb(stmt)->succs);
-    if (!e) return;   // no fall-through edge: covered by ORDER-CONT (2), counts nothing
-    gsi_insert_on_edge_immediate(e, fence(m));
-  } else {
-    gsi_insert_after(gsi, fence(m), GSI_SAME_STMT);
-  }
-  (m == MEMMODEL_ACQUIRE ? cur->fence_ld : cur->fence_st)++;
-}
-
-static bool resume_call_p(gimple *stmt) {
-  gcall *call = dyn_cast<gcall *>(stmt);
-  if (!call) return false;
-  if (gimple_call_flags(call) & ECF_RETURNS_TWICE) return true;
-  tree fn = gimple_call_fndecl(call);
-  return fn && fndecl_built_in_p(fn, BUILT_IN_SETJMP_RECEIVER);
-}
-
-// FENCE-MERGE: a resume fence is not inserted where the statement right next to it, in the same block with nothing between,
-// already is the identical acquire fence (dmb ishld): two equal fences in a row order exactly what one orders.
-static bool acquire_fence_p(gimple *stmt) {
-  gcall *call = stmt ? dyn_cast<gcall *>(stmt) : NULL;
-  if (!call || !gimple_call_builtin_p(call, BUILT_IN_ATOMIC_THREAD_FENCE)) return false;
-  tree m = gimple_call_arg(call, 0);
-  return TREE_CODE(m) == INTEGER_CST && tree_to_uhwi(m) == MEMMODEL_ACQUIRE;
-}
-
-// ORDER-CONT (2): the fence at every resumption point of the function. Run after the per-statement walk (the fences
-// are then not visited as accesses).
-static void add_resume_fences(function *fun) {
-  std::vector<gimple *> after;
-  std::vector<basic_block> heads;
-  basic_block bb;
-  FOR_EACH_BB_FN(bb, fun) {
-    for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi))
-      if (resume_call_p(gsi_stmt(gsi))) after.push_back(gsi_stmt(gsi));
-    bool head = false;
-    edge e; edge_iterator ei;
-    FOR_EACH_EDGE(e, ei, bb->preds) {
-      if (e->flags & EDGE_EH) head = true;
-      else if (e->flags & EDGE_ABNORMAL) {
-        gimple_stmt_iterator g = gsi_after_labels(bb);
-        if (gsi_end_p(g) || !resume_call_p(gsi_stmt(g))) head = true;   // else the fence after that call covers it
-      }
-    }
-    if (head) heads.push_back(bb);
-  }
-  for (gimple *s : after) {
-    gimple_stmt_iterator g = gsi_for_stmt(s);
-    if (stmt_ends_bb_p(s)) {
-      edge e = find_fallthru_edge(gimple_bb(s)->succs);
-      if (!e) continue;
-      gsi_insert_on_edge_immediate(e, fence(MEMMODEL_ACQUIRE));
-    } else {
-      gimple_stmt_iterator nx = g;
-      gsi_next(&nx);
-      if (!gsi_end_p(nx) && acquire_fence_p(gsi_stmt(nx))) continue;   // FENCE-MERGE
-      gsi_insert_after(&g, fence(MEMMODEL_ACQUIRE), GSI_SAME_STMT);
-    }
-    cur->fence_resume++;
-  }
-  for (basic_block b : heads) {
-    gimple_stmt_iterator g = gsi_after_labels(b);
-    if (!gsi_end_p(g) && acquire_fence_p(gsi_stmt(g))) continue;   // FENCE-MERGE
-    gsi_insert_before(&g, fence(MEMMODEL_ACQUIRE), GSI_SAME_STMT);
-    cur->fence_resume++;
-  }
-}
+// ONE FORM. Every possibly-shared access leaves this pass as an atomic builtin (__atomic_load_N acquire, __atomic_store_N release; ldar
+// and stlr) and nothing else: there is no fence around a plain access. ldar is an acquire of its own instruction, so it orders every later
+// access of the thread on every path, the exception edge and a setjmp resumption included; no fence at a resumption point is needed.
 
 // a temporary of any type: create_tmp_var refuses a type that must live in memory (TREE_ADDRESSABLE: a C++ class with a
 // non-trivial copy), the raw form takes it
@@ -437,12 +368,18 @@ static tree make_tmp(tree ty, const char *name) {
   return d;
 }
 
+// a temporary holding a value (the pass runs on SSA form): an SSA name for a register type, a memory temporary otherwise
+static tree make_val(tree ty, const char *name) {
+  if (is_gimple_reg_type(ty) && !TREE_ADDRESSABLE(ty)) return make_ssa_name(ty);
+  return make_tmp(ty, name);
+}
+
 // an operand that is a shared memory reference but sits where only a value can (a call argument, a return value, a
 // condition, an arithmetic operand): read it into a local first with an ordinary assignment, ordered as any other
 // load, and use the local
 static void hoist_read(gimple_stmt_iterator *gsi, gimple *stmt, unsigned i) {
   tree op = gimple_op(stmt, i);
-  tree tmp = make_tmp(TREE_TYPE(op), "order_a");
+  tree tmp = make_val(TREE_TYPE(op), "order_a");
   gimple *as = gimple_build_assign(tmp, op);
   gimple_set_location(as, gimple_location(stmt));
   gsi_insert_before(gsi, as, GSI_SAME_STMT);
@@ -461,233 +398,7 @@ static bool pointer_to_constant(tree a) {
   return base && (TREE_CODE(base) == STRING_CST || readonly_object(base));
 }
 
-// FOLDSET-BEGIN  generated by gen_foldset.py from the pinned gcc-13.3.0.tar.xz (sha256 0845e9621c9543a13f484e94584a49ffc0129970e9914624235fc1d061a0c083)
-// gcc/gimple-fold.cc sha256 f999480bbdeef63afc3679ae59cd3134a83ece89ec477b5c9b4464c6fb1e2875, gcc/builtins.def sha256 bbd89bafc02c73b4ec6b15b4322fc517fa8fe58ded45a747892b0e4f12d78d0b; do not edit
-static const struct { built_in_function code; const char *where; } fold_set[] = {
-  {BUILT_IN_BCMP, "gimple_fold_builtin gimple-fold.cc:5004"},
-  {BUILT_IN_BCOPY, "gimple_fold_builtin gimple-fold.cc:5006"},
-  {BUILT_IN_BZERO, "gimple_fold_builtin gimple-fold.cc:5008"},
-  {BUILT_IN_MEMSET, "gimple_fold_builtin gimple-fold.cc:5011"},
-  {BUILT_IN_MEMCPY, "gimple_fold_builtin gimple-fold.cc:5015"},
-  {BUILT_IN_MEMPCPY, "gimple_fold_builtin gimple-fold.cc:5016"},
-  {BUILT_IN_MEMMOVE, "gimple_fold_builtin gimple-fold.cc:5017"},
-  {BUILT_IN_SPRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5020"},
-  {BUILT_IN_VSPRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5021"},
-  {BUILT_IN_STRCAT_CHK, "gimple_fold_builtin gimple-fold.cc:5023"},
-  {BUILT_IN_STRNCAT_CHK, "gimple_fold_builtin gimple-fold.cc:5025"},
-  {BUILT_IN_STRLEN, "gimple_fold_builtin gimple-fold.cc:5027"},
-  {BUILT_IN_STRCPY, "gimple_fold_builtin gimple-fold.cc:5029"},
-  {BUILT_IN_STRNCPY, "gimple_fold_builtin gimple-fold.cc:5033"},
-  {BUILT_IN_STRCAT, "gimple_fold_builtin gimple-fold.cc:5038"},
-  {BUILT_IN_STRNCAT, "gimple_fold_builtin gimple-fold.cc:5041"},
-  {BUILT_IN_INDEX, "gimple_fold_builtin gimple-fold.cc:5043"},
-  {BUILT_IN_STRCHR, "gimple_fold_builtin gimple-fold.cc:5044"},
-  {BUILT_IN_RINDEX, "gimple_fold_builtin gimple-fold.cc:5046"},
-  {BUILT_IN_STRRCHR, "gimple_fold_builtin gimple-fold.cc:5047"},
-  {BUILT_IN_STRSTR, "gimple_fold_builtin gimple-fold.cc:5049"},
-  {BUILT_IN_STRCMP, "gimple_fold_builtin gimple-fold.cc:5051"},
-  {BUILT_IN_STRCMP_EQ, "gimple_fold_builtin gimple-fold.cc:5052"},
-  {BUILT_IN_STRCASECMP, "gimple_fold_builtin gimple-fold.cc:5053"},
-  {BUILT_IN_STRNCMP, "gimple_fold_builtin gimple-fold.cc:5054"},
-  {BUILT_IN_STRNCMP_EQ, "gimple_fold_builtin gimple-fold.cc:5055"},
-  {BUILT_IN_STRNCASECMP, "gimple_fold_builtin gimple-fold.cc:5056"},
-  {BUILT_IN_MEMCHR, "gimple_fold_builtin gimple-fold.cc:5058"},
-  {BUILT_IN_FPUTS, "gimple_fold_builtin gimple-fold.cc:5060"},
-  {BUILT_IN_FPUTS_UNLOCKED, "gimple_fold_builtin gimple-fold.cc:5063"},
-  {BUILT_IN_MEMCPY_CHK, "gimple_fold_builtin gimple-fold.cc:5066"},
-  {BUILT_IN_MEMPCPY_CHK, "gimple_fold_builtin gimple-fold.cc:5067"},
-  {BUILT_IN_MEMMOVE_CHK, "gimple_fold_builtin gimple-fold.cc:5068"},
-  {BUILT_IN_MEMSET_CHK, "gimple_fold_builtin gimple-fold.cc:5069"},
-  {BUILT_IN_STPCPY, "gimple_fold_builtin gimple-fold.cc:5076"},
-  {BUILT_IN_STRCPY_CHK, "gimple_fold_builtin gimple-fold.cc:5078"},
-  {BUILT_IN_STPCPY_CHK, "gimple_fold_builtin gimple-fold.cc:5079"},
-  {BUILT_IN_STRNCPY_CHK, "gimple_fold_builtin gimple-fold.cc:5085"},
-  {BUILT_IN_STPNCPY_CHK, "gimple_fold_builtin gimple-fold.cc:5086"},
-  {BUILT_IN_SNPRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5093"},
-  {BUILT_IN_VSNPRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5094"},
-  {BUILT_IN_FPRINTF, "gimple_fold_builtin gimple-fold.cc:5097"},
-  {BUILT_IN_FPRINTF_UNLOCKED, "gimple_fold_builtin gimple-fold.cc:5098"},
-  {BUILT_IN_VFPRINTF, "gimple_fold_builtin gimple-fold.cc:5099"},
-  {BUILT_IN_FPRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5109"},
-  {BUILT_IN_VFPRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5110"},
-  {BUILT_IN_PRINTF, "gimple_fold_builtin gimple-fold.cc:5120"},
-  {BUILT_IN_PRINTF_UNLOCKED, "gimple_fold_builtin gimple-fold.cc:5121"},
-  {BUILT_IN_VPRINTF, "gimple_fold_builtin gimple-fold.cc:5122"},
-  {BUILT_IN_PRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5129"},
-  {BUILT_IN_VPRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5130"},
-  {BUILT_IN_ACC_ON_DEVICE, "gimple_fold_builtin gimple-fold.cc:5137"},
-  {BUILT_IN_REALLOC, "gimple_fold_builtin gimple-fold.cc:5140"},
-  {BUILT_IN_CLEAR_PADDING, "gimple_fold_builtin gimple-fold.cc:5143"},
-};
-// builtins with no library function that take a pointer (builtins.def line)
-static const struct { built_in_function code; int line; } nolib_ptr[] = {
-  {BUILT_IN_NONE, 287},
-  {BUILT_IN_SADD_OVERFLOW, 919},
-  {BUILT_IN_SADDL_OVERFLOW, 920},
-  {BUILT_IN_SADDLL_OVERFLOW, 921},
-  {BUILT_IN_SSUB_OVERFLOW, 922},
-  {BUILT_IN_SSUBL_OVERFLOW, 923},
-  {BUILT_IN_SSUBLL_OVERFLOW, 924},
-  {BUILT_IN_SMUL_OVERFLOW, 925},
-  {BUILT_IN_SMULL_OVERFLOW, 926},
-  {BUILT_IN_SMULLL_OVERFLOW, 927},
-  {BUILT_IN_UADD_OVERFLOW, 928},
-  {BUILT_IN_UADDL_OVERFLOW, 929},
-  {BUILT_IN_UADDLL_OVERFLOW, 930},
-  {BUILT_IN_USUB_OVERFLOW, 931},
-  {BUILT_IN_USUBL_OVERFLOW, 932},
-  {BUILT_IN_USUBLL_OVERFLOW, 933},
-  {BUILT_IN_UMUL_OVERFLOW, 934},
-  {BUILT_IN_UMULL_OVERFLOW, 935},
-  {BUILT_IN_UMULLL_OVERFLOW, 936},
-  {BUILT_IN_AGGREGATE_INCOMING_ADDRESS, 941},
-  {BUILT_IN_APPLY, 943},
-  {BUILT_IN_APPLY_ARGS, 944},
-  {BUILT_IN_DWARF_CFA, 970},
-  {BUILT_IN_EH_RETURN, 972},
-  {BUILT_IN_ASSUME_ALIGNED, 983},
-  {BUILT_IN_EXTEND_POINTER, 984},
-  {BUILT_IN_EXTRACT_RETURN_ADDR, 985},
-  {BUILT_IN_FRAME_ADDRESS, 991},
-  {BUILT_IN_FROB_RETURN_ADDR, 994},
-  {BUILT_IN_INIT_DWARF_REG_SIZES, 997},
-  {BUILT_IN_LONGJMP, 1029},
-  {BUILT_IN_NEXT_ARG, 1032},
-  {BUILT_IN_PREFETCH, 1042},
-  {BUILT_IN_RETURN, 1044},
-  {BUILT_IN_RETURN_ADDRESS, 1045},
-  {BUILT_IN_SAVEREGS, 1046},
-  {BUILT_IN_SETJMP, 1047},
-  {BUILT_IN_UPDATE_SETJMP_BUF, 1054},
-  {BUILT_IN_VA_COPY, 1055},
-  {BUILT_IN_VA_END, 1056},
-  {BUILT_IN_VA_START, 1057},
-  {BUILT_IN_INIT_TRAMPOLINE, 1064},
-  {BUILT_IN_INIT_HEAP_TRAMPOLINE, 1065},
-  {BUILT_IN_ADJUST_TRAMPOLINE, 1066},
-  {BUILT_IN_INIT_DESCRIPTOR, 1067},
-  {BUILT_IN_ADJUST_DESCRIPTOR, 1068},
-  {BUILT_IN_NONLOCAL_GOTO, 1069},
-  {BUILT_IN_SETJMP_SETUP, 1072},
-  {BUILT_IN_SETJMP_RECEIVER, 1073},
-  {BUILT_IN_STACK_SAVE, 1076},
-  {BUILT_IN_STACK_RESTORE, 1077},
-  {BUILT_IN_ALLOCA_WITH_ALIGN, 1078},
-  {BUILT_IN_ALLOCA_WITH_ALIGN_AND_MAX, 1079},
-  {BUILT_IN_MEMCMP_EQ, 1083},
-  {BUILT_IN_STRCMP_EQ, 1087},
-  {BUILT_IN_STRNCMP_EQ, 1088},
-  {BUILT_IN_OBJECT_SIZE, 1091},
-  {BUILT_IN_DYNAMIC_OBJECT_SIZE, 1092},
-  {BUILT_IN_SPECULATION_SAFE_VALUE_PTR, 1148},
-  {BUILT_IN_UNWIND_RESUME, 1164},
-  {BUILT_IN_CXA_END_CLEANUP, 1165},
-  {BUILT_IN_EH_POINTER, 1166},
-  {BUILT_IN_EH_FILTER, 1167},
-  {BUILT_IN_EH_COPY_VALUES, 1168},
-};
-// the memory-order parameters (bit i = argument i) of the __atomic builtins, sync-builtins.def line
-static const struct { built_in_function code; unsigned mask; int line; } atomic_order[] = {
-  {BUILT_IN_ATOMIC_TEST_AND_SET, 0x2, 262},
-  {BUILT_IN_ATOMIC_CLEAR, 0x2, 265},
-  {BUILT_IN_ATOMIC_EXCHANGE, 0x10, 268},
-  {BUILT_IN_ATOMIC_EXCHANGE_1, 0x4, 274},
-  {BUILT_IN_ATOMIC_EXCHANGE_2, 0x4, 277},
-  {BUILT_IN_ATOMIC_EXCHANGE_4, 0x4, 280},
-  {BUILT_IN_ATOMIC_EXCHANGE_8, 0x4, 283},
-  {BUILT_IN_ATOMIC_EXCHANGE_16, 0x4, 286},
-  {BUILT_IN_ATOMIC_LOAD, 0x8, 290},
-  {BUILT_IN_ATOMIC_LOAD_1, 0x2, 297},
-  {BUILT_IN_ATOMIC_LOAD_2, 0x2, 300},
-  {BUILT_IN_ATOMIC_LOAD_4, 0x2, 303},
-  {BUILT_IN_ATOMIC_LOAD_8, 0x2, 306},
-  {BUILT_IN_ATOMIC_LOAD_16, 0x2, 309},
-  {BUILT_IN_ATOMIC_COMPARE_EXCHANGE, 0x30, 313},
-  {BUILT_IN_ATOMIC_COMPARE_EXCHANGE_1, 0x30, 320},
-  {BUILT_IN_ATOMIC_COMPARE_EXCHANGE_2, 0x30, 324},
-  {BUILT_IN_ATOMIC_COMPARE_EXCHANGE_4, 0x30, 328},
-  {BUILT_IN_ATOMIC_COMPARE_EXCHANGE_8, 0x30, 332},
-  {BUILT_IN_ATOMIC_COMPARE_EXCHANGE_16, 0x30, 336},
-  {BUILT_IN_ATOMIC_STORE, 0x8, 341},
-  {BUILT_IN_ATOMIC_STORE_1, 0x4, 347},
-  {BUILT_IN_ATOMIC_STORE_2, 0x4, 350},
-  {BUILT_IN_ATOMIC_STORE_4, 0x4, 353},
-  {BUILT_IN_ATOMIC_STORE_8, 0x4, 356},
-  {BUILT_IN_ATOMIC_STORE_16, 0x4, 359},
-  {BUILT_IN_ATOMIC_ADD_FETCH_1, 0x4, 366},
-  {BUILT_IN_ATOMIC_ADD_FETCH_2, 0x4, 369},
-  {BUILT_IN_ATOMIC_ADD_FETCH_4, 0x4, 372},
-  {BUILT_IN_ATOMIC_ADD_FETCH_8, 0x4, 375},
-  {BUILT_IN_ATOMIC_ADD_FETCH_16, 0x4, 378},
-  {BUILT_IN_ATOMIC_SUB_FETCH_1, 0x4, 385},
-  {BUILT_IN_ATOMIC_SUB_FETCH_2, 0x4, 388},
-  {BUILT_IN_ATOMIC_SUB_FETCH_4, 0x4, 391},
-  {BUILT_IN_ATOMIC_SUB_FETCH_8, 0x4, 394},
-  {BUILT_IN_ATOMIC_SUB_FETCH_16, 0x4, 397},
-  {BUILT_IN_ATOMIC_AND_FETCH_1, 0x4, 404},
-  {BUILT_IN_ATOMIC_AND_FETCH_2, 0x4, 407},
-  {BUILT_IN_ATOMIC_AND_FETCH_4, 0x4, 410},
-  {BUILT_IN_ATOMIC_AND_FETCH_8, 0x4, 413},
-  {BUILT_IN_ATOMIC_AND_FETCH_16, 0x4, 416},
-  {BUILT_IN_ATOMIC_NAND_FETCH_1, 0x4, 423},
-  {BUILT_IN_ATOMIC_NAND_FETCH_2, 0x4, 426},
-  {BUILT_IN_ATOMIC_NAND_FETCH_4, 0x4, 429},
-  {BUILT_IN_ATOMIC_NAND_FETCH_8, 0x4, 432},
-  {BUILT_IN_ATOMIC_NAND_FETCH_16, 0x4, 435},
-  {BUILT_IN_ATOMIC_XOR_FETCH_1, 0x4, 442},
-  {BUILT_IN_ATOMIC_XOR_FETCH_2, 0x4, 445},
-  {BUILT_IN_ATOMIC_XOR_FETCH_4, 0x4, 448},
-  {BUILT_IN_ATOMIC_XOR_FETCH_8, 0x4, 451},
-  {BUILT_IN_ATOMIC_XOR_FETCH_16, 0x4, 454},
-  {BUILT_IN_ATOMIC_OR_FETCH_1, 0x4, 461},
-  {BUILT_IN_ATOMIC_OR_FETCH_2, 0x4, 464},
-  {BUILT_IN_ATOMIC_OR_FETCH_4, 0x4, 467},
-  {BUILT_IN_ATOMIC_OR_FETCH_8, 0x4, 470},
-  {BUILT_IN_ATOMIC_OR_FETCH_16, 0x4, 473},
-  {BUILT_IN_ATOMIC_FETCH_ADD_1, 0x4, 480},
-  {BUILT_IN_ATOMIC_FETCH_ADD_2, 0x4, 483},
-  {BUILT_IN_ATOMIC_FETCH_ADD_4, 0x4, 486},
-  {BUILT_IN_ATOMIC_FETCH_ADD_8, 0x4, 489},
-  {BUILT_IN_ATOMIC_FETCH_ADD_16, 0x4, 492},
-  {BUILT_IN_ATOMIC_FETCH_SUB_1, 0x4, 499},
-  {BUILT_IN_ATOMIC_FETCH_SUB_2, 0x4, 502},
-  {BUILT_IN_ATOMIC_FETCH_SUB_4, 0x4, 505},
-  {BUILT_IN_ATOMIC_FETCH_SUB_8, 0x4, 508},
-  {BUILT_IN_ATOMIC_FETCH_SUB_16, 0x4, 511},
-  {BUILT_IN_ATOMIC_FETCH_AND_1, 0x4, 518},
-  {BUILT_IN_ATOMIC_FETCH_AND_2, 0x4, 521},
-  {BUILT_IN_ATOMIC_FETCH_AND_4, 0x4, 524},
-  {BUILT_IN_ATOMIC_FETCH_AND_8, 0x4, 527},
-  {BUILT_IN_ATOMIC_FETCH_AND_16, 0x4, 530},
-  {BUILT_IN_ATOMIC_FETCH_NAND_1, 0x4, 537},
-  {BUILT_IN_ATOMIC_FETCH_NAND_2, 0x4, 540},
-  {BUILT_IN_ATOMIC_FETCH_NAND_4, 0x4, 543},
-  {BUILT_IN_ATOMIC_FETCH_NAND_8, 0x4, 546},
-  {BUILT_IN_ATOMIC_FETCH_NAND_16, 0x4, 549},
-  {BUILT_IN_ATOMIC_FETCH_XOR_1, 0x4, 556},
-  {BUILT_IN_ATOMIC_FETCH_XOR_2, 0x4, 559},
-  {BUILT_IN_ATOMIC_FETCH_XOR_4, 0x4, 562},
-  {BUILT_IN_ATOMIC_FETCH_XOR_8, 0x4, 565},
-  {BUILT_IN_ATOMIC_FETCH_XOR_16, 0x4, 568},
-  {BUILT_IN_ATOMIC_FETCH_OR_1, 0x4, 576},
-  {BUILT_IN_ATOMIC_FETCH_OR_2, 0x4, 579},
-  {BUILT_IN_ATOMIC_FETCH_OR_4, 0x4, 582},
-  {BUILT_IN_ATOMIC_FETCH_OR_8, 0x4, 585},
-  {BUILT_IN_ATOMIC_FETCH_OR_16, 0x4, 588},
-  {BUILT_IN_ATOMIC_THREAD_FENCE, 0x1, 601},
-  {BUILT_IN_ATOMIC_SIGNAL_FENCE, 0x1, 605},
-  {BUILT_IN_ATOMIC_FERAISEEXCEPT, 0x1, 612},
-};
-// FOLDSET-END
-
-static bool in_fold_set(built_in_function c) {
-  for (const auto &e : fold_set) if (e.code == c) return true;
-  return false;
-}
-static bool in_nolib_ptr(built_in_function c) {
-  for (const auto &e : nolib_ptr) if (e.code == c) return true;
-  return false;
-}
+#include "atomic_order.inc"   // generated by gen_atomic_order.py from the pinned GCC 13.3.0 tarball (sha256 inside)
 
 // the non-builtin declaration of a builtin's library function (same name, same type, no built-in class), one per name.
 // GCC rewrites a call into memory accesses only for a call whose callee is a built-in declaration (gimple_fold_builtin,
@@ -702,13 +413,6 @@ static tree library_decl(tree fn) {
   }
   return d;
 }
-
-// REDIRECT RECORD (.fnvnx.redir, no SHF_ALLOC): one line `symbol<TAB>kind` per library function that a builtin call of
-// this unit was redirected to. kind `string-op` when the builtin is in the fold set (gimple-fold.cc's folder rewrites it:
-// the mem*/str* family, their _chk forms and the printf family that folds into them); kind `libcall` for every other
-// redirected library builtin (a math function with an output pointer, for example). Every redirected call is
-// `dmb ish; bl <symbol>; dmb ish`.
-static std::set<std::string> redir_lines;
 
 // ATOMICS (R9: the x86 mapping). Every memory-order argument of an __atomic builtin is raised to seq_cst: on this target
 // ldar serves acquire and seq_cst loads, stlr release and seq_cst stores, and a read-modify-write or compare-exchange of
@@ -725,6 +429,59 @@ static void raise_atomic_orders(gcall *call, built_in_function code) {
 
 static void order_single(gimple_stmt_iterator *gsi);
 
+static std::set<basic_block> generated_bbs;   // blocks this pass created: their accesses are already ordered, never revisited
+
+// CAS EXPECTED. `__atomic_compare_exchange(ptr, expected, desired, ...)` reads `*expected` and, on failure only, writes the observed value
+// to it: two plain accesses inside the builtin when `expected` points to possibly shared memory. The builtin works on a private
+// temporary instead: `tmp = *expected` (an ordered load), the call on &tmp, and on failure (result 0) `*expected = tmp` (an ordered
+// store). On success nothing is stored, as on x86. An `expected` that is the address of an unshared local stays as it is. The generic
+// form (`desired` is a pointer too) is not an __atomic_compare_exchange_N: a compile error.
+static void cas_expected(gimple_stmt_iterator *gsi, gcall *call, built_in_function code) {
+  if (code == BUILT_IN_ATOMIC_COMPARE_EXCHANGE) {
+    error_at(gimple_location(call), "%<fnvnx_order%>: the generic __atomic_compare_exchange reads and writes through two pointers; use the sized form");
+    return;
+  }
+  tree e = gimple_call_arg(call, 1);
+  if (pointer_to_constant(e) || (TREE_CODE(e) == ADDR_EXPR && local_unshared(get_base_address(TREE_OPERAND(e, 0))))) return;
+  tree pt = TREE_TYPE(TREE_TYPE(e));
+  tree tmp = make_tmp(pt, "order_e");
+  force_addressable(tmp);
+  location_t loc = gimple_location(call);
+  tree ref = build2(MEM_REF, pt, e, build_int_cst(TREE_TYPE(e), 0));
+  gimple *in = gimple_build_assign(tmp, ref);
+  gimple_set_location(in, loc);
+  gsi_insert_before(gsi, in, GSI_SAME_STMT);
+  gimple_stmt_iterator g = gsi_for_stmt(in);
+  order_single(&g);
+  *gsi = gsi_for_stmt(call);
+  gimple_call_set_arg(call, 1, build_fold_addr_expr(tmp));
+  tree res = gimple_call_lhs(call);
+  if (!res) { res = make_ssa_name(boolean_type_node); gimple_call_set_lhs(call, res); }
+  update_stmt(call);
+  // on failure: *expected = tmp, in a block of its own after the call
+  basic_block bb = gimple_bb(call);
+  edge fe = split_block(bb, call);
+  basic_block tail = fe->dest, then = create_empty_bb(bb);
+  gimple_stmt_iterator last = gsi_last_bb(bb);
+  gsi_insert_after(&last, gimple_build_cond(EQ_EXPR, res, build_zero_cst(TREE_TYPE(res)), NULL_TREE, NULL_TREE), GSI_NEW_STMT);
+  fe->flags = (fe->flags & ~EDGE_FALLTHRU) | EDGE_FALSE_VALUE;
+  edge te = make_edge(bb, then, EDGE_TRUE_VALUE);
+  make_single_succ_edge(then, tail, EDGE_FALLTHRU);
+  te->probability = profile_probability::unlikely();
+  fe->probability = te->probability.invert();
+  then->count = bb->count.apply_probability(te->probability);
+  generated_bbs.insert(then);
+  if (current_loops) add_bb_to_loop(then, bb->loop_father);
+  free_dominance_info(CDI_DOMINATORS);
+  free_dominance_info(CDI_POST_DOMINATORS);
+  gimple *out = gimple_build_assign(unshare_expr(ref), tmp);
+  gimple_set_location(out, loc);
+  gimple_stmt_iterator ts = gsi_start_bb(then);
+  gsi_insert_after(&ts, out, GSI_NEW_STMT);
+  gimple_stmt_iterator og = gsi_for_stmt(out);
+  order_single(&og);
+}
+
 // a call GCC may expand or fold into plain accesses that reads or writes memory through its pointer arguments: the memory
 // is no GIMPLE operand. GCC's own fnspec of the callee says which pointer arguments it may read or write (unknown spec:
 // all, both ways). Pointer arguments that cannot be shared memory (the address of a constant, of an unshared local) are
@@ -735,6 +492,7 @@ static void order_builtin_call(gimple_stmt_iterator *gsi, gcall *call) {
   built_in_function code = DECL_FUNCTION_CODE(fn);
   if (code >= BUILT_IN_SYNC_FETCH_AND_ADD_N && code <= BUILT_IN_ATOMIC_FERAISEEXCEPT) {
     raise_atomic_orders(call, code);
+    if (code >= BUILT_IN_ATOMIC_COMPARE_EXCHANGE && code <= BUILT_IN_ATOMIC_COMPARE_EXCHANGE_16) cas_expected(gsi, call, code);
     return;
   }
   if (gimple_call_flags(call) & ECF_CONST) return;
@@ -752,83 +510,40 @@ static void order_builtin_call(gimple_stmt_iterator *gsi, gcall *call) {
   if (!rd && !wr) return;
   const char *asmname = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fn));
   if (strncmp(asmname, "__builtin_", 10) != 0) {
-    // REDIRECT. Every GCC rewrite of a call into memory accesses is keyed on the callee being a built-in declaration
+    // LIBRARY CALL. Every GCC rewrite of a call into memory accesses is keyed on the callee being a built-in declaration
     // (DECL_BUILT_IN_CLASS: gimple_fold_builtin, match.pd, expand_builtin); the library declaration has none, so the call
-    // survives to the object file as a call. A call is no plain access; it is bracketed by full fences (dmb ish before and
-    // after), the order the x86 locked/string instructions give the accesses it contains.
+    // survives to the object file as a plain call. The callee is a function of the runtime (newlib, libstdc++, libgcc), which
+    // is compiled with this plugin: it orders its own accesses, and a call is no access of the caller.
     tree lib = library_decl(fn);
     gimple_call_set_fndecl(call, lib);
     gimple_call_set_fntype(call, TREE_TYPE(lib));
-    redir_lines.insert(std::string(asmname) + (in_fold_set(code) ? "\tstring-op" : "\tlibcall"));
-    gsi_insert_before(gsi, fence(MEMMODEL_SEQ_CST), GSI_SAME_STMT);
-    fence_after(gsi, MEMMODEL_SEQ_CST);
-    cur->fence_st++;
     return;
   }
-  // NO LIBRARY FUNCTION (builtins.def: nolib_ptr). The builtin reads or writes through a pointer and cannot be redirected;
-  // GCC's own flags say whether it touches memory at all (ECF_NOVOPS: no virtual operands). Otherwise each pointer
-  // operand that may be shared is bounced through an unshared temporary of its pointee type: read in before the call
-  // when the spec says it may be read, written back after when it may be written, both created ordered.
+  // NO LIBRARY FUNCTION. The builtin has no callee to re-point to and GCC expands it inline at RTL expansion, after this pass, with
+  // plain accesses through its pointer operands. GCC's own flags say whether it touches memory at all (ECF_NOVOPS: no virtual
+  // operands); one that does and reaches this point is a build error naming the builtin. (A builtin GCC expands before this pass is
+  // ordinary GIMPLE here and is ordered as any access.)
   if (gimple_call_flags(call) & ECF_NOVOPS) return;
-  if (!in_nolib_ptr(code)) {
-    error_at(gimple_location(call), "fnvnx_order: builtin %qs reads or writes shared memory and is neither in the generated "
-             "table of builtins without a library function nor redirectable", asmname);
-    return;
-  }
-  // OPAQUE. A pointer operand whose pointee has no size (void *: the jmp_buf of __builtin_setjmp/longjmp, the argument block
-  // of __builtin_apply, ...) cannot be bounced. The builtin is the compiler's inline form of a library function (setjmp,
-  // longjmp, ...) whose accesses the exe makes inside that function; so it is bracketed like a call: dmb ish before and
-  // after, recorded with kind `inline-builtin`. A builtin that ends a basic block (longjmp, a nonlocal goto) is treated
-  // the same way: it cannot be followed by a copy-out.
-  bool opaque = false;
-  for (unsigned i = 0; i < gimple_call_num_args(call); i++) {
-    tree a = gimple_call_arg(call, i);
-    if (!POINTER_TYPE_P(TREE_TYPE(a)) || pointer_to_constant(a)) continue;
-    if (TREE_CODE(a) == ADDR_EXPR && local_unshared(get_base_address(TREE_OPERAND(a, 0)))) continue;
-    tree pt = TREE_TYPE(TREE_TYPE(a));
-    if (VOID_TYPE_P(pt) || !COMPLETE_TYPE_P(pt) || !TYPE_SIZE_UNIT(pt) || !tree_fits_uhwi_p(TYPE_SIZE_UNIT(pt))) opaque = true;
-  }
-  if (opaque || stmt_ends_bb_p(call)) {
-    redir_lines.insert(std::string(asmname) + "\tinline-builtin");
-    gsi_insert_before(gsi, fence(MEMMODEL_SEQ_CST), GSI_SAME_STMT);
-    fence_after(gsi, MEMMODEL_SEQ_CST);
-    cur->fence_st++;
-    return;
-  }
-  gimple_stmt_iterator after = *gsi;
-  for (unsigned i = 0; i < gimple_call_num_args(call); i++) {
-    tree a = gimple_call_arg(call, i);
-    if (!POINTER_TYPE_P(TREE_TYPE(a)) || pointer_to_constant(a)) continue;
-    if (TREE_CODE(a) == ADDR_EXPR && local_unshared(get_base_address(TREE_OPERAND(a, 0)))) continue;
-    tree pt = TREE_TYPE(TREE_TYPE(a));
-    bool known = spec.known_p() && spec.arg_specified_p(i);
-    bool r = !known || spec.arg_maybe_read_p(i), w = !known || spec.arg_maybe_written_p(i);
-    tree tmp = make_tmp(pt, "order_b");
-    force_addressable(tmp);
-    tree ref = build2(MEM_REF, pt, a, build_int_cst(TREE_TYPE(a), 0));
-    if (r) {
-      gimple *in = gimple_build_assign(tmp, ref);
-      gimple_set_location(in, gimple_location(call));
-      gsi_insert_before(gsi, in, GSI_SAME_STMT);
-      gimple_stmt_iterator g = gsi_for_stmt(in);
-      order_single(&g);
-      *gsi = gsi_for_stmt(call);
-    }
-    gimple_call_set_arg(call, i, build_fold_addr_expr(tmp));
-    if (w) {
-      gimple *out = gimple_build_assign(unshare_expr(ref), tmp);
-      gimple_set_location(out, gimple_location(call));
-      gsi_insert_after(&after, out, GSI_SAME_STMT);
-      gimple_stmt_iterator g = gsi_for_stmt(out);
-      order_single(&g);
-      *gsi = gsi_for_stmt(call);
-      after = *gsi;
-    }
-  }
+  error_at(gimple_location(call), "%<fnvnx_order%>: builtin %qs has no library function, is expanded at RTL expansion, and reads or "
+           "writes possibly shared memory through a pointer operand", asmname);
 }
 
 // one statement. Every memory operand is classified (local or read-only: plain; else ordered or fenced); a statement
 // kind with a memory operand that no rule here covers is a compile error, never a silent plain access.
+// STORE-AFTER: `lhs = tmp` after the statement whose result went into tmp. After a statement that ends its block (a call that may
+// throw) the store goes on the fall-through edge; it is then ordered at once, as the walk does not see a block it did not reach.
+static void store_after(gimple_stmt_iterator *gsi, gimple *stmt, gimple *store) {
+  if (stmt_ends_bb_p(stmt)) {
+    edge e = find_fallthru_edge(gimple_bb(stmt)->succs);
+    if (!e) return;   // the statement never completes: the store is never executed
+    gsi_insert_on_edge_immediate(e, store);
+    gimple_stmt_iterator g = gsi_for_stmt(store);
+    order_single(&g);
+  } else {
+    gsi_insert_after(gsi, store, GSI_SAME_STMT);   // visited next
+  }
+}
+
 static void order_stmt(gimple_stmt_iterator *gsi) {
   gimple *stmt = gsi_stmt(*gsi);
   switch (gimple_code(stmt)) {
@@ -838,32 +553,38 @@ static void order_stmt(gimple_stmt_iterator *gsi) {
       for (unsigned i = 1; i < gimple_num_ops(stmt); i++)
         if (gimple_op(stmt, i) && shared_ordered(gimple_op(stmt, i))) hoist_read(gsi, stmt, i);
       if (shared_ordered(gimple_assign_lhs(stmt))) {
+        // an operation whose result goes to shared memory: into a value first, then stored ordered (the store is a single-rhs
+        // assignment, created ordered by order_single)
         tree lhs = gimple_assign_lhs(stmt);
-        if (!stmt_ends_bb_p(stmt) && is_gimple_reg_type(TREE_TYPE(lhs))) {
-          tree tmp = make_tmp(TREE_TYPE(lhs), "order_r");
-          gimple_assign_set_lhs(stmt, tmp);
-          gsi_insert_after(gsi, gimple_build_assign(lhs, tmp), GSI_SAME_STMT);   // visited next
-        } else {
-          gsi_insert_before(gsi, fence(MEMMODEL_RELEASE), GSI_SAME_STMT);
-          cur->fence_st++;
-        }
+        tree tmp = make_val(TREE_TYPE(lhs), "order_r");
+        gimple_assign_set_lhs(stmt, tmp);
+        update_stmt(stmt);
+        store_after(gsi, stmt, gimple_build_assign(lhs, tmp));
       }
       return;
     case GIMPLE_CALL: {
       // arguments that are memory (an aggregate passed by value, the static chain): read first
       for (unsigned i = 1; i < gimple_num_ops(stmt); i++)
         if (gimple_op(stmt, i) && shared_ordered(gimple_op(stmt, i))) hoist_read(gsi, stmt, i);
+      if (gimple_call_internal_p(stmt)) {
+        // an atomic internal function (a folded __atomic builtin): every memory-order argument is seq_cst, as for the builtin
+        for (const auto &e : ifn_order)
+          if (e.code == gimple_call_internal_fn(stmt))
+            for (unsigned i = 0; i < gimple_call_num_args(stmt); i++)
+              if ((e.mask & (1u << i)) && TREE_CODE(gimple_call_arg(stmt, i)) == INTEGER_CST)
+                gimple_call_set_arg(stmt, i, build_int_cst(TREE_TYPE(gimple_call_arg(stmt, i)), MEMMODEL_SEQ_CST));
+        return;
+      }
       order_builtin_call(gsi, as_a<gcall *>(stmt));
       // `ref = f()` storing into an ordered object: route the result through a temporary, and order that store
       tree lhs = gimple_call_lhs(stmt);
-      if (lhs && shared_ordered(lhs) && !stmt_ends_bb_p(stmt) && is_gimple_reg_type(TREE_TYPE(lhs))) {
-        tree tmp = make_tmp(TREE_TYPE(lhs), "order_r");
+      if (lhs && shared_ordered(lhs)) {
+        // the result goes into a value (a register-type result) or a memory temporary (an aggregate: the callee writes it
+        // through the hidden pointer, which is the callee's own ordered access), then is copied ordered
+        tree tmp = make_val(TREE_TYPE(lhs), "order_r");
         gimple_call_set_lhs(stmt, tmp);
-        gsi_insert_after(gsi, gimple_build_assign(lhs, tmp), GSI_SAME_STMT);   // visited next
-      } else if (lhs && shared_ordered(lhs)) {
-        // a return slot (aggregate): release fence before the call that stores into it
-        gsi_insert_before(gsi, fence(MEMMODEL_RELEASE), GSI_SAME_STMT);
-        cur->fence_st++;
+        update_stmt(stmt);
+        store_after(gsi, stmt, gimple_build_assign(lhs, tmp));
       }
       return;
     }
@@ -899,7 +620,6 @@ static void order_stmt(gimple_stmt_iterator *gsi) {
 // moves (padding included, as a memcpy-style aggregate copy does); the order is the program order of the loads and stores of
 // the copy, ascending: x86 TSO orders loads with loads and stores with stores, and ldar/stlr give that order on Arm.
 // Up to 16 units the copy is straight-line code (2 statements per unit); beyond that it is a loop over the units.
-static std::set<basic_block> generated_bbs;   // blocks this pass created: their accesses are already ordered, never revisited
 
 static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bool ld) {
   counts &c = *cur;
@@ -933,7 +653,10 @@ static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bo
     force_addressable(dst);
     fin = lhs;
   }
-  tree dp = address_of(dst, &pre), sp = address_of(src, &pre);
+  // pointers to the two objects, taken only where a unit needs one (a shared unit is an atomic builtin on a pointer; an unshared unit at a
+  // constant offset is a direct reference MEM[&obj + k], which takes no pointer value)
+  tree dp = NULL_TREE, sp = NULL_TREE;
+  auto getp = [&](tree &p, tree obj) { if (!p) p = address_of(obj, &pre); return p; };
   unsigned al = MIN(get_object_alignment(dst), get_object_alignment(src));
   unsigned unit = 8;
   while (unit > 1 && (size % unit || al < unit * 8)) unit >>= 1;
@@ -942,9 +665,20 @@ static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bo
   tree ity = uint_type(idx);
   tree aty = build_aligned_type(ity, unit * 8);
   tree zero = build_int_cst(ptr_type_node, 0);
-  // the statements of one unit at the pointers (dpp, spp): the load into v, then the store; the store is returned
+  // a reference to the unit at byte offset k of an unshared object, without a pointer value; NULL when the object's address is no valid
+  // MEM_REF base (a reference with a variable part)
+  auto direct = [&](tree obj, unsigned HOST_WIDE_INT k) -> tree {
+    tree base = get_base_address(obj);
+    if (!base || !DECL_P(base)) return NULL_TREE;
+    tree a = build_fold_addr_expr(obj);
+    if (!is_gimple_mem_ref_addr(a)) return NULL_TREE;
+    force_addressable(base);
+    return build2(MEM_REF, aty, a, build_int_cst(ptr_type_node, k));
+  };
+  // one unit: the load into v, then the store; the store is returned. dpp/spp: a pointer for a shared side, the unit's memory reference
+  // for an unshared one
   auto one = [&](gimple_seq *seq, tree dpp, tree spp, gimple **last) {
-    tree v = create_tmp_var(ity, "order_w");
+    tree v = make_ssa_name(ity);
     if (src_sh) {
       gcall *l = gimple_build_call(builtin_decl_explicit((built_in_function)(BUILT_IN_ATOMIC_LOAD_1 + idx)), 2, spp,
                                    build_int_cst(integer_type_node, MEMMODEL_ACQUIRE));
@@ -953,7 +687,7 @@ static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bo
       gimple_seq_add_stmt(seq, l);
       c.ldar++;
     } else {
-      gimple *l = gimple_build_assign(v, build2(MEM_REF, aty, spp, zero));
+      gimple *l = gimple_build_assign(v, spp);
       gimple_set_location(l, loc);
       gimple_seq_add_stmt(seq, l);
     }
@@ -963,7 +697,7 @@ static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bo
                             build_int_cst(integer_type_node, MEMMODEL_RELEASE));
       c.stlr++;
     } else {
-      s = gimple_build_assign(build2(MEM_REF, aty, dpp, zero), v);
+      s = gimple_build_assign(dpp, v);
     }
     gimple_set_location(s, loc);
     if (last) *last = s; else gimple_seq_add_stmt(seq, s);
@@ -974,19 +708,26 @@ static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bo
   if (n <= STRAIGHT) {
     for (unsigned HOST_WIDE_INT k = 0; k < n; k++) {
       tree off = size_int(k * unit);
-      tree dpp = k ? at(&pre, dp, off) : dp, spp = k ? at(&pre, sp, off) : sp;
+      auto unit_at = [&](tree &p, tree obj, bool shared) -> tree {
+        if (!shared)
+          if (tree d = direct(obj, k * unit)) return d;
+        tree b = k ? at(&pre, getp(p, obj), off) : getp(p, obj);
+        return shared ? b : build2(MEM_REF, aty, b, zero);
+      };
+      tree dpp = unit_at(dp, dst, st), spp = unit_at(sp, src, src_sh);
       one(&pre, dpp, spp, k + 1 == n ? &last : NULL);
     }
     gsi_insert_seq_before(gsi, pre, GSI_SAME_STMT);
-    gsi_insert_before(gsi, last, GSI_SAME_STMT);
-    // the original statement goes (gsi_replace wants the same lhs, so a nop; the register destination gets its copy)
-    gsi_replace(gsi, fin ? gimple_build_assign(fin, dst) : gimple_build_nop(), true);
+    // the last unit's store takes the original statement's place (SSA: it inherits the statement's virtual definition); a
+    // register destination gets its value from the memory temporary afterwards
+    if (fin) { gsi_insert_before(gsi, last, GSI_SAME_STMT); gsi_replace(gsi, gimple_build_assign(fin, dst), true); }
+    else gsi_replace(gsi, last, true);
     return;
   }
   // more than STRAIGHT units: a loop over units 0..n-2 (do { dst[i] = src[i]; i += unit; } while (i < (n-1)*unit)), then the
   // last unit in place of the statement: the code does not grow with the object
-  tree iv = make_tmp(sizetype, "order_i");
-  gimple_seq_add_stmt(&pre, gimple_build_assign(iv, size_zero_node));
+  getp(dp, dst);
+  getp(sp, src);   // the loop addresses both objects through pointers
   gsi_insert_seq_before(gsi, pre, GSI_SAME_STMT);
   basic_block bb = gsi_bb(*gsi);
   gimple_stmt_iterator g = *gsi;
@@ -995,14 +736,22 @@ static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bo
   basic_block tail = e->dest;
   basic_block body = create_empty_bb(bb);
   redirect_edge_succ(e, body);
+  // the induction variable is an SSA name merged by a PHI at the head of the body: 0 from the setup, the incremented value from the
+  // back edge
+  tree iv = make_ssa_name(sizetype), iv1 = make_ssa_name(sizetype);
+  edge back = make_edge(body, body, EDGE_TRUE_VALUE), out = make_edge(body, tail, EDGE_FALSE_VALUE);
+  gphi *phi = create_phi_node(iv, body);
+  add_phi_arg(phi, size_zero_node, e, UNKNOWN_LOCATION);
+  add_phi_arg(phi, iv1, back, UNKNOWN_LOCATION);
   gimple_seq bs = NULL;
-  tree dpp = at(&bs, dp, iv), spp = at(&bs, sp, iv);
+  tree dpp = at(&bs, getp(dp, dst), iv), spp = at(&bs, getp(sp, src), iv);
+  if (!st) dpp = build2(MEM_REF, aty, dpp, zero);
+  if (!src_sh) spp = build2(MEM_REF, aty, spp, zero);
   one(&bs, dpp, spp, NULL);
-  gimple_seq_add_stmt(&bs, gimple_build_assign(iv, fold_build2(PLUS_EXPR, sizetype, iv, size_int(unit))));
-  gimple_seq_add_stmt(&bs, gimple_build_cond(LT_EXPR, iv, size_int((n - 1) * unit), NULL_TREE, NULL_TREE));
+  gimple_seq_add_stmt(&bs, gimple_build_assign(iv1, PLUS_EXPR, iv, size_int(unit)));
+  gimple_seq_add_stmt(&bs, gimple_build_cond(LT_EXPR, iv1, size_int((n - 1) * unit), NULL_TREE, NULL_TREE));
   gimple_stmt_iterator bsi = gsi_start_bb(body);
   gsi_insert_seq_after(&bsi, bs, GSI_CONTINUE_LINKING);
-  edge back = make_edge(body, body, EDGE_TRUE_VALUE), out = make_edge(body, tail, EDGE_FALSE_VALUE);
   back->probability = profile_probability::very_likely();
   out->probability = back->probability.invert();
   e->probability = profile_probability::always();
@@ -1018,11 +767,14 @@ static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bo
   // the last unit replaces the statement, now the first one of the tail
   gimple_seq ls = NULL;
   tree off = size_int((n - 1) * unit);
-  one(&ls, at(&ls, dp, off), at(&ls, sp, off), &last);
+  tree ldp = at(&ls, getp(dp, dst), off), lsp = at(&ls, getp(sp, src), off);
+  if (!st) ldp = build2(MEM_REF, aty, ldp, zero);
+  if (!src_sh) lsp = build2(MEM_REF, aty, lsp, zero);
+  one(&ls, ldp, lsp, &last);
   gimple_stmt_iterator ts = gsi_for_stmt(stmt);
   gsi_insert_seq_before(&ts, ls, GSI_SAME_STMT);
-  gsi_insert_before(&ts, last, GSI_SAME_STMT);
-  gimple *fin_stmt = fin ? gimple_build_assign(fin, dst) : gimple_build_nop();
+  gimple *fin_stmt = last;
+  if (fin) { gsi_insert_before(&ts, last, GSI_SAME_STMT); fin_stmt = gimple_build_assign(fin, dst); }
   gsi_replace(&ts, fin_stmt, true);
   *gsi = gsi_for_stmt(fin_stmt);
 }
@@ -1040,7 +792,7 @@ static void order_single(gimple_stmt_iterator *gsi) {
     gimple_seq seq = NULL;
     tree p = address_of(rhs, &seq);
     tree ity = uint_type(li);
-    tree bits = create_tmp_var(ity, "order_ld");
+    tree bits = make_ssa_name(ity);
     gcall *call = gimple_build_call(builtin_decl_explicit((built_in_function)(BUILT_IN_ATOMIC_LOAD_1 + li)), 2, p,
                                     build_int_cst(integer_type_node, MEMMODEL_ACQUIRE));
     gimple_call_set_lhs(call, bits);
@@ -1049,11 +801,18 @@ static void order_single(gimple_stmt_iterator *gsi) {
     tree ty = TREE_TYPE(rhs);
     tree v = SCALAR_FLOAT_TYPE_P(ty) ? build1(VIEW_CONVERT_EXPR, ty, bits) : build1(NOP_EXPR, ty, bits);
     if (!useless_type_conversion_p(TREE_TYPE(lhs), ty)) {
-      tree t2 = make_tmp(ty, "order_v");
+      tree t2 = make_val(ty, "order_v");
       gsi_insert_before(gsi, gimple_build_assign(t2, v), GSI_SAME_STMT);
       v = build1(NOP_EXPR, TREE_TYPE(lhs), t2);
     }
+    if (!is_gimple_reg(lhs) && !is_gimple_val(v)) {
+      // the destination is memory: only a single-operand right-hand side is GIMPLE there, so the converted value goes through a register
+      tree rv = make_ssa_name(TREE_TYPE(lhs));
+      gsi_insert_before(gsi, gimple_build_assign(rv, v), GSI_SAME_STMT);
+      v = rv;
+    }
     gimple_assign_set_rhs_from_tree(gsi, v);
+    update_stmt(gsi_stmt(*gsi));
     c.ldar++;
     return;
   }
@@ -1070,12 +829,80 @@ static void order_single(gimple_stmt_iterator *gsi) {
     c.stlr++;
     return;
   }
-  // a bit-field access is a read-modify-write of its containing unit and no unit of its own: it keeps its (volatile)
-  // access, fenced: dmb ish before a store, dmb ishld after a load, and the hidden load of a store gets the acquire
-  // fence a load gets (one rule: every load, written or hidden, is followed by dmb ishld)
+  // a bit-field access is an access of its unit (bitfield_unit): a load is the acquire load of the unit and an extraction, a store
+  // the acquire load of the unit, an insertion and the release store of the unit (the read-modify-write of the x86 code)
   if ((ld && bitfield_ref(rhs)) || (st && bitfield_ref(lhs))) {
-    if (st) { gsi_insert_before(gsi, fence(MEMMODEL_RELEASE), GSI_SAME_STMT); c.fence_st++; }
-    if (ld || bitfield_ref(lhs)) fence_after(gsi, MEMMODEL_ACQUIRE);
+    if (st && ld && (bitfield_ref(lhs) || bitfield_ref(rhs))) {
+      // shared to shared: the value goes through a register first
+      tree tmp = make_val(TREE_TYPE(rhs), "order_f");
+      gimple *as = gimple_build_assign(tmp, rhs);
+      gimple_set_location(as, gimple_location(stmt));
+      gsi_insert_before(gsi, as, GSI_SAME_STMT);
+      gimple_stmt_iterator g2 = gsi_for_stmt(as);
+      order_single(&g2);
+      *gsi = gsi_for_stmt(stmt);
+      gimple_assign_set_rhs1(stmt, tmp);
+      update_stmt(stmt);
+      rhs = tmp;
+      ld = false;
+      if (!(st && bitfield_ref(lhs))) { order_single(gsi); return; }
+    }
+    tree ur;
+    HOST_WIDE_INT off, sz;
+    location_t loc = gimple_location(stmt);
+    if (ld && bitfield_ref(rhs)) {
+      if (!bitfield_unit(rhs, &ur, &off, &sz)) {
+        error_at(loc, "fnvnx_order: a shared bit-field access without a usable allocation unit (representative)");
+        return;
+      }
+      int ui = atomic_index(ur);
+      gimple_seq seq = NULL;
+      tree p = address_of(ur, &seq);
+      tree bits = make_ssa_name(uint_type(ui));
+      gcall *call = gimple_build_call(builtin_decl_explicit((built_in_function)(BUILT_IN_ATOMIC_LOAD_1 + ui)), 2, p,
+                                      build_int_cst(integer_type_node, MEMMODEL_ACQUIRE));
+      gimple_call_set_lhs(call, bits);
+      gimple_set_location(call, loc);
+      gimple_seq_add_stmt(&seq, call);
+      tree bty = build_nonstandard_integer_type(sz, TYPE_UNSIGNED(TREE_TYPE(rhs)));
+      tree fld = make_ssa_name(bty);
+      gimple_seq_add_stmt(&seq, gimple_build_assign(fld, build3(BIT_FIELD_REF, bty, bits, bitsize_int(sz), bitsize_int(off))));
+      gsi_insert_seq_before(gsi, seq, GSI_SAME_STMT);
+      tree bv = useless_type_conversion_p(TREE_TYPE(lhs), bty) ? (tree)fld : build1(NOP_EXPR, TREE_TYPE(lhs), fld);
+      if (!is_gimple_reg(lhs) && !is_gimple_val(bv)) {
+        tree rv = make_ssa_name(TREE_TYPE(lhs));
+        gsi_insert_before(gsi, gimple_build_assign(rv, bv), GSI_SAME_STMT);
+        bv = rv;
+      }
+      gimple_assign_set_rhs_from_tree(gsi, bv);
+      update_stmt(gsi_stmt(*gsi));
+      c.ldar++;
+      return;
+    }
+    if (!bitfield_unit(lhs, &ur, &off, &sz)) {
+      error_at(loc, "fnvnx_order: a shared bit-field access without a usable allocation unit (representative)");
+      return;
+    }
+    int ui = atomic_index(ur);
+    tree uty = uint_type(ui);
+    gimple_seq seq = NULL;
+    tree p = address_of(ur, &seq);
+    tree old = make_ssa_name(uty), nw = make_ssa_name(uty);
+    gcall *ldc = gimple_build_call(builtin_decl_explicit((built_in_function)(BUILT_IN_ATOMIC_LOAD_1 + ui)), 2, p,
+                                   build_int_cst(integer_type_node, MEMMODEL_ACQUIRE));
+    gimple_call_set_lhs(ldc, old);
+    gimple_set_location(ldc, loc);
+    gimple_seq_add_stmt(&seq, ldc);
+    tree bty = build_nonstandard_integer_type(sz, 1);
+    tree v1 = gimplify_to(fold_convert(bty, rhs), &seq);
+    gimple_seq_add_stmt(&seq, gimple_build_assign(nw, BIT_INSERT_EXPR, old, v1, bitsize_int(off)));
+    gcall *stc = gimple_build_call(builtin_decl_explicit((built_in_function)(BUILT_IN_ATOMIC_STORE_1 + ui)), 3, p, nw,
+                                   build_int_cst(integer_type_node, MEMMODEL_RELEASE));
+    gimple_set_location(stc, loc);
+    gsi_insert_seq_before(gsi, seq, GSI_SAME_STMT);
+    gsi_replace(gsi, stc, false);
+    c.ldar++;
+    c.stlr++;
     return;
   }
   // everything else (an aggregate, a scalar ldar/stlr cannot reach, a copy of one shared object into another) is copied
@@ -1087,7 +914,7 @@ struct order_pass : gimple_opt_pass {
   order_pass(gcc::context *ctx, const pass_data &d) : gimple_opt_pass(d, ctx) {}
 
   unsigned int execute(function *fun) final override {
-    counts c = {0, 0, 0, 0, 0};
+    counts c = {0, 0};
     cur = &c;
     basic_block bb;
     // the decls whose address this function takes (address_taken_scan: operands, the hidden result pointer of a call that
@@ -1095,42 +922,6 @@ struct order_pass : gimple_opt_pass {
     // earlier statement keeps a plain access to them.  Every other local is unshared (local_unshared).
     std::set<tree> taken;
     address_taken_scan(fun, taken);
-    // PARAMETER COPY.  A by-value parameter whose address is taken is a shared object, but the inliner (after this pass)
-    // initializes the callee's parameter variable with a plain store when it inlines the body, an access this pass cannot
-    // order. So the body works on a local copy instead: `copy = parm` at entry, every use of the parameter (the address
-    // included) replaced by the copy. The parameter itself then has no address and no memory (the inliner's init store is
-    // an SSA copy), and the copy is the shared object: its entry store is created here and ordered like any other.
-    {
-      std::map<tree, tree> repl;
-      for (tree d : taken)
-        if (TREE_CODE(d) == PARM_DECL && !DECL_BY_REFERENCE(d) && !hard_register(d) && !TREE_STATIC(d) && !DECL_EXTERNAL(d))
-          repl[d] = make_tmp(TREE_TYPE(d), "order_p");
-      if (!repl.empty()) {
-        struct W { static tree sub(tree *tp, int *ws, void *data) {
-          std::map<tree, tree> *m = (std::map<tree, tree> *)((struct walk_stmt_info *)data)->info;
-          auto it = m->find(*tp);
-          if (it != m->end()) *tp = it->second;
-          else if (TYPE_P(*tp)) *ws = 0;
-          return NULL_TREE;
-        } };
-        basic_block bb2;
-        FOR_EACH_BB_FN(bb2, fun)
-          for (gimple_stmt_iterator g = gsi_start_bb(bb2); !gsi_end_p(g); gsi_next(&g)) {
-            struct walk_stmt_info wi;
-            memset(&wi, 0, sizeof wi);
-            wi.info = &repl;
-            walk_gimple_op(gsi_stmt(g), W::sub, &wi);
-            update_stmt(gsi_stmt(g));
-          }
-        gimple_seq init = NULL;
-        for (auto &r : repl) {
-          gimple_seq_add_stmt(&init, gimple_build_assign(r.second, r.first));
-          taken.erase(r.first);
-          taken.insert(r.second);
-        }
-        gsi_insert_seq_on_edge_immediate(single_succ_edge(ENTRY_BLOCK_PTR_FOR_FN(fun)), init);
-      }
-    }
     addr_set = &taken;
     for (tree d : taken)
       if ((VAR_P(d) || TREE_CODE(d) == PARM_DECL || TREE_CODE(d) == RESULT_DECL) && !hard_register(d) && !TREE_STATIC(d) && !DECL_EXTERNAL(d))
@@ -1138,12 +929,12 @@ struct order_pass : gimple_opt_pass {
     FOR_EACH_BB_FN(bb, fun)
       if (!generated_bbs.count(bb))
         for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) order_stmt(&gsi);
-    add_resume_fences(fun);
+    if (!generated_bbs.empty() && current_loops) loops_state_set(LOOPS_NEED_FIXUP);
+    // the statements this pass created carry virtual operands that are not yet in SSA form (TODO_update_ssa renames them)
+    mark_virtual_operands_for_renaming(fun);
     unit_total.ldar += c.ldar; unit_total.stlr += c.stlr;
-    unit_total.fence_ld += c.fence_ld; unit_total.fence_st += c.fence_st; unit_total.fence_resume += c.fence_resume;
-    if (verbose && (c.ldar || c.stlr || c.fence_ld || c.fence_st || c.fence_resume))
-      inform(DECL_SOURCE_LOCATION(fun->decl), "%<fnvnx_order%>: %lu acquire loads, %lu release stores, %lu+%lu fenced, %lu resume fences",
-             c.ldar, c.stlr, c.fence_ld, c.fence_st, c.fence_resume);
+    if (verbose && (c.ldar || c.stlr))
+      inform(DECL_SOURCE_LOCATION(fun->decl), "%<fnvnx_order%>: %lu acquire loads, %lu release stores", c.ldar, c.stlr);
     cur = NULL;
     addr_set = NULL;
     generated_bbs.clear();
@@ -1152,7 +943,7 @@ struct order_pass : gimple_opt_pass {
 };
 
 static const pass_data order_data = {
-    GIMPLE_PASS, "fnvnx_order", OPTGROUP_NONE, TV_NONE, PROP_gimple_any | PROP_cfg, 0, 0, 0, 0,
+    GIMPLE_PASS, "fnvnx_order", OPTGROUP_NONE, TV_NONE, PROP_ssa | PROP_cfg, 0, 0, 0, TODO_update_ssa | TODO_cleanup_cfg,
 };
 
 
@@ -1345,13 +1136,6 @@ static const pass_data frame_data = {
     RTL_PASS, "fnvnx_frame", OPTGROUP_NONE, TV_NONE, 0, 0, 0, 0, 0,
 };
 
-static void emit_redirect_section() {
-  if (redir_lines.empty()) return;
-  fprintf(asm_out_file, "\t.pushsection\t.fnvnx.redir,\"\",%%progbits\n");
-  for (auto &l : redir_lines) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", l.c_str());
-  fprintf(asm_out_file, "\t.popsection\n");
-}
-
 static void emit_readonly_section() {
   if (ro_lines.empty()) return;
   fprintf(asm_out_file, "\t.pushsection\t.fnvnx.ro,\"\",%%progbits\n");
@@ -1383,11 +1167,10 @@ static void emit_frame_section() {
 static void finish(void *, void *) {
   emit_frame_section();
   emit_readonly_section();
-  emit_redirect_section();
   if (verbose)
-    inform(UNKNOWN_LOCATION, "%<fnvnx_order%>: unit: %lu ldar, %lu stlr, %lu fenced loads, %lu fenced stores, %lu resume fences; "
+    inform(UNKNOWN_LOCATION, "%<fnvnx_order%>: unit: %lu ldar, %lu stlr; "
            "%lu calls with arguments right to left, %lu left (class-type argument with side effects)",
-           unit_total.ldar, unit_total.stlr, unit_total.fence_ld, unit_total.fence_st, unit_total.fence_resume, calls_reordered, calls_skipped);
+           unit_total.ldar, unit_total.stlr, calls_reordered, calls_skipped);
   if (verbose && (object_last || operator_rtl))
     inform(UNKNOWN_LOCATION, "%<fnvnx_order%>: unit: %lu calls with the object after the arguments, "
            "%lu overloaded operators right to left, %lu prvalue virtual calls with the object first, "
@@ -1608,16 +1391,19 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
   }
   struct register_pass_info pass;
   pass.pass = new order_pass(g, order_data);
-  pass.reference_pass_name = "cfg";
-  pass.ref_pass_instance_number = 1;
-  pass.pos_op = PASS_POS_INSERT_AFTER;
-  register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pass);
   struct register_pass_info vpass;
   vpass.pass = new frame_vars_pass(g, frame_vars_data);
   vpass.reference_pass_name = "*warn_function_noreturn";
   vpass.ref_pass_instance_number = 1;
   vpass.pos_op = PASS_POS_INSERT_AFTER;
   register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &vpass);
+  // the rewrite is the LAST GIMPLE pass (passes.def:435 pass_warn_function_noreturn, right before pass_expand:437): after every pass
+  // that creates or changes an access. Insert-after puts the last registered pass first, so it runs before frame_vars_pass, which
+  // then records the variables of the code that is compiled
+  pass.reference_pass_name = "*warn_function_noreturn";
+  pass.ref_pass_instance_number = 1;
+  pass.pos_op = PASS_POS_INSERT_AFTER;
+  register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pass);
   struct register_pass_info fpass;
   fpass.pass = new frame_pass(g, frame_data);
   fpass.reference_pass_name = "pro_and_epilogue";
