@@ -9,14 +9,14 @@ its objects (relocatable) and of its linked ELF, never a name's text. Rules:
       (GLOBAL, not common) definition, or by one COMDAT group family (b1), or by the link script (b2). Findings: `undefined` (no
       definition anywhere), `duplicate-strong` (two strong definitions), `weak-only` (a weak or UNIQUE definition outside any COMDAT
       group and no strong one: the linker may substitute it), `common` (a common symbol), `ifunc` (an IFUNC definition: the body is
-      chosen at run time), `comdat-differs` (b1). Items: every undefined reference (object, symbol), every defined global symbol name
+      chosen at run time), `undecidable: no definition record` (b1; `comdat-differs` is kept for tier-2 records that differ, once the definition record exists). Items: every undefined reference (object, symbol), every defined global symbol name
       and every COMDAT signature; a reference is certified iff its symbol has exactly one definition and no finding.
   (b1) C++ vague linkage. A weak or UNIQUE definition in a section that is a member of an SHT_GROUP with GRP_COMDAT (inline functions,
       templates, vtables, typeinfo, guard variables) is a DEFINITION: the linker keeps exactly one copy per group signature (the group's
       signature symbol). The kept copy is arbitrary, so the rule needs all copies to be the same: for each signature, across all
       objects of all product roots, every copy (the member sections in group order: name, type, flags, alignment, bytes, and the
-      relocations of each member by offset, type, addend and TARGET) has one digest, else every copy is `comdat-differs` (an ODR
-      violation). TARGET of a relocation: a global/weak symbol by name; a member of the same group by its ordinal in the group plus offset;
+      relocations of each member by offset, type, addend and TARGET) has one digest, else every copy is `undecidable: no definition record` (byte-different copies; the entity is a source definition,
+      decided by the definition record, link/odr.py). TARGET of a relocation: a global/weak symbol by name; a member of the same group by its ordinal in the group plus offset;
       a SHF_MERGE section by the entity it points at (the NUL-terminated string, or entsize bytes), so string literals of one inline
       function certify wherever the object put them; any other local target by (section name, symbol name, offset), which is
       layout dependent and therefore conservative (two identical copies that reference differently laid out local data are reported).
@@ -59,6 +59,8 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "link"))
+import comdat as comdat_id  # noqa: E402
 import gate_build  # noqa: E402
 import producers  # noqa: E402
 import recipe  # noqa: E402
@@ -107,62 +109,17 @@ def _sections(path):
 
 
 def elf_comdat(path):
-    """COMDAT groups of an ELF relocatable (b1 of the module docstring) -> (member, groups). MEMBER {section index of a member of a
-    GRP_COMDAT group: signature}; GROUPS {signature: sha256 hex of the copy's canonical form (member sections in group order, their
-    relocations normalised)}. A signature that occurs twice in one object keeps the digest of both joined (two copies in one object)."""
-    d, w64, secs, names, cs = _sections(path)
-    symtab = next((i for i, s in enumerate(secs) if s[1] == 2), None)
-    if symtab is None:
-        return {}, {}
-    st = secs[secs[symtab][6]]
-    sfmt = "<IBBHQQ" if w64 else "<IIIBBH"
-    syms = []
-    for t in struct.iter_unpack(sfmt, d[secs[symtab][4]:secs[symtab][4] + secs[symtab][5]]):
-        n, info, shn, val = (t[0], t[1], t[3], t[4]) if w64 else (t[0], t[3], t[5], t[1])
-        syms.append((cs(st[4], n), info, shn, val))
-    rels = {}
-    for i, s in enumerate(secs):
-        if s[1] == 4:   # SHT_RELA: the object's relocations of section s[7]
-            for o, inf, a in struct.iter_unpack("<QQq" if w64 else "<IIi", d[s[4]:s[4] + s[5]]):
-                rels.setdefault(s[7], []).append((o, inf >> 32 if w64 else inf >> 8, inf & 0xFFFFFFFF if w64 else inf & 255, a))
-    member, groups = {}, {}
-    for gi, g in enumerate(secs):
-        if g[1] != 17 or g[5] < 4 or struct.unpack_from("<I", d, g[4])[0] & 1 == 0:   # SHT_GROUP with GRP_COMDAT
-            continue
-        sn, sinfo, sval_shn, _ = syms[g[7]]
-        sig = names[sval_shn] if sinfo & 15 == 3 else sn
-        mem = [m for m in struct.unpack_from("<%dI" % (g[5] // 4 - 1), d, g[4] + 4) if secs[m][1] != 4]   # relocation sections follow their section
-        ordinal = {m: k for k, m in enumerate(mem)}
-        canon = []
-        for m in mem:
-            member[m] = sig
-            s = secs[m]
-            body = b"" if s[1] == 8 else d[s[4]:s[4] + s[5]]
-            rl = []
-            for o, si, ty, a in sorted(rels.get(m, [])):
-                n, inf, shn, val = syms[si]
-                if inf >> 4 != 0 and shn != 0xFFF2 and inf & 15 != 3:   # global or weak symbol (or undefined): by name
-                    tgt = ("sym", n, a)
-                elif shn in ordinal:
-                    tgt = ("member", ordinal[shn], val + a)
-                elif 0 < shn < len(secs) and secs[shn][2] & 0x10 and secs[shn][9]:   # SHF_MERGE: the entity pointed at
-                    base = secs[shn][4] + val + a
-                    es = secs[shn][9]
-                    end = base + es
-                    while secs[shn][2] & 0x20 and d[end - es:end] != bytes(es):   # SHF_STRINGS: up to the terminating all-zero entity
-                        end += es
-                    
-                    tgt = ("merge", d[base:end].hex())
-                else:
-                    tgt = ("local", names[shn] if 0 < shn < len(secs) else shn, n if inf & 15 != 3 else "", val + a)
-                rl.append((o, ty, tgt))
-            canon.append((names[m], s[1], s[2], s[8], body.hex(), rl))
-        h = hashlib.sha256(repr(canon).encode()).hexdigest()
-        groups[sig] = hashlib.sha256((groups[sig] + h).encode()).hexdigest() if sig in groups else h
-    return member, groups
+    """COMDAT groups of an ELF relocatable (b1 of the module docstring) -> (member, groups, undecidable, resolved names, defs). MEMBER {section index of a member of a
+    GRP_COMDAT group: signature}; GROUPS {signature: digest of the copy's identity}; UNDECIDABLE {signature: [(object, section, offset, why)]}.
+    The identity is link/comdat.py comdat_identity, the ONE definition of "the same COMDAT definition" (also used by gates odr/abi and onedef).
+    A signature that occurs twice in one object keeps both copies in one digest."""
+    ids, member, defs = comdat_id.copies(path)
+    return (member, {s: i.digest for s, i in ids.items()}, {s: i.undecidable for s, i in ids.items() if i.undecidable},
+            frozenset(n for i in ids.values() for n in i.resolved), defs, {s: i.defrec for s, i in ids.items()})
 
 
 OUTLINE = re.compile(r"__aarch64_(cas|swp|ldadd|ldclr|ldeor|ldset)[0-9]+_(relax|acq|rel|acq_rel|sync)")   # libgcc's outline-atomics ABI: __aarch64_<op><bytes>_<memory model>
+UNDEC = "undecidable: no definition record"   # one name for byte-different COMDAT copies in every gate (link/odr.py)
 HOST_RUNTIME_PKGS = ("libc6", "libgcc-s1", "libstdc++6")   # packages of verify/env.json whose shared objects are the host boundary (envcheck pins them)
 
 
@@ -214,7 +171,7 @@ def judge(objs, elfs, tables, comdat=None, host=None, guest=()):
     HOST (host root prefixes ["<root>/"], exports {name}) or None: rule (d), the host boundary
     -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). Pure function of its arguments."""
     items, out, comdat = [], set(), comdat or {}
-    defs, refs, copies = {}, [], {}
+    defs, refs, copies, undec, recs = {}, [], {}, {}, {}
     for oid, syms in sorted(objs.items()):
         member = comdat.get(oid, ({}, {}))[0]
         for name, val, size, typ, bind, shn in syms:
@@ -226,11 +183,26 @@ def judge(objs, elfs, tables, comdat=None, host=None, guest=()):
                 defs.setdefault(name, []).append((oid, bind, shn, typ, member.get(shn) if bind != GLOBAL else None))
         for sig, dg in sorted(comdat.get(oid, ({}, {}))[1].items()):
             copies.setdefault(sig, {})[oid] = dg
+            recs.setdefault(sig, {})[oid] = (comdat.get(oid) + ({},))[5].get(sig) if len(comdat.get(oid)) > 5 else None
+        for sig, us in sorted((comdat.get(oid, ({}, {}, {})) + ({},))[2].items()):
+            undec.setdefault(sig, []).extend((oid,) + u[1:] for u in us)
     bad = {}
+
+    def state(sig):
+        """link/comdat.py entity over the copies' digests and definition records: 'same' | 'differs' (tier-2 records differ) | 'norecord'"""
+        c = copies[sig]
+        if len(set(c.values())) == 1:
+            return "same"
+        if any(r is None for r in recs[sig].values()):
+            return "norecord"
+        return "same" if len(set(recs[sig].values())) == 1 else "differs"
     for sig, c in sorted(copies.items()):
         items.append(("<comdat>", sig))
-        if len(set(c.values())) > 1:
-            out.add(("<comdat>", sig, "comdat-differs", "copies differ across %s" % ", ".join(sorted(c))[:200]))
+        if sig in undec and len(c) > 1:       # one copy has nothing to be the same as: undecidable only matters where copies meet
+            u = undec[sig][0]
+            out.add(("<comdat>", sig, "identity-undecidable", "object %s section %s offset %d: %s" % u))
+        elif state(sig) != "same":
+            out.add(("<comdat>", sig, UNDEC if state(sig) == "norecord" else "comdat-differs", "copies differ across %s" % ", ".join("%s (%s)" % (o, c[o][:12]) for o in sorted(c))[:400]))
     script = {}   # elf id -> names the link (script or linker), not an object, defines in that ELF
     for eid, syms in elfs.items():
         pre = eid.rsplit("/", 1)[0] + "/"
@@ -238,13 +210,19 @@ def judge(objs, elfs, tables, comdat=None, host=None, guest=()):
         und = {n for n, val, size, typ, bind, shn in syms or [] if shn == 0}
         script[eid] = {n for n, val, size, typ, bind, shn in syms or [] if shn != 0 and n not in und and (
             bind == GLOBAL or (bind == LOCAL and typ == NOTYPE and n not in objnames))}
+    uniq = comdat_id.name_not_unique({oid: (c[1], c[3], c[4]) for oid, c in comdat.items() if len(c) > 4})
+    for name in sorted({n for c in comdat.values() if len(c) > 4 for n in c[3]}):
+        items.append(("<resolved>", name))
+        if name in uniq:
+            out.add(("<resolved>", name, "name-resolved-not-unique", uniq[name][:300]))
     for name, ds in sorted(defs.items()):
         items.append(("<defs>", name))
         strong = [d for d in ds if d[1] == GLOBAL and d[2] != COMMON]
         cdef = [d for d in ds if d[4] is not None]
-        differs = any(len(set(copies[d[4]].values())) > 1 for d in cdef)
+        differs = any(state(d[4]) != "same" or (d[4] in undec and len(copies[d[4]]) > 1) for d in cdef)
+        dkind = UNDEC if any(state(d[4]) == "norecord" or (d[4] in undec and len(copies[d[4]]) > 1) for d in cdef) else "comdat-differs"
         for kind, why in (("common", any(d[2] == COMMON for d in ds)), ("ifunc", any(d[3] == IFUNC for d in ds)),
-                          ("duplicate-strong", len(strong) > 1), ("comdat-differs", differs and not strong),
+                          ("duplicate-strong", len(strong) > 1), (dkind, differs and not strong),
                           ("weak-only", not strong and not any(d[2] == COMMON for d in ds) and (not cdef or any(d[4] is None for d in ds)))):
             if why:
                 bad[name] = kind

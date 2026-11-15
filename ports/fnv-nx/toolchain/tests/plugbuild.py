@@ -181,6 +181,29 @@ def cc_files(res):
     return out
 
 
+def argument_refused(r, plugin):
+    """True iff R (a compile() result) is the recipe's own refusal of an extra argument of the plugin: the recipe fixes every plugin's arguments by the root's origin
+    (recipe.plugin_args) and refuses any other (`plugin fnvnx_<name>: arguments must be <fixed>, are <given>`). One helper for every plugin test; a test never
+    carries its own expected text."""
+    return r.returncode != 0 and 'plugin fnvnx_%s: arguments must be ' % plugin in r.stderr
+
+
+def missing_plugin_refused(missing):
+    """True iff the recipe refuses a guest root whose plugin list lacks the product plugin MISSING (a name without the fnvnx_ prefix): the product set is
+    recipe.PLUGIN_SOURCES in its fixed order, every unit is compiled with all of it, so a root with fewer is an admission error naming the plugin."""
+    fixed = recipe.plugin_args('native')
+    tmp = tempfile.mkdtemp(prefix='plugbuild-missing-')
+    try:
+        try:
+            _recipe(tmp, [(n[len('fnvnx_'):], fixed[n]) for n in recipe.PLUGIN_SOURCES if n != 'fnvnx_' + missing], {'t.cpp': 'int t(int x) { return x; }\n'},
+                    PRODUCT_FLAGS, native=True, raw=True)
+        except recipe.RecipeError as e:
+            return any('does not load plugin fnvnx_%s' % missing in x for x in e.errors)
+        return False
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def objdump(obj):
     """the object read back with the pinned binutils (env.json): `objdump -dr` -> {symbol: [lines]} (a relocation is the line after its
     instruction). Disassembly is reading, not compiling: the object is the recipe's."""

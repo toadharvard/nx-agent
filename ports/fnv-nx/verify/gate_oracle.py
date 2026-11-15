@@ -22,6 +22,9 @@ Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
                                          has this sha256
     {"kind": "contract", "path": PATH}     a contract table of the tree
     {"kind": "model", "path": PATH}        an independent model in the tree
+Dangling keys: every key of every tracked oracle.json that lies in a directory named `tests` (any directory of the tree, whether or not its
+tests are in the universe above) must name a tracked file of that directory; a key that does not is one uncertified item, `DIR/tests/oracle.json:KEY`,
+which also counts in the universe; an oracle.json that is not a JSON object with a `tests` object is one such item (`DIR/tests/oracle.json`).
 Rule. A test file is certified iff ALL hold:
   1. its DIR's oracle.json is well formed and holds exactly one entry for it (an entry without a test file, an unknown
      key or a wrong format is an error of the DIR: none of its tests is certified);
@@ -56,6 +59,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
+import recipe  # noqa: E402
 import gate_admit  # noqa: E402
 import gate_tests  # noqa: E402
 import gatesdir  # noqa: E402
@@ -284,6 +288,25 @@ def judge(files, decls, tracked, roots, pins, read, artifact, extpins=None):
     return bad
 
 
+def dangling(tracked, read):
+    """-> sorted [item] over every tracked `tests/oracle.json` of the tree: `PATH:KEY` for each key that names no tracked file of its directory,
+    `PATH` for a file that is not a JSON object with a `tests` object. The rule is over the whole tree, not over the directories of the universe."""
+    out = []
+    for p in sorted(tracked):
+        if os.path.basename(p) != "oracle.json" or os.path.basename(os.path.dirname(p)) != "tests":
+            continue
+        try:
+            doc = json.loads(read(p))
+            tests = doc["tests"]
+            if not isinstance(tests, dict):
+                raise TypeError
+        except (OSError, ValueError, KeyError, TypeError):
+            out.append(p)
+            continue
+        out += ["%s:%s" % (p, k) for k in sorted(tests) if os.path.dirname(p) + "/" + k not in tracked]
+    return out
+
+
 def pairs_unique(pairs):
     """json object_pairs_hook: a repeated key is an error (rule 1: exactly one entry)"""
     d = {}
@@ -323,7 +346,7 @@ def fetcher(cache):
                 os.makedirs(tmp)
                 for cmd in (["init", "-q", "--bare"], ["fetch", "-q", "--depth", "1", url, commit]):
                     subprocess.run(["git", "-C", tmp] + cmd, env=env, check=True, capture_output=True)
-                os.replace(tmp, bare)
+                recipe.publish_dir(tmp, bare)
             dest = os.path.join(work, "tree")
             os.makedirs(dest)
             ienv = dict(env, GIT_INDEX_FILE=os.path.join(work, "idx"))
@@ -399,13 +422,16 @@ def main():
             if d + "/" + n not in bad:
                 for ref in e["references"]:
                     kinds[ref["kind"]] = kinds.get(ref["kind"], 0) + 1
+    dang = dangling(tracked, read)
     n = len(files) - len(bad)
-    status = "green" if not bad and not errors else "red"
+    status = "green" if not bad and not errors and not dang else "red"
     detail = "%d of %d test files name a reference outside their subject" % (n, len(files)) if files else \
         "no test files at this commit (nothing to certify yet)"
-    res = {"format": "fnvnx-gate/1", "name": "oracle", "status": status, "universe": len(files), "certified": n,
-           "uncertified": sorted(bad)[:50], "detail": "; ".join(errors + [detail]),
-           "reasons": {f: bad[f] for f in sorted(bad)[:50]}, "references": kinds}
+    if dang:
+        detail += "; %d dangling oracle.json keys: %s" % (len(dang), ", ".join(dang[:5]))
+    res = {"format": "fnvnx-gate/1", "name": "oracle", "status": status, "universe": len(files) + len(dang), "certified": n,
+           "uncertified": (sorted(bad) + dang)[:50], "detail": "; ".join(errors + [detail]),
+           "reasons": dict({f: bad[f] for f in sorted(bad)[:50]}, **{d: "names no tracked test file" for d in dang[:50]}), "references": kinds}
     with open(os.path.join(out, "oracle.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)
     return 0 if status == "green" else 2

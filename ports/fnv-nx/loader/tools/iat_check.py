@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Real-data check of the import-key table (exe-derived inputs; outputs only under --work, never in the repository).
 
-usage: iat_check.py --bridge bridge.tsv --facts facts.json --iat iat.tsv --work DIR
+usage: iat_check.py --bridge bridge.tsv --facts facts.json --iat iat.tsv --work DIR --module name.dll=exports.tsv ... --module-imports name.dll=imports.tsv ...
+
+The modules are the images of modules.tsv, as for the stage: iat.py refuses to write import_keys.c without them.
 
 Generates keys.tsv and import_keys.c with contract/iat.py into DIR, compiles them with loader/src/importkey.c and a
 driver, and looks every import slot of the exe up the way the loader does (dll and name as spelled in the image, or
@@ -38,11 +40,14 @@ def main():
     ap = argparse.ArgumentParser()
     for n in ('bridge', 'facts', 'iat', 'work'):
         ap.add_argument('--' + n, required=True)
+    ap.add_argument('--module', action='append', required=True)
+    ap.add_argument('--module-imports', action='append', required=True)
     a = ap.parse_args()
     os.makedirs(a.work, exist_ok=True)
     w = lambda n: os.path.join(a.work, n)
     p = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'contract', 'iat.py'), '--facts', a.facts, '--bridge', a.bridge,
-                        '--out', w('iat.regen.tsv'), '--keys-out', w('keys.tsv'), '--c-out', w('import_keys.c')], capture_output=True, text=True)
+                        '--out', w('iat.regen.tsv'), '--keys-out', w('keys.tsv'), '--c-out', w('import_keys.c')]
+                       + [x for m in a.module for x in ('--module', m)] + [x for m in a.module_imports for x in ('--module-imports', m)], capture_output=True, text=True)
     print(p.stdout.splitlines()[0] if p.stdout else p.stderr[-300:])
     rows, _ = iat.bridge_rows(a.bridge)
     imports = store.load(a.facts, 'facts')['imports']
