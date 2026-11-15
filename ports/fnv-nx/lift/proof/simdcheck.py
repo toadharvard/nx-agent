@@ -12,7 +12,7 @@ import json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.join(HERE, '..')); sys.path.insert(0, HERE)
 import z3
 from fnvlift import dsl
-from proof import forms, shape, symform, simdspec as S
+from proof import forms, shape, symform, simdspec as S, simdsplit
 REG = ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi']
 
 
@@ -154,6 +154,10 @@ def _discharge(env, nf, goals, eq, timeout, fpl=(), mx=None):
         cases = _case_partition(fpl, chunk, mx) if fpl else [[]]
         for cs in cases:
             if _BUDGET[0] and time.time() > _BUDGET[1]: unknown = True; break          # the shape's wall-clock budget is spent: the rest is not decided (timeout)
+            if fpl and state and cs is cases[0] and chunk is None:
+                sp = simdsplit.prove_flags(g0, nf, env, mx, fpl, _ask, timeout)          # the per-lane split of simdsplit: proved for the whole part (all its cases), or a piece undecided
+                if sp == 'unknown': unknown = True; break
+                if sp: break
             if fpl and state:
                 can = _canonical(g0, cs, env, fpl, mx)
                 if can is not None:
