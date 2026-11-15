@@ -31,6 +31,11 @@ import odr  # noqa: E402
 import recipe  # noqa: E402
 
 
+def envid():
+    """the declared environment of the result: env.json (the pinned toolchain the plugin's sections come from)"""
+    return gate_build.file_sha(os.path.join(HERE, "env.json"))
+
+
 def read_objects(objs):
     """OBJS: [(id, path)] -> (store {(id, 'sympair'): rows}, {layout key: {id: layout tuple}}, red items {id: reason})."""
     store, layouts, red = {}, {}, {}
@@ -86,8 +91,11 @@ def judge_root(repo, cache, root):
         return 1, 0, [root + ":recipe"], "invalid recipe: %s" % "; ".join(e.errors)[:300]
     if res["status"] != "green":
         return 1, 0, [root + ":build"], "build %s" % res["status"]
-    objs = [(root + "/" + o["unit"], o["object"]) for o in res["objects"] if o["unit"].endswith(recipe.CXX_EXT)]
-    return judge_objects(objs)
+    objs = [(root + "/" + o["unit"], o["object"], o["sha256"]) for o in res["objects"] if o["unit"].endswith(recipe.CXX_EXT)]
+    # the item is the root's C++ objects as a set (the ODR and layout joins read all of them): keyed by their ids and sha256 and the tools that read them
+    key = {"gate": "abi", "objects": [[i, h] for i, _, h in objs], "tools": gate_build.tool_digest(__file__, abi, odr, elfobj, l2sections, objsections), "env": envid()}
+    v, _ = gate_build.memo(cache, "abi", key, lambda: list(judge_objects([(i, p) for i, p, _ in objs])))
+    return tuple(v)
 
 
 def main():

@@ -11,6 +11,7 @@ read this gate's GATE_OUT. objects.json of a root is therefore also kept at GATE
 obj/, the ELF and constants.tsv beside it; <tree> = git tree of the commit under test, <root name> = path with / as __), and later
 gates call ensure() (build or cache hits, same result). Without GATE_CACHE nothing outlives the gate except GATE_OUT/objects/<root name>.json."""
 import atexit
+import hashlib
 import json
 import os
 import shutil
@@ -19,6 +20,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cas  # noqa: E402
 import recipe  # noqa: E402
 
 
@@ -107,6 +109,43 @@ def ensure(root, cache, repo="."):
     recipe.publish_dir(tmp, final)
     with open(os.path.join(final, "objects.json")) as f:
         return json.load(f), final
+
+
+def tool_digest(*mods):
+    """sha256 over the source files of the python modules MODS (module objects or file paths): the tool half of a result key."""
+    h = hashlib.sha256()
+    for m in mods:
+        p = m if isinstance(m, str) else m.__file__
+        with open(p, "rb") as f:
+            h.update(hashlib.sha256(f.read()).digest())
+    return h.hexdigest()
+
+
+def memo(cache, gate, key_doc, make, keep=lambda v: True):
+    """One item of a gate as a result of the verdict's store: GATE_CACHE/memo/<gate>/<key>.json, KEY = sha256 of the canonical KEY_DOC, which must hold
+    everything the item reads (the sha256 of each input file, the tool digest, the declared environment) and nothing else. A hit reads the file; a miss runs
+    MAKE() -> a JSON-able value, published by cas.publish_file (complete or absent) iff KEEP(value) (a result that may be a transient failure is not kept). No cache (CACHE None): MAKE() every time. -> (value, hit)."""
+    if not cache:
+        return make(), False
+    key = hashlib.sha256(cas.canon(key_doc)).hexdigest()
+    p = os.path.join(cache, "memo", gate, key[:2], key + ".json")
+    try:
+        with open(p) as f:
+            return json.load(f), True
+    except (OSError, ValueError):
+        pass
+    v = make()
+    if keep(v):
+        cas.publish_file(p, json.dumps(v, sort_keys=True).encode())
+    return v, False
+
+
+def file_sha(p):
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
 
 
 def unitless(root, cache, repo="."):
