@@ -1668,3 +1668,12 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   2. claude/fnv-l6-render-w5-smlink 2d61e9fb9. At the merge, keep w6-root's admit rows (gl4shim, smscan, pair, bridgefacts) and its gen_sm_rows.py; w5's sm_link host libs add libgcc_s.
   - L6 numbers at 2d61e9fb9: 1809 bytecodes; 115776 stage certificates, 0 not ok; 120392 programs, all linked; sm_link red 0.
   - The guest builds of d3d9, translator and sha256 stay measurements until cand3's hermetic guest stages.
+## 14:15 cand2 verdict 5 (w15, f215e1b27)
+- Result: `L1 red 726547a3 1316.5s gates:43 vacuous:19`. Warm seconds per gate: selftests 966, determinism 147, exepin 86, abi 28, imports 23.
+- abi 10415/10434, 19 red:
+  - w15 (cand2): the decoder gaps `$$` and `??$?0`;
+  - cut from cand2, back in cand3 (w12): the 6 va_list rows;
+  - L2 (cut unless fixed first): the 2 units without sympair (clock) and the unnamed rows;
+  - C prototype ctypes: covered by the C 6.2.7 gate (w23). w15 checks its coverage.
+- objstub per profile is in at 939c2794d. The 19 old toy cases become guest-profile roots, with the msvcmodel external in the commit that takes the pin, and stay in cand2.
+- Budget: w15 fixes the selftest cache misses first, then determinism and exepin. Target: the whole verdict ≤ 300 s warm.
