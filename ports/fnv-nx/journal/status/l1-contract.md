@@ -1361,3 +1361,6 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - gate_datamodel reads the generated DATAMODEL.json; its hand set of 3 macros was the cause of the missing long double;
   - guest_compiler.json's triplet, CPU flags and datamodel flags are generated from the platform, CPU and DATAMODEL records.
 - w22 facts rebased: c4544e18b, for cand2.
+- L6 w6 15c11ecd8 (claude/fnv-l1-contract-w16c1-gl) accepted for cand2.
+  - Contents: the run series + base-files + GL read-root rule (only d4ccfe509/67391a3b5 of w5), env.json over the union mirror 6b910213, env_id ceb3a2c4…. test_recipe 136/136, test_envcheck 44/44.
+  - The rest of w5 is unreviewed and NOT taken: factcache (a possible second cache, rule 3), importclosure, build profiles. If w22's construction pass meets a w5 file, it lists it.
