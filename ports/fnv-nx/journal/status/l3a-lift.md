@@ -1056,3 +1056,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - w8's consumer: the null-selector access row for ds, es, fs and gs; reads of the initial gs stay red unless certified; reach certificates produce `fnvnx_reach_violation(fact_id)`.
   - Kind 1 (the /GS failure path, from the load-config SecurityCookie) is L1's; kind 2 is the call graph.
   - The residue goes to the orchestrator with the relift.
+- 22:06 (11-15) Orchestrator, integ CLAUDE.md 1b0541249: the gs row is derived by L5 from the pinned Win7 SP1 x86 kernel binary and its public PDB (the KTRAP_FRAME.SegGs store, address cited). w8's consumer stays as prepared.
+  - The 4,001 data-decoded gs operands are not certified. They are removed by w7's universe rule against fallthrough into data, in the facts stage.
+  - /GS failure-path certificates: L1 w28 format `fnvnx-gsfail/1` is accepted unchanged. L3a publishes it as the declared output `GSCERTS` of lift/facts, generated from the facts and the load-config SecurityCookie (w8). There is no hand-written list.
+  - bottleneck: w7's exe JTAB_RED (17 sites) and the universe rule; FACTS gates the relift.
