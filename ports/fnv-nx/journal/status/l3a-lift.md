@@ -806,3 +806,19 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   3. a B/insn and CPU-hours target;
   4. stable unit boundaries.
   Assigned: (1) to w13 as stage 2, by the emitter's own provenance tag (off by default; output byte-identical with it off), relift in the background. (4) is w13 stage 1. L3b was told the density rule is coming.
+- 20:35 w13 item 4, read at 2c3591efc plus pack blobs, no build:
+  - Units are already address-keyed and stable: liftgen.py:46 gives bucket = (a>>4)&0xfff, 4096 fixed names, no size limit. A function change touches only its own unit and those of its callers, tail sources and range sharers.
+  - 7b2faae276b2 -> 632538cd3 -> db2aaf6d4a08: 4096 of 4096 units blob-identical.
+  - Unit bytes: 20 KB min, 148 KB median, 5.33 MB max.
+  - Full re-runs come from a recipe key defect:
+    - recipe.py:2112-2119 makes the whole liftpack external an input of every PP stage, via include /ext/liftpack/inc;
+    - the loader's uses outputs (BRIDGE_TSV, IMPORTED_TSV) are PP inputs of every unit.
+  - Sent to the L1 lead (subtree includes, per-stage uses), for cand3 or right after it.
+  - The 52 KB prelude, rt/fnvl.h inlined, is in every .ii, so an rt header change re-keys all 4096 CC stages.
+- 20:35 L3b's position on liveness-pruned EFLAGS:
+  - (A) a per-shape projection lemma. v3 stays valid if the elided Form only drops assignments to dead outputs.
+  - (B) a per-function liveness certificate from L3a, as live masks:
+    - readers include partial writers;
+    - ret, indirect jmp, unclosed calls and dispatcher entries read all flags;
+    - so does every synchronous exception point (CONTEXT EFlags), unless a rule proves no handler reads it.
+- bottleneck: pack compile volume (97 B/insn; w12 profile, w13 emit categories); the PP key defect is with L1; cand3; workers 4 (w7, w8, w12, w13).
