@@ -161,61 +161,94 @@
  },
  "conflicts": [
   {
+   "decision": "union",
    "id": "ps:47",
    "kind": "opcode_models",
-   "ms": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
+   "ms": {
+    "page": "desktop-src/direct3dhlsl/defb---ps.md",
+    "section": "Remarks, pixel shader versions table (line 40: ps_2_x, 2_sw, 3_0, 3_sw only)"
+   },
    "note": "MS version table disagrees with vkd3d d3dbc.c (or wine lacks a listed model); universe uses the UNION",
+   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft silent or narrower, Wine 9.0 accepts: the universe is the union)",
    "vkd3d": [
     "ps_2_0",
     "ps_2_x",
     "ps_3_0"
    ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
+   "wine": {
+    "file": "libs/vkd3d/libs/vkd3d-shader/d3dbc.c",
+    "line": 334,
+    "what": "ps_opcode_table lists DEFB with no version bound, so ps_2_0 takes it"
+   }
   },
   {
+   "decision": "union",
    "id": "ps:70",
    "kind": "opcode_models",
-   "ms": [
-    "ps_1_2",
-    "ps_1_3"
-   ],
+   "ms": {
+    "page": "desktop-src/direct3dhlsl/texreg2gb---ps.md",
+    "section": "Remarks, pixel shader versions table (ps_1_2, ps_1_3)"
+   },
    "note": "MS version table disagrees with vkd3d d3dbc.c (or wine lacks a listed model); universe uses the UNION",
+   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft silent or narrower, Wine 9.0 accepts: the universe is the union)",
    "vkd3d": [
     "ps_1_1",
     "ps_1_2",
     "ps_1_3"
    ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3"
-   ]
+   "wine": {
+    "file": "libs/vkd3d/libs/vkd3d-shader/d3dbc.c",
+    "line": 362,
+    "what": "TEXREG2GB is accepted for ps_1_0..1_3, so ps_1_1 takes it"
+   }
   },
   {
+   "decision": "union",
    "id": "vs:sgn@vs_3_0",
    "kind": "operand_count",
-   "note": "MS sgn---vs syntax has 3 sources in all versions; vkd3d d3dbc.c: sgn has 1 source in 3_0; universe has both forms"
+   "ms": {
+    "page": "desktop-src/direct3dhlsl/sgn---vs.md",
+    "section": "Syntax (three sources in every version) and Remarks, version table (line 42)"
+   },
+   "note": "MS sgn---vs syntax has 3 sources in all versions; vkd3d d3dbc.c: sgn has 1 source in 3_0; universe has both forms",
+   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft silent or narrower, Wine 9.0 accepts: the universe is the union)",
+   "wine": {
+    "file": "libs/vkd3d/libs/vkd3d-shader/d3dbc.c",
+    "line": 253,
+    "what": "vs_3_0 SGN has one source (line 252 keeps the three-source form for vs_2_0..2_x); the universe keeps both forms"
+   }
   },
   {
+   "decision": "union",
    "id": "ps_3_0:vFace_src",
    "kind": "legacy",
-   "note": "MS ps_3_0 register page (dx9-graphics-reference-asm-ps-registers-ps-3-0.md:30): vFace only as a condition of setp_comp, if_comp or break_comp; wine 9.0 (vkd3d d3dbc.c:666-676 parses MISCTYPE 1 as VFACE with no instruction restriction, glsl_shader.c:2873-2880 reads it as any source) accepts it as a source of every instruction, and the shipped PS e92b2db2 (cmp r0.x, vFace, c1.x, c1.y) uses it so; universe uses the UNION"
+   "ms": {
+    "page": "desktop-src/direct3dhlsl/dx9-graphics-reference-asm-ps-registers-ps-3-0.md",
+    "section": "Face register (line 30): condition of setp_comp, if_comp or break_comp only"
+   },
+   "note": "MS ps_3_0 register page (dx9-graphics-reference-asm-ps-registers-ps-3-0.md:30): vFace only as a condition of setp_comp, if_comp or break_comp; wine 9.0 (vkd3d d3dbc.c:666-676 parses MISCTYPE 1 as VFACE with no instruction restriction, glsl_shader.c:2873-2880 reads it as any source) accepts it as a source of every instruction, and the shipped PS e92b2db2 (cmp r0.x, vFace, c1.x, c1.y) uses it so; universe uses the UNION",
+   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft silent or narrower, Wine 9.0 accepts: the universe is the union)",
+   "wine": {
+    "file": "libs/vkd3d/libs/vkd3d-shader/d3dbc.c",
+    "line": 666,
+    "what": "MISCTYPE 1 parsed as VFACE (666-676) with no instruction restriction; dlls/wined3d/glsl_shader.c:2873-2880 reads it as any source"
+   }
   },
   {
+   "decision": "union",
    "id": "vs_3_0:v[a0.x]",
    "kind": "legacy",
-   "note": "MS table says a0/aL, MS prose says aL only; wine allows any (reladdr flag)"
+   "ms": {
+    "page": "desktop-src/direct3dhlsl/dx9-graphics-reference-asm-vs-registers-vs-3-0.md",
+    "section": "Register types table, v# row (line 24: RelAddr a0/aL); prose loop---vs.md:46 names aL"
+   },
+   "note": "MS table says a0/aL, MS prose says aL only; wine allows any (reladdr flag)",
+   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft silent or narrower, Wine 9.0 accepts: the universe is the union)",
+   "wine": {
+    "file": "libs/vkd3d/libs/vkd3d-shader/d3dbc.c",
+    "line": 886,
+    "what": "shader_sm1_read_src_param takes the relative-address token of any source register with no register-type restriction"
+   }
   }
  ],
  "env_default": {
