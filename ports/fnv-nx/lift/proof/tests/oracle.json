@@ -80,6 +80,18 @@
     "ports/fnv-nx/lift/proof/lift_dsl.py"
    ]
   },
+  "test_dsl_xsimd.py": {
+   "references": [
+    {
+     "anchor": "## Classes of run-time failure and their gates",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/VERDICT.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/fnvlift/dsl.py"
+   ]
+  },
   "test_ehoracle.py": {
    "references": [
     {
@@ -114,10 +126,41 @@
      "anchor": "## External inputs",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/RECIPE.md"
+    },
+    {
+     "kind": "external",
+     "name": "certs",
+     "path": "certs/certs.tsv"
     }
    ],
    "subject": [
     "ports/fnv-nx/lift/proof/formgate.py"
+   ]
+  },
+  "test_gate_fpexact.py": {
+   "references": [
+    {
+     "anchor": "## Classes of run-time failure and their gates",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/VERDICT.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py",
+    "ports/fnv-nx/verify/recipe.py",
+    "ports/fnv-nx/verify/unitstage.py"
+   ]
+  },
+  "test_generated_readers.py": {
+   "references": [
+    {
+     "anchor": "\"GEN\": \"gen\"",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/rt/build.json"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/genout.py"
    ]
   },
   "test_imageset.py": {

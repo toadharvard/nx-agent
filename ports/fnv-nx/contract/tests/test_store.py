@@ -14,7 +14,7 @@ facts = dict(meta=dict(version=8), base=1, secs={'.text': (1, 2, 3, 4)}, relocs=
 store.save(d + '/f.json', 'facts', facts)
 assert store.load(d + '/f.json', 'facts') == facts
 n1 = dict(fn={16: dict(unit=0, sym='f', size=4, n1=True, why='', relocs=[(0, 6, 's', 99)])},
-          sym={(0, 's'): 99, (0, 3, 'st'): 100}, vt={(0, '??_7C@@6B@'): 7}, exe_sha256='00')
+          sym={(0, 's'): 99, (0, 3, 'st'): 100}, vt={(0, '??_7C@@6B@'): 7}, exe_sha256='00', no_object={2713: dict(source='s.cpp', functions=211)})
 store.save(d + '/n.json', 'n1', n1)
 assert store.load(d + '/n.json', 'n1') == n1
 obj = {('a.o', 16): ([(1, 's', 0, 'obj', 4)], {64, 8}, {32}, {'x'}, [4, 0]), ('a.o', 'ztv'): {'_ZTV1': [(8, 0, ['a', None])]}}

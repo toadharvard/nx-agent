@@ -34,6 +34,7 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIFT = os.path.dirname(HERE)
@@ -106,14 +107,15 @@ def load_inputs(path=INPUTS):
 
 def fetch(doc, cache):
     """-> {name: {host, tree, at}} through the loader of the trunk (recipe.fetch_externals into CACHE/store, CACHE/external)"""
-    ws = os.path.join(cache, "ws")
-    shutil.rmtree(ws, ignore_errors=True)
-    os.makedirs(ws)
+    os.makedirs(cache, exist_ok=True)
+    ws = tempfile.mkdtemp(prefix="ws-", dir=cache)   # private scratch: a second process on the same cache never shares it
     try:
         return recipe.fetch_externals(doc["external"], os.path.join(cache, "store"), os.path.join(cache, "external"), ws)
     except recipe.BuildRed as e:
         f = e.args[0]
         raise Red("inputs: external does not fetch or match its hash: stage %s: %s" % (f["stage"], " | ".join(f["stderr"][-3:])[:300]))
+    finally:
+        shutil.rmtree(ws, ignore_errors=True)
 
 
 def file_sha(p):
@@ -127,6 +129,13 @@ def path_in(ext, v, what):
     if not os.path.isfile(p):
         raise Red("inputs: %s: %s is missing from external %s" % (what, rel, n))
     return p
+
+
+def ir_path(cache):
+    """the path of the pinned x86_proof.ir: the external x86ir of the inputs file, fetched by the loader of the trunk into `cache` (commit + tree_sha256); the farm script passes it to the prover as --sail-ir"""
+    doc = load_inputs()
+    ext = fetch({"external": [e for e in doc["external"] if e["name"] == IR_EXT]}, cache)
+    return path_in(ext, IR_EXT + "/ir/x86_proof.ir", "x86_proof.ir")
 
 
 def dsl_sha(key, md):

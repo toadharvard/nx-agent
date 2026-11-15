@@ -7,7 +7,7 @@ instruction whose shape has no Form, which the gate passes through) and one prod
 The fixpoint is the one of gate_flags.solve, so the red reads are the same reads (a check: the count equals gate_flags'). Each red read gets exactly one cause,
 by this precedence:
   i    no-form   its state has the N bit: a no-form instruction lies between a producer and the read; item 23 may define the flag
-  ii   undef     else it has the U bit: a certified instruction leaves the flag architecturally undefined and a read of it follows; counted by
+  ii   undef     else it has the U bit: a certified instruction leaves the flag architecturally undefined and a read of it follows (a fact of the Sail/x86isa model, ASM-009); counted by
                  (mnemonic, flag) over all producers that reach it
   iii  entry     else it has the E bit: the read is reached by an entry with an unknown predecessor (flag ptr, a kind other than decomp/call/tail, or no
                  direct transfer); counted by the seed reason of its own entry when that entry is seeded, else `inherited` (through callers), and by the consumer
@@ -27,6 +27,8 @@ PB0 = 5                                  # origin bits E C U N, the PASS bit (th
 NF = g.NF
 Gl = {}
 
+
+JOBS_DEFAULT = 4      # worker processes when the stage does not set JOBS (a count, not a path)
 
 def wide(r, pb, W):
     """-> (keep mask, add mask) of the instruction row r in the wide layout"""
@@ -207,7 +209,7 @@ def main(argv):
     path, facts = argv[0], argv[1]
     base, rows = g.load_ranges(os.path.join(facts, 'ranges.tsv'))
     uni = g.load_universe(os.path.join(facts, 'universe.tsv'))
-    inst, res, seed, pb, W = solve(path, base, rows, uni, int(os.environ.get('JOBS', '4')))
+    inst, res, seed, pb, W = solve(path, base, rows, uni, int(os.environ.get('JOBS', str(JOBS_DEFAULT))))
     jt = frozenset(t for r in json.load(open(os.path.join(facts, 'ehtables.json'))).get('jtab_tables', ()) for t in (int(w, 16) for w in r['targets']))
     out = report(rows, uni, inst, res, seed, pb, W, jt)
     d = os.environ.get('GATE_OUT')

@@ -60,53 +60,7 @@ def fetch_nxgl4(scratch):
     return os.path.join(fetch_renderer(scratch)[0], "libnxgl4.so")
 
 
-# MODE 50: the renderer guest. Layout in the heap block at +0x60000: pixels A +0x000 (256 bytes, 8x8 RGBA8), NxImageDesc +0x100 (32),
-# NxInfo +0x200 (32), readback buffer B +0x300 (256), NxImageRead +0x400 (48), NxPresent +0x500 (80), call argument words +0x600.
-# Field offsets: NXGL4_HOST.md section 3 (NxInfo 8 x u32; NxImageDesc gpu_abi.h:41-53; NxImageRead nxgpu4.h:176-181; NxPresent nxgpu4.h:229-240).
-MODE50 = r"""#if MODE == 50
-    uint8_t *A = (uint8_t *)(uintptr_t)(H->heap_base + 0x60000);
-    uint8_t *D = A + 0x100, *I = A + 0x200, *B = A + 0x300, *R = A + 0x400, *P = A + 0x500;
-    uint64_t *w = (uint64_t *)(A + 0x600);
-    for (uint32_t i = 0; i < 256; i++) A[i] = (uint8_t)(i * 7 + 3);
-    w[0] = H->heap_base + 0x60200;
-    num("infoRc", EC(10, 0, FNVNX_ADDR(w), 1));
-    num("magic", ((uint32_t *)I)[0]); num("version", ((uint32_t *)I)[1]); num("backend", ((uint32_t *)I)[6]);
-    num("dims", (uint64_t)((uint32_t *)I)[4] << 16 | ((uint32_t *)I)[5]);
-    *(uint16_t *)(D + 0) = 8; *(uint16_t *)(D + 2) = 8; D[4] = 1; D[5] = 1; D[6] = 1;
-    *(uint64_t *)(D + 16) = H->heap_base + 0x60000; *(uint32_t *)(D + 24) = 256;
-    w[0] = H->heap_base + 0x60100;
-    uint64_t id = EC(10, 3, FNVNX_ADDR(w), 1);
-    num("created", id != 0);
-    *(uint32_t *)(R + 0) = (uint32_t)id;
-    *(uint32_t *)(R + 20) = 8; *(uint32_t *)(R + 24) = 8; *(uint32_t *)(R + 28) = 1;
-    *(uint64_t *)(R + 32) = H->heap_base + 0x60300; *(uint32_t *)(R + 40) = 256; *(uint32_t *)(R + 44) = 32;
-    w[0] = H->heap_base + 0x60400;
-    num("readRc", EC(10, 15, FNVNX_ADDR(w), 1));
-    uint32_t same = 0;
-    for (uint32_t i = 0; i < 256; i++) same += B[i] == A[i];
-    num("readSame", same);
-    *(uint32_t *)(P + 0) = (uint32_t)id;
-    *(int32_t *)(P + 12) = 8; *(int32_t *)(P + 16) = 8; *(int32_t *)(P + 28) = 8; *(int32_t *)(P + 32) = 8;
-    w[0] = H->heap_base + 0x60500;
-    uint64_t prc = 0;
-    for (uint32_t f = 0; f < 4; f++) { *(uint32_t *)(P + 48) = f; prc |= EC(10, 17, FNVNX_ADDR(w), 1); }
-    num("presentRc", prc);
-    uint64_t A2 = plat(4, 0, 0x8000000, 0, 2);
-    plat(5, A2, 0x1000, 0, 2); plat(5, A2 + 0x1000, 0x1000, 0, 2);
-    w[0] = 0x30000000;
-    num("outside", EC(10, 15, FNVNX_ADDR(w), 1));
-    w[0] = A2 + 0xff0;
-    num("straddle", EC(10, 17, FNVNX_ADDR(w), 1));
-    num("badfn", EC(10, 99, FNVNX_ADDR(w), 1));
-    fnvnx_hcall1(H->exit, 0);
-#elif MODE == 51
-    num("mf", fnvnx_hcall3(H->map_fixed, 0x4000000, 0x2000, H->heap_base + 0x20000));
-    uint64_t A = plat(4, 0, 0x8000000, 0, 2);
-    num("A", A);
-    plat(5, A, 0x1000, 0, 2); plat(5, A + 0x1000, 0x1000, 0, 2); plat(5, A + 0x10000, 0x1000, 0, 2);
-    plat(8, A + 0x10000, 0x1000, 1, 3);
-    fnvnx_hcall1(H->exit, 0);
-#elif MODE == 6"""
+# MODE 80 / 81: the renderer guests (tests/bootguest/guest.c; layout of the heap block at +0x60000 and the field offsets are in that source).
 
 
 def parse(lines):
@@ -120,7 +74,7 @@ def main():
     atexit.register(shutil.rmtree, scratch, ignore_errors=True)
     lib = fetch_nxgl4(scratch)
     tb.case("setup: the pinned libnxgl4.so fetched, tree_sha256 and sha256 verified", os.path.isfile(lib))
-    elf50, elf51 = tb.build(50, MODE50)[0], tb.build(51, MODE50)[0]
+    elf50, elf51 = tb.build(80)[0], tb.build(81)[0]
     root = os.path.join(d, "sd")
     os.makedirs(root)
     frames = os.path.join(d, "frames")
@@ -129,7 +83,7 @@ def main():
     os.environ.update(boot.GPU_ENV)
     os.environ["NXGL4_FRAMES"] = frames
     os.makedirs(frames)
-    m = bootmachine.Machine(elf50, tb.make_plan(elf50), boothost.Services(root))
+    m = bootmachine.Machine(elf50, tb.make_plan(elf50), boothost.Services(root), quantum=tb.QUANTUM)
     seen = []
     g = bootgpu.Gpu(lib, m, "docked", on_present=seen.append)
     lines = []
@@ -157,14 +111,14 @@ def main():
     g.close()
 
     # --- without a library: module 10 is not registered
-    m = bootmachine.Machine(elf50, tb.make_plan(elf50), boothost.Services(root))
+    m = bootmachine.Machine(elf50, tb.make_plan(elf50), boothost.Services(root), quantum=tb.QUANTUM)
     lines = []
     m.on_console(lines.append)
     m.run()
     tb.case("without --gpu: module 10 answers NO_MODULE", parse(lines)["infoRc"] == bootmachine.EXT_NO_MODULE, lines)
 
     # --- host_ptr
-    m = bootmachine.Machine(elf51, tb.make_plan(elf51), boothost.Services(root))
+    m = bootmachine.Machine(elf51, tb.make_plan(elf51), boothost.Services(root), quantum=tb.QUANTUM)
     lines = []
     m.on_console(lines.append)
     r = m.run()
@@ -197,7 +151,7 @@ def main():
 
     def args(out, fr, *extra):
         return ["run", "--elf", elf, "--reserved", w("res.tsv", "exe\t400000\t2100000\nmod2\t4000000\t4200000\n"), "--keys", "f0000:200000",
-                "--heap-size", "0x100000", "--root", root, "--milestones", table, "--manifest", w("m.tsv", "1000\tmarker\n"),
+                "--heap-size", "0x100000", "--root", root, "--quantum", str(tb.QUANTUM), "--milestones", table, "--manifest", w("m.tsv", "1000\tmarker\n"),
                 "--out", os.path.join(d, out), "--gpu", lib, "--frames", os.path.join(d, fr), *extra]
 
     outs = []
@@ -213,8 +167,17 @@ def main():
         st = {x["name"]: x["reached"] for x in doc["milestones"]}
         tb.case("CLI: host events gpu-first-call and present reached", st == {"first": True, "pres": True}, st)
         names = [iv["to"] for iv in doc["icount"]["intervals"]]
-        tb.case("CLI: icount marks frame-1..3 only", [n for n in names if n.startswith("frame")] == ["frame-1", "frame-2", "frame-3"], names)
-        tb.case("CLI: frame files in --frames", len(os.listdir(os.path.join(d, "fr0"))) == 8)
+        tb.case("CLI: a frame is not an icount interval (no frame-<n> mark)", [n for n in names if n.startswith("frame")] == [], names)
+        fr = doc.get("frames", [])
+        tb.case("CLI: OUT.json frames = one record per present: n 1..4, virtual t_ns not decreasing, main-thread instructions, a sha256 key",
+                [f["n"] for f in fr] == [1, 2, 3, 4] and all(set(f) == {"n", "t_ns", "per_tid", "sha256"} for f in fr)
+                and [f["t_ns"] for f in fr] == sorted(f["t_ns"] for f in fr) and all(f["per_tid"].get("main", 0) > 0 for f in fr)
+                and sum(sum(f["per_tid"].values()) for f in fr) <= doc["icount"]["totals"]["all"]["total"], fr)
+        keys = {f["sha256"] for f in fr}
+        tb.case("CLI: the frames directory holds exactly the distinct frames, <key>.rgba + <key>.txt, key = sha256(.txt + .rgba)",
+                sorted(os.listdir(os.path.join(d, "fr0"))) == sorted(k + e for k in keys for e in (".rgba", ".txt"))
+                and all(hashlib.sha256(open(os.path.join(d, "fr0", k + ".txt"), "rb").read() + open(os.path.join(d, "fr0", k + ".rgba"), "rb").read()).hexdigest() == k
+                        for k in keys), sorted(os.listdir(os.path.join(d, "fr0"))))
         tb.case("CLI: two runs give byte-identical OUT.json", open(os.path.join(d, "g0.json"), "rb").read()
                 == open(os.path.join(d, "g1.json"), "rb").read())
     try:

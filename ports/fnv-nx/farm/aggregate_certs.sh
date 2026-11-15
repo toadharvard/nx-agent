@@ -9,7 +9,8 @@ set -euo pipefail
 Q=${1:?usage: aggregate_certs.sh QUEUE.tsv N}; N=${2:?usage: aggregate_certs.sh QUEUE.tsv N}
 FARM=$(cd "$(dirname "$0")" && pwd); HERE=$(cd "$FARM/../lift/proof" && pwd)
 B=${FNVNX_BUILD:?FNVNX_BUILD (clone of fnv-nx-build)}; W=${FNVNX_WORK:-${GATE_CACHE:?GATE_CACHE not set}/aggregate}; PUBLISH=${PUBLISH:-1}
-QID=$(grep -m1 -o 'queue_id=[0-9a-f]*' "$Q" | cut -d= -f2); IRID=$(python3 -I "$HERE/certs_build.py" --id); ID=$IRID-$QID
+. "$FARM/sail_toolchain.sh"; IR=${SAIL_IR:-$(sail_pinned_ir)} || exit 1; sail_args "$IR"      # the explicit toolchain arguments of certs_build (model_sail.configure)
+QID=$(grep -m1 -o 'queue_id=[0-9a-f]*' "$Q" | cut -d= -f2); IRID=$(python3 -I "$HERE/certs_build.py" "${TC[@]}" --id); ID=$IRID-$QID
 rm -rf "$W"; mkdir -p "$W/shards"
 GOOD=0; DEFRC=0; MISSING=""; GL="$B/.git/farm.lock"
 # per shard: every published branch whose jsonl has exactly the shard's queue rows and no error record qualifies (shardok); exactly one distinct content must qualify.
@@ -28,7 +29,7 @@ for K in $(seq 1 "$N"); do
 done
 [ -z "${REQUIRE_ALL:-}" ] || [ -z "$MISSING" ] || { echo "shards without a complete file:$MISSING" >&2; exit 1; }
 rm -f "$W/try.jsonl"
-python3 -I "$HERE/certs_build.py" --shards "$W/shards" --out "$W/certs.tsv" --report "$W/report.txt" > "$W/build.log" 2>&1 || { cat "$W/build.log" >&2; exit 1; }
+python3 -I "$HERE/certs_build.py" "${TC[@]}" --shards "$W/shards" --out "$W/certs.tsv" --report "$W/report.txt" > "$W/build.log" 2>&1 || { cat "$W/build.log" >&2; exit 1; }
 # shapes whose only disagreement is a declared model defect: certified against the SDM spec of the defect (defectspec.py); a defect id without spec fails
 python3 -I "$HERE/defectspec.py" "$W/shards" > "$W/defects.tsv" 2> "$W/defects.log" || DEFRC=$?; tail -n 1 "$W/defects.log"
 # far memory transfers compose the EA from the PUSH r/m32 certificate: the basis must be proved in certs.tsv (X86SYS = the L5 record, FARKEYS = the pack's far shapes)

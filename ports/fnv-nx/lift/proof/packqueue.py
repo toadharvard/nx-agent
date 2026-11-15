@@ -19,12 +19,14 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from proof import certs_build, symform  # noqa: E402
+from proof import certs_build, model_sail, symform  # noqa: E402
 
 
 def main(argv):
     ap = argparse.ArgumentParser(); ap.add_argument('universe'); ap.add_argument('shards', nargs='*'); ap.add_argument('--pack-commit', required=True)
-    ap.add_argument('--prover-commit', required=True); ap.add_argument('--out', required=True); ap.add_argument('--noform'); a = ap.parse_args(argv)
+    ap.add_argument('--prover-commit', required=True); ap.add_argument('--out', required=True); ap.add_argument('--noform')
+    ap.add_argument('--sail-work', required=True); ap.add_argument('--sail-ir', required=True); ap.add_argument('--isla', required=True); a = ap.parse_args(argv)
+    model_sail.configure(a.sail_work, a.sail_ir, a.isla)
     pin = certs_build.pinned_model()
     fam, hdr, first = {}, [], {}
     with open(a.universe) as fh:

@@ -181,7 +181,11 @@ LONG InterlockedCompareExchange(volatile LONG *, LONG, LONG);
 PVOID InterlockedCompareExchangePointer(PVOID volatile *, PVOID, PVOID);
 PVOID InterlockedExchangePointer(PVOID volatile *, PVOID);
 #else
+#ifdef __cplusplus
 #define FNVNX_ILK inline __attribute__((gnu_inline, always_inline))
+#else
+#define FNVNX_ILK extern inline __attribute__((gnu_inline, always_inline))   /* C: `inline` + gnu_inline would EMIT a definition in every C unit that includes this header; extern inline emits none */
+#endif
 #define FNVNX_ILK_MISALIGNED(p) __builtin_expect(((uintptr_t)(p) & (sizeof(*(p)) - 1)) != 0, 0)
 #define FNVNX_ILK_FULL(expr) ({ __typeof__(expr) r_ = (expr); __atomic_thread_fence(__ATOMIC_SEQ_CST); r_; })
 FNVNX_ILK LONG InterlockedIncrement(volatile LONG *p)
@@ -274,7 +278,7 @@ DWORD GetCurrentProcessId(void);
 void Sleep(DWORD);
 DWORD SleepEx(DWORD, BOOL);
 BOOL SwitchToThread(void);
-void ExitProcess(UINT);
+void ExitProcess(UINT) __attribute__((noreturn, nothrow));   /* MSDN ExitProcess: "does not return" */
 DWORD TlsAlloc(void);
 LPVOID TlsGetValue(DWORD);
 BOOL TlsSetValue(DWORD, LPVOID);
@@ -583,7 +587,7 @@ typedef struct _MEMORY_BASIC_INFORMATION {
 } MEMORY_BASIC_INFORMATION, *PMEMORY_BASIC_INFORMATION;
 
 BOOL GetExitCodeThread(HANDLE, LPDWORD);
-void ExitThread(DWORD) __attribute__((noreturn));
+void ExitThread(DWORD) __attribute__((noreturn, nothrow));
 BOOL SetThreadPriorityBoost(HANDLE, BOOL);
 int GetThreadPriority(HANDLE);
 BOOL SetFilePointerEx(HANDLE, LARGE_INTEGER, PLARGE_INTEGER, DWORD);

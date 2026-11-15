@@ -3,11 +3,12 @@
 only by code we wrote and certified. Four checks, each total over its universe.
     python3 -I ports/fnv-nx/lift/proof/gate_fpexact.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/fpexact.json
 No argument is read. Universe convention of the object-level gates (gate_build.quantify, as gate_objstub / gate_linkstrict): the admitted product
-roots of verify/admit.json; each root is built or taken from the cache by gate_build.ensure (GATE_CACHE, else GATE_OUT/fpexact-cache) and its
+roots of verify/admit.json; each root is built or taken from the cache by gate_build.ensure (GATE_CACHE: the verdict's one store, always set by l1.py) and its
 objects (objects.json "objects") are judged; no product root: universe 0, green. The loader modules (gate_build, recipe) are imported from
 ports/fnv-nx/verify, sibling of lift/, the way verify/gate_contract.py imports its own; a checkout without verify/ cannot run the gate (no result file: red).
-All object input handling is in `read_inputs` (objects.json -> [(unit, object path)]) and `read_f2i` (the plugin's file of one object).
-The table files are files of the admitted root that holds them (L3a's guest root lift/rt: rcpref.h, rcptab.c, rcptab.cert.json): the item
+All object input handling is in `read_inputs` (objects.json -> [(unit, object path)]), `read_f2i_paths` (objects.json -> {unit: the plugin's file of
+its object}: the `f2i` field of the object's row, the single place where the recipe records the path) and `read_f2i` (that file).
+The table files are files of the admitted root that holds them (L3a's guest root lift/rt: rcptab.c, rcptab.cert.json; rcpref.h is in the root's published GEN output, genout.gen_dir): the item
 `<image>:rcpcert` exists per linked image (a root with a link stage) iff another object of the image references a symbol that the object compiled from the unit rcptab.c defines (symbol tables of the objects: the link resolves exactly those references); no image, or no such reference: no item (universe 0 for check 1).
 
 Check 0, dependency (item `<root>:forms`): the correctness of the helpers sse_f2i / fv_i, whose conversions this gate lets through, is
@@ -18,8 +19,8 @@ result file; the same code on the same declared inputs gives the same verdict). 
 Check 1, certificate (item `<root>:rcpcert`, files of the root): rcptab.c is the table of RCPSS / RSQRTSS of the one reference CPU. The pinned certificate
 rt/rcptab.cert.json (made on that CPU by farm/rcpcert.sh: CPUID identity read with the instruction, all 2^32 inputs of both functions
 executed on the hardware and compared bit for bit with the functions of rt/rcptab.c, SHA-256 of both result streams) is accepted iff
-  sha256(rt/rcptab.c) == source_sha256, sha256(rt/rcpref.h) == header_sha256, mismatches == 0 (the integer 0), and the CPU identity of the
-  certificate equals the four FNVL_RCP_REF_* constants of rt/rcpref.h (the same header rt/rcptab.c includes and the certifying program uses).
+  sha256(rt/rcptab.c) == source_sha256, sha256(GEN/rcpref.h) == header_sha256, mismatches == 0 (the integer 0), and the CPU identity of the
+  certificate equals the four FNVL_RCP_REF_* constants of GEN/rcpref.h (the same header rt/rcptab.c includes and the certifying program uses).
 A missing, unreadable or malformed certificate is a finding. Argument: the table functions are pure functions of 32 bits; the certificate
 states equality with the hardware on the whole domain for the exact source bytes whose hash it carries, on the reference identity; so the
 source named by the hash computes RCPSS / RSQRTSS of the reference CPU for every input. Registered assumptions (ports/fnv-nx/lift/ASSUMPTIONS.l3b.json): ASM-320 (the certifying run was made by farm/rcpcert.sh on a CPU
@@ -40,7 +41,7 @@ assumption: ASM-043 (capstone decodes an instruction to its architectural id; se
 Check 3, float -> integer exactness (item `f2i:<root>/<unit>`). The x86 rule (cvt*2si, cvtt*, fist, fistp, fisttp): rounding by MXCSR.RC /
 FCW.RC (truncation for the cvtt* and fisttp forms); NaN and out-of-range give the integer indefinite (0x80000000, 0x8000,
 0x8000000000000000). The A64 FCVT{Z,N,M,P,A}{S,U} and FJCVTZS saturate instead (NaN gives 0), so a bare conversion is wrong. Measured
-(compile probes with the flags of lift/tools/tests/instest.py): the helpers (sse_f2i, fv_i) are inlined, and GCC hoists, duplicates and
+(compile probes with the flags of the retired one-instruction harness): the helpers (sse_f2i, fv_i) are inlined, and GCC hoists, duplicates and
 if-converts the conversion around their range guard (the FCVTZS may sit above a later compare, its result chosen by a select, shared
 by two guards), so a per-instruction object-level property ("this FCVT is guarded") is only a path-sensitive interval analysis of
 compiler-chosen code, not decidable per instruction from operands. The rule is therefore at source level, before inlining, plus an
@@ -50,10 +51,11 @@ object-level necessary condition:
       irint / {i,l,ll}{ceil,floor} builtin families; IFN_VEC_CONVERT; target builtins with a float argument and an integer result; inline asm with a
       float / vector operand or an FP register clobber) that lies in a function without the attribute fnvnx_f2i (FNVL_F2I in rt/fnvl_x87.h, on the
       helpers sse_f2i and fv_i), right after the CFG is built, before early inlining and every optimisation, so inlining a helper into its callers
-      cannot hide a site and no transformation adds one. It writes `<unit>.f2i.json` (format fnvnx-f2i/1: unit, sites, helpers, findings = sorted
-      {function, file, line, kind: conv|builtin|asm}) into the CC stage's /out; the recipe keeps it as obj/<unit>.o.f2i.json next to the object.
-      Rule: every object has its result file, its `unit` field equals the unit of objects.json, and `findings` == []; a missing or malformed file,
-      another unit, or any finding is a finding of the object.
+      cannot hide a site and no transformation adds one. It writes `<unit>.f2i.json` (format fnvnx-f2i/2: unit, helpers, counts sites = rewritten + len(ranged) + helper + len(findings), findings = sorted
+      unrewritten sites {function, file, line, kind: conv-scalar|conv-vector|builtin|mdbuiltin|asm}, ranged = sites left as they are because GCC's range fact proves the operand in range, {..., fact {source gcc-range, itype i8..u64, conv trunc|rint|round|floor|ceil, lo, hi, nonan}}: green only with nonan true and [lo, hi] inside the set where the conversion is specified, computed by the gate from itype and conv (specified_set), never from the report) into the CC stage's /out; the recipe records its path as the `f2i` field of the object's row in objects.json (obj/<unit>.f2i.json).
+      Rule: every object row has `f2i` naming an existing result file, its `unit` field equals recipe.sandbox_src(unit) (the plugin reports the compiler's
+      input as the stage was given it: the one function that composes the path of a unit's source in the sandbox, also used by the stage), and
+      `findings` == []; a row without `f2i`, a missing or malformed file, another unit, or any finding is a finding of the object.
   3c (native C++ unit) a unit of a root whose cxx_origin is native needs, in its CC stage document (gate_datamodel.cc_docs, the one reader), the declared
       input /plug/fnvnx_ftoi and the argv flag -fplugin=/plug/fnvnx_ftoi/fnvnx_ftoi.so: the compile ran the plugin that rewrites or rejects every
       conversion. A lifted root's units need no plugin (the lifter emits the conversions through the helpers); their f2i file is judged by 3a.
@@ -76,6 +78,7 @@ build or whose recipe is invalid is the one item `<root>:inputs` (uncertified, r
 uncertified: the first 50 ids sorted. Exit 0 iff green."""
 import hashlib
 import json
+from fractions import Fraction
 import os
 import re
 import sys
@@ -91,7 +94,7 @@ VERIFY = os.path.normpath(os.path.join(LIFT, "..", "verify"))
 sys.path.insert(0, LIFT)
 sys.path.insert(0, os.path.join(VERIFY, "..", "contract"))
 sys.path.insert(0, VERIFY)
-from proof import formgate  # noqa: E402
+from proof import formgate, genout  # noqa: E402     (genout: the one reader of the lift/rt GEN output)
 import gate_build  # noqa: E402
 import gate_datamodel  # noqa: E402     (cc_docs: the reader of the CC stage documents, the one copy)
 import gatefile  # noqa: E402     (ports/fnv-nx/contract)
@@ -116,14 +119,22 @@ def sha256_file(path):
 
 def read_inputs(res):
     """-> [(unit, absolute object path)] sorted by unit, from the objects.json dict RES of one root (the recipe's result). The one place the object
-    input is read. The plugin's file of an object is found by read_f2i next to it."""
+    input is read. The plugin's file of an object is named by read_f2i_paths."""
     return sorted((o["unit"], o["object"]) for o in res["objects"])
 
 
-def read_ref(rt):
-    """the four FNVL_RCP_REF_* constants of rt/rcpref.h -> {"VENDOR": str, "FAMILY": int, ...}; ValueError unless each is defined exactly once"""
+def read_f2i_paths(res):
+    """-> {unit: path of the plugin's result file, or None when the row has no `f2i`}: the `f2i` field of each row of objects.json "objects"."""
+    return {o["unit"]: o.get("f2i") for o in res["objects"]}
+
+
+GEN_HEADER = "rcpref.h"      # a file of the root's published GEN output (rt/build.json stage gen_cpuref; genout.gen_dir), not a committed one
+
+
+def read_ref(gen):
+    """the four FNVL_RCP_REF_* constants of GEN/rcpref.h (GEN: genout.gen_dir()) -> {"VENDOR": str, "FAMILY": int, ...}; ValueError unless each is defined exactly once"""
     out = {}
-    with open(os.path.join(rt, "rcpref.h")) as fh:
+    with open(os.path.join(gen, GEN_HEADER)) as fh:
         for line in fh:
             m = re.match(r'#define FNVL_RCP_REF_([A-Z]+) ("[^"\n]*"|[0-9]+)\s*$', line)
             if m and m[1] in REF_KEYS:
@@ -131,14 +142,14 @@ def read_ref(rt):
                     raise ValueError("FNVL_RCP_REF_%s defined twice" % m[1])
                 out[m[1]] = m[2][1:-1] if m[2].startswith('"') else int(m[2])
     if sorted(out) != sorted(REF_KEYS):
-        raise ValueError("rt/rcpref.h does not define exactly FNVL_RCP_REF_{VENDOR,FAMILY,MODEL,STEPPING}")
+        raise ValueError("GEN/rcpref.h does not define exactly FNVL_RCP_REF_{VENDOR,FAMILY,MODEL,STEPPING}")
     return out
 
 
-def check_cert(rt):
-    """check 1 -> [finding strings]"""
+def check_cert(rt, gen):
+    """check 1 -> [finding strings]; RT the directory of rcptab.c and its certificate, GEN the published generated directory (genout.gen_dir)"""
     try:
-        ref = read_ref(rt)
+        ref = read_ref(gen)
     except (OSError, ValueError) as e:
         return ["reference identity unreadable: %s" % e]
     path = os.path.join(rt, "rcptab.cert.json")
@@ -156,8 +167,8 @@ def check_cert(rt):
             bad.append("cpu identity %s is not the reference %s" % (json.dumps(cpu, sort_keys=True), json.dumps(want, sort_keys=True)))
         if cert["mismatches"] != 0 or isinstance(cert["mismatches"], bool):
             bad.append("mismatches is %r, not 0" % (cert["mismatches"],))
-        for key, file in (("source_sha256", "rcptab.c"), ("header_sha256", "rcpref.h")):
-            have = sha256_file(os.path.join(rt, file))
+        for key, base, file in (("source_sha256", rt, "rcptab.c"), ("header_sha256", gen, GEN_HEADER)):
+            have = sha256_file(os.path.join(base, file))
             if cert[key] != have:
                 bad.append("%s %s differs from sha256 of rt/%s (%s)" % (key, cert[key], file, have))
         for key in ("rcp_stream_sha256", "rsqrt_stream_sha256"):
@@ -251,51 +262,115 @@ def symbols_of(path):
     return dfn, ref
 
 
-def read_f2i(obj_path):
-    """-> (result dict or None, problem string or None) of the plugin's file next to the object"""
-    p = obj_path + ".f2i.json"
+F2I_FORMAT = "fnvnx-f2i/2"
+F2I_KINDS = ("conv-scalar", "conv-vector", "builtin", "mdbuiltin", "asm")
+
+
+def _real(x):
+    """x is a JSON number (not a bool, not NaN): an int or a float; an infinity is a real bound the check below handles"""
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and x == x
+
+
+def read_f2i(p):
+    """P: the `f2i` field of the object's row (None if the row has none) -> (result dict or None, problem string or None) of the plugin's file.
+    Format fnvnx-f2i/2: unit, helpers [names], sites, rewritten, helper (ints), findings [{function,file,line,kind}], ranged [{function,file,line,kind,fact}],
+    optional rewrites [{function,file,line,kind}]; kind in F2I_KINDS; fact = {source "gcc-range", itype, conv, lo, hi, nonan} (no bounds: the gate computes them). The counts must add up:
+    sites == rewritten + len(ranged) + helper + len(findings); with `rewrites` present, len(rewrites) == rewritten."""
+    if not p:
+        return None, "the object's row in objects.json has no f2i (the plugin's result file)"
     if not os.path.isfile(p):
-        return None, "no result file %s of the plugin" % os.path.basename(p)
+        return None, "the f2i of the object's row names a missing file %s" % os.path.basename(p)
     try:
         with open(p) as fh:
             d = json.load(fh)
-        if d["format"] != "fnvnx-f2i/1" or not isinstance(d["findings"], list) or not isinstance(d["sites"], int) or not isinstance(d["helpers"], list):
-            raise ValueError("not a fnvnx-f2i/1 result")
-        for f in d["findings"]:
-            f["function"], f["file"], f["line"], f["kind"]
+        if d["format"] != F2I_FORMAT or not isinstance(d["helpers"], list):
+            raise ValueError("not a %s result" % F2I_FORMAT)
+        for k in ("sites", "rewritten", "helper"):
+            if not isinstance(d[k], int) or isinstance(d[k], bool) or d[k] < 0:
+                raise ValueError("%s is not a count" % k)
+        for k in ("findings", "ranged") + (("rewrites",) if "rewrites" in d else ()):
+            if not isinstance(d[k], list):
+                raise ValueError("%s is not a list" % k)
+            for f in d[k]:
+                f["function"], f["file"], f["line"]
+                if f["kind"] not in F2I_KINDS:
+                    raise ValueError("kind %r is not one of %s" % (f["kind"], ", ".join(F2I_KINDS)))
+        for f in d["ranged"]:
+            fa = f["fact"]
+            if not isinstance(fa, dict) or set(fa) != {"source", "itype", "conv", "lo", "hi", "nonan"} or fa["source"] != "gcc-range":
+                raise ValueError("a ranged site's fact is not exactly {source gcc-range, itype, conv, lo, hi, nonan}")
+            if fa["itype"] not in ITYPES or fa["conv"] not in CONVS or not _real(fa["lo"]) or not _real(fa["hi"]) or not isinstance(fa["nonan"], bool):
+                raise ValueError("a ranged site's fact has an itype outside %s, a conv outside %s, a non-real lo / hi or a non-boolean nonan" % (", ".join(ITYPES), ", ".join(CONVS)))
         d["unit"]
+        if d["sites"] != d["rewritten"] + len(d["ranged"]) + d["helper"] + len(d["findings"]):
+            raise ValueError("sites %d != rewritten %d + ranged %d + helper %d + findings %d" % (d["sites"], d["rewritten"], len(d["ranged"]), d["helper"], len(d["findings"])))
+        if "rewrites" in d and len(d["rewrites"]) != d["rewritten"]:
+            raise ValueError("rewrites lists %d sites, rewritten is %d" % (len(d["rewrites"]), d["rewritten"]))
         return d, None
     except (OSError, ValueError, KeyError, TypeError) as e:
         return None, "result file %s unreadable or malformed: %s" % (os.path.basename(p), str(e)[:150] or type(e).__name__)
 
 
-def judge_object_coded(oid, path, asm=False, unit=None):
+ITYPES = ("i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64")
+CONVS = ("trunc", "rint", "round", "floor", "ceil")
+
+
+def specified_set(itype, conv):
+    """-> (lo, lo_open, hi, hi_open) with Fractions: the operands x whose conversion is specified, that is whose result is representable in ITYPE, computed
+    from the conversion alone (never read from a report). With [mn, mx] the integer range of ITYPE:
+      trunc  trunc(x) in [mn, mx]            x in (mn-1, mx+1)
+      floor  floor(x) in [mn, mx]            x in [mn, mx+1)
+      ceil   ceil(x) in [mn, mx]             x in (mn-1, mx]
+      round  round-half-away(x) in [mn, mx]  x in (mn-1/2, mx+1/2)
+      rint   the dynamic rounding mode, so the intersection over all four modes: x in [mn, mx]  (nearest: [mn-1/2, mx+1/2), up: (mn-1, mx], down: [mn, mx+1), zero: (mn-1, mx+1))"""
+    bits = int(itype[1:])
+    mn, mx = (-(1 << (bits - 1)), (1 << (bits - 1)) - 1) if itype[0] == "i" else (0, (1 << bits) - 1)
+    h = Fraction(1, 2)
+    return {"trunc": (mn - 1, True, mx + 1, True), "floor": (mn, False, mx + 1, True), "ceil": (mn - 1, True, mx, False),
+            "round": (mn - h, True, mx + h, True), "rint": (mn, False, mx, False)}[conv]
+
+
+def range_proven(f):
+    """a ranged site is green only if its fact (GCC's range of the operand, known not NaN) lies wholly inside the set where the conversion is specified, which
+    the gate computes from the itype and conv of the fact: nonan true, and lo, hi (exact Fractions of the JSON numbers) inside specified_set"""
+    fa = f["fact"]
+    if fa["nonan"] is not True:
+        return False
+    lo, lo_open, hi, hi_open = specified_set(fa["itype"], fa["conv"])
+    a, b = Fraction(fa["lo"]), Fraction(fa["hi"])
+    return a <= b and (a > lo if lo_open else a >= lo) and (b < hi if hi_open else b <= hi)
+
+
+def judge_object_coded(oid, path, asm=False, unit=None, f2i_path=None):
     """-> {item id: [(code, text)]} for `rcp:<oid>` and `f2i:<oid>`; the code is the finding class (fixture mode, RECIPE.md "Fixtures"). ASM: the unit is
     an assembler unit (.s / .S, the recipe's own kind): the compiler never builds GIMPLE for it, so the plugin has no file to write and no conversion
     site exists in its source: the result is the empty one (sites 0), and check 3b still makes any FCVT / FJCVTZS instruction of the object a finding.
-    A finding of kind builtin (lround, a libm call) is IEEE under OWNER ASM-008 and is not one; conv and asm are."""
+    F2I_PATH: the `f2i` of the object's row. Every finding of the plugin is a finding of the object, whatever its kind: no kind is exempt (the plugin rewrites every
+    conversion GIMPLE carries to the x86 semantics, so a site that remains in `findings` is unrewritten)."""
     scan = scan_object(path)
     rcp = [("rcp-estimate", "%s: %s in %s" % (oid, m, w)) for w, m in scan["recip"]]
     f2i = []
     und = [("undecodable", "undecodable bytes at %s" % w) for w in scan["undecodable"]]
     rcp += und
     f2i += und
-    d, why = ({"format": "fnvnx-f2i/1", "findings": [], "sites": 0, "helpers": []}, None) if asm else read_f2i(path)
+    d, why = ({"format": F2I_FORMAT, "findings": [], "ranged": [], "sites": 0, "rewritten": 0, "helper": 0, "helpers": []}, None) if asm else read_f2i(f2i_path)
     if d is None:
         f2i.append(("f2i-report-missing", why))
-    elif not asm and d["unit"] != unit:
-        f2i.append(("f2i-report-unit", "result file names the unit %r, not %r" % (d["unit"], unit)))
+    elif not asm and d["unit"] != recipe.sandbox_src(unit):
+        f2i.append(("f2i-report-unit", "result file names the unit %r, not %r" % (d["unit"], recipe.sandbox_src(unit))))
     else:
-        f2i += [("f2i-" + f["kind"], "%s:%s in %s: %s outside a conversion helper" % (f["file"], f["line"], f["function"], f["kind"]))
-                for f in d["findings"] if f["kind"] != "builtin"]
+        f2i += [("f2i-" + f["kind"], "%s:%s in %s: %s outside a conversion helper, not rewritten" % (f["file"], f["line"], f["function"], f["kind"]))
+                for f in d["findings"]]
+        f2i += [("f2i-range", "%s:%s in %s: %s site whose range fact does not prove the operand in the specified range (%r)" % (f["file"], f["line"], f["function"], f["kind"], f["fact"]))
+                for f in d["ranged"] if not range_proven(f)]
         if scan["fcvt"] and d["sites"] == 0:
             f2i.append(("fcvt-no-site", "%d float->int instruction(s) (%s) but the unit has no conversion site" % (len(scan["fcvt"]), scan["fcvt"][0][1])))
     return {"rcp:" + oid: rcp, "f2i:" + oid: f2i}
 
 
-def judge_object(oid, path, asm=False, unit=None):
+def judge_object(oid, path, asm=False, unit=None, f2i_path=None):
     """-> {item id: [finding strings]}, see judge_object_coded"""
-    return {k: [t for _, t in v] for k, v in judge_object_coded(oid, path, asm, unit).items()}
+    return {k: [t for _, t in v] for k, v in judge_object_coded(oid, path, asm, unit, f2i_path).items()}
 
 
 FTOI = "fnvnx_ftoi"
@@ -314,11 +389,11 @@ def ftoi_why(doc):
 TABLE_UNIT = "rcptab.c"
 
 
-def table_item(objs, image_dir):
+def table_item(objs, image_dir, cache=None):
     """-> None (no item) or [findings] of the item `<image>:rcpcert`. IMAGE_DIR: the directory of the root that is linked into one image, or None when
     the root links nothing. The table object is the object of the unit rcptab.c of the image; the symbols it defines come from its symbol table. The image
     needs the item iff another object of the image references one of those symbols (the link resolves the reference to the table). The certificate is
-    judged on the directory that holds the unit rcptab.c (rcpref.h, rcptab.c, rcptab.cert.json there)."""
+    judged on the directory that holds the unit rcptab.c (rcptab.c, rcptab.cert.json there; rcpref.h from the published GEN)."""
     if image_dir is None:
         return None
     tabs = [(u, p) for u, p in objs if os.path.basename(u) == TABLE_UNIT]
@@ -330,27 +405,46 @@ def table_item(objs, image_dir):
     used = sorted({n for u, p in objs if os.path.basename(u) != TABLE_UNIT for n in symbols_of(p)[1] & defined})
     if not used:
         return None
-    return check_cert(os.path.join(image_dir, os.path.dirname(tabs[0][0])))
+    try:
+        gen = genout.gen_dir(cache)
+    except RuntimeError as e:
+        return ["reference identity unreadable: %s" % e]
+    return check_cert(os.path.join(image_dir, os.path.dirname(tabs[0][0])), gen)
 
 
-def judge_objects_coded(root, objs, image_dir, forms_ok, docs=None):
+def object_result(oid, path, asm, unit, f2i_path, cache):
+    """judge_object_coded as an item of the verdict's store (gate_build.memo, GATE_CACHE/memo/fpexact): keyed by the sha256 of the object and of its f2i report,
+    the unit, the unit's sandbox source name, the asm flag, the tool (this file, capstone, pyelftools) and env.json; a value is {item id: [[code, text]]}."""
+    if not cache:
+        return judge_object_coded(oid, path, asm, unit, f2i_path)
+    import capstone
+    import elftools
+    key = {"gate": "fpexact", "oid": oid, "object": gate_build.file_sha(path), "f2i": gate_build.file_sha(f2i_path) if f2i_path and os.path.isfile(f2i_path) else None,
+           "unit": unit, "src": recipe.sandbox_src(unit) if unit else None, "asm": bool(asm), "tool": gate_build.tool_digest(__file__),
+           "libs": [capstone.__version__, elftools.__version__], "env": gate_build.file_sha(os.path.join(os.path.dirname(os.path.abspath(recipe.__file__)), "env.json"))}
+    v, _ = gate_build.memo(cache, "fpexact", key, lambda: judge_object_coded(oid, path, asm, unit, f2i_path))
+    return {k: [tuple(x) for x in items] for k, items in v.items()}
+
+
+def judge_objects_coded(root, objs, image_dir, forms_ok, docs=None, f2i=None, cache=None):
     """-> {item id: [(code, text)]} of one root: OBJS [(unit, path)], IMAGE_DIR (see table_item), FORMS_OK (reason string or None: the dependency on the
-    gate forms), DOCS ({unit: CC document} of a native root; None: lifted root)."""
+    gate forms), DOCS ({unit: CC document} of a native root; None: lifted root), F2I ({unit: the `f2i` of the row}, read_f2i_paths; a unit without an entry
+    has none)."""
     items = {root + ":forms": [("forms-not-green", forms_ok)] if forms_ok else []}
-    cert = table_item(objs, image_dir)
+    cert = table_item(objs, image_dir, cache)
     if cert is not None:
         items[root + ":rcpcert"] = [("rcpcert", t) for t in cert]
     for unit, path in objs:
-        r = judge_object_coded(root + "/" + unit, path, unit.endswith(recipe.ASM_EXT), unit)
+        r = object_result(root + "/" + unit, path, unit.endswith(recipe.ASM_EXT), unit, (f2i or {}).get(unit), cache)
         if docs is not None and unit.endswith(recipe.CXX_EXT):
             r["f2i:" + root + "/" + unit] += [("ftoi-plugin-missing", t) for t in ftoi_why(docs.get(unit))]
         items.update(r)
     return items
 
 
-def judge_objects(root, objs, image_dir, forms_ok, docs=None):
+def judge_objects(root, objs, image_dir, forms_ok, docs=None, f2i=None):
     """-> {item id: [findings]}, see judge_objects_coded"""
-    return {k: [t for _, t in v] for k, v in judge_objects_coded(root, objs, image_dir, forms_ok, docs).items()}
+    return {k: [t for _, t in v] for k, v in judge_objects_coded(root, objs, image_dir, forms_ok, docs, f2i).items()}
 
 
 def fixture_findings(root, items):
@@ -390,7 +484,7 @@ def judge_root(root, repo, cache, forms):
         image = os.path.join(repo, root) if res.get("elf") else None
         native = recipe.load_admit(repo).get(root, {}).get("cxx_origin") == "native"
         docs = gate_datamodel.cc_docs(os.path.join(cache, "store"), res) if native else None
-        coded = judge_objects_coded(root, read_inputs(res), image, forms(), docs)
+        coded = judge_objects_coded(root, read_inputs(res), image, forms(), docs, read_f2i_paths(res), cache)
         FINDINGS.extend(fixture_findings(root, coded))
         items = {k: [t for _, t in v] for k, v in coded.items()}
     except (OSError, ValueError, ELFError) as e:
@@ -398,14 +492,22 @@ def judge_root(root, repo, cache, forms):
         return 1, 0, [root + ":inputs"], "input error: %s" % (str(e)[:300] or type(e).__name__)
     bad = sorted(k for k, v in items.items() if v)
     n = sum(len(items[k]) for k in bad)
-    return len(items), len(items) - len(bad), bad, ("%d findings in %d items; first: %s" % (n, len(bad), items[bad[0]][0][:200])) if bad else ""
+    kinds = {}
+    for k in bad:
+        for c, _ in coded[k]:
+            if c.startswith("f2i-") and c[4:] in F2I_KINDS + ("range",):
+                u = k.split(":", 1)[1]
+                kinds.setdefault(c[4:], {}).setdefault(u, 0)
+                kinds[c[4:]][u] += 1
+    by = "; remaining sites by kind: " + ", ".join("%s %d (%s)" % (c, sum(v.values()), ", ".join("%s %d" % kv for kv in sorted(v.items()))) for c, v in sorted(kinds.items())) if kinds else ""
+    return len(items), len(items) - len(bad), bad, ("%d findings in %d items; first: %s%s" % (n, len(bad), items[bad[0]][0][:200], by)) if bad else ""
 
 
 def main(argv):
     if argv or "GATE_OUT" not in os.environ:
         sys.stderr.write("usage: gate_fpexact.py   (no arguments; env GATE_OUT, optional GATE_CACHE; cwd = checkout root)\n")
         return 1
-    cache = os.environ.get("GATE_CACHE") or os.path.join(os.environ["GATE_OUT"], "fpexact-cache")
+    cache = os.environ["GATE_CACHE"]      # the verdict's one store (l1.py always sets it): no cache of this gate's own
     os.makedirs(cache, exist_ok=True)
     memo = []
 

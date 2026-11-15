@@ -10,6 +10,10 @@ unitview.PLACEHOLDER, is its all-placeholder base placed once, bound read-only, 
 placeholder path: O(real files) mounts per stage, never a tree per view);
 outputs fresh rw dirs; fresh /proc (time/stat/sys masked), /dev = null+zero, tmpfs /tmp; hostname fnvnx; no interface up;
 stdin /dev/null; umask 022; ASLR off; no core files; all capabilities dropped; seccomp: getrandom -> ENOSYS (x32 ABI and foreign arch killed).
+Optional stage fields: "ro_root" (every write outside the outputs fails); "links" [{"at","to"}] (symlinks of the root layout, in the key: a link cannot be an
+input mount); "scratch" [paths] (a writable tmpfs per path, nothing survives, not an output, in the key); "unkeyed" {"env": {K: V}, "timeout": seconds}
+(NOT in the key: the job count and the time limit change how long a stage takes, not what it computes; a stage past its timeout is killed as a whole
+process group and the run raises SbxError naming the timeout). tests/test_sandbox.py case 13.
 Measured (tests/test_sandbox.py case 9), NOT closed, listed in result.json "open_channels":
   wall_clock           clock_gettime/time/statx show real time (vDSO). PR_SET_TSC=SIGSEGV + seccomp on the clock syscalls
                        was tried: dynamic date/python/gcc/make crash at startup (SIGSEGV), coarse clocks stay readable. Dropped.
@@ -32,6 +36,7 @@ import resource
 import shutil
 import struct
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
@@ -64,21 +69,31 @@ def sandbox_id():
     return {n: cas._sha_file(os.path.join(HERE, n)) for n in ("sandbox.py", "cas.py")}
 
 def key_of(doc):
-    return cas.stage_key(dict(doc, sandbox=sandbox_id()))
+    """The stage key: the document and the sandbox's own files, WITHOUT `unkeyed` (the job count and the timeout change the time a stage takes, not what it
+    computes: a stage that needs a different value for either has the same key and the same record)."""
+    return cas.stage_key(dict({k: v for k, v in doc.items() if k != "unkeyed"}, sandbox=sandbox_id()))
 
 def check_doc(doc):
     ok = (isinstance(doc, dict) and doc.get("format") == "fnvnx-stage/1" and isinstance(doc.get("stage"), str)
           and isinstance(doc.get("argv"), list) and doc["argv"] and all(isinstance(a, str) for a in doc["argv"])
           and doc["argv"][0].startswith("/") and isinstance(doc.get("cwd"), str) and doc["cwd"].startswith("/")
           and isinstance(doc.get("env"), dict) and isinstance(doc.get("inputs"), list)
-          and isinstance(doc.get("outputs"), list) and set(doc) - {"class", "tool"} == {"format", "stage", "argv", "cwd", "env", "inputs", "outputs"}
+          and isinstance(doc.get("outputs"), list) and set(doc) - {"class", "tool", "ro_root", "links", "scratch", "unkeyed"} == {"format", "stage", "argv", "cwd", "env", "inputs", "outputs"}
+          and doc.get("ro_root", False) in (True, False)
           and doc.get("class", "build") in ("build", "verification"))
     if not ok:
         raise SbxError("malformed stage document")
     for i in doc["inputs"]:
         if not (isinstance(i, dict) and set(i) == {"at", "tree"} and isinstance(i["at"], str)):
             raise SbxError("malformed input entry")
-    paths = [i["at"] for i in doc["inputs"]] + list(doc["outputs"])
+    links, scratch, unk = doc.get("links", []), doc.get("scratch", []), doc.get("unkeyed", {})
+    if not (isinstance(links, list) and all(isinstance(l, dict) and set(l) == {"at", "to"} and isinstance(l["at"], str) and isinstance(l["to"], str) and l["to"] for l in links)
+            and isinstance(scratch, list) and all(isinstance(p, str) for p in scratch)
+            and isinstance(unk, dict) and set(unk) <= {"env", "timeout"}
+            and all(isinstance(k, str) and isinstance(v, str) for k, v in unk.get("env", {}).items())
+            and (unk.get("timeout") is None or (isinstance(unk["timeout"], int) and not isinstance(unk["timeout"], bool) and unk["timeout"] > 0))):
+        raise SbxError("malformed links, scratch or unkeyed")
+    paths = [i["at"] for i in doc["inputs"]] + list(doc["outputs"]) + [l["at"] for l in links] + list(scratch)
     for p in paths:
         if not p.startswith("/") or os.path.normpath(p) != p or p == "/":
             raise SbxError("bad path %r (absolute, normalized, not /)" % p)
@@ -103,6 +118,7 @@ def _seccomp():
     _c(libc.prctl(22, 2, ctypes.c_char_p(fprog)), "seccomp")
 
 def _setup_root(doc, root, run, srcs):
+    ro_flag = MS_RDONLY if doc.get("ro_root") else 0   # a stage with "ro_root": every write outside its outputs fails (EROFS)
     _mount(None, "/", None, MS_REC | MS_PRIVATE)
     _mount("tmpfs", root, "tmpfs", 0, "mode=755")
     for n, i in enumerate(doc["inputs"]):
@@ -120,6 +136,12 @@ def _setup_root(doc, root, run, srcs):
     for n, o in enumerate(doc["outputs"]):
         os.makedirs(root + o)
         _bind_ro(os.path.join(run, "out", str(n)), root + o, ro=False)
+    for l in doc.get("links", []):   # the symlinks of the declared machine's root layout (a link cannot be an input mount): part of the key
+        os.makedirs(os.path.dirname(root + l["at"]), exist_ok=True)
+        os.symlink(l["to"], root + l["at"])
+    for p in doc.get("scratch", []):   # a writable scratch directory: a tmpfs that nothing survives (not an output); a build that works out of tree
+        os.makedirs(root + p)
+        _mount("tmpfs", root + p, "tmpfs", 0, "mode=755")
     os.makedirs(root + doc["cwd"], exist_ok=True)
     for d in ("proc", "dev", "tmp", "oldroot"):
         os.makedirs(os.path.join(root, d), exist_ok=True)
@@ -130,18 +152,20 @@ def _setup_root(doc, root, run, srcs):
     for f in ("null", "zero"):
         open(root + "/dev/" + f, "w").close()
         _bind_ro("/dev/" + f, root + "/dev/" + f, ro=False)
-    os.mkdir(root + "/dev/shm")   # private and empty in every run: POSIX semaphores and shared memory (multiprocessing)
-    _mount("tmpfs", root + "/dev/shm", "tmpfs", 0, "mode=1777")
+    os.mkdir(root + "/dev/shm")   # private and empty in every run: POSIX semaphores and shared memory (multiprocessing). Writable even in a ro_root stage: it is not an output
+    _mount("tmpfs", root + "/dev/shm", "tmpfs", 0, "mode=1777")   # (nothing survives the run, so the "writes only /out" rule is unchanged), and a tool that forks workers needs its semaphores
     for f in ("urandom", "random"):   # a constant: entropy read from a device is a function of the sandbox version
         with open(root + "/dev/" + f, "wb") as g:
             for n in range(32768):
                 g.write(hashlib.sha256(b"fnvnx-sandbox-urandom/1:%d" % n).digest())
         os.chmod(root + "/dev/" + f, 0o444)
-    _mount("tmpfs", root + "/tmp", "tmpfs", 0, "mode=1777")
+    _mount("tmpfs", root + "/tmp", "tmpfs", ro_flag, "mode=1777")
     _c(libc.syscall(155, root.encode(), (root + "/oldroot").encode()), "pivot_root")
     os.chdir("/")
     _c(libc.umount2(b"/oldroot", 2), "umount old root")
     os.rmdir("/oldroot")
+    if doc.get("ro_root"):   # the root tmpfs (cwd, the parents of the input mounts) read-only; the outputs, bound rw, stay the only writable paths
+        _mount(None, "/", None, MS_BIND | MS_REMOUNT | MS_RDONLY)
 
 def _pid1(doc, root, run, logs, errfd, srcs):
     try:
@@ -160,7 +184,7 @@ def _pid1(doc, root, run, logs, errfd, srcs):
             if libc.prctl(24, cap, 0, 0, 0) != 0:
                 break
         _seccomp()
-        os.execve(doc["argv"][0], doc["argv"], doc["env"])
+        os.execve(doc["argv"][0], doc["argv"], dict(doc["env"], **doc.get("unkeyed", {}).get("env", {})))
     except BaseException as e:
         os.write(errfd, ("%s: %s" % (type(e).__name__, e)).encode()[:1000])
     os._exit(127)
@@ -172,6 +196,16 @@ def launch(doc, run, root, srcs):
     pid = os.fork()
     if pid == 0:
         try:
+            os.setsid()   # one process group: a timeout kills the whole stage
+            # The forked child holds a copy of every descriptor that a sibling thread of the parent has open at this instant, among them files open for
+            # writing (a tool being copied into a store, an object being ingested). Such a copy makes an exec of that file by another stage fail with
+            # ETXTBSY for as long as the child lives, which is the whole of the mount setup. The child keeps only what it uses: stdin/out/err, the error
+            # pipe and the two logs.
+            prev = 2
+            for k in sorted({efd[0], efd[1], *logs}):
+                os.closerange(prev + 1, k)
+                prev = max(prev, k)
+            os.closerange(prev + 1, 1 << 16)
             # NEWNS|NEWUTS|NEWIPC|NEWPID|NEWNET
             _c(libc.unshare(0x00020000 | 0x04000000 | 0x08000000 | 0x20000000 | 0x40000000), "unshare")
             b = os.fork()
@@ -184,13 +218,29 @@ def launch(doc, run, root, srcs):
             os.write(efd[1], str(e).encode()[:1000])
             os._exit(126)
     os.close(efd[1])
-    _, st = os.waitpid(pid, 0)
+    timeout = doc.get("unkeyed", {}).get("timeout")
+    if timeout:
+        deadline, st = time.monotonic() + timeout, None
+        while st is None:
+            w, st0, ru = os.wait4(pid, os.WNOHANG)
+            if w:
+                st = st0
+            elif time.monotonic() > deadline:
+                os.killpg(pid, 9)
+                os.wait4(pid, 0)
+                for f in logs + [efd[0]]:
+                    os.close(f)
+                raise SbxError("stage %s: timeout after %d s (killed)" % (doc["stage"], timeout))
+            else:
+                time.sleep(0.05)
+    else:
+        _, st, ru = os.wait4(pid, 0)     # the usage of fork A includes the descendants it waited for (fork B, the command and what it reaped): the stage's CPU
     err = os.read(efd[0], 2000).decode()
     for f in logs + [efd[0]]:
         os.close(f)
     if err:
         raise SbxError("sandbox setup/exec failed: " + err)
-    return os.waitstatus_to_exitcode(st)
+    return os.waitstatus_to_exitcode(st), round(ru.ru_utime + ru.ru_stime, 3)
 
 def placed(store, tree):
     """Directory (or file) of the store that holds tree TREE placed as hardlinks of the objects: made once per store and tree (atomic
@@ -293,7 +343,46 @@ def placed_input(store, tree):
         return placed_base(store, base), [(p, cas._obj(store, e)) for p, e in sorted(reals)]
     return placed(store, tree), []
 
+TIME_FORMAT = "fnvnx-stage-time/1"
+
+
+def time_path(store, key):
+    """the timing sidecar of a stage key: store/<key>.time. NOT part of the key, NOT part of the record (keys/<key>/result.json) and NOT compared by store-merge"""
+    return os.path.join(store, key + ".time")
+
+
+def compared(doc):
+    """The record fields two executions of one key must agree on. A `-ftime-report` stage's stderr is a measurement, not a function of the key (the TIMEREPORT
+    of the @time variant): it is kept but not compared."""
+    return ("rc", "stdout", "outputs") if "-ftime-report" in doc.get("argv", []) else ("rc", "stdout", "stderr", "outputs")
+
+
+def write_time(store, key, t):
+    """publish the sidecar {wall_s, cpu_s} of one execution (a miss); a hit never calls this. Atomic (private temp name, rename)."""
+    p = time_path(store, key)
+    tmp = "%s.tmp-%d-%s" % (p, os.getpid(), os.urandom(4).hex())
+    with open(tmp, "w") as f:
+        json.dump({"format": TIME_FORMAT, "wall_s": t["wall_s"], "cpu_s": t["cpu_s"]}, f, sort_keys=True)
+    os.replace(tmp, p)
+
+
+def read_time(store, key):
+    """the sidecar of KEY or None (a stage that was only ever a hit in this store, or a store merged from one that did not time it)"""
+    try:
+        with open(time_path(store, key)) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return d if isinstance(d, dict) and d.get("format") == TIME_FORMAT else None
+
+
 def execute(store, doc, key):
+    return execute_timed(store, doc, key)[0]
+
+
+def execute_timed(store, doc, key):
+    """-> (result record, {wall_s, cpu_s}): the record is a function of the key; the timing (wall seconds of the launch, child user+sys seconds from wait4
+    rusage) is a measurement and goes to the sidecar (write_time), never into the record"""
     run = os.path.join(store, "run", "%s.%d.%s" % (key, os.getpid(), os.urandom(4).hex()))
     root = os.path.join(run, "root")
     try:
@@ -301,11 +390,13 @@ def execute(store, doc, key):
         for n in range(len(doc["outputs"])):
             os.makedirs(os.path.join(run, "out", str(n)))
         os.makedirs(root)
-        rc = launch(doc, run, root, srcs)
+        t0 = time.monotonic()
+        rc, cpu = launch(doc, run, root, srcs)
+        wall = round(time.monotonic() - t0, 3)
         return {"format": "fnvnx-stage-result/1", "key": key, "stage": doc["stage"], "rc": rc,
                 "outputs": {o: cas.ingest(os.path.join(run, "out", str(n)), store) for n, o in enumerate(doc["outputs"])},
                 "stdout": cas.ingest(os.path.join(run, "stdout"), store),
-                "stderr": cas.ingest(os.path.join(run, "stderr"), store), "open_channels": list(OPEN_CHANNELS)}
+                "stderr": cas.ingest(os.path.join(run, "stderr"), store), "open_channels": list(OPEN_CHANNELS)}, {"wall_s": wall, "cpu_s": cpu}
     finally:
         shutil.rmtree(run, ignore_errors=True)
 
@@ -329,11 +420,12 @@ def cmd_run(store, path, cold, result_path):
     if old is not None and not cold:
         res = old
     else:
-        res = execute(store, doc, key)
+        res, tm = execute_timed(store, doc, key)
+        write_time(store, key, tm)
         if old is None:
             _store_result(store, key, res)
         else:
-            bad = [k for k in ("rc", "stdout", "stderr", "outputs") if res[k] != old[k]]
+            bad = [k for k in compared(doc) if res[k] != old[k]]
             if bad:
                 lines = []
                 for o in doc["outputs"]:

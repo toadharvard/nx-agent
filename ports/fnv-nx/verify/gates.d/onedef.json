@@ -1,0 +1,16 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "onedef",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_onedef.py"
+ ],
+ "result": "onedef.json",
+ "covers": [
+  "test",
+  "product-guest",
+  "lifted",
+  "host-product"
+ ]
+}

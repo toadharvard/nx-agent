@@ -1,2 +1,0 @@
-symbol	param	attrs	source
-fx_read	0	readonly	fixture (negative test: names a defined function)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """registry - run every contract gate on one (facts, objfacts) pair and write the verdicts (L1 CONTRACT).
 
-    registry.py --facts facts.json --obj obj.json --n1 n1.json --link <link dir> --out <dir> [--only data,call]
+    registry.py --facts facts.json --obj obj.json --n1 n1.json [--link <link dir of a root with a link>] --out <dir> [--only data,call]
 
 A gate is a module `gate_<name>.py` in this directory with
 
@@ -36,7 +36,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--facts', required=True)
     ap.add_argument('--obj', required=True)
-    ap.add_argument('--link', required=True)
+    ap.add_argument('--link', help='the link directory of a root that has a link (out/aliases.ld); absent for a root without one')
     ap.add_argument('--out', required=True)
     ap.add_argument('--n1', required=True, help='N1 certificate: gives the address of ___security_cookie')
     ap.add_argument('--only', default='')
@@ -49,7 +49,6 @@ def main():
         sys.exit('___security_cookie is not one address in the N1 map: %r' % sorted(ck))
     facts['cookie'] = ck.pop()
     facts['pristine'] = gate_call.pristine_names(n1)
-    os.makedirs(a.out, exist_ok=True)
     summary = {}
     rows = []
     for g in (a.only.split(',') if a.only else ORDER):

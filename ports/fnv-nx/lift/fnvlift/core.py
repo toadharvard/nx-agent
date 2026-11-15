@@ -1,7 +1,7 @@
 """Decode, recursive descent, jump tables, emit loop, the per-function context and the handler registry.
 
 Dispatch order per instruction (same as the PoC): mnemonic handler (@op); a handler may return SKIP to fall
-through; then the fallbacks in registration order (@fallback(pred): x87 by opcode byte, SSE by xmm operand);
+through; then the shape handlers in registration order (@shape_handler(pred): x87 by opcode byte, SSE by xmm operand);
 then Unsupported('insn ...')."""
 import bisect
 import re
@@ -37,7 +37,7 @@ CC = {'o': 'of', 'no': '!of', 'b': 'cf', 'ae': '!cf', 'e': 'zf', 'ne': '!zf', 'b
 
 SKIP = object()      # a handler returns this when its extra condition fails: dispatch continues
 OPS = {}             # mnemonic -> handler(cx, ins)
-FALLBACKS = []       # (pred(cx, ins), handler(cx, ins)), tried in order when no mnemonic handler took the insn
+SHAPE_HANDLERS = []       # (pred(cx, ins), handler(cx, ins)), tried in order when no mnemonic handler took the insn
 
 
 def op(*names):
@@ -48,9 +48,9 @@ def op(*names):
     return deco
 
 
-def fallback(pred):
+def shape_handler(pred):
     def deco(fn):
-        FALLBACKS.append((pred, fn))
+        SHAPE_HANDLERS.append((pred, fn))
         return fn
     return deco
 
@@ -113,6 +113,18 @@ class Ctx:
             off = '((%s)&0xffffu)' % off
         return '(u32)(' + '+'.join(([seg] if seg else []) + ([off] if off else [])) + ')'
 
+    def static_ea(self, ins, op):
+        """The address of a memory operand that is a displacement alone (no base, index or FS/GS segment), else None. Such an access takes the K form of rt/fnvl.h (MK*, the address a template parameter)."""
+        m = op.mem
+        if self.macc != 'M' or m.base or m.index or m.segment in (X.X86_REG_FS, X.X86_REG_GS):
+            return None
+        return m.disp & 0xffffffff
+
+    def macc_(self, ins, op, w):
+        """the accessor text of a memory operand of w bits: MK<w>(address) when the address is static, else M<w>(expression)"""
+        k = self.static_ea(ins, op)
+        return 'MK%d(0x%xu)' % (w, k) if k is not None else '%s%d(%s)' % (self.macc, w, self.ea(ins, op))
+
     def rd(self, ins, op, size=None):
         s = (size or op.size) * 8
         if op.type == X.X86_OP_IMM:
@@ -120,7 +132,7 @@ class Ctx:
         if op.type == X.X86_OP_REG:
             b, sh, bits = reg(ins.reg_name(op.reg))
             return b if bits == 32 else ('((%s>>%d)&%s)' % (b, sh, MASK[bits]))
-        return '%s%d(%s)' % (self.macc, s, self.ea(ins, op))
+        return self.macc_(ins, op, s)
 
     def wr(self, ins, op, v):
         if op.type == X.X86_OP_REG:
@@ -129,7 +141,7 @@ class Ctx:
                 return '%s=(%s);' % (b, v)
             mk = (1 << bits) - 1
             return '%s=(%s&~0x%xu)|(((u32)(%s)&0x%xu)<<%d);' % (b, b, mk << sh, v, mk, sh)
-        return '%s%d(%s)=(%s);' % (self.macc, op.size * 8, self.ea(ins, op), v)
+        return '%s=(%s);' % (self.macc_(ins, op, op.size * 8), v)
 
     def zsp(self, s):
         return 'zf=(r&%s)==0; sf=(r>>%d)&1; pf=PAR(r);' % (MASK[s], s - 1)
@@ -143,7 +155,8 @@ class Ctx:
     def fmem(self, ins, op):
         if self.macc != 'M':
             raise Unsupported('locked instruction at %x: a float memory access outside LKA<T>' % self.a)
-        return ('MF32' if op.size == 4 else 'MF64') + '(' + self.ea(ins, op) + ')'
+        k = self.static_ea(ins, op)
+        return ('MKF%d(0x%xu)' % (op.size * 8, k)) if k is not None else ('MF32' if op.size == 4 else 'MF64') + '(' + self.ea(ins, op) + ')'
 
 
 def explore(img, lo, hi, code, start=None, extra=(), fall_hi=None):
@@ -253,7 +266,7 @@ def dispatch(cx, ins):
     h = OPS.get(cx.m)
     if h is not None and h(cx, ins) is not SKIP:
         return
-    for pred, fn in FALLBACKS:
+    for pred, fn in SHAPE_HANDLERS:
         if pred(cx, ins):
             fn(cx, ins)
             return
@@ -264,8 +277,8 @@ def lift(img, addr, size, popn=None, start=None, owns=None, strict=True, x87=Non
     """-> (C text, meta). Raises Unsupported(reason).
     [addr, addr+size) is the code range of the function (for a funclet: of its parent); `start` (default addr) the entry the body is the descent
     from, named L_<start>; `owns` the other universe entries with this range as parent: they are explored and are labels of the nonlocal loop;
-    strict=False (instest only) turns falling off the decoded code into the stub event fnvl_raise(2, at) instead of a lift-time error.
-    x87 (instest only): None = the pre-pass decides (f_x87_ctl.py), 'dyn' = dynamic x87 stack, an int = static stack with that entry depth."""
+    strict=False (the retired one-instruction harness only) turns falling off the decoded code into the stub event fnvl_raise(2, at) instead of a lift-time error.
+    x87 (the retired one-instruction harness only): None = the pre-pass decides (f_x87_ctl.py), 'dyn' = dynamic x87 stack, an int = static stack with that entry depth."""
     from . import universe
     if start is None and owns is None:
         ua = universe.entry_args(addr)
@@ -303,13 +316,48 @@ def gs_guard(cx, ins):
         # wine-9.0: err == 0 and not is_privileged_instr -> rec.ExceptionCode = EXCEPTION_ACCESS_VIOLATION, NumberParameters = 2, ExceptionInformation[0] = 0, [1] = 0xffffffff); the same row as f_sys.gp_cond. Nothing was modified yet.
         cx.em(f_sys.gp_cond(cx, '1'))
         return
-    g = [o for o in ins.operands if o.type == X.X86_OP_MEM and o.mem.segment == X.X86_REG_GS]
+    # the null_seg_access row of x86sys (L5): an access through an effective segment register S (prefix, or the default) that may hold the null selector raises the row at this instruction; PRIV vs AV by the
+    # row's opcode set. S may hold null in this image iff the SEGWRITES fact (tools/segwrites.py) does not prove it non-null: its initial selector is null, or a write of S loads a selector not proven non-null; ss and cs never
+    # hold it (loading null is #GP, x86sys mov_to_sreg). lea and the NO_ACCESS mnemonics have no access (returned above); a prefixed instruction without a memory operand has no operand here.
+    from . import x86sys
+    SEGI = {X.X86_REG_ES: 0, X.X86_REG_DS: 3, X.X86_REG_FS: 4, X.X86_REG_GS: 5}
+    eff = set()
+    for o in ins.operands:
+        if o.type == X.X86_OP_MEM:
+            sg = o.mem.segment or (X.X86_REG_SS if o.mem.base in (X.X86_REG_ESP, X.X86_REG_EBP) else X.X86_REG_DS)
+            if sg in SEGI: eff.add(SEGI[sg])
+    if ins.mnemonic.split(' ')[-1] == 'xlatb': eff.add(3)             # implicit ds:[ebx+al]
+    g = sorted(i for i in eff if may_null(i))
     if not g:
         return
-    cond = 'SELK(c->sel[SEG_GS])==0'
-    if any(o.access & capstone.CS_AC_WRITE for o in g):
-        cond += '||SELK(c->sel[SEG_GS])==SELK(SEL_CS)'
-    cx.em(f_sys.gp_cond(cx, cond))
+    r = x86sys.NULL_SEG
+    cond = '||'.join('SELK(c->sel[%d])==0' % i for i in g)
+    if f_sys.row_privileged(ins.bytes, r):
+        cx.nonlocal_ = True
+        cx.raises.add(cx.a)
+        cx.em('if(%s){ SYNC_OUT; REGS(); FNVL_RAISE(FNVL_PRIV,0x%xu); REGS(); SYNC_IN; goto nonlocal; }' % (cond, cx.a))
+    else:
+        if not (r['exception_code'] == 0xC0000005 and r['parameters'] == [0, 0xffffffff] and r['flags'] == 0 and r['eip_advance'] == 0 and r['address'] == 'the faulting instruction'):
+            raise Unsupported('null_seg_access row is not the access violation the runtime raises')
+        cx.em(f_sys.gp_cond(cx, cond))
+    if any(o.type == X.X86_OP_MEM and o.mem.segment == X.X86_REG_GS and o.access & capstone.CS_AC_WRITE for o in ins.operands):
+        cx.em(f_sys.gp_cond(cx, 'SELK(c->sel[SEG_GS])==SELK(SEL_CS)'))
+
+
+_SEGW = {}
+
+
+def may_null(i):
+    """may the data segment register with state index i (0 es, 3 ds, 4 fs, 5 gs) hold the null selector in the image being lifted (see gs_guard)"""
+    import json
+    from . import inputs, x86sys
+    n = {0: 'es', 3: 'ds', 4: 'fs', 5: 'gs'}[i]
+    if n not in x86sys.SEL:
+        raise Unsupported('%s: the initial selector is undecided in x86sys selectors' % n)
+    path = inputs.get('segwrites')
+    if path not in _SEGW:
+        d = json.load(open(path)); assert d['format'] == 'fnvnx-segwrites/2', d['format']; _SEGW[path] = d['images']
+    return _SEGW[path][inputs.get('image')][n]['guard']
 
 
 def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
@@ -323,15 +371,6 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
             raise Unsupported('entry %x decodes but lies outside its range' % start)
         bad = set(bad) | {start}
     order = sorted(insns)
-    def head4(a):
-        """the first four bytes at `a` (what KiTrap06Handler scans for F0): from `code`, beyond it from the image (none when the image has no byte there)"""
-        t = code[a - lo:a - lo + 4]
-        if len(t) < 4:
-            try:
-                t = img.bytes(a, 4)
-            except (TypeError, ValueError, IndexError):
-                pass
-        return t
     cx = Ctx(addr, size, insns, tables, taken)
     cx.start = start
     xc.prepass(cx, img, 'dyn' if x87 == 'dyn' else None, x87 if isinstance(x87, int) else 0)     # x87 stack-depth pre-pass: cx.xm 's' static / 'd' dynamic / None
@@ -371,12 +410,10 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
             em('{ LK_BEGIN(%d); lk_%x: ;' % (f_sys.lock_size(ins), a))
             dispatch(cx, ins)
             cx.macc = 'M'
-            em('if(!lk_commit(lk_,0x%xu)){ LK_RESTORE; goto lk_%x; } }' % (a, a))
+            em('if(!lk_commit<0x%xu>(lk_)){ LK_RESTORE; goto lk_%x; } }' % (a, a))
         else:
             gs_guard(cx, ins)
             dispatch(cx, ins)
-        if any('FNVL_RAISE(FNVL_UD,' in t for t in cx.L[n0:]) and 0xf0 in head4(a):      # KiTrap06Handler: a #UD with an F0 byte among the first four bytes at Eip is STATUS_INVALID_LOCK_SEQUENCE
-            cx.L[n0:] = [t.replace('FNVL_RAISE(FNVL_UD,', 'FNVL_RAISE(FNVL_LOCK,') for t in cx.L[n0:]]
         if not cx.term and (idx + 1 == len(order) or order[idx + 1] != nxt):
             if nxt in insns or nxt in bad:
                 em('goto %s;' % cx.lab(nxt))
@@ -389,7 +426,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
             xc.fix_lines(cx, a, n0)
     for a in sorted(bad):      # bytes that do not decode: the CPU raises #UD there
         cx.nonlocal_ = True
-        em('%s: ; SYNC_OUT; REGS(); FNVL_RAISE(%s,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % (cx.lab(a), 'FNVL_LOCK' if 0xf0 in head4(a) else 'FNVL_UD', a))
+        em('%s: ; SYNC_OUT; REGS(); FNVL_RAISE(%s,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % (cx.lab(a), 'FNVL_UD', a))
     if not order or start != order[0]:       # also an entry whose first byte does not decode: its body is the #UD at that address
         cx.L.insert(0, 'goto %s;' % cx.lab(start))
     if cx.nonlocal_:

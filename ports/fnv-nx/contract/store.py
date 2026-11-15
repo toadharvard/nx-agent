@@ -74,7 +74,7 @@ def _facts_dec(o):
 
 # ---- n1 ----------------------------------------------------------------------------------------------------------
 def _n1_enc(o):
-    return dict(fn=o['fn'], exe_sha256=o['exe_sha256'],
+    return dict(fn=o['fn'], exe_sha256=o['exe_sha256'], no_object={str(u): v for u, v in o.get('no_object', {}).items()},
                 sym={_tab(*k): v for k, v in o['sym'].items()}, vt={_tab(*k): v for k, v in o['vt'].items()})
 
 
@@ -92,8 +92,8 @@ def _n1_dec(o):
     for k, F in o['fn'].items():
         F['relocs'] = _tl(F['relocs'])
         fn[int(k)] = F
-    return dict(fn=fn, exe_sha256=o['exe_sha256'], sym={_n1_key(k): v for k, v in o['sym'].items()},
-                vt={_n1_key(k): v for k, v in o['vt'].items()})
+    return dict(fn=fn, exe_sha256=o['exe_sha256'], no_object={int(u): v for u, v in o.get('no_object', {}).items()},
+                sym={_n1_key(k): v for k, v in o['sym'].items()}, vt={_n1_key(k): v for k, v in o['vt'].items()})
 
 
 # ---- obj ---------------------------------------------------------------------------------------------------------

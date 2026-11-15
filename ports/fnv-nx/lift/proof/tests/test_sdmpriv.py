@@ -20,6 +20,7 @@ class T(unittest.TestCase):
 
     def test_one_source(self):
         self.assertEqual(sysspec.PRIV.keys(), set(privset.mnemonics()))
+        self.assertEqual(set(forms_sys._PRIV), set(privset.mnemonics()))
         self.assertFalse(hasattr(forms_sys, 'PRIV_MN'))
         for m in ('cli', 'hlt', 'in', 'lgdt', 'wrmsr', 'sysexit'):
             self.assertIn(m, privset.mnemonics())

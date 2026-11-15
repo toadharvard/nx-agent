@@ -71,10 +71,11 @@ PY
     echo "published $BR commit $(git -C "$PB" rev-parse HEAD) tree_sha256 $(python3 -c "import sys; sys.path.insert(0, '$FARM/../contract'); sys.path.insert(0, '$FARM/../verify'); import cas; print(cas.tree_hash(sys.argv[1], skip=('.git',)))" "$PB")"
 fi
 # smoke test: add eax, ebx  (01 d8) must give paths ending in (_ unit)
-export LD_LIBRARY_PATH=$Z3/lib SAIL_IR=$OUT.ir SAIL_WORK=$WORK Z3LIB=$Z3/lib ISLA_EXEC=$REMS/isla/target/release/isla-execute-function
+export LD_LIBRARY_PATH=$Z3/lib
 python3 -c "
 import sys; sys.path.insert(0, '$HERE/..')
 from proof import model_sail
+model_sail.configure('$WORK', '$OUT.ir', '$REMS/isla/target/release/isla-execute-function')      # explicit toolchain, no environment
 out, err = model_sail.run_isla(bytes.fromhex('01d8'))
 assert out.count('Result: (_ unit)') >= 1, out[:300]
 print('smoke test ok:', out.count('Result:'), 'paths')"

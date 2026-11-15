@@ -8,10 +8,12 @@ guards uncertified (red):
   front switch over E made a switch over int (per E)                    -> E insensitive, exactly enum:E:* red
   front loses one case label                                             -> front does not build, every enum value red
   sm_table row changed, rows header not regenerated / regenerated        -> rows header not generated / translator red, every SM row red
-  MOJO_PIN differs from the external, tree_sha256 wrong, patch corrupt   -> every SM row red
-  opcode-value / stage / comparison assertion dead in the patch          -> exactly the OP rows / OP rows / rows with a comparison red
+  tree_sha256 of the translator recipe's mojoshader external wrong      -> every SM row red
+  opcode-value / stage / comparison assertion dead in the mirror         -> exactly the OP rows / OP rows / rows with a comparison red
   PHASE token not consumed by the parser                                 -> exactly sm:ps:phase red
   a declared input untracked                                             -> red, nothing certified
+The assertion mutations are made on the pinned mirror itself: the test fetches the translator recipe's mojoshader external, mutates one
+file, commits the tree into a local repository (ARTIFACTS_URL of that run) and points the scratch recipe at the new commit and tree hash.
 plus the gate's tree hash equals verify/cas.py ingest (files, exec bit, symlink, empty dir, and the fetched external).
 The external is fetched once (ARTIFACTS_URL as for the gate) into a cache shared by the cases."""
 import json, os, re, shutil, subprocess, sys, tempfile
@@ -63,19 +65,21 @@ def edit(base, rel, fn):
     open(p(base, rel), "w").write(u)
 
 
-def run_gate(base, cache):
+def run_gate(base, cache, extra=None):
     out = os.path.join(base, "..", os.path.basename(base) + ".out")
     os.makedirs(out)
     env = {k: v for k, v in os.environ.items() if not k.startswith("GATE_")}
-    env.update(GATE_OUT=out, GATE_CACHE=cache)
+    env.update(GATE_OUT=out, GATE_CACHE=cache, **(extra or {}))
     r = subprocess.run([sys.executable, "-I", os.path.join(G.PORT_REL, "render", "total", "gate_d3d9total.py")], cwd=base, env=env,
                        capture_output=True, text=True, timeout=240)
+    if not os.path.exists(os.path.join(out, "d3d9total.json")):
+        raise AssertionError("the gate wrote no result (rc %d): %s" % (r.returncode, (r.stderr or r.stdout)[-600:]))
     res = json.load(open(os.path.join(out, "d3d9total.json")))
     return r.returncode, res
 
 
 def enum_ids(e):
-    spec = json.load(open(os.path.join(PORT, "render", "d3d9", "spec", "d3d9_spec.json")))["enums"][e]
+    spec = json.load(open(os.path.join(PORT, "bridgefacts", "d3d9", "d3d9_spec.json")))["enums"][e]
     if e == "D3DFORMAT":
         spec = spec + ["D3DFMT_" + s.strip() for s in G.module_lists(os.path.join(PORT, "render", "d3d9", "front", "gen_enums.py"),
                                                                       ["SWITCHED", "INDEXED", "VENDOR_FOURCC"])["VENDOR_FOURCC"]]
@@ -83,36 +87,36 @@ def enum_ids(e):
 
 
 ENUM_ALL = [i for e in SWITCHED for i in enum_ids(e)]
-H = "render/d3d9/front/d3d9_enums.gen.h"
+GEN = "render/d3d9/front/gen_enums.py"
+WRITE = 'open(argv[0], "w").write(render(build()))'
 
 
-def header_enum(t, e):
-    """(start, end) of the enumerator lines of NxD3D<E> in the generated header text"""
-    a = t.index("typedef enum NxD3D%s {\n" % e[3:]) + len("typedef enum NxD3D%s {\n" % e[3:])
-    return a, t.index("} NxD3D%s;" % e[3:], a)
+def edit_gen(base, body):
+    """the header is a generated output: a mutation of it is a post-processing step spliced into the generator's write (BODY defines _mut(text))"""
+    edit(base, GEN, lambda t: t.replace(WRITE, body + '\n    open(argv[0], "w").write(_mut(render(build())))', 1))
+
+
+VALUE_BODY = """def _mut(t):
+        k = "typedef enum NxD3D__E__ {\\n"
+        a = t.index(k) + len(k)
+        first = t[a:t.index("\\n", a)]
+        n, v = first.strip().rstrip(",").split(" = ")
+        return t[:a] + "    " + n + " = " + "(" + v.rstrip(",") + ") + 0x10000000," + t[t.index("\\n", a):]"""
+DROP_BODY = """def _mut(t):
+        k = "typedef enum NxD3D__E__ {\\n"
+        a = t.index(k) + len(k)
+        first = t[a:t.index("\\n", a) + 1]
+        n = first.strip().split(" = ")[0]
+        t = t[:a] + t[a + len(first):]
+        return t.replace("    case " + n + ":\\n", "", 1)"""
 
 
 def mut_value(e):
-    def f(base):
-        def g(t):
-            a, b = header_enum(t, e)
-            first = t[a:t.index("\n", a)]
-            n, v = first.strip().rstrip(",").split(" = ")
-            return t[:a] + "    %s = %d," % (n, int(v) + 0x10000000) + t[t.index("\n", a):]
-        edit(base, H, g)
-    return f
+    return lambda base: edit_gen(base, VALUE_BODY.replace("__E__", e[3:]))
 
 
 def mut_drop(e):
-    def f(base):
-        def g(t):
-            a, b = header_enum(t, e)
-            first = t[a:t.index("\n", a) + 1]
-            n = first.strip().split(" = ")[0]
-            t = t[:a] + t[a + len(first):]
-            return t.replace("    case %s:\n" % n, "", 1)
-        edit(base, H, g)
-    return f
+    return lambda base: edit_gen(base, DROP_BODY.replace("__E__", e[3:]))
 
 
 def mut_untyped(e):
@@ -146,8 +150,32 @@ def mut_table(regen):
     return f
 
 
+MIRROR = {}   # filled by main(): {"ext": the recipe's mojoshader external entry, "cache": the gate cache, "tmp": scratch root}
+
+
+def translator_ext(base):
+    return [e for e in json.load(open(p(base, "render/shaders/translator/build.json")))["external"] if e["name"] == "mojoshader"][0]
+
+
 def mut_patch(old, new):
-    return lambda base: edit(base, "render/shaders/mojoshader.patch", lambda t: t.replace(old, new, 1))
+    """mutate the pinned mirror: one file holding `old` exactly once gets `new`; the scratch recipe pins the mutated tree"""
+    def f(base):
+        ext = translator_ext(base)
+        src = os.path.join(MIRROR["tmp"], "mir-" + re.sub(r"[^A-Za-z0-9]", "_", base[-40:]))
+        G.fetch_external(ext, MIRROR["cache"], src, MIRROR["tmp"])
+        hit = [os.path.join(d, x) for d, _, fs in os.walk(src) for x in fs if old in open(os.path.join(d, x), errors="replace").read()]
+        if len(hit) != 1:
+            raise AssertionError("mutation text found in %d files" % len(hit))
+        t = open(hit[0]).read()
+        open(hit[0], "w").write(t.replace(old, new, 1))
+        tree = G.tree_hash(src)       # the files only: the gate hashes the checkout, which has no .git
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+        for cmd in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "m"]):
+            subprocess.run(["git", "-C", src, *cmd], check=True, env=env)
+        commit = subprocess.run(["git", "-C", src, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+        edit(base, "render/shaders/translator/build.json", lambda t: t.replace(ext["commit"], commit).replace(ext["tree_sha256"], tree))
+        return {"ARTIFACTS_URL": src}
+    return f
 
 
 def mut_untrack(rel):
@@ -167,14 +195,12 @@ for _e in SWITCHED:
 CASES["front-case-missing"] = (mut_case, ENUM_ALL, [])
 CASES["table-not-generated"] = (mut_table(False), SM_ALL, [])
 CASES["table-wrong-opcode"] = (mut_table(True), SM_ALL, [])
-CASES["pin-differs"] = (lambda b: edit(b, "render/shaders/build.sh", lambda t: t.replace("MOJO_PIN=ad5d", "MOJO_PIN=bd5d", 1)), SM_ALL, [])
-CASES["tree-hash-wrong"] = (lambda b: edit(b, "render/total/externals.json", lambda t: re.sub(r'"tree_sha256": "(.)', lambda m: '"tree_sha256": "' + ("0" if m[1] != "0" else "1"), t)), SM_ALL, [])
-CASES["patch-corrupt"] = (lambda b: edit(b, "render/shaders/mojoshader.patch", lambda t: t[:len(t) // 2].replace("\n+", "\n-", 3) + t[len(t) // 2:]), SM_ALL, [])
+CASES["tree-hash-wrong"] = (lambda b: edit(b, "render/shaders/translator/build.json", lambda t: t.replace(translator_ext(b)["tree_sha256"], "0" * 64)), SM_ALL, [])
 CASES["value-assert-dead"] = (mut_patch(VALUE_ASSERT, "_Static_assert(1, id)"), SM_OP, [])
 CASES["stage-assert-dead"] = (mut_patch(STAGE_ASSERT, "_Static_assert(1, id)"), SM_OP, [])
 CASES["cmp-assert-dead"] = (mut_patch(CMP_ASSERT, "_Static_assert(1, id)"), SM_CMP, [])
 CASES["token-not-consumed"] = (mut_patch("(uint32) FNVNX_SM_TOKEN_PHASE)", "(uint32) 0x0000FFFD)"), SM_TOKEN, [])
-CASES["input-untracked"] = (mut_untrack("render/total/externals.json"), None, None)
+CASES["input-untracked"] = (mut_untrack("render/shaders/translator/build.json"), None, None)
 
 
 def check(name, cond, what):
@@ -185,8 +211,7 @@ def check(name, cond, what):
 def case(tmp, cache, name):
     mutate, want, mismatch = CASES[name]
     base = scratch(os.path.join(tmp, re.sub(r"[^A-Za-z0-9]", "_", name)))
-    mutate(base)
-    rc, res = run_gate(base, cache)
+    rc, res = run_gate(base, cache, mutate(base))
     check(name, rc == 2 and res["status"] == "red", "not red (rc %d, %s)" % (rc, res["detail"][:200]))
     if want is None:
         check(name, res["certified"] == 0, "certified %d" % res["certified"])
@@ -211,7 +236,7 @@ def tree_hash_vs_cas(tmp, cache):
     open(os.path.join(t, "sub", "x.sh"), "w").write("#!/bin/sh\n")
     os.chmod(os.path.join(t, "sub", "x.sh"), 0o755)
     os.symlink("../a.txt", os.path.join(t, "sub", "link"))
-    ext = json.load(open(os.path.join(TOTAL, "externals.json")))["externals"][0]
+    ext = [e for e in json.load(open(os.path.join(PORT, "render", "shaders", "translator", "build.json")))["external"] if e["name"] == "mojoshader"][0]
     dest = os.path.join(tmp, "ext-check")
     G.fetch_external(ext, cache, dest, tmp)
     cas = os.path.join(PORT, "verify", "cas.py")
@@ -225,6 +250,7 @@ def main():
     try:
         cache = os.path.join(tmp, "cache")
         os.makedirs(cache)
+        MIRROR.update(cache=cache, tmp=tmp)
         base = scratch(os.path.join(tmp, "base"))
         rc, res = run_gate(base, cache)      # also fills the cache before the parallel cases
         check("base", rc == 0 and res["status"] == "green" and res["universe"] == 332 and res["certified"] == 332 and not res["uncertified"],

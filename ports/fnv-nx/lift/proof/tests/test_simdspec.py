@@ -71,7 +71,8 @@ class RcpRows(unittest.TestCase):
         import ctypes, subprocess, tempfile
         d = tempfile.mkdtemp(); so = os.path.join(d, 'rcp.so')
         rt = os.path.join(os.path.dirname(HERE), '..', 'rt')
-        subprocess.check_call(['gcc', '-O1', '-shared', '-fPIC', '-I', rt, '-o', so, os.path.join(rt, 'rcptab.c')])
+        import genout      # rcpref.h is the published GEN output of root lift/rt, not a file of rt/
+        subprocess.check_call(['gcc', '-O1', '-shared', '-fPIC', '-I', rt, '-I', genout.gen_dir(), '-o', so, os.path.join(rt, 'rcptab.c')])
         lib = ctypes.CDLL(so); lib.fnvl_rcp32.restype = lib.fnvl_rsqrt32.restype = ctypes.c_uint32; lib.fnvl_rcp32.argtypes = lib.fnvl_rsqrt32.argtypes = [ctypes.c_uint32]
         rng = random.Random(5); xs = [rng.getrandbits(32) for _ in range(300)] + [0, 0x80000000, 0x7F800000, 0xFF800000, 0x7FC00000, 0x7F800001, 1, 0x007FFFFF, 0x7E800000, 0x7F000000, 0x3F800000]
         X = z3.BitVec('x', 32)

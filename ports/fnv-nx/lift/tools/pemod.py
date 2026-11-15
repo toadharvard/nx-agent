@@ -4,26 +4,25 @@ the PE data directories name (import/export/IAT/delay/debug/load-config/TLS/boun
 import os, struct, bisect
 from types import SimpleNamespace
 EXEC = 0x20000000 | 0x20           # IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_CNT_CODE
-MODULES = '/home/user/wt-l1/modules/modules.tsv'                                  # L1's static load bases (env FNVNX_MODULES)
-MODDIRS = '/home/user/wt-exe:/home/user/wt-redist:/home/user/game'                # where the module files live (env FNVNX_MODDIRS)
 
-def modules(path=None):
+def modules(path):
     """{lower-case file name: SimpleNamespace(name, sha256, size, pref, base, sizeimg, tls, entry, static)} from modules.tsv (L1: assigned_base is the load base of the image)."""
     out = {}
-    for l in open(path or os.environ.get('FNVNX_MODULES', MODULES)):
+    for l in open(path):
         if l[0] == '#' or not l.strip(): continue
         f = l.rstrip('\n').split('\t'); h = lambda x: int(x, 16)
         out[f[0].lower()] = SimpleNamespace(name=f[0].lower(), sha256=f[1], size=int(f[2]), pref=h(f[3]), base=h(f[4]), sizeimg=h(f[5]), tls=int(f[6]), entry=h(f[7]), static=int(f[8]))
     return out
 
-def locate(arg):
-    """arg = a module file name or a path -> (path, modules.tsv row). The name must be in modules.tsv (else KeyError) and the file's sha256 and size must equal the row (else ValueError)."""
+def locate(arg, modules_tsv, moddirs):
+    """arg = a module file name or a path; modules_tsv = the module table (the loader's, a declared input); moddirs = the list of directories that hold the module files
+    (declared inputs) -> (path, modules.tsv row). The name must be in modules.tsv (else KeyError) and the file's sha256 and size must equal the row (else ValueError)."""
     import hashlib
-    name = os.path.basename(arg).lower(); mods = modules()
+    name = os.path.basename(arg).lower(); mods = modules(modules_tsv)
     if name not in mods and not name.endswith('.dll'): name += '.dll'
     if name not in mods: raise KeyError('%s is not in modules.tsv' % name)
-    row = mods[name]; cand = [arg] if os.path.isfile(arg) else [os.path.join(d, f) for d in os.environ.get('FNVNX_MODDIRS', MODDIRS).split(':') if os.path.isdir(d) for f in sorted(os.listdir(d)) if f.lower() == name]
-    if not cand: raise FileNotFoundError('%s: no file in %s' % (name, os.environ.get('FNVNX_MODDIRS', MODDIRS)))
+    row = mods[name]; cand = [arg] if os.path.isfile(arg) else [os.path.join(d, f) for d in moddirs if os.path.isdir(d) for f in sorted(os.listdir(d)) if f.lower() == name]
+    if not cand: raise FileNotFoundError('%s: no file in %s' % (name, ':'.join(moddirs)))
     for c in cand:
         h = hashlib.sha256(open(c, 'rb').read()).hexdigest()
         if h == row.sha256 and os.path.getsize(c) == row.size: return c, row
@@ -32,7 +31,6 @@ def locate(arg):
 def load(path, newbase=None):
     """newbase=None: the file as stored (preferred base). Else the image as the Windows loader maps it at `base`: every address (sections, relocations,
     exports, entry VAs) at `newbase`, delta = newbase - preferred added to the dword of every HIGHLOW fixup, so all stored VAs (TLS directory, load config, tables) speak `newbase`."""
-    if newbase is None and os.environ.get('FNVNX_BASE'): newbase = int(os.environ['FNVNX_BASE'], 16)      # same resolver as fnvlift.Image
     d = open(path, 'rb').read(); pe = struct.unpack_from('<I', d, 0x3c)[0]
     assert d[pe:pe + 4] == b'PE\0\0' and struct.unpack_from('<H', d, pe + 24)[0] == 0x10b, 'not a PE32 image'
     nsec, soh = struct.unpack_from('<H', d, pe + 6)[0], struct.unpack_from('<H', d, pe + 20)[0]

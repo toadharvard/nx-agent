@@ -7,9 +7,9 @@ emitted from; the dyn-x87 retry explores again and yields the same table). The l
 body, so an instruction inside the range of a parent with several entries is lifted once per entry that reaches it. lifted() yields one (va, length)
 per lifted body instruction, entries in address order, instructions in address order inside an entry: a census that counts per instruction counts
 exactly what liftgen counts (shapes.tsv). Nothing is decided here: no class list. The codemap (tools/codemap.py) is a DERIVED view of the facts and is
-never consulted; the universe is the one fnvlift.universe loads (FNVNX_UNIVERSE), and `facts` must be that file.
+never consulted; the universe is the one fnvlift.universe loads (the configured input `universe`), and `facts` must be that file.
 
-The lifting mode and the jump-table facts are inputs of the result (`emit`: '' hand handlers, 'dsl' proven DSL forms first; `jtab`: the ehtables.json path or None), as in liftgen --emit / --jtab; there is no default."""
+The lifting mode and the jump-table facts are inputs of the result (`emit`: 'dsl', the proven DSL forms first, then the hand handlers of the mnemonics no Form covers; `jtab`: the ehtables.json path or None), as in liftgen --emit / --jtab; there is no default."""
 import json
 import os
 import sys
@@ -23,12 +23,9 @@ S = {}          # the capture of the last explore() result, and the memo of lift
 def install(img, emit, jtab):
     """the state of a lifting process: the emit mode, the jump-table facts (ehtables.json of the module: the only source of jump-table extents) and the capture wrapper around core.explore (once per process)"""
     import fnvlift as L, fnvlift.core as core
-    if emit not in ('', 'dsl'): raise ValueError('emit %r' % (emit,))
-    if emit == 'dsl':
-        from proof import lift_dsl
-        core.set_emit(lift_dsl.emit_form)
-    else:
-        core.set_emit(None)
+    if emit != 'dsl': raise ValueError('emit %r (the proven DSL forms are the only path for the mnemonics they cover)' % (emit,))
+    from proof import lift_dsl
+    core.set_emit(lift_dsl.emit_form)
     core.set_jtab(json.load(open(jtab)) if jtab else None)
     S['cap'] = []
     if 'orig_explore' not in S:
@@ -59,9 +56,9 @@ def begin(img, emit, jtab):
 def lifted(img, facts, emit, jtab):
     """-> list of (va, length) of every instruction a lifted body is emitted for (see the module text); `img` an fnvlift.Image, `facts` the universe.tsv the lifter reads"""
     import fnvlift as L
-    ent = L.universe.load()[0]
-    if os.path.abspath(facts) != os.path.abspath(os.environ.get('FNVNX_UNIVERSE', '/home/user/l3facts/universe.tsv')):
-        raise ValueError('lifted: facts %s is not the universe the lifter reads (FNVNX_UNIVERSE)' % facts)
+    ent = L.universe.load(facts)[0]
+    if os.path.abspath(facts) != os.path.abspath(L.inputs.get('universe')):
+        raise ValueError('lifted: facts %s is not the universe the lifter reads (the configured input `universe`)' % facts)
     key = (id(img), facts, emit, jtab)
     if S.get('key') != key:
         begin(img, emit, jtab)

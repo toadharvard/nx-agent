@@ -1,0 +1,769 @@
+object	function	kind	detail
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo11get_BitRateEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo12GetVideoSizeEPlS2_	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo13GetIDsOfNamesEPKvPPtjjPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo13get_SourceTopEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo13put_SourceTopEl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo14get_SourceLeftEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo14get_VideoWidthEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo14put_SourceLeftEl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo15GetCurrentImageEPlS2_	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo15get_SourceWidthEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo15get_VideoHeightEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo15put_SourceWidthEl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo16get_BitErrorRateEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo16get_SourceHeightEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo16put_SourceHeightEl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo17GetSourcePositionEPlS2_S2_S2_	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo17SetSourcePositionEllll	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo18get_DestinationTopEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo18put_DestinationTopEl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo19get_AvgTimePerFrameEPd	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo19get_DestinationLeftEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo19put_DestinationLeftEl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo20IsUsingDefaultSourceEv	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo20get_DestinationWidthEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo20put_DestinationWidthEl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo21get_DestinationHeightEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo21put_DestinationHeightEl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo22GetDestinationPositionEPlS2_S2_S2_	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo22GetVideoPaletteEntriesEllPlS2_	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo22SetDestinationPositionEllll	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo24SetDefaultSourcePositionEv	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo25IsUsingDefaultDestinationEv	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo29SetDefaultDestinationPositionEv	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_110BasicVideo6InvokeElPKvjtPvS4_S4_Pj	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow10HideCursorEl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow10get_HeightEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow10put_HeightEl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow11get_CaptionEPPt	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow11get_VisibleEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow11put_CaptionEPt	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow11put_VisibleEl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow12get_AutoShowEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow12put_AutoShowEl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow13GetIDsOfNamesEPKvPPtjjPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow14IsCursorHiddenEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow15get_BorderColorEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow15get_WindowStateEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow15get_WindowStyleEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow15put_BorderColorEl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow15put_WindowStateEl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow15put_WindowStyleEl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow16get_MessageDrainEPi	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow16put_MessageDrainEi	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow17GetWindowPositionEPlS2_S2_S2_	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow17SetWindowPositionEllll	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow17get_WindowStyleExEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow17put_WindowStyleExEl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow18GetRestorePositionEPlS2_S2_S2_	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow18NotifyOwnerMessageEilii	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow18get_FullScreenModeEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow18put_FullScreenModeEl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow19SetWindowForegroundEl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow20GetMaxIdealImageSizeEPlS2_	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow20GetMinIdealImageSizeEPlS2_	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow21get_BackgroundPaletteEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow21put_BackgroundPaletteEl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow6InvokeElPKvjtPvS4_S4_Pj	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow7get_TopEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow7put_TopEl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow8get_LeftEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow8put_LeftEl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow9get_OwnerEPi	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow9get_WidthEPl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow9put_OwnerEi	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111VideoWindow9put_WidthEl	V	result v0=None x0=('K', 2147500034) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_111inv_controlEPvjiRNS0_4ArgsEPNS0_3VarE	wine-fixme-in-real-body	the function calls fnvnx_wine_fixme and does more than a simplified body
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_17Control15AddSourceFilterEPKtPPv	wine-fixme-unknown-id	id 200 is not a row of wine_fixme.tsv
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_17Control20get_FilterCollectionEPPv	wine-fixme-unknown-id	id 201 is not a row of wine_fixme.tsv
+ports/fnv-nx/platform/audio/dshow.cpp	_ZN3dsh12_GLOBAL__N_17Control23get_RegFilterCollectionEPPv	wine-fixme-unknown-id	id 202 is not a row of wine_fixme.tsv
+ports/fnv-nx/platform/audio/dshow_filters.cpp	_ZN3dsh12_GLOBAL__N_19ReaderPin10BeginFlushEv	V	result v0=None x0=('K', 2147549183) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow_filters.cpp	_ZN3dsh12_GLOBAL__N_19ReaderPin10NewSegmentExxd	V	result v0=None x0=('K', 2147549183) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow_filters.cpp	_ZN3dsh12_GLOBAL__N_19ReaderPin11EndOfStreamEv	V	result v0=None x0=('K', 2147549183) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow_filters.cpp	_ZN3dsh12_GLOBAL__N_19ReaderPin17ReceiveConnectionEPNS_5IPin_EPKNS_2MTE	V	result v0=None x0=('K', 2147746312) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow_filters.cpp	_ZN3dsh12_GLOBAL__N_19ReaderPin8EndFlushEv	V	result v0=None x0=('K', 2147549183) x1=None; no constants row
+ports/fnv-nx/platform/audio/dshow_filters.cpp	_ZN3dsh7BFilter15QueryVendorInfoEPPt	V	result v0=None x0=('K', 2147500033) x1=None; no constants row
+ports/fnv-nx/platform/audio/dsound.cpp	_ZN12_GLOBAL__N_12Ks3SetERK5_GUIDmPvmS4_m	V	result v0=None x0=('K', 2147943568) x1=None; no constants row
+ports/fnv-nx/platform/audio/dsound.cpp	_ZN12_GLOBAL__N_16Buffer10InitializeEP12IDirectSoundPK13_DSBUFFERDESC	V	result v0=None x0=('K', 2289565826) x1=None; no constants row
+ports/fnv-nx/platform/audio/dsound.cpp	_ZN12_GLOBAL__N_16Buffer7RestoreEv	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/audio/waveout.cpp	waveOutGetNumDevs	V	result v0=None x0=('K', 1) x1=None; no constants row
+ports/fnv-nx/platform/clock/clock_real.cpp	clk_device_watch	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/clock/clock_real.cpp	clk_file_moved	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/clock/clock_real.cpp	clk_file_removed	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/clock/clock_real.cpp	clk_file_stamp	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/clock/clock_real.cpp	clk_file_times	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/clock/clock_real.cpp	clk_merge	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/clock/clock_real.cpp	clk_msg_post	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/clock/clock_real.cpp	clk_name	V	result v0=None x0=('A', ('sec', 12, 0)) x1=None; no constants row
+ports/fnv-nx/platform/clock/clock_real.cpp	clk_reset	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/clock/clock_real.cpp	clk_stamp	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/clock/clock_real.cpp	clk_thread_start	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/clock/clock_real.cpp	clk_wait_idle	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/clock/clock_real.cpp	clk_wait_timeout	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/clock/clock_virtual.cpp	clk_name	V	result v0=None x0=('A', ('sec', 18, 0)) x1=None; no constants row
+ports/fnv-nx/platform/clock/clock_virtual.cpp	clk_tick_freq	V	result v0=None x0=('K', 10000000) x1=None; no constants row
+ports/fnv-nx/platform/crt/exitlist.cpp	fnvnx_doexit	T2	reference to os_exit_process at +0xb8
+ports/fnv-nx/platform/crt/msvcrt_exports.cpp	c_abort	T2	reference to os_exit_process at +0x28
+ports/fnv-nx/platform/crt/msvcrt_exports.cpp	c_amsg_exit	T2	reference to os_exit_process at +0xac
+ports/fnv-nx/platform/crt/msvcrt_exports.cpp	c_exit	T2	reference to os_exit_process at +0x30
+ports/fnv-nx/platform/crt/msvcrt_exports.cpp	c_isleadbyte	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/freetype/gen/src/cid/type1cid.c	cid_driver_done	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/gen/src/cid/type1cid.c	parse_font_name	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/gen/src/truetype/truetype.c	tt_driver_done	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/autofit/autofit.c	af_autofitter_done	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/autofit/autofit.c	af_shaper_buf_create	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/autofit/autofit.c	af_shaper_buf_destroy	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/autofit/autofit.c	af_shaper_get_coverage	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/base/ftbase.c	FT_Error_String	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/base/ftbase.c	FT_Library_SetLcdGeometry	V	result v0=None x0=('K', 7) x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/base/ftbase.c	ft_validator_error	T2	reference to longjmp at +0x18
+ports/fnv-nx/platform/freetype/src/base/ftbase.c	ft_validator_error	T2-noreturn-tail	call to longjmp ends the function
+ports/fnv-nx/platform/freetype/src/base/ftbase.c	ft_validator_run	V	result v0=None x0=('K', 4294967295) x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/base/ftdebug.c	FT_Set_Default_Log_Handler	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/base/ftdebug.c	FT_Set_Log_Handler	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/base/ftdebug.c	FT_Trace_Disable	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/base/ftdebug.c	FT_Trace_Enable	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/base/ftdebug.c	FT_Trace_Get_Count	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/base/ftdebug.c	FT_Trace_Get_Name	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/base/ftdebug.c	FT_Trace_Set_Default_Level	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/base/ftdebug.c	FT_Trace_Set_Level	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/base/ftdebug.c	ft_debug_init	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/base/ftpatent.c	FT_Face_CheckTrueTypePatents	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/base/ftpatent.c	FT_Face_SetUnpatentedHinting	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/bdf/bdf.c	bdf_parse_end_	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/bzip2/ftbzip2.c	FT_Stream_OpenBzip2	V	result v0=None x0=('K', 7) x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/cache/ftcache.c	ftc_cmap_node_weight	V	result v0=None x0=('K', 20) x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/cff/cff.c	cff_driver_done	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_BinSrchHeader_validate	T2	reference to ft_validator_error at +0x194
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_BinSrchHeader_validate	T2	reference to ft_validator_error at +0x1f4
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_BinSrchHeader_validate	T2	reference to ft_validator_error at +0x224
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_BinSrchHeader_validate	T2	reference to ft_validator_error at +0x2d4
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_BinSrchHeader_validate	T2	reference to ft_validator_error at +0x338
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_BinSrchHeader_validate	T2	reference to ft_validator_error at +0x374
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_ClassTable_validate	T2	reference to ft_validator_error at +0x154
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_ClassTable_validate	T2	reference to ft_validator_error at +0x180
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_ClassTable_validate	T2	reference to ft_validator_error at +0x21c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_ClassTable_validate	T2	reference to ft_validator_error at +0x23c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_LookupTable_fmt0_validate	T2	reference to ft_validator_error at +0x100
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_LookupTable_fmt0_validate	T2	reference to ft_validator_error at +0x178
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_LookupTable_fmt0_validate	T2	reference to ft_validator_error at +0x1a4
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_LookupTable_fmt2_validate	T2	reference to ft_validator_error at +0x18c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_LookupTable_fmt2_validate	T2	reference to ft_validator_error at +0x2e0
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_LookupTable_fmt2_validate	T2	reference to ft_validator_error at +0x2fc
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_LookupTable_fmt2_validate	T2	reference to ft_validator_error at +0x354
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_LookupTable_fmt4_validate	T2	reference to ft_validator_error at +0x18c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_LookupTable_fmt4_validate	T2	reference to ft_validator_error at +0x384
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_LookupTable_fmt4_validate	T2	reference to ft_validator_error at +0x3a8
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_LookupTable_fmt4_validate	T2	reference to ft_validator_error at +0x3d0
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_LookupTable_fmt4_validate	T2	reference to ft_validator_error at +0x470
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_LookupTable_fmt4_validate	T2	reference to ft_validator_error at +0x4b0
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_LookupTable_fmt6_validate	T2	reference to ft_validator_error at +0x174
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_LookupTable_fmt6_validate	T2	reference to ft_validator_error at +0x1a4
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_LookupTable_fmt6_validate	T2	reference to ft_validator_error at +0x26c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_LookupTable_fmt8_validate	T2	reference to ft_validator_error at +0x164
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_LookupTable_fmt8_validate	T2	reference to ft_validator_error at +0x1e4
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_LookupTable_validate	T2	reference to ft_validator_error at +0x134
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_LookupTable_validate	T2	reference to ft_validator_error at +0x16c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_LookupTable_validate	T2	reference to ft_validator_error at +0xf0
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_StateTable_validate	T2	reference to ft_validator_error at +0x3dc
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_StateTable_validate	T2	reference to ft_validator_error at +0x400
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_StateTable_validate	T2	reference to ft_validator_error at +0x440
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_StateTable_validate	T2	reference to ft_validator_error at +0x5c0
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_StateTable_validate	T2	reference to ft_validator_error at +0x5ec
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_StateTable_validate	T2	reference to ft_validator_error at +0x604
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_StateTable_validate	T2	reference to ft_validator_error at +0x640
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_StateTable_validate	T2	reference to ft_validator_error at +0x6a4
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_XClassTable_lookupval_validate	T2	reference to ft_validator_error at +0x54
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_XStateTable_validate	T2	reference to ft_validator_error at +0x448
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_XStateTable_validate	T2	reference to ft_validator_error at +0x564
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_XStateTable_validate	T2	reference to ft_validator_error at +0x5c4
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_XStateTable_validate	T2	reference to ft_validator_error at +0x600
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_XStateTable_validate	T2	reference to ft_validator_error at +0x6ac
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_XStateTable_validate	T2	reference to ft_validator_error at +0x6e4
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_XStateTable_validate	T2	reference to ft_validator_error at +0x724
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_XStateTable_validate	T2	reference to ft_validator_error at +0x748
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_XStateTable_validate	T2	reference to ft_validator_error at +0x7c4
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_array_getlimits_byte	T2	reference to ft_validator_error at +0x98
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_bsln_LookupFmt4_transit	T2	reference to ft_validator_error at +0x68
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_bsln_LookupValue_validate	T2	reference to ft_validator_error at +0x4c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_bsln_LookupValue_validate	T2	reference to ft_validator_error at +0x90
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_bsln_parts_fmt0_validate	T2	reference to ft_validator_error at +0x40
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_bsln_parts_fmt2_validate	T2	reference to ft_validator_error at +0x11c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_bsln_parts_fmt2_validate	T2	reference to ft_validator_error at +0x138
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_ctlPoint_validate	T2	reference to ft_validator_error at +0x74
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_ctlPoint_validate	T2	reference to ft_validator_error at +0x8c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_feat_name_index_validate.constprop.0	T2	reference to ft_validator_error at +0x60
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_feat_validate	T2	reference to ft_validator_error at +0x3fc
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_feat_validate	T2	reference to ft_validator_error at +0x41c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_feat_validate	T2	reference to ft_validator_error at +0x440
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_feat_validate	T2	reference to ft_validator_error at +0x4d8
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_feat_validate	T2	reference to ft_validator_error at +0x510
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_feat_validate	T2	reference to ft_validator_error at +0x550
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_feat_validate	T2	reference to ft_validator_error at +0x584
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_feat_validate	T2	reference to ft_validator_error at +0x5a0
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_feat_validate	T2	reference to ft_validator_error at +0x5c8
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_feat_validate	T2	reference to ft_validator_error at +0x600
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_feat_validate	T2	reference to ft_validator_error at +0x624
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_feat_validate	T2	reference to ft_validator_error at +0x690
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_feat_validate	T2	reference to ft_validator_error at +0x6a8
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_feat_validate	T2	reference to ft_validator_error at +0x6c4
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_feat_validate	T2	reference to ft_validator_error at +0xac
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_glyphid_validate.part.0.isra.0	T2	reference to ft_validator_error at +0x48
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_just_check_max_gid.isra.0	T2	reference to ft_validator_error at +0x48
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_just_classTable_entry_validate	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_just_justData_validate	T2	reference to ft_validator_error at +0x16c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_just_justData_validate	T2	reference to ft_validator_error at +0x430
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_just_justData_validate	T2	reference to ft_validator_error at +0x50c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_just_justData_validate	T2	reference to ft_validator_error at +0x648
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_just_justData_validate	T2	reference to ft_validator_error at +0x698
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_just_justData_validate	T2	reference to ft_validator_error at +0x6f0
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_just_justData_validate	T2	reference to ft_validator_error at +0x8bc
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_just_justData_validate	T2	reference to ft_validator_error at +0x90c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_just_justData_validate	T2	reference to ft_validator_error at +0x9ec
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_just_justData_validate	T2	reference to ft_validator_error at +0xa3c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_just_justData_validate	T2	reference to ft_validator_error at +0xb60
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_just_justData_validate	T2	reference to ft_validator_error at +0xb84
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_just_justData_validate	T2	reference to ft_validator_error at +0xcb4
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_just_justData_validate	T2	reference to ft_validator_error at +0xcd8
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_just_justData_validate	T2	reference to ft_validator_error at +0xd00
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_just_justData_validate	T2	reference to ft_validator_error at +0xd2c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_just_justData_validate	T2	reference to ft_validator_error at +0xd5c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_just_justData_validate	T2	reference to ft_validator_error at +0xdfc
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_subtable_fmt1_entry_validate	T2	reference to ft_validator_error at +0x7c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_subtable_fmt1_entry_validate	T2	reference to ft_validator_error at +0xa0
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_subtable_fmt1_valueTable_load	T2	reference to ft_validator_error at +0x60
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_subtable_fmt2_clstbl_validate	T2	reference to ft_validator_error at +0x204
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_subtable_fmt2_clstbl_validate	T2	reference to ft_validator_error at +0x284
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0x1000
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0x1024
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0x1040
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0x105c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0x1088
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0x3c4
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0x488
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0x4a8
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0x540
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0x5e8
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0xaf4
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0xb0
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0xb28
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0xba4
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0xc54
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0xc78
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0xcdc
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0xd18
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0xd40
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0xd68
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0xdb0
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0xde8
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0xe20
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0xe54
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0xe84
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0xeb0
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_kern_validate_generic	T2	reference to ft_validator_error at +0xee0
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_lcar_LookupFmt4_transit	T2	reference to ft_validator_error at +0x9c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_lcar_LookupValue_validate	T2	reference to ft_validator_error at +0x134
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_lcar_LookupValue_validate	T2	reference to ft_validator_error at +0x17c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_mort_featurearray_validate	T2	reference to ft_validator_error at +0x1e8
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_mort_featurearray_validate	T2	reference to ft_validator_error at +0x250
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_mort_featurearray_validate	T2	reference to ft_validator_error at +0x2b8
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_mort_featurearray_validate	T2	reference to ft_validator_error at +0x300
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_mort_subtable_type0_entry_validate	T2	reference to ft_validator_error at +0x7c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_mort_subtable_type0_entry_validate	T2	reference to ft_validator_error at +0xb8
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_mort_subtable_type0_entry_validate	T2	reference to ft_validator_error at +0xe4
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_mort_subtable_type0_validate	T2	reference to ft_validator_error at +0x84
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_mort_subtable_type1_entry_validate	T2	reference to ft_validator_error at +0x80
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_mort_subtable_type1_validate	T2	reference to ft_validator_error at +0x150
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_mort_subtable_type1_validate	T2	reference to ft_validator_error at +0x194
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_mort_subtable_type1_validate	T2	reference to ft_validator_error at +0x1dc
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_mort_subtable_type2_entry_validate	T2	reference to ft_validator_error at +0x108
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_mort_subtable_type2_entry_validate	T2	reference to ft_validator_error at +0xe8
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_mort_subtable_type2_opttable_load	T2	reference to ft_validator_error at +0x98
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_mort_subtable_type2_validate	T2	reference to ft_validator_error at +0x158
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_mort_subtable_type2_validate	T2	reference to ft_validator_error at +0x1b0
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_mort_subtable_type2_validate	T2	reference to ft_validator_error at +0x1d4
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_mort_subtable_type5_InsertList_validate	T2	reference to ft_validator_error at +0xf0
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_mort_subtable_type5_validate	T2	reference to ft_validator_error at +0x94
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_morx_subtable_type0_entry_validate	T2	reference to ft_validator_error at +0x18
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_morx_subtable_type0_validate	T2	reference to ft_validator_error at +0x84
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_morx_subtable_type1_LookupValue_validate	T2	reference to ft_validator_error at +0x34
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_morx_subtable_type1_entry_validate	T2	reference to ft_validator_error at +0x90
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_morx_subtable_type1_substitutionTable_load	T2	reference to ft_validator_error at +0x60
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_morx_subtable_type1_validate	T2	reference to ft_validator_error at +0x1b4
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_morx_subtable_type1_validate	T2	reference to ft_validator_error at +0x1fc
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_morx_subtable_type2_entry_validate	T2	reference to ft_validator_error at +0x114
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_morx_subtable_type2_entry_validate	T2	reference to ft_validator_error at +0x128
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_morx_subtable_type2_entry_validate	T2	reference to ft_validator_error at +0xd0
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_morx_subtable_type2_opttable_load	T2	reference to ft_validator_error at +0xec
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_morx_subtable_type2_validate	T2	reference to ft_validator_error at +0x134
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_morx_subtable_type2_validate	T2	reference to ft_validator_error at +0x180
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_morx_subtable_type2_validate	T2	reference to ft_validator_error at +0x1a0
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_morx_subtable_type5_InsertList_validate	T2	reference to ft_validator_error at +0x2c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_morx_subtable_type5_insertionGlyphList_load	T2	reference to ft_validator_error at +0x7c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_morx_subtable_type5_validate	T2	reference to ft_validator_error at +0x9c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_odtect_validate	T2	reference to ft_validator_error at +0x68
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_opbd_LookupValue_validate	T2	reference to ft_validator_error at +0x118
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_prop_property_validate	T2	reference to ft_validator_error at +0x100
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_prop_property_validate	T2	reference to ft_validator_error at +0x110
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_prop_property_validate	T2	reference to ft_validator_error at +0x140
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_prop_property_validate	T2	reference to ft_validator_error at +0x16c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_prop_property_validate	T2	reference to ft_validator_error at +0x1b0
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_prop_property_validate	T2	reference to ft_validator_error at +0x1c8
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_prop_property_validate	T2	reference to ft_validator_error at +0xc4
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_set_length_by_ulong_offset	T2	reference to ft_validator_error at +0x1bc
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_set_length_by_ulong_offset	T2	reference to ft_validator_error at +0x20c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_set_length_by_ulong_offset	T2	reference to ft_validator_error at +0x248
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_set_length_by_ushort_offset	T2	reference to ft_validator_error at +0x1b4
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_set_length_by_ushort_offset	T2	reference to ft_validator_error at +0x200
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_set_length_by_ushort_offset	T2	reference to ft_validator_error at +0x234
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_sfntName_validate	T2	reference to ft_validator_error at +0xa4
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_sfntName_validate	T2	reference to ft_validator_error at +0xb8
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_trak_trackData_validate	T2	reference to ft_validator_error at +0x428
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_trak_trackData_validate	T2	reference to ft_validator_error at +0x448
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_trak_trackData_validate	T2	reference to ft_validator_error at +0x460
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_trak_trackData_validate	T2	reference to ft_validator_error at +0x480
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1058
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1080
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1260
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x128c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1340
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1360
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x16b0
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x16d8
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1704
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x17b8
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x17d8
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1814
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x18dc
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1900
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1928
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1954
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x197c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x19b8
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x19d4
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1a58
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1a7c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1a9c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1aec
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1b0c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1b5c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1b7c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1bb4
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1bec
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1c84
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1cb0
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1cc8
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1ce4
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1d28
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1d4c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x1d6c
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0x478
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0xbc8
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0xd30
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0xd60
+ports/fnv-nx/platform/freetype/src/gxvalid/gxvalid.c	gxv_validate	T2	reference to ft_validator_error at +0xde8
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Anchor_validate	T2	reference to ft_validator_error at +0x148
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Anchor_validate	T2	reference to ft_validator_error at +0x1a4
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Anchor_validate	T2	reference to ft_validator_error at +0x1c0
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Anchor_validate	T2	reference to ft_validator_error at +0x1f8
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Anchor_validate	T2	reference to ft_validator_error at +0x70
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Axis_validate	T2	reference to ft_validator_error at +0x378
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Axis_validate	T2	reference to ft_validator_error at +0x394
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Axis_validate	T2	reference to ft_validator_error at +0x438
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Axis_validate	T2	reference to ft_validator_error at +0x494
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Axis_validate	T2	reference to ft_validator_error at +0x4b8
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Axis_validate	T2	reference to ft_validator_error at +0x4dc
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Axis_validate	T2	reference to ft_validator_error at +0x4f8
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Axis_validate	T2	reference to ft_validator_error at +0x510
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Axis_validate	T2	reference to ft_validator_error at +0x52c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Axis_validate	T2	reference to ft_validator_error at +0x54c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Axis_validate	T2	reference to ft_validator_error at +0x570
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Axis_validate	T2	reference to ft_validator_error at +0x594
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_BaseCoord_validate	T2	reference to ft_validator_error at +0x108
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_BaseCoord_validate	T2	reference to ft_validator_error at +0x70
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_BaseCoord_validate	T2	reference to ft_validator_error at +0xec
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_CaretValue_validate	T2	reference to ft_validator_error at +0xa8
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_CaretValue_validate	T2	reference to ft_validator_error at +0xd0
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_CaretValue_validate	T2	reference to ft_validator_error at +0xec
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ChainContextPos_validate	T2	reference to ft_validator_error at +0x134
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ChainContextPos_validate	T2	reference to ft_validator_error at +0x1d8
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ClassDef_validate	T2	reference to ft_validator_error at +0x11c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ClassDef_validate	T2	reference to ft_validator_error at +0x154
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ClassDef_validate	T2	reference to ft_validator_error at +0x18c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ClassDef_validate	T2	reference to ft_validator_error at +0x214
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ClassDef_validate	T2	reference to ft_validator_error at +0x22c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ClassDef_validate	T2	reference to ft_validator_error at +0x250
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ClassDef_validate	T2	reference to ft_validator_error at +0x274
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ClassDef_validate	T2	reference to ft_validator_error at +0x294
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ContextPos_validate	T2	reference to ft_validator_error at +0x134
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ContextPos_validate	T2	reference to ft_validator_error at +0x1d8
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Coverage_validate	T2	reference to ft_validator_error at +0x170
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Coverage_validate	T2	reference to ft_validator_error at +0x1a8
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Coverage_validate	T2	reference to ft_validator_error at +0x1d8
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Coverage_validate	T2	reference to ft_validator_error at +0x1f4
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Coverage_validate	T2	reference to ft_validator_error at +0x2b0
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Coverage_validate	T2	reference to ft_validator_error at +0x2d4
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Coverage_validate	T2	reference to ft_validator_error at +0x2ec
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Coverage_validate	T2	reference to ft_validator_error at +0x308
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Coverage_validate	T2	reference to ft_validator_error at +0x320
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_CursivePos_validate	T2	reference to ft_validator_error at +0x24c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_CursivePos_validate	T2	reference to ft_validator_error at +0x27c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_CursivePos_validate	T2	reference to ft_validator_error at +0x2bc
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_CursivePos_validate	T2	reference to ft_validator_error at +0x2ec
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_CursivePos_validate	T2	reference to ft_validator_error at +0x314
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_CursivePos_validate	T2	reference to ft_validator_error at +0x5c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Device_validate	T2	reference to ft_validator_error at +0x120
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Device_validate	T2	reference to ft_validator_error at +0x15c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Device_validate	T2	reference to ft_validator_error at +0xd0
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Device_validate	T2	reference to ft_validator_error at +0xec
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ExtensionPos_validate	T2	reference to ft_validator_error at +0x124
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ExtensionPos_validate	T2	reference to ft_validator_error at +0x140
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ExtensionPos_validate	T2	reference to ft_validator_error at +0x160
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ExtensionPos_validate	T2	reference to ft_validator_error at +0x5c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ExtensionSubst_validate	T2	reference to ft_validator_error at +0x150
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ExtensionSubst_validate	T2	reference to ft_validator_error at +0x16c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ExtensionSubst_validate	T2	reference to ft_validator_error at +0x5c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ExtensionSubst_validate	T2	reference to ft_validator_error at +0xe4
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_FeatureList_validate	T2	reference to ft_validator_error at +0x17c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_FeatureList_validate	T2	reference to ft_validator_error at +0x1cc
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_FeatureList_validate	T2	reference to ft_validator_error at +0x1f0
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_FeatureList_validate	T2	reference to ft_validator_error at +0x210
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_FeatureList_validate	T2	reference to ft_validator_error at +0x228
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_GDEF_validate	T2	reference to ft_validator_error at +0x13c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_GDEF_validate	T2	reference to ft_validator_error at +0x154
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_GDEF_validate	T2	reference to ft_validator_error at +0x554
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_GDEF_validate	T2	reference to ft_validator_error at +0x56c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_GDEF_validate	T2	reference to ft_validator_error at +0x584
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_GDEF_validate	T2	reference to ft_validator_error at +0x654
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_GDEF_validate	T2	reference to ft_validator_error at +0x684
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_GDEF_validate	T2	reference to ft_validator_error at +0x6b4
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_GDEF_validate	T2	reference to ft_validator_error at +0x758
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_GDEF_validate	T2	reference to ft_validator_error at +0x780
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_GDEF_validate	T2	reference to ft_validator_error at +0x7ac
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_GDEF_validate	T2	reference to ft_validator_error at +0x7d8
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_GDEF_validate	T2	reference to ft_validator_error at +0x80
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_GDEF_validate	T2	reference to ft_validator_error at +0x874
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_GDEF_validate	T2	reference to ft_validator_error at +0x890
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_JstfPriority_validate	T2	reference to ft_validator_error at +0x424
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_JstfPriority_validate	T2	reference to ft_validator_error at +0x458
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_JstfPriority_validate	T2	reference to ft_validator_error at +0x48c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_JstfPriority_validate	T2	reference to ft_validator_error at +0x4c0
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_JstfPriority_validate	T2	reference to ft_validator_error at +0x4f4
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_JstfPriority_validate	T2	reference to ft_validator_error at +0x52c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_JstfPriority_validate	T2	reference to ft_validator_error at +0x564
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_JstfPriority_validate	T2	reference to ft_validator_error at +0x598
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_JstfPriority_validate	T2	reference to ft_validator_error at +0x630
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_JstfPriority_validate	T2	reference to ft_validator_error at +0x64c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_JstfPriority_validate	T2	reference to ft_validator_error at +0x66c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_LangSys_validate	T2	reference to ft_validator_error at +0x104
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_LangSys_validate	T2	reference to ft_validator_error at +0x134
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_LangSys_validate	T2	reference to ft_validator_error at +0x158
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_LangSys_validate	T2	reference to ft_validator_error at +0xd4
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_LigatureSubst_validate	T2	reference to ft_validator_error at +0x58
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_LigatureSubst_validate	T2	reference to ft_validator_error at +0xd4
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Ligature_validate	T2	reference to ft_validator_error at +0xa4
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Ligature_validate	T2	reference to ft_validator_error at +0xc0
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Ligature_validate	T2	reference to ft_validator_error at +0xd4
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Ligature_validate	T2	reference to ft_validator_error at +0xf0
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_LookupList_validate	T2	reference to ft_validator_error at +0x100
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_LookupList_validate	T2	reference to ft_validator_error at +0xe0
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Lookup_validate	T2	reference to ft_validator_error at +0x194
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Lookup_validate	T2	reference to ft_validator_error at +0x1e8
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Lookup_validate	T2	reference to ft_validator_error at +0x1fc
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_Lookup_validate	T2	reference to ft_validator_error at +0xac
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MarkBasePos_validate	T2	reference to ft_validator_error at +0x58
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MarkBasePos_validate	T2	reference to ft_validator_error at +0xd0
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MarkLigPos_validate	T2	reference to ft_validator_error at +0x58
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MarkLigPos_validate	T2	reference to ft_validator_error at +0xe0
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MarkMarkPos_validate	T2	reference to ft_validator_error at +0x58
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MarkMarkPos_validate	T2	reference to ft_validator_error at +0xcc
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MathGlyphConstruction_validate	T2	reference to ft_validator_error at +0x220
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MathGlyphConstruction_validate	T2	reference to ft_validator_error at +0x258
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MathGlyphConstruction_validate	T2	reference to ft_validator_error at +0x278
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MathGlyphConstruction_validate	T2	reference to ft_validator_error at +0x2e4
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MathGlyphConstruction_validate	T2	reference to ft_validator_error at +0x310
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MathGlyphConstruction_validate	T2	reference to ft_validator_error at +0x334
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MathGlyphConstruction_validate	T2	reference to ft_validator_error at +0x394
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MathGlyphConstruction_validate	T2	reference to ft_validator_error at +0xe4
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MathItalicsCorrectionInfo_validate.isra.0	T2	reference to ft_validator_error at +0x18c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MathItalicsCorrectionInfo_validate.isra.0	T2	reference to ft_validator_error at +0x1cc
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MathItalicsCorrectionInfo_validate.isra.0	T2	reference to ft_validator_error at +0x1f8
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MathItalicsCorrectionInfo_validate.isra.0	T2	reference to ft_validator_error at +0x250
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MinMax_validate	T2	reference to ft_validator_error at +0x27c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MinMax_validate	T2	reference to ft_validator_error at +0x2bc
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MinMax_validate	T2	reference to ft_validator_error at +0x2f4
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MinMax_validate	T2	reference to ft_validator_error at +0x31c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MinMax_validate	T2	reference to ft_validator_error at +0x3c8
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MinMax_validate	T2	reference to ft_validator_error at +0x40c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MultipleSubst_validate	T2	reference to ft_validator_error at +0x58
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_MultipleSubst_validate	T2	reference to ft_validator_error at +0xd4
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_O_x_Ox	T2	reference to ft_validator_error at +0x198
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_O_x_Ox	T2	reference to ft_validator_error at +0x1b0
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_O_x_Ox	T2	reference to ft_validator_error at +0xa0
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_PairPos_validate	T2	reference to ft_validator_error at +0x320
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_PairPos_validate	T2	reference to ft_validator_error at +0x5bc
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_PairPos_validate	T2	reference to ft_validator_error at +0x5e0
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_PairPos_validate	T2	reference to ft_validator_error at +0x600
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_PairPos_validate	T2	reference to ft_validator_error at +0x61c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_PairPos_validate	T2	reference to ft_validator_error at +0x634
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_PairPos_validate	T2	reference to ft_validator_error at +0x64c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_PairPos_validate	T2	reference to ft_validator_error at +0x664
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ReverseChainSingleSubst_validate	T2	reference to ft_validator_error at +0x2c0
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ReverseChainSingleSubst_validate	T2	reference to ft_validator_error at +0x2f0
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ReverseChainSingleSubst_validate	T2	reference to ft_validator_error at +0x30c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ReverseChainSingleSubst_validate	T2	reference to ft_validator_error at +0x348
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ReverseChainSingleSubst_validate	T2	reference to ft_validator_error at +0x364
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ReverseChainSingleSubst_validate	T2	reference to ft_validator_error at +0x378
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ReverseChainSingleSubst_validate	T2	reference to ft_validator_error at +0x390
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ReverseChainSingleSubst_validate	T2	reference to ft_validator_error at +0x64
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ScriptList_validate	T2	reference to ft_validator_error at +0x1d0
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ScriptList_validate	T2	reference to ft_validator_error at +0x1ec
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ScriptList_validate	T2	reference to ft_validator_error at +0x228
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ScriptList_validate	T2	reference to ft_validator_error at +0x240
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_SinglePos_validate	T2	reference to ft_validator_error at +0x18c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_SinglePos_validate	T2	reference to ft_validator_error at +0x224
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_SinglePos_validate	T2	reference to ft_validator_error at +0x240
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_SinglePos_validate	T2	reference to ft_validator_error at +0x268
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_SinglePos_validate	T2	reference to ft_validator_error at +0x290
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_SingleSubst_validate	T2	reference to ft_validator_error at +0x130
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_SingleSubst_validate	T2	reference to ft_validator_error at +0x26c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_SingleSubst_validate	T2	reference to ft_validator_error at +0x280
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_SingleSubst_validate	T2	reference to ft_validator_error at +0x298
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_SingleSubst_validate	T2	reference to ft_validator_error at +0x2b8
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_SingleSubst_validate	T2	reference to ft_validator_error at +0x2d4
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_SingleSubst_validate	T2	reference to ft_validator_error at +0x2f4
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ValueRecord_validate	T2	reference to ft_validator_error at +0x120
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ValueRecord_validate	T2	reference to ft_validator_error at +0x184
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ValueRecord_validate	T2	reference to ft_validator_error at +0x1b8
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_ValueRecord_validate	T2	reference to ft_validator_error at +0xfc
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_u_C_x_Ox	T2	reference to ft_validator_error at +0x170
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_u_C_x_Ox	T2	reference to ft_validator_error at +0x190
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_u_O_O_O_O_x_Onx	T2	reference to ft_validator_error at +0x218
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_u_O_O_O_O_x_Onx	T2	reference to ft_validator_error at +0x23c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_u_O_O_u_O_O	T2	reference to ft_validator_error at +0x230
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_u_O_O_u_O_O	T2	reference to ft_validator_error at +0x250
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_u_O_O_u_O_O	T2	reference to ft_validator_error at +0x26c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_u_O_O_x_Onx	T2	reference to ft_validator_error at +0x1c0
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_u_O_O_x_Onx	T2	reference to ft_validator_error at +0x1e0
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_u_x_Ox_y_Oy_z_Oz_p_sp	T2	reference to ft_validator_error at +0x2d4
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_u_x_Ox_y_Oy_z_Oz_p_sp	T2	reference to ft_validator_error at +0x2f4
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_u_x_Ox_y_Oy_z_Oz_p_sp	T2	reference to ft_validator_error at +0x324
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_u_x_Ox_y_Oy_z_Oz_p_sp	T2	reference to ft_validator_error at +0x340
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_u_x_Ox_y_Oy_z_Oz_p_sp	T2	reference to ft_validator_error at +0x358
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_u_x_Ox_y_Oy_z_Oz_p_sp	T2	reference to ft_validator_error at +0x370
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_u_x_Ox_y_Oy_z_Oz_p_sp	T2	reference to ft_validator_error at +0x388
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_u_x_y_Ox_sy	T2	reference to ft_validator_error at +0x174
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_u_x_y_Ox_sy	T2	reference to ft_validator_error at +0x190
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_u_x_y_Ox_sy	T2	reference to ft_validator_error at +0x1bc
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_u_x_y_Ox_sy	T2	reference to ft_validator_error at +0x1d8
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x115c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x134c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1374
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1398
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x13f8
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1410
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1428
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x145c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1478
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1498
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x14bc
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x14f8
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1520
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x16c0
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x16e0
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1738
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x177c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x17dc
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1808
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x183c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1878
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1898
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x18e0
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1924
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1cdc
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1d04
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1d2c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1d5c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1d98
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1dc4
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1e54
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1edc
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1f08
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1f3c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1f6c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1f9c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x1fb8
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x2014
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x2058
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x2088
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x209c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x20e8
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x3cc
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0x660
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0xa4c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_validate	T2	reference to ft_validator_error at +0xf1c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_x_Ox	T2	reference to ft_validator_error at +0x134
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_x_Ox	T2	reference to ft_validator_error at +0x150
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_x_sxy	T2	reference to ft_validator_error at +0x1d8
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_x_sxy	T2	reference to ft_validator_error at +0x1fc
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_x_sxy	T2	reference to ft_validator_error at +0x214
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_x_ux	T2	reference to ft_validator_error at +0x104
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_x_ux	T2	reference to ft_validator_error at +0x8c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_x_ux	T2	reference to ft_validator_error at +0xe4
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_x_ux_y_uy_z_uz_p_sp	T2	reference to ft_validator_error at +0x19c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_x_ux_y_uy_z_uz_p_sp	T2	reference to ft_validator_error at +0x1bc
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_x_ux_y_uy_z_uz_p_sp	T2	reference to ft_validator_error at +0x1ec
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_x_ux_y_uy_z_uz_p_sp	T2	reference to ft_validator_error at +0x214
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_x_ux_y_uy_z_uz_p_sp	T2	reference to ft_validator_error at +0x23c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_x_ux_y_uy_z_uz_p_sp	T2	reference to ft_validator_error at +0x258
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_x_ux_y_uy_z_uz_p_sp	T2	reference to ft_validator_error at +0x278
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_x_ux_y_uy_z_uz_p_sp	T2	reference to ft_validator_error at +0x29c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_x_y_ux_sy	T2	reference to ft_validator_error at +0x110
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_x_y_ux_sy	T2	reference to ft_validator_error at +0x12c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_x_y_ux_sy	T2	reference to ft_validator_error at +0x15c
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_x_y_ux_sy	T2	reference to ft_validator_error at +0x180
+ports/fnv-nx/platform/freetype/src/otvalid/otvalid.c	otv_x_y_ux_sy	T2	reference to ft_validator_error at +0x1a0
+ports/fnv-nx/platform/freetype/src/pcf/pcf.c	pcf_driver_done	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/psaux/psaux.c	ps_parser_done	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/raster/raster.c	Horizontal_Sweep_Init	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/raster/raster.c	Horizontal_Sweep_Step	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/raster/raster.c	ft_black_reset	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/raster/raster.c	ft_black_set_mode	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/sdf/sdf.c	bsdf_raster_reset	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/sdf/sdf.c	bsdf_raster_set_mode	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/sdf/sdf.c	ft_sdf_done	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/sdf/sdf.c	sdf_raster_reset	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/sdf/sdf.c	sdf_raster_set_mode	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap0_validate	T2	reference to ft_validator_error at +0x60
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap0_validate	T2	reference to ft_validator_error at +0xb8
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap0_validate	T2	reference to ft_validator_error at +0xe8
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap10_validate	T2	reference to ft_validator_error at +0x118
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap10_validate	T2	reference to ft_validator_error at +0x15c
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap10_validate	T2	reference to ft_validator_error at +0xb0
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap12_validate	T2	reference to ft_validator_error at +0x1e0
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap12_validate	T2	reference to ft_validator_error at +0x20c
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap12_validate	T2	reference to ft_validator_error at +0x280
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap12_validate	T2	reference to ft_validator_error at +0x2d4
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap12_validate	T2	reference to ft_validator_error at +0x2ec
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap12_validate	T2	reference to ft_validator_error at +0xb4
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap13_validate	T2	reference to ft_validator_error at +0x1d8
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap13_validate	T2	reference to ft_validator_error at +0x214
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap13_validate	T2	reference to ft_validator_error at +0x26c
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap13_validate	T2	reference to ft_validator_error at +0x2c0
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap13_validate	T2	reference to ft_validator_error at +0x2d8
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap13_validate	T2	reference to ft_validator_error at +0xb4
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap14_char_index	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap14_validate	T2	reference to ft_validator_error at +0x2e8
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap14_validate	T2	reference to ft_validator_error at +0x320
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap14_validate	T2	reference to ft_validator_error at +0x34c
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap14_validate	T2	reference to ft_validator_error at +0x37c
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap14_validate	T2	reference to ft_validator_error at +0x4c0
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap14_validate	T2	reference to ft_validator_error at +0x4f8
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap14_validate	T2	reference to ft_validator_error at +0x548
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap14_validate	T2	reference to ft_validator_error at +0x574
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap14_validate	T2	reference to ft_validator_error at +0x598
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap14_validate	T2	reference to ft_validator_error at +0x5b4
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap14_validate	T2	reference to ft_validator_error at +0x5d4
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap14_validate	T2	reference to ft_validator_error at +0x610
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap14_validate	T2	reference to ft_validator_error at +0x620
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap14_validate	T2	reference to ft_validator_error at +0xc8
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap2_validate	T2	reference to ft_validator_error at +0x1e8
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap2_validate	T2	reference to ft_validator_error at +0x264
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap2_validate	T2	reference to ft_validator_error at +0x33c
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap2_validate	T2	reference to ft_validator_error at +0x394
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap2_validate	T2	reference to ft_validator_error at +0x3a8
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap2_validate	T2	reference to ft_validator_error at +0x70
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap2_validate	T2	reference to ft_validator_error at +0xf8
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap4_validate	T2	reference to ft_validator_error at +0x24c
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap4_validate	T2	reference to ft_validator_error at +0x318
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap4_validate	T2	reference to ft_validator_error at +0x3d8
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap4_validate	T2	reference to ft_validator_error at +0x4a4
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap4_validate	T2	reference to ft_validator_error at +0x4ec
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap4_validate	T2	reference to ft_validator_error at +0x558
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap4_validate	T2	reference to ft_validator_error at +0x61c
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap4_validate	T2	reference to ft_validator_error at +0x63c
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap4_validate	T2	reference to ft_validator_error at +0x658
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap4_validate	T2	reference to ft_validator_error at +0x670
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap4_validate	T2	reference to ft_validator_error at +0x6d4
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap4_validate	T2	reference to ft_validator_error at +0x714
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap4_validate	T2	reference to ft_validator_error at +0x750
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap4_validate	T2	reference to ft_validator_error at +0x77c
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap6_validate	T2	reference to ft_validator_error at +0x118
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap6_validate	T2	reference to ft_validator_error at +0xcc
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap6_validate	T2	reference to ft_validator_error at +0xfc
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap8_validate	T2	reference to ft_validator_error at +0x22c
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap8_validate	T2	reference to ft_validator_error at +0x258
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap8_validate	T2	reference to ft_validator_error at +0x2d0
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap8_validate	T2	reference to ft_validator_error at +0x36c
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap8_validate	T2	reference to ft_validator_error at +0x398
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap8_validate	T2	reference to ft_validator_error at +0x40c
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap8_validate	T2	reference to ft_validator_error at +0x44c
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap8_validate	T2	reference to ft_validator_error at +0x474
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap8_validate	T2	reference to ft_validator_error at +0x494
+ports/fnv-nx/platform/freetype/src/sfnt/sfnt.c	tt_cmap8_validate	T2	reference to ft_validator_error at +0x90
+ports/fnv-nx/platform/freetype/src/smooth/smooth.c	gray_raster_reset	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/smooth/smooth.c	gray_raster_set_mode	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/smooth/smooth.c	gray_set_cell	T2	reference to longjmp at +0xfc
+ports/fnv-nx/platform/freetype/src/smooth/smooth.c	gray_set_cell	T2-noreturn-tail	call to longjmp ends the function
+ports/fnv-nx/platform/freetype/src/type1/type1.c	T1_Driver_Done	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/type1/type1.c	t1_ps_has_glyph_names	V	result v0=None x0=('K', 1) x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/type42/type42.c	T42_Driver_Done	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/freetype/src/type42/type42.c	t42_ps_has_glyph_names	V	result v0=None x0=('K', 1) x1=None; no constants row
+ports/fnv-nx/platform/guest/os_guest.c	os_default_root	V	result v0=None x0=('A', ('sec', 154, 0)) x1=None; no constants row
+ports/fnv-nx/platform/guest/os_guest.c	os_exit_process	T2	reference to exit at +0x1c
+ports/fnv-nx/platform/guest/os_guest.c	os_exit_process	T2-noreturn-tail	call to exit ends the function
+ports/fnv-nx/platform/guest/os_guest.c	os_process_id	V	result v0=None x0=('K', 81) x1=None; no constants row
+ports/fnv-nx/platform/guest/os_guest.c	os_thread_exit	T2	reference to fnvnx_thread_exit at +0x24
+ports/fnv-nx/platform/guest/os_guest.c	os_vm_page_size	V	result v0=None x0=('K', 4096) x1=None; no constants row
+ports/fnv-nx/platform/guest/platform_glue.cpp	fnvnx_pad_horizon_source	V	result v0=None x0=('A', ('sec', 39, 0)) x1=None; no constants row
+ports/fnv-nx/platform/input/dinput.cpp	_ZN12_GLOBAL__N_16Device24SendForceFeedbackCommandEm	V	result v0=None x0=('K', 2147500033) x1=None; no constants row
+ports/fnv-nx/platform/input/swkbd.cpp	fnvnx_swkbd_enter	T2	reference to os_exit_process at +0x39c
+ports/fnv-nx/platform/win32/crt_kernel32.cpp	SetHandleCount	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/win32/crt_kernel32.cpp	TerminateProcess	T2	reference to os_exit_process at +0x6c
+ports/fnv-nx/platform/win32/display.cpp	_ZN12_GLOBAL__N_110sm_captionEv	V	result v0=None x0=('K', 26) x1=None; no constants row
+ports/fnv-nx/platform/win32/display.cpp	_ZN12_GLOBAL__N_110sm_frame_xEv	V	result v0=None x0=('K', 4) x1=None; no constants row
+ports/fnv-nx/platform/win32/display.cpp	_ZN12_GLOBAL__N_18sm_cyminEv	V	result v0=None x0=('K', 34) x1=None; no constants row
+ports/fnv-nx/platform/win32/env_const.cpp	FreeResource	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/win32/env_const.cpp	GetCurrentProcess	V	result v0=None x0=('K', 4294967295) x1=None; no constants row
+ports/fnv-nx/platform/win32/env_const.cpp	GetCurrentThread	V	result v0=None x0=('K', 4294967294) x1=None; no constants row
+ports/fnv-nx/platform/win32/env_const.cpp	GetProcessHeap	V	result v0=None x0=('K', 1376256) x1=None; no constants row
+ports/fnv-nx/platform/win32/env_const.cpp	GetUserDefaultLCID	V	result v0=None x0=('K', 1033) x1=None; no constants row
+ports/fnv-nx/platform/win32/env_const.cpp	IsDebuggerPresent	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/win32/env_const.cpp	SteamAPI_Init	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/win32/env_const.cpp	SteamAPI_IsSteamRunning	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/win32/env_const.cpp	SteamApps	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/win32/env_const.cpp	SteamFriends	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/win32/env_const.cpp	SteamUser	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/win32/env_const.cpp	SteamUserStats	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/win32/env_const.cpp	SteamUtils	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/win32/filemap.cpp	CreateFileMappingA	reach-nonconstant	w0 is not a constant at the call of fnvnx_reach_violation at +0x958
+ports/fnv-nx/platform/win32/filemap.cpp	MapViewOfFile	reach-nonconstant	w0 is not a constant at the call of fnvnx_reach_violation at +0x6bc
+ports/fnv-nx/platform/win32/filemap_private.cpp	_Z15fm_backend_namev	V	result v0=None x0=('A', ('sec', 6, 0)) x1=None; no constants row
+ports/fnv-nx/platform/win32/filemap_private.cpp	_Z15fm_view_prepareP10fm_backingyy	V	result v0=None x0=('K', 0) x1=None; no constants row
+ports/fnv-nx/platform/win32/gdifont.cpp	_ZN12_GLOBAL__N_121declared_input_brokenEPKcRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE	T2	reference to os_exit_process at +0xc8
+ports/fnv-nx/platform/win32/gdifont.cpp	_ZNSt7__cxx119to_stringEi	T2	reference to _ZSt9terminatev at +0x344
+ports/fnv-nx/platform/win32/gdifont.cpp	_ZNSt7__cxx119to_stringEi	T2-noreturn-tail	call to _ZSt9terminatev ends the function
+ports/fnv-nx/platform/win32/ini.cpp	_ZN12_GLOBAL__N_14trimERKNSt7__cxx1112basic_stringIcSt11char_traitsIcENS_9w32_allocIcEEEE	T2-noreturn-tail	call to  ends the function
+ports/fnv-nx/platform/win32/ini.cpp	_ZNSt6vectorINSt7__cxx1112basic_stringIcSt11char_traitsIcEN12_GLOBAL__N_19w32_allocIcEEEENS5_IS7_EEE12emplace_backIJS7_EEERS7_DpOT_.isra.0	T2-noreturn-tail	call to __cxa_throw ends the function
+ports/fnv-nx/platform/win32/ini.cpp	_ZNSt6vectorINSt7__cxx1112basic_stringIcSt11char_traitsIcEN12_GLOBAL__N_19w32_allocIcEEEENS5_IS7_EEE9push_backERKS7_	T2-noreturn-tail	call to __cxa_throw ends the function
+ports/fnv-nx/platform/win32/ini.cpp	_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcEN12_GLOBAL__N_19w32_allocIcEEE9_M_createERjj.isra.0	T2-noreturn-tail	call to __cxa_throw ends the function
+ports/fnv-nx/platform/win32/memory.cpp	VirtualProtect	reach-uncertified	fact 1: no reach facts file of this verdict
+ports/fnv-nx/platform/win32/memory.cpp	VirtualProtect	reach-uncertified	fact 2: no reach facts file of this verdict
+ports/fnv-nx/platform/win32/module.cpp	ExitProcess	T2	reference to os_exit_process at +0x68
+ports/fnv-nx/platform/win32/msgqueue.cpp	fnmq_arrow_cursor	V	result v0=None x0=('A', ('sec', 150, 0)) x1=None; no constants row
+ports/fnv-nx/platform/win32/nls.cpp	GetACP	V	result v0=None x0=('K', 1252) x1=None; no constants row
+ports/fnv-nx/platform/win32/nls.cpp	GetOEMCP	V	result v0=None x0=('K', 437) x1=None; no constants row
+ports/fnv-nx/platform/win32/platstat.cpp	fnvnx_declared_machine	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/win32/platstat.cpp	fnvnx_reach_violation	T2	reference to os_exit_process at +0x74
+ports/fnv-nx/platform/win32/platstat.cpp	fnvnx_reach_violation	reach-not-exit	the definition does not end in a call through a pointer on every path
+ports/fnv-nx/platform/win32/registry.cpp	_ZN12_GLOBAL__N_12Rd5bytesEj	T2-noreturn-tail	call to  ends the function
+ports/fnv-nx/platform/win32/resource.cpp	LockResource	V	result v0=None x0=None x1=None; no constants row
+ports/fnv-nx/platform/win32/sysinfo.cpp	GetVersion	V	result v0=None x0=('K', 498139398) x1=None; no constants row
+ports/fnv-nx/platform/win32/thread.cpp	ExitThread	T2	reference to os_thread_exit at +0x34
+ports/fnv-nx/platform/win32/thread.cpp	ExitThread	T2	reference to os_thread_exit at +0x74
+ports/fnv-nx/platform/win32/thread.cpp	SetThreadPriorityBoost	V	result v0=None x0=('K', 1) x1=None; no constants row
+ports/fnv-nx/platform/win32/window.cpp	_ZL10def_minus1P6windowP6HWND__jl	V	result v0=None x0=('K', 4294967295) x1=None; no constants row
+ports/fnv-nx/platform/win32/window.cpp	_ZL14def_dropobjectP6windowP6HWND__jl	V	result v0=None x0=('K', 1162627398) x1=None; no constants row
+ports/fnv-nx/platform/win32/window.cpp	_ZL7def_oneP6windowP6HWND__jl	V	result v0=None x0=('K', 1) x1=None; no constants row
+ports/fnv-nx/platform/win32/window.cpp	_ZL8def_noneP6windowP6HWND__jl	V	result v0=None x0=('K', 0) x1=None; no constants row
