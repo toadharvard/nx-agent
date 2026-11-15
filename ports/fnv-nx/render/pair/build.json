@@ -20,7 +20,8 @@
  },
  "include": [
   "ports/fnv-nx/render/pair/include",
-  "ports/fnv-nx/render/shaders/translator/include"
+  "ports/fnv-nx/render/shaders/translator/include",
+  "ports/fnv-nx/render/gl4shim/include"
  ],
  "units": "all",
  "external": [

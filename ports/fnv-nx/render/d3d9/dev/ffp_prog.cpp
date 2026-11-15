@@ -8,13 +8,9 @@
 //     (256 consecutive D3DMATRIX = the std140 mat4[256] of the program, row-major bytes: ffp_vs_state.h).
 #include "ffp_dev.h"
 #include "nx_gl4shim.h"
+#include "nx_pair.h"
 
-namespace {
-enum nx_gl4shim_prog_id row(uint32_t stage, uint32_t flat) {
-    if (stage == NxStage_Vertex) return flat ? NX_GL4SHIM_PROG_FFP_VS_FLAT : NX_GL4SHIM_PROG_FFP_VS_SMOOTH;
-    return flat ? NX_GL4SHIM_PROG_FFP_PS_FLAT : NX_GL4SHIM_PROG_FFP_PS_SMOOTH;
-}
-}
+static_assert(NxStage_Vertex == 0 && NxStage_Fragment == 1, "nx_pair_ffp_row (render/pair) takes the stage numbers of NxStage");
 
 bool nx_ffp_flat(NxDeviceCore* d, uint32_t* flat) {
     NxDrawDev* dd = nx_draw_dev(d); if (!dd) return false;
@@ -30,7 +26,7 @@ bool nx_ffp_flat(NxDeviceCore* d, uint32_t* flat) {
 uint32_t nx_ffp_make_program(NxFfpDev* f, uint32_t stage, uint32_t flat) {
     if (!nxs_reserve()) return 0;                                      // the scratch of the glue exists once the ring does (glue_stream.h E1)
     NxShaderDesc* d = (NxShaderDesc*)nxs_scratch(sizeof *d); if (!d) return 0;
-    memset(d, 0, sizeof *d); d->stage = stage; d->row = (uint32_t)row(stage, flat);                 // P2
+    memset(d, 0, sizeof *d); d->stage = stage; d->row = (uint32_t)nx_pair_ffp_row(stage, flat);                 // P2
     uint64_t a[1] = {FNVNX_ADDR_(d)}, r = nxd3d_gpu_call(NXGPU_FN_SHADER_CREATE, a, 1);
     return nxs_ok(r) && r != 0 && r < (1u << 16) ? (uint32_t)r : 0;
 }
