@@ -108,9 +108,10 @@ def main(a):
     cnt = {}
     for k in keys:
         if only not in k: continue
-        r, info = check(k)
+        r, info = check(k, int(a[a.index('--timeout') + 1]) if '--timeout' in a else 60000)
         if r == 'no-row' and k in ud: r = 'ud-class'                  # no spec row by rule: the opmap's cleared class (Form.fault(UD) is its own certificate), not a SIMD row
         cnt[r] = cnt.get(r, 0) + 1
+        if '--progress' in a: print('PROGRESS', k, r, flush=True)
         if r in ('FAILED', 'timeout'): print(r, k, info)
     print(cnt)
     return 0 if not cnt.get('FAILED') and not cnt.get('timeout') else 1
