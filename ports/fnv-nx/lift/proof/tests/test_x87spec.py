@@ -117,11 +117,19 @@ class Coverage(unittest.TestCase):
         keys = set()
         with open(lst, encoding='utf-8') as fh: lines = fh.readlines()
         for ln in lines:
+            if 'CLEARED' in ln: continue                                   # a cleared feature (SSE3 fisttp): #UD on the declared CPU, no spec row
             m = re.match(r'\|\s*([0-9a-f]{2})\s*\|\s*(mem|reg|-)\s*\|\s*(?:(\d)|-)/', ln)
             if m: keys.add((m.group(1), m.group(2), int(m.group(3)) if m.group(3) else None))
         have = {(k[0], k[1], k[2]) for k in X.REGISTRY} | {(k[0], k[1], k[2]) for k in X.NO_SDM_PAGE}
         have |= {(k[0], k[1], None) for k in have if k[1] == '-'}
         self.assertGreater(len(keys), 100)
         self.assertEqual(sorted(keys - have), [])
+class Citations(unittest.TestCase):
+    def test_every_citation_has_a_page(self):
+        with open(os.path.join(os.path.dirname(HERE), 'sdm_pages.tsv'), encoding='utf-8') as fh: tab = [l.rstrip('\n').split('\t') for l in fh][1:]
+        with open(os.path.join(os.path.dirname(HERE), 'x87spec.py'), encoding='utf-8') as fh: src = fh.read()
+        want = set('SDM %s:%s' % k for k in re.findall(r'SDM (1|2A|2B|2C|2D|3A):(T\d+-\d+|\d+(?:\.\d+)*|[A-Za-z][A-Za-z0-9]*)', src))
+        self.assertEqual(want, set(r[0] for r in tab))
+        self.assertEqual([r for r in tab if '?' in r[1] + r[2]], [])
 if __name__ == '__main__':
     unittest.main()

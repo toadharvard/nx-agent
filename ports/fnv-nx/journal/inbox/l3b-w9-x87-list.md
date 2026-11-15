@@ -67,7 +67,7 @@ Gap to the queue header (x87 = 2,063 shapes, 392,864 addresses): 8 shapes / 147 
 | da | reg | 3/* | fcmovu | 1 | 1 | - |
 | da | reg | 5/1 | fucompp | 1 | 1123 | - |
 | db | mem | 0/- | fild m32int | 58 | 4363 | - |
-| db | mem | 1/- | fisttp m32int | 4 | 11 | - |
+| db | mem | 1/- | fisttp m32int (CLEARED: SSE3, #UD on the declared CPU) | 4 | 11 | - |
 | db | mem | 2/- | fist m32int | 4 | 4 | - |
 | db | mem | 3/- | fistp m32int | 7 | 530 | - |
 | db | mem | 5/- | fld m80fp | 9 | 133 | - |
@@ -91,7 +91,7 @@ Gap to the queue header (x87 = 2,063 shapes, 392,864 addresses): 8 shapes / 147 
 | dc | reg | 5/* | fsub st(i),st | 4 | 54 | - |
 | dc | reg | 7/* | fdiv st(i),st | 5 | 54 | - |
 | dd | mem | 0/- | fld m64fp | 116 | 6841 | ds, es |
-| dd | mem | 1/- | fisttp m64int | 3 | 5 | - |
+| dd | mem | 1/- | fisttp m64int (CLEARED: SSE3, #UD on the declared CPU) | 3 | 5 | - |
 | dd | mem | 2/- | fst m64fp | 42 | 627 | - |
 | dd | mem | 3/- | fstp m64fp | 96 | 6921 | - |
 | dd | mem | 4/- | frstor | 4 | 5 | - |
@@ -118,7 +118,7 @@ Gap to the queue header (x87 = 2,063 shapes, 392,864 addresses): 8 shapes / 147 
 | de | reg | 6/* | fdivrp st(i),st | 6 | 1567 | - |
 | de | reg | 7/* | fdivp st(i),st | 6 | 559 | - |
 | df | mem | 0/- | fild m16int | 7 | 23 | - |
-| df | mem | 1/- | fisttp m16int | 2 | 11 | - |
+| df | mem | 1/- | fisttp m16int (CLEARED: SSE3, #UD on the declared CPU) | 2 | 11 | - |
 | df | mem | 2/- | fist m16int | 5 | 14 | - |
 | df | mem | 3/- | fistp m16int | 4 | 5 | - |
 | df | mem | 4/- | fbld m80bcd | 2 | 4 | - |
@@ -129,3 +129,7 @@ Gap to the queue header (x87 = 2,063 shapes, 392,864 addresses): 8 shapes / 147 
 | df | reg | 4/0 | fnstsw ax | 1 | 16676 | - |
 | df | reg | 5/* | fucomip st,st(i) | 3 | 3 | - |
 | df | reg | 6/* | fcomip st,st(i) | 1 | 1 | - |
+
+## Update 2026-11-15 (lead and w4)
+- fisttp (DF/DB/DD /1, 3 forms, 26 sites) is SSE3, cleared on the declared CPU: marked CLEARED, not in the spec. Spec universe: 119 instructions (122 minus 3).
+- D9 /3 mod=3 (D9 D8+i, FSTP1) and DF C0+i (FFREEP) have no SDM page; w4's partition puts the sites D9 DF (FalloutNV 0062b5f5) and DF C4 (d3dx9_38 0173892c) in the #UD class (fnv-nx-build l3b-lift/sdm-partition/7b2faae276b2-ca53ec4aa, cleared_sites.tsv). The spec keeps them as NO_SDM_PAGE, with no behaviour.
