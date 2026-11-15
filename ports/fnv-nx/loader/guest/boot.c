@@ -23,7 +23,7 @@
 #include "fnvnx/sdlayout.h"
 #include "fnvnx/import_key.h"
 #include "fnvnx_start.h"
-#include "fnvnx_win32_ext.h"
+#include "fnvnx/loader_iface.h"
 
 #ifndef FNVNX_EXE_PATH
 #define FNVNX_EXE_PATH FNVNX_SD_EXE   /* sdmc:/switch/fnv/FalloutNV.exe, where boot.cpp and the launcher look */
@@ -33,13 +33,11 @@
 #endif
 #define EXIT_FAILED 0xF0000100u   /* fnvnx_loader_main's result when the start sequence did not reach the guest's entry */
 
-/* the platform (L5, platform/include/fnvnx_win32_ext.h): records an image for GetModuleHandle / VirtualQuery */
-void fnvnx_win32_register_image(const char *name, uint32_t base, uint32_t size);
 /* the lifter runtime (L3a, lift/rt): resolves the import rows of the lifted code through the platform's export table before the
  * first guest instruction; 0, or (index of the first unresolved row + 1) */
 int fnvnx_lift_imports_init(void);
 
-/* the declared fonts (platform/include/fnvnx_win32_ext.h): the directory is the path record's FNVNX_SD_FONTS, read from sdlayout.h, not copied */
+/* the declared fonts (hostabi/include/fnvnx/loader_iface.h): the directory is the path record's FNVNX_SD_FONTS, read from sdlayout.h, not copied */
 const struct fnvnx_font_dirs *fnvnx_declared_fonts(void) {
     static const struct fnvnx_font_dirs d = { FNVNX_SD_FONTS };
     return &d;
