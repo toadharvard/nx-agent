@@ -95,5 +95,29 @@ g = [("a.dll", "F", "", "stdcall", "i", "", "F", "sym")]
 check("judge: green case", I.judge(g, {"F": [("GLOBAL", "FUNC")]}, {}, {}, {}) == [("a.dll!F", None)])
 check("judge: UNIQUE counts as global", I.judge(g, {"F": [("UNIQUE", "FUNC")]}, {}, {}, {}) == [("a.dll!F", None)])
 
+# the rows table (stage A): syms=None binds by rule, never reads a symbol table, and its keys equal the keys of every judged derivation
+import iat  # noqa: E402
+ra, ea, _ = B.derive(NAMES, lambda d: SPECS[d], None, TABLE, [])
+check("rows table: no errors", ea == [], ea)
+check("rows table: every symbol row binds sym, data binds data (iob), msvcrt binds lookup by the name table, a name outside it is none",
+      {(r[1]): r[7] for r in ra if r[0] == "kernel32.dll"} == {"Foo": "sym", "Bar": "sym", "Baz": "sym", "Qux": "sym", "Fwd": "sym"}
+      and {r[1]: r[7] for r in ra if r[0] == "msvcrt.dll"}["_iob"] == "data" and {r[1]: r[7] for r in ra if r[0] == "msvcrt.dll"}["notserved"] == "none"
+      and {r[1]: r[7] for r in ra if r[0] == "msvcrt.dll"}["memcpy"] == "lookup", ra)
+rb, _, _ = derive()
+check("rows table: columns dll, name, ordinal, conv, ret, args equal those of the judged derivation (the symbols judge, they do not shape the rows)",
+      [r[:6] for r in ra] == [r[:6] for r in rb], (ra, rb))
+check("rows table: the import keys of the rows table equal the keys of the judged one (a function of dll, name, conv only)",
+      iat.system_keys([(r[0], r[1], r[3], r[2]) for r in ra]) == iat.system_keys([(r[0], r[1], r[3], r[2]) for r in rb]))
+import subprocess  # noqa: E402
+import tempfile  # noqa: E402
+with tempfile.TemporaryDirectory() as td:
+    for dll, text in SPECS.items():
+        open(os.path.join(td, dll + ".spec"), "w").write(text)
+    open(os.path.join(td, "names"), "w").write(NAMES)
+    open(os.path.join(td, "table"), "w").write("memcpy\tfnvnx_memcpy\tfunc\nstrlen\tfnvnx_strlen\tfunc\nmemset\tfnvnx_memset\tfunc\n")
+    r = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(HERE), "bridgegen.py"), "--names", td + "/names", "--specs", td, "--name-table", td + "/table", "--out", td + "/bridge.tsv"],
+                       capture_output=True, text=True)
+    got = open(td + "/bridge.tsv").read() if r.returncode == 0 else ""
+    check("bridgegen: the stage writes the header and the rows of derive(syms=None)", got == "dll\tname\tordinal\tconv\tret\targs\tnative_symbol\tbind\n" + "".join("\t".join(x) + "\n" for x in ra), (r.stderr, got[:200]))
 print("%d failed" % len(FAILED) if FAILED else "all passed")
 sys.exit(1 if FAILED else 0)

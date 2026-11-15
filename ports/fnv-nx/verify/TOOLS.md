@@ -64,7 +64,10 @@ Bridge table of the import guest entries, pure derivation (rows: dll, name, ordi
 A pure function of its arguments (no file, no process): the driver verify/gate_imports.py reads the declared inputs and calls derive().
   names       text of sys_names.tsv (dll TAB name per line) from the private manifest
   spec_text   function dll -> text of the export specification of the reference environment (Wine 9.0 dlls/<dll>/<dll>.spec)
-  syms        the set of symbol names that the product objects define or reference (objects.json defined + undefined)
+  syms        the set of symbol names that the product objects define or reference (objects.json defined + undefined); None = the rows table
+              (stage A): every row binds by rule alone (sym, data, lookup, l3), no symbol table is read and none is judged; the table is then a
+              function of the names, the specs, the name table and the extra rows only, so the import keys (contract/iat.py) are too.  The
+              symbols are judged against the rows by the gate `imports` (stage B: contract/imports.judge over derive(syms=the objects' symbols))
   name_table  {msvcrt name: (symbol, kind)} of the name table the product serves msvcrt names from (read_name_table)
   extra       texts of rows in this 8-column format (other owners' rows: COM interfaces); a row of the same (dll, name) replaces the derived one
 bind  sym    native_symbol is a symbol of the product objects     lookup  msvcrt name served by the name table (native_symbol `-`)
@@ -2614,4 +2617,17 @@ line is `# table_id <id>`, the id of keys.tsv, which must equal the id of entrie
   import:<dll>!<name>    import  the import key of keys.tsv for the D3D9 calls that mark the first frame: dll `!idirect3ddevice9.dll` and
                          `!idirect3dswapchain9.dll`, name `Present`; a missing row is no row.
 A pure function of its inputs; a violated precondition is a stage error.
+```
+
+## contract/bridgegen.py
+
+```text
+bridgegen - the rows table (stage A of the bridge table): bridge.tsv without any symbol table (contract/bridgetable.derive with syms=None).
+
+    bridgegen.py --names sys_names.tsv --specs DIR --name-table msvcrt_names.tsv --out bridge.tsv [--extra rows.tsv ...]
+
+DIR holds the Wine 9.0 `<dll>.spec` files (dlls/<dll>/<dll>.spec copied by name); `--extra` files are 8-column rows of other owners (COM interfaces,
+the d3d9 exports), each replacing the derived row of the same (dll, name).  The output is the 8-column table with the header line iat.py reads;
+a row binds by rule (sym, data, lookup, l3), so the table does not depend on the product's objects and its sha256 is the table_id of the keys.
+A violated precondition (a name missing from its spec, a stub, a forward that cannot be followed, a duplicate in the extra rows) is a stage error.
 ```
