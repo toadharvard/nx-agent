@@ -12,6 +12,8 @@ Updated 2026-11-14 23:30Z (path plan). Older sections below are from 2026-11-12 
 - Goal path: product roots -> lifted packs as roots -> ELF -> boot -> WinMain -> menu -> first frame (GL in the emulator).
 
 
+**2026-11-15 19:10Z (orchestrator).** Trunk a5c8f427; cand2 02d97431d. The none-elf pin is held for one rebuild carrying three fixes: DECLTYPE-SPEC 689328e7f (template specialization in an extern "C" signature), a real msvcmodel defect (empty-base hunk leaves offset_align stale; test_layout 2/169 red, w3 fixing via GCC's layout bookkeeping), DECLTYPE-COMPLETE (one decltype line per symtab symbol, closed reason set; L2 c2af898fd). L5 d8023503f waits for that pin.
+
 **2026-11-15 18:10Z (orchestrator).** Trunk a5c8f427; cand2 02d97431d (exepin memoized). L2: build 2 of the none-elf pin was only a reproducibility check (off the path), dropped; the pin is taken from build 1 and goes to L1 directly; open: tzdb ICE fixed, pi array-bounds (5a8ebd57b). L3a and L4 wait on cand3 for the pack build and the relink.
 
 **2026-11-15 17:10Z (orchestrator).** Trunk a5c8f427, cand2 07a5e14e8 unchanged; the datamodel pin (L2 none-elf) is ~2 builds of ~50 min away, held for one plugin set in the runtime (order/pi onto it, plugin sources in the stamp key). L4 boot milestones exe entry / WinMain / first frame wired (522ef1d53). L3a: no usable pack store yet; the stale pack build was killed, one cold pack build on farm 1 after cand3 (f48745b3f; corrected 18:10Z). L5, L6, L6A wait on cand3/cand4.
