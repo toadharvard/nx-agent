@@ -248,6 +248,7 @@ def finish(a):
         len(images), len(texts), NBUCKET, res['text_bytes'], max(sum(map(len, u)) for u in units.values()), len(forms), nc))
 
 
+LIFTSRC_USE = {'root': 'ports/fnv-nx/lift/liftsrc', 'output': 'PACK'}      # the lifted source of the pack: the stages of lift/liftsrc (units u/NNN.src, entries.tsv), no external
 GEN_USE = {'root': 'ports/fnv-nx/lift/rt', 'output': 'GEN'}      # the generated rt headers (fnvl_cpuref.h, fnvl_faults.h, fnvl_sys.h): included, not copied
 
 
@@ -269,7 +270,7 @@ def inc_stages():
     return out
 
 
-def recipe(ref, commit, tree, dest=None):
+def recipe(dest=None):
     """lift/pack/build.json. The recipe is the one definition of the semantic flags (verify/guest_compiler.json flags.semantics, appended to every guest compile stage), so
     the build.json holds only the per-root classes (PACK_ROOT_FLAGS; recipe.PER_ROOT: -O, -W, -D, -std ...), and the plugins are the full set of recipe.PLUGIN_SOURCES in
     load order with recipe.plugin_args(origin) of the pack's declared lifted origin (fnvnx_ftoi mode lifted); the units are the fixed names."""
@@ -279,18 +280,17 @@ def recipe(ref, commit, tree, dest=None):
     rec = {'format': 'fnvnx-recipe/1', 'profile': 'guest',      # the game's compiler, its runtime and the full plugin set come from the profile (verify/guest_compiler.json, recipe.py): a root names only its own flags
            'flags': {k: keep(v) for k, v in PACK_ROOT_FLAGS.items()},
            'include': ['ports/fnv-nx/lift/pack/inc'], 'units': 'all',
-           'uses': [{'root': 'ports/fnv-nx/bridgefacts', 'output': 'BRIDGE'}, {'root': 'ports/fnv-nx/loader', 'output': 'IMPORTED_TSV'}, {'root': 'ports/fnv-nx/loader', 'output': 'MODULES_TSV'}, GEN_USE],
+           'uses': [{'root': 'ports/fnv-nx/bridgefacts', 'output': 'BRIDGE'}, {'root': 'ports/fnv-nx/loader', 'output': 'IMPORTED_TSV'}, {'root': 'ports/fnv-nx/loader', 'output': 'MODULES_TSV'}, GEN_USE, LIFTSRC_USE],
            'include_uses': [GEN_USE],
-           'generated': [{'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['copy', '/ext/liftpack', '/out'], 'inputs': [], 'outputs': unit_names()},
+           'generated': [{'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['copy', '/uses/ports/fnv-nx/lift/liftsrc/PACK', '/out'], 'inputs': [], 'outputs': unit_names()},
                          {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['imp', '--bridge', '/uses/ports/fnv-nx/bridgefacts/BRIDGE', '--imported', '/uses/ports/fnv-nx/loader/IMPORTED_TSV', '--prelude', 'fnvl_prelude.h', '--out', '/out'],
                           'inputs': [], 'outputs': ['imp.cpp', 'imp_entries.tsv', 'imp_blocked.tsv']},
-                         {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['entries', '/ext/liftpack/entries.tsv', '/stage/imp_entries.tsv', '/uses/ports/fnv-nx/bridgefacts/BRIDGE', '/uses/ports/fnv-nx/loader/MODULES_TSV', '/out/entries.tsv'],
+                         {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['entries', '/uses/ports/fnv-nx/lift/liftsrc/PACK/entries.tsv', '/stage/imp_entries.tsv', '/uses/ports/fnv-nx/bridgefacts/BRIDGE', '/uses/ports/fnv-nx/loader/MODULES_TSV', '/out/entries.tsv'],
                           'inputs': [{'stage': 'ports/fnv-nx/lift/pack:gen:1', 'path': 'imp_entries.tsv'}], 'outputs': ['entries.tsv']},
                          {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['disp', '--rows', '/out/disp_rows.tsv', '/stage/entries.tsv', '/out/disp.cc'],
                           'inputs': [{'stage': 'ports/fnv-nx/lift/pack:gen:2', 'path': 'entries.tsv'}], 'outputs': ['disp.cc', 'disp_rows.tsv']}] + inc_stages(),
            'outputs': {'ENTRIES': 'entries.tsv', 'DISP_ROWS': 'disp_rows.tsv'},
-           'link': None,
-           'external': [{'name': 'liftpack', 'repo': 'fnv-nx-build', 'ref': ref, 'commit': commit, 'tree_sha256': tree, 'at': '/ext/liftpack'}]}
+           'link': None}
     dest = dest or os.path.join(LIFT, 'pack', 'build.json')
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     with open(dest, 'w') as f:
@@ -310,7 +310,7 @@ def module_inputs(a):
 
 def main():
     ap = argparse.ArgumentParser(description='Every input is an explicit argument: no environment variable, no default path.'); A = ap.add_argument
-    A('--shard'); A('--finish', action='store_true'); A('--recipe', nargs=3, metavar=('REF', 'COMMIT', 'TREE_SHA256')); A('--out'); A('--jobs', type=int, default=3)
+    A('--shard'); A('--finish', action='store_true'); A('--recipe', action='store_true', help='write lift/pack/build.json'); A('--out'); A('--jobs', type=int, default=3)
     A('--exe', help='the exe (or, with --module, ignored: the module file is located in --moddirs)'); A('--universe', help='universe.tsv of the image (with --module: derived below --facts-out)')
     A('--module'); A('--modules', help='modules.tsv (the loader module table)'); A('--moddirs', help='DIR[:DIR...] that hold the module files'); A('--facts-out', help='where tools/universe.py --module wrote the module facts')
     A('--emit', default='', choices=['', 'dsl'], help='dsl: integer instructions from the proven DSL forms (fnvlift/f_dsl.py) before the hand handlers')
@@ -320,7 +320,7 @@ def main():
     A('--fpstate', help='directory of the fp-state facts (invariants.tsv)')
     A('--certs', help='the directory of the form certificates (proof/prove.py output; shard mode)'); A('--fpdepth', help='the x87 stack-depth facts (depth.tsv)'); A('--x86sys', help='the declared x86 system record (platform X86SYS output)')
     a = ap.parse_args()
-    if a.recipe: return recipe(*a.recipe)
+    if a.recipe: return recipe()
     need = ['out'] + (['exe', 'modules', 'image'] if a.finish else ['fpstate', 'fpdepth', 'x86sys', 'certs'] + (['modules', 'moddirs', 'facts_out', 'module'] if a.module else ['exe', 'universe']))      # --finish merges texts and reads no lifter input but the universe files
     miss = ['--' + k.replace('_', '-') for k in need if getattr(a, k) is None]
     if miss: ap.error('missing %s' % ' '.join(miss))
