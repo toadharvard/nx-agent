@@ -65,6 +65,7 @@
 #include "dominance.h"
 #include "tree-cfg.h"
 #include "ssa.h"
+#include "gimple-pretty-print.h"
 #include "tree-into-ssa.h"
 #include "varasm.h"
 #include "output.h"
@@ -907,6 +908,70 @@ static void order_single(gimple_stmt_iterator *gsi) {
 }
 
 
+
+// ORD-T (totality). After the rewrite every GIMPLE memory access of the function is either an ordered atomic (a call: it has no memory
+// operand left) or a plain operand with exactly one reason from a closed set; a plain access with no reason is a compile error.
+//   private    a decl of this function that is not a shared local (the escapes fact: no pointer another thread can hold), or an access
+//              order itself generated through a pointer to an unshared side (its loop copies)
+//   readonly   a static TREE_READONLY object that GCC places in a read-only section (readonly_object: decl_readonly_section)
+//   byref      through the pointer parameter of an aggregate passed by invisible reference (AAPCS64: pass_by_reference): the caller's
+//              copy made for this call, the callee's own object
+//   hardreg    an object with a hard register: no memory
+//   notmem     an operand with no location (a lane of a vector value, a part of a register)
+// The operands are exactly those walk_stmt_load_store_addr_ops reports (GCC's own list of a statement's memory operands). The reason of
+// each is printed to GCC's dump of this pass (-fdump-tree-fnvnx_order); the per-function counts go to `.fnvnx.ordt`.
+struct ordt_counts { unsigned long reason[5]; };
+static const char *ordt_name[5] = {"private", "readonly", "byref", "hardreg", "notmem"};
+static std::map<std::string, ordt_counts> ordt_lines;
+
+struct ordt_ctx { function *fun; ordt_counts c; bool gen; };
+
+static bool ordt_visit(gimple *stmt, tree, tree op, void *data) {
+  ordt_ctx *x = (ordt_ctx *)data;
+  int why = -1;
+  tree base = get_base_address(op);
+  if (base && hard_register(base)) why = 3;
+  else if (gimple_code(stmt) == GIMPLE_RETURN && TREE_CODE(op) == RESULT_DECL) why = 4;   // `return <retval>`: the result object is returned in place, no access
+  else if (!is_memory_ref(op) && !(DECL_P(op) && !TREE_STATIC(op) && !DECL_EXTERNAL(op))) why = 4;
+  else if (base && DECL_P(base)) {
+    if (readonly_object(base)) why = 1;
+    else if (local_unshared(base)) why = 0;
+  } else if (base && (TREE_CODE(base) == MEM_REF || TREE_CODE(base) == TARGET_MEM_REF)) {
+    tree p = TREE_OPERAND(base, 0);
+    if (x->gen) why = 0;
+    else if (TREE_CODE(p) == SSA_NAME && SSA_NAME_IS_DEFAULT_DEF(p) && SSA_NAME_VAR(p) && TREE_CODE(SSA_NAME_VAR(p)) == PARM_DECL &&
+             DECL_BY_REFERENCE(SSA_NAME_VAR(p)))
+      why = 2;
+  } else if (base && TREE_CODE(base) == STRING_CST) why = 1;
+  if (why < 0) {
+    error_at(gimple_location(stmt), "%<fnvnx_order%>: ORD-T: a plain memory access with no reason (%s)", get_tree_code_name(TREE_CODE(op)));
+    print_gimple_stmt(stderr, stmt, 0, TDF_VOPS);   // the statement, as GCC prints it, next to the diagnostic
+    return false;
+  }
+  x->c.reason[why]++;
+  if (dump_file) {
+    fprintf(dump_file, "ORDT %s: ", ordt_name[why]);
+    print_gimple_stmt(dump_file, stmt, 0, TDF_VOPS);
+  }
+  return false;
+}
+
+static void ordt_check(function *fun) {
+  ordt_ctx x;
+  memset(&x, 0, sizeof x);
+  x.fun = fun;
+  basic_block bb;
+  FOR_EACH_BB_FN(bb, fun) {
+    for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
+      gimple *st = gsi_stmt(gsi);
+      if (is_gimple_debug(st) || gimple_code(st) == GIMPLE_ASM || gimple_clobber_p(st)) continue;   // a clobber marks the end of a lifetime: no access
+      x.gen = generated_bbs.count(bb) || generated_stmts.count(st);
+      walk_stmt_load_store_addr_ops(st, &x, ordt_visit, ordt_visit, NULL);
+    }
+  }
+  ordt_lines[IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fun->decl))] = x.c;
+}
+
 struct order_pass : gimple_opt_pass {
   order_pass(gcc::context *ctx, const pass_data &d) : gimple_opt_pass(d, ctx) {}
 
@@ -936,6 +1001,7 @@ struct order_pass : gimple_opt_pass {
     FOR_EACH_BB_FN(bb, fun)
       if (!generated_bbs.count(bb))
         for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) order_stmt(&gsi);
+    ordt_check(fun);
     if (!generated_bbs.empty() && current_loops) loops_state_set(LOOPS_NEED_FIXUP);
     // the statements this pass created carry virtual operands that are not yet in SSA form (TODO_update_ssa renames them)
     mark_virtual_operands_for_renaming(fun);
@@ -1173,6 +1239,17 @@ static const pass_data frame_data = {
     RTL_PASS, "fnvnx_frame", OPTGROUP_NONE, TV_NONE, 0, 0, 0, 0, 0,
 };
 
+static void emit_ordt_section() {
+  if (ordt_lines.empty()) return;
+  fprintf(asm_out_file, "\t.pushsection\t.fnvnx.ordt,\"\",%%progbits\n");
+  for (auto &l : ordt_lines) {
+    std::string t = l.first;
+    for (int i = 0; i < 5; i++) t += std::string("\t") + ordt_name[i] + ":" + std::to_string(l.second.reason[i]);
+    fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", t.c_str());
+  }
+  fprintf(asm_out_file, "\t.popsection\n");
+}
+
 static void emit_readonly_section() {
   if (ro_lines.empty()) return;
   fprintf(asm_out_file, "\t.pushsection\t.fnvnx.ro,\"\",%%progbits\n");
@@ -1204,6 +1281,7 @@ static void emit_frame_section() {
 static void finish(void *, void *) {
   emit_frame_section();
   emit_readonly_section();
+  emit_ordt_section();
   if (verbose)
     inform(UNKNOWN_LOCATION, "%<fnvnx_order%>: unit: %lu ldar, %lu stlr; "
            "%lu calls with arguments right to left, %lu left (class-type argument with side effects)",
