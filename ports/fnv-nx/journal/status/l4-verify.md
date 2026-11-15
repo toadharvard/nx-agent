@@ -424,3 +424,6 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - 22:30: w8 merged base3. Checks: boot 0, bootguest 0, icount 0, gl4 2 (render/ from decb62ead still to be taken).
   - icount link red: the loader pp fails (boot.c: fnvnx_win32_ext.h not found, because the loader doesn't use platform INCLUDE), and lift/descs objects_of is red. Owner L3a (base3), told.
   - The root-level closure still pulls loader, bridges and descs into icount until w12's archive-member rule lands.
+- 22:35: w8 took render/ from L6A decb62ead. recipe.check is 0 on boot, bootguest, icount, gl4, gl4shim, nxgpu and d3d9.
+  - render/gl4 builds green: 17 objects, libnxgl4.so sha 7da199c1…d4ba, equal to L6A's. L4 files have 0 references to the old 9-slot nxgpu ABI.
+  - The icount link is still red at the loader include (L3a w8 is fixing it on base3). The cand3 platform gen:12 import red is routed to L1 and L5.
