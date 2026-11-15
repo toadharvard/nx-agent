@@ -1824,3 +1824,11 @@ bottleneck: the cand2 warm verdict on w15.
 bottleneck: the cand2 warm verdict on w15.
 - 21:26 w12 2faf60c4e: objstub nr_tail fix (a tail call into a non-terminator returns, both ISAs). The per-image facts stage is L1's (exefacts/modules, as L2 says) and goes to w27 after the typed dispatch gate: exefacts over the may-load closure, red facts:missing. w12 order: bootrt rt.c, then the compiler stage.
 bottleneck: the cand2 warm verdict on w15.
+- 21:30 URGENT owner order (integ 4363f94e9): the game compiled by about 04:00Z; every generator is a recipe stage; no path outside the key.
+  - Priorities:
+    1. cand2 verdict now, then merge (cut red gates to green roots). w15.
+    2. cand3 minimal on a new branch claude/fnv-l1-contract-cand3: sharding N ≤ 16, cpu_s, and hermetic generator stages (facts/universe/modules/bridges/pack, gamedata external, outputs as trees, chained through uses). w12.
+    3. abspath gate over the stage-graph closure: str-path literals outside the recipe's mount prefixes, env defaults and home paths, by ast. New worker w28, session_01KmtZKTR5tjvvZFgA3EKYuZ, branch claude/fnv-l1-contract-w28.
+  - bootrt, the compiler stage and all other w12L2 items go to cand4. w27: the typed dispatch gate, then per-image facts as a generator stage.
+  - Workers 4/4: w15, w12, w27, w28.
+bottleneck: the cand2 verdict on w15.
