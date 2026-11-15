@@ -51,7 +51,9 @@ def listing(cache):
             elif rel.startswith("store/keys/") and n == "result.json":
                 got["keys"].add(os.path.basename(d))
             elif rel.startswith("objects/") and n == "objects.json":
-                got["json"][os.path.basename(d)] = open(p).read().replace(cache, "<CACHE>")
+                doc = json.loads(open(p).read().replace(cache, "<CACHE>"))
+                doc.pop("stages", None)   # the run/hit counters say who ran a stage, not what was made
+                got["json"][os.path.basename(d)] = doc
         for n in os.listdir(d):
             if ".tmp" in n and os.path.isdir(os.path.join(d, n)):
                 got["tmp"].append(os.path.relpath(os.path.join(d, n), cache))
@@ -81,7 +83,7 @@ def main():
     check("the reference sequential build is green", r.returncode == 0, r.stderr[-300:])
     check("same store objects as one sequential build", a["obj"] == b["obj"], (len(a["obj"]), len(b["obj"])))
     check("same stage results as one sequential build", a["keys"] == b["keys"], (len(a["keys"]), len(b["keys"])))
-    check("same objects.json (cache path normalised)", a["json"] == b["json"] and len(a["json"]) == 1)
+    check("same objects.json (cache path normalised, stage counters left out)", a["json"] == b["json"] and len(a["json"]) == 1)
     check("a second ensure on the published dir builds nothing", subprocess.run([sys.executable, "-I", "-c", code, shared, go], cwd=REPO, capture_output=True, text=True).returncode == 0)
     t0 = time.time()
     subprocess.run([sys.executable, "-I", "-c", code, shared, go], cwd=REPO, capture_output=True, text=True)
