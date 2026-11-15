@@ -1278,7 +1278,7 @@ def unit_flags(rec, roots, spec, driver, kind):
     compile stage and the gates that run the compiler on a unit's preprocessed text (objstub) read it, so they see the same TU."""
     root = split_spec(spec)[0]
     ent = roots.get(root, {})
-    sem = semantics_for(driver, kind, origin=ent.get("cxx_origin")) if ent.get("target") == "guest" else []
+    sem = semantics_for(driver, kind, origin=ent.get("cxx_origin")) if entry_of(roots, spec).get("target") == "guest" else []   # the EFFECTIVE target of root@NAME
     return sem + rec["flags"][kind]
 
 
@@ -1694,7 +1694,7 @@ class Job:
         drop = {e["at"] for n, e in self.ext.items() if n != cc}
         for k in sorted(set(kinds.values())):
             fp = os.path.join(ws, "flags-%s.json" % k)
-            json.dump({"argv": unit_flags(rec, self.roots, self.root, self.hostpath(drv["c" if k == "asm" else k]), k)}, open(fp, "w"))   # semantics first, then the root's own
+            json.dump({"argv": unit_flags(rec, self.roots, self.root + "@" + self.variant if self.variant else self.root, self.hostpath(drv["c" if k == "asm" else k]), k)}, open(fp, "w"))   # semantics first, then the root's own
             builds[k] = unitstage.Build(argparse.Namespace(store=self.store, cold=False, cxx=drv["c" if k == "asm" else k], toolrt=rtp, flags_file=fp,
                                                            src_root=os.path.join(ws, "root") + "@/src", include=self.includes(ws)))
             builds[k].cc_drop = drop | {i["at"] for i in self.use_inputs(ws)}
