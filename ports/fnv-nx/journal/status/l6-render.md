@@ -656,3 +656,7 @@ Paused: w3b, w4, farm; no other work.
     - No separate verdict: w6 merges w1b 819716297/5bc689044 and del2, rebases w6-root onto the current candidate, and sends the four admit entries (d3d9, translator, lib/sha256, nxgpu). L1 folds them into the next candidate.
     - Global numbers at 43c73bc92: 70 objects, 2,367 defined and 696 undefined symbols (the link belongs to the boot-link item).
     - Next on the path: sm_link at 0 failures (w5).
+- 00:54Z w5 sm_link checker: #27 and #28 done. The universe is every subset of the key flags; hex() goes through fnvnx_shader_key_hex.
+    - Scratch on w1b 819716297: 115,776 stage certs, 120,392 link certs, 0 disagreements, 0 red.
+    - The (FLAT<<1)-1 mask is replaced by direct submask iteration of FNVNX_SHADER_KEY_FLAGS. No new constant.
+    - w1b makes "the output depends only on flags & KEY_FLAGS" structural: masked at translate entry. A NONKEY effect on the GLSL counts as a key defect.
