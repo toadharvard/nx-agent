@@ -313,6 +313,19 @@ def main():
     check("lifted root with a tracked C++ unit is red", any("is not an output" in x for x in errs(tracked, lrec)), errs(tracked, lrec))
     nopack = make_repo("nopack", lrec, {"lifted_by": T + "gen/lift.py", "pack": "nope"}, {T + "gen/lift.py": lift, ROOT + "/a.cc": None})
     check("lifted root naming no external is red", any("names no external" in x for x in errs(nopack, lrec)), errs(nopack, lrec))
+    # --- the pack is a root in `uses` (its declared PACK output) instead of an external: the units are still checked against the generated steps of lifted_by
+    PR = T + "src"
+    prod = {"path": PR, "class": "tool", "target": "host", "recipe": PR + "/build.json"}
+    pfiles = {T + "gen/lift.py": lift, ROOT + "/a.cc": None, PR + "/build.json": json.dumps({"format": "fnvnx-recipe/1", "outputs": {"PACK": "pack"}}), PR + "/pack/x.txt": "x\n"}
+    urec = dict(lrec, external=list(REC["external"]), uses=[{"root": PR, "output": "PACK"}])
+    def uerrs(repo, rec):   # the `uses` recipes are read from the toy checkout
+        return recipe.check(rec, ROOT, recipe.tracked(repo), recipe.load_admit(repo), recipe.load_pin(repo), repo=repo)
+    ug = make_repo("usesgood", urec, {"lifted_by": T + "gen/lift.py", "pack": PR}, pfiles, [prod])
+    check("pack = a root in `uses`: a lifted root made by generated steps of lifted_by is valid", uerrs(ug, urec) == [], uerrs(ug, urec))
+    un = make_repo("usesnot", dict(urec, uses=[]), {"lifted_by": T + "gen/lift.py", "pack": PR}, pfiles, [prod])
+    check("pack = a root that is not in `uses`: red", any("neither an external" in x for x in uerrs(un, dict(urec, uses=[]))), uerrs(un, dict(urec, uses=[])))
+    ub = make_repo("usesbad", urec, {"lifted_by": T + "gen/lift.py", "pack": PR}, dict(pfiles, **{ROOT + "/b.cc": "int b;\n"}), [prod])
+    check("pack = a root in `uses`: a unit that no step of lifted_by made is red", any("is not an output" in x for x in uerrs(ub, urec)), uerrs(ub, urec))
     # --- the stage form: the lifted C++ is made by a generated step of the root itself (no pack); exactly one of pack and stage
     st = "gen:%s:0" % ROOT
     srec = dict(lrec, external=list(REC["external"]))   # no pack: the compiler's and runtime's externals only
