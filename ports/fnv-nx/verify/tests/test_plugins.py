@@ -253,7 +253,8 @@ def main():
         return c, cas.ingest(d, os.path.join(BASE, "ingest-store"))
 
     def xrec(c, t):
-        r = mut(external=[{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": c, "tree_sha256": t, "at": "/ext/pack"}])
+        # the root names /ext/pack in its include path: PP names the external (a stage mounts and keys only the externals it names, recipe.named_ext), CC does not
+        r = mut(external=[{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": c, "tree_sha256": t, "at": "/ext/pack"}], include=["/ext/pack"])
         return r
 
     def kinds():
@@ -313,7 +314,7 @@ def main():
                        extra_roots=[{"path": T + "platform", "class": "product", "target": "guest"}], target=tg)
         he = [x for x in errs(hr, hrec) if "include" in x]
         check("lifted root of target %s including platform/include (a guest product root): %s" % (tg, "red, the other target is no home" if want else "no include error"),
-              bool(he) == want and (not want or any("lies in no admitted product root" in x for x in he)), he)
+              bool(he) == want and (not want or any(("lies in no admitted header root and no product root of target %r" % tg) in x for x in he)), he)
     for what, name in (("an index past the steps", "gen:%s:1" % ROOT), ("another root's step", "gen:%s:0" % (ROOT + "x")), ("a free name", "lift")):
         bs = make_repo("stagebad_" + what.replace(" ", "_").replace("'", ""), srec, {"lifted_by": T + "gen/lift.py", "stage": name}, sfiles)
         check("stage naming %s is red" % what, any("is not a generated step" in x for x in errs(bs, srec)), errs(bs, srec))
