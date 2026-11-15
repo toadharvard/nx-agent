@@ -1735,3 +1735,9 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - 19:50 Final pin: L2 a42ad8875, tools noneelf 05082bde6, tree da6a3d1b…, key 9f0d5729908efe09. w15 checks that DECLTYPE-COMPLETE is in it, then runs the pin commit → verdict → merge.
 - 19:54 L5 w9 on the final pin: platform root green (113 objects); abi red 326/449 from the sympair kind 'noemit' (61 items, 50 units). The rule: the reader takes the closed kind set and definitions from the plugin source; w15. The datamodel fix is still to be pushed; w15 sends it to w9 at once.
 - 19:58 decltype completeness moves to cand3 (w12): asm units by language field have no section, plus the plugin-written registry (L2 w3, next pin). At 05082bde, 4024/4640 members are complete. cand2 takes only the ctypes_compat reader (6315e193a); gate_abi:84 is unchanged.
+## 20:00 Workers (owner order: up to 4 per lead)
+- w15 session_01KmtZKRyNHyAGWeTxKmbdfZ: cand2 pin step → verdict → merge. Doing.
+- w12 session_01KmtZKUQGJi3gKcTZcB8sr6: cand3 integrator, plus the recipe and hermeticity items. Doing.
+- w26 session_01KmtZKTeJ8ehtTJioqEQdfM (new): objstub x86-64 analyzer, the lasterror column, the std: index. Doing.
+- w27 session_01KmtZKTZrENKeH1CT5X794x (new): typed dispatch gates, gate_cert reach kind. Doing.
+- bottleneck: cand2 waits for one warm verdict on the final pin (the last cold run took 1316 s against a 300 s budget, 966 s of it selftests from failing files that re-run); cand3 is then bounded by w12's recipe items; workers 4/4.
