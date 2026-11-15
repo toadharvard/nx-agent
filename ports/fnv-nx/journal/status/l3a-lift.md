@@ -637,3 +637,9 @@ Workers are capped at 3. Assignment by plan item:
 - test_defdisp: recipe-built; the duplicate pairs are dropped, and clpod has moved to tools/tests/clpod. Direct compiler calls in both files: 0.
 - test_defdisp is red on one defect: the covariant-return thunk has no pi early record (fnvnx_pi.cc:651, N3). Blocked on L2; the class was sent to the L2 lead. The rest of the test is green: POD matrix 245 cases, 0 mismatches.
 - Census inbox note: journal/inbox/l3a-w8-compilecalls.md.
+
+## 2026-11-15 00:12
+- w8 item 2 done (int3 71adaa530): test_ranges (5 records) and test_lock_only are recipe-built, 0 direct calls. Next (w8): an admitted lift/tools/tests root holding descclass, defdisp, ranges and lock_only, after t16k.
+- pi thunk defect: L2 w1 is fixing it on claude/fnv-l2-source-w1-pithunk (rule: every body that reaches SSA gets its record).
+- L1 accepted 4681c9634's mechanism. Retiring ASM-213/214 is one commit with 3 points (stale text, a static_assert that FNVL_MAX_BASIC < 7 per SDM 8.1.8, the registry retire). Assigned to w6, after its ctlstate step.
+- verify/cpuref.json (host_cpu pin for the `run` stage; microcode null = line absent on the VM host) plus a leaf-1 EAX identity check. Assigned to w6.
