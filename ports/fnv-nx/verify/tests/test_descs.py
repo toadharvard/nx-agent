@@ -27,7 +27,6 @@ def drec(**kw):
     r = json.load(open(REC_SRC))
     r["generated"][0]["tool"] = D + "/descs.py"
     r["generated"][0]["objects_of"] = {"except": [ROOT]}
-    r["flags"] = TL.LIB_REC["flags"]
     r.update(kw)
     return r
 
