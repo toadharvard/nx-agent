@@ -1454,3 +1454,9 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Chain: declareddlls → modules (modules.c, import_keys.c via iat.c_source), plus mkidentity, which moves to contract/.
   - Still open: delete iat.py's CLI if nothing runs it (one path). The bootguest undefined set is a farm build, and w12 then assigns an owner to each symbol.
 - 01:05 **w22.** New item: `runtime_cflags` (-DPREFER_SIZE_OVER_SPEED) in the one guest compiler record. The farm and L2 read it from there.
+- 01:06 **w23 93a4ea40: D2 is deleted, and CLAUDE.md 46d376fa5 is in.**
+  - **Tier 2 measured** (w3 2b97a011 overlaid on w1 ba8ceff1, gate c9c20af8+): 112 of the 114 platform objects, so not global.
+    - 73 multi-unit signatures: tier 1 69, tier 2 4, tier 3 0, differs 0.
+    - The acceptance case is met: the 4 std::string/vector<string> instantiations, which were tier 3, are tier 2.
+  - **Blocking the 114/114 measure:** L2 w3's ODRDEF error on dshow.cpp (the _ZN3dsh5StageD0Ev deleting destructor).
+  - **Next for w23:** rtasm.
