@@ -92,8 +92,9 @@ namespace {
 enum { T_DC = 1, T_BMP, T_BRUSH, T_PEN, T_FONT, T_PAL };
 enum { K_MEM, K_WIN, K_SCR, K_PAINT, K_DISP };   /* K_DISP: CreateDC("DISPLAY"), the desktop surface like K_SCR */
 const uint32_t CLRINV = 0xFFFFFFFFu;
-const uint32_t SYSPAL[20] = { 0x000000, 0x800000, 0x008000, 0x808000, 0x000080, 0x800080, 0x008080, 0xC0C0C0, 0xC0DCC0, 0xA6CAF0,
-                              0xFFFBF0, 0xA0A0A4, 0x808080, 0xFF0000, 0x00FF00, 0xFFFF00, 0x0000FF, 0xFF00FF, 0x00FFFF, 0xFFFFFF };
+#include "wine_colors.gen.inc"   /* k_syscolor, k_pal1, k_pal4, k_pal8: generated from the pinned Wine 9.0 tree (manifest/gen_wine_colors.py) */
+/* the 20 static system colours: wine-9.0 dlls/win32u/palette.c PALETTE_Init, entries[i < 10 ? i : 236 + i] of the default 8 bpp table */
+inline uint32_t syspal(int i) { return k_pal8[i < 10 ? i : 236 + i]; }
 
 struct obj {
     uint8_t type, stock;
@@ -173,7 +174,7 @@ void init_stock()
         if (i == 6) o->color = 0xFFFFFF;
         if (i == 8) o->hollow = 1;
         if (i == 18) o->color = 0xFFFFFF;
-        if (i == 15) { o->nct = 20; memcpy(o->ct, SYSPAL, sizeof SYSPAL); }
+        if (i == 15) { o->nct = 20; for (int k = 0; k < 20; k++) o->ct[k] = syspal(k); }
         g_slots[1 + i].o = o;     /* generation 0: dynamic slots start at 32 with generation >= 1 */
     }
 }
@@ -322,17 +323,12 @@ bool read_fmt(const uint8_t *b, fmt &f, bool need_wh)
     return true;
 }
 /* the default colour table of a depth (ref get_default_color_table): 1 bpp black and white, 4 bpp the 16 VGA colours in
- * the reference's order, 8 bpp the 256-colour table: the 20 system colours at both ends, between them the 8 x 8 x 4
- * (red, green, blue) lattice. 0x00RRGGBB */
+ * the reference's order, 8 bpp the 256-colour table; all three are the reference's own tables, generated. 0x00RRGGBB */
 uint32_t std_pal(int bpp, int i)
 {
-    static const uint32_t vga[16] = { 0, 0x800000, 0x008000, 0x808000, 0x000080, 0x800080, 0x008080, 0x808080, 0xC0C0C0, 0xFF0000,
-                                      0x00FF00, 0xFFFF00, 0x0000FF, 0xFF00FF, 0x00FFFF, 0xFFFFFF };
-    if (bpp == 1) return i ? 0xFFFFFF : 0;
-    if (bpp == 4) return vga[i & 15];
-    if (i < 10) return SYSPAL[i];
-    if (i >= 246) return SYSPAL[10 + i - 246];
-    return (uint32_t)(((i & 7) * 0x20) << 16 | (((i >> 3) & 7) * 0x20) << 8 | (i >> 6) * 0x40);
+    if (bpp == 1) return k_pal1[i & 1];
+    if (bpp == 4) return k_pal4[i & 15];
+    return k_pal8[i & 255];
 }
 uint32_t new_bitmap(int w, int h, int bpp, bool td, bool dib, obj **out, uint8_t *ext = NULL, void *view = NULL)
 {
@@ -488,7 +484,7 @@ extern "C" HBITMAP CreateDIBSection(HDC hd, const void *bmi, UINT usage, void **
     memcpy(o->mask, f.m, sizeof o->mask);
     const uint8_t *tab = b + f.hsz;
     for (int i = 0; i < f.nct; i++) {
-        if (usage == 1) { uint32_t ix = u16(tab + 2 * i); o->ct[i] = ix < 20 ? SYSPAL[ix] : 0; }   /* DIB_PAL_COLORS: the DC's palette entries */
+        if (usage == 1) { uint32_t ix = u16(tab + 2 * i); o->ct[i] = ix < 20 ? syspal((int)ix) : 0; }   /* DIB_PAL_COLORS: the DC's palette entries */
         else if (f.core) o->ct[i] = (uint32_t)tab[3 * i + 2] << 16 | (uint32_t)tab[3 * i + 1] << 8 | tab[3 * i];   /* RGBTRIPLE */
         else o->ct[i] = u32(tab + 4 * i) & 0xFFFFFF;                                                              /* RGBQUAD */
     }
@@ -701,7 +697,7 @@ extern "C" int GetDIBits(HDC hd, HBITMAP hb, UINT start, UINT lines, void *bits,
         for (int i = tabn; i < n; i++) tab[i] = 0;
     } else if (dbpp <= 8) {
         tabn = n;
-        for (int i = 0; i < n; i++) tab[i] = usage == 1 ? (i < 20 ? SYSPAL[i] : 0) : std_pal(dbpp, i);
+        for (int i = 0; i < n; i++) tab[i] = usage == 1 ? (i < 20 ? syspal(i) : 0) : std_pal(dbpp, i);
     }
     /* scan lines: the block of `lines` rows that ends `start` rows above the bottom, clamped to the requested height */
     int copied = 0;
@@ -848,11 +844,6 @@ extern "C" int gdi_dc_clipbox(void *hd, RECT *out)
     *out = b;
     return 1;
 }
-/* the system colours of the reference environment (win32u sysparams system_colors), COLORREF, index COLOR_SCROLLBAR..COLOR_MENUBAR */
-static const uint32_t k_syscolor[31] = {
-    0xC8D0D4, 0xA56E3A, 0x6A240A, 0x808080, 0xC8D0D4, 0xFFFFFF, 0x000000, 0x000000, 0x000000, 0xFFFFFF, 0xC8D0D4, 0xC8D0D4,
-    0x808080, 0x6A240A, 0xFFFFFF, 0xC8D0D4, 0x808080, 0x808080, 0x000000, 0xC8D0D4, 0xFFFFFF, 0x404040, 0xC8D0D4, 0x000000,
-    0xE1FFFF, 0xB5B5B5, 0xC80000, 0xF0CAA6, 0xC0C0C0, 0x6A240A, 0xC8D0D4 };
 /* the system colours of the reference environment, and the shared brush of each (GetSysColor, GetSysColorBrush) */
 extern "C" COLORREF gdi_syscolor(int i) { return i >= 0 && i < 31 ? (COLORREF)k_syscolor[i] : 0; }
 extern "C" HBRUSH gdi_sys_brush(int i)
