@@ -42,22 +42,58 @@ def git(cwd, *args):
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout
 
 
-# the SM language definition is a stage output of the root render/shaders/total: the scratch repository holds the recipe machinery and that root
-# (the generator, its recipe, its decision records), so the gate builds it in the shared cache as it does in the verdict
-SM_MACHINERY = ["verify", "link", "toolchain/msvcmodel", "render/shaders/total", "contract"]   # verify/recipe.py imports link/ (relocs, undefset, ldcheck) and reads the data model record at import
+# The scratch repository holds exactly what the gate reads from the repository, DERIVED by a probe run, not listed: the probe imports the gate and
+# reads the SM language definition (recipe.stage_output of render/shaders/total) in a process whose audit hook records every file it opens; the
+# closure is the tracked files among them (the gate's modules and everything they import, the recipe machinery, the data they read at import, the
+# root's recipe and generator and their inputs). A file the gate reads that is not tracked is not part of the repository's input and stays out.
+PROBE = """import json, os, sys
+repo = os.getcwd()
+seen = set()
+def hook(ev, args):
+    if ev == "open" and args and isinstance(args[0], (str, bytes)):
+        seen.add(os.fsdecode(args[0]))
+sys.addaudithook(hook)
+sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[1])))
+import gate_d3d9total as G
+G.total_output("gen/sm_table.json", sys.argv[2])
+G.total_output("gen/inc/fnvnx_sm_rows.h", sys.argv[2])
+mods = sorted(m.__file__ for m in list(sys.modules.values()) if getattr(m, "__file__", None))
+print(json.dumps({"opened": sorted(seen), "modules": mods}))
+"""
+
+
+def read_closure():
+    probe = os.path.join(os.path.dirname(CACHE), "probe.py")
+    with open(probe, "w") as f:
+        f.write(PROBE)
+    r = subprocess.run([sys.executable, "-I", probe, os.path.join(TOTAL, "gate_d3d9total.py"), CACHE], cwd=REPO, capture_output=True, text=True)
+    if r.returncode:
+        raise SystemExit("probe of the gate's reads failed: " + (r.stderr or r.stdout)[-600:])
+    res = json.loads(r.stdout.splitlines()[-1])
+    tracked = {x for x in git(REPO, "ls-files", "-z").split("\0") if x}
+    rel = lambda p: os.path.relpath(os.path.realpath(p), REPO) if os.path.isabs(p) else p
+    files = {rel(p) for p in res["opened"]} & tracked
+    mods = {rel(p) for p in res["modules"]} & tracked          # every module the gate imports from the repository
+    assert mods <= files, sorted(mods - files)
+    return sorted(files)
+
+
+CLOSURE = read_closure()
 
 
 def scratch(base):
     """a git repository holding the gate and its declared inputs at the same paths"""
-    files = git(REPO, "ls-files", "-z", "--", *[G.PORT_REL + "/" + p for p in G.INPUTS + ["render/total/gate_d3d9total.py"] + SM_MACHINERY]).split("\0")
+    files = set(CLOSURE) | {x for x in git(REPO, "ls-files", "-z", "--", *[G.PORT_REL + "/" + p for p in G.INPUTS + ["render/total/gate_d3d9total.py"]]).split("\0") if x}
     os.makedirs(base)
-    for f in sorted(x for x in files if x):
+    for f in sorted(files):
         d = os.path.join(base, f)
         os.makedirs(os.path.dirname(d), exist_ok=True)
         shutil.copyfile(os.path.join(REPO, f), d)
         shutil.copymode(os.path.join(REPO, f), d)
     git(base, "init", "-q")
     git(base, "add", "-A")
+    for m in (f for f in CLOSURE if f.endswith(".py")):   # every module the gate imports from the repository is a file of the copy
+        assert os.path.isfile(os.path.join(base, m)), m
     return base
 
 
