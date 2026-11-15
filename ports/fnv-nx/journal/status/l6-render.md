@@ -1061,3 +1061,13 @@ Paused: w3b, w4, farm; no other work.
     - Open: cite the windowed coordinate rule; write a present/cursor test unit on the real gl4 files.
 - **w5:** merging L1 w12L2 into w5-fbo; 14 conflicts, resolved mechanically. All roots move to "profile": "guest". w6 then merges w5's head.
 - bottleneck: the w12L2 merge, then the guest and gl4 builds; L1 cand3 for the trunk (a5c8f427). 4 of 4 workers busy.
+- 20:35Z: L1 named claude/fnv-l1-contract-cand2 (head f770c57f6) as the verify/ for the none-elf pin.
+    - w5 merges it into w5-fbo, with verify/, toolchain/ and guest_compiler.json all from that one commit.
+    - Then w6 and w1b merge w5's head.
+    - Reported to L1: cand2 carries hand PLUGIN_INPUTS (fa5235a50), not the 34a4a4b2a closure.
+- 20:35Z: w1b b6b175f1c. The sm table rulings are implemented, with Wine cited only to shader_sm1.c.
+    - 50 opcode rows widen by ruling 2, the union. Illegal rows went from 108 to 467: 368 are wined3d model rejections, 9 are now legal.
+    - The translator static assert (ps:dst) is the rule (A) coverage gate.
+        - Fix: mojoshader's instructions[] masks are generated from the production table, and each widened emit function is checked for its stage.
+        - Current numbers: d3d9total 161/337, red on the translator compile.
+- bottleneck: the cand2 merge, then the guest and gl4 builds; the translator handlers for the widened rows (w1b); L1 cand3 for the trunk (a5c8f427). 4 of 4 workers busy.
