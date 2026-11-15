@@ -932,3 +932,6 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - lift/descs objects_of is red only because the loader is red, and lift/bridges follows from it.
   - Rule: an interface shared by two roots lives in a root below both. Proposed to L5 (owner of the header) and L1 (owner of the loader): the image-record and fnvnx_declared_fonts declarations move into hostabi/include, and the loader uses hostabi INCLUDE.
 - bottleneck: cand3 heads for gen:12 (L5 0608004f5, via w12) and the loader interface (L5/L1). Then the liftsrc cold build (w8). Facts (w7) and fpfacts (w13) go on meanwhile.
+- 21:34 L3b w11 2919259af (facts 6944080, 5,704,065 sites over 8 images): cleared-feature is now derived from the pinned vendor maps (Intel SDM plus AMD APM, tools/amd-apm aa490c484c89). There are 5,205 cleared-feature sites (5,148 3DNow!, 57 SSE3) and 92 reserved-encoding sites (84 sal /6, 7 test /1, 1 D9 DF).
+  - The generated table is fnv-nx-build d7dd09d041a9 cpuid_feature_bits.tsv. w12's queue is unchanged: profile, then the path sweep, then f_cpufeat reads the table, the hand rows are deleted and the diff is reported.
+  - For the parked udcert (w10, after the first frame): udcert.Pe must read through pemod.load / the relocated Image, never raw file bytes. Raw bytes gave U-NODEC 30 / U-NOGATE 112 / U-DEAD 1; the mapped image gives 0 / 92 / 0.
