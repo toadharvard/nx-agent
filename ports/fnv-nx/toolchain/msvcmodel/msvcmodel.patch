@@ -284,3 +284,118 @@
  
    if (!ENUM_FIXED_UNDERLYING_TYPE_P (enumtype))
      {
+--- a/gcc/plugin.def
++++ b/gcc/plugin.def
+@@ -103,6 +103,11 @@
+    ana::plugin_analyzer_init_iface *.  */
+ DEFEVENT (PLUGIN_ANALYZER_INIT)
+ 
++/* fnv-nx msvcmodel (S29): called by the C++ front end at every array new-expression (build_new_1) and every array delete-expression
++   (build_vec_delete_1) it builds, with the front end's own values for that site.  The event data is a struct fnvnx_cookie_fact *
++   (plugin.h).  */
++DEFEVENT (PLUGIN_FNVNX_COOKIE)
++
+ /* When adding a new hard-coded plugin event, don't forget to edit in
+    file plugin.cc the functions register_callback and
+    invoke_plugin_callbacks_full accordingly!  */
+--- a/gcc/plugin.h
++++ b/gcc/plugin.h
+@@ -162,6 +162,25 @@
+ extern void add_new_plugin (const char *);
+ extern void parse_plugin_arg_opt (const char *);
+ extern int invoke_plugin_callbacks_full (int, void *);
++
++/* fnv-nx msvcmodel (S29): the event data of PLUGIN_FNVNX_COOKIE, one per array new-expression (build_new_1, IS_DELETE 0) and per array
++   delete-expression (build_vec_delete_1, IS_DELETE 1), filled from the values the front end itself uses at that site:
++   ELT_TYPE      the element type; ELT_SIZE its size_in_bytes (an INTEGER_CST unless the element type has a variable size);
++   COOKIE_SIZE   the bytes the allocation holds before the array: the INTEGER_CST of targetm.cxx.get_cookie_size, or NULL_TREE for none;
++   COUNT_OFFSET  new: the byte offset from the start of the allocation at which the element count is stored; NULL_TREE for none;
++   SIZE_ARG      delete: the size argument passed to operator delete[] (the same tree handed to build_op_delete_call);
++   NONTRIVIAL_DTOR TYPE_HAS_NONTRIVIAL_DESTRUCTOR (ELT_TYPE) (false for a non-class type).  */
++struct fnvnx_cookie_fact
++{
++  int is_delete;
++  location_t loc;
++  tree elt_type;
++  tree elt_size;
++  tree cookie_size;
++  tree count_offset;
++  tree size_arg;
++  bool nontrivial_dtor;
++};
+ extern void initialize_plugins (void);
+ extern bool plugins_active_p (void);
+ extern void dump_active_plugins (FILE *);
+--- a/gcc/plugin.cc
++++ b/gcc/plugin.cc
+@@ -499,6 +499,7 @@
+       case PLUGIN_NEW_PASS:
+       case PLUGIN_INCLUDE_FILE:
+       case PLUGIN_ANALYZER_INIT:
++      case PLUGIN_FNVNX_COOKIE:
+         {
+           struct callback_info *new_callback;
+           if (!callback)
+@@ -580,6 +581,7 @@
+       case PLUGIN_NEW_PASS:
+       case PLUGIN_INCLUDE_FILE:
+       case PLUGIN_ANALYZER_INIT:
++      case PLUGIN_FNVNX_COOKIE:
+         {
+           /* Iterate over every callback registered with this event and
+              call it.  */
+--- a/gcc/cp/init.cc
++++ b/gcc/cp/init.cc
+@@ -35,6 +35,7 @@
+ #include "asan.h"
+ #include "stor-layout.h"
+ #include "pointer-query.h"
++#include "plugin.h"
+ 
+ static bool begin_init_stmts (tree *, tree *);
+ static tree finish_init_stmts (bool, tree, tree);
+@@ -3502,6 +3503,22 @@
+ 	}
+     }
+ 
++  /* fnv-nx msvcmodel (S29): the cookie of this array new-expression, from the values used below.  */
++  if (array_p)
++    {
++      struct fnvnx_cookie_fact fact;
++      fact.is_delete = 0;
++      fact.loc = input_location;
++      fact.elt_type = elt_type;
++      fact.elt_size = size_in_bytes (elt_type);
++      fact.cookie_size = cookie_size;
++      fact.count_offset = cookie_size
++	? size_binop (MINUS_EXPR, cookie_size, size_in_bytes (sizetype)) : NULL_TREE;
++      fact.size_arg = NULL_TREE;
++      fact.nontrivial_dtor = CLASS_TYPE_P (elt_type) && TYPE_HAS_NONTRIVIAL_DESTRUCTOR (elt_type);
++      invoke_plugin_callbacks (PLUGIN_FNVNX_COOKIE, &fact);
++    }
++
+   alloc_expr = alloc_call;
+   if (cookie_size)
+     alloc_expr = maybe_wrap_new_for_constexpr (alloc_expr, type,
+@@ -4211,6 +4228,21 @@
+       if (POINTER_SIZE == 32)
+ 	virtual_size = size_exp;
+ 
++      /* fnv-nx msvcmodel (S29): the cookie and the size argument of this array delete-expression.  */
++      {
++	struct fnvnx_cookie_fact fact;
++	fact.is_delete = 1;
++	fact.loc = loc;
++	fact.elt_type = type;
++	fact.elt_size = size_exp;
++	fact.cookie_size = TYPE_VEC_NEW_USES_COOKIE (type)
++	  ? targetm.cxx.get_cookie_size (type) : NULL_TREE;
++	fact.count_offset = NULL_TREE;
++	fact.size_arg = virtual_size;
++	fact.nontrivial_dtor = CLASS_TYPE_P (type) && TYPE_HAS_NONTRIVIAL_DESTRUCTOR (type);
++	invoke_plugin_callbacks (PLUGIN_FNVNX_COOKIE, &fact);
++      }
++
+       deallocate_expr = build_op_delete_call (VEC_DELETE_EXPR,
+ 					      base_tbd, virtual_size,
+ 					      use_global_delete & 1,

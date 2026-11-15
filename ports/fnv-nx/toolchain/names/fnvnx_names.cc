@@ -49,6 +49,7 @@
  */
 #include "gcc-plugin.h"
 #include "plugin-version.h"
+#include "plugin.h"   /* struct fnvnx_cookie_fact, the event data of PLUGIN_FNVNX_COOKIE (msvcmodel.patch) */
 #include "cp/cp-tree.h"
 #include "langhooks.h"
 /* ONE .so SERVES BOTH FRONT ENDS: guest C units (cc1) load the same plugins as C++ units (cc1plus). GCC loads a plugin with RTLD_NOW, so
@@ -1379,6 +1380,34 @@ static std::vector<tree> sdd_slot_decls()
   return out;
 }
 
+/* ---- .fnvnx.cookie (DATAMODEL S29) -------------------------------------------------------------------------------------------------------
+ * One row per array new-expression and per array delete-expression the C++ front end builds in this unit, written from the front end's own values at
+ * the site (the msvcmodel.patch event PLUGIN_FNVNX_COOKIE, called from build_new_1 and build_vec_delete_1, with struct fnvnx_cookie_fact in plugin.h):
+ *   <new|delete> TAB <file:line> TAB <elt size> TAB <cookie bytes> TAB <count offset> TAB <size arg> TAB <size arg is the elt size: 0|1> TAB <dtor: 0|1>
+ * `-` is "none" (no cookie, no count, no operator delete[] size); `var` is a size that is not a constant (an element type of variable size).
+ * The section exists, empty when the unit has no array new/delete, in every C++ unit: its absence means "not compiled by this plugin". The gate reads
+ * every row of every product unit against S29's formula. */
+static std::vector<std::string> cookie_rows;
+
+static std::string cookie_val(tree t)
+{
+  if (!t) return "-";
+  if (TREE_CODE(t) == INTEGER_CST && tree_fits_uhwi_p(t)) return std::to_string((unsigned long)tree_to_uhwi(t));
+  return "var";
+}
+
+static void cookie_event(void *gcc_data, void *)
+{
+  const struct fnvnx_cookie_fact *f = (const struct fnvnx_cookie_fact *)gcc_data;
+  expanded_location xl = expand_location(f->loc);
+  std::string file = xl.file ? xl.file : "";
+  for (char &c : file) if (c == '\t' || c == '\n' || c == '"' || c == '\\') c = '_';
+  bool same = f->size_arg && f->elt_size && operand_equal_p(f->size_arg, f->elt_size, 0);
+  cookie_rows.push_back(std::string(f->is_delete ? "delete" : "new") + "\t" + file + ":" + std::to_string(xl.line) + "\t" + cookie_val(f->elt_size) + "\t"
+                        + cookie_val(f->cookie_size) + "\t" + cookie_val(f->count_offset) + "\t" + cookie_val(f->size_arg) + "\t" + (same ? "1" : "0") + "\t"
+                        + (f->nontrivial_dtor ? "1" : "0"));
+}
+
 static void finish_unit(void *, void *)
 {
   symtab_node *n;
@@ -1419,6 +1448,15 @@ static void finish_unit(void *, void *)
       for (auto &r : cr) fprintf(asm_out_file, "\t.ascii\t\"%s\\t%s\\n\"\n", r.first.c_str(), r.second.c_str());
       fprintf(asm_out_file, "\t.popsection\n");
     }
+  }
+  if (is_cxx()) {
+    fprintf(asm_out_file, "\t.pushsection\t.fnvnx.cookie,\"\",%%progbits\n");
+    for (auto &r : cookie_rows) {
+      std::string e;
+      for (char c : r) e += c == '\t' ? "\\t" : std::string(1, c);
+      fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", e.c_str());
+    }
+    fprintf(asm_out_file, "\t.popsection\n");
   }
   fprintf(asm_out_file, "\t.pushsection\t.fnvnx.sympair,\"\",%%progbits\n");
   for (auto &r : rows) {
@@ -1535,6 +1573,7 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
     register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, odr_pre_genericize, NULL);
     register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, name_body, NULL);
     register_callback(info->base_name, PLUGIN_FINISH_PARSE_FUNCTION, odr_finish_function, NULL);
+    register_callback(info->base_name, PLUGIN_FNVNX_COOKIE, cookie_event, NULL);
   }
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);
   return 0;
