@@ -394,6 +394,16 @@ class StoresBcd(unittest.TestCase):
             mag = Fraction(sig) * Fraction(2) ** (e - 16383 - 63)
             self.assertEqual((-1 if sign else 1) * mag, want)                                                                      # exact
             self.assertEqual(val(o.raised), 0)                                                                                  # FBLD raises nothing for decimal digits
+    def test_fbld_invalid_digit_is_free(self):
+        """SDM 2A:FBLD Description: a digit AH..FH gives an undefined result -> the image is the free nd.fbld.img, no precondition"""
+        nd = z3.BitVec('nd.fbld.img', 80)
+        for digits in (0x0000000000000000A0, 0x123456789012345F78, 0xFFFFC000000000000000 & 0xFFFFFFFFFFFFFFFFFFFF):
+            o = X.execute(('df', 'mem', 4, None), state([]), K(digits, 80), None, None)
+            self.assertIn(str(nd), [str(v) for v in o.nd])
+            self.assertTrue(val(o.pre))                                                                                          # no precondition
+            for img in (0, INDEF, 0x3FFF8000000000000000):
+                r = val(z3.substitute(z3.Select(o.s.R, K(7, 3)), (nd, K(img, 80))))
+                self.assertEqual(r, img, hex(digits))                                                                            # any image is admissible
     def test_fist_ranges(self):
         for n, key in ((16, ('df', 'mem', 2, None)), (32, ('db', 'mem', 2, None))):
             hi, lo = 2 ** (n - 1) - 1, -(2 ** (n - 1))
