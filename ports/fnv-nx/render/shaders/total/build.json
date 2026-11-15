@@ -50,8 +50,6 @@
     "/ext/msdocs",
     "--wine",
     "/ext/wine",
-    "--vkd3d",
-    "/ext/wine",
     "--recipe",
     "/in/ports/fnv-nx/render/shaders/total/build.json",
     "--out",

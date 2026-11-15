@@ -1,6 +1,6 @@
 """sm_xref.py - READ the opcode / register tables of two independent implementations as reference facts (nothing is copied):
-wine  dlls/wined3d/shader_sm1.c (opcode min/max versions, dst/src counts), dlls/d3dcompiler_43/asmparser.c (register tables)
-vkd3d libs/vkd3d-shader/d3dbc.c (opcode min/max versions, dst/src counts).  Parsed with regexes at generation time."""
+wine  dlls/wined3d/shader_sm1.c (opcode min/max versions, dst/src counts), dlls/d3dcompiler_43/asmparser.c (register tables).
+The runtime path is d3d9 -> wined3d (own SM1-3 parser): vkd3d-shader is not on it and is not read.  Parsed with regexes at generation time."""
 import os, re
 MODELS = ["vs_1_1", "vs_2_0", "vs_2_x", "vs_3_0", "ps_1_1", "ps_1_2", "ps_1_3", "ps_1_4", "ps_2_0", "ps_2_x", "ps_3_0"]
 def vtuple(m): return (int(m[3]), 1 if m[5] == "x" else int(m[5]))
@@ -10,31 +10,20 @@ def in_range(m, lo, hi):
 def _enum(src, prefix):
     return {m.group(1): int(m.group(2), 16) for m in re.finditer(prefix + r"OP_(\w+)\s*=\s*(0x[0-9a-fA-F]+)", src)}
 
+LINES = {}      # (stage, opnum) -> [line numbers of the entries in dlls/wined3d/shader_sm1.c parsed by wine_ops]
 def wine_ops(root):
+    LINES.clear()
     """-> {(stage, opcode_number): [(ndst, nsrc, lo, hi)]}"""
     s = open(os.path.join(root, "dlls/wined3d/shader_sm1.c")).read()
     en = _enum(s, "WINED3D_SM1_")
     out = {}
     for st, tab in (("vs", "vs_opcode_table"), ("ps", "ps_opcode_table")):
-        body = s[s.index(tab + "[]"):]; body = body[:body.index("};")]
+        base = s.index(tab + "[]"); body = s[base:]; body = body[:body.index("};")]
         for m in re.finditer(r"\{WINED3D_SM1_OP_(\w+),\s*(\d+),\s*(\d+),\s*\w+,\s*(WINED3D_SHADER_VERSION\(\d,\s*\d\)|0),\s*(WINED3D_SHADER_VERSION\(\d,\s*\d\)|-1|0)\s*\}", body):
             def ver(x):
                 x = x.strip(); k = re.match(r"WINED3D_SHADER_VERSION\((\d),\s*(\d)\)", x)
                 return (int(k.group(1)), int(k.group(2))) if k else None
             out.setdefault((st, en[m.group(1)]), []).append((int(m.group(2)), int(m.group(3)) - int(m.group(2)), ver(m.group(4)), ver(m.group(5))))
-    return out, en
-
-LINES = {}      # (stage, opnum) -> [line numbers in d3dbc.c of the entries parsed by vkd3d_ops]
-def vkd3d_ops(root):
-    s = open(os.path.join(root, "libs/vkd3d/libs/vkd3d-shader/d3dbc.c")).read()
-    en = _enum(s, "VKD3D_SM1_")
-    out = {}
-    for st, tab in (("vs", "vs_opcode_table"), ("ps", "ps_opcode_table")):
-        base = s.index("struct vkd3d_sm1_opcode_info %s[]" % tab); body = s[base:]; body = body[:body.index("};")]
-        for m in re.finditer(r"\{VKD3D_SM1_OP_(\w+),\s*(\d+),\s*(\d+),\s*VKD3DSIH_\w+(?:,\s*\{\s*(\d)\s*,\s*(\d)\s*\})?(?:,\s*\{\s*(?:(\d)\s*,\s*(\d)|~0u,\s*~0u)\s*\})?,?\}", body):
-            lo = (int(m.group(4)), int(m.group(5))) if m.group(4) else None
-            hi = (int(m.group(6)), int(m.group(7))) if m.group(6) else None
-            out.setdefault((st, en[m.group(1)]), []).append((int(m.group(2)), int(m.group(3)), lo, hi))
             LINES.setdefault((st, en[m.group(1)]), []).append(s.count("\n", 0, base + m.start()) + 1)
     return out, en
 

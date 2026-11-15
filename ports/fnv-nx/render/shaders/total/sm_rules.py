@@ -1,6 +1,6 @@
 """sm_rules.py - curated SM1-3 language facts that are not machine-extractable from the Microsoft pages: per-opcode operand
 shapes and the register tables, each with its `source`.  Model sets of opcodes come from the MS version tables
-(sm_docs.version_table) and are cross-checked against wine/vkd3d by sm_table.py; nothing here selects by test result."""
+(sm_docs.version_table) and are cross-checked against wine wined3d shader_sm1.c by sm_table.py; nothing here selects by test result."""
 MS = "MS:dx9-graphics-reference-asm-"          # learn.microsoft.com/en-us/windows/win32/direct3dhlsl/
 V1, V2, V2X, V3 = "vs_1_1", "vs_2_0", "vs_2_x", "vs_3_0"
 P11, P12, P13, P14, P20, P2X, P30 = "ps_1_1", "ps_1_2", "ps_1_3", "ps_1_4", "ps_2_0", "ps_2_x", "ps_3_0"
@@ -89,5 +89,5 @@ PAGES = {  # page stem (without ---vs/---ps) -> [(op key, row label in the versi
  **{k: [(k, k)] for k in ("texbem texbeml texdepth texdp3 texdp3tex texm3x2depth texm3x2pad texm3x2tex texm3x3 texm3x3pad texm3x3spec "
                          "texm3x3tex texm3x3vspec texreg2ar texreg2gb texreg2rgb").split()},
 }
-# texldd has no parsable version table: MS ps-instructions-ps-2-x / ps-3-0 index lists it as ps_2_x+ (text), cross-checked by wine/vkd3d
+# texldd has no parsable version table: MS ps-instructions-ps-2-x / ps-3-0 index lists it as ps_2_x+ (text), cross-checked by wine shader_sm1.c
 MANUAL_MODELS = {("ps", "texldd"): ([P2X, P30], MS + "ps-instructions-ps-2-x (instruction list)")}

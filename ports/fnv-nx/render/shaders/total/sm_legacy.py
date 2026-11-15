@@ -1,11 +1,34 @@
 """sm_legacy.py - resolves the 168 legal=? rows of the previous census (render/total/census/sm_ops.tsv) against sm_table facts.
 status: legal | illegal | conflict | unreachable-doc.  Illegal rows carry the documented validator rule (-> sm_illegal.tsv)."""
-import os, sys
+import os, re, sys
 S1 = "MS:dx9-graphics-reference-asm-"
-def ops_source(ops, f):
+EXCL = re.compile(r"\b(only|cannot|can not|must not|not supported|not allowed|not valid)\b", re.I)
+def r3_v_reladdr(docs):
+    """R3 (prose against a table cell, CLAUDE.md 'Where the Microsoft page is narrower'): the prose overrides the cell only when the sentence that
+    states the rule for this model carries an exclusion word (only, cannot, must not, not supported, not allowed, not valid).  Read from the pages:
+    the sentence of vs-3-0 that names the indexable banks, the RelAddr cell of the v# row of the vs_3_0 register table."""
+    base = os.path.join(docs, "desktop-src", "direct3dhlsl") if os.path.isdir(os.path.join(docs, "desktop-src")) else docs
+    pp, pr = "dx9-graphics-reference-asm-vs-3-0", "dx9-graphics-reference-asm-vs-registers-vs-3-0"
+    pl = open(os.path.join(base, pp + ".md"), encoding="utf8").read().split("\n"); rl = open(os.path.join(base, pr + ".md"), encoding="utf8").read().split("\n")
+    pn, sent = next((n + 1, x) for n, l in enumerate(pl) for x in re.split(r"(?<=[.:])\s+", l) if "can be indexed" in x)
+    hdr = next(l for l in rl if l.startswith("| Register"))
+    col = [c.strip() for c in hdr.strip("|").split("|")].index("RelAddr")
+    cn, row = next((n + 1, l) for n, l in enumerate(rl) if re.match(r"\| v\\#", l))
+    cell = [c.strip() for c in row.strip("|").split("|")][col]
+    excl = EXCL.search(sent); a0 = "a0" in cell
+    ok = a0 and not excl
+    cite = "MS:%s.md:%d (sentence '%s': %s) against the cell %s.md:%d RelAddr '%s': %s" % (pp[len("dx9-graphics-reference-asm-"):], pn, sent.strip(),
+            "states an exclusion ('%s'): the prose wins (R3)" % excl.group(1) if excl else "no exclusion word: it excludes nothing, the cell holds (R3)", pr[len("dx9-graphics-reference-asm-"):], cn, cell, "a0 listed" if a0 else "a0 not listed")
+    return ok, cite, cite
+def ops_source(ops, f, st=None):
     import sm_cases
-    return "; ".join(sorted({v["source"] for k, v in ops.items() if sm_cases.asm_op(k.split(":")[1]) == f}))[:300]
-def legacy_rows(cdir, models, ops, single):
+    return "; ".join(sorted({v["source"] for k, v in ops.items() if sm_cases.asm_op(k.split(":")[1]) == f and (st is None or k[:2] == st)}))[:300]
+def wine_reject(ops, f, st, m):
+    """citation of the shader_sm1.c entries of opcode f in stage st whose version bounds exclude model m (read from the parsed table)"""
+    import sm_cases, sm_xref
+    ns = sorted({v["opnum"] for k, v in ops.items() if sm_cases.asm_op(k.split(":")[1]) == f and v.get("opnum") is not None})
+    return "; ".join("wine-9.0:dlls/wined3d/shader_sm1.c:%s_opcode_table:%d" % (st, ln) for n in ns for ln in sm_xref.LINES.get((st, n), []))
+def legacy_rows(cdir, models, ops, single, docs):
     sys.path.insert(0, os.path.abspath(cdir))
     import sm_cases
     sm_cases.bind(ops, single)
@@ -17,7 +40,10 @@ def legacy_rows(cdir, models, ops, single):
         st = m[:2]; base = f.split("@")[0]
         if k == "opcode" and "@" not in f:
             if f in sm_cases.OPS[m]: R(m, k, f, "legal", ops_source(ops, f))
-            else: R(m, k, f, "illegal", "the instruction page version table (%s) does not list %s for %s: an opcode is in a model's instruction set exactly when its page's version table lists the model" % (ops_source(ops, f), f, m), "opcode %s is not in the %s instruction set" % (f, m))
+            else:
+                src = ops_source(ops, f, st)
+                R(m, k, f, "illegal", "MS: %s does not list %s for %s (silence: no %s page lists it for the model); %s rejects it for %s (version bounds of the entry exclude the model; no entry in the table admits it)" % (src or "no %s instruction page for %s" % (st, f), f, m, st, wine_reject(ops, f, st, m) or "wine-9.0:dlls/wined3d/shader_sm1.c:%s_opcode_table (no entry)" % st, m),
+                  "opcode %s is not in the %s instruction set" % (f, m))
         elif f.startswith("call@label-used"): R(m, k, f, "legal", S1 + "vs-instructions-vs-3-0 call (aL rule only when the subroutine reads aL; this one does not)")
         elif f in ("callnz@p0", "if@p0"): R(m, k, f, "legal", ops["%s:%s" % (st, "callnz_pred" if f[0] == "c" else "if_pred")]["source"])
         elif f in ("if@temp-written-in-branch-only", "rep@temp-written-in-loop"):
@@ -45,9 +71,9 @@ def legacy_rows(cdir, models, ops, single):
         elif f == "c[a0.x+n]@aL-loop": R(m, k, f, "legal", S1 + "vs-registers-vs-2-0/2-x/3-0 (c# RelAddr a0/aL)")
         elif f == "o[a0.x]": R(m, k, f, "illegal", S1 + "vs-registers-vs-3-0 (o# RelAddr aL only)", "o# relative addressing only through aL")
         elif f == "v[a0.x]":
-            R(m, k, f, "illegal", S1 + "vs-3-0.md:33 (prose: 'the following register banks can be indexed, using the loop counter register (aL)') against the cell vs-registers-vs-3-0.md:24 ('a0/aL'); the prose wins (R3), as for o#", "v# relative addressing only through aL in vs_3_0")
-            resolved.append(dict(kind="legacy", id="vs_3_0:v[a0.x]", rule="R3", resolution="v[a0.x] is illegal in vs_3_0 (sm_illegal.tsv); v[aL+n] stays legal",
-                                 evidence="MS vs-registers-vs-3-0.md:24 table cell 'a0/aL' vs dx9-graphics-reference-asm-vs-3-0.md:33 prose 'the following register banks can be indexed, using the loop counter register (aL)': prose names the mechanism, the cell lists the column's register types (the same page gives o# 'aL' only, resolved the same way); wine decoder is unconstrained (silence)"))
+            ok, cite, ev = r3_v_reladdr(docs)
+            R(m, k, f, "legal" if ok else "illegal", cite, "" if ok else "v# relative addressing only through aL in vs_3_0")
+            resolved.append(dict(kind="legacy", id="vs_3_0:v[a0.x]", rule="R3", resolution="v[a0.x] is %s in vs_3_0" % ("legal" if ok else "illegal"), evidence=ev))
         elif k == "usage":
             R(m, k, f, "legal", S1 + "dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15")
         else: R(m, k, f, "unreachable-doc", "no rule found for %s/%s" % (k, f))
