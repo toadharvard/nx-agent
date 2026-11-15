@@ -270,3 +270,6 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - Task T done (w7-s 1a64f0375): the game is mounted at FNVNX_SD_DIR only, read from the header, and the "fnvnx/game" alias is deleted. 0 uses left in verify/ and farm/.
   - Tests: test_bootpath 53, bootinputs 75, oracle 83 are green.
   - w6 takes w7-s into w6-r with the next merge.
+- 01:55:
+  - w6-r 96f9c14a3 has w12L2 a7c657f56 (loader stages) and w8 68814726d (lift/*, ftoi inputs) merged.
+  - Relink is red before the link: gen:loader:0, contract/declareddlls.py does not get /out/gen created. Blocked on L1, which I asked to make recipe.py's gen stage create every declared output's parent directory. The undefined set is not measured at this commit.
