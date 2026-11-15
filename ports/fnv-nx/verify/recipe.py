@@ -639,40 +639,58 @@ def link_candidates(roots, root, target, repo):
     return out
 
 
-def definer_closure(defined, undefined, index):
-    """The link members of an image: the definer closure of its undefined symbols. DEFINED, UNDEFINED are the image's own symbol sets; INDEX is
-    {spec: {"defined": [{symbol, bind}], "undefined": [symbol]}} of every candidate root (link_candidates). Start from the own undefined set minus the own
-    definitions; each symbol goes to the one candidate that defines it (a global definition; a weak one only when no candidate has a global one); that root's
-    own undefined symbols join the set; iterate to the fixed point. -> (sorted specs, {symbol: [specs]} of the symbols several candidates define,
-    {symbol: [referencers]} of the symbols no candidate defines). The several-definers rule is onedef's: a name is defined by one root. Nothing is listed by name:
-    the members follow from the symbols."""
-    strong, weak = {}, {}
-    for spec, x in index.items():
-        for d in x["defined"]:
-            (strong if d["bind"] == "global" else weak).setdefault(d["symbol"], set()).add(spec)
-    have, members, why, ambiguous, missing = set(defined), set(), {s: ["(own)"] for s in undefined}, {}, {}
-    todo = sorted(set(undefined) - have)
-    while todo:
-        sym = todo.pop()
-        if sym in have:
-            continue
-        who = sorted(strong.get(sym) or weak.get(sym) or ())
-        if len(who) > 1:
-            ambiguous[sym] = who
-            continue
-        if not who:
-            missing[sym] = sorted(why.get(sym, []))
-            continue
-        spec = who[0]
-        if spec in members:
-            continue
-        members.add(spec)
-        have |= {d["symbol"] for d in index[spec]["defined"]}
-        for u in index[spec]["undefined"]:
-            if u not in have:
-                why.setdefault(u, []).append(spec)
-                todo.append(u)
-    return sorted(members), ambiguous, missing
+def ar_bytes(members):
+    """The bytes of a GNU `ar` archive of MEMBERS [(name, object bytes)], names at most 15 characters: the symbol index ('/') of the members' global and weak
+    definitions (COMMON included), then the members. Deterministic (date, uid, gid 0, mode 644), so an archive is a pure function of its members: the linker reads
+    it as it reads any archive (a member is pulled only for a symbol that is still undefined)."""
+    mem = [(n + "/", d, sorted(undefset.object_symbols(d)[0])) for n, d in members]
+    names = [x for _, _, ds in mem for x in ds]
+    symsz = 4 + 4 * len(names) + sum(len(x) + 1 for x in names)
+    off = 8 + 60 + symsz + (symsz & 1)
+    offs = []
+    for n, d, ds in mem:
+        offs += [off] * len(ds)
+        off += 60 + len(d) + (len(d) & 1)
+    sym = struct.pack(">I", len(names)) + b"".join(struct.pack(">I", o) for o in offs) + b"".join(x.encode() + b"\0" for x in names)
+
+    def hdr(name, size):
+        return ("%-16s%-12s%-6s%-6s%-8s%-10d`\n" % (name, "0", "0", "0", "644", size)).encode()
+    out = [b"!<arch>\n", hdr("/", len(sym)), sym, b"\n" if len(sym) & 1 else b""]
+    for n, d, _ in mem:
+        out += [hdr(n, len(d)), d, b"\n" if len(d) & 1 else b""]
+    return b"".join(out)
+
+
+def empty_object(cls, machine):
+    """An ELF relocatable with no symbols and no code (class CLS 1 or 2, e_machine MACHINE, little-endian): the one input the linker needs to link a script alone."""
+    names = b"\0.shstrtab\0"
+    eh, sh = (52, 40) if cls == 1 else (64, 64)
+    off = eh + len(names)
+    off += -off % 8
+    if cls == 1:
+        head = struct.pack("<16sHHIIIIIHHHHHH", b"\x7fELF" + bytes([1, 1, 1, 0]) + bytes(8), 1, machine, 1, 0, 0, off, 0, eh, 0, 0, sh, 2, 1)
+        sect = struct.pack("<IIIIIIIIII", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0) + struct.pack("<IIIIIIIIII", 1, 3, 0, 0, eh, len(names), 0, 0, 1, 0)
+    else:
+        head = struct.pack("<16sHHIQQQIHHHHHH", b"\x7fELF" + bytes([2, 1, 1, 0]) + bytes(8), 1, machine, 1, 0, 0, off, 0, eh, 0, 0, sh, 2, 1)
+        sect = bytes(64) + struct.pack("<IIQQQQIIQQ", 1, 3, 0, 0, eh, len(names), 0, 0, 1, 0)
+    return head + names + bytes(off - eh - len(names)) + sect
+
+
+SCRIPT_REF = re.compile(r"undefined symbol `([^']+)' referenced in expression")
+
+
+def script_refs_loop(run):
+    """The symbols a link script references that no input defines: the undefined symbols the pinned ld itself reports for the script linked alone (nothing else
+    is input). RUN(defined) -> the stderr lines of that link with every name in DEFINED given a value (`--defsym`), or None when it succeeds. ld stops at the first
+    undefined name of an expression, so the link repeats with each reported name defined until a pass reports no new one: every pass adds a name, so it ends. What
+    the script's own ASSERTs say about the placeholder values, or any other script error, is the real link's to report. -> sorted names."""
+    seen = []
+    while True:
+        err = run(list(seen))
+        new = sorted({m for ln in (err or []) for m in SCRIPT_REF.findall(ln)} - set(seen))
+        if not new:
+            return sorted(seen)
+        seen += new
 
 
 def variant_names(rec, ent=None):
@@ -816,7 +834,8 @@ def guest_errors(rec, spec, roots, pin, prof=None, files=()):
 
 
 LINK_KEYS = {"output", "flags"}
-LINK_OPT = {"script", "kind", "version_script", "roots", "libs", "loader", "tables"}
+LINK_OPT = {"script", "kind", "version_script", "roots", "libs", "loader", "entry", "tables"}
+IMAGE_ENTRY = "__fnvnx_image_entry"   # the symbol the runtime (rt/guest) calls once its start-up is done; the link assigns it the root's declared `link.entry` (--defsym)
 LIBS_KEYS = {"external", "dirs", "names", "startfiles", "endfiles"}
 KINDS = ("pie", "exe", "shared")
 # The emulation names a link may carry, and the target each one is: (ELF class, e_machine). `pie` is the ILP32 guest; `exe` and `shared` are host images.
@@ -1089,6 +1108,12 @@ def link_errors(lk, root, mine, roots, ext_names, repo, files=(), variant="", se
     rent = entry_of(roots, root + "@" + variant if variant else root)
     if rent.get("target") == "guest" and kind == "exe":
         err.append("link.kind exe is a host executable: a guest root links a pie (the ILP32 guest image, emulation aarch64linux32)")
+    ent_sym = lk.get("entry")
+    if rent.get("target") == "guest":   # the entry of a guest image is declared once, by its root: the symbol the runtime calls, which one object of the image defines
+        if not (isinstance(ent_sym, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", ent_sym) and ent_sym != IMAGE_ENTRY):
+            err.append("link.entry: a guest image declares the symbol its runtime calls as its entry (a C identifier other than %s)" % IMAGE_ENTRY)
+    elif "entry" in lk:
+        err.append("link.entry is the entry of a guest image; a %s root has none" % (rent.get("target") or "host"))
     tb = lk.get("tables", [])
     if not (isinstance(tb, list) and all(isinstance(t, dict) and set(t) == {"tool", "args", "unit", "section"} and isinstance(t["tool"], str) and t["tool"] in files and t["tool"].endswith(".py")
                                          and isinstance(t["args"], list) and all(isinstance(a, str) for a in t["args"]) and isinstance(t["section"], str)
@@ -2565,13 +2590,9 @@ class Job:
         self.failed = [{"unit": u, "stage": failed[u]["stage"], "exit": failed[u]["exit"], "stderr": list(failed[u]["stderr"])[-20:]} for u in units if u in failed]
         return res   # in unit order (UNITS is sorted), so the failures are deterministic
 
-    def link(self, ws, groups, output=None, tag=""):
-        """Stage `ld:<root>`: the linker of the compiler with the options the rule fixes (RECIPE.md "Link"). GROUPS: [(label, [(unit, path of
-        the .o file)])]: the root's own objects, then those of every `link.roots` root, in list order. Every object is linked whole;
-        the guest libraries of `link.libs` are searched (-L, -l) as the gcc driver does for the ILP32 PIE multilib. -> (tree of /out,
-        tree of /objs)."""
+    def ld_tool(self):
+        """(path of the pinned ld, its tool runtime) for this root's link stages: the linker of the compiler, with the compiler's external and that of `link.libs` mounted."""
         lk, cc = self.rec["link"], self.drivers()[0]
-        output = output or lk["output"]   # a test is linked to its own output (RECIPE.md, tests); TAG tells the links of one root apart
         pn = subprocess.run([self.hostpath(cc), "-print-prog-name=ld"], capture_output=True, text=True).stdout.strip()
         ld = unitstage.prog(posixpath.normpath(pn))
         # the ld stage reads the compiler's external (the linker is in it, when the compiler is one) and the external of link.libs: it mounts those, no other
@@ -2582,6 +2603,47 @@ class Job:
             rt = self.toolrt([cc], names)[1]
         else:
             rt = self.cached_rt("tool-ld-" + hashlib.sha256(repr((ld, sorted((e["at"], e["tree"]) for n, e in self.ext.items() if n in names))).encode()).hexdigest()[:16], lambda: self.plus(runtime.build_tool(self.store, [ld], []), names))[1]
+        return ld, rt
+
+    def script_refs(self, ws):
+        """The symbols the link script itself references (`ASSERT(DEFINED(x))`, assignments from x) that no input defines: what the pinned ld reports for the script linked
+        alone, never read from the script text (script_refs_loop). One stage per pass, keyed by the script, the flags and the ld. [] for a link without a script."""
+        lk = self.rec["link"]
+        if "script" not in lk:
+            return []
+        ld, rt = self.ld_tool()
+        mine = {f[len(self.root) + 1:] for f in self.files if under(f, self.root)}
+        src = os.path.join(ws, "root", lk["script"]) if link_generated(lk["script"], mine, set(generated_outputs(self.rec))) else os.path.join(self.repo, link_file(lk["script"], self.root, mine, self.roots, self.files))
+        sd = os.path.join(ws, "ldscript")
+        os.makedirs(sd)
+        shutil.copyfile(src, os.path.join(sd, os.path.basename(lk["script"])))
+        with open(os.path.join(sd, "empty.o"), "wb") as f:   # the one input ld needs: an empty object of the link's target (no symbols of its own)
+            f.write(empty_object(*TARGETS[emulation_of(lk["flags"])]))
+        tree = cas.ingest(sd, self.store)
+        kind = lk.get("kind", "pie")
+
+        def run(defined):
+            argv = [ld] + LD_KIND[kind] + lk["flags"] + ["-T", "/ld/" + os.path.basename(lk["script"]), "--unresolved-symbols=report-all", "-o", "/out/x.elf"] + [
+                "--defsym=%s=0" % n for n in defined] + ["/ld/empty.o"]
+            doc = {"format": "fnvnx-stage/1", "stage": "ldscript:%s:%d" % (self.root, len(defined)), "argv": argv, "cwd": "/", "class": "build", "tool": "ld",
+                   "env": dict(unitstage.ENV, PATH=os.path.dirname(ld)), "outputs": ["/out"], "inputs": merge_inputs(rt["inputs"] + [{"at": "/ld", "tree": tree}], [], self.store, ws)}
+            try:
+                self.stage(doc)
+            except BuildRed as e:
+                return e.args[0]["stderr"] or ["(no stderr)"]
+            return None
+        return script_refs_loop(run)
+
+    def link(self, ws, groups, output=None, tag="", offer=None, refs=()):
+        """Stage `ld:<root>`: the linker of the compiler with the options the rule fixes (RECIPE.md "Link"). GROUPS: [(label, [(unit, path of
+        the .o file)])]: the root's own objects, then those of every `link.roots` root, in list order. Every object is linked whole;
+        the guest libraries of `link.libs` are searched (-L, -l) as the gcc driver does for the ILP32 PIE multilib. OFFER: [(label, [(unit, path)])]
+        makes this the selecting link: each offered root is an archive of its objects inside a group, REFS are `-u` references, unresolved symbols are
+        ignored, and `self.offered` = {label: {member: unit}}; the objects ld pulled are then in the map. -> (tree of /out,
+        tree of /objs, the inputs the checks of this link read)."""
+        lk = self.rec["link"]
+        output = output or lk["output"]   # a test is linked to its own output (RECIPE.md, tests); TAG tells the links of one root apart
+        ld, rt = self.ld_tool()
         od, sd = os.path.join(ws, "objs" + tag), os.path.join(ws, "ld" + tag)
         args = []
         for label, objs in groups:
@@ -2591,6 +2653,18 @@ class Job:
                 shutil.copyfile(p, dest)
                 args.append("/objs/%s/%s.o" % (label, u))
         os.makedirs(sd)
+        arch_args, arch_in = [], []
+        if offer is not None:
+            ad = os.path.join(ws, "arch" + tag)
+            os.makedirs(ad)
+            self.offered = {}
+            for label, objs in offer:
+                names = {"%05d.o" % i: u for i, (u, _) in enumerate(objs)}
+                with open(os.path.join(ad, label + ".a"), "wb") as f:
+                    f.write(ar_bytes([("%05d.o" % i, open(p, "rb").read()) for i, (_, p) in enumerate(objs)]))
+                self.offered[label] = names
+                arch_args.append("/arch/%s.a" % label)
+            arch_in = [{"at": "/arch", "tree": cas.ingest(ad, self.store)}]
         kind = lk.get("kind", "pie")
         for k in ("script", "version_script"):
             if k in lk:
@@ -2632,18 +2706,20 @@ class Job:
         self.linkfacts = {"startend": [self.hostpath(x) for x in pre + post if not x.startswith("/syslib/")],
                           "dirs": [self.hostpath(x[2:]) for x in search if x.startswith("-L") and x != "-L/syslib"], "names": [x[2:] for x in libs],
                           "script": open(os.path.join(sd, os.path.basename(lk["script"]))).read() if "script" in lk else "",
-                          "system": list(lb["system"]) if lb and "system" in lb else []}
+                          "system": list(lb["system"]) if lb and "system" in lb else [], "entry": lk.get("entry")}
         vs = ["--version-script=/ld/" + os.path.basename(lk["version_script"])] if "version_script" in lk else []
         sc = ["-T", "/ld/" + os.path.basename(lk["script"])] if "script" in lk else []
-        argv = [ld] + LD_KIND[kind] + dl + lk["flags"] + sc + vs + ["--cref", "--no-demangle", "-o", "/out/" + output, "-Map=/out/" + output + ".map"] + pre + search + [
-            "--whole-archive"] + args + ["--no-whole-archive"] + (["--start-group"] + libs + ["--end-group"] if libs else []) + post
+        ds = ["--defsym=%s=%s" % (IMAGE_ENTRY, lk["entry"])] if "entry" in lk else []
+        sel = (["--unresolved-symbols=ignore-all"] if offer is not None else []) + [x for r in refs for x in ("-u", r)]
+        argv = [ld] + LD_KIND[kind] + dl + lk["flags"] + sc + vs + ds + sel + ["--cref", "--no-demangle", "-o", "/out/" + output, "-Map=/out/" + output + ".map"] + pre + search + [
+            "--whole-archive"] + args + ["--no-whole-archive"] + (["--start-group"] + arch_args + ["--end-group"] if arch_args else []) + (["--start-group"] + libs + ["--end-group"] if libs else []) + post
         objs_tree, ld_tree = cas.ingest(od, self.store), cas.ingest(sd, self.store)
         doc = {"format": "fnvnx-stage/1", "stage": "ld:" + self.root + (":" + tag if tag else ""), "argv": argv, "cwd": "/", "class": "build", "tool": "ld",
                "env": dict(unitstage.ENV, PATH=os.path.dirname(ld)), "outputs": ["/out"],
-               "inputs": merge_inputs(rt["inputs"] + [{"at": "/objs", "tree": objs_tree}, {"at": "/ld", "tree": ld_tree}], sysin, self.store, ws)}
+               "inputs": merge_inputs(rt["inputs"] + [{"at": "/objs", "tree": objs_tree}, {"at": "/ld", "tree": ld_tree}] + arch_in, sysin, self.store, ws)}
         # the reference link (run only to read a failed link's linker-defined names): the same ld, flags, script, inputs, start files and libraries with
         # unresolved symbols ignored; the names its output defines that no input defines are the ones the pinned ld synthesises for this link
-        self.ref_doc = dict(doc, stage="ldref:" + self.root, argv=[ld] + LD_KIND[kind] + dl + lk["flags"] + sc + vs + ["--unresolved-symbols=ignore-all", "-o", "/out/ref.elf"]
+        self.ref_doc = dict(doc, stage="ldref:" + self.root, argv=[ld] + LD_KIND[kind] + dl + lk["flags"] + sc + vs + ds + ["--unresolved-symbols=ignore-all", "-o", "/out/ref.elf"]
                             + pre + search + ["--whole-archive"] + args + ["--no-whole-archive"] + (["--start-group"] + libs + ["--end-group"] if libs else []) + post)
         return self.stage(doc)[1]["outputs"]["/out"], objs_tree, [{"at": "/ld", "tree": ld_tree}] + sysin
 
@@ -2695,7 +2771,7 @@ class Job:
         dyn = set(loader_defs or ())
         for p in f["system"]:
             dyn |= {n for n, _, _, shndx, _ in ldcheck_syms(rd(os.path.realpath(p)), 11) if shndx != 0}
-        ld_defs = undefset.script_defined(f["script"]) | self.ld_synthesised(rt, arch)
+        ld_defs = undefset.script_defined(f["script"]) | self.ld_synthesised(rt, arch) | ({IMAGE_ENTRY} if f.get("entry") else set())
         u = undefset.closure(prod, rt, arch, dyn, ld_defs)
         return [{"symbol": k, "referencers": v} for k, v in u.items()]
 
@@ -2841,6 +2917,7 @@ class Job:
                "argv": [py["python"], "-s", "-B", "/tool/ldcheck.py", "--elf", "/linked/" + name, "--objs", "/objs", "--out", "/out", "--name", name, "--kind", lk.get("kind", "pie")]
                + (["--version-script", "/ld/" + os.path.basename(lk["version_script"])] if "version_script" in lk else [])
                + (["--script", "/ld/" + os.path.basename(lk["script"])] if "script" in lk else [])
+               + (["--entry", lk["entry"]] if "entry" in lk else [])
                + ["--lib=/syslib/" + os.path.basename(p) for p in lk.get("libs", {}).get("system", [])]
                + (["--loader-defs", "/loader/defs.txt"] if loader_defs is not None else []),
                "env": env, "inputs": [], "outputs": ["/out"]}
@@ -3299,20 +3376,38 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=N
                       f = r["failure"]
                       raise BuildRed({"stage": "ld:" + root, "exit": f["exit"], "stderr": ["input root %s is red: stage %s" % (d, f["stage"])] + f["stderr"][-18:]})
                   built_in[d] = r
-              members, ambiguous, _missing = definer_closure({x["symbol"] for x in res["defined"]}, und, {d: {"defined": r["defined"], "undefined": r["undefined"]} for d, r in built_in.items()})
-              if ambiguous:     # a name defined by several admitted roots: onedef's rule, found here at the closure
-                  raise BuildRed({"stage": "ld:" + root, "exit": None, "stderr": ["%s is defined by several admitted roots (%s): one definition per name" % (sym, ", ".join(w)) for sym, w in sorted(ambiguous.items())][:20]})
-              for n, d in enumerate(members):
+              # The members of the image are chosen by the pinned ld: every candidate root is offered as an archive of its objects, so a root contributes exactly
+              # the objects that define a symbol still undefined, transitively (archive semantics). The seed is the own objects' undefined symbols, the symbols the link
+              # script references (`-u`, from the ld itself) and the declared entry. The set is ld's own map member list.
+              cands = list(built_in)
+              offered = [("%02d-%s" % (n + 1, d.replace("/", "__")), [(o["unit"], o["object"]) for o in built_in[d]["objects"]]) for n, d in enumerate(cands)]
+              refs = sorted(set(j.script_refs(ws)) | ({lk["entry"]} if "entry" in lk else set()))
+
+              def select(own):      # {label: {unit}} the objects ld pulls from the offered archives
+                  out_tree = j.link(ws, own, "select.elf", "select", offer=offered, refs=refs)[0]
+                  text = open(cas._obj(store, cas.manifest(out_tree, store)["entries"]["select.elf.map"]), errors="replace").read()
+                  chosen = {}
+                  for ar, mem in map_members(text):
+                      m = re.fullmatch(r"/arch/(.+)\.a", ar)
+                      if m and m.group(1) in j.offered:
+                          chosen.setdefault(m.group(1), set()).add(j.offered[m.group(1)][mem])
+                  return chosen
+              members = select(groups)
+              for label, d in zip((o[0] for o in offered), cands):
+                  if label not in members:
+                      continue
                   r = built_in[d]
                   kept = []     # the input root's objects stay beside this root's result (its own build directory is scratch)
                   for o in r["objects"]:
+                      if o["unit"] not in members[label]:
+                          continue
                       dest = os.path.join(out, "link_roots", d.replace("/", "__"), o["unit"] + ".o")
                       os.makedirs(os.path.dirname(dest), exist_ok=True)
                       shutil.copyfile(o["object"], dest)
                       kept.append({"unit": o["unit"], "object": os.path.abspath(dest), "sha256": o["sha256"]})
                   res["link_roots"].append({"root": d, "sha256": objects_digest(r), "objects": kept})
-                  groups.append(("%02d-%s" % (n + 1, d.replace("/", "__")), [(o["unit"], o["object"]) for o in kept]))
-                  defs[groups[-1][0]] = r["defined"]
+                  groups.append((label, [(o["unit"], o["object"]) for o in kept]))
+                  defs[label] = [x for x in r["defined"] if x["object"] in members[label]]
               for ti, t in enumerate(lk.get("tables", [])):    # link-stage tables: the tool runs over exactly the objects of this link, its source is one more unit of the image
                   j.table_source(ws, groups, t, ti)
                   tobj = j.compile(ws, [t["unit"]]).get(t["unit"])
@@ -3325,12 +3420,12 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=N
                   shutil.copyfile(cas._obj(store, ent_), dest)
                   if t["section"] in section_names(dest):     # the fixed point: the table's own object holds no entry of the fact it is made from, so one pass is sound
                       raise BuildRed({"stage": "table:%s:%d" % (root, ti), "exit": None, "stderr": ["the table object %s holds the fact section %s: its own entries would be missing from itself" % (t["unit"], t["section"])]})
-                  d_, x_ = symbols(dest, t["unit"])
+                  d_ = symbols(dest, t["unit"])[0]
                   res["defined"] = sorted(res["defined"] + d_, key=lambda d: (d["symbol"], d["object"]))
-                  und |= x_
-                  again, amb2, _m2 = definer_closure({x["symbol"] for x in res["defined"]}, und, {d: {"defined": r["defined"], "undefined": r["undefined"]} for d, r in built_in.items()})
-                  if again != members or amb2:      # the table's own references pull in a root the table was not made over: its tool must see every object of the link
-                      raise BuildRed({"stage": "table:%s:%d" % (root, ti), "exit": None, "stderr": ["the table object %s needs the roots %s, the link it was made over has %s" % (t["unit"], sorted(set(again) ^ set(members)), members)]})
+                  again = select([(groups[0][0], groups[0][1] + [(t["unit"], os.path.abspath(dest))])])    # the own objects with the table's, the archives offered anew
+                  if again != members:      # the table's own references pull in objects the table was not made over: its tool must see every object of the link
+                      raise BuildRed({"stage": "table:%s:%d" % (root, ti), "exit": None, "stderr": ["the table object %s changes the objects ld pulls: %s differ from the %s the table was made over" % (
+                          t["unit"], sorted(k for k in set(again) | set(members) if again.get(k) != members.get(k)), sorted(members))]})
                   row = {"unit": t["unit"], "object": os.path.abspath(dest), "sha256": ent_["h"], "os_layer": False}
                   res["objects"].append(row)
                   units.append(t["unit"])

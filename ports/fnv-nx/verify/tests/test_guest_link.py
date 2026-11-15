@@ -33,7 +33,9 @@ for p, tg, cl in ((EXE, "guest", "product"), (TST, "guest", "test"), (HOST, "hos
 RT = dict(pin["external"])
 
 
-def rec(output, **lk):
+def rec(output, entry="fnvnx_image_main", **lk):
+    if entry:
+        lk["entry"] = entry   # a guest image declares its entry (a host root, and a test of the missing entry, pass entry=None)
     return {"format": recipe.FORMAT, "compiler": {}, "flags": {}, "include": [], "units": "all", "external": [RT],
             "link": dict({"output": output, "flags": ["-m", "aarch64linux32"]}, **lk)}
 
@@ -46,13 +48,18 @@ check("the profile is valid", recipe.guest_link_errors(prof, pin, files, roots) 
 check("the profile holds the script only: no stored libraries", set(prof) == {"script"}, prof)
 check("a guest exe root with no script and no libs has no link error", link_errs(rec("a.elf"), EXE) == [], link_errs(rec("a.elf"), EXE))
 check("a guest test root likewise", link_errs(rec("t.elf"), TST) == [], link_errs(rec("t.elf"), TST))
+for nm, root_, ent in (("without entry", EXE, None), ("with a non-identifier entry", TST, "a-b"), ("with the runtime's own alias as entry", TST, recipe.IMAGE_ENTRY)):
+    e = link_errs(rec("t.elf", entry=ent), root_)
+    check("a guest image %s is red" % nm, any("link.entry" in x for x in e), e)
+e = link_errs(rec("h.elf", kind="exe", flags=["-m", "aarch64linux"], entry="main"), HOST)
+check("a host root that declares entry is red", any("link.entry is the entry of a guest image" in x for x in e), e)
 e = link_errs(rec("a.elf", script="link.ld"), EXE)
 check("a guest root that declares script is red", any("link.script is declared" in x for x in e), e)
 e = link_errs(rec("a.elf", libs={"names": []}), TST)
 check("a guest root that declares libs is red", any("link.libs is declared" in x for x in e), e)
-e = link_errs(rec("h.elf", kind="exe", flags=["-m", "aarch64linux"]), HOST)
+e = link_errs(rec("h.elf", entry=None, kind="exe", flags=["-m", "aarch64linux"]), HOST)
 check("a host root is unaffected (no profile text in its errors, script still required for pie)", not any("guest.json" in x for x in e), e)
-check("a host pie root without script is still red", any("link must be" in x for x in link_errs(rec("h.elf"), HOST)))
+check("a host pie root without script is still red", any("link must be" in x for x in link_errs(rec("h.elf", entry=None), HOST)))
 a, t, h = (recipe.with_guest_link(rec(o), p, roots, REPO) for o, p in (("a.elf", EXE), ("t.elf", TST), ("h.elf", HOST)))
 ka = {k: v for k, v in a["link"].items() if k != "output"}
 kt = {k: v for k, v in t["link"].items() if k != "output"}
