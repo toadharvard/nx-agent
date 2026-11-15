@@ -512,3 +512,7 @@ After the first frame:
   - The farm holds the rebuild until w2 decides whether S29 needs a plugin change, so that one rebuild carries both.
 - 2026-11-15 20:20Z: L1 reported a build blocker: duplicate NULLPTR_TYPE/VECTOR_TYPE cases in fnvnx_layout.cc on L6 w5-fbo ff208d525. The cause is L6's stale merge of an intermediate plugin copy (fa0f48e4f). The L2 head has each case once, in decltype_spell.inc. Fix sent to L6: take toolchain/ and guest_compiler.json whole from plugins a42ad8875 (= the pin 05082bde inputs). Class rule (L1, cand3): toolchain/ on a root branch is byte-equal to the plugins commit of its pin.
 - 2026-11-15 20:25Z: L1 needs one more pin for cand2. The cand2 stamp with 83822426d (sympair_kinds) is fc2cda076bb67b67, which does not match the pin. The farm is building it now from plugins 41beb64ff, which has 83822426d and DECLTYPE-PLUGINSYM, and the MANIFEST gains toolchain_tree_sha256 for cand3's pin-by-reference gate. After that, plugin changes are frozen for cand2. S29 and any writer-count change wait on branches for the cand3 pin, unless S29 can be checked without a plugin change. PINSPLIT is paused for this build.
+- 2026-11-15 20:28Z: test_plugins 73/73 on the pin (w2, test-only fix b9f6b3a69). Both expectations were stale.
+  - (1) The toy root named no external, so under L1's named_ext rule no stage mounts it, which is correct. The root now names /ext/pack in PP.
+  - (2) The admit message wording changed to "no admitted header root and no product root of target"; the test is parameterised on the target.
+  Nothing for L1.
