@@ -282,14 +282,6 @@
    "recipe": "ports/fnv-nx/render/gl4/build.json"
   },
   {
-   "path": "ports/fnv-nx/shim/include",
-   "class": "header"
-  },
-  {
-   "path": "ports/fnv-nx/hostabi/include",
-   "class": "header"
-  },
-  {
    "path": "ports/fnv-nx/tests/bootguest",
    "class": "test",
    "target": "guest",

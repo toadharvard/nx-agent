@@ -36,5 +36,11 @@
    "-m",
    "aarch64linux32"
   ]
- }
+ },
+ "uses": [
+  {
+   "root": "ports/fnv-nx/hostabi",
+   "output": "INCLUDE"
+  }
+ ]
 }
