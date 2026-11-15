@@ -1169,3 +1169,14 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Ruled: land the flag + PD-STACK-REUSE. The bound numbers are not proof.
 - Class without a gate, reported to the orchestrator: native stack depth per thread (4954 unbounded functions; dwStackSize call sites unmeasured). Proposed after the first frame: owner L1, facts from L3a (argflow, indirect targets) and L5 (stack placement).
 - cpuref.json: filled by L3a's worker. microcode null = line absent, required absent, never a wildcard.
+
+### 2026-11-15 00:50 — w6 2f937bc0d review; terminator mixed paths; long double
+- w6 2f937bc0d: the oracle entry, the TOOLS.md ref forms, the PT_INTERP-in-declared-deb rule and the cpuref comparator are accepted. Corrections asked:
+  - the PENDING checks FAIL naming their blocker (w12h item 1), never pass;
+  - cpuref.json holds L3a's reference values (microcode null), not this host's;
+  - the usr-merge aliases are derived from a declared deb's symlinks (base-files), not a hand list.
+- Terminator rule (L5, forwarded to w20):
+  - T2 applies only when every path ends in a real terminator.
+  - In a mixed body, the terminator path is real, and the returning paths are judged by the constant-error rules: a cited declared-machine row, else image_unreachable, else red.
+  - TerminateProcess non-self FALSE/ERROR_INVALID_HANDLE gets a declared-machine row (one process).
+- Orchestrator: msvcmodel long double is 128-bit under ILP32 and should be binary64 (VC++2008); the patch sets LONG_DOUBLE_TYPE_SIZE 64. The pin bump is a separate small commit after the L2 farm; cand1 continues on the current pin.
