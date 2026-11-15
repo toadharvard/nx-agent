@@ -900,3 +900,8 @@ Paused: w3b, w4, farm; no other work.
 - 15:24Z L6A: the third GLSL source is NXGPU_FN_SHADER_CREATE. Its one caller is d3d9/dev/ffp_prog.cpp:42 (the ffp_glsl.gen.h blobs).
     - The sm_link universe is the gamedata set ∪ nx_gl4shim_progs (5) ∪ the FFP programs (vs v, ps v), v ∈ {smooth, flat}.
     - w5 (doing): one re-run on gl4shim 8e94c389a that covers all three. It closes w5's FFP item.
+- 15:26Z L6A decision, accepted:
+    - SHADER_CREATE with caller text is deleted from the nxgpu ABI and becomes PROGRAM_CREATE(row id).
+    - The FFP GLSL generator moves to render/gl4shim as rows FFP_SMOOTH and FFP_FLAT. ffp_glsl.gen.h is deleted.
+    - L6A w6 adapts d3d9/dev/ffp_prog.cpp in the same commit; I review it.
+    - Then: the sm_link universe = the gamedata set ∪ the 7 gl4shim rows. w5 runs once on that head; meanwhile it clears its duplicate admit rows and the old render/d3d9/spec/.
