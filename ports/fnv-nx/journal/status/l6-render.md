@@ -589,3 +589,7 @@ Paused: w3b, w4, farm; no other work.
     - The L6 pass is one bounded inventory by w1b: hand-written sets, second copies and second paths over L6's roots, each with its pinned source, its replacement and on-path/after (doing).
     - Pure deletions of unread second copies/paths go in the reporting commit.
     - The order of the path conversions is decided here.
+- 00:43Z sm_link checker (w5).
+    - It calls the product's fnvnx_dk_vs_needs_complete (fnvnx_dk_layout.h); the copy of the rule is deleted.
+    - Scratch rerun: 0 red, 4m46s.
+    - Next: nx_pair_variant (w6 1a02d0de) once render/d3d9 builds (on w16c1).
