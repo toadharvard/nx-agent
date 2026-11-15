@@ -195,6 +195,26 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   recipe is a whole recipe with no variants of its own; its name may not also be a variant of the base recipe. Header home: an include into a
   product root is accepted for the including root's target only if that root has a recipe for it (its own, or a per-target one).
 
+### ELF facts of a linked output (the link record)
+A green link record carries the facts of the linked ELF, written by the link itself with the pinned binutils of `env.json`; every consumer reads the record and none runs
+`readelf`, `nm` or `objdump` on a linked output. The record is `elffacts.json` ("fnvnx-elffacts/1", `objects.json` key `elf_facts`):
+- `sections`: `{index, name, type, address, size, flags}` of every section of the final ELF (`flags` as readelf's letters), from the stage `ldfacts:<root>`: the
+  pinned `readelf -W -S -s` (the one beside the linker the compiler names; it must be a file of a package env.json pins, else the stage is red) run on the final ELF
+  (after ldcheck). The stage's stdout is cached with it, so a link that hits the cache runs nothing.
+- `symbols`: the DEFINED symbols of `.symtab`: `{name, value, size, type, bind, section}` (`section` = the Ndx column: an index, ABS or COM).
+- `references`: for every product object of the link (key `<group>:<unit>`, the objects of the root and of its `link.roots`) the list `{symbol, definer}` of every
+  undefined reference it makes that the link resolved: `definer` is the input that defines it, named as ld names it (a product object `/objs/<group>/<unit>.o`, a
+  start file, an archive member `ARCHIVE(MEMBER)` with the archive's path, a system library), or `<linker>` for a name that the linker defines itself. A weak
+  undefined reference nothing defines is not resolved and has no entry.
+  Source: ld's own cross reference table (`ld --cref --no-demangle`, in the map the link stage writes; ld manual, Options, `--cref`: for each symbol, "If the symbol
+  is defined, the first file listed is the location of the definition"; the files that follow reference it). ld records a definition only for a symbol an input
+  defines, so the first file is the definer iff ITS OWN symbol table defines the name (the object's or the archive member's, read by `undefset.object_symbols`);
+  otherwise the name is the linker's own (or weak undefined: not defined in the output). No text of ld's diagnostics is read.
+Totality: a row of readelf's tables that does not fit the layout of `readelf.c`, a count that disagrees with the table's header line, or a file in ld's table that
+is no input of the link makes `ldfacts:<root>` red; nothing is skipped. The layouts are those of binutils 2.42 and are pinned by `tests/test_elffacts.py`.
+The readelf readers of linked outputs that are to take their facts from this record: see the list in the lead's report (icount.py, gate_tlsmodel.py relocations of
+the linked ELF, contract/pcrel_abs.py).
+
 ## Run stages (`run`)
 
 `"run": [{"name", "artifact", "args", "inputs", "debs", "outputs"}]` executes a declared artifact in the sandbox, after the generators.

@@ -35,6 +35,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
+import elffacts  # noqa: E402
 import gate_admit  # noqa: E402
 import envcheck  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "link"))
@@ -1816,7 +1817,7 @@ class Job:
                           "system": list(lb["system"]) if lb and "system" in lb else []}
         vs = ["--version-script=/ld/" + os.path.basename(lk["version_script"])] if "version_script" in lk else []
         sc = ["-T", "/ld/" + os.path.basename(lk["script"])] if "script" in lk else []
-        argv = [ld] + LD_KIND[kind] + dl + lk["flags"] + sc + vs + ["-o", "/out/" + lk["output"], "-Map=/out/" + lk["output"] + ".map"] + pre + search + [
+        argv = [ld] + LD_KIND[kind] + dl + lk["flags"] + sc + vs + ["--cref", "--no-demangle", "-o", "/out/" + lk["output"], "-Map=/out/" + lk["output"] + ".map"] + pre + search + [
             "--whole-archive"] + args + ["--no-whole-archive"] + (["--start-group"] + libs + ["--end-group"] if libs else []) + post
         objs_tree, ld_tree = cas.ingest(od, self.store), cas.ingest(sd, self.store)
         doc = {"format": "fnvnx-stage/1", "stage": "ld:" + self.root, "argv": argv, "cwd": "/", "class": "build", "tool": "ld",
@@ -1878,6 +1879,52 @@ class Job:
         ld_defs = undefset.script_defined(f["script"]) | self.ld_synthesised(rt, arch)
         u = undefset.closure(prod, rt, arch, dyn, ld_defs)
         return [{"symbol": k, "referencers": v} for k, v in u.items()]
+
+    def elf_facts(self, ws, fin, elf_tree, groups):
+        """The ELF facts of the linked output (elffacts.py, RECIPE.md "ELF facts of a linked output"): stage `ldfacts:<root>` runs the PINNED readelf of
+        env.json (the one beside the linker the compiler names, `-W -S -s`) on the final ELF, and its stdout is cached with the stage; the definer of
+        every resolved undefined reference of a product object comes from ld's own cross reference table (`--cref`, in the map of the link stage).
+        -> the record (elffacts.record). BuildRed(stage ldfacts:<root>) if the pinned readelf is not a file of a pinned package, or a layout does not fit."""
+        lk, stage = self.rec["link"], "ldfacts:" + self.root
+        name = lk["output"]
+        pn = subprocess.run([self.hostpath(self.drivers()[0]), "-print-prog-name=ld"], capture_output=True, text=True).stdout.strip()
+        d, b = posixpath.split(posixpath.normpath(unitstage.prog(pn)))
+        rd = posixpath.join(d, b[:-2] + "readelf") if b.endswith("ld") else ""
+        bad = envcheck.system_lib_errors([rd], json.load(open(os.path.join(self.repo, ENV_JSON)))["packages"], envcheck.file_owners()) if rd else ["the linker %r has no readelf beside it" % b]
+        if bad:
+            raise BuildRed({"stage": stage, "exit": None, "stderr": ["the pinned readelf beside the linker: %s" % x for x in bad]})
+        rt = self.cached_rt("tool-readelf-" + hashlib.sha256(repr((rd, sorted((e["at"], e["tree"]) for e in self.ext.values()))).encode()).hexdigest()[:16],
+                            lambda: self.plus(runtime.build_tool(self.store, [rd], [])))[1]
+        doc = {"format": "fnvnx-stage/1", "stage": stage, "argv": [rd, "-W", "-S", "-s", "/linked/" + name], "cwd": "/", "class": "build", "tool": "readelf",
+               "env": dict(unitstage.ENV, PATH=os.path.dirname(rd)), "outputs": [],
+               "inputs": merge_inputs(rt["inputs"] + [{"at": "/linked", "tree": fin}], [], self.store, ws)}
+        res = self.stage(doc)[1]
+        text = open(cas._obj(self.store, cas.manifest(res["stdout"], self.store)), errors="replace").read()
+        mp = open(cas._obj(self.store, cas.manifest(elf_tree, self.store)["entries"][name + ".map"]), errors="replace").read()
+        f = self.linkfacts
+        rd_ = lambda p: open(p, "rb").read()  # noqa: E731
+        products, defs = {}, {}
+        for lab, objs in groups:
+            for u, p in objs:
+                products["/objs/%s/%s.o" % (lab, u)] = "%s:%s" % (lab, u)
+                defs["/objs/%s/%s.o" % (lab, u)] = undefset.object_symbols(rd_(p))[0]
+        base = {os.path.basename(x): undefset.object_symbols(rd_(x))[0] for x in f["startend"] if os.path.isfile(x)}
+        for n in f["names"]:
+            ar = next((os.path.join(dd, "lib%s.a" % n) for dd in f["dirs"] if os.path.isfile(os.path.join(dd, "lib%s.a" % n))), None)
+            if ar:
+                base.update({"lib%s.a(%s)" % (n, m): undefset.object_symbols(bb)[0] for m, _, bb in relocs.ar_members(ar)})
+        for p in f["system"]:
+            base[os.path.basename(p)] = {n_ for n_, _, _, shndx, _ in ldcheck_syms(rd_(os.path.realpath(p)), 11) if shndx != 0}
+
+        def defs_of(file):      # ld names an archive member ARCHIVE(MEMBER) with the archive's path, a product object by the path of the link line
+            if file in defs:
+                return defs[file]
+            m = re.fullmatch(r"(.*/)?(lib[^/()]*\.a)\((.*)\)", file)
+            return base.get("%s(%s)" % (m[2], m[3])) if m else base.get(posixpath.basename(file))
+        try:
+            return elffacts.record(name, text, text, mp, products, defs_of)
+        except elffacts.ElfFactsError as e:
+            raise BuildRed({"stage": stage, "exit": None, "stderr": [str(e)[-300:]]})
 
     def guest_libs(self, ws, rootdef, script_text):
         """The guest link's libraries, derived (keyed stages, nothing stored): the driver's `-###` link command read by parse_driver_link, minus the start
@@ -2383,6 +2430,12 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True):
               for f in ("ld.json", "ld.ids"):
                   shutil.copyfile(cas._obj(store, ent[f]), os.path.join(out, f))
                   res["ld_gate"][f] = {"path": os.path.abspath(os.path.join(out, f)), "sha256": ent[f]["h"]}
+              facts = j.elf_facts(ws, fin, elf_tree, groups)     # the link record: sections, defined symbols, definers (consumers never run readelf or nm)
+              fp = os.path.join(out, "elffacts.json")
+              with open(fp, "w") as fh:
+                  json.dump(facts, fh, indent=1, sort_keys=True)
+                  fh.write("\n")
+              res["elf_facts"] = {"path": os.path.abspath(fp), "sha256": hashlib.sha256(open(fp, "rb").read()).hexdigest()}
           except BuildRed as r:
             j.red.append(dict(r.args[0]))
             fu = {"unit": j.rec["link"]["output"], "stage": r.args[0]["stage"], "exit": r.args[0].get("exit"), "stderr": list(r.args[0]["stderr"])[-20:]}

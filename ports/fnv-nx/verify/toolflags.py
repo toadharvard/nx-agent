@@ -7,7 +7,7 @@ switches and the environment that removes the documented ambient inputs.
     python3 -I toolflags.py policy                                                 print the policy table (toolflags_policy.py)
 
 Input: stage documents "fnvnx-stage/1" (sandbox.py) plus "tool", the DECLARED kind (never guessed from a file name): gcc as
-ld ar objcopy python msvc-cl msvc-link msvc-lib wine; sh/make: `tool-unanalysable` (child commands are not visible in argv);
+ld ar objcopy readelf python msvc-cl msvc-link msvc-lib wine; sh/make: `tool-unanalysable` (child commands are not visible in argv);
 others `tool-unlisted`; none `tool-undeclared`. wine needs "wine_tool" (an msvc-* kind) applied to the argv after wine.
 GNU response files `@F`: F under a declared input, read from ROOT + F (--root), expanded before the rules run (no --root,
 unreadable or a cycle: `response-file-unreadable`). Output `STAGE: RULE detail [citation]`, summary, JSON "fnvnx-toolflags/1".
@@ -167,6 +167,15 @@ def chk_objcopy(c, a):
         if t in ("--preserve-dates", "--disable-deterministic-archives") or short(t, "p") or short(t, "U"):
             c.v("flag-forbidden", t, "objcopy.D")
 
+def chk_readelf(c, a):
+    c.need("-W" in a, "-W", "readelf.args")
+    for t in a:
+        if t.startswith("-"):
+            if t not in ("-W", "-S", "-s"):
+                c.v("flag-forbidden", t, "readelf.args")
+        else:
+            c.need_under(t, "readelf input", "readelf.args")
+
 def chk_python(c, a):
     flags, si, bad = pyparse(a)
     for b in bad + ["-" + f for f in "IE" if f in flags]:
@@ -237,7 +246,7 @@ def check_doc(doc, root=None):
     if kind in MSVC:
         chk_msvc(c, kind, a)
     else:
-        {"gcc": chk_gcc, "as": chk_as, "ld": chk_ld, "ar": chk_ar, "objcopy": chk_objcopy, "python": chk_python}[kind](c, a)
+        {"gcc": chk_gcc, "as": chk_as, "ld": chk_ld, "ar": chk_ar, "objcopy": chk_objcopy, "readelf": chk_readelf, "python": chk_python}[kind](c, a)
     return c.out
 
 def load(path):

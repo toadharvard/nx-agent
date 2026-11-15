@@ -4,10 +4,10 @@ RB = "reproducible-builds.org"
 GCCENV = "GCC manual, Environment Variables"
 UNV = " (UNVERIFIED: VC9 not available here)"
 FORBID_ENV_GCC = "GCC_EXEC_PREFIX COMPILER_PATH LIBRARY_PATH CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH DEPENDENCIES_OUTPUT SUNPRO_DEPENDENCIES"
-KINDS_TXT = "gcc/as/ld/ar/objcopy/python/msvc-cl/msvc-link/msvc-lib/wine"
-KINDS = ("gcc", "as", "ld", "ar", "objcopy", "python", "msvc-cl", "msvc-link", "msvc-lib")
+KINDS_TXT = "gcc/as/ld/ar/objcopy/readelf/python/msvc-cl/msvc-link/msvc-lib/wine"
+KINDS = ("gcc", "as", "ld", "ar", "objcopy", "readelf", "python", "msvc-cl", "msvc-link", "msvc-lib")
 MSVC = ("msvc-cl", "msvc-link", "msvc-lib")
-GNU = ("gcc", "as", "ld", "ar", "objcopy")
+GNU = ("gcc", "as", "ld", "ar", "objcopy", "readelf")
 FIXED = (("TZ", "UTC"), ("LC_ALL", "C"), ("PYTHONHASHSEED", "0"))
 FORBID_ENV = ("LANG", "LANGUAGE", "PYTHONPATH", "HOME", "USER", "LOGNAME", "HOSTNAME", "PWD", "DISPLAY", "GCC_EXEC_PREFIX",
               "COMPILER_PATH", "LIBRARY_PATH", "CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "DEPENDENCIES_OUTPUT",
@@ -46,6 +46,8 @@ POLICY = {
     "ar.D": ("ar", "operation letters contain D and not U", "GNU ar manual, Modifiers (D deterministic mode, U real timestamps)"),
     "objcopy.D": ("objcopy", "-D/--enable-deterministic-archives present; -p/--preserve-dates, -U forbidden",
                   "GNU binutils objcopy manual (-D, -p, -U)"),
+    "readelf.args": ("readelf", "-W present; the only options are -W -S -s; every file under a declared input (a reader: it writes nothing)",
+                     "GNU binutils readelf manual, Options (-W --wide, -S --section-headers, -s --syms)"),
     "python.flags": ("python", "-s and (-B or env PYTHONDONTWRITEBYTECODE=1); -I and -E forbidden (they drop PYTHONHASHSEED, "
                      "measured: hash(\"a\") differs per run under -I); -c and -m forbidden",
                      "Python docs, Command line (-B, -E, -I, -s); PEP 552 (pyc embed source mtime)"),

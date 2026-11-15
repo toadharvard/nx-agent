@@ -1385,6 +1385,32 @@ what the source says; it does not follow a relocation into a non-group, non-merg
 Rule (c) groups by address: a body reached through two names of one address with the same body id is the owner's statement of one body.
 ```
 
+## verify/elffacts.py
+
+```text
+elffacts: the facts of a LINKED ELF that the link record carries ("fnvnx-elffacts/1"), so that no consumer runs readelf, nm or objdump on a linked
+output. Pure functions over texts the PINNED binutils of env.json printed (the link stage's own readelf and ld stages): no process is started here.
+
+  sections    readelf -W -S ELF   -> [{index, name, type, address, size, flags}]            (binutils readelf.c, process_section_headers:
+              the columns `[Nr] Name Type Address Off Size ES Flg Lk Inf Al`, the numbers in hex without 0x, Flg a string of the letters of the
+              readelf legend (W write, A alloc, X exec, M merge, S strings, I info, L link order, O extra OS processing, G group, T TLS,
+              C compressed, E exclude, R retain, p processor specific, o OS specific, x unknown, l large)).
+  symbols     readelf -W -s ELF   -> the DEFINED symbols (Ndx not UND) of `.symtab`: [{name, value, size, type, bind, section}]  (readelf.c,
+              process_symbol_table / print_dynamic_symbol: `Num: Value Size Type Bind Vis [other] Ndx Name`; Size is decimal, or 0xHEX above 100000).
+  definers    ld --cref --no-demangle -Map=MAP   -> {symbol: [file, ...]}  (ld.texi, Options, `--cref`: "Output a cross reference table. ... The
+              format of the table is intentionally simple, so that it may be easily processed by a script if necessary. The symbols are printed
+              out, sorted by name. For each symbol, a list of file names is given. If the symbol is defined, the first file listed is the
+              location of the definition. If the symbol is defined as a common value then any files where this happens appear next. Finally any
+              files that reference the symbol are listed."). A name is followed by its first file on the same line (a name too long for the
+              column puts the file on the next line); further files are on lines of their own, indented. A file inside an archive is `ARCHIVE(MEMBER)`.
+  Where the first listed file is not a definition, the symbol is one the linker defines itself (`__ehdr_start`, `_end`, a script assignment) or
+  a weak undefined: ld's source (ldmain.c notice -> ldcref.c add_cref) records a definition only for a symbol that an input defines. The rule here
+  is therefore exact and not a guess: the first file is the definer iff ITS OWN symbol table defines the name (the callers pass `defs_of`).
+
+Every parser is total: a line that does not fit the layout, or a count that disagrees with the header line the tool printed, raises ElfFactsError.
+The layouts are pinned by tests/test_elffacts.py on a real link with the same binutils version as env.json (2.42).
+```
+
 ## verify/gate_tlsmodel.py
 
 ```text
