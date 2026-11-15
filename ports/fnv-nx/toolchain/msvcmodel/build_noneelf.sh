@@ -86,13 +86,14 @@ if ! step unpack; then
   patch -s -d src -p1 < "$HERE/msvcmodel.patch"
   tar -xzf newlib-$NLV.tar.gz -C nl-src --strip-components=1
   patch -s -d nl-src -p1 < "$BS/patches/newlib-$NLV-4.patch"
-  # int32_t is int, as in the exe: newlib-stdint.h (config.gcc, aarch64*-*-elf) would make __INT32_TYPE__ long (and the LEAST32/FAST8
-  # types), a different mangled type for every int32_t parameter. Without it GCC's own stdint types are used, the same as the linux
-  # compiler's, and newlib's _default_types.h takes __INT32_TYPE__ from the compiler.
+  # int32_t is int, as in the exe: newlib-stdint.h (config.gcc, aarch64*-*-elf) makes __INT32_TYPE__ long (and the LEAST32/FAST8
+  # types), a different mangled type for every int32_t parameter. glibc-stdint.h is the target stdint macro set the linux compiler
+  # had (int32 = int, int_fast8 = signed char, as Visual C++'s <stdint.h>); newlib's _default_types.h takes __INT32_TYPE__ from the
+  # compiler. (No stdint macro file at all crashes aarch64-sve init_builtins.)
   python3 -I - src/gcc/config.gcc <<'EOF2'
 import re, sys
 p = sys.argv[1]; s = open(p).read()
-s2, n = re.subn(r'(aarch64\*-\*-elf \| [^\n]*\n(?:[^\n]*\n){0,3}?\ttm_file="\$\{tm_file\} elfos.h) newlib-stdint.h"', r'\1"', s, count=1)
+s2, n = re.subn(r'(aarch64\*-\*-elf \| [^\n]*\n(?:[^\n]*\n){0,3}?\ttm_file="\$\{tm_file\} elfos.h) newlib-stdint.h"', r'\1 glibc-stdint.h"', s, count=1)
 assert n == 1, "aarch64 newlib-stdint.h line not found"
 open(p, "w").write(s2)
 EOF2
