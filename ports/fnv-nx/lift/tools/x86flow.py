@@ -61,6 +61,18 @@ class Image:
         s.rset = frozenset(rel)
         s.taken = sorted(s.u32(r) for r in rel)
 
+    def rebase(s, nb):
+        """the image as loaded at base NB: every relocated word gets the delta, the sections and relocation addresses move (the loader's own result)"""
+        dl = (nb - s.base) & 0xffffffff
+        if not dl: return
+        d = s.d = bytearray(s.d)
+        for r in sorted(s.rset):
+            o = s.off(r)
+            if o is not None: struct.pack_into('<I', d, o, (struct.unpack_from('<I', d, o)[0] + dl) & 0xffffffff)
+        s.secs = [(n, (va + dl) & 0xffffffff, vs, ro, rs, ch) for n, va, vs, ro, rs, ch in s.secs]
+        s.rset = frozenset((r + dl) & 0xffffffff for r in s.rset); s.base = nb
+        s.taken = sorted(s.u32(r) for r in s.rset)
+
     def off(s, a):
         for n, va, vs, ro, rs, ch in s.secs:
             if va <= a < va + vs and a - va < rs:
@@ -136,6 +148,8 @@ def load_universe(exe):
     IMG = Image(exe)
     raw = open(UNI, 'rb').read()
     rows = []
+    hd = raw.split(b'\n', 1)[0].decode()
+    if hd.startswith('# base=0x'): IMG.rebase(int(hd[9:hd.index(':')], 16))        # a module's universe is at its assigned load base
     for ln in raw.decode().splitlines():
         f = ln.split('\t')
         if len(f) >= 3 and f[2].isdigit() and int(f[2]) > 0:
