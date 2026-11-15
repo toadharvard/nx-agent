@@ -94,7 +94,8 @@ echo "$NLPATCH_SHA256  $BS/patches/newlib-$NLV-4.patch" | sha256sum -c --quiet
 echo "$X19_PATCH_SHA256  $PATCH_DIR/x19-x27.patch" | sha256sum -c --quiet
 echo "$NOSIZED_PATCH_SHA256  $PATCH_DIR/libstdcxx-nosized.patch" | sha256sum -c --quiet
 
-STAMP=$(sha256sum "$HERE/msvcmodel.patch" "$HERE/build_noneelf.sh" "$PATCH_DIR/x19-x27.patch" "$PATCH_DIR/libstdcxx-nosized.patch" | sha256sum | cut -c1-16)
+MSVC_PATCH=${MSVC_PATCH:-$HERE/msvcmodel.patch}
+STAMP=$(sha256sum "$MSVC_PATCH" "$HERE/build_noneelf.sh" "$PATCH_DIR/x19-x27.patch" "$PATCH_DIR/libstdcxx-nosized.patch" | sha256sum | cut -c1-16)
 if [ -f "$W/stamp-key" ] && [ "$(cat "$W/stamp-key")" != "$STAMP" ]; then rm -rf "$W"/stamp-* "$SRC" "$NL" "$W"/b-*; fi
 echo "$STAMP" > "$W/stamp-key"
 : > "$CONF"
@@ -117,7 +118,7 @@ if ! step unpack; then
   rm -rf "$SRC" "$NL"
   mkdir "$SRC" "$NL"
   tar -xJf gcc-$V.tar.xz -C "$SRC" --strip-components=1
-  patch -s -d "$SRC" -p1 < "$HERE/msvcmodel.patch"
+  patch -s -d "$SRC" -p1 < "$MSVC_PATCH"
   tar -xzf newlib-$NLV.tar.gz -C "$NL" --strip-components=1
   patch -s -d "$NL" -p1 < "$BS/patches/newlib-$NLV-4.patch"
   apply_p0 "$PATCH_DIR/x19-x27.patch"
