@@ -3,7 +3,7 @@
 
   boot.py run --elf GUEST.elf --reserved modules.tsv --keys LO:HI --heap-size N --root SDROOT [--game DIR]
               --milestones TABLE --manifest entries.tsv [--icount-spec SPEC.json] [--limit-instructions N]
-              [--hc-slice N] [--declared-inputs PINS [--declared-src NAME=DIR]] [--profile handheld|docked] [--watch-log SYMS] --out OUT.json
+              --quantum N [--declared-inputs PINS [--declared-src NAME=DIR]] [--profile handheld|docked] [--watch-log SYMS] --out OUT.json
 
 plan = bootlayout (same rules as its CLI), watch points = bootmiles.resolve(table, manifest, ELF symbols, bias = image
 base). OUT.json ("fnvnx-boot/1", sorted keys, indent 1, no wall time) holds the plan, the run record, the milestone state
@@ -23,6 +23,9 @@ caller's own return or a further longjmp); a target above an intermediate frame 
 has the section .text.fnvl): a BL/BLR whose source is outside the section and whose landing is inside it (src, dst, decoded from the
 instruction word, no names). A name that is absent or not STT_FUNC is an input error naming it.
 Without the option the key is absent.
+
+Cores: the machine is the declared N-core machine (bootmachine.py rule 3). --quantum N (required, no default) is the instructions per slice of a core's
+thread; OUT.json "machine" = {app_cores, cores, quantum, unicorn} and run.cores = per-core {slices, instructions, switches, pairs}.
 
 Host parts: the table's `host` target is an ID word, so the exact console line a part waits for is spelled
 `console.<hex>` (hex of the line's UTF-8 bytes, no newline; helper console_part(line)). The part fires when the guest
@@ -54,6 +57,8 @@ import os
 import re
 import sys
 import time
+
+import unicorn
 
 from unicorn.arm64_const import UC_ARM64_REG_LR, UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3
 
@@ -284,10 +289,9 @@ def run(a):
                 f.write(json.dumps(doc, sort_keys=True, indent=1) + "\n")
             print("boot: reason=scenario-error %s" % e)
             return 2
-    kw = {"hc_slice": a.hc_slice} if a.hc_slice else {}
     svc = boothost.Services(a.root, a.game, sc, watch_reads=wl is not None, read_only=ro)
     m = bootmachine.Machine(raw, plan, svc, limit_instructions=a.limit_instructions,
-                            profile=a.profile, text_entries=text_entries, n_stacks=a.threads, app_cores=bootmachine.app_cores_of(a.guest_root), **kw)
+                            profile=a.profile, text_entries=text_entries, n_stacks=a.threads, quantum=a.quantum)
     ic = m.attach_icount(a.icount_spec if a.icount_spec else {}, base)
     prog, log = bootmiles.Progress(table), []
 
@@ -395,7 +399,8 @@ def run(a):
         rep = ic.report()
         doc = {"elf_sha256": hashlib.sha256(raw).hexdigest(), "plan": plan, "run": r,
                "console_sha256": hashlib.sha256(console.encode()).hexdigest(), "milestones": prog.state(),
-               "milestone_log": log, "inputs": {"text_entry": list(text_entries)}, "manifest_id": manifest.table_id, "last_reached": prog.last_reached(), "icount": rep}
+               "milestone_log": log, "inputs": {"text_entry": list(text_entries)},
+               "machine": {"app_cores": bootmachine.APP_CORES, "cores": m.cores, "quantum": a.quantum, "unicorn": unicorn.__version__}, "manifest_id": manifest.table_id, "last_reached": prog.last_reached(), "icount": rep}
         if declared:
             doc["inputs"]["declared"] = declared
         dif = svc.declared_faults   # a write under a declared input: L5's static fact is wrong, the verdict is failed whatever the guest did next
@@ -449,11 +454,11 @@ def main(argv=None):
     for opt in ("--elf", "--reserved", "--keys", "--root", "--milestones", "--manifest", "--out"):
         sp.add_argument(opt, required=True)
     sp.add_argument("--heap-size", required=True, type=lambda s: int(s, 0))
-    sp.add_argument("--guest-root", required=True, help="directory of the guest product root the ELF was built from (its build.json flags give the application cores)")
     sp.add_argument("--game")
     sp.add_argument("--icount-spec")
     sp.add_argument("--limit-instructions", type=lambda s: int(s, 0))
-    sp.add_argument("--hc-slice", type=lambda s: int(s, 0))
+    sp.add_argument("--quantum", required=True, type=lambda s: int(s, 0),
+                    help="instructions per slice of a core's thread (bootmachine.py rule 3); a declared parameter of the run, no default; recorded in OUT.json machine")
     sp.add_argument("--gpu", help="host renderer library libnxgl4.so: registers ext module 10 (bootgpu.py)")
     sp.add_argument("--frames", help="directory for the library's frame files ($NXGL4_FRAMES); needs --gpu")
     sp.add_argument("--threads", type=int, default=256,

@@ -83,7 +83,7 @@ def main():
     os.environ.update(boot.GPU_ENV)
     os.environ["NXGL4_FRAMES"] = frames
     os.makedirs(frames)
-    m = bootmachine.Machine(elf50, tb.make_plan(elf50), boothost.Services(root), app_cores=tb.APP_CORES)
+    m = bootmachine.Machine(elf50, tb.make_plan(elf50), boothost.Services(root), quantum=tb.QUANTUM)
     seen = []
     g = bootgpu.Gpu(lib, m, "docked", on_present=seen.append)
     lines = []
@@ -111,14 +111,14 @@ def main():
     g.close()
 
     # --- without a library: module 10 is not registered
-    m = bootmachine.Machine(elf50, tb.make_plan(elf50), boothost.Services(root), app_cores=tb.APP_CORES)
+    m = bootmachine.Machine(elf50, tb.make_plan(elf50), boothost.Services(root), quantum=tb.QUANTUM)
     lines = []
     m.on_console(lines.append)
     m.run()
     tb.case("without --gpu: module 10 answers NO_MODULE", parse(lines)["infoRc"] == bootmachine.EXT_NO_MODULE, lines)
 
     # --- host_ptr
-    m = bootmachine.Machine(elf51, tb.make_plan(elf51), boothost.Services(root), app_cores=tb.APP_CORES)
+    m = bootmachine.Machine(elf51, tb.make_plan(elf51), boothost.Services(root), quantum=tb.QUANTUM)
     lines = []
     m.on_console(lines.append)
     r = m.run()
@@ -151,7 +151,7 @@ def main():
 
     def args(out, fr, *extra):
         return ["run", "--elf", elf, "--reserved", w("res.tsv", "exe\t400000\t2100000\nmod2\t4000000\t4200000\n"), "--keys", "f0000:200000",
-                "--heap-size", "0x100000", "--guest-root", tb.GUEST_DIR, "--root", root, "--milestones", table, "--manifest", w("m.tsv", "1000\tmarker\n"),
+                "--heap-size", "0x100000", "--root", root, "--quantum", str(tb.QUANTUM), "--milestones", table, "--manifest", w("m.tsv", "1000\tmarker\n"),
                 "--out", os.path.join(d, out), "--gpu", lib, "--frames", os.path.join(d, fr), *extra]
 
     outs = []

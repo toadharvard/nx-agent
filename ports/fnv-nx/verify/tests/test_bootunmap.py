@@ -16,7 +16,7 @@ import boothost  # noqa: E402
 import bootmachine  # noqa: E402
 from test_bootlayout import make_elf  # noqa: E402
 
-APP_CORES = bootmachine.app_cores_of(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(VERIFY))), "ports", "fnv-nx", "tests", "bootguest"))
+QUANTUM = 20000   # instructions per slice (bootmachine.py rule 3): a declared parameter of these runs
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))
 HDR = os.path.join(REPO, "ports", "fnv-nx", "hostabi", "include", "fnvnx", "hostapi.h")
@@ -45,7 +45,7 @@ def main():
     elf = make_elf()
     rows = [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x1409000), ("mod1", 0x1410000, 0x1500000), ("mod2", 0x4000000, 0x4200000)]
     plan = bootlayout.plan(bootlayout.parse_elf(elf), rows, 4 << 20)
-    m = bootmachine.Machine(elf, plan, boothost.Services(tempfile.mkdtemp(prefix="bu-")), app_cores=APP_CORES)
+    m = bootmachine.Machine(elf, plan, boothost.Services(tempfile.mkdtemp(prefix="bu-")), quantum=QUANTUM)
     ARGS = 0x1400000   # inside the window, scratch for the argument array
     m.map_fixed(ARGS & ~0xFFF, P, 0)
 

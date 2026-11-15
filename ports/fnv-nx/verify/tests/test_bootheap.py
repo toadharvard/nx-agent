@@ -15,7 +15,7 @@ import boothost  # noqa: E402
 import bootmachine  # noqa: E402
 from test_bootlayout import make_elf  # noqa: E402
 
-APP_CORES = bootmachine.app_cores_of(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(VERIFY))), "ports", "fnv-nx", "tests", "bootguest"))
+QUANTUM = 20000   # instructions per slice (bootmachine.py rule 3): a declared parameter of these runs
 
 FAILED, N = [], [0]
 
@@ -37,7 +37,7 @@ def main():
         plan = copy.deepcopy(std)
         edit(plan["regions"])
         try:
-            bootmachine.Machine(elf, plan, boothost.Services(root), app_cores=APP_CORES)
+            bootmachine.Machine(elf, plan, boothost.Services(root), quantum=QUANTUM)
             return None
         except bootmachine.MachineError as e:
             return str(e)

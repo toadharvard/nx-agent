@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # boot_job.sh - L4 farm job: run the boot stage (verify/boot.py) on one real guest ELF and publish the result.
 #
-#   [ARTIFACTS=...] [GAME_DIR=...] bash <checkout>/ports/fnv-nx/farm/boot_job.sh <elf_id> [--limit-instructions N] [--profile handheld|docked]
+#   [ARTIFACTS=...] [GAME_DIR=...] bash <checkout>/ports/fnv-nx/farm/boot_job.sh <elf_id> --quantum N [--limit-instructions N] [--profile handheld|docked]
 #                                [--gpu-branch <artifacts branch>]
 #
 # Steps:
@@ -53,6 +53,8 @@
 # when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build), FARM_HOME (default $HOME/fnvnx-farm),
 # WORK (default $FARM_HOME/boot/<elf_id>), GAME_DIR (an installed game; never inside a git checkout). The profile is
 # passed to boot.py, recorded in meta.json and exported as FNVNX_PROFILE (a render host library reads it).
+# --quantum N (required, no default): instructions per slice of a core's thread in the N-core machine (bootmachine.py rule 3); passed to boot.py
+# and recorded in meta.json (quantum).
 # Exit 0 iff the result was published and boot.py exited 0 or 2; 1 otherwise (one-line reason on stderr).
 set -euo pipefail
 die() { echo "boot_job: FAILED: $*" >&2; exit 1; }
@@ -60,17 +62,20 @@ log() { echo "boot_job: $*" >&2; }
 
 SELF_DIR=$(cd "$(dirname "$0")" && pwd)
 NX=$(cd "$SELF_DIR/.." && pwd)                     # ports/fnv-nx of the checkout this script lives in
-ELF_ID=${1:?usage: boot_job.sh <elf_id> [--limit-instructions N] [--profile handheld|docked] [--gpu-branch B]}; shift
+ELF_ID=${1:?usage: boot_job.sh <elf_id> --quantum N [--limit-instructions N] [--profile handheld|docked] [--gpu-branch B]}; shift
 case $ELF_ID in ''|*[!A-Za-z0-9._-]*|.*) die "elf_id '$ELF_ID' must be letters, digits, '.', '_' or '-' and not start with '.'" ;; esac
-LIMIT=""; PROFILE=handheld; GPU_BRANCH=
+LIMIT=""; PROFILE=handheld; GPU_BRANCH=; QUANTUM=
 while [ $# -gt 0 ]; do
   case $1 in
     --limit-instructions) [ $# -ge 2 ] || die "--limit-instructions needs a value"; LIMIT=$2; shift 2 ;;
+    --quantum) [ $# -ge 2 ] || die "--quantum needs a value"; QUANTUM=$2; shift 2 ;;
     --profile) [ $# -ge 2 ] || die "--profile needs a value"; PROFILE=$2; shift 2 ;;
     --gpu-branch) [ $# -ge 2 ] || die "--gpu-branch needs a value"; GPU_BRANCH=$2; shift 2 ;;
     *) die "unknown argument '$1'" ;;
   esac
 done
+[ -n "$QUANTUM" ] || die "--quantum N is required (instructions per slice of a core's thread; a declared parameter of the run, no default)"
+[[ $QUANTUM =~ ^([1-9][0-9]*|0[xX][0-9a-fA-F]*[1-9a-fA-F][0-9a-fA-F]*)$ ]] || die "--quantum '$QUANTUM' is not a positive integer (decimal or 0x hex)"
 if [ -n "$LIMIT" ]; then
   [[ $LIMIT =~ ^([1-9][0-9]*|0[xX][0-9a-fA-F]*[1-9a-fA-F][0-9a-fA-F]*)$ ]] || die "--limit-instructions '$LIMIT' is not a positive integer (decimal or 0x hex)"
 fi
@@ -237,6 +242,7 @@ conv "${BI[@]}" milestones --table "$IN/milestones.tsv" --entries "$IN/entries.t
 OUT=$WORK/OUT.json; rm -f "$OUT" "$WORK/OUT.console.txt"
 BOOT=(python3 -s -B "$NX/verify/boot.py" run --elf "$IN/guest.elf" --reserved "$IN/reserved.tsv" --keys "$KEYS" --heap-size 0x40000000
       --profile "$PROFILE" --root "$SD" --game "$GAME_DIR" --declared-inputs "$PINS" "${DECL_SRC[@]}" --milestones "$IN/table.txt" --manifest "$IN/entries.tsv" --icount-spec "$WORK/spec.json")
+BOOT+=(--quantum "$QUANTUM")
 [ -z "$LIMIT" ] || BOOT+=(--limit-instructions "$LIMIT")
 FRAMES=$WORK/frames; rm -rf "$FRAMES"
 [ -z "$GPU_LIB" ] || BOOT+=(--gpu "$GPU_LIB" --frames "$FRAMES")
@@ -262,15 +268,16 @@ CPU=$(lscpu 2> /dev/null | sed -n 's/^Model name:[[:space:]]*//p' | head -1)
 [ -n "$CPU" ] || CPU=$(sed -n 's/^model name[[:space:]]*:[[:space:]]*//p' /proc/cpuinfo | head -1)
 [ -n "$CPU" ] || die "the host cpu model is in neither lscpu nor /proc/cpuinfo"
 python3 -I -c 'import json, sys
-k = ["elf_id", "elf_branch_commit", "nx_agent_commit", "exe_sha256", "boot_rc", "seconds", "limit_instructions", "profile", "host_cpu_model", "softfloat", "data_items"]
+k = ["elf_id", "elf_branch_commit", "nx_agent_commit", "exe_sha256", "boot_rc", "seconds", "limit_instructions", "quantum", "profile", "host_cpu_model", "softfloat", "data_items"]
 v = sys.argv[1:]
 d = dict(zip(k, v))
 d["boot_rc"], d["seconds"] = int(d["boot_rc"]), int(d["seconds"])
 d["limit_instructions"] = int(d["limit_instructions"], 0) if d["limit_instructions"] else None
+d["quantum"] = int(d["quantum"], 0)
 d["data_items"] = d["data_items"][len("fetched:"):].split() if d["data_items"] else None
 if v[len(k):]:
     d["gpu_branch"], d["gpu_branch_commit"], d["bridge_branch"], d["bridge_branch_commit"], d["render_head"] = v[len(k):]
-print(json.dumps(d, sort_keys=True, indent=1))' "$ELF_ID" "$ELF_COMMIT" "$NX_COMMIT" "$EXE_SHA" "$RC" "$SECONDS_RUN" "$LIMIT" "$PROFILE" "$CPU" "$SOFT" "$DATA_ITEMS" ${GPU_BRANCH:+"$GPU_BRANCH" "$GPU_COMMIT" "$BRIDGE_BRANCH" "$BRIDGE_COMMIT" "$RENDER_HEAD"} > "$WORK/meta.json" \
+print(json.dumps(d, sort_keys=True, indent=1))' "$ELF_ID" "$ELF_COMMIT" "$NX_COMMIT" "$EXE_SHA" "$RC" "$SECONDS_RUN" "$LIMIT" "$QUANTUM" "$PROFILE" "$CPU" "$SOFT" "$DATA_ITEMS" ${GPU_BRANCH:+"$GPU_BRANCH" "$GPU_COMMIT" "$BRIDGE_BRANCH" "$BRIDGE_COMMIT" "$RENDER_HEAD"} > "$WORK/meta.json" \
   || die "meta.json could not be written"
 IDX=$(mktemp -u "$WORK/index.XXXXXX")
 for f in OUT.json OUT.console.txt spec.json meta.json; do

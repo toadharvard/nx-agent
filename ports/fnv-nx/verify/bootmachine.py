@@ -8,9 +8,22 @@ Rules:
    host page / heap = the plan's regions. No relocation: the guest relocates itself. A segment outside the image region
    or sharing a page with another raises MachineError.
 2. Totality: all 46 slots resolve to services.h_<slot> at construction, else MachineError (the list is the header's struct, checked by the tests).
-3. One CPU. A thread switches only at a blocking host call and at a host call's return after `hc_slice` calls of its
-   slice while another thread is ready: no wall clock, no instruction counts, so switch points repeat. Nothing ready:
-   the virtual tick jumps to the earliest deadline; none: reason "deadlock" with a per-thread wait report.
+3. N cores, parallel progress in rounds (CLAUDE.md "The declared CPU"). N = popcount(FNVNX_APP_CORES) (placement.h, read by name:
+   the declared machine; cores = its set bits, ascending). Every thread lives on its ideal core for ever (thread_create's
+   FNVNX_CPU_SPEC ideal, thread_set_cpu; the main thread FNVNX_DEFAULT_CORE): THREAD_CPU = ideal, there is no migration, the mask is not
+   used for placement. Per core the ready thread of the highest priority runs (Win32 scale, signed, higher first), FIFO within equal
+   priority (the order in which threads became ready; a thread that only used up its quantum keeps its place; thread_yield goes behind its
+   equals). A round visits the cores 0..N-1 in order and gives each core's chosen thread one slice of `quantum` instructions: the machine's
+   own count (block size / 4 per image block, the one block hook), ended at the first block boundary at or after the quantum (the block that
+   would run next is not run and not counted, so every block is counted once and icount stays exact). A thread leaves its core only at a
+   blocking host call, its end, or, at the next round boundary, when a thread of higher priority on the same core is ready. quantum is a
+   required argument (no default); a different quantum changes interleavings, not what a race-free guest computes. The pick is made at the
+   start of each core's turn, so it is a pure function of the machine's state: no wall clock, switch points repeat. Nothing ready on any
+   core: the virtual tick jumps to the earliest deadline; none: reason "deadlock" with a per-thread wait report. run()["cores"] has the
+   per-core numbers: {core: {"slices", "instructions", "switches", "pairs": {"from>to": n}}}; a switch is a core running another thread than
+   the one it ran last. quantum is a declared parameter of the instrument. The slice end is a function of the code's block extents and the
+   pinned Unicorn (env.json python.modules; its version is in OUT.json machine.unicorn), so switch points repeat for the same code and pin.
+   Memory ordering is proved by the plugin rule (R9, OWNER 9); the boot machine neither tests nor certifies it.
 4. Any invalid access (unmapped or protection violation), Unicorn error, or host call on an unmapped guest pointer
    ends the run, reason "fault", record {kind, addr, size, pc, lr, tid}. There is no continue path.
 5. map_fixed(addr, size, src) follows svcMapMemory (hostapi.h): src is a page-aligned block of the heap region, wholly
@@ -143,22 +156,20 @@ WINDOW = (0x00400000, 0x02100000)   # the image range 0x00400000..0x00FDF000 and
 MAP_FIXED_MAX = 512
 FNVNX_HE_NOMEM, FNVNX_HE_NOTFOUND = 0x0559, 0x1359
 # fnvnx/placement.h and hostapi.h (the tests read the numbers by name from the headers and compare)
-FNVNX_DEFAULT_CORE, FNVNX_APP_CORES, FNVNX_APP_CORES_CORE3, FNVNX_CPU_KEEP = 0, 0x7, 0xF, 0xFF
+FNVNX_DEFAULT_CORE, FNVNX_CPU_KEEP = 0, 0xFF
 
 
-def app_cores_of(root_dir, variant=None):
-    """the application cores of a guest root: FNVNX_APP_CORES_CORE3 when the C flags that recipe.py compiles the root with (build.json, the
-    variant's own flags when one is named) define FNVNX_CORE3_DEFAULT non-zero, else FNVNX_APP_CORES (placement.h)"""
-    with open(os.path.join(root_dir, "build.json")) as f:
-        b = json.load(f)
-    flags = ((b.get("variants") or {}).get(variant) or {}).get("flags") if variant else None
-    flags = flags or b.get("flags") or {}
-    on = False
-    for fl in list(flags.get("c", [])) + list(flags.get("cxx", [])):
-        m = re.fullmatch(r"-DFNVNX_CORE3_DEFAULT(?:=(.*))?", fl)
-        if m:
-            on = (m.group(1) or "1") not in ("0", "")
-    return FNVNX_APP_CORES_CORE3 if on else FNVNX_APP_CORES
+def header_define(name, header="placement.h"):
+    """the number of `#define NAME N` in hostabi/include/fnvnx/<header>, read by name: the one copy of the declared machine's numbers"""
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hostabi", "include", "fnvnx", header)
+    with open(p) as f:
+        m = re.search(r"^#define\s+%s\s+(0[xX][0-9A-Fa-f]+|\d+)[uUlL]*\b" % re.escape(name), f.read(), re.M)
+    if not m:
+        raise MachineError("%s: no #define %s" % (header, name))
+    return int(m.group(1), 0)
+
+
+APP_CORES = header_define("FNVNX_APP_CORES")   # the declared machine's application cores (placement.h); N = popcount
 KERNEL_BUSY, KERNEL_INVALID_STATE = 0xF401, 0xFA01   # kernel results 1 | 122 << 9 (Busy), 1 | 125 << 9 (InvalidState); see the docstring
 SEC_E_SIZE, SEC_E_ALIGN, SEC_E_RANGE, SEC_E_REGION, SEC_E_ID, SEC_E_NOMEM, SEC_E_FULL = 0xCA01, 0xCC01, 0xD401, 0xDA01, 0xE401, 0xD001, 0xCE01
 SEC_MAX_SIZE, SEC_SECTIONS, SEC_VIEWS = 0x80000000, 128, 512   # host_section.inc
@@ -238,6 +249,7 @@ class Thread:
         self.handle = 0   # the table handle thread_create returned (0: the main thread, which has none)
         self.tid, self.ctx, self.state, self.wait, self.result, self.resume_pc = tid, None, "new", None, 0, None
         self.paused = False
+        self.rseq = 0   # the order in which threads became ready (FIFO within a priority on one core)
         self.entry = self.arg = 0   # new: new, ready, running, blocked, done; wait: ("addr", a, dl) / ("join", t) / ("sleep", dl)
 
 
@@ -279,9 +291,12 @@ class IdTable:
 
 
 class Machine:
-    def __init__(self, elf_bytes, plan, services, clock=None, *, hc_slice=2000, limit_host_calls=None, n_stacks=32,
-                 stack_size=0x40000, limit_instructions=None, profile="handheld", text_entries=None, app_cores):
-        self.app_cores = app_cores   # FNVNX_APP_CORES, or FNVNX_APP_CORES_CORE3 when the guest root builds with FNVNX_CORE3_DEFAULT (app_cores_of)
+    def __init__(self, elf_bytes, plan, services, clock=None, *, limit_host_calls=None, n_stacks=32,
+                 stack_size=0x40000, limit_instructions=None, profile="handheld", text_entries=None, quantum):
+        if not isinstance(quantum, int) or isinstance(quantum, bool) or quantum <= 0:
+            raise MachineError("quantum must be a positive integer (instructions per slice), got %r" % (quantum,))
+        self.quantum = quantum   # instructions per slice (rule 3); a declared parameter of the run, no default
+        self.app_cores = APP_CORES   # placement.h FNVNX_APP_CORES: the declared machine, nothing varies
         if profile not in ("handheld", "docked"):
             raise MachineError("profile must be 'handheld' or 'docked', got %r" % (profile,))
         self.profile = profile   # FNVNX_PLAT_DISPLAY_DOCKED: docked 1, handheld 0
@@ -297,7 +312,7 @@ class Machine:
         self.ids = IdTable()
         self.socks = bootsock.SockModel(_GuestMem(self), lambda: self.clock.now_ns())
         self.elf = elf = bootlayout.parse_elf(elf_bytes)
-        self.services, self.clock, self.hc_slice, self.limit = services, clock or VirtualClock(), hc_slice, limit_host_calls
+        self.services, self.clock, self.limit = services, clock or VirtualClock(), limit_host_calls
         reg = {n: (r["lo"], r["hi"]) for n, r in plan["regions"].items()}
         base, (ilo, ihi) = plan["image"]["base"], reg["image"]
         self.image, self.heap, self.given = (ilo, ihi), reg["heap"], []   # given: heap blocks consumed by map_fixed
@@ -351,8 +366,12 @@ class Machine:
         uc.mem_write(hp, api)
         uc.mem_write(self.stub_base, struct.pack("<I", 0xD65F03C0) * len(SLOTS))   # ret
         self.addr_of = {n: a for a, n in self.stubs.items()}
-        self.threads, self.order, self.cur, self.last = {}, [], None, None
-        self.calls, self.switches, self.slice_calls0, self.exit_code = 0, 0, 0, None
+        self.threads, self.order, self.cur = {}, [], None
+        self.calls, self.switches, self.exit_code = 0, 0, None
+        self.cores = [c for c in range(32) if APP_CORES >> c & 1]
+        self.core_stats = {c: {"slices": 0, "instructions": 0, "switches": 0, "pairs": {}} for c in self.cores}
+        self.core_last = dict.fromkeys(self.cores)   # core -> tid it ran last
+        self.rseq, self.slice_instr, self.slice_over = 0, 0, False
         self.fault, self.events, self.ext_missing, self.limit_hit = None, [], None, False
         self.mapped = []   # merged [lo, hi) ranges mapped by map_fixed
         self.mf_live = {}   # addr -> (size, src) of every live map_fixed mapping (the kernel's own record)
@@ -360,10 +379,9 @@ class Machine:
         self.cb_thread, self.cb_console, self.line = None, None, bytearray()
         self.ret_pending, self.console_text = {}, []
         self.limit_instr, self.instr, self.icount, self.block_hook = limit_instructions, 0, None, False
-        if limit_instructions is not None:
-            if limit_instructions <= 0:
-                raise MachineError("limit_instructions must be positive, got %r" % (limit_instructions,))
-            self._block_hook()
+        if limit_instructions is not None and limit_instructions <= 0:
+            raise MachineError("limit_instructions must be positive, got %r" % (limit_instructions,))
+        self._block_hook()   # the slice end of rule 3 needs it always
         uc.hook_add(UC_HOOK_CODE, self._on_code, begin=hp, end=hp + PAGE - 1)
         uc.hook_add(UC_HOOK_MEM_INVALID, self._on_bad)
         services.bind(self)
@@ -406,6 +424,11 @@ class Machine:
         return ic
 
     def _on_block(self, uc, addr, size, _):
+        if self.slice_instr >= self.quantum:   # rule 3: the slice is used up; this block neither runs nor is counted (it is counted when it runs)
+            self.slice_over = True
+            uc.emu_stop()
+            return
+        self.slice_instr += size // 4
         if self.icount is not None:
             self.icount._block(uc, addr, size, _)
         self.instr += size // 4
@@ -479,14 +502,15 @@ class Machine:
         """cb(tid, src, dst) for every call (BL or BLR, decoded from the instruction word at src) whose source lies outside [lo, hi) and whose
         landing block dst lies inside it. Block hook over the image: a BL/BLR ends its translation block, so the block executed just before dst
         is the caller's; a call is recognised by (1) the last word of that block being BL (0x94000000 / 0xFC000000 mask) or BLR
-        (0xD63F0000 / 0xFFFFFC1F mask), (2) lr = src + 4, which only a call sets, and (3) for BL, dst = src + 4 * imm26. A thread switch
-        resets the previous block."""
-        prev = [None]
+        (0xD63F0000 / 0xFFFFFC1F mask), (2) lr = src + 4, which only a call sets, and (3) for BL, dst = src + 4 * imm26. The previous block is kept per thread."""
+        prev = {}   # tid -> the last block that thread ran (a slice end between the caller's block and the callee's must not hide the call)
 
         def blk(uc, addr, size, _):
-            tid, p = self.tid(), prev[0]
-            prev[0] = (tid, addr, size)
-            if p is None or p[0] != tid or not lo <= addr < hi:
+            if self.slice_over:   # the machine's hook ended the slice before this block: it has not run
+                return
+            tid, p = self.tid(), prev.get(self.tid())
+            prev[tid] = (tid, addr, size)
+            if p is None or not lo <= addr < hi:
                 return
             src = p[1] + p[2] - 4
             if lo <= src < hi or uc.reg_read(UC_ARM64_REG_LR) & 0xFFFFFFFF != src + 4:
@@ -1014,7 +1038,7 @@ class Machine:
         t.ctx = uc.context_save()
         t.resume_pc, t.result = t.entry, arg
         uc.context_restore(regs)
-        t.state = "ready"
+        self._ready(t, t.result)
         return 0
 
     def exit(self, code):
@@ -1029,9 +1053,9 @@ class Machine:
             t.state = "done"
             for o in self.threads.values():
                 if o.state == "blocked" and o.wait == ("join", t.tid):
-                    o.state, o.result = "ready", 0
+                    self._ready(o, 0)
         elif wait[0] == "yield":
-            t.state = "ready"
+            self._ready(t, t.result)   # behind its equals
         else:
             t.state, t.wait = "blocked", wait
         self.cur = None
@@ -1044,27 +1068,44 @@ class Machine:
             if o.state == "blocked" and o.wait[0] == "addr" and o.wait[1] == addr:
                 if count != U64 and n >= count:
                     break
-                o.state, o.result = "ready", 0
+                self._ready(o, 0)
                 n += 1
 
-    def _pick(self):
-        live = [self.threads[t] for t in self.order]
-        for _ in range(2):
-            start = (self.order.index(self.last) + 1) if self.last in self.order else 0
-            for i in range(len(live)):
-                t = live[(start + i) % len(live)]
-                if t.state == "ready" and not t.paused:
-                    return t
-            dl = [(t.wait[-1], t) for t in live if t.state == "blocked" and t.wait[0] in ("sleep", "addr")
-                  and t.wait[-1] is not None]
-            if not dl:
-                return None
-            when = min(d for d, _ in dl)
-            self.clock.jump_to_ns(when)
-            for d, t in dl:
-                if d <= when:
-                    t.state, t.result = "ready", 1 if t.wait[0] == "addr" else 0
-        return None
+    def _ready(self, t, result):
+        """t becomes ready (rule 3: its place among its equals is the moment it became ready)"""
+        self.rseq += 1
+        t.state, t.result, t.rseq = "ready", result, self.rseq
+
+    def placement_of(self, t):
+        """(ideal core, signed priority) of thread t: the services' placement record (thread_create / thread_set_cpu / thread_set_priority),
+        the main thread's and an unrecorded thread's own values FNVNX_DEFAULT_CORE and 0 (THREAD_PRIORITY_NORMAL)"""
+        pl = getattr(self.services, "placement", {}).get(t.tid) or {}
+        prio = pl.get("prio", 0) & U64
+        return pl.get("ideal", FNVNX_DEFAULT_CORE), prio - (1 << 64) if prio >> 63 else prio
+
+    def _pick_core(self, core):
+        """the thread core runs next: of its ready, unpaused threads the highest priority, the earliest ready within it; None when none"""
+        best = None
+        for tid in self.order:
+            t = self.threads[tid]
+            if t.state == "ready" and not t.paused:
+                ideal, prio = self.placement_of(t)
+                if ideal == core and (best is None or (-prio, t.rseq) < best[0]):
+                    best = ((-prio, t.rseq), t)
+        return best and best[1]
+
+    def _advance_time(self):
+        """nothing is ready on any core: the tick jumps to the earliest deadline and every waiter due then is ready; False when no thread has one"""
+        dl = [(self.threads[i].wait[-1], self.threads[i]) for i in self.order if self.threads[i].state == "blocked"
+              and self.threads[i].wait[0] in ("sleep", "addr") and self.threads[i].wait[-1] is not None]
+        if not dl:
+            return False
+        when = min(d for d, _ in dl)
+        self.clock.jump_to_ns(when)
+        for d, t in dl:
+            if d <= when:
+                self._ready(t, 1 if t.wait[0] == "addr" else 0)
+        return True
 
     # -- host-call dispatch
     def _on_bad(self, uc, access, addr, size, value, _):
@@ -1109,83 +1150,105 @@ class Machine:
             return
         uc.reg_write(UC_ARM64_REG_X0, res & U64)
         uc.reg_write(UC_ARM64_REG_PC, uc.reg_read(UC_ARM64_REG_LR))
-        if self.exit_code is None and self.calls - self.slice_calls0 >= self.hc_slice \
-                and any(x is not self.cur and x.state == "ready" and not x.paused for x in self.threads.values()):
-            self._block(("yield",), res & U64)
 
     def _waits(self):
         return [dict(tid=t.tid, state=t.state, wait=list(t.wait) if t.wait else None, **({"paused": True} if t.paused else {}))
                 for t in sorted(self.threads.values(), key=lambda x: x.tid) if t.state != "done"]
 
+    def _end_reason(self, extra):
+        """the reason the run ends now, or None; extra (a dict, or None) receives its details"""
+        e = extra if extra is not None else {}
+        if self.exit_code is not None:
+            if self.exit_code >> 24 == REACH_VIOLATION:   # fnvnx_reach_violation(fact_id): exit code 0x52000000 | fact_id
+                e["fact_id"] = self.exit_code & 0xFFFFFF
+                return "reach-violation"
+            return "exit"
+        if self.fault is not None:
+            e["fault"] = self.fault
+            return "fault"
+        if self.scenario_error is not None:
+            e["scenario"] = self.scenario_error
+            return "scenario-error"
+        if self.ext_missing:
+            e["ext"] = {"module": self.ext_missing[0], "fn": self.ext_missing[1]}
+            return "ext-module-missing"
+        return "limit" if self.limit_hit else None
+
+    def _slice(self, core, t):
+        """rule 3: one slice of thread t on its core"""
+        uc, st = self.uc, self.core_stats[core]
+        last = self.core_last[core]
+        if last is not None and last != t.tid:
+            self.switches += 1
+            st["switches"] += 1
+            k = "%d>%d" % (last, t.tid)
+            st["pairs"][k] = st["pairs"].get(k, 0) + 1
+        self.core_last[core] = t.tid
+        self.cur = t
+        if self.cb_thread:
+            self.cb_thread(t.tid)
+        uc.context_restore(t.ctx)
+        uc.reg_write(UC_ARM64_REG_X0, t.result & U64)
+        t.state, self.slice_instr, self.slice_over = "running", 0, False
+        i0 = self.instr
+        try:
+            uc.emu_start(t.resume_pc, self.return_addr)
+        except UcError as e:
+            self._stop_fault("uc-error: %s" % e)
+            return
+        finally:
+            st["slices"] += 1
+            st["instructions"] += self.instr - i0
+        if self.cur is t and self.fault is None and not self.limit_hit and self.exit_code is None \
+                and not self.ext_missing and self.scenario_error is None:
+            if self.slice_over:   # preempted at a block boundary: the same place in the ready order, the registers as they are
+                t.ctx, t.resume_pc, t.result, t.state = uc.context_save(), uc.reg_read(UC_ARM64_REG_PC), uc.reg_read(UC_ARM64_REG_X0), "ready"
+                self.cur = None
+            elif uc.reg_read(UC_ARM64_REG_PC) == self.return_addr and t.tid == 1:   # main returned
+                self.exit_code = uc.reg_read(UC_ARM64_REG_X0)
+            else:
+                self._stop_fault("unexpected-stop")
+
     def run(self):
         uc = self.uc
         main = self.threads[1] = Thread(1)
-        self.order, self.last = [1], None
+        self.order = [1]
         uc.reg_write(UC_ARM64_REG_SP, self.stack_for(1))
         uc.reg_write(UC_ARM64_REG_X0, self.host_page)
         uc.reg_write(UC_ARM64_REG_LR, self.return_addr)
         uc.reg_write(UC_ARM64_REG_TPIDR_EL0, 0xDEAD0000)
-        main.ctx, main.resume_pc, main.state, main.result = uc.context_save(), self.entry, "ready", self.host_page
+        main.ctx, main.resume_pc = uc.context_save(), self.entry
+        self._ready(main, self.host_page)
         extra = {}
         while True:
-            if self.exit_code is not None:
-                reason, more = self._exit_class()
-                extra.update(more)
-            elif self.fault is not None:
-                reason, extra["fault"] = "fault", self.fault
-            elif self.scenario_error is not None:
-                reason, extra["scenario"] = "scenario-error", self.scenario_error
-            elif self.ext_missing:
-                reason, extra["ext"] = "ext-module-missing", {"module": self.ext_missing[0], "fn": self.ext_missing[1]}
-            elif self.limit_hit:
-                reason = "limit"
-            else:
-                reason = None
+            reason = self._end_reason(extra)
             if reason:
                 break
-            t = self._pick()
-            if t is None:
+            ran = False
+            for core in self.cores:
+                if self._end_reason(None):
+                    break
+                t = self._pick_core(core)
+                if t is not None:
+                    ran = True
+                    self._slice(core, t)
+            if not ran and not self._end_reason(None) and not self._advance_time():
                 reason, extra["waits"] = "deadlock", self._waits()
                 break
-            if self.last is not None and self.last != t.tid:
-                self.switches += 1
-            self.last, self.cur = t.tid, t
-            if self.cb_thread:
-                self.cb_thread(t.tid)
-            uc.context_restore(t.ctx)
-            uc.reg_write(UC_ARM64_REG_X0, t.result & U64)
-            t.state, self.slice_calls0 = "running", self.calls
-            try:
-                uc.emu_start(t.resume_pc, self.return_addr)
-            except UcError as e:
-                self._stop_fault("uc-error: %s" % e)
-                continue
-            if self.cur is t and self.fault is None and not self.limit_hit and self.exit_code is None \
-                    and not self.ext_missing and self.scenario_error is None:
-                if uc.reg_read(UC_ARM64_REG_PC) == self.return_addr and t.tid == 1:   # main returned
-                    self.exit_code = uc.reg_read(UC_ARM64_REG_X0)
-                else:
-                    self._stop_fault("unexpected-stop")
         return self._result(reason, extra)
-
-    def _exit_class(self):
-        """the run's end by the exit code: ("exit", {}), or the reach violation with its fact_id (the codes of fnvnx/reach.h)"""
-        c = self.exit_code
-        if c >> 24 == REACH_VIOLATION:   # fnvnx_reach_violation(fact_id): exit code 0x52000000 | fact_id
-            return "reach-violation", {"fact_id": c & 0xFFFFFF}
-        return "exit", {}
 
     def _result(self, reason, extra):
         if self.line and self.cb_console:
             self.cb_console(bytes(self.line).decode(errors="replace"))
             self.line = bytearray()
         r = dict(reason=reason, console=b"".join(self.console_text).decode(errors="replace"), exit_code=self.exit_code, host_calls=self.calls, switches=self.switches,
-                 threads=len(self.threads), virtual_ns=self.clock.now_ns(), events=list(self.events))
+                 threads=len(self.threads), virtual_ns=self.clock.now_ns(), events=list(self.events),
+                 cores={str(c): v for c, v in self.core_stats.items()})
         r.update(extra)
         return r
 
     def host_exit(self, code):
         """a host-target object (the renderer library) ended the process through the exit slot of the host runtime (bootrt: fnvnx_reach_violation) with `code`: the run's record as run() would return it for a guest that exited with that code"""
         self.exit_code = code
-        reason, extra = self._exit_class()
-        return self._result(reason, extra)
+        extra = {}
+        return self._result(self._end_reason(extra), extra)
