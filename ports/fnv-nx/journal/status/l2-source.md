@@ -573,3 +573,6 @@ After the first frame:
   - The farm rebuilds stage 2 only (K1 reused) and sends the pin to L1 and w15. plugins-cand3 takes the same fix (w3).
   - HOST1 on L5 section_guest.c:12 stays with L5.
 - 2026-11-15 21:25Z: DISPATCH1-DEF (asked for by L3a, owner w2, plugins-cand3): a shapeless definition gets a quiet descriptor only when it is static and its address is never taken, by GCC's address-taken fact. External linkage or a taken address makes it DISPATCH1. The hunk is ported from L3a 37d4e27df/b0198f906. It closes test_defdisp's 2 red cases on L3a base3 d9d208c61, with the cand3 build batch.
+- 2026-11-15 21:28Z: DISPATCH1-DEF is withdrawn. cand3's DEFDISP-NS (065136142, w2) closes the class. A shapeless definition gets a `-<reason>` row and exitgen is red when it is joined to an exe address.
+  - Proof: native indirect calls to a shapeless type are already call-site errors, so the dispatcher reaches such a definition only through a join.
+  - L3a rewrites its 2 test cases to this rule.
