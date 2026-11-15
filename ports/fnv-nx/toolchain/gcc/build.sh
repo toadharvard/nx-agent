@@ -267,5 +267,35 @@ if ! step merge; then
 	find "$PREFIX/lib/gcc/$TARGET/$GCC_VER" -maxdepth 1 -type f \( -name '*.a' -o -name '*.o' \) -delete
 	done_ merge
 fi
+# ---- stage 3: libnx, built by the game's compiler (stage 2) with the same semantics set as every guest unit, ILP32 pic variant.
+# Source: LIBNX_SRC (fnv-nx-build tools/libnx = upstream libnx b156b477), its tree_sha256 checked first. libnx's Makefile is devkitPro's
+# (base_rules, bin2s, -mtp=soft of devkitA64's gcc 15): none of it exists here, so the build is this step: every .c/.s of the Makefile's SOURCES
+# compiled as its release build (-DNDEBUG=1 -O2, -D__SWITCH__ -DLIBNX_NO_DEPRECATION), thread pointer = the guest's (TPIDR_EL0, no -mtp), data/*
+# embedded as bin2s does (name, name_end, name_size; <name>_bin.h). The asm follows the x19..x27 rule (libnx-guest.patch).
+if ! step libnx; then
+	LIBNX_SRC=${LIBNX_SRC:?LIBNX_SRC: the pinned libnx tree}; LIBNX_TREE_SHA256=${LIBNX_TREE_SHA256:?LIBNX_TREE_SHA256}
+	[ "$(python3 "$HERE/../../verify/cas.py" ingest "$BUILD/libnx-cas" "$LIBNX_SRC")" = "$LIBNX_TREE_SHA256" ] || { echo "libnx tree_sha256 differs from the pin"; exit 1; }
+	rm -rf "$BUILD/libnx" "$BUILD/libnx-cas"; mkdir -p "$BUILD/libnx" && cp -a "$LIBNX_SRC/nx" "$BUILD/libnx/nx" && cd "$BUILD/libnx"
+	patch -p1 < "$HERE/libnx-guest.patch"
+	cd nx; OBJ=$BUILD/libnx/obj; mkdir -p "$OBJ"
+	SRCS="source/arm source/kernel source/sf source/services source/crypto source/nvidia source/nvidia/ioctl source/display source/audio source/applets source/runtime source/runtime/devices source/runtime/util source/runtime/util/utf"
+	for f in data/*; do   # bin2s: the file as a symbol, its end and its size
+		n=$(basename "$f" | tr . _)
+		printf '\t.section .rodata.%s,"a",%%progbits\n\t.balign 8\n\t.global %s\n\t.global %s_end\n\t.global %s_size\n%s:\n\t.incbin "%s"\n%s_end:\n%s_size: .word %s_end - %s\n' "$n" "$n" "$n" "$n" "$n" "$PWD/$f" "$n" "$n" "$n" "$n" > "$OBJ/$n.s"
+		printf '#pragma once\n#include <stdint.h>\nextern const uint8_t %s[];\nextern const uint8_t %s_end[];\nextern const uint32_t %s_size;\n' "$n" "$n" "$n" > "$OBJ/${n}.h"
+	done
+	LXF="-mabi=ilp32 -fshort-wchar -fsigned-char -fPIC $TFLAGS -DNDEBUG=1 -D__SWITCH__ -DLIBNX_NO_DEPRECATION -Iinclude -Iinclude/switch -Iexternal/bsd/include -I$OBJ -iquote include/switch"
+	LXF="$LXF -ffile-prefix-map=$BUILD/libnx=/fnvnx/libnx"
+	ar_objs=""
+	for d in $SRCS; do for f in $d/*.c $d/*.s; do
+		[ -e "$f" ] || continue; o=$OBJ/$(echo "$f" | tr / _).o
+		case $f in *.c) PATH=$S2PATH $TARGET-gcc $LXF $SEM_C -std=gnu11 -c "$f" -o "$o";; *.s) PATH=$S2PATH $TARGET-gcc $LXF -x assembler-with-cpp -c "$f" -o "$o";; esac
+		ar_objs="$ar_objs $o"; done; done
+	for f in "$OBJ"/*.s; do o=$f.o; PATH=$S2PATH $TARGET-gcc $LXF -c "$f" -o "$o"; ar_objs="$ar_objs $o"; done
+	D=$PREFIX/$TARGET/lib/ilp32/wchar16/schar/pic; rm -f "$D/libnx.a"
+	"$PREFIX/bin/$TARGET-ar" Dcr "$D/libnx.a" $ar_objs && "$PREFIX/bin/$TARGET-ranlib" -D "$D/libnx.a"
+	cp -a include/switch.h include/switch "$PREFIX/$TARGET/include/"
+	cd "$BUILD"; done_ libnx
+fi
 python3 "$HERE/check_mirror.py" "$PREFIX" --s2 "$S2" --gcc13 "$GCC13_VER" --manifest --flags-dir "$GUEST_FLAGS_DIR" --flags-commit "$GUEST_FLAGS_COMMIT"
 echo "fnvnx-a64 installed in $PREFIX"

@@ -1,0 +1,72 @@
+# libnx source rules: (1) asm: x19..x27 belong to the guest, no libnx asm writes them (same as x19-x27.patch); (2) mm.c: the enum is int under the exe data model, so the pointer conditional of the original does not type: it takes the value instead. patch -p1 in the libnx tree root.
+--- a/nx/source/runtime/exception.s
++++ b/nx/source/runtime/exception.s
+@@ -33,8 +33,6 @@
+     stp x13, x14, [sp, #-16]!
+     stp x15, x16, [sp, #-16]!
+     stp x17, x18, [sp, #-16]!
+-    stp x19, x20, [sp, #-16]!
+-    str x21, [sp, #-16]!
+ 
+     stp x0, x1, [sp, #-16]!
+     sub sp, sp, #16
+@@ -49,8 +47,6 @@
+ 
+     ldp x0, x1, [sp], #16
+ 
+-    ldr x21, [sp], #16
+-    ldp x19, x20, [sp], #16
+     ldp x17, x18, [sp], #16
+     ldp x15, x16, [sp], #16
+     ldp x13, x14, [sp], #16
+--- a/nx/source/runtime/switch_crt0.s
++++ b/nx/source/runtime/switch_crt0.s
+@@ -23,11 +23,10 @@
+     b    __libnx_exception_entry
+ 
+ .Lcrt0_main_entry:
+-    // Preserve registers across function calls
+-    mov x25, x0  // entrypoint argument 0
+-    mov x26, x1  // entrypoint argument 1
+-    mov x27, x30 // loader return address
++    // Preserve registers across function calls (x19-x27 belong to the guest: they are never written here)
+     mov x28, sp  // initial stack pointer
++    stp x0, x1, [sp, #-32]!   // entrypoint arguments 0 and 1
++    str x30, [sp, #16]        // loader return address
+ 
+     // Perform runtime linking on ourselves (including relocations)
+     adr  x0, _start    // get aslr base
+@@ -39,9 +38,8 @@
+     str  x28, [x9, #:lo12:__stack_top]
+ 
+     // Perform system initialization
+-    mov  x0, x25
+-    mov  x1, x26
+-    mov  x2, x27
++    ldp  x0, x1, [sp]
++    ldr  x2, [sp, #16]
+     bl   __libnx_init
+ 
+     // Jump to the main function
+--- a/nx/source/services/mm.c
++++ b/nx/source/services/mm.c
+@@ -39,7 +39,8 @@
+ 
+ Result mmuRequestFinalize(const MmuRequest *request) {
+     bool need_old = hosversionBefore(2,0,0);
+-    return serviceDispatchIn(&g_mmuSrv, need_old ? 1 : 5, *(need_old ? &request->module : &request->id));
++    u32 in = need_old ? (u32)request->module : request->id; // the enum is int under the exe's data model: the two pointers of the original conditional do not match
++    return serviceDispatchIn(&g_mmuSrv, need_old ? 1 : 5, in);
+ }
+ 
+ Result mmuRequestSetAndWait(const MmuRequest *request, u32 freq_hz, s32 timeout) {
+@@ -57,7 +58,8 @@
+     bool need_old = hosversionBefore(2,0,0);
+ 
+     u32 freq = 0;
+-    Result rc = serviceDispatchInOut(&g_mmuSrv, need_old ? 3 : 7, *(need_old ? &request->module : &request->id), freq);
++    u32 in = need_old ? (u32)request->module : request->id;
++    Result rc = serviceDispatchInOut(&g_mmuSrv, need_old ? 3 : 7, in, freq);
+ 
+     if (R_SUCCEEDED(rc) && out_freq_hz)
+         *out_freq_hz = freq;

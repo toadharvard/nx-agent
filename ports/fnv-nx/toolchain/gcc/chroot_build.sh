@@ -30,7 +30,7 @@ mount --bind /proc "$CH/proc"
 mkdir -p "$CH/dev"
 DEVS="null zero full random urandom tty"
 for n in $DEVS; do rm -f "$CH/dev/$n"; : > "$CH/dev/$n"; mount --bind "/dev/$n" "$CH/dev/$n"; done
-trap 'for n in $DEVS; do umount "$CH/dev/$n" 2>/dev/null || true; done; umount "$CH/src" "$CH/dl" "$CH/dkp" "$CH/gc" "$CH/proc" 2>/dev/null || true' EXIT
+trap 'for n in $DEVS; do umount "$CH/dev/$n" 2>/dev/null || true; done; umount "$CH/src" "$CH/dl" "$CH/dkp" "$CH/gc" "$CH/lx" "$CH/proc" 2>/dev/null || true' EXIT
 chroot "$CH" /usr/bin/dpkg --force-all --configure -a > "$OUT/dpkg-configure.log" 2>&1 || { tail -20 "$OUT/dpkg-configure.log"; exit 1; }
 chroot "$CH" dpkg-query -W -f='${Package}=${Version}\n' > "$OUT/chroot-packages.txt"
 python3 - "$DEBS" "$OUT/chroot-packages.txt" <<'PY'
@@ -41,12 +41,14 @@ bad = [(n, got.get(n), v['version']) for n, v in p.items() if got.get(n) != v['v
 assert not bad and len(got) == len(p), 'chroot != profile: %s' % bad[:5]
 print('chroot packages == profile (%d)' % len(p))
 PY
-mkdir -p "$CH/src" "$CH/dl" "$CH/dkp" "$CH/build" "$CH/opt/fnvnx-a64"
+mkdir -p "$CH/src" "$CH/dl" "$CH/dkp" "$CH/build" "$CH/opt/fnvnx-a64" "$CH/lx"
 # GUEST_FLAGS_DIR (host dir with flags-{c,c++,asm}.json written by verify/guest_flags.py) is seen as /gc; GUEST_FLAGS_COMMIT is
 # the commit of guest_flags.py (recorded in MANIFEST.json)
 GC=$(realpath "${GUEST_FLAGS_DIR:?GUEST_FLAGS_DIR: dir of flags-*.json}"); : "${GUEST_FLAGS_COMMIT:?GUEST_FLAGS_COMMIT}"; mkdir -p "$CH/gc"
 mount --bind "$ROOT" "$CH/src"; mount --bind "$DL" "$CH/dl"; mount --bind "$DKP" "$CH/dkp"; mount --bind "$GC" "$CH/gc"
-chroot "$CH" /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root GUEST_FLAGS_DIR=/gc GUEST_FLAGS_COMMIT="$GUEST_FLAGS_COMMIT" JOBS="${JOBS:-$(nproc)}" \
+# LIBNX_SRC: the pinned libnx tree (fnv-nx-build tools/libnx, upstream b156b477), seen as /lx; build.sh checks LIBNX_TREE_SHA256 over it
+LX=$(realpath "${LIBNX_SRC:?LIBNX_SRC: checkout of tools/libnx}"); : "${LIBNX_TREE_SHA256:?LIBNX_TREE_SHA256}"; mount --bind "$LX" "$CH/lx"
+chroot "$CH" /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root GUEST_FLAGS_DIR=/gc GUEST_FLAGS_COMMIT="$GUEST_FLAGS_COMMIT" LIBNX_SRC=/lx LIBNX_TREE_SHA256="$LIBNX_TREE_SHA256" JOBS="${JOBS:-$(nproc)}" \
 	/src/toolchain/gcc/build.sh /dl /build /opt/fnvnx-a64 /dkp 2>&1 | tee "$OUT/build.log"
 mkdir -p "$OUT/mirror"; cp -a "$CH/opt/fnvnx-a64/." "$OUT/mirror/"
 python3 "$ROOT/verify/cas.py" ingest "$OUT/cas" "$OUT/mirror" | tee "$OUT/tree_sha256.txt"

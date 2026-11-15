@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """check_mirror.py - the checks of the fnvnx-a64 mirror (toolchain/gcc/build.sh header: the class rule).
 
-  check_mirror.py <prefix> [--s2 <stage 2 prefix>] [--gcc13 13.3.0] [--manifest] [--libnx <libnx checkout>]
+  check_mirror.py <prefix> [--s2 <stage 2 prefix>] [--gcc13 13.3.0] [--manifest]
 
 The rule: every ILP32 runtime library a game unit links comes from the unit's own compiler (GCC 13.3.0 + msvcmodel.patch)
 with the unit's data-model flags -mabi=ilp32 -fshort-wchar -fsigned-char. Checks (any failure exits 1):
@@ -19,9 +19,8 @@ with the unit's data-model flags -mabi=ilp32 -fshort-wchar -fsigned-char. Checks
   C7  one C++ library, one ABI: exactly one C++ include version (13.3.0), every ELF object of the library trees is ELF32 AArch64.
   C5  (--manifest) MANIFEST.json: gcc version, msvcmodel.patch sha256, flags, sizeof/alignof of wchar_t, size_t, long,
       long double, pointer, read from the game compiler's object code (no run).
-  C8  (--libnx) libnx is built by stage 1 (flags without -fshort-wchar/-fsigned-char). Its interface carries no type whose
-      size or layout depends on them: every named type of the libnx headers has the same layout under both flag sets, no
-      libnx declaration (type, member, function prototype) names wchar_t. Reports the numbers checked.
+  C8  libnx (stage 3, the game's compiler, same semantics set) is in the ILP32 pic dir with its headers; no member writes x19..x27 (read-only
+      mentions: a store source, a compare, a test). Reports the numbers checked.
 """
 import argparse
 import glob
@@ -158,11 +157,10 @@ def c5(prefix, s2, gcc13, here, flags_dir=None, flags_commit=''):
     gcc = (s2 or prefix) + '/bin/%s-gcc' % TARGET
     with tempfile.TemporaryDirectory() as t:
         open(t + '/p.c', 'w').write(
-            '#include <stddef.h>\nconst unsigned char fnvnx_probe[] = {sizeof(wchar_t), _Alignof(wchar_t), sizeof(size_t), '
+            '#include <stddef.h>\n#include <float.h>\n#include <sys/config.h>\n'
+            'const unsigned char fnvnx_probe[] = {sizeof(wchar_t), _Alignof(wchar_t), sizeof(size_t), '
             '_Alignof(size_t), sizeof(long), _Alignof(long), sizeof(long double), _Alignof(long double), sizeof(void *), '
-            '_Alignof(void *)};\n'
-            '#include <float.h>\n#include <sys/config.h>\n'
-            'const unsigned char fnvnx_probe2[] = {LDBL_MANT_DIG, DBL_MANT_DIG,\n'
+            '_Alignof(void *), LDBL_MANT_DIG, DBL_MANT_DIG,\n'
             '#ifdef _LDBL_EQ_DBL\n1\n#else\n0\n#endif\n};\n')
         r = run([gcc] + FLAGS + ['-O0', '-c', t + '/p.c', '-o', t + '/p.o'])
         if r.returncode != 0:
@@ -210,118 +208,52 @@ def c5(prefix, s2, gcc13, here, flags_dir=None, flags_commit=''):
         man['flags'] = fl
         man['guest_flags_commit'] = flags_commit
         man['guest_flags_sha256'] = {l: hashlib.sha256(open('%s/flags-%s.json' % (flags_dir, l), 'rb').read()).hexdigest() for l in fl}
+    man['libnx'] = LIBNX_INFO
     man['SEMANTICS_FLAGS'] = ' '.join(man['flags']['c++']) if flags_dir else man['ilp32_flags']
     man['sizeof_wchar_t'], man['sizeof_size_t'], man['sizeof_long'] = (man['sizeof'][k] for k in ('wchar_t', 'size_t', 'long'))
     open(prefix + '/MANIFEST.json', 'w').write(json.dumps(man, indent=1, sort_keys=True) + '\n')
     print('C5 ok: manifest written: %s' % json.dumps(man, sort_keys=True))
 
 
-def dwarf_layout(obj, libnx_inc):
-    from elftools.elf.elffile import ELFFile
-    out, uses_wchar = {}, set()
-    with open(obj, 'rb') as f:
-        dw = ELFFile(f).get_dwarf_info()
-        for cu in dw.iter_CUs():
-            dies = {d.offset: d for d in cu.iter_DIEs()}
-
-            def name(d):
-                a = d.attributes.get('DW_AT_name')
-                return a.value.decode() if a else None
-
-            def sig(d, depth=0):
-                """resolved layout of a type DIE: size and, for aggregates, member offsets and member layouts"""
-                if d is None:
-                    return ('void',)
-                tag = d.tag
-                if depth > 8:
-                    return (tag, name(d))
-                t = d.attributes.get('DW_AT_type')
-                tgt = dies.get(t.value + cu.cu_offset) if t else None
-                size = d.attributes['DW_AT_byte_size'].value if 'DW_AT_byte_size' in d.attributes else None
-                if tag in ('DW_TAG_typedef', 'DW_TAG_const_type', 'DW_TAG_volatile_type', 'DW_TAG_restrict_type', 'DW_TAG_atomic_type'):
-                    return sig(tgt, depth + 1)
-                if tag == 'DW_TAG_pointer_type':
-                    return ('ptr', size)
-                if tag == 'DW_TAG_array_type':
-                    cnt = tuple(c.attributes['DW_AT_upper_bound'].value if 'DW_AT_upper_bound' in c.attributes else None
-                                for c in d.iter_children() if c.tag == 'DW_TAG_subrange_type')
-                    return ('array', cnt, sig(tgt, depth + 1))
-                if tag in ('DW_TAG_structure_type', 'DW_TAG_union_type'):
-                    mem = tuple((name(c), c.attributes['DW_AT_data_member_location'].value
-                                 if 'DW_AT_data_member_location' in c.attributes else 0,
-                                 sig(dies.get(c.attributes['DW_AT_type'].value + cu.cu_offset), depth + 1))
-                                for c in d.iter_children() if c.tag == 'DW_TAG_member')
-                    return (tag, size, mem)
-                if tag == 'DW_TAG_base_type':
-                    return ('base', name(d), size)       # signedness (encoding) is not layout: not part of the signature
-                return (tag, size)
-
-            def chain_has_wchar(d, depth=0):
-                if d is None or depth > 12:
-                    return False
-                if d.tag == 'DW_TAG_typedef' and name(d) == 'wchar_t':
-                    return True
-                t = d.attributes.get('DW_AT_type')
-                if t and chain_has_wchar(dies.get(t.value + cu.cu_offset), depth + 1):
-                    return True
-                return any(chain_has_wchar(dies.get(c.attributes['DW_AT_type'].value + cu.cu_offset), depth + 1)
-                           for c in d.iter_children() if c.tag == 'DW_TAG_member' and 'DW_AT_type' in c.attributes)
-            files = {}
-            lp = dw.line_program_for_CU(cu)
-            if lp:
-                for i, e in enumerate(lp['file_entry']):
-                    files[i + (0 if lp['version'] >= 5 else 1)] = e.name.decode() if isinstance(e.name, bytes) else e.name
-                dirs = lp['include_directory']
-                for i, e in enumerate(lp['file_entry']):
-                    di = e.dir_index
-                    dn = dirs[di - (0 if lp['version'] >= 5 else 1)] if (di or lp['version'] >= 5) else b''
-                    dn = dn.decode() if isinstance(dn, bytes) else dn
-                    fn = e.name.decode() if isinstance(e.name, bytes) else e.name
-                    files[i + (0 if lp['version'] >= 5 else 1)] = os.path.join(dn, fn)
-            for d in dies.values():
-                if d.tag not in ('DW_TAG_typedef', 'DW_TAG_structure_type', 'DW_TAG_union_type', 'DW_TAG_enumeration_type'):
-                    continue
-                n = name(d)
-                df = d.attributes.get('DW_AT_decl_file')
-                path = files.get(df.value, '') if df else ''
-                if not n or not path.startswith(libnx_inc):
-                    continue
-                key = (d.tag, n)
-                out[key] = sig(d)
-                if chain_has_wchar(d):
-                    uses_wchar.add(key)
-    return out, uses_wchar
+LIBNX_INFO = {}
+WRITES_OK = ('str', 'stp', 'strb', 'strh', 'stur', 'sturb', 'sturh', 'stlr', 'cmp', 'cmn', 'tst')   # the instructions that only READ their register operands
 
 
-def c8(prefix, libnx):
-    inc = os.path.join(libnx, 'nx', 'include')
-    gcc = prefix + '/bin/%s-gcc' % TARGET
-    base = ['-mabi=ilp32', '-march=armv8-a+crc+crypto', '-mtune=cortex-a57', '-fPIE', '-ftls-model=local-exec', '-D__SWITCH__',
-            '-I' + inc, '-x', 'c', '-std=gnu11', '-g', '-fno-eliminate-unused-debug-types', '-c']
-    res = {}
-    with tempfile.TemporaryDirectory() as t:
-        open(t + '/all.c', 'w').write('#include <switch.h>\n')
-        for tag, extra in (('A', []), ('B', ['-fshort-wchar', '-fsigned-char'])):
-            aux = '%s/%s.aux' % (t, tag)
-            r = run([gcc] + base + extra + ['-aux-info', aux, t + '/all.c', '-o', '%s/%s.o' % (t, tag)])
-            if r.returncode != 0:
-                fail('C6 <switch.h> does not compile under flag set %s: %s' % (tag, r.stderr.strip()[-300:]))
-                return
-            lay, wch = dwarf_layout('%s/%s.o' % (t, tag), inc)
-            protos = [ln for ln in open(aux) if ('/' + inc.lstrip('/')) in ln or inc in ln]
-            res[tag] = (lay, wch, protos)
-    (la, wa, pa), (lb, wb, pb) = res['A'], res['B']
-    bad = [k for k in sorted(set(la) | set(lb)) if la.get(k) != lb.get(k)]
-    for k in bad:
-        fail('C6 libnx type %s %s has a different layout under -fshort-wchar/-fsigned-char' % k)
-    for k in sorted(wa | wb):
-        fail('C6 libnx type %s %s carries wchar_t' % k)
-    for ln in pa + pb:
-        if re.search(r'\bwchar_t\b|\bwint_t\b', ln):
-            fail('C6 a libnx prototype names wchar_t/wint_t: ' + ln.strip()[:160])
-    funcs = len({re.search(r'(\w+)\s*\(', ln).group(1) for ln in pa if re.search(r'(\w+)\s*\(', ln)})
-    print('C6: %d libnx types and %d function prototypes checked, %d type layout differences, %d use wchar_t'
-          % (len(la), funcs, len(bad), len(wa | wb)))
+def c8(prefix):
+    """libnx is built by the game's compiler (stage 3): libnx.a is in the ILP32 pic multilib dir, its headers are installed, and no member writes
+    x19..x27 (the guest's registers: never saved, never clobbered; C code cannot, -ffixed-x19..x27; the asm is judged on the objects). A mention of
+    x19..x27 is allowed only as the source of a store, a compare or a test (the exception dump reads them). The ELF32 class of every member is C7's."""
+    d = prefix + '/%s/lib/ilp32/wchar16/schar/pic' % TARGET
+    lib = d + '/libnx.a'
+    if not os.path.isfile(lib) or not os.path.isfile(prefix + '/%s/include/switch.h' % TARGET):
+        fail('C8 libnx.a (%s) or switch.h is not in the mirror' % lib)
+        return
+    objdump = prefix + '/bin/%s-objdump' % TARGET
+    members = run([prefix + '/bin/%s-ar' % TARGET, 't', lib]).stdout.split()
+    bad, seen = [], 0
+    reg = re.compile(r'\b[xw](?:19|2[0-7])\b')
+    cur = ''
+    for ln in run([objdump, '-d', '--no-show-raw-insn', lib]).stdout.splitlines():
+        m = re.match(r'^(\S+\.o):\s+file format', ln)
+        if m:
+            cur = m.group(1)
+            continue
+        m = re.match(r'^\s*[0-9a-f]+:\s+(\S+)\s+(.*)$', ln)
+        if not m or not reg.search(m.group(2)):
+            continue
+        seen += 1
+        op = m.group(1)
+        ops = m.group(2).split('//')[0]
+        first = re.split(r',(?![^\[]*\])', ops)   # operands, a [..] address kept whole
+        regops = [o for o in first[:2 if op in ('stp',) else 1]]
+        in_addr = any(reg.search(o) for o in first if '[' in o)
+        if in_addr or op not in WRITES_OK or any(reg.search(o) for o in first[2 if op == 'stp' else 1:] if '[' not in o and op not in ('cmp', 'cmn', 'tst')):
+            bad.append('%s: %s %s' % (cur, op, ops.strip()))
+    for x in bad[:20]:
+        fail('C8 libnx writes or addresses through x19..x27: ' + x)
+    LIBNX_INFO.update({'archive': '%s/lib/ilp32/wchar16/schar/pic/libnx.a' % TARGET, 'members': len(members), 'x19_x27_mentions_checked': seen,
+                       'source_tree_sha256': os.environ.get('LIBNX_TREE_SHA256', '')})
+    print('C8 ok: libnx.a has %d members, %d instructions mention x19..x27 (a store source, a compare or a test is allowed), %d violations' % (len(members), seen, len(bad)))
 
 
 SIZED = '''#include <new>
@@ -416,7 +348,6 @@ def main():
     ap.add_argument('--manifest', action='store_true')
     ap.add_argument('--flags-dir', help='directory of flags-{c,c++,asm}.json from verify/guest_flags.py')
     ap.add_argument('--flags-commit', default='')
-    ap.add_argument('--libnx')
     a = ap.parse_args()
     prefix = a.prefix.rstrip('/')
     here = os.path.dirname(os.path.abspath(__file__))
@@ -426,10 +357,9 @@ def main():
     c4(prefix, a.gcc13)
     c6(prefix, a.s2)
     c7(prefix, a.gcc13)
+    c8(prefix)
     if a.manifest:
         c5(prefix, a.s2, a.gcc13, here, a.flags_dir, a.flags_commit)
-    if a.libnx:
-        c8(prefix, a.libnx)
     sys.exit(1 if fails else 0)
 
 
