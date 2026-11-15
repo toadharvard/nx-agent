@@ -99,9 +99,9 @@ def make_repo(name, gen_extra="", rec=None, files=None, extra_roots=()):
     w(repo, "toy/build.json", json.dumps(rec or RECIPE, indent=1))
     w(repo, "verify/env.json", open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(VERIFY))), recipe.ENV_JSON)).read())   # the declared environment
     w(repo, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [
-        {"path": ROOT, "class": "product", "target": "host", "gates": [], "recipe": ROOT + "/build.json"},
-        {"path": T + "gen", "class": "tool", "gates": []}, {"path": T + "verify", "class": "tool", "gates": []},
-        {"path": T + "link", "class": "tool", "gates": []}, {"path": T + "contract", "class": "tool", "gates": []}] + list(extra_roots)}))
+        {"path": ROOT, "class": "product", "target": "host", "recipe": ROOT + "/build.json"},
+        {"path": T + "gen", "class": "tool"}, {"path": T + "verify", "class": "tool"},
+        {"path": T + "link", "class": "tool"}, {"path": T + "contract", "class": "tool"}] + list(extra_roots)}))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "toy")
     return repo
@@ -216,7 +216,7 @@ def main():
     def gate_cases():
         for n in ("build", "determinism"):
             empty = make_repo("empty-" + n)
-            w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": T + "toy", "class": "doc", "gates": []}]}))
+            w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": T + "toy", "class": "doc"}]}))
             rc, g, _, txt = gate(empty, n, BASE + "/ge" + n)
             check("%s gate with no product root: universe 0, green" % n, rc == 0 and g["universe"] == 0 and accepted(n, BASE + "/ge" + n)[0] == "green", txt)
 
@@ -361,7 +361,7 @@ def main():
                        files={"toy/a.c": a_c, "toy/b.c": None, "toy/c.c": None, "toy/constants.tsv": None, "toy/inc/toy.h": None,
                               "lib/l.c": "int f_lib(void) { return 1; }\n", "lib/build.json": json.dumps(librec)})
         ad = json.load(open(os.path.join(lr, T + "verify/admit.json")))
-        ad["roots"].append({"path": LIB, "class": "product", "target": "host", "gates": [], "recipe": LIB + "/build.json"})
+        ad["roots"].append({"path": LIB, "class": "product", "target": "host", "recipe": LIB + "/build.json"})
         w(lr, "verify/admit.json", json.dumps(ad))
         git(lr, "add", "-A")
         git(lr, "commit", "-q", "-m", "lib")
@@ -587,7 +587,7 @@ def check_gen_reads(SS):
     """A generator stage reads, read-only, exactly its declared inputs, tracked files or directories of any admitted root (RECIPE.md "generated").
     The stage key holds the content of each; an undeclared read, a write outside /out, an untracked file and `uses` on a plain file are red."""
     OTH = T + "other"
-    ex = [{"path": OTH, "class": "doc", "gates": []}]
+    ex = [{"path": OTH, "class": "doc"}]
     rd = 'import sys\nn = int(open("/in/%s/data.txt").read())\n' % OTH
     wr = 'os.makedirs("/out/gen")\nopen("/out/gen/gen.h", "w").write("#define NCONST 1\\n#define STAMP %dL\\n" % (n - n))\n'
     def rec_(ins=(OTH + "/data.txt",), **kw):
@@ -656,7 +656,7 @@ def check_run(SS):
     HX, OTH = T + "hx", T + "other"
     hrec = {"format": "fnvnx-recipe/1", "compiler": {"cc": "gcc-13", "cxx": "g++-13"}, "flags": {"c": ["-fPIE", "-O1", "-ffreestanding", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"], "cxx": [], "asm": []},
             "include": [], "units": "all", "link": {"kind": "exe", "output": "hx.exe", "flags": ["-m", "elf_x86_64"]}, "errno_accessor": "__errno"}
-    ex = [{"path": HX, "class": "product", "target": "host", "gates": [], "recipe": HX + "/build.json"}, {"path": OTH, "class": "doc", "gates": []}]
+    ex = [{"path": HX, "class": "product", "target": "host", "recipe": HX + "/build.json"}, {"path": OTH, "class": "doc"}]
 
     def rec_(args=("ok",), ins=(), debs=(), outs=("o.txt",), art=HX + ":hx.exe"):
         return dict(RECIPE, run=[{"name": "r", "artifact": art, "args": list(args), "inputs": list(ins), "debs": ["libc6"] + list(debs), "outputs": list(outs)}])

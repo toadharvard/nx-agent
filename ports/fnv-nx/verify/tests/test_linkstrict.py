@@ -138,7 +138,7 @@ LS = lambda repo, name, cache=None: (lambda r: (r, verdict._gate_result({"name":
     TR.gate(repo, "linkstrict", TR.BASE + "/" + name, cache))
 GC = ROOT + "/cache"
 empty = TR.make_repo("ls-empty")
-TR.w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": TR.T + "toy", "class": "doc", "gates": []}]}))
+TR.w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": TR.T + "toy", "class": "doc"}]}))
 (rc, g, _, txt), st = LS(empty, "e")
 check("no product root: universe 0, green, accepted by the verdict", rc == 0 and g["universe"] == 0 and st[0] == "green", (g, txt))
 # The toy's items: references a.c->f_b; definitions f_a, f_b, f_c, os_svc; the ELF of a linked root. A linked root also carries the product's

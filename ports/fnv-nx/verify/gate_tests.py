@@ -242,7 +242,9 @@ def gitdirs(root):
 def read_set(lines, root, skip, gits):
     """(files {rel: None}, dirs {rel}, git bool) of an strace log: what the run read under ROOT, without the SKIP directories (its own TMPDIR) and __pycache__."""
     files, dirs, git = {}, set(), False
-    for _pid, kind, path, _fl in opentrace.parse(lines, root, extra=True):
+    for _pid, kind, path, fl in opentrace.parse(lines, root, extra=True):
+        if kind == "open" and "O_WRONLY" in fl and "O_RDWR" not in fl:
+            continue   # a file only written is not read: its content is no input of the run
         if any(opentrace.under(path, [g]) for g in gits):
             git = True
             continue

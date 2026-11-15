@@ -66,12 +66,12 @@ def make_repo(name, rec, origin, files=None, extra_roots=(), target="host"):
             w(repo, k, v)
     w(repo, ROOT + "/build.json", json.dumps(rec, indent=1))
     w(repo, recipe.ENV_JSON, open(os.path.join(REAL, recipe.ENV_JSON)).read())   # the declared environment: a build runs only on the machine it describes
-    root = {"path": ROOT, "class": "product", "target": target, "gates": [], "recipe": ROOT + "/build.json"}
+    root = {"path": ROOT, "class": "product", "target": target, "recipe": ROOT + "/build.json"}
     if origin is not None:
         root["cxx_origin"] = origin
     w(repo, T + "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [
-        root, {"path": T + "toolchain", "class": "tool", "gates": []}, {"path": T + "verify", "class": "tool", "gates": []},
-        {"path": T + "gen", "class": "tool", "gates": []}] + list(extra_roots)}))
+        root, {"path": T + "toolchain", "class": "tool"}, {"path": T + "verify", "class": "tool"},
+        {"path": T + "gen", "class": "tool"}] + list(extra_roots)}))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "toy")
     return repo
@@ -302,7 +302,7 @@ def main():
     tt = T + "gen2tree/lift.py"
     trec = dict(srec, generated=[dict(srec["generated"][0], tool=tt)])
     tr = make_repo("treetool", trec, {"lifted_by": tt, "stage": st}, {tt: lift, T + "gen2/x.py": "", ROOT + "/a.cc": None},
-                   extra_roots=[{"path": T + "gen2", "class": "tool", "gates": [], "trees": [T + "gen2", T + "gen2tree"]}])
+                   extra_roots=[{"path": T + "gen2", "class": "tool", "trees": [T + "gen2", T + "gen2tree"]}])
     check("a tool file in a tree of an admitted tool root (not under the root path) is a valid lifted_by and generator tool", errs(tr, trec) == [], errs(tr, trec))
     tr2 = make_repo("treeplain", trec, {"lifted_by": tt, "stage": st}, {tt: lift, ROOT + "/a.cc": None})
     check("the same file under no root or tree is red", any("not a tracked .py of an admitted tool" in x for x in errs(tr2, trec)), errs(tr2, trec))
@@ -312,7 +312,7 @@ def main():
     hfiles = dict(sfiles, **{hh: "#define FNVL_HOST 1\n"})
     for tg, want in (("guest", False), ("host", True)):
         hr = make_repo("hh_" + tg, hrec, {"lifted_by": T + "gen/lift.py", "stage": st}, hfiles,
-                       extra_roots=[{"path": T + "platform", "class": "product", "target": "guest", "gates": []}], target=tg)
+                       extra_roots=[{"path": T + "platform", "class": "product", "target": "guest"}], target=tg)
         he = [x for x in errs(hr, hrec) if "include" in x]
         check("lifted root of target %s including platform/include (a guest product root): %s" % (tg, "red, the other target is no home" if want else "no include error"),
               bool(he) == want and (not want or any("lies in no admitted product root" in x for x in he)), he)

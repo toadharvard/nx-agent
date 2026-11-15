@@ -38,7 +38,7 @@ def mk(name, rec, files=None, libs=(), classes=None):
     repo = TR.make_repo(name, rec=rec, files=dict(BASE_FILES, **(files or {})))
     admit = json.load(open(repo + "/" + TR.T + "verify/admit.json"))
     for path, (r, fs) in dict(libs).items():
-        admit["roots"].append({"path": path, "class": "product", "target": "host", "gates": [], "recipe": path + "/build.json"})
+        admit["roots"].append({"path": path, "class": "product", "target": "host", "recipe": path + "/build.json"})
         TR.w(repo, path[len(T):] + "/build.json", json.dumps(r))
         for f, text in fs.items():
             TR.w(repo, path[len(T):] + "/" + f, text)

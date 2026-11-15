@@ -62,8 +62,8 @@ V = "ports/fnv-nx/"
 
 def adm(*entries, extra=()):
     """admit.json of a toy tree: tool roots link and rules naming gate pure; ENTRIES are repo-relative stage entry points (of link/)."""
-    roots = [{"path": V + "link", "class": "tool", "gates": ["pure", "selftests"], "entry": [V + "link/" + e for e in entries]},
-             {"path": V + "rules", "class": "tool", "gates": ["pure", "selftests"], "entry": [V + "rules/" + e for e in extra]}]
+    roots = [{"path": V + "link", "class": "tool", "entry": [V + "link/" + e for e in entries]},
+             {"path": V + "rules", "class": "tool", "entry": [V + "rules/" + e for e in extra]}]
     return json.dumps({"format": "fnvnx-admit/1", "roots": roots})
 
 def pure(d, *entries, extra=()):
