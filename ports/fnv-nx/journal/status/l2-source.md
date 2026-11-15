@@ -271,3 +271,8 @@ After the first frame:
   - Rule: a vector type is spelled from GCC's own compatibility facts (lane count, element, opaque, qualifiers) as `vec:<N>:<elem>`.
   - Worker: w3, before HOST1. Doing.
 - L1 has taken the three gate_order blockers onto cand2 with w15. w2's gate-side class (G) is the sites where every predecessor carries the same constant offset, and those go to w15.
+- w2, the nonframe trace: 144 accesses in 46 objects. By provenance: loaded pointer 64, unresolved 34, symbol 18, frame pointer 10, call return 6, by-reference parameter 4, computed 8. Rulings:
+  - No env-var trace (it would be a second channel).
+  - ORD-T: after the rewrite, every GIMPLE access is either ordered or plain with exactly one reason from a closed set; a plain access with no reason is a compile error, and the record holds counts per reason.
+  - Then the class rules: RO (no-SHF_WRITE section, gate-side), BYREF (pass_by_reference copy, `args:N`), and the private array with a variable index (gate-side join, L1 w15).
+  - The rest are grouped after ORD-T. Doing.
