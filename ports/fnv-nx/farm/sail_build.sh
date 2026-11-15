@@ -59,7 +59,7 @@ else echo "$OUT.ir is up to date"; fi
 sha256sum "$OUT.ir" "$HERE/x86.toml"
 # PUBLISH_IR=1: publish the IR once as the external tools/sail-ir-<sha 12 hex> of the artifacts repository (every consumer fetches it by sha: farm_shapeprove.sh)
 if [ "${PUBLISH_IR:-0}" = 1 ]; then
-    SHA=$(sha256sum "$OUT.ir" | cut -d' ' -f1); BR=tools/sail-ir-${SHA:0:12}; PB=${FNVNX_BUILD:-/home/user/fnv-nx-build}; T=$(mktemp -d)
+    SHA=$(sha256sum "$OUT.ir" | cut -d' ' -f1); BR=tools/sail-ir-${SHA:0:12}; PB=${FNVNX_BUILD:?FNVNX_BUILD (clone of fnv-nx-build)}; T=$(mktemp -d)
     mkdir -p "$T/ir"; cp "$OUT.ir" "$T/ir/x86_proof.ir"
     python3 - "$T" "$SHA" "$(git -C "$HERE" rev-parse HEAD)" <<'PY'
 import json, sys

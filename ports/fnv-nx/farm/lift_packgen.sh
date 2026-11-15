@@ -10,7 +10,7 @@
 set -euo pipefail
 SHA=$1; N=$2; BRIDGE=$3; IAT=$4; shift 4
 HERE=$(cd "$(dirname "$0")/../lift" && pwd)
-B=${FNVNX_BUILD:-/home/user/fnv-nx-build}; W=${FNVNX_WORK:-/home/user/l3work/farm}; F=${FNVNX_FACTS:-/home/user/l3facts2}
+B=${FNVNX_BUILD:?FNVNX_BUILD (clone of fnv-nx-build)}; W=${FNVNX_WORK:-${GATE_CACHE:?GATE_CACHE not set}/farm}; F=${FNVNX_FACTS:?FNVNX_FACTS (the facts directory: universe.tsv)}
 export FNVNX_UNIVERSE="$F/universe.tsv" PYTHONHASHSEED=0 LC_ALL=C
 fetch() {   # tag, count, dir
     mkdir -p "$3"

@@ -5,11 +5,11 @@
 #          shards are numbered 0 .. N-1; last line: LIFTGEN module= first= count= published= failed= seconds=; exit 1 if any shard is unpublished
 # Inputs (exe-derived, private): fnv-nx-build branches gamedata/exe, gamedata/redist, l3a-lift/facts (universe.tsv), l1-contract/mp4 (modules.tsv); the lifter is this checkout.
 # Output: fnv-nx-build branch l3a-lift/src/<lifter sha12>[-<module>]/<K>of<N> = texts_K.txt, missing_K.tsv, forms_K.tsv, encs_K.tsv, shard.txt (the count line).
-# Nothing exe-derived is written into this repository. Env: FNVNX_BUILD (clone of fnv-nx-build, default /home/user/fnv-nx-build), FNVNX_WORK (default /home/user/l3work/farm).
+# Nothing exe-derived is written into this repository. Env: FNVNX_BUILD (clone of fnv-nx-build, required), FNVNX_WORK (default $GATE_CACHE/farm).
 set -euo pipefail
 FIRST=$1; COUNT=$2; N=$3; JOBS=${4:-$(nproc)}
 HERE=$(cd "$(dirname "$0")/../lift" && pwd)
-B=${FNVNX_BUILD:-/home/user/fnv-nx-build}; W=${FNVNX_WORK:-/home/user/l3work/farm}
+B=${FNVNX_BUILD:?FNVNX_BUILD (clone of fnv-nx-build)}; W=${FNVNX_WORK:-${GATE_CACHE:?GATE_CACHE not set}/farm}
 SHA=$(git -C "$HERE" rev-parse HEAD | cut -c1-12)
 bash "$HERE/../farm/setup_verdict_env.sh"      # the declared environment (verify/env.json): the python and capstone versions are part of it
 mkdir -p "$W/in"

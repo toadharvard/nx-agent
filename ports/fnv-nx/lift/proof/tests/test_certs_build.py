@@ -9,7 +9,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
 from proof import certbasis, certs_build, prove, shape, symform
 
-WORK = os.environ.get('FNVNX_TEST_WORK', '/home/user/l3work/proof/test_work')
+WORK = os.environ.get('FNVNX_TEST_WORK') or __import__('tempfile').mkdtemp(prefix='fnvnx-proof-test-')
 MD = shape.decoder()
 
 

@@ -20,7 +20,7 @@ import fakeext
 from proof import certbasis, formgate, prove, shape
 import recipe
 
-WORK = os.environ.get('FNVNX_TEST_WORK', '/home/user/l3work/proof/test_work')     # declared input: the directory the fixtures are written below
+WORK = os.environ.get('FNVNX_TEST_WORK') or __import__('tempfile').mkdtemp(prefix='fnvnx-proof-test-')     # declared input: the directory the fixtures are written below
 _SEQ = itertools.count()
 
 

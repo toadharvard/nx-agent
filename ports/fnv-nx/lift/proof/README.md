@@ -46,7 +46,7 @@ to every data address (checked in a run with base 0x10000: lin = base + zero-ext
 Real mode, V86, SMM are not implemented. State selects the mode (`-I` registers), so 32-bit semantics are available: default operand/address size
 from CS.D (memory_accessors.sail `select_address_size`), stack width from SS.D, segment base/limit/attributes honoured (`ea_to_la`, null selector and limit
 checks), 0x40-0x4f are inc/dec (REX only in 64-bit mode; in 64-bit mode `40` decodes as REX + `00 00`, rip+3), 0x66 forms, push/pop/call/ret with a
-32-bit stack (ran: all proved/ran in `/home/user/l3work/proof/t2.py` list) and fs: overrides all execute. Consequently no form needs the 64-bit-mode workaround
+32-bit stack (ran: every form proved or ran) and fs: overrides all execute. Consequently no form needs the 64-bit-mode workaround
 (0x67 / constraining upper halves); the driver still returns the low 32 bits of 64-bit registers with free upper halves, so a dependence on an upper half
 would be a counter-example.
 
@@ -60,8 +60,8 @@ z3-solver 5.4.0.0 (pip, libz3.so.5.4), sail-x86-from-acl2 0c6c023, then `sail_bu
 `x86_proof.ir` and exits 1 unless it equals the pin. Every version, commit and sha256 is in `proof/sail_pins.txt`. Env: `GATE_CACHE` (required), `REMS` `TOOLS` `WORK` `JOBS` (defaults under `$GATE_CACHE/sail/<pins>`).
 `MIRROR=<dir> bash ports/fnv-nx/farm/sail_setup.sh` takes every download from `<dir>`; `bash ports/fnv-nx/farm/sail_setup.sh --make-mirror <dir>` fills it from the network.
 The IR is path independent: isla-sail records source file names in the IR, so `sail_build.sh` runs it in a staging tree with relative names only.
-Cause of 3acf7d99 (README) vs 66cf6d73 (farm): the old script passed the splice files by absolute path (`$HERE`); run from `/home/user/nx-agent/ports/...` it gives
-3acf7d99 (10,389,604 B), from `/home/user/nx-l3/ports/...` 66cf6d73 (10,389,595 B), both reproduced. The staged build gives 55f87ab6 (10,389,242 B) in every directory.
+Cause of 3acf7d99 (README) vs 66cf6d73 (farm): the old script passed the splice files by absolute path (`$HERE`); run from one checkout path it gives
+3acf7d99 (10,389,604 B), from another checkout path 66cf6d73 (10,389,595 B), both reproduced. The staged build gives 55f87ab6 (10,389,242 B) in every directory.
 
 ### Sail model patches (W9b)
 `proof/sail_patches/rotate_count.sail` (rotate_left_bits/rotate_right_bits reduce the count mod width) and `ror_cf.sail` (ROR CF = msb of the result for masked
