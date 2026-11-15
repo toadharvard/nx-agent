@@ -14,7 +14,7 @@ Rows:
                  -> ds es ss, the TEB's segment -> fs); gs: undecided (no WDK role); tr = KGDT_TSS.
   mov_to_sreg    the selectors a `mov sreg, r` can load at CPL 3: null for es/ds/fs/gs; the ring-3 data selectors for every register; the code selector: undecided.
   int_ring3      the vectors Wine 9.0 handles, minus those a documented gate excludes at build 7601 (0x29: MSDN __fastfail, Windows 8+; undecided in `excluded`) for a user-mode `int n` (handle_interrupt cases) and the traps it maps to #BP / #OF (vectors 3, 4); every other
-                 vector: undecided (no pinned source says whether Windows 7 has a ring-3 gate there).
+                 vector except the excluded ones: other_vectors, the SDM #GP(n*8+2) delivered as Wine 9.0 does (access violation, precedence 2).
   cr4            tsd 0 (Wine: rdtsc is not intercepted); umip 0 (SDM CR4.UMIP is reserved unless CPUID.07H:ECX[2], and the declared CPU's max basic leaf is below 7);
                  pce undecided.
   eflags         the initial user EFLAGS of Wine 9.0 and its IOPL; IOPL is not user-modifiable (WDK EFLAGS_USER_SANITIZE).
@@ -84,6 +84,35 @@ def build(osrec, src, mirror, wine, cpumodel):
     vec = sorted(set(ints) | ({3} if "TRAP_x86_BPTFLT" in traps else set()) | ({4} if "TRAP_x86_OFLOW" in traps else set()))
     tail = fn.group(0).split("case 0x6c:", 1)[1].split("default:", 1)[0]
     io_ops = sorted(int(o, 16) for o, c in re.findall(r"case (0x[0-9a-fA-F]+):\s*/\*\s*([^*]*?)\s*\*/", "case 0x6c:" + tail) if re.match(r"(ins|outs|in|out)[bl( ]", c))
+    # other_vectors: a user-mode `int n` at a vector that is neither in `vectors` nor in `excluded` (precedence 2: MSDN and the WDK say nothing). Every Wine fact used is asserted from the pinned text.
+    wline = lambda off: wt.count("\n", 0, off) + 1
+    hi_cases = sorted(int(x, 16) for x in re.findall(r"^    case (0x[0-9a-fA-F]+):", hi.group(0), re.M))
+    hi_sw = hi.group(0).split("switch(interrupt)", 1)[1] if "switch(interrupt)" in hi.group(0) else ""
+    if hi_cases != [0x29, 0x2d] or len(re.findall(r"^    default:\s*\n\s*return FALSE;", hi_sw, re.M)) != 1:
+        raise SystemExit("gen_x86sys: handle_interrupt cases are not exactly {0x29, 0x2d} plus `default: return FALSE`")
+    pf = re.search(r"    case TRAP_x86_PROTFLT:.*?\n        break;\n", segv.group(0), re.S)
+    if not pf:
+        raise SystemExit("gen_x86sys: segv_handler has no TRAP_x86_PROTFLT branch")
+    pft = pf.group(0)
+    need_pf = ["(err & 7) == 2 && handle_interrupt( err >> 3,", "rec.ExceptionCode = EXCEPTION_ACCESS_VIOLATION;", "rec.NumberParameters = 2;", "rec.ExceptionInformation[0] = 0;",
+               "rec.ExceptionInformation[1] = 0xffffffff;", "if (!err && (rec.ExceptionCode = is_privileged_instr("]
+    if any(pft.count(x) != 1 for x in need_pf) or pft.index("handle_interrupt(") > pft.index("EXCEPTION_ACCESS_VIOLATION"):
+        raise SystemExit("gen_x86sys: the PROTFLT branch of segv_handler is not the one the row other_vectors needs")
+    if not re.search(r"EXCEPTION_RECORD rec = \{ 0 \};", segv.group(0)):
+        raise SystemExit("gen_x86sys: segv_handler does not zero-initialise its exception record (ExceptionFlags 0)")
+    ser = re.search(r"static void \*setup_exception_record\(.*?\n}\n", wt, re.S)
+    if not ser or "rec->ExceptionAddress = (void *)EIP_sig( sigcontext );" not in ser.group(0) or "Eip" in ser.group(0).replace("EIP_sig", ""):
+        raise SystemExit("gen_x86sys: setup_exception_record does not assign ExceptionAddress = EIP_sig and leave the context's Eip alone")
+    cg = re.search(r"static inline BOOL check_invalid_gs\(.*?\n}\n", wt, re.S)
+    if not cg or "case 0xcd" in cg.group(0) or "default:\n        return FALSE;" not in cg.group(0) or "case 0x65:" not in cg.group(0):
+        raise SystemExit("gen_x86sys: check_invalid_gs does not return FALSE for opcode 0xCD")
+    other = {"fault": "#GP", "error_code": "vector*8+2", "exception_code": 0xC0000005, "flags": 0, "parameters": [0, 0xffffffff], "address": "the int instruction", "eip_advance": 0,
+             "source": "Intel SDM Vol 2 INT n and Vol 3 6.12.1.1 (a user-mode int n at a vector whose gate is not DPL 3 is #GP with error code n*8+2, IDT bit set, EXT 0, saved EIP = the int instruction); "
+                       "%s: segv_handler TRAP_x86_PROTFLT lines %d-%d (err != 0 skips is_privileged_instr; (err & 7) == 2 calls handle_interrupt, which returns FALSE at its `default` line %d for every vector but 0x29 and 0x2d; "
+                       "then EXCEPTION_ACCESS_VIOLATION, NumberParameters 2, ExceptionInformation[0] = 0, [1] = 0xffffffff, check_invalid_gs (line %d) returns FALSE for opcode 0xCD); "
+                       "setup_exception_record line %d: ExceptionAddress = EIP_sig, context Eip not advanced; segv_handler line %d: rec = { 0 } so ExceptionFlags 0 (continuable). Precedence (2): MSDN and the WDK state nothing for these vectors; vector 0x29 stays in `excluded`"
+                       % (wsrc, wline(segv.start() + pf.start()), wline(segv.start() + pf.end() - 1), wline(hi.start() + hi.group(0).index("    default:")), wline(cg.start()),
+                          wline(ser.start() + ser.group(0).index("rec->ExceptionAddress")), wline(segv.start() + segv.group(0).index("EXCEPTION_RECORD rec")))}
     if io_ops != [0x6c, 0x6d, 0x6e, 0x6f, 0xe4, 0xe5, 0xe6, 0xe7, 0xec, 0xed, 0xee, 0xef] or "return EXCEPTION_PRIV_INSTRUCTION" not in tail:
         raise SystemExit("gen_x86sys: is_privileged_instr does not treat in/out/ins/outs as privileged the way the row tss_io_bitmap needs")
     fp = {}
@@ -123,7 +152,7 @@ def build(osrec, src, mirror, wine, cpumodel):
         "sources": {"mirror": src["mirror"], "ks386": kf, "wine": {"commit": src["wine"]["commit"], "file": wf}, "cpumodel": cm},
         "selectors": sel,
         "mov_to_sreg": mov,
-        "int_ring3": {"vectors": vec, "other_vectors": undec("no pinned source says whether Windows 7 has a ring-3 gate at any other vector; Wine 9.0 handles only these"),
+        "int_ring3": {"vectors": vec, "other_vectors": other,
                       "source": "%s: handle_interrupt cases %s; segv_handler / trap_handler map %s to #OF / #BP" % (wsrc, [hex(i) for i in ints], sorted(traps)),
                       "excluded": {str(v): {"status": "undecided", "why": gates[v]["source"]} for v in gated}},
         "cr4": {"tsd": {"value": 0 if not {0x31, 0x33} & set(ext_ops) else None,

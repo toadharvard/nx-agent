@@ -64,8 +64,17 @@
    }
   },
   "other_vectors": {
-   "status": "undecided",
-   "why": "no pinned source says whether Windows 7 has a ring-3 gate at any other vector; Wine 9.0 handles only these"
+   "address": "the int instruction",
+   "eip_advance": 0,
+   "error_code": "vector*8+2",
+   "exception_code": 3221225477,
+   "fault": "#GP",
+   "flags": 0,
+   "parameters": [
+    0,
+    4294967295
+   ],
+   "source": "Intel SDM Vol 2 INT n and Vol 3 6.12.1.1 (a user-mode int n at a vector whose gate is not DPL 3 is #GP with error code n*8+2, IDT bit set, EXT 0, saved EIP = the int instruction); Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6: segv_handler TRAP_x86_PROTFLT lines 1925-1941 (err != 0 skips is_privileged_instr; (err & 7) == 2 calls handle_interrupt, which returns FALSE at its `default` line 1804 for every vector but 0x29 and 0x2d; then EXCEPTION_ACCESS_VIOLATION, NumberParameters 2, ExceptionInformation[0] = 0, [1] = 0xffffffff, check_invalid_gs (line 1279) returns FALSE for opcode 0xCD); setup_exception_record line 1449: ExceptionAddress = EIP_sig, context Eip not advanced; segv_handler line 1905: rec = { 0 } so ExceptionFlags 0 (continuable). Precedence (2): MSDN and the WDK state nothing for these vectors; vector 0x29 stays in `excluded`"
   },
   "source": "Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6: handle_interrupt cases ['0x2d']; segv_handler / trap_handler map ['TRAP_x86_BPTFLT', 'TRAP_x86_OFLOW'] to #OF / #BP",
   "vectors": [
