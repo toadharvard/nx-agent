@@ -405,24 +405,11 @@ def read_sites(path):
 
 # Forms with no row in the opcode tables of the instruction reference that the SDM still defines (so they are lifted with SDM semantics, not #UD): (name, matcher on (mandatory prefix, body bytes), the SDM text that
 # defines them: the line is searched in the SDM text and its page is cited).  Everything else without a row is SDM-undefined (class B: #UD on the declared machine).
-OPMAP = (
-    ('82 /n', lambda m, b: b[:1] == b'\x82', '     80-83          1     mem, 11B', 'Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n'),
-    ('C4 /r LES', lambda m, b: b[:1] == b'\xc4', 'LESi64', 'Table A-2: C4 is LES (invalid only in 64-bit mode)'),
-    ('C5 /r LDS', lambda m, b: b[:1] == b'\xc5', 'LDSi64', 'Table A-2: C5 is LDS (invalid only in 64-bit mode)'),
-    ('0F 1E / 0F 1F Reserved-NOP', lambda m, b: b[:2] in (b'\x0f\x1e', b'\x0f\x1f'), 'are also reserved but may behave as NOP', 'Appendix A: "Reserved-NOP" opcodes may behave as NOP'),
-)
-
-
-def opmap_cite(lines, text):
-    for i, l in enumerate(lines):
-        if text in l and i > 140000:
-            return page_after(lines, i)
-    raise SystemExit('SDM text not found: %r' % text)
-
-
 def cmd_rows(sdm, sites, out, public=None):
     from proof import shape
     lines = load(sdm); table = flag_table(lines); cpu = declared_cpu()
+    from proof import opmap
+    maps = opmap.load(sdm.replace('.txt', '.pdf'), sdm)                       # Appendix A, from the PDF's table cells
     allrows = sdm_rows(lines, table)
     nopflags = set(re.findall(r'are NOP on processors that report CPUID\.\w+H?\.\w+H?:\w+\.(\w+)\[', ' '.join(l.strip() for l in lines)))     # SDM Vol. 1 ch. 17: all MPX instructions are NOP without the flag
     byfirst = collections.defaultdict(list); vex = []
@@ -447,7 +434,7 @@ def cmd_rows(sdm, sites, out, public=None):
             rows = byfirst.get(b0, []) + byfirst.get(b0 & 0xf8, [])
             cand, kind = match_rows(mand, body, rows)
         if not cand and not (body[:1] in (b'\xc4', b'\xc5') and ins.mnemonic.startswith('v')):
-            mp = next((o for o in OPMAP if o[1](mand, body)), None)
+            mp = opmap.lookup(maps, mand, body)
         else:
             mp = None
         if not cand and mp:
@@ -481,7 +468,7 @@ def cmd_rows(sdm, sites, out, public=None):
             e = forms[key]; rs = e['rows']
             if not rs and e.get('map'):
                 mp = e['map']
-                st, needs, val, ea, op, ins, cit = 'defined-by-opcode-map', '-', 'none', '-', mp[0], '-', 'SDM %s (%s)' % (mp[3], opmap_cite(lines, mp[2]))
+                st, needs, val, ea, op, ins, cit = 'defined-by-opcode-map', '-', 'none', '-', mp[0], '-', 'SDM Vol. 2 Appendix A, %s' % mp[1]
             elif not rs:
                 st, needs, val, ea, op, ins, cit = 'undefined', '-', 'none', '-', '-', '-', 'no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")'
             else:
