@@ -195,8 +195,10 @@ def parse_members(map_text):
     lines = map_text.splitlines()
     try:
         i = next(k for k, ln in enumerate(lines) if ln.startswith("Archive member included to satisfy reference by file (symbol)"))
-    except StopIteration:
-        raise ElfFactsError("map: no `Archive member included` section")
+    except StopIteration:   # ld prints the section only when the link pulled a member out of an archive: a link of objects and shared libraries has none
+        if not any(ln.startswith("Memory Configuration") for ln in lines):
+            raise ElfFactsError("map: neither an `Archive member included` section nor `Memory Configuration`: not a complete map")
+        return []
     out, i, pend = [], i + 1, None
     while i < len(lines):
         ln = lines[i]
