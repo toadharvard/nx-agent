@@ -367,3 +367,5 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - Task Z (w7, doing): bootgpu takes GL only from gate_build.ensure(render/gl4); the prebuilt @2f0427f5 and the NXGL4 pins are deleted (A27).
 - 14:30: Task Z done (w7-u 9a8385000): bootgpu, boot.py and boot_job take GL only from gate_build.ensure(render/gl4). The prebuilt @2f0427f5, the gpu/bridge branch fetch, and bootinputs' render-branch and pair subcommands are deleted; verify/bootrt → tests/bootrt.
   - test_bootgpu is env_blocked on this host (no declared env). w7 is installing it with setup_verdict_env.sh, then runs the test and checks the .so sha against L6A's 5cfbee35….
+- 14:35: 4.3: render/ is from gl4link2 47c284629 (w7-u d5627dfaa). On the declared machine (envcheck OK), libnxgl4.so builds green through ensure(render/gl4) with sha256 116b1377…c5c8c6, equal to L6A's.
+  - w7 is adopting L1's verify files and copying the bootguest/icount compiler pin from L1's record, then runs test_bootgpu and test_runner.
