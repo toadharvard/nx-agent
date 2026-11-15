@@ -49,7 +49,7 @@ def build(osrec, src, mirror, wine, cpumodel):
         raise SystemExit("gen_x86sys: the sources describe a native 32-bit x86 machine; this record is not one")
     kf = src["files"]["ks386"]
     kg = ks386_equ(pinned(os.path.join(mirror, kf["path"]), kf, kf["path"]))
-    need = ["KGDT_R3_CODE", "KGDT_R3_DATA", "KGDT_R3_TEB", "KGDT_TSS", "RPL_MASK", "EFLAGS_USER_SANITIZE"]
+    need = ["TssIoMapBase", "PrIopmOffset", "KGDT_R3_CODE", "KGDT_R3_DATA", "KGDT_R3_TEB", "KGDT_TSS", "RPL_MASK", "EFLAGS_USER_SANITIZE"]
     if any(n not in kg for n in need):
         raise SystemExit("gen_x86sys: ks386.inc lacks " + ", ".join(n for n in need if n not in kg))
     rpl = kg["RPL_MASK"]
@@ -82,6 +82,10 @@ def build(osrec, src, mirror, wine, cpumodel):
     gated = sorted(v for v, x in gates.items() if build_no < x["since_build"])   # a documented gate that the declared build is below: the vector is out (precedence 1 over Wine)
     ints = [i for i in ints if i not in gated]
     vec = sorted(set(ints) | ({3} if "TRAP_x86_BPTFLT" in traps else set()) | ({4} if "TRAP_x86_OFLOW" in traps else set()))
+    tail = fn.group(0).split("case 0x6c:", 1)[1].split("default:", 1)[0]
+    io_ops = sorted(int(o, 16) for o, c in re.findall(r"case (0x[0-9a-fA-F]+):\s*/\*\s*([^*]*?)\s*\*/", "case 0x6c:" + tail) if re.match(r"(ins|outs|in|out)[bl( ]", c))
+    if io_ops != [0x6c, 0x6d, 0x6e, 0x6f, 0xe4, 0xe5, 0xe6, 0xe7, 0xec, 0xed, 0xee, 0xef] or "return EXCEPTION_PRIV_INSTRUCTION" not in tail:
+        raise SystemExit("gen_x86sys: is_privileged_instr does not treat in/out/ins/outs as privileged the way the row tss_io_bitmap needs")
     cm = src["cpumodel"]
     ct = pinned(cpumodel, cm, cm["path"])
     if any(v in vec for v in gated) or not src.get("precedence"):   # precedence check: a value that a documented gate excludes never comes from Wine
@@ -109,6 +113,8 @@ def build(osrec, src, mirror, wine, cpumodel):
         "eflags": {"initial": {"value": eflags0, "source": "%s: the initial thread context, context.EFlags" % wsrc},
                    "iopl": {"value": (eflags0 & 0x3000) >> 12, "source": "bits 12-13 of the initial EFLAGS (%s)" % wsrc},
                    "iopl_user_modifiable": {"value": bool(sanit & 0x3000), "source": "%s: EFLAGS_USER_SANITIZE = 0x%X, the EFLAGS bits user code can set; bits 12-13 are %s" % (ks, sanit, "in it" if sanit & 0x3000 else "not in it")}},
+        "tss_io_bitmap": {"value": "no port permitted", "ports_permitted": [], "opcodes": io_ops, "exception": "EXCEPTION_PRIV_INSTRUCTION",
+                          "source": "%s: is_privileged_instr returns EXCEPTION_PRIV_INSTRUCTION for in/out/ins/outs (opcodes %s) with no per-port test, i.e. a Win32 user process has no permitted port; the documentation names the TSS I/O map (WDK 7.1 ks386.inc TssIoMapBase = 0x%X, PrIopmOffset = 0x%X) and the exception (MSDN EXCEPTION_PRIV_INSTRUCTION: an instruction not allowed in the current machine mode) but states no permitted port for a user process, so it does not contradict Wine (precedence 2); with IOPL 0 (row eflags) every such instruction at CPL 3 is #GP(0), delivered as that exception" % (wsrc, [hex(o) for o in io_ops], kg.get("TssIoMapBase", -1), kg.get("PrIopmOffset", -1))},
         "idtr_limit": undec("the number of gates of the OS's IDT is not stated by a pinned source (the SDM allows 256 entries at most)"),
         "sldt": undec("no pinned source states the LDTR of a process that has no LDT"),
         "sgdt": undec("the GDT base and limit of the OS are kernel values with no documented fixed value and no pinned source"),
