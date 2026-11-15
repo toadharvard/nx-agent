@@ -1263,3 +1263,8 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - `outputs: {native: native.tsv}`, consumed by L3a w8's lift/rt `uses` + dispgen.
   - Acceptance: byte-equal to verdict.py's output. The derived data stays in GATE_CACHE only.
 - w22's fpexact candidate stays parked.
+- w20u ccee83277, global objstub on the platform root: 5320/5483 certified, 168 findings (was 768).
+  - T2 570→14, V 180→136.
+  - Commits: errno probe derived (d7279a965); setjmp unwinders and -fno-exceptions terminators (eb12553de); declared-noreturn-only terminators (ccee83277); identity (c08edcb90); external_errors (c56ecabcc).
+  - setjmp must be the pinned runtime header. TLS errno stays unjudged.
+  - Next: .fnvnx.cite citations plus exemptions, then the probe stage, then the gc'd-image universe, then doubles, then shader_opcode.
