@@ -182,6 +182,10 @@
    "recipe": "ports/fnv-nx/shim/build.json"
   },
   {
+   "path": "ports/fnv-nx/shim/include",
+   "class": "header"
+  },
+  {
    "path": "ports/fnv-nx/hostabi/product",
    "class": "product",
    "target": "guest",
@@ -189,6 +193,10 @@
   },
   {
    "path": "ports/fnv-nx/hostabi/include",
+   "class": "header"
+  },
+  {
+   "path": "ports/fnv-nx/platform/include",
    "class": "header"
   },
   {
@@ -267,6 +275,16 @@
    "recipe": "ports/fnv-nx/render/gl4/build.json"
   },
   {
+   "path": "ports/fnv-nx/render/gl4shim/include",
+   "class": "header"
+  },
+  {
+   "path": "ports/fnv-nx/render/gl4shim",
+   "class": "product",
+   "target": "host",
+   "recipe": "ports/fnv-nx/render/gl4shim/build.json"
+  },
+  {
    "path": "ports/fnv-nx/render/shaders/sm_link_stage",
    "class": "product",
    "target": "host",
@@ -289,12 +307,6 @@
    "class": "test",
    "target": "host",
    "recipe": "ports/fnv-nx/render/shaders/sm_link/build.json"
-  },
-  {
-   "path": "ports/fnv-nx/render/gl4shim",
-   "class": "product",
-   "target": "host",
-   "recipe": "ports/fnv-nx/render/gl4shim/build.json"
   }
  ]
 }

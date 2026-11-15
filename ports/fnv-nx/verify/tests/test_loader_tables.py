@@ -44,7 +44,7 @@ mod = next(g for g in gen if g["tool"].endswith("modules.py"))
 bg = next(g for g in gen if g["tool"].endswith("bridgegen.py"))
 check("modules.py reads the bridge table that stage A (bridgegen) writes in this recipe, never the manifest external's pinned bridge.tsv",
       mod["args"][mod["args"].index("--bridge") + 1] == "/stage/gen/bridge.tsv" and not any("bridge.tsv" in a and a.startswith("/ext/") for g in gen for a in g["args"]), mod["args"])
-check("stage A takes the COM rows through `uses` of bridgefacts and the name table and va record from the tool root, and exports its table", rec.get("uses") == [{"root": "ports/fnv-nx/bridgefacts", "output": "COM_ROWS"}]
+check("stage A takes the COM rows through `uses` of bridgefacts and the name table and va record from the tool root, and exports its table", rec.get("uses") == [{"root": "ports/fnv-nx/bridgefacts", "output": "COM_ROWS"}, {"root": "ports/fnv-nx/bridgefacts", "output": "D9_ROWS"}] and "/uses/ports/fnv-nx/bridgefacts/D9_ROWS" in bg["args"] and not any(a.startswith("/ext/manifest/manifest/d9") for a in bg["args"])
       and "/uses/ports/fnv-nx/bridgefacts/COM_ROWS" in bg["args"] and rec["outputs"].get("BRIDGE_TSV") == "gen/bridge.tsv", (bg["args"], rec.get("uses")))
 files = subprocess.run(["git", "-C", repo, "ls-files", "ports/fnv-nx/loader"], capture_output=True, text=True).stdout.split()
 SYMS = ["fnvnx_modules", "fnvnx_module_count", "fnvnx_import_rows", "fnvnx_import_row_count", "fnvnx_import_key_count", "fnvnx_import_by_key_idx", "fnvnx_exe_sha256", "fnvnx_exe_size"]

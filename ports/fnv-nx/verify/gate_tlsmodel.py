@@ -3,7 +3,7 @@
 TLS access model the loader supports, and one symbol is accessed with one model.
     python3 -I gate_tlsmodel.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/tlsmodel.json
 Roots: every product and test root of verify/admit.json with "target": "guest", built by gate_build.ensure; a root's link group is its own
-objects plus the objects of the roots in its recipe's link.roots (the objects that one linked output is made of), and its linked ELF.
+objects plus the objects of its derived link members (recipe.definer_closure) (the objects that one linked output is made of), and its linked ELF.
 Facts are the relocations of the pinned binutils' own decoding (`aarch64-linux-gnu-readelf -rW`, the binutils of verify/env.json): the type
 NAME the ABI gives a relocation (R_AARCH64_P32_TLS..., R_AARCH64_TLS... for LP64), never a name of the program's text. A relocation is TLS when
 its type name has the family prefix TLS (after an optional P32_) or contains TPREL or DTPREL; the family is the ABI's:
@@ -141,7 +141,7 @@ def main():
                 continue
             objs, res = objects(root)
             rec = recipe.load_recipe(repo, admit, root)
-            for r in (rec.get("link") or {}).get("roots", []):
+            for r in [x["root"] for x in res.get("link_roots", [])]:     # the image's members: derived by the build (recipe.definer_closure)
                 objs.update(objects(r)[0])
             groups[root] = objs
             if res["elf"]:

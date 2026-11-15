@@ -551,7 +551,7 @@ Stage table: env BOOT_STAGE_TABLE_BRANCH (default l4-verify/milestones), file st
    contract's rows (bootinputs.py milestones --stage-table: names unique, every exe address a lifted code entry). A missing branch: the
    job runs with the contract rows only and the final line says stage_table=absent; a present branch without the file fails the job.
 Env: ARTIFACTS (clone of the artifacts repository, default $FARM_HOME/artifacts; cloned --filter=blob:none --no-checkout
-when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build), FARM_HOME (default $HOME/fnvnx-farm),
+when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build), FARM_HOME (required),
 WORK (default $FARM_HOME/boot/<elf_id>), GAME_DIR (an installed game; never inside a git checkout). The profile is
 passed to boot.py, recorded in meta.json and exported as FNVNX_PROFILE (a render host library reads it).
 Exit 0 iff the result was published and boot.py exited 0 or 2; 1 otherwise (one-line reason on stderr).
@@ -583,7 +583,7 @@ Steps:
  5 final line: AFTERMERGE commit=<commit12> jobs=<n> violated=<names joined by ","|none> published=<branch>@<commit12>
    exit 0 = every job exited 0; 2 = at least one job reports a violation (the result is published either way);
    1 = usage, environment, tool or publishing error
-Env: FARM_HOME (~/fnvnx-farm), ARTIFACTS (/home/user/fnv-nx-build; a checkout whose origin is the artifacts repository),
+Env: FARM_HOME (required), ARTIFACTS (required; a checkout whose origin is the artifacts repository),
      ARTIFACTS_URL (default: that checkout's origin), RUNNER_JOBS.
 ```
 
@@ -614,7 +614,7 @@ Kinds exe and shared (host images, RECIPE.md "Link") are judged by host mode: ru
 of a shared object defined and global, undefined names only if a --lib shared library defines them (its .dynsym); no crt0 header words.
 
 verify/recipe.py links the guest ELF as the stage `ld:<root>` (fixed options, RECIPE.md "Link"): the root's objects and the objects of
-its `link.roots` whole, the compiler external's guest libraries searched as the gcc driver searches them.  This tool judges the result
+its derived link members whole (recipe.definer_closure), the compiler external's guest libraries searched as the gcc driver searches them.  This tool judges the result
 from ELF symbol tables only (no linker message, no map file, no name or text pattern), the rules of the former link/ld.py:
   1. no undefined symbol in the output's `.symtab`;
   2. every name the input objects reference or define (the symbol tables of every `*.o` below --objs, weak references included) is defined in the output;
@@ -1458,7 +1458,7 @@ Gate "tlsmodel" (fnvnx-gate/1, class A of VERDICT.md): every thread-local refere
 TLS access model the loader supports, and one symbol is accessed with one model.
     python3 -I gate_tlsmodel.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/tlsmodel.json
 Roots: every product and test root of verify/admit.json with "target": "guest", built by gate_build.ensure; a root's link group is its own
-objects plus the objects of the roots in its recipe's link.roots (the objects that one linked output is made of), and its linked ELF.
+objects plus the objects of its derived link members (recipe.definer_closure) (the objects that one linked output is made of), and its linked ELF.
 Facts are the relocations of the pinned binutils' own decoding (`aarch64-linux-gnu-readelf -rW`, the binutils of verify/env.json): the type
 NAME the ABI gives a relocation (R_AARCH64_P32_TLS..., R_AARCH64_TLS... for LP64), never a name of the program's text. A relocation is TLS when
 its type name has the family prefix TLS (after an optional P32_) or contains TPREL or DTPREL; the family is the ABI's:
@@ -1484,7 +1484,7 @@ finding. Counts per relocation family over all roots are in `detail`. No guest r
 Gate "onedef" (fnvnx-gate/1): one definition, one source. A name, a COMDAT group, a source file and a header each come from ONE place.
     python3 -I gate_onedef.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/onedef.json
 Rules (by symbol tables and file content, never by a name's text):
-  (a) Per linked image (a root with a `link`; its objects are those of the root itself and of every root of its `link.roots`): a GLOBAL or WEAK
+  (a) Per linked image (a root with a `link`; its objects are those of the root itself and of every root of its derived link members): a GLOBAL or WEAK
       definition outside every COMDAT group comes from exactly ONE root. Two roots defining one name is `dup-def`, whatever the binding (strong, weak):
       the linker's choice between them would pick a body by link order.
   (b) COMDAT groups of an image. The instances of one signature that come from different roots must be one definition: one digest of the group's
@@ -2145,10 +2145,9 @@ recipe: build a product root from its recipe `build.json` ("fnvnx-recipe/1", con
 every step is a sandbox stage (sandbox.py) keyed by its declared inputs, cached in the store (cas.py).
     python3 -I recipe.py build --root ports/fnv-nx/X --store S --out DIR [--jobs N]     (cwd = checkout root; exit 0 green, 2 red)
     python3 -I recipe.py check --root ports/fnv-nx/X                                    validate only
-Link: `link` = {script, output, flags, kind pie|exe, roots}. a guest root cannot link kind exe; `roots` lists distinct admitted
-product roots of the same target (never the root itself) whose stored objects are declared inputs of the link stage (in its key); the
-image of a product root lists base roots only, a test root any root (a variant is `root@NAME`, declared in the `variants` of the root's admit.json entry, checked by
-gate_admit.py: product roots only, `{NAME: {"target"?}}`). Resolution-relaxing ld options (the refusal set R, `-z lazy` included) are
+Link: `link` = {script, output, flags, kind pie|exe}. a guest root cannot link kind exe; the image's members are derived (recipe.definer_closure over the admitted product roots; a written `roots` is a check
+error) and their stored objects are declared inputs of the link stage (in its key); a variant is `root@NAME`, declared in the `variants` of the root's admit.json entry, checked by
+gate_admit.py: product roots only, `{NAME: {"target"?}}`. Resolution-relaxing ld options (the refusal set R, `-z lazy` included) are
 refused in every link; linkstrict judges the linked output of every product and test root (no undefined symbol of any binding).
 Steps: (1) generated stages (python runtime, runtime.py), (2) one unit stage per source: .c/.cc/.cpp/.cxx = unitstage.Build (PP on
 name-complete views, then CC on the preprocessed text), .s/.S = unitstage.Build too (.S: PP then CC; .s: one stage on its own file), (3) the link: stage `ld:<root>` (the fixed options of RECIPE.md "Link", the objects of the root and of its
@@ -2692,7 +2691,7 @@ compile-failure test's mutation), crt/msvcrt_names.tsv (name, provider symbol, f
 stage, com/comrows.py SPEC ROWS WORDS, the one derivation of the signature of every COM thunk, and declares the outputs COM_ROWS (the bridge rows of
 the COM methods and exports, the `extra` rows of bridgegen) and COM_WORDS (`Interface Method words` for every method, hidden interfaces too).
 The platform's C++ half (platform/com/gen_combridge.py SPEC ROWS WORDS OUTDIR) reads them through `uses` and never recomputes a signature; the
-loader's stage A reads COM_ROWS through `uses`; the gate `imports` names the same files in platform/imports.in.json ({stage, path} for the rows,
+loader's stage A reads COM_ROWS through `uses`; the gate `imports` names the same files in platform/imports.in.json ({root, output} for the rows,
 {root, path} for the records; recipe.resolve_input reads a tracked file of an admitted tool root). Ownership is unchanged: L5 owns the COM and msvcrt
 files, L6 the d3d9 rows (still taken from the manifest external's d9bridge_rows.tsv until its generator moves here).
 Test: verify/tests/test_bridgefacts.py.

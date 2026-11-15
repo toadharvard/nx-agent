@@ -12,11 +12,15 @@
 #include "nxgpu4_check.h"
 #include "nxgpu4_shader.h"
 #include "gl4_funcs.h"
+#include "nx_gl4shim.h"
 #include "fnvnx_dk_layout.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* The marker of the library's exports (gen_exports.py reads it: the linker version script is generated from the declarations that carry it). */
+#define NXGL4_EXPORT __attribute__((visibility("default")))
 
 /* ---- public ------------------------------------------------------------------------------------------------- */
 /* The embedder maps a guest address range [addr, addr + size) to a host pointer (the test provides identity). */
@@ -26,17 +30,16 @@ extern "C" {
 void* nxgl4_guest_ptr(uint64_t addr, uint64_t size);
 /* Creates the surfaceless GL 4.5 core context (current on the calling thread; every later call comes from that
  * thread) and the swapchain image (image 0 names it) of width x height (none when 0). NULL on failure (err). */
-const NxGpuApi4* nxgl4_create(uint32_t width, uint32_t height, char* err, size_t errlen);
-void nxgl4_destroy(void);
+NXGL4_EXPORT const NxGpuApi4* nxgl4_create(uint32_t width, uint32_t height, char* err, size_t errlen);
+NXGL4_EXPORT void nxgl4_destroy(void);
 /* ext_call dispatch for fn 0..NXGPU_FN_SHADER_CREATE_D3D (= NXGPU_FN_COUNT4) over the table the backend created; arguments as in NxGpuApi4. */
-uint64_t nxgl4_ext(uint32_t fn, const uint64_t* args, uint32_t nargs);
-const char* nxgl4_last_error(void);
+NXGL4_EXPORT uint64_t nxgl4_ext(uint32_t fn, const uint64_t* args, uint32_t nargs);
+NXGL4_EXPORT const char* nxgl4_last_error(void);
 /* The embedder's present hook, called by the present call (gl4_present.c) after the frame file (below) is written.
  * The embedder paces the frame there (the surfaceless context has no vblank: NxPresent.interval has no effect on
  * the image). When the environment variable NXGL4_FRAMES names a directory the present call writes the presented
  * swapchain image as <dir>/frame_%06u.rgba (RGBA8, top row first) and <dir>/frame_%06u.txt ("width height\n"). */
 void nxgl4_on_present(uint32_t frame);
-size_t nxgl4_shim_glsl(const char* src, size_t n, uint32_t stage, char* out, size_t cap);
 
 /* ---- internal ----------------------------------------------------------------------------------------------- */
 #define GL4_MAX_STATES   NXCHK_MAX_STATES
@@ -95,7 +98,7 @@ typedef struct Gl4 {
     Gl4Vtx vtx[NX4_MAX_STREAMS];
     Gl4Query qry[GL4_MAX_QUERIES + 1];
     Gl4Slice* slices; uint32_t nSlices, capSlices; GLuint occCur;
-    GLuint nearestSmp, rampTex, scaleProg[6];
+    GLuint nearestSmp, rampTex, scaleProg[NX_GL4SHIM_PAIR_COUNT];
     GLint maxVtxStride, maxAttrOffset;
     NxRenderState applied;
     GLint scissor[4];
@@ -186,7 +189,7 @@ void gl4_d3d_free(Gl4D3d* d);
 uint32_t gl4_program_for(uint32_t vs, uint32_t ps);
 /* Id tables: the id is the slot index (ids 1.., no bound in the ABI). Doubles *cap (at least 64 slots) and zeroes the new slots; 0 only when the host allocator fails (the table is unchanged). */
 int gl4_table_grow(void** tab, uint32_t* cap, size_t elem);
-GLuint gl4_compile_program(const char* vs, const char* fs);   /* internal programs: 0 and an error when they fail */
+GLuint gl4_compile_program(enum nx_gl4shim_pair_id id);   /* internal programs: a pair row of nx_gl4shim_pairs; 0 and an error when it fails */
 /* gl4_core.c */
 void gl4_upload_range(uint32_t block, uint32_t off, uint32_t size);
 const Gl4Mem* gl4_mem(uint32_t id);

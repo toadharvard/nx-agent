@@ -1,7 +1,7 @@
 # D3D9 fixed-function pixel pipeline (T-FFP-PS, rule RD5)
 
 One program, behaviour selected by data. `ffp.frag.glsl` (deko3d GLSL, include `d9_epilogue.glsl` for alpha test + fog) and
-`ffp_ps_ref.c` (CPU twin, same function names) read `NxFfpPsState` (`ffp_state.h`, std140, 800 bytes, UBO binding 3;
+`ffp_ps_ref.c` (CPU twin, same function names) read `NxFfpPsState` (`ffp_state.h`, std140, 800 bytes, UBO `NX_FFP_UBO_BINDING`;
 fnvnx_dk_layout.h uses 0..2). Test: `python3 tests/l6/ffp_ps/test_ffp_ps.py`.
 
 ## State layout (bytes)

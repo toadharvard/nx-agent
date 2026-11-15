@@ -78,6 +78,11 @@ hrows = re.findall(r'\{"([^"]*)", "([^"]*)", 0x([0-9a-f]{8})u\},', hdr)
 check('key header: one row per function row, sorted by (dll, name), the key of keys.tsv', sorted((d, n, int(k, 16)) for d, n, k in hrows),
       sorted((r[1], r[2], int(r[0], 16)) for r in kt_rows))
 check('key header: a data row has no constant, the row count and table_id are written', ('_iob' in hdr, 'nrows = %d;' % len(hrows), ' table_id ' + 'T' * 64), (False, 'nrows = 1;', ' table_id ' + 'T' * 64))
+full = iat.keys_tsv(db, 'T' * 64).splitlines()
+sub1 = iat.imported_tsv(db, 'T' * 64, {('kernel32.dll', 'Sleep'), ('msvcrt.dll', '_iob')}).splitlines()
+check('imported.tsv: the header of keys.tsv, then only the imported function rows (a data row never), keys.tsv order and columns', sub1, [full[0]] + [l for l in full[1:] if l.split('\t')[1:3] == ['kernel32.dll', 'Sleep']])
+check('imported.tsv: nothing imported leaves the header only', iat.imported_tsv(db, 'T' * 64, set()), full[0] + '\n')
+check('imported.tsv: every function row imported equals keys.tsv', iat.imported_tsv(db, 'T' * 64, {(r['dll'], r['name']) for r in db}).splitlines(), full)
 for f in fails:
     print('FAIL', f)
 print('ok' if not fails else 'FAILED %d' % len(fails))

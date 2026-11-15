@@ -15,6 +15,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+_Static_assert((FNVNX_SHADER_KEY_FLAGS & ~((1u << (8 * sizeof(((NxShaderD3D *)0)->variant))) - 1)) == 0, "translator key flags fit NxShaderD3D.variant");
+
 void gl4_d3d_free(Gl4D3d* d) { if (d) { free(d->code); free(d); } }
 
 static uint64_t refuse(const char* why) { gl4_err("shader_create_d3d: %s", why); return 0; }
