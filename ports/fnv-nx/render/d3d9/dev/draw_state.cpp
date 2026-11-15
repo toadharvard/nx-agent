@@ -32,7 +32,9 @@ uint32_t scratch_image(uint32_t w, uint32_t h, uint32_t samples) {   // 0 = the 
     g_scr[v] = {w, h, samples, nxd3d_image_create(nullptr, &d), g_scr_stamp}; return g_scr[v].image;
 }
 bool real(NxSurfCore* c) { return c && c->img->gpu && !nx_img_null(c->img); }
-bool same(const NxTarget& a, const NxTarget& b) { return a.image == b.image && a.level == b.level && a.layer == b.layer; }
+static_assert(sizeof(NxTarget) == 8 && offsetof(NxTarget, level) == 4 && offsetof(NxTarget, layer) == 6, "NxTarget has no padding: its bytes are its fields");
+// one whole-object compare: the field-wise `level == level && layer == layer` is merged by the compiler into a 32-bit bit-field read, which ADDR32 does not route through a run-time pointer
+bool same(const NxTarget& a, const NxTarget& b) { return memcmp(&a, &b, sizeof a) == 0; }
 }
 
 HRESULT nx_pass_resolve(NxDeviceCore* d, NxPassSet* ps) {
