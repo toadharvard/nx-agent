@@ -876,3 +876,7 @@ Paused: w3b, w4, farm; no other work.
     - Ruling on vs_3_0:v[a0.x]: legal. The register table (vs-registers-vs-3-0.md:24) lists a0 and aL; the prose excludes nothing; Wine 9.0 d3dbc.c:886 agrees.
     - Cause: one fact lived in 3 records (conflicts row, legacy row, sm_illegal.tsv:20). w6 (doing): make it one record, with one source per fact asserted in res_smgen.
     - w6's own shader extraction is not evidence (a second path to the universe). w5 re-runs on b545961f once w6 has its next head.
+- 13:58Z w6 de39fc7b0: done. v[a0.x] is one legal record (vs-registers-vs-3-0.md:24).
+    - Cause closed: sm_table.json and sm_illegal.tsv shared 104 (model, feature) ids. The copies are removed, and res_smgen asserts the two files are disjoint.
+    - Rows: union 6, illegal 107, legal 59, unreachable-doc 10. gen.h is byte-identical.
+    - w5 (doing): full sm_link re-run on de39fc7b0 over b545961f, then the hand-off to L1.
