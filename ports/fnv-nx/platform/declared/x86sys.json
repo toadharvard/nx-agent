@@ -1,4 +1,9 @@
 {
+ "cpuid_faulting": {
+  "meaning": "cpuid at CPL 3 executes and returns the CPUID record; it does not fault (CPUID faulting, MSR_MISC_FEATURES_ENABLES bit 0, is not enabled)",
+  "source": "level 2 by absence, per the orchestrator's observable-behaviour ruling: (a) MS Learn __cpuid/__cpuidex (cpp/intrinsics/cpuid-cpuidex, read 2026-11-15) documents the intrinsic as generating the cpuid instruction for ordinary programs, its example is a plain user-mode console main() that executes cpuid and prints the result, and no page text mentions a privilege restriction or an exception; (b) Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6 dlls/ntdll/unix/signal_i386.c is_privileged_instr lines 1214-1271 lists the instructions Wine reports as STATUS_PRIVILEGED_INSTRUCTION (opcode 0x0f 0x20-0x23, in/out, ins/outs, int) and cpuid (0f a2) is not among them; Wine does not use ARCH_SET_CPUID. No pinned source states that Windows 7 SP1 sets the MSR; the SDM Vol 3A pinned here does not describe CPUID faulting (searched 'cpuid faulting': no hit); blocker for a stronger source: Intel SDM Vol 4 (MSRs) and a Windows 7 SP1 statement, neither pinned",
+  "value": 0
+ },
  "cr0": {
   "em": {
    "source": "ruling of the orchestrator (each row is what a ring-3 thread observes on the declared OS): x87 executes natively, no emulation trap is visible; derived: CR0.EM = 1 iff PF_FLOATING_POINT_EMULATED is TRUE, MSDN IsProcessorFeaturePresent gives that value the meaning 'floating-point operations are emulated using a software emulator' (WDK 7.1 winnt.h line 8718), the declared value is 0 (processor_features[1]), and MSDN KeSaveFloatingPointState (learn.microsoft.com wdm/nf-wdm-kesavefloatingpointstate, read 2026-11-15) names STATUS_ILLEGAL_FLOAT_CONTEXT 'the system is configured to use floating-point emulation, rather than doing floating-point operations in the processors' as the other configuration; ks386.inc CR0_EM = 0x4 names the bit",

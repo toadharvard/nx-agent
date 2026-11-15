@@ -38,6 +38,7 @@ checks += [("cs/ds/es/ss: base 0, limit 4 GiB, G=1, D/B=1, DPL=3 decided with so
            ("type and accessed are undecided with a blocker; fs is wholly undecided", all(D[n][f].get("status") == "undecided" and D[n][f].get("why") for n in ("cs", "ds", "es", "ss") for f in ("type", "accessed")) and all(v.get("status") == "undecided" for v in D["fs"].values())),
            ("lar/lsl/verr/verw are undecided and name the missing field", all(v.get("status") == "undecided" and v.get("why") for n in ("cs", "ds", "es", "ss", "fs") for v in rec["lar_lsl"][n].values())),
            ("the SDM is pinned with its order number", rec["sources"]["sdm"]["order_number"] == "253668-093US" and len(rec["sources"]["sdm"]["sha256"]) == 64)]
+checks.append(("cpuid_faulting is 0 with a source naming the sources searched", rec["cpuid_faulting"]["value"] == 0 and "is_privileged_instr" in rec["cpuid_faulting"]["source"] and "__cpuid" in rec["cpuid_faulting"]["source"]))
 for n, c in checks:
     print(("PASS " if c else "FAIL ") + n)
 sys.exit(0 if all(c for _, c in checks) else 1)
