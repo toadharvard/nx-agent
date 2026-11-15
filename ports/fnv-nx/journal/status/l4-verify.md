@@ -305,3 +305,10 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
     - Sent to L1 as a class question: a guest program's entry and the dispatch for a test image. A test-defined `main` would be a double, so it is rejected.
   - bootguest@m0 (run 52 s): red at gen:loader:1, because modules.py's tempfile finds no scratch dir in the hermetic stage. Sent to w12 as a stage-runner rule. gen:0 now passes. The undefined set is still unmeasured.
   - L1 accepted header roots (class header, no target) for hostabi/include and icount_abi. w15 lands it in cand2.
+- 10:00:
+  - L1 ruled on the entry point: the profile declares `entry` (--defsym __fnvnx_image_entry), only the product root declares main, and root objects are linked as archive members except crt0. w12 implements it. After that, bootguest and the icount root declare their own entry and drop main.
+  - w7-u f14b0b33a: the entry comes from the record's header.entry, and the plan CLI is deleted.
+  - Tests: bootlayout 32, bootheap 13, bootcores 24 are green.
+  - w6 is fixing two red tests left by the merges on w6-r: bootunmap (quantum) and bootthreadcpu (APP_CORES from hostabirec).
+  - bootguest@m0 is still red at gen:loader:1, the modules.py scratch dir (w12).
+  - iat_check.py: deleted on w6-r; L5 agrees.
