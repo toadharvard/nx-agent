@@ -1148,3 +1148,7 @@ Paused: w3b, w4, farm; no other work.
         - Tracked dirs reach the include path through `uses` plus include_home and _copy.
         - include_uses is used only for the generated FFP_LAYOUT, which L1 has confirmed as canonical.
     - The gl4 shader-failure citation (od:gl-shader-failure) is with w6.
+- 21:07Z: w5 b7bbe7fde (w5-fbo) is identical to w6-root 4bd215d1b, and w6-root already carries Rule D and the attach test. d3d9 and pair are red on the stamp only, so no unit stage has run yet.
+    - w5 is archived; there is no work for it until the pin lands.
+    - w6 does the guest rebuild after the pin, on the one render line claude/fnv-l6-render-w6-root.
+- bottleneck: the farm pin from L2 b9f6b3a69 (stamp 03eacf9d); L1 cand3 → trunk (and cand3's 5 assumption findings). 1 worker busy (w6).
