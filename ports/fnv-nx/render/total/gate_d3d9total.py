@@ -213,11 +213,11 @@ def locs(d):
 
 
 # ---------------------------------------------------------------- enum part
-def front_build(front, backend, flags):
+def front_build(front, backend, flags, inc=()):
     """compile every front source syntax-only with gcc JSON diagnostics -> (ok, errors [(diag, src)])"""
     ok, errs = True, []
     for f in [x for x in sorted(os.listdir(front)) if x.endswith(".c")]:
-        r = run([GCC, "-std=c11", "-fsyntax-only", "-fdiagnostics-format=json", *flags, "-I", backend, "-I", front, os.path.join(front, f)])
+        r = run([GCC, "-std=c11", "-fsyntax-only", "-fdiagnostics-format=json", *flags, *inc, "-I", backend, "-I", front, os.path.join(front, f)])
         if r.returncode:
             ok = False
         errs += [(d, f) for d in diags(r.stderr) if d.get("kind") == "error"]
@@ -232,6 +232,13 @@ def enum_part(inp, work):
     want_names = {e: list(spec[e]) for e in names}
     want_names["D3DFORMAT"] = want_names["D3DFORMAT"] + ["D3DFMT_" + s.strip() for s in gen["VENDOR_FOURCC"]]
     os.makedirs(work)
+    # the header is a build output (render/d3d9/build.json generated stage): the gate runs the same generator on the same tree
+    gdir = os.path.join(work, "gen")
+    os.makedirs(gdir)
+    hpath = os.path.join(gdir, "d3d9_enums.gen.h")
+    if run([sys.executable, "-I", os.path.join(front, "gen_enums.py"), hpath]).returncode:
+        raise Red("gen_enums.py failed")
+    inc = ["-m32", "-ffreestanding", "-I", gdir, "-I", os.path.join(inp, "shim", "include")]
     src = ['#include "d3d9types.h"']
     for e in names:
         exprs = ["(long long)(%s)" % n for n in spec[e]]
@@ -249,9 +256,8 @@ def enum_part(inp, work):
         if [n for n, _ in vals] != ["FnvnxSpec_%s_%d" % (e, i) for i in range(len(want_names[e]))]:
             raise Red("spec probe: enumeration %s not computed" % e)
         want[e] = [("NX_" + n, v) for n, (_, v) in zip(want_names[e], vals)]
-    hpath = os.path.join(front, "d3d9_enums.gen.h")
     hdecl = {d["name"]: d for d in ast_decls(
-        [CLANG, "-x", "c", "-std=c11", "-w", "-fsyntax-only", "-Xclang", "-ast-dump=json", "-Xclang", "-ast-dump-filter=NxD3D", hpath])
+        [CLANG, "-x", "c", "-std=c11", "-w", "-fsyntax-only", "-Xclang", "-ast-dump=json", "-Xclang", "-ast-dump-filter=NxD3D", *inc, hpath])
         if d.get("kind") == "EnumDecl" and "name" in d}
     # names and order from the AST; values evaluated by the front's compiler in C: one _Static_assert per enumerator, one line each
     bad = {e for e in names if "NxD3D" + e[3:] not in hdecl or
@@ -263,13 +269,13 @@ def enum_part(inp, work):
             vline[len(vsrc)] = e
     vc = os.path.join(work, "values.c")
     write(vc, "\n".join(vsrc) + "\n")
-    r = run([GCC, "-std=c11", "-fsyntax-only", "-w", "-fmax-errors=0", "-fdiagnostics-format=json", "-I", front, vc])
+    r = run([GCC, "-std=c11", "-fsyntax-only", "-w", "-fmax-errors=0", "-fdiagnostics-format=json", *inc, "-I", front, vc])
     verr = [d for d in diags(r.stderr) if d.get("kind") == "error"]
     bad |= {vline.get(ln, "?") for d in verr for f, ln in locs(d) if f == os.path.normpath(vc)}
     if r.returncode and not verr:
         bad.add("?")
     header_bad = sorted(bad)
-    built, berrs = front_build(front, backend, STRICT)
+    built, berrs = front_build(front, backend, STRICT, inc)
     htext = open(hpath, "rb").read()
     sens = {}
     for e in gen["SWITCHED"]:
@@ -284,12 +290,15 @@ def enum_part(inp, work):
             raise Red("NxD3D%s: AST range does not end at '}'" % e[3:])
         pdir = os.path.join(work, "probe_" + e)
         copy_tree(front, pdir)
-        with open(os.path.join(pdir, "d3d9_enums.gen.h"), "wb") as f:
+        pgen = os.path.join(pdir, "gen")
+        os.makedirs(pgen)
+        pinc = ["-m32", "-ffreestanding", "-I", pgen, "-I", os.path.join(inp, "shim", "include")]
+        with open(os.path.join(pgen, "d3d9_enums.gen.h"), "wb") as f:
             f.write(htext[:off] + b"NX_%s_GATEPROBE = %d, " % (e.encode(), extra) + htext[off:])
-        _, perrs = front_build(pdir, backend, STRICT)
+        _, perrs = front_build(pdir, backend, STRICT, pinc)
         here = [(dg, f) for dg, f in perrs if dg.get("option") in ("-Werror=switch", "-Werror=switch-enum") and
                 any(fl == os.path.normpath(os.path.join(pdir, f)) for fl, _ in locs(dg))]
-        sens[e] = {"located_in_front": bool(here), "compiles_without": front_build(pdir, backend, PLAIN)[0]}
+        sens[e] = {"located_in_front": bool(here), "compiles_without": front_build(pdir, backend, PLAIN, pinc)[0]}
     universe, uncert = [], []
     for e in gen["SWITCHED"]:
         good = not header_bad and built and sens[e]["located_in_front"] and sens[e]["compiles_without"]

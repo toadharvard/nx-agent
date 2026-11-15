@@ -27,7 +27,8 @@
   "ports/fnv-nx/shim/include",
   "ports/fnv-nx/render/nxgpu",
   "ports/fnv-nx/render/shaders/translator/include",
-  "ports/fnv-nx/lib/sha256/include"
+  "ports/fnv-nx/lib/sha256/include",
+  "ports/fnv-nx/render/d3d9/gen"
  ],
  "units": "all",
  "generated": [
@@ -117,6 +118,16 @@
    ],
    "outputs": [
     "gen/wine_fixme_ids.gen.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/render/d3d9/front/gen_enums.py",
+   "args": [
+    "/out/gen/d3d9_enums.gen.h"
+   ],
+   "inputs": [],
+   "outputs": [
+    "gen/d3d9_enums.gen.h"
    ]
   }
  ],

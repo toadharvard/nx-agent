@@ -83,36 +83,36 @@ def enum_ids(e):
 
 
 ENUM_ALL = [i for e in SWITCHED for i in enum_ids(e)]
-H = "render/d3d9/front/d3d9_enums.gen.h"
+GEN = "render/d3d9/front/gen_enums.py"
+WRITE = 'open(argv[0], "w").write(render(build()))'
 
 
-def header_enum(t, e):
-    """(start, end) of the enumerator lines of NxD3D<E> in the generated header text"""
-    a = t.index("typedef enum NxD3D%s {\n" % e[3:]) + len("typedef enum NxD3D%s {\n" % e[3:])
-    return a, t.index("} NxD3D%s;" % e[3:], a)
+def edit_gen(base, body):
+    """the header is a generated output: a mutation of it is a post-processing step spliced into the generator's write (BODY defines _mut(text))"""
+    edit(base, GEN, lambda t: t.replace(WRITE, body + '\n    open(argv[0], "w").write(_mut(render(build())))', 1))
+
+
+VALUE_BODY = """def _mut(t):
+        k = "typedef enum NxD3D__E__ {\\n"
+        a = t.index(k) + len(k)
+        first = t[a:t.index("\\n", a)]
+        n, v = first.strip().rstrip(",").split(" = ")
+        return t[:a] + "    " + n + " = " + "(" + v.rstrip(",") + ") + 0x10000000," + t[t.index("\\n", a):]"""
+DROP_BODY = """def _mut(t):
+        k = "typedef enum NxD3D__E__ {\\n"
+        a = t.index(k) + len(k)
+        first = t[a:t.index("\\n", a) + 1]
+        n = first.strip().split(" = ")[0]
+        t = t[:a] + t[a + len(first):]
+        return t.replace("    case " + n + ":\\n", "", 1)"""
 
 
 def mut_value(e):
-    def f(base):
-        def g(t):
-            a, b = header_enum(t, e)
-            first = t[a:t.index("\n", a)]
-            n, v = first.strip().rstrip(",").split(" = ")
-            return t[:a] + "    %s = %d," % (n, int(v) + 0x10000000) + t[t.index("\n", a):]
-        edit(base, H, g)
-    return f
+    return lambda base: edit_gen(base, VALUE_BODY.replace("__E__", e[3:]))
 
 
 def mut_drop(e):
-    def f(base):
-        def g(t):
-            a, b = header_enum(t, e)
-            first = t[a:t.index("\n", a) + 1]
-            n = first.strip().split(" = ")[0]
-            t = t[:a] + t[a + len(first):]
-            return t.replace("    case %s:\n" % n, "", 1)
-        edit(base, H, g)
-    return f
+    return lambda base: edit_gen(base, DROP_BODY.replace("__E__", e[3:]))
 
 
 def mut_untyped(e):
