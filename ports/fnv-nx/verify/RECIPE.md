@@ -158,8 +158,9 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   `libs.external` is the guest runtime external pinned in `verify/guest_compiler.json` (`runtime`: the guest's libc, libm, libstdc++), which the root declares like
   any external; all paths are relative, inside it, there is no host path. A guest root that declares `link.script` or `link.libs` itself is red (no per-root choice, so
   a double of the script cannot exist), a missing or invalid profile is red. The profile's content is in every guest link stage key (script mounted at /ld, libs in argv).
-  A host root declares `script` (a tracked file of the root, required for kind pie) and `libs` as before: `{"external": ..}` of an external of the recipe or `{"system": [..]}`.
-- `link.version_script`: a tracked file of the root, or of an admitted tool root's tree (by repo path).
+  A host root declares `script` (a tracked file of the root or a generated output of it, required for kind pie) and `libs` as before: `{"external": ..}` of an external of the recipe or `{"system": [..]}`.
+- `link.version_script`: a tracked file of the root, a generated output of the root (an output of its `generated` or `run` stages, the way `constants` and `contract_names` are), or a tracked file of an admitted tool root's tree (by repo path).
+  `link.script` takes the same three forms. A generated script or version script is mounted at `/ld` by the ld stage from the root's build view, so its content is in the stage key: changing the generator's input changes the script and the key; an input change that leaves the script equal leaves the link key.
 - Linked whole: every input OBJECT (own and of the input roots) and every archive that is an input is under `--whole-archive`; there is no `--gc-sections`:
   the set of symbols is the set of the inputs. (The toolchain's libraries of `link.libs` are the linker's to search, as the driver does: whole libc
   would be the wrong set; what they pull in is judged by the symbol tables after the link.)
@@ -211,6 +212,35 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   recipe is a whole recipe with no variants of its own; its name may not also be a variant of the base recipe. Header home: an include into a
   product root is accepted for the including root's target only if that root has a recipe for it (its own, or a per-target one).
 
+### ELF facts of a linked output (the link record)
+A green link record carries the facts of the linked ELF, written by the link itself with the pinned binutils of `env.json`; every consumer reads the record and none runs
+`readelf`, `nm` or `objdump` on a linked output. The record is `elffacts.json` ("fnvnx-elffacts/2", `objects.json` key `elf_facts`):
+- `sections`: `{index, name, type, address, size, flags}` of every section of the final ELF (`flags` as readelf's letters), from the stage `ldfacts:<root>`: the
+  pinned `readelf -W -h -S -r -s` (the one beside the linker the compiler names; it must be a file of a package env.json pins, else the stage is red) run on the final ELF
+  (after ldcheck). The stage's stdout is cached with it, so a link that hits the cache runs nothing.
+- `symbols`: the DEFINED symbols of `.symtab`: `{name, value, size, type, bind, section}` (`section` = the Ndx column: an index, ABS or COM).
+- `header`: `{machine, type, entry}` (`-h`; `entry` the e_entry address, an integer).
+- `relocations`: rows `[section, offset, type, symbol, addend, target]` of every relocation section (`-r`; `symbol` is "" for a relocation with no symbol, the section
+  name for a section symbol; `target` = symbol value + addend, an IFUNC symbol's value taken from the symbol table). A link keeps the STATIC relocations of its inputs
+  only with `--emit-relocs` (a link flag of the root; ld manual, Options): without it these are the dynamic relocations of the image.
+- `call_edges`: `{site, caller, caller_offset, callee, target, type}` sorted by site, one per call relocation (the machine's CALL_TYPES: AArch64 CALL26, JUMP26):
+  `caller` the FUNC symbols that hold the site (`[]` if none), `callee` the symbol of the relocation or, for a section symbol, every symbol whose range holds the
+  target. `address_taken`: `{symbol, target}` for every other relocation (not a conditional branch) in an allocated section other than `.eh_frame` and
+  `.gcc_except_table` (unwind tables name every function: metadata). Static call edges exist only for a link with `--emit-relocs`.
+- `members`: `{member, requested_by, symbol}` for every archive member the link pulled in (the map's `Archive member included to satisfy reference by file (symbol)`
+  section), in ld's order. The entry point symbol is the symbol of `symbols` at `header.entry` (the ENTRY of the link script).
+- `references`: for every product object of the link (key `<group>:<unit>`, the objects of the root and of its `link.roots`) the list `{symbol, definer}` of every
+  undefined reference it makes that the link resolved: `definer` is the input that defines it, named as ld names it (a product object `/objs/<group>/<unit>.o`, a
+  start file, an archive member `ARCHIVE(MEMBER)` with the archive's path, a system library), or `<linker>` for a name that the linker defines itself. A weak
+  undefined reference nothing defines is not resolved and has no entry.
+  Source: ld's own cross reference table (`ld --cref --no-demangle`, in the map the link stage writes; ld manual, Options, `--cref`: for each symbol, "If the symbol
+  is defined, the first file listed is the location of the definition"; the files that follow reference it). ld records a definition only for a symbol an input
+  defines, so the first file is the definer iff ITS OWN symbol table defines the name (the object's or the archive member's, read by `undefset.object_symbols`);
+  otherwise the name is the linker's own (or weak undefined: not defined in the output). No text of ld's diagnostics is read.
+Totality: a row of readelf's tables that does not fit the layout of `readelf.c`, a count that disagrees with the table's header line, or a file in ld's table that
+is no input of the link makes `ldfacts:<root>` red; nothing is skipped. The layouts are those of binutils 2.42 and are pinned by `tests/test_elffacts.py`.
+Readers of the record: gate_tlsmodel (the relocations of the linked ELF), contract/pcrel_abs.py via gate_pcrel (the ABS symbols), verify/icount.py (L4 converts it).
+
 ## Run stages (`run`)
 
 `"run": [{"name", "artifact", "args", "inputs", "debs", "outputs"}]` executes a declared artifact in the sandbox, after the generators.
@@ -235,8 +265,21 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
 `generated`) or of run stage NAME of an admitted root. The stage runs (cached by its key), the output is written to `CACHE/stageout/<sha256>/P`
 and the ident is `stage:ROOT:NAME:P:sha256`. An undeclared output, an unknown root or stage and a red stage are `ValueError`.
 
+## Profiles
+`"profile": "guest" | "host"` names the profile of the root's target (it is the root's admit.json `target`; any other is red). recipe.py generates the
+profile's fields from the pins (`recipe.profile_fields`, `recipe.expand_profile`) and expands them into the recipe before anything reads it, so every stage key is a
+function of the expanded values alone (a root that names its profile has the keys of the root that spelled every field):
+- guest: `compiler` (the external and drivers of verify/guest_compiler.json), `plugins` (the full PLUGIN_SOURCES set in load order, fixed arguments from
+  recipe.py via `plugin_decls`), `external` = the compiler's external and the runtime's (pin `runtime`). The semantic flags are already generated (targets.json, DATAMODEL.json, guest_compiler.json).
+- host: `compiler` = the distribution compiler of env.json, no plugin, no external.
+A root names `profile` plus its own `flags`, `include`, `units`, `defines`, `generated`, `link`, and in `external` only what the profile does not carry (those follow
+the profile's in the expanded list). Writing `compiler`, `plugins` or a profile external in the recipe is red ("restates a profile field").
+
 ## Variants
-`variants: {NAME: {"compiler": .., "flags": {..}, "link": {..}}}`: one root built for several targets or with sanitizers. A variant replaces only the keys it names (`compiler`, `flags`, `link`; `link` whole, e.g. a sanitizer variant's own `link.libs.system` [libubsan.so.1 of the pinned libubsan1]), the rest is
+`variants: {NAME: {"compiler": .., "flags": {..}, "link": {..}, "flags_add": {..}, "defines_add": [..]}}`: one root built for several targets or with sanitizers. A variant is a set of **deltas**:
+`flags_add: {"c": [..], "cxx": [..], "asm": [..]}` appends to the root's flags of that language, `defines_add: ["NAME[=VALUE]"]` appends `-DNAME[=VALUE]` to c, cxx and asm; both are
+appended in the order written, after the base flags. A whole replacement (`compiler`, `flags`, `link`) is kept only where replacement is the point: a sanitizer variant's own `link`
+(whole, e.g. its `link.libs.system` [libubsan.so.1 of the pinned libubsan1]) and a variant that changes the compiler. The rest is
 the root's; its effective recipe is checked by every rule of `check()`. A (root, variant) pair is spelled `root@NAME` (`recipe.split_spec`; the implicit
 variant is `root`). It is its own set of content-keyed stages: the variant name is in every stage key (env `FNVNX_VARIANT`, absent for the implicit variant, so
 a root without variants keeps its keys), its objects are stored at `GATE_CACHE/objects/<tree>/<root>@<NAME>/objects.json` and its `objects.json` has

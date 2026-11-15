@@ -1412,28 +1412,33 @@ what the source says; it does not follow a relocation into a non-group, non-merg
 Rule (c) groups by address: a body reached through two names of one address with the same body id is the owner's statement of one body.
 ```
 
-## verify/gate_onedef.py
+## verify/elffacts.py
 
 ```text
-Gate "onedef" (fnvnx-gate/1): one definition, one source. A name, a COMDAT group, a source file and a header each come from ONE place.
-    python3 -I gate_onedef.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/onedef.json
-Rules (by symbol tables and file content, never by a name's text):
-  (a) Per linked image (a root with a `link`; its objects are those of the root itself and of every root of its `link.roots`): a GLOBAL or WEAK
-      definition outside every COMDAT group comes from exactly ONE root. Two roots defining one name is `dup-def`, whatever the binding (strong, weak):
-      the linker's choice between them would pick a body by link order.
-  (b) COMDAT groups of an image. The instances of one signature that come from different roots must be one definition: one digest of the group's
-      member sections (bytes, flags, alignment and relocations by offset, type, addend and target: gate_linkstrict.elf_comdat), else
-      `comdat-differs` (flags, plugins or a body differ: an ODR violation). Instances of one group inside ONE root need no comparison.
-      NOT EXACT (stated): this compares what the linker sees. "The same source definition" (same decl_file/decl_line) needs DWARF
-      `DW_AT_decl_file/line`, and the objects of a recipe carry no debug info (flags are the root's -O/-W/-std only): until a recipe
-      builds them with `-g1`-class line tables, a cross-root COMDAT group whose digests are equal is accepted on equal bytes alone.
-  (c') Every translation-unit source file (.c .cc .cpp .cxx .s .S) of a product root is a unit of exactly ONE root: the content sha256 of a unit
-      must not be the content of a unit of another root (`unit-copy`), and a path is a unit of one root only (`unit-path`).
-  (c'') Headers are shared by include, never copied: a tracked header (.h .hh .hpp .hxx .inc .inl) whose content sha256 appears under two
-      paths of the admitted roots is `header-copy` for every copy. Externals are pinned trees, outside this clause; generated outputs are
-      not tracked, a tool writes them from tracked inputs (they are checked through the sources and headers they are generated from).
-Universe = defined global names per image + COMDAT signatures per image + units of product roots + tracked headers. Certified = items with
-no finding. No product root: units/headers still count (clauses (c'), (c'') are about the tree), (a) and (b) are empty.
+elffacts: the facts of a LINKED ELF that the link record carries ("fnvnx-elffacts/2"), so that no consumer runs readelf, nm or objdump on a linked
+output. Pure functions over texts the PINNED binutils of env.json printed (the link stage's own readelf and ld stages): no process is started here.
+
+  sections    readelf -W -S ELF   -> [{index, name, type, address, size, flags}]            (binutils readelf.c, process_section_headers:
+              the columns `[Nr] Name Type Address Off Size ES Flg Lk Inf Al`, the numbers in hex without 0x, Flg a string of the letters of the
+              readelf legend (W write, A alloc, X exec, M merge, S strings, I info, L link order, O extra OS processing, G group, T TLS,
+              C compressed, E exclude, R retain, p processor specific, o OS specific, x unknown, l large)).
+  symbols     readelf -W -s ELF   -> the DEFINED symbols (Ndx not UND) of `.symtab`: [{name, value, size, type, bind, section}]  (readelf.c,
+              process_symbol_table / print_dynamic_symbol: `Num: Value Size Type Bind Vis [other] Ndx Name`; Size is decimal, or 0xHEX above 100000).
+  header, relocations, members, call_edges, address_taken: as RECIPE.md "ELF facts of a linked output" (readelf -W -h / -r, the map's archive member section,
+              and the derivation from the relocations by the machine's CALL_TYPES); the one `readelf -W -h -S -r -s` output is split by the parsers.
+  definers    ld --cref --no-demangle -Map=MAP   -> {symbol: [file, ...]}  (ld.texi, Options, `--cref`: "Output a cross reference table. ... The
+              format of the table is intentionally simple, so that it may be easily processed by a script if necessary. The symbols are printed
+              out, sorted by name. For each symbol, a list of file names is given. If the symbol is defined, the first file listed is the
+              location of the definition. If the symbol is defined as a common value then any files where this happens appear next. Finally any
+              files that reference the symbol are listed."). A name is followed by its first file on the same line (a name too long for the
+              column puts the file on the next line); further files are on lines of their own, indented. A file inside an archive is `ARCHIVE(MEMBER)`.
+  Where the first listed file is not a definition, the symbol is one the linker defines itself (`__ehdr_start`, `_end`, a script assignment) or
+  a weak undefined: ld's source (ldmain.c notice -> ldcref.c add_cref) records a definition only for a symbol that an input defines. The rule here
+  is therefore exact and not a guess: the first file is the definer iff ITS OWN symbol table defines the name (the callers pass `defs_of`).
+
+Every parser is total: a line that does not fit the layout, or a count that disagrees with the header line the tool printed, raises ElfFactsError.
+The layouts are pinned by tests/test_elffacts.py on a real link with the same binutils version as env.json (2.42).
+```
 
 ## verify/gate_tlsmodel.py
 
@@ -1462,7 +1467,28 @@ Rules (a finding names the object, the symbol and the relocation):
   (5) `unclassified`: a TLS relocation of a name outside the families above.
 Items: every object, every linked ELF, every TLS relocation (object, symbol, relocation name, section, offset). Certified = the items with no
 finding. Counts per relocation family over all roots are in `detail`. No guest root: universe 0, green.
-```
+## verify/gate_onedef.py
+
+```text
+Gate "onedef" (fnvnx-gate/1): one definition, one source. A name, a COMDAT group, a source file and a header each come from ONE place.
+    python3 -I gate_onedef.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/onedef.json
+Rules (by symbol tables and file content, never by a name's text):
+  (a) Per linked image (a root with a `link`; its objects are those of the root itself and of every root of its `link.roots`): a GLOBAL or WEAK
+      definition outside every COMDAT group comes from exactly ONE root. Two roots defining one name is `dup-def`, whatever the binding (strong, weak):
+      the linker's choice between them would pick a body by link order.
+  (b) COMDAT groups of an image. The instances of one signature that come from different roots must be one definition: one digest of the group's
+      member sections (bytes, flags, alignment and relocations by offset, type, addend and target: gate_linkstrict.elf_comdat), else
+      `comdat-differs` (flags, plugins or a body differ: an ODR violation). Instances of one group inside ONE root need no comparison.
+      NOT EXACT (stated): this compares what the linker sees. "The same source definition" (same decl_file/decl_line) needs DWARF
+      `DW_AT_decl_file/line`, and the objects of a recipe carry no debug info (flags are the root's -O/-W/-std only): until a recipe
+      builds them with `-g1`-class line tables, a cross-root COMDAT group whose digests are equal is accepted on equal bytes alone.
+  (c') Every translation-unit source file (.c .cc .cpp .cxx .s .S) of a product root is a unit of exactly ONE root: the content sha256 of a unit
+      must not be the content of a unit of another root (`unit-copy`), and a path is a unit of one root only (`unit-path`).
+  (c'') Headers are shared by include, never copied: a tracked header (.h .hh .hpp .hxx .inc .inl) whose content sha256 appears under two
+      paths of the admitted roots is `header-copy` for every copy. Externals are pinned trees, outside this clause; generated outputs are
+      not tracked, a tool writes them from tracked inputs (they are checked through the sources and headers they are generated from).
+Universe = defined global names per image + COMDAT signatures per image + units of product roots + tracked headers. Certified = items with
+no finding. No product root: units/headers still count (clauses (c'), (c'') are about the tree), (a) and (b) are empty.
 
 ## verify/gate_argorder.py
 

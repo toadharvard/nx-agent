@@ -280,6 +280,23 @@
     "ports/fnv-nx/verify/recipe.py"
    ]
   },
+  "test_elffacts.py": {
+   "references": [
+    {
+     "anchor": "### ELF facts of a linked output (the link record)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    },
+    {
+     "anchor": "## verify/elffacts.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/elffacts.py"
+   ]
+  },
   "test_envcheck.py": {
    "references": [
     {
@@ -820,6 +837,18 @@
    "subject": [
     "ports/fnv-nx/verify/producers.py",
     "ports/fnv-nx/verify/gate_linkstrict.py"
+   ]
+  },
+  "test_profile.py": {
+   "references": [
+    {
+     "anchor": "## Profiles",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
    ]
   },
   "test_puregate.py": {

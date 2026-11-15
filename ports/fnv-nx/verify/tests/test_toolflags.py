@@ -145,6 +145,13 @@ expect("objcopy --preserve-dates", doc("objcopy", OC + ["--preserve-dates"]), ["
 expect("objcopy --disable-deterministic-archives", doc("objcopy", OC + ["-U"]), ["flag-forbidden"])
 expect("objcopy --jobs", doc("objcopy", OC + ["--jobs=2"]), ["jobs-in-argv"])
 
+# --- readelf (the link record's ELF facts)
+RE = ["/tc/bin/readelf", "-W", "-h", "-S", "-r", "-s", "/src/a.elf"]
+expect("readelf -W -h -S -r -s on a declared input passes", doc("readelf", RE), [])
+expect("readelf without -W", doc("readelf", ["/tc/bin/readelf", "-S", "/src/a.elf"]), ["flag-missing"])
+expect("readelf with another option (-d)", doc("readelf", RE + ["-d"]), ["flag-forbidden"])
+expect("readelf on a file outside the inputs", doc("readelf", RE + ["/etc/passwd"]), ["path-outside-inputs"])
+
 # --- python
 expect("python without -B", doc("python", ["/tc/bin/python3", "-s", "/src/tool.py"]), ["flag-missing"])
 expect("python PYTHONDONTWRITEBYTECODE=1 env stands in for -B",

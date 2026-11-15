@@ -3,9 +3,9 @@ GCC 13.3 / binutils 2.42 rows were checked against the installed --help."""
 RB = "reproducible-builds.org"
 GCCENV = "GCC manual, Environment Variables"
 FORBID_ENV_GCC = "GCC_EXEC_PREFIX COMPILER_PATH LIBRARY_PATH CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH DEPENDENCIES_OUTPUT SUNPRO_DEPENDENCIES"
-KINDS_TXT = "gcc/as/ld/ar/objcopy/python"
-KINDS = ("gcc", "as", "ld", "ar", "objcopy", "python")
-GNU = ("gcc", "as", "ld", "ar", "objcopy")
+KINDS_TXT = "gcc/as/ld/ar/objcopy/readelf/python"
+KINDS = ("gcc", "as", "ld", "ar", "objcopy", "readelf", "python")
+GNU = ("gcc", "as", "ld", "ar", "objcopy", "readelf")
 FIXED = (("TZ", "UTC"), ("LC_ALL", "C"), ("PYTHONHASHSEED", "0"))
 FORBID_ENV = ("LANG", "LANGUAGE", "PYTHONPATH", "HOME", "USER", "LOGNAME", "HOSTNAME", "PWD", "DISPLAY", "GCC_EXEC_PREFIX",
               "COMPILER_PATH", "LIBRARY_PATH", "CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "DEPENDENCIES_OUTPUT",
@@ -44,6 +44,8 @@ POLICY = {
     "ar.D": ("ar", "operation letters contain D and not U", "GNU ar manual, Modifiers (D deterministic mode, U real timestamps)"),
     "objcopy.D": ("objcopy", "-D/--enable-deterministic-archives present; -p/--preserve-dates, -U forbidden",
                   "GNU binutils objcopy manual (-D, -p, -U)"),
+    "readelf.args": ("readelf", "-W present; the only options are -W -h -S -r -s; every file under a declared input (a reader: it writes nothing)",
+                     "GNU binutils readelf manual, Options (-W --wide, -h --file-header, -S --section-headers, -r --relocs, -s --syms)"),
     "python.flags": ("python", "-s and (-B or env PYTHONDONTWRITEBYTECODE=1); -I and -E forbidden (they drop PYTHONHASHSEED, "
                      "measured: hash(\"a\") differs per run under -I); -c and -m forbidden",
                      "Python docs, Command line (-B, -E, -I, -s); PEP 552 (pyc embed source mtime)"),
