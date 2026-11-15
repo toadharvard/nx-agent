@@ -10,8 +10,8 @@
 20	Direct3DShaderValidatorCreate9	wine-9.0:dlls/d3d9/d3d9_main.c:Direct3DShaderValidatorCreate9	addr	_ZL5g_mem+8
 10	IDirect3DDevice9::ProcessVertices	wine-9.0:dlls/wined3d/device.c:wined3d_device_process_vertices	branch	-
 11	IDirect3DDevice9::ProcessVertices	wine-9.0:dlls/wined3d/device.c:process_vertices_strided	branch	-
-12	IDirect3DDevice9::ProcessVertices	wine-9.0:dlls/wined3d/utils.c:wined3d_format_get_colour	branch	-
-13	IDirect3DDevice9::ProcessVertices	wine-9.0:dlls/wined3d/utils.c:wined3d_get_flexible_vertex_size	branch	-
+12	IDirect3DDevice9::ProcessVertices	wine-9.0:dlls/wined3d/device.c:wined3d_format_get_colour	branch	-
+13	IDirect3DDevice9::ProcessVertices	wine-9.0:dlls/wined3d/device.c:wined3d_get_flexible_vertex_size	branch	-
 14	IDirect3DDevice9::ProcessVertices	wine-9.0:dlls/d3d9/device.c:d3d9_device_ProcessVertices	branch	-
 15	IDirect3DDevice9::ProcessVertices	wine-9.0:dlls/wined3d/device.c:init_transformed_lights	branch	-
 40	IDirect3DDevice9::SetRenderState	wine-9.0:dlls/wined3d/stateblock.c:wined3d_device_apply_stateblock	branch	-
