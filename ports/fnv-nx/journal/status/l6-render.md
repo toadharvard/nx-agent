@@ -905,3 +905,6 @@ Paused: w3b, w4, farm; no other work.
     - The FFP GLSL generator moves to render/gl4shim as rows FFP_SMOOTH and FFP_FLAT. ffp_glsl.gen.h is deleted.
     - L6A w6 adapts d3d9/dev/ffp_prog.cpp in the same commit; I review it.
     - Then: the sm_link universe = the gamedata set ∪ the 7 gl4shim rows. w5 runs once on that head; meanwhile it clears its duplicate admit rows and the old render/d3d9/spec/.
+- 15:28Z L6A revision: the FFP stages are per-stage rows (FFP_VS and FFP_PS × smooth and flat), and SHADER_CREATE takes {stage, row id}. The scale programs stay as linked rows.
+    - Pairing rule (L6): one source, render/pair. A null VS or PS maps to the FFP row for the draw's SHADEMODE. sm_link enumerates nx_link_set over translator ∪ FFP stages.
+    - w6 (next, after L6A's head): extend render/pair. Then w5 runs once.
