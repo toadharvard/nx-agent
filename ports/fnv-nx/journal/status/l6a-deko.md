@@ -19,13 +19,14 @@ Kind: A = hand-written set, B = second copy of a fact, C = second path.
 On the path (converted now; w6 task W6-D1 on gl4w15c, one commit, then L1 verdict):
 | # | item | kind | replacement |
 |---|---|---|---|
-| 1 | gl4_funcs.h: 109 GL entries typed by hand (3 unused: glGetString, glDeleteSamplers, glFlush) | A | derivation: the entry set is generated from gl4's own call sites (the set of gl* names the gl4 units reference), unused rows go; prototypes from the Khronos header, which must be a pinned input (see L1 below) |
+| 1 | gl4_funcs.h: 109 GL entries typed by hand (3 unused: glGetString, glDeleteSamplers, glFlush) (L6 #30) | A | generation: a recipe stage emits gl4_funcs.h from a pinned Khronos gl.xml edition (mirror fnv-nx-build tools/khronos-glxml), restricted to the gl* symbols gl4's objects reference (a compiler fact); the hand file is deleted |
 | 2 | libnxgl4.map exports (5) restated in gl4.h | A+B | generation: the version script is generated from gl4.h's NXGL4_EXPORT declarations; the hand map is deleted |
 | 3 | variant bits as literals in gl4_d3dshader.c (cause of the FLAT refusal defect: gl4 kept its own copy of the rule) | B | one source: named constants (variant mask, VS_COMPLETE, FLAT) in render/nxgpu/nxgpu4_shader.h, the ABI home; gl4 reads them; byte change sent to L6 |
 | 4, 4b | MAX_CODE, MAX_L, the lp/16 bound, key size 32 as literals (about 6 places) | B | one source: ABI constants in nxgpu4_shader.h / gpu_abi.h, the sizes asserted from them |
 | 4c | gl4.h GL4_MAX_* (7) | B | each one names the ABI constant it follows from, or is removed |
 | 4d | gl4.h NXGL4_OP_LIST / FN_LIST / FN_EXT_LIST (28+17+1) against the NxOp / NXGPU_FN enums; a static_assert checks counts only | A+B | generation: one X-macro list in the nxgpu header defines the enums; gl4's tables are expanded from it; the count assert is deleted |
 | C1 | render/d3d9/backend/build_gl4.sh (second build path for libnxgl4) | C | deleted in this commit; the gl4 root on the recipe replaces it |
+| C1b | render/d3d9/backend/gl4_xlator.sh (translator flags for build_gl4.sh; L6 #29) | C | deleted; gl4 reaches the translator only through fnvnx_shader_translate_glsl and the translator@host link root |
 | C2 | dk build scripts build_dk.sh, build_msres_dksh.sh, build_scale_dksh.sh, selftest/build_dksh.sh, selftest/build_nro.sh | C | deleted in this commit; the dk root on the recipe (w4) and the uam hermetic stage (3b) replace them |
 
 Reported to other owners (on the path):
@@ -48,6 +49,8 @@ After the first frame (deko, paused):
 | 7c | embedder hooks: 3 in dk.h vs 2 in gl4.h | A+B | one hook declaration header in render/nxgpu, read by both backends and L4 |
 | 7d | NXSP v2 layout as dk.h prose plus literals | B | one struct header with offset asserts, read by the producer and dk_shader.c |
 | 7e | dk_msres_dksh.h / dk_scale_dksh.h: committed uam output | C | the uam hermetic stage (3b) generates them; the committed copies are deleted then |
+| 7g | lead branch render/shaders/src/sdp2dksh.c, dk.cpp (L6 #32 area) | — | home: the dk root render/backend (shader pack tooling, with the uam stage 3b); moved by w4 when deko resumes |
+| 7h | dk_facts.tsv / dk_facts.py (L6 #32) | A | generated from the pinned deko3d headers |
 | 7f | w4 render/backend: old copies of the nxgpu headers | B | deleted; includes go to render/nxgpu |
 
 Defect reports from now on name their cause and how the cause is closed.
