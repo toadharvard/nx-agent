@@ -12,7 +12,7 @@ the hash of the stage document + tool code. All paths are root-relative unless m
  "units": "all",
  "generated": [{"tool": "ports/fnv-nx/contract/gen.py", "args": ["/out/gen/t.h"], "inputs": ["ports/fnv-nx/X/table.tsv"], "outputs": ["gen/t.h"]}],
  "os_layer": ["os.S"], "tests": [{"name": "t1", "units": ["tests/t1.cc"]}], "constants": "constants.tsv", "contract_names": "contract.tsv",
- "link": {"script": "link.ld", "output": "x.elf", "flags": ["-m", "aarch64linux32"], "roots": ["ports/fnv-nx/other"],
+ "link": {"script": "link.ld", "output": "x.elf", "flags": ["-m", "aarch64linux32"],
           "libs": {"external": "tc", "dirs": ["lib"], "names": ["c"], "startfiles": ["lib/crt1.o"], "endfiles": ["lib/crtn.o"]}},
  "plugins": [{"name": "fnvnx_order", "source": "ports/fnv-nx/toolchain/order/fnvnx_order.cc", "args": {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}},
              {"name": "fnvnx_ftoi", "source": "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc", "args": {"mode": "native"}}],
@@ -59,11 +59,8 @@ the hash of the stage document + tool code. All paths are root-relative unless m
   the owner (an import name and the body that implements it). Gate `linkstrict` rule (c): every name is defined in the linked ELF with a
   nonzero size, and two names with different body ids never share an address.
 - `link`: the guest ELF, null = no ELF. A link is the stage `ld:<root>` and the post stage `ldcheck:<root>` of the section "Link: the guest ELF"
-  below; `flags` carries the emulation only, `roots` and `libs` are optional.
-  `kind` is `pie` (the ILP32 guest image, the default) or `exe`; a root of target guest cannot link an `exe`. `roots` lists distinct admitted `product`
-  roots of the same target, never the root itself; their stored objects are declared inputs of the link stage (so their content is in its key) and a
-  listed root is built without its own link. A root of class `product` lists base roots only; a root of class `test` lists any root, variants included
-  (`root@NAME`). A variant is one concept: `variants: {NAME: {"target"?}}` in the root's admit.json entry, its flags in the recipe's `variants`,
+  below; `flags` carries the emulation only, `libs` is optional. `link.roots` does not exist: the members of an image are derived (Link members, below).
+  `kind` is `pie` (the ILP32 guest image, the default) or `exe`; a root of target guest cannot link an `exe`. The objects of the image's members (derived, Link members) are declared inputs of the link stage (so their content is in its key); a member is built without its own link. A variant is one concept: `variants: {NAME: {"target"?}}` in the root's admit.json entry, its flags in the recipe's `variants`,
   addressed as `root@NAME` (a sanitizer build is a flags variant of the same root). Whatever the flags, `linkstrict` judges the linked output: no
   undefined symbol of any binding.
 - ABIs: the recipe names the ABI in its flags, and the build reads ELF32 and ELF64 AArch64 objects alike. ILP32 (the product): `-mabi=ilp32`
@@ -77,7 +74,7 @@ the hash of the stage document + tool code. All paths are root-relative unless m
 **The plugin set belongs to the target profile, not to the language.** The guest profile requires the full set (`PLUGIN_SOURCES`, in load order), for C and C++ alike. The host
 profile (`"profile": "host"`) has the empty set, and a host root is required to load none: the plugins enforce guest-ABI semantics (msvcmodel, x86 TSO as `ldar`/`stlr`, MSVC
 argument order, `_ftol` conversion, layout records) that a host object does not have, and they are built against the aarch64 compiler's plugin headers. The set cannot leak
-across targets because a host object never enters a guest image: `link.roots` of a guest image that names a root of another target is red (`resolve_link_root`), so every object in
+across targets because a host object never enters a guest image: a guest image never links a root of another target (`recipe.link_candidates` leaves it out, `resolve_link_root`), so every object in
 a guest link closure was compiled with the full set. (Selftests: tests/test_plugins.py, tests/test_recipe.py "target profile".)
 `fnvnx_ftoi` is one plugin, class C (float -> integer), two modes chosen by the root's `cxx_origin` and never declared freely: `recipe.plugin_args(cxx_origin)` gives `mode=native`
 (the MSVC `_ftol` rewrite, skipped inside functions with `__attribute__((fnvnx_f2i))`, which the plugin registers), `mode=lifted` for a lifted origin (no rewrite; a
@@ -153,10 +150,22 @@ Check: `lifted_by` must be a tracked `.py` of an admitted root of class `tool` (
 ## Link: the guest ELF
 There is one way to link: the recipe key `link` (no other path runs a linker; link/ has no subprocess call). Every key below is validated by
 `check()` with all errors listed at once.
-- `link.roots`: `[repo paths of other admitted product roots, or `root@NAME` pairs (Variants)]`. Each root's own recipe is built by the same machinery (content-keyed, cache hits in
-  GATE_CACHE/store) and its objects are link inputs AFTER this root's own units, in the order of the list, each root's objects in unit order. An input
-  root must be admitted, class product, with `link` null (so a cycle is impossible; `check()` names a cycle `A -> B -> A` anyway), listed once, not the
-  root itself. A red input root makes this link red: stage `ld:<root>`, stderr names the input root and its failing stage.
+- **Link members (derived; there is no `link.roots`).** The objects an image links after its own units are those of its **definer closure**
+  (`recipe.link_candidates`, `recipe.definer_closure`), computed at the link stage from the symbols: start from the image's undefined symbols minus its own
+  definitions; each goes to the admitted product root that defines it (a global definition; a weak one only when no root has a global one), that root's own
+  undefined symbols join, until the fixed point. The candidates are every admitted `product` root with a recipe and `link` null, in the recipe it has for the
+  image's target (`resolve_link_root`), never the image itself; each is built objects-only by the same machinery (content-keyed, cache hits in GATE_CACHE/store).
+  Members are linked in sorted order, each root's objects in unit order. A symbol defined by several candidates is red, stage `ld:<root>` (onedef's
+  rule: a name has one definer). A symbol no candidate defines stays undefined: the runtime libraries and `ldcheck` judge it, red when nothing defines it. A written
+  `link.roots` is a check error. A red candidate makes the link red, stage `ld:<root>`, naming the root and its failing stage. A root with a `link` is an image and
+  is never a member.
+- **Link tables (`link.tables`: `[{tool, args, unit, section}]`).** A table that lists the objects of an image (the descs/bridges dispatch table) is a product of the link, never a root of its
+  own and never a link member. After the members are final, the tool (a tracked `.py` of an admitted tool or product root) runs in the hermetic stage `table:<root>:<i>` over exactly the
+  objects of this link, mounted at `/objs/<group>/<unit>.o`, with `--section <section>` appended; it writes the one declared `unit` (a new root-relative C or C++ source), which is compiled with the
+  root's own flags, plugins and compiler (`Job.compile`) and linked into the same image. The stage key holds every object's content, the tool, its arguments and the section name. One pass is sound
+  because of the fixed-point gate: the table's own object must hold no entry of `section` (red `table:<root>:<i>` otherwise), and its undefined symbols must not pull a root the table was not made over
+  (the closure is recomputed; a different member set is red). An image with no lifted code gets an empty table. Only facts that really are root-level (`contract/facts`, `contract/factscheck`,
+  read through `objects_of`) keep the fact-universe rule; a table of one image's objects is `link.tables`.
 - `link.script`, `link.libs` (guest roots): one fact for every guest link. `ports/fnv-nx/link/guest.json` = `{"script": "link/guest.ld"}` and nothing else: the libraries are not stored anywhere. The link derives them (keyed stages `drv:<root>` and `mld:<root>`: the pinned runtime's driver with `flags.semantics`, `-pie -###`, and `-print-multi-directory`): dirs, names, start files, end files of that link command, minus the start/end files the one-definition rule (they define a symbol a product root defines) or the entry rule (they define `_start` while the script's ENTRY is another symbol) excludes. A derived file outside the pinned runtime external or outside the selected multilib is a red `drv:<root>`.
   Every root whose admit.json `target` is guest and that links (the product ELF and every guest test image) gets exactly this script and these libraries; the link
   stage is `startfiles -L<external at>/<dir>.. [objects, whole] --start-group -l<name>.. --end-group endfiles`, so two guest links differ only by output and objects.
@@ -193,17 +202,16 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   **One entry (ldcheck).** The entry symbol of a link is `ENTRY(sym)` of its script, else `_start`; exactly one object of the product's roots defines it (`entry-none:<sym>` when none does, a definition only in a startfile or library included; `entry-duplicate:<sym> <- objects` when several do). For the guest profile, when ENTRY is not `_start` the startfile that defines `_start` (the runtime's crt0.o, whose ABS32 relocations in .text fail `-z text`) is the runtime's own process start: the derivation excludes it (`recipe.entry_object`), so link/guest.json lists no crt0.
   **Host exe: start files from the driver.** For `kind exe` the link takes its start files (crt1/Scrt1, crti, crtbegin), end files (crtend, crtn) and the dynamic linker from the recipe's own pinned driver, not from the recipe: stage `drv:<root>` runs `<driver> -pie -###` on a one-line file, with the `.o` files of the driver's own library search directories as declared inputs; the link line it prints gives the `.o` files before the first `-l` (start), after the last (end) and `-dynamic-linker`. Each file must belong to a package env.json pins (`system_lib_errors`). The link stage mounts those files and uses them; a recipe that names `libs.startfiles/endfiles/dirs/names/external` for an exe is red, and `link.flags` carries emulation options only, so no `-e`, `-dynamic-linker` or `-nostartfiles`. The output has the exec bit. Weak undefined, host and guest alike (ruling A): a weak undefined reference is accepted iff no product-root object makes it: one that only a startfile or runtime file of the pinned toolchain carries (`__gmon_start__`, `__cxa_finalize`, `_ITM_*`: the compiler's runtime, value 0 by the gABI) is accepted; one a product object references and nothing defines is red (`weak-undefined:<name> <- <objects>`).
   `link.loader` (kind shared only): the admitted root (product or test, with a recipe, the same target) of the image that loads this one. ldcheck then accepts
-  undefined names ⊆ (the dynamic exports of the `link.libs.system` libraries) ∪ (the global and weak names defined by the objects of the loader root and of its
-  own `link.roots`, built objects-only through the stage cache and passed to `ldcheck:<root>` as a declared input), and nothing else. The loader is an edge
+  undefined names ⊆ (the dynamic exports of the `link.libs.system` libraries) ∪ (the global and weak names defined by the objects of the loader root,
+  built objects-only through the stage cache and passed to `ldcheck:<root>` as a declared input), and nothing else. The loader is an edge
   of the root graph (cycles are red). Without `link.loader` only the libraries count.
-  `link.roots` works for every kind; a root needed by several images has `link` null and is built once per (root, variant).
+  The derived members work for every kind; a root needed by several images has `link` null and is built once per (root, variant).
 - Target of the link: every linked object (own and input roots') has the ELF class and e_machine of the link's emulation (`aarch64linux32` ILP32 = class 1,
   AArch64; `aarch64linux` = class 2, AArch64; `elf_x86_64` = class 2, x86-64), read from its ELF header. A mismatch is red, stage `ld:<root>`, naming the object.
   `exe` is host only: a root of target guest links a `pie` (emulation `aarch64linux32`, the crt0 header), a guest test root included; a guest root with
-  kind `exe` is refused. A product image's `link.roots` name base roots only; an explicit variant (`root@NAME`) is linked only by a root of class `test`.
-  A `link.roots` entry names a root and the image links that root's recipe for the IMAGE'S OWN TARGET (`recipe.resolve_link_root`): an explicit `root@NAME` must itself
+  kind `exe` is refused. A member is a root's recipe for the IMAGE'S OWN TARGET (`recipe.resolve_link_root`): an explicit `root@NAME` must itself
   have the image's target, else red; a base name is the base recipe when the base's target is the image's, else the one variant of the root that admit.json declares with
-  the image's target (a host image names the guest root `lib/sha256` and links `lib/sha256@host`); no such variant, or several, is red. An object of another target is
+  the image's target (a host image links the guest root `lib/sha256` as `lib/sha256@host`); no such variant, or several, is red. An object of another target is
   red at the link in any case (class and e_machine of every input).
   The admit.json entry of a root may carry `variants`: {NAME: {"target": "guest"|"host"}} for variants the recipe declares; a variant inherits the base's
   target otherwise, the guest rules (compiler external, data model) are judged on the effective target, and a variant with its own target has it in
@@ -235,7 +243,7 @@ A green link record carries the facts of the linked ELF, written by the link its
   `.gcc_except_table` (unwind tables name every function: metadata). Static call edges exist only for a link with `--emit-relocs`.
 - `members`: `{member, requested_by, symbol}` for every archive member the link pulled in (the map's `Archive member included to satisfy reference by file (symbol)`
   section), in ld's order. The entry point symbol is the symbol of `symbols` at `header.entry` (the ENTRY of the link script).
-- `references`: for every product object of the link (key `<group>:<unit>`, the objects of the root and of its `link.roots`) the list `{symbol, definer}` of every
+- `references`: for every product object of the link (key `<group>:<unit>`, the objects of the root and of its derived link members) the list `{symbol, definer}` of every
   undefined reference it makes that the link resolved: `definer` is the input that defines it, named as ld names it (a product object `/objs/<group>/<unit>.o`, a
   start file, an archive member `ARCHIVE(MEMBER)` with the archive's path, a system library), or `<linker>` for a name that the linker defines itself. A weak
   undefined reference nothing defines is not resolved and has no entry.
@@ -289,14 +297,18 @@ appended in the order written, after the base flags. A whole replacement (`compi
 the root's; its effective recipe is checked by every rule of `check()`. A (root, variant) pair is spelled `root@NAME` (`recipe.split_spec`; the implicit
 variant is `root`). It is its own set of content-keyed stages: the variant name is in every stage key (env `FNVNX_VARIANT`, absent for the implicit variant, so
 a root without variants keeps its keys), its objects are stored at `GATE_CACHE/objects/<tree>/<root>@<NAME>/objects.json` and its `objects.json` has
-`root: "root@NAME"`. `link.roots` entries may be `root@NAME` (the variant must exist). The gates that quantify over product roots (`gate_build.product_roots`)
+`root: "root@NAME"`. The gates that quantify over product roots (`gate_build.product_roots`)
 quantify over the pairs: build, determinism, objstub, linkstrict, argorder, contract's per-root gates.
 
 ## Include
 `include` is the unit's include path in order. A repo directory of it that lies in another admitted product root P (with a recipe for the unit's target) also brings
 P's own repo directories of `include`, transitively, after the consumer's own and each once (`recipe.include_closure`): a header that P ships names its dependencies once,
-in the recipe of P, and every consumer finds them. The entries of P's `include` that lie in an external are P's toolchain and are not carried. A header root
+in the recipe of P, and every consumer finds them. The entries of P's `include` that lie in an external are P's toolchain and are not carried. A directory of P's `include` that holds no tracked file is a generated tree of P and is not carried either (it does not exist in a consumer's tree): its headers reach a consumer through `include_uses`. A header root
 (class header) has no recipe and carries nothing; a header it includes from another root is named by the consumer.
+
+**A path into another root.** An `include` entry inside a generated tree of another root (a directory a generate stage of that root writes into that holds no tracked file, `recipe.generated_trees`, for example `platform/freetype/gen/include`) is a check error: a generated file of a root is its declared output, and a consumer takes it through `uses`. The root's own generated tree is not affected.
+
+**Header home.** A directory of a root of class `header` is a valid `include` entry of a root of every target, guest and host alike (`recipe.header_dirs` and the include check are one rule). A product root's own tree is a home only for the targets it has a recipe for; a tool or doc root is no home. A header root's headers may read only header roots and externals.
 
 ## Outputs and uses
 `outputs: {NAME: a path in generated[].outputs of this root}` declares what other roots may take; the build result lists each as `outputs: {NAME: {path, sha256}}`, a file of the out dir (`OUT/outputs/<path>`) and its hash. `uses: [{"root": R, "output": NAME}]` (R any admitted
@@ -304,8 +316,13 @@ root with a recipe that declares NAME) makes that output an input of this root's
 read-only at `/uses/<R>/<NAME>` (the compile stage mounts nothing of it). The producer's generate stages run (content-keyed, cache hits) and the output file
 is ingested; the consumer's stage key holds the file's content hash, not a path and not the producer's keys: a producer change that leaves the output
 byte-identical changes no consumer key. Red (check errors): an output the root does not declare; a root that is not admitted; a cycle in `uses` plus
-`link.roots` between distinct roots; a `generated` input that is a file of another root (class other than tool) by path, which must go through `uses`.
-Objects of another root enter only through `link.roots`.
+the declared loader between distinct roots; a `generated` input that is a file of another root (class other than tool) by path, which must go through `uses`.
+Objects of another root enter only through the derived link members.
+
+**Directory outputs and `include_uses`.** `outputs: {NAME: P}` may name a directory P instead of a file: every generated output below P is then part of it (check: P holds no tracked file). The
+result lists it as `{path, sha256}` (the hash is over the sorted relative paths and file contents), and a consumer's stage key holds that content. `include_uses: [{"root": R, "output": NAME}]`
+(a subset of `uses`, NAME a directory output) makes `/uses/<R>/<NAME>` one more include directory of every unit of the consumer, after `include`, in list order. It is the one way a root reads the
+generated headers of another root (an `include` entry inside another root's generated tree is a check error). It is not carried to the consumers of the consumer: each root declares what it includes.
 
 **Inputs live below their consumers.** The inputs that a declaration derives from (specs, name tables, row generators) live in a root below every consumer
 of the declaration: a tool root with a recipe, such as `bridgefacts`, which the consumers take through `uses` (derived outputs) or by path
@@ -320,9 +337,9 @@ not declare, a path that is no file inside the external (`..` included), a `.` p
 the other units keep their objects and compile-stage keys (their preprocessing keys follow the view's file names, the compile keys do not).
 
 ### Objects selected by declaration (`objects_of` with `target`, `origin`)
-`objects_of: {"except": [R...], "target": "guest"|"host", "origin": "native"|"lifted"}`: `target` and `origin` (both optional) select the admitted product roots by their
+`objects_of: {"target": "guest"|"host", "origin": "native"|"lifted"}`: `target` and `origin` (both optional) select the admitted product roots by their
 admit.json declaration: `target` equals the entry's `target`, `origin` is `origin_class(cxx_origin)` (native = `"native"` or undeclared, lifted = `{lifted_by, pack}`). A selecting stage
-also leaves out every root that depends on the producing root through `link.roots`, the declared loader or `uses`, transitively (`depends_on`), so the consumer of the
+also leaves out every root that depends on the producing root through the declared loader or `uses`, transitively (`depends_on`), so the consumer of the
 stage's output is never in its input set: no `except` list and no cycle. `contract/facts` selects `{"target": "guest", "origin": "native"}` (the native roots' objects, whose
 `.fnvnx.sympair` sections `bind` and `nativerows` read) and publishes `outputs: {"native": "native.tsv"}`: the address -> defined symbol rows of the native table of `lift/rt`.
 
@@ -331,17 +348,19 @@ stage's output is never in its input set: no `except` list and no cycle. `contra
 `{target: guest, origin: native, dependents_of: contract/facts}` and proves (`nobinding.py`: bind over those objects with facts' `n1` output, red on any bound symbol)
 that the roots facts leaves out contribute no row to `native.tsv`; it cannot be a stage of facts itself (those roots' builds need `native`: a cycle).
 
-### Objects of every admitted product root (`objects_of`) and `forbid_sections`
-A generate stage may carry `objects_of: {"except": [R...]}` (every R an admitted product root). Its inputs then hold, at `/objs/<root with / as __>/<unit>.o`,
-the objects of every admitted product root with a recipe except the root itself and the R listed: the set is read from admit.json at the commit, so a
-newly admitted root enters the next build and no list names it. Each such root is built as a product root and must be green (else red, stage
-`objects_of:<root>`); the stage key holds the objects' content. A root that takes such a fact through `uses` is in the producer's reading set, so it must be
-in `except` (else the cycle check is red), and it must carry `forbid_sections: [".name", ...]`: an object of the root with a named section is red (stage
-`forbid:<root>`). The exception then loses nothing: the excepted root cannot hold what the fact collects.
+### Objects of every admitted product root (`objects_of`): the fact universe
+A generate stage may carry `objects_of: {...}` (every key optional: `target`, `origin`, `dependents_of`, `section`). Its inputs then hold, at `/objs/<root with / as __>/<unit>.o`,
+the objects of the stage's **fact universe**: every admitted product root with a recipe except the root itself and every root that depends on it (`depends_on`:
+the declared loader, `uses` and `objects_of`, transitively), the consumers of the fact. The universe is a rule over admit.json and the uses graph at
+the commit: a newly admitted root enters the next build, and no recipe excludes a root by name (a key `except` is a check error). Each universe root is built as a
+product root and must be green (else red, stage `objects_of:<root>`); the stage key holds the objects' content.
+`section` (not with `dependents_of`) names the fact section the stage collects. The build appends `--section NAME` to the tool's arguments: the recipe is the one place the
+name is written. A root that depends on the producer is outside its universe, so its objects can contribute nothing to the fact; therefore the build requires that none of
+its objects holds the section, red stage `forbid:<root>` (`recipe.fact_sections`, derived from the admitted recipes: no recipe names the section for the consumer).
 `lift/descs` is this rule's first use: its tool collects the `.fnvnx.disp` sections (one `conv:ret:args` descriptor per line, sorted, unique per object,
 LF-terminated, ASCII; an absent section is no indirect call) into the sorted union `descs.tsv`, output `descs`. A malformed section is red at the
-generate stage, naming the object. `lift/bridges` takes it as `{"root": "ports/fnv-nx/lift/descs", "output": "descs"}` (at `/uses/ports/fnv-nx/lift/descs/descs`),
-is listed in the `except` of lift/descs' recipe in the commit that admits it, and has `forbid_sections: [".fnvnx.disp"]`.
+generate stage, naming the object. `lift/bridges` takes it as `{"root": "ports/fnv-nx/lift/descs", "output": "descs"}` (at `/uses/ports/fnv-nx/lift/descs/descs`);
+it is outside the universe because it uses descs, and the build forbids `.fnvnx.disp` in its objects.
 
 ### errno (objstub, derived, no recipe key)
 How the root's libc reaches `errno` is derived per root: objstub compiles `#include <errno.h>` / `int f(void){return errno;}` with the root's own C compiler and unit flags and reads the object (`errno_probe`): a call relocation to a symbol X is the accessor, a TLS relocation to Y is the thread-local form. The final ELF is then judged (rule I, `image_check`): a function body of the image whose whole effect is `errno = constant; return constant` is the finding `fixed-failure`, whether it is ours or comes from an archive member (a weak fallback a strong definition replaced is not in the image). A body that cannot be judged (a data island, a word LLVM rejects, an odd size) is the finding `unjudged`; the TLS form is `unjudged` for the root. Nothing is skipped.
@@ -372,7 +391,7 @@ disk, not the RECORD's claim). Changing one module's digest changes the key of e
 A root build does not stop at the first red stage. Every unit whose declared inputs are all produced is built (and its objects land in the
 store as usual); a red stage is recorded with its stage name, exit and the last 20 diagnostic lines. Blocked, never run and never hidden:
 (i) a unit that is the output of a red generator, (ii) every unit of a root whose `uses` producer or whose external is red, (iii) the C++ units
-when a plugin stage is red, (iv) the ELF whenever anything is red or blocked (also when an input root of `link.roots` is red). A unit that
+when a plugin stage is red, (iv) the ELF whenever anything is red or blocked (also when a derived link member is red). A unit that
 includes a file a red generator did not produce fails in its own preprocessing stage and is listed with those diagnostics. The root is `red`
 if any unit or stage is red or blocked. `objects.json` of a red root: `objects` (the built units), `failed_units` ({unit, stage, exit, stderr}, in unit order),
 `blocked` ({unit, blocked_by: stage}, sorted by unit), `red_stages` (the stages that were red outside a unit), `failure` (the first red stage).
