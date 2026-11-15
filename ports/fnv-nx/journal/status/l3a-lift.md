@@ -955,3 +955,4 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Decision: the pack drops sched1 (-fno-schedule-insns) and keeps sched2. The A57 is out-of-order, and instructions per frame do not change under scheduling. This is a flag decision, not PERFDEBT.
   - w12 checks that the semantic flags do not need sched1, then measures @prof2.
   - 6 units fail FTOI in the stale prelude snapshot. They are recompiled against the generated prelude.
+- 21:42 L1 accepted the verdict gate `liftfacts` (cand4; written by L1 w28, claude/fnv-l1-contract-w28). It is red on any non-green image, on uncertified bytes, entries_on_data or pcsrc s4 rows above 0, or on a pack-set image missing from GATES. w7 sends the format sample to w28.
