@@ -1187,3 +1187,13 @@ Paused: w3b, w4, farm; no other work.
         - The rest are L1, L5 and bootrt, routed to L1.
     - gl4's od:gl-shader-failure certifies. Its V findings are closed by constants.tsv citing gpu_abi.h:173/177.
 - bottleneck: L6's objstub findings to 0 (w6), then the cand4 hand-off; L1 cand3 → trunk. 2 workers (w6, w8).
+- 21:45Z: w8 89a388d2 (keyed inputs).
+    - sm_link was already keyed: it reads the `shaders` external, and does not read sm_table.
+    - render/shaders/total is now a generated-only root over the docs, Wine and vkd3d externals.
+    - The committed sm_table.json was hand-edited (de39fc7b, 68521ef8).
+        - Decision: those rulings go into the generator as cited records, the output is checked byte-equal, the committed copies are deleted, and the consumers read the stage output.
+    - Census, by one rule:
+        - render line: 10 lines in 4 files, of which 3 are real findings, all L3a l3facts defaults;
+        - integration: 259 lines in 85 files.
+        - Routed to the orchestrator together with the farm job that re-derives sm_link.
+- bottleneck: w6's L6 objstub findings; w8 table derivation; the sm_link farm job; L1 cand3 → trunk. 2 workers.
