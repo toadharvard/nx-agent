@@ -325,6 +325,37 @@ echo "mounts=$(wc -l < /proc/mounts)"'''
     sandbox._store_result(store, k12, r12)
     sandbox.write_time(store, k12, t12)
     check("12b the sidecar round-trips and a hit (the stored record) is unchanged by it", sandbox.read_time(store, k12)["cpu_s"] == t12["cpu_s"] and sandbox._load(store, k12) == r12, None)
+    # (13) links (a root-layout symlink), scratch (a tmpfs that is no output), unkeyed (env and timeout outside the key)
+    s13 = os.path.join(fresh("s13"), "s.sh")
+    open(s13, "w").write("echo $JOBS > /out/jobs; echo x > /scratch/f; cat /scratch/f > /out/scr; cat /lnk/f > /out/lnk; ls /scratch | wc -l > /out/n\n")
+    d13 = json.load(open(mkstage(store, "s13", {"/bin/busybox": os.path.join(bb, "busybox"), "/in/s.sh": s13, "/real/f": write(os.path.join(fresh("f13"), "f"), b"L\n")},
+                                 ["/out"], ["/bin/busybox", "sh", "/in/s.sh"], env={})))
+    d13["links"], d13["scratch"] = [{"at": "/lnk", "to": "real"}], ["/scratch"]
+    d13["unkeyed"] = {"env": {"JOBS": "3"}, "timeout": 60}
+    sandbox.check_doc(d13)
+    k13 = sandbox.key_of(d13)
+    d13b = dict(d13, unkeyed={"env": {"JOBS": "7"}, "timeout": 120})
+    check("13a unkeyed (env, timeout) is not in the key; links and scratch are", sandbox.key_of(d13b) == k13
+          and sandbox.key_of(dict(d13, scratch=["/scr2"])) != k13 and sandbox.key_of(dict(d13, links=[{"at": "/lnk", "to": "other"}])) != k13, None)
+    r13, _ = sandbox.execute_timed(store, d13, k13)
+    o13 = r13["outputs"]["/out"]
+    names = {n: open(cas._obj(store, e)).read() for n, e in cas.manifest(o13, store)["entries"].items()}
+    check("13b the unkeyed env reaches the command; scratch is writable; the link resolves; scratch is no output", r13["rc"] == 0 and names.get("jobs") == "3\n"
+          and names.get("scr") == "x\n" and names.get("lnk") == "L\n" and "f" not in names, (r13["rc"], names))
+    d13c = dict(d13, argv=["/bin/busybox", "sleep", "30"], unkeyed={"timeout": 1})
+    t0 = time.monotonic()
+    try:
+        sandbox.execute_timed(store, d13c, sandbox.key_of(d13c))
+        killed = False
+    except sandbox.SbxError as e:
+        killed = "timeout" in str(e)
+    check("13c a stage past its timeout is killed (the error names the timeout), long before the sleep ends", killed and time.monotonic() - t0 < 10, time.monotonic() - t0)
+    bad = False
+    try:
+        sandbox.check_doc(dict(d13, scratch=["/in"]))
+    except sandbox.SbxError:
+        bad = True
+    check("13d a scratch path that nests an input is refused", bad, None)
     return 1 if FAILED else 0
 
 

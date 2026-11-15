@@ -16,14 +16,14 @@ each of these gates to exist before a root can be admitted.
 
 Per-root inputs are outputs of the root's own build and link, read from the out dir of gate_build.ensure (beside objects.json), the names
 declared in contract_inputs.json "root_results": units.json (the exe's unit/function table), addrmap.tsv, aliases.ld (the link stage's maps),
-entries.tsv (liftall's entries, gate disp only). A file the root's recipe/link does not emit yet makes the gate red for that root naming it
+disp_rows.tsv and native_disp_rows.tsv (the typed dispatch tables' rows, outputs of the generator stages; gate disp only). A file the root's recipe/link does not emit yet makes the gate red for that root naming it
 (owner: L1 link stage). The game's units are those under the root-relative directory build.json declares as "game" (no default).
 
 Inputs shared by every root (verify/contract_inputs.json, "fnvnx-contract-inputs/1"; no other source, nothing comes from an argument):
   external     content-pinned inputs of fnv-nx-build, the same keys and the same fetch as a recipe's externals (recipe.fetch_externals:
                exact commit, tree_sha256 checked): the exe-derived private facts never enter this repository
   exe msvc universe   `NAME/path` inside an external: FalloutNV.exe, L3's universe.tsv; `msvc` is the bare NAME of the pristine-objects external (its ROOT: meta.json and obj/u<i>.obj; n1 appends obj)
-  root_results {units, addrmap, aliases[, entries]} file names in the root's out dir
+  root_results {units, addrmap, aliases[, disp_rows, native_disp_rows]} file names in the root's out dir
   ranges       {exe: NAME/path, module: NAME/path with %s = the dll's stem}: where an image's range facts are in an external
   The image set of gpa/reach/reachlink is not an input: contract/images.py derives it (transitive closure of the normal and delay-load import
   directories from the exe, resolved against the files of externals exe and redist). An image without range facts is a red item of those gates.
@@ -65,6 +65,7 @@ OPT_PATHS = {"reach_requests": ("reach, reachlink", "L5: platform manifest reach
              "sites": ("order (gate_lift.py)", "L3a: NAME/path of the file of the sites of the lifted universe: \"1 HEXADDR\" for every locked instruction (every LOCK-prefixed instruction and every xchg with a memory operand), \"2 HEXADDR mem|ax\" for every FPU status instruction (FSTSW, FNSTENV, FNSAVE)")}
 OPT_KEYS = set(OPT_PATHS) | {"keys", "bridge"}
 CONTRACT_GATES = ("n1", "n2_data", "n2_call", "n2_vcall", "xc", "xunit", "rtti", "pcrel", "bodysel")
+DISP_ROWS = ("disp_rows", "native_disp_rows")   # the rows files of the pack table and of the native table (fnvnx-disp-rows/1)
 LINK_GATES = ("abs", "disp", "reach", "reachlink", "gpa")
 GATES = CONTRACT_GATES + LINK_GATES
 GATE_KEYS = {"reach": ["reach_requests"], "reachlink": ["reach_requests"], "gpa": ["dynsites"]}
@@ -112,8 +113,8 @@ def load_inputs(path):
                                                                             for v in rg.values()) and rg["module"].count("%s") == 1):
         err.append("ranges needs exactly exe and module (NAME/path inside a declared external; module holds one %s)")
     rr = doc.get("root_results")
-    if not (isinstance(rr, dict) and set(rr) - {"entries"} == set(RESULTS) and all(isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9._-]+", v) for v in rr.values())):
-        err.append("root_results must map %s (and may map entries) to file names of the root's out dir" % ", ".join(sorted(RESULTS)))
+    if not (isinstance(rr, dict) and set(rr) - set(DISP_ROWS) == set(RESULTS) and all(isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9._-]+", v) for v in rr.values())):
+        err.append("root_results must map %s (and may map %s) to file names of the root's out dir" % (", ".join(sorted(RESULTS)), ", ".join(DISP_ROWS)))
     if err:
         raise Red("%s: %s" % (INPUTS, "; ".join(err)))
     return doc
@@ -219,9 +220,9 @@ def stages(w, doc, ext, rp, only=None):
         "reachlink": (py("gate_reach.py", "--objects", w + "/inputs.rsp", "--requests", opt("reach_requests") or "", "--certified", w + "/reach/reach.facts.tsv"),
                       ["gate/reachlink.json"]),
     }
-    if "entries" in rp:
-        st["disp"] = (py("../link/gate_disp.py", "--elf", link + "/guest/fnvnx.elf", "--universe", P("universe"), "--entries", rp["entries"],
-                         *(["--keys", opt("keys")] if doc.get("keys") else [])), ["gate/disp.json"])
+    if all(k in rp for k in DISP_ROWS):
+        st["disp"] = (py("../link/gate_disp.py", "--elf", link + "/guest/fnvnx.elf", "--universe", P("universe"),
+                         *[a for k in DISP_ROWS for a in ("--rows", rp[k])]), ["gate/disp.json"])
     return st
 
 
@@ -337,10 +338,13 @@ def chain(gate, repo, cache, root):
         raise Red("root %s does not build (stage %s)" % (root, objs.get("failure", {}).get("stage", "?")))
     rr = dict(doc["root_results"])
     if gate != "disp":
-        rr.pop("entries", None)
-    elif "entries" not in rr:
-        raise Red("%s declares no root_results.entries (L2/L3a: liftall's entries.tsv): gate disp cannot judge" % INPUTS)
-    need = [k for k in rr if k != "entries" or gate == "disp"]
+        for k in DISP_ROWS:
+            rr.pop(k, None)
+    else:
+        for k in DISP_ROWS:
+            if k not in rr:
+                raise Red("%s declares no root_results.%s (L3a: the rows file of the typed dispatch table, a declared output of the generator stage): gate disp cannot judge" % (INPUTS, k))
+    need = [k for k in rr if k not in DISP_ROWS or gate == "disp"]
     absent = [rr[k] for k in need if not os.path.isfile(os.path.join(out, rr[k]))]
     if absent:
         raise Red("root %s emits no %s (owner: L1 link stage): the result files of the root's build and link are its only source" % (root, ", ".join(absent)))

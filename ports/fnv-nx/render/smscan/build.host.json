@@ -39,5 +39,8 @@
     "gen/res_smtab.gen.h"
    ]
   }
- ]
+ ],
+ "outputs": {
+  "INCLUDE": "include"
+ }
 }

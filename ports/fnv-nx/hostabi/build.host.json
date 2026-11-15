@@ -6,16 +6,21 @@
  },
  "flags": {
   "c": [
-   "-O2",
-   "-Werror=attributes"
+   "-Wall",
+   "-Werror"
   ],
   "cxx": [
-   "-O2",
-   "-Werror=attributes"
+   "-Wall",
+   "-Werror"
   ],
   "asm": []
  },
- "include": [],
+ "include": [
+  "ports/fnv-nx/hostabi/include"
+ ],
  "units": "all",
- "external": []
+ "link": null,
+ "outputs": {
+  "INCLUDE": "include"
+ }
 }

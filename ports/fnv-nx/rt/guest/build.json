@@ -33,5 +33,11 @@
   "/ext/gcc/aarch64-none-elf/include/c++/13.3.0/aarch64-none-elf",
   "/ext/gcc/aarch64-none-elf/include"
  ],
- "units": "all"
+ "units": "all",
+ "uses": [
+  {
+   "root": "ports/fnv-nx/hostabi",
+   "output": "INCLUDE"
+  }
+ ]
 }
