@@ -12,7 +12,7 @@
  * Memory the platform or the loader got elsewhere is entered with fnvnx_win32_vm_note (flag F_FOREIGN: the OS
  * range is not ours to release); file views are entered by filemap.cpp through w32_vm_view_*. */
 #include "w32.h"
-#include "fnvnx/vm.h"
+#include "fnvnx/hostvm.h"
 #include "w32_reach.h"
 
 #include <malloc.h>
@@ -21,7 +21,7 @@
 #define UMIN 0x00010000u     /* lowest user address */
 #define UEND 0x7FFF0000u     /* one past the highest user address (lpMaximumApplicationAddress + 1) */
 #define NPAGES ((UEND - UMIN) / FNVNX_PAGE_SIZE)
-#define PPG (FNVNX_VM_GRANULE / FNVNX_PAGE_SIZE)    /* pages per granule */
+#define PPG (FNVNX_VM_ALIGN / FNVNX_PAGE_SIZE)    /* pages per granule */
 
 enum { ST_FREE = 0, ST_RESERVE = 1, ST_COMMIT = 2 };
 enum { TY_PRIVATE = 0, TY_MAPPED = 1, TY_IMAGE = 2 };
@@ -180,7 +180,7 @@ static size_t find_free(size_t n, bool top_down, size_t lo, size_t hi)
 }
 
 typedef void *(*osmap_fn)(void *hint, size_t size, void *ctx);
-static void *os_reserve_cb(void *hint, size_t size, void *) { return os_vm_reserve(hint, (size + FNVNX_VM_GRANULE - 1) & ~(size_t)(FNVNX_VM_GRANULE - 1)); }   /* the OS holds the whole granule */
+static void *os_reserve_cb(void *hint, size_t size, void *) { return os_vm_reserve(hint, (size + FNVNX_VM_ALIGN - 1) & ~(size_t)(FNVNX_VM_ALIGN - 1)); }   /* the OS holds the whole granule */
 
 /* places an allocation of n pages: at the granule of want (0: first fit or top down) with the OS range obtained by
  * osmap (hinted: exactly there). Returns the page index of the base or NPAGES with the last error set. */
@@ -188,7 +188,7 @@ static size_t place(uintptr_t want, size_t n, bool top_down, osmap_fn osmap, voi
 {
     size_t span = (n + PPG - 1) / PPG * PPG;
     if (want) {
-        size_t first = pidx(want & ~(uintptr_t)(FNVNX_VM_GRANULE - 1));
+        size_t first = pidx(want & ~(uintptr_t)(FNVNX_VM_ALIGN - 1));
         if (!granules_free(first, n)) {
             SetLastError(ERROR_INVALID_ADDRESS);
             return NPAGES;
@@ -369,7 +369,7 @@ extern "C" LPVOID VirtualAlloc(LPVOID addr, SIZE_T size, DWORD type, DWORD prote
         goto unlock_ok;
     }
     if ((type & MEM_RESERVE) || !a) {   /* a new allocation (a commit without an address reserves too) */
-        uint64_t base = a & ~(uint64_t)(FNVNX_VM_GRANULE - 1), end = a ? (a + sz + FNVNX_PAGE_SIZE - 1) & ~(uint64_t)(FNVNX_PAGE_SIZE - 1) : sz;
+        uint64_t base = a & ~(uint64_t)(FNVNX_VM_ALIGN - 1), end = a ? (a + sz + FNVNX_PAGE_SIZE - 1) & ~(uint64_t)(FNVNX_PAGE_SIZE - 1) : sz;
         size_t np;
         if (a) {
             if (a + sz < a || base < UMIN || end > UEND) {
@@ -1155,6 +1155,6 @@ extern "C" void GetSystemInfo(LPSYSTEM_INFO si)
     si->dwActiveProcessorMask = os_cpu_mask();
     si->dwNumberOfProcessors = os_cpu_count();
     si->dwProcessorType = 586; /* PROCESSOR_INTEL_PENTIUM */
-    si->dwAllocationGranularity = FNVNX_VM_GRANULE;
+    si->dwAllocationGranularity = FNVNX_VM_ALIGN;
     si->wProcessorLevel = 6;
 }

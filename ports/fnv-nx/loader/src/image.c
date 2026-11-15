@@ -1,6 +1,6 @@
 /* Mapping the headers and every section as the Windows loader does; base relocations. */
 #include "internal.h"
-#include "fnvnx/vm.h"
+#include "fnvnx/hostvm.h"
 #include <stdlib.h>
 
 

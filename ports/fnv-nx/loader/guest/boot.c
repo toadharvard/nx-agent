@@ -18,7 +18,7 @@
 #include <string.h>
 
 #include "fnvnx/guest.h"
-#include "fnvnx/vm.h"
+#include "fnvnx/hostvm.h"
 #include "fnvnx/hostapi.h"
 #include "fnvnx/sdlayout.h"
 #include "fnvnx/import_key.h"

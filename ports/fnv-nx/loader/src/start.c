@@ -1,6 +1,6 @@
 /* The start sequence S1..S8, see include/fnvnx_start.h; the lifted PE modules are src/modules.c. */
 #include "start_internal.h"
-#include "fnvnx/vm.h"
+#include "fnvnx/hostvm.h"
 #include "fnvnx_identity.h"
 
 #define NOINLINE __attribute__((noinline))

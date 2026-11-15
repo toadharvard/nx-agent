@@ -56,7 +56,7 @@
  * are page multiples inside the section, at a granule the page map owns, of an id this file holds) and are mapped by
  * their documented meaning. */
 #include "filemap_backing.h"
-#include "fnvnx/vm.h"
+#include "fnvnx/hostvm.h"
 #include "w32_reach.h"
 
 #include <stdlib.h>
@@ -110,7 +110,7 @@ static DWORD sec_error(int r)
 /* the section object of kind (1) / (2): created zero-filled, a file's bytes loaded through a first view of the host's own */
 static struct fm_backing *shared_create(struct fm_backing *b, const struct fm_spec *sp, DWORD *err)
 {
-    uint64_t rounded = (sp->size + FNVNX_VM_GRANULE - 1) & ~(uint64_t)(FNVNX_VM_GRANULE - 1);   /* <= 2 GiB: fm_backing_reach */
+    uint64_t rounded = (sp->size + FNVNX_VM_ALIGN - 1) & ~(uint64_t)(FNVNX_VM_ALIGN - 1);   /* <= 2 GiB: fm_backing_reach */
     int r = fnvnx_section_create((uint32_t)rounded, &b->sec);
     if (r) {
         *err = sec_error(r);
@@ -190,7 +190,7 @@ DWORD fm_view_prepare(struct fm_backing *b, uint64_t off, uint64_t len)
 
 void *fm_view_map(struct fm_backing *b, uint64_t off, size_t size, void *hint, int os_prot, int priv)
 {
-    size_t span = (size + FNVNX_VM_GRANULE - 1) & ~(size_t)(FNVNX_VM_GRANULE - 1);
+    size_t span = (size + FNVNX_VM_ALIGN - 1) & ~(size_t)(FNVNX_VM_ALIGN - 1);
     void *p = os_vm_reserve(hint, span);
     if (!p)
         return NULL;
@@ -222,5 +222,5 @@ void fm_view_unmap(struct fm_backing *b, void *addr, size_t size)
 {
     if (b->sec)   /* the arguments are those of the MAP that made the view: exactly a view, so it cannot be refused */
         fnvnx_section_unmap((uint32_t)(uintptr_t)addr, (uint32_t)size);
-    os_vm_release(addr, (size + FNVNX_VM_GRANULE - 1) & ~(size_t)(FNVNX_VM_GRANULE - 1));
+    os_vm_release(addr, (size + FNVNX_VM_ALIGN - 1) & ~(size_t)(FNVNX_VM_ALIGN - 1));
 }

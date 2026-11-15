@@ -9,7 +9,7 @@
  * UnmapViewOfFile / FlushViewOfFile. A SEC_IMAGE section is laid out as the PE sections say (headers and sections at
  * their RVAs, zero fill, per-section page protection). */
 #include "filemap_backing.h"
-#include "fnvnx/vm.h"
+#include "fnvnx/hostvm.h"
 #include "w32_reach.h"
 
 #include <stdio.h>
@@ -476,7 +476,7 @@ extern "C" LPVOID MapViewOfFile(HANDLE hmap, DWORD access, DWORD offhi, DWORD of
         err = ERROR_INVALID_PARAMETER;
         if (wr && sec_c)   /* a write view of a copy-on-write section is a copy view */
             wr = false, cp = true;
-        if (off & (FNVNX_VM_GRANULE - 1)) {
+        if (off & (FNVNX_VM_ALIGN - 1)) {
             err = ERROR_MAPPED_ALIGNMENT;
             goto out;
         }
@@ -524,7 +524,7 @@ extern "C" LPVOID MapViewOfFile(HANDLE hmap, DWORD access, DWORD offhi, DWORD of
             if (fm_file_io(m->fh, hdr, 0, sizeof hdr, false, &got) && got >= 0x40 + 24 + 32 + 4)
                 pref = rd32(hdr + rd32(hdr + 0x3C) + 24 + 28);
             if (pref && rd32(hdr + 0x3C) + 24 + 32 < sizeof hdr)
-                res = w32_vm_view_place(pref & ~(FNVNX_VM_GRANULE - 1), span, view_osmap, &c, 0x80, page, 1, 1, 0);
+                res = w32_vm_view_place(pref & ~(FNVNX_VM_ALIGN - 1), span, view_osmap, &c, 0x80, page, 1, 1, 0);
         }
         if (!res)
             res = w32_vm_view_place(0, span, view_osmap, &c, m->image ? 0x80 : page, page, !m->reserve, m->image, m->reserve);
