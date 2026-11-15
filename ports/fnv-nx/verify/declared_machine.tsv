@@ -1,5 +1,5 @@
 # id	contract_name	fact	source	kind	value	lasterror
-# fact: no-network | time-zone | registry | no-galaxy | single-process | process-end | thread-end (CLAUDE.md "The declared machine", "GOG Galaxy is not lifted"); source: hostabi:<header>:<service> | wine-9.0:<path>:<function> | std:<doc>:<section> (the standard's own clause: std:C11:7.22.4.4, std:POSIX.1-2017:pthread_exit) | galaxy-sdk:<page>:<function>; kind void|u32|u64|addr|u32nz<N> as in wine_fixme.tsv; kind noreturn (value `-`) for process-end/thread-end: a body declared noreturn in our headers that ends the process or the thread
+# fact: no-network | time-zone | registry | no-galaxy | single-process | process-end | thread-end (CLAUDE.md "The declared machine", "GOG Galaxy is not lifted"); source: hostabi:<header>:<service> | win-doc:<page slug>:<function> | wine-9.0:<path>:<function> | std:<doc>:<section> (the standard's own clause: std:C11:7.22.4.4, std:POSIX.1-2017:pthread_exit) | galaxy-sdk:<page>:<function>; kind void|u32|u64|addr|u32nz<N> as in wine_fixme.tsv; kind noreturn (value `-`) for process-end/thread-end: a body declared noreturn in our headers that ends the process or the thread
 # lasterror (7th column): `-` or `<NAME>=<decimal>` (NAME [A-Z][A-Z0-9_]*, its winerror.h/winsock2.h value): the last error the body sets on the path that returns `value`; kind noreturn always `-`; any other kind `-` only when the cited source leaves the last error unchanged on that path; a hostabi: source never gives a non-`-` value
 # the source column is one token with no spaces; several sources joined by |, sorted and unique, each alone matching the grammar
 # rows come from the platform owner (L5) with the body that cites them; see VERDICT.md "Declared-machine bodies"
@@ -12,13 +12,13 @@
 # 6: body is fflush(NULL); exit(code) (C11 7.21.5.2 fflush)
 # 7: "does not return"; the calling thread ends
 # 8: the calling thread ends and does not return to its caller (IEEE Std 1003.1-2017)
-1	TerminateProcess	single-process	wine-9.0:dlls/kernelbase/process.c:TerminateProcess|wine-9.0:dlls/ntdll/unix/process.c:NtTerminateProcess	u32	0	ERROR_INVALID_HANDLE=6
-2	ExitProcess	process-end	wine-9.0:dlls/kernel32/process.c:ExitProcess	noreturn	-	-
+1	TerminateProcess	single-process	win-doc:learn.microsoft.com/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess:TerminateProcess|wine-9.0:dlls/ntdll/unix/process.c:NtTerminateProcess	u32	0	ERROR_INVALID_HANDLE=6
+2	ExitProcess	process-end	win-doc:learn.microsoft.com/windows/win32/api/processthreadsapi/nf-processthreadsapi-exitprocess:ExitProcess	noreturn	-	-
 3	c_exit	process-end	std:C11:7.22.4.4	noreturn	-	-
 4	c_abort	process-end	std:C11:7.22.4.1	noreturn	-	-
 5	c_amsg_exit	process-end	wine-9.0:dlls/msvcrt/exit.c:_amsg_exit	noreturn	-	-
 6	os_exit_process	process-end	std:C11:7.22.4.4	noreturn	-	-
-7	ExitThread	thread-end	wine-9.0:dlls/ntdll/thread.c:RtlExitUserThread	noreturn	-	-
+7	ExitThread	thread-end	win-doc:learn.microsoft.com/windows/win32/api/processthreadsapi/nf-processthreadsapi-exitthread:ExitThread	noreturn	-	-
 8	os_thread_exit	thread-end	std:POSIX.1-2017:pthread_exit	noreturn	-	-
 9	c_purecall	process-end	wine-9.0:dlls/msvcrt/exit.c:_purecall	noreturn	-	-
 10	fnvnx_thread_exit	thread-end	hostabi:hostabi/include/fnvnx/hostapi.h:thread_exit	noreturn	-	-

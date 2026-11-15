@@ -32,6 +32,16 @@ Request kinds (the TSV `values` column; `note` is free text and is not read):
              A LoadLibrary* site whose name is not decided is not open: its result is the MAY-LOAD SET (gpa_names.py: every module of the declared
              machine) plus NULL, and the GetProcAddress names derived on it are pairs over that set.  While (iii) fails the fact is `measurement`:
              the verdict says so and it never counts as valid.
+  gate_cert  `gate_cert=<gate>`  (dll `-`, name = the site symbol, arg_index k): argument k of every call of the symbol (an object-level call site, a native
+             site of a platform backend) comes only from producers of the universe that gate <gate> declared.  Inputs: --gate-cert GATE=SUMMARY.json,RESULT.json (the
+             summary and the gate file of the SAME verdict), --verdict ID, --cert-objdump (`objdump -dr -t --no-show-raw-insn` of the root's objects, pinned binutils).
+             CERTIFIED iff (a) the gate file says green (certified == universe) and the summary is of this verdict (`gate-not-green`, `summary-other-verdict`);
+             (b) the summary declares `universe` [{kind bytecode|glsl_table|glsl_blob, id, sha256}] sorted, `universe_hash` = sha256 of the lines `kind\tid\tsha256\n`
+             (recomputed here: `universe-hash`) and `producers` [{symbol, kind function|data}], each data producer an id of the universe;
+             (c) the proof of contract/gatecert.py (call graph by relocations, backward data flow of the argument register in every caller, recursion through
+             parameters, an address taken only inside a producer data symbol): a caller outside the universe, a constant, an unbounded index, an unknown call result is
+             red; (d) the certificate hashes the summary, the gate file, the universe hash, the callers and the values; (e) valid only once every GetProcAddress site is
+             resolved: until then the fact is `measurement`, as closure_key.
 Numbers: C syntax (0x..., decimal), 32-bit.  A row that does not parse is an error (exit 2), never skipped.
 
 Fact ids: index (from 1) of the request in the canonical order (dll, name, arg_index, kind, canonical values) over the request list;
@@ -95,6 +105,7 @@ import gatefile
 import memfx
 import gateids
 import gpa_names
+import gatecert
 import iat
 import relocs
 from reachreq import (COLUMNS, KINDS, M32, FormatError, num, parse_clause, parse_values, parse_ret, parse_requests, canon, sha,
@@ -310,8 +321,65 @@ def check_closure_key(f, gpa_global, ctx):
         f.fail(reason, nm, addr)
 
 
+UNIVERSE_KINDS = ('bytecode', 'glsl_table', 'glsl_blob')
+
+
+def universe_hash(universe):
+    return sha(''.join('%s\t%s\t%s\n' % (u['kind'], u['id'], u['sha256']) for u in universe))
+
+
+def check_gate_cert(f, gpa_global, ctx):
+    """gate_cert=G: (a) gate G is green in this verdict, (b) its summary declares the universe and the hash of it, (c) the call-graph and
+    data-flow proof over the objects (gatecert.py), (d) the certificate hashes summary, universe hash and callers, (e) valid only with a closed GetProcAddress."""
+    import json as _json
+    gate = f.req['spec']['gate']
+    g = ctx.get('gates', {}).get(gate)
+    site = f.req['name']
+    if g is None:
+        f.fail('gate-missing', gate, '-', 'no --gate-cert %s=SUMMARY,RESULT' % gate)
+        return
+    summary_text, result_text = g
+    try:
+        res, summ = _json.loads(result_text), _json.loads(summary_text)
+    except ValueError:
+        f.fail('summary-format', gate, '-', 'not JSON')
+        return
+    if res.get('name') != gate or res.get('status') != 'green' or res.get('certified') != res.get('universe'):
+        f.fail('gate-not-green', gate, '-', 'status %s' % res.get('status'))
+    if summ.get('gate') != gate or summ.get('verdict') != ctx.get('verdict') or not ctx.get('verdict'):
+        f.fail('summary-other-verdict', gate, '-', 'summary verdict %s, this verdict %s' % (str(summ.get('verdict'))[:16], str(ctx.get('verdict'))[:16]))
+    uni, prods = summ.get('universe'), summ.get('producers')
+    ok = isinstance(uni, list) and uni and all(isinstance(u, dict) and u.get('kind') in UNIVERSE_KINDS and isinstance(u.get('id'), str) and isinstance(u.get('sha256'), str)
+                                              for u in uni) and uni == sorted(uni, key=lambda u: (u['kind'], u['id'], u['sha256']))
+    pok = isinstance(prods, list) and prods and all(isinstance(p, dict) and p.get('kind') in ('function', 'data') and isinstance(p.get('symbol'), str) for p in prods)
+    if not ok or not pok:
+        f.fail('summary-format', gate, '-', 'universe or producers missing, malformed or unsorted')
+        return
+    if summ.get('universe_hash') != universe_hash(uni):
+        f.fail('universe-hash', gate, '-', 'declared %s' % str(summ.get('universe_hash'))[:16])
+    ids = {u['id'] for u in uni if u['kind'] in ('glsl_table', 'glsl_blob')}
+    for p in prods:
+        if p['kind'] == 'data' and p['symbol'] not in ids:
+            f.fail('producer-not-in-universe', gate, p['symbol'])
+    prog = ctx.get('prog')
+    if prog is None:
+        f.fail('objects-missing', gate, '-', 'no --cert-objdump')
+        return
+    reasons, callers, values = gatecert.Prover(prog, prods).prove(site, f.req['k'])
+    for r, where, det in reasons:
+        f.fail(r, where, site, det)
+    f.examined = len(callers)
+    f.sites.append(dict(gate=gate, summary=sha(summary_text), result=sha(result_text), universe_hash=summ.get('universe_hash'), callers=callers, values=values,
+                        site=site, arg=f.req['k'], objects=sha(canon(sorted(prog.funcs)))))
+    for reason, nm, addr in gpa_global:
+        f.fail(reason, nm, addr)
+
+
 def check_request(req, images, gpa_global, gpa_pairs, ctx=None):
     f = Fact(req)
+    if req['kind'] == 'gate_cert':
+        check_gate_cert(f, gpa_global, ctx or {})
+        return f
     if req['kind'] == 'closure_key':
         check_closure_key(f, gpa_global, ctx or {'dispatchers': {}})
         return f
@@ -372,7 +440,7 @@ def report_tsv(facts, certs):
         r = f.req
         rs = ['%s@%s:%s%s' % (a, b, c, ' (%s)' % f.detail[(a, b, c)] if (a, b, c) in f.detail else '') for a, b, c in sorted(f.reasons)]
         lines.append('\t'.join([str(r['id']), r['request'], '%s!%s' % (r['dll'], r['name']), str(r['k']), r['kind'],
-                                'certified' if r['id'] in certs else 'measurement' if r['kind'] == 'closure_key' and f.reasons and all(a in MEASUREMENT for a, _, _ in f.reasons) else 'uncertified',
+                                'certified' if r['id'] in certs else 'measurement' if r['kind'] in ('closure_key', 'gate_cert') and f.reasons and all(a in MEASUREMENT for a, _, _ in f.reasons) else 'uncertified',
                                 str(f.examined), ' | '.join(rs) or '-']))
     return '\n'.join(lines) + '\n'
 
@@ -382,7 +450,7 @@ def gate(facts, certs, g, nimages):
     uf = sum(1 for f in facts if f.reasons)
     open_note = ('GetProcAddress is open in the image set (%d sites/refs): certificates are not valid yet' % len(g)) if g else \
         'GetProcAddress closed over the image set'
-    meas = sum(1 for f in facts if f.req['kind'] == 'closure_key' and f.reasons and all(a in MEASUREMENT for a, _, _ in f.reasons))
+    meas = sum(1 for f in facts if f.req['kind'] in ('closure_key', 'gate_cert') and f.reasons and all(a in MEASUREMENT for a, _, _ in f.reasons))
     if meas:
         open_note += '; %d closure_key facts are measurement only (open dynamic loads: not valid yet)' % meas
     detail = '%d facts, %d certified over %d images; %s' % (len(facts), len(facts) - uf, nimages, open_note)
@@ -584,6 +652,9 @@ def main(argv=None):
     ap.add_argument('--dispatcher', action='append', default=[], help='NAME=entries.tsv,closure.tsv,sources.tsv (closure_key)')
     ap.add_argument('--objects')
     ap.add_argument('--certified')
+    ap.add_argument('--gate-cert', action='append', default=[], help='GATE=SUMMARY.json,RESULT.json (gate_cert: the gate summary and its gate file of THIS verdict)')
+    ap.add_argument('--cert-objdump', help='`objdump -dr -t --no-show-raw-insn` text of the root objects, by the pinned binutils (gate_cert)')
+    ap.add_argument('--verdict', help='the id of this verdict (the tree and store keys); a gate summary of another verdict is not accepted (gate_cert)')
     a = ap.parse_args(argv)
     try:
         if a.objects:
@@ -615,6 +686,14 @@ def main(argv=None):
     for dsp in a.dispatcher:
         nm, rest = dsp.split('=', 1)
         ctx['dispatchers'][nm] = tuple(open(p).read() for p in rest.split(','))
+    ctx['gates'] = {}
+    for gc in a.gate_cert:
+        nm, rest = gc.split('=', 1)
+        sp, rp = rest.split(',')
+        ctx['gates'][nm] = (open(sp).read(), open(rp).read())
+    ctx['verdict'] = a.verdict
+    if a.cert_objdump:
+        ctx['prog'] = gatecert.parse_objdump(open(a.cert_objdump).read())
     facts, certs, g = run(reqs, images, meta, rows, ctx)
     if a.out:
         write(a.out, report_tsv(facts, certs))
