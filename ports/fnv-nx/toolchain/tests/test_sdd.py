@@ -56,9 +56,12 @@ def checks(obj):
     check('address points: own symbols', ap8['value'] == tv['value'] + 8 and ap36['value'] == tv['value'] + 36 and ap8['sec'] == ap36['sec'] == tv['sec'],
           str((ap8, ap36, tv)))
     ctor = [(t, n) for t, n in relocs_in(obj, '_ZN1MC2Ev')]
-    check('constructor: one relocation per address point, no immediate',
-          sorted(n for t, n in ctor if t == 'R_AARCH64_P32_LD32_GOT_LO12_NC') == ['_ZTV1M.fnvnx_ap36', '_ZTV1M.fnvnx_ap8']
-          and not [1 for t, n in ctor if n == '_ZTV1M'], str(ctor))
+    # the product flags include -fPIC (flags.semantics of verify/guest_compiler.json): a symbol address is GOT-relative, one ADR_GOT_PAGE and one
+    # LD32_GOT_LO12_NC per reference.  The constructor writes the vptr of every address point it constructs (the inlined base constructors' too)
+    aps = sorted({n for t, n in ctor if '.fnvnx_ap' in n})
+    pairs = all(sorted(t for t, n in ctor if n == a_) == ['R_AARCH64_P32_ADR_GOT_PAGE', 'R_AARCH64_P32_LD32_GOT_LO12_NC'] for a_ in aps)
+    check('constructor: one GOT-relative relocation pair per address point, no immediate and no reference to a table itself',
+          {'_ZTV1M.fnvnx_ap36', '_ZTV1M.fnvnx_ap8'} <= set(aps) and pairs and not [1 for t, n in ctor if '.fnvnx_ap' not in n and n.startswith('_ZTV')], str(ctor))
     th = ins('_ZN1MD1Ev.fnvnx_sdd')
     check('??_E flags 0: the destructor; flags 1: the deleting destructor; returns this',
           'tst w1, #0x3 b.ne L1 bl _ZN1MD1Ev b L5 L1: mov w20, w0 tbnz w21, #1, L2 bl _ZN1MD0Ev b L5' in th
