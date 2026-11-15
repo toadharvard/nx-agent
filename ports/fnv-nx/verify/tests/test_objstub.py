@@ -625,20 +625,26 @@ check("a unit the terminator plugin cannot process: a failure of that unit in th
 
 # the final image: every function body of the linked ELF is judged for the fixed-failure class (a weak `errno = ENOSYS; return -1` fallback left in it is red;
 # the same image with a strong override is green, the weak body is not in the image)
-ERR = '#include "toy.h"\nint e;\nint *__errno(void) { return &e; }\n'
-WEAK = '#include "toy.h"\nint *__errno(void);\nint __attribute__((weak)) sched_getcpu(void) { *__errno() = 38; return -1; }\n'
+ERR = '#include "toy.h"\nint e;\nint *__errno_location(void) { return &e; }\n'
+WEAK = '#include "toy.h"\nint *__errno_location(void);\nint __attribute__((weak)) sched_getcpu(void) { *__errno_location() = 38; return -1; }\n'
 USE = '#include "toy.h"\nint sched_getcpu(void);\nint f_c(int x) { return x + TOY + sched_getcpu(); }\n'
-ri = TR.make_repo("os-image-weak", files={"toy/constants.tsv": CONST + "e.c\t__errno\taddr\te\tref e\n", "toy/c.c": USE, "toy/e.c": ERR, "toy/w.c": WEAK})
+ri = TR.make_repo("os-image-weak", files={"toy/constants.tsv": CONST + "e.c\t__errno_location\taddr\te\tref e\n", "toy/c.c": USE, "toy/e.c": ERR, "toy/w.c": WEAK})
 rc, g, _, txt, st = gate(ri, ROOT + "/gi1", GC)
 check("image with a weak errno/-1 fallback: red fixed-failure, the function named under the image", rc == 2 and g["uncertified"] == [TR.ROOT + "/toy.elf:sched_getcpu"]
       and "fixed-failure 1" in g["detail"] and g["image"]["fixed_failure"] == 1 and g["image"]["bodies"] > 0, (g, txt))
-rs = TR.make_repo("os-image-strong", files={"toy/constants.tsv": CONST + "e.c\t__errno\taddr\te\tref e\n", "toy/c.c": USE, "toy/e.c": ERR, "toy/w.c": WEAK, "toy/s.c": '#include "toy.h"\nint *__errno(void);\nint sched_getcpu(void) { return *__errno() + 3; }\n'})
+rs = TR.make_repo("os-image-strong", files={"toy/constants.tsv": CONST + "e.c\t__errno_location\taddr\te\tref e\n", "toy/c.c": USE, "toy/e.c": ERR, "toy/w.c": WEAK, "toy/s.c": '#include "toy.h"\nint *__errno_location(void);\nint sched_getcpu(void) { return *__errno_location() + 3; }\n'})
 rc, g, _, txt, st = gate(rs, ROOT + "/gi2", GC)
 check("the same image with a strong override: green, the weak body is not in the image", rc == 0 and g["image"]["fixed_failure"] == 0 and g["image"]["bodies"] > 0, (g, txt))
-rn2 = json.loads(json.dumps(TR.RECIPE)); del rn2["errno_accessor"]
-rd = TR.make_repo("os-image-noacc2", rec=rn2, files={"toy/constants.tsv": CONST})
+# errno is derived by a probe compile with the root's own flags: an errno.h the root cannot compile is a red finding `errno-probe`, not a crash
+rn2 = TR.mut(); rn2["flags"] = {k: v + ["-D_ERRNO_H"] for k, v in rn2["flags"].items()}   # errno.h becomes empty: `errno` is undeclared
+rd = TR.make_repo("os-image-noprobe", rec=rn2, files={"toy/constants.tsv": CONST})
 rc, g, _, txt, st = gate(rd, ROOT + "/gi3", GC)
-check("a linked root without errno_accessor is red (recipe-invalid), not silently unjudged", rc == 2 and "recipe-invalid" in g["detail"], (g, txt))
+check("a root whose errno.h does not compile: red errno-probe (the probe does not compile with the root's flags), never green", rc == 2 and "errno-probe" in g["detail"], (g, txt))
+# a body with a data island in the final image is unjudged, and unjudged is red
+ISL = '.text\n.globl isl\n.type isl,%function\nisl:\n mov w0, #1\n ret\n .word 0x12345678\n.size isl,.-isl\n'
+rj = TR.make_repo("os-image-island", files={"toy/constants.tsv": CONST + "e.c\t__errno_location\taddr\te\tref e\n", "toy/c.c": USE.replace("sched_getcpu()", "0"), "toy/e.c": ERR, "toy/isl.S": ISL})
+rc, g, _, txt, st = gate(rj, ROOT + "/gi4", GC)
+check("an image body with a data island is red unjudged", rc == 2 and "unjudged" in g["detail"] and g["image"]["unjudged"] >= 1, (g, txt))
 
 # a host root: the terminator plugin is built against the plugin headers of the root's own (x86-64 distro) compiler, and sees its noreturn declarations
 xt = tf + ".x86"

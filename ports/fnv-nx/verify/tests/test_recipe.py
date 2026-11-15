@@ -49,7 +49,7 @@ RECIPE = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-
           "include": [ROOT + "/inc", ROOT + "/gen"], "units": "all",
           "generated": [{"tool": T + "gen/gen.py", "args": [], "inputs": [ROOT + "/constants.tsv"], "outputs": ["gen/gen.h"]}],
           "os_layer": ["os.S"], "constants": "constants.tsv",
-          "link": {"script": "link.ld", "output": "toy.elf", "flags": ["-m", "aarch64linux32"]}, "errno_accessor": "__errno"}
+          "link": {"script": "link.ld", "output": "toy.elf", "flags": ["-m", "aarch64linux32"]}}
 FILES = {
     "toy/a.c": '#include "toy.h"\n#include "gen.h"\nint f_b(void);\nint f_a(void) { return NCONST + f_b() + TOY + (int)(STAMP % 1000003L); }\n',
     "toy/b.c": '#include "toy.h"\nint f_b(void) { return TOY * 2; }\n',

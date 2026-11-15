@@ -66,9 +66,13 @@ def root_check(root, repo, cache, jobs):
     image = {}
     finds = []
     if res.get("elf"):   # the final image: every function body of it, judged for the fixed-failure class (objstub.image_check)
-        n, ff = objstub.image_check(res["elf"]["path"], rec["errno_accessor"])
-        image = {"bodies": n, "fixed_failure": len(ff)}
-        finds = [(base + rec["link"]["output"], name, "fixed-failure", d) for name, d in ff]
+        try:
+            errno = objstub.errno_probe(drv["c"], recipe.unit_flags(rec, roots, root, drv["c"], "c"), cache)
+            n, ff = objstub.image_check(res["elf"]["path"], errno)
+        except ValueError as e:
+            n, ff = 0, [(rec["link"]["output"], "errno-probe", str(e)[:300])]
+        image = {"bodies": n, "fixed_failure": sum(1 for _, k, _ in ff if k == "fixed-failure"), "unjudged": sum(1 for _, k, _ in ff if k == "unjudged")}
+        finds = [(base + rec["link"]["output"], name, kind, d) for name, kind, d in ff]
     return objstub.analyse_all(objs, names, os_ids, cache, jobs, probe), rows, os_ids, finds, abi, records, image
 
 
