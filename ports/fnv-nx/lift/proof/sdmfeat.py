@@ -119,7 +119,7 @@ def eval_flag(text, table, cpu):
 def parse_opcode(text):
     """the opcode cell of a row -> dict(vex, pfx, bytes, plus_r, digit) or None"""
     t = text.strip()
-    d = {'vex': bool(re.match(r'(VEX|EVEX|XOP)', t)), 'pfx': None, 'bytes': [], 'plus_r': False, 'digit': None, 'rexw': 'REX.W' in t}
+    d = {'vex': bool(re.match(r'(VEX|EVEX|XOP)', t)), 'pfx': None, 'bytes': [], 'plus_r': False, 'digit': None, 'rexw': 'REX.W' in t, 'modrm': False}
     if d['vex']:
         return d
     t = t.replace(',', ' '); t = re.sub(r'(?<=[0-9A-F]{2})(?=/)', ' ', t)
@@ -139,11 +139,33 @@ def parse_opcode(text):
         elif x in ('+rb', '+rw', '+rd', '+ro', '+i') or x.startswith('+r') or x.startswith('+i'):
             d['plus_r'] = True
         elif re.match(r'^/[0-7]$', x):
-            d['digit'] = int(x[1])
+            d['digit'] = int(x[1]); d['modrm'] = True
+            break
+        elif x == '/r':
+            d['modrm'] = True
             break
         else:
             break
     return d if d['bytes'] else None
+
+
+REGOP = re.compile(r'^(x?mm\d?|ymm\d?|zmm\d?|r(8|16|32|64)|imm\d+|CR\d?(–CR\d)?|DR\d?(–DR\d)?|Sreg|AL|AX|EAX|CL|1)$')
+
+
+def modclass(instr):
+    """the ModRM.mod condition that the operand text of a row states:
+    'mem': an operand is memory-only (m, m16int, m128, mem, mib ...) and none is an `r/m` / `x/m` operand;
+    ('reg' is not inferred: the instruction cell of a table can be cut by its column width, and an operand list read as register-only from a cut text would be a guess);
+    'any': everything else, including every text that may be cut by the table's column width (an operand cell that wraps is not read as register-only)."""
+    t = instr.strip()
+    if ' ' not in t or t.endswith(','):
+        return 'any'
+    ops = [re.sub(r'\{.*?\}', '', o).strip() for o in t.split(None, 1)[1].split(',')]
+    if any('/' in o for o in ops):
+        return 'any'
+    if any(re.match(r'^m(?!m\d?$)\w*(&\d+)?$', o) for o in ops):
+        return 'mem'
+    return 'any'
 
 
 def sections(lines):
@@ -191,6 +213,7 @@ def rows_of(lines, sec):
             co = min(cos)
         else:
             co = next(h.index('Instruction') for h in hdr if 'Instruction' in h); cf = cd = None
+            ie = min([m.start() for h in hdr for m in [re.search(r'\bOp\b|\bOp/|64-Bit|64/32', h)] if m and m.start() > co] or [co + 40])
         j = i + 1
         while j < sec[2] and not ROWSTART.match(lines[j].strip()):
             if j > i + 8: break
@@ -216,7 +239,7 @@ def rows_of(lines, sec):
                 if fmt in ('A', 'C'):
                     cur = [first, '', l2[cf:cd].strip() if cf is not None and len(l2) > cf else '', j]
                 else:
-                    cur = [first, l2[co:co + 40].strip(), '', j]
+                    cur = [first, re.split(r'\s{3,}', l2[co:ie].strip())[0], '', j]
                     out.append(tuple(cur) + (fmt,)); cur = None
             elif cur is not None and fmt in ('A', 'C'):
                 if not cur[1]: cur[1] = first
@@ -251,7 +274,7 @@ def exc_flags(lines, sec):
 
 
 def page_after(lines, j):
-    for k in range(j, min(j + 200, len(lines))):
+    for k in range(j, min(j + 1500, len(lines))):
         m = PAGE.search(lines[k])
         if m:
             return 'Vol. %s %s' % (m.group(1), m.group(2))
@@ -326,6 +349,11 @@ def match_rows(mand, body, rows, vexbody=None):
             if body[:len(B)] != bytes(B): continue
         if d['digit'] is not None:
             if len(body) <= len(B) or ((body[len(B)] >> 3) & 7) != d['digit']: continue
+        if d['modrm'] and r.get('modc', 'any') != 'any':
+            if len(body) <= len(B): continue
+            mod = body[len(B)] >> 6
+            if (r['modc'] == 'mem') != (mod != 3): continue
+            # (modc 'reg' needs mod == 3 and 'mem' needs mod != 3: the test above is exactly that)
         if d['pfx'] in ('66', 'F2', 'F3') and d['pfx'] != mand: continue
         if d['pfx'] == 'NP' and mand: continue
         cand.append(r)
@@ -354,7 +382,7 @@ def sdm_rows(lines, table):
         ea = sorted({m.group(2) for m in EXECAS.finditer(txt)})
         for opc, ins, fl, ln, fmt in rs:
             fl = flag_expr(fl, table) if fmt == 'A' else ''
-            out.append({'op': opc, 'p': parse_opcode(opc), 'instr': ins.split('  ')[0].strip(), 'flag': fl, 'fmt': fmt, 'sec': sec[0].split('—')[0], 'page': page_after(lines, ln),
+            out.append({'op': opc, 'modc': modclass(ins.strip()) if ins else 'any', 'p': parse_opcode(opc), 'instr': ins.strip(), 'flag': fl, 'fmt': fmt, 'sec': sec[0].split('—')[0], 'page': page_after(lines, ln),
                         'line': ln + 1, 'exc': exc, 'exec_as': ea})
     return out
 
@@ -373,6 +401,23 @@ def read_sites(path):
         a, k, f = ln.rstrip('\n').split('\t')
         out.append((a, k, f))
     return out
+
+
+# Forms with no row in the opcode tables of the instruction reference that the SDM still defines (so they are lifted with SDM semantics, not #UD): (name, matcher on (mandatory prefix, body bytes), the SDM text that
+# defines them: the line is searched in the SDM text and its page is cited).  Everything else without a row is SDM-undefined (class B: #UD on the declared machine).
+OPMAP = (
+    ('82 /n', lambda m, b: b[:1] == b'\x82', '     80-83          1     mem, 11B', 'Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n'),
+    ('C4 /r LES', lambda m, b: b[:1] == b'\xc4', 'LESi64', 'Table A-2: C4 is LES (invalid only in 64-bit mode)'),
+    ('C5 /r LDS', lambda m, b: b[:1] == b'\xc5', 'LDSi64', 'Table A-2: C5 is LDS (invalid only in 64-bit mode)'),
+    ('0F 1E / 0F 1F Reserved-NOP', lambda m, b: b[:2] in (b'\x0f\x1e', b'\x0f\x1f'), 'are also reserved but may behave as NOP', 'Appendix A: "Reserved-NOP" opcodes may behave as NOP'),
+)
+
+
+def opmap_cite(lines, text):
+    for i, l in enumerate(lines):
+        if text in l and i > 140000:
+            return page_after(lines, i)
+    raise SystemExit('SDM text not found: %r' % text)
 
 
 def cmd_rows(sdm, sites, out, public=None):
@@ -401,7 +446,14 @@ def cmd_rows(sdm, sites, out, public=None):
             b0 = body[0] if body else 0
             rows = byfirst.get(b0, []) + byfirst.get(b0 & 0xf8, [])
             cand, kind = match_rows(mand, body, rows)
-        if not cand:
+        if not cand and not (body[:1] in (b'\xc4', b'\xc5') and ins.mnemonic.startswith('v')):
+            mp = next((o for o in OPMAP if o[1](mand, body)), None)
+        else:
+            mp = None
+        if not cand and mp:
+            key = 'map|%s|%s' % (mp[0], ' '.join('%02X' % b for b in body[:3]))
+            e = forms.setdefault(key, {'rows': [], 'shapes': [], 'fam': set(), 'map': mp})
+        elif not cand:
             key = 'undefined|%s|%s' % (mand or '-', ' '.join('%02X' % b for b in body[:3]))
             if kind == 'legacy' and False: pass
             e = forms.setdefault(key, {'rows': [], 'shapes': [], 'fam': set()})
@@ -427,7 +479,10 @@ def cmd_rows(sdm, sites, out, public=None):
         fh.write('# form\tfamily\tstatus\tneeds\tvalue\texec_as\tsdm_opcode\tsdm_instr\tcitation\tshapes\tnsites\n')
         for key in sorted(forms):
             e = forms[key]; rs = e['rows']
-            if not rs:
+            if not rs and e.get('map'):
+                mp = e['map']
+                st, needs, val, ea, op, ins, cit = 'defined-by-opcode-map', '-', 'none', '-', mp[0], '-', 'SDM %s (%s)' % (mp[3], opmap_cite(lines, mp[2]))
+            elif not rs:
                 st, needs, val, ea, op, ins, cit = 'undefined', '-', 'none', '-', '-', '-', 'no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")'
             else:
                 needset = set()
@@ -465,7 +520,7 @@ def cmd_partition(rows, sites, out):
         form, fam, st, needs, val, ea, op, ins, cit, shp, n = f
         if st == 'ambiguous':
             raise SystemExit('ambiguous row %s' % form)
-        cleared = st == 'undefined' or (val == 'absent' and ea == '-')
+        cleared = st == 'undefined' or (val == 'absent' and ea == '-')               # class B: #UD on the declared machine
         for k in shp.split(','): by[k] = (cleared, form, st, needs, ea)
     cnt = collections.Counter(); total = 0
     with open(out, 'w', newline='\n') as fh:
