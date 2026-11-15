@@ -97,5 +97,6 @@
    "root": "ports/fnv-nx/hostabi",
    "output": "INCLUDE"
   }
- ]
+ ],
+ "constants": "constants.tsv"
 }
