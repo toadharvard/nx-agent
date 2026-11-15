@@ -1071,3 +1071,10 @@ Paused: w3b, w4, farm; no other work.
         - Fix: mojoshader's instructions[] masks are generated from the production table, and each widened emit function is checked for its stage.
         - Current numbers: d3d9total 161/337, red on the translator compile.
 - bottleneck: the cand2 merge, then the guest and gl4 builds; the translator handlers for the widened rows (w1b); L1 cand3 for the trunk (a5c8f427). 4 of 4 workers busy.
+- 20:38Z: w1b published production schema v1 (render/shaders/total/PRODUCTIONS.md), for w7 and L1 w27.
+    - Format: fnvnx-sm-productions/1. The coverage gate's output is fnvnx-sm-coverage/1.
+    - Handlers are read from the translator's own dispatch.
+- 20:38Z: L6A stage A3 (L6A w6 8a23b3609): SHADER_CREATE is removed, and the FFP stage shaders are the reserved ids NX_GL4SHIM_SHADER_FFP_*.
+    - My w6 merges it after w5's head:
+        - the pair row functions return the generated ids;
+        - the SHADER_DESTROY of reserved ids is deleted, not kept as harmless.
