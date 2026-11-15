@@ -13,8 +13,8 @@
    "name": "x86ir",
    "repo": "fnv-nx-build",
    "ref": "tools/sail-ir-7c3074644653",
-   "commit": "295aa6204e01226e3332cc831c8b883356c74ce8",
-   "tree_sha256": "ebbc7a42d2e92cdee8e36656e454baa3ac108c524ab5b846c5b2d0b2c8b9f35e",
+   "commit": "8b711fba9b9387c54889d4aa6c6fb38dc5007ba4",
+   "tree_sha256": "fdf3f3fdf413f998b86750412d8c3781413a722998d2a5c24ccad9e37806297c",
    "at": "/ext/x86ir"
   }
  ],
