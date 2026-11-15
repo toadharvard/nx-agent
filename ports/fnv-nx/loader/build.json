@@ -141,6 +141,10 @@
   {
    "root": "ports/fnv-nx/bridgefacts",
    "output": "BRIDGE"
+  },
+  {
+   "root": "ports/fnv-nx/shim",
+   "output": "INCLUDE"
   }
  ]
 }
