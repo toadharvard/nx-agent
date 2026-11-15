@@ -417,3 +417,5 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - icount link: red. The seed's crt0 → runtime.c → dispatch closure reaches lift/bridges, which is invalid under cand3 (direct platform include, old pin; owner L3a, told).
   - Asked L1 to rule that crt0 branches to the link.entry symbol and that the closure is per object, so test images don't pull the pack.
 - bottleneck: waiting on L1 (one lineage, link.entry, per-object closure), L3a (lift recipes under cand3) and L6A (gl4shim INCLUDE) | 2 workers
+- 22:20: L1 accepted both rules, and w12 folds them into cand3: (a) crt0 branches to __fnvnx_image_entry (--defsym from link.entry, which is required for a guest image); (b) closure roots link as archives in a group, so ld chooses the members.
+  - bootrt fix is now w9 9e457ca on 41a8855d4. At that head render/nxgpu is red (nxgpu4_check.h missing; owner L1/L6, told).
