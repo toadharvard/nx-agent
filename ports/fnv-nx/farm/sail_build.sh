@@ -32,9 +32,9 @@ eval "$($TOOLS/opam env --switch=sail)"; export PATH=$REMS/isla/isla-sail:$PATH
 # proof IR: same file list as the model Makefile (PRELUDE_SAILS MODEL_SAILS MAIN_SAIL), plus the window registers first
 OUT=$WORK/sail/x86_proof; PATCHES="$HERE/sail_patches/rotate_count.sail $HERE/sail_patches/ror_cf.sail $HERE/sail_patches/bt_bitnumber.sail $HERE/sail_patches/segment_bases.sail"
 [ $STOCK = 1 ] && { OUT=${OUT}_stock; PATCHES=""; }
-# BUMP=1: the next IR (not the pinned one; the farms never set it): transcriptions of ACL2 master hunks in sail_patches/bump/ (cmps, rol/ror count 0, ror CF, sar count >= size, cpuid, bsf/bsr, + their dispatch arms)
-if [ "${BUMP:-0}" = 1 ] && [ $STOCK != 1 ]; then
-    B=$HERE/sail_patches/bump; OUT=$WORK/sail/x86_proof_bump; mkdir -p "$WORK/sail/gen"; python3 "$B/cpuid_dispatch.py" "$MODEL" "$WORK/sail/gen/cpuid_dispatch0.sail" \
+# The pinned IR (BUMP defaults to 1; BUMP=0 rebuilds the superseded IR 70c8dc39...): the stock model + transcriptions of ACL2 master hunks in sail_patches/bump/ (cmps, rol/ror count 0, ror CF, sar count >= size, cpuid, bsf/bsr, + their dispatch arms)
+if [ "${BUMP:-1}" = 1 ] && [ $STOCK != 1 ]; then
+    B=$HERE/sail_patches/bump; mkdir -p "$WORK/sail/gen"; python3 "$B/cpuid_dispatch.py" "$MODEL" "$WORK/sail/gen/cpuid_dispatch0.sail" \
       && python3 "$B/bsf_bsr_dispatch.py" "$WORK/sail/gen/cpuid_dispatch0.sail" "$WORK/sail/gen/cpuid_dispatch.sail"
     PATCHES="$HERE/sail_patches/rotate_count.sail $B/ror_cf.sail $HERE/sail_patches/bt_bitnumber.sail $HERE/sail_patches/segment_bases.sail $B/cmps.sail $B/rol_count0.sail $B/sar_bigcount.sail $B/cpuid.sail $B/bit_bsf_bsr.sail $WORK/sail/gen/cpuid_dispatch.sail"
 fi
