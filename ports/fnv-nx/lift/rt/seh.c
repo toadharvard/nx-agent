@@ -158,7 +158,7 @@ extern "C" void fnvl_os_DebugBreak(void) {
 extern "C" void fnvl_os_RtlUnwind(void) {
     u32 ra = M32(esp), target = M32(esp + 4), rec = M32(esp + 12), rv = M32(esp + 16), sp0 = esp, sp = esp + 20;
     if (!rec) { rec = sp0 - REC_SIZE; zero(rec, REC_SIZE); M32(rec) = 0xC0000027u; M32(rec + 12) = ra; sp0 = rec; }
-    M32(rec + 4) |= EXC_UNWINDING | (target ? 0 : EXC_EXIT_UNWIND);
+    M32(rec + 4) = (u32)M32(rec + 4) | EXC_UNWINDING | (target ? 0 : EXC_EXIT_UNWIND);
     u32 save_eax = eax; eax = rv; u32 ctx = make_context(sp0, sp, ra); eax = save_eax; esp = ctx;
     u32 fs0 = c->fs, frame = M32(fs0);
     while (frame != 0xffffffffu && frame != target) {

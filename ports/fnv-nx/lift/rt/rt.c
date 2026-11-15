@@ -14,6 +14,8 @@ extern const u32 fnvl_disp_table[];
 extern const u16 fnvl_g[];
 extern const u32 fnvl_phf_params[4];
 extern void fnvl_nobody(void);
+/* The one global spin lock of locked operations on a misaligned operand (rt/fnvl.h LK_*, docs/ORDERING.md ATOMIC-UNALIGNED): 0 free, 1 held. */
+volatile u32 fnvnx_split_lock;
 void (*fnvl_dispatch(u32 a))(void)
 {
     const u32 *q = fnvl_phf_params;

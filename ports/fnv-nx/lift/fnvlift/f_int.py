@@ -312,7 +312,7 @@ def bitstr(cx, ins, body):
     body: C text over a (the unit), b (its bit mask), writing r (new unit) -> cf set, store when r differs by operation"""
     ops, s = cx.ops, cx.s
     sh = {16: 4, 32: 5}[s]
-    cx.em('{ s32 i=(s32)(s%d)%s; u32 ad=%s+(u32)((i>>%d)*%d); u32 a=M%d(ad), b=1u<<(i&%d), r; cf=(a&b)!=0; %s' % (s, cx.rd(ins, ops[1]), cx.ea(ins, ops[0]), sh, s // 8, s, s - 1, body))
+    cx.em('{ s32 i=(s32)(s%d)%s; u32 ad=%s+(u32)((i>>%d)*%d); u32 a=%s%d(ad), b=1u<<(i&%d), r; cf=(a&b)!=0; %s' % (s, cx.rd(ins, ops[1]), cx.ea(ins, ops[0]), sh, s // 8, cx.macc, s, s - 1, body))
 
 
 @op('bt')
@@ -329,7 +329,7 @@ def h_btx(cx, ins):
     m, ops = cx.m, cx.ops
     o = {'bts': 'a|b', 'btr': 'a&~b', 'btc': 'a^b'}[m]
     if not (ops[0].type == X.X86_OP_REG or ops[1].type == X.X86_OP_IMM):
-        bitstr(cx, ins, 'r=%s; M%d(ad)=r; }' % (o, cx.s))
+        bitstr(cx, ins, 'r=%s; %s%d(ad)=r; }' % (o, cx.macc, cx.s))
         return
     cx.em('{ u32 a=%s, b=1u<<((%s)&%d); cf=(a&b)!=0; %s }' % (
         cx.rd(ins, ops[0]), cx.rd(ins, ops[1], ops[0].size), cx.s - 1, cx.wr(ins, ops[0], o)))
@@ -395,7 +395,7 @@ def h_cmpxchg(cx, ins):
 @op('cmpxchg8b')
 def h_cmpxchg8b(cx, ins):
     ea = cx.ea(ins, cx.ops[0])
-    cx.em('{ u32 ad=%s; u64 d=M64(ad); if(d==(((u64)edx<<32)|eax)){ zf=1; M64(ad)=((u64)ecx<<32)|ebx; } else { zf=0; eax=(u32)d; edx=(u32)(d>>32); M64(ad)=d; } }' % ea)
+    cx.em('{ u32 ad=%s; u64 d=%s64(ad); if(d==(((u64)edx<<32)|eax)){ zf=1; %s64(ad)=((u64)ecx<<32)|ebx; } else { zf=0; eax=(u32)d; edx=(u32)(d>>32); %s64(ad)=d; } }' % (ea, cx.macc, cx.macc, cx.macc))
 
 
 @op('bsf', 'bsr')

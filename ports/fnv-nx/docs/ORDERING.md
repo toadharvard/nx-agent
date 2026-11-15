@@ -270,6 +270,101 @@ not touched. `-fplugin-arg-fnvnx_order-uninit=keep` restores GCC's handling (A/B
   (`obj->f(..., obj = X, ...)`): the decomp compiles to the original only if MSVC evaluates the object after the
   arguments. With `object=last` the read is initialized. That is evidence for ORDER-OBJECT (below), for S11.
 
+## Lifted code
+
+The lifted bodies (lift/) execute the exe's own x86 instructions, so they carry no source-level facts (no volatile, no
+key file). The rule is the x86-TSO one, per access, with no exception: **every access of guest memory is ordered, and
+every x86 `lock` instruction and every `xchg` with memory is one atomic read-modify-write followed by a full barrier.**
+It is stated on the compiled objects and checked there by `lift/tools/gate_order.py` (gates `order`, `addrwrap`,
+`align`; self-test `lift/test/gate_order_test.py`).
+
+### Accessors (lift/rt/fnvl.h)
+
+All guest memory goes through `GM<T>` (`M8`..`M64`, `MF32`, `MF64`, `MX`); each is one asm template, so the compiler
+cannot split, merge, hoist or re-address the access.
+
+| access | template |
+|---|---|
+| 1 byte | `ldarb` / `stlrb` |
+| 2, 4, 8 bytes, aligned | `ldar*` / `stlr*` |
+| 2, 4, 8 bytes, misaligned (`tst addr, #size-1` at run time, or at compile time for a constant address) | load: `ldr*` then `dmb ishld`; store: `dmb ishst` then `str*` |
+| 16 bytes | two 8-byte accesses, each as above |
+| `lock` op, `xchg r, m`; aligned or 1 byte | `ldaxr*` .. `stlxr*` loop (compare with the value the body computed from, retry on change), then `dmb ish` |
+| the same, misaligned | acquire `fnvnx_split_lock` (one global word, `ldaxr`/`stlxr`), plain load + `dmb ishld`, `dmb ishst` + plain store, release with `stlr`, `dmb ish` |
+
+Why the misaligned pair is TSO-ordered: `ldr; dmb ishld` orders the load before every later load and store;
+`dmb ishst; str` orders every earlier store before this one, and every earlier load is already ordered before it by its
+own acquire (`ldar`) or its own `dmb ishld`. Store -> load is the one order TSO does not give either.
+
+The address is a 32-bit value zero-extended into the base register; the operand is the base register alone, so
+`base + displacement` and `base + index` wrap at 2^32 in the lifted C++ (u32 arithmetic) before the access, as on x86-32.
+
+### The exempt set (which accesses are not guest accesses)
+
+The gate runs a forward dataflow over every instruction of every executable section of every object of the lifted
+image and gives each base register a class. An access is a guest access unless its base is proven, on every path, to be
+one of three host classes. Nothing is exempt by name, and no register is exempt as such: x27 itself is exempt only for
+offsets inside `struct cpu`.
+
+| class | bases | why no guest address can be formed from it |
+|---|---|---|
+| FRAME | `sp`; a copy of `sp`; `sp + constant`. Only a constant displacement is accepted (an index register is red). | `sp` is the host thread's stack pointer; the gate proves pack code changes it only by constants, by a copy back from a FRAME register, or by its own writeback, so it stays inside the host stack the runtime entered with. The host stack is a host mapping, disjoint from every guest mapping (A2). A guest address would need a guest-derived addend; any non-constant addend makes the result GUEST. |
+| IMAGE | the result of `adrp`/`adr`; a constant added to it; a GOT load. Loads and ordered stores only, constant displacement; an index is accepted only for a load from a datum of the object's own read-only-or-data PROGBITS section when `bound(index) << shift + size` fits before the end of that section. | pc-relative addresses are link-time addresses of the lifted image itself (literal pools, jump data, `fnvnx_split_lock`), disjoint from guest mappings (A2). A plain store through IMAGE is red, so no host global is written unordered either. The bounded index cannot leave the section, by the unsigned bound the dataflow proved. |
+| CPU | x27; a copy; `x27 + offset` where the dataflow keeps the offset interval `[lo, hi]` (constants, or registers with a proven unsigned bound). Passes only when `[lo + disp, hi + disp + size]` lies inside `[0, sizeof(struct cpu)]`; no index, no writeback. | x27 is the fixed register holding the host `struct cpu *` (`-ffixed-x27`); the gate proves no instruction of the image writes it (a write is red), so it holds the value the runtime entry set. Every accepted access lies inside that one host object, which is thread-private register state and not guest memory (A2, A3). An offset not proven inside the object makes the access GUEST (then it must be ordered and wrap-clean, and it is not: red). |
+| spill slot | a CPU-class pointer stored to `[sp, #d]` and reloaded from the same slot keeps its class and interval. | The slot is in the host frame. The gate forgets the slot at any store that overlaps it, any store through a frame pointer of unknown offset, any change of `sp`, and at a call when a frame address at or below the slot has escaped (was in x0-x18 at a call or was stored to memory). A callee that never received a frame address at or below the slot cannot write it (A1). |
+
+This is wider than "host sp/x29 slots and pc literals" in two places, both stated here on purpose: the CPU class
+(x27 with a proven in-object offset; x27 with any other offset is a guest access and must pass like one), and the
+bounded read-only table index of the IMAGE class.
+
+Guest registers (x19-x26) are never exempt. The gate additionally proves they stay below 2^32: every write is W-form, or
+an X-form result with a proven bound below 2^32; so a guest register used as a base is a zero-extended 32-bit address.
+
+### What the gates certify
+
+* `order` (class B): every guest access is an ordered instruction, or a plain store with `dmb ishst`/`dmb ish` before
+  it in the same basic block and no guest access or call between, or a plain load with `dmb ishld`/`dmb ish` after it
+  in the same block before the next guest access, call or block end. Also red: a write of x27, a non-constant change
+  of `sp`, LSE and `dc`/`ic`/`sys` instructions, undecodable words outside `$d`, branches out of the section that are
+  not relocated calls.
+* `addrwrap` (class F): every guest access has the base register alone as its operand, and the base is a 32-bit value
+  on every path (W-form writer, proven bound, or guest register). So no 64-bit sum of guest values is ever an address.
+* `align`: every ordered access wider than a byte is dominated by the zero edge of `tst base, #size-1` on the unchanged
+  base value, or has a constant aligned address. So `ldar`/`stlr`/`ldaxr` never take an alignment fault.
+
+### Assumptions
+
+* **A1 (calls).** AAPCS64: a callee preserves x19-x30 and `sp`, and writes the caller's frame only through an address it
+  was given. The objects are compiled with `-fno-ipa-ra`, so no caller relies on more than the ABI. After a call the
+  gate treats x0-x18 and x30 as GUEST.
+* **A2 (layout).** Guest memory is the mappings below 2^32 the loader made for guest images, heaps and stacks; the host
+  stack, `struct cpu` and the lifted image are host mappings disjoint from them. `struct cpu` has
+  `fnvnx_lift_cpu_bytes` bytes (read from the runtime object).
+* **A3 (closure).** Every object linked into the lifted image is given to the gate, the runtime objects included, and
+  is compiled with the same `-ffixed-x19..x27`. An object that is not gated could write x27 or a guest register.
+* **A4 (LOCK-SPLIT).** A misaligned locked operation is atomic against other locked operations (they all take
+  `fnvnx_split_lock` on that path) but not against a concurrent *plain* store to the same bytes: that store can land
+  between the locked load and the locked store and be lost, which x86 excludes. Assumed absent. Source: the Win32
+  `Interlocked*` documentation requires the operand to be aligned on a 32-bit boundary and states that otherwise the
+  function behaves unpredictably on multiprocessor x86 systems, so a program that mixes a misaligned interlocked
+  operand with plain stores has no defined behaviour to preserve. The page protection of the operand does not change
+  during the operation (the byte write-probe before the lock faults first, with nothing committed).
+
+### Counts (lift/tools/locksites.py; every locked instruction of the reached universe)
+
+| image | locked instructions | `xchg r, m` | `lock` forms present | byte operand | constant address | alignment not proven statically (tested at run time) |
+|---|---|---|---|---|---|---|
+| FalloutNV.exe | 69 | 63 | add 1, and 1, not 1, sbb 1, sub 2 | 34 | 0 | 35 |
+| d3dx9_38 | 98 | 79 | adc 4, add 7, and 7, inc 1 | 54 | 1 (misaligned) | 43 |
+| binkw32 | 8 | 0 | add 8 | 0 | 0 | 8 |
+| libvorbis | 0 | | | | | |
+| libvorbisfile | 1 | 1 | | 0 | 0 | 1 |
+
+The lifter emits the compare-and-swap loop for all 18 lockable mnemonics (add adc and btc btr bts cmpxchg cmpxchg8b dec
+inc neg not or sbb sub xor xadd xchg) and for `xchg` with memory without a prefix; there is no other path, so CAS /
+total is 69 / 69 for the exe. No alignment is assumed for the 35: each takes the aligned or the split-lock path by the
+run-time test.
+
 ## Open, not closed by this
 
 * **ORDER-OBJECT / ORDER-OPERATOR / ORDER-ASSIGN: per shape, from MSVC.** S11 recorded MSVC 2008 (SP1 and RTM, /O2,
