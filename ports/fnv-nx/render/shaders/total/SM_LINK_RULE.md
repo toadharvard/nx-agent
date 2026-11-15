@@ -100,14 +100,18 @@ A program stage is `(bytecode, stage, variant, L)`:
 - `variant` bit 1 = FLAT_COLOR on both stages of the pair: free, 2 values (`nx_ffp_flat` from D3DRS_SHADEMODE).
 - `L` = `nx_link_set`: empty when every pair of VS-out (without POSITION0/PSIZE0) and PS-in is canonical, else the ascending union;
   a function of the pair, so it is not a free parameter.
-- EPI variants (`FNVNX_SHADER_EPI_STATIC/ALPHA/FOG`) and NUMERICS_NINE change PS bodies, not declarations; they are in the
-  per-stage compile universe (5 EPI states: the runtime shader and the 4 static ALPHA/FOG combinations, x 2 NUMERICS) and are not part of the link signature. This is the open point to
-  close with the d3d9 owner: the epilogue is declared inside the PS GLSL and could in principle add a uniform; the gate
-  enumerates them for compile and the signature read (section 2) is taken on every one.
+- EPI variants (`FNVNX_SHADER_EPI_STATIC/ALPHA/FOG`) and NUMERICS_NINE change PS bodies, and an epilogue may in principle declare a uniform or
+  a varying. The rule does not decide that by reading the epilogue: the flag space is the list `FNVNX_SHADER_FLAG_LIST` of fnvnx_shaders.h
+  (one X-macro that generates the enum, `ALL`, `NONKEY` and `KEY`), the key space is every submask of `KEY` (enumerated directly,
+  `for (s = KEY;; s = (s - 1) & KEY)`), and the universe is bytecode x submask. Every cell has its own stage certificate (translate, compile,
+  signature read two ways, 0 disagreements), and the link set of programs is built from the signatures of those cells, so a declaration an
+  epilogue adds is read, compared and linked like any other. A flag added to the list is in the universe by construction.
 
-Per bytecode the compile universe is therefore: VS 2 (complete) x 2 (flat) = 4 per pair context; PS 2 (flat) x 5 (EPI) x 2 (numerics) = 20. These
-are counted by the gate over the keys, and the (complete, L) of a VS depend on the paired PS, so VS variants are enumerated per
-signature class pair, not per bytecode alone.
+Per bytecode the stage universe is therefore 2^popcount(KEY) cells (64 at the current list: EPI_STATIC, EPI_ALPHA, EPI_FOG, NUMERICS_NINE,
+VS_COMPLETE, FLAT_COLOR). The program set is every (VS signature class, PS signature class, flat) with the VS variant and L chosen by
+`nx_pair_variant` of render/pair (the draw path's function, linked into the checker, not restated): the (complete, L) of a VS depend on the
+paired PS, so VS variants are enumerated per class pair, not per bytecode alone. A program whose L is non-empty is counted and red
+until the per-pair translation (`link_pairs`) is covered.
 
 Open points (not guessed, reported):
 1. Fixed-function programs (`nx_ffp_vs_program`, `nx_ffp_ps_program`) pair with translated stages. Their declarations come from
