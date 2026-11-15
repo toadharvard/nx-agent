@@ -1812,3 +1812,11 @@ bottleneck: the cand2 warm verdict on w15.
   - L1 recipe side (w12, after PP keying and the objstub harness): `compiler` = a stage output, and unit keys include its stage key; base packages are keyed by mounted-tree content and checked by envcheck; compiler_stamp_errors and the guest_compiler pin are deleted; store-export/import provide the mirror; the toolchain root is admitted; toy-stage selftests.
   - L2 defines stage 1 (gcc) and stage 2 (plugins + runtime) and agrees the interface with w12.
 bottleneck: the cand2 warm verdict on w15.
+- 21:20 w12 acf66e78b:
+  - PP keying b3a4dad01: the compiler external is mounted whole; other externals only as include/flag subtrees; uses outputs only through include_uses. test_ppkeys passes; the toy re-key and test_objstub cases run in w15's cand3 verdict.
+  - The toy harness carries real declared_sources.
+  - w12L2 has pin 56a4d09c, byte-equal to cand2.
+  - x86-64 FNVNX_CITE fixed.
+  - Next for w12: tests/bootrt rt.c (12 declared-machine-uncited plus 1 reach-not-exit). Its double definitions are deleted and it links the product objects; a symbol with no owner is reported. Then the compiler stage.
+  - L3a told to put the pack's needed header outputs in include_uses.
+bottleneck: the cand2 warm verdict on w15.
