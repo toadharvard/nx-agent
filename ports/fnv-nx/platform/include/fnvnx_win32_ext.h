@@ -55,7 +55,7 @@ void fnvnx_path_reset(const char *root);        /* default mounts under root (NU
 DWORD fnvnx_path_map(const char *win_path, char *host, size_t host_size);
 void fnvnx_set_command_line(int argc, char **argv);
 /* the registry's first boot (platform/win32/registry_seed.cpp): when the hive file does not exist, makes it from the declared
- * machine's rows (platform/manifest/declared_registry.tsv, generated into the build); when it exists, touches nothing */
+ * machine's rows (manifest/declared_registry.tsv, generated into the build); when it exists, touches nothing */
 void fnvnx_registry_first_run(void);
 void fnvnx_declared_files_first_run(void);
 /* The declared fonts: an input of the platform like the registry hive and FalloutPrefs.ini. The root that links the platform defines

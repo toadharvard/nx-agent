@@ -1,4 +1,3 @@
-name	symbol	kind
 malloc	c_malloc	func
 calloc	c_calloc	func
 realloc	c_realloc	func
