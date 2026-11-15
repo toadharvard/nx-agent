@@ -47,9 +47,13 @@
     "--image",
     "exe",
     "--out",
-    "/out/fpdepth"
+    "/out/fpdepth",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
    "outputs": [
     "fpdepth/sites.tsv",
     "fpdepth/depth.tsv",
@@ -67,7 +71,9 @@
     "/out/fpstate/exe",
     "/in/ports/fnv-nx/lift",
     "/uses/ports/fnv-nx/loader/MODULES_TSV",
-    "exe"
+    "exe",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
@@ -91,7 +97,9 @@
     "/out/fpstate/atimgpud",
     "/in/ports/fnv-nx/lift",
     "/uses/ports/fnv-nx/loader/MODULES_TSV",
-    "atimgpud"
+    "atimgpud",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
@@ -115,7 +123,9 @@
     "/out/fpstate/binkw32",
     "/in/ports/fnv-nx/lift",
     "/uses/ports/fnv-nx/loader/MODULES_TSV",
-    "binkw32"
+    "binkw32",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
@@ -139,7 +149,9 @@
     "/out/fpstate/d3dx9_31",
     "/in/ports/fnv-nx/lift",
     "/uses/ports/fnv-nx/loader/MODULES_TSV",
-    "d3dx9_31"
+    "d3dx9_31",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
@@ -163,7 +175,9 @@
     "/out/fpstate/d3dx9_38",
     "/in/ports/fnv-nx/lift",
     "/uses/ports/fnv-nx/loader/MODULES_TSV",
-    "d3dx9_38"
+    "d3dx9_38",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
@@ -187,7 +201,9 @@
     "/out/fpstate/gdffalloutnv",
     "/in/ports/fnv-nx/lift",
     "/uses/ports/fnv-nx/loader/MODULES_TSV",
-    "gdffalloutnv"
+    "gdffalloutnv",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
@@ -211,7 +227,9 @@
     "/out/fpstate/libvorbis",
     "/in/ports/fnv-nx/lift",
     "/uses/ports/fnv-nx/loader/MODULES_TSV",
-    "libvorbis"
+    "libvorbis",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
@@ -235,7 +253,9 @@
     "/out/fpstate/libvorbisfile",
     "/in/ports/fnv-nx/lift",
     "/uses/ports/fnv-nx/loader/MODULES_TSV",
-    "libvorbisfile"
+    "libvorbisfile",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
@@ -262,9 +282,12 @@
     "/stage/fpstate/d3dx9_38",
     "/stage/fpstate/gdffalloutnv",
     "/stage/fpstate/libvorbis",
-    "/stage/fpstate/libvorbisfile"
+    "/stage/fpstate/libvorbisfile",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
+    "ports/fnv-nx/lift/fnvlift",
     {
      "stage": "ports/fnv-nx/lift/fpfacts:gen:1",
      "path": "fpstate/exe/scan.tsv"

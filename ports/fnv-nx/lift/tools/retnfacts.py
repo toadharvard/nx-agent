@@ -9,6 +9,7 @@ import sys
 from multiprocessing import Pool
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import libarg; libarg.take()      # --lib DIR: the package fnvlift (a declared input of the stage)
 import x86flow as W
 
 

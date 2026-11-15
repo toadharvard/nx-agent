@@ -27,7 +27,7 @@ _need('--out', '--keys'); import ehflow; ehflow.configure_keys(_O['--keys'])
 if STRICT:      # separate engine (every relocated pointer into executable bytes is an entry)
     _need('--modules', '--moddirs', '--lib'); sys.path.insert(0, _O['--lib'])      # --lib: the directory that holds the package fnvlift (the lifter's PE loader and decoder); a stage mounts it as an input
     import modlift; modlift.run(MOD, SimpleNamespace(modules=_O['--modules'], moddirs=_O['--moddirs'].split(':'), facts_out=_O['--out'])); sys.exit(0)      # modlift.run raises on failure; its verdict is in the gate JSONs
-_need('--exe', '--funcs')
+_need('--exe', '--funcs', '--lib'); sys.path.insert(0, _O['--lib'])      # --lib: the directory that holds the package fnvlift (a declared input of the stage)
 EXE = _O['--exe']; FUNCS = _O['--funcs']; NAME = ''
 OUTD = _O['--out']; OUT = OUTD + '/universe.tsv'; os.makedirs(OUTD, exist_ok=True)
 if '--refused' not in _O:       # driver: reloc-consistency refusals to their fixed point (each round is a whole run; R_{k+1} = R_k + the pointer-only entries with a misfit; refusals only shrink the flow, so R grows monotonically)
@@ -399,7 +399,6 @@ def uni(I):
 # entry_args gives: [parent, parent+size) for an entry with parent=, else [entry, entry+extent)); a call target is an entry even inside the range (the lifter emits
 # L_<target>() for every direct call). A target inside a decomp function gets parent= (kind inner), like every inner entry. Added entries are R3-style entries: their bodies
 # are kept in scx (not in insns/cov), so byte accounting is unchanged. A target outside every executable section is not an entry (counted: lifter needs a rule there).
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fnvlift import Image as LImage; from fnvlift import core as LCore
 limg = LImage(EXE); cl_cache = {}; cl_ft = set(); cl_out = Counter(); cl_outex = {}; cl_outt = {}; cl_outsrc = Counter(); cl_add = Counter(); cl_jx = set(); cl_rounds = 0
 def span_of(a):
