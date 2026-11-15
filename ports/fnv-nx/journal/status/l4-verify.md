@@ -403,3 +403,6 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - w8 session_01KmtZKS8Qkj4RxpvezPAmzP, branch claude/fnv-l4-verify-w8: doing. It merges cand3, w7-u and w6-r into one L4 branch, runs recipe.check on boot, bootguest, icount and gl4, and links icount.
   - bootguest and test_bootgpu wait for L3a's sharded post-cand3 pack store.
 - bottleneck: waiting on L3a for the post-cand3 pack store (sharded, ≤16 farms) | 1 worker
+- 21:57: The objstub red in tests/bootrt/rt.c blocks cand4 (uncited syscalls, an exit(1) fallback, reach_violation not via the host slot).
+  - w9 session_01KmtZKQe9ND19VuBYDFeesS, branch claude/fnv-l4-verify-w9 from cand3: doing. It applies L1's accepted rule: the exit callback of nxgl4_shim_set is required, reach_violation exits only through it, logging goes through a second callback or is deleted, and rt.c has no syscall and no fallback.
+- bottleneck: waiting on L3a for the post-cand3 pack store | 2 workers (w8 intake, w9 bootrt)
