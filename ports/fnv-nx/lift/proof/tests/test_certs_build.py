@@ -78,8 +78,8 @@ class Aggregate(unittest.TestCase):
         self.assertEqual(self.run_main([a], o), 0)
         rows = [ln.split('\t') for ln in open(o).read().splitlines()[1:]]
         self.assertEqual([r[0] for r in rows], [KEYS[1], KEYS[2]])
-        self.assertEqual(rows[0][6:], ['def0', 'af', '0', '2', 'edx', '-'])
-        self.assertEqual(rows[1][6:], ['def0', '-', '0', '0', '-', '-'])
+        self.assertEqual(rows[0][6:], [','.join(prove.OBLIGATIONS), 'af', '0', '2', 'edx', '-'])
+        self.assertEqual(rows[1][6:], [','.join(prove.OBLIGATIONS), '-', '0', '0', '-', '-'])
 
     def test_closure_key_keeps_a_record_valid_across_an_ir_change(self):
         # the old-IR side is computed from a provided IR file (hashed), not read from the record

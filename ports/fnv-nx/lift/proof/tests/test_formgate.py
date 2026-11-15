@@ -65,7 +65,7 @@ class Fixture:
         for k, f in self.keys:
             if certs_for is not None and k not in certs_for:
                 continue
-            rows.append('%s\t%s\t%s\t%s\tsail\t%s\tdef0\t-\t0\t0\t-\t-\n' % (k, f, dsl_override or formgate.dsl_sha(k, MD) or 'none', model, result))
+            rows.append('%s\t%s\t%s\t%s\tsail\t%s\t%s\t-\t0\t0\t-\t-\n' % (k, f, dsl_override or formgate.dsl_sha(k, MD) or 'none', model, result, ','.join(formgate.OBLIGATIONS)))
         self.art = fakeext.Artifacts(os.path.join(td, 'art'))
         os.makedirs(os.path.join(td, 'art'), exist_ok=True)
         self.art = fakeext.Artifacts(os.path.join(td, 'art'))

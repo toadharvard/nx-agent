@@ -96,7 +96,14 @@ def main():
     keys, bad = load_shapes(a.shapes); keys = keys[::a.slice]
     if a.only: keys = [x for x in keys if a.only in x]
     mine = [x for i, x in enumerate(keys) if i % n == k - 1][:a.limit]
-    done = set(json.loads(l)['shape'] for l in open(path)) if os.path.exists(path) else set()
+    done = set()
+    if os.path.exists(path):                       # a kill can leave one partial last line: drop it (that shape is proved again), keep every complete record
+        with open(path) as fh: lines = fh.read().split('\n')
+        good = []
+        for l in lines:
+            try: done.add(json.loads(l)['shape']); good.append(l)
+            except (ValueError, KeyError): pass
+        with open(path, 'w') as fh: fh.write(''.join(l + '\n' for l in good))
     print('shard %d/%d: %d shapes (%d integer shapes in the universe after --slice %d), %d already done, %d undecodable representatives' % (k, n, len(mine), len(keys), a.slice, len(done), len(bad)), flush=True)
     with open(path, 'a') as out:
         for key in mine:

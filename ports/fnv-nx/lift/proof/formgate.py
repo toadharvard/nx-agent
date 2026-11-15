@@ -154,7 +154,7 @@ def load_shapes(path):
     return out
 
 
-OBLIGATIONS = ("def0",)      # = prove.OBLIGATIONS (test_formgate checks it; this module imports no SMT solver): a row certifies only what the current prover checks
+OBLIGATIONS = ("def0", "xstate")      # = prove.OBLIGATIONS (test_formgate checks it; this module imports no SMT solver): a row certifies only what the current prover checks
 
 
 def declared_table():
