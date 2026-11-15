@@ -1836,3 +1836,7 @@ bottleneck: the cand2 verdict on w15.
 bottleneck: the cand2 verdict on w15.
 - 21:35 L6 at 18973a7f2 (w12L2 acf66e78b): 8 render roots green cold and warm; a warm run executes 0 stages, 3-9 s per root. Objstub over the universe: 2194/2208 certified, 28 findings. Non-L6 findings: loader guest/boot.c is missing fnvnx_win32_ext.h (L1, cand4 for w12); platform gen:12 traceback and rt/guest HOST1 (L5, routed); tests/bootrt reach_violation (L1, cand4); dm:1..12 uncited (L5 or bootrt).
 bottleneck: the cand2 verdict on w15.
+- 21:39 w28 abspath gate at d5269ee4 (16/16 selftests; MOUNT_PREFIXES is the one mount constant). Real tree at a0db3beaa: 28 findings in 11/162 closure files. L3a 6 (l3facts paths), L6 8, L1 14, L5 0, L2 0. w28 fixed the GATE_* defaults.
+  - Ruling on L1's remaining: envcheck probes, runtime lib dirs and the host plugin compiler path become env.json data; ARTIFACTS_URL becomes a required argument; dynamic launcher imports are accepted only through require_mounted(path) (MOUNT_PREFIXES), with no exemptions.
+  - Lists go to L3a and L6. The gate enters with cand4.
+bottleneck: the cand2 verdict on w15.
