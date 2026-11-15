@@ -1786,3 +1786,5 @@ bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 - 20:47 Correction to L6: include_uses is canonical (w12L2 recipe.py:1007). It is the subset of uses that goes on the include path and must name a directory output, generated or tracked. My earlier "deleted" was wrong. FFP_LAYOUT via uses plus include_uses stands.
   - L6 at render-w6-root 4bd215d1b: gl4shim, gl4, nxgpu, pair@host, translator@host and sm_link are green. pair, d3d9, smscan, translator and sha256 are red only on the stamp. It is the cand4 candidate after the pin.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
+- 20:50 w27 a889bf949: the stub gate accepts owner-decision citations, FNVNX_CITE(fn,"od:<id>") against the CLAUDE.md anchor (integ 911175615). It reds unknown-id, wrong-root, cite-mismatch and a malformed anchor; the synthetic tests pass, and the compiler cases run in w15's verdict. Fix asked: read the citation before every rule branch, so it is path-independent. Spelling sent to L6.
+bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
