@@ -43,6 +43,7 @@
  * Anything this plugin sees and cannot place is a compile error; a D0 found in a table is one (the hook was missed).
  */
 #include "../order/fnvnx_frame.h"
+#include "../names/plugsym.inc"
 #include "gcc-plugin.h"
 #include "plugin-version.h"
 #include "cp/cp-tree.h"
@@ -147,6 +148,7 @@ static tree ap_decl(tree vt, HOST_WIDE_INT off)
 {
   std::string n = std::string(asmname(vt)) + ".fnvnx_ap" + std::to_string((long long)off);
   tree &d = ap_decls[n];
+  if (TREE_PUBLIC(vt)) plugsym_note(n);   /* RULE DECLTYPE-PLUGINSYM: a reference to the address point's symbol, written by this plugin (a local table's is a .local symbol: not in the universe) */
   if (!d) {
     d = build_decl(UNKNOWN_LOCATION, VAR_DECL, get_identifier(n.c_str()), TREE_TYPE(TREE_TYPE(vt)));
     SET_DECL_ASSEMBLER_NAME(d, get_identifier(n.c_str()));
@@ -226,6 +228,7 @@ static bool ap_integer(rtx x, unsigned int size, int aligned_p)
     if (off < 0) { error("SDD2: an initializer holds the base of table %qD, not an address point", SYMBOL_REF_DECL(sym)); return false; }
     tree vt = SYMBOL_REF_DECL(sym);
     std::string n = std::string(asmname(vt)) + ".fnvnx_ap" + std::to_string((long long)off);
+    if (TREE_PUBLIC(vt)) plugsym_note(n);   /* RULE DECLTYPE-PLUGINSYM */
     x = gen_rtx_SYMBOL_REF(GET_MODE(sym), ggc_strdup(n.c_str()));
   }
   return orig_asm_integer(x, size, aligned_p);
@@ -514,6 +517,7 @@ static void vtmap_line(tree vt, HOST_WIDE_INT off)
 
 static void finish_unit(void *, void *)
 {
+  plugsym_writer_scope plugsym_scope;   /* RULE DECLTYPE-PLUGINSYM: reports on every way out */
   varpool_node *n;
   FOR_EACH_DEFINED_VARIABLE(n) {
     tree vt = n->decl;
@@ -527,6 +531,7 @@ static void finish_unit(void *, void *)
       if (after_rtti) {
         aps.push_back(ix * esz);
         std::string s = std::string(base) + ".fnvnx_ap" + std::to_string((long long)(ix * esz));
+        if (TREE_PUBLIC(vt)) plugsym_note(s);   /* RULE DECLTYPE-PLUGINSYM: a global or weak symbol of the object (a .local one is not in the universe) */
         fprintf(asm_out_file, "\t%s\t%s\n\t.type\t%s, %%object\n\t.set\t%s, %s+%ld\n",
                 DECL_WEAK(vt) ? ".weak" : TREE_PUBLIC(vt) ? ".globl" : ".local", s.c_str(), s.c_str(), s.c_str(), base, (long)(ix * esz));
         if (DECL_VISIBILITY(vt) == VISIBILITY_HIDDEN) fprintf(asm_out_file, "\t.hidden\t%s\n", s.c_str());
@@ -543,6 +548,8 @@ static void finish_unit(void *, void *)
   for (std::map<std::string, sdd_fn>::iterator t = thunks.begin(); t != thunks.end(); ++t) {
     const char *nm = t->first.c_str();
     const sdd_fn &f = t->second;
+    /* RULE DECLTYPE-PLUGINSYM: the function, and every symbol its text calls */
+    plugsym_note(nm); plugsym_note(f.entry); plugsym_note(f.d0); plugsym_note(f.d1); plugsym_note(f.vdel);
     /* x19 = this as passed (the result), x20 = the complete object, w21 = flags, w22 = elements left */
     fprintf(asm_out_file,
             "\t.section\t.text.%s,\"axG\",%%progbits,%s,comdat\n\t.align\t2\n\t.weak\t%s\n\t.type\t%s, %%function\n%s:\n"
@@ -600,6 +607,7 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
   register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pa);
   register_callback(info->base_name, PLUGIN_START_UNIT, start_unit, NULL);
   register_callback(info->base_name, PLUGIN_ALL_IPA_PASSES_START, ipa_start, NULL);
+  plugsym_writer();
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);
   return 0;
 }
