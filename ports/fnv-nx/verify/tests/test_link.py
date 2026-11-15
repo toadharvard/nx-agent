@@ -398,10 +398,14 @@ def main():
     # the variant rule: a product image links base roots only; a variant is linked by a test root (class test) only
     ep = recipe.check(image("toy", "aarch64linux", [VROOT + "@lp64"]), ROOT, recipe.tracked(repo2 := mk("varprod", image("toy", "aarch64linux", [VROOT + "@lp64"]), IMG, libs=[(VROOT, (vlib, VF))])),
                       recipe.load_admit(repo2), None, repo2)
-    check("variants: a product root linking root@NAME is red (only a test root links a variant)", any("is a variant" in e and "class test" in e for e in ep), ep)
+    check("variants: a product root linking a flags variant root@NAME is red (only a test root links one)", any("is a flags variant" in e and "class test" in e for e in ep), ep)
+    adm_pt = recipe.load_admit(repo2)
+    adm_pt[VROOT] = dict(adm_pt[VROOT], variants={"lp64": {"target": adm_pt[ROOT]["target"], "recipe": adm_pt[VROOT]["recipe"]}})   # a per-target variant (admit.json recipe {guest, host}) of the image's own target
+    ept = recipe.check(image("toy", "aarch64linux", [VROOT + "@lp64"]), ROOT, recipe.tracked(repo2), adm_pt, None, repo2)
+    check("variants: a product image links the per-target variant of its own target (green)", not any("variant" in e for e in ept), ept)
     repo3 = mk("vartest", image("toy", "aarch64linux", [VROOT + "@lp64"]), IMG, libs=[(VROOT, (vlib, VF))], classes={ROOT: "test"})
     et = recipe.check(image("toy", "aarch64linux", [VROOT + "@lp64"]), ROOT, recipe.tracked(repo3), recipe.load_admit(repo3), None, repo3)
-    check("variants: a test root linking root@NAME is green", not any("is a variant" in e for e in et), et)
+    check("variants: a test root linking root@NAME is green", not any("flags variant" in e for e in et), et)
     # a guest root links a pie: kind exe is host only
     TR.w(repo3, "verify/admit.json", json.dumps(dict(json.load(open(repo3 + "/" + T + "verify/admit.json")),
          roots=[dict(x, target="guest") if x["path"] == ROOT else x for x in json.load(open(repo3 + "/" + T + "verify/admit.json"))["roots"]])))

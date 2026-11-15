@@ -71,6 +71,10 @@ if not (len(ids) == 1 and ids[0].startswith('ctype:v')):
 n, c, ids = judge(obj('ce', [row('S', 4, 'c')], {'v': S1}), obj('cf', [row('S', 4, 'c')]))
 if not any('no .fnvnx.decltype' in i for i in ids):
     fails.append('C: a C unit without the record is red: %r' % ids)
+# the section's presence is the fact: a unit of `external` linkage rows (C units of w3's layout) that carries .fnvnx.decltype is compared all the same
+n, c, ids = judge(obj('ea', [row('S', 4, 'external')], {'v': S1}), obj('eb', [row('S', 4, 'external')], {'v': S2}))
+if not (len(ids) == 1 and ids[0].startswith('ctype:v')):
+    fails.append('a decltype section on external-linkage rows is parsed and compared: %r' % ids)
 # crossing_forbidden: a boundary symbol has a row and no term
 SY = 'f\t?f@@YAXXZ\tfunc\tdef\n'
 n, c, ids = judge(obj('xa1', [], sym=SY, cross='f\t-\n'), obj('xb1', []))

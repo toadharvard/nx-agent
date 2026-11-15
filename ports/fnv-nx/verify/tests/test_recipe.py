@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import sys
 import tempfile
 import threading
@@ -657,6 +658,17 @@ def main():
     for st, mode, tail in (("drv:r", ["-pie"], ["-###", "/probe/x.cc", "-o", "/out/x"]), ("mld:r", [], ["-print-multi-directory"])):
         d = recipe.driver_doc(st, "/ext/a64/bin/g++", ["-mabi=ilp32"], mode, tail, [{"at": "/ext/a64", "tree": "t"}])
         check("driver stage %s: its argv passes toolflags (the one constructor carries PROBE_FLAGS)" % st, toolflags.check_doc(d) == [], toolflags.check_doc(d))
+    # generated-only root (RECIPE.md "Generated-only roots"): no compiler, flags, include, units, link: valid with no unit, red with one
+    GO = {"format": "fnvnx-recipe/1", "generated": [{"tool": T + "gen/gen.py", "args": [], "inputs": [ROOT + "/constants.tsv"], "outputs": ["gen/gen.h"]}]}
+    check("a recipe of generated stages only (no compiler, flags, include, units) is valid when the root holds no translation unit",
+          errs(dict(GO)) != [] and all("unit" in e for e in errs(dict(GO))) or errs(dict(GO)) == [], errs(dict(GO)))
+    GOR = make_repo("goonly", rec=dict(GO), files={"toy/a.c": None, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None})
+    ego = recipe.check(dict(GO), ROOT, recipe.tracked(GOR), recipe.load_admit(GOR), None, GOR)
+    check("generated-only root with no unit: recipe valid", ego == [], ego)
+    ego2 = recipe.check(dict(GO), ROOT, recipe.tracked(make_repo("goonly2", rec=dict(GO), files={"toy/os.S": None})), recipe.load_admit(os.path.join(BASE, "goonly2")), None, os.path.join(BASE, "goonly2"))
+    check("generated-only root holding translation units a.c b.c c.c: red, one error per unit", sorted(e.split()[2] for e in ego2 if "translation unit" in e) == ["a.c", "b.c", "c.c"], ego2)
+    rgo = recipe.build(GOR, ROOT, BASE + "/go-store", BASE + "/go-out")
+    check("generated-only root builds green through recipe.py: its output is produced, no object, no ELF", rgo["status"] == "green" and rgo["objects"] == [] and rgo["elf"] is None, rgo.get("failure"))
     check_gen_reads(SS)
     check_run(SS)
     print("INFO +%.1f s: validation done, joining gate scenarios" % (time.time() - t_start))
@@ -746,7 +758,7 @@ def check_run(SS):
     ex = [{"path": HX, "class": "product", "target": "host", "recipe": HX + "/build.json"}, {"path": OTH, "class": "doc"}]
 
     def rec_(args=("ok",), ins=(), debs=(), outs=("o.txt",), art=HX + ":hx.exe"):
-        return dict(RECIPE, run=[{"name": "r", "artifact": art, "args": list(args), "inputs": list(ins), "debs": ["libc6"] + list(debs), "outputs": list(outs)}])
+        return dict(RECIPE, run=[{"name": "r", "artifact": art, "args": list(args), "inputs": list(ins), "debs": ["base-files", "libc6"] + list(debs), "outputs": list(outs)}])
 
     def mk(name, body=HX_C, data="5\n", **kw):
         return make_repo(name, rec=rec_(**kw), files={"hx/hx.c": body, "hx/build.json": json.dumps(hrec), "other/data.txt": data}, extra_roots=ex)
@@ -762,8 +774,29 @@ def check_run(SS):
     check("run stage: an artifact that names no link output of an admitted root is red at check", any("artifact" in e for e in recipe.check(rec_(art=HX + ":nope.exe"), ROOT, files, roots, None, good)))
     r1 = build(good, "1")
     txt1 = " ".join((r1.get("failure") or {}).get("stderr", []))
-    check("run stage: a PT_INTERP that no declared deb provides is red by rule, naming the path (hx.exe: the link rule's /lib/ld64.so.1 until w12h item 1 lands)",
-          r1["status"] == "green" or ("PT_INTERP" in txt1 and "no declared deb provides" in txt1), txt1)
+    check("run stage: the interpreter reached through base-files' /lib64 link runs (the run is green)", r1["status"] == "green", txt1)
+    nb = build(make_repo("rn-nb", rec=dict(rec_(), run=[dict(rec_()["run"][0], debs=["libc6"])]), files={"hx/hx.c": HX_C, "hx/build.json": json.dumps(hrec), "other/data.txt": "5\n"}, extra_roots=ex), "nb")
+    txtnb = " ".join((nb.get("failure") or {}).get("stderr", []))
+    check("run stage: with base-files absent the interpreter is not found: red, naming the path", nb["status"] != "green" and "PT_INTERP" in txtnb and "do not provide" in txtnb, txtnb)
+    with tempfile.TemporaryDirectory() as dt:
+        def put(d, path, to=None):
+            q = dt + "/deb-" + d + path
+            os.makedirs(os.path.dirname(q), exist_ok=True)
+            if to is None:
+                open(q, "w").write("x")
+            else:
+                os.symlink(to, q)
+        put("bf", "/lib64", "usr/lib64")
+        put("bf", "/lib", "usr/lib")
+        put("c6", "/usr/lib64/ld.so")
+        put("c6", "/usr/lib/x/l.so")
+        put("lp", "/a", "b"); put("lp", "/b", "a")
+        put("bf", "/abs", "../usr/lib64/ld.so")
+        check("deb_resolve: a path through a link shipped by one deb resolves to the file of another", recipe.deb_resolve("/lib64/ld.so", dt, ["bf", "c6"]) == ("c6", "/usr/lib64/ld.so"), recipe.deb_resolve("/lib64/ld.so", dt, ["bf", "c6"]))
+        check("deb_resolve: without the link's deb it is None", recipe.deb_resolve("/lib64/ld.so", dt, ["c6"]) is None)
+        check("deb_resolve: a relative link target with .. resolves", recipe.deb_resolve("/abs", dt, ["bf", "c6"]) == ("c6", "/usr/lib64/ld.so"))
+        check("deb_resolve: a link loop is None", recipe.deb_resolve("/a", dt, ["lp"]) is None)
+        check("deb_resolve: a directory is not a file", recipe.deb_resolve("/usr/lib", dt, ["bf", "c6"]) is None)
     cpu = {"vendor_id": None, "family": None, "model": None, "stepping": None, "microcode": None, "model_name": None}
     cur = {}
     for line in open("/proc/cpuinfo").read().splitlines():
@@ -784,14 +817,14 @@ def check_run(SS):
     check("host_cpu: a pin with a microcode value is a mismatch on a host that has no microcode line", len(recipe.cpu_mismatch(dict(vpin, microcode=1), vm)) == 1)
     jb = recipe.Job(good, ROOT, SS, 1, os.path.join(SS, "external"))
     ver = lambda n: {"version": subprocess.run(["dpkg-query", "-W", "-f=${Version}", n], capture_output=True, text=True).stdout}   # noqa: E731
-    both, only = BASE + "/un-both", BASE + "/un-libc"
+    dtmp = BASE + "/un-debs"
+    os.makedirs(dtmp)
     for n in ("base-files", "libc6"):
-        jb._deb_into(both, n, ver(n))
-    jb._deb_into(only, "libc6", ver("libc6"))
-    check("PT_INTERP /lib64/ld-linux-x86-64.so.2 resolves through base-files' ./lib64 -> usr/lib64 and then libc6's own link", recipe.resolves_in(both, "/lib64/ld-linux-x86-64.so.2"))
-    check("without base-files in the declared set the same PT_INTERP is red (libc6 alone has no ./lib64)", not recipe.resolves_in(only, "/lib64/ld-linux-x86-64.so.2"))
-    check("the link-free path /usr/lib64/ld-linux-x86-64.so.2 resolves in libc6 alone (its own link)", recipe.resolves_in(only, "/usr/lib64/ld-linux-x86-64.so.2"))
-    check("/lib/ld64.so.1 (what the link rule writes today) resolves in no declared deb", not recipe.resolves_in(both, "/lib/ld64.so.1"))
+        jb._deb_tree(dtmp, n, ver(n))
+    check("PT_INTERP /lib64/ld-linux-x86-64.so.2 resolves through base-files' ./lib64 -> usr/lib64 and then libc6's own link", recipe.deb_resolve("/lib64/ld-linux-x86-64.so.2", dtmp, ["base-files", "libc6"]) is not None)
+    check("without base-files in the declared set the same PT_INTERP is red (libc6 alone has no ./lib64)", recipe.deb_resolve("/lib64/ld-linux-x86-64.so.2", dtmp, ["libc6"]) is None)
+    check("the link-free path /usr/lib64/ld-linux-x86-64.so.2 resolves in libc6 alone (its own link)", recipe.deb_resolve("/usr/lib64/ld-linux-x86-64.so.2", dtmp, ["libc6"]) is not None)
+    check("/lib/ld64.so.1 (what the link rule writes today) resolves in no declared deb", recipe.deb_resolve("/lib/ld64.so.1", dtmp, ["base-files", "libc6"]) is None)
     hc = dict(rec_(), run=[dict(rec_()["run"][0], host_cpu="cpuref")])
     check("host_cpu: the key needs the tracked pin file verify/cpuref.json", any("cpuref" in e for e in recipe.check(hc, ROOT, files, roots, None, good)))
     check("host_cpu: with the pin file tracked the check accepts it", not [e for e in recipe.check(hc, ROOT, files + [T + "verify/cpuref.json"], roots, None, good) if "host_cpu" in e])
@@ -800,8 +833,7 @@ def check_run(SS):
     check("variant ubsan: its own link.libs.system (an absolute path of the pinned libubsan1) is accepted", not recipe.check(vl(["/usr/lib/x86_64-linux-gnu/libubsan.so.1"]), HX, files, roots, None, good), recipe.check(vl(["/usr/lib/x86_64-linux-gnu/libubsan.so.1"]), HX, files, roots, None, good))
     check("variant ubsan: a relative link.libs.system path is red at check", any("link.libs.system" in e for e in recipe.check(vl(["libubsan.so.1"]), HX, files, roots, None, good)))
     if r1["status"] != "green":
-        check("run stage execution checks (13: green run, keys, red cases, stage ref, debs, host_cpu run): PT_INTERP of link kind exe not runnable: w12h item 1", False,
-              "hx.exe's PT_INTERP %s is provided by no declared deb" % (txt1[:200],))
+        check("run stage execution checks (13: green run, keys, red cases, stage ref, debs, host_cpu run): the toy exe's run is green", False, txt1[:300])
         return
     cache = BASE + "/rc"
     os.makedirs(cache + "/store", exist_ok=True)
@@ -838,12 +870,12 @@ def check_run(SS):
     check("run stage: a declared input is visible at /in/N and its content is read", ri["status"] == "green" and got_in == "5\n", (ri.get("failure"), got_in))
     ri2 = build(mk("rn-in2", args=["copy", "/in/1"], ins=(OTH + "/data.txt",), data="6\n"), "in2")
     check("the content of a declared input is in the run key (one byte changed: exactly one key differs)", ri2["status"] == "green" and len(set(ri["stage_keys"]) - set(ri2["stage_keys"])) == 1, ri2.get("failure"))
-    dd = mk("rn-deb", args=["copy", "/deb/usr/bin/dh_autotools-dev_restoreconfig"], debs=("autotools-dev",))
+    dd = mk("rn-deb", args=["copy", "/deb/autotools-dev/usr/bin/dh_autotools-dev_restoreconfig"], debs=("autotools-dev",))
     rdb = build(dd, "deb")
     os.makedirs(BASE + "/rc3/store", exist_ok=True)
     got_d = open(recipe.resolve_input(ROOT, ref_in, dd, BASE + "/rc3")[0], "rb").read() if rdb["status"] == "green" else b""
-    check("run stage: a declared deb's installed files are visible at /deb/<path>", rdb["status"] == "green" and got_d == open("/usr/bin/dh_autotools-dev_restoreconfig", "rb").read()[:512], rdb.get("failure"))
-    nd = mk("rn-nodeb", args=["copy", "/deb/usr/bin/dh_autotools-dev_restoreconfig"])
+    check("run stage: a declared deb's installed files are visible at /deb/<name>/<path>", rdb["status"] == "green" and got_d == open("/usr/bin/dh_autotools-dev_restoreconfig", "rb").read()[:512], rdb.get("failure"))
+    nd = mk("rn-nodeb", args=["copy", "/deb/autotools-dev/usr/bin/dh_autotools-dev_restoreconfig"])
     rnd = build(nd, "nodeb")
     got_n = open(recipe.resolve_input(ROOT, ref_in, nd, BASE + "/rc4")[0], "rb").read() if os.makedirs(BASE + "/rc4/store", exist_ok=True) is None and rnd["status"] == "green" else None
     check("run stage: a deb that is not declared is not in the sandbox (the file is not there: empty copy)", rnd["status"] == "green" and got_n == b"", (rnd["status"], got_n))
