@@ -136,3 +136,4 @@ Orchestrator decision: -fstack-reuse=none in the guest semantic flag set (L1 fla
   - the RTL passes' refusals cited file:line in toolchain/order/README.md, with a hard-error final RTL check for any pass without one;
   - atomics to the x86 mapping.
   Status: doing.
+- 2026-11-15 01:05 msvcmodel long double rebuild: done. tools/gcc-ilp32-msvcmodel b274ec067a2f, tree_sha256 a1eeb84d83a6. Smoke ok (ILP32 sizeof is 8, LP64 is 16). Farm archived. Repin of guest_compiler.json requested from L1; then L5 w14 rebuilds msvcmodel13 and test_ldbl goes green.
