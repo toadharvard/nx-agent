@@ -1,0 +1,257 @@
+{
+ "format": "fnvnx-recipe/1",
+ "external": [
+  {
+   "name": "exe",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/exe",
+   "commit": "0948da1e89ab719dcf8471e45b67bc60575f6b93",
+   "tree_sha256": "ba933b684b5e221e74b8a841a0ebb35ea8599c78a4d582ca0c376ef5a424ef2b",
+   "at": "/ext/exe"
+  },
+  {
+   "name": "redist",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/redist",
+   "commit": "c53729e3bac168798fddcf4312f5a64a9b5eb08f",
+   "tree_sha256": "fe7d3b56dba13c2bb236bdd3f7681dab41029f192283b7d4ba0c81105878bfd2",
+   "at": "/ext/redist"
+  },
+  {
+   "name": "facts",
+   "repo": "fnv-nx-build",
+   "ref": "l3a-lift/facts",
+   "commit": "6944080c904b1d11c1ddf06601d5e19fcd8d32fd",
+   "tree_sha256": "900e4f0b20407252f0b4de91698854276976fc52e57b2787d3f9cc53a5ab1e8d",
+   "at": "/ext/facts"
+  }
+ ],
+ "uses": [
+  {
+   "root": "ports/fnv-nx/lift/retn",
+   "output": "RETN"
+  }
+ ],
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/lift/tools/fpmodes.py",
+   "args": [
+    "--exe",
+    "/ext/exe/FalloutNV.exe",
+    "--facts",
+    "/ext/facts",
+    "--retn",
+    "/uses/ports/fnv-nx/lift/retn/RETN",
+    "--out",
+    "/out/fpdepth"
+   ],
+   "inputs": [],
+   "outputs": [
+    "fpdepth/sites.tsv",
+    "fpdepth/depth.tsv",
+    "fpdepth/crt_calls.tsv",
+    "fpdepth/undecodable.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/fpstate.py",
+   "args": [
+    "scan",
+    "/ext/exe/FalloutNV.exe",
+    "/ext/facts",
+    "/uses/ports/fnv-nx/lift/retn/RETN",
+    "/out/fpstate/exe"
+   ],
+   "inputs": [],
+   "outputs": [
+    "fpstate/exe/fcw_loads.tsv",
+    "fpstate/exe/mxcsr_loads.tsv",
+    "fpstate/exe/readers.tsv",
+    "fpstate/exe/a3.tsv",
+    "fpstate/exe/scan.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/fpstate.py",
+   "args": [
+    "scan",
+    "/ext/exe/atimgpud.dll",
+    "/ext/facts/atimgpud",
+    "/ext/facts/atimgpud/retn.tsv",
+    "/out/fpstate/atimgpud"
+   ],
+   "inputs": [],
+   "outputs": [
+    "fpstate/atimgpud/fcw_loads.tsv",
+    "fpstate/atimgpud/mxcsr_loads.tsv",
+    "fpstate/atimgpud/readers.tsv",
+    "fpstate/atimgpud/a3.tsv",
+    "fpstate/atimgpud/scan.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/fpstate.py",
+   "args": [
+    "scan",
+    "/ext/exe/binkw32.dll",
+    "/ext/facts/binkw32",
+    "/ext/facts/binkw32/retn.tsv",
+    "/out/fpstate/binkw32"
+   ],
+   "inputs": [],
+   "outputs": [
+    "fpstate/binkw32/fcw_loads.tsv",
+    "fpstate/binkw32/mxcsr_loads.tsv",
+    "fpstate/binkw32/readers.tsv",
+    "fpstate/binkw32/a3.tsv",
+    "fpstate/binkw32/scan.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/fpstate.py",
+   "args": [
+    "scan",
+    "/ext/redist/d3dx9_31.dll",
+    "/ext/facts/d3dx9_31",
+    "/ext/facts/d3dx9_31/retn.tsv",
+    "/out/fpstate/d3dx9_31"
+   ],
+   "inputs": [],
+   "outputs": [
+    "fpstate/d3dx9_31/fcw_loads.tsv",
+    "fpstate/d3dx9_31/mxcsr_loads.tsv",
+    "fpstate/d3dx9_31/readers.tsv",
+    "fpstate/d3dx9_31/a3.tsv",
+    "fpstate/d3dx9_31/scan.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/fpstate.py",
+   "args": [
+    "scan",
+    "/ext/redist/d3dx9_38.dll",
+    "/ext/facts/d3dx9_38",
+    "/ext/facts/d3dx9_38/retn.tsv",
+    "/out/fpstate/d3dx9_38"
+   ],
+   "inputs": [],
+   "outputs": [
+    "fpstate/d3dx9_38/fcw_loads.tsv",
+    "fpstate/d3dx9_38/mxcsr_loads.tsv",
+    "fpstate/d3dx9_38/readers.tsv",
+    "fpstate/d3dx9_38/a3.tsv",
+    "fpstate/d3dx9_38/scan.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/fpstate.py",
+   "args": [
+    "scan",
+    "/ext/exe/GDFFalloutNV.dll",
+    "/ext/facts/gdffalloutnv",
+    "/ext/facts/gdffalloutnv/retn.tsv",
+    "/out/fpstate/gdffalloutnv"
+   ],
+   "inputs": [],
+   "outputs": [
+    "fpstate/gdffalloutnv/fcw_loads.tsv",
+    "fpstate/gdffalloutnv/mxcsr_loads.tsv",
+    "fpstate/gdffalloutnv/readers.tsv",
+    "fpstate/gdffalloutnv/a3.tsv",
+    "fpstate/gdffalloutnv/scan.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/fpstate.py",
+   "args": [
+    "scan",
+    "/ext/exe/libvorbis.dll",
+    "/ext/facts/libvorbis",
+    "/ext/facts/libvorbis/retn.tsv",
+    "/out/fpstate/libvorbis"
+   ],
+   "inputs": [],
+   "outputs": [
+    "fpstate/libvorbis/fcw_loads.tsv",
+    "fpstate/libvorbis/mxcsr_loads.tsv",
+    "fpstate/libvorbis/readers.tsv",
+    "fpstate/libvorbis/a3.tsv",
+    "fpstate/libvorbis/scan.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/fpstate.py",
+   "args": [
+    "scan",
+    "/ext/exe/libvorbisfile.dll",
+    "/ext/facts/libvorbisfile",
+    "/ext/facts/libvorbisfile/retn.tsv",
+    "/out/fpstate/libvorbisfile"
+   ],
+   "inputs": [],
+   "outputs": [
+    "fpstate/libvorbisfile/fcw_loads.tsv",
+    "fpstate/libvorbisfile/mxcsr_loads.tsv",
+    "fpstate/libvorbisfile/readers.tsv",
+    "fpstate/libvorbisfile/a3.tsv",
+    "fpstate/libvorbisfile/scan.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/fpstate.py",
+   "args": [
+    "combine",
+    "/out/fpstate",
+    "/stage/fpstate/exe",
+    "/stage/fpstate/atimgpud",
+    "/stage/fpstate/binkw32",
+    "/stage/fpstate/d3dx9_31",
+    "/stage/fpstate/d3dx9_38",
+    "/stage/fpstate/gdffalloutnv",
+    "/stage/fpstate/libvorbis",
+    "/stage/fpstate/libvorbisfile"
+   ],
+   "inputs": [
+    {
+     "stage": "ports/fnv-nx/lift/fpfacts:gen:1",
+     "path": "fpstate/exe/scan.tsv"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/fpfacts:gen:2",
+     "path": "fpstate/atimgpud/scan.tsv"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/fpfacts:gen:3",
+     "path": "fpstate/binkw32/scan.tsv"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/fpfacts:gen:4",
+     "path": "fpstate/d3dx9_31/scan.tsv"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/fpfacts:gen:5",
+     "path": "fpstate/d3dx9_38/scan.tsv"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/fpfacts:gen:6",
+     "path": "fpstate/gdffalloutnv/scan.tsv"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/fpfacts:gen:7",
+     "path": "fpstate/libvorbis/scan.tsv"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/fpfacts:gen:8",
+     "path": "fpstate/libvorbisfile/scan.tsv"
+    }
+   ],
+   "outputs": [
+    "fpstate/invariants.tsv"
+   ]
+  }
+ ],
+ "outputs": {
+  "FPDEPTH": "fpdepth/depth.tsv",
+  "FPSTATE": "fpstate"
+ }
+}

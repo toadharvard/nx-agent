@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """C4a: whole-program facts about the x87 / MMX / SSE control state, and the invariants that certify the lifter's no-effect bodies.
 
-    fpstate.py scan    <pe image> <facts dir> <retn.tsv>           one module: writes <facts dir>/fpstate/{fcw_loads,mxcsr_loads,readers,a3,scan}.tsv, prints counts only
-    fpstate.py combine <facts dir> [<facts dir> ...]      the PROGRAM invariants = AND over the modules; writes <facts dir>/fpstate/invariants.tsv into every directory
+    fpstate.py scan    <pe image> <facts dir> <retn.tsv> <out dir>   one module: reads the facts directory, writes <out dir>/{fcw_loads,mxcsr_loads,readers,a3,scan}.tsv, prints counts only
+    fpstate.py combine <out dir> <scan dir> [<scan dir> ...]      the PROGRAM invariants = AND over the modules (the scan dirs); writes <out dir>/invariants.tsv
 
 Deterministic: a pure function of the PE image and <facts dir>/universe.tsv (every iteration order is sorted, no clocks). Exe-derived outputs live only under the facts directories.
 Decoder, CFG, esp tracking and the value-set walk are the shared ones (x86flow.py, fpmodes.py).
@@ -22,7 +22,7 @@ import os, sys, hashlib
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import cli
-FPUSAGE = 'usage: fpstate.py scan IMAGE FACTSDIR RETN.tsv | fpstate.py combine DIR...'
+FPUSAGE = 'usage: fpstate.py scan IMAGE FACTSDIR RETN.tsv OUTDIR | fpstate.py combine OUTDIR SCANDIR...'
 sys.path.insert(0, HERE); sys.path.insert(0, os.path.dirname(HERE))
 from collections import Counter, defaultdict
 from multiprocessing import Pool
@@ -225,9 +225,8 @@ def analyse(sites, start, fl, entries_of, kinds):
     return dict(cls=cls, consts=sorted(consts), trans=sorted(trans), unk=sorted(set(unk)), R=R, fields=fields(R, start, fl))
 
 
-def do_scan(exe, facts, retn):
+def do_scan(exe, facts, retn, out):
     raw, rows = load_universe(exe)
-    out = os.path.join(facts, 'fpstate')
     os.makedirs(out, exist_ok=True)
     W.load_retn(retn)
     kind = {a: k for a, e, k in rows}; ext = {a: e for a, e, k in rows}
@@ -322,11 +321,11 @@ def do_scan(exe, facts, retn):
     print('\n'.join(L))
 
 
-def do_combine(dirs):
+def do_combine(outdir, dirs):
     rows = []
     for d in dirs:
         kv = {}
-        for ln in open(os.path.join(d, 'fpstate', 'scan.tsv')):
+        for ln in open(os.path.join(d, 'scan.tsv')):
             f = ln.rstrip('\n').split('\t')
             kv[f[0]] = f[1:]
         rows.append((d, kv))
@@ -334,8 +333,9 @@ def do_combine(dirs):
     for inv in ('ASM-204', 'ASM-205'):
         holds = all(kv[inv][0] == 'holds' for d, kv in rows)
         prog[inv] = 'holds' if holds else 'unproven'
-    for d, kv in rows:
-        with open(os.path.join(d, 'fpstate', 'invariants.tsv'), 'w') as f:
+    os.makedirs(outdir, exist_ok=True)
+    for _ in (0,):
+        with open(os.path.join(outdir, 'invariants.tsv'), 'w') as f:
             f.write('# program-level invariants = AND over the modules below (tools/fpstate.py combine); status holds | unproven\n')
             for inv in sorted(prog):
                 f.write('%s\t%s\t%s\n' % (inv, prog[inv], ' '.join('%s:%s' % (kv2['module'][0], kv2[inv][0]) for d2, kv2 in rows)))
@@ -343,9 +343,9 @@ def do_combine(dirs):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) == 5 and sys.argv[1] == 'scan':
-        W.configure(sys.argv[3]); do_scan(sys.argv[2], sys.argv[3], sys.argv[4])
-    elif len(sys.argv) >= 3 and sys.argv[1] == 'combine':
-        do_combine(sys.argv[2:])
+    if len(sys.argv) == 6 and sys.argv[1] == 'scan':
+        W.configure(sys.argv[3]); do_scan(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5])
+    elif len(sys.argv) >= 4 and sys.argv[1] == 'combine':
+        do_combine(sys.argv[2], sys.argv[3:])
     else:
         cli.parse(FPUSAGE, sys.argv[1:], (99, 99))
