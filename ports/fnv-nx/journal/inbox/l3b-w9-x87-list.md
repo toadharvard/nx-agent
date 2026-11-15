@@ -133,3 +133,7 @@ Gap to the queue header (x87 = 2,063 shapes, 392,864 addresses): 8 shapes / 147 
 ## Update 2026-11-15 (lead and w4)
 - fisttp (DF/DB/DD /1, 3 forms, 26 sites) is SSE3, cleared on the declared CPU: marked CLEARED, not in the spec. Spec universe: 119 instructions (122 minus 3).
 - D9 /3 mod=3 (D9 D8+i, FSTP1) and DF C0+i (FFREEP) have no SDM page; w4's partition puts the sites D9 DF (FalloutNV 0062b5f5) and DF C4 (d3dx9_38 0173892c) in the #UD class (fnv-nx-build l3b-lift/sdm-partition/7b2faae276b2-ca53ec4aa, cleared_sites.tsv). The spec keeps them as NO_SDM_PAGE, with no behaviour.
+
+## Reconciliation with x87_keys.tsv (fnv-nx-build l3b-lift/queue/7b2faae276b2-99d6300abd64-v2, commit 3ae0c50b) - 2026-11-15
+The tool's list: 2,063 shapes, 392,864 sites. Every shape decodes (prefixes 26/2e/36/3e/64/65/66/67/f0/f2/f3 skipped, opcode 9b or d8-df, ModRM) to one of the 122 instruction keys of the table above: **0 new instructions**. The only keys with no spec row are the 3 cleared fisttp forms (10 shapes, 21 sites in the tool's list; D9 DF / DF C4 are in the cleared class, not in the spec).
+The gap of 8 shapes / 147 sites is count differences inside known instructions: fwait 4 shapes / 352 sites in the tool against 2 / 206 here (+2 / +146), and +6 shapes / +1 site spread over mem forms (fld m32fp +1/+1, fst m32fp -1/0, fstp m32int, fiadd, ficom and others +-1..2). So the list of instructions stands; the shape counts of this note are superseded by the tool's (2,063 / 392,864).
