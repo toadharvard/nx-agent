@@ -859,3 +859,7 @@ Paused: w3b, w4, farm; no other work.
     - Next: hand w6-root (new head) and then w5-smlink 48048fe05 to L1 for the candidate after cand3, keeping w6's admit rows.
     - Under this rule, an instruction page's model list that omits ps is a silence. So the five ps conflicts for w1b (slt, sge, dst, expp, logp) become union rows once Wine 9.0 accepts them, each with a citation.
     - Note: the vFace page says "can only be used as condition…", which reads as an explicit restriction. The rule names vFace as a silence by decision, and the rule is followed.
+- 13:50Z w6 60e9d2161: done. 5 union rows (ps:47, ps:70, vs:sgn@vs_3_0, ps_3_0:vFace_src, vs_3_0:v[a0.x]), each with an MS page and section and a Wine 9.0 vkd3d line.
+    - The generate stage asserts the citations. res_smtab.gen.h is byte-identical.
+    - w6 (doing): the 3 "included" undetermined rows (vs1_0_ps1_0, temp_uninit_flow, rcp_mask) get a Wine 9.0 accept or reject citation, or are reported. "Included" without a source is red by rule 1.
+    - Hand-off to L1 follows that commit.
