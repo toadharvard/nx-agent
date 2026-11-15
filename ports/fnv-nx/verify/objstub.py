@@ -25,7 +25,7 @@ runs off the end after a call the compiler knew not to return), except a BL of `
 a caller of a flagged function is not flagged for it. Assumption: every terminating routine of the toolchain is declared noreturn (ASM-044)
 in the headers given. TERMINATOR RULE (what is a terminator): a routine that ENDS THE PROCESS. Resuming or starting the propagation of
 an exception is not process end: it transfers control to a handler (or on to the caller), and whether a handler exists is the EH
-class, not class 1. The plugin applies GCC's own flags (TREE_THIS_VOLATILE = noreturn, TREE_NOTHROW) and its own EH lowering: (1) the
+class, not class 1. The plugin applies GCC's own flags (TREE_THIS_VOLATILE = noreturn, read while the unit is parsed: the DECLARED noreturn; a function that GCC's pure-const pass later finds to never return, because it ends in a longjmp or an exit, is not declared noreturn and is not a terminator; TREE_NOTHROW) and its own EH lowering: (1) the
 EH-resume routines are the explicit builtins GCC's RESX lowering emits (`builtin_decl_explicit` of BUILT_IN_UNWIND_RESUME and
 BUILT_IN_CXA_END_CLEANUP: `_Unwind_Resume` on AArch64, whatever the target uses); (2) in a C++ TU a noreturn function that is not
 nothrow may raise an exception by the language (`__cxa_throw`, `__cxa_rethrow`, the `std::__throw_*` helpers), so it is not process
@@ -82,12 +82,31 @@ is not otherwise V is `wine-fixme-in-real-body`. A reference that is not a BL (a
 `wine-9.0:<path in the Wine source tree>:<function name>`: only the FORM is validated here; checking the reference against a pinned
 Wine 9.0 tree is the oracle class, not done. A row without a call site is no finding; the gate result counts call sites per id.
 
-(D) DECLARED MACHINE. `fnvnx_declared_machine(uint32_t id)` (C linkage, writes nothing, RETURNS) is the second citation function: every rule of (W)
-applies unchanged (BL transparent for V, constant id, exactly one id of ONE citation function on every path, result equals the row, otherwise
-V, no address taken), with the table verify/declared_machine.tsv (`--declared-machine`; read_declared_table): rows
-`id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`, fact and the source prefixes are read from the table's own header line (`# fact: ...; source: ...`: no-network, time-zone, registry, no-galaxy; win-doc, wine-9.0, galaxy-sdk), source `PREFIX:<page or path>:<function>` (the form only), kind/value as in (W). Findings carry the prefix `declared-machine-`. Stated limit: V cannot know which
-result is "success" of a network call, so a row saying success is not rejected; only a body that differs from its row is. A body that calls or
-stores is not V and needs no citation. The gate result counts call sites per id ("declared_machine").
+(C) CITATION RECORDS (rule C: the declared machine and the terminators; the owner of the records is the platform, hostabi/include/fnvnx/cite.h). The call
+`fnvnx_declared_machine(id)` no longer exists; `FNVNX_CITE(fn, "dm:<id>")` and `FNVNX_CITE(fn, "wf:<id>")` emit a RECORD into the non-alloc section
+`.fnvnx.cite` (type PROGBITS, no SHF_ALLOC): u32 function address (an ABS32 relocation of the object's ABI, R_AARCH64_P32_ABS32 for ILP32, against a
+function DEFINED in the same object), u32 length n of the id, the n bytes of the id, padding to 4 (read_cites; any other shape, an id that is not
+`dm:`/`wf:` plus a decimal, a relocation that does not name a function start of this object: `cite-malformed`). `dm:` is the id column of
+verify/declared_machine.tsv (`--declared-machine`; read_declared_table: rows `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`; the facts and the
+source prefixes are read from the table's own header line; the clause of `c11:<clause>:<function>` is digits and dots, the page of `posix-2017:<page>:<function>`
+a name; kind `noreturn` (value `-`) exactly for the facts process-end and thread-end), `wf:` the id column of wine_fixme.tsv. A cited body is judged by the rules
+of (W) with no call to read: it is analysed with the input rule replaced by the result rule (wine mode); V => it is certified iff the row's kind/value match the
+result (`declared-machine-mismatch` / `wine-fixme-mismatch`); not V => `declared-machine-in-real-body` / `wine-fixme-in-real-body`, except a row of kind
+noreturn (below). Exactly one record per body (`cite-mismatch`), the row's contract name is a name of the body (`...-name-mismatch`), the id is a row
+(`...-unknown-id`), and every dm row is cited by some record (`declared-machine-uncited`). Stated limit: V cannot know which result is "success" of a network
+call, so a row saying success is not rejected; only a body that differs from its row is. A body with no record that is V needs a constants row as before.
+The gate result counts records per id ("declared_machine"). The calls of `fnvnx_wine_fixme` keep rule (W).
+
+TERMINATING BODIES AND T2 (replaces "a reference to a terminator is a finding"). A REAL terminator is a function declared noreturn in a header of the unit that
+is either cited by a record whose row has fact process-end/thread-end (kind noreturn), or a library routine that no object of the root defines (documented by the
+pinned library). A cited terminator body is certified iff it is declared noreturn (`cite-not-declared-noreturn`) and no path of it returns
+(`cite-noreturn-returns`); a body that ends in the call through a pointer (the host exit slot) is accepted for `indirect-noreturn-tail` when it is such a cited
+terminator. COVERAGE: every declared-noreturn function that an object defines is a cited terminator, or every path of it ends in a real terminator (least fixed
+point), or it is `fnvnx_reach_violation` / `fnvnx_assume_violation` (class R); else `noreturn-uncited`. T2 and T2-noreturn-tail (a reference to, or a last call of,
+a terminator) are findings only when EVERY path of the function ends in a call of a real terminator (nr_ends) and the function is not a declared-noreturn
+definition (covered above): a body with at least one returning path is a MIXED body, its terminator paths are real control paths and are not a fixed failure by
+termination. The returning paths of a mixed body are judged by the V rules: the analysis treats a call of a declared-noreturn callee as the end of the path, so
+a constant or vacuous result of the returning paths is V, needs a constants row or a record, and is otherwise red (`constants-mismatch`).
 
 (R) REACH. A call (BL, or B as a tail call, with a CALL26/JUMP26 relocation) of the symbol `fnvnx_reach_violation` is not a T2 and not a
 T2-noreturn-tail; it is judged by the reach rule: w0 at the call must be a constant of objstub's own forward constant propagation (the
@@ -137,7 +156,7 @@ this change, platform root, 114 objects, warm cache: total 49 s, maximum 8.9 s (
 
 (I) IMAGE. For a root with a link stage the gate also reads the FINAL ELF (image_check): every STT_FUNC symbol with a size in an executable section of the image
 is a body, so a weak definition that a strong one replaced is not in the image and is not judged, and the archive members the linker pulled are judged as
-they stand. A body is FIXED-FAILURE iff, by the V rules with the root's `errno_accessor` (recipe: the function the libc errno macro calls) transparent, it
+they stand. A body is FIXED-FAILURE iff, by the V rules with the root's errno accessor (DERIVED, `errno_probe`: the function the libc errno macro calls; no recipe key) transparent, it
 stores only constants through the pointer that a call of the accessor returned (at least one such store), reads nothing but its own frame, and returns one
 constant on every path: its whole effect is `errno = K1; return K2`. Finding `fixed-failure` (id <root>/<link output>, name the function). Stated limits: a constant
 return without an errno store is the V class (a constants row); an errno held in a thread register or inlined (no call of the accessor) is not seen; a body with a
@@ -217,6 +236,7 @@ class Obj:
             raise ValueError("%s: not a little-endian AArch64 ELF relocatable" % path)
         w64 = self.w64 = d[4] == 2
         self.cite = CITE   # the functions a call of which is transparent for V (is_wine); trap_candidate adds the one callee under test
+        self.stop = frozenset()   # the declared-noreturn callees: a call of one ends the path (no successor) in the V analysis of a MIXED body (see check_obj)
         shoff, = struct.unpack_from("<Q" if w64 else "<I", d, 0x28 if w64 else 0x20)
         shent, shnum, shstr = struct.unpack_from("<HHH", d, 0x3A if w64 else 0x2E)
         raw = [struct.unpack_from("<IIQQQQIIQQ" if w64 else "<IIIIIIIIII", d, shoff + i * shent) for i in range(shnum)]
@@ -325,9 +345,14 @@ def access(inf):
 
 
 def is_wine(w, rel, obj):
-    """True iff word w, with relocation rel (or None), is a call of a citation function (WINE or DECL): a BL, or a tail B, which is the
+    """True iff word w, with relocation rel (or None), is a call of the citation function (WINE): a BL, or a tail B, which is the
     same body as BL then RET (the compiler's choice of a sibling call is not a different class). See is_tail."""
     return bool(rel) and w >> 26 in (0b100101, 0b000101) and obj.syms[rel[0]][0] in obj.cite
+
+
+def is_stop(w, rel, obj):
+    """True iff word w, with relocation rel, is a call (BL, or a tail B) of a callee in obj.stop: the path ends there."""
+    return bool(rel) and w >> 26 in (0b100101, 0b000101) and obj.syms[rel[0]][0] in obj.stop
 
 
 def is_tail(w, rel, obj):
@@ -347,7 +372,7 @@ def cfg(words, a, b, rels, obj):
         if o not in words:
             return None
         w, nxt = words[o], [o + 4]
-        if (w >> 26 == 0b100101 and not is_wine(w, rels.get(o), obj)) or (w >> 25 == 0b1101011 and (w >> 21) & 15 != 2) or w >> 24 == 0xD4:
+        if (w >> 26 == 0b100101 and not is_wine(w, rels.get(o), obj) and not is_stop(w, rels.get(o), obj)) or (w >> 25 == 0b1101011 and (w >> 21) & 15 != 2) or w >> 24 == 0xD4:
             return None  # BL (except of WINE: transparent), BR/BLR/ERET, SVC/HVC/SMC/BRK/HLT
         if w >> 22 == 0b1101010100 and (w >> 21 & 1 or w >> 19 & 3 or (w >> 12) & 15 not in (2, 3)):
             return None  # system instruction other than hint/barrier (MRS, MSR, SYS)
@@ -355,9 +380,11 @@ def cfg(words, a, b, rels, obj):
             return None  # exclusive/ordered/CAS or LSE atomic
         if (w >> 27) & 7 == 0b011 and (w >> 24) & 3 == 0 and not a <= o + 4 * sx((w >> 5) & 0x7FFFF, 19) < b:
             return None  # LDR literal outside the function
-        if o in rels and not is_tail(w, rels[o], obj) and (w >> 26 == 0b000101 or w >> 24 == 0x54 or (w >> 25) & 63 in (0b011010, 0b011011) or (w >> 27) & 7 == 0b011 and (w >> 24) & 3 == 0):
+        if o in rels and not is_tail(w, rels[o], obj) and not is_stop(w, rels[o], obj) and (w >> 26 == 0b000101 or w >> 24 == 0x54 or (w >> 25) & 63 in (0b011010, 0b011011) or (w >> 27) & 7 == 0b011 and (w >> 24) & 3 == 0):
             return None
-        if is_tail(w, rels.get(o), obj):  # tail B of WINE: the call, then RET
+        if is_stop(w, rels.get(o), obj):  # a call of a declared-noreturn function: the path ends
+            nxt = []
+        elif is_tail(w, rels.get(o), obj):  # tail B of WINE: the call, then RET
             nxt = []
         elif w >> 26 == 0b000101:  # B
             nxt = [o + 4 * sx(w & 0x3FFFFFF, 26)]
@@ -482,7 +509,7 @@ def vanalyse(words, a, b, rels, obj, dec, wine=False, loads_ok=False, errno_ok=F
                 live[o], ch = n, True
     if live[a] and not wine:   # WINE: the input rule (v) is replaced by the result rule (the result must be constant, wine_sim)
         return None
-    rets = [o for o in succ if not succ[o]]
+    rets = [o for o in succ if not succ[o] and not is_stop(words[o], rels.get(o), obj)]   # a call of a declared-noreturn callee ends its path without a result
     fin = {o: step(o, words[o], ins[o], rels.get(o), obj, inf[o]) if is_tail(words[o], rels.get(o), obj) else ins[o] for o in rets}   # a tail B returns after the call
     res = {}
     for name, r in (("x0", 0), ("x1", 1), ("v0", 32)):
@@ -492,9 +519,10 @@ def vanalyse(words, a, b, rels, obj, dec, wine=False, loads_ok=False, errno_ok=F
 
 
 WINE = "fnvnx_wine_fixme"   # the one log function of the Wine-9.0-simplified bodies (wine_fixme.tsv): writes one line and RETURNS
-DECL = "fnvnx_declared_machine"   # the citation function of the declared-machine bodies (declared_machine.tsv): writes no line, RETURNS
-CITE = (WINE, DECL)   # the citation functions: a body that calls one is judged against that one's table by the same rule (W)
-ASSUME = "fnvnx_assume_violation"   # the second contract symbol of an assertion: an accepted-OWNER-record violation (owner order of the orchestrator, 2026-11-12)
+CITE = (WINE,)   # the citation function: a body that calls it is judged against wine_fixme.tsv by rule (W). The declared machine and the terminators are cited by RECORDS (rule C)
+CITE_SEC = ".fnvnx.cite"   # rule C: the non-alloc section of the FNVNX_CITE records (hostabi/include/fnvnx/cite.h)
+ASSUME = "fnvnx_assume_violation"   # the second symbol of class R (the exit of a value outside an assumed domain): a declared noreturn function that needs no citation
+CITE_ID = re.compile(r"(dm|wf):([0-9]+)")
 REACH = "fnvnx_reach_violation"   # the one contract symbol of the proven-unreachable assertion (owner decision 2026-11-11, option iii)
 # Branch relocations of both ABIs. LP64 (ELF64): R_AARCH64_JUMP26 = 282, CALL26 = 283 (elf.h). ILP32 (ELF32, r_info = sym << 8 | type):
 # R_AARCH64_P32_JUMP26 = 20, P32_CALL26 = 21 (AAELF64 ILP32 tables; checked against the names binutils' readelf prints for objects the
@@ -902,6 +930,7 @@ class Image:
             r = struct.unpack_from("<IIQQQQIIQQ" if w64 else "<IIIIIIIIII", d, shoff + i * shent)
             self.secs.append((r[1], r[2], r[3], r[4], r[5], r[6]) if w64 else (r[1], r[2], r[3], r[4], r[5], r[6]))
         self.cite, self.errno_fn, self.syms, self.errno_stores = (errno_fn,), errno_fn, [], 0
+        self.stop = frozenset()   # an image body is judged by the fixed-failure rule only: no mixed-body stop set
         tab = [i for i, t in enumerate(self.secs) if t[0] == 2]
         if len(tab) != 1:
             raise ValueError("%s: the image has no symbol table (or several): its function bodies cannot be read" % path)
@@ -918,32 +947,30 @@ AARCH64_TLS = frozenset(range(512, 576)) | frozenset(range(80, 127))   # AAELF64
 
 
 def errno_probe(cc, flags, cache):
-    """How the root's libc reaches errno, DERIVED by compiling `#include <errno.h>` / `int f(void){return errno;}` with the root's own C compiler CC and
-    unit flags FLAGS and reading the object: -> ("call", SYMBOL) when the body calls SYMBOL (a call relocation, the accessor that returns the address of
-    errno), ("tls", SYMBOL) when it reaches a thread-local symbol (a TLS relocation). Anything else (no call and no TLS relocation, several targets)
-    raises ValueError: the way errno is reached is not known, nothing is guessed. Cached CACHE/objstub/e-<key>, key = compiler, flags, source."""
+    """How the root's libc reaches errno, DERIVED from the libc header of the declared target: the C compiler CC with the root's unit FLAGS preprocesses
+    `#include <errno.h>` / `int f(void){return errno;}` and the expansion of `errno` is read from the text (no object is read, so the rule is the same for every
+    target): `(*NAME ())` -> ("call", NAME), the function that returns the address of errno; a bare identifier NAME -> ("tls", NAME), a thread-local or
+    plain object. Any other expansion raises ValueError: the way errno is reached is not known, nothing is guessed. Cached CACHE/objstub/e-<key>,
+    key = compiler, flags, source."""
     src = "#include <errno.h>\nint f(void){return errno;}\n"
-    key = hashlib.sha256(json.dumps([cc, subprocess.run([cc, "--version"], capture_output=True, text=True).stdout, list(flags), src]).encode()).hexdigest()
+    key = hashlib.sha256(json.dumps([cc, subprocess.run([cc, "--version"], capture_output=True, text=True).stdout, list(flags), src, 2]).encode()).hexdigest()
     cp = os.path.join(cache, "objstub", "e-%s.txt" % key)
     if not os.path.exists(cp):
         with tempfile.TemporaryDirectory() as td:
             open(td + "/p.c", "w").write(src)
-            r = subprocess.run([cc, "-c", "-O1", "-o", td + "/p.o"] + list(flags) + ["-x", "c", td + "/p.c"], capture_output=True, text=True)
+            r = subprocess.run([cc, "-E", "-P"] + list(flags) + ["-x", "c", td + "/p.c"], capture_output=True, text=True)
             if r.returncode:
                 raise ValueError("errno probe does not compile: %s" % r.stderr[-300:])
-            o = Obj(td + "/p.o")
-            tgt = set()
-            for si, rel in o.rela.items():
-                if o.secs[si][2] & 4:
-                    for _, (sy, ty, _) in rel.items():
-                        name = o.syms[sy][0]
-                        if ty in (283, 21):                       # R_AARCH64_CALL26 / R_AARCH64_P32_CALL26
-                            tgt.add(("call", name))
-                        elif ty in AARCH64_TLS:
-                            tgt.add(("tls", name))
-            if len(tgt) != 1:
-                raise ValueError("errno probe: the object of `return errno;` has %d call/TLS targets (%s): how errno is reached is not known" % (len(tgt), sorted(tgt)))
-            _atomic(cp, ("%s %s\n" % sorted(tgt)[0]).encode())
+            d = subprocess.run([cc, "-E", "-dM"] + list(flags) + ["-x", "c", td + "/p.c"], capture_output=True, text=True).stdout
+        if not re.search(r"^#define errno\b", d, re.M):   # ISO C: errno is a macro of <errno.h>; an unexpanded identifier is no derivation
+            raise ValueError("errno probe: <errno.h> of the root's flags defines no macro `errno`")
+        body = re.findall(r"int\s+f\s*\(\s*void\s*\)\s*\{\s*return\s+(.*?);\s*\}", r.stdout, re.S)
+        m = re.fullmatch(r"\(\s*\*\s*([A-Za-z_]\w*)\s*\(\s*\)\s*\)", body[0].strip()) if len(body) == 1 else None
+        t = re.fullmatch(r"([A-Za-z_]\w*)", body[0].strip()) if len(body) == 1 and not m else None
+        if not (m or t):
+            raise ValueError("errno probe: `errno` expands to %r: how errno is reached is not known" % (body[0].strip()[:80] if body else r.stdout[-80:]))
+        os.makedirs(os.path.dirname(cp), exist_ok=True)
+        _atomic(cp, ("%s %s\n" % (("call", m.group(1)) if m else ("tls", t.group(1)))).encode())
     k, n = open(cp).read().split()
     return k, n
 
@@ -1190,13 +1217,59 @@ def flag_holds(fl, name, off, stack=()):
     return bool(sites) and every_path_calls(words, a, b, sites)
 
 
+def read_cites(o):
+    """RULE C (rule text in the module docstring). The `.fnvnx.cite` records of the object O (hostabi/include/fnvnx/cite.h): -> ({(section index, function
+    offset): [id, ..]}, [(item name, detail)] of malformed records). A record is: u32 address of a function (the RELA entry at the record's offset: an
+    ABS32 relocation of the object's ABI against a symbol, with an addend, that resolves to the start of a FUNCTION defined in this object), u32 length n
+    of the id, n bytes of ASCII id that match (dm|wf):<decimal>, padded to 4. The section is not loaded (no SHF_ALLOC) and is PROGBITS. Any other form is
+    malformed: a cited function must be a body of the object, never a name that is merely mentioned."""
+    at, bad = {}, []
+    fn = {(s[5], s[1]) for s in o.syms if s[3] == 2 and 0 < s[5] < 0xFF00}
+    abs32 = 258 if o.w64 else 1   # R_AARCH64_ABS32 (ELF64) / R_AARCH64_P32_ABS32 (ELF32, the ILP32 ABI)
+    for si, (sname, stype, sflags, soff, ssize, _, _) in enumerate(o.secs):
+        if sname != CITE_SEC:
+            continue
+        if stype != 1 or sflags & 2:
+            bad.append(("%s" % CITE_SEC, "the section must be PROGBITS without SHF_ALLOC (type %d, flags %#x)" % (stype, sflags)))
+            continue
+        buf, rel, p = o.data[soff:soff + ssize], o.rela.get(si, {}), 0
+        while p < ssize:
+            nm = "%s+0x%x" % (CITE_SEC, p)
+            if p + 8 > ssize or p not in rel or rel[p][1] != abs32:
+                bad.append((nm, "a record is u32 function address (an ABS32 relocation), u32 length, id bytes, padding to 4"))
+                break
+            n = struct.unpack_from("<I", buf, p + 4)[0]
+            if p + 8 + n > ssize:
+                bad.append((nm, "the id length %d leaves the section" % n))
+                break
+            sidx, _, add = rel[p]
+            sy = o.syms[sidx]
+            key = (sy[5], sy[1] + add) if 0 < sy[5] < 0xFF00 else None
+            m = CITE_ID.fullmatch(buf[p + 8:p + 8 + n].decode("latin-1"))
+            if key not in fn:
+                bad.append((nm, "the record's relocation does not name the start of a function defined in this object (symbol %s)" % sy[0]))
+            elif not m:
+                bad.append((nm, "the id %r is not dm:<decimal> or wf:<decimal>" % buf[p + 8:p + 8 + n].decode("latin-1")[:40]))
+            else:
+                at.setdefault(key, []).append(m.group(0))
+            p += (8 + n + 3) & ~3
+    return at, bad
+
+
 def check_obj(path, terms, os_layer, probe=None):
     """-> (items [name], findings [(name, KIND, detail, V result as JSON or None)], extra {"reach": [[function, offset, constant|None]],
     "exit_ok": [function whose every path ends in a BLR tail]}). OS_LAYER: the object may contain SVC (a fact of the recipe)."""
     o = Obj(path)
-    items, finds, exit_ok, extra = [], [], set(), {"reach": [], "wine": [], "declared": [], "wine_id": {}, "wine_nz": {}, "cite_sym": {}, "alias": {}, "tb": {}, "globals": [], "dref": [], "nr": {}, "flag": None, "tabs": {}, "assume": []}
+    items, finds, exit_ok, extra = [], [], set(), {"reach": [], "wine": [], "wine_id": {}, "wine_nz": {}, "cite_sym": {}, "cite": {}, "terms": [], "term_def": [], "alias": {}, "tb": {}, "globals": [], "dref": [], "nr": {}, "flag": None, "tabs": {}, "assume": []}
     pw = {}   # the probe (recipe error_abi kind flag): name -> (words, a, b, stores, calls) of every function
     unw = {t[1:] for t in terms if t[:1] == "~"}   # unwinders: calls that continue an exception already in flight
+    stops = frozenset(t for t in terms if t[:1] != "~")   # the declared-noreturn callees (terminator candidates): a call ends the path of a mixed body
+    cites_at, cbad = read_cites(o)   # rule C: the citation records of the object, by function address
+    extra["terms"] = sorted(stops)
+    extra["unw"] = sorted(unw)   # the unwinder callees (a transfer of control that does not return: longjmp, throw, resume): an end of a declared-noreturn body, not a process end
+    for nm, why in cbad:
+        items.append(nm)
+        finds.append((nm, "cite-malformed", why, None))
     tid = {i for i, s in enumerate(o.syms) if s[0] in terms and s[4] != 0 and s[0] not in (REACH, ASSUME) + CITE}   # REACH and `ASSUME` are judged by their own rules
     for si, (sname, stype, sflags, soff, ssize, _, _) in enumerate(o.secs):
         if not sflags & 4 or stype != 1:
@@ -1223,6 +1296,9 @@ def check_obj(path, terms, os_layer, probe=None):
                 if last[3] in extra["tb"]:
                     extra["tb"][name] = extra["tb"][last[3]]
                 extra["nr"][name] = extra["nr"].get(last[3])
+                if last[3] in extra["cite"]:
+                    extra["cite"][name] = extra["cite"][last[3]]
+                    extra["wine_nz"][name] = extra["wine_nz"].get(last[3], {})
                 if last[3] in extra["wine_id"]:
                     extra["wine_id"][name] = extra["wine_id"][last[3]]
                     extra["wine_nz"][name] = extra["wine_nz"].get(last[3], {})
@@ -1251,8 +1327,7 @@ def check_obj(path, terms, os_layer, probe=None):
                 fnd.append((name, "T2", "reference to %s at +0x%x" % (o.syms[thits[k][1]][0], thits[k][0] - a), None))
             wsites = {}
             csyms = set()
-            for sym, key, fkind in ((REACH, "reach", "reach-address-taken"), (ASSUME, "assume", "assume-address-taken"), (WINE, "wine", "wine-fixme-address-taken"),
-                                    (DECL, "declared", "declared-machine-address-taken")):
+            for sym, key, fkind in ((REACH, "reach", "reach-address-taken"), (ASSUME, "assume", "assume-address-taken"), (WINE, "wine", "wine-fixme-address-taken")):
                 sites, offs = [], rch[sym]
                 for k in range(bisect.bisect_left(offs, a), bisect.bisect_left(offs, b)):   # references: only a BL/B call is a call site
                     off = offs[k]
@@ -1282,19 +1357,34 @@ def check_obj(path, terms, os_layer, probe=None):
                     fnd.append((name, "T2-noreturn-tail", "call to %s ends the function" % tgt, None))
             elif lk not in ("b", "end"):
                 fnd.append((name, "fallthrough", "last instruction %s can run into the next function" % lm, None))
+            ids = cites_at.get((si, a), [])
+            nrv = nr_ends(words, a, b, rel, o, fn_at)
+            nterm = bisect.bisect_left(tk, b) - bisect.bisect_left(tk, a)
             if not any(f[1] in ("T1", "undecodable", "uncovered") for f in fnd):
+                # a MIXED body (some path returns, some path ends in a call of a declared-noreturn function): the terminator paths end there, and the
+                # returning paths are judged by the V rules (a constant or vacuous result needs a constants row or a citation)
+                o.stop = stops if (nrv is None and nterm) else frozenset()
                 try:
-                    v = vanalyse(words, a, b, rel, o, {x: dec.get(soff + x) for x in words}, bool(wsites))
+                    v = vanalyse(words, a, b, rel, o, {x: dec.get(soff + x) for x in words}, bool(wsites) or bool(ids))
                 except Unanalysable as e:
                     v = None
                     fnd.append((name, "unanalysable", str(e), None))
+                finally:
+                    o.stop = frozenset()
                 if wsites:   # a function that calls WINE: transparent for V; V => WINE-V (judged against wine_fixme.tsv), else a real body
                     extra["wine_id"][name] = wine_path_id(words, a, b, wsites)
                     extra["cite_sym"][name] = next(iter(csyms)) if len(csyms) == 1 else None   # both functions in one body: no single table
                     if v is not None:
                         extra["wine_nz"][name] = {str(n): [wine_sim(words, a, b, rel, o, n, z) for z in (True, False)] for n in range(8)}
                     fnd.append((name, "WINE-V", "result " + " ".join("%s=%s" % kv for kv in sorted(v.items())), vjson(v, o)) if v is not None else
-                               (name, "declared-machine-in-real-body" if csyms == {DECL} else "wine-fixme-in-real-body", "the function calls %s and does more than a simplified body" % "/".join(sorted(csyms)), None))
+                               (name, "wine-fixme-in-real-body", "the function calls %s and does more than a simplified body" % "/".join(sorted(csyms)), None))
+                elif ids:   # rule C: a body that a record cites; V => judged against the cited row; else the judge decides (a terminator row) or it is a real body
+                    extra["cite"][name] = ids
+                    if v is not None:
+                        extra["wine_nz"][name] = {str(n): [wine_sim(words, a, b, rel, o, n, z) for z in (True, False)] for n in range(8)}
+                        fnd.append((name, "WINE-V", "result " + " ".join("%s=%s" % kv for kv in sorted(v.items())), vjson(v, o)))
+                    else:
+                        fnd.append((name, "CITED", "a cited body that is not a vacuous or constant body", None))
                 elif v is not None:
                     fnd.append((name, "V", "result " + " ".join("%s=%s" % kv for kv in sorted(v.items())), vjson(v, o)))
                 else:   # (T-B) not V: a body whose whole effect is one call of a callee X (judged against the root's failure function)
@@ -1304,7 +1394,7 @@ def check_obj(path, terms, os_layer, probe=None):
                         tb = None
                     if tb is not None:
                         extra["tb"][name] = tb
-            extra["nr"][name] = nr_ends(words, a, b, rel, o, fn_at)
+            extra["nr"][name] = nrv
             if probe and probe.get("kind") == "flag" and probe["fail"] in {sy[0] for sy in o.syms if sy[3] == 2 and sy[4] != 0 and sy[5] == si}:
                 try:
                     pw[name] = (words, a, b) + flag_events(words, a, b, rel, o, {x: dec.get(soff + x) for x in words}, fn_at)
@@ -1326,7 +1416,7 @@ def check_obj(path, terms, os_layer, probe=None):
     for tsec, rs in o.rela.items():   # a reference to REACH or WINE from a non-code section can be called with any argument
         if not o.secs[tsec][2] & 4:
             for off, (sidx, t, ad) in sorted(rs.items()):
-                for sym, fkind in ((REACH, "reach-address-taken"), (ASSUME, "assume-address-taken"), (WINE, "wine-fixme-address-taken"), (DECL, "declared-machine-address-taken")):
+                for sym, fkind in ((REACH, "reach-address-taken"), (ASSUME, "assume-address-taken"), (WINE, "wine-fixme-address-taken")):
                     if o.syms[sidx][0] == sym:
                         nm = "%s+0x%x" % (o.secs[tsec][0], off)
                         items.append(nm)
@@ -1336,6 +1426,7 @@ def check_obj(path, terms, os_layer, probe=None):
         if sy[3] == 2 and 0 < sy[5] < 0xFF00:
             fdef.setdefault((sy[5], sy[1]), []).append(sy[0])
     extra["globals"] = sorted({sy[0] for sy in o.syms if sy[3] == 2 and sy[4] != 0 and 0 < sy[5] < 0xFF00})
+    extra["term_def"] = sorted({sy[0] for sy in o.syms if sy[3] == 2 and 0 < sy[5] < 0xFF00 and sy[0] in stops})   # declared-noreturn functions DEFINED here (coverage, judge)
     dref = set()   # the functions a relocation of an allocated data section refers to (the address of the function is stored in data); .eh_frame
     for tsec, rs in o.rela.items():   # describes functions for the unwinder and selects none, a non-allocated section (debug) is not loaded
         if o.secs[tsec][2] & 2 and not o.secs[tsec][2] & 4 and o.secs[tsec][0] != ".eh_frame":
@@ -1601,7 +1692,7 @@ def assume_counts(results, assume):
     return {"sites": n, "accepted": acc, "red": n - acc, "by_id": dict(sorted(by.items()))}
 
 
-def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=None, stats=None, assume=None):
+def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=None, stats=None, extconv=None, assume=None):
     """RESULTS {id: analysis}, ROWS {(id, symbol): (kind, value, ref)}, FACTS None (no reach facts file) or a set of fact ids
     -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). Pure function.
     V: certified iff its row equals the result. indirect-noreturn-tail: certified iff every path ends in the tail and the function is
@@ -1622,6 +1713,43 @@ def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=N
     root_of = {}   # records object -> the object ids that share it (one root)
     for oid, hr in handlers.items():
         root_of.setdefault(id(hr), []).append(oid)
+    declared = declared or {}
+    # RULE C and the terminator rule: the facts of the whole set of objects
+    defined_all = {n for r in results.values() for n in r["items"]}
+    stops_all = {n for r in results.values() for n in r["terms"]}   # the declared-noreturn names that any object mentions
+    cited_ids = {i for r in results.values() for ids in r["cite"].values() for i in ids}
+    cited_term = set()   # the names that a record cites with a process-end/thread-end row (kind noreturn): REAL terminators
+    for r in results.values():
+        for n, ids in r["cite"].items():
+            for i in ids:
+                row = declared.get(int(i[3:])) if i[:3] == "dm:" else None
+                if row and row[3] == "noreturn":
+                    cited_term |= {x for x in names_of(r, n) if x == row[0]}
+    unw_all = {n for r in results.values() for n in r.get("unw", [])}
+    real_end = lambda e, ok: e in ok or ((e in stops_all or e in unw_all) and e not in defined_all)   # a cited terminator, or a library routine declared noreturn in a pinned header (a terminator, or an unwinder: a jump that never returns)
+    term_ok, ch = set(cited_term), True   # + the declared-noreturn definitions every path of which ends in a real terminator (least fixed point)
+    while ch:
+        ch = False
+        for r in results.values():
+            for n in r["term_def"]:
+                nr = r["nr"].get(n)
+                if n not in term_ok and nr is not None and all(real_end(e, term_ok) for e in nr):
+                    term_ok.add(n)
+                    ch = True
+
+    def cite_row(r, name):
+        """The row that the records of the body NAME cite -> (row, table kind 'dm'|'wf', None) or (None, None, (finding kind, detail))."""
+        ids = sorted(set(r["cite"][name]))
+        if len(ids) != 1 or len(r["cite"][name]) != 1:
+            return None, None, ("cite-mismatch", "a cited body is cited by exactly one record, has %s" % r["cite"][name])
+        tk, n = ids[0][:2], int(ids[0][3:])
+        tab, tname = (declared, "declared_machine.tsv") if tk == "dm" else (wine, "wine_fixme.tsv")
+        pre = "declared-machine" if tk == "dm" else "wine-fixme"
+        if n not in tab:
+            return None, None, (pre + "-unknown-id", "id %s is not a row of %s" % (ids[0], tname))
+        if tab[n][0] not in names_of(r, name):
+            return None, None, (pre + "-name-mismatch", "the row %s is for the contract name %s, the cited body is %s" % (ids[0], tab[n][0], name))
+        return tab[n], tk, None
     for oid, r in results.items():
         funcs = set(r["items"])
         wids = {}   # function -> constant ids it passes to WINE (all call sites)
@@ -1635,6 +1763,16 @@ def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=N
             if kind == "V":
                 vflag.add((oid, name))
                 if row and row[0] != "exit" and matches(row, v):
+                    continue
+                ec = (extconv or {}).get(oid)
+                if not row and ec and v is not None:
+                    # EXTERNAL LIBRARY: the unit is a copy of a pinned external's file; its V bodies are the library's own code and are real, unless the
+                    # body returns an error answer: its return type is the library's declared error type (recipe external_errors, read from the compiler's
+                    # own type of the definition) and the constant is not the declared success value
+                    if ec[2].get(name) == ec[0] and v["x0"] is not None and v["x0"][0] == "K" and v["x0"][1] & 0xFFFFFFFF != ec[1] & 0xFFFFFFFF:
+                        out.append((oid, name, "external-error-constant", "returns the constant %d of the error type %s (success %d)" % (v["x0"][1], ec[0], ec[1])))
+                    else:
+                        stats["external_real"] = stats.get("external_real", 0) + 1
                     continue
                 if not row and oid in handlers:
                     ok, why = handler_ok(handlers[oid], name, oid, results, root_of[id(handlers[oid])], allv)
@@ -1651,23 +1789,52 @@ def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=N
                     kind, detail = "wine-fixme-branch-in-vacuous-body", "a branch log cannot make a no-op acceptable; " + detail
                 else:
                     continue
-            elif kind == "WINE-V":
-                wid, csym = r["wine_id"].get(name), r["cite_sym"].get(name, WINE)
-                tab, pre, tname = (declared, "declared-machine", "declared_machine.tsv") if csym == DECL else (wine, "wine-fixme", "wine_fixme.tsv")
-                if wid is None or csym is None:
-                    kind, detail = pre + "-mismatch", "the function does not pass exactly one id of one citation function on every path"
-                elif wid not in (tab or {}):
-                    kind, detail = pre + "-unknown-id", "id %d is not a row of %s" % (wid, tname)
-                elif wine_matches(tab[wid][-2:], v, r["wine_nz"].get(name, {})):
+            elif kind == "WINE-V" and name in r["cite"]:   # rule C: the row is the one the record cites
+                crow, tk, err = cite_row(r, name)
+                if err:
+                    kind, detail = err
+                elif wine_matches(crow[-2:], v, r["wine_nz"].get(name, {})):
                     continue
                 else:
-                    kind, detail = pre + "-mismatch", "row %s %s, analysis: %s" % (tab[wid][-2], tab[wid][-1], detail)
+                    kind, detail = ("declared-machine" if tk == "dm" else "wine-fixme") + "-mismatch", "row %s %s, analysis: %s" % (crow[-2], crow[-1], detail)
+            elif kind == "WINE-V":   # a call of fnvnx_wine_fixme (rule W): the id every path passes to it
+                wid = r["wine_id"].get(name)
+                if wid is None or r["cite_sym"].get(name, WINE) is None:
+                    kind, detail = "wine-fixme-mismatch", "the function does not pass exactly one id of one citation function on every path"
+                elif wid not in wine:
+                    kind, detail = "wine-fixme-unknown-id", "id %d is not a row of wine_fixme.tsv" % wid
+                elif wine_matches(wine[wid][-2:], v, r["wine_nz"].get(name, {})):
+                    continue
+                else:
+                    kind, detail = "wine-fixme-mismatch", "row %s %s, analysis: %s" % (wine[wid][-2], wine[wid][-1], detail)
+            elif kind == "CITED":
+                crow, tk, err = cite_row(r, name)
+                if err:
+                    kind, detail = err
+                elif tk == "dm" and crow[3] == "noreturn":   # a terminator body: it must be declared noreturn and never return
+                    if name not in r["term_def"]:
+                        kind, detail = "cite-not-declared-noreturn", "cited as %s (kind noreturn) but not declared noreturn in a header of the unit" % crow[1]
+                    elif r["nr"].get(name) is None:
+                        kind, detail = "cite-noreturn-returns", "cited as %s (kind noreturn) but a path of the body can return" % crow[1]
+                    else:
+                        continue
+                else:
+                    kind, detail = ("declared-machine" if tk == "dm" else "wine-fixme") + "-in-real-body", "the cited body does more than the documented row %s" % ", ".join(sorted(set(r["cite"][name])))
+            elif kind in ("T2", "T2-noreturn-tail"):
+                # T2 only when EVERY path ends in a real terminator and the function is not itself a declared-noreturn definition (coverage rule below): a body with a
+                # returning path has a real control path, and its returning paths are judged by the V rules
+                nr = r["nr"].get(name)
+                if name in r["term_def"] or nr is None or (all(e in stops_all for e in nr) and not all(real_end(e, term_ok) for e in nr)):   # an end that is no declared terminator stays a finding: the compiler knew the callee does not return
+                    continue
             elif kind == "indirect-noreturn-tail":
-                if name in exit_ok and (name in (REACH, ASSUME) or (row and row[0] == "exit")):
+                if name in exit_ok and (name in (REACH, ASSUME) or (row and row[0] == "exit") or name in cited_term):
                     exited.add((oid, name))
                     continue
-                detail += "; " + ("not every path ends in the tail" if name not in exit_ok else "no row of kind exit")
+                detail += "; " + ("not every path ends in the tail" if name not in exit_ok else "no row of kind exit and no process-end/thread-end citation")
             out.append((oid, name, kind, detail))
+        for n in r["term_def"]:   # coverage: a declared-noreturn function that a body defines is cited, or ends in real terminators on every path, or is class R
+            if n not in term_ok and n not in (REACH, ASSUME):
+                out.append((oid, n, "noreturn-uncited", "declared noreturn and defined here, with no process-end/thread-end citation and not every path ending in a real terminator"))
         fail = (fails.get(oid) or {}).get("fail")
         for name, x in sorted(r["tb"].items()):   # (T-B) trap bodies of the root's failure function
             if fail and x == fail and name != fail:
@@ -1681,7 +1848,7 @@ def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=N
                 bad = assume_verdict(aid, oid in gen, registry)
                 if bad:
                     out.append((oid, name, bad[0], "%s, at +0x%x of %s" % (bad[1], off, name)))
-        for key, sym, pre in (("wine", WINE, "wine-fixme"), ("declared", DECL, "declared-machine")):
+        for key, sym, pre in (("wine", WINE, "wine-fixme"),):
             for name0, off, c in r.get(key, []):
                 if c is None:
                     out += [(oid, name, pre + "-nonconstant", "w0 is not a constant at the call of %s at +0x%x" % (sym, off)) for name in names_of(r, name0)]
@@ -1701,6 +1868,8 @@ def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=N
                 out.append((oid, name, "exit-mismatch", "row of kind exit: not a function whose every path ends in a call through a pointer"))
         elif (oid, name) not in vflag:
             out.append((oid, name, "constants-mismatch", "row for a symbol that is not V-flagged in the object set"))
+    if results:   # rule C: a row of the declared-machine table that no record cites
+        out += [("-", "dm:%d" % i, "declared-machine-uncited", "row %d (%s) is cited by no record" % (i, declared[i][0])) for i in sorted(declared) if "dm:%d" % i not in cited_ids]
     out += [("-", "fact:%d" % c, "reach-stale", "fact in the reach facts with no call site of %s" % REACH) for c in sorted((facts or set()) - used)]
     return items, sorted(set(out))
 
@@ -1745,12 +1914,12 @@ def error_abi_findings(results, oids, abi):
     return []
 
 
-def run_check(objs, terms, rows, os_layer_ids, facts=None, cache=None, jobs=1, wine=None, declared=None, abi=None, records=None, stats=None, tables=None):
+def run_check(objs, terms, rows, os_layer_ids, facts=None, cache=None, jobs=1, wine=None, declared=None, abi=None, records=None, stats=None, tables=None, extconv=None):
     """OBJS [(id, path)] -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). ABI: the `error_abi` of the one root OBJS form; TABLES: the `empty_handlers.tables` of it;
     RECORDS: read_handler_records of it."""
     probe = dict(abi or {}, tables=tables or {}) if (abi or tables) else None
     res = analyse_all(objs, set(terms), set(os_layer_ids), cache, jobs, probe)
-    items, finds = judge(res, rows, facts, wine, declared, {o: abi for o in res} if abi else None, {o: records for o in res} if records else None, stats)
+    items, finds = judge(res, rows, facts, wine, declared, {o: abi for o in res} if abi else None, {o: records for o in res} if records else None, stats, extconv)
     return items, sorted(set(finds) | set(error_abi_findings(res, list(res), abi) if abi else ()) | set(handler_row_findings(records, res) if records else ()))
 
 
@@ -1772,18 +1941,24 @@ def read_rows(path, base=""):
 
 
 def declared_counts(results):
-    """{id: number of call sites of DECL with a constant w0 in all RESULTS}: reported in the gate result ("declared_machine")."""
+    """{id: number of records `dm:<id>` of rule C in all RESULTS}: reported in the gate result ("declared_machine")."""
     out = {}
     for r in results.values():
-        for _, _, c in r.get("declared", []):
-            if c is not None:
-                out[c] = out.get(c, 0) + 1
+        for ids in r.get("cite", {}).values():
+            for i in ids:
+                if i[:3] == "dm:":
+                    out[int(i[3:])] = out.get(int(i[3:]), 0) + 1
     return dict(sorted(out.items()))
 
 
 def wine_counts(results):
-    """{id: number of call sites of WINE with a constant w0 in all RESULTS}: reported in the gate result ("wine_fixme") so growth is visible."""
+    """{id: number of call sites of WINE with a constant w0, plus records `wf:<id>` (rule C), in all RESULTS}: reported in the gate result ("wine_fixme") so growth is visible."""
     out = {}
+    for r in results.values():
+        for ids in r.get("cite", {}).values():
+            for i in ids:
+                if i[:3] == "wf:":
+                    out[int(i[3:])] = out.get(int(i[3:]), 0) + 1
     for r in results.values():
         for _, _, c in r["wine"]:
             if c is not None:
@@ -1825,11 +2000,11 @@ def read_wine_table(path):
     return out
 
 
-def _wine_row(f):
-    """True iff the five fields f (id, name, wine_ref, kind, value) are a well-formed row."""
+def _wine_row(f, noret=False):
+    """True iff the five fields f (id, name, wine_ref, kind, value) are a well-formed row. NORET: the kind `noreturn` (value `-`) is allowed (the declared-machine table)."""
     return bool(len(f) == 5 and re.fullmatch(r"[0-9]+", f[0]) and int(f[0]) < 2 ** 32 and f[1].strip() and
-                re.fullmatch(r"wine-9\.0:[A-Za-z0-9_./+-]+:[A-Za-z_][A-Za-z0-9_@]*", f[2]) and re.fullmatch(r"void|u32|u64|addr|u32nz[0-7]|branch", f[3]) and
-                (f[4] == "" if f[3] == "void" else f[4] == "-" if f[3] == "branch" else re.fullmatch(r"[A-Za-z_.$][A-Za-z0-9_.$@]*(\+(0[xX][0-9a-fA-F]+|[0-9]+))?", f[4]) if f[3] == "addr" else
+                re.fullmatch(r"wine-9\.0:[A-Za-z0-9_./+-]+:[A-Za-z_][A-Za-z0-9_@]*", f[2]) and re.fullmatch(r"void|u32|u64|addr|u32nz[0-7]|branch" + ("|noreturn" if noret else ""), f[3]) and
+                (f[4] == "" if f[3] == "void" else f[4] == "-" if f[3] in ("branch", "noreturn") else re.fullmatch(r"[A-Za-z_.$][A-Za-z0-9_.$@]*(\+(0[xX][0-9a-fA-F]+|[0-9]+))?", f[4]) if f[3] == "addr" else
                  re.fullmatch(r"(-?[0-9]+|0x[0-9a-fA-F]+),(-?[0-9]+|0x[0-9a-fA-F]+)" if f[3][3:5] == "nz" else r"-?[0-9]+|0x[0-9a-fA-F]+", f[4])))
 
 
@@ -1846,9 +2021,19 @@ def declared_header(lines):
             prefixes = [re.match(r"([a-z][a-z0-9.-]*):<", x.strip()) for x in s.group(1).split(" | ")]
             if not all(prefixes):
                 raise ValueError("declared machine table header: a source form is not PREFIX:<..>:<function>: %r" % s.group(1)[:80])
-            body = r":[A-Za-z0-9_./#+-]+:[A-Za-z_][A-Za-z0-9_@]*"
-            return set(m.group(1).split(" | ")), "(" + "|".join(re.escape(x.group(1)) + body for x in prefixes) + ")"
+            fn = r":[A-Za-z_][A-Za-z0-9_@]*"
+            forms = {"c11": r":[0-9]+(?:\.[0-9]+)*" + fn,                 # ISO/IEC 9899:2011 clause number, digits and dots
+                     "posix-2017": r":[A-Za-z_][A-Za-z0-9_]*" + fn}       # IEEE Std 1003.1-2017 page name
+            body = r":[A-Za-z0-9_./#+-]+" + fn
+            return set(m.group(1).split(" | ")), "(" + "|".join(re.escape(x.group(1)) + forms.get(x.group(1), body) for x in prefixes) + ")"
     raise ValueError("declared machine table has no header line `# fact: ...; source: ...; kind ...`")
+
+
+def _sources_ok(field, source):
+    """The source field: one or several sources joined by `|` (no blanks); each token matches the source grammar of the header alone, the tokens
+    are sorted and unique (the row is canonical)."""
+    t = field.split("|")
+    return all(re.fullmatch(source, x) for x in t) and t == sorted(set(t))
 
 
 def read_declared_table(path):
@@ -1856,7 +2041,10 @@ def read_declared_table(path):
     the facts of the table's header line. source is the documented origin of the returned value, `win-doc:<Windows documentation page or header path>:<function>` or
     `wine-9.0:<path in the Wine source tree>:<function name>` (the FORM is validated; checking it against the documentation or a pinned Wine 9.0
     tree is the oracle class, not done here). id, kind and value as in the wine table (shared checks: wine_matches). Ids are a space of their
-    own. -> {id: (contract name, fact, source, kind, value)}. ValueError when missing or malformed."""
+    own. The source form `hostabi:<header>:<service>` (the header line lists it) is valid only for kind `noreturn`: a property of a symbol that our own product defines,
+    which the gates verify against the declaration in the header (the attribute) and the coverage rule (every path of the definition ends in a real terminator or an unwinder);
+    as the source of a Win32/Wine behaviour value it is a malformed row (the trust chain would end at us, not at OWNER 3).
+    -> {id: (contract name, fact, source, kind, value)}. ValueError when missing or malformed."""
     if not os.path.exists(path):
         raise ValueError("declared machine table %s does not exist" % path)
     out = {}
@@ -1866,8 +2054,8 @@ def read_declared_table(path):
         if l.startswith("#"):
             continue
         f = l.split("\t")
-        ok = len(f) == 6 and f[4] != "branch" and f[2] in facts and re.fullmatch(source, f[3]) and \
-            _wine_row(f[:2] + ["wine-9.0:x:x"] + f[4:])   # id, name, kind and value: the rules of the wine table, same columns
+        ok = len(f) == 6 and f[4] != "branch" and f[2] in facts and _sources_ok(f[3], source) and \
+            _wine_row(f[:2] + ["wine-9.0:x:x"] + f[4:], True) and (f[4] == "noreturn") == (f[2] in ("process-end", "thread-end")) and (f[4] == "noreturn" or not any(x.startswith("hostabi:") for x in f[3].split("|")))   # hostabi: is a source for a noreturn property of our own symbol only, never for a Win32/Wine value (a return value, a lasterror, an output: wf:/dm: citations of OWNER 3 only); id, name, kind and value: the rules of the wine table; noreturn exactly for the terminator facts
         if not ok or int(f[0]) in out:
             raise ValueError("bad or duplicate declared machine row in %s: %r" % (path, l[:80]))
         out[int(f[0])] = tuple(f[1:])
@@ -1886,62 +2074,58 @@ def read_facts(path):
         out.add(int(f[0], 0))
     return out
 
-def plugin_so(cc, cache):
-    """The terminator plugin built by the host g++ against the plugin headers of CC, cached under CACHE/objstub by the hash of the plugin
-    source, the host g++ and CC's version, machine and plugin directory."""
-    q = lambda *a: subprocess.run(list(a), capture_output=True, text=True, check=True).stdout.strip()
-    inc = q(cc, "-print-file-name=plugin")
-    h = hashlib.sha256(open(os.path.join(HERE, "objstub_plugin.cc"), "rb").read() + "\0".join(
-        [q("g++", "--version"), q(cc, "-dumpfullversion"), q(cc, "-dumpmachine"), inc]).encode()).hexdigest()
-    so = os.path.join(cache, "objstub", "plugin-" + h, "objstub_plugin.so")   # GCC names a plugin by the base name of its file
-    if not os.path.exists(so):
-        with tempfile.TemporaryDirectory() as td:
-            r = subprocess.run(["g++", "-shared", "-fPIC", "-fno-rtti", "-O1", "-I" + inc + "/include", os.path.join(HERE, "objstub_plugin.cc"),
-                                "-o", td + "/p.so"], capture_output=True, text=True)
-            if r.returncode:
-                raise ValueError("plugin build failed: " + r.stderr[-300:])
-            _atomic(so, open(td + "/p.so", "rb").read())
-    return so, h
+def plugin_hash(so):
+    """sha256 of the plugin file: the recipe's `analysis_plugin` of the root (recipe.ANALYSIS_PLUGIN, a hermetic stage, the only build of the plugin)."""
+    return hashlib.sha256(open(so, "rb").read()).hexdigest()
 
 
-def unit_terminators(cc, units, flags, cache, jobs):
+SYSTEM_SJ = ("/usr/include", "/usr/aarch64-linux-gnu/include")   # the pinned distribution's libc headers (env.json: libc6-dev, libc6-dev-arm64-cross)
+
+
+def unit_terminators(cc, units, flags, cache, jobs, rets=None, sjdirs=SYSTEM_SJ, so=None):
     """Terminator set of a root = union over its C/C++ units of the noreturn declarations the compiler CC itself sees in the unit's
     preprocessed text (the plugin runs on unit.ii with the unit's flags: exactly the TU the compile stage compiles, headers included).
     UNITS [(pp_key, ii path, lang c|c++)]; FLAGS {lang: [..]}. Per unit cached CACHE/objstub/t-<key>.txt, key = pp_key (a hash of
     the compiler, flags and every input of the preprocessor stage), the plugin hash, the language and the flags.
+    RETS, a dict, receives {pp_key: {function assembler name: typedef name of its return type}} of the function definitions of the unit (the plugin's
+    `ret` output, the compiler's own type; only typedef-named and builtin-named return types are listed).
+    SJDIRS: the directories of the pinned headers (the guest runtime external's mount point for a guest root; the distribution's include dirs otherwise): a function
+    is an unwinder by <setjmp.h> only when DECL_SOURCE_FILE is a file named setjmp.h INSIDE one of them (a same-named header elsewhere does not count).
     -> (sorted names, sha256, failures [(pp_key, message)]): a unit the plugin cannot process is a failure of that unit, never an exception."""
-    so, ph = plugin_so(cc, cache)
+    ph = plugin_hash(so)   # SO: the root's analysis plugin (objects.json `analysis_plugin`)
 
     def one(u):
         pk, ii, lang = u
-        key = hashlib.sha256(json.dumps([pk, ph, lang, flags[lang]]).encode()).hexdigest()
-        cp = os.path.join(cache, "objstub", "t-%s.txt" % key)
-        if not os.path.exists(cp):
+        key = hashlib.sha256(json.dumps([pk, ph, lang, flags[lang], list(sjdirs)]).encode()).hexdigest()
+        cp, rp = (os.path.join(cache, "objstub", "t-%s.%s" % (key, e)) for e in ("txt", "ret"))
+        if not (os.path.exists(cp) and os.path.exists(rp)):
             with tempfile.TemporaryDirectory() as td:
-                r = subprocess.run([cc, "-S", "-o", os.devnull, "-fplugin=" + so, "-fplugin-arg-objstub_plugin-out=" + td + "/o.txt"] + flags[lang]
+                r = subprocess.run([cc, "-S", "-o", os.devnull, "-fplugin=" + so, "-fplugin-arg-objstub_plugin-out=" + td + "/o.txt",
+                                    "-fplugin-arg-objstub_plugin-ret=" + td + "/r.txt",
+                                    "-fplugin-arg-objstub_plugin-setjmp-dirs=" + ":".join(sjdirs)] + flags[lang]
                                    + ["-x", lang, "-fpreprocessed", ii], capture_output=True, text=True)
-                if r.returncode or not os.path.exists(td + "/o.txt"):
+                if r.returncode or not os.path.exists(td + "/o.txt") or not os.path.exists(td + "/r.txt"):
                     errs = [l for l in r.stderr.splitlines() if "error" in l or "fatal" in l or "Segmentation" in l or "internal compiler" in l]
                     return pk, None, "terminator plugin failed (exit %d): %s" % (r.returncode, " | ".join(errs[:3]) or r.stderr[-300:])
+                _atomic(rp, open(td + "/r.txt", "rb").read())
                 _atomic(cp, open(td + "/o.txt", "rb").read())
+        if rets is not None:
+            rets[pk] = dict(l.split("\t", 1) for l in read_list(rp))
         return pk, read_list(cp), None
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, jobs)) as ex:
         got = list(ex.map(one, units))
     names = sorted({n for _, ns, _ in got if ns for n in ns})
     return names, hashlib.sha256("\n".join(names).encode()).hexdigest(), [(pk, e) for pk, _, e in got if e]
 
-def derive_terminators(cc, cflags, headers, lang, outp):
-    """Build the plugin with the host g++, compile one TU that includes the headers, write the sorted names to outp."""
+def derive_terminators(cc, cflags, headers, lang, outp, sjdirs=SYSTEM_SJ, so=None):
+    """Compile one TU that includes the headers with the plugin SO (the recipe's analysis plugin for CC), write the sorted names to outp."""
     with tempfile.TemporaryDirectory() as td:
-        inc = subprocess.run([cc, "-print-file-name=plugin"], capture_output=True, text=True, check=True).stdout.strip()
-        so = os.path.join(td, "objstub_plugin.so")
         tu, res = os.path.join(td, "tu." + ("cc" if lang == "c++" else "c")), os.path.join(td, "out.txt")
         open(tu, "w").write("".join("#include <%s>\n" % h for h in headers))
-        for cmd in (["g++", "-shared", "-fPIC", "-fno-rtti", "-O1", "-I" + inc + "/include", os.path.join(HERE, "objstub_plugin.cc"), "-o", so],
-                    [cc, "-S", "-o", os.devnull, "-fplugin=" + so, "-fplugin-arg-objstub_plugin-out=" + res] + list(cflags) + [tu]):
-            r = subprocess.run(cmd, capture_output=True, text=True)
-            if r.returncode:
-                raise ValueError("%s failed: %s" % (cmd[0], r.stderr[-300:]))
+        r = subprocess.run([cc, "-S", "-o", os.devnull, "-fplugin=" + so, "-fplugin-arg-objstub_plugin-out=" + res, "-fplugin-arg-objstub_plugin-setjmp-dirs=" + ":".join(sjdirs)] + list(cflags) + [tu],
+                           capture_output=True, text=True)
+        if r.returncode:
+            raise ValueError("%s failed: %s" % (cc, r.stderr[-300:]))
         names = sorted(set(read_list(res)))
     open(outp, "w").write("".join(n + "\n" for n in names))
     return names
@@ -1959,7 +2143,7 @@ def main(argv):
         i += 1
     try:
         if cmd == "terminators":
-            names = derive_terminators(opt["--cc"][0], opt.get("--cflag", []), opt["--header"], opt.get("--lang", ["c"])[0], opt["-o"][0])
+            names = derive_terminators(opt["--cc"][0], opt.get("--cflag", []), opt["--header"], opt.get("--lang", ["c"])[0], opt["-o"][0], so=opt["--plugin"][0])
             print("%d terminators" % len(names))
             return 0
         items, finds = run_check([(p, p) for p in pos], set(read_list(opt["--terminators"][0])),

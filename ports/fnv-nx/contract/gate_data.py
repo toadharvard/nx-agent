@@ -25,12 +25,14 @@ def verdict(x, n):
 
 
 def run(facts, obj, link):
+    """link: the link directory of a root that HAS a link (its out/aliases.ld is a link output), or None for a root without one: it has no alias map."""
     al = []
-    with open(os.path.join(link, 'out', 'aliases.ld')) as fh:
-        for ln in fh:
-            m = AL.match(ln)
-            if m:
-                al.append(int(m[1], 16))
+    if link is not None:
+        with open(os.path.join(link, 'out', 'aliases.ld')) as fh:
+            for ln in fh:
+                m = AL.match(ln)
+                if m:
+                    al.append(int(m[1], 16))
     al.sort()
     va, vs = facts['secs']['.data'][:2]
 

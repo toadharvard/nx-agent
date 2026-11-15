@@ -11,7 +11,7 @@
  * The MSVC-visible buffer fields (_ptr, _cnt, _base) stay NULL / 0, so inline MSVC code (basic_filebuf) always
  * calls the functions. The standard streams (descriptors 0-2) report text mode but pass bytes to the host's
  * stdout / stderr unchanged (the host console uses LF); stdin is always at end of file. */
-#define _FILE_OFFSET_BITS 64
+#include "fnvnx_crt_config.h"
 #include "fnvnx_iobuf.h"
 #include "fnvnx_msvcrt.h"
 
@@ -34,7 +34,6 @@ _Static_assert(sizeof(struct _iobuf) == 32 && offsetof(struct _iobuf, _file) == 
 _Static_assert(sizeof(fnvnx_ctypevec) == 16, "_Ctypevec");
 #endif
 
-#define HOST_MAX 1024
 #define MAX_FD 256
 #define BUFSZ 4096
 #define NUNGET 8

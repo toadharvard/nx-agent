@@ -3,6 +3,7 @@
 FNVNX_CPU_SPEC(ideal, mask) with ideal in mask within the application cores (else BADINPUT, nothing created, id 0); thread_set_cpu takes a spec
 or a plain core, KEEP / mask 0 keep, a negative spec changes nothing; the main thread starts at FNVNX_DEFAULT_CORE. Every number is read by name
 from the headers. The machine is built on the synthetic ELF of test_bootlayout; the calling thread is set the way run() sets main. Exit 0 on pass."""
+import json
 import os
 import re
 import struct
@@ -12,6 +13,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
+QUANTUM = 20000   # instructions per slice (bootmachine.py rule 3)
 sys.path.insert(0, HERE)
 import bootlayout  # noqa: E402
 import boothost  # noqa: E402
@@ -42,8 +44,7 @@ def main():
     D, APP, KEEP, FN, BAD, NOTF = (define(n) for n in ("FNVNX_DEFAULT_CORE", "FNVNX_APP_CORES", "FNVNX_CPU_KEEP",
                                                              "FNVNX_PLAT_THREAD_CPU", "FNVNX_HE_BADINPUT", "FNVNX_HE_NOTFOUND"))
     case("headers: default core, app cores, KEEP, THREAD_CPU by name", None not in (D, APP, KEEP, FN) and FN == 38, (D, APP, KEEP, FN))
-    case("machine constants equal the headers", (bootmachine.FNVNX_DEFAULT_CORE, bootmachine.FNVNX_APP_CORES,
-                                                 bootmachine.FNVNX_CPU_KEEP) == (D, APP, KEEP))
+    case("machine constants equal the headers", (bootmachine.FNVNX_DEFAULT_CORE, bootmachine.APP_CORES, bootmachine.FNVNX_CPU_KEEP) == (D, APP, KEEP))
     case("BADINPUT 0x1759 and NOTFOUND by name", BAD == bootmachine.LIBNX_BAD_INPUT and (NOTF or bootmachine.FNVNX_HE_NOTFOUND) == bootmachine.FNVNX_HE_NOTFOUND)
 
     def SPEC(ideal, mask):
@@ -55,7 +56,7 @@ def main():
 
     def machine():
         svc = boothost.Services(tempfile.mkdtemp(prefix="tc-"))
-        m = bootmachine.Machine(elf, plan, svc)
+        m = bootmachine.Machine(elf, plan, svc, quantum=QUANTUM)
         m.threads[1] = bootmachine.Thread(1)   # as run() starts main
         m.order, m.cur = [1], m.threads[1]
         return m, svc
@@ -71,13 +72,12 @@ def main():
 
     for tag, app in (("app cores 0-2", APP),):
         m, svc = machine()
-        case("[%s] the machine's app cores are the header's FNVNX_APP_CORES" % tag, m.app_cores == APP, m.app_cores)
         case("[%s] main starts at the default core, mask 1 << default; THREAD_CPU answers it" % tag,
              thread_cpu(m) == D and svc._placed(0) == {"ideal": D, "mask": 1 << D}, svc._placed(0))
         for c in range(4):
             before = len(m.threads)
             h = create(svc, SPEC(c, 1 << c))
-            ok = c < 3
+            ok = app >> c & 1
             case("[%s] thread_create on core %d %s" % (tag, c, "is placed" if ok else "is refused (not an app core): id 0, nothing created"),
                  (h != 0 and len(m.threads) == before + 1) if ok else (h == 0 and len(m.threads) == before), (h, len(m.threads)))
             if ok:
@@ -115,7 +115,7 @@ def main():
         case("[%s] set_cpu mask outside the app cores -> BADINPUT, unchanged" % tag, svc.h_thread_set_cpu(0, SPEC(KEEP, 1 << 4)) == BAD
              and p() == keep)
         r3 = svc.h_thread_set_cpu(0, 3)
-        case("[%s] set_cpu plain core 3 -> BADINPUT, unchanged" % tag, r3 == BAD and p() == keep, (r3, p()))
+        case("[%s] set_cpu plain core 3 (not an app core) -> BADINPUT, unchanged" % tag, r3 == BAD and p() == keep, (r3, p()))
         case("[%s] set_cpu ideal 3 joining the mask -> BADINPUT" % tag, svc.h_thread_set_cpu(0, SPEC(3, 0x3)) == BAD)
         case("[%s] fn 39 -> NO_SERVICE (header bound)" % tag, thread_cpu(m) is not None and m.ext_call(11, 39, ARGS, 0) == 0xFFFFFFFFFFFFFF02)
 

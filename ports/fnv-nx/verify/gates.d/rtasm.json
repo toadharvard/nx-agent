@@ -1,0 +1,13 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "rtasm",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_rtasm.py"
+ ],
+ "result": "rtasm.json",
+ "covers": [
+  "product-guest"
+ ]
+}

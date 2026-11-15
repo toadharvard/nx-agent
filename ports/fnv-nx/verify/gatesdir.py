@@ -22,7 +22,7 @@ DIR = TREE + "/verify/gates.d"
 ADMIT = TREE + "/verify/admit.json"
 FILE_FORMAT = "fnvnx-gatefile/1"
 FORMAT = "fnvnx-gates/1"
-ROOT_CLASSES = ("doc", "tool", "ref", "test", "product-guest", "product-guest-exe", "lifted", "host-product", "linked", "import-provider", "registry-reader")
+ROOT_CLASSES = ("doc", "tool", "ref", "test", "header", "product-guest", "product-guest-exe", "lifted", "host-product", "linked", "import-provider", "registry-reader")
 
 
 class Bad(ValueError):
@@ -32,7 +32,7 @@ class Bad(ValueError):
 def root_class(root):
     """The root class of one admit.json entry (see the module docstring)."""
     c = root.get("class")
-    if c in ("doc", "tool", "ref", "test"):
+    if c in ("doc", "tool", "ref", "test", "header"):
         return c
     if c != "product":
         return None

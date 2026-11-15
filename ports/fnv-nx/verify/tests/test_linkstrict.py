@@ -97,22 +97,22 @@ for ABI[0] in ("lp64", "ilp32"):
           not {x for x in k if x[0] == "_Z2sqi"} and ("<comdat>", "_Z2sqi") in {(i, n) for i, n in items}, (k, items))
     cd = build("#define K 2\n" + INL + "int fb(int v) { return sq(v) + 1; }\n", "cc")
     k, _, f = kinds([ca, cd, cc_])
-    check("(b1) the same inline function with another macro value in one unit: comdat-differs on the signature, the symbol and the reference",
-          {("_Z2sqi", "comdat-differs")} <= k and any(i == "<comdat>" and n == "_Z2sqi" and kd == "comdat-differs" for i, n, kd, _ in f)
+    check("(b1) the same inline function with another macro value in one unit: byte-different copies on the signature, the symbol and the reference",
+          {("_Z2sqi", "undecidable: no definition record")} <= k and any(i == "<comdat>" and n == "_Z2sqi" and kd == "undecidable: no definition record" for i, n, kd, _ in f)
           and any(i == cc_ and n == "_Z2sqi" for i, n, _, _ in f), (k, f))
     VT = "struct B { virtual ~B() {} virtual int f() { return 1; } };\nB *%s() { return new B; }\n"
     v1, v2 = build(VT % "mk1", "cc"), build(VT % "mk2", "cc")
     k, _, f = kinds([v1, v2])
     check("(b1) a class with a virtual destructor in two units: vtable, typeinfo and member groups are identical, no finding of vague linkage",
-          not {x for x in k if x[1] in ("weak-only", "comdat-differs")} and any(n == "_ZTV1B" for _, n, _, _ in f) is False, (k, f))
+          not {x for x in k if x[1] in ("weak-only", "undecidable: no definition record")} and any(n == "_ZTV1B" for _, n, _, _ in f) is False, (k, f))
     v3 = build(VT.replace("return 1", "return 3") % "mk3", "cc")
     k, _, _ = kinds([v1, v3])
-    check("(b1) the same class with another inline body: its member function and vtable group differ", {("_ZN1B1fEv", "comdat-differs"), ("<defs>", "_ZN1B1fEv")} & k
-          and ("_ZN1B1fEv", "comdat-differs") in k, k)
+    check("(b1) the same class with another inline body: its member function and vtable group differ", {("_ZN1B1fEv", "undecidable: no definition record"), ("<defs>", "_ZN1B1fEv")} & k
+          and ("_ZN1B1fEv", "undecidable: no definition record") in k, k)
     SL = "const char *%s() { return \"zzzz-%s\"; }\n__attribute__((noinline)) inline const char *nm() { return \"hello\"; }\nconst char *u%s() { return nm(); }\n"
     s1, s2 = build(SL % ("p", "p", "1"), "cc"), build(SL % ("q", "q-longer", "2"), "cc")
     k, _, f = kinds([s1, s2])
-    check("(b1) a string literal in an inline function certifies wherever the object laid it out (SHF_MERGE entity, not offset)", not {x for x in k if x[1] == "comdat-differs"}, (k, f))
+    check("(b1) a string literal in an inline function certifies wherever the object laid it out (SHF_MERGE entity, not offset)", not {x for x in k if x[1] == "undecidable: no definition record"}, (k, f))
     wk = build("__attribute__((weak)) int wk() { return 1; }\n", "cc")
     k, _, _ = kinds([wk])
     check("(b1) a weak definition outside every COMDAT group stays weak-only in C++", ("wk", "weak-only") in k or ("_Z2wkv", "weak-only") in k, k)
@@ -138,7 +138,7 @@ LS = lambda repo, name, cache=None: (lambda r: (r, verdict._gate_result({"name":
     TR.gate(repo, "linkstrict", TR.BASE + "/" + name, cache))
 GC = ROOT + "/cache"
 empty = TR.make_repo("ls-empty")
-TR.w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": TR.T + "toy", "class": "doc", "gates": []}]}))
+TR.w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": TR.T + "toy", "class": "doc"}]}))
 (rc, g, _, txt), st = LS(empty, "e")
 check("no product root: universe 0, green, accepted by the verdict", rc == 0 and g["universe"] == 0 and st[0] == "green", (g, txt))
 # The toy's items: references a.c->f_b; definitions f_a, f_b, f_c, os_svc; the ELF of a linked root. A linked root also carries the product's

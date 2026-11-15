@@ -9,7 +9,7 @@
 ## admit.json root entry
 
 ```json
-{"path": "ports/fnv-nx/render/total", "class": "tool", "gates": ["pure", "selftests"]}
+{"path": "ports/fnv-nx/render/total", "class": "tool"}
 ```
 
 L1 also adds `ports/fnv-nx/render/total` to the argv of the `pure` and `selftests` gates.

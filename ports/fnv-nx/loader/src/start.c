@@ -1,11 +1,11 @@
 /* The start sequence S1..S8, see include/fnvnx_start.h; the lifted PE modules are src/modules.c. */
 #include "start_internal.h"
+#include "fnvnx/hostvm.h"
 #include "fnvnx_identity.h"
 
-#define PAGE FNVNX_PAGE
 #define NOINLINE __attribute__((noinline))
 
-static uint32_t page_up(uint32_t v) { return (v + PAGE - 1) & ~(PAGE - 1); }
+static uint32_t page_up(uint32_t v) { return (v + FNVNX_PAGE_SIZE - 1) & ~(FNVNX_PAGE_SIZE - 1); }
 uint8_t *fnvnx_gptr(const fnvnx_proc *p, uint32_t va) { return (uint8_t *)((uintptr_t)va + p->cfg.bias); }
 
 unsigned fnvnx_scn_prot(uint32_t ch) {
@@ -110,7 +110,7 @@ int fnvnx_loaded_tls(fnvnx_proc *p, fnvnx_loaded *L, uint32_t index) {
         fnvnx_logf(p->os, "fnvnx-start: %s: TLS template is not in a readable section", L->name);
         return FNVNX_START_E_STATE;
     }
-    if (L->tls.align > PAGE) { fnvnx_logf(p->os, "fnvnx-start: %s: TLS alignment above a page", L->name); return FNVNX_START_E_STATE; }
+    if (L->tls.align > FNVNX_PAGE_SIZE) { fnvnx_logf(p->os, "fnvnx-start: %s: TLS alignment above a page", L->name); return FNVNX_START_E_STATE; }
     r = fnvnx_image_tls_callbacks(&L->img, L->tls_cb, FNVNX_START_MAX_TLS_CALLBACKS, &k);
     if (r) { fnvnx_logf(p->os, "fnvnx-start: %s: TLS callback list: %s", L->name, fnvnx_strerror(r)); return r; }
     if (k > FNVNX_START_MAX_TLS_CALLBACKS) { fnvnx_logf(p->os, "fnvnx-start: %s: more than %u TLS callbacks", L->name, FNVNX_START_MAX_TLS_CALLBACKS); return FNVNX_E_NOMEM; }
@@ -144,7 +144,7 @@ int fnvnx_loaded_protect(fnvnx_proc *p, fnvnx_loaded *L) {
     if (r) return r;
     for (i = 0; i < L->ngap; i++)
         if (p->os->protect(p->os->ctx, (uintptr_t)L->gap[i].va + p->cfg.bias, L->gap[i].size, 0u)) return FNVNX_E_MAP;
-    p->os->register_image(p->os->ctx, L->name, L->img.load_base, (L->pe.size_of_image + (PAGE - 1)) & ~(uint32_t)(PAGE - 1));
+    p->os->register_image(p->os->ctx, L->name, L->img.load_base, (L->pe.size_of_image + (FNVNX_PAGE_SIZE - 1)) & ~(uint32_t)(FNVNX_PAGE_SIZE - 1));
     return FNVNX_OK;
 }
 
@@ -158,7 +158,7 @@ int fnvnx_address_reserved(const fnvnx_proc *p, uint32_t va, uint32_t size) {
 /* guest memory from the platform; its answer is checked against the rules the platform promised */
 static uint32_t alloc_checked(fnvnx_proc *p, uint32_t size) {
     uint32_t va = p->os->alloc_va(p->os->ctx, size, FNVNX_PROT_R | FNVNX_PROT_W);
-    if (!va || (va & (PAGE - 1)) || fnvnx_address_reserved(p, va, size)) {
+    if (!va || (va & (FNVNX_PAGE_SIZE - 1)) || fnvnx_address_reserved(p, va, size)) {
         fnvnx_logf(p->os, "fnvnx-start: guest memory request of 0x%x bytes failed", (unsigned)size);
         return 0;
     }
@@ -201,7 +201,7 @@ int fnvnx_thread_block_free(fnvnx_proc *p, const fnvnx_thread_block *b) {
     if (!p || !b || !p->exe.nmap || !p->os->free_va) return FNVNX_E_ARG;
     total = tls_plan(p, off);
     r = release(p, b->guard_va, b->stack_base - b->guard_va);
-    if ((r2 = release(p, b->teb_va, PAGE)) && !r) r = r2;
+    if ((r2 = release(p, b->teb_va, FNVNX_PAGE_SIZE)) && !r) r = r2;
     if ((r2 = release(p, b->tls_vec_va, total)) && !r) r = r2;
     return r;
 }
@@ -211,21 +211,21 @@ int fnvnx_thread_block_create(fnvnx_proc *p, uint32_t stack_size, fnvnx_thread_b
     uint8_t *t;
     int r = FNVNX_E_NOMEM;
     if (!p || !out || !p->exe.nmap || !p->os->alloc_va || !p->os->free_va || !p->os->protect) return FNVNX_E_ARG;
-    if (!stack_size || stack_size > 0xffff0000u - PAGE) {
+    if (!stack_size || stack_size > 0xffff0000u - FNVNX_PAGE_SIZE) {
         fnvnx_logf(p->os, "fnvnx-start: stack size 0x%x not usable", (unsigned)stack_size);
         return FNVNX_START_E_STATE;
     }
     ssize = page_up(stack_size);
     if (!(total = tls_plan(p, off))) return FNVNX_START_E_STATE;
     memset(out, 0, sizeof *out);
-    if (!(stack = alloc_checked(p, ssize + PAGE)) || !(teb = alloc_checked(p, PAGE)) ||
+    if (!(stack = alloc_checked(p, ssize + FNVNX_PAGE_SIZE)) || !(teb = alloc_checked(p, FNVNX_PAGE_SIZE)) ||
         !(tls = alloc_checked(p, total)))
         goto fail;
     r = FNVNX_E_MAP;
-    if (p->os->protect(p->os->ctx, (uintptr_t)stack + p->cfg.bias, PAGE, 0u)) goto fail;   /* guard */
+    if (p->os->protect(p->os->ctx, (uintptr_t)stack + p->cfg.bias, FNVNX_PAGE_SIZE, 0u)) goto fail;   /* guard */
     out->guard_va = stack;
-    out->stack_limit = stack + PAGE;
-    out->stack_base = stack + PAGE + ssize;
+    out->stack_limit = stack + FNVNX_PAGE_SIZE;
+    out->stack_base = stack + FNVNX_PAGE_SIZE + ssize;
     out->teb_va = teb;
     out->tls_vec_va = tls;
     out->tls_block_va = p->exe.tls.present ? tls + off[0] : 0u;
@@ -243,8 +243,8 @@ int fnvnx_thread_block_create(fnvnx_proc *p, uint32_t stack_size, fnvnx_thread_b
     fnvnx_wr32(t + 0x2c, tls);                     /* ThreadLocalStoragePointer */
     return FNVNX_OK;
 fail:   /* nothing stays allocated when the block cannot be made */
-    (void)release(p, stack, ssize + PAGE);
-    (void)release(p, teb, PAGE);
+    (void)release(p, stack, ssize + FNVNX_PAGE_SIZE);
+    (void)release(p, teb, FNVNX_PAGE_SIZE);
     (void)release(p, tls, total);
     memset(out, 0, sizeof *out);
     return r;

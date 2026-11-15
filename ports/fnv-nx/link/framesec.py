@@ -11,7 +11,8 @@ bytes [CFA, CFA+N), decimal without sign or leading zeros, 0 allowed; a 2-field 
 known) and in the ranges field, after the pairs, zero or more `unk:CAUSE` tokens (CAUSE reg, mem or size; sorted, each once): an address-taken
 variable whose slot is not a constant frame offset. A row with an `unk` token is `dynamic` for the gate (its ranges are not complete). Fields: the assembler symbol (not empty, no blank),
 then either the empty string (no address-taken variable), the word `dynamic` (the frame has no constant layout: alloca, a
-variable-length array, a variable whose slot is not a constant frame offset), or one or more `OFFSET:SIZE` pairs separated by
+variable-length array, a variable whose slot is not a constant frame offset), or one or more `OFFSET:SIZE` or `OFFSET:SIZE:n` pairs (`:n` = a variable that does not escape, escapes=0: a plain access to it is certified by its range,
+through sp/x29 or a register that holds the formed address; a `:n` pair never certifies bytes that overlap an escaping pair) separated by
 one blank each, sorted ascending (by offset, then size). OFFSET is a decimal integer without sign, or with a leading `-`, with no
 leading zeros (`0`, `-4`, `16`); SIZE is a decimal integer of at least 1 without leading zeros. OFFSET is relative to the CFA (the stack
 pointer at function entry): a variable at [CFA-16, CFA-4) is `-16:12`. Any other line is an error `<where>: line N: <what>`; no
@@ -29,6 +30,25 @@ class Row(tuple):
         r = tuple.__new__(cls, (sym, ranges))
         r.args, r.unk = args, tuple(unk)
         return r
+
+
+class Pair(tuple):
+    """(offset, size) with .priv: the variable does not escape (`OFF:SIZE:n`, GCC's points-to solution of the final GIMPLE: its address stays in the thread).
+    Equal only to a pair of the same offset, size and flag."""
+
+    def __new__(cls, off, size, priv=False):
+        r = tuple.__new__(cls, (off, size))
+        r.priv = priv
+        return r
+
+    def __eq__(self, o):
+        return tuple.__eq__(self, o) and getattr(o, 'priv', False) == self.priv
+
+    def __ne__(self, o):
+        return not self == o
+
+    def __hash__(self):
+        return hash((tuple(self), self.priv))
 
 
 UNK_CAUSES = ('reg', 'mem', 'size')
@@ -74,10 +94,11 @@ def parse_frame(data, where):
             if unk:
                 raise ValueError('%s: line %d: a range after an unk token: %r' % (where, n, p))
             o, _, z = p.partition(':')
-            if not (_canon(o, True) and _canon(z, False)):
-                raise ValueError('%s: line %d: not an OFFSET:SIZE pair: %r' % (where, n, p))
-            pairs.append((int(o), int(z)))
-        if pairs != sorted(pairs):
+            z, _, pv = z.partition(':')
+            if not (_canon(o, True) and _canon(z, False)) or pv not in ('', 'n'):
+                raise ValueError('%s: line %d: not an OFFSET:SIZE[:n] pair: %r' % (where, n, p))
+            pairs.append(Pair(int(o), int(z), pv == 'n'))
+        if [tuple(q) for q in pairs] != sorted(tuple(q) for q in pairs):
             raise ValueError('%s: line %d: ranges are not sorted' % (where, n))
         if unk != sorted(set(unk)):
             raise ValueError('%s: line %d: unk causes are not sorted and distinct' % (where, n))
@@ -96,3 +117,4 @@ def from_sections(sections, where):
 
 def read(path):
     return from_sections(a64obj.read(path).sections, path)
+

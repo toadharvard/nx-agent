@@ -9,6 +9,7 @@
  "result": "pure.json",
  "covers": [
   "tool",
-  "ref"
+  "ref",
+  "header"
  ]
 }

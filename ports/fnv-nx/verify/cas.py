@@ -49,6 +49,25 @@ def _publish(tmp, final):
     finally:
         os.unlink(tmp)
 
+def publish_file(final, data=None, src=None):
+    """The one rule that makes a FILE of a shared cache visible (recipe.publish_dir is the directory form): the content is written completely to a private
+    sibling of FINAL (same directory, same filesystem), then rename(2) gives it the name. A reader sees FINAL only complete; two writers of one key
+    publish the same bytes (a function of the key), and the later rename replaces an identical file. DATA: bytes, or SRC: a file to copy."""
+    os.makedirs(os.path.dirname(final), exist_ok=True)
+    tmp = "%s.tmp-%d-%s" % (final, os.getpid(), os.urandom(4).hex())
+    try:
+        if src is not None:
+            shutil.copyfile(src, tmp)
+        else:
+            with open(tmp, "wb") as f:
+                f.write(data)
+        os.replace(tmp, final)
+    except BaseException:
+        if os.path.lexists(tmp):
+            os.unlink(tmp)
+        raise
+    return final
+
 def _put(store, kind, name, data=None, mode=0o444):
     d = os.path.join(store, kind, name[:2])
     os.makedirs(d, exist_ok=True)

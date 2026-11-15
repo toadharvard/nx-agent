@@ -79,6 +79,8 @@ extern bool mark_used(tree, tsubst_flags_t) __attribute__((weak));   /* spelled 
 #include "stor-layout.h"
 #include "tree-cfg.h"
 #include "target.h"
+#include "memmodel.h"
+#include "builtins.h"
 #include <map>
 #include <set>
 #include <string>
@@ -331,6 +333,36 @@ static tree walk_op(tree *tp, int *walk_subtrees, void *data)
 }
 
 /* a call through the destructor's slot: fp(obj, flags), fp's type MSVC's ??_G */
+/* The loads this pass builds after "ssa" are loads of shared memory, like every other (R9, docs/ORDERING.md): fnvnx_order runs
+   before SSA and cannot see them, so they are built in their final form, `__atomic_load_N(p + off, ACQUIRE)` (ldar), with the virtual
+   operand chain of the call that follows them (CALL's vuse goes through each load's vdef).  The rule closes the class: every memory
+   access this plugin creates is created ordered. */
+static tree ordered_ptr_load(gimple_stmt_iterator *gsi, gimple *call, tree base, HOST_WIDE_INT off)
+{
+  tree addr = base;
+  if (off) {
+    addr = make_ssa_name(TREE_TYPE(base));
+    gimple *a = gimple_build_assign(addr, POINTER_PLUS_EXPR, base, size_int(off));
+    gimple_set_location(a, gimple_location(call));
+    gsi_insert_before(gsi, a, GSI_SAME_STMT);
+  }
+  tree ity = build_nonstandard_integer_type(POINTER_SIZE, 1);
+  built_in_function bf = POINTER_SIZE == 64 ? BUILT_IN_ATOMIC_LOAD_8 : BUILT_IN_ATOMIC_LOAD_4;
+  tree bits = make_ssa_name(ity);
+  gcall *ld = gimple_build_call(builtin_decl_explicit(bf), 2, addr, build_int_cst(integer_type_node, MEMMODEL_ACQUIRE));
+  gimple_call_set_lhs(ld, bits);
+  gimple_set_location(ld, gimple_location(call));
+  gimple_set_vuse(ld, gimple_vuse(call));
+  gimple_set_vdef(ld, make_ssa_name(gimple_vop(cfun), ld));
+  gimple_set_vuse(call, gimple_vdef(ld));   /* the call (and so its replacement, which takes its vops) follows the load */
+  gsi_insert_before(gsi, ld, GSI_SAME_STMT);
+  tree v = make_ssa_name(ptr_type_node);
+  gimple *cv = gimple_build_assign(v, NOP_EXPR, bits);
+  gimple_set_location(cv, gimple_location(call));
+  gsi_insert_before(gsi, cv, GSI_SAME_STMT);
+  return v;
+}
+
 static void slot_call(gimple_stmt_iterator *gsi, gcall *call, tree fp, tree obj, int flags)
 {
   tree fnt = build_function_type_list(ptr_type_node, TREE_TYPE(obj), unsigned_type_node, NULL_TREE);
@@ -383,15 +415,8 @@ struct calls_pass : gimple_opt_pass {
           { error_at(gimple_location(st), "SDD2: a deleting destructor call that cannot be placed"); continue; }
         /* a delete-expression: through the object's own slot, flags 1 */
         tree obj = gimple_call_arg(call, 0);
-        tree vp = make_ssa_name(ptr_type_node);
-        gimple *g1 = gimple_build_assign(vp, build2(MEM_REF, ptr_type_node, obj, build_int_cst(ptr_type_node, 0)));
-        gimple_set_vuse(g1, gimple_vuse(st)); gimple_set_location(g1, gimple_location(st));
-        gsi_insert_before(&gsi, g1, GSI_SAME_STMT);
-        tree fp = make_ssa_name(ptr_type_node);
-        gimple *g2 = gimple_build_assign(fp, build2(MEM_REF, ptr_type_node, vp,
-                                                    build_int_cst(ptr_type_node, tree_to_shwi(DECL_VINDEX(d1)) * psz)));
-        gimple_set_vuse(g2, gimple_vuse(st)); gimple_set_location(g2, gimple_location(st));
-        gsi_insert_before(&gsi, g2, GSI_SAME_STMT);
+        tree vp = ordered_ptr_load(&gsi, st, obj, 0);
+        tree fp = ordered_ptr_load(&gsi, st, vp, tree_to_shwi(DECL_VINDEX(d1)) * psz);
         slot_call(&gsi, call, fp, obj, 1);
       }
     return 0;
