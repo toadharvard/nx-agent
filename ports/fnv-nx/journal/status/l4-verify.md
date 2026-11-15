@@ -413,3 +413,7 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - bottleneck: waiting on L1 for one recipe lineage (link.entry, loader outputs) and the closure seed; waiting on L3a for the post-cand3 pack | 2 workers
 - 22:10: w9 d16d89c: bootrt objstub fix done. All callbacks are unconditional, reach exits through the host slot, and there is no syscall or log. test_bootrt: 7 cases, 0 failed.
   - Sent to L1 for cand4. Open at L1: objstub has no host-profile analyzer, and the tests/bootguest admit row is missing at cand3.
+- 22:15: w8 merged cand3 41a8855d4. recipe.check: boot 0, bootguest 0, icount 0, gl4 2 (gl4shim has no INCLUDE output; owner L6A, told).
+  - icount link: red. The seed's crt0 → runtime.c → dispatch closure reaches lift/bridges, which is invalid under cand3 (direct platform include, old pin; owner L3a, told).
+  - Asked L1 to rule that crt0 branches to the link.entry symbol and that the closure is per object, so test images don't pull the pack.
+- bottleneck: waiting on L1 (one lineage, link.entry, per-object closure), L3a (lift recipes under cand3) and L6A (gl4shim INCLUDE) | 2 workers
