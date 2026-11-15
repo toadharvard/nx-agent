@@ -1084,3 +1084,14 @@ Paused: w3b, w4, farm; no other work.
         - cs.c:676-683 builds the cursor rect from it;
         - cs.c:692-693 maps it to the window (MapWindowPoints) only when windowed.
     - verify/tests/test_gl4_cursor.py tests the real recipe libnxgl4.so through bootgpu.load, with op numbers parsed from the header X-macros and no doubles. Accepted. It is not in any verdict until L4's harness admits it.
+- 20:45Z: w5 merged cand2 at f770c57f6 locally (07d8f90cc). It goes only to the measurement branch w5-cand2probe; it is not a base, because nothing builds.
+    - cand2 gaps, reported to L1:
+        - include_uses/uses are missing from recipe.py;
+        - the gl4shim outputs form differs from cand2's;
+        - stamp: a pristine cand2 gives fc2cda076, but the pin says 9f0d5729. The new pin is being rebuilt.
+    - Good news: crossing_terms.inc is closed in cand2.
+    - L6A's green d3d9 guest build is on the old linux-gnu pin b274ec06, so it is a measurement.
+- 20:45Z: rule (A) is split across two workers:
+    - w5, translator (claude/fnv-l6-render-w5-total): instructions[] masks generated from gen/productions.json, and emit checks for the 50 widened rows;
+    - w1b: the production generator, the coverage gate and the validator site.
+- bottleneck: L1 cand2 with include_uses and the fc2cda076 pin (no L6 guest code builds until then); L1 cand3 for the trunk (a5c8f427). 4 of 4 workers busy.
