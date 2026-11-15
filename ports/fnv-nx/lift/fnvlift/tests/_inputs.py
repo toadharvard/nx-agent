@@ -5,11 +5,16 @@ sys.path.insert(0, LIFT)
 X86SYS = os.path.join(os.path.dirname(LIFT), 'platform', 'declared', 'x86sys.json')
 
 
+_CPUFEAT = []
+
+
 def cpufeat_arg():
     """the table path: `--cpufeat PATH` of the test's own command line (removed from argv); no default, a missing argument is an error"""
+    if _CPUFEAT:
+        return _CPUFEAT[0]
     if '--cpufeat' not in sys.argv or sys.argv.index('--cpufeat') + 1 >= len(sys.argv):
         raise SystemExit('missing --cpufeat PATH (the CPUID feature-bit table, L3b cpuid_feature_bits.tsv)')
-    i = sys.argv.index('--cpufeat'); p = sys.argv[i + 1]; del sys.argv[i:i + 2]; return p
+    i = sys.argv.index('--cpufeat'); p = sys.argv[i + 1]; del sys.argv[i:i + 2]; _CPUFEAT.append(p); return p
 
 
 def configure(cpufeat=None):
