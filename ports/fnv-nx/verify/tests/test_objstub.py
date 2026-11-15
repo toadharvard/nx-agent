@@ -92,7 +92,7 @@ for abi in ("ilp32", "lp64"):
     check(T("trap -> T1"), ("f", "T1") in k, k)
     o = build('#include "tiny.h"\nvoid f(int a){ if(a) myabort(); }\nvoid g(void){myabort();}', abi, extra=["-I" + ROOT])
     k, _, _ = kinds(o, ["myabort"])
-    check(T("myabort -> T2 (and noreturn tail for g)"), {("f", "T2"), ("g", "T2"), ("g", "T2-noreturn-tail")} <= k, k)
+    check(T("myabort: g (every path ends in it) -> T2 and noreturn tail; f (a returning path: a mixed body) is no T2"), {("g", "T2"), ("g", "T2-noreturn-tail")} <= k and ("f", "T2") not in k, k)
     check(T("no terminator set -> f not T2"), ("f", "T2") not in kinds(o)[0])
     o = build("#include <stdlib.h>\nvoid f(int a){ if(a) abort(); exit(a); }\nvoid g(void){atexit(0);}", abi)
     k, _, _ = kinds(o, libc)
@@ -271,8 +271,9 @@ int hot(int x) { return x + 1; }
 int cold(int x) __attribute__((cold));
 int cold(int x) { return may_throw(x) * 2; }
 L glob;
-void term(int x) { if (x) std::terminate(); }
-void ab(int x) { if (x) abort(); }
+void term(int) { std::terminate(); }
+void ab(int) { abort(); }
+void always_throw() { throw 5; }
 """
 for abi in ("ilp32", "lp64"):
     T = lambda n: "%s/%s" % (abi, n)
@@ -290,7 +291,7 @@ for abi in ("ilp32", "lp64"):
           bad == {(f, k) for f in ("_Z4termi", "_Z2abi") for k in ("T2", "T2-noreturn-tail")} and len(items) >= 15, (bad, len(items)))
     check(T("C++: no T2-noreturn-tail anywhere (use, stat_local end in _Unwind_Resume; thrower ends in __cxa_throw)"), not any(k == "T2-noreturn-tail" and n not in ("_Z4termi", "_Z2abi") for _, n, k, _ in finds), finds)
     check(T("C++: without the unwinder entries the same objects are findings (the rule is what accepts them)"),
-          any(k == "T2-noreturn-tail" and n == "_Z3usei" for _, n, k, _ in objstub.run_check([(o, o)], {x for x in cterms if x[0] != "~"}, {}, set())[1]))
+          any(k == "T2-noreturn-tail" and n == "_Z12always_throwv" for _, n, k, _ in objstub.run_check([(o, o)], {x for x in cterms if x[0] != "~"}, {}, set())[1]))
     cc = build('#include <cstdlib>\nextern "C" void fatal(void) __attribute__((noreturn));\nint f(int x) { if (x) fatal(); return 1; }', abi, "cc")
     check(T("C++: a user noreturn function that is not nothrow is an unwinder by the compiler's flags, so a call in the middle is no finding (stated limit)"),
           not any(k == "T2" for _, _, k, _ in objstub.run_check([(cc, cc)], {x for x in cterms}, {}, set())[1]))
@@ -442,57 +443,79 @@ try:
 except ValueError:
     check("wine table: missing file is an error", True)
 
-# --- declared machine (CLAUDE.md "The declared machine"): fnvnx_declared_machine(id) + declared_machine.tsv, the same rule as wine_fixme
-DT = {31: ("RegOpenKeyExA", "registry", "win-doc:sysinfo/regopenkeyex:RegOpenKeyExA", "u32", "2"),
-      32: ("connect", "no-network", "win-doc:winsock/connect:connect", "u32", "0xFFFFFFFF"),
-      33: ("WSACleanup", "no-network", "wine-9.0:dlls/ws2_32/socket.c:WSACleanup", "void", "")}
-DH = "void fnvnx_declared_machine(unsigned);\nvoid fnvnx_wine_fixme(unsigned);\n"
+# --- declared machine (CLAUDE.md "The declared machine") and terminators: rule C, the FNVNX_CITE records of hostabi/include/fnvnx/cite.h
+DT = {31: ("f", "registry", "win-doc:sysinfo/regopenkeyex:RegOpenKeyExA", "u32", "2"),
+      32: ("conn", "no-network", "win-doc:winsock/connect:connect", "u32", "0xFFFFFFFF"),
+      33: ("cleanup", "no-network", "wine-9.0:dlls/ws2_32/socket.c:WSACleanup", "void", ""),
+      34: ("die", "process-end", "win-doc:processthreadsapi/exitprocess:ExitProcess", "noreturn", "-"),
+      35: ("tend", "thread-end", "posix-2017:pthread_exit:pthread_exit", "noreturn", "-"),
+      36: ("mixed3", "single-process", "win-doc:processthreadsapi/terminateprocess:TerminateProcess", "u32", "0")}
+CH = ('#define FNVNX_CITE(fn, id) __asm__(".pushsection .fnvnx.cite,\\"\\",%progbits\\n\\t.balign 4\\n\\t.4byte " #fn "\\n\\t.4byte 2f-1f\\n1:\\t.ascii \\"" id "\\"\\n2:\\t.balign 4\\n\\t.popsection")\n'
+      "void fnvnx_wine_fixme(unsigned);\n")
 for abi in ("ilp32", "lp64"):
     T = lambda n: "%s/%s" % (abi, n)
-    def dk(src, tbl=DT, extra=(), wt=WT):
-        o = build(DH + src, abi, extra=extra)
-        items, finds = objstub.run_check([(o, o)], set(), {}, set(), None, None, 1, wt, tbl)
+    def dk(src, tbl=DT, extra=(), wt=WT, terms=(), cited=True):
+        o = build(CH + src, abi, extra=extra)
+        items, finds = objstub.run_check([(o, o)], set(terms), {}, set(), None, None, 1, wt, tbl)
+        if cited:   # the rows no record cites are a finding of their own: only the findings of the cases' own functions are compared
+            finds = [f for f in finds if f[2] != "declared-machine-uncited"]
         return {(n, k) for _, n, k, _ in finds}, finds
     k, f = dk("unsigned f(void) { return 2; }")
-    check(T("declared: the bare constant body (a registry read of an undeclared key) is V today, no citation: flagged V"), k == {("f", "V")}, f)
-    k, f = dk("unsigned f(void) { fnvnx_declared_machine(31); return 2; }")
-    check(T("declared: citation id 31 and the row's value (ERROR_FILE_NOT_FOUND): certified"), not k, f)
-    k, f = dk("unsigned f(void) { fnvnx_declared_machine(32); return 0xFFFFFFFFu; }")
-    check(T("declared: no-network row, SOCKET_ERROR-like value: certified"), not k, f)
-    k, f = dk("unsigned f(void) { fnvnx_declared_machine(32); return 0; }")
-    check(T("declared: no-network row, the body returns 0 (success): declared-machine-mismatch"), k == {("f", "declared-machine-mismatch")}, f)
-    k, f = dk("void f(void) { fnvnx_declared_machine(33); }", extra=["-fno-optimize-sibling-calls"])
-    check(T("declared: void row (WSACleanup, Wine 9.0 source): certified"), not k, f)
-    k, f = dk("unsigned f(void) { fnvnx_declared_machine(40); return 2; }")
-    check(T("declared: id not in declared_machine.tsv: declared-machine-unknown-id"), k == {("f", "declared-machine-unknown-id")}, f)
-    k, f = dk("unsigned f(void) { fnvnx_declared_machine(31); return 2; }", tbl={})
-    check(T("declared: empty table: declared-machine-unknown-id"), k == {("f", "declared-machine-unknown-id")}, f)
-    k, f = dk("void f(unsigned a) { fnvnx_declared_machine(a); }", extra=["-fno-optimize-sibling-calls"])
-    check(T("declared: non-constant id: declared-machine-nonconstant"), ("f", "declared-machine-nonconstant") in k, f)
-    k, f = dk("int g;\nunsigned f(void) { fnvnx_declared_machine(31); g = 1; return 2; }")
-    check(T("declared: citation in a body that also stores to a global: declared-machine-in-real-body"), k == {("f", "declared-machine-in-real-body")}, f)
-    k, f = dk("unsigned f(void) { fnvnx_declared_machine(31); fnvnx_declared_machine(31); return 2; }")
-    check(T("declared: two citations on one path: declared-machine-mismatch"), k == {("f", "declared-machine-mismatch")}, f)
-    k, f = dk("unsigned f(int a) { if (a) { fnvnx_declared_machine(31); } else { fnvnx_wine_fixme(31); } return 2; }")
-    check(T("declared: declared and wine citation on different paths: no single table, declared-machine-mismatch"),
-          ("f", "declared-machine-mismatch") in k or ("f", "wine-fixme-mismatch") in k, f)
-    k, f = dk("unsigned f(void) { fnvnx_wine_fixme(31); return 2; }")
-    check(T("declared: a wine citation does not read the declared table (id 31 only in declared_machine.tsv): wine-fixme-unknown-id"),
-          k == {("f", "wine-fixme-unknown-id")}, f)
-    k, f = dk("unsigned f(void) { fnvnx_wine_fixme(5); return 7; }")
-    check(T("declared: the wine citation is unchanged next to it (row 5 of the wine table): certified"), not k, f)
-    k, f = dk("void *h(void) { return (void *)fnvnx_declared_machine; }")
-    check(T("declared: address taken in code: declared-machine-address-taken"), ("h", "declared-machine-address-taken") in k, f)
-    k, f = dk("void (*volatile ptr)(unsigned) = fnvnx_declared_machine;")
-    check(T("declared: address taken in data: declared-machine-address-taken"), any(kk == "declared-machine-address-taken" for _, kk in k), f)
-    k, f = dk("extern void set_last_error(unsigned);\nint f(void) { set_last_error(10050); return -1; }")
-    check(T("declared: a body that calls set_last_error and returns -1 is no V, no citation needed (not flagged today)"), not k, f)
-    k, f = dk("int e[4];\nint f(void) { e[0] = 10050; return -1; }")
-    check(T("declared: a body that stores the error code (time-zone / last-error store) is no V (not flagged today)"), not k, f)
-    cnt = objstub.declared_counts(objstub.analyse_all([("x", build(DH + "unsigned f(void) { fnvnx_declared_machine(31); return 2; }\nunsigned g(void) { fnvnx_declared_machine(31); return 2; }", abi))], set(), set()))
-    check(T("declared: call sites per id are counted"), cnt == {31: 2}, cnt)
-    check(T("declared: a call of the wine citation is not counted as declared"), objstub.declared_counts(objstub.analyse_all([("x", build(DH + "unsigned f(void) { fnvnx_wine_fixme(5); return 7; }", abi))], set(), set())) == {})
-HDR_REAL = [l for l in open(os.path.join(os.path.dirname(os.path.abspath(objstub.__file__)), "declared_machine.tsv")).read().split("\n") if l.startswith("# fact:")][0]
+    check(T("rule C: the bare constant body (a registry read of an undeclared key) with no record is V: flagged V"), k == {("f", "V")}, f)
+    k, f = dk('unsigned f(void) { return 2; }\nFNVNX_CITE(f, "dm:31");')
+    check(T("rule C: record dm:31 and the row's value (ERROR_FILE_NOT_FOUND): certified"), not k, f)
+    k, f = dk('unsigned conn(void) { return 0xFFFFFFFFu; }\nFNVNX_CITE(conn, "dm:32");')
+    check(T("rule C: no-network row, SOCKET_ERROR-like value: certified"), not k, f)
+    k, f = dk('unsigned conn(void) { return 0; }\nFNVNX_CITE(conn, "dm:32");')
+    check(T("rule C: no-network row, the body returns 0 (success): declared-machine-mismatch"), k == {("conn", "declared-machine-mismatch")}, f)
+    k, f = dk('void cleanup(void) { }\nFNVNX_CITE(cleanup, "dm:33");')
+    check(T("rule C: void row (WSACleanup, Wine 9.0 source): certified"), not k, f)
+    k, f = dk('unsigned f(void) { return 2; }\nFNVNX_CITE(f, "dm:40");')
+    check(T("rule C: id not in declared_machine.tsv: declared-machine-unknown-id"), k == {("f", "declared-machine-unknown-id")}, f)
+    k, f = dk('unsigned f(void) { return 2; }\nFNVNX_CITE(f, "dm:31");', tbl={})
+    check(T("rule C: empty table: declared-machine-unknown-id"), k == {("f", "declared-machine-unknown-id")}, f)
+    k, f = dk('int g;\nunsigned f(void) { g = 1; return 2; }\nFNVNX_CITE(f, "dm:31");')
+    check(T("rule C: a cited body that also stores to a global: declared-machine-in-real-body"), k == {("f", "declared-machine-in-real-body")}, f)
+    k, f = dk('unsigned f(void) { return 2; }\nFNVNX_CITE(f, "dm:31");\nFNVNX_CITE(f, "dm:31");')
+    check(T("rule C: two records for one body: cite-mismatch"), k == {("f", "cite-mismatch")}, f)
+    k, f = dk('unsigned g(void) { return 2; }\nFNVNX_CITE(g, "dm:31");')
+    check(T("rule C: the record names function g, the row 31 is for the contract name f: declared-machine-name-mismatch"), k == {("g", "declared-machine-name-mismatch")}, f)
+    k, f = dk('unsigned f(void) { return 2; }\nFNVNX_CITE(f, "dm:31");', cited=False)
+    check(T("rule C: a row no record cites is red (dm:32..36 here), the cited row is not"), {n for n, kk in k if kk == "declared-machine-uncited"} == {"dm:%d" % i for i in (32, 33, 34, 35, 36)}, f)
+    k, f = dk('unsigned IDirect3DDevice9_X(void) { return 7; }\nFNVNX_CITE(IDirect3DDevice9_X, "wf:5");', wt={5: ("IDirect3DDevice9_X",) + WT[5][1:]})
+    check(T("rule C: a wf: record is judged against wine_fixme.tsv: certified"), not k, f)
+    k, f = dk('unsigned IDirect3DDevice9_X(void) { return 8; }\nFNVNX_CITE(IDirect3DDevice9_X, "wf:5");', wt={5: ("IDirect3DDevice9_X",) + WT[5][1:]})
+    check(T("rule C: a wf: record with a different value: wine-fixme-mismatch"), k == {("IDirect3DDevice9_X", "wine-fixme-mismatch")}, f)
+    for what, rec in (("an id of no table", 'FNVNX_CITE(f, "xx:3");'), ("a non-decimal id", 'FNVNX_CITE(f, "dm:x");'), ("an empty id", 'FNVNX_CITE(f, "");'),
+                      ("a function that is not defined in the object", "extern unsigned ext(void);\nFNVNX_CITE(ext, \"dm:31\");")):
+        k, f = dk("unsigned f(void) { return 2; }\n" + rec)
+        check(T("rule C: a record with " + what + ": cite-malformed"), any(kk == "cite-malformed" for _, kk in k), f)
+    k, f = dk('unsigned f(void) { return 2; }\nFNVNX_CITE(f, "dm:31");\nunsigned h(void) { return 5; }')
+    check(T("rule C: the uncited constant body next to a cited one is still V (the record is per body)"), k == {("h", "V")}, f)
+    cnt = objstub.declared_counts(objstub.analyse_all([("x", build(CH + 'unsigned f(void) { return 2; }\nFNVNX_CITE(f, "dm:31");', abi))], set(), set()))
+    check(T("rule C: records per id are counted"), cnt == {31: 1}, cnt)
+    # terminators
+    NR = "extern void abort(void) __attribute__((noreturn));\nextern void (*volatile host_exit)(void);\n"
+    k, f = dk(NR + 'void die(void) __attribute__((noreturn));\nvoid die(void) { host_exit(); __builtin_unreachable(); }\nFNVNX_CITE(die, "dm:34");', terms=("die", "abort"))
+    check(T("terminator: a declared-noreturn body that ends in the host exit slot and is cited process-end: certified"), not k, f)
+    k, f = dk(NR + 'void die(void) __attribute__((noreturn));\nvoid die(void) { host_exit(); __builtin_unreachable(); }', terms=("die", "abort"))
+    check(T("terminator: the same body with no record: indirect-noreturn-tail and noreturn-uncited"), {("die", "indirect-noreturn-tail"), ("die", "noreturn-uncited")} <= k, f)
+    k, f = dk(NR + 'void tend(void);\nvoid tend(void) { host_exit(); __builtin_unreachable(); }\nFNVNX_CITE(tend, "dm:35");', terms=("abort",))
+    check(T("terminator: a cited process-end/thread-end body that is not declared noreturn: cite-not-declared-noreturn"), ("tend", "cite-not-declared-noreturn") in k, f)
+    k, f = dk(NR + 'void caller(void) { abort(); }', terms=("abort",))
+    check(T("terminator: a body whose every path ends in a library terminator is T2"), any(kk in ("T2", "T2-noreturn-tail") for n, kk in k if n == "caller"), f)
+    k, f = dk(NR + 'int mixed(int x) { if (x) abort(); return x + 1; }', terms=("abort",))
+    check(T("terminator: a body with a returning path is no T2 (a real control path)"), not k, f)
+    k, f = dk(NR + 'int mixed2(void) { volatile int a = 0; if (a) abort(); return 3; }', terms=("abort",))
+    check(T("terminator: a mixed body whose returning paths are an uncited constant is red (V, no row)"), ("mixed2", "constants-mismatch") in k or ("mixed2", "V") in k, f)
+    k, f = dk(NR + 'int mixed3(void) { volatile int a = 0; if (a) abort(); return 0; }\nFNVNX_CITE(mixed3, "dm:36");', terms=("abort",))
+    check(T("terminator: the same mixed body cited by the row 36 (u32 0): clean"), not k, f)
+    k, f = dk(NR + 'void die2(void) __attribute__((noreturn));\nvoid die2(void) { abort(); }', terms=("die2", "abort"))
+    check(T("coverage: a declared-noreturn definition that ends in a library terminator on every path needs no record"), not k, f)
+    k, f = dk(NR + 'void die(void) __attribute__((noreturn));\nvoid die(void) { host_exit(); __builtin_unreachable(); }\nvoid die3(void) __attribute__((noreturn));\nvoid die3(void) { die(); }', terms=("die", "die3", "abort"))
+    check(T("coverage: a declared-noreturn body that ends in an uncited defined terminator is uncovered too"), ("die3", "noreturn-uncited") in k, f)
+HDR_REAL = ('# fact: no-network | time-zone | registry | no-galaxy | single-process | process-end | thread-end (CLAUDE.md "The declared machine"); source: win-doc:<documentation page or header path>:<function> | '
+            'wine-9.0:<path>:<function> | c11:<clause>:<function> | posix-2017:<page>:<function> | galaxy-sdk:<page>:<function>; kind void|u32|u64|addr|u32nz<N>|noreturn')
 GOODS = ("31\tRegOpenKeyExA\tregistry\twin-doc:sysinfo/regopenkeyex:RegOpenKeyExA\tu32\t2",
          "32\tconnect\tno-network\twine-9.0:dlls/ws2_32/socket.c:connect\tu32\t0xFFFFFFFF",
          "33\tGetTimeZoneInformation\ttime-zone\twin-doc:timezoneapi/gettimezoneinformation:GetTimeZoneInformation\tu32nz0\t0,1")
@@ -521,6 +544,24 @@ for what, row in (("an undeclared fact", "35\tx\tno-wifi\twin-doc:a/b:f\tu32\t1"
         check("declared table: a row with " + what + " is red", False)
     except ValueError:
         check("declared table: a row with " + what + " is red", True)
+for what, row, good in (("c11 clause digits and dots", "36\texit\tprocess-end\tc11:7.22.4.4:exit\tnoreturn\t-", True),
+                        ("c11 clause that is not digits and dots", "36\texit\tprocess-end\tc11:7.x:exit\tnoreturn\t-", False),
+                        ("posix-2017 page name", "37\tpthread_exit\tthread-end\tposix-2017:pthread_exit:pthread_exit\tnoreturn\t-", True),
+                        ("posix-2017 page that is not a name", "37\tpthread_exit\tthread-end\tposix-2017:p/q:pthread_exit\tnoreturn\t-", False),
+                        ("process-end with a kind that returns", "38\texit\tprocess-end\tc11:7.22.4.4:exit\tu32\t0", False),
+                        ("noreturn with a fact that is not a terminator", "38\texit\tregistry\tc11:7.22.4.4:exit\tnoreturn\t-", False),
+                        ("noreturn with a value", "38\texit\tprocess-end\tc11:7.22.4.4:exit\tnoreturn\t0", False),
+                        ("sources joined by | (sorted, unique, each token valid)", "39\tx\tregistry\twin-doc:a/b:f|wine-9.0:dlls/a.c:f\tu32\t1", True),
+                        ("sources joined by | with a token that fails the grammar", "39\tx\tregistry\twin-doc:a/b:f|http://x\tu32\t1", False),
+                        ("sources joined by | not in sorted order", "39\tx\tregistry\twine-9.0:dlls/a.c:f|win-doc:a/b:f\tu32\t1", False),
+                        ("sources joined by | with a repeated token", "39\tx\tregistry\twin-doc:a/b:f|win-doc:a/b:f\tu32\t1", False)):
+    open(tf_, "w").write(HDR_REAL + "\n" + row + "\n")
+    try:
+        objstub.read_declared_table(tf_)
+        got_ = True
+    except ValueError:
+        got_ = False
+    check("declared table: " + what + (" is accepted" if good else " is red"), got_ == good, row)
 slim = HDR_REAL.replace(" | no-galaxy", "").replace(" | galaxy-sdk:<page>:<function>", "")
 open(tf_, "w").write(slim + "\n" + GAL + "\n")
 try:
@@ -600,7 +641,7 @@ check("with the fact 42 in the facts file of the same tree: green", rc == 0 and 
 open(facts, "w").write("42\t" + "a" * 64 + "\n43\t" + "b" * 64 + "\n")
 rc, g, _, txt, st = gate(repo3, ROOT + "/g6", GC)
 check("a fact without a call site: red reach-stale", rc == 2 and "reach-stale 1" in g["detail"], (g, txt))
-repo4 = TR.make_repo("os-abort", rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": '#include <stdlib.h>\nint f_c(int x) { if (x > 3) abort(); return x + 1; }\n'})
+repo4 = TR.make_repo("os-abort", rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": '#include <stdlib.h>\nint f_c(int x) { abort(); }\n'})
 rc, g, _, txt, st = gate(repo4, ROOT + "/g8", GC)
 check("terminators come from the headers the unit includes (stdlib.h via the unit's preprocessed text): abort -> T2 in f_c, nothing else red",
       rc == 2 and g["uncertified"] == [TR.ROOT + "/c.c:f_c"] and "T2 1" in g["detail"], (g, txt))
