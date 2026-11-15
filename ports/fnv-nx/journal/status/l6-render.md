@@ -826,3 +826,8 @@ Paused: w3b, w4, farm; no other work.
     - The first stop, 0xC000001D after `init d3dx9_38.dll`, is being classified by L4; it is not L6's yet.
 - 10:40Z Boot-loop order withdrawn (integ 4674ce3e9; the owner rejected it). No stops come from measurement runs.
     - L6 path items stand: w5 on sm_link; w6 rebuilds the guest roots on cand3.
+- 13:03Z w5 9aadaf679: sm_link roots stage, prog and sum (Mesa 25.2.8 llvmpipe, hermetic). Numbers at shaders b545961f with translator 61d4e879a:
+    - stage certificates: 115,776/115,776 ok;
+    - link certificates: 75,245/120,392 linked so far, 0 failures;
+    - disagreements: 0.
+    - Blocked (L1): run stages re-ingest the deb union each time, and {stage} references re-run the whole root; the summary root takes over 2 h cold. Sent to L1.
