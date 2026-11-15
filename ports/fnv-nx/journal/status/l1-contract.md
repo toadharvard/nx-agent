@@ -1783,3 +1783,6 @@ bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 - 20:44 cand3 merge list (w12L2 598f540bf) accepted. Its stamp inputs are identical to cand2's, and both differ from L2 b9f6b3a69 in 5 covered files. Correction for cand2: w15 takes L2's toolchain/ and targets.json at b9f6b3a69, and stamp.py must print 03eacf9d before the verdict. cpuid goes with L3a's tree; the stub citation waits for w27.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
+- 20:47 Correction to L6: include_uses is canonical (w12L2 recipe.py:1007). It is the subset of uses that goes on the include path and must name a directory output, generated or tracked. My earlier "deleted" was wrong. FFP_LAYOUT via uses plus include_uses stands.
+  - L6 at render-w6-root 4bd215d1b: gl4shim, gl4, nxgpu, pair@host, translator@host and sm_link are green. pair, d3d9, smscan, translator and sha256 are red only on the stamp. It is the cand4 candidate after the pin.
+bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
