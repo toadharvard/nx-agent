@@ -1310,3 +1310,15 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - ADMIT accepted (REQUIRED_TEST = build, determinism, linkstrict, objstub, doubles, oracle, assumptions, pure).
   - The legal gate w23 built against the owner's 2026-11-15 decision (no quota on Legal gates) is removed in a follow-up commit; the manifest work is stopped.
   - The 500 non-frame accesses were split to L2: int load 201, int store 201 (combridge.gen 123), vec128 37, fp 28, plain ldxr/stxr 23, pair 10.
+## cand1 verdict (2026-11-15 00:36)
+- Head 2b66742ec: RED, 24/42 green, 1289.5 s cold (budget 300).
+- Red: abi 992/1889, addr32 63/64, argordergate 63/64, assumptions 104/122, build 115/132, datamodel 119/140, determinism 115/132, fpexact 234/239, guestlink exit2, hostapi 55/69, imports 0/6, linkstrict exit2, machine 0/6, objstub 5160/5489, oracle 107/120, order 63/64, selftests 106/118, tlsmodel exit2.
+- Green includes admit 1004/1004, onedef 208/208, pure 44/44, exepin 231/231, d3d9total 332/332.
+- Owners of the reds:
+  - plugin inputs, 10 gates: w24 pluginfix;
+  - abi unnamed tags: w23 linkage;
+  - hostapi and tm.cpp: L5;
+  - selftests: L4 and L1 test_gates;
+  - oracle and assumptions: w15 for L1 files, the others forwarded;
+  - speed (selftests 595, fpexact 319, determinism 129): w24 gatekeys.
+- cand2 is built from 2b66742ec, and its verdict runs incrementally on cand1's cache.
