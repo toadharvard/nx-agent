@@ -86,6 +86,8 @@ FNVNX_CXX_ONLY(uses_template_parms);
 #include <set>
 #include <string>
 #include <vector>
+#include <tuple>
+#include <algorithm>
 
 int plugin_is_GPL_compatible;
 
@@ -853,6 +855,332 @@ static void ipa_start(void *, void *)
   }
 }
 
+
+/* ---- ODRDEF: the definition record of every function emitted as COMDAT (.fnvnx.odrdef)
+ *
+ * [basic.def.odr]: the definitions of an inline function or a template instantiation in different units are one definition when they
+ * are the same sequence of tokens and every name in them binds to the same entity. The bytes the compiler makes of them differ with the
+ * unit (IPA, inlining), so identity is the source definition. One line per function symbol the unit emits as COMDAT (a TREE_PUBLIC
+ * DECL_COMDAT function with a body written in the object, a clone of a constructor / destructor, an alias, a thunk), in section
+ * .fnvnx.odrdef (not loaded):
+ *
+ *     symbol <TAB> sha256 <TAB> targs <TAB> bindings
+ *
+ *   symbol    the mangled (Itanium) name of the symbol
+ *   sha256    of the definition's token sequence, hex. The tokens are the front end's own: the unit is compiled from the preprocessed
+ *             unit.ii (-fpreprocessed, verify/unitstage.py CC stage), and the tokens are read from that file by libcpp, the lexer
+ *             of cc1plus (cp/parser.cc cp_lexer_new_main reads the same file with the same lexer into the parser's token buffer;
+ *             the plugin cannot see that buffer, cp_parser is private to parser.cc, so it lexes the same file again with a second cpp_reader
+ *             of the same language and options). Each token is hashed as `<byte length of its spelling>:<spelling>`; whitespace, comments
+ *             and line breaks are not tokens. The range of a function is the declaration that contains the definition: from
+ *             the first token after the previous `;`, `{`, `}` or access label at the same parenthesis depth (so `template <...>`, the
+ *             specifiers and the declarator are in) to the `}` that closes the body (a ctor-initializer and function-try-block handlers
+ *             included) or the `;` of `= default` / `= delete`. The definition of an instantiation is its template's (the pattern
+ *             DECL_TEMPLATE_RESULT of DECL_TI_TEMPLATE, cp/pt.cc); of a function the compiler declared or defaulted, the definition of
+ *             its class (the class-key to the closing `}`); of a thunk or an alias, its target's. The position of a definition is
+ *             DECL_SOURCE_LOCATION (the declarator-id, which duplicate_decls moves to the definition); a definition whose
+ *             position is not a token start of the unit is an error naming it.
+ *   targs     the template arguments of an instantiation, outermost level first, levels separated by `;`: a type by its Itanium
+ *             string (cp/mangle.cc mangle_type_string), an integral constant by `L<type><value>E`, a declaration by its assembler
+ *             name; any other kind of argument is an error naming it. Empty for a function that is not an instantiation.
+ *   bindings  `,`-separated, sorted, without repeats: the Itanium name of every declaration the body binds to and every type it
+ *             mentions, read from the body at cp_genericize time (PLUGIN_PRE_GENERICIZE, before gimplification, inlining and IPA): a
+ *             FUNCTION_DECL (a callee, a function whose address is taken; default arguments are in the call), a VAR_DECL with static
+ *             storage, and the mangled type of every expression and declaration of the body, so a typedef that names different
+ *             types in two units is a different binding. For an instantiation it is the instantiated body, so the names resolved at the
+ *             point of instantiation (two-phase lookup) are in. No flag of the compilation is in a line.
+ */
+#include "cpplib.h"
+#include "opts.h"
+#include "line-map.h"
+#include "cp/cp-tree.h"
+
+extern cpp_reader *parse_in;   /* c-family/c-opts.cc: the front end's own reader (its options give the language) */
+extern struct ht *ident_hash;  /* toplev.cc: the identifier table */
+
+static std::map<unsigned, std::set<std::string> > odr_bind;   /* DECL_UID of a function with a body -> its bindings */
+
+static std::string odr_type_name(tree t)
+{
+  return mangle_type_string(t);
+}
+
+static std::string odr_decl_name(tree d)
+{
+  const char *s = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d));
+  return s[0] == '*' ? s + 1 : s;
+}
+
+static void odr_add_type(std::set<std::string> &out, tree t, int depth = 0)
+{
+  if (!t || t == error_mark_node || depth > 8) return;
+  if (TREE_CODE(t) == LANG_TYPE || TREE_CODE(t) == TEMPLATE_TYPE_PARM || TREE_CODE(t) == TYPENAME_TYPE) return;   /* no mangling: an overload set, a braced list, a dependent type */
+  out.insert(odr_type_name(t));
+  switch (TREE_CODE(t)) {
+  case POINTER_TYPE: case REFERENCE_TYPE: case ARRAY_TYPE: case VECTOR_TYPE: odr_add_type(out, TREE_TYPE(t), depth + 1); break;
+  case FUNCTION_TYPE: case METHOD_TYPE:
+    odr_add_type(out, TREE_TYPE(t), depth + 1);
+    for (tree a = TYPE_ARG_TYPES(t); a && a != void_list_node; a = TREE_CHAIN(a)) odr_add_type(out, TREE_VALUE(a), depth + 1);
+    break;
+  default: break;
+  }
+}
+
+static tree odr_walk(tree *tp, int *walk_subtrees, void *data)
+{
+  std::set<std::string> &out = *(std::set<std::string> *)data;
+  tree t = *tp;
+  if (!t || t == error_mark_node) return NULL_TREE;
+  if (TYPE_P(t)) { *walk_subtrees = 0; return NULL_TREE; }
+  if (TREE_CODE(t) == FUNCTION_DECL) { out.insert(odr_decl_name(t)); *walk_subtrees = 0; return NULL_TREE; }
+  if (VAR_P(t) && (TREE_STATIC(t) || DECL_EXTERNAL(t))) out.insert(odr_decl_name(t));
+  if ((EXPR_P(t) || DECL_P(t) || CONSTANT_CLASS_P(t)) && TREE_TYPE(t)) odr_add_type(out, TREE_TYPE(t));
+  return NULL_TREE;
+}
+
+static void odr_pre_genericize(void *gcc_data, void *)
+{
+  tree fn = (tree)gcc_data;
+  if (!fn || TREE_CODE(fn) != FUNCTION_DECL || !DECL_SAVED_TREE(fn)) return;
+  std::set<std::string> &b = odr_bind[DECL_UID(fn)];
+  tree body = DECL_SAVED_TREE(fn);
+  walk_tree_without_duplicates_1(&body, odr_walk, &b, cp_walk_subtrees);
+  odr_add_type(b, TREE_TYPE(fn));
+}
+
+/* SHA-256 (FIPS 180-4) */
+struct OdrSha { unsigned h[8]; unsigned char buf[64]; size_t n; unsigned long long len; };
+static void odr_sha_block(OdrSha &c, const unsigned char *p)
+{
+  static const unsigned K[64] = {
+    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,
+    0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,
+    0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,
+    0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2 };
+  unsigned w[64];
+  for (int i = 0; i < 16; i++) w[i] = (unsigned)p[4*i] << 24 | (unsigned)p[4*i+1] << 16 | (unsigned)p[4*i+2] << 8 | p[4*i+3];
+  #define ROR(x, n) (((x) >> (n)) | ((x) << (32 - (n))))
+  for (int i = 16; i < 64; i++) {
+    unsigned s0 = ROR(w[i-15], 7) ^ ROR(w[i-15], 18) ^ (w[i-15] >> 3), s1 = ROR(w[i-2], 17) ^ ROR(w[i-2], 19) ^ (w[i-2] >> 10);
+    w[i] = w[i-16] + s0 + w[i-7] + s1;
+  }
+  unsigned a = c.h[0], b = c.h[1], cc = c.h[2], d = c.h[3], e = c.h[4], f = c.h[5], g = c.h[6], h = c.h[7];
+  for (int i = 0; i < 64; i++) {
+    unsigned S1 = ROR(e, 6) ^ ROR(e, 11) ^ ROR(e, 25), ch = (e & f) ^ (~e & g), t1 = h + S1 + ch + K[i] + w[i];
+    unsigned S0 = ROR(a, 2) ^ ROR(a, 13) ^ ROR(a, 22), mj = (a & b) ^ (a & cc) ^ (b & cc), t2 = S0 + mj;
+    h = g; g = f; f = e; e = d + t1; d = cc; cc = b; b = a; a = t1 + t2;
+  }
+  #undef ROR
+  c.h[0] += a; c.h[1] += b; c.h[2] += cc; c.h[3] += d; c.h[4] += e; c.h[5] += f; c.h[6] += g; c.h[7] += h;
+}
+static void odr_sha_init(OdrSha &c)
+{
+  static const unsigned I[8] = { 0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19 };
+  for (int i = 0; i < 8; i++) c.h[i] = I[i];
+  c.n = 0; c.len = 0;
+}
+static void odr_sha_update(OdrSha &c, const void *data, size_t len)
+{
+  const unsigned char *p = (const unsigned char *)data;
+  c.len += len;
+  while (len--) { c.buf[c.n++] = *p++; if (c.n == 64) { odr_sha_block(c, c.buf); c.n = 0; } }
+}
+static std::string odr_sha_hex(OdrSha &c)
+{
+  unsigned long long bits = c.len * 8;
+  unsigned char pad = 0x80;
+  odr_sha_update(c, &pad, 1);
+  unsigned char z = 0;
+  while (c.n != 56) odr_sha_update(c, &z, 1);
+  unsigned char l[8];
+  for (int i = 0; i < 8; i++) l[i] = (unsigned char)(bits >> (56 - 8 * i));
+  odr_sha_update(c, l, 8);
+  char out[65];
+  for (int i = 0; i < 8; i++) snprintf(out + 8 * i, 9, "%08x", c.h[i]);
+  return out;
+}
+
+/* the tokens of the unit's own input, read by libcpp as the front end reads it */
+struct OdrTok { std::string text; std::string file; int line, col; };
+static std::vector<OdrTok> odr_toks;
+static std::map<std::tuple<std::string, int, int>, size_t> odr_at;
+static bool odr_loaded, odr_lexed_ok;
+
+static bool odr_nodiag(cpp_reader *, enum cpp_diagnostic_level, enum cpp_warning_reason, rich_location *, const char *, va_list *) ATTRIBUTE_FPTR_PRINTF(5, 0);
+static bool odr_nodiag(cpp_reader *, enum cpp_diagnostic_level l, enum cpp_warning_reason, rich_location *, const char *m, va_list *ap) { (void)l; (void)m; (void)ap; odr_lexed_ok = false; return false; }
+
+static void *odr_realloc(void *p, size_t n) { return xrealloc(p, n); }
+static size_t odr_round(size_t n) { return n; }
+
+static void odr_load()
+{
+  if (odr_loaded) return;
+  odr_loaded = true;
+  odr_lexed_ok = true;
+  line_maps *lm = new line_maps();
+  linemap_init(lm, BUILTINS_LOCATION);
+  lm->reallocator = odr_realloc;   /* toplev.cc general_init sets the front end's own (ggc) ones; this table is the plugin's, in the heap */
+  lm->round_alloc_size = odr_round;
+  cpp_reader *r = cpp_create_reader((enum c_lang)cpp_get_options(parse_in)->lang, ident_hash, lm);
+  *cpp_get_options(r) = *cpp_get_options(parse_in);
+  cpp_get_callbacks(r)->diagnostic = odr_nodiag;
+  if (!(num_in_fnames == 1 && cpp_read_main_file(r, in_fnames[0]))) { odr_lexed_ok = false; return; }
+  for (;;) {
+    location_t loc;
+    const cpp_token *t = cpp_get_token_with_location(r, &loc);
+    if (t->type == CPP_EOF) break;
+    if (t->type == CPP_PADDING) continue;
+    unsigned char *sp = cpp_token_as_text(r, t);
+    const line_map_ordinary *map = NULL;
+    location_t sl = linemap_resolve_location(lm, loc, LRK_SPELLING_LOCATION, &map);
+    expanded_location x = linemap_expand_location(lm, map, sl);
+    OdrTok k; k.text = (const char *)sp; k.file = x.file ? x.file : ""; k.line = x.line; k.col = x.column;
+    odr_at.emplace(std::make_tuple(k.file, k.line, k.col), odr_toks.size());
+    odr_toks.push_back(k);
+  }
+}
+
+static bool odr_is(const OdrTok &t, const char *s) { return t.text == s; }
+
+/* [first, last] of the declaration whose declarator-id is token I (or, for a class, whose class-name is) */
+static bool odr_range(size_t i, bool is_class, size_t &first, size_t &last)
+{
+  size_t n = odr_toks.size(), j = i;
+  int depth = 0;
+  while (j > 0) {
+    const OdrTok &p = odr_toks[j - 1];
+    if (odr_is(p, ")")) depth++;
+    else if (odr_is(p, "(")) { if (depth > 0) depth--; }
+    else if (depth == 0) {
+      if (odr_is(p, ";") || odr_is(p, "{") || odr_is(p, "}")) break;
+      if (odr_is(p, ":") && j >= 2 && (odr_is(odr_toks[j - 2], "public") || odr_is(odr_toks[j - 2], "private") || odr_is(odr_toks[j - 2], "protected"))) break;
+    }
+    j--;
+  }
+  first = j;
+  (void)is_class;
+  /* forward: the body */
+  size_t k = i;
+  int d = 0;
+  bool colon = false;
+  size_t body = n;
+  for (; k < n; k++) {
+    const OdrTok &t = odr_toks[k];
+    if (odr_is(t, "(") || odr_is(t, "[")) d++;
+    else if (odr_is(t, ")") || odr_is(t, "]")) { if (d > 0) d--; }
+    else if (d == 0) {
+      if (odr_is(t, ":")) colon = true;
+      else if (odr_is(t, ";")) { last = k; return !is_class; }
+      else if (odr_is(t, "{")) {
+        const OdrTok &pv = odr_toks[k - 1];
+        bool init = colon && !odr_is(pv, ")") && !odr_is(pv, "}");   /* x{...} of a mem-initializer, not the body */
+        if (!init) { body = k; break; }
+        int b = 0;
+        for (; k < n; k++) { if (odr_is(odr_toks[k], "{")) b++; else if (odr_is(odr_toks[k], "}") && --b == 0) break; }
+      }
+    }
+  }
+  if (body == n) return false;
+  for (;;) {
+    int b = 0;
+    size_t m = body;
+    for (; m < n; m++) { if (odr_is(odr_toks[m], "{")) b++; else if (odr_is(odr_toks[m], "}") && --b == 0) break; }
+    if (m >= n) return false;
+    last = m;
+    if (is_class) return true;
+    /* function-try-block handlers: catch ( ... ) { ... } */
+    if (m + 1 < n && odr_is(odr_toks[m + 1], "catch")) {
+      size_t q = m + 2;
+      int pd = 0;
+      for (; q < n; q++) { if (odr_is(odr_toks[q], "(")) pd++; else if (odr_is(odr_toks[q], ")") && --pd == 0) break; }
+      if (q + 1 < n && odr_is(odr_toks[q + 1], "{")) { body = q + 1; continue; }
+    }
+    return true;
+  }
+}
+
+static bool odr_hash_at(location_t loc, bool is_class, std::string &hex, std::string &why)
+{
+  odr_load();
+  if (!odr_lexed_ok) { why = "the unit could not be lexed again"; return false; }
+  expanded_location x = expand_location(loc);
+  auto it = odr_at.find(std::make_tuple(std::string(x.file ? x.file : ""), x.line, x.column));
+  if (it == odr_at.end()) { why = "no token starts at the definition's position"; return false; }
+  size_t first, last;
+  if (!odr_range(it->second, is_class, first, last)) { why = "no body follows the declarator"; return false; }
+  OdrSha c; odr_sha_init(c);
+  for (size_t k = first; k <= last; k++) {
+    std::string e = std::to_string(odr_toks[k].text.size()) + ":";
+    odr_sha_update(c, e.data(), e.size());
+    odr_sha_update(c, odr_toks[k].text.data(), odr_toks[k].text.size());
+  }
+  hex = odr_sha_hex(c);
+  return true;
+}
+
+static bool odr_targ(tree a, std::string &out, std::string &why)
+{
+  if (TYPE_P(a)) { out = odr_type_name(a); return true; }
+  if (TREE_CODE(a) == INTEGER_CST) {
+    out = "L" + odr_type_name(TREE_TYPE(a)) + (tree_fits_shwi_p(a) ? std::to_string(tree_to_shwi(a)) : std::to_string(tree_to_uhwi(a))) + "E";
+    return true;
+  }
+  if (DECL_P(a)) { out = odr_decl_name(a); return true; }
+  if (TREE_CODE(a) == ADDR_EXPR && DECL_P(TREE_OPERAND(a, 0))) { out = "&" + odr_decl_name(TREE_OPERAND(a, 0)); return true; }
+  why = std::string("a template argument of kind ") + get_tree_code_name(TREE_CODE(a));
+  return false;
+}
+
+static void odr_emit()
+{
+  std::vector<std::string> lines;
+  cgraph_node *n;
+  FOR_EACH_DEFINED_FUNCTION(n) {
+    tree d = n->decl;
+    if (!TREE_PUBLIC(d) || !DECL_COMDAT(d) || n->clone_of) continue;
+    if (!(TREE_ASM_WRITTEN(d) || n->alias || n->thunk)) continue;
+    /* the declaration the symbol's definition is written in */
+    tree o = d;
+    if (n->alias && n->get_alias_target()) o = n->ultimate_alias_target()->decl;
+    else if (n->thunk && n->callees) o = n->callees->callee->decl;
+    if (DECL_CLONED_FUNCTION_P(o)) o = DECL_CLONED_FUNCTION(o);
+    tree pat = o;
+    std::string targs;
+    if (DECL_TEMPLATE_INFO(o) && DECL_TI_TEMPLATE(o)) {
+      pat = DECL_TEMPLATE_RESULT(DECL_TI_TEMPLATE(o));
+      tree args = DECL_TI_ARGS(o);
+      int depth = TMPL_ARGS_DEPTH(args);
+      for (int l = 1; l <= depth; l++) {
+        tree lv = TMPL_ARGS_LEVEL(args, l);
+        if (l > 1) targs += ";";
+        for (int k = 0; k < TREE_VEC_LENGTH(lv); k++) {
+          std::string a, why;
+          if (!odr_targ(TREE_VEC_ELT(lv, k), a, why)) { error_at(DECL_SOURCE_LOCATION(o), "ODRDEF: %qs: %s", odr_decl_name(d).c_str(), why.c_str()); return; }
+          targs += (k ? "," : "") + a;
+        }
+      }
+    }
+    std::string hex, why;
+    bool ok;
+    if (DECL_ARTIFICIAL(pat) || (DECL_DEFAULTED_FN(pat) && DECL_ARTIFICIAL(pat))) {   /* the compiler's own member: its class's definition */
+      tree cls = DECL_CONTEXT(pat);
+      if (CLASSTYPE_TEMPLATE_INFO(cls) && CLASSTYPE_TI_TEMPLATE(cls)) cls = TREE_TYPE(CLASSTYPE_TI_TEMPLATE(cls));
+      ok = odr_hash_at(DECL_SOURCE_LOCATION(TYPE_MAIN_DECL(cls)), true, hex, why);
+    } else ok = odr_hash_at(DECL_SOURCE_LOCATION(pat), false, hex, why);
+    if (!ok) { error_at(DECL_SOURCE_LOCATION(o), "ODRDEF: %qs: %s", odr_decl_name(d).c_str(), why.c_str()); return; }
+    std::string b;
+    auto bi = odr_bind.find(DECL_UID(o));
+    if (bi != odr_bind.end()) for (auto &x : bi->second) { if (!b.empty()) b += ","; b += x; }
+    lines.push_back(odr_decl_name(d) + "\t" + hex + "\t" + targs + "\t" + b);
+  }
+  std::sort(lines.begin(), lines.end());
+  fprintf(asm_out_file, "\t.pushsection\t.fnvnx.odrdef,\"\",%%progbits\n");
+  for (auto &l : lines) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", l.c_str());
+  fprintf(asm_out_file, "\t.popsection\n");
+}
+
 static void finish_unit(void *, void *)
 {
   symtab_node *n;
@@ -884,6 +1212,7 @@ static void finish_unit(void *, void *)
       emitted.insert(rows.back().sym);
     }
   }
+  if (is_cxx()) odr_emit();
   if (rows.empty() && vtrows.empty()) return;
   fprintf(asm_out_file, "\t.pushsection\t.fnvnx.sympair,\"\",%%progbits\n");
   for (auto &r : rows)
@@ -978,6 +1307,7 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
     register_callback(info->base_name, PLUGIN_FINISH_DECL, finish_decl, NULL);
     register_callback(info->base_name, PLUGIN_FINISH_TYPE, finish_type, NULL);
     register_callback(info->base_name, PLUGIN_ALL_IPA_PASSES_START, ipa_start, NULL);
+    register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, odr_pre_genericize, NULL);
   }
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);
   return 0;
