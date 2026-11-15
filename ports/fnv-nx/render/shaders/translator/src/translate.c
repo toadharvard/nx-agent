@@ -28,6 +28,12 @@ int fnvnx_shader_translate_glsl(const void *bc, size_t n, const fnvnx_shader_opt
 {
     static const fnvnx_shader_opts defaults = { 0, NULL, NULL, 0 };
     if (!opts) opts = &defaults;
+    /* The translation is a function of (bytecode, flags & FNVNX_SHADER_KEY_FLAGS, link pairs, backend) only: the cache key is sha256 over exactly
+     * those (fnvnx_shaders.h). From here on the function sees the reduced options, so a NONKEY bit cannot reach the frontend, the profile or the
+     * dk config; a bit that must change the GLSL has to be a KEY bit. */
+    fnvnx_shader_opts key_opts = *opts;
+    key_opts.flags &= FNVNX_SHADER_KEY_FLAGS;
+    opts = &key_opts;
     memset(r, 0, sizeof(*r));
     r->stage = FNVNX_STAGE_UNKNOWN;
     if (!bc) { snprintf(r->error, sizeof r->error, "null bytecode"); return 0; }
