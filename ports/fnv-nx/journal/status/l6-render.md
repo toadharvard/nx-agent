@@ -613,3 +613,7 @@ Paused: w3b, w4, farm; no other work.
     - w5: the checker universe from the flag bits plus nx_pair_variant; hex() from lib/sha256.
     - To L6A: #23, #29-#32 (gl4/dk scripts, gl.xml entry list, dk_facts).
     - To the orchestrator: #38 cmath set (L5/L2).
+- 00:48Z Cache race already closed by L1 w24 98deaec70: publish_dir, verify then atomic rename, an 8-process test. It lands in cand2; until then, one verdict per cache at a time.
+- 00:48Z w6 reports w16c1 done.
+    - Next, the path item: merge w16c1 into w6-root 34ce66f16, then render/d3d9 check and build cold/warm.
+    - Then audit rows #7, #13, #15-#17.
