@@ -1176,3 +1176,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Per-image jtabcert.json goes to FACTS JTABCERT/<image>.json; residue carries its reason. A merged modlift table that needs OWNER 6 is residue.
   - facts_commit is dropped from the format. The real run waits on w7.
 - 23:38 w12: b3c prof2 left no result (no timereport). prof2 has 23 units: b32 16 s, 072 159 s, ec2 812 s. The old store is deleted. b3c is measured again with ORDER-STACK.
+- 23:45 ORDER-STACK closed by measurement (L2 w2): at the current pin 84f0883e, 072 takes 41.5 s with the plugin and 40.7 s without (9 private slots). The 20k stack vars came from the stale blob 017758d5.
+  - b3c is slow in GCC's own passes (FRE, RTL dataflow at 6 GB). It is measured on the idle farm with -ftime-report.
+  - w12 back on the 6 FTOI units at base3 a964e90b3.
+- 23:45 L3b moves rcpcert.c and rcpgen.c into host recipe roots, deleting the direct gcc calls; w8 merges it.
