@@ -32,10 +32,16 @@ def flags_for(lang, cache, origin="native"):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--lang", required=True, choices=sorted(KIND))
+    ap.add_argument("--runtime", action="store_true", help="print the runtime_cflags of the record (the flags the guest runtime build adds) instead")
+    ap.add_argument("--lang", choices=sorted(KIND))
     ap.add_argument("--origin", default="native", choices=["native", "lifted"], help="the root's cxx_origin class")
     ap.add_argument("--cache", default=os.environ.get("GATE_CACHE") or os.path.expanduser("~/.cache/fnvnx-guest-flags"))
     a = ap.parse_args(argv)
+    if a.runtime:
+        print(json.dumps(recipe.runtime_cflags(json.load(open(os.path.join(HERE, "guest_compiler.json"))))))
+        return 0
+    if not a.lang:
+        ap.error("--lang or --runtime is required")
     try:
         out = flags_for(a.lang, a.cache, a.origin)
     except recipe.BuildRed as e:

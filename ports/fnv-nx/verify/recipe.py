@@ -451,6 +451,15 @@ def load_pin(repo="."):
     return json.load(open(p)) if os.path.exists(p) else None
 
 
+def runtime_cflags(pin):
+    """The flags the guest runtime (newlib, libstdc++) is built with beyond the semantic set: the `runtime_cflags` of the one guest compiler record.
+    The runtime build reads them here (guest_flags.py --runtime); no build script spells them."""
+    v = pin.get("runtime_cflags") if isinstance(pin, dict) else None
+    if not isinstance(v, list) or not all(isinstance(x, str) and x.startswith("-") for x in v):
+        raise BuildRed("%s: runtime_cflags must be a list of compiler flags" % GUEST_PIN)
+    return list(v)
+
+
 def guest_link_part(rec, root, pin, prof, files, roots):
     """The link of a guest root (part of guest_errors): script and libs are the profile's (link/guest.json), one fact for every guest link."""
     lk = rec.get("link")
