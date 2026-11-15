@@ -261,12 +261,12 @@ static int cmp_pairs(const Pairs *a, const Pairs *b) { if (a->n != b->n) return 
 static int cmp_vcls(const void *a, const void *b) { const VCls *x = a, *y = b; int c; if (x->fl != y->fl) return x->fl - y->fl; if ((c = memcmp(x->sb, y->sb, 32))) return c; if ((c = memcmp(x->sc, y->sc, 32))) return c; return cmp_pairs(&x->w, &y->w); }
 static int cmp_pcls(const void *a, const void *b) { const PCls *x = a, *y = b; int c; if (x->fl != y->fl) return x->fl - y->fl; if ((c = memcmp(x->sig, y->sig, 32))) return c; if (x->major != y->major) return x->major < y->major ? -1 : 1; return cmp_pairs(&x->pr, &y->pr); }
 static long rejected_pairs;   /* nx_pair_variant refused the pair (outside the link slots): the draw path cannot build it */
-static long ffp_programs;   /* the programs with a fixed-function side */
+static long ffp_programs, ffp_prog_by[4];   /* the programs with a fixed-function side */
 static uint8_t ffp_sig[NX_GL4SHIM_STAGE_COUNT][32];   /* sha256 of the row's text: the signature of a fixed-function stage */
 static void ffp_sigs(void) { for (int i = 0; i < NX_GL4SHIM_STAGE_COUNT; i++) fnvnx_sha256(nx_gl4shim_stages[i].text, strlen(nx_gl4shim_stages[i].text), ffp_sig[i]); }
 static long uncovered_L;   /* programs whose link set L is not empty: the draw path translates both stages per pair (link_pairs), which this certificate does not cover */
 static Prog *programs(const SLines *S, long *np) {
-    uncovered_L = 0; rejected_pairs = 0; ffp_programs = 0; ffp_sigs();
+    uncovered_L = 0; rejected_pairs = 0; ffp_programs = 0; memset(ffp_prog_by, 0, sizeof ffp_prog_by); ffp_sigs();
     VCls *v = NULL; long nv = 0; PCls *p = NULL; long npc = 0;
     for (long i = 0; i < S->n; i++) {
         const SLine *a = &S->l[i]; if (!a->ok) continue; int fl = (a->flags & FNVNX_SHADER_FLAT_COLOR) ? 1 : 0;
@@ -292,21 +292,31 @@ static Prog *programs(const SLines *S, long *np) {
             pg = realloc(pg, sizeof(Prog) * (size_t)(n + 1)); memcpy(pg[n].vsig, cb ? v[a].sc : v[a].sb, 32); memcpy(pg[n].psig, p[b].sig, 32); pg[n].fl = v[a].fl; pg[n].cb = cb; pg[n].ffp = 0; n++;
         }
     }
-    /* Pairs with a fixed-function side. D3D9 pairs a null VS or PS with the gl4shim row nx_pair_ffp_vs_row / nx_pair_ffp_ps_row name (by D3DRS_SHADEMODE: flat); the draw path forms (FFP VS, PS) for a PS of the same
-     * shade mode, (VS, FFP PS) for a VS of it, and (FFP VS, FFP PS). A fixed-function stage has no declared pairs, so nx_pair_variant does not select among the translator variants; every
-     * signature class of that shade mode is paired (a superset of what the front end forms, so a program it forms is covered). */
+    /* Pairs with a fixed-function side: the draw path (d3d9/dev/draw_prog.cpp nx_prog_resolve) forms (FFP VS, translated PS), (translated VS, FFP PS) and (FFP VS, FFP PS), and selects every one of them with
+     * the one function nx_pair_variant: the FFP VS's writes are nx_pair_ffp_vs_writes, the FFP PS's reads nx_pair_ffp_ps_reads, an FFP PS has ps_major 3. The same call, the same arguments. */
+    uint8_t fw[31], fr[31]; uint32_t nfw = nx_pair_ffp_vs_writes(fw), nfr = nx_pair_ffp_ps_reads(fr);
     for (int fl = 0; fl < 2; fl++) {
         int rv = (int)nx_pair_ffp_vs_row(fl != 0), rp = (int)nx_pair_ffp_ps_row(fl != 0);
-#define ADD(vs_, ps_, sides) do { pg = realloc(pg, sizeof(Prog) * (size_t)(n + 1)); memcpy(pg[n].vsig, vs_, 32); memcpy(pg[n].psig, ps_, 32); pg[n].fl = fl; pg[n].cb = 0; pg[n].ffp = sides; n++; } while (0)
-        ADD(ffp_sig[rv], ffp_sig[rp], 2);
-        for (long b = 0; b < npc; b++) if (p[b].fl == fl) ADD(ffp_sig[rv], p[b].sig, 1);
-        for (long a = 0; a < nv; a++) if (v[a].fl == fl) { ADD(v[a].sb, ffp_sig[rp], 1); ADD(v[a].sc, ffp_sig[rp], 1); }
+        uint32_t vv, pv, nl; uint8_t L[2 * 224];
+#define ADD(vs_, ps_, sides) do { pg = realloc(pg, sizeof(Prog) * (size_t)(n + 1)); memcpy(pg[n].vsig, vs_, 32); memcpy(pg[n].psig, ps_, 32); pg[n].fl = fl; pg[n].cb = cb; pg[n].ffp = sides; n++; } while (0)
+        int cb = 0; nl = 0;
+        if (nx_pair_variant(fw, nfw, 3, fr, nfr, (uint32_t)fl, &vv, &pv, L, &nl) < 0) rejected_pairs++; else if (nl) uncovered_L++; else ADD(ffp_sig[rv], ffp_sig[rp], 3);
+        for (long b = 0; b < npc; b++) if (p[b].fl == fl) {   /* (FFP VS, translated PS) */
+            nl = 0; if (nx_pair_variant(fw, nfw, (uint8_t)p[b].major, p[b].pr.p, (uint32_t)p[b].pr.n, (uint32_t)fl, &vv, &pv, L, &nl) < 0) { rejected_pairs++; continue; }
+            if (nl) { uncovered_L++; continue; }
+            ADD(ffp_sig[rv], p[b].sig, 2);
+        }
+        for (long a = 0; a < nv; a++) if (v[a].fl == fl) {   /* (translated VS, FFP PS): the complete variant is the function's */
+            nl = 0; if (nx_pair_variant(v[a].w.p, (uint32_t)v[a].w.n, 3, fr, nfr, (uint32_t)fl, &vv, &pv, L, &nl) < 0) { rejected_pairs++; continue; }
+            if (nl) { uncovered_L++; continue; }
+            cb = (vv & FNVNX_SHADER_VS_COMPLETE) != 0; ADD(cb ? v[a].sc : v[a].sb, ffp_sig[rp], 1); cb = 0;
+        }
 #undef ADD
     }
     free(v); free(p);
     qsort(pg, (size_t)n, sizeof(Prog), cmp_prog);
     long m = 0; for (long i = 0; i < n; i++) if (!m || cmp_prog(&pg[m - 1], &pg[i])) pg[m++] = pg[i];
-    for (long i = 0; i < m; i++) ffp_programs += pg[i].ffp != 0;
+    for (long i = 0; i < m; i++) { ffp_programs += pg[i].ffp != 0; ffp_prog_by[pg[i].ffp]++; }
     *np = m; return pg;
 }
 
@@ -448,7 +458,7 @@ static int mode_summary(int argc, char **argv) {
               if (k >= S.n || memcmp(S.l[k].sha, F.forms[i].sha, 32) || S.l[k].flags != fs) { missing++; k--; break; } } } }
     Prog *pg = programs(&S, &np);
     /* the link set */
-    char **lf = argv + sep + 1; int nl = sep2 - sep - 1; long nlines = 0, linked = 0, lfail = 0, lbad = 0, ffp_lines = 0, ffp_linked = 0;
+    char **lf = argv + sep + 1; int nl = sep2 - sep - 1; long nlines = 0, linked = 0, lfail = 0, lbad = 0, ffp_lines = 0, ffp_linked = 0, side_lines[4] = {0}, side_linked[4] = {0};
     for (int i = 0; i < nl; i++) {
         FILE *fp = fopen(lf[i], "r"); if (!fp) { fprintf(stderr, "sm_link: cannot read %s\n", lf[i]); return 2; }
         char *ln = NULL; size_t lc = 0;
@@ -458,7 +468,7 @@ static int mode_summary(int argc, char **argv) {
             k.fl = atoi(q);
             if (!bsearch(&k, pg, (size_t)np, sizeof(Prog), cmp_prog)) extra++;
             int isl = (q = jkey(ln, "status")) && !strncmp(q, "\"linked\"", 8); if (isl) linked++; else lfail++;
-            if ((q = jkey(ln, "ffp_sides")) && atoi(q) > 0) { ffp_lines++; ffp_linked += isl; }
+            if ((q = jkey(ln, "ffp_sides")) && atoi(q) > 0 && atoi(q) < 4) { ffp_lines++; ffp_linked += isl; side_lines[atoi(q)]++; side_linked[atoi(q)] += isl; }
         }
         free(ln); fclose(fp);
     }
@@ -502,8 +512,8 @@ static int mode_summary(int argc, char **argv) {
     FILE *s = fopen(argv[3], "w"); if (!s) return 2;
     fprintf(s, "{\"format\": \"fnvnx-sm-link-summary/1\", \"universe\": %d, \"red\": %ld, \"details\": {\"entries\": %d, \"unique_bytecodes\": %d, \"vs\": %ld, \"ps\": %ld, \"flag_sets\": %d, \"refused\": %ld, "
                "\"stage_certificates\": %ld, \"stage_not_ok\": %ld, \"signature_disagreements\": %ld, \"programs\": %ld, \"link_certificates\": %ld, \"linked\": %ld, \"link_fail\": %ld, "
-               "\"bad_link_lines\": %ld, \"missing_certificates\": %ld, \"unexpected_certificates\": %ld, \"link_set_programs_uncovered\": %ld, \"pairs_rejected\": %ld, \"table_rows\": %ld, \"table_linked\": %ld, \"table_fail\": %ld, \"table_bad\": %ld, \"ffp_programs\": %ld, \"ffp_certificates\": %ld, \"ffp_linked\": %ld, \"universe_sha256\": \"%s\"}}\n",
-            F.n + (int)TROWS, red, entries, F.n, nvs, nps, nfs, refused, S.n, bad_stage, disagree, np, nlines, linked, lfail, lbad, missing, extra, uncovered_L, rejected_pairs, trows, tlinked, tfail, tbad, ffp_programs, ffp_lines, ffp_linked, uhx);
+               "\"bad_link_lines\": %ld, \"missing_certificates\": %ld, \"unexpected_certificates\": %ld, \"link_set_programs_uncovered\": %ld, \"pairs_rejected\": %ld, \"table_rows\": %ld, \"table_linked\": %ld, \"table_fail\": %ld, \"table_bad\": %ld, \"ffp_programs\": %ld, \"ffp_certificates\": %ld, \"ffp_linked\": %ld, \"ffp_ps_only\": [%ld, %ld, %ld], \"ffp_vs_only\": [%ld, %ld, %ld], \"ffp_both\": [%ld, %ld, %ld], \"universe_sha256\": \"%s\"}}\n",
+            F.n + (int)TROWS, red, entries, F.n, nvs, nps, nfs, refused, S.n, bad_stage, disagree, np, nlines, linked, lfail, lbad, missing, extra, uncovered_L, rejected_pairs, trows, tlinked, tfail, tbad, ffp_programs, ffp_lines, ffp_linked, ffp_prog_by[1], side_lines[1], side_linked[1], ffp_prog_by[2], side_lines[2], side_linked[2], ffp_prog_by[3], side_lines[3], side_linked[3], uhx);
     return fclose(s) ? 2 : 0;
 }
 
