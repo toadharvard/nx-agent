@@ -372,3 +372,4 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
   Merges after v3 54/54, last in the order above. L3a w12 takes this table commit.
 - 22:40Z v3 shard 54/54 (farm 20): shapes 345, proved 335, model-gap 10, failed 0, 3,905 s. 52/54 complete. Still running: 25 (farm 07), 53 (farm 20).
 - 22:44Z v3 shard 25/54 (farm 07): shapes 345, proved 341, model-gap 4, failed 0. Farm 07 is done and archived. 53/54 complete. Only 53 remains (farm 20).
+- 22:46Z v3 COMPLETE, 54/54. Shard 53 (farm 20): proved 332, model-gap 12, timeout 1. Farm 20 archived; all v3 farms are done. The freeze on prove.py, model_sail.py, symform.py and certbasis.py lifts once w4's aggregation has run on the v3 tree.
