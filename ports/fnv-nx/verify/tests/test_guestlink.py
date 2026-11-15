@@ -41,6 +41,14 @@ check("onedef: the objects that define a symbol a root defines, sorted", recipe.
 check("onedef: no symbol shared, nothing is excluded (no name decides)", recipe.onedef(o, {"zzz"}) == [], "")
 check("onedef: a weak definition counts as a definition (the caller passes global and weak symbols)", recipe.onedef({"p.o": {"_cpu_init_hook"}}, {"_cpu_init_hook"}) == ["p.o"], "")
 
+crt = {"crt0.o": {"_start", "__libc_start_main"}, "crti.o": set(), "crtbegin.o": {"__do_global_dtors_aux"}}
+check("entry_object: ENTRY names another symbol, the startfile that defines _start is the runtime's own process start and is excluded",
+      recipe.entry_object(crt, "__fnvnx_guest_start") == ["crt0.o"], recipe.entry_object(crt, "__fnvnx_guest_start"))
+check("entry_object: the default entry _start keeps it", recipe.entry_object(crt, "_start") == [], "")
+items, finds = G.judge({"dirs": ["d"], "names": ["c"], "startfiles": ["crti.o"], "endfiles": ["e.o"]},
+                       {"dirs": ["d"], "names": ["c"], "startfiles": ["crti.o", "crt0.o"], "endfiles": ["e.o"]})
+check("a profile that lists crt0.o when the derivation excludes it is red (startfiles finding)", len(finds) == 1 and finds[0].startswith("startfiles:"), finds)
+
 P = {"dirs": ["d1", "d2"], "names": ["c", "m"], "startfiles": ["s.o"], "endfiles": ["e.o"]}
 items, finds = G.judge(dict(P), dict(P))
 check("judge: equal lists are green with every entry an item", finds == [] and len(items) == 6, (items, finds))

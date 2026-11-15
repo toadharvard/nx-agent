@@ -58,7 +58,11 @@ def derive(repo, cache):
         raw = recipe.parse_driver_link(text, at)
         host = j.ext[pin["runtime"]["name"]]["host"]
         objs = {p: {d["symbol"] for d in recipe.symbols(os.path.join(host, p), p)[0]} for p in raw["startfiles"] + raw["endfiles"]}
-    gone = recipe.onedef(objs, rootdef)
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "link"))
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "contract"))
+    import ldcheck
+    sc = open(os.path.join(repo, recipe.TREE, recipe.load_guest_link(repo)["script"])).read()
+    gone = sorted(set(recipe.onedef(objs, rootdef)) | set(recipe.entry_object(objs, ldcheck.script_entry(sc))))
     return {k: ([x for x in v if x not in gone] if k in ("startfiles", "endfiles") else v) for k, v in raw.items()}, gone, pin
 
 

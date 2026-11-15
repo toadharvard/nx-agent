@@ -70,6 +70,25 @@ check("a strong undefined reference is cover and output-undefined, not weak-unde
 ids = L.symbol_ids(objs(a=[("x", W, False)], b=[("x", G, False)]), set(), elf([("x", G, False)]))
 check("a symbol referenced strongly anywhere is not weak-only", all(not i.startswith("weak-undefined") for i in ids), ids)
 
+# a linker-defined symbol: referenced by an input, defined by no input, defined in the output's symbol table (a local one, as for _GLOBAL_OFFSET_TABLE_)
+ids = L.symbol_ids(objs(a=[("f", G, True), ("_GLOBAL_OFFSET_TABLE_", G, False)]), {"f", "_GLOBAL_OFFSET_TABLE_"}, elf([("f", G, True)]))
+check("a name only the linker defines (the output's symbol table has it, no input does) is green", ids == [], ids)
+# ... but never an undefined reference of the output, and never an input definition the output dropped
+ids = L.symbol_ids(objs(a=[("f", G, True), ("_GLOBAL_OFFSET_TABLE_", G, False)]), {"f"}, elf([("f", G, True), ("_GLOBAL_OFFSET_TABLE_", G, False)]))
+check("the same name undefined in the output is red: a linker-defined name is one the output defines",
+      ids == ["cover:_GLOBAL_OFFSET_TABLE_", "output-undefined:_GLOBAL_OFFSET_TABLE_"], ids)
+ids = L.symbol_ids(objs(a=[("f", G, True), ("g", G, True)]), {"f"}, elf([("f", G, True)]))
+check("an input definition the output lacks is red (cover)", ids == ["cover:g"], ids)
+
+# ---- one entry: the entry symbol is defined by exactly one object of the product
+check("script_entry: ENTRY(sym) of the script", L.script_entry("/* ENTRY(no) */\nENTRY(__fnvnx_guest_start)\nSECTIONS {}") == "__fnvnx_guest_start", "")
+check("script_entry: no ENTRY is the linker default _start", L.script_entry("SECTIONS {}") == "_start", "")
+check("entry: one product object defines it: green", L.entry_ids(objs(a=[("e", G, True)], b=[("f", G, True)]), "e") == [], "")
+ids = L.entry_ids(objs(a=[("f", G, True)]), "e")
+check("entry: no product object defines it (a startfile or library does, or none): red", ids == ["entry-none:e"], ids)
+ids = L.entry_ids(objs(a=[("e", G, True)], b=[("e", W, True)]), "e")
+check("entry: two product objects define it: red, naming both", ids == ["entry-duplicate:e <- a.o, b.o"], ids)
+
 # ---- host images: the declared loader (link.loader) --------------------------------------------------------------------------------------
 import argparse  # noqa: E402
 import contextlib  # noqa: E402
