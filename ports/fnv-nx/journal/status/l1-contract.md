@@ -1683,3 +1683,7 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - L3a holds ae7417004 until these gates are in.
 - 14:26 cpu_s (w12 c61259c85): held for cand3. It changes sandbox_id, so it lands with hermeticity item 0 in one cold run. L3a/w8 told.
   - cand4 note (L6, 15:10): at the w5 merge, take w6-root's deletion of render/d3d9/spec/ (150333ba3). The only copy is bridgefacts/d3d9.
+- 15:12 L6A item 4.6 unblocked by a gate_reach kind `gate_cert=<gate>`, a cand3 item for w12 (after typed dispatch).
+  - Certified iff the named gate is green in the same verdict, with its universe hash, and a call-graph proof that every caller of the site's entry gets its input only from producers in that universe.
+  - Product only after every dynamic GetProcAddress site is resolved.
+  - The sm_link row in reach_requests.tsv goes in cand4. w6 (L6A) wires the gl4_shader.c sites.
