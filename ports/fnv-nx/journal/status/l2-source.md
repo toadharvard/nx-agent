@@ -114,3 +114,12 @@ Orchestrator decision: -fstack-reuse=none in the guest semantic flag set (L1 fla
 - 2026-11-15 00:40 w3 ldbl patch: done, fbc1cb989. LONG_DOUBLE_TYPE_SIZE is ILP32?64:128, and TFmode is kept in scalar_mode_supported_p for _Float128 and libgcc's softfp (targhooks.cc:446). Cited in inbox l2-w3-ldbl.md. Farm session_01KmtZKVByegDXmdVwtmHRWU is building it and mirroring to tools/gcc-ilp32-msvcmodel. Status: doing. w3 is finishing test_ldbl (the full __LDBL_*__/__DBL_*__ list, no TF soft-fp references, the DFmode check), then goes to linkage.
 - 2026-11-15 00:45 gate_assumptions, 2 findings in toolchain/f2i_check (orchestrator): done, 1c9f04063 on claude/fnv-l2-source-f2icheck (from L3a int3 c09b32e87). The dead plugin is deleted (superseded by ftoi mode lifted; f2i/1 is rejected by the reader). The docs and A-F2IASM now point at ftoi and the asm decode. Routed to L3a.
 - 2026-11-15 00:45 L1 ask, ODR definition record `.fnvnx.odrdef` (names plugin; token sha256 + template args + front-end bindings), for the gate_abi ODR rule (6 std::string COMDATs differ by IPA). Queued for w3 after ldbl tests and linkage.
+- 2026-11-15 00:48 w2 @8fb86f97c: .fnvnx.ro, NOESCAPE (fnspec) and the parameter copy are accepted. Census over 114 objects: 27 crash (L1 a64order.py:490); 87 counted give 20,234 = a 13,923 / b 5,542 / c 368 / d 29 (was 361) / e 313 / f 41 / g 18.
+  Still open for w2:
+  - merge w1 faa4f24a8 (should remove most of class a) and w3 1f6af667c;
+  - lower aggregate copies field-wise, ordered (no fence rule exists for them);
+  - atomics to the x86 mapping;
+  - the string-op field, the no-library-name list and the pinned tarball;
+  - the census again.
+  Status: doing.
+- 2026-11-15 00:48 odrdef: L1 accepts it. Bindings come from the instantiated body (two-phase lookup); passed to w3.
