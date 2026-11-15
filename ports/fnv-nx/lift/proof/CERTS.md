@@ -57,7 +57,7 @@ The gate applies the same key rule to the rows: a row that went stale after it w
 ## Pinned IR 7c307464: hunks
 
 New pin: x86_proof.ir sha256 7c3074644653d2976cbb101ae993e94f2a09c9b7a3b574d3c74f6a80278d079c (BUMP now defaults to 1 in farm/sail_build.sh; BUMP=0 rebuilds the superseded IR).
-All hunks are transcriptions of ACL2 master 3ccb342c88bd3b815856f4bbc336382287934405 (ASM-009, OWNER 9) over the ACL2 8.5 translation; each patch file cites ACL2 file:line in its own header.
+All hunks are transcriptions of ACL2 master (sail_pins.txt row acl2) (ASM-009, OWNER 9) over the ACL2 8.5 translation; each patch file cites ACL2 file:line in its own header.
 
 | patch (sail_patches/bump/) | ACL2 master source | change |
 |---|---|---|

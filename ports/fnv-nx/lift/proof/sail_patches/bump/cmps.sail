@@ -1,5 +1,5 @@
 // PATCH (iv): x86_cmps = the ACL2 master definition of x86-cmps (G3: operand order of the SUB and the rep termination).  TRANSCRIPTION, ACL2 books/projects/x86isa/machine/instructions/string.lisp
-// at acl2 master 3ccb342c88bd3b815856f4bbc336382287934405 (ASM-009), def-inst x86-cmps, lines 312-560; the pinned model is the translation of ACL2 8.5, whose x86-cmps differs:
+// at acl2 master (sail_pins.txt row acl2) (ASM-009), def-inst x86-cmps, lines 312-560; the pinned model is the translation of ACL2 8.5, whose x86-cmps differs:
 //   8.5:    (gpr-arith/logic-spec operand-size #.*OP-SUB* dst src input-rflags)  with src = [rSI], dst = [rDI]  => computes [rDI] - [rSI]   (the model's CMPS operands are swapped: the first operand is [rSI])
 //   master: string.lisp:443  (gpr-arith/logic-spec operand-size #.*OP-SUB* src1 src2 input-rflags)  with src1 = [rSI] (:397-414, segment seg-reg) and src2 = [rDI] (:417-433, segment *es*)  => [rSI] - [rDI]
 // and the rep handling: master tests rCX = 0 first (string.lisp:383-386: with REPE/REPZ or REPNE/REPNZ and rCX = 0 only rIP advances: write-*ip), then after the comparison decrements rCX and keeps rIP (:453-456),
