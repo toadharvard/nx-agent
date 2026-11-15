@@ -53,8 +53,6 @@ TID = "ef" * 32
 MILESTONES = "exe_entry\texe_entry\t00003000\texe PE ImageBase+AddressOfEntryPoint\n# table_id %s\n" % TID
 RUN = "emulator run: header\n   %s\n   [fnvnx] not a loader line\n" % LINE
 MANIFEST = "00001000\tfnvboot_a\tcode\n00002000\tfnvboot_b\tcode\n00003000\tfnvboot_c\tcode\n000ff000\tI_rt\timport\n# table_id %s\n" % TID
-MODULES = ("# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index\n"
-           "m.dll\t%s\t16\t10000000\t01410000\t00001000\t0\t00000010\t0\t\n" % ("a" * 64))
 FINAL = re.compile(r"^BOOT elf=(\S+) rc=(\d+) reason=(\S+) last=(\S+) instr=(\d+) main=(\d+) threads=(\d+) seconds=(\d+) "
                    r"published=(\S+)@([0-9a-f]{12})( presents=\d+)? stage_table=(\S+)$")
 HOME = os.path.join(SCRATCH, "home")
@@ -128,7 +126,7 @@ def main():
         f.write(EXE)
     git("init", "-q", "--bare", BARE)
     git("config", "uploadpack.allowFilter", "true", cwd=BARE)
-    contract = {"elffacts.json": open(tb.facts_path(), "rb").read(), "entries.tsv": MANIFEST.encode(), "modules.tsv": MODULES.encode(),
+    contract = {"elffacts.json": open(tb.facts_path(), "rb").read(), "entries.tsv": MANIFEST.encode(),
                 "milestones.tsv": MILESTONES.encode(), "run.txt": RUN.encode()}
     ok_elf = fault_elf = gpu_elf = lifted_elf()
     M6, M3, M80 = tb.mode_bytes(6), tb.mode_bytes(3), tb.mode_bytes(80)

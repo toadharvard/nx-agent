@@ -520,8 +520,8 @@ Steps:
    them, and fails on any row or line it does not understand): elffacts.json (the link record of the ELF, L1: its sections and defined symbols, read through
    bootfacts.py), guest.elf, or manifest.json + part.NNN (joined in manifest
    order, every part's and the whole sha256 and size checked; a mismatch fails the job); entries.tsv (addr, symbol, kind
-   code|import, `# table_id` trailer); modules.tsv (name sha256 size preferred_base assigned_base size_of_image ...; reserved
-   ranges = assigned_base .. + size_of_image, plus the exe's own PE image range); the loader root's gen/keys.tsv (a generate-stage output taken through the recipe, not a branch file; the key range is
+   code|import, `# table_id` trailer); modules.tsv (the loader root's MODULES_TSV output, not a branch file; name sha256 size preferred_base assigned_base size_of_image ...; reserved
+   ranges = assigned_base .. + size_of_image, plus the exe's own PE image range); the loader root's KEYS_TSV output (a generate-stage output taken through the recipe, not a branch file; the key range is
    derived from the import rows of entries.tsv, and both table ids must agree); milestones.tsv (the contract's rows: exe_entry, module_entry:*, WinMain, import:*!Present) + the loader's
    console lines of run.txt (when present) -> the bootmiles table; optional softfloat.syms or softfloat.tsv (one symbol
    per line). Every missing required file is listed and fails the job
@@ -807,11 +807,12 @@ row or line a converter does not understand is an InputError carrying the file l
                                       entry_rva static load_index`; one row per module) -> `name lo hi` rows (lo = assigned_base,
                                       hi = lo + size_of_image) plus the row `exe` = the exe's own PE ImageBase .. + SizeOfImage,
                                       sorted by lo
-  stage-output --repo R --root ROOT --output P --cache C -o F
-                                      the generated table P of the admitted product root ROOT (e.g. ports/fnv-nx/loader, gen/keys.tsv), taken from
-                                      that root's generate stage through recipe.stage_output (the verdict's own store C = GATE_CACHE): the one
-                                      source of a generated loader table, no branch copy. The stage is found by rule: the one generator of the
-                                      recipe that declares P (none or several is an error); an unknown root or a red stage is an error
+  stage-output --repo R --root ROOT --output NAME --cache C -o F
+                                      the generated table that the admitted product root ROOT declares as its output NAME (recipe `outputs`, e.g.
+                                      ports/fnv-nx/loader KEYS_TSV / MODULES_TSV), taken from that root's generate stage through
+                                      recipe.stage_output (the verdict's own store C = GATE_CACHE): the one source of a generated table, no branch
+                                      copy. The stage is found by rule: the one generator of the recipe that declares the output's path (none or
+                                      several is an error); an undeclared NAME, an unknown root and a red stage are errors
   keys       --entries entries.tsv --keys keys.tsv
                                       prints LO:HI = the import-key range: lowest import key of entries.tsv .. highest + 0x10 (every
                                       key 16-byte aligned); every key of keys.tsv (`key module name ordinal conv ret args symbol`)

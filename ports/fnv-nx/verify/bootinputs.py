@@ -20,12 +20,13 @@ row or line a converter does not understand is an InputError carrying the file l
                                       prints LO:HI = the import-key range: lowest import key of entries.tsv .. highest + 0x10 (every
                                       key 16-byte aligned); every key of keys.tsv (`key module name ordinal conv ret args symbol`)
                                       must be an import key of entries.tsv and the two table ids must be equal
-  stage-output --repo R --root ROOT --output P --cache C -o F
-                                      the generated table P (a path in `generated[].outputs`, e.g. gen/keys.tsv) of the admitted product root
-                                      ROOT (e.g. ports/fnv-nx/loader), taken from that root's generate stage through recipe.stage_output (the
-                                      verdict's own store C = GATE_CACHE): the one source of a generated loader table; no branch copy of it
-                                      exists. The stage is found by rule: the one generator of the recipe that declares P (none or several is
-                                      an error, so a rename or a second producer is red, never a guess); an unknown root, a red stage is an error
+  stage-output --repo R --root ROOT --output NAME --cache C -o F
+                                      the generated table that the admitted product root ROOT declares as its output NAME (recipe `outputs`, e.g.
+                                      ports/fnv-nx/loader KEYS_TSV / MODULES_TSV), taken from that root's generate stage through
+                                      recipe.stage_output (the verdict's own store C = GATE_CACHE): the one source of a generated table, no branch
+                                      copy. The stage is found by rule: the one generator of the recipe that declares the output's path (none or
+                                      several is an error, so a rename or a second producer is red, never a guess); an undeclared NAME, an
+                                      unknown root and a red stage are errors
   milestones --table milestones.tsv --run run.txt [--entries entries.tsv] [--stage-table FILE] -o table.txt
                                       milestones.tsv + the loader's console lines of the contract's run.txt (every line that is exactly
                                       three spaces + `fnvnx-start: ...`, in file order, each distinct) -> a bootmiles table.
@@ -423,15 +424,19 @@ def generator_index(rec, output):
 
 
 def stage_output_table(repo, root, output, cache):
-    """The bytes of the generated table OUTPUT of product root ROOT of the tree REPO (recipe.stage_output, cached in CACHE)."""
+    """The bytes of the generated table that product root ROOT of the tree REPO declares as its output NAME `output` (recipe `outputs`;
+    recipe.stage_output, cached in CACHE)."""
     import recipe   # the verdict's recipe (the one build); imported only here, the other converters stay pure
     try:
         rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
     except (recipe.RecipeError, KeyError, OSError, ValueError) as e:
         raise InputError("root %s: %s" % (root, "; ".join(getattr(e, "errors", None) or [str(e)])[:300]))
-    i = generator_index(rec, output)
+    outs = rec.get("outputs") if isinstance(rec.get("outputs"), dict) else {}
+    if output not in outs:
+        raise InputError("root %s declares no output %s (declared: %s)" % (root, output, ", ".join(sorted(outs)) or "none"))
+    i = generator_index(rec, outs[output])
     try:
-        path, _ = recipe.stage_output(root, {"stage": "%s:gen:%d" % (root, i), "path": output}, repo, cache)
+        path, _ = recipe.stage_output(root, {"stage": "%s:gen:%d" % (root, i), "path": outs[output]}, repo, cache)
     except ValueError as e:
         raise InputError(str(e)[:400])
     return open(path, "rb").read()

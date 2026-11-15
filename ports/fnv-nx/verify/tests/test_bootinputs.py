@@ -85,6 +85,7 @@ def main():
     case("stage-output error: no generator declares it", good(raises(bi.generator_index, gr, "gen/x.tsv")))
     case("stage-output error: two generators declare it", good(raises(bi.generator_index, {"generated": [{"outputs": ["o"]}, {"outputs": ["o"]}]}, "o")))
     case("stage-output error: a recipe without generated", good(raises(bi.generator_index, {}, "o")))
+    case("stage-output error: an output NAME the root does not declare", good(raises(bi.stage_output_table, os.path.join(HERE, "..", "..", ".."), "ports/fnv-nx/loader", "NOPE", "/nonexistent")))
     case("stage-output error: an unadmitted root", good(raises(bi.stage_output_table, os.path.join(HERE, "..", "..", ".."), "ports/fnv-nx/nonexistent", "gen/keys.tsv", "/nonexistent")))
     # milestones
     ROW = lambda name, kind, v, src, extra=None: "\t".join([name, kind, v, src] + ([extra] if extra is not None else [])) + "\n"
