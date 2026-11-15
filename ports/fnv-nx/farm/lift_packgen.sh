@@ -3,7 +3,7 @@
 #   lift_packgen.sh SHA12 N [MODULE:N ...]        e.g. ... 64 d3dx9_38:32 binkw32:1 libvorbis:1 libvorbisfile:1
 # Fetches l3a-lift/src/<SHA12>/<K>of<N> and l3a-lift/src/<SHA12>-<module>/<K>of<n>, runs liftgen.py --finish --also ..., and pushes ONE orphan commit to
 # fnv-nx-build l3a-lift/pack/<SHA12>: the pack directory of liftgen.py (u/*.cpp, entries.tsv, forms.tsv, encs.tsv, imp_*.tsv, gate_liftgen.json; no inc/: the runtime's headers are the pack recipe's own generated stage)
-# plus shards.txt, finish.txt, README. Last line: PACKGEN commit=<40 hex> — the `commit` of the recipe's external (liftgen.py --recipe REF COMMIT TREE_SHA256;
+# plus shards.txt, finish.txt, README. Last line: PACKGEN commit=<40 hex> — the `commit` of the recipe's external (liftrecipe.py REF COMMIT TREE_SHA256;
 # TREE_SHA256 is what verify/cas.py ingest prints for that commit).
 # Env: FNVNX_NEED (more import-slot tables in the layout of iat.tsv, space separated), PACK_NOTE (text appended to the README), FNVNX_BUILD, FNVNX_WORK,
 # FNVNX_FACTS (directory of the published facts: universe.tsv and <module>/universe.tsv).

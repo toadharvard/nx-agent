@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Unit test of tools/prelude.py, the one inliner of the pack's runtime headers (inc/fnvl_prelude.h, inc/imp.h; packstage.py inc), and of its two users:
-the recipe (liftgen.inc_stages: the inputs of each step are the closure of its source) and the pack copy step (an external that carries an inc/ is rejected).
+the recipe (liftrecipe.inc_stages: the inputs of each step are the closure of its source) and the pack copy step (an external that carries an inc/ is rejected).
     python3 -I test_prelude.py"""
 import json, os, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__)); TOOLS = os.path.dirname(HERE); LIFT = os.path.dirname(TOOLS)
@@ -49,13 +49,13 @@ with tempfile.TemporaryDirectory() as t:
     check('packcopy: a pack with an inc/ (a carried prelude) is rejected', ok)
 
 # the recipe: the inputs of each inc step are exactly the closure of its source in the real tree, and the build.json says so
-import liftgen
+import liftrecipe
 rec = json.load(open(os.path.join(LIFT, 'pack', 'build.json')))
 steps = {g['outputs'][0]: g for g in rec['generated'] if g['args'][0] == 'inc'}
 repo = os.path.join(LIFT, '..', '..', '..')
 for name, (src, _) in prelude.INC.items():
-    dirs = [os.path.join(repo, x) for x in liftgen.INC_DIRS]
+    dirs = [os.path.join(repo, x) for x in liftrecipe.INC_DIRS]
     want = sorted(os.path.relpath(os.path.join(dd, n), repo) for dd, n in prelude.closure(dirs, src).values())
-    check('recipe: inc/%s has the closure of %s over %s as its inputs (%d files)' % (name, src, liftgen.INC_DIRS, len(want)), steps.get('inc/' + name, {}).get('inputs') == want and want)
+    check('recipe: inc/%s has the closure of %s over %s as its inputs (%d files)' % (name, src, liftrecipe.INC_DIRS, len(want)), steps.get('inc/' + name, {}).get('inputs') == want and want)
 check('recipe: the pack include directory is its own generated inc/, and no external carries a header', rec['include'] == ['ports/fnv-nx/lift/pack/inc'])
 print('preludetest: %d failed' % bad); sys.exit(1 if bad else 0)
