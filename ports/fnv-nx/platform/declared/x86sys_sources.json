@@ -1,13 +1,46 @@
 {
  "format": "fnvnx-x86sys-sources/1",
  "note": "The pinned sources of gen_x86sys.py: fnv-nx-build mirror branch tools/wdk71-headers (MANIFEST.json there records the ISO, cab and msi hashes and the ReactOS commit). gen_x86sys.py checks the sha256 of every file it reads against this record.",
- "mirror": {"repo": "fnv-nx-build", "ref": "tools/wdk71-headers", "commit": "cd0fc6801369e057d21cb04b62a1811353ffdee2", "tree_sha256": "b533c38f5629780ea99ed22123c8a9251ec398a6b72e3f43147729e446a06beb"},
+ "mirror": {
+  "repo": "fnv-nx-build",
+  "ref": "tools/wdk71-headers",
+  "commit": "cd0fc6801369e057d21cb04b62a1811353ffdee2",
+  "tree_sha256": "b533c38f5629780ea99ed22123c8a9251ec398a6b72e3f43147729e446a06beb"
+ },
  "files": {
-  "ks386": {"path": "headers/_ks386.inc_00858", "sha256": "21b726611a5608bcd21072901667fddca99bbbeb3eb4b944cf9c438b50bbab23", "origin": "Windows Driver Kit 7.1.0 (7600.16385.1), ks386.inc"},
-  "trap": {"path": "reactos/ntoskrnl/ke/i386/trap.s", "sha256": "7f92095488a4ffc6b638e8e3463104325b4788d04238a17a70fae04d7d061b61", "origin": "ReactOS 0db2415442da18342be8a834c3b97a2ea4be1740 ntoskrnl/ke/i386/trap.s (the x86 IDT of the NT kernel; L3a's seh.cc transcribes the same trap handlers)"},
-  "thread": {"path": "reactos/sdk/lib/rtl/i386/thread.c", "sha256": "9aad0631641723a6cd097d6889ec5c3d1c50a8bda15e81a6db61018e9b8e0e6c", "origin": "ReactOS 0db2415442da18342be8a834c3b97a2ea4be1740 sdk/lib/rtl/i386/thread.c RtlInitializeContext (the initial segment registers of a user thread)"}
+  "ks386": {
+   "path": "headers/_ks386.inc_00858",
+   "sha256": "21b726611a5608bcd21072901667fddca99bbbeb3eb4b944cf9c438b50bbab23",
+   "origin": "Windows Driver Kit 7.1.0 (7600.16385.1), ks386.inc"
+  },
+  "trap": {
+   "path": "reactos/ntoskrnl/ke/i386/trap.s",
+   "sha256": "7f92095488a4ffc6b638e8e3463104325b4788d04238a17a70fae04d7d061b61",
+   "origin": "ReactOS 0db2415442da18342be8a834c3b97a2ea4be1740 ntoskrnl/ke/i386/trap.s (the x86 IDT of the NT kernel; L3a's seh.cc transcribes the same trap handlers)"
+  },
+  "thread": {
+   "path": "reactos/sdk/lib/rtl/i386/thread.c",
+   "sha256": "9aad0631641723a6cd097d6889ec5c3d1c50a8bda15e81a6db61018e9b8e0e6c",
+   "origin": "ReactOS 0db2415442da18342be8a834c3b97a2ea4be1740 sdk/lib/rtl/i386/thread.c RtlInitializeContext (the initial segment registers of a user thread)"
+  }
  },
  "gate_since": {
-  "_KiRaiseSecurityCheckFailure": {"build": 9200, "source": "MSDN __fastfail (int 0x29): minimum supported client Windows 8, so the gate is absent on Windows 7"}
+  "_KiRaiseSecurityCheckFailure": {
+   "build": 9200,
+   "source": "MSDN __fastfail (int 0x29): minimum supported client Windows 8, so the gate is absent on Windows 7"
+  }
+ },
+ "wine": {
+  "repo": "fnv-nx-build",
+  "ref": "tools/wine-9.0",
+  "commit": "c8373ee49fb674f3fe535904d24c5670513c56e1",
+  "upstream": "Wine 9.0 (fd1153552d77)",
+  "files": {
+   "signal_i386": {
+    "path": "dlls/ntdll/unix/signal_i386.c",
+    "sha256": "70245021f17fae5002aaf3f2ea76f2151eb4c900a83e8ee05225e74ebf9afd0d",
+    "origin": "Wine 9.0 dlls/ntdll/unix/signal_i386.c (initial thread context, is_privileged_instr)"
+   }
+  }
  }
 }

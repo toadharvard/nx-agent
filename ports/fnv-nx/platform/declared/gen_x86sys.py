@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """gen_x86sys - the x86 system-state record x86sys.json, from the declared-OS record and the pinned sources alone.
 
-    gen_x86sys.py --os os.json --sources x86sys_sources.json --mirror DIR --out x86sys.json
+    gen_x86sys.py --os os.json --sources x86sys_sources.json --mirror DIR --wine DIR --out x86sys.json
 
 DIR is a checkout of the mirror named in the sources record (fnv-nx-build tools/wdk71-headers). The sha256 of every file read is checked against the
 record. Defined only for a native 32-bit x86 machine record (native_arch 0, process_wow64 0): any other record is refused, so a WOW64 record needs
@@ -17,6 +17,10 @@ Rows:
   int_ring3      the IDT vectors whose gate is DPL 3 in the pinned table (trap.s, expanded by its REPEAT blocks), those the OS build has (gate_since);
                  every other vector is #GP for `int n`.
   idtr_limit     8 * (number of gates of the table) - 1.
+  cr4            tsd: 0 (Wine 9.0 is_privileged_instr has no case for rdtsc 0F 31, so it executes in user mode; consistent with the owner's decision that
+                 rdtsc reads the platform timer); pce, umip: undecided (no pinned source states them).
+  eflags         the initial user EFLAGS of Wine 9.0 (0x202) and its IOPL field (bits 12-13) = 0; WDK EFLAGS_USER_SANITIZE has no IOPL bit, so user
+                 code cannot change it; the opcodes Wine 9.0 reports as privileged at IOPL 0 (in, out, ins, outs, cli, sti, hlt).
   sldt, sgdt, sidt base: undecided where the pinned sources do not state them."""
 import argparse
 import hashlib
@@ -60,7 +64,8 @@ def idt_gates(text):
     return stack[0]
 
 
-def build(osrec, src, mirror):
+def build(osrec, src, mirror, wine):
+    undec = lambda why: {"status": "undecided", "why": why}
     fl = osrec["fields"]
     if fl["native_arch"]["value"] != 0 or fl["process_wow64"]["value"] != 0:
         raise SystemExit("gen_x86sys: the sources describe a native 32-bit x86 machine; this record is not one")
@@ -103,15 +108,45 @@ def build(osrec, src, mirror):
     gates = idt_gates(txt["trap"])
     if len(gates) != 256:
         raise SystemExit("gen_x86sys: trap.s expands to %d gates, not 256" % len(gates))
+    wf = src["wine"]["files"]["signal_i386"]
+    wp = os.path.join(wine, wf["path"])
+    if sha(wp) != wf["sha256"]:
+        raise SystemExit("gen_x86sys: %s: sha256 is not the pinned one" % wf["path"])
+    wt = open(wp, errors="replace").read()
+    m = re.search(r"context\.EFlags\s*=\s*(0x[0-9a-fA-F]+);", wt)
+    fn = re.search(r"static inline DWORD is_privileged_instr\(.*?\n}\n", wt, re.S)
+    if not (m and fn):
+        raise SystemExit("gen_x86sys: signal_i386.c lacks the initial EFlags or is_privileged_instr")
+    body = fn.group(0)
+    ext = re.search(r"case 0x0f:.*?(?=\n    case 0x6c:)", body, re.S).group(0)
+    ext = ext.split("switch", 1)[1]   # the inner switch on the second opcode byte
+    ext_ops = sorted(int(x, 16) for x in re.findall(r"case (0x[0-9a-fA-F]+):\s*/\*", ext))
+    prv = re.search(r"((?:case 0x[0-9a-fA-F]+:[^\n]*\n\s*)+)return EXCEPTION_PRIV_INSTRUCTION;\n\s*default", body)
+    prv_ops = sorted(int(x, 16) for x in re.findall(r"case (0x[0-9a-fA-F]+):", prv.group(1)) if x != "0xcd")   # 0xcd (int n) is reported by the vector rule above
+    eflags0 = int(m.group(1), 16)
+    sanit = kg.get("EFLAGS_USER_SANITIZE")
+    wsrc = src["wine"]["files"]["signal_i386"]["origin"] + " @ " + src["wine"]["commit"][:12]
+    cr4 = {"tsd": {"value": 0 if not {0x31, 0x33} & set(ext_ops) else None,
+                   "source": "%s: is_privileged_instr intercepts only the 0F opcodes %s, so rdtsc (0F 31) runs in user mode; consistent with the owner's decision that rdtsc reads the platform monotonic timer and never faults" % (wsrc, [hex(o) for o in ext_ops])},
+           "pce": undec("rdpmc: neither the WDK 7.1 constants (ks386.inc names CR4_TSD but no PCE bit) nor Wine 9.0 (no case for 0F 33) state CR4.PCE of the declared OS"),
+           "umip": undec("sgdt/sidt/sldt/smsw/str: no pinned source states CR4.UMIP; CPUREF (cpuid leaf 7 ECX bit 2 of the declared CPU) is not in the pinned sources yet")}
+    iopl_mask = 0x3000
+    eflags = {"initial": {"value": eflags0, "source": "%s: the initial thread context, context.EFlags" % wsrc},
+              "iopl": {"value": (eflags0 & iopl_mask) >> 12, "source": "bits 12-13 of the initial EFLAGS (%s)" % wsrc},
+              "iopl_user_modifiable": {"value": bool(sanit & iopl_mask) if sanit is not None else None,
+                                       "source": "WDK 7.1 ks386.inc EFLAGS_USER_SANITIZE = 0x%X: the EFLAGS bits user code can set; bits 12-13 are %s" % (sanit, "in it" if sanit & iopl_mask else "not in it")},
+              "privileged_at_iopl0": {"opcodes": prv_ops, "source": "%s: is_privileged_instr returns EXCEPTION_PRIV_INSTRUCTION for these opcodes (ins, outs, in, out, hlt, cli, sti); popf cannot change IF at IOPL 0 (Intel SDM POPF, mirror tools/intel-sdm)" % wsrc}}
     since = src["gate_since"]
     vec = [v for v, (h, d) in enumerate(gates) if d == 3 and since.get(h, {}).get("build", 0) <= build_no]
     skipped = {"0x%02x" % v: since[h]["source"] for v, (h, d) in enumerate(gates) if d == 3 and since.get(h, {}).get("build", 0) > build_no}
-    undec = lambda why: {"status": "undecided", "why": why}
     return {
         "format": "fnvnx-x86sys/1",
         "os": {"sha256": None, "build": build_no},
         "sources": {k: {"path": f["path"], "sha256": f["sha256"], "origin": f["origin"]} for k, f in sorted(src["files"].items())},
         "mirror": src["mirror"],
+        "wine": {"commit": src["wine"]["commit"], "files": src["wine"]["files"]},
+        "cr4": cr4,
+        "eflags": eflags,
         "selectors": sel,
         "mov_to_sreg": mov,
         "int_ring3": {"vectors": vec, "absent_for_this_build": skipped,
@@ -128,10 +163,11 @@ def main(argv):
     ap.add_argument("--os", required=True)
     ap.add_argument("--sources", required=True)
     ap.add_argument("--mirror", required=True)
+    ap.add_argument("--wine", required=True, help="checkout of fnv-nx-build tools/wine-9.0")
     ap.add_argument("--out", required=True)
     a = ap.parse_args(argv)
     raw = open(a.os, "rb").read()
-    rec = build(json.loads(raw), json.load(open(a.sources)), a.mirror)
+    rec = build(json.loads(raw), json.load(open(a.sources)), a.mirror, a.wine)
     rec["os"]["sha256"] = hashlib.sha256(raw).hexdigest()
     with open(a.out, "w") as f:
         json.dump(rec, f, indent=1, sort_keys=True)

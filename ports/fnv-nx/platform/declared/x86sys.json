@@ -1,4 +1,52 @@
 {
+ "cr4": {
+  "pce": {
+   "status": "undecided",
+   "why": "rdpmc: neither the WDK 7.1 constants (ks386.inc names CR4_TSD but no PCE bit) nor Wine 9.0 (no case for 0F 33) state CR4.PCE of the declared OS"
+  },
+  "tsd": {
+   "source": "Wine 9.0 dlls/ntdll/unix/signal_i386.c (initial thread context, is_privileged_instr) @ c8373ee49fb6: is_privileged_instr intercepts only the 0F opcodes ['0x20', '0x21', '0x22', '0x23'], so rdtsc (0F 31) runs in user mode; consistent with the owner's decision that rdtsc reads the platform monotonic timer and never faults",
+   "value": 0
+  },
+  "umip": {
+   "status": "undecided",
+   "why": "sgdt/sidt/sldt/smsw/str: no pinned source states CR4.UMIP; CPUREF (cpuid leaf 7 ECX bit 2 of the declared CPU) is not in the pinned sources yet"
+  }
+ },
+ "eflags": {
+  "initial": {
+   "source": "Wine 9.0 dlls/ntdll/unix/signal_i386.c (initial thread context, is_privileged_instr) @ c8373ee49fb6: the initial thread context, context.EFlags",
+   "value": 514
+  },
+  "iopl": {
+   "source": "bits 12-13 of the initial EFLAGS (Wine 9.0 dlls/ntdll/unix/signal_i386.c (initial thread context, is_privileged_instr) @ c8373ee49fb6)",
+   "value": 0
+  },
+  "iopl_user_modifiable": {
+   "source": "WDK 7.1 ks386.inc EFLAGS_USER_SANITIZE = 0x3F4DD7: the EFLAGS bits user code can set; bits 12-13 are not in it",
+   "value": false
+  },
+  "privileged_at_iopl0": {
+   "opcodes": [
+    108,
+    109,
+    110,
+    111,
+    228,
+    229,
+    230,
+    231,
+    236,
+    237,
+    238,
+    239,
+    244,
+    250,
+    251
+   ],
+   "source": "Wine 9.0 dlls/ntdll/unix/signal_i386.c (initial thread context, is_privileged_instr) @ c8373ee49fb6: is_privileged_instr returns EXCEPTION_PRIV_INSTRUCTION for these opcodes (ins, outs, in, out, hlt, cli, sti); popf cannot change IF at IOPL 0 (Intel SDM POPF, mirror tools/intel-sdm)"
+  }
+ },
  "format": "fnvnx-x86sys/1",
  "idtr_limit": {
   "source": "256 gates of _KiIdt in trap.s, 8 bytes each",
@@ -134,6 +182,16 @@
    "origin": "ReactOS 0db2415442da18342be8a834c3b97a2ea4be1740 ntoskrnl/ke/i386/trap.s (the x86 IDT of the NT kernel; L3a's seh.cc transcribes the same trap handlers)",
    "path": "reactos/ntoskrnl/ke/i386/trap.s",
    "sha256": "7f92095488a4ffc6b638e8e3463104325b4788d04238a17a70fae04d7d061b61"
+  }
+ },
+ "wine": {
+  "commit": "c8373ee49fb674f3fe535904d24c5670513c56e1",
+  "files": {
+   "signal_i386": {
+    "origin": "Wine 9.0 dlls/ntdll/unix/signal_i386.c (initial thread context, is_privileged_instr)",
+    "path": "dlls/ntdll/unix/signal_i386.c",
+    "sha256": "70245021f17fae5002aaf3f2ea76f2151eb4c900a83e8ee05225e74ebf9afd0d"
+   }
   }
  }
 }
