@@ -409,8 +409,13 @@ The owner's words: "делегируй остаток работы аккура�
   - **Shaders.**
     - The game's shaders are a static set from its gamedata. The translator's link check (`sm_link`) over that whole
       set is a gate at 0 failures.
-    - The backends' link-failure branch becomes `fnvnx_reach_violation`, with that gate's certificate as its fact.
-      So neither GL nor deko3d has a run-time link-failure path.
+    - **GL keeps its branch "the shader did not compile or link" (owner, 2026-11-15 20:20Z: "В бэкенде GL есть ветка
+      «шейдер не собрался». Оставь.").** It is not converted to `fnvnx_reach_violation`, and no assumption about the GL
+      library's GLSL compiler is added. The stub gate accepts this branch with this owner decision cited.
+      <!-- fnvnx-owner-decision: gl-shader-failure | class: GL shader compile/link failure | root: ports/fnv-nx/render/gl4 -->
+    - The deko3d backend's link-failure branch becomes `fnvnx_reach_violation`, with the `sm_link` certificate as its fact.
+    - The translator-totality proof over the SM 1-3 grammar (L6, 2026-11-15) waits until after the first frame. `sm_link`
+      over the gamedata set stays the gate.
   - **The product ELF root.**
     - Owner: L3a, with a worker.
     - L1 supplies the link stage (`link/guest.json`) and the onedef and link-root rules.
@@ -555,15 +560,117 @@ a stale tree. The rules below make that class impossible. Adding checks on top o
 - A site in the exe or a module whose answer depends on an undecided row gets a call-graph reach certificate and goes
   to `fnvnx_reach_violation`. Without the certificate the build is red, and the row is reported to the orchestrator.
 - Other code reads these records and never restates them (rule 2). seh.cc's trap rows are an example.
+- **gs on Windows 7 (7601) x86, orchestrator decision 2026-11-15 22:15Z (it replaces the 22:05Z text).**
+  - No pinned document states the initial user-mode gs selector (L5: the whole WDK 7.1 ISO and Wine 9.0). Register dumps
+    of other NT builds do not count.
+  - The source is a Microsoft-published 7601 artefact: the Windows 7 SP1 x86 kernel (`ntkrnlpa.exe`/`ntoskrnl.exe` of
+    build 7601), with its public PDB from Microsoft's symbol server. Both are pinned by sha256 and mirrored in
+    fnv-nx-build `tools/win7sp1-x86-kernel` (private, never in this repository).
+  - The row's value is derived from that binary: the store of `KTRAP_FRAME.SegGs` (offset from the PDB) on the
+    user-thread initialization path. The function and the instruction address are cited in the row. Source 1 above
+    covers this ("the exe and module bytes" class, applied to the declared OS's own binary).
+  - The `null_seg_access` row and the 24 `mov m16, gs` reads then follow by the existing method. They are one row each,
+    with no per-site work.
+  - The gs-prefixed operands that the code universe reaches only by decoding data are a defect of the universe rule.
+    L3a fixes it in the facts stage. A site is never certified around it.
+  - Owner: L5 (a worker, now; it blocks the pack finish). L3a consumes the row.
+- **Where the Microsoft page is narrower (orchestrator, 2026-11-15 13:45Z; it applies to D3D9 and its shader models as well).**
+  - Microsoft does not list a case, but Wine 9.0 accepts it. That case is a silence, not a contradiction, so source 2
+    fills it and the accepted set is the union.
+  - Each such case is a cited conflict row: the Microsoft page and section, and the Wine 9.0 file and line. Examples are
+    `ps_3_0:vFace_src`, `ps:47` and `vs_3_0:v[a0.x]`.
+  - Where Microsoft states the opposite, Microsoft holds.
+  - "The opposite" means a Microsoft statement of what the system itself does: a result, an error code, a behaviour.
+    A rule addressed to the application ("applications may not use vs_3_0 with the fixed function pipeline") names no
+    result of the system, so it is a silence on that result, and Wine 9.0 fills it as above (orchestrator, 2026-11-15 16:00Z).
+
+## Owner order of 2026-11-15 20:25Z: no rework that gives no progress (binding)
+
+The owner's words: "Это переделка хуйни не дающей прогресса. Вот пересборка компилятора быстрая это важно. Все
+остальное что нужно по счету это важно. А это похуй. Уже корректно почти и хуй с ним."
+
+- Work counts only when it moves the next step in order: root, packs as roots, ELF, boot, first frame.
+- **Important now:**
+  - a fast compiler rebuild: the compiler stage and the plugins+runtime stage are separate;
+  - fast builds and verdicts;
+  - the items each step needs, taken in order.
+- **Not now:** reworking or re-proving something that already works and is nearly correct, when it does not block a step.
+  Examples: the shader-failure branch, a stronger proof of an already green gate, a cleaner form of a working rule.
+  - Such an item is written into the lead's status as "after the first frame" and left.
+- A lead asks itself before starting an item: "which step does this unblock, and when?" If it unblocks none, the item
+  waits.
+
+## Owner order of 2026-11-15 21:00Z: the compiler key cannot be wrong (binding for L1, L2)
+
+The owner's words: "По построению не должно быть неправильного ключа".
+
+- **The guest compiler is a recipe stage, like any unit.**
+  - Stage 1 is the compiler; stage 2 is the plugins and the runtime.
+  - Each stage runs in the hermetic sandbox (`sandbox.py`). Its key is the content of exactly what the sandbox mounts for
+    it.
+  - The stage cannot read anything outside its key, so a key that misses an input is impossible.
+  - There are no input lists kept by hand in `stamp.py` or `build.sh`: no env flags, no dpkg versions, no patch hashes.
+    Rule 1 forbids them.
+- **No pin is handed over.**
+  - A candidate names no compiler commit to wait for.
+  - Its recipe computes the stage keys from its own tree. It takes the compiler from `GATE_CACHE` on a hit and builds it
+    on a miss: one farm build, stage 2 only when only a plugin changed.
+  - A mirror in fnv-nx-build is a copy of that cache entry under its key.
+  - "The candidate needs a pin with key X" is therefore no longer a state. A changed plugin is a cache miss, built
+    once.
+- **Owners:** L2 (stages, PINKEY becomes this) and L1 (the recipe takes the compiler by stage key, `admit`, envcheck).
+  Lands with cand3. The cand2 pin 56a4d09c stands; cand2 is not reopened.
+
+## Owner order of 2026-11-15 21:00Z: every generator is a recipe stage; no path outside the key (binding for every layer)
+
+The owner's words: "Что ещё так проебано? Перепроверь. Пересобери."
+
+- **The defect.** The published pack 7b2faae276b2/db2aaf6d4a08 was lifted from a stale module table: galaxy.dll was
+  still a static image, so libvorbis and libvorbisfile were lifted at a base 0x450000 too high, and d3dx9_31, atimgpud
+  and gdffalloutnv were not lifted at all.
+- **The cause.** `lift/tools/pemod.py:7` read `/home/user/wt-l1/modules/modules.tsv`, a container-local copy, outside
+  any key. The same class holds across the whole lift input chain, at L3a 217cb3ce0: the facts and universe under
+  `/home/user/l3facts*`, `funcs.tsv`, `exe_mnemonics.tsv`, the bridges `/home/user/wt-l5/manifest/bridge.tsv`, and the
+  exe and module directories. It holds in other layers too, for example `render/shaders/total/sm_table.py` REF
+  `/home/user/work/l6/ref` and the `/home/user/fnv-nx-build` defaults of `tools/gates/ready.py`.
+- **The rule.**
+  - Every step that produces an input of a product root or a gate is a hermetic recipe stage: facts, universe, module
+    table, bridges, the lifted pack, the shader table and every other generated table.
+  - Its key is the content of what it mounts:
+    - the exe and module bytes from the gamedata external;
+    - modules.tsv and bridge.tsv from the tree at the commit;
+    - facts from their own stage's output.
+  - A stage that opens a path outside its mounts fails. So a stale copy cannot enter.
+  - No tool on a product or gate path has a default absolute path or an environment default. A missing input is an
+    argument error.
+  - The lifted image set is every module of modules.tsv that has code. The pack carries the sha256 of the table it was
+    lifted from, and the pack stage is red when it differs from the loader's.
+- **Owners.**
+  - L3a: the whole lift chain, done in this relift.
+  - L1: generator stages in recipe.py, and a gate that reds on any absolute path (or `os.environ.get` default)
+    reaching a product or gate input, over every tracked tool, by rule.
+  - L5 and L6: their tools of this class.
+  - Tools used only by tests (X11 locks) and scratch notes are outside the product and gate paths; L1's rule decides that
+    from the stage graph, not by a list.
+- **The cold pack build** of the relifted pack runs on up to 16 farms (orchestrator, 2026-11-15 21:00Z, for this one
+  build). It is sharded by the recipe, with N up to 16, and the shards' stores are merged by key.
 
 ## Orchestrator decision of 2026-11-15 09:20Z: weekly budget (binding for every session)
 
 - The owner's usage page reads: weekly 29 % used, reset on Saturday 2026-11-21 18:00Z. At the pace so far the limit ends
   on 2026-11-16 at night, five days early. The budget is at most about 11 % of the week per day until the reset.
 - Until the orchestrator lifts this:
-  - **Workers:** at most 2 per lead, and each runs only a path item that blocks the next step: first root, packs as roots,
-    ELF, boot.
+  - **Workers:** at most 4 per lead (owner, 2026-11-15 20:00Z: "Разреши лидерам большее количество саб-агентов
+    реализаторов"; it was 2). Each runs only a path item that blocks the next step: first root, packs as roots, ELF, boot.
+    - A lead splits each path item into independent pieces and runs them in parallel, one worker each. While a build runs,
+      its worker prepares the next piece rather than waiting.
+    - A worker whose piece is done, or waits on another layer, is archived, not left idle.
   - **Farms:** at most 4 per layer. Never rerun on unchanged content; a farm stops as soon as its queue is done.
+    - Exception (orchestrator, 2026-11-15 20:15Z, from the leads' bottleneck lines): up to 8 farms for the L3b proof queue
+      (each shard is 3,400-4,400 s), and up to 8 farms for the cold lifted-pack build (4,096 units, about 10 h on one
+      4-core farm).
+    - The pack build is sharded by the recipe itself: each farm builds the unit subset that one rule over the unit key
+      gives it, into the one content-keyed store, and the shards' stores are merged by key. There is no second build path.
   - **Leads:**
     - one message per finished item, no interim reports;
     - no re-reading of large files already read;
@@ -587,3 +694,48 @@ of those turns did nothing. Each turn re-reads the whole context, 200-300k token
   reports to its lead once per item, not per step.
 - Send with `priority: "later"`, unless it unblocks the receiver now.
 - Farm prompts do not tell the farm to read CLAUDE.md: it is loaded automatically.
+
+## Orchestrator decision of 2026-11-15 10:20Z: a candidate is frozen (binding for L1 and its workers)
+
+- The trunk last moved on 2026-11-12. The candidate cand2 is 620 commits ahead of it, and every new item resets its
+  verdict, so nothing merges. That is the cause.
+- Rule:
+  - A candidate's scope is frozen when its verdict starts.
+  - It takes only fixes for the reds of its own verdict.
+  - Every new item goes to the next candidate (cand3), which opens from the trunk right after the merge.
+  - Small candidates, merged often: at least one trunk merge a day while anything is open.
+
+## Orchestrator decision of 2026-11-15 10:30Z: call economy (binding for every session)
+
+Measured by the research session: spend = API calls × the whole context, because every tool call re-reads the full
+context. Mail made up 89 % of L1's calls; re-reading sources made up about 38 % of the workers' calls. So make fewer
+calls, not smaller ones.
+
+- **Calls:**
+  - Run independent tool calls in parallel, in one response.
+  - Chain dependent shell steps in one Bash call (`a && b`).
+  - Read a file once, in full, and re-read only a range that changed. To find a symbol, use one `rg -n` with context,
+    not a series of `sed -n` slices.
+  - Put a script you run more than once in a file instead of retyping it.
+- **Mail:**
+  - Send a message only when the receiver must act or decide, or when a stage is finished. Blockers go at once.
+  - One message per stage: collect the points and send them together.
+  - Read all queued notifications in one ReadNotifications call. Decide, then send every reply in one response, as
+    parallel send_message calls. Never send an acknowledgement.
+  - Use priority "next", unless the receiver must stop what it is doing.
+  - To learn a worker's state, read its status file or call list_sessions with children: true. Do not ask the worker.
+  - Commit the status file once per stage, not after each message.
+- **Code reading goes to a subagent (workers and leads).**
+  - Use the Agent tool, type Explore, when an answer needs more than 3 read or search calls: tracing a function,
+    comparing files, finding every user of a symbol.
+  - The brief gives the question, the paths, what you already know and the output you want: file:line references and
+    identifiers quoted verbatim, under 300 words.
+  - Check every hash, address or id it returns with one targeted command before you commit or send it.
+  - When you know the file and the place, do the one read or grep yourself.
+- **Addendum, 12:45Z (cand2 cannot go green on its own reds).** The candidate merges cut, under the trunk rule "code that
+  does not pass is removed from the trunk whole".
+  - admit.json keeps only the roots that are green over every gate.
+  - A test without a certified reference, and an uncertified generator together with the roots that use it, leave the
+    candidate. Their completion stays on the lead's branch.
+  - A gate's own failing selftest is fixed, not cut.
+  - The warm verdict stays at most 300 s.
