@@ -5,6 +5,7 @@ input of the layout plugin's build. Compiles layout/layout.cpp (ILP32) with the 
 collection after every function (--param ggc-min-expand=0 ggc-min-heapsize=0), and checks the lines read in-process from the
 object: key (MSVC's decorated type name), size, align, members, bases; every type of pi's `types` column has a layout line; an
 unknown plugin argument is an error. No network, no game data. Run: python3 -I <this file> from the checkout root."""
+import re
 import os
 import shutil
 import sys
@@ -134,6 +135,67 @@ def decltype(obj):
     check('every spelling round-trips: parse is total on what the plugin wrote', all(cc.parse(t) for t in got.values()))
 
 
+VEC = {
+    'n_s32': 'vec:4:16:16:int', 'n_u8': 'vec:16:16:16:unsigned_char', 'n_f32': 'vec:2:8:8:float', 'g_s4': 'vec:4:16:16:int',
+    'g_u4': 'vec:4:16:16:unsigned_int', 'g_s2': 'vec:2:8:8:int', 'g_d2': 'vec:2:16:16:double', 'g_c4': 'const:vec:4:16:16:int',
+    'g_p4': '*vec:4:16:16:int', 'g_a': '[2]vec:4:16:16:int', 'g_h': 'struct:HoldsV{c:char;v:vec:4:16:16:int}',
+    'n_fn': '(vec:16:16:16:unsigned_char,vec:4:16:16:int)vec:4:16:16:int',
+}
+
+# every code of class tcc_type in the pinned GCC 13.3 tree.def and cp/cp-tree.def has exactly one outcome: a row of the grammar (a `case` of dl_type), or
+# the error of dl_type's default arm.  Why the error arm cannot fire for a code (or is the rule) is the reason below; a code of the pinned headers
+# without an entry here fails the test, so a GCC change that adds a type code is seen.
+TCC_TYPE_ROW = {'POINTER_TYPE', 'ARRAY_TYPE', 'FUNCTION_TYPE', 'RECORD_TYPE', 'UNION_TYPE', 'ENUMERAL_TYPE', 'VOID_TYPE', 'INTEGER_TYPE', 'REAL_TYPE',
+                'BOOLEAN_TYPE', 'VECTOR_TYPE'}
+TCC_TYPE_ERROR = {
+    'COMPLEX_TYPE': 'deliberate error: _Complex has no spelling in the grammar (tested: decltype_errors cplx)',
+    'FIXED_POINT_TYPE': 'tree.def: _Fract/_Accum of Embedded-C; the aarch64 target has no fixed-point modes (tested: decltype_errors fract is a compile error)',
+    'QUAL_UNION_TYPE': 'tree.def: DECL_QUALIFIER unions, made by the Ada front end only',
+    'OPAQUE_TYPE': 'tree.def: MODE_OPAQUE types of a back end (rs6000 MMA); the aarch64 back end makes none',
+    'OFFSET_TYPE': 'C++ (pointer to data member); the section is written only for C units',
+    'REFERENCE_TYPE': 'tree.def: "Used in C++"; the section is written only for C units',
+    'NULLPTR_TYPE': 'tree.def: the C++ decltype(nullptr); C units only have the section',
+    'METHOD_TYPE': 'C++ member functions; C units only have the section',
+    **{c: 'cp/cp-tree.def: a type code of the C++ front end only (templates, dependent and pack types); C units only have the section'
+       for c in ('BASES', 'BOUND_TEMPLATE_TEMPLATE_PARM', 'DECLTYPE_TYPE', 'DEPENDENT_OPERATOR_TYPE', 'TEMPLATE_TEMPLATE_PARM', 'TEMPLATE_TYPE_PARM',
+                 'TRAIT_TYPE', 'TYPENAME_TYPE', 'TYPEOF_TYPE', 'TYPE_ARGUMENT_PACK', 'TYPE_PACK_EXPANSION', 'UNBOUND_CLASS_TEMPLATE')},
+    'LANG_TYPE': 'tree.def: a language-specific type, made by the C++ front end (cp-tree.h); C units only have the section',
+}
+
+
+def tcc_type_codes():
+    inc = subprocess.run([os.environ.get('FNVNX_GXX', 'aarch64-linux-gnu-g++-13'), '-print-file-name=plugin'], capture_output=True, text=True).stdout.strip()
+    codes = set()
+    for rel in ('include/tree.def', 'include/c-family/c-common.def', 'include/cp/cp-tree.def'):
+        f = os.path.join(inc, rel)
+        if os.path.exists(f):
+            codes |= set(re.findall(r'^DEFTREECODE\s*\((\w+),\s*"[^"]*",\s*tcc_type\b', open(f).read(), re.M))
+    return codes
+
+
+SO = []
+
+
+def vec(obj, td):
+    got = dict(l.split('\t') for l in pb.section(obj, '.fnvnx.decltype').splitlines())
+    for sym, want in sorted(VEC.items()):
+        check('vec %s is %s' % (sym, want), got.get(sym) == want, got.get(sym))
+    check('vec: exactly the external symbols', set(got) == set(VEC), sorted(set(got) ^ set(VEC)))
+    check('vec: NEON int32x4 and a vector_size(16) int are one spelling (GCC compares subparts and element types), unsigned and size differ',
+          got['n_s32'] == got['g_s4'] and got['g_s4'] != got['g_u4'] and got['g_s4'] != got['g_s2'] and got['g_s4'] != got['g_d2'], got)
+    codes = tcc_type_codes()
+    check('tcc_type universe is read from the pinned headers (32 codes at GCC 13.3)', len(codes) == 32, sorted(codes))
+    src = open(os.path.join(HERE, '..', 'layout', 'fnvnx_layout.cc')).read()
+    body = src[src.index('static std::string dl_type('):src.index('static void emit_decltype')]
+    cases = set(re.findall(r'case (\w+):', body))
+    check('every tcc_type code has one outcome (row or error)', codes == TCC_TYPE_ROW | set(TCC_TYPE_ERROR), sorted(codes ^ (TCC_TYPE_ROW | set(TCC_TYPE_ERROR))))
+    check('the row codes are exactly the cases of dl_type', {c for c in cases if c.endswith('_TYPE')} == TCC_TYPE_ROW, sorted(cases))
+    src = os.path.join(td, 'fract.c')
+    open(src, 'w').write('_Fract fr;\n')
+    r = pb.compile(src, os.path.join(td, 'fract.o'), SO)
+    check('_Fract is a compile error on aarch64 (FIXED_POINT_TYPE cannot reach the plugin)', r.returncode != 0, r.stderr[-300:])
+
+
 def decltype_errors(td, so):
     """a type outside the grammar is an error of the compilation; the declarations of one symbol that the front end composes (C11 6.2.7p3)
     give one line, with the composite type"""
@@ -198,6 +260,12 @@ def main():
         if r.returncode == 0:
             decltype(obj)
         decltype_errors(td, so)
+        obj = os.path.join(td, 'v.o')
+        r = pb.compile(os.path.join(HERE, 'layout', 'vec.c'), obj, so)
+        check('vec.c compiles', r.returncode == 0, r.stderr[:2000])
+        if r.returncode == 0:
+            SO[:] = so
+            vec(obj, td)
         obj = os.path.join(td, 'c.o')
         r = pb.compile(os.path.join(HERE, 'layout', 'linkage_c.c'), obj, so)
         check('linkage_c.c compiles', r.returncode == 0, r.stderr[:2000])
