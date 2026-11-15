@@ -411,3 +411,5 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - Blocked on L1: cand3's recipe.py has no link.entry and lacks loader outputs that L3a's L1 copy has (two lineages), and the derived closure is not seeded from link-script symbols. Reported with the proposed rule.
   - w9 12a285993: bootrt objstub fix. Under review, with the no-callback branches of guest_ptr and on_present still to remove, then checks on cand3 c0f504e2a.
 - bottleneck: waiting on L1 for one recipe lineage (link.entry, loader outputs) and the closure seed; waiting on L3a for the post-cand3 pack | 2 workers
+- 22:10: w9 d16d89c: bootrt objstub fix done. All callbacks are unconditional, reach exits through the host slot, and there is no syscall or log. test_bootrt: 7 cases, 0 failed.
+  - Sent to L1 for cand4. Open at L1: objstub has no host-profile analyzer, and the tests/bootguest admit row is missing at cand3.
