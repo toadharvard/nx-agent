@@ -965,7 +965,19 @@ struct frame_vars_pass : gimple_opt_pass {
       for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
         gimple *st = gsi_stmt(gsi);
         if (gcall *call = dyn_cast<gcall *>(st)) {
-          for (unsigned i = 0; i < gimple_call_num_args(call); i++) note(gimple_call_arg(call, i));
+          // NOESCAPE: an argument that the callee, by GCC's own description of the builtin, does not retain forms no pointer another thread
+          // can hold: the va_list builtins (they store frame-derived pointers into the va_list object and keep nothing) and every normal
+          // builtin whose fnspec says the argument does not escape (memcpy, memset, strlen, ...). ASM-001: the compiler's builtin semantics.
+          tree bf = gimple_call_fndecl(call);
+          bool nb = bf && fndecl_built_in_p(bf, BUILT_IN_NORMAL);
+          bool va = nb && (DECL_FUNCTION_CODE(bf) == BUILT_IN_VA_START || DECL_FUNCTION_CODE(bf) == BUILT_IN_VA_END ||
+                           DECL_FUNCTION_CODE(bf) == BUILT_IN_VA_COPY);
+          attr_fnspec sp = gimple_call_fnspec(call);
+          for (unsigned i = 0; i < gimple_call_num_args(call); i++) {
+            if (va) continue;
+            if (nb && sp.known_p() && sp.arg_specified_p(i) && sp.arg_noescape_p(i)) continue;
+            note(gimple_call_arg(call, i));
+          }
           note(gimple_call_chain(call));
         } else if (greturn *r = dyn_cast<greturn *>(st)) {
           note(gimple_return_retval(r));
