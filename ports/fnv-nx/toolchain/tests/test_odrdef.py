@@ -52,7 +52,13 @@ def main():
         S = 'struct S {};\n'
         ta = build_unit(td, so, 'ta', S + 'int g(S);\n' + TMPL + 'int u(S s) { return t(s); }\nint (*tp)(S) = t<S>;\n', O2)
         tb = build_unit(td, so, 'tb', S + 'int g(const S &);\n' + TMPL + 'int u(S s) { return t(s); }\nint (*tp)(S) = t<S>;\n', O2)
-        if not all((a, b, c, d, ta, tb)):
+        # default arguments are part of the call, so of the bindings: the same call with a different default expression is a different row
+        DA = 'int k1(); int k2();\nint h(int = {k});\n'
+        INLH = 'inline int fh() { return h(); }\nint (*ph)() = fh;\n'
+        da = build_unit(td, so, 'da', DA.format(k='k1()') + INLH, O2)
+        db = build_unit(td, so, 'db', DA.format(k='k2()') + INLH, O2)
+        ca = build_unit(td, so, 'ca', 'struct W { int m; W(int v) : m(v) {} int get() const { return m; } };\nint (W::*pg)() const = &W::get;\nW mk(int v) { return W(v); }\n', O0)
+        if not all((a, b, c, d, ta, tb, da, db, ca)):
             return check.done()
         ra, rb, rc, rd, rta, rtb = map(rows, (a, b, c, d, ta, tb))
         F = '_Z1fi'
@@ -65,6 +71,12 @@ def main():
         check('an instantiation: the template argument is mangled', rta[T][2] == '1S', rta[T])
         check('an instantiation: the template definition\'s hash is equal in both units', rta[T][1] == rtb[T][1], (rta[T], rtb[T]))
         check('a dependent call resolved to a different declaration at instantiation: different rows', rta[T][3] != rtb[T][3], (rta[T], rtb[T]))
+        rda, rdb, rca = rows(da), rows(db), rows(ca)
+        check('a default argument: same tokens, the callee of the default expression is a binding', rda['_Z2fhv'][1] == rdb['_Z2fhv'][1]
+              and '_Z2k1v' in rda['_Z2fhv'][3] and '_Z2k2v' in rdb['_Z2fhv'][3] and rda['_Z2fhv'][3] != rdb['_Z2fhv'][3], (rda['_Z2fhv'], rdb['_Z2fhv']))
+        EMPTY = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+        check('a written member has tokens (a ctor with an initializer, a const member); no row has an empty-token hash unless the compiler defined it',
+              rca['_ZN1WC1Ei'][1] != EMPTY and rca['_ZNK1W3getEv'][1] != EMPTY and rca['_ZN1WC1Ei'][1] != rca['_ZNK1W3getEv'][1], rca)
     finally:
         shutil.rmtree(td, ignore_errors=True)
     return check.done()

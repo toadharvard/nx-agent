@@ -872,14 +872,18 @@ static void ipa_start(void *, void *)
  *             of cc1plus (cp/parser.cc cp_lexer_new_main reads the same file with the same lexer into the parser's token buffer;
  *             the plugin cannot see that buffer, cp_parser is private to parser.cc, so it lexes the same file again with a second cpp_reader
  *             of the same language and options). Each token is hashed as `<byte length of its spelling>:<spelling>`; whitespace, comments
- *             and line breaks are not tokens. The range of a function is the declaration that contains the definition: from
- *             the first token after the previous `;`, `{`, `}` or access label at the same parenthesis depth (so `template <...>`, the
- *             specifiers and the declarator are in) to the `}` that closes the body (a ctor-initializer and function-try-block handlers
- *             included) or the `;` of `= default` / `= delete`. The definition of an instantiation is its template's (the pattern
- *             DECL_TEMPLATE_RESULT of DECL_TI_TEMPLATE, cp/pt.cc); of a function the compiler declared or defaulted, the definition of
- *             its class (the class-key to the closing `}`); of a thunk or an alias, its target's. The position of a definition is
- *             DECL_SOURCE_LOCATION (the declarator-id, which duplicate_decls moves to the definition); a definition whose
- *             position is not a token start of the unit is an error naming it.
+ *             and line breaks are not tokens. The range of a definition is two locations the front end recorded, not a search of the stream:
+ *             from DECL_SOURCE_LOCATION of the function (its declarator-id, which duplicate_decls moves to the definition; for a lambda, its
+ *             introducer) to its struct function's function_end_locus (the `}` that closes the body; a ctor-initializer and the handlers of
+ *             a function-try-block are inside). Each location maps to its token by (file, line, column), through the unit's line markers;
+ *             a location that is not the start of a token is an error naming the function. The definition of an instantiation is its
+ *             template's pattern (DECL_TEMPLATE_RESULT of DECL_TI_TEMPLATE, cp/pt.cc), whose struct function the front end keeps. A member
+ *             the compiler defines (implicit, or `= default`) has no written token: the empty sequence, its body being a function of the
+ *             class definition (the layout record) and of the bindings. A thunk or an alias takes its target's.
+ *             Measured (GCC 13.3, every form of a definition: free, in-class, static member, const member, constructor with initializer,
+ *             template): the front end records no start of the decl-specifier-seq (get_start of the function's location is its declarator-id),
+ *             so the specifiers, the return type and a template header are not in the token range. They are covered by the row's other
+ *             fields: the mangled function type (return type and parameters) is a binding and the template arguments are field (3).
  *   targs     the template arguments of an instantiation, outermost level first, levels separated by `;`: a type by its Itanium
  *             string (cp/mangle.cc mangle_type_string), an integral constant by `L<type><value>E`, a declaration by its assembler
  *             name; any other kind of argument is an error naming it. Empty for a function that is not an instantiation.
@@ -898,6 +902,7 @@ static void ipa_start(void *, void *)
 extern cpp_reader *parse_in;   /* c-family/c-opts.cc: the front end's own reader (its options give the language) */
 extern struct ht *ident_hash;  /* toplev.cc: the identifier table */
 
+static std::map<unsigned, location_t> odr_end;   /* DECL_UID of a function with a body -> function_end_locus (the closing `}`), recorded at cp_genericize time */
 static std::map<unsigned, std::set<std::string> > odr_bind;   /* DECL_UID of a function with a body -> its bindings */
 
 static std::string odr_type_name(tree t)
@@ -936,6 +941,13 @@ static tree odr_walk(tree *tp, int *walk_subtrees, void *data)
   if (VAR_P(t) && (TREE_STATIC(t) || DECL_EXTERNAL(t))) out.insert(odr_decl_name(t));
   if ((EXPR_P(t) || DECL_P(t) || CONSTANT_CLASS_P(t)) && TREE_TYPE(t)) odr_add_type(out, TREE_TYPE(t));
   return NULL_TREE;
+}
+
+/* PLUGIN_FINISH_PARSE_FUNCTION: finish_function has set function_end_locus (cp/decl.cc); the struct function is freed after the unit's functions are written */
+static void odr_finish_function(void *gcc_data, void *)
+{
+  tree fn = (tree)gcc_data;
+  if (fn && TREE_CODE(fn) == FUNCTION_DECL && DECL_STRUCT_FUNCTION(fn)) odr_end[DECL_UID(fn)] = DECL_STRUCT_FUNCTION(fn)->function_end_locus;
 }
 
 static void odr_pre_genericize(void *gcc_data, void *)
@@ -1042,76 +1054,27 @@ static void odr_load()
   }
 }
 
-static bool odr_is(const OdrTok &t, const char *s) { return t.text == s; }
 
-/* [first, last] of the declaration whose declarator-id is token I (or, for a class, whose class-name is) */
-static bool odr_range(size_t i, bool is_class, size_t &first, size_t &last)
-{
-  size_t n = odr_toks.size(), j = i;
-  int depth = 0;
-  while (j > 0) {
-    const OdrTok &p = odr_toks[j - 1];
-    if (odr_is(p, ")")) depth++;
-    else if (odr_is(p, "(")) { if (depth > 0) depth--; }
-    else if (depth == 0) {
-      if (odr_is(p, ";") || odr_is(p, "{") || odr_is(p, "}")) break;
-      if (odr_is(p, ":") && j >= 2 && (odr_is(odr_toks[j - 2], "public") || odr_is(odr_toks[j - 2], "private") || odr_is(odr_toks[j - 2], "protected"))) break;
-    }
-    j--;
-  }
-  first = j;
-  (void)is_class;
-  /* forward: the body */
-  size_t k = i;
-  int d = 0;
-  bool colon = false;
-  size_t body = n;
-  for (; k < n; k++) {
-    const OdrTok &t = odr_toks[k];
-    if (odr_is(t, "(") || odr_is(t, "[")) d++;
-    else if (odr_is(t, ")") || odr_is(t, "]")) { if (d > 0) d--; }
-    else if (d == 0) {
-      if (odr_is(t, ":")) colon = true;
-      else if (odr_is(t, ";")) { last = k; return !is_class; }
-      else if (odr_is(t, "{")) {
-        const OdrTok &pv = odr_toks[k - 1];
-        bool init = colon && !odr_is(pv, ")") && !odr_is(pv, "}");   /* x{...} of a mem-initializer, not the body */
-        if (!init) { body = k; break; }
-        int b = 0;
-        for (; k < n; k++) { if (odr_is(odr_toks[k], "{")) b++; else if (odr_is(odr_toks[k], "}") && --b == 0) break; }
-      }
-    }
-  }
-  if (body == n) return false;
-  for (;;) {
-    int b = 0;
-    size_t m = body;
-    for (; m < n; m++) { if (odr_is(odr_toks[m], "{")) b++; else if (odr_is(odr_toks[m], "}") && --b == 0) break; }
-    if (m >= n) return false;
-    last = m;
-    if (is_class) return true;
-    /* function-try-block handlers: catch ( ... ) { ... } */
-    if (m + 1 < n && odr_is(odr_toks[m + 1], "catch")) {
-      size_t q = m + 2;
-      int pd = 0;
-      for (; q < n; q++) { if (odr_is(odr_toks[q], "(")) pd++; else if (odr_is(odr_toks[q], ")") && --pd == 0) break; }
-      if (q + 1 < n && odr_is(odr_toks[q + 1], "{")) { body = q + 1; continue; }
-    }
-    return true;
-  }
-}
-
-static bool odr_hash_at(location_t loc, bool is_class, std::string &hex, std::string &why)
+/* The tokens of a definition are the ones from the token at START to the token at END, both locations the front end recorded (no search of the stream
+ * for a delimiter): START is DECL_SOURCE_LOCATION of the function (its declarator-id; for a lambda, its introducer) and END is its struct function's
+ * function_end_locus, the `}` that closes the body (a ctor-initializer and the handlers of a function-try-block are inside the range). Each location is
+ * mapped to its token by (file, line, column), through the unit's own line markers: libcpp resolves a token's spelling location the same way the front end
+ * does, so the pair is the same. A location with no token is an error. */
+static bool odr_hash_range(location_t start, location_t end, std::string &hex, std::string &why)
 {
   odr_load();
   if (!odr_lexed_ok) { why = "the unit could not be lexed again"; return false; }
-  expanded_location x = expand_location(loc);
-  auto it = odr_at.find(std::make_tuple(std::string(x.file ? x.file : ""), x.line, x.column));
-  if (it == odr_at.end()) { why = "no token starts at the definition's position"; return false; }
-  size_t first, last;
-  if (!odr_range(it->second, is_class, first, last)) { why = "no body follows the declarator"; return false; }
+  size_t at[2];
+  location_t loc[2] = { start, end };
+  for (int k = 0; k < 2; k++) {
+    expanded_location x = expand_location(loc[k]);
+    auto it = odr_at.find(std::make_tuple(std::string(x.file ? x.file : ""), x.line, x.column));
+    if (it == odr_at.end()) { why = k ? "no token starts at the function's end location" : "no token starts at the definition's position"; return false; }
+    at[k] = it->second;
+  }
+  if (at[0] > at[1]) { why = "the end of the definition is before its start"; return false; }
   OdrSha c; odr_sha_init(c);
-  for (size_t k = first; k <= last; k++) {
+  for (size_t k = at[0]; k <= at[1]; k++) {
     std::string e = std::to_string(odr_toks[k].text.size()) + ":";
     odr_sha_update(c, e.data(), e.size());
     odr_sha_update(c, odr_toks[k].text.data(), odr_toks[k].text.size());
@@ -1164,11 +1127,18 @@ static void odr_emit()
     }
     std::string hex, why;
     bool ok;
-    if (DECL_ARTIFICIAL(pat) || (DECL_DEFAULTED_FN(pat) && DECL_ARTIFICIAL(pat))) {   /* the compiler's own member: its class's definition */
-      tree cls = DECL_CONTEXT(pat);
-      if (CLASSTYPE_TEMPLATE_INFO(cls) && CLASSTYPE_TI_TEMPLATE(cls)) cls = TREE_TYPE(CLASSTYPE_TI_TEMPLATE(cls));
-      ok = odr_hash_at(DECL_SOURCE_LOCATION(TYPE_MAIN_DECL(cls)), true, hex, why);
-    } else ok = odr_hash_at(DECL_SOURCE_LOCATION(pat), false, hex, why);
+    if ((DECL_ARTIFICIAL(pat) && !LAMBDA_FUNCTION_P(pat)) || DECL_DEFAULTED_FN(pat)) {
+      /* a member the compiler defines (implicit, or `= default`): no token of it is written, its body is a function of its class's definition (checked by
+       * the layout record of the class) and of the bindings below, which are read from the generated body: the empty token sequence */
+      OdrSha c; odr_sha_init(c);
+      hex = odr_sha_hex(c);
+      ok = true;
+    } else {
+      location_t endl = UNKNOWN_LOCATION;
+      if (pat != o && DECL_STRUCT_FUNCTION(pat)) endl = DECL_STRUCT_FUNCTION(pat)->function_end_locus;   /* a template's pattern keeps its struct function */
+      else { auto ei = odr_end.find(DECL_UID(o)); if (ei != odr_end.end()) endl = ei->second; }
+      ok = endl != UNKNOWN_LOCATION ? odr_hash_range(DECL_SOURCE_LOCATION(pat), endl, hex, why) : (why = "the function has no recorded end location", false);
+    }
     if (!ok) { error_at(DECL_SOURCE_LOCATION(o), "ODRDEF: %qs: %s", odr_decl_name(d).c_str(), why.c_str()); return; }
     std::string b;
     auto bi = odr_bind.find(DECL_UID(o));
@@ -1308,6 +1278,7 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
     register_callback(info->base_name, PLUGIN_FINISH_TYPE, finish_type, NULL);
     register_callback(info->base_name, PLUGIN_ALL_IPA_PASSES_START, ipa_start, NULL);
     register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, odr_pre_genericize, NULL);
+    register_callback(info->base_name, PLUGIN_FINISH_PARSE_FUNCTION, odr_finish_function, NULL);
   }
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);
   return 0;
