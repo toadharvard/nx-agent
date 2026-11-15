@@ -32,8 +32,7 @@
 #  6 publish the orphan commit of OUT.json, OUT.console.txt, spec.json, meta.json to branch l4-verify/boot/<elf_id>
 #  7 final line: BOOT elf=<id> rc=<boot rc> reason=<r> last=<milestone|none> instr=<n> main=<n> threads=<n> seconds=<s> published=<branch>@<commit12>
 # --gpu-branch B: the renderer. Branch B of the artifacts repository must hold libnxgl4.so (the renderer's host library, GL 4.5 on
-#    Mesa llvmpipe). The job fetches it, requires the packages gcc (the callback shim of verify/bootgpu.py), libegl1 and libegl-mesa0 at the versions of
-#    verify/env.json (installed by farm/setup_verdict_env.sh, never by this job; a missing or other version fails the job), checks that the library loads, and runs boot.py with --gpu LIB --frames DIR. EVERY
+#    Mesa llvmpipe). The job fetches it, requires the host to match the declared environment (verify/env.json, checked by verify/envcheck.py above, installed by farm/setup_verdict_env.sh, never by this job), checks that the library loads, and runs boot.py with --gpu LIB --frames DIR. EVERY
 #    presented frame is published, losslessly, by content (no cap, no sampling): boot.py stores each distinct frame once as <key>.rgba + <key>.txt
 #    in the frames directory (key = sha256 of the .txt bytes followed by the .rgba bytes; a repeated identical frame, such as a static menu, is the
 #    same file), and the job publishes every file there under frames/ with the result. OUT.json "frames" has a record for every frame (n, t_ns,
@@ -102,13 +101,6 @@ ENVF=$NX/verify/env.json   # the declared inputs are read only from the tree the
 [ -n "${GATE_CACHE:-}" ] || die "input-error: GATE_CACHE is not set (the verdict's cache; the host runtime verify/bootrt is built in it by recipe.py)"
 export GATE_CACHE
 python3 -I "$NX/verify/envcheck.py" check --env "$ENVF" > "$WORK/envcheck.txt" 2>&1 || { sed 's/^/boot_job: /' "$WORK/envcheck.txt" >&2; die "input-error: the host does not match the declared environment ($ENVF); set the host up with farm/setup_verdict_env.sh"; }
-if [ -n "$GPU_BRANCH" ]; then   # the renderer's host packages are part of the declared environment (verify/env.json): required, never installed here
-  for p in gcc libegl1 libegl-mesa0; do
-    want=$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["packages"][sys.argv[2]])' "$ENVF" "$p") || die "input-error: $ENVF does not declare package $p"
-    have=$(dpkg-query -W -f '${Version}' "$p" 2> /dev/null || true)
-    [ "$have" = "$want" ] || die "input-error: package $p=$want ($ENVF) is required by --gpu-branch, found '${have:-none}'; set the host up with farm/setup_verdict_env.sh"
-  done
-fi
 
 # 2. the guest branch
 if [ ! -d "$ARTIFACTS/.git" ] && [ ! -f "$ARTIFACTS/HEAD" ]; then

@@ -285,7 +285,7 @@ def main():
     r = subprocess.run(["bash", os.path.join(TREE, "farm", "boot_job.sh"), "testid"], env={"PATH": os.environ["PATH"], "HOME": HOME, "ARTIFACTS_URL": BARE, "GAME_DIR": GAME, "LANG": "C.UTF-8"}, capture_output=True, text=True)
     tb.case("no quantum: job fails (no default)", r.returncode == 1 and "--quantum" in r.stderr, (r.returncode, r.stderr[-400:]))
     # --- the renderer: --gpu-branch
-    genv = {}   # the host packages come from the declared environment (verify/env.json); the job requires them and installs nothing
+    genv = {}   # the host matches the declared environment (verify/env.json, envcheck.py); the job installs nothing
     rc, out, err = run_job(["gpuid", "--gpu-branch", GB], genv)
     last = out.strip().splitlines()[-1] if out.strip() else ""
     m = FINAL.match(last)
