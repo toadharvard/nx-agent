@@ -1,6 +1,7 @@
 # L6A DEKO status (lead: Opus, branch claude/fnv-l6a-deko)
 
-Updated 2026-11-15 13:45Z. CLAUDE.md = integration 0e4c31db2 (call economy).
+Updated 2026-11-15 20:00Z. CLAUDE.md = integration dd27cfdb1 (weekly budget: up to 4 workers per lead).
+bottleneck: waiting on L1 (w12 gate_cert kind, cand3, + sm_link reach_requests row, cand4) and L6 (w5 sm_link over gamedata ∪ gl4shim table via render/pair) for 4.6 stage B; gl4 build+link fast (content-keyed, unchanged objects hit); workers 1 (w6, waiting), deko w4 archived (deko off path until first frame)
 
 ## Path plan 2026-11-14 (orchestrator, ALL.md on 21b10f1a)
 
