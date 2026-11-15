@@ -254,7 +254,8 @@ class Subst:
         elif n.op in ('const', 'var', 'fld'): r = n
         else:
             a = [s(c) for c in n.a]
-            r = C(_ev(n, [c.x for c in a]), n.w) if n.op != 'load' and all(c.op == 'const' for c in a) else mk(n.op, n.w, a, n.x)
+            if n.op == 'ite' and a[0].op == 'const': r = a[1] if a[0].x else a[2]      # a selector (the symbolic immediate bits of a shape) that is a constant picks its arm: the DSL's own ite semantics
+            else: r = C(_ev(n, [c.x for c in a]), n.w) if n.op != 'load' and all(c.op == 'const' for c in a) else mk(n.op, n.w, a, n.x)
         s.memo[n.u] = r; return r
 
 def normalize(form, env=None):
