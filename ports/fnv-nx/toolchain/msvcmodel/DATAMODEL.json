@@ -535,7 +535,11 @@
    "mechanism": "msvcmodel.patch hunks in gcc/cp/init.cc, gcc/cp/call.cc, gcc/cp/class.cc and gcc/targhooks.cc",
    "kind": "patch",
    "status": "closed",
-   "check": "ldbl/model.cpp cases (test_ldbl model() step)",
+   "check": {
+    "kind": "test",
+    "file": "toolchain/tests/test_ldbl.py",
+    "id": "model"
+   },
    "flag": null,
    "exe_source": "pinned cl 15.00 output recorded in ldbl/model.cpp comments (Microsoft does not document the cookie)",
    "citations": []

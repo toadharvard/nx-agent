@@ -118,8 +118,15 @@ def main():
             cit.append({'page': 'docs/' + d['page'], 'line': hit[0], 'quote': d['quote']})
         if not f['doc'] and not f.get('exe_source'):
             errs.append('D1 %s has neither a doc quotation nor an exe_source' % i)
-        if not f.get('check'):
+        c = f.get('check')
+        if not c:
             errs.append('C1 %s has no check' % i)
+        elif isinstance(c, str):
+            if not re.fullmatch(r'static_assert DM\("%s"\) in toolchain/tests/ldbl/datamodel\.cpp' % re.escape(i), c):
+                errs.append('C1 %s: a string check is `static_assert DM("<id>") in toolchain/tests/ldbl/datamodel.cpp`, anything else is {kind, file, id}' % i)
+        elif not (isinstance(c, dict) and sorted(c) == ['file', 'id', 'kind'] and c['kind'] == 'test' and all(isinstance(v, str) and v for v in c.values())
+                  and os.path.isfile(os.path.join(os.path.dirname(os.path.abspath(a.facts)), '..', '..', '..', c['file']))):
+            errs.append('C1 %s: check must be a DM string or {"kind": "test", "file": <existing path from ports/fnv-nx>, "id": <function>}' % i)
         r = {k: f[k] for k in ('id', 'property', 'msvc', 'gcc', 'mechanism', 'kind', 'status', 'check') if k in f}
         r['flag'] = f.get('flag')
         if f.get('exe_source'):

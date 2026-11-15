@@ -90,9 +90,15 @@ def datamodel(td, so):
     doc = json.load(open(os.path.join(root, 'msvcmodel', 'DATAMODEL.json')))
     src = open(os.path.join(HERE, 'ldbl', 'datamodel.cpp')).read()
     rows = {r['id']: r for r in doc['rows']}
-    want = sorted(i for i, r in rows.items() if r['check'].startswith('static_assert DM('))
+    want = sorted(i for i, r in rows.items() if isinstance(r['check'], str))
     cases = sorted(set(re.findall(r'^DM\("(S\d+)"', src, re.M)))
     check('every static_assert row has a case and every case a row', cases == want, sorted(set(want) ^ set(cases)))
+    for r in rows.values():
+        c = r['check']
+        if isinstance(c, dict):
+            tf = open(os.path.join(root, '..', c['file'])).read()
+            check('%s: check %s::%s is a function of that test file and main() runs it' % (r['id'], c['file'], c['id']),
+                  re.search(r'^def %s\(' % re.escape(c['id']), tf, re.M) and re.search(r'^\s+%s\(' % re.escape(c['id']), tf.rsplit('\ndef main(', 1)[1], re.M), c)
     for r in rows.values():
         check('%s has a doc quotation or an exe_source, a mechanism and a status' % r['id'],
               (r['citations'] or r.get('exe_source')) and r['mechanism'] and r['status'] in ('closed', 'open'), r)
