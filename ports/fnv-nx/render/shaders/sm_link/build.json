@@ -25,8 +25,7 @@
   "ports/fnv-nx/lib/sha256/include",
   "ports/fnv-nx/render/pair/include",
   "ports/fnv-nx/render/smscan/include",
-  "ports/fnv-nx/render/gl4shim/include",
-  "ports/fnv-nx/render/nxgpu"
+  "ports/fnv-nx/render/gl4shim/include"
  ],
  "units": "all",
  "external": [],

@@ -19,7 +19,6 @@
 #include "fnvnx_sdp.h"
 #include "nx_gl4shim.h"    /* the GL backend's own GLSL rewrite: the text Mesa compiles is the shim's output */
 #include "nx_smscan.h"    /* the one scanner of the draw path: nx_sm_check, nx_sm_pairs */
-#include "nx/gpu_abi.h"   /* enum NxStage: the argument of nx_pair_ffp_row */
 #include "nx_pair.h"      /* the one selection function of the draw path: nx_pair_variant */
 #include "fnvnx_dk_layout.h"   /* the product header: fnvnx_dk_vs_needs_complete is called, not copied */
 #include "fnvnx_sha256.h"
@@ -290,14 +289,14 @@ static Prog *programs(const SLines *S, long *np) {
             if (nx_pair_variant(v[a].w.p, (uint32_t)v[a].w.n, (uint8_t)p[b].major, p[b].pr.p, (uint32_t)p[b].pr.n, (uint32_t)v[a].fl, &vv, &pv, L, &nl) < 0) { rejected_pairs++; continue; }
             if (nl) { uncovered_L++; continue; }
             int cb = (vv & FNVNX_SHADER_VS_COMPLETE) != 0;
-            pg = realloc(pg, sizeof(Prog) * (size_t)(n + 1)); memcpy(pg[n].vsig, cb ? v[a].sc : v[a].sb, 32); memcpy(pg[n].psig, p[b].sig, 32); pg[n].fl = v[a].fl; pg[n].cb = cb; n++;
+            pg = realloc(pg, sizeof(Prog) * (size_t)(n + 1)); memcpy(pg[n].vsig, cb ? v[a].sc : v[a].sb, 32); memcpy(pg[n].psig, p[b].sig, 32); pg[n].fl = v[a].fl; pg[n].cb = cb; pg[n].ffp = 0; n++;
         }
     }
-    /* Pairs with a fixed-function side. D3D9 pairs a null VS or PS with the gl4shim row nx_pair_ffp_row names (by D3DRS_SHADEMODE: flat); the draw path forms (FFP VS, PS) for a PS of the same
+    /* Pairs with a fixed-function side. D3D9 pairs a null VS or PS with the gl4shim row nx_pair_ffp_vs_row / nx_pair_ffp_ps_row name (by D3DRS_SHADEMODE: flat); the draw path forms (FFP VS, PS) for a PS of the same
      * shade mode, (VS, FFP PS) for a VS of it, and (FFP VS, FFP PS). A fixed-function stage has no declared pairs, so nx_pair_variant does not select among the translator variants; every
      * signature class of that shade mode is paired (a superset of what the front end forms, so a program it forms is covered). */
     for (int fl = 0; fl < 2; fl++) {
-        int rv = (int)nx_pair_ffp_row(NxStage_Vertex, (uint32_t)fl), rp = (int)nx_pair_ffp_row(NxStage_Fragment, (uint32_t)fl);
+        int rv = (int)nx_pair_ffp_vs_row(fl != 0), rp = (int)nx_pair_ffp_ps_row(fl != 0);
 #define ADD(vs_, ps_, sides) do { pg = realloc(pg, sizeof(Prog) * (size_t)(n + 1)); memcpy(pg[n].vsig, vs_, 32); memcpy(pg[n].psig, ps_, 32); pg[n].fl = fl; pg[n].cb = 0; pg[n].ffp = sides; n++; } while (0)
         ADD(ffp_sig[rv], ffp_sig[rp], 2);
         for (long b = 0; b < npc; b++) if (p[b].fl == fl) ADD(ffp_sig[rv], p[b].sig, 1);
