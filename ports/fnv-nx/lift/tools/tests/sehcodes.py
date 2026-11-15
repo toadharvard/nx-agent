@@ -54,7 +54,9 @@ def main():
     # code -> (NTSTATUS, ExceptionAddress, NumberParameters, Context.Eip)
     ROWS = {1: (0xC0000094, A, 0, A), 5: (0xC0000095, A, 0, A), 3: (0x80000003, A, 3, A), 4: (0xC000001D, A, 0, A), 6: (0xC0000096, A, 0, A), 7: (0xC000008C, A, 0, A),
             8: (0xC0000095, A, 0, A + 1), 9: (0xC0000420, A, 0, A), 10: (0x80000004, A, 0, A), 11: (0xC000001E, A, 0, A),
-            12: (0x80000003, A + 3, 3, A + 2)}   # 3: int3 and 12: int 2d with eax = 0: Wine 9.0 unix/signal_i386.c trap_handler / handle_interrupt (rt/seh.cc cites them)
+            12: (0x80000003, A + 3, 3, A + 2),
+            13: (0xC0000090, A, 0, A), 14: (0xC000008D, A, 0, A), 15: (0xC000008E, A, 0, A), 16: (0xC0000091, A, 0, A), 17: (0xC0000093, A, 0, A), 18: (0xC000008F, A, 0, A), 19: (0xC0000092, A, 0, A)}
+    # 13..19 = FNVL_FLT_IE DE ZE OE UE PE SF: STATUS_FLOAT_INVALID_OPERATION DENORMAL_OPERAND DIVIDE_BY_ZERO OVERFLOW UNDERFLOW INEXACT_RESULT STACK_CHECK, a fault at the instruction (Wine 9.0 get_fpu_code order)   # 3: int3 and 12: int 2d with eax = 0: Wine 9.0 unix/signal_i386.c trap_handler / handle_interrupt (rt/seh.cc cites them)
     for code, want in sorted(ROWS.items()):
         uc, rd = run(segs, sym, 'drv_raise', (code, A), PROC); rec = rd(rd(sym['g_rec'])[0], 5); ctx = rd(rd(sym['g_ctx'])[0] + 184)[0]; got = (rec[0], rec[3], rec[4], ctx)
         bad += got != want; print('fnvl_raise(%2d) %s %s' % (code, 'ok' if got == want else 'FAIL', ' '.join('%x' % x for x in got)))

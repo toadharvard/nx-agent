@@ -22,7 +22,6 @@ for p in ('tools', ''):
 BATCH = 60
 ENCS = 4            # encodings listed per form (encs.tsv): the distinct byte strings at the lowest addresses; the universe of tools/tests/instest.py
 NBUCKET = 4096
-<<<<<<< HEAD
 # The flags of lifted C++: the recipe's (verify/guest_compiler.json flags.semantics + lift/pack/build.json), resolved by resolved_flags() for every test that compiles pack code. No flag that turns an error into a warning or silences one.
 PACK_ROOT_FLAGS = {'c': ['-Werror=attributes'], 'cxx': ['-std=gnu++17', '-O2', '-Werror=attributes'], 'asm': []}   # the per-root classes of the pack (recipe.PER_ROOT); the semantic flags are the pin's, never listed here
 
@@ -34,16 +33,6 @@ def resolved_flags(driver='aarch64-linux-gnu-g++', kind='cxx'):
     import recipe as R
     rec = json.load(open(os.path.join(LIFT, 'pack', 'build.json')))
     return R.semantics_for(driver, kind, origin='lifted') + list(rec['flags'][kind])
-=======
-# THE flags of lifted C++ (one definition: the pack recipe below and test/instest.py use it). No flag that turns an error into a warning or silences one.
-PACK_CXX_FLAGS = ['-std=gnu++17', '-O2', '-Werror=attributes']     # the root's own flags: only -W -D -std -O (L1 flags rule); the semantic set is the recipe's: verify/guest_compiler.json flags.semantics, appended to every guest stage before these
-PACK_C_FLAGS = ['-Werror=attributes']
-
-
-def semantics():
-    """the recipe's semantic flags (one source: verify/guest_compiler.json); tests compile with them in front of PACK_CXX_FLAGS, as the recipe does"""
-    return list(json.load(open(os.path.join(LIFT, '..', 'verify', 'guest_compiler.json')))['flags']['semantics'])
->>>>>>> origin/claude/fnv-l3a-lift-w1
 ROOT = 'ports/fnv-nx/lift/pack'
 EH_KEYS = ((0x000fffd0, 'fnvl_msvcrt_eh_nested_catch'), (0x000fffe0, 'fnvl_msvcrt_eh_nested_collide'))    # rt/msvcrt.h FNVL_EH_KEY_*: the two handlers the msvcrt EH runtime registers on fs:[0]
 G = {}
@@ -247,7 +236,6 @@ def recipe(ref, commit, tree):
     import recipe as R
     keep = lambda fl: [f for f in fl if R.PER_ROOT.fullmatch(f)]
     gc = json.load(open(os.path.join(LIFT, '..', 'verify', 'guest_compiler.json')))   # the one source of the guest compiler (msvcmodel)
-<<<<<<< HEAD
     args = R.plugin_args('lifted')
     plugins = []
     for n, src in R.PLUGIN_SOURCES.items():
@@ -257,15 +245,6 @@ def recipe(ref, commit, tree):
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': gc['external']['name'], 'cc': gc['cc'], 'cxx': gc['cxx']},
            'flags': {k: keep(v) for k, v in PACK_ROOT_FLAGS.items()},
            'include': ['/ext/liftpack/inc'], 'units': 'all', 'plugins': plugins,
-=======
-    sys.path.insert(0, os.path.join(LIFT, '..', 'verify')); import recipe as RC      # the plugin rule is recipe.py's (one source): the full set, in its order, a lifted root takes LIFTED_ARGS
-    want = dict(RC.PLUGIN_ARGS, **RC.LIFTED_ARGS)
-    plugins = [dict(name=n, source=RC.PLUGIN_SOURCES[n], args=want[n], **({'inputs': list(RC.PLUGIN_INPUTS[n])} if n in RC.PLUGIN_INPUTS else {})) for n in RC.PLUGIN_SOURCES]
-    rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': gc['external']['name'], 'cc': gc['cc'], 'cxx': gc['cxx']},
-           'flags': {'c': list(PACK_C_FLAGS), 'cxx': list(PACK_CXX_FLAGS), 'asm': []},
-           'plugins': plugins, 'plugin_cxx': 'x86_64-linux-gnu-g++-13',      # env.json driver of the compiler's GCC version (verify/samples/platform.build.json)
-           'include': ['/ext/liftpack/inc'], 'units': 'all',
->>>>>>> origin/claude/fnv-l3a-lift-w1
            'generated': [{'tool': 'ports/fnv-nx/lift/tools/packcopy.py', 'args': ['/ext/liftpack', '/out'], 'inputs': [], 'outputs': unit_names()}],
            'link': None,
            'external': [{'name': 'liftpack', 'repo': 'fnv-nx-build', 'ref': ref, 'commit': commit, 'tree_sha256': tree, 'at': '/ext/liftpack'}, gc['external']]}
