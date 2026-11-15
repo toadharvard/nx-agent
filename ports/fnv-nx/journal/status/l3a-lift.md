@@ -1157,3 +1157,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Sent to the orchestrator for a decision on A: (i) precise escapes only, or (ii) OWNER 6 applied to the table index. My recommendation is (ii).
   - w13 implements B + A(i) now. The real-tool run over 1005 sites waits on w7's memory fix (the run OOMs at 13.9 GB).
   - bottleneck: the exe facts memory growth (w7); the orchestrator's R-A decision.
+- 23:29 Orchestrator, integ 11db7476e: R-A (ii). The jtab index is bounded by OWNER 6 to the N+1 entries of a dominating guard on the same cell, with no ebp redefinition between them.
+  - Certificate kind "jtab-guard" goes in FACTS; L3b certifies the kind and L1's gate reads it.
+  - w13 also implements B and the precise escapes.
+  - Sites without a guard and the 18 go to the orchestrator after the real-tool run.
