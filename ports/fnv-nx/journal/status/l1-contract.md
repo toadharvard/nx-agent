@@ -1244,3 +1244,4 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Legal: rule L1 accepted; embedded substrings and VA→name pairings are in ALL.md as open (owner L1, after the first frame).
 - w23 1eada16a: the "no definition record" relabel in gate_abi. linkstrict gets the same label (one class, one name).
 - L2: the placement rule for the 500 nonframe accesses. Possibly-shared accesses leave GIMPLE as atomic or volatile MEMs. Each RTL pass that creates or changes accesses refuses them, cited file:line in GCC 13.3: combine, ldp/stp fusion, RTL store-merging, cpymem/setmem, and the scheduler. A pass without a citation gets a hard-error final RTL check. Accepted.
+- Owner decision 2026-11-15 (via the orchestrator): no quota on Legal gates. Legal rule L1 and the two classes are dropped. `legal` is deleted from REQUIRED_TEST in w23's stub→objstub commit, which goes into cand1. Keeping private data out of the public repo stays a discipline.
