@@ -315,3 +315,4 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - 20:45Z v3 shard 6/54 done (farm 05): proved 333, gap 13, failed 0. Complete: 30/54.
 - 20:45Z v3 shard 22/54 done (farm 07): proved 339, gap 6, failed 0. Complete: 31/54.
 - 20:45Z v3 shard 23/54 done (farm 07): proved 341, gap 4, failed 0. Complete: 32/54.
+- 20:50Z correction: the pack's d3dx9_38 bytes are correct (w7: 0 of 3,426 encs rows mismatch the relocated image). w11 compared raw file bytes, not pemod.load at the assigned base. w11 moves every image read to pemod.load and reruns; the 66->44 split and the cleared totals are provisional until then.
