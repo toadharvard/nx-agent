@@ -797,3 +797,9 @@ Paused: w3b, w4, farm; no other work.
     - w6 does it first: spec and generator move to bridgefacts (output D9_ROWS); d3d9 reads them via `uses`; the copies are deleted.
     - Done means: bytes equal to the manifest, table_id e8aaba62…11d4.
     - Then the commit goes to w12, which wires the loader. smscan follows after.
+- 10:10Z w6 render/smscan 90b2ebd6c
+    - The scanner is in C; res_smgen.py moved, so there is one generator. The d3d9 C++ scanner is deleted. onedef holds; struct static_asserts are 128 and 228 bytes.
+    - Equivalence: differential run of the old C++ against the C over 400,000 generated streams, identical hash 856c3dd3; all 16 error kinds hit. It was an uncommitted harness, so it counts as verification, not proof of a rule.
+    - Open (after the first frame): smscan has no committed test with a reference (the rows of sm_table/sm_illegal as the reference).
+    - d3d9total 332/332. The guest d3d9 build still waits on the L1 layout vector_type fix (68/69 objects; ffp_vs_state.c).
+    - Next for w6: the bridgefacts move. w5 links smscan@host and pair@host.
