@@ -153,3 +153,14 @@ An assumption that a proof rests on is in `ASSUMPTIONS.json` with an id (ASM-NNN
 For every admitted product root that includes fnvnx/hostapi.h: services declared (numbers of `FNVNX_PLAT_*`) = services expanded by at least one
 unit (gate `hostapi`, TOOLS.md). Module ids (`FNVNX_EXT_*`) are not services; machine models below the product boundary are modules. A service
 with no caller is deleted, never kept as a number answering a placeholder.
+
+## T1 NO-DOUBLES
+
+A test binary of a product root is linked from the root's whole product unit set plus its own units (same script and flags), and defines no
+symbol that any product root defines: `symbols(test objects) INTERSECT symbols(all product objects) = EMPTY` (global, weak and unique;
+no allow-list). Every source of a root is a product unit or a unit of exactly one declared test, so an undeclared test source is product code and
+meets the second half of the rule: no GLOBAL symbol is defined by two product objects of one root.
+Proof argument: a double of a product body, fake, mock or recording stand-in is, at the object level, a second definition of that name; the
+intersection is empty iff no test replaces a product symbol. Failure injection is an input of the shared boot machine, never a replaced function.
+Depends only on the accepted OWNER item 1 (the compiler is correct).
+Gate: `objstub` (`doubles.py`; fields `tests_total`, `tests_with_doubles`, `double_symbols`). Owner order of 2026-11-11 night (CLAUDE.md).

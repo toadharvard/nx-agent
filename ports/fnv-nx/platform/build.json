@@ -467,5 +467,11 @@
     "asm": []
    }
   }
+ },
+ "external_errors": {
+  "freetype": {
+   "type": "FT_Error",
+   "success": 0
+  }
  }
 }

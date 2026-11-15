@@ -66,7 +66,7 @@ def _plugin_cxx():
 
 PLUGIN_CXX = _plugin_cxx()
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
-        "plugins", "variants", "outputs", "uses", "sources", "forbid_sections", "error_abi", "empty_handlers", "errno_accessor", "run"}
+        "plugins", "variants", "outputs", "uses", "sources", "forbid_sections", "error_abi", "empty_handlers", "external_errors", "tests", "run"}
 VARIANT_KEYS = {"compiler", "flags", "link"}   # the keys a variant may replace (whole: a sanitizer variant names its own link.libs.system)
 PLUGIN_FIXED = {"source": "PLUGIN_SOURCES", "inputs": "PLUGIN_INPUTS", "args": "PLUGIN_ARGS"}   # what recipe.py fixes for a plugin: a root entry names only the plugin
 GUEST_LINK = TREE + "/link/guest.json"   # the guest link profile: {"script": path inside TREE, "libs": {LIBS_KEYS}}, one fact for every guest link (RECIPE.md, Link)
@@ -84,6 +84,7 @@ PLUGIN_SOURCES = {"fnvnx_ftoi": _T + "ftoi/fnvnx_ftoi.cc", "fnvnx_order": _T + "
                   "fnvnx_names": _T + "names/fnvnx_names.cc", "fnvnx_layout": _T + "layout/fnvnx_layout.cc"}
 PLUGIN_INPUTS = {"fnvnx_ftoi": [_T + "ftoi/f2i_builtins.inc"], "fnvnx_layout": [_T + "names/fnvnx_names.cc"]}
 PLUGIN_ARGS = {n: {} for n in PLUGIN_SOURCES}
+ANALYSIS_PLUGIN = ("objstub_plugin", TREE + "/verify/objstub_plugin.cc")   # the gate objstub's plugin (RECIPE.md "Plugins"): built for every root with C/C++ units, loaded by no compile stage
 PLUGIN_ARGS["fnvnx_ftoi"] = {"mode": "native"}
 # fnvnx_ftoi is one plugin with two modes, chosen by the root's cxx_origin (no free choice): native C++ takes the MSVC rewrite, lifted C++ has
 # no rewrite and every float -> integer conversion outside an fnvnx_f2i function is an error. Both write their report (gate fpexact) to
@@ -509,10 +510,27 @@ def generated_outputs(rec):
             and isinstance(x.get("outputs"), list) for o in x["outputs"] if isinstance(o, str)]
 
 
-def units_of(rec, root, files):
-    """Sorted root-relative unit paths: tracked source files + generated outputs with a source name."""
+def all_units_of(rec, root, files):
+    """Sorted root-relative paths of every source of the root: tracked source files + generated outputs with a source name."""
     mine = {f[len(root) + 1:] for f in files if under(f, root)}
     return sorted(u for u in mine | set(generated_outputs(rec)) if is_unit(u))
+
+
+def tests_of(rec):
+    """The declared tests of REC: [(name, [unit, ..])] (entries that are not well formed are left to check())."""
+    t = rec.get("tests") if isinstance(rec, dict) else None
+    return [(x["name"], list(x["units"])) for x in (t if isinstance(t, list) else []) if isinstance(x, dict) and isinstance(x.get("name"), str)
+            and isinstance(x.get("units"), list) and all(isinstance(u, str) for u in x["units"])]
+
+
+def test_units_of(rec):
+    return {u for _, us in tests_of(rec) for u in us}
+
+
+def units_of(rec, root, files):
+    """Sorted root-relative PRODUCT unit paths: every source of the root that is not a unit of a declared test (RECIPE.md, tests)."""
+    tu = test_units_of(rec)
+    return [u for u in all_units_of(rec, root, files) if u not in tu]
 
 
 def load_pin(repo="."):
@@ -1050,6 +1068,15 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             (ea.get("kind") == "noreturn" and set(ea) == {"fail", "kind"}) or (ea.get("kind") == "flag" and set(ea) == {"fail", "kind", "flag"} and ident(ea.get("flag"))))):
         err.append('error_abi must be {"fail": SYM, "kind": "noreturn"} or {"fail": SYM, "kind": "flag", "flag": FIELD}: the root\'s one failure function and how its '
                    'definition signals failure (objstub checks the definition)')
+    xe = rec.get("external_errors")
+    if xe is not None:
+        names_ = {e.get("name") for e in rec.get("external", []) if isinstance(e, dict)}
+        if not (isinstance(xe, dict) and xe and all(k in names_ and isinstance(v, dict) and set(v) == {"type", "success"} and ident(v["type"])
+                                                    and isinstance(v["success"], int) and not isinstance(v["success"], bool) for k, v in xe.items())):
+            err.append('external_errors must be {EXTERNAL: {"type": TYPEDEF, "success": INT}} naming declared externals: the error convention of a library whose units come from '
+                       '`sources` (objstub: a V body of such a unit is the library\'s own code unless it returns an error constant)')
+        elif not rec.get("sources"):
+            err.append("external_errors needs `sources` (the units of the external libraries)")
     eh = rec.get("empty_handlers")
     if eh is not None:
         tb = eh.get("tables") if isinstance(eh, dict) else None
@@ -1070,11 +1097,30 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     sr = rec.get("sources")
     if sr is not None and not (isinstance(sr, str) and sr in generated_outputs(rec)):
         err.append("sources must name a path in generated[].outputs of this root (a file of <external>:<path> lines)")
+    allu = set(all_units_of(rec, root, files))
+    tl = rec.get("tests", [])
+    seen_t, seen_u = set(), set()
+    for i, t in enumerate(tl if isinstance(tl, list) else err.append("tests must be a list") or []):
+        if not (isinstance(t, dict) and set(t) == {"name", "units"} and isinstance(t["name"], str) and re.fullmatch(r"[A-Za-z0-9_+-]+", t["name"])
+                and isinstance(t["units"], list) and t["units"] and all(isinstance(u, str) for u in t["units"])):
+            err.append("tests[%d] needs exactly name ([A-Za-z0-9_+-]+) and units (a non-empty list of root-relative units)" % i)
+            continue
+        if t["name"] in seen_t:
+            err.append("test %r is declared twice" % t["name"])
+        seen_t.add(t["name"])
+        for u in t["units"]:
+            if u not in allu:
+                err.append("test %r: %r is not a source of the root" % (t["name"], u))
+            if u in seen_u:
+                err.append("test unit %r is declared by two tests (or twice)" % u)
+            seen_u.add(u)
+    if seen_t and not rec.get("link"):
+        err.append("tests need the root's link (a test is linked with the same script and flags)")
     units = set(units_of(rec, root, files))
     ol = rec.get("os_layer", [])
     for u in ol if isinstance(ol, list) else err.append("os_layer must be a list") or []:
         if u not in units:
-            err.append("os_layer entry %r is not a unit" % (u,))
+            err.append("os_layer entry %r is not a unit (a test unit is no os_layer unit)" % (u,))
     gm = rec.get("game")
     if gm is not None and not (isinstance(gm, str) and rel_ok(gm) and any(u.startswith(gm.strip("/") + "/") for u in units)):
         err.append("game %r is not a root-relative directory holding units" % (gm,))
@@ -1346,6 +1392,7 @@ class Job:
         self.rec = with_guest_link(load_recipe(repo, self.roots, spec), root, self.roots, repo)
         self.keys, self.run, self.hit, self.ext, self.ppkeys, self.built = set(), 0, 0, {}, {}, []
         self.aux = []   # build(aux): AUX_FLAGS of the CC stage
+        self.analysis = None   # tree of the objstub plugin's /out (analysis_plugin), built once per root that has C/C++ units
         self.dukeys = {}   # {unit: key of its macro-fact stage (-dU, unitstage.DU_TAIL)}
         self.red, self.blocked, self.failed = [], {}, []   # KEEP GOING: red stages (failure dicts) and {unit: stage it is blocked by}; nothing is masked (see build)
         os.makedirs(os.path.join(store, "rt"), exist_ok=True)
@@ -1672,15 +1719,12 @@ class Job:
             n += 1
         return out
 
-    def plugins(self, ws):
-        """Build every plugin of the recipe as a hermetic stage -> [(name, tree of its /out, argv flags)]. The stage runs the host driver
-        `PLUGIN_CXX` (derived from env.json) on the plugin source and the plugin headers of the target compiler (`compiler.cxx -print-file-name=plugin`),
-        so its key is f(source content, host compiler, flags, headers). The .so is in the store; each CC stage declares it as an input."""
-        pl = plugin_decls(self.rec.get("plugins", []), entry_of(self.roots, self.root + "@" + self.variant if self.variant else self.root).get("cxx_origin"))
-        if not pl:
-            return []
+    def plugin_env(self, ws, drv=1):
+        """The common inputs of every plugin stage: the host driver `PLUGIN_CXX` (derived from env.json), the plugin headers of the target compiler
+        (`compiler.cxx -print-file-name=plugin`), the tool runtime and the startup files -> dict. A plugin stage's key is f(source content, host
+        compiler, flags, headers)."""
         host = "/usr/bin/" + PLUGIN_CXX
-        cxx = self.hostpath(self.drivers()[1])
+        cxx = self.hostpath(self.drivers()[drv])   # the C++ driver (the C driver for a root without C++ units: the same compiler, the same plugin headers)
         pdir = subprocess.run([cxx, "-print-file-name=plugin"], capture_output=True, text=True).stdout.strip()
         if not os.path.isfile(os.path.join(pdir, "include", "gcc-plugin.h")):
             raise BuildRed({"stage": "plugin", "exit": None, "stderr": ["no plugin headers of %s in %s (gcc-N-plugin-dev of env.json)" % (cxx, pdir)]})
@@ -1695,7 +1739,7 @@ class Job:
             # linking a shared object also needs collect2 and ld, which gcc_set (compile only) does not list
             q = lambda n: subprocess.run([host, "-print-prog-name=" + n], capture_output=True, text=True).stdout.strip()  # noqa: E731
             exes = [e if e.startswith("/") else "/usr/bin/" + e for e in exes + [q("collect2"), q("ld")]]
-            return self.plus(runtime.build_tool(self.store, sorted(set(exes)), sorted(set(ts + trees))))
+            return self.plus(runtime.build_tool(self.store, sorted(set(exes)), sorted(set(ts + [t for t in trees if not any(under(t, x) for x in ts)]))))   # the plugin headers of the host compiler itself are in its own tree already
         rt = self.cached_rt("tool-plugin-" + hashlib.sha256(repr((host, pdir, sorted((e["at"], e["tree"]) for e in self.ext.values()))).encode()).hexdigest()[:16], make)[1]
         # A plugin is linked against nothing (its symbols come from the compiler that loads it): -nostdlib, with the startup files the
         # driver would pass (crti/crtbeginS ... crtendS/crtn: __dso_handle, .init/.fini). crtbeginS/crtendS are in the driver's own
@@ -1706,23 +1750,42 @@ class Job:
             if not os.path.isabs(pf(n)):
                 raise BuildRed({"stage": "plugin", "exit": None, "stderr": ["%s: no %s (libc6-dev of env.json)" % (host, n)]})
             shutil.copyfile(pf(n), os.path.join(crt, n))
-        crt_tree = cas.ingest(crt, self.store)
+        return {"host": host, "inc": inc, "rt": rt, "pf": pf, "crt_tree": cas.ingest(crt, self.store)}
+
+    def plugin_build(self, env, ws, n, src, inputs):
+        """The stage `plugin:<n>`: the plugin source (and the tracked INPUTS it includes) at their repo paths -> tree of /out (holds <n>.so)."""
+        host, inc, rt, pf = env["host"], env["inc"], env["rt"], env["pf"]
+        tmp = tempfile.mkdtemp(dir=ws)
+        tree = self.ingest_files(tmp, "psrc", [src] + inputs, "")   # at their repo paths: `#include "../names/x.cc"` resolves
+        argv = [host, "-shared", "-nostdlib", "-fPIC", "-fno-rtti", "-fno-exceptions", "-O2", "-I" + inc + "/include", "-frandom-seed=" + hashlib.sha256(n.encode()).hexdigest(),
+                "-Werror=date-time", "-ffile-prefix-map=/psrc=psrc", "-o", "/out/%s.so" % n, "/plugcrt/crti.o", pf("crtbeginS.o"),
+                "/psrc/" + src, pf("crtendS.o"), "/plugcrt/crtn.o"]
+        doc = {"format": "fnvnx-stage/1", "stage": "plugin:" + n, "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
+               "env": dict(unitstage.ENV, PATH=os.path.dirname(host)), "outputs": ["/out"],
+               "inputs": sorted(rt["inputs"] + [{"at": "/psrc", "tree": tree}, {"at": "/plugcrt", "tree": env["crt_tree"]}], key=lambda i: i["at"])}
+        return self.stage(doc)[1]["outputs"]["/out"]
+
+    def plugins(self, ws):
+        """Build every plugin of the recipe as a hermetic stage -> [(name, tree of its /out, argv flags)]. The .so is in the store; each CC stage
+        declares it as an input."""
+        pl = plugin_decls(self.rec.get("plugins", []), entry_of(self.roots, self.root + "@" + self.variant if self.variant else self.root).get("cxx_origin"))
+        if not pl:
+            return []
+        env = self.plugin_env(ws)
         out = []
         for p in pl:
-            n, src = p["name"], p["source"]
-            tmp = tempfile.mkdtemp(dir=ws)
-            tree = self.ingest_files(tmp, "psrc", [src] + p.get("inputs", []), "")   # at their repo paths: `#include "../names/x.cc"` resolves
-            argv = [host, "-shared", "-nostdlib", "-fPIC", "-fno-rtti", "-fno-exceptions", "-O2", "-I" + inc + "/include", "-frandom-seed=" + hashlib.sha256(n.encode()).hexdigest(),
-                    "-Werror=date-time", "-ffile-prefix-map=/psrc=psrc", "-o", "/out/%s.so" % n, "/plugcrt/crti.o", pf("crtbeginS.o"),
-                    "/psrc/" + src, pf("crtendS.o"), "/plugcrt/crtn.o"]
-            doc = {"format": "fnvnx-stage/1", "stage": "plugin:" + n, "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
-                   "env": dict(unitstage.ENV, PATH=os.path.dirname(host)), "outputs": ["/out"],
-                   "inputs": sorted(rt["inputs"] + [{"at": "/psrc", "tree": tree}, {"at": "/plugcrt", "tree": crt_tree}], key=lambda i: i["at"])}
-            res = self.stage(doc)[1]["outputs"]["/out"]
+            n = p["name"]
+            res = self.plugin_build(env, ws, n, p["source"], p.get("inputs", []))
             flags = ["-fplugin=/plug/%s/%s.so" % (n, n)] + ["-fplugin-arg-%s-%s%s" % (n, k, "=" + v if v else "") for k, v in p["args"].items()] + (
                 ["-fplugin-arg-%s-out=%s" % (n, PLUGIN_OUT[n])] if n in PLUGIN_OUT else [])
             out.append((n, res, flags))
         return out
+
+    def analysis_plugin(self, ws, drv=1):
+        """The plugin of the gate `objstub` (ANALYSIS_PLUGIN): built by the same stage as every plugin, for the target compiler of the root. It is no
+        plugin of the root's compile stages (no root declares it, no CC stage loads it): the gate loads it over the preprocessed text of the units.
+        -> tree of its /out."""
+        return self.plugin_build(self.plugin_env(ws, drv), ws, ANALYSIS_PLUGIN[0], ANALYSIS_PLUGIN[1], [])
 
     def compile(self, ws, units):
         rec, drv = self.rec, dict(zip(("c", "cxx"), self.drivers()))
@@ -1751,6 +1814,11 @@ class Job:
             units = [u for u in units if u not in self.blocked]
             kinds = {u: k for u, k in kinds.items() if u in units}
             self.built = []
+        if self.analysis is None and any(k != "asm" for k in kinds.values()):
+            try:
+                self.analysis = self.analysis_plugin(ws, 1 if "cxx" in kinds.values() else 0)
+            except BuildRed as r:   # the gate objstub cannot judge the root: red and named, no unit is blocked by it
+                self.red.append(dict(r.args[0]))
         builds = {}
         sos = {}
         for n, t, _ in self.built:   # the plugins each front end can load (plugin_languages): the stage loads exactly those, the gate reads the same fact
@@ -1800,12 +1868,13 @@ class Job:
         self.failed = [{"unit": u, "stage": failed[u]["stage"], "exit": failed[u]["exit"], "stderr": list(failed[u]["stderr"])[-20:]} for u in units if u in failed]
         return res   # in unit order (UNITS is sorted), so the failures are deterministic
 
-    def link(self, ws, groups):
+    def link(self, ws, groups, output=None, tag=""):
         """Stage `ld:<root>`: the linker of the compiler with the options the rule fixes (RECIPE.md "Link"). GROUPS: [(label, [(unit, path of
         the .o file)])]: the root's own objects, then those of every `link.roots` root, in list order. Every object is linked whole;
         the guest libraries of `link.libs` are searched (-L, -l) as the gcc driver does for the ILP32 PIE multilib. -> (tree of /out,
         tree of /objs)."""
         lk, cc = self.rec["link"], self.drivers()[0]
+        output = output or lk["output"]   # a test is linked to its own output (RECIPE.md, tests); TAG tells the links of one root apart
         pn = subprocess.run([self.hostpath(cc), "-print-prog-name=ld"], capture_output=True, text=True).stdout.strip()
         ld = unitstage.prog(posixpath.normpath(pn))
         if "external" in self.rec["compiler"]:
@@ -1814,7 +1883,7 @@ class Job:
             rt = self.toolrt([cc])[1]
         else:
             rt = self.cached_rt("tool-ld-" + hashlib.sha256(repr((ld, sorted((e["at"], e["tree"]) for e in self.ext.values()))).encode()).hexdigest()[:16], lambda: self.plus(runtime.build_tool(self.store, [ld], [])))[1]
-        od, sd = os.path.join(ws, "objs"), os.path.join(ws, "ld")
+        od, sd = os.path.join(ws, "objs" + tag), os.path.join(ws, "ld" + tag)
         args = []
         for label, objs in groups:
             for u, p in objs:
@@ -1865,10 +1934,10 @@ class Job:
                           "system": list(lb["system"]) if lb and "system" in lb else []}
         vs = ["--version-script=/ld/" + os.path.basename(lk["version_script"])] if "version_script" in lk else []
         sc = ["-T", "/ld/" + os.path.basename(lk["script"])] if "script" in lk else []
-        argv = [ld] + LD_KIND[kind] + dl + lk["flags"] + sc + vs + ["-o", "/out/" + lk["output"], "-Map=/out/" + lk["output"] + ".map"] + pre + search + [
+        argv = [ld] + LD_KIND[kind] + dl + lk["flags"] + sc + vs + ["-o", "/out/" + output, "-Map=/out/" + output + ".map"] + pre + search + [
             "--whole-archive"] + args + ["--no-whole-archive"] + (["--start-group"] + libs + ["--end-group"] if libs else []) + post
         objs_tree, ld_tree = cas.ingest(od, self.store), cas.ingest(sd, self.store)
-        doc = {"format": "fnvnx-stage/1", "stage": "ld:" + self.root, "argv": argv, "cwd": "/", "class": "build", "tool": "ld",
+        doc = {"format": "fnvnx-stage/1", "stage": "ld:" + self.root + (":" + tag if tag else ""), "argv": argv, "cwd": "/", "class": "build", "tool": "ld",
                "env": dict(unitstage.ENV, PATH=os.path.dirname(ld)), "outputs": ["/out"],
                "inputs": merge_inputs(rt["inputs"] + [{"at": "/objs", "tree": objs_tree}, {"at": "/ld", "tree": ld_tree}], sysin, self.store, ws)}
         # the reference link (run only to read a failed link's linker-defined names): the same ld, flags, script, inputs, start files and libraries with
@@ -2118,6 +2187,7 @@ def objects_digest(res):
     keep["link_roots"] = [{"root": x["root"], "sha256": x["sha256"]} for x in res["link_roots"]]
     keep["objects"] = [{k: o[k] for k in ("unit", "sha256", "os_layer")} for o in res["objects"]]
     keep["plugins"] = [{k: p[k] for k in ("name", "sha256")} for p in res["plugins"]]
+    keep["analysis_plugin"] = (res.get("analysis_plugin") or {}).get("sha256")
     keep["link_archives"] = [{k: m[k] for k in ("archive", "member", "sha256")} for m in res.get("link_archives", [])]
     keep["elf"] = res["elf"] and res["elf"]["sha256"]
     for k in ("constants", "contract_names"):
@@ -2380,7 +2450,7 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True):
     if errs:
         raise RecipeError(errs)
     units = units_of(j.rec, root, j.files)
-    res = {"format": OBJ_FORMAT, "root": spec, "objects": [], "elf": None, "link_roots": [], "constants": None, "contract_names": None, "defined": [], "undefined": [], "plugins": [],
+    res = {"format": OBJ_FORMAT, "root": spec, "objects": [], "tests": [], "elf": None, "link_roots": [], "constants": None, "contract_names": None, "defined": [], "undefined": [], "plugins": [],
            "link_archives": [], "stage_keys": [], "status": "green"}
     ws = tempfile.mkdtemp(prefix="recipe-")
     os.makedirs(out, exist_ok=True)
@@ -2398,10 +2468,11 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True):
                 units = sorted(set(units) | set(j.generated_sources(ws)))
             except BuildRed as r:   # the list of externally sourced units is itself not produced
                 j.red.append(dict(r.args[0]))
-            objs = j.compile(ws, units)
+            objs = j.compile(ws, units + sorted(test_units_of(j.rec)))
         except BuildRed as r:   # an external is not available: no stage of the root has its inputs
             j.red.append(dict(r.args[0]))
             j.blocked.update({u: r.args[0]["stage"] for u in units})
+        built_objs = dict(objs)   # unit -> object tree; `objs` is rebound by the link loops below
         all_units, units = units, [u for u in units if u in objs]
         res["objects"], res["failed_units"] = [], []
         for n, t, _ in j.built:
@@ -2410,6 +2481,12 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True):
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             shutil.copyfile(cas._obj(store, ent), dest)
             res["plugins"].append({"name": n, "sha256": ent["h"], "path": os.path.abspath(dest)})
+        if j.analysis:   # the plugin of the gate objstub (a file of the store, kept beside the root's own plugins)
+            ent = cas.manifest(j.analysis, store)["entries"][ANALYSIS_PLUGIN[0] + ".so"]
+            dest = os.path.join(out, "plugins", ANALYSIS_PLUGIN[0] + ".so")
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copyfile(cas._obj(store, ent), dest)
+            res["analysis_plugin"] = {"name": ANALYSIS_PLUGIN[0], "sha256": ent["h"], "path": os.path.abspath(dest)}
         for u in units:
             dest = os.path.join(out, "obj", u + ".o")
             os.makedirs(os.path.dirname(dest), exist_ok=True)
@@ -2478,6 +2555,22 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True):
                       raise BuildRed({"stage": "ld:" + root, "exit": None, "stderr": ["%s: object %s has target (class, e_machine) %s, the link %s is %s" % (
                           lab, u, object_target(dict(objs)[u]), emulation_of(lk["flags"]), TARGETS[emulation_of(lk["flags"])]) for u in bad[:20]]})
               elf_tree, objs_tree, extra = j.link(ws, groups)
+              for tname, tunits in tests_of(j.rec):   # a test: the root's WHOLE product unit set + its own units, same script and flags (RECIPE.md, tests)
+                  tout, tobjs, tdef = "test-%s.elf" % tname, [], []
+                  for u in tunits:
+                      if u not in built_objs:
+                          raise BuildRed({"stage": "ld:%s:test-%s" % (root, tname), "exit": None, "stderr": ["test unit %s was not built" % u]})
+                      dest = os.path.join(out, "obj", u + ".o")
+                      os.makedirs(os.path.dirname(dest), exist_ok=True)
+                      ent_ = cas.manifest(built_objs[u], store)["entries"]["unit.o"]
+                      shutil.copyfile(cas._obj(store, ent_), dest)
+                      tdef += symbols(dest, u)[0]
+                      tobjs.append({"unit": u, "object": os.path.abspath(dest), "sha256": ent_["h"]})
+                  tgroups = [(groups[0][0], groups[0][1] + [(o["unit"], o["object"]) for o in tobjs])] + groups[1:]
+                  tent = cas.manifest(j.link(ws, tgroups, tout, "test-" + tname)[0], store)["entries"][tout]
+                  shutil.copyfile(cas._obj(store, tent), os.path.join(out, tout))
+                  res["tests"].append({"name": tname, "units": list(tunits), "objects": tobjs, "linked": sorted(u for _, ol_ in tgroups for u, _ in ol_), "defined": sorted(
+                      tdef, key=lambda d: (d["symbol"], d["object"])), "elf": {"path": os.path.abspath(os.path.join(out, tout)), "sha256": tent["h"]}})
               res["link_archives"] = j.archive_members(cas.manifest(elf_tree, store)["entries"], name, out)
               fin = j.ldcheck(ws, elf_tree, objs_tree, extra, loader_defs)
               ent = cas.manifest(fin, store)["entries"]

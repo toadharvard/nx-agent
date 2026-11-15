@@ -1166,6 +1166,25 @@ PE images (MZ) and anything unrecognised: exit 1. Exit codes: 0 ok, 1 error, 2 `
 usage: coffnorm.py normalize IN -o OUT [--allow-typeserver] | check FILE... [--allow-typeserver] | fields FILE
 ```
 
+## verify/doubles.py
+
+```text
+doubles: the rule "no doubles in tests" (CLAUDE.md, owner order of 2026-11-11 night) as a pure function over the results of the
+product roots' builds (objects.json of recipe.py, RECIPE.md "tests"). Called by gate_objstub.py: the check is part of the stub gate.
+Rule, per test binary T of a root R: (symbols defined by T's own objects) INTERSECT (symbols defined by the objects of ALL admitted
+product roots) = EMPTY. A symbol is any global, weak or unique definition of the ELF .symtab of an object (recipe.symbols). No allow-list,
+no exclusion by name. Also red:
+  - a test link that omits a product unit of its root (`linked` must contain every unit of the root);
+  - a declared test without a linked ELF in the result;
+  - two product objects of one root that both define the same GLOBAL symbol: this is how a test source that was not declared (and so is a
+    product unit, linked into the product) is caught when it replaces a product body; a link of the root would fail the same way.
+Argument: the recipe makes every source of a root either a product unit or a unit of exactly one declared test (recipe.check), and a test
+is linked by the recipe from the root's whole product unit set. A test therefore contains the real product objects; a double is a second
+definition of a name, which is exactly the set intersection above. A source that is not declared as a test is product code and meets the
+product-duplicate rule. Weak and unique symbols (inline functions, template instances) count like global ones, as the owner's rule says.
+Depends only on the accepted OWNER item 1 (the compiler is correct): the symbol table of an object is the set of names it defines.
+```
+
 ## verify/envcheck.py
 
 ```text
@@ -1916,12 +1935,31 @@ is not otherwise V is `wine-fixme-in-real-body`. A reference that is not a BL (a
 `wine-9.0:<path in the Wine source tree>:<function name>`: only the FORM is validated here; checking the reference against a pinned
 Wine 9.0 tree is the oracle class, not done. A row without a call site is no finding; the gate result counts call sites per id.
 
-(D) DECLARED MACHINE. `fnvnx_declared_machine(uint32_t id)` (C linkage, writes nothing, RETURNS) is the second citation function: every rule of (W)
-applies unchanged (BL transparent for V, constant id, exactly one id of ONE citation function on every path, result equals the row, otherwise
-V, no address taken), with the table verify/declared_machine.tsv (`--declared-machine`; read_declared_table): rows
-`id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`, fact and the source prefixes are read from the table's own header line (`# fact: ...; source: ...`: no-network, time-zone, registry, no-galaxy; win-doc, wine-9.0, galaxy-sdk), source `PREFIX:<page or path>:<function>` (the form only), kind/value as in (W). Findings carry the prefix `declared-machine-`. Stated limit: V cannot know which
-result is "success" of a network call, so a row saying success is not rejected; only a body that differs from its row is. A body that calls or
-stores is not V and needs no citation. The gate result counts call sites per id ("declared_machine").
+(C) CITATION RECORDS (rule C: the declared machine and the terminators; the owner of the records is the platform, hostabi/include/fnvnx/cite.h). The call
+`fnvnx_declared_machine(id)` no longer exists; `FNVNX_CITE(fn, "dm:<id>")` and `FNVNX_CITE(fn, "wf:<id>")` emit a RECORD into the non-alloc section
+`.fnvnx.cite` (type PROGBITS, no SHF_ALLOC): u32 function address (an ABS32 relocation of the object's ABI, R_AARCH64_P32_ABS32 for ILP32, against a
+function DEFINED in the same object), u32 length n of the id, the n bytes of the id, padding to 4 (read_cites; any other shape, an id that is not
+`dm:`/`wf:` plus a decimal, a relocation that does not name a function start of this object: `cite-malformed`). `dm:` is the id column of
+verify/declared_machine.tsv (`--declared-machine`; read_declared_table: rows `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`; the facts and the
+source prefixes are read from the table's own header line; the clause of `c11:<clause>:<function>` is digits and dots, the page of `posix-2017:<page>:<function>`
+a name; kind `noreturn` (value `-`) exactly for the facts process-end and thread-end), `wf:` the id column of wine_fixme.tsv. A cited body is judged by the rules
+of (W) with no call to read: it is analysed with the input rule replaced by the result rule (wine mode); V => it is certified iff the row's kind/value match the
+result (`declared-machine-mismatch` / `wine-fixme-mismatch`); not V => `declared-machine-in-real-body` / `wine-fixme-in-real-body`, except a row of kind
+noreturn (below). Exactly one record per body (`cite-mismatch`), the row's contract name is a name of the body (`...-name-mismatch`), the id is a row
+(`...-unknown-id`), and every dm row is cited by some record (`declared-machine-uncited`). Stated limit: V cannot know which result is "success" of a network
+call, so a row saying success is not rejected; only a body that differs from its row is. A body with no record that is V needs a constants row as before.
+The gate result counts records per id ("declared_machine"). The calls of `fnvnx_wine_fixme` keep rule (W).
+
+TERMINATING BODIES AND T2 (replaces "a reference to a terminator is a finding"). A REAL terminator is a function declared noreturn in a header of the unit that
+is either cited by a record whose row has fact process-end/thread-end (kind noreturn), or a library routine that no object of the root defines (documented by the
+pinned library). A cited terminator body is certified iff it is declared noreturn (`cite-not-declared-noreturn`) and no path of it returns
+(`cite-noreturn-returns`); a body that ends in the call through a pointer (the host exit slot) is accepted for `indirect-noreturn-tail` when it is such a cited
+terminator. COVERAGE: every declared-noreturn function that an object defines is a cited terminator, or every path of it ends in a real terminator (least fixed
+point), or it is `fnvnx_reach_violation` / `fnvnx_assume_violation` (class R); else `noreturn-uncited`. T2 and T2-noreturn-tail (a reference to, or a last call of,
+a terminator) are findings only when EVERY path of the function ends in a call of a real terminator (nr_ends) and the function is not a declared-noreturn
+definition (covered above): a body with at least one returning path is a MIXED body, its terminator paths are real control paths and are not a fixed failure by
+termination. The returning paths of a mixed body are judged by the V rules: the analysis treats a call of a declared-noreturn callee as the end of the path, so
+a constant or vacuous result of the returning paths is V, needs a constants row or a record, and is otherwise red (`constants-mismatch`).
 
 (R) REACH. A call (BL, or B as a tail call, with a CALL26/JUMP26 relocation) of the symbol `fnvnx_reach_violation` is not a T2 and not a
 T2-noreturn-tail; it is judged by the reach rule: w0 at the call must be a constant of objstub's own forward constant propagation (the

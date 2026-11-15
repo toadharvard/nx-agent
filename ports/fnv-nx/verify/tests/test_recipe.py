@@ -61,7 +61,7 @@ FILES = {
     "verify/declared_machine.tsv": "# id\tcontract_name\tfact\tsource\tkind\tvalue\n# fact: no-network | time-zone | registry | no-galaxy (fixture); source: win-doc:<page>:<function> | wine-9.0:<path>:<function> | galaxy-sdk:<page>:<function>; kind void|u32\n",
     "toy/link.ld": open(os.path.join(VERIFY, "..", "link", "guest.ld")).read(),
 }
-LINK_TOOLS = ("link/ldcheck.py", "link/gateids.py", "contract/gatefile.py")   # the real files of the tree: the ldcheck stage mounts them
+LINK_TOOLS = ("link/ldcheck.py", "link/gateids.py", "contract/gatefile.py", "verify/objstub_plugin.cc")   # the real files of the tree: the ldcheck stage mounts them; objstub_plugin.cc is the source of the analysis plugin every root with C/C++ units builds
 
 
 def check(name, ok, detail=""):
@@ -395,6 +395,20 @@ def main():
 
     later(link_roots)
 
+    # --- declared tests (RECIPE.md "tests"): linked from the root's whole product unit set + the test's own units; the stub gate's doubles rule
+    trec = mut(tests=[{"name": "clean", "units": ["tests/t_clean.c"]}, {"name": "dbl", "units": ["tests/t_dbl.c"]}])
+    tfiles = {"toy/tests/t_clean.c": "int f_b(void);\nint t_only(void) { return f_b() + 1; }\n", "toy/tests/t_dbl.c": "__attribute__((weak)) int f_b(void) { return 99; }\n"}   # weak: the link succeeds, only the symbol rule sees it
+    rt = recipe.build(make_repo("tests", rec=trec, files=tfiles), ROOT, SS, BASE + "/outt")
+    tl = {t["name"]: t for t in rt.get("tests", [])}
+    check("tests: green; product units exclude the test units", rt["status"] == "green" and "tests/t_clean.c" not in rt["units"] and set(tl) == {"clean", "dbl"}, rt.get("failure"))
+    check("tests: each test is linked from every product unit plus its own units and has its own ELF",
+          all(set(t["linked"]) == set(rt["units"]) | set(t["units"]) and t["elf"] for t in tl.values())
+          and not any(d["object"].startswith("tests/") for d in rt["defined"]), tl)
+    import doubles
+    items, finds, st = doubles.judge({ROOT: rt})
+    check("tests + doubles.judge: the test that redefines product f_b is red; the clean one is not",
+          [f[0] for f in finds] == [ROOT + ":test:dbl"] and "f_b" in finds[0][3] and st["tests_with_doubles"] == 1, (finds, st))
+
     print("INFO +%.1f s: toy builds done" % (time.time() - t_start))
     tcc, tct = tc_fut.result()
     tcx = {"name": "tc", "repo": "fnv-nx-build", "ref": "tc", "commit": tcc, "tree_sha256": tct, "at": "/opt/tc"}
@@ -657,7 +671,7 @@ def check_run(SS):
     and /out; outputs are declared paths. A nonzero exit, an undeclared and a missing output are red; {stage, path} refs read a declared output."""
     HX, OTH = T + "hx", T + "other"
     hrec = {"format": "fnvnx-recipe/1", "compiler": {"cc": "gcc-13", "cxx": "g++-13"}, "flags": {"c": ["-fPIE", "-O1", "-ffreestanding", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"], "cxx": [], "asm": []},
-            "include": [], "units": "all", "link": {"kind": "exe", "output": "hx.exe", "flags": ["-m", "elf_x86_64"], "libs": {"system": ["/lib/x86_64-linux-gnu/libc.so.6"]}}, "errno_accessor": "__errno"}
+            "include": [], "units": "all", "link": {"kind": "exe", "output": "hx.exe", "flags": ["-m", "elf_x86_64"], "libs": {"system": ["/lib/x86_64-linux-gnu/libc.so.6"]}}}
     ex = [{"path": HX, "class": "product", "target": "host", "gates": [], "recipe": HX + "/build.json"}, {"path": OTH, "class": "doc", "gates": []}]
 
     def rec_(args=("ok",), ins=(), debs=(), outs=("o.txt",), art=HX + ":hx.exe"):
