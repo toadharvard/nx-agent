@@ -2096,6 +2096,14 @@ EXTERNAL inputs (key "external", RECIPE.md): fetched only by exact commit from A
   the external). The tree is a declared input at "at" of EVERY stage (the tool runtime lists it), so stage keys cover its hash. A tree
   is the content-pinned INPUT, not a build output: sharing the fetch between two cold builds shares nothing that a build computes.
   compiler {"external": N, cc, cxx}: the tree is declared to runtime.py tool as HOST@AT (loader closure resolved as inside the sandbox, RECIPE.md).
+Input refs (the one reader is recipe.resolve_input(root, ref, repo, cache, rec) -> (host path, ident); no gate opens an input itself): a bare string is a
+  tracked file or directory of ROOT (git ls-files only); {"external": NAME, "path": P} reads P in the root's external NAME, checked against its tree_sha256;
+  {"stage": "ROOT:gen:I" | "ROOT:run:NAME", "path": P} reads the declared output P of generator I or run stage NAME of an admitted root, produced by that stage
+  (cached by its key) and written to CACHE/stageout/<sha256>/P. An absolute path, `..`, a symlink leaving the tree, a missing or untracked path, an
+  undeclared external or output, an unknown root/stage and a red stage are ValueError. A generator reads exactly its declared inputs, read-only (stage flag ro_root).
+Run stages (RECIPE.md "Run stages"): `run` executes the linked output of another admitted host root in the sandbox with declared inputs, debs (env.json
+  debs.packages) and /out; the key holds the artifact, input contents, deb sha256s and argv; a PT_INTERP must be provided by a declared deb; optional
+  "host_cpu": "cpuref" puts verify/cpuref.json in the key and refuses a non-matching host (cache hits are served anywhere).
 Outputs in --out: objects.json ("fnvnx-objects/1": root, objects[{unit,object,sha256,os_layer}], elf, constants, defined [{symbol,bind,type,object}] and undefined [symbol] (ELF .symtab of the objects, struct), stage_keys, stages
   {run,hit}, status green|red, failure {stage,exit,stderr tail 20} / failed_units when red), obj/<unit>.o, <name>.elf, constants.tsv.
 Assumptions: the compiler and ld are deterministic given the flags of unitstage/toolflags (A-env); the sandbox leaves the channels of (ASM-038, ASM-039)

@@ -63,7 +63,7 @@ def _plugin_cxx():
 PLUGIN_CXX = _plugin_cxx()
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
         "plugins", "variants", "outputs", "uses", "sources", "forbid_sections", "error_abi", "empty_handlers", "errno_accessor", "run"}
-VARIANT_KEYS = {"compiler", "flags"}   # the keys a variant may replace
+VARIANT_KEYS = {"compiler", "flags", "link"}   # the keys a variant may replace (whole: a sanitizer variant names its own link.libs.system)
 PLUGIN_KEYS = {"name", "source", "args"}   # and optionally "inputs": [tracked files the source includes]
 GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
 GUEST_TARGETS = ("guest", "host")
@@ -576,9 +576,11 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
         pk = {}
     names = set()
     for i, g in enumerate(rs):
-        if not (isinstance(g, dict) and set(g) == {"name", "artifact", "args", "inputs", "debs", "outputs"}):
-            err.append("run[%d] needs exactly name, artifact, args, inputs, debs, outputs" % i)
+        if not (isinstance(g, dict) and {"name", "artifact", "args", "inputs", "debs", "outputs"} <= set(g) <= {"name", "artifact", "args", "inputs", "debs", "outputs", "host_cpu"}):
+            err.append("run[%d] needs name, artifact, args, inputs, debs, outputs (and optionally host_cpu)" % i)
             continue
+        if "host_cpu" in g and not (g["host_cpu"] == "cpuref" and TREE + "/verify/cpuref.json" in files):
+            err.append('run[%d].host_cpu must be "cpuref", with the tracked pin file %s/verify/cpuref.json' % (i, TREE))
         if not (isinstance(g["name"], str) and re.fullmatch(r"[A-Za-z0-9_.-]+", g["name"])) or g["name"] in names:
             err.append("run[%d].name must be a unique plain name" % i)
         names.add(g["name"])
@@ -637,7 +639,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     if vs is not None:
         if not (isinstance(vs, dict) and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9_.-]+", n) and isinstance(v, dict) and v and set(v) <= VARIANT_KEYS
                                               for n, v in vs.items())):
-            return err + ["variants must be {NAME: {compiler and/or flags}}: NAME letters, digits, _ . -; a variant replaces only the keys it names (%s)" % sorted(VARIANT_KEYS)]
+            return err + ["variants must be {NAME: {compiler, flags and/or link}}: NAME letters, digits, _ . -; a variant replaces only the keys it names (%s)" % sorted(VARIANT_KEYS)]
         for n in sorted(vs):    # every variant is a recipe of its own: all the rules apply to its effective form
             err += ["variant %s: %s" % (n, e) for e in check(effective(rec, n), root, files, roots, pin, repo, n)]
     own = roots.get(root, {}).get("variants")
@@ -1281,16 +1283,23 @@ class Job:
         env = {"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "PATH": "/deb",
                "FNVNX_DEBS": ";".join("%s=%s" % (d, pk[d]["sha256"]) for d in sorted(g["debs"]))}   # the deb sha256s are in the key
         argv = ["/art/" + aout] + g["args"]
-        interp = X86_LOADER if elf_interp(r["elf"]["path"]) else None
-        if interp:   # a host executable with a PT_INTERP is started through the x86-64 loader (its PT_INTERP names the build machine's, not the sandbox's), which a declared deb must hold (libc6)
-            home = [d for d in g["debs"] if os.path.lexists(os.path.join(tmp, "deb-" + d + interp))]
+        interp = elf_interp(r["elf"]["path"])
+        if interp:   # started through the file at its PT_INTERP path inside a declared deb (the deb's own symlinks followed; no alias is assumed)
+            home = [(d, interp) for d in g["debs"] if os.path.isfile(os.path.join(tmp, "deb-" + d + interp))]
             if not home:
                 raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": [
-                    "%s needs the loader %s: no declared deb holds it (declare libc6)" % (g["artifact"], interp)]})
+                    "%s has PT_INTERP %s: no declared deb provides that file" % (g["artifact"], interp)]})
             lp = [os.path.join("/deb", d, "lib", "x86_64-linux-gnu") for d in g["debs"]] + [os.path.join("/deb", d, "usr", "lib", "x86_64-linux-gnu") for d in g["debs"]]
-            argv = ["/deb/" + home[0] + interp, "--library-path", ":".join(lp)] + argv
+            argv = ["/deb/" + home[0][0] + home[0][1], "--library-path", ":".join(lp)] + argv
+        if g.get("host_cpu"):   # the reference host's identity is in the key; it must be this host unless the stage is a cache hit
+            pin = json.load(open(os.path.join(self.repo, TREE, "verify", "cpuref.json")))
+            env["FNVNX_HOST_CPU"] = json.dumps(pin, sort_keys=True)
         doc = {"format": "fnvnx-stage/1", "stage": "run:%s:%s" % (self.root, g["name"]), "class": "build", "tool": "run", "cwd": "/work",
                "argv": argv, "env": env, "inputs": sorted(ins, key=lambda x: x["at"]), "outputs": ["/out"], "ro_root": True}
+        if g.get("host_cpu") and sandbox._load(self.store, sandbox.key_of(doc)) is None:
+            bad = cpu_mismatch(pin)
+            if bad:
+                raise BuildRed({"stage": doc["stage"], "exit": None, "stderr": ["host_cpu: this host is not the reference host: " + "; ".join(bad)]})
         res = self.stage(doc)[1]
         got = sorted(x for x, e in cas.listing(res["outputs"]["/out"], self.store) if e["t"] != "d")
         if got != sorted(g["outputs"]):
@@ -1735,7 +1744,34 @@ def resolve_input(root, ref, repo=".", cache=None, rec=None):
     return full, "%s:%s" % (e["tree_sha256"], p), None
 
 
-X86_LOADER = "/usr/lib64/ld-linux-x86-64.so.2"   # the usr-merged path of libc6 (dpkg -L)
+CPU_FIELDS = {"vendor_id": "vendor_id", "family": "cpu family", "model": "model", "stepping": "stepping", "microcode": "microcode", "model_name": "model name"}
+
+
+def cpu_mismatch(pin, text=None):
+    """Differences between the pin {vendor_id, family, model, stepping, microcode, model_name} (the /proc/cpuinfo fields, ints as numbers) and every
+    processor of /proc/cpuinfo (TEXT: the cpuinfo text to judge, default this host's). A pin value null means the field is ABSENT from the processor's
+    lines (a VM has no microcode line); it is not a wildcard: a present field is a mismatch."""
+    procs, cur = [], {}
+    for line in (open("/proc/cpuinfo").read() if text is None else text).splitlines() + [""]:
+        k, _, v = line.partition(":")
+        if k.strip() == "" and cur:
+            procs.append(cur)
+            cur = {}
+        elif k.strip():
+            cur[k.strip()] = v.strip()
+    bad = []
+    for i, p in enumerate(procs):
+        for f, name in CPU_FIELDS.items():
+            have = p.get(name)
+            want = pin.get(f)
+            if isinstance(want, int):
+                try:
+                    have = int(have, 0)
+                except (TypeError, ValueError):
+                    pass
+            if have != want:
+                bad.append("processor %d %s is %r, reference %r" % (i, name, have, want))
+    return bad[:6] if procs else ["/proc/cpuinfo lists no processor"]
 
 
 def elf_interp(path):
