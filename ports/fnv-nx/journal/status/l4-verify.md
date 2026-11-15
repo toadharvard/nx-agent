@@ -419,3 +419,5 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - bottleneck: waiting on L1 (one lineage, link.entry, per-object closure), L3a (lift recipes under cand3) and L6A (gl4shim INCLUDE) | 2 workers
 - 22:20: L1 accepted both rules, and w12 folds them into cand3: (a) crt0 branches to __fnvnx_image_entry (--defsym from link.entry, which is required for a guest image); (b) closure roots link as archives in a group, so ld chooses the members.
   - bootrt fix is now w9 9e457ca on 41a8855d4. At that head render/nxgpu is red (nxgpu4_check.h missing; owner L1/L6, told).
+- 22:25: L3a base3 d9d208c61 (t16l plus cand3 41a8855d4): all 30 admitted roots valid, lift/bridges included. L6A gl4link2 decb62ead on cand3: gl4, gl4shim, nxgpu, translator and d3d9 checks 0, libnxgl4.so sha 7da199c1…d4ba, NxGpuApi 8 slots.
+  - w8 is taking both; w9 is taking render/ to re-measure bootrt.
