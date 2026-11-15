@@ -295,3 +295,9 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - 20:10Z v3 shards 36 (proved 338, gap 7) and 37 (proved 336, gap 8, timeout 1) done (farm 11), failed 0. Complete: 27/54.
 - 20:15Z farms raised to 8 (orchestrator, integ c25091f47). New: farm 17 session_01KmtZKQsNbUFJo5YLf99XPh (K 9-11), 18 session_01KmtZKS6JztAqdT1BzKcjPM (12-14), 19 session_01KmtZKRrFezD7nFUYe49K4K (26-28), 20 session_01KmtZKTosbJBST86GQV375j (40,41,53,54). The old farms keep 05: 5-8, 07: 22-25, 11: 38-39, 12: 49-52. Each farm stops when its list is done; then it is archived.
 - 20:15Z v3 shard 50/54 done (farm 12): proved 334, gap 10, timeout 1, failed 0. Complete: 28/54.
+- 20:20Z v3 shard 5/54 done (farm 05): proved 335, gap 11, failed 0. Complete: 29/54.
+- 20:20Z L3a udcert (bd94fd02, facts 6944080) found 3 defects in our #UD site list. Causes:
+  - d3dx9_31 missing (2,577 sites): hand-written module lists in undecided_sites.py:97 and ehoracle.py:765 (rule 1);
+  - 66 U-NOGATE: opmap does not read the SDM x87 escape tables, so D8-DF forms look undefined (e.g. fist m16int);
+  - 87 U-NODEC: our own sweep, not the lift facts' code universe (rule 2).
+  Assigned to the new worker w11 (session_01KmtZKTzdEzraX9VWyyDcG3). Workers: w4, w9, w10, w11 (4/4).
