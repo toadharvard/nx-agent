@@ -84,5 +84,6 @@
    "root": "ports/fnv-nx/lib/sha256",
    "output": "INCLUDE"
   }
- ]
+ ],
+ "constants": "constants.tsv"
 }
