@@ -205,6 +205,19 @@ def finish(rep, out):
     return 0 if rep["verdict"] == "green" else 2
 
 
+def strace_run(cmd, trace, timeout=None, **popen):
+    """The one strace invocation (opentrace and oraclecheck both run commands through it): CMD under `strace -f -qq -y -e trace=TRACE_SET -o TRACE`;
+    POPEN is passed to subprocess.Popen. -> the command's exit status, or None when TIMEOUT seconds passed (the process group is killed)."""
+    import signal
+    p = subprocess.Popen(["strace", "-f", "-qq", "-y", "-e", "trace=" + TRACE_SET, "-o", trace, "--"] + list(cmd), start_new_session=True, **popen)
+    try:
+        return p.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(p.pid, signal.SIGKILL)
+        p.wait()
+        return None
+
+
 def main(argv):
     ap = argparse.ArgumentParser(prog="opentrace.py")
     ap.add_argument("mode", choices=["run", "check", "key"])
@@ -237,8 +250,7 @@ def main(argv):
             raise SystemExit("opentrace: run needs -- cmd")
         tf = a.keep_trace or tempfile.mkstemp(prefix="opentrace-", suffix=".strace")[1]
         try:
-            rc = subprocess.run(["strace", "-f", "-qq", "-y", "-e", "trace=" + TRACE_SET,
-                                 "-o", tf, "--"] + cmd).returncode
+            rc = strace_run(cmd, tf)
             with open(tf, errors="surrogateescape") as f:
                 lines = f.readlines()
         finally:
