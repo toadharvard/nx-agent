@@ -1060,3 +1060,14 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - The 4,001 data-decoded gs operands are not certified. They are removed by w7's universe rule against fallthrough into data, in the facts stage.
   - /GS failure-path certificates: L1 w28 format `fnvnx-gsfail/1` is accepted unchanged. L3a publishes it as the declared output `GSCERTS` of lift/facts, generated from the facts and the load-config SecurityCookie (w8). There is no hand-written list.
   - bottleneck: w7's exe JTAB_RED (17 sites) and the universe rule; FACTS gates the relift.
+- 22:08 w13 noform: claude/fnv-l3a-lift-w13-noform @ 88f691c09 accepted. One class, the symbolic immediate used as a Python int, closed by an exact mux (selidx/setidx/byteshift).
+  - Over the 4290-key SIMD universe (L3b c18ff53a), built Forms go from 3739 to 3861, with 0 previous shas changed. 122 of the 123 now build; vpavgw is an AVX ud-class case (L3b).
+  - w8 merges it into base3.
+  - Next for w13: the cmp* predicate-immediate class (98 or more shapes) and a ud-class check of the 3DNow shapes.
+- 22:08 w7 findings:
+  - The exe has no green reference in 6944080, because the exe was never regenerated there.
+  - The exe has 326 JTAB_RED rows: 180 unbounded index, 146 non-relocated table word.
+  - The exe facts round's real failure is memory growth at the R3 loop: 10.7 GB and climbing to the 15 GB kill. w7 is profiling it.
+  - Universe rule, class 1: an instruction has a fall-through iff its x86sys.json row has eip_advance > 0, so int 6 at 00ed641a has none.
+  - Class 2: a ptr/tail entry stays unless it has a data-proof. The census runs over all ptr/tail entries of both d3dx9 images, before any code.
+  - bottleneck: the exe facts memory growth (w7).
