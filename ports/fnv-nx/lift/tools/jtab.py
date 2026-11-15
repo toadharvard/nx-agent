@@ -13,6 +13,7 @@ node more than WIDEN times becomes top there (loop heads), so the analysis termi
 The table is the words T + 4*v, v over the interval: every word must be a relocated dword whose value is the address of an executable instruction; the extent may lie below T. The number of words
 is at most the image's size / 4 (more cannot be relocated code addresses). Anything else is RED with the reason.
 Basis: closure completeness (the preds are every edge of the closure, seeds are top: no assumption beyond the manifest of ASM-202); intervals and flags are an over-approximation."""
+import sys
 from capstone import x86 as X
 
 N = 1 << 32; M32 = N - 1; TOP = (0, M32); WIDEN = 4
@@ -347,7 +348,13 @@ class Tg(tuple):
     pass
 
 
+STATS = {'calls': 0, 'secs': 0.0, 'cone_sum': 0, 'cone_max': 0, 'slow': []}      # cost accounting of resolve (printed by the callers): calls, total seconds, backward-cone sizes
 def resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords):
+    import time; t0 = time.time(); r = _resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords); dt = time.time() - t0
+    STATS['calls'] += 1; STATS['secs'] += dt
+    if dt > 5: STATS['slow'].append((site, round(dt, 1), STATS.get('_cone', 0))); sys.stderr.write('jtab resolve %08x: %.1f s, cone %d, calls so far %d, %.0f s\n' % (site, dt, STATS.get('_cone', 0), STATS['calls'], STATS['secs']))
+    return r
+def _resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords):
     """-> (targets tuple, None) or (None, why). dec[x] = (size, mnemonic, feat, falls through, direct targets); preds(x) = the decoded predecessors of x."""
     ins = ins_at(site); op = ins.operands[0]
     if op.mem.base or op.mem.segment: return None, 'table jump with a base register or segment'
@@ -359,6 +366,7 @@ def resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords):
         if seeded(x): continue
         for p in preds(x):
             if p not in cone: cone.add(p); stack.append(p)
+    STATS['_cone'] = len(cone); STATS['cone_sum'] += len(cone); STATS['cone_max'] = max(STATS['cone_max'], len(cone))
     IN = {}; cnt = {}; work = []; cache = {}
     def ins_c(a):
         if a not in cache: cache[a] = ins_at(a)
@@ -430,3 +438,5 @@ def exclusive(ok, svals):
             i += 1
         if good: out.update(t.addrs)
     return out
+import atexit
+atexit.register(lambda: STATS['calls'] and sys.stderr.write('jtab resolve cost: %d calls, %.0f s, cone sum %d, cone max %d, slow(>5s) %d\n' % (STATS['calls'], STATS['secs'], STATS['cone_sum'], STATS['cone_max'], len(STATS['slow']))))
