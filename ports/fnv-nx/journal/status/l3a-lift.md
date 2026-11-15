@@ -935,3 +935,8 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - 21:34 L3b w11 2919259af (facts 6944080, 5,704,065 sites over 8 images): cleared-feature is now derived from the pinned vendor maps (Intel SDM plus AMD APM, tools/amd-apm aa490c484c89). There are 5,205 cleared-feature sites (5,148 3DNow!, 57 SSE3) and 92 reserved-encoding sites (84 sal /6, 7 test /1, 1 D9 DF).
   - The generated table is fnv-nx-build d7dd09d041a9 cpuid_feature_bits.tsv. w12's queue is unchanged: profile, then the path sweep, then f_cpufeat reads the table, the hand rows are deleted and the diff is reported.
   - For the parked udcert (w10, after the first frame): udcert.Pe must read through pemod.load / the relocated Image, never raw file bytes. Raw bytes gave U-NODEC 30 / U-NOGATE 112 / U-DEAD 1; the mapped image gives 0 / 92 / 0.
+- 21:36 w13 lift/fpfacts GREEN: claude/fnv-l3a-lift-w13-fpfacts @ 8366ff4e7 on base3 d9d208c61.
+  - Outputs: FPDEPTH and FPSTATE. It uses lift/retn RETN, and for now the l3a-lift/facts fixture external.
+  - Three builds are byte-identical. Re-run: 4/4 hits in 5.6 s. Cold: 3 min 40 s.
+  - Exe only: depth.tsv 18,539 rows. ASM-204 and ASM-205 are unproven: 51 unknown fcw loads, 3 unknown mxcsr loads, 2,454 sticky observers.
+  - Modules were blocked by the PE-preferred-base Image, which is the same defect w7 fixed in bea44f836. w13 cherry-picks bea44f836, runs fpfacts and retn once per image with bases from MODULES_TSV, takes the program-level ASM-204/205 as the AND over all images, and produces per-module RETN.
