@@ -784,7 +784,7 @@ def _uf_state(s, dst_idx, pop):
 
 
 # --- loads -------------------------------------------------------------------------------
-def _push(s, img, flags=NOFLAGS, uf=FALSE):
+def _push(s, img, flags=NOFLAGS, uf=FALSE, abort_set=None):
     """Push the image img (TOP <- TOP-1; ST(0) <- img, SDM 2A:FLD Op).  Stack overflow (SDM 1:8.5.1.1: push onto a non-empty
     register) or, for FLD ST(i), underflow of the source: IE, SF, C1 = overflow; the masked response pushes
     the QNaN indefinite.  Both at once is not specified by the SDM (precondition)."""
@@ -792,22 +792,25 @@ def _push(s, img, flags=NOFLAGS, uf=FALSE):
     fault = Or(ov, uf)
     s_f = do_push_img(stack_fault_state(s, ov), K(INDEF80, 80))
     s_n = _c1(do_push_img(s, img), FALSE)
-    o = finish(s, St.ite(fault, s_f, s_n), If(fault, fl(IE), flags), extra_pre=Not(And(ov, uf)))
+    o = finish(s, St.ite(fault, s_f, s_n), If(fault, fl(IE), flags), extra_pre=Not(And(ov, uf)), abort_set=abort_set)
     o.undef = UNDEF_C023
     return o
 
 
 def fld_m32(s, m):
     """SDM 2A:FLD Op (memory operand), single precision.  #IA for an SNaN (converted to QNaN, SDM 1:T4-8),
-    #D for a denormal (SDM 2A:FLD Exc)."""
+    #D for a denormal (SDM 2A:FLD Exc).  An unmasked #D does not abort: SDM 2A:FLD Description NOTE: 'When the FLD
+    instruction loads a denormal value and the DM bit in the CW is not masked, an exception is flagged but the value
+    is still pushed onto the x87 stack.'  So only IE aborts (abort_set)."""
     v, de, snan = from_m32(m)
-    return _push(s, to_m80(If(snan, quieten(v), v)), fv(ie=snan, de=de))
+    return _push(s, to_m80(If(snan, quieten(v), v)), fv(ie=snan, de=de), abort_set=fl(IE))
 
 
 def fld_m64(s, m):
-    """SDM 2A:FLD Op (memory operand), double precision (the register format, OWNER 8)."""
+    """SDM 2A:FLD Op (memory operand), double precision (the register format, OWNER 8); an unmasked #D still pushes
+    (the NOTE quoted at fld_m32)."""
     v, de, snan = from_m64(m)
-    return _push(s, to_m80(If(snan, quieten(v), v)), fv(ie=snan, de=de))
+    return _push(s, to_m80(If(snan, quieten(v), v)), fv(ie=snan, de=de), abort_set=fl(IE))
 
 
 def fld_m80(s, m):
