@@ -1682,3 +1682,4 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - The asm parsers are deleted.
   - L3a holds ae7417004 until these gates are in.
 - 14:26 cpu_s (w12 c61259c85): held for cand3. It changes sandbox_id, so it lands with hermeticity item 0 in one cold run. L3a/w8 told.
+  - cand4 note (L6, 15:10): at the w5 merge, take w6-root's deletion of render/d3d9/spec/ (150333ba3). The only copy is bridgefacts/d3d9.
