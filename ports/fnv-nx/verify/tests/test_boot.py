@@ -44,7 +44,7 @@ WL_GUEST = r'''
         fnvwl_f(1); fnvwl_g(); fnvwl_f(0);
         for (uint32_t i = 0; i < 4; i++) num("wlsp", wl_sp[i]);
     }
-    fnvnx_hcall1(H->exit, 0);
+    FNVNX_HCALL1_ON(H, exit, 0);
 #elif'''
 
 

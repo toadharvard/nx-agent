@@ -32,19 +32,19 @@ static void audio_pump(void *) {
     static int16_t buf[2 * 8192];
     while (g_arun) {
         mixer_render_s16(buf, g_aperiod);
-        fnvnx_hcall2(fnvnx_host->audio_submit, FNVNX_ADDR(buf), g_aperiod);
+        FNVNX_HCALL2(audio_submit, FNVNX_ADDR(buf), g_aperiod);
     }
 }
 
 static int host_audio_start(const char *, uint32_t rate, uint32_t period) {
     if (period > 8192) return -1;
-    if ((int64_t)fnvnx_hcall2(fnvnx_host->audio_open, rate, period) != 0) return -2;
+    if ((int64_t)FNVNX_HCALL2(audio_open, rate, period) != 0) return -2;
     g_aperiod = period;
     g_arun = 1;
     g_athread = os_thread_create(audio_pump, nullptr, 64 * 1024, 2, -1);   /* above normal, as S7's */
     if (!g_athread || os_thread_start(g_athread)) {
         g_arun = 0;
-        fnvnx_hcall0(fnvnx_host->audio_close);
+        FNVNX_HCALL0(audio_close);
         return -3;
     }
     return 0;
@@ -57,7 +57,7 @@ static void host_audio_stop(void) {
         os_thread_free(g_athread);
         g_athread = nullptr;
     }
-    fnvnx_hcall0(fnvnx_host->audio_close);
+    FNVNX_HCALL0(audio_close);
 }
 
 extern "C" const fnvnx_audio_backend fnvnx_audio_backend_audren = {"audren", host_audio_start, host_audio_stop};
@@ -66,13 +66,13 @@ extern "C" const fnvnx_audio_backend fnvnx_audio_backend_audren = {"audren", hos
 static_assert(sizeof(fnvnx_pad_raw) == 32, "fnvnx_pad_raw must match the host's layout");
 
 static int host_pad_read(unsigned i, fnvnx_pad_raw *o) {
-    return (int)fnvnx_hcall2(fnvnx_host->pad_read, i, FNVNX_ADDR(o));
+    return (int)FNVNX_HCALL2(pad_read, i, FNVNX_ADDR(o));
 }
 static void host_pad_vibrate(unsigned i, float lo, float hi) {
     uint32_t a, b;
     memcpy(&a, &lo, 4);
     memcpy(&b, &hi, 4);
-    fnvnx_hcall3(fnvnx_host->pad_vibrate, i, a, b);
+    FNVNX_HCALL3(pad_vibrate, i, a, b);
 }
 static const fnvnx_pad_source g_pad_src = {host_pad_read, host_pad_vibrate};
 extern "C" const fnvnx_pad_source *fnvnx_pad_horizon_source(void) { return &g_pad_src; }
@@ -89,7 +89,7 @@ extern "C" void fnvnx_input_pump(void) {
     FnvnxInputEvent ev[64];
     fnvnx_touch_point pts[16];
     unsigned npts = 0;
-    uint64_t n = fnvnx_hcall2(fnvnx_host->input_poll, FNVNX_ADDR(ev), 64);
+    uint64_t n = FNVNX_HCALL2(input_poll, FNVNX_ADDR(ev), 64);
     for (uint64_t i = 0; i < n && i < 64; i++) {
         const FnvnxInputEvent &e = ev[i];
         switch (e.type) {
@@ -120,5 +120,5 @@ extern "C" void fnvnx_guest_platform_init(void) {
  * answer for an unregistered module. */
 uint64_t nxd3d_gpu_call(uint32_t fn, const uint64_t *args, uint32_t nargs) {
     if (!fnvnx_host->ext_call) return FNVNX_EXT_NO_MODULE;
-    return fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_GPU, fn, FNVNX_ADDR(args), nargs);
+    return FNVNX_HCALL4(ext_call, FNVNX_EXT_GPU, fn, FNVNX_ADDR(args), nargs);
 }

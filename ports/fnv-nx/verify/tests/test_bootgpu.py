@@ -98,14 +98,14 @@ MODE50 = r"""#if MODE == 50
     w[0] = A2 + 0xff0;
     num("straddle", EC(10, 17, FNVNX_ADDR(w), 1));
     num("badfn", EC(10, 99, FNVNX_ADDR(w), 1));
-    fnvnx_hcall1(H->exit, 0);
+    FNVNX_HCALL1_ON(H, exit, 0);
 #elif MODE == 51
-    num("mf", fnvnx_hcall3(H->map_fixed, 0x4000000, 0x2000, H->heap_base + 0x20000));
+    num("mf", FNVNX_HCALL3_ON(H, map_fixed, 0x4000000, 0x2000, H->heap_base + 0x20000));
     uint64_t A = plat(4, 0, 0x8000000, 0, 2);
     num("A", A);
     plat(5, A, 0x1000, 0, 2); plat(5, A + 0x1000, 0x1000, 0, 2); plat(5, A + 0x10000, 0x1000, 0, 2);
     plat(8, A + 0x10000, 0x1000, 1, 3);
-    fnvnx_hcall1(H->exit, 0);
+    FNVNX_HCALL1_ON(H, exit, 0);
 #elif MODE == 6"""
 
 
