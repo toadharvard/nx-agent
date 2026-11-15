@@ -97,3 +97,16 @@ DM("S28", __is_same(__PTRDIFF_TYPE__, int));
 // S30: a class with a virtual function holds one 4-byte vptr, then its members; a vtable entry is a 4-byte pointer
 struct VT { virtual void f(); int a; };
 DM("S30", sizeof(VT) == 8 && sizeof(void (*)()) == 4);
+
+// S31, S32: wint_t is unsigned short and sig_atomic_t is int in the 32-bit Windows program
+DM("S31", __is_same(__WINT_TYPE__, unsigned short));
+DM("S32", __is_same(__SIG_ATOMIC_TYPE__, int));
+// S33: every fixed-width alias of the native side is a fundamental type with an S-row; the exact ones have their one identity
+#define FUND(T) (__is_same(T, signed char) || __is_same(T, unsigned char) || __is_same(T, short) || __is_same(T, unsigned short) || __is_same(T, int) || __is_same(T, unsigned int) || __is_same(T, long long) || __is_same(T, unsigned long long))
+DM("S33", __is_same(__INT8_TYPE__, signed char) && __is_same(__INT16_TYPE__, short) && __is_same(__INT32_TYPE__, int) && __is_same(__INT64_TYPE__, long long)
+        && __is_same(__UINT8_TYPE__, unsigned char) && __is_same(__UINT16_TYPE__, unsigned short) && __is_same(__UINT32_TYPE__, unsigned int) && __is_same(__UINT64_TYPE__, unsigned long long)
+        && __is_same(__INTMAX_TYPE__, long long) && __is_same(__UINTMAX_TYPE__, unsigned long long) && __is_same(__INTPTR_TYPE__, int) && __is_same(__UINTPTR_TYPE__, unsigned int)
+        && FUND(__INT_LEAST8_TYPE__) && FUND(__INT_LEAST16_TYPE__) && FUND(__INT_LEAST32_TYPE__) && FUND(__INT_LEAST64_TYPE__)
+        && FUND(__UINT_LEAST8_TYPE__) && FUND(__UINT_LEAST16_TYPE__) && FUND(__UINT_LEAST32_TYPE__) && FUND(__UINT_LEAST64_TYPE__)
+        && FUND(__INT_FAST8_TYPE__) && FUND(__INT_FAST16_TYPE__) && FUND(__INT_FAST32_TYPE__) && FUND(__INT_FAST64_TYPE__)
+        && FUND(__UINT_FAST8_TYPE__) && FUND(__UINT_FAST16_TYPE__) && FUND(__UINT_FAST32_TYPE__) && FUND(__UINT_FAST64_TYPE__));

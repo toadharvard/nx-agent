@@ -36,6 +36,9 @@ Target: Microsoft Visual C++ 2008 (cl 15.00), x86, /Zc:wchar_t, /J off, /Zp8. Pi
 | S28 | long integer, 4 bytes | int (4 bytes) | msvcmodel.patch hunk in gcc/config/aarch64/aarch64.h: SIZE_TYPE / PTRDIFF_TYPE under TARGET_ILP32 | closed | docs/c-runtime-library/standard-types.md:64 |
 | S29 | a 4-byte element count before the array when the class has a non-trivial destructor; the size passed to delete[] | as MSVC after the patch | msvcmodel.patch hunks in gcc/cp/init.cc, gcc/cp/call.cc, gcc/cp/class.cc and gcc/targhooks.cc | closed | exe: pinned cl 15.00 output recorded in ldbl/model.cpp comments (Microsoft does not document the cookie) |
 | S30 | 4-byte entries | 4-byte entries (ILP32 pointers) | equal by default | closed | exe: the exe's vtables; checked per class by the R7 layout gate (Microsoft does not document the vtable layout) |
+| S31 | wint_t is `unsigned short` (WCHAR.H) | unsigned short (__WINT_TYPE__ = short unsigned int) | msvcmodel.patch hunk in gcc/config/aarch64/aarch64.h: WINT_TYPE under TARGET_ILP32 (GCC default is unsigned int) | closed | docs/c-runtime-library/is-isw-routines.md:39 |
+| S32 | sig_atomic_t is `int` (SIGNAL.H of Visual C++ 2008) | int (__SIG_ATOMIC_TYPE__ = int) | equal by default (SIG_ATOMIC_TYPE is unset in aarch64, the language default is int) | closed | exe: cpp-docs documents sig_atomic_t only as "integer" (c-runtime-library/standard-types.md); its type int is the declaration of cl 15.00's signal.h and is checked per record by the R7 layout gate |
+| S33 | Visual C++ 2008 has no <stdint.h>: the exe has no such typedef, so there is no MS value | each alias denotes a fundamental type with an S-row: int8 signed char, int16 short, int32 int, int64 long long, intmax long long, intptr int; least/fast any fundamental integer type of at least N bits | rule, checked: each alias resolves to a fundamental type fixed by S03-S06 and S10, so a field of such a type has the layout of that type | closed | exe: none: native-only typedefs; the rule is the check (a field of such a type has the layout of its fundamental type) |
 
 ## tm.texi entries (135)
 
@@ -63,20 +66,20 @@ Target: Microsoft Visual C++ 2008 (cl 15.00), x86, /Zc:wchar_t, /J off, /Zp8. Pi
 | FRACT_TYPE_SIZE | not a layout fact: decimal-float and fixed-point types: Visual C++ 2008 has none, so the exe has no such type |
 | FUNCTION_BOUNDARY | not a layout fact: code alignment of host functions, not a data layout |
 | INCOMING_STACK_BOUNDARY | not a layout fact: host frame and argument-slot layout; guest calls cross through the generated dispatch descriptors, not through the host frame (a record never holds a frame) |
-| INT16_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| INT32_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| INT64_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| INT8_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| INTMAX_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| INTPTR_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| INT_FAST16_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| INT_FAST32_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| INT_FAST64_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| INT_FAST8_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| INT_LEAST16_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| INT_LEAST32_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| INT_LEAST64_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| INT_LEAST8_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
+| INT16_TYPE | S33 |
+| INT32_TYPE | S33 |
+| INT64_TYPE | S33 |
+| INT8_TYPE | S33 |
+| INTMAX_TYPE | S33 |
+| INTPTR_TYPE | S33 |
+| INT_FAST16_TYPE | S33 |
+| INT_FAST32_TYPE | S33 |
+| INT_FAST64_TYPE | S33 |
+| INT_FAST8_TYPE | S33 |
+| INT_LEAST16_TYPE | S33 |
+| INT_LEAST32_TYPE | S33 |
+| INT_LEAST64_TYPE | S33 |
+| INT_LEAST8_TYPE | S33 |
 | INT_TYPE_SIZE | S05 |
 | LIBGCC2_GNU_PREFIX | not a layout fact: libgcc symbol naming and complex-arithmetic helper width; no type of the exe |
 | LOCAL_ALIGNMENT | not a layout fact: host frame and argument-slot layout; guest calls cross through the generated dispatch descriptors, not through the host frame (a record never holds a frame) |
@@ -108,7 +111,7 @@ Target: Microsoft Visual C++ 2008 (cl 15.00), x86, /Zc:wchar_t, /J off, /Zp8. Pi
 | SHORT_ACCUM_TYPE_SIZE | not a layout fact: decimal-float and fixed-point types: Visual C++ 2008 has none, so the exe has no such type |
 | SHORT_FRACT_TYPE_SIZE | not a layout fact: decimal-float and fixed-point types: Visual C++ 2008 has none, so the exe has no such type |
 | SHORT_TYPE_SIZE | S04 |
-| SIG_ATOMIC_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
+| SIG_ATOMIC_TYPE | S32 |
 | SIZETYPE | S27 |
 | SIZE_TYPE | S27 |
 | STACK_BOUNDARY | not a layout fact: host frame and argument-slot layout; guest calls cross through the generated dispatch descriptors, not through the host frame (a record never holds a frame) |
@@ -156,25 +159,25 @@ Target: Microsoft Visual C++ 2008 (cl 15.00), x86, /Zc:wchar_t, /J off, /Zp8. Pi
 | TARGET_VTABLE_DATA_ENTRY_DISTANCE | S30 |
 | TARGET_VTABLE_ENTRY_ALIGN | S30 |
 | TARGET_VTABLE_USES_DESCRIPTORS | S30 |
-| UINT16_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| UINT32_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| UINT64_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| UINT8_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| UINTMAX_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| UINTPTR_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| UINT_FAST16_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| UINT_FAST32_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| UINT_FAST64_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| UINT_FAST8_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| UINT_LEAST16_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| UINT_LEAST32_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| UINT_LEAST64_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
-| UINT_LEAST8_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
+| UINT16_TYPE | S33 |
+| UINT32_TYPE | S33 |
+| UINT64_TYPE | S33 |
+| UINT8_TYPE | S33 |
+| UINTMAX_TYPE | S33 |
+| UINTPTR_TYPE | S33 |
+| UINT_FAST16_TYPE | S33 |
+| UINT_FAST32_TYPE | S33 |
+| UINT_FAST64_TYPE | S33 |
+| UINT_FAST8_TYPE | S33 |
+| UINT_LEAST16_TYPE | S33 |
+| UINT_LEAST32_TYPE | S33 |
+| UINT_LEAST64_TYPE | S33 |
+| UINT_LEAST8_TYPE | S33 |
 | UNITS_PER_WORD | not a layout fact: width of the host register word; the lifted code expresses every guest operation at its own width, so no guest type changes |
 | WCHAR_TYPE | S02 |
 | WCHAR_TYPE_SIZE | S02 |
 | WIDEST_HARDWARE_FP_SIZE | not a layout fact: libgcc symbol naming and complex-arithmetic helper width; no type of the exe |
-| WINT_TYPE | not a layout fact: typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10 |
+| WINT_TYPE | S31 |
 | WORDS_BIG_ENDIAN | S19 |
 
 ## crossing_forbidden

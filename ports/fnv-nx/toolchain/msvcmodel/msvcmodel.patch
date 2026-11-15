@@ -13,7 +13,7 @@
  
  /* This value is the amount of bytes a caller is allowed to drop the stack
     before probing has to be done for stack clash protection.  */
-@@ -149,9 +153,13 @@
+@@ -149,9 +153,17 @@
  /* Using long long breaks -ansi and -std=c90, so these will need to be
     made conditional for an LLP64 ABI.  */
  
@@ -26,6 +26,10 @@
  
 -#define PTRDIFF_TYPE	"long int"
 +#define PTRDIFF_TYPE	(TARGET_ILP32 ? "int" : "long int")
++
++/* fnv-nx msvcmodel: wint_t is unsigned short in the 32-bit Windows program
++   (cpp-docs c-runtime-library/is-isw-routines.md); GCC would give unsigned int.  */
++#define WINT_TYPE	(TARGET_ILP32 ? "short unsigned int" : "unsigned int")
  
  #define PCC_BITFIELD_TYPE_MATTERS	1
  

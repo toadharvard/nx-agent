@@ -544,6 +544,50 @@
    "flag": null,
    "exe_source": "the exe's vtables; checked per class by the R7 layout gate (Microsoft does not document the vtable layout)",
    "citations": []
+  },
+  {
+   "id": "S31",
+   "property": "wint_t is unsigned short",
+   "msvc": "wint_t is `unsigned short` (WCHAR.H)",
+   "gcc": "unsigned short (__WINT_TYPE__ = short unsigned int)",
+   "mechanism": "msvcmodel.patch hunk in gcc/config/aarch64/aarch64.h: WINT_TYPE under TARGET_ILP32 (GCC default is unsigned int)",
+   "kind": "patch",
+   "status": "closed",
+   "check": "static_assert DM(\"S31\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/c-runtime-library/is-isw-routines.md",
+     "line": 39,
+     "quote": "The `wint_t` data type is defined in `<WCHAR.H>` as an **`unsigned short`**."
+    }
+   ]
+  },
+  {
+   "id": "S32",
+   "property": "sig_atomic_t is int",
+   "msvc": "sig_atomic_t is `int` (SIGNAL.H of Visual C++ 2008)",
+   "gcc": "int (__SIG_ATOMIC_TYPE__ = int)",
+   "mechanism": "equal by default (SIG_ATOMIC_TYPE is unset in aarch64, the language default is int)",
+   "kind": "default",
+   "status": "closed",
+   "check": "static_assert DM(\"S32\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "exe_source": "cpp-docs documents sig_atomic_t only as \"integer\" (c-runtime-library/standard-types.md); its type int is the declaration of cl 15.00's signal.h and is checked per record by the R7 layout gate",
+   "citations": []
+  },
+  {
+   "id": "S33",
+   "property": "fixed-width and intptr typedefs of the native side: intN_t, uintN_t, int_leastN_t, int_fastN_t, intmax_t, intptr_t",
+   "msvc": "Visual C++ 2008 has no <stdint.h>: the exe has no such typedef, so there is no MS value",
+   "gcc": "each alias denotes a fundamental type with an S-row: int8 signed char, int16 short, int32 int, int64 long long, intmax long long, intptr int; least/fast any fundamental integer type of at least N bits",
+   "mechanism": "rule, checked: each alias resolves to a fundamental type fixed by S03-S06 and S10, so a field of such a type has the layout of that type",
+   "kind": "default",
+   "status": "closed",
+   "check": "static_assert DM(\"S33\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "exe_source": "none: native-only typedefs; the rule is the check (a field of such a type has the layout of its fundamental type)",
+   "citations": []
   }
  ],
  "tm": [
@@ -637,59 +681,59 @@
   },
   {
    "entry": "INT16_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "INT32_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "INT64_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "INT8_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "INTMAX_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "INTPTR_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "INT_FAST16_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "INT_FAST32_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "INT_FAST64_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "INT_FAST8_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "INT_LEAST16_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "INT_LEAST32_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "INT_LEAST64_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "INT_LEAST8_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "INT_TYPE_SIZE",
@@ -817,7 +861,7 @@
   },
   {
    "entry": "SIG_ATOMIC_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S32"
   },
   {
    "entry": "SIZETYPE",
@@ -1009,59 +1053,59 @@
   },
   {
    "entry": "UINT16_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "UINT32_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "UINT64_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "UINT8_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "UINTMAX_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "UINTPTR_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "UINT_FAST16_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "UINT_FAST32_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "UINT_FAST64_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "UINT_FAST8_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "UINT_LEAST16_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "UINT_LEAST32_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "UINT_LEAST64_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "UINT_LEAST8_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S33"
   },
   {
    "entry": "UNITS_PER_WORD",
@@ -1081,7 +1125,7 @@
   },
   {
    "entry": "WINT_TYPE",
-   "not_layout": "typedef names for <stdint.h>/<wchar.h>; Visual C++ 2008 ships no <stdint.h>, and each alias denotes a fundamental type whose layout is fixed by S03-S06 and S10"
+   "fact": "S31"
   },
   {
    "entry": "WORDS_BIG_ENDIAN",
