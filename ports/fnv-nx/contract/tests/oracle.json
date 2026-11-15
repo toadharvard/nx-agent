@@ -169,6 +169,18 @@
     "ports/fnv-nx/contract/images.py"
    ]
   },
+  "test_imgfacts.py": {
+   "references": [
+    {
+     "anchor": "## contract/exefacts.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/exefacts.py"
+   ]
+  },
   "test_imports.py": {
    "references": [
     {

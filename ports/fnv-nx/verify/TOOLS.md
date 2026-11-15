@@ -250,6 +250,38 @@ producer of kind data (sizes from the symbol table), or PARAM(j) whose callers a
 certificate is no certificate).  Assumptions: the compiler (OWNER 1) and the pinned objdump decode the objects.
 ```
 
+## contract/exefacts.py
+
+```text
+exefacts - the one fact base read from the player's executable (L1 CONTRACT, M0).
+
+    exefacts.py --exe FalloutNV.exe --units units.json --out facts.json [--jobs N]
+
+Everything a boundary needs is a fact of the exe: base relocations, imports, RTTI vftables, and per function
+the `ret N` set, direct and indirect calls, vptr stores (in order, with base and
+displacement), data references and code pointers.  The output is exe-derived: it stays in the container or in
+fnv-nx-build, never in this repository (docs/ARCHITECTURE.md, Legal).
+
+Facts (store.py kind `facts`, canonical JSON, one dict; the result does not depend on --jobs):
+  meta      sha256 of the exe and of this file, counts
+  base, secs{name: (va, vsize, raw_off, raw_size)}, relocs[sorted va]
+  imports   {iat_slot_va: (dll, name)}
+  vft       {vftable_va: (rtti_name, col_offset, [slot targets], col_va)}; a vftable without RTTI that the
+            decomp names has (its `??_7` symbol, 0, slots, 0)
+  ptrs      [(va, target)]   every relocated code pointer held in data (slots, callbacks, __xc ...)
+  xc        [target ...]     the C++ initializer table, in order
+  fn        {va: F}          F as returned by analyze() plus 'sym', 'decomp', 'unit'
+
+Image mode (the per-image facts stage; owner L1):  exefacts.py --modules modules.tsv --dir DIR [--dir DIR ...] (--out-dir OUT | --bundle FILE)
+  Universe = the rows of modules.tsv (contract/modules.py: the loader's may-load closure over the declared file set), never a list here.  Each image is found by name
+  in the --dir list (as modules.py), checked against the row's sha256 and read by the SAME Image reader as the exe: one document per image of store kind `imgfacts`
+  (meta{name, image_sha256, tool_sha256, relocs, imports}, base, secs, relocs, imports {iat_slot_va: (dll, name)}; the exe's schema without fn/vft/ptrs/xc),
+  and an index `images.tsv` (name, image sha256, document sha256) naming every image.  --out-dir writes `<name>.json` + index; --bundle writes ONE file
+  (`fnvnx-imgfacts-set/1`: images{name: {image_sha256, doc}}, index), the form of a recipe stage, which declares its outputs by name.  An image of the closure
+  without a document is red: `facts:missing:<name>` (no file, no index row or the document is of another image), `facts:sha:<name>` (the file is not the row's
+  image); exit 1 lists them.  Checks: image_check (directory), bundle_check (bundle).  Exe- and game-derived: container and fnv-nx-build only.
+```
+
 ## contract/gate_vcall.py
 
 ```text

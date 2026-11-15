@@ -15,6 +15,7 @@ dict order, no process state reaches the file).  Encoding rules, closed over the
 Kinds (the explicit per-file encoding):
   facts  exefacts.py   fn/vft/imports keys: decimal address; F['ret'] tuple; the lists calls tails icalls itails stores
                        vrefs data codeptrs imports jt of F hold tuples; secs/ptrs/vft values tuples
+  imgfacts exefacts.py image mode  the facts of one module image (no fn/vft/ptrs/xc): meta, base, secs (values tuples), relocs, imports (decimal keys, tuple values)
   n1     n1.py         fn keys decimal address, F['relocs'] list of tuples;
                        sym keys "unit\\tsymbol" (2-tuple) or "unit\\tindex\\tsymbol" (3-tuple), unit and index decimal;
                        vt keys "unit\\tsymbol"
@@ -69,6 +70,12 @@ def _facts_dec(o):
     o['imports'] = _ik(o['imports'], tuple)
     o['vft'] = _ik(o['vft'], tuple)
     o['ptrs'] = _tl(o['ptrs'])
+    return o
+
+
+def _imgfacts_dec(o):
+    o['secs'] = {k: tuple(v) for k, v in o['secs'].items()}
+    o['imports'] = _ik(o['imports'], tuple)
     return o
 
 
@@ -193,15 +200,18 @@ def _eh_dec(o):
     return r
 
 
-KINDS = dict(facts=(_facts_enc, _facts_dec), n1=(_n1_enc, _n1_dec), obj=(_obj_enc, _obj_dec), objone=(_obj_enc, _obj_dec),
+KINDS = dict(facts=(_facts_enc, _facts_dec), imgfacts=(_facts_enc, _imgfacts_dec), n1=(_n1_enc, _n1_dec), obj=(_obj_enc, _obj_dec), objone=(_obj_enc, _obj_dec),
              bind=(_bind_enc, _bind_dec), vtid=(_vtid_enc, _vtid_dec), eh=(_eh_enc, _eh_dec))
 
 
+def dumps(kind, obj):
+    """The text of save(): the canonical file content of OBJ as KIND."""
+    return json.dumps(dict(data=KINDS[kind][0](obj), format=FORMAT, kind=kind), sort_keys=True, separators=(',', ':')) + '\n'
+
+
 def save(path, kind, obj):
-    enc = KINDS[kind][0](obj)
     with open(path, 'w', newline='\n') as fh:
-        json.dump(dict(data=enc, format=FORMAT, kind=kind), fh, sort_keys=True, separators=(',', ':'))
-        fh.write('\n')
+        fh.write(dumps(kind, obj))
 
 
 def load(path, kind=None):

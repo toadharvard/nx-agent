@@ -92,7 +92,9 @@
     "--keys-tsv-out",
     "/out/gen/keys.tsv",
     "--data-out",
-    "/out/gen/iat_data.tsv"
+    "/out/gen/iat_data.tsv",
+    "--modules-tsv-out",
+    "/out/gen/modules.tsv"
    ],
    "inputs": [
     {
@@ -105,7 +107,8 @@
     "gen/import_keys.c",
     "gen/import_keys.h",
     "gen/keys.tsv",
-    "gen/iat_data.tsv"
+    "gen/iat_data.tsv",
+    "gen/modules.tsv"
    ]
   },
   {
@@ -119,6 +122,28 @@
    "inputs": [],
    "outputs": [
     "gen/identity.c"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/contract/exefacts.py",
+   "args": [
+    "--modules",
+    "/stage/gen/modules.tsv",
+    "--dir",
+    "/ext/exe",
+    "--dir",
+    "/ext/redist",
+    "--bundle",
+    "/out/gen/imgfacts.json"
+   ],
+   "inputs": [
+    {
+     "stage": "ports/fnv-nx/loader:gen:1",
+     "path": "gen/modules.tsv"
+    }
+   ],
+   "outputs": [
+    "gen/imgfacts.json"
    ]
   }
  ]

@@ -17,6 +17,15 @@ Facts (store.py kind `facts`, canonical JSON, one dict; the result does not depe
   ptrs      [(va, target)]   every relocated code pointer held in data (slots, callbacks, __xc ...)
   xc        [target ...]     the C++ initializer table, in order
   fn        {va: F}          F as returned by analyze() plus 'sym', 'decomp', 'unit'
+
+Image mode (the per-image facts stage; owner L1):  exefacts.py --modules modules.tsv --dir DIR [--dir DIR ...] (--out-dir OUT | --bundle FILE)
+  Universe = the rows of modules.tsv (contract/modules.py: the loader's may-load closure over the declared file set), never a list here.  Each image is found by name
+  in the --dir list (as modules.py), checked against the row's sha256 and read by the SAME Image reader as the exe: one document per image of store kind `imgfacts`
+  (meta{name, image_sha256, tool_sha256, relocs, imports}, base, secs, relocs, imports {iat_slot_va: (dll, name)}; the exe's schema without fn/vft/ptrs/xc),
+  and an index `images.tsv` (name, image sha256, document sha256) naming every image.  --out-dir writes `<name>.json` + index; --bundle writes ONE file
+  (`fnvnx-imgfacts-set/1`: images{name: {image_sha256, doc}}, index), the form of a recipe stage, which declares its outputs by name.  An image of the closure
+  without a document is red: `facts:missing:<name>` (no file, no index row or the document is of another image), `facts:sha:<name>` (the file is not the row's
+  image); exit 1 lists them.  Checks: image_check (directory), bundle_check (bundle).  Exe- and game-derived: container and fnv-nx-build only.
 """
 import argparse, bisect, collections, hashlib, json, os, struct, sys
 import capstone
@@ -42,15 +51,18 @@ class Image:
         opt, = struct.unpack_from('<H', d, pe + 20)
         self.base, = struct.unpack_from('<I', d, pe + 24 + 28)
         self.dd = [struct.unpack_from('<II', d, pe + 24 + 96 + 8 * i) for i in range(16)]
-        self.secs = {}
+        self.secs, codes = {}, []
         o = pe + 24 + opt
         for _ in range(nsec):
             name = d[o:o + 8].rstrip(b'\0').decode()
             vs, va, rs, ro = struct.unpack_from('<IIII', d, o + 8)
+            ch, = struct.unpack_from('<I', d, o + 36)
             self.secs[name] = (self.base + va, vs, ro, rs)
+            if ch & 0x20 and name not in codes:   # IMAGE_SCN_CNT_CODE
+                codes.append(name)
             o += 40
         self._spans = sorted((va, vs, ro, rs, n) for n, (va, vs, ro, rs) in self.secs.items())
-        self.text = self.secs['.text'][:2]
+        self.text = self.secs['.text'][:2] if '.text' in self.secs else self.secs[codes[0]][:2] if codes else (self.base, 0)   # the exe has .text; a module's code section is the first with the code flag
         self.relocs = self._relocs()
         self.rset = set(self.relocs)
         self.imports, self.iat = self._imports()
@@ -86,6 +98,8 @@ class Image:
     def _relocs(self):
         rva, size = self.dd[5]
         out = []
+        if not rva:
+            return out   # no base relocation directory
         p = self.off(self.base + rva)
         end = p + size
         while p < end:
@@ -102,6 +116,8 @@ class Image:
     def _imports(self):
         rva, size = self.dd[1]
         out = {}
+        if not rva:
+            return out, set()   # no import directory
         p = self.base + rva
         while True:
             ilt, _, _, name, iat = struct.unpack_from('<IIIII', self.d, self.off(p))
@@ -424,14 +440,134 @@ def build(exe, units, jobs=4, log=print):
                 xc=xc, fn=fn)
 
 
+def image_facts(data, name):
+    """The facts of one module image DATA (bytes of a PE32): the exe's schema without the function part: meta, base, secs, relocs, imports
+    (store kind `imgfacts`).  The same Image reader as the exe's, so `imports` is {iat_slot_va: (dll, name)} of the same rules."""
+    img = Image.parse(data)
+    meta = dict(version=VERSION, name=name, image_sha256=img.sha256, tool_sha256=hashlib.sha256(open(__file__, 'rb').read()).hexdigest(),
+                relocs=len(img.relocs), imports=len(img.imports))
+    return dict(meta=meta, base=img.base, secs=img.secs, relocs=img.relocs, imports=img.imports)
+
+
+INDEX = 'images.tsv'
+
+
+def module_rows(text):
+    """modules.tsv text (modules.py) -> [(name, sha256)] of every image of the loader's may-load closure."""
+    return [(f[0], f[1]) for f in (ln.split('\t') for ln in text.splitlines() if ln and not ln.startswith('#'))]
+
+
+def image_docs(modules_text, dirs):
+    """THE per-image facts stage.  Universe = the rows of modules.tsv (the closure over the declared file set, never a list here): the image of every row is
+    found by name in DIRS (modules.find_file), checked against the row's sha256 and read by image_facts.
+    -> ({name: (image sha256, document text of store kind imgfacts)}, ids of the images without a document: `facts:missing:<name>` (no file) or
+    `facts:sha:<name>` (the file is not the row's image))."""
+    import modules
+    docs, bad = {}, []
+    for name, sha in sorted(module_rows(modules_text)):
+        path = modules.find_file(dirs, name)
+        if path is None:
+            bad.append('facts:missing:' + name)
+            continue
+        data = open(path, 'rb').read()
+        if hashlib.sha256(data).hexdigest() != sha:
+            bad.append('facts:sha:' + name)
+            continue
+        docs[name] = (sha, store.dumps('imgfacts', image_facts(data, name)))
+    return docs, bad
+
+
+def index_text(docs):
+    return '# name\timage_sha256\tfacts_sha256\n' + ''.join('%s\t%s\t%s\n' % (n, docs[n][0], hashlib.sha256(docs[n][1].encode()).hexdigest()) for n in sorted(docs))
+
+
+def image_stage(modules_text, dirs, out_dir):
+    """image_docs written as a directory: `<out_dir>/<name>.json` per image and the index `images.tsv` (name, image sha256, document sha256). -> the red ids."""
+    docs, bad = image_docs(modules_text, dirs)
+    os.makedirs(out_dir, exist_ok=True)
+    for n, (_, text) in docs.items():
+        with open(os.path.join(out_dir, n + '.json'), 'w', newline='\n') as fh:
+            fh.write(text)
+    with open(os.path.join(out_dir, INDEX), 'w', newline='\n') as fh:
+        fh.write(index_text(docs))
+    return bad
+
+
+SET_FORMAT = 'fnvnx-imgfacts-set/1'
+
+
+def image_bundle(modules_text, dirs):
+    """image_docs as ONE file (a recipe stage declares its outputs by name, and the closure is derived): {"format", "images": {name: {"image_sha256", "doc": <the
+    document's store object>}}, "index": the index text}, canonical JSON. -> (text, red ids)."""
+    docs, bad = image_docs(modules_text, dirs)
+    out = dict(format=SET_FORMAT, images={n: dict(image_sha256=sha, doc=json.loads(t)) for n, (sha, t) in docs.items()}, index=index_text(docs))
+    return json.dumps(out, sort_keys=True, separators=(',', ':')) + '\n', bad
+
+
+def bundle_check(modules_text, bundle_text):
+    """Completeness of an image_bundle against modules.tsv -> ids `facts:missing:<name>` of every image of the closure that the bundle lacks or holds for another image."""
+    try:
+        b = json.loads(bundle_text)
+        imgs = b['images'] if b.get('format') == SET_FORMAT else {}
+    except (ValueError, AttributeError):
+        imgs = {}
+    bad = []
+    for name, sha in module_rows(modules_text):
+        e = imgs.get(name)
+        if not (isinstance(e, dict) and e.get('image_sha256') == sha and isinstance(e.get('doc'), dict) and e['doc'].get('kind') == 'imgfacts'
+                and e['doc'].get('data', {}).get('meta', {}).get('image_sha256') == sha):
+            bad.append('facts:missing:' + name)
+    return bad
+
+
+def image_check(modules_text, out_dir):
+    """The completeness of the directory form of image_stage against modules.tsv: -> ids `facts:missing:<name>` of every image of the closure without an index
+    row, without its document, or whose document is of another image."""
+    try:
+        idx = {f[0]: f for f in (ln.split('\t') for ln in open(os.path.join(out_dir, INDEX)).read().splitlines() if ln and not ln.startswith('#'))}
+    except OSError:
+        idx = {}
+    bad = []
+    for name, sha in module_rows(modules_text):
+        row, doc = idx.get(name), os.path.join(out_dir, name + '.json')
+        try:
+            ok = row is not None and row[1] == sha and hashlib.sha256(open(doc, 'rb').read()).hexdigest() == row[2] and store.load(doc, 'imgfacts')['meta']['image_sha256'] == sha
+        except (OSError, ValueError, KeyError):
+            ok = False
+        if not ok:
+            bad.append('facts:missing:' + name)
+    return bad
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--exe', required=True)
-    ap.add_argument('--units', required=True)
-    ap.add_argument('--out', required=True)
+    ap.add_argument('--exe')
+    ap.add_argument('--units')
+    ap.add_argument('--out')
+    ap.add_argument('--modules', help='image mode: modules.tsv of modules.py; writes one facts document per image and %s into --out-dir' % INDEX)
+    ap.add_argument('--dir', action='append', default=[], help='image mode: the directories that hold the images (as modules.py)')
+    ap.add_argument('--out-dir', help='image mode: one document per image and the index')
+    ap.add_argument('--bundle', help='image mode: ONE file holding every document and the index (a recipe stage output)')
     ap.add_argument('--jobs', type=int, default=4)
     ap.add_argument('--vft-out', help='also write the sorted list of vftable addresses (input of objfacts_one.py)')
     a = ap.parse_args()
+    if a.modules:
+        if not a.dir or not (a.out_dir or a.bundle):
+            ap.error('--modules needs --dir and --out-dir or --bundle')
+        mt = open(a.modules).read()
+        bad = []
+        if a.out_dir:
+            bad += image_stage(mt, a.dir, a.out_dir) or image_check(mt, a.out_dir)
+        if a.bundle:
+            text, b2 = image_bundle(mt, a.dir)
+            with open(a.bundle, 'w', newline='\n') as fh:
+                fh.write(text)
+            bad += (b2 or bundle_check(mt, text))
+        for b in bad:
+            print(b, file=sys.stderr)
+        return 1 if bad else 0
+    if not (a.exe and a.units and a.out):
+        ap.error('--exe, --units and --out are required (or --modules)')
     facts = build(a.exe, a.units, a.jobs, log=lambda s: print(s, file=sys.stderr))
     store.save(a.out, 'facts', facts)
     if a.vft_out:
@@ -442,4 +578,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main() or 0)
