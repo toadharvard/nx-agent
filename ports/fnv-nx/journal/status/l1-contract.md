@@ -1820,3 +1820,5 @@ bottleneck: the cand2 warm verdict on w15.
   - Next for w12: tests/bootrt rt.c (12 declared-machine-uncited plus 1 reach-not-exit). Its double definitions are deleted and it links the product objects; a symbol with no owner is reported. Then the compiler stage.
   - L3a told to put the pack's needed header outputs in include_uses.
 bottleneck: the cand2 warm verdict on w15.
+- 21:23 L3a: b3a4dad01 fits lift/pack. Unit PP uses only include_uses lift/rt GEN. Confirmed from the code that the generated stages still mount every uses output (recipe.py:2235).
+bottleneck: the cand2 warm verdict on w15.
