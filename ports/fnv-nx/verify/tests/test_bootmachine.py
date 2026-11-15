@@ -28,41 +28,13 @@ import bootlayout  # noqa: E402
 import boothost  # noqa: E402
 import bootmachine  # noqa: E402
 import gate_build  # noqa: E402
+import hostabirec  # noqa: E402
 
 QUANTUM = 20000   # instructions per slice (bootmachine.py rule 3): a declared parameter of these runs
 TMP = tempfile.mkdtemp(prefix="bm-")
 atexit.register(shutil.rmtree, TMP, ignore_errors=True)
 GATE_CACHE = os.environ.get("GATE_CACHE") or os.path.join(TMP, "gate-cache")
 FAILED, N = [], [0]
-
-
-def parse_totality(path):
-    """the header's TOTALITY TABLE block parsed: (services {fn: (NAME, n or None)}, slots [names]). Rows are `<fn> <NAME> n=<k>`, the
-    NOT SERVED row, and the combined sockets row (names, then `n = ... (SOCK_SOCKET 3, CLOSE 1, ...)`); the numbers are cross-checked
-    against the `#define FNVNX_PLAT_<NAME> <fn>u` lines; the slots are the uint64 fields of struct FnvnxHostApi."""
-    txt = open(path).read()
-    block = txt[txt.index("TOTALITY TABLE BEGIN"):txt.index("TOTALITY TABLE END")]
-    lines = [re.sub(r"^\s*\*\s?", "", l) for l in block.splitlines()]
-    rows = {}
-    for l in lines:
-        m = re.match(r"\s*(\d+) ([A-Z_0-9]+)\s+n=(\d+)\b", l)
-        if m:
-            rows[int(m.group(1))] = (m.group(2), int(m.group(3)))
-        m = re.match(r"\s*(\d+) ([A-Z_0-9]+)\s+NOT SERVED", l)
-        if m:
-            rows[int(m.group(1))] = (m.group(2), None)
-    body = "\n".join(lines)
-    m = re.search(r"16\.\.26 30 31 (.*?)\bn = the count[^(]*\((.*?)\)\s*\n", body, re.S)
-    names = re.findall(r"\bSOCK_[A-Z_]+", m.group(1))
-    counts = {("SOCK_" + a if not a.startswith("SOCK_") else a): int(b) for a, b in re.findall(r"([A-Z_]+) (\d+)", m.group(2))}
-    assert len(names) == 13 and set(counts) == set(names), (names, counts)
-    for f, n in zip(list(range(16, 27)) + [30, 31], names):
-        rows[f] = (n, counts[n])
-    defs = {int(v): n for n, v in re.findall(r"#define FNVNX_PLAT_([A-Z_0-9]+) (\d+)u", txt)}
-    assert {f: r[0] for f, r in rows.items()} == defs, "table rows and #define FNVNX_PLAT_* differ"
-    st = txt[txt.index("typedef struct FnvnxHostApi {"):txt.index("} FnvnxHostApi;")]
-    slots = re.findall(r"uint64_t (\w+);", st)[4:]   # after guest_base, guest_size, heap_base, heap_size
-    return rows, slots
 
 
 def case(name, cond, extra=""):
@@ -222,8 +194,8 @@ def main():
     case("limit_host_calls ends with reason limit", rl["reason"] == "limit" and rl["host_calls"] == 3, rl)
 
     n_slots = sum(1 for n in bootmachine.SLOTS if callable(getattr(boothost.Services, "h_" + n, None)))
-    case("45 slots, all resolved at construction", len(bootmachine.SLOTS) == 45 == n_slots
-        and len(bootmachine.Machine(elf0, plan0, boothost.Services(root), quantum=QUANTUM).handlers) == 45)
+    case("every header slot is resolved at construction", len(bootmachine.SLOTS) == n_slots
+        and len(bootmachine.Machine(elf0, plan0, boothost.Services(root), quantum=QUANTUM).handlers) == len(bootmachine.SLOTS))
 
     class NoPad(boothost.Services):
         h_pad_read = None
@@ -359,19 +331,6 @@ def main():
               "sendto-ext": ne(101), "recv-nb": ne(11), "bind-lo": "0", "close3": "0", "closed-getfl": ne(9), "tz-last": "0"}
     case("sockets (guest): handles, flag state, ENETUNREACH, loopback bind "
          "(%d values)" % len(want56), r56["reason"] == "exit" and k56 == want56, ({n: (k56.get(n), v) for n, v in want56.items() if k56.get(n) != v}, r56))
-    sw = open(os.path.join(HOSTABI_DIR, "fnvnx", "sockwire.h")).read()
-    lst = lambda name: [int(v, 0) for v in re.findall(r"X\(\w+, (\w+)\)", re.search(r"#define " + name + r"\(X\)((?:[^\n]*\\\n)*[^\n]*)", sw).group(1))]
-    nums = dict(re.findall(r"#define FNVNX_(WE_\w+) (\d+)", sw))
-    swe = open(os.path.join(HOSTABI_DIR, "fnvnx", "sockwire_errno.h")).read()   # the generated errno list (manifest/gen_wire_errno.py)
-    errs = dict(re.findall(r"X\((E\w+), (\d+)\)", swe))
-    case("machine's wire constants equal the hostabi headers (errno numbers, AF and type lists, POLLNVAL; the getaddrinfo services are not in the ABI)",
-         tuple(lst("FNVNX_WIRE_AF_LIST")) == bootmachine.WIRE_AF and tuple(lst("FNVNX_WIRE_SOCKTYPE_LIST")) == bootmachine.WIRE_SOCKTYPE
-         and int(nums["WE_INVAL"]) == bootmachine.WE_INVAL
-         and (int(errs["EFAULT"]), int(errs["EOVERFLOW"]), int(errs["EBADF"]), int(errs["EAFNOSUPPORT"])) == (
-             bootmachine.WE_FAULT, bootmachine.WE_OVERFLOW, bootmachine.WE_BADF, bootmachine.WE_AFNOSUPPORT)
-         and int(re.search(r"FNVNX_WPOLLNVAL (0x\w+)", sw).group(1), 16) == bootmachine.WPOLLNVAL,
-         (nums, errs.get("EFAULT")))
-
     class NoMsg(boothost.Services):
         plat_message = None
 
@@ -450,30 +409,20 @@ def main():
     case("other non-zero exit codes stay ordinary exits (no fact_id)", r36["reason"] == "exit" and "fact_id" not in r36
          and r1["reason"] == "exit" and "fact_id" not in r1, r36)
 
-    # ---- the header's TOTALITY TABLE (parsed from the fixture) against the machine
-    rows, hslots = parse_totality(os.path.join(HOSTABI_DIR, "fnvnx", "hostapi.h"))
-    SERVED = list(range(1, 10)) + list(range(11, 15)) + list(range(16, 27)) + [30, 31, 34, 35, 36, 37, 38]
+    # ---- the header's TOTALITY TABLE (the generated record, verify/hostabirec.py) against the machine
+    rows, hslots = hostabirec.record().services, list(hostabirec.record().slots)
+    SERVED = sorted(rows)
     mach0 = bootmachine.Machine(elf0, plan0, boothost.Services(root), quantum=QUANTUM)
-    case("header: 31 services of module 11 and 45 slots parsed", len(rows) == 31 and sorted(rows) == SERVED
-         and len(hslots) == 45, (len(rows), len(hslots)))
-    case("slots: the header's struct order is bootmachine.SLOTS, each has an h_<slot> and a handler", hslots == bootmachine.SLOTS
-         and all(callable(getattr(boothost.Services, "h_" + n, None)) and n in mach0.handlers for n in hslots), hslots)
+    case("slots: each header slot has an h_<slot> and a handler", all(callable(getattr(boothost.Services, "h_" + n, None)) and n in mach0.handlers for n in hslots)
+         and len(mach0.handlers) == len(hslots), hslots)
     served_decl = {f for f in rows if f in mach0.plat or f in bootmachine.SOCK_SERVICES}
     case("services: every declared service is served by the machine (the sockets by Machine._sock), none extra",
          served_decl == set(rows) and set(mach0.plat) | set(bootmachine.SOCK_SERVICES) == set(rows) and not set(mach0.plat) & set(bootmachine.SOCK_SERVICES),
          (sorted(set(rows) - served_decl), sorted(set(mach0.plat) & set(bootmachine.SOCK_SERVICES))))
-    case("services: served = 1..9, 11..26, 30, 31, 34..36 (29 of 29)", sorted(served_decl) == SERVED and not hasattr(bootmachine, "UNSERVED"),
-         sorted(served_decl))
-    names_ok = all(rows[f][0].lower() == n and rows[f][1] in (None, need) for f, (n, need) in
-                   {**bootmachine.PLATFORM_FNS, **bootmachine.SOCK_SERVICES}.items())
-    case("services: machine names and least nargs equal the header's rows (every row has its n; fn 10 is served by the console host too)",
-         names_ok and all(r[1] is not None for r in rows.values()) and "recorded difference" not in bootmachine.__doc__,
-         [(f, rows[f]) for f in rows if rows[f][0].lower() != {**bootmachine.PLATFORM_FNS, **bootmachine.SOCK_SERVICES}[f][0]])
     # mechanical argument rules for every declared service, through Machine.ext_call on the host page
     args_at = mach0.host_page + 0x100
     bad = {}
-    for f, (nm, need) in sorted(rows.items()):
-        need = need if need is not None else bootmachine.PLATFORM_FNS[f][1]
+    for f, (nm, need) in sorted((f, (n.lower(), k)) for f, (n, k) in rows.items()):
         if f in bootmachine.SOCK_SERVICES:
             r = [mach0.ext_call(11, f, args_at, k) for k in sorted({0, need - 1, need + 1} - {need, -1})]
             if r != [-22 & bootmachine.U64] * len(r):
@@ -493,8 +442,8 @@ def main():
             bad[nm] = "null array with nargs > 0"
     case("services: every declared service answers BAD_NARGS below its n and for a null array, sockets -EINVAL on a wrong nargs, BAD_NARGS on a null array and a value for zero arguments",
          not bad, bad)
-    case("services: fn 0, 10, 15, 27..29, 32, 33 and 39.. are NO_SERVICE, unknown module NO_MODULE, fn > UINT32_MAX NO_SERVICE (before the platform table)",
-         all(mach0.ext_call(11, f, args_at, 4) == bootmachine.EXT_NO_SERVICE for f in (0, 10, 15, 27, 28, 29, 32, 33, 39, 0xFFFFFFFF, 1 << 32, (1 << 32) + 4))
+    case("services: every fn without a header row (and fn 0 and > the last row) is NO_SERVICE, unknown module NO_MODULE, fn > UINT32_MAX NO_SERVICE (before the platform table)",
+         all(mach0.ext_call(11, f, args_at, 4) == bootmachine.EXT_NO_SERVICE for f in sorted(set(range(max(rows) + 3)) - set(rows)) + [0xFFFFFFFF, 1 << 32, (1 << 32) + 4])
          and mach0.ext_call(63, 1, args_at, 1) == bootmachine.EXT_NO_MODULE and mach0.ext_call(64, 1 << 33, 0, 0) == bootmachine.EXT_NO_MODULE
          and mach0.ext_call(11, 4, args_at, 1 << 40) == 0, "")
     try:
@@ -538,7 +487,7 @@ def main():
     k = kv(l59)
     case("TEXT_ENTRY: a text of exactly max_len units fits", r59["reason"] == "exit" and k == {"te-fit": "1", "te-fit-n": "2", "te-fit-u0": "d83d", "te-fit-u1": "de00", "te-fit-nul": "0"}, (r59["reason"], k))
     # THREAD_CPU and the placement contract (MODE 60). Expected values by hand from hostapi.h / placement.h; the default core is read by name
-    DC = re.search(r"#define\s+FNVNX_DEFAULT_CORE\s+(\d+)", open(os.path.join(HOSTABI_DIR, "fnvnx", "placement.h")).read()).group(1)
+    DC = str(hostabirec.record().define("FNVNX_DEFAULT_CORE"))
     r60, l60 = run(built[60][0], root)[:2]
     k = kv(l60)
     want60 = {"cpu-main": DC, "create-plain-core": "0", "create-minus1": "0", "create-ideal-not-in-mask": "0", "create-spec": "1", "set-core2": "0",

@@ -5,7 +5,6 @@ ends the process, so each case runs in a child python: it loads the library thro
 receives to a file, and calls the violation. Exit 0 on pass."""
 import json
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -18,11 +17,11 @@ import bootgpu  # noqa: E402
 import bootlayout  # noqa: E402
 import boothost  # noqa: E402
 import bootmachine  # noqa: E402
+import hostabirec  # noqa: E402
 import gate_build  # noqa: E402
 from test_bootlayout import make_elf  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))
-RT_H = os.path.join(REPO, "ports", "fnv-nx", "hostabi", "include", "fnvnx", "reach.h")
 TMP = tempfile.mkdtemp(prefix="brt-")
 GATE_CACHE = os.environ.get("GATE_CACHE") or os.path.join(TMP, "gate-cache")
 FAILED, N = [], [0]
@@ -50,14 +49,8 @@ def case(name, cond, extra=""):
         FAILED.append(name)
 
 
-def define(name):
-    m = re.search(r"#define\s+%s\s+(0x[0-9A-Fa-f]+)u?\b" % name, open(RT_H).read())
-    return int(m.group(1), 16)
-
-
 def main():
-    REACH = define("FNVNX_REACH_EXIT")
-    case("machine constant equals reach.h (top byte)", bootmachine.REACH_VIOLATION == REACH >> 24)
+    REACH = hostabirec.record().define("FNVNX_REACH_EXIT")
     res, _ = gate_build.ensure(bootgpu.BOOTRT_ROOT, GATE_CACHE, REPO)
     case("bootrt builds green through recipe.py", res.get("status") == "green" and res.get("elf"), res.get("failure"))
     if res.get("status") != "green":

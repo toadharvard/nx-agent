@@ -5,7 +5,6 @@ or a plain core, KEEP / mask 0 keep, a negative spec changes nothing; the main t
 from the headers. The machine is built on the synthetic ELF of test_bootlayout; the calling thread is set the way run() sets main. Exit 0 on pass."""
 import json
 import os
-import re
 import struct
 import sys
 import tempfile
@@ -18,10 +17,10 @@ sys.path.insert(0, HERE)
 import bootlayout  # noqa: E402
 import boothost  # noqa: E402
 import bootmachine  # noqa: E402
+import hostabirec  # noqa: E402
 from test_bootlayout import make_elf  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))
-INC = os.path.join(REPO, "ports", "fnv-nx", "hostabi", "include", "fnvnx")
 FAILED, N = [], [0]
 
 
@@ -32,20 +31,9 @@ def case(name, cond, extra=""):
         FAILED.append(name)
 
 
-def define(name):
-    for h in ("hostapi.h", "placement.h"):
-        m = re.search(r"#define\s+%s\s+(0x[0-9A-Fa-f]+|\d+)(?:ull|u)?\b" % name, open(os.path.join(INC, h)).read())
-        if m:
-            return int(m.group(1), 0)
-    return None
-
-
 def main():
-    D, APP, KEEP, FN, BAD, NOTF = (define(n) for n in ("FNVNX_DEFAULT_CORE", "FNVNX_APP_CORES", "FNVNX_CPU_KEEP",
-                                                             "FNVNX_PLAT_THREAD_CPU", "FNVNX_HE_BADINPUT", "FNVNX_HE_NOTFOUND"))
-    case("headers: default core, app cores, KEEP, THREAD_CPU by name", None not in (D, APP, KEEP, FN) and FN == 38, (D, APP, KEEP, FN))
-    case("machine constants equal the headers", (bootmachine.FNVNX_DEFAULT_CORE, bootmachine.APP_CORES, bootmachine.FNVNX_CPU_KEEP) == (D, APP, KEEP))
-    case("BADINPUT 0x1759 and NOTFOUND by name", BAD == bootmachine.LIBNX_BAD_INPUT and (NOTF or bootmachine.FNVNX_HE_NOTFOUND) == bootmachine.FNVNX_HE_NOTFOUND)
+    D, APP, KEEP, FN, BAD = (bootmachine.FNVNX_DEFAULT_CORE, bootmachine.APP_CORES, bootmachine.FNVNX_CPU_KEEP,
+                             hostabirec.record().define("FNVNX_PLAT_THREAD_CPU"), bootmachine.LIBNX_BAD_INPUT)   # the machine's names are the generated record's
 
     def SPEC(ideal, mask):
         return (1 << 63) | (mask << 8) | (ideal & 0xFF)   # FNVNX_CPU_SPEC

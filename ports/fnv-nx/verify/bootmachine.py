@@ -36,7 +36,7 @@ Rules:
    (image, host page, stacks, given-away blocks, unmapped: 0xD401). Other modules go to services.ext_<module>
    (fn, args) found at construction; an unregistered module, or a handler raising ExtMissing, ends the run with reason
    "ext-module-missing": a configuration error, never answered with a value.
-5a. TOTAL against the header (hostapi.h TOTALITY TABLE, checked mechanically by tests/test_bootmachine.py against the parsed table): ext_call returns
+5a. TOTAL against the header (hostapi.h TOTALITY TABLE, the table is parsed by verify/hostabirec.py; the machine and the tests use that record only): ext_call returns
    NO_MODULE (module >= 64 or not registered), NO_SERVICE (fn > UINT32_MAX, or a module-11 fn without a row: @HOLES@), BAD_NARGS
    (fewer arguments than the row, or nargs > 0 with a null array); nargs above UINT32_MAX counts as UINT32_MAX; only a handler raising
    ExtMissing ends the run. Module 11 serves fn @SERVED@ here. The stage has no network interface and a fixed UTC zone (VC1). Sockets 16..26, 30, 31 are bootsock.py's model (a host with no network interface; its docstring lists every
@@ -104,34 +104,24 @@ from unicorn.arm64_const import UC_ARM64_REG_CPACR_EL1, UC_ARM64_REG_LR, UC_ARM6
     UC_ARM64_REG_TPIDR_EL0, UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3, UC_ARM64_REG_X4
 
 import bootlayout
+import hostabirec
 import bootsock
+from bootsock import WE_FAULT, WE_INVAL
 import icount
 
 PAGE, U64 = 0x1000, (1 << 64) - 1
-REACH_VIOLATION = 0x52   # top byte of a guest exit code 0x52000000 | fact_id: a build invariant was violated (fnvnx_reach_violation)
-SLOTS = ["output_debug_string", "sleep_ns", "exit", "console_write", "system_tick", "system_tick_freq",
-         "thread_create", "thread_start", "thread_join", "thread_free", "thread_exit", "thread_yield",
-         "thread_set_priority", "thread_set_cpu", "wait_on_address", "wake_address", "wall_time_us",
-         "random64", "memory_info", "cpu_count",
-         "fs_open", "fs_read", "fs_write", "fs_pread", "fs_pwrite", "fs_seek", "fs_truncate", "fs_sync",
-         "fs_fstat", "fs_close", "fs_stat", "fs_mkdir", "fs_rmdir", "fs_remove", "fs_rename", "fs_dir_open",
-         "fs_dir_next", "fs_dir_close",
-         "audio_open", "audio_submit", "audio_close", "pad_read", "pad_vibrate", "input_poll", "map_fixed",
-         "ext_call"]
-API_SIZE = 0x30 + 8 * len(SLOTS)
-FNVNX_EXT_PLATFORM = 11
-EXT_NO_MODULE, EXT_NO_SERVICE, EXT_BAD_NARGS = U64 - 254, U64 - 253, U64 - 252   # FNVNX_EXT_*: -255, -254, -253 as int64 (hostapi.h)
-FNVNX_EXT_MODULES, UINT32_MAX, INT64_MAX = 64, 0xFFFFFFFF, (1 << 63) - 1
-FNVNX_TEXT_ENTRY_MAX = 500   # hostapi.h
-# hostapi.h TOTALITY TABLE, module 11 services 1..15, 34, 35 and 36: fn -> (name, least nargs). The sockets 16..26, 30, 31 are SOCK_SERVICES;
-# both tables are checked against the header's parsed table by tests/test_bootmachine.py.
-PLATFORM_FNS = {1: ("cpu_boost", 1), 2: ("thread_activity", 2), 3: ("message", 2), 4: ("vm_reserve", 2), 5: ("vm_commit", 2),
-                6: ("vm_decommit", 2), 7: ("vm_release", 1), 8: ("vm_protect", 3), 9: ("display_docked", 0),
-                11: ("section_create", 1), 12: ("section_map", 4), 13: ("section_unmap", 2),
-                14: ("section_free", 1), 34: ("tz_at", 2), 35: ("thread_self", 0), 36: ("text_entry", 5), 37: ("unmap_range", 2), 38: ("thread_cpu", 0)}
-SOCK_SERVICES = {16: ("sock_socket", 3), 17: ("sock_close", 1), 18: ("sock_bind", 2), 19: ("sock_listen", 2), 20: ("sock_accept", 2),
-                 21: ("sock_connect", 2), 22: ("sock_sendto", 5), 23: ("sock_recvfrom", 5), 24: ("sock_setsockopt", 5),
-                 25: ("sock_getsockopt", 5), 26: ("sock_poll", 3), 30: ("sock_getfl", 1), 31: ("sock_setfl", 2)}
+_R = hostabirec.record()   # hostabi/include/fnvnx/*.h parsed by verify/hostabirec.py: the one copy of the host ABI (nothing below is typed a second time)
+_D = _R.define
+REACH_VIOLATION = _D("FNVNX_REACH_EXIT") >> 24   # top byte of a guest exit code FNVNX_REACH_EXIT | fact_id: a build invariant was violated (fnvnx_reach_violation)
+SLOTS = list(_R.slots)   # the uint64 slots of struct FnvnxHostApi in the header's order
+API_SIZE = _R.api_size()
+FNVNX_EXT_PLATFORM = _D("FNVNX_EXT_PLATFORM")
+EXT_NO_MODULE, EXT_NO_SERVICE, EXT_BAD_NARGS = _D("FNVNX_EXT_NO_MODULE"), _D("FNVNX_EXT_NO_SERVICE"), _D("FNVNX_EXT_BAD_NARGS")
+FNVNX_EXT_MODULES, UINT32_MAX, INT64_MAX = 64, 0xFFFFFFFF, (1 << 63) - 1   # hostapi.h: module >= 64 (the ext_call comment, no define); C limits
+FNVNX_TEXT_ENTRY_MAX = _D("FNVNX_TEXT_ENTRY_MAX")
+# hostapi.h TOTALITY TABLE: fn -> (name, least nargs) of module 11, split into the sockets (SOCK_*) and the rest
+PLATFORM_FNS = _R.platform_services()
+SOCK_SERVICES = _R.sock_services()
 def _ranges(ns):
     """sorted ints -> "1..9, 11..14, 16" (runs of 3 or more as a..b)"""
     out, i, ns = [], 0, sorted(ns)
@@ -148,38 +138,21 @@ _served = set(PLATFORM_FNS) | set(SOCK_SERVICES)
 # the docstring's service lists are generated from the two tables above, so they cannot drift from them (hostapi.h rows: tests/test_bootmachine.py)
 __doc__ = __doc__.replace("@SERVED@", _ranges(_served)).replace("@HOLES@", "0, " + _ranges(set(range(1, max(_served) + 1)) - _served) + ", %d and up" % (max(_served) + 1))
 
-# wire numbers and lists of sockwire.h live in bootsock.py (tests/test_bootmachine.py compares them with the fixture copy)
-from bootsock import (WE_BADF, WE_FAULT, WE_INVAL, WE_OVERFLOW, WE_AFNOSUPPORT, WIRE_AF, WIRE_SOCKTYPE, WIRE_AI_MASK,  # noqa: F401
-                      WEAI_BADFLAGS, WEAI_NONAME, WEAI_FAMILY, WEAI_SOCKTYPE, WPOLLNVAL)
 TZ_VC1 = (0, 0, b"UTC")   # VC1's zone: off_s, dst, abbr
 WINDOW = (0x00400000, 0x02100000)   # the image range 0x00400000..0x00FDF000 and the data window up to 0x02100000: claimed by the host at start
-MAP_FIXED_MAX = 512
-FNVNX_HE_NOMEM, FNVNX_HE_NOTFOUND = 0x0559, 0x1359
-# fnvnx/placement.h and hostapi.h (the tests read the numbers by name from the headers and compare)
-FNVNX_DEFAULT_CORE, FNVNX_CPU_KEEP = 0, 0xFF
-
-
-def header_define(name, header="placement.h"):
-    """the number of `#define NAME N` in hostabi/include/fnvnx/<header>, read by name: the one copy of the declared machine's numbers"""
-    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hostabi", "include", "fnvnx", header)
-    with open(p) as f:
-        m = re.search(r"^#define\s+%s\s+(0[xX][0-9A-Fa-f]+|\d+)[uUlL]*\b" % re.escape(name), f.read(), re.M)
-    if not m:
-        raise MachineError("%s: no #define %s" % (header, name))
-    return int(m.group(1), 0)
-
-
-APP_CORES = header_define("FNVNX_APP_CORES")   # the declared machine's application cores (placement.h); N = popcount
-KERNEL_BUSY, KERNEL_INVALID_STATE = 0xF401, 0xFA01   # kernel results 1 | 122 << 9 (Busy), 1 | 125 << 9 (InvalidState); see the docstring
-SEC_E_SIZE, SEC_E_ALIGN, SEC_E_RANGE, SEC_E_REGION, SEC_E_ID, SEC_E_NOMEM, SEC_E_FULL = 0xCA01, 0xCC01, 0xD401, 0xDA01, 0xE401, 0xD001, 0xCE01
-SEC_MAX_SIZE, SEC_SECTIONS, SEC_VIEWS = 0x80000000, 128, 512   # host_section.inc
-VM_ALIGN, VM_FLOOR = 0x10000, 0x10000   # host_vm.inc FNVNX_VM_ALIGN; the guest's low 64 KiB stay unmapped. Forbidden ranges are plan data.
-# libnx result values (hostapi.h names them, the repo does not define them): MAKERESULT(Module_Libnx = 345, desc) = 345 | desc << 9,
-# desc from libnx's result.h enum LibnxError (BadInput = 11, AlreadyInitialized = 7)
-LIBNX_BAD_INPUT, LIBNX_ALREADY_INITIALIZED = 345 | 11 << 9, 345 | 7 << 9   # 0x1759, 0xF59
-assert (LIBNX_BAD_INPUT, LIBNX_ALREADY_INITIALIZED, 345 | 9 << 9, 345 | 2 << 9) == (0x1759, 0xF59, FNVNX_HE_NOTFOUND, FNVNX_HE_NOMEM)
-ERR_INVALID_SIZE, ERR_INVALID_ADDRESS, ERR_INVALID_CURRENT_MEMORY = 0xCA01, 0xCC01, 0xD401
-ERR_INVALID_NEW_MEMORY_PERMISSION, ERR_INVALID_HANDLE, ERR_INVALID_STATE = 0xD801, 0xE401, 0xFA01
+MAP_FIXED_MAX = 512   # blocked by header (owner L5): hostapi.h does not state the map_fixed table size
+FNVNX_HE_NOMEM, FNVNX_HE_NOTFOUND = _D("FNVNX_HE_NOMEM"), _D("FNVNX_HE_NOTFOUND")
+FNVNX_DEFAULT_CORE, FNVNX_CPU_KEEP = _D("FNVNX_DEFAULT_CORE"), _D("FNVNX_CPU_KEEP")
+APP_CORES = _D("FNVNX_APP_CORES")   # the declared machine's application cores (placement.h); N = popcount
+KERNEL_BUSY, KERNEL_INVALID_STATE = 0xF401, 0xFA01   # blocked by header (owner L5): kernel results 1 | 122 << 9 (Busy), 1 | 125 << 9 (InvalidState); hostapi.h names no value
+SEC_E_SIZE, SEC_E_ALIGN, SEC_E_RANGE, SEC_E_REGION, SEC_E_ID, SEC_E_NOMEM, SEC_E_FULL = (
+    _D("FNVNX_SEC_E_" + n) for n in ("SIZE", "ALIGN", "RANGE", "REGION", "ID", "NOMEM", "FULL"))
+SEC_MAX_SIZE = _D("FNVNX_SEC_MAX_SIZE")
+SEC_SECTIONS, SEC_VIEWS = 128, 512   # blocked by header (owner L5): table sizes of host_section.inc
+VM_ALIGN, VM_FLOOR = 0x10000, 0x10000   # blocked by header (owner L5): host_vm.inc FNVNX_VM_ALIGN; the guest's low 64 KiB stay unmapped. Forbidden ranges are plan data.
+LIBNX_BAD_INPUT, LIBNX_ALREADY_INITIALIZED = _D("FNVNX_HE_BADINPUT"), _D("FNVNX_HE_ALREADY")
+ERR_INVALID_SIZE, ERR_INVALID_ADDRESS, ERR_INVALID_CURRENT_MEMORY = _D("FNVNX_HE_SIZE"), _D("FNVNX_HE_ADDR"), _D("FNVNX_HE_RANGE")
+ERR_INVALID_NEW_MEMORY_PERMISSION, ERR_INVALID_HANDLE, ERR_INVALID_STATE = _D("FNVNX_HE_PERM"), SEC_E_ID, KERNEL_INVALID_STATE
 ACCESS_KINDS = {UCC.UC_MEM_READ_UNMAPPED: "read-unmapped", UCC.UC_MEM_WRITE_UNMAPPED: "write-unmapped",
                 UCC.UC_MEM_FETCH_UNMAPPED: "fetch-unmapped", UCC.UC_MEM_WRITE_PROT: "write-protected",
                 UCC.UC_MEM_READ_PROT: "read-protected", UCC.UC_MEM_FETCH_PROT: "fetch-protected"}
