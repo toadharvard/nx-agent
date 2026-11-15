@@ -17,7 +17,7 @@ environment of ENV_TRUTH.md, the function returns `value`. Columns (TAB separate
 Declared-machine citation (verify/VERDICT.md "Declared-machine bodies"): the table verify/declared_machine.tsv (default: next to this
 tree, ../verify/declared_machine.tsv; rows `id contract_name fact source kind value`) is read; a symbol that has a row there (contract_name ==
 symbol) gets `FNVNX_CITE(<symbol>, "<id>");` after its body (hostabi/include/fnvnx/cite.h: one record in the non-alloc section .fnvnx.cite, no call), and its row's kind/value must equal the row's constant; the symbol must have C linkage (the record names the assembler symbol)
-(false, NULL and 0 are 0). A value `identity:<k>` means the function returns its argument k unchanged (body `return <name of parameter k>;`, the parameter named in the params column). One rule for every row: no list of functions here.
+(false, NULL and 0 are 0). A row whose symbol has no body in this table is cited by a hand-written body (FNVNX_CITE there); the gate matches rows to records. A value `identity:<k>` means the function returns its argument k unchanged (body `return <name of parameter k>;`, the parameter named in the params column). One rule for every row: no list of functions here.
 Checks, each an error: a row without a source of one of the two forms, an empty value, a void return, a symbol
 given twice for one file, a column count other than 8. The output is a pure function of the table (rows in table order).
 --probe writes the probe form instead (the recipe's `probe` stage compiles the includer with it): the same bodies, and after them one record per row
@@ -28,16 +28,17 @@ import os
 import re
 import sys
 
-# One record per row in the non-alloc section .fnvnx.const (--probe): u32 row id (the line of env_const.tsv), u32 byte length, the value (the row's
-# expression evaluated by the compiler of the includer's own scope, as an object of the row's type), padded to 4 (little endian). The section name
-# carries its own flags: the compiler's `,"a"` after it falls into the trailing comment, so the section is not allocated and not loaded.
+# One record per row in the section .fnvnx.const (--probe): u32 row id (the line of env_const.tsv), u32 byte length, the value (the row's expression
+# evaluated by the compiler of the includer's own scope, as an object of the row's type), padded to 4 (little endian). The probe object is compiled by
+# the recipe's probe stage and read, never linked: its sections are plain.
 RECORD = (
-    '__attribute__((used, section(".fnvnx.const,\\"\\",%%progbits //"))) static const struct __attribute__((packed, aligned(4))) { unsigned id; unsigned len; %(ret)s v; }\n'
+    '__attribute__((section(".fnvnx.const"), used, aligned(4))) static const struct __attribute__((packed)) { unsigned id; unsigned len; %(ret)s v; }\n'
     '    fnvnx_const_%(n)d = { %(n)d, (unsigned)sizeof(%(ret)s), (%(value)s) };\n'
-    'typedef char fnvnx_const_size_%(n)d[sizeof(fnvnx_const_%(n)d) == ((8 + sizeof(%(ret)s) + 3) & ~3u) ? 1 : -1];   /* row %(n)d: header + value, padded to 4 */\n')
+    'FNVNX_SA(sizeof(fnvnx_const_%(n)d) == (8 + sizeof(%(ret)s)), "row %(n)d: the record is header + value");\n')
+SA_DEF = '#ifdef __cplusplus\n#define FNVNX_SA static_assert\n#else\n#define FNVNX_SA _Static_assert\n#endif\n\n'
 # An identity row (value `identity:<k>`): the function returns its argument k unchanged. Its probe record is in the non-alloc section .fnvnx.ident:
 # u32 row id, u32 k (little endian); the row has no .fnvnx.const record.
-IDENT_RECORD = ('__attribute__((used, section(".fnvnx.ident,\\"\\",%%progbits //"))) static const struct __attribute__((packed, aligned(4))) { unsigned id; unsigned k; }\n'
+IDENT_RECORD = ('__attribute__((section(".fnvnx.ident"), used, aligned(4))) static const struct __attribute__((packed)) { unsigned id; unsigned k; }\n'
                 '    fnvnx_ident_%(n)d = { %(n)d, %(k)d };\n')
 COLS = ["symbol", "linkage", "ret", "params", "value", "source", "quals", "file"]
 
@@ -130,7 +131,7 @@ def main(argv):
                 errors.append("line %d: %s: its declared_machine.tsv row (%s %s) differs from the constant %s" % (n, row["symbol"], dkind, dval, row["value"]))
             if row["linkage"] != "C":
                 errors.append("line %d: %s: a declared-machine row names a C-linkage symbol (the citation record names the assembler symbol)" % (n, row["symbol"]))
-            cite = 'FNVNX_CITE(%s, "%d");\n' % (row["symbol"], did)
+            cite = 'FNVNX_CITE(%s, "dm:%d");\n' % (row["symbol"], did)
             used.add(row["symbol"])
         idm = IDENT.match(row["value"].strip())
         if idm:
@@ -145,9 +146,6 @@ def main(argv):
         out.append("/* %s */\n%s%s %s(%s)%s\n{\n    return %s;\n}\n%s" % (
             row["source"], head, row["ret"], row["symbol"], row["params"], quals, row["value"], cite))
         consts.append(RECORD % {"n": n, "ret": row["ret"], "value": row["value"]})
-    if only is None:
-        for sym in sorted(set(decl) - used):
-            errors.append("declared_machine.tsv row %s has no body in this table" % sym)
     if errors:
         for e in errors:
             sys.stderr.write("env_const: %s\n" % e)
@@ -159,7 +157,7 @@ def main(argv):
             f.write('#include <fnvnx/cite.h>\n\n')
         f.write("\n".join(out))
         if probe:
-            f.write("\n" + "".join(consts))
+            f.write(SA_DEF + "".join(consts))
     return 0
 
 

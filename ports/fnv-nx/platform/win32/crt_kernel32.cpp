@@ -14,6 +14,7 @@
  * There is no console and no standard handle (ENV_TRUTH F5): as in a Windows GUI process GetStdHandle gives NULL until
  * SetStdHandle sets one, and every console call fails with ERROR_INVALID_HANDLE. */
 #include "w32.h"
+#include <fnvnx/cite.h>
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -238,6 +239,7 @@ extern "C" BOOL TerminateProcess(HANDLE h, UINT code)
     SetLastError(ERROR_INVALID_HANDLE);   /* no other processes */
     return FALSE;
 }
+FNVNX_CITE(TerminateProcess, "dm:1");   /* verify/declared_machine.tsv row 1: the non-self path is the declared machine's answer */
 
 void w32_log_unhandled(const void *ep, const char *tail);   /* thread.cpp: next to the record layout */
 
