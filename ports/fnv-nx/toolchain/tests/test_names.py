@@ -9,7 +9,7 @@ and no Wine run here). Both directions are checked. What is left out is left out
 class's exact size is asserted, so a name that starts or stops matching fails the test:
   cl only   ??_8 (vbtables), ??4 (implicit assignment cl emits for an exported class), ??_G / ??_E of a class
             without a virtual destructor (cl's helpers for delete), vtordisp thunks ($4): the exe's own, no GCC twin
-  unnamed   what the plugin itself marks `unnamed:<reason>` (GCC's trees do not hold what the name needs: see fnvnx_names.cc); the cl names it
+  nodecor   what the plugin itself marks `nodecor:<reason>` (GCC's trees do not hold what the name needs: see fnvnx_names.cc); the cl names it
             therefore has no row for are counted against those rows, never listed
 The compiler is the guest compiler msvcmodel: size_t is `unsigned int` as for cl, so there is no size_t hole.
 An unknown plugin argument is an error. No network, no game data.  Run: python3 -I <this file> from the checkout root."""
@@ -56,7 +56,7 @@ def checks(obj):
     kinds = {}
     for sym, ms, kind, df in rows: kinds.setdefault(kind.split(':')[0], []).append((sym, ms, kind))
     named = {ms for sym, ms, kind, df in rows if ms and kind not in ('thunk',)}
-    names_vt = {r[2] for r in vt if r[2] and not r[2].startswith('unnamed')}
+    names_vt = {r[2] for r in vt if r[2] and not r[2].startswith('nodecor:')}
     got = named | names_vt
     want = {n for n in expect if not cl_only(n, obj)}
     aps = {'%s.fnvnx_ap%s' % (r[0], r[1]) for r in vt}
@@ -72,7 +72,13 @@ def checks(obj):
                    and st[r[0]]['type'] == 'FUNC')
     check('every row of a function is a function the object defines (or an undefined reference)', not ghost, ghost)
     # the plugin's own account of what it does not name: unnamed rows (not the destructor thunks of classes with virtual bases, which cl never has: cl_only)
-    unnamed = [r for r in rows if r[2].startswith('unnamed') and 'thunk' not in r[2]]
+    unnamed = [r for r in rows if r[2].startswith('nodecor:') and r[2] != 'nodecor:vtordisp']
+    reasons = {}
+    for r in unnamed: reasons.setdefault(r[2], []).append(r[0])
+    check('a symbol with no decoration source carries a typed reason: nested-block statics and classes `localscope`, a function-type parameter whose declared form is lost `fnparmform`',
+          set(reasons) == {'nodecor:localscope', 'nodecor:fnparmform'} and len(reasons['nodecor:localscope']) == 4, reasons)
+    vtor = sorted(r[0] for r in rows if r[2] == 'nodecor:vtordisp')
+    check('a destructor thunk of a class with virtual bases is `vtordisp` (cl\'s vtordisp needs the exe\'s vbptr layout)', len(vtor) == 4 and all('fnvnx_sdd' in x for x in vtor), vtor)
     missing = want - got
     check('the cl names that have no row are exactly as many as the rows the plugin marks unnamed', len(missing) == len(unnamed),
           {'cl names without a row': sorted(missing), 'unnamed rows': [(r[0], r[2]) for r in unnamed]})
@@ -101,6 +107,38 @@ def checks(obj):
           sorted({n for n in expect if n.startswith('??_7')} - names_vt))
 
 
+def sections(td, so):
+    """every unit the plugin compiles carries its records, even when the unit names nothing (empty, or a body that is #if'd out); and the universe of
+    the rows is the object's own symbols: a template pattern (variadic, a templated conversion operator, a literal operator template) has no symbol,
+    so it has no row, instantiated or not, and no row is `nodecor:`"""
+    for fx in ('empty', 'ifdef_out'):
+        o = os.path.join(td, fx + '.o')
+        r = pb.compile(os.path.join(HERE, 'names', fx + '.cpp'), o, so, flags=pb.PRODUCT_FLAGS + ['-O0'])
+        check('%s: compiles' % fx, r.returncode == 0, r.stderr[-2000:])
+        if r.returncode == 0:
+            have = pb.elfobj.read(o)
+            check('%s: the unit carries .fnvnx.sympair, empty' % fx, have.section('.fnvnx.sympair') == b'', have.section('.fnvnx.sympair'))
+    for inst in (False, True):
+        o = os.path.join(td, 'pattern%d.o' % inst)
+        r = pb.compile(os.path.join(HERE, 'names', 'pattern.cpp'), o, so, flags=pb.PRODUCT_FLAGS + ['-O0'] + (['-DINSTANTIATE'] if inst else []))
+        check('pattern (instantiated: %s): compiles' % inst, r.returncode == 0, r.stderr[-2000:])
+        if r.returncode:
+            continue
+        rows = rows_of(o, '.fnvnx.sympair')
+        st = pb.symbols_of(o)
+        bad = [x for x in rows if x[2].startswith('nodecor:')]
+        check('pattern (instantiated: %s): no unnamed row' % inst, not bad, bad)
+        outside = [x[0] for x in rows if x[0] not in st]
+        check('pattern (instantiated: %s): every row is a symbol of the object' % inst, not outside or all(x[2] == 'noemit' for x in rows if x[0] in outside), outside)
+        got = {x[1] for x in rows}
+        check('pattern (instantiated: %s): types and operators cl 15.00 has no name for get the later MSVC ABI\'s (clang MicrosoftMangle.cpp llvmorg-18.1.8): '
+              '__m128, a generic vector, __m64, char16_t, char32_t, nullptr_t, __int128, unsigned __int128; a literal operator `?__K`' % inst,
+              {'?tv@@YAXT__m128@@T?$__vector@H$03@__clang@@T__m64@@_S_U$$T_L_M@Z', '??__K_u@@YA_K_K@Z'} <= got
+              and (not inst or '??$?__K_t@$0DB@$0DC@@@YAHXZ' in got), sorted(got))
+        if inst:
+            check('pattern instantiated: its instantiations are named', {x[1] for x in rows} >= {'??$count@HN@@YAHHN@Z', '??$?BH@C@@QBEHXZ', '??$n@HH@C@@QBEHHH@Z', '??$both@H@?$Pack@HD@@SAHH@Z'}, rows)
+
+
 def main():
     td = tempfile.mkdtemp(prefix='test-names-')
     try:
@@ -110,6 +148,7 @@ def main():
         check('compiles', r.returncode == 0, r.stderr[-3000:])
         if r.returncode == 0:
             checks(obj)
+        sections(td, so)
         r = pb.compile(FIX, os.path.join(td, 'x.o'), so, args=['-fplugin-arg-fnvnx_names-mode=1'])
         check('a plugin argument is an error: the recipe fixes them', pb.argument_refused(r, 'names'), r.stderr[:500])
     finally:
