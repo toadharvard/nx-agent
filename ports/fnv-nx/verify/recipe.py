@@ -65,7 +65,7 @@ PLUGIN_CXX = _plugin_cxx()
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
         "plugins", "variants", "outputs", "uses", "sources", "forbid_sections", "error_abi", "empty_handlers", "errno_accessor", "run"}
 VARIANT_KEYS = {"compiler", "flags", "link"}   # the keys a variant may replace (whole: a sanitizer variant names its own link.libs.system)
-PLUGIN_KEYS = {"name", "source", "args"}   # and optionally "inputs": [tracked files the source includes]
+PLUGIN_FIXED = {"source": "PLUGIN_SOURCES", "inputs": "PLUGIN_INPUTS", "args": "PLUGIN_ARGS"}   # what recipe.py fixes for a plugin: a root entry names only the plugin
 GUEST_LINK = TREE + "/link/guest.json"   # the guest link profile: {"script": path inside TREE, "libs": {LIBS_KEYS}}, one fact for every guest link (RECIPE.md, Link)
 GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
 GUEST_TARGETS = ("guest", "host")
@@ -87,6 +87,13 @@ PLUGIN_ARGS["fnvnx_ftoi"] = {"mode": "native"}
 # PLUGIN_OUT of the CC stage's own /out; the recipe passes it, a build.json does not declare it.
 PLUGIN_OUT = {"fnvnx_ftoi": "/out/unit.f2i.json"}
 PLUGIN_ARGS["fnvnx_order"] = {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}
+
+
+def plugin_decls(names, origin):
+    """[{name, source, inputs, args}] of the root's `plugins` NAMES (each entry {"name": PLUGIN}) for a root whose declared `cxx_origin` is ORIGIN: source, inputs and
+    arguments come from recipe.py alone (PLUGIN_SOURCES, PLUGIN_INPUTS, plugin_args), the one declaration. A name outside PLUGIN_SOURCES is refused by plugin_errors."""
+    want = plugin_args(origin)
+    return [{"name": p["name"], "source": PLUGIN_SOURCES[p["name"]], "inputs": list(PLUGIN_INPUTS.get(p["name"], [])), "args": want[p["name"]]} for p in names]
 
 
 def origin_class(origin):
@@ -1002,29 +1009,17 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant=""):
         return ["plugins must be a list"]
     loaded = {}
     for i, p in enumerate(pl):
-        if not (isinstance(p, dict) and set(p) - {"inputs"} == PLUGIN_KEYS and isinstance(p["name"], str) and isinstance(p["source"], str)
-                and isinstance(p["args"], dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in p["args"].items())):
-            err.append("plugins[%d] needs exactly name, source, args (name and source strings, args {string: string})" % i)
+        if not (isinstance(p, dict) and isinstance(p.get("name"), str)):
+            err.append('plugins[%d] is {"name": PLUGIN}: recipe.py fixes the rest' % i)
             continue
-        n, src = p["name"], p["source"]
-        owner = next((r for r in roots if tree_of({r: roots[r]}, src)), None)
-        if not re.fullmatch("[a-z][a-z0-9_]*", n):
-            err.append("plugins[%d].name %r is not [a-z][a-z0-9_]*" % (i, n))
-        elif n in loaded:
+        n = p["name"]
+        err += ["plugin %s: %s are fixed by recipe.py (%s)" % (n, k, PLUGIN_FIXED[k]) if k == "inputs" else "plugin %s: %s is fixed by recipe.py (%s)" % (n, k, PLUGIN_FIXED[k])
+                for k in PLUGIN_FIXED if k in p]
+        err += ["plugins[%d]: unknown key %r (an entry is {\"name\": PLUGIN})" % (i, k) for k in sorted(set(p) - set(PLUGIN_FIXED) - {"name"})]
+        if n in loaded:
             err.append("plugin %s is declared twice" % n)
-        elif posixpath.basename(src) != n + ".cc":
-            err.append("plugin %s: source %s must be named %s.cc (the plugin's name is its file's)" % (n, src, n))
-        if not (rel_ok(src) and src in files and owner and roots[owner]["class"] == "tool"):
-            err.append("plugin %s: source %r is not a tracked file of an admitted tool root" % (n, src))
-        elif n in PLUGIN_SOURCES and src != PLUGIN_SOURCES[n]:
-            err.append("plugin %s: source must be %s" % (n, PLUGIN_SOURCES[n]))
-        ins = p.get("inputs", [])
-        if not (isinstance(ins, list) and all(isinstance(x, str) and rel_ok(x) and x in files for x in ins)):
-            err.append("plugin %s: inputs must be tracked files (repo-relative)" % n)
-        elif n in PLUGIN_SOURCES and ins != PLUGIN_INPUTS.get(n, []):
-            err.append("plugin %s: inputs must be %s" % (n, PLUGIN_INPUTS.get(n, [])))
-        if not all(re.fullmatch("[a-z][a-z0-9-]*", k) for k in p["args"]):
-            err.append("plugin %s: argument names must be [a-z][a-z0-9-]*" % n)
+        elif n not in PLUGIN_SOURCES:
+            err.append("plugin %s is not a plugin of recipe.py (PLUGIN_SOURCES: %s)" % (n, ", ".join(PLUGIN_SOURCES)))
         loaded[n] = p
     if "plugin_cxx" in rec:
         err.append("plugin_cxx is not declared in a build.json: the plugin compiler is recipe.PLUGIN_CXX (%s), derived from env.json" % PLUGIN_CXX)
@@ -1034,13 +1029,10 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant=""):
     # RULE (orchestrator, 2026-11-12): every guest CC stage, C and C++ alike and whatever the origin of the code, loads the FULL plugin set of
     # PLUGIN_SOURCES with its fixed arguments in the fixed order. No language declarations, no exception list. The arguments are fixed by the
     # origin alone, by the one function plugin_args.
-    want = plugin_args(origin)
     if ent.get("target") == "guest" and any(u.endswith(CC_EXT + CXX_EXT) for u in units) and not (origin == "native" and cxx):
         for n in sorted(PLUGIN_SOURCES):
             if n not in loaded:
                 err.append("guest root %s does not load plugin %s (every guest C and C++ unit is compiled with the full plugin set)" % (root, n))
-            elif loaded[n].get("args") != want[n]:
-                err.append("plugin %s: arguments must be %s, are %s" % (n, want[n], loaded[n].get("args")))
         if list(loaded) != [n for n in PLUGIN_SOURCES if n in loaded]:
             err.append("plugins must be loaded in the order %s" % list(PLUGIN_SOURCES))
     if not cxx:
@@ -1049,8 +1041,6 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant=""):
         for n in sorted(PLUGIN_SOURCES):
             if n not in loaded:
                 err.append("native C++ root %s does not load plugin %s (every native or decomp C++ body is compiled with both)" % (root, n))
-            elif loaded[n].get("args") != want[n]:
-                err.append("plugin %s: arguments must be %s, are %s" % (n, want[n], loaded[n].get("args")))
         if list(loaded) != [n for n in PLUGIN_SOURCES if n in loaded]:
             err.append("plugins must be loaded in the order %s" % list(PLUGIN_SOURCES))
         fl = rec.get("flags", {}).get("cxx", []) if isinstance(rec.get("flags"), dict) else []
@@ -1058,11 +1048,9 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant=""):
         err += ["native C++ root %s: flags.cxx lacks %s" % (root, f) for f in (SDD_FLAGS if ent.get("target") != "guest" else (SDD_DEFINE,)) if f not in fl]
     elif lifted_origin(origin):
         tool, pack, stage = origin["lifted_by"], origin.get("pack"), origin.get("stage")
-        for n, a in [("fnvnx_ftoi", plugin_args(origin)["fnvnx_ftoi"])]:   # lifted C++ does its conversions in helpers: the plugin proves it (and only it is required)
+        for n in ("fnvnx_ftoi",):   # lifted C++ does its conversions in helpers: the plugin proves it (and only it is required)
             if n not in loaded:
                 err.append("lifted C++ root %s does not load plugin %s (mode lifted: every conversion outside an fnvnx_f2i function is an error)" % (root, n))
-            elif loaded[n].get("args") != a:
-                err.append("plugin %s: arguments of a lifted root must be %s, are %s" % (n, a, loaded[n].get("args")))
         mine = {f[len(root) + 1:] for f in files if under(f, root)}
         owner = next((r for r in roots if isinstance(tool, str) and tree_of({r: roots[r]}, tool)), None)
         if not (isinstance(tool, str) and tool in files and tool.endswith(".py") and owner and roots[owner]["class"] == "tool"):
@@ -1561,7 +1549,7 @@ class Job:
         """Build every plugin of the recipe as a hermetic stage -> [(name, tree of its /out, argv flags)]. The stage runs the host driver
         `PLUGIN_CXX` (derived from env.json) on the plugin source and the plugin headers of the target compiler (`compiler.cxx -print-file-name=plugin`),
         so its key is f(source content, host compiler, flags, headers). The .so is in the store; each CC stage declares it as an input."""
-        pl = self.rec.get("plugins", [])
+        pl = plugin_decls(self.rec.get("plugins", []), entry_of(self.roots, self.root + "@" + self.variant if self.variant else self.root).get("cxx_origin"))
         if not pl:
             return []
         host = "/usr/bin/" + PLUGIN_CXX
