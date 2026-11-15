@@ -2642,3 +2642,24 @@ Rule (red otherwise): link/guest.json is exactly {script}; every derived start/e
 the multilib directory the flags select (stage `mld:<root>`, `-print-multi-directory`; recipe.in_multilib). Items: every derived entry; certified = all when
 the rule holds. A red guest root build or a failing driver run is red with the reason.
 ```
+
+## link/milestones.py
+
+```text
+milestones - milestones.tsv for the emulator stage: addresses of the guest's boot milestones, each from a fact.
+
+    milestones.py --exe FalloutNV.exe --modules modules.tsv --n1 n1.json --keys keys.tsv --entries entries.tsv --out milestones.tsv
+
+Rows `name<TAB>kind<TAB>value<TAB>source` (value: 8 hex digits, the address in the guest's address space or the import key); the last
+line is `# table_id <id>`, the id of keys.tsv, which must equal the id of entries.tsv.  The rows, in this order:
+  exe_entry              exe_entry  PE ImageBase + AddressOfEntryPoint of the exe file.
+  module_entry:<name>    module_entry  assigned_base + entry rva of every modules.tsv row with a non-zero entry rva (sorted by name);
+                         a 5th column holds the row's `static` flag (1 = in the exe's import closure).
+  WinMain                winmain  the address of the N1 function whose decorated name is the global function WinMain
+                         (`?WinMain@@...` or `_WinMain@N`).  N1 (n1.py) holds a function only when its MSVC object bytes equal the exe's
+                         bytes at that address, so the name -> address binding is proven; the certificate must carry the sha256 of this
+                         exe.  No such function: no row (nothing is substituted).  Two with different addresses: stage error.
+  import:<dll>!<name>    import  the import key of keys.tsv for the D3D9 calls that mark the first frame: dll `!idirect3ddevice9.dll` and
+                         `!idirect3dswapchain9.dll`, name `Present`; a missing row is no row.
+A pure function of its inputs; a violated precondition is a stage error.
+```
