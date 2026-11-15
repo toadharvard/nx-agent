@@ -6,7 +6,8 @@ D3DMULTISAMPLE_TYPE enum value + invalid ones; every single usage bit of the 32-
 (see render/d3d9/env/README.md for why single bits + pairs cover the usage function)."""
 import json, os, re, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.dont_write_bytecode = True
-fcc = lambda s: sum(ord(c) << (8 * i) for i, c in enumerate(s))
+sys.path.insert(0, HERE); import wine_fourcc  # noqa: E402
+fcc = wine_fourcc.fcc
 
 
 def enum_items(hdr, typedef):
@@ -111,16 +112,9 @@ def c_defines(path, prefix):
 
 
 def known_fourcc(wine):
-    """the FOURCC formats Wine 9.0 knows, derived: the names in wined3d/utils.c format_index_remap, each resolved to its WINEMAKEFOURCC of include/wine/wined3d.h.
+    """the FOURCC formats Wine 9.0 knows: the names of wined3d/utils.c format_index_remap, each resolved to its WINEMAKEFOURCC member of wined3d.h (the one reader, wine_fourcc.py).
     wine = the directory of the pinned mirror (tools/wine-9.0-d3d9-formats)."""
-    u = open(os.path.join(wine, "dlls", "wined3d", "utils.c")).read(); i = u.index("format_index_remap[] ="); blk = u[i:u.index("};", i)]
-    h = open(os.path.join(wine, "include", "wine", "wined3d.h")).read(); out = []
-    for n in re.findall(r"\{(WINED3DFMT_\w+),\s*WINED3D_FORMAT_FOURCC_BASE", blk):
-        m = re.search(r"\b" + n + r"\s*=\s*WINEMAKEFOURCC\('(.)',\s*'(.)',\s*'(.)',\s*'(.)'\)", h)
-        if not m: raise SystemExit("envq: %s of format_index_remap has no WINEMAKEFOURCC in wined3d.h" % n)
-        out.append(fcc("".join(m.groups())))
-    if not out: raise SystemExit("envq: format_index_remap not found")
-    return out
+    return [fcc(c) for c in wine_fourcc.remap(wine)]
 
 
 def load(hdr, spec, wine, d3d9h, caps):

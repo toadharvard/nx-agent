@@ -3,7 +3,7 @@
     GATE_OUT=<dir> GATE_CACHE=<dir> ARTIFACTS_URL=<git url> python3 -I ports/fnv-nx/render/total/gate_d3d9total.py
 Run in the checkout root (verify/verdict.py does). Writes GATE_OUT/d3d9total.json; exit 0 iff green, 2 red.
 Universe = every (enumeration, enumerator) of the enumerations the translation consumes by switch (SWITCHED of
-render/d3d9/front/gen_enums.py, enumerators from the interface table that bridgefacts/d3d9/d3d9_spec.py generates plus VENDOR_FOURCC for D3DFORMAT), ids "enum:E:N",
+render/d3d9/env/gen_enums.py, enumerators from the interface table that bridgefacts/d3d9/d3d9_spec.py generates plus the vendor FOURCC of the pinned Wine mirror for D3DFORMAT), ids "enum:E:N",
 + every row of the generated sm_table.json of render/shaders/total (the SM1-3 commands, (stage, opcode form)), ids "sm:K".
 
 Declared inputs (nothing else is read): the tracked files (git ls-files) of INPUTS below (the d3d9 and translator recipes and the d3d9 root's include lists), copied into GATE_OUT/d3d9total.work;
@@ -57,7 +57,7 @@ def recipe_includes(path):
 INCLUDES = recipe_includes(D3D9_REC)
 TR_GEN = {os.path.dirname(os.path.dirname(TRANSLATOR_REC) + "/" + o) for g in json.load(open(os.path.join(PORT, TRANSLATOR_REC))).get("generated", []) for o in g["outputs"]}   # build outputs: no tracked files
 TR_INCLUDES = [i for i in recipe_includes(TRANSLATOR_REC) if i not in TR_GEN]   # the translator's own tracked include dirs (the patched MojoShader includes fnvnx_dk_layout.h from them)
-INPUTS = ["render/d3d9/front", "bridgefacts/d3d9", D3D9_REC, TRANSLATOR_REC,
+INPUTS = ["render/d3d9/front", "render/d3d9/env", "bridgefacts/d3d9", D3D9_REC, TRANSLATOR_REC,
           "contract/treehash.py"] + INCLUDES + [i for i in TR_INCLUDES if i not in INCLUDES]
 STRICT = ["-Wall", "-Wextra", "-Werror", "-Werror=switch", "-Werror=switch-enum"]
 PLAIN = ["-Wall", "-Wextra", "-Werror", "-Wno-switch", "-Wno-switch-enum"]
@@ -224,10 +224,27 @@ def front_build(front, incs, flags):
     return ok, errs
 
 
-def enum_part(inp, work):
+def vendor_fourcc(inp, work, cache):
+    """the vendor FOURCC list of the enum generator: ITS rule (gen_enums.vendor_fourcc over the pinned Wine mirror of the d3d9 recipe), loaded from the checkout; (list, mirror tree_sha256)"""
+    exts = [x for x in json.load(open(os.path.join(inp, D3D9_REC)))["external"] if x.get("name") == "wine-d3d9-formats"]
+    if len(exts) != 1 or exts[0].get("repo") != "fnv-nx-build":
+        raise Red("%s: exactly one external wine-d3d9-formats of fnv-nx-build is required" % D3D9_REC)
+    tree = os.path.join(work, "ext", "wine-d3d9-formats")
+    h = fetch_external(exts[0], cache, tree, work)
+    env = os.path.join(inp, "render", "d3d9", "env")
+    sys.path.insert(0, env)
+    try:
+        import gen_enums
+        return gen_enums.vendor_fourcc(tree, os.path.join(inp, "shim", "include", "d3d9types.h")), h
+    finally:
+        sys.path.remove(env)
+
+
+def enum_part(inp, work, cache):
     front, backend = os.path.join(inp, "render", "d3d9", "front"), [os.path.join(inp, i) for i in INCLUDES]
-    gen = module_lists(os.path.join(front, "gen_enums.py"), ["SWITCHED", "INDEXED", "VENDOR_FOURCC"])
+    gen = module_lists(os.path.join(inp, "render", "d3d9", "env", "gen_enums.py"), ["SWITCHED", "INDEXED"])
     os.makedirs(work)
+    gen["VENDOR_FOURCC"], wine_hash = vendor_fourcc(inp, work, cache)
     # the interface table is a build output (bridgefacts D9_SPEC): the gate runs the same generator on the same tree
     specp = os.path.join(work, "d3d9_spec.json")
     if run([sys.executable, "-I", os.path.join(inp, "bridgefacts", "d3d9", "d3d9_spec.py"), specp, os.path.join(work, "d9bridge_rows.tsv"), os.path.join(inp, "shim", "include")]).returncode:
@@ -240,7 +257,7 @@ def enum_part(inp, work):
     gdir = os.path.join(work, "gen")
     os.makedirs(gdir)
     hpath = os.path.join(gdir, "d3d9_enums.gen.h")
-    if run([sys.executable, "-I", os.path.join(front, "gen_enums.py"), hpath, specp]).returncode:
+    if run([sys.executable, "-I", os.path.join(inp, "render", "d3d9", "env", "gen_enums.py"), hpath, specp, os.path.join(work, "ext", "wine-d3d9-formats"), os.path.join(inp, "shim", "include", "d3d9types.h")]).returncode:
         raise Red("gen_enums.py failed")
     inc = ["-m32", "-ffreestanding", "-I", gdir, "-I", os.path.join(inp, "shim", "include")]
     ginc = [gdir, os.path.join(inp, "shim", "include")]
@@ -313,7 +330,7 @@ def enum_part(inp, work):
             if not good:
                 uncert.append("enum:%s:%s" % (e, n))
     info = {"header_mismatch": header_bad, "front_builds": built, "front_errors": [d.get("message", "") for d, _ in berrs][:5],
-            "sensitivity": sens}
+            "sensitivity": sens, "wine_formats_tree_sha256": wine_hash}
     return universe, uncert, info
 
 
@@ -462,7 +479,7 @@ def main():
     parts, universe, uncert, err = {}, [], [], ""
     try:
         materialize(inp)
-        eu, ec, einfo = enum_part(inp, os.path.join(work, "enum"))
+        eu, ec, einfo = enum_part(inp, os.path.join(work, "enum"), cache)
     except Red as x:
         err, eu, ec, einfo = str(x), [], [], {}
     su, sc, sinfo = sm_part(inp, os.path.join(work, "sm"), cache) if not err else ([], [], {})
