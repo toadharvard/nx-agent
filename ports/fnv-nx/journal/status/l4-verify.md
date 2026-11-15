@@ -209,3 +209,8 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - w12 implements the 8 loader tables as generated loader stages; mkidentity stays L5's tool, run as a stage.
   - L1 facts producer: w22-facts 33e41190b (native.tsv has 0 rows today), available to L3a's native-disp.
   - Target set: ∅.
+- 00:55: The L4 delivery for cand2 is claude/fnv-l4-verify-cand1 c0b42b63f: cand1 2b66742ec plus L4 paths only (36 files).
+  - Green: 13 test files, 536 cases, 0 fail.
+  - Blocked on L1: test_boot, bootgpu, bootmachine, lockobs and bootrt. The causes are the admit rows for tests/bootguest, verify/bootrt and lift/rt, the hostabi host recipe, and errno_accessor.
+  - errno_accessor is a per-root restatement of a declared-target fact (newlib `__errno`); I asked L1 to read it from the target record (rule 5).
+  - test_boot_job needs the exe.
