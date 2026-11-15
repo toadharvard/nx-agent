@@ -46,6 +46,12 @@
    "name": "fnvnx_layout"
   }
  ],
+ "uses": [
+  {
+   "root": "ports/fnv-nx/loader",
+   "output": "BRIDGE_TSV"
+  }
+ ],
  "generated": [
   {
    "tool": "ports/fnv-nx/lift/tools/packcopy.py",
@@ -4152,7 +4158,18 @@
     "u/ffe.cpp",
     "u/fff.cpp",
     "disp.S",
-    "imp.cpp",
+    "imp.cpp"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/packentries.py",
+   "args": [
+    "/ext/liftpack/entries.tsv",
+    "/uses/ports/fnv-nx/loader/BRIDGE_TSV",
+    "/out/entries.tsv"
+   ],
+   "inputs": [],
+   "outputs": [
     "entries.tsv"
    ]
   }

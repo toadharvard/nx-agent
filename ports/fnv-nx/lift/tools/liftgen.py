@@ -43,7 +43,7 @@ def bucket(a): return (a >> 4) & (NBUCKET - 1)
 
 
 def unit_names(): return ['u/%03x.cpp' % i for i in range(NBUCKET)] + ['disp.S', 'imp.cpp']
-def pack_outputs(): return unit_names() + ['entries.tsv']   # entries.tsv (addr, symbol, kind, table_id trailer) is written with the units by `finish`, so it comes from the same pack as the image
+# entries.tsv (addr, symbol, kind, table_id trailer) is the output of its own stage (packentries.py): table_id is the sha256 of the loader root's BRIDGE_TSV, computed there
 
 
 def lift_one(a):
@@ -243,7 +243,9 @@ def recipe(ref, commit, tree, dest=None):
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': gc['external']['name'], 'cc': gc['cc'], 'cxx': gc['cxx']},
            'flags': {k: keep(v) for k, v in PACK_ROOT_FLAGS.items()},
            'include': ['/ext/liftpack/inc'], 'units': 'all', 'plugins': plugins,
-           'generated': [{'tool': 'ports/fnv-nx/lift/tools/packcopy.py', 'args': ['/ext/liftpack', '/out'], 'inputs': [], 'outputs': pack_outputs()}],
+           'uses': [{'root': 'ports/fnv-nx/loader', 'output': 'BRIDGE_TSV'}],
+           'generated': [{'tool': 'ports/fnv-nx/lift/tools/packcopy.py', 'args': ['/ext/liftpack', '/out'], 'inputs': [], 'outputs': unit_names()},
+                         {'tool': 'ports/fnv-nx/lift/tools/packentries.py', 'args': ['/ext/liftpack/entries.tsv', '/uses/ports/fnv-nx/loader/BRIDGE_TSV', '/out/entries.tsv'], 'inputs': [], 'outputs': ['entries.tsv']}],
            'outputs': {'ENTRIES': 'entries.tsv'},
            'link': None,
            'external': [{'name': 'liftpack', 'repo': 'fnv-nx-build', 'ref': ref, 'commit': commit, 'tree_sha256': tree, 'at': '/ext/liftpack'}, gc['external']]}
