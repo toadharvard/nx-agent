@@ -816,3 +816,7 @@ Paused: w3b, w4, farm; no other work.
         - the guest stages run aarch64-linux-gnu-gcc without -nostdinc or --sysroot;
         - the units include /usr/aarch64-linux-gnu/include glibc headers (math.h, string.h), not newlib.
     - Until that is fixed, these builds are measurements, not product.
+- 10:24Z Orchestrator: the guest glibc defect is assigned.
+    - L1: guest stage hermeticity (-nostdinc plus the runtime sysroot), first item of cand3.
+    - L2: the aarch64-none-elf mirror.
+    - L6: rebuild d3d9, translator and sha256 when cand3 carries both. w6 waits until then.
