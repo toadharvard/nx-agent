@@ -63,7 +63,7 @@ def _plugin_cxx():
 PLUGIN_CXX = _plugin_cxx()
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
         "plugins", "variants", "outputs", "uses", "sources", "run"}
-VARIANT_KEYS = {"compiler", "flags"}   # the keys a variant may replace
+VARIANT_KEYS = {"compiler", "flags", "link"}   # the keys a variant may replace (whole: a sanitizer variant names its own link.libs.system)
 PLUGIN_KEYS = {"name", "source", "args"}   # and optionally "inputs": [tracked files the source includes]
 GUEST_LINK = TREE + "/link/guest.json"   # the guest link profile: {"script": path inside TREE, "libs": {LIBS_KEYS}}, one fact for every guest link (RECIPE.md, Link)
 GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
@@ -794,7 +794,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     if vs is not None:
         if not (isinstance(vs, dict) and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9_.-]+", n) and isinstance(v, dict) and v and set(v) <= VARIANT_KEYS
                                               for n, v in vs.items())):
-            return err + ["variants must be {NAME: {compiler and/or flags}}: NAME letters, digits, _ . -; a variant replaces only the keys it names (%s)" % sorted(VARIANT_KEYS)]
+            return err + ["variants must be {NAME: {compiler, flags and/or link}}: NAME letters, digits, _ . -; a variant replaces only the keys it names (%s)" % sorted(VARIANT_KEYS)]
         for n in sorted(vs):    # every variant is a recipe of its own: all the rules apply to its effective form
             err += ["variant %s: %s" % (n, e) for e in check(effective(rec, n), root, files, roots, pin, repo, n)]
     own = roots.get(root, {}).get("variants")
@@ -1378,9 +1378,8 @@ class Job:
                "FNVNX_DEBS": ";".join("%s=%s" % (d, pk[d]["sha256"]) for d in sorted(g["debs"]))}   # the deb sha256s are in the key
         argv = ["/art/" + aout] + g["args"]
         interp = elf_interp(r["elf"]["path"])
-        if interp:   # started through the file at its PT_INTERP path inside a declared deb (its own symlinks followed; usr-merged /lib* /bin /sbin map to /usr/..)
-            home = [(d, p) for d in g["debs"] for p in (interp, "/usr" + interp if interp.split("/")[1] in USRMERGED else interp)
-                    if os.path.isfile(os.path.join(tmp, "deb-" + d + p))]
+        if interp:   # started through the file at its PT_INTERP path inside a declared deb (the deb's own symlinks followed; no alias is assumed)
+            home = [(d, interp) for d in g["debs"] if os.path.isfile(os.path.join(tmp, "deb-" + d + interp))]
             if not home:
                 raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": [
                     "%s has PT_INTERP %s: no declared deb provides that file" % (g["artifact"], interp)]})
@@ -1901,15 +1900,15 @@ def resolve_input(root, ref, repo=".", cache=None, rec=None):
     return full, "%s:%s" % (e["tree_sha256"], p)
 
 
-USRMERGED = ("lib", "lib32", "lib64", "libx32", "bin", "sbin")   # the first components that are symlinks into /usr on the declared (usr-merged) machine
 CPU_FIELDS = {"vendor_id": "vendor_id", "family": "cpu family", "model": "model", "stepping": "stepping", "microcode": "microcode", "model_name": "model name"}
 
 
-def cpu_mismatch(pin):
+def cpu_mismatch(pin, text=None):
     """Differences between the pin {vendor_id, family, model, stepping, microcode, model_name} (the /proc/cpuinfo fields, ints as numbers) and every
-    processor of /proc/cpuinfo."""
+    processor of /proc/cpuinfo (TEXT: the cpuinfo text to judge, default this host's). A pin value null means the field is ABSENT from the processor's
+    lines (a VM has no microcode line); it is not a wildcard: a present field is a mismatch."""
     procs, cur = [], {}
-    for line in open("/proc/cpuinfo").read().splitlines() + [""]:
+    for line in (open("/proc/cpuinfo").read() if text is None else text).splitlines() + [""]:
         k, _, v = line.partition(":")
         if k.strip() == "" and cur:
             procs.append(cur)
