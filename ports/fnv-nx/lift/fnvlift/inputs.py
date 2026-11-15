@@ -6,9 +6,11 @@ configure(). A name that was not configured is an error at the point of use: the
   fpstate    the directory of the fp-state facts (invariants.tsv; tools/fpstate.py)
   fpdepth    the x87 stack-depth facts (depth.tsv; tools/fpmodes.py): a file; no facts is an empty file
   x86sys     the declared x86 system record (platform X86SYS output)
+  segwrites  the per-image write-site counts of the data segment registers (lift/facts SEGWRITES output, tools/segwrites.py): a file
+  image      the key of the image being lifted in that file ('exe', or the module name without .dll, lower case)
 The load base of a module is not an input of this kind: it is the argument `base` of Image(path, base), taken from the module table row.
 Proof: a lookup is get(name); configure() accepts only these names; a second configure() of a name with another value is an error (one process, one input set)."""
-NAMES = ('universe', 'fpstate', 'fpdepth', 'x86sys')
+NAMES = ('universe', 'fpstate', 'fpdepth', 'x86sys', 'segwrites', 'image')
 _I = {}
 
 

@@ -3,7 +3,7 @@ from capstone import x86 as X
 from .core import op, SKIP, Unsupported, MASK, CC, reg
 
 
-SEGSEL = {'cs': 'SEL_CS', 'ss': 'SEL_DS', 'ds': 'SEL_DS', 'es': 'SEL_DS', 'fs': 'SEL_FS', 'gs': '0u'}    # initial selectors of a Win32 x86 user process (fnvl_seg_init; GS is null); the current values live in c->sel (SEG_STATE)
+SEGSEL = {'cs': 'SEL_CS', 'ss': 'SEL_DS', 'ds': 'SEL_DS', 'es': 'SEL_DS', 'fs': 'SEL_FS', 'gs': 'SEL_GS'}    # initial selectors of a Win32 x86 user process (fnvl_seg_init; GS is null); the current values live in c->sel (SEG_STATE)
 
 
 SEG_STATE = True       # struct cpu holds the six selector values: `mov r, Sreg` / `push Sreg` read the state (rt/fnvl.h fnvl_seg_get) instead of the initial constants above

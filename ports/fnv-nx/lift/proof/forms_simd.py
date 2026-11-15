@@ -131,14 +131,30 @@ def shift(e, kind):
 for k, e in (('w', 16), ('d', 32), ('q', 64)):
     handler('psll' + k)(shift(e, 'l')); handler('psrl' + k)(shift(e, 'r'))
 for k, e in (('w', 16), ('d', 32)): handler('psra' + k)(shift(e, 'a'))
+def byteshift(c, op):
+    """PSLLDQ / PSRLDQ: shift the 128-bit register by imm8 BYTES, 16 or more gives 0 (SDM Vol 2).  imm is an int (concrete instruction) or a DSL node (shape)."""
+    v = c.ops[1].val & 0xff; d = c.ops[0]; a = rd(d)
+    if isinstance(v, int):
+        n = min(v, 16); wr(c.F, d, C(0, 128) if n >= 16 else op(a, C(8 * n, 128)))
+    else:
+        n = C(v, 128); wr(c.F, d, ite(ult(n, C(16, 128)), op(a, shl(n, C(3, 128))), C(0, 128)))
 @handler('pslldq')
-def _pslldq(c):
-    n = min(c.ops[1].val & 0xff, 16); d = c.ops[0]; a = rd(d); wr(c.F, d, C(0, 128) if n >= 16 else shl(a, C(8 * n, 128)))
+def _pslldq(c): byteshift(c, shl)
 @handler('psrldq')
-def _psrldq(c):
-    n = min(c.ops[1].val & 0xff, 16); d = c.ops[0]; a = rd(d); wr(c.F, d, C(0, 128) if n >= 16 else lshr(a, C(8 * n, 128)))
-def pick(v, e, sel): # lane `sel` (a 2-bit constant) of v
-    return lanes(v, e)[sel]
+def _psrldq(c): byteshift(c, lshr)
+def selidx(L, i):
+    """element i of the list L.  i is an int (the concrete instruction: plain indexing) or a DSL node (a SHAPE: the selector is bits of the symbolic immediate, already masked by the caller to
+    0..len(L)-1, so the mux over all positions is exact).  One rule for every immediate-selected lane."""
+    if isinstance(i, int): return L[i]
+    r = L[-1]
+    for k in range(len(L) - 2, -1, -1): r = ite(eq(i, C(k, i.w)), L[k], r)
+    return r
+def setidx(L, i, v):
+    """the list L with element i replaced by v (i an int or a DSL node as in selidx)"""
+    if isinstance(i, int): L = list(L); L[i] = v; return L
+    return [ite(eq(i, C(k, i.w)), v, x) for k, x in enumerate(L)]
+def pick(v, e, sel): # lane `sel` (a 2-bit constant, or the symbolic selector bits of a shape) of v
+    return selidx(lanes(v, e), sel)
 @handler('pshufd')
 def _pshufd(c):
     c.aligned = True; d, s, i = c.ops; v = src(c, s); im = i.val & 0xff
@@ -146,11 +162,11 @@ def _pshufd(c):
 @handler('pshuflw')
 def _pshuflw(c):
     c.aligned = True; d, s, i = c.ops; v = src(c, s); im = i.val & 0xff; L = lanes(v, 16)
-    wr(c.F, d, join([L[(im >> (2 * k)) & 3] for k in range(4)] + L[4:]))
+    wr(c.F, d, join([selidx(L[:4], (im >> (2 * k)) & 3) for k in range(4)] + L[4:]))
 @handler('pshufhw')
 def _pshufhw(c):
     c.aligned = True; d, s, i = c.ops; v = src(c, s); im = i.val & 0xff; L = lanes(v, 16)
-    wr(c.F, d, join(L[:4] + [L[4 + ((im >> (2 * k)) & 3)] for k in range(4)]))
+    wr(c.F, d, join(L[:4] + [selidx(L[4:], (im >> (2 * k)) & 3) for k in range(4)]))
 @handler('pshufw')
 def _pshufw(c):
     c.aligned = True; d, s, i = c.ops; v = src(c, s); im = i.val & 0xff
@@ -186,12 +202,12 @@ def _movmskpd(c):
     d, s = c.ops; L = lanes(rd(s), 64); wr(c.F, d, zext(extract(L[0], 63, 63), 32) | shl(zext(extract(L[1], 63, 63), 32), C(1, 32)))
 @handler('pextrw')
 def _pextrw(c):
-    d, s, i = c.ops; n = (i.val & 7) if s.w == 128 else (i.val & 3); wr(c.F, d, zext(lanes(rd(s), 16)[n], 32))
+    d, s, i = c.ops; n = (i.val & 7) if s.w == 128 else (i.val & 3); wr(c.F, d, zext(selidx(lanes(rd(s), 16), n), 32))
 @handler('pinsrw')
 def _pinsrw(c):
     d, s, i = c.ops; a = rd(d); n = (i.val & 7) if d.w == 128 else (i.val & 3)
     v = trunc(rd(s, 32), 16) if s.k == 'r' else rd(s, 16)
-    L = lanes(a, 16); L[n] = v; wr(c.F, d, join(L))
+    wr(c.F, d, join(setidx(lanes(a, 16), n, v)))
 # ---- moves
 @handler('movdqa', 'movaps', 'movapd')
 def _movdqa(c):

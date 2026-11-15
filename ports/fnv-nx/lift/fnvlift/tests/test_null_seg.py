@@ -12,7 +12,17 @@ from fnvlift.core import Unsupported
 from fnvlift.image import Image
 R = json.load(open(_inputs.X86SYS))
 row = R['null_seg_access']
-assert 'gs' not in x86sys.SEL and R['selectors']['gs'].get('status') == 'undecided'
+assert x86sys.SEL['gs'] == 0 and R['selectors']['gs'].get('value') == 0      # the record decides gs: the null selector (Windows 7 SP1 KeContextToKframes)
+import tempfile
+from fnvlift import inputs
+
+
+def configure(**counts):
+    inputs.reset()
+    d = tempfile.mkdtemp(prefix='nullseg-')
+    json.dump({'format': 'fnvnx-segwrites/1', 'images': {'buf': {**dict(es=0, ds=0, fs=0, gs=0), **counts}}}, open(d + '/segwrites.json', 'w'))
+    open(d + '/universe.tsv', 'w').close(); open(d + '/depth.tsv', 'w').close()
+    inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, segwrites=d + '/segwrites.json', image='buf')
 
 
 def lift(code):
@@ -20,27 +30,34 @@ def lift(code):
     return L.lift(img, 0x401000, len(code))[0]
 
 
-def red(code, what):
-    try: lift(code); assert False, what
-    except Unsupported as e: assert 'gs' in str(e), (what, str(e))
-
-
-red(bytes.fromhex('8cc8c3').replace(b'\x8c\xc8', b'\x8c\xe8'), 'mov eax, gs')   # 8c e8: mov eax, gs
-red(bytes.fromhex('0fa8c3'), 'push gs')
 AVC = 'FNVL_RAISE_AV(%d,0x%xu,0x401000u)' % (row['parameters'][0], row['parameters'][1])
-for seg, pfx, idx in (('es', 0x26, 0), ('ds', 0x3e, 3), ('fs', 0x64, 4), ('gs', 0x65, 5)):
-    t = lift(bytes([pfx, 0x8b, 0x00, 0xc3]))          # mov eax, seg:[eax]
-    assert 'SELK(c->sel[%d])==0' % idx in t and AVC in t, (seg, t[:400])
-t = lift(bytes([0x65, 0x8d, 0x00, 0xc3]))             # lea eax, gs:[eax]: no access
-assert 'SELK(c->sel[5])==0' not in t, t[:300]
-t = lift(bytes([0x65, 0x90, 0xc3]))                  # gs-prefixed nop: no memory operand
-assert 'SELK(c->sel[5])==0' not in t, t[:300]
-# privileged-opcode check of the row: the same table decides PRIV for an instruction whose bytes begin with a privileged opcode after the prefixes
+GUARD = {'es': 'SELK(c->sel[0])==0', 'ds': 'SELK(c->sel[3])==0', 'fs': 'SELK(c->sel[4])==0', 'gs': 'SELK(c->sel[5])==0'}
+PFX = {'es': 0x26, 'ds': 0x3e, 'fs': 0x64, 'gs': 0x65}
+
+# (1) gs read: the record's initial gs (0) is a value, the read is lifted (state read)
+configure()
+assert 'fnvl_seg_get(c,5)' in lift(bytes.fromhex('8ce8c3')) and 'fnvl_seg_get(c,5)' in lift(bytes.fromhex('0fa8c3'))
+# (2) no write site of es/ds/fs in the image: only gs (initial null) is guarded, by prefix or not
+for seg in ('es', 'ds', 'fs'):
+    t = lift(bytes([PFX[seg], 0x8b, 0x00, 0xc3])); assert GUARD[seg] not in t, (seg, t[:300])
+t = lift(bytes([0x8b, 0x00, 0xc3])); assert 'SELK(c->sel[3])==0' not in t
+t = lift(bytes([0x65, 0x8b, 0x00, 0xc3])); assert GUARD['gs'] in t and AVC in t, t[:400]
+# a write site of S in the image: every access through S is guarded, prefixed or default; ss (ebp/esp base) never
+configure(ds=2, es=1, fs=1)
+for seg in ('es', 'ds', 'fs', 'gs'):
+    t = lift(bytes([PFX[seg], 0x8b, 0x00, 0xc3])); assert GUARD[seg] in t and AVC in t, (seg, t[:300])
+assert GUARD['ds'] in lift(bytes([0x8b, 0x00, 0xc3]))                   # default ds
+assert 'SELK(c->sel[' not in lift(bytes([0x8b, 0x45, 0x08, 0xc3]))      # [ebp+8]: ss
+assert 'SELK(c->sel[' not in lift(bytes([0x8b, 0x04, 0x24, 0xc3]))      # [esp]: ss
+assert GUARD['es'] in lift(bytes([0xaa, 0xc3])) and GUARD['ds'] in lift(bytes([0xd7, 0xc3]))      # stosb es:[edi]; xlatb ds:[ebx+al]
+# (3) lea and a prefixed instruction without a memory operand: no guard
+for b in ([0x65, 0x8d, 0x00, 0xc3], [0x3e, 0x8d, 0x00, 0xc3], [0x65, 0x90, 0xc3]):
+    assert 'SELK(c->sel[' not in lift(bytes(b)), b
+# privileged-opcode check of the row
 from fnvlift import f_sys
 for b in range(256):
     want = ('0x%x' % b) in row['privileged_check_first']['priv_instruction_opcodes']
     assert f_sys.row_privileged(bytes([0x65, b, 0, 0]), row) == want, b
 # (4) mov gs, ax loads through fnvl_seg_set (state the guard reads)
-t = lift(bytes([0x8e, 0xe8, 0xc3]))
-assert 'fnvl_seg_set(c,5,' in t, t[:300]
+assert 'fnvl_seg_set(c,5,' in lift(bytes([0x8e, 0xe8, 0xc3]))
 print('null_seg: ok')
