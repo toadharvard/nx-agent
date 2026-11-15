@@ -714,3 +714,7 @@ Paused: w3b, w4, farm; no other work.
     - Generator defects a-d (citations, paraphrase, rcp_mask, sm_cases "from memory") are fixed in the derivation item.
     - First item: the sdk-api mirror.
 - 01:06Z L6A a53a3f3d: NXGPU_MAX_COLOR_TARGETS. It is w6's ABI base (replaces e408b213).
+- 01:08Z w1b: sdk-api mirror tools/msdocs-sdkapi-d3d9 c666b5f6 (MicrosoftDocs/sdk-api 656e9656, tree 66e2aab5…0daa).
+    - Pages: SetRenderTarget and SetDepthStencilSurface: "depth ≥ RT", validated by the debug runtime only.
+    - BeginPass4 size rule sent to L6A: any attachment sizes; render area = the intersection of the attachments (GL §9.4.2; wined3d).
+    - Open part of ASM-628: sample mismatch and MSAA MRT. w1b cites the Wine 9.0 wined3d behaviour.
