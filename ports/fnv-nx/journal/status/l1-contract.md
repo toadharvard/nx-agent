@@ -1306,3 +1306,7 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
     - delete the placeholder aliases.ld and make gate_data read link outputs only for linked roots;
     - a private tmpfs per stage at /dev/shm;
     - fix gate_contract's msvc/obj doubling (all 68719 functions "no MSVC object"), and explain why it was green.
+- w23r f4d62a39:
+  - ADMIT accepted (REQUIRED_TEST = build, determinism, linkstrict, objstub, doubles, oracle, assumptions, pure).
+  - The legal gate w23 built against the owner's 2026-11-15 decision (no quota on Legal gates) is removed in a follow-up commit; the manifest work is stopped.
+  - The 500 non-frame accesses were split to L2: int load 201, int store 201 (combridge.gen 123), vec128 37, fp 28, plain ldxr/stxr 23, pair 10.
