@@ -2,7 +2,15 @@
 semantics (what each load/store/arithmetic does to the value) are in rt/fnvl_x87.h. The transcendental / remainder forms (fsin fcos fsincos fptan fpatan f2xm1 fyl2x
 fyl2xp1 fscale fprem fprem1 fxtract) call rt/fmath.c: correctly rounded binary64 (R8, one reference CPU model); fsincos and fptan always use the dynamic stack because
 their stack effect depends on the operand (C2 = 1: |x| >= 2^63, nothing pushed). fbld / fbstp (packed BCD, rt/x87.c) and fstpnce (D9 D8+i, the undocumented alias of fstp st(i)) are here;
-fldenv / frstor / fnstenv / fnsave (dynamic stack only) are in f_x87_ctl.py. h_x87 is the one entry of every x87 opcode: it records FIP / FDP (ptrs) for the non-control ones."""
+fldenv / frstor / fnstenv / fnsave (dynamic stack only) are in f_x87_ctl.py. h_x87 is the one entry of every x87 opcode: it records FIP / FOP / FCS / FDP / FDS (ptrs) for the non-control ones.
+
+ES / B (FSW bits 7 and 15). SDM Vol 1 8.1.3 "x87 FPU Status Word": ES (error summary) is set when any unmasked exception flag is set; B (busy) mirrors ES. Both are a function of (the six exception
+flags IE DE ZE OE UE PE, the FCW masks) and of nothing else, so they are observable only where an FSW image is produced or where the pending-exception check of a waiting x87 instruction reads them:
+fstsw / fnstsw, fnstenv, fnsave, fxsave (rt/seh.cc fx_capture), a CONTEXT capture, and the #MF check before the next waiting x87 instruction (SDM Vol 1 8.6 "x87 FPU exception synchronization", Vol 2 FWAIT).
+Each of those points computes them with the one function fx_esb() (rt/fnvl_x87.h: restored ES/B | ((flags & ~FCW & 0x3f) != 0)), so computing at production equals tracking at every flag change
+(the flags cannot change between a change and the next observation without being observed). FRSTOR / FLDENV / a CONTEXT restore load ES/B verbatim (c->fsw); FNINIT / FNCLEX clear them. OPEN: the #MF
+check itself is part of 2.5 and does not exist yet: h_fwait refuses `fwait` unless the pinned fact ASM-204 (no unmasked exception at any instruction of any module) holds, so no waiting x87 instruction
+reads ES today; when 2.5 adds the check it must call fx_esb() (an FLDCW that unmasks a pending flag then raises #MF at the next waiting instruction)."""
 from capstone import x86 as X
 from .core import fallback, op, Unsupported, X87Dyn
 from .f_x87_ctl import ctl, x87_flaggy, fown_emit
