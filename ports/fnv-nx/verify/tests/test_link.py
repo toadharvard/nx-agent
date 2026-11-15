@@ -19,6 +19,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import test_recipe as TR  # noqa: E402
+import elffacts  # noqa: E402
 
 recipe, T, ROOT, BASE = TR.recipe, TR.T, TR.ROOT, TR.BASE
 LIB = T + "lib"
@@ -29,13 +30,13 @@ LIB_REC = {"format": "fnvnx-recipe/1", "compiler": TR.RECIPE["compiler"], "flags
 
 
 def main_rec(**kw):
-    r = TR.mut(os_layer=[], constants=None, include=[])
+    r = TR.mut(os_layer=[], constants=None, include=[ROOT + "/inc"])
     r["link"] = dict(r["link"], **kw)
     r.pop("generated")
     return r
 
 
-A_C = TR.HDR + '#include "inc/toy.h"\nint f_b(void);\nint f_a(void) { return f_b() + TOY; }\n'
+A_C = TR.HDR + '#include "toy.h"\nint f_b(void);\nint f_a(void) { return f_b() + TOY; }\n'
 BASE_FILES = {"toy/a.c": A_C, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None, "toy/constants.tsv": None, "gen/gen.py": None}
 
 
@@ -123,7 +124,7 @@ def main():
     ef = json.load(open(r["elf_facts"]["path"]))
     secs, esy = elf32_sections_symbols(r["elf"]["path"])
     check("elf facts: the link record carries the sections (name, address, size) as the ELF's own section header table has them",
-          ef["format"] == "fnvnx-elffacts/1" and [(x["name"], x["address"], x["size"]) for x in ef["sections"]] == secs, (ef["sections"][:3], secs[:3]))
+          ef["format"] == elffacts.FORMAT and [(x["name"], x["address"], x["size"]) for x in ef["sections"]] == secs, ([(a, b) for a, b in zip([(x["name"], x["address"], x["size"]) for x in ef["sections"]], secs) if a != b][:3], len(ef["sections"]), len(secs)))
     check("elf facts: every defined symbol with its value and size, and its type and binding as readelf prints them (f_a FUNC GLOBAL)",
           {x["name"]: (x["value"], x["size"]) for x in ef["symbols"] if x["name"] in esy and x["section"] != "ABS"} == {n: v for n, v in esy.items() if n in {x["name"] for x in ef["symbols"] if x["section"] != "ABS"}}
           and any(x["name"] == "f_a" and x["type"] == "FUNC" and x["bind"] == "GLOBAL" for x in ef["symbols"]), ef["symbols"][:3])
@@ -172,7 +173,7 @@ def main():
     check("link.roots: a root that links is no input root", any("has a link of its own" in e for e in cyc), cyc)
     e2 = errs(main_rec(roots=[ROOT, T + "verify", LIB, LIB]), [LB], "badroots")
     check("link.roots: itself, a tool root and a duplicate are errors, all listed at once",
-          any("the root itself" in e for e in e2) and any("not an admitted product root" in e for e in e2) and any("listed twice" in e for e in e2), e2)
+          any("the root itself" in e for e in e2) and any("is a tool root" in e and "product root" in e for e in e2) and any("listed twice" in e for e in e2), e2)
     e3 = errs(main_rec(flags=["-m", "aarch64linux32", "--gc-sections", "-e", "x"]), [], "flags")
     check("link.flags: only the emulation; --gc-sections and -e are errors", sum("not an emulation option" in e for e in e3) == 3 and
           any("--gc-sections" in e for e in e3) and any("-e is" in e or "-e " in e for e in e3), e3)
@@ -192,7 +193,7 @@ def main():
         os.remove(d + "/lib/t.c")
     commit, thash = TR.publish("gl", populate)
     ex = {"name": "gl", "repo": "fnv-nx-build", "ref": "gl", "commit": commit, "tree_sha256": thash, "at": "/ext/gl"}
-    L = {"toy/b.c": None, "toy/a.c": TR.HDR + '#include "inc/toy.h"\nint lib_fn(void);\nint f_a(void) { return lib_fn() + TOY; }\n'}
+    L = {"toy/b.c": None, "toy/a.c": TR.HDR + '#include "toy.h"\nint lib_fn(void);\nint f_a(void) { return lib_fn() + TOY; }\n'}
     libs = {"external": "gl", "dirs": ["lib"], "names": ["toy"], "startfiles": [], "endfiles": []}
     rl = build(mk("libs", dict(main_rec(libs=libs), external=[ex]), L), SS)
     check("link.libs: a member of a guest library of an external is linked where an input needs it", rl["status"] == "green"
@@ -216,7 +217,7 @@ def main():
 
     # (k) kinds: exe and shared host images (LP64), and the target of the link
     def host_rec(kind, **kw):
-        r = TR.mut(os_layer=[], constants=None, include=[], flags={"c": ["-O1", "-ffreestanding", "-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"],
+        r = TR.mut(os_layer=[], constants=None, include=[ROOT + "/inc"], flags={"c": ["-O1", "-ffreestanding", "-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"],
                                                                        "cxx": [], "asm": []})
         r.pop("generated")
         r["link"] = dict({"output": "x.exe" if kind == "exe" else "x.so", "kind": kind, "flags": ["-m", "aarch64linux"]}, **kw)
@@ -279,6 +280,53 @@ def main():
     rt = build(mk("target", dict(main_rec(), flags=TR.RECIPE["flags"] and {"c": ["-O1", "-ffreestanding", "-fPIE"], "cxx": [], "asm": []}), {"toy/b.c": "int f_b(void) { return 1; }\n"}), SS)
     check("a link whose objects have another target (LP64 objects, ILP32 emulation): red, naming the object", rt["status"] == "red"
           and rt["failure"]["stage"] == "ld:" + ROOT and any("a.c" in x and "target" in x for x in rt["failure"]["stderr"]), err_text(rt))
+
+    # (m) link.libs archive of an external: the members the linker pulls are recorded (and kept as objects); an unused member is not
+    def libpop(d, m1="int f_b(void) { return 21; }\n"):
+        os.makedirs(d + "/lib")
+        for n, body in (("m1", m1), ("m2", "int f_unused(void) { return 1; }\n")):
+            open("%s/%s.c" % (d, n), "w").write(body)
+            subprocess.run([CC, "-mabi=ilp32", "-fPIE", "-O1", "-ffreestanding", "-c", "-o", "%s/%s.o" % (d, n), "%s/%s.c" % (d, n)], check=True)
+            os.remove("%s/%s.c" % (d, n))
+        subprocess.run(["aarch64-linux-gnu-ar", "rcs", d + "/lib/libtoy.a", d + "/m1.o", d + "/m2.o"], check=True)
+        os.remove(d + "/m1.o")
+        os.remove(d + "/m2.o")
+    lc, lh = TR.publish("tlib", libpop)
+    lx = {"name": "tlib", "repo": "fnv-nx-build", "ref": "tlib", "commit": lc, "tree_sha256": lh, "at": "/ext/tlib"}
+    arec = dict(main_rec(libs={"external": "tlib", "dirs": ["lib"], "names": ["toy"], "startfiles": [], "endfiles": []}), external=[lx])
+    arepo = mk("archive", arec, {"toy/b.c": None})
+    rl = build(arepo, SS)
+    la = rl.get("link_archives", [])
+    check("link.libs archive: the member the linker pulled (m1.o, for f_b) is recorded with archive path, archive sha256, member bytes sha256 and a kept object; "
+          "the unused member m2.o is not", rl["status"] == "green" and [(m["archive"], m["member"]) for m in la] == [("/ext/tlib/lib/libtoy.a", "m1.o")]
+          and re.fullmatch("[0-9a-f]{64}", la[0]["sha256"]) and os.path.isfile(la[0]["object"]) and "m2.o" not in repr(la), err_text(rl) + repr(la))
+    ea = errs(dict(arec, link=dict(arec["link"], libs={"external": "tlib", "dirs": ["../x"], "names": ["toy"], "startfiles": [], "endfiles": []})), [], "outside")
+    check("link.libs: a directory outside the external is refused (an archive must lie inside a declared external)", any("link.libs" in e for e in ea), ea)
+
+    rc_, lsr, _, lso = TR.gate(arepo, "linkstrict", BASE + "/gate-ls", BASE + "/gate-cache")
+    rc2, osr, _, oso = TR.gate(arepo, "objstub", BASE + "/gate-os", BASE + "/gate-cache")
+    check("link.libs archive: linkstrict and objstub judge the pulled member as an object (their universe counts its symbols) and accept the root",
+          rc_ == 0 and lsr and lsr["status"] == "green" and lsr["universe"] >= 3 and osr and osr["universe"] >= 1, (lsr, osr, lso[-300:], oso[-300:]))
+    # a pulled member that is a stub (a trap body) is red in objstub; one with an undefined symbol nothing defines is a red build (and so red gates)
+    def archive_repo(name, body):
+        c, h = TR.publish("tlib-" + name, lambda d: libpop(d, body))
+        x = dict(lx, name="tlib", ref=name, commit=c, tree_sha256=h)
+        return mk("archive-" + name, dict(arec, external=[x]), {"toy/b.c": None})
+    rstub = archive_repo("stub", "int f_b(void) { __builtin_trap(); }\n")
+    _, osr2, _, oso2 = TR.gate(rstub, "objstub", BASE + "/gate-os2", BASE + "/gate-cache2")
+    check("link.libs archive: a pulled member that is a stub (trap body) makes objstub red", build(rstub, SS)["status"] == "green" and osr2 and osr2["status"] == "red", (osr2, oso2[-300:]))
+    rund = archive_repo("undef", "int nowhere(void);\nint f_b(void) { return nowhere(); }\n")
+    rr2 = build(rund, SS)
+    _, lsr2, _, _ = TR.gate(rund, "linkstrict", BASE + "/gate-ls2", BASE + "/gate-cache2")
+    check("link.libs archive: a pulled member with an undefined symbol nothing defines: the link is red, and so is linkstrict",
+          rr2["status"] == "red" and lsr2 and lsr2["status"] == "red", (err_text(rr2), lsr2))
+    # (n) the link check that objects.json equals the global and weak symbols read from the objects themselves (a second ELF reader: ldcheck's)
+    o0 = rl["objects"][0]
+    d0 = [d for d in rl["defined"] if d["object"] == o0["unit"]]
+    objs0 = [(o0["unit"], o0["object"])]
+    check("objects.json vs objects: the recorded list equals what the object defines", d0 and recipe.defined_mismatch("t", d0, objs0) == [], d0)
+    check("objects.json vs objects: a symbol listed but not defined, and a defined one not listed, are both findings",
+          len(recipe.defined_mismatch("t", d0 + [dict(d0[0], symbol="ghost")], objs0)) == 1 and len(recipe.defined_mismatch("t", d0[1:], objs0)) == 1 and len(d0) >= 1, d0)
 
     # (l) variants: one root, an aarch64 LP64 variant and an x86_64 variant, linked into two images; a wrong-target link is red
     FL = ["-O1", "-ffreestanding", "-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"]

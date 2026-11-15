@@ -10,6 +10,10 @@
  "covers": [
   "tool",
   "ref",
-  "header"
+  "header",
+  "test",
+  "product-guest",
+  "lifted",
+  "host-product"
  ]
 }

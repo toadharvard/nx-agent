@@ -660,7 +660,7 @@ except ValueError:
 # gate on the toy product root of test_recipe.py
 import verdict  # noqa: E402
 
-RV = ("#include \"inc/toy.h\"\nvoid fnvnx_reach_violation(unsigned) __attribute__((noreturn));\n"
+RV = ("#include \"toy.h\"\nvoid fnvnx_reach_violation(unsigned) __attribute__((noreturn));\n"
       "int f_c(int x) { if (x > 3) fnvnx_reach_violation(42); return x + TOY; }\n")
 OS = TR.FILES["toy/os.S"] + (".globl fnvnx_reach_violation\n.type fnvnx_reach_violation,%function\nfnvnx_reach_violation:\n adrp x1, hostslot\n"
                              " ldr x1, [x1, :lo12:hostslot]\n blr x1\n.size fnvnx_reach_violation,.-fnvnx_reach_violation\n.data\n.balign 8\n.globl hostslot\nhostslot: .quad 0\n")
@@ -725,7 +725,7 @@ rc, g, _, txt, st = gate(repo3, ROOT + "/g7", GC)
 check("a malformed facts file: red, input error", rc == 2 and g["status"] == "red" and "input error" in g["detail"], (g, txt))
 
 # wine_fixme and ILP32 at the gate level
-WC = '#include "inc/toy.h"\nvoid fnvnx_wine_fixme(unsigned);\nint f_c(int x) { (void)x; fnvnx_wine_fixme(5); return 7; }\n'
+WC = '#include "toy.h"\nvoid fnvnx_wine_fixme(unsigned);\nint f_c(int x) { (void)x; fnvnx_wine_fixme(5); return 7; }\n'
 for tag, tbl, want in (("row matches", "5\tm\twine-9.0:dlls/x/y.c:f\tu32\t7\n", "green"), ("row value differs", "5\tm\twine-9.0:dlls/x/y.c:f\tu32\t8\n", "red"),
                        ("malformed table", "5\tm\tnot-a-ref\tu32\t7\n", "input")):
     wr = TR.make_guest_repo("os-wine-" + tag.replace(" ", "-"), rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": WC, "verify/wine_fixme.tsv": tbl})

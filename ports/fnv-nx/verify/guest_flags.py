@@ -4,7 +4,7 @@
 It is recipe.semantics_for(pinned driver, language, origin=ORIGIN) on the flags.semantics of verify/guest_compiler.json: the one function the recipe uses
 for every guest compile stage (the set of the root's origin, native = common, lifted = common + lifted_extra, minus the flags the pinned driver itself
 says do not apply to the language). There is no second list.
-The pinned compiler is fetched by the pin of guest_compiler.json (recipe.fetch_externals) into the verdict store (GATE_CACHE, required).
+The pinned compiler is fetched by the pin of guest_compiler.json (recipe.fetch_externals) into DIR (default $GATE_CACHE, else ~/.cache/fnvnx-guest-flags).
 Exit 1 with the reason on stderr if the pinned compiler cannot be fetched."""
 import argparse
 import json

@@ -8,7 +8,8 @@
 #   farm/gamedata_fetch.sh <out dir> --no-data      only the exe, the INIs, the static modules (gamedata/exe) and the d3dx9 DLLs
 #                                                   (gamedata/redist): what a start to WinMain needs
 #
-# Env: ARTIFACTS_URL (the artifacts repository, fetched over directly; default https://github.com/toadharvard/fnv-nx-build). No clone path is read.
+# Env: ARTIFACTS (a clone of the artifacts repository to fetch into; default /home/user/fnv-nx-build if it exists),
+#      ARTIFACTS_URL (fetched over directly when there is no clone).
 # A finished fetch writes <out>/.gamedata_heads (the branch heads it took); when the heads have not moved, the next
 # run with the same items does nothing ("up to date"), so farms can call it before every boot.
 # Exit: 0 ok, 1 a missing branch or a checksum mismatch, 2 usage.
