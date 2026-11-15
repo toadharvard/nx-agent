@@ -379,7 +379,10 @@ def round_exact(pc, rm, exact):
 class Out:
     """Result of one instruction.  undef: 16-bit mask of FSW bits the SDM lists as 'Undefined' (the model
     leaves them unchanged; a comparison ignores them).  mem_undef: mask of memory-image bits the SDM leaves
-    reserved.  trap: Bool, a #MF is signalled before the instruction executes (SDM 1:8.7.1: a waiting
+    reserved.  nd, nd_pre: the SDM leaves some results implementation-dependent (FPREM's N, whether FCMOVcc with a false
+    condition reports an underflow, whether FPTAN/FSINCOS push for a NaN or infinite operand).  The spec is then a
+    relation: the free variables nd with their admissible range nd_pre.  A Form refines it when for its behaviour
+    there is a value of nd within nd_pre for which it equals the spec.  trap: Bool, a #MF is signalled before the instruction executes (SDM 1:8.7.1: a waiting
     instruction with a pending unmasked exception); set by the registry wrapper."""
     def __init__(self, s, mem=None, wr=None, ax=None, eflags=None, pre=None, undef=None, mem_undef=None):
         self.s = s
@@ -391,6 +394,8 @@ class Out:
         self.undef = undef if undef is not None else K(0, 16)
         self.mem_undef = mem_undef
         self.trap = z3.BoolVal(False)
+        self.nd = []                    # free variables of the SDM's implementation-dependent choices (module docstring 'Nondeterminism')
+        self.nd_pre = z3.BoolVal(True)  # the admissible range of those variables
 
 
 def finish(s_in, s_out, newflags, mem=None, extra_pre=None, ou_pre=False, abort_set=None):
@@ -762,19 +767,53 @@ def _const(s, num_den_or_real):
     return _push(s, bits(r))
 
 
-# Mathematical constants as rationals with 60 significant digits (SDM 2A:FLD1/FLDL2T/... Description lists
-# the values log2 10, log2 e, pi, log10 2, loge 2).  The test checks that the rounding of each constant to
-# binary64 under every RC is the same at 60 and at 100 digits.
-def _dec(s):
-    n, _, f = s.partition(".")
-    return z3.RealVal(int(n + f)) / z3.RealVal(10 ** len(f))
+# Mathematical constants (SDM 2A:FLDL2T/FLDL2E/FLDPI/FLDLG2/FLDLN2 Description: log2 10, log2 e, pi, log10 2, loge 2) as rationals with
+# 120 decimal digits, computed here from convergent series in integer arithmetic (no digit string is typed):
+#   pi = 16 atan(1/5) - 4 atan(1/239) (Machin), ln 2 = 2 atanh(1/3), ln 10 = 3 ln 2 + 2 atanh(1/9) (ln(5/4) = 2 atanh(1/9)),
+#   log2 e = 1/ln 2, log2 10 = ln 10/ln 2, log10 2 = ln 2/ln 10.
+# Each series term is truncated, the error of every constant is below 10^-118 (guard digits 40, at most 200 terms of error 10^-160 each).
+# The rounding of the constant to binary64 under every RC equals the rounding of the exact value iff no rounding boundary (a binary64 value or
+# the midpoint of two) lies within 10^-118 of it; tests/test_x87spec.py checks that distance for each constant and compares the RNE result with
+# the Python float constants (math.pi, ...), an independent source.
+_DIG, _GUARD = 120, 40
+_ONE = 10 ** (_DIG + _GUARD)
 
 
-L2T = _dec("3.32192809488736234787031942948939017586483139302458061205475639581593477660862521585013974335937015")
-L2E = _dec("1.44269504088896340735992468100189213742664595415298593413544940693110921918118507988552662289350634")
-PI_ = _dec("3.14159265358979323846264338327950288419716939937510582097494459230781640628620899862803482534211706")
-LG2 = _dec("0.30102999566398119521373889472449302676818988146210854131000000000000000000000000000000000000000000")
-LN2 = _dec("0.69314718055994530941723212145817656807550013436025525412068000949339362196969471560586332699641868")
+def _atan_inv(n):
+    """atan(1/n) * _ONE: sum of (-1)^k / ((2k+1) n^(2k+1)), n >= 2"""
+    x, k, sgn_, tot = _ONE // n, 0, 1, 0
+    while x:
+        tot += sgn_ * (x // (2 * k + 1))
+        x //= n * n; k += 1; sgn_ = -sgn_
+    return tot
+
+
+def _atanh_inv(n):
+    """atanh(1/n) * _ONE: sum of 1 / ((2k+1) n^(2k+1)), n >= 2"""
+    x, k, tot = _ONE // n, 0, 0
+    while x:
+        tot += x // (2 * k + 1)
+        x //= n * n; k += 1
+    return tot
+
+
+def _consts():
+    pi = 16 * _atan_inv(5) - 4 * _atan_inv(239)
+    ln2 = 2 * _atanh_inv(3)
+    ln10 = 3 * ln2 + 2 * _atanh_inv(9)
+    g = 10 ** _GUARD
+    return {"pi": pi // g, "ln2": ln2 // g, "log2e": (_ONE * _ONE // ln2) // g, "log2_10": (ln10 * _ONE // ln2) // g,
+            "lg2": (ln2 * _ONE // ln10) // g}
+
+
+CONST_INT = _consts()                     # name -> floor(value * 10^120)
+
+
+def _rat(name):
+    return z3.RealVal(CONST_INT[name]) / z3.RealVal(10 ** _DIG)
+
+
+L2T, L2E, PI_, LG2, LN2 = _rat("log2_10"), _rat("log2e"), _rat("pi"), _rat("lg2"), _rat("ln2")
 
 
 def fld1(s):
@@ -1020,13 +1059,20 @@ def fxam(s):
 # --- conditional moves ----------------------------------------------------------------------------
 def fcmov(s, i, cond):
     """SDM 2A:FCMOVcc Op 'IF condition TRUE THEN ST(0) := ST(i)'; the source operand is ST(i) (SDM 2A:FCMOVcc
-    Description), stack underflow (SDM 1:8.5.1.1: an empty source) when ST(i) is empty: IE, SF, C1 = 0 and
-    the destination receives the indefinite when the move happens.  cond is the Bool of the EFLAGS test."""
-    uf = is_empty(s, i)
+    Description 'The source operand is always in the ST(i) register and the destination operand is always
+    ST(0)').  Condition true and ST(i) empty: stack underflow (SDM 2A:FCMOVcc Exc '#IS', SDM 1:8.5.1.1: IE, SF,
+    C1 = 0), the masked response is the indefinite in ST(0).  Condition false and ST(i) empty: the SDM Operation
+    reads ST(i) only inside THEN and lists #IS 'Stack underflow occurred' without saying whether a false
+    condition counts, so both outcomes are admissible: the free Bool nd.fcmov.uf_false (underflow reported, or the
+    instruction does nothing); a Form refines the spec by equalling it for one value.  An empty destination is not
+    an underflow in the Operation (it is written)."""
+    nd_uf = z3.Bool("nd.fcmov.uf_false")
+    uf = And(is_empty(s, i), Or(cond, nd_uf))
     s_ok = _c1(St.ite(cond, write_reg(s, 0, st(s, i)), s), FALSE)
     s_uf = St.ite(cond, write_reg(stack_fault_state(s, False), 0, K(QNAN_INDEF, 64)), stack_fault_state(s, False))
     o = finish(s, St.ite(uf, s_uf, s_ok), If(uf, fl(IE), NOFLAGS))
     o.undef = UNDEF_C023
+    o.nd = [nd_uf]
     return o
 
 
@@ -1247,9 +1293,10 @@ def _prem(s, nearest):
       D := exponent(ST(0)) - exponent(ST(1)); D < 64: Q := trunc (FPREM) or round-to-nearest-even (FPREM1)
       of ST(0)/ST(1); ST(0) := ST(0) - ST(1)*Q; C2 := 0; (C0, C3, C1) := (Q2, Q1, Q0).
       D >= 64: C2 := 1; QQ := trunc((ST(0)/ST(1)) / 2^(D-N)); ST(0) := ST(0) - ST(1)*QQ*2^(D-N).
-    The SDM leaves N 'an implementation-dependent number between 32 and 63': N = 63 here, which reduces the
-    exponent by the most the SDM allows and is a permitted choice; (C0, C3, C1) are then not assigned by the
-    Operation, so they are listed undefined.  Result exact (SDM 2A:FPREM Description: no #P, RC no effect).
+    N is the SDM's 'implementation-dependent number between 32 and 63' (SDM 2A:FPREM Op): the free 16-bit
+    vector nd.prem.N with 32 <= N <= 63, so the spec holds for every D (the whole exponent range) and every admissible
+    N; a Form refines it by equalling the spec for one N (a fixed N = 63 is such a Form).  (C0, C3, C1) are not
+    assigned by the Operation when D >= 64, so they are listed undefined.  Result exact (SDM 2A:FPREM Description: no #P, RC no effect).
     Special values: SDM 2A:FPREM Table 1-27, 2A:FPREM1 Table 1-28.  Zero result takes the sign of the dividend."""
     a, b = st(s, 0), st(s, 1)
     nan_any = Or(is_nan(a), is_nan(b))
@@ -1261,9 +1308,8 @@ def _prem(s, nearest):
     gen = And(Not(nan_any), Not(inv), Not(is_zero(a)), Not(is_inf(b)))
     ra, rb_ = real(a), real(b)
     q = If(rb_ == 0, z3.RealVal(1), ra / rb_)
-    Dv = z3.BV2Int(uexp(a), True) - z3.BV2Int(uexp(b), True)
-    D = If(is_zero(a), z3.IntVal(0), If(is_zero(b), z3.IntVal(0), Dv))
-    big = D >= 64
+    Dbv = If(Or(is_zero(a), is_zero(b)), K(0, 16), uexp(a) - uexp(b))     # D as a 16-bit signed vector (|D| <= 2100)
+    big = Dbv >= K(64, 16)
     # integer part of q (toward zero) and nearest-even
     tz = If(q >= 0, z3.ToReal(z3.ToInt(q)), -z3.ToReal(z3.ToInt(-q)))
     h = q + z3.RealVal(1) / 2
@@ -1271,7 +1317,8 @@ def _prem(s, nearest):
     tie = h == fl_h
     ne = If(And(tie, z3.IsInt(fl_h / 2) == False), fl_h - 1, fl_h)
     Q = ne if nearest else tz
-    sc = If(D - 63 > 0, z3.RealVal(2) ** (D - 63), z3.RealVal(1))
+    N = z3.BitVec("nd.prem.N", 16)
+    sc = If(Dbv - N > K(0, 16), pow2r(Dbv - N), z3.RealVal(1))
     qq = If(q / sc >= 0, z3.ToReal(z3.ToInt(q / sc)), -z3.ToReal(z3.ToInt(-q / sc)))
     R = If(big, ra - rb_ * qq * sc, ra - rb_ * Q)
     rbits = bits(z3.fpRealToFP(z3.RNE(), R, F64))
@@ -1289,6 +1336,8 @@ def _prem(s, nearest):
     s_ok = write_reg(s.copy(fsw=f), 0, res)
     o = finish(s, St.ite(uf, _uf_state(s, 0, False), s_ok), If(uf, fl(IE), fv(ie=ie, de=de)))
     o.undef = If(Or(uf, c2), UNDEF_C0123 & ~K(1 << C2, 16), K(0, 16))
+    o.nd = [N]
+    o.nd_pre = And(z3.UGE(N, K(32, 16)), z3.ULE(N, K(63, 16)))
     return o
 
 
@@ -1312,11 +1361,17 @@ TAN = z3.Function("x87_tan", _R, _R)
 EXP2M1 = z3.Function("x87_exp2m1", _R, _R)         # 2^x - 1
 LOG2 = z3.Function("x87_log2", _R, _R)
 ATAN2 = z3.Function("x87_atan2", _R, _R, _R)       # atan2(y, x)
-LOG2P1 = z3.Function("x87_log2p1", _R, _R)         # log2(x + 1)
 ZR = z3.RealVal(0)
-AXIOMS = [SIN(ZR) == 0, COS(ZR) == 1, TAN(ZR) == 0, EXP2M1(ZR) == 0,
-          EXP2M1(z3.RealVal(1)) == 1, EXP2M1(z3.RealVal(-1)) == z3.RealVal(-1) / 2,   # SDM 2A:F2XM1 Table 1-12
-          LOG2(z3.RealVal(1)) == 0, LOG2P1(ZR) == 0]
+# AXIOMS: every one is a theorem of real analysis, so none stands in for an assumption (the lead's rule); the exact values at 0, 1 and -1
+# are what the SDM tables list for them (SDM 2A:F2XM1 Table 1-12; SDM 2A:FSIN Table 1-31 +-0 -> +-0; SDM 2A:FCOS +-0 -> +1; SDM 2A:FPTAN Table 1-29;
+# SDM 2A:FYL2X Table 1-44, ST(0) = 1 -> 0).
+AXIOMS = [SIN(ZR) == 0,                                        # sin 0 = 0 (power series; the first term vanishes)
+          COS(ZR) == 1,                                        # cos 0 = 1 (power series)
+          TAN(ZR) == 0,                                        # tan 0 = sin 0 / cos 0 = 0
+          EXP2M1(ZR) == 0,                                     # 2^0 - 1 = 0
+          EXP2M1(z3.RealVal(1)) == 1,                          # 2^1 - 1 = 1
+          EXP2M1(z3.RealVal(-1)) == z3.RealVal(-1) / 2,        # 2^-1 - 1 = -1/2
+          LOG2(z3.RealVal(1)) == 0]                            # log2 1 = 0 (2^0 = 1)
 TWO63 = z3.RealVal(2 ** 63)
 
 
@@ -1343,14 +1398,24 @@ def _trig(s, kind):
       ELSE C2 := 1 (ST(0) unchanged, no exception).
     Special values: SDM 2A:FSIN Table 1-31 (+-0 -> +-0, +-inf -> #IA, NaN -> NaN), 2A:FCOS Table 1-19 (+-0 -> +1),
     2A:FPTAN Table 1-29, 2A:FSINCOS Table 1-32; infinity: IE, the indefinite and C2 cleared (SDM 1:T8-10).
-    The function is the exact mathematical one, correctly rounded (OWNER 8).  For FPTAN and FSINCOS the SDM
-    does not say whether the push happens when the source is a NaN or an infinity, so those cases are
-    excluded by the precondition."""
+    The function is the exact mathematical one, correctly rounded (OWNER 8): the result is RN(f(x)) with f the
+    shared symbol of this module.
+    Out of range (|x| >= 2^63): C2 := 1, ST(0) unchanged, no exception, no push (SDM 2A:FPTAN Op ELSE branch,
+    2A:FSINCOS Op, 2A:FSIN Description 'The instruction does not raise an exception when the source operand is out
+    of range').  Infinity: #IA, masked response the QNaN indefinite (SDM 2A:FSIN Table 1-31, 2A:FPTAN Table 1-29,
+    2A:FSINCOS Table 1-32 '*', SDM 2A:FPTAN Exc '#IA Source operand is an SNaN value, infinity').  NaN: the NaN rule
+    (SDM 1:T4-8; the Tables give NaN -> NaN).  For FPTAN and FSINCOS the SDM Operation pushes only inside its
+    'IF ST(0) < 2^63 THEN' and does not say whether a NaN or an infinity enters that branch, so both are admissible:
+    the free Bool nd.trig.push; likewise C2 for those operands ('Set to 1 if outside range (-2^63 < source operand <
+    +2^63); otherwise, set to 0', SDM 2A:FPTAN Flags: whether a NaN or an infinity is outside is not said): the free
+    Bool nd.trig.c2 (a Form refines the spec by equalling it for one value of each).  When pushed, FPTAN pushes
+    1.0 (SDM 2A:FPTAN Op) and FSINCOS pushes the cosine column of its Table 1-32 (the indefinite / the NaN)."""
     b = st(s, 0)
     rm = rm_of(s.fcw)
     x = real(b)
     pushes = kind in ("tan", "sincos")
     nanb, inf_in = is_nan(b), is_inf(b)
+    special = Or(nanb, inf_in)
     big = And(_finite(b), abs_real(x) >= TWO63)
     zero_in = is_zero(b)
     f_main = {"sin": SIN(x), "cos": COS(x), "tan": TAN(x), "sincos": SIN(x)}[kind]
@@ -1359,30 +1424,35 @@ def _trig(s, kind):
     r0 = If(nanb, quieten(b), If(inf_in, K(QNAN_INDEF, 64), If(big, b, If(zero_in, zero_val, mb))))
     ie = Or(is_snan(b), And(Not(nanb), inf_in))
     de = And(Not(ie), is_sub(b))
-    in_range = And(Not(nanb), Not(inf_in), Not(big))
+    in_range = And(Not(special), Not(big))
     pe = And(in_range, Not(zero_in), pe_m)
     ue = And(in_range, Not(zero_in), ue_m)
     up = And(in_range, Not(zero_in), up_m)
     uf = is_empty(s, 0)
-    ov = push_target_nonempty(s) if pushes else FALSE
+    nd_push, nd_c2 = z3.Bool("nd.trig.push"), z3.Bool("nd.trig.c2")
+    push_here = If(special, nd_push, in_range) if pushes else FALSE
+    ov = And(push_here, push_target_nonempty(s)) if pushes else FALSE
     fault = Or(uf, ov)
     s1 = write_reg(s, 0, r0)
     if pushes:
         cb, _, _, cpe, _ = _tr_flags(rm, COS(x))
-        second = ONE64 if kind == "tan" else If(zero_in, ONE64, cb)
-        s1 = St.ite(in_range, do_push(s1, second), s1)
+        second = ONE64 if kind == "tan" else If(special, r0, If(zero_in, ONE64, cb))
+        s1 = St.ite(push_here, do_push(s1, second), s1)
         if kind == "sincos":
             pe = Or(pe, And(in_range, Not(zero_in), cpe))
-    s_ok = s1.copy(fsw=cc(s1.fsw, c1=up, c2=big))
+    s_ok = s1.copy(fsw=cc(s1.fsw, c1=up, c2=If(special, nd_c2, big)))
     s_f = stack_fault_state(s, ov)
     s_f = write_reg(s_f, 0, K(QNAN_INDEF, 64))
     if pushes:
-        s_f = do_push(s_f, K(QNAN_INDEF, 64))
-    pre = And(Not(And(uf, ov)), And(Not(nanb), Not(inf_in)) if pushes else TRUE)
+        s_f = St.ite(ov, do_push(s_f, K(QNAN_INDEF, 64)), s_f)
+    pre = Not(And(uf, ov))
     o = finish(s, St.ite(fault, s_f, s_ok), If(fault, fl(IE), fv(ie=ie, de=de, ue=ue, pe=pe)),
                ou_pre=True, extra_pre=pre)
-    # SDM 2A:FSIN Flags: C0, C3 undefined; C1 round-up (undefined if C2 = 1); C2 range
+    # SDM 2A:FSIN Flags: C0, C3 undefined; C1 round-up (undefined if C2 = 1 for FSIN/FCOS, SDM 2A:FCOS Flags); C2 range
     o.undef = K((1 << C0) | (1 << C3), 16)
+    if kind in ("sin", "cos"):
+        o.undef = o.undef | If(big, K(1 << C1, 16), K(0, 16))
+    o.nd = [nd_push, nd_c2] if pushes else [nd_c2]
     return o
 
 
@@ -1765,10 +1835,12 @@ def _mk():
 
 REGISTRY = _mk()
 
-# Encodings of the pack universe that have no instruction page in the SDM (SDM 1:8.3.13 and the opcode map
-# list no FSTP1 or FFREEP); the spec gives them no behaviour (OWNER 10: the SDM is the reference).
-NO_SDM_PAGE = {("d9", "reg", 3, None): "D9 D8+i (reserved; no SDM page)",
-               ("df", "reg", 0, None): "DF C0+i FFREEP (not in the SDM)"}
+# Cleared class (decision of the L3b lead, 2026-11-15): two encodings of the pack have no instruction page in the SDM (SDM 1:8.3.13
+# and the opcode map list no FSTP1 or FFREEP), so the spec gives them no behaviour (OWNER 10: the SDM is the reference). They occur at
+# exactly 2 sites; the lifter makes each Form.fault(UD) only under L3a's unreachable-or-data certificate, and a reachable non-data site
+# goes to the orchestrator.
+CLEARED_UD = {("d9", "reg", 3, None): "D9 D8+i (FSTP1; no SDM page)",
+              ("df", "reg", 0, None): "DF C0+i (FFREEP; not in the SDM)"}
 
 
 def execute(key, s, m=None, i=None, ef=None):

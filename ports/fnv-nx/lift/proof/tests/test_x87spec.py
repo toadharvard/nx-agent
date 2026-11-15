@@ -4,7 +4,8 @@ Checks: the status/control word layout, the tag encoding, the FINIT state (also 
 (to_m80 of exactly representable values equals the SDM encoding, from_m80 inverts it), the BCD and integer indefinites, and that the registry covers the instruction list of the pack
 (journal/inbox/l3b-w9-x87-list.md) up to the two encodings that have no SDM page.
 python3 -I tests/test_x87spec.py"""
-import os, re, struct, sys, unittest
+import math, os, re, struct, sys, unittest
+from fractions import Fraction
 import z3
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE))
 import x87spec as X
@@ -120,7 +121,7 @@ class Coverage(unittest.TestCase):
             if 'CLEARED' in ln: continue                                   # a cleared feature (SSE3 fisttp): #UD on the declared CPU, no spec row
             m = re.match(r'\|\s*([0-9a-f]{2})\s*\|\s*(mem|reg|-)\s*\|\s*(?:(\d)|-)/', ln)
             if m: keys.add((m.group(1), m.group(2), int(m.group(3)) if m.group(3) else None))
-        have = {(k[0], k[1], k[2]) for k in X.REGISTRY} | {(k[0], k[1], k[2]) for k in X.NO_SDM_PAGE}
+        have = {(k[0], k[1], k[2]) for k in X.REGISTRY} | {(k[0], k[1], k[2]) for k in X.CLEARED_UD}
         have |= {(k[0], k[1], None) for k in have if k[1] == '-'}
         self.assertGreater(len(keys), 100)
         self.assertEqual(sorted(keys - have), [])
@@ -131,5 +132,71 @@ class Citations(unittest.TestCase):
         want = set('SDM %s:%s' % k for k in re.findall(r'SDM (1|2A|2B|2C|2D|3A):(T\d+-\d+|\d+(?:\.\d+)*|[A-Za-z][A-Za-z0-9]*)', src))
         self.assertEqual(want, set(r[0] for r in tab))
         self.assertEqual([r for r in tab if '?' in r[1] + r[2]], [])
+def snap(o, nd, n=2):
+    """(TOP, FSW, ST(0..n-1) patterns) of the spec result with the nondeterministic variables set: nd = [(var, value)]"""
+    s = o.s
+    for v, x in nd: s = X.St(**{f: z3.substitute(getattr(s, f), (v, x)) for f in X.St.FIELDS})
+    top = val(X.top(s)); out = [val(z3.Select(s.R, K((top + i) & 7, 3))) for i in range(n)]
+    return top, val(s.fsw), out
+INDEF = X.QNAN_INDEF
+class Nondeterminism(unittest.TestCase):
+    def test_trig_special_operands(self):
+        keys = {'fptan': ('d9', 'reg', 6, 2), 'fsincos': ('d9', 'reg', 7, 3), 'fsin': ('d9', 'reg', 7, 6), 'fcos': ('d9', 'reg', 7, 7)}
+        push, c2v = z3.Bool('nd.trig.push'), z3.Bool('nd.trig.c2')
+        for name, key in keys.items():
+            for cls, v in (('inf', float('inf')), ('nan', NAN)):
+                o = run(key, state([v]))
+                for pv in (True, False):
+                    for cv in (True, False):
+                        top, fsw, r = snap(o, [(push, z3.BoolVal(pv)), (c2v, z3.BoolVal(cv))])
+                        pushed = name in ('fptan', 'fsincos') and pv
+                        self.assertEqual(top, 6 if pushed else 7, (name, cls, pv))
+                        self.assertEqual(fsw & 1, 1 if cls == 'inf' else 0, (name, cls, 'IE'))          # #IA for infinity only (a QNaN does not raise it)
+                        res = INDEF if cls == 'inf' else NAN
+                        if pushed: self.assertEqual(r, [0x3FF0000000000000 if name == 'fptan' else res, res], (name, cls))
+                        else: self.assertEqual(r[0], res, (name, cls))
+                        self.assertEqual((fsw >> X.C2) & 1, int(cv), (name, cls, 'C2 is the admissible choice'))
+    def test_trig_out_of_range(self):
+        big = 2.0 ** 63
+        for name, key in (('fptan', ('d9', 'reg', 6, 2)), ('fsincos', ('d9', 'reg', 7, 3)), ('fsin', ('d9', 'reg', 7, 6)), ('fcos', ('d9', 'reg', 7, 7))):
+            for v in (big, -big):
+                o = run(key, state([v])); top, fsw, r = snap(o, [])
+                self.assertEqual((top, r[0], (fsw >> X.C2) & 1, fsw & 0x3f), (7, f2b(v), 1, 0), (name, v))
+    def test_fprem_every_N(self):
+        N = z3.BitVec('nd.prem.N', 16)
+        from fractions import Fraction
+        a, b = 2.0 ** 100, 3.0                                   # D = 100 - 1 = 99 >= 64
+        for key, nearest in ((('d9', 'reg', 7, 0), False), (('d9', 'reg', 6, 5), True)):
+            o = run(key, state([a, b]))
+            for n in (32, 40, 63):
+                top, fsw, r = snap(o, [(N, K(n, 16))])
+                self.assertTrue(val(z3.substitute(o.nd_pre, (N, K(n, 16)))))
+                D = 99; qq = int(Fraction(int(a)) / int(b) / Fraction(2) ** (D - n))                       # SDM 2A:FPREM Op ELSE: QQ := trunc((ST(0)/ST(1)) / 2^(D-N))
+                R = Fraction(int(a)) - 3 * qq * Fraction(2) ** (D - n)
+                self.assertEqual(r[0], f2b(float(R)), (key, n)); self.assertEqual((fsw >> X.C2) & 1, 1)
+        for n in (31, 64): self.assertFalse(val(z3.substitute(o.nd_pre, (N, K(n, 16)))))
+    def test_fcmov_empty_source(self):
+        uf = z3.Bool('nd.fcmov.uf_false')
+        for key, cond in ((('db', 'reg', 0, None), True), (('db', 'reg', 0, None), False)):     # FCMOVNB: moves when CF = 0
+            cf = z3.BoolVal(not cond)
+            s = state([1.0]); o = X.execute(key, s, None, 1, (z3.BoolVal(False), z3.BoolVal(False), cf))     # ef = (ZF, PF, CF)           # ST(1) is empty
+            for uv in (True, False):
+                top, fsw, r = snap(o, [(uf, z3.BoolVal(uv))], 1)
+                reported = cond or uv
+                self.assertEqual(fsw & (1 | (1 << X.SF)), (1 | (1 << X.SF)) if reported else 0, (cond, uv))
+                if not reported: self.assertEqual((top, r[0]), (7, f2b(1.0)))
+class Constants(unittest.TestCase):
+    """the constants of FLDPI etc.: floor(v * 10^120); the RNE binary64 equals the Python float constant, and no rounding boundary lies within 10^-100"""
+    FLOATS = {'pi': math.pi, 'ln2': math.log(2), 'log2e': math.log2(math.e), 'log2_10': math.log2(10), 'lg2': math.log10(2)}
+    def test_constants(self):
+        for name, ref in self.FLOATS.items():
+            v = Fraction(X.CONST_INT[name], 10 ** 120)
+            self.assertEqual(float(v), ref, name)                                                                 # float(Fraction) rounds to nearest even
+            e = v.numerator.bit_length() - v.denominator.bit_length()                                             # floor(log2 v) within 1
+            while Fraction(2) ** e > v: e -= 1
+            while Fraction(2) ** (e + 1) <= v: e += 1
+            half = Fraction(2) ** (e - 53)                                                                        # half the spacing of the 53-bit grid
+            k = v / half; dist = abs(k - round(k)) * half
+            self.assertGreater(dist, Fraction(1, 10 ** 100), name)
 if __name__ == '__main__':
     unittest.main()

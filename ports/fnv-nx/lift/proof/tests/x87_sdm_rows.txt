@@ -61,3 +61,13 @@ fcw | IM | 0 | SDM 1:8.1.5 Figure 8-6: IM bit 0
 fcw | PM | 5 | SDM 1:8.1.5 Figure 8-6: PM bit 5
 fcw | PC | 8 | SDM 1:8.1.5 Figure 8-6: PC bits 8-9
 fcw | RC | 10 | SDM 1:8.1.5 Figure 8-6: RC bits 10-11
+# Transcendentals, special operands (FSIN FCOS FPTAN FSINCOS): class | expected | citation
+trig | inf | #IA (IE set), the masked result is the QNaN indefinite in ST(0) | SDM 2A:FSIN Table 1-31, 2A:FSINCOS Table 1-32, 2A:FPTAN Table 1-29 ("*" = #IA for +-inf); SDM 1:8.5.1.2; SDM 1:T4-3 indefinite
+trig | out_of_range | C2 = 1, ST(0) unchanged, no exception | SDM 2A:FSIN Description "The instruction does not raise an exception when the source operand is out of range"; 2A:FPTAN Op ELSE branch
+trig | nan | the NaN (quieted) is the result, IE only for an SNaN | SDM 2A:FSIN Table 1-31 "NaN -> NaN"; SDM 1:T4-8
+trig | push | FPTAN pushes 1.0 after the result; FSINCOS pushes the cosine; a NaN or infinite source may or may not push (nd.trig.push) | SDM 2A:FPTAN Op, 2A:FSINCOS Op (the push is inside "IF ST(0) < 2^63 THEN", NaN and infinity not decided)
+# FPREM, D >= 64: ST(0) := ST(0) - ST(1) * QQ * 2^(D-N), QQ := trunc((ST(0)/ST(1)) / 2^(D-N)), C2 := 1, N in 32..63
+prem | big | C2 = 1 and the SDM remainder for every N in 32..63 | SDM 2A:FPREM Op ELSE branch "N := An implementation-dependent number between 32 and 63"
+# FCMOVcc with an empty ST(i)
+fcmov | true_empty | stack underflow: IE, SF, C1 = 0 | SDM 2A:FCMOVcc Exc "#IS Stack underflow occurred"; SDM 1:8.5.1.1
+fcmov | false_empty | undecided by the SDM: both outcomes admissible (nd.fcmov.uf_false) | SDM 2A:FCMOVcc Op "IF condition TRUE THEN ST(0) := ST(i)" and Exc "#IS"
