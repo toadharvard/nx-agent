@@ -481,6 +481,14 @@ static std::string dl_type(tree t, std::vector<tree> &stk)
     if (!poly_int_tree_p(TYPE_SIZE_UNIT(t), &size) || !size.is_constant()) { dl_error("a complex type whose size is not a constant", "?"); return "?"; }
     return pre + "complex:" + std::to_string(size.to_constant()) + ":" + std::to_string(TYPE_ALIGN_UNIT(t)) + ":" + dl_type(TREE_TYPE(t), stk);
   }
+  case REFERENCE_TYPE: {
+    /* REF1: a reference type has C callers (c-family/c-common.cc:4709 the builtin va_list prototypes, c-attribs.cc:2164 the mode attribute), so it is a row:
+     * `ref:<size>:<align>:` pointee, size and alignment of the reference as GCC laid it out (a reference is laid out as a pointer of its mode,
+     * stor-layout.cc layout_type case REFERENCE_TYPE shares the POINTER_TYPE arm). Compatibility: the same pointee (comptypes_internal compares the codes and TREE_TYPE). */
+    poly_uint64 size;
+    if (!poly_int_tree_p(TYPE_SIZE_UNIT(t), &size) || !size.is_constant()) { dl_error("a reference type whose size is not a constant", "?"); return "?"; }
+    return pre + "ref:" + std::to_string(size.to_constant()) + ":" + std::to_string(TYPE_ALIGN_UNIT(t)) + ":" + dl_type(TREE_TYPE(t), stk);
+  }
   default:
     dl_error("a type outside the grammar", get_tree_code_name((enum tree_code)code));
     return "?";

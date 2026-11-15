@@ -351,3 +351,8 @@ _ev	def
 ?na_v6@@YAPBT__m128@@AAT1@0@Z	def
 ?s@NaP@@QAEXRAH@Z	def
 ?na_r11@@YAXAAHAAUS@@1@Z	def
+# HAND-DERIVED, awaiting a cl recording: the next four rows (NkU, NkS, NkF) are not cl output. They follow MSVC's mangling of the class-key of a tag's
+# FIRST declaration (V class, U struct), as seen in the z7 objects (V_ULARGE_INTEGER@@ of tesfile). They are no reference until a cl run records them.
+?nk_u@@YAXPAVNkU@@@Z	def
+?nk_s@@YAXPAUNkS@@@Z	def
+?nk_f@@YAXPAUNkF@@@Z	def

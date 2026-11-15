@@ -148,7 +148,7 @@ VEC = {
 # the error of dl_type's default arm.  Why the error arm cannot fire for a code (or is the rule) is the reason below; a code of the pinned headers
 # without an entry here fails the test, so a GCC change that adds a type code is seen.
 TCC_TYPE_ROW = {'POINTER_TYPE', 'ARRAY_TYPE', 'FUNCTION_TYPE', 'RECORD_TYPE', 'UNION_TYPE', 'ENUMERAL_TYPE', 'VOID_TYPE', 'INTEGER_TYPE', 'REAL_TYPE',
-                'BOOLEAN_TYPE', 'VECTOR_TYPE', 'NULLPTR_TYPE', 'COMPLEX_TYPE'}
+                'BOOLEAN_TYPE', 'VECTOR_TYPE', 'NULLPTR_TYPE', 'COMPLEX_TYPE', 'REFERENCE_TYPE'}
 # RULE: a code with no row is an error of the compilation (dl_type's default arm): a loud failure, never a wrong spelling. The reasons are facts of the
 # pinned GCC 13.3.0 source (gcc-13.3.0.tar.xz sha256 0845e962...) on where a code is made; they say why the error does not fire in practice.
 GCC = 'gcc-13.3.0/gcc/'
@@ -161,12 +161,6 @@ TCC_TYPE_ERROR = {
                          'which rebuilds an OFFSET_TYPE only from an OFFSET_TYPE it is given); none in c/, c-family/ or the middle end (grep of the pinned tree): C has no pointer to member',
     'METHOD_TYPE': GCC + 'tree.cc:7569 build_method_type_directly; callers outside cp/ are tree.cc:7608, 7627 and 10059 (reconstruct_complex_type, from a METHOD_TYPE it is given); '
                          'none in c/, c-family/ or the middle end (grep of the pinned tree): C has no member function',
-    'REFERENCE_TYPE': GCC + 'tree.cc:6982 build_reference_type_for_mode; callers outside cp/ and the other languages: c-family/c-common.cc:4709 (the type of a '
-                            'BT_VALIST_REF parameter of a builtin prototype: those decls are DECL_IS_UNDECLARED_BUILTIN, which add_decl skips, and a user declaration of '
-                            'the name composes with them only if compatible, which the C front end (no reference type) never makes it), c-family/c-attribs.cc:2164 (the mode '
-                            'attribute on a type that already is a reference), tree.cc:10039 (reconstruct_complex_type, from a reference it is given), ipa-free-lang-data.cc:255 '
-                            'and tree-inline.cc:438 (copies of an existing reference), omp-low.cc:1141 (OpenMP lowering, after the unit\'s declarations are final), '
-                            'alias.cc:1098 (alias sets). c/c-objc-common.cc:124 is Objective-C. C has no reference declarator',
     'LANG_TYPE': GCC + 'tree.def:252; no make_node (LANG_TYPE) and no make_lang_type in c/, c-family/ or the middle end (grep of the pinned tree); the C++ front end '
                        'makes them (cp/decl.cc:4756,4767,4798), the section is written only for C units',
     **{c: GCC + 'cp/cp-tree.def: a code of the C++ front end only (templates, dependent and pack types); the section is written only for C units '
@@ -223,6 +217,14 @@ def cplx(obj):
     check('complex: compatibility is by size, alignment and component',
           cc.compatible(cc.parse(got['c_f']), cc.parse('complex:8:4:float')) and not cc.compatible(cc.parse(got['c_f']), cc.parse(got['c_d']))
           and not cc.compatible(cc.parse(got['at_i']), cc.parse('int')), got)
+
+
+def refrow(obj):
+    got = dict(l.split('\t') for l in pb.section(obj, '.fnvnx.decltype').splitlines())
+    check('ref: the builtin va_list prototypes a C unit redeclares take the unit\'s own types (no reference row is written); the row is the reader\'s and dl_type\'s',
+          set(got) == {'__builtin_va_start', '__builtin_va_end', '__builtin_va_copy', 'use'} and not any('ref:' in v for v in got.values()), got)
+    check('ref: ctypes_compat parses and compares the row',
+          cc.compatible(cc.parse('*ref:8:8:int'), cc.parse('*ref:8:8:int')) and not cc.compatible(cc.parse('ref:8:8:int'), cc.parse('ref:8:8:char')))
 
 
 def decltype_errors(td, so):
@@ -300,6 +302,11 @@ def main():
         check('complex.c compiles', r.returncode == 0, r.stderr[:2000])
         if r.returncode == 0:
             cplx(obj)
+        obj = os.path.join(td, 'rf.o')
+        r = pb.compile(os.path.join(HERE, 'layout', 'ref.c'), obj, so)
+        check('ref.c compiles', r.returncode == 0, r.stderr[:2000])
+        if r.returncode == 0:
+            refrow(obj)
         obj = os.path.join(td, 'c.o')
         r = pb.compile(os.path.join(HERE, 'layout', 'linkage_c.c'), obj, so)
         check('linkage_c.c compiles', r.returncode == 0, r.stderr[:2000])
