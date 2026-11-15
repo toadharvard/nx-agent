@@ -22,13 +22,18 @@ def check(name, ok, info=""):
 # the driver text is the pinned compiler's own -### output (the external of guest_compiler.json, mounted: FNVNX_EXTCACHE or fetched), never a canned line
 import json  # noqa: E402
 import subprocess  # noqa: E402
+import atexit  # noqa: E402
+import shutil  # noqa: E402
 import tempfile  # noqa: E402
+SCRATCH = tempfile.mkdtemp(prefix="gl-")  # one scratch dir per run, removed at exit
+atexit.register(shutil.rmtree, SCRATCH, ignore_errors=True)
 PIN = json.load(open(os.path.join(HERE, "..", "guest_compiler.json")))["external"]
-EXTC = os.environ.get("FNVNX_EXTCACHE") or tempfile.mkdtemp(prefix="glx-")
-AT = recipe.fetch_externals([PIN], tempfile.mkdtemp(prefix="gls-"), EXTC, tempfile.mkdtemp(prefix="glw-"))[PIN["name"]]["host"]
+EXTC = os.environ.get("FNVNX_EXTCACHE") or os.path.join(SCRATCH, "x")
+AT = recipe.fetch_externals([PIN], os.path.join(SCRATCH, "s"), EXTC, os.path.join(SCRATCH, "w"))[PIN["name"]]["host"]
 DRV = os.path.join(AT, recipe.pin_drivers()[1])
 FL = recipe.semantics_for(DRV, "cxx", recipe.SEMANTICS_FLAGS)
-_d = tempfile.mkdtemp(prefix="glp-")
+_d = os.path.join(SCRATCH, "p")
+os.makedirs(_d, exist_ok=True)
 open(os.path.join(_d, "x.cc"), "w").write(recipe.PROBE_SRC)
 TEXT = subprocess.run([DRV] + FL + ["-pie", "-###", os.path.join(_d, "x.cc"), "-o", "/out/x.elf"], capture_output=True, text=True, check=True).stderr
 ML = subprocess.run([DRV] + FL + ["-print-multi-directory"], capture_output=True, text=True, check=True).stdout.strip()
