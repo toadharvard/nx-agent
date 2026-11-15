@@ -1435,3 +1435,8 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - 01:00 **crossing_forbidden ruling (w23).**
   - Crossing is the contract's boundary set (sympair kinds and contract facts), not every external function.
   - L2 w3 emits `.fnvnx.crossing` for every external function: the terms, or `-` when none hold. The gate selects boundary symbols. It is red on a term, on a missing row or on an unknown id.
+- 01:01 **w23 13979d48, the crossing_forbidden gate, is accepted.**
+  - The boundary is the sympair rows with an MSVC name and a kind other than data, def or ref.
+  - It has 6 tests.
+  - The decltype and crossing record request is forwarded to the L2 lead.
+  - cand2 step 7 is now 13979d48.
