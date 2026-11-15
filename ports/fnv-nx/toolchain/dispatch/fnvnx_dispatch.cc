@@ -176,7 +176,8 @@ static bool elem_code(machine_mode m, std::string &c)
 }
 
 /* "" (general registers or stack), or the element code of the vector registers rtx `r` lives in; false: a mode with no code */
-static bool reg_class(rtx r, std::string &c, location_t loc)
+static std::string why_detail;                       /* the detail of the last shape failure (a mode name, a bit count): wording only */
+static bool reg_class(rtx r, std::string &c)
 {
   c = "";
   if (!r) return true;
@@ -185,7 +186,7 @@ static bool reg_class(rtx r, std::string &c, location_t loc)
     for (int i = 0; i < XVECLEN(r, 0); i++) { rtx e = XVECEXP(r, 0, i); if (GET_CODE(e) == EXPR_LIST) e = XEXP(e, 0); if (e && REG_P(e)) { first = e; break; } }
   } else if (REG_P(r)) first = r;
   if (!first || !FP_REGNUM_P(REGNO(first))) return true;
-  if (!elem_code(GET_MODE(first), c)) { error_at(loc, "DISPATCH1: the backend passes a value in vector registers of mode %s, which has no element code", GET_MODE_NAME(GET_MODE(first))); return false; }
+  if (!elem_code(GET_MODE(first), c)) { why_detail = GET_MODE_NAME(GET_MODE(first)); return false; }
   return true;
 }
 
@@ -193,42 +194,57 @@ static std::set<std::string> descs;                  /* every descriptor this un
 
 static const char *conv_of(tree ft);
 
-static bool shape(tree t, bool ret, tree fntype, std::string &out, location_t loc)
+/* shape(): NULL when the type has a descriptor shape (appended to OUT), else the REASON it has none: i128, f<bits> (f128, f16), noshape, nosize,
+ * fastnonpod, vreg. Whether a missing shape is an error is the caller's question: at an indirect call site it is (fnvnx_dispatch receives the
+ * descriptor); a definition only needs one when it is joined to an exe address (exitgen), so it records the reason (`-<reason>`). */
+static std::string reason_buf;                       /* the reason string of a float width: f<bits> (f128, f16) */
+static const char *shape(tree t, bool ret, tree fntype, std::string &out)
 {
-  if (VOID_TYPE_P(t)) { out += "v"; return ret; }
+  why_detail.clear();
+  if (VOID_TYPE_P(t)) { out += "v"; return ret ? NULL : "noshape"; }
   if (INTEGRAL_TYPE_P(t) || POINTER_TYPE_P(t) || TREE_CODE(t) == OFFSET_TYPE || TREE_CODE(t) == NULLPTR_TYPE) {
     unsigned p = TREE_CODE(t) == OFFSET_TYPE ? POINTER_SIZE : TYPE_PRECISION(t);
-    if (p > 64) { error_at(loc, "DISPATCH1: a %u-bit integer in an indirect call", p); return false; }
-    out += p > 32 ? "q" : "i"; return true;
+    if (p > 64) { why_detail = std::to_string(p); return "i128"; }
+    out += p > 32 ? "q" : "i"; return NULL;
   }
   if (SCALAR_FLOAT_TYPE_P(t)) {
-    if (TYPE_PRECISION(t) != 32 && TYPE_PRECISION(t) != 64) { error_at(loc, "DISPATCH1: a floating type of %d bits in an indirect call", (int)TYPE_PRECISION(t)); return false; }
-    out += TYPE_PRECISION(t) == 32 ? "f" : "d"; return true;
+    if (TYPE_PRECISION(t) != 32 && TYPE_PRECISION(t) != 64) { why_detail = std::to_string((int)TYPE_PRECISION(t)); reason_buf = "f" + why_detail; return reason_buf.c_str(); }
+    out += TYPE_PRECISION(t) == 32 ? "f" : "d"; return NULL;
   }
-  if (!AGGREGATE_TYPE_P(t) && TREE_CODE(t) != COMPLEX_TYPE && TREE_CODE(t) != VECTOR_TYPE)
-    { error_at(loc, "DISPATCH1: type %qT in an indirect call has no shape", t); return false; }
-  if (!TYPE_SIZE_UNIT(t) || !tree_fits_uhwi_p(TYPE_SIZE_UNIT(t))) { error_at(loc, "DISPATCH1: type %qT has no constant size", t); return false; }
+  if (!AGGREGATE_TYPE_P(t) && TREE_CODE(t) != COMPLEX_TYPE && TREE_CODE(t) != VECTOR_TYPE) return "noshape";
+  if (!TYPE_SIZE_UNIT(t) || !tree_fits_uhwi_p(TYPE_SIZE_UNIT(t))) return "nosize";
   std::string n = std::to_string((unsigned long)tree_to_uhwi(TYPE_SIZE_UNIT(t)));
   machine_mode mode = TYPE_MODE(t);
   std::string he;
   if (ret) {
     bool nat_mem = aggregate_value_p(t, fntype);
-    if (!nat_mem && !reg_class(targetm.calls.function_value(t, fntype, false), he, loc)) return false;
+    if (!nat_mem && !reg_class(targetm.calls.function_value(t, fntype, false), he)) return "vreg";
     unsigned long sz = (unsigned long)tree_to_uhwi(TYPE_SIZE_UNIT(t));
     bool pod = !(TREE_CODE(t) == RECORD_TYPE || TREE_CODE(t) == UNION_TYPE) || msvc_pod(t);
     bool x86_reg = pod && (sz == 1 || sz == 2 || sz == 4 || sz == 8);
     /* a hidden pointer for a non-POD under __fastcall is in a register that no document names (Agner Fog, table 7): no descriptor, no guess */
-    if (!x86_reg && !pod && !strcmp(conv_of(fntype), "fast")) { error_at(loc, "DISPATCH1: type %qT is a non-POD result under __fastcall: the register of the hidden pointer is not documented", t); return false; }
-    out += "a" + n + (x86_reg ? "R" : "H") + (nat_mem ? "m" : he.empty() ? "g" : he); return true;
+    if (!x86_reg && !pod && !strcmp(conv_of(fntype), "fast")) return "fastnonpod";
+    out += "a" + n + (x86_reg ? "R" : "H") + (nat_mem ? "m" : he.empty() ? "g" : he); return NULL;
   }
   CUMULATIVE_ARGS cum;
   INIT_CUMULATIVE_ARGS(cum, fntype, NULL_RTX, NULL_TREE, 0);
   cumulative_args_t pack = pack_cumulative_args(&cum);
   function_arg_info arg(t, mode, true);
-  if (TREE_ADDRESSABLE(t) || targetm.calls.pass_by_reference(pack, arg)) { out += "s" + n + "r"; return true; }
-  if (!reg_class(targetm.calls.function_arg(pack, arg), he, loc)) return false;
+  if (TREE_ADDRESSABLE(t) || targetm.calls.pass_by_reference(pack, arg)) { out += "s" + n + "r"; return NULL; }
+  if (!reg_class(targetm.calls.function_arg(pack, arg), he)) return "vreg";
   out += "s" + n + (he.empty() ? "g" : he);
-  return true;
+  return NULL;
+}
+
+/* the error of an indirect call site whose type has no shape (the call site is where the descriptor is needed) */
+static void shape_error(const char *why, tree t, location_t loc)
+{
+  if (!strcmp(why, "i128")) error_at(loc, "DISPATCH1: a %s-bit integer in an indirect call", why_detail.c_str());
+  else if (why[0] == 'f' && why[1] != 'a') error_at(loc, "DISPATCH1: a floating type of %s bits in an indirect call", why_detail.c_str());
+  else if (!strcmp(why, "noshape")) error_at(loc, "DISPATCH1: type %qT in an indirect call has no shape", t);
+  else if (!strcmp(why, "nosize")) error_at(loc, "DISPATCH1: type %qT has no constant size", t);
+  else if (!strcmp(why, "fastnonpod")) error_at(loc, "DISPATCH1: type %qT is a non-POD result under __fastcall: the register of the hidden pointer is not documented", t);
+  else error_at(loc, "DISPATCH1: the backend passes a value in vector registers of mode %s, which has no element code", why_detail.c_str());
 }
 
 /* conv of a function type: the declaration's own (fnvnx_cc), METHOD_TYPE is this */
@@ -259,7 +275,7 @@ static tree descriptor(gcall *call)
   tree ft = gimple_call_fntype(call);
   if (!ft) { error_at(loc, "DISPATCH1: an indirect call without a function type"); return NULL_TREE; }
   std::string d = std::string(conv_of(ft)) + ":";
-  if (!shape(TREE_TYPE(ft), true, ft, d, loc)) return NULL_TREE;
+  if (const char *w = shape(TREE_TYPE(ft), true, ft, d)) { shape_error(w, TREE_TYPE(ft), loc); return NULL_TREE; }
   d += ":";
   /* A parameter's type is the function type's (a class that is passed as a reference to a copy is still the
    * class there: the exe takes it by value on its stack); an argument past the declared ones (`...`) has the type
@@ -269,7 +285,7 @@ static tree descriptor(gcall *call)
     if (i) d += ",";
     tree t = parm && parm != void_list_node ? TREE_VALUE(parm) : TREE_TYPE(gimple_call_arg(call, i));
     if (parm && parm != void_list_node) parm = TREE_CHAIN(parm);
-    if (!shape(t, false, ft, d, loc)) return NULL_TREE;
+    if (const char *w = shape(t, false, ft, d)) { shape_error(w, t, loc); return NULL_TREE; }
   }
   descs.insert(d);
   return build_string_literal(d.size() + 1, d.c_str());
@@ -277,21 +293,21 @@ static tree descriptor(gcall *call)
 
 /* The descriptor of a function DEFINITION, from its own type with the same shape() as the call sites (a native body
  * that lifted code reaches through an exit bridge). The parameters are the declared ones: the list is the
- * definition's own, `this` first for a method. */
-static bool def_descriptor(tree decl, std::string &d)
+ * definition's own, `this` first for a method. A type with no shape gives the row `-<reason>` (DEFDISP-NS): no x86 caller can reach a body that has
+ * no x86 shape, and exitgen, which joins a definition to its exe address, is red for a joined `-` row. */
+static std::string def_descriptor(tree decl)
 {
-  location_t loc = DECL_SOURCE_LOCATION(decl);
   tree ft = TREE_TYPE(decl);
-  d = std::string(conv_of(ft)) + ":";
-  if (!shape(TREE_TYPE(ft), true, ft, d, loc)) return false;
+  std::string d = std::string(conv_of(ft)) + ":";
+  if (const char *w = shape(TREE_TYPE(ft), true, ft, d)) return std::string("-") + w;
   d += ":";
   bool first = true;
   for (tree parm = TYPE_ARG_TYPES(ft); parm && parm != void_list_node; parm = TREE_CHAIN(parm)) {
     if (!first) d += ",";
     first = false;
-    if (!shape(TREE_VALUE(parm), false, ft, d, loc)) return false;
+    if (const char *w = shape(TREE_VALUE(parm), false, ft, d)) return std::string("-") + w;
   }
-  return true;
+  return d;
 }
 
 static void emit_lines(const char *section, const std::set<std::string> &lines)
@@ -317,8 +333,7 @@ static void finish_unit(void *, void *)
   FOR_EACH_DEFINED_FUNCTION(node) {
     tree decl = node->decl;
     if (!node->alias && !node->thunk && !TREE_ASM_WRITTEN(decl)) continue;
-    std::string d;
-    if (!def_descriptor(decl, d)) continue;
+    std::string d = def_descriptor(decl);
     const char *name = targetm.strip_name_encoding(IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(decl)));
     defs.insert(std::string(name) + " " + d);
   }
