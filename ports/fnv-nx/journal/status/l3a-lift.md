@@ -794,3 +794,8 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - After the first frame: udcert SCCP (w10 bd94fd02 and later), fpmask (w11), the fnvl_seg_ok certificate, gate_oracle 29/155.
 - bottleneck: waiting on L1 cand3 for typed dispatch and the 8-farm cold pack build; workers 2 (w7, w8).
 - 20:25 Parked and archived (after the first frame): w10 at claude/fnv-l3a-lift-w10-udcert 74294bd0 (WIP note journal/inbox/l3a-lift-w10-udcert-wip.md; 0 of 5,308 certified); w11 at claude/fnv-l3a-lift-w11-fpmask e22f2c2 (lift/fpmask/WIP.md; 935 of 1,111 load sites proved masked, 176 undecided, none clears a mask bit).
+- 20:25 Owner top priority (orchestrator): pack compile time (~36 core-s per unit, ~10 h cold on one farm) is unacceptable. Ahead of the other L3a items:
+  - w12 (session_01KmtZKUVVL6cV1kisqKEof7, claude/fnv-l3a-lift-w12-prof): profile through recipe.py with a profiling flags variant (-ftime-report, plugin timings) of the 20 largest units by largest function plus the 10 nearest the median; superlinearity fit. Status: doing.
+  - w13 (session_01KmtZKT9VGwj9Youb1vJwUR): incrementality census. Units changed between the relifts 7b2faae276b2 / 632538cd3 / db2aaf6d4a08; the function-to-unit assignment rule and its stability (file:line); the inputs common to every CC key. Status: doing.
+  - The unit-size rule (item 2) and the stable-boundary rule (item 3) follow from these two.
+- bottleneck: pack compile time (owner priority, w12/w13 measuring); L1 cand3 for typed dispatch; workers 4 (w7, w8, w12, w13).
