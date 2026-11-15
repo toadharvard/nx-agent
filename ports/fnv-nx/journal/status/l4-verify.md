@@ -351,3 +351,6 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - 11:35: BOOT LOOP is the first item (CLAUDE.md integ 76e450faf); everything else is paused.
   - B1 (w7, doing): ELF 509809b3b809's stop. Last boot 40d7672: after "init d3dx9_38.dll", UnhandledExceptionFilter → ExitProcess(0xC000001D), 1075895420 instructions, start-17. Wanted: pc, image, bytes, host pc and class.
   - B2 (w6, doing): link the newest ELF from the leads' heads as a measurement build, boot it, and route its first stop.
+- 11:45: the boot-loop order is withdrawn (integration 4674ce3e9; owner: "Нет. Опять затычки"). B1 and B2 are stopped, with no classification and no measurement ELF.
+  - Back on the path: bootguest and icount link from admitted roots on L1 cand3 (Header home, the descs universe rule).
+  - The product ELF boots only when the recipe links it by rule.
