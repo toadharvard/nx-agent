@@ -127,7 +127,7 @@ def generate(bridge, out, need=(), l3=None, rt_defined=None):
 
 def main():
     ap = argparse.ArgumentParser(); A = ap.add_argument
-    A('--bridge', default=os.environ.get('FNVNX_BRIDGE', '/home/user/wt-l5/manifest/bridge.tsv')); A('--out', required=True); A('--need', action='append', default=[])
+    A('--bridge', required=True, help='the loader BRIDGE_TSV'); A('--out', required=True); A('--need', action='append', default=[])
     A('--l3', default=None)
     a = ap.parse_args()
     ent, blocked, hit, absent = generate(a.bridge, a.out, a.need, a.l3)

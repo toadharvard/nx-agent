@@ -7,10 +7,13 @@ from collections import defaultdict
 import capstone
 from capstone import x86 as X
 
-FACTS = os.environ.get('FNVNX_FACTS', '/home/user/l3facts')       # facts root: every input / output path below derives from it
-UNI = FACTS + '/universe.tsv'
-EHJ = FACTS + '/ehtables.json'
-M32 = 0xffffffff
+FACTS = UNI = EHJ = CACHE = None      # set by configure(): the facts root of the image under analysis, passed explicitly by the program (no environment variable, no default)
+
+
+def configure(facts):
+    """facts: the directory that holds universe.tsv and ehtables.json of the image; the flow memo (flow/retn.tsv) is written below it"""
+    global FACTS, UNI, EHJ, CACHE
+    FACTS = os.path.abspath(facts); UNI = FACTS + '/universe.tsv'; EHJ = FACTS + '/ehtables.json'; M32 = 0xffffffff
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 md.detail = True
 R32 = ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi']

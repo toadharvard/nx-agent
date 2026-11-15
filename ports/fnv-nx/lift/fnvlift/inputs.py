@@ -6,9 +6,9 @@ configure(). A name that was not configured is an error at the point of use: the
   fpstate    the directory of the fp-state facts (invariants.tsv; tools/fpstate.py)
   fpdepth    the x87 stack-depth facts (depth.tsv; tools/fpmodes.py)
   x86sys     the declared x86 system record (platform X86SYS output)
-  base       the load base the loader assigned to the module (int), or None for the preferred base of the image
+The load base of a module is not an input of this kind: it is the argument `base` of Image(path, base), taken from the module table row.
 Proof: a lookup is get(name); configure() accepts only these names; a second configure() of a name with another value is an error (one process, one input set)."""
-NAMES = ('universe', 'fpstate', 'fpdepth', 'x86sys', 'base')
+NAMES = ('universe', 'fpstate', 'fpdepth', 'x86sys')
 _I = {}
 
 

@@ -98,19 +98,19 @@ def read_texts(path):
             out[a] = f.read(int(m[2]))
 
 
-def init(exe, ent, emit, jtab):
+def init(exe, base, ent, emit, jtab):
     """the state of a lifting process (the parent and every pool worker), built from the arguments: the result does not depend on the start method"""
     import fnvlift as L
     G.update(ent=ent)
-    lifted.begin(L.Image(exe), emit, jtab)
+    lifted.begin(L.Image(exe, base), emit, jtab)
 
 
 def shard(a):
     import fnvlift as L, fnvlift.core as core, formcert
     K, N = map(int, a.shard.split('/')); out = a.out
     ent = L.universe.load()[0]; mine = sorted(ent)[K::N]
-    init(a.exe, ent, a.emit, a.jtab)
-    with mp.Pool(a.jobs, initializer=init, initargs=(a.exe, ent, a.emit, a.jtab)) as p: got = list(p.imap(work, [mine[j:j + BATCH] for j in range(0, len(mine), BATCH)], 1))
+    init(a.exe, a.base, ent, a.emit, a.jtab)
+    with mp.Pool(a.jobs, initializer=init, initargs=(a.exe, a.base, ent, a.emit, a.jtab)) as p: got = list(p.imap(work, [mine[j:j + BATCH] for j in range(0, len(mine), BATCH)], 1))
     texts = [t for g in got for t in g[0]]; miss = sorted(m for g in got for m in g[2])
     forms = collections.Counter()
     for g in got: forms.update(g[1])
@@ -143,7 +143,7 @@ def lifter_tree():
 
 def inputs(a):
     """the generation inputs of a shard: the exe, the universe, the jump-table facts, the emit mode and the lifter; a change of any of them changes the pack manifest and so the external's tree"""
-    return dict(exe_sha256=sha(a.exe), universe_sha256=sha(os.environ.get('FNVNX_UNIVERSE', '/home/user/l3facts/universe.tsv')), jtab_sha256=sha(a.jtab), emit=a.emit, lifter_tree_sha256=lifter_tree())
+    return dict(exe_sha256=sha(a.exe), universe_sha256=sha(a.universe), jtab_sha256=sha(a.jtab), emit=a.emit, lifter_tree_sha256=lifter_tree())
 
 
 def image_inputs(d):
@@ -173,7 +173,7 @@ def finish(a):
     import dispgen, fnvlift as L, impgen
     out = a.out; pk = out + '/pack'
     for d in (pk + '/u', pk + '/inc'): os.makedirs(d, exist_ok=True)
-    images = [(out, L.universe.load()[0])] + [(s.split('=', 1)[0], L.universe.load(s.split('=', 1)[1])[0]) for s in a.also]
+    images = [(out, L.universe.load(a.universe)[0])] + [(s.split('=', 1)[0], L.universe.load(s.split('=', 1)[1])[0]) for s in a.also]
     texts, forms, encs, shapes, shape_fam = {}, collections.defaultdict(lambda: [0, 'none']), {}, collections.Counter(), {}
     for d, ent in images:
         t = image(d, ent)
@@ -195,7 +195,7 @@ def finish(a):
     for x in sorted(texts): units[bucket(x)].append(texts[x])
     for i in range(NBUCKET):
         with open('%s/u/%03x.cpp' % (pk, i), 'wb') as f: f.write(b'#include "fnvl_prelude.h"\n' + b''.join(units[i]))
-    open(pk + '/inc/fnvl_prelude.h', 'w', newline='').write('#ifndef FNVL_PRELUDE_H\n#define FNVL_PRELUDE_H\n' + L.prelude(os.path.join(LIFT, 'rt')) + '\n#endif\n')
+    open(pk + '/inc/fnvl_prelude.h', 'w', newline='').write('#ifndef FNVL_PRELUDE_H\n#define FNVL_PRELUDE_H\n' + L.prelude(os.path.join(LIFT, 'rt'), a.gen) + '\n#endif\n')
     open(pk + "/inc/imp.h", "w", newline="").write(L.inline(os.path.join(LIFT, "rt"), "imp.h", L._GEN[0]))
     syms = {x: 'L_%08x' % x for x in texts}; code = set(syms)
     imp, blocked, hit, absent = impgen.generate(a.bridge, pk, a.need, a.l3, None)
@@ -259,26 +259,36 @@ def recipe(ref, commit, tree, dest=None):
         json.dump(rec, f, indent=1); f.write('\n')
 
 
-def module_env(name):
+def module_inputs(a):
+    """--module NAME: the module's file, its assigned load base (modules.tsv row) and its universe (tools/universe.py --module output below --facts-out), all from declared inputs"""
     import pemod
-    path, row = pemod.locate(name); u = '%s/%s/universe.tsv' % (os.environ.get('FNVNX_FACTS_OUT', '/home/user/l3facts2'), os.path.splitext(row.name)[0])
-    if not os.path.exists(u): sys.exit('--module %s: no universe %s (tools/universe.py --module)' % (name, u))
-    os.environ.update(FNVNX_EXE=path, FNVNX_BASE='%08x' % row.base, FNVNX_UNIVERSE=u)
-    return path
+    path, row = pemod.locate(a.module, a.modules, a.moddirs.split(':'))
+    u = '%s/%s/universe.tsv' % (a.facts_out, os.path.splitext(row.name)[0])
+    if not os.path.exists(u): sys.exit('--module %s: no universe %s (tools/universe.py --module)' % (a.module, u))
+    a.exe, a.base, a.universe = path, row.base, u
 
 
 def main():
-    ap = argparse.ArgumentParser(); A = ap.add_argument
-    A('--shard'); A('--finish', action='store_true'); A('--recipe', nargs=3, metavar=('REF', 'COMMIT', 'TREE_SHA256')); A('--out', default='/home/user/l3work/liftgen'); A('--jobs', type=int, default=3)
-    A('--exe', default=os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')); A('--module'); A('--emit', default='', choices=['', 'dsl'], help='dsl: integer instructions from the proven DSL forms (fnvlift/f_dsl.py) before the hand handlers')
-    A('--jtab', default=None, help='ehtables.json of the module (tools/ehtables.py facts, `jtab_tables`)'); A('--bridge', default=os.environ.get('FNVNX_BRIDGE')); A('--need', action='append', default=[]); A('--l3', default=None); A('--also', action='append', default=[], metavar='DIR=UNIVERSE.tsv')
+    ap = argparse.ArgumentParser(description='Every input is an explicit argument: no environment variable, no default path.'); A = ap.add_argument
+    A('--shard'); A('--finish', action='store_true'); A('--recipe', nargs=3, metavar=('REF', 'COMMIT', 'TREE_SHA256')); A('--out'); A('--jobs', type=int, default=3)
+    A('--exe', help='the exe (or, with --module, ignored: the module file is located in --moddirs)'); A('--universe', help='universe.tsv of the image (with --module: derived below --facts-out)')
+    A('--module'); A('--modules', help='modules.tsv (the loader module table)'); A('--moddirs', help='DIR[:DIR...] that hold the module files'); A('--facts-out', help='where tools/universe.py --module wrote the module facts')
+    A('--emit', default='', choices=['', 'dsl'], help='dsl: integer instructions from the proven DSL forms (fnvlift/f_dsl.py) before the hand handlers')
+    A('--jtab', default=None, help='ehtables.json of the module (tools/ehtables.py facts, `jtab_tables`)'); A('--bridge'); A('--need', action='append', default=[]); A('--l3', default=None)
+    A('--also', action='append', default=[], metavar='DIR=UNIVERSE.tsv')
+    A('--gen', help='the GEN output of the lift/rt root (generated headers of the prelude)'); A('--fpstate', help='directory of the fp-state facts (invariants.tsv)')
+    A('--fpdepth', help='the x87 stack-depth facts (depth.tsv)'); A('--x86sys', help='the declared x86 system record (platform X86SYS output)')
     a = ap.parse_args()
     if a.recipe: return recipe(*a.recipe)
+    need = ['out', 'fpstate', 'fpdepth', 'x86sys'] + (['modules', 'moddirs', 'facts_out', 'module'] if a.module else ['exe', 'universe']) + (['gen', 'bridge'] if a.finish else [])
+    miss = ['--' + k.replace('_', '-') for k in need if getattr(a, k) is None]
+    if miss: ap.error('missing %s' % ' '.join(miss))
+    a.base = None
+    if a.module: module_inputs(a)
+    import fnvlift
+    fnvlift.inputs.configure(universe=a.universe, fpstate=a.fpstate, fpdepth=a.fpdepth, x86sys=a.x86sys)
     os.makedirs(a.out, exist_ok=True)
-    if a.module: a.exe = module_env(a.module)
-    if a.finish:
-        if not a.bridge: ap.error('--finish needs --bridge')
-        finish(a)
+    if a.finish: finish(a)
     elif a.shard: shard(a)
     else: ap.error('--shard K/N, --finish or --recipe')
 

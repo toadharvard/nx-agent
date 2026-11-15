@@ -5,6 +5,7 @@ import os, sys
 LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, LIFT)
 import capstone
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; _inputs.configure()
 import fnvlift as L
 from fnvlift import core, sites
 from fnvlift.core import Unsupported

@@ -23,8 +23,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import cli
 FPUSAGE = 'usage: fpstate.py scan IMAGE FACTSDIR | fpstate.py combine DIR...'
-if __name__ == '__main__' and len(sys.argv) >= 4 and sys.argv[1] == 'scan':
-    os.environ['FNVNX_FACTS'] = os.path.abspath(sys.argv[3])          # x86flow reads its facts root at import
 sys.path.insert(0, HERE); sys.path.insert(0, os.path.dirname(HERE))
 from collections import Counter, defaultdict
 from multiprocessing import Pool
@@ -348,7 +346,7 @@ def do_combine(dirs):
 
 if __name__ == '__main__':
     if len(sys.argv) >= 4 and sys.argv[1] == 'scan':
-        do_scan(sys.argv[2], sys.argv[3])
+        W.configure(sys.argv[3]); do_scan(sys.argv[2], sys.argv[3])
     elif len(sys.argv) >= 3 and sys.argv[1] == 'combine':
         do_combine(sys.argv[2:])
     else:

@@ -3,7 +3,7 @@ Importing the package reads no file of rt/: the runtime prelude is built by prel
 import os
 from .image import Image
 from .core import lift, Unsupported
-from . import universe
+from . import inputs, universe
 from . import f_int, f_string, f_flow, f_sys, f_x87, f_sse, f_simd_int  # noqa: F401  (f_x87 before f_sse: fallback order)
 
 
@@ -29,4 +29,4 @@ def lift_entry(img, a):
     return lift(img, **ua)
 
 
-__all__ = ['Image', 'lift', 'lift_entry', 'Unsupported', 'prelude', 'inline', 'universe']
+__all__ = ['Image', 'lift', 'lift_entry', 'Unsupported', 'prelude', 'inline', 'universe', 'inputs']
