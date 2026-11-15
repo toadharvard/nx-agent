@@ -751,7 +751,7 @@ def guest_errors(rec, spec, roots, pin, prof=None, files=()):
 
 
 LINK_KEYS = {"output", "flags"}
-LINK_OPT = {"script", "kind", "version_script", "roots", "libs", "loader", "entry"}
+LINK_OPT = {"script", "kind", "version_script", "roots", "libs", "loader", "entry", "tables"}
 IMAGE_ENTRY = "__fnvnx_image_entry"   # the symbol the runtime (rt/guest) calls once its start-up is done; the link assigns it the root's declared `link.entry` (--defsym)
 LIBS_KEYS = {"external", "dirs", "names", "startfiles", "endfiles"}
 KINDS = ("pie", "exe", "shared")
@@ -960,6 +960,14 @@ def link_errors(lk, root, mine, roots, ext_names, repo, files=(), variant="", se
             err.append("link.entry: a guest image declares the symbol its runtime calls as its entry (a C identifier other than %s)" % IMAGE_ENTRY)
     elif "entry" in lk:
         err.append("link.entry is the entry of a guest image; a %s root has none" % (rent.get("target") or "host"))
+    tb = lk.get("tables", [])
+    if not (isinstance(tb, list) and all(isinstance(t, dict) and set(t) == {"tool", "args", "unit", "section"} and isinstance(t["tool"], str) and t["tool"] in files and t["tool"].endswith(".py")
+                                         and isinstance(t["args"], list) and all(isinstance(a, str) for a in t["args"]) and isinstance(t["section"], str)
+                                         and re.fullmatch(r"\.[A-Za-z0-9._-]+", t["section"]) and isinstance(t["unit"], str) and rel_ok(t["unit"]) and t["unit"].endswith(CC_EXT + CXX_EXT)
+                                         and t["unit"] not in files and root + "/" + t["unit"] not in files for t in tb)
+            and len({t["unit"] for t in tb if isinstance(t, dict)}) == len(tb)):
+        err.append("link.tables must be a list of {tool: a tracked .py file, args: [str], unit: a new root-relative C or C++ source path, section: \".name\"} with distinct units: "
+                   "the tool runs over the objects of this link and writes the unit, which is compiled into the image (the table of a link, never a root of its own)")
     if "roots" in lk:
         err.append("link.roots is derived, not written: the image links the definer closure of its undefined symbols over the admitted product roots (recipe.link_closure); remove it")
     if "loader" in lk:
@@ -1805,14 +1813,19 @@ class Job:
                 shutil.copyfile(o["object"], dest)
         return cas.ingest(out, self.store)
 
-    def generate(self, ws):
-        if not self.rec.get("generated"):
-            return
+    def pyrt(self):
+        """The Python runtime of every generator and table stage (the interpreter and the pinned modules, a declared input), and `self.pymods`."""
         mods = pinned_modules(self.repo)
         sites = sorted({n for _, _, _, tops, _ in mods for n in tops})
         paths = sorted({p for _, _, _, _, ps in mods for p in ps})
         _, py = self.cached_rt("python-" + hashlib.sha256(repr((sites, paths)).encode()).hexdigest()[:16], lambda: runtime.build(self.store, sys.executable, sites, paths))
         self.pymods = ";".join("%s==%s:%s" % (m, v, d) for m, v, d, _, _ in mods)   # in the key of every generated stage: the interpreter digest (runtime_id) plus the installed files of every pinned module
+        return py
+
+    def generate(self, ws):
+        if not self.rec.get("generated"):
+            return
+        py = self.pyrt()
         for i, g in enumerate(self.rec["generated"]):
             names = self.named_ext(list(g["args"]) + list(g["inputs"]))   # a generated stage mounts the externals its stage names (args, inputs), no other
             xin = [{"at": e["at"], "tree": e["tree"]} for n, e in self.ext.items() if n in names]
@@ -1941,6 +1954,34 @@ class Job:
         for o in g["outputs"]:
             os.makedirs(os.path.dirname(os.path.join(ws, "root", o)), exist_ok=True)
             shutil.copyfile(os.path.join(tmp, "out", o), os.path.join(ws, "root", o))
+
+    def table_source(self, ws, groups, t, ti):
+        """The source of the link-stage table T (`link.tables[ti]`): the declared tool runs over exactly the objects of this link (GROUPS: [(label, [(unit, .o)])]:
+        the root's own and its derived members', mounted at /objs/<label>/<unit>.o) and writes the one file `t["unit"]`, which is then compiled as a unit of the image
+        (the root's own flags, plugins and compiler). Stage `table:<root>:<ti>`; the key holds every object's content, the tool and the section name."""
+        owner = tree_of(self.roots, t["tool"])
+        py = self.pyrt()
+        tmp = tempfile.mkdtemp(dir=ws)
+        for label, objs in groups:
+            for u, p in objs:
+                dest = os.path.join(tmp, "objs", label, u + ".o")
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                shutil.copyfile(p, dest)
+        ins = [{"at": "/tool", "tree": self.ingest_files(tmp, "tool", [f for f in self.files if under(f, owner)], owner)},
+               {"at": "/launch/genlaunch.py", "tree": cas.ingest(GEN_LAUNCH, self.store)},
+               {"at": "/objs", "tree": cas.ingest(os.path.join(tmp, "objs"), self.store)}]
+        env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
+        env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "FNVNX_PYMODS": self.pymods})
+        doc = {"format": "fnvnx-stage/1", "stage": "table:%s:%d" % (self.root, ti), "class": "build", "tool": "python", "cwd": "/work",
+               "argv": [py["python"], "-s", "-B", "/launch/genlaunch.py", t["unit"], "/tool/" + t["tool"][len(owner) + 1:]] + t["args"] + ["--section", t["section"]],
+               "env": env, "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"], "ro_root": True}
+        res = self.stage(doc)[1]
+        got = sorted(r for r, e in cas.listing(res["outputs"]["/out"], self.store) if e["t"] != "d")
+        if got != [t["unit"]]:
+            raise BuildRed({"stage": doc["stage"], "exit": 0, "stderr": ["outputs %s differ from the declared %s" % (got, [t["unit"]])]})
+        cas.materialize(res["outputs"]["/out"], self.store, os.path.join(tmp, "out"))
+        os.makedirs(os.path.dirname(os.path.join(ws, "root", t["unit"])), exist_ok=True)
+        shutil.copyfile(os.path.join(tmp, "out", t["unit"]), os.path.join(ws, "root", t["unit"]))
 
     def includes(self, ws):
         """unitstage --include specs in recipe order: HOST@/inc/N for a directory of this root or the repo, the sandbox path itself
@@ -2870,6 +2911,29 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True):
                   res["link_roots"].append({"root": d, "sha256": objects_digest(r), "objects": kept})
                   groups.append(("%02d-%s" % (n + 1, d.replace("/", "__")), [(o["unit"], o["object"]) for o in kept]))
                   defs[groups[-1][0]] = r["defined"]
+              for ti, t in enumerate(lk.get("tables", [])):    # link-stage tables: the tool runs over exactly the objects of this link, its source is one more unit of the image
+                  j.table_source(ws, groups, t, ti)
+                  tobj = j.compile(ws, [t["unit"]]).get(t["unit"])
+                  if tobj is None:
+                      f = (j.failed or [{"stage": "table:%s:%d" % (root, ti), "stderr": []}])[-1]
+                      raise BuildRed({"stage": "table:%s:%d" % (root, ti), "exit": None, "stderr": ["the table unit %s did not compile: stage %s" % (t["unit"], f["stage"])] + list(f["stderr"])[-18:]})
+                  dest = os.path.join(out, "obj", t["unit"] + ".o")
+                  os.makedirs(os.path.dirname(dest), exist_ok=True)
+                  ent_ = cas.manifest(tobj, store)["entries"]["unit.o"]
+                  shutil.copyfile(cas._obj(store, ent_), dest)
+                  if t["section"] in section_names(dest):     # the fixed point: the table's own object holds no entry of the fact it is made from, so one pass is sound
+                      raise BuildRed({"stage": "table:%s:%d" % (root, ti), "exit": None, "stderr": ["the table object %s holds the fact section %s: its own entries would be missing from itself" % (t["unit"], t["section"])]})
+                  d_, x_ = symbols(dest, t["unit"])
+                  res["defined"] = sorted(res["defined"] + d_, key=lambda d: (d["symbol"], d["object"]))
+                  und |= x_
+                  again, amb2, _m2 = definer_closure({x["symbol"] for x in res["defined"]}, und, {d: {"defined": r["defined"], "undefined": r["undefined"]} for d, r in built_in.items()})
+                  if again != members or amb2:      # the table's own references pull in a root the table was not made over: its tool must see every object of the link
+                      raise BuildRed({"stage": "table:%s:%d" % (root, ti), "exit": None, "stderr": ["the table object %s needs the roots %s, the link it was made over has %s" % (t["unit"], sorted(set(again) ^ set(members)), members)]})
+                  row = {"unit": t["unit"], "object": os.path.abspath(dest), "sha256": ent_["h"], "os_layer": False}
+                  res["objects"].append(row)
+                  units.append(t["unit"])
+                  built_objs[t["unit"]] = tobj
+                  groups[0] = (groups[0][0], groups[0][1] + [(t["unit"], row["object"])])
               loader_defs = None
               if lk.get("loader"):      # the declared loader root: the names its objects (and its link.roots') define may stay undefined in this shared image
                   loader_defs, lrs = loader_defined(repo, lk["loader"], store, jobs, j.extcache, os.path.join(ws, "in", "loader"), "ld:" + root)

@@ -159,6 +159,13 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   rule: a name has one definer). A symbol no candidate defines stays undefined: the runtime libraries and `ldcheck` judge it, red when nothing defines it. A written
   `link.roots` is a check error. A red candidate makes the link red, stage `ld:<root>`, naming the root and its failing stage. A root with a `link` is an image and
   is never a member.
+- **Link tables (`link.tables`: `[{tool, args, unit, section}]`).** A table that lists the objects of an image (the descs/bridges dispatch table) is a product of the link, never a root of its
+  own and never a link member. After the members are final, the tool (a tracked `.py` of an admitted tool or product root) runs in the hermetic stage `table:<root>:<i>` over exactly the
+  objects of this link, mounted at `/objs/<group>/<unit>.o`, with `--section <section>` appended; it writes the one declared `unit` (a new root-relative C or C++ source), which is compiled with the
+  root's own flags, plugins and compiler (`Job.compile`) and linked into the same image. The stage key holds every object's content, the tool, its arguments and the section name. One pass is sound
+  because of the fixed-point gate: the table's own object must hold no entry of `section` (red `table:<root>:<i>` otherwise), and its undefined symbols must not pull a root the table was not made over
+  (the closure is recomputed; a different member set is red). An image with no lifted code gets an empty table. Only facts that really are root-level (`contract/facts`, `contract/factscheck`,
+  read through `objects_of`) keep the fact-universe rule; a table of one image's objects is `link.tables`.
 - `link.script`, `link.libs` (guest roots): one fact for every guest link. `ports/fnv-nx/link/guest.json` = `{"script": "link/guest.ld"}` and nothing else: the libraries are not stored anywhere. The link derives them (keyed stages `drv:<root>` and `mld:<root>`: the pinned runtime's driver with `flags.semantics`, `-pie -###`, and `-print-multi-directory`): dirs, names, start files, end files of that link command, minus the start/end files the one-definition rule (they define a symbol a product root defines) or the entry rule (they define `_start` while the script's ENTRY is another symbol) excludes. A derived file outside the pinned runtime external or outside the selected multilib is a red `drv:<root>`.
   Every root whose admit.json `target` is guest and that links (the product ELF and every guest test image) gets exactly this script and these libraries; the link
   stage is `startfiles -L<external at>/<dir>.. [objects, whole] --start-group -l<name>.. --end-group endfiles`, so two guest links differ only by output and objects.

@@ -47,6 +47,13 @@ lk.pop("roots")
 e = [x for x in recipe.link_errors(lk, "ports/fnv-nx/zg", set(), roots, set(), REPO, files, "") if "link.roots" in x]
 check("an image without link.roots has no link.roots error", e == [], e)
 SHA = "ports/fnv-nx/lib/sha256"
+TB = {"tool": "ports/fnv-nx/lift/descs/descs.py", "args": ["--out", "x"], "unit": "gen/tab.cc", "section": ".fnvnx.disp"}
+terr = lambda tb: [x for x in recipe.link_errors(dict(lk, tables=tb), "ports/fnv-nx/zg", set(), roots, set(), REPO, files, "") if "link.tables" in x]
+check("a well-formed link.tables entry has no error", terr([TB]) == [], terr([TB]))
+for what, bad in (("an unknown key", dict(TB, x=1)), ("a tool that is not tracked", dict(TB, tool="ports/fnv-nx/nope.py")), ("a unit with no source extension", dict(TB, unit="gen/tab.txt")),
+                  ("an absolute unit path", dict(TB, unit="/gen/tab.cc")), ("a section without the dot", dict(TB, section="fnvnx.disp")), ("args that are not strings", dict(TB, args=[1]))):
+    check("link.tables: %s is a check error" % what, len(terr([bad])) == 1, terr([bad]))
+check("link.tables: two entries with one unit are a check error", len(terr([TB, dict(TB)])) == 1, terr([TB, dict(TB)]))
 cg = recipe.link_candidates(roots, "ports/fnv-nx/zg", "guest", REPO)
 check("link candidates of a guest image: admitted product roots with a recipe for the guest target, never the image itself, no unadmitted root",
       SHA in cg and "ports/fnv-nx/zg" not in cg and "ports/fnv-nx/zh" not in cg, cg)
