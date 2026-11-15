@@ -6,7 +6,10 @@ cache hits) and judges what the recipe says (RECIPE.md): the objects (os_layer o
 and the terminator set DERIVED from the recipe's compiler: objstub.unit_terminators runs the compiler's own plugin over the preprocessed text
 of every C/C++ unit (the stage result unit.ii of the build, found by the pp_key in objects.json), so the set is a function of the compiler,
 its flags and every header the unit really includes (a function of the compiler and the header set; the finer key is the preprocessor stage
-key). The set is cached per unit under GATE_CACHE/objstub. No product root: universe 0, green.
+key). The set is cached per unit under GATE_CACHE/objstub.
+No doubles in tests (doubles.py, owner order of 2026-11-11 night): per declared test of every root (RECIPE.md "tests"), symbols its own objects define INTERSECT
+symbols the objects of ALL product roots define = EMPTY, the test link holds every product unit, no GLOBAL symbol twice among a root's product objects.
+Result fields: tests_total, tests_with_doubles, double_symbols, doubles (first 50). No product root: universe 0, green.
 Wine rows: verify/wine_fixme.tsv of the tree under test (objstub.read_wine_table; missing or malformed is a gate error, red); the result
 holds "wine_fixme": {id: call sites} so growth of the simplified bodies is visible.
 Declared-machine rows: verify/declared_machine.tsv of the tree under test (objstub.read_declared_table; missing or malformed is a gate error, red),
@@ -24,15 +27,16 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import doubles  # noqa: E402
 import gate_build  # noqa: E402
 import objstub  # noqa: E402
 import recipe  # noqa: E402
 import unitstage  # noqa: E402
 
 
-def root_check(root, repo, cache, jobs):
+def root_check(root, repo, cache, jobs, built=None):
     """-> (results {unit path: analysis}, rows {(unit path, symbol): row}, os_layer ids, root-level findings [(id, name, kind, detail)],
-    the root's `error_abi` (recipe) or None, the root's handler records (recipe empty_handlers) or None)"""
+    the root's `error_abi` (recipe) or None, the root's handler records (recipe empty_handlers) or None); BUILT, when given, receives {root: build result} of a green build (doubles.py)"""
     roots = recipe.load_admit(repo)
     rec = recipe.load_recipe(repo, roots, root)
     try:
@@ -43,6 +47,8 @@ def root_check(root, repo, cache, jobs):
         f = res["failure"]
         return {}, {}, set(), [("-", f["stage"].split(":", 1)[-1] if ":" in f["stage"] else root, "build-red",
                                 "root %s stage %s: %s" % (root, f["stage"], " ".join(f.get("stderr") or [])[:160])[:300])], None, None, {}, {}
+    if built is not None:
+        built[root] = res
     base = root + "/"
     objs = [(base + o["unit"], o["object"]) for o in res["objects"]]
     objs += [("%s%s(%s)" % (base, m["archive"].lstrip("/"), m["member"]), m["object"]) for m in res.get("link_archives", [])]   # pulled archive members
@@ -87,14 +93,14 @@ def main(argv):
     cache, repo = os.environ.get("GATE_CACHE") or tmp, "."
     stats = {}   # counts of the rule-H certifications and of the trap bodies
     items, finds, why, results, rows, roots, image = [], [], "", {}, {}, gate_build.buildable_roots(repo), {}
-    extconv = {}
+    extconv, built, dstats = {}, {}, {"tests_total": 0, "tests_with_doubles": 0, "double_symbols": 0}
     fails, handlers = {}, {}   # {object id: the root's error_abi}, {object id: the root's handler records}
     try:
         wine = objstub.read_wine_table(os.path.join(repo, "ports/fnv-nx/verify/wine_fixme.tsv"))   # the table of the tree under test
         declared = objstub.read_declared_table(os.path.join(repo, "ports/fnv-nx/verify/declared_machine.tsv"))   # the table of the tree under test
         facts = objstub.read_facts(os.path.join(cache, "reach", gate_build.tree_of(repo), "reach.facts.tsv")) if roots else None
         for root in roots:
-            r, w, _, fs, abi, records, im, ex = root_check(root, repo, cache, jobs)
+            r, w, _, fs, abi, records, im, ex = root_check(root, repo, cache, jobs, built)
             extconv.update(ex)
             image = {k: image.get(k, 0) + v for k, v in im.items()}
             results.update(r)
@@ -107,6 +113,8 @@ def main(argv):
             items += [(i, n) for i, n, _, _ in fs]
         its, fs = objstub.judge(results, rows, facts, wine, declared, fails, handlers, stats, extconv)
         items, finds = items + its, finds + fs
+        dit, dfs, dstats = doubles.judge(built)   # no doubles in tests (doubles.py)
+        items, finds = items + dit, finds + dfs
     except (ValueError, KeyError, OSError) as e:
         why = "input error: %s" % (str(e)[:300] or type(e).__name__)
     finally:
@@ -129,6 +137,8 @@ def main(argv):
     res = {"format": "fnvnx-gate/1", "name": "objstub", "status": status, "universe": len(items), "certified": cert,
            "uncertified": bad[:50], "detail": detail, "wine_fixme": {str(k): v for k, v in objstub.wine_counts(results).items()},
            "declared_machine": {str(k): v for k, v in objstub.declared_counts(results).items()},
+           "tests_total": dstats["tests_total"], "tests_with_doubles": dstats["tests_with_doubles"], "double_symbols": dstats["double_symbols"],
+           "doubles": sorted("%s: %s" % (o, d) for o, _, k, d in finds if k in ("test-double", "test-omits-unit", "test-not-linked", "product-duplicate"))[:50],
            "image": image, "trap_body": stats.get("trap_body", 0), "handler_justified": {k[8:]: v for k, v in sorted(stats.items()) if k.startswith("handler_")}}
     with open(os.path.join(os.environ["GATE_OUT"], "objstub.findings.tsv"), "w") as fh:   # the whole list (the result JSON holds the first 50 ids)
         fh.write("object\tfunction\tkind\tdetail\n" + "".join("%s\t%s\t%s\t%s\n" % (o, n, k, d.replace("\t", " ").replace("\n", " ")) for o, n, k, d in sorted(finds)))

@@ -61,7 +61,7 @@ def _plugin_cxx():
 
 PLUGIN_CXX = _plugin_cxx()
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
-        "plugins", "variants", "outputs", "uses", "sources", "forbid_sections", "error_abi", "empty_handlers", "external_errors"}
+        "plugins", "variants", "outputs", "uses", "sources", "forbid_sections", "error_abi", "empty_handlers", "external_errors", "tests"}
 VARIANT_KEYS = {"compiler", "flags"}   # the keys a variant may replace
 PLUGIN_KEYS = {"name", "source", "args"}   # and optionally "inputs": [tracked files the source includes]
 GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
@@ -257,10 +257,27 @@ def generated_outputs(rec):
             for o in x["outputs"] if isinstance(o, str)]
 
 
-def units_of(rec, root, files):
-    """Sorted root-relative unit paths: tracked source files + generated outputs with a source name."""
+def all_units_of(rec, root, files):
+    """Sorted root-relative paths of every source of the root: tracked source files + generated outputs with a source name."""
     mine = {f[len(root) + 1:] for f in files if under(f, root)}
     return sorted(u for u in mine | set(generated_outputs(rec)) if is_unit(u))
+
+
+def tests_of(rec):
+    """The declared tests of REC: [(name, [unit, ..])] (entries that are not well formed are left to check())."""
+    t = rec.get("tests") if isinstance(rec, dict) else None
+    return [(x["name"], list(x["units"])) for x in (t if isinstance(t, list) else []) if isinstance(x, dict) and isinstance(x.get("name"), str)
+            and isinstance(x.get("units"), list) and all(isinstance(u, str) for u in x["units"])]
+
+
+def test_units_of(rec):
+    return {u for _, us in tests_of(rec) for u in us}
+
+
+def units_of(rec, root, files):
+    """Sorted root-relative PRODUCT unit paths: every source of the root that is not a unit of a declared test (RECIPE.md, tests)."""
+    tu = test_units_of(rec)
+    return [u for u in all_units_of(rec, root, files) if u not in tu]
 
 
 def load_pin(repo="."):
@@ -649,11 +666,30 @@ def check(rec, root, files, roots, pin=None, repo="."):
     sr = rec.get("sources")
     if sr is not None and not (isinstance(sr, str) and sr in generated_outputs(rec)):
         err.append("sources must name a path in generated[].outputs of this root (a file of <external>:<path> lines)")
+    allu = set(all_units_of(rec, root, files))
+    tl = rec.get("tests", [])
+    seen_t, seen_u = set(), set()
+    for i, t in enumerate(tl if isinstance(tl, list) else err.append("tests must be a list") or []):
+        if not (isinstance(t, dict) and set(t) == {"name", "units"} and isinstance(t["name"], str) and re.fullmatch(r"[A-Za-z0-9_+-]+", t["name"])
+                and isinstance(t["units"], list) and t["units"] and all(isinstance(u, str) for u in t["units"])):
+            err.append("tests[%d] needs exactly name ([A-Za-z0-9_+-]+) and units (a non-empty list of root-relative units)" % i)
+            continue
+        if t["name"] in seen_t:
+            err.append("test %r is declared twice" % t["name"])
+        seen_t.add(t["name"])
+        for u in t["units"]:
+            if u not in allu:
+                err.append("test %r: %r is not a source of the root" % (t["name"], u))
+            if u in seen_u:
+                err.append("test unit %r is declared by two tests (or twice)" % u)
+            seen_u.add(u)
+    if seen_t and not rec.get("link"):
+        err.append("tests need the root's link (a test is linked with the same script and flags)")
     units = set(units_of(rec, root, files))
     ol = rec.get("os_layer", [])
     for u in ol if isinstance(ol, list) else err.append("os_layer must be a list") or []:
         if u not in units:
-            err.append("os_layer entry %r is not a unit" % (u,))
+            err.append("os_layer entry %r is not a unit (a test unit is no os_layer unit)" % (u,))
     gm = rec.get("game")
     if gm is not None and not (isinstance(gm, str) and rel_ok(gm) and any(u.startswith(gm.strip("/") + "/") for u in units)):
         err.append("game %r is not a root-relative directory holding units" % (gm,))
@@ -1258,12 +1294,13 @@ class Job:
         self.failed = [{"unit": u, "stage": failed[u]["stage"], "exit": failed[u]["exit"], "stderr": list(failed[u]["stderr"])[-20:]} for u in units if u in failed]
         return res   # in unit order (UNITS is sorted), so the failures are deterministic
 
-    def link(self, ws, groups):
+    def link(self, ws, groups, output=None, tag=""):
         """Stage `ld:<root>`: the linker of the compiler with the options the rule fixes (RECIPE.md "Link"). GROUPS: [(label, [(unit, path of
         the .o file)])]: the root's own objects, then those of every `link.roots` root, in list order. Every object is linked whole;
         the guest libraries of `link.libs` are searched (-L, -l) as the gcc driver does for the ILP32 PIE multilib. -> (tree of /out,
         tree of /objs)."""
         lk, cc = self.rec["link"], self.drivers()[0]
+        output = output or lk["output"]   # a test is linked to its own output (RECIPE.md, tests); TAG tells the links of one root apart
         pn = subprocess.run([self.hostpath(cc), "-print-prog-name=ld"], capture_output=True, text=True).stdout.strip()
         ld = unitstage.prog(posixpath.normpath(pn))
         if "external" in self.rec["compiler"]:
@@ -1272,7 +1309,7 @@ class Job:
             rt = self.toolrt([cc])[1]
         else:
             rt = self.cached_rt("tool-ld-" + hashlib.sha256(repr((ld, sorted((e["at"], e["tree"]) for e in self.ext.values()))).encode()).hexdigest()[:16], lambda: self.plus(runtime.build_tool(self.store, [ld], [])))[1]
-        od, sd = os.path.join(ws, "objs"), os.path.join(ws, "ld")
+        od, sd = os.path.join(ws, "objs" + tag), os.path.join(ws, "ld" + tag)
         args = []
         for label, objs in groups:
             for u, p in objs:
@@ -1302,10 +1339,10 @@ class Job:
             search, libs = ["-L" + at + "/" + d for d in lb["dirs"]], ["-l" + n for n in lb["names"]]
         vs = ["--version-script=/ld/" + os.path.basename(lk["version_script"])] if "version_script" in lk else []
         sc = ["-T", "/ld/" + os.path.basename(lk["script"])] if "script" in lk else []
-        argv = [ld] + LD_KIND[kind] + lk["flags"] + sc + vs + ["-o", "/out/" + lk["output"], "-Map=/out/" + lk["output"] + ".map"] + pre + search + [
+        argv = [ld] + LD_KIND[kind] + lk["flags"] + sc + vs + ["-o", "/out/" + output, "-Map=/out/" + output + ".map"] + pre + search + [
             "--whole-archive"] + args + ["--no-whole-archive"] + (["--start-group"] + libs + ["--end-group"] if libs else []) + post
         objs_tree, ld_tree = cas.ingest(od, self.store), cas.ingest(sd, self.store)
-        doc = {"format": "fnvnx-stage/1", "stage": "ld:" + self.root, "argv": argv, "cwd": "/", "class": "build", "tool": "ld",
+        doc = {"format": "fnvnx-stage/1", "stage": "ld:" + self.root + (":" + tag if tag else ""), "argv": argv, "cwd": "/", "class": "build", "tool": "ld",
                "env": dict(unitstage.ENV, PATH=os.path.dirname(ld)), "outputs": ["/out"],
                "inputs": sorted(rt["inputs"] + [{"at": "/objs", "tree": objs_tree}, {"at": "/ld", "tree": ld_tree}] + sysin, key=lambda i: i["at"])}
         return self.stage(doc)[1]["outputs"]["/out"], objs_tree, [{"at": "/ld", "tree": ld_tree}] + sysin
@@ -1523,7 +1560,7 @@ def build(repo, root, store, out, jobs=4, ext=None):
     if errs:
         raise RecipeError(errs)
     units = units_of(j.rec, root, j.files)
-    res = {"format": OBJ_FORMAT, "root": spec, "objects": [], "elf": None, "link_roots": [], "constants": None, "contract_names": None, "defined": [], "undefined": [], "plugins": [],
+    res = {"format": OBJ_FORMAT, "root": spec, "objects": [], "tests": [], "elf": None, "link_roots": [], "constants": None, "contract_names": None, "defined": [], "undefined": [], "plugins": [],
            "link_archives": [], "stage_keys": [], "status": "green"}
     ws = tempfile.mkdtemp(prefix="recipe-")
     os.makedirs(out, exist_ok=True)
@@ -1540,10 +1577,11 @@ def build(repo, root, store, out, jobs=4, ext=None):
                 units = sorted(set(units) | set(j.generated_sources(ws)))
             except BuildRed as r:   # the list of externally sourced units is itself not produced
                 j.red.append(dict(r.args[0]))
-            objs = j.compile(ws, units)
+            objs = j.compile(ws, units + sorted(test_units_of(j.rec)))
         except BuildRed as r:   # an external is not available: no stage of the root has its inputs
             j.red.append(dict(r.args[0]))
             j.blocked.update({u: r.args[0]["stage"] for u in units})
+        built_objs = dict(objs)   # unit -> object tree; `objs` is rebound by the link loops below
         all_units, units = units, [u for u in units if u in objs]
         res["objects"], res["failed_units"] = [], []
         for n, t, _ in j.built:
@@ -1608,6 +1646,22 @@ def build(repo, root, store, out, jobs=4, ext=None):
                       raise BuildRed({"stage": "ld:" + root, "exit": None, "stderr": ["%s: object %s has target (class, e_machine) %s, the link %s is %s" % (
                           lab, u, object_target(dict(objs)[u]), emulation_of(lk["flags"]), TARGETS[emulation_of(lk["flags"])]) for u in bad[:20]]})
               elf_tree, objs_tree, extra = j.link(ws, groups)
+              for tname, tunits in tests_of(j.rec):   # a test: the root's WHOLE product unit set + its own units, same script and flags (RECIPE.md, tests)
+                  tout, tobjs, tdef = "test-%s.elf" % tname, [], []
+                  for u in tunits:
+                      if u not in built_objs:
+                          raise BuildRed({"stage": "ld:%s:test-%s" % (root, tname), "exit": None, "stderr": ["test unit %s was not built" % u]})
+                      dest = os.path.join(out, "obj", u + ".o")
+                      os.makedirs(os.path.dirname(dest), exist_ok=True)
+                      ent_ = cas.manifest(built_objs[u], store)["entries"]["unit.o"]
+                      shutil.copyfile(cas._obj(store, ent_), dest)
+                      tdef += symbols(dest, u)[0]
+                      tobjs.append({"unit": u, "object": os.path.abspath(dest), "sha256": ent_["h"]})
+                  tgroups = [(groups[0][0], groups[0][1] + [(o["unit"], o["object"]) for o in tobjs])] + groups[1:]
+                  tent = cas.manifest(j.link(ws, tgroups, tout, "test-" + tname)[0], store)["entries"][tout]
+                  shutil.copyfile(cas._obj(store, tent), os.path.join(out, tout))
+                  res["tests"].append({"name": tname, "units": list(tunits), "objects": tobjs, "linked": sorted(u for _, ol_ in tgroups for u, _ in ol_), "defined": sorted(
+                      tdef, key=lambda d: (d["symbol"], d["object"])), "elf": {"path": os.path.abspath(os.path.join(out, tout)), "sha256": tent["h"]}})
               res["link_archives"] = j.archive_members(cas.manifest(elf_tree, store)["entries"], name, out)
               fin = j.ldcheck(ws, elf_tree, objs_tree, extra)
               ent = cas.manifest(fin, store)["entries"]
