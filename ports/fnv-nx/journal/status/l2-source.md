@@ -103,3 +103,4 @@ Orchestrator decision: -fstack-reuse=none in the guest semantic flag set (L1 fla
   - non-per-root flags (-w, -fkeep-inline-functions);
   - an unbuildable no-names root.
   w3 → toolchain/tests green on claude/fnv-l2-source-w3-tests: one product plugin set from the recipe, a shared refusal helper, product flags only. Status: doing.
+- 2026-11-15 00:18 PD-STACK-REUSE (written by L1 w24) is owned by L2 together with the gate. The restoring rule: order emits per-variable slot ranges with lifetimes, and gate_order certifies a shared slot when the lifetimes are disjoint. Queued until after the first frame (speed work), building on w1's per-variable ranges.
