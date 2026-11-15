@@ -1149,3 +1149,4 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - 22:59 base3 80832d8b5 (SHAPE_HANDLERS, no "fallback" in the lifter).
   - Form.sha, a964e90b3 against 99b0218fd: INT 18,645/18,649 built (+2, 0 lost); SIMD 3,959/4,290 (+130, 0 lost, 0 sha changed).
   - 10 far call/jmp m16:32 keys changed sha, probably w7's 9c97f84bc far-FF rule; w8 is proving it. L3b re-certifies those 10.
+- 23:00 The 10 far FF sha changes are proven to be w7's intended rule, 9c97f84bc (at 9c97f84bc they equal the head; at its parent none of the 10 builds). L3b merges base3 80832d8b5 and re-certifies those 10.
