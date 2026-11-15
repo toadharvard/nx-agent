@@ -356,7 +356,12 @@ red generator is blocked by it (never run on a missing path). Tests: `tests/test
 ### Generated `sources`
 `sources: PATH` (a path in generated[].outputs of the root) names a file a generate stage writes, one `<external>:<path>` line per unit; `.` names the root
 itself (a tracked file of it). Each listed file of a declared external is copied into the unit view as the unit `<external>/<path>`, so its content is in
-the unit's keys; the units are built with the root's own. Red (stage `sources:<root>`): a line that is not `<external>:<path>`, an external the recipe does
+the unit's keys; the units are built with the root's own. A line `<root>:<path>` whose first part is an ADMITTED ROOT (a path like `ports/fnv-nx/lift/rt`) names a git-tracked
+file of that root (a file, never a directory or a glob; `..` is red): it is copied into the unit view as the unit `<root with / as __>/<path>`, so its content is in the unit's
+keys exactly as an external's file is. The root must also be listed in the root's `uses` (`{root, output}`), so the stage graph shows the edge and the `uses` cycle check applies;
+the file stays owned by its own root (onedef and objstub judge each product separately, as for externals). Red (stage `sources:<root>`) on a root line: the root is not
+admitted, the file is not tracked, the path leaves the root, the root is not in `uses`. Test: `tests/test_rootsrc.py` (the rule), `tests/test_uses.py` (builds).
+Red (stage `sources:<root>`): a line that is not `<external>:<path>`, an external the recipe does
 not declare, a path that is no file inside the external (`..` included), a `.` path the root does not track. A changed list adds only the new units:
 the other units keep their objects and compile-stage keys (their preprocessing keys follow the view's file names, the compile keys do not).
 
