@@ -312,3 +312,11 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - w6 is fixing two red tests left by the merges on w6-r: bootunmap (quantum) and bootthreadcpu (APP_CORES from hostabirec).
   - bootguest@m0 is still red at gen:loader:1, the modules.py scratch dir (w12).
   - iat_check.py: deleted on w6-r; L5 agrees.
+- 10:15:
+  - Task W done (w7-u f6a759564): boot_job takes keys.tsv from the loader gen stage output (`bootinputs.py stage-output`, one generator found by rule). Tests: test_bootinputs 80 green.
+  - W2: no stage declares the other ELF-branch inputs, so they are hand or second copies.
+    - modules.tsv is written by contract/modules.py with no declared output. Sent to L1 w12.
+    - milestones.tsv: its stage, 1613ccc74, is not on the tree. Sent to L1 w12.
+    - entries.tsv is written by liftgen.py outside any stage. Sent to L3a.
+    - softfloat.syms/.tsv has no generator; after the first frame.
+  - w7-u reloc_census and its tests are deleted (de2080ab3); test_bootlayout 27.
