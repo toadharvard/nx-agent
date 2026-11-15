@@ -242,7 +242,7 @@ def symbol_ids(objs, have, elf_bytes):
     defs, strong, weak = (set().union(*(o[i] for o in objs.values())) for i in range(3))
     out_strong, out_weak = symtab_info(elf_bytes)[1:3]
     weak_only = {n for n in weak if n not in strong}
-    wnames = (weak_only - set(have)) | out_weak
+    wnames = weak_only - set(have)    # ruling A: a weak undefined that only the output's table holds is a reference of a startfile or runtime file (the pinned toolchain's own), value 0 by the gABI
     refs = lambda n: ', '.join(sorted(p for p, o in objs.items() if n in o[2])) or '(none: the output\'s symbol table only)'  # noqa: E731
     ids = ['weak-undefined:%s <- %s' % (n, refs(n)) for n in sorted(wnames)]
     ids += ['cover:' + n for n in sorted(((defs | strong | weak) - set(have)) - wnames)]
@@ -383,7 +383,7 @@ def host_main(a):
     with open(a.elf, 'rb') as fh:
         dd = fh.read()
     cls, etype, entry, _, _ = elf_any(dd)
-    defs, strong, weak, targets = set(), set(), set(), set()
+    defs, strong, weak, targets, wobj = set(), set(), set(), set(), {}
     for p in object_files(a.objs):
         with open(p, 'rb') as fh:
             d = fh.read()
@@ -392,15 +392,18 @@ def host_main(a):
             if typ in (STT_SECTION, STT_FILE) or bind not in (1, 2):
                 continue
             (defs if shndx != SHN_UNDEF else strong if bind == 1 else weak).add(n)
+            if shndx == SHN_UNDEF and bind == 2:
+                wobj.setdefault(n, set()).add(os.path.relpath(p, a.objs))
     libdef = loader_names(a.loader_defs)
     for p in a.lib:
         with open(p, 'rb') as fh:
             libdef |= {n for n, _, _, shndx, _ in syms_any(fh.read(), 11) if shndx != SHN_UNDEF}
     dyn = syms_any(dd, 11)
     out_def = {n for n, bind, _, shndx, _ in dyn + syms_any(dd, 2) if shndx != SHN_UNDEF}
-    ids = ['cover:' + n for n in sorted((defs | strong | weak) - out_def - libdef)]
-    # a WEAK undefined dynamic reference of a host image (the driver's crt objects carry several: __gmon_start__, __cxa_finalize, _ITM_*) is ELF's own
-    # optional-reference semantics: the dynamic loader binds it or leaves it 0. Only a strong one must be defined by a library.
+    ids = ['cover:' + n for n in sorted((defs | strong) - out_def - libdef)]
+    # ruling A: a WEAK undefined dynamic reference of a host image is accepted iff no product object references it (the driver's crt objects carry several:
+    # __gmon_start__, __cxa_finalize, _ITM_*; the gABI gives an unresolved weak symbol the value 0). One a product object references is red, like the guest's.
+    ids += ['weak-undefined:%s <- %s' % (n, ', '.join(sorted(wobj[n]))) for n in sorted(wobj) if n not in out_def and n not in libdef and n not in strong and n not in defs]
     ids += ['output-undefined:' + n for n in sorted({n for n, bind, _, shndx, _ in dyn if shndx == SHN_UNDEF and bind != 2} - libdef)]
     tags = dyn_tags(dd)
     if 22 in tags or tags.get(30, 0) & 4:

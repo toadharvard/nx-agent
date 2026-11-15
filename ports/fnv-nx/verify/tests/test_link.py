@@ -165,6 +165,9 @@ def main():
     check("link.libs: a library that is not there is a red ld:<root>", rl2["status"] == "red" and rl2["failure"]["stage"] == "ld:" + ROOT, err_text(rl2))
     rl3 = build(mk("libs-none", main_rec(), L), SS)
     check("without the library the same undefined reference is red (ld)", rl3["status"] == "red" and rl3["failure"]["stage"] == "ld:" + ROOT, err_text(rl3))
+    fu = (rl3.get("failed_units") or [{}])[0]
+    check("a red link record carries the full static undefined set, each symbol with its referencing objects (never from ld's text)",
+          [u["symbol"] for u in fu.get("undefined", [])] == ["lib_fn"] and "a.c" in fu["undefined"][0]["referencers"][0], fu.get("undefined"))
 
 
     # (k) kinds: exe and shared host images (LP64), and the target of the link
@@ -296,7 +299,7 @@ def main():
             r["compiler"] = cc
         return r
     IMG = {"toy/a.c": None, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None, "toy/link.ld": None,
-           "toy/e.c": "int f_b(void);\nvoid _start(void) { f_b(); for (;;) ; }\n"}
+           "toy/e.c": "int f_b(void);\nint main(void) { f_b(); return 0; }\nint __libc_start_main(void *m) { return ((int (*)(void))m)(); }\nvoid abort(void) { for (;;) ; }\n"}
     IB, IC = T + "imgx", T + "imgbad"
     vrepo = mk("variants", image("toy", "aarch64linux", [VROOT + "@lp64"]), IMG,
               libs=[(VROOT, (vlib, VF)), (IB, (dict(image("imgx", "elf_x86_64", [VROOT + "@x86"], X86), flags={"c": FL, "cxx": [], "asm": []}, include=[]), {"e.c": IMG["toy/e.c"]})),

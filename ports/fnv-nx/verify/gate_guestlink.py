@@ -9,7 +9,7 @@ file. Its last line is the link command of the multilib the flags select; recipe
 dirs (-L inside the external), names (-l, in order) and endfiles (.o after the group) from it. An object of startfiles/endfiles is then excluded by
 the one-definition rule only (recipe.onedef): it defines a global or weak symbol that an admitted guest product root defines (the roots' symbols are
 those of their green builds, gate_build.ensure). Nothing is excluded by a name.
-Rule: the derived libs equal `libs` of link/guest.json, key by key and in order, and `libs.external` is the pinned runtime. A difference is a finding
+Rule: the derived libs equal `runtime.libs` of verify/guest_compiler.json (the one declaration; link/guest.json holds the script only), key by key and in order, and `libs.external` is the pinned runtime. A difference is a finding
 naming the key, the derived values and the profile's. Items: every entry of dirs, names, startfiles and endfiles, derived or profiled. Certified =
 the entries present in both. A red guest root build, or a driver run that fails, is red with the reason."""
 import json
@@ -76,14 +76,17 @@ def main():
         if prof_all is None:
             raise ValueError("link/guest.json is required")
         derived, gone, pin = derive(repo, cache)
-        if write:   # regenerate the profile's libs from the derivation: the only way a value of link/guest.json is made
-            prof_all["libs"] = dict(derived, external=pin["runtime"]["name"])
-            with open(os.path.join(repo, recipe.GUEST_LINK), "w") as fh:
-                json.dump(prof_all, fh, indent=1)
+        if write:   # regenerate runtime.libs of the pin from the derivation
+            pf = os.path.join(repo, recipe.GUEST_PIN)
+            pj = json.load(open(pf))
+            pj["runtime"]["libs"] = derived
+            with open(pf, "w") as fh:
+                json.dump(pj, fh, indent=1)
                 fh.write("\n")
-        prof = prof_all.get("libs", {})
-        if prof_all["libs"].get("external") != pin["runtime"]["name"]:
-            why = "libs.external %r is not the pinned runtime %r" % (prof_all["libs"].get("external"), pin["runtime"]["name"])
+            pin = recipe.load_pin(repo)
+        prof = {k: v for k, v in (recipe.runtime_libs(pin) or {}).items() if k != "external"}
+        if not prof:
+            why = "%s has no runtime.libs" % recipe.GUEST_PIN
     except recipe.RecipeError as e:
         why = "invalid recipe: %s" % "; ".join(e.errors)[:300]
     except recipe.BuildRed as e:
