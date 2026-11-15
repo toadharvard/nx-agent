@@ -15,14 +15,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-_Static_assert(NXGPU_SHADER_MAX_LINK_PAIRS == FNVNX_DK_VARYING_SLOTS, "the ABI link-pair limit is the translator's varying slot count");
-
 void gl4_d3d_free(Gl4D3d* d) { if (d) { free(d->code); free(d); } }
 
 static uint64_t refuse(const char* why) { gl4_err("shader_create_d3d: %s", why); return 0; }
 
 static uint32_t memo_find(const Gl4D3d* k, const uint8_t* code) {
-    for (uint32_t id = 1; id <= GL4_MAX_SHADERS; id++) {
+    for (uint32_t id = 1; id < g4.nSh; id++) {
         const Gl4D3d* e = g4.sh[id].d3d;
         if (e && e->size == k->size && e->stage == k->stage && e->variant == k->variant && e->nl == k->nl && !memcmp(e->l, k->l, k->nl) && !memcmp(e->code, code, k->size)) return id;
     }
@@ -37,20 +35,20 @@ uint64_t gl4_api_shader_create_d3d(uint64_t a) {
     if ((d.variant & ~(uint32_t)FNVNX_SHADER_KEY_FLAGS) || (d.stage != NxStage_Vertex && (d.variant & FNVNX_SHADER_VS_COMPLETE))) return refuse("variant: translator key flags only, VS_COMPLETE on the vertex stage only");
     if (d.pad[0] || d.pad[1] || d.pad2) return refuse("reserved fields are not 0");
     if (!d.size || (d.size & 3) || d.size > NXGPU_SHADER_MAX_CODE) return refuse("bytecode size is 0, not a multiple of 4 or above NXGPU_SHADER_MAX_CODE");
-    if (d.n_link_pairs > NXGPU_SHADER_MAX_LINK_PAIRS) return refuse("more than NXGPU_SHADER_MAX_LINK_PAIRS link pairs");
+    if (d.n_link_pairs > FNVNX_DK_VARYING_SLOTS) return refuse("more than FNVNX_DK_VARYING_SLOTS link pairs");
     const uint8_t* bc = (const uint8_t*)nxgl4_guest_ptr(d.bytecode, d.size);
     const uint8_t* lp = d.n_link_pairs ? (const uint8_t*)nxgl4_guest_ptr(d.link_pairs, d.n_link_pairs) : NULL;
     if (!bc || (d.n_link_pairs && !lp)) return refuse("bytecode or link set unreadable");
     Gl4D3d key; memset(&key, 0, sizeof key);
     key.size = d.size; key.stage = d.stage; key.variant = d.variant; key.nl = (uint8_t)d.n_link_pairs;
     for (uint32_t i = 0; i < d.n_link_pairs; i++) {
-        if (lp[i] / 16 > 13 ||   /* usage <= 13: fnvnx_dk_layout.h FNVNX_DK_PAIR comment (no named constant) */  (i && lp[i] <= lp[i - 1])) return refuse("link set is not ascending, unique pairs of usage <= 13");
+        if (lp[i] / 16 > 13 ||   /* usage <= 13: fnvnx_dk_layout.h FNVNX_DK_PAIR comment (no named constant) */ (i && lp[i] <= lp[i - 1])) return refuse("link set is not ascending, unique pairs of usage <= 13");
         key.l[i] = lp[i];
     }
     uint8_t* code = (uint8_t*)malloc(d.size);
     if (!code) return refuse("out of memory");
     memcpy(code, bc, d.size);
-    uint8_t k[NX_SHADER_KEY_SIZE]; fnvnx_sha256(code, d.size, k); if (memcmp(k, d.key, sizeof k)) { free(code); return refuse("key is not the sha256 of the bytecode"); }
+    uint8_t k[32]; fnvnx_sha256(code, d.size, k); if (memcmp(k, d.key, 32)) { free(code); return refuse("key is not the sha256 of the bytecode"); }
     uint32_t id = memo_find(&key, code);
     if (id) { free(code); g4.sh[id].d3d->refs++; return id; }
     fnvnx_shader_opts o; memset(&o, 0, sizeof o);

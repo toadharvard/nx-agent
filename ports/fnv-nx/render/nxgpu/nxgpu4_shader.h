@@ -30,17 +30,14 @@ extern "C" {
 enum { NXGPU_FN_SHADER_CREATE_D3D = NXGPU_FN_COUNT4 };
 NX_ASSERT_((int)NXGPU_FN_SHADER_CREATE_D3D == (int)NXGPU_FN_COUNT4, "ABI 4.1 continues ABI 4");
 
-/* The limits of one create call (NxShaderD3D.variant has no bits of its own: it carries the translator's key flags, see above). */
-enum {
-    NXGPU_SHADER_MAX_CODE = 1u << 20,     /* bytes of bytecode */
-    NXGPU_SHADER_MAX_LINK_PAIRS = 31      /* n_link_pairs (= FNVNX_DK_VARYING_SLOTS of render/shaders fnvnx_dk_layout.h, asserted by gl4) */
-};
+/* The limit of one create call: bytes of bytecode. (The link set is bounded by FNVNX_DK_VARYING_SLOTS of fnvnx_dk_layout.h.) */
+enum { NXGPU_SHADER_MAX_CODE = 1u << 20 };
 
 typedef struct NxShaderD3D {
     uint64_t bytecode;
     uint32_t size;
     uint8_t stage, variant, pad[2];
-    uint8_t key[NX_SHADER_KEY_SIZE];
+    uint8_t key[32];
     uint64_t link_pairs;
     uint32_t n_link_pairs, pad2;
 } NxShaderD3D;

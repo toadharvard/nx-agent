@@ -61,12 +61,11 @@ typedef struct NxImageDesc {
 
 /* ---- shaders ------------------------------------------------------------------------------------------------ */
 enum NxStage { NxStage_Vertex = 0, NxStage_Fragment = 1 };
-#define NX_SHADER_KEY_SIZE 32   /* bytes of a shader key: a SHA-256 digest (lib/sha256) */
 typedef struct NxShaderDesc {
     uint32_t stage;        /* NxStage */
     uint32_t glsl_size;
     uint64_t glsl;         /* GLSL 4.60 source in the deko3d flavour (the GL backend rewrites version + bindings) */
-    uint8_t key[NX_SHADER_KEY_SIZE]; /* sha256 of the glsl_size bytes at glsl */
+    uint8_t key[32];       /* sha256 of the glsl_size bytes at glsl */
 } NxShaderDesc;
 /* Resource bindings in the GLSL: UBO and sampler `binding = n` are deko3d per-stage slots; the GL backend maps
  * them to GL binding stage * 16 + n. */

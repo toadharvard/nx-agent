@@ -20,7 +20,7 @@ static void op_DefineState(const uint32_t* a, uint32_t argc, Ctx* c) {
     if (!a[0] || a[0] > GL4_MAX_STATES) { gl4_err("DefineState: id %u", a[0]); return; }
     Gl4State* s = &g4.st[a[0]];
     for (int i = 0; i < 4; i++) s->rs.w[i] = a[4 + 2 * i] | (uint64_t)a[5 + 2 * i] << 32;
-    s->vs = (uint16_t)a[1]; s->ps = (uint16_t)a[2]; s->layout = (uint16_t)a[3];
+    s->vs = a[1]; s->ps = a[2]; s->layout = (uint16_t)a[3];
     s->prog = gl4_program_for(s->vs, s->ps); s->epoch = g4.progEpoch;
     s->defined = 1;
 }

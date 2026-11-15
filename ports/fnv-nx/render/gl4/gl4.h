@@ -12,6 +12,7 @@
 #include "nxgpu4_check.h"
 #include "nxgpu4_shader.h"
 #include "gl4_funcs.h"
+#include "fnvnx_dk_layout.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -38,11 +39,8 @@ void nxgl4_on_present(uint32_t frame);
 size_t nxgl4_shim_glsl(const char* src, size_t n, uint32_t stage, char* out, size_t cap);
 
 /* ---- internal ----------------------------------------------------------------------------------------------- */
-#define GL4_MAX_MEM      4096
-#define GL4_MAX_SHADERS  4096
 #define GL4_MAX_STATES   NXCHK_MAX_STATES
 #define GL4_MAX_LAYOUTS  NXCHK_MAX_LAYOUTS
-#define GL4_MAX_PROGRAMS 1024
 #define GL4_MAX_FBOS     64
 #define GL4_MAX_QUERIES  NX4_MAX_QUERIES
 
@@ -61,10 +59,10 @@ typedef struct {
 } Gl4Image;
 /* A shader made by NXGPU_FN_SHADER_CREATE_D3D: its memo key (the bytecode itself, so two codes never share an entry whatever their hash) and the number of
  * creates that returned this id (each SHADER_DESTROY takes one back; the last one releases the GL shader). */
-typedef struct Gl4D3d { uint8_t* code; uint32_t size, refs; uint8_t stage, variant, nl, l[NXGPU_SHADER_MAX_LINK_PAIRS]; } Gl4D3d;
+typedef struct Gl4D3d { uint8_t* code; uint32_t size, refs; uint8_t stage, variant, nl, l[FNVNX_DK_VARYING_SLOTS]; } Gl4D3d;
 typedef struct { GLuint sh; uint8_t stage, used; Gl4D3d* d3d; } Gl4Shader;
-typedef struct { uint16_t vs, ps; GLuint prog; uint8_t used; } Gl4Program;
-typedef struct { NxRenderState rs; uint16_t vs, ps, layout, prog; uint32_t epoch; uint8_t defined; } Gl4State;
+typedef struct { uint32_t vs, ps; GLuint prog; uint8_t used; } Gl4Program;
+typedef struct { NxRenderState rs; uint32_t vs, ps, prog; uint16_t layout; uint32_t epoch; uint8_t defined; } Gl4State;
 typedef struct { NxVtxLayout l; NxVtxLayout4 l4; GLuint vao; uint32_t gen; uint8_t defined, is4, stale; } Gl4Layout;
 typedef NxChkTgt Gl4Tgt;               /* sub = level | layer << 16; image 0 = none */
 typedef NxChkPass Gl4Pass;             /* unused entries are zero (memcmp key) */
@@ -79,11 +77,11 @@ typedef struct { GLuint q; uint32_t n; uint32_t* ids; } Gl4Slice;   /* a GL occl
 typedef struct Gl4 {
     void* dpy; void* ctx;
     NxGpuApi4 api;
-    Gl4Mem mem[GL4_MAX_MEM + 1];
+    Gl4Mem* mem; uint32_t nMem;        /* slot = id; slot 0 unused; grown on demand (gl4_table_grow) */
     Gl4Image img[NX_MAX_IMAGES + 2];
     GLuint smp[NX_MAX_SAMPLERS]; uint32_t nSmp;
-    Gl4Shader sh[GL4_MAX_SHADERS + 1];
-    Gl4Program prog[GL4_MAX_PROGRAMS + 1]; uint32_t progEpoch;
+    Gl4Shader* sh; uint32_t nSh;
+    Gl4Program* prog; uint32_t nProg, progEpoch;
     Gl4State st[GL4_MAX_STATES + 1];
     Gl4Layout lay[GL4_MAX_LAYOUTS + 1];
     Gl4Fbo fbo[GL4_MAX_FBOS]; uint32_t nFbo, fboNext;
@@ -185,7 +183,9 @@ uint32_t gl4_shader_from_glsl(const char* glsl, size_t n, uint32_t stage);   /* 
 /* gl4_d3dshader.c: NXGPU_FN_SHADER_CREATE_D3D */
 uint64_t gl4_api_shader_create_d3d(uint64_t desc);
 void gl4_d3d_free(Gl4D3d* d);
-uint16_t gl4_program_for(uint16_t vs, uint16_t ps);
+uint32_t gl4_program_for(uint32_t vs, uint32_t ps);
+/* Id tables: the id is the slot index (ids 1.., no bound in the ABI). Doubles *cap (at least 64 slots) and zeroes the new slots; 0 only when the host allocator fails (the table is unchanged). */
+int gl4_table_grow(void** tab, uint32_t* cap, size_t elem);
 GLuint gl4_compile_program(const char* vs, const char* fs);   /* internal programs: 0 and an error when they fail */
 /* gl4_core.c */
 void gl4_upload_range(uint32_t block, uint32_t off, uint32_t size);

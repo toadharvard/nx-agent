@@ -15,26 +15,36 @@
 #define NXGL4_VERSION NXGPU_VERSION4
 
 /* ---- memory blocks ----------------------------------------------------------------------------------------------- */
-const Gl4Mem* gl4_mem(uint32_t id) { return id && id <= GL4_MAX_MEM && g4.mem[id].used ? &g4.mem[id] : NULL; }
+int gl4_table_grow(void** tab, uint32_t* cap, size_t elem) {
+    uint32_t n = *cap ? *cap : 32;
+    if (n > UINT32_MAX / 2) return 0;
+    n *= 2;
+    char* p = (char*)realloc(*tab, (size_t)n * elem);
+    if (!p) return 0;
+    memset(p + (size_t)*cap * elem, 0, (size_t)(n - *cap) * elem);
+    *tab = p; *cap = n;
+    return 1;
+}
+
+const Gl4Mem* gl4_mem(uint32_t id) { return id && id < g4.nMem && g4.mem[id].used ? &g4.mem[id] : NULL; }
 
 uint64_t gl4_api_mem_create(uint64_t a) {
     const NxMemBlockDesc* d = (const NxMemBlockDesc*)nxgl4_guest_ptr(a, sizeof *d);
     if (!d || !d->size || !d->storage) return 0;
-    for (uint32_t id = 1; id <= GL4_MAX_MEM; id++) {
-        if (g4.mem[id].used) continue;
-        Gl4Mem* m = &g4.mem[id];
-        m->storage = d->storage; m->size = d->size; m->used = 1;
-        p_glGenBuffers(1, &m->buf);
-        p_glBindBuffer(GL_COPY_WRITE_BUFFER, m->buf);
-        p_glBufferData(GL_COPY_WRITE_BUFFER, d->size, NULL, GL_DYNAMIC_DRAW);
-        return id;
-    }
-    return 0;
+    uint32_t id = 1;
+    while (id < g4.nMem && g4.mem[id].used) id++;
+    if (id >= g4.nMem && !gl4_table_grow((void**)&g4.mem, &g4.nMem, sizeof *g4.mem)) { gl4_err("mem_create: out of memory"); return 0; }
+    Gl4Mem* m = &g4.mem[id];
+    m->storage = d->storage; m->size = d->size; m->used = 1;
+    p_glGenBuffers(1, &m->buf);
+    p_glBindBuffer(GL_COPY_WRITE_BUFFER, m->buf);
+    p_glBufferData(GL_COPY_WRITE_BUFFER, d->size, NULL, GL_DYNAMIC_DRAW);
+    return id;
 }
 uint64_t gl4_api_mem_gpu_addr(uint64_t id) { (void)id; return 0; }
 
 uint64_t gl4_api_mem_destroy(uint64_t id) {
-    if (id > GL4_MAX_MEM || !gl4_mem((uint32_t)id)) { gl4_err("mem_destroy: %llu is not a live block", (unsigned long long)id); return NXGPU_BAD_CALL; }
+    if (id >= g4.nMem || !gl4_mem((uint32_t)id)) { gl4_err("mem_destroy: %llu is not a live block", (unsigned long long)id); return NXGPU_BAD_CALL; }
     p_glDeleteBuffers(1, &g4.mem[id].buf);
     memset(&g4.mem[id], 0, sizeof g4.mem[id]);
     if (g4.idxBlock == id) g4.idxBlock = 0;
@@ -137,7 +147,8 @@ void nxgl4_destroy(void) {
     for (uint32_t i = 0; i < NX4_MAX_STREAMS; i++) free(g4.vtx[i].data);
     for (uint32_t i = 0; i < g4.nSlices; i++) free(g4.slices[i].ids);
     free(g4.slices);
-    for (uint32_t i = 1; i <= GL4_MAX_SHADERS; i++) gl4_d3d_free(g4.sh[i].d3d);
+    for (uint32_t i = 1; i < g4.nSh; i++) gl4_d3d_free(g4.sh[i].d3d);
+    free(g4.mem); free(g4.sh); free(g4.prog);
     if (g4.dpy) {
         eglMakeCurrent(g4.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         if (g4.ctx) eglDestroyContext(g4.dpy, g4.ctx);
