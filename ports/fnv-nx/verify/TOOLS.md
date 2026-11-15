@@ -1843,7 +1843,7 @@ Gates get GATE_CACHE = VDIR/cache (content-keyed results of gates such as selfte
            other push (or fetch) failure is `blocked: push failed: <first line>`, exit 6; in both nothing local changes and the stored green
            verdict stays (keyed by tree). Without --remote only the local ref moves and the last line ends `local only`.
   Exit codes of merge: 0 merged, 2 red/blocked by verdict, 3 conflict, 4 env, 5 moved, 6 push failed (1 error).
-Both print `L1 <green|red> <tree> <seconds>s gates:<n> over_budget:<bool>`; merge adds `merged <commit>` or `blocked: <reason>`.
+Both print `L1 <green|red> <tree> <seconds>s gates:<n> over_budget:<bool> vacuous:<n>` (n: green gates with an empty universe and no admitted root of the class they cover); merge adds `merged <commit>` or `blocked: <reason>`.
 ```
 
 ## verify/objstub.py

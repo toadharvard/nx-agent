@@ -23,11 +23,11 @@ cannot run in this environment (root, namespaces, strace) is uncertified. Zero f
   (the env id); a file the run reads in its own TMPDIR is its own. A run that touched the checkout's git metadata (git ls-files, git show: the index and the
   objects are not files of the tree) is keyed by the tree hash of the commit as well (HEAD^{tree}): any change of the tree re-runs it. A failed file, a timeout
   and a leak are never recorded. No file is recorded without a trace (strace missing or a trace that cannot be read: the file is failed, never skipped).
-  UNTRACED: a test that itself runs strace cannot run under it (one tracer per process). DIR/tests/inputs.json lists such files under "untraced"; they run
+  UNTRACED: a test that itself runs strace cannot run under it (one tracer per process). A file whose import closure over the tree reaches a module that runs strace (TRACERS) is such a file; it runs
   untraced and their entry is keyed by whole directories: the tree hash (cas.tree_hash, no mtimes, __pycache__ skipped) of every --key-dirs directory
   (default: the DIRs scanned) and the tree hash of the commit (HEAD^{tree}) in place of a read set: a test that runs the recipe runs strace itself (the env gate
   `kernel ptrace` is red under another tracer), so its reads are the whole checkout. Detail of a green run: `N of M test files pass, K cached`.
-A test that needs game data declares it in DIR/tests/inputs.json ({"format": "fnvnx-selftest-inputs/1", "tests": {"test_x.py": ["exe"]}, "untraced": ["test_y.py"]}); the names
+A test that needs game data declares it in DIR/tests/inputs.json ({"format": "fnvnx-selftest-inputs/1", "tests": {"test_x.py": ["exe"]}}); the names
 are externals of verify/contract_inputs.json (commit + tree_sha256, fetched like a recipe's external). The test gets FNVNX_INPUT_<NAME> = the checked-out
 directory. If the input cannot be fetched or its tree hash differs, the file's status is `blocked-env`: uncertified (the gate is red), never skipped.
 Result extra key "files": [{"name","seconds","status"[,"reason"]}] (status passed|failed|cached; reason of a failed file: exit status or
@@ -42,6 +42,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -69,13 +70,50 @@ def declared_inputs(path):
     except (ValueError, KeyError, TypeError, AttributeError):
         return None
 
-def untraced_of(path):
-    """True iff DIR/tests/inputs.json lists the test file under "untraced" (it runs strace itself, so cannot run under it)."""
+TRACERS = ("envcheck", "opentrace", "oraclecheck")   # the modules of the tree that run strace (grep "strace" over the tree's non-test modules: the one source of the rule below)
+_MODS = {}
+
+def module_index(root):
+    """{module name: [paths]} of every .py of the checkout's ports/fnv-nx (the tests' helper modules included) (a name in two directories names both: a superset is sound)."""
+    if root not in _MODS:
+        idx = {}
+        for d, ds, fs in os.walk(os.path.join(root, "ports", "fnv-nx")):
+            ds[:] = [x for x in ds if x not in ("__pycache__", ".git")]
+            for f in fs:
+                if f.endswith(".py"):
+                    idx.setdefault(f[:-3], []).append(os.path.join(d, f))
+        _MODS[root] = idx
+    return _MODS[root]
+
+def imports_of(path, scripts=False):
+    """The module names a file refers to: every `import a, b.c` / `from a.b import c, d` statement line of its TEXT (a child script embedded in a string counts, as it runs), and
+    for SCRIPTS (the test file itself) every `name.py` it names (a script run by subprocess or runpy)."""
     try:
-        doc = json.load(open(os.path.join(os.path.dirname(path), "inputs.json")))
-        return os.path.basename(path) in doc.get("untraced", [])
-    except (OSError, ValueError, AttributeError, TypeError):
-        return False
+        text = open(path).read()
+    except OSError:
+        return set()
+    out = set(re.findall(r"([A-Za-z0-9_]+)\.py\b", text)) if scripts else set()
+    for m in re.finditer(r"^[ \t;]*(?:import|from)[ \t]+([A-Za-z0-9_., ]+)", text, re.M):
+        line = m.group(1)
+        out |= set(re.findall(r"[A-Za-z0-9_]+", line.split(" import ")[0] if " import " in line else line))
+        if " import " in line:
+            out |= set(re.findall(r"[A-Za-z0-9_]+", line.split(" import ", 1)[1]))
+    return out
+
+def untraced_of(path):
+    """True iff the test file can run strace itself (so it cannot run under it: one tracer per process): by the rule, its import closure over the checkout's modules
+    reaches a module of TRACERS. Over-approximate and so sound (an untraced file is keyed by the whole directories, coarser, never wrong). No list."""
+    root = os.path.realpath(os.getcwd())
+    idx = module_index(root)
+    seen, todo = set(), sorted(imports_of(path, True))
+    while todo:
+        m = todo.pop()
+        if m in seen:
+            continue
+        seen.add(m)
+        for p in idx.get(m, []):
+            todo += sorted(imports_of(p) - seen)
+    return bool(seen & set(TRACERS))
 
 def fetch_inputs(names, cache, ws):
     """{FNVNX_INPUT_<NAME>: host dir} of the pinned externals NAMES (recipe.fetch_externals, commit + tree_sha256 checked), or a string: why not."""
