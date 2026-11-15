@@ -701,3 +701,9 @@ Paused: w3b, w4, farm; no other work.
     - ASM-629 is removed: unnamed bit-field padding, sizeof 64; gpu_abi.h uses FNVNX_SHA256_DIGEST_SIZE.
     - Checked: no d3d9 or translator code names the pad fields (draw_prog.cpp:57 memsets).
     - w6 takes e408b213, deletes the ASM-629 record and adds the sha256 include to every root that includes gpu_abi.h.
+- 01:05Z w6 f3167f5f5 = #7 b11313f7f + del2.
+    - d3d9_enums.gen.h is a generated stage. Objects are bit-identical except for layout and debug.
+    - d3d9total 332/332; self-test 47/47 killed (pre-merge).
+    - Next: w1b-root 61d4e879a, then e408b213 (ASM-629 delete, sha256 include), then the cand2 b6865471d rebase with tlsmodel, then the builds and gates.
+- 01:05Z L6A: NXGPU_MAX_COLOR_TARGETS (4) in nxgpu4.h (W6-D1d).
+    - MultisampleQuality: no ABI field if the declared adapter gives 1 quality level per type (the D3D9 layer rejects others). w6 checks the env rows.
