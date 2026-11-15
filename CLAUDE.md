@@ -569,6 +569,22 @@ a stale tree. The rules below make that class impossible. Adding checks on top o
     A rule addressed to the application ("applications may not use vs_3_0 with the fixed function pipeline") names no
     result of the system, so it is a silence on that result, and Wine 9.0 fills it as above (orchestrator, 2026-11-15 16:00Z).
 
+## Owner order of 2026-11-15 20:25Z: no rework that gives no progress (binding)
+
+The owner's words: "Это переделка хуйни не дающей прогресса. Вот пересборка компилятора быстрая это важно. Все
+остальное что нужно по счету это важно. А это похуй. Уже корректно почти и хуй с ним."
+
+- Work counts only when it moves the next step in order: root, packs as roots, ELF, boot, first frame.
+- **Important now:**
+  - a fast compiler rebuild: the compiler stage and the plugins+runtime stage are separate;
+  - fast builds and verdicts;
+  - the items each step needs, taken in order.
+- **Not now:** reworking or re-proving something that already works and is nearly correct, when it does not block a step.
+  Examples: the shader-failure branch, a stronger proof of an already green gate, a cleaner form of a working rule.
+  - Such an item is written into the lead's status as "after the first frame" and left.
+- A lead asks itself before starting an item: "which step does this unblock, and when?" If it unblocks none, the item
+  waits.
+
 ## Orchestrator decision of 2026-11-15 09:20Z: weekly budget (binding for every session)
 
 - The owner's usage page reads: weekly 29 % used, reset on Saturday 2026-11-21 18:00Z. At the pace so far the limit ends
