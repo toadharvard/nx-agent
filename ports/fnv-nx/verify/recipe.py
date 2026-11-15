@@ -1073,12 +1073,13 @@ def header_dirs(rec, root, roots, repo=".", variant=""):
     return sorted(dirs)
 
 
-def include_closure(inc, root, roots, repo, tg, variant_rec=None):
+def include_closure(inc, root, roots, repo, tg, variant_rec=None, files=None):
     """The include path of a unit of ROOT (RECIPE.md "Include"): the recipe's `include` list, then, for every repo directory D of it that lies in another admitted
     product root P with a recipe for the target TG, the repo directories of P's own `include`, transitively and in that order, each once. A header that P's
     headers include is found by every consumer of P's headers (a header names its own dependencies once, in the recipe of the root that ships it); the entries
     of a root's `include` that lie in an external are the root's private toolchain and are not carried. -> [dir]"""
     out, seen = list(inc), set(inc)
+    held = [f for f in (files if files is not None else tracked(repo))]
     todo = [d for d in inc if isinstance(d, str) and not d.startswith("/")]
     while todo:
         d = todo.pop(0)
@@ -1095,7 +1096,7 @@ def include_closure(inc, root, roots, repo, tg, variant_rec=None):
                 except (OSError, ValueError, AttributeError):
                     continue
                 for m in more:
-                    if isinstance(m, str) and not m.startswith("/") and m not in seen:
+                    if isinstance(m, str) and not m.startswith("/") and m not in seen and any(under(f, m) for f in held):   # a directory with no tracked file is a generated tree of P: its headers reach a consumer through `include_uses`, never by this carry
                         seen.add(m)
                         out.append(m)
                         todo.append(m)
@@ -2020,7 +2021,7 @@ class Job:
         for a directory inside an external (a declared input of the tool runtime)."""
         out, n = [], 0
         tg = entry_of(self.roots, self.root + ("@" + self.variant if self.variant else "")).get("target")
-        for d in include_closure(self.rec["include"], self.root, self.roots, self.repo, tg):
+        for d in include_closure(self.rec["include"], self.root, self.roots, self.repo, tg, files=self.files):
             if any(under(d, e["at"]) for e in self.ext.values()):
                 out.append(d)
                 continue
