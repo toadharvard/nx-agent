@@ -63,7 +63,11 @@ interpreter on the product path, no fast path switched off for good.
 7. **Real numbers.** Every number is a global total with its commit. Never samples.
 8. **The owner is not disturbed.** The orchestrator decides everything the owner would. Only milestones are reported:
    exe entry, WinMain, menu, first frame, Switch.
-9. **Legal.** Game data and anything decomp-derived stay in private fnv-nx-build, never in the public repo.
+9. **Defects impossible by construction** (CLAUDE.md, 2026-11-15). Derive every set from one complete pinned source;
+   keep one source of truth and generate the rest; keep one path and delete alternatives; define universes by one rule; give
+   each declared target one record; take numbers only from a run at a commit. A defect is fixed at its cause: the list,
+   copy or second path that allowed it.
+10. **Legal.** Game data and anything decomp-derived stay in private fnv-nx-build, never in the public repo.
 
 ## 3. Roles
 
