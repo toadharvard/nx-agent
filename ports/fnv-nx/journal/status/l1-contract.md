@@ -1400,3 +1400,6 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - w12h d7bd67694 accepted: guest.json = script only, keyed drv/mld stages.
 - w12 continues with the loader generated tables on claude/fnv-l1-contract-w12L2 = L5 84f12313f + b707cd5c4 + d7bd67694 + w22 c4544e18b, using w22's existing external/{stage,path} generated-input mechanism (no second form).
 - Profile + delta variants go to a fresh worker once targets.json (w22) exists.
+- w23 D2 (fenced library calls) dd614961 accepted.
+  - Scope rule: every bl whose definer (from the link record) is outside the product roots is a D2 item.
+  - It is certified by fences + a record, or by the callee's own objects having no non-frame access. A bare bl memcpy is red.
