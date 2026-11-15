@@ -276,6 +276,47 @@ def parse_driver_link(text, at):
     return out
 
 
+def parse_host_link(text, mounts):
+    """The link command of a host driver's `-###` output TEXT as {interp, startfiles, endfiles}: `-dynamic-linker`'s argument; the `.o` files that lie
+    in one of MOUNTS (the driver's own library search dirs) before the first `-l` library are the start files, those after the last are the end files;
+    paths normalised. Nothing else of the command is taken (the objects of the link are the recipe's, the libraries libs.system's)."""
+    line = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("COLLECT_GCC_OPTIONS=")][-1]
+    toks = [t.strip('"') for t in line.split()]
+    ls = [i for i, t in enumerate(toks) if t.startswith("-l") and len(t) > 2]
+    inm = lambda t: t.endswith(".o") and t.startswith("/") and any(under(posixpath.normpath(t), m) for m in mounts)  # noqa: E731
+    out = {"interp": None, "startfiles": [], "endfiles": []}
+    for i, t in enumerate(toks):
+        if t == "-dynamic-linker" and i + 1 < len(toks):
+            out["interp"] = toks[i + 1]
+        elif inm(t):
+            out["endfiles" if ls and i > ls[-1] else "startfiles"].append(posixpath.normpath(t))
+    return out
+
+
+def merge_inputs(base, extra, store, ws):
+    """BASE inputs plus EXTRA ([{at, tree}]): an extra input that lies inside a base input's tree is copied into a copy of that tree at its relative path
+    (two inputs never nest in a sandbox); the others are added. Sorted by `at`."""
+    out, n = [dict(i) for i in base], 0
+    for e in extra:
+        host = max((i for i in out if under(e["at"], i["at"])), key=lambda i: len(i["at"]), default=None)   # the innermost input holding it (or at it)
+        if host is None:
+            out.append(dict(e))
+            continue
+        n += 1
+        d = os.path.join(ws, "merge%d" % n)
+        cas.materialize(host["tree"], store, d)
+        sub = os.path.join(d, e["at"][len(host["at"]) + 1:])   # (the input's own root when the paths are equal)
+        os.makedirs(sub, exist_ok=True)
+        ov = os.path.join(ws, "overlay%d" % n)
+        cas.materialize(e["tree"], store, ov)
+        for f in os.listdir(ov):
+            if os.path.lexists(os.path.join(sub, f)):
+                os.unlink(os.path.join(sub, f))
+            shutil.copyfile(os.path.join(ov, f), os.path.join(sub, f))
+        host["tree"] = cas.ingest(d, store)
+    return sorted(out, key=lambda i: i["at"])
+
+
 def onedef(objs, root_defined):
     """The one-definition rule on the objects OBJS ({path: set of defined global/weak symbols}) of the runtime that the driver names: the paths whose
     defined symbols meet ROOT_DEFINED (the symbols that the admitted guest product roots define), sorted. An object is excluded from the link iff
@@ -636,6 +677,9 @@ def link_errors(lk, root, mine, roots, ext_names, repo, files=(), variant=""):
             err.append("link.libs.system must be a non-empty list of absolute normalised paths of the shared libraries of env.json packages")
         elif kind == "pie":
             err.append("link.libs.system: a pie is the guest: its libraries are those of an external")
+    elif kind == "exe" and isinstance(lb, dict) and lb.keys() & {"startfiles", "endfiles", "dirs", "names", "external"}:
+        err.append("link.libs: an exe's start and end files, dirs and default libraries are the pinned driver's `-###` answer for its target (RECIPE.md Link), "
+                   "not a recipe's: only `system` is declared")
     elif "libs" in lk:
         paths = lambda k: isinstance(lb.get(k), list) and all(rel_ok(p) for p in lb[k])  # noqa: E731
         if not (isinstance(lb, dict) and set(lb) == LIBS_KEYS and paths("dirs") and paths("startfiles") and paths("endfiles")
@@ -1425,19 +1469,63 @@ class Job:
                 shutil.copyfile(os.path.realpath(p), os.path.join(yd, os.path.basename(p)))
             sysin = [{"at": "/syslib", "tree": cas.ingest(yd, self.store)}]
             search, post = ["-L/syslib"], ["/syslib/" + os.path.basename(p) for p in lb["system"]]
+        if kind == "exe":
+            # the start and end files and the dynamic linker: the pinned driver's answer for the target, not the recipe's
+            hl, mnt = self.host_startfiles(ws, kind)
+            bad = envcheck.system_lib_errors(hl["startfiles"] + hl["endfiles"], json.load(open(os.path.join(self.repo, ENV_JSON)))["packages"], envcheck.file_owners())
+            if bad or not hl["startfiles"] or not hl["interp"]:
+                raise BuildRed({"stage": "drv:" + self.root, "exit": None, "stderr": ["link: the driver's start files %s / interpreter %r: %s" % (hl["startfiles"], hl["interp"], b) for b in bad or ["none derived"]]})
+            pre, sysin = hl["startfiles"], sysin + [m for m in mnt if any(under(f, m["at"]) for f in hl["startfiles"] + hl["endfiles"])]
+            post = post + hl["endfiles"]
+            dl = ["-dynamic-linker", hl["interp"]]
+        else:
+            dl = []
+        if lb and "system" in lb:
+            pass
         elif lb:
             at = self.ext[lb["external"]]["at"]
             pre, post = [at + "/" + p for p in lb["startfiles"]], [at + "/" + p for p in lb["endfiles"]]
             search, libs = ["-L" + at + "/" + d for d in lb["dirs"]], ["-l" + n for n in lb["names"]]
         vs = ["--version-script=/ld/" + os.path.basename(lk["version_script"])] if "version_script" in lk else []
         sc = ["-T", "/ld/" + os.path.basename(lk["script"])] if "script" in lk else []
-        argv = [ld] + LD_KIND[kind] + lk["flags"] + sc + vs + ["-o", "/out/" + lk["output"], "-Map=/out/" + lk["output"] + ".map"] + pre + search + [
+        argv = [ld] + LD_KIND[kind] + dl + lk["flags"] + sc + vs + ["-o", "/out/" + lk["output"], "-Map=/out/" + lk["output"] + ".map"] + pre + search + [
             "--whole-archive"] + args + ["--no-whole-archive"] + (["--start-group"] + libs + ["--end-group"] if libs else []) + post
         objs_tree, ld_tree = cas.ingest(od, self.store), cas.ingest(sd, self.store)
         doc = {"format": "fnvnx-stage/1", "stage": "ld:" + self.root, "argv": argv, "cwd": "/", "class": "build", "tool": "ld",
                "env": dict(unitstage.ENV, PATH=os.path.dirname(ld)), "outputs": ["/out"],
-               "inputs": sorted(rt["inputs"] + [{"at": "/objs", "tree": objs_tree}, {"at": "/ld", "tree": ld_tree}] + sysin, key=lambda i: i["at"])}
+               "inputs": merge_inputs(rt["inputs"] + [{"at": "/objs", "tree": objs_tree}, {"at": "/ld", "tree": ld_tree}], sysin, self.store, ws)}
         return self.stage(doc)[1]["outputs"]["/out"], objs_tree, [{"at": "/ld", "tree": ld_tree}] + sysin
+
+    def host_startfiles(self, ws, kind):
+        """Stage `drv:<root>` for a host exe: the recipe's own pinned C++ driver run with `-###` on the link of a one-line file. It resolves the start
+        and end files by searching its own library directories, so those directories' `.o` files (the crt objects; each directory at its real path) are
+        declared inputs. -> ({interp, startfiles, endfiles}, [the declared input trees of those files for the link stage])."""
+        cxx = self.drivers()[1]
+        host = self.hostpath(cxx)
+        sd = subprocess.run([host, "-print-search-dirs"], capture_output=True, text=True).stdout
+        libs = next(ln for ln in sd.splitlines() if ln.startswith("libraries:")).split("=", 1)[1].split(":")
+        crt = lambda d: [f for f in sorted(os.listdir(d)) if f.endswith(".o") and os.path.isfile(os.path.join(d, f))]  # noqa: E731
+        dirs = sorted({os.path.realpath(posixpath.normpath(d)) for d in libs if os.path.isdir(d)})
+        dirs = [d for d in dirs if crt(d)]    # the directories that hold crt objects
+        mnt = []
+        for i, d in enumerate(dirs):
+            v = os.path.join(ws, "crt%d" % i)
+            os.makedirs(v)
+            for f in crt(d):
+                shutil.copyfile(os.path.join(d, f), os.path.join(v, f))
+            mnt.append({"at": d, "tree": cas.ingest(v, self.store)})
+        pd = os.path.join(ws, "probe")
+        os.makedirs(pd)
+        with open(os.path.join(pd, "x.cc"), "w") as f:
+            f.write(PROBE_SRC)
+        tr = self.toolrt([cxx])[1]
+        argv = [cxx] + PROBE_FLAGS + (["-pie"] if kind == "exe" else ["-shared"]) + ["-###", "/probe/x.cc", "-o", "/out/x"]
+        doc = {"format": "fnvnx-stage/1", "stage": "drv:" + self.root, "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
+               "env": dict(unitstage.ENV, PATH=os.path.dirname(cxx)), "outputs": ["/out"],
+               "inputs": merge_inputs(tr["inputs"] + [{"at": "/probe", "tree": cas.ingest(pd, self.store)}], mnt, self.store, ws)}
+        res = self.stage(doc)[1]
+        text = open(cas._obj(self.store, cas.manifest(res["stderr"], self.store)), errors="replace").read()
+        return parse_host_link(text, dirs), mnt
 
     def link_probe(self, ws):
         """Stage `drv:<root>`: the guest runtime's C++ driver (pin `runtime_driver`, inside the pinned runtime external) run with the guest semantic flags
@@ -1723,6 +1811,8 @@ def build(repo, root, store, out, jobs=4, ext=None, link=True):
               fin = j.ldcheck(ws, elf_tree, objs_tree, extra, loader_defs)
               ent = cas.manifest(fin, store)["entries"]
               shutil.copyfile(cas._obj(store, ent[name]), os.path.join(out, name))
+              if lk.get("kind") == "exe":
+                  os.chmod(os.path.join(out, name), 0o755)    # an executable image has the exec bit
               res["elf"] = {"path": os.path.abspath(os.path.join(out, name)), "sha256": ent[name]["h"]}
               res["ld_gate"] = {}
               for f in ("ld.json", "ld.ids"):

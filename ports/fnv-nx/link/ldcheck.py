@@ -385,7 +385,9 @@ def host_main(a):
     dyn = syms_any(dd, 11)
     out_def = {n for n, bind, _, shndx, _ in dyn + syms_any(dd, 2) if shndx != SHN_UNDEF}
     ids = ['cover:' + n for n in sorted((defs | strong | weak) - out_def - libdef)]
-    ids += ['output-undefined:' + n for n in sorted({n for n, _, _, shndx, _ in dyn if shndx == SHN_UNDEF} - libdef)]
+    # a WEAK undefined dynamic reference of a host image (the driver's crt objects carry several: __gmon_start__, __cxa_finalize, _ITM_*) is ELF's own
+    # optional-reference semantics: the dynamic loader binds it or leaves it 0. Only a strong one must be defined by a library.
+    ids += ['output-undefined:' + n for n in sorted({n for n, bind, _, shndx, _ in dyn if shndx == SHN_UNDEF and bind != 2} - libdef)]
     tags = dyn_tags(dd)
     if 22 in tags or tags.get(30, 0) & 4:
         ids.append('textrel')
