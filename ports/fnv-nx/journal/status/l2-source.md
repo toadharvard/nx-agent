@@ -156,3 +156,7 @@ Orchestrator decision: -fstack-reuse=none in the guest semantic flag set (L1 fla
   2. one none-elf farm build;
   3. one mirror and one repin. b274ec067 is not repinned.
   Farm session_01KmtZKTV1mniUErarfUpdJZ is in phase A (script plus trial build on the current patch, predefine diff, linux-gnu hits; publishes nothing). Phase B starts on my START <sha>.
+- 2026-11-15 01:46 DATAMODEL first list (w3, about 90 static_asserts).
+  - Equal: char, wchar_t, scalars, pointers, struct alignment, vptr; long double is fixed by its hunk.
+  - Patch in the one rebuild: (1) MS bitfield layout (TARGET_MS_BITFIELD_LAYOUT_P under ILP32); (2) enum underlying type int (values above INT_MAX as the /Zc:enumTypes doc shows, else a hard error); (3) MSVC empty-base placement, with its build-and-test loop on the farm's trial tree.
+  - No patch, orchestrator to decide: (4) PMF size 4 vs 8; (5) virtual-base vbptr layout. Proposed: a boundary gate.
