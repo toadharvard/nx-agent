@@ -5,8 +5,8 @@ front end's own values (msvcmodel.patch: PLUGIN_FNVNX_COOKIE called by build_new
 Row: <new|delete> TAB <file:line> TAB <elt size> TAB <cookie bytes> TAB <count offset> TAB <size arg> TAB <size arg is the elt size> TAB <dtor>.
 The rule checked on every row (DATAMODEL S29): the cookie is 4 bytes exactly when the element class has a non-trivial destructor, whatever its alignment,
 and none otherwise; an array new stores the count at cookie-4 (the last size_t of the cookie); an array delete passes the size of one element to
-operator delete[]. cookie/cookie.cpp holds a class with a non-trivial destructor, a trivial one, an over-aligned one and a delete[] through a
-base pointer; cookie/none.cpp has no array expression (the section is present and empty).
+operator delete[]. ldbl/model.cpp holds the cases the pinned cl 15.00 was recorded on (DATAMODEL S29's source). An over-aligned element (16 and up) has no recorded cl
+output: that case is undecided and is not tested; cookie/none.cpp has no array expression (the section is present and empty).
 Compiled by the recipe's guest compiler with the sdd and names plugins. Run: python3 -I <this file> from the checkout root."""
 import os
 import shutil
@@ -42,15 +42,27 @@ def main():
     try:
         so = [pb.build(n, td) for n in ('sdd', 'names')]
         obj = os.path.join(td, 'c.o')
-        r = pb.compile(os.path.join(HERE, 'cookie', 'cookie.cpp'), obj, so, flags=pb.PRODUCT_FLAGS + ['-O0'])
+        r = pb.compile(os.path.join(HERE, 'ldbl', 'model.cpp'), obj, so, flags=pb.PRODUCT_FLAGS + ['-O0'])
         check('compiles', r.returncode == 0, r.stderr[-3000:])
         if r.returncode == 0:
             rows = rows_of(obj)
-            check('8 rows: 4 array new, 4 array delete', sorted(x[0] for x in rows) == ['delete'] * 4 + ['new'] * 4, rows)
             check('every row satisfies the S29 formula', not [x for x in rows if rule(x)], [(x, rule(x)) for x in rows if rule(x)])
-            check('the dtor classes have a 4-byte cookie, the trivial one none, the over-aligned one too',
-                  sorted((x[0], x[2], x[3]) for x in rows if x[7] == '1') == sorted([(k, s, '4') for k in ('new', 'delete') for s in ('4', '16', '8')])
-                  and all(x[3] == '-' for x in rows if x[7] == '0'), rows)
+            got = sorted((x[0], x[2], x[3], x[7], x[5] if x[0] == 'delete' else '-') for x in rows)
+            # (kind, elt size, cookie, dtor, delete size arg): each row is the pinned cl's output recorded in ldbl/model.cpp (DATAMODEL S29's source), by its comment
+            want = sorted([
+                ('new', '4', '4', '1', '-'),     # n_d:   cl: operator new(3*4 + 4), array = block + 4
+                ('new', '8', '4', '1', '-'),     # n_a8:  cl: operator new(3*8 + 4), array = block + 4 (the 8-aligned element: the cookie is not padded)
+                ('new', '20', '-', '0', '-'),    # n_nm:  cl: NM::operator new[](60): no count
+                ('new', '24', '-', '0', '-'),    # n_nd:  cl: 72: no count
+                ('new', '28', '4', '1', '-'),    # n_nv:  cl: 3*28 + 4 = 88
+                ('new', '12', '4', '1', '-'),    # n_n:   cl: 3*12 + 4 = 40
+                ('new', '4', '-', '0', '-'),     # n_var: cl: operator new(4*n), no cookie
+                ('delete', '20', '-', '0', '20'),  # d_nm: cl: heap_free(p, 20)
+                ('delete', '24', '-', '0', '24'),  # d_nd: cl: heap_free(p, 24)
+                ('delete', '28', '4', '1', '28'),  # d_nv: cl: heap_free(p - 4, 28)
+                ('delete', '12', '4', '1', '12'),  # d_n:  cl: heap_free(p - 4, 12)
+            ])
+            check('the rows are the recorded cl cases of ldbl/model.cpp, one each', got == want, (got, want))
         o2 = os.path.join(td, 'n.o')
         r = pb.compile(os.path.join(HERE, 'cookie', 'none.cpp'), o2, so, flags=pb.PRODUCT_FLAGS + ['-O0'])
         check('a unit with no array new/delete compiles', r.returncode == 0, r.stderr[-2000:])
