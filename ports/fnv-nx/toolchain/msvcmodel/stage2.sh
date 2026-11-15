@@ -208,9 +208,18 @@ if [ -n "${FNVNX_PLUGINS_JSON:-}" ]; then
     [ "$(readelf -h "$f" | sed -n 's/^ *Machine: *//p')" = "Advanced Micro Devices X86-64" ] || continue
     strip --strip-debug "$f"
   done < <(find "$P/bin" "$P/libexec" -type f)
-  python3 -I - "$P" "$T" "$V" "$SHA256" "$STAMP" "$MSVC_PATCH" "$MLFLAGS" "$PLUG_C" "$PLUG_CXX" "$TLC" "$TLCXX" "$CONF" "$FNVNX_PLUGINS_JSON" "$VERIFY" "$P/bin/$T-gcc" "$K1" <<'EOF'
+  # toolchain_tree_sha256 (for the pin-by-reference gate): the git tree of ports/fnv-nx/toolchain at the checkout's HEAD, and the cas.py sha256 of that tree's
+  # archive; both computed here, from a checkout whose toolchain directory is committed (a dirty one is an error: the hash would not name what was built).
+  TCDIR=$(cd "$HERE/.." && pwd)
+  [ -z "$(git -C "$TCDIR" status --porcelain -- .)" ] || { echo "build.sh: the toolchain directory has uncommitted changes; commit them first" >&2; exit 6; }
+  TC_GIT=$(git -C "$TCDIR" rev-parse HEAD:./)
+  rm -rf "$W/tc-arch" "$W/tc-store"; mkdir "$W/tc-arch"
+  git -C "$TCDIR" archive --format=tar "$TC_GIT" | tar -x -C "$W/tc-arch"
+  TC_CAS=$(python3 -I "$VERIFY/cas.py" ingest "$W/tc-store" "$W/tc-arch")
+  rm -rf "$W/tc-arch" "$W/tc-store"
+  python3 -I - "$P" "$T" "$V" "$SHA256" "$STAMP" "$MSVC_PATCH" "$MLFLAGS" "$PLUG_C" "$PLUG_CXX" "$TLC" "$TLCXX" "$CONF" "$FNVNX_PLUGINS_JSON" "$VERIFY" "$P/bin/$T-gcc" "$K1" "$TC_GIT" "$TC_CAS" <<'EOF'
 import sys, os, json, hashlib, subprocess
-P, T, V, SHA, STAMP, PATCH, ML, PC, PCX, TLC, TLCXX, CONF, PJ, VERIFY, GCC, K1 = sys.argv[1:17]
+P, T, V, SHA, STAMP, PATCH, ML, PC, PCX, TLC, TLCXX, CONF, PJ, VERIFY, GCC, K1, TC_GIT, TC_CAS = sys.argv[1:19]
 sys.path.insert(0, VERIFY)
 import recipe
 h = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()
@@ -226,7 +235,7 @@ for root in (os.path.join(P, T, "lib"), os.path.join(P, "lib", "gcc", T, V)):
 ml = subprocess.run([GCC, "-print-multi-lib"], capture_output=True, text=True, check=True).stdout.split()
 conf = [l for l in open(CONF).read().splitlines() if l.strip()]
 m = {"format": "fnvnx-runtime-manifest/1",
-     "compiler": {"gcc": V, "source_sha256": SHA, "msvcmodel_patch_sha256": h(PATCH), "build_key": STAMP, "stage_keys": {"compiler": K1, "runtime": STAMP}, "configure": conf},
+     "compiler": {"gcc": V, "source_sha256": SHA, "msvcmodel_patch_sha256": h(PATCH), "build_key": STAMP, "stage_keys": {"compiler": K1, "runtime": STAMP}, "toolchain_tree_git": TC_GIT, "toolchain_tree_sha256": TC_CAS, "configure": conf},
      "plugins": plugins,
      "flags": {"c": TLC.split(), "cxx": TLCXX.split()},
      "multilib": {"select": ML.split(), "dir": ml},
