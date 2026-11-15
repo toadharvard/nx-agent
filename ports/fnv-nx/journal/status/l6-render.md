@@ -1215,3 +1215,13 @@ Paused: w3b, w4, farm; no other work.
         - objstub: 2,195/2,208, 27 findings; gl4 has 0.
         - Clear/draw incomplete-pass branch: moved to nx_wine_incomplete_pass, with 2 callers.
         - Translator: constants rows citing the msdocs mirror; the RESERVED emitter deleted by a table-driven mirror patch. In progress.
+- 22:05Z: w6 3103d0d2d.
+    - Objstub over the whole universe: 2,204/2,209, 19 findings. Render's only remaining finding is the RESERVED emitter, which goes by a mirror patch.
+    - The translator constants rows are being re-cited to the msdocs mirror.
+    - d3d9total 332/332, 45/45.
+- 22:05Z: w8 54fac201.
+    - The shader table is generated only: sm_decisions.py holds the cited rulings, and the generator output was compared byte for byte against the committed files.
+        - Two differences, both explained: ref_commits, and 10 stale status fields that no consumer reads.
+    - The committed sm_table.json, sm_illegal.tsv and fnvnx_sm_rows.h are deleted. The consumers read the stage output.
+    - Unverified: there is no env in w8's container, so farm1 is running d3d9total and its test.
+    - After the first frame: the decision records cite d3dbc.c while the cross-reference uses vkd3d. Mixed provenance, recorded.
