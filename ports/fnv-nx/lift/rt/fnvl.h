@@ -261,6 +261,24 @@ template<class UT, int FB> static inline bool fx_tiny_after(bool div, UT a, UT b
     top=E+d+P-1; if(up && R+1==((u128)1<<P)) top++; }
   else top=E+L-1;
   return top < 1-BIAS; }
+/* dsl.fp ops 5..16: min max, the eight CMPPS predicates, comi ucomi (fnvlift/dsl.py CMPPRED, _fp_smt): no rounding, integer compares of the bit patterns (a, b after DAZ; ao, bo the operands as read, for DE); the result's flags are IE and DE only.
+   The value is the min / max result, the all-ones / zero predicate mask, or ZF<<2 | PF<<1 | CF of COMISS / UCOMISS. */
+template<class UT, int FB> static inline u128 fx_dsl_fcmp(u32 op, UT ao, UT bo, UT a, UT b, u32 mx){
+  const int W=sizeof(UT)*8; const UT SGN=(UT)1<<(W-1), FM=((UT)1<<FB)-1, EX=(UT)((((UT)1<<(W-1))-1)&~FM), QB=(UT)1<<(FB-1);
+  auto isnan=[&](UT x){ return (x&EX)==EX && (x&FM)!=0; };
+  auto issnan=[&](UT x){ return isnan(x) && !(x&QB); };
+  auto issub=[&](UT x){ return (x&EX)==0 && (x&FM)!=0; };
+  auto key=[&](UT x)->long long { long long m=(long long)(x&~SGN); return (x&SGN) ? -m : m; };
+  const bool un=isnan(a)||isnan(b), sn=issnan(a)||issnan(b), daz=(mx>>6)&1;
+  const bool lt=!un && key(a)<key(b), eq=!un && key(a)==key(b), gt=!un && key(a)>key(b);
+  bool invalid; UT val;
+  if(op==5||op==6){ invalid=un; const bool bz=(a&~SGN)==0 && (b&~SGN)==0; val=un||bz ? b : (op==5 ? (lt?a:b) : (gt?a:b)); }
+  else if(op>=7&&op<=14){ const u32 k=op-7; const bool sig=k==1||k==2||k==5||k==6; invalid=sig?un:sn;
+    const bool t=k==0?eq : k==1?lt : k==2?(lt||eq) : k==3?un : k==4?(un||!eq) : k==5?(un||!lt) : k==6?(un||!(lt||eq)) : !un;
+    val=t?(UT)~(UT)0:(UT)0; }
+  else { invalid=(op==15)?un:sn; val=(UT)(((un||eq)?4u:0u)|(un?2u:0u)|((un||lt)?1u:0u)); }
+  const bool de=!daz && !invalid && (issub(ao)||issub(bo));
+  return ((u128)((invalid?1u:0u)|(de?2u:0u))<<W)|val; }
 template<class FT, class UT, int FB> static inline u128 fx_dsl_fp_t(u32 op, UT a, UT b, u32 mx){
   const int W=sizeof(UT)*8; const UT SGN=(UT)1<<(W-1), FM=((UT)1<<FB)-1, EX=(UT)((((UT)1<<(W-1))-1)&~FM), QB=(UT)1<<(FB-1), MINN=(UT)1<<FB;
   const bool daz=(mx>>6)&1, um=(mx>>11)&1, ftz=(mx>>15)&1;
@@ -270,6 +288,7 @@ template<class FT, class UT, int FB> static inline u128 fx_dsl_fp_t(u32 op, UT a
   const bool unary=op==4;
   const UT ao=a, bo=unary?a:b;
   if(daz){ if(issub(a)) a&=SGN; if(issub(b)) b&=SGN; }
+  if(op>=5) return fx_dsl_fcmp<UT,FB>(op,ao,bo,a,b,mx);
   const UT indef=(UT)(SGN|EX|QB);
   UT val; u32 fl=0;
   if(isnan(a)||(!unary&&isnan(b))){

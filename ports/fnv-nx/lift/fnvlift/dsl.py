@@ -92,7 +92,8 @@ def uf(name, w, *args):
     without arguments); C: the runtime's own function (UF_C).  Two reads of the same name and arguments in one Form are one value (hash-consed): an instruction that needs the same
     read twice (rdtsc's two halves) names it once."""
     return mk('uf', w, tuple(_unwrap(a) for a in args), name)
-FPOPS = ('add', 'sub', 'mul', 'div', 'sqrt')
+CMPPRED = ('eq', 'lt', 'le', 'unord', 'neq', 'nlt', 'nle', 'ord')      # the imm8 predicates of CMPPS / CMPSS (SDM Vol 2 CMPPS table 3-1)
+FPOPS = ('add', 'sub', 'mul', 'div', 'sqrt', 'min', 'max') + tuple('cmp' + p for p in CMPPRED) + ('comi', 'ucomi')
 def fp(op, w, a, b, mx):
     """SSE scalar floating point at the SOURCE type (w = 32: binary32, 64: binary64) on the bit patterns a, b (w bits; sqrt ignores b) under the MXCSR value mx (32 bits).
     One node of width w + 6: the low w bits are the result's bit pattern, bits w..w+5 the status flags (IE DE ZE OE UE PE, MXCSR bits 0-5) THIS operation raises; use fp_val / fp_flags.
@@ -166,6 +167,27 @@ def _fp_smt(op, w, a, b, mx):
     def run(rm):
         return {'add': lambda: z3.fpAdd(rm, fa, fb_), 'sub': lambda: z3.fpSub(rm, fa, fb_), 'mul': lambda: z3.fpMul(rm, fa, fb_),
                 'div': lambda: z3.fpDiv(rm, fa, fb_), 'sqrt': lambda: z3.fpSqrt(rm, fa)}[op]()
+    if op in ('min', 'max') or op[:3] == 'cmp' or op in ('comi', 'ucomi'):
+        # no rounding, no result flags but IE / DE.  Operands a (the destination) and b (the source) after DAZ.  A NaN operand: IE for MIN / MAX and for the signalling predicates (lt le nlt nle) and COMISS (any NaN),
+        # only for a signalling NaN with the quiet predicates (eq unord neq ord) and UCOMISS (SDM Vol 2 MINPS / CMPPS / COMISS / UCOMISS "SIMD Floating-Point Exceptions"); DE for a denormal operand (DAZ clear) when IE is not raised.
+        un = z3.Or(isnan_(a1), isnan_(b1)); sn = z3.Or(issnan(a1), issnan(b1))
+        sig = op in ('min', 'max', 'comi') or op[3:] in ('lt', 'le', 'nlt', 'nle')
+        invalid = un if sig else sn
+        de = z3.And(z3.Not(daz), z3.Not(invalid), z3.Or(issub(a), issub(b)))
+        eq_, lt_, le_ = z3.fpEQ(fa, fb_), z3.fpLT(fa, fb_), z3.fpLEQ(fa, fb_)
+        ones = BV((1 << w) - 1, w)
+        if op in ('min', 'max'):
+            bz = z3.And(z3.fpIsZero(fa), z3.fpIsZero(fb_)); pick = lt_ if op == 'min' else z3.fpGT(fa, fb_)
+            val = z3.If(un, b1, z3.If(bz, b1, z3.If(pick, a1, b1)))
+        elif op in ('comi', 'ucomi'):
+            gt_ = z3.fpGT(fa, fb_); zf = z3.Or(un, eq_); cf = z3.Or(un, lt_); pf = un
+            val = z3.ZeroExt(w - 3, z3.Concat(z3.If(zf, BV(1, 1), BV(0, 1)), z3.If(pf, BV(1, 1), BV(0, 1)), z3.If(cf, BV(1, 1), BV(0, 1))))
+        else:
+            t = {'eq': z3.And(z3.Not(un), eq_), 'lt': z3.And(z3.Not(un), lt_), 'le': z3.And(z3.Not(un), le_), 'unord': un, 'neq': z3.Or(un, z3.Not(eq_)), 'nlt': z3.Or(un, z3.Not(lt_)),
+                 'nle': z3.Or(un, z3.Not(le_)), 'ord': z3.Not(un)}[op[3:]]
+            val = z3.If(t, ones, BV(0, w))
+        fl = [invalid, z3.And(z3.Not(invalid), de), z3.BoolVal(False), z3.BoolVal(False), z3.BoolVal(False), z3.BoolVal(False)]
+        return z3.Concat(z3.Concat(*[z3.If(f, BV(1, 1), BV(0, 1)) for f in reversed(fl)]), val)
     rm = z3.If(rc == 0, RM['n'], z3.If(rc == 1, RM['d'], z3.If(rc == 2, RM['u'], RM['z'])))
     r, rd_, ru_, rz_ = run(rm), run(RM['d']), run(RM['u']), run(RM['z'])
     anan, bnan = isnan_(a1), (isnan_(b1) if op != 'sqrt' else z3.BoolVal(False))
