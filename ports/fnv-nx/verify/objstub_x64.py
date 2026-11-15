@@ -204,8 +204,9 @@ def kval(v, w):
 class Flow:
     """Per-function forward dataflow. Raises Unanalysable for undecodable shapes; `run` returns None when the function is not V."""
 
-    def __init__(self, ins, a, b, rel, syms, stop=frozenset(), cite=CITE, loads_ok=False, wine=False):
+    def __init__(self, ins, a, b, rel, syms, stop=frozenset(), cite=CITE, loads_ok=False, wine=False, errno=None):
         self.ins, self.a, self.b, self.rel, self.syms = ins, a, b, rel, syms
+        self.errno, self.errno_stores = errno, 0   # ERRNO: the accessor that returns the address of errno (the image rule): a call of it is transparent and returns N
         self.stop, self.cite, self.loads_ok, self.wine = stop, tuple(cite), loads_ok, wine
         self.roffs = sorted(rel)
 
@@ -221,7 +222,11 @@ class Flow:
             if typ in (R_X86_64_PLT32, R_X86_64_PC32):
                 return self.syms[sidx][0]
         t = self.target(i)
-        return self.fn_at.get(t) if hasattr(self, "fn_at") else None
+        c = self.fn_at.get(t) if hasattr(self, "fn_at") else None
+        if c is None and t is not None:   # a linked image has no relocations: the decoder's label of the target (`<name@plt>`, `<name+0x..>`)
+            m = re.search(r"<([^<>+]+?)(?:@plt)?(?:\+0x[0-9a-f]+)?>\s*$", i.t)
+            c = m.group(1) if m else None
+        return c
 
     def target(self, i):
         m = re.match(r"^([0-9a-f]+)\s*(?:<.*>)?$", i.t)
@@ -300,6 +305,9 @@ class Flow:
     def store(self, st, mm, v):
         o = self.slot(st, mm)
         sz = mm[0] or 8
+        if o is None and self.errno and mm[2] is not None and st[0][mm[2]] == ("N",) and mm[3] is None and mm[1] is None and v[0] == "K":
+            self.errno_stores += 1   # a store of a constant through the pointer that a call of the errno accessor returned: counted, no effect that makes the body non-vacuous
+            return
         if o is None or o + sz > 0:
             raise Fail("store outside the own frame")
         r, fr = st
@@ -373,6 +381,11 @@ class Flow:
             c = self.callee(i)
             if k == "jmpd" and not (c is not None):
                 raise Fail("branch out of the function")
+            if self.errno and c == self.errno and k == "calld":
+                for x in CALLER_SAVED:
+                    r[x] = I
+                r["rax"] = ("N",)
+                return [(nxt, st)]
             if c in self.stop and c not in self.cite:
                 self.ends.add(i.a)
                 return []
@@ -493,7 +506,7 @@ class Flow:
 
     def run(self):
         """-> {'x0','x1','v0': None | ('K',c) | ('A',addr) | ('U',)} if V, else None; self.states = {offset: state before it}."""
-        self.rets, self.ends = [], set()
+        self.rets, self.ends, self.errno_stores = [], set(), 0
         self.states = {self.a: self.entry()}
         work = [self.a]
         steps = 0
@@ -855,3 +868,73 @@ def wine_path_id(ins, a, b, sites, f):
                 st[t] = new
                 work.append(t)
     return ends.pop()[1] if len(ends) == 1 and next(iter(ends))[0] == 1 else None
+
+
+# ---- the final image (objstub.image_check for the host profile) --------------------------------------------------------------------------
+
+def _elf64(path):
+    d = open(path, "rb").read()
+    if d[:4] != b"\x7fELF" or d[4] != 2 or d[5] != 1 or struct.unpack_from("<H", d, 18)[0] != EM_X86_64 or struct.unpack_from("<H", d, 16)[0] not in (2, 3):
+        raise ValueError("%s: not a little-endian x86-64 ELF executable or shared object" % path)
+    shoff, = struct.unpack_from("<Q", d, 0x28)
+    shent, shnum, shstr = struct.unpack_from("<HHH", d, 0x3A)
+    raw = [struct.unpack_from("<IIQQQQIIQQ", d, shoff + i * shent) for i in range(shnum)]
+    cstr = lambda off, n: d[off + n:d.index(b"\0", off + n)].decode("latin-1")
+    secs = [(cstr(raw[shstr][4], r[0]), r[1], r[2], r[3], r[4], r[5], r[6]) for r in raw]   # name, type, flags, addr, off, size, link
+    tab = [i for i, t in enumerate(secs) if t[1] == 2]
+    if len(tab) != 1:
+        raise ValueError("%s: the image has no symbol table (or several): its function bodies cannot be read" % path)
+    t = secs[tab[0]]
+    syms = []
+    for e in struct.iter_unpack("<IBBHQQ", d[t[4]:t[4] + t[5]]):
+        syms.append((cstr(secs[t[6]][4], e[0]), e[4], e[5], e[1] & 15, e[1] >> 4, e[3]))
+    return d, secs, syms
+
+
+def image_check(path, errno):
+    """The host-profile image rule, the same rule as objstub.image_check over x86-64: -> (number of bodies, [(name, kind, detail)]). ERRNO = (form, SYMBOL) of
+    errno_probe. Every STT_FUNC symbol of an executable section of the image with a size is a body; equal ranges are one body, every name judged. `fixed-failure`:
+    the Flow rules of the module docstring (V) with the errno accessor transparent (its result is N) hold, at least one store of a constant through N occurs, and
+    every path returns the same constant in eax/rax: the whole effect is `errno = K1; return K2`. A body with another call or an indirect branch is outside the
+    class by definition. `unjudged` (red, never skipped): errno through a TLS symbol, a body whose decoded instructions do not tile [value, value+size), a byte run
+    the decoder rejects (`(bad)`), a size that leaves the section."""
+    form, sym = errno
+    d, secs, syms = _elf64(path)
+    if form != "call":
+        return 0, [(path, "unjudged", "errno is reached through the thread-local symbol %s: a store through it is not read by this rule" % sym)]
+    funcs = sorted({(s[1], s[2], s[0], s[5]) for s in syms if s[3] == 2 and s[2] > 0 and 0 < s[5] < len(secs) and secs[s[5]][2] & 4})
+    fn_at = {}
+    for v, sz, n, _ in funcs:
+        fn_at.setdefault(v, n)
+    cache, out, bodies, done = {}, [], 0, {}
+    for v, sz, n, shn in funcs:
+        bodies += 1
+        if (v, sz) in done:
+            out += [(n, k, dd) for k, dd in done[(v, sz)]]
+            continue
+        sec = secs[shn]
+        if sec[0] not in cache:
+            cache[sec[0]] = seal(disassemble(path, sec[0]), sec[3] + sec[5])
+        allins = cache[sec[0]]
+        res = []
+        if v + sz > sec[3] + sec[5]:
+            res = [("unjudged", "the size %d leaves the section %s" % (sz, sec[0]))]
+        else:
+            ins = {x: i for x, i in allins.items() if v <= x < v + sz}
+            if v not in ins or max(ins) + ins[max(ins)].n != v + sz or any(x + i.n not in ins and x + i.n != v + sz for x, i in ins.items()):
+                res = [("unjudged", "the decoded instructions do not tile [%#x, %#x)" % (v, v + sz))]
+            elif any("(bad)" in i.text for i in ins.values()):
+                res = [("unjudged", "a byte run of the body is rejected by the decoder")]
+            else:
+                f = Flow(ins, v, v + sz, {}, [], errno=sym, loads_ok=False, wine=True)
+                f.fn_at = fn_at
+                try:
+                    r = f.run()
+                except Unanalysable as e:
+                    res = [("unjudged", "not analysable: %s" % e)]
+                else:
+                    if r is not None and f.errno_stores > 0 and isinstance(r["x0"], tuple) and r["x0"][0] == "K":
+                        res = [("fixed-failure", "stores a constant through the errno pointer (%s) and returns the constant %d: a fixed failure" % (sym, r["x0"][1]))]
+        done[(v, sz)] = res
+        out += [(n, k, dd) for k, dd in res]
+    return bodies, out
