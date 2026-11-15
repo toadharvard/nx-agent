@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gen_env.py [OUTDIR]: env_handheld.tsv + env_docked.tsv (tests/l6/env/make_env.py: our measurement of Wine 9.0 + Mesa llvmpipe) -> env_table.gen.h/.cpp (not checked in).
+"""gen_env.py OUTDIR SPEC TSV_DIR D3DTYPES_H: env_handheld.tsv + env_docked.tsv (tests/l6/env/make_env.py: our measurement of Wine 9.0 + Mesa llvmpipe) -> env_table.gen.h/.cpp (not checked in).
 Every table cell is DERIVED from rows through the closing rules of README.md, and every rule's premise is asserted on all rows it covers (a violated rule stops the generator,
 exit 2, naming it): devtype / adapter-format independence, format classes, usage-bit conjunction, struct writes iff success. The lookup functions are in env_rules.cpp.in.
 Profiles differ only where reported by the `profile differences` line."""

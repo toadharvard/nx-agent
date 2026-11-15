@@ -76,7 +76,8 @@
    "args": [
     "/out/gen",
     "/uses/ports/fnv-nx/bridgefacts/D9_SPEC",
-    "/in/ports/fnv-nx/render/d3d9/env"
+    "/in/ports/fnv-nx/render/d3d9/env",
+    "/in/ports/fnv-nx/shim/include/d3d9types.h"
    ],
    "inputs": [
     "ports/fnv-nx/shim/include/d3d9types.h",

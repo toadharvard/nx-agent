@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gen_wine_ids.py OUTDIR [TABLE]: gen/wine_fixme_ids.gen.h, the ids of verify/wine_fixme.tsv as named constants.
+"""gen_wine_ids.py OUTDIR TABLE: gen/wine_fixme_ids.gen.h, the ids of verify/wine_fixme.tsv as named constants.
 The table verify/wine_fixme.tsv (id, contract_name, wine_ref, kind, value) is the ONLY place where an id, its Wine 9.0 function, its kind and its value are
 written. The code names an id as NXW_<wine function> (the last component of wine_ref), so an id in the code is the table's row by construction: a name
 without a row does not compile, a row renamed in the table renames the constant. The wine function names of the rows must be unique (checked here: a clash is an error).
@@ -7,11 +7,10 @@ Rows are read with the same fields as verify/objstub.py read_wine_table (which v
 import os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_TABLE = os.path.join(HERE, "..", "..", "..", "verify", "wine_fixme.tsv")
 
 
 def main(argv):
-    out = argv[1]; table = argv[2] if len(argv) > 2 else DEFAULT_TABLE
+    out = argv[1]; table = argv[2]   # the table is an argument (no default)
     rows, names = [], {}
     for l in open(table).read().split("\n"):
         if not l or l.startswith("#"): continue

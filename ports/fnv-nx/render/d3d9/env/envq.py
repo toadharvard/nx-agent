@@ -6,9 +6,7 @@ D3DMULTISAMPLE_TYPE enum value + invalid ones; every single usage bit of the 32-
 (see render/d3d9/env/README.md for why single bits + pairs cover the usage function)."""
 import os, re, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.dont_write_bytecode = True
-# the port tree: the checkout (this file at render/d3d9/env) or, in a recipe generator stage, the declared inputs mounted at /in/<repo path>
-TREE = "/in/ports/fnv-nx" if HERE.startswith("/tool/") else os.path.normpath(os.path.join(HERE, "..", "..", ".."))
-HDR = os.path.join(TREE, "shim", "include", "d3d9types.h")
+HDR = sys.argv[4]   # the importing generator's argument: gen_env.py OUT SPEC TSV_DIR D3DTYPES_H (the mounted header; no default, no path of this file)
 fcc = lambda s: sum(ord(c) << (8 * i) for i, c in enumerate(s))
 
 
