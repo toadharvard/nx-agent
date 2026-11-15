@@ -1440,3 +1440,7 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - It has 6 tests.
   - The decltype and crossing record request is forwarded to the L2 lead.
   - cand2 step 7 is now 13979d48.
+- 01:02 **L6A finding: the PP and generated stages mount every external of the root.**
+  - Rule: a stage mounts and keys only the externals it names. PP gets the include-path externals; a generated stage gets those its doc names.
+  - Assigned to w24 gatekeys.
+- 01:02 **L6 w6.** cand2 b6865471d carries tlsmodel in REQUIRED_PRODUCT and in its rows. The per-row lists go away with w24's admit-by-class.
