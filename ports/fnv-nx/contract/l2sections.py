@@ -7,7 +7,7 @@
     read(path)                 -> {'sympair': [...], 'vtpair': [...], 'n3': [...]}; an absent section gives []
 
 Format: plain text, LF-terminated lines, TAB-separated.  sympair: exactly 4 fields, kind one of KINDS or
-`unnamed:<reason>` (reason not empty); the name may be empty only for the kinds in NAMELESS.  vtpair: exactly 4
+`nodecor:<reason>` (reason not empty); the name may be empty only for the kinds in NAMELESS.  vtpair: exactly 4
 fields, offsets decimal.  n3: 2..5 fields (the producer omits trailing empty ones), verdict not empty, inlined a
 `,`-separated list of symbols, kind one of N3_KINDS or a clone suffix (not empty, no blank), types `,`-separated
 Itanium type strings (the producer's own separator; the task brief said `;`).  Any other line is an error
@@ -55,11 +55,11 @@ def parse_sympair(data, where):
     for n, ln in enumerate(_lines(data, where), 1):
         sym, ms, kind, df = _fields(ln, where, n, 4, 4)
         _need(sym, where, n, 'symbol')
-        if kind not in KINDS and not (kind.startswith('unnamed:') and len(kind) > 8):
+        if kind not in KINDS and not (kind.startswith('nodecor:') and len(kind) > 8):
             raise ValueError('%s: line %d: unknown kind %r' % (where, n, kind))
         if df not in ('def', 'ref'):
             raise ValueError('%s: line %d: %r is neither def nor ref' % (where, n, df))
-        if not ms and kind not in NAMELESS and kind[:8] != 'unnamed:':
+        if not ms and kind not in NAMELESS and kind[:8] != 'nodecor:':
             raise ValueError('%s: line %d: kind %s without an MSVC name' % (where, n, kind))
         out.append((sym, ms, kind, df))
     return out
