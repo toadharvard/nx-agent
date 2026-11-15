@@ -831,3 +831,9 @@ Paused: w3b, w4, farm; no other work.
     - link certificates: 75,245/120,392 linked so far, 0 failures;
     - disagreements: 0.
     - Blocked (L1): run stages re-ingest the deb union each time, and {stage} references re-run the whole root; the summary root takes over 2 h cold. Sent to L1.
+- 13:20Z w5 0b7061b06: full sm_link universe (shaders b545961f).
+    - 1,809 shaders (443 VS, 1,366 PS): 115,776 stage certificates; 120,392/120,392 programs linked.
+    - 0 failures, 0 disagreements, 0 non-empty L.
+    - gates.d/sm_link.json and gate_sm_link.py added.
+    - Rejected: case 2 (translator declared_pairs, branch w5-pair 5da4de284). d3d9 never calls the translator. The single source stays smscan nx_sm_pairs.
+    - Re-run pending with smscan@host and pair@host.
