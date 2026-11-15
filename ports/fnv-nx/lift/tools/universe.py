@@ -21,12 +21,12 @@ if __name__ == '__main__': _POS, _O = cli.parse(USAGE, sys.argv[1:], (0, 0), _OP
 else: _O = {}
 def _need(*ks):
     miss = [k for k in ks if k not in _O]
-    if miss: sys.stderr.write('universe.py: missing %s\n\n%s\n' % (' '.join(miss), USAGE)); sys.exit(2)
+    if miss: sys.exit('universe.py: missing %s\n\n%s' % (' '.join(miss), USAGE))
 MOD = _O.get('--module'); STRICT = MOD is not None   # module mode: pointers are code/data only on evidence
 _need('--out', '--keys'); import ehflow; ehflow.configure_keys(_O['--keys'])
 if STRICT:      # separate engine (every relocated pointer into executable bytes is an entry)
     _need('--modules', '--moddirs', '--lib'); sys.path.insert(0, _O['--lib'])      # --lib: the directory that holds the package fnvlift (the lifter's PE loader and decoder); a stage mounts it as an input
-    import modlift; sys.exit(modlift.run(MOD, SimpleNamespace(modules=_O['--modules'], moddirs=_O['--moddirs'].split(':'), facts_out=_O['--out'])))
+    import modlift; modlift.run(MOD, SimpleNamespace(modules=_O['--modules'], moddirs=_O['--moddirs'].split(':'), facts_out=_O['--out'])); sys.exit(0)      # modlift.run raises on failure; its verdict is in the gate JSONs
 _need('--exe', '--funcs')
 EXE = _O['--exe']; FUNCS = _O['--funcs']; NAME = ''
 OUTD = _O['--out']; OUT = OUTD + '/universe.tsv'; os.makedirs(OUTD, exist_ok=True)
@@ -37,10 +37,12 @@ if '--refused' not in _O:       # driver: reloc-consistency refusals to their fi
         _k += 1
         open(_rf, 'w').write(''.join('%08x\n' % a for a in sorted(_R)))
         _p = subprocess.run([sys.executable, '-I', os.path.abspath(__file__)] + sys.argv[1:] + ['--refused', _rf], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        if _p.returncode:      # a failed round: its whole output and the reason go to stderr (a signal kill, e.g. the out-of-memory killer, has a negative returncode and no output of its own)
+            sys.stderr.write(_p.stdout); sys.stderr.write('universe.py: reloc-consistency round %d: the round process %s\n' % (_k, 'was killed by signal %d' % -_p.returncode if _p.returncode < 0 else 'exited with status %d' % _p.returncode)); sys.exit('universe.py: stopped')
         _nx = set(int(l.split()[0], 16) for l in open(OUTD + '/refused_next.tsv') if l.strip()) if os.path.exists(OUTD + '/refused_next.tsv') else set()
         if _nx <= _R:
             sys.stdout.write(_p.stdout); print('reloc-consistency fixed point after %d rounds: %d entries refused' % (_k + 1, len(_R)))
-            open(_rf, 'w').write('# columns: entry; unproven pointer-only entries refused by reloc-consistency (the bytes go to data, the relocated pointer is a data fact)\n' + ''.join('%08x\n' % a for a in sorted(_R))); sys.exit(_p.returncode)
+            open(_rf, 'w').write('# columns: entry; unproven pointer-only entries refused by reloc-consistency (the bytes go to data, the relocated pointer is a data fact)\n' + ''.join('%08x\n' % a for a in sorted(_R))); sys.exit(0)      # a failed round was reported above
         _R |= _nx
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
 M = pemod.load(EXE); d, pe, base, secs, loc, off, sec, u32, dirent = M.d, M.pe, M.base, M.secs, M.loc, M.off, M.sec, M.u32, M.dirent
