@@ -26,7 +26,7 @@ Classes:
            failure classes of verify/VERDICT.md. A product root cannot be admitted before those gates exist in
            gates.d, so code enters the trunk only together with the gates that judge it.
   test     tests linked against the real files of the product roots: REQUIRED_TEST gates (build, determinism, linkstrict, objstub, doubles,
-           oracle, stub, assumptions, legal, pure), a "recipe" like a product root and a "target"; never REQUIRED_PRODUCT. The gates of
+           oracle, assumptions, pure), a "recipe" like a product root and a "target"; never REQUIRED_PRODUCT. The gates of
            REQUIRED_TEST that cover roots (build, determinism, linkstrict, objstub: gates.d `covers`) include class test.
   ref      reference files that tests/oracle.json records point at (spec, contract, model): no gate named, no recipe, no units, no link,
            no outputs. Every file of a ref root is the `path` of a reference of some tests/oracle.json, and none is a build.json or a
@@ -57,8 +57,8 @@ REQUIRED_PRODUCT = ("objstub", "linkstrict", "determinism", "oracle",
                     "datamodel", "order", "fpexact", "eh", "exepin", "addr32", "machine", "hostapi")
 # A test root (class test) is a root that links the tests of the product against the product roots' real files (CLAUDE.md "no doubles in
 # tests"): it is judged by its own set, never by REQUIRED_PRODUCT. Its gates: the build gates, the doubles gate (symbols the test defines
-# intersect symbols of the product roots it links = empty), an oracle record for every test, stub, the registry gate, Legal and pure.
-REQUIRED_TEST = ("build", "determinism", "linkstrict", "objstub", "doubles", "oracle", "stub", "assumptions", "legal", "pure")
+# intersect symbols of the product roots it links = empty), an oracle record for every test, the registry gate and pure (the stub gate is objstub; Legal is a property of the whole public tree, a whole-tree gate of the verdict, not a per-root requirement).
+REQUIRED_TEST = ("build", "determinism", "linkstrict", "objstub", "doubles", "oracle", "assumptions", "pure")
 REQUIRED = {"doc": (), "tool": ("selftests",), "product": REQUIRED_PRODUCT, "ref": (), "test": REQUIRED_TEST}
 
 

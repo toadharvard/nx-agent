@@ -1,0 +1,20 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "legal",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_legal.py"
+ ],
+ "result": "legal.json",
+ "covers": [
+  "doc",
+  "tool",
+  "ref",
+  "test",
+  "product-guest",
+  "lifted",
+  "host-product",
+  "linked"
+ ]
+}
