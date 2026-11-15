@@ -29,10 +29,12 @@ the emulator's event counts (faults, budget slices, ...) as `events` and puts th
 approximate. Threads that switch at host calls (blocks ended by a branch to a host page) are exact.
 """
 import json
-import re
 import struct
-import subprocess
+import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # run as `python3 -I icount.py`: the script's directory is not on the path
+import bootlayout  # noqa: E402
 
 FORMAT = "fnvnx-icount/1"
 OPCODE_NAMES = ("ldar_stlr", "ldapr", "ldaxr_stlxr", "dmb", "dsb", "isb")
@@ -238,21 +240,15 @@ class Icount:
 
 
 # -- spec subcommand
-def _run(*cmd):
-    return subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
-
-
 def build_spec(elf, ranges, entries):
-    """ranges: ["NAME=section:S" | "NAME=symrange:A,B"], entries: ["NAME=symfile:FILE"] -> SPEC dict; ValueError on a miss"""
-    secs, syms = {}, {}
-    for line in _run("aarch64-linux-gnu-readelf", "-S", "-W", elf).splitlines():
-        m = re.match(r"\s*\[\s*\d+\]\s+(\S+)\s+\S+\s+([0-9a-f]+)\s+[0-9a-f]+\s+([0-9a-f]+)\s", line)
-        if m:
-            secs.setdefault(m[1], []).append((int(m[2], 16), int(m[3], 16)))
-    for line in _run("aarch64-linux-gnu-nm", "--defined-only", elf).splitlines():
-        p = line.split()
-        if len(p) == 3:
-            syms.setdefault(p[2], []).append(int(p[0], 16))
+    """ranges: ["NAME=section:S" | "NAME=symrange:A,B"], entries: ["NAME=symfile:FILE"] -> SPEC dict; ValueError on a miss. The section ranges and the
+    symbol values are read from the ELF file itself (bootlayout.section_ranges, bootlayout.defined_symbols): no external program."""
+    with open(elf, "rb") as f:
+        data = f.read()
+    try:
+        secs, syms = bootlayout.section_ranges(data), bootlayout.defined_symbols(data)
+    except bootlayout.LayoutError as e:
+        raise ValueError(f"{elf}: {e}")
 
     def sym(n):
         if n not in syms:
@@ -301,7 +297,7 @@ def main(argv):
     a = ap.parse_args(argv)
     try:
         spec = build_spec(a.elf, a.range, a.entries)
-    except (ValueError, OSError, subprocess.CalledProcessError) as e:
+    except (ValueError, OSError) as e:
         print(f"icount spec: {e}", file=sys.stderr)
         return 1
     with open(a.o, "w") as f:
