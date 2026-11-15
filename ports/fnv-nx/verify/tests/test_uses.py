@@ -69,7 +69,8 @@ def main():
     g = consumer()
     g["generated"] = [dict(g["generated"][0], inputs=[P + "/p.c"])]
     e4 = errs(g, "red4")
-    check("a stage reading another root's file by path (generated input) is a check error pointing at `uses`", any("another root" in e and "uses" in e for e in e4), e4)
+    # recipe 22aa53b17: a generator may read declared inputs of any admitted root (their content is in the stage key), so a tracked file of another root is no check error
+    check("a stage reading another root's tracked file by path (generated input) is accepted: the content is in the key", not [e for e in e4 if "another root" in e], e4)
     e5 = errs(consumer(outputs={"used": "gen/other.c"}), "red5")
     check("outputs: a name that maps to no generated output of the root is a check error", any("outputs must be" in e for e in e5), e5)
     # generated `sources`: units listed by a generate stage as <external>:<path> lines
