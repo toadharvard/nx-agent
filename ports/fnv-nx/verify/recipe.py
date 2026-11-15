@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/verify/env.json ports/fnv-nx/toolchain @admitted-recipes
+# reads: ports/fnv-nx/verify/env.json ports/fnv-nx/verify/guest_compiler.json ports/fnv-nx/toolchain @admitted-recipes
 """recipe: build a product root from its recipe `build.json` ("fnvnx-recipe/1", contract in RECIPE.md) on the stage machinery:
 every step is a sandbox stage (sandbox.py) keyed by its declared inputs, cached in the store (cas.py).
     python3 -I recipe.py build --root ports/fnv-nx/X --store S --out DIR [--jobs N]     (cwd = checkout root; exit 0 green, 2 red)
@@ -414,10 +414,11 @@ def merge_inputs(base, extra, store, ws):
 
 def outside_files(text, at):
     """The `.o` files of the driver's link command TEXT that lie outside the runtime external mounted at AT, the program's own object (the driver's
-    temporary /tmp/cc*.o) excepted: a start or end file the pinned runtime's driver names from elsewhere. Empty when every one is the runtime's."""
+    temporary $TMPDIR/cc*.o) excepted: a start or end file the pinned runtime's driver names from elsewhere. Empty when every one is the runtime's."""
     line = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("COLLECT_GCC_OPTIONS=")][-1]
     toks = [posixpath.normpath(t.strip('"')) for t in line.split() if t.strip('"').endswith(".o") and t.strip('"').startswith("/")]
-    return sorted(t for t in toks if not t.startswith(at + "/") and not re.fullmatch(r"/tmp/cc[^/]*\.o", t))
+    tmp = posixpath.normpath(tempfile.gettempdir())   # the driver's temporary directory is the process's own TMPDIR
+    return sorted(t for t in toks if not t.startswith(at + "/") and not re.fullmatch(re.escape(tmp) + r"/cc[^/]*\.o", t))
 
 
 def entry_object(objs, entry):

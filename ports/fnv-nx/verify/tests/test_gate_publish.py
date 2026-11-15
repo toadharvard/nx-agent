@@ -17,7 +17,7 @@ REPO = os.path.realpath(os.path.join(VERIFY, "..", "..", ".."))
 sys.path.insert(0, VERIFY)
 import cas  # noqa: E402
 
-ROOT = "ports/fnv-nx/lib/sha256"
+ROOT = "ports/fnv-nx/hostabi/product"
 FAILS = 0
 
 
