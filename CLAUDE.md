@@ -625,3 +625,17 @@ calls, not smaller ones.
     identifiers quoted verbatim, under 300 words.
   - Check every hash, address or id it returns with one targeted command before you commit or send it.
   - When you know the file and the place, do the one read or grep yourself.
+
+## Owner order of 2026-11-15 10:40Z: "Я хочу свой кадр" — the boot loop runs now (binding)
+
+- The last boot, ELF 509809b3, passed 17 of 17 loader milestones (1.08 G instructions). It stopped before exe entry, with
+  0xC000001D after `init d3dx9_38.dll`. Since then no boot has run, because all the work went into admission to the trunk.
+- From now on, two things run in parallel:
+  - **The boot loop (L4, first item).**
+    - Link the newest ELF that the recipe can link from the leads' heads. This is a measurement build. Boot it, and
+      route the first stop, with its pc, instruction and class, to the layer that owns it.
+    - The owner closes the stop by its class rule in the product, never by a patch. Then the loop boots again.
+    - It reports each milestone reached: exe entry, WinMain, first frame.
+    - The boot verifies and never selects code.
+  - **Admission to the trunk**, as before. A milestone counts as done when the trunk reaches it.
+- Every lead puts the stop that the loop routes to it before any other item.
