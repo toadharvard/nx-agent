@@ -63,7 +63,7 @@ def image_of(a):
 def work(chunk):
     md = shape.decoder()
     from fnvlift import f_sys
-    shapes, nop, bad = {}, [], []
+    shapes, nop, bad, sites = {}, [], [], []
     for a in chunk:
         i = image_of(a)
         if i < 0:
@@ -85,17 +85,18 @@ def work(chunk):
                 bad.append((a, 'undecodable')); continue
             nop.append((a, bytes(g.bytes).hex())); continue
         k = shape.shape_key(ins); e = shapes.get(k)
+        if shape.family(ins) == 'simd': sites.append((a, k))
         if e is None:
             shapes[k] = [shape.family(ins), 1, a]
         else:
             e[1] += 1; e[2] = min(e[2], a)
-    return shapes, nop, bad
+    return shapes, nop, bad, sites
 
 
 def main(argv):
-    if len(argv) != 3:
+    if len(argv) not in (3, 4):
         sys.stderr.write(__doc__); return 2
-    pack, imgs, out = argv
+    pack, imgs, out = argv[:3]
     shas = {}
     with open(imgs) as fh:
         for ln in fh:
@@ -117,9 +118,9 @@ def main(argv):
     chunks = [ls[i::n] for i in range(n)]
     with multiprocessing.Pool(4) as p:
         res = p.map(work, chunks)
-    shapes, nop, bad = {}, [], []
-    for s, np_, b in res:
-        nop += np_; bad += b
+    shapes, nop, bad, sites = {}, [], [], []
+    for s, np_, b, st in res:
+        nop += np_; bad += b; sites += st
         for k, (fam, c, a) in s.items():
             e = shapes.get(k)
             if e is None:
@@ -150,6 +151,11 @@ def main(argv):
             f, c, a = shapes[k]
             fh.write('%s\t%s\t%s\t%d\t%08x\n' % (k, f, fk[k], c, a))
     sys.stdout.write('labels %d raise_only %d shapes %d nop_gap %d %s\n' % (len(ls), len(raised), len(shapes), len(nop), ' '.join('%s=%d' % x for x in sorted(fam.items()))))
+    if len(argv) == 4:                                        # SITES.tsv: every address of a simd-family instruction: module:address<TAB>shape key
+        with open(argv[3], 'w', newline='\n') as fh:
+            fh.write('# fnvnx-packsites/1 simd-family sites of the pack, module:address (pack load address)\tshape\n')
+            for a, k in sorted(sites):
+                fh.write('%s:%08x\t%s\n' % (IMGS[image_of(a)][0], a, k))
     return 0
 
 
