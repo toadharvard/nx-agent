@@ -13,6 +13,8 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import plugbuild as pb  # noqa: E402
+sys.path.insert(0, os.path.join(HERE, '..', '..', 'link'))
+import ctypes_compat as cc  # noqa: E402
 
 check = pb.Checks('test_layout')
 FIX = os.path.join(HERE, 'layout', 'layout.cpp')
@@ -100,6 +102,51 @@ def linkage(obj):
     check('all three values occur', set(got.values()) == {'none', 'internal', 'external'}, sorted(set(got.values())))
 
 
+# `.fnvnx.decltype` of a C unit: the declared type of every external symbol, in the grammar link/ctypes_compat.py parses
+DECLTYPE = {
+    'v': 'struct:S{x:int;y:*char}', 'il': '*struct:L', 'p': 'struct:-{a:int}', 'b': 'struct:B{f:unsigned_int:3;-:int:5;g:int}',
+    'a': '[4]int', 'au': '[]int', 'f': '(int,*char)int', 'g': '(int,...)int', 'h': '(?)int', 'q': 'const:*int', 'pc': '*const:int',
+    'l': 'struct:Lst{next:*struct:Lst}', 'ts': 'struct:-{m:int;n:*const:int}', 'vv': 'volatile:long_long_unsigned_int',
+    'fp': '*(*()int,*const:char)int', 'u': 'union:U{i:int;f:float}', 'cs': 'const:struct:S{x:int;y:*char}',
+    'caller': '()int', 'use': '()int', 'implicit_fn': '(?)int',
+}
+
+
+def decltype(obj):
+    data = pb.section(obj, '.fnvnx.decltype')
+    try:
+        got = cc.parse_decltype((data or '').encode(), 'decltype.c') if data else None
+    except ValueError as e:
+        check('.fnvnx.decltype parses with ctypes_compat.parse_decltype', False, e)
+        return
+    check('.fnvnx.decltype exists and parses with ctypes_compat.parse_decltype', got is not None)
+    if got is None:
+        return
+    e = got.pop('e', None)
+    check('enum E: `enum:E=` + int or unsigned_int (the compiler\'s choice of the integer type)', e in ('enum:E=int', 'enum:E=unsigned_int'), e)
+    for sym, want in sorted(DECLTYPE.items()):
+        check('decltype %s is %s' % (sym, want), got.get(sym) == want, got.get(sym))
+    check('exactly the external symbols (no static, no builtin), each once', set(got) == set(DECLTYPE), sorted(set(got) ^ set(DECLTYPE)))
+    check('every spelling round-trips: parse is total on what the plugin wrote', all(cc.parse(t) for t in got.values()))
+
+
+def decltype_errors(td, so):
+    """a type outside the grammar is an error of the compilation; the declarations of one symbol that the front end composes (C11 6.2.7p3)
+    give one line, with the composite type"""
+    for name, text, why in (('atomic', '_Atomic int at;\n', '_Atomic'), ('cplx', '_Complex double z;\n', 'outside the grammar')):
+        src = os.path.join(td, name + '.c')
+        open(src, 'w').write(text)
+        r = pb.compile(src, os.path.join(td, name + '.o'), so)
+        check('decltype: %s is an error naming the cause' % name, r.returncode != 0 and why in r.stderr, (r.returncode, r.stderr[-400:]))
+    for name, text, want in (('comp1', 'int use(void) { extern int w[]; return w[0]; }\nint w[3];\n', {'w': '[3]int', 'use': '()int'}),
+                             ('comp2', 'int f(void);\nint use(void) { int f(); return f(); }\n', {'f': '()int', 'use': '()int'})):
+        src = os.path.join(td, name + '.c')
+        open(src, 'w').write(text)
+        r = pb.compile(src, os.path.join(td, name + '.o'), so)
+        got = cc.parse_decltype(pb.section(os.path.join(td, name + '.o'), '.fnvnx.decltype').encode(), name) if r.returncode == 0 else None
+        check('decltype: declarations of one symbol compose to one line (%s)' % name, got == want, (got, r.stderr[-300:]))
+
+
 def main():
     td = tempfile.mkdtemp(prefix='test-layout-')
     try:
@@ -114,6 +161,12 @@ def main():
         check('linkage.cpp compiles', r.returncode == 0, r.stderr[:2000])
         if r.returncode == 0:
             linkage(obj)
+        obj = os.path.join(td, 'd.o')
+        r = pb.compile(os.path.join(HERE, 'layout', 'decltype.c'), obj, so)
+        check('decltype.c compiles', r.returncode == 0, r.stderr[:2000])
+        if r.returncode == 0:
+            decltype(obj)
+        decltype_errors(td, so)
         r = pb.compile(FIX, os.path.join(td, 'x.o'), so, args=['-fplugin-arg-fnvnx_layout-mode=1'])
         check('an unknown plugin argument is an error', pb.argument_refused(r, 'layout'), r.stderr[:500])
     finally:
