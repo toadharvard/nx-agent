@@ -1885,3 +1885,5 @@ bottleneck: the cand2 merge (cut, the stage-2 pin, a warm verdict).
 bottleneck: the cand3 platform fix (w12), which blocks the relift, and the cand2 merge (w15).
 - 22:30 L5 w10: HOST1 fix b7bda281f (presence checks deleted in rt/guest; rt/guest and guest_main green) goes into cand3. gen_combridge fix 0608004f5: w12 takes it if it follows the uses rule, plus the foreign-import check. Platform's gdifont -Wnarrowing stays with L5.
 bottleneck: the cand3 platform fix (w12), and the cand2 merge (w15).
+- 22:34 L4 bootrt is green (w9 bdc9c9d4: 0 findings, test_bootrt 7/7); its 3 commits go into cand3. Whole-tree objstub at 41a8855d4: 25 findings over 311/324. The 8 mojoshader V go to L6. The 17 unattributed (12 dm-uncited, 3 build-red, 2 recipe-invalid) are attributed by w12 at its new head.
+bottleneck: the cand3 platform fix (w12), and the cand2 merge (w15).
