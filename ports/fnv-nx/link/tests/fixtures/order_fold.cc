@@ -29,3 +29,12 @@ void passes(const T12 *s) { takes(*s); }
 // atomics: every memory order is raised to seq_cst
 int rmw(int *p) { return __atomic_fetch_add(p, 1, __ATOMIC_RELAXED); }
 int cas(int *p, int *e) { return __atomic_compare_exchange_n(p, e, 1, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED); }
+// a CAS on shared memory with a shared `expected`: the builtin works on a private copy, the failure path stores back ordered
+bool cas_sh(int *p, int *e) { return __atomic_compare_exchange_n(p, e, 1, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED); }
+bool cas_loc(int *p) { int e = 0; return __atomic_compare_exchange_n(p, &e, 1, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED); }
+// bit-fields: an access of the allocation unit, one ldar / stlr of the unit
+struct BF { unsigned a : 3; unsigned b : 5; int c : 7; unsigned d : 17; };
+unsigned bf_get(const BF *p) { return p->b; }
+int bf_gets(const BF *p) { return p->c; }
+void bf_set(BF *p, unsigned v) { p->b = v; }
+void bf_copy(BF *d, const BF *s) { d->b = s->b; }
