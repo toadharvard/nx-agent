@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The CPUID feature flag of every instruction form of the pack, read from the Intel SDM (OWNER 10, ASM-009: the x86 ISA as documented in the SDM) and, for a form the SDM does not define, from the pinned AMD APM Vol. 3 (vendormap.py: a map cell that names a feature of its Table 3-1 that Appendix E defines).
 
-    python3 -I sdmfeat.py rows SDM.txt SITES.tsv OUT_ROWS.tsv [PUBLIC_ROWS.tsv] --apm APM.pdf (APM.txt beside it)  # the per-form feature rows; OUT_ROWS lists the shapes of each form (exe-derived: private), PUBLIC_ROWS (lift/proof/tests/sdm_cpuid_feature_rows.tsv) only their number
-    python3 -I sdmfeat.py features SDM.txt APM.pdf OUT.tsv   # the feature -> CPUID leaf/reg/bit table (SDM U APM, a page cite per row)
+    python3 -I sdmfeat.py rows SDM.txt SITES.tsv OUT_ROWS.tsv [PUBLIC_ROWS.tsv] --apm APM.pdf [--apm ...] (one per pinned AMD volume, Vol. 3 and Vol. 5; APM.txt beside each)  # the per-form feature rows; OUT_ROWS lists the shapes of each form (exe-derived: private), PUBLIC_ROWS (lift/proof/tests/sdm_cpuid_feature_rows.tsv) only their number
+    python3 -I sdmfeat.py features SDM.txt OUT.tsv --apm APM.pdf [--apm ...]   # the feature -> CPUID leaf/reg/bit table (SDM U APM, a page cite per row)
     python3 -I sdmfeat.py partition OUT_ROWS.tsv SITES.tsv OUT.tsv  # the cleared sites, from the rows file ONLY
 
 SDM.txt: `pdftotext -layout` of the Intel(R) 64 and IA-32 Architectures SDM, combined volumes (its sha256 is in every output header; the page numbers cited are those of that edition).
@@ -76,12 +76,14 @@ def flag_rows(lines):
 
 
 def cmd_features(sdm, apm, out):
+    apm = apm if isinstance(apm, list) else [apm]
     """the feature -> CPUID bit table of the partition: Intel SDM Vol. 1 ch. 21 leaf tables U AMD APM Vol. 3 Appendix E CPUID function tables, one row per (feature, leaf, sub, reg, bit), a page cite on every row"""
     from proof import vendormap
     rows = [(n, l, s_, r, b, c) for n, l, s_, r, b, c in flag_rows(load(sdm))]
-    rows += vendormap.cpuid_rows(apm.replace('.pdf', '.txt'))
+    for a in apm:
+        rows += vendormap.cpuid_rows(a.replace('.pdf', '.txt'))
     with open(out, 'w', newline='\n') as fh:
-        fh.write('# fnvnx-cpuid-feature-bits/1 sdm_sha256=%s apm_sha256=%s\n# feature\tleaf\tsub\treg\tbit\tcitation\n' % (sha_file(sdm.replace('.txt', '.pdf')), sha_file(apm)))
+        fh.write('# fnvnx-cpuid-feature-bits/1 sdm_sha256=%s apm_sha256=%s\n# feature\tleaf\tsub\treg\tbit\tcitation\n' % (sha_file(sdm.replace('.txt', '.pdf')), ','.join(sha_file(a) for a in apm)))
         for n, l, s_, r, b, c in sorted(set(rows)):
             fh.write('%s\t%08X\t%d\t%s\t%d\t%s\n' % (n, l, s_, r, b, c))
     sys.stdout.write('features %d rows\n' % len(set(rows)))
@@ -442,16 +444,11 @@ def vendor_cell(cells, mand, body):
     return next((cells[(body[1], p)] for p in ((mand,) if mand else ('n/a', 'none')) if (body[1], p) in cells), None)
 
 
-def cmd_rows(sdm, sites, out, public=None, apm=None):
+def cmd_rows(sdm, sites, out, public=None, apm=()):
     from proof import shape, vendormap
-    import pdfplumber
     lines = load(sdm); cpu = declared_cpu()
-    apdf = pdfplumber.open(apm); atxt = apm.replace('.pdf', '.txt')
-    afeat = vendormap.cpuid_rows(atxt)
+    afeat, vcells = vendormap.layer([(a, a.replace('.pdf', '.txt')) for a in apm])   # every pinned AMD volume: the Appendix E bit rows and the vendor map cells that name a feature (Appendix A maps with Tables 3-1 / D-1, instruction references)
     table = vendormap.table(flag_table(lines), afeat)                         # Intel SDM CPUID tables U AMD APM Appendix E: one table, one rule
-    fnames = vendormap.gating(atxt, afeat)                                    # the features that Table 3-1 names as gating instructions
-    vnames = dict({x: x for x in fnames}, **{m: v[0] for m, v in vendormap.subsets(apdf, atxt, fnames).items()})
-    vcells = vendormap.mapcells(apdf, atxt, vnames)                           # vendor map cells that name a feature (APM Appendix A, with Table D-1 for cells that name an instruction)
     from proof import opmap
     maps = opmap.load(sdm.replace('.txt', '.pdf'), sdm)                       # Appendix A, from the PDF's table cells
     allrows = sdm_rows(lines, table)
@@ -575,9 +572,11 @@ def cmd_partition(rows, sites, out):
 
 
 def main(argv):
-    if '--apm' in argv:
-        i = argv.index('--apm'); apm = argv[i + 1]; argv = argv[:i] + argv[i + 2:]
-        if len(argv) in (4, 5) and argv[0] == 'rows': return cmd_rows(*argv[1:], apm=apm)
+    apm = []
+    while '--apm' in argv:                                                   # one `--apm VOL.pdf` per pinned AMD volume (VOL.txt beside it)
+        i = argv.index('--apm'); apm.append(argv[i + 1]); argv = argv[:i] + argv[i + 2:]
+    if apm and len(argv) in (4, 5) and argv[0] == 'rows': return cmd_rows(*argv[1:], apm=apm)
+    if apm and len(argv) == 3 and argv[0] == 'features': return cmd_features(argv[1], apm, argv[2])
     if len(argv) == 4 and argv[0] == 'features': return cmd_features(*argv[1:])
     if len(argv) == 4 and argv[0] == 'partition': return cmd_partition(*argv[1:])
     sys.stderr.write(__doc__); return 2

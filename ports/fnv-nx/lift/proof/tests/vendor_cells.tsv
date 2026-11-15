@@ -348,9 +348,32 @@ XSAVES	0000000D	1	EAX	3	APM Vol. 3 Appendix E (PDF page index 676), "CPUID Fn000
 x2APIC	00000001	0	ECX	21	APM Vol. 3 Appendix E (PDF page index 667), "CPUID Fn0000_0001_ECX Feature Identifiers": bit 21 x2APIC
 x2AVIC	8000000A	0	EDX	18	APM Vol. 3 Appendix E (PDF page index 698), "CPUID Fn8000_000A_EDX SVM Feature Identification": bit 18 x2AVIC
 x2AVIC_EXT	8000000A	0	ECX	6	APM Vol. 3 Appendix E (PDF page index 697), "CPUID Fn8000_000A_ECX SVM Feature Identification": bit 6 x2AVIC_EXT
+cell	0F01	F2	RMPREAD
+cell	0F01	F3	RMPQUERY
+cell	0F01	n/a	RDTSCP
+cell	0F05	n/a	SysCallSysRet
+cell	0F07	n/a	SysCallSysRet
+cell	0F0E	n/a	3DNow
 cell	0F0F	n/a	3DNow
+cell	0F2A	66	SSE2
+cell	0F2A	n/a	SSE
+cell	0F2C	66	SSE2
+cell	0F2C	n/a	SSE
+cell	0F2D	66	SSE2
+cell	0F30	n/a	MSR
+cell	0F31	n/a	TSC
+cell	0F32	n/a	MSR
+cell	0F34	n/a	SysEnterSysExit
+cell	0F35	n/a	SysEnterSysExit
+cell	0F77	n/a	MMX
 cell	0FB8	F3	POPCNT
 cell	0FBD	F3	ABM
+cell	0FC5	n/a	SSE
+cell	0FD6	F2	SSE2
+cell	0FD6	F3	SSE2
+cell	0FE0	n/a	SSE
+cell	0FE3	n/a	SSE
+cell	0FE7	n/a	SSE
 subset	3DNow!	3DNow
 subset	ADCX	ADX
 subset	ADOX	ADX

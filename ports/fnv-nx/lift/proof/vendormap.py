@@ -31,6 +31,8 @@ def cpuid_rows(txt):
     The first text line of the appendix after the table of contents is its heading; it ends at the next Appendix heading.  The citation names the PDF page index and the section."""
     pages = open(txt, encoding='utf-8', errors='replace').read().split('\x0c')
     start = [i for i, p in enumerate(pages) if re.search(r'^Appendix E Obtaining Processor Information Via\s*$', p, re.M)]
+    if not start:
+        return []                                      # a volume without the CPUID appendix defines no bit rows
     assert len(start) == 1, 'Appendix E heading must occur once outside the table of contents'
     end = next((i for i in range(start[0] + 1, len(pages)) if re.search(r'^Appendix [F-Z] ', pages[i], re.M)), len(pages))
     out = []; cur = None
@@ -102,6 +104,47 @@ def mapcells(pdf, txt, names):
     return out
 
 
+SUPPORT = re.compile(r'Support\s+for\s+(?:this|the\s+\S+)\s+instruction(?:\s+(?:sub)?set)?\s+is\s+indicated\s+by\s+CPUID\s+Fn[0-9A-F_]+_E[ABCD]X\[(\w+)\]')
+OPROW = re.compile(r'^\s*\S+(?:\s+[^\s]+){0,4}?\s{2,}((?:(?:66|F2|F3)\s+)?)0F\s+([0-9A-F]{2})(?=\s|$)')
+
+
+def instrcells(txt, known):
+    """-> {(opcode byte after 0F, prefix): (feature, citation)}: the instruction reference of an AMD volume that defines instructions (Vol. 5; the same rule reads any such volume).  A table `Mnemonic  Opcode  Description` is preceded by its instruction's text; the feature of
+    its rows is the one that text names in `Support for this instruction [sub]set is indicated by CPUID FnXXXX_XXXX_REG[Feature]` when Appendix E defines that name (known: the names of cpuid_rows).  A row whose opcode is `[66|F2|F3] 0F xx` is the two-byte cell (xx, prefix; `n/a` for none).
+    A section with no such sentence, or a name Appendix E does not define, gives no cell; rows of other maps (x87, 0F 38, 0F 3A) are not two-byte cells."""
+    pages = open(txt, encoding='utf-8', errors='replace').read().split('\x0c')
+    out = {}
+    for pi, p in enumerate(pages):
+        lines = p.split('\n')
+        for j, ln in enumerate(lines):
+            if not re.match(r'^Mnemonic\s+Opcode\s+Description', ln):
+                continue
+            # the text before the table: back to the previous `rFLAGS Affected` / `Related Instructions` marker, across pages
+            ctx = []; k = j; q = pi; back = list(lines[:j])
+            while True:
+                for t in reversed(back):
+                    if re.match(r'^(rFLAGS Affected|Related Instructions)\s*$', t):
+                        break
+                    ctx.append(t)
+                else:
+                    if q > 0 and len(ctx) < 400:
+                        q -= 1; back = pages[q].split('\n'); continue
+                break
+            m = SUPPORT.findall(' '.join(reversed(ctx)))
+            feats = {f for f in m if f in known}
+            if len(feats) != 1:
+                continue
+            f = next(iter(feats))
+            for t in lines[j + 1:j + 80]:
+                if re.match(r'^(rFLAGS Affected|Related Instructions)\s*$', t):
+                    break
+                m = OPROW.match(t)
+                if m and m.group(2) not in ('38', '3A'):
+                    byte = int(m.group(2), 16); pfx = m.group(1).strip() or 'n/a'
+                    out[(byte, pfx)] = (f, 'APM Vol. 5 instruction reference (PDF page index %d): `%s` is a %s instruction (Support ... is indicated by CPUID ...[%s])' % (pi, t.strip()[:60], f, f))
+    return out
+
+
 def table(flags, apm_rows):
     out = {k: list(v) for k, v in flags.items()}
     for name, leaf, sub, reg, bit, _ in apm_rows:
@@ -119,12 +162,35 @@ def dump(rows):
     return ''.join('%s\t%08X\t%d\t%s\t%d\t%s\n' % f for f in sorted(rows))
 
 
+def layer(volumes):
+    """volumes: [(pdf path, txt path)] of every pinned AMD volume that defines bits or instructions (pins.json `external`, Vol. 3 and Vol. 5).  -> (rows, cells): the Appendix E CPUID bit rows of all volumes, and the vendor map cells that name a feature:
+    the union over the volumes of mapcells (Appendix A maps, names from Table 3-1 and Table D-1) and instrcells (instruction references).  A cell that two volumes give different features is an error, not a choice."""
+    import pdfplumber
+    rows = []
+    for _, txt in volumes:
+        rows += cpuid_rows(txt)
+    known = {r[0] for r in rows}; cells = {}
+    for pdf, txt in volumes:
+        got = {}
+        feats = gating(txt, rows)
+        if feats:
+            p = pdfplumber.open(pdf); sub = subsets(p, txt, feats)
+            got.update(mapcells(p, txt, dict({x: x for x in feats}, **{m: v[0] for m, v in sub.items()})))
+        for k, v in instrcells(txt, known).items():
+            got.setdefault(k, v)
+        for k, v in got.items():
+            if cells.setdefault(k, v)[0] != v[0]:
+                raise SystemExit('vendor cell 0F %02X %s: %s and %s' % (k[0], k[1], cells[k][0], v[0]))
+    return rows, cells
+
+
 if __name__ == '__main__':
     import pdfplumber
-    pdf = pdfplumber.open(sys.argv[1]); rows = cpuid_rows(sys.argv[2])
+    vols = [(a, a[:-4] + '.txt') for a in sys.argv[1:]]            # one pdf per pinned AMD volume, txt beside it; the first holds Table 3-1 / D-1
+    rows, cells = layer(vols)
     sys.stdout.write(dump(rows))
-    feats = gating(sys.argv[2], rows); sub = subsets(pdf, sys.argv[2], feats)
-    for k, v in sorted(mapcells(pdf, sys.argv[2], dict({x: x for x in feats}, **{m: v[0] for m, v in sub.items()})).items()):
+    for k, v in sorted(cells.items()):
         sys.stdout.write('cell\t0F%02X\t%s\t%s\n' % (k[0], k[1], v[0]))
-    for m, v in sorted(sub.items()):
+    feats = gating(vols[0][1], rows)
+    for m, v in sorted(subsets(pdfplumber.open(vols[0][0]), vols[0][1], feats).items()):
         sys.stdout.write('subset\t%s\t%s\n' % (m, v[0]))

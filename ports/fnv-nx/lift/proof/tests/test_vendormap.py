@@ -1,5 +1,5 @@
 """vendormap / sdmfeat vendor rule: (1) synthetic cells (the rule on fixed values); (2) over the PINNED AMD APM (fnv-nx-build tools/amd-apm, commit and sha256 in pins.json `external`) the parsed Appendix E CPUID bit rows, map cells and subsets equal the committed
-reference, proof/tests/vendor_cells.tsv, the cells of the declared-CPU-cleared feature (3DNow) are 0F 0F, no bit carries two features, and every row sits under its own function table."""
+reference, proof/tests/vendor_cells.tsv, the cells of the declared-CPU-cleared feature (3DNow) are 0F 0E (Vol. 5) and 0F 0F (Vol. 3), no bit carries two features, and every row sits under its own function table."""
 import hashlib
 import json
 import os
@@ -12,7 +12,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
 from proof import sdmfeat as S, vendormap as V  # noqa: E402
 
-PIN = [e for e in json.load(open(os.path.join(HERE, '..', 'pins.json')))['external'] if e['name'] == 'amd-apm'][0]
+PINS = [e for e in json.load(open(os.path.join(HERE, '..', 'pins.json')))['external'] if e['name'].startswith('amd-apm')]     # every pinned AMD volume (Vol. 3, Vol. 5)
+PIN = PINS[0]
 
 
 class Synthetic(unittest.TestCase):
@@ -77,16 +78,19 @@ class Pinned(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             subprocess.run(['git', '-C', B, 'fetch', '-q', 'origin', PIN['ref']], check=True)
             self.assertEqual(subprocess.run(['git', '-C', B, 'rev-parse', 'FETCH_HEAD'], check=True, capture_output=True, text=True).stdout.strip(), PIN['commit'], 'the pinned branch moved')
-            pdf = os.path.join(d, 'a.pdf')
-            open(pdf, 'wb').write(subprocess.run(['git', '-C', B, 'show', 'FETCH_HEAD:' + PIN['file']], check=True, capture_output=True).stdout)
-            self.assertEqual(hashlib.sha256(open(pdf, 'rb').read()).hexdigest(), PIN['sha256'])
-            txt = os.path.join(d, 'a.txt'); subprocess.run(['pdftotext', '-layout', pdf, txt], check=True)
-            p = pdfplumber.open(pdf); f = V.cpuid_rows(txt); fn = V.gating(txt, f); sub = V.subsets(p, txt, fn)
-            cells = V.mapcells(p, txt, dict({x: x for x in fn}, **{m: v[0] for m, v in sub.items()}))
-            t31 = V.table31(txt)
+            vols = []
+            for i, pin in enumerate(PINS):
+                self.assertEqual(pin['commit'], PIN['commit'])
+                pdf = os.path.join(d, 'v%d.pdf' % i)
+                open(pdf, 'wb').write(subprocess.run(['git', '-C', B, 'show', 'FETCH_HEAD:' + pin['file']], check=True, capture_output=True).stdout)
+                self.assertEqual(hashlib.sha256(open(pdf, 'rb').read()).hexdigest(), pin['sha256'])
+                subprocess.run(['pdftotext', '-layout', pdf, pdf[:-4] + '.txt'], check=True)
+                vols.append((pdf, pdf[:-4] + '.txt'))
+            f, cells = V.layer(vols)
+            txt = vols[0][1]; p = pdfplumber.open(vols[0][0]); t31 = V.table31(txt); fn = V.gating(txt, f); sub = V.subsets(p, txt, fn)
             got = V.dump(f) + ''.join('cell\t0F%02X\t%s\t%s\n' % (k[0], k[1], v[0]) for k, v in sorted(cells.items())) + ''.join('subset\t%s\t%s\n' % (m, v[0]) for m, v in sorted(sub.items()))
         self.assertEqual(got, open(os.path.join(HERE, 'vendor_cells.tsv')).read())
-        self.assertEqual({k[0] for k, v in cells.items() if v[0] == '3DNow'}, {0x0f})
+        self.assertEqual({k[0] for k, v in cells.items() if v[0] == '3DNow'}, {0x0e, 0x0f})            # 0F 0F from Vol. 3 Appendix A (map cell), 0F 0E FEMMS from Vol. 5 (instruction reference); no hand entry
         self.assertIn(('3DNow', 0x80000001, 0, 'EDX', 31), {x[:5] for x in f})
         # one bit, one feature; every row's leaf and register are those of the table that the row was read under (the citation names the section)
         seen = {}
