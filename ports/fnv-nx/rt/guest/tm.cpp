@@ -9,7 +9,7 @@
  * the block for a rollback that cannot happen):
  *   _ITM_RU1, _ITM_RU4               the plain load                      (libitm.h: read, undo-logged, unsigned 8 / 32 bit)
  *   _ITM_memcpyRnWt, _ITM_memcpyRtWn the plain memcpy                    (read non-transactional / transactional, write the other)
- *   _ZGTtnam, _ZGTtdlPv              ::operator new[] / ::operator delete (the delete libitm defers to the commit is done at once: a
+ *   _ZGTtnaj, _ZGTtdlPv              ::operator new[] / ::operator delete (the delete libitm defers to the commit is done at once: a
  *                                    transaction that never rolls back cannot tell the order)
  * OPEN: _ITM_addUserCommitAction is NOT such a plain operation.  libitm queues the action and runs it when the outermost transaction
  * COMMITS, after the rest of the transaction body; the body below runs it at once, which is a different order.  It stays only because
@@ -29,6 +29,9 @@ void _ITM_addUserCommitAction(void (*action)(void *), uint64_t resuming_id, void
     (void)resuming_id;   /* libitm requires _ITM_noTransactionId here */
     action(arg);
 }
-void *_ZGTtnam(size_t n) { return ::operator new[](n); }
+/* _ZGTtnaj is the transactional clone of operator new[](size_t): the Itanium mangling of its parameter is 'j' (unsigned int) because
+ * the guest's size_t is unsigned int (ILP32, MSVCMODEL1); 'm' (unsigned long) is the LP64 name.  The assert ties the letter to the type. */
+static_assert(sizeof(size_t) == sizeof(unsigned int), "_ZGTtnaj names operator new[](unsigned int)");
+void *_ZGTtnaj(size_t n) { return ::operator new[](n); }
 void _ZGTtdlPv(void *p) { ::operator delete(p); }
 }
