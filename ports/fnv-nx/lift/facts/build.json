@@ -77,42 +77,11 @@
     "facts",
     "gates"
    ]
-  },
-  {
-   "tool": "ports/fnv-nx/lift/tools/gscerts.py",
-   "args": [
-    "--lift",
-    "/in/ports/fnv-nx/lift",
-    "--out",
-    "/out/gscerts.json",
-    "--facts",
-    "/stage/facts",
-    "--modules",
-    "/uses/ports/fnv-nx/loader/MODULES_TSV",
-    "--exe",
-    "/ext/exe/FalloutNV.exe",
-    "--moddirs",
-    "/ext/exe:/ext/redist"
-   ],
-   "inputs": [
-    {
-     "stage": "ports/fnv-nx/lift/facts:gen:0",
-     "path": "facts"
-    },
-    "ports/fnv-nx/lift/fnvlift",
-    "ports/fnv-nx/lift/proof/__init__.py",
-    "ports/fnv-nx/lift/proof/census.py",
-    "ports/fnv-nx/lift/proof/shape.py"
-   ],
-   "outputs": [
-    "gscerts.json"
-   ]
   }
  ],
  "outputs": {
   "FACTS": "facts",
-  "GATES": "gates",
-  "GSCERTS": "gscerts.json"
+  "GATES": "gates"
  },
  "external": [
   {
