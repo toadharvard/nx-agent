@@ -1,0 +1,139 @@
+{
+ "format": "fnvnx-x86sys/1",
+ "idtr_limit": {
+  "source": "256 gates of _KiIdt in trap.s, 8 bytes each",
+  "value": 2047
+ },
+ "int_ring3": {
+  "absent_for_this_build": {
+   "0x29": "MSDN __fastfail (int 0x29): minimum supported client Windows 8, so the gate is absent on Windows 7"
+  },
+  "source": "ReactOS 0db2415442da18342be8a834c3b97a2ea4be1740 ntoskrnl/ke/i386/trap.s (the x86 IDT of the NT kernel; L3a's seh.cc transcribes the same trap handlers): the gates with INT_32_DPL3 (a user-mode `int n` of any other vector is #GP)",
+  "vectors": [
+   3,
+   4,
+   42,
+   43,
+   44,
+   45,
+   46
+  ]
+ },
+ "mirror": {
+  "commit": "cd0fc6801369e057d21cb04b62a1811353ffdee2",
+  "ref": "tools/wdk71-headers",
+  "repo": "fnv-nx-build",
+  "tree_sha256": "b533c38f5629780ea99ed22123c8a9251ec398a6b72e3f43147729e446a06beb"
+ },
+ "mov_to_sreg": {
+  "ds": {
+   "null": true,
+   "selectors": [
+    35,
+    59
+   ],
+   "source": "KGDT_R3_DATA and KGDT_R3_TEB are the ring-3 data segments of the WDK's GDT constants (ks386.inc); SDM Vol 3 MOV Sreg: a data segment of DPL 3 is loadable at CPL 3 with RPL 3"
+  },
+  "es": {
+   "null": true,
+   "selectors": [
+    35,
+    59
+   ],
+   "source": "KGDT_R3_DATA and KGDT_R3_TEB are the ring-3 data segments of the WDK's GDT constants (ks386.inc); SDM Vol 3 MOV Sreg: a data segment of DPL 3 is loadable at CPL 3 with RPL 3"
+  },
+  "fs": {
+   "null": true,
+   "selectors": [
+    35,
+    59
+   ],
+   "source": "KGDT_R3_DATA and KGDT_R3_TEB are the ring-3 data segments of the WDK's GDT constants (ks386.inc); SDM Vol 3 MOV Sreg: a data segment of DPL 3 is loadable at CPL 3 with RPL 3"
+  },
+  "gs": {
+   "null": true,
+   "selectors": [
+    35,
+    59
+   ],
+   "source": "KGDT_R3_DATA and KGDT_R3_TEB are the ring-3 data segments of the WDK's GDT constants (ks386.inc); SDM Vol 3 MOV Sreg: a data segment of DPL 3 is loadable at CPL 3 with RPL 3"
+  },
+  "ss": {
+   "null": false,
+   "selectors": [
+    35,
+    59
+   ],
+   "source": "KGDT_R3_DATA and KGDT_R3_TEB are the ring-3 data segments of the WDK's GDT constants (ks386.inc); SDM Vol 3 MOV Sreg: a data segment of DPL 3 is loadable at CPL 3 with RPL 3; ss needs a writable data segment, not the null selector"
+  },
+  "undecided": {
+   "selectors": [
+    27
+   ],
+   "why": "the KGDT_R3_CODE descriptor's readable bit is not stated in a pinned source, so whether es/ds/fs/gs may load it is undecided"
+  }
+ },
+ "os": {
+  "build": 7601,
+  "sha256": "623155df2ce5dec30006208c391dd9841f123ab5ca7c0153b246859fe617b460"
+ },
+ "selectors": {
+  "cs": {
+   "source": "ReactOS RtlInitializeContext, 0db2415442da18342be8a834c3b97a2ea4be1740: cs = KGDT_R3_CODE; WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_CODE = 0x18, RPL_MASK = 3",
+   "value": 27
+  },
+  "ds": {
+   "source": "ReactOS RtlInitializeContext, 0db2415442da18342be8a834c3b97a2ea4be1740: ds = KGDT_R3_DATA; WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_DATA = 0x20, RPL_MASK = 3",
+   "value": 35
+  },
+  "es": {
+   "source": "ReactOS RtlInitializeContext, 0db2415442da18342be8a834c3b97a2ea4be1740: es = KGDT_R3_DATA; WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_DATA = 0x20, RPL_MASK = 3",
+   "value": 35
+  },
+  "fs": {
+   "source": "ReactOS RtlInitializeContext, 0db2415442da18342be8a834c3b97a2ea4be1740: fs = KGDT_R3_TEB; WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_TEB = 0x38, RPL_MASK = 3",
+   "value": 59
+  },
+  "gs": {
+   "source": "ReactOS RtlInitializeContext, 0db2415442da18342be8a834c3b97a2ea4be1740: SegGs = 0",
+   "value": 0
+  },
+  "ss": {
+   "source": "ReactOS RtlInitializeContext, 0db2415442da18342be8a834c3b97a2ea4be1740: ss = KGDT_R3_DATA; WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_DATA = 0x20, RPL_MASK = 3",
+   "value": 35
+  },
+  "tr": {
+   "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_TSS (the task register selector of the OS, RPL 0)",
+   "value": 40
+  }
+ },
+ "sgdt": {
+  "status": "undecided",
+  "why": "the GDT base and limit of the OS are kernel values with no documented fixed value and no pinned source"
+ },
+ "sidt_base": {
+  "status": "undecided",
+  "why": "the IDT base is a kernel address with no documented fixed value and no pinned source"
+ },
+ "sldt": {
+  "status": "undecided",
+  "why": "no pinned source states the LDTR of a process that has no LDT (ReactOS ldt.c loads KGDT_LDT only when a process creates one)"
+ },
+ "sources": {
+  "ks386": {
+   "origin": "Windows Driver Kit 7.1.0 (7600.16385.1), ks386.inc",
+   "path": "headers/_ks386.inc_00858",
+   "sha256": "21b726611a5608bcd21072901667fddca99bbbeb3eb4b944cf9c438b50bbab23"
+  },
+  "thread": {
+   "origin": "ReactOS 0db2415442da18342be8a834c3b97a2ea4be1740 sdk/lib/rtl/i386/thread.c RtlInitializeContext (the initial segment registers of a user thread)",
+   "path": "reactos/sdk/lib/rtl/i386/thread.c",
+   "sha256": "9aad0631641723a6cd097d6889ec5c3d1c50a8bda15e81a6db61018e9b8e0e6c"
+  },
+  "trap": {
+   "origin": "ReactOS 0db2415442da18342be8a834c3b97a2ea4be1740 ntoskrnl/ke/i386/trap.s (the x86 IDT of the NT kernel; L3a's seh.cc transcribes the same trap handlers)",
+   "path": "reactos/ntoskrnl/ke/i386/trap.s",
+   "sha256": "7f92095488a4ffc6b638e8e3463104325b4788d04238a17a70fae04d7d061b61"
+  }
+ }
+}
