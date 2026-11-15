@@ -1983,3 +1983,13 @@ bottleneck: the cand2 merge (w15), and cand3 (w12: the pack build check).
   - The pin is L2 84f0883e. The fpexact target comes from each root's profile.
   - Reported to the orchestrator. w12 rebases cand3 onto fb9dd044f, then w15 verifies and merges it.
 bottleneck: the cand3 head on the trunk (w12), then its verdict and merge (w15).
+- 00:45 w12 is paused in its own session (its sends were denied there); its cand3 has not moved from 8fc4c58b9 in 2 h. w15 takes over cand3 on trunk fb9dd044f:
+  - L5 ad3af10c5 (f128f4efb + a9cefdbec);
+  - the sympair table through `uses`;
+  - w28 789ef219c;
+  - sched1 bb4256c9e;
+  - the store mkdtemp;
+  - integ CLAUDE.md;
+  - and a cut by the graph.
+  The head goes to L3a w8 as soon as it builds.
+bottleneck: cand3 (w15).
