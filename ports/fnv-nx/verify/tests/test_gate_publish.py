@@ -61,8 +61,7 @@ def listing(cache):
     return got
 
 
-def main():
-    tmp = tempfile.mkdtemp(prefix="gate-publish-")
+def main(tmp):
     shared, fresh, go = [os.path.join(tmp, x) for x in ("shared", "fresh", "go")]
     code = CHILD % (VERIFY, ROOT)
     kids = [subprocess.Popen([sys.executable, "-I", "-c", code, shared, go], cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for _ in range(2)]
@@ -93,5 +92,14 @@ def main():
     return 1 if FAILS else 0
 
 
+def run():
+    import shutil
+    tmp = tempfile.mkdtemp(prefix="gate-publish-")
+    try:
+        return main(tmp)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run())
