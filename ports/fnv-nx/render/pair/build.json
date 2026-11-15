@@ -59,5 +59,14 @@
    "name": "fnvnx_layout"
   }
  ],
- "link": null
+ "link": null,
+ "outputs": {
+  "INCLUDE": "include"
+ },
+ "uses": [
+  {
+   "root": "ports/fnv-nx/render/shaders/translator",
+   "output": "INCLUDE"
+  }
+ ]
 }

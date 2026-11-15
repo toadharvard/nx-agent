@@ -237,20 +237,22 @@ def build(store, python, sites, paths=()):
         if os.path.islink(e):
             raise RtError("sys.path entry %s is a symlink outside every other entry" % e)
     stage_dir = tempfile.mkdtemp(prefix="rt-python-")  # the interpreter alone, so PATH=<its dir> lies under a declared input
-    shutil.copy2(real, os.path.join(stage_dir, os.path.basename(real)))
-    bdir = os.path.dirname(real)
-    top = kept + [e for e in extra if not any(under(e, t) for t in kept)] + [bdir]
-    src = {t: t for t in top}
-    src[bdir] = stage_dir
-    ip = elf(real)
-    libs = closure([real], top)
-    libs.update(closure(roots, top, tuple(origin(ip[2], bdir)) if not ip[3] else ()))
-    src.update({at: f for at, f in libs.items() if not any(under(at, t) for t in top)})
-    for a in src:
-        if any(b != a and under(a, b) for b in src):
-            raise RtError("inputs nest: %s" % a)
-    inputs = [{"at": at, "tree": ingest_tree(s, store, third, keep) if os.path.isdir(s) else cas.ingest(s, store)} for at, s in sorted(src.items())]
-    shutil.rmtree(stage_dir)
+    try:
+        shutil.copy2(real, os.path.join(stage_dir, os.path.basename(real)))
+        bdir = os.path.dirname(real)
+        top = kept + [e for e in extra if not any(under(e, t) for t in kept)] + [bdir]
+        src = {t: t for t in top}
+        src[bdir] = stage_dir
+        ip = elf(real)
+        libs = closure([real], top)
+        libs.update(closure(roots, top, tuple(origin(ip[2], bdir)) if not ip[3] else ()))
+        src.update({at: f for at, f in libs.items() if not any(under(at, t) for t in top)})
+        for a in src:
+            if any(b != a and under(a, b) for b in src):
+                raise RtError("inputs nest: %s" % a)
+        inputs = [{"at": at, "tree": ingest_tree(s, store, third, keep) if os.path.isdir(s) else cas.ingest(s, store)} for at, s in sorted(src.items())]
+    finally:
+        shutil.rmtree(stage_dir, ignore_errors=True)   # also when a step above raises: the scratch never outlives the call
     return {"format": FORMAT, "python": real, "version": info["version"], "inputs": inputs, "env": dict(ENV),
             "runtime_id": cas.stage_key(inputs)}
 

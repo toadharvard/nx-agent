@@ -4,7 +4,12 @@ C records have no linkage ([6.2.2]p6: a tag is never an entity with linkage), so
 declarations of one object or function with external linkage have compatible types.  The record `.fnvnx.decltype` (non-loaded, written by the
 layout plugin of a C unit) has one line per external symbol the unit declares or defines:  `symbol<TAB>type`.  Type grammar (prefix, no blanks):
     scalar        a word of [A-Za-z0-9_] (`int`, `unsigned_int`, `float`, `void`, `_Bool`)
-    qualified     `const:`T | `volatile:`T | `restrict:`T      (any order, each once, canonical order const, volatile, restrict)
+    qualified     `const:`T | `volatile:`T | `restrict:`T | `atomic:`T   (any order, each once, canonical order const, volatile, restrict, atomic)
+    host          `host:`W   a scalar word carrying the fnvnx_host attribute (the HOST1 rule): a distinct constructor, compatible only with itself
+    entry         `entry:`T  T a pointer carrying the fnvnx_entry attribute (ENTRY1): a distinct constructor, compatible only with itself (and a compatible T)
+    vector        `vec:`N`:`S`:`A`:`T   N elements (a decimal or `c0+c1x` poly), S bytes, A byte alignment, element T (VEC1)
+    reference     `ref:`S`:`A`:`T   a reference type (REF1): S bytes, A byte alignment, pointee T
+    complex       `complex:`S`:`A`:`T   `_Complex T`: S bytes, A byte alignment, component T (CPLX1; layout_type case COMPLEX_TYPE)
     pointer       `*`T
     array         `[N]`T (N decimal) | `[]`T (incomplete)
     function      `(`P,P,...`)`T  with P a type, `...` last for varargs; `(?)`T has no prototype (K&R)
@@ -18,6 +23,7 @@ parameter of the prototype is changed by the default argument promotions; struct
 are tagged, the same member count, and in order the same names, the same bit-field widths and compatible types; a complete and an incomplete type are
 compatible when the tags are equal (6.2.7p1); enum: the same tag (or both unnamed) and compatible integer types.  A recursive type is compared by
 coinduction: a pair already under comparison is compatible (the greatest fixed point).  Pure: strings in, verdicts out."""
+import os
 import re
 
 WORD = re.compile(r'[A-Za-z0-9_]+')
@@ -85,7 +91,24 @@ class Parse:
             self.eat(')')
             return ('fn', tuple(ps), va, self.ty())
         w = self.word()
-        if w in ('const', 'volatile', 'restrict') and self.peek() == ':':
+        if w == 'host' and self.peek() == ':':
+            self.i += 1
+            return ('host', self.word())
+        if w == 'entry' and self.peek() == ':':
+            self.i += 1
+            return ('entry', self.ty())
+        if w in ('vec', 'complex', 'ref') and self.peek() == ':':
+            self.i += 1
+            fields = []
+            for _ in range(3 if w == 'vec' else 2):
+                m = re.compile(r'[0-9]+(?:\+[0-9]+[xy][0-9]*)?').match(self.s, self.i)
+                if not m:
+                    raise ValueError('expected a size at %d of %r' % (self.i, self.s))
+                self.i = m.end()
+                fields.append(m.group(0))
+                self.eat(':')
+            return (w, tuple(fields), self.ty())
+        if w in ('const', 'volatile', 'restrict', 'atomic') and self.peek() == ':':
             self.i += 1
             q = [w]
             t = self.ty()
@@ -136,9 +159,13 @@ def compatible(a, b, seen=None):
     k = a[0]
     if k == 'sc':
         return a[1] == b[1]
+    if k == 'host':
+        return a[1] == b[1]
+    if k in ('vec', 'complex', 'ref'):
+        return a[1] == b[1] and compatible(a[2], b[2], seen)
     if k == 'q':
         return a[1] == b[1] and compatible(a[2], b[2], seen)
-    if k == 'ptr':
+    if k in ('ptr', 'entry'):
         return compatible(a[1], b[1], seen)
     if k == 'arr':
         return (a[1] is None or b[1] is None or a[1] == b[1]) and compatible(a[2], b[2], seen)
@@ -167,24 +194,45 @@ def compatible(a, b, seen=None):
     raise ValueError('unknown type %r' % (a,))
 
 
-def parse_decltype(data, where):
-    """-> {symbol: type string} of the `.fnvnx.decltype` section: LF-terminated lines `symbol<TAB>type`, each symbol once; every type must parse"""
+def _decltype_reasons():
+    """the closed set of no-row reasons of `.fnvnx.decltype`, read from where the plugin defines it once (toolchain/layout/decltype_spell.inc, FNVNX_DECLTYPE_REASONS)"""
+    inc = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'toolchain', 'layout', 'decltype_spell.inc')
+    m = re.search(r'#define FNVNX_DECLTYPE_REASONS\(X\)((?: X\(\w+\))+)', open(inc).read())
+    if not m:
+        raise ValueError('%s: no FNVNX_DECLTYPE_REASONS' % inc)
+    return frozenset(re.findall(r'X\((\w+)\)', m.group(1)))
+
+
+def parse_decltype_lines(data, where):
+    """-> ({symbol: type string}, {symbol: reason}) of the `.fnvnx.decltype` section: LF-terminated lines `symbol<TAB>type` or `symbol<TAB>-reason`, each symbol once
+    (RULE DECLTYPE-COMPLETE: every symbol of the object has exactly one of the two); every type must parse and every reason must be in the plugin's closed set"""
     text = data.decode('utf-8')
     if text and not text.endswith('\n'):
         raise ValueError('%s: no final LF' % where)
-    out = {}
+    reasons = _decltype_reasons()
+    out, why = {}, {}
     for n, ln in enumerate(text.split('\n')[:-1], 1):
         f = ln.split('\t')
         if len(f) != 2 or not f[0]:
             raise ValueError('%s: line %d: not symbol<TAB>type' % (where, n))
-        if f[0] in out:
+        if f[0] in out or f[0] in why:
             raise ValueError('%s: line %d: %s twice' % (where, n, f[0]))
+        if f[1].startswith('-') and len(f[1]) > 1:
+            if f[1][1:] not in reasons:
+                raise ValueError('%s: line %d: reason %r is not in the closed set %s' % (where, n, f[1][1:], sorted(reasons)))
+            why[f[0]] = f[1][1:]
+            continue
         try:
             parse(f[1])
         except ValueError as e:
             raise ValueError('%s: line %d: %s' % (where, n, e))
         out[f[0]] = f[1]
-    return out
+    return out, why
+
+
+def parse_decltype(data, where):
+    """-> {symbol: type string} of the rows of the `.fnvnx.decltype` section (the symbols with a reason instead of a type are not compared: parse_decltype_lines)"""
+    return parse_decltype_lines(data, where)[0]
 
 
 def check(per_object):

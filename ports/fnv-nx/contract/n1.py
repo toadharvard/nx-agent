@@ -97,7 +97,7 @@ def check_objects(msvc):
         want = json.load(open(os.path.join(msvc, 'meta.json')))['objects']
     except (OSError, ValueError, KeyError) as e:
         raise ValueError('%s/meta.json does not declare the object count: %s' % (msvc, e))
-    have = sum(1 for f in os.listdir(d) if re.fullmatch(r'u\d+\.obj', f))
+    have = sum(1 for f in sorted(os.listdir(d)) if re.fullmatch(r'u\d+\.obj', f))
     if have != want:
         raise ValueError('%s holds %d objects u<i>.obj, meta.json declares %d' % (d, have, want))
     return have

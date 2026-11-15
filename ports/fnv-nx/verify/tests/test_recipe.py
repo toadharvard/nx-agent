@@ -4,6 +4,7 @@ pass, one PASS/FAIL line per case. Needs root (sandbox) and aarch64-linux-gnu-gc
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -90,7 +91,10 @@ def make_repo(name, gen_extra="", rec=None, files=None, extra_roots=()):
     repo = os.path.join(BASE, name)
     os.makedirs(repo)
     git(repo, "init", "-q")
-    for k, v in dict(FILES, **(files or {})).items():
+    base = dict(FILES)
+    if not (rec or RECIPE).get("link"):   # nothing is linked: the OS layer unit has no crt0 (its header names linker-script symbols that only a link defines)
+        base["toy/os.S"] = OS_NOLINK
+    for k, v in dict(base, **(files or {})).items():
         if v is not None:
             w(repo, k, v)
     for f in LINK_TOOLS:
@@ -105,6 +109,42 @@ def make_repo(name, gen_extra="", rec=None, files=None, extra_roots=()):
         {"path": T + "link", "class": "tool"}, {"path": T + "contract", "class": "tool"}] + list(extra_roots)}))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "toy")
+    return repo
+
+
+def guest_rec(rec=None, image=None):
+    """RECIPE (or REC) as a guest-profile root: the compiler, plugins and runtime come from the profile (verify/guest_compiler.json); the per-root flags keep only what a guest
+    build.json may carry (recipe.PER_ROOT), plus -Werror=attributes and the sdd define the rule requires. The semantic flags (ILP32, PIE, freestanding, ...) are the pin's."""
+    r = json.loads(json.dumps(rec or RECIPE))
+    for k in ("compiler", "plugins"):
+        r.pop(k, None)
+    r["profile"] = "guest"
+    r.pop("link", None)   # a guest image is linked by the runtime (link.entry, link/guest.json, the pinned libraries): the toy roots are object roots unless IMAGE names the entry symbol
+    if image:
+        r["link"] = {"output": "toy.elf", "flags": ["-m", "aarch64linux32"], "entry": image}
+    keep = lambda fs: [f for f in fs if recipe.PER_ROOT.fullmatch(f)]  # noqa: E731
+    r["flags"] = {"c": keep(r["flags"]["c"]) + [recipe.WERROR_ATTR], "cxx": keep(r["flags"]["cxx"]) + [recipe.SDD_DEFINE, recipe.WERROR_ATTR], "asm": keep(r["flags"]["asm"])}
+    return r
+
+
+def make_guest_repo(name, gen_extra="", rec=None, files=None, extra_roots=(), image=None):
+    """make_repo as a GUEST root (admit target guest, the game's compiler from the real pin, the real env.json): the objects are the game's ELF32 AArch64 ones."""
+    repo = make_repo(name, gen_extra, guest_rec(rec, image), files, extra_roots)
+    ad = json.load(open(os.path.join(repo, T + "verify/admit.json")))
+    for r in ad["roots"]:
+        if r["path"] == ROOT:
+            r["target"] = "guest"
+    w(repo, "verify/admit.json", json.dumps(ad))
+    w(repo, "verify/guest_compiler.json", open(os.path.join(VERIFY, "guest_compiler.json")).read())
+    if image:   # the guest link profile (script and libraries of every guest link) and the script it names
+        for n in ("link/guest.json", "link/guest.ld"):
+            w(repo, n, open(os.path.join(VERIFY, "..", n)).read())
+    real = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))   # checkout root
+    for n in recipe.plugin_files(real):   # the real plugin sources and inputs: the profile's plugins are built from them
+        os.makedirs(os.path.dirname(os.path.join(repo, n)), exist_ok=True)
+        shutil.copyfile(os.path.join(real, n), os.path.join(repo, n))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "guest")
     return repo
 
 
@@ -334,7 +374,30 @@ def main():
                 check("generator embedding %s: sandbox makes it constant, so two cold builds are equal (closed channel); without GATE_CACHE there is no warm build" % label,
                       rc == 0 and "no warm" in g["detail"] and g["universe"] == 2, (g, txt))
 
-    for fn in (gate_toy, gate_bad, gate_nd, gate_cases):
+    def gate_inc():
+        # determinism is incremental, like every stage: a second run with nothing changed executes 0 stages in its store, and one changed unit executes
+        # exactly the stages whose keys are new (read from the two builds' stage_keys), never more
+        irepo, gc, n = make_repo("inc"), BASE + "/inccache", [0]
+
+        def run():
+            n[0] += 1
+            rc0, _, _, t0 = gate(irepo, "build", BASE + "/ib%d" % n[0], gc)
+            rc, g, _, txt = gate(irepo, "determinism", BASE + "/id%d" % n[0], gc)
+            tree = git(irepo, "rev-parse", "HEAD^{tree}").strip()
+            keys = set(json.load(open("%s/objects/%s/%s/objects.json" % (gc, tree, ROOT.replace("/", "__"))))["stage_keys"])
+            m = re.search(r"detstore: (\d+) stages executed", (g or {}).get("detail", ""))
+            return rc0 == 0 and rc == 0, keys, int(m.group(1)) if m else None, (g, txt, t0)
+        ok1, k1, r1, d1 = run()
+        check("determinism, first run: green, every stage executed in its own store", ok1 and r1 is not None and 0 < r1 <= len(k1), (r1, len(k1), d1))
+        ok2, k2, r2, d2 = run()
+        check("determinism, second run with nothing changed: 0 stages executed", ok2 and k2 == k1 and r2 == 0, (r2, d2))
+        w(irepo, "toy/b.c", '#include "toy.h"\nint f_b(void) { return TOY * 3; }\n')
+        git(irepo, "add", "-A")
+        git(irepo, "commit", "-q", "-m", "change b")
+        ok3, k3, r3, d3 = run()
+        check("determinism, one changed unit: exactly the stages with new keys executed", ok3 and 0 < r3 <= len(k3 - k1) < len(k3) and r3 < r1, (r3, len(k3 - k1), len(k3), r1, d3))
+
+    for fn in (gate_toy, gate_bad, gate_nd, gate_cases, gate_inc):
         later(fn)
 
     # --- toy root, shared store: cold, then cached
@@ -432,6 +495,8 @@ def main():
     def include_rule():
         """RECIPE.md "Include": root C includes B's header dir, B's recipe includes A's: C's unit include path holds A's dir without C naming it"""
         d = tempfile.mkdtemp(prefix="inc-", dir=BASE)
+        for sub in ("a/include", "a2/include"):   # the carried dirs are checkout directories (generated output of another root is not carried)
+            os.makedirs(os.path.join(d, T + sub))
         os.makedirs(d + "/b")
         json.dump({"include": [T + "a/include", "/ext/private/include"]}, open(d + "/b/build.json", "w"))
         os.makedirs(d + "/b2")
@@ -911,6 +976,13 @@ def check_run(SS):
 
 def check_tc_gate(repo, tcc, tiny):
     rc, g, td, txt = gate(repo, "determinism", BASE + "/gtc", BASE + "/tccache")
+    if rc:
+        for dp, _, fs in os.walk(BASE + "/gtc"):
+            for fn in fs:
+                if fn.endswith(".json"):
+                    t = open(os.path.join(dp, fn), errors="replace").read()
+                    if "stderr" in t:
+                        print("DIAG", fn, t[:1500])
     print("INFO gate determinism, external compiler + external include tree (2 cold + warm) %.1f s: %s" % (td, g and g["detail"]))
     check("determinism gate with the compiler as an external tree at /opt/tc and a second external: green, accepted by verdict, each fetched once",
           rc == 0 and g["universe"] == 2 == g["certified"] and accepted("determinism", BASE + "/gtc")[0] == "green"

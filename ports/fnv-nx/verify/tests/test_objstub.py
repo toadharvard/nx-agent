@@ -212,6 +212,21 @@ for abi in ("ilp32", "lp64"):
     cs = [a - sec[3] for a in cs]
     check(T("LLVM (a64access) decodes the same words as objdump"), od == cs and len(od) > 10, (len(od), len(cs)))
 
+# --- the target profile of a root decides how its objects are judged (gate_objstub.profile_findings)
+import gate_objstub
+def hdr(cls, machine):
+    pth = tempfile.mkstemp(dir=ROOT, suffix=".o")[1]
+    open(pth, "wb").write(b"\x7fELF" + bytes([cls, 1, 1]) + bytes(9) + (1).to_bytes(2, "little") + machine.to_bytes(2, "little") + bytes(40))
+    return pth
+g32, g64, x64 = hdr(1, 183), hdr(2, 183), hdr(2, 62)
+check("profile: a guest root with ELF32 AArch64 objects has no finding (its bodies are analysed)", gate_objstub.profile_findings("r", "guest", [("a", g32)]) == [])
+check("profile: a host root is red as a root, one finding, no abort (no body analyzer for profile host)",
+      gate_objstub.profile_findings("r", "host", [("a", x64), ("b", g64)]) == [("r", "objstub", "no-body-analyzer", "objstub: no body analyzer for profile host")])
+f = gate_objstub.profile_findings("r", "guest", [("a", g32), ("b", x64)])
+check("profile: an object whose e_machine is not the guest profile's is red, named by its id", [x[:3] for x in f] == [("b", "e_machine", "target-mismatch")], f)
+f = gate_objstub.profile_findings("r", "host", [("a", g32)])
+check("profile: a host root with an ELF32 object is a mismatch (the host profile is ELF64)", [x[:3] for x in f] == [("a", "e_machine", "target-mismatch")], f)
+
 # determinism, CLI, gate wrapper, verdict acceptance
 o1 = build("void f(void){__builtin_trap();}\nint r(int a){return a+1;}", "lp64")
 cmd = [sys.executable, "-I", os.path.join(VERIFY, "objstub.py"), "check", "--terminators", tf, o1]
@@ -724,15 +739,15 @@ def tree_of(repo):
 
 
 for what in ("empty",):
-    empty = TR.make_repo("os-empty")
+    empty = TR.make_guest_repo("os-empty")
     TR.w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": TR.T + "toy", "class": "doc"}]}))
     rc, g, _, txt, st = gate(empty, ROOT + "/g0")
     check("gate with no product root: universe 0, green, accepted by verdict", rc == 0 and g["universe"] == 0 and st[0] == "green", (g, txt))
 GC = ROOT + "/gcache"
-repo = TR.make_repo("os-toy", files={"toy/constants.tsv": CONST})
+repo = TR.make_guest_repo("os-toy", files={"toy/constants.tsv": CONST})
 rc, g, secs, txt, st = gate(repo, ROOT + "/g1", GC)
-# the toy's functions: f_a, f_b, f_c, os_svc, plus the functions of the product's crt0 the toy links (rt/guest/crt0.s, %function symbols)
-NTOY = 5 + len(re.findall(r"^\s*\.type\s+\S+,\s*%function", open(os.path.join(os.path.dirname(HERE), "..", "rt", "guest", "crt0.s")).read(), re.M))
+# the toy's functions: f_a, f_b, f_c, os_svc and the OS layer's one more (a guest toy has no crt0: the runtime is the image's)
+NTOY = 5
 # (+1: the `<root>:product-units` item that the no-doubles rule, doubles.py, adds per root)
 check("gate on the toy root (os_layer, constants row, terminators from its own units): green NTOY/NTOY, accepted by verdict",
       rc == 0 and g["universe"] == NTOY == g["certified"] and st[0] == "green", (g, txt))
@@ -740,18 +755,18 @@ print("INFO toy gate cold (with build) %.1f s" % secs)
 rc, g, secs, txt, st = gate(repo, ROOT + "/g2", GC)
 print("INFO toy gate warm %.1f s" % secs)
 check("gate again with the cache: same result", rc == 0 and g["universe"] == NTOY == g["certified"], (g, txt))
-repo2 = TR.make_repo("os-toy2", files={"toy/constants.tsv": ""})
+repo2 = TR.make_guest_repo("os-toy2", files={"toy/constants.tsv": ""})
 rc, g, _, txt, st = gate(repo2, ROOT + "/g3", GC)
 check("toy root without the constants row of f_b: red, names the function by unit path", rc == 2 and g["uncertified"] == [TR.ROOT + "/b.c:f_b"]
       and st[0] == "red", (g, txt))
 IDB = '#include "toy.h"\nint f_b(int x) { return x; }\n'
 for tag, tbl, want in (("identity row", "b.c\tf_b\tidentity\t0\tref b\n", "green"), ("void row also matches the same body", "b.c\tf_b\tvoid\t\tref b\n", "green"),
                        ("no row", "", "red"), ("identity of another argument is no V row", "b.c\tf_b\tidentity\t1\tref b\n", "input")):
-    ri_ = TR.make_repo("os-id-" + tag.replace(" ", "-"), files={"toy/constants.tsv": tbl, "toy/b.c": IDB})
+    ri_ = TR.make_guest_repo("os-id-" + tag.replace(" ", "-"), files={"toy/constants.tsv": tbl, "toy/b.c": IDB})
     rc, g, _, txt, st = gate(ri_, ROOT + "/gid-" + tag.replace(" ", "-"), GC)
     check("constants kind identity, case %s: %s" % (tag, want), (rc == 0 and g["certified"] == g["universe"]) if want == "green" else
           (rc == 2 and g["uncertified"] == [TR.ROOT + "/b.c:f_b"]) if want == "red" else (rc == 2 and "input error" in g["detail"]), (g, txt))
-repo3 = TR.make_repo("os-reach", files={"toy/constants.tsv": CONST, "toy/c.c": RV, "toy/os.S": OS})
+repo3 = TR.make_guest_repo("os-reach", files={"toy/constants.tsv": CONST, "toy/c.c": RV, "toy/os.S": OS})
 rc, g, _, txt, st = gate(repo3, ROOT + "/g4", GC)
 check("reach call in the toy root with no reach facts file: red reach-uncertified, REACH's own definition and the terminator exemption accepted",
       rc == 2 and g["uncertified"] == [TR.ROOT + "/c.c:f_c"] and "reach-uncertified 1" in g["detail"], (g, txt))
@@ -763,7 +778,7 @@ check("with the fact 42 in the facts file of the same tree: green", rc == 0 and 
 open(facts, "w").write("42\t" + "a" * 64 + "\n43\t" + "b" * 64 + "\n")
 rc, g, _, txt, st = gate(repo3, ROOT + "/g6", GC)
 check("a fact without a call site: red reach-stale", rc == 2 and "reach-stale 1" in g["detail"], (g, txt))
-repo4 = TR.make_repo("os-abort", rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": '#include <stdlib.h>\nint f_c(int x) { abort(); }\n'})
+repo4 = TR.make_guest_repo("os-abort", rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": '#include <stdlib.h>\nint f_c(int x) { abort(); }\n'})
 rc, g, _, txt, st = gate(repo4, ROOT + "/g8", GC)
 check("terminators come from the headers the unit includes (stdlib.h via the unit's preprocessed text): abort -> T2 in f_c, nothing else red",
       rc == 2 and g["uncertified"] == [TR.ROOT + "/c.c:f_c"] and "T2 1" in g["detail"], (g, txt))
@@ -775,23 +790,23 @@ check("a malformed facts file: red, input error", rc == 2 and g["status"] == "re
 WC = '#include "toy.h"\nvoid fnvnx_wine_fixme(unsigned);\nint f_c(int x) { (void)x; fnvnx_wine_fixme(5); return 7; }\n'
 for tag, tbl, want in (("row matches", "5\tm\twine-9.0:dlls/x/y.c:f\tu32\t7\n", "green"), ("row value differs", "5\tm\twine-9.0:dlls/x/y.c:f\tu32\t8\n", "red"),
                        ("malformed table", "5\tm\tnot-a-ref\tu32\t7\n", "input")):
-    wr = TR.make_repo("os-wine-" + tag.replace(" ", "-"), rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": WC, "verify/wine_fixme.tsv": tbl})
+    wr = TR.make_guest_repo("os-wine-" + tag.replace(" ", "-"), rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": WC, "verify/wine_fixme.tsv": tbl})
     rc, g, _, txt, st = gate(wr, ROOT + "/gw" + tag.replace(" ", "-"), GC)
     check("gate, wine_fixme table, case %s: expected %s" % (tag, want), (rc == 0 and g["certified"] == g["universe"] and g["wine_fixme"] == {"5": 1} and st[0] == "green") if want == "green" else
           (rc == 2 and ("wine-fixme-mismatch 1" in g["detail"] if want == "red" else "input error" in g["detail"])), (g, txt))
-r32 = TR.make_repo("os-toy32", rec=TR.abi_rec("ilp32"), files={"toy/constants.tsv": CONST})
+r32 = TR.make_guest_repo("os-toy32", rec=TR.abi_rec("ilp32"), files={"toy/constants.tsv": CONST})
 t0 = time.time()
 rc, g, secs, txt, st = gate(r32, ROOT + "/g32", GC)
 check("ILP32 toy root (ELF32 objects, aarch64linux32 link): gate green NTOY/NTOY, accepted by verdict", rc == 0 and g["universe"] == NTOY == g["certified"] and st[0] == "green", (g, txt))
 print("INFO ILP32 toy gate cold %.1f s" % secs)
 rc, g, secs, txt, st = gate(r32, ROOT + "/g32b", GC)
 print("INFO ILP32 toy gate warm %.1f s" % secs)
-r32r = TR.make_repo("os-reach32", rec=TR.abi_rec("ilp32"), files={"toy/constants.tsv": CONST, "toy/c.c": RV, "toy/os.S": OS.replace("ldr x1, [x1, :lo12:hostslot]", "ldr w1, [x1, :lo12:hostslot]").replace("blr x1", "blr x1").replace(".quad 0", ".word 0")})
+r32r = TR.make_guest_repo("os-reach32", rec=TR.abi_rec("ilp32"), files={"toy/constants.tsv": CONST, "toy/c.c": RV, "toy/os.S": OS.replace("ldr x1, [x1, :lo12:hostslot]", "ldr w1, [x1, :lo12:hostslot]").replace("blr x1", "blr x1").replace(".quad 0", ".word 0")})
 rc, g, _, txt, st = gate(r32r, ROOT + "/g32r", GC)
 check("ILP32 reach call (P32 CALL26 relocation) is judged by the reach rule: reach-uncertified, nothing else red", rc == 2 and g["uncertified"] == [TR.ROOT + "/c.c:f_c"] and "reach-uncertified 1" in g["detail"], (g, txt))
 
 # a failing unit is a red finding of that unit, never a gate crash (exit 2 from an exception)
-rb = TR.make_repo("os-buildred", rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": "int f_c(int x) { return x +; }\n"})
+rb = TR.make_guest_repo("os-buildred", rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": "int f_c(int x) { return x +; }\n"})
 rc, g, _, txt, st = gate(rb, ROOT + "/gbr", GC)
 check("a build-red unit: red finding build-red naming the unit, not an input error", rc == 2 and g["status"] == "red" and "build-red" in g["detail"]
       and "input error" not in g["detail"] and any(u.endswith("c.c") for u in g["uncertified"]), (g, txt))
@@ -802,19 +817,19 @@ check("a unit the terminator plugin cannot process: a failure of that unit in th
 
 # the final image: every function body of the linked ELF is judged for the fixed-failure class (a weak `errno = ENOSYS; return -1` fallback left in it is red;
 # the same image with a strong override is green, the weak body is not in the image)
-ERR = '#include "toy.h"\nint e;\nint *__errno_location(void) { return &e; }\n'
-WEAK = '#include "toy.h"\nint *__errno_location(void);\nint __attribute__((weak)) sched_getcpu(void) { *__errno_location() = 38; return -1; }\n'
+ERR = '#include "toy.h"\nstatic int e;\nint *__errno(void) { return &e; }\n'
+WEAK = '#include "toy.h"\nint *__errno(void);\nint __attribute__((weak)) sched_getcpu(void) { *__errno() = 38; return -1; }\n'
 USE = '#include "toy.h"\nint sched_getcpu(void);\nint f_c(int x) { return x + TOY + sched_getcpu(); }\n'
-ri = TR.make_repo("os-image-weak", files={"toy/constants.tsv": CONST + "e.c\t__errno_location\taddr\te\tref e\n", "toy/c.c": USE, "toy/e.c": ERR, "toy/w.c": WEAK})
+ri = TR.make_guest_repo("os-image-weak", files={"toy/constants.tsv": CONST + "e.c\t__errno\taddr\te\tref e\n", "toy/c.c": USE, "toy/e.c": ERR, "toy/w.c": WEAK}, image="f_a")
 rc, g, _, txt, st = gate(ri, ROOT + "/gi1", GC)
 check("image with a weak errno/-1 fallback: red fixed-failure, the function named under the image", rc == 2 and g["uncertified"] == [TR.ROOT + "/toy.elf:sched_getcpu"]
       and "fixed-failure 1" in g["detail"] and g["image"]["fixed_failure"] == 1 and g["image"]["bodies"] > 0, (g, txt))
-rs = TR.make_repo("os-image-strong", files={"toy/constants.tsv": CONST + "e.c\t__errno_location\taddr\te\tref e\n", "toy/c.c": USE, "toy/e.c": ERR, "toy/w.c": WEAK, "toy/s.c": '#include "toy.h"\nint *__errno_location(void);\nint sched_getcpu(void) { return *__errno_location() + 3; }\n'})
+rs = TR.make_guest_repo("os-image-strong", files={"toy/constants.tsv": CONST + "e.c\t__errno\taddr\te\tref e\n", "toy/c.c": USE, "toy/e.c": ERR, "toy/w.c": WEAK, "toy/s.c": '#include "toy.h"\nint *__errno(void);\nint sched_getcpu(void) { return *__errno() + 3; }\n'}, image="f_a")
 rc, g, _, txt, st = gate(rs, ROOT + "/gi2", GC)
 check("the same image with a strong override: green, the weak body is not in the image", rc == 0 and g["image"]["fixed_failure"] == 0 and g["image"]["bodies"] > 0, (g, txt))
 # errno is derived by a probe compile with the root's own flags: an errno.h the root cannot compile is a red finding `errno-probe`, not a crash
 rn2 = TR.mut(); rn2["flags"] = {k: v + ["-D_ERRNO_H"] for k, v in rn2["flags"].items()}   # errno.h becomes empty: `errno` is undeclared
-rd = TR.make_repo("os-image-noprobe", rec=rn2, files={"toy/constants.tsv": CONST})
+rd = TR.make_guest_repo("os-image-noprobe", rec=rn2, files={"toy/constants.tsv": CONST}, image="f_a")
 rc, g, _, txt, st = gate(rd, ROOT + "/gi3", GC)
 check("a root whose errno.h does not compile: red errno-probe (the probe does not compile with the root's flags), never green", rc == 2 and "errno-probe" in g["detail"], (g, txt))
 # the accessor is derived, no root declares it: a host root and a target root get theirs from their own libc's errno.h, and the key is no recipe key any more
@@ -827,7 +842,7 @@ rk = TR.mut(); rk["errno_accessor"] = "__errno"
 check("a recipe that declares errno_accessor is rejected (the accessor is derived, the key does not exist)", any("errno_accessor" in e_ for e_ in TR.errs(rk)), TR.errs(rk))
 # a body with a data island in the final image is unjudged, and unjudged is red
 ISL = '.text\n.globl isl\n.type isl,%function\nisl:\n mov w0, #1\n ret\n .word 0x12345678\n.size isl,.-isl\n'
-rj = TR.make_repo("os-image-island", files={"toy/constants.tsv": CONST + "e.c\t__errno_location\taddr\te\tref e\n", "toy/c.c": USE.replace("sched_getcpu()", "0"), "toy/e.c": ERR, "toy/isl.S": ISL})
+rj = TR.make_guest_repo("os-image-island", files={"toy/constants.tsv": CONST + "e.c\t__errno\taddr\te\tref e\n", "toy/c.c": USE.replace("sched_getcpu()", "0"), "toy/e.c": ERR, "toy/isl.S": ISL}, image="f_a")
 rc, g, _, txt, st = gate(rj, ROOT + "/gi4", GC)
 check("an image body with a data island is red unjudged", rc == 2 and "unjudged" in g["detail"] and g["image"]["unjudged"] >= 1, (g, txt))
 

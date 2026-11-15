@@ -77,11 +77,14 @@ def read_objects(objs):
                 continue
             store[(oid, "sympair")] = l2sections.parse_sympair(sp, oid + ":.fnvnx.sympair")
             lays = objsections.parse_layout(objsections.section(elf, ".fnvnx.layout"), oid + ":.fnvnx.layout")
-            dt = elf.section(".fnvnx.decltype")     # a C unit's declared types of external symbols, compared by C11 6.2.7 (link/ctypes_compat.py): the section's presence is the fact, whatever the linkage of the layout rows
-            if dt is not None:
-                decls[oid] = ctypes_compat.parse_decltype(dt, oid + ":.fnvnx.decltype")
-            elif any(lay.linkage == "c" for lay in lays):     # a unit of `c` records without its declared types: nothing to compare them with
-                red[oid + ":decltype"] = "a C unit has no .fnvnx.decltype section"
+            dt = elf.section(".fnvnx.decltype")     # RULE DECLTYPE-COMPLETE (link/ctypes_compat.py): every GLOBAL/WEAK symbol of the object has exactly one line, `sym<TAB>type` or `sym<TAB>-reason` (reason from the plugin's closed set); the typed lines are compared by C11 6.2.7
+            types, why = ctypes_compat.parse_decltype_lines(dt if dt is not None else b"", oid + ":.fnvnx.decltype")
+            have = {n for n, bind, _t, _sh, _v, _sz, _o in elf.symbols() if n and bind in (1, 2)}     # STB_GLOBAL, STB_WEAK
+            for n in sorted(have - set(types) - set(why)):
+                red[oid + ":decltype:missing:" + n] = "global/weak symbol %s has no .fnvnx.decltype line" % n
+            for n in sorted((set(types) | set(why)) - have):
+                red[oid + ":decltype:extra:" + n] = ".fnvnx.decltype line for %s, which is not a global/weak symbol of the object" % n
+            decls[oid] = types
             cr = elf.section(".fnvnx.crossing")
             if cr is not None:
                 cross[oid] = parse_crossing(cr, oid + ":.fnvnx.crossing")
@@ -128,7 +131,7 @@ def judge_objects(objs):
     for (oid, kind), rows in store.items():
         if kind == "sympair":
             for sym, ms, k, df in rows:
-                if ms and k != "data":
+                if ms and k not in ("data", "noemit"):     # noemit: the unit defines it, GCC wrote it nowhere (sympair_kinds.inc): no symbol of the object crosses
                     boundary.setdefault(sym, []).append(oid)
     for sym, oids in sorted(boundary.items()):
         items.append("crossing:" + sym)

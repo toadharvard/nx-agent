@@ -24,6 +24,7 @@ import argparse
 import concurrent.futures
 import errno
 import hashlib
+import importlib.util
 import json
 import os
 import pathlib
@@ -99,7 +100,7 @@ PLUGIN_ARGS["fnvnx_order"] = {"args": "rtl", "object": "msvc", "operator": "rtl"
 _QINC = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', re.M)
 
 
-def plugin_inputs(source, files, roots, repo="."):
+def plugin_inputs(source, files, roots, repo=".", tree=None):
     """The tracked files that the plugin SOURCE includes by `#include "..."`, transitively, each resolved against the directory of the including file
     (a header the plugin stage mounts at its repo path) -> sorted [repo path], SOURCE not in it. Angle includes, and quoted ones that name no tracked file beside the includer, come from the compiler's own
     plugin headers. Rule: the closure lies inside the admitted root that holds SOURCE (a tracked file of a declared root); a quoted include that names a tracked file of another root is ValueError (a plugin reaches another root's files only by a declared `uses`, which a plugin has none of)."""
@@ -112,7 +113,7 @@ def plugin_inputs(source, files, roots, repo="."):
     out, todo = set(), [source]
     while todo:
         f = todo.pop()
-        with open(os.path.join(repo, f), encoding="utf-8", errors="surrogateescape") as fh:
+        with open(os.path.join(tree, f[len(TREE) + 1:]) if tree else os.path.join(repo, f), encoding="utf-8", errors="surrogateescape") as fh:   # TREE is a directory of its own on the disk
             text = fh.read()
         for m in _QINC.findall(text):
             q = posixpath.normpath(posixpath.join(posixpath.dirname(f), m))
@@ -126,10 +127,11 @@ def plugin_inputs(source, files, roots, repo="."):
     return sorted(out)
 
 
-def plugin_files(repo="."):
-    """Every plugin source of PLUGIN_SOURCES with the files it includes (plugin_inputs), in REPO -> sorted [repo path]."""
-    files, roots = tracked(repo), load_admit(repo)
-    return sorted(set(PLUGIN_SOURCES.values()) | {i for q in PLUGIN_SOURCES.values() for i in plugin_inputs(q, files, roots, repo)})
+def plugin_files(repo=".", files=None, roots=None, tree=None):
+    """Every plugin source of PLUGIN_SOURCES with the files it includes (plugin_inputs), in REPO -> sorted [repo path]. FILES and ROOTS default to the tracked
+    files and the admitted roots of REPO (a checkout that is no git repository gives its own file list and its root, as stamp.py does)."""
+    files, roots = tracked(repo) if files is None else files, load_admit(repo) if roots is None else roots
+    return sorted(set(PLUGIN_SOURCES.values()) | {i for q in PLUGIN_SOURCES.values() for i in plugin_inputs(q, files, roots, repo, tree)})
 
 
 def plugin_decls(names, origin, files=(), roots=(), repo="."):
@@ -171,6 +173,7 @@ import targets as _targets  # noqa: E402  (the declared targets: verify/targets.
 SEMANTICS_FLAGS = tuple(_targets.semantic_prefix(_targets.load())) + tuple(_sem["common"])   # every guest root (native, decomp, lifted)
 SEMANTICS_LIFTED = SEMANTICS_FLAGS + tuple(_sem["lifted_extra"])   # a root whose cxx_origin is a lifted declaration: the common set plus what the lifter's code is built under
 SDD_DEFINE = "-DFNVNX_SDD=1"   # per root: the plugin fnvnx_sdd needs it (and -fno-devirtualize, which is in the semantic set of a guest root)
+SDD_FLAGS = (SDD_DEFINE, "-fno-devirtualize")   # what a NATIVE C++ root of a host target holds itself
 LANG_X = {"c": "c", "cxx": "c++", "asm": "assembler-with-cpp"}   # the driver's -x language of each kind of unit
 # What a guest build.json may carry (per-root classes); every other -f/-m/... token comes from flags.semantics and is refused here. Warnings and
 # diagnostics, defines, the language standard, the optimisation level (-O0..-O3, -Os, -Og: not -Ofast, which switches FP semantics), debug info,
@@ -350,23 +353,21 @@ PROBE_FLAGS = ["-frandom-seed=guestlink", "-ffile-prefix-map=/probe=.", "-Werror
 def parse_driver_link(text, at):
     """The link command of a driver's `-###` output TEXT (its last command line: the link) as the profile's libs: {dirs, names, startfiles, endfiles}, every path
     inside the external mounted at AT, normalised and relative to it (the driver names them through its own bin/..). startfiles: the .o files before the
-    library group; endfiles: the .o files after it; dirs: the -L directories inside the external, in order, each once; names: the -l libraries in order of
+    libraries; endfiles: the .o files after the last `-l` library (the none-elf driver prints no `--end-group`); dirs: the -L directories inside the external, in order, each once; names: the -l libraries in order of
     appearance (the group's included). A `-L` or `.o` outside the external is not a guest runtime file and is not taken."""
     line = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("COLLECT_GCC_OPTIONS=")][-1]   # each command of -### follows its COLLECT_GCC_OPTIONS line
     toks = [t.strip('"') for t in line.split()]
     rel = lambda t: posixpath.normpath(t)[len(at) + 1:] if posixpath.normpath(t).startswith(at + "/") else None  # noqa: E731
     out = {"dirs": [], "names": [], "startfiles": [], "endfiles": []}
-    seen_end = False
-    for t in toks:
+    last_l = max((i for i, t in enumerate(toks) if t.startswith("-l") and len(t) > 2), default=-1)
+    for i, t in enumerate(toks):
         if t.startswith("-L") and rel(t[2:]):
             if rel(t[2:]) not in out["dirs"]:
                 out["dirs"].append(rel(t[2:]))
         elif t.startswith("-l") and len(t) > 2:
             out["names"].append(t[2:])
-        elif t == "--end-group":
-            seen_end = True
         elif t.endswith(".o") and rel(t):
-            out["endfiles" if seen_end else "startfiles"].append(rel(t))
+            out["endfiles" if i > last_l else "startfiles"].append(rel(t))
     return out
 
 
@@ -469,7 +470,7 @@ def with_guest_link(rec, root, roots, repo):
     lk, prof = rec.get("link"), load_guest_link(repo)
     if not (isinstance(lk, dict) and prof and entry_of(roots, root).get("target") == "guest"):
         return rec
-    return dict(rec, link=dict(lk, script=TREE + "/" + prof["script"], libs={"external": load_pin(repo)["runtime"]["name"], "derive": True}))
+    return dict(rec, link=dict(lk, script=TREE + "/" + prof["script"], libs={"external": load_pin(repo)["external"]["name"], "derive": True}))
 
 
 def load_admit(repo="."):
@@ -515,18 +516,19 @@ def entry_of(roots, spec):
 
 def profile_fields(profile, pin):
     """The fields of the PROFILE ("guest" | "host") of a root: {compiler, plugins, external}, generated from the pins and never written in a build.json.
-    guest: the game's compiler (the external and drivers of verify/guest_compiler.json, PIN), the full plugin set of PLUGIN_SOURCES in load order
-    (plugin_decls takes the arguments from recipe.py alone), the compiler's external and the runtime's external (pin `runtime`).
+    guest: the game's compiler (the external of verify/guest_compiler.json, PIN, and its drivers derived from the one triplet of targets.json), the full plugin set of PLUGIN_SOURCES in load order
+    (plugin_decls takes the arguments from recipe.py alone), the compiler's external (it holds the runtime too: one tree).
     host: the distribution compiler pinned by env.json (PLUGIN_CXX's package), no plugin, no external. -> (fields, errors)."""
     if profile == "host":
         return {"compiler": {"cc": PLUGIN_CXX.replace("g++", "gcc"), "cxx": PLUGIN_CXX}, "plugins": [], "external": []}, []
     if profile != "guest":
         return None, ["profile %r is unknown (%s)" % (profile, " | ".join(PROFILES))]
-    if not (isinstance(pin, dict) and isinstance(pin.get("external"), dict) and isinstance(pin.get("runtime"), dict)):
-        return None, ["profile guest: %s is missing or has no external and runtime" % GUEST_PIN]
+    if not (isinstance(pin, dict) and isinstance(pin.get("external"), dict)):
+        return None, ["profile guest: %s is missing or has no external" % GUEST_PIN]
     ex = pin["external"]
-    return {"compiler": {"external": ex["name"], "cc": pin["cc"], "cxx": pin["cxx"]}, "plugins": [{"name": n} for n in PLUGIN_SOURCES],
-            "external": [dict(ex), dict(pin["runtime"])]}, []
+    cc, cxx = pin_drivers()
+    return {"compiler": {"external": ex["name"], "cc": cc, "cxx": cxx}, "plugins": [{"name": n} for n in PLUGIN_SOURCES],
+            "external": [dict(ex)]}, []
 
 
 COMPILE_KEYS = ("compiler", "flags", "include", "units", "link", "profile", "variants")
@@ -722,6 +724,11 @@ def units_of(rec, root, files):
     return [u for u in all_units_of(rec, root, files) if u not in tu]
 
 
+def pin_drivers():
+    """(cc, cxx) driver paths of the guest compiler tree: derived from the one triplet of targets.json (targets.drivers), never written in the pin."""
+    return _targets.drivers(_targets.load())
+
+
 def load_pin(repo="."):
     """verify/guest_compiler.json of the checkout, or None when the tree has none."""
     p = os.path.join(repo, GUEST_PIN)
@@ -737,6 +744,29 @@ def runtime_cflags(pin):
     return list(v)
 
 
+def runtime_configure(pin):
+    """The gcc configure options of the guest compiler build (build.sh of toolchain/msvcmodel): the `runtime_configure` of the one guest compiler record.
+    The build reads them here; no build script spells them."""
+    v = pin.get("runtime_configure") if isinstance(pin, dict) else None
+    if not isinstance(v, list) or not all(isinstance(x, str) and x.startswith("--") for x in v):
+        raise BuildRed("%s: runtime_configure must be a list of configure options" % GUEST_PIN)
+    cite = pin.get("runtime_configure_cite")
+    missing = [o for o in v if not isinstance(cite, dict) or not isinstance(cite.get(o), str) or not cite[o].strip()]
+    if missing:
+        raise BuildRed("%s: runtime_configure options without a cite in runtime_configure_cite: %s" % (GUEST_PIN, ", ".join(missing)))
+    return list(v)
+
+
+def runtime_configure_patch(pin):
+    """The patch of the runtime subdirs' generated configure scripts (rule CFG-LINK): the `runtime_configure_patch` of the one guest compiler record.
+    The build reads the script, the subdirs and its two fact sources here; no build script spells them."""
+    v = pin.get("runtime_configure_patch") if isinstance(pin, dict) else None
+    keys = ("script", "subdirs", "protocol_source", "guest_script", "cite")
+    if not isinstance(v, dict) or any(k not in v for k in keys) or not isinstance(v["subdirs"], list) or not all(isinstance(v[k], str) and v[k].strip() for k in keys if k != "subdirs"):
+        raise BuildRed("%s: runtime_configure_patch needs %s (cite non-empty)" % (GUEST_PIN, ", ".join(keys)))
+    return dict(v)
+
+
 def guest_link_part(rec, root, pin, prof, files, roots):
     """The link of a guest root (part of guest_errors): script and libs are the profile's (link/guest.json), one fact for every guest link."""
     lk = rec.get("link")
@@ -744,9 +774,6 @@ def guest_link_part(rec, root, pin, prof, files, roots):
         return []
     bad = ["link.%s is declared: script and libs of a guest link come from %s" % (k, GUEST_LINK) for k in ("script", "libs") if k in lk]
     bad += guest_link_errors(prof, pin, files, roots) if prof is not None else ["%s is missing" % GUEST_LINK]
-    rt = pin.get("runtime") if isinstance(pin, dict) else None
-    if isinstance(rt, dict) and rt.get("name") not in [e.get("name") for e in rec.get("external", []) if isinstance(e, dict)]:
-        bad.append("the runtime external %r of %s is not declared in external" % (rt.get("name"), GUEST_PIN))
     return ["guest root %s: %s" % (root, b) for b in bad]
 
 
@@ -768,10 +795,7 @@ def guest_errors(rec, spec, roots, pin, prof=None, files=()):
         return lb + ["guest root %s: compiler must be the external compiler %r (not a distribution driver)" % (root, pin["external"].get("name"))]
     ex = next((e for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == c["external"]), None)
     bad = [] if ex == pin["external"] else ["external %r is not the pinned one (%s)" % (c["external"], pin["external"])]
-    rt = pin.get("runtime")   # the guest's libc/libstdc++ external: when a recipe declares it (by name), it is the pinned one, exactly
-    if isinstance(rt, dict):
-        bad += ["external %r is not the pinned runtime (%s)" % (e["name"], rt) for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == rt["name"] and e != rt]
-    bad += ["compiler.%s is %r, pinned %r" % (k, c[k], pin.get(k)) for k in ("cc", "cxx") if c[k] != pin.get(k)]
+    bad += ["compiler.%s is %r, derived from the triplet %r" % (k, c[k], d) for k, d in zip(("cc", "cxx"), pin_drivers()) if c[k] != d]
     fl = rec.get("flags") if isinstance(rec.get("flags"), dict) else {}
     # an attribute that neither the compiler nor a loaded plugin registers is otherwise dropped with a warning: a marker a rule relies on vanishes
     bad += ["flags.%s lacks %s" % (k, WERROR_ATTR) for k in ("c", "cxx") if WERROR_ATTR not in (fl.get(k) if isinstance(fl.get(k), list) else [])]
@@ -787,8 +811,7 @@ def guest_errors(rec, spec, roots, pin, prof=None, files=()):
 
 
 LINK_KEYS = {"output", "flags"}
-LINK_OPT = {"script", "kind", "version_script", "roots", "libs", "loader", "entry", "tables"}
-IMAGE_ENTRY = "__fnvnx_image_entry"   # the symbol the runtime (rt/guest) calls once its start-up is done; the link assigns it the root's declared `link.entry` (--defsym)
+LINK_OPT = {"script", "kind", "version_script", "roots", "libs", "loader", "tables"}
 LIBS_KEYS = {"external", "dirs", "names", "startfiles", "endfiles"}
 KINDS = ("pie", "exe", "shared")
 # The emulation names a link may carry, and the target each one is: (ELF class, e_machine). `pie` is the ILP32 guest; `exe` and `shared` are host images.
@@ -944,6 +967,36 @@ def dir_output(p, gen):
     return any(o != p and under(o, p) for o in gen)
 
 
+def include_home(d, rec, roots, repo, files):
+    """D (a repo directory) lies in a directory output of tracked files (a `srcdir`) of a root that REC `uses`."""
+    for u in rec.get("uses") or []:
+        ent = roots.get(u.get("root")) if isinstance(u, dict) else None
+        if not (ent and isinstance(ent.get("recipe"), str)):
+            continue
+        try:
+            prod = read_recipe(repo, ent["recipe"])
+            p = (prod.get("outputs") or {}).get(u["output"])
+        except (OSError, ValueError, KeyError, AttributeError, TypeError):
+            continue
+        if isinstance(p, str) and output_kind(p, u["root"], generated_outputs(prod), files) == "srcdir" and under(d, u["root"] + "/" + p):
+            return True
+    return False
+
+
+def output_kind(p, root, gen, files):
+    """What the declared output path P (root-relative) of ROOT is: "file" (a generated output), "gendir" (a directory whose files are generated outputs, none
+    tracked), "srcdir" (a directory of tracked files of the root, nothing generated below it: its content is its tree hash), "mixed" (generated and tracked
+    files below one directory: red), or None."""
+    if p in gen:
+        return "file"
+    full = root + "/" + p
+    gdir = dir_output(p, gen)
+    tdir = any(under(f, full) for f in files)
+    if gdir and tdir:
+        return "mixed"
+    return "gendir" if gdir else "srcdir" if tdir else None
+
+
 def include_uses_errors(rec, roots, repo):
     """Problems of `include_uses` ([{root, output}], a subset of `uses`): the directory output NAME of another root, which is mounted at /uses/<root>/<NAME>
     and is one more include directory (after `include`, in list order). It is how a consumer reads the generated headers of another root."""
@@ -964,20 +1017,22 @@ def include_uses_errors(rec, roots, repo):
             p = (prod.get("outputs") or {}).get(u["output"])
         except (OSError, ValueError, KeyError, AttributeError, TypeError):
             continue    # uses_errors reports an unreadable or undeclared producer
-        if not (isinstance(p, str) and dir_output(p, generated_outputs(prod))):
-            err.append("include_uses: output %r of %s is not a directory output (outputs: {NAME: a directory of generated files})" % (u["output"], u["root"]))
-        elif any(under(f, u["root"] + "/" + p) for f in tracked(repo)):
-            err.append("include_uses: directory output %r of %s holds a tracked file (a directory output is generated files only)" % (u["output"], u["root"]))
+        if not (isinstance(p, str) and output_kind(p, u["root"], generated_outputs(prod), tracked(repo)) in ("gendir", "srcdir")):
+            err.append("include_uses: output %r of %s is not a directory output (outputs: {NAME: a directory of generated files, or of tracked files})" % (u["output"], u["root"]))
     return err
 
 
-def uses_errors(rec, root, roots, repo):
-    """Problems of `outputs` ({name: a generated output of this root}) and `uses` ([{root, output}]: an output another admitted root declares)."""
+def uses_errors(rec, root, roots, repo, files=None):
+    """Problems of `outputs` ({name: a generated output of this root, a directory of generated files, or a directory of tracked files}) and `uses`
+    ([{root, output}]: an output another admitted root declares)."""
     err, gen = [], generated_outputs(rec)
     outs = rec.get("outputs")
-    if outs is not None and not (isinstance(outs, dict) and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9_.-]+", n) and isinstance(p, str) and (p in gen or dir_output(p, gen))
-                                                                 for n, p in outs.items())):
-        err.append("outputs must be {NAME: a path in generated[].outputs of this root, or a directory every file of which is one of them}")
+    if outs is not None:
+        held = tracked(repo) if files is None else files
+        if not (isinstance(outs, dict) and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9_.-]+", n) and isinstance(p, str) and rel_ok(p)
+                                               and output_kind(p, root, gen, held) in ("file", "gendir", "srcdir") for n, p in outs.items())):
+            err.append("outputs must be {NAME: a path in generated[].outputs of this root, a directory every file of which is one of them, or a directory of tracked files of this root "
+                       "with no generated output below it (never both in one directory)}")
     us = rec.get("uses")
     if us is None:
         return err
@@ -1022,12 +1077,6 @@ def link_errors(lk, root, mine, roots, ext_names, repo, files=(), variant="", se
     rent = entry_of(roots, root + "@" + variant if variant else root)
     if rent.get("target") == "guest" and kind == "exe":
         err.append("link.kind exe is a host executable: a guest root links a pie (the ILP32 guest image, emulation aarch64linux32)")
-    ent_sym = lk.get("entry")
-    if rent.get("target") == "guest":   # the entry of a guest image is declared once, by its root: the symbol the runtime calls, which one object of the image defines
-        if not (isinstance(ent_sym, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", ent_sym) and ent_sym != IMAGE_ENTRY):
-            err.append("link.entry: a guest image declares the symbol its runtime calls as its entry (a C identifier other than %s)" % IMAGE_ENTRY)
-    elif "entry" in lk:
-        err.append("link.entry is the entry of a guest image; a %s root has none" % (rent.get("target") or "host"))
     tb = lk.get("tables", [])
     if not (isinstance(tb, list) and all(isinstance(t, dict) and set(t) == {"tool", "args", "unit", "section"} and isinstance(t["tool"], str) and t["tool"] in files and t["tool"].endswith(".py")
                                          and isinstance(t["args"], list) and all(isinstance(a, str) for a in t["args"]) and isinstance(t["section"], str)
@@ -1109,36 +1158,6 @@ def header_dirs(rec, root, roots, repo=".", variant=""):
     return sorted(dirs)
 
 
-def include_closure(inc, root, roots, repo, tg, variant_rec=None, files=None):
-    """The include path of a unit of ROOT (RECIPE.md "Include"): the recipe's `include` list, then, for every repo directory D of it that lies in another admitted
-    product root P with a recipe for the target TG, the repo directories of P's own `include`, transitively and in that order, each once. A header that P's
-    headers include is found by every consumer of P's headers (a header names its own dependencies once, in the recipe of the root that ships it); the entries
-    of a root's `include` that lie in an external are the root's private toolchain and are not carried. -> [dir]"""
-    out, seen = list(inc), set(inc)
-    held = [f for f in (files if files is not None else tracked(repo))]
-    todo = [d for d in inc if isinstance(d, str) and not d.startswith("/")]
-    while todo:
-        d = todo.pop(0)
-        for p, r in roots.items():
-            if p == root or r.get("class") != "product" or tg not in targets_of(r) or not under(d, p):
-                continue
-            paths = [r.get("recipe") if r.get("target") == tg else None] + [q for t, q in own_recipes(r).values() if t == tg]
-            for path in paths:
-                if not isinstance(path, str):
-                    continue
-                try:
-                    with open(os.path.join(repo, path)) as f:
-                        more = json.load(f).get("include") or []
-                except (OSError, ValueError, AttributeError):
-                    continue
-                for m in more:
-                    if isinstance(m, str) and not m.startswith("/") and m not in seen and any(under(f, m) for f in held):   # a directory with no tracked file is a generated tree of P: its headers reach a consumer through `include_uses`, never by this carry
-                        seen.add(m)
-                        out.append(m)
-                        todo.append(m)
-    return out
-
-
 def run_errors(rec, root, files, roots, mine, seen, repo):
     """The `run` stages (RECIPE.md "Run stages"): {name, artifact "ROOT:OUTPUT", args, inputs [ref], debs [env.json package], outputs [path]}."""
     rs, err = rec.get("run", []), []
@@ -1189,7 +1208,7 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
                     if p["external"] not in [e.get("name") for e in rec.get("external", []) if isinstance(e, dict)]:
                         err.append("run[%d].inputs: external %r is not declared" % (i, p["external"]))
                 elif not (isinstance(p, dict) and set(p) == {"stage", "path"} and all(isinstance(v, str) for v in p.values())):
-                    err.append("run[%d].inputs: %r is neither a path, {root, path}, {root, output}, {external, path} nor {stage, path}" % (i, p))
+                    err.append("run[%d].inputs: %r is neither a path, {external, path} nor {stage, path}" % (i, p))
         outs = g["outputs"]
         if not (isinstance(outs, list) and outs and all(isinstance(o, str) and rel_ok(o) for o in outs)):
             err.append("run[%d].outputs must be a non-empty list of root-relative paths" % i)
@@ -1298,11 +1317,11 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             continue
         if not rel_ok(d) or tree_of(roots, d) is None:
             err.append("include %r is not a path inside an admitted root or an external's at" % (d,))
-        elif not under(d, root) and not any(under(d, r) and (roots[r].get("class") == "header" or roots[r].get("class") == "product" and tg in targets_of(roots[r])) for r in roots):
-            # one home per header: the headers a product root includes lie in a product root of the same target (covered by its gates through
-            # the units that read them), never in a doc or tool root or a root of the other target
-            err.append("include %r lies in no admitted header root and no product root of target %r (a header dir of a doc or tool root, or of the other target, is no home)"
-                       % (d, tg))
+        elif not under(d, root) and not include_home(d, rec, roots, repo, files):
+            # one home per header, and the way to it is declared: an include outside the unit's own root lies in a directory output
+            # (`outputs: {INCLUDE: dir}`) of another admitted root that this root `uses`, never merely in some admitted root
+            err.append("include %r lies outside root %s and in no directory output of a root that this root `uses` (the owner declares `outputs: {INCLUDE: dir}`, this root `uses: [{root, output}]`)"
+                       % (d, root))
         elif not (any(under(f, d) for f in files) or any(under(root + "/" + o, d) for o in gen)):
             err.append("include %r holds no tracked or generated file" % d)
     # a path into a generated tree of another root is no include: the generated files of a root are its declared outputs, and a consumer takes them through `uses`
@@ -1363,7 +1382,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
                 err.append("generated output %s is produced twice" % o)
             seen.add(o)
     err += run_errors(rec, root, files, roots, mine, seen, repo)
-    err += uses_errors(rec, root, roots, repo) + include_uses_errors(rec, roots, repo)
+    err += uses_errors(rec, root, roots, repo, files) + include_uses_errors(rec, roots, repo)
     ea, ident = rec.get("error_abi"), lambda x: isinstance(x, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", x)
     if ea is not None and not (isinstance(ea, dict) and ident(ea.get("fail")) and (
             (ea.get("kind") == "noreturn" and set(ea) == {"fail", "kind"}) or (ea.get("kind") == "flag" and set(ea) == {"fail", "kind", "flag"} and ident(ea.get("flag"))))):
@@ -1492,9 +1511,7 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant="", repo=".
             err.append("plugins must be loaded in the order %s" % list(PLUGIN_SOURCES))
     if not cxx:
         return err + (["admit.json %s: cxx_origin of a root without C++ units" % root] if origin is not None else [])
-    if origin == "native" and ent.get("target") != "guest":
-        pass   # the plugin set belongs to the TARGET PROFILE, not to the language (RECIPE.md "Plugins"): the host profile has the empty set (the plugins enforce guest-ABI semantics a host object does not have), so nothing is required of it
-    elif origin == "native":
+    if origin == "native":
         for n in sorted(PLUGIN_SOURCES):
             if n not in loaded:
                 err.append("native C++ root %s does not load plugin %s (every native or decomp C++ body is compiled with both)" % (root, n))
@@ -1502,7 +1519,7 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant="", repo=".
             err.append("plugins must be loaded in the order %s" % list(PLUGIN_SOURCES))
         fl = rec.get("flags", {}).get("cxx", []) if isinstance(rec.get("flags"), dict) else []
         # fnvnx_sdd needs the define and -fno-devirtualize; a guest root's -fno-devirtualize comes from flags.semantics, its define is per root
-        err += ["native C++ root %s: flags.cxx lacks %s" % (root, f) for f in (SDD_DEFINE,) if f not in fl]
+        err += ["native C++ root %s: flags.cxx lacks %s" % (root, f) for f in (SDD_FLAGS if ent.get("target") != "guest" else (SDD_DEFINE,)) if f not in fl]
     elif lifted_origin(origin):
         tool, pack, stage = origin["lifted_by"], origin.get("pack"), origin.get("stage")
         for n in ("fnvnx_ftoi",):   # lifted C++ does its conversions in helpers: the plugin proves it (and only it is required)
@@ -1579,6 +1596,33 @@ def publish_dir(tmp, final):
         shutil.rmtree(tmp, ignore_errors=True)
         if x.errno not in (errno.ENOTEMPTY, errno.EEXIST) or not os.path.isdir(final):
             raise
+
+
+RECIPE_TREE = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx of the checkout this recipe is part of
+
+
+def compiler_stamp_errors(tree, host, name):
+    """Problems of a pinned compiler tree: its MANIFEST.json `compiler.build_key` (written by toolchain/msvcmodel/build.sh from the one computation,
+    toolchain/msvcmodel/stamp.py) must equal stamp.py over the compiler inputs of the checkout TREE (ports/fnv-nx) that this recipe belongs to, else the pin names a
+    compiler built from other patches than the ones this checkout's data model table (DATAMODEL.json) describes. HOST is the tree's checkout. [] = ok."""
+    spec = importlib.util.spec_from_file_location("fnvnx_msvcmodel_stamp", os.path.join(tree, "toolchain", "msvcmodel", "stamp.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    want = mod.stamp(tree, recipe=sys.modules[__name__])
+    try:
+        with open(os.path.join(host, "MANIFEST.json")) as f:
+            comp = json.load(f).get("compiler", {})
+        got = comp.get("build_key")
+    except (OSError, ValueError):
+        return ["external %s: no MANIFEST.json with compiler.build_key: the tree was not built by toolchain/msvcmodel/build.sh at a checkout with stamp.py; "
+                "this checkout's compiler key is %s" % (name, want)]
+    if got != want:
+        pw = mod.patch_sha256(tree)
+        why = ("its msvcmodel_patch_sha256 is %s, this checkout's msvcmodel.patch is %s" % (comp.get("msvcmodel_patch_sha256"), pw)
+               if comp.get("msvcmodel_patch_sha256") != pw else "msvcmodel.patch is the same, another input of the build differs")
+        return ["external %s: compiler.build_key is %s, this checkout's compiler inputs (toolchain/msvcmodel/stamp.py) give %s (%s): the pinned tree was built "
+                "from other inputs than this checkout's; rebuild it and re-pin" % (name, got, want, why)]
+    return []
 
 
 def fetch_externals(exts, store, extcache, ws):
@@ -1853,6 +1897,12 @@ class Job:
         for u in self.rec.get("uses", []):
             p = Job(self.repo, u["root"], self.store, self.jobs, self.extcache)
             pws = tempfile.mkdtemp(dir=ws)
+            rel = (p.rec.get("outputs") or {}).get(u["output"])
+            if isinstance(rel, str) and output_kind(rel, u["root"], generated_outputs(p.rec), p.files) == "srcdir":
+                # a directory of tracked files: its content is the output, no stage of the producer runs (a header-only root has nothing to build)
+                _copy(self.repo, [f for f in p.files if under(f, u["root"] + "/" + rel)], u["root"], os.path.join(pws, "root"))
+                out.append({"at": "/uses/%s/%s" % (u["root"], u["output"]), "tree": cas.ingest(os.path.join(pws, "root", rel), self.store)})
+                continue
             try:
                 p.externals(pws)
                 p.generate(pws)
@@ -2061,8 +2111,7 @@ class Job:
         """unitstage --include specs in recipe order: HOST@/inc/N for a directory of this root or the repo, the sandbox path itself
         for a directory inside an external (a declared input of the tool runtime)."""
         out, n = [], 0
-        tg = entry_of(self.roots, self.root + ("@" + self.variant if self.variant else "")).get("target")
-        for d in include_closure(self.rec["include"], self.root, self.roots, self.repo, tg, files=self.files):
+        for d in self.rec["include"]:
             if any(under(d, e["at"]) for e in self.ext.values()):
                 out.append(d)
                 continue
@@ -2185,6 +2234,17 @@ class Job:
                 self.analysis = self.analysis_plugin(ws, 1 if "cxx" in kinds.values() else 0)
             except BuildRed as r:   # the gate objstub cannot judge the root: red and named, no unit is blocked by it
                 self.red.append(dict(r.args[0]))
+        # RULE: a unit of a guest root is compiled only by a compiler tree that is a build of THIS checkout's compiler inputs (compiler_stamp_errors: the one key,
+        # toolchain/msvcmodel/stamp.py). The plugin stages above only read headers from the tree (they are what the compiler build itself needs), so the check
+        # stands here, at the first stage that compiles a unit.
+        pin = load_pin(self.repo) if guest and cc else None
+        if pin:
+            bad = []
+            bad += compiler_stamp_errors(RECIPE_TREE, self.ext[cc]["host"], cc)
+            if bad:
+                self.red.append({"stage": "external:" + cc, "exit": None, "stderr": bad})
+                self.blocked.update({u: "external:" + cc for u in units})
+                return {}
         builds = {}
         sos = {}
         for n, t, _ in self.built:   # the plugins each front end can load (plugin_languages): the stage loads exactly those, the gate reads the same fact
@@ -2300,11 +2360,10 @@ class Job:
         self.linkfacts = {"startend": [self.hostpath(x) for x in pre + post if not x.startswith("/syslib/")],
                           "dirs": [self.hostpath(x[2:]) for x in search if x.startswith("-L") and x != "-L/syslib"], "names": [x[2:] for x in libs],
                           "script": open(os.path.join(sd, os.path.basename(lk["script"]))).read() if "script" in lk else "",
-                          "system": list(lb["system"]) if lb and "system" in lb else [], "entry": lk.get("entry")}
+                          "system": list(lb["system"]) if lb and "system" in lb else []}
         vs = ["--version-script=/ld/" + os.path.basename(lk["version_script"])] if "version_script" in lk else []
         sc = ["-T", "/ld/" + os.path.basename(lk["script"])] if "script" in lk else []
-        ds = ["--defsym=%s=%s" % (IMAGE_ENTRY, lk["entry"])] if "entry" in lk else []
-        argv = [ld] + LD_KIND[kind] + dl + lk["flags"] + sc + vs + ds + ["--cref", "--no-demangle", "-o", "/out/" + output, "-Map=/out/" + output + ".map"] + pre + search + [
+        argv = [ld] + LD_KIND[kind] + dl + lk["flags"] + sc + vs + ["--cref", "--no-demangle", "-o", "/out/" + output, "-Map=/out/" + output + ".map"] + pre + search + [
             "--whole-archive"] + args + ["--no-whole-archive"] + (["--start-group"] + libs + ["--end-group"] if libs else []) + post
         objs_tree, ld_tree = cas.ingest(od, self.store), cas.ingest(sd, self.store)
         doc = {"format": "fnvnx-stage/1", "stage": "ld:" + self.root + (":" + tag if tag else ""), "argv": argv, "cwd": "/", "class": "build", "tool": "ld",
@@ -2312,7 +2371,7 @@ class Job:
                "inputs": merge_inputs(rt["inputs"] + [{"at": "/objs", "tree": objs_tree}, {"at": "/ld", "tree": ld_tree}], sysin, self.store, ws)}
         # the reference link (run only to read a failed link's linker-defined names): the same ld, flags, script, inputs, start files and libraries with
         # unresolved symbols ignored; the names its output defines that no input defines are the ones the pinned ld synthesises for this link
-        self.ref_doc = dict(doc, stage="ldref:" + self.root, argv=[ld] + LD_KIND[kind] + dl + lk["flags"] + sc + vs + ds + ["--unresolved-symbols=ignore-all", "-o", "/out/ref.elf"]
+        self.ref_doc = dict(doc, stage="ldref:" + self.root, argv=[ld] + LD_KIND[kind] + dl + lk["flags"] + sc + vs + ["--unresolved-symbols=ignore-all", "-o", "/out/ref.elf"]
                             + pre + search + ["--whole-archive"] + args + ["--no-whole-archive"] + (["--start-group"] + libs + ["--end-group"] if libs else []) + post)
         return self.stage(doc)[1]["outputs"]["/out"], objs_tree, [{"at": "/ld", "tree": ld_tree}] + sysin
 
@@ -2364,7 +2423,7 @@ class Job:
         dyn = set(loader_defs or ())
         for p in f["system"]:
             dyn |= {n for n, _, _, shndx, _ in ldcheck_syms(rd(os.path.realpath(p)), 11) if shndx != 0}
-        ld_defs = undefset.script_defined(f["script"]) | self.ld_synthesised(rt, arch) | ({IMAGE_ENTRY} if f.get("entry") else set())
+        ld_defs = undefset.script_defined(f["script"]) | self.ld_synthesised(rt, arch)
         u = undefset.closure(prod, rt, arch, dyn, ld_defs)
         return [{"symbol": k, "referencers": v} for k, v in u.items()]
 
@@ -2372,14 +2431,13 @@ class Job:
         """The ELF facts of the linked output (elffacts.py, RECIPE.md "ELF facts of a linked output"): stage `ldfacts:<root>` runs the PINNED readelf of
         env.json (the one beside the linker the compiler names, `-W -S -s`) on the final ELF, and its stdout is cached with the stage; the definer of
         every resolved undefined reference of a product object comes from ld's own cross reference table (`--cref`, in the map of the link stage).
-        -> the record (elffacts.record). BuildRed(stage ldfacts:<root>) if the pinned readelf is not a file of a pinned package or of a declared external tree, or a layout does not fit."""
+        -> the record (elffacts.record). BuildRed(stage ldfacts:<root>) if the pinned readelf is not a file of a pinned package, or a layout does not fit."""
         lk, stage = self.rec["link"], "ldfacts:" + self.root
         name = lk["output"]
         pn = subprocess.run([self.hostpath(self.drivers()[0]), "-print-prog-name=ld"], capture_output=True, text=True).stdout.strip()
         d, b = posixpath.split(posixpath.normpath(unitstage.prog(pn)))
         rd = posixpath.join(d, b[:-2] + "readelf") if b.endswith("ld") else ""
-        in_ext = bool(rd) and any(under(rd, e["host"]) or under(rd, e["at"]) for e in self.ext.values())   # a file of a declared external tree is pinned by its commit and tree_sha256
-        bad = [] if in_ext else envcheck.system_lib_errors([rd], json.load(open(os.path.join(self.repo, ENV_JSON)))["packages"], envcheck.file_owners()) if rd else ["the linker %r has no readelf beside it" % b]
+        bad = envcheck.system_lib_errors([rd], json.load(open(os.path.join(self.repo, ENV_JSON)))["packages"], envcheck.file_owners()) if rd else ["the linker %r has no readelf beside it" % b]
         if bad:
             raise BuildRed({"stage": stage, "exit": None, "stderr": ["the pinned readelf beside the linker: %s" % x for x in bad]})
         rt = self.cached_rt("tool-readelf-" + hashlib.sha256(repr((rd, sorted((e["at"], e["tree"]) for e in self.ext.values()))).encode()).hexdigest()[:16],
@@ -2432,7 +2490,7 @@ class Job:
             bad.append("derived files outside the multilib %r that flags.semantics selects: %s" % (self.multidir, ", ".join(stray)))
         if bad:
             raise BuildRed({"stage": "drv:" + self.root, "exit": None, "stderr": bad})
-        host = self.ext[pin["runtime"]["name"]]["host"]
+        host = self.ext[pin["external"]["name"]]["host"]
         objs = {p: {d["symbol"] for d in symbols(os.path.join(host, p), p)[0]} for p in raw["startfiles"] + raw["endfiles"]}
         gone = sorted(set(onedef(objs, rootdef)) | set(entry_object(objs, ldcheck.script_entry(script_text))))
         return {k: ([x for x in v if x not in gone] if k in ("startfiles", "endfiles") else v) for k, v in raw.items()}, gone
@@ -2451,13 +2509,13 @@ class Job:
         return {n for n, _, _, shndx, typ in ldcheck_syms(d, 2) if shndx != 0 and typ not in (3, 4)} - own
 
     def link_probe(self, ws):
-        """Stage `drv:<root>`: the guest runtime's C++ driver (pin `runtime_driver`, inside the pinned runtime external) run with the guest semantic flags
+        """Stage `drv:<root>`: the guest runtime's C++ driver (the cxx driver of the triplet, inside the pinned compiler tree that holds the runtime) run with the guest semantic flags
         (the common set: the profile is one fact for every guest link, native and lifted alike) and `-###` on the link of a one-line C++ file, hermetic (the driver prints the commands it would run; none is run).
         -> (stderr text, the runtime external's mount point): the link command of the multilib the flags select."""
         pin = load_pin(self.repo)
-        rt = pin["runtime"]
-        self.ext.update(fetch_externals([pin["external"], rt], self.store, self.extcache, ws))
-        drv = rt["at"] + "/" + pin["runtime_driver"]
+        rt = pin["external"]
+        self.ext.update(fetch_externals([rt], self.store, self.extcache, ws))
+        drv = rt["at"] + "/" + pin_drivers()[1]
         flags = semantics_for(self.hostpath(self.drivers()[1]), "cxx", SEMANTICS_FLAGS)
         tr = self.toolrt([drv])[1]
         pd = os.path.join(ws, "probe")
@@ -2511,7 +2569,6 @@ class Job:
                "argv": [py["python"], "-s", "-B", "/tool/ldcheck.py", "--elf", "/linked/" + name, "--objs", "/objs", "--out", "/out", "--name", name, "--kind", lk.get("kind", "pie")]
                + (["--version-script", "/ld/" + os.path.basename(lk["version_script"])] if "version_script" in lk else [])
                + (["--script", "/ld/" + os.path.basename(lk["script"])] if "script" in lk else [])
-               + (["--entry", lk["entry"]] if "entry" in lk else [])
                + ["--lib=/syslib/" + os.path.basename(p) for p in lk.get("libs", {}).get("system", [])]
                + (["--loader-defs", "/loader/defs.txt"] if loader_defs is not None else []),
                "env": env, "inputs": [], "outputs": ["/out"]}
@@ -2650,32 +2707,12 @@ def resolve_foreign(root, ref, repo=".", cache=None, rec=None):
 
 def resolve_input(root, ref, repo=".", cache=None, rec=None):
     """THE reader of a path named by an input file of a gate (imports.in.json, registry.in.json, ...); no gate opens one itself.
-    REF is a bare string (a tracked file or directory of ROOT), {"root": R, "path": P} (a tracked file or directory of the admitted TOOL root R: the
-    inputs a declaration derives from live in a root below its consumers, RECIPE.md "Outputs and uses") or {"root": R, "output": NAME} (the declared output NAME of root R, which ROOT's recipe `uses`: the stage index is not part of the contract) or {"external": NAME, "path": P}: NAME must be an `external` of ROOT's recipe,
+    REF is a bare string (a tracked file or directory of ROOT) or {"external": NAME, "path": P}: NAME must be an `external` of ROOT's recipe,
     its tree is mounted from the pinned commit and checked against its tree_sha256. Red (ValueError) for: an undeclared external, a path that
     is absolute or leaves the tree (.. or a symlink), a missing path, an untracked path, a tree_sha256 mismatch.
     -> (host path, ident); IDENT is "tree_sha256:path" of an external, "root/path" of a tracked file: the gate key takes it."""
     if isinstance(ref, str):
         base, p, kind = os.path.join(repo, root), ref, None
-    elif isinstance(ref, dict) and set(ref) == {"root", "path"} and all(isinstance(v, str) for v in ref.values()):
-        roots = load_admit(repo)
-        if ref["root"] not in roots or roots[ref["root"]].get("class") != "tool":
-            raise ValueError("%s: input %r names %r, which is not an admitted tool root" % (root, ref, ref["root"]))
-        root, base, p, kind = ref["root"], os.path.join(repo, ref["root"]), ref["path"], None
-    elif isinstance(ref, dict) and set(ref) == {"root", "output"} and all(isinstance(v, str) for v in ref.values()):
-        roots = load_admit(repo)
-        if rec is None:
-            rec = load_recipe(repo, roots, root)
-        if {"root": ref["root"], "output": ref["output"]} not in (rec.get("uses") or []):
-            raise ValueError("%s: input %r is an output of another root that the recipe does not `uses`" % (root, ref))
-        prod = load_recipe(repo, roots, ref["root"])
-        path = (prod.get("outputs") or {}).get(ref["output"])
-        if path is None:
-            raise ValueError("%s: root %s declares no output %r" % (root, ref["root"], ref["output"]))
-        idx = next((i for i, g in enumerate(prod.get("generated", [])) if path in g["outputs"]), None)
-        if idx is None:
-            raise ValueError("%s: output %r of %s is made by no generate stage" % (root, ref["output"], ref["root"]))
-        return stage_output(root, {"stage": "%s:gen:%d" % (ref["root"], idx), "path": path}, repo, cache)
     elif isinstance(ref, dict) and set(ref) == {"external", "path"} and all(isinstance(v, str) for v in ref.values()):
         kind, p = ref["external"], ref["path"]
         if rec is None:
@@ -2693,7 +2730,7 @@ def resolve_input(root, ref, repo=".", cache=None, rec=None):
     elif isinstance(ref, dict) and set(ref) == {"stage", "path"} and all(isinstance(v, str) for v in ref.values()):
         return stage_output(root, ref, repo, cache)
     else:
-        raise ValueError("%s: input %r is neither a path, {root, path}, {root, output}, {external, path} nor {stage, path}" % (root, ref))
+        raise ValueError("%s: input %r is neither a path, {external, path} nor {stage, path}" % (root, ref))
     if not p or os.path.isabs(p) or ".." in p.split("/"):
         raise ValueError("%s: input path %r is absolute or leaves the tree" % (root, p))
     full = os.path.join(base, p)
@@ -2888,7 +2925,7 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True):
         raise RecipeError(errs)
     units = units_of(j.rec, root, j.files)
     res = {"format": OBJ_FORMAT, "root": spec, "objects": [], "tests": [], "elf": None, "link_roots": [], "constants": None, "contract_names": None, "defined": [], "undefined": [], "plugins": [],
-           "link_archives": [], "stage_keys": [], "outputs": {}, "status": "green"}
+           "link_archives": [], "stage_keys": [], "status": "green"}
     ws = tempfile.mkdtemp(prefix="recipe-")
     os.makedirs(out, exist_ok=True)
     all_units = units
