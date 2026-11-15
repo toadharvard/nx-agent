@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for the recipe profile (recipe.expand_profile, effective deltas, RECIPE.md "Profiles"): the expanded recipe of a root that names its profile
 is the recipe that spelled every profile field (so every stage key, a function of the expanded values, is unchanged), a restated profile field is red,
 and the variant deltas flags_add / defines_add append. Pure: no sandbox. Plain script, one PASS/FAIL line per case."""

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for verify/producers.py (rule (f) of gate linkstrict): the objects a link takes from externals show the recipe's semantic flag set in their
 DW_AT_producer. Real objects and archives built by the pinned msvcmodel compiler (fetched by the pin of verify/guest_compiler.json; red with the reason
 when it cannot be fetched, never skipped). Plain script: PASS/FAIL lines, exit 0 on pass."""

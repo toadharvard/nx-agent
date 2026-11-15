@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/lib/sha256/build.host.json ports/fnv-nx/lib/sha256/build.json
+# reads: ports/fnv-nx/link ports/fnv-nx/loader/build.json ports/fnv-nx/platform/build.json ports/fnv-nx/render/d3d9/build.json
+# reads: ports/fnv-nx/render/gl4/build.json ports/fnv-nx/render/nxgpu/build.guest.json ports/fnv-nx/render/nxgpu/build.json
+# reads: ports/fnv-nx/render/pair/build.host.json ports/fnv-nx/render/pair/build.json ports/fnv-nx/render/shaders/translator/build.host.json
+# reads: ports/fnv-nx/render/shaders/translator/build.json ports/fnv-nx/render/smscan/build.host.json ports/fnv-nx/render/smscan/build.json
+# reads: ports/fnv-nx/rt/guest/build.json ports/fnv-nx/rt/guest_main/build.json ports/fnv-nx/shim/build.json
+# reads: ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for the guest link profile (link/guest.json, recipe.with_guest_link, the guest part of recipe.check): one fact for every guest link.
 Pure: the real checkout's profile and admit.json, synthetic roots, no sandbox."""
 import copy

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/verify
 """Tests for verify/gate_pure.py cross-root imports (admit.json `imports`) and gate_admit.imports_errors. Cases, each on a toy tree
 run as the gate runs (cwd = checkout root, env GATE_OUT): (1) a root that imports a module of another root WITHOUT declaring it is red
 (import-unlisted) even though the module exists; (2) the same import declared in `imports` is green; (3) a declared import does not
