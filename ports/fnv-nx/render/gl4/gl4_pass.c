@@ -32,7 +32,7 @@ static GLuint fbo_for(const Gl4Pass* p) {
     }
     GLuint f;
     p_glCreateFramebuffers(1, &f);
-    GLenum bufs[4];
+    GLenum bufs[NXGPU_MAX_COLOR_TARGETS];
     for (uint32_t i = 0; i < p->nColor; i++) {
         const Gl4Image* c = gl4_img(gl4_view_of(p->c[i].image));
         bufs[i] = GL_COLOR_ATTACHMENT0 + i;
@@ -98,7 +98,7 @@ void gl4_op_begin_pass(const uint32_t* a, uint32_t argc) {
     begin_end();
 }
 
-/* NxOp_BeginPass4: colorCount (0-4), (image, level | layer << 16) per colour target, depth (image, level | layer << 16) */
+/* NxOp_BeginPass4: colorCount (0..NXGPU_MAX_COLOR_TARGETS), (image, level | layer << 16) per colour target, depth (image, level | layer << 16) */
 void gl4_op_begin_pass4(const uint32_t* a, uint32_t argc) {
     Gl4Pass p;
     uint32_t w, h, ns;

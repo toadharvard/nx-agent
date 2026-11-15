@@ -78,7 +78,8 @@ enum NxAttrType4 {
     NxAttr4_Float16_2, NxAttr4_Float16_4,
     NxAttr4_Count
 };
-enum { NX4_MAX_STREAMS = 16, NX4_MAX_ATTRS = 16, NX4_MAX_QUERIES = 4096 /* query ids 1..NX4_MAX_QUERIES (NxOp_QueryBegin) */ };
+enum { NXGPU_MAX_COLOR_TARGETS = 4,   /* simultaneous colour targets of a pass (NxOp_BeginPass4 colorCount 0..this; the mask/blend slots of NxRenderState) */
+       NX4_MAX_STREAMS = 16, NX4_MAX_ATTRS = 16, NX4_MAX_QUERIES = 4096 /* query ids 1..NX4_MAX_QUERIES (NxOp_QueryBegin) */ };
 typedef struct NxVtxAttr4 { uint16_t offset; uint8_t stream, type, location, pad[3]; } NxVtxAttr4;
 typedef struct NxVtxLayout4 {
     uint8_t attrCount, pad[3];
@@ -124,7 +125,7 @@ typedef struct NxVtxLayout4 {
 /* The v4 additions: THE definition of ops NxOp_Count.. (after the v3 list). NXGPU_OP_LIST = the whole table. */
 #define NXGPU_OP_LIST_V4(X) \
     X(BeginPass4) \
-                        /* colorCount (0-4), then per colour target 2 words (image, level | layer << 16; image 0 = \
+                        /* colorCount (0..NXGPU_MAX_COLOR_TARGETS), then per colour target 2 words (image, level | layer << 16; image 0 = \
                            the swapchain image), then the depth target 2 words (image 0 = none). Colour targets: a \
                            2D image, a cube face (layer), a 3D slice (layer), any mip level, multisampled images; \
                            colorCount 0 with a depth target = a depth-only pass. Draw buffer i = target i; sRGB \

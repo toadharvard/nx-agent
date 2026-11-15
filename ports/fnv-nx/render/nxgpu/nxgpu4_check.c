@@ -31,7 +31,7 @@ static uint32_t layers_of(const NxChkImage* im, uint32_t level) {
 
 int nxchk_pass_parse4(const NxChkEnv* e, const uint32_t* a, uint32_t argc, NxChkPass* p) {
     memset(p, 0, sizeof *p);
-    if (argc < 1 || a[0] > 4 || argc < 3 + 2 * a[0]) { nxchk_err("BeginPass4: %u words for %u colour targets", argc, argc ? a[0] : 0); return 1; }
+    if (argc < 1 || a[0] > NXGPU_MAX_COLOR_TARGETS || argc < 3 + 2 * a[0]) { nxchk_err("BeginPass4: %u words for %u colour targets", argc, argc ? a[0] : 0); return 1; }
     p->nColor = a[0];
     for (uint32_t i = 0; i < a[0]; i++) {
         p->c[i].image = a[1 + 2 * i] ? a[1 + 2 * i] : e->swapImage;

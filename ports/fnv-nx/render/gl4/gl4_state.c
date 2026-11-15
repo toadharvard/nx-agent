@@ -88,7 +88,7 @@ static GLenum glfill(uint32_t fill) {
 void gl4_apply_state(const NxRenderState* rs, int force) {
     uint64_t w0 = rs->w[0], w1 = rs->w[1], w2 = rs->w[2];
     if (force || w0 != g4.applied.w[0]) {
-        for (GLuint rt = 0; rt < 4; rt++) {
+        for (GLuint rt = 0; rt < NXGPU_MAX_COLOR_TARGETS; rt++) {
             uint32_t m = NXRS_GET(w0, NXRS_B_MASK(rt), 4);
             p_glColorMaski(rt, m & 1, (m >> 1) & 1, (m >> 2) & 1, (m >> 3) & 1);
             if (w0 & 1) p_glEnablei(GL_BLEND, rt); else p_glDisablei(GL_BLEND, rt);
@@ -141,7 +141,7 @@ void gl4_apply_state(const NxRenderState* rs, int force) {
 /* A known state for draws and blits the backend issues itself (scaling, present): everything gl4_apply_state sets
  * goes back to its neutral value, and the next BindState re-applies its own. */
 void gl4_neutral_state(void) {
-    for (GLuint rt = 0; rt < 4; rt++) { p_glColorMaski(rt, 1, 1, 1, 1); p_glDisablei(GL_BLEND, rt); }
+    for (GLuint rt = 0; rt < NXGPU_MAX_COLOR_TARGETS; rt++) { p_glColorMaski(rt, 1, 1, 1, 1); p_glDisablei(GL_BLEND, rt); }
     p_glDisable(GL_DEPTH_TEST); p_glDepthMask(GL_TRUE);
     p_glDisable(GL_STENCIL_TEST); p_glStencilMaskSeparate(GL_FRONT_AND_BACK, 0xFF);
     p_glDisable(GL_CULL_FACE); p_glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
