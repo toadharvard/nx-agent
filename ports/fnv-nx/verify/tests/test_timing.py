@@ -45,7 +45,8 @@ with tempfile.TemporaryDirectory() as td:
     check("store-merge never goes red on a sidecar and keeps the destination's", sandbox.read_time(s1, K1)["cpu_s"] == 1.25, sandbox.read_time(s1, K1))
     check("store-merge takes a sidecar the destination lacks", (sandbox.read_time(s1, K2) or {}).get("cpu_s") == 2.0, sandbox.read_time(s1, K2))
     for k, st, argv in ((K1, "cc:src/a.cc", ["g++", "-ftime-report", "-c"]), (K2, "pp:src/a.cc", ["g++", "-E"])):
-        json.dump({"stage": st, "argv": argv}, open(os.path.join(s1, "stage-docs", k + ".json"), "w"))
+        os.makedirs(os.path.join(s1, "stage-docs", k[:2]), exist_ok=True)
+        json.dump({"stage": st, "argv": argv}, open(os.path.join(s1, "stage-docs", k[:2], k + ".json"), "w"))
     errf = os.path.join(td, "err")
     open(errf, "w").write(TEXT)
     import shutil

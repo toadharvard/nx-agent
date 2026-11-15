@@ -1795,6 +1795,72 @@ def _store_files(root, kind):
                 yield n, os.path.join(base, d, n)
 
 
+def _tree_closure(store, h, seen):
+    """The tree manifests and objects that tree H names in STORE -> [(kind, file name)]: a file's object, a directory's manifest and what it names, recursively."""
+    if h in seen:
+        return []
+    seen.add(h)
+    m = cas.manifest(h, store)
+    out = [("tree", h + ".json")]
+    if not cas._is_dir_manifest(m):   # a single-file tree: the manifest is the file entry itself
+        return out + [("obj", m["h"] + (".x" if m["x"] else ""))]
+    for e in m["entries"].values():
+        out += _tree_closure(store, e["h"], seen) if e["t"] == "d" else [("obj", e["h"] + (".x" if e["x"] else ""))]
+    return out
+
+
+def store_export(store, key, dst):
+    """Copy the cache entry of stage KEY of STORE into the store directory DST, under its key: the key's record, its stage document and every tree and object the
+    record names (stdout, stderr, each output). DST is then a store that `store_import` (store-merge) takes in; nothing else of STORE is copied. A key with no
+    record, or a record naming a tree or object the store lacks, is RecipeError. The timing sidecar is a measurement and is not part of the entry."""
+    res = sandbox._load(store, key)
+    if res is None:
+        raise RecipeError(["store-export: no record for key %s in %s" % (key, store)])
+    files, seen, miss = [], set(), []
+    try:
+        for h in [res["stdout"], res["stderr"]] + [res["outputs"][o] for o in sorted(res["outputs"])]:
+            files += _tree_closure(store, h, seen)
+    except (cas.CasError, KeyError) as e:
+        raise RecipeError(["store-export: key %s names a tree the store lacks: %s" % (key, e)])
+    for kind, n in sorted(set(files)):
+        p = os.path.join(store, kind, n[:2], n)
+        if not os.path.isfile(p):
+            miss.append("%s/%s" % (kind, n))
+    if miss:
+        raise RecipeError(["store-export: key %s names a file the store lacks: %s" % (key, m) for m in miss[:20]])
+    for kind, n in sorted(set(files)):
+        cas.publish_file(os.path.join(dst, kind, n[:2], n), src=os.path.join(store, kind, n[:2], n))
+    sd = os.path.join(store, "stage-docs", key[:2], key + ".json")
+    if os.path.isfile(sd):
+        cas.publish_file(os.path.join(dst, "stage-docs", key[:2], key + ".json"), src=sd)
+    cas.publish_file(os.path.join(dst, "keys", key, "result.json"), src=os.path.join(store, "keys", key, "result.json"))
+    return len(set(files)) + 2
+
+
+def store_import(src, store, key):
+    """Take the entry of KEY from the store directory SRC (a `store_export`) into STORE: SRC must hold exactly the closure of KEY's record (the record, and every tree
+    and object it names, each object checked against its own sha256 name), else RecipeError and STORE is unchanged; then it is store_merge (a name present in both
+    must hold the same bytes)."""
+    rp = os.path.join(src, "keys", key, "result.json")
+    if not os.path.isfile(rp):
+        raise RecipeError(["store-import: %s holds no record of key %s" % (src, key)])
+    if sorted(os.listdir(os.path.join(src, "keys"))) != [key]:
+        raise RecipeError(["store-import: %s holds more than the entry of key %s" % (src, key)])
+    with tempfile.TemporaryDirectory() as td:   # the closure check runs on a copy of nothing: the export is read where it is
+        try:
+            res = json.load(open(rp))
+            closure = set()
+            seen = set()
+            for h in [res["stdout"], res["stderr"]] + [res["outputs"][o] for o in sorted(res["outputs"])]:
+                closure |= set(_tree_closure(src, h, seen))
+        except (OSError, ValueError, KeyError, cas.CasError) as e:
+            raise RecipeError(["store-import: the entry of key %s is incomplete: %s" % (key, e)])
+        have = {(k, n) for k in ("obj", "tree") for n, _ in _store_files(src, k)}
+        if have != closure:
+            raise RecipeError(["store-import: %s differs from the closure of key %s: %s" % (src, key, sorted(have ^ closure)[:5])])
+    return store_merge(src, store)
+
+
 def store_merge(src, dst):
     """Import the objects, trees, stage documents and key records of store SRC into store DST by content (the one import path). A name present in both
     must hold the same bytes (a key's result record included), else RecipeError `store-merge: key <k> differs` and DST is unchanged (the check is
@@ -1863,7 +1929,7 @@ def timing_report(store, keys):
     A stage with no sidecar was only ever a hit in this store (or came from a store merged without it): it counts in n, not in timed."""
     kinds, units, passes, untimed = {}, {}, {}, 0
     for k in sorted(keys):
-        dp = os.path.join(store, "stage-docs", k + ".json")
+        dp = os.path.join(store, "stage-docs", k[:2], k + ".json")
         if not os.path.isfile(dp):
             untimed += 1
             continue
@@ -3350,6 +3416,13 @@ def main(argv):
         if argv[:1] == ["store-merge"]:   # recipe store-merge SRC [--store DST]: DST defaults to $GATE_CACHE/store
             dst = dict(zip(argv[2::2], argv[3::2])).get("--store") or os.path.join(os.environ["GATE_CACHE"], "store")
             print("store-merge: " + " ".join("%s %d" % kv for kv in sorted(store_merge(argv[1], dst).items())))
+            return 0
+        if argv[:1] in (["store-export"], ["store-import"]):   # recipe store-export KEY DIR [--store S] / store-import DIR KEY [--store S]: one cache entry under its key
+            st = dict(zip(argv[3::2], argv[4::2])).get("--store") or os.path.join(os.environ["GATE_CACHE"], "store")
+            if argv[0] == "store-export":
+                print("store-export: %d files" % store_export(st, argv[1], argv[2]))
+            else:
+                print("store-import: " + " ".join("%s %d" % kv for kv in sorted(store_import(argv[1], st, argv[2]).items())))
             return 0
         if argv[:1] == ["timing"]:     # recipe timing --root R[@VARIANT] --store S [--ext E]: builds (every stage a hit when it was built before) and sums the sidecars
             o = dict(zip(argv[1::2], argv[2::2]))
