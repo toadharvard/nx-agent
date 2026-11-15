@@ -394,6 +394,46 @@ class StoresBcd(unittest.TestCase):
             mag = Fraction(sig) * Fraction(2) ** (e - 16383 - 63)
             self.assertEqual((-1 if sign else 1) * mag, want)                                                                      # exact
             self.assertEqual(val(o.raised), 0)                                                                                  # FBLD raises nothing for decimal digits
+    def test_fbld_invalid_digit_is_free(self):
+        """SDM 2A:FBLD Description: a digit AH..FH gives an undefined result -> the image is the free nd.fbld.img, no precondition"""
+        nd = z3.BitVec('nd.fbld.img', 80)
+        for digits in (0x0000000000000000A0, 0x123456789012345F78, 0xFFFFC000000000000000 & 0xFFFFFFFFFFFFFFFFFFFF):
+            o = X.execute(('df', 'mem', 4, None), state([]), K(digits, 80), None, None)
+            self.assertIn(str(nd), [str(v) for v in o.nd])
+            self.assertTrue(val(o.pre))                                                                                          # no precondition
+            for img in (0, INDEF, 0x3FFF8000000000000000):
+                r = val(z3.substitute(z3.Select(o.s.R, K(7, 3)), (nd, K(img, 80))))
+                self.assertEqual(r, img, hex(digits))                                                                            # any image is admissible
+    def test_fld_denormal_unmasked_still_pushes(self):
+        """SDM 2A:FLD Description NOTE: a denormal load with DM unmasked flags the exception but the value is still pushed;
+        SDM 1:8.5.1.1: an unmasked #IA (SNaN) leaves TOP and the registers unchanged"""
+        for key, mem, want in ((('d9', 'mem', 0, None), 0x00000001, 2.0 ** -149), (('dd', 'mem', 0, None), 0x1, 5e-324)):
+            for fcw, pushed in ((0x037D, True), (0x037F, True)):
+                o = X.execute(key, state([], fcw), K(mem, 32 if key[0] == 'd9' else 64), None, None)
+                s = o.s; top = val(X.top(s)); fsw = val(s.fsw)
+                self.assertEqual(top, 7, (key, hex(fcw)))                                   # pushed in both cases
+                self.assertEqual((fsw >> X.DE) & 1, 1, (key, hex(fcw)))                    # DE flagged
+                self.assertEqual((fsw >> X.ES) & 1, int(fcw == 0x037D), (key, hex(fcw)))   # ES only when unmasked
+                self.assertEqual(rd(s, 7), f2b(want), key)                                  # normalised, exact
+        o = X.execute(('dd', 'mem', 0, None), state([], 0x037E), K(0x7FF0000000000001, 64), None, None)   # SNaN, IM unmasked
+        self.assertEqual((val(X.top(o.s)) , val(o.s.fsw) & 1), (0, 1))                       # TOP unchanged (empty stack: TOP = 0), IE set
+    def test_fiarith_forms(self):
+        """SDM 2A:FIADD Op 'DEST := DEST + ConvertToDoubleExtendedPrecisionFP(SRC)' and the FISUB/FISUBR/FIMUL/FIDIV/FIDIVR rows"""
+        ops = {0: lambda a, b: a + b, 1: lambda a, b: a * b, 4: lambda a, b: a - b, 5: lambda a, b: b - a, 6: lambda a, b: a / b, 7: lambda a, b: b / a}
+        for op_, fn in ops.items():
+            for opc, n, signed_max in (('da', 32, 2 ** 31 - 1), ('de', 16, 2 ** 15 - 1)):
+                for a, m in ((2.5, 7), (2.5, -3), (-1.75, 1000), (0.5, signed_max), (0.5, -signed_max - 1)):
+                    mem = m & (2 ** n - 1)
+                    o = X.execute((opc, 'mem', op_, None), state([a]), K(mem, n), None, None)
+                    got = rd(o.s, 7)
+                    self.assertEqual(got, f2b(fn(a, float(m))), (opc, op_, a, m))
+                    self.assertEqual(val(X.top(o.s)), 7)
+        o = X.execute(('da', 'mem', 6, None), state([2.5]), K(0, 32), None, None)          # FIDIV by integer 0: #Z, SDM 2A:FDIV/FIDIV Exc
+        self.assertEqual((val(o.s.fsw) >> X.ZE) & 1, 1)
+        o = X.execute(('da', 'mem', 7, None), state([0.0]), K(5, 32), None, None)          # FIDIVR: 5 / ST(0) = 5 / 0
+        self.assertEqual((val(o.s.fsw) >> X.ZE) & 1, 1)
+        o = X.execute(('da', 'mem', 0, None), state([]), K(1, 32), None, None)             # ST(0) empty: stack underflow #IS
+        self.assertEqual((val(o.s.fsw) >> X.SF) & 1, 1)
     def test_fist_ranges(self):
         for n, key in ((16, ('df', 'mem', 2, None)), (32, ('db', 'mem', 2, None))):
             hi, lo = 2 ** (n - 1) - 1, -(2 ** (n - 1))

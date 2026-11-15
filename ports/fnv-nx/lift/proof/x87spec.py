@@ -525,8 +525,11 @@ def finish(s_in, s_out, newflags, mem=None, extra_pre=None, ou_pre=False, abort_
         'Destination is a memory location'): the caller passes abort_set = IE|OE|UE for such stores;
       * an unmasked PE stores the result and then signals (SDM 1:8.5.6: handler invoked in addition);
       * ES and B are recomputed (SDM 1:8.1.3.3).
-    ou_pre adds the OWNER 8 precondition that OE and UE are masked when this instruction raised them
-    (the biased result of SDM 1:8.5.4/8.5.5 is not representable in binary64)."""
+    ou_pre adds the precondition that OE and UE are masked when this instruction raised them (the biased result
+    of SDM 1:8.5.4/8.5.5 is not representable in binary64, OWNER 8).  It is not a bare assumption: it is the
+    L3a fact `x87-masked-sites` of CLAUDE.md, section Hardware exceptions in lifted code (every fldcw, fldenv, frstor and
+    fxrstor site of the exe keeps the exceptions masked, so FCW.OM = FCW.UM = 1 at every x87 instruction).
+    CERTS.md, section x87 precondition facts, names it; a certificate that uses ou_pre has that fact in its K."""
     fcw = s_in.fcw
     unm = ~Extract(5, 0, fcw)
     abort = (newflags & unm & (fl(IE, DE, ZE) if abort_set is None else abort_set)) != K(0, 6)
@@ -719,8 +722,7 @@ def bcd_to_img(m):
 
 
 def bcd_digits_ok(m):
-    """FBLD of a digit above 9: SDM 1:4.7 gives no value for it (SDM 2A:FBLD: 'attempting to load the
-    indefinite produces an undefined result'), so the precondition is that all 18 digits are decimal."""
+    """True when all 18 digits of the packed BCD m are decimal (SDM 1:4.7: a digit is 0..9)."""
     conds = [ULE(Extract(4 * i + 3, 4 * i, m), K(9, 4)) for i in range(18)]
     return And(*conds)
 
@@ -782,7 +784,7 @@ def _uf_state(s, dst_idx, pop):
 
 
 # --- loads -------------------------------------------------------------------------------
-def _push(s, img, flags=NOFLAGS, uf=FALSE):
+def _push(s, img, flags=NOFLAGS, uf=FALSE, abort_set=None):
     """Push the image img (TOP <- TOP-1; ST(0) <- img, SDM 2A:FLD Op).  Stack overflow (SDM 1:8.5.1.1: push onto a non-empty
     register) or, for FLD ST(i), underflow of the source: IE, SF, C1 = overflow; the masked response pushes
     the QNaN indefinite.  Both at once is not specified by the SDM (precondition)."""
@@ -790,22 +792,25 @@ def _push(s, img, flags=NOFLAGS, uf=FALSE):
     fault = Or(ov, uf)
     s_f = do_push_img(stack_fault_state(s, ov), K(INDEF80, 80))
     s_n = _c1(do_push_img(s, img), FALSE)
-    o = finish(s, St.ite(fault, s_f, s_n), If(fault, fl(IE), flags), extra_pre=Not(And(ov, uf)))
+    o = finish(s, St.ite(fault, s_f, s_n), If(fault, fl(IE), flags), extra_pre=Not(And(ov, uf)), abort_set=abort_set)
     o.undef = UNDEF_C023
     return o
 
 
 def fld_m32(s, m):
     """SDM 2A:FLD Op (memory operand), single precision.  #IA for an SNaN (converted to QNaN, SDM 1:T4-8),
-    #D for a denormal (SDM 2A:FLD Exc)."""
+    #D for a denormal (SDM 2A:FLD Exc).  An unmasked #D does not abort: SDM 2A:FLD Description NOTE: 'When the FLD
+    instruction loads a denormal value and the DM bit in the CW is not masked, an exception is flagged but the value
+    is still pushed onto the x87 stack.'  So only IE aborts (abort_set)."""
     v, de, snan = from_m32(m)
-    return _push(s, to_m80(If(snan, quieten(v), v)), fv(ie=snan, de=de))
+    return _push(s, to_m80(If(snan, quieten(v), v)), fv(ie=snan, de=de), abort_set=fl(IE))
 
 
 def fld_m64(s, m):
-    """SDM 2A:FLD Op (memory operand), double precision (the register format, OWNER 8)."""
+    """SDM 2A:FLD Op (memory operand), double precision (the register format, OWNER 8); an unmasked #D still pushes
+    (the NOTE quoted at fld_m32)."""
     v, de, snan = from_m64(m)
-    return _push(s, to_m80(If(snan, quieten(v), v)), fv(ie=snan, de=de))
+    return _push(s, to_m80(If(snan, quieten(v), v)), fv(ie=snan, de=de), abort_set=fl(IE))
 
 
 def fld_m80(s, m):
@@ -925,10 +930,13 @@ def fild(s, m, n):
 
 
 def fbld(s, m):
-    """SDM 2A:FBLD Op: 'TOP := TOP - 1', 'ST(0) := ConvertToDoubleExtendedPrecisionFP(SRC)'.  The digits are
-    assumed decimal (SDM 2A:FBLD Description): precondition."""
-    o = _push(s, bcd_to_img(m))
-    o.pre = And(o.pre, bcd_digits_ok(m))
+    """SDM 2A:FBLD Op: 'TOP := TOP - 1', 'ST(0) := ConvertToDoubleExtendedPrecisionFP(SRC)'.  A digit above 9 is
+    outside SDM 1:4.7's packed-BCD format and the SDM gives no result for it (2A:FBLD Description: 'Attempting to load an
+    invalid encoding produces an undefined result.'): the loaded image is the free variable
+    `nd.fbld.img` (BitVec80, any image), with no precondition and no flag."""
+    nd = z3.BitVec("nd.fbld.img", 80)
+    o = _push(s, If(bcd_digits_ok(m), bcd_to_img(m), nd))
+    o.nd = list(o.nd) + [nd]
     return o
 
 
