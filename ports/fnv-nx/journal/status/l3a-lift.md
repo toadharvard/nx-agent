@@ -1026,3 +1026,10 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - int 0x29–0x2e: 0 sites.
   - Shard rule: a fixed N per image (exe 64, d3dx9 16 each, small images 1), and shard j takes bucket(entry) % N == j, with no stage set derived from facts. finish requires the union of the shards to equal UNIVERSE.
 - 23:03 L5 head f1da9b3e9 (claude/fnv-l5-platform-w15): the other_vectors row is #GP, error vector*8+2, AV 0xC0000005, flags 0, params [0, 0xffffffff], address = the int, eip_advance 0. Wine facts are checked against the pinned text; test_gen_x86sys passes 8/8. w8 merges it into base3 and writes the faults consumer against the row fields.
+- 23:08 Census over the lifted set (w8; each UNIVERSE entry's own explore(); exe + 7 modules; facts 6944080; 155,896 entries; 0 crashes).
+  - int 0x29–0x2e: 0.
+  - Other int n: 90 sites (int 6 32, in the exe and libvorbis; the rest in d3dx9). All are reached by fallthrough from a universe entry; one is an entry itself (014d3c95).
+  - gs: 24 `mov m16, gs` and 4,001 gs-prefixed accesses (exe 1, d3dx9_31 1,020, d3dx9_38 2,980).
+  - The universe is a sound may-execute superset, so every decoded instruction gets the CPU's semantics, and the universe is unchanged. int n is covered by L5's f1da9b3e9 row.
+  - gs is undecided in the record. While it stays undecided, all 4,025 sites are red and the pack is incomplete. L5 is asked for one row for the class: either the initial gs plus #GP(0) through null-selector access, or the Wine 9.0 check_invalid_gs path if precedence admits it.
+- bottleneck: the exe jump-table red (w7); the gs record (L5); the facts farms; lift/bridges l2sections (L1 w12).
