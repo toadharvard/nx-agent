@@ -273,6 +273,13 @@ void sw(H* __restrict d, const H* __restrict s) {
   for (int i = 0; i < 32; i++) { const char* p = (const char*)&s->spares[i]; char* q = (char*)&d->spares[i]; q[0]=p[3]; q[1]=p[2]; q[2]=p[1]; q[3]=p[0]; }
 }
 '''
+EH_SRC = r'''
+static unsigned char tab[97];
+void init() { __builtin_init_dwarf_reg_size_table(tab); }
+void* f(void* a) { return __builtin_extract_return_addr(a); }
+void* g(void* a) { return __builtin_frob_return_addr(a); }
+void h(long a, void* b) { __builtin_eh_return(a, b); }
+'''
 plug = build_plugin()
 if plug:
     po = compile_cxx(SRC, 'plug', plug)
@@ -313,6 +320,13 @@ if plug:
     check('lanes: the shared load and store of the byte-swap loop certify', lr, {})
     ldis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', lanes]).stdout
     check('lanes: the shared bytes are read ldarb and written stlrb (no plain access of the shared span)', ('ldarb' in ldis, 'stlrb' in ldis), (True, True))
+    # the unwinder's context builtins (libgcc unwind-dw2.c): value-only return-address/EH builtins, and the dwarf register-size table filler
+    ehs = compile_cxx(EH_SRC, 'eh', plug)
+    er = {k: v for k, v in a64order.scan(ehs).rows if v}
+    check('unwinder builtins: no ORD-T error, every access certified', er, {})
+    edis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', ehs]).stdout
+    check('init_dwarf_reg_sizes: the shared table is read ldarb and written stlrb, the builtin fills a private copy',
+          ('ldarb' in edis.split('<_Z4initv>:')[1].split('\n\n')[0], 'stlrb' in edis.split('<_Z4initv>:')[1].split('\n\n')[0]), (True, True))
     check('bit-field store certified', not any(k.startswith('_Z3stbv') or k.startswith('_Z3ldbv') for k in rs), True)
     dis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', po]).stdout
     esc = dis.split('<_Z3escv>:')[1].split('\n\n')[0]

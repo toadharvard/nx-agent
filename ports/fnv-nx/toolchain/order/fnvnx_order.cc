@@ -608,6 +608,49 @@ static void order_builtin_call(gimple_stmt_iterator *gsi, gcall *call) {
   // expand_builtin_stack_save / expand_stack_restore: emit_stack_save / emit_stack_restore, a move of the stack pointer register); the pointer
   // operand is a stack-pointer VALUE that the builtin never dereferences, so it is no memory access (a VLA or alloca scope boundary).
   if (code == BUILT_IN_STACK_SAVE || code == BUILT_IN_STACK_RESTORE) return;
+  // THE RETURN-ADDRESS AND EH-RETURN BUILTINS. __builtin_extract_return_addr and __builtin_frob_return_addr expand_expr their operand to a
+  // register value and apply a mask or a constant offset to it (except.cc expand_builtin_extract_return_addr / expand_builtin_frob_return_addr:
+  // expand_and, plus_constant); __builtin_eh_return expand_exprs its two operands to registers (the stack adjustment and the handler address),
+  // copies them to the EH registers and jumps to the function's EH-return label (except.cc expand_builtin_eh_return). The pointer operands are
+  // addresses taken as VALUES: no MEM is made from any of them, so there is no access to order.
+  if (code == BUILT_IN_EXTRACT_RETURN_ADDR || code == BUILT_IN_FROB_RETURN_ADDR || code == BUILT_IN_EH_RETURN) return;
+  // __builtin_init_dwarf_reg_sizes (table): dwarf2cfi.cc expand_builtin_init_dwarf_reg_sizes stores the size of each register's save slot, byte
+  // stores through the BLKmode MEM at the operand, into the entries the target's register map names; the other entries are not touched. The
+  // pointee is the whole table object. It is applied to a private copy of that object: the table is read into a private temporary by
+  // an ordered copy, the builtin fills the temporary, and the object is written back by an ordered copy (an ordered read-modify-write of the
+  // object, the same form as the store of a bit-field). Difference from the plain stores: the entries the builtin does not name are stored back
+  // with the value read; that is unobservable unless another thread stores to the same object in between, and every writer of such a table
+  // is this builtin, which writes the same values on every call.
+  if (code == BUILT_IN_INIT_DWARF_REG_SIZES && gimple_call_num_args(call) >= 1) {
+    tree a = gimple_call_arg(call, 0);
+    tree base = TREE_CODE(a) == ADDR_EXPR ? ref_base(TREE_OPERAND(a, 0)) : NULL_TREE;
+    poly_int64 bsz, bpos;
+    tree voff;
+    machine_mode mm;
+    int uns, rev, vol;
+    HOST_WIDE_INT bp = -1;
+    if (base && DECL_P(base)) {
+      get_inner_reference(TREE_OPERAND(a, 0), &bsz, &bpos, &voff, &mm, &uns, &rev, &vol);
+      if (voff || !bpos.is_constant(&bp)) bp = -1;
+    }
+    if (bp != 0 || !DECL_P(base) || !TYPE_SIZE_UNIT(TREE_TYPE(base)) || !tree_fits_uhwi_p(TYPE_SIZE_UNIT(TREE_TYPE(base)))) {
+      error_at(gimple_location(call), "%<fnvnx_order%>: __builtin_init_dwarf_reg_sizes whose operand is not the start of a table object");
+      return;
+    }
+    if (local_unshared(base)) return;
+    tree t = make_tmp(TREE_TYPE(base), "order_dwt");
+    force_addressable(t);
+    gimple *in = gimple_build_assign(t, unshare_expr(base));
+    gimple_set_location(in, gimple_location(call));
+    gsi_insert_before(gsi, in, GSI_SAME_STMT);
+    gimple_stmt_iterator g2 = gsi_for_stmt(in);
+    order_single(&g2);
+    *gsi = gsi_for_stmt(call);
+    gimple_call_set_arg(call, 0, fold_convert(TREE_TYPE(a), build_fold_addr_expr(t)));
+    update_stmt(call);
+    store_after(gsi, call, gimple_build_assign(unshare_expr(base), t));
+    return;
+  }
   if (code == BUILT_IN_VA_START && gimple_call_num_args(call) >= 1) {
     tree a = gimple_call_arg(call, 0);
     if (POINTER_TYPE_P(TREE_TYPE(a)) && !(TREE_CODE(a) == ADDR_EXPR && local_unshared(ref_base(TREE_OPERAND(a, 0))))) {
