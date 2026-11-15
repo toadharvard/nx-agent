@@ -576,3 +576,4 @@ After the first frame:
 - 2026-11-15 21:28Z: DISPATCH1-DEF is withdrawn. cand3's DEFDISP-NS (065136142, w2) closes the class. A shapeless definition gets a `-<reason>` row and exitgen is red when it is joined to an exe address.
   - Proof: native indirect calls to a shapeless type are already call-site errors, so the dispatcher reaches such a definition only through a join.
   - L3a rewrites its 2 test cases to this rule.
+- 2026-11-15 21:32Z: Farm defect: MANIFEST toolchain_tree_sha256 (53513a9c) in pins 56a4d09c and 6741a66c was the hash of an empty directory, because the archive was taken from a subdirectory. toolchain_tree_git was right. The fix is farm 3c6a1ebd: archive from the top, and an empty archive is an error. K1 is unchanged and K2 is 6a485ab9d3d3d486. Stage 2 is rebuilt from it, plugins are fast-forwarded to 3c6a1ebd, and the pin goes to L1, w15 and L6. The toolchain_tree_sha256 of earlier pins is void.
