@@ -29,6 +29,9 @@ admit requirement is deleted. The practice stays: private artifacts live in fnv-
 **Speed, after the first frame (owner, 2026-11-15):** first nativization and the PERFDEBT restores. Only after them, a
 deterministic A57 cache model (L1/L2 by documented sizes) in the L4 emulator, giving misses per frame per thread beside the
 instruction counts. Owner L4.
+Also after the first frame (owner, 2026-11-15; CLAUDE.md "parallel loops and deviations"): the parallel-loop rule (owner
+L3a for the proof over the points-to model, L5 for the fork-join runtime) and verify/DEVIATIONS.json with its gate (owner L1);
+a deviation is admitted only for a stated goal.
 
 All work resumed at 2026-11-14 23:00Z on the candidate `claude/fnv-next3b` 141b07580. That is 224af83e plus L1
 w17m 4ee6cc10 plus CLAUDE.md. Its verdict v9 is running. The trunk is a5c8f427 (38 gates). The platform root is not

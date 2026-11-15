@@ -449,3 +449,30 @@ The owner's words: "делегируй остаток работы аккура�
     every explicit target float→int builtin (vcvtq_s32_f32, vcvtq_u32_f32 and their family) lane-exact. In range it
     converts; out of range or NaN it gives x86 integer-indefinite (cvttps2dq semantics). Then fpexact certifies the
     NEON path and the switch is removed.
+
+## Owner order of 2026-11-15: parallel loops and deviations, after the first frame (binding)
+
+The owner's words: "Делаем, так как данные уже будут для анализа этого" and "Это не должно быть так, что мы просто решили
+исправить все баги. Это разрешено только если решает конкретную задачу, например, позволяет добиться большей
+производительности за счет улучшения корректности."
+
+- **Parallel-loop rule (speed, after the first frame).** A loop of the main thread runs its iterations on several cores
+  only when it is proven statically, by the one points-to/write-set model, that:
+  - the iterations write disjoint memory and read nothing another iteration writes;
+  - they touch no shared state (allocator, reference counts, shared lists), or that state is made thread-safe natively first;
+  - there is no floating-point reduction across iterations.
+
+  Execution is fork-join, so the result is bit-identical to the sequential loop. A loop that is not proven stays sequential.
+  Which loops to try comes from the per-function instructions-per-frame data; the proof decides.
+- **Deviations (`verify/DEVIATIONS.json`).** A change of the exe's behaviour is allowed only when it serves a stated
+  goal on the path (for example a speed rule), never as bug-fixing for its own sake. Each entry gives:
+  - the original behaviour and why it is undefined or a defect (a data race, a crash, an out-of-bounds access);
+  - the new behaviour;
+  - the proof that every behaviour of the new program is one the original program could already show on its defined
+    inputs. For example, adding synchronization to a race only removes interleavings;
+  - the goal it unlocks, such as a rule id or a PERFDEBT/speed item;
+  - its owner.
+
+  A deviation without a goal, or without that proof, is red.
+  - Example (owner): a worker thread writes UI state concurrently with the main thread. That is a race. Making the write
+    ordered through the main thread lets the worker run on its own core.
