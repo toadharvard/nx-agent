@@ -299,3 +299,9 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - L1 w12's two recipe rules are in (409f79837) and merged at w6-r 5c98d9225. w6 is running the icount root and the bootguest link.
   - Blocked on L1: an admit rule for target-neutral header roots. It covers hostabi/include for bootrt (host, needed by 4.3 gl4) and verify/icount_abi for the icount root (guest).
   - L6A: bootrt is admitted on w6-r; its base for the L4 files is w6-r.
+- 09:50:
+  - icount root: every compile is green; ld is red.
+    - Undefined: fnvnx_dispatch (from rt/guest) and main (from rt/guest's crt0).
+    - Sent to L1 as a class question: a guest program's entry and the dispatch for a test image. A test-defined `main` would be a double, so it is rejected.
+  - bootguest@m0 (run 52 s): red at gen:loader:1, because modules.py's tempfile finds no scratch dir in the hermetic stage. Sent to w12 as a stage-runner rule. gen:0 now passes. The undefined set is still unmeasured.
+  - L1 accepted header roots (class header, no target) for hostabi/include and icount_abi. w15 lands it in cand2.
