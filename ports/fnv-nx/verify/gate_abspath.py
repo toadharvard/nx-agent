@@ -203,8 +203,11 @@ def pathval(node, idx, flow, sc, selfpath, mod, depth=0):
         while i is not None:
             vals = flow[i].get(node.id)
             if vals:
-                got = [pathval(v, i, flow, sc, selfpath, mod, depth + 1) for v in vals]
-                return got[0] if all(g is not None for g in got) else None
+                alts = [v for w in vals for v in alternatives(w) if mentions_self(v, i, flow, sc)]   # the others are arguments: the caller's key
+                got = [pathval(v, i, flow, sc, selfpath, mod, depth + 1) for v in alts]
+                if not got or not all(g is not None for g in got):
+                    return None
+                return next((g for g in got if g[1] and "?" in g[0]), got[0])   # every assignment is an alternative: the undecidable one decides
             i = sc[i][1]
         return None
     if isinstance(node, ast.Subscript):
@@ -282,6 +285,35 @@ def leaves(segs, owner):
             out.append(g)
     o = owner.split("/")
     return out[:len(o)] != o, "/".join(out)
+
+
+def alternatives(node):
+    """The expressions a conditional or `or`/`and` chain can evaluate to."""
+    if isinstance(node, ast.IfExp):
+        return alternatives(node.body) + alternatives(node.orelse)
+    if isinstance(node, ast.BoolOp):
+        return [a for v in node.values for a in alternatives(v)]
+    return [node]
+
+
+def mentions_self(node, idx, flow, sc, depth=0):
+    """True iff the expression NODE (or a name it is assigned from) mentions __file__, __path__ or sys.argv[0]: a path of the file's own location."""
+    for m in ast.walk(node):
+        if isinstance(m, ast.Name):
+            if m.id in ("__file__", "__path__"):
+                return True
+            if depth < 6:
+                i = idx
+                while i is not None:
+                    vals = flow[i].get(m.id)
+                    if vals:
+                        if any(mentions_self(v, i, flow, sc, depth + 1) for v in vals):
+                            return True
+                        break
+                    i = sc[i][1]
+        elif isinstance(m, ast.Subscript) and dotted(m.value) == "sys.argv" and isinstance(m.slice, ast.Constant) and m.slice.value == 0:
+            return True
+    return False
 
 
 def read_target(n, mod):
@@ -375,14 +407,19 @@ def judge_file(path, src, owner=None):
             for n in own_nodes(scope):
                 if not isinstance(n, ast.Call):
                     continue
-                t = read_target(n, mod)
-                if t is None or guarded(t, idx, flow, sc):
+                t0 = read_target(n, mod)
+                if t0 is None:
                     continue
-                v = pathval(t, idx, flow, sc, path, mod)
-                if v is not None and v[1]:
-                    out, res = leaves(v[0], owner)
-                    if out:
-                        add("escape", n.lineno, res)
+                for t in alternatives(t0):   # `a if c else b`, `a or b`: every branch is a path the read can take
+                    if guarded(t, idx, flow, sc):
+                        continue
+                    v = pathval(t, idx, flow, sc, path, mod)
+                    if v is not None and v[1]:
+                        out, res = leaves(v[0], owner)
+                        if out or "?" in v[0]:   # a path the gate cannot decide (a non-constant part) is never green
+                            add("escape", n.lineno, res)
+                    elif v is None and mentions_self(t, idx, flow, sc):
+                        add("escape", n.lineno, "undecided")
     dyn = []
     for idx, (scope, _) in enumerate(sc):
         for n in own_nodes(scope):
