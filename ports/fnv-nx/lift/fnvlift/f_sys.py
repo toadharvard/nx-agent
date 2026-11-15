@@ -45,7 +45,7 @@ def h_int(cx, ins):
     v = cx.ops[0].imm & 0xff
     row = faults.INT_ROWS.get(v)
     if row is None:
-        raise Unsupported('int 0x%x: the gate is undecided in platform/declared/x86sys.json' % v)
+        raise Unsupported('int 0x%x: undecided on the declared OS (x86sys int_ring3)' % v)
     name, at = row
     raise_code(cx, 'FNVL_' + name, cx.nxt if at == 'nxt' else cx.a + at)
 
