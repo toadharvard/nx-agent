@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""gen_env.py OUTDIR SPEC TSV_DIR D3DTYPES_H: env_handheld.tsv + env_docked.tsv (tests/l6/env/make_env.py: our measurement of Wine 9.0 + Mesa llvmpipe) -> env_table.gen.h/.cpp (not checked in).
+"""gen_env.py OUTDIR SPEC TSV_DIR D3DTYPES_H WINE_DIR: env_handheld.tsv + env_docked.tsv (tests/l6/env/make_env.py: our measurement of Wine 9.0 + Mesa llvmpipe) -> env_table.gen.h/.cpp (not checked in).
 Every table cell is DERIVED from rows through the closing rules of README.md, and every rule's premise is asserted on all rows it covers (a violated rule stops the generator,
 exit 2, naming it): devtype / adapter-format independence, format classes, usage-bit conjunction, struct writes iff success. The lookup functions are in env_rules.cpp.in.
 Profiles differ only where reported by the `profile differences` line."""
 import os, re, struct, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.dont_write_bytecode = True
 sys.path.insert(0, HERE); import envq  # noqa: E402
+# OUT SPEC TSV_DIR D3DTYPES_H WINE_DIR: the one place that parses the arguments (no default)
+envq.load(sys.argv[4], sys.argv[2], sys.argv[5])
+TSV_DIR = sys.argv[3]
 PROFILES = ["handheld", "docked"]; X8, R5, X1, A2R10 = 22, 23, 24, 35; HRC = [0, 0x8876086A, 0x8876086C, 0x0876086F]; HRN = {v: i for i, v in enumerate(HRC)}
 NA, INV = 0x8876086A, 0x8876086C
 # CreateQuery (nx_env_query_supported). Rule: d3d9 query_init passes the type through (wined3d_query_type = D3DQUERYTYPE); wined3d GL adapter_gl_create_query implements EVENT (ARB_sync / fences),
@@ -24,8 +27,7 @@ GLVER = gl_versions(); QMASK = sum(1 << t for t, need in QUERY_GL.items() if GLV
 fcc = envq.fcc
 # d3d9/device.c wined3dformat_from_d3dformat: non-FOURCC values with a case; wined3d/utils.c get_format_idx: the known FOURCCs
 SWITCH = [20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 40, 41, 50, 51, 52, 60, 61, 62, 63, 64, 67, 70, 71, 73, 75, 77, 79, 80, 81, 82, 83, 101, 102, 110, 111, 112, 113, 114, 115, 116, 117]
-KNOWN_FCC = sorted(fcc(s) for s in ["UYVY", "YUY2", "YV12", "DXT1", "DXT2", "DXT3", "DXT4", "DXT5", "MET1", "GRGB", "RGBG", "ATI1", "ATI2", "INST", "NVDB", "NVHU", "NVHS", "INTZ",
-                                    "RESZ", "NULL", " R16", "AL16", "NV12", "ATOC"])
+KNOWN_FCC = envq.KNOWN_FCC   # derived by envq.load from wined3d/utils.c format_index_remap (Wine 9.0), sorted
 UNK0, UNKF = len(KNOWN_FCC) + len(SWITCH), len(KNOWN_FCC) + len(SWITCH) + 1; NC = UNKF + 1
 
 
@@ -70,9 +72,6 @@ def image(st, out, size):
 
 
 import json  # noqa: E402
-# OUT SPEC TSV_DIR D3DTYPES_H: the one place that parses the arguments (no default)
-envq.load(sys.argv[4], sys.argv[2])
-TSV_DIR = sys.argv[3]
 ST = json.load(open(envq.SPEC))["structs"]
 
 

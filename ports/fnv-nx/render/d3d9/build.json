@@ -77,7 +77,8 @@
     "/out/gen",
     "/uses/ports/fnv-nx/bridgefacts/D9_SPEC",
     "/in/ports/fnv-nx/render/d3d9/env",
-    "/in/ports/fnv-nx/shim/include/d3d9types.h"
+    "/in/ports/fnv-nx/shim/include/d3d9types.h",
+    "/ext/wine-d3d9-formats"
    ],
    "inputs": [
     "ports/fnv-nx/shim/include/d3d9types.h",
@@ -114,6 +115,16 @@
    "outputs": [
     "gen/d3d9_enums.gen.h"
    ]
+  }
+ ],
+ "external": [
+  {
+   "name": "wine-d3d9-formats",
+   "repo": "fnv-nx-build",
+   "ref": "tools/wine-9.0-d3d9-formats",
+   "commit": "348f306e22a002a82db5fdad4def20c50b6e2544",
+   "tree_sha256": "342fb6d47a3bfc7cdae569acdd2d60b1a2ff64a3216214925a93c330bf8abd0b",
+   "at": "/ext/wine-d3d9-formats"
   }
  ],
  "link": null,

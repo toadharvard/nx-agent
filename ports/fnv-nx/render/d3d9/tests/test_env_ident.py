@@ -8,6 +8,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); ENV = os.path.normpath(os.pat
 
 
 PORT = os.path.normpath(os.path.join(HERE, "..", "..", ".."))
+WINE = sys.argv[1]   # test_env_ident.py WINE_DIR: the pinned mirror tools/wine-9.0-d3d9-formats (the recipe external "wine-d3d9-formats"), an argument (no default)
 SPEC = os.path.join(tempfile.mkdtemp(prefix="t-env-spec-"), "d3d9_spec.json")   # the interface table, generated as the d3d9 recipe's D9_SPEC is
 with open(SPEC, "wb") as _f:
     _f.write(subprocess.run([sys.executable, "-I", os.path.join(PORT, "bridgefacts", "d3d9", "d3d9_spec.py"), "--stdout", os.path.join(PORT, "shim", "include")],
@@ -15,7 +16,7 @@ with open(SPEC, "wb") as _f:
 
 
 def gen(out, tsv_dir=None):
-    return subprocess.run([sys.executable, "-I", os.path.join(ENV, "gen_env.py"), out, SPEC, tsv_dir or ENV, os.path.join(PORT, "shim", "include", "d3d9types.h")], capture_output=True, text=True)
+    return subprocess.run([sys.executable, "-I", os.path.join(ENV, "gen_env.py"), out, SPEC, tsv_dir or ENV, os.path.join(PORT, "shim", "include", "d3d9types.h"), WINE], capture_output=True, text=True)
 
 
 def t_ident(cpp):

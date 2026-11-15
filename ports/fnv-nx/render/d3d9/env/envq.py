@@ -26,10 +26,13 @@ def d3dformat_enum(hdr):
     return out
 
 
-FOURCC_LIST = ["DXT1", "DXT2", "DXT3", "DXT4", "DXT5", "ATI1", "ATI2", "INTZ", "RAWZ", "DF16", "DF24", "NULL", "NVDB", "RESZ", "ATOC", "A2M0", "A2M1", "INST", "R2VB",
-               "YUY2", "UYVY", "GRGB", "RGBG", "MET1", "NV12", "YV12", "AYUV", "NVHU", "NVHS", " R16", "AL16"]   # D3DFMT_G8R8_G8B8 = 'GRGB', R8G8_B8G8 = 'RGBG', MULTI2_ARGB8 = 'MET1'
+# UNKNOWN_FMT: representatives of the complement of (enum values + known FOURCCs). Closing proof, Wine 9.0 (tools/wine-9.0-d3d9-formats 348f306e, = tools/wine-9.0 c8373ee4):
+#  - a value of four printable bytes is passed through unchanged (dlls/d3d9/device.c:112-113), then dlls/wined3d/utils.c get_format_idx returns -1 for every FOURCC not in format_index_remap
+#    (utils.c:1932-1948), which selects the UNKNOWN format: one behaviour for every unknown printable FOURCC (ZZZZ, abcd, ~!@# stand for it);
+#  - any other value goes through the switch of wined3dformat_from_d3dformat (device.c:115) whose `default:` is WINED3DFMT_UNKNOWN: one behaviour for every unmapped number (1, 37, 255, 0x7fffffff, 0x41420143).
 UNKNOWN_FMT = [fcc("ZZZZ"), fcc("abcd"), fcc("~!@#"), 1, 37, 255, 0x7fffffff, 0x41420143]
-FMT = None   # set by load(): every D3DFORMAT enum value of the header + FOURCC_LIST + UNKNOWN_FMT
+FMT = None   # set by load(): every D3DFORMAT enum value of the header + the known FOURCCs + UNKNOWN_FMT
+KNOWN_FCC = None   # set by load(): the FOURCCs Wine 9.0 knows, sorted
 # DEVT, RTYPE, MSAA (and their *X / complement forms) are derived in load() from the enums of the mounted d3d9types.h (enum_domain)
 USAGE_BITS = [1 << i for i in range(32)]
 MASK = 0x103ffff0 | 3     # WINED3DUSAGE_MASK | WINED3DUSAGE_QUERY_MASK (+ RT, DS): the bits that reach wined3d_check_device_format's usage logic
@@ -78,11 +81,26 @@ NARGS = {"GetAdapterCount": 0, "GetAdapterIdentifier": 2, "GetAdapterMonitor": 1
          "EnumAdapterModesEx": 4, "GetAdapterDisplayModeEx": 2, "GetAdapterLUID": 1, "Direct3DCreate9": 1, "Direct3DCreate9Ex": 1}
 
 
-def load(hdr, spec):
-    """the one entry: hdr = d3d9types.h, spec = the interface table (D9_SPEC); both are the caller's arguments (no default, no path of this file).
+def known_fourcc(wine):
+    """the FOURCC formats Wine 9.0 knows, derived: the names in wined3d/utils.c format_index_remap, each resolved to its WINEMAKEFOURCC of include/wine/wined3d.h.
+    wine = the directory of the pinned mirror (tools/wine-9.0-d3d9-formats)."""
+    u = open(os.path.join(wine, "dlls", "wined3d", "utils.c")).read(); i = u.index("format_index_remap[] ="); blk = u[i:u.index("};", i)]
+    h = open(os.path.join(wine, "include", "wine", "wined3d.h")).read(); out = []
+    for n in re.findall(r"\{(WINED3DFMT_\w+),\s*WINED3D_FORMAT_FOURCC_BASE", blk):
+        m = re.search(r"\b" + n + r"\s*=\s*WINEMAKEFOURCC\('(.)',\s*'(.)',\s*'(.)',\s*'(.)'\)", h)
+        if not m: raise SystemExit("envq: %s of format_index_remap has no WINEMAKEFOURCC in wined3d.h" % n)
+        out.append(fcc("".join(m.groups())))
+    if not out: raise SystemExit("envq: format_index_remap not found")
+    return out
+
+
+def load(hdr, spec, wine):
+    """the one entry: hdr = d3d9types.h, spec = the interface table (D9_SPEC), wine = the pinned Wine mirror directory; all are the caller's arguments (no default, no path of this file).
     Builds FMT (and its domain D["FMT"]) and sets SPEC; nothing of this module is valid before it is called."""
     global FMT, SPEC
-    FMT = sorted(set(d3dformat_enum(hdr)) | {fcc(s) for s in FOURCC_LIST} | set(UNKNOWN_FMT))
+    global KNOWN_FCC
+    KNOWN_FCC = sorted(known_fourcc(wine))
+    FMT = sorted(set(d3dformat_enum(hdr)) | set(KNOWN_FCC) | set(UNKNOWN_FMT))
     D["FMT"] = FMT
     # D3DDEVTYPE: Wine 9.0 (tools/wine-9.0 c8373ee4) never reads the value except in dlls/wined3d/directx.c:2320 (wined3d_get_device_caps: DeviceType = HAL ? HAL : REF,
     #   the result is the same for every value other than HAL) and passes it through by cast (dlls/d3d9/d3d9_private.h:409); so every value outside the enum behaves as REF.
