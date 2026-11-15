@@ -280,6 +280,10 @@ void* f(void* a) { return __builtin_extract_return_addr(a); }
 void* g(void* a) { return __builtin_frob_return_addr(a); }
 void h(long a, void* b) { __builtin_eh_return(a, b); }
 '''
+WAIT_SRC = r'''
+#include <atomic>
+void waitf(std::atomic<int>& a, int v) { a.wait(v); }
+'''
 plug = build_plugin()
 if plug:
     po = compile_cxx(SRC, 'plug', plug)
@@ -327,6 +331,11 @@ if plug:
     edis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', ehs]).stdout
     check('init_dwarf_reg_sizes: the shared table is read ldarb and written stlrb, the builtin fills a private copy',
           ('ldarb' in edis.split('<_Z4initv>:')[1].split('\n\n')[0], 'stlrb' in edis.split('<_Z4initv>:')[1].split('\n\n')[0]), (True, True))
+    # an atomic builtin whose memory-order operand is an SSA name (libstdc++ atomic wait: a PHI of the order): raising it to a constant must
+    # leave the statement's operand cache consistent (the SSA update after the pass crashed on the stale use)
+    wo = compile_cxx(WAIT_SRC, 'wait', plug, ['-std=gnu++20'])
+    wdis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', wo]).stdout
+    check('atomic wait: compiles with the order raised to seq_cst on a run-time order operand', 'ldar' in wdis, True)
     check('bit-field store certified', not any(k.startswith('_Z3stbv') or k.startswith('_Z3ldbv') for k in rs), True)
     dis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', po]).stdout
     esc = dis.split('<_Z3escv>:')[1].split('\n\n')[0]

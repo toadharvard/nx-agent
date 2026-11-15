@@ -515,6 +515,9 @@ static void raise_atomic_orders(gcall *call, built_in_function code) {
     if (e.code != code) continue;
     for (unsigned i = 0; i < gimple_call_num_args(call); i++)
       if (e.mask & (1u << i)) gimple_call_set_arg(call, i, build_int_cst(integer_type_node, MEMMODEL_SEQ_CST));
+    // an operand that was an SSA name (a memory order computed at run time: a PHI) is now a constant: the statement's operand cache still holds
+    // the use, which the SSA update after this pass would rename (a stale use of a name the statement no longer reads)
+    update_stmt(call);
     return;
   }
 }
@@ -741,6 +744,7 @@ static void order_stmt(gimple_stmt_iterator *gsi) {
             for (unsigned i = 0; i < gimple_call_num_args(stmt); i++)
               if ((e.mask & (1u << i)) && TREE_CODE(gimple_call_arg(stmt, i)) == INTEGER_CST)
                 gimple_call_set_arg(stmt, i, build_int_cst(TREE_TYPE(gimple_call_arg(stmt, i)), MEMMODEL_SEQ_CST));
+        update_stmt(stmt);   // as in raise_atomic_orders: the replaced operand may have been an SSA name
       }
       // __builtin_va_copy: GCC expands it as the assignment of the two va_list objects (builtins.cc expand_builtin_va_copy: MODIFY_EXPR dst,
       // src), a plain access through its pointer operand. It is lowered to that assignment here, and ordered as any aggregate copy.
