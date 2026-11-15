@@ -1854,3 +1854,5 @@ bottleneck: the cand2 verdict on w15.
   - My error: I had told L3a that b3a4dad01 was in cand3.
   - Fix (w12, now): cand3 = c0f504e2a + the w12L2 line + b3a4dad01, with one directory-output form, sandbox and cas byte-equal to c0f504e2a, and the cand2 toolchain. The compiler stage and abspath stay out.
 bottleneck: the merged cand3 (w12) for the relift base, and the cand2 verdict (w15).
+- 22:01 w12 5fb4374ee (cand4): the compiler as a stage output (FNVNX_COMPILER_KEY in PP/CC; stamp_errors, RECIPE_TREE and test_stamp deleted; test_compilerstage 8/8); tool steps with debs/scratch/unkeyed/plugin inputs (test_toolstep 8/8). Open: guest_compiler.json switches when L2 w3's toolchain roots land; the envcheck tree hash and the env.json deb pins need w15's host. w12 is on the urgent cand3 rebuild.
+bottleneck: the merged cand3 (w12), and the cand2 verdict (w15).
