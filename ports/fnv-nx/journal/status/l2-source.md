@@ -529,3 +529,4 @@ After the first frame:
   - Decided domain: element alignment ≤8 (A8: the cookie is 4 bytes, not padded) and class-specific delete[].
   - Outside the domain (alignment ≥16, global sized delete[]): no recorded cl output. A product cookie row there is red "undecided"; no value is chosen.
   - The out-of-domain count over the product is reported once the pin exists. If it is above 0, a recorded cl 15.00 output is needed (to the orchestrator).
+- 2026-11-15 20:40Z: S29 at 0b50229a1 (w2, branch only). Rows add the element alignment and the called operator, so the gate can judge the domain. DATAMODEL.md/.json were edited by hand, which is refused (rule 2): only the gen.py sources are edited, the output is regenerated from the pinned docs checkout, and nothing is committed by hand.
