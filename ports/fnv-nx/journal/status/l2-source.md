@@ -210,3 +210,10 @@ After the first frame:
   - Nonframe: 372. Owner: w2, grouped by cause.
 - DATAMODEL 1760d47f3: cpp-docs subset mirror (tools/cpp-docs 1bc81a52b, tree 9c63b1c7…); S31 wint_t hunk; S33 stdint rule. CHAR16/32/8 are not tm macros.
 - odrdef ICE on swkbd.cpp:166 (mangle.cc:2515) goes to w3. targets.json's guest_platform.triplet goes to the farm.
+- 2026-11-15 01:05 w2 e0338490d: atomics seq_cst; aggregate copies ordered unit-wise; fold-set, nolib_ptr and atomic_order tables generated from the pinned tarball. 114 objects built, 19 crash L1's gate_order (a64order.py:490; reported to w23).
+  - Accepted: copy loop; spill slots (D1).
+  - To fix: CAS *expected bounce.
+  - Held: the fenced-libcall / string-op assignment (fold-set membership is not the SDM class). Proposed to the orchestrator:
+    - runtime C callees order themselves under one-ABI, so calls get no fence;
+    - newlib is built with -DPREFER_SIZE_OVER_SPEED, so no assembly string routines remain;
+    - the fenced-call path is deleted.
