@@ -365,3 +365,5 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - Waiting on L1 cand3 (w12 fd2505f0e: link.roots derived, link.tables per image) for the bootguest and icount link.
 - 14:25: 4.3: L6A's gl4 root is green (render/gl4 at gl4link2 133d310f3; libnxgl4.so 5cfbee35…, the same in 2 stores).
   - Task Z (w7, doing): bootgpu takes GL only from gate_build.ensure(render/gl4); the prebuilt @2f0427f5 and the NXGL4 pins are deleted (A27).
+- 14:30: Task Z done (w7-u 9a8385000): bootgpu, boot.py and boot_job take GL only from gate_build.ensure(render/gl4). The prebuilt @2f0427f5, the gpu/bridge branch fetch, and bootinputs' render-branch and pair subcommands are deleted; verify/bootrt → tests/bootrt.
+  - test_bootgpu is env_blocked on this host (no declared env). w7 is installing it with setup_verdict_env.sh, then runs the test and checks the .so sha against L6A's 5cfbee35….
