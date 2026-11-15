@@ -244,7 +244,7 @@ def recipe(ref, commit, tree, dest=None):
            'flags': {k: keep(v) for k, v in PACK_ROOT_FLAGS.items()},
            'include': ['/ext/liftpack/inc'], 'units': 'all', 'plugins': plugins,
            'generated': [{'tool': 'ports/fnv-nx/lift/tools/packcopy.py', 'args': ['/ext/liftpack', '/out'], 'inputs': [], 'outputs': pack_outputs()}],
-           'outputs': {'entries': 'entries.tsv'},
+           'outputs': {'ENTRIES': 'entries.tsv'},
            'link': None,
            'external': [{'name': 'liftpack', 'repo': 'fnv-nx-build', 'ref': ref, 'commit': commit, 'tree_sha256': tree, 'at': '/ext/liftpack'}, gc['external']]}
     dest = dest or os.path.join(LIFT, 'pack', 'build.json')

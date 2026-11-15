@@ -4158,7 +4158,7 @@
   }
  ],
  "outputs": {
-  "entries": "entries.tsv"
+  "ENTRIES": "entries.tsv"
  },
  "link": null,
  "external": [
