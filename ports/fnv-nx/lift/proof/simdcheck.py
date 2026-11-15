@@ -95,19 +95,76 @@ def _case_partition(fpl, chunk, mx):
     return cases
 
 
+def _consts(e):
+    """names of the uninterpreted constants (state variables, arrays) of a term"""
+    acc, seen, st = set(), set(), [e]
+    while st:
+        x = st.pop()
+        if x.get_id() in seen: continue
+        seen.add(x.get_id())
+        if z3.is_const(x) and x.decl().kind() == z3.Z3_OP_UNINTERPRETED: acc.add(x.decl().name())
+        st.extend(x.children())
+    return acc
+
+
+_BUDGET = [0, 0.0]                  # [seconds per shape (0: none), deadline of the shape being checked]
+_QC = {}                              # canonical query -> proved (unsat): sha256 of the SMT-LIB text of the canonical assertions
+_QCFILE = os.environ.get('SIMD_QCACHE')
+
+
+def _qc_load():
+    if _QCFILE and os.path.exists(_QCFILE) and not _QC:
+        for ln in open(_QCFILE): _QC[ln.strip()] = True
+
+
+def _canonical(g, cs, env, fpl, mx):
+    """the lane function with its operands abstracted: every FP lane operand of the row (fpl) is replaced by a fresh variable (the same term on both sides of the equality, so this is a substitution of equal
+    terms, not an assumption), and only the hypotheses on MXCSR and those operands are kept (weaker hypotheses: a proof is still a proof).  -> (assertions, ok); ok is False when the part still depends on
+    any other state (a preserved register, memory): it is then not a pure lane function and is asked whole."""
+    ops, seen = [], set()
+    for w, xs in fpl:
+        for x in xs:
+            if x.get_id() not in seen: seen.add(x.get_id()); ops.append((w, x))
+    pairs = [(x, z3.BitVec('opv%d' % i, w)) for i, (w, x) in enumerate(ops)]
+    sub = lambda t: z3.substitute(t, *pairs)
+    allowed = {'mxcsr'} | {v.decl().name() for _, v in pairs}
+    g2 = z3.simplify(sub(g)); cs2 = [sub(c) for c in cs]
+    keep = [sub(c) for c in (env.children() if z3.is_and(env) else [env])]
+    keep = [c for c in keep if _consts(c) <= allowed]
+    if not _consts(g2) <= allowed: return None
+    return keep + cs2 + [z3.Not(g2)]
+
+
+def _ask(asserts, timeout):
+    s = _TAC.solver(); s.set('timeout', timeout); s.add(*asserts)
+    return s
+
+
 def _discharge(env, nf, goals, eq, timeout, fpl=(), mx=None):
     """proved iff every part of every goal is unsat under env (and nf for the state parts), in every case of its case partition (FP rows: _case_partition; others: one case).  Parts that simplify to true
-    (a register the instruction does not touch) are not asked."""
+    (a register the instruction does not touch) are not asked.  An FP part that is a pure function of its lane operands and MXCSR is asked in its canonical form (_canonical), and a proved canonical query
+    is remembered (the same lane function of the builder is proved once, whatever register or address the shape names); anything the canonical query does not prove is asked whole."""
+    import hashlib, time
+    _qc_load()
     parts = [(g, False, None) for g in goals] + [(c, True, k) for e in eq for c, k in _components(e, bool(fpl))]
     unknown = False
-    for g, state, chunk in parts:
-        g = z3.simplify(g)
+    for g0, state, chunk in parts:
+        g = z3.simplify(g0)
         if z3.is_true(g): continue
         cases = _case_partition(fpl, chunk, mx) if fpl else [[]]
         for cs in cases:
-            s = _TAC.solver(); s.set('timeout', timeout)          # FP terms are bit-blasted (fpa2bv) and decided by the SAT core: the same decision problem, ~15x faster than the default combination
-            s.add(env, *cs, z3.And(nf, z3.Not(g)) if state else z3.Not(g))
-            import time; t0 = time.time(); res = s.check()
+            if _BUDGET[0] and time.time() > _BUDGET[1]: unknown = True; break          # the shape's wall-clock budget is spent: the rest is not decided (timeout)
+            if fpl and state:
+                can = _canonical(g0, cs, env, fpl, mx)
+                if can is not None:
+                    key = hashlib.sha256(z3.And(*can).sexpr().encode()).hexdigest()
+                    if key in _QC: continue
+                    if _ask(can, timeout).check() == z3.unsat:
+                        _QC[key] = True
+                        if _QCFILE: open(_QCFILE, 'a').write(key + '\n')
+                        continue
+            s = _ask([env, *cs, z3.And(nf, z3.Not(g)) if state else z3.Not(g)], timeout)          # FP terms are bit-blasted (fpa2bv) and decided by the SAT core
+            t0 = time.time(); res = s.check()
             if os.environ.get('SIMD_TRACE') and (res != z3.unsat or time.time() - t0 > 2): print('  part', str(g)[:70].replace('\n', ' '), res, round(time.time() - t0, 1), flush=True)
             if res == z3.sat: return 'FAILED', str(s.model())[:400]
             if res != z3.unsat: unknown = True
@@ -163,6 +220,7 @@ def main(a):
     cnt = {}
     for k in keys:
         if only not in k: continue
+        if '--budget' in a: import time; _BUDGET[0] = int(a[a.index('--budget') + 1]); _BUDGET[1] = time.time() + _BUDGET[0]
         r, info = check(k, int(a[a.index('--timeout') + 1]) if '--timeout' in a else 60000)
         if r == 'no-row' and k in ud: r = 'ud-class'                  # no spec row by rule: the opmap's cleared class (Form.fault(UD) is its own certificate), not a SIMD row
         cnt[r] = cnt.get(r, 0) + 1
