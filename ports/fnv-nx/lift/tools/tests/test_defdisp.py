@@ -132,19 +132,28 @@ def run_all(w):
             ok = cls == want or (cls == ('m',) and want == ('g',) and kind == 'result') or (g.endswith('r') and kind == 'argument' and want == ('g',))
             if kind == 'result' and rm: ok = ok and (rm.group(2) == 'R') == (n not in ('ct', 'in', 'vf') and int(rm.group(1)) in (1, 2, 4, 8))
             check('%s %s' % (kind, n), ok, 'row %s %s, the compiler uses %s' % (fn, d1, want))
-    # (4b) A definition without a shape: no row and no diagnostic only when its address is provably not taken (static, cgraph address_taken false);
-    # address taken (a callback, a table entry) or external linkage stays a build error, the row would be missing at an indirect call.
-    def compile_status(src, stem):
-        open('%s/%s.cc' % (w, stem), 'w').write(src)
-        r = pb.compile('%s/%s.cc' % (w, stem), '%s/%s.o' % (w, stem), plug)
-        return r.returncode, r.stderr
+    # (4b) DEFDISP-NS (L2's rule, toolchain/tests/test_dispatch_defdisp_ns.py): a definition whose type has no x86 shape compiles quietly, whatever its linkage and
+    # whether its address is taken, and gets the row `<asm> -<reason>`; reachability is decided by the join in exitgen, which is red for a JOINED `-` row.
+    import exitgen
     U = 'typedef unsigned __int128 u128;\n'
-    rc, err = compile_status(U + 'static u128 __attribute__((noinline)) sq(u128 x) { return x + 1; }\nextern "C" int use(int a) { return (int)sq(a); }\n', 'u128static')
-    check('static u128, address not taken: green, no row', rc == 0, err[:200])
-    rc, err = compile_status(U + 'static u128 __attribute__((noinline)) sq(u128 x) { return x + 1; }\nu128 (*volatile tab)(u128) = sq;\n', 'u128taken')
-    check('static u128, address taken: DISPATCH1 error', rc != 0 and 'DISPATCH1' in err, err[:200])
-    rc, err = compile_status(U + 'extern "C" u128 __attribute__((noinline)) pub(u128 x) { return x + 1; }\n', 'u128pub')
-    check('external u128: DISPATCH1 error', rc != 0 and 'DISPATCH1' in err, err[:200])
+    cases = (('u128static', 'static u128 __attribute__((noinline)) sq(u128 x) { return x + 1; }\nextern "C" int use(int a) { return (int)sq(a); }\n', '_ZL2sqo', 'static, address not taken'),
+             ('u128taken', 'static u128 __attribute__((noinline)) sq(u128 x) { return x + 1; }\nu128 (*volatile tab)(u128) = sq;\n', '_ZL2sqo', 'static, address taken'),
+             ('u128pub', 'extern "C" u128 __attribute__((noinline)) pub(u128 x) { return x + 1; }\n', 'pub', 'external'))
+    objs = {}
+    for stem, body, sym, what in cases:
+        open('%s/%s.cc' % (w, stem), 'w').write(U + body)
+        r = pb.compile('%s/%s.cc' % (w, stem), '%s/%s.o' % (w, stem), plug)
+        check('u128 definition, %s: compiles, no error' % what, r.returncode == 0, r.stderr[:200])
+        if r.returncode: continue
+        dd = exitgen.defdisp_table(exitgen.read_defdisp('%s/%s.o' % (w, stem)))
+        check('u128 definition, %s: the row is `-i128`' % what, dd.get(sym) == {'-i128'}, repr(dd))
+        objs[stem] = (sym, '%s/%s.o' % (w, stem))
+    if 'u128pub' in objs:
+        sym, obj = objs['u128pub']
+        rf, out = w + '/rows.tsv', w + '/exits.cc'
+        open(rf, 'w').write('00402000\t%s\tcaller\n' % sym)
+        r = subprocess.run([sys.executable, '-I', os.path.join(HERE, '..', 'exitgen.py'), '--rows', rf, '--out', out, '--obj', obj], capture_output=True, text=True, env={})
+        check('exitgen: a joined `-i128` row is red and names the symbol', r.returncode != 0 and sym in r.stderr and 'i128' in r.stderr and not os.path.exists(out), r.stderr[:300])
     print('defdisptest: %d failed' % bad); return 1 if bad else 0
 
 
