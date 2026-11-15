@@ -1708,3 +1708,17 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - abi decoder: `$$C` and `??$?0` done.
 - C prototypes: 1607 of 2737 C-decorated boundary symbols have no type check (extern "C" in C++ units). Sent to L2 (layout plugin decltype rows) and to the orchestrator as a class without a gate; cand3.
 - 15:41 L2 w3 81984319d DECLTYPE-LANG (decltype rows for C-linkage symbols in C++ units), to cand3 (w12) after the pin: fix gate_abi:84, measure covered/2737 and the hard errors by cause.
+## 15:58 cand4 hand-off (L6). This replaces the earlier heads.
+1. claude/fnv-l6-render-w6-root 68521ef8f. It contains L6A gl4link2 1ca99e8bd; if gl4link2 goes in separately, it goes first or in the same candidate.
+2. claude/fnv-l6-render-w5-smlink ed6a8f41e. It already has w6-root 35f8eafec merged, plus the tightened elffacts fix a350858b4.
+- What they bring:
+  - D9_SPEC as a stage output; w6 rebases gen_combridge onto cand3's COM_SPEC.
+  - The gl4shim GLSL table: 9 rows, with FFP generated from structs.
+  - pair, with FFP read/write sets as data.
+  - The SM table, one record per fact.
+- sm_link green at ed6a8f41e:
+  - universe 1818 (sha 3d157e07…6c19);
+  - 115776 stage certificates, 0 not ok;
+  - 121394 programs, all linked;
+  - FFP programs 1002/1002.
+- These wait on L1 (all cand3, w12): the run-stage cost fix, the plugin include closure (crossing_terms.inc), and the hostabi INCLUDE root.
