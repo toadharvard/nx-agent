@@ -26,7 +26,7 @@
  *            alignment the source asked for), altered (the record's alignment is not the natural one: pack, packed,
  *            alignas / __declspec(align) on it or on a member)
  *   itanium  the Itanium type string (the key of the `types` column of .fnvnx.n3)
- *   linkage  `none` | `internal` | `external`: the linkage of the record type, C++ [basic.link], decided by GCC 13.3's own predicates
+ *   linkage  `none` | `internal` | `external` | `c`: the linkage of the record type, C++ [basic.link], decided by GCC 13.3's own predicates
  *            (linkage_of below), not by names:
  *              none      cp/tree.cc no_linkage_check(t, false) names a type: a local class, an unnamed class without a typedef name for
  *                        linkage at namespace scope, a lambda without mangling scope, a class nested in those (the offending type
@@ -37,8 +37,10 @@
  *                        argument of internal linkage)
  *              external  everything else
  *            An unnamed class with a typedef name for linkage purposes is named for the front end (TYPE_UNNAMED_P is false) and takes
- *            the linkage of that name's scope. A record of a C unit (cc1) has none of these predicates: `none` when it is declared in a function's
- *            block (TYPE_CONTEXT is a FUNCTION_DECL), else `external`.
+ *            the linkage of that name's scope.       c         every record of a C unit (cc1), whatever its scope: C11 6.2.2p6 gives an identifier that is not an object or a function
+ *                        (a struct, union or enum tag, a typedef name) no linkage, and C has no ODR for tags; agreement across units is
+ *                        the compatibility (6.2.7) of the declarations of external objects and functions, not the tag's name. So none of
+ *                        the C++ predicates applies and the value says so.
  *
  * Declared types (section .fnvnx.decltype, C units only, not loaded): see the block comment before emit_decltype: one line `symbol <TAB> type` per
  * external symbol the unit declares or defines, in the grammar of link/ctypes_compat.py (C11 6.2.7p2).
@@ -82,7 +84,7 @@ FNVNX_CXX_ONLY(decl_anon_ns_mem_p);
 static const char *linkage_of(tree t)
 {
   t = TYPE_MAIN_VARIANT(t);
-  if (!is_cxx()) return TYPE_CONTEXT(t) && TREE_CODE(TYPE_CONTEXT(t)) == FUNCTION_DECL ? "none" : "external";
+  if (!is_cxx()) return "c";   /* C11 6.2.2p6, 6.2.7: see the header comment */
   if (no_linkage_check(t, false)) return "none";
   tree d = TYPE_MAIN_DECL(t);
   if (!TREE_PUBLIC(d) || decl_anon_ns_mem_p(d)) return "internal";

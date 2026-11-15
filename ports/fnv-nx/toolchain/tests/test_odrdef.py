@@ -55,7 +55,13 @@ def main():
         PK = ('template <class... A> int pk(A... a) { return sizeof...(A); }\ntemplate <int... N> int pn() { return sizeof...(N); }\n'
               'int (*p1)(int, double) = pk<int, double>;\nint (*p2)() = pn<1, 2, 3>;\nint (*p4)() = pn<>;\n')
         pk = build_unit(td, so, 'pk', PK, O2)   # an argument pack is a template argument that no mangling accepts: it is the I...E of its elements
-        if not all((a, b, c, d, ta, tb, pk)):
+        # default arguments are part of the call, so of the bindings: the same call with a different default expression is a different row
+        DA = 'int k1(); int k2();\nint h(int = {k});\n'
+        INLH = 'inline int fh() { return h(); }\nint (*ph)() = fh;\n'
+        da = build_unit(td, so, 'da', DA.format(k='k1()') + INLH, O2)
+        db = build_unit(td, so, 'db', DA.format(k='k2()') + INLH, O2)
+        ca = build_unit(td, so, 'ca', 'struct W { int m; W(int v) : m(v) {} int get() const { return m; } };\nint (W::*pg)() const = &W::get;\nW mk(int v) { return W(v); }\n', O0)
+        if not all((a, b, c, d, ta, tb, pk, da, db, ca)):
             return check.done()
         ra, rb, rc, rd, rta, rtb = map(rows, (a, b, c, d, ta, tb))
         F = '_Z1fi'
@@ -71,6 +77,12 @@ def main():
         rpk = rows(pk)
         targs = sorted(r[2] for r in rpk.values())
         check('argument packs: pk<int, double> is IidE, pn<1, 2, 3> is ILi1ELi2ELi3EE, pn<> is IE', targs == sorted(['ILi1ELi2ELi3EE', 'IE', 'IidE']), targs)
+        rda, rdb, rca = rows(da), rows(db), rows(ca)
+        check('a default argument: same tokens, the callee of the default expression is a binding', rda['_Z2fhv'][1] == rdb['_Z2fhv'][1]
+              and '_Z2k1v' in rda['_Z2fhv'][3] and '_Z2k2v' in rdb['_Z2fhv'][3] and rda['_Z2fhv'][3] != rdb['_Z2fhv'][3], (rda['_Z2fhv'], rdb['_Z2fhv']))
+        EMPTY = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+        check('a written member has tokens (a ctor with an initializer, a const member); no row has an empty-token hash unless the compiler defined it',
+              rca['_ZN1WC1Ei'][1] != EMPTY and rca['_ZNK1W3getEv'][1] != EMPTY and rca['_ZN1WC1Ei'][1] != rca['_ZNK1W3getEv'][1], rca)
     finally:
         shutil.rmtree(td, ignore_errors=True)
     return check.done()

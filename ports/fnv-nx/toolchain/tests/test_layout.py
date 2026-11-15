@@ -88,8 +88,8 @@ LINKAGE = {
 
 def linkage(obj):
     rows = [l.split('\t') for l in pb.section(obj, '.fnvnx.layout').splitlines()]
-    check('every layout line has 8 fields, the last is none, internal or external',
-          rows and all(len(r) == 8 and r[7] in ('none', 'internal', 'external') for r in rows), [r for r in rows if len(r) != 8][:3])
+    check('every layout line has 8 fields, the last is none, internal, external or c',
+          rows and all(len(r) == 8 and r[7] in ('none', 'internal', 'external', 'c') for r in rows), [r for r in rows if len(r) != 8][:3])
     got = {r[6]: r[7] for r in rows if len(r) == 8}
     for it, want in sorted(LINKAGE.items()):
         check('linkage %s is %s' % (it, want), got.get(it) == want, got.get(it))
@@ -167,6 +167,13 @@ def main():
         if r.returncode == 0:
             decltype(obj)
         decltype_errors(td, so)
+        obj = os.path.join(td, 'c.o')
+        r = pb.compile(os.path.join(HERE, 'layout', 'linkage_c.c'), obj, so)
+        check('linkage_c.c compiles', r.returncode == 0, r.stderr[:2000])
+        if r.returncode == 0:
+            rows = [l.split('\t') for l in pb.section(obj, '.fnvnx.layout').splitlines()]
+            check('a C unit: every record (file scope, static, in a function, union) has linkage c',
+                  len(rows) >= 4 and all(len(r) == 8 and r[7] == 'c' for r in rows), rows)
         r = pb.compile(FIX, os.path.join(td, 'x.o'), so, args=['-fplugin-arg-fnvnx_layout-mode=1'])
         check('an unknown plugin argument is an error', pb.argument_refused(r, 'layout'), r.stderr[:500])
     finally:
