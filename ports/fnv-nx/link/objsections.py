@@ -14,7 +14,7 @@ section's order).  Pure: bytes in, tuples out.
   argorder  exactly 4 fields: function, callee (symbols), `a0|a1|...` (at least two arguments: the producer writes a site only
             when two or more arguments have effects; each argument is a possibly empty `,`-list of symbols, no empty element
             inside a non-empty list), `k/n` (decimals, 0 <= k < n).
-  layout    exactly 8 fields: key (not empty), size, align (decimals), fields, bases, flags, itanium, linkage (none | internal | external).
+  layout    exactly 8 fields: key (not empty), size, align (decimals), fields, bases, flags, itanium, linkage (none | internal | external | c: C11 6.2.2p6 / 6.2.7, a record of a C unit).
             fields: `,`-list of `name:byteoffset:size` | `name:byteoffset:bitoffset:bitsize:size` (bitoffset < 8) |
                     `<vptr>:byteoffset:size`; a name starting with `#` is the producer's mark of an unnamed (bit-)field.
             bases:  `,`-list of `key:offset:flag` (offset decimal, may be negative), flag n (direct non-virtual), v (direct virtual), i (indirect virtual).
@@ -133,8 +133,8 @@ def parse_layout(data, where):
     out = []
     for n, ln in enumerate(_lines(data, where), 1):
         key, size, align, fields, bases, flags, itanium, linkage = _fields(ln, where, n, 8)
-        if linkage not in ('none', 'internal', 'external'):
-            raise ValueError('%s: line %d: linkage %r is not none, internal or external' % (where, n, linkage))
+        if linkage not in ('none', 'internal', 'external', 'c'):
+            raise ValueError('%s: line %d: linkage %r is not none, internal, external or c' % (where, n, linkage))
         if not key or ' ' in key or '\r' in key:
             raise ValueError('%s: line %d: key is empty or holds a blank: %r' % (where, n, key))
         fl = []
