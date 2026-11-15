@@ -1579,3 +1579,9 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Correction: no archive linking, because it would drop static constructors. fnvnx_dispatch is L3a's generated table over the image's lifted set. An empty set gives an empty table, whose misses go to fnvnx_reach_violation under the certificate "no lifted code".
 - 09:38 **Test images' entry.** L5's "test images define their own main" is overruled, because main is product-defined, so a test defining it is a double. Test images declare their own `entry`.
 - 09:38 **L2 w3 90b850348** has .fnvnx.decltype and .fnvnx.crossing, and the ICE is closed. It goes into cand2 (w15), with the gate_abi fix "decltype read whenever present".
+- 09:41 **w12 1aa06561a.**
+  - PT_INTERP is resolved through the declared debs' symlinks; base-files and mawk are pinned; test_recipe passes.
+  - import_keys.h is generated (FNVNX_KEY is a compile-time constant; a missing row is a compile error). The platform side belongs to L5.
+  - Next:
+    - the entry rule;
+    - bridge.tsv as a generated stage output that includes the platform's combridge and cxx rows (the manifest copy is deleted).
