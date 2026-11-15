@@ -254,3 +254,10 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - 4/54 shards complete (15, 29, 30, 42): 1,349 proved, 31 model-gap, 1 timeout, 0 failed. Running aggregate: l3b-lift/certsagg/7c3074644653-f3eb5096ad36/54-4d4b7448fed5 (w4, rerun every 45 min).
 - Checked: shards 29, 30 and 42 hold disjoint shape sets (345 each, overlap 0).
 - Farm 05 has been disconnected since 10:08 and none of K=1-14 has started; it is asked to restart. Farms 07/11/12 each run 2-3 at once (min(nproc, mem/6 GB) on 4 cores / 16 GB), about 22 h for the rest.
+
+## 2026-11-15 13:10Z
+- SIMD stage merged (d85062eb3 = w9 6047f67e; subject L3a 47b68e51c), 4,290 shapes: proved 3,155 (122 by cases), ud-class 331, FAILED 108, timeout 566, no-form 130. Frozen prover files untouched.
+- FAILED 108 = two L3a Form defects (NaN+denormal sets DE: 96; zero divisor + denormal dividend sets DE with ZE: 12). Assigned by L3a to w7 (session_01KmtZKV5F6B2PqGD9piX26f, claude/fnv-l3a-lift-w7-simd): one flag-priority function in dsl.fp, SDM §11.5.2.1 order, plus the no-form mnemonics. blocked (L3a w7) -> rerun on w7's commit.
+- Decision: SDM over ACL2 where they contradict (ACL2 = transcription source; trust roots OWNER 9/10). Recorded in CERTS.md by w9.
+- w9: doing — 566 timeouts by per-lane x operand-class split (simdcheck/ssefp only, completeness stated).
+- v3: 4/54 complete (15,29,30,42); farms running; w4 aggregates at 54/54.
