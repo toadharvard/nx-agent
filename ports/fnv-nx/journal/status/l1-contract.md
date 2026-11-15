@@ -1225,3 +1225,13 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - L5 root 6edd2fd98: gate_objstub passes raw flags without -mabi=ilp32, so crt/iob.c's static assertion fails. Fixed by w20u unit_flags, which conflicts with the root in 4 files (resolve_input lineage). L5 w10 merges on claude/fnv-l5-platform-root-w20u; L1 reviews against b25ddaac7's resolve_input and w20's may-load 34c9f0826.
 - L2: the ODR definition record is accepted. It is `.fnvnx.odrdef` in the names plugin, with the mangled name, the definition token sha256, the template arguments, and the sorted bindings taken from the instantiated body. Schedule on L2 w3 claude/fnv-l2-source-w3-linkage: test_ldbl, then linkage, then odrdef. w23 wires tier 2 when it lands.
 - L4: platform/build.json needs contract/reachreq.py and L2's ftoi f2i_builtins.inc. Both are in L5 head a44acb71f, which cand1 takes. reachreq.py (L5 679eb04c8, the parser and emitter moved out of gate_reach) is accepted as L1's file. w20 rebases may-load and shader_opcode onto it, with the shader_opcode parse in reachreq.KINDS.
+
+### 2026-11-15 01:35 — gate_order on L2 w1 objects (global)
+- Measured on L2 w1 faa4f24a8 at w23 fef875ab: platform root recipe-built (114 objects).
+  - 178206 accesses, 175838 certified, 2368 uncertified (was 17371 at 0db1931).
+  - Certified by rule: O 75901, F 95034, L 1119, R 2907, D 877.
+  - Classes a, b, c, f and g are at 0. 0 crashes; max 2.9 s per object.
+- Uncertified:
+  - 1714 shared-overlap accesses: address-taken locals. L2 decides between ordering all of them and a per-variable `escapes` fact from GCC's points-to solution (preferred, keeps the fast path).
+  - 500 nonframe plain accesses: order-plugin misses. w23 splits them by instruction shape for L2.
+  - 83 tag-X and 71 tag-D accesses outside the ranges: w23 traces the cause.
