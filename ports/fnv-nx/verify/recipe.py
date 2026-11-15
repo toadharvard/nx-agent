@@ -142,9 +142,9 @@ def plugin_decls(names, origin, files=(), roots=(), repo="."):
 
 
 def origin_class(origin):
-    """"lifted" iff the declared `cxx_origin` ORIGIN is a lifted declaration (lifted_origin: {"lifted_by", "pack"} or {"lifted_by", "stage"}), else "native" (also for no origin): the one
+    """"lifted" iff the declared `cxx_origin` ORIGIN is a lifted declaration ({"lifted_by", "pack"}), else "native" (also for no origin): the one
     place the origin's class is read (the class name "lifted" itself is accepted, for the CLI); plugin_args and semantics_set are functions of it."""
-    return "lifted" if origin == "lifted" or lifted_origin(origin) else "native"
+    return "lifted" if origin == "lifted" or (isinstance(origin, dict) and set(origin) == {"lifted_by", "pack"}) else "native"
 
 
 def semantics_set(origin):
@@ -467,7 +467,7 @@ def with_guest_link(rec, root, roots, repo):
     """The recipe a guest root is BUILT with: its `link` gets script (by repo path, a tool-tree file) and libs from the guest link profile.
     A host root, a root without link, or a checkout without a profile: REC unchanged."""
     lk, prof = rec.get("link"), load_guest_link(repo)
-    if not (isinstance(lk, dict) and prof and entry_of(roots, root).get("target") == "guest"):
+    if not (isinstance(lk, dict) and prof and roots.get(root, {}).get("target") == "guest"):
         return rec
     return dict(rec, link=dict(lk, script=TREE + "/" + prof["script"], libs={"external": load_pin(repo)["external"]["name"], "derive": True}))
 
@@ -530,30 +530,13 @@ def profile_fields(profile, pin):
             "external": [dict(ex)]}, []
 
 
-COMPILE_KEYS = ("compiler", "flags", "include", "units", "link", "profile", "variants")
-
-
-def generated_only(rec):
-    """A recipe of generated stages only (RECIPE.md "Generated-only roots"): `generated` is a non-empty list and none of the keys that compile or link
-    (COMPILE_KEYS) is written. Such a root has no unit (check refuses a translation unit in it), so it needs no compiler and no flags."""
-    return isinstance(rec, dict) and bool(rec.get("generated")) and not any(k in rec for k in COMPILE_KEYS)
-
-
-def fill_generated_only(rec):
-    """REC of a generated-only root with the fields every reader expects, empty: no unit is compiled, so the compiler named (the host profile's) is
-    never run and no flag is ever passed. Any other recipe: REC unchanged."""
-    if not generated_only(rec):
-        return rec
-    return dict(rec, units="all", include=[], flags={"c": [], "cxx": [], "asm": []}, compiler=profile_fields("host", None)[0]["compiler"])
-
-
 def expand_profile(rec, pin):
     """REC with its `profile` expanded: the profile's fields (profile_fields) in place of the keys the root does not write. A root that names a
     profile writes none of `compiler` and `plugins` (restating a profile field is red); its `external` lists only the externals the profile does not
     carry, which follow the profile's own in the expanded list. The expanded recipe has no `profile` key, so expansion is idempotent and every stage key is a
     function of the expanded values alone. -> (recipe, errors)."""
     if not isinstance(rec, dict) or "profile" not in rec:
-        return fill_generated_only(rec), []
+        return rec, []
     fields, err = profile_fields(rec["profile"], pin)
     if fields is None:
         return rec, err
@@ -950,9 +933,8 @@ def link_errors(lk, root, mine, roots, ext_names, repo, files=(), variant="", se
                 err.append("link.roots: %s has no variant %r (the one of target %r that admit.json declares)" % (dr, split_spec(rs)[1], rent.get("target")))
             elif dv and dv not in variant_names(drec, ent):
                 err.append("link.roots: %s has no variant %r" % (dr, dv))
-            elif dv and rent.get("class") != "test" and dv not in own_recipes(ent):
-                err.append("link.roots: %s is a flags variant (sanitizer or the like): only a test root (class test) links one; a product image links base roots "
-                           "and the per-target variant of its own target (admit.json recipe {guest, host})" % d)
+            elif dv and rent.get("class") != "test":
+                err.append("link.roots: %s is a variant: only a test root (class test) links a variant; a product image links base roots" % d)
             if dl is not None:
                 err.append("link.roots: %s has a link of its own (an input root links nothing)" % d)
     if "loader" in lk:
@@ -1013,8 +995,6 @@ def header_dirs(rec, root, roots, repo=".", variant=""):
         dirs.update(d for d in inc if isinstance(d, str) and not d.startswith("/"))
     add(rec.get("include") if isinstance(rec.get("include"), list) else [])
     for p, r in roots.items():
-        if r.get("class") == "header":
-            dirs.add(p)   # a header root is a home for every target
         if r.get("class") == "product" and tg in targets_of(r):
             dirs.add(include_dir(roots, p))
             for path in [r.get("recipe") if r.get("target") == tg else None] + [q for t, q in own_recipes(r).values() if t == tg]:
@@ -1096,7 +1076,6 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     if not isinstance(rec, dict):
         return ["recipe is not a JSON object"]
     err = ["unknown key %r" % k for k in sorted(set(rec) - KEYS)]
-    gonly = generated_only(rec)
     if "profile" in rec:
         ent0 = roots.get(root, {})
         want = (entry_of(roots, root + "@" + variant) if variant else ent0).get("target")
@@ -1138,9 +1117,6 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
         err.append('units must be "all" (no tracked source file can be left out)')
     mine = {f[len(root) + 1:] for f in files if under(f, root)}
     gen = generated_outputs(rec)
-    if gonly:   # no compiler and no flags are written: the root compiles nothing
-        err += ["generated-only root: %s is a translation unit (a root with units writes compiler, flags, include and units)" % u
-                for u in sorted(mine | set(gen)) if u.endswith(CC_EXT + CXX_EXT + ASM_EXT)]
     comp, exts, ats = rec.get("compiler"), rec.get("external", []), []
     if not isinstance(exts, list):
         err.append("external must be a list")
@@ -1185,10 +1161,10 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             continue
         if not rel_ok(d) or tree_of(roots, d) is None:
             err.append("include %r is not a path inside an admitted root or an external's at" % (d,))
-        elif not under(d, root) and not any(under(d, r) and (roots[r].get("class") == "header" or roots[r].get("class") == "product" and tg in targets_of(roots[r])) for r in roots):
+        elif not under(d, root) and not any(under(d, r) and roots[r].get("class") == "product" and tg in targets_of(roots[r]) for r in roots):
             # one home per header: the headers a product root includes lie in a product root of the same target (covered by its gates through
             # the units that read them), never in a doc or tool root or a root of the other target
-            err.append("include %r lies in no admitted header root and no product root of target %r (a header dir of a doc or tool root, or of the other target, is no home)"
+            err.append("include %r lies in no admitted product root of target %r (a header dir of a doc or tool root, or of the other target, is no home)"
                        % (d, tg))
         elif not (any(under(f, d) for f in files) or any(under(root + "/" + o, d) for o in gen)):
             err.append("include %r holds no tracked or generated file" % d)
@@ -2037,7 +2013,7 @@ class Job:
 
     def run_one(self, ws, i, g):
         """Stage `run:<root>:<name>`: executes the artifact (the linked output of an admitted root) in the sandbox. It sees the artifact at /art/<output>,
-        the declared inputs at /in/<ident>, each declared deb's installed files at /deb/<name>/<absolute path>, and writes /out. Key = artifact
+        the declared inputs at /in/<ident>, the union of the declared debs' installed files (base-files implicit) at /deb/<absolute path>, and writes /out. Key = artifact
         content + input contents + deb sha256 (env.json) + argv. A nonzero exit, an undeclared or a missing output is red."""
         aroot, aout = g["artifact"].split(":", 1)
         tmp = tempfile.mkdtemp(dir=ws)
@@ -2057,21 +2033,24 @@ class Job:
                 ins.append({"at": at, "tree": cas.ingest(host, self.store)})
         with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "env.json")) as f:
             pk = json.load(f)["debs"]["packages"]
-        for d in g["debs"]:
+        decl = [MACHINE_LAYOUT_DEB] + [d for d in g["debs"] if d != MACHINE_LAYOUT_DEB]   # base-files is the machine's root layout: implicit in every run stage
+        for d in decl:
             if d not in pk:
                 raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["deb %s is not declared in env.json debs.packages" % d]})
-            ins.append({"at": "/deb/" + d, "tree": self._deb_tree(tmp, d, pk[d])})
-        env = {"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "PATH": "/deb",
-               "FNVNX_DEBS": ";".join("%s=%s" % (d, pk[d]["sha256"]) for d in sorted(g["debs"]))}   # the deb sha256s are in the key
+        union = os.path.join(tmp, "deb")
+        for d in decl:
+            self._deb_into(union, d, pk[d])
+        ins.append({"at": "/deb", "tree": cas.ingest(union, self.store)})
+        env = {"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "PATH": "/deb/usr/bin",
+               "FNVNX_DEBS": ";".join("%s=%s" % (d, pk[d]["sha256"]) for d in sorted(decl))}   # the deb sha256s are in the key
         argv = ["/art/" + aout] + g["args"]
         interp = elf_interp(r["elf"]["path"])
-        if interp:   # started through the file at its PT_INTERP path inside a declared deb (the deb's own symlinks followed; no alias is relied on)
-            home = deb_resolve(interp, tmp, g["debs"])
-            if not home:
+        if interp:   # started through the file at its PT_INTERP path in the union of the declared debs, their symlink members followed (kernel and host alike)
+            if not resolves_in(union, interp):
                 raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": [
-                    "%s has PT_INTERP %s: the declared debs %s do not provide that file (followed through the symlinks they ship)" % (g["artifact"], interp, sorted(g["debs"]))]})
-            lp = [os.path.join("/deb", d, "lib", "x86_64-linux-gnu") for d in g["debs"]] + [os.path.join("/deb", d, "usr", "lib", "x86_64-linux-gnu") for d in g["debs"]]
-            argv = ["/deb/" + home[0] + home[1], "--library-path", ":".join(lp)] + argv
+                    "%s has PT_INTERP %s: no declared deb provides that file (declared: %s)" % (g["artifact"], interp, ", ".join(decl))]})
+            lp = ["/deb/lib/x86_64-linux-gnu", "/deb/usr/lib/x86_64-linux-gnu"]
+            argv = ["/deb" + interp, "--library-path", ":".join(lp)] + argv
         if g.get("host_cpu"):   # the reference host's identity is in the key; it must be this host unless the stage is a cache hit
             pin = json.load(open(os.path.join(self.repo, TREE, "verify", "cpuref.json")))
             env["FNVNX_HOST_CPU"] = json.dumps(pin, sort_keys=True)
@@ -2097,22 +2076,30 @@ class Job:
         os.chmod(os.path.join(d, base), 0o755)
         return cas.ingest(d, self.store)
 
-    def _deb_tree(self, tmp, name, pin):
-        """The installed files of the env.json package NAME (dpkg -L: regular files and symlinks) under <tmp>/deb-<name>/<absolute path>. The package
-        is the pinned one (envcheck checks version and the deb's sha256 pin: debs.packages.<name>.sha256, which is also in the stage key by `env`)."""
+    def _deb_into(self, dest, name, pin):
+        """Copy the installed files of the env.json package NAME (dpkg -L: regular files and symlinks) into DEST/<absolute path>. The package is the
+        pinned one (version checked; its deb sha256 is in the stage key). An absolute symlink target is made relative to DEST: it must resolve inside the
+        union mounted at /deb. A path that two packages ship with different content is red."""
         v = subprocess.run(["dpkg-query", "-W", "-f=${Version}", name], capture_output=True, text=True).stdout
         if v != pin["version"]:
             raise BuildRed({"stage": "deb:" + name, "exit": None, "stderr": ["package %s is installed at %r, env.json pins %s" % (name, v, pin["version"])]})
-        dest = os.path.join(tmp, "deb-" + name)
         for p in subprocess.run(["dpkg-query", "-L", name], capture_output=True, text=True).stdout.splitlines():
-            if os.path.isfile(p) or os.path.islink(p):
-                os.makedirs(os.path.dirname(dest + p), exist_ok=True)
-                if os.path.islink(p):   # an absolute target is made relative to the package tree: it must resolve inside /deb/<name>
-                    t = os.readlink(p)
-                    os.symlink(os.path.relpath(t, os.path.dirname(p)) if t.startswith("/") else t, dest + p)
-                else:
-                    shutil.copy2(p, dest + p)
-        return cas.ingest(dest, self.store)
+            if not (os.path.isfile(p) or os.path.islink(p)):
+                continue
+            q = dest + p
+            os.makedirs(os.path.dirname(q), exist_ok=True)
+            if os.path.islink(p):
+                t = os.readlink(p)
+                t = os.path.relpath(t, os.path.dirname(p)) if t.startswith("/") else t
+                if os.path.lexists(q) and not (os.path.islink(q) and os.readlink(q) == t):
+                    raise BuildRed({"stage": "deb:" + name, "exit": None, "stderr": ["%s is shipped with another content by two declared debs" % p]})
+                if not os.path.lexists(q):
+                    os.symlink(t, q)
+            else:
+                if os.path.lexists(q) and not (os.path.isfile(q) and not os.path.islink(q) and open(q, "rb").read() == open(p, "rb").read()):
+                    raise BuildRed({"stage": "deb:" + name, "exit": None, "stderr": ["%s is shipped with another content by two declared debs" % p]})
+                if not os.path.lexists(q):
+                    shutil.copy2(p, q)
 
     def generate_one(self, ws, i, g, py, xin):
         owner = tree_of(self.roots, g["tool"])
@@ -2864,31 +2851,30 @@ def cpu_mismatch(pin, text=None):
     return bad[:6] if procs else ["/proc/cpuinfo lists no processor"]
 
 
-def deb_resolve(path, tmp, debs, limit=40):
-    """(deb, real path) of the file the absolute PATH names in the root made by the union of the installed files of DEBS (<tmp>/deb-<name>/<path>,
-    from _deb_tree), following every symlink component the debs ship, such as base-files' /lib64 -> usr/lib64; None when a component is missing, a
-    link loop or the final path is not a file. The union is the stage's whole root: no alias and no hand list of usr-merged names is relied on."""
-    def find(p):
-        return [d for d in debs if os.path.lexists(os.path.join(tmp, "deb-" + d + p))]
-    parts, cur = [x for x in path.split("/") if x], "/"
-    for _ in range(limit * 8):
-        if not parts:
-            break
-        nxt = os.path.join(cur, parts[0])
-        link = [d for d in find(nxt) if os.path.islink(os.path.join(tmp, "deb-" + d + nxt))]
-        if link:
-            limit -= 1
-            if limit < 0:
-                return None
-            t = os.readlink(os.path.join(tmp, "deb-" + link[0] + nxt))
-            full = os.path.normpath(os.path.join(cur, t))
-            parts, cur = [x for x in full.split("/") if x] + parts[1:], "/"
+MACHINE_LAYOUT_DEB = envcheck.RUN_LAYOUT_DEB   # base-files: ships the usr-merge links (./lib -> usr/lib, ./lib64 -> usr/lib64, ./bin, ./sbin); read from the deb, never listed here
+
+
+def resolves_in(root, path):
+    """True if PATH (absolute) resolves to a regular file inside the tree ROOT, following the symlinks of the tree (never leaving it)."""
+    cur, todo, hops = root, [c for c in path.split("/") if c], 0
+    while todo:
+        c = todo.pop(0)
+        if c == "..":
+            cur = os.path.dirname(cur) if cur != root else cur
             continue
-        if not find(nxt):
-            return None
-        cur, parts = nxt, parts[1:]
-    home = [d for d in find(cur) if os.path.isfile(os.path.join(tmp, "deb-" + d + cur))]
-    return (home[0], cur) if home else None
+        nxt = os.path.join(cur, c)
+        if os.path.islink(nxt):
+            hops += 1
+            t = os.readlink(nxt)
+            if hops > 40 or t.startswith("/"):
+                return False
+            todo = [x for x in t.split("/") if x] + todo
+            continue
+        if not os.path.exists(nxt):
+            return False
+        cur = nxt
+    return os.path.isfile(cur)
+
 
 def elf_interp(path):
     """The PT_INTERP path of an ELF64 file, or None (read from the program headers)."""

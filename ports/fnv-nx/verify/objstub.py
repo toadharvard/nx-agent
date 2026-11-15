@@ -521,7 +521,7 @@ def vanalyse(words, a, b, rels, obj, dec, wine=False, loads_ok=False, errno_ok=F
 WINE = "fnvnx_wine_fixme"   # the one log function of the Wine-9.0-simplified bodies (wine_fixme.tsv): writes one line and RETURNS
 CITE = (WINE,)   # the citation function: a body that calls it is judged against wine_fixme.tsv by rule (W). The declared machine and the terminators are cited by RECORDS (rule C)
 CITE_SEC = ".fnvnx.cite"   # rule C: the non-alloc section of the FNVNX_CITE records (hostabi/include/fnvnx/cite.h)
-ASSUME = "fnvnx_assume_violation"   # the second symbol of class R (the exit of a value outside an OWNER-accepted domain (ASM-004)): a declared noreturn function that needs no citation
+ASSUME = "fnvnx_assume_violation"   # the second symbol of class R (the exit of a value outside an assumed domain): a declared noreturn function that needs no citation
 CITE_ID = re.compile(r"(dm|wf):([0-9]+)")
 REACH = "fnvnx_reach_violation"   # the one contract symbol of the proven-unreachable assertion (owner decision 2026-11-11, option iii)
 # Branch relocations of both ABIs. LP64 (ELF64): R_AARCH64_JUMP26 = 282, CALL26 = 283 (elf.h). ILP32 (ELF32, r_info = sym << 8 | type):

@@ -1,5 +1,5 @@
 // The encoding fixture of verify/tests/test_icount.py: one instruction per row, each preceded by ROW <mask>, the opcode classes icount.classify must return
-// for it (bits of verify/icount_abi/icount_classes.h, the record icount.py reads too). ROW appends {offset of the instruction from icenc_begin, mask}
+// for it (bits of verify/tests/icount/icount_classes.h, the record icount.py reads too). ROW appends {offset of the instruction from icenc_begin, mask}
 // to the table icenc_table (8 bytes per row, .rodata); the test reads the table by symbol and the instruction words from the image.
 #include "icount_classes.h"
 .arch armv8.4-a+rcpc+lse+lor
