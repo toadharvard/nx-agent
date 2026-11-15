@@ -931,3 +931,9 @@ Paused: w3b, w4, farm; no other work.
     - w6 3f2fec0be: accepted. render/pair exports nx_pair_ffp_row, ffp_prog.cpp's copy is deleted, host builds green.
     - w6 (doing): merge L6A 1ca99e8bd (NxShaderDesc {row}), and make the -1 sentinel inexpressible (an enum switch with no default). Then w5's final run, then construction rows 15/16.
     - ffp_prog.cpp is changed by L6 w6 only.
+- 15:50Z w6 163c4e5b2: construction row 16 done; row 15 partly done.
+    - gen_glsl.py emits the bindings and the 24 sampler lines from ffp_state.h, ffp_vs_state.h and fnvnx_dk_layout.h. The restated numbers are deleted. d3d9total 332/332.
+    - w6 queue:
+        1. merge L6A 1ca99e8bd and remove the -1 from nx_pair_ffp_row; w5's final run follows;
+        2. row 15: the UBO block is generated from the C struct, with a std140 offset static_assert;
+        3. the COM_SPEC rebase when cand3 lands.
