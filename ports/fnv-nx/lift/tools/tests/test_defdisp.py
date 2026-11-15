@@ -8,14 +8,15 @@
     callee's own compiled body uses (descclasstest.ref_arg / ref_ret: the compiler as reference);
 (4) the hidden-pointer rule on results (msvc_pod): every case of clpod/gen.py (12 features x depth d0/d1/d1a/d2 x sizes 1,2,4,8,12 + plain controls) against
     clpod/table.tsv, the cl 15.00.30729.01 (VC 2008 SP1) measurement with its toolchain commit and cl.exe sha256; prints the mismatch count (must be 0).
-Run: python3 -B lift/test/defdisptest.py [--cc <dir of aarch64-linux-gnu-g++>] [--work dir]   exit 0 on pass."""
-import argparse, os, re, subprocess, sys
+Run: python3 -I lift/tools/tests/test_defdisp.py   exit 0 on pass. Every compile is a stage of the recipe (toolchain/tests/plugbuild.py), no direct compiler call."""
+import os, re, shutil, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(HERE, '..', 'tools'))
-import descclasstest as dc
+sys.path.insert(0, os.path.join(HERE, '..'))
+import test_descclass as dc
 import bridgegen
+import plugbuild as pb
 
 UNIT = r'''
 struct VB { int v; };
@@ -34,7 +35,7 @@ int MI::g() { return 2; }
 struct CB { virtual CB *cl(); };  struct CD : A1, CB { CD *cl(); };   // covariant return with a base at an offset: a _ZTc thunk
 CB *CB::cl() { return this; }
 CD *CD::cl() { return this; }
-int __attribute__((fnvnx_cc("stack"))) sc(float x, F2 p) { return (int)x + (int)p.b; }
+int __attribute__((fnvnx_cc("stack"))) sc(float x, F2 p) { return x > p.b; }
 int __attribute__((fnvnx_cc("fast"))) fc(int x, int y) { return x + y; }
 '''
 WANT = {
@@ -50,23 +51,23 @@ WANT = {
 
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument('--cc', default=''); ap.add_argument('--work', default='/tmp/defdisp'); a = ap.parse_args()
-    w = a.work; os.makedirs(w, exist_ok=True)
-    cc = lambda t: (a.cc + '/' if a.cc else '') + 'aarch64-linux-gnu-' + t
-    pdir = dc.run([cc('g++'), '-print-file-name=plugin']).strip() + '/include'
-    plug = []
-    for n, src in (('fnvnx_names', 'names/fnvnx_names.cc'), ('fnvnx_dispatch', 'dispatch/fnvnx_dispatch.cc')):
-        so = '%s/%s.so' % (w, n)
-        dc.run(['x86_64-linux-gnu-g++-13', '-shared', '-fPIC', '-fno-rtti', '-fno-exceptions', '-O2', '-I' + pdir, '%s/toolchain/%s' % (dc.FNV, src), '-o', so])
-        plug.append('-fplugin=' + so)
-    F = ['-mabi=ilp32', '-std=gnu++17', '-O2', '-fPIC', '-ffreestanding', '-fno-exceptions', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-Wno-attributes']
+    w = tempfile.mkdtemp(prefix='defdisp-')
+    try:
+        return run_all(w)
+    finally:
+        shutil.rmtree(w, ignore_errors=True)
+
+
+def run_all(w):
+    plug = [pb.build(n, w) for n in ('sdd', 'names', 'dispatch')]
     bad = 0
     def check(name, ok, info=''):
         nonlocal bad
         print('%-44s %s %s' % (name, 'ok' if ok else 'FAIL', info)); bad += not ok
     def build(src, stem):
         open('%s/%s.cc' % (w, stem), 'w').write(src)
-        dc.run([cc('g++')] + F + plug + ['-c', '%s/%s.cc' % (w, stem), '-o', '%s/%s.o' % (w, stem)])
+        r = pb.compile('%s/%s.cc' % (w, stem), '%s/%s.o' % (w, stem), plug)
+        if r.returncode: print('compile of %s failed: %s' % (stem, r.stderr[:800])); return None
         out = '%s/%s.defdisp' % (w, stem)
         r = subprocess.run(['aarch64-linux-gnu-objcopy', '--dump-section', '.fnvnx.defdisp=' + out, '%s/%s.o' % (w, stem), '/dev/null'], capture_output=True, text=True)
         return open(out, 'rb').read() if r.returncode == 0 else None
@@ -82,7 +83,7 @@ def main():
         lines = lines[:-1]
         check('sorted and unique', lines == sorted(set(lines)))
         got = rows(data)
-        nm = dc.run(['aarch64-linux-gnu-nm', '--defined-only', '%s/unit.o' % w])
+        nm = subprocess.run(['aarch64-linux-gnu-nm', '--defined-only', '%s/unit.o' % w], capture_output=True, text=True, check=True).stdout
         defined = {l.split()[2] for l in nm.split('\n') if len(l.split()) == 3 and l.split()[1] in ('T', 't', 'W', 'w')}
         check('defined function symbols == rows', defined == set(got), 'only in the object %s, only in the rows %s' % (sorted(defined - set(got)), sorted(set(got) - defined)))
         check('a covariant thunk is a defined symbol with a row', any(k.startswith('_ZTch') or k.startswith('_ZTc') for k in got), str(sorted(got)))
@@ -117,8 +118,7 @@ def main():
     ref = ''.join('%s g_%s;\nextern "C" void __attribute__((noinline)) a_%s(%s x) { g_%s = x; }\nextern "C" %s __attribute__((noinline)) r_%s(void) { return g_%s; }\n' % (T, n, n, T, n, T, n, n) for n, d, T in dc.TYPES)
     data = build(decls + '\n' + ref, 'ref')
     got = rows(data) if data is not None else {}
-    dc.run([cc('g++')] + F + ['-S', w + '/ref.cc', '-o', w + '/ref.s'])
-    asm = open(w + '/ref.s').read()
+    asm = dc.asm_of(w + '/ref.o')
     for n, d, T in dc.TYPES:
         for kind, fn in (('argument', 'a_' + n), ('result', 'r_' + n)):
             d1 = got.get(fn)
@@ -132,7 +132,7 @@ def main():
             ok = cls == want or (cls == ('m',) and want == ('g',) and kind == 'result') or (g.endswith('r') and kind == 'argument' and want == ('g',))
             if kind == 'result' and rm: ok = ok and (rm.group(2) == 'R') == (n not in ('ct', 'in', 'vf') and int(rm.group(1)) in (1, 2, 4, 8))
             check('%s %s' % (kind, n), ok, 'row %s %s, the compiler uses %s' % (fn, d1, want))
-    print('defdisptest: %d failed' % bad); sys.exit(1 if bad else 0)
+    print('defdisptest: %d failed' % bad); return 1 if bad else 0
 
 
 if __name__ == '__main__': main()
