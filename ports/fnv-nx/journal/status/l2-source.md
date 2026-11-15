@@ -217,3 +217,8 @@ After the first frame:
     - runtime C callees order themselves under one-ABI, so calls get no fence;
     - newlib is built with -DPREFER_SIZE_OVER_SPEED, so no assembly string routines remain;
     - the fenced-call path is deleted.
+- 2026-11-15 01:08 Orchestrator ruling: library calls are plain calls. The runtime (newlib, libstdc++, libgcc, libnx) is compiled with every plugin.
+  - w2: delete the fenced-call path and the redir records; add PERFDEBT PD-RT-STRING-ORDERED (owner L2; the restoring rule is due before the first frame).
+  - Farm: newlib -DPREFER_SIZE_OVER_SPEED (field from w22), plus the runtime asm-set check (derived; classes D1, pre-thread, svc, documented atomic; otherwise red).
+  - L1 w23 drops the fenced-bl rule.
+  - Open for L2: the restoring rule for the string routines, an aarch64 body proven equal to the x86 semantics of the exe CRT's routine (rep movs/stos fast-string, or per-store ordering by size path).
