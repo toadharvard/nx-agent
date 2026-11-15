@@ -37,12 +37,11 @@ def main():
     root = os.path.join(d, "sd")
     os.makedirs(root, exist_ok=True)
     elf = os.path.join(d, "h92.elf")
-    open(elf, "wb").write(tb.build()[0])
-    tb.write_mode(root, 92)
+    open(elf, "wb").write(tb.build(92)[0])
     syms = w("syms.txt", "t_acquire\nt_try ret\nt_release\n" + "".join("%s ret\n" % r for r in RUNNERS))
 
     def boot_args(out, *extra):
-        return ["run", "--elf", elf, "--facts", tb.facts_path(), "--reserved", reserved, "--keys", "f0000:200000", "--heap-size", "0x100000", "--root", root, "--quantum", str(tb.QUANTUM),
+        return ["run", "--elf", elf, "--reserved", reserved, "--keys", "f0000:200000", "--heap-size", "0x100000", "--root", root, "--quantum", str(tb.QUANTUM),
                 "--milestones", table, "--manifest", manifest, "--out", os.path.join(d, out), *extra]
     rc, o, e = cli(boot_args("o92.json", "--watch-log", syms))
     assert rc in (0, 2) and os.path.exists(os.path.join(d, "o92.json")), (rc, o, e)
@@ -55,7 +54,7 @@ def main():
     tb.case("records: seq 0.. in machine order, every record has tid, t_ns (non-decreasing), kind", [r["seq"] for r in wl] == list(range(len(wl)))
             and all({"tid", "t_ns", "kind"} <= set(r) for r in wl) and all(a["t_ns"] <= b["t_ns"] for a, b in zip(wl, wl[1:]))
             and {r["kind"] for r in wl} == {"call", "return", "game-entry", "unwound"}, sorted({r["kind"] for r in wl}))
-    st = lockobs.Symtab(tb.facts_path())
+    st = lockobs.Symtab(elf)
     ga, gb = st.addr["game_a"], st.addr["game_b"]
     ent = [r for r in wl if r["kind"] == "game-entry"]
     by = {}
@@ -126,22 +125,22 @@ def main():
             and few["outside"][0]["dst"] == ga, few["outside"])
     # the CLI: files, exit codes, report
     cj, rj = w("cases.json", json.dumps({"cases": good})), os.path.join(d, "rep.json")
-    rc, o, e = cli(["--out", os.path.join(d, "o92.json"), "--facts", tb.facts_path(), "--cases", cj, "--report", rj, "--lock-syms", ",".join(NAMES)], lockobs)
+    rc, o, e = cli(["--out", os.path.join(d, "o92.json"), "--elf", elf, "--cases", cj, "--report", rj, "--lock-syms", ",".join(NAMES)], lockobs)
     tb.case("lockobs CLI: exit 0 for the declared cases, the report holds every case with its acquisition sites",
             rc == 0 and o.startswith("lockobs: ok cases=10 outside=0 foreign_unlocks=1") and json.load(open(rj))["cases"][1]["violations"][0]["held"][0]["sites"], (rc, o, e))
     cb = w("cases_bad.json", json.dumps({"cases": good[:5] + [case("case_held")] + good[6:]}))
-    rc, o, e = cli(["--out", os.path.join(d, "o92.json"), "--facts", tb.facts_path(), "--cases", cb, "--lock-syms", ",".join(NAMES)], lockobs)
+    rc, o, e = cli(["--out", os.path.join(d, "o92.json"), "--elf", elf, "--cases", cb, "--lock-syms", ",".join(NAMES)], lockobs)
     tb.case("lockobs CLI: a difference exits 2", rc == 2 and "DIFFERENT" in o, (rc, o))
     cm = w("cases_missing.json", json.dumps({"cases": [case("case_nope")]}))
-    rc, o, e = cli(["--out", os.path.join(d, "o92.json"), "--facts", tb.facts_path(), "--cases", cm, "--lock-syms", ",".join(NAMES)], lockobs)
+    rc, o, e = cli(["--out", os.path.join(d, "o92.json"), "--elf", elf, "--cases", cm, "--lock-syms", ",".join(NAMES)], lockobs)
     tb.case("lockobs CLI: a runner the watch file does not list is an input error (exit 1)", rc == 1 and "case_nope ret" in e, (rc, e))
-    rc, o, e = cli(["--out", os.path.join(d, "o92.json"), "--facts", tb.facts_path(), "--cases", w("cases_dst.json", json.dumps({"cases": [case("case_held", "no_such")]})), "--lock-syms", ",".join(NAMES)], lockobs)
+    rc, o, e = cli(["--out", os.path.join(d, "o92.json"), "--elf", elf, "--cases", w("cases_dst.json", json.dumps({"cases": [case("case_held", "no_such")]})), "--lock-syms", ",".join(NAMES)], lockobs)
     tb.case("lockobs CLI: a declared dst that is no function symbol is an input error (exit 1)", rc == 1 and "no_such" in e, (rc, e))
     syms2 = w("syms2.txt", "t_acquire\nt_try\nt_release\ncase_held\n")
     rc, o, e = cli(boot_args("o92b.json", "--watch-log", syms2))
-    rc2, o2, e2 = cli(["--out", os.path.join(d, "o92b.json"), "--facts", tb.facts_path(), "--cases", w("cases_h.json", json.dumps({"cases": [case("case_held", "game_a")]})), "--lock-syms", ",".join(NAMES)], lockobs)
+    rc2, o2, e2 = cli(["--out", os.path.join(d, "o92b.json"), "--elf", elf, "--cases", w("cases_h.json", json.dumps({"cases": [case("case_held", "game_a")]})), "--lock-syms", ",".join(NAMES)], lockobs)
     tb.case("lockobs CLI: a trylock that the watch file does not mark `ret` is an input error", rc == 0 and rc2 == 1 and "t_try ret" in e2, (rc, rc2, e2))
-    rc, o, e = cli(["--out", os.path.join(d, "o92.json"), "--facts", tb.facts_path(), "--cases", cj], lockobs)
+    rc, o, e = cli(["--out", os.path.join(d, "o92.json"), "--elf", elf, "--cases", cj], lockobs)
     tb.case("lockobs CLI: the defaults are the os.h names os_lock / os_trylock / os_unlock: a watch file of other names is an input error (exit 1)",
             rc == 1 and "os_lock" in e, (rc, e))
     rc, o, e = cli(boot_args("o92c.json", "--watch-log", w("syms3.txt", "t_acquire extra\n")))

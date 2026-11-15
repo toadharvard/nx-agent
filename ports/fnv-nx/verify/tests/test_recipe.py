@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Tests for verify/recipe.py, gate_build.py, gate_determinism.py on a toy product root in a temp git repo. Plain script: exit 0 on
 pass, one PASS/FAIL line per case. Needs root (sandbox) and aarch64-linux-gnu-gcc-13/g++-13. Scratch: mkdtemp, removed at exit."""
+import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -35,7 +37,6 @@ open("/out/gen/gen.h", "w").write("#define NCONST %d\\n#define STAMP %dL\\n" % (
 '''
 GENLD = '''import os
 n = len([l for l in open("/in/ports/fnv-nx/toy/ldin.tsv") if l.strip()])
-os.makedirs("/out/gen")
 open("/out/gen/link.ld", "w").write(open("/in/ports/fnv-nx/link/guest.ld").read() + "\\n/* generated for %d rows */\\n" % n)
 '''
 # The toy root is a guest ELF in the sense of RECIPE.md "Link": ILP32, position independent, linked with the product's own link/guest.ld and
@@ -165,6 +166,7 @@ def make_toolchain(dst):
     exes, trees = map(set, unitstage.gcc_set(CC_DRV))
     ld = subprocess.run([CC_DRV, "-print-prog-name=ld"], capture_output=True, text=True).stdout.strip()
     exes.add(os.path.normpath(ld))
+    exes.add(os.path.normpath(ld)[:-2] + "readelf")   # the ELF facts stage runs the readelf beside the linker
     keep = {"cc1", "collect2"}    # test economy: the C compiler proper and the driver's helper; not cc1plus, lto1, f951 ... (unused by C units)
     for t in sorted(trees):
         if t == "/usr/include":   # the host's own headers: not searched by a freestanding cross compile, 87 MB
@@ -333,7 +335,30 @@ def main():
                 check("generator embedding %s: sandbox makes it constant, so two cold builds are equal (closed channel); without GATE_CACHE there is no warm build" % label,
                       rc == 0 and "no warm" in g["detail"] and g["universe"] == 2, (g, txt))
 
-    for fn in (gate_toy, gate_bad, gate_nd, gate_cases):
+    def gate_inc():
+        # determinism is incremental, like every stage: a second run with nothing changed executes 0 stages in its store, and one changed unit executes
+        # exactly the stages whose keys are new (read from the two builds' stage_keys), never more
+        irepo, gc, n = make_repo("inc"), BASE + "/inccache", [0]
+
+        def run():
+            n[0] += 1
+            rc0, _, _, t0 = gate(irepo, "build", BASE + "/ib%d" % n[0], gc)
+            rc, g, _, txt = gate(irepo, "determinism", BASE + "/id%d" % n[0], gc)
+            tree = git(irepo, "rev-parse", "HEAD^{tree}").strip()
+            keys = set(json.load(open("%s/objects/%s/%s/objects.json" % (gc, tree, ROOT.replace("/", "__"))))["stage_keys"])
+            m = re.search(r"detstore: (\d+) stages executed", (g or {}).get("detail", ""))
+            return rc0 == 0 and rc == 0, keys, int(m.group(1)) if m else None, (g, txt, t0)
+        ok1, k1, r1, d1 = run()
+        check("determinism, first run: green, every stage executed in its own store", ok1 and r1 is not None and 0 < r1 <= len(k1), (r1, len(k1), d1))
+        ok2, k2, r2, d2 = run()
+        check("determinism, second run with nothing changed: 0 stages executed", ok2 and k2 == k1 and r2 == 0, (r2, d2))
+        w(irepo, "toy/b.c", '#include "toy.h"\nint f_b(void) { return TOY * 3; }\n')
+        git(irepo, "add", "-A")
+        git(irepo, "commit", "-q", "-m", "change b")
+        ok3, k3, r3, d3 = run()
+        check("determinism, one changed unit: exactly the stages with new keys executed", ok3 and 0 < r3 <= len(k3 - k1) < len(k3) and r3 < r1, (r3, len(k3 - k1), len(k3), r1, d3))
+
+    for fn in (gate_toy, gate_bad, gate_nd, gate_cases, gate_inc):
         later(fn)
 
     # --- toy root, shared store: cold, then cached
@@ -404,6 +429,49 @@ def main():
         check("link roots: a test-style link with --unresolved-symbols=ignore-all is refused before any stage", raised and "refusal set R" in raised, raised)
 
     later(link_roots)
+
+    def host_in_guest_link():
+        """the plugin set is the target profile's (RECIPE.md "Plugins"): a host-profile object never enters a guest image, so a guest link.roots naming a host root is red"""
+        hp = make_repo("hg")
+        roots = dict(recipe.load_admit(hp))
+        roots[ROOT] = dict(roots[ROOT], target="guest")
+        roots[LIB] = {"path": LIB, "class": "product", "target": "host", "recipe": LIB + "/build.json"}
+        e = recipe.check(mut(link=dict(RECIPE["link"], roots=[LIB])), ROOT, recipe.tracked(hp), roots, None, hp)
+        check("target profile: a guest image whose link.roots names a root of the host profile is red", any("link.roots" in x and "'host'" in x for x in e), e)
+        roots[ROOT] = dict(roots[ROOT], target="host")
+        e = recipe.check(mut(link=dict(RECIPE["link"], roots=[LIB])), ROOT, recipe.tracked(hp), roots, None, hp)
+        check("target profile: the same link of a host image has no target error", not any("link.roots" in x and "'host'" in x and "has target" in x for x in e), e)
+    later(host_in_guest_link)
+
+    def declared_outputs():
+        """the build result lists each declared output as {path, sha256}: the file is in the out dir and its hash is the file's"""
+        orec = mut(outputs={"genh": RECIPE["generated"][0]["outputs"][0]})
+        orp = make_repo("do", rec=orec)
+        r = recipe.build(orp, ROOT, BASE + "/ss-do", BASE + "/do1")
+        o = r.get("outputs", {}).get("genh")
+        check("result outputs: a declared output is {path, sha256} of a file in the out dir", r["status"] == "green" and o and os.path.isfile(o["path"])
+              and hashlib.sha256(open(o["path"], "rb").read()).hexdigest() == o["sha256"] and o["path"].startswith(os.path.abspath(BASE + "/do1")), r.get("outputs"))
+        check("result outputs: a root declaring none has an empty map", recipe.build(make_repo("do0"), ROOT, BASE + "/ss-do", BASE + "/do2").get("outputs") == {})
+    later(declared_outputs)
+
+    def include_rule():
+        """RECIPE.md "Include": root C includes B's header dir, B's recipe includes A's: C's unit include path holds A's dir without C naming it"""
+        d = tempfile.mkdtemp(prefix="inc-", dir=BASE)
+        for sub in ("a/include", "a2/include"):   # the carried dirs are checkout directories (generated output of another root is not carried)
+            os.makedirs(os.path.join(d, T + sub))
+        os.makedirs(d + "/b")
+        json.dump({"include": [T + "a/include", "/ext/private/include"]}, open(d + "/b/build.json", "w"))
+        os.makedirs(d + "/b2")
+        json.dump({"include": [T + "b2/include", T + "a2/include"]}, open(d + "/b2/build.json", "w"))
+        roots = {T + "c": {"class": "product", "target": "guest"}, T + "b": {"class": "product", "target": "guest", "recipe": "b/build.json"},
+                 T + "b2": {"class": "product", "target": "guest", "recipe": "b2/build.json"}, T + "a": {"class": "header"}}
+        inc = recipe.include_closure([T + "b/include"], T + "c", roots, d, "guest")
+        check("include closure: the include dirs of the root that ships the header are carried, repo dirs only, after the consumer's own", inc == [T + "b/include", T + "a/include"], inc)
+        inc = recipe.include_closure([T + "b2/include"], T + "c", roots, d, "guest")
+        check("include closure: a dir already named is not added twice, and the order is the recipe's", inc == [T + "b2/include", T + "a2/include"], inc)
+        check("include closure: a root's own include is not widened by itself", recipe.include_closure([T + "b/include"], T + "b", roots, d, "guest") == [T + "b/include"])
+        check("include closure: a root with no recipe for the unit's target carries nothing", recipe.include_closure([T + "b/include"], T + "c", roots, d, "host") == [T + "b/include"])
+    later(include_rule)
     LGS = BASE + "/ss-lg"
 
     def link_generated():
@@ -617,7 +685,7 @@ def main():
     rfiles = list(recipe.tracked(rk)) + [T + n + "/h.h" for n in ("hdr_prod", "hdr_other", "hdr_tool", "hdr_doc")]
 
     def home(d):
-        return [e for e in recipe.check(mut(include=RECIPE["include"] + [T + d]), ROOT, rfiles, rr, None, rk) if "lies in no admitted product root" in e]
+        return [e for e in recipe.check(mut(include=RECIPE["include"] + [T + d]), ROOT, rfiles, rr, None, rk) if "lies in no admitted header root" in e]
     check("include dir in a product root of the same target accepted", not home("hdr_prod"), home("hdr_prod"))
     check("include dir in a product root of the other target rejected", len(home("hdr_other")) == 1, home("hdr_other"))
     check("include dir in a tool root rejected", len(home("hdr_tool")) == 1, home("hdr_tool"))
@@ -657,6 +725,17 @@ def main():
     for st, mode, tail in (("drv:r", ["-pie"], ["-###", "/probe/x.cc", "-o", "/out/x"]), ("mld:r", [], ["-print-multi-directory"])):
         d = recipe.driver_doc(st, "/ext/a64/bin/g++", ["-mabi=ilp32"], mode, tail, [{"at": "/ext/a64", "tree": "t"}])
         check("driver stage %s: its argv passes toolflags (the one constructor carries PROBE_FLAGS)" % st, toolflags.check_doc(d) == [], toolflags.check_doc(d))
+    # generated-only root (RECIPE.md "Generated-only roots"): no compiler, flags, include, units, link: valid with no unit, red with one
+    GO = {"format": "fnvnx-recipe/1", "generated": [{"tool": T + "gen/gen.py", "args": [], "inputs": [ROOT + "/constants.tsv"], "outputs": ["gen/gen.h"]}]}
+    check("a recipe of generated stages only (no compiler, flags, include, units) is valid when the root holds no translation unit",
+          errs(dict(GO)) != [] and all("unit" in e for e in errs(dict(GO))) or errs(dict(GO)) == [], errs(dict(GO)))
+    GOR = make_repo("goonly", rec=dict(GO), files={"toy/a.c": None, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None})
+    ego = recipe.check(dict(GO), ROOT, recipe.tracked(GOR), recipe.load_admit(GOR), None, GOR)
+    check("generated-only root with no unit: recipe valid", ego == [], ego)
+    ego2 = recipe.check(dict(GO), ROOT, recipe.tracked(make_repo("goonly2", rec=dict(GO), files={"toy/os.S": None})), recipe.load_admit(os.path.join(BASE, "goonly2")), None, os.path.join(BASE, "goonly2"))
+    check("generated-only root holding translation units a.c b.c c.c: red, one error per unit", sorted(e.split()[2] for e in ego2 if "translation unit" in e) == ["a.c", "b.c", "c.c"], ego2)
+    rgo = recipe.build(GOR, ROOT, BASE + "/go-store", BASE + "/go-out")
+    check("generated-only root builds green through recipe.py: its output is produced, no object, no ELF", rgo["status"] == "green" and rgo["objects"] == [] and rgo["elf"] is None, rgo.get("failure"))
     check_gen_reads(SS)
     check_run(SS)
     print("INFO +%.1f s: validation done, joining gate scenarios" % (time.time() - t_start))
@@ -746,7 +825,7 @@ def check_run(SS):
     ex = [{"path": HX, "class": "product", "target": "host", "recipe": HX + "/build.json"}, {"path": OTH, "class": "doc"}]
 
     def rec_(args=("ok",), ins=(), debs=(), outs=("o.txt",), art=HX + ":hx.exe"):
-        return dict(RECIPE, run=[{"name": "r", "artifact": art, "args": list(args), "inputs": list(ins), "debs": ["libc6"] + list(debs), "outputs": list(outs)}])
+        return dict(RECIPE, run=[{"name": "r", "artifact": art, "args": list(args), "inputs": list(ins), "debs": ["base-files", "libc6"] + list(debs), "outputs": list(outs)}])
 
     def mk(name, body=HX_C, data="5\n", **kw):
         return make_repo(name, rec=rec_(**kw), files={"hx/hx.c": body, "hx/build.json": json.dumps(hrec), "other/data.txt": data}, extra_roots=ex)
@@ -784,14 +863,14 @@ def check_run(SS):
     check("host_cpu: a pin with a microcode value is a mismatch on a host that has no microcode line", len(recipe.cpu_mismatch(dict(vpin, microcode=1), vm)) == 1)
     jb = recipe.Job(good, ROOT, SS, 1, os.path.join(SS, "external"))
     ver = lambda n: {"version": subprocess.run(["dpkg-query", "-W", "-f=${Version}", n], capture_output=True, text=True).stdout}   # noqa: E731
-    both, only = BASE + "/un-both", BASE + "/un-libc"
+    dtmp = BASE + "/un-debs"
+    os.makedirs(dtmp)
     for n in ("base-files", "libc6"):
-        jb._deb_into(both, n, ver(n))
-    jb._deb_into(only, "libc6", ver("libc6"))
-    check("PT_INTERP /lib64/ld-linux-x86-64.so.2 resolves through base-files' ./lib64 -> usr/lib64 and then libc6's own link", recipe.resolves_in(both, "/lib64/ld-linux-x86-64.so.2"))
-    check("without base-files in the declared set the same PT_INTERP is red (libc6 alone has no ./lib64)", not recipe.resolves_in(only, "/lib64/ld-linux-x86-64.so.2"))
-    check("the link-free path /usr/lib64/ld-linux-x86-64.so.2 resolves in libc6 alone (its own link)", recipe.resolves_in(only, "/usr/lib64/ld-linux-x86-64.so.2"))
-    check("/lib/ld64.so.1 (what the link rule writes today) resolves in no declared deb", not recipe.resolves_in(both, "/lib/ld64.so.1"))
+        jb._deb_tree(dtmp, n, ver(n))
+    check("PT_INTERP /lib64/ld-linux-x86-64.so.2 resolves through base-files' ./lib64 -> usr/lib64 and then libc6's own link", recipe.deb_resolve("/lib64/ld-linux-x86-64.so.2", dtmp, ["base-files", "libc6"]) is not None)
+    check("without base-files in the declared set the same PT_INTERP is red (libc6 alone has no ./lib64)", recipe.deb_resolve("/lib64/ld-linux-x86-64.so.2", dtmp, ["libc6"]) is None)
+    check("the link-free path /usr/lib64/ld-linux-x86-64.so.2 resolves in libc6 alone (its own link)", recipe.deb_resolve("/usr/lib64/ld-linux-x86-64.so.2", dtmp, ["libc6"]) is not None)
+    check("/lib/ld64.so.1 (what the link rule writes today) resolves in no declared deb", recipe.deb_resolve("/lib/ld64.so.1", dtmp, ["base-files", "libc6"]) is None)
     hc = dict(rec_(), run=[dict(rec_()["run"][0], host_cpu="cpuref")])
     check("host_cpu: the key needs the tracked pin file verify/cpuref.json", any("cpuref" in e for e in recipe.check(hc, ROOT, files, roots, None, good)))
     check("host_cpu: with the pin file tracked the check accepts it", not [e for e in recipe.check(hc, ROOT, files + [T + "verify/cpuref.json"], roots, None, good) if "host_cpu" in e])
@@ -838,12 +917,12 @@ def check_run(SS):
     check("run stage: a declared input is visible at /in/N and its content is read", ri["status"] == "green" and got_in == "5\n", (ri.get("failure"), got_in))
     ri2 = build(mk("rn-in2", args=["copy", "/in/1"], ins=(OTH + "/data.txt",), data="6\n"), "in2")
     check("the content of a declared input is in the run key (one byte changed: exactly one key differs)", ri2["status"] == "green" and len(set(ri["stage_keys"]) - set(ri2["stage_keys"])) == 1, ri2.get("failure"))
-    dd = mk("rn-deb", args=["copy", "/deb/usr/bin/dh_autotools-dev_restoreconfig"], debs=("autotools-dev",))
+    dd = mk("rn-deb", args=["copy", "/deb/autotools-dev/usr/bin/dh_autotools-dev_restoreconfig"], debs=("autotools-dev",))
     rdb = build(dd, "deb")
     os.makedirs(BASE + "/rc3/store", exist_ok=True)
     got_d = open(recipe.resolve_input(ROOT, ref_in, dd, BASE + "/rc3")[0], "rb").read() if rdb["status"] == "green" else b""
-    check("run stage: a declared deb's installed files are visible at /deb/<path>", rdb["status"] == "green" and got_d == open("/usr/bin/dh_autotools-dev_restoreconfig", "rb").read()[:512], rdb.get("failure"))
-    nd = mk("rn-nodeb", args=["copy", "/deb/usr/bin/dh_autotools-dev_restoreconfig"])
+    check("run stage: a declared deb's installed files are visible at /deb/<name>/<path>", rdb["status"] == "green" and got_d == open("/usr/bin/dh_autotools-dev_restoreconfig", "rb").read()[:512], rdb.get("failure"))
+    nd = mk("rn-nodeb", args=["copy", "/deb/autotools-dev/usr/bin/dh_autotools-dev_restoreconfig"])
     rnd = build(nd, "nodeb")
     got_n = open(recipe.resolve_input(ROOT, ref_in, nd, BASE + "/rc4")[0], "rb").read() if os.makedirs(BASE + "/rc4/store", exist_ok=True) is None and rnd["status"] == "green" else None
     check("run stage: a deb that is not declared is not in the sandbox (the file is not there: empty copy)", rnd["status"] == "green" and got_n == b"", (rnd["status"], got_n))
@@ -851,6 +930,13 @@ def check_run(SS):
 
 def check_tc_gate(repo, tcc, tiny):
     rc, g, td, txt = gate(repo, "determinism", BASE + "/gtc", BASE + "/tccache")
+    if rc:
+        for dp, _, fs in os.walk(BASE + "/gtc"):
+            for fn in fs:
+                if fn.endswith(".json"):
+                    t = open(os.path.join(dp, fn), errors="replace").read()
+                    if "stderr" in t:
+                        print("DIAG", fn, t[:1500])
     print("INFO gate determinism, external compiler + external include tree (2 cold + warm) %.1f s: %s" % (td, g and g["detail"]))
     check("determinism gate with the compiler as an external tree at /opt/tc and a second external: green, accepted by verdict, each fetched once",
           rc == 0 and g["universe"] == 2 == g["certified"] and accepted("determinism", BASE + "/gtc")[0] == "green"

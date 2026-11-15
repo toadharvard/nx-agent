@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """verify/targets.json: the declared targets, one record each (owner order 2026-11-15, rule 5): guest_platform (a Horizon process over newlib) and
 console_cpu (the Cortex-A57 feature set). Every field is cited: to a file and line of a pinned external (libnx, the a64 runtime), to a section of a
-pinned vendor document (the Arm TRM, pinned by sha256 in the arm-a57-docs external), or to an OWNER assumption id of verify/ASSUMPTIONS.json.
+pinned vendor document (the Arm TRM, pinned by sha256 in the arm-a57-docs external), or to an OWNER record id of verify/ASSUMPTIONS.json (ASM-004 for the console).
 Whatever follows from a record is generated here and never written a second time: `semantic_prefix` is the leading run of the guest semantic flags
 (recipe.SEMANTICS_FLAGS).
     python3 -I targets.py [--ext NAME=DIR ...]      validates the record (and, with --ext, resolves every external citation)

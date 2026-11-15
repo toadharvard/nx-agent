@@ -31,7 +31,7 @@ def derive(repo, cache):
     pin = recipe.load_pin(repo)
     if pin is None or not isinstance(pin.get("runtime_driver"), str):
         raise ValueError("verify/guest_compiler.json with runtime_driver is required")
-    guests = [r for r in gate_build.buildable_roots(repo) if admit[r].get("target") == "guest"]
+    guests = [r for r in gate_build.buildable_roots(repo) if recipe.entry_of(admit, r).get("target") == "guest"]
     if not guests:
         raise ValueError("no guest root")
     rootdef = set()
