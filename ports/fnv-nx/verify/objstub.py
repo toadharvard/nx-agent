@@ -1548,7 +1548,7 @@ def handler_ok(rec, name, oid, results, sibs, allv):
     return True, sorted(kinds)[0]
 
 
-def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=None, stats=None):
+def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=None, stats=None, extconv=None):
     """RESULTS {id: analysis}, ROWS {(id, symbol): (kind, value, ref)}, FACTS None (no reach facts file) or a set of fact ids
     -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). Pure function.
     V: certified iff its row equals the result. indirect-noreturn-tail: certified iff every path ends in the tail and the function is
@@ -1578,6 +1578,16 @@ def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=N
             if kind == "V":
                 vflag.add((oid, name))
                 if row and row[0] != "exit" and matches(row, v):
+                    continue
+                ec = (extconv or {}).get(oid)
+                if not row and ec and v is not None:
+                    # EXTERNAL LIBRARY: the unit is a copy of a pinned external's file; its V bodies are the library's own code and are real, unless the
+                    # body returns an error answer: its return type is the library's declared error type (recipe external_errors, read from the compiler's
+                    # own type of the definition) and the constant is not the declared success value
+                    if ec[2].get(name) == ec[0] and v["x0"] is not None and v["x0"][0] == "K" and v["x0"][1] & 0xFFFFFFFF != ec[1] & 0xFFFFFFFF:
+                        out.append((oid, name, "external-error-constant", "returns the constant %d of the error type %s (success %d)" % (v["x0"][1], ec[0], ec[1])))
+                    else:
+                        stats["external_real"] = stats.get("external_real", 0) + 1
                     continue
                 if not row and oid in handlers:
                     ok, why = handler_ok(handlers[oid], name, oid, results, root_of[id(handlers[oid])], allv)
@@ -1682,12 +1692,12 @@ def error_abi_findings(results, oids, abi):
     return []
 
 
-def run_check(objs, terms, rows, os_layer_ids, facts=None, cache=None, jobs=1, wine=None, declared=None, abi=None, records=None, stats=None, tables=None):
+def run_check(objs, terms, rows, os_layer_ids, facts=None, cache=None, jobs=1, wine=None, declared=None, abi=None, records=None, stats=None, tables=None, extconv=None):
     """OBJS [(id, path)] -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). ABI: the `error_abi` of the one root OBJS form; TABLES: the `empty_handlers.tables` of it;
     RECORDS: read_handler_records of it."""
     probe = dict(abi or {}, tables=tables or {}) if (abi or tables) else None
     res = analyse_all(objs, set(terms), set(os_layer_ids), cache, jobs, probe)
-    items, finds = judge(res, rows, facts, wine, declared, {o: abi for o in res} if abi else None, {o: records for o in res} if records else None, stats)
+    items, finds = judge(res, rows, facts, wine, declared, {o: abi for o in res} if abi else None, {o: records for o in res} if records else None, stats, extconv)
     return items, sorted(set(finds) | set(error_abi_findings(res, list(res), abi) if abi else ()) | set(handler_row_findings(records, res) if records else ()))
 
 
@@ -1841,26 +1851,32 @@ def plugin_so(cc, cache):
     return so, h
 
 
-def unit_terminators(cc, units, flags, cache, jobs):
+def unit_terminators(cc, units, flags, cache, jobs, rets=None):
     """Terminator set of a root = union over its C/C++ units of the noreturn declarations the compiler CC itself sees in the unit's
     preprocessed text (the plugin runs on unit.ii with the unit's flags: exactly the TU the compile stage compiles, headers included).
     UNITS [(pp_key, ii path, lang c|c++)]; FLAGS {lang: [..]}. Per unit cached CACHE/objstub/t-<key>.txt, key = pp_key (a hash of
     the compiler, flags and every input of the preprocessor stage), the plugin hash, the language and the flags.
+    RETS, a dict, receives {pp_key: {function assembler name: typedef name of its return type}} of the function definitions of the unit (the plugin's
+    `ret` output, the compiler's own type; only typedef-named and builtin-named return types are listed).
     -> (sorted names, sha256, failures [(pp_key, message)]): a unit the plugin cannot process is a failure of that unit, never an exception."""
     so, ph = plugin_so(cc, cache)
 
     def one(u):
         pk, ii, lang = u
         key = hashlib.sha256(json.dumps([pk, ph, lang, flags[lang]]).encode()).hexdigest()
-        cp = os.path.join(cache, "objstub", "t-%s.txt" % key)
-        if not os.path.exists(cp):
+        cp, rp = (os.path.join(cache, "objstub", "t-%s.%s" % (key, e)) for e in ("txt", "ret"))
+        if not (os.path.exists(cp) and os.path.exists(rp)):
             with tempfile.TemporaryDirectory() as td:
-                r = subprocess.run([cc, "-S", "-o", os.devnull, "-fplugin=" + so, "-fplugin-arg-objstub_plugin-out=" + td + "/o.txt"] + flags[lang]
+                r = subprocess.run([cc, "-S", "-o", os.devnull, "-fplugin=" + so, "-fplugin-arg-objstub_plugin-out=" + td + "/o.txt",
+                                    "-fplugin-arg-objstub_plugin-ret=" + td + "/r.txt"] + flags[lang]
                                    + ["-x", lang, "-fpreprocessed", ii], capture_output=True, text=True)
-                if r.returncode or not os.path.exists(td + "/o.txt"):
+                if r.returncode or not os.path.exists(td + "/o.txt") or not os.path.exists(td + "/r.txt"):
                     errs = [l for l in r.stderr.splitlines() if "error" in l or "fatal" in l or "Segmentation" in l or "internal compiler" in l]
                     return pk, None, "terminator plugin failed (exit %d): %s" % (r.returncode, " | ".join(errs[:3]) or r.stderr[-300:])
+                _atomic(rp, open(td + "/r.txt", "rb").read())
                 _atomic(cp, open(td + "/o.txt", "rb").read())
+        if rets is not None:
+            rets[pk] = dict(l.split("\t", 1) for l in read_list(rp))
         return pk, read_list(cp), None
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, jobs)) as ex:
         got = list(ex.map(one, units))

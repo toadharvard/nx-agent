@@ -193,6 +193,9 @@ is listed in the `except` of lift/descs' recipe in the commit that admits it, an
 ### errno (objstub, derived, no recipe key)
 How the root's libc reaches `errno` is derived per root: objstub compiles `#include <errno.h>` / `int f(void){return errno;}` with the root's own C compiler and unit flags and reads the object (`errno_probe`): a call relocation to a symbol X is the accessor, a TLS relocation to Y is the thread-local form. The final ELF is then judged (rule I, `image_check`): a function body of the image whose whole effect is `errno = constant; return constant` is the finding `fixed-failure`, whether it is ours or comes from an archive member (a weak fallback a strong definition replaced is not in the image). A body that cannot be judged (a data island, a word LLVM rejects, an odd size) is the finding `unjudged`; the TLS form is `unjudged` for the root. Nothing is skipped.
 
+### `external_errors` (objstub)
+`external_errors: {EXTERNAL: {"type": TYPEDEF, "success": INT}}` declares once per library the error convention of an external whose units enter through `sources` (FreeType: `{"freetype": {"type": "FT_Error", "success": 0}}`). A unit `<external>/<path>` is a copy of that external's pinned file, so its V bodies (no effect, constant result) are the library's own code and are real, with one exception: a body whose return type (the compiler's own typedef name of the definition, from the objstub plugin) is the declared error type and that returns a constant other than `success` is the finding `external-error-constant`: an error answer where the library does work.
+
 ### `error_abi` and `empty_handlers` (objstub)
 `error_abi` declares the root's one failure function and how its definition signals failure: `{"fail": SYMBOL, "kind": "noreturn"}` (the definition does
 not return) or `{"fail": SYMBOL, "kind": "flag", "flag": FIELD}` (the definition stores a nonzero constant to the member FIELD of the structure its first

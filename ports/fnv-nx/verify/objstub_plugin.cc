@@ -15,11 +15,15 @@
 #include <string>
 #include <cstdio>
 int plugin_is_GPL_compatible;
-static std::set<tree> decls;
-static std::string outpath;
+static std::set<tree> decls, defs;
+static std::string outpath, retpath;
 static void on_decl(void *gcc_data, void *) {
   tree d = (tree)gcc_data;
   if (d && TREE_CODE(d) == FUNCTION_DECL) decls.insert(d);
+}
+static void on_def(void *gcc_data, void *) {
+  tree d = (tree)gcc_data;   // PLUGIN_FINISH_PARSE_FUNCTION: a function definition has been parsed
+  if (d && TREE_CODE(d) == FUNCTION_DECL) defs.insert(d);
 }
 static void on_unit(void *, void *) {
   // Terminators: noreturn functions that END THE PROCESS. Unwinders (printed as "~name"): calls that continue the propagation of an
@@ -47,13 +51,31 @@ static void on_unit(void *, void *) {
   for (auto &n : term) fprintf(f, "%s\n", n.c_str());
   for (auto &n : unw) if (!term.count(n)) fprintf(f, "~%s\n", n.c_str());
   fclose(f);
+  if (!retpath.empty()) {
+    // The typedef name of the return type of every function DEFINITION (`FT_Error f(...) {..}`: TYPE_NAME of the return type is a TYPE_DECL), one
+    // `assembler-name<TAB>typedef` line, sorted. It is the compiler's own type, not a text match; the error convention of a library
+    // (recipe external_errors) is read against it.
+    std::set<std::string> rows;
+    for (tree d : defs)
+      if (DECL_NAME(d)) {
+        tree t = TREE_TYPE(TREE_TYPE(d)), n = t ? TYPE_NAME(t) : NULL_TREE;
+        if (n && TREE_CODE(n) == TYPE_DECL && DECL_NAME(n))
+          rows.insert(std::string(IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d))) + "\t" + IDENTIFIER_POINTER(DECL_NAME(n)));
+      }
+    FILE *g = fopen(retpath.c_str(), "w");
+    if (!g) return;
+    for (auto &r : rows) fprintf(g, "%s\n", r.c_str());
+    fclose(g);
+  }
 }
 int plugin_init(plugin_name_args *a, plugin_gcc_version *v) {
   if (!plugin_default_version_check(v, &gcc_version)) return 1;
   for (int i = 0; i < a->argc; i++)
     if (std::string(a->argv[i].key) == "out") outpath = a->argv[i].value;
+    else if (std::string(a->argv[i].key) == "ret") retpath = a->argv[i].value;
   if (outpath.empty()) return 1;
   register_callback(a->base_name, PLUGIN_FINISH_DECL, on_decl, NULL);
+  register_callback(a->base_name, PLUGIN_FINISH_PARSE_FUNCTION, on_def, NULL);
   register_callback(a->base_name, PLUGIN_FINISH_UNIT, on_unit, NULL);
   return 0;
 }

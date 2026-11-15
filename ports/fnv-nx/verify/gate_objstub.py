@@ -38,25 +38,25 @@ def root_check(root, repo, cache, jobs):
     try:
         res, _ = gate_build.ensure(root, cache, repo)
     except recipe.RecipeError as e:
-        return {}, {}, set(), [("-", root, "recipe-invalid", "; ".join(e.errors)[:200])], None, None, {}
+        return {}, {}, set(), [("-", root, "recipe-invalid", "; ".join(e.errors)[:200])], None, None, {}, {}
     if res["status"] == "red":
         f = res["failure"]
         return {}, {}, set(), [("-", f["stage"].split(":", 1)[-1] if ":" in f["stage"] else root, "build-red",
-                                "root %s stage %s: %s" % (root, f["stage"], " ".join(f.get("stderr") or [])[:160])[:300])], None, None, {}
+                                "root %s stage %s: %s" % (root, f["stage"], " ".join(f.get("stderr") or [])[:160])[:300])], None, None, {}, {}
     base = root + "/"
     objs = [(base + o["unit"], o["object"]) for o in res["objects"]]
     objs += [("%s%s(%s)" % (base, m["archive"].lstrip("/"), m["member"]), m["object"]) for m in res.get("link_archives", [])]   # pulled archive members
     drv = dict(zip(("c", "c++"), recipe.host_compilers(rec, cache)))
-    store, names, bad = os.path.join(cache, "store"), set(), []
+    store, names, bad, rets = os.path.join(cache, "store"), set(), [], {}
     for lang, ext in (("c", recipe.CC_EXT), ("c++", recipe.CXX_EXT)):
         us = [(k, unitstage.result_file(store, k, "unit.ii"), lang) for u, k in sorted(res["pp_keys"].items()) if u.endswith(ext)]
         if us:
-            ns, _, errs = objstub.unit_terminators(drv[lang], us, {"c": recipe.unit_flags(rec, roots, root, drv["c"], "c"), "c++": recipe.unit_flags(rec, roots, root, drv["c++"], "cxx")}, cache, jobs)
+            ns, _, errs = objstub.unit_terminators(drv[lang], us, {"c": recipe.unit_flags(rec, roots, root, drv["c"], "c"), "c++": recipe.unit_flags(rec, roots, root, drv["c++"], "cxx")}, cache, jobs, rets)
             names |= set(ns)
             unit_of = {k: u for u, k in res["pp_keys"].items()}
             bad += [(base + unit_of[k], unit_of[k], "terminator-red", "root %s: %s" % (root, e)[:300]) for k, e in errs]
     if bad:   # the terminator set of the root is incomplete: its objects cannot be judged, each failing unit is a finding
-        return {}, {}, set(), bad, None, None, {}
+        return {}, {}, set(), bad, None, None, {}, {}, {}
     os_ids = {base + o["unit"] for o in res["objects"] if o["os_layer"]}
     rows = objstub.read_rows(res["constants"], base) if res["constants"] else {}
     eh = rec.get("empty_handlers")
@@ -73,7 +73,12 @@ def root_check(root, repo, cache, jobs):
             n, ff = 0, [(rec["link"]["output"], "errno-probe", str(e)[:300])]
         image = {"bodies": n, "fixed_failure": sum(1 for _, k, _ in ff if k == "fixed-failure"), "unjudged": sum(1 for _, k, _ in ff if k == "unjudged")}
         finds = [(base + rec["link"]["output"], name, kind, d) for name, kind, d in ff]
-    return objstub.analyse_all(objs, names, os_ids, cache, jobs, probe), rows, os_ids, finds, abi, records, image
+    ext = {}   # {object id: (error type, success value, {function: return type})}: the units of an external library with a declared error convention
+    for u, k in res["pp_keys"].items():
+        conv = (rec.get("external_errors") or {}).get(u.split("/", 1)[0]) if "/" in u else None
+        if conv and rec.get("sources"):   # a unit `<external>/<path>` is a copy of that external's file (recipe `sources`)
+            ext[base + u] = (conv["type"], conv["success"], rets.get(k, {}))
+    return objstub.analyse_all(objs, names, os_ids, cache, jobs, probe), rows, os_ids, finds, abi, records, image, ext
 
 
 def main(argv):
@@ -82,13 +87,15 @@ def main(argv):
     cache, repo = os.environ.get("GATE_CACHE") or tmp, "."
     stats = {}   # counts of the rule-H certifications and of the trap bodies
     items, finds, why, results, rows, roots, image = [], [], "", {}, {}, gate_build.buildable_roots(repo), {}
+    extconv = {}
     fails, handlers = {}, {}   # {object id: the root's error_abi}, {object id: the root's handler records}
     try:
         wine = objstub.read_wine_table(os.path.join(repo, "ports/fnv-nx/verify/wine_fixme.tsv"))   # the table of the tree under test
         declared = objstub.read_declared_table(os.path.join(repo, "ports/fnv-nx/verify/declared_machine.tsv"))   # the table of the tree under test
         facts = objstub.read_facts(os.path.join(cache, "reach", gate_build.tree_of(repo), "reach.facts.tsv")) if roots else None
         for root in roots:
-            r, w, _, fs, abi, records, im = root_check(root, repo, cache, jobs)
+            r, w, _, fs, abi, records, im, ex = root_check(root, repo, cache, jobs)
+            extconv.update(ex)
             image = {k: image.get(k, 0) + v for k, v in im.items()}
             results.update(r)
             fails.update({o: abi for o in r} if abi else {})
@@ -98,7 +105,7 @@ def main(argv):
             rows.update(w)
             finds += fs
             items += [(i, n) for i, n, _, _ in fs]
-        its, fs = objstub.judge(results, rows, facts, wine, declared, fails, handlers, stats)
+        its, fs = objstub.judge(results, rows, facts, wine, declared, fails, handlers, stats, extconv)
         items, finds = items + its, finds + fs
     except (ValueError, KeyError, OSError) as e:
         why = "input error: %s" % (str(e)[:300] or type(e).__name__)
