@@ -32,16 +32,16 @@ def _load_table(want):
         for l in fh:
             if not l.strip() or l[0] == '#':
                 continue
-            canon, leaf, sub, reg, bit = l.rstrip('\n').split('\t')[:5]
+            c = l.rstrip('\n').split('\t')
+            canon, leaf, sub, reg, bit = c[:5]
+            if c[9] != '':
+                continue                    # a mirror row (the APM's "Same as CPUID ..."): its canonical address is the row without mirror_of
             f = canon.split('@')[0]
             if f in want and int(leaf, 16) in FLAG_LEAVES:
-                rows.setdefault(f, set()).add((int(leaf, 16), reg, int(bit)))
-    out = {}
-    for f, rs in rows.items():
-        if len({(reg, bit) for leaf, reg, bit in rs}) != 1:
-            raise ValueError('cpufeat: feature %s has several flag rows %s' % (f, sorted(rs)))
-        out[f] = min(rs)
-    return out
+                if f in rows:
+                    raise ValueError('cpufeat: feature %s has several flag rows %s and %s' % (f, rows[f], (int(leaf, 16), reg, int(bit))))
+                rows[f] = (int(leaf, 16), reg, int(bit))
+    return rows
 
 
 # the model's answer, DERIVED from verify/cpuid_model.json by cpumodel_bits.model_words (the one derivation, shared with tools/gen_cpuref.py); leaf 7 is above the

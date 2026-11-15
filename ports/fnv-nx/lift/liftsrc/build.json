@@ -20,9 +20,9 @@
   {
    "name": "cpufeat",
    "repo": "fnv-nx-build",
-   "ref": "l3b-lift/cpuid-feature-bits/ffb79d19d",
-   "commit": "947b7817d1933089b84d5946713993a5db632699",
-   "tree_sha256": "8f17fd521c2cce9b066ca30f59a9963f340417500f72faa2013dde2a5b887fb6",
+   "ref": "l3b-lift/cpuid-feature-bits/137fc92db",
+   "commit": "a245cab336712dd8f0dd35368a3db147248e2640",
+   "tree_sha256": "fcebc91fd7daa6d8b59760406b01ca8ca26843ba20548ca9bf5099f692581967",
    "at": "/ext/cpufeat"
   }
  ],
