@@ -22,6 +22,7 @@ Assumptions: the compiler and ld are deterministic given the flags of unitstage/
   sandbox.OPEN_CHANNELS open (see gate_determinism.py for which of them two cold builds expose)."""
 import argparse
 import concurrent.futures
+import errno
 import hashlib
 import json
 import os
@@ -829,6 +830,19 @@ def symbols(path, unit):
     return defined, undefined
 
 
+def publish_dir(tmp, final):
+    """The one rule that makes a directory of a shared store visible (every external: the bare fetch, the checkout, the exttree): TMP is a sibling of FINAL
+    in the same store, complete and (where a tree hash is pinned) already verified; rename(2) publishes it atomically. A writer that loses the race (FINAL
+    exists: ENOTEMPTY or EEXIST) deletes its own copy and uses the published one, which only ever holds a verified tree. No lock, no wait. Any other
+    error deletes TMP and is raised. An interrupted writer leaves only a TMP-named directory: FINAL is never partial, and no reader looks at a TMP name."""
+    try:
+        os.rename(tmp, final)
+    except OSError as x:
+        shutil.rmtree(tmp, ignore_errors=True)
+        if x.errno not in (errno.ENOTEMPTY, errno.EEXIST) or not os.path.isdir(final):
+            raise
+
+
 def fetch_externals(exts, store, extcache, ws):
     """Content-pinned inputs: each external of EXTS fetched by exact commit into the bare cache EXTCACHE/<commit>, checked out ONCE at
     EXTCACHE/<commit>.co, ingested into the CAS STORE; its tree hash must equal tree_sha256 (BuildRed naming the external). -> {name:
@@ -853,7 +867,7 @@ def fetch_externals(exts, store, extcache, ws):
                 os.makedirs(tmp)
                 for cmd in (["init", "-q", "--bare"], ["fetch", "-q", "--depth", "1", url, e["commit"]]):
                     subprocess.run(["git", "-C", tmp] + cmd, env=env, check=True, capture_output=True)
-                os.replace(tmp, bare)
+                publish_dir(tmp, bare)
             dest = co
             if not os.path.isdir(co):
                 dest = tmpco = "%s.tmp%d-%s" % (co, os.getpid(), os.urandom(4).hex())
@@ -872,10 +886,7 @@ def fetch_externals(exts, store, extcache, ws):
                 shutil.rmtree(tmpco, ignore_errors=True)
             raise BuildRed({"stage": stage, "exit": None, "stderr": ["tree_sha256 is %s, recipe says %s" % (tree, e["tree_sha256"])]})
         if tmpco:
-            try:
-                os.rename(tmpco, co)
-            except OSError:      # another process made it first: the same commit, the same tree
-                shutil.rmtree(tmpco, ignore_errors=True)
+            publish_dir(tmpco, co)   # a lost race: the published checkout is the same commit and the same verified tree
         os.makedirs(os.path.dirname(fact), exist_ok=True)
         ftmp = "%s.tmp%d-%s" % (fact, os.getpid(), os.urandom(4).hex())
         with open(ftmp, "w") as fh:
@@ -1431,10 +1442,7 @@ def exttree(e, cache):
         subprocess.run(["git", "--git-dir", bare, "read-tree", e["commit"]], env=env, check=True, capture_output=True)
         subprocess.run(["git", "--git-dir", bare, "--work-tree", tmp, "checkout-index", "-a", "-f"], env=env, check=True, capture_output=True)
         os.unlink(tmp + ".idx")
-        try:
-            os.rename(tmp, dest)
-        except OSError:
-            shutil.rmtree(tmp, ignore_errors=True)
+        publish_dir(tmp, dest)
     return dest
 
 

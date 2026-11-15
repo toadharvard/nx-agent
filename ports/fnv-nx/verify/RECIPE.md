@@ -238,3 +238,7 @@ terminator set}, `units`, `defined` [{symbol, bind GLOBAL|WEAK|UNIQUE, type, obj
 the stages are their own cache entries and the code generated is the same). Each `objects.json` row then carries `su`: the path of `obj/<unit>.su`, the compiler's own
 report, one line per function `file:line:col:name TAB bytes TAB static|dynamic|dynamic,bounded`. Any other option is refused. It is a measurement of a build
 (`stackuse.py`), never an input of a gate that certifies a product.
+
+## Externals in a shared store
+
+Several builds may run at once on one `GATE_CACHE` and extract the same external (the bare fetch, the checkout, `exttree`). One rule, `recipe.publish_dir(tmp, final)`, makes every such directory visible: it is extracted into a temporary sibling in the same store (`<final>.tmp<pid>-<random>`), its `tree_sha256` is verified there, and `rename(2)` publishes it atomically. A writer that loses the race (final exists: ENOTEMPTY or EEXIST) deletes its own copy and uses the published one; it is already verified, because only a verified tree is ever renamed in. Any other error deletes the temporary directory and is raised. No locks, no waits. An interrupted extract leaves only a temporary directory; the target is never partial and no reader looks at a temporary name. Test: `tests/test_extcache_race.py` (8 concurrent processes, one tree, an interrupted extract).
