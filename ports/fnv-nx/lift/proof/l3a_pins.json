@@ -1,0 +1,7 @@
+{
+ "format": "fnvnx-l3a-pins/1",
+ "note": "files of L3a that this branch holds as a byte-identical copy: never edited here; when L3a changes one, merge L3a's commit and update this row to it (path, the L3a commit it was taken from, its git blob id and sha256)",
+ "files": [
+  {"path": "ports/fnv-nx/lift/tools/udcert.py", "l3a_commit": "bd94fd02e92249ebc96983256143d985f7930c17", "blob": "ed58b0a8e581e9a1ba31f777557689fc5bf7ff72", "sha256": "a4238e1be2d7c2f747a3d753cabdf61e76638698beffba81d92ee9f934a235cb"}
+ ]
+}

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """undecided_sites: the sites of the lift facts whose outcome reads a row that the declared-machine record (platform/declared/x86sys.json) marks `undecided`.
 
-    undecided_sites.py --x86sys x86sys.json --sites SITES.tsv --exe FalloutNV.exe --modules modules.tsv --dir DIR [--dir DIR ...] [--out FILE]
+    undecided_sites.py --x86sys x86sys.json --sites SITES.tsv --cleared CLEARED.tsv --exe FalloutNV.exe --modules modules.tsv --dir DIR [--dir DIR ...] [--out FILE]
 
 Universe (one rule): every instruction that the lift facts decode, SITES.tsv of factsites.py (L3a's code universe; no pack, no marker file, no sweep of ours). The instruction at a site is
 decoded from the image that owns it; the image set and each module's base are the loader's module table (imageset.py, contract/modules.py modules.tsv), the images are the owner's gamedata.
@@ -77,7 +77,7 @@ def row_map(rec):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--x86sys", required=True); ap.add_argument("--sites", required=True, help="factsites.py output"); ap.add_argument("--exe", required=True)
+    ap.add_argument("--x86sys", required=True); ap.add_argument("--sites", required=True, help="factsites.py output"); ap.add_argument("--cleared", required=True, help="sdmfeat.py partition output over the same sites"); ap.add_argument("--exe", required=True)
     ap.add_argument("--modules", required=True); ap.add_argument("--dir", action="append", required=True); ap.add_argument("--out")
     a = ap.parse_args()
     rec = json.load(open(a.x86sys))
@@ -151,6 +151,21 @@ def main():
         print("%-28s %10d %8d %10d" % (row, sum(x[5] for x in L), len({x[2] for x in L}), len(L)))
         for o, va, sk, mn, detail, m in sorted(L, key=lambda x: (x[0], x[1])):
             lines.append("%s\t%s:%08x\t%s\t%s\t%s\t%d" % (row, o, va, sk, mn, detail, m))
+    # class `reserved-encoding`: the sites whose encoding the SDM opcode tables do not define (sdmfeat.py partition, reason `undefined opcode`). The declared-CPU rule makes each of them #UD,
+    # so each needs a reach certificate like a cleared-feature site; the class is the partition's own, nothing is listed here.
+    R = []
+    for ln in open(a.cleared):
+        if ln[0] == "#" or not ln.strip():
+            continue
+        site, sk, form, why = ln.rstrip("\n").split("\t")
+        if why != "undefined opcode":
+            continue
+        o, va = site.rsplit(":", 1); va = int(va, 16)
+        ins = next(iter(md.disasm(images[o].bytes(va, 15), va, 1)), None)
+        R.append((o, va, sk, ins.mnemonic if ins else "-", form))
+    print("%-28s %10d %8d %10d" % ("reserved-encoding", len(R), len({x[2] for x in R}), len(R)))
+    for o, va, sk, mn, form in sorted(R, key=lambda x: (x[0], x[1])):
+        lines.append("reserved-encoding\t%s:%08x\t%s\t%s\t%s\t1" % (o, va, sk, mn, form))
     if a.out:
         open(a.out, "w").write("\n".join(lines) + "\n")
 
