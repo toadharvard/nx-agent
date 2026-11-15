@@ -16,7 +16,7 @@
    "fast_path": "GCC stack slot reuse (-fstack-reuse=all) in guest code",
    "id": "PD-STACK-REUSE",
    "owner": "L2",
-   "rule": "gate_order judges a slot shared by variables of disjoint lifetimes from the order plugin's per-variable ranges and lifetime facts (L2 plugin, L1 gate); then -fstack-reuse=none leaves guest_compiler.json flags.semantics.common and this entry is deleted in the same commit."
+   "rule": "Stack-slot sharing is allowed for slots whose address does not escape, decided by the same points-to model as gate_order rule D (no address-forming instruction of the range reaches the slot in the CFG), and for slots shared by variables of disjoint lifetimes from the order plugin's per-variable ranges and lifetime facts (L2 plugin, L1 gate). When gate_order certifies every shared slot of the guest roots by that rule, -fstack-reuse=none leaves guest_compiler.json flags.semantics.common and this entry is deleted in the same commit."
   }
  ],
  "first_frame": false,
