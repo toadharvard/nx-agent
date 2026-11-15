@@ -1303,3 +1303,7 @@ Paused: w3b, w4, farm; no other work.
     - The gen tables are deduplicated (PROP/PIDS, REFS); 960 MiB is stated only in ENV_PIN.txt.
     - Product byte-identical; d3d9total 332/332; test 45/45; test_env_ident passes; abspath render 0.
 - bottleneck: L1's merge1 store fix (sm_link) and the cand3 head (COM_SPEC rebase), then cand3 and cand4 to the trunk (a5c8f427). 2 workers (w6, farm1), both waiting on L1.
+- 22:35Z L1: the trunk is at fb9dd044f (cand2).
+    - Every render root was cut with platform (no linking root yet); they return with cand3 or cand4. ASM-601..641 were retired with them.
+    - w6 (doing): claude/fnv-l6-render-w6-cand4 = 88eb3fde6 rebased onto fb9dd044f. It restores exactly the ASM-6NN ids that render cites, deleting the citations of any assumption already removed, and runs the assumptions gate with render at 0. It is rebased onto the cand3 head when that is published, then goes to w12.
+- bottleneck: L1 cand3 (platform plus a linking root), then cand4 (render); L1's merge1 store fix (sm_link).
