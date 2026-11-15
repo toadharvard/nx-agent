@@ -16,6 +16,7 @@ dist/
 *.so
 *.o
 *.d
+!ports/fnv-nx/verify/gates.d/
 *.lst
 *.map
 device/

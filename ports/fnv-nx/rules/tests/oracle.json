@@ -1,0 +1,92 @@
+{
+ "format": "fnvnx-oracle/1",
+ "tests": {
+  "test_addrfn1.py": {
+   "references": [
+    {
+     "anchor": "## Rule table",
+     "kind": "spec",
+     "path": "ports/fnv-nx/rules/README.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/rules/s2_bodies.py",
+    "ports/fnv-nx/rules/s1_compile.py"
+   ]
+  },
+  "test_asm_rule.py": {
+   "references": [
+    {
+     "anchor": "## Rule table",
+     "kind": "spec",
+     "path": "ports/fnv-nx/rules/README.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/rules/s8_asm.py"
+   ]
+  },
+  "test_harn1.py": {
+   "references": [
+    {
+     "anchor": "## Rule table",
+     "kind": "spec",
+     "path": "ports/fnv-nx/rules/README.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/rules/s2_bodies.py"
+   ]
+  },
+  "test_mscgate.py": {
+   "references": [
+    {
+     "anchor": "## Dual-compile check (mscgate.py)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/rules/README.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/rules/mscgate.py"
+   ]
+  },
+  "test_pop2.py": {
+   "references": [
+    {
+     "anchor": "## Rule table",
+     "kind": "spec",
+     "path": "ports/fnv-nx/rules/README.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/rules/s2_bodies.py",
+    "ports/fnv-nx/rules/_msvcsig.py"
+   ]
+  },
+  "test_prepare_pure.py": {
+   "references": [
+    {
+     "anchor": "## Tests (run from the checkout root, as `python3 -I rules/tests/test_X.py`)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/rules/README.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/rules/prepare.py"
+   ]
+  },
+  "test_rules_text.py": {
+   "references": [
+    {
+     "anchor": "## Rule table",
+     "kind": "spec",
+     "path": "ports/fnv-nx/rules/README.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/rules/core.py",
+    "ports/fnv-nx/rules/s1_compile.py"
+   ]
+  }
+ }
+}

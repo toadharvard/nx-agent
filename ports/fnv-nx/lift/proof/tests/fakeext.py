@@ -1,10 +1,14 @@
 """Test helper: local bare git repos as fake externals (a stand-in for fnv-nx-build, selected by ARTIFACTS_URL, no network) and the overlay of the
-trunk's verify/ (this branch does not contain it; on the trunk the real directory is the one the gates import)."""
+trunk's verify/ (the real directory of this tree is the one the gates import)."""
 import os
 import subprocess
 import sys
 
+<<<<<<< HEAD
 VERIFY = os.environ.get('FNVNX_TEST_VERIFY') or os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'verify'))    # the verify/ of the checkout this test runs in (FNVNX_TEST_VERIFY overrides it)
+=======
+VERIFY = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'verify'))    # the verify/ of this checkout
+>>>>>>> origin/claude/fnv-l3b-lift
 sys.path.insert(0, os.path.join(VERIFY, '..', 'contract'))
 sys.path.insert(0, VERIFY)
 import cas       # noqa: E402

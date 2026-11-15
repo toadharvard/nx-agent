@@ -37,6 +37,33 @@ typedef struct ds3d_result {
 
 #define DS3D_SPEED_OF_SOUND 343.3f   /* m/s */
 
+/* Parameter groups: DirectSound applies DS3D_IMMEDIATE / DS3D_DEFERRED per parameter, never per object. */
+#define DS3D_S_POS 1u
+#define DS3D_S_VEL 2u
+#define DS3D_S_CONE_ANGLES 4u
+#define DS3D_S_CONE_ORIENT 8u
+#define DS3D_S_CONE_VOLUME 16u
+#define DS3D_S_MIN 32u
+#define DS3D_S_MAX 64u
+#define DS3D_S_MODE 128u
+#define DS3D_S_ALL 255u
+#define DS3D_L_POS 1u
+#define DS3D_L_VEL 2u
+#define DS3D_L_ORIENT 4u
+#define DS3D_L_DISTANCE 8u
+#define DS3D_L_ROLLOFF 16u
+#define DS3D_L_DOPPLER 32u
+#define DS3D_L_ALL 63u
+
+/* copy the parameter groups in `mask` from src to dst */
+void ds3d_source_merge(ds3d_source *dst, const ds3d_source *src, unsigned mask);
+void ds3d_listener_merge(ds3d_listener *dst, const ds3d_listener *src, unsigned mask);
+/* SDK ranges; 1 = every parameter valid: cone angles 0..360 with inside <= outside, cone outside volume
+ * -10000..0, distances > 0, mode NORMAL/HEADRELATIVE/DISABLE; listener: distance factor FLT_MIN..FLT_MAX,
+ * rolloff and doppler 0..10, front and top non-zero and not parallel. NaN is invalid everywhere. */
+int ds3d_source_valid(const ds3d_source *s);
+int ds3d_listener_valid(const ds3d_listener *l);
+
 void ds3d_listener_default(ds3d_listener *l);
 void ds3d_source_default(ds3d_source *s);
 /* mute_at_max: DSBCAPS_MUTE3DATMAXDISTANCE */

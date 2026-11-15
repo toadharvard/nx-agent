@@ -38,7 +38,7 @@
 #include <string>
 #include <type_traits>
 
-extern "C" void _invalid_parameter_noinfo(void);
+#include "fnvnx_crt.h"   /* _invalid_parameter_noinfo */
 
 #ifndef FNVNX_MSVC_BASE_END   /* fnvnx_compat.h: a derived class's members start at sizeof(base), as under MSVC */
 template <unsigned A> struct fnvnx_int_of_align;

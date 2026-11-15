@@ -83,7 +83,7 @@ GCC 13 `aarch64-linux-gnu -mabi=ilp32 -O2` with the build flags (`BUILD_FLAGS`, 
 | `a * b + c`, float | `fmul` + `fadd`, never `fmadd` (`-ffp-contract=off`; 0 fused ops in the 436 f8 objects of the sample) | x87/SSE mul + add (same rounding steps) |
 | `*i = 1; *f = 0; return *i;` | reloaded (`-fno-strict-aliasing`) | reloaded |
 | a global | through its own GOT slot (`-fPIC`, D16) | absolute address |
-| `!b`, `b ? x : y` for a bool byte | `b ^ 1`, `tst x0, 1`: assumes 0/1 | `test al, al`: any non-zero byte is true |
+| `!b`, `b ? x : y` for a bool byte | `b ^ 1`, `tst x0, 1`: takes the byte as 0/1 | `test al, al`: any non-zero byte is true |
 | `DAT[i]`, `int` or `unsigned` index | `ldr w0, [x1, w0, sxtw]`: zero-extended base + sign-extended 32-bit offset, in 64 bits | base + offset mod 2^32 |
 | `*(int*)(intval + 8)` | `uxtw` then +8 in 64 bits | mod 2^32 |
 | `f(g(), h())` | `g` first (left to right) | `h` first (pushes right to left) |
@@ -99,7 +99,7 @@ GCC 13 `aarch64-linux-gnu -mabi=ilp32 -O2` with the build flags (`BUILD_FLAGS`, 
 | volatile read / write | plain `ldr` / `str`; plain stores move across volatile ones | acquire / release (`/volatile:ms`, the x86 default) |
 | uninitialized local on one path | path folded away | whatever the stack held |
 | address of a dead local returned | `NULL` (isolate-erroneous-paths) | the stale address |
-| missing `return` | the path is assumed unreachable | whatever eax held |
+| missing `return` | the path is treated as unreachable | whatever eax held |
 | `-ftrivial-auto-var-init=zero` | does not change the above (GCC still optimizes as uninitialized) | - |
 
 ## Hazard classes, counts and verdicts
@@ -215,7 +215,7 @@ The authoritative table with counts is `report.md` of a run; the classes are def
   S4/S5 must make sure no image code reaches them through the TEB TLS index.
 * **bool bytes (BOOL-PUN)**. **runtime**, rule where needed. Memory of another type read as `bool`
   (`*(bool*)((char*)this + 0x104)`, `*((bool*)this + 0xe2)`, the decomp's raw-offset style). MSVC tests the whole byte
-  (`test al, al`) and keeps its value in integer contexts; GCC assumes 0/1 (`!b` is `b ^ 1`, `b ? x : y` tests bit 0;
+  (`test al, al`) and keeps its value in integer contexts; GCC takes the byte as 0/1 (`!b` is `b ^ 1`, `b ? x : y` tests bit 0;
   facts). Same result while the byte holds a real bool, which is what MSVC wrote into the image and into saves. It
   matters only where the byte is really a flag byte or counter typed `bool` by the decomp. Fix: rule **BOOL1** (S1,
   from the site list, only on reads, only where the byte can hold other values): `(*(unsigned char*)(p) != 0)`.

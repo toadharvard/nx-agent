@@ -2,8 +2,9 @@
 #ifndef FNVNX_W32_H
 #define FNVNX_W32_H
 
-#include "fnvnx_win32_ext.h"
+#include "../include/fnvnx_win32_ext.h"
 #include "../os/os.h"
+#include "../include/fnvnx_clock.h"
 
 #include <stdarg.h>
 #include <string.h>
@@ -22,7 +23,7 @@ struct w32_wait_rec {
     int kind;                      /* 0 none, W32_WG_CS, W32_WG_OBJ */
     uint32_t pc;                   /* return address of the Win32 call (a guest code address) */
     uint32_t ms;                   /* the wait's timeout (INFINITE for none) */
-    uint64_t t0;                   /* os_monotonic_ns() at the start */
+    uint64_t t0;                   /* clk_rt_ns() at the start */
     int all, n;                    /* WaitForMultipleObjects' bWaitAll and count (n <= W32_WG_MAXOBJ recorded) */
     void *obj[W32_WG_MAXOBJ];      /* W32_WG_CS: the CRITICAL_SECTION; W32_WG_OBJ: struct w32_obj * */
 };
@@ -45,9 +46,10 @@ struct w32_thread {
     struct w32_wait_rec wait;
 };
 struct w32_thread *w32_self(void);
+void w32_fls_thread_exit(void);   /* fls.cpp: the calling thread ends: its FLS callbacks run, its cells go */
 
 /* ---- kernel objects: HANDLE is a pointer to one of these */
-enum { W32_EVENT = 1, W32_MUTEX, W32_SEMAPHORE, W32_THREAD, W32_FILE, W32_FIND, W32_HEAP };
+enum { W32_EVENT = 1, W32_MUTEX, W32_SEMAPHORE, W32_THREAD, W32_FILE, W32_FIND, W32_HEAP, W32_MAPPING, W32_WINSTA, W32_DESKTOP, W32_ADAPTER };
 #define W32_MAGIC 0x46564E58u /* "FVNX" */
 struct w32_link {                  /* one waiter linked to one object */
     struct w32_link *next, *prev;
@@ -59,6 +61,7 @@ struct w32_obj {
     int refs;                      /* atomic */
     struct w32_link waiters;       /* list head, guarded by w32_wait_lock */
     void (*destroy)(struct w32_obj *);
+    uint64_t clk_t;                /* the clock stamp of the last signal (creation for an object made signaled): a wait that succeeds takes it */
 };
 struct w32_obj *w32_obj_new(int type, size_t size, void (*destroy)(struct w32_obj *));
 /* Handles are indices into a table with a generation count (stale or double-closed handles fail with
@@ -78,6 +81,8 @@ void w32_mutexes_abandon_locked(DWORD tid);        /* a thread ended: its mutexe
 /* ---- threads (thread.cpp) */
 #define W32_PSEUDO_THREAD ((HANDLE)(LONG_PTR)-2)
 #define W32_PSEUDO_PROCESS ((HANDLE)(LONG_PTR)-1)
+/* the handle of the process heap (memory.cpp g_proc_heap) */
+#define PROCESS_HEAP ((HANDLE)(uintptr_t)0x00150000u)
 struct w32_thread_obj;
 int w32_thread_signaled(struct w32_obj *o);
 DWORD w32_thread_obj_tid(struct w32_obj *o);       /* the thread id of a W32_THREAD object */
@@ -101,14 +106,55 @@ FARPROC w32_mem_hook_proc(const char *name, FARPROC f);   /* GetProcAddress: Dir
 DWORD w32_map_path(const char *win, char *host, size_t n);
 void w32_virtual_cwd(char *out, size_t n);
 DWORD w32_full_path(const char *win, char *out, size_t n); /* normalised "x:\\a\\b" */
-const char *w32_exe_path(void);              /* virtual Windows path of FalloutNV.exe */
-const char *w32_user_dir(void);              /* virtual Windows path of the documents folder */
+/* what a name opened by CreateFile is (path.cpp): a file-system name, or a DOS device / device-namespace name */
+enum { W32_NC_FILE, W32_NC_NUL, W32_NC_CONSOLE, W32_NC_PORT, W32_NC_PIPE, W32_NC_UNC, W32_NC_NONE };
+int w32_name_class(const char *name, char *dev, size_t n);
+/* virtual Windows paths of the environment (ENV_TRUTH F1, F2, P5): the install, the exe, the user's folder, the
+ * system and Windows directories */
+static const char W32_GAME_DIR[] = "C:\\FalloutNV";
+static const char W32_EXE_PATH[] = "C:\\FalloutNV\\FalloutNV.exe";
+static const char W32_USER_DIR[] = "C:\\Users\\Player";
+static const char W32_SYS_DIR[] = "C:\\Windows\\system32";
+static const char W32_WIN_DIR[] = "C:\\Windows";
 /* errno-style os error -> Win32 error code */
 DWORD w32_os_error(int neg);
 int w32_wildcard_match(const char *pat, const char *name); /* Windows *, ? matching, case-insensitive */
 
+/* ---- the page map's services (memory.cpp) to IsBad*Ptr (module.cpp) and to file views (filemap.cpp) */
+int w32_vm_probe(const void *p, size_t n, int access);   /* access 0 read, 1 write, 8 code; 1: accessible */
+#define W32_VIEW_FAIL ((void *)~(uintptr_t)0)   /* osmap's answer "no range will do": the last error is set, the page map stops */
+typedef void *(*w32_view_osmap)(void *hint, size_t size, void *ctx);   /* maps the OS range of a view: exactly at hint; NULL: the OS
+                                                                          does not have it, the next free fit is tried */
+/* enters a view allocation of size bytes (granule placement at want or anywhere; osmap is called with the address
+ * the map chose, and again with the next one if the OS refuses); image: MEM_IMAGE, else MEM_MAPPED. NULL: last error */
+void *w32_vm_view_place(uintptr_t want, size_t size, w32_view_osmap osmap, void *ctx, DWORD alloc_prot, DWORD page_prot,
+                        int committed, int image, int reserve_section);
+size_t w32_vm_view_remove(uintptr_t base);   /* the view allocation at base leaves the map; its size, 0: not a view base */
+void w32_vm_view_alias(uintptr_t base, size_t size, int file);   /* the view's pages alias a host section object (file: of a file-backed section) */
+void w32_vm_view_prot(uintptr_t base, size_t size, DWORD prot);   /* the pages' current protection (map only) */
+
+/* file.cpp: can the bytes of the file behind this handle change while the handle's file object lives? Yes iff the open
+ * has write access or allows FILE_SHARE_WRITE (the share table admits no other writer otherwise) */
+bool w32_file_writers_possible(HANDLE h);
+
 /* ---- misc */
-void w32_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+/* The debug log is typed, not variadic: a caller's pointer reaches only the bounded copy loop s() (a plain read of the
+ * string), never a libc formatter or a `...` argument (LLVM treats a pointer in a C vararg as captured and written, which
+ * would make every import that logs one unprovable). There is deliberately no printf-style entry point.
+ *   W32Log l; l.s("LoadLibraryA(\"").s(name).s("\"): error ").u(err).emit();
+ * One message = one local buffer ("[fnvnx] " + the pieces, truncated at 1023 bytes) handed to os_debug_print. u() prints
+ * an unsigned decimal, h() "0x" + lowercase hex of an unsigned value, p() the address of a pointer (a pointer-to-integer
+ * conversion: the pointer is then a capture, so p() is for pointers that are not import arguments). */
+struct W32Log {
+    char buf[1024];
+    size_t n;
+    W32Log();
+    W32Log &s(const char *str);
+    W32Log &u(unsigned long long v);
+    W32Log &h(unsigned long long v);
+    W32Log &p(const void *ptr) { return h((unsigned long long)(uintptr_t)ptr); }
+    void emit();
+};
 #define W32_UNUSED(x) ((void)(x))
 int w32_stricmp(const char *a, const char *b);
 int w32_strnicmp(const char *a, const char *b, size_t n);
@@ -240,8 +286,8 @@ typedef struct _STARTUPINFOA {
     HANDLE hStdInput, hStdOutput, hStdError;
 } STARTUPINFOA, *LPSTARTUPINFOA;
 struct _EXCEPTION_POINTERS;
-typedef LONG (*LPTOP_LEVEL_EXCEPTION_FILTER)(struct _EXCEPTION_POINTERS *);
-typedef BOOL (*LOCALE_ENUMPROCA)(LPSTR);
+FNVNX_CALLBACK_T(LPTOP_LEVEL_EXCEPTION_FILTER, LONG, (struct _EXCEPTION_POINTERS *));
+FNVNX_CALLBACK_T(LOCALE_ENUMPROCA, BOOL, (LPSTR));
 
 extern "C" {
 UINT GetDriveTypeA(LPCSTR);
@@ -252,6 +298,10 @@ LONG UnhandledExceptionFilter(struct _EXCEPTION_POINTERS *);
 LPTOP_LEVEL_EXCEPTION_FILTER SetUnhandledExceptionFilter(LPTOP_LEVEL_EXCEPTION_FILTER);
 void GetStartupInfoA(LPSTARTUPINFOA);
 HMODULE GetModuleHandleW(LPCWSTR);
+BOOL DisableThreadLibraryCalls(HMODULE);
+void FatalAppExitA(UINT, LPCSTR);
+/* an exception raised by platform code itself (thread.cpp): the installed backend, else the unhandled sequence */
+void w32_raise(DWORD code, DWORD flags, DWORD nargs, const ULONG_PTR *args);
 int LCMapStringA(LCID, DWORD, LPCSTR, int, LPSTR, int);
 int LCMapStringW(LCID, DWORD, LPCWSTR, int, LPWSTR, int);
 BOOL GetCPInfo(UINT, LPCPINFO);
@@ -278,18 +328,37 @@ HANDLE CreateFileW(LPCWSTR, DWORD, DWORD, void *, DWORD, DWORD, HANDLE);
 DWORD GetTimeZoneInformation(LPTIME_ZONE_INFORMATION);
 int GetLocaleInfoA(LCID, LCTYPE, LPSTR, int);
 int GetLocaleInfoW(LCID, LCTYPE, LPWSTR, int);
+int GetDateFormatA(LCID, DWORD, const SYSTEMTIME *, LPCSTR, LPSTR, int);
+int GetTimeFormatA(LCID, DWORD, const SYSTEMTIME *, LPCSTR, LPSTR, int);
+DWORD GetTempPathA(DWORD, LPSTR);
+UINT GetTempFileNameA(LPCSTR, LPCSTR, UINT, LPSTR);
+UINT GetTempFileNameW(LPCWSTR, LPCWSTR, UINT, LPWSTR);
+BOOL DeleteFileW(LPCWSTR);
+BOOL MoveFileW(LPCWSTR, LPCWSTR);
+void *FindResourceW(HMODULE, LPCWSTR, LPCWSTR);
+void *FindResourceExW(HMODULE, LPCWSTR, LPCWSTR, WORD);
 BOOL GetStringTypeA(LCID, DWORD, LPCSTR, int, LPWORD);
 BOOL GetStringTypeW(DWORD, LPCWSTR, int, LPWORD);
 BOOL IsValidLocale(LCID, DWORD);
 BOOL EnumSystemLocalesA(LOCALE_ENUMPROCA, DWORD);
 LCID GetUserDefaultLCID(void);
 BOOL GetUserNameA(LPSTR, LPDWORD);           /* advapi32 */
+unsigned char SystemFunction036(void *, unsigned long);   /* advapi32 RtlGenRandom, services.cpp */
 DWORD GetClassLongA(HWND, int);              /* user32 */
+BOOL GetVersionExA(void *);                  /* sysinfo.cpp */
+DWORD GetVersion(void);
+UINT GetSystemDirectoryA(LPSTR, UINT);
+UINT GetWindowsDirectoryA(LPSTR, UINT);
+BOOL IsProcessorFeaturePresent(DWORD);
+UINT SetErrorMode(UINT);
+BOOL IsDBCSLeadByte(BYTE);
+DWORD ExpandEnvironmentStringsA(LPCSTR, LPSTR, DWORD);
+FNVNX_CALLBACK_T(PHANDLER_ROUTINE, BOOL, (DWORD));
+FNVNX_CALLBACK_T(ENUMRESNAMEPROCA, BOOL, (HMODULE, LPCSTR, LPSTR, LONG_PTR));
+FNVNX_CALLBACK_T(TIMERPROC, void, (HWND, UINT, UINT_PTR, DWORD));
+BOOL SetConsoleCtrlHandler(PHANDLER_ROUTINE, BOOL);   /* crt_kernel32.cpp */
+LSTATUS RegOpenKeyA(HKEY, LPCSTR, PHKEY);            /* advapi32 (registry.cpp) */
 }
-/* the standard handles (GetStdHandle): fixed pseudo values outside the handle table. ReadFile/WriteFile/CloseHandle
- * route them here: -1 = not a standard handle, else the BOOL result */
-/* crt_kernel32.cpp; weak so harnesses that link part of platform/win32 (tests/s15/mtqemu) need not take it */
-int w32_std_io(HANDLE h, int write, void *buf, DWORD n, LPDWORD done) __attribute__((weak));
-int w32_is_std_handle(HANDLE h) __attribute__((weak));
+/* the platform's fixed Windows directories (sysinfo.cpp, ENV_TRUTH P5) */
 
 #endif

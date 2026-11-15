@@ -1,0 +1,17 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "admit",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_admit.py"
+ ],
+ "result": "admit.json",
+ "covers": [
+  "doc",
+  "tool",
+  "product-guest",
+  "lifted",
+  "host-product"
+ ]
+}

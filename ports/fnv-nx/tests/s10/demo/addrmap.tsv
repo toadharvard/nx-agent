@@ -1,6 +1,0 @@
-# fnvnx-addrmap 1
-# address	kind	link_symbol	native_symbol	object	note
-# synthetic (tests/s10): what S2 writes for the demo tree
-00500000	F	__fnv_00500000	_Z12FUN_00500000v	src_generated_demo_a_variant.cpp.o
-00f40040	F	__fnv_00f40040	_Z22InitializeRuntimeDemo1v	src_generated_demo_b.cpp.o
-00fc8040	E				no native definition (CRT/thunk, S4)

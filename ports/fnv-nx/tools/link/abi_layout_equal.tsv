@@ -1,7 +1,0 @@
-# abi_layout_equal.tsv - manual ABI pairs proved layout-equal (fnvlink resolve: abi_manual_trap is not applied).
-# A pair here passes an aggregate by value that fits one register and is trivially copyable and destructible on
-# both sides, so the native calls are identical; abi2 has no layout plan for it. Each row: the exe address, the
-# reference's symbol, and the proof (static_asserts on the prepared tree plus a GCC disassembly, by whom).
-# address	reference	evidence
-00dcd4d0	_Z12FUN_00dcd4d08AgentKey	R2, tree bea5a2ed: AgentKey {void *value}, 4 bytes, trivial; w0 like the placed int(void *); units.json binds ?FUN_00dcd4d0@@YAHUAgentKey@@@Z to the address
-00abfa90	_ZN12fnv_00abbae011VecQ_abbae012FUN_00abfa90ENS_18CItQ_abbae0_abbae0EjRKNS_12FUN_0065edd0E	R2, tree bea5a2ed: the iterator {void *_Myaux; El *_Myptr} and fnvnx_vc9::_Vector_const_iterator<El> both 8 bytes, trivial, _Myptr at +4 (one register); the element by const reference on both sides

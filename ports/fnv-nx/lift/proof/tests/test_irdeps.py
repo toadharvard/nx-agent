@@ -1,4 +1,4 @@
-"""Differential test of the K key (irdeps.py): the closure_sha of an encoding changes under an edit of a function its run executed (isla call events,
+"""CERTS.md "Certificate key K (closure rule)", obligations of item 5.  Differential test of the K key (irdeps.py): the closure_sha of an encoding changes under an edit of a function its run executed (isla call events,
 model_sail.LAST['fns']), and under no edit of a function the run did not call, nor of the position annotations."""
 import os
 import re
@@ -29,7 +29,7 @@ class Closure(unittest.TestCase):
     def setUpClass(cls):
         r, _, _ = run('85c0')
         cls.fns = list(model_sail.LAST['fns'])
-        cls.text = open(model_sail.IR).read()
+        cls.text = open(model_sail.ir_file()).read()
         cls.ir = irdeps.IR(cls.text)
         cls.base = irdeps.closure_sha(cls.ir, cls.fns, 'e')
         cls.found, _ = irdeps.resolve(cls.ir, cls.fns)
@@ -55,6 +55,16 @@ class Closure(unittest.TestCase):
     def test_the_run_environment_is_part_of_the_key(self):
         self.assertNotEqual(irdeps.closure_sha(self.ir, self.fns, 'f'), self.base)
 
+
+
+class Refusal(unittest.TestCase):
+    def test_an_ir_that_does_not_match_the_pin_is_refused(self):      # item 4: the record's IR is fetched by sha, not trusted: a record whose IR is not provided is REFUSED (never a silent stale); the IR-edit case (an executed function edited in the record's IR -> invalid) is test_certs_build.test_closure_key_keeps_a_record_valid_across_an_ir_change
+        from proof import certs_build
+        certs_build._K.clear()
+        rec = {'model_sha': '1' * 64, 'model_fns': ['f'], 'closure_sha': '2' * 64}
+        with self.assertRaises(certs_build.Refused):
+            certs_build.model_valid(rec, '0' * 64)
+        certs_build._K.clear()
 
 if __name__ == '__main__':
     unittest.main()

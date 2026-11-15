@@ -1,0 +1,13 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "forms",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/lift/proof/formgate.py"
+ ],
+ "result": "forms.json",
+ "covers": [
+  "lifted"
+ ]
+}

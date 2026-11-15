@@ -11,7 +11,6 @@ What lives where:
 | `fnvlift/` | the lifter: `image.py` (PE, .reloc), `core.py` (descent, emit loop, handler registry), one module per instruction family (`f_int`, `f_flow`, `f_string`, `f_x87`, `f_sse`, `f_sys`) |
 | `rt/` | the runtime: `fnvl.h` (state and inline semantics every lifted file includes), `x87.c` (exact 80-bit arithmetic), `rt.c` (dispatch, bridges' helpers, host calls) |
 | `test/` | `golden.py` (output digest of a lifter over all functions), `instest.py` (every instruction form against Unicorn), unit tests of the runtime |
-| `bench/` | function-level equivalence bench (x86 under Unicorn against lifted AArch64 under Unicorn, same memory world) |
 | `tools/` | `universe.py` (every entry the exe needs a body for), `census.py`, `cache.py`, `bridges.py`, `report.py` |
 
 The tools are ours. Their **output is exe-derived** (lifted C, entry lists, per-function tables, objects) and is
@@ -62,7 +61,7 @@ of the image is ever rewritten (vtable slots, EH tables and jump tables included
   of t through the dispatcher on top of this frame and repeat with what it returns. This one rule covers tail
   jumps, `push addr; ret`, helpers that return with a changed esp (`__chkstk`, `_alloca_probe`), `longjmp`, and the
   exe's own unwinder jumping into a handler or a catch continuation of an outer live frame.
-- A hardware fault is `fnvl_raise(code, at)` (rt/seh.c); it leaves `c->ra` = the resume address (ContinueExecution, or a handler's
+- A hardware fault is `fnvl_raise(code, at)` (rt/seh.cc); it leaves `c->ra` = the resume address (ContinueExecution, or a handler's
   own non-local jump) and the function continues in its loop; every raise site and the instruction after it are labels of that loop.
 - Exceptions (R4): a faulting instruction (#DE, #UD, `int3`, access violation taken by the host) builds the
   EXCEPTION_RECORD and CONTEXT from the guest registers and runs the dispatch the OS would run: walk `fs:[0]`, call
@@ -95,12 +94,12 @@ of the image is ever rewritten (vtable slots, EH tables and jump tables included
     (kframework/X86-64-semantics).
   - `sdm`: float->int (E1), compare flag mapping (E2), x87 control and state (`fnstsw`, `fldcw`, `fnstenv`,
     `fnsave`, `frstor`), `cpuid`, `rdtsc`: a reference module written once from the SDM in the same logic, checked
-    against the pinned x86 host exhaustively where the input space allows (16 and 32 bits). Assumption A3 for this
+    against the pinned x86 host exhaustively where the input space allows (16 and 32 bits). ASM-331 for this
     remainder, stated plainly: the reference was transcribed from the SDM and exhaustively compared with the host
     where that is possible.
   - `table`: `rcp*`/`rsqrt*`: the 2^32 table of the reference CPU is the specification.
-  Assumption recorded: memory forms are proven for pre-states where the model raises no segment-limit fault; on the
-  flat 4 GiB segments of the real process an address wraps modulo 2^32, which is what the lifted code does. `instest` (Unicorn) and the bench verify; they
+  Recorded as ASM-003 (A-FLAT): memory forms are proven for pre-states where the model raises no segment-limit fault; on the
+  flat 4 GiB segments of the real process an address wraps modulo 2^32, which is what the lifted code does. `instest` (Unicorn) verifies; it
   prove nothing.
 - **R3, code map.** Every byte of `.text` of every lifted module is an instruction of an entry, alignment, or a
   table named by a relocation (`tools/universe.py`); anything else is a build error. There are no trap codes.
@@ -128,7 +127,7 @@ of the image is ever rewritten (vtable slots, EH tables and jump tables included
   Implemented (rt/fnvl.h, fnvlift/core.py lock mode): class (b) for every guest access, the stack included (class (a)
   and the extensions only remove ordering, so leaving them out is safe); every LOCK-prefixed instruction and `xchg`
   with memory is one compare-and-swap commit of the instruction body run on a private copy, followed by `dmb ish`;
-  a misaligned locked operand runs under the one global spin lock `fnvnx_split_lock`.
+  a misaligned locked operand runs between `fnvl_host_world_stop()` and `fnvl_host_world_resume()` (platform/os/os.h and os_world.c: stop / resume every other thread of the process, synchronously, under one global lock; resume is called on the thread that stopped): every other guest thread is suspended, so nothing interleaves.
 - **Modules.** The lifter is applied to every non-system PE of the game (the exe, binkw32 and the rest).
 
 ### One reference CPU model (owner decision 2026-11-10)
@@ -148,21 +147,32 @@ Everything that depends on the machine follows one fixed model, the same at ever
 No trap paths. Whatever the x86 code does on the CPU, the lifted code does:
 - a hardware fault of the instruction (divide error, `int3`, access violation is the host's own fault) raises the
   same SEH exception through the thread's `fs:[0]` chain, which the lifted frames build exactly as the exe does;
-- `rt/seh.c` is the dispatcher the exe expects from the OS: it walks `fs:[0]`, calls each handler (lifted code of
+- `rt/seh.cc` is the dispatcher the exe expects from the OS: it walks `fs:[0]`, calls each handler (lifted code of
   the exe: `__except_handler3/4`, `__CxxFrameHandler3`, which interpret the exe's own scope tables and FuncInfo),
   and performs the unwind (`RtlUnwind`) those handlers ask for. The exe's EH machinery is lifted code like any
   other, so FuncInfo, try maps, catchable types, rethrow and local destructors run from the exe's own tables;
 - native frames in between: the entry and exit bridges link a native frame into the chain in both directions
   (a registration whose handler runs the native unwinder for that frame), so a throw crosses lifted and native
   frames in any order.
-Proof: every FuncInfo and scope table of the exe is parsed (`tools/ehtables.py`, 0 unparsed), and the bench throws
-through every function that has one, comparing the unwind actions with the x86 execution.
+Proof: every FuncInfo and scope table of every image is a dataflow fact over the decoded code (`tools/ehtables.py` on the flow engine `tools/ehflow.py`):
+ThrowInfo at each throw site through the callers' arguments (R1), callee-saved registers across calls only where the callee is proven to restore them (R2),
+the SEH scope table of a registration helper from the argument at every direct call site (R3), the table length as 1 + the largest constant trylevel stored (R4).
+A site no rule resolves is red in `gates/gate_eh.py` (never skipped), as is a table entry without a lifted landing. The unwind actions are compared with the x86 execution only by
+`test/` cases that exist; there is no per-function throw bench.
 
 ## Entries: the universe
 
 `tools/universe.py` computes every entry by recursive descent from the decomp function list, call and tail-jump
 targets, the PE entry point and every .reloc'd pointer into `.text` (vtables, callback tables, EH funclets), and
 classifies every byte of `.text`. The exit gate "100 % of exe functions lifted" is measured on that list.
+
+## The dispatcher table: one generator (`tools/dispgen.py`)
+
+`disp.S` (`fnvl_disp_table`, `fnvl_g`, `fnvl_phf_params`, read by `rt/rt.c`) is a pure function of an entry list, and `tools/dispgen.py` is its only
+implementation (`tools/phf.py` is the hash it calls). It reads rows `addr<TAB>sym[...]` (the format of the pack's `entries.tsv`, `#` lines ignored) and writes
+the assembly; the row order, the clock and the environment do not change a byte. `liftgen.py --finish` writes `entries.tsv` first and calls `dispgen.table` on
+those same rows. A root builds its own table with a `generated` step (`verify/RECIPE.md`): `{"tool": "ports/fnv-nx/lift/tools/dispgen.py", "args": ["/in/<repo path of the entries file>", "/out/disp.S"], "inputs": ["<repo path of the entries file>"], "outputs": ["disp.S"]}`. The recipe mounts the whole admitted tool root at `/tool` and the inputs at `/in/<repo path>`, and the generator writes only `/out/disp.S`, which is then a unit of the root (a `.S` file). `phf.py` sits beside `dispgen.py`, so the generator reads nothing outside `/tool` except the entries file under `/in` (the admitted tool root is `ports/fnv-nx/lift/tools`; a tool imports only from its own root). A key that is not in the list resolves to `fnvl_nobody`. `test/dispgentest.py` checks the
+determinism and the lookup.
 
 ## Cache
 
@@ -176,4 +186,3 @@ A lifted object is keyed by (function bytes, relocation mask inside them, lifter
 | coverage | `tools/census.py` | entries lifted / entries, failure reasons |
 | golden (refactors) | `test/golden.py <dir>` | sha256 of all outputs |
 | instruction | `test/instest.py` | forms tested, cases equal / different, per mnemonic |
-| equivalence | `bench/` on farms | functions equal on all usable inputs / no usable input / diverging |

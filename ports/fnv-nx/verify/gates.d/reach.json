@@ -1,0 +1,15 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "reach",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_contract.py",
+  "--gate",
+  "reach"
+ ],
+ "result": "reach.json",
+ "covers": [
+  "linked"
+ ]
+}

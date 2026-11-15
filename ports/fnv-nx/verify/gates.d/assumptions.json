@@ -1,0 +1,14 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "assumptions",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_assumptions.py"
+ ],
+ "result": "assumptions.json",
+ "covers": [
+  "tool",
+  "ref"
+ ]
+}

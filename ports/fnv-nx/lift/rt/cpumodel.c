@@ -18,6 +18,7 @@
    A leaf above the max of its range returns the data of the highest basic leaf (Intel SDM, CPUID: "if a value entered for CPUID.EAX is higher than the maximum
    input value for basic or extended function ... the data for the highest basic information leaf is returned"), i.e. leaf 4 with the given subleaf.
    Leaves 0x80000002..4: the host's brand string "Intel(R) Xeon(R) Processor @ 2.10GHz", unchanged. */
+#include "fnvl_abi.h"
 typedef unsigned int u32; typedef unsigned long long u64;
 unsigned long long fnvl_host_ticks_ns(void);
 #define FNVL_MAX_BASIC 4u
@@ -43,7 +44,7 @@ void fnvl_cpuid(u32 leaf, u32 sub, u32 o[4]) {
     if (leaf > FNVL_MAX_BASIC) { leaf = FNVL_MAX_BASIC; }     /* SDM rule above (also for 0x80000005.. and 0x40000000..) */
     switch (leaf) {
     case 0: o[0] = L0[0]; o[1] = L0[1]; o[2] = L0[3]; o[3] = L0[2]; break;
-    case 1: o[0] = 0x000c06f2; o[1] = 0x00010800; o[2] = 0; o[3] = 0x078bfbff; break;
+    case 1: o[0] = FNVL_CPUID1_EAX; o[1] = FNVL_CPUID1_EBX; o[2] = FNVL_CPUID1_ECX; o[3] = FNVL_CPUID1_EDX; break;
     case 2: for (i = 0; i < 4; i++) o[i] = L2[i]; break;
     case 3: break;
     case 4: if (sub < 4) for (i = 0; i < 4; i++) o[i] = L4[sub][i]; break;

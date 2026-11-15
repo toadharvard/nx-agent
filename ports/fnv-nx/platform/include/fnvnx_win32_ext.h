@@ -35,6 +35,7 @@ extern "C" {
 #define ERROR_INVALID_NAME 123L
 #define ERROR_MOD_NOT_FOUND 126L
 #define ERROR_PROC_NOT_FOUND 127L
+#define ERROR_DLL_INIT_FAILED 1114L
 #define ERROR_DIR_NOT_EMPTY 145L
 #define ERROR_ALREADY_EXISTS 183L
 #define ERROR_MORE_DATA 234L
@@ -53,13 +54,19 @@ void fnvnx_path_reset(const char *root);        /* default mounts under root (NU
  * Win32 error code (ERROR_PATH_NOT_FOUND when a directory component is missing and !for_create...). */
 DWORD fnvnx_path_map(const char *win_path, char *host, size_t host_size);
 void fnvnx_set_command_line(int argc, char **argv);
-/* the first run's profile files, as the PC launcher writes them (platform/win32/profile.cpp); a mask of what it made */
-#define FNVNX_PROFILE_INI 1u      /* My Games\FalloutNV\Fallout.ini: a copy of Fallout_default.ini */
-#define FNVNX_PROFILE_PREFS 2u    /* My Games\FalloutNV\FalloutPrefs.ini: Fallout_default.ini + [Display] sD3DDevice */
-#define FNVNX_PROFILE_PLUGINS 4u  /* AppData\Local\FalloutNV\plugins.txt: empty, as the launcher leaves it */
-unsigned fnvnx_first_run_profile(void);
+/* the registry's first boot (platform/win32/registry_seed.cpp): when the hive file does not exist, makes it from the declared
+ * machine's rows (platform/manifest/declared_registry.tsv, generated into the build); when it exists, touches nothing */
+void fnvnx_registry_first_run(void);
+void fnvnx_declared_files_first_run(void);
+/* The declared fonts: an input of the platform like the registry hive and FalloutPrefs.ini. The root that links the platform defines
+ * this function (the loader: boot.cpp; the host tests: host_boundary.cpp), so a root without declared fonts does not link. The three
+ * directories are the Wine 9.0 data directory (the .fon bitmap fonts and the TrueType files), the host fonts (every sfnt file
+ * below it) and the registry export directory (.reg files: Fonts, FontSubstitutes, hardware-profile Fonts, CodePage\ACP). There is
+ * no setter and no unset state: GDI reads them when the first font is realised. */
+struct fnvnx_font_dirs { const char *dir; };   /* the one declared directory: exactly the fnv-nx-build tools/fonts-wine9 mirror */
+const struct fnvnx_font_dirs *fnvnx_declared_fonts(void);
 /* implicit TLS of the image (.tls section of FalloutNV.exe, from the loader, S3) */
-void fnvnx_tls_set_template(const void *init_data, size_t init_size, size_t total_size);
+BOOL fnvnx_tls_set_template(const void *init_data, size_t init_size, size_t total_size);
 void *fnvnx_tls_block(void);                     /* this thread's block; what fs:[0x2c][0] points at */
 void **fnvnx_tls_array(void);                    /* what fs:[0x2c] returns */
 /* Wait-graph watchdog (platform/win32/waitgraph.cpp, D25 #7): every blocking wait on a critical section, event,
@@ -80,8 +87,7 @@ void fnvnx_waitgraph_summary(void);
 /* an interposer around EnterCriticalSection / WaitFor* (the race checker's --wrap) names the real call site: set it
  * before the call, 0 after; the watchdog records it instead of the interposer's own address */
 void fnvnx_waitgraph_set_caller(unsigned pc);
-/* prints what the thread checkers have so far: the race checker's pairs (hb_dump, when linked) and the watchdog's
- * summary (when on). ExitProcess calls it; the scanner every FNVNX_THREADS_DUMP_S seconds (default 10). */
+/* prints what the watchdog has so far (its summary, when on); a race checker prints its own pairs (hb_dump). ExitProcess calls it; the scanner every FNVNX_THREADS_DUMP_S seconds (default 10). */
 void fnvnx_threads_flush(void);              /* "wg: summary cycles N long-waits N scans N threads N" */
 /* Memory lane (platform/win32/memtrack.cpp, D25 #8; tools/perf/MEM.md): live bytes by kind (0 heap, 1 virtual,
  * 2 gpu), the peak, failed allocations and allocation sites by caller address, "mem: ..." lines to the sink (default
@@ -101,47 +107,157 @@ int fnvnx_mem_enter(unsigned caller);             /* a stand-in records its own 
 void fnvnx_mem_leave(int entered);
 int fnvnx_mem_inside(void);
 unsigned fnvnx_mem_caller(unsigned fallback);
-/* Platform lane (platform/win32/platstat.cpp, D25 #3 #4 #6; tools/perf/PLAT.md): calls to unimplemented and no-op
+/* Platform lane (platform/win32/platstat.cpp, D25 #3 #4 #6; tools/perf/PLAT.md): calls to unimplemented
  * entries, failed file opens, audio decode failures and unmapped inputs, counted per (class, name, caller, detail),
  * "plat: ..." lines to the sink (default os_debug_print). Off (one load per report site) until started. */
-enum { FNVNX_PLAT_UNIMPL = 0, FNVNX_PLAT_NOOP, FNVNX_PLAT_OPEN, FNVNX_PLAT_DECODE, FNVNX_PLAT_INPUT, FNVNX_PLAT_NCLASS };
+enum { FNVNX_NOTE_UNIMPL = 0, FNVNX_NOTE_OPEN, FNVNX_NOTE_DECODE, FNVNX_NOTE_INPUT, FNVNX_NOTE_NCLASS };
 typedef void (*fnvnx_plat_sink)(const char *line);
 extern volatile int fnvnx_plat_on;
 void fnvnx_plat_start(fnvnx_plat_sink sink);
 void fnvnx_plat_autostart(void);                  /* from a static constructor (tools/perf/plat_autostart.c) */
 void fnvnx_plat_stop(void);
 void fnvnx_plat_flush(void);                      /* counts and summary (ExitProcess calls it) */
-void fnvnx_plat_counts(unsigned long long distinct[5], unsigned long long calls[5]);
+void fnvnx_plat_counts(unsigned long long distinct[FNVNX_NOTE_NCLASS], unsigned long long calls[FNVNX_NOTE_NCLASS]);
 void fnvnx_plat_note(int cls, const char *name, unsigned caller, const char *detail);
 /* win: the Windows path as the game gave it; host: what the mapper made of it (NULL if it failed); api: the entry */
 void fnvnx_plat_open_failed(const char *win, const char *host, unsigned err, unsigned caller, const char *api);
-#define FNVNX_PLAT_RA ((unsigned)(unsigned long)__builtin_return_address(0))
-/* in a stand-in's body: a call to a missing function / to a documented no-op (named by the enclosing function) */
-#define FNVNX_UNIMPL() (fnvnx_plat_on ? fnvnx_plat_note(FNVNX_PLAT_UNIMPL, __PRETTY_FUNCTION__, FNVNX_PLAT_RA, 0) : (void)0)
-#define FNVNX_NOOP() (fnvnx_plat_on ? fnvnx_plat_note(FNVNX_PLAT_NOOP, __PRETTY_FUNCTION__, FNVNX_PLAT_RA, 0) : (void)0)
+#define FNVNX_NOTE_RA ((unsigned)(unsigned long)__builtin_return_address(0))
 /* builtin modules for LoadLibraryA/GetProcAddress (xinput1_3.dll, ... registered by S6/S7) */
 typedef FARPROC (*fnvnx_module_resolver)(const char *proc);
 void fnvnx_register_module(const char *dll_name, fnvnx_module_resolver resolve);
 /* Win32 export table: implementation of a DLL import by name (for IAT slots resolved from the exe) */
 void *fnvnx_win32_lookup_export(const char *dll, const char *name);
-/* A constant of the player's exe that the loader left unmapped (MSVC put some .rdata-like constants, e.g.
- * dinput8.lib's GUID_XAxis..GUID_Key, into .text; the port maps the image's data sections only): its bytes, read
- * from the exe file into buf (n bytes), else p itself (a mapped address, or no image). toolchain/game/boot.cpp
- * defines it; the weak default in platform/win32/module.cpp returns p. */
-const void *fnvnx_image_const(const void *p, uint32_t n, void *buf);
 /* An import slot of the exe, as the loader hands it over: by name (ordinal == FNVNX_IMPORT_BY_NAME, the loader's
  * FNVNX_BY_NAME) or by ordinal (name NULL). NULL: no export (the slot stays 0). */
 #define FNVNX_IMPORT_BY_NAME 0xffffffffu
 void *fnvnx_win32_lookup_import(const char *dll, const char *name, unsigned ordinal);
+/* Exceptions raised by platform code (a failed HEAP_GENERATE_EXCEPTIONS allocation, RaiseException, DebugBreak when
+ * the caller is the platform): the lifter runtime installs its SEH dispatcher over the guest's fs:[0] chain here at
+ * start. Returns when the exception was continued. Without a backend no handler exists: the top-level filter of
+ * SetUnhandledExceptionFilter decides, then the process ends with the exception code as its exit status. */
+typedef void (*fnvnx_raise_fn)(uint32_t code, uint32_t flags, uint32_t nargs, const uintptr_t *args);
+void fnvnx_win32_set_raise_backend(fnvnx_raise_fn fn);
+/* Test hooks. Module table: -1 for a system DLL (pinned), the reference count of a registered module, 0 for a
+ * handle that is no module. Steam: the number of (object, id) registrations of SteamAPI_RegisterCallback. */
+int fnvnx_module_load_count(HMODULE);
+/* The loader reports a mapped image (the exe, or a translated game module after mapping it): the module table gets it
+ * (HMODULE = base; GetModuleHandle/GetModuleFileName/LoadLibrary/GetProcAddress by the PE export directory in memory,
+ * forwarders followed; FindResource* on its resource directory) and the page map records it as MEM_IMAGE, the whole
+ * image and then each of its sections with the protection of its R/W/X bits. `name` is the file name or path. */
+void fnvnx_win32_register_image(const char *name, uint32_t base, uint32_t size);
+int fnvnx_steam_callback_count(void);
+/* The i-th system module (the distinct DLL names of the export table, as the exe imports them), NULL past the last */
+const char *fnvnx_win32_system_module(unsigned i);
 /* window/input plumbing for S6/S7 */
 HWND fnvnx_main_window(void);
-void fnvnx_set_display_size(int w, int h);
+void fnvnx_set_display_size(int w, int h);   /* the output size (display.cpp): 1920x1080 is docked, any smaller one handheld */
+/* the console was docked or undocked (the lifecycle code calls it): re-reads os_display_docked, sets the display
+ * mode, the desktop window and GetSystemMetrics, and sends WM_DISPLAYCHANGE to the top-level windows */
+void fnvnx_display_mode_changed(void);
 void fnvnx_post_message(HWND, UINT, WPARAM, LPARAM);
 void fnvnx_set_key_state(int vk, int down);
 void fnvnx_set_cursor_pos(int x, int y);
+BOOL GetClipCursor(RECT *);                  /* user32; ClipCursor is in the shim */
+HWND GetCapture(void);
+HWND fnwin_capture(void);                    /* the window with the mouse capture, NULL if none */
 /* COM classes (e.g. XAudio2 from S7) for CoCreateInstance */
 typedef HRESULT (*fnvnx_com_factory)(const GUID *iid, void **out);
-void fnvnx_register_com_class(const GUID *clsid, fnvnx_com_factory f);
+/* A statically linked server (resident for the life of the process); 0 when the registry (16 classes) is full. */
+int fnvnx_register_com_class(const GUID *clsid, fnvnx_com_factory f);
+/* A server with its own unload query (DllCanUnloadNow: S_OK when idle); CoFreeUnusedLibraries drops the idle ones. */
+typedef HRESULT (*fnvnx_com_can_unload)(void);
+int fnvnx_register_com_dll(const GUID *clsid, fnvnx_com_factory f, fnvnx_com_can_unload can_unload);
+#ifndef CLSCTX_INPROC_SERVER
+#define CLSCTX_INPROC_SERVER 0x1
+#define CLSCTX_INPROC_HANDLER 0x2
+#endif
+#ifndef CO_E_NOTINITIALIZED
+#define CO_E_NOTINITIALIZED ((HRESULT)0x800401F0L)
+#endif
+#ifndef RPC_E_CHANGED_MODE
+#define RPC_E_CHANGED_MODE ((HRESULT)0x80010106L)
+#endif
+#ifndef CLASS_E_NOAGGREGATION
+#define CLASS_E_NOAGGREGATION ((HRESULT)0x80040110L)
+#endif
+/* ---- virtual memory (platform/win32/memory.cpp, filemap.cpp): the process has ONE page map of its user address space
+ * [0x00010000, 0x7FFEFFFF]; every page has a state, type, allocation base and protections. */
+#ifndef ERROR_NOACCESS
+#define ERROR_NOACCESS 998L
+#endif
+#ifndef ERROR_BAD_LENGTH
+#define ERROR_BAD_LENGTH 24L
+#endif
+#ifndef ERROR_FILE_INVALID
+#define ERROR_FILE_INVALID 1006L
+#endif
+#ifndef ERROR_MAPPED_ALIGNMENT
+#define ERROR_MAPPED_ALIGNMENT 1132L
+#endif
+#ifndef ERROR_PRIVILEGE_NOT_HELD
+#define ERROR_PRIVILEGE_NOT_HELD 1314L
+#endif
+#ifndef ERROR_BAD_EXE_FORMAT
+#define ERROR_BAD_EXE_FORMAT 193L
+#endif
+#ifndef MEM_MAPPED
+#define MEM_MAPPED 0x40000
+#define MEM_IMAGE 0x1000000
+#endif
+#ifndef MEM_RESET
+#define MEM_RESET 0x80000
+#define MEM_RESET_UNDO 0x1000000
+#define MEM_WRITE_WATCH 0x200000
+#define WRITE_WATCH_FLAG_RESET 1
+UINT GetWriteWatch(DWORD flags, PVOID base, SIZE_T size, PVOID *addresses, PULONG_PTR count, PULONG granularity);
+UINT ResetWriteWatch(PVOID base, SIZE_T size);
+#define MEM_PHYSICAL 0x400000
+#define MEM_LARGE_PAGES 0x20000000
+#endif
+#ifndef PAGE_WRITECOMBINE
+#define PAGE_WRITECOMBINE 0x400
+#endif
+#ifndef FILE_MAP_READ
+#define FILE_MAP_COPY 0x0001
+#define FILE_MAP_WRITE 0x0002
+#define FILE_MAP_READ 0x0004
+#define FILE_MAP_ALL_ACCESS 0x000F001F
+#define FILE_MAP_EXECUTE 0x0020
+#define SEC_FILE 0x00800000
+#define SEC_IMAGE 0x01000000
+#define SEC_RESERVE 0x04000000
+#define SEC_COMMIT 0x08000000
+#define SEC_NOCACHE 0x10000000
+#define SEC_WRITECOMBINE 0x40000000
+#define SEC_LARGE_PAGES 0x80000000
+#endif
+#ifndef STATUS_GUARD_PAGE_VIOLATION
+#define STATUS_GUARD_PAGE_VIOLATION 0x80000001u
+#endif
+#ifndef STATUS_ACCESS_VIOLATION
+#define STATUS_ACCESS_VIOLATION 0xC0000005u
+#endif
+BOOL VirtualProtect(LPVOID, SIZE_T, DWORD, PDWORD);
+HANDLE CreateFileMappingA(HANDLE, void *, DWORD, DWORD, DWORD, LPCSTR);
+LPVOID MapViewOfFile(HANDLE, DWORD, DWORD, DWORD, SIZE_T);
+BOOL UnmapViewOfFile(LPCVOID);
+BOOL FlushViewOfFile(LPCVOID, SIZE_T);
+/* The loader records memory it did not get from VirtualAlloc: base/size (page granular), type MEM_IMAGE / MEM_MAPPED /
+ * MEM_PRIVATE, the pages' protection. The pages become committed in the map (the platform does not touch the OS
+ * protection of noted memory except through VirtualProtect). A note over pages that are free starts a new allocation
+ * at base; a note over pages of an existing allocation of the same type only sets their protection: the loader notes
+ * the whole image first (headers, PAGE_READONLY) and then each section with its own protection, so one image is one
+ * allocation. The platform records heap-less regions it obtains itself the same way. Ranges outside the 32-bit user
+ * space [0x10000, 0x7FFEFFFF] are not part of the map and are ignored. */
+void fnvnx_win32_vm_note(uintptr_t base, size_t size, DWORD type, DWORD protect);
+/* The memory noted above is gone (a thread's stack ended, a module unloaded): its pages are free in the map again. */
+void fnvnx_win32_vm_unnote(uintptr_t base, size_t size);
+/* The host fault handler asks what a memory fault at addr (access 0 read, 1 write, 8 exec) is, by the map:
+ * returns 1: a guard-page hit (the guard bit is cleared, *code_out = STATUS_GUARD_PAGE_VIOLATION: raise it, the
+ * access is retried after the handler), 0: an access violation (*code_out = STATUS_ACCESS_VIOLATION), 2: the map
+ * permits the access (another thread cleared the guard first): just retry. */
+int fnvnx_win32_vm_fault(uintptr_t addr, int access, uint32_t *code_out);
+
 /* message boxes: default answer policy is the default button; tests can capture the text */
 typedef int (*fnvnx_msgbox_hook)(const char *text, const char *caption, UINT type);
 void fnvnx_set_msgbox_hook(fnvnx_msgbox_hook);

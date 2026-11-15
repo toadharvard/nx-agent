@@ -2,7 +2,7 @@
 narrow_div: the Sail model divides 128-bit zero-/sign-extended copies of the 64-bit (or 32/16-bit) operands (bvsdiv_i on 128 bits).  Equivalence of a 128-bit and a
 64-bit divider is out of reach of the bit-blaster, so every bvudiv/bvsdiv whose operands are (provably, one small z3 check each) extensions of their low half is replaced by
     udiv:  If(b == 0, ones, ZeroExt(udiv_n(a, b)))        sdiv:  If(b == 0, <bvsdiv(A,0)>, If(a == MIN and b == -1, <bvsdiv(MIN,-1)>, SignExt(sdiv_n(a, b))))
-which are identities of the SMT-LIB bit-vector semantics (the special cases keep the original term with the operands substituted, so nothing is assumed).
+which are identities of the SMT-LIB bit-vector semantics (the special cases keep the original term with the operands substituted, so the identity is exact).
 pow2_mul: x * 2^k (0 < k < width) = concat(x[w-1-k:0], 0^k) (a shift by a constant is a wiring, not a multiplier; the DSL writes `base + index * scale`, the model
 shifts), an identity of the bit-vector semantics; applied to the terms of BOTH sides before the query, it makes the two address computations of a SIB operand
 syntactically equal (z3 otherwise bit-blasts the multiplier against the wiring, seconds per query).

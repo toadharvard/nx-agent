@@ -76,6 +76,23 @@ typedef struct fnvnx_touch_point { int32_t x, y; uint32_t id; } fnvnx_touch_poin
 void fnvnx_touch_reset(void);
 void fnvnx_touch_frame(const fnvnx_touch_point *pts, unsigned count, uint64_t time_ms);
 
+/* ---- text entry through the system software keyboard (swkbd.cpp; docs/AUDIO_INPUT.md "Text entry")
+ * The pad filter takes the combination FNVNX_SWKBD_COMBO out of the buttons the game sees and, once per press of the
+ * combination, runs the applet (os_text_entry). The entered text becomes the key strokes of the platform's layout that
+ * turn back into it; the strokes are released one edge per fnvnx_swkbd_pump call, and the next only after the game has
+ * observed the previous one (swkbd.cpp: no time in the rule), through fnvnx_swkbd_inject, the single point that feeds
+ * every keyboard channel of the platform. */
+#define FNVNX_SWKBD_COMBO (FNVNX_NPAD_STICKL | FNVNX_NPAD_STICKR)   /* both stick clicks held together */
+#define FNVNX_SWKBD_MAX_LEN 64                                      /* units per entry */
+void fnvnx_swkbd_filter(uint64_t *buttons);          /* pad path: consumes the combination, may run the applet */
+int fnvnx_swkbd_enter(void);                         /* runs the applet now; strokes queued, 0 cancelled, <0 error */
+void fnvnx_swkbd_pump(void);                         /* releases the next key edge if the previous one was observed */
+uint64_t fnvnx_input_kbd_reads(void);                /* DirectInput keyboard reads that returned data, ever (dinput.cpp) */
+unsigned fnvnx_input_kbd_room(void);                 /* free buffered slots over the acquired keyboards; 0 when none is acquired */
+void fnvnx_swkbd_inject(unsigned vk, unsigned scan, int down);   /* the one injection point */
+int fnvnx_swkbd_stroke(uint16_t ch, unsigned *vk, unsigned *scan, int *shift);   /* the layout inverted; 0: no key makes ch */
+unsigned fnvnx_swkbd_pending(void);                  /* edges not yet released */
+
 /* pumps the platform sources (Horizon hid); called by the APIs before they read state; throttled */
 void fnvnx_input_pump(void);
 
@@ -84,5 +101,45 @@ void fnvnx_audio_input_register(void);
 
 #ifdef __cplusplus
 }
+#endif
+#ifdef FNVNX_SHIM_XINPUT_H   /* xinput.h included first: the documented XInput 1.3 exports beyond its subset */
+#ifndef BATTERY_TYPE_WIRED
+#define BATTERY_DEVTYPE_GAMEPAD 0x00
+#define BATTERY_DEVTYPE_HEADSET 0x01
+#define BATTERY_TYPE_DISCONNECTED 0x00
+#define BATTERY_TYPE_WIRED 0x01
+#define BATTERY_LEVEL_EMPTY 0x00
+#define BATTERY_LEVEL_FULL 0x03
+#define XINPUT_KEYSTROKE_KEYDOWN 0x0001
+#define XINPUT_KEYSTROKE_KEYUP 0x0002
+#define XINPUT_KEYSTROKE_REPEAT 0x0004
+#define VK_PAD_A 0x5800
+#define VK_PAD_B 0x5801
+#define VK_PAD_X 0x5802
+#define VK_PAD_Y 0x5803
+#define VK_PAD_RSHOULDER 0x5804
+#define VK_PAD_LSHOULDER 0x5805
+#define VK_PAD_LTRIGGER 0x5806
+#define VK_PAD_RTRIGGER 0x5807
+#define VK_PAD_DPAD_UP 0x5810
+#define VK_PAD_DPAD_DOWN 0x5811
+#define VK_PAD_DPAD_LEFT 0x5812
+#define VK_PAD_DPAD_RIGHT 0x5813
+#define VK_PAD_START 0x5814
+#define VK_PAD_BACK 0x5815
+#define VK_PAD_LTHUMB_PRESS 0x5816
+#define VK_PAD_RTHUMB_PRESS 0x5817
+typedef struct _XINPUT_BATTERY_INFORMATION { BYTE BatteryType; BYTE BatteryLevel; } XINPUT_BATTERY_INFORMATION;
+typedef struct _XINPUT_KEYSTROKE { WORD VirtualKey; WCHAR Unicode; WORD Flags; BYTE UserIndex; BYTE HidCode; } XINPUT_KEYSTROKE;
+#ifdef __cplusplus
+extern "C" {
+#endif
+DWORD WINAPI XInputGetDSoundAudioDeviceGuids(DWORD dwUserIndex, GUID *pDSoundRenderGuid, GUID *pDSoundCaptureGuid);
+DWORD WINAPI XInputGetBatteryInformation(DWORD dwUserIndex, BYTE devType, XINPUT_BATTERY_INFORMATION *pBatteryInformation);
+DWORD WINAPI XInputGetKeystroke(DWORD dwUserIndex, DWORD dwReserved, XINPUT_KEYSTROKE *pKeystroke);
+#ifdef __cplusplus
+}
+#endif
+#endif
 #endif
 #endif

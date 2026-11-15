@@ -1,11 +1,8 @@
 /* platstat.cpp - the platform lane's recorder (D25 #3, #4, #6; tools/perf/PLAT.md).
  *
  * Off until fnvnx_plat_start / fnvnx_plat_autostart (tools/perf/plat_autostart.c). While on, the stand-ins report:
- *   unimpl   a call to an entry whose function is missing (FNVNX_UNIMPL(): E_NOTIMPL methods, BinkOpen without a
- *            movie player, an unsupported TEB offset, ...); an import with no export is the boot's own line
+ *   unimpl   a call to an entry whose function is missing (fnvnx_plat_note(FNVNX_NOTE_UNIMPL, ...): an unsupported TEB offset, a Wine 9.0 simplified body (fnvnx_wine_fixme), ...); an import with no export is the boot's own line
  *            ("fnvnx boot: import <dll>!<name>: no export") and its call a trap (tools/perf/plat.py reads both)
- *   noop     a call to an entry that is a documented no-op on the Switch (FNVNX_NOOP(): Steam / GOG Galaxy,
- *            winsock offline, DebugBreak): reported, not counted in the metric
  *   open     a failed file open (CreateFileA, the CRT's fopen / _open): the path's class (bsa, esm, save, ini,
  *            other), the Win32 error, whether a case-insensitive scan of the parent directory finds the name
  *            ("ci yes": the path mapper missed a spelling; "ci no"; "ci nodir": the directory itself is missing),
@@ -17,9 +14,11 @@
  * and every 30 s from the flusher):
  *   plat: <class> <name> caller 0x<pc>[ <detail>]
  *   plat: count <class> <name> caller 0x<pc> n <count>[ <detail>]
- *   plat: summary unimpl <distinct> <calls> noop <distinct> <calls> open <d> <c> decode <d> <c> input <d> <c> dropped <n>
+ *   plat: summary unimpl <distinct> <calls> open <d> <c> decode <d> <c> input <d> <c> dropped <n>
  * Names are function names of our own stand-ins (Class::method), callers addresses only. */
 #include "w32.h"
+#include <fnvnx/declared.h>
+#include <fnvnx/reach.h>
 
 #include <stdio.h>
 
@@ -27,11 +26,11 @@ volatile int fnvnx_plat_on;
 
 #define NPLAT 2048
 #define NPRINT 256
-static const char *const cls_name[FNVNX_PLAT_NCLASS] = {"unimpl", "noop", "open", "decode", "input"};
+static const char *const cls_name[FNVNX_NOTE_NCLASS] = {"unimpl", "open", "decode", "input"};
 struct pent { const char *name; unsigned caller; uint8_t cls, used; char detail[64]; uint64_t n; };
 static struct pent g_e[NPLAT];
 static unsigned g_ne, g_dropped, g_printed;
-static uint64_t g_calls[FNVNX_PLAT_NCLASS], g_distinct[FNVNX_PLAT_NCLASS];
+static uint64_t g_calls[FNVNX_NOTE_NCLASS], g_distinct[FNVNX_NOTE_NCLASS];
 static os_lock_t g_plat;
 static fnvnx_plat_sink g_sink;
 static volatile int g_pending;
@@ -70,9 +69,41 @@ static uint32_t hstr(const char *s)
 
 static void start_flusher(void);
 
+/* The log line of a body that does what Wine 9.0's simplified implementation does (verify/VERDICT.md "Bodies that do what
+ * Wine 9.0's simplified implementation does", verify/wine_fixme.tsv): one line at every call, as Wine's FIXME, whether the plat
+ * lane is on or not; while it is on the call is also counted as an "unimpl" entry named wine-fixme with the id. */
+extern "C" void fnvnx_wine_fixme(uint32_t id)
+{
+    char l[48];
+    snprintf(l, sizeof l, "fixme: wine-9.0 id %u", (unsigned)id);
+    emit(l);
+    char d[24];
+    snprintf(d, sizeof d, "id %u", (unsigned)id);
+    fnvnx_plat_note(FNVNX_NOTE_UNIMPL, "wine-fixme", FNVNX_NOTE_RA, d);
+}
+
+/* The citation function of the declared-machine bodies (verify/VERDICT.md "Declared-machine bodies", verify/declared_machine.tsv): a body that
+ * answers from the declared machine (no network, fixed time zone, registry values, no Galaxy) calls it with the id of its row. It writes nothing
+ * and returns: the gate reads the call, the body's result is the row's value. */
+extern "C" void fnvnx_declared_machine(uint32_t id)
+{
+    (void)id;
+}
+
+/* The one exit of the branches the reachability gate proves unreachable (contract/include/fnvnx/reach.h has the contract). Reached only
+ * when a build invariant is violated: one log line through the same sink as the other lines, then the process ends through the
+ * host's exit (os_exit_process: the hostapi `exit` slot on the console) with FNVNX_REACH_EXIT | fact_id. */
+extern "C" void fnvnx_reach_violation(uint32_t fact_id)
+{
+    char l[48];
+    snprintf(l, sizeof l, "reach violation fact %u", (unsigned)fact_id);
+    emit(l);
+    os_exit_process((int)(FNVNX_REACH_EXIT | fact_id));
+}
+
 extern "C" void fnvnx_plat_note(int cls, const char *name, unsigned caller, const char *detail)
 {
-    if (!fnvnx_plat_on || cls < 0 || cls >= FNVNX_PLAT_NCLASS || !name)
+    if (!fnvnx_plat_on || cls < 0 || cls >= FNVNX_NOTE_NCLASS || !name)
         return;
     if (__builtin_expect(g_pending, 0) && __atomic_exchange_n(&g_pending, 0, __ATOMIC_ACQ_REL))
         start_flusher();
@@ -165,7 +196,7 @@ extern "C" void fnvnx_plat_open_failed(const char *win, const char *host, unsign
         return;
     char d[64];
     snprintf(d, sizeof d, "%s err %u ci %s path %08x", path_class(win), err, ci_scan(host), hstr(win));
-    fnvnx_plat_note(FNVNX_PLAT_OPEN, api, caller, d);
+    fnvnx_plat_note(FNVNX_NOTE_OPEN, api, caller, d);
 }
 
 extern "C" void fnvnx_plat_flush(void)
@@ -174,7 +205,7 @@ extern "C" void fnvnx_plat_flush(void)
         return;
     static struct pent snap[NPLAT];
     unsigned n = 0;
-    uint64_t calls[FNVNX_PLAT_NCLASS], dist[FNVNX_PLAT_NCLASS];
+    uint64_t calls[FNVNX_NOTE_NCLASS], dist[FNVNX_NOTE_NCLASS];
     unsigned dropped;
     os_lock(&g_plat);
     for (unsigned i = 0; i < NPLAT; i++)
@@ -192,18 +223,18 @@ extern "C" void fnvnx_plat_flush(void)
         emit(l);
     }
     int o = snprintf(l, sizeof l, "plat: summary");
-    for (int c = 0; c < FNVNX_PLAT_NCLASS; c++)
+    for (int c = 0; c < FNVNX_NOTE_NCLASS; c++)
         o += snprintf(l + o, sizeof l - (size_t)o, " %s %llu %llu", cls_name[c], (unsigned long long)dist[c],
                       (unsigned long long)calls[c]);
     snprintf(l + o, sizeof l - (size_t)o, " dropped %u", dropped);
     emit(l);
 }
 
-extern "C" void fnvnx_plat_counts(unsigned long long distinct[FNVNX_PLAT_NCLASS],
-                                  unsigned long long calls[FNVNX_PLAT_NCLASS])
+extern "C" void fnvnx_plat_counts(unsigned long long distinct[FNVNX_NOTE_NCLASS],
+                                  unsigned long long calls[FNVNX_NOTE_NCLASS])
 {
     os_lock(&g_plat);
-    for (int c = 0; c < FNVNX_PLAT_NCLASS; c++) {
+    for (int c = 0; c < FNVNX_NOTE_NCLASS; c++) {
         if (distinct) distinct[c] = g_distinct[c];
         if (calls) calls[c] = g_calls[c];
     }
@@ -215,7 +246,7 @@ static void flusher(void *arg)
     W32_UNUSED(arg);
     while (__atomic_load_n(&g_run, __ATOMIC_ACQUIRE)) {
         for (unsigned left = 30000; left && __atomic_load_n(&g_run, __ATOMIC_ACQUIRE); left -= 50)
-            os_sleep_ns(50000000ull);
+            clk_rt_sleep_ns(50000000ull);
         if (__atomic_load_n(&g_run, __ATOMIC_ACQUIRE))
             fnvnx_plat_flush();
     }

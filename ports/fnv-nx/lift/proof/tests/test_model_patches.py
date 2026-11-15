@@ -3,6 +3,14 @@ against the DSL by prove.prove_one on the Sail model.  Each test names the SDM s
 the series without it: segment_bases -> FS/GS-prefixed push / popal are FAILED(dsl) (the driver added the segment base to the stack accesses); bound -> model-gap
 'Opcode Unimplemented in x86isa!'; CS store -> model-gap ':NON-WRITABLE-SEGMENT').  Needs the proof IR of the toolchain (SAIL_IR / WORK, farm/sail_build.sh): a missing IR is an error, never a skip."""
 import argparse, os, sys, unittest
+
+def _rows():
+    d = {}
+    for ln in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'model_patch_rows.tsv')):
+        if ln[0] != '#' and ln.strip():
+            n, _, h = ln.rstrip('\n').split('\t'); d[n] = h.split()
+    return d
+ROWS = _rows()
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32
 from proof import forms, model_sail, prove
@@ -17,19 +25,19 @@ class ModelPatches(unittest.TestCase):
         r, note, _ = run(h); self.assertEqual(r, 'proved', '%s: %s %s' % (h, r, note))
 
     def test_segment_base_is_per_access(self):          # SDM Vol. 3, 3.4.3 / Vol. 1, 3.4.2.1: FS/GS have their own base; the stack (SS), ES:EDI and a ModRM byte 0x64/0x65 are not FS/GS
-        for h in ('6451', '6551', '656751', '676451', '51', '6550', '64a100000000', '648b0d00000000', '642108'):
+        for h in ROWS['segment_base_per_access']:
             self.proved(h)
 
     def test_store_through_cs_faults(self):             # SDM Vol. 3, 5.6 / 3.4.5.1: a code segment is not writable: #GP(0) -> STATUS_ACCESS_VIOLATION (DSL fault kind 7, AV)
-        for h in ('2e006900', '2e0108', '2e890a', '2ec60100'):
+        for h in ROWS['store_through_cs_faults']:
             self.proved(h)
 
     def test_pusha_popa_by_size(self):                  # SDM PUSHA/POPA (0x66): 16-bit words, ESP -+ 16; the 32-bit forms are unchanged
-        for h in ('60', '61', '6660', '6661'):
+        for h in ROWS['pusha_popa_by_size']:
             self.proved(h)
 
     def test_push_segment_register(self):               # pinned model x86-push-segment-register: the selector (free in the initial state, model_sail.SYMSEL) is stored with a 16-bit move, ESP -= operand size
-        for h in ('06', '0e', '16', '1e', '0fa0', '0fa8', '661e', '666a00'):
+        for h in ROWS['push_segment_register']:
             self.proved(h)
 
 class Def0(unittest.TestCase):

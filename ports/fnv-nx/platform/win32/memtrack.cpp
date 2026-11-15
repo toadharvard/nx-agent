@@ -58,7 +58,7 @@ static os_thread *g_sampler;
 static volatile int g_run;
 
 static void emit(const char *l) { (g_sink ? g_sink : os_debug_print)(l); }
-static uint64_t ms_now(void) { return (os_monotonic_ns() - g_t0) / 1000000ull; }
+static uint64_t ms_now(void) { return (clk_rt_ns() - g_t0) / 1000000ull; }
 
 static void start_sampler(void);
 /* tables from os_vm_* (not malloc: the recorder must not recurse into a wrapped malloc) */
@@ -330,19 +330,19 @@ extern "C" void fnvnx_mem_counts(unsigned long long live[3], unsigned long long 
 static void sampler(void *arg)
 {
     W32_UNUSED(arg);
-    uint64_t next_dump = os_monotonic_ns() + FNVNX_MEM_DUMP_S * 1000000000ull;
+    uint64_t next_dump = clk_rt_ns() + FNVNX_MEM_DUMP_S * 1000000000ull;
     while (__atomic_load_n(&g_run, __ATOMIC_ACQUIRE)) {
         for (unsigned left = g_period_ms; left && __atomic_load_n(&g_run, __ATOMIC_ACQUIRE);) {
             unsigned step = left > 50 ? 50 : left;
-            os_sleep_ns((uint64_t)step * 1000000ull);
+            clk_rt_sleep_ns((uint64_t)step * 1000000ull);
             left -= step;
         }
         if (!__atomic_load_n(&g_run, __ATOMIC_ACQUIRE))
             break;
         line_t();
-        if (g_sink == NULL && os_monotonic_ns() >= next_dump) {
+        if (g_sink == NULL && clk_rt_ns() >= next_dump) {
             fnvnx_mem_flush();
-            next_dump = os_monotonic_ns() + FNVNX_MEM_DUMP_S * 1000000000ull;
+            next_dump = clk_rt_ns() + FNVNX_MEM_DUMP_S * 1000000000ull;
         }
     }
 }
@@ -361,7 +361,7 @@ static void start_sampler(void)
 
 extern "C" void fnvnx_mem_autostart(unsigned period_ms)   /* from a constructor: no thread, no allocation */
 {
-    g_t0 = os_monotonic_ns();
+    g_t0 = clk_rt_ns();
     g_period_ms = period_ms ? period_ms : 1000;
     g_pending = 1;
     __atomic_store_n(&w32_mem_on, 1, __ATOMIC_RELEASE);
@@ -371,7 +371,7 @@ extern "C" void fnvnx_mem_start(unsigned period_ms, fnvnx_mem_sink sink)
 {
     g_sink = sink;
     if (!g_t0)
-        g_t0 = os_monotonic_ns();
+        g_t0 = clk_rt_ns();
     g_period_ms = period_ms;
     g_pending = 0;
     ensure_tables();

@@ -175,7 +175,7 @@ Not here: d3d9, d3dx9_38 and binkw32 (S6), dinput8, dsound, xinput1_3 and vorbis
   written to AArch64 **FPCR.RMode** (RN/RP/RM/RZ for `_RC_NEAR/UP/DOWN/CHOP`), so S8's `fistp` replacement (rounds
   in the current mode) follows the game's requests. Precision control (`_MCW_PC`) is accepted, remembered and has no
   effect; exception masks are remembered, traps never enabled; `_DN_FLUSH` sets FPCR.FZ. **The game must be compiled
-  with `-frounding-math`**, otherwise GCC constant-folds conversions and `rint`-like operations assuming
+  with `-frounding-math`**, otherwise GCC constant-folds conversions and `rint`-like operations on the premise of
   round-to-nearest (the host test caught exactly that).
 * **INI** (`GetPrivateProfile*`): case-insensitive sections/keys, first match wins, `;` comments, values trimmed
   and unquoted, a key without `=` is an empty value, NULL section/key list names (`size-2` on truncation), defaults
@@ -717,7 +717,7 @@ static-object destructors that the source registers explicitly with `atexit`; `0
   mounts consistent with where the exe is read from (`sdmc:/fnv-nx/game/FalloutNV.exe`).
 * **S5 (toolchain)**: os_horizon.c needs fsdev mounted before `os_init`, a non-zero system resource size in the
   NPDM (svcMapPhysicalMemory) and the alias region inside the 32-bit range; newlib reserves `_unlink`, `_stat`,
-  ... (the runtime avoids those names); newlib's aarch64 `fenv` and `malloc_usable_size` are assumed.
+  ... (the runtime avoids those names); newlib's aarch64 `fenv` and `malloc_usable_size` are used as newlib provides them.
 * **S6/S7**: register DLL replacements with `fnvnx_register_module`, COM classes with `fnvnx_register_com_class`;
   drive the window with `fnvnx_set_display_size`, `fnvnx_post_message`, `fnvnx_set_key_state`,
   `fnvnx_set_cursor_pos`.

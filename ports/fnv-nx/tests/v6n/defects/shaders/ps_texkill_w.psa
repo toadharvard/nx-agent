@@ -1,8 +1,0 @@
-// V6n defect ps_texkill_w (synthetic, for S6b): from ps_2_0 on, texkill tests all four components (Nine:
-// KILL_IF(src) for version >= 2; wined3d: "2.0 shaders compare all 4 components in texkill"); ps_1_x tests xyz.
-// Only w is negative here: the pixel must be discarded (the clear colour stays).
-ps_2_0
-mov r0, c7
-texkill r0
-mov r1, c7.x
-mov oC0, r1

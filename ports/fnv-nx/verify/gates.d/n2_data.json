@@ -1,0 +1,15 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "n2_data",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_contract.py",
+  "--gate",
+  "n2_data"
+ ],
+ "result": "n2_data.json",
+ "covers": [
+  "linked"
+ ]
+}

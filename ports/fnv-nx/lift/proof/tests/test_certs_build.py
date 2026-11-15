@@ -84,8 +84,8 @@ class Aggregate(unittest.TestCase):
     def test_closure_key_keeps_a_record_valid_across_an_ir_change(self):
         # the old-IR side is computed from a provided IR file (hashed), not read from the record
         fns = ['bool_to_bits', 'zf_spec']
-        old = certs_build.add_ir(certs_build.model_sail.IR)                      # stands for the IR of the record
-        newer = os.path.join(self.d, 'newer.ir'); txt = open(certs_build.model_sail.IR).read()
+        old = certs_build.add_ir(certs_build.model_sail.ir_file())                      # stands for the IR of the record
+        newer = os.path.join(self.d, 'newer.ir'); txt = open(certs_build.model_sail.ir_file()).read()
         with open(newer, 'w') as fh: fh.write(txt + '\n// an edit outside the executed functions\n')
         new = certs_build.add_ir(newer)
         r = dict(rec(KEYS[0], model=old), model_fns=fns)

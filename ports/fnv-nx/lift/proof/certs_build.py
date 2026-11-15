@@ -104,7 +104,7 @@ def add_ir(path):
 def _closure(sha, fns):
     key = (sha, tuple(fns))
     if key not in _K:
-        path = IR_FILES.get(sha) or (model_sail.IR if model_sail.ir_sha() == sha else None)
+        path = IR_FILES.get(sha) or (model_sail.ir_file() if model_sail.ir_sha() == sha else None)
         if path is None: raise Refused('the IR %s of a record is not provided (--ir PATH: fetch it by sha, tools/x86-proof-ir*)' % sha)
         _K[key] = irdeps.sha_of_file(path, fns, model_sail.run_env_sha())
     return _K[key]

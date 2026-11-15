@@ -1,0 +1,7 @@
+# Expected values of test_rewrite.py, from the SMT-LIB standard, theory FixedSizeBitVectors (version 2.6, "Theories/FixedSizeBitVectors") and logic QF_BV. z3 is the decision procedure (ASM owner 9); these rows are the definitions the identities follow from.
+# columns: rule, SMT-LIB citation, parameters (tab separated after the citation)
+pow2_mul	FixedSizeBitVectors: bvmul s t is unsigned multiplication modulo 2^m, bvshl s t is s * 2^(bv2nat t) modulo 2^m: so x * 2^k = x << k (k < m)	1	3	8	15
+pow2_mul_not	FixedSizeBitVectors: bvmul by a constant that is not a power of two has no shift form	3
+low_extract	FixedSizeBitVectors: bvadd, bvsub, bvmul are arithmetic modulo 2^m, so ((extract i 0) of the result) = the same operation on the (extract i 0) of the operands	7
+urem_def	FixedSizeBitVectors: (bvurem s t) = s - (bvudiv s t) * t modulo 2^m for t != 0, and s for t = 0 (the SMT-LIB total definition of bvudiv by 0 = all ones)	8
+zext_add	FixedSizeBitVectors: zero_extend i (bvadd (zero_extend j s) c) equals zero_extend (i+j) (bvadd...) at the wider width iff s + c < 2^(m+j) cannot wrap; constants c >= 2^(m+j) can wrap and stay as they are	5	65535

@@ -17,7 +17,7 @@
      Every primitive truncates (toward zero) and its absolute error is <= 2^(emax-32n+1), emax = the larger operand exponent (bf_mul, bf_div, bf_*_u32:
      relative error <= 2^(2-32n)); bf_add of numbers whose bits fit the window is exact.
      Series (Taylor, Euler, atanh, Machin) are summed term by term until the term is below 2^-(32n+4) of the sum (tail <= 2 terms): error bound GUARD(n) below.
-     The constants pi and ln 2 come from a generated table (n <= 40 limbs, truncated: relative error < 2^(2-32n)) or from the series (n > 40). Assumption
+     The constants pi and ln 2 come from a generated table (n <= 40 limbs, truncated: relative error < 2^(2-32n): ASM-230) or from the series (n > 40). ASM-232
      recorded: n <= 2^15 limbs (4 MiB of mantissa), which no double input approaches (hard cases need ~ 200 bits).
    WIDE ARGUMENT STEPS are done in a second context cw with more limbs so that they are exact or carry an explicit absolute bound.
    PER FUNCTION (exact cases handled before the loop / evaluator and its error budget):
@@ -30,7 +30,7 @@
        2^k expm1(f ln 2) + (2^k - 1), k = nearest integer, f = x - k exact.
      y log2(x), y log2(x+1): the table of FYL2X / FYL2XP1 for zero / infinite / NaN / out-of-domain operands and x = 1 (or x = +-0); u = x or 1 + x is formed EXACTLY in cw
        (every bit between 2^-1074 and 2^1025 fits in 72 limbs), u = 2^k w, z = w - 1 exact; u a power of two (z = 0) gives y k exactly; else ln w = 2 atanh(z/(2+z)).
-   MSVCRT LIBRARY FUNCTIONS (the 15 _CI* intrinsics, rt/msvcrt_ci.c): acos asin atan cosh sinh tanh exp log pow by the same engine (start limb count n >= 2), fmod and sqrt exact. Same rule, same steps 1-3.
+   MSVCRT LIBRARY FUNCTIONS (the 15 _CI* intrinsics, rt/msvcrt_ci.cc): acos asin atan cosh sinh tanh exp log pow by the same engine (start limb count n >= 2), fmod and sqrt exact. Same rule, same steps 1-3.
      Irrationality (step 2): for a non-zero algebraic x, e^x (Hermite-Lindemann) and so exp, sinh, cosh, tanh (sinh x = s algebraic gives e^x a root of E^2 - 2 s E - 1, cosh and tanh likewise) are transcendental;
        ln x for algebraic x > 0, x != 1 is transcendental (e^(ln x) = x algebraic); asin, acos, atan: sin / cos / tan of a non-zero algebraic number is transcendental, and tan(atan x) = x, sin(asin x) = x, cos(acos x) = x
        are algebraic, so the angle is not algebraic: never a double or half-way point (the lattice of step 3 contains only dyadic rationals). Exact cases decided before the loop: exp 0 -> 1, log 1 -> +0, acos 1 -> +0,

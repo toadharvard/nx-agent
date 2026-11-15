@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Link check of the shape certificate, EXHAUSTIVE over the instruction instances of the image:
     for every instance i (bytes, address) of integer-family shape S:   canon(forms.build(i, addr)) == canon(symbuild(S)[fields := bytes of i, eip := addr])
-canon = serialization of the Form after constant folding (symform.py).  The lifter keeps building concrete Forms (fnvlift/f_dsl.py), so this equality is what
+canon = serialization of the Form after constant folding (symform.py).  The lifter keeps building concrete Forms (proof/lift_dsl.py), so this equality is what
 turns "the symbolic Form of shape S is proved against the Sail model for all field values" into "the Form the lifter emits for i is proved".
   symcheck.py --image EXE --ranges ranges.tsv [--proc K/N] [--out FILE] [--limit M]
 Universe: the union of the half-open ranges of ranges.tsv (entry <TAB> start-end ...), linear sweep per range, instances de-duplicated by (address, bytes).
 --proc K/N splits the unique ranges over N processes (K = 1..N, range index mod N).
 Result classes per instance: linked | MISMATCH | unlinked:<class> (symbuild failed with that class while the concrete builder succeeded: the shape has no
 symbolic Form, so the instance is NOT covered by a shape proof) | no-form (neither builder covers it) | other-family | shape-error.
-Also counted (assumption A-SEGLIM, shapeprove.py): relative targets whose non-wrapping value addr + size + sext(rel) leaves [0, 2^32): seglim-violations.
+Also counted (assumption ASM-006, shapeprove.py): relative targets whose non-wrapping value addr + size + sext(rel) leaves [0, 2^32): seglim-violations.
 Memory: the DSL interns every node, so the intern table and the per-shape cache are cleared every CHUNK instances (nodes are compared by serialization, not identity)."""
 import argparse, collections, json, os, re, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))

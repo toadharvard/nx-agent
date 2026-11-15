@@ -8,6 +8,7 @@
 /* the SDK's own packing (8, MSVC's default), whatever region includes this header: DECL1 / DECL2 put the include
  * where the decomp's prototype or SDK type was, 16 times inside the #pragma pack(push, 4) of its generated layout
  * headers (S11: LARGE_INTEGER, ULARGE_INTEGER, MEMORYSTATUSEX came out 4-aligned there) */
+#include "fnvnx_callback.h"
 #pragma pack(push, 8)
 /* the SDK's own include guards: the decomp's generated layout headers (include/_FILETIME.h, _RTL_CRITICAL_SECTION.h,
  * _ULARGE_INTEGER.h, _WIN32_FIND_DATAA.h) skip their copies when the SDK came first - their copies carry Xbox 360
@@ -259,7 +260,7 @@ BOOL CloseHandle(HANDLE);
 #define WAIT_FAILED 0xFFFFFFFF
 
 /* ---- threads, TLS, time */
-typedef DWORD (*LPTHREAD_START_ROUTINE)(LPVOID);
+FNVNX_CALLBACK_T(LPTHREAD_START_ROUTINE, DWORD, (LPVOID));
 HANDLE CreateThread(void *, SIZE_T, LPTHREAD_START_ROUTINE, LPVOID, DWORD, LPDWORD);
 DWORD ResumeThread(HANDLE);
 DWORD SuspendThread(HANDLE);
@@ -377,7 +378,7 @@ void OutputDebugStringA(LPCSTR);
 #define INVALID_SET_FILE_POINTER ((DWORD)-1)
 
 /* ---- windowing (only what the engine's bootstrap touches) */
-typedef LRESULT (*WNDPROC)(HWND, UINT, WPARAM, LPARAM);
+FNVNX_CALLBACK_T(WNDPROC, LRESULT, (HWND, UINT, WPARAM, LPARAM));
 typedef struct tagMSG { HWND hwnd; UINT message; WPARAM wParam; LPARAM lParam; DWORD time; POINT pt; } MSG, *LPMSG;
 typedef struct tagWNDCLASSA {
     UINT style; WNDPROC lpfnWndProc; int cbClsExtra, cbWndExtra; HINSTANCE hInstance; HICON hIcon;
@@ -430,8 +431,7 @@ static inline unsigned int _rotr(unsigned int v, int s) { s &= 31; return s ? (v
 #endif
 
 /* ---- C++ exception plumbing referenced by name in a few units (compiler-generated on MSVC) */
-typedef struct _ThrowInfo _ThrowInfo;
-void _CxxThrowException(void *, _ThrowInfo *);
+#include "fnvnx_crt.h"   /* _ThrowInfo, _CxxThrowException */
 
 /* ==== merged from platform/include/fnvnx_win32_ext.h (S4): imports the runtime implements */
 #ifndef WAIT_ABANDONED
@@ -627,8 +627,8 @@ UINT timeEndPeriod(UINT);
 
 /* ---- user32 / gdi32 imports not in the shim */
 typedef struct HHOOK__ *HHOOK;
-typedef LRESULT (*HOOKPROC)(int, WPARAM, LPARAM);
-typedef BOOL (*WNDENUMPROC)(HWND, LPARAM);
+FNVNX_CALLBACK_T(HOOKPROC, LRESULT, (int, WPARAM, LPARAM));
+FNVNX_CALLBACK_T(WNDENUMPROC, BOOL, (HWND, LPARAM));
 HWND GetWindow(HWND, UINT);
 UINT GetDoubleClickTime(void);
 BOOL SwapMouseButton(BOOL);

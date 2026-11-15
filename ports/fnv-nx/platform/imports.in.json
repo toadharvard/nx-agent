@@ -1,0 +1,9 @@
+{
+ "format": "fnvnx-imports-in/1",
+ "external": "manifest",
+ "names": "sys_names.tsv",
+ "specs": "specs",
+ "extra": [],
+ "extra_other": [],
+ "name_table": "crt/msvcrt_names.tsv"
+}

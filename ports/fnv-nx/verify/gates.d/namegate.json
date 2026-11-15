@@ -1,0 +1,13 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "namegate",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_namegate.py"
+ ],
+ "result": "namegate.json",
+ "covers": [
+  "product-guest"
+ ]
+}

@@ -1,0 +1,36 @@
+dll	name	ordinal	conv	ret	args	native_symbol
+fx.dll	fx_read		stdcall	i	i	fx_read
+fx.dll	fx_write		stdcall	i	i	fx_write
+fx.dll	fx_global		stdcall	i	i	fx_global
+fx.dll	fx_helper_read		stdcall	i	i	fx_helper_read
+fx.dll	fx_helper_store		stdcall	i	i	fx_helper_store
+fx.dll	fx_extern		stdcall	i	i	fx_extern
+fx.dll	fx_memcpy_src		stdcall	i	iii	fx_memcpy_src
+fx.dll	fx_ret		stdcall	i	i	fx_ret
+fx.dll	fx_atomic		stdcall	i	i	fx_atomic
+fx.dll	fx_list		stdcall	i	i	fx_list
+fx.dll	fx_int		stdcall	i	i	fx_int
+fx.dll	fx_q		stdcall	i	q	fx_q
+fx.dll	fx_local		stdcall	i	i	fx_local
+fx.dll	fx_float		stdcall	i	fdi	fx_float
+fx.dll	fx_vararg		vararg	i	ii	fx_vararg
+fx.dll	fx_mismatch		stdcall	i	iii	fx_mismatch
+fx.dll	fx_missing		stdcall	i	i	fx_missing
+fx.dll	fnvl_thing		stdcall	i	i	fnvl_thing
+fx.dll	fx_data		data	i		fx_data
+fx.dll	fx_ret_big		stdcall	i	ii	fx_ret_big
+fx.dll	fx_ret_store		stdcall	i	i	fx_ret_store
+fx.dll	fx_ret_derived		stdcall	i	i	fx_ret_derived
+fx.dll	fx_local_noinline		stdcall	i	i	fx_local_noinline
+fx.dll	fx_callee_write		stdcall	i	i	fx_callee_write
+fx.dll	fx_stash_write		stdcall	i	i	fx_stash_write
+fx.dll	fx_unused		stdcall	i	i	fx_unused
+fx.dll	fx_gep_read		stdcall	i	ii	fx_gep_read
+fx.dll	fx_gep_write		stdcall	i	ii	fx_gep_write
+fx.dll	fx_contract		stdcall	i	i	fx_contract
+fx.dll	fx_contract_ro		stdcall	i	i	fx_contract_ro
+fx.dll	fx_nullcheck		stdcall	i	i	fx_nullcheck
+fx.dll	fx_nullcheck_ne		stdcall	i	i	fx_nullcheck_ne
+fx.dll	fx_nullstore		stdcall	i	i	fx_nullstore
+fx.dll	fx_ptrcmp		stdcall	i	ii	fx_ptrcmp
+fx.dll	fx_ptrtoint		stdcall	i	i	fx_ptrtoint

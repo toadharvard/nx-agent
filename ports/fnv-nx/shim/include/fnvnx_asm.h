@@ -182,7 +182,7 @@ FNVNX_ASM_INLINE void fnvnx_sincos(float x, float* s, float* c)
 FNVNX_ASM_INLINE float fnvnx_x87_mul(float a, float b)
 {
     float r = a * b;
-#if defined(__aarch64__)
+#if defined(__aarch64__) && !defined(FNVNX_MSVC_NAMES)
     __asm__("" : "+w"(r));
 #elif defined(__SSE__)
     __asm__("" : "+x"(r));

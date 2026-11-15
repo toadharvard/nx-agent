@@ -1,225 +1,243 @@
-/* services.cpp - advapi32 registry (in memory), shell32, ole32, ws2_32 and steam_api.
+/* services.cpp - shell32, ole32, ws2_32 and steam_api (the registry is in registry.cpp).
  *
- * Registry: a process-local store seeded with the keys the launcher-less game expects
- * (HKLM\SOFTWARE\Bethesda Softworks\FalloutNV "Installed Path"). Writes are kept for the session only.
- * Winsock: Havok's remote-debugger socket is the only user; networking is reported as unavailable. The
- * functions are named fnvnx_ws2_* so they cannot collide with the BSD socket API of the target libc; the
- * link step (S2) maps the ws2_32 IAT slots and import thunks to them (docs/RUNTIME.md).
- * Steam / GOG Galaxy (orchestrator policy): no-op success. SteamAPI_Init and IsSteamRunning succeed, every interface
- * accessor returns NULL: the exe null-checks each one (0x006ff741.., 0x00af28f9.., 0x00af2979, 0x00af2dce), so
- * achievements, the overlay and the store queries are skipped and callbacks run as no-ops. */
+ * Winsock is in winsock.cpp.
+ * Steam / GOG Galaxy: the Steamworks API as it is without a running client (ENV_TRUTH M6), at the end. */
 #include "w32.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 
-/* ---- registry */
-struct regval { char key[160], name[64]; DWORD type; DWORD len; BYTE data[MAX_PATH + 4]; };
-static struct regval g_reg[64];
-static int g_nreg;
-static os_lock_t g_reg_lock;
-struct regkey { uint32_t magic; char path[160]; };
-#define REGKEY_MAGIC 0x4B474552u
-
-static void reg_root(HKEY k, char *out, size_t n)
-{
-    struct regkey *rk = (struct regkey *)k;
-    if (k == HKEY_LOCAL_MACHINE) snprintf(out, n, "HKLM");
-    else if (k == HKEY_CURRENT_USER) snprintf(out, n, "HKCU");
-    else if (k == HKEY_CLASSES_ROOT) snprintf(out, n, "HKCR");
-    else if (k == HKEY_USERS) snprintf(out, n, "HKU");
-    else if (rk && rk->magic == REGKEY_MAGIC) snprintf(out, n, "%s", rk->path);
-    else out[0] = 0;
-}
-
-static void reg_set(const char *key, const char *name, DWORD type, const void *data, DWORD len)
-{
-    int i;
-    for (i = 0; i < g_nreg; i++)
-        if (!w32_stricmp(g_reg[i].key, key) && !w32_stricmp(g_reg[i].name, name))
-            break;
-    if (i == g_nreg) {
-        if (g_nreg == 64)
-            return;
-        g_nreg++;
-    }
-    snprintf(g_reg[i].key, sizeof g_reg[i].key, "%s", key);
-    snprintf(g_reg[i].name, sizeof g_reg[i].name, "%s", name);
-    g_reg[i].type = type;
-    g_reg[i].len = len > sizeof g_reg[i].data ? (DWORD)sizeof g_reg[i].data : len;
-    memcpy(g_reg[i].data, data, g_reg[i].len);
-}
-
-static void reg_seed(void)
-{
-    static int seeded;
-    if (seeded++)
-        return;
-    const char *k = "HKLM\\SOFTWARE\\Bethesda Softworks\\FalloutNV";
-    const char *ip = "C:\\FalloutNV\\";
-    reg_set(k, "Installed Path", REG_SZ, ip, (DWORD)strlen(ip) + 1);
-    reg_set("HKLM\\SOFTWARE\\Wow6432Node\\Bethesda Softworks\\FalloutNV", "Installed Path", REG_SZ, ip, (DWORD)strlen(ip) + 1);
-}
-
-static int reg_key_exists(const char *path)
-{
-    size_t l = strlen(path);
-    for (int i = 0; i < g_nreg; i++)
-        if (!w32_strnicmp(g_reg[i].key, path, l) && (g_reg[i].key[l] == 0 || g_reg[i].key[l] == '\\'))
-            return 1;
-    return 0;
-}
-
-static LSTATUS reg_open(HKEY parent, LPCSTR sub, PHKEY out, int create, LPDWORD disp)
-{
-    os_lock(&g_reg_lock);
-    reg_seed();
-    char path[160];
-    reg_root(parent, path, sizeof path);
-    if (!path[0]) {
-        os_unlock(&g_reg_lock);
-        return ERROR_INVALID_HANDLE;
-    }
-    if (sub && *sub) {
-        size_t l = strlen(path);
-        snprintf(path + l, sizeof path - l, "\\%s", sub);
-    }
-    int exists = reg_key_exists(path);
-    if (!exists && !create) {
-        os_unlock(&g_reg_lock);
-        return ERROR_FILE_NOT_FOUND;
-    }
-    if (!exists)
-        reg_set(path, "", REG_NONE, "", 0); /* marker so the key exists */
-    os_unlock(&g_reg_lock);
-    struct regkey *k = (struct regkey *)calloc(1, sizeof *k);
-    if (!k)
-        return ERROR_NOT_ENOUGH_MEMORY;
-    k->magic = REGKEY_MAGIC;
-    snprintf(k->path, sizeof k->path, "%s", path);
-    *out = (HKEY)k;
-    if (disp)
-        *disp = exists ? REG_OPENED_EXISTING_KEY : REG_CREATED_NEW_KEY;
-    return ERROR_SUCCESS;
-}
-
-extern "C" LSTATUS RegOpenKeyExA(HKEY k, LPCSTR sub, DWORD o, REGSAM s, PHKEY out)
-{
-    W32_UNUSED(o); W32_UNUSED(s);
-    return reg_open(k, sub, out, 0, NULL);
-}
-
-extern "C" LSTATUS RegCreateKeyExA(HKEY k, LPCSTR sub, DWORD r, LPSTR c, DWORD o, REGSAM s, void *sa, PHKEY out, LPDWORD disp)
-{
-    W32_UNUSED(r); W32_UNUSED(c); W32_UNUSED(o); W32_UNUSED(s); W32_UNUSED(sa);
-    return reg_open(k, sub, out, 1, disp);
-}
-
-extern "C" LSTATUS RegQueryValueExA(HKEY k, LPCSTR name, LPDWORD res, LPDWORD type, LPBYTE data, LPDWORD len)
-{
-    W32_UNUSED(res);
-    char path[160];
-    reg_root(k, path, sizeof path);
-    os_lock(&g_reg_lock);
-    reg_seed();
-    LSTATUS r = ERROR_FILE_NOT_FOUND;
-    for (int i = 0; i < g_nreg; i++)
-        if (!w32_stricmp(g_reg[i].key, path) && !w32_stricmp(g_reg[i].name, name ? name : "") && g_reg[i].type != REG_NONE) {
-            if (type)
-                *type = g_reg[i].type;
-            if (data && len && W32_DW(*len) < g_reg[i].len)
-                r = ERROR_MORE_DATA;
-            else {
-                if (data)
-                    memcpy(data, g_reg[i].data, g_reg[i].len);
-                r = ERROR_SUCCESS;
-            }
-            if (len)
-                *len = g_reg[i].len;
-            break;
-        }
-    os_unlock(&g_reg_lock);
-    return r;
-}
-
-extern "C" LSTATUS RegSetValueExA(HKEY k, LPCSTR name, DWORD res, DWORD type, const BYTE *data, DWORD len)
-{
-    W32_UNUSED(res);
-    char path[160];
-    reg_root(k, path, sizeof path);
-    if (!path[0])
-        return ERROR_INVALID_HANDLE;
-    os_lock(&g_reg_lock);
-    reg_set(path, name ? name : "", type, data, W32_DW(len));
-    os_unlock(&g_reg_lock);
-    return ERROR_SUCCESS;
-}
-
-extern "C" LSTATUS RegCloseKey(HKEY k)
-{
-    struct regkey *rk = (struct regkey *)k;
-    if (rk && rk->magic == REGKEY_MAGIC) {
-        rk->magic = 0;
-        free(rk);
-    }
-    return ERROR_SUCCESS;
-}
-
 /* ---- shell32 */
 extern "C" HINSTANCE ShellExecuteA(HWND h, LPCSTR op, LPCSTR file, LPCSTR params, LPCSTR dir, INT show)
 {
     W32_UNUSED(h); W32_UNUSED(params); W32_UNUSED(dir); W32_UNUSED(show);
-    w32_log("ShellExecuteA(%s, %s) not available", op ? op : "open", file ? file : "");
+    W32Log().s("ShellExecuteA(").s(op ? op : "open").s(", ").s(file ? file : "").s(") not available").emit();
     return (HINSTANCE)(uintptr_t)31; /* SE_ERR_NOASSOC (<= 32 means failure) */
 }
 
+/* SHGetFolderPathA. The CSIDL table is the Windows 7 default location of every folder id 0x00-0x3e (the shell's
+ * known-folder defaults) in the ENV F2 profile tree; ENV P4/P1 make this a 32-bit Windows 7, so the x86 variants of the
+ * system and Program Files folders equal the base ones. "%U" is the profile directory of the token's user. A null
+ * path marks a virtual folder (no file-system path: E_FAIL); an id not in the table is not a CSIDL (E_INVALIDARG).
+ * Flags (the high byte): CREATE creates the folder (and its parents), DONT_VERIFY returns the path unchecked,
+ * NO_ALIAS and PER_USER_INIT do not change the path (no alias or lazily initialised folder exists here). Without
+ * either, a folder that does not exist gives S_FALSE (with its path). Tokens: NULL is the current user, -1 the default
+ * user profile (C:\Users\Default); any other value is not a token handle (E_FAIL). SHGFP_TYPE_CURRENT and _DEFAULT are the
+ * same location: nothing is redirected. */
+#define SH_RM "%U\\AppData\\Roaming"
+#define SH_SM SH_RM "\\Microsoft\\Windows\\Start Menu"
+#define SH_PD "C:\\ProgramData"
+#define SH_PDSM SH_PD "\\Microsoft\\Windows\\Start Menu"
+#define SH_PUB "C:\\Users\\Public"
+static const struct { unsigned char id; const char *path; } g_csidl[] = {
+    { 0x00, "%U\\Desktop" }, { 0x01, NULL }, { 0x02, SH_SM "\\Programs" }, { 0x03, NULL }, { 0x04, NULL },
+    { 0x05, "%U\\Documents" }, { 0x06, "%U\\Favorites" }, { 0x07, SH_SM "\\Programs\\Startup" },
+    { 0x08, SH_RM "\\Microsoft\\Windows\\Recent" }, { 0x09, SH_RM "\\Microsoft\\Windows\\SendTo" }, { 0x0a, NULL },
+    { 0x0b, SH_SM }, { 0x0c, "%U\\Documents" }, { 0x0d, "%U\\Music" }, { 0x0e, "%U\\Videos" },
+    { 0x10, "%U\\Desktop" }, { 0x11, NULL }, { 0x12, NULL }, { 0x13, SH_RM "\\Microsoft\\Windows\\Network Shortcuts" },
+    { 0x14, "C:\\Windows\\Fonts" }, { 0x15, SH_RM "\\Microsoft\\Windows\\Templates" },
+    { 0x16, SH_PDSM }, { 0x17, SH_PDSM "\\Programs" }, { 0x18, SH_PDSM "\\Programs\\Startup" },
+    { 0x19, SH_PUB "\\Desktop" }, { 0x1a, SH_RM }, { 0x1b, SH_RM "\\Microsoft\\Windows\\Printer Shortcuts" },
+    { 0x1c, "%U\\AppData\\Local" }, { 0x1d, NULL }, { 0x1e, NULL }, { 0x1f, SH_PUB "\\Favorites" },
+    { 0x20, "%U\\AppData\\Local\\Microsoft\\Windows\\Temporary Internet Files" },
+    { 0x21, SH_RM "\\Microsoft\\Windows\\Cookies" }, { 0x22, "%U\\AppData\\Local\\Microsoft\\Windows\\History" },
+    { 0x23, SH_PD }, { 0x24, "C:\\Windows" }, { 0x25, "C:\\Windows\\system32" }, { 0x26, "C:\\Program Files" },
+    { 0x27, "%U\\Pictures" }, { 0x28, "%U" }, { 0x29, "C:\\Windows\\system32" }, { 0x2a, "C:\\Program Files" },
+    { 0x2b, "C:\\Program Files\\Common Files" }, { 0x2c, "C:\\Program Files\\Common Files" },
+    { 0x2d, SH_PD "\\Microsoft\\Windows\\Templates" }, { 0x2e, SH_PUB "\\Documents" },
+    { 0x2f, SH_PDSM "\\Programs\\Administrative Tools" }, { 0x30, SH_SM "\\Programs\\Administrative Tools" },
+    { 0x31, NULL }, { 0x35, SH_PUB "\\Music" }, { 0x36, SH_PUB "\\Pictures" }, { 0x37, SH_PUB "\\Videos" },
+    { 0x38, "C:\\Windows\\Resources" }, { 0x39, "C:\\Windows\\Resources\\1033" }, { 0x3a, SH_PD "\\OEM Links" },
+    { 0x3b, "%U\\AppData\\Local\\Microsoft\\Windows\\Burn\\Burn" }, { 0x3d, NULL }, { 0x3e, "C:\\Users" },
+};
+
 extern "C" HRESULT SHGetFolderPathA(HWND h, int csidl, HANDLE tok, DWORD flags, LPSTR out)
 {
-    W32_UNUSED(h); W32_UNUSED(tok); W32_UNUSED(flags);
-    const char *sub;
-    switch (csidl & 0xFF) {
-    case CSIDL_PERSONAL: sub = "\\Documents"; break;
-    case CSIDL_APPDATA: sub = "\\AppData\\Roaming"; break;
-    case CSIDL_LOCAL_APPDATA: sub = "\\AppData\\Local"; break;
-    case CSIDL_COMMON_APPDATA: snprintf(out, MAX_PATH, "C:\\ProgramData"); return S_OK;
-    default: out[0] = 0; return E_FAIL;
+    W32_UNUSED(h);
+    W32_UNUSED(flags);   /* SHGFP_TYPE_CURRENT / _DEFAULT: one location */
+    if (!out)
+        return E_INVALIDARG;
+    out[0] = 0;
+    unsigned id = (unsigned)csidl & 0xFF, fl = (unsigned)csidl & 0xFF00u;
+    const char *pat = NULL;
+    bool known = false;
+    for (size_t i = 0; i < sizeof g_csidl / sizeof *g_csidl; i++)
+        if (g_csidl[i].id == id) {
+            pat = g_csidl[i].path;
+            known = true;
+            break;
+        }
+    if (!known)
+        return E_INVALIDARG;
+    uintptr_t t = (uintptr_t)tok;
+    if (t != 0 && t != (uintptr_t)-1 && t != 0xFFFFFFFFu)
+        return E_FAIL;          /* no such token handle */
+    if (!pat)
+        return E_FAIL;          /* a virtual folder */
+    const char *user = (t == 0) ? W32_USER_DIR : "C:\\Users\\Default";
+    char path[MAX_PATH];
+    size_t o = 0;
+    for (const char *p = pat; *p && o + 1 < sizeof path; p++) {
+        if (p[0] == '%' && p[1] == 'U') {
+            o += (size_t)snprintf(path + o, sizeof path - o, "%s", user);
+            p++;
+        } else
+            path[o++] = *p;
     }
-    snprintf(out, MAX_PATH, "%s%s", w32_user_dir(), sub);
-    if (csidl & CSIDL_FLAG_CREATE)
-        CreateDirectoryA(out, NULL);
+    path[o < sizeof path ? o : sizeof path - 1] = 0;
+    snprintf(out, MAX_PATH, "%s", path);
+    if (fl & 0x4000u /* CSIDL_FLAG_DONT_VERIFY */)
+        return S_OK;
+    DWORD a = GetFileAttributesA(path);
+    if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY))
+        return S_OK;
+    if (!(fl & 0x8000u /* CSIDL_FLAG_CREATE */))
+        return S_FALSE;
+    for (char *p = path + 3; ; p++) {   /* "C:\" exists; create each component */
+        if (*p == '\\' || !*p) {
+            char c = *p;
+            *p = 0;
+            if (!CreateDirectoryA(path, NULL) && GetLastError() != ERROR_ALREADY_EXISTS)
+                return E_FAIL;
+            *p = c;
+            if (!c)
+                break;
+        }
+    }
     return S_OK;
 }
 
-/* ---- ole32 */
-struct comclass { GUID clsid; fnvnx_com_factory f; };
+/* ---- ole32
+ * Apartments: every thread has an initialisation count and the apartment model of its first successful
+ * CoInitialize[Ex] (COINIT_APARTMENTTHREADED = 2 is an STA, anything else an MTA). A thread that never initialised is
+ * implicitly in the MTA while at least one thread of the process holds an MTA initialisation (g_mta_threads).
+ * Servers: the in-process servers are registered with their class factory; a server registered with
+ * fnvnx_register_com_class is part of the image (resident: DllCanUnloadNow would answer S_FALSE for ever), one
+ * registered with fnvnx_register_com_dll carries its own can-unload query which CoFreeUnusedLibraries asks. No registered
+ * factory takes an outer unknown, so no class supports aggregation. */
+enum { W32_COINIT_STA = 2 };
+static __thread int g_co_count;
+static __thread DWORD g_co_model;
+static int g_mta_threads;
+
+struct comclass { GUID clsid; fnvnx_com_factory f; fnvnx_com_can_unload can_unload; };
 static struct comclass g_com[16];
 static int g_ncom;
+static os_lock_t g_com_lock;
 
-extern "C" void fnvnx_register_com_class(const GUID *clsid, fnvnx_com_factory f)
+static int com_register(const GUID *clsid, fnvnx_com_factory f, fnvnx_com_can_unload can_unload)
 {
-    if (g_ncom < 16) {
+    os_lock(&g_com_lock);
+    int ok = g_ncom < 16;
+    if (ok) {
         g_com[g_ncom].clsid = *clsid;
         g_com[g_ncom].f = f;
+        g_com[g_ncom].can_unload = can_unload;
         g_ncom++;
     }
+    os_unlock(&g_com_lock);
+    return ok;
 }
 
-extern "C" HRESULT CoInitialize(LPVOID r) { W32_UNUSED(r); return S_OK; }
-extern "C" HRESULT CoInitializeEx(LPVOID r, DWORD m) { W32_UNUSED(r); W32_UNUSED(m); return S_OK; }
-extern "C" void CoUninitialize(void) {}
-extern "C" void CoFreeUnusedLibraries(void) {}
+extern "C" int fnvnx_register_com_class(const GUID *clsid, fnvnx_com_factory f)
+{
+    return com_register(clsid, f, NULL);
+}
+
+extern "C" int fnvnx_register_com_dll(const GUID *clsid, fnvnx_com_factory f, fnvnx_com_can_unload can_unload)
+{
+    return can_unload && com_register(clsid, f, can_unload);
+}
+
+extern "C" HRESULT CoInitializeEx(LPVOID reserved, DWORD model)
+{
+    if (reserved)
+        return E_INVALIDARG;
+    DWORD m = (model & W32_COINIT_STA) ? W32_COINIT_STA : 0;
+    if (g_co_count && g_co_model != m)
+        return RPC_E_CHANGED_MODE;
+    HRESULT hr = g_co_count ? S_FALSE : S_OK;
+    if (!g_co_count) {
+        g_co_model = m;
+        if (!m)
+            __atomic_add_fetch(&g_mta_threads, 1, __ATOMIC_SEQ_CST);
+    }
+    g_co_count++;
+    return hr;
+}
+
+extern "C" HRESULT CoInitialize(LPVOID reserved)
+{
+    return CoInitializeEx(reserved, W32_COINIT_STA);
+}
+
+extern "C" void CoUninitialize(void)
+{
+    if (!g_co_count)
+        return; /* no successful CoInitialize on this thread to balance */
+    if (--g_co_count == 0 && !g_co_model)
+        __atomic_sub_fetch(&g_mta_threads, 1, __ATOMIC_SEQ_CST);
+}
+
+extern "C" void CoFreeUnusedLibraries(void)
+{
+    os_lock(&g_com_lock);
+    int o = 0;
+    for (int i = 0; i < g_ncom; i++) {
+        if (g_com[i].can_unload && g_com[i].can_unload() == S_OK)
+            continue; /* the server's DllCanUnloadNow said it is idle: its class leaves the registry */
+        g_com[o++] = g_com[i];
+    }
+    g_ncom = o;
+    os_unlock(&g_com_lock);
+}
 extern "C" LPVOID CoTaskMemAlloc(SIZE_T n) { return malloc(n ? n : 1); }
 extern "C" void CoTaskMemFree(LPVOID p) { free(p); }
 
 extern "C" HRESULT CoCreateInstance(const GUID *clsid, void *outer, DWORD ctx, const GUID *iid, LPVOID *out)
 {
-    W32_UNUSED(outer); W32_UNUSED(ctx);
-    if (out)
-        *out = NULL;
-    for (int i = 0; i < g_ncom; i++)
+    if (!out)
+        return E_POINTER;
+    *out = NULL;
+    if (!clsid || !iid)
+        return E_INVALIDARG;
+    if (!g_co_count && !__atomic_load_n(&g_mta_threads, __ATOMIC_SEQ_CST))
+        return CO_E_NOTINITIALIZED;
+    if (!(ctx & (CLSCTX_INPROC_SERVER | CLSCTX_INPROC_HANDLER)))
+        return REGDB_E_CLASSNOTREG; /* only in-process servers exist */
+    fnvnx_com_factory f = NULL;
+    os_lock(&g_com_lock);
+    for (int i = 0; i < g_ncom && !f; i++)
         if (!memcmp(&g_com[i].clsid, clsid, sizeof(GUID)))
-            return g_com[i].f(iid, out);
-    return REGDB_E_CLASSNOTREG;
+            f = g_com[i].f;
+    os_unlock(&g_com_lock);
+    if (!f)
+        return REGDB_E_CLASSNOTREG;
+    if (outer)
+        return CLASS_E_NOAGGREGATION;
+    return f(iid, out);
+}
+
+/* advapi32!SystemFunction036 (= RtlGenRandom): fill len bytes of buf with random data, return TRUE. Contract:
+ * Wine 9.0 dlls/advapi32/crypt.c (SystemFunction036 -> RtlGenRandom, which writes exactly len bytes and answers
+ * TRUE). len 0 writes nothing and succeeds; a NULL buffer with len > 0 is a fault on Windows, here FALSE +
+ * ERROR_INVALID_PARAMETER. Source: the platform's os_random32 (os.h), the same one CoCreateGuid draws from.
+ * NOTE: os_random32 is documented non-cryptographic; the game (Gamebryo seeding) needs no more. */
+extern "C" unsigned char SystemFunction036(void *buf, unsigned long len)
+{
+    if (!len)
+        return 1;
+    if (!buf) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+    unsigned char *p = (unsigned char *)buf;
+    while (len) {
+        uint32_t w = os_random32();
+        for (unsigned k = 0; k < 4 && len; k++, len--, w >>= 8)
+            *p++ = (unsigned char)w;
+    }
+    return 1;
 }
 
 extern "C" HRESULT CoCreateGuid(GUID *g)
@@ -235,38 +253,85 @@ extern "C" HRESULT CoCreateGuid(GUID *g)
     return S_OK;
 }
 
-/* ---- ws2_32: offline (orchestrator policy): every network call fails with WSAENETDOWN; byte-order and address
- * formatting helpers are plain functions */
-#define WSAENETDOWN_ 10050
-extern "C" int fnvnx_ws2_WSAStartup(WORD ver, void *data) { W32_UNUSED(ver); W32_UNUSED(data); FNVNX_NOOP(); return WSAENETDOWN_; }
-extern "C" int fnvnx_ws2_WSACleanup(void) { return 0; }
-extern "C" int fnvnx_ws2_WSAGetLastError(void) { return WSAENETDOWN_; }
-extern "C" UINT_PTR fnvnx_ws2_socket(int af, int type, int proto) { W32_UNUSED(af); W32_UNUSED(type); W32_UNUSED(proto); FNVNX_NOOP(); return ~(UINT_PTR)0; }
-extern "C" int fnvnx_ws2_closesocket(UINT_PTR s) { W32_UNUSED(s); return -1; }   /* no socket was ever made */
-extern "C" int fnvnx_ws2_fail(void) { return -1; } /* bind, listen, accept, connect, send, recv, setsockopt, ioctlsocket, WSAAsyncSelect */
-extern "C" unsigned short fnvnx_ws2_htons(unsigned short v) { return (unsigned short)((v >> 8) | (v << 8)); }
-extern "C" unsigned short fnvnx_ws2_ntohs(unsigned short v) { return (unsigned short)((v >> 8) | (v << 8)); }
-extern "C" unsigned long fnvnx_ws2_inet_addr(const char *s) { W32_UNUSED(s); return 0xFFFFFFFFul; }
-extern "C" char *fnvnx_ws2_inet_ntoa(unsigned long a) { W32_UNUSED(a); static char b[] = "0.0.0.0"; return b; }
-extern "C" void *fnvnx_ws2_gethostbyname(const char *n) { W32_UNUSED(n); FNVNX_NOOP(); return NULL; }
-extern "C" int fnvnx_ws2_gethostname(char *b, int n) { if (b && n > 0) b[0] = 0; return -1; }
-extern "C" int fnvnx_ws2_fdisset(UINT_PTR s, void *set) { W32_UNUSED(s); W32_UNUSED(set); return 0; }   /* __WSAFDIsSet: select never succeeds */
 
-/* ---- NVAPI: no nvapi.dll on the Switch. The exe's NvAPI_* entry points are `jmp [slot]` thunks into the
- * table nvapi_QueryInterface fills at run time (0x009fead6, 0x009feae8, 0x009febd8; crt_symbols.tsv class thunk);
- * with the library absent each returns NVAPI_API_NOT_INITIALIZED (-4) and the renderer takes its non-NVIDIA path
- * (R2 recon2-002, R6 recon6-007). Any arguments, nothing written. */
-extern "C" int fnvnx_nvapi_not_initialized(void) { FNVNX_NOOP(); return -4; }
+/* ---- steam_api / galaxywrp.dll: GOG Galaxy is not lifted (CLAUDE.md "Owner order of 2026-11-11, 23:00"): the declared machine has no
+ * Galaxy and no Steam service. Every name the exe or a module reaches in GalaxyWrp.dll / Galaxy.dll (platform/manifest/check_galaxy.py:
+ * the 11 Steamworks entries of the exe's galaxywrp.dll import) has a body here, the public Steamworks contract in the state "client not
+ * running / API not initialised" (ENV_TRUTH M6), with the documentation cited per function (the constant ones in
+ * manifest/env_const.tsv, the others at their definition). SteamAPI_Init fails every time (no client to connect to), SteamAPI_IsSteamRunning is false, every
+ * interface accessor is NULL (no ISteam* object exists without a client), no callback is ever delivered (callbacks
+ * come from the client), and the callback registration list is the real one: RegisterCallback adds an
+ * (object, id) pair, UnregisterCallback removes all pairs of the object. */
+static os_lock_t g_steam_lock;
+static struct steam_reg { void *cb; int id; } *g_steam_regs;
+static int g_steam_nregs, g_steam_cap;
 
-/* ---- steam_api: no-op success (see the top) */
-extern "C" bool SteamAPI_Init(void) { FNVNX_NOOP(); return true; }   /* the platform lane: documented no-ops */
-extern "C" bool SteamAPI_IsSteamRunning(void) { return true; }
-extern "C" void SteamAPI_Shutdown(void) {}
-extern "C" void SteamAPI_RunCallbacks(void) {}
-extern "C" void SteamAPI_RegisterCallback(void *cb, int id) { W32_UNUSED(cb); W32_UNUSED(id); }
-extern "C" void SteamAPI_UnregisterCallback(void *cb) { W32_UNUSED(cb); }
-extern "C" void *SteamUser(void) { FNVNX_NOOP(); return NULL; }
-extern "C" void *SteamFriends(void) { FNVNX_NOOP(); return NULL; }
-extern "C" void *SteamUtils(void) { FNVNX_NOOP(); return NULL; }
-extern "C" void *SteamApps(void) { FNVNX_NOOP(); return NULL; }
-extern "C" void *SteamUserStats(void) { FNVNX_NOOP(); return NULL; }
+/* SteamAPI_Init, SteamAPI_IsSteamRunning and the interface accessors: env_const.tsv (ENV:M6). Init never succeeds, so
+ * the pipe to the client (HSteamPipe, 0 = none) is never opened. */
+static int g_steam_pipe;
+
+/* SteamAPI_Shutdown. Steamworks SDK steam_api.h / doc/api/steam_api#SteamAPI_Shutdown: "Shuts down the Steamworks API, releasing the
+ * pointers and memory"; the call is valid in the uninitialised state (nothing to release). Releases the pipe to the client (none) and marks
+ * the API uninitialised; the registrations belong to their objects (they unregister themselves). */
+extern "C" void SteamAPI_Shutdown(void)
+{
+    os_lock(&g_steam_lock);
+    g_steam_pipe = 0;
+    os_unlock(&g_steam_lock);
+}
+
+/* SteamAPI_RunCallbacks. steam_api.h / doc/api/steam_api#SteamAPI_RunCallbacks: "Dispatches callbacks and call results to all of the
+ * registered listeners" - those come from the client over the pipe; without a pipe (SteamAPI_Init failed) nothing is queued, so nothing is
+ * dispatched and no registered object is touched. */
+extern "C" void SteamAPI_RunCallbacks(void)
+{
+    os_lock(&g_steam_lock);
+    int pipe = g_steam_pipe;
+    os_unlock(&g_steam_lock);
+    if (!pipe)
+        return;
+}
+
+/* SteamAPI_RegisterCallback (steam_api.h, steam_api_internal.h CCallbackBase: the Steamworks callback registry, the function the
+ * STEAM_CALLBACK / CCallback<> constructors call): adds the (object, callback id) pair to the registry. The registry is independent of the
+ * connection to the client (the objects register before SteamAPI_Init is called), so it is the real list, not a constant. */
+extern "C" void SteamAPI_RegisterCallback(void *cb, int id)
+{
+    os_lock(&g_steam_lock);
+    if (g_steam_nregs == g_steam_cap) {
+        int cap = g_steam_cap ? g_steam_cap * 2 : 16;
+        struct steam_reg *n = (struct steam_reg *)realloc(g_steam_regs, (size_t)cap * sizeof *n);
+        if (!n) {
+            os_unlock(&g_steam_lock);
+            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+            return;
+        }
+        g_steam_regs = n;
+        g_steam_cap = cap;
+    }
+    g_steam_regs[g_steam_nregs].cb = cb;
+    g_steam_regs[g_steam_nregs].id = id;
+    g_steam_nregs++;
+    os_unlock(&g_steam_lock);
+}
+
+/* SteamAPI_UnregisterCallback (steam_api.h; the CCallbackBase destructor calls it): removes every registration of the object; an object
+ * with none is a no-op. */
+extern "C" void SteamAPI_UnregisterCallback(void *cb)
+{
+    os_lock(&g_steam_lock);
+    int o = 0;
+    for (int i = 0; i < g_steam_nregs; i++)
+        if (g_steam_regs[i].cb != cb)
+            g_steam_regs[o++] = g_steam_regs[i];
+    g_steam_nregs = o;
+    os_unlock(&g_steam_lock);
+}
+
+extern "C" int fnvnx_steam_callback_count(void)
+{
+    os_lock(&g_steam_lock);
+    int n = g_steam_nregs;
+    os_unlock(&g_steam_lock);
+    return n;
+}

@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -13,6 +14,7 @@ PROOF = os.path.join(HERE, '..')
 LIFT = os.path.join(PROOF, '..')
 sys.path.insert(0, HERE)
 sys.path.insert(0, LIFT)
+sys.path.insert(0, os.path.join(LIFT, "..", "verify"))     # cas, recipe: the trunk loader the gate itself uses (-I drops PYTHONPATH)
 import fakeext
 from proof import formgate, prove, shape
 import recipe
@@ -265,7 +267,7 @@ class InputsRed(unittest.TestCase):
         with open(formgate.INPUTS) as fh:
             doc = json.load(fh)
         self.assertEqual(doc['model_sha256'], formgate.model_pin())
-        self.assertEqual([e['name'] for e in doc['external']], ['certs'])
+        self.assertEqual([e['name'] for e in doc['external']], ['certs', 'x86ir'])
         with workdir() as td:
             u, c, ids, detail = formgate.judge(td)
         self.assertEqual((u, c, ids, detail), (1, 0, ['inputs'], 'inputs: external liftpack not declared'))
@@ -327,6 +329,25 @@ class ObligationsPin(unittest.TestCase):
     def test_formgate_obligations_are_the_provers(self):
         from proof import prove
         self.assertEqual(formgate.OBLIGATIONS, prove.OBLIGATIONS)
+
+
+class EaRule(unittest.TestCase):
+    """item ea-rule (proof/eaaudit.py): the Form builders of this tree hold the rule; a builder that loads or stores raw, or hands an mload / mstore an address that no address function made, is one violation each"""
+    def test_this_tree_holds_the_rule(self):
+        from proof import eaaudit
+        self.assertEqual(eaaudit.violations(PROOF), [])
+
+    def test_violations_are_found(self):
+        from proof import eaaudit
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, 'forms.py'), 'w') as f:
+                f.write('def mload(m, a, n): return a\ndef good(c):\n    a = ea(c)\n    return mload(a, 4)\ndef bad(c):\n    return mload(c.raw, 4)\n')
+            with open(os.path.join(d, 'forms_x.py'), 'w') as f:
+                f.write('from dsl import load\ndef g(c):\n    x = load(c)\n    c.store(1)\n    return mstore(c, c.r, 1, 4)\n')
+            got = eaaudit.violations(d)
+        self.assertEqual(got, [('forms.py', 6, 'address-source: mload argument is not from an address function'),
+                               ('forms_x.py', 1, 'raw-access: import load'), ('forms_x.py', 3, 'raw-access: load('), ('forms_x.py', 4, 'raw-access: .store('),
+                               ('forms_x.py', 5, 'address-source: mstore argument is not from an address function')])
 
 
 if __name__ == '__main__':

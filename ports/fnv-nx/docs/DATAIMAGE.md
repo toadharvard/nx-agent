@@ -424,7 +424,7 @@ compare with, so the image is checked against itself, units.json and S2's addres
 
 | Check | Passed | Violations (owner) |
 |---|---|---|
-| pointers: every resolved pointer word the image holds targets a defined image byte or a code address the map knows | 13 data known, 2 `.bss`, 508 functions (F/C/X/G), 727 `.text` without definition (E); 16,574 words unresolved, 328 held by another item | 675 function starts units.json defines but f12 lacks (S1: 576 in `tesform.cpp`, 65 in `tes.cpp`, 13 `imagespaceshaderhdr_h_unit`, 10 zlib `deflate.c`, ...); 295 TypeDescriptor vptrs to `type_info`'s vftable `0x010f1ee0`, which no object defines (CRT data: exe/S4b); 10 `__sehtable$` entries to labels (x86 only) |
+| pointers: every resolved pointer word the image holds targets a defined image byte or a code address the map knows | 13 data known, 2 `.bss`, 508 functions (F/C/X/G), 727 `.text` without definition (E); 16,574 words unresolved, 328 held by another item | 675 function starts units.json defines but f12 lacks (S1: 576 in `tesform.cpp`, 65 in `tes.cpp`, 13 `imagespaceshaderhdr_h_unit`, 10 zlib `deflate.c`, ...); 295 TypeDescriptor vptrs to `type_info`'s vftable `<va>`, which no object defines (CRT data: exe/S4b); 10 `__sehtable$` entries to labels (x86 only) |
 | vftable slots: the definition at the target fits the slot's convention and arity (llvm-undname + `tools/link/sigs.py`, every definition at the address) | 499 the slot's own symbol, 672 fit, 1 free function that ignores `this` (x86-compatible, a bridge natively), 727 E targets; 13,442 slots unresolved (no address for the slot's symbol) | 1 convention: `NiTriBasedGeomData` slot 0 `LinkObject(NiStream&)` (thiscall, 1 argument) -> `0x00a8a9a0` defined as cdecl `FUN_00a8a9a0()` (decomp/S2b) |
 | RTTI: vftable -> COL -> TD/CHD -> BCA -> BCD per object, the same COL/CHD across objects, placed TDs | 2,838 chains consistent, 277 placed TDs; no COL has an address (2,793 vftables keep `[-1]` unknown) | 150 class hierarchies declared differently in different objects, 11 COLs with other offsets, 31 COLs only spelled class/struct apart; 104 placed TDs whose bytes are another unit's spelling; 45 vftables whose `[-1]` word holds the preceding literal/float (Gamebryo/BSShader classes: no COL in the original, built without C++ RTTI, or the `??_7` address is off; decomp, S3 hints) |
 | overlaps: no two items claim one byte with different contents | 631 agreeing overlaps (11,459 bytes) | 81 TD `.?AV`/`.?AU` (64 by majority, 17 contested), 13 TDs of different classes at one address, 13 vftables at one address with other slots (12 contested), 2 vftables running into the next item, 4 `__real@` with another value, 3 + 1 literals with other content or running on, 6 TLS stand-in aggregates vs variables inside them (5 contested), 10 `.bss` variables over another item's non-zero bytes (decomp) |
@@ -443,7 +443,7 @@ claimed by two objects; now 0, as the state map always said).
 MemoryManager constructor `0x00aa3880` (run by an initializer the decomp lacks, `toolchain/game/boot.cpp`
 `construct_memory_manager()`) calls `InitializeGlobal` `0x00866690`, which sets `0x011f6118` to
 `new FUN_00aa21d0(new BSNiAllocator)` and calls InitHolder once directly (the flag stays 0); `FUN_00aa20b0(0)` then
-takes the existing options (`0x011f610d` = 0) and InitHolder runs a second time. The image gives BSNiAllocator's
+takes the existing options (`<va>` = 0) and InitHolder runs a second time. The image gives BSNiAllocator's
 vftable `0x010a2528` only its COL word and slot 0 (unknown: the decomp's stand-in class declares one virtual,
 `m_virtual0`, without an address); the next vftable's COL word at `0x010a2550` bounds the original to 10 slots,
 not 14 as the decomp's comment says, and NiStandardAllocator's at `0x010a24fc` also has 10.
@@ -481,4 +481,4 @@ also a real run: no violation owned by S14),
 * Points 2-4 of the vtable proposal depend on S2 being able to read GCC's class layouts; virtual inheritance classes
   (68 sites) have different object layouts and need patches.
 * Image data written by the original code at runtime before our code runs (none: we run no original code) and
-  pointers into `.text` used as data (jump tables live in `.text` and are not needed) are assumed absent.
+  pointers into `.text` used as data (jump tables live in `.text` and are not needed) are assumed absent. (ASM-023)

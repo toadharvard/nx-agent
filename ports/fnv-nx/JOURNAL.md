@@ -958,7 +958,7 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   GetSaveDirectory now and stops at WinMain+0x1cc on untranslated 0x00af3020 (`blk_00ae0000_od.cpp`, 13 errors). WinMain
   path units: blk_00c20000_od (WPARAM typedef), blk_004a0000_od (operator new(sizetype, char*)), MSVC
   StandardLibrarySingletonObject ctor, blk_00ae0000_od. Top hit counts: actormover (1,786), nitarray_h_unit (1,000),
-  nicontrollermanager (329). Memory manager: only InitHolder 0x00aa2020 writes the heap pointer 0x011f6080, called from
+  nicontrollermanager (329). Memory manager: only InitHolder <va> writes the heap pointer <va>, called from
   the MemoryManager ctor 0x00aa3880 which **no decompiled code calls** -> an initializer missing from the decomp; its
   unit blk_00aa0000_od_ob1_variant fails (9 errors), FormHeap_Allocate's middlehighprocess.cpp fails (7). 200
   PC-relative relocations to absolute `__fnv_` symbols in 87 objects are right only at the link address (S2 apply).
@@ -1119,8 +1119,8 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **found** - 7,307 undefined (f10 7,502); relocatable (0 PC-relative absolute references); `GAME_NEW=runtime` weakens
   0 objects. Independent check of J-0056: 0/6,265 dyninit and 0/4,692 dynexit functions hold a `brk`, and the skip
   summary has no trap group. Emulated boot: WinMain passes +0x1c8; +0x1d0 -> FUN_00aa20b0 -> FUN_00aa3050 (run-once
-  Gamebryo memory init) -> InitHolder 0x00aa2020 stores the holder at 0x011f6080, then CBaseList::GetHeadPositionI
-  0x009fd0f0 is untranslated (blk_009e0000_o2: VirtualAlloc C declaration conflict) -> first fault InitHolder+0x54.
+  Gamebryo memory init) -> InitHolder <va> stores the holder at <va>, then CBaseList::GetHeadPositionI
+  <va> is untranslated (blk_009e0000_o2: VirtualAlloc C declaration conflict) -> first fault InitHolder+0x54.
   Skipped initializers 2,889: 1,679 memory manager (FUN_00aa1070), 767 null function pointers, 338 `.text` writes
   (RegisterFloatKeyOps), 105 null reads in constructors. Frontier: 122 keys / 3,300 hits in 35 units; 24 of the 29
   units that failed in fresh8 are clean in census c18 (109 keys), among them the memory-manager constructor unit and
@@ -1453,7 +1453,7 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
       stand-ins, 45 vftables without an original COL).
   - **Defined addresses:** 9,266 of the 48,664 referenced in the window are fully defined, 13,956 have no object.
   - **Memory manager:** the four globals and the run-once flag are .bss zero, and the flag is 0 at WinMain+0x1d0, as
-    on x86. The x86 path is: constructor 0x00aa3880 -> InitializeGlobal -> InitHolder once, then WinMain's
+    on x86. The x86 path is: constructor <va> -> InitializeGlobal -> InitHolder once, then WinMain's
     FUN_00aa20b0(0) -> InitHolder again.
   - **BSNiAllocator's vftable 0x010a2528 has 10 slots**, and the decomp's stand-in declares 1 (-> S1, J-0073).
 * **metrics** - synth_objects=2987 synth_known_bytes=246924 synth_addr_defined=9266/48664 synth_addr_missing=13956
@@ -3746,3 +3746,55 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
   - Artifact branches, reports and caches stay in the private repo. HANDOFF.md section 3 tells how to recreate the farms if ever wanted.
 * **scope** - This covers the first account only. The farms named in J-0149..J-0165 (bl1, full2, full3, sw13, sw14, nr1) belong to the resumed orchestrator in the other account and were not touched.
 * **left** - The first account's S2d, S12 and S13b stream sessions are idle. Their results are on their branches.
+
+### J-0167 | 2026-11-10 | stream: orchestration | status: active | parent: J-0166
+
+* **decided (owner)**
+  - Universal, correct-by-construction fixes instead of per-item patches.
+  - Work is organized as Fable leads with Sonnet workers.
+  - The plan is MASTER_PLAN3, private, at fnv-nx-build `plan/master3`. Its super-rule: the contract comes from the exe, and a native body earns its place, otherwise the body is lifted from the exe's x86 bytes.
+* **found**
+  - Four audits plus reconciliation against the 11-09 farm reports (head e1ca6b02): about 480 rows, of which 66 closed, 164 open, 225 unverified and 16 audit-wrong.
+  - Lifter PoC: 1,000 of 1,025 exe functions equal to x86 on every input, with 0 real divergences. 98.94 % of decomp functions are liftable.
+* **did** - Started four leads (P0/P1), each on its own branch:
+  - L4 VERIFY: fast loop, warm==cold every head, farm fleet. Branch `claude/fnv-l4-verify`.
+  - L1 CONTRACT: exefacts, VT-ID, PROTO, gates. Branch `claude/fnv-l1-contract`.
+  - L3 LIFT: lifter, ABI glue, BODYSEL, deep bench. Branch `claude/fnv-l3-lift`.
+  - L2 SOURCE: SDD1, flags, one recompile. Branch `claude/fnv-l2-source`.
+* **provisional (owner may override)**
+  - Lifted bodies are allowed for cold code.
+  - SDD1 replaces D7/D22/D26, and the recon fleet is closed.
+  - The clean branch is created after P0.
+  - At most 12 farms.
+* **next** - L5 PLATFORM and L6 RENDER start at the P0 gate. L7 PERF starts after the first measured frame.
+
+### J-0168 | 2026-11-10 | stream: orchestration | status: active | parent: J-0167
+
+* **decided (owner)**
+  - Class-closing rules only (CLAUDE.md order).
+  - MASTER_PLAN4 is the plan of record.
+  - Real multicore parallelism with the TSO-MAP rule.
+  - N1-N4 without SMT for native bodies; SMT against Sail x86 for lifter forms.
+  - Plain IEEE float, with exact classes for ftoi, NaN compares and bit patterns.
+  - One reference CPU model.
+  - Perf counted in executed instructions.
+  - Downloads authorized.
+  - Merges into the clean branch only on a green L1 verdict.
+  - Switch product decisions recorded in CLAUDE.md.
+* **did** - Started L5 PLATFORM (`claude/fnv-l5-platform`) and L6 RENDER (`claude/fnv-l6-render`).
+  - New areas:
+    - L4: NRO packaging plus console smoke package, and the scenario bench.
+    - L1: loader and start.
+    - L5: the Switch app lifecycle, and memory including code size.
+  - ARCHITECTURE.md and RENDER_NATIVE.md marked as superseded in part.
+* **found** (lead notes)
+  - L1: N1 holds for 68,354 / 68,657 functions; the exefacts base takes 33 s; the gates take 2.4 s.
+  - L4: instruction counter delivered; 357 M instructions before WinMain; link breakdown 835 s (exe RTTI 38 %).
+  - L3: the m80 core equals the host on 70.4 M cases; 482 instruction forms, 407 equal.
+* **P0 exit**
+  - L1 ≤5 min, measured twice.
+  - The sandbox plus the R12-T determinism rule.
+  - The instruction counter.
+  - Tables as data and static BODYSEL.
+  - The clean branch is created at P0 exit.
+* **next** - L7 PERF starts at the first measured frame.

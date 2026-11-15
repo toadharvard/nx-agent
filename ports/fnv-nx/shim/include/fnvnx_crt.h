@@ -38,6 +38,11 @@ int _finite(double);
 int _isnan(double);
 char *_gcvt(double, int, char *);
 
+/* compiler/CRT runtime entry points that only MSVC-built code references by name */
+typedef struct _ThrowInfo _ThrowInfo;
+void _CxxThrowException(void *, _ThrowInfo *);
+void _invalid_parameter_noinfo(void);
+
 #ifdef __cplusplus
 }
 #endif

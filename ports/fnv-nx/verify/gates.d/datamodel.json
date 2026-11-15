@@ -1,0 +1,14 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "datamodel",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_datamodel.py"
+ ],
+ "result": "datamodel.json",
+ "covers": [
+  "product-guest",
+  "lifted"
+ ]
+}

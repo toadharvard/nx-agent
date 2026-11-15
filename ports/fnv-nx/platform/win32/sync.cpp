@@ -11,14 +11,16 @@
 #define FNVNX_W32_IMPL 1   /* the out-of-line Interlocked* (fnvnx_win32.h has inline copies for everyone else) */
 #include "w32.h"
 
+#include <stdio.h>
 #include <stdlib.h>
+#include <strings.h>
 
 os_lock_t w32_wait_lock;
 
 static_assert(sizeof(void *) != 4 || sizeof(CRITICAL_SECTION) == 24, "CRITICAL_SECTION must keep the 32-bit SDK layout");
 static_assert(sizeof(((CRITICAL_SECTION *)0)->LockSemaphore) >= sizeof(os_lock_t), "lock word must fit LockSemaphore");
 
-/* ---- critical sections */
+/* ---- critical sections: the game's own locks, so os_glock/os_gtrylock/os_gunlock (not counted, os.h) */
 static inline os_lock_t *cs_lock(LPCRITICAL_SECTION cs) { return (os_lock_t *)(void *)&cs->LockSemaphore; }
 static inline HANDLE tid_handle(DWORD tid) { return (HANDLE)(uintptr_t)tid; }
 
@@ -57,7 +59,7 @@ static bool cs_spin_acquire(LPCRITICAL_SECTION cs)
         spin = W32_CS_SPIN_MAX;
     os_lock_t *l = cs_lock(cs);
     for (DWORD i = 0; i < spin; i++) {
-        if (__atomic_load_n(&l->word, __ATOMIC_RELAXED) == 0 && os_trylock(l))   /* 0: unlocked */
+        if (__atomic_load_n(&l->word, __ATOMIC_SEQ_CST) == 0 && os_gtrylock(l))   /* 0: unlocked */
             return true;
         cpu_relax();
     }
@@ -68,20 +70,20 @@ extern "C" void EnterCriticalSection(LPCRITICAL_SECTION cs)
 {
     struct w32_thread *self = w32_self();
     DWORD me = self->tid;
-    if (__atomic_load_n(&cs->OwningThread, __ATOMIC_RELAXED) == tid_handle(me)) {
+    if (__atomic_load_n(&cs->OwningThread, __ATOMIC_SEQ_CST) == tid_handle(me)) {
         cs->RecursionCount++;
         return;
     }
-    if (!os_trylock(cs_lock(cs)) && !cs_spin_acquire(cs)) {
+    if (!os_gtrylock(cs_lock(cs)) && !cs_spin_acquire(cs)) {
         if (__builtin_expect(w32_wg_on, 0)) {   /* the wait-graph watchdog (waitgraph.cpp) */
             w32_wg_cs_begin(self, cs, (uint32_t)(uintptr_t)__builtin_return_address(0));
-            os_lock(cs_lock(cs));
+            os_glock(cs_lock(cs));
             w32_wg_end(self);
         } else {
-            os_lock(cs_lock(cs));
+            os_glock(cs_lock(cs));
         }
     }
-    __atomic_store_n(&cs->OwningThread, tid_handle(me), __ATOMIC_RELAXED);
+    __atomic_store_n(&cs->OwningThread, tid_handle(me), __ATOMIC_SEQ_CST);
     cs->RecursionCount = 1;
     cs->LockCount = 0;
 }
@@ -89,13 +91,13 @@ extern "C" void EnterCriticalSection(LPCRITICAL_SECTION cs)
 extern "C" BOOL TryEnterCriticalSection(LPCRITICAL_SECTION cs)
 {
     DWORD me = w32_self()->tid;
-    if (__atomic_load_n(&cs->OwningThread, __ATOMIC_RELAXED) == tid_handle(me)) {
+    if (__atomic_load_n(&cs->OwningThread, __ATOMIC_SEQ_CST) == tid_handle(me)) {
         cs->RecursionCount++;
         return TRUE;
     }
-    if (!os_trylock(cs_lock(cs)))
+    if (!os_gtrylock(cs_lock(cs)))
         return FALSE;
-    __atomic_store_n(&cs->OwningThread, tid_handle(me), __ATOMIC_RELAXED);
+    __atomic_store_n(&cs->OwningThread, tid_handle(me), __ATOMIC_SEQ_CST);
     cs->RecursionCount = 1;
     cs->LockCount = 0;
     return TRUE;
@@ -104,13 +106,13 @@ extern "C" BOOL TryEnterCriticalSection(LPCRITICAL_SECTION cs)
 extern "C" void LeaveCriticalSection(LPCRITICAL_SECTION cs)
 {
     if (cs->RecursionCount <= 0) {
-        w32_log("LeaveCriticalSection on a section that is not held (%p)", (void *)cs);
+        W32Log().s("LeaveCriticalSection on a section that is not held (").p(cs).s(")").emit();
         return;
     }
     if (--cs->RecursionCount == 0) {
-        __atomic_store_n(&cs->OwningThread, (HANDLE)0, __ATOMIC_RELAXED);
+        __atomic_store_n(&cs->OwningThread, (HANDLE)0, __ATOMIC_SEQ_CST);
         cs->LockCount = -1;
-        os_unlock(cs_lock(cs));
+        os_gunlock(cs_lock(cs));
     }
 }
 
@@ -127,12 +129,12 @@ extern "C" void DeleteCriticalSection(LPCRITICAL_SECTION cs) { memset(cs, 0, siz
 static unsigned char g_split_lock;
 template <class T, class F> static T w32_split(volatile T *p, F f)
 {
-    while (__atomic_exchange_n(&g_split_lock, 1, __ATOMIC_ACQUIRE)) {}
+    while (__atomic_exchange_n(&g_split_lock, 1, __ATOMIC_SEQ_CST)) {}
     T old;
     memcpy(&old, (const void *)p, sizeof old);
     T nv = f(old);
     memcpy((void *)p, &nv, sizeof nv);
-    __atomic_store_n(&g_split_lock, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_split_lock, 0, __ATOMIC_SEQ_CST);
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
     return old;
 }
@@ -266,6 +268,39 @@ static struct w32_obj *find_named(const char *name, int type)
     return NULL;
 }
 
+#ifndef ERROR_FILENAME_EXCED_RANGE
+#define ERROR_FILENAME_EXCED_RANGE 206
+#endif
+#ifndef ERROR_PATH_NOT_FOUND
+#define ERROR_PATH_NOT_FOUND 3
+#endif
+
+/* Namespace key: a name is at most MAX_PATH-1 characters; "Local\\x" is the same object as "x" (the session
+ * namespace), "Global\\x" is another; after the prefix a backslash is not allowed. */
+static bool key_of(const char *name, char *key /* MAX_PATH + 8 */)
+{
+    size_t n = strlen(name);
+    if (n >= MAX_PATH) {
+        SetLastError(ERROR_FILENAME_EXCED_RANGE);
+        return false;
+    }
+    const char *rest = name;
+    bool global = false;
+    if (!strncasecmp(name, "Local\\", 6))
+        rest = name + 6;
+    else if (!strncasecmp(name, "Global\\", 7)) {
+        rest = name + 7;
+        global = true;
+    }
+    if (!*rest || strchr(rest, '\\')) {
+        SetLastError(ERROR_PATH_NOT_FOUND);
+        return false;
+    }
+    snprintf(key, MAX_PATH + 8, "%s%s", global ? "Global\\" : "", rest);   /* Local\x is x; Global\x stays distinct */
+    return true;
+}
+
+/* takes over the caller's reference to fresh; on failure it is dropped */
 static HANDLE create_named(const char *name, int type, struct w32_obj *fresh)
 {
     if (!name || !*name) {
@@ -274,18 +309,33 @@ static HANDLE create_named(const char *name, int type, struct w32_obj *fresh)
             SetLastError(ERROR_SUCCESS);
         return h;
     }
+    char key[MAX_PATH + 8];
+    if (!key_of(name, key)) {
+        w32_obj_unref(fresh);
+        return NULL;
+    }
+    struct named *n = (struct named *)malloc(sizeof *n);   /* before taking the lock: a failure leaves no half state */
+    char *copy = strdup(key);
+    if (!n || !copy) {
+        free(n);
+        free(copy);
+        w32_obj_unref(fresh);
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        return NULL;
+    }
     os_lock(&w32_wait_lock);
-    struct w32_obj *ex = find_named(name, type);
+    struct w32_obj *ex = find_named(key, type);
     if (!ex) {
-        struct named *n = (struct named *)malloc(sizeof *n);
-        if (n) {
-            n->name = strdup(name);
-            n->o = fresh;
-            n->next = g_named;
-            g_named = n;
-        }
+        n->name = copy;
+        n->o = fresh;
+        n->next = g_named;
+        g_named = n;
     }
     os_unlock(&w32_wait_lock);
+    if (ex) {
+        free(n);
+        free(copy);
+    }
     if (ex == (struct w32_obj *)-1) {
         w32_obj_unref(fresh);
         SetLastError(ERROR_INVALID_HANDLE);
@@ -353,6 +403,7 @@ extern "C" HANDLE CreateSemaphoreA(void *sa, LONG initial, LONG max, LPCSTR name
 
 void w32_obj_signal_locked(struct w32_obj *o)
 {
+    o->clk_t = clk_stamp();
     for (struct w32_link *l = o->waiters.next; l != &o->waiters; l = l->next)
         os_cond_signal(&l->t->waiter.cond);
 }
@@ -437,7 +488,7 @@ static int signaled(struct w32_obj *o, DWORD me)
     case W32_SEMAPHORE: return ((struct w32_sem *)o)->count > 0;
     case W32_THREAD: return w32_thread_signaled(o);
     case W32_FILE: return 1; /* I/O is synchronous: a file handle is always signaled */
-    default: return 0;
+    default: return 0;      /* W32_PSEUDO: the running process / thread; never signaled */
     }
 }
 
@@ -461,6 +512,28 @@ static int acquire(struct w32_obj *o, DWORD me)
 }
 
 static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32_t pc);
+
+/* The pseudo handles GetCurrentProcess() / GetCurrentThread() are waitable (SYNCHRONIZE) and not signaled while
+ * they run; there are no standard handles (F5). One static, never-freed object stands for the
+ * unsignaled pseudo handles; the others are rejected by type (W32_FIND, W32_HEAP carry no SYNCHRONIZE access). */
+#define W32_PSEUDO_RUNNING 100
+static struct w32_obj g_running_obj = { W32_MAGIC, W32_PSEUDO_RUNNING, 1 << 30, { &g_running_obj.waiters, &g_running_obj.waiters, NULL }, NULL };
+
+static struct w32_obj *wait_target(HANDLE h)
+{
+    if (h == W32_PSEUDO_PROCESS || h == W32_PSEUDO_THREAD) {
+        w32_obj_ref(&g_running_obj);
+        return &g_running_obj;
+    }
+    struct w32_obj *o = w32_obj_get_ref(h, 0);
+    if (o && o->type != W32_EVENT && o->type != W32_MUTEX && o->type != W32_SEMAPHORE && o->type != W32_THREAD &&
+        o->type != W32_FILE) {
+        w32_obj_unref(o);
+        SetLastError(ERROR_INVALID_HANDLE);
+        return NULL;
+    }
+    return o;
+}
 
 /* The loading-screen thread (OS_THREAD_BOOST) waits without a timeout only when the loading screen is done
  * (LoadingMenuThread::ThreadProc parks on its semaphore): the CPU boost is off for such a wait.
@@ -501,14 +574,16 @@ static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32
     struct w32_obj *objs[MAXIMUM_WAIT_OBJECTS];
     struct w32_link links[MAXIMUM_WAIT_OBJECTS];
     for (DWORD i = 0; i < n; i++) {
-        objs[i] = w32_obj_get_ref(hs[i], 0);   /* referenced under the handle lock: a CloseHandle cannot free it */
+        objs[i] = wait_target(hs[i]);   /* referenced under the handle lock: a CloseHandle cannot free it */
         if (!objs[i]) {
             for (DWORD j = 0; j < i; j++)
                 w32_obj_unref(objs[j]);
             return WAIT_FAILED;
         }
     }
-    uint64_t deadline = ms == INFINITE ? 0 : os_monotonic_ns() + (uint64_t)ms * 1000000ull;
+    uint64_t deadline = ms == INFINITE ? 0 : clk_rt_deadline((uint64_t)ms * 1000000ull);
+    uint64_t sig_t = 0;            /* the latest signal time of what was acquired (fnvnx_clock.h: the wait takes it) */
+    int idled = 0;
     DWORD res = WAIT_TIMEOUT;
     int wg = __builtin_expect(w32_wg_on, 0) && ms != 0, recorded = 0;
     if (wg)
@@ -521,9 +596,11 @@ static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32
                 k++;
             if (k == n) {
                 res = WAIT_OBJECT_0;
-                for (DWORD i = 0; i < n; i++)
+                for (DWORD i = 0; i < n; i++) {
                     if (acquire(objs[i], self->tid) && res == WAIT_OBJECT_0)
                         res = WAIT_ABANDONED + i;
+                    if (objs[i]->clk_t > sig_t) sig_t = objs[i]->clk_t;
+                }
                 break;
             }
         } else {
@@ -532,16 +609,24 @@ static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32
                 k++;
             if (k < n) {
                 res = (acquire(objs[k], self->tid) ? WAIT_ABANDONED : WAIT_OBJECT_0) + k;
+                sig_t = objs[k]->clk_t;
                 break;
             }
         }
         uint64_t left = OS_WAIT_FOREVER;
         if (ms != INFINITE) {
-            uint64_t now = os_monotonic_ns();
-            if (ms == 0 || now >= deadline)
+            if (ms == 0 || !clk_rt_left(deadline, &left))
                 break;
-            left = deadline - now;
         }
+        if (!idled) {   /* about to block: virtual time may have work for this wait (the audio device), outside the lock */
+            idled = 1;
+            os_unlock(&w32_wait_lock);
+            int worked = clk_wait_idle((const void *const *)hs, n, ms == INFINITE ? UINT64_MAX : (uint64_t)ms * 1000000ull);
+            os_lock(&w32_wait_lock);
+            if (worked) idled = 0;
+            continue;
+        }
+        idled = 0;
         if (wg && !recorded) {   /* recorded and cleared under w32_wait_lock while objs[] are referenced */
             w32_wg_obj_begin(self, objs, n, all, ms, pc);
             recorded = 1;
@@ -553,7 +638,7 @@ static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32
             objs[i]->waiters.next->prev = &links[i];
             objs[i]->waiters.next = &links[i];
         }
-        os_cond_wait(&self->waiter.cond, &w32_wait_lock, left);
+        clk_rt_cond_timedwait(&self->waiter.cond, &w32_wait_lock, left);
         for (DWORD i = 0; i < n; i++) {
             links[i].prev->next = links[i].next;
             links[i].next->prev = links[i].prev;
@@ -564,6 +649,10 @@ static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32
     os_unlock(&w32_wait_lock);
     for (DWORD i = 0; i < n; i++)
         w32_obj_unref(objs[i]);
+    if (res == WAIT_TIMEOUT)
+        clk_wait_timeout(ms == INFINITE ? 0 : (uint64_t)ms * 1000000ull);   /* the thread's time passes by the timeout */
+    else
+        clk_merge(sig_t);                                                    /* a success takes the signaller's time */
     return res;
 }
 

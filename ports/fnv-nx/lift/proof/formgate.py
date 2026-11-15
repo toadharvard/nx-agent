@@ -40,7 +40,7 @@ VERIFY = os.path.normpath(os.path.join(LIFT, "..", "verify"))
 sys.path.insert(0, LIFT)
 sys.path.insert(0, os.path.join(VERIFY, "..", "contract"))
 sys.path.insert(0, VERIFY)
-from proof import shape, symform  # noqa: E402
+from proof import eaaudit, shape, symform  # noqa: E402
 import gatefile  # noqa: E402     (ports/fnv-nx/contract)
 import recipe  # noqa: E402
 
@@ -237,8 +237,10 @@ def judge(cache, inputs=INPUTS, pins=PINS):
     finally:
         shutil.rmtree(os.path.join(cache, "ws"), ignore_errors=True)     # the checkouts of the externals (the CAS store keeps the content)
     unc = [k for k in sorted(cert) if not cert[k]]
+    ea = eaaudit.violations(HERE)      # one uncertified item per violation of the ea-rule: every Form memory access goes through an address function (proof/eaaudit.py)
+    ea_ids = ["ea-rule:%s:%d" % v[:2] for v in ea]
     byfam = ", ".join("%s %d/%d" % (f, sum(cert[k] for k in fam if fam[k] == f), sum(1 for k in fam if fam[k] == f)) for f in FAMILIES)
-    return len(cert), len(cert) - len(unc), unc, "certified/universe per family: %s; shapes without a DSL builder: %d" % (byfam, nobuilder)
+    return len(cert) + len(ea_ids), len(cert) - len(unc), unc + ea_ids, "certified/universe per family: %s; shapes without a DSL builder: %d; ea-rule violations: %d%s" % (byfam, nobuilder, len(ea), "".join("; %s:%d %s" % v for v in ea[:5]))
 
 
 def cache_dir(env):

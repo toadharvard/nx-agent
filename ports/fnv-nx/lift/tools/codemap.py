@@ -10,9 +10,9 @@ from bytes that are already classified exactly once here; they add no class of t
 data named by a relocation (class 3) or instructions of another entry, the byte keeps its class (instruction of a committed entry, else relocation-named
 data): class precedence is for accounting only, the entry still exists and its undecodable bytes raise #UD at run time.
 Output: <outdir>/codemap.tsv (start, length, class, owner entry or referencing relocation)."""
-import re, bisect
+import os, re, bisect
 from collections import Counter
-CLS = {7: 'hole', 8: 'data-pe-header', 1: 'entry-decomp', 2: 'entry-nondecomp', 3: 'data-reloc', 4: 'padding', 5: 'dead-decomp', 6: 'dead-gap', 0: 'UNEXPLAINED'}
+CLS = {7: 'hole', 8: 'data-pe-header', 1: 'entry-decomp', 2: 'entry-nondecomp', 3: 'data-reloc', 4: 'padding', 9: 'data-unreached', 0: 'UNEXPLAINED'}
 TERM = {'ret', 'retf', 'jmp', 'int3', 'ud2', 'iret', 'iretd'}
 
 def split_runs(U, runs):
@@ -63,31 +63,31 @@ def analyse(U, runs):
     return [(s, e, info[k] or 'dead') for k, (s, e) in enumerate(runs)], ops
 
 def finish(U):
-    """final accounting -> (stdout lines, unexplained bytes)."""
+    """final accounting -> (stdout lines, unexplained bytes, classes). The residue runs are settled by tools/residue.py (the one residual rule); the per-run sweep reason is printed for information."""
+    import residue
     cls = U.classify(); runs = split_runs(U, U.pad_split(cls)); res, ops = analyse(U, runs); bad = []
+    CLO = residue.closure(U.rvals, U.entries, U.outdir); brk = Counter()
     for s, e, st in res:
-        if st == 'dead': cls[s:e] = (b'\5' if U.dmap[s] else b'\6') * (e - s)
-        else: bad.append((s, e, st))
+        brk[st if st != 'dead' else 'decodes-and-ends'] += e - s
+        if CLO.complete: cls[s:e] = bytes([residue.DATA]) * (e - s)
+        else: bad.append((s, e, CLO.reason))
+    XCs, ENs, TLs = residue.pe_sources(U.M, U.u32, U.intext)
+    residue.write_sources(os.path.join(U.outdir, 'FalloutNV'), residue.source_rows(CLO, U.outdir, set(U.entries), XCs, ENs, TLs, {t for t, ks in U.kinds.items() if ks & residue.EH_KINDS}))
+    residue.combine(U.outdir)
     cc = Counter(cls); L = []
-    L.append('R3 bytes of executable sections %d: entry-decomp %d, entry-nondecomp %d, data-by-reloc %d, data-pe-header %d, padding %d, dead-decomp %d, dead-gap %d, UNEXPLAINED %d' % (
-        U.TN - cc[7], cc[1], cc[2], cc[3], cc[8], cc[4], cc[5], cc[6], cc[0]))
-    dr = Counter(); db = Counter()
-    for s, e, st in res:
-        k = 'decomp' if U.dmap[s] else 'gap'; dr[k, st == 'dead'] += 1; db[k, st == 'dead'] += e - s
-    L.append('dead runs/bytes: decomp %d/%d (checked clean+no reloc into: %d runs failed), gap %d/%d (%d failed); decomp funcs with dead code %d' % (
-        dr['decomp', True], db['decomp', True], dr['decomp', False], dr['gap', True], db['gap', True], dr['gap', False],
-        len({U.indec(U.T0 + s)[0] for s, e, st in res if st == 'dead' and U.dmap[s]})))
-    for s, e, st in bad: L.append('  UNEXPLAINED %08x len %d: %s; bytes %s; relocs-into %s' % (U.T0 + s, e - s, st, U.text[s:s + 8].hex(),
-        ' '.join('%x' % r for r, v in U.rvals if U.T0 + s <= v < U.T0 + e)[:40] or '-'))
+    L.append('R3 bytes of executable sections %d: entry-decomp %d, entry-nondecomp %d, data-by-reloc %d, data-pe-header %d, padding %d, data-unreached %d, UNEXPLAINED %d' % (
+        U.TN - cc[7], cc[1], cc[2], cc[3], cc[8], cc[4], cc[9], cc[0]))
+    L.append(residue.line(CLO, cc[9], len(res) if CLO.complete else 0) + '; residue runs %d, bytes %d; informational sweep of the residue runs (decides nothing): %s' % (len(res), sum(e - s for s, e, st in res), ', '.join('%s %d' % kv for kv in sorted(brk.items()))))
+    for s, e, st in bad[:20]: L.append('  UNEXPLAINED %08x len %d: %s; bytes %s' % (U.T0 + s, e - s, st, U.text[s:s + 8].hex()))
     # ---- codemap.tsv
     OWNL = sorted(a for a in U.entries if a not in U.parent and a not in U.r3); rows = []
-    for c in (1, 2, 5, 3, 8, 4, 6, 0):
+    for c in (1, 2, 3, 8, 4, 9, 0):
         for m in re.finditer(bytes([c]) + b'+', bytes(cls)):
             s, e = m.span()
-            if c in (1, 2, 5):
+            if c in (1, 2):
                 cuts = [s] + [a - U.T0 for a in OWNL[bisect.bisect_right(OWNL, U.T0 + s):bisect.bisect_left(OWNL, U.T0 + e)]] + [e]
                 for x, y in zip(cuts, cuts[1:]):
-                    o = U.indec(U.T0 + x) if c == 5 else None
+                    o = None
                     i = bisect.bisect_right(OWNL, U.T0 + x) - 1
                     rows.append((x, y - x, c, 'entry:%08x' % (o[0] if o else OWNL[i] if i >= 0 else 0)))
             elif c == 3:

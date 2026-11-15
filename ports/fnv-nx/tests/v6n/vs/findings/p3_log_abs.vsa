@@ -1,5 +1,0 @@
-vs_2_0
-dcl_position v0
-mov oPos, v0
-log oT0, c0.x
-mov oD0, c1

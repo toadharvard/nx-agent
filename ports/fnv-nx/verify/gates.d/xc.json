@@ -1,0 +1,15 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "xc",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_contract.py",
+  "--gate",
+  "xc"
+ ],
+ "result": "xc.json",
+ "covers": [
+  "linked"
+ ]
+}

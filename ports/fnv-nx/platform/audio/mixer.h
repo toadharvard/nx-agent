@@ -47,6 +47,16 @@ mix_voice *mixer_voice_create(const mix_format *fmt, uint8_t *data, uint32_t siz
 void mixer_voice_destroy(mix_voice *v);
 void mixer_voice_set_format(mix_voice *v, const mix_format *fmt);    /* buffer must be stopped */
 
+/* Pull-source voice: the mixer calls fn(user, dst, frames) while rendering, for exactly the source frames its
+ * resampler needs next (floor(p) and, when p has a fraction, floor(p)+1 for each output position p); dst takes
+ * `frames` frames in fmt. A short return = no more data now: the rest is silence, the cursor stays and the voice
+ * stays alive. The total pulled after K output frames from a fresh/restarted voice is
+ * (p>>32)+1+((uint32)p != 0), p = (K-1)*step, step = floor(freq*doppler/out_rate*2^32), however the K frames
+ * are split into render calls. fn runs WITH THE MIXER'S RENDER LOCK HELD: it must not call any mixer_* function
+ * (and must not wait on a lock whose holder calls the mixer). mixer_voice_set_cursor restarts a stream. */
+typedef size_t (*mix_stream_fn)(void *user, void *dst, size_t frames);
+mix_voice *mixer_voice_create_stream(const mix_format *fmt, mix_stream_fn fn, void *user);
+
 /* gains are linear amplitudes; freq_hz is the playback rate (before doppler) */
 void mixer_voice_set_gain(mix_voice *v, float left, float right);
 void mixer_voice_set_freq(mix_voice *v, uint32_t freq_hz);

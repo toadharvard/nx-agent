@@ -1,0 +1,13 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "abi",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_abi.py"
+ ],
+ "result": "abi.json",
+ "covers": [
+  "product-guest"
+ ]
+}

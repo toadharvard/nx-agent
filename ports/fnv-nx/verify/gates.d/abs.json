@@ -1,0 +1,15 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "abs",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_contract.py",
+  "--gate",
+  "abs"
+ ],
+ "result": "abs.json",
+ "covers": [
+  "linked"
+ ]
+}

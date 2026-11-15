@@ -37,14 +37,15 @@ def load(path, newbase=None):
     assert d[pe:pe + 4] == b'PE\0\0' and struct.unpack_from('<H', d, pe + 24)[0] == 0x10b, 'not a PE32 image'
     nsec, soh = struct.unpack_from('<H', d, pe + 6)[0], struct.unpack_from('<H', d, pe + 20)[0]
     base, sizeimg = struct.unpack_from('<II', d, pe + 52)[0], struct.unpack_from('<I', d, pe + 80)[0]
-    nd = struct.unpack_from('<I', d, pe + 24 + 92)[0]; secs = []; xs = []; o = pe + 24 + soh
+    nd = struct.unpack_from('<I', d, pe + 24 + 92)[0]; secs = []; xs = []; wr = []; o = pe + 24 + soh
     for i in range(nsec):
         nm = d[o:o + 8].rstrip(b'\0').decode(); vs, va, rs, ro = struct.unpack_from('<IIII', d, o + 8); fl = struct.unpack_from('<I', d, o + 36)[0]
         secs.append((nm, base + va, vs, ro, rs))
         if fl & EXEC: xs.append((nm, base + va, min(vs, rs), ro))
+        if fl & 0x80000000: wr.append((base + va, max(vs, rs)))
         o += 40
     order = sorted(range(len(secs)), key=lambda i: secs[i][1]); starts = [secs[i][1] for i in order]
-    M = SimpleNamespace(d=d, pe=pe, base=base, sizeimg=sizeimg, secs=secs, xs=xs, nd=nd, entry=struct.unpack_from('<I', d, pe + 40)[0])
+    M = SimpleNamespace(d=d, pe=pe, base=base, sizeimg=sizeimg, secs=secs, xs=xs, wr=wr, nd=nd, entry=struct.unpack_from('<I', d, pe + 40)[0])
     def loc(a):
         i = bisect.bisect_right(starts, a) - 1
         if i >= 0:
@@ -73,7 +74,7 @@ def load(path, newbase=None):
         for r in rl or ():
             x = M.off(r)
             if x is not None: struct.pack_into('<I', d, x, (struct.unpack_from('<I', d, x)[0] + delta) & 0xffffffff)
-        secs[:] = [(n, (va + delta) & 0xffffffff, vs, ro, rs) for n, va, vs, ro, rs in secs]; xs[:] = [(n, (va + delta) & 0xffffffff, z, ro) for n, va, z, ro in xs]
+        secs[:] = [(n, (va + delta) & 0xffffffff, vs, ro, rs) for n, va, vs, ro, rs in secs]; xs[:] = [(n, (va + delta) & 0xffffffff, z, ro) for n, va, z, ro in xs]; wr[:] = [((va + delta) & 0xffffffff, z) for va, z in wr]
         starts[:] = [(x + delta) & 0xffffffff for x in starts]; M.base = newbase
     return M
 

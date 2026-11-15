@@ -1,5 +1,0 @@
-ps_2_0
-dcl v0
-dcl v1
-add_sat r0, v0, v1
-mov oC0, r0

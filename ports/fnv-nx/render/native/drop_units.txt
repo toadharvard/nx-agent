@@ -1,4 +1,0 @@
-# NATIVE1 (REQUESTS.md R3): decomp units dropped from the build once the native renderer replaces them.
-# Empty for now: N1 first overrides individual virtuals (overrides.tsv); the whole-unit drop of
-# src/gamebryo2.2/corelibs/niconsolerenderer/* and the replaced bsshader units follows when the override set covers
-# every function of those units that kept code still calls (N1_PLAN.md §4).

@@ -1,6 +1,6 @@
 /* mmio.cpp - winmm's buffered multimedia file I/O (mmioOpenA ... mmioAdvance), for the game's WAV loader.
  *
- * The exe imports mmioOpenA, Descend, Read, Ascend, GetInfo, Advance and Close (IAT 0x00fdf318..0x00fdf330). Its WAV
+ * The exe imports mmioOpenA, Descend, Read, Ascend, GetInfo, Advance and Close. Its WAV
  * loader opens with MMIO_ALLOCBUF and its own I/O procedure (pIOProc, fccIOProc 'WAV '), which reads through the
  * game's archive files: it keeps its file in adwInfo[0] and the position in lDiskOffset, and returns 0 from
  * MMIOM_SEEK. So every position here comes from lDiskOffset after a message, never from MMIOM_SEEK's return
@@ -12,7 +12,7 @@
  * Built-in procedures: DOS files (fccIOProc 0 or 'DOS ', through CreateFileA) and memory files ('MEM ': the buffer
  * is the file). The I/O procedure gets the handle's own MMIOINFO, which is what mmioGetInfo copies out. */
 #include "w32.h"
-#include "fnvnx_mmio.h"
+#include "../include/fnvnx_mmio.h"
 
 #include <stdio.h>   /* SEEK_SET/CUR/END = FILE_BEGIN/CURRENT/END */
 #include <stdlib.h>
@@ -24,12 +24,14 @@ static_assert(__builtin_offsetof(MMIOINFO, lDiskOffset) == 44 && __builtin_offse
 #endif
 
 namespace {
+const DWORD MMIO_NAMEBUF = 128;   /* the least room the documentation promises szFilename for a name written back */
 const uint32_t MMIO_MAGIC = 0x4F494D4Du;   /* "MMIO" */
 
 struct mmio {
     MMIOINFO info;       /* first: the I/O procedure's LPSTR argument is &info */
     uint32_t magic;
     int mem;             /* memory file: the buffer is the whole file */
+    int native_dos;      /* the built-in DOS procedure (a platform function, never a game address: not stored in pIOProc) */
     int own_buffer;
     char *wend;          /* buffered writes: end of the data written into the buffer */
     HANDLE dos;          /* the DOS procedure's file */
@@ -90,6 +92,8 @@ LRESULT dos_proc(LPSTR p, UINT msg, LPARAM l1, LPARAM l2)
 
 LRESULT send(mmio *m, UINT msg, LPARAM l1, LPARAM l2)
 {
+    if (m->native_dos)
+        return dos_proc((LPSTR)&m->info, msg, l1, l2);
     return m->info.pIOProc ? m->info.pIOProc((LPSTR)&m->info, msg, l1, l2) : (msg == MMIOM_SEEK ? -1 : 0);
 }
 
@@ -160,14 +164,58 @@ extern "C" {
 HMMIO mmioOpenA(LPSTR name, LPMMIOINFO in, DWORD flags)
 {
     flags = W32_DW(flags);
-    if (flags & MMIO_EXIST)
-        return name && GetFileAttributesA(name) != INVALID_FILE_ATTRIBUTES ? (HMMIO)1 : NULL;
-    if (flags & MMIO_DELETE)
-        return name && DeleteFileA(name) ? (HMMIO)1 : NULL;
-    if (flags & (MMIO_PARSE | MMIO_GETTEMP)) {
+    /* the name-only operations. Their results are TRUE (a non-NULL value that is no handle) or NULL; a name they produce is
+     * written back into szFilename, which the documentation requires to hold at least 128 bytes */
+    if (flags & MMIO_PARSE) {                  /* the fully qualified file name; all other flags are ignored */
+        char full[MAX_PATH];
+        DWORD n = name ? GetFullPathNameA(name, sizeof full, full, NULL) : 0;
+        if (!n || n >= MMIO_NAMEBUF) {
+            if (in)
+                in->wErrorRet = MMIOERR_CANNOTOPEN;
+            return NULL;
+        }
+        memcpy(name, full, n + 1);
         if (in)
-            in->wErrorRet = MMIOERR_CANNOTOPEN;
-        return NULL;
+            in->wErrorRet = 0;
+        return (HMMIO)1;
+    }
+    if (flags & MMIO_EXIST) {                  /* does the file exist (a directory is no file)? */
+        /* MSDN also has the fully qualified name written back into szFilename; tests/s4/test_mmio.cpp passes a string
+         * literal here, which no write can survive, so EXIST only answers the question (reported to the lead). */
+        DWORD a = name ? GetFileAttributesA(name) : INVALID_FILE_ATTRIBUTES;
+        if (a == INVALID_FILE_ATTRIBUTES || (a & FILE_ATTRIBUTE_DIRECTORY)) {
+            if (in)
+                in->wErrorRet = MMIOERR_FILENOTFOUND;
+            return NULL;
+        }
+        if (in)
+            in->wErrorRet = 0;
+        return (HMMIO)1;
+    }
+    if (flags & MMIO_GETTEMP) {                /* "X:" and/or a prefix of up to three characters: a temporary file name */
+        char dir[MAX_PATH], tmp[MAX_PATH];
+        const char *prefix = name ? name : "";
+        if (prefix[0] && prefix[1] == ':') {
+            snprintf(dir, sizeof dir, "%c:\\", prefix[0]);
+            prefix += 2;
+        } else if (!GetTempPathA(sizeof dir, dir)) {
+            dir[0] = 0;
+        }
+        if (!name || !dir[0] || !GetTempFileNameA(dir, prefix, 0, tmp) || strlen(tmp) >= MMIO_NAMEBUF) {
+            if (in)
+                in->wErrorRet = MMIOERR_FILENOTFOUND;
+            return NULL;
+        }
+        memcpy(name, tmp, strlen(tmp) + 1);
+        if (in)
+            in->wErrorRet = 0;
+        return (HMMIO)1;
+    }
+    if (flags & MMIO_DELETE) {
+        BOOL ok = name && DeleteFileA(name);
+        if (in)
+            in->wErrorRet = ok ? 0 : MMIOERR_FILENOTFOUND;
+        return ok ? (HMMIO)1 : NULL;
     }
     mmio *m = (mmio *)calloc(1, sizeof *m);
     if (!m) {
@@ -194,7 +242,7 @@ HMMIO mmioOpenA(LPSTR name, LPMMIOINFO in, DWORD flags)
             m->mem = 1;
         } else if (f == 0 || f == FOURCC_DOS) {
             m->info.fccIOProc = FOURCC_DOS;
-            m->info.pIOProc = dos_proc;
+            m->native_dos = 1;
         } else {
             err = MMIOERR_INVALIDFILE;   /* no installable I/O procedures (mmioInstallIOProc is not imported) */
         }
@@ -291,6 +339,21 @@ LONG mmioWrite(HMMIO h, const char *src, LONG n)
     LONG total = 0;
     while (n > 0) {
         LONG room = (LONG)(m->info.pchEndWrite - m->info.pchNext);
+        if (room <= 0 && m->mem && m->own_buffer && (LONG)m->info.adwInfo[0] > 0) {
+            /* an expandable memory file (adwInfo[0] = the growth increment) grows by whole increments to hold the write */
+            LONG inc = (LONG)m->info.adwInfo[0], want = ((n + inc - 1) / inc) * inc;
+            LONG at = (LONG)(m->info.pchNext - m->info.pchBuffer), end = (LONG)(m->info.pchEndRead - m->info.pchBuffer);
+            char *nb = (char *)realloc(m->info.pchBuffer, (size_t)(m->info.cchBuffer + want) + 1);
+            if (!nb)
+                return total ? total : -1;
+            memset(nb + m->info.cchBuffer, 0, (size_t)want + 1);
+            m->info.cchBuffer += want;
+            m->info.pchBuffer = nb;
+            m->info.pchNext = nb + at;
+            m->info.pchEndRead = nb + end;
+            m->info.pchEndWrite = nb + m->info.cchBuffer;
+            continue;
+        }
         if (room <= 0) {
             if (m->mem || !flush(m))
                 return total ? total : -1;

@@ -168,8 +168,8 @@ static_assert(sizeof(DIJOYSTATE) == 80, "DIJOYSTATE");
 static_assert(sizeof(DIJOYSTATE2) == 272, "DIJOYSTATE2");
 #endif
 
-typedef BOOL (*LPDIENUMDEVICESCALLBACKA)(LPCDIDEVICEINSTANCEA, LPVOID);
-typedef BOOL (*LPDIENUMDEVICEOBJECTSCALLBACKA)(LPCDIDEVICEOBJECTINSTANCEA, LPVOID);
+FNVNX_CALLBACK_T(LPDIENUMDEVICESCALLBACKA, BOOL, (LPCDIDEVICEINSTANCEA, LPVOID));
+FNVNX_CALLBACK_T(LPDIENUMDEVICEOBJECTSCALLBACKA, BOOL, (LPCDIDEVICEOBJECTINSTANCEA, LPVOID));
 
 /* ---- constants */
 #define DI_OK S_OK
@@ -271,7 +271,7 @@ typedef BOOL (*LPDIENUMDEVICEOBJECTSCALLBACKA)(LPCDIDEVICEOBJECTINSTANCEA, LPVOI
 #define DIPROP_AUTOCENTER MAKEDIPROP(9)
 #define DIPROP_CALIBRATIONMODE MAKEDIPROP(10)
 #define DIPROP_KEYNAME MAKEDIPROP(20)
-#define DIPROP_SCANCODE MAKEDIPROP(21)
+#define DIPROP_SCANCODE MAKEDIPROP(23)
 #define DIGDD_PEEK 0x00000001
 #define DIENUM_STOP 0
 #define DIENUM_CONTINUE 1
@@ -405,7 +405,21 @@ FNVNX_DI_GUID(GUID_POV, 0xa36d02f2, 0xc9f3, 0x11cf, 0xbf, 0xc7, 0x44, 0x45, 0x53
 
 /* ---- interfaces */
 struct IDirectInputDevice8A;
-struct IDirectInputEffect;
+/* A force-feedback effect object. Neither device has force feedback (DIDC_FORCEFEEDBACK clear), so CreateEffect never
+ * returns one; the interface is declared completely because CreateEffect's result type names it. */
+struct IDirectInputEffect : public IUnknown
+{
+    /* 3 */ virtual HRESULT STDMETHODCALLTYPE Initialize(HINSTANCE hinst, DWORD dwVersion, REFGUID rguid) = 0;
+    /* 4 */ virtual HRESULT STDMETHODCALLTYPE GetEffectGuid(LPGUID pguid) = 0;
+    /* 5 */ virtual HRESULT STDMETHODCALLTYPE GetParameters(void *peff, DWORD dwFlags) = 0;
+    /* 6 */ virtual HRESULT STDMETHODCALLTYPE SetParameters(const void *peff, DWORD dwFlags) = 0;
+    /* 7 */ virtual HRESULT STDMETHODCALLTYPE Start(DWORD dwIterations, DWORD dwFlags) = 0;
+    /* 8 */ virtual HRESULT STDMETHODCALLTYPE Stop() = 0;
+    /* 9 */ virtual HRESULT STDMETHODCALLTYPE GetEffectStatus(LPDWORD pdwFlags) = 0;
+    /* 10 */ virtual HRESULT STDMETHODCALLTYPE Download() = 0;
+    /* 11 */ virtual HRESULT STDMETHODCALLTYPE Unload() = 0;
+    /* 12 */ virtual HRESULT STDMETHODCALLTYPE Escape(void *pesc) = 0;
+};
 struct IDirectInputDevice8A : public IUnknown
 {
     /* 3 */ virtual HRESULT STDMETHODCALLTYPE GetCapabilities(LPDIDEVCAPS lpDIDevCaps) = 0;

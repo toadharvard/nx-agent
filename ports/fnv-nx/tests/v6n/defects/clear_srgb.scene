@@ -1,8 +1,0 @@
-# DEFECT clear_srgb (tests/v6n/DEFECTS.md, low severity)
-# Clear with SRGBWRITEENABLE: Nine clears through the sRGB view (nine_context_clear_fb: NineSurface9_GetSurface(rt, sRGB))
-size 16 16
-rt A8R8G8B8
-ds D24S8
-clear 7 0xff000000 1.0 0
-rs SRGBWRITEENABLE TRUE
-clear 1 0xff808080 1.0 0

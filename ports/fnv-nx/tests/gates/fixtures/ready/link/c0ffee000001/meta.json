@@ -1,6 +1,0 @@
-{
- "guest_undefined": 0,
- "boot_image_sha256": "abababababababababababababababababababababababababababababababab",
- "boot_peak_heap_bytes": 1073741824,
- "check_package_rc": 0
-}
