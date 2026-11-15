@@ -875,3 +875,14 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Adopted from cand3: "profile":"guest" in the lift roots; lift/pack uses bridgefacts BRIDGE.
   - recipe.py check: 24 of 30 roots valid. The 6 red are the lift/tests/guest roots, which include lift/rt outside `uses`; the fix is moving the rt headers into lift/rt/include (w8, next).
   - The lift tool tests run in the background. w7 and w13 build on base3.
+
+## 21:10 base3 d9d208c61: 30 of 30 roots valid (w8)
+- claude/fnv-l3a-lift-base3 @ d9d208c61. `recipe.py check` over all 30 admitted roots: 30 valid, 0 red. sandbox.py and cas.py are identical to c0f504e2a.
+- All lift roots use "profile":"guest", pinned by verify/guest_compiler.json. The gcc-msvcmodel b274ec06 external is gone.
+- Out-of-root includes come only through `uses`:
+  - rt and bridges use platform INCLUDE and hostabi INCLUDE;
+  - the tests use shim INCLUDE and rt GEN.
+- lift/rt republishes its 7 headers into GEN by gen_copy stages. They are content-keyed copies of one tracked source, so this is not a second source. Accepted.
+- The native test roots have no link.entry under cand3's single guest entry rule. L4's harness calls fnvl_{citest,imptest,msvcrttest}_entry by symbol. L4 was copied and asks if it needs a per-test entry.
+- Not run yet: the lift tool tests (now in the background, w8) and the facts/native builds on this base (w7, w13).
+- bottleneck: the lift chain as stages (w7 facts -> w13 fpfacts -> w8 liftsrc) on d9d208c61; workers 4 (w7, w8, w12, w13).
