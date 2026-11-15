@@ -461,3 +461,7 @@ After the first frame:
     - (1) guest_compiler.json still names the old mirror b274ec06 and the linux-gnu binaries. w2 wires the pin, derives cc/cxx from the one target triple field (rule 5) and sends it to L1 for cand2.
     - (2) test_gate_order uses stock linux-gnu g++, a second path. It moves onto the recipe, and the test universe is censused for direct compiler calls.
     - (3) Explain the lse violation shape (gate rule or correct red).
+- 2026-11-15 19:05Z: BLOCKER from L5. The platform root at w14 fc7b6b094 (none-elf, plugins 2057a846) is red at one stage, cc:audio/dsound.cpp:1191, where fnvnx_guestfn writes "class template specialization has no tag form" for an extern "C" function whose signature holds only C types. Owner w3:
+  - The decltype walk's universe is the decl's declared type alone.
+  - A specialization that does appear in a declared type is written in its Itanium type mangling (§5.1.5).
+  - A regression test is added, the fix goes to L5 and the farm, and the pin is rebuilt from it.
