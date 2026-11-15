@@ -137,6 +137,32 @@ def facts(root):
     return res
 
 
+def conformance(root, fs):
+    """-> (why, {image: [findings]}): the EH/SEH conformance oracle (proof/ehoracle.py) judged every image of EHFACTS against the pinned Wine 9.0 rules. Its report EHFACTS/ehoracle.json
+    must be the report of THESE inputs: the oracle's own sha256, the pinned Wine files' sha256 (proof/wine_pin.json) and each image's ehtables.json sha256 must equal the current ones, and the
+    report must cover every image of EHFACTS. Each finding of an image is a red fact `eh-conformance`; a Wine finding (a pin or citation mismatch) is red on the exe."""
+    import hashlib
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sha = lambda p: hashlib.sha256(open(p, 'rb').read()).hexdigest()
+    p = os.path.join(root, 'ehoracle.json')
+    if not os.path.isfile(p): return 'no ehoracle.json: the conformance oracle has not judged these facts', {}
+    try:
+        with open(p) as fh: R = json.load(fh)
+        pin = json.load(open(os.path.join(here, 'proof', 'wine_pin.json')))
+        if R['format'] != 'fnvnx-ehoracle/1': return 'ehoracle.json: format %r' % R['format'], {}
+        if R['oracle_sha256'] != sha(os.path.join(here, 'proof', 'ehoracle.py')): return 'ehoracle.json is the report of another ehoracle.py', {}
+        if R['wine_sha256'] != pin['files']: return 'ehoracle.json judged other Wine files than proof/wine_pin.json pins', {}
+        by = {('exe' if r['image'] == 'FalloutNV' else r['image']): r for r in R['images']}
+        if sorted(by) != sorted(fs): return 'ehoracle.json covers images %s, EHFACTS has %s' % (sorted(by), sorted(fs)), {}
+        out = {}
+        for img, f in sorted(fs.items()):
+            if by[img]['facts_sha256'] != sha(f): return '%s: ehoracle.json judged another ehtables.json' % img, {}
+            if by[img]['findings']: out[img] = ['%s:%s' % (x['kind'], x.get('site') or x.get('file') or x.get('addr') or '') for x in by[img]['findings']]
+        return '', out
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        return 'ehoracle.json unusable: %s' % e, {}
+
+
 def check(pack, root):
     """-> (universe, uncertified list, why, violations {image: {class: [items]}})"""
     try:
@@ -146,12 +172,15 @@ def check(pack, root):
     if not os.path.isdir(root): return 0, [], 'no EHFACTS directory', {}
     fs = facts(root); unc = []; red = {}; uni = 0; spans = []; code = sorted(a for a, k in ent.items() if k == 'code')
     if 'exe' not in fs: return 0, [], 'no ehtables.json for the exe', {}
+    why, conf = conformance(root, fs)
+    if why: return 0, [], why, {}
     if not code: return 0, [], 'the pack has no code entry', {}
     if len(fs) != nimg: return 0, [], '%d facts files for %d images of the pack' % (len(fs), nimg), {}
     for img, p in sorted(fs.items()):
         try:
             with open(p) as fh: J = json.load(fh)
             it = items(J); lo, hi = (hx(x) for x in J['text']); vi = violations(J)
+            if img in conf: vi['eh-conformance'] = sorted(conf[img])
             if vi: red[img] = vi
         except (OSError, ValueError, KeyError, TypeError, Bad) as e:
             return 0, [], '%s: ehtables.json unusable: %s' % (img, e), red

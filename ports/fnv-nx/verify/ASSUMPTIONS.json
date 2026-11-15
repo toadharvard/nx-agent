@@ -1266,8 +1266,8 @@
     "L3b:A-CTX"
    ],
    "status": "REMOVE",
-   "removed_by": "no gate yet: a handler may write the FP control words in CONTEXT; being checked against rt/seh.c with the FP-mask fact",
-   "owner": "L3a"
+   "removed_by": "planned: the rule 'SEH continue restores the whole CONTEXT' (Wine 9.0 NtSetContextThread, per ContextFlags), carried by the single field table of lift/rt/seh.cc (ctx_capture / ctx_restore) and reviewed field by field in journal/inbox/l3b-w9-ctx.md: 48 of 70 fields round trip, 14 are ignored by Wine's restore too, 8 (FOP, FCS, FDS, FSW bits ES/B, EFlags TF/NT/RF) need state in struct cpu (owner L3a); the round trip test over the lift/rt root is open, blocked by the environment",
+   "owner": "L3a+L3b"
   },
   {
    "id": "ASM-221",
