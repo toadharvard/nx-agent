@@ -111,6 +111,22 @@ class Table:
     def keys(self):
         return sorted(self.defs)
 
+    def complete_kinds(self):
+        """-> sorted [(name, kind)] of every complete (not forward-reference) class/struct/union record, name = the record's source name
+        (qualified, not the decorated unique name), kind 'class' | 'struct' | 'union'. A record without the forward-reference bit votes,
+        whether or not it carries a unique name; unnamed types (`<unnamed-...>`, `<lambda_...>`) name nothing and are left out."""
+        kind = {LF_CLASS: 'class', LF_STRUCTURE: 'struct', LF_UNION: 'union'}
+        out = set()
+        for i, (k, b) in self.t.items():
+            if k in RECORDS:
+                try:
+                    _k, prop, _fl, _size, name, _u = self._head(i)
+                except CVError as e:
+                    raise CVError('%s: record 0x%x: %s' % (self.where, i, e))
+                if not prop & PROP_FWD and '<' not in name:
+                    out.add((name, kind[k]))
+        return sorted(out)
+
     def unique_of(self, i):
         if self._get(i)[0] not in RECORDS:
             raise CVError('type 0x%x is no record' % i)
