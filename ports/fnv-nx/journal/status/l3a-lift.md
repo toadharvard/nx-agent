@@ -940,3 +940,18 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Three builds are byte-identical. Re-run: 4/4 hits in 5.6 s. Cold: 3 min 40 s.
   - Exe only: depth.tsv 18,539 rows. ASM-204 and ASM-205 are unproven: 51 unknown fcw loads, 3 unknown mxcsr loads, 2,454 sticky observers.
   - Modules were blocked by the PE-preferred-base Image, which is the same defect w7 fixed in bea44f836. w13 cherry-picks bea44f836, runs fpfacts and retn once per image with bases from MODULES_TSV, takes the program-level ASM-204/205 as the AND over all images, and produces per-module RETN.
+
+## 21:40 facts as roots (w7); compile time is GCC scheduling (w12)
+- **w7 (claude/fnv-l3a-lift-w7-facts2, on base3 393e79d8c).**
+  - Structure: lift/factsimg/<image> is 8 admitted roots with one stage each. lift/facts uses all 8 plus loader MODULES_TSV; factsassemble is red unless the stage set equals the table rows. lift/retn uses lift/facts FACTS.
+  - 5 of 7 module images are byte-identical to facts 6944080, 16 files each: binkw32 28 s, atimgpud 9 s, libvorbisfile 11 s, libvorbis 24 s, gdffalloutnv 3 s. pcsrc is under 20 % of each.
+  - Running: d3dx9_31, d3dx9_38 and the exe, with py-spy at 10 min.
+  - The fixed point has no cap; a repeated state is red (test_fixpoint_cycle).
+  - modules.tsv sha256 bafdbc7b…, 7 rows, equals the derivation.
+  - The facts producers exit 0 once the facts are written. Their gate JSONs (codemap, pcsrc) become the lift/facts GATES output, and L1 is asked for a verdict gate on it. Example: libvorbis has 6,499 uncertified bytes.
+- **w12 (pack db2aaf6d4a08, lift/pack@prof, 27 of 30 units).**
+  - The GCC insn scheduler is 70–92 % of CC time. Plugins cost under 0.3 s per unit.
+  - Medians: 13–30 s CC. Big units: 65–700 s.
+  - Decision: the pack drops sched1 (-fno-schedule-insns) and keeps sched2. The A57 is out-of-order, and instructions per frame do not change under scheduling. This is a flag decision, not PERFDEBT.
+  - w12 checks that the semantic flags do not need sched1, then measures @prof2.
+  - 6 units fail FTOI in the stale prelude snapshot. They are recompiled against the generated prelude.
