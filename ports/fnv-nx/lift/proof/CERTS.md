@@ -119,9 +119,17 @@ against `x87spec.py` (OWNER 10 for the parts no pinned formal model covers; the 
   cvtdq2ps, cvtps2dq, cvttps2dq, cvtdq2pd, cvtpd2dq, cvttpd2dq (SDM 2A text, ACL2 has no row). A float to int conversion out of range / NaN gives the integer indefinite 0x80000000 with IE
   (SDM 1:4.8.4.1); inexact gives PE. Reciprocal rows (rcpps/ss, rsqrtps/ss) read the reference CPU's table from lift/rt/rcptab.c (accepted only when its sha256 is the certificate's
   and its mismatches are 0), MXCSR plays no part. The rcp/rsqrt transcription is tested against the C function of the same file (RcpRows).
-  Not rows: the MMX-register forms (cvtpi2ps/pd, cvt(t)ps2pi, cvt(t)pd2pi) and 3DNow (the declared CPU clears it: #UD)
+  The MMX-register forms (cvtpi2ps/pd, cvt(t)ps2pi, cvt(t)pd2pi: SDM text, x87spec's MMX rule) and PAUSE (SDM 2B:PAUSE: NOP for architectural state) are rows; 3DNow and VEX forms are the #UD class (table below).
 - The symbolic Form side does not exist for FP arithmetic yet (forms_simd.py has no handler: the lifter emits it in C++, fnvlift/f_sse.py), so simdcheck reports these shapes
   `no-form`, not `proved`.
+
+### SIMD: where ACL2 and the SDM disagree (per row, both cites; OWNER 10)
+
+| row | ACL2 (acl2_cites.tsv) | SDM (simdsdm_cites.txt) | followed | status |
+|---|---|---|---|---|
+| minps/pd/ss/sd, maxps/pd/ss/sd, a NaN operand and a denormal other operand | `fp/arith-spec.lisp` `sse-max/min`: DE is also set | SDM 1:4.9.2 "the handling of a QNaN operand has precedence over lower-" priority exceptions; the denormal-operand exception is priority 4 | SDM (invalid / NaN alone) | ACL2 models the behaviour and contradicts the SDM: a real contradiction, reported to the L3b lead; the row follows the SDM until decided |
+| ldmxcsr, a value with a bit outside MXCSR_MASK | `fp/mxcsr.lisp` `x86-ldmxcsr/stmxcsr-Op/En-M`: the reserved-bit check is not modelled | SDM 2A:LDMXCSR "#GP For an attempt to set reserved bits in MXCSR" | SDM (#GP(0), mapped to the AV kind of fnvlift/faults.json) | ACL2 does not model it: the SDM applies (OWNER 10) |
+| 3DNow! (0F 0F family) and VEX vpavgw | no row | no row in the opcode tables of the SDM: undefined, #UD | the #UD class (`simdcheck.py --cleared`, the partition of sdmfeat.py, result `ud-class`) | not a SIMD row; the opmap's cleared class owns the certificate |
 
 ## Pinned IR 7c307464: hunks
 
