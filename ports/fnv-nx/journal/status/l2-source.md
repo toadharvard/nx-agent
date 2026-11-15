@@ -179,3 +179,7 @@ After the first frame:
   - Cause: a second ABI in one image. The sdd plugin rewrites vtable address points, but the guest runtime's libstdc++ was built without the plugins.
   - Closed by (a), the orchestrator's decision: the noneelf phase B builds libgcc, newlib and libstdc++ with every loadable plugin, and the MANIFEST carries the plugin digests. Owner: farm.
 - order's RTL table: w1 builds it as a generator plus classification rows keyed by the pinned tarball, with checks. L2 reviews the rows.
+- 2026-11-15 00:48 w3 DATAMODEL draft at 37a5e7b22: 26 rows; 20 equal; patch hunks for bitfields (S16-S18) and enums (S14). Open rows: S12 (PMF), S23 (empty bases), S25 (virtual base), S26 (va_list). Measured on the old pin, fixture failures are exactly S09, S13, S14 and S16.
+  - Next: S23 goes into the same patch, with its loop on the farm tree.
+  - The table becomes generated (pinned cpp-docs plus the tm.texi universe).
+  - S26 va_list joins crossing_forbidden, reported to L1.
