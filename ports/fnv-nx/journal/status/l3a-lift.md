@@ -990,3 +990,6 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - w7 builds the 5 small images, then store-merges and builds lift/facts (all hits). w13 rebases onto 53583fa77 and builds retn and fpfacts on the merged FACTS.
 - bottleneck: the facts farms (d3dx9_31 about 3 h); the nxgpu include (w8), then the liftsrc cold build.
 - 22:19 The facts build commit is now w7 e7b12ab35 (53583fa77 plus the round driver streaming its stderr live). The 3 farms are moved to it, with stores at l3a-lift/factsstore/e7b12ab35-<image>. w7 stops its own d3dx9_31 run, which duplicates the farm and risks OOM, and builds the 5 small images. universe.py, modlift.py, pcsrc.py and cli.py are frozen until the farms finish.
+- 22:24 base3 @ 1b1abc42c = e92e86825 + the render/nxgpu include fix (its own commit, sent to L6 and L1). render/nxgpu and lift/descs are green (descs: 48 run, 555 hit).
+  - lift/bridges is red from an L1 contract tool: l2sections.py opens /tool/../toolchain/names/sympair_kinds.inc, a path that leaves its mount. Sent to L1 w12: declare the file as an input, and have the abspath gate / require_under reject `..` escapes.
+  - The liftsrc cold build is restarted (it does not wait on bridges). w8 freed 11 GB of stale recipe temps.
