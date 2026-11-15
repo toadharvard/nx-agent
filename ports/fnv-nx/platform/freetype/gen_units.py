@@ -263,7 +263,6 @@ def main(a):
     gen["units.list"] = "\n".join("freetype:" + u for u in U if u not in rewritten) + "\n"
     for rel, text in gen.items():
         p = os.path.join(out, rel)
-        os.makedirs(os.path.dirname(p), exist_ok=True)
         with open(p, "w", encoding="utf-8", errors="surrogateescape", newline="") as f:
             f.write(text)
     for n in names:

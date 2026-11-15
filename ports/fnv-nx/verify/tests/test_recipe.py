@@ -31,7 +31,6 @@ PY = [sys.executable, "-I"]
 GEN = '''import os
 @IMPORT@
 n = len([l for l in open("/in/ports/fnv-nx/toy/constants.tsv") if l.strip()])
-os.makedirs("/out/gen")
 open("/out/gen/gen.h", "w").write("#define NCONST %d\\n#define STAMP %dL\\n" % (n, @EXTRA@))
 '''
 # The toy root is a guest ELF in the sense of RECIPE.md "Link": ILP32, position independent, linked with the product's own link/guest.ld and
@@ -569,6 +568,10 @@ def main():
     m["flags"]["c"] = ["-Ifoo", "-o"]
     check("flags that change a stage's job rejected, all problems listed", len([e for e in errs(m)]) >= 2)
 
+    import toolflags
+    for st, mode, tail in (("drv:r", ["-pie"], ["-###", "/probe/x.cc", "-o", "/out/x"]), ("mld:r", [], ["-print-multi-directory"])):
+        d = recipe.driver_doc(st, "/ext/a64/bin/g++", ["-mabi=ilp32"], mode, tail, [{"at": "/ext/a64", "tree": "t"}])
+        check("driver stage %s: its argv passes toolflags (the one constructor carries PROBE_FLAGS)" % st, toolflags.check_doc(d) == [], toolflags.check_doc(d))
     check_gen_reads(SS)
     check_run(SS)
     print("INFO +%.1f s: validation done, joining gate scenarios" % (time.time() - t_start))
@@ -586,7 +589,7 @@ def check_gen_reads(SS):
     OTH = T + "other"
     ex = [{"path": OTH, "class": "doc", "gates": []}]
     rd = 'import sys\nn = int(open("/in/%s/data.txt").read())\n' % OTH
-    wr = 'os.makedirs("/out/gen")\nopen("/out/gen/gen.h", "w").write("#define NCONST 1\\n#define STAMP %dL\\n" % (n - n))\n'
+    wr = 'open("/out/gen/gen.h", "w").write("#define NCONST 1\\n#define STAMP %dL\\n" % (n - n))\n'
     def rec_(ins=(OTH + "/data.txt",), **kw):
         return dict(RECIPE, generated=[{"tool": T + "gen/xr.py", "args": [], "inputs": [ROOT + "/constants.tsv"] + list(ins),
                                                       "outputs": ["gen/gen.h"]}], **kw)

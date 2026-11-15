@@ -220,6 +220,7 @@ def small_repo(gates=None, link=None):
     for g in (gates or two_gates())["gates"]:
         put(r, "ports/fnv-nx/verify/gates.d/%s.json" % g["name"], json.dumps(dict(g, format="fnvnx-gatefile/1")))
     shutil.copy(os.path.join(VERIFY, "env.json"), os.path.join(r, "ports/fnv-nx/verify/env.json"))
+    put(r, "ports/fnv-nx/contract/treehash.py", open(os.path.join(VERIFY, "..", "contract", "treehash.py")).read())   # cas.py reads the tree-hash rule from ../contract
     put(r, "ports/fnv-nx/link/tests/test_ok.py", "import sys\nsys.exit(0)\n")
     put(r, V + "link/stage.py", CLEAN)  # one stage entry point: a pure gate over an empty universe is vacuous (verdict.py)
     put(r, V + "verify/admit.json", adm("stage.py", *[k.rsplit("/", 1)[-1] for k in (link or {}) if k.endswith("/bad.py")]))
@@ -454,6 +455,8 @@ d2 = tmp("tests-cache-env")
 mk(d2, test_a="pass\n")
 for n in ("gate_tests.py", "cas.py", "envcheck.py"):
     shutil.copy(os.path.join(VERIFY, n), os.path.join(d2, n))
+os.makedirs(os.path.join(ROOT, "contract"), exist_ok=True)   # cas.py reads the tree-hash rule from ../contract/treehash.py
+shutil.copy(os.path.join(VERIFY, "..", "contract", "treehash.py"), os.path.join(ROOT, "contract", "treehash.py"))
 def gate_in(dirpath, cache):
     out = tempfile.mkdtemp(dir=ROOT, prefix="out-")
     subprocess.run([sys.executable, "-I", os.path.join(dirpath, "gate_tests.py"), "--cache", cache, "verify"], cwd=d2,
