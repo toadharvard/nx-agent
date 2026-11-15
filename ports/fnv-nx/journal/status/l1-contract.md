@@ -1617,3 +1617,6 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
     - A: rows from the specs plus the platform's emitted extra rows, including the data-row symbols. table_id = sha256(A), and the keys depend on A only.
     - B: binding, a gate-side judgement against the link record.
   - Owner: w12. Next: a boot consumer root for milestones.
+
+## 2026-11-15 09:35
+- w15 (cand2), added: assumptions reds (L6 registry union by id, 3 L1 id-less mentions, ASM-999 fixture built at run time, .ver lexer); elffacts missing "Archive member included" section = empty list (L6A gl4 link); platform admit gates pure+selftests; RECIPE.md /dev/shm text corrected (only declared outputs are writable). Status: doing.
