@@ -152,6 +152,8 @@ def main():
         if r.returncode == 0:
             checks(out)
         host(td, so)
+        r = pb.compile(FIX, os.path.join(td, 'x.o'), so, args=['-fplugin-arg-fnvnx_dispatch-mode=1'])
+        check('an argument of the plugin is the recipe\'s refusal', pb.argument_refused(r, 'dispatch'), r.stderr[:500])
     finally:
         shutil.rmtree(td, ignore_errors=True)
     return check.done()

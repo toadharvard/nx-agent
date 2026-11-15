@@ -101,7 +101,7 @@ def main():
         if r.returncode == 0:
             checks(obj)
         r = pb.compile(FIX, os.path.join(td, 'x.o'), so, args=['-fplugin-arg-fnvnx_names-mode=1'])
-        check('an unknown plugin argument is an error', r.returncode != 0 and 'unknown plugin argument' in r.stderr, r.stderr[:500])
+        check('an unknown plugin argument is an error', pb.argument_refused(r, 'names'), r.stderr[:500])
     finally:
         shutil.rmtree(td, ignore_errors=True)
     return check.done()

@@ -187,7 +187,7 @@ def main():
             effect(obj)
         for arg in ('mode=1', 'fpfast'):
             r = pb.compile(os.path.join(HERE, 'pi', 'pi.cpp'), os.path.join(td, 'x.o'), [so], args=['-w', '-fplugin-arg-fnvnx_pi-' + arg])
-            check('unknown plugin argument %s is an error' % arg, r.returncode != 0 and 'unknown plugin argument' in r.stderr, r.stderr[:500])
+            check('unknown plugin argument %s is an error' % arg, pb.argument_refused(r, 'pi'), r.stderr[:500])
     finally:
         shutil.rmtree(td, ignore_errors=True)
     return check.done()
