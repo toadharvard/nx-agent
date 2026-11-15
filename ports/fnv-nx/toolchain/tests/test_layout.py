@@ -128,7 +128,9 @@ def dt_all(obj, label):
     """RULE DECLTYPE-COMPLETE: every global or weak symbol of the object's symbol table has exactly one line of .fnvnx.decltype (a type, or `-reason` of the closed set
     that link/ctypes_compat.py reads from the plugin), and every line is a symbol of the table; -> ({symbol: type}, {symbol: reason})"""
     rows, why = cc.parse_decltype_lines(pb.section(obj, '.fnvnx.decltype').encode(), label)
-    syms = {n for n, v in pb.symbols_of(obj).items() if v['bind'] in ('GLOBAL', 'WEAK') and v['type'] not in ('SECTION', 'FILE')}
+    # the pinned binutils' nm -g: the global and weak symbols, defined or not (readelf's column layout shifts for a symbol with a st_other flag such as an SVE variant-PCS one)
+    nm = os.path.join(os.path.dirname(pb.driver()), 'aarch64-none-elf-nm')
+    syms = {l.split()[-1] for l in subprocess.run([nm, '-g', obj], capture_output=True, text=True, check=True).stdout.splitlines() if len(l.split()) >= 2}
     lines = set(rows) | set(why)
     check('DECLTYPE-COMPLETE %s: one line for each of the %d global/weak symbols of the object (type or closed-set reason), no line for another' % (label, len(syms)),
           lines == syms and not (set(rows) & set(why)), (sorted(syms - lines), sorted(lines - syms)))
@@ -321,11 +323,11 @@ def decltype_cxx(td, so):
         got = dt_all(os.path.join(td, 'tspec.o'), 'tspec')[0]
         row = got.get('ts', '')
         check('DECLTYPE-SPEC: the row names each specialization by `_ZTS` + its Itanium mangling and parses with ctypes_compat',
-              'struct:_ZTS2TTIiE{t:int}' in row and 'struct:_ZTS1GIFicEE,' in row and 'struct:_ZTSN2TTIiE2InE{i:int}' in row and bool(cc.parse(row)), row)
+              'struct:_ZTS2TTIiE{t:int}' in row and 'struct:_ZTS1GIFicEE,' in row and 'struct:_ZTSN2TTIiE2InE)' in row and bool(cc.parse(row)), row)
     # DECLTYPE-COMPLETE in a C unit: a declaration with an assembler label is the symbol of the label (SYMSET: `*x` is stripped, the mark is on `x`), and a function the back
     # end calls implicitly (a binary128 sum is the library function __addtf3) has the reason libcall
     src = os.path.join(td, 'lbl.c')
-    open(src, 'w').write('int af(int) __asm__("realname");\nint q(int i) { volatile _Float128 a = i, b = 2; return (int)(a + b); }\nint use(void) { return af(1) + q(3); }\n')
+    open(src, 'w').write('int af(int) __asm__("realname");\nint q(int i) { volatile _Float128 a = i, b = 2; volatile _Float128 c = a + b; return i; }\nint use(void) { return af(1) + q(3); }\n')
     r = pb.compile(src, os.path.join(td, 'lbl.o'), so)
     check('DECLTYPE-COMPLETE: an assembler-label declaration and a libcall compile', r.returncode == 0, r.stderr[-800:])
     if r.returncode == 0:
