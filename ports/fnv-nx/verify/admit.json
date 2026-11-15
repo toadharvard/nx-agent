@@ -43,6 +43,7 @@
   {"path": "ports/fnv-nx/lift/tests/guest/imptest/lifted", "class": "product", "target": "guest", "gates": [], "recipe": "ports/fnv-nx/lift/tests/guest/imptest/lifted/build.json", "cxx_origin": {"lifted_by": "ports/fnv-nx/lift/tools/guestgen_imptest.py", "stage": "gen:ports/fnv-nx/lift/tests/guest/imptest/lifted:0"}},
   {"path": "ports/fnv-nx/lift/tests/guest/imptest/native", "class": "test", "target": "guest", "gates": [], "recipe": "ports/fnv-nx/lift/tests/guest/imptest/native/build.json", "cxx_origin": "native"},
   {"path": "ports/fnv-nx/lift/tests/guest/msvcrttest/lifted", "class": "product", "target": "guest", "gates": [], "recipe": "ports/fnv-nx/lift/tests/guest/msvcrttest/lifted/build.json", "cxx_origin": {"lifted_by": "ports/fnv-nx/lift/tools/guestgen_msvcrttest.py", "stage": "gen:ports/fnv-nx/lift/tests/guest/msvcrttest/lifted:0"}},
-  {"path": "ports/fnv-nx/lift/tests/guest/msvcrttest/native", "class": "test", "target": "guest", "gates": [], "recipe": "ports/fnv-nx/lift/tests/guest/msvcrttest/native/build.json", "cxx_origin": "native"}
+  {"path": "ports/fnv-nx/lift/tests/guest/msvcrttest/native", "class": "test", "target": "guest", "gates": [], "recipe": "ports/fnv-nx/lift/tests/guest/msvcrttest/native/build.json", "cxx_origin": "native"},
+  {"path": "ports/fnv-nx/verify/tests/icount", "class": "test", "target": "guest", "gates": ["build", "determinism", "linkstrict"], "recipe": "ports/fnv-nx/verify/tests/icount/build.json"}
  ]
 }
