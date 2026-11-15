@@ -179,7 +179,7 @@ LANG_X = {"c": "c", "cxx": "c++", "asm": "assembler-with-cpp"}   # the driver's 
 # diagnostics, defines, the language standard, the optimisation level (-O0..-O3, -Os, -Og: not -Ofast, which switches FP semantics), debug info,
 # section splitting. -Wa, -Wl, -Wp are driver pass-throughs, not warnings. `--param` with the compiler's own garbage-collector knobs
 # (ggc-min-expand, ggc-min-heapsize): they change when the compiler collects its memory, never the code it emits (the gcstress variant).
-PER_ROOT = re.compile(r"--param|ggc-min-(?:expand|heapsize)=[0-9]+|-W(?![alp],)[^\s]*|-D[^\s]+|-std=[^\s]+|-O[0-3sg]|-g[^\s]*|-ffunction-sections|-fdata-sections")
+PER_ROOT = re.compile(r"--param|ggc-min-(?:expand|heapsize)=[0-9]+|-W(?![alp],)[^\s]*|-D[^\s]+|-std=[^\s]+|-O[0-3sg]|-g[^\s]*|-ffunction-sections|-fdata-sections|-ftime-report")
 # The options of every link, fixed by the rule (RECIPE.md "Link"): the specs of the gcc driver for the ILP32 PIE multilib, no gc-sections, no id.
 AUX_FLAGS = ["-fstack-usage"]   # build --stack-usage 1: the CC stage also writes unit.su (documented: one line per function, its frame size and whether it is static); no code generation changes
 LD_FIXED = ["--build-id=none", "-pie", "--no-dynamic-linker", "-z", "text", "-z", "now", "-z", "pack-relative-relocs", "-z", "max-page-size=0x1000",
@@ -1827,6 +1827,7 @@ def store_merge(src, dst):
             todo.append(("keys", p, q, None))
     if bad:
         raise RecipeError(bad[:20])
+    tms = [(os.path.join(src, f), os.path.join(dst, f)) for f in sorted(os.listdir(src)) if f.endswith(".time") and os.path.isfile(os.path.join(src, f))]
     n = {k: 0 for k in STORE_KINDS + ("keys",)}
     for kind, p, q, mode in sorted(todo, key=lambda t: (t[0] == "keys", t[2])):
         cas.publish_file(q, src=p)
@@ -1834,7 +1835,61 @@ def store_merge(src, dst):
             os.chmod(q, mode)
             os.utime(q, (0, 0))
         n[kind] += 1
+    for p, q in tms:       # the timing sidecars (sandbox.write_time): measurements, never compared; whichever the destination holds is kept, else the source's is taken
+        if not os.path.exists(q):
+            cas.publish_file(q, src=p)
     return n
+
+
+TIME_ROW = re.compile(r"^\s*(.+?)\s*:\s+(\d+\.\d+) \(\s*\d+%\)\s+(\d+\.\d+) \(\s*\d+%\)\s+(\d+\.\d+) \(\s*\d+%\)")
+
+
+def timereport_passes(text):
+    """{pass name: {usr, sys, wall}} of the stderr TEXT of a `-ftime-report` compile (GCC's table: `name : usr (pct) sys (pct) wall (pct) ggc (pct)`; the total row is
+    `TOTAL`); a pass of the same name in a later table of the text adds up"""
+    out = {}
+    for ln in text.splitlines():
+        m = TIME_ROW.match(ln)
+        if m:
+            d = out.setdefault(m[1], {"usr": 0.0, "sys": 0.0, "wall": 0.0})
+            for k, v in zip(("usr", "sys", "wall"), m.groups()[1:]):
+                d[k] = round(d[k] + float(v), 3)
+    return out
+
+
+def timing_report(store, keys):
+    """The timing of the stages KEYS (a build's stage_keys) from the sidecars (sandbox.read_time): {kinds: {kind: {n, timed, cpu_s, wall_s}}, units: {unit: {cpu_s,
+    wall_s}} (the stages named `kind:unit`), passes: {pass: {usr, sys, wall}} (the TIMEREPORT of every stage whose argv holds -ftime-report: its stderr), untimed: n}.
+    A stage with no sidecar was only ever a hit in this store (or came from a store merged without it): it counts in n, not in timed."""
+    kinds, units, passes, untimed = {}, {}, {}, 0
+    for k in sorted(keys):
+        dp = os.path.join(store, "stage-docs", k + ".json")
+        if not os.path.isfile(dp):
+            untimed += 1
+            continue
+        doc = json.load(open(dp))
+        kind, _, unit = doc["stage"].partition(":")
+        d = kinds.setdefault(kind, {"n": 0, "timed": 0, "cpu_s": 0.0, "wall_s": 0.0})
+        d["n"] += 1
+        t = sandbox.read_time(store, k)
+        if t is None:
+            untimed += 1
+        else:
+            d["timed"] += 1
+            d["cpu_s"] = round(d["cpu_s"] + t["cpu_s"], 3)
+            d["wall_s"] = round(d["wall_s"] + t["wall_s"], 3)
+            u = units.setdefault(unit or kind, {"cpu_s": 0.0, "wall_s": 0.0})
+            u["cpu_s"] = round(u["cpu_s"] + t["cpu_s"], 3)
+            u["wall_s"] = round(u["wall_s"] + t["wall_s"], 3)
+        if "-ftime-report" in doc.get("argv", []):
+            res = sandbox._load(store, k)
+            if res:
+                text = open(cas._obj(store, cas.manifest(res["stderr"], store)), errors="replace").read()
+                for name, v in timereport_passes(text).items():
+                    p = passes.setdefault(name, {"usr": 0.0, "sys": 0.0, "wall": 0.0})
+                    for x in p:
+                        p[x] = round(p[x] + v[x], 3)
+    return {"kinds": kinds, "units": units, "passes": passes, "untimed": untimed}
 
 
 class Job:
@@ -3263,6 +3318,15 @@ def main(argv):
         if argv[:1] == ["store-merge"]:   # recipe store-merge SRC [--store DST]: DST defaults to $GATE_CACHE/store
             dst = dict(zip(argv[2::2], argv[3::2])).get("--store") or os.path.join(os.environ["GATE_CACHE"], "store")
             print("store-merge: " + " ".join("%s %d" % kv for kv in sorted(store_merge(argv[1], dst).items())))
+            return 0
+        if argv[:1] == ["timing"]:     # recipe timing --root R[@VARIANT] --store S [--ext E]: builds (every stage a hit when it was built before) and sums the sidecars
+            o = dict(zip(argv[1::2], argv[2::2]))
+            with tempfile.TemporaryDirectory() as td:
+                res = build(repo, o["--root"], o["--store"], os.path.join(td, "out"), int(o.get("--jobs", 4)), o.get("--ext"))
+            if res["status"] != "green":
+                print(json.dumps(res["failure"], indent=1))
+                return 2
+            print(json.dumps(timing_report(o["--store"], res["stage_keys"]), indent=1, sort_keys=True))
             return 0
         if argv[:1] == ["check"]:
             roots = load_admit(repo)

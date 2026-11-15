@@ -300,6 +300,14 @@ a root without variants keeps its keys), its objects are stored at `GATE_CACHE/o
 `root: "root@NAME"`. The gates that quantify over product roots (`gate_build.product_roots`)
 quantify over the pairs: build, determinism, objstub, linkstrict, argorder, contract's per-root gates.
 
+### Stage timing (`@time`, `recipe timing`)
+Every stage that executes (a miss, or a cold rerun) writes a sidecar `store/<key>.time` (`{"format": "fnvnx-stage-time/1", wall_s, cpu_s}`, the child's wait4 rusage and
+wall clock). It is a measurement: not part of the key, not in `keys/<key>/result.json`, never compared; `store-merge` copies a sidecar the destination lacks and never
+goes red on a differing one. A hit writes none. A variant `"time": {"flags_add": {"c": ["-ftime-report"], "cxx": ["-ftime-report"]}}` (a per-root flag class: it changes
+no object) makes the CC stage print GCC's pass table to stderr, kept in the record as the **TIMEREPORT** (a `-ftime-report` stage's stderr is not compared between two runs).
+`recipe.py timing --root R[@variant] --store S` builds R into a temporary directory and prints `{kinds, units, passes, untimed}`: sidecars summed per stage kind (`pp`, `cc`,
+...) and per unit, the TIMEREPORT summed per pass, and the stages that have no sidecar (hits only). Build with `@time` into a fresh store to time every pass.
+
 ## Include
 `include` is the unit's include path in order. A repo directory of it that lies in another admitted product root P (with a recipe for the unit's target) also brings
 P's own repo directories of `include`, transitively, after the consumer's own and each once (`recipe.include_closure`): a header that P ships names its dependencies once,
