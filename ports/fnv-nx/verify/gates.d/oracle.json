@@ -8,6 +8,7 @@
  ],
  "result": "oracle.json",
  "covers": [
-  "tool"
+  "tool",
+  "header"
  ]
 }

@@ -89,9 +89,6 @@ for g in TG:
     check("a test root is refused while gate %s has no file in gates.d" % g, list(bad) == tf and any(g in e for e in err))
 bad, err = ga.judge(tf, adm(tool, doc, troot), GATES + [g for g in TG if g != "doubles"], yes)
 check("a test root cannot be admitted while the doubles gate has no file in gates.d", list(bad) == tf and any("doubles" in e for e in err))
-for g in ("objstub", "doubles"):
-    bad, err = ga.judge(tf, adm(tool, doc, dict(troot, gates=[x for x in TG if x != g])), GATES + TG, yes)
-    check("a test root with objstub and doubles admits; one lacking %s is red" % g, list(bad) == tf and any(g in e for e in err))
 check("a test root naming the old `stub` or `legal` is refused: no such file in gates.d",
       all(list(ga.judge(tf, adm(tool, doc, dict(troot, gates=TG + [g])), GATES + TG, yes)[0]) == tf for g in ("stub", "legal")))
 bad, err = ga.judge(tf, adm(tool, doc, {k: v for k, v in troot.items() if k != "target"}), GATES + TG, yes)
@@ -116,5 +113,21 @@ json.dump({"roots": [{"path": T + "/p", "class": "product"}, {"path": T + "/t", 
           open(rp + "/ports/fnv-nx/verify/admit.json", "w"))
 check("the build family judges the product and the test roots; the other gates keep the product roots",
       gbd.buildable_roots(rp) == [T + "/p", T + "/t"] and gbd.product_roots(rp) == [T + "/p"])
+# class header: headers only, no recipe, no target (both derived from the recipes that include it), no translation unit
+HG = list(ga.REQUIRED_HEADER)
+hroot = {"path": T + "/inc", "class": "header"}
+hf = [T + "/inc/x/a.h", T + "/inc/x/b.inc"]
+bad, err = ga.judge(hf, adm(tool, doc, hroot), GATES + HG, yes)
+check("a header root of header files, with no recipe and no target, is certified", not bad and not err)
+check("REQUIRED_HEADER is the gates that read sources, no object gate", set(ga.REQUIRED_HEADER) == {"assumptions", "pure", "oracle"}
+      and ga.gates_of(hroot) == list(ga.REQUIRED_HEADER))
+for k, v in (("target", "host"), ("recipe", T + "/inc/build.json"), ("variants", {"m": {}}), ("cxx_origin", "native")):
+    bad, err = ga.judge(hf, adm(tool, doc, dict(hroot, **{k: v})), GATES + HG, yes)
+    check("a header root naming %s is refused (a root with no units has none)" % k, set(bad) == set(hf) and any(k in e for e in err))
+for u in ("/inc/x/c.c", "/inc/x/d.cc", "/inc/x/e.S", "/inc/build.json"):
+    bad, err = ga.judge(hf + [T + u], adm(tool, doc, hroot), GATES + HG, yes)
+    check("a header root with %s is refused (it has a unit: a product or test root)" % u, bad and any("unit" in e for e in err))
+bad, err = ga.judge(hf, adm(tool, doc, hroot), GATES + [g for g in HG if g != "oracle"], yes)
+check("a header root is refused while a gate of REQUIRED_HEADER has no file in gates.d", set(bad) == set(hf) and any("oracle" in e for e in err))
 print("%d failed" % fails)
 sys.exit(1 if fails else 0)

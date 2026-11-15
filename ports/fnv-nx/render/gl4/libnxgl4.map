@@ -1,0 +1,6 @@
+/* linker version script of libnxgl4.so: the embedder-facing API only. nxgl4_guest_ptr and nxgl4_on_present are
+ * undefined in the library by design: the embedder provides them. */
+{
+  global: nxgl4_create; nxgl4_destroy; nxgl4_ext; nxgl4_last_error; nxgl4_shim_glsl;
+  local: *;
+};

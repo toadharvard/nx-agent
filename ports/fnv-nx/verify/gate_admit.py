@@ -28,6 +28,9 @@ Classes:
   test     tests linked against the real files of the product roots: REQUIRED_TEST gates (build, determinism, linkstrict, objstub, doubles,
            oracle, assumptions, pure), a "recipe" like a product root and a "target"; never REQUIRED_PRODUCT. The gates of
            REQUIRED_TEST that cover roots (build, determinism, linkstrict, objstub: gates.d `covers`) include class test.
+  header   headers shared by include (a directory of .h/.hh/.hpp/.hxx/.inc/.inl files that product and test roots name in `include`): no recipe, no
+           "target" (a root with no units has no target: both are derived from the recipes that include it), no translation unit, no build.json.
+           Gates: REQUIRED_HEADER (the gates that read sources). A header root is a home for `include` of every product and test root of either target.
   ref      reference files that tests/oracle.json records point at (spec, contract, model): no gate named, no recipe, no units, no link,
            no outputs. Every file of a ref root is the `path` of a reference of some tests/oracle.json, and none is a build.json or a
            test (is_test_file): a product or test root is never a ref root. The gates that cover class ref (gates.d `covers`) are the
@@ -47,7 +50,7 @@ import gatesdir  # noqa: E402
 
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
-CLASSES = ("doc", "tool", "product", "ref", "test")
+CLASSES = ("doc", "tool", "product", "ref", "test", "header")
 # A product root names a gate for every run-time failure class of VERDICT.md. Wired on the trunk: objstub .. oracle,
 # the contract and link gates. Owned by other leads: imports, forms, d3d9total. L2's r7, namegate, argordergate, abi are wired.
 # Classes A-G of the owner's rule: datamodel, order, fpexact, eh, exepin, addr32, machine.
@@ -60,7 +63,11 @@ REQUIRED_PRODUCT = ("objstub", "linkstrict", "onedef", "determinism", "oracle",
 # tests"): it is judged by its own set, never by REQUIRED_PRODUCT. Its gates: the build gates, the doubles gate (symbols the test defines
 # intersect symbols of the product roots it links = empty), an oracle record for every test, the registry gate and pure (the stub gate is objstub; no Legal gate is built, owner decision of 2026-11-15).
 REQUIRED_TEST = ("build", "determinism", "linkstrict", "objstub", "doubles", "oracle", "assumptions", "pure")
-REQUIRED = {"doc": (), "tool": ("selftests",), "product": REQUIRED_PRODUCT, "ref": (), "test": REQUIRED_TEST}
+# A header root (class header) holds the headers that product and test roots include and no translation unit: it has no recipe, no target, no units, no link
+# (so no object gate applies), and is judged by the gates that read sources.
+REQUIRED_HEADER = ("assumptions", "pure", "oracle")
+REQUIRED = {"doc": (), "tool": ("selftests",), "product": REQUIRED_PRODUCT, "ref": (), "test": REQUIRED_TEST, "header": REQUIRED_HEADER}
+UNIT_EXTS = (".c", ".cc", ".cpp", ".cxx", ".s", ".S")   # a translation unit (the same set recipe.py compiles); a header root holds none
 # The roots whose python reads the host by design (the sandbox, the recipe, the gate drivers, the farm scripts): gate_pure.py HOST-READER modules.
 # Every other tool and product root is judged by "pure".
 HOST_READERS = (TREE + "/verify", TREE + "/farm")
@@ -156,6 +163,11 @@ def judge(files, admit, gate_names, exists, ref_paths=frozenset()):
         else:
             if cls == "ref" and "recipe" in r:
                 why.append("a ref root has no recipe (it has no units, no link and no outputs)")
+            if cls == "header":
+                why += ['a header root has no "%s" (it has no units, so no target, recipe, variants or link: they are derived from the roots that include it)' % k
+                        for k in ("recipe", "target", "variants", "cxx_origin") if k in r]
+                why += ["a header root holds the translation unit %s (a root with a unit is a product or test root)" % f for f in files
+                        if any(f.startswith(t + "/") for t in trees(r)) and (f.endswith(UNIT_EXTS) or f.rsplit("/", 1)[-1] == "build.json")]
             if cls == "test" and r.get("target") not in ("guest", "host"):
                 why.append('a test root declares "target": "guest" or "host"')
             if "variants" in r:   # the variants of a product root: {NAME: {"target": "guest"|"host"}}, addressed as root@NAME (recipe.entry_of); the recipe holds their flags

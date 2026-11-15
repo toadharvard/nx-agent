@@ -35,7 +35,7 @@ interpreter on the product path, no fast path switched off for good.
    - Forbidden: stubs, no-ops, placeholders, trap paths, fallbacks, heuristics, name guesses, hand lists, sampling as
      proof, and measure-then-skip.
    - Tests and runs verify; they never decide.
-2. **Correctness is absolute.** The only exceptions are the 10 OWNER assumptions, decided in advance (verify/ASSUMPTIONS.json):
+2. **Correctness is absolute.** The only exceptions are the 10 OWNER assumptions, decided in advance (ASM-001 to ASM-009 and ASM-055 in `verify/ASSUMPTIONS.json`):
    1. the compiler is correct;
    2. SHA-256;
    3. Win32 and D3D9 as documented;
@@ -47,7 +47,7 @@ interpreter on the product path, no fast path switched off for good.
    9. the pinned formal tools and published theorems.
    10. the x86 ISA as the Intel SDM documents it, where no pinned formal model covers it (x87), cited per line.
 
-   Every other assumption is REMOVE, with an owner and a gate. No session adds an assumption.
+   Every other registry entry is REMOVE, with an owner and a gate, and no session adds one (the `assumptions` gate, ASM-001).
 3. **The trunk is always green.** Green means that what the compiler built does not fail at run time. The stub gate is
    an absolute 0.
 4. **One build machinery.** `verify/recipe.py` plus `GATE_CACHE`, with:
@@ -69,7 +69,7 @@ interpreter on the product path, no fast path switched off for good.
 
 | Role | Who | Decides | Does not |
 |---|---|---|---|
-| Owner | the human | goals, OWNER assumptions | get asked for a yes |
+| Owner | the human | goals, the OWNER registry entries (ASM-001 to ASM-009, ASM-055) | get asked for a yes |
 | Orchestrator | the session titled "New Vegas Switch port" | task order, priorities, worker caps, rule rulings between layers, merges to the trunk (only on a green `l1.py merge` verdict), session lifecycle, standing orders (written into CLAUDE.md, then a message points to them) | mechanical work; merging red; widening Legal or the rules |
 | Lead (Opus), one per layer | see section 4 | correctness within its layer; accepts or rejects worker results (the rule closes the class, the numbers are global, the build used the machinery) | mechanical work itself; work off the path |
 | Worker (Sonnet) | created by a lead | nothing beyond its task | anything not named in its task (files, rule, check, branch) |
@@ -88,7 +88,7 @@ interpreter on the product path, no fast path switched off for good.
 
 | Layer | Owner's name | Owns |
 |---|---|---|
-| L1 | Контракт и сборка | recipe.py and the cache; the verdict and all gates; trunk merges; the assumptions and PERFDEBT registries; the loader root; the guest link (link/guest.json, onedef, link root); the IAT root; the call-graph reach certificates |
+| L1 | Контракт и сборка | recipe.py and the cache; the verdict and all gates; trunk merges; the `ASSUMPTIONS.json` and `PERFDEBT.json` registries; the loader root; the guest link (link/guest.json, onedef, link root); the IAT root; the call-graph reach certificates |
 | L2 | Исходники и плагины | the GCC plugins (order, ftoi, addr, dispatch, names, sdd, pi); N1 name certification (identity, not role); TLS and extents facts; the shim/compat headers |
 | L3a | Лифт | the lifter and its facts (dispatch, EH tables, flags, DEF0/DEFPRIOR, control-state value analysis); the packs; lift/rt; the bridges; the product ELF root |
 | L3b | Проверка лифта | shape/form certificates against the Sail model (the pack's own universe); SEH/EH conformance; full CONTEXT restore; lift tests with no doubles |

@@ -106,7 +106,7 @@ def main():
         u = c = 0
         ids, why = [], []
         adm = recipe.load_admit(repo)
-        roots = [r for r in gate_build.product_roots(repo) if adm[recipe.split_spec(r)[0]].get("target") == "guest"]
+        roots = [r for r in gate_build.product_roots(repo) if recipe.entry_of(adm, r).get("target") == "guest"]
         for r in roots:
             ru, rc, rids, rd = judge_root(repo, cache, r)
             u, c, ids = u + ru, c + rc, ids + rids

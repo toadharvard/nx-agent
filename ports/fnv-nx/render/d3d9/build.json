@@ -1,0 +1,177 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "external": "gcc-msvcmodel",
+  "cc": "bin/aarch64-linux-gnu-gcc",
+  "cxx": "bin/aarch64-linux-gnu-g++"
+ },
+ "flags": {
+  "c": [
+   "-O2",
+   "-Werror=attributes",
+   "-Wall",
+   "-DSTDMETHODCALLTYPE=",
+   "-std=gnu11"
+  ],
+  "cxx": [
+   "-O2",
+   "-Werror=attributes",
+   "-Wall",
+   "-DSTDMETHODCALLTYPE=",
+   "-DFNVNX_SDD=1",
+   "-std=gnu++20"
+  ],
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/shim/include",
+  "ports/fnv-nx/render/nxgpu",
+  "ports/fnv-nx/render/shaders/translator/include",
+  "ports/fnv-nx/lib/sha256/include",
+  "ports/fnv-nx/render/d3d9/gen",
+  "ports/fnv-nx/render/pair/include",
+  "ports/fnv-nx/render/smscan/include"
+ ],
+ "units": "all",
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/render/d3d9/gen/gen_impl.py",
+   "args": [
+    "/out/gen",
+    "/in/ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json"
+   ],
+   "inputs": [
+    "ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json"
+   ],
+   "outputs": [
+    "gen/d9impl.gen.h",
+    "gen/d9impl_methods.txt",
+    "gen/d9impl_unk.gen.cpp"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/render/d3d9/dev/state_model.py",
+   "args": [
+    "/out/gen",
+    "/in/ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json"
+   ],
+   "inputs": [
+    "ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json"
+   ],
+   "outputs": [
+    "gen/state.gen.cpp",
+    "gen/state.gen.h",
+    "gen/state_methods.txt"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/render/d3d9/gen/gen_bridge.py",
+   "args": [
+    "/out/gen",
+    "/in/ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json",
+    "/in/ports/fnv-nx/bridgefacts/d3d9"
+   ],
+   "inputs": [
+    "ports/fnv-nx/bridgefacts/d3d9"
+   ],
+   "outputs": [
+    "gen/d9bridge.gen.cpp"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/render/d3d9/env/gen_env.py",
+   "args": [
+    "/out/gen",
+    "/in/ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json"
+   ],
+   "inputs": [
+    "ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json",
+    "ports/fnv-nx/shim/include/d3d9types.h"
+   ],
+   "outputs": [
+    "gen/env_caps.gen.h",
+    "gen/env_table.gen.cpp",
+    "gen/env_table.gen.h",
+    "gen/ident_docked.bin",
+    "gen/ident_handheld.bin"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/render/d3d9/ffp/gen_glsl.py",
+   "args": [
+    "/out/gen"
+   ],
+   "inputs": [],
+   "outputs": [
+    "gen/ffp_glsl.gen.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/render/d3d9/gen/gen_wine_ids.py",
+   "args": [
+    "/out/gen",
+    "/in/ports/fnv-nx/verify/wine_fixme.tsv"
+   ],
+   "inputs": [
+    "ports/fnv-nx/verify/wine_fixme.tsv"
+   ],
+   "outputs": [
+    "gen/wine_fixme_ids.gen.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/render/d3d9/front/gen_enums.py",
+   "args": [
+    "/out/gen/d3d9_enums.gen.h",
+    "/in/ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json"
+   ],
+   "inputs": [
+    "ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json"
+   ],
+   "outputs": [
+    "gen/d3d9_enums.gen.h"
+   ]
+  }
+ ],
+ "plugins": [
+  {
+   "name": "fnvnx_ftoi"
+  },
+  {
+   "name": "fnvnx_order"
+  },
+  {
+   "name": "fnvnx_sdd"
+  },
+  {
+   "name": "fnvnx_pi"
+  },
+  {
+   "name": "fnvnx_dispatch"
+  },
+  {
+   "name": "fnvnx_addr"
+  },
+  {
+   "name": "fnvnx_names"
+  },
+  {
+   "name": "fnvnx_layout"
+  }
+ ],
+ "external": [
+  {
+   "name": "gcc-msvcmodel",
+   "repo": "fnv-nx-build",
+   "ref": "tools/gcc-ilp32-msvcmodel",
+   "commit": "b274ec067a2f965807a359853f456e31c67a49af",
+   "tree_sha256": "a1eeb84d83a6ecfa631643575c49581dc72a48b961b6e6db31ad2a63436debec",
+   "at": "/ext/gcc"
+  }
+ ],
+ "link": null,
+ "outputs": {
+  "ident_handheld.bin": "gen/ident_handheld.bin",
+  "ident_docked.bin": "gen/ident_docked.bin"
+ }
+}

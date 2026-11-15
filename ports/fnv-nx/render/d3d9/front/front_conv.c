@@ -26,6 +26,7 @@ uint32_t nx_d3d9_converted_size(uint32_t d3dfmt, uint32_t w, uint32_t h, uint32_
     return mip_pixels(w, h, mips, blocks) * row.info.bytes * faces;
 }
 
+// ASM-638 (verify/ASSUMPTIONS.json)
 /* BC4 unorm block, decoded as Mesa's util_format_rgtc: integer division, truncating. */
 static void bc4_block(const uint8_t* b, uint8_t out[16]) {
     uint8_t e[8];
