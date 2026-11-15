@@ -1905,3 +1905,5 @@ bottleneck: the cand3 head (w12: objstub terminator, L5 header move), and the ca
   - The layout comes from w7's producer code at 3a5531e1 and is re-checked against w7's first real sample.
   - Also on that branch: 520eaa33, the exe row in modules.tsv, sent to w12 and w7. Both commits are cand4.
 bottleneck: the cand3 head (w12), and the cand2 merge (w15).
+- 22:54 The loader↔platform cycle is closed by L5 w9 a9cefdbec (hostabi/include/fnvnx/loader_iface.h; the loader has 0 platform includes; loader, platform, @vclock and rt/guest are green). Sent to w12 for cand3.
+bottleneck: the cand3 head (w12: objstub terminator, then the merge of the lines), and the cand2 merge (w15).
