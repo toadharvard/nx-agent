@@ -205,3 +205,8 @@ After the first frame:
   - Defect found: order's bit-field path emits a fenced plain MEM, which no RTL refusal protects.
   - Cause: a second emission form.
   - Closed by one form: the representative unit as __atomic acquire/release, plus deletion of every other fenced-plain emission except string-op calls. Owner: w2.
+- 2026-11-15 01:02 Rule D (gate_order), open: 694 of 178,724 accesses, at L1 w23 dd614961, over the 114 platform objects at w1 ba8ceff1.
+  - Escaping-frame variables left plain: 322 (sp-overlap 238, tag-D 39, tag-X 45). Owner: w1, cause first.
+  - Nonframe: 372. Owner: w2, grouped by cause.
+- DATAMODEL 1760d47f3: cpp-docs subset mirror (tools/cpp-docs 1bc81a52b, tree 9c63b1c7…); S31 wint_t hunk; S33 stdint rule. CHAR16/32/8 are not tm macros.
+- odrdef ICE on swkbd.cpp:166 (mangle.cc:2515) goes to w3. targets.json's guest_platform.triplet goes to the farm.
