@@ -941,3 +941,10 @@ Paused: w3b, w4, farm; no other work.
     - w6 (doing): remove the __builtin_unreachable (undefined behaviour) by exact typing: nx_pair_ffp_vs_row and nx_pair_ffp_ps_row(bool flat), with the stage named statically at each call site.
     - Gap: ffp_prog.cpp is compiled nowhere until L1's plugin mount fix (crossing_terms.inc).
     - w5 (doing): final sm_link on ece3d7b16. The universe adds the 5 scale rows and the FFP × translator pairs per shade mode.
+- 16:00Z w6 3e4e9bd6b: row 15 done.
+    - The FFP UBO blocks are generated from the C structs NxFfpPsState and NxFfpVsState.
+    - The layout asserts are a gl4shim output (FFP_LAYOUT). The hand offset tables are deleted; values are unchanged (PS 800, VS 2144).
+    - The mutation test fails the build.
+    - Found: the FFP GLSL says `#version 460`, but the backend is GL 4.5. w6 (doing): the version comes from one shim record.
+    - w6 (doing): the vs/ps row split and the stale twin references in the README.
+    - w5: the final run waits on that head.
