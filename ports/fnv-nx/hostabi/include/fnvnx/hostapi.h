@@ -540,6 +540,9 @@ typedef uint64_t (*fnvnx_hfn5)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t)
 extern const FnvnxHostApi *fnvnx_host;
 /* FNVNX_HOST_HAS(slot): the host's table is big enough to hold the slot (a table of an older host ends before it). The fact comes from the table's
  * size field (sizeof(FnvnxHostApi) as the host built it); no slot value is read or compared (HOST1: a slot is only called). */
+/* FNVNX_PROCESS_END(code): the one body of "the process ends now" - the host's `exit` slot, which does not return (no handler, no flush, no DLL detach).
+ * os_terminate_process (platform/guest/os_guest.c) and the violation exits (platform/win32/platstat.cpp) expand it; no other code calls the slot. */
+#define FNVNX_PROCESS_END(code) do { FNVNX_HCALL1(exit, (code)); __builtin_unreachable(); } while (0)
 #define FNVNX_HOST_HAS(slot) (fnvnx_host->size >= offsetof(FnvnxHostApi, slot) + sizeof(fnvnx_hslot))
 #define FNVNX_HCALL0(slot) FNVNX_HCALL0_ON(fnvnx_host, slot)
 #define FNVNX_HCALL1(slot, a) FNVNX_HCALL1_ON(fnvnx_host, slot, a)

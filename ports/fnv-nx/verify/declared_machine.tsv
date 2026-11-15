@@ -22,3 +22,4 @@
 9	c_purecall	process-end	wine-9.0:dlls/msvcrt/exit.c:_purecall	noreturn	-
 10	fnvnx_thread_exit	thread-end	hostabi:hostabi/include/fnvnx/hostapi.h:thread_exit	noreturn	-
 11	FatalAppExitA	process-end	wine-9.0:dlls/kernelbase/debug.c:FatalAppExitA	noreturn	-
+12	os_terminate_process	process-end	hostabi:hostabi/include/fnvnx/hostapi.h:exit|wine-9.0:dlls/ntdll/unix/process.c:NtTerminateProcess	noreturn	-
