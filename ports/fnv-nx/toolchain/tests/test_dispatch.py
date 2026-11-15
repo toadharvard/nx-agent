@@ -78,6 +78,15 @@ FORMS = [
      'a host slot value is passed as an argument'),
     ('copy through __builtin_memcpy', 'void f(Api *p, const Api *q) { __builtin_memcpy(p, q, sizeof *p); }',
      'an aggregate with host slots is copied, loaded, stored, passed or returned by value'),
+    # CONT-P: a pointer to a record that holds a host slot does not become an integer or a pointer to another type
+    ('CONT-P: memcpy of the table (void *)', 'void *memcpy(void *, const void *, unsigned long);\nchar buf[64];\nvoid f() { memcpy(buf, host_api, 8); }',
+     'CONT-P: a pointer to a record that holds a host slot is converted to a pointer to another type'),
+    ('CONT-P: cast to char *', 'const char *f() { return (const char *)host_api; }',
+     'CONT-P: a pointer to a record that holds a host slot is converted to a pointer to another type'),
+    ('CONT-P: cast to an integer', 'unsigned long f() { return (unsigned long)host_api; }',
+     'CONT-P: a pointer to a record that holds a host slot is converted to an integer'),
+    ('CONT-P: a record that holds the table', 'struct W { Api a; };\nconst unsigned long long *f(const W *w) { return (const unsigned long long *)w; }',
+     'CONT-P: a pointer to a record that holds a host slot is converted to a pointer to another type'),
 ]
 
 
@@ -114,6 +123,19 @@ def host(td, so):
     dis = pb.objdump(os.path.join(td, 'alias.o')) if r.returncode == 0 else ''
     check('a slot typed through a second typedef is a host slot (no dispatch, plain blr)',
           r.returncode == 0 and calls(body(dis, '_Z2a1y')) == 0 and re.search(r'\b(?:blr|br) x\d+', body(dis, '_Z2a1y')), r.stderr[:500] or body(dis, '_Z2a1y'))
+    # CONT-P allows what is not a loss of the type: a qualifier change, the same record, a callee that takes the table typed
+    src = os.path.join(td, 'contp_ok.cpp')
+    open(src, 'w').write(PRE + 'unsigned take(const Api *p) { return p->size; }\nunsigned f(Api *p) { return take(p) + take((const Api *)p) + take(host_api); }\n')
+    r = pb.compile(src, os.path.join(td, 'contp_ok.o'), so)
+    check('CONT-P: a qualifier change and a callee typed with the table are not errors', r.returncode == 0, r.stderr[:800])
+    for name, text, want in (('memcpy', 'void *memcpy(void *, const void *, unsigned long);\nchar buf[64];\nvoid f(void) { memcpy(buf, host_api, 8); }',
+                              'CONT-P: a pointer to a record that holds a host slot is converted to a pointer to another type'),
+                             ('int', 'unsigned long f(void) { return (unsigned long)host_api; }', 'CONT-P: a pointer to a record that holds a host slot is converted to an integer')):
+        src = os.path.join(td, 'contp_c_%s.c' % name)
+        open(src, 'w').write('typedef unsigned long long __attribute__((fnvnx_host)) hslot;\ntypedef struct Api { unsigned size; hslot open; hslot tab[2]; } Api;\n'
+                             'extern const Api *host_api;\n' + text + '\n')
+        r = pb.compile(src, os.path.join(td, 'contp_c_%s.o' % name), so)
+        check('CONT-P in a C unit: %s' % name, r.returncode != 0 and want in r.stderr, r.stderr[:600])
     src = os.path.join(td, 'bad.cpp')
     open(src, 'w').write('typedef int __attribute__((fnvnx_host)) bad;\n')
     r = pb.compile(src, os.path.join(td, 'bad.o'), so)

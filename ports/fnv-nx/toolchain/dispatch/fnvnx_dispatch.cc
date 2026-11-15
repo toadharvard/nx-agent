@@ -43,6 +43,12 @@
  *      field is taken; and if an aggregate that contains such a field is copied, loaded, stored, passed or returned
  *      by value (its slots would travel as plain data). So a host address never reaches fnvnx_dispatch, and the
  *      callee of a host-ABI call is always a value the host wrote.
+ *   3. CONT-P, at PLUGIN_PRE_GENERICIZE (conversions of C and C++ are still explicit there, as NOP / CONVERT /
+ *      VIEW_CONVERT): a conversion from a pointer (or reference) to a record that holds an fnvnx_host field,
+ *      recursively through members and arrays, to an integer or to a pointer (reference) to another type is an
+ *      error; qualifier changes and a conversion to the same record are not. An opaque callee (memcpy, memset,
+ *      a `void *` parameter) cannot receive the table, and a callee that takes a `const FnvnxHostApi *` is guest
+ *      code, built with this plugin, so its loads are checked by 2.
  * The unit's section `.fnvnx.dispatch` (not loaded) has one line `symbol<TAB>rewritten<TAB>host` for every function with
  * an indirect call: the number of call sites rewritten and the number of host-ABI calls.
  */
@@ -234,6 +240,33 @@ static bool contains_host(tree t)
     for (tree f = TYPE_FIELDS(t); f; f = DECL_CHAIN(f))
       if (TREE_CODE(f) == FIELD_DECL && contains_host(TREE_TYPE(f))) return true;
   return false;
+}
+
+/* CONT-P: the explicit conversions of a function body, walked before genericization */
+static tree contp_walk(tree *tp, int *walk_subtrees, void *)
+{
+  tree e = *tp;
+  if (!e) return NULL_TREE;
+  if (TYPE_P(e)) { *walk_subtrees = 0; return NULL_TREE; }
+  const enum tree_code c = TREE_CODE(e);
+  if (c != NOP_EXPR && c != CONVERT_EXPR && c != VIEW_CONVERT_EXPR) return NULL_TREE;
+  tree src = TREE_TYPE(TREE_OPERAND(e, 0)), dst = TREE_TYPE(e);
+  if (!src || !dst || !(POINTER_TYPE_P(src))) return NULL_TREE;
+  tree sp = TREE_TYPE(src);
+  if (!contains_host(sp)) return NULL_TREE;
+  if (POINTER_TYPE_P(dst)) {
+    if (TYPE_MAIN_VARIANT(TREE_TYPE(dst)) == TYPE_MAIN_VARIANT(sp)) return NULL_TREE;   /* the same record: a qualifier change */
+    error_at(EXPR_LOCATION(e), "HOST1: CONT-P: a pointer to a record that holds a host slot is converted to a pointer to another type");
+  } else if (INTEGRAL_TYPE_P(dst)) {
+    error_at(EXPR_LOCATION(e), "HOST1: CONT-P: a pointer to a record that holds a host slot is converted to an integer");
+  }
+  return NULL_TREE;
+}
+
+static void contp_fn(void *gcc_data, void *)
+{
+  tree fn = (tree)gcc_data;
+  if (DECL_SAVED_TREE(fn)) walk_tree_without_duplicates(&DECL_SAVED_TREE(fn), contp_walk, NULL);
 }
 
 /* a reference that names a field of host slot type (at any depth of the access path) */
@@ -666,6 +699,7 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
     return 1;
   }
   register_callback(info->base_name, PLUGIN_ATTRIBUTES, register_attrs, NULL);
+  register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, contp_fn, NULL);
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);
   register_pass_info ap;
   ap.pass = new agg_pass(g);
