@@ -7,6 +7,7 @@ function has a row; a template instantiated in two units whose dependent call re
 No network, no game data.  Run: python3 -I <this file> from the checkout root."""
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -40,6 +41,24 @@ def rows(obj):
     return out
 
 
+def raw_unit(td, so):
+    """the unit of the farm's libstdc++ failure (a header from a -I directory), compiled raw by the pinned driver: refused naming the cause; with -save-temps: builds"""
+    drv = pb.driver()
+    inc = os.path.join(td, 'rawinc')
+    os.makedirs(inc)
+    open(os.path.join(inc, 'rh.h'), 'w').write('inline int rcmp(int a) { return a < 3; }\n')
+    src = os.path.join(td, 'raw.cc')
+    open(src, 'w').write('#include <rh.h>\nint rf(int x) { return rcmp(x); }\nint (*rp)(int) = rcmp;\n')
+    base = [drv, '-c', '-O2', '-I' + inc] + sum((['-fplugin=' + p] for p in so), []) + [src]
+    r = subprocess.run(base + ['-o', os.path.join(td, 'raw.o')], capture_output=True, text=True, cwd=td)
+    check('a raw unit is refused', r.returncode != 0, r.stderr[:600])
+    check('the refusal names the cause (not preprocessed), not "could not be lexed again"', 'not preprocessed' in r.stderr and 'lexed again' not in r.stderr, r.stderr[:600])
+    r = subprocess.run(base + ['-save-temps=obj', '-o', os.path.join(td, 'raw2.o')], capture_output=True, text=True, cwd=td)
+    check('the same unit under -save-temps builds', r.returncode == 0, r.stderr[:600])
+    row = [l for l in pb.section(os.path.join(td, 'raw2.o'), '.fnvnx.odrdef').splitlines() if l.startswith('_Z4rcmpi')]
+    check('the -save-temps object has the definition row of the header function', len(row) == 1, row)
+
+
 def main():
     td = tempfile.mkdtemp(prefix='test-odrdef-')
     try:
@@ -67,6 +86,9 @@ def main():
               'dsh::BF *mk0() { return new dsh::Conc; }\ndsh::BF *mk1() { return new dsh::Stage; }\ndsh::BF *mk2() { return new dsh::Def; }\ndsh::BF *mk3() { return new dsh::Over; }\n'
               'void del(dsh::BF *p) { delete p; }\n')
         dt = build_unit(td, so, 'dt', DT, O0)
+        # ODRDEF-PP: the farm's runtime build compiles raw sources with the driver. A raw unit (include chain and macros only parse_in holds) is refused with its
+        # cause; the same unit through the driver's two steps (-save-temps) builds, and a unit with a -I header through the recipe's PP and CC stages builds.
+        raw_unit(td, so)
         if not all((a, b, c, d, ta, tb, pk, da, db, ca, dt)):
             return check.done()
         ra, rb, rc, rd, rta, rtb = map(rows, (a, b, c, d, ta, tb))

@@ -1120,6 +1120,7 @@ struct OdrTok { std::string text; std::string file; int line, col; };
 static std::vector<OdrTok> odr_toks;
 static std::map<std::tuple<std::string, int, int>, size_t> odr_at;
 static bool odr_loaded, odr_lexed_ok;
+static const char *odr_lex_why = "the unit could not be lexed again";
 
 static bool odr_nodiag(cpp_reader *, enum cpp_diagnostic_level, enum cpp_warning_reason, rich_location *, const char *, va_list *) ATTRIBUTE_FPTR_PRINTF(5, 0);
 static bool odr_nodiag(cpp_reader *, enum cpp_diagnostic_level l, enum cpp_warning_reason, rich_location *, const char *m, va_list *ap) { (void)l; (void)m; (void)ap; odr_lexed_ok = false; return false; }
@@ -1132,6 +1133,17 @@ static void odr_load()
   if (odr_loaded) return;
   odr_loaded = true;
   odr_lexed_ok = true;
+  /* RULE (ODRDEF-PP): the second lex of the unit reads exactly the text the first lex read, which is a function of the unit's own preprocessor state alone
+   * only when the unit is its own preprocessed text (-fpreprocessed: every include, macro and -include already applied, line markers kept). A raw source's
+   * state is the include chains, the builtin and command-line macros and the -include list, held by parse_in (c_finish_options and register_include_chains
+   * keep them in statics of the front end) and not readable from here: a second reader over a raw source would lex another token sequence, or fail on its
+   * first #include. So a raw unit is refused by this cause, never lexed with a rebuilt state; the driver's -save-temps (the compiler's own two steps, as the
+   * recipe's PP and CC stages) gives the preprocessed unit. */
+  if (!cpp_get_options(parse_in)->preprocessed) {
+    odr_lexed_ok = false;
+    odr_lex_why = "the unit is not preprocessed (-fpreprocessed): its include chains and macros are not readable to lex it again; compile its preprocessed text (the driver's -save-temps, or the recipe's PP stage)";
+    return;
+  }
   line_maps *lm = new line_maps();
   linemap_init(lm, BUILTINS_LOCATION);
   lm->reallocator = odr_realloc;   /* toplev.cc general_init sets the front end's own (ggc) ones; this table is the plugin's, in the heap */
@@ -1164,7 +1176,7 @@ static void odr_load()
 static bool odr_hash_range(location_t start, location_t end, std::string &hex, std::string &why)
 {
   odr_load();
-  if (!odr_lexed_ok) { why = "the unit could not be lexed again"; return false; }
+  if (!odr_lexed_ok) { why = odr_lex_why; return false; }
   size_t at[2];
   location_t loc[2] = { start, end };
   for (int k = 0; k < 2; k++) {
