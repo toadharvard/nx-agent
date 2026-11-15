@@ -18,7 +18,6 @@
  "include": [
   "ports/fnv-nx/loader/include",
   "ports/fnv-nx/hostabi/include",
-  "ports/fnv-nx/platform/include",
   "/ext/a64/aarch64-none-elf/include",
   "ports/fnv-nx/lib/sha256/include"
  ],

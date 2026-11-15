@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """descs.py - the `descs` fact of the DISPATCH1 bridges: the set of call-shape descriptors of every indirect call of native code.
 
-    descs.py --section NAME [OBJS_DIR [OUT]]   defaults /objs and /out/descs.tsv (the generate stage's mounts, recipe `objects_of`; the recipe's
-                                               `objects_of.section` is the one place the section is named: the build appends `--section NAME`)
+    descs.py [OBJS_DIR [OUT]]        defaults /objs and /out/descs.tsv (the generate stage's mounts, recipe `objects_of`)
 
 Input: every ELF object under OBJS_DIR (`<root with / as __>/<unit>.o`, the objects of every admitted product root but the ones the recipe excepts).
 The section `.fnvnx.disp` of an object is the fact toolchain/dispatch/fnvnx_dispatch.cc writes: ASCII, LF-terminated, sorted, unique, one descriptor
@@ -24,6 +23,7 @@ import re
 import struct
 import sys
 
+SECTION = ".fnvnx.disp"
 N = r"[0-9]+"
 ELT = r"(?:f|d|q|h|v8|v16)"
 RET = r"(?:v|i|q|f|d|a%s[RH](?:g|m|h%s))" % (N, ELT)
@@ -31,7 +31,7 @@ ARG = r"(?:i|q|f|d|s%sg|s%sh%s|s%sr)" % (N, N, ELT, N)
 LINE = re.compile(r"(?:this|fast|stack):%s:(?:%s(?:,%s)*)?" % (RET, ARG, ARG))
 
 
-def section_of(path, name):
+def section(path, name):
     """The bytes of section NAME of ELF32/ELF64 little-endian object PATH, or None. ValueError for a file that is no such object."""
     d = open(path, "rb").read()
     if d[:4] != b"\x7fELF" or d[4] not in (1, 2) or d[5] != 1:
@@ -56,26 +56,26 @@ def section_of(path, name):
     return d[s[4]:s[4] + s[5]]
 
 
-def read_section(data, section):
+def read_section(data):
     """[descriptor] of one section's bytes; ValueError naming the first problem."""
     if not data:
         return []
     if data[-1:] != b"\n":
-        raise ValueError("%s: no final LF" % section)
+        raise ValueError("%s: no final LF" % SECTION)
     try:
         text = data.decode("ascii")
     except UnicodeDecodeError:
-        raise ValueError("%s: not ASCII" % section)
+        raise ValueError("%s: not ASCII" % SECTION)
     lines = text[:-1].split("\n")
     for k, ln in enumerate(lines, 1):
         if not LINE.fullmatch(ln):
-            raise ValueError("%s: line %d %r is outside the grammar conv:ret:args" % (section, k, ln[:60]))
+            raise ValueError("%s: line %d %r is outside the grammar conv:ret:args" % (SECTION, k, ln[:60]))
     if lines != sorted(set(lines)):
-        raise ValueError("%s: the lines are not sorted and unique" % section)
+        raise ValueError("%s: the lines are not sorted and unique" % SECTION)
     return lines
 
 
-def collect(objs, section):
+def collect(objs):
     """(sorted union [descriptor], [problem]) of the objects under directory OBJS."""
     descs, err, files = set(), [], []
     for base, dirs, names in os.walk(objs):
@@ -84,21 +84,17 @@ def collect(objs, section):
     for p in files:
         rel = os.path.relpath(p, objs)
         try:
-            data = section_of(p, section)
-            descs.update(read_section(data or b"", section))
+            data = section(p, SECTION)
+            descs.update(read_section(data or b""))
         except ValueError as e:
             err.append("%s: %s" % (rel, e))
     return sorted(descs), err
 
 
 def main(argv):
-    if argv[:1] != ["--section"] or len(argv) < 2 or not re.fullmatch(r"\.[A-Za-z0-9._-]+", argv[1]):
-        sys.stderr.write("descs: usage: descs.py --section .name [OBJS_DIR [OUT]]\n")
-        return 1
-    section, argv = argv[1], argv[2:]
     objs = argv[0] if argv else "/objs"
     out = argv[1] if len(argv) > 1 else "/out/descs.tsv"
-    descs, err = collect(objs, section)
+    descs, err = collect(objs)
     if err:
         sys.stderr.write("descs: %d problem(s)\n%s\n" % (len(err), "\n".join(err)))
         return 1

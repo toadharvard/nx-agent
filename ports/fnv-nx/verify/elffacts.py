@@ -195,10 +195,8 @@ def parse_members(map_text):
     lines = map_text.splitlines()
     try:
         i = next(k for k, ln in enumerate(lines) if ln.startswith("Archive member included to satisfy reference by file (symbol)"))
-    except StopIteration:   # ld prints the heading lazily, with the first archive member it pulls (ldmain.c add_archive_element): no section = no member, in a map that is a map
-        if not any(ln.startswith("Memory Configuration") for ln in lines):
-            raise ElfFactsError("map: no `Archive member included` section and no `Memory Configuration` (not a GNU ld map)")
-        return []
+    except StopIteration:
+        raise ElfFactsError("map: no `Archive member included` section")
     out, i, pend = [], i + 1, None
     while i < len(lines):
         ln = lines[i]

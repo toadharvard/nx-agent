@@ -14,7 +14,6 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import test_recipe as TR  # noqa: E402
-import elffacts  # noqa: E402
 
 recipe, T, ROOT, BASE = TR.recipe, TR.T, TR.ROOT, TR.BASE
 LIB = T + "lib"
@@ -119,7 +118,7 @@ def main():
     ef = json.load(open(r["elf_facts"]["path"]))
     secs, esy = elf32_sections_symbols(r["elf"]["path"])
     check("elf facts: the link record carries the sections (name, address, size) as the ELF's own section header table has them",
-          ef["format"] == elffacts.FORMAT and [(x["name"], x["address"], x["size"]) for x in ef["sections"]] == secs, ([(a, b) for a, b in zip([(x["name"], x["address"], x["size"]) for x in ef["sections"]], secs) if a != b][:3], len(ef["sections"]), len(secs)))
+          ef["format"] == "fnvnx-elffacts/1" and [(x["name"], x["address"], x["size"]) for x in ef["sections"]] == secs, (ef["sections"][:3], secs[:3]))
     check("elf facts: every defined symbol with its value and size, and its type and binding as readelf prints them (f_a FUNC GLOBAL)",
           {x["name"]: (x["value"], x["size"]) for x in ef["symbols"] if x["name"] in esy and x["section"] != "ABS"} == {n: v for n, v in esy.items() if n in {x["name"] for x in ef["symbols"] if x["section"] != "ABS"}}
           and any(x["name"] == "f_a" and x["type"] == "FUNC" and x["bind"] == "GLOBAL" for x in ef["symbols"]), ef["symbols"][:3])

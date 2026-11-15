@@ -135,15 +135,6 @@ for bad in (b'f\t-16:8:m\n', b'f\t-16:8:n:n\n', b'f\t-16:8: \n'):
         fails.append('parse accepted %r' % bad)
     except ValueError:
         pass
-r2 = FS.parse_frame(b'f\t-16:8:n -8:4\targs:24\ng\tunk:mem\targs:0\nh\tdynamic\n', 'x')
-check('parse: both row forms (a :n range and args:N) in one row, and the dynamic row without args', [(r[0], [(tuple(q), q.priv) for q in r[1]] if r[1] != 'dynamic' else 'dynamic', r.args) for r in r2],
-      [('f', [((-16, 8), True), ((-8, 4), False)], 24), ('g', 'dynamic', 0), ('h', 'dynamic', None)])
-for bad in (b'f\t-16:8:n\targs:24\textra:1\n', b'f\t-16:8:n\tfoo:24\n', b'f\t-16:8:n\targs:\n'):
-    try:
-        FS.parse_frame(bad, 'x')
-        fails.append('parse accepted %r' % bad)
-    except ValueError:
-        pass
 # a crash of the scan is a red row naming the object, never an exception
 orig = A.scan
 A.scan = lambda p: (_ for _ in ()).throw(TypeError('can only concatenate tuple (not "int") to tuple'))

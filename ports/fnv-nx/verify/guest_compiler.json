@@ -41,8 +41,7 @@
         "-fstack-reuse=none",
         "-U_FORTIFY_SOURCE",
         "-fno-math-errno",
-        "-fno-reorder-blocks-and-partition",
-        "-D__FNVNX_HOST_ATTR__=1"
+        "-fno-reorder-blocks-and-partition"
       ],
       "lifted_extra": [
         "-ffreestanding",

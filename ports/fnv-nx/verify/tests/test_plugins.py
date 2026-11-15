@@ -33,7 +33,7 @@ PLUGS = [{"name": n} for n in recipe.PLUGIN_SOURCES]   # a root names only the p
 P = {p["name"]: p for p in PLUGS}
 SRC = "volatile int g;\nint rd() { return g; }\nvoid wr(int v) { g = v; }\nint f2i(float f) { return (int)f; }\nint ic(int (*f)(int)) { return f(1); }\nstruct S { int a; char b; };\nS gs;\nregister int hr asm(\"x27\");\nregister unsigned eax asm(\"x19\");\nint hrw(int v) { hr = v; eax = v + 1; return hr + eax; }\nstatic int arr[7];\nint ua(int i) { return arr[i]; }\nint lf() { static char ls[3]; return ls[0]; }\nextern int ex;\nint uex() { return ex; }\nextern int dg[];\nint udg() { return dg[0]; }\n"
 REC = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
-       "flags": {"c": [], "cxx": ["-O2", "-mabi=ilp32", recipe.SDD_DEFINE, "-fno-devirtualize"], "asm": []}, "include": [], "units": "all",
+       "flags": {"c": [], "cxx": ["-O2", "-mabi=ilp32"] + list(recipe.SDD_FLAGS), "asm": []}, "include": [], "units": "all",
        "plugins": PLUGS}
 
 
@@ -65,7 +65,6 @@ def make_repo(name, rec, origin, files=None, extra_roots=(), target="host"):
         if v is not None:
             w(repo, k, v)
     w(repo, ROOT + "/build.json", json.dumps(rec, indent=1))
-    w(repo, recipe.GUEST_PIN, open(os.path.join(REAL, recipe.GUEST_PIN)).read())   # the game's compiler pin: a guest root reads it
     w(repo, recipe.ENV_JSON, open(os.path.join(REAL, recipe.ENV_JSON)).read())   # the declared environment: a build runs only on the machine it describes
     root = {"path": ROOT, "class": "product", "target": target, "recipe": ROOT + "/build.json"}
     if origin is not None:
@@ -102,11 +101,8 @@ def mut(**kw):
 
 def main():
     # --- gate rule, validation level (no build)
-    repo = make_repo("native", REC, "native", target="guest")
-    pl = lambda e: [x for x in e if "plugin" in x or "FNVNX_SDD" in x]  # noqa: E731  the rule under test: the plugin set of the TARGET PROFILE
-    check("native guest root with the full plugin set has no plugin error", pl(errs(repo, REC)) == [], pl(errs(repo, REC)))
-    hrepo = make_repo("native-host", REC, "native", target="host")
-    check("target profile: a host root with no plugin has no plugin error", pl(errs(hrepo, mut(plugins=[]))) == [], pl(errs(hrepo, mut(plugins=[]))))
+    repo = make_repo("native", REC, "native")
+    check("native root with both plugins is valid", errs(repo, REC) == [], errs(repo, REC))
     for gone in recipe.PLUGIN_SOURCES:
         r = mut(plugins=[p for p in PLUGS if p["name"] != gone])
         e = errs(repo, r)
@@ -127,8 +123,8 @@ def main():
     check("plugin_decls: fnvnx_ftoi has f2i_builtins.inc as input, so changing it changes the key of every root that loads the plugin",
           any(i.endswith("f2i_builtins.inc") for i in dec["fnvnx_ftoi"]["inputs"]), dec["fnvnx_ftoi"]["inputs"])
     check("plugins out of load order are red", any("order" in x for x in errs(repo, mut(plugins=PLUGS[::-1]))))
-    check("native root without the fnvnx_sdd define is red", any("lacks " + recipe.SDD_DEFINE in x for x in errs(repo, mut(
-        flags={"c": [], "cxx": [f for f in REC["flags"]["cxx"] if f != recipe.SDD_DEFINE], "asm": []}))))
+    check("native root without a semantics flag is red", any("lacks -fno-devirtualize" in x for x in errs(repo, mut(
+        flags={"c": [], "cxx": [f for f in REC["flags"]["cxx"] if f != "-fno-devirtualize"], "asm": []}))))
     check("-fplugin in flags is red", any("plugin" in x for x in errs(repo, mut(flags={"c": [], "cxx": ["-fplugin=/x.so"], "asm": []}))))
     check("a hand-typed plugin_cxx in a build.json is red (the plugin compiler is recipe.PLUGIN_CXX, derived from env.json)",
           any("plugin_cxx" in x for x in errs(repo, mut(plugin_cxx="x86_64-linux-gnu-g++-13"))) and recipe.PLUGIN_CXX == "x86_64-linux-gnu-g++-13")

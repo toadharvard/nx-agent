@@ -34,9 +34,8 @@ u = copy.deepcopy(t)
 u["console_cpu"]["features"].append("sve")
 check("a feature without a citation is red", any("feature sve" in b for b in targets.check(u)), targets.check(u))
 u = copy.deepcopy(t)
-u["console_cpu"]["cite"]["crypto"].append({"assumption": "ASM-" + "999"})   # built at run time: no literal id for the registry scan
-BAD = "ASM-" + "999"
-check("an unknown assumption id is red", any(BAD in b for b in targets.check(u)), targets.check(u))
+u["console_cpu"]["cite"]["crypto"].append({"assumption": "ASM-999"})
+check("an unknown assumption id is red", any("ASM-999" in b for b in targets.check(u)), targets.check(u))
 u = copy.deepcopy(t)
 u["references"]["x"] = "no/such/file.json"
 check("a reference to a missing file is red", any("no/such" in b for b in targets.check(u, repo=repo)), targets.check(u, repo=repo))

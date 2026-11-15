@@ -30,6 +30,7 @@
     "obj.json"
    ],
    "objects_of": {
+    "except": [],
     "target": "guest",
     "origin": "native",
     "dependents_of": "ports/fnv-nx/contract/facts"
