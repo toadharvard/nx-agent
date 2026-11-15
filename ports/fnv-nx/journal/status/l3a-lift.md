@@ -1009,3 +1009,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - The defect is ours: check_int_vectors uses a constant, and faults.json has a FASTFAIL row.
   - Rule now (w8): int n semantics come from the record. A gate vector gets its trap semantics; an excluded vector raises #GP; an undecided vector makes the lift red at the site. The FASTFAIL row is deleted.
   - Static counts over the full image set: int 0x29, other int n, and gs reads. A non-zero count goes to the orchestrator as a blocker.
+- 22:52 Local exe shard 0/95 (w8, diagnostic with a temporary X86SYS): 985 lifted, 35 missing.
+  - 34 of the 35 are jump tables with no jtab facts: the old facts external 6944080c has no jtab_tables. liftsrc takes UNIVERSE, FACTS and JTAB from w7-facts2 b9261cd85, and FPSTATE, FPDEPTH and RETN from w13 (once rebased onto e7b12ab35), all through `uses`; the 6944080c external is deleted.
+  - 1 missing: int 0x6 in the exe, where the vector is undecided. L5 is asked to decide every non-gate vector by its precedence, from Wine 9.0's #GP path in signal_i386.c segv_handler, with lines cited, as one row with no list.
+  - The consumer rule (int n semantics from the record) is done by w8 now.
