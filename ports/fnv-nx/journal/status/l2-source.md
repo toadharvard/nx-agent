@@ -234,3 +234,8 @@ After the first frame:
   - farm: phase A with runtime_cflags, plugins and -g;
   - w1: the 322 escaping-frame accesses, then the RTL table;
   - w2: delete the fenced calls, the bit-field single form, the 372 nonframe accesses, the CAS bounce.
+- 2026-11-15 09:15 Rule-D frame class (322) cause, w1 trace with one example per class:
+  - the record was computed after the rewrite, where order's own __atomic_store_4 makes ESCAPED=anything;
+  - the plain/ordered decision was made earlier, from a separate address scan.
+  - Closed by one fact: escapes, computed once at order's last-GIMPLE position before any rewrite, drives both the access form and `:n`. The recompute is deleted.
+  - New SSA pointers without points-to information are ordered (conservative).
