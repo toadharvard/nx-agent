@@ -67,16 +67,20 @@
     "--module",
     "libvorbisfile=/uses/ports/fnv-nx/lift/factsimg/libvorbisfile/IMG",
     "--out",
-    "/out/facts"
+    "/out/facts",
+    "--gates",
+    "/out/gates"
    ],
    "inputs": [],
    "outputs": [],
    "dirs": [
-    "facts"
+    "facts",
+    "gates"
    ]
   }
  ],
  "outputs": {
-  "FACTS": "facts"
+  "FACTS": "facts",
+  "GATES": "gates"
  }
 }
