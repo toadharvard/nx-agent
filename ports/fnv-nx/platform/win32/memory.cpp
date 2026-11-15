@@ -14,6 +14,7 @@
 #include "w32.h"
 #include "fnvnx/hostvm.h"
 #include "w32_reach.h"
+#include "declared_os.h"   /* generated from declared/os.json */
 
 #include <malloc.h>
 #include <stdlib.h>
@@ -1148,7 +1149,7 @@ extern "C" BOOL GlobalMemoryStatusEx(LPMEMORYSTATUSEX ms)
 extern "C" void GetSystemInfo(LPSYSTEM_INFO si)
 {
     memset(si, 0, sizeof *si);
-    si->wProcessorArchitecture = 0; /* PROCESSOR_ARCHITECTURE_INTEL: what the game was built for */
+    si->wProcessorArchitecture = FNVNX_OS_NATIVE_ARCH; /* declared/os.json native_arch */
     si->dwPageSize = FNVNX_PAGE_SIZE;
     si->lpMinimumApplicationAddress = (LPVOID)(uintptr_t)0x00010000u;
     si->lpMaximumApplicationAddress = (LPVOID)(uintptr_t)0x7FFEFFFFu;
