@@ -1325,3 +1325,4 @@ Paused: w3b, w4, farm; no other work.
         - d3d9total 332/332; test 45/45; abspath render 0.
     - Assumptions gate on cand4: 125/125, 108 records.
 - bottleneck: the w28 head on the final cand3, for the w6-cand4 rebase.
+- 22:50Z L6A confirms the NxImageRead P4 contract for deko3d. It is item D-P4 in l6a-deko.md, with GL as the reference, and comes after the first frame.
