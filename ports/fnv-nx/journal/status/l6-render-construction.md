@@ -47,15 +47,17 @@ Kinds: (a) hand-written set, (b) second copy of a fact, (c) second path. On-path
 | 39 | w6 shim/include/{d3d9,d3d9caps,d3d9types,d3dx9*}.h (render-owned) | a | Microsoft d3d9 SDK headers (pinned edition); the shim rewrites them | the hand-written shim copy defines the d3d9 universe that #7/#8 read. Derive from the pinned SDK headers by a stated transform, or pin the SDK headers as the external and delete the copy | yes |
 | 40 | w6 render/d3d9/gen/ (gen_bridge, gen_expr, gen_impl, gen_meth, gen_replay, gen_tab, gen_wine_ids, gen_wrap) | generators | #8 | not a defect; listed so the count is complete. Each reads #8; check there is no second list inside any of them (gen_wine_ids reads verify/wine_fixme.tsv) | yes |
 
-## Counts (this pass; rows above, not facts about the code)
+## Counts (this pass; rows of the table, not facts about the code)
 
-| kind | rows | on first-frame path | after |
-|---|---|---|---|
-| (a) hand-written set | 17 (#1, 2, 5, 8, 9, 10, 11, 12, 13, 14, 30, 31, 32, 33, 36, 38, 39) | 12 | 5 |
-| (b) second copy of a fact | 18 (#3, 4, 5, 6, 7, 14, 15, 16, 17, 18, 19, 20, 21, 24, 25, 26, 27, 28, 29, 34, 35, 37; some rows count under two kinds) | see below | see below |
-| (c) second path | 3 rows (#22, 23, 26) covering 11 scripts: 2 shaders/ (build.sh, CMakeLists.txt), 6 gl4/dk/selftest/rec builds, rec farm job, mkshcache | 2 rows | 1 row |
+39 audited rows (#1-39) plus #40 (generators, neutral: not a defect). A row counts once per kind it carries.
 
-Rows are counted once per kind they carry, so the total of the three lines (17 + 22 + 3 = 42) exceeds the 40 table rows (rows 5, 14, 26, 27, 37 carry two kinds; row 40 is neutral). On-path: rows #1-4, 7-11, 13-21, 24, 26-27, 29-31, 35, 37, 39 = 27 of 40; after: #5(part), 6, 12(part), 22, 23(part), 25, 28, 32(L6A), 33, 34, 36, 38 = 13.
+| kind | rows | row numbers |
+|---|---|---|
+| (a) hand-written set | 19 | 1, 2, 5, 8, 9, 10, 11, 12, 13, 14, 27, 30, 31, 32, 33, 36, 37, 38, 39 |
+| (b) second copy of a fact | 22 | 3, 4, 5, 6, 7, 14, 15, 16, 17, 18, 19, 20, 21, 24, 25, 26, 27, 28, 29, 34, 35, 37 |
+| (c) second path | 3 | 22, 23, 26 (11 scripts: 2 in shaders/, 6 gl4/dk/selftest/rec builds, 1 rec farm job, mkshcache, gl4_xlator) |
+
+By first-frame path (39 rows, each once): on-path 28 (#1-4, 7-11, 13-21, 24, 26, 27, 29-31, 35, 37-39), partly on-path 3 (#5, 12, 23), after 8 (#6, 22, 25, 28, 32 for the emulator, 33, 34, 36).
 
 ## Done in this commit
 No pure deletion. Reason: on my branch (5bc689044) none of the second paths or copies exist (it holds only translator, lib/sha256 and the rule-A facts). Every second path or copy above is on w6 or the lead branch, and each still has a reader (the lead's render/shaders/src and cache/ are read by shcache and the dk selftest builds; build.sh by the gl/shader builds). Nothing was deleted.
