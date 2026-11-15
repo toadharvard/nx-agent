@@ -1131,3 +1131,6 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - FEATURES is derived from L3b's table, an fnv-nx-build external of lift/liftsrc: b30137748, tree f6ccfbb6…, passed as --cpufeat to 101 shards. The gating is unchanged.
   - w8 merges it into base3.
   - L3b adds a canonical-name column, because one bit has two spellings (SSE41/SSE4_1, AES/AESNI).
+- 22:47 base3 428d94d9e: cpufeat in, all roots valid.
+  - L3b v3 is 54/54. L3b needs one L3a commit, so w8 builds the next base3 head: base3 + w7 simd 9c97f84b + w12 paths bf89c7b36. Form.sha must be unchanged over 4290 SIMD and 18,649 integer keys.
+  - The toolchain is still cand2 (720fe5403), waiting on the L1 cand3 head.
