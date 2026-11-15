@@ -348,8 +348,15 @@ Rules fixed here (all three consumers use them through this file and importkey.c
              the same bridge.tsv in one link; the stage key of all three includes the SHA-256 of bridge.tsv, and
              keys.tsv and import_keys.c each carry it (`table_id`) so the gate can check they come from one input.
   data row   a bridge row of conv `data` whose native_symbol is a C identifier is a table row of kind data (value =
-             address of the native object).  A data row with native_symbol `-` has no native object: it is left out of
-             the table (the lookup returns 0 = the platform does not provide it) and counted in the stdout line.
+             address of the native object).  A data row with native_symbol `-` has no native object.  If an image of
+             modules.tsv imports it (an import slot of the exe's facts, or of any module's imports/<name>.tsv, by name or
+             by the ordinal of the row) it is a stage error naming dll!name: the slot would be unbound at start.  If no
+             image imports it, it stays outside the table (the lookup returns 0) and is counted in the stdout line.
+             The imports of every module are an input (--module-imports, one per --module, the same name set): a rule
+             over "every image" is not computed over a subset.
+  --data-out iat_data.tsv  `# table_id <sha256 of bridge.tsv>` (the table_id of keys.tsv and import_keys.c), then one row per data
+                        row of the table, in the order of import_keys.c: dll, name, ordinal, kind (`data`), native_symbol.
+                        The build fact L4's rule S4 reads; the address of each native_symbol is in the ELF symtab.
 ```
 
 ## contract/images.py
@@ -451,6 +458,24 @@ address bind.json gave it) gives its row; none, or several different symbols for
 address, because the table has no rule to choose between bodies. A symbol defined in several objects (inline functions) counts once. The output is a function
 of the three input files only. `lift/tools/dispgen.py --prefix fnvnx_native --allow-empty` turns the rows into the table `fnvnx_native_disp_table`, which
 `fnvnx_dispatch` consults first.
+
+## contract/modules.py
+
+```text
+modules - the module table of the guest (L1 CONTRACT), and, from the same PE reading, the facts the loader's start rules compare.
+
+TLS directory facts (tls.tsv, tls/<name>.bin; rule S5 of the loader, read by L4's bootstart.py).  Universe: the exe, then every image of
+modules.tsv whose has_tls column is 1 (data directory 9 has a nonzero size), sorted by name; so the DLL rows of tls.tsv number exactly the
+has_tls = 1 rows of modules.tsv.  The directory is IMAGE_TLS_DIRECTORY32 (StartAddressOfRawData, EndAddressOfRawData, AddressOfIndex,
+AddressOfCallBacks, SizeOfZeroFill, Characteristics), read raw: the four addresses are VAs at the PREFERRED base.
+Columns: name, load_index (as in modules.tsv; empty for the exe), start_va, end_va, index_va, callbacks_va (hex, raw), template_rva (start_va
+- preferred base, hex), template_size (end - start, decimal), zero_fill (SizeOfZeroFill, decimal), align (the IMAGE_SCN_ALIGN field of
+Characteristics, bits 20-23, the field itself: 0 stays 0), template_sha256, callbacks (;-list of the RVAs of the callback array up to its null word;
+empty when AddressOfCallBacks is 0 or the first word is 0).  tls/<name>.bin holds the template bytes as the mapped image has them (file bytes,
+then zeros).  Red, never clamped: a directory shorter than 24 bytes or outside the image, end < start, a template outside the image, a callback
+array with no null terminator inside the image, a callback outside the image.  Written to OUT only: nothing game-derived enters the repository.
+Test: contract/tests/test_modules.py on synthetic PE images built by the test.
+```
 
 ## contract/objfacts_merge.py
 

@@ -36,7 +36,7 @@ int fnvnx_images_overlap(const fnvnx_proc *p, uint32_t base, uint32_t size, int 
     return 0;
 }
 
-/* S1. Assumption: the whole file fits in memory for the moment of the check (os->alloc of file_size bytes). */
+/* S1. The whole file is held in memory for the moment of the check: os->alloc of file_size bytes; when that fails the start is refused (FNVNX_E_NOMEM). */
 static int s1_identity(fnvnx_proc *p) {
     uint8_t *buf;
     int r;
@@ -56,7 +56,7 @@ static int s1_identity(fnvnx_proc *p) {
 /* S3 / M2. Windows rule: headers and every section (discardable ones too) at base + rva, VirtualSize page-rounded
  * (SizeOfRawData when VirtualSize is 0), min(raw, virtual) bytes from the file, the rest zero. Every other page of
  * [base, base + SizeOfImage) is claimed with no access, so nothing else can ever be placed inside the image range.
- * Assumption: the image is mapped at `base` with no relocation applied yet (a module's relocation follows in M2). */
+ * Precondition of the callers' order: the image is mapped at `base` with no relocation applied yet (a module's relocation follows in M2). */
 int fnvnx_loaded_map(fnvnx_proc *p, fnvnx_loaded *L, uint32_t base, int self) {
     const fnvnx_pe *pe = &L->pe;
     uint32_t end = base + pe->size_of_image, cur = base;
@@ -91,8 +91,8 @@ int fnvnx_loaded_map(fnvnx_proc *p, fnvnx_loaded *L, uint32_t base, int self) {
 }
 
 /* S5 / M3. The Windows loader gives the main module TLS index 0 and every other module with a TLS directory the next
- * index; the code reaches its thread data as ((char **)fs:[0x2c])[index]. Assumptions: the template is host-readable
- * after S6 (its section has IMAGE_SCN_MEM_READ, checked here), every callback lies in an executable section (it is
+ * index; the code reaches its thread data as ((char **)fs:[0x2c])[index]. Checked here, each a refusal of the start: the template
+ * is host-readable after S6 (its section has IMAGE_SCN_MEM_READ), every callback lies in an executable section (it is
  * entered through the lifter), and the directory asks for at most page alignment. */
 int fnvnx_loaded_tls(fnvnx_proc *p, fnvnx_loaded *L, uint32_t index) {
     const fnvnx_start_range *s;

@@ -200,8 +200,13 @@ uint32_t fnvnx_images_count(const fnvnx_proc *p);
 int fnvnx_images_get(const fnvnx_proc *p, uint32_t i, fnvnx_image_info *out);   /* FNVNX_OK, or FNVNX_E_ARG for i out of range */
 
 /* The process the boot glue (guest/boot.c) started: the section map the platform's VirtualQuery answers from, the
- * main thread's block. Defined by the glue; valid from the start of main, filled by a successful prepare. */
+ * main thread's block. Defined by the glue; valid from the start of fnvnx_loader_main, filled by a successful prepare. */
 fnvnx_proc *fnvnx_start_proc(void);
+
+/* The loader's entry (defined by guest/boot.c): the process entry (the guest runtime's main) calls it and returns its value. It opens the
+ * exe, checks its identity, prepares the image (map, imports, TLS), runs the module and TLS initialisers, enters the exe through
+ * fnvnx_start_enter -> fnvnx_lift_enter(AddressOfEntryPoint, esp, teb) and returns the exe's exit code, or a start failure code. */
+int fnvnx_loader_main(void);
 
 /* The reserved address set of the process: [FNVNX_START_RESERVED_LO, HI), the exe image and [base, base + size_of_image)
  * of EVERY row of the module table, mapped or not. 1 when [va, va+size) intersects it or leaves the 32-bit address

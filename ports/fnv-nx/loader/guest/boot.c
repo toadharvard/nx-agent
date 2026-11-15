@@ -1,5 +1,5 @@
 /* Guest-side boot glue: implements the loader's OS hooks (include/fnvnx_loader.h, fnvnx_os) on the host API v3
- * inside the ILP32 guest module and runs the start sequence (src/start.c, S1..S8). The guest runtime calls main().
+ * inside the ILP32 guest module and runs the start sequence (src/start.c, S1..S8). The guest runtime's main calls fnvnx_loader_main().
  *
  * Nothing here decides anything: every hook is a total mapping onto one host call, and every failure is reported to
  * start.c, which stops the start with a logged message. There is no fallback value and no default provider.
@@ -35,7 +35,7 @@
 #define FNVNX_EXE_NAME "FalloutNV.exe"
 #endif
 #define PAGE 0x1000u
-#define EXIT_FAILED 0xF0000100u   /* main's result when the start sequence did not reach the guest's entry */
+#define EXIT_FAILED 0xF0000100u   /* fnvnx_loader_main's result when the start sequence did not reach the guest's entry */
 
 /* the platform (L5, platform/include/fnvnx_win32_ext.h): records an image for GetModuleHandle / VirtualQuery */
 void fnvnx_win32_register_image(const char *name, uint32_t base, uint32_t size);
@@ -57,7 +57,7 @@ static int64_t file_fd(uint32_t file) {
     const char *name;
     if (file > fnvnx_module_count) return -1;
     if (g_open[file]) return g_fd[file];
-    if (file == FNVNX_FILE_EXE) return -1;   /* opened by main */
+    if (file == FNVNX_FILE_EXE) return -1;   /* opened by fnvnx_loader_main */
     while (dir && FNVNX_EXE_PATH[dir - 1] != '/') dir--;
     name = fnvnx_modules[file - 1u].name;
     n = strlen(name);
@@ -227,7 +227,7 @@ static int fail(const char *what, long long v) {
     return (int)EXIT_FAILED;
 }
 
-int main(void) {
+int fnvnx_loader_main(void) {
     static fnvnx_start_cfg cfg;
     FnvnxStat st;
     int r;
