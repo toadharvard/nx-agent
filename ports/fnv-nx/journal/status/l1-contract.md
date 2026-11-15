@@ -1553,3 +1553,10 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Off path for now: the selftests index cache, the warm timings.
 - 09:28 **w12 409f79837.** The gen-stage parent-dir rule and the one driver argv constructor are done, forwarded to L4 for the relink and merged into cand2 (w15).
   - PT_INTERP ruling: pin base-files and resolve through the declared debs' symlinks. w15's directory-tuple alias (b6865471d) is deleted. Owner: w12.
+- 09:31 **cand2 becomes the ONE L1 head for L5 and L6A** (rule 3).
+  - w15 adds L5 root d2e4a6e4f, w22-construction d6dc466e7 (after the L2 w3 DATAMODEL branch), w25 7cf4bd302 and w12L2 409f79837. It also fixes the variant defect at gate_objstub:54 (L6A G3).
+  - Targeted tests run first; the verdict comes after.
+- 09:31 **w12, iat one path.**
+  - modules.py writes keys.tsv and iat_data.tsv, and the iat.py CLI is deleted.
+  - boot_job.sh is to take keys.tsv from the stage output.
+  - The PT_INTERP/base-files item comes first.
