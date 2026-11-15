@@ -34,7 +34,7 @@ struct cpu { int r[4]; };
 register cpu *cc asm("x27");
 int hg(int v) { eax = v; eax += 1; return eax; }
 int hl(int v) { register unsigned loc asm("x25") = v; loc += 2; return loc; }
-int hp(int v) { cc->r[1] = v; return cc->r[1]; }
+int hp(int v) { cc->r[1] = v; return cc->r[2]; }
 ''',
     'local': r'''
 extern int gg;
