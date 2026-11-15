@@ -268,6 +268,18 @@
     "ports/fnv-nx/verify/a64access.cc"
    ]
   },
+  "test_extcache_race.py": {
+   "references": [
+    {
+     "anchor": "## Externals in a shared store",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
   "test_fpbound.py": {
    "references": [
     {
