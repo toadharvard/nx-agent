@@ -993,3 +993,4 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - 22:24 base3 @ 1b1abc42c = e92e86825 + the render/nxgpu include fix (its own commit, sent to L6 and L1). render/nxgpu and lift/descs are green (descs: 48 run, 555 hit).
   - lift/bridges is red from an L1 contract tool: l2sections.py opens /tool/../toolchain/names/sympair_kinds.inc, a path that leaves its mount. Sent to L1 w12: declare the file as an input, and have the abspath gate / require_under reject `..` escapes.
   - The liftsrc cold build is restarted (it does not wait on bridges). w8 freed 11 GB of stale recipe temps.
+- 22:26 w7: the 5 small images are green at the e7b12ab35 tree (branch head b9261cd85). Cold, --jobs 1: atimgpud 19 s, binkw32 43 s, gdffalloutnv 13 s, libvorbis 35 s, libvorbisfile 21 s. Next: the 3 farm stores, store-merge, lift/facts.
