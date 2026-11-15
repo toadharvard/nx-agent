@@ -1950,7 +1950,8 @@ def resolve_input(root, ref, repo=".", cache=None, rec=None):
     if not p or os.path.isabs(p) or ".." in p.split("/"):
         raise ValueError("%s: input path %r is absolute or leaves the tree" % (root, p))
     full = os.path.join(base, p)
-    if not os.path.realpath(full).startswith(os.path.realpath(base) + os.sep):
+    rf, rb = os.path.realpath(full), os.path.realpath(base)
+    if rf != rb and not rf.startswith(rb + os.sep):
         raise ValueError("%s: input path %r leaves the tree (symlink)" % (root, p))
     if not os.path.exists(full):
         raise ValueError("%s: input path %r does not exist" % (root, p))
