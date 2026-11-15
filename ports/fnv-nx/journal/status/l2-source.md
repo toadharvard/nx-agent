@@ -534,3 +534,12 @@ After the first frame:
 - 2026-11-15 20:45Z: Owner order: a fast compiler rebuild is L2's item 1, right after the current pin. PINSPLIT moves to w3 as implementer, with the farm running the builds. It is built on a branch and goes into plugins after the freeze lifts.
   - Proof: the stamp key equals the MANIFEST key, the archives are content-equal to the cand2 pin's, and a plugin byte change reruns stage 2 only, with the time of each stage.
   - Near-correct items that block no step wait until after the first frame.
+- 2026-11-15 20:50Z: CAND2 PIN @56a4d09c3773e393f877c5839eb249df713268a5, tree_sha256 cbb8843feab8b7679a865a42a9c538293e2508d6ef8563ec8315105756a8151f, build_key 74cafda21648518e.
+  - Two stages (PINSPLIT, done by the farm): compiler K1 79be858ab74710e8, runtime K2 74cafda21648518e; toolchain_tree_git 1b2b42da.
+  - The plugins branch is merged at 17fb4961a: toolchain tree equal to the pin, stamp and --stages equal (checked).
+  - Measured from scratch: gcc 396 s, plugins 160 s, runtime 231 s, total 787 s (was ~50 min). The plugin-only restore path (K1 reused) is still unproven; the farm is testing it.
+  - Next:
+    - w2: guest_compiler.json pin fields, then the tests, to L1.
+    - w3: review the farm's PINSPLIT, then the full-runtime decltype check.
+  - Plugins are frozen until cand2 merges.
+- bottleneck: waiting on L1 for the cand2 verdict and merge (plugins frozen). The pin rebuild is now 13 min from scratch; a plugin-only change should take ~6.5 min once the restore path is proven. Workers: 2 + farm.
