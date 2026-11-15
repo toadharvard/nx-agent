@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check of link/gate_order.py, link/a64order.py, link/framesec.py and toolchain/order/fnvnx_order.cc.  Fixtures: hand-assembled ILP32
-AArch64 objects (the machine-code rules are independent of the plugin) and C++ compiled with the distro cross compiler, the product
-flags and the order plugin built from the tracked source (product args `args=rtl object=msvc operator=rtl assign=msvc`).  Cases:
+AArch64 objects (the machine-code rules are independent of the plugin) and C++ compiled by the recipe (toolchain/tests/plugbuild.py: the pinned
+guest compiler, the product flags, the plugin set built by the recipe's own stages with the product arguments).  Cases:
 certified: ordered forms, frame accesses outside the recorded variables, a frame address that leaves the function and points into a
 recorded variable, linker and read-only loads, fenced runs; plugin output for a non-escaped local, an escaped local written after
 the escape (ordered by the plugin), a return slot (sret) aggregate store, an aggregate load into a local, a bit-field store.
@@ -20,14 +20,11 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'contract'))
+sys.path.insert(0, os.path.join(HERE, '..', '..', 'toolchain', 'tests'))
 import a64order
 import framesec
+import plugbuild as pb
 
-TOOL = os.path.join(HERE, '..', '..', 'toolchain', 'order', 'fnvnx_order.cc')
-CXX = 'aarch64-linux-gnu-g++-13'
-FLAGS = ['-mabi=ilp32', '-std=gnu++17', '-O2', '-fwrapv', '-fno-strict-aliasing', '-march=armv8-a+crc+crypto', '-mtune=cortex-a57',
-         '-fno-stack-protector', '-fno-stack-clash-protection', '-mno-outline-atomics', '-fno-exceptions', '-fno-rtti']
-PLUGIN_ARGS = ['args=rtl', 'object=msvc', 'operator=rtl', 'assign=msvc']
 fails = []
 tmp = tempfile.mkdtemp(prefix='gate-order-')
 
@@ -41,27 +38,12 @@ def run(argv):
     return subprocess.run(argv, capture_output=True, text=True)
 
 
-def build_plugin():
-    pdir = run([CXX, '-print-file-name=plugin']).stdout.strip()
-    d = os.path.join(tmp, 'plug')
-    os.makedirs(d)
-    host = 'x86_64-linux-gnu-g++-13'
-    crt = [run([host, '-print-file-name=' + n]).stdout.strip() for n in ('crti.o', 'crtbeginS.o')]
-    end = [run([host, '-print-file-name=' + n]).stdout.strip() for n in ('crtendS.o', 'crtn.o')]
-    r = run([host, '-shared', '-nostdlib', '-fPIC', '-fno-rtti', '-fno-exceptions', '-O2', '-I' + pdir + '/include', '-o',
-             os.path.join(d, 'fnvnx_order.so')] + crt + [TOOL] + end)
-    if r.returncode:
-        fails.append('plugin build: ' + r.stderr[-800:])
-        return None
-    return os.path.join(d, 'fnvnx_order.so')
-
-
-def compile_cxx(src, name, plugin, extra=()):
+def compile_cxx(src, name, extra=()):
+    """C++ fixture compiled by the recipe (plugbuild: pinned guest compiler, product flags, the full plugin set with the product arguments)"""
     p = os.path.join(tmp, name + '.cpp')
     o = os.path.join(tmp, name + '.o')
     open(p, 'w').write(src)
-    pl = ['-fplugin=' + plugin] + ['-fplugin-arg-fnvnx_order-' + a for a in PLUGIN_ARGS] if plugin else []
-    r = run([CXX] + FLAGS + list(extra) + pl + ['-c', p, '-o', o])
+    r = pb.compile(p, o, [], args=list(extra), native=True)
     if r.returncode:
         fails.append('compile %s: %s' % (name, r.stderr[-800:]))
     return o
@@ -284,70 +266,79 @@ WAIT_SRC = r'''
 #include <atomic>
 void waitf(std::atomic<int>& a, int v) { a.wait(v); }
 '''
-plug = build_plugin()
-if plug:
-    po = compile_cxx(SRC, 'plug', plug)
-    plain = compile_cxx(SRC, 'plain', None)
-    rows = a64order.scan(po).rows
-    rs = {k: v for k, v in rows if v}
-    fr = framesec.read(po)
-    rec = dict(fr)
-    check('record: every function has one line', len(rec), len(fr))
-    check('record: non-escaped local has none', rec.get('_Z6nonesci'), ())
-    check('record: escaped scalar', rec['_Z3escv'], ((-4, 4),))
-    check('record: escaped array', rec['_Z4esc2v'], ((-16, 16),))
-    check('record: alloca is dynamic', rec['_Z3dyni'], 'dynamic')
-    names = sorted({k.split('+')[0].split('/')[0] for k in rs})
-    check('plugin output: red functions are exactly the documented ones', names, ['_Z3dyni', '_Z4passv'])
-    check('alloca: its frame accesses are not F', any(k.startswith('_Z3dyni+') and v == 'plain-store' for k, v in rs.items()), True)
-    check('by-value aggregate argument copy is an escape no record covers',
-          [k.split('+')[0] for k, v in rs.items() if v == 'frame-escape-unrecorded'], ['_Z4passv'])
-    ok = {k for k, v in rows if not v}
-    check('non-escaped local: frame accesses certified', any(k.startswith('_Z6nonesci+') for k in ok), True)
-    check('escaped local: certified and ordered', not any(k.startswith('_Z3escv') for k in rs) and any(k.startswith('_Z3escv+') for k in ok), True)
-    check('escaped array: certified', not any(k.startswith('_Z4esc2v') for k in rs), True)
-    check('sret aggregate store certified', not any(k.startswith('_Z3retv') for k in rs), True)
-    check('aggregate load certified', not any(k.startswith('_Z3aggv') or k.startswith('_Z3cpyv') for k in rs), True)
-    check('packed bit-field (no representative): load, store and the read-only table walk certify',
-          [k for k in rs if k.startswith(('_Z3pbli', '_Z3pbsi', '_Z3pbcj'))], [])
-    dis0 = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', po]).stdout
-    pbl = dis0.split('<_Z3pbli>:')[1].split('\n\n')[0]
-    pbs = dis0.split('<_Z3pbsi>:')[1].split('\n\n')[0]
-    pbc = dis0.split('<_Z3pbcj>:')[1].split('\n\n')[0]
-    check('packed bit-field load: its 3 bytes are ldarb in address order, no plain load of the field', (pbl.count('ldarb'), 'ldr\tw' in pbl), (3, False))
-    check('packed bit-field store: read-modify-write of the 3 bytes, release byte stores', (pbs.count('ldarb'), pbs.count('stlrb')), (3, 3))
-    check('table walk through a derived pointer: read-only by provenance, no ordered access', ('ldar' in pbc, 'stlr' in pbc), (False, False))
-    check('the walk records the table in .fnvnx.ro', '_ZL3cpb' in run(['aarch64-linux-gnu-readelf', '-p', '.fnvnx.ro', po]).stdout, True)
-    # the vectorizer's load/store-lanes form (-O3): `MEM <char[64]> [p] = .STORE_LANES (array)` writes shared memory through an internal function
-    lanes = compile_cxx(LANES_SRC, 'lanes', plug, ['-O3'])
-    lr = {k: v for k, v in a64order.scan(lanes).rows if v}
-    check('lanes: the shared load and store of the byte-swap loop certify', lr, {})
-    ldis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', lanes]).stdout
-    check('lanes: the shared bytes are read ldarb and written stlrb (no plain access of the shared span)', ('ldarb' in ldis, 'stlrb' in ldis), (True, True))
-    # the unwinder's context builtins (libgcc unwind-dw2.c): value-only return-address/EH builtins, and the dwarf register-size table filler
-    ehs = compile_cxx(EH_SRC, 'eh', plug)
-    er = {k: v for k, v in a64order.scan(ehs).rows if v}
-    check('unwinder builtins: no ORD-T error, every access certified', er, {})
-    edis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', ehs]).stdout
-    check('init_dwarf_reg_sizes: the shared table is read ldarb and written stlrb, the builtin fills a private copy',
-          ('ldarb' in edis.split('<_Z4initv>:')[1].split('\n\n')[0], 'stlrb' in edis.split('<_Z4initv>:')[1].split('\n\n')[0]), (True, True))
-    # an atomic builtin whose memory-order operand is an SSA name (libstdc++ atomic wait: a PHI of the order): raising it to a constant must
-    # leave the statement's operand cache consistent (the SSA update after the pass crashed on the stale use)
-    wo = compile_cxx(WAIT_SRC, 'wait', plug, ['-std=gnu++20'])
-    wdis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', wo]).stdout
-    check('atomic wait: compiles with the order raised to seq_cst on a run-time order operand', 'ldar' in wdis, True)
-    check('bit-field store certified', not any(k.startswith('_Z3stbv') or k.startswith('_Z3ldbv') for k in rs), True)
-    dis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', po]).stdout
-    esc = dis.split('<_Z3escv>:')[1].split('\n\n')[0]
-    check('plugin: the writes to the escaped local are stlr', 'stlr\twzr' in esc and 'stlr\tw0' in esc, True)
-    retf = dis.split('<_Z3retv>:')[1].split('\n\n')[0]
-    check('plugin: the return slot aggregate is stored unit-wise, 5 stlr and no plain store of it', (retf.count('stlr'), 'stp\tx2, x3, [x8]' in retf), (5, False))
-    r, j = gate(po)
-    check('gate on plugin object is red for the two documented functions', (r.returncode, j['status']), (2, 'red'))
-    r, j = gate(plain)
-    check('no plugin, no section: red', (r.returncode, j['status']), (2, 'red'))
-    check('no plugin: object item named', plain in j['uncertified'] and '%s:_Z3escv' % plain in j['uncertified'], True)
-    check('no plugin: plain accesses to globals named', any(k.startswith(plain + ':_Z3retv+0x') for k in j['uncertified']), True)
+po = compile_cxx(SRC, 'plug')
+# the object of a build without the ordering plugin: the same two functions with plain accesses, hand-assembled (the recipe loads the whole plugin set in every guest unit)
+plain = assemble('plain', {'_Z3escv': ['sub sp, sp, #16', 'str wzr, [sp, #12]', 'ldr w0, [sp, #12]', 'add sp, sp, #16', 'ret'],
+                           '_Z3retv': ['adrp x1, gv', 'ldr w0, [x1, :lo12:gv]', 'str w0, [x1, :lo12:gv]', 'ret']})
+rows = a64order.scan(po).rows
+rs = {k: v for k, v in rows if v}
+fr = framesec.read(po)
+rec = dict(fr)
+check('record: every function has one line', len(rec), len(fr))
+check('record: non-escaped local has none', rec.get('_Z6nonesci'), ())
+check('record: escaped scalar', rec['_Z3escv'], ((-4, 4),))
+check('record: escaped array', rec['_Z4esc2v'], ((-16, 16),))
+check('record: alloca is dynamic', rec['_Z3dyni'], 'dynamic')
+names = sorted({k.split('+')[0].split('/')[0] for k in rs})
+check('plugin output: red functions are exactly the documented ones', names, ['_Z3dyni', '_Z4passv'])
+check('alloca: its frame accesses are not F', any(k.startswith('_Z3dyni+') and v == 'plain-store' for k, v in rs.items()), True)
+check('by-value aggregate argument copy is an escape no record covers',
+      [k.split('+')[0] for k, v in rs.items() if v == 'frame-escape-unrecorded'], ['_Z4passv'])
+ok = {k for k, v in rows if not v}
+check('non-escaped local: frame accesses certified', any(k.startswith('_Z6nonesci+') for k in ok), True)
+check('escaped local: certified and ordered', not any(k.startswith('_Z3escv') for k in rs) and any(k.startswith('_Z3escv+') for k in ok), True)
+check('escaped array: certified', not any(k.startswith('_Z4esc2v') for k in rs), True)
+check('sret aggregate store certified', not any(k.startswith('_Z3retv') for k in rs), True)
+check('aggregate load certified', not any(k.startswith('_Z3aggv') or k.startswith('_Z3cpyv') for k in rs), True)
+check('packed bit-field (no representative): load, store and the read-only table walk certify',
+      [k for k in rs if k.startswith(('_Z3pbli', '_Z3pbsi', '_Z3pbcj'))], [])
+dis0 = run(['aarch64-linux-gnu-objdump', '-dr', '--no-show-raw-insn', po]).stdout
+
+
+def plain_loads(fn):
+    """the plain ldr/ldrb/ldrh instructions of the disassembly FN (objdump -dr) that do not load a GOT entry (the PIC address of the global itself)"""
+    ls = fn.splitlines()
+    return [l for i, l in enumerate(ls) if '\tldr' in l and 'ldar' not in l and 'GOT_LO12' not in ' '.join(ls[i + 1:i + 2])]
+
+
+
+pbl = dis0.split('<_Z3pbli>:')[1].split('\n\n')[0]
+pbs = dis0.split('<_Z3pbsi>:')[1].split('\n\n')[0]
+pbc = dis0.split('<_Z3pbcj>:')[1].split('\n\n')[0]
+check('packed bit-field load: its 3 bytes are ldarb in address order, no plain load of the field', (pbl.count('ldarb'), plain_loads(pbl)), (3, []))
+check('packed bit-field store: read-modify-write of the 3 bytes, release byte stores', (pbs.count('ldarb'), pbs.count('stlrb')), (3, 3))
+check('table walk through a derived pointer: read-only by provenance, no ordered access', ('ldar' in pbc, 'stlr' in pbc), (False, False))
+check('the walk records the table in .fnvnx.ro', '_ZL3cpb' in run(['aarch64-linux-gnu-readelf', '-p', '.fnvnx.ro', po]).stdout, True)
+# the vectorizer's load/store-lanes form (-O3): `MEM <char[64]> [p] = .STORE_LANES (array)` writes shared memory through an internal function
+lanes = compile_cxx(LANES_SRC, 'lanes', ['-O3'])
+lr = {k: v for k, v in a64order.scan(lanes).rows if v}
+check('lanes: the shared load and store of the byte-swap loop certify', lr, {})
+ldis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', lanes]).stdout
+check('lanes: the shared bytes are read ldarb and written stlrb (no plain access of the shared span)', ('ldarb' in ldis, 'stlrb' in ldis), (True, True))
+# the unwinder's context builtins (libgcc unwind-dw2.c): value-only return-address/EH builtins, and the dwarf register-size table filler
+ehs = compile_cxx(EH_SRC, 'eh')
+er = {k: v for k, v in a64order.scan(ehs).rows if v}
+check('unwinder builtins: no ORD-T error, every access certified', er, {})
+edis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', ehs]).stdout
+check('init_dwarf_reg_sizes: the shared table is read ldarb and written stlrb, the builtin fills a private copy',
+      ('ldarb' in edis.split('<_Z4initv>:')[1].split('\n\n')[0], 'stlrb' in edis.split('<_Z4initv>:')[1].split('\n\n')[0]), (True, True))
+# an atomic builtin whose memory-order operand is an SSA name (libstdc++ atomic wait: a PHI of the order): raising it to a constant must
+# leave the statement's operand cache consistent (the SSA update after the pass crashed on the stale use)
+wo = compile_cxx(WAIT_SRC, 'wait', ['-std=gnu++20'])
+wdis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', wo]).stdout
+check('atomic wait: compiles with the order raised to seq_cst on a run-time order operand', 'ldar' in wdis, True)
+check('bit-field store certified', not any(k.startswith('_Z3stbv') or k.startswith('_Z3ldbv') for k in rs), True)
+dis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', po]).stdout
+esc = dis.split('<_Z3escv>:')[1].split('\n\n')[0]
+check('plugin: the writes to the escaped local are stlr', 'stlr\twzr' in esc and 'stlr\tw0' in esc, True)
+retf = dis.split('<_Z3retv>:')[1].split('\n\n')[0]
+check('plugin: the return slot aggregate is stored unit-wise, 5 stlr and no plain store of it', (retf.count('stlr'), 'stp\tx2, x3, [x8]' in retf), (5, False))
+r, j = gate(po)
+check('gate on plugin object is red for the two documented functions', (r.returncode, j['status']), (2, 'red'))
+r, j = gate(plain)
+check('no plugin, no section: red', (r.returncode, j['status']), (2, 'red'))
+check('no plugin: object item named', plain in j['uncertified'] and '%s:_Z3escv' % plain in j['uncertified'], True)
+check('no plugin: plain accesses to globals named', any(k.startswith(plain + ':_Z3retv+0x') for k in j['uncertified']), True)
 
 shutil.rmtree(tmp, ignore_errors=True)
 if fails:

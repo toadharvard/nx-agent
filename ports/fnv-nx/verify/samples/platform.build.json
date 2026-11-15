@@ -1,10 +1,6 @@
 {
  "format": "fnvnx-recipe/1",
- "compiler": {
-  "external": "gcc-msvcmodel",
-  "cc": "bin/aarch64-none-elf-gcc",
-  "cxx": "bin/aarch64-none-elf-g++"
- },
+ "profile": "guest",
  "flags": {
   "c": [
    "-O2",
@@ -19,45 +15,19 @@
   "asm": []
  },
  "include": [
-  "/ext/gcc/aarch64-none-elf/include/c++/13.3.0",
-  "/ext/gcc/aarch64-none-elf/include/c++/13.3.0/aarch64-none-elf",
-  "/ext/gcc/aarch64-none-elf/include"
+  "/ext/a64/aarch64-none-elf/include/c++/15.2.0",
+  "/ext/a64/aarch64-none-elf/include/c++/15.2.0/aarch64-none-elf/ilp32",
+  "/ext/a64/aarch64-none-elf/include"
  ],
  "units": "all",
- "plugins": [
-  {
-   "name": "fnvnx_ftoi"
-  },
-  {
-   "name": "fnvnx_order"
-  },
-  {
-   "name": "fnvnx_sdd"
-  },
-  {
-   "name": "fnvnx_pi"
-  },
-  {
-   "name": "fnvnx_dispatch"
-  },
-  {
-   "name": "fnvnx_addr"
-  },
-  {
-   "name": "fnvnx_names"
-  },
-  {
-   "name": "fnvnx_layout"
-  }
- ],
  "external": [
   {
-   "name": "gcc-msvcmodel",
+   "name": "fnvnx-a64-msvcmodel",
    "repo": "fnv-nx-build",
-   "ref": "tools/gcc-ilp32-msvcmodel-noneelf",
-   "commit": "b36df9302cd1a27c11a606274b5d9bcfc6221f5f",
-   "tree_sha256": "6ed4c54a30a1314fcf47e9df53fce873e6664a2a27534458244fc28c2f47e142",
-   "at": "/ext/gcc"
+   "ref": "tools/fnvnx-a64-msvcmodel",
+   "commit": "00e3d42acd10593d534b9a70bb8940cee7991436",
+   "tree_sha256": "3f25152cbc5a729d9e0a12fc5c62b6b912b6ab1571b6b3494de8f35e3904207d",
+   "at": "/ext/a64"
   }
  ]
 }

@@ -104,10 +104,10 @@ def datamodel(td, so):
     for r in rows.values():
         check('%s has a doc quotation or an exe_source, a mechanism and a status' % r['id'],
               (r['citations'] or r.get('exe_source')) and r['mechanism'] and r['status'] in ('closed', 'open'), r)
-    gc = open(os.path.join(root, '..', 'verify', 'guest_compiler.json')).read()
+    sem = set(pb.recipe.semantics_set(None))   # the one derivation: the data-model rows' flags and guest_compiler.json's common flags (L1, fa6bed977)
     for r in rows.values():
         if r.get('flag'):
-            check('%s: flag %s is a semantic flag of guest_compiler.json' % (r['id'], r['flag']), r['flag'] in gc, r['flag'])
+            check('%s: flag %s is in the recipe\'s semantic flag set' % (r['id'], r['flag']), r['flag'] in sem, r['flag'])
     bad = [t['entry'] for t in doc['tm'] if ('fact' in t and t['fact'] not in rows) or ('fact' not in t and not t.get('not_layout'))]
     check('every tm.texi entry (%d) maps to a row or states why it is not a layout fact' % len(doc['tm']), not bad, bad)
     used = {t['fact'] for t in doc['tm'] if 'fact' in t}
@@ -162,7 +162,7 @@ def main():
                   not (und & tf), sorted(und & tf))
             ext = json.load(open(os.path.join(pb.REAL, pb.T + 'verify/guest_compiler.json')))
             co = os.path.join(pb.STORE, 'external', ext['external']['commit'] + '.co')
-            pd = predefines(os.path.join(co, ext['cxx']))
+            pd = predefines(os.path.join(co, recipe.pin_drivers()[1]))
             dbl = {k[len('__DBL_'):]: v for k, v in pd.items() if k.startswith('__DBL_')}
             ldbl = {k[len('__LDBL_'):]: v for k, v in pd.items() if k.startswith('__LDBL_')}
             check('every __LDBL_*__ predefine has its __DBL_*__ twin and the reverse (%d names)' % len(dbl), set(ldbl) == set(dbl),
@@ -172,15 +172,16 @@ def main():
                   {k: (dbl[k], ldbl[k]) for k in dbl if k in ldbl and number(ldbl[k]) != number(dbl[k])})
             # MLIB1: the compiler's defaults are the guest record. A plain compile (no flag at all) has the ILP32 data model of the exe: the ABI of
             # guest_platform (--with-abi), signed char and a 16-bit wchar_t (DATAMODEL S01, S02: the patch, not a flag), binary64 long double.
-            plain = predefines(os.path.join(co, ext['cxx']))
+            plain = predefines(os.path.join(co, recipe.pin_drivers()[1]))
             check('a plain compile is ILP32 (__ILP32__), with plain char signed (no __CHAR_UNSIGNED__), a 16-bit wchar_t and an 8-byte long double (MLIB1)',
                   '__ILP32__' in plain and '__CHAR_UNSIGNED__' not in plain and plain.get('__WCHAR_WIDTH__') == '16'
                   and plain.get('__SIZEOF_WCHAR_T__') == '2' and plain.get('__SIZEOF_LONG_DOUBLE__') == '8',
                   {k: plain.get(k) for k in ('__ILP32__', '__CHAR_UNSIGNED__', '__WCHAR_WIDTH__', '__SIZEOF_WCHAR_T__', '__SIZEOF_LONG_DOUBLE__')})
-            ml = subprocess.run([os.path.join(co, ext['cxx']), '-print-multi-lib'], capture_output=True, text=True).stdout.split()
+            ml = subprocess.run([os.path.join(co, recipe.pin_drivers()[1]), '-print-multi-lib'], capture_output=True, text=True).stdout.split()
             sel = {x for l in ml for x in l.split(';', 1)[1].replace('@', ' -').split()}
-            check('-print-multi-lib lists only the guest\'s variants: every one selects the platform\'s code model (-fPIC) and nothing about the ABI, '
-                  'wchar_t or char, which are the compiler\'s defaults (MLIB1)', ml and sel == {'-fPIC'} and all(';@fPIC' in l for l in ml), ml)
+            check('-print-multi-lib lists only the guest\'s variants: the default (no selector) and the position-independent one, which selects the platform\'s code '
+                  'model (-fPIC) and nothing about the ABI, wchar_t or char, which are the compiler\'s defaults (MLIB1)',
+                  ml and sel == {'-fPIC'} and all(l == '.;' or l.endswith(';@fPIC') for l in ml) and any(l.endswith(';@fPIC') for l in ml), ml)
         model(td, so)
         datamodel(td, so)
     finally:

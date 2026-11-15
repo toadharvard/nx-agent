@@ -64,6 +64,18 @@ for bad in (b'f\tint', b'f\tint\nf\tint\n', b'f\t[\n'):
         fails.append('parse_decltype accepted %r' % bad)
     except ValueError:
         pass
+# RULE DECLTYPE-COMPLETE: a line is `symbol<TAB>type` or `symbol<TAB>-reason`, the reasons being the plugin's closed set
+types, why = C.parse_decltype_lines(b'f\t(int)int\n_ZN1AC1Ev\t-mangled\nmemcpy\t-builtin\n__addtf3\t-libcall\nx\t-cxx\ny\t-noname\n', 'x')
+if types != {'f': '(int)int'} or why != {'_ZN1AC1Ev': 'mangled', 'memcpy': 'builtin', '__addtf3': 'libcall', 'x': 'cxx', 'y': 'noname'}:
+    fails.append('parse_decltype_lines: %r %r' % (types, why))
+if C.parse_decltype(b'f\t(int)int\ng\t-mangled\n', 'x') != {'f': '(int)int'}:
+    fails.append('parse_decltype keeps the typed rows only')
+for bad in (b'f\t-unknown\n', b'f\t-mangled\nf\t-mangled\n', b'f\t(int)int\nf\t-cxx\n'):
+    try:
+        C.parse_decltype_lines(bad, 'x')
+        fails.append('parse_decltype_lines accepted %r' % bad)
+    except ValueError:
+        pass
 for a, b, want in (('complex:8:4:float', 'complex:8:4:float', True), ('complex:8:4:float', 'complex:16:8:double', False),
                   ('complex:16:8:double', 'complex:16:16:double', False), ('vec:4:16:16:int', 'vec:4:16:16:int', True), ('vec:4:16:16:int', 'vec:2:8:8:int', False),
                   ('atomic:int', 'int', False), ('atomic:const:int', 'const:atomic:int', True), ('host:int', 'host:int', True), ('host:int', 'int', False),

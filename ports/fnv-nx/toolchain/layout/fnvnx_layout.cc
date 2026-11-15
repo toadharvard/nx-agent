@@ -147,9 +147,20 @@ static void add_var(tree d)
   if (vars_set.insert(d).second) { vars.push_back(d); keep_vars = tree_cons(NULL_TREE, d, keep_vars); }
 }
 
+/* RULE SYMSET (names.cc sym_emitted), the assembler-label case: a declaration with `__asm__("x")` has the assembler name `*x`, and varasm.cc assemble_name marks a symbol
+ * referenced on the identifier `x` only when that identifier already exists (maybe_get_identifier). Interning it when the declaration is finished makes GCC's own
+ * bookkeeping record the reference, so that TREE_SYMBOL_REFERENCED of `x` is the fact for the symbol of the object, whatever the spelling of the declaration. */
+static void intern_label_name(tree d)
+{
+  if (!d || !DECL_P(d) || !VAR_OR_FUNCTION_DECL_P(d) || !DECL_ASSEMBLER_NAME_SET_P(d)) return;
+  const char *an = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d));
+  if (an[0] == '*' && an[1]) get_identifier(an + 1);
+}
+
 static void finish_decl_cb(void *gcc_data, void *)
 {
   tree d = (tree)gcc_data;
+  intern_label_name(d);
   add_var(d);
   /* a compiler-made object (typeinfo, vtable, guard) carries compiler-made record types: not the source's */
   if (d && DECL_P(d) && !DECL_ARTIFICIAL(d)) add_type(TREE_TYPE(d));
@@ -344,39 +355,66 @@ static void emit_objects()
  * A type outside this grammar (an atomic qualifier, a complex type, an incomplete enumeration) is an error of the compilation, and
  * so is a symbol declared with two different spellings in one unit (every declaration of it is compatible with the others, but the gate that
  * reads this section needs one spelling to be the symbol's type in the unit). */
+#include "rtl.h"
 #include "decltype_spell.inc"   /* dl_type: the spelling of .fnvnx.decltype, shared with fnvnx_dispatch */
+
+/* RULE DECLTYPE-COMPLETE (1): the names of the library functions the back end called (see emit_decltype). */
+static std::set<std::string> libcalls;
+static void (*orig_external_libcall)(rtx);
+static void libcall_seen(rtx fun)
+{
+  if (fun && GET_CODE(fun) == SYMBOL_REF) { const char *nm = XSTR(fun, 0); if (*nm == '*') nm++; libcalls.insert(nm); }
+  if (orig_external_libcall) orig_external_libcall(fun);
+}
 
 static void emit_decltype()
 {
-  /* RULE SYMSET (names.cc sym_emitted): one row per symbol the object has (defined or referenced), spelled from the symbol table's own declaration, which is the
-   * declaration the front end composed from all of the unit's declarations of it (C11 6.2.7p3). A declaration the headers bring in whose symbol the object does
-   * not have is not a row: the gate compares symbols across objects, so it would add nothing but size. */
+  /* RULE SYMSET (names.cc sym_emitted) + RULE DECLTYPE-COMPLETE: every symbol the object has (defined or referenced) has exactly one line: the row spelled from the
+   * symbol table's own declaration, which is the declaration the front end composed from all of the unit's declarations of it (C11 6.2.7p3), or `-reason` (the closed
+   * set FNVNX_DECLTYPE_REASONS). The universe is the one of .fnvnx.sympair: the symbol table's emitted symbols and the SDD2 slot functions. A declaration the headers
+   * bring in whose symbol the object does not have is not a line: the gate compares symbols across objects, so it would add nothing but size. */
   std::vector<tree> decls;
   symtab_node *sn;
   FOR_EACH_SYMBOL(sn) {
     bool def;
-    tree d = sn->decl;
-    if (!sym_emitted(sn, def) || DECL_IS_UNDECLARED_BUILTIN(d) || !DECL_NAME(d)) continue;
-    /* RULE (DECLTYPE-LANG): the symbols of a C unit and the symbols with C language linkage of a C++ unit (extern "C": the names C code can declare); a C++ name
-     * has the ODR (.fnvnx.odrdef) and the layout gates, not C's 6.2.7 */
-    if (is_cxx() && !(DECL_LANG_SPECIFIC(d) && DECL_EXTERN_C_P(d))) continue;
-    /* RULE (DECLTYPE-MANGLED): a symbol whose assembler name is in the Itanium mangled-name space carries its type in its name, so it gets no row. The space is
-     * fixed by two citations: the Itanium C++ ABI 5.1 (a mangled name begins with `_Z`) and C11 7.1.3p1 / C++ [lex.name] (an identifier that begins with `_` and an
-     * uppercase letter is reserved to the implementation, so no user C symbol has such a name). It is decided on the assembler name, the string sym_emitted uses,
-     * not on the source spelling: an extern "C" declaration of a mangled name (libstdc++'s cow-stdexcept.cc declares the std::string constructors so) is in it
-     * too. Its cross-object comparison is .fnvnx.sympair / .fnvnx.odrdef, which cover mangled names. */
-    const char *an = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d));
-    if (an[0] == '_' && an[1] == 'Z') continue;
-    decls.push_back(d);
+    if (sym_emitted(sn, def)) decls.push_back(sn->decl);
   }
+  for (tree f : sdd_slot_decls()) decls.push_back(f);
   std::map<std::string, std::string> rows;
   for (tree d : decls) {
-    const char *nm = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d));
-    std::vector<tree> stk;
-    std::string ty = dl_type(TREE_TYPE(d), stk);
+    const std::string nms = asmname(d);   /* the object's symbol: an assembler-label declaration has the assembler name `*x` */
+    const char *nm = nms.c_str();
+    /* RULE (DECLTYPE-MANGLED): decided on the assembler name, the string sym_emitted uses, not on the source spelling: an extern "C" declaration of a mangled name
+     * (libstdc++'s cow-stdexcept.cc declares the std::string constructors so) is in it too. Its cross-object comparison is .fnvnx.sympair / .fnvnx.odrdef, which cover
+     * mangled names. RULE (DECLTYPE-LANG): the symbols of a C unit and the symbols with C language linkage of a C++ unit (extern "C": the names C code can declare). */
+    const char *why = nullptr;
+    if (nm[0] == '_' && nm[1] == 'Z') why = "mangled";
+    else if (DECL_IS_UNDECLARED_BUILTIN(d)) why = "builtin";
+    else if (!DECL_NAME(d)) why = "noname";
+    else if (is_cxx() && !(DECL_LANG_SPECIFIC(d) && DECL_EXTERN_C_P(d))) why = "cxx";
+    std::string ty;
+    if (why) ty = std::string("-") + why;
+    else { std::vector<tree> stk; ty = dl_type(TREE_TYPE(d), stk); }
     auto it = rows.find(nm);
     if (it == rows.end()) rows[nm] = ty;
+    /* the front end's own declaration of a library function (`-builtin`) and the unit's declaration or definition of the same symbol (ffsll in newlib) are one symbol:
+     * the declaration of the unit's text is the row, the builtin one is only the implicit declaration of that libc function (GCC internals, "Builtins") */
+    else if (it->second == "-builtin" && ty != "-builtin") it->second = ty;
+    else if (ty == "-builtin") {}
     else if (it->second != ty) dl_error("one symbol is declared with two spellings in one unit", std::string(nm) + ": " + it->second + " / " + ty);
+  }
+  /* The symbols the object has that no symbol table node names: the references the back end makes itself. (1) The library functions it calls implicitly: every one is
+   * announced through targetm.asm_out.external_libcall (varasm.cc assemble_external_libcall, called once per SYMBOL_REF the first time it is used: the one place a
+   * libcall is emitted, whatever table made its SYMBOL_REF), which the plugin wraps (libcall_seen). (2) The explicit built-in functions it lowers to calls after the
+   * symbol table was built (_Unwind_Resume of a resx: the decl is in builtin_info, and its assembler name is TREE_SYMBOL_REFERENCED when a call to it was output). They
+   * have no declaration of the unit's text: `-libcall` / `-builtin`. */
+  for (auto &nm : libcalls) if (!rows.count(nm)) rows[nm] = "-libcall";
+  for (int i = 0; i < (int)END_BUILTINS; i++) {
+    tree d = builtin_info[i].decl;
+    if (!d || !TREE_PUBLIC(d) || !DECL_ASSEMBLER_NAME_SET_P(d)) continue;
+    tree an = DECL_ASSEMBLER_NAME(d);
+    if (!TREE_SYMBOL_REFERENCED(an)) continue;
+    if (!rows.count(IDENTIFIER_POINTER(an))) rows[IDENTIFIER_POINTER(an)] = "-builtin";
   }
   fprintf(asm_out_file, "\t.pushsection\t.fnvnx.decltype,\"\",%%progbits\n");
   for (auto &r : rows) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", escape(r.first + "\t" + r.second).c_str());
@@ -455,6 +493,8 @@ extern "C" int plugin_init(struct plugin_name_args *info, struct plugin_gcc_vers
     error("%<fnvnx_layout%>: unknown plugin argument %qs", info->argv[0].key);
     return 1;
   }
+  orig_external_libcall = targetm.asm_out.external_libcall;
+  targetm.asm_out.external_libcall = libcall_seen;
   /* the name rules need the class-key reports and the scope numbers of toolchain/names */
   register_callback(info->base_name, PLUGIN_REGISTER_GGC_ROOTS, NULL, (void *)keep_roots);
   register_callback(info->base_name, PLUGIN_REGISTER_GGC_ROOTS, NULL, (void *)keep_vars_roots);
@@ -464,7 +504,7 @@ extern "C" int plugin_init(struct plugin_name_args *info, struct plugin_gcc_vers
     register_callback(info->base_name, PLUGIN_FINISH_TYPE, (plugin_callback_func)+[](void *d, void *u) { finish_type(d, u); finish_type_cb(d, u); }, NULL);
     register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, pre_genericize_cb, NULL);
   } else {   /* cc1: records come from the types the front end finishes and the declarations it finishes */
-    register_callback(info->base_name, PLUGIN_FINISH_DECL, +[](void *d, void *) { add_var((tree)d); if (d && DECL_P((tree)d) && !DECL_ARTIFICIAL((tree)d)) add_type(TREE_TYPE((tree)d)); }, NULL);
+    register_callback(info->base_name, PLUGIN_FINISH_DECL, +[](void *d, void *) { intern_label_name((tree)d); add_var((tree)d); if (d && DECL_P((tree)d) && !DECL_ARTIFICIAL((tree)d)) add_type(TREE_TYPE((tree)d)); }, NULL);
     register_callback(info->base_name, PLUGIN_FINISH_TYPE, finish_type_cb, NULL);
   }
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit_cb, NULL);

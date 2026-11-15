@@ -1,10 +1,6 @@
 {
  "format": "fnvnx-recipe/1",
- "compiler": {
-  "external": "gcc-msvcmodel",
-  "cc": "bin/aarch64-none-elf-gcc",
-  "cxx": "bin/aarch64-none-elf-g++"
- },
+ "profile": "guest",
  "flags": {
   "c": [
    "-O2",
@@ -35,42 +31,6 @@
   "/ext/gcc/aarch64-none-elf/include"
  ],
  "units": "all",
- "plugins": [
-  {
-   "name": "fnvnx_ftoi"
-  },
-  {
-   "name": "fnvnx_order"
-  },
-  {
-   "name": "fnvnx_sdd"
-  },
-  {
-   "name": "fnvnx_pi"
-  },
-  {
-   "name": "fnvnx_dispatch"
-  },
-  {
-   "name": "fnvnx_addr"
-  },
-  {
-   "name": "fnvnx_names"
-  },
-  {
-   "name": "fnvnx_layout"
-  }
- ],
- "external": [
-  {
-   "name": "gcc-msvcmodel",
-   "repo": "fnv-nx-build",
-   "ref": "tools/gcc-ilp32-msvcmodel-noneelf",
-   "commit": "b36df9302cd1a27c11a606274b5d9bcfc6221f5f",
-   "tree_sha256": "6ed4c54a30a1314fcf47e9df53fce873e6664a2a27534458244fc28c2f47e142",
-   "at": "/ext/gcc"
-  }
- ],
  "link": {
   "output": "bootguest.elf",
   "kind": "pie",

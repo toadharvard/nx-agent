@@ -1,79 +1,39 @@
 {
-  "format": "fnvnx-recipe/1",
-  "compiler": {
-    "external": "gcc-msvcmodel",
-    "cc": "bin/aarch64-none-elf-gcc",
-    "cxx": "bin/aarch64-none-elf-g++"
-  },
-  "flags": {
-    "c": [
-      "-O2",
-      "-g",
-      "-ffunction-sections",
-      "-fdata-sections",
-      "-Wall",
-      "-Wextra",
-      "-D__LINUX_ERRNO_EXTENSIONS__",
-      "-std=gnu11",
-      "-Werror=attributes"
-    ],
-    "cxx": [
-      "-O2",
-      "-g",
-      "-ffunction-sections",
-      "-fdata-sections",
-      "-Wall",
-      "-Wextra",
-      "-D__LINUX_ERRNO_EXTENSIONS__",
-      "-DFNVNX_SDD=1",
-      "-std=gnu++20",
-      "-Werror=attributes"
-    ],
-    "asm": []
-  },
-  "include": [
-    "ports/fnv-nx/hostabi/include",
-    "ports/fnv-nx/loader/include",
-    "ports/fnv-nx/lib/sha256/include",
-    "/ext/gcc/aarch64-none-elf/include/c++/13.3.0",
-    "/ext/gcc/aarch64-none-elf/include/c++/13.3.0/aarch64-none-elf",
-    "/ext/gcc/aarch64-none-elf/include"
+ "format": "fnvnx-recipe/1",
+ "profile": "guest",
+ "flags": {
+  "c": [
+   "-O2",
+   "-g",
+   "-ffunction-sections",
+   "-fdata-sections",
+   "-Wall",
+   "-Wextra",
+   "-D__LINUX_ERRNO_EXTENSIONS__",
+   "-std=gnu11",
+   "-Werror=attributes"
   ],
-  "units": "all",
-  "plugins": [
-    {
-      "name": "fnvnx_ftoi"
-    },
-    {
-      "name": "fnvnx_order"
-    },
-    {
-      "name": "fnvnx_sdd"
-    },
-    {
-      "name": "fnvnx_pi"
-    },
-    {
-      "name": "fnvnx_dispatch"
-    },
-    {
-      "name": "fnvnx_addr"
-    },
-    {
-      "name": "fnvnx_names"
-    },
-    {
-      "name": "fnvnx_layout"
-    }
+  "cxx": [
+   "-O2",
+   "-g",
+   "-ffunction-sections",
+   "-fdata-sections",
+   "-Wall",
+   "-Wextra",
+   "-D__LINUX_ERRNO_EXTENSIONS__",
+   "-DFNVNX_SDD=1",
+   "-std=gnu++20",
+   "-Werror=attributes"
   ],
-  "external": [
-    {
-      "name": "gcc-msvcmodel",
-      "repo": "fnv-nx-build",
-      "ref": "tools/gcc-ilp32-msvcmodel-noneelf",
-      "commit": "b36df9302cd1a27c11a606274b5d9bcfc6221f5f",
-      "tree_sha256": "6ed4c54a30a1314fcf47e9df53fce873e6664a2a27534458244fc28c2f47e142",
-      "at": "/ext/gcc"
-    }
-  ]
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/hostabi/include",
+  "ports/fnv-nx/loader/include",
+  "ports/fnv-nx/lib/sha256/include",
+  "/ext/gcc/aarch64-none-elf/include/c++/13.3.0",
+  "/ext/gcc/aarch64-none-elf/include/c++/13.3.0/aarch64-none-elf",
+  "/ext/gcc/aarch64-none-elf/include"
+ ],
+ "units": "all"
 }

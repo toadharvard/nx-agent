@@ -437,7 +437,7 @@ def with_guest_link(rec, root, roots, repo):
     lk, prof = rec.get("link"), load_guest_link(repo)
     if not (isinstance(lk, dict) and prof and entry_of(roots, root).get("target") == "guest"):
         return rec
-    return dict(rec, link=dict(lk, script=TREE + "/" + prof["script"], libs={"external": load_pin(repo)["runtime"]["name"], "derive": True}))
+    return dict(rec, link=dict(lk, script=TREE + "/" + prof["script"], libs={"external": load_pin(repo)["external"]["name"], "derive": True}))
 
 
 def load_admit(repo="."):
@@ -483,18 +483,19 @@ def entry_of(roots, spec):
 
 def profile_fields(profile, pin):
     """The fields of the PROFILE ("guest" | "host") of a root: {compiler, plugins, external}, generated from the pins and never written in a build.json.
-    guest: the game's compiler (the external and drivers of verify/guest_compiler.json, PIN), the full plugin set of PLUGIN_SOURCES in load order
-    (plugin_decls takes the arguments from recipe.py alone), the compiler's external and the runtime's external (pin `runtime`).
+    guest: the game's compiler (the external of verify/guest_compiler.json, PIN, and its drivers derived from the one triplet of targets.json), the full plugin set of PLUGIN_SOURCES in load order
+    (plugin_decls takes the arguments from recipe.py alone), the compiler's external (it holds the runtime too: one tree).
     host: the distribution compiler pinned by env.json (PLUGIN_CXX's package), no plugin, no external. -> (fields, errors)."""
     if profile == "host":
         return {"compiler": {"cc": PLUGIN_CXX.replace("g++", "gcc"), "cxx": PLUGIN_CXX}, "plugins": [], "external": []}, []
     if profile != "guest":
         return None, ["profile %r is unknown (%s)" % (profile, " | ".join(PROFILES))]
-    if not (isinstance(pin, dict) and isinstance(pin.get("external"), dict) and isinstance(pin.get("runtime"), dict)):
-        return None, ["profile guest: %s is missing or has no external and runtime" % GUEST_PIN]
+    if not (isinstance(pin, dict) and isinstance(pin.get("external"), dict)):
+        return None, ["profile guest: %s is missing or has no external" % GUEST_PIN]
     ex = pin["external"]
-    return {"compiler": {"external": ex["name"], "cc": pin["cc"], "cxx": pin["cxx"]}, "plugins": [{"name": n} for n in PLUGIN_SOURCES],
-            "external": [dict(ex)] + ([dict(pin["runtime"])] if pin["runtime"] != ex else [])}, []   # one mirror holds the compiler and the runtime: then the runtime is the compiler's external, declared once
+    cc, cxx = pin_drivers()
+    return {"compiler": {"external": ex["name"], "cc": cc, "cxx": cxx}, "plugins": [{"name": n} for n in PLUGIN_SOURCES],
+            "external": [dict(ex)]}, []
 
 
 COMPILE_KEYS = ("compiler", "flags", "include", "units", "link", "profile", "variants")
@@ -635,6 +636,11 @@ def units_of(rec, root, files):
     return [u for u in all_units_of(rec, root, files) if u not in tu]
 
 
+def pin_drivers():
+    """(cc, cxx) driver paths of the guest compiler tree: derived from the one triplet of targets.json (targets.drivers), never written in the pin."""
+    return _targets.drivers(_targets.load())
+
+
 def load_pin(repo="."):
     """verify/guest_compiler.json of the checkout, or None when the tree has none."""
     p = os.path.join(repo, GUEST_PIN)
@@ -680,9 +686,6 @@ def guest_link_part(rec, root, pin, prof, files, roots):
         return []
     bad = ["link.%s is declared: script and libs of a guest link come from %s" % (k, GUEST_LINK) for k in ("script", "libs") if k in lk]
     bad += guest_link_errors(prof, pin, files, roots) if prof is not None else ["%s is missing" % GUEST_LINK]
-    rt = pin.get("runtime") if isinstance(pin, dict) else None
-    if isinstance(rt, dict) and rt.get("name") not in [e.get("name") for e in rec.get("external", []) if isinstance(e, dict)]:
-        bad.append("the runtime external %r of %s is not declared in external" % (rt.get("name"), GUEST_PIN))
     return ["guest root %s: %s" % (root, b) for b in bad]
 
 
@@ -704,10 +707,7 @@ def guest_errors(rec, spec, roots, pin, prof=None, files=()):
         return lb + ["guest root %s: compiler must be the external compiler %r (not a distribution driver)" % (root, pin["external"].get("name"))]
     ex = next((e for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == c["external"]), None)
     bad = [] if ex == pin["external"] else ["external %r is not the pinned one (%s)" % (c["external"], pin["external"])]
-    rt = pin.get("runtime")   # the guest's libc/libstdc++ external: when a recipe declares it (by name), it is the pinned one, exactly
-    if isinstance(rt, dict):
-        bad += ["external %r is not the pinned runtime (%s)" % (e["name"], rt) for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == rt["name"] and e != rt]
-    bad += ["compiler.%s is %r, pinned %r" % (k, c[k], pin.get(k)) for k in ("cc", "cxx") if c[k] != pin.get(k)]
+    bad += ["compiler.%s is %r, derived from the triplet %r" % (k, c[k], d) for k, d in zip(("cc", "cxx"), pin_drivers()) if c[k] != d]
     fl = rec.get("flags") if isinstance(rec.get("flags"), dict) else {}
     # an attribute that neither the compiler nor a loaded plugin registers is otherwise dropped with a warning: a marker a rule relies on vanishes
     bad += ["flags.%s lacks %s" % (k, WERROR_ATTR) for k in ("c", "cxx") if WERROR_ATTR not in (fl.get(k) if isinstance(fl.get(k), list) else [])]
@@ -2019,8 +2019,7 @@ class Job:
         pin = load_pin(self.repo) if guest and cc else None
         if pin:
             bad = []
-            for n in dict.fromkeys([cc] + [pin["runtime"]["name"]] * (isinstance(pin.get("runtime"), dict) and pin["runtime"]["name"] in self.ext)):
-                bad += compiler_stamp_errors(RECIPE_TREE, self.ext[n]["host"], n)
+            bad += compiler_stamp_errors(RECIPE_TREE, self.ext[cc]["host"], cc)
             if bad:
                 self.red.append({"stage": "external:" + cc, "exit": None, "stderr": bad})
                 self.blocked.update({u: "external:" + cc for u in units})
@@ -2270,7 +2269,7 @@ class Job:
             bad.append("derived files outside the multilib %r that flags.semantics selects: %s" % (self.multidir, ", ".join(stray)))
         if bad:
             raise BuildRed({"stage": "drv:" + self.root, "exit": None, "stderr": bad})
-        host = self.ext[pin["runtime"]["name"]]["host"]
+        host = self.ext[pin["external"]["name"]]["host"]
         objs = {p: {d["symbol"] for d in symbols(os.path.join(host, p), p)[0]} for p in raw["startfiles"] + raw["endfiles"]}
         gone = sorted(set(onedef(objs, rootdef)) | set(entry_object(objs, ldcheck.script_entry(script_text))))
         return {k: ([x for x in v if x not in gone] if k in ("startfiles", "endfiles") else v) for k, v in raw.items()}, gone
@@ -2289,13 +2288,13 @@ class Job:
         return {n for n, _, _, shndx, typ in ldcheck_syms(d, 2) if shndx != 0 and typ not in (3, 4)} - own
 
     def link_probe(self, ws):
-        """Stage `drv:<root>`: the guest runtime's C++ driver (pin `runtime_driver`, inside the pinned runtime external) run with the guest semantic flags
+        """Stage `drv:<root>`: the guest runtime's C++ driver (the cxx driver of the triplet, inside the pinned compiler tree that holds the runtime) run with the guest semantic flags
         (the common set: the profile is one fact for every guest link, native and lifted alike) and `-###` on the link of a one-line C++ file, hermetic (the driver prints the commands it would run; none is run).
         -> (stderr text, the runtime external's mount point): the link command of the multilib the flags select."""
         pin = load_pin(self.repo)
-        rt = pin["runtime"]
-        self.ext.update(fetch_externals([pin["external"]] + ([rt] if rt != pin["external"] else []), self.store, self.extcache, ws))
-        drv = rt["at"] + "/" + pin["runtime_driver"]
+        rt = pin["external"]
+        self.ext.update(fetch_externals([rt], self.store, self.extcache, ws))
+        drv = rt["at"] + "/" + pin_drivers()[1]
         flags = semantics_for(self.hostpath(self.drivers()[1]), "cxx", SEMANTICS_FLAGS)
         tr = self.toolrt([drv])[1]
         pd = os.path.join(ws, "probe")

@@ -23,6 +23,7 @@ parameter of the prototype is changed by the default argument promotions; struct
 are tagged, the same member count, and in order the same names, the same bit-field widths and compatible types; a complete and an incomplete type are
 compatible when the tags are equal (6.2.7p1); enum: the same tag (or both unnamed) and compatible integer types.  A recursive type is compared by
 coinduction: a pair already under comparison is compatible (the greatest fixed point).  Pure: strings in, verdicts out."""
+import os
 import re
 
 WORD = re.compile(r'[A-Za-z0-9_]+')
@@ -193,24 +194,45 @@ def compatible(a, b, seen=None):
     raise ValueError('unknown type %r' % (a,))
 
 
-def parse_decltype(data, where):
-    """-> {symbol: type string} of the `.fnvnx.decltype` section: LF-terminated lines `symbol<TAB>type`, each symbol once; every type must parse"""
+def _decltype_reasons():
+    """the closed set of no-row reasons of `.fnvnx.decltype`, read from where the plugin defines it once (toolchain/layout/decltype_spell.inc, FNVNX_DECLTYPE_REASONS)"""
+    inc = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'toolchain', 'layout', 'decltype_spell.inc')
+    m = re.search(r'#define FNVNX_DECLTYPE_REASONS\(X\)((?: X\(\w+\))+)', open(inc).read())
+    if not m:
+        raise ValueError('%s: no FNVNX_DECLTYPE_REASONS' % inc)
+    return frozenset(re.findall(r'X\((\w+)\)', m.group(1)))
+
+
+def parse_decltype_lines(data, where):
+    """-> ({symbol: type string}, {symbol: reason}) of the `.fnvnx.decltype` section: LF-terminated lines `symbol<TAB>type` or `symbol<TAB>-reason`, each symbol once
+    (RULE DECLTYPE-COMPLETE: every symbol of the object has exactly one of the two); every type must parse and every reason must be in the plugin's closed set"""
     text = data.decode('utf-8')
     if text and not text.endswith('\n'):
         raise ValueError('%s: no final LF' % where)
-    out = {}
+    reasons = _decltype_reasons()
+    out, why = {}, {}
     for n, ln in enumerate(text.split('\n')[:-1], 1):
         f = ln.split('\t')
         if len(f) != 2 or not f[0]:
             raise ValueError('%s: line %d: not symbol<TAB>type' % (where, n))
-        if f[0] in out:
+        if f[0] in out or f[0] in why:
             raise ValueError('%s: line %d: %s twice' % (where, n, f[0]))
+        if f[1].startswith('-') and len(f[1]) > 1:
+            if f[1][1:] not in reasons:
+                raise ValueError('%s: line %d: reason %r is not in the closed set %s' % (where, n, f[1][1:], sorted(reasons)))
+            why[f[0]] = f[1][1:]
+            continue
         try:
             parse(f[1])
         except ValueError as e:
             raise ValueError('%s: line %d: %s' % (where, n, e))
         out[f[0]] = f[1]
-    return out
+    return out, why
+
+
+def parse_decltype(data, where):
+    """-> {symbol: type string} of the rows of the `.fnvnx.decltype` section (the symbols with a reason instead of a type are not compared: parse_decltype_lines)"""
+    return parse_decltype_lines(data, where)[0]
 
 
 def check(per_object):

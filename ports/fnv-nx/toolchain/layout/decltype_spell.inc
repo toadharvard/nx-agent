@@ -1,6 +1,15 @@
 /* decltype_spell.inc - the spelling of a type in `.fnvnx.decltype` (grammar: link/ctypes_compat.py), THE one implementation. Included by the layout
  * plugin (what the front end declares) and by the dispatch plugin (the dispatcher's own prototype, which no front end declares), so a type is spelled
  * by one function whoever owns the declaration. Needs tree.h, stor-layout.h, diagnostic-core.h, <string>, <vector>, <algorithm>. */
+/* RULE (DECLTYPE-COMPLETE): a symbol of the object has exactly one line, `symbol<TAB>type`, or `symbol<TAB>-reason` when no row is formed for it. The reasons are a
+ * closed set, defined here once (link/ctypes_compat.py reads this line; a reason outside it is a parse error there):
+ *   mangled  the assembler name is in the Itanium mangled-name space (`_Z`, Itanium C++ ABI 5.1; C11 7.1.3p1 / C++ [lex.name] reserve it), its type is in its name
+ *   builtin  the front end's own declaration of a library function (DECL_IS_UNDECLARED_BUILTIN): no declaration of the unit's text
+ *   libcall  a library function the back end calls implicitly (libfuncs.h): no declaration of the unit's text at all
+ *   noname   a declaration without a source name
+ *   cxx      a C++ name (not extern "C"): it has the ODR (.fnvnx.odrdef) and layout gates, not C11 6.2.7 (RULE DECLTYPE-LANG)
+ * A symbol with none of the two forms is an error of the plugin (emit_decltype). */
+#define FNVNX_DECLTYPE_REASONS(X) X(mangled) X(builtin) X(libcall) X(noname) X(cxx)
 static bool dl_failed = false;
 static void dl_error(const char *what, const std::string &name)
 {
@@ -10,7 +19,7 @@ static void dl_error(const char *what, const std::string &name)
 
 /* RULE (DECLTYPE-LANG): one spelling for a C and a C++ unit. In a C++ unit the tag of a class is its name qualified by its scopes (namespaces and enclosing
  * classes, outermost first, joined by `__`, a name the C++ standard reserves in user code, so two scopes never collide), a global class is its bare name, exactly
- * as in C. A class template specialization (its arguments are part of the type, a tag cannot carry them), or a name outside [A-Za-z0-9_] (an anonymous namespace) has no row form; an anonymous class is spelled as in C (no tag, `-`): an error with the name, never a
+ * as in C. A class template specialization (its arguments are part of the type, a tag cannot carry them) is spelled by its Itanium name (RULE DECLTYPE-SPEC, below); a name outside [A-Za-z0-9_] (an anonymous namespace) has no row form; an anonymous class is spelled as in C (no tag, `-`): an error with the name, never a
  * skip. The members of a class are the FIELD_DECLs the front end makes (base-class subobjects and the vptr are artificial fields, spelled `-`: the layout the
  * C view sees); member functions and static members are not part of the object. A C unit's rows are unchanged (its TYPE_CONTEXT is not read). */
 static bool dl_cxx() { return !strncmp(lang_hooks.name, "GNU C++", 7); }
@@ -19,6 +28,19 @@ static bool dl_ident(const char *s)
   if (!*s) return false;
   for (; *s; s++) if (!ISALNUM(*s) && *s != '_') return false;
   return true;
+}
+
+/* RULE (DECLTYPE-SPEC): a class template specialization (its arguments are part of the type) or a class nested in one has no source-name tag, and its tag is
+ * the Itanium ABI name of its type: `_ZTS` followed by the mangling of the type (Itanium C++ ABI 5.1.5, the special name of the type's name string; the mangling
+ * is unique for every C++ type, and an identifier that begins with `_Z` is in the namespace the implementation reserves, C11 7.1.3p1 / C++ [lex.name], so the
+ * tag never equals the tag of a class written in source). It is the one spelling cp/mangle.cc itself gives the type (the names plugin's odr_type_name), made of
+ * [A-Za-z0-9_] only, so it is a TAG of the grammar of link/ctypes_compat.py. The members follow as for any class. */
+FNVNX_CXX_ONLY(mangle_type_string);
+static std::string dl_tag_mangled(tree t)
+{
+  std::string m = "_ZTS" + std::string(mangle_type_string(TYPE_MAIN_VARIANT(t)));
+  if (!dl_ident(m.c_str())) { dl_error("the Itanium name of a class template specialization is outside the grammar of a tag", m); return "?"; }
+  return m;
 }
 
 static std::string dl_tag(tree t)
@@ -30,11 +52,11 @@ static std::string dl_tag(tree t)
   if (!dl_cxx()) return tag;
   if (IDENTIFIER_ANON_P(n) && !IDENTIFIER_LAMBDA_P(n)) return "-";   /* an anonymous class: GCC's own name (._anon_N) is no source name; the row form is the C one, no tag (a typedef name for linkage is no tag either, above) */
   if (IDENTIFIER_LAMBDA_P(n)) { dl_error("a lambda closure type has no tag form", tag); return "?"; }
-  if (CLASS_TYPE_P(t) && CLASSTYPE_TEMPLATE_INFO(t)) { dl_error("a class template specialization has no tag form (its arguments are part of the type)", tag); return "?"; }
+  if (CLASS_TYPE_P(t) && CLASSTYPE_TEMPLATE_INFO(t)) return dl_tag_mangled(t);
   if (!dl_ident(tag.c_str())) { dl_error("a class name outside the grammar", tag); return "?"; }
   for (tree c = TYPE_CONTEXT(t); c; ) {
     tree id, up;
-    if (TYPE_P(c) && CLASS_TYPE_P(c) && CLASSTYPE_TEMPLATE_INFO(c)) { dl_error("a class nested in a class template specialization has no tag form", tag); return "?"; }
+    if (TYPE_P(c) && CLASS_TYPE_P(c) && CLASSTYPE_TEMPLATE_INFO(c)) return dl_tag_mangled(t);   /* a class nested in a specialization: its scope carries arguments too */
     if (TYPE_P(c)) { id = TYPE_NAME(c); id = id && TREE_CODE(id) == TYPE_DECL ? DECL_NAME(id) : NULL_TREE; up = TYPE_CONTEXT(c); }
     else if (TREE_CODE(c) == NAMESPACE_DECL) { if (!DECL_CONTEXT(c)) break; id = DECL_NAME(c); up = DECL_CONTEXT(c); }   /* the global namespace has no context */
     else break;

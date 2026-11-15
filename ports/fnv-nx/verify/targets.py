@@ -25,6 +25,12 @@ def arch_flag(cpu):
     return "-march=" + cpu["arch"] + "".join("+" + f for f in cpu["features"])
 
 
+def drivers(t):
+    """(cc, cxx): the driver paths inside the guest compiler tree, derived from the one triplet of the guest platform. Nobody else spells a target name."""
+    tr = t["guest_platform"]["triplet"]
+    return "bin/%s-gcc" % tr, "bin/%s-g++" % tr
+
+
 def semantic_prefix(t, repo=None):
     """The leading run of the guest semantic flags, from the records: ABI of the platform, architecture and tuning of the CPU, the platform's code model,
     then the flags of the data-model rows."""
