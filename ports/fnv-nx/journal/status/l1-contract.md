@@ -1294,3 +1294,5 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - cand2 will hold w24 pluginfix + 559f220db/b30f7b460, and w12 d6df0254/91850075d.
 - L6 w6 base-files accepted: env.json packages + base-files 13ubuntu10.5 + mawk, by envcheck RUN_LAYOUT_DEB; the run stage mounts one deb union; env_id 210d5c58…; mirror b80d5ea4. The mirror fork with w5's 9b0c4743 (GL dev debs) gets one union commit, only if a --from-code rule emits w5's packages. Owner w6, for cand2.
 - w20u cbf20c9cd: the doubles gate, stage 1 (recipe `tests` key, doubles.py in objstub). The FNVNX_IMAGE_ENTRY exception (from PP) and the global doubles count are pending.
+- L5 w10 310d0e97e accepted (resolve_input: a tracked directory is a blob copy from ls-files -s, the ident is a (path, blob) sha, a symlink is red). 7 roots green on its head. For cand2.
+- L2 w3 ccd19e8a7: .fnvnx.odrdef landed. w23 implements tier 2 in gate_abi/linkstrict; the acceptance case is the 6 std::string instantiations.
