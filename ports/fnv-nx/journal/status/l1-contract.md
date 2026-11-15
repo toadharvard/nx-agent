@@ -1677,3 +1677,7 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - C prototype ctypes: covered by the C 6.2.7 gate (w23). w15 checks its coverage.
 - objstub per profile is in at 939c2794d. The 19 old toy cases become guest-profile roots, with the msvcmodel external in the commit that takes the pin, and stay in cand2.
 - Budget: w15 fixes the selftest cache misses first, then determinism and exepin. Target: the whole verdict ≤ 300 s warm.
+- 14:25 Typed dispatch (L3a w8 ae7417004, L2 ENTRY1), a cand3 item for w12, ahead of std:.
+  - gate_disp and gate_reach read the generator's declared rows output, and check the linked ELF's typed tables against those rows through the relocations, slot by slot.
+  - The asm parsers are deleted.
+  - L3a holds ae7417004 until these gates are in.
