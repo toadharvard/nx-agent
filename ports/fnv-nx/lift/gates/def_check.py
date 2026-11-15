@@ -51,27 +51,53 @@ def check_form(F):
     return fl, rg, read_back(lines_of(F), fl, rg, F.uwhen)
 
 
+def instructions(pe, facts):
+    """-> {address: instruction}: every instruction that an entry of the facts reaches, decoded per ENTRY from the entry's own address by control flow inside the entry's ranges
+    (ranges.tsv: entry -> the bytes it reaches; fall-through and the direct jump / call-free branch targets, one decoder: capstone at the address, the one of tools/pcsrc.Img.dec).
+    Decoding from the start of a range instead would start inside an instruction wherever ranges overlap; an instruction is a pure function of its address, so the union over entries is
+    well defined. A successor outside the entry's ranges is not decoded for this entry."""
+    base, rows = g.load_ranges(os.path.join(facts, 'ranges.tsv'))
+    img = g.Image(pe, base)
+    out = {}
+    for e, rgs in rows.items():
+        def inside(a): return any(lo <= a < hi for lo, hi in rgs)
+        work = [e]; seen = set()
+        while work:
+            a = work.pop()
+            if a in seen or not inside(a): continue
+            seen.add(a)
+            i = out.get(a)
+            if i is None:
+                hi = next(h for lo, h in rgs if lo <= a < h)
+                code = None
+                for n in (15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1):
+                    code = img.read(a, a + n)
+                    if code is not None: break
+                if code is None: continue
+                i = next(g._md.disasm(code, a, 1), None)
+                if i is None: continue
+                out[a] = i
+            nxt = [i.address + i.size]
+            if i.group(capstone.CS_GRP_JUMP) or i.group(capstone.CS_GRP_CALL) or i.group(capstone.CS_GRP_RET) or i.group(capstone.CS_GRP_IRET):
+                m = i.mnemonic
+                nxt = [] if m in ('ret', 'retn', 'retf', 'iret', 'iretd', 'jmp', 'ljmp') else nxt
+                if i.group(capstone.CS_GRP_JUMP) and i.operands and i.operands[0].type == X.X86_OP_IMM: nxt.append(i.operands[0].imm)
+            work += nxt
+    return out
+
+
 def universe(pairs):
-    """-> {shape key: [first instruction, site count]} over every decoded instruction of the images"""
+    """-> {shape key: [first instruction, site count]} over every instruction that an entry of the images reaches (instructions())"""
     out = {}
     for pe, facts in pairs:
-        base, rows = g.load_ranges(os.path.join(facts, 'ranges.tsv'))
-        img = g.Image(pe, base)
-        seen = set()
-        for e in sorted(rows):
-            for lo, hi in rows[e]:
-                if (lo, hi) in seen: continue
-                seen.add((lo, hi))
-                code = img.read(lo, hi)
-                if code is None: continue
-                for i in g._md.disasm(code, lo):
-                    cc = None
-                    if i.id in g.SHIFT_IDS and i.operands and i.operands[-1].type == X.X86_OP_IMM: cc = min(i.operands[-1].imm & 31, 2)
-                    try: key = (shape.shape_key(i), cc)
-                    except shape.ShapeError: continue
-                    v = out.get(key)
-                    if v is None: out[key] = [i, 1]
-                    else: v[1] += 1
+        for a, i in sorted(instructions(pe, facts).items()):
+            cc = None
+            if i.id in g.SHIFT_IDS and i.operands and i.operands[-1].type == X.X86_OP_IMM: cc = min(i.operands[-1].imm & 31, 2)
+            try: key = (shape.shape_key(i), cc)
+            except shape.ShapeError: continue
+            v = out.get(key)
+            if v is None: out[key] = [i, 1]
+            else: v[1] += 1
     return out
 
 
