@@ -54,6 +54,111 @@
    ]
   },
   {
+   "tool": "ports/fnv-nx/lift/tools/retnfacts.py",
+   "args": [
+    "--exe",
+    "/ext/exe/atimgpud.dll",
+    "--universe",
+    "/ext/facts/atimgpud/universe.tsv",
+    "--out",
+    "/out/retn/atimgpud.tsv"
+   ],
+   "inputs": [],
+   "outputs": [
+    "retn/atimgpud.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/retnfacts.py",
+   "args": [
+    "--exe",
+    "/ext/exe/binkw32.dll",
+    "--universe",
+    "/ext/facts/binkw32/universe.tsv",
+    "--out",
+    "/out/retn/binkw32.tsv"
+   ],
+   "inputs": [],
+   "outputs": [
+    "retn/binkw32.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/retnfacts.py",
+   "args": [
+    "--exe",
+    "/ext/redist/d3dx9_31.dll",
+    "--universe",
+    "/ext/facts/d3dx9_31/universe.tsv",
+    "--out",
+    "/out/retn/d3dx9_31.tsv"
+   ],
+   "inputs": [],
+   "outputs": [
+    "retn/d3dx9_31.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/retnfacts.py",
+   "args": [
+    "--exe",
+    "/ext/redist/d3dx9_38.dll",
+    "--universe",
+    "/ext/facts/d3dx9_38/universe.tsv",
+    "--out",
+    "/out/retn/d3dx9_38.tsv"
+   ],
+   "inputs": [],
+   "outputs": [
+    "retn/d3dx9_38.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/retnfacts.py",
+   "args": [
+    "--exe",
+    "/ext/exe/GDFFalloutNV.dll",
+    "--universe",
+    "/ext/facts/gdffalloutnv/universe.tsv",
+    "--out",
+    "/out/retn/gdffalloutnv.tsv"
+   ],
+   "inputs": [],
+   "outputs": [
+    "retn/gdffalloutnv.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/retnfacts.py",
+   "args": [
+    "--exe",
+    "/ext/exe/libvorbis.dll",
+    "--universe",
+    "/ext/facts/libvorbis/universe.tsv",
+    "--out",
+    "/out/retn/libvorbis.tsv"
+   ],
+   "inputs": [],
+   "outputs": [
+    "retn/libvorbis.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/retnfacts.py",
+   "args": [
+    "--exe",
+    "/ext/exe/libvorbisfile.dll",
+    "--universe",
+    "/ext/facts/libvorbisfile/universe.tsv",
+    "--out",
+    "/out/retn/libvorbisfile.tsv"
+   ],
+   "inputs": [],
+   "outputs": [
+    "retn/libvorbisfile.tsv"
+   ]
+  },
+  {
    "tool": "ports/fnv-nx/lift/tools/fpstate.py",
    "args": [
     "scan",
@@ -81,13 +186,17 @@
     "scan",
     "/ext/exe/atimgpud.dll",
     "/ext/facts/atimgpud",
-    "/ext/facts/atimgpud/retn.tsv",
+    "/stage/retn/atimgpud.tsv",
     "/out/fpstate/atimgpud",
     "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
-    "ports/fnv-nx/verify/cpuid_model.json"
+    "ports/fnv-nx/verify/cpuid_model.json",
+    {
+     "stage": "ports/fnv-nx/lift/fpfacts:gen:1",
+     "path": "retn/atimgpud.tsv"
+    }
    ],
    "outputs": [
     "fpstate/atimgpud/fcw_loads.tsv",
@@ -103,13 +212,17 @@
     "scan",
     "/ext/exe/binkw32.dll",
     "/ext/facts/binkw32",
-    "/ext/facts/binkw32/retn.tsv",
+    "/stage/retn/binkw32.tsv",
     "/out/fpstate/binkw32",
     "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
-    "ports/fnv-nx/verify/cpuid_model.json"
+    "ports/fnv-nx/verify/cpuid_model.json",
+    {
+     "stage": "ports/fnv-nx/lift/fpfacts:gen:2",
+     "path": "retn/binkw32.tsv"
+    }
    ],
    "outputs": [
     "fpstate/binkw32/fcw_loads.tsv",
@@ -125,13 +238,17 @@
     "scan",
     "/ext/redist/d3dx9_31.dll",
     "/ext/facts/d3dx9_31",
-    "/ext/facts/d3dx9_31/retn.tsv",
+    "/stage/retn/d3dx9_31.tsv",
     "/out/fpstate/d3dx9_31",
     "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
-    "ports/fnv-nx/verify/cpuid_model.json"
+    "ports/fnv-nx/verify/cpuid_model.json",
+    {
+     "stage": "ports/fnv-nx/lift/fpfacts:gen:3",
+     "path": "retn/d3dx9_31.tsv"
+    }
    ],
    "outputs": [
     "fpstate/d3dx9_31/fcw_loads.tsv",
@@ -147,13 +264,17 @@
     "scan",
     "/ext/redist/d3dx9_38.dll",
     "/ext/facts/d3dx9_38",
-    "/ext/facts/d3dx9_38/retn.tsv",
+    "/stage/retn/d3dx9_38.tsv",
     "/out/fpstate/d3dx9_38",
     "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
-    "ports/fnv-nx/verify/cpuid_model.json"
+    "ports/fnv-nx/verify/cpuid_model.json",
+    {
+     "stage": "ports/fnv-nx/lift/fpfacts:gen:4",
+     "path": "retn/d3dx9_38.tsv"
+    }
    ],
    "outputs": [
     "fpstate/d3dx9_38/fcw_loads.tsv",
@@ -169,13 +290,17 @@
     "scan",
     "/ext/exe/GDFFalloutNV.dll",
     "/ext/facts/gdffalloutnv",
-    "/ext/facts/gdffalloutnv/retn.tsv",
+    "/stage/retn/gdffalloutnv.tsv",
     "/out/fpstate/gdffalloutnv",
     "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
-    "ports/fnv-nx/verify/cpuid_model.json"
+    "ports/fnv-nx/verify/cpuid_model.json",
+    {
+     "stage": "ports/fnv-nx/lift/fpfacts:gen:5",
+     "path": "retn/gdffalloutnv.tsv"
+    }
    ],
    "outputs": [
     "fpstate/gdffalloutnv/fcw_loads.tsv",
@@ -191,13 +316,17 @@
     "scan",
     "/ext/exe/libvorbis.dll",
     "/ext/facts/libvorbis",
-    "/ext/facts/libvorbis/retn.tsv",
+    "/stage/retn/libvorbis.tsv",
     "/out/fpstate/libvorbis",
     "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
-    "ports/fnv-nx/verify/cpuid_model.json"
+    "ports/fnv-nx/verify/cpuid_model.json",
+    {
+     "stage": "ports/fnv-nx/lift/fpfacts:gen:6",
+     "path": "retn/libvorbis.tsv"
+    }
    ],
    "outputs": [
     "fpstate/libvorbis/fcw_loads.tsv",
@@ -213,13 +342,17 @@
     "scan",
     "/ext/exe/libvorbisfile.dll",
     "/ext/facts/libvorbisfile",
-    "/ext/facts/libvorbisfile/retn.tsv",
+    "/stage/retn/libvorbisfile.tsv",
     "/out/fpstate/libvorbisfile",
     "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
-    "ports/fnv-nx/verify/cpuid_model.json"
+    "ports/fnv-nx/verify/cpuid_model.json",
+    {
+     "stage": "ports/fnv-nx/lift/fpfacts:gen:7",
+     "path": "retn/libvorbisfile.tsv"
+    }
    ],
    "outputs": [
     "fpstate/libvorbisfile/fcw_loads.tsv",
@@ -245,35 +378,35 @@
    ],
    "inputs": [
     {
-     "stage": "ports/fnv-nx/lift/fpfacts:gen:1",
+     "stage": "ports/fnv-nx/lift/fpfacts:gen:8",
      "path": "fpstate/exe/scan.tsv"
     },
     {
-     "stage": "ports/fnv-nx/lift/fpfacts:gen:2",
+     "stage": "ports/fnv-nx/lift/fpfacts:gen:9",
      "path": "fpstate/atimgpud/scan.tsv"
     },
     {
-     "stage": "ports/fnv-nx/lift/fpfacts:gen:3",
+     "stage": "ports/fnv-nx/lift/fpfacts:gen:10",
      "path": "fpstate/binkw32/scan.tsv"
     },
     {
-     "stage": "ports/fnv-nx/lift/fpfacts:gen:4",
+     "stage": "ports/fnv-nx/lift/fpfacts:gen:11",
      "path": "fpstate/d3dx9_31/scan.tsv"
     },
     {
-     "stage": "ports/fnv-nx/lift/fpfacts:gen:5",
+     "stage": "ports/fnv-nx/lift/fpfacts:gen:12",
      "path": "fpstate/d3dx9_38/scan.tsv"
     },
     {
-     "stage": "ports/fnv-nx/lift/fpfacts:gen:6",
+     "stage": "ports/fnv-nx/lift/fpfacts:gen:13",
      "path": "fpstate/gdffalloutnv/scan.tsv"
     },
     {
-     "stage": "ports/fnv-nx/lift/fpfacts:gen:7",
+     "stage": "ports/fnv-nx/lift/fpfacts:gen:14",
      "path": "fpstate/libvorbis/scan.tsv"
     },
     {
-     "stage": "ports/fnv-nx/lift/fpfacts:gen:8",
+     "stage": "ports/fnv-nx/lift/fpfacts:gen:15",
      "path": "fpstate/libvorbisfile/scan.tsv"
     }
    ],
