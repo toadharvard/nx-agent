@@ -658,3 +658,5 @@ Workers are capped at 3. Assignment by plan item:
 - 00:55 L3b asks (blocks sys/SIMD certification):
   (1) raise in a Form: answered. F.fault(kind, cond) exists; NTSTATUS/Eip per kind come from the one table in seh.cc (sehcodes.py).
   (2) x87/MMX/SSE Form state: the interface is frozen (fr0-7, ftop, ftag, fcw, fsw, pointers, xmm0-7, mxcsr; MMX aliasing by SDM 9.5.1). Assigned to w1, doing: the dsl bump in parallel with the relift, before the pack pin. Then the sse/x87 fallback shapes (3,894 + 2,034) become Forms class by class.
+- 01:00 The final #UD class from L3b (1df9aed): 2,730 sites = 3DNow! 2,574 + Group 2 /6 119 + Group 3 /1 13 + fisttp 21 + AVX 1 (data) + x87 no-row 2. w6: join against our 2,600, explain the 5 fisttp sites, certify all of them; w7's facts decide the 135 first. Rule: the 134 no-SDM-row encodings get #UD only where certified unreachable or data; a reachable one goes to the orchestrator.
+- w1: the bsf/bsr zero-source Form (L3b w4 IR: dest unchanged, ZF=1) comes first, then the x87/SIMD state.
