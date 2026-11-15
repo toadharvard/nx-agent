@@ -175,8 +175,9 @@ def derive(rep, fields):
     if fields['disp'] and not disp: raise FieldDecodeError('no memory operand depends on the displacement bytes (%s)' % ins.mnemonic)
     return imm, disp
 
-def symbuild(key):
-    """SymForm of a shape.  Raises KeyError (no DSL builder for the mnemonic), FieldDecodeError, SymbolicBranch, AssertionError (builder precondition)"""
+def symins(key):
+    """the ADAPTER instruction of a shape (symbuild's input) and its field data: -> (SymIns, fields, widths, imm, disp).  One function: symbuild builds the Form from it,
+    and a spec checker (simdcheck.py) reads the operands' effective addresses from the same operands."""
     rep, fields = parse_key(key); ins = decode(rep, 0)
     imm, disp = derive(rep, fields); size = ins.size; widths = {n: 8 * f[1] for n, f in fields.items() if f}
     ops = []
@@ -185,7 +186,12 @@ def symbuild(key):
         if j in imm: so = SymOp(o, imm=SV(imm[j].node(widths['imm'], size), '%s operand %d (imm)' % (ins.mnemonic, j)))
         if j in disp: so = SymOp(o, mem=SymMem(o.mem, SV(disp[j].node(widths['disp'], size), '%s operand %d (disp)' % (ins.mnemonic, j))))
         ops.append(so)
-    sins = SymIns(ins, ops)
+    return SymIns(ins, ops), fields, widths, imm, disp, ins
+
+
+def symbuild(key):
+    """SymForm of a shape.  Raises KeyError (no DSL builder for the mnemonic), FieldDecodeError, SymbolicBranch, AssertionError (builder precondition)"""
+    sins, fields, widths, imm, disp, ins = symins(key)
     try: f = forms.build(sins, eip())
     except SymbolicBranch as e:
         tb = [t for t in traceback.extract_tb(sys.exc_info()[2]) if os.path.basename(t.filename).startswith('forms')]
