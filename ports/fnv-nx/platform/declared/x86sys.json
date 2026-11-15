@@ -2,76 +2,48 @@
  "cr4": {
   "pce": {
    "status": "undecided",
-   "why": "rdpmc: neither the WDK 7.1 constants (ks386.inc names CR4_TSD but no PCE bit) nor Wine 9.0 (no case for 0F 33) state CR4.PCE of the declared OS"
+   "why": "rdpmc at CPL 3 needs CR4.PCE = 1; the SDM only defines the bit, the declared CPU's cpuid does not state it, the WDK 7.1 constants name no PCE bit and Wine 9.0 has no rdpmc case"
   },
   "tsd": {
-   "source": "Wine 9.0 dlls/ntdll/unix/signal_i386.c (initial thread context, is_privileged_instr) @ c8373ee49fb6: is_privileged_instr intercepts only the 0F opcodes ['0x20', '0x21', '0x22', '0x23'], so rdtsc (0F 31) runs in user mode; consistent with the owner's decision that rdtsc reads the platform monotonic timer and never faults",
+   "source": "Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6: is_privileged_instr intercepts only the 0F opcodes ['0x20', '0x21', '0x22', '0x23'], so rdtsc (0F 31) runs in user mode; consistent with the owner's decision that rdtsc reads the platform timer",
    "value": 0
   },
   "umip": {
-   "status": "undecided",
-   "why": "sgdt/sidt/sldt/smsw/str: no pinned source states CR4.UMIP; CPUREF (cpuid leaf 7 ECX bit 2 of the declared CPU) is not in the pinned sources yet"
+   "source": "Intel SDM Vol 3A 2.5 CR4.UMIP: the bit is reserved (setting it is #GP) unless CPUID.(EAX=07H,ECX=0):ECX[2] is enumerated; the declared CPU's max basic leaf is 4 (ports/fnv-nx/lift/rt/cpumodel.c FNVL_MAX_BASIC @ b5af46461e81), below 7, so there is no leaf 7 and CR4.UMIP is 0",
+   "value": 0
   }
  },
  "eflags": {
   "initial": {
-   "source": "Wine 9.0 dlls/ntdll/unix/signal_i386.c (initial thread context, is_privileged_instr) @ c8373ee49fb6: the initial thread context, context.EFlags",
+   "source": "Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6: the initial thread context, context.EFlags",
    "value": 514
   },
   "iopl": {
-   "source": "bits 12-13 of the initial EFLAGS (Wine 9.0 dlls/ntdll/unix/signal_i386.c (initial thread context, is_privileged_instr) @ c8373ee49fb6)",
+   "source": "bits 12-13 of the initial EFLAGS (Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6)",
    "value": 0
   },
   "iopl_user_modifiable": {
-   "source": "WDK 7.1 ks386.inc EFLAGS_USER_SANITIZE = 0x3F4DD7: the EFLAGS bits user code can set; bits 12-13 are not in it",
+   "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): EFLAGS_USER_SANITIZE = 0x3F4DD7, the EFLAGS bits user code can set; bits 12-13 are not in it",
    "value": false
-  },
-  "privileged_at_iopl0": {
-   "opcodes": [
-    108,
-    109,
-    110,
-    111,
-    228,
-    229,
-    230,
-    231,
-    236,
-    237,
-    238,
-    239,
-    244,
-    250,
-    251
-   ],
-   "source": "Wine 9.0 dlls/ntdll/unix/signal_i386.c (initial thread context, is_privileged_instr) @ c8373ee49fb6: is_privileged_instr returns EXCEPTION_PRIV_INSTRUCTION for these opcodes (ins, outs, in, out, hlt, cli, sti); popf cannot change IF at IOPL 0 (Intel SDM POPF, mirror tools/intel-sdm)"
   }
  },
- "format": "fnvnx-x86sys/1",
+ "format": "fnvnx-x86sys/2",
  "idtr_limit": {
-  "source": "256 gates of _KiIdt in trap.s, 8 bytes each",
-  "value": 2047
+  "status": "undecided",
+  "why": "the number of gates of the OS's IDT is not stated by a pinned source (the SDM allows 256 entries at most)"
  },
  "int_ring3": {
-  "absent_for_this_build": {
-   "0x29": "MSDN __fastfail (int 0x29): minimum supported client Windows 8, so the gate is absent on Windows 7"
+  "other_vectors": {
+   "status": "undecided",
+   "why": "no pinned source says whether Windows 7 has a ring-3 gate at any other vector; Wine 9.0 handles only these"
   },
-  "source": "ReactOS 0db2415442da18342be8a834c3b97a2ea4be1740 ntoskrnl/ke/i386/trap.s (the x86 IDT of the NT kernel; L3a's seh.cc transcribes the same trap handlers): the gates with INT_32_DPL3 (a user-mode `int n` of any other vector is #GP)",
+  "source": "Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6: handle_interrupt cases ['0x29', '0x2d']; segv_handler / trap_handler map ['TRAP_x86_BPTFLT', 'TRAP_x86_OFLOW'] to #OF / #BP",
   "vectors": [
    3,
    4,
-   42,
-   43,
-   44,
-   45,
-   46
+   41,
+   45
   ]
- },
- "mirror": {
-  "commit": "cd0fc6801369e057d21cb04b62a1811353ffdee2",
-  "ref": "tools/wdk71-headers",
-  "repo": "fnv-nx-build",
-  "tree_sha256": "b533c38f5629780ea99ed22123c8a9251ec398a6b72e3f43147729e446a06beb"
  },
  "mov_to_sreg": {
   "ds": {
@@ -118,7 +90,7 @@
    "selectors": [
     27
    ],
-   "why": "the KGDT_R3_CODE descriptor's readable bit is not stated in a pinned source, so whether es/ds/fs/gs may load it is undecided"
+   "why": "the ring-3 code descriptor's readable bit is not stated in a pinned source, so whether es/ds/fs/gs may load it is undecided"
   }
  },
  "os": {
@@ -127,31 +99,31 @@
  },
  "selectors": {
   "cs": {
-   "source": "ReactOS RtlInitializeContext, 0db2415442da18342be8a834c3b97a2ea4be1740: cs = KGDT_R3_CODE; WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_CODE = 0x18, RPL_MASK = 3",
+   "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_CODE = 0x18 (the ring-3 code segment) | RPL_MASK 3",
    "value": 27
   },
   "ds": {
-   "source": "ReactOS RtlInitializeContext, 0db2415442da18342be8a834c3b97a2ea4be1740: ds = KGDT_R3_DATA; WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_DATA = 0x20, RPL_MASK = 3",
+   "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_DATA = 0x20 (the ring-3 data segment) | RPL_MASK 3",
    "value": 35
   },
   "es": {
-   "source": "ReactOS RtlInitializeContext, 0db2415442da18342be8a834c3b97a2ea4be1740: es = KGDT_R3_DATA; WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_DATA = 0x20, RPL_MASK = 3",
+   "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_DATA = 0x20 (the ring-3 data segment) | RPL_MASK 3",
    "value": 35
   },
   "fs": {
-   "source": "ReactOS RtlInitializeContext, 0db2415442da18342be8a834c3b97a2ea4be1740: fs = KGDT_R3_TEB; WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_TEB = 0x38, RPL_MASK = 3",
+   "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_TEB = 0x38 (the TEB's segment) | RPL_MASK 3",
    "value": 59
   },
   "gs": {
-   "source": "ReactOS RtlInitializeContext, 0db2415442da18342be8a834c3b97a2ea4be1740: SegGs = 0",
-   "value": 0
+   "status": "undecided",
+   "why": "no pinned source gives the initial gs of a Windows 7 user thread (Wine loads the host's gs, the WDK has no KGDT constant for it)"
   },
   "ss": {
-   "source": "ReactOS RtlInitializeContext, 0db2415442da18342be8a834c3b97a2ea4be1740: ss = KGDT_R3_DATA; WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_DATA = 0x20, RPL_MASK = 3",
+   "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_DATA = 0x20 (the ring-3 data segment) | RPL_MASK 3",
    "value": 35
   },
   "tr": {
-   "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_TSS (the task register selector of the OS, RPL 0)",
+   "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_TSS (the task state segment selector)",
    "value": 40
   }
  },
@@ -165,29 +137,30 @@
  },
  "sldt": {
   "status": "undecided",
-  "why": "no pinned source states the LDTR of a process that has no LDT (ReactOS ldt.c loads KGDT_LDT only when a process creates one)"
+  "why": "no pinned source states the LDTR of a process that has no LDT"
  },
  "sources": {
+  "cpumodel": {
+   "branch": "claude/fnv-l3a-lift",
+   "commit": "b5af46461e81455567395e13acc8f94dee9517d2",
+   "origin": "the declared CPU's cpuid (CPUREF), L3a rt/cpumodel.c",
+   "path": "ports/fnv-nx/lift/rt/cpumodel.c",
+   "sha256": "465fbd127dd3a55c204db5eb3fe5c20872b4a9bd6b66c752c60cd786e1d8f0e1"
+  },
   "ks386": {
    "origin": "Windows Driver Kit 7.1.0 (7600.16385.1), ks386.inc",
    "path": "headers/_ks386.inc_00858",
    "sha256": "21b726611a5608bcd21072901667fddca99bbbeb3eb4b944cf9c438b50bbab23"
   },
-  "thread": {
-   "origin": "ReactOS 0db2415442da18342be8a834c3b97a2ea4be1740 sdk/lib/rtl/i386/thread.c RtlInitializeContext (the initial segment registers of a user thread)",
-   "path": "reactos/sdk/lib/rtl/i386/thread.c",
-   "sha256": "9aad0631641723a6cd097d6889ec5c3d1c50a8bda15e81a6db61018e9b8e0e6c"
+  "mirror": {
+   "commit": "09a54d413da7a42d1956b5d675033e71941ae4da",
+   "ref": "tools/wdk71-headers",
+   "repo": "fnv-nx-build",
+   "tree_sha256": "301fc827dd66a386a425a67cdf586bdd81fac68168c114bc6d8e2b833e302770"
   },
-  "trap": {
-   "origin": "ReactOS 0db2415442da18342be8a834c3b97a2ea4be1740 ntoskrnl/ke/i386/trap.s (the x86 IDT of the NT kernel; L3a's seh.cc transcribes the same trap handlers)",
-   "path": "reactos/ntoskrnl/ke/i386/trap.s",
-   "sha256": "7f92095488a4ffc6b638e8e3463104325b4788d04238a17a70fae04d7d061b61"
-  }
- },
- "wine": {
-  "commit": "c8373ee49fb674f3fe535904d24c5670513c56e1",
-  "files": {
-   "signal_i386": {
+  "wine": {
+   "commit": "c8373ee49fb674f3fe535904d24c5670513c56e1",
+   "file": {
     "origin": "Wine 9.0 dlls/ntdll/unix/signal_i386.c (initial thread context, is_privileged_instr)",
     "path": "dlls/ntdll/unix/signal_i386.c",
     "sha256": "70245021f17fae5002aaf3f2ea76f2151eb4c900a83e8ee05225e74ebf9afd0d"

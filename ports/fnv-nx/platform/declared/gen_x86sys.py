@@ -1,27 +1,23 @@
 #!/usr/bin/env python3
 """gen_x86sys - the x86 system-state record x86sys.json, from the declared-OS record and the pinned sources alone.
 
-    gen_x86sys.py --os os.json --sources x86sys_sources.json --mirror DIR --wine DIR --out x86sys.json
+    gen_x86sys.py --os os.json --sources x86sys_sources.json --mirror DIR --wine DIR --cpumodel FILE --out x86sys.json
 
-DIR is a checkout of the mirror named in the sources record (fnv-nx-build tools/wdk71-headers). The sha256 of every file read is checked against the
-record. Defined only for a native 32-bit x86 machine record (native_arch 0, process_wow64 0): any other record is refused, so a WOW64 record needs
-sources of its own. The output is a pure function of its inputs; every row carries its source; a state with no pinned source is written as
-{"status": "undecided", "why": ...} and is never given a value.
+DIR (--mirror) is a checkout of fnv-nx-build tools/wdk71-headers, --wine one of tools/wine-9.0, FILE the rt/cpumodel.c of the sources record. The sha256 of every
+file read is checked against the record. Defined only for a native 32-bit x86 machine record (native_arch 0, process_wow64 0). The output is a pure function
+of its inputs; every row cites its source; a state with no pinned source is written {"status": "undecided", "why": ...} and never given a value.
+Trust chain: documented Win32 (WDK 7.1 headers), the Intel SDM, Wine 9.0 under the owner's Wine rule. Nothing else.
 
 Rows:
-  selectors      cs, ds, es, ss, fs, gs of a user thread: KGDT_R3_* of ks386.inc | RPL_MASK (the user privilege level), the assignment of
-                 registers to KGDT constants and gs = 0 from RtlInitializeContext (thread.c); tr = KGDT_TSS (ks386.inc).
-  mov_to_sreg    the selectors a `mov sreg, r` can load at CPL 3: null for es/ds/fs/gs; the KGDT_R3_DATA and KGDT_R3_TEB selectors (ring-3 data
-                 segments by the WDK's naming) for every register, ss included; the KGDT_R3_CODE selector for no register until the descriptor's
-                 readability is pinned (undecided).
-  int_ring3      the IDT vectors whose gate is DPL 3 in the pinned table (trap.s, expanded by its REPEAT blocks), those the OS build has (gate_since);
-                 every other vector is #GP for `int n`.
-  idtr_limit     8 * (number of gates of the table) - 1.
-  cr4            tsd: 0 (Wine 9.0 is_privileged_instr has no case for rdtsc 0F 31, so it executes in user mode; consistent with the owner's decision that
-                 rdtsc reads the platform timer); pce, umip: undecided (no pinned source states them).
-  eflags         the initial user EFLAGS of Wine 9.0 (0x202) and its IOPL field (bits 12-13) = 0; WDK EFLAGS_USER_SANITIZE has no IOPL bit, so user
-                 code cannot change it; the opcodes Wine 9.0 reports as privileged at IOPL 0 (in, out, ins, outs, cli, sti, hlt).
-  sldt, sgdt, sidt base: undecided where the pinned sources do not state them."""
+  selectors      cs ds es ss fs: KGDT_R3_CODE / KGDT_R3_DATA / KGDT_R3_TEB of ks386.inc | RPL_MASK, by the role the WDK names (code segment -> cs, data segment
+                 -> ds es ss, the TEB's segment -> fs); gs: undecided (no WDK role); tr = KGDT_TSS.
+  mov_to_sreg    the selectors a `mov sreg, r` can load at CPL 3: null for es/ds/fs/gs; the ring-3 data selectors for every register; the code selector: undecided.
+  int_ring3      the vectors Wine 9.0 handles for a user-mode `int n` (handle_interrupt cases) and the traps it maps to #BP / #OF (vectors 3, 4); every other
+                 vector: undecided (no pinned source says whether Windows 7 has a ring-3 gate there).
+  cr4            tsd 0 (Wine: rdtsc is not intercepted); umip 0 (SDM CR4.UMIP is reserved unless CPUID.07H:ECX[2], and the declared CPU's max basic leaf is below 7);
+                 pce undecided.
+  eflags         the initial user EFLAGS of Wine 9.0 and its IOPL; IOPL is not user-modifiable (WDK EFLAGS_USER_SANITIZE).
+  idtr_limit, sldt, sgdt, sidt base: undecided."""
 import argparse
 import hashlib
 import json
@@ -35,124 +31,78 @@ def sha(path):
         return hashlib.sha256(f.read()).hexdigest()
 
 
+def pinned(path, rec, what):
+    if sha(path) != rec["sha256"]:
+        raise SystemExit("gen_x86sys: %s: sha256 is not the pinned one" % what)
+    return open(path, errors="replace").read()
+
+
 def ks386_equ(text):
     return {m.group(1): int(m.group(2), 16) for m in re.finditer(r"^(\w+)\s+equ\s+([0-9A-Fa-f]+)H\s*$", text, re.M)}
 
 
-def idt_gates(text):
-    """The gates of _KiIdt in order: [(handler, dpl)], REPEAT blocks expanded, GENERATE_IDT_STUB lines the DPL 0 stubs of the macro."""
-    body = text.split("_KiIdt:", 1)[1]
-    stub = re.search(r"MACRO\(GENERATE_IDT_STUB.*?\nidt (\w+)&Vector, INT_32_DPL(\d)", text, re.S)
-    gates = []
-    stack = [[]]
-    counts = []
-    for ln in body.splitlines():
-        s = ln.split("/*")[0].strip()
-        m = re.fullmatch(r"idt\s+(\w+),\s*INT_32_DPL(\d)", s)
-        if m:
-            stack[-1].append((m.group(1), int(m.group(2))))
-        elif re.fullmatch(r"GENERATE_IDT_STUB\s+%i", s):
-            stack[-1].append((stub.group(1) + "<vector>", int(stub.group(2))))
-        elif (m := re.fullmatch(r"REPEAT\s+(\d+)", s)):
-            counts.append(int(m.group(1)))
-            stack.append([])
-        elif s == "ENDR":
-            blk = stack.pop()
-            stack[-1].extend(blk * counts.pop())
-        elif s.startswith((".endcode", "END")) and not stack[1:]:
-            break
-    return stack[0]
-
-
-def build(osrec, src, mirror, wine):
+def build(osrec, src, mirror, wine, cpumodel):
     undec = lambda why: {"status": "undecided", "why": why}
     fl = osrec["fields"]
     if fl["native_arch"]["value"] != 0 or fl["process_wow64"]["value"] != 0:
         raise SystemExit("gen_x86sys: the sources describe a native 32-bit x86 machine; this record is not one")
-    build_no = fl["build"]["value"]
-    txt = {}
-    for k, f in sorted(src["files"].items()):
-        p = os.path.join(mirror, f["path"])
-        if sha(p) != f["sha256"]:
-            raise SystemExit("gen_x86sys: %s: sha256 is not the pinned one" % f["path"])
-        txt[k] = open(p, errors="replace").read()
-    kg = ks386_equ(txt["ks386"])
-    need = ["KGDT_R3_CODE", "KGDT_R3_DATA", "KGDT_R3_TEB", "KGDT_TSS", "RPL_MASK"]
+    kf = src["files"]["ks386"]
+    kg = ks386_equ(pinned(os.path.join(mirror, kf["path"]), kf, kf["path"]))
+    need = ["KGDT_R3_CODE", "KGDT_R3_DATA", "KGDT_R3_TEB", "KGDT_TSS", "RPL_MASK", "EFLAGS_USER_SANITIZE"]
     if any(n not in kg for n in need):
         raise SystemExit("gen_x86sys: ks386.inc lacks " + ", ".join(n for n in need if n not in kg))
     rpl = kg["RPL_MASK"]
-    thr = txt["thread"]
-    reg = {}
-    for r, sg in (("gs", "SegGs"), ("fs", "SegFs"), ("es", "SegEs"), ("ds", "SegDs"), ("ss", "SegSs"), ("cs", "SegCs")):
-        m = re.search(r"ThreadContext->%s\s*=\s*(\w+);" % sg, thr)
-        if not m:
-            raise SystemExit("gen_x86sys: thread.c does not set %s" % sg)
-        reg[r] = m.group(1)
-    src_ks = "WDK 7.1.0 ks386.inc (%s)" % src["files"]["ks386"]["path"]
-    src_th = "ReactOS RtlInitializeContext, " + src["files"]["thread"]["origin"].split(" ", 2)[1]
-    sel = {}
-    for r in ("cs", "ds", "es", "ss", "fs", "gs"):
-        v = reg[r]
-        if v == "0":
-            sel[r] = {"value": 0, "source": "%s: SegGs = 0" % src_th}
-        else:
-            sel[r] = {"value": kg[v] | rpl, "source": "%s: %s = %s; %s: %s = 0x%02X, RPL_MASK = %d" % (src_th, r, v, src_ks, v, kg[v], rpl)}
-    sel["tr"] = {"value": kg["KGDT_TSS"], "source": "%s: KGDT_TSS (the task register selector of the OS, RPL 0)" % src_ks}
+    ks = "WDK 7.1.0 ks386.inc (%s)" % kf["path"]
+    role = {"cs": ("KGDT_R3_CODE", "the ring-3 code segment"), "ds": ("KGDT_R3_DATA", "the ring-3 data segment"), "es": ("KGDT_R3_DATA", "the ring-3 data segment"),
+            "ss": ("KGDT_R3_DATA", "the ring-3 data segment"), "fs": ("KGDT_R3_TEB", "the TEB's segment")}
+    sel = {r: {"value": kg[k] | rpl, "source": "%s: %s = 0x%02X (%s) | RPL_MASK %d" % (ks, k, kg[k], why, rpl)} for r, (k, why) in sorted(role.items())}
+    sel["gs"] = undec("no pinned source gives the initial gs of a Windows 7 user thread (Wine loads the host's gs, the WDK has no KGDT constant for it)")
+    sel["tr"] = {"value": kg["KGDT_TSS"], "source": "%s: KGDT_TSS (the task state segment selector)" % ks}
     data = sorted({sel["ds"]["value"], sel["fs"]["value"]})
-    code = sel["cs"]["value"]
     why_ds = "KGDT_R3_DATA and KGDT_R3_TEB are the ring-3 data segments of the WDK's GDT constants (ks386.inc); SDM Vol 3 MOV Sreg: a data segment of DPL 3 is loadable at CPL 3 with RPL 3"
-    mov = {"es": {"null": True, "selectors": data, "source": why_ds}, "ds": {"null": True, "selectors": data, "source": why_ds},
-           "fs": {"null": True, "selectors": data, "source": why_ds}, "gs": {"null": True, "selectors": data, "source": why_ds},
-           "ss": {"null": False, "selectors": data, "source": why_ds + "; ss needs a writable data segment, not the null selector"},
-           "undecided": {"selectors": [code], "why": "the KGDT_R3_CODE descriptor's readable bit is not stated in a pinned source, so whether es/ds/fs/gs may load it is undecided"}}
-    gates = idt_gates(txt["trap"])
-    if len(gates) != 256:
-        raise SystemExit("gen_x86sys: trap.s expands to %d gates, not 256" % len(gates))
+    mov = {r: {"null": r != "ss", "selectors": data, "source": why_ds + ("; ss needs a writable data segment, not the null selector" if r == "ss" else "")} for r in ("es", "ds", "fs", "gs", "ss")}
+    mov["undecided"] = {"selectors": [sel["cs"]["value"]], "why": "the ring-3 code descriptor's readable bit is not stated in a pinned source, so whether es/ds/fs/gs may load it is undecided"}
     wf = src["wine"]["files"]["signal_i386"]
-    wp = os.path.join(wine, wf["path"])
-    if sha(wp) != wf["sha256"]:
-        raise SystemExit("gen_x86sys: %s: sha256 is not the pinned one" % wf["path"])
-    wt = open(wp, errors="replace").read()
+    wt = pinned(os.path.join(wine, wf["path"]), wf, wf["path"])
+    wsrc = "Wine 9.0 %s @ %s" % (wf["path"], src["wine"]["commit"][:12])
     m = re.search(r"context\.EFlags\s*=\s*(0x[0-9a-fA-F]+);", wt)
     fn = re.search(r"static inline DWORD is_privileged_instr\(.*?\n}\n", wt, re.S)
-    if not (m and fn):
-        raise SystemExit("gen_x86sys: signal_i386.c lacks the initial EFlags or is_privileged_instr")
-    body = fn.group(0)
-    ext = re.search(r"case 0x0f:.*?(?=\n    case 0x6c:)", body, re.S).group(0)
-    ext = ext.split("switch", 1)[1]   # the inner switch on the second opcode byte
+    hi = re.search(r"static BOOL handle_interrupt\(.*?\n}\n", wt, re.S)
+    segv = re.search(r"static void segv_handler\(.*?(?=\nstatic void trap_handler)", wt, re.S)
+    trap = re.search(r"static void trap_handler\(.*?(?=\nstatic void fpe_handler)", wt, re.S)
+    if not (m and fn and hi and segv and trap):
+        raise SystemExit("gen_x86sys: signal_i386.c lacks the initial EFlags, is_privileged_instr, handle_interrupt or segv_handler / trap_handler")
+    ext = fn.group(0).split("case 0x0f:", 1)[1].split("case 0x6c:", 1)[0].split("switch", 1)[1]
     ext_ops = sorted(int(x, 16) for x in re.findall(r"case (0x[0-9a-fA-F]+):\s*/\*", ext))
-    prv = re.search(r"((?:case 0x[0-9a-fA-F]+:[^\n]*\n\s*)+)return EXCEPTION_PRIV_INSTRUCTION;\n\s*default", body)
-    prv_ops = sorted(int(x, 16) for x in re.findall(r"case (0x[0-9a-fA-F]+):", prv.group(1)) if x != "0xcd")   # 0xcd (int n) is reported by the vector rule above
+    ints = sorted(int(x, 16) for x in re.findall(r"^    case (0x[0-9a-fA-F]+):", hi.group(0), re.M))
+    traps = {n for n, t in (("TRAP_x86_OFLOW", segv), ("TRAP_x86_BPTFLT", trap)) if "case %s:" % n in t.group(0)}
+    vec = sorted(set(ints) | ({3} if "TRAP_x86_BPTFLT" in traps else set()) | ({4} if "TRAP_x86_OFLOW" in traps else set()))
+    cm = src["cpumodel"]
+    ct = pinned(cpumodel, cm, cm["path"])
+    mb = re.search(r"#define FNVL_MAX_BASIC (\d+)u", ct)
+    if not mb:
+        raise SystemExit("gen_x86sys: cpumodel.c does not define FNVL_MAX_BASIC")
+    max_basic = int(mb.group(1))
+    umip = 0 if max_basic < 7 else None
     eflags0 = int(m.group(1), 16)
-    sanit = kg.get("EFLAGS_USER_SANITIZE")
-    wsrc = src["wine"]["files"]["signal_i386"]["origin"] + " @ " + src["wine"]["commit"][:12]
-    cr4 = {"tsd": {"value": 0 if not {0x31, 0x33} & set(ext_ops) else None,
-                   "source": "%s: is_privileged_instr intercepts only the 0F opcodes %s, so rdtsc (0F 31) runs in user mode; consistent with the owner's decision that rdtsc reads the platform monotonic timer and never faults" % (wsrc, [hex(o) for o in ext_ops])},
-           "pce": undec("rdpmc: neither the WDK 7.1 constants (ks386.inc names CR4_TSD but no PCE bit) nor Wine 9.0 (no case for 0F 33) state CR4.PCE of the declared OS"),
-           "umip": undec("sgdt/sidt/sldt/smsw/str: no pinned source states CR4.UMIP; CPUREF (cpuid leaf 7 ECX bit 2 of the declared CPU) is not in the pinned sources yet")}
-    iopl_mask = 0x3000
-    eflags = {"initial": {"value": eflags0, "source": "%s: the initial thread context, context.EFlags" % wsrc},
-              "iopl": {"value": (eflags0 & iopl_mask) >> 12, "source": "bits 12-13 of the initial EFLAGS (%s)" % wsrc},
-              "iopl_user_modifiable": {"value": bool(sanit & iopl_mask) if sanit is not None else None,
-                                       "source": "WDK 7.1 ks386.inc EFLAGS_USER_SANITIZE = 0x%X: the EFLAGS bits user code can set; bits 12-13 are %s" % (sanit, "in it" if sanit & iopl_mask else "not in it")},
-              "privileged_at_iopl0": {"opcodes": prv_ops, "source": "%s: is_privileged_instr returns EXCEPTION_PRIV_INSTRUCTION for these opcodes (ins, outs, in, out, hlt, cli, sti); popf cannot change IF at IOPL 0 (Intel SDM POPF, mirror tools/intel-sdm)" % wsrc}}
-    since = src["gate_since"]
-    vec = [v for v, (h, d) in enumerate(gates) if d == 3 and since.get(h, {}).get("build", 0) <= build_no]
-    skipped = {"0x%02x" % v: since[h]["source"] for v, (h, d) in enumerate(gates) if d == 3 and since.get(h, {}).get("build", 0) > build_no}
+    sanit = kg["EFLAGS_USER_SANITIZE"]
     return {
-        "format": "fnvnx-x86sys/1",
-        "os": {"sha256": None, "build": build_no},
-        "sources": {k: {"path": f["path"], "sha256": f["sha256"], "origin": f["origin"]} for k, f in sorted(src["files"].items())},
-        "mirror": src["mirror"],
-        "wine": {"commit": src["wine"]["commit"], "files": src["wine"]["files"]},
-        "cr4": cr4,
-        "eflags": eflags,
+        "format": "fnvnx-x86sys/2",
+        "os": {"sha256": None, "build": fl["build"]["value"]},
+        "sources": {"mirror": src["mirror"], "ks386": kf, "wine": {"commit": src["wine"]["commit"], "file": wf}, "cpumodel": cm},
         "selectors": sel,
         "mov_to_sreg": mov,
-        "int_ring3": {"vectors": vec, "absent_for_this_build": skipped,
-                      "source": "%s: the gates with INT_32_DPL3 (a user-mode `int n` of any other vector is #GP)" % src["files"]["trap"]["origin"]},
-        "idtr_limit": {"value": 8 * len(gates) - 1, "source": "%d gates of _KiIdt in trap.s, 8 bytes each" % len(gates)},
-        "sldt": undec("no pinned source states the LDTR of a process that has no LDT (ReactOS ldt.c loads KGDT_LDT only when a process creates one)"),
+        "int_ring3": {"vectors": vec, "other_vectors": undec("no pinned source says whether Windows 7 has a ring-3 gate at any other vector; Wine 9.0 handles only these"),
+                      "source": "%s: handle_interrupt cases %s; segv_handler / trap_handler map %s to #OF / #BP" % (wsrc, [hex(i) for i in ints], sorted(traps))},
+        "cr4": {"tsd": {"value": 0 if not {0x31, 0x33} & set(ext_ops) else None,
+                        "source": "%s: is_privileged_instr intercepts only the 0F opcodes %s, so rdtsc (0F 31) runs in user mode; consistent with the owner's decision that rdtsc reads the platform timer" % (wsrc, [hex(o) for o in ext_ops])},
+                "umip": {"value": umip, "source": "Intel SDM Vol 3A 2.5 CR4.UMIP: the bit is reserved (setting it is #GP) unless CPUID.(EAX=07H,ECX=0):ECX[2] is enumerated; the declared CPU's max basic leaf is %d (%s FNVL_MAX_BASIC @ %s), below 7, so there is no leaf 7 and CR4.UMIP is 0" % (max_basic, cm["path"], cm["commit"][:12])},
+                "pce": undec("rdpmc at CPL 3 needs CR4.PCE = 1; the SDM only defines the bit, the declared CPU's cpuid does not state it, the WDK 7.1 constants name no PCE bit and Wine 9.0 has no rdpmc case")},
+        "eflags": {"initial": {"value": eflags0, "source": "%s: the initial thread context, context.EFlags" % wsrc},
+                   "iopl": {"value": (eflags0 & 0x3000) >> 12, "source": "bits 12-13 of the initial EFLAGS (%s)" % wsrc},
+                   "iopl_user_modifiable": {"value": bool(sanit & 0x3000), "source": "%s: EFLAGS_USER_SANITIZE = 0x%X, the EFLAGS bits user code can set; bits 12-13 are %s" % (ks, sanit, "in it" if sanit & 0x3000 else "not in it")}},
+        "idtr_limit": undec("the number of gates of the OS's IDT is not stated by a pinned source (the SDM allows 256 entries at most)"),
+        "sldt": undec("no pinned source states the LDTR of a process that has no LDT"),
         "sgdt": undec("the GDT base and limit of the OS are kernel values with no documented fixed value and no pinned source"),
         "sidt_base": undec("the IDT base is a kernel address with no documented fixed value and no pinned source"),
     }
@@ -164,10 +114,11 @@ def main(argv):
     ap.add_argument("--sources", required=True)
     ap.add_argument("--mirror", required=True)
     ap.add_argument("--wine", required=True, help="checkout of fnv-nx-build tools/wine-9.0")
+    ap.add_argument("--cpumodel", required=True, help="rt/cpumodel.c of the sources record")
     ap.add_argument("--out", required=True)
     a = ap.parse_args(argv)
     raw = open(a.os, "rb").read()
-    rec = build(json.loads(raw), json.load(open(a.sources)), a.mirror, a.wine)
+    rec = build(json.loads(raw), json.load(open(a.sources)), a.mirror, a.wine, a.cpumodel)
     rec["os"]["sha256"] = hashlib.sha256(raw).hexdigest()
     with open(a.out, "w") as f:
         json.dump(rec, f, indent=1, sort_keys=True)
