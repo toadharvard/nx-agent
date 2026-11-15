@@ -13,7 +13,7 @@
   "asm": []
  },
  "include": [
-  "/ext/liftpack/inc"
+  "ports/fnv-nx/lift/pack/inc"
  ],
  "units": "all",
  "uses": [
@@ -4202,6 +4202,45 @@
     "disp.cc",
     "disp_rows.tsv"
    ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/packstage.py",
+   "args": [
+    "inc",
+    "fnvl_prelude.h",
+    "/out/inc/fnvl_prelude.h",
+    "/in/ports/fnv-nx/lift/rt",
+    "/in/ports/fnv-nx/platform/include",
+    "/uses/ports/fnv-nx/lift/rt/GEN"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/fmath.h",
+    "ports/fnv-nx/lift/rt/fnvl.h",
+    "ports/fnv-nx/lift/rt/fnvl_abi.h",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h",
+    "ports/fnv-nx/lift/rt/x87.h",
+    "ports/fnv-nx/platform/include/fnvl_host.h"
+   ],
+   "outputs": [
+    "inc/fnvl_prelude.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/packstage.py",
+   "args": [
+    "inc",
+    "imp.h",
+    "/out/inc/imp.h",
+    "/in/ports/fnv-nx/lift/rt",
+    "/in/ports/fnv-nx/platform/include",
+    "/uses/ports/fnv-nx/lift/rt/GEN"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/imp.h"
+   ],
+   "outputs": [
+    "inc/imp.h"
+   ]
   }
  ],
  "outputs": {
@@ -4213,9 +4252,9 @@
   {
    "name": "liftpack",
    "repo": "fnv-nx-build",
-   "ref": "l3a-lift/pack/7b2faae276b2-noneed",
-   "commit": "db2aaf6d4a08d96f9c91d25980170578b983bfe0",
-   "tree_sha256": "c7367e301ed27aabc548eb2a0f0fa9e081ac97d60911a914d7f4f021b777cb05",
+   "ref": "l3a-lift/pack/7b2faae276b2-noprelude",
+   "commit": "751b898b14ce2f527030236fb625cc7cd7467f96",
+   "tree_sha256": "aefdd1bd32b25464ee0cc7db2fe504a52d8fcb8d5d85542bcfc11b7d97cbc4a7",
    "at": "/ext/liftpack"
   }
  ]
