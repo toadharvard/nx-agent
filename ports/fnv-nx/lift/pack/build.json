@@ -4223,6 +4223,15 @@
      "-ftime-report-details"
     ]
    }
+  },
+  "prof2": {
+   "flags_add": {
+    "cxx": [
+     "-ftime-report",
+     "-ftime-report-details",
+     "-fno-schedule-insns"
+    ]
+   }
   }
  }
 }
