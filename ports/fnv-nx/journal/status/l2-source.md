@@ -568,3 +568,7 @@ After the first frame:
   - The old build.sh, stage2.sh and stamp.py are deleted in the same step as w12's caller removal.
   - Open on w12 (L1): the build.json form, plus the env.json debs (bash, sed, grep, patch, xz, findutils, diffutils, gzip).
   - Not run yet. Proof pending: an unmounted read fails, a plugin byte change rebuilds rt only, the archives equal 56a4d09c, and the stage times.
+- 2026-11-15 21:20Z: URGENT for the cand2 merge: the assumptions gate was red on plugsym.inc:18 ("cannot assume").
+  - Fixed at plugins 6d9f72b18 (toolchain tree 33fbb22b): the line is now stated as a fact, and no record was added. Across all of toolchain/, 0 assum|допущ occurrences lack an ASM id.
+  - The farm rebuilds stage 2 only (K1 reused) and sends the pin to L1 and w15. plugins-cand3 takes the same fix (w3).
+  - HOST1 on L5 section_guest.c:12 stays with L5.
