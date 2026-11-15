@@ -132,6 +132,19 @@ def run_all(w):
             ok = cls == want or (cls == ('m',) and want == ('g',) and kind == 'result') or (g.endswith('r') and kind == 'argument' and want == ('g',))
             if kind == 'result' and rm: ok = ok and (rm.group(2) == 'R') == (n not in ('ct', 'in', 'vf') and int(rm.group(1)) in (1, 2, 4, 8))
             check('%s %s' % (kind, n), ok, 'row %s %s, the compiler uses %s' % (fn, d1, want))
+    # (4b) A definition without a shape: no row and no diagnostic only when its address is provably not taken (static, cgraph address_taken false);
+    # address taken (a callback, a table entry) or external linkage stays a build error, the row would be missing at an indirect call.
+    def compile_status(src, stem):
+        open('%s/%s.cc' % (w, stem), 'w').write(src)
+        r = pb.compile('%s/%s.cc' % (w, stem), '%s/%s.o' % (w, stem), plug)
+        return r.returncode, r.stderr
+    U = 'typedef unsigned __int128 u128;\n'
+    rc, err = compile_status(U + 'static u128 __attribute__((noinline)) sq(u128 x) { return x + 1; }\nextern "C" int use(int a) { return (int)sq(a); }\n', 'u128static')
+    check('static u128, address not taken: green, no row', rc == 0, err[:200])
+    rc, err = compile_status(U + 'static u128 __attribute__((noinline)) sq(u128 x) { return x + 1; }\nu128 (*volatile tab)(u128) = sq;\n', 'u128taken')
+    check('static u128, address taken: DISPATCH1 error', rc != 0 and 'DISPATCH1' in err, err[:200])
+    rc, err = compile_status(U + 'extern "C" u128 __attribute__((noinline)) pub(u128 x) { return x + 1; }\n', 'u128pub')
+    check('external u128: DISPATCH1 error', rc != 0 and 'DISPATCH1' in err, err[:200])
     print('defdisptest: %d failed' % bad); return 1 if bad else 0
 
 
