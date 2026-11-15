@@ -82,17 +82,18 @@ def main():
         r = subprocess.run([sys.executable, '-I', os.path.join(LIFT, 'tools', 'dispgen.py'), '--prefix', 'fnvnx_native', '--rows', d + '/r.tsv', d + '/e.tsv', d + '/n.cc'], capture_output=True, text=True, env={})
         rl = open(d + '/r.tsv').read().split('\n') if r.returncode == 0 else []
         ncc = open(d + '/n.cc').read() if r.returncode == 0 else ''
-    body = [l.split('\t') for l in rl[3:] if l]
+    hd = [l for l in rl if l.startswith('#')]
+    body = [l.split('\t') for l in rl if l and not l.startswith('#')]
     tbl = [(int(k, 0), int(i)) for k, i in re.findall(r'^  (0x[0-9a-f]+)u, (\d+)u,$', ncc, re.M)]
     ents = re.findall(r'^  &(\w+),$', ncc, re.M)
-    check('rows: three header lines, one row per entry', rl[:1] == ['# fnvnx-disp-rows/1'] and rl[1].startswith('# hash fnvnx_native_disp_table slots=%d empty=0' % len(tbl)) and rl[2].startswith('# table') and len(body) == len(syms))
+    check('rows: format line, the entries file table_id, the hash line, the column line, one row per entry', hd[:2] == ['# fnvnx-disp-rows/1', '# table_id 00'] and hd[2] == '# hash fnvnx_native_disp_table slots=%d empty=0' % len(tbl) and hd[3].startswith('# table') and len(hd) == 4 and len(body) == len(syms))
     check('rows: rows[j] is entries[j] of the emitted array: index, address, symbol', [(b[0], int(b[1]), b[3]) for b in body] == [('fnvnx_native_disp_entries', j, e) for j, e in enumerate(ents)]
           and [int(b[2], 16) for b in body] == sorted(syms) and [b[3] for b in body] == [syms[a] for a in sorted(syms)])
     check('rows: table[slot] of the emitted array is (addr, index+1) for every row, and every other slot is empty (index half 0)',
           all(tbl[int(b[4])] == (int(b[2], 16), int(b[1]) + 1) for b in body) and sorted(int(b[4]) for b in body) == [i for i, t in enumerate(tbl) if t[1]] and len(set(b[4] for b in body)) == len(body))
-    tl = ROWS + ['# table_id %s\n' % ('ab' * 32)]
+    nt = [l for l in ROWS if not l.startswith('# table_id')]
     check('rows: the table_id trailer of the entries file is line 2 of the rows file, a file without one has none',
-          dispgen.table_id(tl) == 'ab' * 32 and dispgen.table_id(ROWS) is None and dispgen.rows_text(syms, dispgen.table(tl)[1], 'fnvl', dispgen.table_id(tl)).split('\n')[1] == '# table_id ' + 'ab' * 32)
+          dispgen.table_id(ROWS) == '00' and dispgen.table_id(nt) is None and dispgen.rows_text(syms, dispgen.table(nt)[1], 'fnvl').split('\n')[1].startswith('# hash'))
     eh = dispgen.table([])[1]
     check('rows: an empty list has the header and no row', dispgen.rows_text({}, eh, 'fnvl') == '# fnvnx-disp-rows/1\n# hash fnvl_disp_table slots=%d empty=0\n# table\tindex\taddr\tsymbol\tslot\n' % len(eh['slots']))
     print('dispgentest: %d failed' % bad); sys.exit(1 if bad else 0)
