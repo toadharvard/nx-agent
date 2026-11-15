@@ -31,6 +31,7 @@ HRESULT nx_draw_exec(NxDeviceCore* d, const NxDrawReq& r) {
     NxTexPlan tp; if ((hr = nx_tex_plan(d, pr, &tp)) != D3D_OK) return hr;                                                                          // 3
     NxBindPlan bp; if ((hr = nx_bind_plan(d, r, lay, &bp)) != D3D_OK) return hr;                                                                     // 4
     NxPassSet ps; if ((hr = nx_pass_resolve(d, &ps)) != D3D_OK) { nx_bind_done(&bp); return hr; }                                                   // 5
+    if (ps.incomplete) { fnvnx_wine_fixme(NXW_wined3d_context_gl_check_fbo_status); nx_bind_done(&bp); return D3D_OK; }                         // incomplete framebuffer: nothing drawn (draw_state.cpp nx_attach)
     nx_pass_ensure(d, ps);
     uint32_t payload = 16384; for (uint32_t i = 0; i < pr.fv.n_ubo && !pr.vi; i++) payload += pr.fv.ubo[i].bytes + 256; for (uint32_t i = 0; i < pr.fp.n_ubo && !pr.pi; i++) payload += pr.fp.ubo[i].bytes + 256;
     if (r.up) { if (!bp.big_mem[0]) payload += r.up->vbytes + 256; if (r.indexed && !bp.big_mem[1]) payload += r.up->ibytes + 256; }
