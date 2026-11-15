@@ -60,9 +60,12 @@
     "/ext/exe/FalloutNV.exe",
     "/ext/facts",
     "/uses/ports/fnv-nx/lift/retn/RETN",
-    "/out/fpstate/exe"
+    "/out/fpstate/exe",
+    "/in/ports/fnv-nx/lift"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
    "outputs": [
     "fpstate/exe/fcw_loads.tsv",
     "fpstate/exe/mxcsr_loads.tsv",
@@ -78,9 +81,12 @@
     "/ext/exe/atimgpud.dll",
     "/ext/facts/atimgpud",
     "/ext/facts/atimgpud/retn.tsv",
-    "/out/fpstate/atimgpud"
+    "/out/fpstate/atimgpud",
+    "/in/ports/fnv-nx/lift"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
    "outputs": [
     "fpstate/atimgpud/fcw_loads.tsv",
     "fpstate/atimgpud/mxcsr_loads.tsv",
@@ -96,9 +102,12 @@
     "/ext/exe/binkw32.dll",
     "/ext/facts/binkw32",
     "/ext/facts/binkw32/retn.tsv",
-    "/out/fpstate/binkw32"
+    "/out/fpstate/binkw32",
+    "/in/ports/fnv-nx/lift"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
    "outputs": [
     "fpstate/binkw32/fcw_loads.tsv",
     "fpstate/binkw32/mxcsr_loads.tsv",
@@ -114,9 +123,12 @@
     "/ext/redist/d3dx9_31.dll",
     "/ext/facts/d3dx9_31",
     "/ext/facts/d3dx9_31/retn.tsv",
-    "/out/fpstate/d3dx9_31"
+    "/out/fpstate/d3dx9_31",
+    "/in/ports/fnv-nx/lift"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
    "outputs": [
     "fpstate/d3dx9_31/fcw_loads.tsv",
     "fpstate/d3dx9_31/mxcsr_loads.tsv",
@@ -132,9 +144,12 @@
     "/ext/redist/d3dx9_38.dll",
     "/ext/facts/d3dx9_38",
     "/ext/facts/d3dx9_38/retn.tsv",
-    "/out/fpstate/d3dx9_38"
+    "/out/fpstate/d3dx9_38",
+    "/in/ports/fnv-nx/lift"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
    "outputs": [
     "fpstate/d3dx9_38/fcw_loads.tsv",
     "fpstate/d3dx9_38/mxcsr_loads.tsv",
@@ -150,9 +165,12 @@
     "/ext/exe/GDFFalloutNV.dll",
     "/ext/facts/gdffalloutnv",
     "/ext/facts/gdffalloutnv/retn.tsv",
-    "/out/fpstate/gdffalloutnv"
+    "/out/fpstate/gdffalloutnv",
+    "/in/ports/fnv-nx/lift"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
    "outputs": [
     "fpstate/gdffalloutnv/fcw_loads.tsv",
     "fpstate/gdffalloutnv/mxcsr_loads.tsv",
@@ -168,9 +186,12 @@
     "/ext/exe/libvorbis.dll",
     "/ext/facts/libvorbis",
     "/ext/facts/libvorbis/retn.tsv",
-    "/out/fpstate/libvorbis"
+    "/out/fpstate/libvorbis",
+    "/in/ports/fnv-nx/lift"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
    "outputs": [
     "fpstate/libvorbis/fcw_loads.tsv",
     "fpstate/libvorbis/mxcsr_loads.tsv",
@@ -186,9 +207,12 @@
     "/ext/exe/libvorbisfile.dll",
     "/ext/facts/libvorbisfile",
     "/ext/facts/libvorbisfile/retn.tsv",
-    "/out/fpstate/libvorbisfile"
+    "/out/fpstate/libvorbisfile",
+    "/in/ports/fnv-nx/lift"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
    "outputs": [
     "fpstate/libvorbisfile/fcw_loads.tsv",
     "fpstate/libvorbisfile/mxcsr_loads.tsv",

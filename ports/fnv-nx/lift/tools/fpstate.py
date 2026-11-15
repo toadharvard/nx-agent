@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """C4a: whole-program facts about the x87 / MMX / SSE control state, and the invariants that certify the lifter's no-effect bodies.
 
-    fpstate.py scan    <pe image> <facts dir> <retn.tsv> <out dir>   one module: reads the facts directory, writes <out dir>/{fcw_loads,mxcsr_loads,readers,a3,scan}.tsv, prints counts only
+    fpstate.py scan    <pe image> <facts dir> <retn.tsv> <out dir> <lift dir>   one module (lift dir: the directory that holds the fnvlift package): reads the facts directory, writes <out dir>/{fcw_loads,mxcsr_loads,readers,a3,scan}.tsv, prints counts only
     fpstate.py combine <out dir> <scan dir> [<scan dir> ...]      the PROGRAM invariants = AND over the modules (the scan dirs); writes <out dir>/invariants.tsv
 
 Deterministic: a pure function of the PE image and <facts dir>/universe.tsv (every iteration order is sorted, no clocks). Exe-derived outputs live only under the facts directories.
@@ -22,14 +22,21 @@ import os, sys, hashlib
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import cli
-FPUSAGE = 'usage: fpstate.py scan IMAGE FACTSDIR RETN.tsv OUTDIR | fpstate.py combine OUTDIR SCANDIR...'
-sys.path.insert(0, HERE); sys.path.insert(0, os.path.dirname(HERE))
+FPUSAGE = 'usage: fpstate.py scan IMAGE FACTSDIR RETN.tsv OUTDIR LIFTDIR | fpstate.py combine OUTDIR SCANDIR...'
+sys.path.insert(0, HERE)
 from collections import Counter, defaultdict
 from multiprocessing import Pool
 import x86flow as W
 import fpmodes as FP
 from x86flow import X, M32, mn, Fn, load_universe
-from fnvlift import f_cpufeat, f_sys, f_sse, core
+f_cpufeat = f_sys = f_sse = core = None      # the lifter's handler tables: use_lift(dir) imports them from the explicit directory that holds the fnvlift package
+
+
+def use_lift(d):
+    global f_cpufeat, f_sys, f_sse, core
+    sys.path.insert(0, d)
+    from fnvlift import f_cpufeat as a, f_sys as b, f_sse as c, core as e
+    f_cpufeat, f_sys, f_sse, core = a, b, c, e
 
 FCW_START, MXCSR_START = 0x027F, 0x1F80
 FCW_FIELDS = (('masks', 0x003F), ('PC', 0x0300), ('RC', 0x0C00), ('IC', 0x1000))
@@ -343,8 +350,8 @@ def do_combine(outdir, dirs):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) == 6 and sys.argv[1] == 'scan':
-        W.configure(sys.argv[3]); do_scan(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5])
+    if len(sys.argv) == 7 and sys.argv[1] == 'scan':
+        use_lift(sys.argv[6]); W.configure(sys.argv[3]); do_scan(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5])
     elif len(sys.argv) >= 4 and sys.argv[1] == 'combine':
         do_combine(sys.argv[2], sys.argv[3:])
     else:
