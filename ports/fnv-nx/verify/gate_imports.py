@@ -9,7 +9,7 @@ A product root DECLARES its imports in `<root>/imports.in.json` ("fnvnx-imports-
    "extra": [row files inside it, judged against this root], "extra_other": [row files of another owner's build, judged against the other roots],
    "name_table": path inside the root of the msvcrt name table `name TAB symbol TAB func|data` (the same file the root generates its lookup table from)}
 The external is checked out from the build's own fetch (GATE_CACHE/external/<commit>) and its tree hash must equal tree_sha256.
-Universe (gate_build.quantify, the convention of build/objstub): the admitted product roots; per root every row of the bridge table (contract/bridgetable.derive). A root without imports.in.json is one red item. Certified: rows with no class
+Universe (gate_build.quantify, the convention of build/objstub): the admitted product roots; per root every row of the bridge table (contract/bridgetable.derive). A root without imports.in.json is one red item, unless it is header-only (gate_build.unitless: no unit, no link; it holds no code, so it has no imports by construction): 0 items. Certified: rows with no class
 (contract/imports.py). uncertified: the first 50 ids `dll!name`; imports.ids lists `id TAB class`, sorted. No product root: universe 0, green. Bad input, a red build, an invalid recipe or an
 external that fails its hash is red with the reason in detail. Exit 0 iff green."""
 import json
@@ -92,6 +92,8 @@ def judge_root(root, repo, cache, admit, roots, bad):
     p = os.path.join(repo, root, "imports.in.json")
     try:
         if not os.path.isfile(p):
+            if gate_build.unitless(root, cache, repo):
+                return 0, 0, [], "header-only root: no code, so no imports (by construction)"
             return 1, 0, [root + ":imports.in.json"], "declares no imports.in.json (the root's imports are undeclared)"
         with open(p) as f:
             decl = json.load(f)

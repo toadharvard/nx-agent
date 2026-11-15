@@ -1,24 +1,29 @@
 {
  "script": "link/guest.ld",
  "libs": {
-  "external": "fnvnx-a64-msvcmodel",
   "dirs": [
+   "lib/gcc/aarch64-none-elf/15.2.0/ilp32/pic",
    "aarch64-none-elf/lib/ilp32/pic",
-   "lib/gcc/aarch64-none-elf/15.2.0/ilp32/pic"
+   "lib/gcc/aarch64-none-elf/15.2.0",
+   "lib/gcc",
+   "aarch64-none-elf/lib"
   ],
   "names": [
    "stdc++",
    "m",
+   "gcc",
    "c",
-   "gcc"
+   "sysbase"
   ],
   "startfiles": [
    "lib/gcc/aarch64-none-elf/15.2.0/ilp32/pic/crti.o",
-   "lib/gcc/aarch64-none-elf/15.2.0/ilp32/pic/crtbegin.o"
+   "lib/gcc/aarch64-none-elf/15.2.0/ilp32/pic/crtbegin.o",
+   "aarch64-none-elf/lib/ilp32/pic/crt0.o"
   ],
   "endfiles": [
    "lib/gcc/aarch64-none-elf/15.2.0/ilp32/pic/crtend.o",
    "lib/gcc/aarch64-none-elf/15.2.0/ilp32/pic/crtn.o"
-  ]
+  ],
+  "external": "fnvnx-a64-msvcmodel"
  }
 }

@@ -61,7 +61,7 @@ a, t, h = (recipe.with_guest_link(rec(o), p, roots, REPO) for o, p in (("a.elf",
 ka = {k: v for k, v in a["link"].items() if k != "output"}
 kt = {k: v for k, v in t["link"].items() if k != "output"}
 check("guest exe and guest test get identical script and libs (links differ only by output and objects)", ka == kt and ka["libs"] == prof["libs"]
-      and os.path.isfile(ka["script"]), (ka, kt))
+      and os.path.isfile(os.path.join(REPO, ka["script"])), (ka, kt))
 check("a host root's link is unchanged", h == rec("h.elf"))
 bad = copy.deepcopy(prof)
 bad["libs"]["external"] = "other"
@@ -75,5 +75,16 @@ e = link_errs(rec("s.so", kind="shared", version_script="ports/fnv-nx/nothere.ma
 check("version_script: an untracked file outside the root is red", any("link must be" in x for x in e), e)
 e = link_errs(rec("s.so", kind="shared", version_script="ports/fnv-nx/docs/ARCHITECTURE.md", flags=["-m", "aarch64linux"]), HOST)
 check("version_script: a tracked file of a doc root is red", any("link must be" in x for x in e), e)
+
+# the tools of the ldcheck stage (link/ldcheck.py, link/gateids.py, contract/gatefile.py): tracked files under a tree of an admitted tool root
+need = lambda rs: [e for e in recipe.check(rec("a.elf"), EXE, files, rs, pin, REPO) if "ldcheck stage needs" in e]  # noqa: E731
+check("link tools under the declared trees of the tool root (contract, link) are valid", need(roots) == [], need(roots))
+cr = next(r for r in roots.values() if r.get("class") == "tool" and "ports/fnv-nx/link" in (r.get("trees") or []))
+nt = dict(roots, **{cr["path"]: {k: v for k, v in cr.items() if k != "trees"}})
+check("the same tools with no admitted tree that holds them are red, one finding per tool", len(need(nt)) >= 2, need(nt))
+dc = dict(roots, **{cr["path"]: dict(cr, **{"class": "doc"})})
+check("a tree of a root that is not a tool root does not admit a link tool", len(need(dc)) >= 2, need(dc))
+check("tool_file is the one membership function: a file under a declared tree is a tool file, one outside every tree is not",
+      recipe.tool_file(roots, files, "ports/fnv-nx/link/ldcheck.py") and not recipe.tool_file(nt, files, "ports/fnv-nx/link/ldcheck.py"))
 print("FAILED: %s" % FAILED if FAILED else "all pass")
 sys.exit(1 if FAILED else 0)

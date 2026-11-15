@@ -1739,6 +1739,11 @@ the consumer (a graph error, not skipped). --toolflags checks every document BEF
 on argv/env/tool/input `at` only (not on tree hashes), so documents of not-yet-run consumers are checked with placeholder trees.
 ```
 
+## verify/guest_flags.py
+`python3 verify/guest_flags.py --lang c|c++|asm [--cache DIR]` prints, as a JSON array, the semantic flag set the recipe passes to a guest compile stage of that language:
+`recipe.semantics_for(pinned driver, language)` on `flags.semantics` of `guest_compiler.json` (the set minus the flags the driver itself says do not apply to the language).
+It is the one function the recipe uses; there is no second list. The pinned compiler is fetched by its pin into DIR (default `$GATE_CACHE`). For the runtime build of L5.
+
 ## verify/icount.py
 
 ```text
@@ -2536,4 +2541,22 @@ independent decoders on every instruction of the set; after first frame.  Droppe
 regexes, the deleting-destructor byte patterns (`_FLAGS_TEST`), `delete_this`, `leaf_constant`, `string_at`, the vftable
 getter walker (GETTER_MAX), the constructor "last store wins" rule (exefacts records every vptr store in order), hard-coded
 TEXT/DATA ranges (the section table is used), the JSON cache keyed on mtime.
+```
+
+## verify/gate_guestlink.py
+
+```text
+Gate "guestlink" (fnvnx-gate/1, class A of VERDICT.md): the guest link profile link/guest.json holds exactly the values the pinned guest runtime's
+own driver derives, so a hand-picked startfile, library directory or library name is red.
+    python3 -I gate_guestlink.py [--write]    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/guestlink.json
+    (--write first rewrites `libs` of link/guest.json from the derivation: the way the profile is made; the gate then compares it)
+Derivation (RECIPE.md, Link): the C++ driver of the pinned runtime external (verify/guest_compiler.json `runtime_driver`) is run, as the hermetic recipe
+stage `drv:<root>`, with the guest semantic flags (flags.semantics.common, filtered for C++ by the pinned compiler) and `-pie -###` on a one-line C++
+file. Its last line is the link command of the multilib the flags select; recipe.parse_driver_link reads startfiles (.o before the library group),
+dirs (-L inside the external), names (-l, in order) and endfiles (.o after the group) from it. An object of startfiles/endfiles is then excluded by
+the one-definition rule only (recipe.onedef): it defines a global or weak symbol that an admitted guest product root defines (the roots' symbols are
+those of their green builds, gate_build.ensure). Nothing is excluded by a name.
+Rule: the derived libs equal `libs` of link/guest.json, key by key and in order, and `libs.external` is the pinned runtime. A difference is a finding
+naming the key, the derived values and the profile's. Items: every entry of dirs, names, startfiles and endfiles, derived or profiled. Certified =
+the entries present in both. A red guest root build, or a driver run that fails, is red with the reason.
 ```

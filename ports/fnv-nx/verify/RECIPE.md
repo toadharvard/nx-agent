@@ -14,7 +14,6 @@ the hash of the stage document + tool code. All paths are root-relative unless m
  "os_layer": ["os.S"], "constants": "constants.tsv", "contract_names": "contract.tsv",
  "link": {"script": "link.ld", "output": "x.elf", "flags": ["-m", "aarch64linux32"], "roots": ["ports/fnv-nx/other"],
           "libs": {"external": "tc", "dirs": ["lib"], "names": ["c"], "startfiles": ["lib/crt1.o"], "endfiles": ["lib/crtn.o"]}},
- "plugin_cxx": "x86_64-linux-gnu-g++-13",
  "plugins": [{"name": "fnvnx_order", "source": "ports/fnv-nx/toolchain/order/fnvnx_order.cc", "args": {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}},
              {"name": "fnvnx_ftoi", "source": "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc", "args": {"mode": "native"}}],
  "external": [{"name": "ft", "repo": "fnv-nx-build", "ref": "mirror/freetype", "commit": "<40 hex>", "tree_sha256": "<64 hex>", "at": "/ext/ft"}]}
@@ -59,19 +58,19 @@ the hash of the stage document + tool code. All paths are root-relative unless m
   `ld`; it is required: a link is the ILP32 guest ELF). The objects are ELF32 (`SHT_RELA` with `Elf32_Rela`, relocations `R_AARCH64_P32_*`),
   the linked ELF is ELF32. LP64 is the default, with no flag.
 - `external`: content-pinned inputs (see below).
-- `plugins`, `plugin_cxx`: GCC plugins of the C++ front end (see "Plugins"). `flags` may not hold any `-fplugin*` token.
+- `plugins`: GCC plugins of the C++ front end (see "Plugins"). `flags` may not hold any `-fplugin*` token.
 
 ## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)
-`fnvnx_ftoi` is one plugin, class C (float -> integer), two modes chosen by the root's `cxx_origin` and never declared freely: `PLUGIN_ARGS` has `mode=native`
-(the MSVC `_ftol` rewrite, skipped inside functions with `__attribute__((fnvnx_f2i))`, which the plugin registers), `LIFTED_ARGS` has `mode=lifted` (no rewrite; a
+`fnvnx_ftoi` is one plugin, class C (float -> integer), two modes chosen by the root's `cxx_origin` and never declared freely: `recipe.plugin_args(cxx_origin)` gives `mode=native`
+(the MSVC `_ftol` rewrite, skipped inside functions with `__attribute__((fnvnx_f2i))`, which the plugin registers), `mode=lifted` for a lifted origin (no rewrite; a
 conversion, conversion builtin or float-reading asm outside an `fnvnx_f2i` function is an error). The recipe adds `-fplugin-arg-fnvnx_ftoi-out=/out/unit.f2i.json` to every
 CC stage (`PLUGIN_OUT`); the report (`fnvnx-f2i/1`: sites, helpers, findings) is kept next to the object and listed in `objects.json` as `f2i` of the unit.
 Rule: a root that uses an attribute declares the plugin that registers it (guest roots compile with `-Werror=attributes`).
 Our compiler is the pinned g++-13 with our two plugins. Their sources are tracked under the tool root `ports/fnv-nx/toolchain` (no build script:
 the recipe is the only way they are built). Each entry of `plugins` is `{"name", "source", "args"}`: `source` is `<dir>/<name>.cc`, a tracked file of an
-admitted tool root; `args` becomes `-fplugin-arg-<name>-<key>[=<value>]`. `plugin_cxx` is the host driver under `/usr/bin` (env.json) that builds
-them: x86_64 `x86_64-linux-gnu-g++-13` (the bare `g++-13` prints no path for `as`/`ld`), same GCC version as `compiler.cxx`.
-- Stage `plugin:<name>` (sandbox, class build): `plugin_cxx -shared -nostdlib -fPIC -fno-rtti -fno-exceptions -O2 -I<compiler.cxx -print-file-name=plugin>/include
+admitted tool root; `args` becomes `-fplugin-arg-<name>-<key>[=<value>]`. The host driver under `/usr/bin` that builds
+them is `recipe.PLUGIN_CXX`, DERIVED from env.json (the one pinned package `g++-N-x86-64-linux-gnu` provides `x86_64-linux-gnu-g++-N`; the bare `g++-N` prints no path for `as`/`ld`), the GCC version of `compiler.cxx`. A `plugin_cxx` in a build.json is red: no hand-typed compiler name.
+- Stage `plugin:<name>` (sandbox, class build): `recipe.PLUGIN_CXX -shared -nostdlib -fPIC -fno-rtti -fno-exceptions -O2 -I<compiler.cxx -print-file-name=plugin>/include
   crti.o crtbeginS.o SOURCE crtendS.o crtn.o`. Declared inputs: the driver's tool runtime, the plugin headers of the target compiler
   (gcc-13-plugin-dev-aarch64-linux-gnu of env.json), the source, crti.o/crtn.o of libc6-dev. Key = content of these + driver + flags, like every stage.
   The `.so` is stored in `GATE_CACHE/store`, copied to `OUT/plugins/<name>.so`, listed in `objects.json` (`plugins`: name, sha256, path).
@@ -93,7 +92,7 @@ error). A guest build.json may carry only per-root classes (`recipe.PER_ROOT`): 
 keep in sync). `-DFNVNX_SDD=1` is per root (a native C++ root must hold it).
 Every product root's admit.json entry declares `"target": "guest"` (the game's code) or `"host"`; missing = invalid recipe = red `build`. A guest root's
 compiler, for C and C++ alike, is the external compiler pinned in `verify/guest_compiler.json`
-(`{"format": "fnvnx-guest-compiler/1", "external": {EXT_KEYS}, "cc", "cxx", "flags": {"semantics": [flag]}}`; `flags.semantics` is the one source of `recipe.SEMANTICS_FLAGS`: every flag that changes generated-code semantics): GCC 13.3.0 + `toolchain/msvcmodel/msvcmodel.patch`, a fnv-nx-build mirror
+(`{"format": "fnvnx-guest-compiler/1", "external": {EXT_KEYS}, "cc", "cxx", "flags": {"semantics": {"common": [flag], "lifted_extra": [flag]}}}`; `flags.semantics` is the one source of `recipe.SEMANTICS_FLAGS` (`common`) and `recipe.SEMANTICS_LIFTED` (`common` + `lifted_extra`: `-ffreestanding -fno-exceptions -fno-asynchronous-unwind-tables -fno-unwind-tables`, what lifted code is built under). `-fno-exceptions` removes host C++ EH from lifted units only. The exe's MSVC C++ EH and SEH stay implemented by the lifter through the exe's own EH tables (owner order of 2026-11-10). Nothing in the lifted flag set changes that.; `recipe.semantics_set(cxx_origin)` picks the set of a root by its declared origin, `recipe.semantics_for(driver, language, origin=)` derives the per-language set from it; `verify/guest_flags.py --lang L --origin native|lifted` prints it): GCC 13.3.0 + `toolchain/msvcmodel/msvcmodel.patch`, a fnv-nx-build mirror
 (`tools/gcc-ilp32-msvcmodel`). The root's `compiler` must be `{"external", "cc", "cxx"}` naming an `external` entry equal to the pinned one (name, commit,
 tree_sha256, at) with the pinned driver paths. The distribution g++-13 is the base the compiler is built from, never the compiler of guest code. A tree
 without the pin file has no valid guest root. The plugins are built against this compiler's own plugin headers (the plugin stage reads
@@ -115,8 +114,8 @@ that includes `<vector>`, `<string>`, `<cstdio>`. The 13.3 compiler reads gcc 15
 - `native`: `plugins` must hold `fnvnx_order` and `fnvnx_ftoi`, with the sources `PLUGIN_SOURCES` and the arguments `PLUGIN_ARGS` of recipe.py (the MSVC
   semantics; `ltr`, `first`, `cpp17` exist for A/B measurements and are no product). Anything missing or different is a finding naming it.
 - lifted (the lifter emits `ldar`/`stlr` itself): consistent only if the root has NO tracked C++ unit, every C++ unit is an output of a `generated`
-  step whose tool is `lifted_by`, and `pack` is an external of the recipe (an input of every generator). The one plugin it must load is `fnvnx_ftoi` with `LIFTED_ARGS` (`mode=lifted`): no rewrite, and every float -> integer conversion outside an `fnvnx_f2i` function is a build error.
-- every guest root with a C or C++ unit (native or lifted, any language mix) holds ALL of `PLUGIN_SOURCES` with `PLUGIN_ARGS` (a lifted root: `LIFTED_ARGS` for the plugins it names, so `fnvnx_ftoi` in mode lifted), in that order: the
+  step whose tool is `lifted_by`, and `pack` is an external of the recipe (an input of every generator). The one plugin it must load is `fnvnx_ftoi` with `mode=lifted` (`plugin_args`): no rewrite, and every float -> integer conversion outside an `fnvnx_f2i` function is a build error.
+- every guest root with a C or C++ unit (native or lifted, any language mix) holds ALL of `PLUGIN_SOURCES` with the arguments of `recipe.plugin_args(cxx_origin)` (the only source: `fnvnx_ftoi` in mode lifted for a lifted root), in that order: the
   C and the C++ CC stage of the root load every plugin their front end can load (`-fplugin=/plug/<n>/<n>.so`, `/plug/<n>` a declared input), so a
   plugin is in every unit key. Loadable = has no STRONG undefined reference to a symbol that only the other front end defines (`recipe.plugin_languages`: `nm -D` of cc1,
   cc1plus and the .so; a weak undefined reference resolves to null and is no load requirement). Every plugin declares the C++ front end's symbols weak
@@ -147,8 +146,9 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   -z max-page-size=0x1000 -z common-page-size=0x1000`, then the emulation from `link.flags` (`-m aarch64linux32`, `-EL`, `-X` only), `-T script`.
   `--build-id=none` (not the driver's sha1) is the recipe's own rule for determinism. The refusal set R stays.
 - Post stage `ldcheck:<root>` (link/ldcheck.py, a pure python tool of the python runtime like `generated`; inputs: the linked ELF and the input objects): from
-  ELF symbol tables only it checks the rules of the former ld.py: no undefined symbol in the output; every name the inputs reference or define (weak
-  references included: the linker resolves an undefined weak to 0 and drops it) is defined in the output; no dynamic relocation but
+  ELF symbol tables only it checks the rules of the former ld.py: no undefined symbol in the output; every name the inputs reference or define is defined in the
+  output; a WEAK undefined reference (STB_WEAK, SHN_UNDEF: in the output's symbol table, or dropped by the linker, which resolves it to 0) that the output does
+  not define is red, id `weak-undefined:<name> <- <objects that reference it>`, with no exception list (a weak reference that the output defines is fine); no dynamic relocation but
   R_AARCH64_P32_RELATIVE or RELR (no REL, JMPREL, TEXTREL table); the PIE mark (DF_1_PIE); the FNXG magic at the first PT_LOAD + 8 and the entry at the
   first PT_LOAD. Then it writes the crt0 header words +16 (link address), +20 (page aligned span), +24 (bit 0: relocatable) and outputs the final ELF and the
   gate file `ld` (`ld.json`, `ld.ids`). A failed rule is a red build, stage `ldcheck:<root>`, stderr: one `ldcheck: <id>` line per finding.
@@ -160,7 +160,11 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   script required) or `shared` (`-shared -z text -z now`, `link.version_script` required and passed as `--version-script`; the output is `NAME.so`). ldcheck
   of a non-pie kind checks from ELF symbol tables: every name the inputs define or reference is defined; no undefined symbol except those a
   `link.libs.system` library defines (its `.dynsym` is read); no TEXTREL; a shared object's exported names (those the version script names) are defined and
-  global. `link.libs.system`: `[absolute paths of shared libraries of env.json packages]`, mounted as declared inputs at /syslib (their content is in the key).
+  global. `link.libs.system`: `[absolute paths of shared libraries of env.json packages]`, mounted as declared inputs at /syslib (their content is in the key). Any file of a package that env.json pins is admitted, the loader `ld-linux-x86-64.so.2` included (libc6): the link stage asks `envcheck.system_lib_errors` (dpkg's file lists under every usrmerge spelling of the path, against the pinned `packages`); a path no pinned package owns is a red `ld:<root>` stage naming it.
+  `link.loader` (kind shared only): the admitted root (product or test, with a recipe, the same target) of the image that loads this one. ldcheck then accepts
+  undefined names ⊆ (the dynamic exports of the `link.libs.system` libraries) ∪ (the global and weak names defined by the objects of the loader root and of its
+  own `link.roots`, built objects-only through the stage cache and passed to `ldcheck:<root>` as a declared input), and nothing else. The loader is an edge
+  of the root graph (cycles are red). Without `link.loader` only the libraries count.
   `link.roots` works for every kind; a root needed by several images has `link` null and is built once per (root, variant).
 - Target of the link: every linked object (own and input roots') has the ELF class and e_machine of the link's emulation (`aarch64linux32` ILP32 = class 1,
   AArch64; `aarch64linux` = class 2, AArch64; `elf_x86_64` = class 2, x86-64), read from its ELF header. A mismatch is red, stage `ld:<root>`, naming the object.

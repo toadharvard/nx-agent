@@ -231,6 +231,25 @@ def symtab_info(d):
     return defs, strong, weak, commons, bad
 
 
+def symbol_ids(objs, have, elf_bytes):
+    """The ids of rules 1 and 2 (and the weak-undefined rule). OBJS: {object: (defined, strong undefined, weak undefined)} of the input objects;
+    HAVE: the names the output defines (all_defined); ELF_BYTES: the linked output.
+      weak-undefined:<name> <- <objects>   a WEAK undefined reference (STB_WEAK, SHN_UNDEF) the output does not define, whether the linker kept it in
+                                           the output's .symtab or dropped it (resolved to 0): the objects that reference it are named. There is no
+                                           exception list; the only non-red form of a weak reference is one the output defines;
+      cover:<name>                         an input name (defined or strongly referenced) the output does not define;
+      output-undefined:<name>              a strong undefined symbol in the output's .symtab."""
+    defs, strong, weak = (set().union(*(o[i] for o in objs.values())) for i in range(3))
+    out_strong, out_weak = symtab_info(elf_bytes)[1:3]
+    weak_only = {n for n in weak if n not in strong}
+    wnames = (weak_only - set(have)) | out_weak
+    refs = lambda n: ', '.join(sorted(p for p, o in objs.items() if n in o[2])) or '(none: the output\'s symbol table only)'  # noqa: E731
+    ids = ['weak-undefined:%s <- %s' % (n, refs(n)) for n in sorted(wnames)]
+    ids += ['cover:' + n for n in sorted(((defs | strong | weak) - set(have)) - wnames)]
+    ids += ['output-undefined:' + n for n in sorted(out_strong - set(have) - out_weak)]
+    return ids
+
+
 def write_list(path, rows):
     with open(path, 'w', newline='\n') as fh:
         fh.write(''.join(r + '\n' for r in rows))
@@ -330,6 +349,15 @@ def version_globals(text):
     return exact, pats
 
 
+def loader_names(path):
+    """The names of a --loader-defs file (one per line), a set; none when PATH is None. A shared image's undefined names must lie in the dynamic
+    exports of its system libraries or in this set (the defined set of the declared loader root): nothing else may stay undefined."""
+    if path is None:
+        return set()
+    with open(path) as fh:
+        return {ln.rstrip('\n') for ln in fh if ln.strip()}
+
+
 def host_main(a):
     """Rules for a host image (exe, shared): no undefined name except those the link's shared libraries define (their .dynsym); every name the
     inputs reference or define is defined in the output or by a library; no text relocation; for `shared`, every name the version script exports as
@@ -350,7 +378,7 @@ def host_main(a):
             if typ in (STT_SECTION, STT_FILE) or bind not in (1, 2):
                 continue
             (defs if shndx != SHN_UNDEF else strong if bind == 1 else weak).add(n)
-    libdef = set()
+    libdef = loader_names(a.loader_defs)
     for p in a.lib:
         with open(p, 'rb') as fh:
             libdef |= {n for n, _, _, shndx, _ in syms_any(fh.read(), 11) if shndx != SHN_UNDEF}
@@ -399,6 +427,7 @@ def main():
     ap.add_argument('--name', required=True)
     ap.add_argument('--kind', default='pie', choices=('pie', 'exe', 'shared'))
     ap.add_argument('--version-script', default=None)
+    ap.add_argument('--loader-defs', default=None, help='a file of the names the declared loader root defines, one per line (a shared image may leave them undefined)')
     ap.add_argument('--lib', action='append', default=[], help='a shared library of the link (its .dynsym defines names the image may leave undefined)')
     a = ap.parse_args()
     if a.kind != 'pie':
@@ -406,23 +435,18 @@ def main():
     os.environ['GATE_OUT'] = a.out
     os.makedirs(a.out, exist_ok=True)
     final = os.path.join(a.out, a.name)
-    defs, strong, weak = set(), set(), set()
-    n_objs = 0
+    objs = {}
     for p in object_files(a.objs):
         if not p.endswith('.o'):
             sys.exit('ldcheck: %s: not an object file' % p)
         with open(p, 'rb') as fh:
             d, st, wk, _, _ = symtab_info(fh.read())
-        defs |= d
-        strong |= st
-        weak |= wk
-        n_objs += 1
+        objs[os.path.relpath(p, a.objs)] = (d, st, wk)
+    defs, strong, weak = (set().union(*(o[i] for o in objs.values())) for i in range(3))
+    n_objs = len(objs)
     names = defs | strong | weak
     out = symbols(a.elf)
-    have = all_defined(a.elf)
-    weak_only = {n for n in weak if n not in strong}
-    ids = [('weak:' if n in weak_only else 'cover:') + n for n in sorted(names - have)]
-    ids += ['output-undefined:' + n for n, df in out if not df]
+    ids = symbol_ids(objs, all_defined(a.elf), open(a.elf, 'rb').read())
     cnt, badrel = dyn_relocs(a.elf)
     ids += badrel
     if not is_pie(a.elf):
