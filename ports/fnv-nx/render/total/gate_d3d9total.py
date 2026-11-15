@@ -53,7 +53,7 @@ INCLUDES = recipe_includes(D3D9_REC)
 TR_GEN = {os.path.dirname(os.path.dirname(TRANSLATOR_REC) + "/" + o) for g in json.load(open(os.path.join(PORT, TRANSLATOR_REC))).get("generated", []) for o in g["outputs"]}   # build outputs: no tracked files
 TR_INCLUDES = [i for i in recipe_includes(TRANSLATOR_REC) if i not in TR_GEN]   # the translator's own tracked include dirs (the patched MojoShader includes fnvnx_dk_layout.h from them)
 INPUTS = ["render/d3d9/front", "render/d3d9/spec/d3d9_spec.json", D3D9_REC, TRANSLATOR_REC,
-          "render/shaders/total/sm_table.json", "render/shaders/total/gen_sm_rows.py", "render/shaders/total/fnvnx_sm_rows.h"] + INCLUDES + [i for i in TR_INCLUDES if i not in INCLUDES]
+          "render/shaders/total/sm_table.json", "render/shaders/total/gen_sm_rows.py", "render/shaders/total/fnvnx_sm_rows.h", "contract/treehash.py"] + INCLUDES + [i for i in TR_INCLUDES if i not in INCLUDES]
 GCC, CLANG, GIT = "/usr/bin/gcc", "/usr/bin/clang", "/usr/bin/git"
 ARTIFACTS_URL = "https://github.com/toadharvard/fnv-nx-build"
 STRICT = ["-Wall", "-Wextra", "-Werror", "-Werror=switch", "-Werror=switch-enum"]

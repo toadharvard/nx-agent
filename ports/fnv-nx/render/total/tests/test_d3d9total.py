@@ -72,6 +72,8 @@ def run_gate(base, cache, extra=None):
     env.update(GATE_OUT=out, GATE_CACHE=cache, **(extra or {}))
     r = subprocess.run([sys.executable, "-I", os.path.join(G.PORT_REL, "render", "total", "gate_d3d9total.py")], cwd=base, env=env,
                        capture_output=True, text=True, timeout=240)
+    if not os.path.exists(os.path.join(out, "d3d9total.json")):
+        raise AssertionError("the gate wrote no result (rc %d): %s" % (r.returncode, (r.stderr or r.stdout)[-600:]))
     res = json.load(open(os.path.join(out, "d3d9total.json")))
     return r.returncode, res
 
