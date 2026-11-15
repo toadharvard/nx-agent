@@ -678,8 +678,10 @@ class Func:
         if i.mem is None or b is None or (i.mem.index != 0 and b == SP):
             return None
         # a register-offset access `[xB, wI, ext]` of a register that holds a formed frame address is the access `add xT, xB, wI; [xT]` folded
-        # into one instruction: the same derived address, judged by the origins of xB (ASM-006: the index stays inside the object the
-        # formed address points into). Through sp itself the object is not named by the base, so that form is never judged
+        # into one instruction: the same derived address, judged by the origins of xB. ARGUMENT: the base is the decl's frame address (the
+        # derived-address rule), and the index is in bounds of that object: for native code by OWNER 5 (ASan/UBSan-tested, not proven), for a
+        # lifted unit by OWNER 6 (the exe makes no wild accesses, array indices in bounds); ASM-006 states the same bound for the tag X. A frame
+        # access is thread-private, so its ordering is vacuous. Through sp itself the object is not named by the base, so that form is never judged
         og = (sp,) if b == SP else origins(rg.get(b))
         if not og or None in og:
             return None
