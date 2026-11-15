@@ -296,7 +296,7 @@ def main():
             r["compiler"] = cc
         return r
     IMG = {"toy/a.c": None, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None, "toy/link.ld": None,
-           "toy/e.c": "int f_b(void);\nvoid _start(void) { f_b(); for (;;) ; }\n"}
+           "toy/e.c": "int f_b(void);\nint main(void) { f_b(); return 0; }\nint __libc_start_main(void *m) { return ((int (*)(void))m)(); }\nvoid abort(void) { for (;;) ; }\n"}
     IB, IC = T + "imgx", T + "imgbad"
     vrepo = mk("variants", image("toy", "aarch64linux", [VROOT + "@lp64"]), IMG,
               libs=[(VROOT, (vlib, VF)), (IB, (dict(image("imgx", "elf_x86_64", [VROOT + "@x86"], X86), flags={"c": FL, "cxx": [], "asm": []}, include=[]), {"e.c": IMG["toy/e.c"]})),

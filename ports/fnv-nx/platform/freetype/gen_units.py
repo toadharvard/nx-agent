@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """gen_units - FreeType's own build for the declared machine's FreeType configuration (recipe `generated` stage of the platform root).
 
-    gen_units.py EXT DEB OUT      EXT = the pinned FreeType external (/ext/freetype), DEB = the `debian/` directory of the declared machine's FreeType source package
+    gen_units.py EXT DEB OUT SRC  SRC = the root's tracked sources (/in/ports/fnv-nx/platform); EXT = the pinned FreeType external (/ext/freetype), DEB = the `debian/` directory of the declared machine's FreeType source package
                                   (external `freetype-debian`: the Ubuntu package freetype 2.13.2+dfsg-1ubuntu0.2 pinned by verify/env.json), OUT = the stage's /out/freetype
 
 The declared machine's FreeType is the package's: upstream plus debian/patches/series applied in order. The generator applies that series strictly (every context and
@@ -47,6 +47,61 @@ def config(ext, cfg_text):
         if n not in names:
             names.append(n)
     return names, list(dict.fromkeys(base))
+
+
+def refs_of(src):
+    """the text of every tracked platform source (the root's own code; its freetype/ directory is the build, not a caller)"""
+    out = []
+    for d, ds, fs in os.walk(src):
+        ds[:] = sorted(x for x in ds if not (d == src and x == "freetype"))
+        out += [read(os.path.join(d, f)) for f in sorted(fs) if f.endswith((".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".inc"))]
+    return "\n".join(out)
+
+
+def unreferenced(ext, names, base, src):
+    """RULE (service modules). A base extension ft<x>.c is the public entry of the FreeType API of header freetype/ft<x>.h; it finds a service of a module by id
+    (FT_FACE_FIND_*SERVICE(face, service, ID)). A module that only provides such a service id, an id no other source outside the module and its entries looks up,
+    is reached only through that entry. When no source of the root names the entry's header (nor its FT_..._H macro in ftheader.h), the entry cannot be called
+    from the root, and the entry and the module are dropped from the build. Returns (dropped base extensions, dropped modules)."""
+    text = refs_of(src)
+    hdr = read(os.path.join(ext, "include/freetype/config/ftheader.h"))
+    srcs = {}
+    for d, _, fs in os.walk(os.path.join(ext, "src")):
+        for f in fs:
+            if f.endswith(".c"):
+                srcs[os.path.relpath(os.path.join(d, f), ext)] = read(os.path.join(d, f))
+
+    def looks_up(sid):
+        return re.compile(r"FT_SERVICE_ID_%s\b|FIND_\w*SERVICE\s*\([^;]*?\b%s\s*\)" % (sid, sid))
+    gone_ext, gone_mod = set(), set()
+    for n in names:
+        provided = set()
+        for p, t in srcs.items():
+            if p.startswith("src/%s/" % n):
+                provided |= set(re.findall(r"\{\s*FT_SERVICE_ID_(\w+)\s*,", t))
+        if not provided:
+            continue
+        entries = set()
+        ok = True
+        for sid in provided:
+            users = [p for p, t in srcs.items() if not p.startswith("src/%s/" % n) and looks_up(sid).search(t)]
+            if not users or any(not (p.startswith("src/base/") and p[len("src/base/"):] in base) for p in users):
+                ok = False
+                break
+            entries |= set(users)
+        if not ok:
+            continue
+        for e in sorted(entries):
+            stem = e.rsplit("/", 1)[1][:-2]
+            names_h = [m[1] for m in re.finditer(r"#\s*define\s+(FT_\w+_H)\s+<freetype/%s\.h>" % re.escape(stem), hdr)]
+            if not names_h and not os.path.isfile(os.path.join(ext, "include/freetype/%s.h" % stem)):
+                ok = False      # an entry without a public header of its own cannot be shown unreferenced
+            if re.search(r"freetype/%s\.h|\b(%s)\b" % (re.escape(stem), "|".join(names_h) or "(?!)"), text):
+                ok = False
+        if ok:
+            gone_mod.add(n)
+            gone_ext |= {e.rsplit("/", 1)[1] for e in entries}
+    return gone_ext, gone_mod
 
 
 def units(ext, names, base):
@@ -157,7 +212,7 @@ def check_form(old, new, what, pat_old, pat_new):
 
 
 def main(a):
-    ext, deb, out = a
+    ext, deb, out, src = a
     comp = components(deb)
     files = {}
     for name in series(deb):
@@ -179,6 +234,9 @@ def main(a):
         opts_added = check_form(orig["include/freetype/config/ftoption.h"], files["include/freetype/config/ftoption.h"], "ftoption.h",
                                 r"^/\* #define \w+ \*/$", r"^#define \w+$")
     names, base = config(ext, cfg_text if "modules.cfg" in files else read(os.path.join(ext, "modules.cfg")))
+    gone_ext, gone_mod = unreferenced(ext, names, base, src)
+    names = [n for n in names if n not in gone_mod]
+    base = [b for b in base if b not in gone_ext]
     U = units(ext, names, base)
     gen = {"gen/include/freetype/config/ftmodule.h": module_h(ext, names),
            "gen/include/freetype/config/ftoption.h": files.get("include/freetype/config/ftoption.h", read(os.path.join(ext, "include/freetype/config/ftoption.h")))}
@@ -208,6 +266,13 @@ def main(a):
         os.makedirs(os.path.dirname(p), exist_ok=True)
         with open(p, "w", encoding="utf-8", errors="surrogateescape", newline="") as f:
             f.write(text)
+    for n in names:
+        sys.stderr.write("gen_units: kept module %s: in the package's modules.cfg; FT_Init_FreeType registers it through ftmodule.h (FT_Add_Default_Modules)\n" % n)
+    for n in sorted(gone_mod):
+        sys.stderr.write("gen_units: dropped module %s: its services are looked up only by the base entries %s, and no source of the root names their public headers\n" % (n, sorted(gone_ext)))
+    for e in ("ftsystem.c", "ftdebug.c", "ftinit.c"):
+        sys.stderr.write("gen_units: kept base src/base/%s: mandatory component (FT_Init_FreeType/FT_Done_FreeType reach it)\n" % e)
+    sys.stderr.write("gen_units: dropped, no caller in the root: extensions %s modules %s\n" % (sorted(gone_ext), sorted(gone_mod)))
     sys.stderr.write("gen_units: package enables modules %s and options %s\n" % ([x.strip() for x in mods_added], [x.strip() for x in opts_added]))
     return 0
 

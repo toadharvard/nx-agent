@@ -8,10 +8,8 @@ src/base/ftdebug.c
 src/base/ftfstype.c
 src/base/ftgasp.c
 src/base/ftglyph.c
-src/base/ftgxval.c
 src/base/ftinit.c
 src/base/ftmm.c
-src/base/ftotval.c
 src/base/ftpatent.c
 src/base/ftpfr.c
 src/base/ftstroke.c
@@ -24,10 +22,8 @@ src/bzip2/ftbzip2.c
 src/cache/ftcache.c
 src/cff/cff.c
 src/cid/type1cid.c
-src/gxvalid/gxvalid.c
 src/gzip/ftgzip.c
 src/lzw/ftlzw.c
-src/otvalid/otvalid.c
 src/pcf/pcf.c
 src/pfr/pfr.c
 src/psaux/psaux.c

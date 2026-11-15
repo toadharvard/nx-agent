@@ -1,0 +1,9 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
+ "flags": {"c": ["-mabi=ilp32"], "cxx": ["-mabi=ilp32"], "asm": ["-mabi=ilp32"]},
+ "include": [],
+ "units": "all",
+ "generated": [{"tool": "ports/fnv-nx/lift/descs/descs.py", "args": [], "inputs": [], "objects_of": {"except": []}, "outputs": ["descs.tsv"]}],
+ "outputs": {"descs": "descs.tsv"}
+}

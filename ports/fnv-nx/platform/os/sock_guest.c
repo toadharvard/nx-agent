@@ -53,10 +53,11 @@ static int64_t sc(uint32_t fn, uint32_t n, uint64_t a0, uint64_t a1, uint64_t a2
 
 /* ---- errno / constants by name */
 static int local_errno(int w) {
+    w = fnvnx_dom_errno_check(w);   /* generated (os/gen/dom_errno.c): a wire number of the two tables below, else the ASM-004 exit */
 #define X(N, v) if (w == (v)) return N;
     FNVNX_WIRE_ERRNO_LIST(X)
 #undef X
-    return EIO;
+    return FNVNX_ERRNO_UNKNOWN_OFFSET + w;   /* an UNNAMED number: no libc name, libnx's own encoding */
 }
 /* a negative service result -> errno + -1 */
 static int fail(int64_t r) { errno = local_errno((int)-r); return -1; }

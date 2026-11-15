@@ -17,7 +17,7 @@ tests/test_graph,test_sandbox; gcc,as,ld test_sandbox,test_sdcheck; aarch64-linu
 aarch64-linux-gnu-nm,readelf icount.py,test_unitstage; aarch64-linux-gnu-as,ld,objcopy test_icount; ar,clang test_coffnorm;
 git verdict.py,l1.py,test_gates; ldd,true test_runtime; g++,llvm-config-18 build a64access.cc (objstub.py, test_a64access).
 The a64access build set is derived the same way: every header `g++ -M` reports for a64access.cc under `llvm-config-18 --cxxflags`,
-and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). The clang set (clang-18 plugins such as vtnames; clang -m32 compiles) is derived the same way: the headers under `llvm-config-18 --includedir` that a plugin includes (CLANG_API) with the whole clang/ tree they sit in, the libraries of CLANG_LIBS under `--libdir`, and every header `clang -m32 -M` reports for a C probe including stdint.h and stdlib.h (gnu/stubs-32.h: libc6-dev-i386). Python modules (version in python.modules, installed-files sha256 in python.installed_files_sha256, see wheel_digest; wheel file sha256 in python.wheel_sha256): capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts, perf, check_mirror); pefile (platform/manifest/regsites.py); numpy (lift/test/instest.py packer); z3-solver, keystone-engine, gmpy2 (lift/proof, lift/bench, lift/test)."""
+and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). The clang set (clang-18 plugins such as vtnames; clang -m32 compiles) is derived the same way: the headers under `llvm-config-18 --includedir` that a plugin includes (CLANG_API) with the whole clang/ tree they sit in, the libraries of CLANG_LIBS under `--libdir`, and every header `clang -m32 -M` reports for a C probe including stdint.h and stdlib.h (gnu/stubs-32.h: libc6-dev-i386). Python modules (version in python.modules, installed-files sha256 in python.installed_files_sha256, see wheel_digest; wheel file sha256 in python.wheel_sha256): capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts, perf, check_mirror); pefile (manifest/regsites.py); numpy (lift/test/instest.py packer); z3-solver, keystone-engine, gmpy2 (lift/proof, lift/bench, lift/test)."""
 import argparse
 import csv
 import ctypes
@@ -59,28 +59,6 @@ KERNEL = ["unshare mount+pid+net+uts+ipc namespaces as root", "seccomp filter", 
 
 def env_id(doc):
     return hashlib.sha256(json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-
-def wheel_files(dist):
-    """{path: sha256 hex} of the installed files of distribution DIST that its RECORD hashes (no .pyc, no installer-written files), read from
-    the disk: a file that differs from its RECORD entry makes the digest differ (the entry is not trusted, the content is hashed)."""
-    import base64
-    import csv
-    d, out = metadata.distribution(dist), {}
-    for row in csv.reader(d.read_text("RECORD").splitlines()):
-        path, h = row[0], row[1] if len(row) > 1 else ""
-        if not h.startswith("sha256=") or path.endswith(".pyc") or "__pycache__" in path.split("/"):
-            continue
-        f = d.locate_file(path)
-        have = hashlib.sha256(open(f, "rb").read()).hexdigest() if os.path.isfile(f) else "missing"
-        want = base64.urlsafe_b64decode(h[7:] + "=" * (-len(h[7:]) % 4)).hex()
-        out[path] = have if have == want else "differs-from-record:" + have
-    return out
-
-
-def wheel_digest(dist):
-    """sha256 over the sorted (path, content hash) lines of wheel_files(DIST): names the installed wheel by its content."""
-    return hashlib.sha256("".join("%s %s\n" % kv for kv in sorted(wheel_files(dist).items())).encode()).hexdigest()
-
 
 def file_owners():
     """{path: {dpkg package names}} from /var/lib/dpkg/info/*.list (arch qualifier dropped); a path owned by several packages has all of them."""

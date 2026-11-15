@@ -1,0 +1,6 @@
+test	test observation (lock counting, violations)	threads+futex: condition variables	threads+futex: locks	threads+futex: threads	time: clocks and time zone
+vc_audio_determinism	2444	43	2443	15	175
+vc_audio_dsound_cursor_is_a_function_of_t	891	0	890	3	0
+vc_audio_dsound_notification_times	643	0	642	0	49
+vc_audio_waveout_callback_function_time	994	9	993	103	5
+vc_audio_waveout_completion_times	1830	14	1829	6	62

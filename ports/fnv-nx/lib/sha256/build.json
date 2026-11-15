@@ -18,6 +18,7 @@
    "-std=c99"
   ],
   "cxx": [
+   "-O2",
    "-Werror=attributes"
   ],
   "asm": []
@@ -31,8 +32,8 @@
    "name": "gcc-msvcmodel",
    "repo": "fnv-nx-build",
    "ref": "tools/gcc-ilp32-msvcmodel",
-   "commit": "b4057704c0babd012e466cc89181132e02542289",
-   "tree_sha256": "b60eafe7a5b0ae3dc679f9bf21e20d3363e3bac2af7379e34127ea5cf8455116",
+   "commit": "b274ec067a2f965807a359853f456e31c67a49af",
+   "tree_sha256": "a1eeb84d83a6ecfa631643575c49581dc72a48b961b6e6db31ad2a63436debec",
    "at": "/ext/gcc"
   }
  ],
@@ -40,6 +41,9 @@
   {
    "name": "fnvnx_ftoi",
    "source": "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc",
+   "inputs": [
+   "ports/fnv-nx/toolchain/ftoi/f2i_builtins.inc"
+   ],
    "args": {
     "mode": "native"
    }

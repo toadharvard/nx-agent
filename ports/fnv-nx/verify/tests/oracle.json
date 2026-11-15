@@ -222,6 +222,20 @@
     "ports/fnv-nx/verify/coffnorm.py"
    ]
   },
+  "test_comdat.py": {
+   "references": [
+    {
+     "anchor": "## link/odr.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/comdat.py",
+    "ports/fnv-nx/link/odr.py",
+    "ports/fnv-nx/verify/gate_linkstrict.py"
+   ]
+  },
   "test_datamodel.py": {
    "references": [
     {
@@ -232,6 +246,19 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/gate_datamodel.py",
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
+  "test_descs.py": {
+   "references": [
+    {
+     "anchor": "### Objects of every admitted product root (`objects_of`) and `forbid_sections`",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/descs/descs.py",
     "ports/fnv-nx/verify/recipe.py"
    ]
   },
@@ -253,6 +280,18 @@
     "ports/fnv-nx/farm/setup_verdict_env.sh",
     "ports/fnv-nx/verify/env.json",
     "ports/fnv-nx/verify/a64access.cc"
+   ]
+  },
+  "test_extcache_race.py": {
+   "references": [
+    {
+     "anchor": "## Externals in a shared store",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
    ]
   },
   "test_fpbound.py": {
@@ -637,6 +676,58 @@
     "ports/fnv-nx/verify/verdict.py"
    ]
   },
+  "test_objstub_assume.py": {
+   "references": [
+    {
+     "anchor": "## verify/objstub.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## verify/objstub_plugin.cc",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## verify/gate_objstub.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/objstub.py",
+    "ports/fnv-nx/verify/objstub_plugin.cc",
+    "ports/fnv-nx/verify/gate_objstub.py",
+    "ports/fnv-nx/verify/a64access.cc",
+    "ports/fnv-nx/verify/verdict.py"
+   ]
+  },
+  "test_objstub_rules.py": {
+   "references": [
+    {
+     "anchor": "## verify/objstub.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/objstub.py",
+    "ports/fnv-nx/verify/gate_objstub.py",
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
+  "test_onedef.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_onedef.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_onedef.py"
+   ]
+  },
   "test_opentrace.py": {
    "references": [
     {
@@ -805,6 +896,18 @@
     "ports/fnv-nx/verify/sdcheck.py"
    ]
   },
+  "test_stackuse.py": {
+   "references": [
+    {
+     "anchor": "## verify/stackuse.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/stackuse.py"
+   ]
+  },
   "test_systemlibs.py": {
    "references": [
     {
@@ -898,18 +1001,6 @@
     "ports/fnv-nx/verify/sandbox.py",
     "ports/fnv-nx/verify/unitview.py",
     "ports/fnv-nx/verify/unitstage.py"
-   ]
-  },
-  "test_onedef.py": {
-   "references": [
-    {
-     "anchor": "## verify/gate_onedef.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/gate_onedef.py"
    ]
   }
  }

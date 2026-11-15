@@ -96,7 +96,7 @@ REACH_VIOLATION = 0x52   # top byte of a guest exit code 0x52000000 | fact_id: a
 SLOTS = ["output_debug_string", "sleep_ns", "exit", "console_write", "system_tick", "system_tick_freq",
          "thread_create", "thread_start", "thread_join", "thread_free", "thread_exit", "thread_yield",
          "thread_set_priority", "thread_set_cpu", "wait_on_address", "wake_address", "wall_time_us",
-         "random64", "memory_info", "cpu_count",
+         "random64", "memory_info",
          "fs_open", "fs_read", "fs_write", "fs_pread", "fs_pwrite", "fs_seek", "fs_truncate", "fs_sync",
          "fs_fstat", "fs_close", "fs_stat", "fs_mkdir", "fs_rmdir", "fs_remove", "fs_rename", "fs_dir_open",
          "fs_dir_next", "fs_dir_close",
@@ -112,7 +112,7 @@ FNVNX_TEXT_ENTRY_MAX = 500   # hostapi.h
 PLATFORM_FNS = {1: ("cpu_boost", 1), 2: ("thread_activity", 2), 3: ("message", 2), 4: ("vm_reserve", 2), 5: ("vm_commit", 2),
                 6: ("vm_decommit", 2), 7: ("vm_release", 1), 8: ("vm_protect", 3), 9: ("display_docked", 0),
                 11: ("section_create", 1), 12: ("section_map", 4), 13: ("section_unmap", 2),
-                14: ("section_free", 1), 34: ("tz_at", 2), 35: ("thread_self", 0), 36: ("text_entry", 5)}
+                14: ("section_free", 1), 34: ("tz_at", 2), 35: ("thread_self", 0), 36: ("text_entry", 5), 37: ("unmap_range", 2), 38: ("thread_cpu", 0)}
 SOCK_SERVICES = {16: ("sock_socket", 3), 17: ("sock_close", 1), 18: ("sock_bind", 2), 19: ("sock_listen", 2), 20: ("sock_accept", 2),
                  21: ("sock_connect", 2), 22: ("sock_sendto", 5), 23: ("sock_recvfrom", 5), 24: ("sock_setsockopt", 5),
                  25: ("sock_getsockopt", 5), 26: ("sock_poll", 3), 30: ("sock_getfl", 1), 31: ("sock_setfl", 2)}
@@ -139,6 +139,8 @@ TZ_VC1 = (0, 0, b"UTC")   # VC1's zone: off_s, dst, abbr
 WINDOW = (0x00400000, 0x02100000)   # the image range 0x00400000..0x00FDF000 and the data window up to 0x02100000: claimed by the host at start
 MAP_FIXED_MAX = 512
 FNVNX_HE_NOMEM, FNVNX_HE_NOTFOUND = 0x0559, 0x1359
+# fnvnx/placement.h and hostapi.h (the tests read the numbers by name from the headers and compare)
+FNVNX_DEFAULT_CORE, FNVNX_APP_CORES, FNVNX_CPU_KEEP = 0, 0x7, 0xFF
 KERNEL_BUSY, KERNEL_INVALID_STATE = 0xF401, 0xFA01   # kernel results 1 | 122 << 9 (Busy), 1 | 125 << 9 (InvalidState); see the docstring
 SEC_E_SIZE, SEC_E_ALIGN, SEC_E_RANGE, SEC_E_REGION, SEC_E_ID, SEC_E_NOMEM, SEC_E_FULL = 0xCA01, 0xCC01, 0xD401, 0xDA01, 0xE401, 0xD001, 0xCE01
 SEC_MAX_SIZE, SEC_SECTIONS, SEC_VIEWS = 0x80000000, 128, 512   # host_section.inc
@@ -261,6 +263,7 @@ class IdTable:
 class Machine:
     def __init__(self, elf_bytes, plan, services, clock=None, *, hc_slice=2000, limit_host_calls=None, n_stacks=32,
                  stack_size=0x40000, limit_instructions=None, profile="handheld", text_entries=None):
+        self.app_cores = FNVNX_APP_CORES   # placement.h: the declared processors, the one value
         if profile not in ("handheld", "docked"):
             raise MachineError("profile must be 'handheld' or 'docked', got %r" % (profile,))
         self.profile = profile   # FNVNX_PLAT_DISPLAY_DOCKED: docked 1, handheld 0
@@ -329,6 +332,7 @@ class Machine:
         self.fault, self.events, self.ext_missing, self.limit_hit = None, [], None, False
         self.mapped = []   # merged [lo, hi) ranges mapped by map_fixed
         self.mf_live = {}   # addr -> (size, src) of every live map_fixed mapping (the kernel's own record)
+        self.win_live = set()   # addresses of the window pages that a map_fixed has mapped (UNMAP_RANGE takes exactly these back)
         self.cb_thread, self.cb_console, self.line = None, None, bytearray()
         self.ret_pending, self.console_text = {}, []
         self.limit_instr, self.instr, self.icount, self.block_hook = limit_instructions, 0, None, False
@@ -538,6 +542,7 @@ class Machine:
             return self._refuse("map_fixed", addr, size, "size 0, wraps or not 4 KiB aligned", LIBNX_BAD_INPUT)
         if self._in_window(addr, addr + size):   # the host's window: read-write and zeroed, src is not looked at
             self._zero_window(addr, size)
+            self.win_live.update(range(addr, addr + size, PAGE))
             return 0
         if src == 0 or src % PAGE:
             return self._refuse("map_fixed", addr, size, "src 0 or not 4 KiB aligned", LIBNX_BAD_INPUT)
@@ -558,6 +563,23 @@ class Machine:
         self.uc.mem_write(addr, content)
         self.mf_live[addr] = (size, src)
         self._merge_mapped()
+        return 0
+
+    def _plat_unmap_range(self, a):
+        """hostapi.h 37 UNMAP_RANGE (addr, size), checks in the header's order: size 0, addr+size wraps, addr or size not 4 KiB aligned ->
+        FNVNX_HE_BADINPUT; not wholly inside the host window, or a page that no map_fixed mapped -> FNVNX_HE_RANGE with nothing done (no partial
+        unmap); else every page returns to the window's free state. In this machine that state is what the window has from the start: read-write
+        and zero (VM_PROTECT's protection is dropped), so the next map_fixed of the range reads zero in any case."""
+        addr, size = a[:2]
+        if size == 0 or addr + size >= 1 << 64 or addr % PAGE or size % PAGE:
+            return self._refuse("unmap_range", addr, size, "size 0, wraps or not 4 KiB aligned", LIBNX_BAD_INPUT)
+        if not self._in_window(addr, addr + size):
+            return self._refuse("unmap_range", addr, size, "not wholly inside a window the host claimed at start", ERR_INVALID_CURRENT_MEMORY)
+        pages = range(addr, addr + size, PAGE)
+        if not all(p in self.win_live for p in pages):
+            return self._refuse("unmap_range", addr, size, "a page of the range was not mapped by map_fixed", ERR_INVALID_CURRENT_MEMORY)
+        self._zero_window(addr, size)
+        self.win_live.difference_update(pages)
         return 0
 
     def _merge_mapped(self):

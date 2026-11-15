@@ -120,7 +120,7 @@ Several native copies of one address: each is judged, the worst verdict stands.
 ```text
 gate_reach - certificates that a branch of a platform import body is unreachable (L1 CONTRACT, gate `reach`).
 
-    gate_reach.py --requests reach_requests.tsv --gpa gpa_names.tsv --image NAME=pe,ranges.tsv ... [--bridge bridge.tsv]
+    gate_reach.py --requests reach_requests.tsv --gpa gpa_names.tsv --image NAME=pe ... --facts DIR --facts-tree SHA [--bridge bridge.tsv]
                   [--out DIR/reach.tsv] [--facts-h reach_facts.h] [--facts-tsv reach.facts.tsv]
     gate_reach.py --objects <ld out>/inputs.rsp --requests reach_requests.tsv --certified reach.facts.tsv [--out reach.link.tsv]
 
@@ -146,9 +146,10 @@ Request kinds (the TSV `values` column; `note` is free text and is not read):
   closure_key  `dispatcher=NAME`  (dll `-`, name = the dispatcher symbol, arg_index 0): every value that reaches the dispatcher NAME (native
              fnvnx_dispatch, lifted fnvl_dispatch) is a key of its table.  Inputs: --dispatcher NAME=ENTRIES,CLOSURE,SOURCES (ENTRIES: dispgen's
              rows `addr<TAB>sym`; CLOSURE: dispgen --closure's rows, the first column a hex address; SOURCES: the code-address source closure fact
-             of the lift, rows `source<TAB>closed|open` for every source of CLOSURE_SOURCES) and --loadlib loadlib.tsv.  CERTIFIED iff (i) every
-             source is present and closed, (ii) every closure address is a key, (iii) no dynamic GetProcAddress / LoadLibrary site is open (the gpa
-             rows and loadlib.tsv).  While (iii) fails the fact is `measurement`: the verdict says so and it never counts as valid.
+             of the lift, rows `source<TAB>closed|open` for every source of CLOSURE_SOURCES).  CERTIFIED iff (i) every
+             source is present and closed, (ii) every closure address is a key, (iii) no dynamic GetProcAddress site is open (the gpa rows).
+             An undecided LoadLibrary* name is not open: its result is the may-load set plus NULL (gpa_names.py --mayload).
+             While (iii) fails the fact is `measurement`: the verdict says so and it never counts as valid.
 Numbers: C syntax (0x..., decimal), 32-bit.  A row that does not parse is an error (exit 2), never skipped.
 
 Fact ids: index (from 1) of the request in the canonical order (dll, name, arg_index, kind, canonical values) over the request list;
@@ -293,7 +294,7 @@ Items of the universe and their certification:
   seed                            certified iff `seed` equals, byte for byte, the include generate() makes from (sites, declared)
   writer:<unit>                   every product object that references a hive-writing API (role create or write); certified iff it is the
                                   declared seed unit: no other code of the product makes a hive key
-generate() is the port of platform/manifest/gen_registry_seed.py (L5): it refuses a declared row that no static read site reads, a malformed or
+generate() is the port of manifest/gen_registry_seed.py (L5): it refuses a declared row that no static read site reads, a malformed or
 duplicate row, a value not valid for its type, and a `{` that is not `{game_dir}`. Assumptions (ASM-051): regsites.tsv is complete over the exe and the
 modules (the registry-site pass reports what it cannot bind as dynamic, never skips); the seed unit and the registry implementation are the only
 code that reaches the hive, and the implementation creates no key by itself (the writers rule closes the entry points, not the internals).
@@ -304,7 +305,8 @@ code that reaches the hive, and the implementation creates no key by itself (the
 ```text
 iat - the value the loader writes in every import slot of an image (L1 CONTRACT, loader contract with L3 and L5).
 
-    iat.py --facts facts.json --bridge bridge.tsv [--module name.dll=exports.tsv ...] --out iat.tsv
+    iat.py --facts facts.json --bridge bridge.tsv --module name.dll=exports.tsv ... --module-imports name.dll=imports.tsv ... --out iat.tsv
+    iat.py --check ...   tool mode: no --module needed, never writes keys.tsv, import_keys.c or iat_data.tsv
 
 Image code pointers are not rewritten and `call [slot]` is an ordinary indirect call, so a slot must hold a 32-bit
 value the dispatcher of the lifted code maps to an entry.  Rule, total over the image's import directory:
@@ -322,6 +324,10 @@ Keys lie in [IMPORT_BASE, LIMIT), and SENTINEL (the return address under the fir
 Assumption, checked by the loader at start: no mapping of the process intersects [SENTINEL, LIMIT) - the range (ASM-020)
 is below the lowest address the 32-bit address space hands out (0x00200000), so a key is never a readable or
 executable address and never the address of an image, module, heap or stack.
+
+A stage that writes a product file (keys.tsv, import_keys.c, iat_data.tsv) passes --module and --module-imports for every
+image of modules.tsv; without --module it is a stage error, because the import set of every image is an input.  Only
+`--check` runs without them, and then no product file is written.
 
 A slot without a provider, an export the module does not have, a dll that is both a module and a bridge dll: the
 stage fails and lists them (gate `iat`: universe = slots, certified = slots with a value).  Output rows:
@@ -348,8 +354,15 @@ Rules fixed here (all three consumers use them through this file and importkey.c
              the same bridge.tsv in one link; the stage key of all three includes the SHA-256 of bridge.tsv, and
              keys.tsv and import_keys.c each carry it (`table_id`) so the gate can check they come from one input.
   data row   a bridge row of conv `data` whose native_symbol is a C identifier is a table row of kind data (value =
-             address of the native object).  A data row with native_symbol `-` has no native object: it is left out of
-             the table (the lookup returns 0 = the platform does not provide it) and counted in the stdout line.
+             address of the native object).  A data row with native_symbol `-` has no native object.  If an image of
+             modules.tsv imports it (an import slot of the exe's facts, or of any module's imports/<name>.tsv, by name or
+             by the ordinal of the row) it is a stage error naming dll!name: the slot would be unbound at start.  If no
+             image imports it, it stays outside the table (the lookup returns 0) and is counted in the stdout line.
+             The imports of every module are an input (--module-imports, one per --module, the same name set): a rule
+             over "every image" is not computed over a subset.
+  --data-out iat_data.tsv  `# table_id <sha256 of bridge.tsv>` (the table_id of keys.tsv and import_keys.c), then one row per data
+                        row of the table, in the order of import_keys.c: dll, name, ordinal, kind (`data`), native_symbol.
+                        The build fact L4's rule S4 reads; the address of each native_symbol is in the ELF symtab.
 ```
 
 ## contract/images.py
@@ -441,6 +454,26 @@ PE directories).  Assumptions (stated, not proven): P; the image's code ranges a
 callee preserves ebx/esi/edi/ebp (A1) and reads no register of an import call (the platform's calling convention); the
 platform implementation writes through a pointer argument only when ImportInfo says so (default: every pointer argument
 may be written); no code outside the images (the loader, the OS) writes L except through those imports.
+```
+
+## contract/modules.py
+
+```text
+modules - the module table of the guest (L1 CONTRACT), and, from the same PE reading, the facts the loader's start rules compare.
+
+TLS directory facts (tls.tsv, tls/<name>.bin; rule S5 of the loader, read by L4's bootstart.py).  Universe: the exe, then every image of
+modules.tsv whose has_tls column is 1 (data directory 9 has a nonzero size), sorted by name; so the DLL rows of tls.tsv number exactly the
+has_tls = 1 rows of modules.tsv.  The directory is IMAGE_TLS_DIRECTORY32 (StartAddressOfRawData, EndAddressOfRawData, AddressOfIndex,
+AddressOfCallBacks, SizeOfZeroFill, Characteristics), read raw: the four addresses are VAs at the PREFERRED base.
+Columns: name, load_index (as in modules.tsv; empty for the exe), start_va, end_va, index_va, callbacks_va (hex, raw), template_rva (start_va
+- preferred base, hex), template_size (end - start, decimal), zero_fill (SizeOfZeroFill, decimal), align (the IMAGE_SCN_ALIGN field of
+Characteristics, bits 20-23, the field itself: 0 stays 0), template_sha256, callbacks (;-list of the RVAs of the callback array up to its null word;
+empty when AddressOfCallBacks is 0 or the first word is 0), tls_slot (the TLS index the loader assigns: the exe 0, loader/src/start.c:301; then each static image with a directory 1, 2, ... in
+load_index order, loader/src/modules.c:273-278; empty for an image loaded on demand, modules.c:396), align_bytes (align as the loader applies it, loader/src/tls.c:38: 1 for 0, else
+1 << (align - 1)).  tls/<name>.bin holds the template bytes as the mapped image has them (file bytes,
+then zeros).  Red, never clamped: a directory shorter than 24 bytes or outside the image, end < start, a template outside the image, a callback
+array with no null terminator inside the image, a callback outside the image.  Written to OUT only: nothing game-derived enters the repository.
+Test: contract/tests/test_modules.py on synthetic PE images built by the test.
 ```
 
 ## contract/objfacts_merge.py
@@ -1375,6 +1408,7 @@ Rules (by symbol tables and file content, never by a name's text):
       not tracked, a tool writes them from tracked inputs (they are checked through the sources and headers they are generated from).
 Universe = defined global names per image + COMDAT signatures per image + units of product roots + tracked headers. Certified = items with
 no finding. No product root: units/headers still count (clauses (c'), (c'') are about the tree), (a) and (b) are empty.
+
 ## verify/gate_tlsmodel.py
 
 ```text
@@ -1545,6 +1579,9 @@ Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
                                          has this sha256
     {"kind": "contract", "path": PATH}     a contract table of the tree
     {"kind": "model", "path": PATH}        an independent model in the tree
+Dangling keys: every key of every tracked oracle.json that lies in a directory named `tests` (any directory of the tree, whether or not its
+tests are in the universe above) must name a tracked file of that directory; a key that does not is one uncertified item, `DIR/tests/oracle.json:KEY`,
+which also counts in the universe; an oracle.json that is not a JSON object with a `tests` object is one such item (`DIR/tests/oracle.json`).
 Rule. A test file is certified iff ALL hold:
   1. its DIR's oracle.json is well formed and holds exactly one entry for it (an entry without a test file, an unknown
      key or a wrong format is an error of the DIR: none of its tests is certified);
@@ -1572,6 +1609,8 @@ and compares the tracked files it opened with subject + references (verify/oracl
 ## verify/gate_assumptions.py
 
 ```text
+Perf debt: verify/PERFDEBT.json (fnvnx-perfdebt/1) lists switched-off fast paths, each with id, fast_path, rule, owner (a layer); the report gives
+perfdebt.open; first_frame true makes any open entry red.
 Gate "assumptions" (fnvnx-gate/1): every assumption the rules rest on is in one registry, with an id and a status
 (verify/VERDICT.md class 18); the accepted ones are ASM-001 to ASM-009.
     python3 -I gate_assumptions.py   run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/assumptions.json
@@ -1797,7 +1836,7 @@ Verdict green iff >= 1 gate, all green with certified == universe, and no stage 
 
 ```text
 objstub: decide on MACHINE CODE whether built AArch64 objects contain (T) a trap/abort path or (V) a vacuous function.
-    objstub.py check --terminators FILE [--constants FILE] [--facts FILE] [--os-layer OBJ]... [--wine-fixme FILE] [--cache DIR] [--jobs N] [--json OUT] OBJ...
+    objstub.py check --terminators FILE [--constants FILE] [--facts FILE] [--os-layer OBJ]... [--wine-fixme FILE] [--declared-machine FILE] [--fail SYMBOL] [--op-cover FILE --op-syntax FILE] [--cache DIR] [--jobs N] [--json OUT] OBJ...
         (the object id and the `unit` of a constants row are the path as given)
     objstub.py terminators --cc CC [--cflag F]... [--lang c|c++] --header H... -o FILE
 Inputs: ELF relocatable objects, ELF32 (ILP32; SHT_RELA with Elf32_Rela, R_AARCH64_P32_* kinds) or ELF64, AArch64, little endian. Decoder: ONE source, verify/a64access.cc (built with
@@ -1844,6 +1883,17 @@ process-exit imports, generated by the owner's manifest (one per import); a hand
 NOT PROVEN: that the pointer called is the host exit slot (the contract row says so); an infinite loop is class `nodeadlock`.
 `fnvnx_reach_violation` is also `reach-not-exit` if its definition does not end that way.
 
+(A) ASSUME. `fnvnx_assume_violation(asm_id, value)` (C linkage; noreturn; like `fnvnx_reach_violation` its definition ends in the call through the
+host exit slot on every path, else `assume-not-exit`) is the exit of a miss of a total domain that an ACCEPTED assumption (verify/ASSUMPTIONS.json
+status OWNER) declares. It is the second contract symbol of an assertion, not a trap path. Polarity holds by construction: the ONLY caller is a
+check function that a generator stage of the root's recipe writes (`fnvnx_dom_<name>[]` and `fnvnx_dom_<name>_check(v)`: hit returns v, miss
+calls ASSUME with the id the generator writes from its declared input); the generator is the one place the polarity is written and its test
+proves hit -> return, miss -> violation. A call is accepted iff, per site: (a) it lies in an object of a unit that a generator stage outputs
+(`recipe.generated_outputs`; else `assume-direct-call`: hand-written code never calls it); (b) w0 is a literal, an integer c (id `ASM-%03d` % c)
+or a pointer to a C string in a data section of the object (its text), and the record of that id has status OWNER (`assume-id-nonliteral`;
+`assume-id-not-owner`: REMOVE, missing or unknown). A reference that is not a call is `assume-address-taken`. The gate result holds
+"assume_calls": {sites, accepted, red, by_id} over all objects.
+
 (W) WINE FIXME. `fnvnx_wine_fixme(uint32_t id)` (C linkage, defined by the runtime's owner; writes one line and RETURNS) marks a body that
 does exactly what Wine 9.0's simplified implementation of an API does (nothing, or a fixed value). For V the BL of it is transparent: it
 is no evidence of a call (rule (i)), and after it x0-x18, x30, v0-v7, v16-v31 are unknown (written with unknown values), so a result
@@ -1866,6 +1916,13 @@ is not otherwise V is `wine-fixme-in-real-body`. A reference that is not a BL (a
 `wine-9.0:<path in the Wine source tree>:<function name>`: only the FORM is validated here; checking the reference against a pinned
 Wine 9.0 tree is the oracle class, not done. A row without a call site is no finding; the gate result counts call sites per id.
 
+(D) DECLARED MACHINE. `fnvnx_declared_machine(uint32_t id)` (C linkage, writes nothing, RETURNS) is the second citation function: every rule of (W)
+applies unchanged (BL transparent for V, constant id, exactly one id of ONE citation function on every path, result equals the row, otherwise
+V, no address taken), with the table verify/declared_machine.tsv (`--declared-machine`; read_declared_table): rows
+`id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`, fact and the source prefixes are read from the table's own header line (`# fact: ...; source: ...`: no-network, time-zone, registry, no-galaxy; win-doc, wine-9.0, galaxy-sdk), source `PREFIX:<page or path>:<function>` (the form only), kind/value as in (W). Findings carry the prefix `declared-machine-`. Stated limit: V cannot know which
+result is "success" of a network call, so a row saying success is not rejected; only a body that differs from its row is. A body that calls or
+stores is not V and needs no citation. The gate result counts call sites per id ("declared_machine").
+
 (R) REACH. A call (BL, or B as a tail call, with a CALL26/JUMP26 relocation) of the symbol `fnvnx_reach_violation` is not a T2 and not a
 T2-noreturn-tail; it is judged by the reach rule: w0 at the call must be a constant of objstub's own forward constant propagation (the
 V dataflow over a CFG where a call returns and clobbers the AAPCS64 caller-saved registers), else `reach-nonconstant`; the constant must be a
@@ -1874,8 +1931,40 @@ when the file does not exist); a fact with no call site in the universe is `reac
 taken, in code or in data) is `reach-address-taken`. Assumption: the decoder's write sets (LLVM defs) name every register an instruction (ASM-045)
 writes (a missed write of x0 would make a constant wrong).
 
+(T-B) TRAP BODY. The root's recipe declares its failure function, `error_abi: {"fail": SYMBOL, "kind": "noreturn"}` or `{"fail": SYMBOL, "kind": "flag",
+"flag": FIELD}` (`--fail --kind [--flag]`; the declaration is required of every root with table handlers). A call of the failure function is the failure edge.
+A function is TRAP-SHAPED (trap_candidate), by output effect alone, iff it calls exactly one symbol X (BL, or a tail B, with a branch relocation; X global,
+not a citation function, not REACH) and, with calls of X transparent, has no output effect: no store outside its own frame, no indirect branch, no other
+call, no system word, no atomic, and no returned constant or address (the result of x0 is not K or A); LOADS from any address and the arguments of the call
+are not effects (so `if (ctx->x) fail(ctx, ...)` does not escape: that path has no call of X, hence the body is not trap-shaped only for that reason, and
+`fail(ctx, ctx->x)` is). EVERY path of it must pass a call of X (every_path_calls). If X is the root's failure function the function is the finding
+`trap-body`: a body that only reports a failure is a stub. The analysis is per object and root-independent (the callee name is the fact, cached with the
+object); `judge` compares it with the root's symbol. The gate result holds "trap_body": the count.
+The DECLARATION is checked against the definition (error_abi_findings): the symbol is defined exactly once as a global function of the root
+(`error-abi-undefined`, `error-abi-multiple`); kind noreturn: no path of the definition returns (nr_ends/noreturn_set: no RET, BR, ERET, SVC, no fall-through,
+every path ends in a call through a pointer, or in a call that the compiler placed last of a function of the root that is itself noreturn, the least fixed
+point; REACH is in it by its BLR tail) else `error-abi-noreturn`; kind flag: the object's DWARF gives the structure the first parameter points to and the
+member FLAG, and on EVERY path the definition stores a nonzero constant at that offset through x0 as it was at entry (flag_events: no write of x0 before; the
+ILP32 `mov w0, w0` is no write), directly or through direct calls (BL, tail B) of functions of the same object with x0 unchanged (flag_holds, any depth,
+cycles do not count) else `error-abi-flag` (also without DWARF). STATED SUBSET: a callee in another object is not followed (red, the safe side). Both
+kinds read the code of the object: the compiler's code generation is ASM-001.
+
+(H) EMPTY HANDLERS BY RECORDS. A table of handlers selects functions by their address stored in a data section (an instruction table). A V function
+(empty or constant body) with no constants row is certified iff the root's generated records justify it (`--op-cover FILE --op-syntax FILE --table
+SLOT=SYMBOL:FIELD`; recipe `empty_handlers: {"cover": PATH, "syntax": PATH, "tables": {SLOT: {"symbol": TABLE, "field": FIELD}}}`, tracked files;
+read_handler_records, an unparseable record is an error): (1) the layout-derived join: the handler of entry k of the table of slot S is the target of the
+data relocation at sym + k*sizeof(entry) + offsetof(entry, FIELD), with sizeof and offsetof from the object's DWARF (the array variable SYM, its element
+structure); at least one (S, k) selects the function (a local function: in its own object's table; a global one: in any object's); a table with no DWARF
+layout, or an entry with no relocation (the declared slot cannot be resolved) is red, not skipped; (2) every selected (S, k) has a row of op_cover.tsv
+(`slot id opnum op class covering evidence`, key (slot, opnum = k)) and EVERY such row is justified: class a (the id is `sm:<key>` and every op_syntax
+row of the key is `ok` with 0 destination, 0 source, 0 other operands: the opcode has nothing to do), or class b (`covering` names symbols, each defined
+in the root and none a V body: another non-empty emitter carries the semantics); class c (the row is unreachable) is judged by the reach rule, so an
+empty body is not accepted for it (the body must be a call of fnvnx_reach_violation with a certificate); none and own justify nothing. Otherwise the
+finding V with the reason. The gate result holds "handler_justified": {a: n, b: n}. The records carry no handler name: a name copied from source text
+would need its own proof, the layout of the object is the proof.
+
 CACHE. Per object, CACHE/objstub/<key>.json, key = sha256 of (analysis version = objstub.py + a64access.cc, object sha256, os_layer
-flag, the terminators the object's own symbols mention): the analysis reads the terminator set only through the object's symbol names, so
+flag, the terminators the object's own symbols mention, the probe = the root's error_abi and empty_handlers.tables): the analysis reads the terminator set only through the object's symbol names, so
 the key is exact and a changed header does not invalidate objects that do not mention the new terminator. Constants rows and reach facts
 are applied after the analysis (judge), so they are not in the key. Objects without an entry run in --jobs processes.
 
@@ -2510,6 +2599,39 @@ regexes, the deleting-destructor byte patterns (`_FLAGS_TEST`), `delete_this`, `
 getter walker (GETTER_MAX), the constructor "last store wins" rule (exefacts records every vptr store in order), hard-coded
 TEXT/DATA ranges (the section table is used), the JSON cache keyed on mtime.
 ```
+
+## verify/stackuse.py
+
+```text
+stackuse - the stack growth a codegen flag causes, from the compiler's own reports (measurement, never a gate input).
+
+    python3 -I stackuse.py --base OBJECTS.json... --flag OBJECTS.json... [--json OUT]
+
+Inputs: the objects.json files of two builds of the same roots made with `recipe.py build --stack-usage 1` (RECIPE.md): BASE without the flag, FLAG with it.
+Every row of an objects.json names the unit's object (`object`) and its `-fstack-usage` report (`su`: `file:line:col:name TAB bytes TAB qualifier`).
+
+(a) Frame growth. A function is keyed by (unit, file:line:col, name), the compiler's own identity in both reports. Growth = FLAG bytes - BASE bytes. Reported: the
+    number of functions in both, the largest growth with its function, the sum of all growth, the functions in one report only, and the functions whose qualifier is
+    not `static` (dynamic frames have no byte bound: counted, never given a number).
+(b) The deepest native call chain. The call graph of the objects: an edge for every R_AARCH64_CALL26 / JUMP26 relocation, from the function symbol that contains the
+    relocated word to the function symbol the relocation names (a section symbol + addend resolves to the function at that offset); a function whose code contains a
+    BLR or BR instruction word (a superset of its indirect calls: a data word that looks like one only adds a report) has an INDIRECT call. A frame of a function is the
+    `.su` bytes of the function of that symbol name in that object (the C name is the symbol; a C++ name in the report is not the mangled symbol, so such a
+    function has no frame: it is counted as `noframe`). The depth of a function = its frame + the largest depth of its callees. A cycle, a function with an
+    indirect call, a dynamic frame, a callee with no definition among the objects (runtime library, other image) or a function with no frame makes the depth of
+    everything that reaches it `unbounded`, and it is listed; no value is guessed. Growth along the chain = the same walk over (FLAG - BASE) frame growth.
+Output: a JSON document and one summary line per number. Exit 0.
+```
+
+### Measurement of `-fstack-reuse=none` (head 8dc852415)
+
+`-fstack-reuse=none` is in `guest_compiler.json` `flags.semantics.common` and `PERFDEBT.json` `PD-STACK-REUSE` records the switch-off (owner L2: the restoring rule is per-variable slot ranges in the order plugin, judged by gate_order). It closes the class "a stack slot shared by variables of disjoint lifetimes" (93 class-d accesses). Measured with `recipe.py build --stack-usage 1` over the 7 guest roots (loader, lib/sha256, hostabi, shim, rt/guest, render/shaders/translator, platform; platform exits 2 on its known red unit, its built units are counted), base vs flag, then `stackuse.py`:
+
+- (a) 5000 functions in both builds, 0 dynamic frames. Largest growth +2528 B (platform crt/msvcrt_format.cpp, `put_float`: 2432 -> 4960). Sum of growth +30736 B. 16 functions only in base and 14 only in flag.
+- (b) Base: 5554 functions, 600 bounded, 4954 unbounded (noframe 3753 C++ names, indirect call 454, undefined callee 118, reaches 747, cycle 0). Flag: 5551 functions, 600 bounded. Deepest bounded chain 528 B (`ps_parser_to_token_array`). Largest chain growth over the bounded functions: 0.
+- (c) FalloutNV.exe sha256 89e7020487e80f20ddc92ea641c4433b2c6839a82f45a076e414d167d11dd0fe: PE32 SizeOfStackReserve 1048576, SizeOfStackCommit 4096 (the bytes stay outside the repository). The `dwStackSize` of the CreateThread/_beginthreadex call sites is not measured (argflow over exe facts, L3).
+
+These numbers are NOT a bound of the native stack depth per thread: no such bound exists with or without the flag (4954 of 5554 functions unbounded; recursion through indirect or C++ calls is not excluded). The class "native stack depth per thread" is reported to the orchestrator as a run-time failure class without a gate.
 
 ## verify/gate_guestlink.py
 

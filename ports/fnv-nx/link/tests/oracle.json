@@ -148,6 +148,19 @@
     "ports/fnv-nx/toolchain/order/fnvnx_order.cc"
    ]
   },
+  "test_order_tags.py": {
+   "references": [
+    {
+     "anchor": "L156-L156",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/VERDICT.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/a64order.py",
+    "ports/fnv-nx/link/gate_order.py"
+   ]
+  },
   "test_thisadj.py": {
    "references": [
     {

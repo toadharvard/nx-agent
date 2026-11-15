@@ -29,7 +29,8 @@ extern "C" {
 /* ---- process */
 void os_debug_print(const char *s);         /* one line to the debug log (stderr / svcOutputDebugString) */
 void os_exit_process(int code) __attribute__((noreturn));
-unsigned os_cpu_count(void);                /* cores the game may use */
+unsigned os_cpu_count(void);                /* the declared processor count (FNVNX_NPROC) */
+uint32_t os_cpu_mask(void);                 /* the declared affinity mask (FNVNX_APP_CORES) */
 uint32_t os_process_id(void);
 void os_memory_info(uint64_t *total_phys, uint64_t *avail_phys);
 uint32_t os_random32(void);                 /* non-cryptographic quality is enough */
@@ -70,7 +71,7 @@ typedef void (*os_thread_fn)(void *arg);
  * its start and after each infinite wait, off before such a wait and at its end (platform/win32 thread.cpp,
  * sync.cpp). Not passed on to os_thread_create. */
 #define OS_THREAD_BOOST 0x10000
-#define OS_ROLE_AUDIO 6   /* FNVNX_ROLE_AUDIO (toolchain/include/fnvnx/hostapi.h): the platform's audio pump */
+#define OS_ROLE_AUDIO 6   /* FNVNX_ROLE_AUDIO (hostabi/include/fnvnx/placement.h): the platform's audio pump */
 os_thread *os_thread_create(os_thread_fn fn, void *arg, size_t stack_size, int prio, int cpu);
 /* CPU boost for loading: 1 = fast load (Switch: appletSetCpuBoostMode FastLoad, CPU 1785 MHz, GPU at its minimum),
  * 0 = normal. The host may refuse (platform config boost_loading=0); a no-op on other backends. */
@@ -79,14 +80,19 @@ void os_cpu_boost(int fast_load);
  * Switch's error applet; a no-op where the platform has none (the caller logs the text). */
 void os_show_message(const char *caption, const char *text);
 
-/* Text entry through the system software keyboard (docs/AUDIO_INPUT.md "Text entry"); the host service TEXT_ENTRY (hostapi.h)
- * (toolchain/include/fnvnx/hostapi.h), same arguments. Opens the applet for at most max_len UTF-16 units (1..500) starting with
- * init[0..init_n) (init NULL: empty). Returns 1: entered (out[0..*n) holds the text, out[*n] = 0, *n <= max_len; out has room for
- * max_len + 1 units), 0: the user cancelled (out and *n untouched), <0: -FNVNX_HE_BADINPUT (max_len 0 or above 500, out or n NULL)
- * or -(the applet's Horizon result): the caller treats it as fatal. The backend does no validation of the text: that is the caller's,
- * which calls again with init = the text it refused. The guest backend is platform/guest/os_guest.c; the host test backend
- * (os_posix.c) plays a script the test fills, one entry per applet round, cut to max_len as the applet's field would. */
-int os_text_entry(unsigned max_len, const uint16_t *init, size_t init_n, uint16_t *out, size_t *n);
+/* Text entry through the system software keyboard (docs/AUDIO_INPUT.md "Text entry"); the host service TEXT_ENTRY (hostapi.h).
+ * struct fnvnx_text is the one text type of the call: n units of u. Invariant: n <= FNVNX_SWKBD_MAX_LEN, and u[n] = 0 (u has the
+ * extra unit the service writes the terminator into). Only os_text_entry writes it, and the applet is configured with the max
+ * length FNVNX_SWKBD_MAX_LEN (1..500, a constant), so the invariant holds by construction; a contract the types carry has no
+ * run-time check: the argument values the service refuses (max_len 0 or above 500, out or n NULL) cannot be expressed. */
+#define FNVNX_SWKBD_MAX_LEN 64   /* units per entry */
+struct fnvnx_text { uint16_t u[FNVNX_SWKBD_MAX_LEN + 1]; uint32_t n; };
+/* Opens the applet starting with *init (NULL: empty). Returns 1: entered (*out holds the text), 0: the user cancelled (*out
+ * untouched), <0: -(the applet's Horizon result): the caller logs it and the guest sees no text, as for a cancel. init may not
+ * alias out. The backend does no validation of the text: that is the caller's, which calls again with init = the text it refused.
+ * The guest backend is platform/guest/os_guest.c; the host test backend (os_posix.c) plays a script the test fills, one entry per
+ * applet round, cut to FNVNX_SWKBD_MAX_LEN as the applet's field would. */
+int os_text_entry(const struct fnvnx_text *init, struct fnvnx_text *out);
 /* host test backend only (os_posix.c): the script of what the user types, one entry per applet round; an empty script is a user who
  * closes the applet. os_text_script_calls: the rounds since the last reset; os_text_script_init: the init of the last round copied
  * into buf (cap units), its length, or (size_t)-1 when it was NULL. */

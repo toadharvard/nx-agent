@@ -433,9 +433,10 @@ struct Control final : IMediaControl_ {
     HR GetState(long ms, long *state) override;
     HR RenderFile(const WCH *) override;
     /* Wine 9.0's quartz returns S_OK from all three after a FIXME and leaves the out pointer alone */
-    HR AddSourceFilter(const WCH *, void **) override { fnvnx_wine_fixme(200); return S_OK_; }
-    HR get_FilterCollection(void **) override { fnvnx_wine_fixme(201); return S_OK_; }
-    HR get_RegFilterCollection(void **) override { fnvnx_wine_fixme(202); return S_OK_; }
+    /* the three Wine 9.0 bodies are never inlined: a body that holds a fnvnx_wine_fixme call is its own function (one class per body), not part of its callers (inv_control) */
+    __attribute__((noinline)) HR AddSourceFilter(const WCH *, void **) override { fnvnx_wine_fixme(200); return S_OK_; }
+    __attribute__((noinline)) HR get_FilterCollection(void **) override { fnvnx_wine_fixme(201); return S_OK_; }
+    __attribute__((noinline)) HR get_RegFilterCollection(void **) override { fnvnx_wine_fixme(202); return S_OK_; }
     HR StopWhenReady() override;
 };
 struct Event final : IMediaEventEx_ {
@@ -641,7 +642,7 @@ struct Graph final : IFilterGraph2_, GraphCore {
     {
         control.g = event.g = sink.g = mfilter.g = seeking.g = position.g = audio.g = site_if.g = version_if.g = vwin.g = bvid.g = this;
         evt = CreateEventA(nullptr, TRUE, FALSE, nullptr);
-        clk_device_watch(evt, 1);   /* the pump signals it: a wait on it runs the pump on virtual time */
+        VT_DEVICE_WATCH(evt, 1);   /* the pump signals it: a wait on it runs the pump on virtual time */
     }
     ~Graph();
     HR QueryInterface(const void *iid, void **out) override;
@@ -2007,7 +2008,7 @@ Graph::~Graph()
         if (queue[i].keep) queue[i].keep->Release();
     for (size_t i = 0; i < lent.n; i++)
         if (lent[i].keep) lent[i].keep->Release();
-    if (evt) { clk_device_watch(evt, 0); CloseHandle(evt); }
+    if (evt) { VT_DEVICE_WATCH(evt, 0); CloseHandle(evt); }
 }
 
 /* ---- IDispatch members: each interface's vtable behaviour behind a name and a VARIANT convention */

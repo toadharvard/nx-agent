@@ -80,20 +80,20 @@ static bool writable_file_base(DWORD prot) { return prot == PAGE_READWRITE || pr
 /* the sections that are one host section object: kinds (1) and (2) of the header comment */
 static bool is_shared(const struct fm_spec *sp) { return !sp->file || (writable_file_base(sp->prot) && !sp->image); }
 
-uint32_t fm_backing_reach(const struct fm_spec *sp)
+enum w32_reach_kind fm_backing_reach(const struct fm_spec *sp)
 {
     if (is_shared(sp))
-        return sp->size > FNVNX_SEC_MAX_SIZE ? (sp->file ? REACH_KERNEL32_CreateFileMappingA_PROT : REACH_KERNEL32_CreateFileMappingA_HFILE) : 0;
-    return sp->writers ? REACH_KERNEL32_CreateFileMappingA_WRITER : 0;
+        return sp->size > FNVNX_SEC_MAX_SIZE ? (sp->file ? W32R_CFM_PROT : W32R_CFM_HFILE) : W32R_NONE;
+    return sp->writers ? W32R_CFM_WRITER : W32R_NONE;
 }
 
 int fm_backing_alias(const struct fm_backing *b) { return b->alias; }
 
-uint32_t fm_view_reach(const struct fm_backing *b, int os_prot, int priv)
+enum w32_reach_kind fm_view_reach(const struct fm_backing *b, int os_prot, int priv)
 {
     if (!b->sec || ((os_prot & OS_VM_WRITE) && !priv))
-        return 0;
-    return b->alias == FM_ALIAS_FILE ? REACH_KERNEL32_CreateFileMappingA_PROT : REACH_KERNEL32_CreateFileMappingA_HFILE;
+        return W32R_NONE;
+    return b->alias == FM_ALIAS_FILE ? W32R_CFM_PROT : W32R_CFM_HFILE;
 }
 
 /* the Win32 error of a section service error (-code as the wrappers return it) */

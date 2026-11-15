@@ -7,9 +7,9 @@ stated in bootpath.py). BootPath(root) creates <root>/switch/fnv, as the device 
 
 Host slots whose effect is not modelled (the observable contract is kept; see HOST SLOTS in the stage report):
  output_debug_string (kept in .debug, no sink),
- thread_free, thread_set_priority / thread_set_cpu (recorded in .placement only, no placement effect),
+ thread_free, thread_set_priority / thread_set_cpu (recorded in .placement as ideal and mask, checked as hostapi.h says; THREAD_CPU answers the ideal),
  wall_time_us (fixed epoch + virtual ns), random64 (deterministic splitmix64, seed 0),
- memory_info (4 GiB / 3 GiB), cpu_count (3), audio_open / audio_submit / audio_close (frames counted, samples
+ memory_info (4 GiB / 3 GiB), audio_open / audio_submit / audio_close (frames counted, samples
  dropped, submit sleeps the period in virtual time), pad_read (never connected, zeros), pad_vibrate, input_poll
  (no events), module 11 CPU_BOOST (recorded in .boosts, returns 0: no platform config), MESSAGE (caption and text recorded in
  .messages, returns 0: the dialog is closed at once). The rest of module 11 (thread_activity, vm_*) is the machine's.
@@ -82,10 +82,37 @@ class Services:
         return self.m.clock.FREQ
 
     # -- v2 threads
+    def _cpu_spec(self, spec, cur=None):
+        """the thread_create / thread_set_cpu cpu argument (hostapi.h) -> (ideal, mask), or None when it is refused (FNVNX_HE_BADINPUT).
+        thread_create (cur None): FNVNX_CPU_SPEC(ideal, mask) only, ideal in mask, mask within the application cores. thread_set_cpu
+        (cur = (ideal, mask)): additionally a plain core 0..63 (that core only); FNVNX_CPU_KEEP ideal and mask 0 keep the current value; the
+        ideal core joins the mask; the result's mask must lie within the application cores."""
+        app = self.m.app_cores
+        if spec >> 63 == 0:   # not a spec: one core
+            if cur is None or spec > 63 or spec >= 32 or not app >> spec & 1:
+                return None
+            return spec, 1 << spec
+        if spec >> 40 & 0x7FFFFF:
+            return None
+        ideal, mask = spec & 0xFF, spec >> 8 & 0xFFFFFFFF
+        if cur is None:
+            return (ideal, mask) if ideal < 32 and mask >> ideal & 1 and not mask & ~app else None
+        ideal = cur[0] if ideal == bootmachine.FNVNX_CPU_KEEP else ideal
+        mask = mask or cur[1]
+        if ideal >= 32:
+            return None
+        mask |= 1 << ideal
+        return (ideal, mask) if not mask & ~app else None
+
     def h_thread_create(self, entry, arg, stack, prio, cpu, *_):
+        pl = self._cpu_spec(cpu)
+        if pl is None:   # refused: nothing is created, the id is 0
+            self.m._event("thread_create-refused", cpu=cpu, why="cpu is not FNVNX_CPU_SPEC(ideal, mask) with ideal in mask within the "
+                          "application cores", result=bootmachine.LIBNX_BAD_INPUT)
+            return 0
         h = self.m.thread_create(entry, arg)
         if h:
-            self.placement[self.m.ids.get("thread", h).tid] = {"prio": prio, "cpu": cpu}
+            self.placement[self.m.ids.get("thread", h).tid] = {"prio": prio, "ideal": pl[0], "mask": pl[1]}
         return h
 
     def h_thread_start(self, h, *_):
@@ -114,7 +141,10 @@ class Services:
         t = self.m.cur if h == 0 else self.m.ids.get("thread", h)
         if isinstance(t, bootmachine.SelfRecord):
             t = t.t
-        return None if t is None else self.placement.setdefault(t.tid, {})
+        if t is None:
+            return None   # the main thread starts at FNVNX_DEFAULT_CORE, mask 1 << FNVNX_DEFAULT_CORE; every other thread was placed at create
+        d = bootmachine.FNVNX_DEFAULT_CORE
+        return self.placement.setdefault(t.tid, {"ideal": d, "mask": 1 << d})
 
     def h_thread_set_priority(self, h, prio, *_):
         p = self._placed(h)
@@ -129,8 +159,15 @@ class Services:
             return HE_NOTFOUND
         if spec >> 40 & 0x7FFFFF == 0x7FFFFF:   # a negative spec (bits 40..62 set): nothing changed
             return 0
-        p["cpu"] = spec
+        pl = self._cpu_spec(spec, (p["ideal"], p["mask"]))
+        if pl is None:
+            return self.m._refuse("thread_set_cpu", h, spec, "not a placement within the application cores", HE_BADINPUT)
+        p["ideal"], p["mask"] = pl
         return 0
+
+    def plat_thread_cpu(self, args):
+        """FNVNX_PLAT_THREAD_CPU() -> the calling thread's current ideal core (this machine's deterministic thread model; hostapi.h)"""
+        return self._placed(0)["ideal"]
 
     def h_wait_on_address(self, addr, expected, timeout, *_):
         if addr % 4:
@@ -166,9 +203,6 @@ class Services:
     def h_memory_info(self, out, *_):
         self.m.uc.mem_write(out, struct.pack("<QQ", 4 << 30, 3 << 30))
         return 0
-
-    def h_cpu_count(self, *_):
-        return 3
 
     # -- v2 files
     def fs(self, fn, call, sd=None):

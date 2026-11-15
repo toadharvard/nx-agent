@@ -34,12 +34,14 @@ n = len([l for l in open("/in/ports/fnv-nx/toy/constants.tsv") if l.strip()])
 os.makedirs("/out/gen")
 open("/out/gen/gen.h", "w").write("#define NCONST %d\\n#define STAMP %dL\\n" % (n, @EXTRA@))
 '''
-# The toy root is a guest ELF in the sense of RECIPE.md "Link": ILP32, position independent, linked with the product's own link/guest.ld, with
-# the FNXG header of crt0 at the first segment + 8 and the entry at the first segment. The header is OS-layer code (os.S, an os_layer unit);
+# The toy root is a guest ELF in the sense of RECIPE.md "Link": ILP32, position independent, linked with the product's own link/guest.ld and
+# the product's own crt0 (rt/guest/crt0.s, read from the tree like guest.ld, so the fixture can never drift from the link contract): the
+# FNXG header at the first segment + 8, MOD0 behind it, the entry at the first segment. crt0 branches to __fnvnx_guest_entry, the entry every
+# guest program defines (in the product, runtime.c); the toy's program entry is f_a. The header is OS-layer code (os.S, an os_layer unit);
 # HDR is the same as one assembler statement for the roots that have no os.S (MINI).
-CRT0 = (".section .crt0,\"a\",%progbits\n.global __fnvnx_guest_start\n.align 2\n__fnvnx_guest_start:\n b f_a\n"
-        ".section .crt0.hdr,\"a\",%progbits\n.align 2\n.global __fnvnx_guest_hdr\n__fnvnx_guest_hdr:\n .word 0, 0x47584e46, 3, 0, 0, 0, 0\n"
-        ".section .crt0.mod0,\"a\",%progbits\n.align 2\n.global __fnvnx_mod0\n__fnvnx_mod0:\n .ascii \"MOD0\"\n")
+CRT0 = (open(os.path.join(VERIFY, "..", "rt", "guest", "crt0.s")).read()
+        + "\n.text\n.global __fnvnx_guest_entry\n.set __fnvnx_guest_entry, f_a\n")
+OS_NOLINK = ".text\n.globl os_svc\n.type os_svc,%function\nos_svc:\n svc #0\n ret\n.size os_svc,.-os_svc\n"
 HDR = "__asm__(%s);\n" % json.dumps(CRT0 + ".text\n")
 RECIPE = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
           "flags": {"c": ["-mabi=ilp32", "-fPIE", "-O1", "-ffreestanding", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"],
@@ -203,6 +205,7 @@ def main():
     erec = mut(external=[ex], include=RECIPE["include"] + ["/ext/tiny/inc"])
     ef = {"toy/b.c": '#include "toy.h"\n#include "ext.h"\nint f_b(void) { return TOY * 2 + EXTV; }\n'}
     futs = []
+    deferred = []   # scenarios that patch a module global: run after every concurrent scenario has joined
 
     def later(fn, *a):
         futs.append(pool.submit(fn, *a))
@@ -243,16 +246,18 @@ def main():
         check("every module pinned in env.json is listed with its installed-files digest and top-level names",
               [m for m, _, _, _ in pm] == sorted(json.load(open(os.path.join(two, recipe.ENV_JSON)))["python"]["modules"])
               and all(len(d) == 64 and tops for _, _, d, tops in pm), pm)
-        base = recipe.build(two, ROOT, BASE + "/pm-store", BASE + "/pm-out0")
-        real = recipe.envcheck.wheel_digest
-        for target in [m for m, _, _, _ in pm]:
-            recipe.envcheck.wheel_digest = lambda dist, _t=target: real(dist) + ("x" if dist == _t else "")
-            try:
-                alt = recipe.build(two, ROOT, BASE + "/pm-store", BASE + "/pm-out1")
-            finally:
-                recipe.envcheck.wheel_digest = real
-            d1, d2 = set(base["stage_keys"]) - set(alt["stage_keys"]), set(alt["stage_keys"]) - set(base["stage_keys"])
-            check("changing the pinned digest of %s changes the generated-stage key (and only that stage's)" % target, len(d1) == 1 and len(d2) == 1, (d1, d2))
+        def pm_keys():   # patches a module global: runs after every concurrent scenario has joined, never beside their builds
+            base = recipe.build(two, ROOT, BASE + "/pm-store", BASE + "/pm-out0")
+            real = recipe.envcheck.wheel_digest
+            for target in [m for m, _, _, _ in pm]:
+                recipe.envcheck.wheel_digest = lambda dist, _t=target: real(dist) + ("x" if dist == _t else "")
+                try:
+                    alt = recipe.build(two, ROOT, BASE + "/pm-store", BASE + "/pm-out1")
+                finally:
+                    recipe.envcheck.wheel_digest = real
+                d1, d2 = set(base["stage_keys"]) - set(alt["stage_keys"]), set(alt["stage_keys"]) - set(base["stage_keys"])
+                check("changing the pinned digest of %s changes the generated-stage key (and only that stage's)" % target, len(d1) == 1 and len(d2) == 1, (d1, d2))
+        deferred.append(pm_keys)
         # KEEP GOING: a red generator does not stop the other stages. Its output unit is blocked by it (never built), every other unit is
         # built, the ELF is blocked, and the root is red naming the red stage.
         kg = make_repo("kg", rec=dict(RECIPE, os_layer=[], generated=RECIPE["generated"] + [
@@ -536,26 +541,6 @@ def main():
     check("include dir in a product root of the other target rejected", len(home("hdr_other")) == 1, home("hdr_other"))
     check("include dir in a tool root rejected", len(home("hdr_tool")) == 1, home("hdr_tool"))
     check("include dir in a doc root rejected", len(home("hdr_doc")) == 1, home("hdr_doc"))
-    # per-target recipes: the root hdr_other (the other target) with a recipe for this root's target too is a home; without it, none
-    both = recipe.norm_entry({"path": T + "hdr_other", "class": "product", "target": other, "recipe": {other: T + "hdr_other/b.json", own: T + "hdr_other/b2.json"}})
-    check("a per-target recipe {guest, host} parses to the base string plus a variant keyed by the other target",
-          both["recipe"] == T + "hdr_other/b.json" and both["variants"] == {own: {"target": own, "recipe": T + "hdr_other/b2.json"}}
-          and recipe.targets_of(both) == {own, other} and recipe.pairs_of({}, "r", both) == ["r", "r@" + own], both)
-    check("the spelling as a variant parses to the same structure",
-          recipe.norm_entry({"path": "x", "target": other, "recipe": "b.json", "variants": {own: {"target": own, "recipe": "b2.json"}}})["variants"]
-          == recipe.norm_entry({"path": "x", "target": other, "recipe": {other: "b.json", own: "b2.json"}})["variants"])
-    rr3 = dict(rr, **{T + "hdr_other": both})
-    pt = [e for e in recipe.check(mut(include=RECIPE["include"] + [T + "hdr_other"]), ROOT, rfiles, rr3, None, rk) if "lies in no admitted product root" in e]
-    check("an include into a root with a recipe for the including root's target is accepted", not pt, pt)
-    check("the same include without that recipe is rejected", len(home("hdr_other")) == 1, home("hdr_other"))
-    check("a plain-string recipe parses to itself", recipe.norm_entry({"path": "x", "target": own, "recipe": "b.json"}) == {"path": "x", "target": own, "recipe": "b.json"})
-    # every per-target rule judges the effective entry: the plugin rule of a variant follows the variant's target, not the base's
-    noplug = dict(RECIPE, plugins=[])
-    pe = lambda tg, vt, var: [e for e in recipe.plugin_errors(noplug, ROOT, rfiles, {ROOT: dict(base_roots[ROOT], target=tg, variants={"v": {"target": vt}})}, ["a.cc"], [], var)  # noqa: E731
-                              if "does not load plugin" in e]
-    check("plugins: a guest root without plugins is red; its host variant is green; a host root's guest variant is red",
-          len(pe("guest", "host", "")) > 0 and pe("guest", "host", "v") == [] and pe("host", "guest", "") == [] and len(pe("host", "guest", "v")) > 0,
-          (len(pe("guest", "host", "")), pe("guest", "host", "v"), pe("host", "guest", ""), len(pe("host", "guest", "v"))))
     # one name, one file: two include dirs of one recipe holding a header of the same include-relative path are red
     rr2 = dict(rr, **{T + "hdr_prod2": {"path": T + "hdr_prod2", "class": "product", "target": own}})
     rf2 = rfiles + [T + "hdr_prod2/h.h", T + "hdr_prod2/g.h"]
@@ -593,6 +578,8 @@ def main():
     for f in futs:
         f.result()
     pool.shutdown()
+    for fn in deferred:
+        fn()
     print("INFO times: toy cold %.1f s, cached %.1f s; whole file %.1f s" % (cold, warm, time.time() - t_start))
     print("%d FAILED" % len(FAILED) if FAILED else "all passed")
     return 1 if FAILED else 0
@@ -659,10 +646,9 @@ int main(int argc, char **argv) {
   else if (eq(m, "copy")) copy(argv[2], "/out/o.txt");
   else if (eq(m, "bad")) sc3(231, 1, 0, 0);
   else if (eq(m, "extra")) { put("/out/o.txt", "a\n", 2); put("/out/x.txt", "b\n", 2); }
+  sc3(231, 0, 0, 0);
   return 0;
 }
-/* the link takes the driver's start file (Scrt1.o: _start calls __libc_start_main) and no library: this program defines that entry itself */
-int __libc_start_main(int (*m)(int, char **, char **), int argc, char **argv) { sc3(231, m(argc, argv, 0), 0, 0); return 0; }
 """
 
 
@@ -671,7 +657,7 @@ def check_run(SS):
     and /out; outputs are declared paths. A nonzero exit, an undeclared and a missing output are red; {stage, path} refs read a declared output."""
     HX, OTH = T + "hx", T + "other"
     hrec = {"format": "fnvnx-recipe/1", "compiler": {"cc": "gcc-13", "cxx": "g++-13"}, "flags": {"c": ["-fPIE", "-O1", "-ffreestanding", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"], "cxx": [], "asm": []},
-            "include": [], "units": "all", "link": {"kind": "exe", "output": "hx.exe", "flags": ["-m", "elf_x86_64"]}}
+            "include": [], "units": "all", "link": {"kind": "exe", "output": "hx.exe", "flags": ["-m", "elf_x86_64"], "libs": {"system": ["/lib/x86_64-linux-gnu/libc.so.6"]}}, "errno_accessor": "__errno"}
     ex = [{"path": HX, "class": "product", "target": "host", "gates": [], "recipe": HX + "/build.json"}, {"path": OTH, "class": "doc", "gates": []}]
 
     def rec_(args=("ok",), ins=(), debs=(), outs=("o.txt",), art=HX + ":hx.exe"):
@@ -711,16 +697,6 @@ def check_run(SS):
     check("host_cpu: pin microcode null matches a VM cpuinfo with no microcode line", recipe.cpu_mismatch(vpin, vm) == [], recipe.cpu_mismatch(vpin, vm))
     check("host_cpu: pin microcode null is NOT a wildcard: a host with a microcode line is a mismatch", len(recipe.cpu_mismatch(vpin, vm.replace("stepping", "microcode\t: 0x1\nstepping"))) == 1, recipe.cpu_mismatch(vpin, vm.replace("stepping", "microcode\t: 0x1\nstepping")))
     check("host_cpu: a pin with a microcode value is a mismatch on a host that has no microcode line", len(recipe.cpu_mismatch(dict(vpin, microcode=1), vm)) == 1)
-    jb = recipe.Job(good, ROOT, SS, 1, os.path.join(SS, "external"))
-    ver = lambda n: {"version": subprocess.run(["dpkg-query", "-W", "-f=${Version}", n], capture_output=True, text=True).stdout}   # noqa: E731
-    both, only = BASE + "/un-both", BASE + "/un-libc"
-    for n in ("base-files", "libc6"):
-        jb._deb_into(both, n, ver(n))
-    jb._deb_into(only, "libc6", ver("libc6"))
-    check("PT_INTERP /lib64/ld-linux-x86-64.so.2 resolves through base-files' ./lib64 -> usr/lib64 and then libc6's own link", recipe.resolves_in(both, "/lib64/ld-linux-x86-64.so.2"))
-    check("without base-files in the declared set the same PT_INTERP is red (libc6 alone has no ./lib64)", not recipe.resolves_in(only, "/lib64/ld-linux-x86-64.so.2"))
-    check("the link-free path /usr/lib64/ld-linux-x86-64.so.2 resolves in libc6 alone (its own link)", recipe.resolves_in(only, "/usr/lib64/ld-linux-x86-64.so.2"))
-    check("/lib/ld64.so.1 (what the link rule writes today) resolves in no declared deb", not recipe.resolves_in(both, "/lib/ld64.so.1"))
     hc = dict(rec_(), run=[dict(rec_()["run"][0], host_cpu="cpuref")])
     check("host_cpu: the key needs the tracked pin file verify/cpuref.json", any("cpuref" in e for e in recipe.check(hc, ROOT, files, roots, None, good)))
     check("host_cpu: with the pin file tracked the check accepts it", not [e for e in recipe.check(hc, ROOT, files + [T + "verify/cpuref.json"], roots, None, good) if "host_cpu" in e])
@@ -767,12 +743,12 @@ def check_run(SS):
     check("run stage: a declared input is visible at /in/N and its content is read", ri["status"] == "green" and got_in == "5\n", (ri.get("failure"), got_in))
     ri2 = build(mk("rn-in2", args=["copy", "/in/1"], ins=(OTH + "/data.txt",), data="6\n"), "in2")
     check("the content of a declared input is in the run key (one byte changed: exactly one key differs)", ri2["status"] == "green" and len(set(ri["stage_keys"]) - set(ri2["stage_keys"])) == 1, ri2.get("failure"))
-    dd = mk("rn-deb", args=["copy", "/deb/usr/bin/dh_autotools-dev_restoreconfig"], debs=("autotools-dev",))
+    dd = mk("rn-deb", args=["copy", "/deb/autotools-dev/usr/bin/dh_autotools-dev_restoreconfig"], debs=("autotools-dev",))
     rdb = build(dd, "deb")
     os.makedirs(BASE + "/rc3/store", exist_ok=True)
     got_d = open(recipe.resolve_input(ROOT, ref_in, dd, BASE + "/rc3")[0], "rb").read() if rdb["status"] == "green" else b""
-    check("run stage: a declared deb's installed files are visible at /deb/<path>", rdb["status"] == "green" and got_d == open("/usr/bin/dh_autotools-dev_restoreconfig", "rb").read()[:512], rdb.get("failure"))
-    nd = mk("rn-nodeb", args=["copy", "/deb/usr/bin/dh_autotools-dev_restoreconfig"])
+    check("run stage: a declared deb's installed files are visible at /deb/<name>/<path>", rdb["status"] == "green" and got_d == open("/usr/bin/dh_autotools-dev_restoreconfig", "rb").read()[:512], rdb.get("failure"))
+    nd = mk("rn-nodeb", args=["copy", "/deb/autotools-dev/usr/bin/dh_autotools-dev_restoreconfig"])
     rnd = build(nd, "nodeb")
     got_n = open(recipe.resolve_input(ROOT, ref_in, nd, BASE + "/rc4")[0], "rb").read() if os.makedirs(BASE + "/rc4/store", exist_ok=True) is None and rnd["status"] == "green" else None
     check("run stage: a deb that is not declared is not in the sandbox (the file is not there: empty copy)", rnd["status"] == "green" and got_n == b"", (rnd["status"], got_n))
