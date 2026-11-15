@@ -3617,10 +3617,31 @@ def need_store(opt):
     return opt["--store"]
 
 
+def norm_root(repo, spec):
+    """The one normalization of a --root argument ROOT[@VARIANT]: an absolute path inside the checkout REPO becomes the relative root id; a path outside it is
+    RecipeError "root must be inside the checkout: PATH"; a spec that is not an admitted root with a recipe is RecipeError (never an uncaught KeyError)."""
+    if not isinstance(spec, str) or not spec:
+        raise RecipeError(["missing --root ROOT"])
+    path, sep, var = spec.partition("@")
+    if os.path.isabs(path):
+        top = os.path.realpath(repo)
+        rel = os.path.relpath(os.path.realpath(path), top)
+        if rel == ".." or rel.startswith("../") or rel == ".":
+            raise RecipeError(["root must be inside the checkout: %s" % path])
+        path = rel
+    path = os.path.normpath(path)
+    ent = load_admit(repo).get(path)
+    if not (isinstance(ent, dict) and ent.get("recipe")):
+        raise RecipeError(["root %s is not an admitted root with a recipe" % path])
+    return path + sep + var
+
+
 def main(argv):
     opt = dict(zip(argv[1::2], argv[2::2]))
     try:
         repo = "."
+        if "--root" in opt:
+            opt["--root"] = norm_root(repo, opt["--root"])
         if argv[:1] == ["store-merge"]:   # recipe store-merge SRC [--store DST]: --store DST is required
             dst = need_store(dict(zip(argv[2::2], argv[3::2])))
             print("store-merge: " + " ".join("%s %d" % kv for kv in sorted(store_merge(argv[1], dst).items())))
@@ -3633,9 +3654,9 @@ def main(argv):
                 print("store-import: " + " ".join("%s %d" % kv for kv in sorted(store_import(argv[1], st, argv[2]).items())))
             return 0
         if argv[:1] == ["timing"]:     # recipe timing --root R[@VARIANT] --store S [--ext E]: builds (every stage a hit when it was built before) and sums the sidecars
-            o = dict(zip(argv[1::2], argv[2::2]))
+            o = dict(zip(argv[1::2], argv[2::2]), **{"--root": opt["--root"]})
             with tempfile.TemporaryDirectory() as td:
-                res = build(repo, o["--root"], o["--store"], os.path.join(td, "out"), int(o.get("--jobs", 4)), o.get("--ext"))
+                res = build(repo, o["--root"], need_store(o), os.path.join(td, "out"), int(o.get("--jobs", 4)), o.get("--ext"))
             if res["status"] != "green":
                 print(json.dumps(res["failure"], indent=1))
                 return 2
