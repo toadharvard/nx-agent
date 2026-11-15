@@ -56,6 +56,58 @@ def checks(obj):
         check('%s: descriptor %s' % (f, want_d), desc(f) == want_d, repr(desc(f)))
 
 
+HOSTFIX = os.path.join(HERE, 'dispatch', 'host.cpp')
+PRE = open(HOSTFIX).read().split('unsigned long long h1')[0]
+# each error form of the containment rule: (id, the function that uses a host slot value in that form, the exact error)
+FORMS = [
+    ('store of the value', 'unsigned long long g;\nvoid f() { g = host_api->open; }', 'a host slot value is stored'),
+    ('argument', 'void sink(unsigned long long);\nvoid f() { sink(host_api->open); }', 'a host slot value is passed as an argument'),
+    ('return', 'unsigned long long f() { return host_api->open; }', 'a host slot value is returned'),
+    ('comparison', 'int f(unsigned long long a) { return host_api->open == a; }', 'a host slot value is compared or switched on'),
+    ('switch', 'int f() { switch (host_api->open) { case 1: return 5; case 7: return 9; default: return 0; } }', 'a host slot value is compared or switched on'),
+    ('arithmetic', 'unsigned long long f(unsigned long long a) { return host_api->open + a; }',
+     'a host slot value is used in arithmetic or a selection'),
+    ('PHI', 'unsigned long long f(int c, unsigned long long a) { return ((hfn1)(unsigned long)(c ? host_api->open : host_api->close))(a); }',
+     'a host slot value is merged by a PHI'),
+    ('asm operand', 'void f() { asm volatile("" :: "r"(host_api->open)); }', 'a host slot value is an operand of an asm'),
+    ('store into a slot', 'void f(Api *p, unsigned long long v) { p->open = v; }', 'a host slot is stored into'),
+    ('address of a slot', 'hslot *f(Api *p) { return &p->open; }', 'the address of a host slot is taken'),
+    ('copy of the aggregate', 'void f(Api *p, const Api *q) { *p = *q; }',
+     'an aggregate with host slots is copied, loaded, stored, passed or returned by value'),
+    ('the value also an argument of its own call', 'unsigned long long f() { return ((hfn1)(unsigned long)(host_api->open))((unsigned long long)host_api->open); }',
+     'a host slot value is passed as an argument'),
+    ('copy through __builtin_memcpy', 'void f(Api *p, const Api *q) { __builtin_memcpy(p, q, sizeof *p); }',
+     'an aggregate with host slots is copied, loaded, stored, passed or returned by value'),
+]
+
+
+def host(td, so):
+    obj = os.path.join(td, 'host.o')
+    r = pb.compile(HOSTFIX, obj, so)
+    check('host.cpp compiles', r.returncode == 0, r.stderr[:2000])
+    if r.returncode == 0:
+        dis = pb.objdump(obj)
+        fns = {'_Z2h1y': 0, '_Z2h2yy': 0, '_Z2h3iy': 0, '_Z2h4y': 0, '_Z3ordPFyyEy': 1, '_Z5plainPK3Api': 0}
+        for f, n in fns.items():
+            b = body(dis, f)
+            check('%s: %d call(s) of fnvnx_dispatch' % (f, n), calls(b) == n, b)
+        check('a host call is a plain indirect call (blr), with no site', all(re.search(r'\b(?:blr|br) x\d+', body(dis, f)) for f in ('_Z2h1y', '_Z2h2yy', '_Z2h3iy', '_Z2h4y')), body(dis, '_Z2h1y'))
+        check('the pointer call of ord is rewritten and its host call is not: one site, two indirect calls',
+              len(re.findall(r'\b(?:blr|br) x\d+', body(dis, '_Z3ordPFyyEy'))) == 2 and pb.section_size(obj, '.bss') == 8, body(dis, '_Z3ordPFyyEy'))
+        rec = {l.split('\t')[0]: tuple(int(x) for x in l.split('\t')[1:]) for l in pb.section(obj, '.fnvnx.dispatch').splitlines()}
+        want = {'_Z2h1y': (0, 1), '_Z2h2yy': (0, 2), '_Z2h3iy': (0, 1), '_Z2h4y': (0, 1), '_Z3ordPFyyEy': (1, 1)}
+        check('.fnvnx.dispatch: per function the rewritten sites and the host-ABI calls', rec == want, rec)
+    for name, fn, err in FORMS:
+        src = os.path.join(td, 'form.cpp')
+        open(src, 'w').write(PRE + fn + '\n')
+        r = pb.compile(src, os.path.join(td, 'form.o'), so)
+        check('containment: %s is the error "HOST1: %s"' % (name, err), r.returncode != 0 and 'HOST1: ' + err in r.stderr, r.stderr[:800])
+    src = os.path.join(td, 'bad.cpp')
+    open(src, 'w').write('typedef int __attribute__((fnvnx_host)) bad;\n')
+    r = pb.compile(src, os.path.join(td, 'bad.o'), so)
+    check('fnvnx_host applies to a 64-bit unsigned type only', r.returncode != 0 and 'applies to a 64-bit unsigned integer type' in r.stderr, r.stderr[:500])
+
+
 def main():
     td = tempfile.mkdtemp(prefix='test-dispatch-')
     try:
@@ -65,6 +117,7 @@ def main():
         check('compiles', r.returncode == 0, r.stderr[:2000])
         if r.returncode == 0:
             checks(out)
+        host(td, so)
         r = pb.compile(FIX, os.path.join(td, 'x.o'), so, args=['-fplugin-arg-fnvnx_dispatch-mode=1'])
         check('an unknown plugin argument is an error', r.returncode != 0 and 'unknown plugin argument' in r.stderr, r.stderr[:500])
         r = pb.compile(FIX, os.path.join(td, 'y.o'), [so[0], so[2]])

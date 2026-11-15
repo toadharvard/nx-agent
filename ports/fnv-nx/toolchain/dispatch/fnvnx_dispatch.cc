@@ -28,8 +28,23 @@
  * The convention is the declaration's own: CC1 keeps MSVC's __cdecl / __stdcall / __fastcall / __thiscall as the
  * type attribute fnvnx_cc (shim/include/fnvnx_compat.h), which the fnvnx_names plugin registers.
  *
- * Every indirect call is rewritten; there is no list of exceptions. A call the pass cannot rewrite or describe is
- * an error.
+ * Every indirect call is rewritten, except a host-ABI call (HOST1, below); there is no list of exceptions. A call the
+ * pass cannot rewrite or describe is an error.
+ *
+ * HOST1: a host address is not an exe code address. The platform's host API (FnvnxHostApi) holds the addresses of the
+ * host's functions in slots; their type is `fnvnx_hslot`, a uint64_t that carries the type attribute `fnvnx_host`
+ * (registered here). They are not keys of the dispatcher: calling one through fnvnx_dispatch would be a violation of
+ * the dispatcher's domain. So, in the function, at the last GIMPLE:
+ *   1. An indirect call is a host-ABI call iff its callee value comes, through conversions only (NOP, CONVERT,
+ *      VIEW_CONVERT, a plain copy), from a load of a field whose type carries fnvnx_host. It is not rewritten.
+ *   2. Containment, which closes the class: it is an error if a value loaded from such a field, or any conversion
+ *      of it, is used other than as the callee of an indirect call (a store, an argument, a return, a comparison,
+ *      arithmetic, a PHI, an asm operand, a switch); if anything is stored into such a field; if the address of such a
+ *      field is taken; and if an aggregate that contains such a field is copied, loaded, stored, passed or returned
+ *      by value (its slots would travel as plain data). So a host address never reaches fnvnx_dispatch, and the
+ *      callee of a host-ABI call is always a value the host wrote.
+ * The unit's section `.fnvnx.dispatch` (not loaded) has one line `symbol<TAB>rewritten<TAB>host` for every function with
+ * an indirect call: the number of call sites rewritten and the number of host-ABI calls.
  */
 #include "gcc-plugin.h"
 #include "plugin-version.h"
@@ -56,6 +71,11 @@
 #include "attribs.h"
 #include "builtins.h"
 #include "calls.h"
+#include "output.h"
+#include "gimple-walk.h"
+#include "ssa-iterators.h"
+#include "tree-dfa.h"
+#include <map>
 #include <string>
 #include <vector>
 
@@ -169,6 +189,317 @@ static bool indirect_call(gimple *st)
   return !(TREE_CODE(fn) == ADDR_EXPR && TREE_CODE(TREE_OPERAND(fn, 0)) == FUNCTION_DECL);
 }
 
+/* ---- HOST1: the host slot type, host-ABI calls and containment */
+
+static tree handle_host(tree *node, tree name, tree args, int, bool *no_add_attrs)
+{
+  tree t = *node;
+  if (TREE_CODE(t) != INTEGER_TYPE || !TYPE_UNSIGNED(t) || TYPE_PRECISION(t) != 64) {
+    error("%qE applies to a 64-bit unsigned integer type (a slot of the host API holds a host address)", name);
+    *no_add_attrs = true;
+  }
+  return NULL_TREE;
+}
+static struct attribute_spec host_attr = { "fnvnx_host", 0, 0, false, true, false, false, handle_host, NULL };
+static void register_attrs(void *, void *) { register_attribute(&host_attr); }
+
+static bool host_type(tree t)
+{
+  return t && TYPE_P(t) && lookup_attribute("fnvnx_host", TYPE_ATTRIBUTES(t));
+}
+
+/* a slot, or an array of slots (the array field's elements are slots) */
+static bool host_elem_type(tree t)
+{
+  while (t && TREE_CODE(t) == ARRAY_TYPE) t = TREE_TYPE(t);
+  return host_type(t);
+}
+
+/* a type that is, or holds by member or element, a host slot */
+static bool contains_host(tree t)
+{
+  if (!t || !TYPE_P(t)) return false;
+  if (host_type(t)) return true;
+  if (TREE_CODE(t) == ARRAY_TYPE) return contains_host(TREE_TYPE(t));
+  if (TREE_CODE(t) == RECORD_TYPE || TREE_CODE(t) == UNION_TYPE)
+    for (tree f = TYPE_FIELDS(t); f; f = DECL_CHAIN(f))
+      if (TREE_CODE(f) == FIELD_DECL && contains_host(TREE_TYPE(f))) return true;
+  return false;
+}
+
+/* a reference that names a field of host slot type (at any depth of the access path) */
+static bool host_ref(tree r)
+{
+  if (!r) return false;
+  while (handled_component_p(r)) {
+    if (TREE_CODE(r) == COMPONENT_REF && host_elem_type(TREE_TYPE(TREE_OPERAND(r, 1)))) return true;
+    r = TREE_OPERAND(r, 0);
+  }
+  return false;
+}
+
+static bool conv_code(enum tree_code c)
+{
+  return c == NOP_EXPR || c == CONVERT_EXPR || c == VIEW_CONVERT_EXPR || c == SSA_NAME;
+}
+
+/* the SSA name holds the address of a host slot (or of a place inside a host-slot array): `&p->slot`, or such an
+ * address plus an offset, or a conversion of one. GCC itself writes `&p->slot` and loads through it at the last GIMPLE. */
+static bool host_addr(tree n, int guard = 0)
+{
+  if (guard > 32 || !n || TREE_CODE(n) != SSA_NAME) return false;
+  gimple *d = SSA_NAME_DEF_STMT(n);
+  if (!is_gimple_assign(d)) return false;
+  enum tree_code c = gimple_assign_rhs_code(d);
+  tree r = gimple_assign_rhs1(d);
+  if (gimple_assign_single_p(d)) return TREE_CODE(r) == ADDR_EXPR && host_ref(TREE_OPERAND(r, 0));
+  if (c == POINTER_PLUS_EXPR) return host_addr(r, guard + 1);
+  if (c == NOP_EXPR || c == CONVERT_EXPR) return host_addr(r, guard + 1);
+  return false;
+}
+
+/* a memory reference that reads a host slot: a field access of host slot type, or a dereference of a host address */
+static bool host_load(tree r)
+{
+  if (host_ref(r)) return true;
+  if (TREE_CODE(r) != MEM_REF) return false;
+  tree b = TREE_OPERAND(r, 0);
+  return TREE_CODE(b) == SSA_NAME ? host_addr(b) : TREE_CODE(b) == ADDR_EXPR && host_ref(TREE_OPERAND(b, 0));
+}
+
+static bool atomic_load_fn(gcall *c)
+{
+  if (!gimple_call_builtin_p(c, BUILT_IN_NORMAL)) return false;
+  switch (DECL_FUNCTION_CODE(gimple_call_fndecl(c))) {
+  case BUILT_IN_ATOMIC_LOAD_1: case BUILT_IN_ATOMIC_LOAD_2: case BUILT_IN_ATOMIC_LOAD_4: case BUILT_IN_ATOMIC_LOAD_8: case BUILT_IN_ATOMIC_LOAD_16:
+    return true;
+  default: return false;
+  }
+}
+
+static bool atomic_store_fn(gcall *c)
+{
+  if (!gimple_call_builtin_p(c, BUILT_IN_NORMAL)) return false;
+  switch (DECL_FUNCTION_CODE(gimple_call_fndecl(c))) {
+  case BUILT_IN_ATOMIC_STORE_1: case BUILT_IN_ATOMIC_STORE_2: case BUILT_IN_ATOMIC_STORE_4: case BUILT_IN_ATOMIC_STORE_8: case BUILT_IN_ATOMIC_STORE_16:
+    return true;
+  default: return false;
+  }
+}
+
+/* the ordering plugin turns a load into `__atomic_load_N (address, order)`: this call reads a host slot */
+static bool host_atomic_load(gimple *st)
+{
+  gcall *c = dyn_cast<gcall *>(st);
+  if (!c || !atomic_load_fn(c) || gimple_call_num_args(c) < 1) return false;
+  tree a = gimple_call_arg(c, 0);
+  return TREE_CODE(a) == SSA_NAME ? host_addr(a) : TREE_CODE(a) == ADDR_EXPR && host_ref(TREE_OPERAND(a, 0));
+}
+
+/* the callee value comes from a host slot load through conversions only */
+static bool host_callee(tree fn)
+{
+  for (int guard = 0; guard < 64 && fn && TREE_CODE(fn) == SSA_NAME; guard++) {
+    gimple *d = SSA_NAME_DEF_STMT(fn);
+    if (host_atomic_load(d)) return true;
+    if (!is_gimple_assign(d)) return false;
+    enum tree_code c = gimple_assign_rhs_code(d);
+    tree r = gimple_assign_rhs1(d);
+    if (gimple_assign_single_p(d) && host_load(r)) return true;
+    if (!conv_code(c)) return false;
+    fn = c == VIEW_CONVERT_EXPR ? TREE_OPERAND(r, 0) : r;
+  }
+  return false;
+}
+
+static void host_error(gimple *st, const char *form)
+{
+  error_at(gimple_location(st), "HOST1: %s", form);
+}
+
+/* every use of the host value V (or of a conversion of it) is the callee of an indirect call */
+static void check_uses(tree v, std::vector<tree> &seen)
+{
+  for (tree s : seen) if (s == v) return;
+  seen.push_back(v);
+  gimple *use;
+  imm_use_iterator it;
+  FOR_EACH_IMM_USE_STMT(use, it, v) {
+    if (is_gimple_debug(use)) continue;
+    if (gcall *c = dyn_cast<gcall *>(use)) {
+      bool callee = gimple_call_fn(c) == v, arg = false;
+      for (unsigned i = 0; i < gimple_call_num_args(c); i++) arg |= gimple_call_arg(c, i) == v;
+      if (callee && !arg && !gimple_call_internal_p(c)) continue;
+      bool st_val = atomic_store_fn(c) && gimple_call_num_args(c) >= 2 && gimple_call_arg(c, 1) == v;   /* the ordering plugin's store builtin */
+      host_error(use, st_val ? "a host slot value is stored" : "a host slot value is passed as an argument");
+      continue;
+    }
+    if (gassign *a = dyn_cast<gassign *>(use)) {
+      if (conv_code(gimple_assign_rhs_code(a)) && gimple_num_ops(a) == 2 &&
+          (gimple_assign_rhs_code(a) == VIEW_CONVERT_EXPR ? TREE_OPERAND(gimple_assign_rhs1(a), 0) : gimple_assign_rhs1(a)) == v &&
+          TREE_CODE(gimple_assign_lhs(a)) == SSA_NAME) { check_uses(gimple_assign_lhs(a), seen); continue; }
+      host_error(use, TREE_CODE(gimple_assign_lhs(a)) != SSA_NAME ? "a host slot value is stored"
+                 : TREE_CODE_CLASS(gimple_assign_rhs_code(a)) == tcc_comparison ? "a host slot value is compared or switched on"
+                 : "a host slot value is used in arithmetic or a selection");
+      continue;
+    }
+    if (is_a<gphi *>(use)) { host_error(use, "a host slot value is merged by a PHI"); continue; }
+    if (is_a<gcond *>(use) || is_a<gswitch *>(use)) { host_error(use, "a host slot value is compared or switched on"); continue; }
+    if (is_a<greturn *>(use)) { host_error(use, "a host slot value is returned"); continue; }
+    if (is_a<gasm *>(use)) { host_error(use, "a host slot value is an operand of an asm"); continue; }
+    host_error(use, "a host slot value is used other than as the callee of an indirect call");
+  }
+}
+
+/* every use of a host address A is the address of a load (`*A`), or yields another host address */
+static void check_addr_uses(tree a, std::vector<tree> &seen)
+{
+  for (tree s : seen) if (s == a) return;
+  seen.push_back(a);
+  gimple *use;
+  imm_use_iterator it;
+  FOR_EACH_IMM_USE_STMT(use, it, a) {
+    if (is_gimple_debug(use)) continue;
+    if (gcall *c = dyn_cast<gcall *>(use)) {
+      if (gimple_call_num_args(c) >= 1 && gimple_call_arg(c, 0) == a) {
+        bool other = false;
+        for (unsigned i = 1; i < gimple_call_num_args(c); i++) other |= gimple_call_arg(c, i) == a;
+        if (!other && atomic_load_fn(c)) continue;   /* a load: its value is checked where the loads are */
+        if (!other && atomic_store_fn(c)) { host_error(use, "a host slot is stored into"); continue; }
+      }
+    } else if (gassign *g = dyn_cast<gassign *>(use)) {
+      tree l = gimple_assign_lhs(g);
+      if (TREE_CODE(l) != SSA_NAME) { host_error(use, "a host slot is stored into"); continue; }
+      enum tree_code c = gimple_assign_rhs_code(g);
+      if (gimple_assign_single_p(g) && TREE_CODE(gimple_assign_rhs1(g)) == MEM_REF && TREE_OPERAND(gimple_assign_rhs1(g), 0) == a)
+        continue;   /* a load: its value is checked where the loads are */
+      if ((c == POINTER_PLUS_EXPR && gimple_assign_rhs1(g) == a && gimple_assign_rhs2(g) != a) ||
+          ((c == NOP_EXPR || c == CONVERT_EXPR) && gimple_assign_rhs1(g) == a)) { check_addr_uses(l, seen); continue; }
+    }
+    host_error(use, "the address of a host slot is taken");
+  }
+}
+
+static void check_operand(gimple *st, tree op, bool lhs)
+{
+  if (!op) return;
+  if (TREE_CODE(op) == ADDR_EXPR && host_ref(TREE_OPERAND(op, 0))) {
+    gassign *g = dyn_cast<gassign *>(st);   /* `a = &p->slot` is checked by the uses of a; any other place the address is written is an error */
+    if (g && gimple_assign_single_p(g) && gimple_assign_rhs1(g) == op && TREE_CODE(gimple_assign_lhs(g)) == SSA_NAME) {
+      std::vector<tree> seen;
+      check_addr_uses(gimple_assign_lhs(g), seen);
+    } else
+      host_error(st, "the address of a host slot is taken");
+  }
+  if (lhs && host_load(op)) host_error(st, "a host slot is stored into");
+}
+
+static const char *aggregate_form = "an aggregate with host slots is copied, loaded, stored, passed or returned by value";
+
+static void aggregate_operand(gimple *st, tree op)
+{
+  if (!op) return;
+  if (TREE_CODE(op) == TREE_LIST) op = TREE_VALUE(op);
+  if (TREE_TYPE(op) && TYPE_P(TREE_TYPE(op)) && AGGREGATE_TYPE_P(TREE_TYPE(op)) && contains_host(TREE_TYPE(op))) host_error(st, aggregate_form);
+}
+
+/* a statement of the lowered GIMPLE (before the memory-order rewrite splits an aggregate copy into word accesses): an access to, or a copy of, a whole
+ * aggregate that holds host slots, and a memory builtin whose pointer operands point to one */
+static tree aggregate_stmt(gimple_stmt_iterator *gsi, bool *handled, struct walk_stmt_info *)
+{
+  gimple *st = gsi_stmt(*gsi);
+  if (is_gimple_debug(st)) return NULL_TREE;
+  if (gassign *a = dyn_cast<gassign *>(st)) {
+    for (unsigned i = 0; i < gimple_num_ops(a); i++) aggregate_operand(st, gimple_op(a, i));
+  } else if (gcall *c = dyn_cast<gcall *>(st)) {
+    if (tree l = gimple_call_lhs(c)) aggregate_operand(st, l);
+    for (unsigned i = 0; i < gimple_call_num_args(c); i++) aggregate_operand(st, gimple_call_arg(c, i));
+    if (gimple_call_builtin_p(c, BUILT_IN_NORMAL))
+      switch (DECL_FUNCTION_CODE(gimple_call_fndecl(c))) {
+      case BUILT_IN_MEMCPY: case BUILT_IN_MEMMOVE: case BUILT_IN_MEMPCPY: case BUILT_IN_MEMSET:
+      case BUILT_IN_MEMCPY_CHK: case BUILT_IN_MEMMOVE_CHK: case BUILT_IN_MEMPCPY_CHK: case BUILT_IN_MEMSET_CHK:
+        for (unsigned i = 0; i < gimple_call_num_args(c) && i < 2; i++) {
+          tree t = TREE_TYPE(gimple_call_arg(c, i));
+          if (POINTER_TYPE_P(t) && contains_host(strip_array_types(TREE_TYPE(t)))) host_error(st, aggregate_form);
+        }
+        break;
+      default: break;
+      }
+  } else if (greturn *r = dyn_cast<greturn *>(st))
+    aggregate_operand(st, gimple_return_retval(r));
+  else if (gasm *x = dyn_cast<gasm *>(st)) {
+    for (unsigned i = 0; i < gimple_asm_noutputs(x); i++) aggregate_operand(st, gimple_asm_output_op(x, i));
+    for (unsigned i = 0; i < gimple_asm_ninputs(x); i++) aggregate_operand(st, gimple_asm_input_op(x, i));
+  }
+  *handled = false;
+  return NULL_TREE;
+}
+
+/* HOST1 containment over the function; the SSA names that hold a host slot value are checked for their uses */
+static void host_containment(function *fun)
+{
+  basic_block bb;
+  FOR_EACH_BB_FN(bb, fun)
+    for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
+      gimple *st = gsi_stmt(gsi);
+      if (is_gimple_debug(st)) continue;
+      if (gassign *a = dyn_cast<gassign *>(st)) {
+        tree lhs = gimple_assign_lhs(a);
+        check_operand(st, lhs, true);
+        for (unsigned i = 1; i < gimple_num_ops(a); i++) check_operand(st, gimple_op(a, i), false);
+        if (gimple_assign_single_p(a) && host_load(gimple_assign_rhs1(a)) && TREE_CODE(lhs) == SSA_NAME) {
+          std::vector<tree> seen;
+          check_uses(lhs, seen);
+        } else if (gimple_assign_single_p(a) && host_load(gimple_assign_rhs1(a)))
+          host_error(st, "a host slot is stored");
+      } else if (gcall *c = dyn_cast<gcall *>(st)) {
+        if (tree l = gimple_call_lhs(c)) check_operand(st, l, true);
+        bool ld = host_atomic_load(st);
+        for (unsigned i = 0; i < gimple_call_num_args(c); i++)
+          if (!(ld && i == 0)) check_operand(st, gimple_call_arg(c, i), false);
+        if (ld) {
+          tree l = gimple_call_lhs(c);
+          if (l && TREE_CODE(l) == SSA_NAME) { std::vector<tree> seen; check_uses(l, seen); }
+          else if (l) host_error(st, "a host slot is stored");
+        }
+      } else if (gasm *x = dyn_cast<gasm *>(st)) {
+        for (unsigned i = 0; i < gimple_asm_noutputs(x); i++) check_operand(st, gimple_asm_output_op(x, i), true);
+        for (unsigned i = 0; i < gimple_asm_ninputs(x); i++) check_operand(st, gimple_asm_input_op(x, i), false);
+      } else if (greturn *r = dyn_cast<greturn *>(st))
+        check_operand(st, gimple_return_retval(r), false);
+    }
+}
+
+/* The provenance of a callee is a fact of the early GIMPLE (after SSA is built): a slot is read through its field, and a later pass may write the address of
+ * the slot as plain pointer arithmetic. So the early pass (host_pass) marks every host-ABI call: its callee value C becomes `m = fnvnx_host_ptr (C)`, a
+ * const artificial call that the dispatch pass at the last GIMPLE recognises and replaces by `m = C`. A marker is a fact of the pass pair; it never reaches
+ * an object. */
+static bool marker_call(gimple *st)
+{
+  gcall *c = dyn_cast<gcall *>(st);
+  tree d = c ? gimple_call_fndecl(c) : NULL_TREE;
+  return d && DECL_ARTIFICIAL(d) && DECL_EXTERNAL(d) && DECL_NAME(d) && !strcmp(IDENTIFIER_POINTER(DECL_NAME(d)), "fnvnx_host_ptr");
+}
+
+static tree marker_decl(tree ptr_type)
+{
+  tree t = build_function_type_list(ptr_type, ptr_type, NULL_TREE);
+  tree d = build_fn_decl("fnvnx_host_ptr", t);
+  DECL_EXTERNAL(d) = 1; TREE_PUBLIC(d) = 1; DECL_ARTIFICIAL(d) = 1; TREE_NOTHROW(d) = 1; TREE_READONLY(d) = 1; DECL_PURE_P(d) = 0;
+  return d;
+}
+
+/* per function: [rewritten, host] */
+static std::map<std::string, std::pair<unsigned, unsigned>> records;
+
+static void finish_unit(void *, void *)
+{
+  fprintf(asm_out_file, "\t.pushsection\t.fnvnx.dispatch,\"\",%%progbits\n");
+  for (auto &r : records)
+    fprintf(asm_out_file, "\t.ascii\t\"%s\\t%u\\t%u\\n\"\n", r.first.c_str(), r.second.first, r.second.second);
+  fprintf(asm_out_file, "\t.popsection\n");
+}
+
 static void rewrite(function *fun, gimple *st)
 {
   gcall *call = as_a<gcall *>(st);
@@ -238,15 +569,78 @@ struct dispatch_pass : gimple_opt_pass {
   dispatch_pass(gcc::context *c) : gimple_opt_pass(dispatch_data, c) {}
   unsigned int execute(function *fun) override
   {
-    std::vector<gimple *> calls;
+    std::vector<gimple *> calls, markers;
+    unsigned host = 0;
     basic_block bb;
     FOR_EACH_BB_FN(bb, fun)
-      for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi))
-        if (indirect_call(gsi_stmt(gsi))) calls.push_back(gsi_stmt(gsi));
+      for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
+        gimple *st = gsi_stmt(gsi);
+        if (marker_call(st)) markers.push_back(st);
+        else if (indirect_call(st)) {
+          tree fn = gimple_call_fn(st);
+          gimple *d = TREE_CODE(fn) == SSA_NAME ? SSA_NAME_DEF_STMT(fn) : NULL;
+          if (d && marker_call(d)) host++; else calls.push_back(st);
+        }
+      }
+    /* a marker value is only ever a callee; then the marker is a plain copy */
+    for (gimple *m : markers) {
+      tree l = gimple_call_lhs(m);
+      if (l) {
+        std::vector<tree> seen;
+        check_uses(l, seen);
+      }
+      gimple_stmt_iterator gsi = gsi_for_stmt(m);
+      gsi_replace(&gsi, gimple_build_assign(l ? l : make_ssa_name(TREE_TYPE(gimple_call_arg(m, 0))), gimple_call_arg(m, 0)), true);
+    }
+    if (calls.empty() && !host) return 0;
+    records[IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fun->decl))] = { (unsigned)calls.size(), host };
     if (calls.empty()) return 0;
     for (size_t i = 0; i < calls.size(); i++) rewrite(fun, calls[i]);
     free_dominance_info(CDI_DOMINATORS);
     mark_virtual_operands_for_renaming(fun);
+    return 0;
+  }
+};
+
+const pass_data agg_data = { GIMPLE_PASS, "fnvnx_hostagg", OPTGROUP_NONE, TV_NONE, 0, 0, 0, 0, 0 };
+/* HOST1 containment of aggregates, on the lowered GIMPLE (no CFG yet) */
+struct agg_pass : gimple_opt_pass {
+  agg_pass(gcc::context *c) : gimple_opt_pass(agg_data, c) {}
+  unsigned int execute(function *fun) override
+  {
+    struct walk_stmt_info wi;
+    memset(&wi, 0, sizeof wi);
+    walk_gimple_seq(gimple_body(fun->decl), aggregate_stmt, NULL, &wi);
+    return 0;
+  }
+};
+
+const pass_data host_data = { GIMPLE_PASS, "fnvnx_host", OPTGROUP_NONE, TV_NONE, PROP_cfg | PROP_ssa, 0, 0, 0, 0 };
+/* HOST1 at the early GIMPLE (after the SSA form is built): containment, and a marker on every host-ABI call */
+struct host_pass : gimple_opt_pass {
+  host_pass(gcc::context *c) : gimple_opt_pass(host_data, c) {}
+  unsigned int execute(function *fun) override
+  {
+    host_containment(fun);
+    std::vector<gimple *> calls;
+    basic_block bb;
+    FOR_EACH_BB_FN(bb, fun)
+      for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi))
+        if (indirect_call(gsi_stmt(gsi))) {
+          tree fn = gimple_call_fn(gsi_stmt(gsi));
+          if (TREE_CODE(fn) == SSA_NAME && host_callee(fn)) calls.push_back(gsi_stmt(gsi));
+        }
+    for (gimple *call : calls) {
+      tree fn = gimple_call_fn(call);
+      tree m = make_ssa_name(TREE_TYPE(fn));
+      gcall *mk = gimple_build_call(marker_decl(TREE_TYPE(fn)), 1, fn);
+      gimple_call_set_lhs(mk, m);
+      gimple_set_location(mk, gimple_location(call));
+      gimple_stmt_iterator gsi = gsi_for_stmt(call);
+      gsi_insert_before(&gsi, mk, GSI_SAME_STMT);
+      gimple_call_set_fn(as_a<gcall *>(call), m);
+      update_stmt(call);
+    }
     return 0;
   }
 };
@@ -262,6 +656,20 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
     error("%<fnvnx_dispatch%>: unknown plugin argument %qs", info->argv[0].key);
     return 1;
   }
+  register_callback(info->base_name, PLUGIN_ATTRIBUTES, register_attrs, NULL);
+  register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);
+  register_pass_info ap;
+  ap.pass = new agg_pass(g);
+  ap.reference_pass_name = "eh";
+  ap.ref_pass_instance_number = 1;
+  ap.pos_op = PASS_POS_INSERT_AFTER;
+  register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &ap);
+  register_pass_info hp;
+  hp.pass = new host_pass(g);
+  hp.reference_pass_name = "ssa";
+  hp.ref_pass_instance_number = 1;
+  hp.pos_op = PASS_POS_INSERT_AFTER;
+  register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &hp);
   register_pass_info p;
   p.pass = new dispatch_pass(g);
   p.reference_pass_name = "optimized";
