@@ -49,8 +49,25 @@ def pre_state():
 PRE = pre_state()
 
 def subst(t): return z3.substitute(t, *SUBS)
+# x87/MMX/SSE state of the Form's post (dsl.Form.post): the pre-state variables are the DSL's own (fr<i> 80, xmm<i> 128, ftop 3, ftag 16, fsw 16, mxcsr 32, fip fdp 32, fop 11, fcs fds 16)
+XPRE = {**{'fr%d' % i: z3.BitVec('fr%d' % i, 80) for i in range(8)}, **{'xmm%d' % i: z3.BitVec('xmm%d' % i, 128) for i in range(8)},
+        'ftop': z3.BitVec('ftop', 3), 'ftag': z3.BitVec('ftag', 16), 'fsw': z3.BitVec('fsw', 16), 'mxcsr': z3.BitVec('mxcsr', 32),
+        'fip': z3.BitVec('fip', 32), 'fdp': z3.BitVec('fdp', 32), 'fop': z3.BitVec('fop', 11), 'fcs': z3.BitVec('fcs', 16), 'fds': z3.BitVec('fds', 16)}
+XKEYS = ('fr', 'xmm', 'ftop', 'ftag', 'fsw', 'mxcsr', 'fptr')
+
+def x_post(D):
+    """{name: post term} of the x87/MMX/SSE state of a Form's post (empty for a Form of an older DSL)"""
+    xs = {}
+    for k in ('fr', 'xmm'):
+        for i, v in enumerate(D.get(k, ())): xs['%s%d' % (k, i)] = v
+    for k in ('ftop', 'ftag', 'fsw', 'mxcsr'):
+        if k in D: xs[k] = D[k]
+    if 'fptr' in D: xs.update(zip(('fip', 'fdp', 'fop', 'fcs', 'fds'), D['fptr']))
+    return xs
+
 def post_of(F):
-    D = F.post(); r = {k: subst(v) for k, v in D.items() if not isinstance(v, dict)}
+    D = F.post(); r = {k: subst(v) for k, v in D.items() if not isinstance(v, (dict, list, tuple)) and k not in XKEYS}
+    r['xs'] = {n: subst(v) for n, v in x_post(D).items()}
     for k in ('regs', 'flags', 'defined', 'rdefined'): r[k] = {n: subst(v) for n, v in D[k].items()}
     return r
 
@@ -180,6 +197,8 @@ def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     M = model() if model else mod.model_post(code, pre); memo = {}; domain = M.pop('domain', z3.BoolVal(True)); complete = M.pop('complete', True)    # domain: restriction of the pre-state by construction (shape runs: eip range), not a model fault
     M = {k: (rewrite.narrow_div(v, memo) if not isinstance(v, dict) else {n: rewrite.narrow_div(t, memo) for n, t in v.items()}) for k, v in M.items()}
     D = post_of(F); assume = M.get('assume', z3.BoolVal(True))
+    xchg = sorted(n for n, t in D['xs'].items() if not z3.eq(z3.simplify(t), XPRE[n]))      # x87/MMX/SSE state the Form changes: the Sail model has no register for it (xmm: zmms) except through a transcribed SIMD slice
+    if xchg: return 'model-gap', 'x-state effect on %s has no reference in the Sail model (SIMD / x87 slices)' % ','.join(xchg), {}
     mm2 = {}; mm3 = {}; fx = lambda v: rewrite.div_norm(rewrite.pow2_mul(v, mm2), mm3)
     M = {k: (fx(v) if not isinstance(v, dict) else {n: fx(t) for n, t in v.items()}) for k, v in M.items()}; D = {k: (fx(v) if not isinstance(v, dict) else {n: fx(t) for n, t in v.items()}) for k, v in D.items()}
     assume = M.get('assume', z3.BoolVal(True))

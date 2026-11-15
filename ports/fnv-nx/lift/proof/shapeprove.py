@@ -20,10 +20,10 @@ Certificate field `assumptions` (ids):
               (non-wrapping) address leaves [0, 2^32) (model_sail.FAULT_OK); symcheck.py checks it for every relative target of the exe
 Split record: always 'none' (no field is case-split: isla runs on the symbolic bytes without forking on them in a way that needs it; the paths it forks
 into are exhaustive with their path conditions in the merge)."""
-import argparse, collections, json, os, sys
+import argparse, collections, json, os, sys, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import z3
-from proof import shape as shp, symform, prove, model_sail
+from proof import shape as shp, symform, prove, model_sail, certbasis
 
 def load_shapes(path):
     """canonical integer-family shape keys, sorted"""
@@ -70,7 +70,7 @@ def one(key, args):
     if model_sail.LAST.get('fault_paths'): asm.append('A-SEGLIM')
     ids = res[len('FAILED(model-defect:'):-1].split(',') if res.startswith('FAILED(model-defect:') else []
     return fin('FAILED(model-defect)' if ids else res, note, defects=ids, assumptions=asm,
-               model_terms_sha=extra.get('model_sha256'), def0=extra.get('def0'), declared=extra.get('declared'), platform_sha256=extra.get('platform_sha256'), obligations=list(prove.OBLIGATIONS), isla_paths=model_sail.LAST.get('paths'), isla_fault_paths=model_sail.LAST.get('fault_paths'), **fns_fields())
+               model_terms_sha=extra.get('model_sha256'), def0=extra.get('def0'), declared=extra.get('declared'), platform_sha256=extra.get('platform_sha256'), obligations=list(prove.OBLIGATIONS), prover_sha=certbasis.prover_sha(), isla_paths=model_sail.LAST.get('paths'), isla_fault_paths=model_sail.LAST.get('fault_paths'), **fns_fields())
 
 def migrate(rec, args):
     """K migration of a record of this model (model_sha = the pinned IR) made before the closure key: rerun ONLY the isla model run of its shape (deterministic: same IR, config, inputs; the run is cached by the
@@ -96,14 +96,28 @@ def main():
     keys, bad = load_shapes(a.shapes); keys = keys[::a.slice]
     if a.only: keys = [x for x in keys if a.only in x]
     mine = [x for i, x in enumerate(keys) if i % n == k - 1][:a.limit]
-    done = set(json.loads(l)['shape'] for l in open(path)) if os.path.exists(path) else set()
+    done = set()
+    if os.path.exists(path):                       # a kill can leave one partial last line: drop it (that shape is proved again), keep every complete record
+        with open(path) as fh: lines = fh.read().split('\n')
+        good = []
+        for l in lines:
+            try: done.add(json.loads(l)['shape']); good.append(l)
+            except (ValueError, KeyError): pass
+        with open(path, 'w') as fh: fh.write(''.join(l + '\n' for l in good))
     print('shard %d/%d: %d shapes (%d integer shapes in the universe after --slice %d), %d already done, %d undecodable representatives' % (k, n, len(mine), len(keys), a.slice, len(done), len(bad)), flush=True)
     with open(path, 'a') as out:
         for key in mine:
             if key in done: continue
-            out.write(json.dumps(one(key, a), sort_keys=True) + '\n'); out.flush()
+            t0 = time.time()
+            try: rec = one(key, a)
+            except Exception as e:                 # a prover exception on a shape is a record (error + the traceback hash), never a missing one
+                import hashlib, traceback
+                tb = traceback.format_exc(); rec = {'shape': key, 'result': 'error', 'note': ('%s: %s' % (type(e).__name__, e))[:300], 'traceback_sha': hashlib.sha256(tb.encode()).hexdigest()[:16], 'model_sha': model_sail.ir_sha()}
+                print(tb, file=sys.stderr, flush=True)
+            rec['seconds'] = round(time.time() - t0, 2)           # the wall time of the shape (not part of the certificate): the shard count is derived from its distribution
+            out.write(json.dumps(rec, sort_keys=True) + '\n'); out.flush()
     rs = [json.loads(l) for l in open(path)]; c = collections.Counter(r['result'] for r in rs)
     print('shard %d/%d done: %d shapes  ' % (k, n, len(rs)) + ' '.join('%s=%d' % x for x in sorted(c.items())))
-    return 0
+    return 1 if c.get('error') or len(rs) < len(mine) else 0
 
 if __name__ == '__main__': sys.exit(main())

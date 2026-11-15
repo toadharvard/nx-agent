@@ -19,8 +19,8 @@ def row(v): return {'value': v, 'source': 'fixture'}
 
 
 REC = {'format': 'fnvnx-x86sys/2', 'selectors': {'cs': row(0x1b), 'tr': row(0x28)}, 'eflags': {'iopl': row(0)}, 'cr4': {'umip': row(0), 'pce': {'status': 'undecided', 'why': 'pce blocker'}},
-       'int_ring3': {'vectors': [3], 'other_vectors': {'status': 'undecided', 'why': 'other vectors blocker'}}, 'mov_to_sreg': {'undecided': {'selectors': [27], 'why': 'sreg blocker'}},
-       'sgdt_base': {'status': 'undecided', 'why': 'gdt blocker'}}
+       'int_ring3': {'vectors': [3], 'other_vectors': {'status': 'undecided', 'why': 'other vectors blocker'}}, 'tss_io_bitmap': row('no port permitted'), 'mov_to_sreg': {'undecided': {'selectors': [27], 'why': 'sreg blocker'}},
+       'sgdt': {'status': 'undecided', 'why': 'gdt blocker'}}
 
 
 class T(unittest.TestCase):
@@ -34,13 +34,19 @@ class T(unittest.TestCase):
         else: os.environ['FNVNX_X86SYS'] = self.old
 
     def test_classes(self):
-        for h in ('fa', 'f4', 'cc', 'ce', 'f1'):
+        for h in ('fa', 'f4', 'cc', 'ce', 'f1', 'ec', 'ee', 'e4', '6c'):
             self.assertEqual(sysspec.check(key(h + '00000000'))[0], 'proved', h)
 
     def test_undecided_rows_are_uncertified_with_the_blocker(self):
-        for h, why in (('cd2e', 'other vectors blocker'), ('8ed8', 'sreg blocker'), ('0f0100', 'gdt blocker'), ('0f33', 'pce blocker'), ('ec', 'no row tss_io_bitmap')):
+        for h, why in (('cd2e', 'other vectors blocker'), ('8ed8', 'sreg blocker'), ('0f0100', 'gdt blocker'), ('0f33', 'pce blocker'), ):
             r, n = sysspec.check(key(h + '00000000'))
             self.assertEqual(r, 'uncertified', h); self.assertIn(why, n, h)
+
+    def test_io_without_the_row_is_uncertified(self):
+        r = dict(REC); del r['tss_io_bitmap']
+        with open(self.f.name, 'w') as fh: json.dump(r, fh)
+        res, n = sysspec.check(key('ec00000000'))
+        self.assertEqual(res, 'uncertified'); self.assertIn('no row tss_io_bitmap', n)
 
     def test_absent_record_is_uncertified(self):
         os.environ['FNVNX_X86SYS'] = self.f.name + '.absent'

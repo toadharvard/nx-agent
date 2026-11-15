@@ -11,10 +11,10 @@
 # Work = the QUEUE: the integer shapes that have no valid certificate in ANY published shard (certs_build.py --queue).  A certificate is valid iff
 #   (shape key, symform.shape_sha(key) of the CURRENT DSL, IR sha256) all match its record (certs_build.py header): a DSL edit re-queues exactly the shapes whose
 #   Form changed; nothing else is proved again, whatever shard, run or machine produced the earlier certificate.  Shard K/N is taken from the queue.
-# Output: branch  l3b-lift/shapeprove/<ID>/<K>of<N>  = shapeprove_<K>_of_<N>.jsonl (only that file), ID = <IR id 12 hex>-<queue id 12 hex>
+# Output: WRITE-ONCE branch  l3b-lift/shapeprove/<ID>/<K>of<N>-<sha12 of the jsonl>  = shapeprove_<K>_of_<N>.jsonl (only that file; a rerun writes a new branch); a branch counts as published only when shardok.py passes (records == queue rows, no error record), ID = <IR id 12 hex>-<queue id 12 hex>
 #   (certs_build.py --id: the proof IR sha256; queue id = sha256 over the queue's (key, shape_sha) lines, so the same queue and K/N is the same branch).
 #   Already published: nothing is re-run.
-# Resumable: rerun the same command after an interruption (the jsonl is appended, shapes already in it are skipped).
+# Resumable and incremental: the shard's results branch is updated every PUBLISH_EVERY seconds (default 600) and on SIGTERM/SIGINT; a rerun of the same command resumes from the published file (shapes with a record are skipped), so a time limit, a crash or a kill loses at most one increment.
 # Env: GATE_CACHE (required: the verdict cache; the Sail toolchain and caches are under it)  FNVNX_BUILD (clone of fnv-nx-build)  FNVNX_WORK (default $GATE_CACHE/farm-shapeprove)
 #      SHAPES_BRANCH (default l3b-lift/shapes; the census branch, KEYS.tsv-pinned; a re-pinned census goes to ANOTHER branch, the running farms read the head of this one)  BRANCH_PREFIX (default l3b-lift/shapeprove; tests use l3b-lift/shapeprove-test)  PUBLISH (1 default; 0: prove only)
 #      TIMEOUT (s per shape, default 600)  EIP (sym|fixed, default sym)  SLICE (default 1)  LIMIT (first LIMIT shapes of the shard, default all)
@@ -53,21 +53,15 @@ if ! python3 -c 'import capstone, keystone' 2>/dev/null; then
 fi
 
 # 1. toolchain: the installed isla binary, else built from the mirror branch (sail_setup.sh).  The proof IR is NOT built here: it is fetched by its sha (the pin of
-#    sail_pins.txt) from the external tools/sail-ir-<sha 12 hex> of the artifacts repository, which farm/sail_build.sh produced and published once (PUBLISH_IR=1)
+#    formgate_inputs.json, the external x86ir) from the artifacts repository by the loader; farm/sail_build.sh produced and published it once (PUBLISH_IR=1)
 ISLA=${ISLA_EXEC:-$SAILBASE/rems-project/isla/target/release/isla-execute-function}
 export ISLA_EXEC=$ISLA SAIL_WORK=$WORKDIR      # tests (gate_tests strips GATE_*) and model_sail.py read the toolchain through these
 if [ ! -x "$ISLA" ]; then
     fetch_branch tools/sail-mirror "$W/in/sail-mirror"
     MIRROR="$W/in/sail-mirror" bash "$FARM/sail_setup.sh" > "$W/sail_setup_$K.log" 2>&1 || { echo "sail_setup.sh failed (see $W/sail_setup_$K.log)" >&2; exit 1; }
 fi
-PIN=$(awk '$1=="x86_proof.ir"{print $NF}' "$HERE/sail_pins.txt")
-mkdir -p "$WORKDIR/sail"
-if [ -z "${SAIL_IR:-}" ] && [ "$(sha256sum "$WORKDIR/sail/x86_proof.ir" 2>/dev/null | cut -d' ' -f1)" != "$PIN" ]; then
-    fetch_branch "tools/sail-ir-${PIN:0:12}" "$W/in/sail-ir"
-    [ "$(sha256sum "$W/in/sail-ir/ir/x86_proof.ir" | cut -d' ' -f1)" = "$PIN" ] || { echo "the external tools/sail-ir-${PIN:0:12} does not hold the pinned IR $PIN" >&2; exit 1; }
-    cp "$W/in/sail-ir/ir/x86_proof.ir" "$WORKDIR/sail/x86_proof.ir"
-fi
-SHA=$(sha256sum "${SAIL_IR:-$WORKDIR/sail/x86_proof.ir}" | cut -d' ' -f1)
+# the IR is pinned in ONE place: the external x86ir of formgate_inputs.json (commit + tree_sha256); the trunk's loader (model_sail.ir_file) fetches it into GATE_CACHE.  No pin literal here.
+SHA=$(python3 -I "$HERE/certs_build.py" --model-sha) || { echo "the IR (SAIL_IR, else the external x86ir of formgate_inputs.json) does not load" >&2; exit 1; }
 PINSHA=$(env -u SAIL_IR python3 -I "$HERE/certs_build.py" --model-sha) || { echo "the pinned IR (external x86ir of formgate_inputs.json) does not load" >&2; exit 1; }
 [ "$SHA" = "$PINSHA" ] || { echo "IR sha256 $SHA is not the pinned IR $PINSHA (external x86ir of formgate_inputs.json)" >&2; exit 1; }
 
@@ -119,13 +113,50 @@ QID=$(echo "$QLINE" | awk '{print $2}'); echo "queue $QLINE (from $(find "$PUBD"
 fi
 ID="$(python3 -I "$HERE/certs_build.py" --id)-$QID"
 OUT="$W/out/$ID"; mkdir -p "$OUT"
-BR="$PREFIX/$ID/${K}of${N}"
-if [ "$PUBLISH" = 1 ] && git -C "$B" ls-remote --exit-code origin "refs/heads/$BR" >/dev/null 2>&1; then echo "SHAPEPROVE shard=$K/$N id=$ID: already published"; exit 0; fi
-
-# 3. prove
-ulimit -v "${VMEM_KB:-6000000}"
-python3 -I "$HERE/shapeprove.py" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --timeout "${TIMEOUT:-600}" --eip "${EIP:-sym}" --slice "${SLICE:-1}" ${LIMIT:+--limit "$LIMIT"} > "$OUT/shapeprove_${K}_of_$N.log" 2>&1 || true
 J="$OUT/shapeprove_${K}_of_$N.jsonl"
+# a results branch is WRITE-ONCE (the git proxy refuses deletes and forced updates): its name carries the content, <prefix>/<ID>/<K>of<N>-<sha12 of the jsonl>.  A rerun writes a new branch.  A branch counts as
+# published only when its record count equals the shard's queue rows and it has no error record (shardok); any other branch (empty, short, with errors) is ignored by rule, by every reader.
+ROWS=$(python3 -I - "$QUEUE" "$K" "$N" "${SLICE:-1}" <<'PY'
+import sys
+q, k, n, sl = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
+rows = [l for l in open(q) if l.strip() and l[0] != '#'][::sl]
+print(len([1 for i, _ in enumerate(rows) if i % n == k - 1]))
+PY
+)
+[ -n "${LIMIT:-}" ] && [ "$LIMIT" -lt "$ROWS" ] && ROWS=$LIMIT
+shardok() { python3 -I "$HERE/shardok.py" "$1" "$ROWS"; }     # exit 0 iff the jsonl has exactly ROWS records and no error record
+publish() {   # an orphan commit holding the jsonl only, on a NEW branch named by its content
+    [ "$PUBLISH" = 1 ] && [ -s "$J" ] || return 0
+    local h; h=$(sha256sum "$J" | cut -c1-12); BR="$PREFIX/$ID/${K}of${N}-$h"
+    git -C "$B" ls-remote --exit-code origin "refs/heads/$BR" >/dev/null 2>&1 && return 0
+    local p="$W/pub-$K"; rm -rf "$p"; mkdir -p "$p"; git -C "$p" init -q; git -C "$p" checkout -q --orphan pub
+    cp "$J" "$p/"; git -C "$p" add "shapeprove_${K}_of_$N.jsonl"
+    git -C "$p" -c user.name=farm -c user.email=farm@localhost commit -q -m "l3b-lift shapeprove $ID shard $K/$N ($(wc -l < "$J") records)"
+    git -C "$p" push -q "$(git -C "$B" remote get-url origin)" "pub:refs/heads/$BR"; local rc=$?; rm -rf "$p"; return $rc
+}
+# 3. resume: among this shard's branches take the one with the most records; already published = such a branch that passes shardok (nothing is re-run)
+if [ "$PUBLISH" = 1 ] && [ ! -s "$J" ]; then
+    BEST=0
+    for r in $(git -C "$B" ls-remote origin "refs/heads/$PREFIX/$ID/${K}of${N}-*" | awk '{print $2}'); do
+        git -C "$B" fetch -q --depth 1 origin "$r" || continue
+        git -C "$B" show FETCH_HEAD:"shapeprove_${K}_of_$N.jsonl" > "$J.try" 2>/dev/null || continue
+        c=$(wc -l < "$J.try"); if [ "$c" -gt "$BEST" ]; then BEST=$c; mv "$J.try" "$J"; fi
+    done
+    rm -f "$J.try"
+    [ -s "$J" ] && echo "resumed: $(wc -l < "$J") of $ROWS records"
+    if [ -s "$J" ] && shardok "$J"; then echo "SHAPEPROVE shard=$K/$N id=$ID already published: $ROWS records, no error"; exit 0; fi
+fi
+# 4. prove; the results are published every PUBLISH_EVERY seconds (default 600) while it runs, and at the end or on SIGTERM/SIGINT
+ulimit -v "${VMEM_KB:-6000000}"
+python3 -I "$HERE/shapeprove.py" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --timeout "${TIMEOUT:-600}" --eip "${EIP:-sym}" --slice "${SLICE:-1}" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
+PP=$!
+trap 'kill $PP 2>/dev/null; wait $PP 2>/dev/null; publish; exit 143' TERM INT
+LASTP=$(date +%s)
+while kill -0 $PP 2>/dev/null; do
+    sleep 5
+    if [ $(( $(date +%s) - LASTP )) -ge "${PUBLISH_EVERY:-600}" ]; then publish || echo "increment push failed (next try in ${PUBLISH_EVERY:-600} s)" >&2; LASTP=$(date +%s); fi
+done
+wait $PP || true
 [ -f "$J" ] || { echo "no result file; see $OUT/shapeprove_${K}_of_$N.log" >&2; tail -n 5 "$OUT/shapeprove_${K}_of_$N.log" >&2; exit 1; }
 SUM=$(python3 -I - "$J" <<'PY'
 import collections, json, sys
@@ -133,14 +164,7 @@ c = collections.Counter(json.loads(l)['result'] for l in open(sys.argv[1]))
 print('shapes=%d %s' % (sum(c.values()), ' '.join('%s=%d' % x for x in sorted(c.items()))))
 PY
 )
-
-# 4. publish: an orphan commit holding the jsonl only
-if [ "$PUBLISH" = 1 ]; then
-    p="$W/pub-$K"; rm -rf "$p"; mkdir -p "$p"; git -C "$p" init -q; git -C "$p" checkout -q --orphan pub
-    cp "$J" "$p/"
-    git -C "$p" add shapeprove_${K}_of_$N.jsonl
-    git -C "$p" -c user.name=farm -c user.email=farm@localhost commit -q -m "l3b-lift shapeprove $ID shard $K/$N"
-    git -C "$p" push -q "$(git -C "$B" remote get-url origin)" "pub:refs/heads/$BR" || { echo "SHAPEPROVE shard=$K/$N id=$ID: PUSH FAILED"; exit 1; }
-    rm -rf "$p"
-fi
-echo "SHAPEPROVE shard=$K/$N id=$ID $SUM seconds=$(( $(date +%s) - T0 )) branch=$([ "$PUBLISH" = 1 ] && echo "$BR" || echo none)"
+echo "SHAPEPROVE shard=$K/$N id=$ID $SUM rows=$ROWS seconds=$(( $(date +%s) - T0 )) cores=$(nproc) mem_kb=$(awk '/MemTotal/{print $2}' /proc/meminfo)"
+if ! shardok "$J"; then echo "SHAPEPROVE shard=$K/$N: FAILED: records != queue rows ($ROWS) or an error record; nothing is published as complete" >&2; exit 1; fi
+publish || { echo "SHAPEPROVE shard=$K/$N id=$ID: PUSH FAILED"; exit 1; }
+echo "published ${BR:-none}"
