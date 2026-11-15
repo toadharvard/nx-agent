@@ -369,7 +369,7 @@
    "property": "1 byte of padding is added between consecutive empty bases; the last empty base of a run is placed at the running offset, even past the end of a non-empty base",
    "msvc": "consecutive empty bases are separated by 1 byte of padding; the last is placed at the running offset",
    "gcc": "as MSVC after the patch: the empty base at the running offset, one byte between consecutive empty bases (the cases of the cited page)",
-   "mechanism": "msvcmodel.patch hunk in gcc/cp/class.cc layout_empty_base_or_field under TARGET_ILP32 (written; its farm build is pending)",
+   "mechanism": "msvcmodel.patch hunks in gcc/cp/class.cc under TARGET_ILP32: layout_empty_base_or_field places an empty base at the running offset with 1 byte between consecutive empty bases, and include_empty_classes does not grow the class over a trailing empty base (farm build pending)",
    "kind": "patch",
    "status": "open",
    "doc": [
