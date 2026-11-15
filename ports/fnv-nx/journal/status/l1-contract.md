@@ -1374,3 +1374,6 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Open: guest.json = script only.
   - Queue: loader generated tables, then the guest/host profile (L5's rule-2 census: compiler, runtime, plugins and flags restated 5-14 times across L5 roots); the profile is generated from targets.json + DATAMODEL + pins.
 - L2 crossing classes S12 PMF / S25 virtual base / S26 va_list go to w23, read from the DATAMODEL table.
+- L4 found that variants replace keys whole (tests/bootguest restates its flags 45 times):
+  - delta variants (flags_add) go to w12 with the profile;
+  - variants_from by regex is rejected (a guess from text). The preferred rule is one binary with the mode chosen at run time; else the source declares an X-macro, read by w20's probe stage.
