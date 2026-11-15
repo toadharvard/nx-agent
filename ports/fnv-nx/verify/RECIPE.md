@@ -169,7 +169,11 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
 - Target of the link: every linked object (own and input roots') has the ELF class and e_machine of the link's emulation (`aarch64linux32` ILP32 = class 1,
   AArch64; `aarch64linux` = class 2, AArch64; `elf_x86_64` = class 2, x86-64), read from its ELF header. A mismatch is red, stage `ld:<root>`, naming the object.
   `exe` is host only: a root of target guest links a `pie` (emulation `aarch64linux32`, the crt0 header), a guest test root included; a guest root with
-  kind `exe` is refused. A product image's `link.roots` name base roots only; a variant (`root@NAME`) is linked only by a root of class `test`.
+  kind `exe` is refused. A product image's `link.roots` name base roots only; an explicit variant (`root@NAME`) is linked only by a root of class `test`.
+  A `link.roots` entry names a root and the image links that root's recipe for the IMAGE'S OWN TARGET (`recipe.resolve_link_root`): an explicit `root@NAME` must itself
+  have the image's target, else red; a base name is the base recipe when the base's target is the image's, else the one variant of the root that admit.json declares with
+  the image's target (a host image names the guest root `lib/sha256` and links `lib/sha256@host`); no such variant, or several, is red. An object of another target is
+  red at the link in any case (class and e_machine of every input).
   The admit.json entry of a root may carry `variants`: {NAME: {"target": "guest"|"host"}} for variants the recipe declares; a variant inherits the base's
   target otherwise, the guest rules (compiler external, data model) are judged on the effective target, and a variant with its own target has it in
   every stage key (`FNVNX_TARGET`). Sources stay the base root's. Every entry point resolves a `root@NAME` spec with `split_spec` once.

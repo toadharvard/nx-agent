@@ -356,6 +356,27 @@ def effective(rec, name):
     return out
 
 
+def resolve_link_root(roots, d, target):
+    """The spec that the link.roots entry D names for an image of TARGET ("guest" | "host"), or (None, why). A link.roots entry names a root, and the
+    image links that root's recipe for the image's own target: an explicit `root@variant` must itself have TARGET (else none); a base name is the
+    base recipe when the base's target is TARGET, else the one per-target variant of the root whose target is TARGET (admit.json `variants`);
+    no such variant, or more than one, is none. Objects of another target are never linked (each linked object's ELF class and machine are checked
+    again at the link). -> (spec, "")."""
+    r, v = split_spec(d)
+    ent = roots.get(r)
+    if not ent:
+        return None, "%s is not an admitted root" % d
+    if v:
+        return (d, "") if entry_of(roots, d).get("target") == target else (None, "%s has target %r, the image %r" % (d, entry_of(roots, d).get("target"), target))
+    if ent.get("target") == target:
+        return d, ""
+    own = ent.get("variants") if isinstance(ent.get("variants"), dict) else {}
+    hit = sorted(n for n, x in own.items() if isinstance(x, dict) and x.get("target") == target)
+    if len(hit) == 1:
+        return "%s@%s" % (r, hit[0]), ""
+    return None, "%s has target %r and %s variant of target %r for the image" % (d, ent.get("target"), "no" if not hit else "several (%s)" % ", ".join(hit), target)
+
+
 def variant_names(rec):
     v = rec.get("variants") if isinstance(rec, dict) else None
     return sorted(v) if isinstance(v, dict) else []
@@ -568,14 +589,15 @@ def link_errors(lk, root, mine, roots, ext_names, repo, files=(), variant=""):
             err.append("link.roots: %s is listed twice" % d)
         dr, dv = split_spec(d)
         ent = roots.get(dr)
+        rs, why = resolve_link_root(roots, d, rent.get("target")) if ent else (None, "")
         if dr == root:
             err.append("link.roots: %s is the root itself" % d)
         elif ent and ent.get("class") != "product":
             err.append("link.roots: %s is a %s root: a root reached through link.roots runs at its target, so it is a product root (a tool root's outputs run at build time only)" % (d, ent.get("class")))
         elif not ent:
             err.append("link.roots: %s is not an admitted product root" % d)
-        elif entry_of(roots, d).get("target") != rent.get("target"):
-            err.append("link.roots: %s has target %r, the linking root %r" % (d, entry_of(roots, d).get("target"), rent.get("target")))
+        elif rs is None:
+            err.append("link.roots: %s (the linking image has target %r)" % (why, rent.get("target")))
         else:
             try:
                 drec = json.load(open(os.path.join(repo, ent["recipe"])))
@@ -583,7 +605,9 @@ def link_errors(lk, root, mine, roots, ext_names, repo, files=(), variant=""):
             except (OSError, ValueError, KeyError, AttributeError):
                 err.append("link.roots: the recipe of %s is unreadable" % d)
                 continue
-            if dv and dv not in variant_names(drec):
+            if rs and split_spec(rs)[1] and split_spec(rs)[1] not in variant_names(drec):
+                err.append("link.roots: %s has no variant %r (the one of target %r that admit.json declares)" % (dr, split_spec(rs)[1], rent.get("target")))
+            elif dv and dv not in variant_names(drec):
                 err.append("link.roots: %s has no variant %r" % (dr, dv))
             elif dv and rent.get("class") != "test":
                 err.append("link.roots: %s is a variant: only a test root (class test) links a variant; a product image links base roots" % d)
@@ -1660,6 +1684,7 @@ def build(repo, root, store, out, jobs=4, ext=None, link=True):
               groups = [("00-own", [(u, o["object"]) for u, o in zip(units, res["objects"])])]
               res["link_roots"], defs = [], {}
               for n, d in enumerate(lk.get("roots", [])):
+                  d = resolve_link_root(j.roots, d, entry_of(j.roots, spec).get("target"))[0]    # the root's recipe for the image's own target (check made it valid)
                   try:
                       r = build(repo, d, store, os.path.join(ws, "in", d.replace("/", "__")), jobs, j.extcache, link=False)   # its objects only: its own link (if any) is not built here
                   except RecipeError as x:
