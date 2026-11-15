@@ -134,3 +134,14 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
   - symcheck waits for the relift instrs.tsv (L3a w1);
   - the #UD certificates wait for L3a w6;
   - row #4 waits for CODEMAP.md (L3a w7).
+
+## 2026-11-15 09:15Z
+- All 8 farms confirm: the 24 v2 shards ran to the 2 h background limit, emitted no SHAPEPROVE line, published nothing, and no process survived.
+  - Cause (rule 8): the runner keeps results only at the end of a shard.
+  - Class fix, given to w4 for v3: per-shape results keyed by (shape_sha, IR pin, prover hash), published incrementally, with skip on restart; the shard count is derived from the measured per-shape rate.
+  - Orchestrator rule 8 fix, also in v3: the queue reads the IR pin from proof/sail_pins.txt at its head, and the runner checks it against the pin at its own head before the first shard.
+- bs class proof (w4, w1 426d95f8, IR 7c307464):
+  - 96 class shapes, 48 proved and 48 no-form. The no-form ones are F3 tzcnt/lzcnt, which have no builder. Sent to L3a: register them on bs() by decode under CPUREF.
+  - The pack universe (25,233 shapes) holds 0 bs shapes.
+- sysspec readers done (w4 8ed832c07). IN/OUT/INS/OUTS are uncertified until L5 adds the tss_io_bitmap row (asked of w14).
+- L5 w14 2895b30fe: 0x29 is in int_ring3.excluded as undecided; vectors 3, 4 and 0x2d come from Wine 9.0. w3 counts the dependent sites at this head.
