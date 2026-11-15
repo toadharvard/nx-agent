@@ -177,10 +177,11 @@ def derive(R, DEV):
         if len(v) != 1: die(f"CheckDeviceFormat (class, usage) not a function of (resource class, format class, usage): {k}")
     S = lambda rc, c, us: next(iter(cdf[(rc, c, us)]))
     M = [[0] * NC for _ in range(5)]
+    Q = lambda n: envq.WU["WINED3DUSAGE_QUERY_" + n]; RTU, DSU = envq.DU["D3DUSAGE_RENDERTARGET"], envq.DU["D3DUSAGE_DEPTHSTENCIL"]
     for rc in range(5):
         for c in range(NC):
-            bits = [S(rc, c, 0) == 0, S(rc, c, 1) == 0, S(rc, c, 2) == 0, S(rc, c, 0x20000) == 0, S(rc, c, 0x80000) == 0, S(rc, c, 0x10000) == 0,
-                    S(rc, c, 0x40000 | (1 if rc == 0 else 0)) == 0, S(rc, c, 0x100000) == 0, S(rc, c, 0x8000) == 0, S(rc, c, 0x400) != NA, S(rc, c, 0x400) == 0]
+            bits = [S(rc, c, 0) == 0, S(rc, c, RTU) == 0, S(rc, c, DSU) == 0, S(rc, c, Q("FILTER")) == 0, S(rc, c, Q("POSTPIXELSHADER_BLENDING")) == 0, S(rc, c, Q("SRGBREAD")) == 0,
+                    S(rc, c, Q("SRGBWRITE") | (RTU if rc == 0 else 0)) == 0, S(rc, c, Q("VERTEXTEXTURE")) == 0, S(rc, c, Q("LEGACYBUMPMAP")) == 0, S(rc, c, Q("GENMIPMAP")) != NA, S(rc, c, Q("GENMIPMAP")) == 0]
             M[rc][c] = sum(1 << i for i, b in enumerate(bits) if b)
     T["CDF"] = M
     # CheckDepthStencilMatch = RT-capable(rt) and DS-capable(ds); adapter format and device type are ignored
@@ -200,14 +201,14 @@ def derive(R, DEV):
     for (n, a), (r, o) in R.items():
         if n != "CheckDeviceMultiSampleType": continue
         ad, dev, fm, w, t = a
-        if ad != 0 or t > 16: (r, o) == (INV, "-") or die(f"CheckDeviceMultiSampleType {a} must be INVALIDCALL untouched"); continue
+        if ad != 0 or t > envq.MSAA_MAX: (r, o) == (INV, "-") or die(f"CheckDeviceMultiSampleType {a} must be INVALIDCALL untouched"); continue
         ms.setdefault((cls(fm), t), set()).add((r, o))
     mask = [0] * NC
     for c in range(NC):
         if c == UNK0:
-            if any(ms[(c, t)] != {(INV, "-")} for t in range(17) if (c, t) in ms): die("format UNKNOWN is INVALIDCALL")
+            if any(ms[(c, t)] != {(INV, "-")} for t in range(envq.MSAA_MAX + 1) if (c, t) in ms): die("format UNKNOWN is INVALIDCALL")
             continue
-        for t in range(17):
+        for t in range(envq.MSAA_MAX + 1):
             if len(ms[(c, t)]) != 1: die(f"CheckDeviceMultiSampleType not a function of (class, type) at {c},{t}")
         if ms[(c, 0)] != {(0, "q=1")}: die(f"MSAA type NONE at class {c}")
         for t in range(2, 17):

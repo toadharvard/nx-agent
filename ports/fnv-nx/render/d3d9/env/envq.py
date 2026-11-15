@@ -48,6 +48,7 @@ def switch_formats(wine, fmtn):
 #  - any other value goes through the switch of wined3dformat_from_d3dformat (device.c:115) whose `default:` is WINED3DFMT_UNKNOWN: one behaviour for every unmapped number (1, 37, 255, 0x7fffffff, 0x41420143).
 UNKNOWN_FMT = [fcc("ZZZZ"), fcc("abcd"), fcc("~!@#"), 1, 37, 255, 0x7fffffff, 0x41420143]
 FMT = None   # set by load(): every D3DFORMAT enum value of the header + the known FOURCCs + UNKNOWN_FMT
+WU = DU = MSAA_MAX = None   # set by load(): WINED3DUSAGE_* (wined3d.h) and D3DUSAGE_* (d3d9types.h) by name; the largest D3DMULTISAMPLE_TYPE enumerator
 KNOWN_FCC = None   # set by load(): the FOURCCs Wine 9.0 knows, sorted
 # DEVT, RTYPE, MSAA (and their *X / complement forms) are derived in load() from the enums of the mounted d3d9types.h (enum_domain)
 USAGE_BITS = [1 << i for i in range(32)]   # the 32 single bits of the DWORD usage word; PAIRS, MASK and the usage domains below are derived in load()
@@ -117,7 +118,7 @@ def known_fourcc(wine):
 def load(hdr, spec, wine, d3d9h):
     """the one entry: hdr = d3d9types.h, spec = the interface table (D9_SPEC), wine = the pinned Wine mirror directory; all are the caller's arguments (no default, no path of this file).
     Builds FMT (and its domain D["FMT"]) and sets SPEC; nothing of this module is valid before it is called."""
-    global FMT, SPEC, X8, R5, X1, A2R10, SWITCH, NA, INV, NOAUTOGEN
+    global WU, DU, MSAA_MAX, FMT, SPEC, X8, R5, X1, A2R10, SWITCH, NA, INV, NOAUTOGEN
     global KNOWN_FCC
     FN = d3dformat_enum(hdr)
     KNOWN_FCC = sorted(known_fourcc(wine))
@@ -129,6 +130,7 @@ def load(hdr, spec, wine, d3d9h):
     WU = c_defines(os.path.join(wine, "include", "wine", "wined3d.h"), "WINED3DUSAGE_"); DU = c_defines(hdr, "D3DUSAGE_")
     MASK = WU["WINED3DUSAGE_MASK"] | WU["WINED3DUSAGE_QUERY_MASK"] | DU["D3DUSAGE_RENDERTARGET"] | DU["D3DUSAGE_DEPTHSTENCIL"]
     EFF = [b for b in USAGE_BITS if b & MASK]
+    MSAA_MAX = max(enum_domain(hdr, "_D3DMULTISAMPLE_TYPE", ("D3DMULTISAMPLE_TYPE", "D3DMULTISAMPLE_FORCE_DWORD"))[0])   # D3DMULTISAMPLE_16_SAMPLES
     D["PAIRS"] = [a | b for i, a in enumerate(EFF) for b in EFF[i + 1:]]
     RTV, DSV = DU["D3DUSAGE_RENDERTARGET"], DU["D3DUSAGE_DEPTHSTENCIL"]; q = lambda n: WU["WINED3DUSAGE_QUERY_" + n]
     D["USM3"] = [0, RTV, DSV]
