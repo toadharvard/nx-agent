@@ -7,6 +7,7 @@ import re
 from capstone import x86 as X
 from .core import op, fallback, Unsupported, SKIP
 from .f_x87_ctl import sse_flaggy, fown_emit
+from .f_sys import gp_cond
 
 SSE = {}
 REG, MEM, IMM = X.X86_OP_REG, X.X86_OP_MEM, X.X86_OP_IMM
@@ -158,7 +159,8 @@ def h_prefetch(cx, ins):
 
 @op('ldmxcsr')
 def h_ldmxcsr(cx, ins):
-    cx.em('{ u32 v_=M32(%s); c->mxcsr=v_; sse_fpcr(v_); if(fown()==2u) fnvl_fp_x87_clear(); }' % cx.ea(ins, cx.ops[0]))      # the flags of the operand REPLACE the SSE set (SDM LDMXCSR)
+    gp = gp_cond(cx, '(v_ & ~FNVL_MXCSR_MASK) != 0u')      # SDM Vol 2 LDMXCSR: #GP(0) if a reserved bit (outside the model's MXCSR_MASK, verify/cpuid_model.json) is set; nothing is changed yet
+    cx.em('{ u32 v_=M32(%s); %s c->mxcsr=v_; sse_fpcr(v_); if(fown()==2u) fnvl_fp_x87_clear(); }' % (cx.ea(ins, cx.ops[0]), gp))      # the flags of the operand REPLACE the SSE set (SDM LDMXCSR)
 
 
 @op('stmxcsr')

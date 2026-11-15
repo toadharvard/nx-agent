@@ -7,7 +7,7 @@ Form-level conventions: fault(code, cond) = the instruction raises DE/BP/UD when
 model driver does not expose, so a form that writes them can only be certified on its observable fields."""
 import os, sys
 sys.path.insert(0, os.environ.get('FNVLIFT_ROOT') or os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from fnvlift.dsl import C, Form, V, bit, concat, eq, extract, load, msb, trunc, zext
+from fnvlift.dsl import C, Form, V, bit, concat, eq, extract, load, mm, msb, trunc, xmm, zext
 from capstone import x86 as X
 
 R8 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh']; R16 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di']
@@ -88,9 +88,18 @@ def mstore(F, a, v, when=None):
     F.store(a, v, when)
 def sload(a, w): return mload(ssa(a), w)
 def sstore(F, a, v): mstore(F, ssa(a), v)
+def isvec(op): return op.k == 'r' and (op.name.startswith('xmm') or (op.name.startswith('mm') and op.name[2:].isdigit()))
+def mload128(op):
+    """the 128-bit load of an SSE memory operand: two 64-bit loads, low half first (little endian)"""
+    a = ea(op); return concat(mload(addoff(a, C(8, 32)), 64), mload(a, 64))
 def rd(op, w=None):
     w = w or op.w
     if op.k == 'i': return C(op.val, w)
+    if isvec(op):
+        assert w <= op.w, (op.name, w)
+        v = xmm(int(op.name[3:])) if op.name.startswith('xmm') else mm(int(op.name[2:]))
+        return v if w == op.w else extract(v, w - 1, 0)
+    if op.k == 'm' and w == 128: return mload128(op)
     if op.k == 'm': return mload(ea(op), w)
     r, lo = op.full(); return extract(V(r, 32), lo + op.w - 1, lo)
 def store_op(F, op, addr, v, when=None):
@@ -99,6 +108,13 @@ def store_op(F, op, addr, v, when=None):
     if op.seg == 'cs': F.fault(7, C(1, 1))
     mstore(F, addr, v, when)
 def wr(F, op, v, when=None):
+    if isvec(op):
+        assert when is None and v.w == op.w, (op.name, v.w)
+        if op.name.startswith('xmm'): F.xmm(int(op.name[3:]), v)
+        else: F.mmw.append((int(op.name[2:]), v))        # an MMX register write: build() hands them to Form.mmx, the one MMX rule
+        return
+    if op.k == 'm' and op.w == 128:
+        a = ea(op); store_op(F, op, a, extract(v, 63, 0), when); store_op(F, op, addoff(a, C(8, 32)), extract(v, 127, 64), when); return
     if op.k == 'm': return store_op(F, op, ea(op), v, when)
     r, lo = op.full(); old = F.cur(r)
     if op.w == 32: F.reg(r, v, when)
@@ -137,7 +153,7 @@ def handler(*names):
 
 def build(ins, addr):
     """Form for a decoded instruction at addr; key = form_key(ins).  Raises KeyError for mnemonics outside the covered set."""
-    from proof import forms_alu, forms_move, forms_flow, forms_sys      # noqa: F401  (register their handlers)
+    from proof import forms_alu, forms_move, forms_flow, forms_sys, forms_simd, forms_ssefp      # noqa: F401  (register their handlers)
     c = Ctx(); c.ins, c.addr = ins, addr; c.F = Form(form_key(ins), addr, ins.size)
     words = ins.mnemonic.split(); c.rep = words[0] if len(words) > 1 else ''; c.m = words[-1]
     c.ops = [Op(ins, o) for o in ins.operands]
@@ -158,4 +174,5 @@ def build(ins, addr):
     if fn is None and c.m.startswith('cmov'): fn = H['cmovcc']
     if fn is None: raise KeyError(c.m)
     fn(c)
+    if c.F.mmw or any(isvec(o) and o.name.startswith('mm') for o in c.ops): c.F.mmx(c.F.mmw)      # every MMX instruction but EMMS: SDM Vol 1 9.5.1 (the handler of emms calls F.mmx(emms=True) itself)
     return c.F

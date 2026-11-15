@@ -23,35 +23,40 @@ from collections import Counter, defaultdict
 
 M32 = 0xffffffff
 WIDTH = 8
-OBJW = 8
+STKW = 256                       # stack slots of a callee's frame above this byte offset are one slot (DEEP): bounds the table forwarded around a call cycle (a recursion adds a slot per pass otherwise)
+OBJW = int(os.environ.get("PTOBJW", "8"))
 UNK = (None, None); TOP = ('TOP', None)
 U = frozenset([UNK]); TOPSET = frozenset([TOP])
 R32 = pcsrc.R32
 
 
-_NORM = {}
+class NS(frozenset):
+    """a token set in canonical (normalised) form: norm() of it is itself. Only norm() makes one; every set stored in a cell or state is one."""
+    __slots__ = ()
 
 
 def norm(ts):
-    """widen a token set: per object more than WIDTH offsets -> ANY; more than WIDTH integer constants -> the arbitrary integer; TOP absorbs nothing (kept as a token)"""
-    if len(ts) <= WIDTH: return ts
-    r = _NORM.get(ts)
-    if r is None:
-        r = _NORM[ts] = _norm(ts)           # pure function of the set: memoised (the same wide sets are joined millions of times)
-    return r
+    """the canonical form of a token set: per object more than WIDTH offsets -> ANY; more than WIDTH integer constants -> the arbitrary integer; more than OBJW frame or heap objects of a kind -> the kind's summary object;
+    TOP absorbs nothing (kept as a token). norm(norm(x)) == norm(x), and x is contained in norm(x) as a set of concrete values. No memo table (a memo keyed by the wide input sets held 1.3 GB at 3M joins on binkw32).
+    Canonical forms are what makes the fixpoint terminate: two sets with the same meaning compare equal, so a join that adds nothing is seen as unchanged."""
+    if type(ts) is NS: return ts
+    return NS(_norm(ts))
 
 
 def _norm(ts):
+    """canonical form, in this order: (1) per object more than WIDTH offsets -> ANY; (2) more than WIDTH integer constants -> the arbitrary integer; (3) more than OBJW frame or heap objects of a kind -> the kind's
+    summary object (kind, '*') with ANY offset; (4) SUBSUMPTION: a token that another token of the set already covers is dropped: (o, c) under (o, None), (F|H obj, c) under ((kind,'*'), None), (None, c) under UNK.
+    Without (4) one meaning has several forms and a loop that adds an offset to an object that already has ANY, then collapses at WIDTH, alternates between them forever."""
     byo = defaultdict(set)
     for o, c in ts: byo[o].add(c)
     out = set()
     for o, cs in byo.items():
-        if o is None: out |= {(None, c) for c in cs} if len(cs) <= WIDTH else {UNK}
+        if o is None:
+            if None in cs or len(cs) > WIDTH: out.add(UNK)
+            else: out |= {(None, c) for c in cs}
         elif o == 'TOP': out.add(TOP)
-        elif len(cs) <= WIDTH: out |= {(o, c) for c in cs}
-        else: out.add((o, None))
-    # more than OBJW distinct objects of one kind (frames F, heap H): the set becomes the ANY-offset pointer of the kind's SUMMARY object (kind, '*'), which stands for every object of the kind
-    # (a write through it is seen by a read of any of them: PT.read / PT.write / PT.objall). The representation of a set stays bounded by (static sections) + OBJW x kinds + the integer constants.
+        elif None in cs or len(cs) > WIDTH: out.add((o, None))
+        else: out |= {(o, c) for c in cs}
     kinds = defaultdict(set)
     for o, c in out:
         if o is not None and o != 'TOP' and o[0] in ('F', 'H') and o[1] != '*': kinds[o[0]].add(o)
@@ -59,13 +64,17 @@ def _norm(ts):
         if len(objs) > OBJW:
             out = {(o, c) for o, c in out if not (o is not None and o != 'TOP' and o[0] == k and o[1] != '*')}
             out.add(((k, '*'), None))
+    for o, c in list(out):                                   # (4) subsumption by a summary object
+        if o is not None and o != 'TOP' and o[0] in ('F', 'H') and o[1] != '*' and ((o[0], '*'), None) in out: out.discard((o, c))
     return frozenset(out)
 
 
 def join(a, b):
-    if a is None: return b
-    if b is None or a is b or b <= a: return a
-    if a <= b: return b
+    """the canonical union; every result is canonical (norm), also when one side contains the other: returning the raw wider side would give the same meaning two forms and the dataflow of a loop would alternate between them"""
+    if a is None: return norm(b) if b is not None else None
+    if b is None or a is b: return norm(a)
+    if b <= a: return norm(a)
+    if a <= b: return norm(b)
     return norm(a | b)
 
 
@@ -225,6 +234,13 @@ class PT:
             def rdmem(op):
                 if op.type == X.X86_OP_MEM:
                     ad = addr_of(op); v = self.read(ad)
+                    for o_, c_ in ad:                                  # incoming slots (and pushed ones) of this frame: the values the caller passed (feed), joined to the cells
+                        if o_ == fr:
+                            if c_ is None:
+                                for sv in st.values(): v = join(v, sv)
+                            else:
+                                sv = st.get(min(c_, STKW) if c_ >= 0 else c_)
+                                if sv is not None: v = join(v, sv)
                     if op.size and op.size != 4: v = U if not any(t[0] == 'TOP' for t in v) else TOPSET
                     return v
                 return None
@@ -383,7 +399,9 @@ class PT:
         if esp is not None:
             base = esp if tail else esp - 4
             for k, v in st.items():
-                if k >= (esp if tail else esp): s[k - base] = join(s.get(k - base), v)
+                if k >= esp:
+                    kk = min(k - base, STKW) if k - base >= 0 else k - base      # offsets from the callee's entry esp; at STKW and above one slot (DEEP): a join, sound
+                    s[kk] = join(s.get(kk), v)
         new = (r, s)
         if new != old: self.inp[t] = new; self.changed = True
 

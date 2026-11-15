@@ -323,15 +323,6 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
             raise Unsupported('entry %x decodes but lies outside its range' % start)
         bad = set(bad) | {start}
     order = sorted(insns)
-    def head4(a):
-        """the first four bytes at `a` (what KiTrap06Handler scans for F0): from `code`, beyond it from the image (none when the image has no byte there)"""
-        t = code[a - lo:a - lo + 4]
-        if len(t) < 4:
-            try:
-                t = img.bytes(a, 4)
-            except (TypeError, ValueError, IndexError):
-                pass
-        return t
     cx = Ctx(addr, size, insns, tables, taken)
     cx.start = start
     xc.prepass(cx, img, 'dyn' if x87 == 'dyn' else None, x87 if isinstance(x87, int) else 0)     # x87 stack-depth pre-pass: cx.xm 's' static / 'd' dynamic / None
@@ -375,8 +366,6 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
         else:
             gs_guard(cx, ins)
             dispatch(cx, ins)
-        if any('FNVL_RAISE(FNVL_UD,' in t for t in cx.L[n0:]) and 0xf0 in head4(a):      # KiTrap06Handler: a #UD with an F0 byte among the first four bytes at Eip is STATUS_INVALID_LOCK_SEQUENCE
-            cx.L[n0:] = [t.replace('FNVL_RAISE(FNVL_UD,', 'FNVL_RAISE(FNVL_LOCK,') for t in cx.L[n0:]]
         if not cx.term and (idx + 1 == len(order) or order[idx + 1] != nxt):
             if nxt in insns or nxt in bad:
                 em('goto %s;' % cx.lab(nxt))
@@ -389,7 +378,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
             xc.fix_lines(cx, a, n0)
     for a in sorted(bad):      # bytes that do not decode: the CPU raises #UD there
         cx.nonlocal_ = True
-        em('%s: ; SYNC_OUT; REGS(); FNVL_RAISE(%s,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % (cx.lab(a), 'FNVL_LOCK' if 0xf0 in head4(a) else 'FNVL_UD', a))
+        em('%s: ; SYNC_OUT; REGS(); FNVL_RAISE(%s,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % (cx.lab(a), 'FNVL_UD', a))
     if not order or start != order[0]:       # also an entry whose first byte does not decode: its body is the #UD at that address
         cx.L.insert(0, 'goto %s;' % cx.lab(start))
     if cx.nonlocal_:

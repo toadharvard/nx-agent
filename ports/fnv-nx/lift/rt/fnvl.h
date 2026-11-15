@@ -1,6 +1,6 @@
 
 typedef unsigned char u8; typedef unsigned short u16; typedef unsigned int u32; typedef unsigned long long u64;
-typedef signed char s8; typedef short s16; typedef int s32; typedef long long s64;
+typedef unsigned __int128 u128; typedef signed char s8; typedef short s16; typedef int s32; typedef long long s64;
 typedef u8 __attribute__((may_alias)) u8a; typedef u16 __attribute__((aligned(1),may_alias)) u16a;
 typedef u32 __attribute__((aligned(1),may_alias)) u32a; typedef u64 __attribute__((aligned(1),may_alias)) u64a;
 typedef float __attribute__((aligned(1),may_alias)) f32a; typedef double __attribute__((aligned(1),may_alias)) f64a;
@@ -46,11 +46,8 @@ register struct cpu *c asm("x27");
 #define REGS() __asm__ volatile("" : "+r"(eax),"+r"(ecx),"+r"(edx),"+r"(ebx),"+r"(esp),"+r"(ebp),"+r"(esi),"+r"(edi))
 /* Control transfer (README): a lifted function is `void L_<addr>(void)`. A direct call or tail to another entry is a C call of its
    L_ function (CALLX); the one-instruction tests (test/instest.py) redefine CALLX after the prelude in their own sources. */
+#include "fnvl_faults.h"      /* the FNVL_* fault codes: generated from fnvlift/faults.json, the one CPU fault table (tools/gen_faults.py) */
 /* hardware exception codes passed to fnvl_raise(code, at) (rt/seh.cc maps them to NTSTATUS): divide by zero / quotient overflow, #BP, #UD */
-#define FNVL_DE0 1
-#define FNVL_DEOVF 5
-#define FNVL_BP 3
-#define FNVL_UD 4
 extern "C" { void (*fnvl_dispatch(u32 image_addr))(void);
              void fnvl_trace(u32 entry, u32 esp); }
 #define CALLX(h) L_##h()
@@ -234,21 +231,95 @@ FNVL_F2I static inline u32 sse_f2i(double v,u32 rc){ double r=rc==0?__builtin_ro
 static inline double sse_f2d(float v,u32 mx){ v=sse_daz(v,mx); if(v!=v){ u32 b=fxbits(v); return fxval<double>((u64)(b&0x80000000u)<<32|0x7ffull<<52|(u64)(b&0x7fffffu)<<29|1ull<<51); } return (double)v; }
 static inline float sse_d2f(double v,u32 mx){ v=sse_daz(v,mx); if(v!=v){ u64 b=fxbits(v); return fxval<float>((u32)(b>>32)&0x80000000u|0x7f800000u|(u32)((b&FX<double>::M)>>29)|0x400000u); } return sse_ftz((float)v,mx); }
 static inline void sse_fpcr(u32 mx){ static const unsigned char m[4]={0,2,1,3}; u64 f; __asm__ volatile("mrs %0, fpcr":"=r"(f)); f=(f&~(3ull<<22))|((u64)m[(mx>>13)&3]<<22); __asm__ volatile("msr fpcr, %0"::"r"(f)); }
+/* DSL SSE state (fnvlift/dsl.py F.xmm / F.mxcsr and the xmm<i> / mxcsr pre-state): the whole value of the register as a u128 (little endian: q[0] is the low half), the architectural
+   MXCSR image = c->mxcsr (flags of the SSE family's host FPSR are added while it is the owner); a write replaces the whole register / the whole MXCSR: the flags the host FPSR holds for the
+   SSE family are cleared (the new value carries the sticky flags), the host rounding mode follows RC (bits 13-14). */
+static inline u128 fx_dsl_xmm(u32 i){ return ((u128)c->x[i].q[1]<<64)|c->x[i].q[0]; }
+static inline void fx_dsl_xmm_set(u32 i, u128 v){ c->x[i].q[0]=(u64)v; c->x[i].q[1]=(u64)(v>>64); }
+static inline u32 fx_dsl_mxcsr(void){ return c->mxcsr|sse_live(); }
+static inline void fx_dsl_mxcsr_set(u32 v){ FOWN_SSE(); fnvl_fp_x87_clear(); c->mxcsr=v; sse_fpcr(v); }
+/* dsl.fp (fnvlift/dsl.py `fp`, the rules are in its docstring and in _fp_smt): scalar binary32 / binary64 add sub mul div sqrt (op 0..4) of the bit patterns a, b under the MXCSR value mx -> the result's
+   bit pattern in the low w bits and THIS operation's flags IE DE ZE OE UE PE (MXCSR bits 0-5) in bits w..w+5. The host does the IEEE operation in the guest's rounding mode (FPCR RC from mx, sse_fpcr);
+   its sticky IOC / DZC / OFC / IXC flags are IE / ZE / OE / PE; NaN operands, DAZ, DE, tininess AFTER rounding (UE: the result rounded to the destination precision with unbounded exponent range is nonzero and below the smallest normal, SoftFloat 8086-SSE specialize.h;
+   the host's UFC is before rounding and is not used) and FTZ are computed here on the bit patterns. The live host flags of the SSE family are folded into c->mxcsr first (the family's sticky set is c->mxcsr | live), so none is lost. */
+/* tininess AFTER rounding of a mul / div (SDM / SoftFloat 8086-SSE): the exact result V * 2^E (V an integer, a sticky bit for a division's remainder) rounded to P significant bits in the guest's rounding mode rc
+   with unbounded exponent range is below the smallest normal 2^(1-BIAS). Integers only: the host's own rounding is at the subnormal grid and cannot answer this. a, b: finite operands after DAZ. */
+template<class UT, int FB> static inline bool fx_tiny_after(bool div, UT a, UT b, u32 rc){
+  const int W=sizeof(UT)*8, P=FB+1, BIAS=(1<<(W-FB-2))-1; const UT FM=((UT)1<<FB)-1; const bool neg=(((a^b)>>(W-1))&1)!=0;
+  auto dec=[&](UT x, u128& m, int& e){ UT ef=(x>>FB)&((((UT)1)<<(W-FB-1))-1), f=x&FM; if(ef==0){ m=f; e=1-BIAS-FB; } else { m=f|((UT)1<<FB); e=(int)ef-BIAS-FB; } };
+  const UT EXM=(UT)((((UT)1<<(W-1))-1)&~FM); if((a&EXM)==EXM||(b&EXM)==EXM) return false;      /* an infinite operand: the result is an exact zero or an infinity */
+  u128 ma, mb; int ea, eb; dec(a,ma,ea); dec(b,mb,eb);
+  if(ma==0||mb==0) return false;                                    /* an exact zero is not tiny */
+  while(!(ma>>FB)){ ma<<=1; ea--; } while(!(mb>>FB)){ mb<<=1; eb--; }
+  u128 V; int E; bool st=false;
+  if(!div){ V=ma*mb; E=ea+eb; }
+  else { const int S=P+3; const u128 num=ma<<S; u128 q=0, r=0; for(int i=P+S-1;i>=0;i--){ r=(r<<1)|((num>>i)&1); q<<=1; if(r>=mb){ r-=mb; q|=1; } } st=r!=0; V=q; E=ea-eb-S; }
+  int L=0; for(u128 t=V;t;t>>=1) L++;
+  int top;
+  if(L>P){ const int d=L-P; const u128 low=V&(((u128)1<<d)-1), half=(u128)1<<(d-1), R=V>>d; const bool inex=low!=0||st, g=(low&half)!=0, rest=(low&(half-1))!=0||st;
+    bool up=false; if(rc==0) up=g&&(rest||(R&1)); else if(rc==1) up=neg&&inex; else if(rc==2) up=!neg&&inex;
+    top=E+d+P-1; if(up && R+1==((u128)1<<P)) top++; }
+  else top=E+L-1;
+  return top < 1-BIAS; }
+/* dsl.fp ops 5..16: min max, the eight CMPPS predicates, comi ucomi (fnvlift/dsl.py CMPPRED, _fp_smt): no rounding, integer compares of the bit patterns (a, b after DAZ; ao, bo the operands as read, for DE); the result's flags are IE and DE only.
+   The value is the min / max result, the all-ones / zero predicate mask, or ZF<<2 | PF<<1 | CF of COMISS / UCOMISS. */
+template<class UT, int FB> static inline u128 fx_dsl_fcmp(u32 op, UT ao, UT bo, UT a, UT b, u32 mx){
+  const int W=sizeof(UT)*8; const UT SGN=(UT)1<<(W-1), FM=((UT)1<<FB)-1, EX=(UT)((((UT)1<<(W-1))-1)&~FM), QB=(UT)1<<(FB-1);
+  auto isnan=[&](UT x){ return (x&EX)==EX && (x&FM)!=0; };
+  auto issnan=[&](UT x){ return isnan(x) && !(x&QB); };
+  auto issub=[&](UT x){ return (x&EX)==0 && (x&FM)!=0; };
+  auto key=[&](UT x)->long long { long long m=(long long)(x&~SGN); return (x&SGN) ? -m : m; };
+  const bool un=isnan(a)||isnan(b), sn=issnan(a)||issnan(b), daz=(mx>>6)&1;
+  const bool lt=!un && key(a)<key(b), eq=!un && key(a)==key(b), gt=!un && key(a)>key(b);
+  bool invalid; UT val;
+  if(op==5||op==6){ invalid=un; const bool bz=(a&~SGN)==0 && (b&~SGN)==0; val=un||bz ? b : (op==5 ? (lt?a:b) : (gt?a:b)); }
+  else if(op>=7&&op<=14){ const u32 k=op-7; const bool sig=k==1||k==2||k==5||k==6; invalid=sig?un:sn;
+    const bool t=k==0?eq : k==1?lt : k==2?(lt||eq) : k==3?un : k==4?(un||!eq) : k==5?(un||!lt) : k==6?(un||!(lt||eq)) : !un;
+    val=t?(UT)~(UT)0:(UT)0; }
+  else { invalid=(op==15)?un:sn; val=(UT)(((un||eq)?4u:0u)|(un?2u:0u)|((un||lt)?1u:0u)); }
+  const bool de=!daz && !invalid && (issub(ao)||issub(bo));
+  return ((u128)((invalid?1u:0u)|(de?2u:0u))<<W)|val; }
+template<class FT, class UT, int FB> static inline u128 fx_dsl_fp_t(u32 op, UT a, UT b, u32 mx){
+  const int W=sizeof(UT)*8; const UT SGN=(UT)1<<(W-1), FM=((UT)1<<FB)-1, EX=(UT)((((UT)1<<(W-1))-1)&~FM), QB=(UT)1<<(FB-1), MINN=(UT)1<<FB;
+  const bool daz=(mx>>6)&1, um=(mx>>11)&1, ftz=(mx>>15)&1;
+  auto isnan=[&](UT x){ return (x&EX)==EX && (x&FM)!=0; };
+  auto issnan=[&](UT x){ return isnan(x) && !(x&QB); };
+  auto issub=[&](UT x){ return (x&EX)==0 && (x&FM)!=0; };
+  const bool unary=op==4;
+  const UT ao=a, bo=unary?a:b;
+  if(daz){ if(issub(a)) a&=SGN; if(issub(b)) b&=SGN; }
+  if(op>=5) return fx_dsl_fcmp<UT,FB>(op,ao,bo,a,b,mx);
+  const UT indef=(UT)(SGN|EX|QB);
+  UT val; u32 fl=0;
+  if(isnan(a)||(!unary&&isnan(b))){
+    val=isnan(a)?(UT)(a|QB):(UT)(b|QB); fl=(issnan(a)||(!unary&&issnan(b)))?1u:0u;
+    return ((u128)fl<<W)|val; }
+  FOWN_SSE(); c->mxcsr|=sse_live(); sse_fpcr(mx); fnvl_fp_x87_clear();
+  FT x, y, r; __builtin_memcpy(&x,&a,sizeof x); __builtin_memcpy(&y,&b,sizeof y);
+  __asm__ volatile("" : "+w"(x), "+w"(y));
+  switch(op){ case 0: r=x+y; break; case 1: r=x-y; break; case 2: r=x*y; break; case 3: r=x/y; break; default: r=__builtin_sqrt(x); }
+  __asm__ volatile("" : "+w"(r));
+  const u32 hf=fnvl_fp_x87_flags(); fnvl_fp_x87_clear();
+  const bool ie=hf&1u, ze=(hf>>2)&1u, oe=(hf>>3)&1u, pe=((hf>>5)&1u)!=0;
+  __builtin_memcpy(&val,&r,sizeof val);
+  if(ie){ sse_fpcr(mx); return ((u128)1u<<W)|indef; }
+  const bool de=!daz && (issub(ao)||issub(bo));
+  bool tiny=false;
+  if((UT)(val&~SGN)<=MINN){                                         /* a tiny-after-rounding result is at most the smallest normal: add / sub there are exact (a multiple of the subnormal step), mul / div decide exactly in integers, sqrt is never tiny */
+    if(op<=1) tiny=(UT)(val&~SGN)!=0 && (UT)(val&~SGN)<MINN;
+    else if(op<=3) tiny=fx_tiny_after<UT,FB>(op==3,a,b,(mx>>13)&3u); }
+  bool ue=tiny&&(pe||!um), pe2=pe||oe;
+  if(ftz&&um&&tiny){ val&=SGN; ue=true; pe2=true; }
+  fl=(de?2u:0u)|(ze?4u:0u)|(oe?8u:0u)|(ue?16u:0u)|(pe2?32u:0u);
+  return ((u128)fl<<W)|val; }
+static inline u128 fx_dsl_fp(u32 op, u32 w, u64 a, u64 b, u32 mx){
+  return w==32 ? fx_dsl_fp_t<float,u32,23>(op,(u32)a,(u32)b,mx) : fx_dsl_fp_t<double,u64,52>(op,a,b,mx); }
 static inline int sse_sat(int v,int lo,int hi){ return v<lo?lo:v>hi?hi:v; }
 static inline u64 sse_sad(const u8*a,const u8*b){ u32 s=0; for(int i=0;i<8;i++) s+=a[i]>b[i]?a[i]-b[i]:b[i]-a[i]; return s; }
 static inline u32 sse_pmovmskb(xmm_t s,int n){ u32 r=0; for(int i=0;i<n;i++) r|=(u32)(s.b[i]>>7)<<i; return r; }
 /* ---- Integer / system helpers (W14). ---- */
-/* more hardware exception codes for fnvl_raise(code, at); rt/seh.cc maps them (the case in its status mapping is the runtime owner's):
-   FNVL_PRIV 6  STATUS_PRIVILEGED_INSTRUCTION 0xC0000096, a fault: ExceptionAddress = Context.Eip = at
-   FNVL_BOUNDS 7  STATUS_ARRAY_BOUNDS_EXCEEDED 0xC000008C (bound, `int 5`), a fault: Eip = at
-   FNVL_INTO 8  STATUS_INTEGER_OVERFLOW 0xC0000095 (into, `int 4`), a trap: ExceptionAddress = at, Context.Eip = at+1
-   FNVL_ASSERT 9  STATUS_ASSERTION_FAILURE 0xC0000420 (`int 0x2c`): ExceptionAddress = Context.Eip = at
-   `int 3` / `int 0x2d` use FNVL_BP with at = the address of the byte after the opcode byte (see f_sys.py). A #GP from a software interrupt whose gate has DPL 0
-   is fnvl_raise_av(0, 0xFFFFFFFF, at). */
-#define FNVL_PRIV 6
-#define FNVL_BOUNDS 7
-#define FNVL_INTO 8
-#define FNVL_ASSERT 9
+/* The hardware exception codes (FNVL_*) are one table, fnvlift/faults.json (status, trap/fault, address rule, source per row): fnvl_faults.h and the cases of rt/seh.cc are generated from it.
+   `int 3` / `int 0x2d` use FNVL_BP with at = the address of the byte after the opcode byte (see f_sys.py). A #GP from a software interrupt whose gate has DPL 0 is fnvl_raise_av(0, 0xFFFFFFFF, at). */
 extern "C" { void fnvl_cpuid(u32 leaf, u32 sub, u32 out[4]); u64 fnvl_rdtsc(void); }
 /* The hardware-raise entries of the runtime (rt/seh.cc) are declared ONLY here, inside namespace fnvl_rt, and only FNVL_RAISE / FNVL_RAISE_AV below name them: a lifted unit that calls the raw
    fnvl_raise or fnvl_raise_av (no EFLAGS / C0 C2 C3 flush) does not find the name and is a compile error. They are the same C-linkage functions as the definitions in seh.cc. */
@@ -266,19 +337,8 @@ namespace fnvl_rt { extern "C" { void fnvl_raise(u32 code, u32 at); void fnvl_ra
 #define RAISE_IN do{ u32 ef_=c->eflags; EFL_POP(ef_); c0=(c->fc>>8)&1; c2=(c->fc>>10)&1; c3=(c->fc>>14)&1; }while(0)
 #define FNVL_RAISE(code, at) do{ RAISE_OUT; fnvl_rt::fnvl_raise(code, at); RAISE_IN; }while(0)
 #define FNVL_RAISE_AV(acc, addr, at) do{ RAISE_OUT; fnvl_rt::fnvl_raise_av(acc, addr, at); RAISE_IN; }while(0)
-/* aam/aad/aaa/aas/daa/das are generated inline; segment selector values of a Win32 x86 user process (as in rt/seh.cc's CONTEXT) */
-#define SEL_CS 0x1bu
-#define SEL_DS 0x23u
-#define SEL_FS 0x3bu
-/* ---- W15: class rules of the system / rare-instruction family (fnvlift/f_sys.py, f_int.py). Appended; nothing above changed. ----
-   More hardware exception codes for fnvl_raise(code, at) (the mapping lines for rt/seh.cc are in the W15 report):
-   FNVL_STEP 10  STATUS_SINGLE_STEP 0x80000004 (`int1` / icebp, F1: a debug TRAP): ExceptionAddress = Context.Eip = at, which is the address of the NEXT instruction
-   (KiTrap01: KiDispatchException0Args(STATUS_SINGLE_STEP, TrapFrame->Eip), no parameters). */
-#define FNVL_STEP 10
-/* FNVL_LOCK 11  STATUS_INVALID_LOCK_SEQUENCE 0xC000001E: #UD of an instruction that has an F0 prefix among its bytes (KiTrap06Handler); at = the instruction, a fault. */
-#define FNVL_LOCK 11
-/* FNVL_DBGSRV 12  `int 0x2d` (the debug service), at = the instruction; the rule of Wine 9.0 handle_interrupt, rt/seh.cc fnvl_raise. */
-#define FNVL_DBGSRV 12
+/* aam/aad/aaa/aas/daa/das are generated inline; the selectors of the process (SEL_CS SEL_DS SEL_ES SEL_SS SEL_FS SEL_TR) and fnvl_seg_ok are generated from platform/declared/x86sys.json (tools/gen_sys.py, included below at SEG_*). */
+/* ---- W15: class rules of the system / rare-instruction family (fnvlift/f_sys.py, f_int.py). The fault codes they raise (STEP, LOCK, DBGSRV, FLT_*) are rows of fnvlift/faults.json. ---- */
 /* Segment registers of the process model (rt/seh.cc CONTEXT values above): index into the register file. Every segment has base 0 and limit 4 GiB except FS
    (base = TEB, limit 0xFFF); the only descriptors a ring-3 load can reach are the three of the model GDT below, plus the null selector for ES/DS/FS/GS.
    SELK strips the RPL: it keeps the descriptor index and the TI bit (a TI=1 selector names the LDT, which a Win32 process has none of: always invalid). */
@@ -289,18 +349,9 @@ namespace fnvl_rt { extern "C" { void fnvl_raise(u32 code, u32 at); void fnvl_ra
 #define SEG_FS 4
 #define SEG_GS 5
 #define SELK(s_) ((s_)&0xfffcu)
-/* Model GDT (the NT x86 user descriptors; SDM Vol 3 3.4.5 for the layout): high dword of the descriptor of the selector, 0 = no descriptor a ring-3 process can name
-   (null, kernel segments and TSS: DPL 0, not accessible at CPL 3; every index outside the three: not present).
-   CS 0x00cffb00: G=1 D=1 limit 0xfffff, P DPL=3 S=1 type 0xb (execute/read, accessed).  DS 0x00cff300: the same as data, type 0x3 (read/write, accessed).
-   FS 0x0040f300: G=0 D=1 limit 0xfff (the TEB page), DPL=3 data read/write; its base is the TEB (the cpu's fs base), which no instruction below reads. */
-static inline u32 fnvl_gdt_hi(u32 sel){ u32 k=SELK(sel); return k==SELK(SEL_CS)?0x00cffb00u:k==SELK(SEL_DS)?0x00cff300u:k==SELK(SEL_FS)?0x0040f300u:0u; }
-static inline u32 fnvl_gdt_limit(u32 hi){ u32 l=hi==0x0040f300u?0xfffu:0xfffffu; return (hi&0x00800000u)?(l<<12)|0xfffu:l; }
-/* May a MOV/POP/LDS... load selector `sel` into segment register idx at CPL 3 (SDM Vol 3 5.2 / MOV-to-Sreg pseudo-code)? ES/DS/FS/GS: the null selector (index 0, TI 0, any RPL),
-   or a data / readable-code segment with DPL >= max(CPL, RPL) = 3: all three model descriptors. SS: not null, RPL == CPL == 3, a writable data segment (DS or FS). CS is never
-   loaded by these instructions (a far transfer checks it: RPL <= 3 and the CS index). */
-static inline u32 fnvl_seg_ok(u32 idx, u32 sel){ u32 k=SELK(sel);
-  if(idx==SEG_SS) return (sel&3)==3&&(k==SELK(SEL_DS)||k==SELK(SEL_FS));
-  return k==0||k==SELK(SEL_CS)||k==SELK(SEL_DS)||k==SELK(SEL_FS); }
+/* SELK strips the RPL. fnvl_seg_ok(idx, sel) (generated: the loadable selectors per register are mov_to_sreg of platform/declared/x86sys.json; a selector the record leaves undecided calls
+   fnvl_undecided_selector, which has no definition: the lifted code that can load one does not link). */
+#include "fnvl_sys.h"
 /* Segment register STATE (lead): fnvl_seg_set(c, idx, sel): c->sel[idx] = sel and, for FS, c->fs = (SELK(sel)==SELK(SEL_FS)) ? c->teb : 0 (a flat selector has base 0; the null
    selector leaves no usable base); fnvl_seg_get(c, idx) reads c->sel[idx] (CS: SEL_CS). The caller has already checked fnvl_seg_ok. The lifter emits fnvl_seg_set only for a load
    instruction and, while f_int.SEG_STATE is False, still reads the register as the process constant of SEGSEL. */
@@ -308,16 +359,7 @@ static inline void fnvl_seg_set(struct cpu *p, u32 idx, u32 sel){ p->sel[idx]=se
 static inline u32 fnvl_seg_get(struct cpu *p, u32 idx){ return p->sel[idx]; }
 /* Segment state of a fresh thread (rt/enter.cc cpu_reset): the process constants of a native 32-bit Windows 7 user process (rt/seh.cc make_context): CS 0x1b, DS=ES=SS 0x23, FS 0x3b with
    base = TEB, GS null. struct cpu.sel is indexed ES, CS, SS, DS, FS, GS (SEG_*); sel and teb are the last fields of struct cpu. */
-static inline void fnvl_seg_init(struct cpu *p, u32 teb){ p->teb=teb; p->sel[SEG_ES]=SEL_DS; p->sel[SEG_CS]=SEL_CS; p->sel[SEG_SS]=SEL_DS; p->sel[SEG_DS]=SEL_DS; p->sel[SEG_FS]=SEL_FS; p->sel[SEG_GS]=0u; p->fs=teb; }
+static inline void fnvl_seg_init(struct cpu *p, u32 teb){ p->teb=teb; p->sel[SEG_ES]=SEL_ES; p->sel[SEG_CS]=SEL_CS; p->sel[SEG_SS]=SEL_SS; p->sel[SEG_DS]=SEL_DS; p->sel[SEG_FS]=SEL_FS; p->fs=teb; }
 /* Base of a `gs:` access, by the CURRENT GS selector (the null selector never gets here: the lifter emits a #GP(0) guard before the instruction): the FS descriptor -> TEB, a flat one -> 0. */
 #define FNVL_GS_BASE() (SELK(c->sel[SEG_GS])==SELK(SEL_FS)?c->teb:0u)
-/* Descriptor-table registers as sgdt/sidt/sldt/str/smsw read them (readable at CPL 3, CR4.UMIP = 0). The reference OS state is not derivable from the instruction set, so the
-   model fixes it: GDT/IDT in kernel space with the standard NT x86 sizes (GDT 128 descriptors, IDT 256 gates), no LDT (selector 0), TR = KGDT_TSS 0x28 (RPL 0),
-   MSW/CR0 = PG|WP|NE|ET|MP|PE with TS clear: 0x80010033. */
-#define FNVL_GDTR_BASE 0x80b95000u
-#define FNVL_GDTR_LIMIT 0x03ffu
-#define FNVL_IDTR_BASE 0x80b95400u
-#define FNVL_IDTR_LIMIT 0x07ffu
-#define FNVL_LDTR_SEL 0u
-#define FNVL_TR_SEL 0x28u
-#define FNVL_CR0 0x80010033u
+/* The descriptor-table registers, LDTR and CR0 have no source in platform/declared/x86sys.json (sgdt, sidt, sldt, smsw: undecided): no constant here and no Form for them. */

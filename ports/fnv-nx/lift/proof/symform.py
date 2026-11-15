@@ -264,7 +264,8 @@ def normalize(form, env=None):
     for k, v in (env or {}).items(): e[('var' if k == 'eip' else 'fld', k)] = v
     S = Subst(e); g = copy.copy(form)
     g.regs = [(r, S(v), None if w is None else S(w)) for r, v, w in form.regs]; g.flags = [(f, S(v), None if w is None else S(w)) for f, v, w in form.flags]
-    g.stores = [(S(a), S(v)) for a, v in form.stores]; g.swhen = {i: S(w) for i, w in form.swhen.items()}; g.faults = [(k, S(c)) for k, c in form.faults]; g.undef = dict(form.undef)
+    g.stores = [(S(a), S(v)) for a, v in form.stores]; g.swhen = {i: S(w) for i, w in form.swhen.items()}; g.faults = [(k, S(c)) for k, c in form.faults]; g.undef = dict(form.undef); g.uwhen = {f: S(w) for f, w in form.uwhen.items()}      # the `when` of an undefined flag (DEF0) and the x87 / SIMD effects hold nodes too
+    g.xs = [(k, i, tuple(S(x) for x in e) if k == 'fptr' else S(e)) for k, i, e in form.xs]; g.mmw = []
     g.eip = S(form.eip); g.flo = None if form.flo is None else S(form.flo); g.pend = {}
     if isinstance(form.addr, N):
         a = S(form.addr); g.addr = a.x if a.op == 'const' else a
