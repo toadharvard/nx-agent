@@ -640,6 +640,7 @@ static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bo
       c.ldar++;
     } else {
       gimple *l = gimple_build_assign(v, spp);
+      generated_stmts.insert(l);   // a plain unit of an unshared side (ORD-T: private)
       gimple_set_location(l, loc);
       gimple_seq_add_stmt(seq, l);
     }
@@ -650,6 +651,7 @@ static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bo
       c.stlr++;
     } else {
       s = gimple_build_assign(dpp, v);
+      generated_stmts.insert(s);
     }
     gimple_set_location(s, loc);
     if (last) *last = s; else gimple_seq_add_stmt(seq, s);
