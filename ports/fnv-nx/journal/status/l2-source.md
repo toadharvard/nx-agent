@@ -563,3 +563,8 @@ After the first frame:
   - COMPILER-STAGE interface: the L1 recipe side is w12 (compiler by stage output, keys from mounts, pin and stamp_errors deleted, store-export/import). L2 (w3) defines the toolchain product root with the two stages.
   - w15's 3 cand2 toolchain files go into plugins-cand3 after cand2 merges.
 - 2026-11-15 21:12Z: PINKEY 774bc6d06 (w3) is superseded by the owner order and not merged: its keys were still hand lists in stamp.py. Kept: libgcc cannot be built outside GCC's build tree, so the stage-1 output is prefix + b-gcc + src with absolute paths. They hold by construction at the sandbox's fixed mount paths. Storage is GATE_CACHE plus w12's store-export. w3 does COMPILER-STAGE now.
+- 2026-11-15 21:15Z: The COMPILER-STAGE scripts are at plugins-cand3 9f3b2222f (w3): stage1.sh (gcc1 -> STAGE1), rt.sh (rt -> COMPILER), records.py (generates the step records from targets, guest_compiler and recipe) and STAGES.md.
+  - Paths are constants. There is no key, hash or input list in the scripts, and tlflags is byte-equal to recipe.semantics_for.
+  - The old build.sh, stage2.sh and stamp.py are deleted in the same step as w12's caller removal.
+  - Open on w12 (L1): the build.json form, plus the env.json debs (bash, sed, grep, patch, xz, findutils, diffutils, gzip).
+  - Not run yet. Proof pending: an unmounted read fails, a plugin byte change rebuilds rt only, the archives equal 56a4d09c, and the stage times.
