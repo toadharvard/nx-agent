@@ -1,6 +1,6 @@
 """Integer instruction family: moves, ALU, shifts, multiply/divide, stack, setcc/cmovcc, bit tests."""
 from capstone import x86 as X
-from .core import op, SKIP, Unsupported, MASK, CC, reg
+from .core import op, fallback, SKIP, Unsupported, MASK, CC, reg
 
 
 SEGSEL = {'cs': 'SEL_CS', 'ss': 'SEL_DS', 'ds': 'SEL_DS', 'es': 'SEL_DS', 'fs': 'SEL_FS', 'gs': 'SEL_GS'}    # initial selectors of a Win32 x86 user process (fnvl_seg_init; GS is null); the current values live in c->sel (SEG_STATE)
@@ -52,10 +52,15 @@ def shcount(cx, ins, ops):
     return cx.rd(ins, ops[1])
 
 
-@op('mov', 'push', 'pop')
+def _segshape(cx, ins):
+    """the shapes of mov/push/pop that carry a segment register or a CRn/DRn operand"""
+    return cx.m in ('mov', 'push', 'pop') and any(o.type == X.X86_OP_REG and (segname(ins, o) or ins.reg_name(o.reg)[:2] in ('cr', 'dr')) for o in cx.ops)
+
+
+@fallback(_segshape)
 def h_segshapes(cx, ins):
     """the shapes no Form covers: a segment register operand (class 3, f_sys: MOV/POP Sreg load through fnvl_seg_set after the fnvl_seg_ok check; reads are the state, fnvl_seg_get) and MOV to/from CRn/DRn (class 2:
-    #GP(0) at CPL 3). Every other shape of these mnemonics is the Forms' (SKIP): the Form universe never reaches this handler for them."""
+    #GP(0) at CPL 3). A class of shapes by operand kind, tried after the Forms (EMIT) and the OPS handlers and before f_sys.h_default, which would make them #UD; no OPS entry, so no mnemonic has both a Form and a hand handler."""
     from . import f_sys
     ops = cx.ops
     if cx.m == 'mov':
@@ -70,10 +75,7 @@ def h_segshapes(cx, ins):
         if sg:      # mov r/m16, Sreg: the selector in the state; a 32-bit register destination gets it zero-extended
             cx.em(cx.wr(ins, ops[0], segread(sg)))
             return
-        return SKIP
-    sg = segname(ins, ops[0]) if ops else None
-    if not sg:
-        return SKIP
+    sg = segname(ins, ops[0])
     if cx.m == 'push':      # push Sreg: 32-bit operand size pushes the selector zero-extended; the 66 prefix pushes the word
         cx.em('{ esp-=2; M16(esp)=(u16)(%s); }' % segread(sg) if ins.prefix[2] == 0x66 else '{ esp-=4; M32(esp)=%s; }' % segread(sg))
         return

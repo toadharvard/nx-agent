@@ -13,7 +13,7 @@ exclusive by their guards and exhaustive because the last one, UD, is the comple
      -> STATUS_ACCESS_VIOLATION otherwise;
   4. reserved-NOP / hint space (0F 0D, 0F 18..0F 1F /r not claimed above: bnd*, cldemote, endbr*, rdssp, nop Ev): SDM Vol 2 A.4, Table A-6 "reserved-NOP": no architectural effect;
   5. prefix-only variants whose prefix the model CPU ignores (F2 BND on branches, 3E NOTRACK, F2/F3 XACQUIRE/XRELEASE with LOCK): the instruction without the prefix;
-  6. UD: everything else the decoder knows. The model advertises none of the extensions that introduced it (VEX/EVEX/XOP encodings, the 0F 38 and 0F 3A maps, SSE3/SSE4a,
+  6. UD: only what the declared CPU's CPUID table (f_cpufeat.missing, h_absent_ext) or the SDM opcode map (UD0/UD1/UD2) decides; any other shape without a Form or a handler is a lift error (h_default).  The model advertises none of the extensions that introduced it (VEX/EVEX/XOP encodings, the 0F 38 and 0F 3A maps, SSE3/SSE4a,
      MOVBE, POPCNT, RDRAND, XSAVE/OSXSAVE/XGETBV, BMI/ADX/..., VMX/SMX/SVM/SGX, CET, RTM/HLE, MPX, PadLock, SYSCALL/SYSRET/SWAPGS which Intel defines only in 64-bit mode): SDM Vol 2
      "Exceptions" of each instruction lists #UD for CPUID.<feature> = 0.
 Legal-on-the-model instructions that are NOT implemented anywhere are named in LEGAL_UNIMPLEMENTED and stay Unsupported (never silently #UD)."""
@@ -37,36 +37,6 @@ def raise_code(cx, code, at=None):
     site(cx, 'FNVL_RAISE(%s,0x%xu);' % (code, cx.a if at is None else at))
 
 
-# int imm8 in a ring-3 Win32 process: the gates are the record's (platform/declared/x86sys.json int_ring3.vectors, via fnvlift/x86sys.py); the row each gate raises and its address are the
-# int_vector / int_at columns of fnvlift/faults.json (Wine 9.0 signal_i386.c, cited per row).  A vector the record does not list is UNDECIDED (int_ring3.other_vectors): the instruction is Unsupported.
-@op('int')
-def h_int(cx, ins):
-    from . import faults, x86sys
-    v = cx.ops[0].imm & 0xff
-    row = faults.INT_ROWS.get(v)
-    if row is not None:                                   # a gate of the record: its trap row
-        name, at = row
-        raise_code(cx, 'FNVL_' + name, cx.nxt if at == 'nxt' else cx.a + at)
-        return
-    if v in x86sys.INT_EXCLUDED:                          # a vector the record excludes and leaves undecided: no body
-        raise Unsupported('int 0x%x: undecided on the declared OS (x86sys int_ring3)' % v)
-    o = x86sys.INT_OTHER                                  # every other vector: the record's row, raised through the AV entry with the int's own address
-    av = faults.BYNAME['AV']
-    if not (o['fault'] == '#GP' and o['exception_code'] == int(av['status'], 16) and o['flags'] == 0 and o['eip_advance'] == 0
-            and o['address'] == 'the int instruction' and o['error_code'] == 'vector*8+2' and len(o['parameters']) == av['np']):
-        raise Unsupported('int 0x%x: the other_vectors row of x86sys int_ring3 is not an access violation the runtime raises' % v)
-    site(cx, 'FNVL_RAISE_AV(0x%xu,0x%xu,0x%xu);' % (o['parameters'][0], o['parameters'][1], cx.a))
-
-
-
-
-
-
-# ---- class 2: CPL-0 instructions and I/O at IOPL 0 -------------------------------------------------------------------------------------------------------------------
-# The CPU raises #GP(0) (SDM Vol 2, each instruction's Exceptions section: "#GP(0) if the current privilege level is not 0"; IN/OUT/INS/OUTS/CLI/STI: "if CPL > IOPL" and, for the I/O
-# instructions, the TSS I/O bitmap that a Win32 process has all-ones; RDPMC: CR4.PCE = 0). SYSEXIT at CPL 3 is #GP(0) too (SDM: SYSEXIT).
-# What the process sees: Wine 9.0 dlls/ntdll/unix/signal_i386.c segv_handler + is_privileged_instr (the declared implementation; documentation is silent, platform/declared/x86sys.json precedence):
-#   * a #GP with error code 0 (instruction-raised) is scanned past the legacy prefix bytes (2E 36 3E 26 64 65 66 67 F0 F2 F3);
 #   * first opcode byte F4 (HLT), FA (CLI), FB (STI), 6C-6F (INS/OUTS), E4-E7 and EC-EF (IN/OUT), or 0F 20-23 (MOV CRn/DRn)  -> EXCEPTION_PRIV_INSTRUCTION (STATUS_PRIVILEGED_INSTRUCTION), no parameters;
 #   * every other #GP(0) (RDMSR, WRMSR, LGDT, LIDT, LLDT, LTR, LMSW, INVLPG, INVD, WBINVD, CLTS, RDPMC, SYSEXIT ...) -> EXCEPTION_ACCESS_VIOLATION, ExceptionInformation {0, 0xFFFFFFFF}.
 # A #GP with a nonzero error code (selector faults, `int n` through a DPL-0 gate) never reaches that table: always STATUS_ACCESS_VIOLATION {0, 0xFFFFFFFF} (gp_cond / gp_av).
@@ -284,6 +254,7 @@ def h_prefix_only(cx, ins):
 
 
 # ---- class 6: UD ------------------------------------------------------------------------------------------------------------------------------------------------------
+UD_OPCODES = ('ud0', 'ud1', 'ud2')      # defined #UD by the SDM opcode map (the other #UD classes: f_cpufeat.missing, h_absent_ext)
 LEGAL_UNIMPLEMENTED = {
     'fxsave': 'FXSR is in the model; the 512-byte image is x87 + SSE state (x87 owner)',
     'fxrstor': 'FXSR is in the model; the 512-byte image is x87 + SSE state (x87 owner)',
@@ -332,7 +303,11 @@ def h_default(cx, ins):
     kind, b = encoding(ins)
     if kind == '0f' and (b[1] == 0x0d or 0x18 <= b[1] <= 0x1f):
         return      # SDM Vol 2 Table A-6 / A.4: reserved-NOP, no architectural effect (a memory operand is not accessed)
-    ud_site(cx)
+    if cx.m in UD_OPCODES:
+        ud_site(cx)     # an opcode the SDM defines as #UD (UD0/UD1/UD2)
+        return
+    from . import formkey
+    raise Unsupported('insn %s: no Form and no handler and no decided #UD (the CPUID table and the SDM opcode map decide a #UD, nothing else does); shape %s' % (cx.m, formkey.form_key(ins, X)))
 
 
 # ---- decoder completeness for reserved-NOP space ---------------------------------------------------------------------------------------------------------------

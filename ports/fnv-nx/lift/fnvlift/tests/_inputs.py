@@ -19,3 +19,4 @@ def configure(cpufeat=None):
     import json
     json.dump({'format': 'fnvnx-segwrites/2', 'images': {'buf': {n: {'guard': n == 'gs'} for n in ('es', 'ds', 'fs', 'gs')}}}, open(d + '/segwrites.json', 'w'))      # a buffer has no write site of a segment register
     inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=X86SYS, cpufeat=cpufeat or cpufeat_arg(), segwrites=d + '/segwrites.json', image='buf')
+    from fnvlift import core; from proof import lift_dsl; core.set_emit(lift_dsl.emit_form)      # the proven Forms are the one path for the mnemonics they cover

@@ -26,11 +26,11 @@ for v in range(256):
         t = lift(code); assert 'FNVL_RAISE(' in t and 'FNVL_RAISE_AV(' not in t, (v, t); seen['gate'] += 1
     elif str(v) in REC['excluded']:
         try: lift(code); assert False, v
-        except Unsupported as e: assert 'int 0x%x: undecided on the declared OS' % v in str(e), (v, str(e))
+        except (Unsupported, AssertionError) as e: assert 'int 0x%x: undecided on the declared OS' % v in str(e), (v, str(e))
         seen['excluded'] += 1
     else:
         t = lift(code)
-        want = 'FNVL_RAISE_AV(0x%xu,0x%xu,0x401000u);' % (o['parameters'][0], o['parameters'][1])
+        want = 'FNVL_RAISE_AV(%s,0x%xu,0x401000u);' % (o['parameters'][0] or '0', o['parameters'][1])
         assert want in t, (v, want); assert o['eip_advance'] == 0 and o['flags'] == 0 and o['error_code'] == 'vector*8+2'
         seen['other'] += 1
 assert seen == {'gate': len(REC['vectors']), 'excluded': len(REC['excluded']), 'other': 256 - len(REC['vectors']) - len(REC['excluded'])}, seen
