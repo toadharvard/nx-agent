@@ -1026,3 +1026,9 @@ Paused: w3b, w4, farm; no other work.
     - The universe is 1,818 members: 1,809 bytecode + 9 glsl_table, with universe_hash 550f66a5…7327.
     - Measured at ed6a8f41e: red 0, 115,776 stage certificates and 121,394 link certificates.
     - Producers are derived in gate_sm_link.py from the checker root's elffacts references: 18 symbols. Sent to L1 w27. Accepted.
+- 20:22Z: the translator tie (L6A 4.6, gate_cert) has a gap. sm_link's universe is the 1,809 shaderpackage bytecodes, and nothing proves that every Create*Shader pFunction lies in that set.
+    - Rule (L6): the universe is defined by one rule over the may-load image set, d3dx9_38/31 included. It is the data-flow sources of pFunction at every IDirect3DDevice9 Create*Shader call site: sdp records, image constants, and D3DX compile outputs.
+    - The certificate sits at the d3d9 front end's Create*Shader body, on the guest side.
+    - The variant (nx_pair_variant) and the link set (the full cross product) are already closed by sm_link.
+    - The fact was requested from L1, and the gap was reported to the orchestrator as a failure class with no gate. The owner is not yet decided.
+- bottleneck: the guest compile after the plugin-set fixes (w5, w6); the Create*Shader source fact (owner L1 or L3a, not yet decided); L1 cand3 for the trunk (a5c8f427). 3 of 4 workers busy.
