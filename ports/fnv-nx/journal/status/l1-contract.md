@@ -1939,3 +1939,7 @@ bottleneck: the cand2 merge (w15: gate scope, pin, warm verdict), and the cand3 
   - Rule: tool data from another root comes only through `uses` of a declared output. The fix goes to w12, with the toolchain/names output from L2 if needed.
   - Gate: w28 extends abspath. A read built from __file__ that leaves the tool's mount is red.
 bottleneck: the cand2 merge (w15), and cand3 (w12: the contract/facts tool data).
+- 23:18 L6's cand4 head is w6-root 48c5208b9 (it merges w28 632a45447). abspath in render is 0, and d3d9total is 332/332.
+  - Red in render: the recipe `store` stage of gl4 and sm_link fails with EEXIST on /tmp/recipe-*/syslib (recipe.py:2762). It is L1's, given to w28; the rule is a private scratch per stage.
+  - objstub at that head: 2059/2126, 79 findings, none in render. w12 attributes them when it assembles cand4.
+bottleneck: the cand2 merge (w15), and cand3 (w12: the contract/facts tool data).
