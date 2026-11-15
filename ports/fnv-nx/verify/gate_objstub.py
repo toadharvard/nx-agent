@@ -60,7 +60,7 @@ def root_check(root, repo, cache, jobs, built=None):
     for lang, ext in (("c", recipe.CC_EXT), ("c++", recipe.CXX_EXT)):
         us = [(k, unitstage.result_file(store, k, "unit.ii"), lang) for u, k in sorted(res["pp_keys"].items()) if u.endswith(ext)]
         if us:
-            ns, _, errs = objstub.unit_terminators(drv[lang], us, {"c": recipe.unit_flags(rec, roots, root, drv["c"], "c"), "c++": recipe.unit_flags(rec, roots, root, drv["c++"], "cxx")}, cache, jobs, rets, sjdirs)
+            ns, _, errs = objstub.unit_terminators(drv[lang], us, {"c": recipe.unit_flags(rec, roots, root, drv["c"], "c"), "c++": recipe.unit_flags(rec, roots, root, drv["c++"], "cxx")}, cache, jobs, rets, sjdirs, (res.get("analysis_plugin") or {}).get("path"))
             names |= set(ns)
             unit_of = {k: u for u, k in res["pp_keys"].items()}
             bad += [(base + unit_of[k], unit_of[k], "terminator-red", "root %s: %s" % (root, e)[:300]) for k, e in errs]

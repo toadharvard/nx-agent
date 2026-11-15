@@ -125,6 +125,11 @@ that includes `<vector>`, `<string>`, `<cstdio>`. The 13.3 compiler reads gcc 15
 Assumption: the declaration `lifted_by` names the lifter is the owner's (admit.json is reviewed); the gate proves that no hand-written C++ sits in a lifted root. (ASM-101)
 Check: `lifted_by` must be a tracked `.py` of an admitted root of class `tool` (recipe.py check, `cxx_origin.lifted_by ... is not a tracked .py of an admitted tool root` otherwise), and the gate proves that no hand-written C++ sits in a lifted root: every C++ unit is an output of a step of that tool. When the single lifter `liftall.py` is on the trunk, `lifted_by` must equal its path (one constant `LIFTER` of recipe.py); until then the check is the one stated here.
 
+### The analysis plugin (`objstub_plugin`)
+`ANALYSIS_PLUGIN` (verify/objstub_plugin.cc) is the plugin of the gate `objstub`: the recipe builds it, as the same hermetic stage `plugin:<name>` as every other plugin, for the target compiler of every root that has C/C++ units
+(the plugin headers of that compiler, the host driver `PLUGIN_CXX`). No `build.json` declares it and no CC stage loads it; the gate loads it over the preprocessed text of the units. The result holds
+`analysis_plugin: {name, sha256, path}` (the file `plugins/objstub_plugin.so` beside the objects). There is no other build of it: the gate has no compiler call of its own for it.
+
 ## Link: the guest ELF
 There is one way to link: the recipe key `link` (no other path runs a linker; link/ has no subprocess call). Every key below is validated by
 `check()` with all errors listed at once.

@@ -4,6 +4,7 @@ Compiles with aarch64-linux-gnu-gcc in both ABIs (ilp32, lp64); scratch under te
 import json
 import os
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -18,6 +19,11 @@ import scratch  # noqa: E402
 
 scratch.install()
 
+sys.path.insert(0, HERE)
+import test_recipe as TR  # noqa: E402
+import recipe  # noqa: E402
+import cas  # noqa: E402
+
 CC = "aarch64-linux-gnu-gcc"
 ROOT = tempfile.mkdtemp(prefix="objstub-")
 FAILED = []
@@ -29,6 +35,30 @@ def check(name, cond, extra=""):
     print(("PASS " if cond else "FAIL ") + name + ("" if cond else "  " + str(extra)[:400]))
     if not cond:
         FAILED.append(name)
+
+
+PLUG = {}
+
+
+def plug(cc):
+    """The analysis plugin (recipe.ANALYSIS_PLUGIN, the recipe's hermetic plugin stage) for the compiler CC: the stage of a Job over a toy root whose compiler
+    is CC's pair (the driver of the same target: <triple>-gcc-13 / -g++-13 or, for the x86-64 distribution, gcc-13 / g++-13)."""
+    base = re.sub(r"-g\+\+(-13)?$|-gcc(-13)?$", "", cc)
+    pair = ({"cc": "gcc-13", "cxx": "g++-13"} if base == "x86_64-linux-gnu" else {"cc": base + "-gcc-13", "cxx": base + "-g++-13"})
+    key = pair["cc"]
+    if key not in PLUG:
+        rec = TR.mut()
+        rec["compiler"] = pair
+        repo = TR.make_repo("plug-" + key, rec=rec)
+        store = os.path.join(ROOT, "pstore")
+        j = recipe.Job(repo, TR.ROOT, store, 1, {})
+        ws = tempfile.mkdtemp(prefix="objstub-ws-")
+        t = j.analysis_plugin(ws)
+        dest = os.path.join(ROOT, "plug-" + key, "objstub_plugin.so")   # GCC names a plugin by the base name of its file
+        os.makedirs(os.path.dirname(dest))
+        shutil.copyfile(cas._obj(store, cas.manifest(t, store)["entries"]["objstub_plugin.so"]), dest)
+        PLUG[key] = dest
+    return PLUG[key]
 
 
 def build(src, abi, ext="c", extra=()):
@@ -69,15 +99,15 @@ check("a function with nested loops is analysed (liveness converges, LP64 and IL
 tiny = os.path.join(ROOT, "tiny.h")
 open(tiny, "w").write("void myabort(void) __attribute__((noreturn));\nvoid fine(void);\n")
 tf = os.path.join(ROOT, "terms.txt")
-names = objstub.derive_terminators(CC, ["-I" + ROOT], ["tiny.h"], "c", tf)
+names = objstub.derive_terminators(CC, ["-I" + ROOT], ["tiny.h"], "c", tf, so=plug(CC))
 check("terminators: tiny header (and the EH-resume builtin as an unwinder)", [n for n in names if n[0] != "~"] == ["myabort"] and "~_Unwind_Resume" in names, names)
-libc = objstub.derive_terminators(CC, [], ["stdlib.h", "unistd.h", "assert.h", "signal.h"], "c", tf + ".libc")
+libc = objstub.derive_terminators(CC, [], ["stdlib.h", "unistd.h", "assert.h", "signal.h"], "c", tf + ".libc", so=plug(CC))
 check("terminators: libc set", all(x in libc for x in ("abort", "exit", "_Exit", "quick_exit")) and "atexit" not in libc
       and "raise" not in libc, libc)
-cxx = objstub.derive_terminators("aarch64-linux-gnu-g++", [], ["cstdlib", "exception"], "c++", tf + ".cxx")
-cxx_sj = objstub.derive_terminators("aarch64-linux-gnu-g++", [], ["csetjmp", "cstdlib", "cxxabi.h"], "c++", tf + ".cxxsj")
-cxx_ne = objstub.derive_terminators("aarch64-linux-gnu-g++", ["-fno-exceptions"], ["csetjmp", "cstdlib", "cxxabi.h"], "c++", tf + ".cxxne")
-libc_sj = objstub.derive_terminators(CC, [], ["setjmp.h", "stdlib.h"], "c", tf + ".libcsj")
+cxx = objstub.derive_terminators("aarch64-linux-gnu-g++", [], ["cstdlib", "exception"], "c++", tf + ".cxx", so=plug("aarch64-linux-gnu-g++"))
+cxx_sj = objstub.derive_terminators("aarch64-linux-gnu-g++", [], ["csetjmp", "cstdlib", "cxxabi.h"], "c++", tf + ".cxxsj", so=plug("aarch64-linux-gnu-g++"))
+cxx_ne = objstub.derive_terminators("aarch64-linux-gnu-g++", ["-fno-exceptions"], ["csetjmp", "cstdlib", "cxxabi.h"], "c++", tf + ".cxxne", so=plug("aarch64-linux-gnu-g++"))
+libc_sj = objstub.derive_terminators(CC, [], ["setjmp.h", "stdlib.h"], "c", tf + ".libcsj", so=plug(CC))
 check("terminators: C++ set has mangled terminate", "_ZSt9terminatev" in cxx and "abort" in cxx, cxx)
 check("terminators: longjmp family (<setjmp.h>) is a control transfer, an unwinder, in C and C++", all("~" + n in cxx_sj and n not in cxx_sj for n in ("longjmp", "siglongjmp", "_longjmp")) and "abort" in cxx_sj
       and all("~" + n in libc_sj and n not in libc_sj for n in ("longjmp", "siglongjmp")), (cxx_sj, libc_sj))
@@ -85,13 +115,13 @@ check("terminators: __cxa_throw is an unwinder when exceptions are enabled and a
       and "__cxa_throw" in cxx_ne and "~__cxa_throw" not in cxx_ne, (cxx_sj, cxx_ne))
 os.makedirs(os.path.join(ROOT, "fake"), exist_ok=True)
 open(os.path.join(ROOT, "fake", "setjmp.h"), "w").write("void fake_jmp(void) __attribute__((noreturn));\n")   # a same-named header that is NOT the pinned runtime's
-fk_other = objstub.derive_terminators(CC, ["-I" + os.path.join(ROOT, "fake")], ["setjmp.h"], "c", tf + ".fk1")
-fk_pinned = objstub.derive_terminators(CC, ["-I" + os.path.join(ROOT, "fake")], ["setjmp.h"], "c", tf + ".fk2", sjdirs=(os.path.join(ROOT, "fake"),))
+fk_other = objstub.derive_terminators(CC, ["-I" + os.path.join(ROOT, "fake")], ["setjmp.h"], "c", tf + ".fk1", so=plug(CC))
+fk_pinned = objstub.derive_terminators(CC, ["-I" + os.path.join(ROOT, "fake")], ["setjmp.h"], "c", tf + ".fk2", sjdirs=(os.path.join(ROOT, "fake"),), so=plug(CC))
 check("terminators: a setjmp.h outside the pinned header directories is no unwinder source (its noreturn function is a terminator); inside a pinned directory it is",
       "fake_jmp" in fk_other and "~fake_jmp" not in fk_other and "~fake_jmp" in fk_pinned and "fake_jmp" not in fk_pinned, (fk_other, fk_pinned))
 open(os.path.join(ROOT, "infer.h"), "w").write("#include <setjmp.h>\nextern jmp_buf jb;\nvoid helper(int e);\nvoid decl_nr(void) __attribute__((noreturn));\n")
 open(os.path.join(ROOT, "infer.c"), "w").write('#include "infer.h"\njmp_buf jb;\nvoid helper(int e) { longjmp(jb, e); }\n')
-so_inf = objstub.plugin_so(CC, tempfile.mkdtemp(prefix="objstub-inf-"))[0]
+so_inf = plug(CC)
 subprocess.run([CC, "-O2", "-I" + ROOT, "-S", "-o", os.devnull, "-fplugin=" + so_inf, "-fplugin-arg-objstub_plugin-out=" + tf + ".inf", "-fplugin-arg-objstub_plugin-ret=" + tf + ".infr", os.path.join(ROOT, "infer.c")], check=True)
 inf_names = objstub.read_list(tf + ".inf")
 check("terminators: a function GCC infers to never return (ends in longjmp) is not declared noreturn and is no terminator; a declared one is", "decl_nr" in inf_names and "helper" not in inf_names, inf_names)
@@ -291,7 +321,7 @@ for abi in ("ilp32", "lp64"):
     T = lambda n: "%s/%s" % (abi, n)
     o = build(CXX, abi, "cc")
     tl = os.path.join(ROOT, "cxx-%s.txt" % abi)
-    cterms = set(objstub.derive_terminators("aarch64-linux-gnu-g++", ["-mabi=" + abi], ["cstdlib", "exception", "new", "typeinfo", "cxxabi.h", "unwind.h"], "c++", tl))
+    cterms = set(objstub.derive_terminators("aarch64-linux-gnu-g++", ["-mabi=" + abi], ["cstdlib", "exception", "new", "typeinfo", "cxxabi.h", "unwind.h"], "c++", tl, so=plug("aarch64-linux-gnu-g++")))
     secs = subprocess.run(["aarch64-linux-gnu-readelf", "-SW", o], capture_output=True, text=True).stdout
     check(T("C++ unit has COMDAT groups, .text.startup, .text.unlikely, .text.hot"), all(x in secs for x in (".group", ".text.startup", ".text.unlikely", ".text.hot")), secs[:300])
     check(T("terminator rule: process end only (terminate, abort, exit); unwinding and throwing are unwinders (~), the EH-resume builtin is one"),
@@ -576,6 +606,17 @@ for what, row, good in (("c11 clause digits and dots", "36\texit\tprocess-end\tc
     except ValueError:
         got_ = False
     check("declared table: " + what + (" is accepted" if good else " is red"), got_ == good, row)
+HDR_HOST = HDR_REAL.replace(" | galaxy-sdk:<page>:<function>", " | galaxy-sdk:<page>:<function> | hostabi:<header>:<service>")
+for what, row, good in (("hostabi source for a noreturn property of our own symbol", "40\tfnvnx_thread_exit\tthread-end\thostabi:hostabi/include/fnvnx/hostapi.h:thread_exit\tnoreturn\t-", True),
+                        ("hostabi source as the source of a Win32 value (a return value)", "41\tx\tno-network\thostabi:hostabi/include/fnvnx/hostapi.h:connect\tu32\t0xFFFFFFFF", False),
+                        ("hostabi joined to a wine source for a Win32 value", "41\tx\tno-network\thostabi:a.h:s|wine-9.0:dlls/a.c:f\tu32\t1", False)):
+    open(tf_, "w").write(HDR_HOST + "\n" + row + "\n")
+    try:
+        objstub.read_declared_table(tf_)
+        got_ = True
+    except ValueError:
+        got_ = False
+    check("declared table: " + what + (" is accepted" if good else " is red"), got_ == good, row)
 slim = HDR_REAL.replace(" | no-galaxy", "").replace(" | galaxy-sdk:<page>:<function>", "")
 open(tf_, "w").write(slim + "\n" + GAL + "\n")
 try:
@@ -596,8 +637,6 @@ except ValueError:
     check("declared table: missing file is an error", True)
 
 # gate on the toy product root of test_recipe.py
-sys.path.insert(0, HERE)
-import test_recipe as TR  # noqa: E402
 import verdict  # noqa: E402
 
 RV = ("#include \"toy.h\"\nvoid fnvnx_reach_violation(unsigned) __attribute__((noreturn));\n"
@@ -690,7 +729,7 @@ check("a build-red unit: red finding build-red naming the unit, not an input err
       and "input error" not in g["detail"] and any(u.endswith("c.c") for u in g["uncertified"]), (g, txt))
 bad_ii = tf + ".bad.ii"
 open(bad_ii, "w").write("int f(void) { return +; }\n")
-tc = objstub.unit_terminators("aarch64-linux-gnu-g++", [("pk-bad", bad_ii, "c")], {"c": []}, tempfile.mkdtemp(prefix="objstub-tc-"), 1)
+tc = objstub.unit_terminators("aarch64-linux-gnu-g++", [("pk-bad", bad_ii, "c")], {"c": []}, tempfile.mkdtemp(prefix="objstub-tc-"), 1, so=plug("aarch64-linux-gnu-g++"))
 check("a unit the terminator plugin cannot process: a failure of that unit in the result (no exception)", tc[0] == [] and len(tc[2]) == 1 and tc[2][0][0] == "pk-bad", tc)
 
 # the final image: every function body of the linked ELF is judged for the fixed-failure class (a weak `errno = ENOSYS; return -1` fallback left in it is red;
@@ -727,11 +766,11 @@ check("an image body with a data island is red unjudged", rc == 2 and "unjudged"
 # a host root: the terminator plugin is built against the plugin headers of the root's own (x86-64 distro) compiler, and sees its noreturn declarations
 xt = tf + ".x86"
 open(tf + ".x86.h", "w").write("void fnvnx_die(void) __attribute__((noreturn));\n")
-xn = objstub.derive_terminators("x86_64-linux-gnu-gcc-13", ["-I" + os.path.dirname(tf)], [os.path.basename(tf) + ".x86.h"], "c", xt)
+xn = objstub.derive_terminators("x86_64-linux-gnu-gcc-13", ["-I" + os.path.dirname(tf)], [os.path.basename(tf) + ".x86.h"], "c", xt, so=plug("x86_64-linux-gnu-gcc-13"))
 check("host root compiler x86_64-linux-gnu-gcc-13: the plugin builds against its own plugin headers and finds the noreturn function", "fnvnx_die" in xn, xn)
-xh = objstub.plugin_so("x86_64-linux-gnu-gcc-13", tempfile.mkdtemp(prefix="objstub-x86-"))[1]
+xh = objstub.plugin_hash(plug("x86_64-linux-gnu-gcc-13"))
 check("the plugin key depends on the root compiler: x86-64 distro gcc and the aarch64 compiler give different plugins",
-      xh != objstub.plugin_so("aarch64-linux-gnu-g++", tempfile.mkdtemp(prefix="objstub-a64-"))[1])
+      xh != objstub.plugin_hash(plug("aarch64-linux-gnu-g++")))
 
 print("%d failed, wall %.1f s" % (len(FAILED), time.time() - T0))
 sys.exit(1 if FAILED else 0)

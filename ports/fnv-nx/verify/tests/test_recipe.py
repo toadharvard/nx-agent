@@ -61,7 +61,7 @@ FILES = {
     "verify/declared_machine.tsv": "# id\tcontract_name\tfact\tsource\tkind\tvalue\n# fact: no-network | time-zone | registry | no-galaxy (fixture); source: win-doc:<page>:<function> | wine-9.0:<path>:<function> | galaxy-sdk:<page>:<function>; kind void|u32\n",
     "toy/link.ld": open(os.path.join(VERIFY, "..", "link", "guest.ld")).read(),
 }
-LINK_TOOLS = ("link/ldcheck.py", "link/gateids.py", "contract/gatefile.py")   # the real files of the tree: the ldcheck stage mounts them
+LINK_TOOLS = ("link/ldcheck.py", "link/gateids.py", "contract/gatefile.py", "verify/objstub_plugin.cc")   # the real files of the tree: the ldcheck stage mounts them; objstub_plugin.cc is the source of the analysis plugin every root with C/C++ units builds
 
 
 def check(name, ok, detail=""):

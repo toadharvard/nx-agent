@@ -78,6 +78,7 @@ PLUGIN_SOURCES = {"fnvnx_ftoi": _T + "ftoi/fnvnx_ftoi.cc", "fnvnx_order": _T + "
                   "fnvnx_names": _T + "names/fnvnx_names.cc", "fnvnx_layout": _T + "layout/fnvnx_layout.cc"}
 PLUGIN_INPUTS = {"fnvnx_layout": [_T + "names/fnvnx_names.cc"]}
 PLUGIN_ARGS = {n: {} for n in PLUGIN_SOURCES}
+ANALYSIS_PLUGIN = ("objstub_plugin", TREE + "/verify/objstub_plugin.cc")   # the gate objstub's plugin (RECIPE.md "Plugins"): built for every root with C/C++ units, loaded by no compile stage
 PLUGIN_ARGS["fnvnx_ftoi"] = {"mode": "native"}
 # fnvnx_ftoi is one plugin with two modes, chosen by the root's cxx_origin (no free choice): native C++ takes the MSVC rewrite, lifted C++ has
 # no rewrite and every float -> integer conversion outside an fnvnx_f2i function is an error. Both write their report (gate fpexact) to
@@ -952,6 +953,7 @@ class Job:
         self.roots, self.files = load_admit(repo), tracked(repo)
         self.rec = load_recipe(repo, self.roots, spec)
         self.keys, self.run, self.hit, self.ext, self.ppkeys, self.built = set(), 0, 0, {}, {}, []
+        self.analysis = None   # tree of the objstub plugin's /out (analysis_plugin), built once per root that has C/C++ units
         self.dukeys = {}   # {unit: key of its macro-fact stage (-dU, unitstage.DU_TAIL)}
         self.red, self.blocked, self.failed = [], {}, []   # KEEP GOING: red stages (failure dicts) and {unit: stage it is blocked by}; nothing is masked (see build)
         os.makedirs(os.path.join(store, "rt"), exist_ok=True)
@@ -1168,15 +1170,12 @@ class Job:
             n += 1
         return out
 
-    def plugins(self, ws):
-        """Build every plugin of the recipe as a hermetic stage -> [(name, tree of its /out, argv flags)]. The stage runs the host driver
-        `PLUGIN_CXX` (derived from env.json) on the plugin source and the plugin headers of the target compiler (`compiler.cxx -print-file-name=plugin`),
-        so its key is f(source content, host compiler, flags, headers). The .so is in the store; each CC stage declares it as an input."""
-        pl = self.rec.get("plugins", [])
-        if not pl:
-            return []
+    def plugin_env(self, ws, drv=1):
+        """The common inputs of every plugin stage: the host driver `PLUGIN_CXX` (derived from env.json), the plugin headers of the target compiler
+        (`compiler.cxx -print-file-name=plugin`), the tool runtime and the startup files -> dict. A plugin stage's key is f(source content, host
+        compiler, flags, headers)."""
         host = "/usr/bin/" + PLUGIN_CXX
-        cxx = self.hostpath(self.drivers()[1])
+        cxx = self.hostpath(self.drivers()[drv])   # the C++ driver (the C driver for a root without C++ units: the same compiler, the same plugin headers)
         pdir = subprocess.run([cxx, "-print-file-name=plugin"], capture_output=True, text=True).stdout.strip()
         if not os.path.isfile(os.path.join(pdir, "include", "gcc-plugin.h")):
             raise BuildRed({"stage": "plugin", "exit": None, "stderr": ["no plugin headers of %s in %s (gcc-N-plugin-dev of env.json)" % (cxx, pdir)]})
@@ -1191,7 +1190,7 @@ class Job:
             # linking a shared object also needs collect2 and ld, which gcc_set (compile only) does not list
             q = lambda n: subprocess.run([host, "-print-prog-name=" + n], capture_output=True, text=True).stdout.strip()  # noqa: E731
             exes = [e if e.startswith("/") else "/usr/bin/" + e for e in exes + [q("collect2"), q("ld")]]
-            return self.plus(runtime.build_tool(self.store, sorted(set(exes)), sorted(set(ts + trees))))
+            return self.plus(runtime.build_tool(self.store, sorted(set(exes)), sorted(set(ts + [t for t in trees if not any(under(t, x) for x in ts)]))))   # the plugin headers of the host compiler itself are in its own tree already
         rt = self.cached_rt("tool-plugin-" + hashlib.sha256(repr((host, pdir, sorted((e["at"], e["tree"]) for e in self.ext.values()))).encode()).hexdigest()[:16], make)[1]
         # A plugin is linked against nothing (its symbols come from the compiler that loads it): -nostdlib, with the startup files the
         # driver would pass (crti/crtbeginS ... crtendS/crtn: __dso_handle, .init/.fini). crtbeginS/crtendS are in the driver's own
@@ -1202,23 +1201,42 @@ class Job:
             if not os.path.isabs(pf(n)):
                 raise BuildRed({"stage": "plugin", "exit": None, "stderr": ["%s: no %s (libc6-dev of env.json)" % (host, n)]})
             shutil.copyfile(pf(n), os.path.join(crt, n))
-        crt_tree = cas.ingest(crt, self.store)
+        return {"host": host, "inc": inc, "rt": rt, "pf": pf, "crt_tree": cas.ingest(crt, self.store)}
+
+    def plugin_build(self, env, ws, n, src, inputs):
+        """The stage `plugin:<n>`: the plugin source (and the tracked INPUTS it includes) at their repo paths -> tree of /out (holds <n>.so)."""
+        host, inc, rt, pf = env["host"], env["inc"], env["rt"], env["pf"]
+        tmp = tempfile.mkdtemp(dir=ws)
+        tree = self.ingest_files(tmp, "psrc", [src] + inputs, "")   # at their repo paths: `#include "../names/x.cc"` resolves
+        argv = [host, "-shared", "-nostdlib", "-fPIC", "-fno-rtti", "-fno-exceptions", "-O2", "-I" + inc + "/include", "-frandom-seed=" + hashlib.sha256(n.encode()).hexdigest(),
+                "-Werror=date-time", "-ffile-prefix-map=/psrc=psrc", "-o", "/out/%s.so" % n, "/plugcrt/crti.o", pf("crtbeginS.o"),
+                "/psrc/" + src, pf("crtendS.o"), "/plugcrt/crtn.o"]
+        doc = {"format": "fnvnx-stage/1", "stage": "plugin:" + n, "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
+               "env": dict(unitstage.ENV, PATH=os.path.dirname(host)), "outputs": ["/out"],
+               "inputs": sorted(rt["inputs"] + [{"at": "/psrc", "tree": tree}, {"at": "/plugcrt", "tree": env["crt_tree"]}], key=lambda i: i["at"])}
+        return self.stage(doc)[1]["outputs"]["/out"]
+
+    def plugins(self, ws):
+        """Build every plugin of the recipe as a hermetic stage -> [(name, tree of its /out, argv flags)]. The .so is in the store; each CC stage
+        declares it as an input."""
+        pl = self.rec.get("plugins", [])
+        if not pl:
+            return []
+        env = self.plugin_env(ws)
         out = []
         for p in pl:
-            n, src = p["name"], p["source"]
-            tmp = tempfile.mkdtemp(dir=ws)
-            tree = self.ingest_files(tmp, "psrc", [src] + p.get("inputs", []), "")   # at their repo paths: `#include "../names/x.cc"` resolves
-            argv = [host, "-shared", "-nostdlib", "-fPIC", "-fno-rtti", "-fno-exceptions", "-O2", "-I" + inc + "/include", "-frandom-seed=" + hashlib.sha256(n.encode()).hexdigest(),
-                    "-Werror=date-time", "-ffile-prefix-map=/psrc=psrc", "-o", "/out/%s.so" % n, "/plugcrt/crti.o", pf("crtbeginS.o"),
-                    "/psrc/" + src, pf("crtendS.o"), "/plugcrt/crtn.o"]
-            doc = {"format": "fnvnx-stage/1", "stage": "plugin:" + n, "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
-                   "env": dict(unitstage.ENV, PATH=os.path.dirname(host)), "outputs": ["/out"],
-                   "inputs": sorted(rt["inputs"] + [{"at": "/psrc", "tree": tree}, {"at": "/plugcrt", "tree": crt_tree}], key=lambda i: i["at"])}
-            res = self.stage(doc)[1]["outputs"]["/out"]
+            n = p["name"]
+            res = self.plugin_build(env, ws, n, p["source"], p.get("inputs", []))
             flags = ["-fplugin=/plug/%s/%s.so" % (n, n)] + ["-fplugin-arg-%s-%s%s" % (n, k, "=" + v if v else "") for k, v in p["args"].items()] + (
                 ["-fplugin-arg-%s-out=%s" % (n, PLUGIN_OUT[n])] if n in PLUGIN_OUT else [])
             out.append((n, res, flags))
         return out
+
+    def analysis_plugin(self, ws, drv=1):
+        """The plugin of the gate `objstub` (ANALYSIS_PLUGIN): built by the same stage as every plugin, for the target compiler of the root. It is no
+        plugin of the root's compile stages (no root declares it, no CC stage loads it): the gate loads it over the preprocessed text of the units.
+        -> tree of its /out."""
+        return self.plugin_build(self.plugin_env(ws, drv), ws, ANALYSIS_PLUGIN[0], ANALYSIS_PLUGIN[1], [])
 
     def compile(self, ws, units):
         rec, drv = self.rec, dict(zip(("c", "cxx"), self.drivers()))
@@ -1247,6 +1265,11 @@ class Job:
             units = [u for u in units if u not in self.blocked]
             kinds = {u: k for u, k in kinds.items() if u in units}
             self.built = []
+        if self.analysis is None and any(k != "asm" for k in kinds.values()):
+            try:
+                self.analysis = self.analysis_plugin(ws, 1 if "cxx" in kinds.values() else 0)
+            except BuildRed as r:   # the gate objstub cannot judge the root: red and named, no unit is blocked by it
+                self.red.append(dict(r.args[0]))
         builds = {}
         sos = {}
         for n, t, _ in self.built:   # the plugins each front end can load (plugin_languages): the stage loads exactly those, the gate reads the same fact
@@ -1448,6 +1471,7 @@ def objects_digest(res):
     keep["link_roots"] = [{"root": x["root"], "sha256": x["sha256"]} for x in res["link_roots"]]
     keep["objects"] = [{k: o[k] for k in ("unit", "sha256", "os_layer")} for o in res["objects"]]
     keep["plugins"] = [{k: p[k] for k in ("name", "sha256")} for p in res["plugins"]]
+    keep["analysis_plugin"] = (res.get("analysis_plugin") or {}).get("sha256")
     keep["link_archives"] = [{k: m[k] for k in ("archive", "member", "sha256")} for m in res.get("link_archives", [])]
     keep["elf"] = res["elf"] and res["elf"]["sha256"]
     for k in ("constants", "contract_names"):
@@ -1590,6 +1614,12 @@ def build(repo, root, store, out, jobs=4, ext=None):
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             shutil.copyfile(cas._obj(store, ent), dest)
             res["plugins"].append({"name": n, "sha256": ent["h"], "path": os.path.abspath(dest)})
+        if j.analysis:   # the plugin of the gate objstub (a file of the store, kept beside the root's own plugins)
+            ent = cas.manifest(j.analysis, store)["entries"][ANALYSIS_PLUGIN[0] + ".so"]
+            dest = os.path.join(out, "plugins", ANALYSIS_PLUGIN[0] + ".so")
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copyfile(cas._obj(store, ent), dest)
+            res["analysis_plugin"] = {"name": ANALYSIS_PLUGIN[0], "sha256": ent["h"], "path": os.path.abspath(dest)}
         for u in units:
             dest = os.path.join(out, "obj", u + ".o")
             os.makedirs(os.path.dirname(dest), exist_ok=True)
