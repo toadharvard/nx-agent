@@ -643,3 +643,4 @@ Workers are capped at 3. Assignment by plan item:
 - pi thunk defect: L2 w1 is fixing it on claude/fnv-l2-source-w1-pithunk (rule: every body that reaches SSA gets its record).
 - L1 accepted 4681c9634's mechanism. Retiring ASM-213/214 is one commit with 3 points (stale text, a static_assert that FNVL_MAX_BASIC < 7 per SDM 8.1.8, the registry retire). Assigned to w6, after its ctlstate step.
 - verify/cpuref.json (host_cpu pin for the `run` stage; microcode null = line absent on the VM host) plus a leaf-1 EAX identity check. Assigned to w6.
+- 00:15 w8 (int3 00ef4468d): lift/rt is recipe-built on 4681c9634, green with 12 objects; test_rtroot is ok. L2's dispatch definition rule (37d4e27df, b0198f906) is carried onto int3. test_defdisp: 291 ok, 1 fail (the pi thunk; blocked on L2 w1). Store correction: GATE_CACHE only.
