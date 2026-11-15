@@ -261,3 +261,4 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - Decision: SDM over ACL2 where they contradict (ACL2 = transcription source; trust roots OWNER 9/10). Recorded in CERTS.md by w9.
 - w9: doing — 566 timeouts by per-lane x operand-class split (simdcheck/ssefp only, completeness stated).
 - v3: 4/54 complete (15,29,30,42); farms running; w4 aggregates at 54/54.
+- 13:20Z v3 shard 17/54 done (farm 07): 346 rows, proved 336, model-gap 10, failed 0. Complete: 5/54 (15,17,29,30,42).
