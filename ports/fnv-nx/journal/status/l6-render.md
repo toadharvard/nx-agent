@@ -707,3 +707,10 @@ Paused: w3b, w4, farm; no other work.
     - Next: w1b-root 61d4e879a, then e408b213 (ASM-629 delete, sha256 include), then the cand2 b6865471d rebase with tlsmodel, then the builds and gates.
 - 01:05Z L6A: NXGPU_MAX_COLOR_TARGETS (4) in nxgpu4.h (W6-D1d).
     - MultisampleQuality: no ABI field if the declared adapter gives 1 quality level per type (the D3D9 layer rejects others). w6 checks the env rows.
+- 01:06Z w1b 28 SM differences (w1b-sm f58bf7a8c)
+    - 17 rows are decided by msdocs; legacy rows: 10 legal (rule R4), 1 illegal (R3).
+    - R1 and R2 (ps defb, texreg2gb, sgn@vs_3_0): decided by Wine 9.0's bundled vkd3d-shader, cited `wine-9.0:` per row.
+    - Open: where rule R4 is written.
+    - Generator defects a-d (citations, paraphrase, rcp_mask, sm_cases "from memory") are fixed in the derivation item.
+    - First item: the sdk-api mirror.
+- 01:06Z L6A a53a3f3d: NXGPU_MAX_COLOR_TARGETS. It is w6's ABI base (replaces e408b213).
