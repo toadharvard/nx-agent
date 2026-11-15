@@ -593,3 +593,7 @@ Paused: w3b, w4, farm; no other work.
     - It calls the product's fnvnx_dk_vs_needs_complete (fnvnx_dk_layout.h); the copy of the rule is deleted.
     - Scratch rerun: 0 red, 4m46s.
     - Next: nx_pair_variant (w6 1a02d0de) once render/d3d9 builds (on w16c1).
+- 00:44Z Complete decision, one source.
+    - On w6-root, draw_prog.cpp:85 calls fnvnx_dk_vs_needs_complete, and the sm_link checker calls the same function.
+    - nx_pair_variant (w6 1a02d0de) is only on the old branch claude/fnv-l6-render-w6. w6 carries it onto w6-root after w16c1.
+    - FFP pair sets (nx_ffp_*_program) are still open for sm_link.
