@@ -163,6 +163,9 @@ static bool is_memory_ref(tree t) {
     }
     case VAR_DECL:
       return !hard_register(t) && (TREE_STATIC(t) || DECL_EXTERNAL(t) || TREE_ADDRESSABLE(t));
+    case PARM_DECL:
+      // an aggregate parameter that lives in memory: its address is taken, or it is passed by invisible reference (the object is the caller's copy)
+      return !hard_register(t) && (TREE_ADDRESSABLE(t) || DECL_BY_REFERENCE(t));
     case RESULT_DECL:
       return memory_result(t);
     default:
@@ -935,7 +938,7 @@ static bool ordt_visit(gimple *stmt, tree, tree op, void *data) {
   else if (!is_memory_ref(op) && !(DECL_P(op) && !TREE_STATIC(op) && !DECL_EXTERNAL(op))) why = 4;
   else if (base && DECL_P(base)) {
     if (readonly_object(base)) why = 1;
-    else if (local_unshared(base)) why = 0;
+    else if (local_unshared(base)) why = (TREE_CODE(base) == PARM_DECL && DECL_BY_REFERENCE(base)) ? 2 : 0;
   } else if (base && (TREE_CODE(base) == MEM_REF || TREE_CODE(base) == TARGET_MEM_REF)) {
     tree p = TREE_OPERAND(base, 0);
     if (x->gen) why = 0;
@@ -945,7 +948,9 @@ static bool ordt_visit(gimple *stmt, tree, tree op, void *data) {
   } else if (base && TREE_CODE(base) == STRING_CST) why = 1;
   if (why < 0) {
     error_at(gimple_location(stmt), "%<fnvnx_order%>: ORD-T: a plain memory access with no reason (%s)", get_tree_code_name(TREE_CODE(op)));
-    print_gimple_stmt(stderr, stmt, 0, TDF_VOPS);   // the statement, as GCC prints it, next to the diagnostic
+    print_gimple_stmt(stderr, stmt, 0, TDF_VOPS);   // the statement, and its block, as GCC prints them, next to the diagnostic
+    fprintf(stderr, "-- block %d:\n", gimple_bb(stmt)->index);
+    for (gimple_stmt_iterator g = gsi_start_bb(gimple_bb(stmt)); !gsi_end_p(g); gsi_next(&g)) print_gimple_stmt(stderr, gsi_stmt(g), 2, TDF_VOPS);
     return false;
   }
   x->c.reason[why]++;
