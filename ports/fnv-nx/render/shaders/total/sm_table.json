@@ -5829,19 +5829,52 @@
    "rows": "excluded"
   },
   {
+   "decision": "union",
    "id": "vs1_0_ps1_0",
+   "ms": {
+    "page": "none: no vs_1_0/ps_1_0 page in the D3D9 asm reference (instruction pages start at vs_1_1/ps_1_1)",
+    "section": "every instruction version table"
+   },
    "note": "vs_1_0/ps_1_0 via Create*Shader: not in any MS page of the D3D9 asm reference; wine d3d9 has no test, only d3d8. Included as 1_1 grammar (superset).",
-   "rows": "included"
+   "rows": "included",
+   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft silent or narrower, Wine 9.0 accepts: the universe is the union)",
+   "wine": {
+    "file": "libs/vkd3d/libs/vkd3d-shader/d3dbc.c",
+    "line": "1243-1267",
+    "what": "version token: VS/PS type accepted, any version <= 3.0 accepted (vs_1_0 and ps_1_0 parse); opcode tables start at {1,0} (e.g. line 362); dlls/wined3d/shader.c:555 (vs 1_0..1_1) and :587 (ps 1_0..1_3) give them limits"
+   }
   },
   {
+   "decision": "union",
    "id": "temp_uninit_flow",
+   "ms": {
+    "page": "desktop-src/direct3dhlsl/dx9-graphics-reference-asm-ps-registers-ps-1-x.md",
+    "section": "temporary register: uninitialised-read validator rule, ps_1_x only; sm2/3 pages are silent"
+   },
    "note": "read of a temp written only inside if/rep: MS states the uninitialised-read validator rule for ps_1_x only; sm2/3 silent. Included.",
-   "rows": "included"
+   "rows": "included",
+   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft silent or narrower, Wine 9.0 accepts: the universe is the union)",
+   "wine": {
+    "file": "libs/vkd3d/libs/vkd3d-shader/d3dbc.c",
+    "line": "880-899",
+    "what": "shader_sm1_read_src_param parses a temp source with no written-before check; no uninitialised-temp check exists in d3dbc.c, dlls/wined3d/shader.c or glsl_shader.c (0 matches for 'uninit')"
+   }
   },
   {
+   "decision": "union",
    "id": "rcp_mask",
+   "ms": {
+    "page": "desktop-src/direct3dhlsl/dx9-graphics-reference-asm-vs-registers-modifiers-masking.md",
+    "section": "Masking, line 38: exp, expp, log, logp, pow, rcp, rsq need a single write mask (vs); the ps pages are silent"
+   },
    "note": "MS vs masking page: exp/expp/log/logp/pow/rcp/rsq need a single-component write mask; ps pages silent; universe uses single-component masks plus full mask. Included.",
-   "rows": "included"
+   "rows": "included",
+   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft silent or narrower, Wine 9.0 accepts: the universe is the union)",
+   "wine": {
+    "file": "libs/vkd3d/libs/vkd3d-shader/d3dbc.c",
+    "line": 485,
+    "what": "shader_sm1_parse_dst_param stores the write mask unvalidated for every opcode, so a full mask on rcp parses"
+   }
   }
  ],
  "usage_source": "MS:dx9-graphics-reference-asm-dcl-usage-input-register---vs, dcl-usage---ps (D3DDECLUSAGE values, usage_index 0..15)",

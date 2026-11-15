@@ -7,6 +7,8 @@ out, tabj, tabpy = sys.argv[1:4]; os.makedirs(out, exist_ok=True)
 T = json.load(open(tabj))
 for _c in T["conflicts"]:   # every union row cites the rule, the Microsoft page and section, and the Wine 9.0 file and line (CLAUDE.md: Where the Microsoft page is narrower)
     assert _c.get("decision") == "union" and _c["rule"] and _c["ms"]["page"] and _c["ms"]["section"] and _c["wine"]["file"] and _c["wine"]["line"], _c["id"]
+for _u in T["undetermined"]:   # no row stays included without a source: an included row is a union row with the same citation
+    if _u["rows"] == "included": assert _u.get("decision") == "union" and _u["rule"] and _u["ms"]["page"] and _u["ms"]["section"] and _u["wine"]["file"] and _u["wine"]["line"], _u["id"]
 sp = importlib.util.spec_from_file_location("d3d9_tables", tabpy); D = importlib.util.module_from_spec(sp); sp.loader.exec_module(D)
 CLS = ["r", "v", "c", "t", "a0", "aL", "b", "i", "l", "oPos", "oFog", "oPts", "oD", "oT", "o", "oC", "oDepth", "s", "p0", "vPos", "vFace"]
 SRCMOD = ["neg", "bias", "biasneg", "sign", "signneg", "comp", "x2", "x2neg", "dz", "dw", "abs", "absneg"]          # token codes 1..12 (13 = not: predicate only)
