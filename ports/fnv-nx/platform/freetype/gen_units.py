@@ -266,6 +266,12 @@ def main(a):
         os.makedirs(os.path.dirname(p), exist_ok=True)
         with open(p, "w", encoding="utf-8", errors="surrogateescape", newline="") as f:
             f.write(text)
+    for n in names:
+        sys.stderr.write("gen_units: kept module %s: in the package's modules.cfg; FT_Init_FreeType registers it through ftmodule.h (FT_Add_Default_Modules)\n" % n)
+    for n in sorted(gone_mod):
+        sys.stderr.write("gen_units: dropped module %s: its services are looked up only by the base entries %s, and no source of the root names their public headers\n" % (n, sorted(gone_ext)))
+    for e in ("ftsystem.c", "ftdebug.c", "ftinit.c"):
+        sys.stderr.write("gen_units: kept base src/base/%s: mandatory component (FT_Init_FreeType/FT_Done_FreeType reach it)\n" % e)
     sys.stderr.write("gen_units: dropped, no caller in the root: extensions %s modules %s\n" % (sorted(gone_ext), sorted(gone_mod)))
     sys.stderr.write("gen_units: package enables modules %s and options %s\n" % ([x.strip() for x in mods_added], [x.strip() for x in opts_added]))
     return 0
