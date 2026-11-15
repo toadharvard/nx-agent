@@ -737,3 +737,8 @@ Paused: w3b, w4, farm; no other work.
     - Quality levels: 1 for every maskable type.
     - Rule D (depth compatibility at draw, Wine-cited) goes to w6. Its effect: BeginPass4's sample-count precondition always holds for d3d9 depth.
     - Open (f): Wine's behaviour on an incomplete FBO (colour MS mismatch). ASM-628 is deleted after (f).
+- 09:18Z Budget order (orchestrator, integ 9ea2d5403): at most 2 workers per lead.
+    - w6 (doing): only steps 1-5, the root into the candidate. Rule D and the dev/ report wait.
+    - w5 (doing): sm_link.
+    - w1b: stopped, branches kept. Queue held: (f), sm_cases, readers, header items.
+    - Farms: 0.
