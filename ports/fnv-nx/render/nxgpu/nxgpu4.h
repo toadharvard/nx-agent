@@ -129,9 +129,14 @@ typedef struct NxVtxLayout4 {
                            the swapchain image), then the depth target 2 words (image 0 = none). Colour targets: a \
                            2D image, a cube face (layer), a 3D slice (layer), any mip level, multisampled images; \
                            colorCount 0 with a depth target = a depth-only pass. Draw buffer i = target i; sRGB \
-                           writes go through the target's sRGB view (NXRS_R_SRGB). All targets must have the same \
-                           size at their level and the same sample count, layer and level must exist, colour \
-                           // ASM-628 (verify/ASSUMPTIONS.json) \
+                           writes go through the target's sRGB view (NXRS_R_SRGB). Targets may differ in size: \
+                           rendering covers the intersection (min width, min height over the bound attachments; GL 4.5 \
+                           9.4.2, and wined3d binds them in one FBO); the pass's w, h = colour target 0 at its level, or \
+                           the depth target when colorCount is 0 (SetRenderTarget Remarks: the viewport becomes the full \
+                           render-target size; MicrosoftDocs/sdk-api nf-d3d9-idirect3ddevice9-setrendertarget.md and \
+                           -setdepthstencilsurface.md Remarks, msdocs-win32-d3d9 multiple-render-targets.md:15). All \
+                           targets must have the same sample count (ASM-628, verify/ASSUMPTIONS.json), layer and \
+                           level must exist, colour \
                            targets must be colour images and the depth target a depth image, and there must be \
                            at least one target: else the submit is BAD_CALL before anything runs (the device \
                            guarantees it; D3D9 requires it). No clear; the pass starts as NxOp_BeginPass does \

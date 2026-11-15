@@ -1,7 +1,7 @@
 /* fnv-nx L6 GL 4.5 backend v4: render passes and clears.
  *
  * A pass is a set of up to 4 colour subresources (image, level, layer: a cube face, a 3D slice, a mip level) and an
- * optional depth-stencil subresource, all of one size and one sample count (nxchk_pass_check; BeginPass4 that
+ * optional depth-stencil subresource, of one sample count and any sizes (nxchk_pass_check; BeginPass4 that
  * violates it makes the submit BAD_CALL before anything runs). Colour image id 0 names the swapchain image. Colour
  * targets are attached through their sRGB view when the format has one (NXRS_R_SRGB then decides whether GL encodes
  * the write), draw buffer i = colour target i. A pass has no GL object: framebuffers are cached by the target
@@ -64,7 +64,8 @@ static void clear_depth_stencil(uint32_t flags, const Gl4Image* z, uint32_t zbit
     else if (flags & NxClear_Stencil && z->hasStencil) p_glClearBufferiv(GL_STENCIL, 0, &s);
 }
 
-/* binds the targets and sets what a pass starts with: viewport (0.5, 0.5, w, h) = D3D9's full viewport, depth range
+/* binds the targets and sets what a pass starts with (w, h = colour target 0, or the depth target; attachments of other
+ * sizes are covered by the intersection, GL 4.5 9.4.2, no FBO change): viewport (0.5, 0.5, w, h) = D3D9's full viewport, depth range
  * [0,1], scissor (0, 0, w, h), blend constant (1,1,1,1), depth bias 0, no state bound */
 static void begin(const Gl4Pass* p, uint32_t w, uint32_t h, uint32_t samples) {
     g4.passN = p->nColor; g4.passSamples = samples;

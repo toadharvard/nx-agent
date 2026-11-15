@@ -1,6 +1,6 @@
 /* fnv-nx L6 nxgpu v4: backend-neutral argument and stream checks (see nxgpu4_check.h). Moved from gl4_check.c,
  * gl4_pass.c and gl4_vtx.c without a change of rule, message or order.
- *   BeginPass4  targets that disagree in size or sample count, bad level / layer, no target at all;
+ *   BeginPass4  targets that disagree in sample count, bad level / layer, no target at all;
  *   DefineLayout4, BindVtxN  attribute types, streams, locations, divisors and strides outside the ABI or the limits;
  *   DefineState  render-state w[3] bits that are reserved.
  * NXRS_M_LASTPIXEL is not checked: it has no GL state and never refuses a draw (Wine 9.0 wined3d keeps WINED3D_RS_LASTPIXEL
@@ -42,7 +42,9 @@ int nxchk_pass_parse4(const NxChkEnv* e, const uint32_t* a, uint32_t argc, NxChk
     return 0;
 }
 
-/* sizes: every target's subresource must have the size and sample count of the first */
+/* every target's subresource must have the sample count of the first; sizes may differ (rendering covers the
+ * intersection, GL 4.5 9.4.2). w, h = the first target: colour target 0 at its level, or the depth target when
+ * there is no colour target (D3D9 SetRenderTarget: the viewport becomes the full render-target size) */
 int nxchk_pass_check(const NxChkEnv* e, const NxChkPass* p, uint32_t* w, uint32_t* h, uint32_t* samples) {
     if (!p->nColor && !p->d.image) { nxchk_err("pass: no target"); return 1; }
     int have = 0;
@@ -58,8 +60,8 @@ int nxchk_pass_check(const NxChkEnv* e, const NxChkPass* p, uint32_t* w, uint32_
         if (level >= im.mips || layer >= layers_of(&im, level)) { nxchk_err("pass: target %u: level %u layer %u outside image %u", i, level, layer, t->image); return 1; }
         uint32_t tw = nxchk_lvl(im.w, level), th = nxchk_lvl(im.h, level);
         if (!have) { *w = tw; *h = th; *samples = im.samples; have = 1; }
-        else if (tw != *w || th != *h || im.samples != *samples) {
-            nxchk_err("pass: target %u is %ux%u x%u samples, the pass is %ux%u x%u", i, tw, th, im.samples, *w, *h, *samples);
+        else if (im.samples != *samples) {
+            nxchk_err("pass: target %u has %u samples, the pass has %u", i, im.samples, *samples);
             return 1;
         }
     }
