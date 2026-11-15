@@ -266,3 +266,8 @@ After the first frame:
     - frame_cfa crashing on 20 objects;
     - boundary_guest.cpp PP missing fnvnx_sha256.h, which leaves 5 objects unbuilt.
   - Next: split the 1,572 into gate-side (constant frame offset lost: L1) and plugin-side (GIMPLE cause groups; I rule on them). The exact head sha is pending from w2.
+- VEC1 (from L5): fnvnx_layout dl_type rejected VECTOR_TYPE, which makes lib/sha256 (L5) and render/shaders/translator (L6) red on cand2 d523d1367.
+  - Cause: the grammar's productions were enumerated by hand.
+  - Rule: a vector type is spelled from GCC's own compatibility facts (lane count, element, opaque, qualifiers) as `vec:<N>:<elem>`.
+  - Worker: w3, before HOST1. Doing.
+- L1 has taken the three gate_order blockers onto cand2 with w15. w2's gate-side class (G) is the sites where every predecessor carries the same constant offset, and those go to w15.
