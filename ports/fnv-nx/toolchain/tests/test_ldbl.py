@@ -3,7 +3,7 @@
 its own that mangles as 'O' (double: 'N'). ldbl/ldbl.cpp is compiled through the recipe (pinned compiler external, the product plugins,
 plugbuild.py); its static_asserts hold sizeof/alignof, LDBL_MANT_DIG == 53, __LDBL_MAX__ == __DBL_MAX__ and the distinctness from double, so
 a compiler that still has a 128-bit long double fails to compile. The MSVC names of the functions are read from the names plugin's
-.fnvnx.sympair rows: ?ld@@YAONON@Z (long double 'O', double 'N'), as cl writes them. No network, no game data.
+.fnvnx.sympair rows: ?ld@@YAOON@Z (long double 'O', double 'N'), as cl writes them. No network, no game data.
 Run: python3 -I <this file> from the checkout root."""
 import json
 import os
@@ -35,8 +35,10 @@ def predefines(cxx):
 
 
 def number(v):
-    """the value of a float-constant macro without its spelling: casts and the type suffix removed (`((double)1.79e+308L)` and `1.79e+308L`)"""
+    """the value of a float-constant macro without its spelling: casts and the type suffix removed (`((double)1.79e+308L)`, `double(1.79e+308L)` and `1.79e+308L`)"""
     v = re.sub(r'\(\((?:long )?double\)', '(', v)
+    v = re.sub(r'\((?:long )?(?:double|float)\)\(', '(', v)
+    v = re.sub(r'\b(?:long double|double|float)\(', '(', v)   # the C++ functional-cast form GCC 13 writes: `double(1.79e+308L)`
     v = re.sub(r'(?<=[0-9.])[LlFf]\b', '', v)
     return re.sub(r'[()\s]', '', v)
 
@@ -138,7 +140,7 @@ def main():
               '\n'.join(l for l in r.stderr.splitlines() if 'warning' not in l and 'note:' not in l)[:3000])
         if r.returncode == 0:
             rows = {l.split('\t')[0]: l.split('\t')[1] for l in pb.section(obj, '.fnvnx.sympair').splitlines()}
-            check('long double mangles as O: ?ld@@YAONON@Z', rows.get('_Z2lded') == '?ld@@YAONON@Z',
+            check('long double mangles as O: ?ld@@YAOON@Z', rows.get('_Z2lded') == '?ld@@YAOON@Z',
                   rows)
             check('double still mangles as N: ?dd@@YANN@Z', rows.get('_Z2ddd') == '?dd@@YANN@Z', rows)
             check('the Itanium names keep long double (e) apart from double (d): two overloads, two MSVC names',

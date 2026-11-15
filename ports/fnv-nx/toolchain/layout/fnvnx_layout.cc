@@ -341,7 +341,7 @@ static void emit_objects()
  * expansion (a recursive type is written by its tag, not unrolled), `-` for an unnamed tag or member, `union:` likewise; `enum:TAG=T`
  * (T the enumeration's compatible integer type); qualifiers are a prefix `const:` `volatile:` `restrict:` in that order. Typedef names are
  * looked through (a typedef is not a type); the top-level qualifiers of a parameter are dropped (6.7.6.3p15).
- * A type outside this grammar (an atomic qualifier, a vector or complex type, an incomplete enumeration) is an error of the compilation, and
+ * A type outside this grammar (an atomic qualifier, a complex type, an incomplete enumeration) is an error of the compilation, and
  * so is a symbol declared with two different spellings in one unit (every declaration of it is compatible with the others, but the gate that
  * reads this section needs one spelling to be the symbol's type in the unit). */
 static std::vector<tree> decls;
@@ -441,6 +441,17 @@ static std::string dl_type(tree t, std::vector<tree> &stk)
     if (n && TREE_CODE(n) == TYPE_DECL) n = DECL_NAME(n);
     if (!n || TREE_CODE(n) != IDENTIFIER_NODE) { dl_error("a scalar type without a name", "?"); return "?"; }
     return pre + dl_word(IDENTIFIER_POINTER(n));
+  }
+  case VECTOR_TYPE: {
+    /* VEC1: a vector type is spelled by the facts GCC's own compatibility check reads: c/c-typeck.cc comptypes_internal (VECTOR_TYPE: equal
+     * TYPE_VECTOR_SUBPARTS and compatible element types) and cp/typeck.cc structural_comptypes (same), plus the layout the ABI sees (size,
+     * alignment) and TYPE_VECTOR_OPAQUE (an opaque vector is a distinct type for the builtins' overload machinery).  Row:
+     * `vec:<N>:<size>:<align>:` [`opaque:`] element. */
+    poly_uint64 n = TYPE_VECTOR_SUBPARTS(t);
+    unsigned HOST_WIDE_INT nc = 0;
+    if (!n.is_constant(&nc) || !tree_fits_uhwi_p(TYPE_SIZE_UNIT(t))) { dl_error("a vector type of non-constant size", "?"); return "?"; }
+    return pre + "vec:" + std::to_string(nc) + ":" + std::to_string(tree_to_uhwi(TYPE_SIZE_UNIT(t))) + ":"
+           + std::to_string(TYPE_ALIGN_UNIT(t)) + ":" + (TYPE_VECTOR_OPAQUE(t) ? "opaque:" : "") + dl_type(TREE_TYPE(t), stk);
   }
   default:
     dl_error("a type outside the grammar", get_tree_code_name((enum tree_code)code));
