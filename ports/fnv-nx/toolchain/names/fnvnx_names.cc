@@ -1384,6 +1384,7 @@ static std::vector<tree> sdd_slot_decls()
  * One row per array new-expression and per array delete-expression the C++ front end builds in this unit, written from the front end's own values at
  * the site (the msvcmodel.patch event PLUGIN_FNVNX_COOKIE, called from build_new_1 and build_vec_delete_1, with struct fnvnx_cookie_fact in plugin.h):
  *   <new|delete> TAB <file:line> TAB <elt size> TAB <cookie bytes> TAB <count offset> TAB <size arg> TAB <size arg is the elt size: 0|1> TAB <dtor: 0|1>
+ *   TAB <elt alignment> TAB <the called allocation/deallocation function: class|global|-> TAB <its parameter count|->
  * `-` is "none" (no cookie, no count, no operator delete[] size); `var` is a size that is not a constant (an element type of variable size).
  * The section exists, empty when the unit has no array new/delete, in every C++ unit: its absence means "not compiled by this plugin". The gate reads
  * every row of every product unit against S29's formula. */
@@ -1403,9 +1404,16 @@ static void cookie_event(void *gcc_data, void *)
   std::string file = xl.file ? xl.file : "";
   for (char &c : file) if (c == '\t' || c == '\n' || c == '"' || c == '\\') c = '_';
   bool same = f->size_arg && f->elt_size && operand_equal_p(f->size_arg, f->elt_size, 0);
+  std::string fn = "-", np = "-";
+  if (f->fn && TREE_CODE(f->fn) == FUNCTION_DECL) {
+    fn = DECL_CLASS_SCOPE_P(f->fn) ? "class" : "global";
+    int n = 0;
+    for (tree a = TYPE_ARG_TYPES(TREE_TYPE(f->fn)); a && a != void_list_node; a = TREE_CHAIN(a)) n++;
+    np = std::to_string(n);
+  }
   cookie_rows.push_back(std::string(f->is_delete ? "delete" : "new") + "\t" + file + ":" + std::to_string(xl.line) + "\t" + cookie_val(f->elt_size) + "\t"
                         + cookie_val(f->cookie_size) + "\t" + cookie_val(f->count_offset) + "\t" + cookie_val(f->size_arg) + "\t" + (same ? "1" : "0") + "\t"
-                        + (f->nontrivial_dtor ? "1" : "0"));
+                        + (f->nontrivial_dtor ? "1" : "0") + "\t" + std::to_string(f->elt_align) + "\t" + fn + "\t" + np);
 }
 
 static void finish_unit(void *, void *)

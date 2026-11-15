@@ -2,8 +2,8 @@
 """Test of the .fnvnx.cookie section of toolchain/names/fnvnx_names.cc (S29): one row per array new-expression and per array delete-expression, from the
 front end's own values (msvcmodel.patch: PLUGIN_FNVNX_COOKIE called by build_new_1 and build_vec_delete_1).
 
-Row: <new|delete> TAB <file:line> TAB <elt size> TAB <cookie bytes> TAB <count offset> TAB <size arg> TAB <size arg is the elt size> TAB <dtor>.
-The rule checked on every row (DATAMODEL S29): the cookie is 4 bytes exactly when the element class has a non-trivial destructor, whatever its alignment,
+Row: <new|delete> TAB <file:line> TAB <elt size> TAB <cookie bytes> TAB <count offset> TAB <size arg> TAB <size arg is the elt size> TAB <dtor> TAB <elt alignment> TAB <class|global|- : the called operator> TAB <its parameter count>.
+The rule checked on every row (DATAMODEL S29): the cookie is 4 bytes exactly when the element class has a non-trivial destructor, for the recorded alignments (up to 8),
 and none otherwise; an array new stores the count at cookie-4 (the last size_t of the cookie); an array delete passes the size of one element to
 operator delete[]. ldbl/model.cpp holds the cases the pinned cl 15.00 was recorded on (DATAMODEL S29's source). An over-aligned element (16 and up) has no recorded cl
 output: that case is undecided and is not tested; cookie/none.cpp has no array expression (the section is present and empty).
@@ -26,7 +26,7 @@ def rows_of(obj):
 
 def rule(r):
     """the reasons a row breaks S29's formula ([] = it holds)"""
-    kind, _, esz, cookie, cnt, sarg, same, dtor = r
+    kind, _, esz, cookie, cnt, sarg, same, dtor, align, fn, np = r
     w = []
     if cookie != ('4' if dtor == '1' else '-'):
         w.append('cookie %s with dtor=%s' % (cookie, dtor))
@@ -35,6 +35,13 @@ def rule(r):
     if kind == 'delete' and not (same == '1' and sarg == esz):
         w.append('size arg %s is not the element size %s' % (sarg, esz))
     return w
+
+
+def undecided(r):
+    """the S29 domain: the recorded cl cases are element alignments up to 8, and a delete[] that calls a class-specific two-parameter operator delete[]
+    (a new[] is recorded with the global and the class-specific operator). A row outside it has no recorded cl output: undecided, never accepted by formula"""
+    kind, align, fn, np = r[0], int(r[8]), r[9], r[10]
+    return align > 8 or (kind == 'delete' and not (fn == 'class' and np == '2'))
 
 
 def main():
@@ -47,6 +54,7 @@ def main():
         if r.returncode == 0:
             rows = rows_of(obj)
             check('every row satisfies the S29 formula', not [x for x in rows if rule(x)], [(x, rule(x)) for x in rows if rule(x)])
+            check('every row is inside the S29 domain', not [x for x in rows if undecided(x)], [x for x in rows if undecided(x)])
             got = sorted((x[0], x[2], x[3], x[7], x[5] if x[0] == 'delete' else '-') for x in rows)
             # (kind, elt size, cookie, dtor, delete size arg): each row is the pinned cl's output recorded in ldbl/model.cpp (DATAMODEL S29's source), by its comment
             want = sorted([

@@ -300,7 +300,7 @@
     invoke_plugin_callbacks_full accordingly!  */
 --- a/gcc/plugin.h
 +++ b/gcc/plugin.h
-@@ -162,6 +162,25 @@
+@@ -162,6 +162,30 @@
  extern void add_new_plugin (const char *);
  extern void parse_plugin_arg_opt (const char *);
  extern int invoke_plugin_callbacks_full (int, void *);
@@ -311,6 +311,9 @@
 +   COOKIE_SIZE   the bytes the allocation holds before the array: the INTEGER_CST of targetm.cxx.get_cookie_size, or NULL_TREE for none;
 +   COUNT_OFFSET  new: the byte offset from the start of the allocation at which the element count is stored; NULL_TREE for none;
 +   SIZE_ARG      delete: the size argument passed to operator delete[] (the same tree handed to build_op_delete_call);
++   FN            the allocation function (new: alloc_fn) or the deallocation function (delete: the operator delete[] callee of the call the front end
++                 built) the expression calls; NULL_TREE when the front end does not name one;
++   ELT_ALIGN     TYPE_ALIGN_UNIT (ELT_TYPE);
 +   NONTRIVIAL_DTOR TYPE_HAS_NONTRIVIAL_DESTRUCTOR (ELT_TYPE) (false for a non-class type).  */
 +struct fnvnx_cookie_fact
 +{
@@ -321,6 +324,8 @@
 +  tree cookie_size;
 +  tree count_offset;
 +  tree size_arg;
++  tree fn;
++  unsigned elt_align;
 +  bool nontrivial_dtor;
 +};
  extern void initialize_plugins (void);
@@ -354,7 +359,7 @@
  
  static bool begin_init_stmts (tree *, tree *);
  static tree finish_init_stmts (bool, tree, tree);
-@@ -3502,6 +3503,22 @@
+@@ -3502,6 +3503,24 @@
  	}
      }
  
@@ -370,6 +375,8 @@
 +      fact.count_offset = cookie_size
 +	? size_binop (MINUS_EXPR, cookie_size, size_in_bytes (sizetype)) : NULL_TREE;
 +      fact.size_arg = NULL_TREE;
++      fact.fn = alloc_fn;
++      fact.elt_align = TYPE_ALIGN_UNIT (elt_type);
 +      fact.nontrivial_dtor = CLASS_TYPE_P (elt_type) && TYPE_HAS_NONTRIVIAL_DESTRUCTOR (elt_type);
 +      invoke_plugin_callbacks (PLUGIN_FNVNX_COOKIE, &fact);
 +    }
@@ -377,10 +384,11 @@
    alloc_expr = alloc_call;
    if (cookie_size)
      alloc_expr = maybe_wrap_new_for_constexpr (alloc_expr, type,
-@@ -4211,6 +4228,21 @@
-       if (POINTER_SIZE == 32)
- 	virtual_size = size_exp;
- 
+@@ -4217,6 +4236,28 @@
+ 					      /*placement=*/NULL_TREE,
+ 					      /*alloc_fn=*/NULL_TREE,
+ 					      complain);
++
 +      /* fnv-nx msvcmodel (S29): the cookie and the size argument of this array delete-expression.  */
 +      {
 +	struct fnvnx_cookie_fact fact;
@@ -392,10 +400,16 @@
 +	  ? targetm.cxx.get_cookie_size (type) : NULL_TREE;
 +	fact.count_offset = NULL_TREE;
 +	fact.size_arg = virtual_size;
++	{
++	  tree call = deallocate_expr;
++	  while (call && TREE_CODE (call) == COMPOUND_EXPR)
++	    call = TREE_OPERAND (call, 1);
++	  fact.fn = call && TREE_CODE (call) == CALL_EXPR ? cp_get_callee_fndecl_nofold (call) : NULL_TREE;
++	}
++	fact.elt_align = TYPE_ALIGN_UNIT (type);
 +	fact.nontrivial_dtor = CLASS_TYPE_P (type) && TYPE_HAS_NONTRIVIAL_DESTRUCTOR (type);
 +	invoke_plugin_callbacks (PLUGIN_FNVNX_COOKIE, &fact);
 +      }
-+
-       deallocate_expr = build_op_delete_call (VEC_DELETE_EXPR,
- 					      base_tbd, virtual_size,
- 					      use_global_delete & 1,
+     }
+ 
+   body = loop;
