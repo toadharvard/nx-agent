@@ -633,3 +633,9 @@ Paused: w3b, w4, farm; no other work.
     - gate_d3d9total's inputs come from the roots' records: MOJO_PIN from translator build.json, includes from the admitted include lists.
     - Then delete render/backend, shaders/include, shaders/src (sdp.c to translator/src), build.sh, the patches and CMake.
     - The dk files are confirmed to be on L6A's branch before they are deleted.
+- 00:51Z L6A on the audit.
+    - #29: gl4 reaches the translator only through translate_glsl; no copy.
+    - #23: the gl4/dk build scripts were deleted (L6A b627972e).
+    - #30/#31: gl.xml mirror plus a generated entry list and map (L6A w6).
+    - The lead-line test tests/l6/gl4/xl.py names the deleted gl4_xlator.sh; deleted here.
+    - render/backend, shaders/include and shaders/src are not on w6-root, so no candidate deletion is needed. Deleting them on our line would risk a delete-wins merge loss against L6A's dk root.
