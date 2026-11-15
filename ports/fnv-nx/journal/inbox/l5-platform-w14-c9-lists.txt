@@ -1,0 +1,106 @@
+C9: libnx warnings by option {"-Wincompatible-pointer-types": 10, "-Wint-to-pointer-cast": 9, "-Woverflow": 2, "-Wpointer-to-int-cast": 27, "-Wshift-count-overflow": 20}; 68 findings; 120 struct/union types of switch.h compared, 25 differ between ILP32 and LP64
+{
+"-Wincompatible-pointer-types": [
+"source/runtime/btdev.c:211",
+"source/runtime/devices/usb_comms.c:591",
+"source/runtime/devices/usb_comms.c:685",
+"source/runtime/init.c:76",
+"source/runtime/init.c:77",
+"source/services/applet.c:1198",
+"source/services/btdrv.c:353",
+"source/services/btdrv.c:983",
+"source/services/btdrv.c:1216",
+"source/services/psm.c:77"
+],
+"-Wint-to-pointer-cast": [
+"source/kernel/thread.c:71",
+"source/runtime/dynamic.c:44",
+"source/runtime/dynamic.c:57",
+"source/runtime/dynamic.c:96",
+"source/runtime/dynamic.c:104",
+"source/runtime/env.c:59",
+"source/runtime/env.c:60",
+"source/runtime/env.c:64",
+"source/runtime/env.c:73"
+],
+"-Woverflow": [
+"source/kernel/virtmem.c:192",
+"source/kernel/virtmem.c:198"
+],
+"-Wpointer-to-int-cast": [
+"source/kernel/jit.c:107",
+"source/kernel/jit.c:127",
+"source/kernel/jit.c:130",
+"source/kernel/thread.c:66",
+"source/kernel/tmem.c:122",
+"source/kernel/tmem.c:129",
+"source/nvidia/ioctl/nvchannel.c:35",
+"source/nvidia/ioctl/nvchannel.c:61",
+"source/nvidia/ioctl/nvchannel.c:195",
+"source/nvidia/ioctl/nvhost-ctrl-gpu.c:119",
+"source/nvidia/ioctl/nvmap.c:64",
+"source/runtime/argv.c:48",
+"source/runtime/argv.c:60",
+"source/runtime/argv.c:61",
+"source/runtime/devices/usb_comms.c:417",
+"source/runtime/devices/usb_comms.c:423",
+"source/runtime/devices/usb_comms.c:504",
+"source/runtime/devices/usb_comms.c:510",
+"source/services/audin.c:197",
+"source/services/audin.c:217",
+"source/services/audout.c:239",
+"source/services/audout.c:259",
+"source/services/usbds.c:317",
+"source/services/usbhs.c:291",
+"source/services/usbhs.c:412",
+"source/services/usbhs.c:494",
+"source/services/usbhs.c:511"
+],
+"-Wshift-count-overflow": [
+"include/switch/runtime/../sf/hipc.h:112",
+"include/switch/runtime/../sf/hipc.h:113",
+"include/switch/runtime/../sf/hipc.h:125",
+"include/switch/runtime/../sf/hipc.h:126",
+"include/switch/runtime/../sf/hipc.h:127",
+"include/switch/runtime/../sf/hipc.h:135",
+"include/switch/runtime/../sf/hipc.h:142",
+"include/switch/runtime/../sf/hipc.h:152",
+"include/switch/runtime/../sf/hipc.h:157",
+"include/switch/sf/hipc.h:112",
+"include/switch/sf/hipc.h:113",
+"include/switch/sf/hipc.h:125",
+"include/switch/sf/hipc.h:126",
+"include/switch/sf/hipc.h:127",
+"include/switch/sf/hipc.h:135",
+"include/switch/sf/hipc.h:142",
+"include/switch/sf/hipc.h:152",
+"include/switch/sf/hipc.h:157",
+"include/switch/types.h:58",
+"source/runtime/pad.c:31"
+]
+}
+structure_type AppletHookCookie: sizeof 12 (ILP32) vs 24 (LP64), members that differ: next,callback,param
+structure_type AudioDriverWaveBuf: sizeof 56 (ILP32) vs 56 (LP64), members that differ: None,context_addr,next
+structure_type AudioInBuffer: sizeof 32 (ILP32) vs 40 (LP64), members that differ: next,buffer,buffer_size,data_size,data_offset
+structure_type AudioOutBuffer: sizeof 32 (ILP32) vs 40 (LP64), members that differ: next,buffer,buffer_size,data_size,data_offset
+structure_type CmifRequest: sizeof 52 (ILP32) vs 96 (LP64), members that differ: hipc,data,out_pointer_sizes,objects,server_pointer_size,cur_in_ptr_id
+structure_type CmifResponse: sizeof 16 (ILP32) vs 32 (LP64), members that differ: data,objects,copy_handles,move_handles
+structure_type ConsoleFont: sizeof 12 (ILP32) vs 16 (LP64), members that differ: gfx,asciiOffset,numChars,tileWidth,tileHeight
+structure_type ConsoleRenderer: sizeof 20 (ILP32) vs 40 (LP64), members that differ: init,deinit,drawChar,scrollWindow,flushAndSwap
+structure_type Framebuffer: sizeof 60 (ILP32) vs 80 (LP64), members that differ: win,map,buf,buf_linear,stride,width_aligned,height_aligned,num_fbs,fb_size,has_init
+structure_type HipcParsedRequest: sizeof 80 (ILP32) vs 112 (LP64), members that differ: data,pid
+structure_type HipcRequest: sizeof 32 (ILP32) vs 64 (LP64), members that differ: send_statics,send_buffers,recv_buffers,exch_buffers,data_words,recv_list,copy_handles,move_handles
+structure_type HipcResponse: sizeof 40 (ILP32) vs 56 (LP64), members that differ: statics,data_words,copy_handles,move_handles
+structure_type NWindow: sizeof 120 (ILP32) vs 128 (LP64), members that differ: bq,event,mutex,slots_configured,slots_requested,cur_slot,width,height,format,usage,crop,scaling_mode,transform,sticky_transform,default_width,default_height,swap_interval,is_connected,producer_controlled_by_app,consumer_running_behind
+structure_type NvMap: sizeof 24 (ILP32) vs 32 (LP64), members that differ: cpu_addr,kind,has_init,is_cpu_cacheable
+structure_type PrintConsole: sizeof 72 (ILP32) vs 80 (LP64), members that differ: font,renderer,cursorX,cursorY,prevCursorX,prevCursorY,consoleWidth,consoleHeight,windowX,windowY,windowWidth,windowHeight,tabSize,fg,bg,flags,consoleInitialised
+structure_type SfBuffer: sizeof 8 (ILP32) vs 16 (LP64), members that differ: ptr,size
+structure_type SfDispatchParams: sizeof 224 (ILP32) vs 328 (LP64), members that differ: buffers,in_send_pid,in_num_objects,in_objects,in_num_handles,in_handles,out_num_objects,out_objects,out_handle_attrs,out_handles
+structure_type Thread: sizeof 32 (ILP32) vs 56 (LP64), members that differ: stack_mem,stack_mirror,stack_sz,tls_array,next,prev_next
+structure_type TipcDispatchParams: sizeof 180 (ILP32) vs 256 (LP64), members that differ: buffers,in_send_pid,in_num_handles,in_handles,out_num_objects,out_objects,out_handle_attrs,out_handles
+structure_type UEvent: sizeof 20 (ILP32) vs 40 (LP64), members that differ: waitable,signal,auto_clear
+structure_type UTimer: sizeof 40 (ILP32) vs 56 (LP64), members that differ: waitable,next_tick,interval
+structure_type Waitable: sizeof 16 (ILP32) vs 32 (LP64), members that differ: vt,list,mutex
+structure_type WaitableNode: sizeof 8 (ILP32) vs 16 (LP64), members that differ: prev,next
+structure_type timespec: sizeof 16 (ILP32) vs 16 (LP64), members that differ: tv_nsec
+structure_type timeval: sizeof 16 (ILP32) vs 16 (LP64), members that differ: tv_usec
