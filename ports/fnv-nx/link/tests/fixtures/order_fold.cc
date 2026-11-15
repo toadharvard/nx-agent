@@ -17,3 +17,15 @@ int slot_f() { return vslot(&Q::f); }
 extern "C" void use_ptr(const unsigned *);
 static inline int pcopy(unsigned a) { use_ptr(&a); return (int)a; }
 int pcaller(unsigned x) { return pcopy(x) + pcopy(x + 1); }
+// aggregate copies with a shared side are copied unit-wise, every shared unit ordered
+struct T12 { int a, b, c; };
+void copy12(T12 *d, const T12 *s) { *d = *s; }
+struct Big { int v[100]; };
+void copybig(Big *d, const Big *s) { *d = *s; }
+extern T12 gsrc;
+T12 retg() { return gsrc; }
+void takes(T12 v);
+void passes(const T12 *s) { takes(*s); }
+// atomics: every memory order is raised to seq_cst
+int rmw(int *p) { return __atomic_fetch_add(p, 1, __ATOMIC_RELAXED); }
+int cas(int *p, int *e) { return __atomic_compare_exchange_n(p, e, 1, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED); }
