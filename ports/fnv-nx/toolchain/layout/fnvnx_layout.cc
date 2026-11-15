@@ -42,7 +42,7 @@
  *                        the compatibility (6.2.7) of the declarations of external objects and functions, not the tag's name. So none of
  *                        the C++ predicates applies and the value says so.
  *
- * Declared types (section .fnvnx.decltype, C units only, not loaded): see the block comment before emit_decltype: one line `symbol <TAB> type` per
+ * Declared types (section .fnvnx.decltype, every unit: the external symbols of a C unit, the C-linkage symbols of a C++ unit; not loaded): see the block comment before emit_decltype: one line `symbol <TAB> type` per
  * external symbol the unit declares or defines, in the grammar of link/ctypes_compat.py (C11 6.2.7p2).
  *
  * Boundary-forbidden types (section .fnvnx.crossing, every unit, not loaded): written by the names plugin (the block comment before cross_holds in toolchain/names/fnvnx_names.cc): one line
@@ -344,162 +344,31 @@ static void emit_objects()
  * A type outside this grammar (an atomic qualifier, a complex type, an incomplete enumeration) is an error of the compilation, and
  * so is a symbol declared with two different spellings in one unit (every declaration of it is compatible with the others, but the gate that
  * reads this section needs one spelling to be the symbol's type in the unit). */
-static std::vector<tree> decls;
-static std::set<tree> decls_set;
-static tree keep_decls = NULL_TREE;
-static const struct ggc_root_tab keep_decls_roots[] = {
-  { &keep_decls, 1, sizeof(keep_decls), &gt_ggc_mx_lang_tree_node, NULL },
-  LAST_GGC_ROOT_TAB
-};
-
-static void add_decl(tree d)
-{
-  if (!d || (TREE_CODE(d) != VAR_DECL && TREE_CODE(d) != FUNCTION_DECL) || !TREE_PUBLIC(d)) return;
-  if (DECL_IS_UNDECLARED_BUILTIN(d) || !DECL_NAME(d)) return;
-  if (decls_set.insert(d).second) { decls.push_back(d); keep_decls = tree_cons(NULL_TREE, d, keep_decls); }
-}
-
-static bool dl_failed = false;
-static void dl_error(const char *what, const std::string &name)
-{
-  error("%<fnvnx_layout%>: .fnvnx.decltype: %s (%s)", what, name.c_str());
-  dl_failed = true;
-}
-
-static std::string dl_tag(tree t)
-{
-  tree n = TYPE_NAME(t);
-  if (n && TREE_CODE(n) == TYPE_DECL) n = DECL_ARTIFICIAL(n) ? DECL_NAME(n) : NULL_TREE;   /* a typedef name is not a tag */
-  return n && TREE_CODE(n) == IDENTIFIER_NODE ? IDENTIFIER_POINTER(n) : "-";
-}
-
-static std::string dl_word(const std::string &s)
-{
-  std::string w = s;
-  for (char &c : w) if (c == ' ') c = '_';
-  return w;
-}
-
-static std::string dl_type(tree t, std::vector<tree> &stk)
-{
-  if (!t || t == error_mark_node) { dl_error("an erroneous type", "?"); return "?"; }
-  int q = TYPE_QUALS(t);
-  const int code = TREE_CODE(t);
-  std::string pre;
-  /* HOST1: a scalar that carries the type attribute fnvnx_host, on the type or on the original type of the typedef that names it, is spelled with the
-   * prefix `host:` after the qualifiers. It is read before the main variant is taken: an attribute makes a variant. */
-  bool host = false;
-  if (code == INTEGER_TYPE) {
-    host = lookup_attribute("fnvnx_host", TYPE_ATTRIBUTES(t)) != NULL_TREE;
-    tree n = TYPE_NAME(t);
-    if (!host && n && TREE_CODE(n) == TYPE_DECL && DECL_ORIGINAL_TYPE(n))
-      host = lookup_attribute("fnvnx_host", TYPE_ATTRIBUTES(DECL_ORIGINAL_TYPE(n))) != NULL_TREE;
-  }
-  if (code != ARRAY_TYPE && code != FUNCTION_TYPE) {   /* an array's qualifiers are its element's: spelled there */
-    if (q & TYPE_QUAL_CONST) pre += "const:";
-    if (q & TYPE_QUAL_VOLATILE) pre += "volatile:";
-    if (q & TYPE_QUAL_RESTRICT) pre += "restrict:";
-    if (q & TYPE_QUAL_ATOMIC) pre += "atomic:";   /* C11 6.7.3p10: _Atomic is a qualifier of the type; 6.7.3p10 and 6.2.7p1: compatible types have equal qualifiers */
-    t = TYPE_MAIN_VARIANT(t);
-  }
-  switch (code) {
-  case POINTER_TYPE:
-    return pre + "*" + dl_type(TREE_TYPE(t), stk);
-  case ARRAY_TYPE: {
-    tree dom = TYPE_DOMAIN(t), mx = dom ? TYPE_MAX_VALUE(dom) : NULL_TREE;
-    std::string n;
-    if (mx && TREE_CODE(mx) == INTEGER_CST && tree_fits_uhwi_p(mx)) n = std::to_string(tree_to_uhwi(mx) + 1);
-    return "[" + n + "]" + dl_type(TREE_TYPE(t), stk);
-  }
-  case FUNCTION_TYPE: {
-    std::string r = dl_type(TREE_TYPE(t), stk);
-    tree args = TYPE_ARG_TYPES(t);
-    if (!args) return "(?)" + r;
-    std::string ps;
-    bool va = true;
-    for (; args; args = TREE_CHAIN(args)) {
-      tree a = TREE_VALUE(args);
-      if (a == void_type_node) { va = false; break; }
-      if (TREE_CODE(a) != ARRAY_TYPE && TREE_CODE(a) != FUNCTION_TYPE) a = TYPE_MAIN_VARIANT(a);   /* 6.7.6.3p15 */
-      ps += (ps.empty() ? "" : ",") + dl_type(a, stk);
-    }
-    if (va) ps += (ps.empty() ? "" : ",") + std::string("...");
-    return pre + "(" + ps + ")" + r;
-  }
-  case RECORD_TYPE: case UNION_TYPE: {
-    std::string head = std::string(code == UNION_TYPE ? "union:" : "struct:") + dl_tag(t);
-    if (!COMPLETE_TYPE_P(t) || std::find(stk.begin(), stk.end(), t) != stk.end()) return pre + head;
-    stk.push_back(t);
-    std::string ms;
-    for (tree f = TYPE_FIELDS(t); f; f = DECL_CHAIN(f)) {
-      if (TREE_CODE(f) != FIELD_DECL) continue;
-      bool bf = DECL_C_BIT_FIELD(f);
-      std::string m = std::string(DECL_NAME(f) ? IDENTIFIER_POINTER(DECL_NAME(f)) : "-") + ":"
-                    + dl_type(bf && DECL_BIT_FIELD_TYPE(f) ? DECL_BIT_FIELD_TYPE(f) : TREE_TYPE(f), stk);
-      if (bf) m += ":" + std::to_string(tree_to_uhwi(DECL_SIZE(f)));
-      ms += (ms.empty() ? "" : ";") + m;
-    }
-    stk.pop_back();
-    return pre + head + "{" + ms + "}";
-  }
-  case ENUMERAL_TYPE:
-    if (!TREE_TYPE(t)) { dl_error("an enumeration without a compatible integer type", dl_tag(t)); return "?"; }
-    return pre + "enum:" + dl_tag(t) + "=" + dl_type(TREE_TYPE(t), stk);
-  case VOID_TYPE: case INTEGER_TYPE: case REAL_TYPE: case BOOLEAN_TYPE: {
-    tree n = TYPE_NAME(t);
-    if (n && TREE_CODE(n) == TYPE_DECL) n = DECL_NAME(n);
-    if (!n && (code == BOOLEAN_TYPE || code == INTEGER_TYPE))   /* an element type the target makes without a name (the SVE predicate's 1-bit boolean): its precision and signedness are its identity */
-      return pre + (code == BOOLEAN_TYPE ? "bool_bits_" : TYPE_UNSIGNED(t) ? "uint_bits_" : "int_bits_") + std::to_string(TYPE_PRECISION(t));
-    if (!n || TREE_CODE(n) != IDENTIFIER_NODE) { dl_error("a scalar type without a name", "?"); return "?"; }
-    return pre + (host ? "host:" : "") + dl_word(IDENTIFIER_POINTER(n));
-  }
-  case NULLPTR_TYPE:   /* C23 nullptr_t (c/c-decl.cc 4653 records the builtin type): one node, identified by its name */
-    return pre + "nullptr_t";
-  case VECTOR_TYPE: {
-    /* VEC1: a vector type is spelled by the facts that GCC's own compatibility check reads: c/c-typeck.cc comptypes_internal case VECTOR_TYPE (1279-1283:
-     * known_eq of TYPE_VECTOR_SUBPARTS and compatible element types; cp/typeck.cc structural_comptypes likewise) plus the layout the ABI sees (size, alignment).
-     * Row `vec:<N>:<size>:<align>:` element.  N and size are poly_ints (a variable-length SVE vector has N = c0 + c1*x, x the runtime vector-length factor): the
-     * decimal c0, or `c0+c1x` when c1 is not 0 (known_eq compares coefficient-wise).
-     * TYPE_VECTOR_OPAQUE is not spelled: an opaque vector is a VARIANT of its non-opaque main type (tree.cc build_opaque_vector_type 10162-10180: a variant copy;
-     * tree.cc 13366: "vector types may differ by TYPE_VECTOR_OPAQUE"), the main variant is taken above, and comptypes_internal ignores it.  It is made by vector
-     * comparison results (c/c-typeck.cc 12725, 12886; cp/typeck.cc 6050; cp/call.cc 5674): tested with __typeof__ of such a comparison. */
-    auto ps = [](poly_uint64 v) {
-      std::string r = std::to_string(v.coeffs[0]);
-      for (unsigned i = 1; i < NUM_POLY_INT_COEFFS; i++) if (v.coeffs[i]) r += "+" + std::to_string(v.coeffs[i]) + (i == 1 ? "x" : "y" + std::to_string(i));
-      return r;
-    };
-    poly_uint64 size;
-    if (!poly_int_tree_p(TYPE_SIZE_UNIT(t), &size)) { dl_error("a vector type whose size is not a poly_int constant", "?"); return "?"; }
-    return pre + "vec:" + ps(TYPE_VECTOR_SUBPARTS(t)) + ":" + ps(size) + ":" + std::to_string(TYPE_ALIGN_UNIT(t)) + ":" + dl_type(TREE_TYPE(t), stk);
-  }
-  case COMPLEX_TYPE: {
-    /* CPLX1: a C99 `_Complex T` / GNU `_Complex int` is two consecutive elements of T (stor-layout.cc layout_type case COMPLEX_TYPE 2416-2423: the mode is
-     * GET_MODE_COMPLEX_MODE of the element's, TYPE_SIZE_UNIT its size; the alignment is the mode's, set by finalize_type_size).  Row `complex:<size>:<align>:` element,
-     * size and alignment in bytes read off the node (TYPE_SIZE_UNIT, TYPE_ALIGN_UNIT), not computed from a formula.  Compatibility (c/c-typeck.cc
-     * comptypes_internal: the default case compares the codes and TREE_TYPE): the same element type.  size and align are the ABI facts of that type. */
-    poly_uint64 size;
-    if (!poly_int_tree_p(TYPE_SIZE_UNIT(t), &size) || !size.is_constant()) { dl_error("a complex type whose size is not a constant", "?"); return "?"; }
-    return pre + "complex:" + std::to_string(size.to_constant()) + ":" + std::to_string(TYPE_ALIGN_UNIT(t)) + ":" + dl_type(TREE_TYPE(t), stk);
-  }
-  case REFERENCE_TYPE: {
-    /* REF1: a reference type has C callers (c-family/c-common.cc:4709 the builtin va_list prototypes, c-attribs.cc:2164 the mode attribute), so it is a row:
-     * `ref:<size>:<align>:` pointee, size and alignment of the reference as GCC laid it out (a reference is laid out as a pointer of its mode,
-     * stor-layout.cc layout_type case REFERENCE_TYPE shares the POINTER_TYPE arm). Compatibility: the same pointee (comptypes_internal compares the codes and TREE_TYPE). */
-    poly_uint64 size;
-    if (!poly_int_tree_p(TYPE_SIZE_UNIT(t), &size) || !size.is_constant()) { dl_error("a reference type whose size is not a constant", "?"); return "?"; }
-    return pre + "ref:" + std::to_string(size.to_constant()) + ":" + std::to_string(TYPE_ALIGN_UNIT(t)) + ":" + dl_type(TREE_TYPE(t), stk);
-  }
-  default:
-    dl_error("a type outside the grammar", get_tree_code_name((enum tree_code)code));
-    return "?";
-  }
-}
+#include "decltype_spell.inc"   /* dl_type: the spelling of .fnvnx.decltype, shared with fnvnx_dispatch */
 
 static void emit_decltype()
 {
-  /* the symbol table also holds the symbols the front end made without a finished declaration (an implicitly declared function) */
+  /* RULE SYMSET (names.cc sym_emitted): one row per symbol the object has (defined or referenced), spelled from the symbol table's own declaration, which is the
+   * declaration the front end composed from all of the unit's declarations of it (C11 6.2.7p3). A declaration the headers bring in whose symbol the object does
+   * not have is not a row: the gate compares symbols across objects, so it would add nothing but size. */
+  std::vector<tree> decls;
   symtab_node *sn;
-  FOR_EACH_SYMBOL(sn) add_decl(sn->decl);
+  FOR_EACH_SYMBOL(sn) {
+    bool def;
+    tree d = sn->decl;
+    if (!sym_emitted(sn, def) || DECL_IS_UNDECLARED_BUILTIN(d) || !DECL_NAME(d)) continue;
+    /* RULE (DECLTYPE-LANG): the symbols of a C unit and the symbols with C language linkage of a C++ unit (extern "C": the names C code can declare); a C++ name
+     * has the ODR (.fnvnx.odrdef) and the layout gates, not C's 6.2.7 */
+    if (is_cxx() && !(DECL_LANG_SPECIFIC(d) && DECL_EXTERN_C_P(d))) continue;
+    /* RULE (DECLTYPE-MANGLED): a symbol whose assembler name is in the Itanium mangled-name space carries its type in its name, so it gets no row. The space is
+     * fixed by two citations: the Itanium C++ ABI 5.1 (a mangled name begins with `_Z`) and C11 7.1.3p1 / C++ [lex.name] (an identifier that begins with `_` and an
+     * uppercase letter is reserved to the implementation, so no user C symbol has such a name). It is decided on the assembler name, the string sym_emitted uses,
+     * not on the source spelling: an extern "C" declaration of a mangled name (libstdc++'s cow-stdexcept.cc declares the std::string constructors so) is in it
+     * too. Its cross-object comparison is .fnvnx.sympair / .fnvnx.odrdef, which cover mangled names. */
+    const char *an = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d));
+    if (an[0] == '_' && an[1] == 'Z') continue;
+    decls.push_back(d);
+  }
   std::map<std::string, std::string> rows;
   for (tree d : decls) {
     const char *nm = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d));
@@ -573,7 +442,7 @@ static void finish_unit_cb(void *, void *)
   for (size_t i = 0; i < lines.size(); i++) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", escape(lines[i]).c_str());
   fprintf(asm_out_file, "\t.popsection\n");
   emit_objects();
-  if (!is_cxx()) emit_decltype();
+  emit_decltype();
 }
 
 extern "C" int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *version)
@@ -589,15 +458,13 @@ extern "C" int plugin_init(struct plugin_name_args *info, struct plugin_gcc_vers
   /* the name rules need the class-key reports and the scope numbers of toolchain/names */
   register_callback(info->base_name, PLUGIN_REGISTER_GGC_ROOTS, NULL, (void *)keep_roots);
   register_callback(info->base_name, PLUGIN_REGISTER_GGC_ROOTS, NULL, (void *)keep_vars_roots);
-  register_callback(info->base_name, PLUGIN_REGISTER_GGC_ROOTS, NULL, (void *)keep_decls_roots);
   if (is_cxx()) {
     register_callback(info->base_name, PLUGIN_START_UNIT, start_unit, NULL);
     register_callback(info->base_name, PLUGIN_FINISH_DECL, finish_decl_cb, NULL);
     register_callback(info->base_name, PLUGIN_FINISH_TYPE, (plugin_callback_func)+[](void *d, void *u) { finish_type(d, u); finish_type_cb(d, u); }, NULL);
     register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, pre_genericize_cb, NULL);
   } else {   /* cc1: records come from the types the front end finishes and the declarations it finishes */
-    register_callback(info->base_name, PLUGIN_FINISH_PARSE_FUNCTION, +[](void *d, void *) { add_decl((tree)d); }, NULL);
-    register_callback(info->base_name, PLUGIN_FINISH_DECL, +[](void *d, void *) { add_decl((tree)d); add_var((tree)d); if (d && DECL_P((tree)d) && !DECL_ARTIFICIAL((tree)d)) add_type(TREE_TYPE((tree)d)); }, NULL);
+    register_callback(info->base_name, PLUGIN_FINISH_DECL, +[](void *d, void *) { add_var((tree)d); if (d && DECL_P((tree)d) && !DECL_ARTIFICIAL((tree)d)) add_type(TREE_TYPE((tree)d)); }, NULL);
     register_callback(info->base_name, PLUGIN_FINISH_TYPE, finish_type_cb, NULL);
   }
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit_cb, NULL);

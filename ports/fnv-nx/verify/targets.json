@@ -8,8 +8,8 @@
   },
   "a64-runtime": {
    "repo": "fnv-nx-build",
-   "ref": "tools/fnvnx-a64-msvcmodel",
-   "commit": "00e3d42acd10593d534b9a70bb8940cee7991436"
+   "ref": "tools/gcc-ilp32-msvcmodel-noneelf",
+   "commit": "b36df9302cd1a27c11a606274b5d9bcfc6221f5f"
   },
   "arm-a57-docs": {
    "repo": "fnv-nx-build",

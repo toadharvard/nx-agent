@@ -119,6 +119,18 @@ def main():
         if r.returncode == 0:
             checks(out)
             crossing(out)
+        # THE TREES KEEP THE REAL TABLE: a class with a virtual base is constructed through a VTT and a construction vtable; the accesses before
+        # an address point (vbase offset, offset-to-top, RTTI: inside the table) must neither warn (the address point's own symbol is one slot
+        # long, so GCC's bounds analysis would flag every such access) nor become a relocation with a negative addend against that symbol.
+        # The address point's symbol is written where the assembler text is made (ap_integer) and in the code after the last analysis.
+        vo = os.path.join(td, 'vb.o')
+        r = pb.compile(os.path.join(HERE, 'sdd', 'vbase_bounds.cpp'), vo, [so], args=['-Wall', '-Werror=array-bounds'])
+        check('virtual base: compiles with -Werror=array-bounds', r.returncode == 0, r.stderr[:1500])
+        if r.returncode == 0:
+            neg = [(t, n, a) for rl in pb.relocs_of(vo).values() for o, t, n, a in rl if '.fnvnx_ap' in n and a < 0]
+            check('virtual base: no relocation against an address point with a negative addend', not neg, str(neg[:3]))
+            vt = [n for rl in pb.relocs_of(vo).values() for o, t, n, a in rl if '.fnvnx_ap' in n]
+            check('virtual base: the VTT and the code name address points by their own symbols', any(n.startswith('_ZTT') or '.fnvnx_ap' in n for n in vt) and vt, str(vt[:3]))
         r = pb.compile(FIX, os.path.join(td, 'x.o'), [so], args=['-fplugin-arg-fnvnx_sdd-mode=1'])
         check('an unknown plugin argument is an error', pb.argument_refused(r, 'sdd'), r.stderr[:500])
     finally:

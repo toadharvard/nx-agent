@@ -24,6 +24,7 @@ import argparse
 import concurrent.futures
 import errno
 import hashlib
+import importlib.util
 import json
 import os
 import pathlib
@@ -86,8 +87,9 @@ _T = TREE + "/toolchain/"
 PLUGIN_SOURCES = {"fnvnx_ftoi": _T + "ftoi/fnvnx_ftoi.cc", "fnvnx_order": _T + "order/fnvnx_order.cc", "fnvnx_sdd": _T + "sdd/fnvnx_sdd.cc",
                   "fnvnx_pi": _T + "pi/fnvnx_pi.cc", "fnvnx_dispatch": _T + "dispatch/fnvnx_dispatch.cc", "fnvnx_addr": _T + "addr/fnvnx_addr.cc",
                   "fnvnx_names": _T + "names/fnvnx_names.cc", "fnvnx_layout": _T + "layout/fnvnx_layout.cc"}
-PLUGIN_INPUTS = {"fnvnx_ftoi": [_T + "ftoi/f2i_builtins.inc"], "fnvnx_layout": [_T + "names/fnvnx_names.cc", _T + "layout/crossing_terms.inc"],
-                 "fnvnx_names": [_T + "layout/crossing_terms.inc"]}
+PLUGIN_INPUTS = {"fnvnx_ftoi": [_T + "ftoi/f2i_builtins.inc"], "fnvnx_layout": [_T + "names/fnvnx_names.cc", _T + "layout/crossing_terms.inc", _T + "layout/decltype_spell.inc"],
+                 "fnvnx_dispatch": [_T + "layout/decltype_spell.inc"], "fnvnx_names": [_T + "layout/crossing_terms.inc"],
+                 "fnvnx_order": [_T + "order/fnvnx_frame.h", _T + "order/atomic_order.inc"], "fnvnx_sdd": [_T + "order/fnvnx_frame.h"]}
 PLUGIN_ARGS = {n: {} for n in PLUGIN_SOURCES}
 ANALYSIS_PLUGIN = ("objstub_plugin", TREE + "/verify/objstub_plugin.cc")   # the gate objstub's plugin (RECIPE.md "Plugins"): built for every root with C/C++ units, loaded by no compile stage
 PLUGIN_ARGS["fnvnx_ftoi"] = {"mode": "native"}
@@ -645,6 +647,29 @@ def runtime_cflags(pin):
     if not isinstance(v, list) or not all(isinstance(x, str) and x.startswith("-") for x in v):
         raise BuildRed("%s: runtime_cflags must be a list of compiler flags" % GUEST_PIN)
     return list(v)
+
+
+def runtime_configure(pin):
+    """The gcc configure options of the guest compiler build (build.sh of toolchain/msvcmodel): the `runtime_configure` of the one guest compiler record.
+    The build reads them here; no build script spells them."""
+    v = pin.get("runtime_configure") if isinstance(pin, dict) else None
+    if not isinstance(v, list) or not all(isinstance(x, str) and x.startswith("--") for x in v):
+        raise BuildRed("%s: runtime_configure must be a list of configure options" % GUEST_PIN)
+    cite = pin.get("runtime_configure_cite")
+    missing = [o for o in v if not isinstance(cite, dict) or not isinstance(cite.get(o), str) or not cite[o].strip()]
+    if missing:
+        raise BuildRed("%s: runtime_configure options without a cite in runtime_configure_cite: %s" % (GUEST_PIN, ", ".join(missing)))
+    return list(v)
+
+
+def runtime_configure_patch(pin):
+    """The patch of the runtime subdirs' generated configure scripts (rule CFG-LINK): the `runtime_configure_patch` of the one guest compiler record.
+    The build reads the script, the subdirs and its two fact sources here; no build script spells them."""
+    v = pin.get("runtime_configure_patch") if isinstance(pin, dict) else None
+    keys = ("script", "subdirs", "protocol_source", "guest_script", "cite")
+    if not isinstance(v, dict) or any(k not in v for k in keys) or not isinstance(v["subdirs"], list) or not all(isinstance(v[k], str) and v[k].strip() for k in keys if k != "subdirs"):
+        raise BuildRed("%s: runtime_configure_patch needs %s (cite non-empty)" % (GUEST_PIN, ", ".join(keys)))
+    return dict(v)
 
 
 def guest_link_part(rec, root, pin, prof, files, roots):
@@ -1434,6 +1459,33 @@ def publish_dir(tmp, final):
             raise
 
 
+RECIPE_TREE = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx of the checkout this recipe is part of
+
+
+def compiler_stamp_errors(tree, host, name):
+    """Problems of a pinned compiler tree: its MANIFEST.json `compiler.build_key` (written by toolchain/msvcmodel/build.sh from the one computation,
+    toolchain/msvcmodel/stamp.py) must equal stamp.py over the compiler inputs of the checkout TREE (ports/fnv-nx) that this recipe belongs to, else the pin names a
+    compiler built from other patches than the ones this checkout's data model table (DATAMODEL.json) describes. HOST is the tree's checkout. [] = ok."""
+    spec = importlib.util.spec_from_file_location("fnvnx_msvcmodel_stamp", os.path.join(tree, "toolchain", "msvcmodel", "stamp.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    want = mod.stamp(tree, recipe=sys.modules[__name__])
+    try:
+        with open(os.path.join(host, "MANIFEST.json")) as f:
+            comp = json.load(f).get("compiler", {})
+        got = comp.get("build_key")
+    except (OSError, ValueError):
+        return ["external %s: no MANIFEST.json with compiler.build_key: the tree was not built by toolchain/msvcmodel/build.sh at a checkout with stamp.py; "
+                "this checkout's compiler key is %s" % (name, want)]
+    if got != want:
+        pw = mod.patch_sha256(tree)
+        why = ("its msvcmodel_patch_sha256 is %s, this checkout's msvcmodel.patch is %s" % (comp.get("msvcmodel_patch_sha256"), pw)
+               if comp.get("msvcmodel_patch_sha256") != pw else "msvcmodel.patch is the same, another input of the build differs")
+        return ["external %s: compiler.build_key is %s, this checkout's compiler inputs (toolchain/msvcmodel/stamp.py) give %s (%s): the pinned tree was built "
+                "from other inputs than this checkout's; rebuild it and re-pin" % (name, got, want, why)]
+    return []
+
+
 def fetch_externals(exts, store, extcache, ws):
     """Content-pinned inputs: each external of EXTS fetched by exact commit into the bare cache EXTCACHE/<commit>, checked out ONCE at
     EXTCACHE/<commit>.co, ingested into the CAS STORE; its tree hash must equal tree_sha256 (BuildRed naming the external). -> {name:
@@ -2000,6 +2052,18 @@ class Job:
                 self.analysis = self.analysis_plugin(ws, 1 if "cxx" in kinds.values() else 0)
             except BuildRed as r:   # the gate objstub cannot judge the root: red and named, no unit is blocked by it
                 self.red.append(dict(r.args[0]))
+        # RULE: a unit of a guest root is compiled only by a compiler tree that is a build of THIS checkout's compiler inputs (compiler_stamp_errors: the one key,
+        # toolchain/msvcmodel/stamp.py). The plugin stages above only read headers from the tree (they are what the compiler build itself needs), so the check
+        # stands here, at the first stage that compiles a unit.
+        pin = load_pin(self.repo) if guest and cc else None
+        if pin:
+            bad = []
+            for n in [cc] + [pin["runtime"]["name"]] * (isinstance(pin.get("runtime"), dict) and pin["runtime"]["name"] in self.ext):
+                bad += compiler_stamp_errors(RECIPE_TREE, self.ext[n]["host"], n)
+            if bad:
+                self.red.append({"stage": "external:" + cc, "exit": None, "stderr": bad})
+                self.blocked.update({u: "external:" + cc for u in units})
+                return {}
         builds = {}
         sos = {}
         for n, t, _ in self.built:   # the plugins each front end can load (plugin_languages): the stage loads exactly those, the gate reads the same fact
