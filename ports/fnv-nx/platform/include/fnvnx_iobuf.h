@@ -21,6 +21,7 @@
 
 #include <stdarg.h>
 #include <stddef.h>
+#include <stdint.h>
 #ifdef __cplusplus
 #include <cstdio>
 #include <cwchar> /* glibc's wchar.h names fclose in an attribute: it must see fclose before the overload below */
@@ -97,6 +98,8 @@ int fnvnx_iob_fileno(struct _iobuf *f);
 
 int fnvnx_write(int fd, const void *buf, unsigned int n);
 long long fnvnx_lseeki64(int fd, long long off, int whence);
+intptr_t fnvnx_get_osfhandle(int fd);                  /* _get_osfhandle: the descriptor's kernel32 HANDLE */
+int fnvnx_open_osfhandle(intptr_t handle, int oflags); /* _open_osfhandle: a descriptor over a kernel32 HANDLE */
 
 #ifdef __cplusplus
 }

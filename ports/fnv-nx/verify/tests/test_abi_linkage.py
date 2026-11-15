@@ -11,6 +11,7 @@ sys.path[:0] = [os.path.join(HERE, '..'), os.path.join(HERE, '..', '..', 'link')
 import gate_abi  # noqa: E402
 
 tmp = tempfile.mkdtemp(prefix='abilink-')
+__import__('atexit').register(__import__('shutil').rmtree, tmp, True)   # a test leaves no scratch behind
 fails = []
 
 
@@ -18,11 +19,13 @@ def sect(nm, text):
     return '\t.section %s,"",%%progbits\n\t.ascii "%s"\n' % (nm, text.replace('\t', '\\t').replace('\n', '\\n'))
 
 
-def obj(name, rows, decl=None, sym='', cross=None):
+def obj(name, rows, decl=None, sym='', cross=None, glob=(), extra=None):
     s = os.path.join(tmp, name + '.s')
     o = os.path.join(tmp, name + '.o')
     lay = ''.join('\\t'.join(map(str, r)) + '\\n' for r in rows)
-    open(s, 'w').write('\t.text\n' + (sect('.fnvnx.sympair', sym) if sym else '\t.section .fnvnx.sympair,"",%progbits\n') + ('' if cross is None else sect('.fnvnx.crossing', cross)) + ('' if decl is None else '\t.section .fnvnx.decltype,"",%progbits\n\t.ascii "' + ''.join(k + '\\t' + v + '\\n' for k, v in decl.items()) + '"\n') + '\t.section .fnvnx.layout,"",%progbits\n\t.ascii "' + lay + '"\n')
+    gl = ''.join('\t.globl %s\n' % k for k in list(glob) + list(decl or {}))
+    decl = dict(decl or {}, **(extra or {})) if (decl is not None or extra) else None   # every symbol of the record is a global symbol of the object (DECLTYPE-COMPLETE)
+    open(s, 'w').write('\t.text\n' + gl + (sect('.fnvnx.sympair', sym) if sym else '\t.section .fnvnx.sympair,"",%progbits\n') + ('' if cross is None else sect('.fnvnx.crossing', cross)) + ('' if decl is None else '\t.section .fnvnx.decltype,"",%progbits\n\t.ascii "' + ''.join(k + '\\t' + v + '\\n' for k, v in decl.items()) + '"\n') + '\t.section .fnvnx.layout,"",%progbits\n\t.ascii "' + lay + '"\n')
     r = subprocess.run(['aarch64-linux-gnu-as', '-mabi=ilp32', s, '-o', o], capture_output=True, text=True)
     if r.returncode:
         fails.append('assemble ' + name + ': ' + r.stderr[-200:])
@@ -68,13 +71,42 @@ if ids:
 n, c, ids = judge(obj('cc', [row('S', 4, 'c')], {'v': S1}), obj('cd', [row('S', 4, 'c')], {'v': S2}))
 if not (len(ids) == 1 and ids[0].startswith('ctype:v')):
     fails.append('C: a member type differing is red on the symbol: %r' % ids)
-n, c, ids = judge(obj('ce', [row('S', 4, 'c')], {'v': S1}), obj('cf', [row('S', 4, 'c')]))
-if not any('no .fnvnx.decltype' in i for i in ids):
-    fails.append('C: a C unit without the record is red: %r' % ids)
+n, c, ids = judge(obj('ce', [row('S', 4, 'c')], {'v': S1}), obj('cf', [row('S', 4, 'c')], glob=['v']))
+if not any('decltype:missing:v' in i for i in ids):
+    fails.append('C: a global symbol with no decltype line is red, missing:v: %r' % ids)
+n, c, ids = judge(obj('cg', [row('S', 4, 'c')], {'v': S1, 'w': '-mangled'}), obj('ch', [row('S', 4, 'c')], {'v': S1}))
+if ids:
+    fails.append('a complete object (a type line and a -mangled reason line) is green: %r' % ids)
+n, c, ids = judge(obj('ci', [row('S', 4, 'c')], {'v': S1}), obj('cj', [row('S', 4, 'c')], {'v': S1}, extra={'zz': 'int'}))
+if not any('decltype:extra:zz' in i for i in ids):
+    fails.append('a decltype line for a symbol the object lacks is red, extra:zz: %r' % ids)
+n, c, ids = judge(obj('ck', [row('S', 4, 'c')], {'v': S1}), obj('cl', [row('S', 4, 'c')], {'v': S1, 'w': '-bogus'}))
+if not any('unreadable' in i for i in ids):
+    fails.append('a reason outside the closed set is red: %r' % ids)
 # the section's presence is the fact: a unit of `external` linkage rows (C units of w3's layout) that carries .fnvnx.decltype is compared all the same
 n, c, ids = judge(obj('ea', [row('S', 4, 'external')], {'v': S1}), obj('eb', [row('S', 4, 'external')], {'v': S2}))
 if not (len(ids) == 1 and ids[0].startswith('ctype:v')):
     fails.append('a decltype section on external-linkage rows is parsed and compared: %r' % ids)
+# an assembly unit carries no .fnvnx.decltype section
+oa, ob = obj('asm_with', [row('S', 4, 'c')], {'v': S1}), obj('asm_without', [])
+n, c, ids, _d = gate_abi.judge_objects([obj('ma', [row('S', 4, 'c')], {'v': S1}), obj('mb', [row('S', 4, 'c')], {'v': S1})], [oa])
+if not any('asm_with:decltype:asm' in i for i in ids):
+    fails.append('an assembly unit with a decltype section is red: %r' % ids)
+n, c, ids, _d = gate_abi.judge_objects([obj('mc', [row('S', 4, 'c')], {'v': S1}), obj('md', [row('S', 4, 'c')], {'v': S1})], [ob])
+if ids:
+    fails.append('an assembly unit without a decltype section is green: %r' % ids)
+# crossing universe and the va forwarders
+VA = 'f\t?f@@YAXXZ\tfunc\tdef\n'
+def jx(name, cross, uni, va=()):
+    return gate_abi.judge_objects([obj(name + 'a', [], sym=VA, cross=cross), obj(name + 'b', [])], (), uni, frozenset(va))[2]
+if jx('u1', 'f\tva_list\n', {'f'}, ['f']):
+    fails.append('an in-universe va crossing with its msvcrt_va record is green')
+if not any('abi:va:f' in i for i in jx('u2', 'f\tva_list\n', {'f'})):
+    fails.append('an in-universe va crossing without its record is red abi:va:f')
+if jx('u3', 'f\tpointer_to_member,va_list\n', {'g'}):
+    fails.append('an out-of-universe symbol with S-terms is not judged')
+if not jx('u4', 'f\tpointer_to_member\n', {'f'}):
+    fails.append('an in-universe symbol with a ptrmem term is red')
 # crossing_forbidden: a boundary symbol has a row and no term
 SY = 'f\t?f@@YAXXZ\tfunc\tdef\n'
 n, c, ids = judge(obj('xa1', [], sym=SY, cross='f\t-\n'), obj('xb1', []))
@@ -95,6 +127,20 @@ if ids:
 n, c, ids = judge(obj('xa6', [], sym=SY, cross='f\t-\n'), obj('xb6', [], sym='f\t?f@@YAXXZ\tfunc\tref\n'))
 if ids:
     fails.append('crossing: one row in a unit that declares it suffices: %r' % ids)
+# noemit (toolchain/names/sympair_kinds.inc): the unit defines the function, GCC wrote it nowhere; the row is read, never a reference and never a boundary symbol
+NE = 'f\t?f@@YAXXZ\tnoemit\tref\n'
+n, c, ids = judge(obj('na1', [], sym=NE), obj('nb1', []))
+if ids:
+    fails.append('noemit: a row with no symbol in the object, no crossing line, is green (no pairing, no crossing obligation): %r' % ids)
+n, c, ids = judge(obj('na2', [], sym=NE, cross='f\tpointer_to_member\n'), obj('nb2', []))
+if ids:
+    fails.append('noemit: its crossing line is a fact about the signature, with no symbol to bind it to: %r' % ids)
+n, c, ids = judge(obj('na3', [], sym=NE), obj('nb3', [], sym=SY.replace('def', 'def'), cross='f\t-\n'))
+if ids:
+    fails.append('noemit in one unit, the definer in another: the definer\'s row is judged, green: %r' % ids)
+n, c, ids = judge(obj('na4', [], sym='f\t?f@@YAXXZ\tbogus\tdef\n'), obj('nb4', []))
+if not any('unreadable' in i for i in ids):
+    fails.append('a kind outside the plugin set is red: %r' % ids)
 if fails:
     print('FAIL\n' + '\n'.join(fails))
     sys.exit(1)

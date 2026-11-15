@@ -270,19 +270,15 @@ not touched. `-fplugin-arg-fnvnx_order-uninit=keep` restores GCC's handling (A/B
   (`obj->f(..., obj = X, ...)`): the decomp compiles to the original only if MSVC evaluates the object after the
   arguments. With `object=last` the read is initialized. That is evidence for ORDER-OBJECT (below), for S11.
 
-## Resumption points, register objects, one-thread objects (ORDER-CONT, HARDREG, LOCAL, FENCE-MERGE)
+## Resumption points, register objects, one-thread objects (ONE FORM, HARDREG, LOCAL)
 
 Rules of `toolchain/order/fnvnx_order.cc`; the tests are `link/tests/test_order_cont.py` and `link/tests/test_ice_poly_byvalue.py`.
 
-- **ORDER-CONT.** The acquire fence after a load orders it before every later access of the same thread. A later access after a
-  block-ending statement S is reached only along S's fall-through edge or after a resumption point (an EH landing pad, the point after a
-  returns-twice call: the setjmp family, `__builtin_setjmp_receiver`, a nonlocal-goto receiver). The fence goes on the fall-through edge;
-  every resumption point begins with the same fence (right after the call for a returns-twice call). A block-ending statement without a
-  fall-through edge (a noreturn call such as `__builtin_longjmp`) needs nothing: all its continuations begin at a resumption point.
-  Proof: TSO orders a thread's accesses in program order; every program-order successor of S is on the fall-through edge or after a
-  resumption point; each begins with the fence; extra fences only add order. Nonlocal entries land at native receivers, and every lifted
-  access carries its own ordering (L3a, lifter rule R9).
-- **FENCE-MERGE.** A resume fence is not inserted next to an identical acquire fence in the same block with nothing between.
+- **ONE FORM (replaces ORDER-CONT and FENCE-MERGE).** Every possibly shared access is `__atomic_load_N` acquire (`ldar`) or `__atomic_store_N`
+  release (`stlr`); there is no fence around a plain access and no resumption fence. `ldar`/`stlr` order by themselves in program order, so a
+  successor reached through a landing pad or after a returns-twice call is ordered without any fence. Library calls are plain calls (the runtime is
+  compiled with the same plugins and orders its own accesses); a builtin with no library function that is expanded at RTL and touches shared memory is
+  a compile error naming it (test: `link/tests/test_order_cont.py`, `__builtin_longjmp`).
 - **HARDREG.** An object whose declaration has a hard register (`register T v asm("xN")`) has no memory location: never ordered, no address.
 - **LOCAL.** Ordering exists only for memory another thread can observe: a non-aliased declaration is never ordered and its address is never
   taken. A `RESULT_DECL` with `DECL_BY_REFERENCE` is the hidden result pointer, a value of the thread: never memory; the result object is
@@ -444,3 +440,13 @@ of guest accesses stays every access of every object. `.fnvl.fsw` (FSTSW, FNSTEN
   site needs its field made volatile or keyed (a `field Class::member` line in a key file passed as ORDER_KEYS).
 * **W-UNINIT** in memory locals above 64 bytes: a buffer read before it is written keeps whatever the stack held.
   GCC does not scalarize such a buffer, so it does not fold its loads as undefined.
+
+## NO-MIX (private variables never share a stack slot)
+
+The frame record (`.fnvnx.frame`) has one flag per stack slot; a slot shared by two variables is escaping if either escapes. A private
+variable (`:n`; order's own temporaries are private) that GCC places in the slot of a shared variable would make each plain access to it
+an access to a recorded-escaping range. GCC shares slots only between variables that do not conflict (cfgexpand.cc `add_scope_conflicts`:
+live from the first mention until the death clobber). Rule: every private memory variable (an addressable one the escapes fact proves private, and an aggregate that is no gimple register and has no address in the IL, which is private whatever the fact says of the others, e.g. when one pointer has no points-to info) is mentioned by the first statement of the
+entry block (an empty `asm volatile("" :: "m"(v))`, no instruction) and order creates no clobber for it, so it is live in every block and
+conflicts with every other variable. Cost: private variables keep their own slot (frame size), PD-STACK-REUSE. `DECL_NONSHAREABLE` does
+not do this for variables outside a BLOCK (measured: object bytes unchanged). Test: link/tests/test_order_fold.py (nomix2, nomix3).

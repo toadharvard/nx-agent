@@ -1,4 +1,5 @@
 /*
+ * ASM-603 (verify/ASSUMPTIONS.json)
  * fnvnx_dk_layout.h - the binding contract between translated shaders (any
  * GLSL backend) and the D3D9 front end. Header-only, C99, no dependencies.
  *

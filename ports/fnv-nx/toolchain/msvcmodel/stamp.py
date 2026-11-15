@@ -4,7 +4,7 @@ MANIFEST.json as compiler.build_key) and by verify/recipe.py (which refuses a pi
 The key is a function of the CONTENT of the inputs of the compiler build alone, each under its tree-relative name (a path outside the tree does not enter it),
 so the same files give the same key in any checkout. The inputs are what build.sh READS:
   - the six files msvcmodel.patch, build.sh, the three guest patches and cfg_link.py (INPUTS), by content;
-  - every plugin file the runtime is compiled with (plugin_inputs: the recipe's PLUGIN_SOURCES and PLUGIN_INPUTS, read from the recipe, no second list), by content;
+  - every plugin file the runtime is compiled with (plugin_inputs: the recipe's PLUGIN_SOURCES and the include closure derived from them, no list), by content;
   - the VALUES build.sh takes from records, through the same functions it calls (build_values): the declared target (targets.json guest_platform
     triplet/abi/code and console_cpu arch/features, which give the multilib selector, --with-arch and --with-abi), recipe.runtime_configure and
     recipe.runtime_cflags of guest_compiler.json, and recipe.semantics_set(None) (the semantic flag set: targets, the DATAMODEL rows' flags and
@@ -40,15 +40,14 @@ def build_values(root=None, verify=None, targets=None, recipe=None):
 
 
 def plugin_inputs(root=None, recipe=None):
-    """-> [tree-relative path]: every file the plugins are built from, read from the recipe's own declaration (PLUGIN_SOURCES and PLUGIN_INPUTS, the one list;
+    """-> [tree-relative path]: every file the plugins are built from, read from the recipe's own declaration (PLUGIN_SOURCES and the include closure recipe.plugin_files derives, no list;
     the runtime is compiled with all of the plugins, so a change to any of these is another plugin ABI in the pinned runtime)."""
     if recipe is None:
         sys.path.insert(0, os.path.join(root or TREE, "verify"))
         import recipe
-    files = set(recipe.PLUGIN_SOURCES.values())
-    for v in recipe.PLUGIN_INPUTS.values():
-        files.update(v)
-    return sorted(os.path.relpath(f, recipe.TREE) for f in files)
+    tree = os.path.abspath(root or TREE)   # a tree ports/fnv-nx, a git checkout or not: its files are listed from the disk
+    held = [recipe.TREE + "/" + os.path.relpath(os.path.join(d, f), tree) for d, _n, fs in os.walk(os.path.join(tree, "toolchain")) for f in fs]
+    return sorted(os.path.relpath(f, recipe.TREE) for f in recipe.plugin_files(".", held, {recipe.TREE + "/toolchain": {}}, tree))
 
 
 def stamp(root=None, patch=None, build=None, patch_dir=None, verify=None, targets=None, recipe=None):

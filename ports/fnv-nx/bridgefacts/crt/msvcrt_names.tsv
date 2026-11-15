@@ -2,7 +2,7 @@ malloc	c_malloc	func
 calloc	c_calloc	func
 realloc	c_realloc	func
 free	c_free	func
-??2@YAPAXI@Z	c_malloc	func
+??2@YAPAXI@Z	c_new	func
 ??3@YAXPAX@Z	c_free	func
 _strdup	_strdup	func
 _iob	fnvnx_iob	data
@@ -13,6 +13,8 @@ fwrite	fnvnx_iob_fwrite	func
 fflush	fnvnx_iob_fflush	func
 _write	fnvnx_write	func
 _lseeki64	fnvnx_lseeki64	func
+_get_osfhandle	fnvnx_get_osfhandle	func
+_open_osfhandle	fnvnx_open_osfhandle	func
 _fileno	fnvnx_iob_fileno	func
 _isatty	fnvnx_isatty	func
 _tempnam	c_tempnam	func

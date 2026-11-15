@@ -119,6 +119,15 @@ const NxGpuApi4* nxgl4_create(uint32_t width, uint32_t height, char* err, size_t
     p_glEnable(GL_PROGRAM_POINT_SIZE);
     p_glGetIntegerv(GL_MAX_VERTEX_ATTRIB_STRIDE, &g4.maxVtxStride);
     p_glGetIntegerv(GL_MAX_VERTEX_ATTRIB_RELATIVE_OFFSET, &g4.maxAttrOffset);
+    {   /* every row of the gl4shim table, once, one generated call per list entry (no loop, no index) */
+        int rows_ok = 1;
+#define NX_GL4SHIM_MAKE_P(id, vs, fs) rows_ok &= (g4.scaleProg[NX_GL4SHIM_PAIR_##id] = gl4_compile_pair(&nx_gl4shim_##id)) != 0;
+#define NX_GL4SHIM_MAKE_S(id, st, text) rows_ok &= gl4_compile_stage(NX_GL4SHIM_SHADER_##id, &nx_gl4shim_##id) == NX_GL4SHIM_SHADER_##id;
+        NX_GL4SHIM_PROG_LIST(NX_GL4SHIM_MAKE_P, NX_GL4SHIM_MAKE_S)
+#undef NX_GL4SHIM_MAKE_P
+#undef NX_GL4SHIM_MAKE_S
+        if (!rows_ok) { if (err && errlen) snprintf(err, errlen, "gl4shim row: %s", g4.err); return NULL; }
+    }
     p_glGenVertexArrays(1, &g4.lay[0].vao);
     p_glBindVertexArray(g4.lay[0].vao);
     if (width && height) {

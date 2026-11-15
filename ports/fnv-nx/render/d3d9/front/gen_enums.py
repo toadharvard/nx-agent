@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """gen_enums.py: the C enums of the D3D9 enumerations the state translation consumes (RD-front, rule "total by construction").
+ASM-614 (verify/ASSUMPTIONS.json)
 
     python3 -I gen_enums.py OUT_HEADER        (a `generated` step of the recipe of render/d3d9: gen/d3d9_enums.gen.h is a build output, nothing is committed)
 

@@ -1,0 +1,15 @@
+{
+ "format": "fnvnx-recipe/1",
+ "profile": "guest",
+ "flags": {
+  "c": [
+   "-Werror=attributes"
+  ],
+  "cxx": [
+   "-Werror=attributes"
+  ],
+  "asm": []
+ },
+ "include": [],
+ "units": "all"
+}

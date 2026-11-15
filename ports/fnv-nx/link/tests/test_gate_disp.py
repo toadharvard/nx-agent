@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Synthetic check of link/gate_disp.py: ELF fixtures built with struct (no toolchain, no private data) around a real perfect hash (found here
-by search, K1 K2 NBITS TBITS g as rt.c uses them): the green case, a universe address without entry, a slot that points at the wrong symbol, an
-extra key, a duplicate key, a key that sits in a slot other than the one the hash computes (hash-miss), a table whose stored parameters do not
-match its slots (red), wrong symbol sizes, --keys, entries.tsv kinds, table_id and --missing."""
+"""Synthetic check of link/gate_disp.py (typed dispatch tables, rows format fnvnx-disp-rows/1): ELF32 fixtures built with struct (no toolchain, no
+private data) around a real hash-and-displace table found here by search.  Cases: rows equal (green); a slot differs; a row missing; a stray non-empty
+slot; the rows file missing; an unrelocated entry; wrong entry word; undefined/ambiguous symbol; wrong hash parameters; sizes; two tables; the universe."""
 import json
 import os
 import struct
@@ -16,14 +15,14 @@ sys.path.insert(0, os.path.join(HERE, '..'))
 sys.path.append(os.path.join(HERE, '..', '..', 'verify'))
 import scratch
 scratch.install()
-import gate_disp
 
 fails = []
-TABLE = 0x2000      # fnvl_disp_table
-BODY = 0x1000       # first body; body i at BODY + 0x40 * i
 M = 0xffffffff
-K1, K2, NB, TB = 0x9e3779b1, 0x85ebca6b, 4, 4       # 16 buckets, 16 slots
-GOFF, POFF = TABLE + (8 << TB), TABLE + (8 << TB) + (2 << NB)   # fnvl_g and fnvl_phf_params after the table
+K1, K2, NB, TB = 0x9e3779b1, 0x85ebca6b, 2, 3        # 4 buckets, 8 slots
+N = 1 << TB
+ADDRS = [0x401000, 0x401020, 0x40a000, 0xff0000]
+BODY = {a: 0x1000 + 0x40 * i for i, a in enumerate(ADDRS)}
+SYM = {a: 'L_%08x' % a for a in ADDRS}
 
 
 def check(name, got, want):
@@ -36,9 +35,7 @@ def hslot(a, g, k1=K1, k2=K2, nb=NB, tb=TB):
 
 
 def phf(keys):
-    """g (a u16 per bucket) with which the keys hash to distinct slots of 1 << TB: buckets by size, g by search."""
-    g, used = [0] * (1 << NB), set()
-    buckets = {}
+    g, used, buckets = [0] * (1 << NB), set(), {}
     for k in sorted(keys):
         buckets.setdefault(((k * K1) & M) >> (32 - NB), []).append(k)
     for b in sorted(buckets, key=lambda b: (-len(buckets[b]), b)):
@@ -53,59 +50,65 @@ def phf(keys):
     return g
 
 
-def elf(slots, syms, g, params=(K1, K2, NB, TB), sizes=(8 << TB, 2 << NB, 16), with_params=True):
-    """ELF32 LE AArch64 with one PT_LOAD [0, 0x3000) that holds the table at TABLE, fnvl_g and fnvl_phf_params after it, and a .symtab.
-    slots [(key, offset)]; syms [(name, address)]; sizes the st_size of table, g, params."""
-    img = bytearray(0x3000)
-    for i, (k, off) in enumerate(slots):
-        struct.pack_into('<Ii', img, TABLE + 8 * i, k, off)
-    struct.pack_into('<%dH' % len(g), img, GOFF, *g)
-    struct.pack_into('<IIII', img, POFF, *params)
-    allsyms = list(syms) + [('fnvl_disp_table', TABLE, sizes[0]), ('fnvl_g', GOFF, sizes[1])] + ([('fnvl_phf_params', POFF, sizes[2])] if with_params else [])
-    strtab = b'\0'
-    recs = [struct.pack('<IIIBBH', 0, 0, 0, 0, 0, 0)]
-    for t in allsyms:
-        n, v, size = t if len(t) == 3 else (t + (0,))
+G = phf(ADDRS)
+
+
+def layout(prefix='fnvl', addrs=ADDRS, g=G):
+    """(table words, entries words, rows) for the addresses in the order of `addrs`: entry index = position, slot by the hash."""
+    table = [0] * (2 * N)
+    for s in range(N):
+        a = 0xfeed0000 + s
+        while hslot(a, g) == s:
+            a += 1
+        table[2 * s] = a
+    rows = []
+    for j, a in enumerate(addrs):
+        s = hslot(a, g)
+        table[2 * s], table[2 * s + 1] = a, j + 1
+        rows.append(('%s_disp_entries' % prefix, j, a, SYM[a], s))
+    return table, [BODY[a] for a in addrs], rows
+
+
+def elf(prefix='fnvl', table=None, entries=None, g=G, params=(K1, K2, NB, TB), relr='auto', syms=None, sizes=None, nrows=None):
+    """One PT_LOAD [0, 0x4000): table at 0x2000, entries at 0x2200, g at 0x2300, params at 0x2400; relr: vaddrs (SHT_RELR) or None (fixed image)."""
+    T, E, GG, PP = 0x2000, 0x2200, 0x2300, 0x2400
+    t, e, rows = layout(prefix)
+    table = t if table is None else table
+    entries = e if entries is None else entries
+    img = bytearray(0x4000)
+    struct.pack_into('<%dI' % len(table), img, T, *table)
+    struct.pack_into('<%dI' % len(entries), img, E, *entries)
+    struct.pack_into('<%dH' % len(g), img, GG, *g)
+    struct.pack_into('<IIII', img, PP, *params)
+    sz = sizes or dict(table=4 * len(table), entries=4 * max(len(entries), 1), g=2 * len(g), params=16)
+    allsyms = [('%s_disp_table' % prefix, T, sz['table']), ('%s_disp_entries' % prefix, E, sz['entries']), ('%s_g' % prefix, GG, sz['g']),
+               ('%s_phf_params' % prefix, PP, sz['params'])] + (list(BODY_SYMS) if syms is None else syms)
+    if relr == 'auto':
+        relr = [E + 4 * i for i in range(len(entries))]
+    strtab, recs = b'\0', [struct.pack('<IIIBBH', 0, 0, 0, 0, 0, 0)]
+    for n, v, size in [(x[0], x[1], x[2] if len(x) > 2 else 0) for x in allsyms]:
         recs.append(struct.pack('<IIIBBH', len(strtab), v, size, (1 << 4) | 1, 0, 1))
         strtab += n.encode() + b'\0'
     symtab = b''.join(recs)
-    shstr = b'\0.text\0.symtab\0.strtab\0.shstrtab\0'
-    o_sym = 0x3000 + 52
+    relrb = b''.join(struct.pack('<I', a) for a in sorted(relr)) if relr is not None else b''
+    shstr = b'\0.text\0.symtab\0.strtab\0.shstrtab\0.relr.dyn\0'
+    o_sym = 0x4000 + 52
     o_str = o_sym + len(symtab)
     o_shs = o_str + len(strtab)
-    shoff = o_shs + len(shstr)
+    o_rel = o_shs + len(shstr)
+    shoff = o_rel + len(relrb)
 
     def sh(name, typ, off, size, link=0, ent=0):
         return struct.pack('<IIIIIIIIII', name, typ, 0, 0, off, size, link, 0, 4, ent)
-    shdrs = (sh(0, 0, 0, 0) + sh(1, 1, 0, 0x3000) + sh(7, 2, o_sym, len(symtab), 3, 16) + sh(15, 3, o_str, len(strtab)) +
-             sh(23, 3, o_shs, len(shstr)))
-    # file layout: [ELF header (52) | one program header (32) at 52] is inside the first 84 bytes of the image, which are zero
-    ph = struct.pack('<IIIIIIII', 1, 0, 0, 0, 0x3000, 0x3000, 5, 0x1000)
-    img[52:84] = ph
-    hdr = b'\x7fELF' + bytes([1, 1, 1, 0]) + bytes(8) + struct.pack('<HHIIIIIHHHHHH', 3, 183, 1, 0, 52, shoff, 0, 52, 32, 1, 40, 5, 4)
-    img[0:52] = hdr
-    return bytes(img) + bytes(52) + symtab + strtab + shstr + shdrs
+    shdrs = sh(0, 0, 0, 0) + sh(1, 1, 0, 0x4000) + sh(7, 2, o_sym, len(symtab), 3, 16) + sh(15, 3, o_str, len(strtab)) + sh(23, 3, o_shs, len(shstr))
+    if relr is not None:
+        shdrs += sh(33, 19, o_rel, len(relrb), 0, 4)
+    img[52:84] = struct.pack('<IIIIIIII', 1, 0, 0, 0, 0x4000, 0x4000, 5, 0x1000)
+    img[0:52] = b'\x7fELF' + bytes([1, 1, 1, 0]) + bytes(8) + struct.pack('<HHIIIIIHHHHHH', 3, 183, 1, 0, 52, shoff, 0, 52, 32, 1, 40, 6 if relr is not None else 5, 4)
+    return bytes(img) + bytes(52) + symtab + strtab + shstr + relrb + shdrs
 
 
-UNIVERSE = [0x00401000, 0x00401020, 0x0040a000, 0x00ff0000]
-NAMES = {a: 'L_%08x' % a for a in UNIVERSE}
-BODIES = {a: BODY + 0x40 * i for i, a in enumerate(UNIVERSE)}
-IMPORTS = {0xf0000001: ('imp_a', 0x1800), 0xf0000002: ('imp_b', 0x1840)}
-G_ALL = phf(UNIVERSE + sorted(IMPORTS) + [0x12345678])      # a hash that also holds the import keys and one extra key
-
-
-def table(overrides=None, extra=(), place=None, drop=(), g=None):
-    """slots of the 1 << TB-slot table: every key of the universe and `extra` at the slot the hash gives (g), offset to its body;
-    overrides {key: symbol address}; place {key: slot} puts a key at another slot; drop: keys left out; empty slots hold an arbitrary key, offset 0."""
-    g = g or G_ALL
-    ov, place = overrides or {}, place or {}
-    slots = [(0xfeed0000 + i, 0) for i in range(1 << TB)]
-    for k in [a for a in UNIVERSE if a not in drop] + list(extra):
-        tgt = ov.get(k, BODIES.get(k) or IMPORTS[k][1] if k in IMPORTS else BODIES.get(k, BODY))
-        slots[place.get(k, hslot(k, g))] = (k, tgt - TABLE)
-    return slots
-
-
+BODY_SYMS = [(SYM[a], BODY[a], 0x40) for a in ADDRS]
 d = tempfile.mkdtemp()
 
 
@@ -116,21 +119,22 @@ def write(name, text):
     return p
 
 
-def run(slots, entries=None, keys=None, extra_syms=(), entries_extra='', keys_header='', missing=None, **elfkw):
-    syms = [(NAMES[a], BODIES[a]) for a in UNIVERSE] + list(extra_syms)
-    elfkw.setdefault('g', G_ALL)
+def rows_text(rows, prefix='fnvl', slots=N, empty=None, tid=None, fmt=True):
+    empty = slots - len(rows) if empty is None else empty
+    return ('# fnvnx-disp-rows/1\n' if fmt else '') + ('# table_id %s\n' % tid if tid else '') + '# hash %s_disp_table slots=%d empty=%d\n' % (prefix, slots, empty) + \
+        '# table\tindex\taddr\tsymbol\tslot\n' + ''.join('%s\t%d\t%08x\t%s\t%d\n' % r for r in rows)
+
+
+def run(elfbytes=None, rows=None, text=None, universe=None, extra=(), elf_file=True):
     with open(os.path.join(d, 'g.elf'), 'wb') as fh:
-        fh.write(elf(slots, syms, **elfkw))
-    u = write('u.tsv', '# base\n' + ''.join('%08x\tdecomp\t10\tcall\n' % a for a in UNIVERSE))
-    ents = NAMES if entries is None else entries
-    e = write('e.tsv', ''.join('%08x\t%s\n' % (a, ents[a]) for a in sorted(ents)) + entries_extra)
+        fh.write(elfbytes if elfbytes is not None else elf())
+    if text is None:
+        text = rows_text(layout()[2] if rows is None else rows)
+    cmd = [sys.executable, '-I', GATE, '--elf', os.path.join(d, 'g.elf' if elf_file else 'none.elf'), '--rows', write('r.tsv', text)] + list(extra)
+    if universe is not None:
+        cmd += ['--universe', write('u.tsv', '# base\n' + ''.join('%08x\tdecomp\n' % a for a in universe))]
     go = os.path.join(d, 'gate')
     os.makedirs(go, exist_ok=True)
-    cmd = [sys.executable, '-I', GATE, '--elf', os.path.join(d, 'g.elf'), '--universe', u, '--entries', e]
-    if keys is not None:
-        cmd += ['--keys', write('k.tsv', keys_header + ''.join('%08x\t%s\n' % kv for kv in keys))]
-    if missing is not None:
-        cmd += ['--missing', write('m.tsv', ''.join('%08x\n' % a for a in missing))]
     r = subprocess.run(cmd, capture_output=True, text=True, env=dict(os.environ, GATE_OUT=go))
     if not os.path.exists(os.path.join(go, 'disp.json')):
         sys.exit('gate_disp failed: ' + r.stderr[-600:])
@@ -138,111 +142,102 @@ def run(slots, entries=None, keys=None, extra_syms=(), entries_extra='', keys_he
         j = json.load(fh)
     with open(os.path.join(go, 'disp.ids')) as fh:
         j['ids'] = fh.read().split('\n')[:-1]
-    j['stdout'] = r.stdout
+    os.remove(os.path.join(go, 'disp.json'))
     return r.returncode, j
 
 
-rc, g = run(table())
-check('green', (rc, g['status'], g['universe'], g['certified'], g['uncertified'], g['ids']), (0, 'green', 4, 4, [], []))
-# the lookup is the one of rt.c: every universe key hashes to its slot
-check('hash', all(table()[hslot(a, G_ALL)][0] == a for a in UNIVERSE), True)
-# a universe address without entry (and --missing is reporting only)
-ents = dict(NAMES)
-del ents[0x0040a000]
-rc, g = run(table(), entries=ents)
-check('no entry', (rc, g['status'], g['universe'], g['certified'], g['uncertified']), (1, 'red', 4, 3, ['0040a000:no-entry']))
-rc, g = run(table(), entries=ents, missing=[0x0040a000, 0x00401000])
-check('--missing reports and certifies nothing', (rc, g['uncertified'], 'missing list 2: 1 without entry, 1 with an entry; without entry and not listed 0' in g['stdout']),
-      (1, ['0040a000:no-entry'], True))
-rc, g = run(table(), entries=ents, missing=[])
-check('--missing: a gap not listed is reported', 'without entry and not listed 1' in g['stdout'], True)
-# an entry whose symbol the ELF does not define
-ents = dict(NAMES)
-ents[0x00401020] = 'L_deadbeef'
-rc, g = run(table(), entries=ents)
-check('undefined symbol', (rc, g['uncertified']), (1, ['00401020:symbol-undefined']))
-# a slot that points at the wrong symbol (the body of another entry)
-rc, g = run(table({0x00401020: BODIES[0x00ff0000]}))
-check('wrong target', (rc, g['status'], g['certified'], g['uncertified'], g['ids']), (1, 'red', 3, ['00401020:wrong-target'], ['00401020:wrong-target']))
-# one byte off (a stored offset that is right modulo 2^32 only)
-slots = table()
-i = hslot(0x00401000, G_ALL)
-slots[i] = (slots[i][0], slots[i][1] + 1)
-rc, g = run(slots)
-check('off by one', (rc, g['uncertified']), (1, ['00401000:wrong-target']))
-# an extra key (an occupied slot whose key is not an address of the universe)
-rc, g = run(table(extra=[0x12345678]))
-check('extra key', (rc, g['status'], g['universe'], g['certified'], g['uncertified']), (1, 'red', 5, 4, ['12345678:extra-key']))
-# an empty slot (offset 0) is no key whatever its key says
-slots = table()
-j = next(i for i, (k, o) in enumerate(slots) if not o)
-slots[j] = (0x12345678, 0)
-rc, g = run(slots)
-check('empty slot with a key', (rc, g['status']), (0, 'green'))
-# a duplicate key: the key of 0x00401000 also sits in an empty slot
-j = next(i for i, (k, o) in enumerate(table()) if not o)
-rc, g = run([(s if i != j else (0x00401000, BODIES[0x00401000] - TABLE)) for i, s in enumerate(table())])
-check('duplicate key', (rc, g['uncertified']), (1, ['00401000:duplicate-key']))
-# a key whose slot is not the one the hash computes (the dispatcher would not find it)
-rc, g = run(table(place={0x00401020: j}))
-check('hash-miss', (rc, g['uncertified']), (1, ['00401020:hash-miss']))
-# a key in the universe with no slot at all
-rc, g = run(table(drop=[0x00ff0000]))
-check('no slot', (rc, g['uncertified']), (1, ['00ff0000:no-slot']))
-# the stored parameters are not those the slots were placed with: the proof of the lookup fails for the keys it misplaces
-rc, g = run(table(), params=(K1, K2 ^ 0x10000, NB, TB))
-check('parameters do not match the table', (rc, g['status'], g['certified'] < 4, all(u.endswith(':hash-miss') for u in g['uncertified'])), (1, 'red', True, True))
-rc, g = run(table(), params=(K1 ^ 0x5a5a5a5a, K2, NB, TB))
-check('K1 differs', (rc, g['status']), (1, 'red'))
-# sizes and parameters outside the table
-for name, kw in (('table size', dict(sizes=((8 << TB) - 8, 2 << NB, 16))), ('g size', dict(sizes=(8 << TB, (2 << NB) - 2, 16))),
-                 ('params size', dict(sizes=(8 << TB, 2 << NB, 12))), ('NBITS 0', dict(params=(K1, K2, 0, TB))), ('TBITS 32', dict(params=(K1, K2, NB, 32))),
-                 ('no params', dict(with_params=False))):
-    rc, g = run(table(), **kw)
-    check('red: %s' % name, (rc, g['status'], g['certified'], g['uncertified'][:1]), (1, 'red', 0, ['00401000:no-table']))
-# --keys: the import key set; the symbols of the bodies are named by entries.tsv rows of kind import
-imp = [(k, v[0]) for k, v in sorted(IMPORTS.items())]
-xs = [('imp_a', 0x1800), ('imp_b', 0x1840)]
-irows = lambda names: ''.join('%08x\t%s\timport\n' % (k, n) for k, n in names)
-rc, g = run(table(extra=sorted(IMPORTS)), keys=imp, extra_syms=xs, entries_extra=irows(imp))
-check('keys green', (rc, g['status'], g['universe'], g['certified']), (0, 'green', 6, 6))
-rc, g = run(table(extra=sorted(IMPORTS)), keys=imp, extra_syms=xs, entries_extra=irows(imp[:1]))
-check('a key of --keys that no entries row names', (rc, g['uncertified']), (1, ['f0000002:no-entry']))
-rc, g = run(table(extra=sorted(IMPORTS)), keys=imp, extra_syms=xs, entries_extra=irows([imp[0], (0xf0000002, 'imp_a')]))
-check('key names the wrong symbol', (rc, g['uncertified']), (1, ['f0000002:wrong-target']))
-rc, g = run(table(), extra_syms=[('imp_a', 0x1800)], entries_extra='00401000\timp_a\tcode\n')
-check('entry conflict: two rows name two symbols', (rc, g['uncertified']), (1, ['00401000:entry-conflict']))
-# entries.tsv third column: kind import makes the row a key that is not a universe address
-ents = dict(NAMES)
-ents.update({0xf0000001: 'imp_a', 0xf0000002: 'imp_b'})
-rc, g = run(table(extra=sorted(IMPORTS)), entries={a: s for a, s in ents.items()}, extra_syms=xs)
-check('import rows without the kind column are not keys: the slots are extra keys', (rc, g['uncertified']), (1, ['f0000001:extra-key', 'f0000002:extra-key']))
-e = write('e2.tsv', ''.join('%08x\t%s\tcode\n' % (a, NAMES[a]) for a in sorted(NAMES)) + ''.join('%08x\t%s\timport\n' % (k, IMPORTS[k][0]) for k in sorted(IMPORTS)) +
-          '# table_id abc123\n')
-# (run() writes its own entries file, so call the gate directly for the kind column)
+rc, g = run()
+check('rows equal', (rc, g['status'], g['universe'], g['certified'], g['uncertified'], g['ids']), (0, 'green', 1 + 4 + 4, 9, [], []))
+rc, g = run(elf(relr=None))
+check('fixed image is green', (rc, g['status']), (0, 'green'))
+check('the fixture hash is a real perfect hash', len({hslot(a, G) for a in ADDRS}), 4)
+# a slot differs: the table slot of row 1 holds the index of row 2
+t, e, rows = layout()
+s1 = rows[1][4]
+t[2 * s1 + 1] = 3
+rc, g = run(elf(table=t))
+check('slot differs', (rc, g['uncertified']), (1, ['fnvl_disp_entries[1]:wrong-slot']))
+# a slot with a different key
+t, e, rows = layout()
+t[2 * s1] ^= 0x10
+rc, g = run(elf(table=t))
+check('slot key differs', (rc, g['uncertified']), (1, ['fnvl_disp_entries[1]:wrong-slot']))
+# an entries word that points elsewhere
+t, e, rows = layout()
+e[2] = BODY[ADDRS[3]]
+rc, g = run(elf(entries=e))
+check('entry word wrong', (rc, g['uncertified']), (1, ['fnvl_disp_entries[2]:wrong-target']))
+# a row is missing: the generator declared 3 rows, the table and the entries hold 4
+rc, g = run(rows=layout()[2][:3])
+check('row missing', (rc, g['uncertified'][:1]), (1, ['fnvl:table-size']))
+# a row missing in the middle of the index space
+rc, g = run(rows=[r if r[1] != 1 else r[:1] + (5,) + r[2:] for r in layout()[2]])
+check('row missing (index gap)', (rc, g['uncertified'][:1]), (1, ['fnvl:index-gap']))
+# a stray non-empty slot: an empty slot holds index 2 (and the key is not a row's)
+t, e, rows = layout()
+sn = next(s for s in range(N) if s not in {r[4] for r in rows})
+t[2 * sn + 1] = 2
+rc, g = run(elf(table=t))
+check('stray slot', (rc, g['uncertified']), (1, ['fnvl_disp_table[%d]:stray-slot' % sn]))
+# an empty slot whose key hashes to it
+t, e, rows = layout()
+a = 0xfeed0000
+while hslot(a, G) != sn:
+    a += 1
+t[2 * sn] = a
+rc, g = run(elf(table=t))
+check('empty slot hits', (rc, g['uncertified']), (1, ['fnvl_disp_table[%d]:empty-slot-hits' % sn]))
+# the rows file is missing / malformed, no ELF
+rc = subprocess.run([sys.executable, '-I', GATE, '--elf', os.path.join(d, 'g.elf'), '--rows', os.path.join(d, 'absent.tsv')], capture_output=True,
+                    env=dict(os.environ, GATE_OUT=os.path.join(d, 'gate'))).returncode
+check('rows file missing', rc, 1)
+with open(os.path.join(d, 'gate', 'disp.json')) as fh:
+    check('rows file missing: item', json.load(fh)['uncertified'], ['rows:no-rows'])
+rc, g = run(text=rows_text(layout()[2], fmt=False))
+check('rows file without the format line', (rc, g['uncertified']), (1, ['rows:format']))
+rc, g = run(elf_file=False)
+check('no elf', (rc, g['uncertified']), (1, ['elf:no-elf']))
+# relocation: an entry not covered
+rc, g = run(elf(relr=[0x2200, 0x2204, 0x220c]))
+check('unrelocated', (rc, g['uncertified']), (1, ['fnvl_disp_entries[2]:unrelocated']))
+# symbols
+rc, g = run(elf(syms=[(SYM[a], BODY[a], 0x40) for a in ADDRS[1:]]))
+check('undefined symbol', (rc, g['uncertified']), (1, ['fnvl_disp_entries[0]:symbol-undefined']))
+rc, g = run(elf(syms=BODY_SYMS + [(SYM[ADDRS[0]], 0x9000, 0x40)]))
+check('ambiguous symbol', (rc, g['uncertified']), (1, ['fnvl_disp_entries[0]:symbol-ambiguous']))
+# parameters that do not match the table: the lookup of the stored parameters misses
+rc, g = run(elf(params=(K1, K2 ^ 0x10000, NB, TB)))
+check('K2 differs', (rc, g['status'], g['certified'] < 9, all(u.endswith(':hash-miss') or u.endswith(':empty-slot-hits') for u in g['uncertified'])), (1, 'red', True, True))
+# sizes and parameter ranges
+for name, kw, why in (('table size', dict(sizes=dict(table=8 * N - 8, entries=16, g=2 << NB, params=16)), 'table-size'),
+                      ('g size', dict(sizes=dict(table=8 * N, entries=16, g=(2 << NB) - 2, params=16)), 'table-size'),
+                      ('params size', dict(sizes=dict(table=8 * N, entries=16, g=2 << NB, params=12)), 'params'),
+                      ('TBITS differs from N', dict(params=(K1, K2, NB, TB + 1)), 'params'), ('NBITS 0', dict(params=(K1, K2, 0, TB)), 'params')):
+    rc, g = run(elf(**kw))
+    check('red: %s' % name, (rc, g['status'], g['uncertified'][:1]), (1, 'red', ['fnvl:' + why]))
+rc, g = run(text=rows_text(layout()[2], empty=3))
+check('empty count', (rc, g['uncertified'][:1]), (1, ['fnvl:slot-count']))
+# an empty table: one element 0 that is not a row, no relocation covers it
+rc, g = run(elf(entries=[0], table=layout('fnvl', [])[0], relr=[]), rows=[])
+check('empty table is green', (rc, g['status']), (0, 'green'))
+rc, g = run(elf(entries=[0x1000], table=layout('fnvl', [])[0], relr=[]), rows=[])
+check('empty table with a nonzero element', (rc, g['uncertified']), (1, ['fnvl_disp_entries[0]:empty-element']))
+# universe
+rc, g = run(universe=ADDRS)
+check('universe covered', (rc, g['status'], g['universe']), (0, 'green', 13))
+rc, g = run(universe=ADDRS + [0x123456])
+check('universe address without a row', (rc, g['uncertified']), (1, ['00123456:no-entry']))
+# two tables, one rows file each (the native prefix)
+nt, ne, nrows = layout('fnvnx_native', ADDRS[:2], phf(ADDRS[:2]))
 with open(os.path.join(d, 'g.elf'), 'wb') as fh:
-    fh.write(elf(table(extra=sorted(IMPORTS)), [(NAMES[a], BODIES[a]) for a in UNIVERSE] + xs, g=G_ALL))
-u = write('u.tsv', ''.join('%08x\tdecomp\t10\tcall\n' % a for a in UNIVERSE))
-go = os.path.join(d, 'gate2')
-os.makedirs(go, exist_ok=True)
-
-
-def direct(*extra):
-    r = subprocess.run([sys.executable, '-I', GATE, '--elf', os.path.join(d, 'g.elf'), '--universe', u, '--entries', e] + list(extra), capture_output=True, text=True,
-                       env=dict(os.environ, GATE_OUT=go))
-    with open(os.path.join(go, 'disp.json')) as fh:
-        return r.returncode, json.load(fh)
-
-
-rc, g = direct()
-check('kind import', (rc, g['status'], g['universe'], g['certified']), (0, 'green', 6, 6))
-# table_id: equal in entries.tsv and keys.tsv is green and counted, different is red
-k_same = write('k_same.tsv', '# table_id abc123\n')
-k_diff = write('k_diff.tsv', '# table_id fff999\n')
-rc, g = direct('--keys', k_same)
-check('table_id equal', (rc, g['status'], g['universe'], g['certified']), (0, 'green', 7, 7))
-rc, g = direct('--keys', k_diff)
-check('table_id differs', (rc, g['status'], g['uncertified']), (1, 'red', ['table_id']))
+    fh.write(elf())
+r1 = write('r1.tsv', rows_text(layout()[2]))
+r2 = write('r2.tsv', rows_text(nrows, prefix='fnvnx_native'))
+rc = subprocess.run([sys.executable, '-I', GATE, '--elf', os.path.join(d, 'g.elf'), '--rows', r1, '--rows', r2], capture_output=True,
+                    env=dict(os.environ, GATE_OUT=os.path.join(d, 'gate'))).returncode
+with open(os.path.join(d, 'gate', 'disp.json')) as fh:
+    gj = json.load(fh)
+check('second table that the ELF does not hold', (rc, gj['uncertified'][:1]), (1, ['fnvnx_native:symbol-undefined']))
 
 if fails:
     print('\n'.join(fails))

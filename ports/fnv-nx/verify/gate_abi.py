@@ -77,11 +77,14 @@ def read_objects(objs):
                 continue
             store[(oid, "sympair")] = l2sections.parse_sympair(sp, oid + ":.fnvnx.sympair")
             lays = objsections.parse_layout(objsections.section(elf, ".fnvnx.layout"), oid + ":.fnvnx.layout")
-            dt = elf.section(".fnvnx.decltype")     # a C unit's declared types of external symbols, compared by C11 6.2.7 (link/ctypes_compat.py): the section's presence is the fact, whatever the linkage of the layout rows
-            if dt is not None:
-                decls[oid] = ctypes_compat.parse_decltype(dt, oid + ":.fnvnx.decltype")
-            elif any(lay.linkage == "c" for lay in lays):     # a unit of `c` records without its declared types: nothing to compare them with
-                red[oid + ":decltype"] = "a C unit has no .fnvnx.decltype section"
+            dt = elf.section(".fnvnx.decltype")     # RULE DECLTYPE-COMPLETE (link/ctypes_compat.py): every GLOBAL/WEAK symbol of the object has exactly one line, `sym<TAB>type` or `sym<TAB>-reason` (reason from the plugin's closed set); the typed lines are compared by C11 6.2.7
+            types, why = ctypes_compat.parse_decltype_lines(dt if dt is not None else b"", oid + ":.fnvnx.decltype")
+            have = {n for n, bind, _t, _sh, _v, _sz, _o in elf.symbols() if n and bind in (1, 2)}     # STB_GLOBAL, STB_WEAK
+            for n in sorted(have - set(types) - set(why)):
+                red[oid + ":decltype:missing:" + n] = "global/weak symbol %s has no .fnvnx.decltype line" % n
+            for n in sorted((set(types) | set(why)) - have):
+                red[oid + ":decltype:extra:" + n] = ".fnvnx.decltype line for %s, which is not a global/weak symbol of the object" % n
+            decls[oid] = types
             cr = elf.section(".fnvnx.crossing")
             if cr is not None:
                 cross[oid] = parse_crossing(cr, oid + ":.fnvnx.crossing")
@@ -93,12 +96,30 @@ def read_objects(objs):
     return store, layouts, red, decls, cross
 
 
-def judge_objects(objs):
+def asm_findings(objs):
+    """OBJS: [(id, path)] of the assembly units of a root (recipe.ASM_EXT) -> {item: reason}: an assembled unit has no declared types (RULE DECLTYPE-COMPLETE: the plugin
+    writes `.fnvnx.decltype` for C and C++ units only), so a unit of the assembly language that carries the section is red"""
+    red = {}
+    for oid, path in objs:
+        try:
+            has = elfobj.read(path).section(".fnvnx.decltype") is not None
+        except (ValueError, OSError) as e:
+            red[oid + ":unreadable"] = str(e)[:300]
+            continue
+        if has:
+            red[oid + ":decltype:asm"] = "an assembly unit carries a .fnvnx.decltype section"
+    return red
+
+
+def judge_objects(objs, asm=(), universe=None, va_forwarders=frozenset()):
     """-> (universe, certified, ids, detail) of the objects OBJS [(id, path)] of one root."""
     store, layouts, red, decls, cross = read_objects(objs)
     uni, abi_red = abi.check(store)
     items = list(uni)
     reds = {k: v for k, v in abi_red.items()}
+    asm_red = asm_findings(asm)
+    items += [oid for oid, _ in asm]
+    reds.update(asm_red)
     try:
         odr_uni, odr_red = odr.check([p for _, p in objs])
     except (ValueError, OSError) as e:        # odr cannot parse an object: no verdict on the copies, the gate is red for it
@@ -128,9 +149,11 @@ def judge_objects(objs):
     for (oid, kind), rows in store.items():
         if kind == "sympair":
             for sym, ms, k, df in rows:
-                if ms and k != "data":
+                if ms and k not in ("data", "noemit"):     # noemit: the unit defines it, GCC wrote it nowhere (sympair_kinds.inc): no symbol of the object crosses
                     boundary.setdefault(sym, []).append(oid)
     for sym, oids in sorted(boundary.items()):
+        if universe is not None and sym not in universe:
+            continue        # not in the crossing universe (IAT bindings, called exports, dispatch descriptors): the symbol never crosses the boundary, so no term of it is judged
         items.append("crossing:" + sym)
         got = [cross[o][sym] for o in oids if sym in cross.get(o, {})]
         if known is None:
@@ -139,6 +162,12 @@ def judge_objects(objs):
             reds["crossing:" + sym] = "no .fnvnx.crossing row in any unit that declares it (%s)" % ", ".join(sorted(oids))[:200]
             continue
         terms = {t for g in got for t in g}
+        if terms == {"va_list"} and sym in va_forwarders:
+            continue        # a va_list crossing is allowed iff it is a msvcrt_va forwarder (bridgefacts crt/msvcrt_va.tsv): it walks the x86 va_list as guest memory
+        if "va_list" in terms and terms - known == set() and sym not in va_forwarders:
+            items.append("abi:va:" + sym)
+            reds["abi:va:" + sym] = "a va_list crossing symbol with no msvcrt_va forwarder record"
+            continue
         if terms - known:
             reds["crossing:" + sym] = "unknown term %s (the table has %s)" % (sorted(terms - known), sorted(known))
         elif terms:
@@ -159,10 +188,11 @@ def judge_root(repo, cache, root):
         return 1, 0, [root + ":recipe"], "invalid recipe: %s" % "; ".join(e.errors)[:300]
     if res["status"] != "green":
         return 1, 0, [root + ":build"], "build %s" % res["status"]
-    objs = [(root + "/" + o["unit"], o["object"], o["sha256"]) for o in res["objects"] if o["unit"].endswith(recipe.CXX_EXT)]
-    # the item is the root's C++ objects as a set (the ODR and layout joins read all of them): keyed by their ids and sha256 and the tools that read them
-    key = {"gate": "abi", "objects": [[i, h] for i, _, h in objs], "tools": gate_build.tool_digest(__file__, abi, odr, elfobj, l2sections, objsections), "env": envid()}
-    v, _ = gate_build.memo(cache, "abi", key, lambda: list(judge_objects([(i, p) for i, p, _ in objs])))
+    objs = [(root + "/" + o["unit"], o["object"], o["sha256"]) for o in res["objects"] if o["unit"].endswith(recipe.CC_EXT + recipe.CXX_EXT)]
+    asm = [(root + "/" + o["unit"], o["object"], o["sha256"]) for o in res["objects"] if o["unit"].endswith(recipe.ASM_EXT)]
+    # the item is the root's C and C++ objects as a set (the ODR and layout joins read all of them): keyed by their ids and sha256 and the tools that read them
+    key = {"gate": "abi", "objects": [[i, h] for i, _, h in objs], "asm": [[i, h] for i, _, h in asm], "tools": gate_build.tool_digest(__file__, abi, odr, elfobj, l2sections, objsections), "env": envid()}
+    v, _ = gate_build.memo(cache, "abi", key, lambda: list(judge_objects([(i, p) for i, p, _ in objs], [(i, p) for i, p, _ in asm])))
     return tuple(v)
 
 

@@ -147,100 +147,100 @@ int sm_menucheck(void)
 /* ref SM_CXMAXIMIZED / SM_CYMAXIMIZED (both are the reference's own formulas, FIXME there) */
 int sm_cxmaximized(void) { return fnvnx_display_w() + 2 * sm_frame_x(); }
 int sm_cymaximized(void) { return fnvnx_display_h() + 2 * sm_caption(); }
-/* GetSystemMetrics: one handler per `case SM_*:` label of wine-9.0 dlls/win32u/sysparams.c get_system_metrics, bound by name; the table is
+/* GetSystemMetrics: one handler per `case SM_*:` label (a constant answer is a table datum `static const int`, a computed one a function) of wine-9.0 dlls/win32u/sysparams.c get_system_metrics, bound by name; the table is
    generated (manifest/gen_sysmetrics.py): a label with no handler, or a handler with no label, is a build error. A case that is a literal in
    the reference returns that literal; every other index answers 0, the reference's `default: return 0`. */
 static int sm_SM_CXSCREEN(void) { return fnvnx_display_w(); }
 static int sm_SM_CYSCREEN(void) { return fnvnx_display_h(); }
-static int sm_SM_CXVSCROLL(void) { return SCROLL_W; }
-static int sm_SM_CYHSCROLL(void) { return SCROLL_H; }
+static const int sm_SM_CXVSCROLL = SCROLL_W;
+static const int sm_SM_CYHSCROLL = SCROLL_H;
 static int sm_SM_CYCAPTION(void) { return sm_caption(); }
-static int sm_SM_CXBORDER(void) { return 1; }
-static int sm_SM_CYBORDER(void) { return 1; }
-static int sm_SM_CXDLGFRAME(void) { return 3; }
-static int sm_SM_CYDLGFRAME(void) { return 3; }
-static int sm_SM_CYVTHUMB(void) { return SCROLL_H; }
-static int sm_SM_CXHTHUMB(void) { return SCROLL_H; }
-static int sm_SM_CXICON(void) { return ICON; }
-static int sm_SM_CYICON(void) { return ICON; }
-static int sm_SM_CXCURSOR(void) { return ICON; }
-static int sm_SM_CYCURSOR(void) { return ICON; }
-static int sm_SM_CYMENU(void) { return MENU_H + 1; }
+static const int sm_SM_CXBORDER = 1;
+static const int sm_SM_CYBORDER = 1;
+static const int sm_SM_CXDLGFRAME = 3;
+static const int sm_SM_CYDLGFRAME = 3;
+static const int sm_SM_CYVTHUMB = SCROLL_H;
+static const int sm_SM_CXHTHUMB = SCROLL_H;
+static const int sm_SM_CXICON = ICON;
+static const int sm_SM_CYICON = ICON;
+static const int sm_SM_CXCURSOR = ICON;
+static const int sm_SM_CYCURSOR = ICON;
+static const int sm_SM_CYMENU = MENU_H + 1;
 static int sm_SM_CXFULLSCREEN(void) { return sm_cxmaximized() - 2 * sm_frame_x(); }
 static int sm_SM_CYFULLSCREEN(void) { return sm_cymaximized() - sm_cymin(); }
-static int sm_SM_CYKANJIWINDOW(void) { return 0; }
-static int sm_SM_MOUSEPRESENT(void) { return 1; }
-static int sm_SM_CYVSCROLL(void) { return SCROLL_H; }
-static int sm_SM_CXHSCROLL(void) { return SCROLL_H; }
-static int sm_SM_DEBUG(void) { return 0; }
+static const int sm_SM_CYKANJIWINDOW = 0;
+static const int sm_SM_MOUSEPRESENT = 1;
+static const int sm_SM_CYVSCROLL = SCROLL_H;
+static const int sm_SM_CXHSCROLL = SCROLL_H;
+static const int sm_SM_DEBUG = 0;
 static int sm_SM_SWAPBUTTON(void) { return fnvnx_swap_buttons(); }
-static int sm_SM_RESERVED1(void) { return 0; }
-static int sm_SM_RESERVED2(void) { return 0; }
-static int sm_SM_RESERVED3(void) { return 0; }
-static int sm_SM_RESERVED4(void) { return 0; }
+static const int sm_SM_RESERVED1 = 0;
+static const int sm_SM_RESERVED2 = 0;
+static const int sm_SM_RESERVED3 = 0;
+static const int sm_SM_RESERVED4 = 0;
 static int sm_SM_CXMIN(void) { return sm_cxmin(); }
 static int sm_SM_CYMIN(void) { return sm_cymin(); }
-static int sm_SM_CXSIZE(void) { return CAPTION_W; }
-static int sm_SM_CYSIZE(void) { return CAPTION_H; }
+static const int sm_SM_CXSIZE = CAPTION_W;
+static const int sm_SM_CYSIZE = CAPTION_H;
 static int sm_SM_CXFRAME(void) { return sm_frame_x(); }
 static int sm_SM_CYFRAME(void) { return sm_frame_x(); }
 static int sm_SM_CXMINTRACK(void) { return sm_cxmin(); }
 static int sm_SM_CYMINTRACK(void) { return sm_cymin(); }
-static int sm_SM_CXDOUBLECLK(void) { return DRAG; }
-static int sm_SM_CYDOUBLECLK(void) { return DRAG; }
-static int sm_SM_CXICONSPACING(void) { return ICON_SPACING; }
-static int sm_SM_CYICONSPACING(void) { return ICON_SPACING; }
-static int sm_SM_MENUDROPALIGNMENT(void) { return 0; }
-static int sm_SM_PENWINDOWS(void) { return 0; }
-static int sm_SM_DBCSENABLED(void) { return 0; }
-static int sm_SM_CMOUSEBUTTONS(void) { return 3; }
-static int sm_SM_SECURE(void) { return 0; }
-static int sm_SM_CXEDGE(void) { return 2; }
-static int sm_SM_CYEDGE(void) { return 2; }
+static const int sm_SM_CXDOUBLECLK = DRAG;
+static const int sm_SM_CYDOUBLECLK = DRAG;
+static const int sm_SM_CXICONSPACING = ICON_SPACING;
+static const int sm_SM_CYICONSPACING = ICON_SPACING;
+static const int sm_SM_MENUDROPALIGNMENT = 0;
+static const int sm_SM_PENWINDOWS = 0;
+static const int sm_SM_DBCSENABLED = 0;
+static const int sm_SM_CMOUSEBUTTONS = 3;
+static const int sm_SM_SECURE = 0;
+static const int sm_SM_CXEDGE = 2;
+static const int sm_SM_CYEDGE = 2;
 static int sm_SM_CXMINSPACING(void) { return sm(57) + MIN_GAP; }
 static int sm_SM_CYMINSPACING(void) { return sm(58) + MIN_GAP; }
-static int sm_SM_CXSMICON(void) { return SMICON; }
-static int sm_SM_CYSMICON(void) { return SMICON; }
-static int sm_SM_CYSMCAPTION(void) { return SMCAP_H + 1; }
-static int sm_SM_CXSMSIZE(void) { return SMCAP_W; }
-static int sm_SM_CYSMSIZE(void) { return SMCAP_H; }
-static int sm_SM_CXMENUSIZE(void) { return MENU_W; }
-static int sm_SM_CYMENUSIZE(void) { return MENU_H; }
-static int sm_SM_ARRANGE(void) { return 8; }
-static int sm_SM_CXMINIMIZED(void) { return MIN_WIDTH + 6; }
-static int sm_SM_CYMINIMIZED(void) { return CAPTION_H + 6; }
+static const int sm_SM_CXSMICON = SMICON;
+static const int sm_SM_CYSMICON = SMICON;
+static const int sm_SM_CYSMCAPTION = SMCAP_H + 1;
+static const int sm_SM_CXSMSIZE = SMCAP_W;
+static const int sm_SM_CYSMSIZE = SMCAP_H;
+static const int sm_SM_CXMENUSIZE = MENU_W;
+static const int sm_SM_CYMENUSIZE = MENU_H;
+static const int sm_SM_ARRANGE = 8;
+static const int sm_SM_CXMINIMIZED = MIN_WIDTH + 6;
+static const int sm_SM_CYMINIMIZED = CAPTION_H + 6;
 static int sm_SM_CXMAXTRACK(void) { return fnvnx_display_w() + 4 + 2 * sm_frame_x(); }
 static int sm_SM_CYMAXTRACK(void) { return fnvnx_display_h() + 4 + 2 * sm_frame_x(); }
 static int sm_SM_CXMAXIMIZED(void) { return sm_cxmaximized(); }
 static int sm_SM_CYMAXIMIZED(void) { return sm_cymaximized(); }
-static int sm_SM_NETWORK(void) { return 3; }
-static int sm_SM_CLEANBOOT(void) { return 0; }
-static int sm_SM_CXDRAG(void) { return DRAG; }
-static int sm_SM_CYDRAG(void) { return DRAG; }
-static int sm_SM_SHOWSOUNDS(void) { return 0; }
+static const int sm_SM_NETWORK = 3;
+static const int sm_SM_CLEANBOOT = 0;
+static const int sm_SM_CXDRAG = DRAG;
+static const int sm_SM_CYDRAG = DRAG;
+static const int sm_SM_SHOWSOUNDS = 0;
 static int sm_SM_CXMENUCHECK(void) { return sm_menucheck(); }
 static int sm_SM_CYMENUCHECK(void) { return sm_menucheck(); }
-static int sm_SM_SLOWMACHINE(void) { return 0; }
-static int sm_SM_MIDEASTENABLED(void) { return 0; }
-static int sm_SM_MOUSEWHEELPRESENT(void) { return 1; }
-static int sm_SM_XVIRTUALSCREEN(void) { return 0; }
-static int sm_SM_YVIRTUALSCREEN(void) { return 0; }
+static const int sm_SM_SLOWMACHINE = 0;
+static const int sm_SM_MIDEASTENABLED = 0;
+static const int sm_SM_MOUSEWHEELPRESENT = 1;
+static const int sm_SM_XVIRTUALSCREEN = 0;
+static const int sm_SM_YVIRTUALSCREEN = 0;
 static int sm_SM_CXVIRTUALSCREEN(void) { return fnvnx_display_w(); }
 static int sm_SM_CYVIRTUALSCREEN(void) { return fnvnx_display_h(); }
-static int sm_SM_CMONITORS(void) { return 1; }
-static int sm_SM_SAMEDISPLAYFORMAT(void) { return 1; }
-static int sm_SM_IMMENABLED(void) { return 0; }
-static int sm_SM_CXFOCUSBORDER(void) { return 1; }
-static int sm_SM_CYFOCUSBORDER(void) { return 1; }
-static int sm_SM_TABLETPC(void) { return 0; }
-static int sm_SM_MEDIACENTER(void) { return 0; }
-static int sm_SM_CMETRICS(void) { return 90; }
+static const int sm_SM_CMONITORS = 1;
+static const int sm_SM_SAMEDISPLAYFORMAT = 1;
+static const int sm_SM_IMMENABLED = 0;
+static const int sm_SM_CXFOCUSBORDER = 1;
+static const int sm_SM_CYFOCUSBORDER = 1;
+static const int sm_SM_TABLETPC = 0;
+static const int sm_SM_MEDIACENTER = 0;
+static const int sm_SM_CMETRICS = 90;
 #include "sysmetrics.gen.inc"
 int sm(int i)
 {
     for (const rule &r : k_rules)
         if (r.idx == i)
-            return r.fn();
+            return r.fn ? r.fn() : r.val;
     return 0;   /* an index Windows does not define: ref default */
 }
 } // namespace

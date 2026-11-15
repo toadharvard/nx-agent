@@ -41,16 +41,13 @@ uint32_t nx_ffp_stage_mask(const uint32_t tss[8][33], const uint8_t tex_types[8]
 // ---- ffp_dev.cpp: the per-device record (an IUnknown private-data entry of the device: it dies with the device)
 struct NxFfpDev : IUnknown {
     long refs = 1;
-    uint32_t vs[2] = {0, 0}, ps[2] = {0, 0};             // backend shader ids by flat shading (0 = not made)
     bool vs_ok = false; NxFfpVsKey key; NxFfpVsState vsb; NxFfpPsState psb;
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, void** pp) override { *pp = nullptr; return E_NOINTERFACE; }
     ULONG STDMETHODCALLTYPE AddRef() override { return ++refs; }
     ULONG STDMETHODCALLTYPE Release() override { long r = --refs; if (!r) delete this; return r; }
     void* operator new(size_t n) noexcept NX_MUST_USE NX_USE_MAKE { return nxd3d_alloc(n); } void operator delete(void* p) { nxd3d_free(p); }   // made by nx_make_plain<NxFfpDev>()
-    virtual ~NxFfpDev();                                          // destroys the backend programs (the pending stream is submitted first) and forgets them in the state table
 };
 NxFfpDev* nx_ffp_dev(NxDeviceCore* d);                    // the device's record, made at the first call; null = no memory. The pointer is valid as long as the device is.
 // ---- ffp_prog.cpp
 enum NxBackendKind : uint32_t { NX_BACKEND_DEKO3D = 1, NX_BACKEND_GL = 2 };   // NxGpuInfo.backend (gpu_abi.h)
 bool nx_ffp_flat(NxDeviceCore* d, uint32_t* flat);        // the program variant: D3DRS_SHADEMODE FLAT (the front's flat_shade rule over the draw path's latch); false = no memory for the latch
-uint32_t nx_ffp_make_program(NxFfpDev* f, enum nx_gl4shim_stage_id row);   // a backend shader id (>= 1) of the program, 0 = not made

@@ -1,0 +1,181 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "cc": "x86_64-linux-gnu-gcc-13",
+  "cxx": "x86_64-linux-gnu-g++-13"
+ },
+ "flags": {
+  "c": [
+   "-Werror=attributes"
+  ],
+  "cxx": [
+   "-Werror=attributes"
+  ],
+  "asm": []
+ },
+ "include": [],
+ "units": "all",
+ "external": [
+  {
+   "name": "shaders",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/shaders",
+   "commit": "b545961fad52aaf65474038dba302c32f7d37569",
+   "tree_sha256": "a19fc6e63372561044329b7d43e89e5da01e37c1ab0b03c31f37fc8b452f4e6f",
+   "at": "/ext/shaders"
+  }
+ ],
+ "run": [
+  {
+   "name": "summary",
+   "artifact": "ports/fnv-nx/render/shaders/sm_link:sm_link_check.exe",
+   "args": [
+    "--deb",
+    "/deb",
+    "summary",
+    "/in/1",
+    "/out/summary.json",
+    "/in/2",
+    "/in/3",
+    "/in/4",
+    "/in/5",
+    "/in/6",
+    "/in/7",
+    "/in/8",
+    "/in/9",
+    "--",
+    "/in/10",
+    "/in/11",
+    "/in/12",
+    "/in/13",
+    "/in/14",
+    "/in/15",
+    "/in/16",
+    "/in/17",
+    "--",
+    "/in/18"
+   ],
+   "inputs": [
+    {
+     "external": "shaders",
+     "path": "."
+    },
+    {
+     "stage": "ports/fnv-nx/render/shaders/sm_link_stage:run:stage-0",
+     "path": "stage-0.jsonl"
+    },
+    {
+     "stage": "ports/fnv-nx/render/shaders/sm_link_stage:run:stage-1",
+     "path": "stage-1.jsonl"
+    },
+    {
+     "stage": "ports/fnv-nx/render/shaders/sm_link_stage:run:stage-2",
+     "path": "stage-2.jsonl"
+    },
+    {
+     "stage": "ports/fnv-nx/render/shaders/sm_link_stage:run:stage-3",
+     "path": "stage-3.jsonl"
+    },
+    {
+     "stage": "ports/fnv-nx/render/shaders/sm_link_stage:run:stage-4",
+     "path": "stage-4.jsonl"
+    },
+    {
+     "stage": "ports/fnv-nx/render/shaders/sm_link_stage:run:stage-5",
+     "path": "stage-5.jsonl"
+    },
+    {
+     "stage": "ports/fnv-nx/render/shaders/sm_link_stage:run:stage-6",
+     "path": "stage-6.jsonl"
+    },
+    {
+     "stage": "ports/fnv-nx/render/shaders/sm_link_stage:run:stage-7",
+     "path": "stage-7.jsonl"
+    },
+    {
+     "stage": "ports/fnv-nx/render/shaders/sm_link_prog:run:link-0",
+     "path": "link-0.jsonl"
+    },
+    {
+     "stage": "ports/fnv-nx/render/shaders/sm_link_prog:run:link-1",
+     "path": "link-1.jsonl"
+    },
+    {
+     "stage": "ports/fnv-nx/render/shaders/sm_link_prog:run:link-2",
+     "path": "link-2.jsonl"
+    },
+    {
+     "stage": "ports/fnv-nx/render/shaders/sm_link_prog:run:link-3",
+     "path": "link-3.jsonl"
+    },
+    {
+     "stage": "ports/fnv-nx/render/shaders/sm_link_prog:run:link-4",
+     "path": "link-4.jsonl"
+    },
+    {
+     "stage": "ports/fnv-nx/render/shaders/sm_link_prog:run:link-5",
+     "path": "link-5.jsonl"
+    },
+    {
+     "stage": "ports/fnv-nx/render/shaders/sm_link_prog:run:link-6",
+     "path": "link-6.jsonl"
+    },
+    {
+     "stage": "ports/fnv-nx/render/shaders/sm_link_prog:run:link-7",
+     "path": "link-7.jsonl"
+    },
+    {
+     "stage": "ports/fnv-nx/render/shaders/sm_link_prog:run:table",
+     "path": "table.jsonl"
+    }
+   ],
+   "debs": [
+    "libc6",
+    "libegl1",
+    "libegl-mesa0",
+    "mesa-libgallium",
+    "libgbm1",
+    "libglvnd0",
+    "libdrm2",
+    "libllvm20",
+    "libexpat1",
+    "libffi8",
+    "libzstd1",
+    "zlib1g",
+    "libstdc++6",
+    "libgcc-s1",
+    "libelf1t64",
+    "libsensors5",
+    "libx11-xcb1",
+    "libx11-6",
+    "libxcb1",
+    "libxcb-dri3-0",
+    "libxcb-present0",
+    "libxcb-randr0",
+    "libxcb-sync1",
+    "libxcb-xfixes0",
+    "libxcb-shm0",
+    "libxcb-glx0",
+    "libxshmfence1",
+    "libwayland-client0",
+    "libxau6",
+    "libxdmcp6",
+    "libxext6",
+    "libxxf86vm1",
+    "libbsd0",
+    "libmd0",
+    "libpciaccess0",
+    "libdrm-amdgpu1",
+    "libdrm-intel1",
+    "libedit2",
+    "libtinfo6",
+    "libxml2",
+    "liblzma5",
+    "libicu74"
+   ],
+   "outputs": [
+    "summary.json"
+   ]
+  }
+ ]
+}

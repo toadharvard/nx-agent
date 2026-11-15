@@ -13,7 +13,8 @@ Result fields: tests_total, tests_with_doubles, double_symbols, doubles (first 5
 Wine rows: verify/wine_fixme.tsv of the tree under test (objstub.read_wine_table; missing or malformed is a gate error, red); the result
 holds "wine_fixme": {id: call sites} so growth of the simplified bodies is visible.
 Declared-machine rows: verify/declared_machine.tsv of the tree under test (objstub.read_declared_table; missing or malformed is a gate error, red),
-judged by the same rule as the Wine rows through `fnvnx_declared_machine(id)`; the result holds "declared_machine": {id: call sites}.
+judged by the same rule as the Wine rows through `fnvnx_declared_machine(id)`; the result holds "declared_machine": {id: call sites}. Seven fields per row (the
+7th is the last error); the `std:` citations and the lasterror values are checked against the pinned documents of verify/declared_sources.json (declared_pins).
 Reach facts: GATE_CACHE/reach/<git tree>/reach.facts.tsv (rows fact_id<TAB>sha256, written by the gate `reach`, which does not exist yet).
 While the file is absent, every call of fnvnx_reach_violation is the finding `reach-uncertified`.
 Universe: every function of every object of every product root, every uncovered gap, and a root whose recipe is invalid or whose build is
@@ -34,6 +35,19 @@ import recipe  # noqa: E402
 import unitstage  # noqa: E402
 
 
+def profile_findings(root, target, objs):
+    """The root's target profile, from its record, decides what an object may be and which analysis judges its bodies (the one declaration: recipe.TARGETS / KIND_EMU).
+    OBJS [(id, path)] -> findings [(id, name, kind, detail)]: an object whose (ELF class, e_machine) is not one of the profile's is red; a guest root with matching
+    objects has none (its bodies get the AArch64 analysis), and so has a host root with x86-64 objects (its bodies get the x86-64 analysis, objstub_x64.py: one rule set, one judge). The doubles
+    check (doubles.py) reads symbol tables and judges every root of either profile."""
+    allowed = {recipe.TARGETS[e] for k in (("pie",) if target == "guest" else ("exe", "shared")) for e in recipe.KIND_EMU[k]}
+    mis = [(oid, "e_machine", "target-mismatch", "object has (ELF class, e_machine) %s, the %s profile allows %s" % (recipe.object_target(path), target, sorted(allowed)))
+           for oid, path in objs if recipe.object_target(path) not in allowed]
+    if mis:
+        return mis
+    return []
+
+
 def root_check(root, repo, cache, jobs, built=None):
     """-> (results {unit path: analysis}, rows {(unit path, symbol): row}, ids of the objects of generated units, root-level findings [(id, name, kind, detail)],
     the root's `error_abi` (recipe) or None, the root's handler records (recipe empty_handlers) or None, image, ext); BUILT, when given, receives {root: build result} of a green build (doubles.py)"""
@@ -52,10 +66,13 @@ def root_check(root, repo, cache, jobs, built=None):
     base = root + "/"
     objs = [(base + o["unit"], o["object"]) for o in res["objects"]]
     objs += [("%s%s(%s)" % (base, m["archive"].lstrip("/"), m["member"]), m["object"]) for m in res.get("link_archives", [])]   # pulled archive members
+    finds = profile_findings(root, recipe.entry_of(roots, root).get("target"), objs)
+    if finds:
+        return {}, {}, set(), finds, None, None, {}, {}
     drv = dict(zip(("c", "c++"), recipe.host_compilers(rec, cache)))
     store, names, bad, rets = os.path.join(cache, "store"), set(), [], {}
-    pin = recipe.load_pin(repo)   # a guest root's libc headers are the pinned runtime external's (guest_compiler.json "runtime"); a host root's the distribution's
-    rt_at = ((pin or {}).get("runtime") or {}).get("at")
+    pin = recipe.load_pin(repo)   # a guest root's libc headers are the pinned compiler tree's (guest_compiler.json "external": the one tree holds the runtime); a host root's the distribution's
+    rt_at = ((pin or {}).get("external") or {}).get("at")
     sjdirs = (rt_at,) if rt_at and recipe.entry_of(roots, root).get("target") == "guest" else objstub.SYSTEM_SJ
     for lang, ext in (("c", recipe.CC_EXT), ("c++", recipe.CXX_EXT)):
         us = [(k, unitstage.result_file(store, k, "unit.ii"), lang) for u, k in sorted(res["pp_keys"].items()) if u.endswith(ext)]
@@ -88,7 +105,19 @@ def root_check(root, repo, cache, jobs, built=None):
         conv = (rec.get("external_errors") or {}).get(u.split("/", 1)[0]) if "/" in u else None
         if conv and rec.get("sources"):   # a unit `<external>/<path>` is a copy of that external's file (recipe `sources`)
             ext[base + u] = (conv["type"], conv["success"], rets.get(k, {}))
-    return objstub.analyse_all(objs, names, os_ids, cache, jobs, probe), rows, gen, finds, abi, records, image, ext
+    return objstub.analyse_all(objs, names, os_ids, cache, jobs, probe, 183 if recipe.entry_of(roots, root).get("target") == "guest" else 62), rows, gen, finds, abi, records, image, ext
+
+
+def declared_pins(repo, cache):
+    """The pinned documents of the declared-machine table (declared_sources.json of the tree under test) as the two lazy resolvers read_declared_table takes: each fetches
+    its fnv-nx-build tree once, by exact commit and tree_sha256, only when the table cites it (recipe.fetch_externals, the one mechanism of the recipe's externals)."""
+    pin = json.load(open(os.path.join(repo, "ports/fnv-nx/verify/declared_sources.json")))
+
+    def tree(key):
+        e = pin[key]
+        return recipe.fetch_externals([{"name": key, "commit": e["commit"], "tree_sha256": e["tree_sha256"], "at": key}], os.path.join(cache, "store"),
+                                      os.path.join(cache, "external"), os.path.join(cache, "ws-declared"))[key]["host"]
+    return (lambda: objstub.std_index_load(tree("std_index"), pin["std_index"])), (lambda: objstub.winerror_load(tree("wdk"), pin["wdk"]))
 
 
 def main(argv):
@@ -102,7 +131,8 @@ def main(argv):
     gen_ids = set()
     try:
         wine = objstub.read_wine_table(os.path.join(repo, "ports/fnv-nx/verify/wine_fixme.tsv"))   # the table of the tree under test
-        declared = objstub.read_declared_table(os.path.join(repo, "ports/fnv-nx/verify/declared_machine.tsv"))   # the table of the tree under test
+        std_ix, winerr = declared_pins(repo, cache)
+        declared = objstub.read_declared_table(os.path.join(repo, "ports/fnv-nx/verify/declared_machine.tsv"), std_ix, winerr)   # the table of the tree under test
         facts = objstub.read_facts(os.path.join(cache, "reach", gate_build.tree_of(repo), "reach.facts.tsv")) if roots else None
         for root in roots:
             r, w, gm, fs, abi, records, im, ex = root_check(root, repo, cache, jobs, built)
@@ -123,7 +153,7 @@ def main(argv):
         items, finds = items + its, finds + fs
         dit, dfs, dstats = doubles.judge(built)   # no doubles in tests (doubles.py)
         items, finds = items + dit, finds + dfs
-    except (ValueError, KeyError, OSError) as e:
+    except (ValueError, KeyError, OSError, recipe.BuildRed) as e:
         why = "input error: %s" % (str(e)[:300] or type(e).__name__)
     finally:
         if tmp and not os.environ.get("GATE_KEEP"):

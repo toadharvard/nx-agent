@@ -62,7 +62,6 @@ struct NxBound {
     NxUboCache ubo[2][8];                                                  // [stage][slot]
     NxViewport vp; NxScissor sc; float blend[4], bias[2]; uint8_t vp_ok, sc_ok, blend_ok, bias_ok;
     uint32_t pass_epoch; bool pass_ok; NxTarget col[4]; uint32_t nc; NxTarget dep; bool has_dep;   // the pass this module began
-    bool fx_lastpixel;                                                     // NXW_wined3d_device_apply_stateblock was logged (Wine: `static bool warned`)
 };
 #include "const_fixme.h"   // fnvnx_wine_fixme and the NXW_ ids of verify/wine_fixme.tsv
 extern NxBound g_nxb;
