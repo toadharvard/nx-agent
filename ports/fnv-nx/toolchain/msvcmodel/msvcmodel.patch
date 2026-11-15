@@ -76,7 +76,7 @@
  			   original_size, errval);
 --- a/gcc/cp/class.cc
 +++ b/gcc/cp/class.cc
-@@ -4525,6 +4525,27 @@
+@@ -4525,6 +4525,37 @@
    /* This is an empty base class.  We first try to put it at offset
       zero.  */
    tree offset = size_zero_node;
@@ -98,13 +98,23 @@
 +	  rli->offset = size_binop (PLUS_EXPR, rli->offset,
 +				    size_binop (MINUS_EXPR, offset,
 +						rli_size_unit_so_far (rli)));
++	  /* The record_layout_info invariant (stor-layout.cc place_field,
++	     "If the alignment is still within offset_align, just align the
++	     bit position"): rli->offset is a multiple of rli->offset_align.
++	     The one-byte step breaks it, so offset_align follows the
++	     alignment of the new offset (a constant: a class has no
++	     variable-size layout in C++).  */
++	  if (tree_fits_uhwi_p (rli->offset) && !integer_zerop (rli->offset))
++	    rli->offset_align
++	      = MIN (rli->offset_align,
++		     BITS_PER_UNIT * least_bit_hwi (tree_to_uhwi (rli->offset)));
 +	}
 +      atend = !integer_zerop (offset);
 +    }
    if (TREE_CODE (rli->t) != UNION_TYPE
        && layout_conflict_p (type,
  			    offset,
-@@ -4534,7 +4555,8 @@
+@@ -4534,7 +4565,8 @@
        /* That didn't work.  Now, we move forward from the next
  	 available spot in the class.  */
        atend = true;
@@ -114,7 +124,7 @@
        while (1)
  	{
  	  if (!layout_conflict_p (type,
-@@ -5856,6 +5878,13 @@
+@@ -5856,6 +5888,13 @@
    if (TYPE_HAS_NONTRIVIAL_DESTRUCTOR (type))
      return true;
  
@@ -128,7 +138,7 @@
    /* If the usual deallocation function is a two-argument whose second
       argument is of type `size_t', then we have to pass the size of
       the array to the deallocation function, so we will need to store
-@@ -6615,6 +6644,14 @@
+@@ -6615,6 +6654,14 @@
    tree eoc;
    tree rli_size;
  

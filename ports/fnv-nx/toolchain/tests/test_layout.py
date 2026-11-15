@@ -35,8 +35,14 @@ WANT = {
     'UVDer2@@': (16, 4, 'c:8:1', 'UVDer@@:0:n,UVBase@@:12:i'),
     'UEmpty@@': (1, 1, '', ''),
     'UEmptyDer@@': (4, 4, 'a:0:4', 'UEmpty@@:0:n'),
-    'UTwoEmpty@@': (4, 4, 'a:0:4', 'UEmpty@@:0:n,UEmpty2@@:0:n'),
-    'UBits@@': (8, 4, 'a:0:0:3:4,b:0:3:5:4,c:1:0:20:4,d:3:4:2:1,e:4:0:9:2', ''),
+    # cpp-docs cpp/empty-bases.md, Derived4 : Empty2, Empty3 { int i; } is size(8): the first empty base at 0, a byte of padding to the second
+    # empty base at 1, the int aligned to 4 at offset 4.  UTwoEmpty : UEmpty, UEmpty2 { int a; } is the same shape.
+    'UTwoEmpty@@': (8, 4, 'a:4:4', 'UEmpty@@:0:n,UEmpty2@@:1:n'),
+    # c-language/padding-and-alignment-of-structure-members.md: adjacent bit fields share an allocation unit only if their integral types are the same
+    # size and the next fits without crossing the unit.  a(3) b(5) c(20): three 4-byte-typed fields, 28 bits, one unit (c starts at bit 8 = byte 1 bit 0).
+    # d is a char: another size, a new unit at byte 4 (alignment 1, bits 0-1).  e is a short: another size again, a new 2-byte unit at byte 6 (aligned 2), 9 bits;
+    # the unit ends at 8 and the struct (alignment 4) is 8 bytes.
+    'UBits@@': (8, 4, 'a:0:0:3:4,b:0:3:5:4,c:1:0:20:4,d:4:0:2:1,e:6:0:9:2', ''),
     'UWide@@': (24, 8, 'c:0:1,d:8:8,i:16:8', ''),
     'UPacked1@@': (13, 1, 'c:0:1,i:1:4,d:5:8', ''),
     'U?$Tmpl@N@@': (16, 8, 'v:0:8,c:8:1', ''),
