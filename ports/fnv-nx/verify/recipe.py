@@ -327,6 +327,18 @@ def entry_object(objs, entry):
     return sorted(p for p, d in objs.items() if "_start" in d) if entry != "_start" else []
 
 
+def in_multilib(paths, multidir):
+    """The paths of PATHS (relative to the runtime external) that do not lie in the multilib directory MULTIDIR the guest semantic flags select
+    (`-print-multi-directory`): a directory component run equal to MULTIDIR's components must occur in the path. Empty: every file is of that multilib."""
+    want = [c for c in multidir.split("/") if c and c != "."]
+    out = []
+    for p in paths:
+        parts = p.split("/")
+        if want and not any(parts[i:i + len(want)] == want for i in range(len(parts))):
+            out.append(p)
+    return out
+
+
 def onedef(objs, root_defined):
     """The one-definition rule on the objects OBJS ({path: set of defined global/weak symbols}) of the runtime that the driver names: the paths whose
     defined symbols meet ROOT_DEFINED (the symbols that the admitted guest product roots define), sorted. An object is excluded from the link iff
@@ -340,31 +352,21 @@ def load_guest_link(repo="."):
     return json.load(open(p)) if os.path.exists(p) else None
 
 
-def runtime_ident(pin):
-    """The pinned runtime external's identity: the pin's `runtime` without its `libs`."""
-    return {k: v for k, v in pin["runtime"].items() if k != "libs"}
-
-
-def runtime_libs(pin):
-    """The libs a guest link takes: the pin's `runtime.libs` ({dirs, names, startfiles, endfiles}; the one declaration of the guest's start and end files,
-    crti/crtbegin and crtend/crtn, no crt0: the product owns the entry) with `external` the pinned runtime's name."""
-    rt = pin.get("runtime") if isinstance(pin, dict) else None
-    return dict(rt["libs"], external=rt["name"]) if isinstance(rt, dict) and isinstance(rt.get("libs"), dict) else None
-
-
 def guest_link_errors(prof, pin, files, roots):
-    """Problems of the guest link profile PROF (load_guest_link): exactly {script}; `script` a tracked file under a tree of an admitted tool root
-    (tool_file). The libs are the pin's runtime.libs (runtime_libs): {dirs, names, startfiles, endfiles} of LIBS_KEYS, paths inside the runtime."""
-    if not isinstance(prof, dict) or set(prof) != {"script"}:
-        return ["%s must be {script}: the libs are runtime.libs of %s" % (GUEST_LINK, GUEST_PIN)]
-    sc, lb, err = prof["script"], runtime_libs(pin), []
+    """Problems of the guest link profile PROF (load_guest_link): exactly {script, libs}; `script` a tracked file under a tree of an admitted tool root
+    (tool_file); `libs` {external, dirs, names, startfiles, endfiles} of LIBS_KEYS whose external is the pinned runtime of PIN (no hand path)."""
+    if not isinstance(prof, dict) or set(prof) != {"script", "libs"}:
+        return ["%s must be {script, libs}" % GUEST_LINK]
+    sc, lb, err = prof["script"], prof["libs"], []
     full = TREE + "/" + sc if isinstance(sc, str) and rel_ok(sc) else None
     if not (full and tool_file(roots, files, full)):
         err.append("%s: script %r is not a tracked file of an admitted tool root (a path inside %s)" % (GUEST_LINK, sc, TREE))
     paths = lambda k: isinstance(lb.get(k), list) and all(rel_ok(x) for x in lb[k])  # noqa: E731
     if not (isinstance(lb, dict) and set(lb) == LIBS_KEYS and paths("dirs") and paths("startfiles") and paths("endfiles")
             and isinstance(lb.get("names"), list) and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9._+-]+", n) for n in lb["names"])):
-        err.append("%s: runtime.libs must be {dirs, names, startfiles, endfiles} (paths inside the runtime external)" % GUEST_PIN)
+        err.append("%s: libs must be {external, dirs, names, startfiles, endfiles} (paths inside the external)" % GUEST_LINK)
+    elif not (isinstance(pin, dict) and isinstance(pin.get("runtime"), dict) and lb["external"] == pin["runtime"].get("name")):
+        err.append("%s: libs.external %r is not the pinned runtime external of %s" % (GUEST_LINK, lb["external"], GUEST_PIN))
     return err
 
 
@@ -374,7 +376,7 @@ def with_guest_link(rec, root, roots, repo):
     lk, prof = rec.get("link"), load_guest_link(repo)
     if not (isinstance(lk, dict) and prof and roots.get(root, {}).get("target") == "guest"):
         return rec
-    return dict(rec, link=dict(lk, script=TREE + "/" + prof["script"], libs=runtime_libs(load_pin(repo))))
+    return dict(rec, link=dict(lk, script=TREE + "/" + prof["script"], libs=prof["libs"]))
 
 
 
@@ -515,9 +517,8 @@ def guest_link_part(rec, root, pin, prof, files, roots):
         return []
     bad = ["link.%s is declared: script and libs of a guest link come from %s" % (k, GUEST_LINK) for k in ("script", "libs") if k in lk]
     bad += guest_link_errors(prof, pin, files, roots) if prof is not None else ["%s is missing" % GUEST_LINK]
-    rl = runtime_libs(pin)
-    if rl and rl["external"] not in [e.get("name") for e in rec.get("external", []) if isinstance(e, dict)]:
-        bad.append("the runtime external %r of %s is not declared in external" % (rl["external"], GUEST_PIN))
+    if isinstance(prof, dict) and isinstance(prof.get("libs"), dict) and prof["libs"].get("external") not in [e.get("name") for e in rec.get("external", []) if isinstance(e, dict)]:
+        bad.append("the runtime external %r of %s is not declared in external" % (prof["libs"].get("external"), GUEST_LINK))
     return ["guest root %s: %s" % (root, b) for b in bad]
 
 
@@ -541,8 +542,7 @@ def guest_errors(rec, spec, roots, pin, prof=None, files=()):
     bad = [] if ex == pin["external"] else ["external %r is not the pinned one (%s)" % (c["external"], pin["external"])]
     rt = pin.get("runtime")   # the guest's libc/libstdc++ external: when a recipe declares it (by name), it is the pinned one, exactly
     if isinstance(rt, dict):
-        rte = runtime_ident(pin)   # the external's identity; `libs` is the layout the guest links by
-        bad += ["external %r is not the pinned runtime (%s)" % (e["name"], rte) for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == rt["name"] and e != rte]
+        bad += ["external %r is not the pinned runtime (%s)" % (e["name"], rt) for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == rt["name"] and e != rt]
     bad += ["compiler.%s is %r, pinned %r" % (k, c[k], pin.get(k)) for k in ("cc", "cxx") if c[k] != pin.get(k)]
     fl = rec.get("flags") if isinstance(rec.get("flags"), dict) else {}
     # an attribute that neither the compiler nor a loaded plugin registers is otherwise dropped with a warning: a marker a rule relies on vanishes
@@ -1628,7 +1628,7 @@ class Job:
         (the common set: the profile is one fact for every guest link, native and lifted alike) and `-###` on the link of a one-line C++ file, hermetic (the driver prints the commands it would run; none is run).
         -> (stderr text, the runtime external's mount point): the link command of the multilib the flags select."""
         pin = load_pin(self.repo)
-        rt = runtime_ident(pin)
+        rt = pin["runtime"]
         self.ext.update(fetch_externals([pin["external"], rt], self.store, self.extcache, ws))
         drv = rt["at"] + "/" + pin["runtime_driver"]
         flags = semantics_for(self.hostpath(self.drivers()[1]), "cxx", SEMANTICS_FLAGS)
@@ -1642,6 +1642,8 @@ class Job:
                "env": dict(unitstage.ENV, PATH=os.path.dirname(drv)), "outputs": ["/out"],
                "inputs": sorted(tr["inputs"] + [{"at": "/probe", "tree": cas.ingest(pd, self.store)}], key=lambda i: i["at"])}
         res = self.stage(doc)[1]
+        md = self.stage(dict(doc, argv=[drv] + list(flags) + ["-print-multi-directory"], stage="mld:" + self.root))[1]   # the multilib directory the same flags select
+        self.multidir = open(cas._obj(self.store, cas.manifest(md["stdout"], self.store)), errors="replace").read().strip()
         return open(cas._obj(self.store, cas.manifest(res["stderr"], self.store)), errors="replace").read(), rt["at"]
 
     def archive_members(self, ent, name, out):

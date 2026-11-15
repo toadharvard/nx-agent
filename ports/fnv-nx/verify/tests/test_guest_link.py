@@ -30,8 +30,7 @@ EXE, TST, HOST = "ports/fnv-nx/gx", "ports/fnv-nx/gt", "ports/fnv-nx/hx"
 roots = dict(roots)
 for p, tg, cl in ((EXE, "guest", "product"), (TST, "guest", "test"), (HOST, "host", "product")):
     roots[p] = {"path": p, "class": cl, "target": tg}
-RT = recipe.runtime_ident(pin)
-PL = recipe.runtime_libs(pin)
+RT = dict(pin["runtime"])
 
 
 def rec(output, **lk):
@@ -40,18 +39,16 @@ def rec(output, **lk):
 
 
 def link_errs(r, root):
-    return [e for e in recipe.check(r, root, files, roots, pin, REPO) if "link" in e.lower() or "guest.json" in e or "guest_compiler.json" in e]
+    return [e for e in recipe.check(r, root, files, roots, pin, REPO) if "link" in e.lower() or "guest.json" in e]
 
 
 check("the profile is valid", recipe.guest_link_errors(prof, pin, files, roots) == [], recipe.guest_link_errors(prof, pin, files, roots))
-check("the libs are the pin's runtime.libs: no crt0 in the startfiles, crti and crtbegin first, the external the pinned runtime",
-      PL["external"] == pin["runtime"]["name"] and not any(x.endswith("crt0.o") for x in PL["startfiles"])
-      and [x.rsplit("/", 1)[1] for x in PL["startfiles"]] == ["crti.o", "crtbegin.o"] and [x.rsplit("/", 1)[1] for x in PL["endfiles"]] == ["crtend.o", "crtn.o"], PL)
+check("profile libs.external is the pinned runtime", prof["libs"]["external"] == pin["runtime"]["name"])
 check("a guest exe root with no script and no libs has no link error", link_errs(rec("a.elf"), EXE) == [], link_errs(rec("a.elf"), EXE))
 check("a guest test root likewise", link_errs(rec("t.elf"), TST) == [], link_errs(rec("t.elf"), TST))
 e = link_errs(rec("a.elf", script="link.ld"), EXE)
 check("a guest root that declares script is red", any("link.script is declared" in x for x in e), e)
-e = link_errs(rec("a.elf", libs=PL), TST)
+e = link_errs(rec("a.elf", libs=prof["libs"]), TST)
 check("a guest root that declares libs is red", any("link.libs is declared" in x for x in e), e)
 r = rec("a.elf")
 r["external"] = []
@@ -63,13 +60,12 @@ check("a host pie root without script is still red", any("link must be" in x for
 a, t, h = (recipe.with_guest_link(rec(o), p, roots, REPO) for o, p in (("a.elf", EXE), ("t.elf", TST), ("h.elf", HOST)))
 ka = {k: v for k, v in a["link"].items() if k != "output"}
 kt = {k: v for k, v in t["link"].items() if k != "output"}
-check("guest exe and guest test get identical script and libs (links differ only by output and objects)", ka == kt and ka["libs"] == PL
+check("guest exe and guest test get identical script and libs (links differ only by output and objects)", ka == kt and ka["libs"] == prof["libs"]
       and os.path.isfile(os.path.join(REPO, ka["script"])), (ka, kt))
 check("a host root's link is unchanged", h == rec("h.elf"))
-bp = copy.deepcopy(pin)
-del bp["runtime"]["libs"]
-check("a pin without runtime.libs is red", recipe.guest_link_errors(prof, bp, files, roots) != [])
-check("a profile that carries libs is red (they are the pin's)", recipe.guest_link_errors(dict(prof, libs=PL), pin, files, roots) != [])
+bad = copy.deepcopy(prof)
+bad["libs"]["external"] = "other"
+check("a profile whose libs.external is not the pinned runtime is red", recipe.guest_link_errors(bad, pin, files, roots) != [])
 bad = dict(prof, script="../x.ld")
 check("a profile script outside the tool tree is red", recipe.guest_link_errors(bad, pin, files, roots) != [])
 check("a profile with another key is red", recipe.guest_link_errors(dict(prof, extra=1), pin, files, roots) != [])

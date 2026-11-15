@@ -49,6 +49,13 @@ items, finds = G.judge({"dirs": ["d"], "names": ["c"], "startfiles": ["crti.o"],
                        {"dirs": ["d"], "names": ["c"], "startfiles": ["crti.o", "crt0.o"], "endfiles": ["e.o"]})
 check("a profile that lists crt0.o when the derivation excludes it is red (startfiles finding)", len(finds) == 1 and finds[0].startswith("startfiles:"), finds)
 
+ML = "ilp32/wchar16/schar/pic"
+check("in_multilib: a crtbegin in the multilib directory the flags select is accepted",
+      recipe.in_multilib(["lib/gcc/aarch64-none-elf/13.3.0/ilp32/wchar16/schar/pic/crtbegin.o"], ML) == [], "")
+check("in_multilib: a crtbegin of another multilib (e.g. the flags select wchar16/schar and the file is ilp32/pic) is reported",
+      recipe.in_multilib(["lib/gcc/aarch64-none-elf/15.2.0/ilp32/pic/crtbegin.o"], ML) == ["lib/gcc/aarch64-none-elf/15.2.0/ilp32/pic/crtbegin.o"], "")
+check("in_multilib: the default multilib (.) has no directory to hold", recipe.in_multilib(["lib/crtbegin.o"], ".") == [], "")
+
 P = {"dirs": ["d1", "d2"], "names": ["c", "m"], "startfiles": ["s.o"], "endfiles": ["e.o"]}
 items, finds = G.judge(dict(P), dict(P))
 check("judge: equal lists are green with every entry an item", finds == [] and len(items) == 6, (items, finds))

@@ -131,7 +131,7 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   GATE_CACHE/store) and its objects are link inputs AFTER this root's own units, in the order of the list, each root's objects in unit order. An input
   root must be admitted, class product, with `link` null (so a cycle is impossible; `check()` names a cycle `A -> B -> A` anyway), listed once, not the
   root itself. A red input root makes this link red: stage `ld:<root>`, stderr names the input root and its failing stage.
-- `link.script`, `link.libs` (guest roots): one fact for every guest link, `ports/fnv-nx/link/guest.json` = `{"script": "link/guest.ld"}` for the script; the libs are `runtime.libs` of `verify/guest_compiler.json` (`{dirs, names, startfiles, endfiles}`, paths inside the pinned runtime; the one declaration; the start files are crti and crtbegin, the end files crtend and crtn, never the runtime's crt0: the product owns the entry).
+- `link.script`, `link.libs` (guest roots): one fact for every guest link, `ports/fnv-nx/link/guest.json` = `{"script": "link/guest.ld", "libs": {"external": NAME, "dirs": [paths inside it], "names": [lib names], "startfiles": [...], "endfiles": [...]}}`.
   Every root whose admit.json `target` is guest and that links (the product ELF and every guest test image) gets exactly this script and these libraries; the link
   stage is `startfiles -L<external at>/<dir>.. [objects, whole] --start-group -l<name>.. --end-group endfiles`, so two guest links differ only by output and objects.
   `libs.external` is the guest runtime external pinned in `verify/guest_compiler.json` (`runtime`: the guest's libc, libm, libstdc++), which the root declares like
