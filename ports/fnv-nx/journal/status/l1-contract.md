@@ -1444,3 +1444,8 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Rule: a stage mounts and keys only the externals it names. PP gets the include-path externals; a generated stage gets those its doc names.
   - Assigned to w24 gatekeys.
 - 01:02 **L6 w6.** cand2 b6865471d carries tlsmodel in REQUIRED_PRODUCT and in its rows. The per-row lists go away with w24's admit-by-class.
+- 01:04 **Orchestrator decision "memory ordering of runtime calls" (integ 46d376fa5).**
+  - w23 deletes D2, the fenced library calls.
+  - New gate `rtasm`, wired by w23: the runtime .S/.s objects are certified by a class (D1, before threads, kernel call, atomic) from L2's access facts. Any other access is red.
+  - PD-RT-STRING-ORDERED belongs to L2.
+  - cand2 takes CLAUDE.md from 46d376fa5.
