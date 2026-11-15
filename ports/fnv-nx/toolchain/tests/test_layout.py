@@ -332,6 +332,14 @@ def decltype_cxx(td, so):
         rl, wl = dt_all(os.path.join(td, 'lbl.o'), 'lbl')
         check('DECLTYPE-COMPLETE: the label declaration is the row of `realname` (its object symbol), the implicit library call __addtf3 has the reason libcall',
               rl.get('realname') == '(int)int' and wl.get('__addtf3') == 'libcall' and wl.get('__floatsitf') == 'libcall', (rl, wl))
+    # a unit that defines a library function the front end also declares as a builtin (newlib's ffsll): one symbol, the unit's declaration is the row
+    src = os.path.join(td, 'bi.c')
+    open(src, 'w').write('int ffsll(long long i) { return __builtin_ffsll(i); }\nint ffsl(long i) { return __builtin_ffsl(i); }\n')
+    r = pb.compile(src, os.path.join(td, 'bi.o'), so)
+    check('DECLTYPE-COMPLETE: a definition of a function the front end declares as a builtin compiles', r.returncode == 0, r.stderr[-400:])
+    if r.returncode == 0:
+        rb, wb = dt_all(os.path.join(td, 'bi.o'), 'bi')
+        check('DECLTYPE-COMPLETE: the definition\'s typed row is the symbol\'s line, not the builtin reason', rb.get('ffsll') == '(long_long_int)int' and rb.get('ffsl') == '(long_int)int' and not wb, (rb, wb))
     for name, text, why in (('ptrmem', 'struct M { int m; };\nextern "C" int pm(int M::*p);\nextern "C" int use(void) { return pm(0); }\n', 'offset_type'),
                             ('lambda', 'auto lam = [] {};\nextern "C" int lm(decltype(lam) *p);\nextern "C" int use(void) { return lm(0); }\n', 'lambda closure type has no tag form'),
                             ('anonns', 'namespace { struct An { int i; }; }\nextern "C" int an(An *p);\nextern "C" int use(void) { An x; return an(&x); }\n', 'scope name outside the grammar')):
