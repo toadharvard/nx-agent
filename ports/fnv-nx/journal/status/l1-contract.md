@@ -1570,3 +1570,9 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
     - the returned constant equals the value's preprocessed definition;
     - a row for a symbol the link drops is red.
   - The objstub wiring is OPEN: no L1 worker under the budget. It is assigned after cand2.
+- 09:36 **w12 c1c217efa.** The iat CLI is deleted (one path). modules.py writes keys.tsv and iat_data.tsv.
+- 09:36 **Image entry rule (L4 ask).**
+  - The guest link profile declares `entry`, passed as `--defsym=__fnvnx_image_entry`. crt0 calls it.
+  - Only the product root declares main, so tests have their own entry and no double.
+  - Root objects are linked as archive members except crt0, so fnvnx_dispatch is pulled only when referenced.
+  - Owner: w12, after PT_INTERP.
