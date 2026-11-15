@@ -218,23 +218,40 @@ def read_modules(text):
     return out
 
 
+TLS_COLUMNS = ["name", "load_index", "start_va", "end_va", "index_va", "callbacks_va", "template_rva", "template_size", "zero_fill", "align",
+               "template_sha256", "callbacks", "tls_slot", "align_bytes"]   # the column order documented in contract/modules.py write_tls
+
+
 def read_tls(text, tls_dir_path):
     """tls.tsv (contract/modules.py write_tls) + tls/<name>.bin -> [row]: name, idx (load_index or None), start, end, index_va, cb_va, rva, size,
-    zero, align_f (the IMAGE_SCN_ALIGN field itself), sha, callbacks (RVAs), slot (tls_slot or None), align_bytes, bin (the template file)"""
-    rows = []
+    zero, align_f (the IMAGE_SCN_ALIGN field itself), sha, callbacks (RVAs), slot (tls_slot or None), align_bytes, bin (the template file).
+    Columns are read BY NAME from the `# name<TAB>...` header; every name of TLS_COLUMNS must be there (more columns are ignored) and every row
+    has as many fields as the header. Without a header row the documented order is taken and the count must be exactly 14."""
+    rows, cols = [], None
     for no, line in enumerate(text.split("\n"), 1):
-        if not line or line.startswith("#"):
+        if not line:
             continue
+        if line.startswith("#"):
+            if cols is None and line.startswith("# name\t"):
+                cols = line[2:].split("\t")
+                miss = [c for c in TLS_COLUMNS if c not in cols]
+                if miss or len(set(cols)) != len(cols):
+                    raise StartError("tls.tsv header: missing or repeated columns %s" % (miss or sorted(c for c in cols if cols.count(c) > 1)))
+            continue
+        cols = cols or list(TLS_COLUMNS)
         f = line.split("\t")
-        if len(f) != 14:
-            raise StartError("tls.tsv line %d: 14 tab-separated fields expected (tls_slot, align_bytes are the last two)" % no)
-        name, li, sva, eva, iva, cva, rva, tsz, zf, al, sha, cbs, slot, ab = f
+        if len(f) != len(cols):
+            raise StartError("tls.tsv line %d: %d fields, %d columns%s" % (no, len(f), len(cols), "" if cols != TLS_COLUMNS else " (no header: exactly the 14 documented ones)"))
+        c = dict(zip(cols, f))
         try:
-            r = {"name": name, "idx": int(li) if li else None, "start": int(sva, 16), "end": int(eva, 16), "index_va": int(iva, 16), "cb_va": int(cva, 16),
-                 "rva": int(rva, 16), "size": int(tsz), "zero": int(zf), "align_f": int(al), "sha": sha, "callbacks": [int(x, 16) for x in cbs.split(";") if x],
-                 "slot": int(slot) if slot else None, "align_bytes": int(ab)}
+            r = {"name": c["name"], "idx": int(c["load_index"]) if c["load_index"] else None, "start": int(c["start_va"], 16), "end": int(c["end_va"], 16),
+                 "index_va": int(c["index_va"], 16), "cb_va": int(c["callbacks_va"], 16), "rva": int(c["template_rva"], 16), "size": int(c["template_size"]),
+                 "zero": int(c["zero_fill"]), "align_f": int(c["align"]), "sha": c["template_sha256"],
+                 "callbacks": [int(x, 16) for x in c["callbacks"].split(";") if x],
+                 "slot": int(c["tls_slot"]) if c["tls_slot"] else None, "align_bytes": int(c["align_bytes"])}
         except ValueError:
             raise StartError("tls.tsv line %d: bad number" % no) from None
+        name = r["name"]
         if not name or "/" in name or "\\" in name or name.startswith("."):
             raise StartError("tls.tsv line %d: bad image name %r" % (no, name))
         try:

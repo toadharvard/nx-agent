@@ -235,7 +235,7 @@ def main():
         os.makedirs(P("tls"))
         open(P("tls/FalloutNV.exe.bin"), "wb").write(b"TEMPLATE")
         open(P("tls/m.dll.bin"), "wb").write(DLLT)
-        open(P("tls.tsv"), "w").write("# header\n" + "".join("%s\t%s\t%08x\t%08x\t%08x\t%08x\t%08x\t%d\t%d\t%d\t%s\t%s\t%s\t%d\n" % (
+        open(P("tls.tsv"), "w").write("# " + "\t".join(bs.TLS_COLUMNS) + "\n" + "".join("%s\t%s\t%08x\t%08x\t%08x\t%08x\t%08x\t%d\t%d\t%d\t%s\t%s\t%s\t%d\n" % (
             r["name"], "" if r["idx"] is None else r["idx"], r["start"], r["end"], r["index_va"], r["cb_va"], r["rva"], r["size"], r["zero"], r["align_f"], r["sha"],
             ";".join("%08x" % c for c in r["callbacks"]), "" if r["slot"] is None else r["slot"], r["align_bytes"]) for r in TLS))
         base = ["--exe", P("exe"), "--iat", P("iat.tsv"), "--modules", P("modules.tsv")]
@@ -251,6 +251,23 @@ def main():
         rd = bs.read_tls(open(P("tls.tsv")).read(), P("tls"))
         case("read_tls: the rows of tls.tsv with their templates", [r["name"] for r in rd] == ["FalloutNV.exe", "m.dll"] and rd[1]["bin"] == DLLT and rd[0]["idx"] is None
              and rd[1]["idx"] == 0 and rd[0]["callbacks"] == [0x1010] and [(r["slot"], r["align_bytes"]) for r in rd] == [(0, 4), (1, 1)], rd)
+        txt = open(P("tls.tsv")).read()
+        hdr = "# name\tload_index\tstart_va\tend_va\tindex_va\tcallbacks_va\ttemplate_rva\ttemplate_size\tzero_fill\talign\ttemplate_sha256\tcallbacks\ttls_slot\talign_bytes"
+        body = "\n".join(txt.split("\n")[1:]).rstrip("\n")
+        swapped = "# name\tload_index\tstart_va\tend_va\tindex_va\tcallbacks_va\ttemplate_rva\ttemplate_size\tzero_fill\talign\ttemplate_sha256\tcallbacks\talign_bytes\ttls_slot\n" + "\n".join(
+            "\t".join(f[:12] + [f[13], f[12]]) for f in (l.split("\t") for l in body.split("\n") if l)) + "\n"
+        rs = bs.read_tls(swapped, P("tls"))
+        case("read_tls: columns are taken by name (a swapped column order reads the same)", [(r["slot"], r["align_bytes"]) for r in rs] == [(0, 4), (1, 1)], rs)
+        extra = hdr + "\textra\n" + "\n".join("\t".join(f + ["x"]) for f in (l.split("\t") for l in body.split("\n") if l)) + "\n"
+        case("read_tls: an appended column is ignored, not taken for another", [(r["slot"], r["align_bytes"]) for r in bs.read_tls(extra, P("tls"))] == [(0, 4), (1, 1)])
+        for what, bad in (("a header without tls_slot", hdr.replace("\ttls_slot", "") + "\n" + body + "\n"), ("a row with fewer fields than the header", hdr + "\n" + body.split("\n")[0].rsplit("\t", 1)[0] + "\n"),
+                          ("no header and 13 fields", "\n".join(l.rsplit("\t", 1)[0] for l in body.split("\n") if l) + "\n")):
+            try:
+                bs.read_tls(bad, P("tls"))
+                case("read_tls error: " + what, False)
+            except bs.StartError:
+                case("read_tls error: " + what, True)
+        case("read_tls: no header row, 14 fields = the documented order", [(r["slot"], r["align_bytes"]) for r in bs.read_tls(body + "\n", P("tls"))] == [(0, 4), (1, 1)])
         case("read_modules: the load index, bases and has_tls", bs.read_modules(open(P("modules.tsv")).read())["m.dll"] == MF["m.dll"], bs.read_modules(open(P("modules.tsv")).read()))
     # blocks over 64 KiB: captured whole, in chunks; pass and fail, never undecided for size
     big = bytes((i * 31 + 7) & 0xFF for i in range(70000))
