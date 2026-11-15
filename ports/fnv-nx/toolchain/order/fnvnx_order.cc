@@ -777,6 +777,54 @@ static void order_single(gimple_stmt_iterator *gsi) {
     c.stlr++;
     return;
   }
+  // BIT_FIELD_REF of a shared object (a part of an aggregate or vector that GCC reads as one reference: a folded memcmp, a lane): an access
+  // of the naturally aligned 1/2/4/8-byte block of the object that holds all the bits, an acquire load of the block and an extraction. A
+  // reference whose bits no such block holds (it spans blocks, or the block would leave the object) is a compile error.
+  if (ld && !st && TREE_CODE(rhs) == BIT_FIELD_REF) {
+    tree obj = TREE_OPERAND(rhs, 0);
+    location_t loc = gimple_location(stmt);
+    bool ok = tree_fits_uhwi_p(TREE_OPERAND(rhs, 1)) && tree_fits_uhwi_p(TREE_OPERAND(rhs, 2)) && TYPE_SIZE(TREE_TYPE(obj)) &&
+              tree_fits_uhwi_p(TYPE_SIZE(TREE_TYPE(obj)));
+    unsigned HOST_WIDE_INT size = ok ? tree_to_uhwi(TREE_OPERAND(rhs, 1)) : 0, pos = ok ? tree_to_uhwi(TREE_OPERAND(rhs, 2)) : 0;
+    unsigned HOST_WIDE_INT osz = ok ? tree_to_uhwi(TYPE_SIZE(TREE_TYPE(obj))) : 0;
+    unsigned al = ok ? get_object_alignment(obj) : 0;
+    int ui = -1;
+    for (int k = 0; ok && k < 4 && ui < 0; k++) {
+      unsigned HOST_WIDE_INT blk = 8u << k;
+      if (size && al >= blk && pos / blk == (pos + size - 1) / blk && (pos / blk + 1) * blk <= osz) ui = k;
+    }
+    if (ui < 0) {
+      error_at(loc, "%<fnvnx_order%>: a shared BIT_FIELD_REF that no aligned 1/2/4/8-byte block of the object holds");
+      return;
+    }
+    unsigned HOST_WIDE_INT blk = 8u << ui, bstart = pos / blk * blk;
+    gimple_seq seq = NULL;
+    tree p = address_of(obj, &seq);
+    if (bstart) p = gimplify_to(fold_build_pointer_plus(p, size_int(bstart / 8)), &seq);
+    tree bits = make_ssa_name(uint_type(ui));
+    gcall *call = gimple_build_call(builtin_decl_explicit((built_in_function)(BUILT_IN_ATOMIC_LOAD_1 + ui)), 2, p,
+                                    build_int_cst(integer_type_node, MEMMODEL_ACQUIRE));
+    gimple_call_set_lhs(call, bits);
+    gimple_set_location(call, loc);
+    gimple_seq_add_stmt(&seq, call);
+    tree bty = build_nonstandard_integer_type(size, 1);
+    tree fld = make_ssa_name(bty);
+    gimple_seq_add_stmt(&seq, gimple_build_assign(fld, build3(BIT_FIELD_REF, bty, bits, bitsize_int(size), bitsize_int(pos - bstart))));
+    gsi_insert_seq_before(gsi, seq, GSI_SAME_STMT);
+    tree bv = fld;
+    if (!useless_type_conversion_p(TREE_TYPE(lhs), bty))
+      bv = (INTEGRAL_TYPE_P(TREE_TYPE(lhs)) || POINTER_TYPE_P(TREE_TYPE(lhs))) ? (tree)build1(NOP_EXPR, TREE_TYPE(lhs), fld)
+                                                                             : (tree)build1(VIEW_CONVERT_EXPR, TREE_TYPE(lhs), fld);
+    if (!is_gimple_reg(lhs) && !is_gimple_val(bv)) {
+      tree rv = make_ssa_name(TREE_TYPE(lhs));
+      gsi_insert_before(gsi, gimple_build_assign(rv, bv), GSI_SAME_STMT);
+      bv = rv;
+    }
+    gimple_assign_set_rhs_from_tree(gsi, bv);
+    update_stmt(gsi_stmt(*gsi));
+    c.ldar++;
+    return;
+  }
   // a bit-field access is an access of its unit (bitfield_unit): a load is the acquire load of the unit and an extraction, a store
   // the acquire load of the unit, an insertion and the release store of the unit (the read-modify-write of the x86 code)
   if ((ld && bitfield_ref(rhs)) || (st && bitfield_ref(lhs))) {
