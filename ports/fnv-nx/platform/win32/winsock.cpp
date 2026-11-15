@@ -649,7 +649,7 @@ extern "C" int fnvnx_ws2_select(int, void *r, void *w, void *x, const void *tvp)
     }
     int pr = poll(pf, (nfds_t)n, ms);
     if (pr < 0) return fail_errno();
-    if (pr == 0 && ms >= 0) clk_wait_timeout((uint64_t)ms * 1000000ull);   /* the select timed out */
+    if (pr == 0 && ms >= 0) VT_WAIT_TIMEOUT((uint64_t)ms * 1000000ull);   /* the select timed out */
     UINT_PTR keep[3][64]; uint32_t kc[3] = { 0, 0, 0 };
     for (int i = 0; i < n; i++) {
         cerr[i] = 0;

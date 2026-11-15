@@ -9,13 +9,12 @@
  * UnmapViewOfFile / FlushViewOfFile. A SEC_IMAGE section is laid out as the PE sections say (headers and sections at
  * their RVAs, zero fill, per-section page protection). */
 #include "filemap_backing.h"
+#include "fnvnx/hostvm.h"
 #include "w32_reach.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 
-#define PAGE 0x1000u
-#define GRAN 0x10000u
 #define SEC_MASK (SEC_FILE | SEC_IMAGE | SEC_RESERVE | SEC_COMMIT | SEC_NOCACHE | SEC_WRITECOMBINE | SEC_LARGE_PAGES)
 #define FM_ALL_ACCESS_BITS (FILE_MAP_ALL_ACCESS | FILE_MAP_EXECUTE)
 
@@ -185,13 +184,13 @@ static DWORD image_fill(void *mem, void *c)
     size_t n = 0;
     if (!fm_file_io(m->fh, img, 0, x->hsize, false, &n) || n != x->hsize)
         err = ERROR_BAD_EXE_FORMAT;
-    for (size_t p = 0; p < x->hsize / PAGE + (x->hsize % PAGE != 0); p++)
+    for (size_t p = 0; p < x->hsize / FNVNX_PAGE_SIZE + (x->hsize % FNVNX_PAGE_SIZE != 0); p++)
         m->pprot[p] = PAGE_READONLY;
     const unsigned char *s = x->sect;
     for (unsigned i = 0; i < x->nsec && !err; i++, s += 40) {
         uint32_t vsize = rd32(s + 8), va = rd32(s + 12), rawsz = rd32(s + 16), rawptr = rd32(s + 20), ch = rd32(s + 36);
         uint32_t ext = vsize ? vsize : rawsz;
-        uint64_t end = (uint64_t)va + ((ext + PAGE - 1) & ~(PAGE - 1));
+        uint64_t end = (uint64_t)va + ((ext + FNVNX_PAGE_SIZE - 1) & ~(FNVNX_PAGE_SIZE - 1));
         if (va % x->salign || va < x->hsize || end > x->imsz || (rawsz && (uint64_t)rawptr + rawsz > x->fsize)) {
             err = ERROR_BAD_EXE_FORMAT;
             break;
@@ -199,7 +198,7 @@ static DWORD image_fill(void *mem, void *c)
         uint32_t copy = rawsz < ext ? rawsz : ext;
         if (copy && (!fm_file_io(m->fh, img + va, rawptr, copy, false, &n) || n != copy))
             err = ERROR_BAD_EXE_FORMAT;
-        for (uint64_t p = va / PAGE; p < end / PAGE; p++)
+        for (uint64_t p = va / FNVNX_PAGE_SIZE; p < end / FNVNX_PAGE_SIZE; p++)
             m->pprot[p] = (uint16_t)section_prot(ch);
     }
     return err;
@@ -207,7 +206,7 @@ static DWORD image_fill(void *mem, void *c)
 
 /* validates the file as a PE32 image and creates the section's backing (the layout of image_fill) with the page
  * protections; 0 or the error */
-static DWORD image_load(struct w32_map *m, uint64_t fsize, uint32_t *preferred_base, uint32_t *reach)
+static DWORD image_load(struct w32_map *m, uint64_t fsize, uint32_t *preferred_base, enum w32_reach_kind *reach)
 {
     unsigned char hdr[0x1000];
     size_t got = 0;
@@ -226,7 +225,7 @@ static DWORD image_load(struct w32_map *m, uint64_t fsize, uint32_t *preferred_b
     if (optsz < 0x60 || nt + 24 + optsz > got || rd16(oh) != 0x10B)   /* PE32: a 32-bit process maps nothing else */
         return ERROR_BAD_EXE_FORMAT;
     uint32_t salign = rd32(oh + 32), falign = rd32(oh + 36), isize = rd32(oh + 56), hsize = rd32(oh + 60);
-    if (salign < PAGE || (salign & (salign - 1)) || falign < 0x200 || falign > 0x10000 || (falign & (falign - 1)) || !isize ||
+    if (salign < FNVNX_PAGE_SIZE || (salign & (salign - 1)) || falign < 0x200 || falign > 0x10000 || (falign & (falign - 1)) || !isize ||
         isize % salign || hsize > isize || hsize > fsize || nsec > 96)
         return ERROR_BAD_EXE_FORMAT;
     if ((uint64_t)nt + 24 + optsz + 40ull * nsec > got)
@@ -234,13 +233,13 @@ static DWORD image_load(struct w32_map *m, uint64_t fsize, uint32_t *preferred_b
     *preferred_base = rd32(oh + 28);
     uint64_t imsz = isize;
     m->image_size = imsz;
-    m->pprot = (uint16_t *)calloc((size_t)(imsz / PAGE), sizeof(uint16_t));
+    m->pprot = (uint16_t *)calloc((size_t)(imsz / FNVNX_PAGE_SIZE), sizeof(uint16_t));
     if (!m->pprot)
         return ERROR_NOT_ENOUGH_MEMORY;
     struct image_ctx x = { m, oh + optsz, nsec, hsize, salign, fsize, imsz };
     struct fm_spec sp = { imsz, m->prot, true, true, false, m->fh, w32_file_writers_possible(m->fh) };
     DWORD err = 0;
-    if ((*reach = fm_backing_reach(&sp)) == 0)
+    if ((*reach = fm_backing_reach(&sp)) == W32R_NONE)
         m->bk = fm_backing_create(&sp, image_fill, &x, &err);
     return err;
 }
@@ -297,13 +296,13 @@ extern "C" HANDLE CreateFileMappingA(HANDLE file, void *sa, DWORD flprot, DWORD 
     m->reserve = (sec & SEC_RESERVE) != 0;
     m->file = !pagefile;
     DWORD err = 0;
-    uint32_t reach = 0;   /* the fact of a section the backend does not express (filemap_backing.h) */
+    enum w32_reach_kind reach = W32R_NONE;   /* the reason of a section the backend does not express (filemap_backing.h) */
     if (pagefile) {
         if (!want)
             err = ERROR_INVALID_PARAMETER;
         else {
             struct fm_spec sp = { want, base, false, false, m->reserve != 0, NULL, false };
-            if ((reach = fm_backing_reach(&sp)) == 0)
+            if ((reach = fm_backing_reach(&sp)) == W32R_NONE)
                 m->bk = fm_backing_create(&sp, NULL, NULL, &err);
         }
         m->size = want;
@@ -346,7 +345,7 @@ extern "C" HANDLE CreateFileMappingA(HANDLE file, void *sa, DWORD flprot, DWORD 
                 m->size = size;
                 if (!err) {
                     struct fm_spec sp = { size, base, true, false, false, m->fh, w32_file_writers_possible(m->fh) };
-                    if ((reach = fm_backing_reach(&sp)) == 0)
+                    if ((reach = fm_backing_reach(&sp)) == W32R_NONE)
                         m->bk = fm_backing_create(&sp, NULL, NULL, &err);
                 }
             }
@@ -354,7 +353,7 @@ extern "C" HANDLE CreateFileMappingA(HANDLE file, void *sa, DWORD flprot, DWORD 
     }
     if (reach) {   /* no lock is held and the section has no memory yet: its handles and file go with the object */
         w32_obj_unref(&m->o);
-        w32_reach(reach);
+        w32_reach_if(reach);
     }
     if (err) {
         w32_obj_unref(&m->o);
@@ -477,7 +476,7 @@ extern "C" LPVOID MapViewOfFile(HANDLE hmap, DWORD access, DWORD offhi, DWORD of
         err = ERROR_INVALID_PARAMETER;
         if (wr && sec_c)   /* a write view of a copy-on-write section is a copy view */
             wr = false, cp = true;
-        if (off & (GRAN - 1)) {
+        if (off & (FNVNX_VM_ALIGN - 1)) {
             err = ERROR_MAPPED_ALIGNMENT;
             goto out;
         }
@@ -505,12 +504,12 @@ extern "C" LPVOID MapViewOfFile(HANDLE hmap, DWORD access, DWORD offhi, DWORD of
     if (!m->reserve && (err = fm_view_prepare(m->bk, off, len)) != 0)
         goto out;
     {
-        size_t span = (size_t)((len + PAGE - 1) & ~(uint64_t)(PAGE - 1));
+        size_t span = (size_t)((len + FNVNX_PAGE_SIZE - 1) & ~(uint64_t)(FNVNX_PAGE_SIZE - 1));
         struct osmap_ctx c = { m->bk, off, m->reserve ? OS_VM_NONE : m->image ? OS_VM_READ | OS_VM_WRITE : os_prot_of_page(page), priv };
-        uint32_t reach = fm_view_reach(m->bk, c.prot, priv);
+        enum w32_reach_kind reach = fm_view_reach(m->bk, c.prot, priv);
         if (reach) {   /* a request the backend's memory cannot express (filemap_backing.h) */
             w32_obj_unref(&m->o);
-            w32_reach(reach);
+            w32_reach_if(reach);
         }
         struct view *v = (struct view *)calloc(1, sizeof *v);
         if (!v) {
@@ -525,7 +524,7 @@ extern "C" LPVOID MapViewOfFile(HANDLE hmap, DWORD access, DWORD offhi, DWORD of
             if (fm_file_io(m->fh, hdr, 0, sizeof hdr, false, &got) && got >= 0x40 + 24 + 32 + 4)
                 pref = rd32(hdr + rd32(hdr + 0x3C) + 24 + 28);
             if (pref && rd32(hdr + 0x3C) + 24 + 32 < sizeof hdr)
-                res = w32_vm_view_place(pref & ~(GRAN - 1), span, view_osmap, &c, 0x80, page, 1, 1, 0);
+                res = w32_vm_view_place(pref & ~(FNVNX_VM_ALIGN - 1), span, view_osmap, &c, 0x80, page, 1, 1, 0);
         }
         if (!res)
             res = w32_vm_view_place(0, span, view_osmap, &c, m->image ? 0x80 : page, page, !m->reserve, m->image, m->reserve);
@@ -535,12 +534,12 @@ extern "C" LPVOID MapViewOfFile(HANDLE hmap, DWORD access, DWORD offhi, DWORD of
             goto out;
         }
         if (m->image) {   /* each section's pages get their protection, in the map and in the OS */
-            for (size_t p = 0; p < span / PAGE;) {
+            for (size_t p = 0; p < span / FNVNX_PAGE_SIZE;) {
                 size_t q = p;
-                while (q < span / PAGE && m->pprot[q] == m->pprot[p])
+                while (q < span / FNVNX_PAGE_SIZE && m->pprot[q] == m->pprot[p])
                     q++;
-                os_vm_protect((char *)res + p * PAGE, (q - p) * PAGE, os_prot_of_page(m->pprot[p]));
-                w32_vm_view_prot((uintptr_t)res + p * PAGE, (q - p) * PAGE, m->pprot[p]);
+                os_vm_protect((char *)res + p * FNVNX_PAGE_SIZE, (q - p) * FNVNX_PAGE_SIZE, os_prot_of_page(m->pprot[p]));
+                w32_vm_view_prot((uintptr_t)res + p * FNVNX_PAGE_SIZE, (q - p) * FNVNX_PAGE_SIZE, m->pprot[p]);
                 p = q;
             }
         }

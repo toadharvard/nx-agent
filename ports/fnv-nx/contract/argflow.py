@@ -92,6 +92,7 @@ class Image:
         self.ranges = rec.runs
         self.relocs = rec.relocs
         self.imports = rec.imports
+        self.mayload = None   # the may-load set: names of every module of the declared machine (gpa_names --mayload); None = not given
         self._ins, self._funcs, self._ctx = {}, {}, None
         self.flat = sorted((a, b, e) for e, rs in self.ranges.items() for a, b in rs)
         self._callers = None
@@ -741,14 +742,24 @@ def call_result_modules(img, call_va, ctx=None, depth=0):
     if c[0] == 'import' and c[2] in LOADERS:
         wide = LOADERS[c[2]] == 'w'
         a = derive_arg(img, call_va, 0, 0, None, ctx)
-        brk |= a.breaks
+        undecided = bool(a.breaks)
         for k2, v2, ch2 in a.sorted_leaves():
             if k2 == 'str' and v2[1 if wide else 0] is not None:
                 names[v2[1 if wide else 0]] = ch2 + (call_va,)
             elif k2 == 'imm' and v2 == 0 and c[2].startswith('GetModuleHandle'):
                 names[img.exe_name] = ch2 + (call_va,)
             else:
-                brk.add((call_va, 'module name argument is %s %r' % (k2, v2)))
+                undecided = True
+        if undecided:
+            # the module name is not decided: the result is a module of the declared machine or NULL (the may-load set).  Rule: whatever
+            # LoadLibrary*/GetModuleHandle* returns is a loaded module of the declared file set or NULL (a name outside it: NULL, 126).
+            if img.mayload is None:
+                brk |= a.breaks
+                brk.add((call_va, 'module name argument is not decided and no may-load set is given'))
+            else:
+                for m in img.mayload:
+                    names.setdefault(m, (call_va, 'mayload'))
+                null = True
     elif c[0] == 'direct' and depth < 6 and c[1] in img.ranges:
         f = img.func(c[1])
         for v, i in sorted(f.nodes.items()):

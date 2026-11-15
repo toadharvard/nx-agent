@@ -39,7 +39,7 @@ def run(repo, tag):
 
 # no product root: universe 0, green, accepted by the verdict
 empty = TR.make_repo("im-empty")
-TR.w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": TR.T + "toy", "class": "doc", "gates": []}]}))
+TR.w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": TR.T + "toy", "class": "doc"}]}))
 rc, g, txt, acc = run(empty, "none")
 check("no product root: universe 0, green, accepted by the verdict", rc == 0 and g["universe"] == 0 and g["status"] == "green" and acc[0] == "green", (g, txt))
 
@@ -72,9 +72,9 @@ def toy_repo(tag, names, table, decl_extra=None):
     ex = {"name": "manifest", "repo": "fnv-nx-build", "ref": "im-" + tag, "commit": commit, "tree_sha256": thash, "at": "/ext/manifest"}
     rec = dict(TR.RECIPE, external=[ex])
     decl = {"format": "fnvnx-imports-in/1", "names": {"external": "manifest", "path": "sys_names.tsv"}, "specs": {"external": "manifest", "path": "specs"}, "extra": [], "extra_other": [],
-            "name_table": "msvcrt_names.tsv"}
+            "name_table": "msvcrt_names.tsv", "va": "msvcrt_va.tsv"}
     decl.update(decl_extra or {})
-    return TR.make_repo("im-" + tag, rec=rec, files={"toy/imports.in.json": json.dumps(decl), "toy/msvcrt_names.tsv": table})
+    return TR.make_repo("im-" + tag, rec=rec, files={"toy/imports.in.json": json.dumps(decl), "toy/msvcrt_names.tsv": table, "toy/msvcrt_va.tsv": ""})
 
 
 # green: every import has a body in the toy objects (f_a, f_b, f_c global functions; the name table serves memcpy by f_b, strlen by f_c)
@@ -111,7 +111,7 @@ def two_roots(tag, body):
     TR.w(repo, "toy2/x.c", body)
     TR.w(repo, "toy2/build.json", json.dumps(rec2))
     ad = json.load(open(repo + "/" + TR.T + "verify/admit.json"))
-    ad["roots"].append({"path": TR.T + "toy2", "class": "product", "target": "host", "gates": [], "recipe": TR.T + "toy2/build.json"})
+    ad["roots"].append({"path": TR.T + "toy2", "class": "product", "target": "host", "recipe": TR.T + "toy2/build.json"})
     TR.w(repo, "verify/admit.json", json.dumps(ad))
     TR.git(repo, "add", "-A")
     TR.git(repo, "commit", "-q", "-m", "toy2")

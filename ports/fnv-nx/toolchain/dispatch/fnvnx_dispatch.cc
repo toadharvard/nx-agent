@@ -6,7 +6,7 @@
  * the function are final, every call whose target is not a named function becomes
  *
  *     static unsigned long long site;             one per call site, in the unit's data, 0 at start
- *     w = site;                                    one 64-bit load: low half = the exe address last called here,
+ *     w = site;                                    one 64-bit acquire load: low half = the exe address last called here,
  *     entry = (unsigned) w == fp ? w >> 32         high half = its entry (pointers are 32 bits)
  *                                : fnvnx_dispatch(fp, &site, desc);
  *     entry(arguments...)                          the call itself is unchanged
@@ -79,6 +79,7 @@ static inline bool fnvnx_cxx_fe() { return !strncmp(lang_hooks.name, "GNU C++", 
 #include "dominance.h"
 #include "cfgloop.h"
 #include "attribs.h"
+#include "memmodel.h"
 #include "builtins.h"
 #include "rtl.h"
 #include "target.h"
@@ -364,7 +365,11 @@ static void rewrite(function *fun, gimple *st)
   /* head: k = (unsigned) fp; w = site; if ((unsigned) w == k) */
   tree k = make_ssa_name(u32), w = make_ssa_name(u64), lo = make_ssa_name(u32);
   before(gimple_build_assign(k, NOP_EXPR, fp));
-  before(gimple_build_assign(w, build2(MEM_REF, u64, build_fold_addr_expr(site), build_int_cst(build_pointer_type(u64), 0))));
+  /* the slot is shared memory: its load is created ordered (R9, docs/ORDERING.md; fnvnx_order runs before this pass and cannot see it) */
+  gcall *ld = gimple_build_call(builtin_decl_explicit(BUILT_IN_ATOMIC_LOAD_8), 2, build_fold_addr_expr(site),
+                                build_int_cst(integer_type_node, MEMMODEL_ACQUIRE));
+  gimple_call_set_lhs(ld, w);
+  before(ld);
   before(gimple_build_assign(lo, NOP_EXPR, w));
   gcond *cond = gimple_build_cond(EQ_EXPR, lo, k, NULL_TREE, NULL_TREE);
   before(cond);

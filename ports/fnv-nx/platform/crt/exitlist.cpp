@@ -51,5 +51,4 @@ extern "C" void fnvnx_doexit(int code, int quick, int retcaller)
     if (retcaller)
         return;
     ExitProcess((UINT)code);
-    os_exit_process(code);
 }

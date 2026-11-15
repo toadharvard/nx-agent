@@ -1,9 +1,9 @@
-/* Lookup over the generated import table (include/fnvnx_importkey.h). Freestanding-safe, ILP32-safe. */
+/* Lookup over the generated import table (hostabi/include/fnvnx/import_key.h). Freestanding-safe, ILP32-safe. */
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
-#include "fnvnx_importkey.h"
+#include "fnvnx/import_key.h"
 
 #define DLL_MAX 64
 

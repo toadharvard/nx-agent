@@ -98,7 +98,6 @@ def main(argv):
     if err:
         sys.stderr.write("descs: %d problem(s)\n%s\n" % (len(err), "\n".join(err)))
         return 1
-    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     with open(out, "w", newline="") as f:
         f.write("".join(d + "\n" for d in descs))
     print("descs: %d descriptors" % len(descs))

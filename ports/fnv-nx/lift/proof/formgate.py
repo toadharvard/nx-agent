@@ -29,6 +29,7 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIFT = os.path.dirname(HERE)
@@ -115,14 +116,15 @@ def load_inputs(path=INPUTS, pins=PINS):
 
 def fetch(exts, cache):
     """-> {name: {host, tree, at}} through the loader of the trunk (recipe.fetch_externals into CACHE/store, CACHE/external)"""
-    ws = os.path.join(cache, "ws")
-    shutil.rmtree(ws, ignore_errors=True)
-    os.makedirs(ws)
+    os.makedirs(cache, exist_ok=True)
+    ws = tempfile.mkdtemp(prefix="ws-", dir=cache)   # private scratch: a second process on the same cache never shares it
     try:
         return recipe.fetch_externals(exts, os.path.join(cache, "store"), os.path.join(cache, "external"), ws)
     except recipe.BuildRed as e:
         f = e.args[0]
         raise Red("external does not fetch or match its hash: stage %s: %s" % (f["stage"], " | ".join(f["stderr"][-3:])[:300]), "forms-fetch")
+    finally:
+        shutil.rmtree(ws, ignore_errors=True)
 
 
 def path_in(ext, name, rel, what):

@@ -22,7 +22,7 @@ static void reset_data(void) {
   for (u32 i = 0; i < sizeof DATAIMG; i++) d[i] = DATAIMG[i];
 }
 
-extern "C" int main(int argc, char **argv) {
+extern "C" int fnvl_msvcrttest_entry(int argc, char **argv) {
   u32 span = CODE_END - 0x400000u + 0x20000u;
   unsigned char *img = (unsigned char *)VirtualAlloc((void *)0x400000u, span, MEM_COMMIT_RESERVE, PAGE_RW);
   u32 *teb = (u32 *)VirtualAlloc((void *)TEB_ADDR, 0x1000u, MEM_COMMIT_RESERVE, PAGE_RW);

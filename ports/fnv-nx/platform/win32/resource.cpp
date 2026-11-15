@@ -489,7 +489,6 @@ extern "C" void *LoadResource(HMODULE m, void *r)
     if (!entry_ptr(im, r)) { SetLastError(ERROR_INVALID_PARAMETER); return NULL; }
     return entry_data(im, (const uint8_t *)r, &d, &n) ? (void *)d : NULL;
 }
-extern "C" void *LockResource(void *h) { return h; }
 extern "C" DWORD SizeofResource(HMODULE m, void *r)
 {
     Img im; const uint8_t *d; size_t n;

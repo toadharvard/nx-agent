@@ -104,7 +104,7 @@ void deliver_loop(void *)
         if (!g_qhead) g_qtail = NULL;
         g_inflight++;
         os_unlock(&g_qlock);
-        clk_thread_start(q->ck);   /* each callback is an activation at the event's instant (this thread serves every device) */
+        VT_THREAD_START(q->ck);   /* each callback is an activation at the event's instant (this thread serves every device) */
         deliver(q);
         free(q);
         __atomic_fetch_sub(&g_inflight, 1, __ATOMIC_SEQ_CST);
@@ -179,7 +179,7 @@ void start_threads()   /* g_lock held */
 {
     if (g_threads) return;
     /* the thread lives for the process; its os_thread record is never freed (the thread reads its own) */
-    os_thread *t = os_thread_create(deliver_loop, NULL, 512 * 1024, 2, OS_THREAD_ROLE(OS_ROLE_AUDIO));
+    os_thread *t = os_thread_create(deliver_loop, NULL, 512 * 1024, 2, FNVNX_THREAD_ROLE(FNVNX_ROLE_AUDIO));
     if (t) os_thread_start(t);
     g_threads = 1;
 }
@@ -300,8 +300,8 @@ UINT waveOutOpen(void **phwo, UINT dev, const void *pwfx, uintptr_t cb, uintptr_
     w->next = g_list; g_list = w;
     start_threads();
     *phwo = (void *)w->id;
-    if (kind == CB_EVENT) clk_device_watch((const void *)cb, 1);
-    post(w->cb, w->id, WOM_OPEN, 0, clk_stamp());
+    if (kind == CB_EVENT) VT_DEVICE_WATCH((const void *)cb, 1);
+    post(w->cb, w->id, WOM_OPEN, 0, VT_STAMP());
     mixer_voice_play(w->voice, 0);
     os_unlock(&g_lock);
     return OK;
@@ -319,8 +319,8 @@ UINT waveOutClose(void *h)
     for (wo **pp = &g_list; *pp; pp = &(*pp)->next)
         if (*pp == w) { *pp = w->next; break; }
     mixer_voice_destroy(w->voice);
-    if (w->cb.kind == CB_EVENT) clk_device_watch((const void *)w->cb.target, 0);
-    post(w->cb, w->id, WOM_CLOSE, 0, clk_stamp());
+    if (w->cb.kind == CB_EVENT) VT_DEVICE_WATCH((const void *)w->cb.target, 0);
+    post(w->cb, w->id, WOM_CLOSE, 0, VT_STAMP());
     os_unlock(&g_lock);
     free(w);
     return OK;
@@ -367,7 +367,7 @@ UINT waveOutWrite(void *h, void *hdr, UINT cb)
         p->dwFlags = (p->dwFlags | H_QUEUE) & ~(uint32_t)H_DONE;
         os_lock(&w->wlock);
         if (!w->cur) {   /* the stream was idle: its timeline starts with this block */
-            w->anchor_t = clk_stamp(); w->anchor_k = w->pulled;
+            w->anchor_t = VT_STAMP(); w->anchor_k = w->pulled;
             if (w->paused) w->paused_at = w->anchor_t;
         }
         if (w->tail) w->tail->next = n; else w->head = n;
@@ -384,7 +384,7 @@ UINT waveOutPause(void *h)
 {
     os_lock(&g_lock);
     wo *w = find(h);
-    if (w) { os_lock(&w->wlock); if (!w->paused) w->paused_at = clk_stamp(); w->paused = true; os_unlock(&w->wlock); }
+    if (w) { os_lock(&w->wlock); if (!w->paused) w->paused_at = VT_STAMP(); w->paused = true; os_unlock(&w->wlock); }
     os_unlock(&g_lock);
     return w ? OK : INVALHANDLE;
 }
@@ -395,7 +395,7 @@ UINT waveOutRestart(void *h)
     wo *w = find(h);
     if (w) {
         os_lock(&w->wlock);
-        if (w->paused) { uint64_t t = clk_stamp(); if (t > w->paused_at) w->anchor_t += t - w->paused_at; }   /* a pause shifts the timeline */
+        if (w->paused) { uint64_t t = VT_STAMP(); if (t > w->paused_at) w->anchor_t += t - w->paused_at; }   /* a pause shifts the timeline */
         w->paused = false;
         os_unlock(&w->wlock);
     }
@@ -413,7 +413,7 @@ UINT waveOutReset(void *h)
             node *n = w->head;
             w->head = n->next;
             n->h->dwFlags = (n->h->dwFlags & ~(uint32_t)H_QUEUE) | H_DONE;
-            post(w->cb, w->id, WOM_DONE, (uintptr_t)n->h, clk_stamp());   /* a reset returns every block now */
+            post(w->cb, w->id, WOM_DONE, (uintptr_t)n->h, VT_STAMP());   /* a reset returns every block now */
             free(n);
         }
         w->tail = w->cur = w->loop_begin = NULL;

@@ -4,7 +4,7 @@ Output: a C++ driver. It calls each fixture function of fixture_neon.cpp (the pl
 families) and of fixture_sse2neon.cpp (the four sse2neon forms through the real fnvnx_compat.h) with lane inputs and checks the bytes it gets against the x86
 results computed here, exactly (Fraction arithmetic), from the rule alone: the conversion of the exact value in the rounding named, when it fits the integer
 type, else the integer indefinite (bit P-1 set; the unsigned lanes the same pattern). Current-mode families run once per FPCR rounding mode (set from the
-driver), so the mode the rule must not assume is the mode of the run. The driver prints one line per failing case and returns the number of failures
+driver), so every rounding mode is a mode of the run. The driver prints one line per failing case and returns the number of failures
 (0 = all cases equal x86).
 usage: gen_values.py neon|sse2neon OUT.cpp"""
 import math

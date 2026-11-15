@@ -83,10 +83,10 @@ def lifted_repo(name, body, pack, ehfacts=None, rts=(RT,), image=True):
         files[r + "/build.json"] = json.dumps(REC_ASM)
     if image:
         files[T + "img/build.json"] = json.dumps({"format": "fnvnx-recipe/1", "link": {"roots": [ROOT] + rtroots}})
-    extra = [{"path": T + "lift/gates", "class": "tool", "gates": []}]
-    extra += [{"path": r, "class": "product", "target": "host", "gates": [], "recipe": r + "/build.json"} for r in rtroots]
+    extra = [{"path": T + "lift/gates", "class": "tool"}]
+    extra += [{"path": r, "class": "product", "target": "host", "recipe": r + "/build.json"} for r in rtroots]
     if image:
-        extra.append({"path": T + "img", "class": "product", "target": "host", "gates": [], "recipe": T + "img/build.json"})
+        extra.append({"path": T + "img", "class": "product", "target": "host", "recipe": T + "img/build.json"})
     repo = tp.make_repo(name, rec, {"lifted_by": T + "gen/lift.py", "pack": pack["name"]}, files, extra)
     os.makedirs(os.path.join(repo, LIFT), exist_ok=True)
     for f in ("gate_order.py", "gate_eh.py"):

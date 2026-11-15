@@ -13,8 +13,8 @@ lib-dynload, PY_MODULES); (3) UNIT_CC through unitstage.gcc_set(): driver, `as`,
 FILE under its trees (the unit stage ingests them whole: /usr/include, GCC install dir with plugin headers, libexec); the host
 gcc's HOST_GCC_PROGS/HOST_GCC_FILES and every file of its plugin directory (HOST_GCC_PLUGIN_DIRS: the plugin headers of the host-root compiler); (4) the renderer's host libraries: RENDER_LIBS (loader cache names, with their loader closure) and RENDER_FILES. The trees also get a listing digest (an extra package adding files there is a mismatch).
 A file without a dpkg owner outside python's prefix is an error. Programs and who executes them: strace opentrace.py; busybox
-tests/test_graph,test_sandbox; gcc,as,ld test_sandbox,test_sdcheck; aarch64-linux-gnu-g++ test_unitstage (unitstage.py);
-aarch64-linux-gnu-nm,readelf icount.py,test_unitstage; aarch64-linux-gnu-as,ld,objcopy test_icount; ar,clang test_coffnorm;
+tests/test_sandbox; gcc,as,ld test_sandbox,test_sdcheck; aarch64-linux-gnu-g++ test_unitstage (unitstage.py);
+aarch64-linux-gnu-nm,readelf icount.py,test_unitstage; aarch64-linux-gnu-as,ld,objcopy test_icount;
 git verdict.py,l1.py,test_gates; ldd,true test_runtime; g++,llvm-config-18 build a64access.cc (objstub.py, test_a64access).
 The a64access build set is derived the same way: every header `g++ -M` reports for a64access.cc under `llvm-config-18 --cxxflags`,
 and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). The clang set (clang-18 plugins such as vtnames; clang -m32 compiles) is derived the same way: the headers under `llvm-config-18 --includedir` that a plugin includes (CLANG_API) with the whole clang/ tree they sit in, the libraries of CLANG_LIBS under `--libdir`, and every header `clang -m32 -M` reports for a C probe including stdint.h and stdlib.h (gnu/stubs-32.h: libc6-dev-i386). Python modules (version in python.modules, installed-files sha256 in python.installed_files_sha256, see wheel_digest; wheel file sha256 in python.wheel_sha256): capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts, perf, check_mirror); pefile (manifest/regsites.py); numpy (lift/test/instest.py packer); z3-solver, keystone-engine, gmpy2 (lift/proof, lift/bench, lift/test)."""
@@ -48,6 +48,7 @@ M32_PROBE = "#include <stdint.h>\n#include <stdlib.h>\nint main(){return 0;}\n" 
 PY_MODULES = {"capstone": "capstone", "gmpy2": "gmpy2", "keystone-engine": "keystone", "numpy": "numpy", "unicorn": "unicorn",
               "pyelftools": "elftools", "z3-solver": "z3", "pefile": "pefile"}   # distribution -> import name
 RENDER_LIBS = ["libEGL.so.1", "libEGL_mesa.so.0"]   # ldconfig names: the EGL loader the published libnxgl4.so links, and the Mesa vendor it dispatches to (NXGL4_HOST.md section 2); their loader closure (mesa-libgallium, libllvm, ...) is derived
+RUN_LAYOUT_DEB = "base-files"   # the machine's root layout (./lib -> usr/lib, ./lib64 -> usr/lib64, ./bin, ./sbin): every `run` stage of recipe.py mounts its symlink members
 RENDER_FILES = ["/usr/share/glvnd/egl_vendor.d/50_mesa.json"]   # read by libEGL.so.1 to find that vendor
 def HOST_GCC_PLUGIN_DIRS(gcc):
     """Every file of the plugin directory of compiler GCC (`gcc -print-file-name=plugin`: the gcc-N-plugin-dev package of a distro compiler)."""
@@ -286,6 +287,45 @@ def _root_compilers(repo=None):
     return sorted(out)
 
 
+READROOTS = os.path.join(HERE, "readroots.json")
+
+def read_roots(repo):
+    """[(root name, cwd, [system header path read], error or None)] for every root of verify/readroots.json whose cwd exists in REPO:
+    `gcc -M` of the root's flags and sources (globs expanded in its cwd); a root whose sources are not all in the checkout is skipped. The headers are the dependencies under
+    /usr (what the preprocessor read); an error is the first lines of gcc's diagnostics (a header that is not installed)."""
+    import glob
+    try:
+        roots = json.load(open(READROOTS))["roots"]
+    except (OSError, ValueError, KeyError):
+        return []
+    out = []
+    for r in roots:
+        cwd = os.path.join(repo, r["cwd"])
+        if not os.path.isdir(cwd):
+            continue
+        srcs = [sorted(glob.glob(os.path.join(cwd, g))) for g in r["sources"]]
+        if not all(srcs):   # the root's sources are not in this checkout (its branch has not landed): nothing to read
+            continue
+        args = r["flags"] + [os.path.relpath(x, cwd) for g in srcs for x in g]
+        p = subprocess.run(["gcc", "-M"] + args, cwd=cwd, capture_output=True, text=True)
+        if p.returncode != 0:
+            out.append((r["name"], cwd, [], p.stderr.strip().splitlines()[0] if p.stderr.strip() else "gcc -M failed"))
+            continue
+        toks = [t for t in p.stdout.replace("\\\n", " ").split() if not t.endswith(":")]
+        out.append((r["name"], cwd, sorted({os.path.realpath(os.path.join(cwd, t)) for t in toks if os.path.realpath(os.path.join(cwd, t)).startswith("/usr/")}), None))
+    return out
+
+def read_owner_packages(repo):
+    """The packages that own the system headers the read roots read (what snapshot pins): for each header its owners, the first by name
+    when several; headers of packages already chosen cost nothing."""
+    own, pk = _owners(), set()
+    for _, _, hs, _ in read_roots(repo):
+        for h in hs:
+            o = own.get(h, set())
+            if o and not (o & pk):
+                pk.add(sorted(o)[0])
+    return pk
+
 def check(doc, repo=None):
     """List of mismatch lines (empty = the machine is the declared environment)."""
     bad = []
@@ -339,6 +379,12 @@ def check(doc, repo=None):
         files = HOST_GCC_PLUGIN_DIRS(shutil.which(drv) or drv)
         miss = sorted({p for f in files for p in [sorted(own.get(os.path.realpath(f), {"no package"}))[0]] if p not in doc["packages"]})
         cmp("plugin headers of " + drv, "owned by listed packages", "no plugin headers" if not files else ("owned by %s" % miss if miss else "owned by listed packages"))
+    pinned, own = pinned_set(doc["packages"]), own
+    for name, cwd, hs, err in read_roots(repo or os.path.dirname(os.path.dirname(os.path.dirname(HERE)))):
+        if err:
+            bad.append("env: read root %s: %s" % (name, err))
+        foreign = sorted({(h, sorted(own.get(h, {"no package"}))[0]) for h in hs if not (own.get(h, set()) & pinned)})
+        bad += ["env: read root %s reads %s, owned by %s (not a package of env.json)" % (name, h, o) for h, o in foreign]
     for need in doc["kernel"]["needs"]:
         ok = need in PROBES and PROBES[need]()
         cmp("kernel " + need, "available", "available" if ok else ("unavailable" if need in PROBES else "unknown capability"))
@@ -402,6 +448,11 @@ def snapshot(prev=None):
     dyn = sysconfig.get_config_var("DESTSHARED")
     roots = [py] + [f for d in [dyn] + mods for f in runtime.elf_files(d, runtime.ident(py))]
     loads(roots, [os.path.dirname(os.__file__), os.path.dirname(os.path.dirname(py))] + mods)
+    for name, _cwd, hs, err in read_roots(os.path.dirname(os.path.dirname(os.path.dirname(HERE)))):   # the system headers that the host roots read (readroots.json)
+        if err:
+            raise SystemExit("envcheck: read root %s: %s" % (name, err))
+        for h in hs:
+            add(h)
     for prog in PROGRAMS:
         real = os.path.realpath(shutil.which(prog) or sys.exit("envcheck: program %s not in PATH" % prog))
         add(real)
@@ -448,6 +499,9 @@ def snapshot(prev=None):
         loads([os.path.realpath(hit[0])])
     for f in RENDER_FILES:
         add(f)
+    if _dpkg(RUN_LAYOUT_DEB) is None:   # the run stage's root layout (recipe.MACHINE_LAYOUT_DEB): its files are read by every run stage
+        raise SystemExit("envcheck: %s is not installed" % RUN_LAYOUT_DEB)
+    pk.add(RUN_LAYOUT_DEB)
     return {"format": FORMAT, "os": _os(), "arch": platform.machine(),
             "uid": os.geteuid(), "trees": {t: tree_digest(t, pinned_set(pk), file_owners()) for t in trees}, "packages": {p: _dpkg(p) for p in sorted(pk)},
             "python": {"version": platform.python_version(), "modules": {m: metadata.version(m) for m in sorted(PY_MODULES)},

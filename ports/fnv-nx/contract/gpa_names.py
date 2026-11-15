@@ -17,7 +17,12 @@ are derived.  One rule for every row (argflow.py): the uses of the slot value ar
 At every use, lpProcName (stdcall argument 1) and hModule (argument 0) are derived by argflow.derive_arg: definitions D1 string,
 D2 constant-indexed table, D3 ordinal, D4 own parameter (expanded to every caller, open when the function is address-taken).
 hModule: result of LoadLibrary*/GetModuleHandle* with a derived string, directly or through a direct callee (parameters bound
-to the arguments of the call); NULL contributes nothing (GetProcAddress(NULL, ..) fails).  A site is `closed` when every use
+to the arguments of the call); NULL contributes nothing (GetProcAddress(NULL, ..) fails).  A LoadLibrary*/GetModuleHandle* whose name is not
+decided yields the MAY-LOAD SET (--mayload: every module of the declared machine = the images, modules.tsv, the bridge dlls and the
+names of every --mayload file, a dll the machine does not hold gives NULL) plus NULL; the pairs of the sites that use it are (module, name)
+for every module of the set, a superset of "the name resolved against the exports of every module of the set".  Without a set the module is
+unknown and the pairs are (*, name).  A name that is not decided, or a handle the facts cannot place (not the result of a
+LoadLibrary*/GetModuleHandle* call), is a break: with a set the site is open.  A site is `closed` when every use
 has a derived name set and no escape; its module set is `derived` when every use has one, else `unknown` and the pairs are
 written (*, name): the platform must provide the name in every module.
 
@@ -59,6 +64,9 @@ def derive_site(img, site):
             out['breaks'].append('name@%x %x %s' % (u, va, why))
         if mb:
             out['mod_unknown'] = True
+            if img.mayload is not None:   # with the may-load set every placeable handle is in it: a handle that is not is a break
+                for va, why in sorted(mb):
+                    out['breaks'].append('module@%x %x %s' % (u, va, why))
         dlls = sorted(pair_key(m) for m in mods) or ['*']
         if mb:
             dlls = sorted(set(dlls) | {'*'})
@@ -211,6 +219,7 @@ def main(argv=None):
     ap.add_argument('--writes', help='tsv dll, name, letters (n = never written through) per import argument; default: all may be written')
     ap.add_argument('--no-memfx', action='store_true', help='derive without the may-write rule')
     ap.add_argument('--modules', help='modules.tsv (lifted modules provide their own names)')
+    ap.add_argument('--mayload', action='append', default=[], help='tsv/list of dll names of the declared machine (first column); repeat')
     ap.add_argument('--out', required=True)
     a = ap.parse_args(argv)
     stacks = {}
@@ -220,6 +229,15 @@ def main(argv=None):
     images = {nm: argflow.Image(rec) for nm, rec in imagerec.load_images(a.image, a.facts, a.facts_tree).items()}
     for im in images.values():
         im.import_stack = stacks
+    mayload = {pair_key(n) for n in images}
+    for p in a.mayload + ([a.modules] if a.modules else []):
+        with open(p) as fh:
+            mayload |= {pair_key(l.split('\t')[0]) for l in fh.read().splitlines() if l and l[0] not in '#' and l.split('\t')[0] != 'module'}
+    if a.bridge:
+        with open(a.bridge) as fh:
+            mayload |= {pair_key(l.split('\t')[0]) for l in fh.read().splitlines()[1:] if l.strip()}
+    for im in images.values():
+        im.mayload = sorted(mayload)
     if not a.no_memfx:
         bt = open(a.bridge).read() if a.bridge else ''
         info = memfx.ImportInfo(bt, [open(p).read() for p in a.escape], open(a.writes).read() if a.writes else '')

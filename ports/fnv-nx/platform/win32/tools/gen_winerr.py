@@ -75,7 +75,6 @@ def main():
     o += ["};", "static const char g_sysmsg_text[%d] = {" % len(blob)]
     o += [",".join(str(b) for b in blob[j:j + 24]) + "," for j in range(0, len(blob), 24)]
     o += ["};", ""]
-    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     open(out, "w").write("\n".join(o))
 
 

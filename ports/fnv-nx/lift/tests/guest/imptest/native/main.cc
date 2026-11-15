@@ -33,7 +33,7 @@ u32 t_boom(u32 x) { u32 a[1] = { x }; w32_raise(0xE0000001u, 0, 1, a); return x 
 #define PAGE_RW 4u
 static void *map(u32 at, u32 size) { return VirtualAlloc((void *)(unsigned long)at, size, MEM_COMMIT_RESERVE, PAGE_RW); }
 
-extern "C" int main(void) {
+extern "C" int fnvl_imptest_entry(void) {
   unsigned char *img = (unsigned char *)map(0x400000u, 0x10000u);
   u32 *teb = (u32 *)map(0x50000000u, 0x1000u);
   void *gstack = map(0x60000000u, 0x20000u);

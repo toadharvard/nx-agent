@@ -405,7 +405,21 @@ def table_item(objs, image_dir):
     return check_cert(os.path.join(image_dir, os.path.dirname(tabs[0][0])))
 
 
-def judge_objects_coded(root, objs, image_dir, forms_ok, docs=None, f2i=None):
+def object_result(oid, path, asm, unit, f2i_path, cache):
+    """judge_object_coded as an item of the verdict's store (gate_build.memo, GATE_CACHE/memo/fpexact): keyed by the sha256 of the object and of its f2i report,
+    the unit, the unit's sandbox source name, the asm flag, the tool (this file, capstone, pyelftools) and env.json; a value is {item id: [[code, text]]}."""
+    if not cache:
+        return judge_object_coded(oid, path, asm, unit, f2i_path)
+    import capstone
+    import elftools
+    key = {"gate": "fpexact", "oid": oid, "object": gate_build.file_sha(path), "f2i": gate_build.file_sha(f2i_path) if f2i_path and os.path.isfile(f2i_path) else None,
+           "unit": unit, "src": recipe.sandbox_src(unit) if unit else None, "asm": bool(asm), "tool": gate_build.tool_digest(__file__),
+           "libs": [capstone.__version__, elftools.__version__], "env": gate_build.file_sha(os.path.join(os.path.dirname(os.path.abspath(recipe.__file__)), "env.json"))}
+    v, _ = gate_build.memo(cache, "fpexact", key, lambda: judge_object_coded(oid, path, asm, unit, f2i_path))
+    return {k: [tuple(x) for x in items] for k, items in v.items()}
+
+
+def judge_objects_coded(root, objs, image_dir, forms_ok, docs=None, f2i=None, cache=None):
     """-> {item id: [(code, text)]} of one root: OBJS [(unit, path)], IMAGE_DIR (see table_item), FORMS_OK (reason string or None: the dependency on the
     gate forms), DOCS ({unit: CC document} of a native root; None: lifted root), F2I ({unit: the `f2i` of the row}, read_f2i_paths; a unit without an entry
     has none)."""
@@ -414,7 +428,7 @@ def judge_objects_coded(root, objs, image_dir, forms_ok, docs=None, f2i=None):
     if cert is not None:
         items[root + ":rcpcert"] = [("rcpcert", t) for t in cert]
     for unit, path in objs:
-        r = judge_object_coded(root + "/" + unit, path, unit.endswith(recipe.ASM_EXT), unit, (f2i or {}).get(unit))
+        r = object_result(root + "/" + unit, path, unit.endswith(recipe.ASM_EXT), unit, (f2i or {}).get(unit), cache)
         if docs is not None and unit.endswith(recipe.CXX_EXT):
             r["f2i:" + root + "/" + unit] += [("ftoi-plugin-missing", t) for t in ftoi_why(docs.get(unit))]
         items.update(r)
@@ -463,7 +477,7 @@ def judge_root(root, repo, cache, forms):
         image = os.path.join(repo, root) if res.get("elf") else None
         native = recipe.load_admit(repo).get(root, {}).get("cxx_origin") == "native"
         docs = gate_datamodel.cc_docs(os.path.join(cache, "store"), res) if native else None
-        coded = judge_objects_coded(root, read_inputs(res), image, forms(), docs, read_f2i_paths(res))
+        coded = judge_objects_coded(root, read_inputs(res), image, forms(), docs, read_f2i_paths(res), cache)
         FINDINGS.extend(fixture_findings(root, coded))
         items = {k: [t for _, t in v] for k, v in coded.items()}
     except (OSError, ValueError, ELFError) as e:
