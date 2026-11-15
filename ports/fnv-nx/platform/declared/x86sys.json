@@ -131,6 +131,69 @@
    "why": "the ring-3 code descriptor's readable bit is not stated in a pinned source, so whether es/ds/fs/gs may load it is undecided"
   }
  },
+ "null_seg_access": {
+  "address": "the faulting instruction",
+  "applies_to": [
+   "ds",
+   "es",
+   "fs",
+   "gs"
+  ],
+  "eip_advance": 0,
+  "error_code": 0,
+  "exception_code": 3221225477,
+  "fault": "#GP",
+  "faults": "an instruction with a memory operand whose segment register (default or by prefix) holds the null selector; lea, and a prefixed instruction without a memory operand, do not fault",
+  "flags": 0,
+  "parameters": [
+   0,
+   4294967295
+  ],
+  "privileged_check_first": {
+   "at_limit": "EXCEPTION_ILLEGAL_INSTRUCTION",
+   "otherwise": "the access violation below",
+   "prefix_limit": 15,
+   "prefix_skip": [
+    "0x26",
+    "0x2e",
+    "0x36",
+    "0x3e",
+    "0x64",
+    "0x65",
+    "0x66",
+    "0x67",
+    "0xf0",
+    "0xf2",
+    "0xf3"
+   ],
+   "priv_instruction_0f_second_bytes": [
+    "0x20",
+    "0x21",
+    "0x22",
+    "0x23"
+   ],
+   "priv_instruction_opcodes": [
+    "0x6c",
+    "0x6d",
+    "0x6e",
+    "0x6f",
+    "0xcd",
+    "0xe4",
+    "0xe5",
+    "0xe6",
+    "0xe7",
+    "0xec",
+    "0xed",
+    "0xee",
+    "0xef",
+    "0xf4",
+    "0xfa",
+    "0xfb"
+   ],
+   "result": "EXCEPTION_PRIV_INSTRUCTION"
+  },
+  "source": "Intel SDM Vol 3 3.4.2 (a memory reference through a segment register that holds the null selector is #GP(0) at that instruction); Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6: segv_handler TRAP_x86_PROTFLT lines 1925-1941 (err == 0 runs is_privileged_instr first, lines 1214-1271: prefixes skipped, 15 prefixes give EXCEPTION_ILLEGAL_INSTRUCTION, then the opcode set above gives EXCEPTION_PRIV_INSTRUCTION; otherwise EXCEPTION_ACCESS_VIOLATION, NumberParameters 2, ExceptionInformation[0] = 0, [1] = 0xffffffff because err & 7 != 4); check_invalid_gs line 1288 returns FALSE at a valid code address; setup_exception_record line 1449: ExceptionAddress = EIP_sig, Eip not advanced; segv_handler line 1905: rec = { 0 } so ExceptionFlags 0. Precedence (2): MSDN and the WDK state nothing for this case"
+ },
  "os": {
   "build": 7601,
   "sha256": "623155df2ce5dec30006208c391dd9841f123ab5ca7c0153b246859fe617b460"
