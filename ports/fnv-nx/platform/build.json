@@ -260,8 +260,7 @@
     "com/combridge_cxx.gen.h",
     "com/combridge.gen.cpp",
     "com/combridge_exports.gen.cpp",
-    "com/combridge_if.gen.h",
-    "com/combridge_rows.tsv"
+    "com/combridge_if.gen.h"
    ]
   },
   {
