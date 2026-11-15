@@ -259,3 +259,6 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - Tests: test_hostabirec 12, bootpath 54, bootinputs 75, oracle 83 are green.
   - Open: the "fnvnx/game" alias (L5 header name); m61 literal (w6).
   - Loader tables are generated stages (L1 w12L2 a7c657f56); w6 merges them and relinks with the private externals from the cache.
+- 01:40:
+  - NPROC follow-up declined. FNVNX_NPROC is defined as popcount(FNVNX_APP_CORES) in placement.h (static-asserted), so it is one fact and has no second check.
+  - Task T (w7, doing): the "fnvnx/game" alias is deleted (L5: no header name, stale pre-split layout). The game is FNVNX_SD_DIR only, read from the header; no directory-content choice.
