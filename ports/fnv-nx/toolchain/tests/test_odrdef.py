@@ -70,7 +70,7 @@ def main():
         check('a dependent call resolved to a different declaration at instantiation: different rows', rta[T][3] != rtb[T][3], (rta[T], rtb[T]))
         rpk = rows(pk)
         targs = sorted(r[2] for r in rpk.values())
-        check('argument packs: pk<int, double> is IidE, pn<1, 2, 3> is ILi1ELi2ELi3EE, pn<> is IE', targs == ['ILi1ELi2ELi3EE', 'IE', 'IidE'], targs)
+        check('argument packs: pk<int, double> is IidE, pn<1, 2, 3> is ILi1ELi2ELi3EE, pn<> is IE', targs == sorted(['ILi1ELi2ELi3EE', 'IE', 'IidE']), targs)
     finally:
         shutil.rmtree(td, ignore_errors=True)
     return check.done()
