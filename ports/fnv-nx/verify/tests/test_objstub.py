@@ -524,6 +524,8 @@ for abi in ("ilp32", "lp64"):
     check(T("terminator: the same mixed body cited by the row 36 (u32 0): clean"), not k, f)
     k, f = dk(NR + 'void die2(void) __attribute__((noreturn));\nvoid die2(void) { abort(); }', terms=("die2", "abort"))
     check(T("coverage: a declared-noreturn definition that ends in a library terminator on every path needs no record"), not k, f)
+    k, f = dk(NR + 'void jmp(void) __attribute__((noreturn));\nvoid jmp_user(void) __attribute__((noreturn));\nvoid jmp_user(void) { jmp(); }', terms=("jmp_user", "~jmp"))
+    check(T("coverage: a declared-noreturn definition that ends in an unwinder (longjmp, throw) on every path is a control transfer, covered, no record"), not k, f)
     k, f = dk(NR + 'void die(void) __attribute__((noreturn));\nvoid die(void) { host_exit(); __builtin_unreachable(); }\nvoid die3(void) __attribute__((noreturn));\nvoid die3(void) { die(); }', terms=("die", "die3", "abort"))
     check(T("coverage: a declared-noreturn body that ends in an uncited defined terminator is uncovered too"), ("die3", "noreturn-uncited") in k, f)
 HDR_REAL = ('# fact: no-network | time-zone | registry | no-galaxy | single-process | process-end | thread-end (CLAUDE.md "The declared machine"); source: win-doc:<documentation page or header path>:<function> | '
@@ -708,6 +710,14 @@ rn2 = TR.mut(); rn2["flags"] = {k: v + ["-D_ERRNO_H"] for k, v in rn2["flags"].i
 rd = TR.make_repo("os-image-noprobe", rec=rn2, files={"toy/constants.tsv": CONST})
 rc, g, _, txt, st = gate(rd, ROOT + "/gi3", GC)
 check("a root whose errno.h does not compile: red errno-probe (the probe does not compile with the root's flags), never green", rc == 2 and "errno-probe" in g["detail"], (g, txt))
+# the accessor is derived, no root declares it: a host root and a target root get theirs from their own libc's errno.h, and the key is no recipe key any more
+ec = tempfile.mkdtemp(prefix="objstub-errno-")
+check("errno accessor derived for a host compiler (x86-64 glibc: the call of __errno_location), no declaration",
+      objstub.errno_probe("x86_64-linux-gnu-gcc-13", [], ec) == ("call", "__errno_location"), objstub.errno_probe("x86_64-linux-gnu-gcc-13", [], ec))
+check("errno accessor derived for the AArch64 compiler (a call of the libc's accessor), no declaration",
+      objstub.errno_probe("aarch64-linux-gnu-gcc-13", ["-mabi=lp64"], ec) == ("call", "__errno_location"), objstub.errno_probe("aarch64-linux-gnu-gcc-13", ["-mabi=lp64"], ec))
+rk = TR.mut(); rk["errno_accessor"] = "__errno"
+check("a recipe that declares errno_accessor is rejected (the accessor is derived, the key does not exist)", any("errno_accessor" in e_ for e_ in TR.errs(rk)), TR.errs(rk))
 # a body with a data island in the final image is unjudged, and unjudged is red
 ISL = '.text\n.globl isl\n.type isl,%function\nisl:\n mov w0, #1\n ret\n .word 0x12345678\n.size isl,.-isl\n'
 rj = TR.make_repo("os-image-island", files={"toy/constants.tsv": CONST + "e.c\t__errno_location\taddr\te\tref e\n", "toy/c.c": USE.replace("sched_getcpu()", "0"), "toy/e.c": ERR, "toy/isl.S": ISL})
