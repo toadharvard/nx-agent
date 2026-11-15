@@ -1314,3 +1314,14 @@ Paused: w3b, w4, farm; no other work.
     - w6 (doing): remove ASM-614 (one FOURCC reader with envq), ASM-633 (MAXD3DDECLLENGTH), ASM-637 (make_env host check) and ASM-641 (nxgpu4.h states image 0 = swapchain; L6A told) by landing what each record asks.
 - bottleneck: L1 cand3 (admit, host record, platform, linking root), then cand4.
 - 22:39Z L1: the w6-cand4 base is the w28 head rebased onto the final cand3. It carries the host record and hostprofile, abspath in gates.d, liftfacts and the pack uses-root. cand3 itself carries the admit entries for the green roots it restores.
+- 22:49Z w6 838f6656a, carried into w6-cand4 8e043d5e2: ASM-614, 633 and 641 removed.
+    - ASM-614: env/wine_fourcc.py is the one reader of the pinned wined3d.h. The front takes the members, the env probe the remap.
+    - ASM-633: the bound is MAXD3DDECLLENGTH, by name; Wine's 126 is a superset, checked at the definition.
+    - ASM-641: nxgpu4.h P4 states NxImageRead image 0 = the swapchain image; gl4 implements it; the contract was relayed to L6A.
+    - ASM-637 stays: the make_env recorder is not in the tree, and is off the path. gen_env now refuses an env tsv whose sha256 differs from ENV_PIN.
+    - Builds and gates at 838f6656a:
+        - render roots green, apart from sm_link (merge1, L1);
+        - d3d9 byte-identical except res_decl.cpp.o;
+        - d3d9total 332/332; test 45/45; abspath render 0.
+    - Assumptions gate on cand4: 125/125, 108 records.
+- bottleneck: the w28 head on the final cand3, for the w6-cand4 rebase.
