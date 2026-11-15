@@ -20,7 +20,8 @@
   "ports/fnv-nx/render/nxgpu/include",
   "ports/fnv-nx/render/shaders/translator/include",
   "ports/fnv-nx/lib/sha256/include",
-  "ports/fnv-nx/render/gl4shim/include"
+  "ports/fnv-nx/render/gl4shim/include",
+  "ports/fnv-nx/hostabi/include"
  ],
  "units": "all",
  "link": {
@@ -90,6 +91,10 @@
   },
   {
    "root": "ports/fnv-nx/render/gl4shim",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/hostabi",
    "output": "INCLUDE"
   }
  ]

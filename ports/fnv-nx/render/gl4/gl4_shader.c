@@ -1,5 +1,6 @@
 /* fnv-nx L6 GL 4.5 backend v4: shaders and programs. The GLSL rewrite for the driver is nxgl4_shim_glsl (render/gl4shim, nx_gl4shim.h). */
 #include "gl4.h"
+#include "fnvnx/cite.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,7 +15,7 @@ static GLenum stage_enum(uint32_t stage) {
 }
 
 /* GLSL (deko style, "#version 460") -> the GL shader registered under ID of the stage. 0 and a recorded error when the host allocator fails or the compile fails: nothing is registered then. */
-static uint32_t shader_into(uint32_t id, const char* glsl, size_t n, uint32_t stage) {
+__attribute__((noinline)) static uint32_t shader_into(uint32_t id, const char* glsl, size_t n, uint32_t stage) {
     if (!glsl || !n || !stage_enum(stage)) return 0;
     while (id >= g4.nSh)
         if (!gl4_table_grow((void**)&g4.sh, &g4.nSh, sizeof *g4.sh)) { gl4_err("shader: out of memory"); return 0; }
@@ -124,3 +125,8 @@ GLuint gl4_compile_pair(const struct nx_gl4shim_pair* row) {
     if (!ok) { p_glDeleteProgram(p); return 0; }
     return p;
 }
+
+/* the compile/link failure branches of this file are the owner decision "gl-shader-failure" (CLAUDE.md): one record per body */
+FNVNX_CITE(shader_into, "od:gl-shader-failure");
+FNVNX_CITE(gl4_program_for, "od:gl-shader-failure");
+FNVNX_CITE(gl4_compile_pair, "od:gl-shader-failure");
