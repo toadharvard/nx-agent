@@ -319,6 +319,11 @@ byte-identical changes no consumer key. Red (check errors): an output the root d
 the declared loader between distinct roots; a `generated` input that is a file of another root (class other than tool) by path, which must go through `uses`.
 Objects of another root enter only through the derived link members.
 
+**Directory outputs and `include_uses`.** `outputs: {NAME: P}` may name a directory P instead of a file: every generated output below P is then part of it (check: P holds no tracked file). The
+result lists it as `{path, sha256}` (the hash is over the sorted relative paths and file contents), and a consumer's stage key holds that content. `include_uses: [{"root": R, "output": NAME}]`
+(a subset of `uses`, NAME a directory output) makes `/uses/<R>/<NAME>` one more include directory of every unit of the consumer, after `include`, in list order. It is the one way a root reads the
+generated headers of another root (an `include` entry inside another root's generated tree is a check error). It is not carried to the consumers of the consumer: each root declares what it includes.
+
 **Inputs live below their consumers.** The inputs that a declaration derives from (specs, name tables, row generators) live in a root below every consumer
 of the declaration: a tool root with a recipe, such as `bridgefacts`, which the consumers take through `uses` (derived outputs) or by path
 (`inputs` of a generate stage, `{root, path}` in a gate's declaration file; tracked files of an admitted `tool` root). A root that consumes a

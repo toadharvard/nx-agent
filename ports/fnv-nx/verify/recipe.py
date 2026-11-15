@@ -68,7 +68,7 @@ def _plugin_cxx():
 
 PLUGIN_CXX = _plugin_cxx()
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
-        "plugins", "variants", "profile", "outputs", "uses", "sources", "error_abi", "empty_handlers", "external_errors", "tests", "run"}
+        "plugins", "variants", "profile", "outputs", "uses", "include_uses", "sources", "error_abi", "empty_handlers", "external_errors", "tests", "run"}
 VARIANT_KEYS = {"compiler", "flags", "link", "flags_add", "defines_add"}   # the keys a variant may replace (whole: a sanitizer variant names its own link.libs.system) and its two deltas
 VARIANT_DELTAS = {"flags_add", "defines_add"}   # appended to the base flags of the root (RECIPE.md, "Profiles")
 PROFILES = ("guest", "host")
@@ -903,13 +903,45 @@ def source_lines(text):
     return out
 
 
+def dir_output(p, gen):
+    """P is a directory output: a path with generated outputs below it (the output is the whole directory: its files are exactly those outputs)."""
+    return any(o != p and under(o, p) for o in gen)
+
+
+def include_uses_errors(rec, roots, repo):
+    """Problems of `include_uses` ([{root, output}], a subset of `uses`): the directory output NAME of another root, which is mounted at /uses/<root>/<NAME>
+    and is one more include directory (after `include`, in list order). It is how a consumer reads the generated headers of another root."""
+    iu, us = rec.get("include_uses"), rec.get("uses") or []
+    if iu is None:
+        return []
+    if not (isinstance(iu, list) and all(isinstance(u, dict) and set(u) == {"root", "output"} and all(isinstance(v, str) for v in u.values()) for u in iu)):
+        return ['include_uses must be [{"root": admitted root, "output": NAME}]']
+    err = []
+    for i, u in enumerate(iu):
+        if u in iu[:i]:
+            err.append("include_uses: %s/%s is listed twice" % (u["root"], u["output"]))
+        if u not in us:
+            err.append("include_uses: %s/%s is not in `uses`" % (u["root"], u["output"]))
+            continue
+        try:
+            prod = read_recipe(repo, roots[u["root"]]["recipe"])
+            p = (prod.get("outputs") or {}).get(u["output"])
+        except (OSError, ValueError, KeyError, AttributeError, TypeError):
+            continue    # uses_errors reports an unreadable or undeclared producer
+        if not (isinstance(p, str) and dir_output(p, generated_outputs(prod))):
+            err.append("include_uses: output %r of %s is not a directory output (outputs: {NAME: a directory of generated files})" % (u["output"], u["root"]))
+        elif any(under(f, u["root"] + "/" + p) for f in tracked(repo)):
+            err.append("include_uses: directory output %r of %s holds a tracked file (a directory output is generated files only)" % (u["output"], u["root"]))
+    return err
+
+
 def uses_errors(rec, root, roots, repo):
     """Problems of `outputs` ({name: a generated output of this root}) and `uses` ([{root, output}]: an output another admitted root declares)."""
     err, gen = [], generated_outputs(rec)
     outs = rec.get("outputs")
-    if outs is not None and not (isinstance(outs, dict) and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9_.-]+", n) and isinstance(p, str) and p in gen
+    if outs is not None and not (isinstance(outs, dict) and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9_.-]+", n) and isinstance(p, str) and (p in gen or dir_output(p, gen))
                                                                  for n, p in outs.items())):
-        err.append("outputs must be {NAME: a path in generated[].outputs of this root}")
+        err.append("outputs must be {NAME: a path in generated[].outputs of this root, or a directory every file of which is one of them}")
     us = rec.get("uses")
     if us is None:
         return err
@@ -1294,7 +1326,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
                 err.append("generated output %s is produced twice" % o)
             seen.add(o)
     err += run_errors(rec, root, files, roots, mine, seen, repo)
-    err += uses_errors(rec, root, roots, repo)
+    err += uses_errors(rec, root, roots, repo) + include_uses_errors(rec, roots, repo)
     ea, ident = rec.get("error_abi"), lambda x: isinstance(x, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", x)
     if ea is not None and not (isinstance(ea, dict) and ident(ea.get("fail")) and (
             (ea.get("kind") == "noreturn" and set(ea) == {"fail", "kind"}) or (ea.get("kind") == "flag" and set(ea) == {"fail", "kind", "flag"} and ident(ea.get("flag"))))):
@@ -1999,6 +2031,7 @@ class Job:
                 host = os.path.join(ws, "inc", d)
             out.append("%s@/inc/%d" % (host, n))
             n += 1
+        out += ["/uses/%s/%s" % (u["root"], u["output"]) for u in self.rec.get("include_uses", [])]   # the mounted directory output of another root, an absolute path inside the sandbox
         return out
 
     def plugin_env(self, ws, drv=1):
@@ -2841,7 +2874,16 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True):
         res["outputs"] = {}   # the root's declared outputs (`outputs: {NAME: path}`), each a file of `out` with its sha256: a consumer compares the hash, never the path
         for nm, rel in sorted((j.rec.get("outputs") or {}).items()):
             src = os.path.join(ws, "root", rel)
-            if os.path.isfile(src):
+            if os.path.isdir(src):    # a directory output: its sha256 is over the sorted (relative path, content) of its files
+                dest = os.path.join(out, "outputs", rel)
+                shutil.copytree(src, dest, dirs_exist_ok=True)
+                h = hashlib.sha256()
+                for dp, _dn, fn in sorted(os.walk(dest)):
+                    for f in sorted(fn):
+                        fp = os.path.join(dp, f)
+                        h.update(("%s\0%s\0" % (os.path.relpath(fp, dest), hashlib.sha256(open(fp, "rb").read()).hexdigest())).encode())
+                res["outputs"][nm] = {"path": os.path.abspath(dest), "sha256": h.hexdigest()}
+            elif os.path.isfile(src):
                 dest = os.path.join(out, "outputs", rel)
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 shutil.copyfile(src, dest)
