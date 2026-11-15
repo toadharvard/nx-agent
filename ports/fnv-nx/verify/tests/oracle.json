@@ -1,5 +1,17 @@
 {
  "format": "fnvnx-oracle/1",
+ "test_guest_link.py": {
+  "references": [
+   {
+    "anchor": "## Link: the guest ELF",
+    "kind": "spec",
+    "path": "ports/fnv-nx/verify/RECIPE.md"
+   }
+  ],
+  "subject": [
+   "ports/fnv-nx/verify/recipe.py"
+  ]
+ },
  "tests": {
   "test_a64access.py": {
    "references": [
@@ -196,6 +208,43 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/bootsock.py"
+   ]
+  },
+  "test_bootcores.py": {
+   "references": [
+    {
+     "anchor": "## verify/bootmachine.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## verify/boot.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/bootmachine.py",
+    "ports/fnv-nx/verify/boothost.py",
+    "ports/fnv-nx/verify/boot.py"
+   ]
+  },
+  "test_bootstart.py": {
+   "references": [
+    {
+     "anchor": "## verify/bootstart.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## verify/boot.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/bootstart.py",
+    "ports/fnv-nx/verify/boot.py"
    ]
   },
   "test_cas.py": {
@@ -950,6 +999,18 @@
     "ports/fnv-nx/verify/toolflags_policy.py",
     "ports/fnv-nx/verify/puregate.py",
     "ports/fnv-nx/verify/puregate_policy.py"
+   ]
+  },
+  "test_undefset.py": {
+   "references": [
+    {
+     "anchor": "## Link: the guest ELF",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/undefset.py"
    ]
   },
   "test_unitstage.py": {
