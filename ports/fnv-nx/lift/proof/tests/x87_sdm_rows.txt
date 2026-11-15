@@ -95,3 +95,48 @@ fyl2x | +0 | * * * -0 +0 +0 * NaN | SDM 2A:FYL2X Table 1-44
 fyl2x | +F | * * ** -F +0 +F +inf NaN | SDM 2A:FYL2X Table 1-44
 fyl2x | +inf | * * -inf -inf * +inf +inf NaN | SDM 2A:FYL2X Table 1-44
 fyl2x | NaN | NaN NaN NaN NaN NaN NaN NaN NaN | SDM 2A:FYL2X Table 1-44
+# FSIN Table 1-31 (SRC -> DEST; '*' = #IA, 'range' = a finite value)
+fsin | -inf | * | SDM 2A:FSIN Table 1-31
+fsin | -F | range | SDM 2A:FSIN Table 1-31
+fsin | -0 | -0 | SDM 2A:FSIN Table 1-31
+fsin | +0 | +0 | SDM 2A:FSIN Table 1-31
+fsin | +F | range | SDM 2A:FSIN Table 1-31
+fsin | +inf | * | SDM 2A:FSIN Table 1-31
+fsin | NaN | NaN | SDM 2A:FSIN Table 1-31
+# FPTAN Table 1-29
+fptan | -inf | * | SDM 2A:FPTAN Table 1-29
+fptan | -F | range | SDM 2A:FPTAN Table 1-29
+fptan | -0 | -0 | SDM 2A:FPTAN Table 1-29
+fptan | +0 | +0 | SDM 2A:FPTAN Table 1-29
+fptan | +F | range | SDM 2A:FPTAN Table 1-29
+fptan | +inf | * | SDM 2A:FPTAN Table 1-29
+fptan | NaN | NaN | SDM 2A:FPTAN Table 1-29
+# FSINCOS Table 1-32 (SRC | ST(1) cosine, ST(0) sine)
+fsincos | -inf | * * | SDM 2A:FSINCOS Table 1-32
+fsincos | -F | range range | SDM 2A:FSINCOS Table 1-32
+fsincos | -0 | +1 -0 | SDM 2A:FSINCOS Table 1-32
+fsincos | +0 | +1 +0 | SDM 2A:FSINCOS Table 1-32
+fsincos | +F | range range | SDM 2A:FSINCOS Table 1-32
+fsincos | +inf | * * | SDM 2A:FSINCOS Table 1-32
+fsincos | NaN | NaN NaN | SDM 2A:FSINCOS Table 1-32
+# F2XM1 Table 1-12 (SRC in the listed range -> DEST); the +-0 rows exact
+f2xm1 | -1.0..-0 | -0.5..-0 | SDM 2A:F2XM1 Table 1-12
+f2xm1 | -0 | -0 | SDM 2A:F2XM1 Table 1-12
+f2xm1 | +0 | +0 | SDM 2A:F2XM1 Table 1-12
+f2xm1 | +0..+1.0 | +0..1.0 | SDM 2A:F2XM1 Table 1-12
+# FPREM Table 1-27 (rows ST(0) -inf -F -0 +0 +F +inf NaN, columns ST(1) in the same order); 'S' = ST(0) unchanged, 'a/b' = either
+fprem | -inf | * * * * * * NaN | SDM 2A:FPREM Table 1-27
+fprem | -F | S -F/-0 * * -F/-0 S NaN | SDM 2A:FPREM Table 1-27
+fprem | -0 | -0 -0 * * -0 -0 NaN | SDM 2A:FPREM Table 1-27
+fprem | +0 | +0 +0 * * +0 +0 NaN | SDM 2A:FPREM Table 1-27
+fprem | +F | S +F/+0 * * +F/+0 S NaN | SDM 2A:FPREM Table 1-27
+fprem | +inf | * * * * * * NaN | SDM 2A:FPREM Table 1-27
+fprem | NaN | NaN NaN NaN NaN NaN NaN NaN | SDM 2A:FPREM Table 1-27
+# FPREM1 Table 1-28 ('+-F' either sign)
+fprem1 | -inf | * * * * * * NaN | SDM 2A:FPREM1 Table 1-28
+fprem1 | -F | S F/-0 * * F/-0 S NaN | SDM 2A:FPREM1 Table 1-28
+fprem1 | -0 | -0 -0 * * -0 -0 NaN | SDM 2A:FPREM1 Table 1-28
+fprem1 | +0 | +0 +0 * * +0 +0 NaN | SDM 2A:FPREM1 Table 1-28
+fprem1 | +F | S F/+0 * * F/+0 S NaN | SDM 2A:FPREM1 Table 1-28
+fprem1 | +inf | * * * * * * NaN | SDM 2A:FPREM1 Table 1-28
+fprem1 | NaN | NaN NaN NaN NaN NaN NaN NaN | SDM 2A:FPREM1 Table 1-28

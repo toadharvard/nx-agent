@@ -292,6 +292,105 @@ class MmxAlias(unittest.TestCase):
         for m in range(8): self.prove(e["fr%d" % m] == d["fr%d" % m])
 
 
+class TableCells(unittest.TestCase):
+    """every cell of SDM 2A:FSIN Table 1-31, FPTAN 1-29, FSINCOS 1-32, F2XM1 1-12, FPREM 1-27 and FPREM1 1-28 (rows in x87_sdm_rows.txt)"""
+    SRC = {'-inf': float('-inf'), '-F': -2.0, '-0': -0.0, '+0': 0.0, '+F': 2.0, '+inf': float('inf'), 'NaN': NAN}
+    PUSH, C2, N = z3.Bool('nd.trig.push'), z3.Bool('nd.trig.c2'), z3.BitVec('nd.prem.N', 16)
+    cls = staticmethod(SpecialTables.cls)
+    @staticmethod
+    def snapx(o, nd, n=2):
+        """snap, but a register that is a symbolic value (a transcendental of a finite operand) is None, and fsw is reduced to its IE bit (None if symbolic)"""
+        s = o.s
+        for v, x in nd: s = X.St(**{f: z3.substitute(getattr(s, f), (v, x)) for f in X.St.FIELDS})
+        def c(e):
+            r = z3.simplify(e); return r.as_long() if z3.is_bv_value(r) else None
+        top = c(X.top(s))
+        return top, c(z3.ZeroExt(15, z3.Extract(0, 0, s.fsw))), [c(X.view64(z3.Select(s.R, K((top + i) & 7, 3)), K(0x037F, 16))) for i in range(n)]
+    def check(self, cls_got, flags, want, who):
+        if want == '*': self.assertEqual((cls_got, flags & 1), ('NaN', 1), who)
+        elif want == 'NaN': self.assertEqual(cls_got, 'NaN', who)
+        elif want == 'range': self.assertEqual(flags & 1, 0, who)
+        else: self.assertEqual(cls_got, {'+1': '+F'}.get(want, want), who)
+    def trig(self, name, key, ncols):
+        n = 0
+        for r in rows(name):
+            o = run(key, state([self.SRC[r[0]]]))
+            top, fsw, regs = self.snapx(o, [(self.PUSH, z3.BoolVal(False)), (self.C2, z3.BoolVal(False))])      # no push: ST(0) is the DEST column (sine / tangent)
+            want = r[1].split()[-1]
+            if want == 'range': self.assertEqual(fsw, 0, (name, r[0])); n += 1; continue
+            res = regs[1] if (name == 'fptan' and top == 6) else regs[0]                                      # FPTAN pushes 1.0 above the tangent
+            self.check(self.cls(res), fsw, want, (name, r[0])); n += 1
+        self.assertEqual(n, 7)
+    def test_fsin_table_1_31(self): self.trig('fsin', ('d9', 'reg', 7, 6), 1)
+    def test_fptan_table_1_29(self): self.trig('fptan', ('d9', 'reg', 6, 2), 1)
+    def test_fsincos_table_1_32(self):
+        for r in rows('fsincos'):
+            cosw, sinw = r[1].split()
+            o = run(('d9', 'reg', 7, 3), state([self.SRC[r[0]]]))
+            top, fsw, regs = self.snapx(o, [(self.PUSH, z3.BoolVal(True)), (self.C2, z3.BoolVal(False))])           # pushed: ST(0) = cosine, ST(1) = sine
+            if cosw == 'range':
+                self.assertEqual(fsw, 0, r[0]); continue
+            self.assertEqual(top, 6, r[0])
+            self.check(self.cls(regs[0]), fsw, cosw, ('cos', r[0])); self.check(self.cls(regs[1]), fsw, sinw, ('sin', r[0]))
+            if cosw == '+1': self.assertEqual(regs[0], 0x3FF0000000000000, r[0])
+    def test_f2xm1_table_1_12(self):
+        key = ('d9', 'reg', 6, 0)
+        for v, want in ((-0.0, -0.0), (0.0, 0.0)):
+            o = run(key, state([v])); top, fsw, regs = snap(o, [])
+            self.assertEqual((rd(o.s, top), fsw & 0x3f), (f2b(want), 0), v)
+        for v in (-1.0, -0.5, 0.5, 1.0):                                                                      # in range: the result is a finite value of the listed range, no exception but #P
+            o = run(key, state([v])); self.assertEqual(val(z3.Extract(3, 0, o.raised)), 0, v)        # IE, DE, ZE, OE raise nothing (UE and PE depend on the symbolic 2^x - 1)
+        # out of range: the result is the admissible choice, any image (no precondition)
+        o = run(key, state([3.0])); self.assertTrue(z3.is_true(z3.simplify(o.pre)))
+        self.assertEqual([str(v) for v in o.nd], ['nd.f2xm1.out'])
+        for want in (0, 0x3FFF8000000000000000):
+            self.assertEqual(val(z3.Select(X.St(**{f: z3.substitute(getattr(o.s, f), (o.nd[0], K(want, 80))) for f in X.St.FIELDS}).R, K(7, 3))), want)
+    def prem(self, name, key, nearest):
+        V = {'-inf': float('-inf'), '-F': -5.0, '-0': -0.0, '+0': 0.0, '+F': 5.0, '+inf': float('inf'), 'NaN': NAN}
+        C = {'-inf': float('-inf'), '-F': -3.0, '-0': -0.0, '+0': 0.0, '+F': 3.0, '+inf': float('inf'), 'NaN': NAN}
+        n = 0
+        for r in rows(name):
+            for c, want in zip(list(C), r[1].split()):
+                o = run(key, state([V[r[0]], C[c]]))                                                         # ST(0) = dividend, ST(1) = modulus
+                top, fsw, regs = self.snapx(o, [(self.N, K(63, 16))])
+                who = (name, r[0], c)
+                if want == 'S': self.assertEqual(regs[0], f2b(V[r[0]]), who)
+                elif '/' in want:
+                    okc = [{'F': ('-F', '+F'), '-F': ('-F',), '+F': ('+F',)}.get(w, (w,)) for w in want.split('/')]
+                    self.assertIn(self.cls(regs[0]), sum(okc, ()), who)
+                else: self.check(self.cls(regs[0]), fsw, want, who)
+                n += 1
+        self.assertEqual(n, 49)
+    def test_fprem_table_1_27(self): self.prem('fprem', ('d9', 'reg', 7, 0), False)
+    def test_fprem1_table_1_28(self): self.prem('fprem1', ('d9', 'reg', 6, 5), True)
+
+class NanRule(unittest.TestCase):
+    """SDM 1:T4-8, x87 column, every row, through FADD ST(0), ST(1): (ST(0), ST(1)) -> result"""
+    QA, QB = 0x7FF8000000000005, 0x7FF8000000000007         # QNaNs, B has the larger significand
+    SA, SB = 0x7FF0000000000005, 0x7FF0000000000007         # SNaNs
+    def add(self, a, b, tie=False):
+        o = run(('d8', 'reg', 0, None), state([a, b]), i=1)
+        o = X.St(**{f: z3.substitute(getattr(o.s, f), (X.NAN_TIE, z3.BoolVal(tie))) for f in X.St.FIELDS})
+        return rd(o, val(X.top(o))), val(o.fsw) & 1
+    def test_rows(self):
+        q = 0x0008000000000000
+        self.assertEqual(self.add(self.SA, self.QB), (self.QB, 1))              # SNaN and QNaN: the QNaN operand
+        self.assertEqual(self.add(self.QA, self.SB), (self.QA, 1))
+        self.assertEqual(self.add(self.SA, self.SB), (self.SB | q, 1))          # two SNaNs: the larger significand, converted
+        self.assertEqual(self.add(self.SB, self.SA), (self.SB | q, 1))
+        self.assertEqual(self.add(self.QA, self.QB), (self.QB, 0))              # two QNaNs: the larger significand
+        self.assertEqual(self.add(self.QB, self.QA), (self.QB, 0))
+        self.assertEqual(self.add(self.SA, 1.5), (self.SA | q, 1))              # SNaN and a value: the SNaN converted
+        self.assertEqual(self.add(1.5, self.SA), (self.SA | q, 1))
+        self.assertEqual(self.add(self.QA, 1.5), (self.QA, 0))                  # QNaN and a value
+        self.assertEqual(self.add(1.5, self.QA), (self.QA, 0))
+    def test_equal_significand_different_sign_is_the_choice(self):
+        pos, neg = self.QA, self.QA | (1 << 63)
+        for tie in (True, False):
+            r, _ = self.add(pos, neg, tie); self.assertEqual(r, pos if tie else neg)        # ST(0) = pos, ST(1) = neg: either operand
+        o = run(('d8', 'reg', 0, None), state([1.0, 2.0]), i=1)
+        self.assertEqual([str(v) for v in o.nd], ['nd.nan.tie'])
+
 class MmxThenX87(unittest.TestCase):
     """x87 after MMX without EMMS: an MMX write leaves fr<n> = 0xFFFF:v64 (SDM 1:9.6.2) with tags 00 and TOP = 0; that image has integer bit
     v64[63] and may be an unsupported encoding (exponent 7FFFH with integer bit 0).  The spec takes it as a state, no precondition."""

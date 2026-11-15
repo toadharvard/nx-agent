@@ -428,10 +428,15 @@ def real(b):
     return z3.fpToReal(fp(b))
 
 
+NAN_TIE = z3.Bool("nd.nan.tie")
+
+
 def nan_result2(a, b):
     """SDM 1:T4-8, x87 column, for two operands of which at least one is a NaN.  Returns the result
     pattern (a QNaN) and the Bool (a result was selected by a rule) (False when the SDM leaves the choice
-    open: two NaNs of equal significand and different sign)."""
+    open: two NaNs of equal significand and different sign; the result is then the admissible choice nd.nan.tie: a or b, each is the
+    source operand with the larger significand).  The larger significand is read on the binary64 view of the operands (OWNER 8: the fraction is
+    the top 52 bits of the 80-bit one).  The instructions with two register operands add nd.nan.tie to Out.nd (CERTS.md, section x87 admissible choices)."""
     an, bn = is_nan(a), is_nan(b)
     asn, bsn = is_snan(a), is_snan(b)
     # SNaN and QNaN -> the QNaN operand;  SNaN and a number -> the SNaN converted;  QNaN and number -> the QNaN
@@ -441,10 +446,10 @@ def nan_result2(a, b):
     mixed_b_q = And(an, bn, asn, Not(bsn))      # a SNaN, b QNaN -> b
     both_same_kind = And(an, bn, asn == bsn)    # two SNaNs or two QNaNs -> larger significand
     pick_a_larger = UGT(fr(a), fr(b))
-    larger = If(pick_a_larger, a, b)
-    res = If(only_a, a, If(only_b, b, If(mixed_a_q, a, If(mixed_b_q, b, larger))))
-    # equal significand, different sign: the SDM names no rule
     ambiguous = And(both_same_kind, fr(a) == fr(b), sgn(a) != sgn(b))
+    larger = If(ambiguous, If(NAN_TIE, a, b), If(pick_a_larger, a, b))
+    res = If(only_a, a, If(only_b, b, If(mixed_a_q, a, If(mixed_b_q, b, larger))))
+    # equal significand, different sign: the SDM names no rule (the choice is NAN_TIE above)
     return quieten(res), Not(ambiguous)
 
 
@@ -1238,13 +1243,17 @@ def arith_int(s, m, n, op, rev):
 
 def arith_st0_sti(s, i, op, rev):
     """SDM 2A:FADD etc. ST(0), ST(i) (D8 C0+i ...): ST(0) := ST(0) op ST(i)."""
-    return _arith(s, op, 0, st(s, i), is_empty(s, i), False, rev, src_u=is_unsup80(st80(s, i)))
+    o = _arith(s, op, 0, st(s, i), is_empty(s, i), False, rev, src_u=is_unsup80(st80(s, i)))
+    o.nd = [NAN_TIE]
+    return o
 
 
 def arith_sti_st0(s, i, op, rev, pop):
     """SDM 2A:FADD etc. ST(i), ST(0) (DC C0+i ...) and the P forms (DE C0+i ...): ST(i) := ST(i) op ST(0),
     then PopRegisterStack for FADDP, FSUBP, FSUBRP, FMULP, FDIVP, FDIVRP."""
-    return _arith(s, op, i, st(s, 0), is_empty(s, 0), pop, rev, src_u=is_unsup80(st80(s, 0)))
+    o = _arith(s, op, i, st(s, 0), is_empty(s, 0), pop, rev, src_u=is_unsup80(st80(s, 0)))
+    o.nd = [NAN_TIE]
+    return o
 
 
 def fsqrt(s):
@@ -1349,6 +1358,7 @@ def fscale(s):
     o = finish(s, St.ite(uf, _uf_state(s, 0, False), s_ok),
                If(uf, fl(IE), fv(ie=ie, de=de, oe=oe, ue=ue, pe=Or(inexact, oe))), ou_pre=True)
     o.undef = UNDEF_C023
+    o.nd = [NAN_TIE]
     return o
 
 
@@ -1412,7 +1422,7 @@ def _prem(s, nearest):
     s_ok = write_reg(s.copy(fsw=f), 0, res)
     o = finish(s, St.ite(uf, _uf_state(s, 0, False), s_ok), If(uf, fl(IE), fv(ie=ie, de=de)))
     o.undef = If(Or(uf, c2), UNDEF_C0123 & ~K(1 << C2, 16), K(0, 16))
-    o.nd = [N]
+    o.nd = [N, NAN_TIE]
     o.nd_pre = And(z3.UGE(N, K(32, 16)), z3.ULE(N, K(63, 16)))
     return o
 
@@ -1621,6 +1631,7 @@ def fyl2x(s):
                If(uf, fl(IE), fv(ie=ie, de=de, ze=ze, oe=And(gen_nz, goe), ue=And(gen_nz, gue), pe=And(gen_nz, gpe))),
                ou_pre=True)
     o.undef = UNDEF_C023
+    o.nd = [NAN_TIE]
     return o
 
 
@@ -1655,6 +1666,7 @@ def fpatan(s):
     o = finish(s, St.ite(uf, s_f, s_ok), If(uf, fl(IE), fv(ie=ie, de=de, ue=And(live, ue_), pe=And(live, pe_))),
                ou_pre=True)
     o.undef = UNDEF_C023
+    o.nd = [NAN_TIE]
     return o
 
 

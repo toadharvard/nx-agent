@@ -56,7 +56,7 @@ The gate applies the same key rule to the rows: a row that went stale after it w
 
 ## x87 admissible choices (x87spec.py)
 
-The SDM leaves five points of x87 behaviour undecided. x87spec.py does not pick a value. Each is a free z3 variable
+The SDM leaves six points of x87 behaviour undecided. x87spec.py does not pick a value. Each is a free z3 variable
 with a precondition (`Out.nd`, `Out.nd_pre`). A Form refines the spec if, for some value of these variables that
 satisfies `nd_pre`, the Form equals the spec. A certificate for a shape that uses one of them is valid for the
 Form's own choice only, and the K of that record names the variable. Quotes are from the pinned SDM (fnv-nx-build
@@ -69,6 +69,7 @@ Form's own choice only, and the K of that record names the variable. Quotes are 
 | `nd.trig.c2` (Bool) | FPTAN / FSINCOS / FSIN / FCOS with a NaN or infinite source: the value of C2 | PDF 1075 (FPTAN, FPU Flags Affected): "C2 Set to 1 if outside range (−263 < source operand < +263); otherwise, set to 0." Whether NaN and ±∞ are "outside" is not stated. PDF 1074: "If the source operand is outside the acceptable range, the C2 flag in the FPU status word is set, and the value in register ST(0) remains unchanged." |
 | `nd.fcmov.uf_false` (Bool) | FCMOVcc with a false condition and an empty ST(i): whether the underflow (IE, SF) is reported | PDF 1026 (2A:FCMOVcc Operation): "IF condition TRUE THEN ST(0) := ST(i); FI;" and Exceptions "#IS Stack underflow occurred." and "C1 Set to 0 if stack underflow occurred." The SDM does not say whether the operand check happens when the condition is false. With a true condition the underflow is certain (the operand is read). |
 | `nd.f2xm1.out` (BitVec80) | F2XM1 with a source outside -1.0..+1.0 (a NaN excepted): the 80-bit result image | PDF 1011 (2A:F2XM1 Description): "The value of the source operand must lie in the range –1.0 to +1.0. If the source value is outside this range, the result is undefined." Any image is admissible; the flags and exceptions are those the SDM gives for the operand (#IA, #D, #U, #P; C1 = rounded up; C0, C2, C3 undefined). There is no precondition and no L3a range fact is needed. |
+| `nd.nan.tie` (Bool) | an instruction with two register operands that are NaNs of the same kind, equal significand and different sign: which operand is the result | PDF 107 (1:T4-8, x87 column): "Two SNaNs: X87 FPU — SNaN source operand with the larger significand, converted into a QNaN." and "Two QNaNs: X87 FPU — QNaN source operand with the larger significand." With equal significands both operands are "the larger"; the SDM names neither. Added to `Out.nd` of FADD..FDIVR (ST,ST(i) and ST(i),ST forms), FSCALE, FPREM, FPREM1, FYL2X, FPATAN. "Larger significand" is read on the binary64 view of the operands (OWNER 8). |
 
 Rule: no other undecided point is encoded as a choice. A point the SDM decides, or that OWNER 8 fixes (IEEE values,
 see x87spec.py header), has one value in the spec. Where the SDM marks a flag "Undefined" (C0/C2/C3 after
