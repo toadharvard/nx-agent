@@ -193,13 +193,13 @@ The owner's words: "Транк никогда красный. Всегда зе�
 The owner's words: "Я буквально сказал, что я использую только конкретный компилятор... Мы нахуя инструменты подготавливали? Чтобы потом просто игнорить?"
 
 - **Compiler:** only the one pinned in `verify/env.json` (g++-13-aarch64-linux-gnu 13.3.0-6ubuntu2~24.04.1cross1, binutils 2.42-4ubuntu2.10), installed by `farm/setup_verdict_env.sh` and checked by `envcheck.py`. No unpinned apt, no other gcc.
-- **Our own compiler (the game's compiler)** is `toolchain/msvcmodel` (MSVCMODEL1). It is GCC 13.3.0 built from the sha256-pinned GNU tarball, with `msvcmodel.patch` applied. Under `-mabi=ilp32` it has the exe's Visual C++ 2008 data model: `size_t` = `unsigned int`, `ptrdiff_t` = `int`, and MSVC's new[] cookie and delete[] size. The headers and binutils come from the pinned distribution cross packages in `env.json`.
+- **Our own compiler (the game's compiler)** is `toolchain/msvcmodel` (MSVCMODEL1). It is GCC 13.3.0 built from the sha256-pinned GNU tarball, with `msvcmodel.patch` applied. Under `-mabi=ilp32` it has the exe's Visual C++ 2008 data model. That model is one table, DATAMODEL, derived from Microsoft's documentation with a test per row: `size_t` = `unsigned int`, `ptrdiff_t` = `int`, signed `char`, 16-bit `wchar_t`, binary64 `long double`, MSVC's new[] cookie and delete[] size, and every other row of the table. **Target (orchestrator decision, 2026-11-15):** it is configured `--target=aarch64-none-elf --with-newlib` with the ILP32 multilib, because the guest is a Horizon process over newlib, not Linux. It is built in one build together with its target libraries (libgcc, crt, newlib from the pinned fnvnx-a64 devkit sources, GCC 13.3's own libstdc++), and the configure line is recorded. That one mirror is both the compiler of every guest root and the guest runtime. The headers are newlib's and its own. Binutils are the env.json 2.42 package when its ld has the aarch64elf32 emulations; otherwise binutils 2.42 are built from the pinned GNU sources in the same build.
   - It enters every guest product root as the recipe's external compiler (`{"external", "cc", "cxx"}`, RECIPE.md): a fnv-nx-build mirror `tools/gcc-ilp32-msvcmodel`, pinned by commit and `tree_sha256`.
   - Our GCC plugins are built against its own plugin headers, as hermetic recipe stages; each `.so` is a declared input, so it is in every key. They are `fnvnx_order` (x86 TSO and MSVC volatile become `ldar`/`stlr`; MSVC argument order), `fnvnx_ftoi` (MSVC `_ftol`), and L2's `addr`, `dispatch`, `names`, `sdd` and `pi` (plus the clang `vtnames`).
   - Native and decomp C++ load them all.
   - Lifted C++ is compiled by the same compiler; the lifter emits the memory ordering itself (R9 (б)).
   - The stock `g++-13` of `env.json` is the base the compiler is built from. It is not the game's compiler.
-  - The guest runtime is built by the game's own compiler: `tools/fnvnx-a64-msvcmodel13` (L5 w14, with a MANIFEST.json the recipe compares against the compiler before any unit runs). Its libstdc++ (headers and library) is GCC 13.3's own, the same version as the compiler. newlib and libnx come from the fnvnx-a64 devkit sources, rebuilt with msvcmodel. The gcc 15 libstdc++ headers of fnvnx-a64 are not used for guest code: they do not parse under gcc 13 (orchestrator decision, 2026-11-12).
+  - The guest runtime is built by the game's own compiler, in the same none-elf build (2026-11-15). Until that build lands, it is `tools/fnvnx-a64-msvcmodel13` (L5 w14, with a MANIFEST.json the recipe compares against the compiler before any unit runs). Its libstdc++ (headers and library) is GCC 13.3's own, the same version as the compiler. newlib and libnx come from the fnvnx-a64 devkit sources, rebuilt with msvcmodel. The gcc 15 libstdc++ headers of fnvnx-a64 are not used for guest code: they do not parse under gcc 13 (orchestrator decision, 2026-11-12).
 - **Build:** `verify/recipe.py` (`verify/RECIPE.md`). A product root has `build.json` and is admitted in `verify/admit.json`. Each unit is two hermetic stages (`unitstage.py`: PP, then CC), keyed by the content of what they read plus compiler and flags.
 - **Cache:** the verdict's own store, `GATE_CACHE` (`l1.py` gives `VDIR/cache`; objects in `GATE_CACHE/store`). An unchanged unit is never compiled again. Do not add another cache or call the compiler directly.
 - **Private sources** (lifted C++, decomp trees) enter a recipe only as an `external`: a fnv-nx-build commit plus `tree_sha256`.
@@ -449,3 +449,97 @@ The owner's words: "делегируй остаток работы аккура�
     every explicit target float→int builtin (vcvtq_s32_f32, vcvtq_u32_f32 and their family) lane-exact. In range it
     converts; out of range or NaN it gives x86 integer-indefinite (cvttps2dq semantics). Then fpexact certifies the
     NEON path and the switch is removed.
+
+## Owner order of 2026-11-15: parallel loops and deviations, after the first frame (binding)
+
+The owner's words: "Делаем, так как данные уже будут для анализа этого" and "Это не должно быть так, что мы просто решили
+исправить все баги. Это разрешено только если решает конкретную задачу, например, позволяет добиться большей
+производительности за счет улучшения корректности."
+
+- **Parallel-loop rule (speed, after the first frame).** A loop of the main thread runs its iterations on several cores
+  only when it is proven statically, by the one points-to/write-set model, that:
+  - the iterations write disjoint memory and read nothing another iteration writes;
+  - they touch no shared state (allocator, reference counts, shared lists), or that state is made thread-safe natively first;
+  - there is no floating-point reduction across iterations.
+
+  Execution is fork-join, so the result is bit-identical to the sequential loop. A loop that is not proven stays sequential.
+  Which loops to try comes from the per-function instructions-per-frame data; the proof decides.
+- **Deviations (`verify/DEVIATIONS.json`).** A change of the exe's behaviour is allowed only when it serves a stated
+  goal on the path (for example a speed rule), never as bug-fixing for its own sake. Each entry gives:
+  - the original behaviour and why it is undefined or a defect (a data race, a crash, an out-of-bounds access);
+  - the new behaviour;
+  - the proof that every behaviour of the new program is one the original program could already show on its defined
+    inputs. For example, adding synchronization to a race only removes interleavings;
+  - the goal it unlocks, such as a rule id or a PERFDEBT/speed item;
+  - its owner.
+
+  A deviation without a goal, or without that proof, is red.
+  - Example (owner): a worker thread writes UI state concurrently with the main thread. That is a race. Making the write
+    ordered through the main thread lets the worker run on its own core.
+
+## Owner order of 2026-11-15: defects impossible by construction (binding)
+
+The owner's words: "Надо закрыть те проблемы которые мы обсуждали на корню. Чтобы новых подобных просто не могло
+возникнуть."
+
+The defects of 2026-11-14/15 had one cause: a fact was enumerated from memory, copied, or reachable by a second path,
+instead of derived once from a complete source. Examples: `long double` missing from the data model; a linux-gnu target
+for a Horizon guest; data lifted as code; a test compiling with stock g++; a dead second ftoi plugin; numbers counted on
+a stale tree. The rules below make that class impossible. Adding checks on top of checks does not.
+
+1. **Derive, never enumerate.**
+   - Every set or table that defines behaviour or coverage is generated by a recipe stage from one complete, pinned
+     source, with the source cited per row. Examples: the data model, the ISA spec, the Win32 bodies, the shader set,
+     the image set, code ranges, thread kinds and gate universes.
+   - The source is one of: the exe and module bytes, the owner's gamedata, or a pinned edition of the vendor's
+     documentation (Microsoft, Intel, Arm, the Horizon/libnx headers).
+   - A set written by hand from memory is red, even when it is complete today.
+2. **One source of truth, everything else generated.**
+   - A fact lives in exactly one file.
+   - Whatever follows from it is produced by a recipe stage and is never written a second time. Examples: compiler flags
+     from DATAMODEL, the dispatcher from the facts, the bridges from the descriptors.
+   - A second copy of a fact is deleted, not gated.
+3. **One path, alternatives deleted.**
+   - There is no second compiler call, plugin, cache, build script or test runner.
+   - When one is found, it is deleted in the same commit that reports it. It is never kept behind a check.
+4. **Universes by one rule.** Every universe is defined by one rule over the tree or the exe, so a new item is inside
+   automatically. Examples: files, tests, functions, sites, threads. "Every test file by the naming rule" counts;
+   "these 12 tests" does not.
+5. **The declared target is one record each, and everything reads it.** These are:
+   - the guest platform (Horizon process over newlib, aarch64-none-elf, ILP32);
+   - the console CPU (Cortex-A57 feature set);
+   - the game's data model (DATAMODEL);
+   - the declared x86 CPU (CPUREF);
+   - the declared machine.
+
+   No root or tool restates any of them.
+6. **Numbers come only from a run at a commit.** A reported number is the output of a recipe or gate run, given with its
+   commit and command, read from the cached facts. It is never retold from memory or counted on another tree.
+7. **The trust chain ends at the OWNER registry.** A gate is ordinary code. Its lead checks it against its rule, and it is
+   tested against its references. No gate checks another gate, and below the OWNER entries nothing is checked.
+8. **A found defect closes its cause.**
+   - Every defect report names the enumeration, copy or second path that let it happen.
+   - The fix replaces that with a derivation, a generation or a deletion (rules 1-3).
+   - A fix of the single item alone is not accepted.
+
+## Orchestrator decision of 2026-11-15: memory ordering of runtime calls (binding for L1, L2)
+
+- The guest runtime (newlib, libstdc++, libgcc, libnx) is compiled by the game's compiler with every plugin. So a callee
+  whose body is C or C++ orders its own accesses, and a call to it is a plain call.
+  - There is no fenced call and no libcall or string-op record.
+  - Membership of a fold set never assigns a class.
+- newlib is built with `-DPREFER_SIZE_OVER_SPEED`, read from the one guest compiler record. With it, its aarch64 `.S`
+  string routines use their C sources.
+- The remaining assembly is derived from the built runtime objects: every object assembled from `.S` or `.s`. Each one
+  is closed by a stated class:
+  - it touches only jmp_buf and the frame (D1);
+  - it runs before threads;
+  - it is a kernel call;
+  - it is an atomic with its documented ordering.
+  An assembly object with a memory access outside these classes makes the runtime stage red. There is no allow-list.
+- The ordered C string loops switch off a fast path. They are `PD-RT-STRING-ORDERED` in `verify/PERFDEBT.json`
+  (owner L2), 0 at the first frame. The restoring rule gives each string routine a body whose ordering is proven equal
+  to the x86 semantics of the call in the source:
+  - where the exe's own CRT routine uses `rep movs`/`stos`, SDM §8.2.4 fast-string semantics (fenced at entry and
+    exit, unordered inside);
+  - elsewhere, ordering per x86 store, by size path.

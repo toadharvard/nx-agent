@@ -67,12 +67,15 @@ INPUT FACTS AND RULES.
  KC      rule: `movz`/`movk`/`movn`/`mov` with an immediate give a register the constant tag ('K', v); `sub|add sp, sp, xN` with xN of that tag changes sp by
          v. Soundness: the tag is the exact value of the register on every path that reaches the instruction (a join of different values drops it); a
          constant is not an address, so it never counts as a frame-derived value.
- D       rule (dominance; the prologue home-slot store is its forward form): see Func.unshared. A callee cannot reach a slot whose address is not
-         formed yet except by a wild access from its own sp, which OWNER assumption ASM-006 (no wild accesses) excludes; so no call condition is needed.
+ D       rule (dominance, D1; the prologue home-slot store is its forward form): see Func.unshared. An access to a slot is unshared iff no ESCAPE of
+         the slot's address (a stored value, an argument register at a call, an index register) reaches it on any CFG path from the entry. A stale pointer
+         from an earlier frame, or a callee reaching a slot nobody published, is a wild access, which OWNER assumption ASM-006 excludes.
  A       rule (incoming arguments): [CFA, CFA+args) is the call's argument area, args = crtl->args.size from the third field `args:N` of the frame row;
          an access inside it that overlaps no recorded range is a frame access. Soundness: the area holds the call's own stack arguments, written by the
          caller before the call; an address-taken parameter in it is a recorded range, and any other slot has no name another thread could hold.
          A row with an `unk` token (a variable whose slot is not a constant frame offset) is `dynamic` for the gate: its ranges are not complete.
+ RO-REC  the `.fnvnx.ro` record of the order plugin (the bases it left plain as read-only) is advisory and no gate input: rule L reads the
+         section flags of the relocation target (SHF_ALLOC, no SHF_WRITE) from the object itself and never trusts the plugin for it.
  ROBND   input fact: a load through a read-only base register plus an index stays inside the object; the read-only sections and
          their objects are those of objects.json (the object's section table, flags without SHF_WRITE and PT_GNU_RELRO).
  RUN     part of rule R9 (docs/ORDERING.md, "Everything else is ordered", aggregates on the dmb fence path): the loads of one run
@@ -342,6 +345,7 @@ class Func:
 
     # -- control flow
     _forming = None
+    _escapes = None
     args = None   # the incoming stack-argument size from the frame row (bytes at [CFA, CFA+args)), None when the row has none
     _reach = None
 
@@ -736,14 +740,16 @@ class Func:
         return res
 
     def frame_ok(self, i, sp, rg):
-        """rule F: the access is inside the function's own frame and overlaps no address-taken variable of the record"""
+        """rule F: the access is inside the function's own frame and overlaps no address-taken variable of the record, or only variables the record marks
+        `:n` (escapes=0): such an access is certified by its range, whether it goes through sp/x29 or through a register that holds the formed address (an
+        access that overlaps any escaping pair is never certified by a `:n` pair)"""
         if self.rec is None or self.rec == a64frame.DYNAMIC:
             return False
         cs = self.frame_offsets(i, sp, rg)
         sz = acc_size(i)
         if cs is None or sz is None:
             return False
-        return all(self.in_frame(c, sz) and not any(c < o + s and o < c + sz for o, s in self.rec) for c in cs)
+        return all(self.in_frame(c, sz) and all(getattr(r, 'priv', False) for r in self.rec if c < r[0] + r[1] and r[0] < c + sz) for c in cs)
 
     def in_frame(self, c, sz):
         """[c, c+sz) lies in the function's own frame (below the CFA) or in its incoming stack-argument area [CFA, CFA+args) (rule A: the argument area
@@ -771,15 +777,32 @@ class Func:
                     self._forming[k] = None if og is None else tuple(sorted(og))
         return self._forming
 
+    def escapes(self):
+        """{k: origins tuple, or None for an unknown origin}: the instructions that hand out a frame address (escape_sites: the value operand of a store, an
+        argument register at a call or a tail jump, an index register), by the state before the instruction, cached.  Returning x0 is no seed: the
+        frame is popped and the function has no instruction after the return."""
+        if self._escapes is None:
+            self._escapes = {}
+            for k in range(len(self.ins)):
+                sp, rg = self.fact(k)
+                og = set()
+                for s_ in self.escape_sites(k, sp, dict(rg)):
+                    og = None if (s_ is None or og is None) else og | set(s_)
+                    if og is None:
+                        break
+                if og is None or og:
+                    self._escapes[k] = None if og is None else tuple(sorted(og))
+        return self._escapes
+
     def reaches(self, rng):
-        """the set of instructions CFG-reachable (one or more edges, loops included) from an instruction that forms an address inside the range (o, s)
-        (end included: a one-past-the-end pointer), or from one whose origin is unknown"""
+        """the set of instructions CFG-reachable (one or more edges, loops included) from an ESCAPE of an address inside the range (o, s) (end included:
+        a one-past-the-end pointer), or from one whose origin is unknown"""
         key = rng
         if self._reach is None:
             self._reach = {}
         if key not in self._reach:
             o, s = rng
-            seeds = [k for k, og in self.forming().items() if og is None or any(o <= c <= o + s for c in og)]
+            seeds = [k for k, og in self.escapes().items() if og is None or any(o <= c <= o + s for c in og)]
             seen = set()
             work = list(seeds)
             while work:
@@ -793,9 +816,13 @@ class Func:
 
     def unshared(self, k, i, sp, rg):
         """rule D (dominance; the forward form of it is the prologue home-slot store): a frame access that overlaps recorded variables is unshared, and so
-        needs no order, iff for every recorded range it overlaps no instruction that forms an address inside that range can reach it in the CFG.
-        Soundness: another thread can observe a frame object only through an address of it; before the first address-forming instruction on every path no
-        such address exists (the frame is the thread's own: STACK), and a loop back edge from a forming instruction to the access is a path from it."""
+        needs no order, iff for every recorded range it overlaps no ESCAPE of an address inside that range reaches it on any CFG path from the function
+        entry (escape: the address, or one derived from it, is the value operand of a store, an argument register at a bl/blr/tail jump, an index register;
+        returning it pops the frame).  Soundness (D1): another thread can hold a frame object's address only if it was published, and publishing is an
+        escape; before the first escape on every path the address lives in registers of this thread only, and a loop back edge from an escape to the access
+        is a path from it.  A stale pointer to the same stack address from an earlier frame is a use after scope, which is undefined behaviour of the source
+        and a wild access, excluded by OWNER assumption ASM-006.  A callee cannot reach a slot that no escape has published except by a wild access from its
+        own sp, also ASM-006.  Callee-saved registers holding the address across a call are preserved by the callee (the ABI), the call is an escape anyway."""
         if self.rec is None or self.rec == a64frame.DYNAMIC:
             return False
         cs = self.frame_offsets(i, sp, rg)
@@ -961,3 +988,33 @@ def scan(path):
             if rule:
                 stats[what] += 1
     return Scan(sorted(rows), dict(stats))
+
+
+ASM_FRAME = ((-(1 << 24), 1 << 25),)    # an assembled routine has no frame record: its whole frame is ONE recorded range whose address may escape (rule D1 decides)
+
+
+def scan_asm(path):
+    """-> [(item, kind)] sorted, kind '' = certified, for an object assembled from .S/.s (gate rtasm).  There is no `.fnvnx.frame` record: every body
+    (function symbol or the gap between them) is judged with the whole frame as one escaping range, so a frame access is certified (rule D) only if no escape of a
+    frame address reaches it on any path from the entry (D1), an ordered form (ldar/stlr/ldaxr/stlxr/LSE acquire-release) by rule O, and every other access is red.
+    Items: 'SYM+0xOFF' (a memory-access instruction, or an undecodable word), 'SYM' (a range the gate cannot judge)."""
+    o = a64obj.read(path)
+    rows = []
+    bodies, extra = functions_of(o)
+    for si, a, name, kind in extra:
+        rows.append((name, kind))
+    for si, a, b, names, kind in bodies:
+        name = names[0]
+        if (b - a) % 4 or a % 4:
+            rows.append(('%s+0x0' % name, 'odd-code-range'))
+            continue
+        f = Func(o, si, a, b, name, o.relocs.get(si, {}), ASM_FRAME)
+        f.args = 0 if kind == 'func' else None
+        f.build()
+        f.dataflow()
+        res = f.judge()
+        for off in f.undec:
+            rows.append(('%s+0x%x' % (name, off - a), 'undecodable'))
+        for off, (what, rule) in sorted(res.items()):
+            rows.append(('%s+0x%x' % (name, off - a), '' if rule else what))
+    return sorted(rows)

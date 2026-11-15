@@ -79,14 +79,19 @@ troot = {"path": T + "/tests", "class": "test", "target": "guest", "gates": TG, 
 tf = [T + "/tests/t.cc"]
 bad, err = ga.judge(tf, adm(tool, doc, troot), GATES + TG, yes)
 check("a test root with its REQUIRED_TEST gates, a recipe and a target is certified (REQUIRED_PRODUCT is not asked of it)", not bad and not err)
-check("REQUIRED_TEST is the build family, doubles, oracle, stub, assumptions, legal, pure",
-      set(ga.REQUIRED_TEST) == {"build", "determinism", "linkstrict", "objstub", "doubles", "oracle", "stub", "assumptions", "legal", "pure"}
+check("REQUIRED_TEST is the build family, objstub, doubles, oracle, assumptions, pure (the stub gate is objstub; legal is a whole-tree gate)",
+      set(ga.REQUIRED_TEST) == {"build", "determinism", "linkstrict", "objstub", "doubles", "oracle", "assumptions", "pure"}
       and not set(ga.REQUIRED_TEST) >= set(ga.REQUIRED_PRODUCT))
 for g in TG:
     bad, err = ga.judge(tf, adm(tool, doc, dict(troot, gates=[x for x in TG if x != g])), GATES + TG, yes)
     check("a test root without gate %s is refused" % g, list(bad) == tf and any(g in e for e in err))
 bad, err = ga.judge(tf, adm(tool, doc, troot), GATES + [g for g in TG if g != "doubles"], yes)
 check("a test root cannot be admitted while the doubles gate has no file in gates.d", list(bad) == tf and any("doubles" in e for e in err))
+for g in ("objstub", "doubles"):
+    bad, err = ga.judge(tf, adm(tool, doc, dict(troot, gates=[x for x in TG if x != g])), GATES + TG, yes)
+    check("a test root with objstub and doubles admits; one lacking %s is red" % g, list(bad) == tf and any(g in e for e in err))
+check("a test root naming the old `stub` or `legal` is refused: no such file in gates.d",
+      all(list(ga.judge(tf, adm(tool, doc, dict(troot, gates=TG + [g])), GATES + TG, yes)[0]) == tf for g in ("stub", "legal")))
 bad, err = ga.judge(tf, adm(tool, doc, {k: v for k, v in troot.items() if k != "target"}), GATES + TG, yes)
 check("a test root without a target is refused", list(bad) == tf and any("target" in e for e in err))
 bad, err = ga.judge(tf, adm(tool, doc, dict(troot, target="elsewhere")), GATES + TG, yes)

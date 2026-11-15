@@ -4,7 +4,7 @@
  * One text line per complete record type (class, struct, union) the unit lays out, in the object's own section
  * .fnvnx.layout (not loaded):
  *
- *     key <TAB> size <TAB> align <TAB> fields <TAB> bases <TAB> flags <TAB> itanium
+ *     key <TAB> size <TAB> align <TAB> fields <TAB> bases <TAB> flags <TAB> itanium <TAB> linkage
  *
  *   key      MSVC's decorated type name as cl writes it into CodeView as the "unique name" of the record
  *            (`UP@@` for struct P, `VB@@` for class B, `T...@@` for a union, `UIn@Q@@` for Q::In, `U?$TT@H@@` for
@@ -26,6 +26,35 @@
  *            alignment the source asked for), altered (the record's alignment is not the natural one: pack, packed,
  *            alignas / __declspec(align) on it or on a member)
  *   itanium  the Itanium type string (the key of the `types` column of .fnvnx.n3)
+ *   linkage  `none` | `internal` | `external` | `c`: the linkage of the record type, C++ [basic.link], decided by GCC 13.3's own predicates
+ *            (linkage_of below), not by names:
+ *              none      cp/tree.cc no_linkage_check(t, false) names a type: a local class, an unnamed class without a typedef name for
+ *                        linkage at namespace scope, a lambda without mangling scope, a class nested in those (the offending type
+ *                        is the record itself or a type it is a member of)
+ *              internal  not none, and the type's declaration is not public: cp/tree.cc decl_anon_ns_mem_p (a member of an unnamed
+ *                        namespace, however deeply, also through an enclosing class) or TREE_PUBLIC cleared by the front end's
+ *                        determine_visibility / constrain_visibility_for_template (cp/decl2.cc: a template instantiation with an
+ *                        argument of internal linkage)
+ *              external  everything else
+ *            An unnamed class with a typedef name for linkage purposes is named for the front end (TYPE_UNNAMED_P is false) and takes
+ *            the linkage of that name's scope.       c         every record of a C unit (cc1), whatever its scope: C11 6.2.2p6 gives an identifier that is not an object or a function
+ *                        (a struct, union or enum tag, a typedef name) no linkage, and C has no ODR for tags; agreement across units is
+ *                        the compatibility (6.2.7) of the declarations of external objects and functions, not the tag's name. So none of
+ *                        the C++ predicates applies and the value says so.
+ *
+ * Objects (section .fnvnx.objects, not loaded): one line per variable definition with static storage the unit
+ * makes (a global, a file-scope static, a static data member, a function-local static; not a declaration alone):
+ *
+ *     asm <TAB> size <TAB> align <TAB> elem <TAB> itanium <TAB> flags
+ *
+ *   asm      the assembler name of the object (the symbol of the object file)
+ *   size     TYPE_SIZE_UNIT of the declared type (an array's size is its element size times its extent, from its type)
+ *   align    TYPE_ALIGN_UNIT of the declared type (the optimiser may align the object more; that is not the type's)
+ *   elem     the record key (as in the layout lines) of the innermost element type when that is a class, struct or
+ *            union, else `-`; the layout and abi gates certify that record, the data-model gate certifies a scalar
+ *   itanium  the Itanium type string of the declared type
+ *   flags    `,`-separated: internal (not external linkage), local (function-local static)
+ *  A type without a constant size (an incomplete array, a dependent type) gets no line.
  *
  * Which types: every record type the unit completes by a definition (PLUGIN_FINISH_TYPE), every record type that
  * occurs in a declaration or in the body of a function of the unit (instantiated templates, local classes), and
@@ -44,6 +73,20 @@
 #include "tree-inline.h"
 
 int plugin_is_GPL_compatible;
+
+FNVNX_CXX_ONLY(no_linkage_check);
+FNVNX_CXX_ONLY(decl_anon_ns_mem_p);
+
+/* the linkage column of a layout line, by the front end's own predicates (see the header comment) */
+static const char *linkage_of(tree t)
+{
+  t = TYPE_MAIN_VARIANT(t);
+  if (!is_cxx()) return "c";   /* C11 6.2.2p6, 6.2.7: see the header comment */
+  if (no_linkage_check(t, false)) return "none";
+  tree d = TYPE_MAIN_DECL(t);
+  if (!TREE_PUBLIC(d) || decl_anon_ns_mem_p(d)) return "internal";
+  return "external";
+}
 
 static std::vector<tree> found;
 static std::set<tree> found_set;
@@ -81,9 +124,27 @@ static void add_type(tree t)
 
 static void finish_type_cb(void *gcc_data, void *) { add_type((tree)gcc_data); }
 
+/* variable definitions with static storage, chained from the GC root `keep_vars` until FINISH_UNIT */
+static std::vector<tree> vars;
+static std::set<tree> vars_set;
+static tree keep_vars = NULL_TREE;
+static const struct ggc_root_tab keep_vars_roots[] = {
+  { &keep_vars, 1, sizeof(keep_vars), &gt_ggc_mx_lang_tree_node, NULL },
+  LAST_GGC_ROOT_TAB
+};
+
+static void add_var(tree d)
+{
+  if (!d || TREE_CODE(d) != VAR_DECL || !TREE_STATIC(d) || DECL_EXTERNAL(d)) return;
+  if (DECL_HARD_REGISTER(d)) return;   /* a global register variable is no memory: no extent */
+  if (is_cxx() && (processing_template_decl || uses_template_parms(TREE_TYPE(d)))) return;   /* (cc1: no templates) */
+  if (vars_set.insert(d).second) { vars.push_back(d); keep_vars = tree_cons(NULL_TREE, d, keep_vars); }
+}
+
 static void finish_decl_cb(void *gcc_data, void *)
 {
   tree d = (tree)gcc_data;
+  add_var(d);
   /* a compiler-made object (typeinfo, vtable, guard) carries compiler-made record types: not the source's */
   if (d && DECL_P(d) && !DECL_ARTIFICIAL(d)) add_type(TREE_TYPE(d));
   if (d) { finish_decl(gcc_data, NULL); }
@@ -234,6 +295,35 @@ static void close_over(tree t)
   }
 }
 
+/* the .fnvnx.objects lines: one per variable definition with static storage and a constant size */
+static void emit_objects()
+{
+  std::set<std::string> seen;
+  std::vector<std::string> lines;
+  for (tree d : vars) {
+    tree type = TREE_TYPE(d);
+    if (!type || !COMPLETE_TYPE_P(type) || !tree_fits_uhwi_p(TYPE_SIZE_UNIT(type))) continue;
+    if (!DECL_ASSEMBLER_NAME_SET_P(d) && !DECL_NAME(d)) continue;
+    std::string name = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d));
+    if (name.empty() || !seen.insert(name).second) continue;
+    tree e = type;
+    while (TREE_CODE(e) == ARRAY_TYPE) e = TREE_TYPE(e);
+    std::string elem = "-";
+    if (RECORD_OR_UNION_TYPE_P(e) && (!is_cxx() || CLASS_TYPE_P(e) || TREE_CODE(e) == UNION_TYPE) && COMPLETE_TYPE_P(e)) {
+      std::string why;
+      elem = key_of(TYPE_MAIN_VARIANT(e), why);
+    }
+    std::vector<std::string> fl;
+    if (!TREE_PUBLIC(d)) fl.push_back("internal");
+    if (decl_function_context(d)) fl.push_back("local");
+    lines.push_back(name + "\t" + std::to_string(tree_to_uhwi(TYPE_SIZE_UNIT(type))) + "\t" + std::to_string(TYPE_ALIGN_UNIT(type)) + "\t"
+                    + elem + "\t" + itanium(type) + "\t" + join(fl, ','));
+  }
+  fprintf(asm_out_file, "\t.pushsection\t.fnvnx.objects,\"\",%%progbits\n");
+  for (size_t i = 0; i < lines.size(); i++) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", escape(lines[i]).c_str());
+  fprintf(asm_out_file, "\t.popsection\n");
+}
+
 static void finish_unit_cb(void *, void *)
 {
   std::vector<std::string> lines;
@@ -282,11 +372,12 @@ static void finish_unit_cb(void *, void *)
     }
     std::vector<std::string> fl(flags.begin(), flags.end());
     lines.push_back(key + "\t" + std::to_string(tree_to_uhwi(TYPE_SIZE_UNIT(t))) + "\t" + std::to_string(TYPE_ALIGN_UNIT(t)) + "\t"
-                    + join(fields, ',') + "\t" + join(bases, ',') + "\t" + join(fl, ',') + "\t" + itanium(t));
+                    + join(fields, ',') + "\t" + join(bases, ',') + "\t" + join(fl, ',') + "\t" + itanium(t) + "\t" + linkage_of(t));
   }
   fprintf(asm_out_file, "\t.pushsection\t.fnvnx.layout,\"\",%%progbits\n");
   for (size_t i = 0; i < lines.size(); i++) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", escape(lines[i]).c_str());
   fprintf(asm_out_file, "\t.popsection\n");
+  emit_objects();
 }
 
 extern "C" int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *version)
@@ -301,13 +392,14 @@ extern "C" int plugin_init(struct plugin_name_args *info, struct plugin_gcc_vers
   }
   /* the name rules need the class-key reports and the scope numbers of toolchain/names */
   register_callback(info->base_name, PLUGIN_REGISTER_GGC_ROOTS, NULL, (void *)keep_roots);
+  register_callback(info->base_name, PLUGIN_REGISTER_GGC_ROOTS, NULL, (void *)keep_vars_roots);
   if (is_cxx()) {
     register_callback(info->base_name, PLUGIN_START_UNIT, start_unit, NULL);
     register_callback(info->base_name, PLUGIN_FINISH_DECL, finish_decl_cb, NULL);
     register_callback(info->base_name, PLUGIN_FINISH_TYPE, (plugin_callback_func)+[](void *d, void *u) { finish_type(d, u); finish_type_cb(d, u); }, NULL);
     register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, pre_genericize_cb, NULL);
   } else {   /* cc1: records come from the types the front end finishes and the declarations it finishes */
-    register_callback(info->base_name, PLUGIN_FINISH_DECL, +[](void *d, void *) { if (d && DECL_P((tree)d) && !DECL_ARTIFICIAL((tree)d)) add_type(TREE_TYPE((tree)d)); }, NULL);
+    register_callback(info->base_name, PLUGIN_FINISH_DECL, +[](void *d, void *) { add_var((tree)d); if (d && DECL_P((tree)d) && !DECL_ARTIFICIAL((tree)d)) add_type(TREE_TYPE((tree)d)); }, NULL);
     register_callback(info->base_name, PLUGIN_FINISH_TYPE, finish_type_cb, NULL);
   }
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit_cb, NULL);
