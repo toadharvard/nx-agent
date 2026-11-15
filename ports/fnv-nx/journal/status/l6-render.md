@@ -1237,3 +1237,4 @@ Paused: w3b, w4, farm; no other work.
     - Builds green (recipe, --artifacts): shaders/total 0 objects, translator 8, smscan 1, d3d9 69.
     - test_d3d9total.py not measured (0/45): its scratch repo lacks link/, so recipe.py `import relocs` fails. Cause: SM_MACHINERY is a hand list. Fix (w8, doing): derive the scratch tree from the gate's import/mount closure, hand list deleted; then farm1 re-runs, 45/45 expected.
     - bottleneck: test_d3d9total scratch closure (w8); render objstub RESERVED patch (w6); cand4 waits for both.
+- 21:08Z w8 d7be7453: SM_MACHINERY hand list deleted; test_d3d9total derives its scratch tree from the gate's own import/open closure (audit hook) plus the gate's INPUTS, asserted to cover every repo module in sys.modules. farm1 runs the 45 mutations at d7be7453.
