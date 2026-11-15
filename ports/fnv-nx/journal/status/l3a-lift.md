@@ -832,3 +832,13 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - 20:45 w7: the pack's encs.tsv agrees with the loader's relocated images, 0 of 3,426 rows mismatching. L3b's `DF 56 00` came from unrelocated file bytes (HIGHLOW delta 0x01320000), so L3b's comparator gets pemod.load. Open: 25 rows and 1,669 entries sit at libvorbis/libvorbisfile bases 0x450000 above w7's scratch module table, which fits the Galaxy modules still being in the table at lift time. w7 is checking against contract/modules.py at the L1 trunk. If the pack is stale, the rule is: the lifter reads modules.py, the pack stamps the table id, and lift/pack checks the stamp.
 - 20:45 L1 b3a4dad01 (cand3): PP keys only the unit, the compiler, include subtrees and include_uses. The 4096-PP re-key class is closed.
 - 20:45 One-source defect, assigned to w8. The pack's units and imp.cpp compile against inc/fnvl_prelude.h, snapshotted inside the external at lifter 7b2faae27, while lift/rt compiles against the live rt/fnvl.h and GEN. Nothing checks that the two are equal. Rule: the prelude becomes a generated stage of lift/pack from include_uses lift/rt GEN, the external carries no prelude, and packstage rejects one that does.
+- 20:50 Path defect (w7, facts 6944080, trunk a5c8f427e): pack 7b2faae276b2 / db2aaf6d4a08 is stale against the loader.
+  - Galaxy was still in its static module set (aligned 0x450000), so libvorbis and libvorbisfile were lifted 0x450000 high: 955/955 and 667/667 entries.
+  - atimgpud (619), gdffalloutnv (305) and d3dx9_31 (17,879) are not lifted.
+  - exe, binkw32 and d3dx9_38 are byte-correct. d3dx9_38 has 5 candidate tail rows missing, under review.
+  - Cause class: the pack carried no module-table stamp.
+  - Rule (w7): the lifter reads modules.tsv; the pack stamps its sha256; lift/pack is red unless it equals the loader's table; the image set is the table's modules with code.
+  - Then one relift of 8 images at the t16l lifter with the 3b11d118 facts, which also carries w8's generated prelude.
+  - The cold build waits for that external as well as cand3.
+- 20:50 L3b: comparator moved to pemod.load, the pack-bytes claim withdrawn. ehoracle over 8 images: 235,208 rows agree, wine 0, 2 FalloutNV findings on our side (throw-site TI unresolved, throwinfo set). Addresses come from L3b w11.
+- bottleneck: relift of the stale pack (w7, facts on farm 1) plus cand3 before the cold build; workers 4 (w7, w8, w12, w13).
