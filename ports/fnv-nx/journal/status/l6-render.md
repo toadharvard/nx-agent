@@ -1258,3 +1258,7 @@ Paused: w3b, w4, farm; no other work.
     - gate_d3d9total standalone at a02e400ba: rc 0, d3d9total.json green, universe 332, certified 332, uncertified []. Enum values 161/161, SM commands 171/171, mutations not killed 0, mojoshader tree bc0ea3c1.
     - test_gl4_cursor.py: 17 PASS against the store-built libnxgl4.so. Two test defects fixed in the test only: the ABI header path (render/nxgpu/include), and the ctypes buffer for the invalid-size cases. No assertion was weakened.
     - w6 waits for the w12 recipe fixes (sm_link) and the cand3 head (COM_SPEC rebase).
+- 21:23Z L1: the newer abspath gate (w28 632a45447, on cand3) finds 6 render literals: gen_env.py, res_smgen.py, and 4 in gate_d3d9total.py.
+    - w6 (doing): merge w28 632a45447 and fix them by rule (mount prefix or require_mounted; toolchain external or hostprofile).
+    - Then re-run abspath, d3d9total and the test, and send the new head to L1 w12 as the cand4 candidate, replacing b3856ec5c.
+- bottleneck: the render abspath literals under the new gate (w6), then L1 cand3 and cand4.
