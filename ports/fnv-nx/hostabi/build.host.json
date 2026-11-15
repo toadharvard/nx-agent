@@ -15,9 +15,10 @@
   ],
   "asm": []
  },
- "include": [
-  "ports/fnv-nx/hostabi/include"
- ],
+ "include": [],
  "units": "all",
- "link": null
+ "link": null,
+ "outputs": {
+  "INCLUDE": "include"
+ }
 }

@@ -8,10 +8,6 @@ interface pointers at the boundary in both directions and calls the C++ method. 
 is welded to the d3d9 generator (gen_impl, gen_expr, NxObj with the face in front of every object: our objects are plain C++ classes,
 so faces here are records per (object, interface), platform/com/combridge.h); the vocabulary of spec and rows is theirs.
 
-  OUTDIR/combridge_rows.tsv   rows of the bridge table (bridge.tsv format, 8 TAB columns, no header): one per method of every
-                              non-hidden interface (dll `!<Interface>`, name, ordinal = slot, stdcall, ret v|i, args = slot
-                              letters with the `this` first, native symbol nxb_<Interface>_<Method>, bind sym) and one per export
-                              (dll, name, ordinal, stdcall, ret, args, nxb_<Export>, sym): the row REPLACES the base row of that export.
   OUTDIR/combridge.gen.cpp    the thunks, the proxy classes of the game's objects, the interface / IID / key tables, and the checks of
                               the spec against the C++ declarations (static_asserts and nxcom::selfcheck).
 
@@ -317,7 +313,7 @@ def main():
             f = ln.split("\t")
             nwords[(f[0], f[1])] = int(f[2])
     g = Gen(spec)
-    rows, cpp, hdr, exp = [], [], [], []
+    cpp, hdr, exp = [], [], []
     hdr.append(HEAD)
     hdr.append("#ifndef FNVNX_COMBRIDGE_IF_GEN_H\n#define FNVNX_COMBRIDGE_IF_GEN_H")
     for h in spec["headers"]:
@@ -387,13 +383,11 @@ template <class MP> int vslot(MP mp)
             else:
                 text, letters, rl = g.thunk(what, sym, m, f"(({C} *)o)->{m['name']}", n)
             cpp.append('extern "C" ' + text)
-            rows.append((f"!{n}", m["name"], str(m["slot"]), "stdcall", rl, letters, sym, "sym"))
     for e in spec["exports"]:
         what = e["name"]
         sym = f"nxb_{what}"
         text, letters, rl = g.thunk(what, sym, e, what, None)
         exp.append('extern "C" ' + text)
-        rows.append((e["dll"], e["name"], str(e["ordinal"]), "stdcall", rl, letters, sym, "sym"))
     # ---- proxies: a method of a game object is one boundary call of at most FNVNX_BND_MAX_WORDS words (this included); an
     # interface with a wider method (IFilterMapper::EnumMatchingFilters: 22 words) is the platform's own service object, no game
     # object implements it, and the runtime consumes no game object of it (px_get: no maker)
@@ -449,8 +443,7 @@ template <class MP> int vslot(MP mp)
         cpp.append(f"    g_iids[{i}].iface = NXIF_{n};")
     cpp.append("}\n}   // namespace nxcom")
     cpp += chk
-    crows, cthunks, chdr, cdecl, ccode, cinit = gen_cxx.build(sys.argv[6], proto)
-    rows += crows
+    _crows, cthunks, chdr, cdecl, ccode, cinit = gen_cxx.build(sys.argv[6], proto)   # the bridge rows come from bridgefacts (COM_ROWS); the record kind's own rows are not a bridge input
     open(os.path.join(out, "combridge_cxx.gen.h"), "w").write("\n".join(
         [HEAD, "#ifndef FNVNX_COMBRIDGE_CXX_GEN_H", "#define FNVNX_COMBRIDGE_CXX_GEN_H", "#include <stdint.h>", "#include <stddef.h>"] + chdr + ["#endif"]) + "\n")
     open(os.path.join(out, "combridge_cxx.gen.cpp"), "w").write("\n".join(
@@ -459,9 +452,7 @@ template <class MP> int vslot(MP mp)
     open(os.path.join(out, "combridge.gen.cpp"), "w").write("\n".join(cpp) + "\n")
     open(os.path.join(out, "combridge_exports.gen.cpp"), "w").write("\n".join(exp) + "\n")
     open(os.path.join(out, "combridge_if.gen.h"), "w").write("\n".join(hdr) + "\n")
-    open(os.path.join(out, "combridge_rows.tsv"), "w").write("".join("\t".join(r) + "\n" for r in rows))
-    nm = sum(1 for r in rows if r[0][0] == "!")
-    print(f"gen_combridge: {len(rows)} rows ({nm} methods of {sum(1 for n in g.names if not spec['interfaces'][n]['hidden'])} interfaces, {len(rows) - nm} exports)")
+    print(f"gen_combridge: {sum(1 for n in g.names if not spec['interfaces'][n]['hidden'])} interfaces, {len(spec['exports'])} exports")
 
 
 if __name__ == "__main__":

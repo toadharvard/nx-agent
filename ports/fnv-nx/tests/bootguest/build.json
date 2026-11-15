@@ -29,7 +29,6 @@
   "asm": []
  },
  "include": [
-  "ports/fnv-nx/hostabi/include",
   "/ext/a64/aarch64-none-elf/include/c++/15.2.0",
   "/ext/a64/aarch64-none-elf/include/c++/15.2.0/aarch64-none-elf/ilp32",
   "/ext/a64/aarch64-none-elf/include"
@@ -78,6 +77,9 @@
    "tree_sha256": "3f25152cbc5a729d9e0a12fc5c62b6b912b6ab1571b6b3494de8f35e3904207d",
    "at": "/ext/a64"
   }
+ ],
+ "uses": [
+  {"root": "ports/fnv-nx/hostabi", "output": "INCLUDE"}
  ],
  "link": {
   "output": "bootguest.elf",

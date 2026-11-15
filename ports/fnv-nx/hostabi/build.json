@@ -14,9 +14,7 @@
   ],
   "asm": []
  },
- "include": [
-  "ports/fnv-nx/hostabi/include"
- ],
+ "include": [],
  "units": "all",
  "external": [
   {
@@ -51,5 +49,8 @@
    "tree_sha256": "16f47d88caf0811c24b580b594c25db06d8ab037d5e96efd5d92bac4e13496de",
    "at": "/ext/linuxerrno"
   }
- ]
+ ],
+ "outputs": {
+  "INCLUDE": "include"
+ }
 }

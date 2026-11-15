@@ -17,7 +17,6 @@
  },
  "include": [
   "ports/fnv-nx/loader/include",
-  "ports/fnv-nx/hostabi/include",
   "/ext/a64/aarch64-none-elf/include",
   "ports/fnv-nx/lib/sha256/include"
  ],
@@ -163,6 +162,7 @@
   "BRIDGE_TSV": "gen/bridge.tsv"
  },
  "uses": [
+  {"root": "ports/fnv-nx/hostabi", "output": "INCLUDE"},
   {
    "root": "ports/fnv-nx/bridgefacts",
    "output": "COM_ROWS"

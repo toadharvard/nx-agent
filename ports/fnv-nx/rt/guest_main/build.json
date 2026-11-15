@@ -32,7 +32,6 @@
     "asm": []
   },
   "include": [
-    "ports/fnv-nx/hostabi/include",
     "ports/fnv-nx/loader/include",
     "ports/fnv-nx/lib/sha256/include",
     "/ext/a64/aarch64-none-elf/include/c++/15.2.0",
@@ -40,6 +39,9 @@
     "/ext/a64/aarch64-none-elf/include"
   ],
   "units": "all",
+  "uses": [
+    {"root": "ports/fnv-nx/hostabi", "output": "INCLUDE"}
+  ],
   "plugins": [
     {
       "name": "fnvnx_ftoi"

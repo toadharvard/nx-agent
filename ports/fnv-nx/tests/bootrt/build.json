@@ -6,7 +6,8 @@
   "cxx": ["-O2", "-fPIC"],
   "asm": []
  },
- "include": ["ports/fnv-nx/hostabi/include"],
+ "include": [],
+ "uses": [{"root": "ports/fnv-nx/hostabi", "output": "INCLUDE"}],
  "units": "all",
  "link": {"output": "libnxgl4rt.so", "kind": "shared", "version_script": "exports.ver", "flags": ["-m", "elf_x86_64"]}
 }

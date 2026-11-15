@@ -80,7 +80,7 @@ struct ProxyRec {
 };
 
 /* Fills the key tables from the import table (fnvnx_bnd_export_value); returns the number of rows the import table lacks (0
- * in a build whose bridge table contains combridge_rows.tsv). Idempotent; called by every entry point below. */
+ * in a build whose bridge table contains the COM rows of bridgefacts, COM_ROWS). Idempotent; called by every entry point below. */
 unsigned init();
 
 Face *face_from(const void *gp);                 /* gp is a face of this file: it, else null */
