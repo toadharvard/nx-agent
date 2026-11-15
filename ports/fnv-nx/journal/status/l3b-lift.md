@@ -248,3 +248,4 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - Owner order (integration 76e450faf): the L4 boot loop runs now. A boot stop routed to L3b comes before every other L3b item.
 - The first stop is ELF 509809b3: 0xC000001D (illegal instruction) after `init d3dx9_38.dll`. L4 is classifying it. If it is a #UD-class site (CPUREF cleared feature, no-SDM encoding), it is L3b's together with L3a.
 - "Call economy" (integration 0e4c31db2) is passed to w4 and w9.
+- 10:40Z: the boot-loop order is WITHDRAWN (integration 4674ce3e9), so no measurement-run stops are routed to L3b. The path items stand as before.
