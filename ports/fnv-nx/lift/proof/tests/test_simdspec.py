@@ -6,6 +6,8 @@ import os, random, sys, unittest
 import z3
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE))
 import simdspec as S
+CACHE = os.environ.get('GATE_CACHE')      # declared input of this test (the verdict store); without it the tests that need the published GEN output are skipped with the reason
+if CACHE: S.F.configure(CACHE)
 K = S.K
 
 
@@ -69,10 +71,11 @@ class RcpRows(unittest.TestCase):
     def test_rcp_rsqrt_structure_against_the_c_function(self):
         """ssefp.rcp32 / rsqrt32 (table read from rt/rcptab.c, structure transcribed) equal fnvl_rcp32 / fnvl_rsqrt32 compiled from the same file"""
         import ctypes, subprocess, tempfile
+        if not CACHE: self.skipTest('GATE_CACHE (declared input: the verdict store with the published GEN output of lift/rt) is not set')
         d = tempfile.mkdtemp(); so = os.path.join(d, 'rcp.so')
         rt = os.path.join(os.path.dirname(HERE), '..', 'rt')
         import genout      # rcpref.h is the published GEN output of root lift/rt, not a file of rt/
-        subprocess.check_call(['gcc', '-O1', '-shared', '-fPIC', '-I', rt, '-I', genout.gen_dir(), '-o', so, os.path.join(rt, 'rcptab.c')])
+        subprocess.check_call(['gcc', '-O1', '-shared', '-fPIC', '-I', rt, '-I', genout.gen_dir(CACHE), '-o', so, os.path.join(rt, 'rcptab.c')])
         lib = ctypes.CDLL(so); lib.fnvl_rcp32.restype = lib.fnvl_rsqrt32.restype = ctypes.c_uint32; lib.fnvl_rcp32.argtypes = lib.fnvl_rsqrt32.argtypes = [ctypes.c_uint32]
         rng = random.Random(5); xs = [rng.getrandbits(32) for _ in range(300)] + [0, 0x80000000, 0x7F800000, 0xFF800000, 0x7FC00000, 0x7F800001, 1, 0x007FFFFF, 0x7E800000, 0x7F000000, 0x3F800000]
         X = z3.BitVec('x', 32)

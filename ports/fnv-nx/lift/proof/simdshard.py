@@ -23,8 +23,8 @@ from proof import symform, treeid  # noqa: E402
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--shapes', required=True); ap.add_argument('--shard', default='1/1'); ap.add_argument('--out', required=True)
-    ap.add_argument('--timeout', type=float, default=600); ap.add_argument('--slice', type=int, default=1); ap.add_argument('--limit', type=int); ap.add_argument('--cleared')
-    a = ap.parse_args(); k, n = [int(x) for x in a.shard.split('/')]; assert 1 <= k <= n
+    ap.add_argument('--timeout', type=float, default=600); ap.add_argument('--slice', type=int, default=1); ap.add_argument('--limit', type=int); ap.add_argument('--cleared'); ap.add_argument('--cache', required=True)
+    a = ap.parse_args(); simdcheck.S.F.configure(a.cache); k, n = [int(x) for x in a.shard.split('/')]; assert 1 <= k <= n
     os.makedirs(a.out, exist_ok=True); path = os.path.join(a.out, 'shapeprove_%d_of_%d.jsonl' % (k, n))
     rows = [l.rstrip('\n').split('\t') for l in open(a.shapes) if l.strip() and l[0] != '#'][::a.slice]
     mine = [r for i, r in enumerate(rows) if i % n == k - 1][:a.limit]

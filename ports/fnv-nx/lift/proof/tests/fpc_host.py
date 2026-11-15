@@ -2,7 +2,7 @@
 """The C helper fx_dsl_fp of rt/fnvl.h against the z3 model of dsl.fp (the same rules, two implementations). The helper's text is cut out of rt/fnvl.h (the template and its wrapper), compiled on the host
 with a shim for the aarch64 FPCR / FPSR hooks (fenv.h: rounding mode and the sticky flags), and run on random operands, with the fixed special cases, over every MXCSR combination of RC / DAZ / FTZ / UM.
 The z3 side is the model that the prover judges; this test says the shipped C text computes the same values and flags. Both sides use the host's IEEE hardware only through fenv in the C side.
-    fpc_host.py [N]       (exit 0 = no disagreement)"""
+    fpc_host.py CACHE [N]       (CACHE: the verdict store with the published GEN output of lift/rt, required; exit 0 = no disagreement)"""
 import ctypes, os, random, re, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, LIFT)
@@ -34,7 +34,8 @@ def build():
     return ctypes.CDLL(os.path.join(d, 'h.so'))
 
 def main():
-    N = int(sys.argv[1]) if len(sys.argv) > 1 else 40
+    if len(sys.argv) < 2: raise SystemExit('usage: fpc_host.py CACHE [N]  (CACHE: the verdict store, required)')
+    CACHE = sys.argv[1]; N = int(sys.argv[2]) if len(sys.argv) > 2 else 40
     lib = build(); lib.dsl_fp.argtypes = [ctypes.c_uint, ctypes.c_uint, ctypes.c_ulonglong, ctypes.c_ulonglong, ctypes.c_uint, ctypes.POINTER(ctypes.c_ulonglong), ctypes.POINTER(ctypes.c_uint)]
     rng = random.Random(5); bad = tot = 0
     SP = {32: [0, 0x80000000, 1, 0x007fffff, 0x00800000, 0x00800001, 0x7f7fffff, 0x3f800000, 0xbf800000, 0x7f800000, 0xff800000, 0x7fc00000, 0x7f800001, 0x40000000, 0x3f000000, 0x40400000, 0x30800000],
@@ -80,7 +81,7 @@ def main():
                     if bad <= 12: print('DISAGREE cvt %s %d->%d t%d a=%x mx=%x z3=(%x,%02x) c=(%x,%02x)' % (kind, sw, rw, tr, a, mx, zv, zf, v.value, f.value))
     # dsl.tab: every entry of both tables, z3 (rcptab.c read by dsl) against the C accessors that read rcptab.c's own functions
     sys.path.insert(0, os.path.join(LIFT, 'proof')); import genout
-    gdir = genout.gen_dir(); tdir = tempfile.mkdtemp(prefix='fpc_host_'); i0 = src.index('/* dsl.tab:'); acc = src[i0:src.index('\n', src.index('static inline u32 fnvl_tab_rsqrt'))]      # the shipped accessors, cut out of rt/fnvl.h
+    gdir = genout.gen_dir(CACHE); tdir = tempfile.mkdtemp(prefix='fpc_host_'); i0 = src.index('/* dsl.tab:'); acc = src[i0:src.index('\n', src.index('static inline u32 fnvl_tab_rsqrt'))]      # the shipped accessors, cut out of rt/fnvl.h
     tsrc = os.path.join(tdir, 't.cc')
     open(tsrc, 'w').write('typedef unsigned int u32;\nextern "C" u32 fnvl_rcp32(u32); extern "C" u32 fnvl_rsqrt32(u32);\n' + acc + '\nextern "C" u32 t_rcp(u32 i){ return fnvl_tab_rcp(i); } extern "C" u32 t_rsq(u32 i){ return fnvl_tab_rsqrt(i); }\n')
     subprocess.check_call(['g++', '-O1', '-shared', '-fPIC', '-I', gdir, '-o', os.path.join(tdir, 't.so'), '-x', 'c++', tsrc, '-x', 'c', os.path.join(LIFT, 'rt', 'rcptab.c')])

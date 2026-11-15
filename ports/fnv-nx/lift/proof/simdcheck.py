@@ -228,6 +228,8 @@ def _by_cases(key, rep, timeout):
 
 
 def main(a):
+    if '--cache' not in a: raise SystemExit('usage: simdcheck.py SHAPES.tsv --cache VERDICT_STORE [--only S] [--cleared F] [--timeout MS] [--budget S] [--progress]')
+    S.F.configure(a[a.index('--cache') + 1])
     only = a[a.index('--only') + 1] if '--only' in a else ''
     ud = set()
     if '--cleared' in a:                                   # the partition of sdmfeat.py (`partition`): the shapes of the cleared sites, #UD on the declared CPU (CPUREF), each by its SDM-derived reason
