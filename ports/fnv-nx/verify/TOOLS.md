@@ -158,7 +158,7 @@ Request kinds (the TSV `values` column; `note` is free text and is not read):
              site of a platform backend) comes only from producers of the universe that gate <gate> declared.  Inputs: --gate-cert GATE=SUMMARY.json,RESULT.json (the
              summary and the gate file of the SAME verdict), --verdict ID, --cert-objdump (`objdump -dr -t --no-show-raw-insn` of the root's objects, pinned binutils).
              CERTIFIED iff (a) the gate file says green (certified == universe) and the summary is of this verdict (`gate-not-green`, `summary-other-verdict`);
-             (b) the summary declares `universe` [{kind bytecode|glsl_table|glsl_blob, id, sha256}] sorted, `universe_hash` = sha256 of the lines `kind	id	sha256
+             (b) the summary declares `universe` [{kind bytecode|glsl_table, id, sha256}] sorted, `universe_hash` = sha256 of the lines `kind	id	sha256
 `
              (recomputed here: `universe-hash`) and `producers` [{symbol, kind function|data}], each data producer an id of the universe;
              (c) the proof of contract/gatecert.py (call graph by relocations, backward data flow of the argument register in every caller, recursion through
@@ -233,7 +233,11 @@ VALUES found by a backward walk over the control-flow graph of the caller (every
   - `mov`/`orr` from a register: the value of that register before the instruction;
   - result of a call (x0 after `bl F`): value PROD(F); any other caller-saved register after a call is clobbered (`clobbered`);
   - `adrp` + `add :lo12:` of the same symbol, or `adrp` + `ldr :lo12:` : the address of / a load from a constant offset of symbol Y;
-  - `ldr` from a register that holds the address of Y plus a constant: load from Y at that offset; a register index is `index-unbounded`;
+  - `ldr` from a register that holds the address of Y plus a constant: load from Y at that offset; with a register index (`[b, i, lsl #s]`, uxtw/sxtw) the
+    index must be proven in [0, count), count = (st_size(Y) - offset) / elt: (a) every path to the load carries an unsigned compare-and-branch of the index (or of
+    a register it was copied/extended/masked from) against a constant <= count (cmp with b.lo/b.cc taken, b.hs/b.cs fallthrough; b.ls taken / b.hi fallthrough
+    bound c+1; cbz/tbz are not bounds), a must-analysis over the CFG (the weakest path counts); (b) a loop induction variable is the same proof: its entry edge
+    (a constant) and its back or exit edge carry the bounds, a loop back edge adds nothing by itself.  Anything else is `index-unbounded:<function>+<offset>`;
   - the value of an x0..x7 at the function entry: PARAM(j), judged by the callers of the function (the call graph, recursively);
   - anything else (constants, stack loads, arithmetic, an unknown call result) has no certificate (`constant`, `stack-load`, `computed`, ...).
 A value is accepted iff it is PROD(F) with F a producer of kind function, or an address of / load from Y at a constant offset < size(Y) with

@@ -111,7 +111,7 @@ check('join with a constant path', sorted({x[0] for x in r}), ['constant'])
 f = base() + [('c6', [SAVE, ('adrp\tx1, 0 <c6>', (PG, 'progs')), ('add\tx1, x1, #0x0', (ADD, 'progs')), ('ldr\tw0, [x1, x2, lsl #2]', None),
                       ('bl\t0 <from_glsl>', (CALL, 'from_glsl')), REST, RET])]
 r, _, _ = run(f)
-check('unbounded index', sorted({x[0] for x in r}), ['index-unbounded'])
+check('unbounded index', sorted({x[0].split(':')[0] for x in r}), ['index-unbounded'])
 f = base() + [('c7', [SAVE, ('adrp\tx1, 0 <c7>', (PG, 'progs')), ('add\tx1, x1, #0x0', (ADD, 'progs')), ('ldr\tw0, [x1, #20]', None),
                       ('bl\t0 <from_glsl>', (CALL, 'from_glsl')), REST, RET])]
 r, _, _ = run(f)
@@ -134,6 +134,59 @@ check('no caller', [x[0] for x in r], ['no-caller'])
 f = base() + [('c8', [SAVE, ('mov\tw0, w20', None), ('bl\t0 <from_glsl>', (CALL, 'from_glsl')), REST, RET])]
 r, _, _ = run(f)
 check('uninitialized', sorted({x[0] for x in r}), ['uninitialized'])
+
+# ---- a variable index: (a) a dominating unsigned compare, (b) a loop induction variable bounded by its exit test
+ADRP19 = [SAVE, ('adrp\tx19, 0 <c>', (PG, 'progs')), ('add\tx19, x19, #0x0', (ADD, 'progs'))]
+SITE = [('ldr\tw0, [x19, w20, uxtw #2]', None), ('bl\t0 <from_glsl>', (CALL, 'from_glsl'))]
+
+
+def idxfn(name, body):
+    """a function placed FIRST in the object (start address 0), so branch targets are the addresses 4*index"""
+    return [(name, body)] + base()
+
+
+def codes(r):
+    return sorted({x[0].split(':')[0] for x in r})
+
+
+for cmp_c, cond, want in ((5, 'hs', []), (6, 'hs', ['index-unbounded']), (4, 'hs', [])):
+    # 0 SAVE 1 adrp 2 add 3 cmp 4 b.cond -> 8 (REST) 5 ldr 6 bl 7 REST(unused) ... 8 REST 9 RET
+    body = ADRP19 + [('cmp\tw20, #0x%x' % cmp_c, None), ('b.%s\t20 <c+0x20>' % cond, None)] + SITE + [REST, REST, RET]
+    r, _, _ = run(idxfn('c9', body))
+    check('(a) cmp #%d b.%s over 5 elements' % (cmp_c, cond), codes(r), want)
+# b.lo to the access: taken edge bounds the index
+body = ADRP19 + [('cmp\tw20, #0x5', None), ('b.lo\t18 <c+0x18>', None), ('b\t28 <c+0x28>', None)] + SITE + [REST, RET]
+r, _, _ = run(idxfn('c9', body))
+check('(a) b.lo taken', codes(r), [])
+# b.hi fallthrough: index <= 4 < 5
+body = ADRP19 + [('cmp\tw20, #0x4', None), ('b.hi\t20 <c+0x20>', None)] + SITE + [REST, REST, RET]
+r, _, _ = run(idxfn('c9', body))
+check('(a) b.hi fallthrough bound c+1', codes(r), [])
+# the bound is on another register that was copied: mov w20, w21 after cmp w21
+body = ADRP19 + [('cmp\tw21, #0x5', None), ('b.hs\t24 <c+0x24>', None), ('mov\tw20, w21', None)] + SITE + [REST, REST, RET]
+r, _, _ = run(idxfn('c9', body))
+check('(a) through a copy', codes(r), [])
+# no compare at all
+body = ADRP19 + SITE + [REST, RET]
+r, _, _ = run(idxfn('c9', body))
+check('unbounded: no compare', codes(r), ['index-unbounded'])
+# a compare that does not dominate: the access is also reached by a path that skips it
+body = ADRP19 + [('cbz\tw22, 1c <c+0x1c>', None), ('cmp\tw20, #0x5', None), ('b.hs\t2c <c+0x2c>', None)] + [('nop', None)] + SITE + [REST, REST, RET]
+r, _, _ = run(idxfn('c9', body))
+check('unbounded: the compare does not dominate', codes(r), ['index-unbounded'])
+# (b) loop from 0 to N: 0 SAVE 1 adrp 2 add 3 mov w20,#0 4 ldr(head) 5 bl 6 add 7 cmp 8 b.lo head(16) 9 REST 10 RET
+for n, want in ((5, []), (6, ['index-unbounded']), (3, [])):
+    body = ADRP19 + [('mov\tw20, #0x0', None)] + SITE + [('add\tw20, w20, #0x1', None), ('cmp\tw20, #0x%x' % n, None), ('b.lo\t10 <c+0x10>', None), REST, RET]
+    r, _, _ = run(idxfn('c9', body))
+    check('(b) loop 0..%d over 5 elements' % n, codes(r), want)
+# a loop whose step is not 1 / whose exit test is missing
+body = ADRP19 + [('mov\tw20, #0x0', None)] + SITE + [('add\tw20, w20, #0x1', None), ('b\t10 <c+0x10>', None), REST, RET]
+r, _, _ = run(idxfn('c9', body))
+check('(b) a loop without an exit test', codes(r), ['index-unbounded'])
+# a loop that starts from an unknown value
+body = ADRP19 + SITE + [('add\tw20, w20, #0x1', None), ('cmp\tw20, #0x5', None), ('b.lo\tc <c+0xc>', None), REST, RET]
+r, _, _ = run(idxfn('c9', body))
+check('(b) a loop from an unknown start (the entry path is unbounded)', codes(r), ['index-unbounded'])
 
 if fails:
     print('\n'.join(fails))
