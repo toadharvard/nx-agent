@@ -652,3 +652,7 @@ Paused: w3b, w4, farm; no other work.
     - Fixes in 43c73bc92: 7 Wine-cited fixme rows carried over; the NxTarget compare is one memcmp with a no-padding static_assert (ADDR32).
     - No build_guest.sh is tracked on w6-root.
     - Next: merge w1b 5bc689044 and del2, then one candidate verdict (L1) over d3d9, translator, sha256, nxgpu.
+- 00:53Z The orchestrator accepted 3.6 (render/d3d9 green, w6 43c73bc92).
+    - No separate verdict: w6 merges w1b 819716297/5bc689044 and del2, rebases w6-root onto the current candidate, and sends the four admit entries (d3d9, translator, lib/sha256, nxgpu). L1 folds them into the next candidate.
+    - Global numbers at 43c73bc92: 70 objects, 2,367 defined and 696 undefined symbols (the link belongs to the boot-link item).
+    - Next on the path: sm_link at 0 failures (w5).
