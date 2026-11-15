@@ -47,7 +47,7 @@ CLANG_LIBS = ["libclang-cpp.so.18.1", "libclang.so"]   # under `llvm-config-18 -
 M32_PROBE = "#include <stdint.h>\n#include <stdlib.h>\nint main(){return 0;}\n"   # clang -m32 -M: every header a 32-bit compile of the C library reads (gnu/stubs-32.h: libc6-dev-i386)
 PY_MODULES = {"capstone": "capstone", "gmpy2": "gmpy2", "keystone-engine": "keystone", "numpy": "numpy", "unicorn": "unicorn",
               "pyelftools": "elftools", "z3-solver": "z3", "pefile": "pefile"}   # distribution -> import name
-RENDER_LIBS = ["libEGL.so.1", "libEGL_mesa.so.0"]   # ldconfig names: the EGL loader the libnxgl4.so of render/gl4 links, and the Mesa vendor it dispatches to (NXGL4_HOST.md section 2); their loader closure (mesa-libgallium, libllvm, ...) is derived
+RENDER_LIBS = ["libEGL.so.1", "libEGL_mesa.so.0"]   # ldconfig names: the EGL loader the libnxgl4.so of render/gl4 links, and the Mesa vendor it dispatches to; their loader closure (mesa-libgallium, libllvm, ...) is derived
 RUN_LAYOUT_DEB = "base-files"   # the machine's root layout (./lib -> usr/lib, ./lib64 -> usr/lib64, ./bin, ./sbin): every `run` stage of recipe.py mounts its symlink members
 RENDER_FILES = ["/usr/share/glvnd/egl_vendor.d/50_mesa.json"]   # read by libEGL.so.1 to find that vendor
 def HOST_GCC_PLUGIN_DIRS(gcc):
