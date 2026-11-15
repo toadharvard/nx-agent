@@ -1974,3 +1974,12 @@ bottleneck: the cand2 merge (w15), cand3 (w12), and the pack-uses machinery (w28
   - It is not yet built at 09182012b, since w28's host has no pins; w12 runs it.
   - L3b's formgate.py:156 must read PACK too; relayed through L3a.
 bottleneck: the cand2 merge (w15), and cand3 (w12: the pack build check).
+- 00:25 **cand2 MERGED: trunk claude/fnv-nx-clean = fb9dd044f.** L1 green, 198.5 s warm, 42 gates, 31 of them vacuous 0/0.
+  - Cut by the graph:
+    - loader, sha256, translator, d3d9, gl4, nxgpu, pair, smscan and render/total;
+    - rt/guest, guest_main, platform and bootrt;
+    - 41 tests.
+    The tooling plus shim, hostabi/product and bridgefacts stay.
+  - The pin is L2 84f0883e. The fpexact target comes from each root's profile.
+  - Reported to the orchestrator. w12 rebases cand3 onto fb9dd044f, then w15 verifies and merges it.
+bottleneck: the cand3 head on the trunk (w12), then its verdict and merge (w15).
