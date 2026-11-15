@@ -241,6 +241,198 @@
      "ident": "side_effects_p"
     }
    ]
+  },
+  {
+   "pass": "pass_rtl_store_motion",
+   "class": "refuses",
+   "reason": "Every ordered access order emits is an __atomic_load_N / __atomic_store_N call (BUILT_IN_ATOMIC_LOAD_1 / BUILT_IN_ATOMIC_STORE_1 calls built in fnvnx_order.cc); builtins.cc expand_builtin_atomic_load/store take their MEM from get_builtin_sync_mem, which sets MEM_VOLATILE_P (6003), so the MEM of ldar/stlr is volatile and store-motion.cc:526 (volatile dest) and :530 (side effects) refuse it. A scalar access order leaves plain (a bit-field, fnvnx_order.cc: the fenced RMW path) has no volatile MEM; only its dmb fences protect it, which this table does not cover (reported)",
+   "files": {
+    "store-motion.cc": "dde6ace07d3da08c0cad4d71c57417cc96d680a077de563362182db40736a6f6",
+    "builtins.cc": "2880670ab684fa82ffd25230399f71a248744cb4f4ddb0aa48404d63baa34812"
+   },
+   "cites": [
+    {
+     "file": "store-motion.cc",
+     "line": 526,
+     "ident": "MEM_VOLATILE_P"
+    },
+    {
+     "file": "store-motion.cc",
+     "line": 530,
+     "ident": "side_effects_p"
+    },
+    {
+     "file": "builtins.cc",
+     "line": 6003,
+     "ident": "MEM_VOLATILE_P"
+    },
+    {
+     "file": "builtins.cc",
+     "line": 6426,
+     "ident": "get_builtin_sync_mem"
+    },
+    {
+     "file": "builtins.cc",
+     "line": 6449,
+     "ident": "get_builtin_sync_mem"
+    }
+   ],
+   "gated_off": {
+    "flag_var": "flag_gcse_sm",
+    "option": "fgcse-sm",
+    "gate": {
+     "file": "store-motion.cc",
+     "line": 1257,
+     "ident": "flag_gcse_sm"
+    }
+   }
+  },
+  {
+   "pass": "pass_sched",
+   "class": "refuses",
+   "reason": "sched_analyze_2 treats an UNSPEC_VOLATILE insn (ldar/stlr, atomics.md UNSPECV_LDA/UNSPECV_STL) as a true barrier: it flushes the pending memory lists (2756) and sets reg_pending_barrier = TRUE_BARRIER (2772), so no insn moves across it; two volatile MEMs are always dependent (alias.cc:2770, in true_dependence_1)",
+   "files": {
+    "sched-deps.cc": "d5cf1d42b69801e164990d80409e801d2db4bd3fcfceebd18bd95fec1f0e0c38",
+    "alias.cc": "a400b7ec29c748bf9f396740c637375cd11ccad44fe53a4bed557589466baf8a"
+   },
+   "cites": [
+    {
+     "file": "sched-deps.cc",
+     "line": 2756,
+     "ident": "UNSPEC_VOLATILE"
+    },
+    {
+     "file": "sched-deps.cc",
+     "line": 2772,
+     "ident": "TRUE_BARRIER"
+    },
+    {
+     "file": "alias.cc",
+     "line": 2770,
+     "ident": "MEM_VOLATILE_P"
+    }
+   ]
+  },
+  {
+   "pass": "pass_sched2",
+   "class": "refuses",
+   "reason": "sched_analyze_2 treats an UNSPEC_VOLATILE insn (ldar/stlr, atomics.md UNSPECV_LDA/UNSPECV_STL) as a true barrier: it flushes the pending memory lists (2756) and sets reg_pending_barrier = TRUE_BARRIER (2772), so no insn moves across it; two volatile MEMs are always dependent (alias.cc:2770, in true_dependence_1)",
+   "files": {
+    "sched-deps.cc": "d5cf1d42b69801e164990d80409e801d2db4bd3fcfceebd18bd95fec1f0e0c38",
+    "alias.cc": "a400b7ec29c748bf9f396740c637375cd11ccad44fe53a4bed557589466baf8a"
+   },
+   "cites": [
+    {
+     "file": "sched-deps.cc",
+     "line": 2756,
+     "ident": "UNSPEC_VOLATILE"
+    },
+    {
+     "file": "sched-deps.cc",
+     "line": 2772,
+     "ident": "TRUE_BARRIER"
+    },
+    {
+     "file": "alias.cc",
+     "line": 2770,
+     "ident": "MEM_VOLATILE_P"
+    }
+   ]
+  },
+  {
+   "pass": "pass_live_range_shrinkage",
+   "class": "refuses",
+   "reason": "sched_analyze_2 treats an UNSPEC_VOLATILE insn (ldar/stlr, atomics.md UNSPECV_LDA/UNSPECV_STL) as a true barrier: it flushes the pending memory lists (2756) and sets reg_pending_barrier = TRUE_BARRIER (2772), so no insn moves across it; two volatile MEMs are always dependent (alias.cc:2770, in true_dependence_1)",
+   "files": {
+    "sched-deps.cc": "d5cf1d42b69801e164990d80409e801d2db4bd3fcfceebd18bd95fec1f0e0c38",
+    "alias.cc": "a400b7ec29c748bf9f396740c637375cd11ccad44fe53a4bed557589466baf8a"
+   },
+   "cites": [
+    {
+     "file": "sched-deps.cc",
+     "line": 2756,
+     "ident": "UNSPEC_VOLATILE"
+    },
+    {
+     "file": "sched-deps.cc",
+     "line": 2772,
+     "ident": "TRUE_BARRIER"
+    },
+    {
+     "file": "alias.cc",
+     "line": 2770,
+     "ident": "MEM_VOLATILE_P"
+    }
+   ]
+  },
+  {
+   "pass": "pass_sched_fusion",
+   "class": "refuses",
+   "reason": "scheduling fusion only reorders insns for peephole2 (sched-rgn.cc gate, 3951 holds flag_peephole2); it uses the same dependence analysis as sched (sched-deps.cc:2756/2772 barrier), and the ldp/stp fusion peepholes refuse a volatile MEM (aarch64.cc:26152 aarch64_operands_ok_for_ldpstp, 26319 aarch64_gen_adjusted_ldpstp)",
+   "files": {
+    "sched-deps.cc": "d5cf1d42b69801e164990d80409e801d2db4bd3fcfceebd18bd95fec1f0e0c38",
+    "config/aarch64/aarch64.cc": "458ca7feffb0560f53f4ae66f4a6f85a31d231d50378e78f165f2314c3c42e0f"
+   },
+   "cites": [
+    {
+     "file": "sched-deps.cc",
+     "line": 2756,
+     "ident": "UNSPEC_VOLATILE"
+    },
+    {
+     "file": "sched-deps.cc",
+     "line": 2772,
+     "ident": "TRUE_BARRIER"
+    },
+    {
+     "file": "config/aarch64/aarch64.cc",
+     "line": 26152,
+     "ident": "MEM_VOLATILE_P"
+    },
+    {
+     "file": "config/aarch64/aarch64.cc",
+     "line": 26319,
+     "ident": "MEM_VOLATILE_P"
+    }
+   ]
+  },
+  {
+   "pass": "pass_combine",
+   "class": "refuses",
+   "reason": "combine_instructions calls init_recog_no_volatile (1140), so recog's general_operand rejects a volatile MEM operand (recog.cc:1525); the MEM operand of ldar/stlr is aarch64_sync_memory_operand, which is memory_operand (predicates.md:417), and the patterns are unspec_volatile (atomics.md:734); a source that is UNSPEC_VOLATILE is not combined across other insns (combine.cc:1927)",
+   "files": {
+    "combine.cc": "006dfc908fb02f26282679f955a11baf00b6adff46323352b235d731e270a0c4",
+    "recog.cc": "0d68c844fa7b34b3544ecf364341230363523a2056605d07a6e3cdfa1ea98412",
+    "config/aarch64/predicates.md": "ddefbcdc553708d9436ff0399e9e1365e7882a36ad855ef5cf7e6e11ab49381d",
+    "config/aarch64/atomics.md": "bdd18423901e0b8b3deef2843b68b15be1a3fa554a619d5d8ee8b6b1ebd76517"
+   },
+   "cites": [
+    {
+     "file": "combine.cc",
+     "line": 1140,
+     "ident": "init_recog_no_volatile"
+    },
+    {
+     "file": "recog.cc",
+     "line": 1525,
+     "ident": "volatile_ok"
+    },
+    {
+     "file": "config/aarch64/predicates.md",
+     "line": 417,
+     "ident": "memory_operand"
+    },
+    {
+     "file": "config/aarch64/atomics.md",
+     "line": 734,
+     "ident": "UNSPECV_STL"
+    },
+    {
+     "file": "combine.cc",
+     "line": 1927,
+     "ident": "UNSPEC_VOLATILE"
+    }
+   ]
   }
  ]
 }
