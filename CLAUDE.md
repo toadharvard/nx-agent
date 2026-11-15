@@ -607,6 +607,40 @@ The owner's words: "По построению не должно быть неп�
 - **Owners:** L2 (stages, PINKEY becomes this) and L1 (the recipe takes the compiler by stage key, `admit`, envcheck).
   Lands with cand3. The cand2 pin 56a4d09c stands; cand2 is not reopened.
 
+## Owner order of 2026-11-15 21:00Z: every generator is a recipe stage; no path outside the key (binding for every layer)
+
+The owner's words: "Что ещё так проебано? Перепроверь. Пересобери."
+
+- **The defect.** The published pack 7b2faae276b2/db2aaf6d4a08 was lifted from a stale module table: galaxy.dll was
+  still a static image, so libvorbis and libvorbisfile were lifted at a base 0x450000 too high, and d3dx9_31, atimgpud
+  and gdffalloutnv were not lifted at all.
+- **The cause.** `lift/tools/pemod.py:7` read `/home/user/wt-l1/modules/modules.tsv`, a container-local copy, outside
+  any key. The same class holds across the whole lift input chain, at L3a 217cb3ce0: the facts and universe under
+  `/home/user/l3facts*`, `funcs.tsv`, `exe_mnemonics.tsv`, the bridges `/home/user/wt-l5/manifest/bridge.tsv`, and the
+  exe and module directories. It holds in other layers too, for example `render/shaders/total/sm_table.py` REF
+  `/home/user/work/l6/ref` and the `/home/user/fnv-nx-build` defaults of `tools/gates/ready.py`.
+- **The rule.**
+  - Every step that produces an input of a product root or a gate is a hermetic recipe stage: facts, universe, module
+    table, bridges, the lifted pack, the shader table and every other generated table.
+  - Its key is the content of what it mounts:
+    - the exe and module bytes from the gamedata external;
+    - modules.tsv and bridge.tsv from the tree at the commit;
+    - facts from their own stage's output.
+  - A stage that opens a path outside its mounts fails. So a stale copy cannot enter.
+  - No tool on a product or gate path has a default absolute path or an environment default. A missing input is an
+    argument error.
+  - The lifted image set is every module of modules.tsv that has code. The pack carries the sha256 of the table it was
+    lifted from, and the pack stage is red when it differs from the loader's.
+- **Owners.**
+  - L3a: the whole lift chain, done in this relift.
+  - L1: generator stages in recipe.py, and a gate that reds on any absolute path (or `os.environ.get` default)
+    reaching a product or gate input, over every tracked tool, by rule.
+  - L5 and L6: their tools of this class.
+  - Tools used only by tests (X11 locks) and scratch notes are outside the product and gate paths; L1's rule decides that
+    from the stage graph, not by a list.
+- **The cold pack build** of the relifted pack runs on up to 16 farms (orchestrator, 2026-11-15 21:00Z, for this one
+  build). It is sharded by the recipe, with N up to 16, and the shards' stores are merged by key.
+
 ## Orchestrator decision of 2026-11-15 09:20Z: weekly budget (binding for every session)
 
 - The owner's usage page reads: weekly 29 % used, reset on Saturday 2026-11-21 18:00Z. At the pace so far the limit ends
