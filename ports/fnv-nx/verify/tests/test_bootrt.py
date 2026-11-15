@@ -94,7 +94,7 @@ def main():
     # the machine's side: the run record of a host-object exit, full width, as run() would classify a guest's exit
     elf = make_elf()
     plan = bootlayout.plan(bootlayout.parse_elf(elf), [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x1409000)], 4 << 20)
-    m = bootmachine.Machine(elf, plan, boothost.Services(_scratch("brt-m-")), app_cores=bootmachine.FNVNX_APP_CORES)
+    m = bootmachine.Machine(elf, plan, boothost.Services(_scratch("brt-m-")), quantum=20000)
     r = m.host_exit(REACH | 0xABCDEF)
     case("host_exit reach: reason reach-violation, fact_id, exit_code in full", r["reason"] == "reach-violation" and r["fact_id"] == 0xABCDEF
          and r["exit_code"] == REACH | 0xABCDEF, r)
