@@ -36,6 +36,15 @@ def gates(exe, mods, out):
     open(os.path.join(out, 'summary.tsv'), 'w').write(''.join(lines)); print(''.join(lines), end='')
 
 
+def jtabcert(exe, mods, out):
+    """JTABCERT/<image>.json: the jtab-guard certificates and residue of every image, copied byte for byte from the per-image stage (the liftfacts gate counts any residue as red)"""
+    os.makedirs(os.path.join(out, 'JTABCERT'))
+    for n, d in [('exe', exe)] + [(n.lower(), os.path.join(d, n.lower())) for n, d in sorted(mods, key=lambda x: x[0].lower())]:
+        p = os.path.join(d, 'jtabcert.json')
+        if not os.path.isfile(p): sys.exit('factsassemble: %s: missing jtabcert.json' % n)
+        shutil.copy(p, os.path.join(out, 'JTABCERT', n + '.json'))
+
+
 def main(table, funcs, exe, mods, out, gout):
     want = sorted(os.path.splitext(n)[0].lower() for n in rows(table)); got = sorted(n.lower() for n, _ in mods)
     bad = ['table row without a stage: %s' % n for n in want if n not in got] + ['stage that is no table row: %s' % n for n in got if n not in want] + ['stage given twice: %s' % n for n in sorted(set(g for g in got if got.count(g) > 1))]
@@ -47,6 +56,7 @@ def main(table, funcs, exe, mods, out, gout):
         src = os.path.join(d, n.lower())
         if not os.path.isdir(src): sys.exit('factsassemble: %s: the stage directory %s has no %s/' % (n, d, n.lower()))
         shutil.copytree(src, os.path.join(out, n.lower()))
+    jtabcert(exe, mods, out)
     gates(exe, mods, gout)
     print('factsassemble: exe + %d modules + funcs' % len(mods))
 

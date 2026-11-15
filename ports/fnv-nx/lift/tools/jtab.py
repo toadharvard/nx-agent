@@ -451,7 +451,17 @@ def benign_form(ins, x, ins_c, preds, dec):
     return False
 
 
+RO = None                      # read_only(lo, hi) of the image being resolved (pemod.M.read_only); set by the caller before resolving
 STATS = {'calls': 0, 'secs': 0.0, 'cone_sum': 0, 'cone_max': 0, 'slow': []}      # cost accounting of resolve (printed by the callers): calls, total seconds, backward-cone sizes
+def owner6_id():
+    """the id of OWNER 6 (the exe makes no wild accesses) in verify/ASSUMPTIONS.json, found by the owner's quoted decision"""
+    import json
+    d = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'verify', 'ASSUMPTIONS.json')))
+    ids = [r['id'] for v in d.values() if isinstance(v, list) for r in v if isinstance(r, dict) and r.get('status') == 'OWNER' and r.get('decision', {}).get('quote', '').startswith('6. the exe makes no wild accesses')]
+    assert len(ids) == 1, ids
+    return ids[0]
+
+
 def _cert(st, ireg, v, T, words, ins, site, u8):
     """the 'jtab-guard' certificate of a resolution that relies on frame cells although a frame address is formed in the cone (OWNER 6: nothing but the function writes the cell between guard and reload).
     The index register holds the (unsigned, ja/jae/jbe/jb) guarded value of ONE ebp cell, through the recorded steps (add/sub constants, byte-table lookups): the guard dominates the jump (the tag survives
@@ -462,22 +472,26 @@ def _cert(st, ireg, v, T, words, ins, site, u8):
     if tg is None: return None, 'C1/C2: no unsigned guard on one ebp cell dominates the jump with the cell unwritten up to the reload'
     if ins.mnemonic != 'jmp' or ins.operands[0].mem.scale != 4: return None, 'C3: not a scale-4 table jump'
     (gva, jcc, taken, imm, loc, bound, jbytes, rule), steps = tg
-    q = (0, bound); b = None; bext = None; bsha = None; st2 = []
+    q = (0, bound); b = None; bext = None; bsha = None; blo = None; st2 = []
     for va, k, a in steps:
         if k == 'add': q = add(q, a)
         elif k == 'byte':
             if q[1] >= (1 << 16): return None, 'C3: byte-table index interval too wide'
             vs = [u8((a + q[0] + i) % N) for i in range(q[1] + 1)]
             if None in vs: return None, 'C3: byte table outside the read-only image'
-            b = a; bext = q[1] + 1; bsha = hashlib.sha256(bytes(vs)).hexdigest(); q = (min(vs), max(vs) - min(vs))
+            b = a; blo = q[0]; bext = q[1] + 1; bsha = hashlib.sha256(bytes(vs)).hexdigest(); q = (min(vs), max(vs) - min(vs))
         st2.append((va, k, a))
     if q != v: return None, 'C3: the guard alone gives %s after the steps, the resolution %s' % (q, v)
+    ilo = v[0] if v[0] < N // 2 else v[0] - N
+    if RO is None: return None, 'C4: the image has no read-only predicate'
+    if not RO((T + 4 * ilo) % N, (T + 4 * (ilo + v[1] + 1)) % N if ilo + v[1] + 1 > 0 else T + 4 * (ilo + v[1] + 1)): return None, 'C4: the table extent is not inside one read-only section'
+    if b is not None and not RO((b + blo) % N, (b + blo + bext) % N): return None, 'C4: the byte table is not inside one read-only section'
     loads = [x for x in steps if x[1] == 'load']
     return {'kind': 'jtab-guard', 'site_va': site, 'jmp_va': site, 'guard_va': gva, 'reload_va': loads[0][0] if loads else None,
             'cell': {'base': 'ebp', 'disp': loc[2], 'width': 4}, 'guard_width': 4, 'reload_width': 4, 'jcc': jcc, 'jcc_bytes': jbytes, 'edge': 'taken' if taken else 'not-taken', 'N': imm,
             'extent_rule': 'N+1 inclusive bound' if rule == 'inclusive' else 'N exclusive bound', 'guard_extent': bound + 1, 'extent': v[1] + 1, 'index_lo': v[0] if v[0] < N // 2 else v[0] - N,
-            'T': T, 'scale': 4, 'steps': tuple(st2), 'B': b, 'b_extent': bext, 'b_entries_sha': bsha,
-            'entries_sha': hashlib.sha256(b''.join(w.to_bytes(4, 'little') for w in words)).hexdigest(), 'assumption': 'OWNER 6'}, None
+            'T': T, 'scale': 4, 'steps': tuple(st2), 'B': b, 'b_lo': blo, 'b_extent': bext, 'b_entries_sha': bsha,
+            'entries_sha': hashlib.sha256(b''.join(w.to_bytes(4, 'little') for w in words)).hexdigest(), 'assumption': owner6_id()}, None
 
 
 def resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords):
@@ -562,7 +576,7 @@ def _resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords, 
         if cert is None:
             STATS.setdefault('guard_residue', []).append((site, why))
             return _resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords, True)
-    r = Tg(out); r.cert = cert; r.addrs = tuple(addrs); r.base = T; r.dsite = site + ins.disp_offset; r.lo = v[0] if v[0] < N // 2 else v[0] - N; r.hi = r.lo + v[1]; return r, None
+    r = Tg(out); r.cert = cert; r.need6 = need6; r.addrs = tuple(addrs); r.base = T; r.dsite = site + ins.disp_offset; r.lo = v[0] if v[0] < N // 2 else v[0] - N; r.hi = r.lo + v[1]; return r, None
 
 
 def exclusive(ok, svals):
@@ -586,3 +600,14 @@ def exclusive(ok, svals):
     return out
 import atexit
 atexit.register(lambda: STATS['calls'] and sys.stderr.write('jtab resolve cost: %d calls, %.0f s, cone sum %d, cone max %d, slow(>5s) %d\n' % (STATS['calls'], STATS['secs'], STATS['cone_sum'], STATS['cone_max'], len(STATS['slow']))))
+
+
+def write_certs(outd, image, image_sha256, jt_ok, jt_red, facts_commit=None):
+    """JTABCERT of one image: the certificates of the resolved sites that need OWNER 6, and the residue (the red sites whose cone formed a frame address and had no valid certificate, with the reason).
+    Written to outd/jtabcert.json; factsassemble copies it to JTABCERT/<image>.json."""
+    import json
+    certs = [dict(t.cert, image=image, image_sha256=image_sha256, facts_commit=facts_commit) for a, t in sorted(jt_ok.items()) if getattr(t, 'cert', None)]
+    why = dict(STATS.get('guard_residue', ()))
+    res = [{'site_va': a, 'reason': why[a]} for a in sorted(jt_red) if a in why]
+    json.dump({'format': 'fnvnx-jtabcert/1', 'image': image, 'image_sha256': image_sha256, 'certificates': certs, 'residue': res}, open(os.path.join(outd, 'jtabcert.json'), 'w'), indent=1, sort_keys=True)
+    return len(certs), len(res)

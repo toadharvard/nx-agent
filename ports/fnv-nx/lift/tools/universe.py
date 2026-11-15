@@ -185,6 +185,7 @@ def jt_pass():
         if any(v <= a < v + z for v, z in M.wr): return None           # a byte table is read only from a read-only section (a writable one is not a fact)
         try: return u32(a) & 0xff
         except Exception: return None
+    JT.RO = M.read_only
     ex = JT.exclusive(jt_ok, svals)
     def seeded(x):
         if x in callers: return True
@@ -509,6 +510,9 @@ if not STRICT:
     exo = sorted(a for a, v in insns.items() if v[1] in EXOTIC)
     print('\n'.join(eh.finish(entries)))
     import dic
+    import hashlib
+    nj = JT.write_certs(OUTD, 'exe', hashlib.sha256(M.d).hexdigest(), jt_ok, jt_red)
+    print('JTABCERT certificates %d, residue %d' % nj)
     DR = dic.jtab_ranges(OUTD); dic.write(OUTD, HD, DR)          # data in code: the ranges a proven consumer reads (tools/dic.py)
     DW, DWd = dic.nonoperand_words(md, text, T0, relocs, {(a_, (scx[e_] if e_ in scx else insns)[a_][0]) for e_ in entries for a_ in (sorted(scx[e_]) if e_ in scx else extent_insns(e_))}, DR)
     print('data_in_code: %d ranges (jtab %d), %d bytes; relocated words overlapping a reached instruction without being its operand: %d (of them inside a data range %d)' % (len(DR), len(DR), sum(b_ - a_ for a_, b_, k, d in DR), len(DW), len(DWd)))

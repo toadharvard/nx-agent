@@ -138,6 +138,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
             if any(v <= a < v + z for v, z in M.wr): return None       # a byte table is read only from a read-only section (a writable one is not a fact)
             try: return u32(a) & 0xff
             except Exception: return None
+        JT.RO = M.read_only
         ex = JT.exclusive(jt_ok, svals)
         def seeded(x):
             if x in callers: return True
@@ -160,7 +161,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
             if a in jt_ok and jt_ok[a] != tg:      # monotone: a site's table only grows (each result is proved on a real decode, so the union of two results is a set of real edges; the evaluation can otherwise oscillate between two decodes)
                 old = jt_ok[a]; pairs = sorted(set(zip(old.addrs, old)) | set(zip(tg.addrs, tg)))
                 if len(pairs) == len(old.addrs): continue
-                m = JT.Tg(t for _, t in pairs); m.addrs = tuple(x for x, _ in pairs); m.base = old.base; m.dsite = old.dsite; m.lo = min(old.lo, tg.lo); m.hi = max(old.hi, tg.hi); tg = m
+                m = JT.Tg(t for _, t in pairs); m.addrs = tuple(x for x, _ in pairs); m.base = old.base; m.dsite = old.dsite; m.lo = min(old.lo, tg.lo); m.hi = max(old.hi, tg.hi); m.need6 = old.need6 or tg.need6; m.cert = None; tg = m      # a union of two decodes' tables: the certificate of either covers only its own extent, so a union that needs OWNER 6 is residue
             if a not in jt_ok or jt_ok[a] != tg:
                 jt_ok[a] = tg; sz, mn, ft, fall, old = dec[a]; dec[a] = (sz, mn, ft, False, tuple(tg)); jins.append(a); n += 1
                 for t in tg: descend(t)
@@ -419,6 +420,8 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     mp = Counter(dec[a][1] for a in pset)
     fi = eh.finish(ent)
     import dic
+    nj = JT.write_certs(outd, name, hashlib.sha256(M.d).hexdigest(), {a: t for a, t in jt_ok.items()}, jt_red | {a: 'C1-C4: a merged table needs OWNER 6 and has no certificate' for a, t in jt_ok.items() if getattr(t, 'need6', False) and t.cert is None})
+    print('JTABCERT certificates %d, residue %d' % nj)
     DR = dic.jtab_ranges(outd); dic.write(outd, hd, DR)          # data in code: the ranges a proven consumer reads (tools/dic.py)
     DW, DWd = dic.nonoperand_words(md, text, T0, relocs, {(a, dec[a][0]) for e in E for a in exts[e]}, DR)
     print('data_in_code: %d ranges (jtab %d), %d bytes; relocated words overlapping a reached instruction without being its operand: %d (of them inside a data range %d)' % (len(DR), len(DR), sum(b - a for a, b, k, d in DR), len(DW), len(DWd)))

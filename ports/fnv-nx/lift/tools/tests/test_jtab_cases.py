@@ -15,6 +15,8 @@ def u32v(a): return TAB if a else 0
 def tab(*v): return b''.join(u32(x) for x in v)
 def jmp_tab(disp, reg=0x85): return b'\xff\x24' + bytes([reg]) + u32(disp)
 
+jtab.RO = lambda lo, hi: BASE <= lo and hi <= RW and RO <= lo or (FN <= lo and hi <= RO)          # the code and read-only data are read-only, the RW page is not
+
 class earlier:
     '''FRAME_ESCAPE_OTHER = True: the earlier rule, a frame-address form that is not proved benign turns the cells off for the cone'''
     def __enter__(s): jtab.FRAME_ESCAPE_OTHER = True
@@ -149,7 +151,7 @@ class F(unittest.TestCase):
         code = b'\x8d\x4d\xec\x89\x55\xec\x83\x7d\xec\x04\x77\x0a\x8b\x45\xec' + jmp_tab(TAB) + b'\xc3'
         c = s.cert(code, relocs=[FN + 18] + s.R5)
         s.assertEqual((c['kind'], c['jmp_va'], c['guard_va'], c['reload_va'], c['cell'], c['jcc'], c['jcc_bytes'], c['edge'], c['N'], c['extent_rule'], c['guard_extent'], c['extent'], c['B'], c['assumption']),
-                      ('jtab-guard', FN + 15, FN + 10, FN + 12, {'base': 'ebp', 'disp': -0x14, 'width': 4}, 'ja', '770a', 'not-taken', 4, 'N+1 inclusive bound', 5, 5, None, 'OWNER 6'))
+                      ('jtab-guard', FN + 15, FN + 10, FN + 12, {'base': 'ebp', 'disp': -0x14, 'width': 4}, 'ja', '770a', 'not-taken', 4, 'N+1 inclusive bound', 5, 5, None, 'ASM-006'))
         with earlier(): s.red(code, tab(*OUT[:5]), relocs=[FN + 18] + s.R5)
     def test_certificate_through_a_byte_table(s):
         code = b'\x8d\x4d\xec\x89\x55\xec\x83\x7d\xec\x03\x77\x11\x8b\x45\xec' + b'\x0f\xb6\x88' + u32(RO) + jmp_tab(TAB, 0x8d) + b'\xc3'
@@ -163,6 +165,11 @@ class F(unittest.TestCase):
         code = b'\x8d\x4d\xec\x89\x55\xec\x83\x7d\xec\x04\x77\x11\xc7\x45\xec\x09\x00\x00\x00\x8b\x45\xec' + jmp_tab(TAB) + b'\xc3'
         t, why = run(code, tab(*OUT[:10]), relocs=[FN + 25] + [TAB + 4 * i for i in range(10)])
         s.assertTrue(t is None or t.cert is None or t.cert['extent'] == 1)
+    def test_table_in_a_writable_section_has_no_certificate(s):
+        code = b'\x8d\x4d\xec\x89\x55\xec\x83\x7d\xec\x04\x77\x0a\x8b\x45\xec' + jmp_tab(RW) + b'\xc3'
+        t, why = run(code, b'', rw=tab(*OUT[:5]), relocs=[FN + 18] + [RW + 4 * i for i in range(5)])
+        s.assertIsNone(t)
+        s.assertTrue(any('C4' in w for _, w in jtab.STATS.get('guard_residue', [])))
     def test_signed_guard_has_no_certificate(s):
         code = b'\x8d\x4d\xec\x89\x55\xec\x83\x7d\xec\x04\x7f\x0a\x8b\x45\xec' + jmp_tab(TAB) + b'\xc3'
         s.red(code, tab(*OUT[:5]), relocs=[FN + 18] + s.R5)
