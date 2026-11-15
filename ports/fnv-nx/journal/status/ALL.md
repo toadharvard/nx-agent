@@ -12,6 +12,8 @@ Updated 2026-11-14 23:30Z (path plan). Older sections below are from 2026-11-12 
 - Goal path: product roots -> lifted packs as roots -> ELF -> boot -> WinMain -> menu -> first frame (GL in the emulator).
 
 
+**2026-11-15 17:10Z (orchestrator).** Trunk a5c8f427, cand2 07a5e14e8 unchanged; the datamodel pin (L2 none-elf) is ~2 builds of ~50 min away, held for one plugin set in the runtime (order/pi onto it, plugin sources in the stamp key). L4 boot milestones exe entry / WinMain / first frame wired (522ef1d53). L3a pack store handed to L4 (f48745b3f). L5, L6, L6A wait on cand3/cand4.
+
 **2026-11-15 16:10Z (orchestrator).** Trunk a5c8f427 unchanged; cand2 07a5e14e8 (selftests 94 hit / 24 fail, ~14 wait on the datamodel pin; merge after the pin and one warm run). New gate class from L1: extern "C" parameter/result types in C++ units (1607/2737 at cand2 726547a3) -> L2 decltype rows, done 81984319d, cand3. L3a: jump-table resolver fixpoint defect fixed (w7 3b11d1185), all 8 images recomputed. L6 sm_link green over the full universe (1799440ac), cand4. L6A 4.6 d3d9 guest green (db7aa346b). Ruling: an application-side Microsoft prohibition is a silence on the system's result (CLAUDE.md 10ce6e2df).
 
 **2026-11-15 15:10Z (orchestrator).** Trunk a5c8f427 unchanged. cand2 c7fde52c3 fixing its own reds (objstub target profile 939c2794d, abi decoder C forms f215e1b27/4159b2316, selftest scratch leak c7fde52c3); abi 8690/10434 after L2 w2 0a6c04811; datamodel waits on the L2 farm's none-elf pin (CFG-LINK rule for configure link tests). L6 sm_link 0 red at 2d61e9fb9 queued for cand4 behind w6-root; L6A told 4.6 is unblocked. L6A gl4 libnxgl4.so from the recipe, derived link roots, 3b360ffd2. No lead stopped on the limit.
