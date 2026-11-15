@@ -2153,7 +2153,7 @@ class Job:
             fp = os.path.join(ws, "flags-%s.json" % k)
             json.dump({"argv": flags[k]}, open(fp, "w"))   # semantics first, then the root's own
             builds[k] = unitstage.Build(argparse.Namespace(store=self.store, cold=False, cxx=drv["c" if k == "asm" else k], toolrt=rtp, flags_file=fp,
-                                                           src_root=os.path.join(ws, "root") + "@/src", include=self.includes(ws)))
+                                                           src_root=os.path.join(ws, "root") + "@/src", include=self.includes(ws), mounted=[i["at"] for i in self.use_inputs(ws)]))
             builds[k].cc_drop = drop | {i["at"] for i in self.use_inputs(ws)}
             builds[k].rt = dict(builds[k].rt, inputs=builds[k].rt["inputs"] + self.use_inputs(ws))
             builds[k].variant = self.variant

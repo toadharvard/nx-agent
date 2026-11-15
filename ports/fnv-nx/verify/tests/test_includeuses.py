@@ -44,6 +44,18 @@ with tempfile.TemporaryDirectory() as repo:
     files = [P + "/inc/a.h", P + "/x.c"]
     check("closure carries P's directory with tracked files and drops its generated directory", recipe.include_closure([P + "/inc"], C, roots, repo, "guest", files=files), [P + "/inc", ])
     check("the consumer's own entries stay", recipe.include_closure([P + "/inc", C + "/g"], C, roots, repo, "guest", files=files + [C + "/g/z.h"]), [P + "/inc", C + "/g"])
+# unitstage: an include of a mounted `include_uses` directory is accepted, one that no input names is refused
+import argparse, unitstage
+with tempfile.TemporaryDirectory() as d:
+    os.makedirs(d + "/src"); os.makedirs(d + "/store")
+    json.dump({"exes": {"g++": 1}, "inputs": []}, open(d + "/rt.json", "w")); json.dump({"argv": []}, open(d + "/fl.json", "w"))
+    mk = lambda **kw: unitstage.Build(argparse.Namespace(store=d + "/store", cold=False, cxx="g++", toolrt=d + "/rt.json", flags_file=d + "/fl.json", src_root=d + "/src@/src", include=["/uses/r/GEN"], **kw))
+    check("a mounted use directory is an include", mk(mounted=["/uses/r/GEN"]).iargs, ["-I/uses/r/GEN"])
+    try:
+        mk()
+        check("an include that no input mounts is refused", False)
+    except unitstage.UnitError:
+        pass
 if fails:
     print("\n".join("FAIL " + f for f in fails)); sys.exit(1)
 print("includeuses: ok")
