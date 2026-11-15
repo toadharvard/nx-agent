@@ -1850,3 +1850,7 @@ bottleneck: the cand2 verdict on w15.
 bottleneck: the cand2 verdict on w15.
 - 21:54 w28 e8caf06f: L1 abspath findings 0. Over 163 files: 12 findings, L3a 6 and L6 6. env.json gets a host record read by hostprofile.py; ARTIFACTS_URL becomes a required --artifacts; require_mounted / require_under guards; 20/20 selftests. Goes into cand4 (farm scripts need --artifacts and a refreshed env_id). Next for w28: the exe row in MODULES_TSV for cand4, kind from IMAGE_FILE_DLL.
 bottleneck: the cand2 verdict on w15.
+- 21:58 L3a blocker: cand3 c0f504e2a lacks the w12L2 line that the lifter base t16l and lift/pack depend on (include_uses/outputs NAME:dir, link.tables, link.roots, resolve_input ".", the fact universe). That gave two L1 lines.
+  - My error: I had told L3a that b3a4dad01 was in cand3.
+  - Fix (w12, now): cand3 = c0f504e2a + the w12L2 line + b3a4dad01, with one directory-output form, sandbox and cas byte-equal to c0f504e2a, and the cand2 toolchain. The compiler stage and abspath stay out.
+bottleneck: the merged cand3 (w12) for the relift base, and the cand2 verdict (w15).
