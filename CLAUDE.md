@@ -409,8 +409,13 @@ The owner's words: "делегируй остаток работы аккура�
   - **Shaders.**
     - The game's shaders are a static set from its gamedata. The translator's link check (`sm_link`) over that whole
       set is a gate at 0 failures.
-    - The backends' link-failure branch becomes `fnvnx_reach_violation`, with that gate's certificate as its fact.
-      So neither GL nor deko3d has a run-time link-failure path.
+    - **GL keeps its branch "the shader did not compile or link" (owner, 2026-11-15 20:20Z: "В бэкенде GL есть ветка
+      «шейдер не собрался». Оставь.").** It is not converted to `fnvnx_reach_violation`, and no assumption about the GL
+      library's GLSL compiler is added. The stub gate accepts this branch with this owner decision cited.
+      <!-- fnvnx-owner-decision: gl-shader-failure | class: GL shader compile/link failure | root: ports/fnv-nx/render/gl4 -->
+    - The deko3d backend's link-failure branch becomes `fnvnx_reach_violation`, with the `sm_link` certificate as its fact.
+    - The translator-totality proof over the SM 1-3 grammar (L6, 2026-11-15) waits until after the first frame. `sm_link`
+      over the gamedata set stays the gate.
   - **The product ELF root.**
     - Owner: L3a, with a worker.
     - L1 supplies the link stage (`link/guest.json`) and the onedef and link-root rules.
