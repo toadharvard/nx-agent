@@ -71,6 +71,8 @@ CLASSES = ('jcc', 'setcc', 'cmov', 'carry', 'pushf', 'other', 'no-form')
 FULL = (1 << (3 * NF)) - 1
 
 
+JOBS_DEFAULT = 4      # worker processes when the stage does not set JOBS (a count, not a path)
+
 def classof(ins):
     m = ins.mnemonic.split()[-1]
     if ins.id in PUSHF_IDS: return 'pushf'
@@ -664,7 +666,7 @@ def main(argv):
     base, rows = load_ranges(os.path.join(facts, 'ranges.tsv'))
     uni = load_universe(os.path.join(facts, 'universe.tsv'))
     ents = sorted(rows)
-    inst, res = solve(path, base, rows, uni, int(os.environ.get('JOBS', '4')))
+    inst, res = solve(path, base, rows, uni, int(os.environ.get('JOBS', str(JOBS_DEFAULT))))
     s, red = summary(ents, inst, res)
     reads_red = [r for r in red if r[4] != 'no-form']
     nof = [r for r in red if r[4] == 'no-form']

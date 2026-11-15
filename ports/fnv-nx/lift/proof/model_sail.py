@@ -17,12 +17,24 @@ import hashlib, os, re, subprocess, sys
 import z3
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-WORK = os.environ.get('SAIL_WORK', '/home/user/l3work/proof')
-IR = os.environ.get('SAIL_IR', os.path.join(WORK, 'sail', 'x86_proof.ir'))
+# The toolchain is an explicit input: configure(work, ir, isla) is called by the program that runs the prover (shapeprove.py --sail-work/--sail-ir/--isla;
+# the tests take the same three from their declared inputs). Nothing is read from the environment and no path is defaulted: before configure() every
+# use is an ArgError. The z3 shared libraries are those of the z3 python module this process imported (the pinned wheel), not a path.
+WORK = IR = ISLA = CACHE = None
 CFG = os.path.join(HERE, 'x86.toml')
-ISLA = os.environ.get('ISLA_EXEC', '/home/user/rems-project/isla/target/release/isla-execute-function')
-Z3LIB = os.environ.get('Z3LIB', '/usr/local/lib/python3.13/site-packages/z3/lib')
-CACHE = os.path.join(WORK, 'sail_cache')
+Z3LIB = os.path.join(os.path.dirname(os.path.abspath(z3.__file__)), 'lib')
+
+class ArgError(Exception):
+    """a required input of the model (work directory, proof IR, isla executable) was not passed"""
+
+def configure(work, ir, isla):
+    global WORK, IR, ISLA, CACHE, _irsha
+    for n, v in (('sail work directory', work), ('proof IR', ir), ('isla executable', isla)):
+        if not v: raise ArgError('model_sail.configure: %s is required' % n)
+    WORK, IR, ISLA, CACHE, _irsha = os.path.abspath(work), os.path.abspath(ir), os.path.abspath(isla), os.path.join(os.path.abspath(work), 'sail_cache'), None
+
+def _need():
+    if IR is None: raise ArgError('model_sail: configure(work, ir, isla) was not called (explicit arguments --sail-work --sail-ir --isla)')
 ADDR = 0x401000
 GPR = {'rax': 'eax', 'rcx': 'ecx', 'rdx': 'edx', 'rbx': 'ebx', 'rsp': 'esp', 'rbp': 'ebp', 'rsi': 'esi', 'rdi': 'edi'}
 FLAGBIT = {'cf': 0, 'pf': 2, 'af': 4, 'zf': 6, 'sf': 7, 'of': 11}
@@ -44,6 +56,7 @@ class ModelGap(Exception):
 _irsha = None
 def ir_sha():
     global _irsha
+    _need()
     if _irsha is None: _irsha = hashlib.sha256(open(IR, 'rb').read()).hexdigest()
     return _irsha
 
@@ -66,6 +79,7 @@ SELREG = ('es', 'cs', 'ss', 'ds', 'fs', 'gs')      # isla prints the register se
 
 def run_isla(code, timeout=600, sym=None):
     """raw isla output (stdout, stderr) for one encoding, from the on-disk cache when present.  sym = (ranges, eip_sym): a SHAPE run, see sym_constraint"""
+    _need()
     if not os.path.exists(IR): raise RuntimeError('missing %s: run ports/fnv-nx/farm/sail_build.sh' % IR)
     args = list(SEG_FREE if SYMSEL else SEG) + sum([['--probe', f] for f in ERRFNS], []) + sum([['-L', f] for f in LINEARIZE], [])
     cons = sym_constraint(code, *sym) if sym else ''
@@ -77,7 +91,7 @@ def run_isla(code, timeout=600, sym=None):
         regs += ['--reset-constraint', cons]
     else: regs = ['-I', 'code_base=#x%012x' % ADDR, '-I', 'code_bytes=#x' + code.ljust(16, b'\0')[::-1].hex(), '-I', 'rip=#x%016x' % ADDR]
     cmd = [ISLA, '-A', IR, '-C', CFG, '-T', '1', '--timeout', str(timeout), 'x86_fetch_decode_execute', '()'] + regs + args + ['-D', 'p', '--traces', '--error-traces', '-s']
-    env = dict(os.environ, LD_LIBRARY_PATH=Z3LIB + ':' + os.environ.get('LD_LIBRARY_PATH', ''))
+    env = dict(os.environ, LD_LIBRARY_PATH=Z3LIB)
     try: r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout + 20)     # isla's own --timeout is not honoured while z3 is busy
     except subprocess.TimeoutExpired:
         return 'Error Timeout\n(trace\n  (write-reg |Final result| nil (_ poison)))\n', 'hard timeout %ds\n' % (timeout + 20)
