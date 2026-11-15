@@ -555,3 +555,19 @@ a stale tree. The rules below make that class impossible. Adding checks on top o
 - A site in the exe or a module whose answer depends on an undecided row gets a call-graph reach certificate and goes
   to `fnvnx_reach_violation`. Without the certificate the build is red, and the row is reported to the orchestrator.
 - Other code reads these records and never restates them (rule 2). seh.cc's trap rows are an example.
+
+## Orchestrator decision of 2026-11-15 09:20Z: weekly budget (binding for every session)
+
+- The owner's usage page reads: weekly 29 % used, reset on Saturday 2026-11-21 18:00Z. At the pace so far the limit ends
+  on 2026-11-16 at night, five days early. The budget is at most about 11 % of the week per day until the reset.
+- Until the orchestrator lifts this:
+  - **Workers:** at most 2 per lead, and each runs only a path item that blocks the next step: first root, packs as roots,
+    ELF, boot.
+  - **Farms:** at most 4 per layer. Never rerun on unchanged content; a farm stops as soon as its queue is done.
+  - **Leads:**
+    - one message per finished item, no interim reports;
+    - no re-reading of large files already read;
+    - compact the context before 250k tokens;
+    - an idle lead with nothing on the path waits; it does not invent work.
+  - **Off the path:** no verifier, census, refactor or proof waits for nothing else. Everything that does not block one of
+    the four steps waits until after the first frame.
