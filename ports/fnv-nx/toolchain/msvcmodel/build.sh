@@ -229,8 +229,12 @@ if ! step newlib; then
   note "newlib configure: CFLAGS_FOR_TARGET='$TLC' $NL/configure --disable-newlib-supplied-syscalls --enable-newlib-mb --disable-newlib-wide-orient --enable-newlib-register-fini --target=$T --prefix=$P"
   CFLAGS_FOR_TARGET="$TLC" "$NL/configure" --disable-newlib-supplied-syscalls --enable-newlib-mb \
     --disable-newlib-wide-orient --enable-newlib-register-fini --target=$T --prefix="$P" > ../configure-newlib.log 2>&1
-  make -j"$JOBS" > ../make-newlib.log 2>&1
-  make install -j1 > ../install-newlib.log 2>&1
+  # the .info manuals (libgloss/doc, newlib/doc) are documentation, not part of the runtime: the pinned environment has no texinfo, and the
+  # tarball's own prebuilt .info files are what `make` would regenerate when the unpack order leaves a .texinfo newer than its .info.
+  # MAKEINFO=true is the documented way (configure's own message) to say "do not run makeinfo"; no library or header depends on it.
+  note "# newlib make/make install: MAKEINFO=true (there is no texinfo in the pinned env, and the .info docs are not a product)"
+  make -j"$JOBS" MAKEINFO=true > ../make-newlib.log 2>&1
+  make install -j1 MAKEINFO=true > ../install-newlib.log 2>&1
   cd ..; done_ newlib
 fi
 [ "$STAGE" = newlib ] && { echo "$P/bin/$T-g++"; exit 0; }
