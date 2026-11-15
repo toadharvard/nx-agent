@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 2026-11-15 12:40Z boot-loop order withdrawn (integration 4674ce3e9, owner rejected it). No measurement stops; path items stand. The L4 link-head note is void.
 - 2026-11-15 12:35Z owner order "my frame" (CLAUDE.md integ 76e450faf): the L4 boot loop runs now; a stop routed to L5 comes before every other item. The linkable platform head for L4 is w10-pending 12695dba3 (sent to L4). First stop: ELF 509809b3 0xC000001D after init d3dx9_38.dll, being classified by L4.
 - 2026-11-15 12:30Z "call economy" rule (CLAUDE.md integ 0e4c31db2) applied; sent to w10, and w9/w14 get it in their next brief.
 - 2026-11-15 12:25Z cand2 frozen at verdict 62a24a5ec (CLAUDE.md integ 2cb25d1b4): only fixes of its own reds. New items go to cand3 (owner w12): cpuid_model mxcsr_mask is cand3 item 3; bridgefacts, IMPORT_KEYS_H and our w10-pending set go there unless already in cand2. The loader items land in cand2 only if they fix a red of 62a24a5ec. w10-pending rebases onto cand3 when it opens.
