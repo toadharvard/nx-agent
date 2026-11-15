@@ -278,3 +278,7 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - The icount test root is written (verify/tests/icount). It is red at stage mld: the link-probe argv lacks PROBE_FLAGS, so toolflags fails.
   - Sent to L1 w12 as a recipe rule: one argv constructor for every driver stage. That defect and the gen-dir defect block both the icount root and bootguest.
   - Expected classes: data in the image, read by symbol, not comments.
+- 09:15 (after the limit reset):
+  - w6 resumed: icenc class table as image data, test_icount onto the icount root, then the relink when w12 lands.
+  - w7 task U (doing, w7-u): bootlayout's interim ELF readers are replaced by L1 w25's link-record ELF facts (547405ab5) and deleted.
+  - Blocked: the bootguest link and the icount root both wait on L1 w12's two recipe rules (gen output dirs; one driver argv with PROBE_FLAGS).
