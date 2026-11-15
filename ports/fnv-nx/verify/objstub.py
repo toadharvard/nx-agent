@@ -1378,9 +1378,9 @@ def addr_name(val):
 
 def matches(row, v):
     (kind, val), x0 = row[:2], v["x0"]
-    if v["x1"] or v["v0"] or (kind == "void") != (x0 is None):
+    if v["x1"] or v["v0"] or (kind in ("void", "identity")) != (x0 is None):
         return False
-    return kind == "void" or (x0[0] == "A" and addr_name(val) in x0[1] if kind == "addr" else
+    return kind in ("void", "identity") or (x0[0] == "A" and addr_name(val) in x0[1] if kind == "addr" else
                               x0[0] == "K" and x0[1] & (0xFFFFFFFF if kind == "u32" else 2 ** 64 - 1) == int(val, 0))
 
 ANALYSIS = hashlib.sha256(open(os.path.join(HERE, "objstub.py"), "rb").read() + open(os.path.join(HERE, "a64access.cc"), "rb").read()).hexdigest()
@@ -1694,12 +1694,13 @@ def run_check(objs, terms, rows, os_layer_ids, facts=None, cache=None, jobs=1, w
 read_list = lambda path: [l.rstrip("\n") for l in open(path) if l.strip()]
 
 def read_rows(path, base=""):
-    """Constants table: `unit<TAB>symbol<TAB>kind<TAB>value<TAB>contract_ref` (kind void|u32|u64|addr|exit; value empty for void and
-    exit) -> {(base + unit, symbol): (kind, value, ref)}. The key is (unit, symbol): equal local names in two objects do not collide."""
+    """Constants table: `unit<TAB>symbol<TAB>kind<TAB>value<TAB>contract_ref` (kind void|u32|u64|addr|exit|identity; value empty for void and
+    exit; identity: value 0 = the function returns its first argument x0 unchanged on every path. Another argument is read, so the body is not V and
+    needs no row: a row of kind identity for a body that is not V is constants-mismatch) -> {(base + unit, symbol): (kind, value, ref)}. The key is (unit, symbol): equal local names in two objects do not collide."""
     rows = {}
     for l in read_list(path):
         f = l.split("\t")
-        if len(f) != 5 or f[2] not in ("void", "u32", "u64", "addr", "exit") or not f[0] or not f[1] or not f[4]:
+        if len(f) != 5 or f[2] not in ("void", "u32", "u64", "addr", "exit", "identity") or not f[0] or not f[1] or not f[4] or (f[2] == "identity" and f[3] != "0"):
             raise ValueError("bad constants row in %s: %r" % (path, l[:80]))
         if (base + f[0], f[1]) in rows:
             raise ValueError("duplicate constants row (%s, %s) in %s" % (f[0], f[1], path))

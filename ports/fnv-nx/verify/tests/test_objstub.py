@@ -581,6 +581,13 @@ repo2 = TR.make_repo("os-toy2", files={"toy/constants.tsv": ""})
 rc, g, _, txt, st = gate(repo2, ROOT + "/g3", GC)
 check("toy root without the constants row of f_b: red, names the function by unit path", rc == 2 and g["uncertified"] == [TR.ROOT + "/b.c:f_b"]
       and st[0] == "red", (g, txt))
+IDB = '#include "toy.h"\nint f_b(int x) { return x; }\n'
+for tag, tbl, want in (("identity row", "b.c\tf_b\tidentity\t0\tref b\n", "green"), ("void row also matches the same body", "b.c\tf_b\tvoid\t\tref b\n", "green"),
+                       ("no row", "", "red"), ("identity of another argument is no V row", "b.c\tf_b\tidentity\t1\tref b\n", "input")):
+    ri_ = TR.make_repo("os-id-" + tag.replace(" ", "-"), files={"toy/constants.tsv": tbl, "toy/b.c": IDB})
+    rc, g, _, txt, st = gate(ri_, ROOT + "/gid-" + tag.replace(" ", "-"), GC)
+    check("constants kind identity, case %s: %s" % (tag, want), (rc == 0 and g["certified"] == g["universe"]) if want == "green" else
+          (rc == 2 and g["uncertified"] == [TR.ROOT + "/b.c:f_b"]) if want == "red" else (rc == 2 and "input error" in g["detail"]), (g, txt))
 repo3 = TR.make_repo("os-reach", files={"toy/constants.tsv": CONST, "toy/c.c": RV, "toy/os.S": OS})
 rc, g, _, txt, st = gate(repo3, ROOT + "/g4", GC)
 check("reach call in the toy root with no reach facts file: red reach-uncertified, REACH's own definition and the terminator exemption accepted",
