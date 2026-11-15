@@ -237,9 +237,9 @@
   {
    "id": "A-F2IASM",
    "area": "fpexact",
-   "file": "lift/tools/fnvnx_f2i_check.cc",
+   "file": "toolchain/ftoi/fnvnx_ftoi.cc",
    "statement": "An inline asm without FP/vector operand and without FP clobber does no float->int conversion.",
-   "disposition": "gate: check 3b covers units with no site; closing fully = forbid inline asm outside listed rt files by the plugin"
+   "disposition": "removed: gate fpexact 3c/3d decodes every byte of every asm range (.fnvnx.asmrange) and every byte outside compiler-function extents for fp_to_int; ASM-218 removed_by gate:fpexact"
   },
   {
    "id": "A-F2ICONST",
