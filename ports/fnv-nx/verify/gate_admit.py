@@ -31,7 +31,7 @@ Classes:
   ref      reference files that tests/oracle.json records point at (spec, contract, model): no gate named, no recipe, no units, no link,
            no outputs. Every file of a ref root is the `path` of a reference of some tests/oracle.json, and none is a build.json or a
            test (is_test_file): a product or test root is never a ref root. The gates that cover class ref (gates.d `covers`) are the
-           ones that read any root: pure, assumptions (and the Legal and stub gates where they exist).
+           ones that read any root: pure, assumptions (and the stub gate where it exists).
 Argument: the verdict is green only if certified == universe, so a tracked file outside every root, a root with a
 missing gate, or a product root without its gates makes every merge red. The table maps directories to gates; it
 holds no exception for a file, a function or a finding.
@@ -57,7 +57,7 @@ REQUIRED_PRODUCT = ("objstub", "linkstrict", "determinism", "oracle",
                     "datamodel", "order", "fpexact", "eh", "exepin", "addr32", "machine", "hostapi")
 # A test root (class test) is a root that links the tests of the product against the product roots' real files (CLAUDE.md "no doubles in
 # tests"): it is judged by its own set, never by REQUIRED_PRODUCT. Its gates: the build gates, the doubles gate (symbols the test defines
-# intersect symbols of the product roots it links = empty), an oracle record for every test, the registry gate and pure (the stub gate is objstub; Legal is a property of the whole public tree, a whole-tree gate of the verdict, not a per-root requirement).
+# intersect symbols of the product roots it links = empty), an oracle record for every test, the registry gate and pure (the stub gate is objstub; no Legal gate is built, owner decision of 2026-11-15).
 REQUIRED_TEST = ("build", "determinism", "linkstrict", "objstub", "doubles", "oracle", "assumptions", "pure")
 REQUIRED = {"doc": (), "tool": ("selftests",), "product": REQUIRED_PRODUCT, "ref": (), "test": REQUIRED_TEST}
 
