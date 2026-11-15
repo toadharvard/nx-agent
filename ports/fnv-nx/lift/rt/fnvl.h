@@ -80,17 +80,11 @@ static constexpr NoLkWin lkwin_ = {};
 template<> struct GM<T> { u32 a; \
   __attribute__((always_inline)) operator T() const { u32 a_=a; T v; \
     if(sizeof(T)==1) __asm__ volatile(FNVL_A_ "ldar" SUF " %" R "[v], [%x[a]]" : [v]"=&r"(v), [a]"+r"(a_) : : "memory"); \
-    else if(__builtin_constant_p(a)){ \
-      if(a&MASK) __asm__ volatile(FNVL_K_ "ldr" SUF " %" R "[v], [%x[a]]\ndmb ishld" : [v]"=&r"(v), [a]"=&r"(a_) : [lo]"i"(a&0xffffu), [hi]"i"(a>>16) : "memory"); \
-      else __asm__ volatile(FNVL_K_ "ldar" SUF " %" R "[v], [%x[a]]" : [v]"=&r"(v), [a]"=&r"(a_) : [lo]"i"(a&0xffffu), [hi]"i"(a>>16) : "memory"); } \
     else __asm__ volatile(FNVL_A_ "tst %w[a], " #MASK "\nb.ne 1f\nldar" SUF " %" R "[v], [%x[a]]\nb 2f\n1: ldr" SUF " %" R "[v], [%x[a]]\ndmb ishld\n2:" \
                           : [v]"=&r"(v), [a]"+r"(a_) : : "memory", "cc"); \
     return v; } \
   __attribute__((always_inline)) T operator=(T v) const { u32 a_=a; \
     if(sizeof(T)==1) __asm__ volatile(FNVL_A_ "stlr" SUF " %" R "[v], [%x[a]]" : [a]"+r"(a_) : [v]"r"(v) : "memory"); \
-    else if(__builtin_constant_p(a)){ \
-      if(a&MASK) __asm__ volatile(FNVL_K_ "dmb ishst\nstr" SUF " %" R "[v], [%x[a]]" : [a]"=&r"(a_) : [v]"r"(v), [lo]"i"(a&0xffffu), [hi]"i"(a>>16) : "memory"); \
-      else __asm__ volatile(FNVL_K_ "stlr" SUF " %" R "[v], [%x[a]]" : [a]"=&r"(a_) : [v]"r"(v), [lo]"i"(a&0xffffu), [hi]"i"(a>>16) : "memory"); } \
     else __asm__ volatile(FNVL_A_ "tst %w[a], " #MASK "\nb.ne 1f\nstlr" SUF " %" R "[v], [%x[a]]\nb 2f\n1: dmb ishst\nstr" SUF " %" R "[v], [%x[a]]\n2:" \
                           : [a]"+r"(a_) : [v]"r"(v) : "memory", "cc"); \
     return v; } \
@@ -105,6 +99,36 @@ template<class F,class T> struct GMF { u32 a;      /* a float / double cell: the
   __attribute__((always_inline)) F operator=(F v) const { union{ T u; F f; } x; x.f=v; GM<T>{a}=x.u; return v; }
   __attribute__((always_inline)) F operator=(const GMF &o) const { return *this=(F)o; }
   __attribute__((always_inline)) const GMF &g(NoLkWin) const { return *this; } };
+/* A static address (an instruction whose memory operand is a displacement alone) takes the K form: the address is the template parameter A, so the two halves of the movz / movk operands are constants by
+   construction, never by what the optimizer folds; every other address takes the register form above. */
+template<class T, u32 A> struct GMK;
+#define FNVL_GMK_(T, R, SUF, MASK) \
+template<u32 A> struct GMK<T, A> { \
+  __attribute__((always_inline)) operator T() const { u32 a_; T v; \
+    if(A&MASK) __asm__ volatile(FNVL_K_ "ldr" SUF " %" R "[v], [%x[a]]\ndmb ishld" : [v]"=&r"(v), [a]"=&r"(a_) : [lo]"i"(A&0xffffu), [hi]"i"(A>>16) : "memory"); \
+    else __asm__ volatile(FNVL_K_ "ldar" SUF " %" R "[v], [%x[a]]" : [v]"=&r"(v), [a]"=&r"(a_) : [lo]"i"(A&0xffffu), [hi]"i"(A>>16) : "memory"); \
+    return v; } \
+  __attribute__((always_inline)) T operator=(T v) const { u32 a_; \
+    if(A&MASK) __asm__ volatile(FNVL_K_ "dmb ishst\nstr" SUF " %" R "[v], [%x[a]]" : [a]"=&r"(a_) : [v]"r"(v), [lo]"i"(A&0xffffu), [hi]"i"(A>>16) : "memory"); \
+    else __asm__ volatile(FNVL_K_ "stlr" SUF " %" R "[v], [%x[a]]" : [a]"=&r"(a_) : [v]"r"(v), [lo]"i"(A&0xffffu), [hi]"i"(A>>16) : "memory"); \
+    return v; } \
+  __attribute__((always_inline)) T operator=(const GMK &o) const { return *this=(T)o; } \
+  __attribute__((always_inline)) const GMK &g(NoLkWin) const { return *this; } };
+FNVL_GMK_(u8, "w", "b", 0)
+FNVL_GMK_(u16, "w", "h", 1)
+FNVL_GMK_(u32, "w", "", 3)
+FNVL_GMK_(u64, "x", "", 7)
+template<class F,class T,u32 A> struct GMKF {
+  __attribute__((always_inline)) operator F() const { union{ T u; F f; } x; x.u=(T)GMK<T,A>{}; return x.f; }
+  __attribute__((always_inline)) F operator=(F v) const { union{ T u; F f; } x; x.f=v; GMK<T,A>{}=x.u; return v; }
+  __attribute__((always_inline)) F operator=(const GMKF &o) const { return *this=(F)o; }
+  __attribute__((always_inline)) const GMKF &g(NoLkWin) const { return *this; } };
+#define MK8(A) (GMK<u8,(A)>{}.g(lkwin_))
+#define MK16(A) (GMK<u16,(A)>{}.g(lkwin_))
+#define MK32(A) (GMK<u32,(A)>{}.g(lkwin_))
+#define MK64(A) (GMK<u64,(A)>{}.g(lkwin_))
+#define MKF32(A) (GMKF<float,u32,(A)>{}.g(lkwin_))
+#define MKF64(A) (GMKF<double,u64,(A)>{}.g(lkwin_))
 #define M8(a) (GM<u8>{(u32)(a)}.g(lkwin_))
 #define M16(a) (GM<u16>{(u32)(a)}.g(lkwin_))
 #define M32(a) (GM<u32>{(u32)(a)}.g(lkwin_))
@@ -126,7 +150,7 @@ extern "C" { void fnvl_host_world_stop(void); void fnvl_host_world_resume(void);
 /* `.fnvl.lk` (12-byte records of three words: x86 pc, host start, host end; pc plain, start and end R_AARCH64_P32_ABS32 in the same executable section; docs/ORDERING.md). A locked
    instruction: the range is the exclusive sequence of the aligned commit below, `ldaxr ... cbnz`, emitted by that ONE asm statement. The labels and the record are text of the same asm, so the compiler
    cannot place anything but the sequence between them: it treats the statement as one opaque, indivisible block (ASM-001). The `ldar` load, the body on the private copy and the world-stop path lie
-   outside it; the pc is the constant operand lk_commit(lk_, pc) that fnvlift/core.py passes. */
+   outside it; the pc is the template parameter of lk_commit<pc>(lk_) that fnvlift/core.py passes. */
 #define FNVL_LK_(T, R, SUF, MASK, LAST, W) \
 template<> struct LKA<T> { \
   static __attribute__((always_inline)) T load(u32 a){ T o; \
@@ -139,12 +163,12 @@ template<> struct LKA<T> { \
       fnvl_host_world_stop(); \
       __asm__ volatile(FNVL_A_ "ldr" SUF " %" R "[o], [%x[a]]\ndmb ishld" : [o]"=&r"(o), [a]"+r"(a) : : "memory"); } \
     return o; } \
-  static __attribute__((always_inline)) bool commit(u32 a, T o, T n, u32 pc){ u32 ok, s; T v; \
+  template<u32 PC> static __attribute__((always_inline)) bool commit(u32 a, T o, T n){ u32 ok, s; T v; \
     if(sizeof(T)==1 || __builtin_expect(!(a & MASK), 1)) { \
       __asm__ volatile(FNVL_A_ "3: ldaxr" SUF " %" R "[v], [%x[a]]\ncmp %" R "[v], %" R "[o]\nb.ne 5f\nstlxr" SUF " %w[s], %" R "[n], [%x[a]]\ncbnz %w[s], 3b\n" \
         "9:\n.pushsection .fnvl.lk,\"a\",%%progbits\n.balign 4\n.word %c[pc]\n.word 3b\n.word 9b\n.popsection\n" \
         "dmb ish\nmov %w[ok], 1\nb 2f\n5: mov %w[ok], 0\n2:" \
-        : [ok]"=&r"(ok), [a]"+r"(a), [s]"=&r"(s), [v]"=&r"(v) : [o]"r"((W)o), [n]"r"((W)n), [pc]"i"(pc) : "memory", "cc"); \
+        : [ok]"=&r"(ok), [a]"+r"(a), [s]"=&r"(s), [v]"=&r"(v) : [o]"r"((W)o), [n]"r"((W)n), [pc]"i"(PC) : "memory", "cc"); \
       return ok; } \
     __asm__ volatile(FNVL_A_ "dmb ishst\nstr" SUF " %" R "[n], [%x[a]]\ndmb ish" : [a]"+r"(a) : [n]"r"((W)n) : "memory"); \
     fnvl_host_world_resume(); \
@@ -157,9 +181,9 @@ template<class T> struct LKS { u32 a; T o, n; u32 st; };
 template<class T> struct LKP { LKS<T> *s; u32 a;
   __attribute__((always_inline)) operator T() const { if(!s->st){ s->a=a; s->st=1; s->o=LKA<T>::load(a); s->n=s->o; } return s->n; }
   __attribute__((always_inline)) T operator=(T v) const { (void)(T)*this; s->n=v; return v; } };
-template<class T> static inline __attribute__((always_inline)) bool lk_commit(LKS<T> &s, u32 pc){
+template<u32 PC, class T> static inline __attribute__((always_inline)) bool lk_commit(LKS<T> &s){
   if(!s.st) return true;
-  bool ok=LKA<T>::commit(s.a,s.o,s.n,pc);
+  bool ok=LKA<T>::template commit<PC>(s.a,s.o,s.n);
   if(!ok) s.st=0;
   return ok; }
 #define LK_BEGIN(n) const LkWin lkwin_ = {}; LKS<u##n> lk_={0,0,0,0}; const u32 lkr_[8]={eax,ecx,edx,ebx,esp,ebp,esi,edi}, lkf_[6]={cf,zf,sf,of,pf,af}
@@ -180,13 +204,16 @@ template<class T> static inline __attribute__((always_inline)) bool lk_commit(LK
    instruction `bfxil` on the register of EAX (no guest access). */
 #define FNVL_FSWREC_ "9:\n.pushsection .fnvl.fsw,\"a\",%%progbits\n.balign 4\n.word %c[pc]\n.word 8b\n.word 9b\n.popsection\n"
 #define FNVL_FSW_(T, R, SUF, MASK) \
-static inline __attribute__((always_inline)) void fsw_st(u32 a, T v, u32 pc, T*){ \
-  if(__builtin_constant_p(a)) __asm__ volatile(FNVL_K_ "dmb ishst\n8: str" SUF " %" R "[v], [%x[a]]\n" FNVL_FSWREC_ : [a]"=&r"(a) : [v]"r"(v), [lo]"i"(a&0xffffu), [hi]"i"(a>>16), [pc]"i"(pc) : "memory"); \
-  else __asm__ volatile(FNVL_A_ "dmb ishst\n8: str" SUF " %" R "[v], [%x[a]]\n" FNVL_FSWREC_ : [a]"+r"(a) : [v]"r"(v), [pc]"i"(pc) : "memory"); }
+template<u32 PC> static inline __attribute__((always_inline)) void fsw_st(u32 a, T v, T*){ \
+  __asm__ volatile(FNVL_A_ "dmb ishst\n8: str" SUF " %" R "[v], [%x[a]]\n" FNVL_FSWREC_ : [a]"+r"(a) : [v]"r"(v), [pc]"i"(PC) : "memory"); } \
+template<u32 A, u32 PC> static inline __attribute__((always_inline)) void fsw_stk(T v, T*){ u32 a_; \
+  __asm__ volatile(FNVL_K_ "dmb ishst\n8: str" SUF " %" R "[v], [%x[a]]\n" FNVL_FSWREC_ : [a]"=&r"(a_) : [v]"r"(v), [lo]"i"(A&0xffffu), [hi]"i"(A>>16), [pc]"i"(PC) : "memory"); }
 FNVL_FSW_(u16, "w", "h", 1)
 FNVL_FSW_(u32, "w", "", 3)
-#define FSW_ST16(A, V, PC) fsw_st((u32)(A), (u16)(V), (PC), (u16*)0)
-#define FSW_ST32(A, V, PC) fsw_st((u32)(A), (u32)(V), (PC), (u32*)0)
+#define FSW_ST16(A, V, PC) fsw_st<(PC)>((u32)(A), (u16)(V), (u16*)0)
+#define FSW_STK16(A, V, PC) fsw_stk<(A),(PC)>((u16)(V), (u16*)0)
+#define FSW_ST32(A, V, PC) fsw_st<(PC)>((u32)(A), (u32)(V), (u32*)0)
+#define FSW_STK32(A, V, PC) fsw_stk<(A),(PC)>((u32)(V), (u32*)0)
 #define FSW_AX(V, PC) do{ u32 v_=(V); __asm__ volatile("8: bfxil %w[r], %w[v], 0, 16\n" FNVL_FSWREC_ : [r]"+r"(eax) : [v]"r"(v_), [pc]"i"(PC)); }while(0)
 #include "fnvl_x87.h"
 /* ---- SSE / SSE2 / MMX runtime (W6). MXCSR: RC, FTZ, DAZ are honoured; the exception status bits and the exception masks are not
