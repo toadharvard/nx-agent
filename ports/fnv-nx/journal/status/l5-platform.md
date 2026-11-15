@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 2026-11-15 01:11Z w9 takes the gen_combridge.py extension: spec kind record, thiscall thunk, conventions decoded from the MSVC mangling letter table, keys written at generation; com_spec/combridge become a recipe gen stage (batch B item 3 pulled forward); then throw_bad_alloc.
 - 2026-11-15 01:10Z ruling for w9 (throw_bad_alloc): every native function stored in a platform-built guest record (vtable, RTTI, ThrowInfo) gets a generated thunk key from the record declarations (the combridge key class), never through import-closure lookup at first use; the calling convention comes from the MSVC mangling letter (E = thiscall) and the generator handles it; a slot without a key is a build error.
 - 2026-11-15 01:08Z L1: the hostabi: form is valid for terminators of our ABI (never a Win32 value source); lasterror accepted (w20 next); objstub lineage must take w20u whole (e93bfdc13, c56ecabcc fix a SYSTEM_SJ crash) - w10 merges it before the rerun on w9 37c4ccccb, together with doubles.py.
 - 2026-11-15 01:07Z priority 1 (orchestrator): x86sys.json blocks L3a (hand copies f_sys.INT_VECTORS, INT_KIND, SEL_*). w14 pushes the decided fields now with undecided+blocker for the rest; osrec branch 402577fea has os.json only.
