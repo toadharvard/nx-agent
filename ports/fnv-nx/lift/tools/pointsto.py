@@ -29,16 +29,11 @@ U = frozenset([UNK]); TOPSET = frozenset([TOP])
 R32 = pcsrc.R32
 
 
-_NORM = {}
-
-
 def norm(ts):
-    """widen a token set: per object more than WIDTH offsets -> ANY; more than WIDTH integer constants -> the arbitrary integer; TOP absorbs nothing (kept as a token)"""
+    """widen a token set: per object more than WIDTH offsets -> ANY; more than WIDTH integer constants -> the arbitrary integer; TOP absorbs nothing (kept as a token).
+    No memo table: a memo keyed by the wide input sets held 1.3 GB at 3M joins on binkw32 (78 thousand distinct inputs); the result is a pure function computed in one pass."""
     if len(ts) <= WIDTH: return ts
-    r = _NORM.get(ts)
-    if r is None:
-        r = _NORM[ts] = _norm(ts)           # pure function of the set: memoised (the same wide sets are joined millions of times)
-    return r
+    return _norm(ts)
 
 
 def _norm(ts):
