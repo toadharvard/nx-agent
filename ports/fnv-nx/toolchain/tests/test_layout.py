@@ -235,8 +235,12 @@ def crossing(obj):
     except ValueError as e:
         check('crossing.cpp section parses with gate_abi.parse_crossing', False, str(e))
         return
-    check('crossing: every external function has its terms (gate_abi.parse_crossing round trip)', got == CROSSING,
-          sorted(set(got.items()) ^ set(CROSSING.items())))
+    # the universe is the sympair's: a row for every function the unit pairs with an MSVC name (the implicit constructors included, which have no terms:
+    # they take only `this`); the terms of the fixture's own functions are the table
+    pairs = {p.split('\t')[0] for p in pb.section(obj, '.fnvnx.sympair').splitlines() if len(p.split('\t')) == 4 and p.split('\t')[1] and p.split('\t')[2] != 'data'}
+    check('crossing: the universe is the unit\'s sympair rows with an MSVC name (gate_abi.parse_crossing round trip)', set(got) == pairs, sorted(set(got) ^ pairs))
+    check('crossing: the terms of every function of the fixture', {k: got.get(k) for k in CROSSING} == CROSSING and all(v == () for k, v in got.items() if k not in CROSSING),
+          sorted(set((k, got.get(k)) for k in CROSSING) ^ set(CROSSING.items())))
     ids = {t['id'] for t in json.load(open(os.path.join(HERE, '..', 'msvcmodel', 'DATAMODEL.json')))['crossing_forbidden']['terms']}
     check('crossing: every emitted term is an id of DATAMODEL.json', all(t in ids for v in got.values() for t in v), ids)
     check('crossing: terms sorted and distinct', all(list(v) == sorted(set(v)) for v in got.values()), got)

@@ -45,7 +45,7 @@
  * Declared types (section .fnvnx.decltype, C units only, not loaded): see the block comment before emit_decltype: one line `symbol <TAB> type` per
  * external symbol the unit declares or defines, in the grammar of link/ctypes_compat.py (C11 6.2.7p2).
  *
- * Boundary-forbidden types (section .fnvnx.crossing, every unit, not loaded): see the block comment before emit_crossing: one line
+ * Boundary-forbidden types (section .fnvnx.crossing, every unit, not loaded): written by the names plugin (the block comment before cross_holds in toolchain/names/fnvnx_names.cc): one line
  * `symbol <TAB> terms` per external function the unit defines or references, the terms being ids of DATAMODEL.json crossing_forbidden.
  *
  * Objects (section .fnvnx.objects, not loaded): one line per variable definition with static storage the unit
@@ -384,13 +384,22 @@ static std::string dl_type(tree t, std::vector<tree> &stk)
 {
   if (!t || t == error_mark_node) { dl_error("an erroneous type", "?"); return "?"; }
   int q = TYPE_QUALS(t);
-  if (q & TYPE_QUAL_ATOMIC) { dl_error("an _Atomic type has no spelling", "?"); return "?"; }
   const int code = TREE_CODE(t);
   std::string pre;
+  /* HOST1: a scalar that carries the type attribute fnvnx_host, on the type or on the original type of the typedef that names it, is spelled with the
+   * prefix `host:` after the qualifiers. It is read before the main variant is taken: an attribute makes a variant. */
+  bool host = false;
+  if (code == INTEGER_TYPE) {
+    host = lookup_attribute("fnvnx_host", TYPE_ATTRIBUTES(t)) != NULL_TREE;
+    tree n = TYPE_NAME(t);
+    if (!host && n && TREE_CODE(n) == TYPE_DECL && DECL_ORIGINAL_TYPE(n))
+      host = lookup_attribute("fnvnx_host", TYPE_ATTRIBUTES(DECL_ORIGINAL_TYPE(n))) != NULL_TREE;
+  }
   if (code != ARRAY_TYPE && code != FUNCTION_TYPE) {   /* an array's qualifiers are its element's: spelled there */
     if (q & TYPE_QUAL_CONST) pre += "const:";
     if (q & TYPE_QUAL_VOLATILE) pre += "volatile:";
     if (q & TYPE_QUAL_RESTRICT) pre += "restrict:";
+    if (q & TYPE_QUAL_ATOMIC) pre += "atomic:";   /* C11 6.7.3p10: _Atomic is a qualifier of the type; 6.7.3p10 and 6.2.7p1: compatible types have equal qualifiers */
     t = TYPE_MAIN_VARIANT(t);
   }
   switch (code) {
@@ -442,7 +451,43 @@ static std::string dl_type(tree t, std::vector<tree> &stk)
     if (!n && (code == BOOLEAN_TYPE || code == INTEGER_TYPE))   /* an element type the target makes without a name (the SVE predicate's 1-bit boolean): its precision and signedness are its identity */
       return pre + (code == BOOLEAN_TYPE ? "bool_bits_" : TYPE_UNSIGNED(t) ? "uint_bits_" : "int_bits_") + std::to_string(TYPE_PRECISION(t));
     if (!n || TREE_CODE(n) != IDENTIFIER_NODE) { dl_error("a scalar type without a name", "?"); return "?"; }
-    return pre + dl_word(IDENTIFIER_POINTER(n));
+    return pre + (host ? "host:" : "") + dl_word(IDENTIFIER_POINTER(n));
+  }
+  case NULLPTR_TYPE:   /* C23 nullptr_t (c/c-decl.cc 4653 records the builtin type): one node, identified by its name */
+    return pre + "nullptr_t";
+  case VECTOR_TYPE: {
+    /* VEC1: a vector type is spelled by the facts that GCC's own compatibility check reads: c/c-typeck.cc comptypes_internal case VECTOR_TYPE (1279-1283:
+     * known_eq of TYPE_VECTOR_SUBPARTS and compatible element types; cp/typeck.cc structural_comptypes likewise) plus the layout the ABI sees (size, alignment).
+     * Row `vec:<N>:<size>:<align>:` element.  N and size are poly_ints (a variable-length SVE vector has N = c0 + c1*x, x the runtime vector-length factor): the
+     * decimal c0, or `c0+c1x` when c1 is not 0 (known_eq compares coefficient-wise).
+     * TYPE_VECTOR_OPAQUE is not spelled: an opaque vector is a VARIANT of its non-opaque main type (tree.cc build_opaque_vector_type 10162-10180: a variant copy;
+     * tree.cc 13366: "vector types may differ by TYPE_VECTOR_OPAQUE"), the main variant is taken above, and comptypes_internal ignores it.  It is made by vector
+     * comparison results (c/c-typeck.cc 12725, 12886; cp/typeck.cc 6050; cp/call.cc 5674): tested with __typeof__ of such a comparison. */
+    auto ps = [](poly_uint64 v) {
+      std::string r = std::to_string(v.coeffs[0]);
+      for (unsigned i = 1; i < NUM_POLY_INT_COEFFS; i++) if (v.coeffs[i]) r += "+" + std::to_string(v.coeffs[i]) + (i == 1 ? "x" : "y" + std::to_string(i));
+      return r;
+    };
+    poly_uint64 size;
+    if (!poly_int_tree_p(TYPE_SIZE_UNIT(t), &size)) { dl_error("a vector type whose size is not a poly_int constant", "?"); return "?"; }
+    return pre + "vec:" + ps(TYPE_VECTOR_SUBPARTS(t)) + ":" + ps(size) + ":" + std::to_string(TYPE_ALIGN_UNIT(t)) + ":" + dl_type(TREE_TYPE(t), stk);
+  }
+  case COMPLEX_TYPE: {
+    /* CPLX1: a C99 `_Complex T` / GNU `_Complex int` is two consecutive elements of T (stor-layout.cc layout_type case COMPLEX_TYPE 2416-2423: the mode is
+     * GET_MODE_COMPLEX_MODE of the element's, TYPE_SIZE_UNIT its size; the alignment is the mode's, set by finalize_type_size).  Row `complex:<size>:<align>:` element,
+     * size and alignment in bytes read off the node (TYPE_SIZE_UNIT, TYPE_ALIGN_UNIT), not computed from a formula.  Compatibility (c/c-typeck.cc
+     * comptypes_internal: the default case compares the codes and TREE_TYPE): the same element type.  size and align are the ABI facts of that type. */
+    poly_uint64 size;
+    if (!poly_int_tree_p(TYPE_SIZE_UNIT(t), &size) || !size.is_constant()) { dl_error("a complex type whose size is not a constant", "?"); return "?"; }
+    return pre + "complex:" + std::to_string(size.to_constant()) + ":" + std::to_string(TYPE_ALIGN_UNIT(t)) + ":" + dl_type(TREE_TYPE(t), stk);
+  }
+  case REFERENCE_TYPE: {
+    /* REF1: a reference type has C callers (c-family/c-common.cc:4709 the builtin va_list prototypes, c-attribs.cc:2164 the mode attribute), so it is a row:
+     * `ref:<size>:<align>:` pointee, size and alignment of the reference as GCC laid it out (a reference is laid out as a pointer of its mode,
+     * stor-layout.cc layout_type case REFERENCE_TYPE shares the POINTER_TYPE arm). Compatibility: the same pointee (comptypes_internal compares the codes and TREE_TYPE). */
+    poly_uint64 size;
+    if (!poly_int_tree_p(TYPE_SIZE_UNIT(t), &size) || !size.is_constant()) { dl_error("a reference type whose size is not a constant", "?"); return "?"; }
+    return pre + "ref:" + std::to_string(size.to_constant()) + ":" + std::to_string(TYPE_ALIGN_UNIT(t)) + ":" + dl_type(TREE_TYPE(t), stk);
   }
   case NULLPTR_TYPE:   /* C23 nullptr_t (c/c-decl.cc 4653 records the builtin type): one node, identified by its name */
     return pre + "nullptr_t";
@@ -488,72 +533,7 @@ static void emit_decltype()
   fprintf(asm_out_file, "\t.popsection\n");
 }
 
-/* ---- Types that must not cross the native/exe boundary (section .fnvnx.crossing) ------------------------------------------------------------
- * One line per external function of the unit (every symbol-table function with TREE_PUBLIC that the unit defines or references: the universe of
- * `.fnvnx.sympair`, which is where boundary symbols come from):  symbol <TAB> term[,term...]  or  symbol <TAB> -  when no term holds. The terms
- * are the ids of toolchain/msvcmodel/DATAMODEL.json crossing_forbidden.terms, read from crossing_terms.inc (gen_crossing.py: the ids and which GCC
- * predicate decides each come from that file; this source names none). A term HOLDS for a function iff its GCC predicate holds for the return type
- * or for a parameter type (the implicit `this` is a pointer: it holds nothing), where the predicate of a type T is true iff it is true for T itself,
- * for the element type of an array, for the type of every non-static data member, and for every base class, recursively (a pointer or reference
- * contains nothing: the object it points to is not passed):
- *   CF_BINFO_VIRTUAL    T is a class with a virtual base (CLASSTYPE_VBASECLASSES, which includes the virtual bases of its bases)
- *   CF_PTRMEM           T is a pointer to member: TYPE_PTRDATAMEM_P or TYPE_PTRMEMFUNC_P
- *   CF_VA_LIST_NODE     T is the va_list type (its main variant is va_list_type_node)
- * Terms are sorted and distinct; a symbol once per unit. */
-enum CrossFact { CF_BINFO_VIRTUAL, CF_PTRMEM, CF_VA_LIST_NODE };
-struct CrossTerm { const char *id; CrossFact fact; };
-static const CrossTerm cross_terms[] = {
-#include "crossing_terms.inc"
-};
-
-static bool cross_holds(CrossFact f, tree t, std::set<tree> &seen)
-{
-  if (!t || t == error_mark_node) return false;
-  if (TREE_CODE(t) == ARRAY_TYPE) return cross_holds(f, TREE_TYPE(t), seen);
-  if (!TYPE_P(t)) return false;
-  t = TYPE_MAIN_VARIANT(t);
-  if (f == CF_VA_LIST_NODE && va_list_type_node && t == TYPE_MAIN_VARIANT(va_list_type_node)) return true;
-  if (is_cxx() && f == CF_PTRMEM && (TYPE_PTRDATAMEM_P(t) || TYPE_PTRMEMFUNC_P(t))) return true;
-  if (!RECORD_OR_UNION_TYPE_P(t) || !COMPLETE_TYPE_P(t)) return false;
-  if (!seen.insert(t).second) return false;
-  if (is_cxx() && f == CF_BINFO_VIRTUAL && CLASS_TYPE_P(t) && CLASSTYPE_VBASECLASSES(t) && CLASSTYPE_VBASECLASSES(t)->length()) return true;
-  for (tree m = TYPE_FIELDS(t); m; m = DECL_CHAIN(m))
-    if (TREE_CODE(m) == FIELD_DECL && cross_holds(f, TREE_TYPE(m), seen)) return true;
-  if (cxx_class(t) && TYPE_BINFO(t)) {
-    tree b; int k;
-    for (k = 0; BINFO_BASE_ITERATE(TYPE_BINFO(t), k, b); k++)
-      if (cross_holds(f, BINFO_TYPE(b), seen)) return true;
-  }
-  return false;
-}
-
-static void emit_crossing()
-{
-  std::map<std::string, std::string> rows;
-  symtab_node *sn;
-  FOR_EACH_SYMBOL(sn) {
-    tree d = sn->decl;
-    if (TREE_CODE(d) != FUNCTION_DECL || !TREE_PUBLIC(d) || DECL_IS_UNDECLARED_BUILTIN(d)) continue;
-    bool def = sn->definition && !DECL_EXTERNAL(d) && (TREE_ASM_WRITTEN(d) || sn->alias);
-    if (!def && !TREE_SYMBOL_REFERENCED(DECL_ASSEMBLER_NAME(d))) continue;
-    std::vector<tree> tys;
-    tree ft = TREE_TYPE(d);
-    tys.push_back(TREE_TYPE(ft));
-    for (tree a = TYPE_ARG_TYPES(ft); a && TREE_VALUE(a) != void_type_node; a = TREE_CHAIN(a)) tys.push_back(TREE_VALUE(a));
-    std::set<std::string> held;
-    for (const CrossTerm &c : cross_terms)
-      for (tree t : tys) {
-        std::set<tree> seen;
-        if (cross_holds(c.fact, t, seen)) { held.insert(c.id); break; }
-      }
-    std::string v;
-    for (const std::string &h : held) v += (v.empty() ? "" : ",") + h;
-    rows[IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d))] = v.empty() ? "-" : v;
-  }
-  fprintf(asm_out_file, "\t.pushsection\t.fnvnx.crossing,\"\",%%progbits\n");
-  for (auto &r : rows) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", escape(r.first + "\t" + r.second).c_str());
-  fprintf(asm_out_file, "\t.popsection\n");
-}
+/* `.fnvnx.crossing` is written by the names plugin, from the rows of `.fnvnx.sympair` (toolchain/names/fnvnx_names.cc): one universe. */
 
 static void finish_unit_cb(void *, void *)
 {
@@ -613,7 +593,6 @@ static void finish_unit_cb(void *, void *)
   fprintf(asm_out_file, "\t.popsection\n");
   emit_objects();
   if (!is_cxx()) emit_decltype();
-  emit_crossing();
 }
 
 extern "C" int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *version)

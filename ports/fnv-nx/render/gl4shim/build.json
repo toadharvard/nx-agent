@@ -1,0 +1,42 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "cc": "x86_64-linux-gnu-gcc-13",
+  "cxx": "x86_64-linux-gnu-g++-13"
+ },
+ "flags": {
+  "c": [
+   "-std=c11",
+   "-Wall",
+   "-Werror",
+   "-Werror=switch-enum",
+   "-O2",
+   "-fPIC"
+  ],
+  "cxx": [],
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/render/gl4shim/include",
+  "ports/fnv-nx/render/gl4shim/gen"
+ ],
+ "units": "all",
+ "link": null,
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/render/gl4shim/ffp/gen_glsl.py",
+   "args": [
+    "/out/gen",
+    "/in/ports/fnv-nx/render/gl4shim/ffp"
+   ],
+   "inputs": [
+    "ports/fnv-nx/render/gl4shim/ffp/ffp.vert.glsl",
+    "ports/fnv-nx/render/gl4shim/ffp/ffp.frag.glsl",
+    "ports/fnv-nx/render/gl4shim/ffp/d9_epilogue.glsl"
+   ],
+   "outputs": [
+    "gen/gl4shim_ffp.gen.h"
+   ]
+  }
+ ]
+}

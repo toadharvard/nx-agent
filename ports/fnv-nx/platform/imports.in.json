@@ -9,7 +9,7 @@
   "path": "specs"
  },
  "extra": [
-  {"stage": "ports/fnv-nx/bridgefacts:gen:0", "path": "com_rows.tsv"}
+  {"root": "ports/fnv-nx/bridgefacts", "output": "COM_ROWS"}
  ],
  "extra_other": [],
  "name_table": {"root": "ports/fnv-nx/bridgefacts", "path": "crt/msvcrt_names.tsv"},

@@ -1,22 +1,18 @@
 // ffp_prog.cpp: nx_ffp_vs_program / nx_ffp_ps_program (draw_ffp.h) and the backend programs behind them.
 //  P1 Programs: ONE vertex and ONE pixel program (render/d3d9/ffp/ffp.vert.glsl, ffp.frag.glsl), in two variants selected by D3DRS_SHADEMODE FLAT (locations 0 / 1 `flat`, NX_FFP_FLAT; both stages by the same rule), made
 //     lazily at the first draw that needs (stage, variant), cached on the device record (ffp_dev.cpp R1), destroyed with it. A program id is NOT a function of any other state: everything else is uniform data.
-//  P2 The front end sends one GLSL blob and its sha256 key (NxShaderDesc.glsl / glsl_size / key, gpu_abi.h) to every backend and never DKSH: ffp_glsl.gen.h, render/d3d9/ffp/gen_glsl.py computes both at generation time;
-//     a backend that needs DKSH compiles the GLSL itself. The blob is a function of (stage, variant) only; there is no backend switch.
-//  P3 Every address the backend call reads is backend memory (nxd3d_gpu_alloc, glue_stream.h): the blob is copied there for the call and returned after it (the backend compiles / copies synchronously, as draw_prog.cpp
-//     does for bytecode); the descriptors live in the scratch of the glue. No memory = 0.
+//  P2 The front end sends the backend a row id of the one GLSL table of render/gl4shim (NxShaderDesc.row, gpu_abi.h; nx_gl4shim.h, rows FFP_VS/PS_SMOOTH/FLAT) and never GLSL text or DKSH: the text is a function of (stage, variant)
+//     only, and lives in the backend's table; there is no backend switch.
+//  P3 Every address the backend call reads is backend memory: the descriptor lives in the scratch of the glue (glue_stream.h). No memory = 0.
 //  P4 The blocks handed out (ubo[i].data) are the record's: the vertex block (memoised by its inputs, ffp_dev.h F2), the pixel block, and the world palette = the device's own WORLDMATRIX(0..255) states
 //     (256 consecutive D3DMATRIX = the std140 mat4[256] of the program, row-major bytes: ffp_vs_state.h).
 #include "ffp_dev.h"
-#include "../gen/ffp_glsl.gen.h"
+#include "nx_gl4shim.h"
 
 namespace {
-struct Blob { const unsigned char* p; unsigned n; const unsigned char* key; };
-Blob blob(uint32_t stage, uint32_t flat) {
-#define NXB_(s, v) Blob{nx_ffp_glsl_##s##_##v, nx_ffp_glsl_##s##_##v##_size, nx_ffp_glsl_##s##_##v##_key}
-    if (stage == NxStage_Vertex) return flat ? NXB_(vs, flat) : NXB_(vs, smooth);
-    return flat ? NXB_(ps, flat) : NXB_(ps, smooth);
-#undef NXB_
+enum nx_gl4shim_prog_id row(uint32_t stage, uint32_t flat) {
+    if (stage == NxStage_Vertex) return flat ? NX_GL4SHIM_PROG_FFP_VS_FLAT : NX_GL4SHIM_PROG_FFP_VS_SMOOTH;
+    return flat ? NX_GL4SHIM_PROG_FFP_PS_FLAT : NX_GL4SHIM_PROG_FFP_PS_SMOOTH;
 }
 }
 
@@ -33,13 +29,9 @@ bool nx_ffp_flat(NxDeviceCore* d, uint32_t* flat) {
 
 uint32_t nx_ffp_make_program(NxFfpDev* f, uint32_t stage, uint32_t flat) {
     if (!nxs_reserve()) return 0;                                      // the scratch of the glue exists once the ring does (glue_stream.h E1)
-    Blob b = blob(stage, flat);                                        // P2
-    uint32_t bytes = (b.n + 4095u) & ~4095u; uint8_t* m = (uint8_t*)nxd3d_gpu_alloc(bytes); if (!m) return 0;   // P3
-    memset(m, 0, bytes); memcpy(m, b.p, b.n);
-    NxShaderDesc* d = (NxShaderDesc*)nxs_scratch(sizeof *d); if (!d) { nxd3d_gpu_free(m); return 0; }
-    memset(d, 0, sizeof *d); d->stage = stage;
-    d->glsl = FNVNX_ADDR_(m); d->glsl_size = b.n; memcpy(d->key, b.key, sizeof d->key);
-    uint64_t a[1] = {FNVNX_ADDR_(d)}, r = nxd3d_gpu_call(NXGPU_FN_SHADER_CREATE, a, 1); nxd3d_gpu_free(m);
+    NxShaderDesc* d = (NxShaderDesc*)nxs_scratch(sizeof *d); if (!d) return 0;
+    memset(d, 0, sizeof *d); d->stage = stage; d->row = (uint32_t)row(stage, flat);                 // P2
+    uint64_t a[1] = {FNVNX_ADDR_(d)}, r = nxd3d_gpu_call(NXGPU_FN_SHADER_CREATE, a, 1);
     return nxs_ok(r) && r != 0 && r < (1u << 16) ? (uint32_t)r : 0;
 }
 

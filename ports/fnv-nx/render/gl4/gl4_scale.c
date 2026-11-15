@@ -22,33 +22,11 @@
 #endif
 
 #define SCALE_UNIT 62   /* texture units 62 / 63: above every unit a guest stage * 16 + slot can name */
-enum { P_C2D, P_CARR, P_C3D, P_DEPTH, P_STENCIL };
-
-static const char k_vs[] = "#version 450 core\nvoid main() { vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); "
-                           "gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }\n";
-static const char k_head[] =
-    "#version 450 core\nlayout(location = 0) uniform ivec4 src;\nlayout(location = 1) uniform ivec4 dst;\n"
-    "layout(location = 2) uniform ivec2 lz;\nlayout(location = 3) uniform int mode;\n"
-    "layout(binding = 63) uniform usampler2D ramp;\n";
-static const char k_tex[] = "ivec2 t = src.xy + ((2 * (ivec2(gl_FragCoord.xy) - dst.xy) + 1) * src.zw) / (2 * dst.zw);\n";
-static const char k_gamma[] =
-    "if (mode == 1) { ivec3 i = ivec3(round(clamp(c.rgb, 0.0, 1.0) * 255.0));\n"
-    "  c.r = float(texelFetch(ramp, ivec2(i.r, 0), 0).r >> 8) / 255.0; c.g = float(texelFetch(ramp, ivec2(i.g, 1), 0).r >> 8) / 255.0;\n"
-    "  c.b = float(texelFetch(ramp, ivec2(i.b, 2), 0).r >> 8) / 255.0; }\n";
+enum { P_C2D = NX_GL4SHIM_PROG_SCALE_C2D, P_CARR = NX_GL4SHIM_PROG_SCALE_CARR, P_C3D = NX_GL4SHIM_PROG_SCALE_C3D,
+       P_DEPTH = NX_GL4SHIM_PROG_SCALE_DEPTH, P_STENCIL = NX_GL4SHIM_PROG_SCALE_STENCIL };
 
 static GLuint program(int kind) {
-    static const char* const smp[] = {"sampler2D", "sampler2DArray", "sampler3D", "sampler2D", "usampler2D"};
-    static const char* const fetch[] = {"texelFetch(s, t, 0)", "texelFetch(s, ivec3(t, lz.y), 0)", "texelFetch(s, ivec3(t, lz.y), 0)"};
-    if (g4.scaleProg[kind]) return g4.scaleProg[kind];
-    char fs[1800];
-    int n = snprintf(fs, sizeof fs, "%slayout(binding = 62) uniform %s s;\n", k_head, smp[kind]);
-    if (kind <= P_C3D)
-        snprintf(fs + n, sizeof fs - (size_t)n, "layout(location = 0) out vec4 o;\nvoid main() {\n%s vec4 c = %s;\n%s o = c; }\n", k_tex, fetch[kind], k_gamma);
-    else if (kind == P_DEPTH)
-        snprintf(fs + n, sizeof fs - (size_t)n, "void main() {\n%s gl_FragDepth = texelFetch(s, t, 0).r; }\n", k_tex);
-    else
-        snprintf(fs + n, sizeof fs - (size_t)n, "void main() {\n%s if (((texelFetch(s, t, 0).r >> uint(mode)) & 1u) == 0u) discard; }\n", k_tex);
-    g4.scaleProg[kind] = gl4_compile_program(k_vs, fs);
+    if (!g4.scaleProg[kind]) g4.scaleProg[kind] = gl4_compile_program((enum nx_gl4shim_prog_id)kind);
     return g4.scaleProg[kind];
 }
 

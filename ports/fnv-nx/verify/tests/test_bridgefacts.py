@@ -26,8 +26,8 @@ BF = "ports/fnv-nx/bridgefacts"
 roots = recipe.load_admit(repo)
 check("bridgefacts is an admitted tool root with a recipe", roots.get(BF, {}).get("class") == "tool", roots.get(BF))
 rec = recipe.load_recipe(repo, roots, BF)
-check("it declares the COM rows and words as outputs and uses nothing (a root below every consumer: no uses cycle)",
-      rec["outputs"] == {"COM_ROWS": "com_rows.tsv", "COM_WORDS": "com_words.tsv"} and not rec.get("uses"), rec.get("outputs"))
+check("it declares the COM rows, COM words and d3d9 rows as outputs and uses nothing (a root below every consumer: no uses cycle)",
+      rec["outputs"] == {"COM_ROWS": "com_rows.tsv", "COM_WORDS": "com_words.tsv", "D9_ROWS": "d9bridge_rows.tsv"} and not rec.get("uses"), rec.get("outputs"))
 for r in ("ports/fnv-nx/loader", "ports/fnv-nx/platform"):
     u = recipe.load_recipe(repo, roots, r).get("uses") or []
     check("%s takes COM_ROWS through uses" % r, {"root": BF, "output": "COM_ROWS"} in u, u)
@@ -43,6 +43,13 @@ for why, ref in (("a product root", {"root": "ports/fnv-nx/loader", "path": "bui
         check("resolve_input {root, path}: %s is red" % why, False)
     except ValueError:
         check("resolve_input {root, path}: %s is red" % why, True)
+# {root, output}: needs the consumer's `uses`; an undeclared output or an output not used is red (checked before any build)
+for why, ref in (("an output the consumer does not use", {"root": BF, "output": "COM_WORDS_X"}), ("another root's output without `uses`", {"root": BF, "output": "COM_WORDS"})):
+    try:
+        recipe.resolve_input("ports/fnv-nx/loader", ref, repo, "/nonexistent")
+        check("resolve_input {root, output}: %s is red" % why, False)
+    except ValueError:
+        check("resolve_input {root, output}: %s is red" % why, True)
 # comrows.py on the real spec: one row per method of every non-hidden interface and export; words for every method incl. hidden ones
 spec = json.load(open(os.path.join(repo, BF, "com/com_spec.json")))
 with tempfile.TemporaryDirectory() as td:

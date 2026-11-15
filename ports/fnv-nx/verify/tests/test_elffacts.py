@@ -157,7 +157,8 @@ def main():
     check("parse_relocs: a row that does not fit raises", raises(elffacts.parse_relocs, "Relocation section '.s' at offset 0x1 contains 1 entry:\nnot a row\n"))
     check("parse_header: a header without an entry point raises", raises(elffacts.parse_header, "  Type: EXEC\n  Machine: x\n"))
     check("derive: a machine with no call-relocation table raises", raises(elffacts.derive, {"machine": "Z80"}, [], [], []))
-    check("parse_members: no section raises", raises(elffacts.parse_members, "nothing"))
+    check("parse_members: no section in a text that is no ld map raises", raises(elffacts.parse_members, "nothing"))
+    check("parse_members: a map with no archive section pulled no member (ld prints the heading with the first one)", elffacts.parse_members("Memory Configuration\n\nName Origin\n") == [])
     check("parse_cref: no table raises", raises(elffacts.parse_cref, "no table"))
     check("definers: a file ld printed that is no input of the link raises", raises(elffacts.definers, {"s": ["zzz.o"]}, {}, lambda f: None, set()))
     # a long name puts its file on the next line of ld's table

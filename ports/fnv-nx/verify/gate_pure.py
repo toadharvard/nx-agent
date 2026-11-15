@@ -25,16 +25,18 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import gate_admit  # noqa: E402
+import gatesdir  # noqa: E402
 from gate_admit import imports_errors  # noqa: E402
 
 ADMIT = "ports/fnv-nx/verify/admit.json"
 HOST = gate_admit.HOST_READERS
+PURE_COVERS = set(json.load(open(os.path.join(HERE, "gates.d", "pure.json")))["covers"])   # the classes this gate judges: its own gates.d file, the one place that says so
 
 
 def units(roots):
     """-> [(trees of the root, imported root paths)] of every root naming gate pure (one puregate run per root)."""
     out = [(tuple(os.path.normpath(t) for t in gate_admit.trees(r) if os.path.exists(t)), tuple(r.get("imports", [])))
-           for r in roots if "pure" in gate_admit.gates_of(r)]
+           for r in roots if gatesdir.root_class(r) in PURE_COVERS and r.get("path") not in HOST]
     return [u for u in out if u[0]]  # a tree that is not in this checkout contributes nothing
 
 

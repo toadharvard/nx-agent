@@ -93,6 +93,22 @@ def checks(obj):
           vm == ['_ZTV1M\t8\t0\t1M\t1M\n', '_ZTV1M\t36\t8\t1M\t1M;2S2\n'], str(vm))
 
 
+def crossing(obj):
+    """.fnvnx.crossing has a row for EVERY function the unit pairs with an MSVC name in .fnvnx.sympair (one universe: the row is made where the pair is made),
+    so every destructor variant is covered whatever emits it: the complete/base/deleting ones GCC emits (dtor.d0/d1/d2, in a class with a virtual base too), the
+    vector deleting destructor ??_E the plugin writes as assembly (dtor.sdd, its this-adjusting thunk dtor.sdd.thunk), and the ones inlined everywhere (noemit)"""
+    pairs = [l.split('\t') for l in pb.section(obj, '.fnvnx.sympair').splitlines()]
+    cross = {l.split('\t')[0] for l in pb.section(obj, '.fnvnx.crossing').splitlines()}
+    boundary = [p for p in pairs if len(p) == 4 and p[1] and p[2] != 'data']
+    missing = [p[0] for p in boundary if p[0] not in cross]
+    check('crossing: every sympair row with an MSVC name has a crossing row', boundary and not missing, missing[:10])
+    kinds = {p[2] for p in boundary}
+    for k in ('dtor.d0', 'dtor.d1', 'dtor.d2', 'dtor.sdd', 'dtor.sdd.thunk', 'noemit'):
+        check('crossing: the fixture has a %s row and it has its crossing row' % k, k in kinds and all(p[0] in cross for p in boundary if p[2] == k), sorted(kinds))
+    vb = [p for p in boundary if p[2].startswith('dtor') and p[1].startswith('??_EVB@@')]
+    check('crossing: the vector deleting destructor of a class with a virtual base (VB) is paired and has its row', vb and all(p[0] in cross for p in vb), vb)
+
+
 def main():
     td = tempfile.mkdtemp(prefix='test-sdd-')
     try:
@@ -102,6 +118,7 @@ def main():
         check('compiles', r.returncode == 0, r.stderr[:3000])
         if r.returncode == 0:
             checks(out)
+            crossing(out)
         r = pb.compile(FIX, os.path.join(td, 'x.o'), [so], args=['-fplugin-arg-fnvnx_sdd-mode=1'])
         check('an unknown plugin argument is an error', pb.argument_refused(r, 'sdd'), r.stderr[:500])
     finally:
