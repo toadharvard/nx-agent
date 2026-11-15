@@ -135,7 +135,7 @@ typedef struct NxVtxLayout4 {
                            the depth target when colorCount is 0 (SetRenderTarget Remarks: the viewport becomes the full \
                            render-target size; MicrosoftDocs/sdk-api nf-d3d9-idirect3ddevice9-setrendertarget.md and \
                            -setdepthstencilsurface.md Remarks, msdocs-win32-d3d9 multiple-render-targets.md:15). All \
-                           targets must have the same sample count (ASM-628, verify/ASSUMPTIONS.json), layer and \
+                           targets must have the same sample count: D3D9 requires it ('The multisample type must be the same for the render target and the depth stencil surface', sdk-api nf-d3d9-idirect3ddevice9-setrendertarget.md Remarks; mirror fnv-nx-build tools/msdocs-sdkapi-d3d9 c666b5f6), layer and \
                            level must exist, colour \
                            targets must be colour images and the depth target a depth image, and there must be \
                            at least one target: else the submit is BAD_CALL before anything runs (the device \
