@@ -505,3 +505,8 @@ After the first frame:
   - build.sh is split into two content-keyed stages. Stage 1 (compiler) depends on the GCC tarball, msvcmodel.patch, binutils and the configure line. Stage 2 (plugins + runtime) depends on the stage-1 tree, the plugin sources and the runtime sources. A plugin change reruns stage 2 only.
   - One MANIFEST key is generated from both stage keys; stamp.py holds the input lists once.
   - Proof: stamp.py's key equals the MANIFEST key, the archives are content-equal to 05082bde's, and a plugin byte change reruns stage 2 only. Stage times are reported at a commit.
+- 2026-11-15 20:15Z: DECLTYPE-PLUGINSYM is done at 41beb64ff (key 03eacf9d8c6932cd, w3).
+  - One registry, names/plugsym.inc, for sdd, dispatch and weakref targets. A weakref line goes under the target name with the decl's type, and a different spelling is an error.
+  - GCC's finish_unit order is not controlled, so the last writer to finish emits; the writer count must be derived from registration.
+  - On fixtures, symtab = lines for 22/22.
+  - The farm holds the rebuild until w2 decides whether S29 needs a plugin change, so that one rebuild carries both.
