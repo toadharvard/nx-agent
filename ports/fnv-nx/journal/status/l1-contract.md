@@ -1822,3 +1822,5 @@ bottleneck: the cand2 warm verdict on w15.
 bottleneck: the cand2 warm verdict on w15.
 - 21:23 L3a: b3a4dad01 fits lift/pack. Unit PP uses only include_uses lift/rt GEN. Confirmed from the code that the generated stages still mount every uses output (recipe.py:2235).
 bottleneck: the cand2 warm verdict on w15.
+- 21:26 w12 2faf60c4e: objstub nr_tail fix (a tail call into a non-terminator returns, both ISAs). The per-image facts stage is L1's (exefacts/modules, as L2 says) and goes to w27 after the typed dispatch gate: exefacts over the may-load closure, red facts:missing. w12 order: bootrt rt.c, then the compiler stage.
+bottleneck: the cand2 warm verdict on w15.
