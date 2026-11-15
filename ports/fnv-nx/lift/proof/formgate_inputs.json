@@ -8,8 +8,17 @@
    "commit": "16ca5eb9d8f046d395cc7e5a0e8e351e11ee7ff4",
    "tree_sha256": "04910d46b71be1e1c6e1e0d2559b9a81df87484206f119cf639d0e8d6841b560",
    "at": "/ext/certs"
+  },
+  {
+   "name": "x86ir",
+   "repo": "fnv-nx-build",
+   "ref": "tools/x86-proof-ir",
+   "commit": "baf8bc809f84759ee941285f0de76a9d1064126b",
+   "tree_sha256": "2dc6263d77db4448148e2041c08f06b034fe26e6615c4629921e66c02d913afa",
+   "at": "/ext/x86ir"
   }
  ],
+ "shapes": "liftpack/shapes.tsv",
  "certs": "certs/certs.tsv",
- "model_sha256": "70c8dc39cf64be4fe52d50f34ffd37eeefdc8bfa8162c5da8ffdd98d6b393eae"
+ "model_sha256": "7c3074644653d2976cbb101ae993e94f2a09c9b7a3b574d3c74f6a80278d079c"
 }

@@ -1,0 +1,34 @@
+{
+ "format": "fnvnx-declared/1",
+ "rows": [
+  {
+   "function": "cpuid",
+   "ufs": [
+    "cpuid0",
+    "cpuid1",
+    "cpuid2",
+    "cpuid3"
+   ],
+   "source": "rt/cpumodel.c",
+   "basis": "CLAUDE.md 'The declared CPU': cpuid is the reference host's answer (CPUREF, lift/rt/cpumodel.c) restricted to MMX, SSE, SSE2; SDM vol. 2A CPUID: the instruction returns the processor identification in EAX, EBX, ECX, EDX",
+   "outputs": [
+    "eax",
+    "ebx",
+    "ecx",
+    "edx"
+   ]
+  },
+  {
+   "function": "rdtsc",
+   "ufs": [
+    "rdtsc"
+   ],
+   "source": "rt/cpumodel.c",
+   "basis": "CLAUDE.md 'One fixed reference CPU model': rdtsc reads the platform's monotonic timer (fnvl_rdtsc); SDM vol. 2B RDTSC: the 64-bit time-stamp counter is returned in EDX:EAX",
+   "outputs": [
+    "eax",
+    "edx"
+   ]
+  }
+ ]
+}

@@ -1,6 +1,9 @@
 #!/bin/bash
 # Farm worker of the shape prover: prove shard K of N of the integer encoding shapes and publish the result to the private artifacts repository.
-#   bash ports/fnv-nx/farm/farm_shapeprove.sh K N          (K = 1..N; the shapes at sorted position = K-1 mod N)
+#   bash ports/fnv-nx/farm/farm_shapeprove.sh [--queue FILE] K N          (K = 1..N; the shapes at sorted position = K-1 mod N)
+# --queue FILE: the PINNED queue of a pack (fnv-nx-build branch l3b-lift/queue/<pack12>-<prover12>, file queue.tsv, proof/packqueue.py): the rows `shape_key<TAB>shape_sha`
+#   are the work, split by position mod N; nothing is fetched or scanned (steps 2 and 2b are skipped), so every farm of one run has the same queue.  The header's ir_sha256 must be
+#   the IR of this machine and the rows must hash to the header's queue_id, else exit 1.  Output branch id = <IR id>-<queue_id>.  Every record carries model_fns / closure_sha (K).
 # Inputs (private / exe-derived, fetched from the artifacts repository fnv-nx-build, never stored in this repository):
 #   branch l3b-lift/shapes        KEYS.tsv + <module>/shapes.tsv (output of proof/census.py); every shapes.tsv is checked against KEYS.tsv
 #   branch tools/sail-mirror      the pinned downloads of the Sail/isla toolchain; used by farm/sail_setup.sh (MIRROR=...) only when the toolchain
@@ -13,12 +16,14 @@
 #   Already published: nothing is re-run.
 # Resumable: rerun the same command after an interruption (the jsonl is appended, shapes already in it are skipped).
 # Env: FNVNX_BUILD (clone of fnv-nx-build, default /home/user/fnv-nx-build)  FNVNX_WORK (default /home/user/l3work/farm-shapeprove)
-#      BRANCH_PREFIX (default l3b-lift/shapeprove; tests use l3b-lift/shapeprove-test)  PUBLISH (1 default; 0: prove only)
+#      SHAPES_BRANCH (default l3b-lift/shapes; the census branch, KEYS.tsv-pinned; a re-pinned census goes to ANOTHER branch, the running farms read the head of this one)  BRANCH_PREFIX (default l3b-lift/shapeprove; tests use l3b-lift/shapeprove-test)  PUBLISH (1 default; 0: prove only)
 #      TIMEOUT (s per shape, default 600)  EIP (sym|fixed, default sym)  SLICE (default 1)  LIMIT (first LIMIT shapes of the shard, default all)
 #      VMEM_KB (address-space limit per process, default 6000000)  SHAPES (a shapes.tsv: skips the fetch of l3b-lift/shapes; local tests)
 # Last line: SHAPEPROVE shard=K/N id=ID shapes=<n> proved=<n> ... seconds=<wall> ; exit 1 if publication failed.
 set -euo pipefail
-K=${1:?usage: farm_shapeprove.sh K N}; N=${2:?usage: farm_shapeprove.sh K N}
+PINQ=
+if [ "${1:-}" = "--queue" ]; then PINQ=${2:?usage: farm_shapeprove.sh [--queue FILE] K N}; shift 2; [ -f "$PINQ" ] || { echo "queue file $PINQ not found" >&2; exit 1; }; fi
+K=${1:?usage: farm_shapeprove.sh [--queue FILE] K N}; N=${2:?usage: farm_shapeprove.sh [--queue FILE] K N}
 FARM=$(cd "$(dirname "$0")" && pwd); HERE=$(cd "$FARM/../lift/proof" && pwd)
 B=${FNVNX_BUILD:-/home/user/fnv-nx-build}; W=${FNVNX_WORK:-/home/user/l3work/farm-shapeprove}
 PREFIX=${BRANCH_PREFIX:-l3b-lift/shapeprove}; PUBLISH=${PUBLISH:-1}
@@ -56,9 +61,24 @@ bash "$FARM/sail_build.sh" > "$W/sail_build_$K.log" 2>&1 || { echo "sail_build.s
 SHA=$(sha256sum "${SAIL_IR:-$WORKDIR/sail/x86_proof.ir}" | cut -d' ' -f1)
 grep -q "^x86_proof.ir .* $SHA\$" "$HERE/sail_pins.txt" || { echo "IR sha256 $SHA is not the pin in sail_pins.txt" >&2; exit 1; }
 
+if [ -n "$PINQ" ]; then
+    # 2. the pinned queue: its header names the IR and the queue id; the rows must hash to it
+    QUEUE=$PINQ
+    QID=$(python3 -I - "$QUEUE" "$SHA" <<'PY' || exit 1
+import hashlib, re, sys
+q, sha = sys.argv[1], sys.argv[2]
+hdr = [l for l in open(q) if l.startswith('#')]; rows = [l for l in open(q) if l.strip() and l[0] != '#']
+m = re.search(r'queue_id=([0-9a-f]{12})', hdr[0]); ir = [l.split('=', 1)[1].strip() for l in hdr if l.startswith('# ir_sha256=')]
+if not m or ir != [sha]: sys.exit('queue header: queue_id missing or ir_sha256 differs from the IR of this machine (%s)' % sha)
+if hashlib.sha256(''.join(rows).encode()).hexdigest()[:12] != m.group(1): sys.exit('queue rows do not hash to the queue_id of the header')
+print(m.group(1))
+PY
+)
+    echo "queue $QID pinned: $PINQ ($(grep -vc '^#' "$PINQ") shapes)"
+else
 # 2. shapes: l3b-lift/shapes (each module's shapes.tsv is checked against the sha256 in KEYS.tsv); the union of the modules' shape keys is the universe
 if [ -z "${SHAPES:-}" ]; then
-    fetch_branch l3b-lift/shapes "$W/in/shapes"
+    fetch_branch "${SHAPES_BRANCH:-l3b-lift/shapes}" "$W/in/shapes"
     python3 -I - "$W/in/shapes" <<'PY' || { echo "a shapes.tsv of the shapes branch does not match KEYS.tsv" >&2; exit 1; }
 import hashlib, os, sys
 d = sys.argv[1]
@@ -86,6 +106,7 @@ QUEUE="$W/queue.tsv"
 QLINE=$(python3 -I "$HERE/certs_build.py" --queue "$SHAPES" --shards "$PUBD" --out "$QUEUE")
 QID=$(echo "$QLINE" | awk '{print $2}'); echo "queue $QLINE (from $(find "$PUBD" -name 'shapeprove_*.jsonl' | wc -l) published shard files)"
 [ "$(awk '{print $3}' <<< "$QLINE")" != 0 ] || { echo "SHAPEPROVE shard=$K/$N: queue empty, every encoding with a Form has a valid certificate"; exit 0; }
+fi
 ID="$(python3 -I "$HERE/certs_build.py" --id)-$QID"
 OUT="$W/out/$ID"; mkdir -p "$OUT"
 BR="$PREFIX/$ID/${K}of${N}"

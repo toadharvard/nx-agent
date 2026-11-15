@@ -1,0 +1,13 @@
+# Expected shape keys, written from the Intel SDM vol. 2 (opcode map, appendix A; ModRM / SIB tables 2-2 and 2-3) and NOT computed by shape.py.
+# Key = <bytes with immediate / displacement bytes zeroed>/<imm_offset>.<imm_size>.<disp_offset>.<disp_size> (shape.py docstring).
+# columns: encoding hex, SDM row, key, family
+55	50+rd PUSH r32: opcode only	55/0.0.0.0	int
+8b45f4	8B /r MOV r32,r/m32; ModRM 45 = mod 01 rm 101 [EBP+disp8]: disp8 at byte 2	8b4500/0.0.2.1	int
+b878563412	B8+rd id MOV r32,imm32: imm32 at byte 1	b800000000/1.4.0.0	int
+e8f0ffffff	E8 cw/cd CALL rel32: the 4 bytes after the opcode are the target	e800000000/1.4.0.0	int
+83c004	83 /0 ib ADD r/m32,imm8; ModRM C0 = mod 11: no disp, imm8 at byte 2	83c000/2.1.0.0	int
+c3	C3 RET	c3/0.0.0.0	int
+8b048578563412	8B /r MOV r32,r/m32; ModRM 04 = mod 00 rm 100 SIB; SIB 85 base 101 with mod 00 = disp32 at byte 3	8b048500000000/0.0.3.4	int
+6a01	6A ib PUSH imm8: imm8 at byte 1	6a00/1.1.0.0	int
+0f8412000000	0F 84 cd JZ rel32: 2 opcode bytes, the 4 bytes after them are the target	0f8400000000/2.4.0.0	int
+d94508	D9 /0 FLD m32fp; ModRM 45 = [EBP+disp8]: disp8 at byte 2	d94500/0.0.2.1	x87

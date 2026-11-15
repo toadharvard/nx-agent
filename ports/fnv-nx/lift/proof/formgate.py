@@ -1,29 +1,33 @@
 #!/usr/bin/env python3
 """Gate `forms` (fnvnx-gate/1, class 6 of VERDICT.md): an x86 instruction form without a certificate is a build error (rule R2).
     python3 -I ports/fnv-nx/lift/proof/formgate.py          cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/forms.json
-ONE copy of this gate. No argument and no other environment variable is read.
+ONE copy of this gate. No argument and no other environment variable is read: every private input is declared in formgate_inputs.json
+(next to this file, "fnvnx-forms-inputs/1": the same `external` entries as verify/contract_inputs.json, fetched by the SAME loader,
+recipe.fetch_externals, by exact commit with tree_sha256 checked, into GATE_CACHE/{store,external}; without GATE_CACHE the cache is
+GATE_OUT/forms-cache). The loader is imported from ports/fnv-nx/verify (sibling of lift/) the way verify/gate_contract.py imports its own (plain imports: a checkout
+without verify/ cannot run the gate, no result file, so the verdict is red).
+Keys: external; shapes = `liftpack/<path>` (shapes.tsv of the lifted pack); certs = `certs/<path>` (certs.tsv); model_sha256 = the pinned model.
 
-Universe (the verdict's universe rule, quantified over the admitted product roots of verify/admit.json): the ENCODING SHAPES of the lifted packs, whole.
-For every admitted root whose admit entry declares `cxx_origin` {"lifted_by", "pack"} the pack is the external of THAT root's recipe named by `pack`
-(the one place a pack is declared: content-pinned by commit and tree_sha256, the same external the root's build stages read); its `shapes.tsv`
-(rows `shape_key<TAB>family<TAB>count`, sorted by key, unique, family in int x87 simd sys; the generate driver of the pack writes it with
-proof/shape.py:shape_key) is read from the root of that external. The universe is the union of the shape keys of all such roots. No lifted root:
-universe 0, green. A lifted root whose pack external does not fetch or match its hash, or has no valid shapes.tsv, is the item `<root>:shapes`
-(uncertified, reason in detail): never skipped. The gate has no decoder of the exe and no census of its own.
-Certified: a shape is certified iff certs.tsv (rows shape_key family dsl_sha model_sha reference result) has a row with the same shape key, the
-dsl_sha that the CURRENT code gives (symform.shape_sha(key): sha256 of the symbolic Form, immediate / displacement / relative-target fields as
-variables; the same function the prover writes the field with; none when the shape has no symbolic Form: then the shape is uncertified), the pinned
-model_sha256 and result == proved. The hash binds the certificate to the builder code (forms*.py, dsl.py, symform.py) and to the object that was
-proved. The gate imports no SMT solver (the DSL imports z3 only inside to_smt / post).
-The certificates are declared once, in formgate_inputs.json (next to this file, "fnvnx-forms-inputs/1": the same `external` entries as
-verify/contract_inputs.json, fetched by the SAME loader, recipe.fetch_externals, by exact commit with tree_sha256 checked, into GATE_CACHE/{store,external};
-without GATE_CACHE the cache is GATE_OUT/forms-cache). Keys: external; certs = `NAME/<path>` (certs.tsv); model_sha256 = the pinned model.
+Universe: the ENCODING SHAPES of the lifted pack, whole: the rows `shape_key<TAB>family<TAB>count` of shapes.tsv (sorted by key, unique, family in
+int x87 simd sys) inside the external `liftpack`; the generate driver of the pack writes it with proof/shape.py:shape_key. The gate has no decoder
+of the exe and no census of its own. A shape is certified iff certs.tsv (rows shape_key family dsl_sha model_sha reference result obligations undef_flags def0_witness def0_free nonflag_free) has a row with
+the same shape key, the dsl_sha that the CURRENT code gives (symform.shape_sha(key): sha256 of the symbolic Form, immediate / displacement /
+relative-target fields as variables; the same function the prover writes the field with; none when the shape has no symbolic Form: then the shape
+is uncertified), the pinned model_sha256 and result == proved. The hash binds the certificate to the builder code (forms*.py, dsl.py, symform.py)
+and to the object that was proved. The gate imports no SMT solver (the DSL imports z3 only inside to_smt / post).
+
 Pinned model: formgate_inputs.json model_sha256 must equal the `x86_proof.ir` pin of proof/sail_pins.txt (red otherwise): one pin, two readers.
 
 RED with the reason (item `inputs`, universe 1, certified 0), never skipped: no inputs file; not JSON; wrong format or keys; a path key naming an
-external that is not declared; model_sha256 differing from sail_pins.txt; (with a lifted root) the certs external that does not fetch or whose tree does
-not match its hash, certs.tsv absent or malformed. Otherwise the items are the shapes (and `<root>:shapes`); uncertified = items without a
-certificate (first 50, sorted); detail keeps the certified/universe count per family."""
+external that is not declared (`inputs: external NAME not declared`); model_sha256 differing from sail_pins.txt; an external
+that does not fetch or whose tree does not match its hash; shapes.tsv or certs.tsv absent from its external or malformed. Otherwise the items are the
+shapes; uncertified = shapes without a certificate (first 50, sorted); detail keeps the certified/universe count per family.
+
+TODAY (no pack with shapes.tsv is published): the committed file declares only `certs`, so the gate is RED with `inputs: external liftpack not declared`.
+To make it live add ONE entry to "external" in formgate_inputs.json:
+  {"name": "liftpack", "repo": "fnv-nx-build", "ref": <branch of the pack>, "commit": <40 hex>, "tree_sha256": <cas tree hash of that commit's checkout>, "at": "/ext/liftpack"}
+(tree_sha256 = what recipe.fetch_externals reports for it)."""
+import hashlib
 import json
 import os
 import re
@@ -36,7 +40,7 @@ VERIFY = os.path.normpath(os.path.join(LIFT, "..", "verify"))
 sys.path.insert(0, LIFT)
 sys.path.insert(0, os.path.join(VERIFY, "..", "contract"))
 sys.path.insert(0, VERIFY)
-from proof import shape, symform  # noqa: E402
+from proof import eaaudit, shape, symform  # noqa: E402
 import gatefile  # noqa: E402     (ports/fnv-nx/contract)
 import recipe  # noqa: E402
 
@@ -45,17 +49,14 @@ INPUTS = os.path.join(HERE, "formgate_inputs.json")
 PINS = os.path.join(HERE, "sail_pins.txt")
 FORMAT = "fnvnx-forms-inputs/1"
 EXT_KEYS = {"name", "repo", "ref", "commit", "tree_sha256", "at"}      # = recipe.EXT_KEYS (a test asserts it)
-KEYS = {"format", "external", "certs", "model_sha256"}
+KEYS = {"format", "external", "shapes", "certs", "model_sha256"}
 REFERENCES = ("sail", "fpsmt", "k", "sdm", "table")
 FAMILIES = ("int", "x87", "simd", "sys")
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 
 
 class Red(Exception):
-    """a declared input is missing or invalid: the gate is red with this reason; CODE is the finding class (fixtures, RECIPE.md "Fixtures")"""
-    def __init__(self, msg, code="forms-inputs"):
-        super().__init__(msg)
-        self.code = code
+    """a declared input is missing or invalid: the gate is red with this reason"""
 
 
 def rows(path):
@@ -100,7 +101,7 @@ def load_inputs(path=INPUTS, pins=PINS):
     names = [e["name"] for e in exts]
     if len(set(names)) != len(names):
         raise Red("inputs: external names are not unique")
-    for k in ("certs",):
+    for k in ("shapes", "certs"):
         v = doc[k]
         if not isinstance(v, str) or "/" not in v or ".." in v.split("/"):
             raise Red("inputs: %s must be NAME/path inside a declared external" % k)
@@ -113,46 +114,24 @@ def load_inputs(path=INPUTS, pins=PINS):
     return doc
 
 
-def fetch(exts, cache):
+def fetch(doc, cache):
     """-> {name: {host, tree, at}} through the loader of the trunk (recipe.fetch_externals into CACHE/store, CACHE/external)"""
     ws = os.path.join(cache, "ws")
     shutil.rmtree(ws, ignore_errors=True)
     os.makedirs(ws)
     try:
-        return recipe.fetch_externals(exts, os.path.join(cache, "store"), os.path.join(cache, "external"), ws)
+        return recipe.fetch_externals(doc["external"], os.path.join(cache, "store"), os.path.join(cache, "external"), ws)
     except recipe.BuildRed as e:
         f = e.args[0]
-        raise Red("external does not fetch or match its hash: stage %s: %s" % (f["stage"], " | ".join(f["stderr"][-3:])[:300]), "forms-fetch")
+        raise Red("inputs: external does not fetch or match its hash: stage %s: %s" % (f["stage"], " | ".join(f["stderr"][-3:])[:300]))
 
 
-def path_in(ext, name, rel, what):
-    p = os.path.join(ext[name]["host"], rel)
+def path_in(ext, v, what):
+    n, rel = v.split("/", 1)
+    p = os.path.join(ext[n]["host"], rel)
     if not os.path.isfile(p):
-        raise Red("%s: %s is missing from external %s" % (what, rel, name), "forms-missing-shapes" if what == "pack" else "forms-certs-missing")
+        raise Red("inputs: %s: %s is missing from external %s" % (what, rel, n))
     return p
-
-
-def lifted_roots(repo):
-    """-> [(root, pack external entry or None)] of the admitted product roots declared `cxx_origin` {"lifted_by", "pack"}, by path"""
-    roots = recipe.load_admit(repo)
-    only = os.environ.get("GATE_ONLY_ROOT")      # a whole-root fixture (RECIPE.md "Fixtures"): the gate runs on that root alone
-    out = []
-    for path in sorted(roots):
-        r = roots[path]
-        o = r.get("cxx_origin")
-        if only:
-            if path != only or r.get("class") not in ("product", "fixture"):
-                continue
-        elif r.get("class") != "product":
-            continue
-        if not (isinstance(o, dict) and "pack" in o):
-            continue
-        try:
-            exts = recipe.load_recipe(repo, roots, path).get("external", [])
-        except (OSError, ValueError, KeyError, AttributeError):
-            exts = []
-        out.append((path, next((e for e in exts if isinstance(e, dict) and e.get("name") == o["pack"]), None)))
-    return out
 
 
 def dsl_sha(key, md):
@@ -170,76 +149,98 @@ def load_shapes(path):
     out, last = {}, None
     for r in rows(path):
         if len(r) != 3 or r[1] not in FAMILIES or not r[2].isdigit():
-            raise Red("shapes.tsv: bad row %r" % "\t".join(r)[:100], "forms-bad-shapes")
+            raise Red("shapes.tsv: bad row %r" % "\t".join(r)[:100])
         if last is not None and r[0] <= last:
-            raise Red("shapes.tsv: not sorted by key, or a key twice, at %r" % r[0][:100], "forms-bad-shapes")
+            raise Red("shapes.tsv: not sorted by key, or a key twice, at %r" % r[0][:100])
         last = r[0]
         out[r[0]] = r[1]
     if not out:
-        raise Red("shapes.tsv: no shapes (a pack has entries)", "forms-bad-shapes")
+        raise Red("shapes.tsv: no shapes (a pack has entries)")
     return out
+
+
+OBLIGATIONS = ("def0",)      # = prove.OBLIGATIONS (test_formgate checks it; this module imports no SMT solver): a row certifies only what the current prover checks
+
+
+def declared_table():
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "declared.json")) as fh:
+        return json.load(fh)
+
+
+def platform_sha(fns, root=None):
+    """= prove.platform_sha (test_formgate checks they agree; this module imports no SMT solver): sha256 over (relative path, content) of the declared.json sources of the functions, hashed from the lift tree this gate runs from"""
+    root = root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    rows = {u: r for r in declared_table()["rows"] for u in r["ufs"]}
+    h = hashlib.sha256()
+    for src in sorted({rows[f]["source"] for f in fns}):
+        h.update(src.encode()); h.update(open(os.path.join(root, src), "rb").read())
+    return h.hexdigest()
+
+
+def declared_ok(decl, root=None):
+    """`reg:fn,...@sha256`: every pair is allowed by declared.json (function, output), and the sha is that of the platform sources in this tree"""
+    try:
+        pairs, sha = decl.rsplit("@", 1)
+        rows = {u: r for r in declared_table()["rows"] for u in r["ufs"]}
+        fns = []
+        for p in pairs.split(","):
+            reg, fn = p.split(":")
+            if fn not in rows or reg not in rows[fn]["outputs"]: return False
+            fns.append(fn)
+        return sha == platform_sha(fns, root)
+    except (ValueError, KeyError, OSError):
+        return False
+
 
 
 def load_certs(path, model_sha):
     """{shape: set of dsl_sha} of the rows that are proofs against the pinned model"""
     ok = {}
     for r in rows(path):
-        if len(r) != 6:
+        if len(r) != 12:
             raise Red("certs.tsv: bad row %r" % "\t".join(r)[:100])
-        key, _, dsl, model, ref, res = r
-        if res == "proved" and model == model_sha and ref in REFERENCES:
+        key, _, dsl, model, ref, res, obl, decl = r[:7] + r[11:]
+        # `proved`: every output equals the model's.  `agree-except-declared`: every output equals the model's EXCEPT the registers listed in the declared column
+        # (reg:function pairs, @platform sha256), which the Form takes from a platform function (cpuid: rt/cpumodel.c); a proved row declares nothing
+        if res not in ("proved", "agree-except-declared") or (res == "proved") != (decl == "-"):
+            continue
+        if decl != "-" and not declared_ok(decl):
+            continue                                                # a declared output outside declared.json, or a platform source that is not the one of this tree: stale
+        if model == model_sha and ref in REFERENCES and obl == ",".join(OBLIGATIONS):
             ok.setdefault(key, set()).add(dsl)
     return ok
 
 
-FINDINGS = []     # the findings of the last judge() as {"id": "<root>[:<item>]" or "inputs", "code": CODE}; written to forms.json (RECIPE.md "Fixtures")
-
-
-def judge(repo, cache, inputs=INPUTS, pins=PINS):
-    """-> (universe, certified, uncertified ids, detail); never raises for an input problem. FINDINGS holds the coded findings: one per item that is not
-    certified, id `<root>/shapes` (a finding id is under its root: gate_fixtures.py) for a root's pack or shapes, `inputs` for the gate's own declared inputs"""
-    del FINDINGS[:]
-    try:
-        doc = load_inputs(inputs, pins)
-        packs = lifted_roots(repo)
-        if not packs:
-            return 0, 0, [], "no lifted root in admit.json: no shape to certify"
-        cname, crel = doc["certs"].split("/", 1)
-        cext = fetch([e for e in doc["external"] if e["name"] == cname], cache)
-        certs_path = path_in(cext, cname, crel, "certs")
-        certs = load_certs(certs_path, doc["model_sha256"])
-        fam, bad, mine = {}, {}, {}
-        for root, ext in packs:
-            if ext is None:
-                bad[root + ":shapes"] = "the recipe declares no external named by cxx_origin.pack"
-                FINDINGS.append({"id": root + "/shapes", "code": "forms-no-pack"})
-                continue
-            try:
-                got = fetch([ext], cache)
-                mine[root] = load_shapes(path_in(got, ext["name"], "shapes.tsv", "pack"))
-                fam.update({k: v for k, v in mine[root].items() if k not in fam})
-            except Red as e:
-                bad[root + ":shapes"] = str(e)[:200]
-                FINDINGS.append({"id": root + "/shapes", "code": e.code})
-    except Red as e:
-        FINDINGS.append({"id": "inputs", "code": e.code})
-        return 1, 0, ["inputs"], str(e)[:600]
-    except (OSError, ValueError) as e:
-        FINDINGS.append({"id": "inputs", "code": "forms-inputs"})
-        return 1, 0, ["inputs"], "inputs: %s" % (str(e)[:300] or type(e).__name__)
-    finally:
-        shutil.rmtree(os.path.join(cache, "ws"), ignore_errors=True)     # the checkouts of the externals (the CAS store keeps the content)
+def analyse(shapes_path, certs_path, model_sha):
+    """-> ({shape: family}, {shape: certified}, shapes without builder)"""
+    fam = load_shapes(shapes_path)
+    certs = load_certs(certs_path, model_sha)
     md = shape.decoder()
     cert, nobuilder = {}, 0
     for k in sorted(fam):
         d = dsl_sha(k, md)
         nobuilder += d is None
         cert[k] = d is not None and d in certs.get(k, ())
-    FINDINGS.extend({"id": r + "/shapes", "code": "forms-uncertified"} for r in sorted(mine) if any(not cert[k] for k in mine[r]))
-    unc = [k for k in sorted(cert) if not cert[k]] + sorted(bad)
+    return fam, cert, nobuilder
+
+
+def judge(cache, inputs=INPUTS, pins=PINS):
+    """-> (universe, certified, uncertified ids, detail); never raises for an input problem"""
+    try:
+        doc = load_inputs(inputs, pins)
+        ext = fetch(doc, cache)
+        fam, cert, nobuilder = analyse(path_in(ext, doc["shapes"], "shapes"), path_in(ext, doc["certs"], "certs"), doc["model_sha256"])
+    except Red as e:
+        return 1, 0, ["inputs"], str(e)[:600]
+    except (OSError, ValueError) as e:
+        return 1, 0, ["inputs"], "inputs: %s" % (str(e)[:300] or type(e).__name__)
+    finally:
+        shutil.rmtree(os.path.join(cache, "ws"), ignore_errors=True)     # the checkouts of the externals (the CAS store keeps the content)
+    unc = [k for k in sorted(cert) if not cert[k]]
+    ea = eaaudit.violations(HERE)      # one uncertified item per violation of the ea-rule: every Form memory access goes through an address function (proof/eaaudit.py)
+    ea_ids = ["ea-rule:%s:%d" % v[:2] for v in ea]
     byfam = ", ".join("%s %d/%d" % (f, sum(cert[k] for k in fam if fam[k] == f), sum(1 for k in fam if fam[k] == f)) for f in FAMILIES)
-    why = "".join("; %s: %s" % (k, bad[k]) for k in sorted(bad))
-    return len(cert) + len(bad), len(cert) - (len(unc) - len(bad)), unc, "certified/universe per family: %s; shapes without a DSL builder: %d%s" % (byfam, nobuilder, why)
+    return len(cert) + len(ea_ids), len(cert) - len(unc), unc + ea_ids, "certified/universe per family: %s; shapes without a DSL builder: %d; ea-rule violations: %d%s" % (byfam, nobuilder, len(ea), "".join("; %s:%d %s" % v for v in ea[:5]))
 
 
 def cache_dir(env):
@@ -252,15 +253,8 @@ def main(argv):
         return 1
     cache = cache_dir(os.environ)
     os.makedirs(cache, exist_ok=True)
-    u, c, ids, detail = judge(".", cache)
-    path = gatefile.write(NAME, u, c, ids, detail)
-    if path:     # the coded findings (fixtures, RECIPE.md "Fixtures"); also in normal mode: a whole-root fixture is judged in normal mode
-        with open(path) as fh:
-            r = json.load(fh)
-        r["findings"] = FINDINGS
-        with open(path, "w", newline="\n") as fh:
-            json.dump(r, fh, sort_keys=True, separators=(",", ":"))
-            fh.write("\n")
+    u, c, ids, detail = judge(cache)
+    gatefile.write(NAME, u, c, ids, detail)
     st = "green" if u == c else "red"
     sys.stdout.write("%s: %s %d/%d %s\n" % (NAME, st, c, u, detail[:200]))
     return 0 if st == "green" else 2

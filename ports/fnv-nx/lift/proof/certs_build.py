@@ -3,6 +3,7 @@
 
     python3 -I certs_build.py --id                                  the model id (first 12 hex of the pinned IR sha256)
     python3 -I certs_build.py --shards PATH [PATH ...] --out certs.tsv [--report FILE]
+    python3 -I certs_build.py --coverage SHAPES.tsv --shards PATH [PATH ...] [--out MISSING]   global coverage: every int key with a Form has one decided record at the current (shape_sha, IR sha); exit 1 and the list when keys are MISSING
     python3 -I certs_build.py --queue SHAPES.tsv [--shards PATH ...] --out QUEUE   the encodings that still need a proof (see below); prints `queue <id> <n>`
 PATH = a shapeprove_<K>_of_<N>.jsonl file or a directory searched (sorted, recursively) for such files.
 
@@ -32,9 +33,12 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIFT = os.path.dirname(HERE)
 sys.path.insert(0, LIFT)
-from proof import shape, symform  # noqa: E402
+from proof import irdeps, model_sail, prove, shape, symform  # noqa: E402
 
-HEADER = '# shape_key\tfamily\tdsl_sha\tmodel_sha\treference\tresult\n'
+HEADER = '# shape_key\tfamily\tdsl_sha\tmodel_sha\treference\tresult\tobligations\tundef_flags\tdef0_witness\tdef0_free\tnonflag_free\tdeclared\n'
+
+def _lst(x):
+    return ','.join(x) if x else '-'
 
 
 class Refused(Exception):
@@ -87,6 +91,35 @@ def current_sha(key, cache=_SHA):
     return cache[key]
 
 
+IR_FILES = {}          # sha256 -> path of an IR file (--ir PATH, fetched by sha from the artifacts repository: tools/x86-proof-ir*); every file is hashed here, a file is never trusted by name
+_K = {}
+
+
+def add_ir(path):
+    with open(path, 'rb') as fh: sha = hashlib.sha256(fh.read()).hexdigest()
+    IR_FILES[sha] = path
+    return sha
+
+
+def _closure(sha, fns):
+    key = (sha, tuple(fns))
+    if key not in _K:
+        path = IR_FILES.get(sha) or (model_sail.ir_file() if model_sail.ir_sha() == sha else None)
+        if path is None: raise Refused('the IR %s of a record is not provided (--ir PATH: fetch it by sha, tools/x86-proof-ir*)' % sha)
+        _K[key] = irdeps.sha_of_file(path, fns, model_sail.run_env_sha())
+    return _K[key]
+
+
+def model_valid(r, model):
+    """K: a record is valid for the pinned model iff it was proved against it (model_sha), or the closure of the functions its isla run executed (model_fns, recorded) is the same on the IR of the
+    record (its model_sha) and on the pinned IR: both are COMPUTED here by irdeps (the stored closure_sha is informational), from IR files that are hashed to their sha.  Equal closure => the run is
+    step for step the same (irdeps.py), so the shape's certificate is the same."""
+    if r.get('model_sha') == model: return True
+    fns = r.get('model_fns')
+    if not fns or not r.get('model_sha'): return False
+    return _closure(r['model_sha'], fns) == _closure(model, fns)
+
+
 def scan(files):
     """-> (proved {key: (dsl_sha, ...)} valid certificates, counts {result or 'stale-dsl'/'stale-model': n}, status {(key, dsl, model): best result}).
     Records that do not match (shape, current shape_sha, pinned IR) are counted stale and ignored.  Raises Refused on a contradiction."""
@@ -94,7 +127,7 @@ def scan(files):
     with open(os.path.join(HERE, 'formgate_inputs.json')) as fh:
         if json.load(fh)['model_sha256'] != model:
             raise Refused('formgate_inputs.json model_sha256 differs from the x86_proof.ir pin of sail_pins.txt')
-    proved, counts, status = {}, {}, {}
+    proved, counts, status, info = {}, {}, {}, {}
     for f, i, r in records(files):
         where = '%s:%d' % (f, i)
         res = r.get('result')
@@ -102,42 +135,55 @@ def scan(files):
             counts[res] = counts.get(res, 0) + 1
             continue                                            # no obligation ran: no Form, no model sha
         key = r['shape']
-        if r.get('model_sha') != model:
+        if not model_valid(r, model):
             counts['stale-model'] = counts.get('stale-model', 0) + 1
+            continue
+        if r.get('obligations') != list(prove.OBLIGATIONS):          # a record of a prover that did not check DEF0 (every undefined flag = 0) certifies less than this one
+            counts['stale-obligations'] = counts.get('stale-obligations', 0) + 1
+            continue
+        d0r = r.get('def0') or {}
+        if d0r.get('nonflag_free') and 'defprior' not in d0r:          # a record of a prover before DEFPRIOR: its non-flag free outputs were only listed, never proved or classified
+            counts['stale-defprior'] = counts.get('stale-defprior', 0) + 1
             continue
         if r.get('dsl_sha') is None or r.get('dsl_sha') != current_sha(key):
             counts['stale-dsl'] = counts.get('stale-dsl', 0) + 1
             continue
         counts[res] = counts.get(res, 0) + 1
         k3 = (key, r['dsl_sha'], model)
-        ok = res == 'proved'
-        if res.startswith('FAILED') and status.get(k3) == 'proved' or ok and status.get(k3, '').startswith('FAILED'):
+        ok = res in ('proved', 'agree-except-declared')
+        if res == 'agree-except-declared' and r.get('platform_sha256') != prove.platform_sha(r.get('declared') or {}):
+            counts['stale-platform'] = counts.get('stale-platform', 0) + 1
+            continue
+        if res.startswith('FAILED') and status.get(k3) in ('proved', 'agree-except-declared') or ok and status.get(k3, '').startswith('FAILED'):
             raise Refused('%s: %s is proved in one record and %s in another' % (where, key, res if not ok else status[k3]))
         if ok or k3 not in status:
             status[k3] = res
         if ok:
             proved[key] = r['dsl_sha']
-    return proved, counts, status
+            d0 = r.get('def0') or {}
+            dc = r.get('declared') or {}
+            info[key] = (res, _lst(r.get('obligations')), _lst(d0.get('undef_flags')), str(d0.get('witness', 0)), str(d0.get('free', 0)), _lst(d0.get('nonflag_free')),
+                         ','.join('%s:%s' % x for x in sorted(dc.items())) + '@' + r['platform_sha256'] if dc else '-')
+    return proved, counts, status, info
 
 
 def build(files):
     """-> (sorted rows, counts of results, notes).  Raises Refused."""
     model = pinned_model()
     md = shape.decoder()
-    proved, counts, status = scan(files)
+    proved, counts, status, info = scan(files)
     rows = {}
     for key, dsl in proved.items():
         rep = shape.rep_bytes(key)
         ins = list(md.disasm(rep, shape.ADDR))
         if len(ins) != 1 or ins[0].size != len(rep) or shape.shape_key(ins[0]) != key:
             raise Refused('the representative of %s is not the shape' % key)
-        rows[key] = '%s\t%s\t%s\t%s\tsail\tproved\n' % (key, shape.family(ins[0]), dsl, model)
+        rows[key] = '%s\t%s\t%s\t%s\tsail\t%s\n' % (key, shape.family(ins[0]), dsl, model, '\t'.join(info[key]))
     return [rows[k] for k in sorted(rows)], counts, status
 
 
-def queue(shapes_path, files):
-    """-> (queue id, [(key, shape_sha)] sorted): integer-family shapes of the shapes file with a symbolic Form and no valid certificate in the shards"""
-    proved, _, _ = scan(files)
+def forms_of(shapes_path):
+    """{shape key: current shape_sha}: the integer-family shapes of the shapes file that have a symbolic Form (the set the farms must cover)"""
     md = shape.decoder()
     out = {}
     with open(shapes_path) as fh:
@@ -154,11 +200,34 @@ def queue(shapes_path, files):
             except shape.ShapeError:
                 continue
             d = current_sha(ck)
-            if fam == 'int' and d is not None and proved.get(ck) != d:
+            if fam in ('int', 'sys') and d is not None:
                 out[ck] = d
-    q = sorted(out.items())
+    return out
+
+
+def queue(shapes_path, files):
+    """-> (queue id, [(key, shape_sha)] sorted): integer-family shapes of the shapes file with a symbolic Form and no valid certificate in the shards"""
+    proved, _, _, _ = scan(files)
+    q = sorted((k, d) for k, d in forms_of(shapes_path).items() if proved.get(k) != d)
     h = hashlib.sha256(''.join('%s\t%s\n' % x for x in q).encode()).hexdigest()[:12]
     return h, q
+
+
+def coverage(shapes_path, files):
+    """GLOBAL coverage of the farm run, independent of how any farm split its queue: every shape key with a Form must have EXACTLY ONE decided result at (key, current shape_sha, pinned IR sha)
+    (several records of the same result are duplicates; two different results are `Refused` by scan).  -> (total, {result: n}, [keys with no record], duplicates)"""
+    model = pinned_model()
+    want = forms_of(shapes_path)
+    seen = {}
+    for f, i, r in records(files):
+        if r.get('shape') in want and r.get('model_sha') == model and r.get('dsl_sha') == want[r['shape']] and r.get('result') not in ('no-form', 'builder-branches-on-field', 'field-decode', 'decode'):
+            seen.setdefault(r['shape'], []).append(r['result'])
+    scan(files)                                                       # contradictions are refused
+    res = {}
+    for k, v in seen.items():
+        for x in set(v):
+            res[x] = res.get(x, 0) + 1
+    return len(want), res, sorted(k for k in want if k not in seen), sum(len(v) - 1 for v in seen.values())
 
 
 def main(argv):
@@ -168,10 +237,24 @@ def main(argv):
     ap.add_argument('--out')
     ap.add_argument('--queue')
     ap.add_argument('--report')
+    ap.add_argument('--coverage')
+    ap.add_argument('--ir', action='append', default=[], help='an IR file (hashed to its sha) that a record of another model_sha was proved against')
     a = ap.parse_args(argv)
+    for f in a.ir: add_ir(f)
     if a.id:
         sys.stdout.write(run_id() + '\n')
         return 0
+    if a.coverage:
+        try:
+            total, res, missing, dups = coverage(a.coverage, shard_files(a.shards or []))
+        except Refused as e:
+            sys.stderr.write('certs_build: REFUSED: %s\n' % e)
+            return 2
+        sys.stdout.write('coverage: %d keys with a Form; decided %d (%s); duplicate records %d; MISSING %d\n' % (total, total - len(missing), ' '.join('%s=%d' % x for x in sorted(res.items())), dups, len(missing)))
+        if a.out:
+            with open(a.out, 'w', newline='\n') as fh:
+                fh.writelines(k + '\n' for k in missing)
+        return 1 if missing else 0
     if a.queue:
         if not a.out:
             sys.stderr.write('certs_build: --queue SHAPES --out FILE\n')
@@ -201,7 +284,7 @@ def main(argv):
         with open(a.report, 'w', newline='\n') as fh:
             fh.write('# shape_key\tdsl_sha\tmodel_sha\tbest result in the shards\n')
             for k3 in sorted(status):
-                if status[k3] != 'proved':
+                if status[k3] not in ('proved', 'agree-except-declared'):
                     fh.write('%s\t%s\t%s\t%s\n' % (k3[0], k3[1], k3[2], status[k3]))
     sys.stdout.write('certs_build: %d shard files, %d proved rows; records by result: %s\n' % (len(files), len(rows), ' '.join('%s=%d' % x for x in sorted(counts.items()))))
     return 0
