@@ -1139,3 +1139,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Rule: h_default emits #UD only for a decided #UD (ud-class by f_cpufeat, or an undefined encoding); any other shape is a lift error. The census runs over the merged FACTS.
   - rcptab.c is reverted to its certified bytes (d2a3920e…).
   - The Form.sha check against 99b0218fd is pending (w13's harness), and gates L3b's merge.
+- 22:55 base3 743de8cb2: rcptab.c certified bytes back.
+  - h_default emits #UD only when it is decided (CPUID ud-class, or SDM UD0/1/2); every other shape is red at the shard. int is the Form alone. 41/41 roots valid at d7c7a822f.
+  - L1 cand3 8fc4c58b9 still carries the cand2 toolchain (3c1ad1b10, pin 56a4d09c) and not 789ef219c. I asked L1 for the head with L2's current pin.
+  - bottleneck: the exe facts memory growth (w7); the toolchain pin in L1 cand3.
