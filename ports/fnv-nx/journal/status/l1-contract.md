@@ -1322,3 +1322,8 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - oracle and assumptions: w15 for L1 files, the others forwarded;
   - speed (selftests 595, fpexact 319, determinism 129): w24 gatekeys.
 - cand2 is built from 2b66742ec, and its verdict runs incrementally on cand1's cache.
+- cand2 additions:
+  - the L5 tree is platform-root 310d0e97e (hostapi 31/31, assumptions 103/103 there);
+  - the L3a origin_class hunk of 8569a4dc0 is cherry-picked (stage-form lifted = lifted);
+  - L4 w7 selftests on claude/fnv-l4-verify-cand1; deleting dead code is the rule for -Wunused-function.
+- w22 gets a 5th correction: excluded roots bind no exe address.
