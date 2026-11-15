@@ -238,7 +238,10 @@ PLUG_C=""; PLUG_CXX=""
 [ -n "${FNVNX_TL_PLUGIN_FLAGS_C:-}" ] && PLUG_C=$(cat "$FNVNX_TL_PLUGIN_FLAGS_C")
 [ -n "${FNVNX_TL_PLUGIN_FLAGS_CXX:-}" ] && PLUG_CXX=$(cat "$FNVNX_TL_PLUGIN_FLAGS_CXX")
 TLC="-O2 $(tlflags c) $PLUG_C"   # no -ffunction-sections/-fdata-sections: rtasm reads whole objects with their .fnvnx* sections
-TLCXX="-O2 $(tlflags cxx) $PLUG_CXX"
+# -save-temps=obj for C++ (rule ODRDEF-PP of fnvnx_names.cc): the driver runs the compiler's own two steps, preprocess then compile the preprocessed text, as the
+# recipe's PP and CC stages do; the ODR definition record re-lexes the unit and can only do so from its own preprocessed text (a raw unit's include chains and macros are
+# not readable from the plugin). The flag changes no code: the same cc1 input, the preprocessed text is what the compiler would have lexed.
+TLCXX="-O2 -save-temps=obj $(tlflags cxx) $PLUG_CXX"
 note "CFLAGS_FOR_TARGET=$TLC"
 note "CXXFLAGS_FOR_TARGET=$TLCXX"
 
