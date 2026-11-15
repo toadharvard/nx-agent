@@ -459,6 +459,10 @@ static void order_builtin_call(gimple_stmt_iterator *gsi, gcall *call) {
   // may be shared it fills a private temporary, which is then copied into it as any ordered aggregate copy. The temporary is private by
   // construction (force_addressable) and its address goes to this one call, which keeps no pointer (GCC's own description of the builtin)
   if (code == BUILT_IN_VA_END) return;
+  // THE STACK-POINTER BUILTINS. __builtin_stack_save returns the stack pointer and __builtin_stack_restore(p) sets it (builtins.cc
+  // expand_builtin_stack_save / expand_stack_restore: emit_stack_save / emit_stack_restore, a move of the stack pointer register); the pointer
+  // operand is a stack-pointer VALUE that the builtin never dereferences, so it is no memory access (a VLA or alloca scope boundary).
+  if (code == BUILT_IN_STACK_SAVE || code == BUILT_IN_STACK_RESTORE) return;
   if (code == BUILT_IN_VA_START && gimple_call_num_args(call) >= 1) {
     tree a = gimple_call_arg(call, 0);
     if (POINTER_TYPE_P(TREE_TYPE(a)) && !(TREE_CODE(a) == ADDR_EXPR && local_unshared(ref_base(TREE_OPERAND(a, 0))))) {
