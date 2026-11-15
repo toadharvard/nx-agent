@@ -75,7 +75,14 @@ libc = objstub.derive_terminators(CC, [], ["stdlib.h", "unistd.h", "assert.h", "
 check("terminators: libc set", all(x in libc for x in ("abort", "exit", "_Exit", "quick_exit")) and "atexit" not in libc
       and "raise" not in libc, libc)
 cxx = objstub.derive_terminators("aarch64-linux-gnu-g++", [], ["cstdlib", "exception"], "c++", tf + ".cxx")
+cxx_sj = objstub.derive_terminators("aarch64-linux-gnu-g++", [], ["csetjmp", "cstdlib", "cxxabi.h"], "c++", tf + ".cxxsj")
+cxx_ne = objstub.derive_terminators("aarch64-linux-gnu-g++", ["-fno-exceptions"], ["csetjmp", "cstdlib", "cxxabi.h"], "c++", tf + ".cxxne")
+libc_sj = objstub.derive_terminators(CC, [], ["setjmp.h", "stdlib.h"], "c", tf + ".libcsj")
 check("terminators: C++ set has mangled terminate", "_ZSt9terminatev" in cxx and "abort" in cxx, cxx)
+check("terminators: longjmp family (<setjmp.h>) is a control transfer, an unwinder, in C and C++", all("~" + n in cxx_sj and n not in cxx_sj for n in ("longjmp", "siglongjmp", "_longjmp")) and "abort" in cxx_sj
+      and all("~" + n in libc_sj and n not in libc_sj for n in ("longjmp", "siglongjmp")), (cxx_sj, libc_sj))
+check("terminators: __cxa_throw is an unwinder when exceptions are enabled and a terminator under -fno-exceptions", "~__cxa_throw" in cxx_sj and "__cxa_throw" not in cxx_sj
+      and "__cxa_throw" in cxx_ne and "~__cxa_throw" not in cxx_ne, (cxx_sj, cxx_ne))
 print("INFO libc set size %d, c++ set size %d" % (len(libc), len(cxx)))
 
 for abi in ("ilp32", "lp64"):

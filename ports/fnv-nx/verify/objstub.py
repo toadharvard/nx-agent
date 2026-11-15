@@ -29,8 +29,10 @@ class, not class 1. The plugin applies GCC's own flags (TREE_THIS_VOLATILE = nor
 EH-resume routines are the explicit builtins GCC's RESX lowering emits (`builtin_decl_explicit` of BUILT_IN_UNWIND_RESUME and
 BUILT_IN_CXA_END_CLEANUP: `_Unwind_Resume` on AArch64, whatever the target uses); (2) in a C++ TU a noreturn function that is not
 nothrow may raise an exception by the language (`__cxa_throw`, `__cxa_rethrow`, the `std::__throw_*` helpers), so it is not process
-end; in a C TU every noreturn function is a terminator (C has no exceptions). Terminators = the remaining noreturn functions
-(`abort`, `exit`, `_Exit`, `quick_exit`, `std::terminate`, `longjmp`, a noreturn nothrow user function; a C user function declared
+end; in a C TU, and in a C++ TU compiled with -fno-exceptions (GCC's flag_exceptions is 0: no handler exists, so a throw ends the process),
+every noreturn function is a terminator. A function declared by <setjmp.h> (ISO C 7.13: longjmp, siglongjmp, _longjmp) is a control
+transfer to the caller of a setjmp, not process end: an unwinder. Terminators = the remaining noreturn functions
+(`abort`, `exit`, `_Exit`, `quick_exit`, `std::terminate`, a noreturn nothrow user function; a C user function declared
 noreturn). The others are UNWINDERS, written to the set as `~name`: a call of one is no T2, and a direct BL of one at the end of a
 function is no `T2-noreturn-tail` (a landing pad ends in `bl _Unwind_Resume`; a `throw` ends in `bl __cxa_throw`). NOT EXACT (stated):
 the headers declare `__cxa_pure_virtual`, `__cxa_deleted_virtual` and `pthread_exit` noreturn but not nothrow, and the compiler's flags
