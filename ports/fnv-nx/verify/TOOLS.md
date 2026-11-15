@@ -467,7 +467,9 @@ AddressOfCallBacks, SizeOfZeroFill, Characteristics), read raw: the four address
 Columns: name, load_index (as in modules.tsv; empty for the exe), start_va, end_va, index_va, callbacks_va (hex, raw), template_rva (start_va
 - preferred base, hex), template_size (end - start, decimal), zero_fill (SizeOfZeroFill, decimal), align (the IMAGE_SCN_ALIGN field of
 Characteristics, bits 20-23, the field itself: 0 stays 0), template_sha256, callbacks (;-list of the RVAs of the callback array up to its null word;
-empty when AddressOfCallBacks is 0 or the first word is 0).  tls/<name>.bin holds the template bytes as the mapped image has them (file bytes,
+empty when AddressOfCallBacks is 0 or the first word is 0), tls_slot (the TLS index the loader assigns: the exe 0, loader/src/start.c:301; then each static image with a directory 1, 2, ... in
+load_index order, loader/src/modules.c:273-278; empty for an image loaded on demand, modules.c:396), align_bytes (align as the loader applies it, loader/src/tls.c:38: 1 for 0, else
+1 << (align - 1)).  tls/<name>.bin holds the template bytes as the mapped image has them (file bytes,
 then zeros).  Red, never clamped: a directory shorter than 24 bytes or outside the image, end < start, a template outside the image, a callback
 array with no null terminator inside the image, a callback outside the image.  Written to OUT only: nothing game-derived enters the repository.
 Test: contract/tests/test_modules.py on synthetic PE images built by the test.

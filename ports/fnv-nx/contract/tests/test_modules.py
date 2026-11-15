@@ -105,8 +105,15 @@ modules.write_tls(out, rows)
 lines = [l for l in open(os.path.join(out, "tls.tsv")).read().splitlines() if not l.startswith("#")]
 f = lines[1].split("\t")
 check("tls.tsv: one row per image, 12 columns, the row of b.dll as specified",
-      len(lines) == 3 and all(len(l.split("\t")) == 12 for l in lines)
-      and f == ["b.dll", "0", "10001100", "10001120", "10001200", "10001300", "00001100", "32", "64", "3", hashlib.sha256(bytes(range(0x40, 0x60))).hexdigest(), "00001010;00001020"], f)
+      len(lines) == 3 and all(len(l.split("\t")) == 14 for l in lines)
+      and f == ["b.dll", "0", "10001100", "10001120", "10001200", "10001300", "00001100", "32", "64", "3", hashlib.sha256(bytes(range(0x40, 0x60))).hexdigest(), "00001010;00001020", "1", "4"], f)
+g = lines[2].split("\t")
+check("tls_slot: the exe 0, then the static images with a directory from 1 in load_index order (b.dll index 0 -> 1, c.dll index 2 -> 2)",
+      [l.split("\t")[12] for l in lines] == ["0", "1", "2"], [l.split("\t")[12] for l in lines])
+rs = modules.tls_slots([(exepin.NAME, "", {}), ("z.dll", 5, {}), ("m.dll", "", {}), ("a.dll", 1, {})])
+check("tls_slot: by load_index not by name; an image loaded on demand has none", rs == {exepin.NAME: 0, "a.dll": 1, "z.dll": 2}, rs)
+check("align_bytes: 0 -> 1, n -> 1 << (n-1) for n in 1..14 (tls.c:38)", [modules.align_bytes(n) for n in range(0, 15)] == [1] + [1 << (n - 1) for n in range(1, 15)])
+check("align_bytes column: the raw 3 of b.dll is 4 bytes", f[13] == "4" and g[13] == "4" and lines[0].split("\t")[13] == "4", (f, g))
 check("tls/<name>.bin holds the template of each row",
       sorted(os.listdir(os.path.join(out, "tls"))) == sorted([exepin.NAME + ".bin", "b.dll.bin", "c.dll.bin"])
       and open(os.path.join(out, "tls", "b.dll.bin"), "rb").read() == bytes(range(0x40, 0x60)))
