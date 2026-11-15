@@ -27,7 +27,7 @@ from test_plugins import BASE, ROOT, T, check, git, w  # noqa: E402
 LIFT = T + "lift/gates/"
 RT = ".data\n.globl fnvnx_lift_cpu_bytes\n.type fnvnx_lift_cpu_bytes,%object\n.size fnvnx_lift_cpu_bytes,4\nfnvnx_lift_cpu_bytes: .word 536\n.text\n.globl fnvl_dispatch\n.type fnvl_dispatch,%function\nfnvl_dispatch: ret\n.size fnvl_dispatch,.-fnvl_dispatch\n"
 FN = ".text\n.globl f\n.type f,%function\nf:\n{}\n.size f,.-f\n"
-GEN = ('import os\nbody = open("/in/ports/fnv-nx/toy/body.s").read()\nos.makedirs("/out/gen")\n'
+GEN = ('import os\nbody = open("/in/ports/fnv-nx/toy/body.s").read()\nos.makedirs("/out/gen", exist_ok=True)\n'
        'lines = ["asm(\\n"] + [\'"\' + l + \'\\\\n"\\n\' for l in body.split("\\n") if l] + [");\\n"]\n'
        'open("/out/gen/lifted.cc", "w").write("".join(lines))\n')
 G, R = "green", "red"
@@ -74,8 +74,8 @@ def lifted_repo(name, body, pack, ehfacts=None, rts=(RT,), image=True):
            "flags": {"c": ["-mabi=ilp32"], "cxx": ["-mabi=ilp32", "-O1"], "asm": ["-mabi=ilp32"]}, "include": [], "units": "all",
            "generated": [{"tool": T + "gen/lift.py", "args": [], "inputs": [ROOT + "/body.s"], "outputs": ["gen/lifted.cc"]}],
            "external": [pack],
-           # a lifted root loads exactly fnvnx_ftoi in mode lifted (recipe.plugin_args), as every lifted root of the product does
-           "plugins": [dict(tp.P["fnvnx_ftoi"], args=dict(tp.recipe.plugin_args("lifted")["fnvnx_ftoi"]))]}
+           # a lifted root loads exactly fnvnx_ftoi; recipe.py fixes its args (PLUGIN_ARGS, mode lifted), a recipe names none
+           "plugins": [dict(tp.P["fnvnx_ftoi"])]}
     files = {T + "gen/lift.py": GEN, ROOT + "/body.s": body, ROOT + "/a.cc": None}
     rtroots = [T + "rt%d" % i for i in range(len(rts))]
     for r, text in zip(rtroots, rts):

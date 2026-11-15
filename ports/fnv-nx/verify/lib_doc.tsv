@@ -1,0 +1,4 @@
+# id	external	symbol	kind	value	source
+# documented bodies of an external library (not our source, so no FNVNX_CITE): the body returns the constant that the library's own header documents for this build; source = doc:<external>:<path relative to that external's tree>:<first>-<last>; rows sorted by id, ids never reused (L1 form, 2026-11-15)
+1	freetype	FT_Library_SetLcdGeometry	constant-error	FT_Err_Unimplemented_Feature	doc:freetype:include/freetype/ftlcdfil.h:303-304
+2	freetype	FT_Stream_OpenBzip2	constant-error	FT_Err_Unimplemented_Feature	doc:freetype:include/freetype/ftbzip2.h:87-88

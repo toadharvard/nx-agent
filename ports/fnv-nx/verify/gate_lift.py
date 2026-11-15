@@ -128,7 +128,7 @@ def judge_image(gate, root, image, repo, cache):
     for m in sorted(set(members) | {root}):
         res, _ = gate_build.ensure(m, cache, repo)
         if res["status"] == "red":
-            return 1, 0, [m + ":build"], "build red at stage %s" % res["failure"]["stage"]
+            return 1, 0, [m + ":build"], "build red at stage %s: %s" % (res["failure"]["stage"], " | ".join(res["failure"].get("stderr", [])[-3:])[:300])
         built[m] = res
         holders += [(m, d["object"]) for d in res["defined"] if d["symbol"] == CPU_SYMBOL]
     if len(holders) != 1:

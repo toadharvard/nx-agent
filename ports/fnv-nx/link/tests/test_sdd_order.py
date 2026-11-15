@@ -42,17 +42,37 @@ def functions(obj):
     return fns
 
 
+def relocated(obj):
+    """{(symbol, offset)} of the instructions that carry a relocation (objdump -dr prints it on the line after the instruction)"""
+    out = subprocess.run(['aarch64-linux-gnu-objdump', '-dr', '--no-show-raw-insn', obj], capture_output=True, text=True, check=True).stdout
+    res, cur, start, last = set(), None, 0, None
+    for line in out.splitlines():
+        m = re.match(r'^([0-9a-f]+) <(\S+)>:$', line)
+        if m:
+            cur, start = m.group(2), int(m.group(1), 16)
+            continue
+        m = re.match(r'^\s*([0-9a-f]+):\s+(R_AARCH64\S+)\s', line)
+        if m and cur is not None:
+            res.add((cur, int(m.group(1), 16) - start))
+    return res
+
+
 def main():
     obj = realobj.objects(['sdd_order'])['sdd_order']
     fns = functions(obj)
     rows = {item: kind for item, kind in gate_order.scan_object(obj)[0]}
+    reloc = relocated(obj)
     # functions with a delete-expression of a virtual destructor: sites through the object's own slot, flags 1
     for fn, want in (('_Z5del_aP1A', 2), ('_Z6del_s2P2S2', 2), ('_Z5del_mP1M', 2)):
         ins = fns[fn]
         ldar = [o for o, m, a in ins if m == 'ldar' and a.startswith('w')]   # the 4-byte vptr and slot (the 8-byte ldar is dispatch's slot)
+        # the thread-local word fnvnx_call_fp (initial-exec): its offset is read from the GOT, a load the loader wrote once, no shared memory
         plain4 = [o for o, m, a in ins if m == 'ldr' and a.startswith('w')]
         check(fn + ': two ordered loads (vptr, slot)', len(ldar) == want, ldar)
-        check(fn + ': no plain 4-byte load', not plain4, plain4)
+        # a plain 4-byte load is allowed only where the word is filled by the linker (a relocation names it: the initial-exec TLS offset in the GOT
+        # that the backend loads for the dispatch word store); the gate record (rule L, a64order.R_LINKER_LOAD) certifies it. Any other is red
+        check(fn + ': every plain 4-byte load is a relocated linker-filled word, certified by gate_order',
+              all((fn, o) in reloc and rows.get('%s+0x%x' % (fn, o)) == '' for o in plain4), plain4)
         for o in ldar:
             check('%s+0x%x: certified by gate_order' % (fn, o), rows.get('%s+0x%x' % (fn, o)) == '', rows.get('%s+0x%x' % (fn, o)))
     # a virtual call (not a delete) keeps the loads the front end made before "cfg": ordered by fnvnx_order

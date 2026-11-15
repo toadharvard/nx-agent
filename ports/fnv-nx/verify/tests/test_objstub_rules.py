@@ -17,6 +17,7 @@ import objstub  # noqa: E402
 
 CC = "aarch64-linux-gnu-gcc"
 ROOT = tempfile.mkdtemp(prefix="objstub-rules-")
+__import__('atexit').register(__import__('shutil').rmtree, ROOT, True)   # a test leaves no scratch behind
 FAILED, N = [], [0]
 
 

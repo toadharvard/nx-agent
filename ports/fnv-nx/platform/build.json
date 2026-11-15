@@ -1,10 +1,6 @@
 {
  "format": "fnvnx-recipe/1",
- "compiler": {
-  "external": "gcc-msvcmodel",
-  "cc": "bin/aarch64-linux-gnu-gcc",
-  "cxx": "bin/aarch64-linux-gnu-g++"
- },
+ "profile": "guest",
  "flags": {
   "c": [
    "-O2",
@@ -36,9 +32,9 @@
   "ports/fnv-nx/lib/sha256/include",
   "ports/fnv-nx/hostabi/include",
   "ports/fnv-nx/shim/include",
-  "/ext/a64/aarch64-none-elf/include/c++/15.2.0",
-  "/ext/a64/aarch64-none-elf/include/c++/15.2.0/aarch64-none-elf/ilp32",
-  "/ext/a64/aarch64-none-elf/include",
+  "/ext/gcc/aarch64-none-elf/include/c++/13.3.0",
+  "/ext/gcc/aarch64-none-elf/include/c++/13.3.0/aarch64-none-elf",
+  "/ext/gcc/aarch64-none-elf/include",
   "/ext/minimp3",
   "/ext/libnx/nx/include",
   "/ext/libnx/nx/external/bsd/include",
@@ -91,7 +87,7 @@
     "--libnx-convert",
     "/ext/libnx/nx/source/runtime/devices/convert_errno.c",
     "--newlib-errno",
-    "/ext/a64/aarch64-none-elf/include/sys/errno.h",
+    "/ext/gcc/aarch64-none-elf/include/sys/errno.h",
     "--linux-errno-base",
     "/ext/linuxerrno/asm-generic/errno-base.h",
     "--linux-errno",
@@ -234,11 +230,11 @@
   {
    "tool": "ports/fnv-nx/platform/crt/gen_msvcrt_table.py",
    "args": [
-    "/in/ports/fnv-nx/bridgefacts/crt/msvcrt_names.tsv",
+    "/in/ports/fnv-nx/platform/crt/msvcrt_names.tsv",
     "/out/crt/msvcrt_table.gen.cpp"
    ],
    "inputs": [
-    "ports/fnv-nx/bridgefacts/crt/msvcrt_names.tsv"
+    "ports/fnv-nx/platform/crt/msvcrt_names.tsv"
    ],
    "outputs": [
     "crt/msvcrt_table.gen.cpp"
@@ -247,18 +243,28 @@
   {
    "tool": "ports/fnv-nx/platform/com/gen_combridge.py",
    "args": [
-    "/in/ports/fnv-nx/bridgefacts/com/com_spec.json",
-    "/uses/ports/fnv-nx/bridgefacts/COM_ROWS",
-    "/uses/ports/fnv-nx/bridgefacts/COM_WORDS",
-    "/out/com"
+    "/out/com",
+    "/in/ports/fnv-nx/shim/include",
+    "/in/ports/fnv-nx/platform/audio",
+    "/in/ports/fnv-nx/contract",
+    "/in/ports/fnv-nx/platform/crt/cxx_types.tsv"
    ],
    "inputs": [
-    "ports/fnv-nx/bridgefacts/com/com_spec.json"
+    "ports/fnv-nx/shim/include/dsound.h",
+    "ports/fnv-nx/shim/include/dinput.h",
+    "ports/fnv-nx/platform/audio/dsound_fx.h",
+    "ports/fnv-nx/platform/audio/dshow_int.h",
+    "ports/fnv-nx/contract/proto.py",
+    "ports/fnv-nx/contract/store.py",
+    "ports/fnv-nx/platform/crt/cxx_types.tsv"
    ],
    "outputs": [
+    "com/combridge_cxx.gen.cpp",
+    "com/combridge_cxx.gen.h",
     "com/combridge.gen.cpp",
     "com/combridge_exports.gen.cpp",
-    "com/combridge_if.gen.h"
+    "com/combridge_if.gen.h",
+    "com/combridge_rows.tsv"
    ]
   },
   {
@@ -383,57 +389,24 @@
    "outputs": [
     "win32/declared_os.h"
    ]
+  },
+  {
+   "tool": "ports/fnv-nx/platform/declared/gen_export.py",
+   "args": [
+    "/in/ports/fnv-nx/platform/declared/x86sys.json",
+    "/out/declared/x86sys.export.json"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/declared/x86sys.json"
+   ],
+   "outputs": [
+    "declared/x86sys.export.json"
+   ]
   }
- ],
- "uses": [
-  {"root": "ports/fnv-nx/bridgefacts", "output": "COM_ROWS"},
-  {"root": "ports/fnv-nx/bridgefacts", "output": "COM_WORDS"}
  ],
  "os_layer": [],
  "link": null,
- "plugins": [
-  {
-   "name": "fnvnx_ftoi"
-  },
-  {
-   "name": "fnvnx_order"
-  },
-  {
-   "name": "fnvnx_sdd"
-  },
-  {
-   "name": "fnvnx_pi"
-  },
-  {
-   "name": "fnvnx_dispatch"
-  },
-  {
-   "name": "fnvnx_addr"
-  },
-  {
-   "name": "fnvnx_names"
-  },
-  {
-   "name": "fnvnx_layout"
-  }
- ],
  "external": [
-  {
-   "name": "gcc-msvcmodel",
-   "repo": "fnv-nx-build",
-   "ref": "tools/gcc-ilp32-msvcmodel",
-   "commit": "b274ec067a2f965807a359853f456e31c67a49af",
-   "tree_sha256": "a1eeb84d83a6ecfa631643575c49581dc72a48b961b6e6db31ad2a63436debec",
-   "at": "/ext/gcc"
-  },
-  {
-   "name": "fnvnx-a64-msvcmodel",
-   "repo": "fnv-nx-build",
-   "ref": "tools/fnvnx-a64-msvcmodel",
-   "commit": "00e3d42acd10593d534b9a70bb8940cee7991436",
-   "tree_sha256": "3f25152cbc5a729d9e0a12fc5c62b6b912b6ab1571b6b3494de8f35e3904207d",
-   "at": "/ext/a64"
-  },
   {
    "name": "libnx",
    "repo": "fnv-nx-build",
@@ -560,5 +533,8 @@
    "type": "FT_Error",
    "success": 0
   }
+ },
+ "outputs": {
+  "X86SYS": "declared/x86sys.export.json"
  }
 }

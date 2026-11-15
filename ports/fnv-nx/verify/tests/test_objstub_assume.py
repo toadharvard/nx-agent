@@ -41,7 +41,7 @@ def run(body, abi, generated=True, registry=REG):
     o = build(HDR + body, abi)
     res = objstub.analyse_all([(o, o)], set(), set())
     a = (registry, {o} if generated else set())
-    items, finds = objstub.judge(res, {}, None, None, None, a)
+    items, finds = objstub.judge(res, {}, None, None, None, assume=a)
     return {(n, k) for _, n, k, _ in finds}, objstub.assume_counts(res, a)
 
 
@@ -71,11 +71,11 @@ for abi in ("ilp32", "lp64"):
 
 # the definition: a function that ends in a call through a pointer on every path is the exit (like REACH); another body is not
 o = build("extern void (*hostslot)(unsigned, unsigned);\nvoid fnvnx_assume_violation(unsigned a, unsigned v) { hostslot(a, v); __builtin_unreachable(); }\n", "ilp32")
-items, finds = objstub.judge(objstub.analyse_all([(o, o)], set(), set()), {}, None, None, None, (REG, set()))
+items, finds = objstub.judge(objstub.analyse_all([(o, o)], set(), set()), {}, None, None, None, assume=(REG, set()))
 check("definition of assume_violation ending in the call through the host slot: no exit finding",
       not any(k in ("assume-not-exit", "constants-mismatch") for _, _, k, _ in finds) and not any(n == "fnvnx_assume_violation" and k == "indirect-noreturn-tail" for _, n, k, _ in finds), finds)
 o = build("int g;\nvoid fnvnx_assume_violation(unsigned a, unsigned v) { g = a + v; }\n", "ilp32")
-items, finds = objstub.judge(objstub.analyse_all([(o, o)], set(), set()), {}, None, None, None, (REG, set()))
+items, finds = objstub.judge(objstub.analyse_all([(o, o)], set(), set()), {}, None, None, None, assume=(REG, set()))
 check("definition that returns: a finding (never accepted)", any(n == "fnvnx_assume_violation" for _, n, _, _ in finds), finds)
 
 print("FAILED: %s" % FAILED if FAILED else "all passed")

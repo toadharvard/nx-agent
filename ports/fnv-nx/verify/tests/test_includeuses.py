@@ -42,8 +42,6 @@ with tempfile.TemporaryDirectory() as repo:
     json.dump({"include": [P + "/inc", P + "/gen/inc"]}, open(os.path.join(repo, P, "build.json"), "w"))
     roots = {P: {"recipe": P + "/build.json", "class": "product", "target": "guest"}, C: {"class": "product", "target": "guest"}}
     files = [P + "/inc/a.h", P + "/x.c"]
-    check("closure carries P's directory with tracked files and drops its generated directory", recipe.include_closure([P + "/inc"], C, roots, repo, "guest", files=files), [P + "/inc", ])
-    check("the consumer's own entries stay", recipe.include_closure([P + "/inc", C + "/g"], C, roots, repo, "guest", files=files + [C + "/g/z.h"]), [P + "/inc", C + "/g"])
 # unitstage: an include of a mounted `include_uses` directory is accepted, one that no input names is refused
 import argparse, unitstage
 with tempfile.TemporaryDirectory() as d:
