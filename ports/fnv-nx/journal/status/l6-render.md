@@ -679,3 +679,9 @@ Paused: w3b, w4, farm; no other work.
     - w1b cites each condition from the docs mirror.
     - Where D3D9 is weaker, the ABI follows D3D9.
 - 00:57Z L1 decided: op_cover/op_reserved are computed by gate_reach shader_opcode from the object (w20); op_reserved_values is a generated stage over the MojoShader mirror. w1b deletes gen_opcover.py and the 3 .tsv files when w20 lands.
+- 00:59Z w1b del2 967e3c9b0 (on w6-root 43c73bc92).
+    - gate_d3d9total reads the roots' records: the translator external, the d3d9 include list, the translator flags.
+    - Deleted: build.sh, mojoshader.patch, render/total/externals.json.
+    - d3d9total 332/332 before and after; mutations not killed: 0.
+    - gate_admit on w6-root is red, 0/1101 (the L1 tlsmodel gate is not named). The candidate rebase fixes it.
+    - w6: merge del2, then w1b 819716297/5bc689044, then rebase onto cand2.
