@@ -233,6 +233,22 @@
     "line": 666,
     "what": "MISCTYPE 1 parsed as VFACE (666-676) with no instruction restriction; dlls/wined3d/glsl_shader.c:2873-2880 reads it as any source"
    }
+  },
+  {
+   "decision": "union",
+   "id": "pair:vs_3_0+ffp_ps",
+   "kind": "pairing",
+   "ms": {
+    "page": "desktop-src/direct3dhlsl/shader-model-3.md",
+    "section": "opening paragraph: for hardware shaders, vs_3_0 and ps_3_0 may not be used with the fixed function pipeline (an application restriction; the page names no runtime answer)"
+   },
+   "note": "the Microsoft page restricts the application and is silent on what the runtime does when a vs_3_0 vertex shader is drawn with the fixed-function pixel stage; Wine 9.0 draws it (L6 decision): the pair stays in the universe and is linked by the varying completion rule (fnvnx_dk_layout.h); universe uses the UNION",
+   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft silent or narrower, Wine 9.0 accepts: the universe is the union)",
+   "wine": {
+    "file": "dlls/wined3d/glsl_shader.c",
+    "line": 10366,
+    "what": "set_glsl_shader_program: with a vertex shader of major < 4 and no pixel shader, shader_glsl_find_ffp_fragment_shader supplies the fixed-function fragment program; shader_glsl_generate_vs3_rasterizer_input_setup (7147, ps_major 0 for a null PS, defaults 7243-7268) completes the unwritten varyings"
+   }
   }
  ],
  "env_default": {
