@@ -107,6 +107,7 @@ class Aggregate(unittest.TestCase):
         self.assertEqual([r[0] for r in rows], [KEYS[0]])
         self.assertEqual(rows[0][5], 'agree-except-declared'); self.assertEqual(rows[0][-1], 'eax:cpuid0,ebx:cpuid1@' + prove.platform_sha(dc))
         self.assertEqual(prove.declared_outputs(__import__('proof.symform', fromlist=['x']).symbuild(key_of('0fa2')).form), {'eax': 'cpuid0', 'ebx': 'cpuid1', 'ecx': 'cpuid2', 'edx': 'cpuid3'})
+        self.assertEqual(prove.declared_outputs(__import__('proof.symform', fromlist=['x']).symbuild(key_of('0f31')).form), {'eax': 'rdtsc', 'edx': 'rdtsc'})
 
     def test_refusals(self):
         o = os.path.join(self.d, 'o')

@@ -181,7 +181,7 @@ def declared_outputs(F):
     for name, v, when in F.regs:
         n = v
         while n.op in ('extract', 'zext'): n = n.a[0]
-        if n.op == 'uf' and when is None and n.x in UFROW and name in UFROW[n.x]['outputs'] and n is v: out[name] = n.x
+        if n.op == 'uf' and when is None and n.x in UFROW and name in UFROW[n.x]['outputs']: out[name] = n.x
     return out
 
 def declared_findings(F):
