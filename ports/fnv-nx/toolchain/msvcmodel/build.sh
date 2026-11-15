@@ -323,6 +323,14 @@ done
 # repo/ref/commit/tree_sha256 are not in it (the manifest is inside the tree that hash covers): they are the pin in guest_compiler.json.
 # Plugins come from the recipe's objects.json (FNVNX_PLUGINS_JSON: name, sha256, stage_key) in recipe.PLUGIN_SOURCES order, argv from the flag files.
 if [ -n "${FNVNX_PLUGINS_JSON:-}" ]; then
+  # The prefix is self-contained real files (a tree_sha256 of it must not depend on link targets): every symlink (libtool's .so version
+  # chain of libcc1 and the plugin libraries) becomes a copy of the regular file it resolves to inside the prefix; any other kind is an error.
+  while IFS= read -r l; do
+    t=$(readlink -f "$l")
+    case "$t" in "$P"/*) [ -f "$t" ] || { echo "build.sh: symlink $l does not resolve to a file ($t)" >&2; exit 5; } ;;
+      *) echo "build.sh: symlink $l resolves outside the prefix ($t)" >&2; exit 5 ;; esac
+    cp --remove-destination "$t" "$l"
+  done < <(find "$P" -type l)
   [ -z "$(find "$P" -type l)" ] || { echo "build.sh: the prefix holds symlinks:" >&2; find "$P" -type l | head >&2; exit 5; }
   python3 -I - "$P" "$T" "$V" "$SHA256" "$STAMP" "$MSVC_PATCH" "$MLFLAGS" "$PLUG_C" "$PLUG_CXX" "$TLC" "$TLCXX" "$CONF" "$FNVNX_PLUGINS_JSON" "$VERIFY" "$P/bin/$T-gcc" <<'EOF'
 import sys, os, json, hashlib, subprocess
