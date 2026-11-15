@@ -145,7 +145,7 @@ phase "sail_build.sh (stock IR, proof IR, smoke test)"
 REMS=$REMS TOOLS=$TOOLS WORK=$WORK CARGO=$CARGO bash "$FARM/sail_build.sh"
 
 phase "check"
-GOT=$(sha256sum "$WORK/sail/x86_proof.ir" | cut -d' ' -f1); WANT=$(python3 -I "$HERE/certs_build.py" --sail-work "$WORK" --sail-ir "$(sail_pinned_ir)" --isla "$REMS/isla/target/release/isla-execute-function" --model-sha)
+GOT=$(sha256sum "$WORK/sail/x86_proof.ir" | cut -d' ' -f1); WANT=$(python3 -I "$HERE/certs_build.py" --sail-work "$WORK" --sail-ir "$(sail_pinned_ir)" --isla "$REMS/isla/target/release/isla-execute-function" --x86sys "$HERE/../../platform/declared/x86sys.json" --model-sha)
 echo "x86_proof.ir sha256 $GOT ($(stat -c %s "$WORK/sail/x86_proof.ir") bytes), pinned $WANT"
 [ "$GOT" = "$WANT" ] || die "x86_proof.ir differs from the pinned hash"
 fi

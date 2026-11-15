@@ -33,7 +33,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIFT = os.path.dirname(HERE)
 sys.path.insert(0, LIFT)
-from proof import certbasis, irdeps, model_sail, prove, shape, symform  # noqa: E402
+from proof import certbasis, irdeps, model_sail, prove, shape, symform, x86sys  # noqa: E402
 
 HEADER = '# shape_key\tfamily\tdsl_sha\tmodel_sha\treference\tresult\tobligations\tundef_flags\tdef0_witness\tdef0_free\tnonflag_free\tdeclared\n'
 
@@ -87,6 +87,7 @@ def current_sha(key, cache=_SHA):
     return cache[key]
 
 
+XSHA = [None]          # sha256 of the x86sys file this process was configured with (--x86sys)
 IR_FILES = {}          # sha256 -> path of an IR file (--ir PATH, fetched by sha from the artifacts repository: tools/x86-proof-ir*); every file is hashed here, a file is never trusted by name
 _K = {}
 
@@ -133,6 +134,9 @@ def scan(files):
         key = r['shape']
         if not model_valid(r, model):
             counts['stale-model'] = counts.get('stale-model', 0) + 1
+            continue
+        if r.get('x86sys_sha256') != XSHA[0]:                     # made under another declared machine (platform/declared/x86sys.json): stale by the same rule as the prover tree
+            counts['stale-x86sys'] = counts.get('stale-x86sys', 0) + 1
             continue
         if r.get('prover_sha') != certbasis.prover_sha():          # proved by other prover semantics (prove.py, model_sail.py, symform.py, certbasis.py)
             counts['stale-prover'] = counts.get('stale-prover', 0) + 1
@@ -242,7 +246,9 @@ def main(argv):
     ap.add_argument('--coverage')
     ap.add_argument('--sail-work'); ap.add_argument('--sail-ir'); ap.add_argument('--isla')      # the toolchain (model_sail.configure): all three, or none when the caller configured model_sail itself
     ap.add_argument('--ir', action='append', default=[], help='an IR file (hashed to its sha) that a record of another model_sha was proved against')
+    x86sys.add_arg(ap)
     a = ap.parse_args(argv)
+    XSHA[0] = x86sys.configure(a.x86sys)
     if a.sail_work or a.sail_ir or a.isla: model_sail.configure(a.sail_work, a.sail_ir, a.isla)
     try:
         return _run(a)

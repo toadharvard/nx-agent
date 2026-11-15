@@ -33,7 +33,7 @@ python3 -I "$HERE/certs_build.py" "${TC[@]}" --shards "$W/shards" --out "$W/cert
 # shapes whose only disagreement is a declared model defect: certified against the SDM spec of the defect (defectspec.py); a defect id without spec fails
 python3 -I "$HERE/defectspec.py" "$W/shards" > "$W/defects.tsv" 2> "$W/defects.log" || DEFRC=$?; tail -n 1 "$W/defects.log"
 # far memory transfers compose the EA from the PUSH r/m32 certificate: the basis must be proved in certs.tsv (X86SYS = the L5 record, FARKEYS = the pack's far shapes)
-if [ -n "${X86SYS:-}" ] && [ -n "${FARKEYS:-}" ]; then FNVNX_X86SYS="$X86SYS" python3 -I "$HERE/sysspec.py" --far-only "$FARKEYS" --certs "$W/certs.tsv" > "$W/far.tsv" || { echo "far spec FAILED" >&2; exit 1; }; fi
+if [ -n "${FARKEYS:-}" ]; then python3 -I "$HERE/sysspec.py" --x86sys "$X86SYS_FILE" --far-only "$FARKEYS" --certs "$W/certs.tsv" > "$W/far.tsv" || { echo "far spec FAILED" >&2; exit 1; }; fi
 H=$(sha256sum "$W/certs.tsv" | cut -c1-12); echo "AGGREGATE id=$ID shards=$GOOD/$N certs=$H rows=$(grep -vc '^#' "$W/certs.tsv") $(tail -n 1 "$W/build.log")"
 if [ "$PUBLISH" = 1 ]; then
     BR="l3b-lift/certsagg/$ID/$N-$H"

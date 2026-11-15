@@ -6,4 +6,5 @@ SAILBASE="${GATE_CACHE:?GATE_CACHE (the verdict cache) is not set}/sail/$(sha256
 WORKDIR=${WORK:-$SAILBASE/work}
 ISLA=${ISLA_EXEC:-$SAILBASE/rems-project/isla/target/release/isla-execute-function}
 sail_pinned_ir() { python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); from proof import formgate; print(formgate.ir_path(sys.argv[2]))' "$HERE/.." "$GATE_CACHE"; }
-sail_args() { TC=(--sail-work "$WORKDIR" --sail-ir "$1" --isla "$ISLA"); }
+X86SYS_FILE="$HERE/../../platform/declared/x86sys.json"      # the declared machine of THIS tree: the one x86sys input of every proof program (--x86sys), its sha256 is in every record and queue header
+sail_args() { TC=(--sail-work "$WORKDIR" --sail-ir "$1" --isla "$ISLA" --x86sys "$X86SYS_FILE"); }

@@ -17,8 +17,7 @@ sys.path.insert(0, os.path.dirname(HERE)); sys.path.insert(0, HERE)
 
 
 def main(argv):
-    from fnvlift import inputs
-    argv = list(argv); i = argv.index('--x86sys'); inputs.configure(x86sys=argv[i + 1]); del argv[i:i + 2]
+    argv = list(argv); i = argv.index('--x86sys'); from proof import x86sys; x86sys.configure(argv[i + 1]); del argv[i:i + 2]
     i = argv.index('--out'); out = argv[i + 1]; del argv[i:i + 2]
     queue, universe, shards = argv[0], argv[1], argv[2:]
     from proof import sysspec, sysspec_far, symform, certs_build, shape

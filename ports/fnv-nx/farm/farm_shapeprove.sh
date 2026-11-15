@@ -65,18 +65,21 @@ PINIR=$(sail_pinned_ir) || { echo "the pinned IR (external x86ir of formgate_inp
 IR=${SAIL_IR:-$PINIR}
 sail_args "$IR"
 SHA=$(python3 -I "$HERE/certs_build.py" "${TC[@]}" --model-sha) || { echo "the IR $IR does not load" >&2; exit 1; }
-PINSHA=$(python3 -I "$HERE/certs_build.py" --sail-work "$WORKDIR" --sail-ir "$PINIR" --isla "$ISLA" --model-sha) || { echo "the pinned IR (external x86ir of formgate_inputs.json) does not load" >&2; exit 1; }
+PINSHA=$(python3 -I "$HERE/certs_build.py" --sail-work "$WORKDIR" --sail-ir "$PINIR" --isla "$ISLA" --x86sys "$X86SYS_FILE" --model-sha) || { echo "the pinned IR (external x86ir of formgate_inputs.json) does not load" >&2; exit 1; }
 [ "$SHA" = "$PINSHA" ] || { echo "IR sha256 $SHA is not the pinned IR $PINSHA (external x86ir of formgate_inputs.json)" >&2; exit 1; }
 
 if [ -n "$PINQ" ]; then
     # 2. the pinned queue: its header names the IR and the queue id; the rows must hash to it
     QUEUE=$PINQ
-    QID=$(python3 -I - "$QUEUE" "$SHA" <<'PY' || exit 1
+    XSHA=$(sha256sum "$X86SYS_FILE" | cut -d' ' -f1)
+    QID=$(python3 -I - "$QUEUE" "$SHA" "$XSHA" <<'PY' || exit 1
 import hashlib, re, sys
-q, sha = sys.argv[1], sys.argv[2]
+q, sha, xsha = sys.argv[1], sys.argv[2], sys.argv[3]
 hdr = [l for l in open(q) if l.startswith('#')]; rows = [l for l in open(q) if l.strip() and l[0] != '#']
 m = re.search(r'queue_id=([0-9a-f]{12})', hdr[0]); ir = [l.split('=', 1)[1].strip() for l in hdr if l.startswith('# ir_sha256=')]
 if not m or ir != [sha]: sys.exit('queue header: queue_id missing or ir_sha256 differs from the IR of this machine (%s)' % sha)
+xs = [l.split('=', 1)[1].strip() for l in hdr if l.startswith('# x86sys_sha256=')]
+if xs != [xsha]: sys.exit('queue header: x86sys_sha256 missing or differs from this tree\'s platform/declared/x86sys.json (%s)' % xsha)
 if hashlib.sha256(''.join(rows).encode()).hexdigest()[:12] != m.group(1): sys.exit('queue rows do not hash to the queue_id of the header')
 print(m.group(1))
 PY
@@ -148,7 +151,7 @@ MODE=$(sed -n 's/^# mode=//p' "$QUEUE" | head -1)
 if [ "$MODE" = simd ]; then
     QCS=$(sed -n 's/^# qcache=//p' "$QUEUE" | head -1)
     if [ -n "$QCS" ]; then fetch_branch "${QCS%%:*}" "$W/in/simdqc-$K"; cp "$W/in/simdqc-$K/${QCS#*:}" "$W/qcache-$K.txt"; export SIMD_QCACHE="$W/qcache-$K.txt"; fi
-    python3 -I "$HERE/simdshard.py" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --timeout "${TIMEOUT:-60}" --slice "${SLICE:-1}" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
+    python3 -I "$HERE/simdshard.py" --x86sys "$X86SYS_FILE" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --timeout "${TIMEOUT:-60}" --slice "${SLICE:-1}" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
 else
 python3 -I "$HERE/shapeprove.py" "${TC[@]}" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --timeout "${TIMEOUT:-600}" --eip "${EIP:-sym}" --slice "${SLICE:-1}" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
 fi

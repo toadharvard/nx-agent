@@ -8,6 +8,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
+from fnvlift import inputs
 from proof import shape, sysspec, x86sys
 
 
@@ -19,19 +20,24 @@ def row(v): return {'value': v, 'source': 'fixture'}
 
 
 REC = {'format': 'fnvnx-x86sys/2', 'selectors': {'cs': row(0x1b), 'tr': row(0x28)}, 'eflags': {'iopl': row(0)}, 'cr4': {'umip': row(0), 'tsd': row(0), 'pce': {'status': 'undecided', 'why': 'pce blocker'}},
-       'int_ring3': {'vectors': [3], 'other_vectors': {'status': 'undecided', 'why': 'other vectors blocker'}}, 'tss_io_bitmap': row('no port permitted'), 'mov_to_sreg': {'undecided': {'selectors': [27], 'why': 'sreg blocker'}},
+       'int_ring3': {'vectors': [3, 4, 45], 'other_vectors': {'status': 'undecided', 'why': 'other vectors blocker'}}, 'tss_io_bitmap': row('no port permitted'), 'mov_to_sreg': {'undecided': {'selectors': [27], 'why': 'sreg blocker'}},
        'sgdt': {'status': 'undecided', 'why': 'gdt blocker'}}
+
+
+def _complete(fixture):
+    """the fixture's rows over a complete record (the tree's): the Forms read fnvlift.x86sys from the same one input and need every row it names; the rows the fixture states replace the tree's, key by key"""
+    with open(os.path.join(HERE, '..', '..', '..', 'platform', 'declared', 'x86sys.json')) as fh: base = json.load(fh)
+    for k, v in fixture.items(): base[k] = dict(base[k], **v) if isinstance(v, dict) and isinstance(base.get(k), dict) else v
+    return base
 
 
 class T(unittest.TestCase):
     def setUp(self):
-        self.f = tempfile.NamedTemporaryFile('w', suffix='.json', delete=False); json.dump(REC, self.f); self.f.close()
-        self.old = os.environ.get('FNVNX_X86SYS'); os.environ['FNVNX_X86SYS'] = self.f.name
+        self.f = tempfile.NamedTemporaryFile('w', suffix='.json', delete=False); json.dump(_complete(REC), self.f); self.f.close()
+        inputs.reset(); inputs.configure(x86sys=self.f.name)       # the one explicit input (no environment variable, no default path)
 
     def tearDown(self):
-        os.unlink(self.f.name)
-        if self.old is None: del os.environ['FNVNX_X86SYS']
-        else: os.environ['FNVNX_X86SYS'] = self.old
+        os.unlink(self.f.name); inputs.reset()
 
     def test_classes(self):
         for h in ('fa', 'f4', 'cc', 'ce', 'f1', 'ec', 'ee', 'e4', '6c'):
@@ -49,7 +55,7 @@ class T(unittest.TestCase):
         self.assertEqual(res, 'uncertified'); self.assertIn('no row tss_io_bitmap', n)
 
     def test_absent_record_is_uncertified(self):
-        os.environ['FNVNX_X86SYS'] = self.f.name + '.absent'
+        inputs.reset(); inputs.configure(x86sys=self.f.name + '.absent')
         r, n = sysspec.check(key('fa'))
         self.assertEqual((r, n.startswith('uncertified: record absent')), ('uncertified', True))
 
@@ -60,14 +66,14 @@ class T(unittest.TestCase):
         self.assertEqual(x86sys.cpl(REC), 3)
         with self.assertRaises(x86sys.Undecided): x86sys.get(REC, 'cr4', 'pce')
         with self.assertRaises(x86sys.Undecided): x86sys.get(REC, 'nope')
-        self.assertEqual(x86sys.get(REC, 'int_ring3', 'vectors'), [3])
+        self.assertEqual(x86sys.get(REC, 'int_ring3', 'vectors'), [3, 4, 45])
 
     def test_rdtsc_proved_over_the_declared_function(self):
         self.assertEqual(sysspec.check(key('0f31'))[0], 'proved')
 
     def test_rdtsc_with_tsd_set_is_not_covered(self):
         REC['cr4']['tsd'] = row(1)
-        try: open(self.f.name, 'w').write(json.dumps(REC)); self.assertEqual(sysspec.check(key('0f31'))[0], 'not-covered')
+        try: open(self.f.name, 'w').write(json.dumps(_complete(REC))); self.assertEqual(sysspec.check(key('0f31'))[0], 'not-covered')
         finally: REC['cr4']['tsd'] = row(0)
 
     def test_cpuid_needs_its_fault_row(self):
@@ -75,12 +81,12 @@ class T(unittest.TestCase):
 
     def test_cpuid_proved_with_the_fault_row(self):
         REC['cpuid_faulting'] = row(0)
-        try: open(self.f.name, 'w').write(json.dumps(REC)); self.assertEqual(sysspec.check(key('0fa2'))[0], 'proved')
+        try: open(self.f.name, 'w').write(json.dumps(_complete(REC))); self.assertEqual(sysspec.check(key('0fa2'))[0], 'proved')
         finally: del REC['cpuid_faulting']
 
     def test_lar_is_decided_by_the_descriptor_rows(self):
         REC['lar_lsl'] = {'cs': {'lar': {'status': 'undecided', 'why': 'type blocker'}}}
-        try: open(self.f.name, 'w').write(json.dumps(REC)); r, n = sysspec.check(key('0f0202')); self.assertEqual(r, 'uncertified'); self.assertIn('type blocker', n)
+        try: open(self.f.name, 'w').write(json.dumps(_complete(REC))); r, n = sysspec.check(key('0f0202')); self.assertEqual(r, 'uncertified'); self.assertIn('type blocker', n)
         finally: del REC['lar_lsl']
 
     def test_str_proved_against_the_cited_sdm_operation(self):
