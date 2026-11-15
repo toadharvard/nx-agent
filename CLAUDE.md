@@ -576,6 +576,11 @@ a stale tree. The rules below make that class impossible. Adding checks on top o
       its worker prepares the next piece rather than waiting.
     - A worker whose piece is done, or waits on another layer, is archived, not left idle.
   - **Farms:** at most 4 per layer. Never rerun on unchanged content; a farm stops as soon as its queue is done.
+    - Exception (orchestrator, 2026-11-15 20:15Z, from the leads' bottleneck lines): up to 8 farms for the L3b proof queue
+      (each shard is 3,400-4,400 s), and up to 8 farms for the cold lifted-pack build (4,096 units, about 10 h on one
+      4-core farm).
+    - The pack build is sharded by the recipe itself: each farm builds the unit subset that one rule over the unit key
+      gives it, into the one content-keyed store, and the shards' stores are merged by key. There is no second build path.
   - **Leads:**
     - one message per finished item, no interim reports;
     - no re-reading of large files already read;
