@@ -41,9 +41,13 @@
     "--moddirs",
     "/ext/exe:/ext/redist",
     "--keys",
-    "/uses/ports/fnv-nx/loader/KEYS_TSV"
+    "/uses/ports/fnv-nx/loader/KEYS_TSV",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
    "outputs": [],
    "dirs": [
     "o"

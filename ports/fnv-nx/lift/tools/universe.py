@@ -11,12 +11,12 @@ from array import array
 from collections import Counter, deque
 from capstone import x86 as X
 import cli
-USAGE = '''usage: universe.py --out OUTDIR (--exe FILE --funcs FILE [--refused FILE] | --module NAME --modules modules.tsv --moddirs DIR[:DIR...]) --keys keys.tsv [--theirs DIR]
+USAGE = '''usage: universe.py --out OUTDIR (--exe FILE --funcs FILE [--refused FILE] | --module NAME --modules modules.tsv --moddirs DIR[:DIR...] --lib DIR) --keys keys.tsv [--theirs DIR]
   code universe of the exe (--exe, with the decomp function starts --funcs) or of the module NAME (a name or file of modules.tsv; the module table and the directories
   that hold the module files are declared inputs). --keys: the import conventions (keys.tsv). --theirs (optional): with --exe, the directory that holds
   L1's facts.pkl and eh.pkl, for the entry-set comparison (reconcile.py). --refused FILE: one round of the exe's reloc-consistency fixed point (the refusals of the earlier rounds); without it the exe run drives
   the rounds itself. Every path is an explicit argument: no environment variable, no default.'''
-_OPTS = {'--out': True, '--exe': True, '--funcs': True, '--module': True, '--modules': True, '--moddirs': True, '--keys': True, '--theirs': True, '--refused': True}
+_OPTS = {'--out': True, '--exe': True, '--funcs': True, '--module': True, '--modules': True, '--moddirs': True, '--keys': True, '--theirs': True, '--refused': True, '--lib': True}
 if __name__ == '__main__': _POS, _O = cli.parse(USAGE, sys.argv[1:], (0, 0), _OPTS)
 else: _O = {}
 def _need(*ks):
@@ -25,7 +25,7 @@ def _need(*ks):
 MOD = _O.get('--module'); STRICT = MOD is not None   # module mode: pointers are code/data only on evidence
 _need('--out', '--keys'); import ehflow; ehflow.configure_keys(_O['--keys'])
 if STRICT:      # separate engine (every relocated pointer into executable bytes is an entry)
-    _need('--modules', '--moddirs')
+    _need('--modules', '--moddirs', '--lib'); sys.path.insert(0, _O['--lib'])      # --lib: the directory that holds the package fnvlift (the lifter's PE loader and decoder); a stage mounts it as an input
     import modlift; sys.exit(modlift.run(MOD, SimpleNamespace(modules=_O['--modules'], moddirs=_O['--moddirs'].split(':'), facts_out=_O['--out'])))
 _need('--exe', '--funcs')
 EXE = _O['--exe']; FUNCS = _O['--funcs']; NAME = ''
