@@ -94,10 +94,13 @@ def bt(c):
         if addr is None: wr(F, d, nv)
         else: store_op(F, d, addr, nv)
 
-@handler('bsf', 'bsr')
+# tzcnt / lzcnt (F3 0F BC / BD): the declared CPU (lift/rt/cpumodel.c) has BMI1 (CPUID.07H.0:EBX[3]) and LZCNT (CPUID.80000001H:ECX[5]) clear, so by the Intel SDM TZCNT / LZCNT pages
+# ("executed as BSF / BSR") the F3 forms are BSF / BSR; sail_patches/bump/bsf_bsr_dispatch.py reads the same two bits and dispatches the model the same way.
+@handler('bsf', 'bsr', 'tzcnt', 'lzcnt')
 def bs(c):
+    m = {'tzcnt': 'bsf', 'lzcnt': 'bsr'}.get(c.m, c.m)
     F, d, s = c.F, c.ops[0], c.ops[1]; w = d.w; a = rd(s); r = C(0, w)
-    for i in (range(w - 1, -1, -1) if c.m == 'bsf' else range(w)): r = ite(bit(a, i), C(i, w), r)
+    for i in (range(w - 1, -1, -1) if m == 'bsf' else range(w)): r = ite(bit(a, i), C(i, w), r)
     z = eq(a, 0); F.flag('zf', z); undef(F, ('cf', 'of', 'sf', 'af', 'pf'), UNDEF_BS)
     wr(F, d, ite(z, rd(d), r), when=~z)
 
