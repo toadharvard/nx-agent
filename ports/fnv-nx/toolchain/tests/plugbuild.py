@@ -55,8 +55,6 @@ def _w(repo, rel, text):
 
 def _plugin(name, args):
     p = {'name': name, 'source': source_of(name), 'args': dict(args)}
-    if name in recipe.PLUGIN_INPUTS:
-        p['inputs'] = recipe.PLUGIN_INPUTS[name]
     return p
 
 
@@ -83,7 +81,7 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
     flags = ['-O2', '-Werror=attributes', '-DFNVNX_SDD=1'] + [f for f in flags if f not in ('-O2', '-Werror=attributes', '-DFNVNX_SDD=1')]
     plugins = [('fnvnx_' + n, a) for n, a in plugins]
     names = [n for n, _ in plugins]
-    for rel in sorted({source_of(n) for n in names} | {i for n in names for i in recipe.PLUGIN_INPUTS.get(n, [])}):
+    for rel in sorted({source_of(n) for n in names} | {i for n in names for i in recipe.plugin_inputs(source_of(n), recipe.tracked(REAL), recipe.load_admit(REAL), REAL)}):
         os.makedirs(os.path.dirname(os.path.join(repo, rel)), exist_ok=True)
         shutil.copyfile(os.path.join(REAL, rel), os.path.join(repo, rel))
     _w(repo, T + 'verify/guest_compiler.json', json.dumps(pin))
