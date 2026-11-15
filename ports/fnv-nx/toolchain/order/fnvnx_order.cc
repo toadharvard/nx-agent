@@ -635,10 +635,11 @@ struct frame_pass : rtl_opt_pass {
   }
 
   unsigned int execute(function *fun) final override {
-    // `dynamic` only where the stack pointer has no constant offset in the body: alloca / a variable-length array (calls_alloca), setjmp, a
-    // non-local label. Every other function has a constant layout: its variables are `OFFSET:SIZE` ranges, and an address-taken variable that
-    // has no constant frame slot is its own `unk:CAUSE` token, never a reason to give up the whole function.
-    bool dynamic = fun->calls_alloca || fun->calls_setjmp || fun->has_nonlocal_label;
+    // `dynamic` only where the stack pointer has no constant offset in the body: alloca or a variable-length array (calls_alloca). A setjmp or a
+    // non-local label does not move the frame: the layout stays constant, the jmp_buf is an address-taken local of it. Every function without
+    // alloca has `OFFSET:SIZE` ranges, and an address-taken variable that has no constant frame slot is its own `unk:CAUSE` token, never a
+    // reason to give up the whole function.
+    bool dynamic = fun->calls_alloca;
     std::vector<std::pair<long, long> > rs;
     std::set<std::string> unk;
     auto one = [&](tree v) {

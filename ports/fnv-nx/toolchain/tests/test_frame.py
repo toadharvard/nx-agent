@@ -2,7 +2,7 @@
 """Test of the `.fnvnx.frame` rows (rule R1 of class B) that fnvnx_order writes, through the recipe on the guest compiler (plugbuild.py), on the real object:
   - every row has the 3-field form SYMBOL TAB RANGES TAB args:N (the writer is toolchain/order/fnvnx_frame.h, the one writer of order and of the sdd thunks);
   - a function with a constant layout is never `dynamic`: an address-taken local array, a local whose slot is virtual-stack-vars, and a stack-passed
-    parameter (the argument pointer) are OFFSET:SIZE ranges; `dynamic` is exactly the alloca / variable-length-array functions;
+    parameter (the argument pointer) are OFFSET:SIZE ranges; `dynamic` is exactly the alloca / variable-length-array functions (calls_alloca);
   - args:N is the size of the incoming stack arguments (0 when all arguments are in registers);
   - an address-taken variable with no frame slot is its own `unk:CAUSE` token, not `dynamic` (a by-reference class parameter lives in the caller's frame);
   - the sdd thunk of a virtual destructor has its own row, written by the same writer.
