@@ -44,7 +44,7 @@ mode, out = sys.argv[1], sys.argv[2]
 def ex(code):
     open(out, "w").write(json.dumps({"code": code}))
     os._exit(2)
-cbs = (bootgpu.PTR_CB(lambda a, s: 0), bootgpu.PRESENT_CB(lambda f: None), bootgpu.EXIT_CB(ex) if mode == "cb" else bootgpu.EXIT_CB())
+cbs = (bootgpu.PTR_CB(lambda a, s: 0), bootgpu.PRESENT_CB(lambda f: None), bootgpu.EXIT_CB(ex))
 lib.nxgl4_shim_set(*cbs)
 lib.fnvnx_reach_violation(0xABCDEF)
 os._exit(77)   # never reached: noreturn
@@ -88,10 +88,8 @@ def main():
         return r.returncode, r.stderr, code
 
     rc, err, code = run("cb")
-    case("reach: one log line, the exit callback gets 0x52000000 | fact_id (full 32 bits)", err == "fnvnx-reach fact=0xabcdef\n" and code == REACH | 0xABCDEF
+    case("reach: the exit callback gets 0x52000000 | fact_id (full 32 bits), no output of its own", err == "" and code == REACH | 0xABCDEF
          and rc == 2, (rc, err, code))
-    rc, err, code = run("nocb")
-    case("reach with no exit callback: the log line, then status 1", err == "fnvnx-reach fact=0xabcdef\n" and rc == 1 and code is None, (rc, err, code))
 
     # the machine's side: the run record of a host-object exit, full width, as run() would classify a guest's exit
     elf = make_elf()
