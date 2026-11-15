@@ -1150,3 +1150,9 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - the stale comment text;
   - static_assert FNVL_MAX_BASIC < 7: the declared CPU has no leaf 7, so EBX[6]/[13] are 0 and SDM 8.1.8 stores the pointers per instruction;
   - the retired records plus the l3b aliases.
+
+### 2026-11-15 00:30 — idle workers
+- Archived as idle or failed (off the path): w18, w16, w10, w14. The orchestrator archived w17, which had re-run a full verdict on 4ee6cc10: 1555 s, the same reds as v9.
+- Held, with no runs of their own: w19 (selftests universe, next) and w22 (the fpexact candidate after L2 w1).
+- Rule: one full verdict per candidate, which is w15's cand1. Workers run unit tests only.
+- L6 w6 verdict on 2c7e65a4a: RED. Attributable to w16c1: oracle 94/95 (test_resolve_input.py has no oracle entry). The entry is to be added on -run with the TOOLS.md recipe.py spec reference. The rest is the render root's own state (L6).
