@@ -1,0 +1,1310 @@
+// fnvnx_order.cc - GCC plugin: MSVC x86 evaluation order and TSO memory ordering for decomp units on AArch64
+// (docs/ORDERING.md).
+//
+//   g++ ... -fplugin=<dir>/fnvnx_order.so [-fplugin-arg-fnvnx_order-verbose[=sites]] [-fplugin-arg-fnvnx_order-args=rtl|ltr]
+//           [-fplugin-arg-fnvnx_order-object=first|last|msvc] [-fplugin-arg-fnvnx_order-operator=cpp17|rtl]
+//           [-fplugin-arg-fnvnx_order-assign=cpp17|msvc] unit.cpp
+//
+// Memory ordering (R9 TSO-MAP) has one rule and no option: every load and store of memory that is not a proven local
+// of the function (an automatic variable whose address is never taken) is ordered; the hardware is x86 TSO, the
+// Cortex-A57 reorders freely. volatile is no mark: it adds nothing, every shared access is ordered.
+//
+//   load  of shared memory  -> __atomic_load_N (p, ACQUIRE)   = ldar / ldarh / ldarb
+//   store to shared memory  -> __atomic_store_N(p, v, RELEASE) = stlr / stlrh / stlrb
+//
+// Objects that are not a naturally aligned 1/2/4/8-byte scalar (bit-fields, packed or misaligned fields - ldar
+// faults on misalignment where x86 does not -, aggregates, vectors) keep their plain access with a fence:
+// load; dmb ishld (acquire), and dmb ish; store (release). Interlocked* keep the full x86 lock semantics (inline
+// ldaxr/stlxr loops and dmb). The one object not ordered is a constant the compiler itself places in a read-only
+// section (readonly_object): nothing ever writes it.
+//
+// Runs right after the CFG is built (before SSA, so no virtual operands to maintain), like fnvnx_ftoi.
+//
+// args=rtl (default) | ltr: call arguments in MSVC's order (ORDER-ARGS). MSVC x86 evaluates the arguments of every
+// call right to left (it pushes them); GCC evaluates them left to right on AArch64 (its gimplifier reverses only for
+// targets with push instructions, PUSH_ARGS_REVERSED, a compile-time 0 here). Before a function body is lowered
+// (PLUGIN_PRE_GENERICIZE), every call or constructor call with at least one side-effecting argument and another
+// non-constant one gets its scalar arguments wrapped in SAVE_EXPRs, and the first of them becomes the chain
+// (s_n, ..., s_2, s_1): GCC evaluates the first argument first, so all of them are evaluated last to first, while the
+// call itself (and so return slots and constructor calls) stays as it was. `this` and the callee stay first, as now
+// (ORDER-OBJECT is a separate class). A call with a side-effecting argument of class type is left alone.
+//
+// object=first (default) | last (ORDER-OBJECT, open until S11's MSVC 2008 run of tests/s12/order/evalorder.cpp):
+// MSVC's thiscall pushes the arguments and probably computes the object (ecx) last. With object=last (and args=rtl)
+// a member call whose object and an argument can see each other (one has side effects, the other is not invariant)
+// evaluates the arguments right to left, then the object, then the callee: for a direct call `this` joins the chain
+// as its last element (the callee stays an ADDR_EXPR, so the call stays direct); for a virtual call the chain goes
+// in front of the OBJ_TYPE_REF's object, which GCC gimplifies before the vtable load. Constructors, destructors and
+// calls through pointers to members keep the object first.
+// operator=cpp17 (default) | rtl (ORDER-OPERATOR, open the same way): C++17 evaluates overloaded `<<`, `>>`, `[]`,
+// `->*` left to right (CALL_EXPR_ORDERED_ARGS), which the pass leaves alone. With operator=rtl they lose the flag
+// and are ordered like any call (a free operator's left operand included; a member operator's object as object=
+// says). `=` and `@=` (CALL_EXPR_REVERSE_ARGS) already evaluate the right operand first, as MSVC does: left alone.
+#include "gcc-plugin.h"
+#include "plugin-version.h"
+#include "context.h"
+#include "tree.h"
+#include "tree-pass.h"
+#include "function.h"
+#include "basic-block.h"
+#include "tree-ssa-alias.h"
+#include "internal-fn.h"
+#include "gimple-expr.h"
+#include "gimple.h"
+#include "gimple-iterator.h"
+#include "gimplify.h"
+#include "gimplify-me.h"
+#include "stringpool.h"
+#include "memmodel.h"
+#include "builtins.h"
+#include "tree-iterator.h"
+#include "cp/cp-tree.h"
+#include "diagnostic-core.h"
+#include "cfghooks.h"
+#include "tree-cfg.h"
+#include "ssa.h"
+#include "varasm.h"
+#include "output.h"
+#include "attr-fnspec.h"
+#include "gimple-walk.h"
+#include "rtl.h"
+#include "emit-rtl.h"
+#include "target.h"
+#include "fnvnx_frame.h"
+#include "regs.h"
+#include "cgraph.h"
+#include "tm_p.h"
+#include "rtl-iter.h"
+#include <set>
+#include <map>
+#include <algorithm>
+#include <string>
+#include <vector>
+#include <tuple>
+#include <utility>
+
+int plugin_is_GPL_compatible;   // the plugin interface asks for it; the code is MIT (LICENSE), which is compatible
+
+static bool verbose, verbose_sites;
+struct counts { unsigned long ldar, stlr, fence_ld, fence_st, fence_resume; };
+static counts unit_total;
+static bool args_rtl = true;
+static unsigned long calls_reordered, calls_skipped;
+static bool object_last = false;                         // object=first (default) | last | msvc: ORDER-OBJECT
+static bool object_msvc = false;                         // object=msvc: MSVC 2008's table (tests/s11/order/order.msvc)
+static bool assign_msvc = false;                         // assign=cpp17 (default) | msvc: built-in compound assignment
+static bool operator_rtl = false;                        // operator=cpp17 (default) | rtl: ORDER-OPERATOR
+static unsigned long calls_object_last, calls_operator, calls_prvalue_virtual, calls_fnptr;
+
+// ---- what counts as shared memory
+
+// LOCAL: ordering exists only for memory another thread can observe. Two facts, both decided by the declaration alone:
+//  (1) a decl base that is not aliased (an automatic variable or parameter that no operand of this function's GIMPLE takes
+//      the address of, a gimple temporary) is visible to one thread only: no access to it is ordered and its address is never
+//      taken (local_unshared).  "Takes the address of" is decided on the GIMPLE of the function by address_taken_scan, NOT
+//      by TREE_ADDRESSABLE: the front end sets that flag whenever it formed `&x` at any point (for a trivial constructor or
+//      copy it later folds away: every aggregate local of C++ carries it), so it says nothing about a pointer that exists.
+//      PROOF.  A GIMPLE object that is neither static, external nor thread-local is named only by its own decl; another
+//      thread can reach it only through an address, and an address of a decl comes into being by exactly these operations:
+//      an ADDR_EXPR whose base is the decl (an rvalue operand: assignment, call argument, call function, static chain,
+//      constructor element, switch/cond/return operand; an ADDR_EXPR as the base of a MEM_REF/TARGET_MEM_REF is an access
+//      form, no pointer value); the hidden result pointer of a call whose result is returned in memory (aggregate_value_p)
+//      and whose lhs has the decl as base; an operand of an asm statement (a memory constraint takes the address implicitly).
+//      address_taken_scan collects the decls of all three over every statement; the scan covers every operand of every
+//      statement kind, so a decl outside the set has no pointer anywhere (ASM-001: the compiler's GIMPLE semantics).
+//  (2) a RESULT_DECL with DECL_BY_REFERENCE is the hidden result POINTER of the function (its type is the reference
+//      type; the object is at *<retval>): the decl itself is a value of this thread, never memory. Reading it (passing it
+//      on, `UVf::UVf (<retval>, x)`) is no load, and its address is never taken (&<retval> is the ICE in
+//      expand_expr_addr_expr_1). The result object is reached through MEM_REF / COMPONENT_REF on that pointer value, and
+//      those accesses are ordered as any indirect access.
+// Only a result that the ABI returns in memory without DECL_BY_REFERENCE (an aggregate through x8, memory_result) is an
+// object that is caller memory: the object a function's result is constructed in is the caller's memory, which can be any
+// object (copy elision constructs the result in the final object), so a pointer dereference and never a frame variable
+static bool memory_result(tree d) {
+  return TREE_CODE(d) == RESULT_DECL && !DECL_BY_REFERENCE(d) && aggregate_value_p(TREE_TYPE(d), current_function_decl);
+}
+
+// HARDREG: an object whose DECL has a hard register (DECL_HARD_REGISTER: `register T v asm("xN")`, global or local) is a
+// machine register: it has no memory location and no address. It is never a memory reference for this plugin: not
+// ordered, no address taken (taking one is the ICE in expand_expr_addr_expr_1). Every classification below (is_memory_ref,
+// local_unshared, the addressable marks) applies this one rule, so a component or element of such an object is plain too.
+static bool hard_register(tree base) {
+  return base && TREE_CODE(base) == VAR_DECL && DECL_HARD_REGISTER(base);
+}
+
+// the decls whose address the function takes (see LOCAL above); valid between execute()'s scan and its end
+static std::set<tree> *addr_set;
+
+static void scan_operand(tree t, std::set<tree> &out) {
+  if (!t) return;
+  switch (TREE_CODE(t)) {
+    case ADDR_EXPR: {
+      tree b = get_base_address(TREE_OPERAND(t, 0));
+      if (b && DECL_P(b)) out.insert(b);
+      scan_operand(TREE_OPERAND(t, 0), out);
+      return;
+    }
+    case MEM_REF: case TARGET_MEM_REF: {
+      // MEM_REF[&x + c] is an access to x, not a pointer value: its ADDR_EXPR base takes no address
+      tree b = TREE_OPERAND(t, 0);
+      scan_operand(TREE_CODE(b) == ADDR_EXPR ? TREE_OPERAND(b, 0) : b, out);
+      for (int i = 1; i < TREE_OPERAND_LENGTH(t); i++) scan_operand(TREE_OPERAND(t, i), out);
+      return;
+    }
+    case CONSTRUCTOR: {
+      unsigned long i;
+      tree idx, val;
+      FOR_EACH_CONSTRUCTOR_ELT(CONSTRUCTOR_ELTS(t), i, idx, val) { scan_operand(idx, out); scan_operand(val, out); }
+      return;
+    }
+    case TREE_LIST:
+      for (; t; t = TREE_CHAIN(t)) scan_operand(TREE_VALUE(t), out);
+      return;
+    default:
+      if (EXPR_P(t) || handled_component_p(t))
+        for (int i = 0; i < TREE_OPERAND_LENGTH(t); i++) scan_operand(TREE_OPERAND(t, i), out);
+      return;
+  }
+}
+
+static void address_taken_scan(function *fun, std::set<tree> &out) {
+  basic_block bb;
+  FOR_EACH_BB_FN(bb, fun)
+    for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
+      gimple *st = gsi_stmt(gsi);
+      // NOESCAPE: an address passed to a builtin for an argument that GCC's own fnspec of the builtin says does not escape
+      // (the callee neither stores the pointer nor lets it outlive the call: memcpy, memset, memcmp, strlen, ...) forms no
+      // pointer another thread can hold, so it does not make its object shared (ASM-001: the compiler's builtin fnspecs).
+      gcall *bc = dyn_cast<gcall *>(st);
+      tree bfn = bc ? gimple_call_fndecl(bc) : NULL_TREE;
+      bool nb = bfn && fndecl_built_in_p(bfn, BUILT_IN_NORMAL) && gimple_call_fnspec(bc).known_p();
+      for (unsigned i = 0; i < gimple_num_ops(st); i++) {
+        if (nb && i >= 3 && i - 3 < gimple_call_num_args(bc)) {
+          attr_fnspec sp = gimple_call_fnspec(bc);
+          tree a = gimple_call_arg(bc, i - 3);
+          if (TREE_CODE(a) == ADDR_EXPR && sp.arg_specified_p(i - 3) && sp.arg_noescape_p(i - 3)) continue;
+        }
+        scan_operand(gimple_op(st, i), out);
+      }
+      if (gcall *call = dyn_cast<gcall *>(st)) {
+        scan_operand(gimple_call_chain(call), out);
+        tree lhs = gimple_call_lhs(call);
+        if (lhs && aggregate_value_p(TREE_TYPE(lhs), gimple_call_fntype(call))) {
+          tree b = get_base_address(lhs);
+          if (b && DECL_P(b)) out.insert(b);   // the hidden result pointer
+        }
+      } else if (gasm *as = dyn_cast<gasm *>(st)) {
+        auto asm_ops = [&](unsigned n, tree (*get)(const gasm *, unsigned)) {
+          for (unsigned i = 0; i < n; i++) {
+            tree v = TREE_VALUE(get(as, i));
+            tree b = get_base_address(v);
+            if (b && DECL_P(b)) out.insert(b);   // a memory constraint takes the address implicitly
+            scan_operand(v, out);
+          }
+        };
+        asm_ops(gimple_asm_noutputs(as), [](const gasm *a, unsigned i) { return gimple_asm_output_op(a, i); });
+        asm_ops(gimple_asm_ninputs(as), [](const gasm *a, unsigned i) { return gimple_asm_input_op(a, i); });
+      }
+    }
+}
+
+static bool local_unshared(tree base) {
+  if (!base) return true;
+  if (hard_register(base)) return true;
+  if (TREE_CODE(base) == VAR_DECL || TREE_CODE(base) == PARM_DECL || TREE_CODE(base) == RESULT_DECL)
+    // a result or parameter passed by invisible reference is the object the caller named (a return slot: `g = f()`
+    // may construct f's result in g itself): a pointer dereference, not a frame variable of this function
+    return !memory_result(base) && !TREE_STATIC(base) && !DECL_EXTERNAL(base) && !DECL_THREAD_LOCAL_P(base) &&
+           !(addr_set ? addr_set->count(base) != 0 : TREE_ADDRESSABLE(base));
+  if (TREE_CODE(base) == CONST_DECL || TREE_CODE(base) == STRING_CST) return true;
+  return false;
+}
+
+// L-RO (MASTER_PLAN4 R9): an object this unit defines and the compiler itself places in a read-only section
+// (a constant with a constant initializer and no relocation; varasm's own decision). Nothing ever writes it, so a
+// load of it has no store to be ordered against.
+static bool readonly_object(tree base) {
+  return base && TREE_CODE(base) == VAR_DECL && TREE_STATIC(base) && !DECL_EXTERNAL(base) && TREE_READONLY(base) &&
+         !TREE_THIS_VOLATILE(base) && DECL_INITIAL(base) && DECL_INITIAL(base) != error_mark_node &&
+         decl_readonly_section(base, 0);
+}
+
+static bool is_memory_ref(tree t) {
+  switch (TREE_CODE(t)) {
+    case MEM_REF: case TARGET_MEM_REF: case COMPONENT_REF: case ARRAY_REF: case ARRAY_RANGE_REF:
+    case BIT_FIELD_REF: case REALPART_EXPR: case IMAGPART_EXPR: case VIEW_CONVERT_EXPR:
+      return true;
+    case VAR_DECL:
+      return !hard_register(t) && (TREE_STATIC(t) || DECL_EXTERNAL(t) || TREE_ADDRESSABLE(t));
+    case RESULT_DECL:
+      return memory_result(t);
+    default:
+      return false;
+  }
+}
+
+// READONLY RECORD (.fnvnx.ro, no SHF_ALLOC). One line per distinct (symbol, byte range) of a read-only object that an
+// access of this unit left plain because readonly_object judged the base read-only: `symbol<TAB>offset:size`, bytes
+// within the object. A range with a non-constant index or extent is the whole object (0:size of the decl). It is a
+// claim, not a verdict: the gate (link/gate_order.py) certifies a plain load against it only after checking from the
+// linked object that the symbol's section has SHF_ALLOC and not SHF_WRITE. The record is per unit, not per function:
+// the optimizers inline bodies, so an access reaches the object file in a function other than the one it was written in.
+static std::set<std::string> ro_lines;
+static void record_readonly(tree t, tree base) {
+  poly_int64 bitsize, bitpos;
+  tree off;
+  machine_mode mode;
+  int unsignedp, reversep, volatilep;
+  HOST_WIDE_INT lo = 0, size = 0;
+  tree inner = get_inner_reference(t, &bitsize, &bitpos, &off, &mode, &unsignedp, &reversep, &volatilep);
+  (void)inner;
+  tree dsz = DECL_SIZE_UNIT(base);
+  HOST_WIDE_INT whole = dsz && tree_fits_shwi_p(dsz) ? tree_to_shwi(dsz) : -1;
+  if (!off && bitpos.is_constant(&lo) && bitsize.is_constant(&size) && size >= 0) {
+    lo /= BITS_PER_UNIT;
+    size = (size + BITS_PER_UNIT - 1) / BITS_PER_UNIT;
+  } else { lo = 0; size = whole; }
+  char buf[64];
+  snprintf(buf, sizeof buf, "\t%ld:%ld", (long)lo, (long)size);
+  ro_lines.insert(std::string(IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(base))) + buf);
+}
+
+static bool shared_ordered(tree t) {
+  if (!t || !is_memory_ref(t)) return false;
+  tree base = get_base_address(t);
+  if (readonly_object(base)) { record_readonly(t, base); return false; }
+  return !local_unshared(base);
+}
+
+// a naturally aligned scalar of 1/2/4/8 bytes that ldar/stlr can access: the size index 0..3, or -1
+static int atomic_index(tree t) {
+  tree ty = TREE_TYPE(t);
+  if (!(INTEGRAL_TYPE_P(ty) || POINTER_TYPE_P(ty) || SCALAR_FLOAT_TYPE_P(ty) || TREE_CODE(ty) == OFFSET_TYPE)) return -1;
+  if (TREE_CODE(t) == BIT_FIELD_REF) return -1;
+  if (TREE_CODE(t) == COMPONENT_REF && DECL_BIT_FIELD(TREE_OPERAND(t, 1))) return -1;
+  if (TREE_CODE(t) == REALPART_EXPR || TREE_CODE(t) == IMAGPART_EXPR) return -1;
+  if (!TYPE_SIZE_UNIT(ty) || !tree_fits_uhwi_p(TYPE_SIZE_UNIT(ty))) return -1;
+  unsigned HOST_WIDE_INT sz = tree_to_uhwi(TYPE_SIZE_UNIT(ty));
+  if (INTEGRAL_TYPE_P(ty) && TYPE_PRECISION(ty) != sz * BITS_PER_UNIT && TREE_CODE(ty) != BOOLEAN_TYPE) return -1;
+  int idx = sz == 1 ? 0 : sz == 2 ? 1 : sz == 4 ? 2 : sz == 8 ? 3 : -1;
+  if (idx < 0) return -1;
+  if (get_object_alignment(t) < sz * BITS_PER_UNIT) return -1;   // packed / misaligned: ldar would fault
+  return idx;
+}
+
+static bool bitfield_ref(tree t) {
+  return TREE_CODE(t) == BIT_FIELD_REF || (TREE_CODE(t) == COMPONENT_REF && DECL_BIT_FIELD(TREE_OPERAND(t, 1)));
+}
+
+static tree uint_type(int idx) {
+  static const int bits[] = {8, 16, 32, 64};
+  return build_nonstandard_integer_type(bits[idx], 1);
+}
+
+static gimple *fence(enum memmodel m) {
+  return gimple_build_call(builtin_decl_explicit(BUILT_IN_ATOMIC_THREAD_FENCE), 1, build_int_cst(integer_type_node, m));
+}
+
+// force_gimple_operand replaces its sequence; gimplify into a fresh one and append it
+static tree gimplify_to(tree e, gimple_seq *seq) {
+  gimple_seq s = NULL;
+  tree v = force_gimple_operand(e, &s, true, NULL_TREE);
+  gimple_seq_add_seq(seq, s);
+  return v;
+}
+
+static tree address_of(tree ref, gimple_seq *seq) {
+  tree base = get_base_address(ref);
+  if (base && DECL_P(base) && !hard_register(base)) mark_addressable(base);
+  return gimplify_to(build_fold_addr_expr(ref), seq);
+}
+
+// value of type T held in an unsigned integer of the same size, and back
+static tree to_bits(tree v, tree ity, gimple_seq *seq) {
+  tree ty = TREE_TYPE(v);
+  tree e = SCALAR_FLOAT_TYPE_P(ty) ? fold_build1(VIEW_CONVERT_EXPR, ity, v) : fold_convert(ity, v);
+  return gimplify_to(e, seq);
+}
+
+
+static counts *cur;   // the counters of the function being ordered
+
+// totality (R9): `ref = ...` / `... = ref` forms ordered scalar-wise where expressible, fenced otherwise
+static void order_single(gimple_stmt_iterator *gsi);
+
+// ORDER-CONT: where the acquire fence after a load goes when the statement ends its block.
+//
+// The acquire fence (dmb ishld) after a load L orders L before every later access of the same thread. A later access
+// after a block-ending statement S is reached only along S's continuation:
+//   (a) S's fall-through edge, or
+//   (b) a resumption point: an EH landing pad, or the point after a returns-twice call (the setjmp family,
+//       __builtin_setjmp_receiver, a nonlocal-goto receiver) in this function or in another frame (longjmp, unwinding).
+// Rule: (1) a block-ending S with a fall-through edge gets the fence on that edge. (2) Every resumption point of every
+// function this plugin orders begins with the same acquire fence (add_resume_fences): the head of every block that is
+// the target of an EDGE_EH edge; right AFTER a returns-twice call or __builtin_setjmp_receiver (execution resumes after
+// the call, not before it); the head of every other block that is the target of an EDGE_ABNORMAL edge (a nonlocal
+// label). (3) A block-ending S without a fall-through edge (a noreturn call such as __builtin_longjmp, a resx) needs
+// nothing on its other paths: every continuation of S starts at a resumption point or does not exist. No error path.
+// Proof: TSO orders a thread's accesses in program order; every program-order successor of S lies on the fall-through
+// edge or after a resumption point; each of those begins with the fence; extra fences on other incoming paths of a
+// resumption point only add order. Scope: native code that loads fnvnx_order. Nonlocal entries land at native
+// receivers (which begin with the fence above), and every lifted access carries its own ordering (L3a, lifter rule R9).
+static void fence_after(gimple_stmt_iterator *gsi, enum memmodel m) {
+  gimple *stmt = gsi_stmt(*gsi);
+  if (stmt_ends_bb_p(stmt)) {
+    edge e = find_fallthru_edge(gimple_bb(stmt)->succs);
+    if (!e) return;   // no fall-through edge: covered by ORDER-CONT (2), counts nothing
+    gsi_insert_on_edge_immediate(e, fence(m));
+  } else {
+    gsi_insert_after(gsi, fence(m), GSI_SAME_STMT);
+  }
+  (m == MEMMODEL_ACQUIRE ? cur->fence_ld : cur->fence_st)++;
+}
+
+static bool resume_call_p(gimple *stmt) {
+  gcall *call = dyn_cast<gcall *>(stmt);
+  if (!call) return false;
+  if (gimple_call_flags(call) & ECF_RETURNS_TWICE) return true;
+  tree fn = gimple_call_fndecl(call);
+  return fn && fndecl_built_in_p(fn, BUILT_IN_SETJMP_RECEIVER);
+}
+
+// FENCE-MERGE: a resume fence is not inserted where the statement right next to it, in the same block with nothing between,
+// already is the identical acquire fence (dmb ishld): two equal fences in a row order exactly what one orders.
+static bool acquire_fence_p(gimple *stmt) {
+  gcall *call = stmt ? dyn_cast<gcall *>(stmt) : NULL;
+  if (!call || !gimple_call_builtin_p(call, BUILT_IN_ATOMIC_THREAD_FENCE)) return false;
+  tree m = gimple_call_arg(call, 0);
+  return TREE_CODE(m) == INTEGER_CST && tree_to_uhwi(m) == MEMMODEL_ACQUIRE;
+}
+
+// ORDER-CONT (2): the fence at every resumption point of the function. Run after the per-statement walk (the fences
+// are then not visited as accesses).
+static void add_resume_fences(function *fun) {
+  std::vector<gimple *> after;
+  std::vector<basic_block> heads;
+  basic_block bb;
+  FOR_EACH_BB_FN(bb, fun) {
+    for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi))
+      if (resume_call_p(gsi_stmt(gsi))) after.push_back(gsi_stmt(gsi));
+    bool head = false;
+    edge e; edge_iterator ei;
+    FOR_EACH_EDGE(e, ei, bb->preds) {
+      if (e->flags & EDGE_EH) head = true;
+      else if (e->flags & EDGE_ABNORMAL) {
+        gimple_stmt_iterator g = gsi_after_labels(bb);
+        if (gsi_end_p(g) || !resume_call_p(gsi_stmt(g))) head = true;   // else the fence after that call covers it
+      }
+    }
+    if (head) heads.push_back(bb);
+  }
+  for (gimple *s : after) {
+    gimple_stmt_iterator g = gsi_for_stmt(s);
+    if (stmt_ends_bb_p(s)) {
+      edge e = find_fallthru_edge(gimple_bb(s)->succs);
+      if (!e) continue;
+      gsi_insert_on_edge_immediate(e, fence(MEMMODEL_ACQUIRE));
+    } else {
+      gimple_stmt_iterator nx = g;
+      gsi_next(&nx);
+      if (!gsi_end_p(nx) && acquire_fence_p(gsi_stmt(nx))) continue;   // FENCE-MERGE
+      gsi_insert_after(&g, fence(MEMMODEL_ACQUIRE), GSI_SAME_STMT);
+    }
+    cur->fence_resume++;
+  }
+  for (basic_block b : heads) {
+    gimple_stmt_iterator g = gsi_after_labels(b);
+    if (!gsi_end_p(g) && acquire_fence_p(gsi_stmt(g))) continue;   // FENCE-MERGE
+    gsi_insert_before(&g, fence(MEMMODEL_ACQUIRE), GSI_SAME_STMT);
+    cur->fence_resume++;
+  }
+}
+
+// an operand that is a shared memory reference but sits where only a value can (a call argument, a return value, a
+// condition, an arithmetic operand): read it into a local first with an ordinary assignment, ordered as any other
+// load, and use the local
+static void hoist_read(gimple_stmt_iterator *gsi, gimple *stmt, unsigned i) {
+  tree op = gimple_op(stmt, i);
+  tree tmp = create_tmp_var(TREE_TYPE(op), "order_a");
+  gimple *as = gimple_build_assign(tmp, op);
+  gimple_set_location(as, gimple_location(stmt));
+  gsi_insert_before(gsi, as, GSI_SAME_STMT);
+  gimple_stmt_iterator g2 = gsi_for_stmt(as);
+  order_single(&g2);
+  gimple_set_op(stmt, i, tmp);
+}
+
+static bool operand_shared(gimple *, tree, tree op, void *) { return shared_ordered(op); }
+
+// a pointer argument that cannot be shared memory: the address of a constant the compiler keeps read-only
+static bool pointer_to_constant(tree a) {
+  if (TREE_CODE(a) != ADDR_EXPR) return false;
+  tree base = get_base_address(TREE_OPERAND(a, 0));
+  return base && (TREE_CODE(base) == STRING_CST || readonly_object(base));
+}
+
+// FOLDSET-BEGIN  generated by gen_foldset.py from GCC 13.3.0 gcc/gimple-fold.cc (sha256 f999480bbdeef63afc3679ae59cd3134a83ece89ec477b5c9b4464c6fb1e2875); do not edit
+static const struct { built_in_function code; const char *where; } fold_set[] = {
+  {BUILT_IN_BCMP, "gimple_fold_builtin gimple-fold.cc:5004"},
+  {BUILT_IN_BCOPY, "gimple_fold_builtin gimple-fold.cc:5006"},
+  {BUILT_IN_BZERO, "gimple_fold_builtin gimple-fold.cc:5008"},
+  {BUILT_IN_MEMSET, "gimple_fold_builtin gimple-fold.cc:5011"},
+  {BUILT_IN_MEMCPY, "gimple_fold_builtin gimple-fold.cc:5015"},
+  {BUILT_IN_MEMPCPY, "gimple_fold_builtin gimple-fold.cc:5016"},
+  {BUILT_IN_MEMMOVE, "gimple_fold_builtin gimple-fold.cc:5017"},
+  {BUILT_IN_SPRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5020"},
+  {BUILT_IN_VSPRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5021"},
+  {BUILT_IN_STRCAT_CHK, "gimple_fold_builtin gimple-fold.cc:5023"},
+  {BUILT_IN_STRNCAT_CHK, "gimple_fold_builtin gimple-fold.cc:5025"},
+  {BUILT_IN_STRLEN, "gimple_fold_builtin gimple-fold.cc:5027"},
+  {BUILT_IN_STRCPY, "gimple_fold_builtin gimple-fold.cc:5029"},
+  {BUILT_IN_STRNCPY, "gimple_fold_builtin gimple-fold.cc:5033"},
+  {BUILT_IN_STRCAT, "gimple_fold_builtin gimple-fold.cc:5038"},
+  {BUILT_IN_STRNCAT, "gimple_fold_builtin gimple-fold.cc:5041"},
+  {BUILT_IN_INDEX, "gimple_fold_builtin gimple-fold.cc:5043"},
+  {BUILT_IN_STRCHR, "gimple_fold_builtin gimple-fold.cc:5044"},
+  {BUILT_IN_RINDEX, "gimple_fold_builtin gimple-fold.cc:5046"},
+  {BUILT_IN_STRRCHR, "gimple_fold_builtin gimple-fold.cc:5047"},
+  {BUILT_IN_STRSTR, "gimple_fold_builtin gimple-fold.cc:5049"},
+  {BUILT_IN_STRCMP, "gimple_fold_builtin gimple-fold.cc:5051"},
+  {BUILT_IN_STRCMP_EQ, "gimple_fold_builtin gimple-fold.cc:5052"},
+  {BUILT_IN_STRCASECMP, "gimple_fold_builtin gimple-fold.cc:5053"},
+  {BUILT_IN_STRNCMP, "gimple_fold_builtin gimple-fold.cc:5054"},
+  {BUILT_IN_STRNCMP_EQ, "gimple_fold_builtin gimple-fold.cc:5055"},
+  {BUILT_IN_STRNCASECMP, "gimple_fold_builtin gimple-fold.cc:5056"},
+  {BUILT_IN_MEMCHR, "gimple_fold_builtin gimple-fold.cc:5058"},
+  {BUILT_IN_FPUTS, "gimple_fold_builtin gimple-fold.cc:5060"},
+  {BUILT_IN_FPUTS_UNLOCKED, "gimple_fold_builtin gimple-fold.cc:5063"},
+  {BUILT_IN_MEMCPY_CHK, "gimple_fold_builtin gimple-fold.cc:5066"},
+  {BUILT_IN_MEMPCPY_CHK, "gimple_fold_builtin gimple-fold.cc:5067"},
+  {BUILT_IN_MEMMOVE_CHK, "gimple_fold_builtin gimple-fold.cc:5068"},
+  {BUILT_IN_MEMSET_CHK, "gimple_fold_builtin gimple-fold.cc:5069"},
+  {BUILT_IN_STPCPY, "gimple_fold_builtin gimple-fold.cc:5076"},
+  {BUILT_IN_STRCPY_CHK, "gimple_fold_builtin gimple-fold.cc:5078"},
+  {BUILT_IN_STPCPY_CHK, "gimple_fold_builtin gimple-fold.cc:5079"},
+  {BUILT_IN_STRNCPY_CHK, "gimple_fold_builtin gimple-fold.cc:5085"},
+  {BUILT_IN_STPNCPY_CHK, "gimple_fold_builtin gimple-fold.cc:5086"},
+  {BUILT_IN_SNPRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5093"},
+  {BUILT_IN_VSNPRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5094"},
+  {BUILT_IN_FPRINTF, "gimple_fold_builtin gimple-fold.cc:5097"},
+  {BUILT_IN_FPRINTF_UNLOCKED, "gimple_fold_builtin gimple-fold.cc:5098"},
+  {BUILT_IN_VFPRINTF, "gimple_fold_builtin gimple-fold.cc:5099"},
+  {BUILT_IN_FPRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5109"},
+  {BUILT_IN_VFPRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5110"},
+  {BUILT_IN_PRINTF, "gimple_fold_builtin gimple-fold.cc:5120"},
+  {BUILT_IN_PRINTF_UNLOCKED, "gimple_fold_builtin gimple-fold.cc:5121"},
+  {BUILT_IN_VPRINTF, "gimple_fold_builtin gimple-fold.cc:5122"},
+  {BUILT_IN_PRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5129"},
+  {BUILT_IN_VPRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5130"},
+  {BUILT_IN_ACC_ON_DEVICE, "gimple_fold_builtin gimple-fold.cc:5137"},
+  {BUILT_IN_REALLOC, "gimple_fold_builtin gimple-fold.cc:5140"},
+  {BUILT_IN_CLEAR_PADDING, "gimple_fold_builtin gimple-fold.cc:5143"},
+};
+// FOLDSET-END
+
+static bool in_fold_set(built_in_function c) {
+  for (const auto &e : fold_set) if (e.code == c) return true;
+  return false;
+}
+
+// the non-builtin declaration of a builtin's library function (same name, same type, no built-in class), one per name.
+// GCC rewrites a call into memory accesses only for a call whose callee is a built-in declaration (gimple_fold_builtin,
+// match.pd and expand_builtin all start from DECL_BUILT_IN_CLASS), so the same call with this callee stays a call.
+static tree library_decl(tree fn) {
+  static std::map<std::string, tree> made;
+  const char *name = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fn));
+  tree &d = made[name];
+  if (!d) {
+    d = build_fn_decl(name, TREE_TYPE(fn));
+    DECL_ARTIFICIAL(d) = 1;
+  }
+  return d;
+}
+
+// a call GCC may expand inline that reads or writes memory through its pointer arguments (memcpy, memset, memcmp,
+// strlen, ...): the memory is no GIMPLE operand. GCC's own fnspec of the callee says which pointer arguments it may
+// read or write (unknown spec: all, both ways). A write gets a release fence before, a read an acquire fence after.
+// The atomic and sync builtins carry their own ordering and are not touched.
+static void order_builtin_call(gimple_stmt_iterator *gsi, gcall *call) {
+  tree fn = gimple_call_fndecl(call);
+  if (!fn || !fndecl_built_in_p(fn, BUILT_IN_NORMAL)) return;
+  built_in_function code = DECL_FUNCTION_CODE(fn);
+  if (code >= BUILT_IN_SYNC_FETCH_AND_ADD_N && code <= BUILT_IN_ATOMIC_FERAISEEXCEPT) return;
+  if (gimple_call_flags(call) & ECF_CONST) return;
+  attr_fnspec spec = gimple_call_fnspec(call);
+  bool rd = false, wr = false;
+  for (unsigned i = 0; i < gimple_call_num_args(call); i++) {
+    tree a = gimple_call_arg(call, i);
+    if (!POINTER_TYPE_P(TREE_TYPE(a)) || pointer_to_constant(a)) continue;
+    // the address of an unshared local (the scan above left it unshared because this argument does not escape)
+    if (TREE_CODE(a) == ADDR_EXPR && local_unshared(get_base_address(TREE_OPERAND(a, 0)))) continue;
+    bool known = spec.known_p() && spec.arg_specified_p(i);
+    if (!known || spec.arg_maybe_read_p(i)) rd = true;
+    if (!known || spec.arg_maybe_written_p(i)) wr = true;
+  }
+  if (!rd && !wr) return;
+  // FOLD SET.  A builtin that touches an operand which may be shared would be folded or expanded into plain accesses
+  // after this pass (gimple-fold.cc fold_set, match.pd, expand_builtin: move_by_pieces). The rule: every such call
+  // (the fold_set, and any other non-atomic builtin that reads or writes through a pointer) calls its library function
+  // instead of the builtin. PROOF. Every GCC rewrite of a call into memory accesses is keyed on the callee being a
+  // built-in declaration (DECL_BUILT_IN_CLASS); the library declaration has none, so the call survives to the object
+  // file as a call, which is no plain access, and the callee is the guest runtime's own ordered code (the same call a
+  // user-written memcpy is under -fno-builtin). A builtin with no library function (assembler name __builtin_*) cannot
+  // take this form: if it is in the fold set that is a compile error, otherwise it keeps the fences below.
+  const char *asmname = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fn));
+  bool has_lib = strncmp(asmname, "__builtin_", 10) != 0;
+  if (has_lib) { gimple_call_set_fndecl(call, library_decl(fn)); gimple_call_set_fntype(call, TREE_TYPE(library_decl(fn))); return; }
+  if (in_fold_set(code))
+    error_at(gimple_location(call), "fnvnx_order: %qs is in the GCC fold set and takes a shared operand, but has no library function to call instead", asmname);
+  if (wr) { gsi_insert_before(gsi, fence(MEMMODEL_RELEASE), GSI_SAME_STMT); cur->fence_st++; }
+  if (rd) fence_after(gsi, MEMMODEL_ACQUIRE);
+}
+
+// one statement. Every memory operand is classified (local or read-only: plain; else ordered or fenced); a statement
+// kind with a memory operand that no rule here covers is a compile error, never a silent plain access.
+static void order_stmt(gimple_stmt_iterator *gsi) {
+  gimple *stmt = gsi_stmt(*gsi);
+  switch (gimple_code(stmt)) {
+    case GIMPLE_ASSIGN:
+      if (gimple_assign_single_p(stmt)) { order_single(gsi); return; }
+      // unary/binary/ternary operations: value operands in GIMPLE, but any memory one is read first
+      for (unsigned i = 1; i < gimple_num_ops(stmt); i++)
+        if (gimple_op(stmt, i) && shared_ordered(gimple_op(stmt, i))) hoist_read(gsi, stmt, i);
+      if (shared_ordered(gimple_assign_lhs(stmt))) {
+        tree lhs = gimple_assign_lhs(stmt);
+        if (!stmt_ends_bb_p(stmt) && is_gimple_reg_type(TREE_TYPE(lhs))) {
+          tree tmp = create_tmp_var(TREE_TYPE(lhs), "order_r");
+          gimple_assign_set_lhs(stmt, tmp);
+          gsi_insert_after(gsi, gimple_build_assign(lhs, tmp), GSI_SAME_STMT);   // visited next
+        } else {
+          gsi_insert_before(gsi, fence(MEMMODEL_RELEASE), GSI_SAME_STMT);
+          cur->fence_st++;
+        }
+      }
+      return;
+    case GIMPLE_CALL: {
+      // arguments that are memory (an aggregate passed by value, the static chain): read first
+      for (unsigned i = 1; i < gimple_num_ops(stmt); i++)
+        if (gimple_op(stmt, i) && shared_ordered(gimple_op(stmt, i))) hoist_read(gsi, stmt, i);
+      order_builtin_call(gsi, as_a<gcall *>(stmt));
+      // `ref = f()` storing into an ordered object: route the result through a temporary, and order that store
+      tree lhs = gimple_call_lhs(stmt);
+      if (lhs && shared_ordered(lhs) && !stmt_ends_bb_p(stmt) && is_gimple_reg_type(TREE_TYPE(lhs))) {
+        tree tmp = create_tmp_var(TREE_TYPE(lhs), "order_r");
+        gimple_call_set_lhs(stmt, tmp);
+        gsi_insert_after(gsi, gimple_build_assign(lhs, tmp), GSI_SAME_STMT);   // visited next
+      } else if (lhs && shared_ordered(lhs)) {
+        // a return slot (aggregate): release fence before the call that stores into it
+        gsi_insert_before(gsi, fence(MEMMODEL_RELEASE), GSI_SAME_STMT);
+        cur->fence_st++;
+      }
+      return;
+    }
+    case GIMPLE_RETURN: case GIMPLE_COND: case GIMPLE_SWITCH:
+      // the value operands: read a memory one first. `return <retval>` of a result held in memory reads nothing: the
+      // object already is where the caller expects it
+      for (unsigned i = 0; i < gimple_num_ops(stmt); i++)
+        if (gimple_op(stmt, i) && shared_ordered(gimple_op(stmt, i)) &&
+            !(gimple_code(stmt) == GIMPLE_RETURN && TREE_CODE(gimple_op(stmt, i)) == RESULT_DECL))
+          hoist_read(gsi, stmt, i);
+      return;
+    case GIMPLE_ASM:
+      // the memory operands of an asm are the asm's own business: a function with asm is never a native body
+      return;
+    case GIMPLE_DEBUG:
+      return;
+    default:
+      // every other kind: no memory operand allowed to escape
+      if (walk_stmt_load_store_addr_ops(stmt, NULL, operand_shared, operand_shared, NULL))
+        error_at(gimple_location(stmt), "%<fnvnx_order%>: cannot order a memory operand of a %s statement",
+                 gimple_code_name[gimple_code(stmt)]);
+      return;
+  }
+}
+
+static void order_single(gimple_stmt_iterator *gsi) {
+  counts &c = *cur;
+  gimple *stmt = gsi_stmt(*gsi);
+  tree lhs = gimple_assign_lhs(stmt), rhs = gimple_assign_rhs1(stmt);
+  bool st = shared_ordered(lhs), ld = shared_ordered(rhs);
+  if (!st && !ld) return;
+  if (gimple_clobber_p(stmt)) return;
+  int li = ld ? atomic_index(rhs) : -1, si = st ? atomic_index(lhs) : -1;
+  if (ld && !st && li >= 0 && is_gimple_reg_type(TREE_TYPE(rhs))) {
+    // lhs = ref  ->  bits = __atomic_load_N(&ref, ACQUIRE); lhs = (T) bits
+    gimple_seq seq = NULL;
+    tree p = address_of(rhs, &seq);
+    tree ity = uint_type(li);
+    tree bits = create_tmp_var(ity, "order_ld");
+    gcall *call = gimple_build_call(builtin_decl_explicit((built_in_function)(BUILT_IN_ATOMIC_LOAD_1 + li)), 2, p,
+                                    build_int_cst(integer_type_node, MEMMODEL_ACQUIRE));
+    gimple_call_set_lhs(call, bits);
+    gimple_seq_add_stmt(&seq, call);
+    gsi_insert_seq_before(gsi, seq, GSI_SAME_STMT);
+    tree ty = TREE_TYPE(rhs);
+    tree v = SCALAR_FLOAT_TYPE_P(ty) ? build1(VIEW_CONVERT_EXPR, ty, bits) : build1(NOP_EXPR, ty, bits);
+    if (!useless_type_conversion_p(TREE_TYPE(lhs), ty)) {
+      tree t2 = create_tmp_var(ty, "order_v");
+      gsi_insert_before(gsi, gimple_build_assign(t2, v), GSI_SAME_STMT);
+      v = build1(NOP_EXPR, TREE_TYPE(lhs), t2);
+    }
+    gimple_assign_set_rhs_from_tree(gsi, v);
+    c.ldar++;
+    return;
+  }
+  if (st && !ld && si >= 0 && is_gimple_val(rhs)) {
+    // ref = v  ->  __atomic_store_N(&ref, (uintN) v, RELEASE)
+    gimple_seq seq = NULL;
+    tree p = address_of(lhs, &seq);
+    tree bits = to_bits(rhs, uint_type(si), &seq);
+    gcall *call = gimple_build_call(builtin_decl_explicit((built_in_function)(BUILT_IN_ATOMIC_STORE_1 + si)), 3, p,
+                                    bits, build_int_cst(integer_type_node, MEMMODEL_RELEASE));
+    gimple_set_location(call, gimple_location(stmt));
+    gsi_insert_seq_before(gsi, seq, GSI_SAME_STMT);
+    gsi_replace(gsi, call, false);
+    c.stlr++;
+    return;
+  }
+  // everything else keeps its (volatile) access, fenced: dmb ish before a store, dmb ishld after a load
+  if (st) { gsi_insert_before(gsi, fence(MEMMODEL_RELEASE), GSI_SAME_STMT); c.fence_st++; }
+  // a store to a bit-field is a read-modify-write of the containing unit: its hidden load is a load of shared memory and
+  // gets the acquire fence a load gets (one rule: every load, written or hidden, is followed by dmb ishld)
+  if (ld || (st && bitfield_ref(lhs))) fence_after(gsi, MEMMODEL_ACQUIRE);
+}
+
+struct order_pass : gimple_opt_pass {
+  order_pass(gcc::context *ctx, const pass_data &d) : gimple_opt_pass(d, ctx) {}
+
+  unsigned int execute(function *fun) final override {
+    counts c = {0, 0, 0, 0, 0};
+    cur = &c;
+    basic_block bb;
+    // the decls whose address this function takes (address_taken_scan: operands, the hidden result pointer of a call that
+    // returns in memory, asm operands) are the shared locals; they are made addressable before any access is classified, so no
+    // earlier statement keeps a plain access to them.  Every other local is unshared (local_unshared).
+    std::set<tree> taken;
+    address_taken_scan(fun, taken);
+    // PARAMETER COPY.  A by-value parameter whose address is taken is a shared object, but the inliner (after this pass)
+    // initializes the callee's parameter variable with a plain store when it inlines the body, an access this pass cannot
+    // order. So the body works on a local copy instead: `copy = parm` at entry, every use of the parameter (the address
+    // included) replaced by the copy. The parameter itself then has no address and no memory (the inliner's init store is
+    // an SSA copy), and the copy is the shared object: its entry store is created here and ordered like any other.
+    {
+      std::map<tree, tree> repl;
+      for (tree d : taken)
+        if (TREE_CODE(d) == PARM_DECL && !DECL_BY_REFERENCE(d) && !hard_register(d) && !TREE_STATIC(d) && !DECL_EXTERNAL(d))
+          repl[d] = create_tmp_var(TREE_TYPE(d), "order_p");
+      if (!repl.empty()) {
+        struct W { static tree sub(tree *tp, int *ws, void *data) {
+          std::map<tree, tree> *m = (std::map<tree, tree> *)((struct walk_stmt_info *)data)->info;
+          auto it = m->find(*tp);
+          if (it != m->end()) *tp = it->second;
+          else if (TYPE_P(*tp)) *ws = 0;
+          return NULL_TREE;
+        } };
+        basic_block bb2;
+        FOR_EACH_BB_FN(bb2, fun)
+          for (gimple_stmt_iterator g = gsi_start_bb(bb2); !gsi_end_p(g); gsi_next(&g)) {
+            struct walk_stmt_info wi;
+            memset(&wi, 0, sizeof wi);
+            wi.info = &repl;
+            walk_gimple_op(gsi_stmt(g), W::sub, &wi);
+            update_stmt(gsi_stmt(g));
+          }
+        gimple_seq init = NULL;
+        for (auto &r : repl) {
+          gimple_seq_add_stmt(&init, gimple_build_assign(r.second, r.first));
+          taken.erase(r.first);
+          taken.insert(r.second);
+        }
+        gsi_insert_seq_on_edge_immediate(single_succ_edge(ENTRY_BLOCK_PTR_FOR_FN(fun)), init);
+      }
+    }
+    addr_set = &taken;
+    for (tree d : taken)
+      if ((VAR_P(d) || TREE_CODE(d) == PARM_DECL || TREE_CODE(d) == RESULT_DECL) && !hard_register(d) && !TREE_STATIC(d) && !DECL_EXTERNAL(d))
+        mark_addressable(d);
+    FOR_EACH_BB_FN(bb, fun)
+      for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) order_stmt(&gsi);
+    add_resume_fences(fun);
+    unit_total.ldar += c.ldar; unit_total.stlr += c.stlr;
+    unit_total.fence_ld += c.fence_ld; unit_total.fence_st += c.fence_st; unit_total.fence_resume += c.fence_resume;
+    if (verbose && (c.ldar || c.stlr || c.fence_ld || c.fence_st || c.fence_resume))
+      inform(DECL_SOURCE_LOCATION(fun->decl), "%<fnvnx_order%>: %lu acquire loads, %lu release stores, %lu+%lu fenced, %lu resume fences",
+             c.ldar, c.stlr, c.fence_ld, c.fence_st, c.fence_resume);
+    cur = NULL;
+    addr_set = NULL;
+    return 0;
+  }
+};
+
+static const pass_data order_data = {
+    GIMPLE_PASS, "fnvnx_order", OPTGROUP_NONE, TV_NONE, PROP_gimple_any | PROP_cfg, 0, 0, 0, 0,
+};
+
+
+// ---- the frame record (.fnvnx.frame), rule R1 of class B
+//
+// For every function the unit emits: the frame ranges of its address-taken variables (TREE_ADDRESSABLE after the
+// optimizers, with a stack slot), as `offset:size` pairs relative to the CFA (the stack pointer at function entry, the
+// value DW_CFA_def_cfa names), or the word `dynamic` when the frame has no constant layout (alloca, a variable-length
+// array, a variable whose slot is not a constant frame offset). The record is emitted from an RTL pass after
+// pro_and_epilogue, where the frame is laid out, so the offsets are the final ones. The gate (link/gate_order.py)
+// certifies a plain sp- or x29-based access only when it overlaps none of these ranges.
+static std::map<std::string, fnvnx_frame_row> frame_lines;
+static std::map<tree, std::vector<tree> > frame_vars;   // the local variables at the last GIMPLE point (expand frees the list)
+
+// ESCAPES (per variable of the frame row). Rule: an address-taken local has escapes=0 only when GCC's own points-to solution of the
+// final GIMPLE says no other thread can hold its address; every other variable has escapes=1. The solution is recomputed at this pass
+// (TODO_rebuild_alias before it runs: execute_function_todo, passes.cc, calls compute_may_aliases, tree-ssa-structalias.cc, i.e.
+// compute_points_to_sets / find_what_var_points_to), so it describes exactly the code that is compiled, not a state left by an earlier
+// pass. escapes=1 when ANY of:
+//   (1) the function has no points-to solution: flag_tree_pta is off (-O0, -fno-tree-pta) or the body is not in SSA form;
+//   (2) the decl is in the ESCAPED solution, local or IPA (pt_solution_includes on a solution with `escaped`/`ipa_escaped` set:
+//       pt_solution_includes_1 asks cfun->gimple_df->escaped and ipa_escaped_pt by DECL_PT_UID). ESCAPED is the closure of what a call
+//       argument (handle_rhs_call, make_escape_constraint), a store into non-local memory, a return (compute_points_to_sets: escapes
+//       through returns) and an asm operand make reachable;
+//   (3) the decl is in the points-to set (pt_solution_includes on the SSA name's own pi->pt) of a pointer that this function passes as a
+//       call argument or static chain, returns, stores to non-local memory (a global, or through a pointer whose set is not only local),
+//       or names ADDR_EXPR in such a position or in an asm operand; a pointer without points-to info points anywhere;
+// (3) restates (2) from the statements, so a solution that missed a use cannot make a variable private. Pointers carried in integers are
+// covered by (2) only (the PTA models the conversion). ASM-001: the compiler's GIMPLE and points-to semantics.
+struct frame_info { bool dynamic; long args; std::vector<std::tuple<long, long, bool> > ranges; };   // (offset, size, private)
+static std::map<tree, frame_info> frame_infos;
+static std::map<tree, std::set<tree> > frame_private;   // per function: the address-taken locals with escapes=0
+
+struct frame_vars_pass : gimple_opt_pass {
+  frame_vars_pass(gcc::context *ctx, const pass_data &d) : gimple_opt_pass(d, ctx) {}
+
+  static bool only_local(struct pt_solution *pt) {
+    return !(pt->anything || pt->nonlocal || pt->escaped || pt->ipa_escaped || pt->vars_contains_escaped || pt->vars_contains_escaped_heap);
+  }
+  static bool store_nonlocal(tree lhs) {
+    tree b = get_base_address(lhs);
+    if (!b) return true;
+    if (DECL_P(b)) return is_global_var(b) || DECL_EXTERNAL(b);
+    if (TREE_CODE(b) == MEM_REF || TREE_CODE(b) == TARGET_MEM_REF) {
+      tree ptr = TREE_OPERAND(b, 0);
+      if (TREE_CODE(ptr) == ADDR_EXPR) return store_nonlocal(TREE_OPERAND(ptr, 0));
+      if (TREE_CODE(ptr) != SSA_NAME || !SSA_NAME_PTR_INFO(ptr)) return true;
+      return !only_local(&SSA_NAME_PTR_INFO(ptr)->pt);
+    }
+    return true;
+  }
+
+  unsigned int execute(function *fun) final override {
+    unsigned ix;
+    tree d;
+    std::vector<tree> &v = frame_vars[fun->decl];
+    FOR_EACH_LOCAL_DECL(fun, ix, d) v.push_back(d);
+    std::vector<tree> cand = v;
+    for (tree p = DECL_ARGUMENTS(fun->decl); p; p = DECL_CHAIN(p)) cand.push_back(p);
+    std::set<tree> &priv = frame_private[fun->decl];
+    if (!flag_tree_pta || !gimple_in_ssa_p(fun) || !fun->gimple_df) return 0;          // (1): nothing is private
+    std::set<tree> esc;
+    bool all = false;
+    struct pt_solution q;
+    memset(&q, 0, sizeof q);
+    q.escaped = 1;
+    q.ipa_escaped = fun->gimple_df->ipa_pta;   // ipa_escaped_pt starts as `anything`: it is a solution only when IPA PTA ran (compute_may_aliases returns early then)
+    for (tree c : cand) if (pt_solution_includes(&q, c)) esc.insert(c);                // (2)
+    auto note = [&](tree val) {                                                        // (3)
+      if (!val) return;
+      if (TREE_CODE(val) == ADDR_EXPR) {
+        tree b = get_base_address(TREE_OPERAND(val, 0));
+        if (b && DECL_P(b)) esc.insert(b);
+        return;
+      }
+      if (TREE_CODE(val) != SSA_NAME || !POINTER_TYPE_P(TREE_TYPE(val))) return;
+      struct ptr_info_def *pi = SSA_NAME_PTR_INFO(val);
+      if (!pi) { all = true; return; }
+      for (tree c : cand) if (pt_solution_includes(&pi->pt, c)) esc.insert(c);
+    };
+    basic_block bb;
+    FOR_EACH_BB_FN(bb, fun)
+      for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
+        gimple *st = gsi_stmt(gsi);
+        if (gcall *call = dyn_cast<gcall *>(st)) {
+          for (unsigned i = 0; i < gimple_call_num_args(call); i++) note(gimple_call_arg(call, i));
+          note(gimple_call_chain(call));
+        } else if (greturn *r = dyn_cast<greturn *>(st)) {
+          note(gimple_return_retval(r));
+        } else if (gasm *as = dyn_cast<gasm *>(st)) {
+          for (unsigned i = 0; i < gimple_asm_ninputs(as); i++) note(TREE_VALUE(gimple_asm_input_op(as, i)));
+          for (unsigned i = 0; i < gimple_asm_noutputs(as); i++) {
+            tree o = TREE_VALUE(gimple_asm_output_op(as, i));
+            tree b = get_base_address(o);
+            if (b && DECL_P(b)) esc.insert(b);
+          }
+        } else if (gassign *a = dyn_cast<gassign *>(st)) {
+          if (gimple_assign_single_p(a) && !is_gimple_reg(gimple_assign_lhs(a)) && store_nonlocal(gimple_assign_lhs(a)))
+            note(gimple_assign_rhs1(a));
+        }
+      }
+    if (all) return 0;
+    for (tree c : cand) if (!esc.count(c)) priv.insert(c);
+    return 0;
+  }
+};
+static const pass_data frame_vars_data = {
+    GIMPLE_PASS, "fnvnx_frame_vars", OPTGROUP_NONE, TV_NONE, PROP_ssa, 0, 0, TODO_rebuild_alias, 0,
+};
+
+struct frame_pass : rtl_opt_pass {
+  frame_pass(gcc::context *ctx, const pass_data &d) : rtl_opt_pass(d, ctx) {}
+
+  // The CFA-relative offset of a frame address, after elimination: the CFA is the argument pointer (the stack pointer at entry); a frame
+  // register's value is its elimination offset from the stack pointer minus the argument pointer's. One rule for every register a DECL_RTL
+  // address is built on after instantiate_virtual_regs and pro_and_epilogue: the frame pointer (sfp), virtual-stack-vars (sfp +
+  // STARTING_FRAME_OFFSET), the argument pointer, virtual-incoming-args (ap + FIRST_PARM_OFFSET), the stack pointer, the hard frame
+  // pointer; plus constants, nested. Anything else (a pseudo, a register of another meaning) is not a frame address.
+  static bool reg_cfa(unsigned regno, tree fndecl, long *v) {
+    poly_int64 fp = 0, ap = 0, hf = 0;
+    INITIAL_ELIMINATION_OFFSET(FRAME_POINTER_REGNUM, STACK_POINTER_REGNUM, fp);
+    INITIAL_ELIMINATION_OFFSET(ARG_POINTER_REGNUM, STACK_POINTER_REGNUM, ap);
+    long f, a, h;
+    if (!fp.is_constant(&f) || !ap.is_constant(&a)) return false;
+    if (regno == FRAME_POINTER_REGNUM) { *v = f - a; return true; }
+    if (regno == VIRTUAL_STACK_VARS_REGNUM) { *v = f - a + (long)targetm.starting_frame_offset(); return true; }
+    if (regno == ARG_POINTER_REGNUM) { *v = 0; return true; }
+    if (regno == VIRTUAL_INCOMING_ARGS_REGNUM) { *v = (long)FIRST_PARM_OFFSET(fndecl); return true; }
+    if (regno == STACK_POINTER_REGNUM) { *v = -a; return true; }
+    if (regno == HARD_FRAME_POINTER_REGNUM) {
+      INITIAL_ELIMINATION_OFFSET(FRAME_POINTER_REGNUM, HARD_FRAME_POINTER_REGNUM, hf);   // sfp - hard fp
+      if (!hf.is_constant(&h)) return false;
+      *v = f - a - h;
+      return true;
+    }
+    return false;
+  }
+  static bool slot_offset(rtx addr, tree fndecl, long *off) {
+    if (REG_P(addr)) return reg_cfa(REGNO(addr), fndecl, off);
+    if (GET_CODE(addr) == PLUS && CONST_INT_P(XEXP(addr, 1))) {
+      long b;
+      if (!slot_offset(XEXP(addr, 0), fndecl, &b)) return false;
+      *off = b + INTVAL(XEXP(addr, 1));
+      return true;
+    }
+    return false;
+  }
+
+  unsigned int execute(function *fun) final override {
+    // `dynamic` only where the stack pointer has no constant offset in the body: alloca or a variable-length array (calls_alloca). A setjmp or a
+    // non-local label does not move the frame: the layout stays constant, the jmp_buf is an address-taken local of it. Every function without
+    // alloca has `OFFSET:SIZE` ranges, and an address-taken variable that has no constant frame slot is its own `unk:CAUSE` token, never a
+    // reason to give up the whole function.
+    bool dynamic = fun->calls_alloca;
+    std::map<std::pair<long, long>, bool> rs;           // (offset, size) -> every variable in the slot has escapes=0
+    std::set<std::string> unk;
+    std::set<tree> &priv = frame_private[fun->decl];
+    auto one = [&](tree v) {
+      if (!VAR_P(v) && TREE_CODE(v) != PARM_DECL) return;
+      if (TREE_STATIC(v) || DECL_EXTERNAL(v) || !TREE_ADDRESSABLE(v)) return;
+      rtx m = DECL_RTL_IF_SET(v);
+      if (!m) return;                                  // no storage (the variable was optimized out)
+      if (!MEM_P(m)) { unk.insert("reg"); return; }    // lives in a register
+      long off;
+      tree sz = DECL_SIZE_UNIT(v);
+      if (!sz || !tree_fits_uhwi_p(sz)) { unk.insert("size"); return; }
+      if (!slot_offset(XEXP(m, 0), fun->decl, &off)) { unk.insert("mem"); return; }   // through a pseudo: not a slot of this frame
+      std::pair<long, long> k = std::make_pair(off, (long)tree_to_uhwi(sz));
+      bool pv = priv.count(v) != 0;
+      std::map<std::pair<long, long>, bool>::iterator it = rs.find(k);
+      if (it == rs.end()) rs[k] = pv; else it->second = it->second && pv;   // a slot shared by variables: escaping wins
+    };
+    for (tree v : frame_vars[fun->decl]) one(v);
+    for (tree p = DECL_ARGUMENTS(fun->decl); p; p = DECL_CHAIN(p)) one(p);
+    {
+      frame_info &fi = frame_infos[fun->decl];
+      fi.dynamic = dynamic || !unk.empty();
+      fi.args = 0;
+      for (auto &r : rs) fi.ranges.push_back(std::make_tuple(r.first.first, r.first.second, r.second));
+    }
+    fnvnx_frame_row row;
+    if (dynamic) row.ranges = "dynamic";
+    else {
+      for (auto &r : rs)
+        row.ranges += (row.ranges.empty() ? "" : " ") + std::to_string(r.first.first) + ":" + std::to_string(r.first.second) + (r.second ? ":n" : "");
+      for (auto &u : unk) row.ranges += (row.ranges.empty() ? "" : " ") + ("unk:" + u);
+    }
+    poly_int64 as = crtl->args.size;
+    long args = 0;
+    if (!as.is_constant(&args)) args = 0;
+    row.args = args;
+    frame_infos[fun->decl].args = args;
+    frame_lines[IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fun->decl))] = row;
+    return 0;
+  }
+};
+
+static const pass_data frame_data = {
+    RTL_PASS, "fnvnx_frame", OPTGROUP_NONE, TV_NONE, 0, 0, 0, 0, 0,
+};
+
+// ---- the last RTL check (rule: placement). A plain memory access that survives to the end of the RTL passes and may touch memory another
+// thread can reach is a compile error. The accesses the order rewrite made ordered are UNSPEC_VOLATILE patterns (ldar/stlr: UNSPECV_LDA,
+// UNSPECV_LDAP, UNSPECV_STL, config/aarch64/atomics.md) and the fences are a volatile BLK MEM on a SCRATCH address (*dmb, atomics.md); neither
+// is a plain access. Every other MEM of the final insns is judged here, whichever RTL pass created, merged, split or moved it (README.md lists
+// each pass and what protects the atomics from it; a pass without a refusal is covered by this check alone). A MEM is private when:
+//   - it is read-only (MEM_READONLY_P) or a constant-pool reference;
+//   - its address is the stack pointer with an auto-modification (prologue, epilogue and call-argument pushes);
+//   - its address is a constant offset from a frame register (the CFA-relative offset of frame_pass) and the bytes overlap no recorded
+//     variable with escapes=1, in a function whose row is not `dynamic` (no alloca, every address-taken variable placed), or lie in the
+//     incoming argument area [CFA, CFA+args);
+//   - its MEM_EXPR names a local whose address-taken variable has escapes=0 (frame_private).
+// Everything else is possibly shared, including a MEM without MEM_EXPR whose address is not a frame offset.
+static bool rtl_const_pool(rtx a) {
+  if (GET_CODE(a) == LO_SUM) a = XEXP(a, 1);
+  if (GET_CODE(a) == CONST) a = XEXP(a, 0);
+  if (GET_CODE(a) == PLUS) a = XEXP(a, 0);
+  return GET_CODE(a) == SYMBOL_REF && CONSTANT_POOL_ADDRESS_P(a);
+}
+
+static const char *rtl_private_mem(rtx m, function *fun) {   // NULL when private, else the reason
+  if (MEM_READONLY_P(m)) return NULL;
+  rtx a = XEXP(m, 0);
+  if (rtl_const_pool(a)) return NULL;
+  if ((GET_CODE(a) == PRE_MODIFY || GET_CODE(a) == POST_MODIFY || GET_CODE(a) == PRE_DEC || GET_CODE(a) == POST_INC ||
+       GET_CODE(a) == PRE_INC || GET_CODE(a) == POST_DEC) && REG_P(XEXP(a, 0)) && REGNO(XEXP(a, 0)) == STACK_POINTER_REGNUM)
+    return NULL;
+  frame_info &fi = frame_infos[fun->decl];
+  long off;
+  if (frame_pass::slot_offset(a, fun->decl, &off)) {
+    if (fi.dynamic) return "frame access in a function whose frame has no complete record (alloca or unrecorded variable)";
+    long sz = 1;
+    if (MEM_SIZE_KNOWN_P(m)) sz = (long)MEM_SIZE(m).to_constant();
+    else if (GET_MODE(m) != BLKmode) sz = (long)GET_MODE_SIZE(GET_MODE(m)).to_constant();
+    else return "frame access of unknown size";
+    if (off >= 0 && off + sz <= fi.args) return NULL;
+    for (auto &r : fi.ranges)
+      if (!std::get<2>(r) && off < std::get<0>(r) + std::get<1>(r) && std::get<0>(r) < off + sz) return "frame access overlapping a variable with escapes=1";
+    return NULL;
+  }
+  tree e = MEM_EXPR(m);
+  if (e) {
+    tree b = get_base_address(e);
+    if (b && DECL_P(b) && !TREE_STATIC(b) && !DECL_EXTERNAL(b) && !DECL_THREAD_LOCAL_P(b) &&
+        (VAR_P(b) || TREE_CODE(b) == PARM_DECL) && frame_private[fun->decl].count(b))
+      return NULL;
+    if (b && (TREE_CODE(b) == MEM_REF || TREE_CODE(b) == TARGET_MEM_REF)) return "access through a pointer";
+    if (b && DECL_P(b) && (TREE_STATIC(b) || DECL_EXTERNAL(b) || DECL_THREAD_LOCAL_P(b))) return "access to a global or static object";
+    if (b && DECL_P(b)) return "access to a local with escapes=1";
+    return "access with an unclassified MEM_EXPR";
+  }
+  return "access without MEM_EXPR whose address is not a frame offset";
+}
+
+struct rtl_check_pass : rtl_opt_pass {
+  rtl_check_pass(gcc::context *ctx, const pass_data &d) : rtl_opt_pass(d, ctx) {}
+  unsigned int execute(function *fun) final override {
+    for (rtx_insn *insn = get_insns(); insn; insn = NEXT_INSN(insn)) {
+      if (!NONDEBUG_INSN_P(insn)) continue;
+      {   // an insn that holds an UNSPEC_VOLATILE is an ordered form (ldar, stlr, and their extending variants): its MEM is the instruction's operand
+        bool ordered = false;
+        subrtx_iterator::array_type a0;
+        FOR_EACH_SUBRTX(i0, a0, PATTERN(insn), ALL) if (GET_CODE(*i0) == UNSPEC_VOLATILE) { ordered = true; break; }
+        if (ordered) continue;
+      }
+      subrtx_var_iterator::array_type arr;
+      rtx callee = NULL_RTX;
+      FOR_EACH_SUBRTX_VAR(it, arr, PATTERN(insn), NONCONST) {
+        rtx x = *it;
+        if (GET_CODE(x) == CALL) { callee = XEXP(x, 0); continue; }
+        if (!MEM_P(x)) continue;
+        it.skip_subrtxes();
+        if (x == callee) continue;   // the callee address of a call is not a data access
+        if (GET_MODE(x) == BLKmode && GET_CODE(XEXP(x, 0)) == SCRATCH && !MEM_VOLATILE_P(x)) continue;   // stack_tie (UNSPEC_PRLG_STK): a scheduling clobber with no address, not an access
+        if (GET_MODE(x) == BLKmode && GET_CODE(XEXP(x, 0)) == SCRATCH && MEM_VOLATILE_P(x)) continue;   // the fence (*dmb)
+        const char *why = rtl_private_mem(x, fun);
+        if (!why) continue;
+        error_at(INSN_LOCATION(insn), "%<fnvnx_order%>: a plain memory access that may reach shared memory survives to the end of the RTL passes in %qD: %s", fun->decl, why);
+      }
+    }
+    return 0;
+  }
+};
+static const pass_data rtl_check_data = {
+    RTL_PASS, "fnvnx_rtlcheck", OPTGROUP_NONE, TV_NONE, 0, 0, 0, 0, 0,
+};
+
+static void emit_readonly_section() {
+  if (ro_lines.empty()) return;
+  fprintf(asm_out_file, "\t.pushsection\t.fnvnx.ro,\"\",%%progbits\n");
+  for (auto &l : ro_lines) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", l.c_str());
+  fprintf(asm_out_file, "\t.popsection\n");
+}
+
+static void emit_frame_section() {
+  cgraph_node *n;
+  std::map<std::string, fnvnx_frame_row> pending;
+  FOR_EACH_FUNCTION(n) {
+    if (!n->definition && !n->alias) continue;
+    if (n->inlined_to) continue;
+    const char *name = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(n->decl));
+    if (frame_lines.count(name)) continue;
+    // an alias is the body of its target (same bytes, same frame): the same row; a thunk has no frame of its own (no variable, no stack argument)
+    fnvnx_frame_row line = {"", 0};
+    if (n->alias) {
+      cgraph_node *t = n->ultimate_alias_target();
+      auto it = t ? frame_lines.find(IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(t->decl))) : frame_lines.end();
+      if (it != frame_lines.end()) line = it->second;
+    }
+    pending[name] = line;
+  }
+  for (auto &p : pending) frame_lines[p.first] = p.second;
+  fnvnx_emit_frame_rows(asm_out_file, frame_lines);
+}
+
+static void finish(void *, void *) {
+  emit_frame_section();
+  emit_readonly_section();
+  if (verbose)
+    inform(UNKNOWN_LOCATION, "%<fnvnx_order%>: unit: %lu ldar, %lu stlr, %lu fenced loads, %lu fenced stores, %lu resume fences; "
+           "%lu calls with arguments right to left, %lu left (class-type argument with side effects)",
+           unit_total.ldar, unit_total.stlr, unit_total.fence_ld, unit_total.fence_st, unit_total.fence_resume, calls_reordered, calls_skipped);
+  if (verbose && (object_last || operator_rtl))
+    inform(UNKNOWN_LOCATION, "%<fnvnx_order%>: unit: %lu calls with the object after the arguments, "
+           "%lu overloaded operators right to left, %lu prvalue virtual calls with the object first, "
+           "%lu calls through a computed pointer with the arguments first",
+           calls_object_last, calls_operator, calls_prvalue_virtual, calls_fnptr);
+}
+
+// ---- argument order (args=rtl)
+
+static bool scalar_arg(tree t) {
+  tree ty = TREE_TYPE(t);
+  return ty && (INTEGRAL_TYPE_P(ty) || POINTER_TYPE_P(ty) || SCALAR_FLOAT_TYPE_P(ty) || TREE_CODE(ty) == OFFSET_TYPE ||
+                TREE_CODE(ty) == VECTOR_TYPE || TREE_CODE(ty) == NULLPTR_TYPE);
+}
+
+static int arg_count(tree t) {
+  return TREE_CODE(t) == CALL_EXPR ? call_expr_nargs(t) : aggr_init_expr_nargs(t);
+}
+static tree *arg_slot(tree t, int i) {
+  return TREE_CODE(t) == CALL_EXPR ? &CALL_EXPR_ARG(t, i) : &AGGR_INIT_EXPR_ARG(t, i);
+}
+
+// object=last: how the object of a member call can move after its arguments. 1: a direct call; the object is
+// argument 0 and joins the argument chain as its last element. 2: a virtual call; the chain goes in front of the
+// OBJ_TYPE_REF's object, so the arguments run before the object and its vtable load. 0: neither (object=first, a
+// constructor or destructor, a call through a pointer to member or another computed callee). The callee itself is
+// never replaced: a COMPOUND_EXPR there would make a direct call indirect.
+// object=msvc follows MSVC 2008 as recorded in all five configurations (S11, tests/s11/order/order.msvc): a direct
+// member call (member operators included) evaluates its arguments, then the object (1); a virtual call evaluates the
+// object first (0: GCC's order); a call through a pointer to member evaluates its arguments, then object and member
+// pointer (3: the chain goes in front of the computed callee, which is an indirect call anyway).
+static int object_kind(tree call, tree fn) {
+  if (!(object_last || object_msvc) || !fn || arg_count(call) < 1) return 0;
+  if (TREE_CODE(call) == AGGR_INIT_EXPR && AGGR_INIT_VIA_CTOR_P(call)) return 0;
+  if (TREE_CODE(fn) == ADDR_EXPR && TREE_CODE(TREE_OPERAND(fn, 0)) == FUNCTION_DECL) {
+    tree d = TREE_OPERAND(fn, 0);
+    if (DECL_CONSTRUCTOR_P(d) || DECL_DESTRUCTOR_P(d)) return 0;
+    // `make().f(a())` with f virtual: the front end calls a prvalue's virtual function directly (it knows the
+    // type), MSVC 2008 still treats it as a virtual call and evaluates the object first (V2's P1)
+    if (object_msvc && DECL_VIRTUAL_P(d) && TREE_CODE(call) == CALL_EXPR) {
+      tree o = *arg_slot(call, 0);
+      while (CONVERT_EXPR_P(o) || TREE_CODE(o) == NON_LVALUE_EXPR) o = TREE_OPERAND(o, 0);
+      if (TREE_CODE(o) == ADDR_EXPR && TREE_CODE(TREE_OPERAND(o, 0)) == TARGET_EXPR) { calls_prvalue_virtual++; return 0; }
+    }
+    return 1;
+  }
+  if (TREE_CODE(fn) == OBJ_TYPE_REF) return object_msvc ? 0 : 2;
+  return object_msvc && TREE_CODE(call) == CALL_EXPR ? 3 : 0;
+}
+
+// an object no argument can change: a constant, or the address of a declaration
+static bool invariant_object(tree t) {
+  while (CONVERT_EXPR_P(t) || TREE_CODE(t) == NON_LVALUE_EXPR) t = TREE_OPERAND(t, 0);
+  return TREE_CONSTANT(t) || (TREE_CODE(t) == ADDR_EXPR && DECL_P(TREE_OPERAND(t, 0)));
+}
+
+static void reorder_call(tree call) {
+  int n = arg_count(call);
+  int first = 0;
+  // `this` (first argument of a method call, and the object of a constructor call) stays first, unless object=last
+  tree fntype = NULL_TREE;
+  tree fn = TREE_CODE(call) == CALL_EXPR ? CALL_EXPR_FN(call) : AGGR_INIT_EXPR_FN(call);
+  if (fn && POINTER_TYPE_P(TREE_TYPE(fn))) fntype = TREE_TYPE(TREE_TYPE(fn));
+  bool op = false;
+  if (TREE_CODE(call) == CALL_EXPR) {
+    // `=` and `@=` (CALL_EXPR_REVERSE_ARGS): C++17 evaluates the right operand, then the left one (a member
+    // operator's object). That is MSVC's push order too, with either object= setting: left as it is.
+    if (CALL_EXPR_REVERSE_ARGS(call)) return;
+    // `<<`, `>>`, `[]`, `->*` (CALL_EXPR_ORDERED_ARGS): C++17 left to right; operator=rtl orders them as any call
+    if (CALL_EXPR_ORDERED_ARGS(call)) {
+      if (!operator_rtl) return;
+      op = true;
+    }
+  }
+  if (fntype && TREE_CODE(fntype) == METHOD_TYPE) first = 1;
+  int okind = first ? object_kind(call, fn) : 0;
+  // `fp()(a())`: a call through a computed function pointer evaluates its arguments before the callee expression
+  // under MSVC 2008 (V2's P2): the argument chain goes in front of the callee (an indirect call anyway)
+  bool fnptr = false;
+  if (!first && object_msvc && TREE_CODE(call) == CALL_EXPR && fn && TREE_SIDE_EFFECTS(fn) &&
+      !(TREE_CODE(fn) == ADDR_EXPR && TREE_CODE(TREE_OPERAND(fn, 0)) == FUNCTION_DECL) && TREE_CODE(fn) != OBJ_TYPE_REF &&
+      fntype && TREE_CODE(fntype) == FUNCTION_TYPE) {
+    okind = 3;
+    fnptr = true;
+  }
+  int effects = 0, live = 0;
+  for (int i = first; i < n; i++) {
+    tree a = *arg_slot(call, i);
+    if (TREE_SIDE_EFFECTS(a)) {
+      if (!scalar_arg(a)) {
+        calls_skipped++;
+        if (verbose_sites)
+          inform(EXPR_LOCATION(call), "%<fnvnx_order%>: arguments left in GCC order (argument %d: %qT with side effects)",
+                 i, TREE_TYPE(a));
+        return;
+      }
+      effects++;
+    }
+    if (!TREE_CONSTANT(a)) live++;
+  }
+  if (okind == 3) {
+    // pointer to member: the callee holds the object and the member pointer; the arguments go in front of it
+    if (!TREE_SIDE_EFFECTS(fn) && !effects) okind = 0;
+  } else if (okind) {
+    // the object moves only where it and an argument can see each other: one has side effects, the other is live
+    tree obj = *arg_slot(call, 0);
+    if (!scalar_arg(obj) || !((TREE_SIDE_EFFECTS(obj) && live) || (!invariant_object(obj) && effects))) okind = 0;
+  }
+  if (!okind && (!effects || live < 2)) return;
+  int lead = -1;
+  for (int i = okind == 1 ? 0 : first; i < n; i++) {
+    tree *slot = arg_slot(call, i);
+    if (TREE_CONSTANT(*slot) || !scalar_arg(*slot)) continue;
+    *slot = save_expr(*slot);
+    if (lead < 0) lead = i;
+  }
+  if (lead < 0) return;
+  tree *ls = arg_slot(call, lead);
+  tree chain = *ls;
+  for (int i = lead + 1; i < n; i++) {
+    tree a = *arg_slot(call, i);
+    if (TREE_CODE(a) == SAVE_EXPR) chain = build2(COMPOUND_EXPR, TREE_TYPE(chain), a, chain);
+  }
+  if (okind == 3) {
+    CALL_EXPR_FN(call) = build2(COMPOUND_EXPR, TREE_TYPE(fn), chain, fn);
+  } else if (okind == 2) {
+    // GCC gimplifies the callee before the arguments, and an OBJ_TYPE_REF's object before its vtable load: with
+    // the chain in front of that object, the arguments, the object and the vtable load run in this order
+    tree &o = OBJ_TYPE_REF_OBJECT(fn);
+    o = build2(COMPOUND_EXPR, TREE_TYPE(o), chain, o);
+  } else {
+    *ls = chain;
+  }
+  if (op) {
+    CALL_EXPR_ORDERED_ARGS(call) = 0;   // gimplified as a plain call now: the chain decides the order
+    calls_operator++;
+  }
+  if (okind) calls_object_last++;
+  if (fnptr) calls_fnptr++;
+  calls_reordered++;
+}
+
+// assign=msvc: a built-in compound assignment `*p() += a()` evaluates its left operand first under MSVC 2008 (all five
+// recorded configurations: "pa"); C++17 makes GCC evaluate the right one first. The front end has already put the
+// left operand's side effects into SAVE_EXPRs that the right side shares (the `lhs = lhs + rhs` form): they are
+// evaluated in front of the assignment. A plain `=` is left alone: MSVC's own order differs between /O2 and /Od.
+static std::set<tree> assigns_done;
+static unsigned long assigns_reordered;
+
+static tree collect_saves(tree *tp, int *walk_subtrees, void *data) {
+  if (TYPE_P(*tp)) { *walk_subtrees = 0; return NULL_TREE; }
+  if (TREE_CODE(*tp) == SAVE_EXPR) {
+    if (TREE_SIDE_EFFECTS(TREE_OPERAND(*tp, 0))) ((std::vector<tree> *)data)->push_back(*tp);
+    *walk_subtrees = 0;
+  }
+  return NULL_TREE;
+}
+static tree find_tree(tree *tp, int *, void *data) { return *tp == (tree)data ? *tp : NULL_TREE; }
+
+static void compound_assign(tree *tp) {
+  tree t = *tp;
+  if (!assign_msvc || TREE_CODE(t) != MODIFY_EXPR || assigns_done.count(t)) return;
+  tree lhs = TREE_OPERAND(t, 0), rhs = TREE_OPERAND(t, 1);
+  if (!TREE_SIDE_EFFECTS(lhs) || !TREE_SIDE_EFFECTS(rhs) || !scalar_arg(lhs)) return;
+  std::vector<tree> saves;
+  walk_tree_without_duplicates(&lhs, collect_saves, &saves);
+  tree chain = NULL_TREE;
+  for (tree sv : saves)
+    if (walk_tree_without_duplicates(&rhs, find_tree, sv))   // shared by both sides: the compound form
+      chain = chain ? build2(COMPOUND_EXPR, void_type_node, chain, sv) : sv;
+  if (!chain) return;
+  assigns_done.insert(t);
+  *tp = build2(COMPOUND_EXPR, TREE_TYPE(t), chain, t);
+  assigns_reordered++;
+}
+
+static tree order_args_walk(tree *tp, int *, void *) {
+  compound_assign(tp);
+  if (args_rtl && (TREE_CODE(*tp) == CALL_EXPR || TREE_CODE(*tp) == AGGR_INIT_EXPR)) reorder_call(*tp);
+  return NULL_TREE;
+}
+
+static void pre_genericize(void *gcc_data, void *) {
+  tree fndecl = (tree)gcc_data;
+  if (!fndecl || TREE_CODE(fndecl) != FUNCTION_DECL || !DECL_SAVED_TREE(fndecl)) return;
+  // compiler and C library headers (arm_neon.h, <string>, ...) are not decomp code: their order is GCC's to keep
+  if (in_system_header_at(DECL_SOURCE_LOCATION(fndecl))) return;
+  walk_tree_without_duplicates(&DECL_SAVED_TREE(fndecl), order_args_walk, NULL);
+}
+
+int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *version) {
+  if (!plugin_default_version_check(version, &gcc_version)) {
+    error("%<fnvnx_order%>: built for GCC %s, loaded by %s", gcc_version.basever, version->basever);
+    return 1;
+  }
+  for (int i = 0; i < info->argc; i++) {
+    const char *k = info->argv[i].key, *v = info->argv[i].value;
+    if (!strcmp(k, "verbose")) { verbose = true; if (v && !strcmp(v, "sites")) verbose_sites = true; }
+    else if (!strcmp(k, "args") && v) {
+      if (!strcmp(v, "rtl")) args_rtl = true;
+      else if (!strcmp(v, "ltr")) args_rtl = false;
+      else { error("%<fnvnx_order%>: unknown argument order %s", v); return 1; }
+    } else if (!strcmp(k, "object") && v) {
+      if (!strcmp(v, "first")) object_last = object_msvc = false;
+      else if (!strcmp(v, "last")) { object_last = true; object_msvc = false; }
+      else if (!strcmp(v, "msvc")) { object_msvc = true; object_last = false; }
+      else { error("%<fnvnx_order%>: unknown object order %s", v); return 1; }
+    } else if (!strcmp(k, "operator") && v) {
+      if (!strcmp(v, "cpp17")) operator_rtl = false;
+      else if (!strcmp(v, "rtl")) operator_rtl = true;
+      else { error("%<fnvnx_order%>: unknown operator order %s", v); return 1; }
+    } else if (!strcmp(k, "assign") && v) {
+      if (!strcmp(v, "cpp17")) assign_msvc = false;
+      else if (!strcmp(v, "msvc")) assign_msvc = true;
+      else { error("%<fnvnx_order%>: unknown assignment order %s", v); return 1; }
+    }
+    else { error("%<fnvnx_order%>: unknown argument %s", k); return 1; }
+  }
+  struct register_pass_info pass;
+  pass.pass = new order_pass(g, order_data);
+  pass.reference_pass_name = "cfg";
+  pass.ref_pass_instance_number = 1;
+  pass.pos_op = PASS_POS_INSERT_AFTER;
+  register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pass);
+  struct register_pass_info vpass;
+  vpass.pass = new frame_vars_pass(g, frame_vars_data);
+  vpass.reference_pass_name = "*warn_function_noreturn";
+  vpass.ref_pass_instance_number = 1;
+  vpass.pos_op = PASS_POS_INSERT_AFTER;
+  register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &vpass);
+  struct register_pass_info fpass;
+  fpass.pass = new frame_pass(g, frame_data);
+  fpass.reference_pass_name = "pro_and_epilogue";
+  fpass.ref_pass_instance_number = 1;
+  fpass.pos_op = PASS_POS_INSERT_AFTER;
+  register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &fpass);
+  struct register_pass_info cpass;
+  cpass.pass = new rtl_check_pass(g, rtl_check_data);
+  cpass.reference_pass_name = "final";
+  cpass.ref_pass_instance_number = 1;
+  cpass.pos_op = PASS_POS_INSERT_BEFORE;
+  register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &cpass);
+  register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish, NULL);
+  register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, pre_genericize, NULL);
+  return 0;
+}
