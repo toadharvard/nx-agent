@@ -1120,3 +1120,6 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - 22:29 Revision: the root cause of the 3 stack objects per site is in fnvnx_order (L2). address_taken_scan makes every asm operand address-taken, whatever its constraint. valfn is dropped.
   - Rule sent to L2: an operand is address-taken iff its constraint allows memory, by GCC's parse_*_constraint `allows_mem`.
   - w12 measures a local patch through recipe.py: CC, RSS, stack vars, and the multiset of ordering instructions.
+- 22:30 w8 selector value rule accepted: base3 b5fda5e65 (segwrites/2).
+  - pop and mov sources are proven by the same walk. Every cut-off gives possibly-null, so it is sound, with the argument in the docstring and 4 new tests.
+  - On 6944080, the exe's 3 possibly-null writes are data decoded as code (00ee6f84, 00ee7104, 00ee77f4), so they are removed by w7's universe rule.
