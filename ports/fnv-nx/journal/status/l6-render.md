@@ -1288,3 +1288,8 @@ Paused: w3b, w4, farm; no other work.
     - d3d9 product byte-identical; test_env_ident passes; abspath render 0; d3d9total 332/332; test 45/45.
     - sm_link waits on w12's merge1 store fix. COM_SPEC rebase follows the cand3 head.
 - bottleneck: w12's recipe merge1 store defect (sm_link); L1 cand3 and cand4.
+- 21:55Z w6 0c989ffbc (render/d3d9, rule 1): the envq domains are derived.
+    - DEVT, RTYPE and MSAA come from the d3d9types.h enums. Each complement representative has a proof cited to Wine 9.0 (tools/wine-9.0 c8373ee4).
+    - FOURCC_LIST is deleted. KNOWN_FCC is read from format_index_remap in a new pruned mirror, tools/wine-9.0-d3d9-formats @348f306e (tree 342fb6d4…).
+    - Product byte-identical; test_env_ident passes; abspath render 0; d3d9total 332/332; test 45/45.
+    - Next (w6, doing): derive gen_env's SWITCH and its enum constants from device.c and d3d9types.h, grep env/ and gen/ for any other hand list, then send one head to w12.
