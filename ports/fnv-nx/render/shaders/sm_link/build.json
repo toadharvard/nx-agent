@@ -25,7 +25,8 @@
   "ports/fnv-nx/lib/sha256/include",
   "ports/fnv-nx/render/pair/include",
   "ports/fnv-nx/render/smscan/include",
-  "ports/fnv-nx/render/gl4shim/include"
+  "ports/fnv-nx/render/gl4shim/include",
+  "ports/fnv-nx/render/nxgpu"
  ],
  "units": "all",
  "external": [],
@@ -35,13 +36,6 @@
   "flags": [
    "-m",
    "elf_x86_64"
-  ],
-  "roots": [
-   "ports/fnv-nx/render/shaders/translator@host",
-   "ports/fnv-nx/lib/sha256@host",
-   "ports/fnv-nx/render/pair@host",
-   "ports/fnv-nx/render/smscan@host",
-   "ports/fnv-nx/render/gl4shim"
   ],
   "libs": {
    "system": [

@@ -19,6 +19,7 @@
 #include "fnvnx_sdp.h"
 #include "nx_gl4shim.h"    /* the GL backend's own GLSL rewrite: the text Mesa compiles is the shim's output */
 #include "nx_smscan.h"    /* the one scanner of the draw path: nx_sm_check, nx_sm_pairs */
+#include "nx/gpu_abi.h"   /* enum NxStage: the argument of nx_pair_ffp_row */
 #include "nx_pair.h"      /* the one selection function of the draw path: nx_pair_variant */
 #include "fnvnx_dk_layout.h"   /* the product header: fnvnx_dk_vs_needs_complete is called, not copied */
 #include "fnvnx_sha256.h"
@@ -253,7 +254,7 @@ static int read_stage_files(int nf, char **fv, SLines *S) {
 }
 
 /* ---- the program set: every (VS signature, PS signature, flat) the draw path builds for a (vertex class, PS class) ---- */
-typedef struct { uint8_t vsig[32], psig[32]; int fl, cb; } Prog;
+typedef struct { uint8_t vsig[32], psig[32]; int fl, cb, ffp; } Prog;   /* ffp: how many sides are fixed-function rows of gl4shim (0: translator x translator) */
 static int cmp_prog(const void *a, const void *b) { const Prog *x = a, *y = b; if (x->fl != y->fl) return x->fl - y->fl; int c = memcmp(x->vsig, y->vsig, 32); return c ? c : memcmp(x->psig, y->psig, 32); }
 typedef struct { uint8_t sb[32], sc[32]; Pairs w; int fl; } VCls;
 typedef struct { uint8_t sig[32]; Pairs pr; unsigned major; int fl; } PCls;
@@ -261,9 +262,12 @@ static int cmp_pairs(const Pairs *a, const Pairs *b) { if (a->n != b->n) return 
 static int cmp_vcls(const void *a, const void *b) { const VCls *x = a, *y = b; int c; if (x->fl != y->fl) return x->fl - y->fl; if ((c = memcmp(x->sb, y->sb, 32))) return c; if ((c = memcmp(x->sc, y->sc, 32))) return c; return cmp_pairs(&x->w, &y->w); }
 static int cmp_pcls(const void *a, const void *b) { const PCls *x = a, *y = b; int c; if (x->fl != y->fl) return x->fl - y->fl; if ((c = memcmp(x->sig, y->sig, 32))) return c; if (x->major != y->major) return x->major < y->major ? -1 : 1; return cmp_pairs(&x->pr, &y->pr); }
 static long rejected_pairs;   /* nx_pair_variant refused the pair (outside the link slots): the draw path cannot build it */
+static long ffp_programs;   /* the programs with a fixed-function side */
+static uint8_t ffp_sig[NX_GL4SHIM_STAGE_COUNT][32];   /* sha256 of the row's text: the signature of a fixed-function stage */
+static void ffp_sigs(void) { for (int i = 0; i < NX_GL4SHIM_STAGE_COUNT; i++) fnvnx_sha256(nx_gl4shim_stages[i].text, strlen(nx_gl4shim_stages[i].text), ffp_sig[i]); }
 static long uncovered_L;   /* programs whose link set L is not empty: the draw path translates both stages per pair (link_pairs), which this certificate does not cover */
 static Prog *programs(const SLines *S, long *np) {
-    uncovered_L = 0; rejected_pairs = 0;
+    uncovered_L = 0; rejected_pairs = 0; ffp_programs = 0; ffp_sigs();
     VCls *v = NULL; long nv = 0; PCls *p = NULL; long npc = 0;
     for (long i = 0; i < S->n; i++) {
         const SLine *a = &S->l[i]; if (!a->ok) continue; int fl = (a->flags & FNVNX_SHADER_FLAT_COLOR) ? 1 : 0;
@@ -289,9 +293,21 @@ static Prog *programs(const SLines *S, long *np) {
             pg = realloc(pg, sizeof(Prog) * (size_t)(n + 1)); memcpy(pg[n].vsig, cb ? v[a].sc : v[a].sb, 32); memcpy(pg[n].psig, p[b].sig, 32); pg[n].fl = v[a].fl; pg[n].cb = cb; n++;
         }
     }
+    /* Pairs with a fixed-function side. D3D9 pairs a null VS or PS with the gl4shim row nx_pair_ffp_row names (by D3DRS_SHADEMODE: flat); the draw path forms (FFP VS, PS) for a PS of the same
+     * shade mode, (VS, FFP PS) for a VS of it, and (FFP VS, FFP PS). A fixed-function stage has no declared pairs, so nx_pair_variant does not select among the translator variants; every
+     * signature class of that shade mode is paired (a superset of what the front end forms, so a program it forms is covered). */
+    for (int fl = 0; fl < 2; fl++) {
+        int rv = (int)nx_pair_ffp_row(NxStage_Vertex, (uint32_t)fl), rp = (int)nx_pair_ffp_row(NxStage_Fragment, (uint32_t)fl);
+#define ADD(vs_, ps_, sides) do { pg = realloc(pg, sizeof(Prog) * (size_t)(n + 1)); memcpy(pg[n].vsig, vs_, 32); memcpy(pg[n].psig, ps_, 32); pg[n].fl = fl; pg[n].cb = 0; pg[n].ffp = sides; n++; } while (0)
+        ADD(ffp_sig[rv], ffp_sig[rp], 2);
+        for (long b = 0; b < npc; b++) if (p[b].fl == fl) ADD(ffp_sig[rv], p[b].sig, 1);
+        for (long a = 0; a < nv; a++) if (v[a].fl == fl) { ADD(v[a].sb, ffp_sig[rp], 1); ADD(v[a].sc, ffp_sig[rp], 1); }
+#undef ADD
+    }
     free(v); free(p);
     qsort(pg, (size_t)n, sizeof(Prog), cmp_prog);
     long m = 0; for (long i = 0; i < n; i++) if (!m || cmp_prog(&pg[m - 1], &pg[i])) pg[m++] = pg[i];
+    for (long i = 0; i < m; i++) ffp_programs += pg[i].ffp != 0;
     *np = m; return pg;
 }
 
@@ -328,12 +344,23 @@ static unsigned held_shader(Helds *H, const uint8_t sig[32], const SLines *S, co
     }
     return 0;
 }
+static unsigned compile_given(unsigned type, const char *text, char *log, size_t logn) {
+    unsigned sh = glCreateShader(type); int ok = 0; const char *src[1] = { text };
+    glShaderSource(sh, 1, src, NULL); glCompileShader(sh); glGetShaderiv(sh, GL_COMPILE_STATUS, &ok);
+    if (!ok) { glGetShaderInfoLog(sh, (int)logn, NULL, log); glDeleteShader(sh); return 0; }
+    return sh;
+}
 static int mode_link(int argc, char **argv) {
     if (argc < 7) { fprintf(stderr, "usage: sm_link_check link SHADER_DIR SHARD N OUT.jsonl STAGE...\n"); return 2; }
     int sh = atoi(argv[3]), N = atoi(argv[4]); if (N < 1 || sh < 0 || sh >= N) { fprintf(stderr, "sm_link: bad shard\n"); return 2; }
     Forms F; int entries; SLines S; long np;
     if (gl_init() || load_forms(argv[2], &F, &entries) || read_stage_files(argc - 6, argv + 6, &S)) return 2;
     Prog *pg = programs(&S, &np); Helds H = { NULL, 0 };
+    for (int r = 0; r < NX_GL4SHIM_STAGE_COUNT; r++) {   /* the fixed-function stages: compiled as given, held under the signature of their text */
+        char lg[400] = ""; unsigned sh = compile_given(nx_gl4shim_stages[r].stage == NX_GL4SHIM_STG_VS ? GL_VERTEX_SHADER : GL_FRAGMENT_SHADER, nx_gl4shim_stages[r].text, lg, sizeof lg);
+        if (!sh) { fprintf(stderr, "sm_link: stage row %d does not compile: %s\n", r, lg); continue; }   /* no representative: its programs report red */
+        H.h = realloc(H.h, sizeof(Held) * (size_t)(H.n + 1)); memcpy(H.h[H.n].sig, ffp_sig[r], 32); H.h[H.n].shader = sh; H.n++;
+    }
     FILE *o = fopen(argv[5], "w"); if (!o) { fprintf(stderr, "sm_link: cannot write %s\n", argv[5]); return 2; }
     for (long i = sh; i < np; i += N) {
         char sa[FNVNX_SHADER_KEY_HEX], sb[FNVNX_SHADER_KEY_HEX]; hex(pg[i].vsig, 32, sa); hex(pg[i].psig, 32, sb);
@@ -344,41 +371,54 @@ static int mode_link(int argc, char **argv) {
             log[0] = 0; if (!ls) glGetProgramInfoLog(pr, (int)sizeof log, NULL, log);
             glDeleteProgram(pr);
         }
-        fprintf(o, "{\"format\": \"fnvnx-sm-link/1\", \"vs_signature_sha256\": \"%s\", \"ps_signature_sha256\": \"%s\", \"flat_color\": %d, \"vs_complete\": %d, \"status\": \"%s\", \"log\": ", sa, sb, pg[i].fl, pg[i].cb, ls ? "linked" : "link_fail");
+        fprintf(o, "{\"format\": \"fnvnx-sm-link/1\", \"vs_signature_sha256\": \"%s\", \"ps_signature_sha256\": \"%s\", \"flat_color\": %d, \"vs_complete\": %d, \"ffp_sides\": %d, \"status\": \"%s\", \"log\": ", sa, sb, pg[i].fl, pg[i].cb, pg[i].ffp, ls ? "linked" : "link_fail");
         jstr(o, log); fprintf(o, "}\n");
     }
     return fclose(o) ? 2 : 0;
 }
 
-/* ---- mode table: every row of nx_gl4shim_progs (the internal programs of the GL backend, GLSL 4.50 core compiled as given: no translator, no shim, no scanner) is compiled and linked through the same Mesa path ---- */
-static const char *const table_id[NX_GL4SHIM_PROG_COUNT] = {
-#define NX_SM_TID(id, vs, fs) #id,
-    NX_GL4SHIM_PROG_LIST(NX_SM_TID)
-#undef NX_SM_TID
+/* ---- mode table: every row of the gl4shim table (the internal programs of the GL backend, GLSL 4.50 core, compiled as given: no translator, no shim, no scanner). A pair row (vs, fs) is compiled and
+ * linked through the same Mesa path; a stage row (a fixed-function stage) is compiled with its stage; its programs are the ffp_sides lines of the link mode. ---- */
+static const char *const pair_id[NX_GL4SHIM_PAIR_COUNT] = {
+#define NX_SM_PID(id, vs, fs) #id,
+#define NX_SM_PIDS(id, st, text)
+    NX_GL4SHIM_PROG_LIST(NX_SM_PID, NX_SM_PIDS)
+#undef NX_SM_PID
+#undef NX_SM_PIDS
 };
-static unsigned compile_given(unsigned type, const char *text, char *log, size_t logn) {
-    unsigned sh = glCreateShader(type); int ok = 0; const char *src[1] = { text };
-    glShaderSource(sh, 1, src, NULL); glCompileShader(sh); glGetShaderiv(sh, GL_COMPILE_STATUS, &ok);
-    if (!ok) { glGetShaderInfoLog(sh, (int)logn, NULL, log); glDeleteShader(sh); return 0; }
-    return sh;
-}
+static const char *const stage_id[NX_GL4SHIM_STAGE_COUNT] = {
+#define NX_SM_SID(id, vs, fs)
+#define NX_SM_SIDS(id, st, text) #id,
+    NX_GL4SHIM_PROG_LIST(NX_SM_SID, NX_SM_SIDS)
+#undef NX_SM_SID
+#undef NX_SM_SIDS
+};
 static int mode_table(int argc, char **argv) {
     if (argc != 3) { fprintf(stderr, "usage: sm_link_check table OUT.jsonl\n"); return 2; }
     if (gl_init()) return 2;
     FILE *o = fopen(argv[2], "w"); if (!o) { fprintf(stderr, "sm_link: cannot write %s\n", argv[2]); return 2; }
-    for (int i = 0; i < NX_GL4SHIM_PROG_COUNT; i++) {
+    for (int i = 0; i < NX_GL4SHIM_PAIR_COUNT; i++) {
         uint8_t hv[32], hf[32]; char a[FNVNX_SHADER_KEY_HEX], b[FNVNX_SHADER_KEY_HEX], log[400] = ""; const char *st = "linked";
-        fnvnx_sha256(nx_gl4shim_progs[i].vs, strlen(nx_gl4shim_progs[i].vs), hv); fnvnx_sha256(nx_gl4shim_progs[i].fs, strlen(nx_gl4shim_progs[i].fs), hf);
+        fnvnx_sha256(nx_gl4shim_pairs[i].vs, strlen(nx_gl4shim_pairs[i].vs), hv); fnvnx_sha256(nx_gl4shim_pairs[i].fs, strlen(nx_gl4shim_pairs[i].fs), hf);
         hex(hv, 32, a); hex(hf, 32, b);
-        unsigned vs = compile_given(GL_VERTEX_SHADER, nx_gl4shim_progs[i].vs, log, sizeof log), fs = vs ? compile_given(GL_FRAGMENT_SHADER, nx_gl4shim_progs[i].fs, log, sizeof log) : 0;
+        unsigned vs = compile_given(GL_VERTEX_SHADER, nx_gl4shim_pairs[i].vs, log, sizeof log), fs = vs ? compile_given(GL_FRAGMENT_SHADER, nx_gl4shim_pairs[i].fs, log, sizeof log) : 0;
         if (!vs || !fs) st = "compile_fail";
         else {
             int ls = 0; unsigned pr = glCreateProgram(); glAttachShader(pr, vs); glAttachShader(pr, fs); glLinkProgram(pr); glGetProgramiv(pr, GL_LINK_STATUS, &ls);
             if (!ls) { st = "link_fail"; glGetProgramInfoLog(pr, (int)sizeof log, NULL, log); }
             glDeleteProgram(pr);
         }
-        if (vs) glDeleteShader(vs); if (fs) glDeleteShader(fs);
-        fprintf(o, "{\"format\": \"fnvnx-sm-table/1\", \"row\": %d, \"id\": \"%s\", \"vs_sha256\": \"%s\", \"fs_sha256\": \"%s\", \"status\": \"%s\", \"log\": ", i, table_id[i], a, b, st);
+        if (vs) glDeleteShader(vs);
+        if (fs) glDeleteShader(fs);
+        fprintf(o, "{\"format\": \"fnvnx-sm-table/1\", \"kind\": \"pair\", \"row\": %d, \"id\": \"%s\", \"vs_sha256\": \"%s\", \"fs_sha256\": \"%s\", \"status\": \"%s\", \"log\": ", i, pair_id[i], a, b, st);
+        jstr(o, log); fprintf(o, "}\n");
+    }
+    for (int i = 0; i < NX_GL4SHIM_STAGE_COUNT; i++) {
+        uint8_t h[32]; char a[FNVNX_SHADER_KEY_HEX], log[400] = ""; const char *st = "compiled";
+        fnvnx_sha256(nx_gl4shim_stages[i].text, strlen(nx_gl4shim_stages[i].text), h); hex(h, 32, a);
+        unsigned sh = compile_given(nx_gl4shim_stages[i].stage == NX_GL4SHIM_STG_VS ? GL_VERTEX_SHADER : GL_FRAGMENT_SHADER, nx_gl4shim_stages[i].text, log, sizeof log);
+        if (!sh) st = "compile_fail"; else glDeleteShader(sh);
+        fprintf(o, "{\"format\": \"fnvnx-sm-table/1\", \"kind\": \"stage\", \"row\": %d, \"id\": \"%s\", \"stage\": %u, \"text_sha256\": \"%s\", \"status\": \"%s\", \"log\": ", i, stage_id[i], nx_gl4shim_stages[i].stage, a, st);
         jstr(o, log); fprintf(o, "}\n");
     }
     return fclose(o) ? 2 : 0;
@@ -409,7 +449,7 @@ static int mode_summary(int argc, char **argv) {
               if (k >= S.n || memcmp(S.l[k].sha, F.forms[i].sha, 32) || S.l[k].flags != fs) { missing++; k--; break; } } } }
     Prog *pg = programs(&S, &np);
     /* the link set */
-    char **lf = argv + sep + 1; int nl = sep2 - sep - 1; long nlines = 0, linked = 0, lfail = 0, lbad = 0;
+    char **lf = argv + sep + 1; int nl = sep2 - sep - 1; long nlines = 0, linked = 0, lfail = 0, lbad = 0, ffp_lines = 0, ffp_linked = 0;
     for (int i = 0; i < nl; i++) {
         FILE *fp = fopen(lf[i], "r"); if (!fp) { fprintf(stderr, "sm_link: cannot read %s\n", lf[i]); return 2; }
         char *ln = NULL; size_t lc = 0;
@@ -418,40 +458,53 @@ static int mode_summary(int argc, char **argv) {
             if (!(q = jkey(ln, "vs_signature_sha256")) || unhex(q + 1, k.vsig, 32) || !(q = jkey(ln, "ps_signature_sha256")) || unhex(q + 1, k.psig, 32) || !(q = jkey(ln, "flat_color"))) { lbad++; continue; }
             k.fl = atoi(q);
             if (!bsearch(&k, pg, (size_t)np, sizeof(Prog), cmp_prog)) extra++;
-            if ((q = jkey(ln, "status")) && !strncmp(q, "\"linked\"", 8)) linked++; else lfail++;
+            int isl = (q = jkey(ln, "status")) && !strncmp(q, "\"linked\"", 8); if (isl) linked++; else lfail++;
+            if ((q = jkey(ln, "ffp_sides")) && atoi(q) > 0) { ffp_lines++; ffp_linked += isl; }
         }
         free(ln); fclose(fp);
     }
     if (nlines != np) { if (nlines < np) missing += np - nlines; else extra += nlines - np; }
-    /* the table set: exactly one certificate per row of nx_gl4shim_progs, in row order, naming the row's id and the hashes of its two texts, every one linked */
+    /* the table set: exactly one certificate per row, pair rows then stage rows in table order, each naming the row's id and the hash of its text(s); a pair row is linked, a stage row compiled */
     long trows = 0, tlinked = 0, tfail = 0, tbad = 0;
     { FILE *fp = fopen(argv[argc - 1], "r"); if (!fp) { fprintf(stderr, "sm_link: cannot read %s\n", argv[argc - 1]); return 2; }
       char *ln = NULL; size_t lc = 0;
       while (getline(&ln, &lc, fp) > 0) {
           const char *q; trows++;
-          int i = (int)trows - 1; uint8_t hv[32], hf[32], g[32]; char a[FNVNX_SHADER_KEY_HEX], b[FNVNX_SHADER_KEY_HEX];
-          if (i >= NX_GL4SHIM_PROG_COUNT) { tbad++; continue; }
-          fnvnx_sha256(nx_gl4shim_progs[i].vs, strlen(nx_gl4shim_progs[i].vs), hv); fnvnx_sha256(nx_gl4shim_progs[i].fs, strlen(nx_gl4shim_progs[i].fs), hf);
-          (void)g; hex(hv, 32, a); hex(hf, 32, b);
-          char want[160]; snprintf(want, sizeof want, "\"%s\"", table_id[i]);
-          if (!(q = jkey(ln, "id")) || strncmp(q, want, strlen(want)) || !(q = jkey(ln, "vs_sha256")) || strncmp(q + 1, a, 64) || !(q = jkey(ln, "fs_sha256")) || strncmp(q + 1, b, 64)) { tbad++; continue; }
-          if ((q = jkey(ln, "status")) && !strncmp(q, "\"linked\"", 8)) tlinked++; else tfail++;
+          int i = (int)trows - 1; uint8_t hv[32], hf[32]; char a[FNVNX_SHADER_KEY_HEX], b[FNVNX_SHADER_KEY_HEX], want[160];
+          if (i >= NX_GL4SHIM_PAIR_COUNT + NX_GL4SHIM_STAGE_COUNT) { tbad++; continue; }
+          if (i < NX_GL4SHIM_PAIR_COUNT) {
+              fnvnx_sha256(nx_gl4shim_pairs[i].vs, strlen(nx_gl4shim_pairs[i].vs), hv); fnvnx_sha256(nx_gl4shim_pairs[i].fs, strlen(nx_gl4shim_pairs[i].fs), hf); hex(hv, 32, a); hex(hf, 32, b);
+              snprintf(want, sizeof want, "\"%s\"", pair_id[i]);
+              if (!(q = jkey(ln, "kind")) || strncmp(q, "\"pair\"", 6) || !(q = jkey(ln, "id")) || strncmp(q, want, strlen(want)) || !(q = jkey(ln, "vs_sha256")) || strncmp(q + 1, a, 64) || !(q = jkey(ln, "fs_sha256")) || strncmp(q + 1, b, 64)) { tbad++; continue; }
+              if ((q = jkey(ln, "status")) && !strncmp(q, "\"linked\"", 8)) tlinked++; else tfail++;
+          } else {
+              int r = i - NX_GL4SHIM_PAIR_COUNT; fnvnx_sha256(nx_gl4shim_stages[r].text, strlen(nx_gl4shim_stages[r].text), hv); hex(hv, 32, a);
+              snprintf(want, sizeof want, "\"%s\"", stage_id[r]);
+              if (!(q = jkey(ln, "kind")) || strncmp(q, "\"stage\"", 7) || !(q = jkey(ln, "id")) || strncmp(q, want, strlen(want)) || !(q = jkey(ln, "text_sha256")) || strncmp(q + 1, a, 64)
+                  || !(q = jkey(ln, "stage")) || (unsigned)atoi(q) != nx_gl4shim_stages[r].stage) { tbad++; continue; }
+              if ((q = jkey(ln, "status")) && !strncmp(q, "\"compiled\"", 10)) tlinked++; else tfail++;
+          }
       }
       free(ln); fclose(fp); }
-    if (trows != NX_GL4SHIM_PROG_COUNT) tbad += trows < NX_GL4SHIM_PROG_COUNT ? NX_GL4SHIM_PROG_COUNT - trows : trows - NX_GL4SHIM_PROG_COUNT;
-    /* the universe hash: every bytecode hash in sorted order, then each table row (id, vs text, fs text): a change of any member or of the table changes it */
-    uint8_t uh[32]; { size_t tot = (size_t)F.n * 32; for (int i = 0; i < NX_GL4SHIM_PROG_COUNT; i++) tot += strlen(table_id[i]) + strlen(nx_gl4shim_progs[i].vs) + strlen(nx_gl4shim_progs[i].fs) + 3;
+    const long TROWS = NX_GL4SHIM_PAIR_COUNT + NX_GL4SHIM_STAGE_COUNT;
+    if (trows != TROWS) tbad += trows < TROWS ? TROWS - trows : trows - TROWS;
+    /* the universe hash: every bytecode hash in sorted order, then each table row (id, texts, stage): a change of any member or of the table changes it */
+    uint8_t uh[32]; { size_t tot = (size_t)F.n * 32;
+        for (int i = 0; i < NX_GL4SHIM_PAIR_COUNT; i++) tot += strlen(pair_id[i]) + strlen(nx_gl4shim_pairs[i].vs) + strlen(nx_gl4shim_pairs[i].fs) + 3;
+        for (int i = 0; i < NX_GL4SHIM_STAGE_COUNT; i++) tot += strlen(stage_id[i]) + 12 + strlen(nx_gl4shim_stages[i].text) + 3;
         unsigned char *ub = malloc(tot), *w = ub; if (!ub) return 2;
         for (int i = 0; i < F.n; i++) { memcpy(w, F.forms[i].sha, 32); w += 32; }
-        for (int i = 0; i < NX_GL4SHIM_PROG_COUNT; i++) { const char *p[3] = { table_id[i], nx_gl4shim_progs[i].vs, nx_gl4shim_progs[i].fs }; for (int k = 0; k < 3; k++) { size_t l = strlen(p[k]) + 1; memcpy(w, p[k], l); w += l; } }
+        for (int i = 0; i < NX_GL4SHIM_PAIR_COUNT; i++) { const char *p[3] = { pair_id[i], nx_gl4shim_pairs[i].vs, nx_gl4shim_pairs[i].fs }; for (int k = 0; k < 3; k++) { size_t l = strlen(p[k]) + 1; memcpy(w, p[k], l); w += l; } }
+        for (int i = 0; i < NX_GL4SHIM_STAGE_COUNT; i++) { char sn[16]; snprintf(sn, sizeof sn, "%u", nx_gl4shim_stages[i].stage);
+            const char *p[3] = { stage_id[i], sn, nx_gl4shim_stages[i].text }; for (int k = 0; k < 3; k++) { size_t l = strlen(p[k]) + 1; memcpy(w, p[k], l); w += l; } }
         fnvnx_sha256(ub, tot, uh); free(ub); }
     char uhx[FNVNX_SHADER_KEY_HEX]; hex(uh, 32, uhx);
     red = refused + bad_stage + disagree + lfail + lbad + missing + extra + rejected_pairs + tfail + tbad;
     FILE *s = fopen(argv[3], "w"); if (!s) return 2;
     fprintf(s, "{\"format\": \"fnvnx-sm-link-summary/1\", \"universe\": %d, \"red\": %ld, \"details\": {\"entries\": %d, \"unique_bytecodes\": %d, \"vs\": %ld, \"ps\": %ld, \"flag_sets\": %d, \"refused\": %ld, "
                "\"stage_certificates\": %ld, \"stage_not_ok\": %ld, \"signature_disagreements\": %ld, \"programs\": %ld, \"link_certificates\": %ld, \"linked\": %ld, \"link_fail\": %ld, "
-               "\"bad_link_lines\": %ld, \"missing_certificates\": %ld, \"unexpected_certificates\": %ld, \"link_set_programs_uncovered\": %ld, \"pairs_rejected\": %ld, \"table_rows\": %ld, \"table_linked\": %ld, \"table_fail\": %ld, \"table_bad\": %ld, \"universe_sha256\": \"%s\"}}\n",
-            F.n + NX_GL4SHIM_PROG_COUNT, red, entries, F.n, nvs, nps, nfs, refused, S.n, bad_stage, disagree, np, nlines, linked, lfail, lbad, missing, extra, uncovered_L, rejected_pairs, trows, tlinked, tfail, tbad, uhx);
+               "\"bad_link_lines\": %ld, \"missing_certificates\": %ld, \"unexpected_certificates\": %ld, \"link_set_programs_uncovered\": %ld, \"pairs_rejected\": %ld, \"table_rows\": %ld, \"table_linked\": %ld, \"table_fail\": %ld, \"table_bad\": %ld, \"ffp_programs\": %ld, \"ffp_certificates\": %ld, \"ffp_linked\": %ld, \"universe_sha256\": \"%s\"}}\n",
+            F.n + (int)TROWS, red, entries, F.n, nvs, nps, nfs, refused, S.n, bad_stage, disagree, np, nlines, linked, lfail, lbad, missing, extra, uncovered_L, rejected_pairs, trows, tlinked, tfail, tbad, ffp_programs, ffp_lines, ffp_linked, uhx);
     return fclose(s) ? 2 : 0;
 }
 
