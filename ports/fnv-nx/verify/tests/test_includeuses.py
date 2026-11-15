@@ -35,6 +35,15 @@ with tempfile.TemporaryDirectory() as repo:
     os.makedirs(os.path.join(repo, "ports/fnv-nx/p", "gen")); open(os.path.join(repo, "ports/fnv-nx/p", "gen", "tracked.h"), "w").close()
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
     check("a tracked file inside the directory output is red", len(ie({"uses": [U], "include_uses": [U]})) == 1, True)
+# the include carry: a generated directory of P's include is not carried to a consumer (no tracked file: nothing to mount)
+with tempfile.TemporaryDirectory() as repo:
+    P, C = "ports/fnv-nx/p", "ports/fnv-nx/c"
+    os.makedirs(os.path.join(repo, P)); os.makedirs(os.path.join(repo, C))
+    json.dump({"include": [P + "/inc", P + "/gen/inc"]}, open(os.path.join(repo, P, "build.json"), "w"))
+    roots = {P: {"recipe": P + "/build.json", "class": "product", "target": "guest"}, C: {"class": "product", "target": "guest"}}
+    files = [P + "/inc/a.h", P + "/x.c"]
+    check("closure carries P's directory with tracked files and drops its generated directory", recipe.include_closure([P + "/inc"], C, roots, repo, "guest", files=files), [P + "/inc", ])
+    check("the consumer's own entries stay", recipe.include_closure([P + "/inc", C + "/g"], C, roots, repo, "guest", files=files + [C + "/g/z.h"]), [P + "/inc", C + "/g"])
 if fails:
     print("\n".join("FAIL " + f for f in fails)); sys.exit(1)
 print("includeuses: ok")

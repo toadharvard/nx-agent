@@ -303,7 +303,7 @@ quantify over the pairs: build, determinism, objstub, linkstrict, argorder, cont
 ## Include
 `include` is the unit's include path in order. A repo directory of it that lies in another admitted product root P (with a recipe for the unit's target) also brings
 P's own repo directories of `include`, transitively, after the consumer's own and each once (`recipe.include_closure`): a header that P ships names its dependencies once,
-in the recipe of P, and every consumer finds them. The entries of P's `include` that lie in an external are P's toolchain and are not carried. A header root
+in the recipe of P, and every consumer finds them. The entries of P's `include` that lie in an external are P's toolchain and are not carried. A directory of P's `include` that holds no tracked file is a generated tree of P and is not carried either (it does not exist in a consumer's tree): its headers reach a consumer through `include_uses`. A header root
 (class header) has no recipe and carries nothing; a header it includes from another root is named by the consumer.
 
 **A path into another root.** An `include` entry inside a generated tree of another root (a directory a generate stage of that root writes into that holds no tracked file, `recipe.generated_trees`, for example `platform/freetype/gen/include`) is a check error: a generated file of a root is its declared output, and a consumer takes it through `uses`. The root's own generated tree is not affected.
