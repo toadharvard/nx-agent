@@ -107,7 +107,7 @@ echo "$NOSIZED_PATCH_SHA256  $PATCH_DIR/libstdcxx-nosized.patch" | sha256sum -c 
 echo "$NLGUEST_PATCH_SHA256  $PATCH_DIR/newlib-guest.patch" | sha256sum -c --quiet
 
 MSVC_PATCH=${MSVC_PATCH:-$HERE/msvcmodel.patch}
-STAMP=$(sha256sum "$MSVC_PATCH" "$HERE/build.sh" "$PATCH_DIR/x19-x27.patch" "$PATCH_DIR/libstdcxx-nosized.patch" "$PATCH_DIR/newlib-guest.patch" | sha256sum | cut -c1-16)
+STAMP=$(python3 -I "$HERE/stamp.py" --patch "$MSVC_PATCH" --build "$HERE/build.sh" --patch-dir "$PATCH_DIR")   # the one key computation (stamp.py); verify/recipe.py compares it with the compiler tree's MANIFEST.json
 if [ -f "$W/stamp-key" ] && [ "$(cat "$W/stamp-key")" != "$STAMP" ]; then rm -rf "$W"/stamp-* "$SRC" "$NL" "$W"/b-*; fi
 echo "$STAMP" > "$W/stamp-key"
 : > "$CONF"
