@@ -898,7 +898,7 @@ Address-space plan of the emulator boot stage for the guest ELF (elf32-littleaar
 
 Pure and stdlib-only: no unicorn, clock, environment or randomness; every iteration runs over sorted/ordered data.
 The guest loader later maps the original Windows exe image (0x00400000..) and the module images through a host call, so
-the stage must keep those ranges free. Library: parse_elf, normalize_reserved, plan, reloc_census, file_bytes. A condition that cannot be met raises
+the stage must keep those ranges free. Library: parse_elf, normalize_reserved, plan, file_bytes. A condition that cannot be met raises
 LayoutError; there is no alternative placement and no default.
 
 Rules (each with its argument):
@@ -917,12 +917,7 @@ Rules (each with its argument):
    (4 KiB) at 0x3F000000, heap at 0x40000000, end <= 2^32. Fixed regions are not moved: a clash is an error. Totality:
    `checks` lists every unordered pair of {regions + reserved} exactly once, each verified disjoint here, so the
    plan's disjointness is auditable without re-deriving it. `free` repeats the (aligned) reserved ranges.
-4. reloc_census: the guest relocates itself at run time, so the stage applies no relocation; it only proves that the
-   image is self-contained. Counts of dynamic relocations per type from DT_RELA/DT_RELASZ (Elf32_Rela), DT_REL and
-   DT_JMPREL (decoded per DT_PLTREL) and the DT_RELR entry count (DT_RELRSZ / DT_RELRENT, default 4). Allowed: type
-   R_AARCH64_P32_RELATIVE = 183 in DT_RELA (AAELF64 ILP32 relocations, binutils include/elf/aarch64.h, glibc elf.h)
-   and any DT_RELR; anything else (other types, non-empty DT_REL / DT_JMPREL) is an error listing the counts.
-   crt0 header (parse_elf): at +8 of the first executable PT_LOAD: magic 0x47584E46, u32 abi, u32 link_base (+16) ==
+4. crt0 header (parse_elf; the guest relocates itself at run time, so the stage applies no relocation and reads no relocation table): at +8 of the first executable PT_LOAD: magic 0x47584E46, u32 abi, u32 link_base (+16) ==
    lowest PT_LOAD vaddr aligned down, u32 size (+20) == page-aligned span, u32 flags (+24) with bit0 (relocatable).
    Regions and reserved ranges all lie at or above 0x10000 (the guest's low pages stay unmapped).
 5. entry: plan() takes the image entry from its caller (`entry=`: header.entry of the link record, bootfacts.entry; the ELF header is not read for

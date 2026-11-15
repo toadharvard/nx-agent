@@ -107,18 +107,6 @@ def main():
 
     ok, msg = raises(lambda: bootlayout.normalize_reserved([("low", 0x8000, 0x20000)]), "low", "0x10000")
     case("reserved below 0x10000", ok, msg)
-    c = bootlayout.reloc_census(good)
-    case("census: 183 only", c == {"rela": {"183": 1}, "rel": {}, "jmprel": {}, "relr": 0}, c)
-    c = bootlayout.reloc_census(make_elf(relr=5, relocs=()))
-    case("census: RELR ok", c["relr"] == 5 and c["rela"] == {}, c)
-    ok, msg = raises(lambda: bootlayout.reloc_census(make_elf(relocs=((0x12200, 183, 0), (0x12204, 181, 0),
-                                                                      (0x12208, 181, 0)))), "181", "2")
-    case("census: foreign type", ok, msg)
-    ok, msg = raises(lambda: bootlayout.reloc_census(make_elf(jmprel=1)), "jmprel")
-    case("census: non-empty JMPREL", ok, msg)
-    ok, msg = raises(lambda: bootlayout.reloc_census(make_elf(rel=1)), "rel")
-    case("census: non-empty REL", ok, msg)
-
     case("plan: image.entry is base + entry", p["image"]["entry"] == p["image"]["base"] + ENTRY, p["image"])
     for what, ent in (("past the span", 0x14000), ("below it", -1)):
         ok, msg = raises(lambda ent=ent: bootlayout.plan(e, rsv, 16 * MB, entry=ent), "entry", "span")

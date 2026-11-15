@@ -3,7 +3,7 @@
 
 Pure and stdlib-only: no unicorn, clock, environment or randomness; every iteration runs over sorted/ordered data.
 The guest loader later maps the original Windows exe image (0x00400000..) and the module images through a host call, so
-the stage must keep those ranges free. Library: parse_elf, normalize_reserved, plan, reloc_census, file_bytes. A condition that cannot be met raises
+the stage must keep those ranges free. Library: parse_elf, normalize_reserved, plan, file_bytes. A condition that cannot be met raises
 LayoutError; there is no alternative placement and no default.
 
 Rules (each with its argument):
@@ -22,12 +22,7 @@ Rules (each with its argument):
    (4 KiB) at 0x3F000000, heap at 0x40000000, end <= 2^32. Fixed regions are not moved: a clash is an error. Totality:
    `checks` lists every unordered pair of {regions + reserved} exactly once, each verified disjoint here, so the
    plan's disjointness is auditable without re-deriving it. `free` repeats the (aligned) reserved ranges.
-4. reloc_census: the guest relocates itself at run time, so the stage applies no relocation; it only proves that the
-   image is self-contained. Counts of dynamic relocations per type from DT_RELA/DT_RELASZ (Elf32_Rela), DT_REL and
-   DT_JMPREL (decoded per DT_PLTREL) and the DT_RELR entry count (DT_RELRSZ / DT_RELRENT, default 4). Allowed: type
-   R_AARCH64_P32_RELATIVE = 183 in DT_RELA (AAELF64 ILP32 relocations, binutils include/elf/aarch64.h, glibc elf.h)
-   and any DT_RELR; anything else (other types, non-empty DT_REL / DT_JMPREL) is an error listing the counts.
-   crt0 header (parse_elf): at +8 of the first executable PT_LOAD: magic 0x47584E46, u32 abi, u32 link_base (+16) ==
+4. crt0 header (parse_elf; the guest relocates itself at run time, so the stage applies no relocation and reads no relocation table): at +8 of the first executable PT_LOAD: magic 0x47584E46, u32 abi, u32 link_base (+16) ==
    lowest PT_LOAD vaddr aligned down, u32 size (+20) == page-aligned span, u32 flags (+24) with bit0 (relocatable).
    Regions and reserved ranges all lie at or above 0x10000 (the guest's low pages stay unmapped).
 5. entry: plan() takes the image entry from its caller (`entry=`: header.entry of the link record, bootfacts.entry; the ELF header is not read for
@@ -40,7 +35,6 @@ PAGE = 0x1000
 ALIGN = 0x10000
 EM_AARCH64, ET_DYN, PT_LOAD, PT_DYNAMIC, PT_TLS = 183, 3, 1, 2, 7
 DF_1_PIE, DT_FLAGS_1 = 0x08000000, 0x6ffffffb
-R_P32_RELATIVE = 183
 MIN_ADDR, CRT0_MAGIC = 0x10000, 0x47584E46
 IMAGE_MIN, STACK_END, HOST_PAGE, HEAP_BASE, TOP = 0x05000000, 0x3E000000, 0x3F000000, 0x40000000, 1 << 32
 REGION_NAMES = ("image", "stacks", "host_page", "heap")
@@ -198,43 +192,6 @@ def plan(elf, reserved, heap_size, *, entry, n_stacks=32, stack_size=0x40000):
     return {"format": FORMAT, "image": {"base": base, "lo": lo, "hi": hi, "entry": base + entry},
             "regions": {n: {"lo": a, "hi": b} for n, (a, b) in regions.items()},
             "free": [{"name": n, "lo": a, "hi": b} for n, a, b in res], "checks": checks}
-
-
-def _count_table(data, loads, addr, size, ent, what):
-    off = _file_off(loads, addr, size, what)
-    counts = {}
-    for i in range(size // ent):
-        info = _unpack("<II", data, off + ent * i, what)[1]
-        counts[info & 0xFF] = counts.get(info & 0xFF, 0) + 1
-    return {str(t): c for t, c in sorted(counts.items())}
-
-
-def reloc_census(data):
-    elf = parse_elf(data)
-    tags = _dynamic(data, elf)
-    loads, cen = elf["loads"], {"rela": {}, "rel": {}, "jmprel": {}, "relr": 0}
-    size = tags.get(8, 0)
-    if tags.get(9, 12) != 12 or size % 12:
-        raise LayoutError("DT_RELAENT=%d DT_RELASZ=%d: need entries of 12 bytes" % (tags.get(9, 12), size))
-    if size:
-        cen["rela"] = _count_table(data, loads, tags[7], size, 12, "DT_RELA")
-    if tags.get(18, 0):
-        cen["rel"] = _count_table(data, loads, tags[17], tags[18] // 8 * 8, 8, "DT_REL")
-    if tags.get(2, 0):
-        if tags.get(20) not in (17, 23):
-            raise LayoutError("DT_JMPREL non-empty but DT_PLTREL=%s, need 17 or 23" % tags.get(20))
-        ent = 12 if tags[20] == 17 else 8
-        cen["jmprel"] = _count_table(data, loads, tags[23], tags[2] // ent * ent, ent, "DT_JMPREL")
-    if tags.get(35, 0):
-        if tags.get(37, 4) != 4:
-            raise LayoutError("DT_RELRENT=%d, need 4" % tags.get(37, 4))
-        cen["relr"] = tags[35] // 4
-    bad = [(k, t, c) for k in ("rela", "rel", "jmprel") for t, c in cen[k].items()
-           if not (k == "rela" and t == str(R_P32_RELATIVE))]
-    if bad:
-        raise LayoutError("relocations the stage does not accept (table type: count): " +
-                          ", ".join("%s %s: %d" % b for b in bad))
-    return cen
 
 
 def read_tsv(path):
