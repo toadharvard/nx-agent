@@ -52,7 +52,7 @@ EXT_KEYS = {"name", "repo", "ref", "commit", "tree_sha256", "at"}      # = recip
 KEYS = {"format", "external", "shapes", "certs", "instrs"}
 IR_EXT = "x86ir"      # the external that pins x86_proof.ir: the one place the model is pinned; its sha256 is derived from the file
 REFERENCES = ("sail", "fpsmt", "k", "sdm", "table")
-FAMILIES = ("int", "x87", "simd", "sys")
+FAMILIES = shape.FAMILIES
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 
 
