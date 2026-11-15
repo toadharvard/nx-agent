@@ -248,7 +248,8 @@ def decltype_errors(td, so):
 PAIR = ('struct S { int x; char *y; };\nstruct S v;\nstruct L;\nextern struct L *il;\nint a[4];\nint f(int i, char *s) { return i + s[0]; }\n'
         'int g(int i, ...);\nint h(void);\nconst int *pc;\nstruct Lst { struct Lst *next; } l;\nenum E { E0, E1 } e;\n'
         'int (*fp)(int (*cb)(void), const char *const name);\nvolatile unsigned long long vv;\n'
-        'int use(void) { return f(1, 0) + g(1, 2) + h() + (il != 0); }\n')
+        'struct W { struct { int a; char b; } in; union { int i; float f; }; int z; };\ntypedef struct { int t; } TD;\nint anf(struct W *w, TD *t);\nenum { AN0 } anv;\n'
+        'int use(void) { return f(1, 0) + g(1, 2) + h() + (il != 0) + anf(0, 0); }\n')
 CXX_ONLY = ('struct P { int a; };\nstruct Q : P { int b; };\nstruct V { virtual void f(); int c; };\nnamespace ns { struct N { int n; }; }\n'
             'enum class EC : short { A };\nstruct Top { struct In { int i; }; };\n'
             'extern "C" {\nint r1(P &p, const Q &q);\nint r2(V *v, ns::N n, EC e, Top::In *t);\nint r3(decltype(nullptr) n);\nextern Q gq;\nQ gq2 = {};\n'
@@ -272,7 +273,7 @@ def decltype_cxx(td, so):
             return
         rows[o] = dict(l.split('\t') for l in pb.section(os.path.join(td, o), '.fnvnx.decltype').splitlines())
     check('extern "C" declarations and definitions of a C++ unit give the same rows as the same text in a C unit (%d symbols)' % len(rows['pair_c.o']),
-          rows['pair_c.o'] == rows['pair_cxx.o'] and len(rows['pair_c.o']) >= 12, (sorted(set(rows['pair_c.o'].items()) ^ set(rows['pair_cxx.o'].items()))))
+          rows['pair_c.o'] == rows['pair_cxx.o'] and len(rows['pair_c.o']) >= 14 and '-' in rows['pair_c.o']['anf'] and '._anon' not in rows['pair_cxx.o']['anf'], (sorted(set(rows['pair_c.o'].items()) ^ set(rows['pair_cxx.o'].items()))))
     src = os.path.join(td, 'cxxonly.cpp')
     open(src, 'w').write(CXX_ONLY)
     r = pb.compile(src, os.path.join(td, 'cxxonly.o'), so)
@@ -284,7 +285,8 @@ def decltype_cxx(td, so):
         check('a C++ unit: exactly its C-linkage symbols (cxxfn, cxxuse have C++ linkage: no row)', set(got) == set(CXX_ONLY_ROWS), sorted(set(got) ^ set(CXX_ONLY_ROWS)))
         check('every C++ row parses with ctypes_compat', all(cc.parse(t) for t in got.values()))
     for name, text, why in (('ptrmem', 'struct M { int m; };\nextern "C" int pm(int M::*p);\nextern "C" int use(void) { return pm(0); }\n', 'offset_type'),
-                            ('tspec', 'template <class T> struct TT { T t; };\nextern "C" int ts(TT<int> *p);\nextern "C" int use(void) { TT<int> x; return ts(&x); }\n', 'no tag form'),
+                            ('tspec', 'template <class T> struct TT { T t; };\nextern "C" int ts(TT<int> *p);\nextern "C" int use(void) { TT<int> x; return ts(&x); }\n', 'class template specialization has no tag form'),
+                            ('lambda', 'extern "C" int lm(decltype([] {}) *p);\nextern "C" int use(void) { return lm(0); }\n', 'lambda closure type has no tag form'),
                             ('anonns', 'namespace { struct An { int i; }; }\nextern "C" int an(An *p);\nextern "C" int use(void) { An x; return an(&x); }\n', 'scope name outside the grammar')):
         src = os.path.join(td, name + '.cpp')
         open(src, 'w').write(text)
