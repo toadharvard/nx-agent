@@ -1288,3 +1288,7 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - a PT_INTERP test.
 - Revised ruling: the driver derivation is the one rule for guest and host, and L5 w14's runtime.libs is not a startfile declaration (at most an expected-value test). L4 relinks bootguest on 91850075d.
 - w24 b30f7b460 accepted (externals race: recipe.publish_dir, atomic publish of a verified temporary sibling; the loser discards its copy; tests/test_extcache_race.py fails on the old code). It lands with 559f220db after cand1. L5 agreed that w14 drops runtime.libs and guest_errors compares with the derived profile.
+- cand1 = 2b66742ec (origin/claude/fnv-l1-contract-cand1). w15 is running its verdict.
+  - Known reds: loader, lib/sha256 and rt/guest fail plugin inputs, because recipe.py:738 requires roots to restate PLUGIN_INPUTS.
+  - Class rule: recipe.py is the only declaration of a plugin's source, inputs and fixed args, and roots name the plugin only. That is w24, on claude/fnv-l1-contract-w24-pluginfix.
+- cand2 will hold w24 pluginfix + 559f220db/b30f7b460, and w12 d6df0254/91850075d.
