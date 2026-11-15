@@ -1382,3 +1382,11 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - admit gate set derived from class (w24, item 3);
   - GL/EGL headers come from pinned debs (w6 15c11ecd8);
   - a `host_gl` record in targets.json (w22, value from L6).
+- L1 construction register: w22 5a98a9e20, journal/status/l1-construction.md, 254 rows (A hand sets 84, B copies 78, C+D second paths 92).
+  - Deletions now (w22): graph.py, loader/tools/fnvnx_pe.py + fnvnx_formats.py (dead), iat_check.py (stand-ins), toolflags msvc/wine kinds, oraclecheck's own strace, stackuse.py if unread.
+  - Path conversions:
+    - objstub g++ and private cache: w20;
+    - gate_tests and guest_flags caches: w24;
+    - bootgpu shim gcc, farm unpinned apt, icount Unicorn: L4;
+    - lift/descs stock gcc: L3a.
+  - Copies: profile (w12), targets.json (w22), admit by class (w24).
