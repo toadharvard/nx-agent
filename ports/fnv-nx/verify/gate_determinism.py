@@ -111,9 +111,11 @@ def main():
             key = {"gate": "determinism", "root": root, "stage_keys": sorted(warm["stage_keys"]), "pp_keys": sorted(warm.get("pp_keys", {}).items()), "du_keys": sorted(warm.get("du_keys", {}).items()),
                    "objects": [[o["unit"], o["sha256"]] for o in warm["objects"]], "elf": warm["elf"] and warm["elf"]["sha256"],
                    "tools": gate_build.tool_digest(__file__, recipe, sandbox, unitstage, runtime, cas), "env": gate_build.file_sha(os.path.join(HERE, "env.json"))}
-            r, _ = gate_build.memo(cache, "determinism", key, lambda: judge_root(repo, root, rec, roots, files, ext, cache, warm), keep=lambda v: not v["why"])
+            r, hit = gate_build.memo(cache, "determinism", key, lambda: judge_root(repo, root, rec, roots, files, ext, cache, warm), keep=lambda v: not v["why"])
         else:
             r = judge_root(repo, root, rec, roots, files, ext, cache, warm)
+        if warm is not None and warm["status"] == "green" and hit:
+            r = dict(r, ran=[])   # a memo hit executes nothing
         items += r["items"]
         good += r["good"]
         why += r["why"]
