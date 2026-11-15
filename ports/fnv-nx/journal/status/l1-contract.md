@@ -1856,3 +1856,5 @@ bottleneck: the cand2 verdict on w15.
 bottleneck: the merged cand3 (w12) for the relift base, and the cand2 verdict (w15).
 - 22:01 w12 5fb4374ee (cand4): the compiler as a stage output (FNVNX_COMPILER_KEY in PP/CC; stamp_errors, RECIPE_TREE and test_stamp deleted; test_compilerstage 8/8); tool steps with debs/scratch/unkeyed/plugin inputs (test_toolstep 8/8). Open: guest_compiler.json switches when L2 w3's toolchain roots land; the envcheck tree hash and the env.json deb pins need w15's host. w12 is on the urgent cand3 rebuild.
 bottleneck: the merged cand3 (w12), and the cand2 verdict (w15).
+- 22:05 cand3 rebuilt: claude/fnv-l1-contract-cand3 41a8855d4 = the w12L2 line (8 commits plus PP keying) + shards 16/cpu_s/timing/export + generator dirs (one form, consumed as outputs NAME:dir) + sandbox. sandbox and cas equal c0f504e2a; toolchain equals cand2; static 20/20; genchain, shard, ppkeys and sandbox tests pass. Orchestrator, L3a, L4 and w15 have it. w12 next: assemble cand4.
+bottleneck: the cand2 verdict on w15, then cand3.
