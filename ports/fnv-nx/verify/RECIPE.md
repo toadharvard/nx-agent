@@ -27,6 +27,7 @@ the hash of the stage document + tool code. All paths are root-relative unless m
 - `units`: must be `"all"`. A `.S` unit is preprocessed as its own stage like a C unit (its key covers exactly the headers it includes);
   a `.s` unit sees nothing but its own file (`.include` fails: use `.S` and `#include`). RULE: every tracked `*.c *.cc *.cpp *.cxx *.s *.S` under the root, and every generated output with such a name, is
   compiled. A file that must not be compiled does not belong in the root; there is no `exclude`.
+- `run`: see "Run stages" below.
 - `generated`: python generators run as sandbox stages before compilation, in list order. `tool` is a tracked `.py` of an admitted tool or product
   root (the whole root is mounted at `/tool`, the script at `/tool/<path in its root>`), `inputs` are tracked files or directories (repo-relative;
   mounted at `/in/<repo path>`; they may not nest), the generator writes ONLY `/out/<output>` (the set of produced files must equal `outputs`).
@@ -64,11 +65,14 @@ the hash of the stage document + tool code. All paths are root-relative unless m
 `fnvnx_ftoi` is one plugin, class C (float -> integer), two modes chosen by the root's `cxx_origin` and never declared freely: `recipe.plugin_args(cxx_origin)` gives `mode=native`
 (the MSVC `_ftol` rewrite, skipped inside functions with `__attribute__((fnvnx_f2i))`, which the plugin registers), `mode=lifted` for a lifted origin (no rewrite; a
 conversion, conversion builtin or float-reading asm outside an `fnvnx_f2i` function is an error). The recipe adds `-fplugin-arg-fnvnx_ftoi-out=/out/unit.f2i.json` to every
-CC stage (`PLUGIN_OUT`); the report (`fnvnx-f2i/1`: sites, helpers, findings) is kept next to the object and listed in `objects.json` as `f2i` of the unit.
+CC stage (`PLUGIN_OUT`); the report (`fnvnx-f2i/2`: sites, rewritten, ranged, helper, helpers, findings; gate fpexact) is kept next to the object and listed in `objects.json` as `f2i` of the unit.
 Rule: a root that uses an attribute declares the plugin that registers it (guest roots compile with `-Werror=attributes`).
 Our compiler is the pinned g++-13 with our two plugins. Their sources are tracked under the tool root `ports/fnv-nx/toolchain` (no build script:
-the recipe is the only way they are built). Each entry of `plugins` is `{"name", "source", "args"}`: `source` is `<dir>/<name>.cc`, a tracked file of an
-admitted tool root; `args` becomes `-fplugin-arg-<name>-<key>[=<value>]`. The host driver under `/usr/bin` that builds
+the recipe is the only way they are built). `recipe.py` is the ONLY declaration of what it fixes for a plugin: its source (`PLUGIN_SOURCES`, `<dir>/<name>.cc`, a tracked file of the tool root), its inputs
+(`PLUGIN_INPUTS`: the tracked files the source includes) and its arguments (`plugin_args(cxx_origin)`, which become `-fplugin-arg-<name>-<key>[=<value>]`). An entry of a
+root's `plugins` is `{"name": PLUGIN}` and nothing else, in the order of `PLUGIN_SOURCES`; the stage keys and mounts take source, inputs and arguments from recipe.py
+(`recipe.plugin_decls`). An entry that carries `source`, `inputs` or `args` is an error ("plugin X: inputs are fixed by recipe.py (PLUGIN_INPUTS)"), never compared; a name outside
+`PLUGIN_SOURCES` is an error. So a change of an input of a plugin (for example `f2i_builtins.inc` of `fnvnx_ftoi`) changes the key of every root that loads it and no build.json needs editing. The host driver under `/usr/bin` that builds
 them is `recipe.PLUGIN_CXX`, DERIVED from env.json (the one pinned package `g++-N-x86-64-linux-gnu` provides `x86_64-linux-gnu-g++-N`; the bare `g++-N` prints no path for `as`/`ld`), the GCC version of `compiler.cxx`. A `plugin_cxx` in a build.json is red: no hand-typed compiler name.
 - Stage `plugin:<name>` (sandbox, class build): `recipe.PLUGIN_CXX -shared -nostdlib -fPIC -fno-rtti -fno-exceptions -O2 -I<compiler.cxx -print-file-name=plugin>/include
   crti.o crtbeginS.o SOURCE crtendS.o crtn.o`. Declared inputs: the driver's tool runtime, the plugin headers of the target compiler
@@ -190,8 +194,32 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   recipe is a whole recipe with no variants of its own; its name may not also be a variant of the base recipe. Header home: an include into a
   product root is accepted for the including root's target only if that root has a recipe for it (its own, or a per-target one).
 
+## Run stages (`run`)
+
+`"run": [{"name", "artifact", "args", "inputs", "debs", "outputs"}]` executes a declared artifact in the sandbox, after the generators.
+- `artifact` is `ROOT:OUTPUT`: the linked `link.output` of another admitted **host** product root (it is built first, by this same recipe machinery).
+- The stage sees only: the artifact at `/art/OUTPUT`; the declared `inputs` (a repo-relative tracked file or directory of an admitted root, git ls-files only, like a generator input; or `{external, path}` /
+  `{stage, path}`, read by resolve_input) at `/in/1`, `/in/2`, ... in list order; the installed files of each declared deb at `/deb/<name>/<absolute path>`; its `/out`.
+  The root is read-only, `/tmp` and `/work` are not writable. `debs` are names of `env.json` `debs.packages`; an undeclared name is red (check).
+- An artifact with a PT_INTERP is started through the file at that path inside a declared deb (`/deb/<name>/<PT_INTERP>`, the deb's own symlinks
+  followed; no alias such as the usr-merge links is assumed: a PT_INTERP reachable only through one is red until a pinned deb ships them), with `--library-path` over the declared debs'
+  `lib/x86_64-linux-gnu` and `usr/lib/x86_64-linux-gnu`. A PT_INTERP that no declared deb provides is red; no loader path is hard-coded.
+- `"host_cpu": "cpuref"` (optional): the pin `verify/cpuref.json` {vendor_id, family, model, stepping, microcode, model_name} (the /proc/cpuinfo fields,
+  ints as numbers; a null value means the field is ABSENT from /proc/cpuinfo (a VM has no microcode line), never a wildcard) is in the stage key. Before a stage that is not a cache hit runs, every processor of /proc/cpuinfo must equal the pin, else the stage
+  is red (no fallback); a cache hit is served on any host.
+- The key covers the artifact content, the input contents, the deb sha256s (`env.json`, in the stage environment) and the argv.
+- `outputs` are root-relative declared paths, stored in the store and copied into the root like generated outputs (they may be units, headers,
+  constants ...). A nonzero exit, an undeclared output and a missing declared output are red, naming `run:<root>:<name>`.
+- A `run` stage is not a compile: toolflags does not judge it (its argv[0] is the artifact, never a compiler).
+
+### Stage refs
+
+`resolve_input` takes a third ref form `{"stage": "ROOT:gen:I" | "ROOT:run:NAME", "path": P}`: the declared output P of generator I (index in
+`generated`) or of run stage NAME of an admitted root. The stage runs (cached by its key), the output is written to `CACHE/stageout/<sha256>/P`
+and the ident is `stage:ROOT:NAME:P:sha256`. An undeclared output, an unknown root or stage and a red stage are `ValueError`.
+
 ## Variants
-`variants: {NAME: {"compiler": .., "flags": {..}}}`: one root built for several targets. A variant replaces only the keys it names (`compiler`, `flags`), the rest is
+`variants: {NAME: {"compiler": .., "flags": {..}, "link": {..}}}`: one root built for several targets or with sanitizers. A variant replaces only the keys it names (`compiler`, `flags`, `link`; `link` whole, e.g. a sanitizer variant's own `link.libs.system` [libubsan.so.1 of the pinned libubsan1]), the rest is
 the root's; its effective recipe is checked by every rule of `check()`. A (root, variant) pair is spelled `root@NAME` (`recipe.split_spec`; the implicit
 variant is `root`). It is its own set of content-keyed stages: the variant name is in every stage key (env `FNVNX_VARIANT`, absent for the implicit variant, so
 a root without variants keeps its keys), its objects are stored at `GATE_CACHE/objects/<tree>/<root>@<NAME>/objects.json` and its `objects.json` has
@@ -213,6 +241,32 @@ itself (a tracked file of it). Each listed file of a declared external is copied
 the unit's keys; the units are built with the root's own. Red (stage `sources:<root>`): a line that is not `<external>:<path>`, an external the recipe does
 not declare, a path that is no file inside the external (`..` included), a `.` path the root does not track. A changed list adds only the new units:
 the other units keep their objects and compile-stage keys (their preprocessing keys follow the view's file names, the compile keys do not).
+
+### Objects of every admitted product root (`objects_of`) and `forbid_sections`
+A generate stage may carry `objects_of: {"except": [R...]}` (every R an admitted product root). Its inputs then hold, at `/objs/<root with / as __>/<unit>.o`,
+the objects of every admitted product root with a recipe except the root itself and the R listed: the set is read from admit.json at the commit, so a
+newly admitted root enters the next build and no list names it. Each such root is built as a product root and must be green (else red, stage
+`objects_of:<root>`); the stage key holds the objects' content. A root that takes such a fact through `uses` is in the producer's reading set, so it must be
+in `except` (else the cycle check is red), and it must carry `forbid_sections: [".name", ...]`: an object of the root with a named section is red (stage
+`forbid:<root>`). The exception then loses nothing: the excepted root cannot hold what the fact collects.
+`lift/descs` is this rule's first use: its tool collects the `.fnvnx.disp` sections (one `conv:ret:args` descriptor per line, sorted, unique per object,
+LF-terminated, ASCII; an absent section is no indirect call) into the sorted union `descs.tsv`, output `descs`. A malformed section is red at the
+generate stage, naming the object. `lift/bridges` takes it as `{"root": "ports/fnv-nx/lift/descs", "output": "descs"}` (at `/uses/ports/fnv-nx/lift/descs/descs`),
+is listed in the `except` of lift/descs' recipe in the commit that admits it, and has `forbid_sections: [".fnvnx.disp"]`.
+
+### `errno_accessor` (objstub)
+`errno_accessor: SYMBOL` is required of every root with a link stage: the function that the libc `errno` macro calls (it returns the address of errno). objstub reads the final ELF through it (rule I, `image_check`): a function body of the image whose whole effect is `errno = constant; return constant` is the finding `fixed-failure`, whether it is ours or comes from an archive member (a weak fallback a strong definition replaced is not in the image).
+
+### `error_abi` and `empty_handlers` (objstub)
+`error_abi` declares the root's one failure function and how its definition signals failure: `{"fail": SYMBOL, "kind": "noreturn"}` (the definition does
+not return) or `{"fail": SYMBOL, "kind": "flag", "flag": FIELD}` (the definition stores a nonzero constant to the member FIELD of the structure its first
+parameter points to, on every path, directly or through direct calls in the same object). objstub (gate `objstub`, rule T-B) checks the declaration from
+the definition in the object (the DWARF gives the member offset, so a root with `flag` is compiled with -g) and makes a function whose every path ends in
+a call of SYMBOL, with no output effect, the finding `trap-body`. `empty_handlers: {"cover": PATH, "syntax": PATH, "tables": {SLOT: {"symbol": TABLE,
+"field": FIELD}}}` names the generated records (tracked repository files, op_cover.tsv and op_syntax.tsv) and, per slot, the instruction table (an array
+variable) and the entry field that holds the handler; the handler of entry k is read from the data relocation at that table, by the layout from DWARF, and an
+empty or constant handler is certified only by the record rows of the entries that select it (rule H). `cover` and `syntax` must be files of an admitted root other than this one (the generated outputs of the root that produces them, e.g. render/shaders/total). A `handler` column in op_cover.tsv (a symbol, a `+` list of clones, `MISSING:S`) is a claim checked against the object: it must equal the table's function, and a missing or undefined handler is the finding `handler-missing`. A root with `empty_handlers` must declare `error_abi`
+(a recipe error otherwise). Both are checked as keys here and judged in objstub.py; the probe (error_abi and tables) is part of the objstub cache key.
 
 ## Python of the generated stages
 
@@ -261,3 +315,9 @@ terminator set}, `units`, `defined` [{symbol, bind GLOBAL|WEAK|UNIQUE, type, obj
 ## What the lead does
 1. Put the recipe in the root, name it in `admit.json`. 2. `python3 -I verify/recipe.py check --root R` (validation). 3.
 `python3 -I verify/recipe.py build --root R --store S --out O` builds; run it twice with fresh stores to see the determinism gate's view.
+
+## Stack-usage report (measurement)
+`recipe.py build --root R --store S --out O --stack-usage 1` adds `-fstack-usage` to the CC stage of every unit (AUX_FLAGS in recipe.py; it is part of the stage key, so
+the stages are their own cache entries and the code generated is the same). Each `objects.json` row then carries `su`: the path of `obj/<unit>.su`, the compiler's own
+report, one line per function `file:line:col:name TAB bytes TAB static|dynamic|dynamic,bounded`. Any other option is refused. It is a measurement of a build
+(`stackuse.py`), never an input of a gate that certifies a product.

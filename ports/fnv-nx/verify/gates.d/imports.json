@@ -8,8 +8,6 @@
  ],
  "result": "imports.json",
  "covers": [
-  "product-guest",
-  "lifted",
-  "host-product"
+  "import-provider"
  ]
 }

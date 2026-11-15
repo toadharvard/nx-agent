@@ -220,6 +220,15 @@ LIFTED = {"path": "ports/fnv-nx/pack", "class": "product", "target": "guest", "c
 HOSTP = {"path": "ports/fnv-nx/render", "class": "product", "target": "host"}
 check("covers: root classes derive from admit.json", gatesdir.root_classes({"roots": [GUEST, LIFTED, HOSTP, {"path": "d", "class": "doc"}, {"path": "t", "class": "tool"}]})
       == {"ports/fnv-nx/platform": {"product-guest"}, "ports/fnv-nx/pack": {"lifted"}, "ports/fnv-nx/render": {"host-product"}, "d": {"doc"}, "t": {"tool"}})
+# product-guest-exe: a native guest root with a `game` directory (an exe twin); platform-like roots without one are product-guest only
+EXE = {"path": "ports/fnv-nx/decomp", "class": "product", "target": "guest", "cxx_origin": "native"}
+NOEXE = {"path": "ports/fnv-nx/platform", "class": "product", "target": "guest", "cxx_origin": "native"}
+rx = tmp("exe")
+for rp, bj in ((EXE["path"], {"game": "game"}), (NOEXE["path"], {"link": None})):
+    os.makedirs(os.path.join(rx, rp)); json.dump(bj, open(os.path.join(rx, rp, "build.json"), "w"))
+cl = gatesdir.root_classes({"roots": [EXE, NOEXE, LIFTED]}, rx)
+check("covers: a native guest root with a game dir is product-guest-exe, one without is only product-guest, a lifted root is neither",
+      cl == {EXE["path"]: {"product-guest", "product-guest-exe"}, NOEXE["path"]: {"product-guest"}, LIFTED["path"]: {"lifted"}}, cl)
 def covers_linked(name, link, want):
     r = with_admit([HOSTP])
     os.makedirs(os.path.join(r, "ports/fnv-nx/render"))
