@@ -78,6 +78,16 @@ class T(unittest.TestCase):
         try: open(self.f.name, 'w').write(json.dumps(REC)); r, n = sysspec.check(key('0f0202')); self.assertEqual(r, 'uncertified'); self.assertIn('type blocker', n)
         finally: del REC['lar_lsl']
 
+    def test_str_proved_against_the_cited_sdm_operation(self):
+        self.assertEqual(sysspec.check(key('0f000f'))[0], 'proved')
+
+    def test_str_cites_check_against_the_pinned_sdm(self):
+        sdm = os.environ.get('FNVNX_SDM_TXT', '/tmp/sdmdl/sdm.txt')
+        if not os.path.exists(sdm): self.skipTest('pinned SDM text not present')
+        import subprocess
+        r = subprocess.run([sys.executable, '-I', os.path.join(HERE, '..', 'sdm_cite_check.py'), sdm, os.path.join(HERE, '..', 'sysspec_str.py'), os.path.join(HERE, '..', 'sysspec_pages.tsv')], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout)
+
 
 if __name__ == '__main__':
     unittest.main()

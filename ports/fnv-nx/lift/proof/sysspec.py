@@ -13,6 +13,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 from proof import privset, shape, symform, x86sys  # noqa: E402
+sys.path.insert(0, HERE)
 from fnvlift import dsl  # noqa: E402
 
 K_BP, K_UD, K_BOUNDS, K_INTO, K_PRIV, K_AV, K_STEP = 2, 3, 4, 5, 6, 7, 8
@@ -89,6 +90,17 @@ def needs(key, rec):
     return None
 
 
+STR_TEXT = {'effects': 'str: expected one store only (memory form), no register, flag or fault effect', 'nstores': 'str: not exactly one store, the SDM has one', 'width': 'str: the store is not 16 bits wide (SDM: 16-bit quantity regardless of operand size)',
+            'value': 'the stored value differs from TR.SegmentSelector of the record'}
+
+
+def check_str(key, rec):
+    """the STR spec is proof/sysspec_str.py (every SDM quote of it is checked by sdm_cite_check.py against sysspec_pages.tsv)"""
+    import sysspec_str
+    r = sysspec_str.check(key, rec)
+    return ('proved', 'SDM STR: DEST := TR(SegmentSelector), the record selectors.tr') if r == 'ok' else ('FAILED(dsl)', STR_TEXT[r])
+
+
 def decl_spec(m):
     """the SDM semantics of a DECL instruction as {register: z3 term} over the declared function of declared.json (the uninterpreted function named by the row's ufs): RDTSC `EDX:EAX := TimeStampCounter` (high:low in the basis text),
     CPUID `(EAX, EBX, ECX, EDX) := CPUID_INFO(EAX, ECX)` (the i-th function is the i-th register of the tuple)"""
@@ -139,6 +151,8 @@ def check(key):
         return 'FAILED(facts)', 'cr4.umip is set on the declared machine: UMIP semantics are not specified'
     if m not in PRIV and m not in COND and m not in CLASS_B:
         return 'not-covered', 'no spec for %s (its record rows are decided)' % m
+    if m == 'str' and not cond_fires(m, rec):
+        return check_str(key, rec)
     if m in COND and not cond_fires(m, rec):
         return 'not-covered', 'no spec for %s (its #GP(0) condition does not hold on the declared machine; the instruction has its ordinary effect)' % m
     f = symform.symbuild(key).form
