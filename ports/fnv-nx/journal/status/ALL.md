@@ -12,6 +12,12 @@ Updated 2026-11-14 23:30Z (path plan). Older sections below are from 2026-11-12 
 - Goal path: product roots -> lifted packs as roots -> ELF -> boot -> WinMain -> menu -> first frame (GL in the emulator).
 
 
+**2026-11-15 22:35Z (orchestrator).** TRUNK MOVED: cand2 merged as fb9dd044f.
+- Verdict: L1 green, 198.5 s warm, 42 gates, of which 31 are vacuous 0/0.
+- In: the guest compiler pin 84f0883e (L2 74c32c454) and the tooling; the roots left are shim, hostabi/product and bridgefacts.
+- Cut by the graph, because no ELF root certifies a guest root yet: loader, render (translator, d3d9, gl4, nxgpu, pair, smscan, total), rt/guest, platform, tests/bootrt and 41 tests.
+- cand3 brings them back: rebased on fb9dd044f with shards, cpu_s and generator stages. The trunk CLAUDE.md orders of 20:25Z+ ride with it.
+
 **2026-11-15 22:10Z (orchestrator).** Trunk a5c8f427.
 - cand2 6866d87aa: being cut by the graph to its green roots (loader, render d3d9/gl4/nxgpu/pair/translator and others cut, bc2034d0c..b2095fdb1); pin 84f0883e (L2 74c32c454); verdict reds being fixed by L1. cand3 8fc4c58b9.
 - gs on 7601: derived from the pinned Windows 7 SP1 x86 kernel and its public PDB (CLAUDE.md 1b0541249, L5 worker). It blocks the L3a pack finish (4,025 sites; 24 real `mov m16,gs`, 4,001 data decoded by fallthrough, which is a universe-rule defect for L3a w7).
