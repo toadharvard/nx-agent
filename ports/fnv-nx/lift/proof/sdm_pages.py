@@ -45,6 +45,9 @@ def resolve(txt, vol, ident):
     rng = volume_range(pg, vol)
     if rng is None: return None
     pat = None
+    if re.fullmatch(r'P\d+', ident):          # SDM <vol>:P<n>: the PDF page n itself (an Operation section spans pages the instruction-page key does not reach); it must be a page of the volume
+        n = int(ident[1:])
+        return (n, printed(pg, n - 1)) if 1 <= n <= len(pg) and rng[0] <= n - 1 <= rng[1] else None
     if re.fullmatch(r'T\d+-\d+', ident):
         n, m = ident[1:].split('-')
         pat = re.compile(r'^\s*Table %s-%s(?:\.|\s+[A-Z])' % (n, m), re.M)

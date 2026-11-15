@@ -93,6 +93,17 @@ class T(unittest.TestCase):
         r = subprocess.run([sys.executable, '-I', os.path.join(HERE, '..', 'sdm_cite_check.py'), sdm, os.path.join(HERE, '..', 'sysspec_str.py'), os.path.join(HERE, '..', 'sysspec_pages.tsv')], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stdout)
 
+    def test_far_call_cites_check_against_the_pinned_sdm(self):
+        sdm = os.environ.get('FNVNX_SDM_TXT', '/tmp/sdmdl/sdm.txt')
+        if not os.path.exists(sdm): self.skipTest('pinned SDM text not present')
+        import subprocess
+        r = subprocess.run([sys.executable, '-I', os.path.join(HERE, '..', 'sdm_cite_check.py'), sdm, os.path.join(HERE, '..', 'sysspec_far.py'), os.path.join(HERE, '..', 'sysspec_far_pages.tsv')], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout)
+
+    def test_far_transfer_is_uncertified_while_the_descriptor_rows_are_undecided(self):
+        r, n = sysspec.check(key('9a000000000000'))      # the Form of the far CALL (9A) exists on the lift line with the far Forms; without it the shape is not covered
+        self.assertIn(r, ('uncertified', 'not-covered')); self.assertIn('sgdt' if r == 'uncertified' else 'Form', n)
+
 
 if __name__ == '__main__':
     unittest.main()
