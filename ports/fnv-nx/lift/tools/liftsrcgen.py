@@ -2,30 +2,32 @@
 """lift/liftsrc/build.json: the recipe of the lifted source (the tool-class root `lift/liftsrc`). One generated stage per shard of every image (tools/liftgen.py --shard K/N), then
 one finish stage (tools/liftgen.py --finish) that merges the shards into the pack source: u/*.src, entries/forms/encs/shapes tsv and the module-table stamp.
 
-    liftsrcgen.py --facts DIR --modules MODULES_TSV [--per-shard N] [--dest build.json]
+    liftsrcgen.py --modules MODULES_TSV [--dest build.json]
 
-DIR is the output tree of lift/facts (FACTS) (the per-image universe.tsv; exe: DIR/universe.tsv, module M: DIR/M/universe.tsv), MODULES_TSV the loader's table. The number of shards of an image is
-ceil(entries / per-shard): a static function of the universe. It is not trusted: finish refuses an image whose shards do not cover its universe exactly, and a row of the loader's table
-without an image (tools/liftgen.py check_images). The inputs of a shard are exactly what the lifter reads: the fnvlift package, the runtime headers rt/*.h (lifter_tree), the tool
+MODULES_TSV is the loader's table. The stage set does NOT depend on the facts: every image has a fixed number N of shards, chosen from the image size alone (shards(); decision in README), and shard K of
+an image takes the functions whose entry has bucket(entry) % N == K (tools/liftgen.py bucket, the rule of the pack's units). A facts change re-keys stages and never changes the stage set. It is not trusted:
+finish refuses an image whose shards do not cover its universe exactly, and a row of the loader's table without an image (tools/liftgen.py check_images). The inputs of a shard are exactly what the lifter reads: the fnvlift package, the runtime headers rt/*.h (lifter_tree), the tool
 root (mounted by the recipe), the externals and the platform's X86SYS."""
 import argparse, glob, json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); REPO = os.path.normpath(os.path.join(HERE, '..', '..', '..', '..'))
 ROOT = 'ports/fnv-nx/lift/liftsrc'
 LIFT = 'ports/fnv-nx/lift'
 LIFTGEN = LIFT + '/tools/liftgen.py'
-PER_SHARD = 1024
+EXE_SHARDS = 64          # the exe (SizeOfImage 0x0f60000 range, 96,839 entries)
+BIG_SHARDS = 16          # an image of size_of_image >= BIG_IMAGE (d3dx9_31, d3dx9_38)
+BIG_IMAGE = 0x200000
 EXE = 'FalloutNV.exe'
 EXTERNALS = [
     {'name': 'exe', 'repo': 'fnv-nx-build', 'ref': 'gamedata/exe', 'commit': '0948da1e89ab719dcf8471e45b67bc60575f6b93', 'tree_sha256': 'ba933b684b5e221e74b8a841a0ebb35ea8599c78a4d582ca0c376ef5a424ef2b', 'at': '/ext/exe'},
     {'name': 'redist', 'repo': 'fnv-nx-build', 'ref': 'gamedata/redist', 'commit': 'c53729e3bac168798fddcf4312f5a64a9b5eb08f', 'tree_sha256': 'fe7d3b56dba13c2bb236bdd3f7681dab41029f192283b7d4ba0c81105878bfd2', 'at': '/ext/redist'},
-    {'name': 'fp', 'repo': 'fnv-nx-build', 'ref': 'l3a-lift/fpfixture-w8', 'commit': '616cc88c0a13fa8fe7ce9c17a9ebfd84b57f9197', 'tree_sha256': '41c780bdffb76769536daf3bada5e5b8d28d282f4e90a37620f4e74d123b29c5', 'at': '/ext/fp'},
 ]
-USES = [{'root': 'ports/fnv-nx/loader', 'output': 'MODULES_TSV'}, {'root': 'ports/fnv-nx/lift/facts', 'output': 'FACTS'}, {'root': 'ports/fnv-nx/platform', 'output': 'X86SYS'}]
+USES = [{'root': 'ports/fnv-nx/loader', 'output': 'MODULES_TSV'}, {'root': 'ports/fnv-nx/lift/facts', 'output': 'FACTS'}, {'root': 'ports/fnv-nx/lift/fpfacts', 'output': 'FPSTATE'}, {'root': 'ports/fnv-nx/lift/fpfacts', 'output': 'FPDEPTH'}, {'root': 'ports/fnv-nx/platform', 'output': 'X86SYS'}]
 MOD = '/uses/ports/fnv-nx/loader/MODULES_TSV'
 
 
-def universe_size(path):
-    return sum(1 for l in open(path) if l.strip() and not l.startswith('#'))
+def shards(size_of_image):
+    """N of an image: EXE_SHARDS for the exe (size None), BIG_SHARDS for an image of size_of_image >= BIG_IMAGE, else 1: a function of the loader's row alone, never of the facts"""
+    return EXE_SHARDS if size_of_image is None else BIG_SHARDS if size_of_image >= BIG_IMAGE else 1
 
 
 def lift_inputs():
@@ -36,15 +38,14 @@ def lift_inputs():
 def images(modules):
     """[(image name, module file or None)]: the exe, then every row of the loader's table in file order"""
     rows = [l.rstrip('\n').split('\t') for l in open(modules) if not l.startswith('#') and l.strip()]
-    return [('exe', None)] + [(r[0][:-4] if r[0].lower().endswith('.dll') else r[0], r[0]) for r in rows]
+    return [('exe', None, None)] + [(r[0][:-4] if r[0].lower().endswith('.dll') else r[0], r[0], int(r[5], 16)) for r in rows]      # modules.tsv column 6: size_of_image
 
 
-def recipe(facts, modules, per_shard=PER_SHARD, exts=EXTERNALS):
-    common = ['--lift', '/in/' + LIFT, '--fpstate', '/ext/fp/fpstate', '--fpdepth', '/ext/fp/fpmodes/depth.tsv', '--x86sys', '/uses/ports/fnv-nx/platform/X86SYS', '--certs', '/in/' + ROOT + '/certs', '--jobs', '4']
+def recipe(modules, exts=EXTERNALS):
+    common = ['--lift', '/in/' + LIFT, '--fpstate', '/uses/ports/fnv-nx/lift/fpfacts/FPSTATE', '--fpdepth', '/uses/ports/fnv-nx/lift/fpfacts/FPDEPTH', '--x86sys', '/uses/ports/fnv-nx/platform/X86SYS', '--certs', '/in/' + ROOT + '/certs', '--jobs', '4']
     gen, imgargs = [], []
-    for name, mod in images(modules):
-        u = os.path.join(facts, 'universe.tsv' if mod is None else name + '/universe.tsv')
-        n = max(1, -(-universe_size(u) // per_shard))
+    for name, mod, size in images(modules):
+        n = shards(size)
         where = ['--exe', '/ext/exe/' + EXE, '--universe', '/uses/ports/fnv-nx/lift/facts/FACTS/universe.tsv', '--jtab', '/uses/ports/fnv-nx/lift/facts/FACTS/ehtables.json'] if mod is None else \
                 ['--module', mod, '--modules', MOD, '--moddirs', '/ext/exe:/ext/redist', '--facts-out', '/uses/ports/fnv-nx/lift/facts/FACTS']
         for k in range(n):
@@ -64,9 +65,9 @@ def recipe(facts, modules, per_shard=PER_SHARD, exts=EXTERNALS):
 
 def main():
     ap = argparse.ArgumentParser(); A = ap.add_argument
-    A('--facts', required=True); A('--modules', required=True); A('--per-shard', type=int, default=PER_SHARD); A('--dest', default=os.path.join(REPO, ROOT, 'build.json'))
+    A('--modules', required=True); A('--dest', default=os.path.join(REPO, ROOT, 'build.json'))
     a = ap.parse_args()
-    rec = recipe(a.facts, a.modules, a.per_shard)
+    rec = recipe(a.modules)
     with open(a.dest, 'w') as f: json.dump(rec, f, indent=1); f.write('\n')
     print('liftsrc: %d shard stages + finish, %d outputs' % (len(rec['generated']) - 1, len(rec['generated'][-1]['outputs'])))
 

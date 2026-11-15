@@ -112,7 +112,7 @@ def init(exe, base, ent, emit, jtab):
 def shard(a):
     import fnvlift as L, fnvlift.core as core, formcert
     K, N = map(int, a.shard.split('/')); out = a.out
-    ent = L.universe.load()[0]; mine = sorted(ent)[K::N]
+    ent = L.universe.load()[0]; mine = [x for x in sorted(ent) if bucket(x) % N == K]      # shard K of N: the entries whose unit bucket is K mod N (the rule of the pack's units)
     init(a.exe, a.base, ent, a.emit, a.jtab)
     with mp.Pool(a.jobs, initializer=init, initargs=(a.exe, a.base, ent, a.emit, a.jtab)) as p: got = list(p.imap(work, [mine[j:j + BATCH] for j in range(0, len(mine), BATCH)], 1))
     texts = [t for g in got for t in g[0]]; miss = sorted(m for g in got for m in g[2])
