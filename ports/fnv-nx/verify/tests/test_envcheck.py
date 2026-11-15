@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for verify/envcheck.py and farm/setup_verdict_env.sh: the declared environment of the verdict. Plain script: exit 0 on
 pass, one PASS/FAIL line per case. Needs the declared environment itself (a mismatch here IS the failure the file reports)."""
 import hashlib

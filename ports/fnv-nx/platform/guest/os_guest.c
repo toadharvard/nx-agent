@@ -23,9 +23,9 @@ static int64_t hs(uint64_t v) { return (int64_t)v; }
 
 void os_debug_print(const char *s) {
     size_t n = strlen(s);
-    fnvnx_hcall2(fnvnx_host->output_debug_string, FNVNX_ADDR(s), n);
-    fnvnx_hcall2(fnvnx_host->console_write, FNVNX_ADDR(s), n);
-    if (n == 0 || s[n - 1] != '\n') fnvnx_hcall2(fnvnx_host->console_write, FNVNX_ADDR("\n"), 1);
+    FNVNX_HCALL2(output_debug_string, FNVNX_ADDR(s), n);
+    FNVNX_HCALL2(console_write, FNVNX_ADDR(s), n);
+    if (n == 0 || s[n - 1] != '\n') FNVNX_HCALL2(console_write, FNVNX_ADDR("\n"), 1);
 }
 
 void os_exit_process(int code) {
@@ -40,12 +40,12 @@ uint32_t os_process_id(void) { return 0x51; }   /* any stable non-zero id */
 
 void os_memory_info(uint64_t *total, uint64_t *avail) {
     FnvnxMemInfo m = {0, 0};
-    fnvnx_hcall1(fnvnx_host->memory_info, FNVNX_ADDR(&m));
+    FNVNX_HCALL1(memory_info, FNVNX_ADDR(&m));
     *total = m.total_phys;
     *avail = m.avail_phys;
 }
 
-uint32_t os_random32(void) { return (uint32_t)fnvnx_hcall0(fnvnx_host->random64); }
+uint32_t os_random32(void) { return (uint32_t)FNVNX_HCALL0(random64); }
 
 /* ---- locks / condvars: os_lock_t / os_cond_t are one u32, the runtime's lock/cond words */
 void os_lock(os_lock_t *l) { fnvnx_lock(&l->word); }
@@ -130,19 +130,19 @@ static int host_id_of(os_thread *t, uint64_t *id) {
 int os_thread_set_priority(os_thread *t, int prio) {
     uint64_t id;
     if (host_id_of(t, &id)) return -1;
-    return fnvnx_hcall2(fnvnx_host->thread_set_priority, id, (uint64_t)(int64_t)prio) ? -1 : 0;
+    return FNVNX_HCALL2(thread_set_priority, id, (uint64_t)(int64_t)prio) ? -1 : 0;
 }
 int os_thread_set_cpu(os_thread *t, int cpu) {
     uint64_t id;
     if (host_id_of(t, &id)) return -1;
     if (cpu < 0) return 0;
-    return fnvnx_hcall2(fnvnx_host->thread_set_cpu, id, (uint64_t)cpu) ? -1 : 0;
+    return FNVNX_HCALL2(thread_set_cpu, id, (uint64_t)cpu) ? -1 : 0;
 }
 int os_thread_set_affinity(os_thread *t, int ideal, unsigned mask) {
     uint64_t id;
     if (host_id_of(t, &id)) return -1;
     uint64_t spec = FNVNX_CPU_SPEC(ideal < 0 ? FNVNX_CPU_KEEP : (unsigned)ideal, mask);
-    return fnvnx_hcall2(fnvnx_host->thread_set_cpu, id, spec) ? -1 : 0;
+    return FNVNX_HCALL2(thread_set_cpu, id, spec) ? -1 : 0;
 }
 /* the calling thread cannot be paused by the kernel: thread.cpp blocks it instead (SuspendThread on itself). */
 /* The pause primitive (os_world.h): the host's svcSetThreadActivity through FNVNX_PLAT_THREAD_ACTIVITY, a boolean per thread
@@ -153,16 +153,16 @@ os_wslot *os_thread_wslot(os_thread *t) { return &t->slot; }
 int os_raw_pause(os_thread *t) {
     if (t == g_me || !t->hid) return -1;
     uint64_t arg[2] = {t->hid, 1u};
-    return fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_THREAD_ACTIVITY, FNVNX_ADDR(arg), 2) ? -1 : 0;
+    return FNVNX_HCALL4(ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_THREAD_ACTIVITY, FNVNX_ADDR(arg), 2) ? -1 : 0;
 }
 void os_raw_resume(os_thread *t) {
     uint64_t arg[2] = {t->hid, 0u};
-    fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_THREAD_ACTIVITY, FNVNX_ADDR(arg), 2);
+    FNVNX_HCALL4(ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_THREAD_ACTIVITY, FNVNX_ADDR(arg), 2);
 }
 /* the main thread: the host registers a record for the calling thread (FNVNX_PLAT_THREAD_SELF) and returns its id */
 os_thread *os_raw_adopt_self(void) {
     uint64_t arg[1] = {0};
-    uint64_t id = fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_THREAD_SELF, FNVNX_ADDR(arg), 0);
+    uint64_t id = FNVNX_HCALL4(ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_THREAD_SELF, FNVNX_ADDR(arg), 0);
     if (!id) return NULL;
     os_thread *t = calloc(1, sizeof *t);
     if (!t) return NULL;
@@ -178,15 +178,13 @@ FNVNX_CITE(os_thread_exit, "dm:8");
 /* the host's platform services (toolchain/host/host.c platform_ext): appletSetCpuBoostMode, unless the config
  * (sdmc:/switch/fnv/fnvnx.ini boost_loading=0) turns it off */
 void os_cpu_boost(int fast_load) {
-    if (!fnvnx_host->ext_call) return;
     uint64_t arg[1] = {fast_load ? 1u : 0u};
-    fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_CPU_BOOST, FNVNX_ADDR(arg), 1);
+    FNVNX_HCALL4(ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_CPU_BOOST, FNVNX_ADDR(arg), 1);
 }
 /* the host's error applet (toolchain/host/host_message.inc) */
 void os_show_message(const char *caption, const char *text) {
-    if (!fnvnx_host->ext_call) return;
     uint64_t arg[2] = {FNVNX_ADDR(caption ? caption : ""), FNVNX_ADDR(text ? text : "")};
-    fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_MESSAGE, FNVNX_ADDR(arg), 2);
+    FNVNX_HCALL4(ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_MESSAGE, FNVNX_ADDR(arg), 2);
 }
 /* the system software keyboard: host service FNVNX_PLAT_TEXT_ENTRY (hostapi.h), whose result is this function's: 1 entered, 0 cancelled,
  * negative = -(the applet's Horizon result). The service's argument checks (max_len 1..FNVNX_TEXT_ENTRY_MAX, out and n non-null)
@@ -194,21 +192,21 @@ void os_show_message(const char *caption, const char *text) {
 _Static_assert(FNVNX_SWKBD_MAX_LEN >= 1 && FNVNX_SWKBD_MAX_LEN <= FNVNX_TEXT_ENTRY_MAX, "the service takes max_len 1..500");
 int os_text_entry(const struct fnvnx_text *init, struct fnvnx_text *out) {
     uint64_t arg[5] = {FNVNX_SWKBD_MAX_LEN, init ? FNVNX_ADDR(init->u) : 0u, init ? init->n : 0u, FNVNX_ADDR(out->u), FNVNX_ADDR(&out->n)};
-    int64_t r = (int64_t)fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_TEXT_ENTRY, FNVNX_ADDR(arg), 5);
+    int64_t r = (int64_t)FNVNX_HCALL4(ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_TEXT_ENTRY, FNVNX_ADDR(arg), 5);
     return (int)r;
 }
 /* the console's operation mode: host service FNVNX_PLAT_DISPLAY_DOCKED (hostapi.h), which every host implements
  * (toolchain/host/host.c platform_ext: appletGetOperationMode() == AppletOperationMode_Console -> 1 docked, 0
  * handheld) */
 int os_display_docked(void) {
-    return fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_DISPLAY_DOCKED, 0, 0) == 1;
+    return FNVNX_HCALL4(ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_DISPLAY_DOCKED, 0, 0) == 1;
 }
 void os_yield(void) { fnvnx_yield(); }
-void os_sleep_ns(uint64_t ns) { fnvnx_hcall1(fnvnx_host->sleep_ns, ns); }
+void os_sleep_ns(uint64_t ns) { FNVNX_HCALL1(sleep_ns, ns); }
 
 /* ---- time */
-uint64_t os_ticks(void) { return fnvnx_hcall0(fnvnx_host->system_tick); }
-uint64_t os_tick_freq(void) { return fnvnx_hcall0(fnvnx_host->system_tick_freq); }
+uint64_t os_ticks(void) { return FNVNX_HCALL0(system_tick); }
+uint64_t os_tick_freq(void) { return FNVNX_HCALL0(system_tick_freq); }
 uint64_t os_monotonic_ns(void) {
     uint64_t t = os_ticks(), f = os_tick_freq();
     return (t / f) * 1000000000ull + (t % f) * 1000000000ull / f;
@@ -218,13 +216,13 @@ uint64_t os_cycle_counter(void) {
     __asm__ volatile("mrs %0, cntpct_el0" : "=r"(v));   /* CNTVCT_EL0 traps at EL0 on Horizon (NX1 check 3) */
     return v;
 }
-int64_t os_wall_time_us(void) { return hs(fnvnx_hcall0(fnvnx_host->wall_time_us)); }
+int64_t os_wall_time_us(void) { return hs(FNVNX_HCALL0(wall_time_us)); }
 /* the console's time zone: the host's TZ_AT service (hostapi.h) gives offset, daylight flag and abbreviation at an instant; an older
  * host without it answers FNVNX_EXT_NO_MODULE (no zone data: UTC for the offset, os_tz_rule fails) */
 static int tzr_at(int64_t utc_s, int32_t *off_s, int *is_dst, char abbr[8]) {
     FnvnxTzAt o;
     uint64_t arg[2] = {(uint64_t)utc_s, FNVNX_ADDR(&o)};
-    if (!fnvnx_host->ext_call || fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_TZ_AT, FNVNX_ADDR(arg), 2)) return -1;
+    if (FNVNX_HCALL4(ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_TZ_AT, FNVNX_ADDR(arg), 2)) return -1;
     *off_s = o.off_s;
     *is_dst = o.dst != 0;
     memcpy(abbr, o.abbr, 8);
@@ -241,25 +239,25 @@ int32_t os_zone_offset_minutes(void) {
 
 /* ---- files: host fs calls return -errno, os.h wants -OS_E* (same numbers) */
 int os_file_open(const char *path, int flags) {
-    return (int)hs(fnvnx_hcall2(fnvnx_host->fs_open, FNVNX_ADDR(path), (uint64_t)flags));
+    return (int)hs(FNVNX_HCALL2(fs_open, FNVNX_ADDR(path), (uint64_t)flags));
 }
 int64_t os_file_read(int fd, void *buf, size_t n) {
-    return hs(fnvnx_hcall3(fnvnx_host->fs_read, (uint64_t)fd, FNVNX_ADDR(buf), n));
+    return hs(FNVNX_HCALL3(fs_read, (uint64_t)fd, FNVNX_ADDR(buf), n));
 }
 int64_t os_file_write(int fd, const void *buf, size_t n) {
-    return hs(fnvnx_hcall3(fnvnx_host->fs_write, (uint64_t)fd, FNVNX_ADDR(buf), n));
+    return hs(FNVNX_HCALL3(fs_write, (uint64_t)fd, FNVNX_ADDR(buf), n));
 }
 int64_t os_file_pread(int fd, void *buf, size_t n, uint64_t off) {
-    return hs(fnvnx_hcall4(fnvnx_host->fs_pread, (uint64_t)fd, FNVNX_ADDR(buf), n, off));
+    return hs(FNVNX_HCALL4(fs_pread, (uint64_t)fd, FNVNX_ADDR(buf), n, off));
 }
 int64_t os_file_pwrite(int fd, const void *buf, size_t n, uint64_t off) {
-    return hs(fnvnx_hcall4(fnvnx_host->fs_pwrite, (uint64_t)fd, FNVNX_ADDR(buf), n, off));
+    return hs(FNVNX_HCALL4(fs_pwrite, (uint64_t)fd, FNVNX_ADDR(buf), n, off));
 }
 int64_t os_file_seek(int fd, int64_t off, int whence) {
-    return hs(fnvnx_hcall3(fnvnx_host->fs_seek, (uint64_t)fd, (uint64_t)off, (uint64_t)whence));
+    return hs(FNVNX_HCALL3(fs_seek, (uint64_t)fd, (uint64_t)off, (uint64_t)whence));
 }
-int os_file_truncate(int fd, uint64_t size) { return (int)hs(fnvnx_hcall2(fnvnx_host->fs_truncate, (uint64_t)fd, size)); }
-int os_file_sync(int fd) { return (int)hs(fnvnx_hcall1(fnvnx_host->fs_sync, (uint64_t)fd)); }
+int os_file_truncate(int fd, uint64_t size) { return (int)hs(FNVNX_HCALL2(fs_truncate, (uint64_t)fd, size)); }
+int os_file_sync(int fd) { return (int)hs(FNVNX_HCALL1(fs_sync, (uint64_t)fd)); }
 static void from_host(const FnvnxStat *h, os_stat_t *st) {
     st->is_dir = (int)h->is_dir;
     st->read_only = (int)h->read_only;
@@ -270,22 +268,22 @@ static void from_host(const FnvnxStat *h, os_stat_t *st) {
 }
 int os_file_fstat(int fd, os_stat_t *st) {
     FnvnxStat h;
-    int r = (int)hs(fnvnx_hcall2(fnvnx_host->fs_fstat, (uint64_t)fd, FNVNX_ADDR(&h)));
+    int r = (int)hs(FNVNX_HCALL2(fs_fstat, (uint64_t)fd, FNVNX_ADDR(&h)));
     if (r == 0) from_host(&h, st);
     return r;
 }
-int os_file_close(int fd) { return (int)hs(fnvnx_hcall1(fnvnx_host->fs_close, (uint64_t)fd)); }
+int os_file_close(int fd) { return (int)hs(FNVNX_HCALL1(fs_close, (uint64_t)fd)); }
 int os_stat(const char *path, os_stat_t *st) {
     FnvnxStat h;
-    int r = (int)hs(fnvnx_hcall2(fnvnx_host->fs_stat, FNVNX_ADDR(path), FNVNX_ADDR(&h)));
+    int r = (int)hs(FNVNX_HCALL2(fs_stat, FNVNX_ADDR(path), FNVNX_ADDR(&h)));
     if (r == 0) from_host(&h, st);
     return r;
 }
-int os_mkdir(const char *p) { return (int)hs(fnvnx_hcall1(fnvnx_host->fs_mkdir, FNVNX_ADDR(p))); }
-int os_rmdir(const char *p) { return (int)hs(fnvnx_hcall1(fnvnx_host->fs_rmdir, FNVNX_ADDR(p))); }
-int os_remove(const char *p) { return (int)hs(fnvnx_hcall1(fnvnx_host->fs_remove, FNVNX_ADDR(p))); }
+int os_mkdir(const char *p) { return (int)hs(FNVNX_HCALL1(fs_mkdir, FNVNX_ADDR(p))); }
+int os_rmdir(const char *p) { return (int)hs(FNVNX_HCALL1(fs_rmdir, FNVNX_ADDR(p))); }
+int os_remove(const char *p) { return (int)hs(FNVNX_HCALL1(fs_remove, FNVNX_ADDR(p))); }
 int os_rename(const char *a, const char *b) {
-    return (int)hs(fnvnx_hcall2(fnvnx_host->fs_rename, FNVNX_ADDR(a), FNVNX_ADDR(b)));
+    return (int)hs(FNVNX_HCALL2(fs_rename, FNVNX_ADDR(a), FNVNX_ADDR(b)));
 }
 
 struct os_dir {
@@ -293,18 +291,18 @@ struct os_dir {
     char name[256];
 };
 os_dir *os_dir_open(const char *path) {
-    uint64_t h = fnvnx_hcall1(fnvnx_host->fs_dir_open, FNVNX_ADDR(path));
+    uint64_t h = FNVNX_HCALL1(fs_dir_open, FNVNX_ADDR(path));
     if (!h) return NULL;
     os_dir *d = calloc(1, sizeof *d);
-    if (!d) { fnvnx_hcall1(fnvnx_host->fs_dir_close, h); return NULL; }
+    if (!d) { FNVNX_HCALL1(fs_dir_close, h); return NULL; }
     d->h = h;
     return d;
 }
 const char *os_dir_next(os_dir *d) {
-    return fnvnx_hcall3(fnvnx_host->fs_dir_next, d->h, FNVNX_ADDR(d->name), sizeof d->name) ? d->name : NULL;
+    return FNVNX_HCALL3(fs_dir_next, d->h, FNVNX_ADDR(d->name), sizeof d->name) ? d->name : NULL;
 }
 void os_dir_close(os_dir *d) {
-    fnvnx_hcall1(fnvnx_host->fs_dir_close, d->h);
+    FNVNX_HCALL1(fs_dir_close, d->h);
     free(d);
 }
 /* FAT32/exFAT on the SD card fold case, but that is a property of Horizon's fs, not checked on hardware yet (NX1):
@@ -325,7 +323,7 @@ int os_fs_case_insensitive(void) {
  * host always serves it; there is no other source of pages. */
 static uint64_t vm_ext(uint32_t fn, uint32_t n, uint64_t a0, uint64_t a1) {
     uint64_t arg[2] = {a0, a1};
-    return fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, fn, FNVNX_ADDR(arg), n);
+    return FNVNX_HCALL4(ext_call, FNVNX_EXT_PLATFORM, fn, FNVNX_ADDR(arg), n);
 }
 size_t os_vm_page_size(void) { return 0x1000; }
 void *os_vm_reserve(void *hint, size_t size) {
@@ -343,7 +341,7 @@ int os_vm_decommit(void *addr, size_t size) {
 int os_vm_protect(void *addr, size_t size, int os_prot) {
     uint64_t arg[3] = {FNVNX_ADDR(addr), size,
                        (uint64_t)(((os_prot & OS_VM_READ) ? FNVNX_VM_PROT_R : 0) | ((os_prot & OS_VM_WRITE) ? FNVNX_VM_PROT_W : 0))};
-    return fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_VM_PROTECT, FNVNX_ADDR(arg), 3) ? -1 : 0;
+    return FNVNX_HCALL4(ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_VM_PROTECT, FNVNX_ADDR(arg), 3) ? -1 : 0;
 }
 int os_vm_release(void *addr, size_t size) {
     (void)size;

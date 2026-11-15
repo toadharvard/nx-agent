@@ -16,10 +16,10 @@ Pure functions; `unit_index` is the index of the object's unit in units.json (n1
   symbol_addresses(unit_index, sympair_rows, n1) -> ({symbol: address}, [(symbol, kind, reason)])
       address = n1['sym'][(unit_index, msvc name)], as pinned (an absolute-value pin keeps its ABSOLUTE flag bit).
       kinds thunk, vtable, gcc, internal have no exe twin by definition: unbound, reason as in NO_TWIN, not an error.
-      Other rows without an address: unbound with the kind's own `unnamed:*` text, 'no MSVC name', or 'not in N1'.
+      Other rows without an address: unbound with the kind's own `nodecor:*` text, 'no MSVC name', or 'not in N1'.
       One symbol with two different addresses or names is a ValueError.
   vtable_addresses(unit_index, vtpair_rows, n1) -> ({(_ZTV symbol, address point): vftable address}, [(ztv, point, reason)])
-      through n1['vt'][(unit_index, ??_7 name)]; an empty or unnamed:* name, or a name N1 never pinned, is unbound.
+      through n1['vt'][(unit_index, ??_7 name)]; an empty or nodecor:* name, or a name N1 never pinned, is unbound.
   n3_verdicts(unit_index, n3_rows, symbol_addresses) -> {exe address: (verdict, [inlined exe addresses])}
       the shape bodysel.decide takes as `n3`.  A row whose symbol has no exe address is not an exe function: ignored.
       An ok / ok+E row with an inlined symbol that has no exe address keeps its verdict only when every n3 row of that
@@ -93,7 +93,7 @@ Two conditions; a function with a row of either is not N2 (bodysel takes LIFTED)
    symbol name of Y in the pristine MSVC objects (facts['pristine'], built from the N1 certificate by `pristine_names`), and
    that name is decorated (starts with `?`).  Not provable, by rule and with no name table: no sympair section in the object;
    Y has no pristine COFF symbol; the pristine symbol is undecorated (extern "C", every asm/x87/register CRT helper such as
-   _ftol2 or _CI*: `_f` carries no types); no `ref` row of a named kind (not `unnamed:*`) has the pristine name; a covering
+   _ftol2 or _CI*: `_f` carries no types); no `ref` row of a named kind (not `nodecor:*`) has the pristine name; a covering
    row with an undecorated name.  Edge and row are matched by the exe address (objfacts keeps no ELF symbol of an edge): the
    rows that "cover" Y are the ref rows whose name is a pristine name of Y; all of them must be decorated and one must exist.
    Proof argument: proto.py (R5) derives cc, stack words, varargs, sret and the argument classes of a boundary only from the
@@ -372,7 +372,7 @@ l2sections - the three non-loaded ELF sections that L2's compiler plugins put in
     read(path)                 -> {'sympair': [...], 'vtpair': [...], 'n3': [...]}; an absent section gives []
 
 Format: plain text, LF-terminated lines, TAB-separated.  sympair: exactly 4 fields, kind one of KINDS or
-`unnamed:<reason>` (reason not empty); the name may be empty only for the kinds in NAMELESS.  vtpair: exactly 4
+`nodecor:<reason>` (reason not empty); the name may be empty only for the kinds in NAMELESS.  vtpair: exactly 4
 fields, offsets decimal.  n3: 2..5 fields (the producer omits trailing empty ones), verdict not empty, inlined a
 `,`-separated list of symbols, kind one of N3_KINDS or a clone suffix (not empty, no blank), types `,`-separated
 Itanium type strings (the producer's own separator; the task brief said `;`).  Any other line is an error
@@ -551,7 +551,7 @@ Stage table: env BOOT_STAGE_TABLE_BRANCH (default l4-verify/milestones), file st
    contract's rows (bootinputs.py milestones --stage-table: names unique, every exe address a lifted code entry). A missing branch: the
    job runs with the contract rows only and the final line says stage_table=absent; a present branch without the file fails the job.
 Env: ARTIFACTS (clone of the artifacts repository, default $FARM_HOME/artifacts; cloned --filter=blob:none --no-checkout
-when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build), FARM_HOME (required),
+when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build), FARM_HOME (default $HOME/fnvnx-farm),
 WORK (default $FARM_HOME/boot/<elf_id>), GAME_DIR (an installed game; never inside a git checkout). The profile is
 passed to boot.py, recorded in meta.json and exported as FNVNX_PROFILE (a render host library reads it).
 Exit 0 iff the result was published and boot.py exited 0 or 2; 1 otherwise (one-line reason on stderr).
@@ -583,7 +583,7 @@ Steps:
  5 final line: AFTERMERGE commit=<commit12> jobs=<n> violated=<names joined by ","|none> published=<branch>@<commit12>
    exit 0 = every job exited 0; 2 = at least one job reports a violation (the result is published either way);
    1 = usage, environment, tool or publishing error
-Env: FARM_HOME (required), ARTIFACTS (required; a checkout whose origin is the artifacts repository),
+Env: FARM_HOME (~/fnvnx-farm), ARTIFACTS (/home/user/fnv-nx-build; a checkout whose origin is the artifacts repository),
      ARTIFACTS_URL (default: that checkout's origin), RUNNER_JOBS.
 ```
 
@@ -614,7 +614,7 @@ Kinds exe and shared (host images, RECIPE.md "Link") are judged by host mode: ru
 of a shared object defined and global, undefined names only if a --lib shared library defines them (its .dynsym); no crt0 header words.
 
 verify/recipe.py links the guest ELF as the stage `ld:<root>` (fixed options, RECIPE.md "Link"): the root's objects and the objects of
-its derived link members whole (recipe.definer_closure), the compiler external's guest libraries searched as the gcc driver searches them.  This tool judges the result
+its `link.roots` whole, the compiler external's guest libraries searched as the gcc driver searches them.  This tool judges the result
 from ELF symbol tables only (no linker message, no map file, no name or text pattern), the rules of the former link/ld.py:
   1. no undefined symbol in the output's `.symtab`;
   2. every name the input objects reference or define (the symbol tables of every `*.o` below --objs, weak references included) is defined in the output;
@@ -1458,7 +1458,7 @@ Gate "tlsmodel" (fnvnx-gate/1, class A of VERDICT.md): every thread-local refere
 TLS access model the loader supports, and one symbol is accessed with one model.
     python3 -I gate_tlsmodel.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/tlsmodel.json
 Roots: every product and test root of verify/admit.json with "target": "guest", built by gate_build.ensure; a root's link group is its own
-objects plus the objects of its derived link members (recipe.definer_closure) (the objects that one linked output is made of), and its linked ELF.
+objects plus the objects of the roots in its recipe's link.roots (the objects that one linked output is made of), and its linked ELF.
 Facts are the relocations of the pinned binutils' own decoding (`aarch64-linux-gnu-readelf -rW`, the binutils of verify/env.json): the type
 NAME the ABI gives a relocation (R_AARCH64_P32_TLS..., R_AARCH64_TLS... for LP64), never a name of the program's text. A relocation is TLS when
 its type name has the family prefix TLS (after an optional P32_) or contains TPREL or DTPREL; the family is the ABI's:
@@ -1484,7 +1484,7 @@ finding. Counts per relocation family over all roots are in `detail`. No guest r
 Gate "onedef" (fnvnx-gate/1): one definition, one source. A name, a COMDAT group, a source file and a header each come from ONE place.
     python3 -I gate_onedef.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/onedef.json
 Rules (by symbol tables and file content, never by a name's text):
-  (a) Per linked image (a root with a `link`; its objects are those of the root itself and of every root of its derived link members): a GLOBAL or WEAK
+  (a) Per linked image (a root with a `link`; its objects are those of the root itself and of every root of its `link.roots`): a GLOBAL or WEAK
       definition outside every COMDAT group comes from exactly ONE root. Two roots defining one name is `dup-def`, whatever the binding (strong, weak):
       the linker's choice between them would pick a body by link order.
   (b) COMDAT groups of an image. The instances of one signature that come from different roots must be one definition: one digest of the group's
@@ -1770,13 +1770,16 @@ cannot run in this environment (root, namespaces, strace) is uncertified. Zero f
   TMPDIR set to a fresh directory of its own, and the gate removes that directory (and kills what is left of the file's
   process group) when the file ends, passed, failed or timed out: no test leaves anything in the temporary directory. No test needs a serial
   group: sandbox namespaces are per process and every store/work directory is per run.
---cache DIR (default $GATE_CACHE, see verdict.py; none = no caching): a test file's result is a function of the content of the
-  directories the gate declares and of the declared environment. KEY = sha256 over: cas.tree_hash of every key dir
-  (--key-dirs, default: the DIRs scanned; whole directory content, no mtimes, __pycache__ skipped), the envcheck id of the
-  env.json next to this script, this gate's argv without --cache/--jobs, and the python version string. If DIR/<KEY>.json
-  records every file of the universe as passed, they are certified WITHOUT running (detail: `N of M pass, cached key <12 hex>`).
-  Otherwise all files run and the per-file results are stored under KEY only when the run completed. All-or-nothing per key:
-  no per-file dependency guessing; a failed file is never recorded as passed, a key with a failure re-runs everything.
+--cache DIR (default $GATE_CACHE, see verdict.py; none = no caching): one entry per test file, keyed by its path, the envcheck id, this gate's argv
+  without --cache/--jobs, the python version and the pins of its inputs; the entry is valid while the content its run read is unchanged.
+  TRACED file: the read set recorded by strace (paths and their content hashes, listings). A failed file is never recorded.
+  UNTRACED file (its import closure reaches a module that runs strace itself, `gate_tests.TRACERS`: a test that runs the recipe): it runs on its MOUNT, a directory
+  holding its import closure and the files under the data roots it declares in `# reads: <path> ...` lines of its text; anything else of the checkout is absent, so a
+  read outside the declaration fails the test (a missing declaration is red, never a wide key). Its entry is keyed by the mount content (path and sha256 of each file).
+  Every untraced file also gets the game's compiler mounted: the external of verify/guest_compiler.json fetched once into the gate's cache (FNVNX_EXTCACHE,
+  FNVNX_INPUT_GUEST); a build in the test finds it there. Not fetchable: `blocked-env`.
+  CUT: a test file whose import closure names a root that verify/admit.json does not admit (a directory with a recipe, or ports/fnv-nx/tests/<name> of class test) belongs
+  to the cut of the branch and is outside the universe (gate oracle judges the same list); the detail lists `cut:test:<file> (root <r>)` for each.
 Result extra key "files": [{"name","seconds","status"}] (status passed|failed|cached); same list in selftests.times.json.
 ```
 
@@ -1843,7 +1846,7 @@ Gates get GATE_CACHE = VDIR/cache (content-keyed results of gates such as selfte
            other push (or fetch) failure is `blocked: push failed: <first line>`, exit 6; in both nothing local changes and the stored green
            verdict stays (keyed by tree). Without --remote only the local ref moves and the last line ends `local only`.
   Exit codes of merge: 0 merged, 2 red/blocked by verdict, 3 conflict, 4 env, 5 moved, 6 push failed (1 error).
-Both print `L1 <green|red> <tree> <seconds>s gates:<n> over_budget:<bool>`; merge adds `merged <commit>` or `blocked: <reason>`.
+Both print `L1 <green|red> <tree> <seconds>s gates:<n> over_budget:<bool> vacuous:<n>` (n: green gates with an empty universe and no admitted root of the class they cover); merge adds `merged <commit>` or `blocked: <reason>`.
 ```
 
 ## verify/objstub.py
@@ -2145,9 +2148,10 @@ recipe: build a product root from its recipe `build.json` ("fnvnx-recipe/1", con
 every step is a sandbox stage (sandbox.py) keyed by its declared inputs, cached in the store (cas.py).
     python3 -I recipe.py build --root ports/fnv-nx/X --store S --out DIR [--jobs N]     (cwd = checkout root; exit 0 green, 2 red)
     python3 -I recipe.py check --root ports/fnv-nx/X                                    validate only
-Link: `link` = {script, output, flags, kind pie|exe}. a guest root cannot link kind exe; the image's members are derived (recipe.definer_closure over the admitted product roots; a written `roots` is a check
-error) and their stored objects are declared inputs of the link stage (in its key); a variant is `root@NAME`, declared in the `variants` of the root's admit.json entry, checked by
-gate_admit.py: product roots only, `{NAME: {"target"?}}`. Resolution-relaxing ld options (the refusal set R, `-z lazy` included) are
+Link: `link` = {script, output, flags, kind pie|exe, roots}. a guest root cannot link kind exe; `roots` lists distinct admitted
+product roots of the same target (never the root itself) whose stored objects are declared inputs of the link stage (in its key); the
+image of a product root lists base roots only, a test root any root (a variant is `root@NAME`, declared in the `variants` of the root's admit.json entry, checked by
+gate_admit.py: product roots only, `{NAME: {"target"?}}`). Resolution-relaxing ld options (the refusal set R, `-z lazy` included) are
 refused in every link; linkstrict judges the linked output of every product and test root (no undefined symbol of any binding).
 Steps: (1) generated stages (python runtime, runtime.py), (2) one unit stage per source: .c/.cc/.cpp/.cxx = unitstage.Build (PP on
 name-complete views, then CC on the preprocessed text), .s/.S = unitstage.Build too (.S: PP then CC; .s: one stage on its own file), (3) the link: stage `ld:<root>` (the fixed options of RECIPE.md "Link", the objects of the root and of its
@@ -2377,7 +2381,7 @@ Certified iff the two contracts are equal; the verdict names the first differing
 result, pop, variadic, aggregate, undecoded name).  Equal contracts mean every argument and the result travel in the same place on both machines,
 so no bridge exists to be generated: where the legacy model produced `bridge` / `manual` / `x86-inconsistent`, the pair is uncertified.
 UNIVERSE.  Every row that is a ref or a non-canonical def of a symbol that has a definition row somewhere in obj.json and is a function-kind row
-(func, ctor.*, dtor.*) with an MSVC name, or an `unnamed:` row; item id `object:symbol`.  An `unnamed:` row, or a row of a symbol whose canonical
+(func, ctor.*, dtor.*) with an MSVC name, or a `nodecor:` row; item id `object:symbol`.  An `nodecor:` row, or a row of a symbol whose canonical
 definition has no MSVC name, is uncertified (no contract can be compared).  Symbols with no definition row at all are linkstrict's business (class 3).  Rows of kind
 thunk/vtable/gcc/internal/data are outside (no function contract of the exe).
 PROOF.  Parameters are placed by the calling convention as a function of the ordered class list, so equal class lists under equal conventions
@@ -2441,8 +2445,8 @@ UNIVERSE (nothing sampled, nothing skipped), per unit with a GCC object, in the 
      dtor.sdd, dtor.sdd.thunk) and that is `def` of a symbol the object defines STRONGLY: binding GLOBAL (not weak, not unique), defined
      in a section (not SHN_UNDEF/ABS/COMMON), not a section or file symbol, and the defining section is not in a COMDAT group
      (SHF_GROUP).  Item id `unit:symbol`.
-  2. every row of .fnvnx.sympair whose kind is `unnamed:<reason>` (no rule names it), `ref` or `def`.  Item id `unit:symbol:unnamed`.
-  3. every row of .fnvnx.vtpair whose MSVC name is `unnamed:<reason>`.  Item id `unit:ztv-symbol:vftable-unnamed`.
+  2. every row of .fnvnx.sympair whose kind is `nodecor:<reason>` (no rule names it), `ref` or `def`.  Item id `unit:symbol:unnamed`.
+  3. every row of .fnvnx.vtpair whose MSVC name is `nodecor:<reason>`.  Item id `unit:ztv-symbol:vftable-unnamed`.
   4. a GCC object that cannot be read (ELF, symbol table, a plugin section): one item `unit:error`.
 CERTIFIED: an item of class 1 whose MSVC name is `def`, `comdat` or `common` among the external symbols of at least one cl object of the
 unit (an unreadable one among them does not hide a proof in another; if none proves it, the item is red and says so).

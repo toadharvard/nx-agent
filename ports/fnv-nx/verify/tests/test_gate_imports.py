@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/rt/guest/crt0.s ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for verify/gate_imports.py (class 4): the driver on the toy product root of test_recipe.py (reused by import) with a synthetic manifest
 published as an external of a stand-in artifacts repository; the pure rules are tested by contract/tests/test_imports.py.
 Plain script: PASS/FAIL lines, exit 0 on pass."""

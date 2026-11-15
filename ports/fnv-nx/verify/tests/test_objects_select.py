@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/lib/sha256/build.host.json ports/fnv-nx/link ports/fnv-nx/render/gl4/build.json
+# reads: ports/fnv-nx/render/nxgpu/build.json ports/fnv-nx/render/pair/build.host.json ports/fnv-nx/render/shaders/translator/build.host.json
+# reads: ports/fnv-nx/render/smscan/build.host.json ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Synthetic check of the two recipe rules of the facts root (contract/facts): `objects_of` selection by declaration (target, origin) with the
 derived exclusion of the consumers of the producing root, and generator inputs that are {stage, path} refs of earlier generators.  No build, no
 private input: admit entries and recipes are written into a temp directory."""
@@ -33,8 +36,8 @@ ROOTS = {
 }
 RECS = {
     "consumer": {"uses": [{"root": P + "facts", "output": "native"}]},
-    "viaconsumer": {"uses": [{"root": P + "consumer", "output": "o"}]},          # reaches facts through the consumer, transitively
-    "linker": {},                     # depends on nothing: stays in
+    "viaconsumer": {"link": {"roots": [P + "consumer"]}},          # reaches facts through the consumer, transitively
+    "linker": {"link": {"roots": [P + "nat"]}},                     # depends on a native root, not on facts: stays in
     "descs": {"generated": [{"tool": P + "t.py", "args": [], "inputs": [], "outputs": ["d"], "objects_of": {"except": [P + "bridges"]}}]},
     "bridges": {"uses": [{"root": P + "descs", "output": "descs"}]},
 }
@@ -53,10 +56,8 @@ with tempfile.TemporaryDirectory() as repo:
     allp = sorted(r for r, e in ROOTS.items() if e.get("class") == "product" and r != F)
     check("descs -> consumer -> facts: bridges depends on facts through descs' objects_of (the cycle lift/rt -> facts -> bridges -> descs -> lift/rt)",
           recipe.depends_on(P + "bridges", F, ROOTS, repo))
-    univ = [r for r in allp if not recipe.depends_on(r, F, ROOTS, repo)]
-    check("no selector: the universe is every product root with a recipe minus the consumers of the producer (derived from the uses graph)",
-          recipe.objects_of_roots(gen(), F, ROOTS, repo), univ)
-    check("the consumers of the producer are outside its universe", all(P + r not in univ for r in ("consumer", "viaconsumer", "bridges")) and P + "nat" in univ, True)
+    check("no selector: every product root with a recipe, as before", recipe.objects_of_roots(gen(**{"except": []}), F, ROOTS, repo), allp)
+    check("except still removes a root", recipe.objects_of_roots(gen(**{"except": [P + "nat"]}), F, ROOTS, repo), [r for r in allp if r != P + "nat"])
     want = [P + "linker", P + "nat", P + "nat_undeclared"]
     check("target guest + origin native: declared native or undeclared origin, not lifted, not host, not a consumer of the producer (directly or through a chain)",
           recipe.objects_of_roots(gen(target="guest", origin="native"), F, ROOTS, repo), want)
@@ -64,7 +65,7 @@ with tempfile.TemporaryDirectory() as repo:
     check("target host", recipe.objects_of_roots(gen(target="host"), F, ROOTS, repo), [P + "hosted"])
     check("a root's own origin class is read from the declaration, never from its name",
           [recipe.origin_class(ROOTS[r].get("cxx_origin")) for r in (P + "nat", P + "nat_undeclared", P + "lifted")], ["native", "native", "lifted"])
-    check("depends_on is transitive over uses", [recipe.depends_on(P + r, F, ROOTS, repo) for r in ("consumer", "viaconsumer", "linker", "nat")],
+    check("depends_on is transitive over link.roots and uses", [recipe.depends_on(P + r, F, ROOTS, repo) for r in ("consumer", "viaconsumer", "linker", "nat")],
           [True, True, False, False])
     check("without a repo the selecting stage cannot read recipes: no consumer exclusion (the build always passes the repo)",
           recipe.objects_of_roots(gen(target="guest", origin="native"), F, ROOTS), sorted(want + [P + "consumer", P + "viaconsumer", P + "bridges"]))

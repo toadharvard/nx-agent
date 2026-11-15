@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/lib/sha256/build.json ports/fnv-nx/link
+# reads: ports/fnv-nx/loader/build.json ports/fnv-nx/platform/build.json ports/fnv-nx/render/d3d9/build.json ports/fnv-nx/render/gl4/build.json
+# reads: ports/fnv-nx/render/nxgpu/build.json ports/fnv-nx/render/pair/build.json ports/fnv-nx/render/shaders/translator/build.json
+# reads: ports/fnv-nx/render/smscan/build.json ports/fnv-nx/rt/guest/build.json ports/fnv-nx/rt/guest/crt0.s ports/fnv-nx/rt/guest_main/build.json
+# reads: ports/fnv-nx/shim/build.json ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for verify/recipe.py, gate_build.py, gate_determinism.py on a toy product root in a temp git repo. Plain script: exit 0 on
 pass, one PASS/FAIL line per case. Needs root (sandbox) and aarch64-linux-gnu-gcc-13/g++-13. Scratch: mkdtemp, removed at exit."""
 import hashlib
@@ -91,7 +96,10 @@ def make_repo(name, gen_extra="", rec=None, files=None, extra_roots=()):
     repo = os.path.join(BASE, name)
     os.makedirs(repo)
     git(repo, "init", "-q")
-    for k, v in dict(FILES, **(files or {})).items():
+    base = dict(FILES)
+    if not (rec or RECIPE).get("link"):   # nothing is linked: the OS layer unit has no crt0 (its header names linker-script symbols that only a link defines)
+        base["toy/os.S"] = OS_NOLINK
+    for k, v in dict(base, **(files or {})).items():
         if v is not None:
             w(repo, k, v)
     for f in LINK_TOOLS:
@@ -106,6 +114,42 @@ def make_repo(name, gen_extra="", rec=None, files=None, extra_roots=()):
         {"path": T + "link", "class": "tool"}, {"path": T + "contract", "class": "tool"}] + list(extra_roots)}))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "toy")
+    return repo
+
+
+def guest_rec(rec=None, image=None):
+    """RECIPE (or REC) as a guest-profile root: the compiler, plugins and runtime come from the profile (verify/guest_compiler.json); the per-root flags keep only what a guest
+    build.json may carry (recipe.PER_ROOT), plus -Werror=attributes and the sdd define the rule requires. The semantic flags (ILP32, PIE, freestanding, ...) are the pin's."""
+    r = json.loads(json.dumps(rec or RECIPE))
+    for k in ("compiler", "plugins"):
+        r.pop(k, None)
+    r["profile"] = "guest"
+    r.pop("link", None)   # a guest image is linked by the runtime (link.entry, link/guest.json, the pinned libraries): the toy roots are object roots unless IMAGE names the entry symbol
+    if image:
+        r["link"] = {"output": "toy.elf", "flags": ["-m", "aarch64linux32"], "entry": image}
+    keep = lambda fs: [f for f in fs if recipe.PER_ROOT.fullmatch(f)]  # noqa: E731
+    r["flags"] = {"c": keep(r["flags"]["c"]) + [recipe.WERROR_ATTR], "cxx": keep(r["flags"]["cxx"]) + [recipe.SDD_DEFINE, recipe.WERROR_ATTR], "asm": keep(r["flags"]["asm"])}
+    return r
+
+
+def make_guest_repo(name, gen_extra="", rec=None, files=None, extra_roots=(), image=None):
+    """make_repo as a GUEST root (admit target guest, the game's compiler from the real pin, the real env.json): the objects are the game's ELF32 AArch64 ones."""
+    repo = make_repo(name, gen_extra, guest_rec(rec, image), files, extra_roots)
+    ad = json.load(open(os.path.join(repo, T + "verify/admit.json")))
+    for r in ad["roots"]:
+        if r["path"] == ROOT:
+            r["target"] = "guest"
+    w(repo, "verify/admit.json", json.dumps(ad))
+    w(repo, "verify/guest_compiler.json", open(os.path.join(VERIFY, "guest_compiler.json")).read())
+    if image:   # the guest link profile (script and libraries of every guest link) and the script it names
+        for n in ("link/guest.json", "link/guest.ld"):
+            w(repo, n, open(os.path.join(VERIFY, "..", n)).read())
+    real = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))   # checkout root
+    for n in list(recipe.PLUGIN_SOURCES.values()) + [i for v in recipe.PLUGIN_INPUTS.values() for i in v]:   # the real plugin sources and inputs: the profile's plugins are built from them
+        os.makedirs(os.path.dirname(os.path.join(repo, n)), exist_ok=True)
+        shutil.copyfile(os.path.join(real, n), os.path.join(repo, n))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "guest")
     return repo
 
 
@@ -392,7 +436,7 @@ def main():
         librec["include"] = []
         a_c = "int f_lib(void);\nint f_a(void) { return f_lib(); }\n"
         lr = make_repo("lr", rec=dict(RECIPE, generated=[], constants=None, include=[], units="all",
-                                      link=dict(RECIPE["link"])),
+                                      link=dict(RECIPE["link"], roots=[LIB])),
                        files={"toy/a.c": a_c, "toy/b.c": None, "toy/c.c": None, "toy/constants.tsv": None, "toy/inc/toy.h": None,
                               "lib/l.c": "int f_lib(void) { return 1; }\n", "lib/build.json": json.dumps(librec)})
         ad = json.load(open(os.path.join(lr, T + "verify/admit.json")))
@@ -401,7 +445,7 @@ def main():
         git(lr, "add", "-A")
         git(lr, "commit", "-q", "-m", "lib")
         x1 = recipe.build(lr, ROOT, LRS, BASE + "/lr1")
-        check("link roots: the image links the objects of the root that defines its undefined f_lib (the definer closure, no list)", x1["status"] == "green" and x1["elf"]
+        check("link roots: the image links the objects of the listed root (f_lib resolves)", x1["status"] == "green" and x1["elf"]
               and [r["root"] for r in x1.get("link_roots", [])] == [LIB], x1.get("failure"))
         w(lr, "lib/l.c", "int f_lib(void) { return 2; }\n")
         git(lr, "add", "-A")
@@ -410,15 +454,14 @@ def main():
         check("link roots: a change in the listed root changes the link key and the ELF", x2["status"] == "green"
               and x2["elf"]["sha256"] != x1["elf"]["sha256"] and set(x2["stage_keys"]) != set(x1["stage_keys"]), (x1["stage_keys"], x2["stage_keys"]))
         nolink = dict(json.load(open(os.path.join(lr, ROOT, "build.json"))))
-        ad = json.load(open(os.path.join(lr, T + "verify/admit.json")))
-        ad["roots"] = [r for r in ad["roots"] if r["path"] != LIB]       # no admitted root defines f_lib any more
-        w(lr, "verify/admit.json", json.dumps(ad))
+        nolink["link"] = dict(nolink["link"], roots=[])
+        w(lr, "toy/build.json", json.dumps(nolink))
         git(lr, "add", "-A")
-        git(lr, "commit", "-q", "-m", "lib no longer admitted")
+        git(lr, "commit", "-q", "-m", "no roots")
         x3 = recipe.build(lr, ROOT, LRS, BASE + "/lr3")
         check("link roots: without the root f_lib has no body and the link is red, never a silent zero", x3["status"] == "red", x3.get("failure"))
         ig = dict(nolink)
-        ig["link"] = dict(nolink["link"], flags=["-m", "aarch64linux32", "--unresolved-symbols=ignore-all"])
+        ig["link"] = dict(nolink["link"], roots=[LIB], flags=["-m", "aarch64linux32", "--unresolved-symbols=ignore-all"])
         w(lr, "toy/build.json", json.dumps(ig))
         git(lr, "add", "-A")
         git(lr, "commit", "-q", "-m", "ignore-all")
@@ -432,14 +475,16 @@ def main():
     later(link_roots)
 
     def host_in_guest_link():
-        """a host-profile object never enters a guest image: a root of the host profile is no candidate of the definer closure of a guest image; and link.roots is a check error"""
+        """the plugin set is the target profile's (RECIPE.md "Plugins"): a host-profile object never enters a guest image, so a guest link.roots naming a host root is red"""
         hp = make_repo("hg")
         roots = dict(recipe.load_admit(hp))
         roots[ROOT] = dict(roots[ROOT], target="guest")
         roots[LIB] = {"path": LIB, "class": "product", "target": "host", "recipe": LIB + "/build.json"}
-        check("target profile: a root of the host profile is no link candidate of a guest image", LIB not in recipe.link_candidates(roots, ROOT, "guest", hp), recipe.link_candidates(roots, ROOT, "guest", hp))
         e = recipe.check(mut(link=dict(RECIPE["link"], roots=[LIB])), ROOT, recipe.tracked(hp), roots, None, hp)
-        check("link.roots is a check error: the members are derived", any("link.roots is derived" in x for x in e), e)
+        check("target profile: a guest image whose link.roots names a root of the host profile is red", any("link.roots" in x and "'host'" in x for x in e), e)
+        roots[ROOT] = dict(roots[ROOT], target="host")
+        e = recipe.check(mut(link=dict(RECIPE["link"], roots=[LIB])), ROOT, recipe.tracked(hp), roots, None, hp)
+        check("target profile: the same link of a host image has no target error", not any("link.roots" in x and "'host'" in x and "has target" in x for x in e), e)
     later(host_in_guest_link)
 
     def declared_outputs():
@@ -689,14 +734,6 @@ def main():
     check("include dir in a product root of the other target rejected", len(home("hdr_other")) == 1, home("hdr_other"))
     check("include dir in a tool root rejected", len(home("hdr_tool")) == 1, home("hdr_tool"))
     check("include dir in a doc root rejected", len(home("hdr_doc")) == 1, home("hdr_doc"))
-    # header home (class header): valid from every target, one rule (header_dirs and the include check)
-    hr = dict(rr, **{T + "hdr_hdr": {"path": T + "hdr_hdr", "class": "header"}})
-    hf = rfiles + [T + "hdr_hdr/h2.h"]
-    for tgt in ("guest", "host"):
-        ent = dict(hr[ROOT], target=tgt)
-        er = [e for e in recipe.check(mut(include=RECIPE["include"] + [T + "hdr_hdr"]), ROOT, hf, dict(hr, **{ROOT: ent}), None, rk) if "lies in no admitted header root" in e]
-        check("include dir in a header-class root accepted from a %s includer" % tgt, not er, er)
-        check("header_dirs of a %s root holds the header root" % tgt, T + "hdr_hdr" in recipe.header_dirs(mut(), ROOT, dict(hr, **{ROOT: ent}), rk))
     # one name, one file: two include dirs of one recipe holding a header of the same include-relative path are red
     rr2 = dict(rr, **{T + "hdr_prod2": {"path": T + "hdr_prod2", "class": "product", "target": own}})
     rf2 = rfiles + [T + "hdr_prod2/h.h", T + "hdr_prod2/g.h"]

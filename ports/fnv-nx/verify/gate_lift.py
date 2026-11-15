@@ -6,8 +6,8 @@ The driver is impure (it builds roots through recipe.py, reads the cache, runs t
 ports/fnv-nx/lift/gates (gate_order.py, gate_eh.py), which the driver runs as processes on the cached build results.
 Roots come from admit.json, never from arguments. A root is judged by its admit.json declaration `cxx_origin`, never by a name:
   lifted  {"lifted_by", "pack"}   order: gate_order's `order` and `align` rows, addr32: its `addrwrap` rows, over the objects of the image
-          in every image whose derived link members (the definer closure) include the root (a lifted root that no image names has universe 0 until the ELF root exists); the
-          objects are those of the lifted root and of the runtime root, the root among the image's link members that holds the unique object
+          in every image that names the root in link.roots (a lifted root that no image names has universe 0 until the ELF root exists); the
+          objects are those of the lifted root and of the runtime root, the root among the image's link.roots that holds the unique object
           defining the 4-byte symbol fnvnx_lift_cpu_bytes (sizeof(struct cpu); none or several is red).
           eh: gate_eh over the pack (the external of the recipe that `pack` names) and the EH facts (the external that the key `ehfacts` of
           contract_inputs.json names; layout ehtables.json and <module>/ehtables.json, as the facts of the other contract gates).
@@ -99,14 +99,8 @@ def fold(root, rows):
     return u, c, ids, "; ".join(r["detail"] for r in (red or rows))[:600]
 
 
-def link_members(image, cache, repo):
-    """The members the build derived for IMAGE (res["link_roots"], the definer closure): [spec]. A red build before the link has none."""
-    res, _ = gate_build.ensure(image, cache, repo)
-    return [x["root"] for x in res.get("link_roots", [])]
-
-
-def images_naming(root, repo, cache):
-    """The images that link ROOT (a member of the derived definer closure of the image): [path]. A recipe that does not load names nothing."""
+def images_naming(root, repo):
+    """The link roots whose recipe lists ROOT in link.roots (the image that links it): [path]. A recipe that does not load names nothing."""
     admit = recipe.load_admit(repo)
     out = []
     for p in gate_build.product_roots(repo):
@@ -114,16 +108,17 @@ def images_naming(root, repo, cache):
             rl = recipe.load_recipe(repo, admit, p).get("link")
         except (OSError, ValueError, AttributeError):
             continue
-        if isinstance(rl, dict) and root in link_members(p, cache, repo):
+        rs = rl.get("roots") if isinstance(rl, dict) else None
+        if isinstance(rs, list) and root in rs:
             out.append(p)
     return out
 
 
 def judge_image(gate, root, image, repo, cache):
-    """The objects judged are those of the image: the lifted ROOT and the runtime root, the root among the link members of IMAGE that defines
-    the 4-byte symbol fnvnx_lift_cpu_bytes (its object is the unique definer over all link members; none or several is red)."""
+    """The objects judged are those of the image: the lifted ROOT and the runtime root, the root among link.roots of IMAGE that defines
+    the 4-byte symbol fnvnx_lift_cpu_bytes (its object is the unique definer over all link.roots; none or several is red)."""
     admit = recipe.load_admit(repo)
-    members = link_members(image, cache, repo)
+    members = recipe.load_recipe(repo, admit, image)["link"]["roots"]
     built, holders = {}, []
     for m in sorted(set(members) | {root}):
         res, _ = gate_build.ensure(m, cache, repo)
@@ -158,15 +153,15 @@ def judge_image(gate, root, image, repo, cache):
 
 
 def judge_lifted_order(gate, root, repo, cache):
-    """A lifted root is judged in every image that links it (derived link members); no image names it: universe 0 until the ELF root exists."""
+    """A lifted root is judged in every image that names it in link.roots; no image names it: universe 0 until the ELF root exists."""
     u = c = 0
     ids, why = [], []
-    for image in images_naming(root, repo, cache):
+    for image in images_naming(root, repo):
         iu, ic, iids, idetail = judge_image(gate, root, image, repo, cache)
         u, c, ids = u + iu, c + ic, ids + iids
         if ic != iu:
             why.append("%s: %s" % (image, idetail))
-    return u, c, ids, "; ".join(why) or "%d items in %d images" % (u, len(images_naming(root, repo, cache)))
+    return u, c, ids, "; ".join(why) or "%d items in %d images" % (u, len(images_naming(root, repo)))
 
 
 def eh_inputs(repo, cache, root, rec, ws):

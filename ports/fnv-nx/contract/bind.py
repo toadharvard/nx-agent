@@ -7,10 +7,10 @@ Pure functions; `unit_index` is the index of the object's unit in units.json (n1
   symbol_addresses(unit_index, sympair_rows, n1) -> ({symbol: address}, [(symbol, kind, reason)])
       address = n1['sym'][(unit_index, msvc name)], as pinned (an absolute-value pin keeps its ABSOLUTE flag bit).
       kinds thunk, vtable, gcc, internal have no exe twin by definition: unbound, reason as in NO_TWIN, not an error.
-      Other rows without an address: unbound with the kind's own `unnamed:*` text, 'no MSVC name', or 'not in N1'.
+      Other rows without an address: unbound with the kind's own `nodecor:*` text, 'no MSVC name', or 'not in N1'.
       One symbol with two different addresses or names is a ValueError.
   vtable_addresses(unit_index, vtpair_rows, n1) -> ({(_ZTV symbol, address point): vftable address}, [(ztv, point, reason)])
-      through n1['vt'][(unit_index, ??_7 name)]; an empty or unnamed:* name, or a name N1 never pinned, is unbound.
+      through n1['vt'][(unit_index, ??_7 name)]; an empty or nodecor:* name, or a name N1 never pinned, is unbound.
   n3_verdicts(unit_index, n3_rows, symbol_addresses) -> {exe address: (verdict, [inlined exe addresses])}
       the shape bodysel.decide takes as `n3`.  A row whose symbol has no exe address is not an exe function: ignored.
       An ok / ok+E row with an inlined symbol that has no exe address keeps its verdict only when every n3 row of that
@@ -37,7 +37,7 @@ def symbol_addresses(unit_index, rows, n1):
             raise ValueError('symbol %s has two rows with different names or kinds' % sym)
         if kind in NO_TWIN:
             unbound.append((sym, kind, NO_TWIN[kind]))
-        elif kind.startswith('unnamed:'):
+        elif kind.startswith('nodecor:'):
             unbound.append((sym, kind, kind))
         elif not ms:
             unbound.append((sym, kind, 'no MSVC name'))
@@ -51,7 +51,7 @@ def symbol_addresses(unit_index, rows, n1):
 def vtable_addresses(unit_index, rows, n1):
     out, unbound = {}, []
     for ztv, ap, ms, _ in rows:
-        if not ms or ms.startswith('unnamed:'):
+        if not ms or ms.startswith('nodecor:'):
             unbound.append((ztv, ap, ms or 'no MSVC name'))
         elif (unit_index, ms) not in n1['vt']:
             unbound.append((ztv, ap, 'not in N1'))

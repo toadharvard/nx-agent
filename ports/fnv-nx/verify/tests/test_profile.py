@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for the recipe profile (recipe.expand_profile, effective deltas, RECIPE.md "Profiles"): the expanded recipe of a root that names its profile
 is the recipe that spelled every profile field (so every stage key, a function of the expanded values, is unchanged), a restated profile field is red,
 and the variant deltas flags_add / defines_add append. Pure: no sandbox. Plain script, one PASS/FAIL line per case."""
@@ -23,15 +24,14 @@ def check(name, ok, detail=""):
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
 PIN = recipe.load_pin(REPO)
 EXT = PIN["external"]
-RT = PIN["runtime"]
 LEGACY = {   # the loader recipe as it was written before profiles: every profile field spelled
     "format": "fnvnx-recipe/1",
-    "compiler": {"external": EXT["name"], "cc": PIN["cc"], "cxx": PIN["cxx"]},
+    "compiler": {"external": EXT["name"], "cc": recipe.pin_drivers()[0], "cxx": recipe.pin_drivers()[1]},
     "flags": {"c": ["-O2"], "cxx": [], "asm": []},
     "include": ["ports/fnv-nx/loader/include"],
     "units": "all",
     "plugins": [{"name": n} for n in recipe.PLUGIN_SOURCES],
-    "external": [dict(EXT), dict(RT)],
+    "external": [dict(EXT)],
 }
 NEW = {"format": "fnvnx-recipe/1", "profile": "guest", "flags": {"c": ["-O2"], "cxx": [], "asm": []}, "include": ["ports/fnv-nx/loader/include"], "units": "all"}
 
@@ -42,7 +42,7 @@ check("the expansion is idempotent and has no profile key", recipe.expand_profil
 more = {"name": "libnx", "repo": "r", "ref": "x", "commit": "c", "tree_sha256": "t", "at": "/ext/libnx"}
 r2 = dict(NEW, external=[more])
 ex2, err2 = recipe.expand_profile(r2, PIN)
-check("the root's own externals follow the profile's", not err2 and ex2["external"] == [dict(EXT), dict(RT), more], ex2["external"])
+check("the root's own externals follow the profile's", not err2 and ex2["external"] == [dict(EXT), more], ex2["external"])
 
 for k, v in (("compiler", {"cc": "x"}), ("plugins", [{"name": "fnvnx_ftoi"}])):
     _, e = recipe.expand_profile(dict(NEW, **{k: v}), PIN)

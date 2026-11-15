@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/lib/sha256/build.json ports/fnv-nx/lift/descs ports/fnv-nx/link
+# reads: ports/fnv-nx/loader/build.json ports/fnv-nx/platform/build.json ports/fnv-nx/render/d3d9/build.json ports/fnv-nx/render/gl4/build.json
+# reads: ports/fnv-nx/render/nxgpu/build.json ports/fnv-nx/render/pair/build.json ports/fnv-nx/render/shaders/translator/build.json
+# reads: ports/fnv-nx/render/smscan/build.json ports/fnv-nx/rt/guest/build.json ports/fnv-nx/rt/guest/crt0.s ports/fnv-nx/rt/guest_main/build.json
+# reads: ports/fnv-nx/shim/build.json ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for the `descs` fact (lift/descs, recipe `objects_of`, `forbid_sections`): the sorted union of the `.fnvnx.disp` sections of every
 admitted product root's objects but the excepted ones, a recipe output that a consumer takes by `uses`. Toy roots in temp git repos, real sandbox
 stages. Plain script: exit 0 on pass, one PASS/FAIL line per case. Needs root (sandbox). Scratch: test_recipe's BASE, removed at exit."""
@@ -26,8 +31,7 @@ USE = ("import os, sys\nt = open('/uses/%s/descs' % sys.argv[1]).read()\n"
 def drec(**kw):
     r = json.load(open(REC_SRC))
     r["generated"][0]["tool"] = D + "/descs.py"
-    r["generated"][0]["objects_of"] = {"section": ".fnvnx.disp"}
-    r["flags"] = TL.LIB_REC["flags"]
+    r["generated"][0]["objects_of"] = {"except": [ROOT]}
     r.update(kw)
     return r
 
@@ -82,12 +86,12 @@ def main():
                              ("unsorted lines", b"this:v:i\nstack:i:\n", "not sorted"), ("duplicate lines", b"stack:i:\nstack:i:\n", "not sorted"),
                              ("a non-ASCII byte", b"stack:i:\n\xc3\xa9\n", "not ASCII"), ("an empty line", b"stack:i:\n\nthis:v:i\n", "outside the grammar")):
         try:
-            DT.read_section(data, ".fnvnx.disp")
+            DT.read_section(data)
             ok = False
         except ValueError as e:
             ok = word in str(e)
         check("descs.py section: %s is red" % what, ok)
-    check("descs.py section: the empty section is no descriptor, a valid one is read", DT.read_section(b"", ".fnvnx.disp") == [] and DT.read_section(b"stack:i:\nthis:v:i\n", ".fnvnx.disp") == ["stack:i:", "this:v:i"])
+    check("descs.py section: the empty section is no descriptor, a valid one is read", DT.read_section(b"") == [] and DT.read_section(b"stack:i:\nthis:v:i\n") == ["stack:i:", "this:v:i"])
 
     subprocess.run(["git", "init", "-q", "--bare", BASE + "/artifacts.git"], check=True)
     os.environ["ARTIFACTS_URL"] = BASE + "/artifacts.git"
@@ -110,10 +114,10 @@ def main():
     check("a newly admitted product root's descriptors enter the union (no list names it)", r3["status"] == "green" and b"stack:d:d\n" in used_text(r3) and r3["stage_keys"] != r["stage_keys"],
           TL.err_text(r3))
     # ---- the excepted root: its own section is forbidden, so the exception loses nothing
-    rf = recipe.build(repo_of("dc", ROOTS, crec=consumer()), ROOT, SS, BASE + "/o-dc")
-    check("a consumer without the fact section is green", rf["status"] == "green", TL.err_text(rf))
-    rr = recipe.build(repo_of("de", ROOTS, crec=consumer(), extra={"toy/h.S": ASM % "stack:i:\\n"}), ROOT, SS, BASE + "/o-de")
-    check("a consumer object with the fact section (objects_of.section of the producer it uses) is red, stage forbid:<root>, derived: no recipe names it", rr["status"] == "red" and rr["failure"]["stage"] == "forbid:" + ROOT,
+    rf = recipe.build(repo_of("dc", ROOTS, crec=consumer(forbid_sections=[".fnvnx.disp"])), ROOT, SS, BASE + "/o-dc")
+    check("forbid_sections: a root without the section is green", rf["status"] == "green", TL.err_text(rf))
+    rr = recipe.build(repo_of("de", ROOTS, crec=consumer(forbid_sections=[".fnvnx.disp"]), extra={"toy/h.S": ASM % "stack:i:\\n"}), ROOT, SS, BASE + "/o-de")
+    check("forbid_sections: an object of the root with .fnvnx.disp is red, stage forbid:<root> (the cycle guard of lift/bridges)", rr["status"] == "red" and rr["failure"]["stage"] == "forbid:" + ROOT,
           TL.err_text(rr))
     # ---- malformed facts are red at the generate stage, naming the object
     for i, (what, body) in enumerate((("no final LF", '.section .fnvnx.disp,"a",%progbits\n.ascii "stack:i:"\n'), ("a line outside the grammar", ASM % "bogus\\n"),
@@ -122,10 +126,10 @@ def main():
         check("a malformed section (%s) makes the consumer red at the descs generate stage, naming the object" % what,
               rm["status"] == "red" and "gen:" in str(rm["failure"]) and "e.S" in str(rm["failure"]), TL.err_text(rm))
     # ---- checks
-    e1 = recipe.check(consumer(forbid_sections=[".fnvnx.disp"]), ROOT, recipe.tracked(ra), adm, None, ra)
-    check("forbid_sections is no key any more: the sections a root may not hold are derived from the facts it uses", any("forbid_sections" in e for e in e1), e1)
-    e2 = recipe.check(drec(generated=[dict(drec()["generated"][0], objects_of={"except": [ROOT]})]), D, recipe.tracked(ra), adm, None, ra)
-    check("objects_of: a root excluded by name (except) is a check error: the universe is derived", any("objects_of" in e for e in e2), e2)
+    e1 = recipe.check(consumer(forbid_sections=[]), ROOT, recipe.tracked(ra), adm, None, ra)
+    check("forbid_sections: an empty list is a check error", any("forbid_sections" in e for e in e1), e1)
+    e2 = recipe.check(drec(generated=[dict(drec()["generated"][0], objects_of={"except": [T + "ghost"]})]), D, recipe.tracked(ra), adm, None, ra)
+    check("objects_of: an except that is no admitted product root is a check error", any("objects_of" in e for e in e2), e2)
     cr = dict(TL.LIB_REC, uses=[{"root": D, "output": "descs"}])
     rc_ = repo_of("cy", {PA: ROOTS[PA]}, rec=cr)
     cyc = recipe.check(cr, PA, recipe.tracked(rc_), recipe.load_admit(rc_), None, rc_)

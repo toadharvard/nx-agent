@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/lib/sha256/build.json ports/fnv-nx/link
+# reads: ports/fnv-nx/loader/build.json ports/fnv-nx/platform/build.json ports/fnv-nx/render/d3d9/build.json ports/fnv-nx/render/gl4/build.json
+# reads: ports/fnv-nx/render/nxgpu/build.json ports/fnv-nx/render/pair/build.json ports/fnv-nx/render/shaders/translator/build.json
+# reads: ports/fnv-nx/render/smscan/build.json ports/fnv-nx/rt/guest/build.json ports/fnv-nx/rt/guest_main/build.json ports/fnv-nx/shim/build.json
+# reads: ports/fnv-nx/shim/include ports/fnv-nx/toolchain/addr/fnvnx_addr.cc ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc
+# reads: ports/fnv-nx/toolchain/ftoi/f2i_builtins.inc ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc ports/fnv-nx/toolchain/layout/crossing_terms.inc
+# reads: ports/fnv-nx/toolchain/layout/decltype_spell.inc ports/fnv-nx/toolchain/layout/fnvnx_layout.cc ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json
+# reads: ports/fnv-nx/toolchain/names/fnvnx_names.cc ports/fnv-nx/toolchain/order/atomic_order.inc ports/fnv-nx/toolchain/order/fnvnx_frame.h
+# reads: ports/fnv-nx/toolchain/order/fnvnx_order.cc ports/fnv-nx/toolchain/pi/fnvnx_pi.cc ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc
+# reads: ports/fnv-nx/toolchain/tests ports/fnv-nx/verify
 """Test of the four sse2neon float -> integer forms (_mm_cvt_ps2pi / _mm_cvtps_pi32, _mm_cvtps_pi16, _mm_cvtps_pi8, _mm_cvt_ss2si) through the real
 shim/include/fnvnx_compat.h and the pinned sse2neon (fnv-nx-build tools/sse2neon), built by the recipe with the msvcmodel compiler and the full native
 plugin set. Static: the unit builds, fnvnx_ftoi rewrote every NEON target builtin the forms reach (no finding), each form's function holds the rule's compare and

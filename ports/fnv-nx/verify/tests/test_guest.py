@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/addr/fnvnx_addr.cc ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc
+# reads: ports/fnv-nx/toolchain/ftoi/f2i_builtins.inc ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc ports/fnv-nx/toolchain/layout/crossing_terms.inc
+# reads: ports/fnv-nx/toolchain/layout/decltype_spell.inc ports/fnv-nx/toolchain/layout/fnvnx_layout.cc ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json
+# reads: ports/fnv-nx/toolchain/names/fnvnx_names.cc ports/fnv-nx/toolchain/order/atomic_order.inc ports/fnv-nx/toolchain/order/fnvnx_frame.h
+# reads: ports/fnv-nx/toolchain/order/fnvnx_order.cc ports/fnv-nx/toolchain/pi/fnvnx_pi.cc ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc ports/fnv-nx/verify
 """Tests for the guest-root rule of verify/recipe.py: a product root with "target": "guest" is compiled, C and C++, by the external compiler of
 verify/guest_compiler.json (GCC with msvcmodel.patch, toolchain/msvcmodel), the plugins are built against ITS plugin headers, and the whole
 chain is deterministic and cached. The compiler is fetched by the pin of verify/guest_compiler.json (exact commit of fnv-nx-build from
@@ -19,7 +24,7 @@ from test_plugins import BASE, ROOT, T, REC, PLUGS, SRC, check, git, w, make_rep
 
 
 def guest_rec(ext, **kw):
-    r = mut(compiler={"external": "gcc-msvcmodel", "cc": "bin/aarch64-linux-gnu-gcc", "cxx": "bin/aarch64-linux-gnu-g++"}, external=[ext], **kw)
+    r = mut(compiler={"external": "gcc-msvcmodel", "cc": recipe.pin_drivers()[0], "cxx": recipe.pin_drivers()[1]}, external=[ext], **kw)
     if "flags" not in kw:   # every guest root carries -Werror=attributes in flags.c and flags.cxx
         # a guest build.json holds only per-root flags (recipe.PER_ROOT); every semantic flag comes from the pin and is appended by the recipe
         r["flags"] = {"c": ["-O2", recipe.WERROR_ATTR], "cxx": ["-O2", recipe.SDD_DEFINE, recipe.WERROR_ATTR], "asm": []}
@@ -46,7 +51,7 @@ def guest_repo(name, rec, pin, target="guest", files=None):
 def main():
     pin_real = json.load(open(os.path.join(REAL, T + "verify/guest_compiler.json")))
     ext = {"name": "gcc-msvcmodel", "repo": "fnv-nx-build", "ref": "tools/gcc-ilp32-msvcmodel", "commit": "a" * 40, "tree_sha256": "b" * 64, "at": "/ext/gcc"}
-    pin = {"format": "fnvnx-guest-compiler/1", "external": ext, "cc": "bin/aarch64-linux-gnu-gcc", "cxx": "bin/aarch64-linux-gnu-g++"}
+    pin = {"format": "fnvnx-guest-compiler/1", "external": ext}
     rec = guest_rec(ext)
     # --- the rule, validation only (no compiler needed)
     g = guest_repo("g1", rec, pin)
@@ -77,18 +82,10 @@ def main():
             check("guest root with %s in flags.%s is invalid" % (f, k), any("flags.%s: %s downgrades" % (k, f) in x for x in errs(g, bad)), errs(g, bad))
     check("host root may carry -fpermissive", not [x for x in errs(host, dict(REC, flags=dict(REC["flags"], cxx=REC["flags"]["cxx"] + ["-fpermissive"]))) if "downgrades" in x])
     check("host root needs no -Werror=attributes", not [x for x in errs(host, REC) if "attributes" in x], errs(host, REC))
-    # --- the runtime external (guest libc/libstdc++) and the sample build.json of the platform root
-    rtp = pin_real["runtime"]
+    # --- the sample build.json of the platform root (the compiler tree holds the runtime: one external)
     sample = json.load(open(os.path.join(REAL, T + "verify/samples/platform.build.json")))
     gs = guest_repo("gs", sample, pin_real, files={ROOT + "/a.cc": SRC})
     check("sample platform build.json is accepted by recipe check", errs(gs, sample) == [], errs(gs, sample))
-    bad_rt = json.loads(json.dumps(sample))
-    bad_rt["external"] = [x if x["name"] != rtp["name"] else dict(x, commit="e" * 40) for x in bad_rt["external"]]
-    check("a recipe whose runtime external is not the pinned one is red", any("not the pinned runtime" in x for x in errs(gs, bad_rt)), errs(gs, bad_rt))
-    no_rt = json.loads(json.dumps(sample))
-    no_rt["external"] = [x for x in no_rt["external"] if x["name"] != rtp["name"]]
-    no_rt["include"] = []
-    check("a guest root may leave the runtime out", not [x for x in errs(gs, no_rt) if "runtime" in x], errs(gs, no_rt))
     # --- the real compiler, by the pin of the checkout (no environment switch, no skip)
     pin = json.load(open(os.path.join(REAL, T + "verify/guest_compiler.json")))
     ext = pin["external"]
@@ -119,14 +116,15 @@ def main():
             ok["flags"][k] = ok["flags"][k] + [f]
             check("guest root with %s in flags.%s is accepted (per-root class)" % (f, k), not [x for x in errs(gr, ok) if "per-root" in x], errs(gr, ok))
     # the recipe's semantic set per language is the driver's own answer: C drops what the driver says is C++-only; C++ and asm keep all
-    drv = lambda n: os.path.join(prefix, "bin/aarch64-linux-gnu-" + n)  # noqa: E731
+    drv = lambda n: os.path.join(prefix, dict(zip(("gcc", "g++"), recipe.pin_drivers()))[n])  # noqa: E731
     sc, sx, sa = (recipe.semantics_for(drv(d), k) for d, k in (("gcc", "c"), ("g++", "cxx"), ("gcc", "asm")))
     check("semantics_for: C++ and asm keep the whole set, C drops only what the driver says does not apply", sx == list(recipe.SEMANTICS_FLAGS) and sa == sx
           and sc == [f for f in sx if f != "-fno-sized-deallocation"], (len(sc), len(sx), len(sa), set(sx) - set(sc)))
     for k, d in (("c", "gcc"), ("cxx", "g++"), ("asm", "gcc")):   # the compiler's own statement of the data model under the recipe's flags
         m = recipe.predefined(drv(d), k, recipe.semantics_for(drv(d), k))
         check("predefined %s: size_t unsigned int, ptrdiff_t int, plain char signed" % k, m["__SIZE_TYPE__"] == "unsigned int" and m["__PTRDIFF_TYPE__"] == "int" and "__CHAR_UNSIGNED__" not in m, m.get("__SIZE_TYPE__"))
-    check("without -fsigned-char the compiler's plain char is unsigned (the gate's clause has something to catch)", "__CHAR_UNSIGNED__" in recipe.predefined(drv("gcc"), "c", ["-mabi=ilp32"]))
+    check("the compiler's plain char is signed by its own data model (DATAMODEL), and -funsigned-char makes it unsigned (the gate's clause has something to catch)",
+          "__CHAR_UNSIGNED__" not in recipe.predefined(drv("gcc"), "c", ["-mabi=ilp32"]) and "__CHAR_UNSIGNED__" in recipe.predefined(drv("gcc"), "c", ["-mabi=ilp32", "-funsigned-char"]))
     try:
         recipe.semantics_for(drv("gcc"), "c", ["-mabi=ilp32", "-fnosuchflag"])
         check("semantics_for: a flag the driver does not know is an error", False)

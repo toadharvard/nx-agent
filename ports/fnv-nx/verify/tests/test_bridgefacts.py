@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/bridgefacts/build.json ports/fnv-nx/bridgefacts/com/com_spec.json ports/fnv-nx/contract ports/fnv-nx/link
+# reads: ports/fnv-nx/loader/build.json ports/fnv-nx/platform/build.json ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """bridgefacts (tool root): the inputs the bridge table derives from live below every consumer. Pure: reads the recipes and runs comrows.py on the
 real spec and on toys; no private input."""
 import json

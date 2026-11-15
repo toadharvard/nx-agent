@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/lib/sha256/build.host.json ports/fnv-nx/lib/sha256/build.json
+# reads: ports/fnv-nx/link ports/fnv-nx/loader/build.json ports/fnv-nx/platform/build.json ports/fnv-nx/render/d3d9/build.json
+# reads: ports/fnv-nx/render/gl4/build.json ports/fnv-nx/render/nxgpu/build.guest.json ports/fnv-nx/render/nxgpu/build.json
+# reads: ports/fnv-nx/render/pair/build.host.json ports/fnv-nx/render/pair/build.json ports/fnv-nx/render/shaders/translator/build.host.json
+# reads: ports/fnv-nx/render/shaders/translator/build.json ports/fnv-nx/render/smscan/build.host.json ports/fnv-nx/render/smscan/build.json
+# reads: ports/fnv-nx/rt/guest/build.json ports/fnv-nx/rt/guest_main/build.json ports/fnv-nx/shim/build.json
+# reads: ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for the guest link profile (link/guest.json, recipe.with_guest_link, the guest part of recipe.check): one fact for every guest link.
 Pure: the real checkout's profile and admit.json, synthetic roots, no sandbox."""
 import copy
@@ -30,12 +37,10 @@ EXE, TST, HOST = "ports/fnv-nx/gx", "ports/fnv-nx/gt", "ports/fnv-nx/hx"
 roots = dict(roots)
 for p, tg, cl in ((EXE, "guest", "product"), (TST, "guest", "test"), (HOST, "host", "product")):
     roots[p] = {"path": p, "class": cl, "target": tg}
-RT = dict(pin["runtime"])
+RT = dict(pin["external"])
 
 
-def rec(output, entry="fnvnx_image_main", **lk):
-    if entry:
-        lk["entry"] = entry   # a guest image declares its entry (a host root, and a test of the missing entry, pass entry=None)
+def rec(output, **lk):
     return {"format": recipe.FORMAT, "compiler": {}, "flags": {}, "include": [], "units": "all", "external": [RT],
             "link": dict({"output": output, "flags": ["-m", "aarch64linux32"]}, **lk)}
 
@@ -48,26 +53,17 @@ check("the profile is valid", recipe.guest_link_errors(prof, pin, files, roots) 
 check("the profile holds the script only: no stored libraries", set(prof) == {"script"}, prof)
 check("a guest exe root with no script and no libs has no link error", link_errs(rec("a.elf"), EXE) == [], link_errs(rec("a.elf"), EXE))
 check("a guest test root likewise", link_errs(rec("t.elf"), TST) == [], link_errs(rec("t.elf"), TST))
-for nm, root_, ent in (("without entry", EXE, None), ("with a non-identifier entry", TST, "a-b"), ("with the runtime's own alias as entry", TST, recipe.IMAGE_ENTRY)):
-    e = link_errs(rec("t.elf", entry=ent), root_)
-    check("a guest image %s is red" % nm, any("link.entry" in x for x in e), e)
-e = link_errs(rec("h.elf", kind="exe", flags=["-m", "aarch64linux"], entry="main"), HOST)
-check("a host root that declares entry is red", any("link.entry is the entry of a guest image" in x for x in e), e)
 e = link_errs(rec("a.elf", script="link.ld"), EXE)
 check("a guest root that declares script is red", any("link.script is declared" in x for x in e), e)
 e = link_errs(rec("a.elf", libs={"names": []}), TST)
 check("a guest root that declares libs is red", any("link.libs is declared" in x for x in e), e)
-r = rec("a.elf")
-r["external"] = []
-e = link_errs(r, EXE)
-check("a guest root without the runtime external is red", any("not declared in external" in x for x in e), e)
-e = link_errs(rec("h.elf", entry=None, kind="exe", flags=["-m", "aarch64linux"]), HOST)
+e = link_errs(rec("h.elf", kind="exe", flags=["-m", "aarch64linux"]), HOST)
 check("a host root is unaffected (no profile text in its errors, script still required for pie)", not any("guest.json" in x for x in e), e)
-check("a host pie root without script is still red", any("link must be" in x for x in link_errs(rec("h.elf", entry=None), HOST)))
+check("a host pie root without script is still red", any("link must be" in x for x in link_errs(rec("h.elf"), HOST)))
 a, t, h = (recipe.with_guest_link(rec(o), p, roots, REPO) for o, p in (("a.elf", EXE), ("t.elf", TST), ("h.elf", HOST)))
 ka = {k: v for k, v in a["link"].items() if k != "output"}
 kt = {k: v for k, v in t["link"].items() if k != "output"}
-check("guest exe and guest test get identical script and a derive marker with the pinned runtime (links differ only by output and objects)", ka == kt and ka["libs"] == {"external": pin["runtime"]["name"], "derive": True}
+check("guest exe and guest test get identical script and a derive marker with the pinned runtime (links differ only by output and objects)", ka == kt and ka["libs"] == {"external": pin["external"]["name"], "derive": True}
       and os.path.isfile(os.path.join(REPO, ka["script"])), (ka, kt))
 check("a host root's link is unchanged", h == rec("h.elf"))
 check("a profile that stores libs is red (they are derived, never stored)", recipe.guest_link_errors(dict(prof, libs={}), pin, files, roots) != [])

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/verify
 """Tests for the one set of files of a pinned python module (envcheck.record_files: the wheel's RECORD): the digest, the mount and the red cases,
 on a toy wheel that keeps a library in a sibling *.libs directory (as gmpy2 and numpy do). No game data."""
 import base64

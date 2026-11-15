@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/lib/sha256/build.json ports/fnv-nx/link
+# reads: ports/fnv-nx/loader/build.json ports/fnv-nx/platform/build.json ports/fnv-nx/render/d3d9/build.json ports/fnv-nx/render/gl4/build.json
+# reads: ports/fnv-nx/render/nxgpu/build.json ports/fnv-nx/render/pair/build.json ports/fnv-nx/render/shaders/translator/build.json
+# reads: ports/fnv-nx/render/smscan/build.json ports/fnv-nx/rt/guest/build.json ports/fnv-nx/rt/guest_main/build.json ports/fnv-nx/shim/build.json
+# reads: ports/fnv-nx/toolchain/addr/fnvnx_addr.cc ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc ports/fnv-nx/toolchain/ftoi/f2i_builtins.inc
+# reads: ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc ports/fnv-nx/toolchain/gcc ports/fnv-nx/toolchain/layout/crossing_terms.inc
+# reads: ports/fnv-nx/toolchain/layout/decltype_spell.inc ports/fnv-nx/toolchain/layout/fnvnx_layout.cc ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json
+# reads: ports/fnv-nx/toolchain/msvcmodel/build.sh ports/fnv-nx/toolchain/msvcmodel/msvcmodel.patch ports/fnv-nx/toolchain/names/fnvnx_names.cc
+# reads: ports/fnv-nx/toolchain/order/atomic_order.inc ports/fnv-nx/toolchain/order/fnvnx_frame.h ports/fnv-nx/toolchain/order/fnvnx_order.cc
+# reads: ports/fnv-nx/toolchain/pi/fnvnx_pi.cc ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc ports/fnv-nx/verify
 """Tests for the plugin stage of verify/recipe.py (fnvnx_order, fnvnx_ftoi) on toy roots in temp git repos. Plain script: exit 0 on pass, one
 PASS/FAIL line per case. Needs root (sandbox) and the compilers of verify/env.json. Scratch: mkdtemp, removed at exit.
 Cases: (a) the .so is byte-equal in two cold stores and a warm build runs no stage; (b) a volatile access is ldar/stlr; (c) float -> int is
@@ -33,7 +43,7 @@ PLUGS = [{"name": n} for n in recipe.PLUGIN_SOURCES]   # a root names only the p
 P = {p["name"]: p for p in PLUGS}
 SRC = "volatile int g;\nint rd() { return g; }\nvoid wr(int v) { g = v; }\nint f2i(float f) { return (int)f; }\nint ic(int (*f)(int)) { return f(1); }\nstruct S { int a; char b; };\nS gs;\nregister int hr asm(\"x27\");\nregister unsigned eax asm(\"x19\");\nint hrw(int v) { hr = v; eax = v + 1; return hr + eax; }\nstatic int arr[7];\nint ua(int i) { return arr[i]; }\nint lf() { static char ls[3]; return ls[0]; }\nextern int ex;\nint uex() { return ex; }\nextern int dg[];\nint udg() { return dg[0]; }\n"
 REC = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
-       "flags": {"c": [], "cxx": ["-O2", "-mabi=ilp32", recipe.SDD_DEFINE, "-fno-devirtualize"], "asm": []}, "include": [], "units": "all",
+       "flags": {"c": [], "cxx": ["-O2", "-mabi=ilp32"] + list(recipe.SDD_FLAGS), "asm": []}, "include": [], "units": "all",
        "plugins": PLUGS}
 
 
@@ -58,14 +68,13 @@ def make_repo(name, rec, origin, files=None, extra_roots=(), target="host"):
     repo = os.path.join(BASE, name)
     os.makedirs(repo)
     git(repo, "init", "-q")
-    for n in list(recipe.plugin_files(REAL)) + [recipe.ANALYSIS_PLUGIN[1]]:   # the real plugin sources and the files they include (plugin_inputs), and the analysis plugin every root with units builds
+    for n in list(recipe.PLUGIN_SOURCES.values()) + [i for v in recipe.PLUGIN_INPUTS.values() for i in v] + [recipe.ANALYSIS_PLUGIN[1]]:   # the real plugin sources and the analysis plugin the build stores
         os.makedirs(os.path.dirname(os.path.join(repo, n)), exist_ok=True)
         shutil.copyfile(os.path.join(REAL, n), os.path.join(repo, n))
     for k, v in dict({ROOT + "/a.cc": SRC}, **(files or {})).items():
         if v is not None:
             w(repo, k, v)
     w(repo, ROOT + "/build.json", json.dumps(rec, indent=1))
-    w(repo, recipe.GUEST_PIN, open(os.path.join(REAL, recipe.GUEST_PIN)).read())   # the game's compiler pin: a guest root reads it
     w(repo, recipe.ENV_JSON, open(os.path.join(REAL, recipe.ENV_JSON)).read())   # the declared environment: a build runs only on the machine it describes
     root = {"path": ROOT, "class": "product", "target": target, "recipe": ROOT + "/build.json"}
     if origin is not None:
@@ -102,11 +111,8 @@ def mut(**kw):
 
 def main():
     # --- gate rule, validation level (no build)
-    repo = make_repo("native", REC, "native", target="guest")
-    pl = lambda e: [x for x in e if "plugin" in x or "FNVNX_SDD" in x]  # noqa: E731  the rule under test: the plugin set of the TARGET PROFILE
-    check("native guest root with the full plugin set has no plugin error", pl(errs(repo, REC)) == [], pl(errs(repo, REC)))
-    hrepo = make_repo("native-host", REC, "native", target="host")
-    check("target profile: a host root with no plugin has no plugin error", pl(errs(hrepo, mut(plugins=[]))) == [], pl(errs(hrepo, mut(plugins=[]))))
+    repo = make_repo("native", REC, "native")
+    check("native root with both plugins is valid", errs(repo, REC) == [], errs(repo, REC))
     for gone in recipe.PLUGIN_SOURCES:
         r = mut(plugins=[p for p in PLUGS if p["name"] != gone])
         e = errs(repo, r)
@@ -114,46 +120,21 @@ def main():
     check("native root without plugins is red", len([x for x in errs(repo, mut(plugins=[])) if "does not load" in x]) == len(recipe.PLUGIN_SOURCES))
     # recipe.py is the only declaration of source, inputs and arguments: an entry that carries one is red, whatever its value (never compared)
     for key, val, pin in (("args", {"args": "ltr"}, "PLUGIN_ARGS"), ("args", dict(recipe.PLUGIN_ARGS["fnvnx_order"]), "PLUGIN_ARGS"),
-                          ("source", recipe.PLUGIN_SOURCES["fnvnx_order"], "PLUGIN_SOURCES"), ("inputs", [], "plugin_inputs, derived from the source"),
-                          ("inputs", list(recipe.plugin_inputs(recipe.PLUGIN_SOURCES["fnvnx_ftoi"], recipe.tracked(REAL), recipe.load_admit(REAL), REAL)), "plugin_inputs, derived from the source")):
+                          ("source", recipe.PLUGIN_SOURCES["fnvnx_order"], "PLUGIN_SOURCES"), ("inputs", [], "PLUGIN_INPUTS"),
+                          ("inputs", list(recipe.PLUGIN_INPUTS["fnvnx_ftoi"]), "PLUGIN_INPUTS")):
         nm = "fnvnx_ftoi" if key == "inputs" else "fnvnx_order"
         e = errs(repo, mut(plugins=[dict(p, **{key: val}) if p["name"] == nm else p for p in PLUGS]))
         check("a root entry with %s=%r is red: fixed by recipe.py (%s)" % (key, val, pin), any(("plugin %s: %s %s fixed by recipe.py (%s)" % (nm, key, "are" if key == "inputs" else "is", pin)) in x for x in e), e)
     check("a plugin outside recipe.PLUGIN_SOURCES is red", any("is not a plugin of recipe.py" in x for x in errs(repo, mut(plugins=PLUGS + [{"name": "fnvnx_other"}]))))
     # the stage construction takes source, inputs and arguments from recipe.py alone
-    dec = {d["name"]: d for d in recipe.plugin_decls(PLUGS, "native", recipe.tracked(REAL), recipe.load_admit(REAL), REAL)}
-    check("plugin_decls: source, inputs and arguments are recipe.py's", all(dec[n]["source"] == recipe.PLUGIN_SOURCES[n] and dec[n]["inputs"] == recipe.plugin_inputs(recipe.PLUGIN_SOURCES[n], recipe.tracked(REAL), recipe.load_admit(REAL), REAL)
+    dec = {d["name"]: d for d in recipe.plugin_decls(PLUGS, "native")}
+    check("plugin_decls: source, inputs and arguments are recipe.py's", all(dec[n]["source"] == recipe.PLUGIN_SOURCES[n] and dec[n]["inputs"] == recipe.PLUGIN_INPUTS.get(n, [])
           and dec[n]["args"] == recipe.plugin_args("native")[n] for n in recipe.PLUGIN_SOURCES))
     check("plugin_decls: fnvnx_ftoi has f2i_builtins.inc as input, so changing it changes the key of every root that loads the plugin",
           any(i.endswith("f2i_builtins.inc") for i in dec["fnvnx_ftoi"]["inputs"]), dec["fnvnx_ftoi"]["inputs"])
-    # plugin_inputs: the include closure of a plugin source, from its #include lines (no list)
-    import tempfile
-    with tempfile.TemporaryDirectory() as td:
-        def put(rel, text):
-            os.makedirs(os.path.dirname(os.path.join(td, rel)), exist_ok=True)
-            open(os.path.join(td, rel), "w").write(text)
-        put("T/names/n.cc", '#include <gcc-plugin.h>\n#include "../layout/c.inc"\nint x;\n')
-        put("T/layout/c.inc", '#include "d.inc"\n')
-        put("T/layout/d.inc", "int y;\n")
-        put("T/names/bad.cc", '#include "../../O/o.h"\n')
-        put("O/o.h", "int z;\n")
-        put("T/names/gone.cc", '#include "nope.h"\n')
-        fl, rt = ["T/names/n.cc", "T/layout/c.inc", "T/layout/d.inc", "T/names/bad.cc", "O/o.h", "T/names/gone.cc"], {"T": {}, "O": {}}
-        check("plugin_inputs: a quoted include of a file of the same root builds (transitively); angle includes are not inputs",
-              recipe.plugin_inputs("T/names/n.cc", fl, rt, td) == ["T/layout/c.inc", "T/layout/d.inc"], recipe.plugin_inputs("T/names/n.cc", fl, rt, td))
-        put("T/layout/d.inc", "int y2;\n")
-        check("plugin_inputs: a change of an included file leaves the set but the stage mounts its content (key changes)",
-              recipe.plugin_inputs("T/names/n.cc", fl, rt, td) == ["T/layout/c.inc", "T/layout/d.inc"])
-        check("plugin_inputs: a quoted include that names no tracked file is the compiler's (no input)", recipe.plugin_inputs("T/names/gone.cc", fl, rt, td) == [])
-        for src, want in (("T/names/bad.cc", "lies outside the root"),):
-            try:
-                recipe.plugin_inputs(src, fl, rt, td)
-                check("plugin_inputs: %s is a check error" % src, False)
-            except ValueError as e:
-                check("plugin_inputs: %s is a check error (%s)" % (src, want), want in str(e), str(e))
     check("plugins out of load order are red", any("order" in x for x in errs(repo, mut(plugins=PLUGS[::-1]))))
-    check("native root without the fnvnx_sdd define is red", any("lacks " + recipe.SDD_DEFINE in x for x in errs(repo, mut(
-        flags={"c": [], "cxx": [f for f in REC["flags"]["cxx"] if f != recipe.SDD_DEFINE], "asm": []}))))
+    check("native root without a semantics flag is red", any("lacks -fno-devirtualize" in x for x in errs(repo, mut(
+        flags={"c": [], "cxx": [f for f in REC["flags"]["cxx"] if f != "-fno-devirtualize"], "asm": []}))))
     check("-fplugin in flags is red", any("plugin" in x for x in errs(repo, mut(flags={"c": [], "cxx": ["-fplugin=/x.so"], "asm": []}))))
     check("a hand-typed plugin_cxx in a build.json is red (the plugin compiler is recipe.PLUGIN_CXX, derived from env.json)",
           any("plugin_cxx" in x for x in errs(repo, mut(plugin_cxx="x86_64-linux-gnu-g++-13"))) and recipe.PLUGIN_CXX == "x86_64-linux-gnu-g++-13")
@@ -203,18 +184,16 @@ def main():
     check("double -> __int128 fails the build with an FTOI error naming both types", rwd["status"] == "red" and any(
         "FTOI" in x and "double" in x and "__int128" in x for x in rwd["failure"]["stderr"]), rwd.get("failure"))
     check("the ordinary conversions of the same root still compile", "#0x80000000" in f2i)
-    # --- ORDER-CONT: a block-ending statement without a fall-through edge needs no fence; every resumption point begins with dmb ishld
+    # --- ONE FORM: no fence anywhere; an exception landing pad and the setjmp() library call need none (ldar orders by itself)
     cont_src = (
         "#include <setjmp.h>\n"
-        "struct NF { void *jb[5]; };\nstruct C { NF *nf; int v; };\n"
-        "void lj(C *c) { if (c->nf) __builtin_longjmp((void **)c->nf->jb, 1); }\n"
-        "void thrower();\nint sj(void **b, int *p) { if (__builtin_setjmp(b)) return *p; thrower(); return 0; }\n"
+        "void thrower();\n"
         "int tc(int *p) { try { thrower(); } catch (...) { return *p; } return 0; }\n"
-        "struct cpu { int r[4]; };\nregister cpu *cc asm(\"x26\");\nint hl(int v) { register unsigned loc asm(\"x25\") = v; cc->r[1] = loc; return cc->r[1]; }\n"
-        "int sj2(jmp_buf b, int *p) { if (setjmp(b)) return *p; return 0; }\n")
+        "struct cpu { int r[4]; };\nregister cpu *cc asm(\"x26\");\nint hl(int v) { register unsigned loc asm(\"x25\") = v; cc->r[1] = loc; return cc->r[2]; }\n"
+        "int sj2(jmp_buf b, int *p) { if (setjmp(b)) return *p; thrower(); return 0; }\n")
     crepo = make_repo("cont", REC, "native", {ROOT + "/b.cc": cont_src})
     rc_, _ = build(crepo, "C")
-    check("ORDER-CONT: longjmp / setjmp / try-catch fixtures compile with no error", rc_["status"] == "green", rc_.get("failure"))
+    check("ONE FORM: setjmp / try-catch / hard-register fixtures compile with no error", rc_["status"] == "green", rc_.get("failure"))
     if rc_["status"] == "green":
         ob = next(x["object"] for x in rc_["objects"] if x["unit"] == "b.cc")
         syms = {n.split()[-1] for n in subprocess.run(["aarch64-linux-gnu-nm", ob], capture_output=True, text=True).stdout.splitlines()}
@@ -222,20 +201,12 @@ def main():
         def lines(sym):
             sym = next((n for n in syms if sym in n and n.startswith("_Z")), sym)
             return [x.split("\t", 2)[-1].strip() for x in disasm(rc_, sym, "b.cc").split("\n") if "\t" in x]
-        before_ldar = lambda ls: any("dmb\tishld" in x for x in ls) and next(i for i, x in enumerate(ls) if "dmb\tishld" in x) < max(i for i, x in enumerate(ls) if x.startswith("ldar"))  # noqa: E731
-        lj = lines("2ljP1C")
         hl = lines("2hli")
-        check("HARDREG: local register variable plain; the load/store through a register-held pointer stays ordered", not any("dmb" in x and "ishld" in x and False for x in hl) and any("stlr" in x for x in hl) and any("ldar" in x for x in hl), hl)
-        print("DISASM lj:", lj)
-        check("(i) noreturn __builtin_longjmp: no fence needed after it", any(x.startswith("br") or x.startswith("b ") or x.startswith("bl") or x.startswith("ldr") for x in lj) and lj, lj)
-        s2 = lines("2sjPPvPi")
-        check("(ii) __builtin_setjmp: dmb ishld at the receiver, before the load", before_ldar(s2), s2)
+        check("HARDREG: local register variable plain; the load/store through a register-held pointer stays ordered", any("stlr" in x for x in hl) and any("ldar" in x for x in hl), hl)
         tc = lines("2tcPi")
-        check("(iii) catch landing pad: dmb ishld before the load in the catch", before_ldar(tc), tc)
+        check("catch landing pad: ldar and no dmb", any(x.startswith("ldar") for x in tc) and not any(x.startswith("dmb") for x in tc), tc)
         s3 = lines("3sj2P")
-        i3 = [i for i, x in enumerate(s3) if "_setjmp" in x or "setjmp" in x]
-        print("DISASM sj2:", s3, "\nDISASM sj:", s2, "\nDISASM tc:", tc)
-        check("(iv) setjmp(): dmb ishld right after the call", bool(i3) and any("dmb" in x and "ishld" in x for x in s3[i3[0] + 1:i3[0] + 3]), s3)
+        check("setjmp(): a plain call, no dmb", not any(x.startswith("dmb") for x in s3), s3)
     # the plugin is a declared input of the CC stage and its flags are in the stage document
     docs = [json.load(open(p)) for p in glob.glob(os.path.join(BASE, "A", "stage-docs", "*", "*.json"))]
     cc = [d for d in docs if d["stage"] == "cc:a.cc"]

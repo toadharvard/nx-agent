@@ -128,7 +128,7 @@ def judge_objects(objs):
     for (oid, kind), rows in store.items():
         if kind == "sympair":
             for sym, ms, k, df in rows:
-                if ms and k != "data":
+                if ms and k not in ("data", "noemit"):     # noemit: the unit defines it, GCC wrote it nowhere (sympair_kinds.inc): no symbol of the object crosses
                     boundary.setdefault(sym, []).append(oid)
     for sym, oids in sorted(boundary.items()):
         items.append("crossing:" + sym)

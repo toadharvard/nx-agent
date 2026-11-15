@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Gate items as results of the verdict's store (gate_build.memo: GATE_CACHE/memo/<gate>/<key>.json, the key holds everything the item reads).
 memo itself: a miss makes and publishes, a hit reads and does not make, another key makes again, a value that KEEP refuses is not stored, no cache means
 make every time, two processes on one key leave one complete file. exepin on a toy git tree: a second run is a hit (one memo file, under 5 s), one changed
@@ -31,6 +32,7 @@ def files(cache, gate):
 
 def main():
     tmp = tempfile.mkdtemp(prefix="gate-memo-")
+    __import__('atexit').register(__import__('shutil').rmtree, tmp, True)   # a test leaves no scratch behind
     c = os.path.join(tmp, "cache")
     made = []
 
