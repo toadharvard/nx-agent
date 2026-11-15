@@ -1,0 +1,3 @@
+# fnv-nx-build tools/libnx (upstream libnx b156b477): commit and the tree_sha256 of its git-archive checkout (verify/cas.py ingest)
+LIBNX_COMMIT=518bf11
+LIBNX_TREE_SHA256=28642e369e75dfe075aac6ee427a82ee9e0cbbe6941be36b0e977da3c96d9298

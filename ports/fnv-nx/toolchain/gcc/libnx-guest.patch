@@ -1,0 +1,733 @@
+# libnx source rules, patch -p1 in the libnx tree root:
+# (1) asm: x19..x27 belong to the guest, no libnx asm writes them (same as x19-x27.patch);
+# (2) mm.c: the enum is int under the exe data model, so the pointer conditional of the original does not type: it takes the value instead;
+# (3) data model (C9, W1): libnx is written for a 64-bit process. In the ILP32 guest every address is below 2^32 (NPDM 32-bit address space, GCC
+#     zero-extends pointers), so a pointer is widened to a kernel/wire u64 as (u64)(uintptr_t)p and a kernel/loader address becomes a pointer as
+#     (T*)(uintptr_t)v; a shift or a bound that needs more than 32 bits is computed in u64 (hipc.h descriptors, BITL, virtmem region bounds, the
+#     1.0.0 probe svcUnmapMemory with u64 arguments); a kernel output goes through a temporary of the callee's declared width (svcGetInfo u64,
+#     IPC u32 outputs), never through a differently sized object. C9 proves: 0 warnings of -Wpointer-to-int-cast, -Wint-to-pointer-cast,
+#     -Wshift-count-overflow, -Woverflow, -Wincompatible-pointer-types in the libnx build.
+--- a/nx/include/switch/sf/hipc.h
++++ b/nx/include/switch/sf/hipc.h
+@@ -109,8 +109,8 @@
+ {
+     return (HipcStaticDescriptor){
+         .index        = index,
+-        .address_high = (u32)((uintptr_t)buffer >> 36),
+-        .address_mid  = (u32)((uintptr_t)buffer >> 32),
++        .address_high = (u32)((u64)(uintptr_t)buffer >> 36),
++        .address_mid  = (u32)((u64)(uintptr_t)buffer >> 32),
+         .size         = (u32)size,
+         .address_low  = (u32)(uintptr_t)buffer,
+     };
+@@ -122,9 +122,9 @@
+         .size_low     = (u32)size,
+         .address_low  = (u32)(uintptr_t)buffer,
+         .mode         = mode,
+-        .address_high = (u32)((uintptr_t)buffer >> 36),
+-        .size_high    = (u32)(size >> 32),
+-        .address_mid  = (u32)((uintptr_t)buffer >> 32),
++        .address_high = (u32)((u64)(uintptr_t)buffer >> 36),
++        .size_high    = (u32)((u64)size >> 32),
++        .address_mid  = (u32)((u64)(uintptr_t)buffer >> 32),
+     };
+ }
+ 
+@@ -132,14 +132,14 @@
+ {
+     return (HipcRecvListEntry){
+         .address_low  = (u32)((uintptr_t)buffer),
+-        .address_high = (u32)((uintptr_t)buffer >> 32),
++        .address_high = (u32)((u64)(uintptr_t)buffer >> 32),
+         .size         = (u32)size,
+     };
+ }
+ 
+ NX_CONSTEXPR void* hipcGetStaticAddress(const HipcStaticDescriptor* desc)
+ {
+-    return (void*)(desc->address_low | ((uintptr_t)desc->address_mid << 32) | ((uintptr_t)desc->address_high << 36));
++    return (void*)(uintptr_t)((u64)desc->address_low | ((u64)desc->address_mid << 32) | ((u64)desc->address_high << 36));
+ }
+ 
+ NX_CONSTEXPR size_t hipcGetStaticSize(const HipcStaticDescriptor* desc)
+@@ -149,12 +149,12 @@
+ 
+ NX_CONSTEXPR void* hipcGetBufferAddress(const HipcBufferDescriptor* desc)
+ {
+-    return (void*)(desc->address_low | ((uintptr_t)desc->address_mid << 32) | ((uintptr_t)desc->address_high << 36));
++    return (void*)(uintptr_t)((u64)desc->address_low | ((u64)desc->address_mid << 32) | ((u64)desc->address_high << 36));
+ }
+ 
+ NX_CONSTEXPR size_t hipcGetBufferSize(const HipcBufferDescriptor* desc)
+ {
+-    return desc->size_low | ((size_t)desc->size_high << 32);
++    return (size_t)((u64)desc->size_low | ((u64)desc->size_high << 32));
+ }
+ 
+ NX_CONSTEXPR HipcRequest hipcCalcRequestLayout(HipcMetadata meta, void* base)
+--- a/nx/include/switch/types.h
++++ b/nx/include/switch/types.h
+@@ -55,7 +55,7 @@
+ #endif
+ 
+ #ifndef BITL
+-#define BITL(n) (1UL<<(n))
++#define BITL(n) (1ULL<<(n))
+ #endif
+ 
+ /// Packs a struct so that it won't include padding bytes.
+--- a/nx/source/kernel/jit.c
++++ b/nx/source/kernel/jit.c
+@@ -104,7 +104,7 @@
+ 
+     switch (j->type) {
+     case JitType_SetProcessMemoryPermission:
+-        if (j->is_executable) rc = svcUnmapProcessCodeMemory(envGetOwnProcessHandle(), (u64) j->rx_addr, (u64) j->src_addr, j->size);
++        if (j->is_executable) rc = svcUnmapProcessCodeMemory(envGetOwnProcessHandle(), (u64)(uintptr_t)j->rx_addr, (u64)(uintptr_t)j->src_addr, j->size);
+         break;
+ 
+     case JitType_CodeMemory:
+@@ -124,10 +124,10 @@
+     switch (j->type) {
+     case JitType_SetProcessMemoryPermission:
+         if (!j->is_executable) {
+-            rc = svcMapProcessCodeMemory(envGetOwnProcessHandle(), (u64) j->rx_addr, (u64) j->src_addr, j->size);
++            rc = svcMapProcessCodeMemory(envGetOwnProcessHandle(), (u64)(uintptr_t)j->rx_addr, (u64)(uintptr_t)j->src_addr, j->size);
+ 
+             if (R_SUCCEEDED(rc)) {
+-                rc = svcSetProcessMemoryPermission(envGetOwnProcessHandle(), (u64) j->rx_addr, j->size, Perm_Rx);
++                rc = svcSetProcessMemoryPermission(envGetOwnProcessHandle(), (u64)(uintptr_t)j->rx_addr, j->size, Perm_Rx);
+ 
+                 if (R_FAILED(rc)) {
+                     jitTransitionToWritable(j);
+--- a/nx/source/kernel/thread.c
++++ b/nx/source/kernel/thread.c
+@@ -63,12 +63,12 @@
+ 
+     MemoryInfo mem_info = {0};
+     u32 page_info;
+-    svcQueryMemory(&mem_info, &page_info, (u64)(&mem_info));
++    svcQueryMemory(&mem_info, &page_info, (u64)(uintptr_t)(&mem_info));
+ 
+     // Set stack.
+     g_mainThread.owns_stack_mem = false;
+     g_mainThread.stack_mem      = NULL;
+-    g_mainThread.stack_mirror   = (void*)mem_info.addr;
++    g_mainThread.stack_mirror   = (void*)(uintptr_t)mem_info.addr;
+     g_mainThread.stack_sz       = mem_info.size;
+ 
+     // Set the TLS array.
+--- a/nx/source/kernel/tmem.c
++++ b/nx/source/kernel/tmem.c
+@@ -119,14 +119,14 @@
+     if ((t->perm & perm) != perm) {
+         MemoryInfo m = {0};
+         u32 p = 0;
+-        rc = svcQueryMemory(&m, &p, (u64)(t->src_addr));
++        rc = svcQueryMemory(&m, &p, (u64)(uintptr_t)(t->src_addr));
+ 
+         if (R_FAILED(rc)) {
+             return rc;
+         }
+ 
+         while ((m.perm & perm) != perm) {
+-            rc = svcQueryMemory(&m, &p, (u64)(t->src_addr));
++            rc = svcQueryMemory(&m, &p, (u64)(uintptr_t)(t->src_addr));
+ 
+             if (R_FAILED(rc)) {
+                 return rc;
+--- a/nx/source/kernel/virtmem.c
++++ b/nx/source/kernel/virtmem.c
+@@ -10,9 +10,10 @@
+ #define SEQUENTIAL_GUARD_REGION_SIZE 0x1000
+ #define RANDOM_MAX_ATTEMPTS 0x200
+ 
++// Region bounds are address-space quantities: the end of a 32-bit address space is 2^32, which a 32-bit uintptr_t cannot hold.
+ typedef struct {
+-    uintptr_t start;
+-    uintptr_t end;
++    u64 start;
++    u64 end;
+ } MemRegion;
+ 
+ struct VirtmemReservation {
+@@ -21,6 +22,8 @@
+     MemRegion region;
+ };
+ 
++extern Result _virtmemSvcUnmapMemory64(u64 dst, u64 src, u64 size) __asm__("svcUnmapMemory");
++
+ static Mutex g_VirtmemMutex;
+ 
+ static MemRegion g_AliasRegion;
+@@ -53,20 +56,20 @@
+     return rc;
+ }
+ 
+-static void _memregionInitHardcoded(MemRegion* r, uintptr_t start, uintptr_t end) {
++static void _memregionInitHardcoded(MemRegion* r, u64 start, u64 end) {
+     r->start = start;
+     r->end   = end;
+ }
+ 
+-NX_INLINE bool _memregionIsInside(MemRegion* r, uintptr_t start, uintptr_t end) {
++NX_INLINE bool _memregionIsInside(MemRegion* r, u64 start, u64 end) {
+     return start >= r->start && end <= r->end;
+ }
+ 
+-NX_INLINE bool _memregionOverlaps(MemRegion* r, uintptr_t start, uintptr_t end) {
++NX_INLINE bool _memregionOverlaps(MemRegion* r, u64 start, u64 end) {
+     return start < r->end && r->start < end;
+ }
+ 
+-NX_INLINE bool _memregionIsMapped(uintptr_t start, uintptr_t end, uintptr_t guard, uintptr_t* out_end) {
++NX_INLINE bool _memregionIsMapped(u64 start, u64 end, u64 guard, u64* out_end) {
+     // Adjust start/end by the desired guard size.
+     start -= guard;
+     end += guard;
+@@ -79,7 +82,7 @@
+         diagAbortWithResult(MAKERESULT(Module_Libnx, LibnxError_BadQueryMemory));
+ 
+     // Return true if there's anything mapped.
+-    uintptr_t memend = meminfo.addr + meminfo.size;
++    u64 memend = meminfo.addr + meminfo.size;
+     if (meminfo.type != MemType_Unmapped || end > memend) {
+         if (out_end) *out_end = memend + guard;
+         return true;
+@@ -88,7 +91,7 @@
+     return false;
+ }
+ 
+-NX_INLINE bool _memregionIsReserved(uintptr_t start, uintptr_t end, uintptr_t guard, uintptr_t* out_end) {
++NX_INLINE bool _memregionIsReserved(u64 start, u64 end, u64 guard, u64* out_end) {
+     // Adjust start/end by the desired guard size.
+     start -= guard;
+     end += guard;
+@@ -104,24 +107,24 @@
+     return false;
+ }
+ 
+-static void* _memregionFindRandom(MemRegion* r, size_t size, size_t guard_size) {
+-    // Page align the sizes.
+-    size = (size + 0xFFF) &~ 0xFFF;
+-    guard_size = (guard_size + 0xFFF) &~ 0xFFF;
++static void* _memregionFindRandom(MemRegion* r, size_t size_in, size_t guard_size_in) {
++    // Page align the sizes (address-space quantities: u64).
++    u64 size = ((u64)size_in + 0xFFF) &~ 0xFFFull;
++    u64 guard_size = ((u64)guard_size_in + 0xFFF) &~ 0xFFFull;
+ 
+     // Ensure the requested size isn't greater than the memory region itself...
+-    uintptr_t region_size = r->end - r->start;
++    u64 region_size = r->end - r->start;
+     if (size > region_size)
+         return NULL;
+ 
+     // Main allocation loop.
+-    uintptr_t aslr_max_page_offset = (region_size - size) >> 12;
++    u64 aslr_max_page_offset = (region_size - size) >> 12;
+     for (unsigned i = 0; i < RANDOM_MAX_ATTEMPTS; i ++) {
+         // Calculate a random memory range outside reserved areas.
+-        uintptr_t cur_addr;
++        u64 cur_addr;
+         for (;;) {
+-            uintptr_t page_offset = __libnx_virtmem_rng() % (aslr_max_page_offset + 1);
+-            cur_addr = (uintptr_t)r->start + (page_offset << 12);
++            u64 page_offset = (u64)__libnx_virtmem_rng() % (aslr_max_page_offset + 1);
++            cur_addr = r->start + (page_offset << 12);
+ 
+             // Avoid mapping within the alias region.
+             if (_memregionOverlaps(&g_AliasRegion, cur_addr, cur_addr + size))
+@@ -144,7 +147,7 @@
+             continue;
+ 
+         // We found a suitable address!
+-        return (void*)cur_addr;
++        return (void*)(uintptr_t)cur_addr;
+     }
+ 
+     return NULL;
+@@ -185,7 +188,8 @@
+         // [1.0.0] doesn't expose aslr/stack region information so we have to do this dirty hack to detect it.
+         // Forgive me.
+         g_IsLegacyKernel = true;
+-        rc = svcUnmapMemory((void*)0xFFFFFFFFFFFFE000UL, (void*)0xFFFFFE000UL, 0x1000);
++        // The probe addresses are 64-bit kernel arguments that a 32-bit pointer cannot hold: the same svc, called with u64 arguments.
++        rc = _virtmemSvcUnmapMemory64(0xFFFFFFFFFFFFE000ull, 0xFFFFFE000ull, 0x1000);
+         if (R_VALUE(rc) == KERNELRESULT(InvalidMemoryState)) {
+             // Invalid src-address error means that a valid 36-bit address was rejected.
+             // Thus we are 32-bit.
+@@ -233,7 +237,7 @@
+     if (!mutexIsLockedByCurrentThread(&g_VirtmemMutex)) return NULL;
+     VirtmemReservation* rv = (VirtmemReservation*)__libnx_alloc(sizeof(VirtmemReservation));
+     if (rv) {
+-        rv->region.start = (uintptr_t)mem;
++        rv->region.start = (u64)(uintptr_t)mem;
+         rv->region.end   = rv->region.start + size;
+         rv->next         = g_Reservations;
+         rv->prev         = NULL;
+--- a/nx/source/nvidia/ioctl/nvchannel.c
++++ b/nx/source/nvidia/ioctl/nvchannel.c
+@@ -32,7 +32,7 @@
+     } data;
+ 
+     memset(&data, 0, sizeof(data));
+-    data.gpfifo = (u64)data.entries; // ignored
++    data.gpfifo = (u64)(uintptr_t)data.entries; // ignored
+     data.num_entries = num_entries;
+     data.flags = flags;
+     data.fence = *fence_inout;
+@@ -58,7 +58,7 @@
+     } data;
+ 
+     memset(&data, 0, sizeof(data));
+-    data.gpfifo = (u64)entries; // ignored?
++    data.gpfifo = (u64)(uintptr_t)entries; // ignored?
+     data.num_entries = num_entries;
+     data.flags = flags;
+     data.fence = *fence_inout;
+@@ -192,7 +192,7 @@
+     } data;
+ 
+     memset(&data, 0, sizeof(data));
+-    data.addr = (u64)addr;
++    data.addr = (u64)(uintptr_t)addr;
+ 
+     return nvIoctl(fd, _NV_IOW(0x47, 0x14, data), &data);
+ }
+--- a/nx/source/nvidia/ioctl/nvhost-ctrl-gpu.c
++++ b/nx/source/nvidia/ioctl/nvhost-ctrl-gpu.c
+@@ -116,7 +116,7 @@
+ 
+     memset(&data, 0, sizeof(data));
+     data.bufsize = size;
+-    data.bufaddr = (u64)buffer;
++    data.bufaddr = (u64)(uintptr_t)buffer;
+ 
+     rc = nvIoctl(fd, _NV_IOWR(0x47, 0x06, data), &data);
+ 
+--- a/nx/source/nvidia/ioctl/nvmap.c
++++ b/nx/source/nvidia/ioctl/nvmap.c
+@@ -61,7 +61,7 @@
+     data.flags = flags;
+     data.align = align;
+     data.kind = kind;
+-    data.addr = (u64)addr;
++    data.addr = (u64)(uintptr_t)addr;
+ 
+     return nvIoctl(fd, _NV_IOWR(0x01, 0x04, data), &data);
+ }
+--- a/nx/source/runtime/argv.c
++++ b/nx/source/runtime/argv.c
+@@ -45,7 +45,7 @@
+ 
+     if (envIsNso()) {
+         memset(&meminfo, 0, sizeof(meminfo));
+-        rc = svcQueryMemory(&meminfo, &pageinfo, (u64)argdata);
++        rc = svcQueryMemory(&meminfo, &pageinfo, (u64)(uintptr_t)argdata);
+ 
+         // This memory is only mapped when arguments were passed.
+         if (R_FAILED(rc) || meminfo.perm != 0x3)
+@@ -57,8 +57,8 @@
+ 
+         if (argdata_allocsize==0 || argdata_strsize==0) return;
+ 
+-        if ((u64)argdata < meminfo.addr) return;
+-        if (((u64)argdata - meminfo.addr) + argdata_allocsize > meminfo.size) return;
++        if ((u64)(uintptr_t)argdata < meminfo.addr) return;
++        if (((u64)(uintptr_t)argdata - meminfo.addr) + argdata_allocsize > meminfo.size) return;
+ 
+         argvptr_pos = 0x20 + argdata_strsize+1;
+         if (argvptr_pos >= argdata_allocsize) return;
+--- a/nx/source/runtime/btdev.c
++++ b/nx/source/runtime/btdev.c
+@@ -201,7 +201,7 @@
+ 
+ Result btdevGetGattOperationResult(BtdrvBleClientGattOperationInfo *out) {
+     Result rc=0;
+-    u32 type=0;
++    BtdrvBleEventType type=0;
+     u8 tmpval=0;
+     BtdrvLeEventInfo eventinfo={0};
+ 
+--- a/nx/source/runtime/devices/usb_comms.c
++++ b/nx/source/runtime/devices/usb_comms.c
+@@ -414,13 +414,13 @@
+ 
+     while(size)
+     {
+-        if(((u64)bufptr) & 0xfff)//When bufptr isn't page-aligned copy the data into g_usbComms_endpoint_in_buffer and transfer that, otherwise use the bufptr directly.
++        if(((u64)(uintptr_t)bufptr) & 0xfff)//When bufptr isn't page-aligned copy the data into g_usbComms_endpoint_in_buffer and transfer that, otherwise use the bufptr directly.
+         {
+             transfer_buffer = interface->endpoint_out_buffer;
+             memset(interface->endpoint_out_buffer, 0, 0x1000);
+ 
+             chunksize = 0x1000;
+-            chunksize-= ((u64)bufptr) & 0xfff;//After this transfer, bufptr will be page-aligned(if size is large enough for another transfer).
++            chunksize-= ((u64)(uintptr_t)bufptr) & 0xfff;//After this transfer, bufptr will be page-aligned(if size is large enough for another transfer).
+             if (size<chunksize) chunksize = size;
+ 
+             transfer_type = 0;
+@@ -501,13 +501,13 @@
+ 
+     while(size)
+     {
+-        if(((u64)bufptr) & 0xfff)//When bufptr isn't page-aligned copy the data into g_usbComms_endpoint_in_buffer and transfer that, otherwise use the bufptr directly.
++        if(((u64)(uintptr_t)bufptr) & 0xfff)//When bufptr isn't page-aligned copy the data into g_usbComms_endpoint_in_buffer and transfer that, otherwise use the bufptr directly.
+         {
+             transfer_buffer = interface->endpoint_in_buffer;
+             memset(interface->endpoint_in_buffer, 0, 0x1000);
+ 
+             chunksize = 0x1000;
+-            chunksize-= ((u64)bufptr) & 0xfff;//After this transfer, bufptr will be page-aligned(if size is large enough for another transfer).
++            chunksize-= ((u64)(uintptr_t)bufptr) & 0xfff;//After this transfer, bufptr will be page-aligned(if size is large enough for another transfer).
+             if (size<chunksize) chunksize = size;
+ 
+             memcpy(interface->endpoint_in_buffer, bufptr, chunksize);
+@@ -572,7 +572,7 @@
+ size_t usbCommsReadEx(void* buffer, size_t size, u32 interface)
+ {
+     size_t transferredSize=0;
+-    u32 state=0;
++    UsbState state=0;
+     Result rc, rc2;
+     usbCommsInterface *inter = &g_usbCommsInterfaces[interface];
+     bool initialized;
+@@ -666,7 +666,7 @@
+ size_t usbCommsWriteEx(const void* buffer, size_t size, u32 interface)
+ {
+     size_t transferredSize=0;
+-    u32 state=0;
++    UsbState state=0;
+     Result rc, rc2;
+     usbCommsInterface *inter = &g_usbCommsInterfaces[interface];
+     bool initialized;
+--- a/nx/source/runtime/dynamic.c
++++ b/nx/source/runtime/dynamic.c
+@@ -41,7 +41,7 @@
+ 			}
+ 
+ 			case R_AARCH64_RELATIVE: {
+-				u64* ptr = (u64*)(base + rela->r_offset);
++				u64* ptr = (u64*)(uintptr_t)(base + rela->r_offset);
+ 				*ptr = base + rela->r_addend;
+ 				break;
+ 			}
+@@ -54,7 +54,7 @@
+ 	u64* ptr = NULL;
+ 	for (; relrsz--; relr++) {
+ 		if ((*relr & 1) == 0) {
+-			ptr = (u64*)(base + *relr);
++			ptr = (u64*)(uintptr_t)(base + *relr);
+ 			*ptr++ += base;
+ 		} else {
+ 			u64 bitmap = *relr >> 1;
+@@ -93,7 +93,7 @@
+ 	for (; dyn->d_tag != DT_NULL; dyn++) {
+ 		switch (dyn->d_tag) {
+ 			case DT_RELA:
+-				rela = (const Elf64_Rela*)(base + dyn->d_un.d_ptr);
++				rela = (const Elf64_Rela*)(uintptr_t)(base + dyn->d_un.d_ptr);
+ 				break;
+ 
+ 			case DT_RELASZ:
+@@ -101,7 +101,7 @@
+ 				break;
+ 
+ 			case DT_RELR:
+-				relr = (const Elf64_Relr*)(base + dyn->d_un.d_ptr);
++				relr = (const Elf64_Relr*)(uintptr_t)(base + dyn->d_un.d_ptr);
+ 				break;
+ 
+ 			case DT_RELRSZ:
+--- a/nx/source/runtime/env.c
++++ b/nx/source/runtime/env.c
+@@ -56,12 +56,12 @@
+             break;
+ 
+         case EntryType_NextLoadPath:
+-            g_nextLoadPath = (char*) ent->Value[0];
+-            g_nextLoadArgv = (char*) ent->Value[1];
++            g_nextLoadPath = (char*)(uintptr_t)ent->Value[0];
++            g_nextLoadArgv = (char*)(uintptr_t)ent->Value[1];
+             break;
+ 
+         case EntryType_OverrideHeap:
+-            g_overrideHeapAddr = (void*) ent->Value[0];
++            g_overrideHeapAddr = (void*)(uintptr_t)ent->Value[0];
+             g_overrideHeapSize = ent->Value[1];
+             break;
+ 
+@@ -70,7 +70,7 @@
+             break;
+ 
+         case EntryType_Argv:
+-            g_overrideArgv = (void*) ent->Value[1];
++            g_overrideArgv = (void*)(uintptr_t)ent->Value[1];
+             break;
+ 
+         case EntryType_SyscallAvailableHint:
+--- a/nx/source/runtime/exception.s
++++ b/nx/source/runtime/exception.s
+@@ -33,8 +33,6 @@
+     stp x13, x14, [sp, #-16]!
+     stp x15, x16, [sp, #-16]!
+     stp x17, x18, [sp, #-16]!
+-    stp x19, x20, [sp, #-16]!
+-    str x21, [sp, #-16]!
+ 
+     stp x0, x1, [sp, #-16]!
+     sub sp, sp, #16
+@@ -49,8 +47,6 @@
+ 
+     ldp x0, x1, [sp], #16
+ 
+-    ldr x21, [sp], #16
+-    ldp x19, x20, [sp], #16
+     ldp x17, x18, [sp], #16
+     ldp x15, x16, [sp], #16
+     ldp x13, x14, [sp], #16
+--- a/nx/source/runtime/init.c
++++ b/nx/source/runtime/init.c
+@@ -65,7 +65,7 @@
+ {
+     void*  addr;
+     size_t size = 0;
+-    size_t mem_available = 0, mem_used = 0;
++    u64 mem_available = 0, mem_used = 0;   // svcGetInfo writes 8 bytes
+ 
+     if (envHasHeapOverride()) {
+         addr = envGetHeapOverrideAddr();
+@@ -76,7 +76,11 @@
+             svcGetInfo(&mem_available, InfoType_TotalMemorySize, CUR_PROCESS_HANDLE, 0);
+             svcGetInfo(&mem_used, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0);
+             if (mem_available > mem_used+0x200000)
+-                size = (mem_available - mem_used - 0x200000) & ~0x1FFFFF;
++            {
++                // the heap of a 32-bit process cannot exceed its address space: clamp to the largest 2 MiB multiple a size_t holds
++                u64 want = (mem_available - mem_used - 0x200000) & ~0x1FFFFFull;
++                size = want > (u64)SIZE_MAX ? (size_t)(SIZE_MAX & ~(size_t)0x1FFFFF) : (size_t)want;
++            }
+             if (size==0)
+                 size = 0x2000000*16;
+         }
+--- a/nx/source/runtime/pad.c
++++ b/nx/source/runtime/pad.c
+@@ -28,7 +28,7 @@
+ void padInitializeWithMask(PadState* pad, u64 mask) {
+     memset(pad, 0, sizeof(*pad));
+     pad->id_mask = mask & 0xff;
+-    pad->read_handheld = (mask & (1UL << HidNpadIdType_Handheld)) != 0;
++    pad->read_handheld = (mask & (1ULL << HidNpadIdType_Handheld)) != 0;
+ }
+ 
+ static void _padUpdateWithCommonState(PadState* pad, const HidNpadCommonState* state) {
+--- a/nx/source/runtime/switch_crt0.s
++++ b/nx/source/runtime/switch_crt0.s
+@@ -23,11 +23,10 @@
+     b    __libnx_exception_entry
+ 
+ .Lcrt0_main_entry:
+-    // Preserve registers across function calls
+-    mov x25, x0  // entrypoint argument 0
+-    mov x26, x1  // entrypoint argument 1
+-    mov x27, x30 // loader return address
++    // Preserve registers across function calls (x19-x27 belong to the guest: they are never written here)
+     mov x28, sp  // initial stack pointer
++    stp x0, x1, [sp, #-32]!   // entrypoint arguments 0 and 1
++    str x30, [sp, #16]        // loader return address
+ 
+     // Perform runtime linking on ourselves (including relocations)
+     adr  x0, _start    // get aslr base
+@@ -39,9 +38,8 @@
+     str  x28, [x9, #:lo12:__stack_top]
+ 
+     // Perform system initialization
+-    mov  x0, x25
+-    mov  x1, x26
+-    mov  x2, x27
++    ldp  x0, x1, [sp]
++    ldr  x2, [sp, #16]
+     bl   __libnx_init
+ 
+     // Jump to the main function
+--- a/nx/source/services/applet.c
++++ b/nx/source/services/applet.c
+@@ -1195,7 +1195,14 @@
+ }
+ 
+ IPC_MAKE_CMD_IMPL(       Result appletSetIdleTimeDetectionExtension(AppletIdleTimeDetectionExtension ext),  &g_appletISelfController, 62, _appletCmdInU32NoOut,         ext)
+-IPC_MAKE_CMD_IMPL(       Result appletGetIdleTimeDetectionExtension(AppletIdleTimeDetectionExtension *ext), &g_appletISelfController, 63, _appletCmdNoInOutU32,         ext)
++Result appletGetIdleTimeDetectionExtension(AppletIdleTimeDetectionExtension *ext) {
++    if (!serviceIsActive(&g_appletISelfController))
++        return MAKERESULT(Module_Libnx, LibnxError_NotInitialized);
++    u32 tmp=0;
++    Result rc = _appletCmdNoInOutU32(&g_appletISelfController, &tmp, 63);
++    if (R_SUCCEEDED(rc)) *ext = (AppletIdleTimeDetectionExtension)tmp;
++    return rc;
++}
+ IPC_MAKE_CMD_IMPL(       Result appletSetInputDetectionSourceSet(u32 val),                                  &g_appletISelfController, 64, _appletCmdInU32NoOut,         val)
+ IPC_MAKE_CMD_IMPL_HOSVER(Result appletReportUserIsActive(void),                                             &g_appletISelfController, 65, _appletCmdNoIO,       (2,0,0))
+ 
+--- a/nx/source/services/audin.c
++++ b/nx/source/services/audin.c
+@@ -194,7 +194,7 @@
+ 
+ Result audinAppendAudioInBuffer(AudioInBuffer *Buffer) {
+     bool new_cmd = hosversionAtLeast(3,0,0);
+-    u64 tmp = (u64)Buffer;
++    u64 tmp = (u64)(uintptr_t)Buffer;
+     return serviceDispatchIn(&g_audinIAudioIn, new_cmd==0 ? 3 : 8, tmp,
+         .buffer_attrs = { (new_cmd==0 ? SfBufferAttr_HipcMapAlias : SfBufferAttr_HipcAutoSelect) | SfBufferAttr_In },
+         .buffers = { { Buffer, sizeof(*Buffer) } },
+@@ -214,7 +214,7 @@
+ }
+ 
+ Result audinContainsAudioInBuffer(AudioInBuffer *Buffer, bool *ContainsBuffer) {
+-    u64 tmp = (u64)Buffer;
++    u64 tmp = (u64)(uintptr_t)Buffer;
+     u8 out=0;
+     Result rc = serviceDispatchInOut(&g_audinIAudioIn, 6, tmp, out);
+     if (R_SUCCEEDED(rc) && ContainsBuffer) *ContainsBuffer = out & 1;
+--- a/nx/source/services/audout.c
++++ b/nx/source/services/audout.c
+@@ -236,7 +236,7 @@
+ 
+ Result audoutAppendAudioOutBuffer(AudioOutBuffer *Buffer) {
+     bool new_cmd = hosversionAtLeast(3,0,0);
+-    u64 tmp = (u64)Buffer;
++    u64 tmp = (u64)(uintptr_t)Buffer;
+     return serviceDispatchIn(&g_audoutIAudioOut, new_cmd==0 ? 3 : 7, tmp,
+         .buffer_attrs = { (new_cmd==0 ? SfBufferAttr_HipcMapAlias : SfBufferAttr_HipcAutoSelect) | SfBufferAttr_In },
+         .buffers = { { Buffer, sizeof(*Buffer) } },
+@@ -256,7 +256,7 @@
+ }
+ 
+ Result audoutContainsAudioOutBuffer(AudioOutBuffer *Buffer, bool *ContainsBuffer) {
+-    u64 tmp = (u64)Buffer;
++    u64 tmp = (u64)(uintptr_t)Buffer;
+     u8 out=0;
+     Result rc = serviceDispatchInOut(&g_audoutIAudioOut, 6, tmp, out);
+     if (R_SUCCEEDED(rc) && ContainsBuffer) *ContainsBuffer = out & 1;
+--- a/nx/source/services/btdrv.c
++++ b/nx/source/services/btdrv.c
+@@ -350,7 +350,10 @@
+ }
+ 
+ Result btdrvGetEventInfo(void* buffer, size_t size, BtdrvEventType *type) {
+-    return _btdrvCmdOutU32OutBuf(buffer, size, type, 15);
++    u32 tmp_type=0;
++    Result rc = _btdrvCmdOutU32OutBuf(buffer, size, &tmp_type, 15);
++    if (R_SUCCEEDED(rc) && type) *type = (BtdrvEventType)tmp_type;
++    return rc;
+ }
+ 
+ Result btdrvInitializeHid(Event* out_event) {
+@@ -980,7 +983,10 @@
+         return MAKERESULT(Module_Libnx, LibnxError_IncompatSysVer);
+     u32 cmd_id = hosversionBefore(5,1,0) ? 78 : 79;
+ 
+-    return _btdrvCmdOutU32OutBuf(buffer, size, type, cmd_id);
++    u32 tmp_type=0;
++    Result rc = _btdrvCmdOutU32OutBuf(buffer, size, &tmp_type, cmd_id);
++    if (R_SUCCEEDED(rc) && type) *type = (BtdrvBleEventType)tmp_type;
++    return rc;
+ }
+ 
+ Result btdrvGetGattFirstCharacteristic(u32 conn_id, const BtdrvGattId *serv_id, bool is_primary, const BtdrvGattAttributeUuid *filter_uuid, u8 *out_property, BtdrvGattId *out_char_id) {
+@@ -1213,7 +1219,10 @@
+         return MAKERESULT(Module_Libnx, LibnxError_IncompatSysVer);
+     u32 cmd_id = hosversionBefore(5,1,0) ? 95 : 96;
+ 
+-    return _btdrvCmdOutU32OutBuf(buffer, size, type, cmd_id);
++    u32 tmp_type=0;
++    Result rc = _btdrvCmdOutU32OutBuf(buffer, size, &tmp_type, cmd_id);
++    if (R_SUCCEEDED(rc) && type) *type = (BtdrvBleEventType)tmp_type;
++    return rc;
+ }
+ 
+ Result btdrvRegisterBleHidEvent(Event* out_event) {
+--- a/nx/source/services/mm.c
++++ b/nx/source/services/mm.c
+@@ -39,7 +39,8 @@
+ 
+ Result mmuRequestFinalize(const MmuRequest *request) {
+     bool need_old = hosversionBefore(2,0,0);
+-    return serviceDispatchIn(&g_mmuSrv, need_old ? 1 : 5, *(need_old ? &request->module : &request->id));
++    u32 in = need_old ? (u32)request->module : request->id; // the enum is int under the exe's data model: the two pointers of the original conditional do not match
++    return serviceDispatchIn(&g_mmuSrv, need_old ? 1 : 5, in);
+ }
+ 
+ Result mmuRequestSetAndWait(const MmuRequest *request, u32 freq_hz, s32 timeout) {
+@@ -57,7 +58,8 @@
+     bool need_old = hosversionBefore(2,0,0);
+ 
+     u32 freq = 0;
+-    Result rc = serviceDispatchInOut(&g_mmuSrv, need_old ? 3 : 7, *(need_old ? &request->module : &request->id), freq);
++    u32 in = need_old ? (u32)request->module : request->id;
++    Result rc = serviceDispatchInOut(&g_mmuSrv, need_old ? 3 : 7, in, freq);
+ 
+     if (R_SUCCEEDED(rc) && out_freq_hz)
+         *out_freq_hz = freq;
+--- a/nx/source/services/psm.c
++++ b/nx/source/services/psm.c
+@@ -74,7 +74,10 @@
+ }
+ 
+ Result psmGetChargerType(PsmChargerType *out) {
+-    return _psmCmdNoInOutU32(&g_psmSrv, out, 1);
++    u32 tmp=0;
++    Result rc = _psmCmdNoInOutU32(&g_psmSrv, &tmp, 1);
++    if (R_SUCCEEDED(rc)) *out = (PsmChargerType)tmp;
++    return rc;
+ }
+ 
+ Result psmEnableBatteryCharging(void) {
+--- a/nx/source/services/usbds.c
++++ b/nx/source/services/usbds.c
+@@ -314,7 +314,7 @@
+         u32 size;
+         u32 padding;
+         u64 buffer;
+-    } in = { (u32)size, 0, (u64)buffer };
++    } in = { (u32)size, 0, (u64)(uintptr_t)buffer };
+ 
+     serviceAssumeDomain(srv);
+     return serviceDispatchInOut(srv, cmd_id, in, *urbId);
+--- a/nx/source/services/usbhs.c
++++ b/nx/source/services/usbhs.c
+@@ -288,7 +288,7 @@
+         u16 wIndex;
+         u16 wLength;
+         u64 buffer;
+-    } in = { bmRequestType, bRequest, wValue, wIndex, wLength, (u64)buffer };
++    } in = { bmRequestType, bRequest, wValue, wIndex, wLength, (u64)(uintptr_t)buffer };
+ 
+     serviceAssumeDomain(&s->s);
+     return serviceDispatchIn(&s->s, 5, in);
+@@ -409,7 +409,7 @@
+         u32 pad;
+         u64 buffer;
+         u64 id;
+-    } in = { size, 0, (u64)buffer, id };
++    } in = { size, 0, (u64)(uintptr_t)buffer, id };
+ 
+     serviceAssumeDomain(&s->s);
+     return serviceDispatchInOut(&s->s, 4, in, *xferId);
+@@ -491,7 +491,7 @@
+         u32 pad;
+         u64 buffer;
+         u64 id;
+-    } in = { urbCount, unk1, unk2, 0, (u64)buffer, id };
++    } in = { urbCount, unk1, unk2, 0, (u64)(uintptr_t)buffer, id };
+ 
+     serviceAssumeDomain(&s->s);
+     return serviceDispatchInOut(&s->s, 6, in, *xferId,
+@@ -508,7 +508,7 @@
+         u32 size;
+         u32 pad;
+         u64 buffer;
+-    } in = { size, 0, (u64)buffer };
++    } in = { size, 0, (u64)(uintptr_t)buffer };
+ 
+     serviceAssumeDomain(&s->s);
+     return serviceDispatchIn(&s->s, 7, in);
