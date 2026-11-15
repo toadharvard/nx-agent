@@ -23,6 +23,7 @@ REPO = os.path.dirname(os.path.dirname(NX))
 sys.path.insert(0, HERE)
 sys.path.insert(0, VERIFY)
 import boot  # noqa: E402
+import cas  # noqa: E402
 import test_bootmachine as tb  # noqa: E402
 import test_bootgpu as tg  # noqa: E402
 
@@ -32,7 +33,7 @@ atexit.register(shutil.rmtree, SCRATCH, ignore_errors=True)
 
 def make_tree(name):
     """A fixture tree: a temp git copy of the checkout the job runs from (envcheck reads admit.json and the recipes of the whole checkout). The
-    job reads verify/env.json and verify/boot_inputs.json only from its own tree, so a test that needs another pin or env file edits this
+    job reads verify/env.json and manifest/fonts_mirror.json only from its own tree, so a test that needs another pin or env file edits this
     copy and runs this tree's farm/boot_job.sh. Returns the tree's ports/fnv-nx."""
     top = os.path.join(SCRATCH, "tree-" + name)
     shutil.copytree(REPO, top, ignore=shutil.ignore_patterns(".git", "__pycache__"))
@@ -64,7 +65,7 @@ def _exe():
     """the player's FalloutNV.exe: the pinned gamedata/exe input of verify/tests/inputs.json (the gate fetches it by commit + tree hash)"""
     with open(os.path.join(os.environ["FNVNX_INPUT_EXE"], "FalloutNV.exe"), "rb") as f:
         return f.read()
-PINS = os.path.join(TREE, "verify", "boot_inputs.json")   # the main fixture tree's pin file: a fixture set (not the real fonts) in the test's bare repository
+PINS = os.path.join(TREE, "manifest", "fonts_mirror.json")   # the main fixture tree's pin file: a fixture set (not the real fonts) in the test's bare repository
 FONT_FILES = {"fonts/A.ttf": b"alpha", "fonts/Sub/B.ttf": b"bravo"}
 
 
@@ -171,16 +172,19 @@ def main():
     publish_branch("gpu-othersha", {"libnxgl4.so": lib, "meta.json": jd(dict(json.loads(meta_j), sha256="0" * 64))})
     publish_branch("gpu-empty", {"README": b"no library here\n"})
     publish_branch("gpu-bad", {"libnxgl4.so": b"not an elf\n", "meta.json": jd(dict(json.loads(meta_j), sha256=sha(b"not an elf\n")))})
-    # the declared inputs: a fixture font set + its sums file at the root of a branch; the pin file names that commit
-    fsums = "".join("%s  %s\n" % (hashlib.sha256(v).hexdigest(), k) for k, v in sorted(FONT_FILES.items())).encode()
-    publish_branch("test/fonts", dict(FONT_FILES, SHA256SUMS=fsums))
+    # the declared input: a fixture font set at the root of a branch of the fixture artifacts repository; the pin file names that commit and the
+    # tree hash of its checkout (verify/cas.py, the recipe's own function), and the font files are the tree's fonts/ directory (mount_path)
+    publish_branch("test/fonts", dict(FONT_FILES))
     fcommit = git("rev-parse", "refs/heads/test/fonts", cwd=BARE).strip()
+    co = os.path.join(SCRATCH, "fonts-co")
+    os.makedirs(co)
+    subprocess.run("git --git-dir '%s' archive %s | tar -x -C '%s'" % (BARE, fcommit, co), shell=True, check=True)
+    ftree = cas.ingest(co, os.path.join(SCRATCH, "fonts-store"))
 
-    def write_pins(path, sums_sha, commit=fcommit):
-        open(path, "w").write(json.dumps({"format": "fnvnx-boot-inputs/1", "inputs": [
-            {"name": "fonts", "repo": "fnv-nx-build", "ref": "test/fonts", "commit": commit, "path": "fonts", "sums": "SHA256SUMS",
-             "sums_sha256": sums_sha, "mount": "switch/fnv/fonts"}]}))
-    write_pins(PINS, hashlib.sha256(fsums).hexdigest())
+    def write_pins(path, tree, commit=fcommit):
+        open(path, "w").write(json.dumps({"name": "fonts-wine9", "repo": "fnv-nx-build", "ref": "test/fonts", "commit": commit, "tree_sha256": tree,
+                                          "at": "/ext/fonts", "mount_path": "fonts"}))
+    write_pins(PINS, ftree)
     tb.case("setup: contract branches built", True)
 
     rc, out, err = run_job(["testid"])
@@ -197,7 +201,7 @@ def main():
     elf_commit = git("rev-parse", "refs/heads/l1-contract/elf/testid", cwd=BARE).strip()
     nx_commit = git("rev-parse", "HEAD", cwd=NX).strip()
     tb.case("meta.json keys and values", sorted(meta) == sorted(["elf_id", "elf_branch_commit", "nx_agent_commit", "exe_sha256", "boot_rc",
-            "seconds", "limit_instructions", "quantum", "profile", "host_cpu_model", "softfloat", "data_items"])
+            "seconds", "limit_instructions", "quantum", "profile", "host_cpu_model", "softfloat", "data_items", "declared_inputs"])
             and meta["elf_id"] == "testid" and meta["elf_branch_commit"] == elf_commit and meta["nx_agent_commit"] == nx_commit
             and meta["exe_sha256"] == hashlib.sha256(EXE).hexdigest() and meta["boot_rc"] == 0 and meta["limit_instructions"] is None and meta["quantum"] == QUANTUM
             and meta["profile"] == "handheld" and meta["host_cpu_model"] and meta["softfloat"] == "absent", meta)
@@ -211,13 +215,14 @@ def main():
     tb.case("console file holds the guest's line", LINE in files.get("OUT.console.txt", b"").decode(), files.get("OUT.console.txt"))
     tb.case("milestones: loader console line of run.txt reached in order, then exe-entry",
             [m["name"] for m in doc.get("milestones", [])] == ["start-01", "exe-entry"] and all(m["reached"] for m in doc["milestones"]), doc.get("milestones"))
-    tb.case("OUT.json inputs.declared records {name, commit, sums_sha256, files}", doc.get("inputs", {}).get("declared") ==
-            [{"name": "fonts", "commit": fcommit, "sums_sha256": hashlib.sha256(fsums).hexdigest(), "files": 2}], doc.get("inputs"))
+    tb.case("OUT.json inputs.declared and meta.json declared_inputs record {name, commit, tree_sha256}", doc.get("inputs", {}).get("declared") ==
+            [{"name": "fonts-wine9", "commit": fcommit, "tree_sha256": ftree, "files": 2}] and meta.get("declared_inputs") ==
+            [{"name": "fonts-wine9", "commit": fcommit, "tree_sha256": ftree}], (doc.get("inputs"), meta.get("declared_inputs")))
     n_pub = git("rev-parse", "refs/heads/l4-verify/boot/testid", cwd=BARE).strip()
-    for what, pinfile in (("a wrong sums hash", ("w1", hashlib.sha256(fsums).hexdigest()[::-1], fcommit)),
-                          ("a commit the repository does not have", ("w2", hashlib.sha256(fsums).hexdigest(), "1" * 40))):
+    for what, pinfile in (("a wrong tree hash", ("w1", ftree[::-1], fcommit)),
+                          ("a commit the repository does not have", ("w2", ftree, "1" * 40))):
         bt = make_tree(pinfile[0])
-        write_pins(os.path.join(bt, "verify", "boot_inputs.json"), pinfile[1], pinfile[2])
+        write_pins(os.path.join(bt, "manifest", "fonts_mirror.json"), pinfile[1], pinfile[2])
         rc3, out3, err3 = run_job(["testid"], tree=bt)
         tb.case("declared input with %s: the job ends as input-error before the boot, nothing published" % what, rc3 == 1 and "input-error" in err3
                 and out3 == "" and git("rev-parse", "refs/heads/l4-verify/boot/testid", cwd=BARE).strip() == n_pub, (rc3, out3, err3[-300:]))

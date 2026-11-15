@@ -3,7 +3,7 @@
 
   boot.py run --elf GUEST.elf --reserved modules.tsv --keys LO:HI --heap-size N --root SDROOT [--game DIR]
               --milestones TABLE --manifest entries.tsv [--icount-spec SPEC.json] [--limit-instructions N]
-              --quantum N [--declared-inputs PINS [--declared-src NAME=DIR]] [--profile handheld|docked] [--watch-log SYMS] --out OUT.json
+              --quantum N [--declared-inputs PIN] [--profile handheld|docked] [--watch-log SYMS] --out OUT.json
 
 plan = bootlayout (same rules as its CLI), watch points = bootmiles.resolve(table, manifest, ELF symbols, bias = image
 base). OUT.json ("fnvnx-boot/1", sorted keys, indent 1, no wall time) holds the plan, the run record, the milestone state
@@ -255,8 +255,8 @@ def run(a):
     plan = _plan(a, raw)
     declared, ro = [], []
     if a.declared_inputs:
-        ro = [p["mount"] for p in bootdecl.load_pins(a.declared_inputs)]   # read-only on the guest's card, bootpath.BootPath   # verified and mounted read-only on the SD root before anything runs; a mismatch is an input error
-        declared = bootdecl.mount_all(a.declared_inputs, a.root, dict(s.split("=", 1) for s in a.declared_src))
+        declared = bootdecl.mount_all(a.declared_inputs, a.root)   # fetched through the recipe's external mechanism, tree-hash verified, mounted read-only on the SD root before anything runs; a mismatch is an input error
+        ro = [bootdecl.mount_point()]                               # read-only on the guest's card (bootpath.BootPath)
     base = plan["image"]["base"]
     with open(a.milestones) as f:
         table = bootmiles.load_table(f.read())
@@ -474,14 +474,10 @@ def main(argv=None):
     sp.add_argument("--text-entry", action="append", default=[], metavar="TEXT",
                     help="the answer of one TEXT_ENTRY call (the system keyboard), repeatable, consumed in order; none left: the call "
                          "is cancelled (0); a text longer than the call's max_len ends the run as scenario-error")
-    sp.add_argument("--declared-inputs", metavar="PINS", help="verify/boot_inputs.json: each pinned port input (the font set) is fetched by its commit "
-                    "(or taken from --declared-src), verified against its checksum list and mounted read-only under --root (bootdecl.py); "
-                    "any mismatch is an input error and nothing runs; OUT.json inputs.declared holds {name, commit, sums_sha256, files}")
-    sp.add_argument("--declared-src", action="append", default=[], metavar="NAME=DIR",
-                    help="a checkout holding the input's path and sums file, in place of the fetch (needs --declared-inputs)")
+    sp.add_argument("--declared-inputs", metavar="PIN", help="manifest/fonts_mirror.json: the pinned font mirror is fetched by the recipe's external mechanism "
+                    "(commit, tree_sha256; the cache is $GATE_CACHE) and mounted read-only at FNVNX_SD_FONTS under --root (bootdecl.py); a mismatch is an "
+                    "input error and nothing runs; OUT.json inputs.declared holds {name, commit, tree_sha256, files}")
     a = ap.parse_args(argv)
-    if a.declared_src and not a.declared_inputs:
-        ap.error("--declared-src needs --declared-inputs")
     if a.frames and not a.gpu:
         ap.error("--frames needs --gpu")
     try:

@@ -9,6 +9,7 @@ import tempfile
 
 VERIFY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, VERIFY)
+import bootdecl  # noqa: E402
 import bootpath  # noqa: E402
 
 TMP = tempfile.mkdtemp(prefix="bp-")
@@ -150,7 +151,7 @@ for n, g in (("p3", None), ("p4", fresh("p4g"))):
          not os.path.exists(u))
 
 # declared input: sdmc:/switch/fnv/fonts (bootpath.py PORT_NAMES, READ_ONLY): on the card's root in every mode, never in the game
-RO = ["switch/fnv/fonts"]   # the mount list of verify/boot_inputs.json (boot.py passes it)
+RO = [bootdecl.mount_point()]   # the mount list of the declared input (boot.py passes it): FNVNX_SD_FONTS of sdlayout.h without its device prefix
 for tag, with_game in (("with game", True), ("without game", False)):
     root = fresh("f1" if with_game else "f2")
     game = fresh("f1g") if with_game else None
