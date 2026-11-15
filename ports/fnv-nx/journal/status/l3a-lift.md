@@ -1090,3 +1090,9 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - fnvl_seg_init: every selector comes from the declared row through a generated header; no implicit zero.
 - 22:18 w12 paths: bf89c7b36 accepted.
   - N2 (f_cpufeat from L3b's cpuid table) waits on L3b for 4 AMD rows (3DNOWEXT, SSE4A, XOP, FMA4) and a check of the FXSR leaf.
+- 22:19 w8 lift/pack on the liftsrc PACK output (claude/fnv-l3a-lift-w8-packuses @ 09182012b) is red in L1's machinery.
+  - recipe.py cxx_origin "pack" must accept a `uses` root (3 stages: gen:0, gen:1, gen:3).
+  - gate_lift.py fetches the pack only as an external.
+  - Both are sent to the L1 lead.
+  - GSCERTS removal: base3 7abf794a6.
+  - bottleneck: the exe facts memory growth (w7); L1's pack-from-uses change.
