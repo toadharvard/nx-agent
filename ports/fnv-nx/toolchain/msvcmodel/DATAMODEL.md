@@ -179,7 +179,8 @@ Target: Microsoft Visual C++ 2008 (cl 15.00), x86, /Zc:wchar_t, /J off, /Zp8. Pi
 
 ## crossing_forbidden
 
-crossing_forbidden(T) is true iff T is, or contains by member (recursively through arrays and member records) or by base (recursively), a record with a virtual base, or contains or is a pointer to member
+crossing_forbidden(T) is true iff T is, or contains by member (recursively through arrays and member records) or by base (recursively), a record with a virtual base, or is or contains a pointer to member, or is or contains a va_list
 
 - virtual_base (rows S25): `for a RECORD_TYPE R with TYPE_BINFO: any binfo reached from TYPE_BINFO(R) through BINFO_BASE_BINFO whose BINFO_VIRTUAL_P is true; R and every member type that is a record or an array of records, recursively`. Visual C++ keeps a vbptr and a vbtable, GCC (Itanium) a vtable with virtual-base offsets: sizes can agree, layouts do not; no msvcmodel patch
 - pointer_to_member (rows S11, S12): `TYPE_PTRMEM_P(T), i.e. TYPE_PTRDATAMEM_P (data member) or TYPE_PTRMEMFUNC_P (member function), for T and for every member type, recursively`. a function pointer to member is 8 bytes under GCC and 4 bytes (single inheritance) in MSVC, and the representation depends on the inheritance model; a data member pointer is 4 bytes on both (a 4-byte offset) but its representation of the null value is not documented by Microsoft, so it is forbidden too
+- va_list (rows S26): `T is the va_list type (TYPE_MAIN_VARIANT(T) == va_list_type_node, __builtin_va_list), for the type, every member type and every parameter type of a function crossing the boundary, recursively`. the exe's va_list is a char * into guest stack memory (cl); GCC's is the AAPCS64 structure. Native code never receives an x86 va_list as a va_list: a bridge that takes one walks it as guest memory by the x86 rules (4-byte-rounded slots)
