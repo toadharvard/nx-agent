@@ -1,0 +1,12 @@
+{
+ "cpp_docs": {
+  "repo": "https://github.com/MicrosoftDocs/cpp-docs",
+  "commit": "af4947c4bdf5993dcaee98e63d55a2d7a5744d7d",
+  "mirror": "fnv-nx-build tools/cpp-docs"
+ },
+ "gcc": {
+  "tarball": "gcc-13.3.0.tar.xz",
+  "file": "gcc/doc/tm.texi",
+  "tarball_sha256": "0845e9621c9543a13f484e94584a49ffc0129970e9914624235fc1d061a0c083"
+ }
+}

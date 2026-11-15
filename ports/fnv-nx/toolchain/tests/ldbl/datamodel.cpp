@@ -81,3 +81,10 @@ DM("S25", sizeof(VD1) == 12);   // OPEN: MSVC keeps a vbptr (4) + a + the shared
 typedef __builtin_va_list VL;
 double va_k(int n, ...) { VL ap; __builtin_va_start(ap, n); double s = 0; s += __builtin_va_arg(ap, int); s += __builtin_va_arg(ap, long long); s += __builtin_va_arg(ap, double); s += __builtin_va_arg(ap, long double); s += (unsigned)__builtin_va_arg(ap, void *); __builtin_va_end(ap); return s; }
 DM("S26", sizeof(VL) != sizeof(char *));   // OPEN: MSVC's va_list is `char *`
+
+// S27, S28: the types of the language's own typedefs (cl: size_t unsigned int, ptrdiff_t a 4-byte signed integer, int in its mangling)
+DM("S27", __is_same(__SIZE_TYPE__, unsigned int));
+DM("S28", __is_same(__PTRDIFF_TYPE__, int));
+// S30: a class with a virtual function holds one 4-byte vptr, then its members; a vtable entry is a 4-byte pointer
+struct VT { virtual void f(); int a; };
+DM("S30", sizeof(VT) == 8 && sizeof(void (*)()) == 4);
