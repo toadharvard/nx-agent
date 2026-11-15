@@ -870,3 +870,9 @@ Paused: w3b, w4, farm; no other work.
         - The multi-component rcp_mask becomes illegal (MS masking page states the single-component mask).
         - The legacy conflict row is decided by the same rule, or reported.
     - Then nx_sm_check runs over the shipped set again; a newly rejected shader is reported, not worked around.
+- 13:56Z w6 cc3d206d3: decided from the Microsoft text.
+    - Illegal: vs_a0_src (vs-registers-address.md:25), vs_bi_alu (vs-registers-constant-integer.md:16), mov_a0_vs2 (mova---vs.md:31), multi-component rcp_mask (masking.md:38).
+    - New code NX_SM_E_DSTMASK, generated from mk "single".
+    - Ruling on vs_3_0:v[a0.x]: legal. The register table (vs-registers-vs-3-0.md:24) lists a0 and aL; the prose excludes nothing; Wine 9.0 d3dbc.c:886 agrees.
+    - Cause: one fact lived in 3 records (conflicts row, legacy row, sm_illegal.tsv:20). w6 (doing): make it one record, with one source per fact asserted in res_smgen.
+    - w6's own shader extraction is not evidence (a second path to the universe). w5 re-runs on b545961f once w6 has its next head.
