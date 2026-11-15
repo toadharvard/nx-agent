@@ -309,3 +309,9 @@ After the first frame:
   - `.fnvnx.decltype` spells `host:` on the slot scalar.
   - The carrier is the slot field type, not the callee type, which cannot carry the attribute.
   - Assigned to w3 with CONT-P. L1 w15 adds the -D and -Werror=attributes on cand2.
+- ORD-T done: w2 39e62c50b, over 109 objects and 4,489 functions.
+  - 0 plain GIMPLE accesses without a reason. Reasons: private 9,070, readonly 341, byref 0, hardreg 0, notmem 0. Section `.fnvnx.ordt`.
+  - The cand2 gate leaves 841 uncertified: A 553 (no frame tag), B 239 (overlaps an escaping range), C 49 (indexed).
+  - Rulings:
+    - B: the frame record's flag comes from the one GIMPLE escapes fact, and the RTL pass's address-formation marking is deleted. What remains of B must be stack-sharing overlaps (PD-STACK-REUSE). w2 is doing it.
+    - A and C are gate-side, sent to L1 w15 as RO-IDX, RO-PTR, G-IDX and SPILL.
