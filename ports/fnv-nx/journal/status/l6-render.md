@@ -742,3 +742,10 @@ Paused: w3b, w4, farm; no other work.
     - w5 (doing): sm_link.
     - w1b: stopped, branches kept. Queue held: (f), sm_cases, readers, header items.
     - Farms: 0.
+- 09:20Z w1b stopped. WIP d42e04cd2 on w1b-sm, rebased on w6-root f3167f5f5. Not rebuilt or re-run since the last edits.
+    - Opcode universe derived from the pages: illegal rows 109 → 612, legacy rows 168 → 655.
+    - Readers moved via `uses`; tracked tables deleted. The recipe and unitstage include-in-uses extension is L1's, for its review.
+    - Wine mirror tools/wine-9.0-d3d9 is now 2d819f705 (adds d3dcompiler_43); R1 and R2 cite wine-9.0 per row.
+    - Decision (L6) on the 5 conflicts (slt, sge, dst, expp, logp in ps): illegal. The MS instruction page lists the models (OWNER 3); Wine decides only where MS is silent. Applied when w1b resumes.
+    - Open: rule R4 is written only in sm_table.py:110. It goes to the orchestrator together with the next item.
+    - Lead branch: the old render/shaders/src/sdp.c goes when w6-root is merged into claude/fnv-l6-render.
