@@ -2,8 +2,8 @@
 """The generator of the lifted pack: the lifter's output for the whole code universe as C++ SOURCE. No compiler runs here: the objects are built
 only by verify/recipe.py from the product root lift/pack (build.json), whose `generated` stage copies the units out of the published pack tree.
     liftgen.py --shard K/N --out DIR [--jobs J]   lift the entries whose index (address order) mod N == K -> texts_K.txt, missing_K.tsv, forms_K.tsv, encs_K.tsv, shapes_K.tsv
-    liftgen.py --finish --out DIR [--also MODDIR=UNIVERSE.tsv ...] [--need iat.tsv ...]
-        merge the shards of every image of the process -> DIR/pack/: u/000.cpp .. u/fff.cpp, entries.tsv (lifted and runtime rows), need.tsv, inc/fnvl_prelude.h, inc/imp.h,
+    liftgen.py --finish --out DIR [--also MODDIR=UNIVERSE.tsv ...]
+        merge the shards of every image of the process -> DIR/pack/: u/000.cpp .. u/fff.cpp, entries.tsv (lifted and runtime rows), inc/fnvl_prelude.h, inc/imp.h,
         forms.tsv, encs.tsv, shapes.tsv, gate_liftgen.json. Nothing derived from the loader's bridge table is written (imp.cpp, disp.S, the import rows and
         the table_id are the generated stages of lift/pack).
     liftgen.py --recipe REF COMMIT TREE_SHA256    write lift/pack/build.json for the published pack tree (fnv-nx-build branch, commit, cas.py ingest hash)
@@ -206,7 +206,6 @@ def finish(a):
         syms[k] = sy; kind[k] = 'runtime'
     w = lambda n, rows: open('%s/%s.tsv' % (pk, n), 'w').write(''.join('\t'.join(map(str, x)) + '\n' for x in rows))
     w('entries', [('%08x' % x, sy, kind[x]) for x, sy in sorted(syms.items())])      # lifted and runtime rows: independent of the loader table
-    open(pk + '/need.tsv', 'w').write(''.join(open(f).read() for f in a.need))      # the import slots the images need (impgen's completeness check); empty = none declared
     w('shapes', [(k, shape_fam[k], n) for k, n in sorted(shapes.items(), key=lambda t: t[0].encode())])      # the universe of formgate: exactly what was lifted
     w('forms', [(f, v[0], v[1]) for f, v in sorted(forms.items())])
     w('encs', [(f, r.hex(), '%08x' % x) for f, e in sorted(encs.items()) for r, x in sorted(e.items(), key=lambda t: (t[1], t[0]))])
@@ -236,10 +235,10 @@ def recipe(ref, commit, tree, dest=None):
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': gc['external']['name'], 'cc': gc['cc'], 'cxx': gc['cxx']},
            'flags': {k: keep(v) for k, v in PACK_ROOT_FLAGS.items()},
            'include': ['/ext/liftpack/inc'], 'units': 'all', 'plugins': plugins,
-           'uses': [{'root': 'ports/fnv-nx/loader', 'output': 'BRIDGE_TSV'}, GEN_USE],
+           'uses': [{'root': 'ports/fnv-nx/loader', 'output': 'BRIDGE_TSV'}, {'root': 'ports/fnv-nx/loader', 'output': 'IMPORTED_TSV'}, GEN_USE],
            'include_uses': [GEN_USE],
            'generated': [{'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['copy', '/ext/liftpack', '/out'], 'inputs': [], 'outputs': unit_names()},
-                         {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['imp', '--bridge', '/uses/ports/fnv-nx/loader/BRIDGE_TSV', '--need', '/ext/liftpack/need.tsv', '--prelude', 'fnvl_prelude.h', '--out', '/out'],
+                         {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['imp', '--bridge', '/uses/ports/fnv-nx/loader/BRIDGE_TSV', '--imported', '/uses/ports/fnv-nx/loader/IMPORTED_TSV', '--prelude', 'fnvl_prelude.h', '--out', '/out'],
                           'inputs': [], 'outputs': ['imp.cpp', 'imp_entries.tsv', 'imp_blocked.tsv']},
                          {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['entries', '/ext/liftpack/entries.tsv', '/stage/imp_entries.tsv', '/uses/ports/fnv-nx/loader/BRIDGE_TSV', '/out/entries.tsv'],
                           'inputs': [{'stage': 'ports/fnv-nx/lift/pack:gen:1', 'path': 'imp_entries.tsv'}], 'outputs': ['entries.tsv']},
@@ -269,7 +268,7 @@ def main():
     A('--exe', help='the exe (or, with --module, ignored: the module file is located in --moddirs)'); A('--universe', help='universe.tsv of the image (with --module: derived below --facts-out)')
     A('--module'); A('--modules', help='modules.tsv (the loader module table)'); A('--moddirs', help='DIR[:DIR...] that hold the module files'); A('--facts-out', help='where tools/universe.py --module wrote the module facts')
     A('--emit', default='', choices=['', 'dsl'], help='dsl: integer instructions from the proven DSL forms (fnvlift/f_dsl.py) before the hand handlers')
-    A('--jtab', default=None, help='ehtables.json of the module (tools/ehtables.py facts, `jtab_tables`)'); A('--need', action='append', default=[]); A('--l3', default=None)
+    A('--jtab', default=None, help='ehtables.json of the module (tools/ehtables.py facts, `jtab_tables`)'); A('--l3', default=None)
     A('--also', action='append', default=[], metavar='DIR=UNIVERSE.tsv')
     A('--gen', help='the GEN output of the lift/rt root (generated headers of the prelude)'); A('--fpstate', help='directory of the fp-state facts (invariants.tsv)')
     A('--certs', help='the directory of the form certificates (proof/prove.py output; shard mode)'); A('--fpdepth', help='the x87 stack-depth facts (depth.tsv)'); A('--x86sys', help='the declared x86 system record (platform X86SYS output)')
