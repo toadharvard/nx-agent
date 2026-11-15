@@ -20,7 +20,7 @@ DRIVER = r'''#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "fnvnx_importkey.h"
+#include "fnvnx/import_key.h"
 int main(int argc, char **argv) {
     if (argc < 2) return 2;
     char ln[512]; FILE *f = fopen(argv[1], "r");
@@ -57,7 +57,7 @@ def main():
     open(w('drv.c'), 'w').write(DRIVER)
     with open(w('objs.c'), 'w') as fh:   # stand-ins for the native data objects, only so the check links
         fh.writelines('char %s[16];\n' % o for o in sorted({r['native_symbol'] for r in rows if r['conv'] == 'data' and iat.IDENT.match(r['native_symbol'])}))
-    subprocess.run(['cc', '-std=c99', '-Wall', '-Wextra', '-Werror', '-I' + os.path.join(ROOT, 'loader', 'include'), w('drv.c'), w('objs.c'), w('import_keys.c'),
+    subprocess.run(['cc', '-std=c99', '-Wall', '-Wextra', '-Werror', '-I' + os.path.join(ROOT, 'loader', 'include'), '-I' + os.path.join(ROOT, 'hostabi', 'include'), w('drv.c'), w('objs.c'), w('import_keys.c'),
                     os.path.join(ROOT, 'loader', 'src', 'importkey.c'), '-o', w('drv')], check=True)
     got = {}
     for ln in subprocess.run([w('drv'), w('slots.tsv')], capture_output=True, text=True, check=True).stdout.splitlines():
