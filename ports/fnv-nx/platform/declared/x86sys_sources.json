@@ -34,8 +34,24 @@
     "path": "dlls/ntdll/unix/signal_i386.c",
     "sha256": "70245021f17fae5002aaf3f2ea76f2151eb4c900a83e8ee05225e74ebf9afd0d",
     "origin": "Wine 9.0 dlls/ntdll/unix/signal_i386.c (initial thread context, is_privileged_instr)"
+   },
+   "sysinfo": {
+    "path": "dlls/ntdll/unix/system.c",
+    "sha256": "9645702cbdd8b705b002da44c8c12ed51eb9b95f33360409d395668ef8e10f48",
+    "origin": "Wine 9.0 dlls/ntdll/unix/system.c (get_cpuinfo: CPUID bits to CPU_FEATURE_*, have_sse_daz_mode)"
+   },
+   "wineboot": {
+    "path": "programs/wineboot/wineboot.c",
+    "sha256": "3a39fa0a97b8d9247735dfeb8d2b1582856628bcc194fcffae4fa8b982c1c841",
+    "origin": "Wine 9.0 programs/wineboot/wineboot.c (CPU_FEATURE_* to ProcessorFeatures[PF_*] of the user shared data)"
+   },
+   "usd_mapping": {
+    "path": "server/mapping.c",
+    "sha256": "24d9831b31ed2798c2a2ba2b445e2010f2cb25150a82fbefcd0b55105b0f8db0",
+    "origin": "Wine 9.0 server/mapping.c (create_user_data_mapping: the section the features are written into)"
    }
-  }
+  },
+  "files_note": "system.c, wineboot.c and mapping.c were read from the upstream tag wine-9.0; dlls/ntdll/unix/signal_i386.c of the same tag has the pinned sha256 of the mirror commit, which ties the tag to the mirror. Pin them in the mirror's MANIFEST when the mirror is next touched."
  },
  "cpumodel": {
   "path": "ports/fnv-nx/verify/cpuid_model.json",
@@ -56,5 +72,12 @@
    "since_build": 9200,
    "source": "MSDN __fastfail intrinsic: fast fail is supported from Windows 8 (build 9200); Windows 7 SP1 is build 7601, so int 0x29 is not a fast-fail gate there. What the instruction does on build 7601 is not stated by MSDN: undecided"
   }
- ]
+ ],
+ "cpuref": {
+  "path": "ports/fnv-nx/verify/cpuref.json",
+  "commit": "a3217cd2c6041b8cf455f8ef269e99747620e18f",
+  "branch": "claude/fnv-l3a-lift-int3",
+  "sha256": "cd69ad7b76253a974b6df776ad95235929fd27cf02c0b81ebf1aca13a3c8a156",
+  "origin": "the declared CPU's identity (vendor_id GenuineIntel), CPUREF"
+ }
 }

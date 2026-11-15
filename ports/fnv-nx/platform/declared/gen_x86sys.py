@@ -42,7 +42,7 @@ def ks386_equ(text):
     return {m.group(1): int(m.group(2), 16) for m in re.finditer(r"^(\w+)\s+equ\s+([0-9A-Fa-f]+)H\s*$", text, re.M)}
 
 
-def build(osrec, src, mirror, wine, cpumodel):
+def build(osrec, src, mirror, wine, cpumodel, cpuref):
     undec = lambda why: {"status": "undecided", "why": why}
     fl = osrec["fields"]
     if fl["native_arch"]["value"] != 0 or fl["process_wow64"]["value"] != 0:
@@ -67,6 +67,7 @@ def build(osrec, src, mirror, wine, cpumodel):
     wt = pinned(os.path.join(wine, wf["path"]), wf, wf["path"])
     wsrc = "Wine 9.0 %s @ %s" % (wf["path"], src["wine"]["commit"][:12])
     m = re.search(r"context\.EFlags\s*=\s*(0x[0-9a-fA-F]+);", wt)
+    eflags0 = int(m.group(1), 16) if m else None
     fn = re.search(r"static inline DWORD is_privileged_instr\(.*?\n}\n", wt, re.S)
     hi = re.search(r"static BOOL handle_interrupt\(.*?\n}\n", wt, re.S)
     segv = re.search(r"static void segv_handler\(.*?(?=\nstatic void trap_handler)", wt, re.S)
@@ -115,33 +116,85 @@ def build(osrec, src, mirror, wine, cpumodel):
         raise SystemExit("gen_x86sys: cpuid_model.json has no max_basic")
     umip = 0 if max_basic < 7 else None
     cpu = json.loads(ct)
-    regs = {("1", "edx"): int(cpu["leaf1_edx_raw"], 16) & ~int(cpu["leaf1_edx_clear"], 16), ("1", "ecx"): int(cpu["leaf1_ecx_raw"], 16) & int(cpu["leaf1_ecx_keep"], 16)}   # the declared masks of cpuid_model.json (masks_doc)
+    ref = pinned(cpuref, src["cpuref"], src["cpuref"]["path"])
+    vendor = json.loads(ref)["vendor_id"]
+    leaf = {("1", "edx"): int(cpu["leaf1_edx_raw"], 16) & ~int(cpu["leaf1_edx_clear"], 16), ("1", "ecx"): int(cpu["leaf1_ecx_raw"], 16) & int(cpu["leaf1_ecx_keep"], 16),
+            ("ext", "edx"): int(cpu["ext1_edx_raw"], 16) & int(cpu["ext1_edx_keep"], 16), ("ext", "ecx"): int(cpu["ext1_ecx_raw"], 16) & int(cpu["ext1_ecx_keep"], 16)}   # the declared masks (cpuid_model.json masks_doc)
     pfdoc = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "pf.json")))
     wn = pinned(os.path.join(mirror, src["files"]["winnt"]["path"]), src["files"]["winnt"], "winnt.h").split("\n")
     pfn = {int(m.group(2)): (m.group(1), i + 1) for i, l in enumerate(wn) for m in [re.match(r"#define (PF_[A-Z0-9_]+)\s+(\d+)\s*$", l)] if m}
-    if sorted(pfn) != list(range(max(pfn) + 1)) or sorted(map(int, pfdoc["records"])) != sorted(pfn):
-        raise SystemExit("gen_x86sys: pf.json does not have exactly one record per PF_* index of winnt.h")
-    pf, cpuid_src = {}, "%s %s (masks of the declared machine: %s)" % (cm["path"], "leaf 1", "EDX = raw & ~leaf1_edx_clear, ECX = raw & leaf1_ecx_keep")
+    if sorted(pfn) != list(range(max(pfn) + 1)) or sorted(map(int, pfdoc["meanings"])) != sorted(pfn):
+        raise SystemExit("gen_x86sys: pf.json does not have exactly one meaning entry per PF_* index of winnt.h")
+    wsrc_of = lambda k: (src["wine"]["files"][k], "Wine 9.0 %s @ %s" % (src["wine"]["files"][k]["path"], src["wine"]["commit"][:12]))
+    def wread(k):
+        f = src["wine"]["files"][k]
+        return pinned(os.path.join(wine, f["path"]), f, f["path"]).split("\n")
+    wb, sy, mp = wread("wineboot"), wread("sysinfo"), wread("usd_mapping")
+    # (1) wineboot.c: the PROCESSOR_ARCHITECTURE_INTEL case: features[PF_X] = !!(sci.ProcessorFeatureBits & CPU_FEATURE_Y);  or  = TRUE;
+    i0 = next(i for i, l in enumerate(wb) if l.strip() == "case PROCESSOR_ARCHITECTURE_INTEL:")
+    i1 = next(i for i in range(i0, len(wb)) if wb[i].strip() == "break;")
+    setby = {}
+    for i in range(i0, i1):
+        m = re.match(r"\s*features\[(PF_\w+)\]\s*=\s*(?:!!\(sci\.ProcessorFeatureBits & CPU_FEATURE_(\w+)\)|(TRUE));", wb[i])
+        if m:
+            setby[m.group(1)] = (m.group(2) or "TRUE", i + 1)
+    # (2) system.c get_cpuinfo: the CPUID bits of each CPU_FEATURE_Y in the declared vendor's branch (leaf 1 first, then 0x80000001 after its do_cpuid)
+    g0 = next(i for i, l in enumerate(sy) if l.startswith("static void get_cpuinfo("))
+    g1 = next(i for i in range(g0, len(sy)) if sy[i] == "}")
+    vend = {"GenuineIntel": "GENU && regs[3] == INEI && regs[2] == NTEL", "AuthenticAMD": "AUTH && regs[3] == ENTI && regs[2] == CAMD"}[vendor]
+    vstart = next(i for i in range(g0, g1) if vend in sy[i])
+    vend_end = next(i for i in range(vstart + 1, g1) if re.match(r"\s*(else if|else)\b", sy[i]))
+    bits = {}   # CPU_FEATURE_Y -> [(leaf, reg, bit, line)]
+    def scan(lo, hi, lf):
+        for i in range(lo, hi):
+            if re.search(r"do_cpuid\(\s*0x80000001", sy[i]):
+                lf = "ext"
+            m = re.match(r"\s*if\s*\(\s*regs2\[(\d)\]\s*&\s*\(1u?\s*<<\s*(\d+)\s*\)\s*\)\s*features \|= CPU_FEATURE_(\w+);", sy[i])
+            if m:
+                bits.setdefault(m.group(3), []).append((lf, {2: "ecx", 3: "edx"}[int(m.group(1))], int(m.group(2)), i + 1))
+    l1 = next(i for i in range(g0, g1) if re.search(r"do_cpuid\(\s*0x00000001", sy[i]))
+    scan(l1, next(i for i in range(l1, g1) if "have_sse_daz_mode()" in sy[i]), "1")
+    scan(vstart, vend_end, "1")
+    daz_line = next(i for i in range(g0, g1) if "have_sse_daz_mode()" in sy[i]) + 1
+    z0 = next(i for i, l in enumerate(mp) if "user_shared_data = ptr;" in l)
+    zline = "%s line %d (the section is created SEC_COMMIT, zero-filled, line %d; the server writes only SystemCall = 1 at line %d); no assignment of the index in wineboot.c PROCESSOR_ARCHITECTURE_INTEL case lines %d-%d" % (src["wine"]["files"]["usd_mapping"]["path"], z0 + 1, z0 - 4, z0 + 2, i0 + 1, i1)
+    pf = {}
     for idx in sorted(pfn):
         nm, ln = pfn[idx]
-        r = pfdoc["records"][str(idx)]
-        b = r["basis"]
-        row = {"name": nm, "meaning": r["meaning"], "meaning_source": pfdoc["meaning_source"], "winnt_h_line": ln}
-        c = b.get("cpuid") or b.get("absent_if_cpuid_clear")
-        if "undecided" in b:
-            row.update(undec(b["undecided"]))
-        elif c:
-            bit = (regs[(str(c["leaf"]), c["reg"])] >> c["bit"]) & 1
-            how = "Intel SDM Vol 2A CPUID feature flag %s (leaf %d %s[%d])" % (c["name"], c["leaf"], c["reg"].upper(), c["bit"])
-            if "cpuid" in b:
-                row.update({"value": bit, "source": "%s = %d in %s" % (how, bit, cpuid_src)})
-            elif bit == 0:
-                row.update({"value": 0, "source": "the documented meaning needs the hardware feature; %s = 0 in %s" % (how, cpuid_src)})
+        row = {"name": nm, "winnt_h_line": ln}
+        mean = pfdoc["meanings"][str(idx)]
+        if mean:
+            row.update({"meaning": mean, "meaning_source": pfdoc["meaning_source"]})
+        if nm not in setby:
+            row.update({"value": 0, "source": "Wine 9.0 never sets it on x86: %s" % zline})
+        else:
+            how, wl = setby[nm]
+            wbs = "Wine 9.0 %s line %d" % (src["wine"]["files"]["wineboot"]["path"], wl)
+            if how == "TRUE":
+                row.update({"value": 1, "source": "%s sets it unconditionally" % wbs})
+            elif how == "DAZ":
+                mm = cpu.get("mxcsr_mask")
+                if mm is None:
+                    row.update(undec("Wine 9.0 computes it as SSE2 && FXSAVE && MXCSR_MASK bit 6 (%s line %d, have_sse_daz_mode, fxsave); verify/cpuid_model.json lacks mxcsr_mask; blocker: the owner of cpuid_model.json (L3a) must add the reference CPU's MXCSR_MASK, which the lifted FXSAVE needs too" % (src["wine"]["files"]["sysinfo"]["path"], daz_line)))
+                else:
+                    sse2 = (leaf[("1", "edx")] >> 26) & 1
+                    fxsr = (leaf[("1", "edx")] >> 24) & 1
+                    row.update({"value": int(bool(sse2 and fxsr and (int(mm, 16) >> 6) & 1)), "source": "%s: CPU_FEATURE_DAZ = SSE2 && FXSR && MXCSR_MASK bit 6 (system.c line %d), MXCSR_MASK of cpuid_model.json" % (wbs, daz_line)})
             else:
-                row.update(undec(b["present_otherwise"]["undecided"]))
+                hits = bits.get(how, [])
+                if not hits:
+                    other = [i + 1 for i in range(g0, g1) if ("CPU_FEATURE_%s;" % how) in sy[i] and not (vstart <= i < vend_end)]
+                    sp = src["wine"]["files"]["sysinfo"]["path"]
+                    if other:
+                        row.update({"value": 0, "source": "%s maps CPU_FEATURE_%s; %s sets it only in another vendor's branch (line %s), never in the %s branch (lines %d-%d) of the declared CPU, so the feature word lacks it" % (wbs, how, sp, ",".join(map(str, other)), vendor, vstart + 1, vend_end)})
+                    else:
+                        row.update(undec("%s maps it from CPU_FEATURE_%s, which %s get_cpuinfo never sets" % (wbs, how, sp)))
+                else:
+                    val = int(any((leaf[(lf, rg)] >> b) & 1 for lf, rg, b, _ in hits))
+                    why = "; ".join("%s line %d: CPUID %s %s[%d] = %d" % (src["wine"]["files"]["sysinfo"]["path"], l_, "leaf 1" if lf == "1" else "0x80000001", rg.upper(), b, (leaf[(lf, rg)] >> b) & 1) for lf, rg, b, l_ in hits)
+                    row.update({"value": val, "source": "%s maps CPU_FEATURE_%s; %s; under the declared masks of %s (vendor %s from %s)" % (wbs, how, why, cm["path"], vendor, src["cpuref"]["path"])})
         pf[str(idx)] = row
     osfxsr = {"value": pf["6"]["value"], "source": "derived: CR4.OSFXSR = 1 iff the declared PF_XMMI_INSTRUCTIONS_AVAILABLE (row processor_features[6]) is TRUE, because MSDN IsProcessorFeaturePresent gives that value the meaning 'the SSE instruction set is available' to the calling process and Intel SDM Vol 3A 2.5 / 13.1 raises #UD for SSE instructions when CR4.OSFXSR = 0; ks386.inc CR4_FXSR = 0x%X names the bit" % kg["CR4_FXSR"]} if "value" in pf["6"] else undec("derived from processor_features[6], which is undecided")
-    eflags0 = int(m.group(1), 16)
     sanit = kg["EFLAGS_USER_SANITIZE"]
     return {
         "format": "fnvnx-x86sys/2",
@@ -184,11 +237,12 @@ def main(argv):
     ap.add_argument("--sources", required=True)
     ap.add_argument("--mirror", required=True)
     ap.add_argument("--wine", required=True, help="checkout of fnv-nx-build tools/wine-9.0")
+    ap.add_argument("--cpuref", required=True, help="verify/cpuref.json of the sources record")
     ap.add_argument("--cpumodel", required=True, help="verify/cpuid_model.json of the sources record")
     ap.add_argument("--out", required=True)
     a = ap.parse_args(argv)
     raw = open(a.os, "rb").read()
-    rec = build(json.loads(raw), json.load(open(a.sources)), a.mirror, a.wine, a.cpumodel)
+    rec = build(json.loads(raw), json.load(open(a.sources)), a.mirror, a.wine, a.cpumodel, a.cpuref)
     rec["os"]["sha256"] = hashlib.sha256(raw).hexdigest()
     with open(a.out, "w") as f:
         json.dump(rec, f, indent=1, sort_keys=True)

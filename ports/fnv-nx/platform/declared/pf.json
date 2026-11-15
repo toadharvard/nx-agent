@@ -1,26 +1,29 @@
 {
- "format": "fnvnx-pf/1",
- "note": "One record per PF_* index of the WDK 7.1 winnt.h (name and index are read from that file by gen_x86sys.py), with the documented meaning (MSDN IsProcessorFeaturePresent, Windows 7) and the basis of its value on the declared machine. basis.cpuid: the feature is the CPUID bit the Intel SDM Vol 2A (CPUID, Table 3-10/3-11 feature flags) defines for that meaning, read from verify/cpuid_model.json with its declared masks. basis.absent_if_cpuid_clear: the documented meaning needs the hardware feature, so a clear CPUID bit gives FALSE. basis.undecided: no pinned source gives the value; the blocker is named, and no value is chosen. Indices above the last one the WDK defines: the MSDN return value (zero when the feature is not supported).",
+ "format": "fnvnx-pf/2",
+ "note": "The documented meaning of each PF_* index of the WDK 7.1 winnt.h (MSDN IsProcessorFeaturePresent, Windows 7). Values are NOT here: gen_x86sys.py computes each from Wine 9.0's own code (wineboot.c ProcessorFeatures, system.c get_cpuinfo) over the CPUID record of the declared CPU (precedence level 2: the documentation defines the meaning, not how Windows computes it). Meaning text is given only where the MSDN text is known; the rest is named by the WDK constant only.",
  "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
- "records": {
-  "0": {"meaning": "On a Pentium, a floating-point precision error can occur in rare circumstances", "basis": {"undecided": "an erratum of one CPU stepping; no pinned source gives the declared CPU's errata (the CPUID record holds no stepping errata)"}},
-  "1": {"meaning": "Floating-point operations are emulated using a software emulator", "basis": {"undecided": "operating-system state (CR0.EM and the emulator of the kernel); no WDK 7.1 or MSDN source states it for the declared machine (cr0.em is undecided in the same record)"}},
-  "2": {"meaning": "The atomic compare and exchange operation (cmpxchg8b) is available", "basis": {"cpuid": {"leaf": 1, "reg": "edx", "bit": 8, "name": "CX8"}}},
-  "3": {"meaning": "The MMX instruction set is available", "basis": {"cpuid": {"leaf": 1, "reg": "edx", "bit": 23, "name": "MMX"}}},
-  "4": {"meaning": "The PowerPC 64-bit move instruction is available", "basis": {"undecided": "the meaning is a PowerPC feature; whether Windows 7 x86 answers it by the architecture is not stated by a pinned source"}},
-  "5": {"meaning": "The Alpha byte instructions are available", "basis": {"undecided": "the meaning is an Alpha feature; whether Windows 7 x86 answers it by the architecture is not stated by a pinned source"}},
-  "6": {"meaning": "The SSE instruction set is available", "basis": {"cpuid": {"leaf": 1, "reg": "edx", "bit": 25, "name": "SSE"}}},
-  "7": {"meaning": "The 3D-Now instruction set is available", "basis": {"undecided": "the 3DNow bit (CPUID 0x80000001 EDX[31]) is defined by the AMD APM, which is not a pinned source; the Intel SDM does not define it"}},
-  "8": {"meaning": "The RDTSC instruction is available", "basis": {"cpuid": {"leaf": 1, "reg": "edx", "bit": 4, "name": "TSC"}}},
-  "9": {"meaning": "The processor is PAE-enabled", "basis": {"undecided": "operating-system boot state (PAE follows the DEP/NX boot policy of the install); no WDK 7.1 or MSDN source states it for the declared machine"}},
-  "10": {"meaning": "The SSE2 instruction set is available", "basis": {"cpuid": {"leaf": 1, "reg": "edx", "bit": 26, "name": "SSE2"}}},
-  "11": {"meaning": "PF_SSE_DAZ_MODE_AVAILABLE (the SSE denormals-are-zero mode is available)", "basis": {"undecided": "DAZ support is MXCSR_MASK bit 6 (SDM Vol 1 11.6.4), not a CPUID bit; the declared MXCSR_MASK is not in a pinned source"}},
-  "12": {"meaning": "Data execution prevention is enabled", "basis": {"undecided": "operating-system state (the DEP policy of the install, boot.ini/BCD nx); no WDK 7.1 or MSDN source states it for the declared machine"}},
-  "13": {"meaning": "The SSE3 instruction set is available", "basis": {"cpuid": {"leaf": 1, "reg": "ecx", "bit": 0, "name": "SSE3"}}},
-  "14": {"meaning": "The atomic compare and exchange 128-bit operation (cmpxchg16b) is available", "basis": {"cpuid": {"leaf": 1, "reg": "ecx", "bit": 13, "name": "CX16"}}},
-  "15": {"meaning": "PF_COMPARE64_EXCHANGE128", "basis": {"undecided": "the MSDN text for this index is not pinned and the name does not decide between cmpxchg8b and cmpxchg16b semantics"}},
-  "16": {"meaning": "PF_CHANNELS_ENABLED", "basis": {"undecided": "operating-system state with no pinned MSDN text"}},
-  "17": {"meaning": "The processor implements the XSAVE and XRSTOR instructions", "basis": {"absent_if_cpuid_clear": {"leaf": 1, "reg": "ecx", "bit": 26, "name": "XSAVE"}, "present_otherwise": {"undecided": "enabled also needs CR4.OSXSAVE, operating-system state with no pinned source"}}}
+ "meanings": {
+  "0": "On a Pentium, a floating-point precision error can occur in rare circumstances",
+  "1": "Floating-point operations are emulated using a software emulator",
+  "2": "The atomic compare and exchange operation (cmpxchg8b) is available",
+  "3": "The MMX instruction set is available",
+  "4": null,
+  "5": null,
+  "6": "The SSE instruction set is available",
+  "7": "The 3D-Now instruction set is available",
+  "8": "The RDTSC instruction is available",
+  "9": "The processor is PAE-enabled",
+  "10": "The SSE2 instruction set is available",
+  "11": null,
+  "12": "Data execution prevention is enabled",
+  "13": "The SSE3 instruction set is available",
+  "14": "The atomic compare and exchange 128-bit operation (cmpxchg16b) is available",
+  "15": null,
+  "16": null,
+  "17": "The processor implements the XSAVE and XRSTOR instructions"
  },
- "others": {"value": 0, "source": "MSDN IsProcessorFeaturePresent, return value: zero when the feature is not supported; the WDK 7.1 winnt.h defines indices 0..17 only"}
+ "others": {
+  "value": 0,
+  "source": "MSDN IsProcessorFeaturePresent, return value: zero when the feature is not supported; the WDK 7.1 winnt.h defines indices 0..17 only. Wine 9.0 also sets higher indices of newer Windows (e.g. PF_FASTFAIL_AVAILABLE, Windows 8+), which contradicts the declared build 7601 (precedence 1: documentation)."
+ }
 }
