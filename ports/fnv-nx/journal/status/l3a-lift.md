@@ -1071,3 +1071,6 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Universe rule, class 1: an instruction has a fall-through iff its x86sys.json row has eip_advance > 0, so int 6 at 00ed641a has none.
   - Class 2: a ptr/tail entry stays unless it has a data-proof. The census runs over all ptr/tail entries of both d3dx9 images, before any code.
   - bottleneck: the exe facts memory growth (w7).
+- 22:13 w13 cmp class: 0dd2ae53f accepted. The predicate immediate is selected exactly over 0..7; per the SDM, imm8 bits 7:3 are reserved, so there is no Form above 7.
+  - Built 3731 → 3829 (+98) on base3, 0 shas changed. The 330 3DNow shapes and vpavgw are ud-class by f_cpufeat (L3b).
+  - Open: the count of concrete cmp* instructions with imm > 7 in the lifted set, and L3b's v3 integer-universe check (18,649 keys). That check gates the merge into base3.
