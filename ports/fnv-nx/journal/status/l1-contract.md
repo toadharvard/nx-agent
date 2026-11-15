@@ -1287,3 +1287,4 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - ldcheck one-entry;
   - a PT_INTERP test.
 - Revised ruling: the driver derivation is the one rule for guest and host, and L5 w14's runtime.libs is not a startfile declaration (at most an expected-value test). L4 relinks bootguest on 91850075d.
+- w24 b30f7b460 accepted (externals race: recipe.publish_dir, atomic publish of a verified temporary sibling; the loser discards its copy; tests/test_extcache_race.py fails on the old code). It lands with 559f220db after cand1. L5 agreed that w14 drops runtime.libs and guest_errors compares with the derived profile.
