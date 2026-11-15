@@ -154,8 +154,12 @@ static bool readonly_object(tree base) {
 static bool is_memory_ref(tree t) {
   switch (TREE_CODE(t)) {
     case MEM_REF: case TARGET_MEM_REF: case COMPONENT_REF: case ARRAY_REF: case ARRAY_RANGE_REF:
-    case BIT_FIELD_REF: case REALPART_EXPR: case IMAGPART_EXPR: case VIEW_CONVERT_EXPR:
-      return true;
+    case BIT_FIELD_REF: case REALPART_EXPR: case IMAGPART_EXPR: case VIEW_CONVERT_EXPR: {
+      // a component reference is memory only when its base is: a lane of a vector value, a part of a complex register or a
+      // view-conversion of an SSA name has an SSA_NAME (or constant) at the bottom and no location
+      tree b = get_base_address(t);
+      return !b || !(TREE_CODE(b) == SSA_NAME || CONSTANT_CLASS_P(b) && TREE_CODE(b) != STRING_CST);
+    }
     case VAR_DECL:
       return !hard_register(t) && (TREE_STATIC(t) || DECL_EXTERNAL(t) || TREE_ADDRESSABLE(t));
     case RESULT_DECL:
