@@ -1141,30 +1141,6 @@ Tree hash definition:
   Empty directories are kept. Nothing else (mtime, owner, mode other than exec) is part of the hash.
 ```
 
-## verify/coffnorm.py
-
-```text
-coffnorm: zero the time-dependent fields of a COFF object or COFF/ar archive. stdlib only; run as `python3 -I`.
-
-RULE: every time-dependent field of a COFF object / archive is defined by the PE-COFF format specification; the
-normalizer sets exactly those fields to zero and changes nothing else. The fields (all little-endian):
-  COFF object   IMAGE_FILE_HEADER.TimeDateStamp                         offset 4, 4 bytes
-  bigobj        ANON_OBJECT_HEADER_BIGOBJ.TimeDateStamp (Sig1=0, Sig2=0xFFFF, Version>=2, ClassID
-                {D1BAA1C7-BAEE-4ba9-AF20-FAF66AA4DCB8})                 offset 8, 4 bytes
-  import object IMPORT_OBJECT_HEADER.TimeDateStamp (Sig1=0, Sig2=0xFFFF, Version 0)   offset 8, 4 bytes
-  archive       each member header (60 bytes): date (offset 16, 12 ASCII bytes) -> "0" + 11 spaces; and the
-                ownership fields as GNU `ar D` writes them (checked with `ar rcD`, binutils 2.42):
-                uid (offset 28, 6 bytes) "0     ", gid (offset 34, 6 bytes) "0     ", mode (offset 40, 8 bytes)
-                "644     ". Linker members ("/") and the longnames member ("//") are kept; their data holds no time.
-  CodeView      .debug$T records LF_TYPESERVER (0x1301), LF_TYPESERVER_ST (0x1501), LF_TYPESERVER2 (0x1515) carry a PDB
-                signature/GUID: positively identified, counted, NEVER rewritten; error unless --allow-typeserver.
-Nothing else in .debug$S/.debug$T is identified as time-dependent (S_OBJNAME's signature is the PCH signature, not a
-time; whether a given compiler fills it with a time is not decided by the format, so it is left alone and unlisted).
-PE images (MZ) and anything unrecognised: exit 1. Exit codes: 0 ok, 1 error, 2 `check` found a non-normalized field.
-
-usage: coffnorm.py normalize IN -o OUT [--allow-typeserver] | check FILE... [--allow-typeserver] | fields FILE
-```
-
 ## verify/envcheck.py
 
 ```text

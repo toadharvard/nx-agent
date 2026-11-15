@@ -210,18 +210,6 @@
     "ports/fnv-nx/verify/cas.py"
    ]
   },
-  "test_coffnorm.py": {
-   "references": [
-    {
-     "anchor": "## verify/coffnorm.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/coffnorm.py"
-   ]
-  },
   "test_datamodel.py": {
    "references": [
     {
