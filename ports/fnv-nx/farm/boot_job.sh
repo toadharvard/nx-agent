@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # boot_job.sh - L4 farm job: run the boot stage (verify/boot.py) on one real guest ELF and publish the result.
 #
-#   [ARTIFACTS=...] [GAME_DIR=...] bash <checkout>/ports/fnv-nx/farm/boot_job.sh <elf_id> --quantum N [--limit-instructions N] [--profile handheld|docked]
+#   FNVNX_BUILD=<clone of fnv-nx-build> [GAME_DIR=...] bash <checkout>/ports/fnv-nx/farm/boot_job.sh <elf_id> --quantum N [--limit-instructions N] [--profile handheld|docked]
 #                                [--gpu-branch <artifacts branch>]
 #
 # Steps:
@@ -48,8 +48,8 @@
 #    contract's rows (bootinputs.py milestones --stage-table: names unique, every exe address a lifted code entry). A missing branch: the
 #    job runs with the contract rows only and the final line says stage_table=absent; a present branch without the file fails the job.
 # The declared inputs (verify/env.json, manifest/fonts_mirror.json) are read only from the tree the job runs from; no variable redirects them.
-# Env: ARTIFACTS (clone of the artifacts repository, default $FARM_HOME/artifacts; cloned --filter=blob:none --no-checkout
-# when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build), FARM_HOME (default $HOME/fnvnx-farm),
+# Env: FNVNX_BUILD (required, no default: a clone of the artifacts repository fnv-nx-build; no job clones its own), ARTIFACTS_URL (default: the
+# origin of that clone), FARM_HOME (default $HOME/fnvnx-farm),
 # WORK (default $FARM_HOME/boot/<elf_id>), GAME_DIR (an installed game; never inside a git checkout). The profile is
 # passed to boot.py, recorded in meta.json and exported as FNVNX_PROFILE (a render host library reads it).
 # --quantum N (required, no default): instructions per slice of a core's thread in the N-core machine (bootmachine.py rule 3); passed to boot.py
@@ -83,8 +83,9 @@ export FNVNX_PROFILE=$PROFILE
 case $GPU_BRANCH in *[!A-Za-z0-9._/-]*|-*) die "--gpu-branch '$GPU_BRANCH' is not a branch name" ;; esac
 
 FARM_HOME=${FARM_HOME:-$HOME/fnvnx-farm}
-ARTIFACTS=${ARTIFACTS:-$FARM_HOME/artifacts}
-ARTIFACTS_URL=${ARTIFACTS_URL:-https://github.com/toadharvard/fnv-nx-build}
+ARTIFACTS=${FNVNX_BUILD:?FNVNX_BUILD (clone of fnv-nx-build) is required}
+{ [ -d "$ARTIFACTS/.git" ] || [ -f "$ARTIFACTS/HEAD" ]; } || die "FNVNX_BUILD $ARTIFACTS is not a git clone"
+ARTIFACTS_URL=${ARTIFACTS_URL:-$(git -C "$ARTIFACTS" remote get-url origin)} || die "$ARTIFACTS has no origin"
 WORK=${WORK:-$FARM_HOME/boot/$ELF_ID}
 IN_BRANCH=l1-contract/elf/$ELF_ID; OUT_BRANCH=l4-verify/boot/$ELF_ID
 GIT_ID=(-c user.name=fnv-nx-farm -c user.email=farm@invalid)
@@ -103,10 +104,6 @@ export GATE_CACHE
 python3 -I "$NX/verify/envcheck.py" check --env "$ENVF" > "$WORK/envcheck.txt" 2>&1 || { sed 's/^/boot_job: /' "$WORK/envcheck.txt" >&2; die "input-error: the host does not match the declared environment ($ENVF); set the host up with farm/setup_verdict_env.sh"; }
 
 # 2. the guest branch
-if [ ! -d "$ARTIFACTS/.git" ] && [ ! -f "$ARTIFACTS/HEAD" ]; then
-  mkdir -p "$(dirname "$ARTIFACTS")"
-  retry git clone -q --filter=blob:none --no-checkout "$ARTIFACTS_URL" "$ARTIFACTS" || die "git clone of $ARTIFACTS_URL failed"
-fi
 LS=$WORK/ls-remote.txt
 retry git -C "$ARTIFACTS" ls-remote "$ARTIFACTS_URL" "refs/heads/$IN_BRANCH" > "$LS" || die "ls-remote of $ARTIFACTS_URL failed"
 [ -s "$LS" ] || die "$ARTIFACTS_URL has no branch $IN_BRANCH"

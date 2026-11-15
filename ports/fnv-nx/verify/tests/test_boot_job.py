@@ -57,6 +57,7 @@ FINAL = re.compile(r"^BOOT elf=(\S+) rc=(\d+) reason=(\S+) last=(\S+) instr=(\d+
                    r"published=(\S+)@([0-9a-f]{12})( presents=\d+)? stage_table=(\S+)$")
 HOME = os.path.join(SCRATCH, "home")
 BARE = os.path.join(SCRATCH, "artifacts.git")
+CLONE = os.path.join(SCRATCH, "fnv-nx-build")   # the FNVNX_BUILD of the jobs: a clone of the bare repository (its origin is the artifacts URL)
 GAME = os.path.join(SCRATCH, "game")
 def _exe():
     """the player's FalloutNV.exe: the pinned gamedata/exe input of verify/tests/inputs.json (the gate fetches it by commit + tree hash)"""
@@ -101,7 +102,7 @@ QUANTUM = 20000
 
 
 def run_job(args, env_extra=None, game=GAME, tree=None):
-    env = {"PATH": os.environ["PATH"], "HOME": HOME, "ARTIFACTS_URL": BARE, "LANG": "C.UTF-8", "GATE_CACHE": os.path.join(HOME, "gate-cache")}
+    env = {"PATH": os.environ["PATH"], "HOME": HOME, "FNVNX_BUILD": CLONE, "LANG": "C.UTF-8", "GATE_CACHE": os.path.join(HOME, "gate-cache")}
     if game:
         env["GAME_DIR"] = game
     env.update(env_extra or {})
@@ -126,6 +127,7 @@ def main():
         f.write(EXE)
     git("init", "-q", "--bare", BARE)
     git("config", "uploadpack.allowFilter", "true", cwd=BARE)
+    git("clone", "-q", BARE, CLONE)
     contract = {"elffacts.json": open(tb.facts_path(), "rb").read(), "entries.tsv": MANIFEST.encode(),
                 "milestones.tsv": MILESTONES.encode(), "run.txt": RUN.encode()}
     ok_elf = fault_elf = gpu_elf = lifted_elf()
@@ -287,7 +289,9 @@ def main():
     tb.case("bad limit: job fails", rc == 1 and "--limit-instructions" in err, (rc, err[-400:]))
     rc, out, err = run_job(["testid", "--quantum", "0"])
     tb.case("bad quantum: job fails", rc == 1 and "--quantum" in err, (rc, err[-400:]))
-    r = subprocess.run(["bash", os.path.join(TREE, "farm", "boot_job.sh"), "testid"], env={"PATH": os.environ["PATH"], "HOME": HOME, "ARTIFACTS_URL": BARE, "GAME_DIR": GAME, "LANG": "C.UTF-8"}, capture_output=True, text=True)
+    r = subprocess.run(["bash", os.path.join(TREE, "farm", "boot_job.sh"), "testid"], env={"PATH": os.environ["PATH"], "HOME": HOME, "FNVNX_BUILD": CLONE, "GAME_DIR": GAME, "LANG": "C.UTF-8"}, capture_output=True, text=True)
+    r0 = subprocess.run(["bash", os.path.join(TREE, "farm", "boot_job.sh"), "testid", "--quantum", "1"], env={"PATH": os.environ["PATH"], "HOME": HOME, "GAME_DIR": GAME, "LANG": "C.UTF-8"}, capture_output=True, text=True)
+    tb.case("FNVNX_BUILD unset: job fails naming it, nothing cloned", r0.returncode != 0 and "FNVNX_BUILD" in r0.stderr and not os.path.exists(os.path.join(HOME, "fnvnx-farm", "artifacts")), (r0.returncode, r0.stderr[-400:]))
     tb.case("no quantum: job fails (no default)", r.returncode == 1 and "--quantum" in r.stderr, (r.returncode, r.stderr[-400:]))
     # --- the renderer: --gpu-branch
     genv = {}   # the host matches the declared environment (verify/env.json, envcheck.py); the job installs nothing
