@@ -53,7 +53,7 @@ def check(paths):
         p0, f0 = cs[0]
         for p, f in cs[1:]:
             if not comdat.same(f, f0):
-                red[s] = 'copies in %s (%s) and %s (%s) differ: %s' % (p0, f0.digest[:12], p, f.digest[:12], comdat.first_difference(f0, f))
+                red[s] = 'no definition record: copies in %s (%s) and %s (%s) differ: %s' % (p0, f0.digest[:12], p, f.digest[:12], comdat.first_difference(f0, f))
                 break
     bad = comdat.name_not_unique({p: ({s: i.digest for s, i in c.items()}, {n for i in c.values() for n in i.resolved}, d) for p, (c, d) in per.items()})
     for n in sorted({n for c, _ in per.values() for i in c.values() for n in i.resolved}):
@@ -72,6 +72,8 @@ def by_class(red):
             k = 'undecidable: ' + r.rsplit(': ', 1)[-1].replace(' ', '_')
         elif r.startswith('name-resolved'):
             k = 'name-not-unique'
+        elif r.startswith('no definition record'):
+            k = 'undecidable: no definition record'   # byte-different copies; the entity is a source definition, decided by L2's definition record once it exists
         else:
             k = 'differ'
         out[k] = out.get(k, 0) + 1
