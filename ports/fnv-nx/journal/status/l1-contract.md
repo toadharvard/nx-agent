@@ -1502,3 +1502,8 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Cold timings: build 118.9 s, fpexact 273 s, determinism 277 s, selftests about 410 s. Warm timings come after the rebase onto cand2.
   - 9 selftest files fail; they are being triaged by owner after the rebase.
 - 09:13 **MERGER.** L1's merge will be cand2 alone, after its green verdict. w15 merges trunk a5c8f427 into it.
+- 09:15 **L5 asks.**
+  - (a) thiscall args count stack slots without `this`, which is correct by the grammar. L3a is asked to confirm its reader.
+  - (b) Gap: combridge rows are not checked against bridge.tsv. Class fix, assigned to w12: a generated key header from the iat stage, and the run-time resolver is deleted.
+  - (c) objstub constant-error bodies. The universe is the sections kept by the --gc-sections link. A kept body is red unless it cites the library's documentation under the declared config.
+- 09:15 **w22.** The bridgetable hand lists (register rows 256-259) are moved up next. The va_ forwarder mapping comes from a platform-emitted record, not a name prefix.
