@@ -1141,3 +1141,10 @@ Paused: w3b, w4, farm; no other work.
     - This head is the cand4 candidate once the b9f6b3a69 pin lands.
     - w5 is merging it into w5-fbo.
 - bottleneck: the farm pin 03eacf9d (stamp); L1 cand3 → trunk. 2 workers busy.
+- 21:05Z: w6 gates at 4bd215d1b.
+    - d3d9total 332/332, with 45/45 mutations killed.
+    - Assumptions gate red: 5 mention-no-id findings, all in L1 files inherited byte-identical from w12L2 (contract/gatecert.py:11, :292; verify/objstub_x64.py:1, :15, :686). Routed to L1.
+    - INCLUDE check:
+        - Tracked dirs reach the include path through `uses` plus include_home and _copy.
+        - include_uses is used only for the generated FFP_LAYOUT, which L1 has confirmed as canonical.
+    - The gl4 shader-failure citation (od:gl-shader-failure) is with w6.
