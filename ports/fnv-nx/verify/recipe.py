@@ -978,8 +978,9 @@ def include_closure(inc, root, roots, repo, tg, variant_rec=None):
     todo = [d for d in inc if isinstance(d, str) and not d.startswith("/")]
     while todo:
         d = todo.pop(0)
+        home = max((q for q in roots if under(d, q)), key=len, default=None)   # the nearest admitted root owns the directory (a header root nested in a product root owns its own tree)
         for p, r in roots.items():
-            if p == root or r.get("class") != "product" or tg not in targets_of(r) or not under(d, p):
+            if p != home or p == root or r.get("class") != "product" or tg not in targets_of(r):
                 continue
             paths = [r.get("recipe") if r.get("target") == tg else None] + [q for t, q in own_recipes(r).values() if t == tg]
             for path in paths:

@@ -4,7 +4,11 @@ C records have no linkage ([6.2.2]p6: a tag is never an entity with linkage), so
 declarations of one object or function with external linkage have compatible types.  The record `.fnvnx.decltype` (non-loaded, written by the
 layout plugin of a C unit) has one line per external symbol the unit declares or defines:  `symbol<TAB>type`.  Type grammar (prefix, no blanks):
     scalar        a word of [A-Za-z0-9_] (`int`, `unsigned_int`, `float`, `void`, `_Bool`)
-    qualified     `const:`T | `volatile:`T | `restrict:`T      (any order, each once, canonical order const, volatile, restrict)
+    qualified     `const:`T | `volatile:`T | `restrict:`T | `atomic:`T   (any order, each once, canonical order const, volatile, restrict, atomic)
+    host          `host:`W   a scalar word carrying the fnvnx_host attribute (the HOST1 rule): a distinct constructor, compatible only with itself
+    vector        `vec:`N`:`S`:`A`:`T   N elements (a decimal or `c0+c1x` poly), S bytes, A byte alignment, element T (VEC1)
+    reference     `ref:`S`:`A`:`T   a reference type (REF1): S bytes, A byte alignment, pointee T
+    complex       `complex:`S`:`A`:`T   `_Complex T`: S bytes, A byte alignment, component T (CPLX1; layout_type case COMPLEX_TYPE)
     pointer       `*`T
     array         `[N]`T (N decimal) | `[]`T (incomplete)
     function      `(`P,P,...`)`T  with P a type, `...` last for varargs; `(?)`T has no prototype (K&R)
@@ -85,7 +89,21 @@ class Parse:
             self.eat(')')
             return ('fn', tuple(ps), va, self.ty())
         w = self.word()
-        if w in ('const', 'volatile', 'restrict') and self.peek() == ':':
+        if w == 'host' and self.peek() == ':':
+            self.i += 1
+            return ('host', self.word())
+        if w in ('vec', 'complex', 'ref') and self.peek() == ':':
+            self.i += 1
+            fields = []
+            for _ in range(3 if w == 'vec' else 2):
+                m = re.compile(r'[0-9]+(?:\+[0-9]+[xy][0-9]*)?').match(self.s, self.i)
+                if not m:
+                    raise ValueError('expected a size at %d of %r' % (self.i, self.s))
+                self.i = m.end()
+                fields.append(m.group(0))
+                self.eat(':')
+            return (w, tuple(fields), self.ty())
+        if w in ('const', 'volatile', 'restrict', 'atomic') and self.peek() == ':':
             self.i += 1
             q = [w]
             t = self.ty()
@@ -136,6 +154,10 @@ def compatible(a, b, seen=None):
     k = a[0]
     if k == 'sc':
         return a[1] == b[1]
+    if k == 'host':
+        return a[1] == b[1]
+    if k in ('vec', 'complex', 'ref'):
+        return a[1] == b[1] and compatible(a[2], b[2], seen)
     if k == 'q':
         return a[1] == b[1] and compatible(a[2], b[2], seen)
     if k == 'ptr':
