@@ -989,3 +989,4 @@ One bounded read-only pass over lift/. Each item gives its replacement.
     - d3dx9_38: session_01KmtZKTC7Y1r6PNDNnBLoET (doing).
   - w7 builds the 5 small images, then store-merges and builds lift/facts (all hits). w13 rebases onto 53583fa77 and builds retn and fpfacts on the merged FACTS.
 - bottleneck: the facts farms (d3dx9_31 about 3 h); the nxgpu include (w8), then the liftsrc cold build.
+- 22:19 The facts build commit is now w7 e7b12ab35 (53583fa77 plus the round driver streaming its stderr live). The 3 farms are moved to it, with stores at l3a-lift/factsstore/e7b12ab35-<image>. w7 stops its own d3dx9_31 run, which duplicates the farm and risks OOM, and builds the 5 small images. universe.py, modlift.py, pcsrc.py and cli.py are frozen until the farms finish.
