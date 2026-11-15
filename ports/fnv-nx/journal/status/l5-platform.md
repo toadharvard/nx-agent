@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 2026-11-15 01:00Z L1 ruling: guest start/end files and libs = pinned driver -### derivation (w12h 91850075d link/guest.json, crt0.o excluded by ENTRY rule); w14 runtime.libs removed (second declaration), guest_errors onto the derivation.
 - 2026-11-15 00:58Z w14 pair farm session_01KmtZKR9PGPSxf9iUWd5Q54 at 78299544c (inputs by pin; rt branch fbeeb49ff merges L1 559f220db): measurement only, not published. Publish after W1+W2 and C9 0/0, second pair.
 - 2026-11-15 00:55Z w14 C9 f70d0f25f @libnx 518bf11: 68 data-model warnings (ptr->int 27, int->ptr 9, shift 20, overflow 2, incompatible ptr 10), 25/120 types differ ILP32 vs LP64. Ruling: W1 all 68 fixed at source by class rule (u64 widening, 32-bit address space fact) + 5 options -Werror in guest semantics; W2 wire types decided statically (type reaching svc/IPC descriptor/shmem), wire types layout-equal or ILP32 wire definition. Name split rejected.
 - 2026-11-15 00:50Z compiler repin by L1 w24 559f220db (b274ec067/a1eeb84d in guest_compiler.json + every build.json; recipe probe long double 8). w14 bases msvcmodel13 repin on it; pair on farm (inputs fetched by pin). w9 c753ecc32 declared_machine source tokens; objstub rerun waits on L1 c11:/posix-2017: forms. link/guest.json pre crt0.o -> runtime.libs startfiles (L1, from L4 report).
