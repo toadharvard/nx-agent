@@ -326,3 +326,20 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
     - The boot root ports/fnv-nx/boot is admitted (L1 7f96612fa) and committed. Its recipe has one error: lift/pack declares no ENTRIES, waiting on L3a w8.
     - Tests: test_bootinputs 81 green.
   - Entry rule (L1 a924103e0): w6 is renaming the test entries and relinking bootguest.
+- 11:05:
+  - w6-r 8e00b490c: w7-u de2080ab3 and L1 a924103e0 are merged; the entry rule is applied (fnvnx_test_entry, no main).
+  - Relink red: a924103e0 lacked envcheck.record_problems, which is fixed on the w12L2 head; w6 is relinking on it.
+  - Link-free L4 tests at f19bff66a are green:
+
+    | Test | Cases |
+    |---|---|
+    | bootheap | 13 |
+    | bootlayout | 27 |
+    | bootpath | 53 |
+    | bootsock | 6 |
+    | bootthreadcpu | 35 |
+    | bootunmap | 28 |
+    | bootcores, bootinputs, bootstart | 0 failed |
+
+  - Sent to L1: the compiler pin is restated per root (lift/* stale at b4057704c vs b274ec067). Rule asked: one pin record, and a literal pin in a build.json is an error.
+  - Admit variant m0 is gone, so the plain bootguest root is built.
