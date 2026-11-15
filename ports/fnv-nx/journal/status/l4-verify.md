@@ -220,3 +220,13 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - L5 w10 fnvnx_declared_fonts (FNVNX_SD_FONTS in sdlayout.h);
   - L2 sdd plugin vtables 3 (closed by the noneelf runtime build, phase B mirror pending).
   - Task S (w7): the boot machine mounts the pinned tools/fonts-wine9 mirror at FNVNX_SD_FONTS, path read from sdlayout.h, mirror verified by the pin.
+
+## 2026-11-15 01:00 — 2026-11-15 order: L4 pass R (w6, 953f6427d, journal/status/l4-defects-0215.md)
+- Universe: 43 files by the naming rule. Findings: 45 (A 27, B 12, C 6). No direct compiler/ld call, unpinned apt or second cache was found.
+- Converting now (path), in this order:
+  1. B2+C1 (delete boot_job's dpkg loop and dead gcc);
+  2. A25+B1 (bootguest variants generated from guest.c MODE labels; no restated flags or plugins);
+  3. B6+C2 (icount: ELF facts from the recipe, no direct readelf/nm);
+  4. upgraded to path, one generated hostabi record (a stage parses hostapi.h, placement.h, reach.h and sockwire*.h; copies and compare tests are deleted). This closes A1-A6, A11-A13, B5, B7, B8, A26 and L5's rule-2 finding. A8 is blocked until L5 exports the host_section/vm values in a header.
+- After the first frame: the remaining rows are listed in l4-defects-0215.md (A7?, A9-A10, A14-A24, A27, B3, B4, B9-B12, C3-C6).
+- cand2 takes c0b42b63f (L1). errno_accessor: L1 w20 derives it from the target libc header and deletes the field and check.
