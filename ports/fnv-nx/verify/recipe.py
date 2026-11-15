@@ -120,12 +120,14 @@ def plugin_args(origin):
     return out
 
 
-# The semantic flags of a guest root (data model, ABI, target, FP, aliasing, overflow, language model, calling convention): ONE ordered set, the
-# guest compiler pin's "flags"."semantics" (guest_compiler.json, next to this file). The RECIPE appends it to every guest compile stage, C, C++ and
+# The semantic flags of a guest root (data model, ABI, target, FP, aliasing, overflow, language model, calling convention): ONE ordered set. Its leading
+# run (ABI, architecture, tuning, code model) is generated from the declared targets (targets.json, targets.semantic_prefix); the rest is the guest
+# compiler pin's "flags"."semantics" (guest_compiler.json, next to this file). The RECIPE appends it to every guest compile stage, C, C++ and
 # assembler alike, minus what the pinned driver itself says does not apply to that language (semantics_for); a guest build.json carries none of them.
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "guest_compiler.json")) as _f:
     _sem = json.load(_f)["flags"]["semantics"]
-SEMANTICS_FLAGS = tuple(_sem["common"])   # every guest root (native, decomp, lifted)
+import targets as _targets  # noqa: E402  (the declared targets: verify/targets.json)
+SEMANTICS_FLAGS = tuple(_targets.semantic_prefix(_targets.load())) + tuple(_sem["common"])   # every guest root (native, decomp, lifted)
 SEMANTICS_LIFTED = SEMANTICS_FLAGS + tuple(_sem["lifted_extra"])   # a root whose cxx_origin is a lifted declaration: the common set plus what the lifter's code is built under
 SDD_DEFINE = "-DFNVNX_SDD=1"   # per root: the plugin fnvnx_sdd needs it (and -fno-devirtualize, which is in the semantic set of a guest root)
 SDD_FLAGS = (SDD_DEFINE, "-fno-devirtualize")   # what a NATIVE C++ root of a host target holds itself
@@ -527,6 +529,15 @@ def load_pin(repo="."):
     """verify/guest_compiler.json of the checkout, or None when the tree has none."""
     p = os.path.join(repo, GUEST_PIN)
     return json.load(open(p)) if os.path.exists(p) else None
+
+
+def runtime_cflags(pin):
+    """The flags the guest runtime (newlib, libstdc++) is built with beyond the semantic set: the `runtime_cflags` of the one guest compiler record.
+    The runtime build reads them here (guest_flags.py --runtime); no build script spells them."""
+    v = pin.get("runtime_cflags") if isinstance(pin, dict) else None
+    if not isinstance(v, list) or not all(isinstance(x, str) and x.startswith("-") for x in v):
+        raise BuildRed("%s: runtime_cflags must be a list of compiler flags" % GUEST_PIN)
+    return list(v)
 
 
 def guest_link_part(rec, root, pin, prof, files, roots):
@@ -1275,6 +1286,14 @@ def predefined(driver, kind, flags):
     if r.returncode:
         raise BuildRed({"stage": "predefined:" + kind, "exit": r.returncode, "stderr": r.stderr.splitlines()[-20:]})
     return {l.split(" ", 2)[1]: (l.split(" ", 2) + [""])[2] for l in r.stdout.splitlines() if l.startswith("#define ")}
+
+
+def diagnostics(driver, kind, flags, source):
+    """The diagnostics (stderr lines) of the pinned DRIVER compiling SOURCE (a file) for a unit of KIND under FLAGS, syntax only: the compiler's own
+    answer on a translation unit whose static_asserts state the data model (gate "datamodel").  -> (exit code, [lines])."""
+    r = subprocess.run([driver, "-x", LANG_X[kind], "-fsyntax-only"] + list(flags) + [source], capture_output=True, text=True,
+                       env=dict(os.environ, LC_ALL="C", LANGUAGE="C"))
+    return r.returncode, r.stderr.splitlines()
 
 
 def semantics_for(driver, kind, flags=None, origin=None):

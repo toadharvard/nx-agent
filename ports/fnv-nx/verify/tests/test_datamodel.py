@@ -16,6 +16,10 @@ from test_plugins import BASE, ROOT, T, REAL, VERIFY, check, REC
 sys.path.insert(0, VERIFY)
 import gate_datamodel as gd  # noqa: E402
 import recipe  # noqa: E402
+import targets  # noqa: E402
+
+
+DM_JSON = gd.DATAMODEL
 
 
 def gate(repo, cache):
@@ -41,7 +45,8 @@ def main():
     other = tg.guest_repo("d3", tg.guest_rec(dict(ext, commit="c" * 40)), pin)
     rc, r, o = gate(other, cache)
     check("guest root on another commit of the external: red", rc == 2 and ROOT + ":compiler" in r["uncertified"], r)
-    check("the semantics flags of the recipe rule are the pin's (one source)", tuple(pin["flags"]["semantics"]["common"]) == recipe.SEMANTICS_FLAGS and "-mabi=ilp32" in recipe.SEMANTICS_FLAGS
+    check("the semantics flags of the recipe rule are the declared targets' prefix then the pin's (one source each)",
+          tuple(targets.semantic_prefix(targets.load())) + tuple(pin["flags"]["semantics"]["common"]) == recipe.SEMANTICS_FLAGS and "-mabi=ilp32" in recipe.SEMANTICS_FLAGS
           and "-mno-outline-atomics" in recipe.SEMANTICS_FLAGS and "-ffp-contract=off" in recipe.SEMANTICS_FLAGS, pin["flags"])
     # the certificate of a unit, on a CC stage document (pure function of the document and the semantic set of the unit's language)
     sem = list(recipe.SEMANTICS_FLAGS)
@@ -82,17 +87,25 @@ def main():
     cdoc["argv"] = [a for a in cdoc["argv"] if a != "-fno-sized-deallocation"]
     check("a C document with the driver's C subset is green", gd.unit_why("a.c", cdoc, csem, pin) == [], gd.unit_why("a.c", cdoc, csem, pin))
     check("a C document that still holds the C++-only flag is red", "argv holds -fno-sized-deallocation" in gd.unit_why("a.c", doc, csem, pin))
-    good = {"__SIZE_TYPE__": "unsigned int", "__PTRDIFF_TYPE__": "int"}
-    check("the exe's data model macros certify a unit", gd.unit_why("a.cc", doc, sem, pin, None, good) == [])
-    check("size_t = long unsigned int is red", any("__SIZE_TYPE__" in x for x in gd.unit_why("a.cc", doc, sem, pin, None, dict(good, __SIZE_TYPE__="long unsigned int"))))
-    check("ptrdiff_t = long int is red", any("__PTRDIFF_TYPE__" in x for x in gd.unit_why("a.cc", doc, sem, pin, None, dict(good, __PTRDIFF_TYPE__="long int"))))
-    check("unsigned plain char is red", any("plain char" in x for x in gd.unit_why("a.cc", doc, sem, pin, None, dict(good, __CHAR_UNSIGNED__="1"))))
+    rows = [dict(id="S01", flag="-fsigned-char", check='static_assert DM("S01") in toolchain/tests/x.cpp'), dict(id="S02", flag=None, check='static_assert DM("S02") in toolchain/tests/x.cpp')]
+    ok = gd.row_why(rows, ["-fsigned-char"], 0, [], {"S01", "S02"})
+    check("rows with their cases, accepted by the compiler, are certified", ok == {"S01": [], "S02": []}, ok)
+    bad = gd.row_why(rows, ["-fsigned-char"], 1, ["x.cpp:3:1: error: static assertion failed: S02"], {"S01", "S02"})
+    check("a row whose case the compiler rejects is red, the other stays green", bad["S02"] and not bad["S01"], bad)
+    check("a row with no case is red", gd.row_why(rows, ["-fsigned-char"], 0, [], {"S01"})["S02"] != [], 0)
+    check("a case with no row is an item of its own", gd.row_why(rows, ["-fsigned-char"], 0, [], {"S01", "S02", "S09"}).get("case:S09"), 0)
+    check("a flag row whose site flag is not in the semantic set is red", gd.row_why(rows, [], 0, [], {"S01", "S02"})["S01"] != [], 0)
+    odd = rows + [dict(id="S29", flag=None, check="ldbl/model.cpp cases (test_ldbl model() step)")]
+    check("a row whose check is not a static_assert case is red", gd.row_why(odd, ["-fsigned-char"], 0, [], {"S01", "S02"})["S29"] != [], 0)
+    check("a case file that does not compile marks every row red", all(gd.row_why(rows, ["-fsigned-char"], 1, ["x.cpp:1: error: expected ;"], {"S01", "S02"}).values()), 0)
     check("unit without a CC document is red", gd.unit_why("a.cc", None, sem, pin) == ["no CC stage document"])
     # the real compiler: green
-    g = tg.guest_repo("d4", rec, pin, files={ROOT + "/b.cc": "int b() { return 2; }\n", ROOT + "/c.c": "int c(float f) { return (int)f; }\n",
+    g = tg.guest_repo("d4", rec, pin, files={DM_JSON: json.dumps({"rows": [dict(id="S01", flag="-fsigned-char", check='static_assert DM("S01") in toolchain/tests/x.cpp'), dict(id="S05", flag=None, check='static_assert DM("S05") in toolchain/tests/x.cpp')]}),
+                                                     "ports/fnv-nx/toolchain/tests/x.cpp": '#define DM(id, ...) static_assert((__VA_ARGS__), id)\nDM("S01", (char)-1 < 0);\nDM("S05", sizeof(int) == 4);\n',
+                                                     ROOT + "/b.cc": "int b() { return 2; }\n", ROOT + "/c.c": "int c(float f) { return (int)f; }\n",
                                                      ROOT + "/s.S": ".text\n.globl sx\nsx: ret\n"})
     rc, r, o = gate(g, cache)
-    check("native guest root on the pinned compiler: green, compiler + C++, C and asm units", rc == 0 and r["status"] == "green" and (r["certified"], r["universe"]) == (5, 5), (rc, r, o))
+    check("native guest root on the pinned compiler: green, compiler + C++, C and asm units", rc == 0 and r["status"] == "green" and (r["certified"], r["universe"]) == (7, 7), (rc, r, o))
 
 
 if __name__ == "__main__":

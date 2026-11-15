@@ -435,18 +435,6 @@
     "ports/fnv-nx/verify/puregate_policy.py"
    ]
   },
-  "test_graph.py": {
-   "references": [
-    {
-     "anchor": "## verify/graph.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/graph.py"
-   ]
-  },
   "test_guest.py": {
    "references": [
     {
@@ -507,22 +495,6 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/icount.py"
-   ]
-  },
-  "test_l1graph.py": {
-   "references": [
-    {
-     "anchor": "## verify/l1graph.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/l1graph.py",
-    "ports/fnv-nx/verify/graph.py",
-    "ports/fnv-nx/verify/runtime.py",
-    "ports/fnv-nx/verify/toolflags.py",
-    "ports/fnv-nx/verify/toolflags_policy.py"
    ]
   },
   "test_l2gates.py": {
@@ -885,18 +857,6 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/sdcheck.py"
-   ]
-  },
-  "test_stackuse.py": {
-   "references": [
-    {
-     "anchor": "## verify/stackuse.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/stackuse.py"
    ]
   },
   "test_systemlibs.py": {

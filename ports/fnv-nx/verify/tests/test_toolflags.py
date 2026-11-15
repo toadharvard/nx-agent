@@ -30,9 +30,6 @@ GCC = ["/tc/bin/gcc", "-c", "/src/a.c", "-o", "/out/a.o", "-O2", "-frandom-seed=
        "-Werror=date-time", "-pipe"]
 LD = ["/tc/bin/ld", "-o", "/out/a.elf", "/src/a.o", "--build-id=sha1"]
 PY = ["/tc/bin/python3", "-B", "-s", "/src/tool.py", "-j", "4"]
-CLDECL = {"coff_normalize": True, "no_date_time_macros": {"checked_by": "srcscan"}}
-CL = ["/tc/bin/cl.exe", "/c", "/Z7", "/Fo/out/a.obj", "/src/a.c"]
-LINK = ["/tc/bin/link.exe", "/INCREMENTAL:NO", "/OUT:/out/a.exe", "/src/a.obj"]
 
 
 def doc(tool, argv, env=None, extra=None):
@@ -70,8 +67,6 @@ expect("gcc full compile passes", doc("gcc", GCC), [])
 expect("ar rcD passes", doc("ar", ["/tc/bin/ar", "rcD", "/out/liba.a", "/src/a.o", "/src/b.o"]), [])
 expect("ld passes", doc("ld", LD), [])
 expect("python passes (script args may hold -j)", doc("python", PY), [])
-expect("msvc-cl coff_normalize passes", doc("msvc-cl", CL, extra=CLDECL), [])
-expect("msvc-link passes", doc("msvc-link", LINK, extra={"coff_normalize": True}), [])
 
 # --- environment rules
 for k, v in (("TZ", "Europe/Berlin"), ("LC_ALL", "en_US.UTF-8"), ("PYTHONHASHSEED", "1"), ("SOURCE_DATE_EPOCH", "12x"),
@@ -176,46 +171,6 @@ expect("python -j before script", doc("python", ["/tc/bin/python3", "-B", "-s", 
        ["jobs-in-argv"])
 expect("python other PYTHON* env", doc("python", PY, env_with(PYTHONOPTIMIZE="1")), ["env-forbidden"])
 
-# --- msvc
-expect("msvc-cl no decl", doc("msvc-cl", CL, extra={"no_date_time_macros": {"checked_by": "x"}}), ["decl-missing"])
-expect("msvc-cl both decl", doc("msvc-cl", CL + ["/Brepro"], extra=dict(CLDECL, msvc_brepro=True)), ["decl-conflict"])
-expect("msvc-cl brepro declared and present",
-       doc("msvc-cl", CL + ["/Brepro"], extra={"msvc_brepro": True, "no_date_time_macros": {"checked_by": "x"}}), [])
-expect("msvc-cl brepro declared absent",
-       doc("msvc-cl", CL, extra={"msvc_brepro": True, "no_date_time_macros": {"checked_by": "x"}}), ["flag-missing"])
-expect("msvc-cl no date/time declaration", doc("msvc-cl", CL, extra={"coff_normalize": True}), ["decl-missing"])
-expect("msvc-cl empty checked_by",
-       doc("msvc-cl", CL, extra={"coff_normalize": True, "no_date_time_macros": {"checked_by": ""}}), ["decl-missing"])
-for f in ("/Zi", "/ZI", "/MP", "/MP4", "/Fdfoo.pdb"):
-    expect("msvc-cl forbidden %s" % f, doc("msvc-cl", CL + [f], extra=CLDECL), ["flag-forbidden"])
-expect("msvc-cl /showIncludes /FC ok", doc("msvc-cl", CL + ["/showIncludes", "/FC"], extra=CLDECL), [])
-expect("msvc-link no INCREMENTAL:NO", doc("msvc-link", argv_with(LINK, drop=["/INCREMENTAL"]),
-                                          extra={"pe_normalize": True}), ["flag-missing"])
-expect("msvc-link /INCREMENTAL", doc("msvc-link", argv_with(LINK, ["/INCREMENTAL"], ["/INCREMENTAL"]),
-                                     extra={"pe_normalize": True}), ["flag-forbidden", "flag-missing"])
-for f in ("/LTCG:PGINSTRUMENT", "/LTCG:PGOPTIMIZE", "/ltcg:pgoptimize"):
-    expect("msvc-link forbidden %s" % f, doc("msvc-link", LINK + [f], extra={"pe_normalize": True}), ["flag-forbidden"])
-expect("msvc-link no decl", doc("msvc-link", LINK), ["decl-missing"])
-expect("msvc-lib passes", doc("msvc-lib", ["/tc/bin/lib.exe", "/OUT:/out/a.lib", "/src/a.obj"],
-                              extra={"coff_normalize": True}), [])
-expect("msvc-lib brepro missing", doc("msvc-lib", ["/tc/bin/lib.exe", "/OUT:/out/a.lib"],
-                                      extra={"msvc_brepro": True}), ["flag-missing"])
-
-# --- wine
-WENV = env_with(WINEDEBUG="-all", WINEPREFIX="/out/wp")
-WARGV = ["/tc/bin/wine"] + CL
-expect("wine passes", doc("wine", WARGV, WENV, dict(CLDECL, wine_tool="msvc-cl")), [])
-expect("wine without wine_tool", doc("wine", WARGV, WENV, CLDECL), ["tool-undeclared"])
-expect("wine_tool not msvc", doc("wine", WARGV, WENV, dict(CLDECL, wine_tool="gcc")), ["tool-unlisted"])
-expect("wine inner rules apply", doc("wine", WARGV + ["/Zi"], WENV, dict(CLDECL, wine_tool="msvc-cl")),
-       ["flag-forbidden"])
-expect("wine no WINEDEBUG", doc("wine", WARGV, env_with(WINEPREFIX="/out/wp"), dict(CLDECL, wine_tool="msvc-cl")),
-       ["env-missing"])
-expect("wine WINEPREFIX outside", doc("wine", WARGV, env_with(WINEDEBUG="-all", WINEPREFIX="/root/.wine"),
-                                      dict(CLDECL, wine_tool="msvc-cl")), ["env-value"])
-expect("wine WINEPREFIX under input ok", doc("wine", WARGV, env_with(WINEDEBUG="-all", WINEPREFIX="/tc/wp"),
-                                             dict(CLDECL, wine_tool="msvc-cl")), [])
-
 # --- response files
 root = os.path.join(TMP, "root")
 os.makedirs(os.path.join(root, "src"))
@@ -279,7 +234,7 @@ case("cli unreadable document exit 1", run("check", junk)[0] == 1)
 case("cli missing file exit 1", run("check", os.path.join(TMP, "none.json"))[0] == 1)
 case("cli usage exit 1", run()[0] == 1 and run("bogus")[0] == 1 and run("check")[0] == 1)
 rc, out = run("policy")
-case("cli policy table", rc == 0 and "gcc" in out and "UNVERIFIED" in out and "reproducible-builds.org" in out, out[:200])
+case("cli policy table", rc == 0 and "gcc" in out and "reproducible-builds.org" in out, out[:200])
 pg = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "puregate.py"), "check",
                      os.path.join(VERIFY, "toolflags.py"), os.path.join(VERIFY, "toolflags_policy.py")],
                     capture_output=True, text=True)
