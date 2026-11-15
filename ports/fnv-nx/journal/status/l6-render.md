@@ -1293,3 +1293,8 @@ Paused: w3b, w4, farm; no other work.
     - FOURCC_LIST is deleted. KNOWN_FCC is read from format_index_remap in a new pruned mirror, tools/wine-9.0-d3d9-formats @348f306e (tree 342fb6d4…).
     - Product byte-identical; test_env_ident passes; abspath render 0; d3d9total 332/332; test 45/45.
     - Next (w6, doing): derive gen_env's SWITCH and its enum constants from device.c and d3d9types.h, grep env/ and gen/ for any other hand list, then send one head to w12.
+- 22:00Z w6 62aa78908: the cand4 candidate at w12. It covers 0c989ffbc.
+    - SWITCH comes from the pinned device.c case labels (48).
+    - The d3d9types.h and d3d9.h constants, the usage MASK (wined3d.h) and the MSAA bound are derived by name.
+    - Dead constants deleted. Product byte-identical; d3d9total 332/332; test 45/45; abspath render 0.
+    - Next (w6, doing): the last hand numbers in env/: AFLAG, SCAN and the complement proofs; the caps masks from d3d9caps.h; the sizes from D9_SPEC; 960 MiB from ENV_PIN. It also checks that the gen/ encoding tables are the one source.
