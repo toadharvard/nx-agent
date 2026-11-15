@@ -234,7 +234,7 @@ def main():
             "generated": [{"tool": T + "gen/lift.py", "args": [], "inputs": [], "outputs": ["gen/a.cc"]}],
             "external": [{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": commit, "tree_sha256": tree, "at": "/ext/pack"}]}
     LSRC = SRC.replace("int f2i(float f)", "__attribute__((fnvnx_f2i)) int f2i(float f)")   # lifted C++ converts inside a helper only
-    lift = ('import os\nos.makedirs("/out/gen")\nopen("/out/gen/a.cc", "w").write(%r)\n' % LSRC)
+    lift = ('import os\nopen("/out/gen/a.cc", "w").write(%r)\n' % LSRC)
     lrepo = make_repo("lifted", lrec, {"lifted_by": T + "gen/lift.py", "pack": "pack"}, {T + "gen/lift.py": lift, ROOT + "/a.cc": None})
     check("lifted root with fnvnx_ftoi in mode lifted is valid", errs(lrepo, lrec) == [], errs(lrepo, lrec))
     check("lifted root without fnvnx_ftoi is red", any("does not load plugin fnvnx_ftoi" in x for x in errs(lrepo, dict(lrec, plugins=[]))))
