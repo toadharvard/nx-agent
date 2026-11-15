@@ -201,3 +201,7 @@ After the first frame:
   - Cross-check against w7's full BCD set.
   - Numbers to report: selected, checked, mismatches (target 0), with commits.
 - 2026-11-15 00:57 L3a w7: RTTI BCD facts delivered to w3 (fnv-nx-build l3a-lift/rtti-bcd c11deaf35, tree fa3a313f…): 3,269 COLs, 2,683 classes, 18,630 BCDs, 15 virtual-base BCDs, 0 malformed.
+- 2026-11-15 00:59 w1 RTL table: 92 passes in the universe (passes.def plus aarch64-passes.def, which the first version missed); 14 classified, 78 to go.
+  - Defect found: order's bit-field path emits a fenced plain MEM, which no RTL refusal protects.
+  - Cause: a second emission form.
+  - Closed by one form: the representative unit as __atomic acquire/release, plus deletion of every other fenced-plain emission except string-op calls. Owner: w2.
