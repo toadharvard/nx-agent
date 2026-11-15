@@ -390,3 +390,4 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - test_bootgpu now compiles lift/pack (about 4096 lifted units) as a cold build, running in the background with a 55 min limit. Later runs hit GATE_CACHE.
 - 16:00: w7-u f70211d54: lift/ is whole from 18c2b9cde, and the d3d9types red is closed. test_bootgpu's setup case passes; the cold lift/pack build (about 4096 units, 4 cores) passed 3300 s without failing.
   - Decision: resume on w7's warm GATE_CACHE rather than on a farm, because a farm would start cold and repay the whole build. The rerun is in the background.
+- 18:00: test_bootgpu at w7-u f70211d54 is still building cold, not red. 4547 stage keys are in the store, at about 13 stages/min on 4 cores, so roughly 7 h remain. w7 keeps resuming. I asked L3a for an existing pack store to seed from fnv-nx-build.
