@@ -6,7 +6,8 @@ Universe: the rows abi.py defines (abi.check), over the C++ objects of every adm
 (objects from gate_build.ensure; the contract names are the plugin's `.fnvnx.sympair` of each object), plus the input facts abi.py's PROOF rests on, as items
 of the same gate:
   odr    `odr` signatures (link/odr.py check): every COMDAT group present in two or more of the root's objects, copies identical (reported as `odr:<sig>`);
-  layout every `.fnvnx.layout` key (without a `nokey:` flag, whose key is not unique by construction) seen in two or more objects has one layout in all of
+  layout every `.fnvnx.layout` key of external linkage (8th column `external`; `internal`, `none` and `c` records are distinct entities per unit and never pair by
+         name: C's cross-unit rule is 6.2.7 compatibility of declared types, not a tag name) (without a `nokey:` flag, whose key is not unique by construction) seen in two or more objects has one layout in all of
          them (size, alignment, fields, bases, flags; `layout:<key>`): the same aggregate name is the same type in all units, which is what lets abi pass a
          by-value aggregate by its name alone. (link/odr.py proves the COMDAT-copy fact only; this item closes the layout fact abi.py's PROOF names.)
 Red iff an item is uncertified, the root's build is not green, an object has no `.fnvnx.sympair` section or cannot be parsed (red item naming the object). A C++
@@ -43,7 +44,7 @@ def read_objects(objs):
                 continue
             store[(oid, "sympair")] = l2sections.parse_sympair(sp, oid + ":.fnvnx.sympair")
             for lay in objsections.parse_layout(objsections.section(elf, ".fnvnx.layout"), oid + ":.fnvnx.layout"):
-                if not any(f.startswith("nokey:") for f in lay.flags):
+                if lay.linkage == "external" and not any(f.startswith("nokey:") for f in lay.flags):
                     layouts.setdefault(lay.key, {})[oid] = (lay.size, lay.align, lay.fields, lay.bases, lay.flags)
         except (ValueError, OSError) as e:
             red[oid + ":unreadable"] = str(e)[:300]
