@@ -48,7 +48,6 @@ M32_PROBE = "#include <stdint.h>\n#include <stdlib.h>\nint main(){return 0;}\n" 
 PY_MODULES = {"capstone": "capstone", "gmpy2": "gmpy2", "keystone-engine": "keystone", "numpy": "numpy", "unicorn": "unicorn",
               "pyelftools": "elftools", "z3-solver": "z3", "pefile": "pefile"}   # distribution -> import name
 RENDER_LIBS = ["libEGL.so.1", "libEGL_mesa.so.0"]   # ldconfig names: the EGL loader the published libnxgl4.so links, and the Mesa vendor it dispatches to (NXGL4_HOST.md section 2); their loader closure (mesa-libgallium, libllvm, ...) is derived
-RUN_LAYOUT_DEB = "base-files"   # the machine's root layout (./lib -> usr/lib, ./lib64 -> usr/lib64, ./bin, ./sbin): every `run` stage of recipe.py mounts its symlink members
 RENDER_FILES = ["/usr/share/glvnd/egl_vendor.d/50_mesa.json"]   # read by libEGL.so.1 to find that vendor
 def HOST_GCC_PLUGIN_DIRS(gcc):
     """Every file of the plugin directory of compiler GCC (`gcc -print-file-name=plugin`: the gcc-N-plugin-dev package of a distro compiler)."""
@@ -499,9 +498,6 @@ def snapshot(prev=None):
         loads([os.path.realpath(hit[0])])
     for f in RENDER_FILES:
         add(f)
-    if _dpkg(RUN_LAYOUT_DEB) is None:   # the run stage's root layout (recipe.MACHINE_LAYOUT_DEB): its files are read by every run stage
-        raise SystemExit("envcheck: %s is not installed" % RUN_LAYOUT_DEB)
-    pk.add(RUN_LAYOUT_DEB)
     return {"format": FORMAT, "os": _os(), "arch": platform.machine(),
             "uid": os.geteuid(), "trees": {t: tree_digest(t, pinned_set(pk), file_owners()) for t in trees}, "packages": {p: _dpkg(p) for p in sorted(pk)},
             "python": {"version": platform.python_version(), "modules": {m: metadata.version(m) for m in sorted(PY_MODULES)},

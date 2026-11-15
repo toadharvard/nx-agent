@@ -86,7 +86,13 @@
     "--c-out",
     "/out/gen/modules.c",
     "--keys-c-out",
-    "/out/gen/import_keys.c"
+    "/out/gen/import_keys.c",
+    "--keys-h-out",
+    "/out/gen/import_keys.h",
+    "--keys-tsv-out",
+    "/out/gen/keys.tsv",
+    "--data-out",
+    "/out/gen/iat_data.tsv"
    ],
    "inputs": [
     {
@@ -96,7 +102,10 @@
    ],
    "outputs": [
     "gen/modules.c",
-    "gen/import_keys.c"
+    "gen/import_keys.c",
+    "gen/import_keys.h",
+    "gen/keys.tsv",
+    "gen/iat_data.tsv"
    ]
   },
   {
