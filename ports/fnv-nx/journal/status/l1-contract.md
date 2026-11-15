@@ -1864,3 +1864,5 @@ bottleneck: the cand2 verdict on w15, then cand3.
 bottleneck: the complete cand3 (w12), and the cand2 verdict (w15).
 - 22:12 L4 bootrt fix at w9 d16d89c: rt.c has 4 symbols, the callbacks are unconditional, reach_violation exits through g_exit(0x52000000|fact), no syscall or libc; test_bootrt 7/7. Remaining L1 items go to w12 for cand3: the admit row for tests/bootguest(@m80) from L4 w8 478c8914b; the profile-host body analyzer (objstub_x64) wired in by ISA fact.
 bottleneck: the complete cand3 (w12), and the cand2 verdict (w15).
+- 22:15 L4: the script-seeded closure made every test image pull the whole pack (crt0 -> guest_entry -> runtime -> dispatch). Rule, in cand3 (w12): (a) crt0 branches to __fnvnx_image_entry, defined by --defsym from link.entry, which is required for guest images (crt0.s is L5's; a one-line change, commit sent to L5); (b) per-object selection with archive semantics, each root an archive in --start-group and ld choosing the members (from the -Map).
+bottleneck: the complete cand3 (w12), and the cand2 verdict (w15).
