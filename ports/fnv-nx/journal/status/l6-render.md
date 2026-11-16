@@ -1414,3 +1414,4 @@ Paused: w3b, w4, farm; no other work.
     - (4) cexpr's skip on NotConst becomes exact by grammar: function-like macros expand from their header #define (MAKEFOURCC), a non-expression body is not a constant, an undefined name stops. D9_SPEC diff to be reported.
     - (3) Blocked (L1): gen_expr's import of d3d9_expr needs one cross-root import rule shared by recipe and puregate.
 - bottleneck: gl4 build red (w6, cause unknown); L1 cross-root import rule; w28 PURE/linkstrict host boundary; farm1 sm_link; the cand4 base.
+- 02:12Z L1 (w8 on base3 0127057f4 + w28 f3cbb982c) reported a render/d3d9 gen:3 file-escape at envq.py:16. It is already closed at w6-root: envq.load(hdr) since 42f2c238f, and gen_env passes and declares d3d9types.h. Check: w6-root 83e44f5f1 with verify/ of w28 f3cbb982c gives `recipe check` valid for render/d3d9, gl4, smscan and bridgefacts. base3 holds an older render copy.
