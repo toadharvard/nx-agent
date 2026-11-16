@@ -2345,3 +2345,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - Farm: the new L2 compiler pin is tools/gcc-ilp32-msvcmodel-noneelf d1a92e26 (tree d8bb3cc3, cand4b b51ad22ee). It supersedes 84f0883e; L2 updates guest_compiler.json.
 - test_layout and test_ldbl look for externals at GATE_CACHE/external, a second path. Folded into w28's ext_dir accessor item.
 - The farm's earlier w29 and cand3b runs died silently. The cand3b verdict at 963dce662 is moved to first; the farm reports the cause of the deaths.
+- d1a92e26 is an old-path build, a measurement only. guest_compiler.json takes only the recipe-path pin, with proof (b) and the deletion of the old path in the same commit (L2).
