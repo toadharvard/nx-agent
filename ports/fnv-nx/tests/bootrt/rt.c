@@ -1,9 +1,9 @@
 /* bootrt: the symbols the boot machine gives the host-target objects it loads (the renderer library libnxgl4.so, translator@host objects):
- * the embedder callbacks nxgl4_guest_ptr / nxgl4_on_present and the proven-unreachable assertion fnvnx_reach_violation of hostabi/include/fnvnx/reach.h
- * (fnvnx_assume_violation is not defined here: no gate certifies its facts).
- * Freestanding: no libc, no system call. Protocol: the embedder (the boot machine) registers all three callbacks with nxgl4_shim_set before it loads the
- * renderer. The exit callback is the host exit slot: it receives the full 32-bit exit code and ends the process (the boot machine writes OUT.json,
- * which carries the code and its fact id, first). fnvnx_reach_violation exits only through that slot. */
+ * the embedder callbacks nxgl4_guest_ptr / nxgl4_on_present and the proven-unreachable assertion fnvnx_reach_violation of hostabi/include/fnvnx/reach.h (fnvnx_assume_violation is not defined here: no gate certifies its facts).
+ * Freestanding: no libc, the process's only calls are the write and exit_group system calls of Linux x86-64.
+ * nxgl4_shim_set registers (guest ptr, present, exit) callbacks; the exit callback receives the full 32-bit exit code and ends the process (the boot
+ * machine writes OUT.json first). A violation with no exit callback ends the process with status 1 after its log line: a library loaded outside the
+ * boot machine has no other exit. */
 #include <stdint.h>
 
 #include "fnvnx/reach.h"
@@ -18,13 +18,45 @@ void nxgl4_shim_set(void *(*ptr)(uint64_t, uint64_t), void (*present)(uint32_t),
     g_exit = exit_cb;
 }
 
-void *nxgl4_guest_ptr(uint64_t addr, uint64_t size) { return g_ptr(addr, size); }
+void *nxgl4_guest_ptr(uint64_t addr, uint64_t size) { return g_ptr ? g_ptr(addr, size) : (void *)0; }
 
 void nxgl4_on_present(uint32_t frame) {
-    g_present(frame);
+    if (g_present)
+        g_present(frame);
+}
+
+static long sys3(long n, long a, long b, long c) {
+    long r;
+    __asm__ volatile("syscall" : "=a"(r) : "0"(n), "D"(a), "S"(b), "d"(c) : "rcx", "r11", "memory");
+    return r;
+}
+
+static char *hex(char *p, uint64_t v, int digits) {
+    for (int i = digits - 1; i >= 0; i--)
+        *p++ = "0123456789abcdef"[v >> (4 * i) & 15];
+    return p;
+}
+
+static char *str(char *p, const char *s) {
+    while (*s)
+        *p++ = *s++;
+    return p;
+}
+
+static void log_line(const char *line, int n) { sys3(1, 2, (long)line, n); }   /* write(2, line, n) */
+
+static void __attribute__((noreturn)) leave(uint32_t code) {
+    if (g_exit)
+        g_exit(code);   /* the machine ends the process itself; if it returns, the code is still the process's end */
+    for (;;)
+        sys3(231, g_exit ? (long)(code & 0xFF) : 1, 0, 0);   /* exit_group(status): 1 with no callback, else the code's low byte */
 }
 
 void fnvnx_reach_violation(uint32_t fact_id) {
-    g_exit(FNVNX_REACH_EXIT | (fact_id & 0xFFFFFFu));   /* the slot ends the process (protocol) */
-    __builtin_unreachable();
+    char b[64], *p = b;
+    p = str(p, "fnvnx-reach fact=0x");
+    p = hex(p, fact_id & 0xFFFFFFu, 6);
+    *p++ = '\n';
+    log_line(b, (int)(p - b));
+    leave(FNVNX_REACH_EXIT | (fact_id & 0xFFFFFFu));
 }

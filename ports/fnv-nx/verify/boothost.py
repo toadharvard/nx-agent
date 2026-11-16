@@ -9,7 +9,7 @@ Host slots whose effect is not modelled (the observable contract is kept; see HO
  output_debug_string (kept in .debug, no sink),
  thread_free, thread_set_priority / thread_set_cpu (recorded in .placement as ideal and mask, checked as hostapi.h says; THREAD_CPU answers the ideal),
  wall_time_us (fixed epoch + virtual ns), random64 (deterministic splitmix64, seed 0),
- memory_info (4 GiB / 3 GiB), cpu_count (3), audio_open / audio_submit / audio_close (frames counted, samples
+ memory_info (4 GiB / 3 GiB), audio_open / audio_submit / audio_close (frames counted, samples
  dropped, submit sleeps the period in virtual time), pad_read / pad_vibrate / input_poll (the declared device states of a scenario, bootinput.py; none: nothing attached), module 11 CPU_BOOST (recorded in .boosts, returns 0: no platform config), MESSAGE (caption and text recorded in
  .messages, returns 0: the dialog is closed at once). The rest of module 11 (thread_activity, vm_*) is the machine's.
 """
@@ -27,8 +27,9 @@ import bootpath  # noqa: E402
 
 U64 = (1 << 64) - 1
 WALL_EPOCH_US = 1_700_000_000_000_000
-INT64_MAX = (1 << 63) - 1
-HE_NOTFOUND, HE_BADINPUT, HE_ADDR, HE_RANGE = bootmachine.FNVNX_HE_NOTFOUND, bootmachine.LIBNX_BAD_INPUT, 0xCC01, 0xD401
+INT64_MAX = bootmachine.INT64_MAX
+HE_NOTFOUND, HE_BADINPUT, HE_ADDR, HE_RANGE = (bootmachine.FNVNX_HE_NOTFOUND, bootmachine.LIBNX_BAD_INPUT, bootmachine.ERR_INVALID_ADDRESS,
+                                               bootmachine.ERR_INVALID_CURRENT_MEMORY)
 
 
 def neg(e):
@@ -215,9 +216,6 @@ class Services:
     def h_memory_info(self, out, *_):
         self.m.uc.mem_write(out, struct.pack("<QQ", 4 << 30, 3 << 30))
         return 0
-
-    def h_cpu_count(self, *_):
-        return 3
 
     # -- v2 files
     def fs(self, fn, call, sd=None):

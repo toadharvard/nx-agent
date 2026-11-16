@@ -4,13 +4,7 @@ row or line a converter does not understand is an InputError carrying the file l
 
   join       --dir D -o guest.elf     manifest.json (fnvnx-elf/1: name, size, sha256, parts [[file, size, sha256]]) -> the parts
                                       concatenated in manifest order; each part's size and sha256 and the whole size and sha256 checked
-                                      an optional `render` object is allowed (see pair)
-  render-branch --manifest manifest.json
-                                      prints `BRANCH SHA256`: manifest.json's `render` object {branch, archive_sha256} = the artifacts
-                                      branch of the D3D9 bridge the ELF was linked with and the sha256 of its libfnvnx-d3d9.a
-  pair       --manifest manifest.json --bridge DIR --gpu DIR
-                                      the renderer pair rule (render_pair): the bridge linked into the ELF and libnxgl4.so are of one
-                                      nx-agent commit, and every recorded sha256 equals the bytes; prints the common commit
+                                      an optional `render` object is allowed (not read here)
   reserved   --modules modules.tsv --exe FalloutNV.exe -o reserved.tsv
                                       modules.tsv (header `# name sha256 size preferred_base assigned_base size_of_image has_tls
                                       entry_rva static load_index`; one row per module) -> `name lo hi` rows (lo = assigned_base,
@@ -20,6 +14,13 @@ row or line a converter does not understand is an InputError carrying the file l
                                       prints LO:HI = the import-key range: lowest import key of entries.tsv .. highest + 0x10 (every
                                       key 16-byte aligned); every key of keys.tsv (`key module name ordinal conv ret args symbol`)
                                       must be an import key of entries.tsv and the two table ids must be equal
+  stage-output --repo R --root ROOT --output NAME --cache C -o F
+                                      the generated table that the admitted product root ROOT declares as its output NAME (recipe `outputs`, e.g.
+                                      ports/fnv-nx/loader KEYS_TSV / MODULES_TSV), taken from that root's generate stage through
+                                      recipe.stage_output (the verdict's own store C = GATE_CACHE): the one source of a generated table, no branch
+                                      copy. The stage is found by rule: the one generator of the recipe that declares the output's path (none or
+                                      several is an error, so a rename or a second producer is red, never a guess); an undeclared NAME, an
+                                      unknown root and a red stage are errors
   milestones --table milestones.tsv --run run.txt [--entries entries.tsv] [--stage-table FILE] -o table.txt
                                       milestones.tsv + the loader's console lines of the contract's run.txt (every line that is exactly
                                       three spaces + `fnvnx-start: ...`, in file order, each distinct) -> a bootmiles table.
@@ -59,9 +60,6 @@ row or line a converter does not understand is an InputError carrying the file l
                                       `group-incomplete`): a group with fewer parts would be a weaker condition. A milestone left without
                                       rows is listed as `# dropped-milestone:`.
 """
-import os
-import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import argparse
 import hashlib
 import json
@@ -70,9 +68,10 @@ import re
 import struct
 import sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "contract"))
 import boot
 import bootmiles
-from contract import exepin
+import exepin
 
 MODULE_HEADER = "# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index\tdll"
 KEYS_STRIDE = 0x10
@@ -137,57 +136,6 @@ def join_elf(manifest_text, read_part):
     if len(data) != size or hashlib.sha256(data).hexdigest() != sha:
         raise InputError(f"joined ELF: size {len(data)} / sha256 {hashlib.sha256(data).hexdigest()} differs from the manifest ({size} / {sha})")
     return bytes(data)
-
-
-HEX40, HEX64 = re.compile(r"[0-9a-f]{40}\Z"), re.compile(r"[0-9a-f]{64}\Z")
-BRANCH = re.compile(r"[A-Za-z0-9._][A-Za-z0-9._/-]*\Z")
-
-
-def _json_obj(text, what):
-    try:
-        d = json.loads(text)
-    except ValueError as e:
-        raise InputError(f"{what}: not JSON ({e})") from None
-    if not isinstance(d, dict):
-        raise InputError(f"{what}: not a JSON object")
-    return d
-
-
-def _field(d, key, pat, what):
-    v = d.get(key)
-    if not isinstance(v, str) or not pat.match(v):
-        raise InputError(f"{what}: field {key!r} is missing or malformed ({v!r})")
-    return v
-
-
-def render_branch(manifest_text):
-    """the bridge branch and archive sha256 the ELF's manifest.json records: (branch, archive_sha256)"""
-    r = _json_obj(manifest_text, "manifest.json").get("render")
-    if not isinstance(r, dict) or sorted(r) != ["archive_sha256", "branch"]:
-        raise InputError("manifest.json: no `render` object with exactly the fields branch and archive_sha256 "
-                         "(the bridge the ELF was linked with is not recorded)")
-    return _field(r, "branch", BRANCH, "manifest.json render"), _field(r, "archive_sha256", HEX64, "manifest.json render")
-
-
-def render_pair(manifest_text, build_text, archive, meta_text, lib):
-    """The renderer pair rule: the guest side (the D3D9 bridge archive linked into the ELF) and the host side (libnxgl4.so) are
-    built from one nx-agent commit. Checked, each an InputError when false:
-      manifest.json render.archive_sha256 == bridge build.json archive_sha256 == sha256(bridge libfnvnx-d3d9.a)
-      nxgl4 meta.json sha256 == sha256(libnxgl4.so)
-      bridge build.json nx_agent_commit == nxgl4 meta.json nx_agent_commit
-    Returns the common commit (40 hex)."""
-    branch, want = render_branch(manifest_text)
-    build, meta = _json_obj(build_text, "bridge build.json"), _json_obj(meta_text, "nxgl4 meta.json")
-    b_sha, got = _field(build, "archive_sha256", HEX64, "bridge build.json"), hashlib.sha256(archive).hexdigest()
-    if not (want == b_sha == got):
-        raise InputError(f"bridge archive: the ELF was linked with {want}, {branch} build.json says {b_sha}, its libfnvnx-d3d9.a is {got}")
-    l_sha, got = _field(meta, "sha256", HEX64, "nxgl4 meta.json"), hashlib.sha256(lib).hexdigest()
-    if l_sha != got:
-        raise InputError(f"libnxgl4.so: meta.json says {l_sha}, the file is {got}")
-    b_head, g_head = _field(build, "nx_agent_commit", HEX40, "bridge build.json"), _field(meta, "nx_agent_commit", HEX40, "nxgl4 meta.json")
-    if b_head != g_head:
-        raise InputError(f"bridge head {b_head} != nxgl4 head {g_head}: the renderer pair is not of one head")
-    return b_head
 
 
 def pe_image(raw):
@@ -414,6 +362,34 @@ def stage_table(old_text, source="4b1a7bb"):
     return "\n".join(out + dropped + lost) + "\n"
 
 
+def generator_index(rec, output):
+    """The index in rec["generated"] of the one generator that declares OUTPUT. InputError for none or several."""
+    gens = rec.get("generated") if isinstance(rec.get("generated"), list) else []
+    hit = [i for i, g in enumerate(gens) if isinstance(g, dict) and output in (g.get("outputs") or [])]
+    if len(hit) != 1:
+        raise InputError("%s is declared by %d generators of the recipe (exactly one is required)" % (output, len(hit)))
+    return hit[0]
+
+
+def stage_output_table(repo, root, output, cache):
+    """The bytes of the generated table that product root ROOT of the tree REPO declares as its output NAME `output` (recipe `outputs`;
+    recipe.stage_output, cached in CACHE)."""
+    import recipe   # the verdict's recipe (the one build); imported only here, the other converters stay pure
+    try:
+        rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
+    except (recipe.RecipeError, KeyError, OSError, ValueError) as e:
+        raise InputError("root %s: %s" % (root, "; ".join(getattr(e, "errors", None) or [str(e)])[:300]))
+    outs = rec.get("outputs") if isinstance(rec.get("outputs"), dict) else {}
+    if output not in outs:
+        raise InputError("root %s declares no output %s (declared: %s)" % (root, output, ", ".join(sorted(outs)) or "none"))
+    i = generator_index(rec, outs[output])
+    try:
+        path, _ = recipe.stage_output(root, {"stage": "%s:gen:%d" % (root, i), "path": outs[output]}, repo, cache)
+    except ValueError as e:
+        raise InputError(str(e)[:400])
+    return open(path, "rb").read()
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -427,6 +403,12 @@ def main(argv=None):
     k = sub.add_parser("keys")
     k.add_argument("--entries", required=True)
     k.add_argument("--keys", required=True)
+    so = sub.add_parser("stage-output")
+    so.add_argument("--repo", required=True)
+    so.add_argument("--root", required=True)
+    so.add_argument("--output", required=True)
+    so.add_argument("--cache", required=True)
+    so.add_argument("-o", required=True)
     m = sub.add_parser("milestones")
     m.add_argument("--table", required=True)
     m.add_argument("--run")
@@ -437,12 +419,6 @@ def main(argv=None):
     st.add_argument("--old", required=True)
     st.add_argument("--source", default="4b1a7bb")
     st.add_argument("-o", required=True)
-    rb = sub.add_parser("render-branch")
-    rb.add_argument("--manifest", required=True)
-    pr = sub.add_parser("pair")
-    pr.add_argument("--manifest", required=True)
-    pr.add_argument("--bridge", required=True, help="directory with the bridge branch's build.json and libfnvnx-d3d9.a")
-    pr.add_argument("--gpu", required=True, help="directory with the nxgl4 branch's meta.json and libnxgl4.so")
     a = ap.parse_args(argv)
     rd = lambda p: open(p, encoding="utf-8").read()
     try:
@@ -455,11 +431,8 @@ def main(argv=None):
         elif a.cmd == "keys":
             lo, hi = key_range(rd(a.entries), rd(a.keys))
             print("%x:%x" % (lo, hi))
-        elif a.cmd == "render-branch":
-            print("%s %s" % render_branch(rd(a.manifest)))
-        elif a.cmd == "pair":
-            print(render_pair(rd(a.manifest), rd(os.path.join(a.bridge, "build.json")), open(os.path.join(a.bridge, "libfnvnx-d3d9.a"), "rb").read(),
-                              rd(os.path.join(a.gpu, "meta.json")), open(os.path.join(a.gpu, "libnxgl4.so"), "rb").read()))
+        elif a.cmd == "stage-output":
+            open(a.o, "wb").write(stage_output_table(a.repo, a.root, a.output, a.cache))
         elif a.cmd == "stage-table":
             open(a.o, "w").write(stage_table(rd(a.old), a.source))
         else:
@@ -467,8 +440,7 @@ def main(argv=None):
             open(a.o, "w").write(milestone_table(rd(a.table), rd(a.run) if a.run else "", man.table_id if man else None,
                                                  rd(a.stage_table) if a.stage_table else None, man))
     except (InputError, bootmiles.ManifestError, OSError, exepin.ExePinError) as e:
-        src = {"join": "manifest.json", "reserved": "modules.tsv", "keys": "keys.tsv", "milestones": "milestones.tsv", "stage-table": "old table",
-               "render-branch": "manifest.json", "pair": "manifest.json/build.json/meta.json"}[a.cmd]
+        src = {"join": "manifest.json", "reserved": "modules.tsv", "keys": "keys.tsv", "stage-output": "the generate stage", "milestones": "milestones.tsv", "stage-table": "old table"}[a.cmd]
         print(f"bootinputs {a.cmd} ({src}/entries.tsv/run.txt): {e}", file=sys.stderr)
         return 1
     return 0

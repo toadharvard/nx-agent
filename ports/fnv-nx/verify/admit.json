@@ -570,6 +570,24 @@
    "class": "product",
    "target": "guest",
    "recipe": "ports/fnv-nx/verify/probes/build.json"
+  },
+  {
+   "path": "ports/fnv-nx/tests/bootguest",
+   "class": "test",
+   "target": "guest",
+   "recipe": "ports/fnv-nx/tests/bootguest/build.json"
+  },
+  {
+   "path": "ports/fnv-nx/verify/tests/icount",
+   "class": "test",
+   "target": "guest",
+   "recipe": "ports/fnv-nx/verify/tests/icount/build.json"
+  },
+  {
+   "path": "ports/fnv-nx/boot",
+   "class": "test",
+   "target": "host",
+   "recipe": "ports/fnv-nx/boot/build.json"
   }
  ]
 }
