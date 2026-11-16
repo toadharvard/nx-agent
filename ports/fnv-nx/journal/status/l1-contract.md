@@ -2702,3 +2702,11 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - pycparser: already pinned at 3.12 in w28-c5 (from the pdfplumber/cffi closure). One version per module, so the 3.0 request is declined.
 - cpp: no step preprocesses product source itself. New run-step input {"pp": ROOT, "unit": PATH} = the unit's PP stage output from the store, ROOT in uses and a guest root. Assigned to w28-c5 (after the derived imports, before the ROOTFS_MEMO selftest).
 - bottleneck: the cand4 verdict (w15); L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
+
+### 2026-11-16: w28-c5 82a245d49 (derived imports), 8dd699677 (ROOTFS_MEMO selftest)
+- The admit `imports` field is deleted; derived by ast: 10 edges on 5 roots at 82a245d49. 0 dynamic imports, and a dynamic import is red. The declared-cycle and unused-import checks are gone with the declarations.
+- Bare imports that resolve through sys.path.insert in host scripts (52) are outside stage code. The rule's boundary is to be written in RECIPE.md.
+- test_rootfs_memo: the real Job._rootfs, twice in one process; it fails with 2 FAILs against the old memo.
+- Found by w28 and assigned to it: farm/header_owners.py imports a missing resolve_profile; manifest/funcfacts.py imports an unpinned dnfile.
+- Not yet run: the farm verdict on w28-c5 (part of cand5).
+- bottleneck: the cand4 verdict (w15); L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
