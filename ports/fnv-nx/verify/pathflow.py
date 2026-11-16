@@ -8,7 +8,7 @@ ABS = re.compile(r"/[A-Za-z0-9_.][^\s]*\Z")
 SINK_PREFIX = ("os.", "shutil.", "subprocess.", "glob.", "pathlib.", "sys.path.")
 SINKS = {"open", "io.open", "tarfile.open", "zipfile.ZipFile", "pathlib.Path", "pathlib.PurePath", "pathlib.PosixPath", "fileinput.input",
          "runpy.run_path", "importlib.util.spec_from_file_location"}
-GUARDS = {"require_mounted", "require_under"}   # recipe.py: the guards a launcher loads a tool through (the target of a dynamic load must be their result)
+GUARDS = {"require_mounted"}   # recipe.py: the guards a launcher loads a tool through (the target of a dynamic load must be their result)
 
 
 def dotted(n):
@@ -107,7 +107,7 @@ def catches_keyerror(h):
 
 
 def is_guard(node):
-    """A call of the one guard of a dynamic load: require_mounted(...) or require_under(...) (recipe.py), plain or as an attribute."""
+    """A call of the one guard of a dynamic load: require_mounted(...) (recipe.py), plain or as an attribute."""
     return isinstance(node, ast.Call) and (dotted(node.func) or "").split(".")[-1] in GUARDS
 
 
@@ -300,10 +300,11 @@ def flow_of(sc):
     return flow
 
 
-def escapes(path, mod, sc, flow, owner):
+def escapes(path, mod, sc, flow, owner, inside=None):
     """[(line, detail)] of the file reads in the stage tool PATH (module MOD, scopes SC, def-use FLOW) whose path is built from __file__, __path__ or sys.argv[0] and
     leaves OWNER, the repo tree the stage mounts the tool from, or cannot be decided ("undecided" / a "?" part). Inside OWNER it is a mounted file (green);
-    through require_mounted/require_under it is guarded (green). The one implementation: gate_abspath (abspath:escape) and recipe.check (gen:file-escape)."""
+    through require_mounted it is guarded (green). INSIDE: a list that receives the resolved repo path of every read that stays inside OWNER (what a stage must mount for
+    the module to run). The one implementation: gate_abspath (abspath:escape) and recipe.check (gen:file-escape)."""
     out_f = []
     for idx, (scope, _) in enumerate(sc):
         for n in own_nodes(scope):
@@ -320,13 +321,15 @@ def escapes(path, mod, sc, flow, owner):
                     out, res = leaves(v[0], owner)
                     if out or "?" in v[0]:   # a path the gate cannot decide (a non-constant part) is never green
                         out_f.append((n.lineno, res))
+                    elif inside is not None:
+                        inside.append(res)
                 elif v is None and mentions_self(t, idx, flow, sc):
                     out_f.append((n.lineno, "undecided"))
     return out_f
 
 
-def escapes_of(path, src, owner):
-    """The escapes of the tool file PATH with source SRC (see escapes)."""
+def escapes_of(path, src, owner, inside=None):
+    """The escapes of the tool file PATH with source SRC (see escapes); INSIDE receives the in-tree reads."""
     mod = Module(path, src)
     sc = scopes(mod.tree)
-    return escapes(path, mod, sc, flow_of(sc), owner)
+    return escapes(path, mod, sc, flow_of(sc), owner, inside)

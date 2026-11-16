@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gate "onedef" (fnvnx-gate/1): one definition, one source. A name, a COMDAT group, a source file and a header each come from ONE place.
-    python3 -I gate_onedef.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/onedef.json
+    python3 -I gate_onedef.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/onedef.json
 Rules (by symbol tables and file content, never by a name's text):
   (a) Per linked image (a root with a `link`; its objects are those of the root itself and of every root of its derived link members, ld's archive selection, recipe.link_candidates): a GLOBAL or WEAK
       definition outside every COMDAT group comes from exactly ONE root. Two roots defining one name is `dup-def`, whatever the binding (strong, weak):
@@ -91,7 +91,7 @@ def tree_files(repo, adm, files):
         if spec != root:
             continue          # a variant's sources are its base's
         rec = recipe.load_recipe(repo, adm, root)
-        for u in recipe.units_of(rec, root, files) if isinstance(rec, dict) else []:
+        for u in recipe.units_of(rec, root, files, adm, repo) if isinstance(rec, dict) else []:
             p = root + "/" + u
             owners.setdefault(p, set()).add(root)
             if p in files:
@@ -162,8 +162,8 @@ def main():
         status, detail = "green", "%d items: one definition, one source" % len(items)
     res = {"format": "fnvnx-gate/1", "name": "onedef", "status": status, "universe": len(items), "certified": cert,
            "uncertified": sorted("%s:%s" % x for x in bad)[:50], "detail": detail}
-    os.makedirs(os.environ.get("GATE_OUT", "."), exist_ok=True)
-    with open(os.path.join(os.environ.get("GATE_OUT", "."), "onedef.json"), "w") as fh:
+    os.makedirs(os.environ["GATE_OUT"], exist_ok=True)
+    with open(os.path.join(os.environ["GATE_OUT"], "onedef.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)
     print("onedef: %s %d/%d %s" % (status, cert, len(items), detail[:200]))
     return 0 if status == "green" else 2

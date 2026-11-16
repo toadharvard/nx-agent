@@ -64,8 +64,12 @@ def check_env(c):
             c.v("env-value", "%s=%s, want a decimal integer" % (k, e[k]), "env.fixed")
     for k in sorted(e):
         if (k in FORBID_ENV or k.startswith(("CCACHE_", "DISTCC_")) or (k.startswith("LC_") and k != "LC_ALL")
-                or (k.startswith("PYTHON") and k not in PYENV_OK)):
+                or (k.startswith("PYTHON") and k not in PYENV_OK and k != "PYTHONPATH")):
             c.v("env-forbidden", k, "env.forbidden")
+    if "PYTHONPATH" in e:   # the declared imports of a generator stage (recipe `imports`, mounted at /imp/<dir>): every component must lie under a declared input
+        for comp in e["PYTHONPATH"].split(":"):
+            if not under(comp, c.ins):
+                c.v("env-forbidden", "PYTHONPATH component '%s' not under a declared input" % comp, "env.forbidden")
     for comp in e["PATH"].split(":") if "PATH" in e else c.v("env-missing", "PATH", "env.path") or []:
         if not under(comp, c.ins):
             c.v("env-path", "PATH component '%s' not under a declared input" % comp, "env.path")

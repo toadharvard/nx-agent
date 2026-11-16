@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gate "determinism" (fnvnx-gate/1, class 9): the build of every product root is a function of the tracked tree.
-    python3 -I gate_determinism.py   cwd = checkout root, env GATE_OUT, optional GATE_CACHE, optional GATE_COMMIT
+    python3 -I gate_determinism.py   cwd = checkout root, env GATE_OUT, optional GATE_CACHE
 Rule: build the recipe TWICE COLD (two fresh stores, no cache: every stage runs in the sandbox, tool runtimes included) and compare
 every object and the ELF by sha256. Also the warm build of gate_build (GATE_CACHE/objects/<tree>/<root name>, made by gate_build.ensure,
 stages served from the cache) must equal them: R12 "warm == cold". Without GATE_CACHE there is no warm build and only the cold pair
@@ -44,7 +44,7 @@ def shas(res):
 def judge_root(repo, root, rec, roots, files, ext, cache, warm):
     """-> {"items", "good", "why", "secs"} of one root: two cold builds in fresh stores (and WARM, the published build of gate_build.ensure) compared by sha256."""
     items, good, why, secs, ran = [], [], [], [], []
-    pre = [root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files)] if isinstance(rec, dict) else []
+    pre = [root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files, roots, repo)] if isinstance(rec, dict) else []
     runs = []
     try:
         if warm is not None and cache:
@@ -91,7 +91,7 @@ def main():
     items, good, why, repo, secs, ran = [], [], [], ".", [], []
     roots, files = recipe.load_admit(repo), recipe.tracked(repo)
     cache = os.environ.get("GATE_CACHE")
-    ext = os.path.join(cache, "external") if cache else tempfile.mkdtemp(prefix="gate-det-ext-")   # the bare fetch cache is shared, stores are not
+    ext = recipe.ext_dir(cache) if cache else tempfile.mkdtemp(prefix="gate-det-ext-")   # the bare fetch cache is shared, stores are not
     for root in gate_build.buildable_roots(repo):
         rec = recipe.load_recipe(repo, roots, root)
         warm = None
@@ -99,7 +99,7 @@ def main():
             if cache:
                 warm = gate_build.ensure(root, cache, repo)[0]
         except recipe.RecipeError as e:
-            r = {"items": [root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files)] if isinstance(rec, dict) else [], "good": [],
+            r = {"items": [root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files, roots, repo)] if isinstance(rec, dict) else [], "good": [],
                  "why": ["%s: invalid recipe: %s" % (root, "; ".join(e.errors)[:300])], "secs": []}
             items += r["items"]
             why += r["why"]

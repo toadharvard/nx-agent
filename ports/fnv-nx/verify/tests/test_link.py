@@ -107,7 +107,7 @@ def err_text(r):
 
 def main():
     subprocess.run(["git", "init", "-q", "--bare", BASE + "/artifacts.git"], check=True)
-    os.environ["ARTIFACTS_URL"] = BASE + "/artifacts.git"
+    TR.recipe.ARTIFACTS = BASE + "/artifacts.git"
     SS = BASE + "/store"
     LB = (LIB, (LIB_REC, {"l.c": "int f_b(void) { return 14; }\n"}))
 

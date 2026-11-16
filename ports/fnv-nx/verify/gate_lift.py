@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gates "order" (class B), "addr32" (class F) and "eh" (class D) of VERDICT.md (fnvnx-gate/1): the product gates owned by L3a.
-    python3 -I gate_lift.py --gate order|addr32|eh        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT
+    python3 -I gate_lift.py --gate order|addr32|eh        cwd = checkout root, env GATE_OUT, optional GATE_CACHE
                                                            writes GATE_OUT/<gate>.json
 The driver is impure (it builds roots through recipe.py, reads the cache, runs the tools); the rules are in the pure tool root
 ports/fnv-nx/lift/gates (gate_order.py, gate_eh.py), which the driver runs as processes on the cached build results.
@@ -141,7 +141,7 @@ def judge_image(gate, root, image, repo, cache):
     ws = tempfile.mkdtemp(prefix="gate-lift-locks-")
     try:
         name, _, sub = doc["sites"].partition("/")
-        ex = recipe.fetch_externals(doc["external"], os.path.join(cache, "store"), os.path.join(cache, "external"), ws)
+        ex = recipe.fetch_externals(doc["external"], os.path.join(cache, "store"), recipe.ext_dir(cache), ws)
         sites = os.path.join(ex[name]["host"], sub)
         if not os.path.isfile(sites):
             return 1, 0, [image + ":inputs"], "input missing: the external %s has no %s" % (name, sub)
@@ -175,7 +175,7 @@ def pack_of(repo, cache, root, rec, ws):
     pack = recipe.load_admit(repo)[root]["cxx_origin"]["pack"]
     pe = [e for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == pack]
     if len(pe) == 1:
-        return recipe.fetch_externals(pe, os.path.join(cache, "store"), os.path.join(cache, "external"), os.path.join(ws, "pack"))[pack]
+        return recipe.fetch_externals(pe, os.path.join(cache, "store"), recipe.ext_dir(cache), os.path.join(ws, "pack"))[pack]
     if pe or not any(isinstance(u, dict) and u.get("root") == pack and u.get("output") == "PACK" for u in rec.get("uses", [])):
         raise gate_contract.Red("input missing: cxx_origin.pack %r of %s is neither one external of its recipe nor a root in its `uses` with output PACK" % (pack, root))
     try:
@@ -192,7 +192,7 @@ def eh_inputs(repo, cache, root, rec, ws):
     if not ef:
         raise gate_contract.Red("input missing: %s declares no ehfacts (the external that holds ehtables.json of the exe and every module; owner L3a)"
                                 % gate_contract.INPUTS)
-    store, extc = os.path.join(cache, "store"), os.path.join(cache, "external")
+    store, extc = os.path.join(cache, "store"), recipe.ext_dir(cache)
     pk = pack_of(repo, cache, root, rec, ws)
     ex = recipe.fetch_externals(doc["external"], store, extc, os.path.join(ws, "facts"))
     name, _, sub = ef.partition("/")
@@ -244,7 +244,7 @@ def judge_lifted_flags(root, repo, cache):
     doc = gate_contract.load_inputs(os.path.join(repo, gate_contract.INPUTS))
     ws = tempfile.mkdtemp(prefix="gate-lift-ext-")
     try:
-        store, extc = os.path.join(cache, "store"), os.path.join(cache, "external")
+        store, extc = os.path.join(cache, "store"), recipe.ext_dir(cache)
         pack = recipe.load_admit(repo)[root]["cxx_origin"]["pack"]
         pk = pack_of(repo, cache, root, rec, ws)
         ext = recipe.fetch_externals(doc["external"], store, extc, os.path.join(ws, "facts"))
@@ -263,7 +263,7 @@ def judge_lifted_flags(root, repo, cache):
             covered |= mine
             if not mine:
                 continue
-            r = run_tool(repo, cache, "gate_flags.py", [pepath, os.path.dirname(rg)], ("flags",), [name, trees], {"JOBS": os.environ.get("JOBS", "4")})["flags"]
+            r = run_tool(repo, cache, "gate_flags.py", [pepath, os.path.dirname(rg)], ("flags",), [name, trees], {"JOBS": "4"})["flags"]
             nf = r.get("no_form_rows", 0)
             reads, bad = r.get("flag_reads", 0), r.get("undecodable_ranges", 0)
             red = r.get("red_flag_reads", 0)
