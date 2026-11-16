@@ -74,7 +74,7 @@ def root_check(root, repo, cache, jobs, built=None):
     if finds:
         return {}, set(), finds, None, None, {}, {}
     drv = dict(zip(("c", "c++"), recipe.host_compilers(rec, cache)))
-    store, names, bad, rets = os.path.join(cache, "store"), set(), [], {}
+    store, names, bad = os.path.join(cache, "store"), set(), []
     pin = recipe.load_pin(repo)   # a guest root's libc headers are the pinned compiler tree's (guest_compiler.json "external": the one tree holds the runtime); a host root's the distribution's
     rt_at = ((pin or {}).get("external") or {}).get("at")
     sjdirs = (rt_at,) if rt_at and recipe.entry_of(roots, root).get("target") == "guest" else objstub.SYSTEM_SJ
@@ -83,7 +83,7 @@ def root_check(root, repo, cache, jobs, built=None):
     for lang, ext in (("c", recipe.CC_EXT), ("c++", recipe.CXX_EXT)):
         us = [(k, unitstage.result_file(store, k, "unit.ii"), lang) for u, k in sorted(res["pp_keys"].items()) if u.endswith(ext)]
         if us:
-            ns, _, errs = objstub.unit_terminators(drv[lang], us, {"c": recipe.unit_flags(rec, roots, root, drv["c"], "c"), "c++": recipe.unit_flags(rec, roots, root, drv["c++"], "cxx")}, cache, jobs, rets, sjdirs, (res.get("analysis_plugin") or {}).get("path"),
+            ns, _, errs = objstub.unit_terminators(drv[lang], us, {"c": recipe.unit_flags(rec, roots, root, drv["c"], "c"), "c++": recipe.unit_flags(rec, roots, root, drv["c++"], "cxx")}, cache, jobs, sjdirs, (res.get("analysis_plugin") or {}).get("path"),
                                             rootplug)
             names |= set(ns)
             unit_of = {k: u for u, k in res["pp_keys"].items()}
@@ -106,11 +106,7 @@ def root_check(root, repo, cache, jobs, built=None):
         image = {"bodies": n, "fixed_failure": sum(1 for _, k, _ in ff if k == "fixed-failure"), "unjudged": sum(1 for _, k, _ in ff if k == "unjudged")}
         finds = [(base + rec["link"]["output"], name, kind, d) for name, kind, d in ff]
     gen = {base + u for u in recipe.generated_outputs(rec)}   # the units a generator stage of the recipe outputs: the domains of `assume_violation`
-    ext = {}   # {object id: (error type, success value, {function: return type})}: the units of an external library with a declared error convention
-    for u, k in res["pp_keys"].items():
-        conv = (rec.get("external_errors") or {}).get(u.split("/", 1)[0]) if "/" in u else None
-        if conv and rec.get("sources"):   # a unit `<external>/<path>` is a copy of that external's file (recipe `sources`)
-            ext[base + u] = (conv["type"], conv["success"], rets.get(k, {}))
+    ext = {base + u for u in res.get("ext_units", {})}   # the objects of units copied from a pinned external of the recipe: the recipe's own record of provenance (objects.json ext_units)
     return objstub.analyse_all(objs, names, os_ids, cache, jobs, probe, 183 if recipe.entry_of(roots, root).get("target") == "guest" else 62), gen, finds, abi, records, image, ext
 
 
@@ -132,7 +128,7 @@ def main(argv):
     cache, repo = os.environ.get("GATE_CACHE") or tmp, "."
     stats = {}   # counts of the rule-H certifications and of the trap bodies
     items, finds, why, results, roots, image = [], [], "", {}, gate_build.buildable_roots(repo), {}
-    extconv, built, dstats = {}, {}, {"tests_total": 0, "tests_with_doubles": 0, "double_symbols": 0}
+    external, built, dstats = set(), {}, {"tests_total": 0, "tests_with_doubles": 0, "double_symbols": 0}
     fails, handlers = {}, {}   # {object id: the root's error_abi}, {object id: the root's handler records}
     gen_ids = set()
     try:
@@ -142,7 +138,7 @@ def main(argv):
         facts = objstub.read_facts(os.path.join(cache, "reach", gate_build.tree_of(repo), "reach.facts.tsv")) if roots else None
         for root in roots:
             r, gm, fs, abi, records, im, ex = root_check(root, repo, cache, jobs, built)
-            extconv.update(ex)
+            external.update(ex)
             image = {k: image.get(k, 0) + v for k, v in im.items()}
             gen_ids |= gm
             results.update(r)
@@ -154,7 +150,7 @@ def main(argv):
             items += [(i, n) for i, n, _, _ in fs]
         rp = os.path.join(repo, "ports/fnv-nx/verify/ASSUMPTIONS.json")   # of the tree under test; a tree without one has no OWNER id: every `assume` call is red
         registry = {e["id"]: e["status"] for e in json.load(open(rp))["entries"]} if os.path.exists(rp) else {}
-        its, fs = objstub.judge(results, facts, wine, declared, fails, handlers, stats, extconv, (registry, gen_ids), owners)
+        its, fs = objstub.judge(results, facts, wine, declared, fails, handlers, stats, external, (registry, gen_ids), owners)
         items, finds = items + its, finds + fs + (objstub.orphan_findings(results, row_owner) if roots else [])
         adm = recipe.load_admit(repo)
         dit, dfs, dstats = doubles.judge(built, {r for r in built if adm[recipe.split_spec(r)[0]]["class"] == "test"})   # no doubles in tests (doubles.py)

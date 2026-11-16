@@ -1817,7 +1817,7 @@ def read_owner_decisions(path):
     return out
 
 
-def judge(results, facts, wine=None, declared=None, fails=None, handlers=None, stats=None, extconv=None, assume=None, owners=None):
+def judge(results, facts, wine=None, declared=None, fails=None, handlers=None, stats=None, external=None, assume=None, owners=None):
     """RESULTS {id: analysis}, FACTS None (no reach facts file) or a set of fact ids
     -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). Pure function.
     V: certified iff it has exactly one `.fnvnx.const` record and the record equals the result (`const-missing`, `const-duplicate`, `const-mismatch`; a record
@@ -1828,6 +1828,8 @@ def judge(results, facts, wine=None, declared=None, fails=None, handlers=None, s
     FAILS {object id: the root's `error_abi` {fail, kind, flag}}: a function whose analysis says trap-shaped with callee == fail is `trap-body`; the
     definition is checked by error_abi_findings (once, global, and by kind: noreturn from the code, flag from the DWARF field and the stores).
     HANDLERS {object id: records of read_handler_records}: a V function with no record is certified iff handler_ok (rule H).
+    EXTERNAL {object ids}: the objects of units that the recipe copied from a pinned external (objects.json `ext_units`, the build's own record of provenance): the
+    library's own code, not judged by this gate (counted in STATS "external_objects").
     STATS, a dict, receives the counts "trap_body", "handler_a", "handler_b".
     OWNERS ({id: (class, root)} of read_owner_decisions, None = none): a body cited by an `od:<id>` record (FNVNX_CITE(fn, "od:<id>")) has every finding
     of the stub gate accepted iff it is the body's only record (`cite-mismatch`), the id is an anchor of CLAUDE.md (`owner-decision-unknown-id`) and the
@@ -1835,7 +1837,7 @@ def judge(results, facts, wine=None, declared=None, fails=None, handlers=None, s
     `ASSUME` = ({record id: status}, {ids of the objects of generated units}), None = both empty: a call of `fnvnx_assume_violation` is accepted
     iff it lies in an object of a unit that a generator stage of the root's recipe outputs (else `assume-direct-call`) and its first argument
     is a literal id whose record is OWNER (`assume-id-nonliteral`, `assume-id-not-owner`); see (A) above and `assume_verdict`."""
-    registry, gen = assume if assume else ({}, set())
+    registry, gen, external = *(assume if assume else ({}, set())), set(external or ())
     items, out, vflag, exited, used, out_od = [], [], set(), set(), set(), []
     wine, fails, handlers, stats = wine or {}, fails or {}, handlers or {}, stats if stats is not None else {}
     allv = {(oid, n) for oid, r in results.items() for n, k, _, _ in r["finds"] if k == "V"}
@@ -1900,6 +1902,9 @@ def judge(results, facts, wine=None, declared=None, fails=None, handlers=None, s
             if c_ is not None:
                 wids.setdefault(n_, set()).add(c_)
         items += [(oid, i) for i in r["items"]]
+        if oid in external:   # a unit copied from a pinned external of the recipe (objects.json ext_units): the library's own code, outside the stub judgment
+            stats["external_objects"] = stats.get("external_objects", 0) + 1
+            continue
         exit_ok = set(r["exit_ok"])
         for name, kind, detail, v in r["finds"]:
             recs = r.get("const", {}).get(name, [])
@@ -1914,16 +1919,6 @@ def judge(results, facts, wine=None, declared=None, fails=None, handlers=None, s
                     if const_matches(recs[0], v):
                         continue
                     out.append((oid, name, "const-mismatch", "record %s, analysis: %s" % (recs[0], detail)))
-                    continue
-                ec = (extconv or {}).get(oid)
-                if ec and v is not None:
-                    # EXTERNAL LIBRARY: the unit is a copy of a pinned external's file; its V bodies are the library's own code and are real, unless the
-                    # body returns an error answer: its return type is the library's declared error type (recipe external_errors, read from the compiler's
-                    # own type of the definition) and the constant is not the declared success value
-                    if ec[2].get(name) == ec[0] and v["x0"] is not None and v["x0"][0] == "K" and v["x0"][1] & 0xFFFFFFFF != ec[1] & 0xFFFFFFFF:
-                        out.append((oid, name, "external-error-constant", "returns the constant %d of the error type %s (success %d)" % (v["x0"][1], ec[0], ec[1])))
-                    else:
-                        stats["external_real"] = stats.get("external_real", 0) + 1
                     continue
                 if oid in handlers:
                     ok, why = handler_ok(handlers[oid], name, oid, results, root_of[id(handlers[oid])], allv)
@@ -2063,12 +2058,12 @@ def error_abi_findings(results, oids, abi):
     return []
 
 
-def run_check(objs, terms, os_layer_ids, facts=None, cache=None, jobs=1, wine=None, declared=None, abi=None, records=None, stats=None, tables=None, extconv=None, machine=None, owners=None):
+def run_check(objs, terms, os_layer_ids, facts=None, cache=None, jobs=1, wine=None, declared=None, abi=None, records=None, stats=None, tables=None, external=None, machine=None, owners=None):
     """OBJS [(id, path)] -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). ABI: the `error_abi` of the one root OBJS form; TABLES: the `empty_handlers.tables` of it;
     RECORDS: read_handler_records of it."""
     probe = dict(abi or {}, tables=tables or {}) if (abi or tables) else None
     res = analyse_all(objs, set(terms), set(os_layer_ids), cache, jobs, probe, machine)
-    items, finds = judge(res, facts, wine, declared, {o: abi for o in res} if abi else None, {o: records for o in res} if records else None, stats, extconv, None, owners)
+    items, finds = judge(res, facts, wine, declared, {o: abi for o in res} if abi else None, {o: records for o in res} if records else None, stats, external, None, owners)
     return items, sorted(set(finds) | set(error_abi_findings(res, list(res), abi) if abi else ()) | set(handler_row_findings(records, res) if records else ()))
 
 
@@ -2333,13 +2328,11 @@ def plugin_hash(so):
 SYSTEM_SJ = ("/usr/include", "/usr/aarch64-linux-gnu/include")   # the pinned distribution's libc headers (env.json: libc6-dev, libc6-dev-arm64-cross)
 
 
-def unit_terminators(cc, units, flags, cache, jobs, rets=None, sjdirs=SYSTEM_SJ, so=None, root_plugins=None):
+def unit_terminators(cc, units, flags, cache, jobs, sjdirs=SYSTEM_SJ, so=None, root_plugins=None):
     """Terminator set of a root = union over its C/C++ units of the noreturn declarations the compiler CC itself sees in the unit's
     preprocessed text (the plugin runs on unit.ii with the unit's flags: exactly the TU the compile stage compiles, headers included).
     UNITS [(pp_key, ii path, lang c|c++)]; FLAGS {lang: [..]}. Per unit cached CACHE/objstub/t-<key>.txt, key = pp_key (a hash of
     the compiler, flags and every input of the preprocessor stage), the plugin hash, the language and the flags.
-    RETS, a dict, receives {pp_key: {function assembler name: typedef name of its return type}} of the function definitions of the unit (the plugin's
-    `ret` output, the compiler's own type; only typedef-named and builtin-named return types are listed).
     SJDIRS: the directories of the pinned headers (the guest runtime external's mount point for a guest root; the distribution's include dirs otherwise): a function
     is an unwinder by <setjmp.h> only when DECL_SOURCE_FILE is a file named setjmp.h INSIDE one of them (a same-named header elsewhere does not count).
     ROOT_PLUGINS (key, flags_of) or None: the plugins of the root's own compile stage, loaded before the terminator plugin, so that the compiler sees the
@@ -2352,20 +2345,16 @@ def unit_terminators(cc, units, flags, cache, jobs, rets=None, sjdirs=SYSTEM_SJ,
     def one(u):
         pk, ii, lang = u
         key = hashlib.sha256(json.dumps([pk, ph, lang, flags[lang], list(sjdirs), rkey]).encode()).hexdigest()
-        cp, rp = (os.path.join(cache, "objstub", "t-%s.%s" % (key, e)) for e in ("txt", "ret"))
-        if not (os.path.exists(cp) and os.path.exists(rp)):
+        cp = os.path.join(cache, "objstub", "t-%s.txt" % key)
+        if not os.path.exists(cp):
             with tempfile.TemporaryDirectory() as td:
                 r = subprocess.run([cc, "-S", "-o", os.devnull] + rflags(td) + ["-fplugin=" + so, "-fplugin-arg-objstub_plugin-out=" + td + "/o.txt",
-                                    "-fplugin-arg-objstub_plugin-ret=" + td + "/r.txt",
                                     "-fplugin-arg-objstub_plugin-setjmp-dirs=" + ":".join(sjdirs)] + flags[lang]
                                    + ["-x", lang, "-fpreprocessed", ii], capture_output=True, text=True)
-                if r.returncode or not os.path.exists(td + "/o.txt") or not os.path.exists(td + "/r.txt"):
+                if r.returncode or not os.path.exists(td + "/o.txt"):
                     errs = [l for l in r.stderr.splitlines() if "error" in l or "fatal" in l or "Segmentation" in l or "internal compiler" in l]
                     return pk, None, "terminator plugin failed (exit %d): %s" % (r.returncode, " | ".join(errs[:3]) or r.stderr[-300:])
-                _atomic(rp, open(td + "/r.txt", "rb").read())
                 _atomic(cp, open(td + "/o.txt", "rb").read())
-        if rets is not None:
-            rets[pk] = dict(l.split("\t", 1) for l in read_list(rp))
         return pk, read_list(cp), None
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, jobs)) as ex:
         got = list(ex.map(one, units))

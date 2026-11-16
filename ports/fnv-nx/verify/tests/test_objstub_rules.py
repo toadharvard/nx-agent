@@ -304,19 +304,17 @@ for what, ref in (("the root's own file", D + "/build.json"), ("a path outside e
     check("resolve_foreign: %s is red" % what, ok)
 e = errs(error_abi={"fail": "f", "kind": "noreturn"}, empty_handlers=dict(EH, cover={"external": "undeclared", "path": "x"}))
 check("recipe: an {external, path} cover naming an undeclared external is a check error", any("declared external" in x for x in e), e)
-e = errs(external_errors={"nonext": {"type": "FT_Error", "success": 0}})
-check("recipe: external_errors naming an undeclared external is a check error", any("external_errors" in x for x in e), e)
-# ---- external library units: V bodies are real unless they return an error constant of the library's declared error type
+# ---- external library units (objects.json ext_units): the objects of those units are outside the stub judgment; an own unit is judged
 EXT = "typedef int FT_Error;\nFT_Error ok0(void) { return 0; }\nFT_Error err5(void) { return 5; }\nint other7(void) { return 7; }\nvoid nop(void) { }\n"
-eo = build(EXT, "c", ("-O1", "-fno-ipa-icf"))
-conv = {eo: ("FT_Error", 0, {"ok0": "FT_Error", "err5": "FT_Error", "other7": "int", "nop": "void"})}
+eo, own = build(EXT, "c", ("-O1", "-fno-ipa-icf")), build(EXT, "c", ("-O1", "-fno-ipa-icf"))
 st = {}
-got, finds = judged(eo, extconv=conv, stats=st)
-check("external library unit: an error constant of the declared type is red, success / other types / void are the library's own code",
-      got == {("err5", "external-error-constant")} and st.get("external_real") == 3, (got, st))
-got, finds = judged(eo)
-check("the same unit without the convention: every V body needs a constants row",
-      {n for n, k in got} == {"ok0", "err5", "other7", "nop"}, got)
+got, finds = judged([eo, own], external={eo}, stats=st)
+check("external unit: its V bodies (error constant, success, other types, void) are not judged; the own unit with the same source is",
+      {n for n, k in got} == {"ok0", "err5", "other7", "nop"} and all(i == own for i, n, k, d in finds) and st.get("external_objects") == 1, (got, st))
+got, finds = judged(eo, external={eo})
+check("a root whose only object is external has no finding", not finds, finds)
+got, finds = judged(eo, external=set())
+check("the same unit with no provenance record: every V body is judged", {n for n, k in got} == {"ok0", "err5", "other7", "nop"}, got)
 print("%d FAILED" % len(FAILED) if FAILED else "all passed")
 sys.exit(1 if FAILED else 0)
 
