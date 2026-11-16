@@ -611,6 +611,13 @@
    ]
   },
   {
+   "path": "ports/fnv-nx/contract/target",
+   "class": "tool",
+   "target": "host",
+   "entry": [],
+   "recipe": "ports/fnv-nx/contract/target/build.json"
+  },
+  {
    "path": "ports/fnv-nx/loader/include",
    "class": "header"
   },
