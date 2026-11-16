@@ -54,19 +54,19 @@ if ! python3 -c 'import capstone, keystone' 2>/dev/null; then
 fi
 
 # 1. toolchain: the installed isla binary, else built from the mirror branch (sail_setup.sh).  The proof IR is NOT built here: it is fetched by its sha (the pin of
-#    formgate_inputs.json, the external x86ir) from the artifacts repository by the loader; farm/sail_build.sh produced and published it once (PUBLISH_IR=1)
+#    lift/proof/sailmodel/build.json, the external x86ir) from the artifacts repository by the loader; farm/sail_build.sh produced and published it once (PUBLISH_IR=1)
 if [ ! -x "$ISLA" ]; then
     fetch_branch tools/sail-mirror "$W/in/sail-mirror"
     MIRROR="$W/in/sail-mirror" bash "$FARM/sail_setup.sh" > "$W/sail_setup_$K.log" 2>&1 || { echo "sail_setup.sh failed (see $W/sail_setup_$K.log)" >&2; exit 1; }
 fi
-# the IR is pinned in ONE place: the external x86ir of formgate_inputs.json (commit + tree_sha256); formgate.ir_path fetches it through the trunk's loader into GATE_CACHE.  No pin literal here.
+# the IR is pinned in ONE place: the external x86ir of lift/proof/sailmodel/build.json (commit + tree_sha256); formgate.ir_path fetches it through the trunk's loader into GATE_CACHE.  No pin literal here.
 # The toolchain is passed to every prover program as explicit arguments (model_sail.configure): --sail-work --sail-ir --isla; no program reads it from the environment.  SAIL_IR (a farm build of the series) replaces the pinned IR.
-PINIR=$(sail_pinned_ir) || { echo "the pinned IR (external x86ir of formgate_inputs.json) does not load" >&2; exit 1; }
+PINIR=$(sail_pinned_ir) || { echo "the pinned IR (external x86ir of lift/proof/sailmodel/build.json) does not load" >&2; exit 1; }
 IR=${SAIL_IR:-$PINIR}
 sail_args "$IR"
 SHA=$(python3 -I "$HERE/certs_build.py" "${TC[@]}" --model-sha) || { echo "the IR $IR does not load" >&2; exit 1; }
-PINSHA=$(python3 -I "$HERE/certs_build.py" --sail-work "$WORKDIR" --sail-ir "$PINIR" --isla "$ISLA" --x86sys "$X86SYS_FILE" --model-sha) || { echo "the pinned IR (external x86ir of formgate_inputs.json) does not load" >&2; exit 1; }
-[ "$SHA" = "$PINSHA" ] || { echo "IR sha256 $SHA is not the pinned IR $PINSHA (external x86ir of formgate_inputs.json)" >&2; exit 1; }
+PINSHA=$(python3 -I "$HERE/certs_build.py" --sail-work "$WORKDIR" --sail-ir "$PINIR" --isla "$ISLA" --x86sys "$X86SYS_FILE" --model-sha) || { echo "the pinned IR (external x86ir of lift/proof/sailmodel/build.json) does not load" >&2; exit 1; }
+[ "$SHA" = "$PINSHA" ] || { echo "IR sha256 $SHA is not the pinned IR $PINSHA (external x86ir of lift/proof/sailmodel/build.json)" >&2; exit 1; }
 
 if [ -n "$PINQ" ]; then
     # 2. the pinned queue: its header names the IR and the queue id; the rows must hash to it

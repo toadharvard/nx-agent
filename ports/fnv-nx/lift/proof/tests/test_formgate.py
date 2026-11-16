@@ -41,6 +41,7 @@ def skip_cache(d, names):
     return [n for n in names if n in ('__pycache__', 'tests')]
 
 
+REAL = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(fakeext.VERIFY)), ''))      # ports/fnv-nx of this tree
 MD = shape.decoder()
 IR_TEXT = 'fixture: the x86_proof.ir of the external x86ir\n'
 MODEL = hashlib.sha256(IR_TEXT.encode()).hexdigest()      # derived from the file, as formgate derives it
@@ -57,7 +58,7 @@ def key_of(h):
 
 class Fixture:
     """one fake artifacts repo with externals liftpack (shapes.tsv) and certs (certs.tsv), the inputs file (and the fake IR as the external x86ir)"""
-    def __init__(self, td, encs, certs_for=None, dsl_override=None, model=MODEL, result='proved', shapes_text=None, declare=('liftpack', 'certs', 'x86ir'),
+    def __init__(self, td, encs, certs_for=None, dsl_override=None, model=MODEL, result='proved', shapes_text=None, declare=('liftpack', 'certs'), ir_declared=True,
                  shapes_file='shapes.tsv', cert_rows=None, instrs_text=None):
         self.td = td
         self.keys = sorted(set(key_of(h) for h in encs))
@@ -75,11 +76,25 @@ class Fixture:
                     'certs': self.art.publish('certs', {'certs.tsv': ''.join(cert_rows if cert_rows is not None else rows)}),
                     'x86ir': self.art.publish('x86ir', {'ir/x86_proof.ir': IR_TEXT})}
         self.inputs = os.path.join(td, 'inputs.json')
+        self.repo = os.path.join(td, 'repo')
+        self.ir_declared = ir_declared
+        self.write_owner(self.repo)
         self.write(declare=declare)
         self.cache = os.path.join(td, 'cache')
         os.makedirs(self.cache)
 
-    def write(self, declare=('liftpack', 'certs', 'x86ir'), **over):
+    def write_owner(self, root):
+        """the owner's side of the pin in checkout ROOT: admit.json with the row of formgate.OWNER and its build.json, the committed one with the external x86ir replaced by the fixture's"""
+        rows = [r for r in json.load(open(os.path.join(REAL, 'verify', 'admit.json')))['roots'] if r['path'] == formgate.OWNER]
+        rec = json.load(open(os.path.join(REAL, rows[0]['recipe'][len('ports/fnv-nx/'):])))
+        rec['external'] = [e for e in rec['external'] if e['name'] != 'x86ir'] + ([self.ext['x86ir']] if self.ir_declared else [])
+        for rel, doc in (('verify/admit.json', {'format': 'fnvnx-admit/1', 'roots': rows}), (rows[0]['recipe'][len('ports/fnv-nx/'):], rec)):
+            q = os.path.join(root, 'ports', 'fnv-nx', rel)
+            os.makedirs(os.path.dirname(q), exist_ok=True)
+            with open(q, 'w') as fh:
+                json.dump(doc, fh)
+
+    def write(self, declare=('liftpack', 'certs'), **over):
         doc = {'format': 'fnvnx-forms-inputs/1', 'external': [self.ext[n] for n in declare], 'shapes': 'liftpack/shapes.tsv',
                'certs': 'certs/certs.tsv', 'instrs': 'liftpack/instrs.tsv'}
         doc.update(over)
@@ -88,7 +103,7 @@ class Fixture:
 
     def judge(self):
         with fakeext.use_artifacts(self.art):
-            return formgate.judge(self.cache, self.inputs)
+            return formgate.judge(self.cache, self.inputs, self.repo)
 
 
 class Green(unittest.TestCase):
@@ -215,7 +230,7 @@ class InputsRed(unittest.TestCase):
 
     def test_external_not_declared(self):
         with workdir() as td:
-            f = Fixture(td, GOOD, declare=('certs', 'x86ir'))
+            f = Fixture(td, GOOD, declare=('certs',))
             self.red(f, 'inputs: external liftpack not declared')
 
     def test_bad_external_entry_and_path(self):
@@ -223,19 +238,19 @@ class InputsRed(unittest.TestCase):
             f = Fixture(td, GOOD)
             f.write(shapes='liftpack/../x')
             self.red(f, 'NAME/path')
-            f.write(external=[dict(f.ext['liftpack'], commit='abc'), f.ext['certs'], f.ext['x86ir']])
+            f.write(external=[dict(f.ext['liftpack'], commit='abc'), f.ext['certs']])
             self.red(f, 'bad name, repo, commit')
 
     def test_hash_mismatch(self):
         with workdir() as td:
             f = Fixture(td, GOOD)
-            f.write(external=[dict(f.ext['liftpack'], tree_sha256='0' * 64), f.ext['certs'], f.ext['x86ir']])
+            f.write(external=[dict(f.ext['liftpack'], tree_sha256='0' * 64), f.ext['certs']])
             self.red(f, 'tree_sha256 is')
 
     def test_external_does_not_fetch(self):
         with workdir() as td:
             f = Fixture(td, GOOD)
-            f.write(external=[dict(f.ext['liftpack'], commit='1' * 40), f.ext['certs'], f.ext['x86ir']])
+            f.write(external=[dict(f.ext['liftpack'], commit='1' * 40), f.ext['certs']])
             self.red(f, 'does not fetch')
 
     def test_shapes_tsv_missing(self):
@@ -251,8 +266,14 @@ class InputsRed(unittest.TestCase):
 
     def test_the_ir_external_is_required(self):
         with workdir() as td:
+            f = Fixture(td, GOOD, ir_declared=False)
+            self.red(f, 'external x86ir (the pinned x86_proof.ir) is not declared by the recipe of')
+
+    def test_the_ir_external_is_not_repeated_in_the_inputs(self):
+        with workdir() as td:
             f = Fixture(td, GOOD, declare=('liftpack', 'certs'))
-            self.red(f, 'external x86ir (the pinned x86_proof.ir) not declared')
+            f.write(external=[f.ext['liftpack'], f.ext['certs'], f.ext['x86ir']])
+            self.red(f, 'is declared once, in the recipe of')
 
     def test_a_certificate_of_another_ir_is_not_a_certificate(self):      # the model sha is derived from the file of the external, not typed anywhere
         with workdir() as td:
@@ -276,8 +297,8 @@ class InputsRed(unittest.TestCase):
         """the committed file: loads up to the missing liftpack; certs external is the pinned one"""
         with open(formgate.INPUTS) as fh:
             doc = json.load(fh)
-        self.assertNotIn('model_sha256', doc)      # the IR is pinned in one place: the x86ir external
-        self.assertEqual([e['name'] for e in doc['external']], ['certs', 'x86ir'])
+        self.assertNotIn('model_sha256', doc)      # the IR is pinned in one place: the x86ir external of the recipe of formgate.OWNER
+        self.assertEqual([e['name'] for e in doc['external']], ['certs'])
         with workdir() as td:
             u, c, ids, detail = formgate.judge(td)
         self.assertEqual((u, c, ids, detail), (1, 0, ['inputs'], 'inputs: external liftpack not declared'))
@@ -289,11 +310,16 @@ class Cli(unittest.TestCase):
         co = os.path.join(td, 'co')
         os.makedirs(os.path.join(co, 'ports', 'fnv-nx'))
         shutil.copytree(LIFT, os.path.join(co, 'ports', 'fnv-nx', 'lift'), ignore=skip_cache, copy_function=shutil.copyfile)
-        os.symlink(os.path.abspath(fakeext.VERIFY), os.path.join(co, 'ports', 'fnv-nx', 'verify'))
+        os.makedirs(os.path.join(co, 'ports', 'fnv-nx', 'verify'))      # the real verify/ except admit.json (the fixture's owner row)
+        for n in os.listdir(fakeext.VERIFY):
+            if n != 'admit.json':
+                os.symlink(os.path.abspath(os.path.join(fakeext.VERIFY, n)), os.path.join(co, 'ports', 'fnv-nx', 'verify', n))
         os.symlink(os.path.abspath(os.path.join(fakeext.VERIFY, '..', 'contract')), os.path.join(co, 'ports', 'fnv-nx', 'contract'))
+        os.symlink(os.path.abspath(os.path.join(fakeext.VERIFY, '..', 'link')), os.path.join(co, 'ports', 'fnv-nx', 'link'))      # recipe.py imports relocs from ../link of its own directory
         os.symlink(os.path.abspath(os.path.join(fakeext.VERIFY, '..', 'toolchain')), os.path.join(co, 'ports', 'fnv-nx', 'toolchain'))      # recipe.py reads the DATAMODEL table that verify/targets.json references (references.datamodel)
         os.symlink(os.path.abspath(os.path.join(fakeext.VERIFY, '..', 'platform')), os.path.join(co, 'ports', 'fnv-nx', 'platform'))      # the declared x86 system record (formgate.X86SYS)
         shutil.copyfile(f.inputs, os.path.join(co, 'ports', 'fnv-nx', 'lift', 'proof', 'formgate_inputs.json'))
+        f.write_owner(co)
         out = os.path.join(td, 'out')
         os.makedirs(out)
         import recipe
@@ -312,7 +338,7 @@ class Cli(unittest.TestCase):
 
     def test_missing_pack_is_red_with_reason(self):
         with workdir() as td:
-            f = Fixture(td, GOOD, declare=('certs', 'x86ir'))
+            f = Fixture(td, GOOD, declare=('certs',))
             r, out = self.run_gate(td, f)
             self.assertEqual(r.returncode, 2)
             with open(os.path.join(out, 'forms.json')) as fh:

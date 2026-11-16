@@ -11,7 +11,7 @@ CERTIFICATE KEY RULE (one rule, per encoding, independent of the shard, the run 
 shape iff ALL THREE match
     shape key   = the key of the record's shape,
     shape_sha   = symform.shape_sha(key) = the sha256 of the symbolic Form that the CURRENT DSL builds for that shape (record field dsl_sha),
-    IR sha256   = the pinned x86_proof.ir sha256 (the file of the external x86ir of formgate_inputs.json; record field model_sha)
+    IR sha256   = the pinned x86_proof.ir sha256 (the file of the external x86ir of lift/proof/sailmodel/build.json; record field model_sha)
 and result == proved.  Nothing else enters: no run id, no hash of the DSL sources.  A DSL edit therefore voids exactly the certificates of the shapes whose
 Form changed (their shape_sha differs); a record that does not match is STALE: it is ignored (counted in the output line), it is never a refusal, it can
 not become a row.  proof/formgate.py applies the same test to the rows (the same symform.shape_sha), so a row that went stale after it was written is
@@ -46,7 +46,7 @@ class Refused(Exception):
 
 
 def pinned_model():
-    """the sha256 of the pinned IR: DERIVED from the file of the declared external `x86ir` (formgate_inputs.json, the one place the IR is pinned), never typed"""
+    """the sha256 of the pinned IR: DERIVED from the file of the declared external `x86ir` (the recipe of lift/proof/sailmodel, the one place the IR is pinned), never typed"""
     return model_sail.ir_sha()
 
 
