@@ -2942,3 +2942,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - objstub: L5 gets the 12 findings (sent raw by the farm) and the citation format, with 30 minutes, on claude/fnv-l5-platform-cand4-cite.
 - objstub on cand4: the 12 findings are orphan rows dm:1-12 of verify/declared_machine.tsv, the exit paths, which no body cites.
   - Exit is real work, so no citation is needed. w15 deletes the rows (L1), and L5 confirms that the 12 bodies are non-vacuous.
+- Ruling: declared_machine and wine_fixme rows belong to the root whose body cites them, and enter with that root.
+  - cand4: dm:1-12 leave the table, since no citing root is admitted.
+  - cand5: per-root tables, with objstub reading the union over admitted roots (w28).
+  - Row 1 (TerminateProcess) is not needed, because SetLastError is a store and so the body is not V. L5 deletes the citation.
