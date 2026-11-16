@@ -491,3 +491,8 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - test_bootgpu: setup ok, the rest not run. test_boot: not run. Both stop because the tests/bootguest guest-image link is red on lift/rt dispatch.c ENTRY1-CONT (L3a, waiting on L2's 67164ec5e pin into cand4).
   - w10 archived.
 - bottleneck: lift/rt ENTRY1-CONT (L3a/L2 pin); L1 link admit row; L1 cand5 (.gamedata_pins); the L3a pack store | no workers, no farms
+- 12:00: L1 found a double: tests/bootrt defines fnvnx_reach_violation, which the product root platform/win32/platstat.cpp also defines (L5 c5 objstub).
+  - No host-target product source calls it, so the definition is deleted (rule 3). A future host caller links its product definer, or the link is red.
+  - Also a regression: w10 copied the old L4 tests/bootrt/rt.c (syscalls, the g_ptr fallback), test_bootrt.py and bootgpu.py over w39's rule-clean versions (the w9 rules). The cause was my instruction to copy L4 paths from the lead branch, which held no w9 merge. Fix: take them from the base.
+  - w11 session_01KmtZKRkztiX98rcGcbvajR: doing both, plus the symbol list of libnxgl4rt.so checked against product definers, and test_bootrt/test_bootgpu.
+- bottleneck: w11; lift/rt ENTRY1-CONT (L3a/L2); L1 cand5 | 1 worker, no farms
