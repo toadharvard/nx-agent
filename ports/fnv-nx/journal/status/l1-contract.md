@@ -2752,3 +2752,9 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - The farm (session_01KmtZKTV1mniUErarfUpdJZ) loses its background jobs on each restart. The cand4 verdict has not finished.
 - Asked: one job at a time, --jobs N/2, df and free recorded, stale scratch deleted. If it still restarts, the verdict moves to a fresh farm.
 - bottleneck: the cand4 verdict (farm restarts); L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
+
+### 2026-11-16: console_cpu.fpcr row (orchestrator, for L3b x87 proofs)
+- Assigned to w28-c5: a targets.json row console_cpu.fpcr (DN=0, FZ=0, RMode=RN, traps off; cited to Arm ARM DDI 0487, basis OWNER 8).
+- The enter.cc FPCR write is generated from that row, and every msr fpcr site in lift/rt and platform reads the generated constant. A hand literal is red. L3a is told.
+- dnfile pinned at w28-c5 7ede87810 and forwarded to L5. The pdfplumber removal is pending.
+- bottleneck: the cand4 verdict (farm restarts); L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
