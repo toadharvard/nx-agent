@@ -83,14 +83,6 @@ def gp_cond(cx, cond):
     return 'if(%s){ SYNC_OUT; REGS(); FNVL_RAISE_AV(0,0xffffffffu,0x%xu); REGS(); SYNC_IN; goto nonlocal; }' % (cond, cx.a)
 
 
-def gp0(cx, ins):
-    """a CPL-0-only instruction at CPL 3: #GP(0), reported as Windows reports it"""
-    if wine_is_privileged(ins.bytes):
-        raise_code(cx, 'FNVL_PRIV')
-    else:
-        gp_av(cx)
-
-
 # The privileged set is the SDM's (proof/privset.py, rows of proof/sdmpriv.py); its Forms are proof/forms_sys.privileged and reach the lifter through core.set_emit (a privileged mnemonic has no hand handler).
 
 
@@ -140,7 +132,7 @@ def h_repz_ret(cx, ins):
 
 # ---- class 3: segment registers, far transfers, descriptor-table instructions --------------------------------------------------------------------------------------
 # Model: the selectors of platform/declared/x86sys.json (generated rt/gen/fnvl_sys.h: fnvl_seg_ok decides every selector). State needed to be exact (the lead owns struct cpu):
-# the six selector values c->sel[6] and the TEB base c->teb (fnvl_seg_set / fnvl_seg_get of rt/fnvl.h); reads of a segment register use fnvl_seg_get (f_int.SEG_STATE = True).
+# the six selector values c->sel[6] and the TEB base c->teb (fnvl_seg_set / fnvl_seg_get of rt/fnvl.h); reads of a segment register are the Forms (proof/forms_move.py: fnvl_seg_get of the state).
 SEGIDX = {'es': 0, 'cs': 1, 'ss': 2, 'ds': 3, 'fs': 4, 'gs': 5}
 
 
@@ -153,20 +145,6 @@ def seg_load(cx, sg):
         cx.usesfs = True
         t += ' fsb=c->fs;'
     return t
-
-
-def mov_to_sreg(cx, ins, sg):
-    """MOV Sreg, r/m16 (8E /r). MOV CS is #UD (SDM: "If attempting to load the CS register, #UD")."""
-    if sg == 'cs':
-        ud_site(cx)
-        return
-    cx.em('{ u32 s=(%s)&0xffffu; %s }' % (cx.rd(ins, cx.ops[1], 2), seg_load(cx, sg)))
-
-
-def pop_sreg(cx, ins, sg):
-    """POP Sreg: the word at the stack top (a dword with 32-bit operand size) -> the register, then ESP += 2 or 4. Nothing is modified when the load faults."""
-    w = 2 if osz16(ins) else 4
-    cx.em('{ u32 s=M%d(esp)&0xffffu; %s esp+=%du; }' % (8 * w, seg_load(cx, sg), w))
 
 
 @op('les', 'lds', 'lss', 'lfs', 'lgs')
