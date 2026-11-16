@@ -2097,3 +2097,16 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - L6: res_smgen pure (w6); sm_link farm1 run.
   - w3: mirror 12 debs; test_toolstep and test_toolext.
 - bottleneck: cand3b (w15).
+
+## 2026-11-16: w28 b10bdd3fe; debs mirrored
+
+- done:
+  - w28 61ee55d2a, machine: a writer is a CALL/JUMP relocation to a hive-writer API, via recipe.call_refs. A table address is a data relocation, so not a write.
+  - w28 9bee9ca42, no-doubles: a test root's defined symbols ∩ product symbols = ∅, with no allow-list. Measured on L5's lists at e8e54dcea: 1 symbol, 1 file, 1 test root.
+  - w28 e06b3e69f, objstub: terminators run with the root's own plugins (recipe.plugin_flags / root_plugin_flags).
+  - w28 b10bdd3fe, imports: definers resolve over link_members(root) = {root} ∪ recipe.link_candidates, with exactly one definer required (new class multiple-definers).
+  - w3: 12 + dash debs mirrored at fnv-nx-build tools/verdict-debs 52ec11342 (389 debs).
+- pending:
+  - On w3's farm: test_gate_machine, test_doubles, test_objstub, test_gate_imports, test_toolext, test_toolstep, and the objstub re-measure of 65 + 12.
+  - w28: linkstrict over the shared link set, the external-path accessor, PURE, and env.json with dash.
+- bottleneck: cand3b (w15).
