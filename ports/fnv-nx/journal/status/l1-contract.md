@@ -2329,3 +2329,13 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - one ext_dir accessor (the external_of --ext bug);
   - the `{"include_of": ROOT}` input form (closes L6's rule-2 item);
   - exec-mount deb symlinks followed within the closure.
+
+## 2026-11-16: stage B in (w28 c2c160cfd)
+- The bridge is built from exports.tsv over the derived universe (new tool root bridgetable). RET = the definer's decltype.
+- Deleted: native(), L3_*, _CI*, the ws2 prefix, the lookup binds. link is its own root. recipe.check shows only the 17 render variant reds (L6).
+- Diff of the 543 records, from 528 parsed:
+  - setsockopt has no record (L5);
+  - galaxywrp is recorded only under steam_api (L5); its hand signature dict is deleted after that;
+  - sprintf/_snprintf/sscanf must name the va forwarders (L5);
+  - _CI* RET=v awaits L3a's confirmation.
+- The RET diff over objects needs the farm. test_gate_imports is to be rewritten (w28).
