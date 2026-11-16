@@ -15,6 +15,7 @@
  * pixels with AND=1 and XOR=1 (screen invert) are transparent in the pixels and set in the icon's invert mask
  * (fnvnx_icon_invert_mask). Images: PNG-compressed icons (all colour types, depths, Adam7), and every DIB encoding
  * (see dib_decode); .ico/.cur files through ImageList_LoadImageA. Malformed data: ERROR_INVALID_DATA, NULL. */
+#include <fnvnx_export.h>
 #include "w32.h"
 #include "inflate.h"
 
@@ -459,6 +460,7 @@ extern "C" void fnvnx_resource_register_image(HMODULE m, const void *base, size_
     if (slot) { slot->b = (const uint8_t *)base; slot->n = size; }
 }
 extern "C" void fnvnx_resource_set_image_for_test(HMODULE m, const void *base, size_t size) { fnvnx_resource_register_image(m, base, size); }
+FNVNX_EXPORT("kernel32.dll", "FindResourceExA", FindResourceExA, "func");
 extern "C" void *FindResourceExA(HMODULE m, LPCSTR type, LPCSTR name, WORD lang)
 {
     Img im;
@@ -473,14 +475,18 @@ extern "C" void *fnvnx_resource_find_exact(HMODULE m, LPCSTR type, LPCSTR name, 
     if (!open_image(m, &im)) return NULL;
     return (void *)find(im, KeyA(type).k, KeyA(name).k, lang & 0xFFFF, (lang & 0xFFFF) != 0);
 }
+FNVNX_EXPORT("kernel32.dll", "FindResourceA", FindResourceA, "func");
 extern "C" void *FindResourceA(HMODULE m, LPCSTR name, LPCSTR type) { return FindResourceExA(m, type, name, 0); }
+FNVNX_EXPORT("kernel32.dll", "FindResourceExW", FindResourceExW, "func");
 extern "C" void *FindResourceExW(HMODULE m, LPCWSTR type, LPCWSTR name, WORD lang)
 {
     Img im;
     if (!open_image(m, &im)) return NULL;
     return (void *)find(im, mkkeyw(type), mkkeyw(name), lang & 0xFFFF);
 }
+FNVNX_EXPORT("kernel32.dll", "FindResourceW", FindResourceW, "func");
 extern "C" void *FindResourceW(HMODULE m, LPCWSTR name, LPCWSTR type) { return FindResourceExW(m, type, name, 0); }
+FNVNX_EXPORT("kernel32.dll", "LoadResource", LoadResource, "func");
 extern "C" void *LoadResource(HMODULE m, void *r)
 {
     Img im; const uint8_t *d; size_t n;
@@ -489,6 +495,7 @@ extern "C" void *LoadResource(HMODULE m, void *r)
     if (!entry_ptr(im, r)) { SetLastError(ERROR_INVALID_PARAMETER); return NULL; }
     return entry_data(im, (const uint8_t *)r, &d, &n) ? (void *)d : NULL;
 }
+FNVNX_EXPORT("kernel32.dll", "SizeofResource", SizeofResource, "func");
 extern "C" DWORD SizeofResource(HMODULE m, void *r)
 {
     Img im; const uint8_t *d; size_t n;
@@ -496,6 +503,7 @@ extern "C" DWORD SizeofResource(HMODULE m, void *r)
     if (!entry_ptr(im, r)) { SetLastError(ERROR_INVALID_PARAMETER); return 0; }
     return entry_data(im, (const uint8_t *)r, &d, &n) ? (DWORD)n : 0;
 }
+FNVNX_EXPORT("kernel32.dll", "EnumResourceNamesA", EnumResourceNamesA, "func");
 extern "C" BOOL EnumResourceNamesA(HMODULE m, LPCSTR type, ENUMRESNAMEPROCA cb, LONG_PTR param)
 {
     Img im; Dir d; uint32_t off;
@@ -554,6 +562,7 @@ extern "C" int fnvnx_icon_invert_mask(HANDLE h, const uint8_t **mask)
     return 0;
 }
 
+FNVNX_EXPORT("comctl32.dll", "InitCommonControlsEx", InitCommonControlsEx, "func");
 /* ---- comctl32 */
 extern "C" BOOL InitCommonControlsEx(const void *icc)
 {
@@ -574,6 +583,7 @@ static bool read_file(LPCSTR path, uint8_t **buf, size_t *n)
     if (good) *n = sz; else { free(*buf); *buf = NULL; if (!GetLastError()) SetLastError(ERROR_NOT_ENOUGH_MEMORY); }
     return good;
 }
+FNVNX_EXPORT("comctl32.dll", "ImageList_LoadImageA", ImageList_LoadImageA, "func");
 extern "C" void *ImageList_LoadImageA(HINSTANCE hi, LPCSTR name, int cx, int grow, DWORD crMask, UINT type, UINT flags)
 {
     Dib d = { NULL, 0, 0, NULL };
@@ -619,6 +629,7 @@ extern "C" void *ImageList_LoadImageA(HINSTANCE hi, LPCSTR name, int cx, int gro
     l->next = g_lists; g_lists = l;
     return l;
 }
+FNVNX_EXPORT("comctl32.dll", "ImageList_Destroy", ImageList_Destroy, "func");
 static IList *il_find(void *h) { for (IList *l = g_lists; l; l = l->next) if (l == h) return l; return NULL; }   /* g_lock held */
 extern "C" BOOL ImageList_Destroy(void *h)
 {
@@ -627,7 +638,9 @@ extern "C" BOOL ImageList_Destroy(void *h)
         if (*p == h) { IList *l = *p; *p = l->next; free(l->px); free(l); return TRUE; }
     return FALSE;
 }
+FNVNX_EXPORT("comctl32.dll", "ImageList_GetImageCount", ImageList_GetImageCount, "func");
 extern "C" int ImageList_GetImageCount(void *h) { Lk lk; IList *l = il_find(h); return l ? l->count : 0; }
+FNVNX_EXPORT("comctl32.dll", "ImageList_GetIconSize", ImageList_GetIconSize, "func");
 extern "C" BOOL ImageList_GetIconSize(void *h, int *cx, int *cy)
 {
     Lk lk; IList *l = il_find(h);

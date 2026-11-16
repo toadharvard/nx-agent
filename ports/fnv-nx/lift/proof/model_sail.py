@@ -114,11 +114,14 @@ PROBE_LINE = re.compile(r'^\[\x1b\[\d+m\d+\s+\x1b\[0m\]: ')
 ERRCALL = re.compile(r'^\[\x1b\[\d+m\d+\s+\x1b\[0m\]: Calling x86_(?:fault|model_error)<')
 CALLING = re.compile(r'\]: Calling (\S+?)\(', re.M)
 
-def run_isla(code, sym=None):
+def run_isla(code, sym=None, ctrs=None):
     """raw isla output (stdout, stderr) for one encoding, from the on-disk cache when present.  sym = (ranges, eip_sym): a SHAPE run, see sym_constraint"""
     _need()
     if not os.path.exists(IR): raise RuntimeError('missing %s: run ports/fnv-nx/farm/sail_build.sh' % IR)
-    args = list(SEG_FREE if SYMSEL else SEG) + sum([['--probe', f] for f in errfns()], []) + sum([['-L', f] for f in LINEARIZE], [])     # the cache key (kept: old outputs stay valid); the run itself probes every call, see below
+    args = list(SEG_FREE if SYMSEL else SEG)
+    if ctrs is not None:      # the control registers of the run (17 words, CR0 = element 0, CR4 = element 4: config.sail __SetConfig): proof/udsail.py's system-state variants
+        assert len(ctrs) == 17; args[args.index('ctrs=[#x0000000000000000; 17]')] = 'ctrs=[%s]' % ', '.join('#x%016x' % w for w in ctrs)
+    args += sum([['--probe', f] for f in errfns()], []) + sum([['-L', f] for f in LINEARIZE], [])     # the cache key (kept: old outputs stay valid); the run itself probes every call, see below
     cons = sym_constraint(code, *sym) if sym else ''
     key = hashlib.sha256(('|'.join([ir_sha(), hashlib.sha256(open(CFG, 'rb').read()).hexdigest(), ' '.join(args), code.hex(), str(ADDR), 'v1'] + ([cons] if sym else []))).encode()).hexdigest()
     os.makedirs(CACHE, exist_ok=True); base = os.path.join(CACHE, key)

@@ -31,9 +31,13 @@
     "--image",
     "exe",
     "--out",
-    "/out/retn/exe.tsv"
+    "/out/retn/exe.tsv",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
    "outputs": [
     "retn/exe.tsv"
    ]
@@ -50,9 +54,13 @@
     "--image",
     "atimgpud",
     "--out",
-    "/out/retn/atimgpud.tsv"
+    "/out/retn/atimgpud.tsv",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
    "outputs": [
     "retn/atimgpud.tsv"
    ]
@@ -69,9 +77,13 @@
     "--image",
     "binkw32",
     "--out",
-    "/out/retn/binkw32.tsv"
+    "/out/retn/binkw32.tsv",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
    "outputs": [
     "retn/binkw32.tsv"
    ]
@@ -88,9 +100,13 @@
     "--image",
     "d3dx9_31",
     "--out",
-    "/out/retn/d3dx9_31.tsv"
+    "/out/retn/d3dx9_31.tsv",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
    "outputs": [
     "retn/d3dx9_31.tsv"
    ]
@@ -107,9 +123,13 @@
     "--image",
     "d3dx9_38",
     "--out",
-    "/out/retn/d3dx9_38.tsv"
+    "/out/retn/d3dx9_38.tsv",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
    "outputs": [
     "retn/d3dx9_38.tsv"
    ]
@@ -126,9 +146,13 @@
     "--image",
     "gdffalloutnv",
     "--out",
-    "/out/retn/gdffalloutnv.tsv"
+    "/out/retn/gdffalloutnv.tsv",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
    "outputs": [
     "retn/gdffalloutnv.tsv"
    ]
@@ -145,9 +169,13 @@
     "--image",
     "libvorbis",
     "--out",
-    "/out/retn/libvorbis.tsv"
+    "/out/retn/libvorbis.tsv",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
    "outputs": [
     "retn/libvorbis.tsv"
    ]
@@ -164,9 +192,13 @@
     "--image",
     "libvorbisfile",
     "--out",
-    "/out/retn/libvorbisfile.tsv"
+    "/out/retn/libvorbisfile.tsv",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
    "outputs": [
     "retn/libvorbisfile.tsv"
    ]

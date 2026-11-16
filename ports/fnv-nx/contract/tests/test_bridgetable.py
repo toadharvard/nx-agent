@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""bridgetable.derive: an msvcrt C++ name (operator new/delete) is served by the name table like every other msvcrt name, never by a constructed symbol.
-  - ??2@YAPAXI@Z with a name-table row `c_new func` is a `lookup` row with native `-` (the table's symbol is judged by contract/imports.judge);
-  - the same name without a table row is bind `none` (red at the gate), not a made-up fnvnx_msvcrt_operator_new."""
+"""bridgetable.derive: the native symbol and the return letter of a function row come from its export record alone.
+  - ??2@YAPAXI@Z with a record `c_new` is a `link` row with native c_new and the record's ret;
+  - the same name without a record is an error, never a made-up fnvnx_msvcrt_operator_new and never a lookup row."""
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-import bridgetable as B  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: contract.X by its qualified name
+from contract import bridgetable as B  # noqa: E402
 
 fails = 0
 
@@ -19,9 +19,18 @@ def check(name, ok, info=""):
 
 spec = lambda dll: "@ cdecl ??2@YAPAXI@Z(long)\n@ cdecl ??3@YAXPAX@Z(ptr)\n"  # noqa: E731
 names = "msvcrt.dll\t??2@YAPAXI@Z\nmsvcrt.dll\t??3@YAXPAX@Z\n"
-rows, errs, _ = B.derive(names, spec, None, B.read_name_table("??2@YAPAXI@Z\tc_new\tfunc\n??3@YAXPAX@Z\tc_free\tfunc\n"), [])
-check("operator new/delete with table rows are lookup rows, native -", errs == [] and [(r[1], r[6], r[7]) for r in rows] == [("??2@YAPAXI@Z", "-", "lookup"), ("??3@YAXPAX@Z", "-", "lookup")], (rows, errs))
-rows, errs, _ = B.derive(names, spec, None, B.read_name_table("??3@YAXPAX@Z\tc_free\tfunc\n"), [])
-check("operator new without a table row is bind none, no invented symbol", [(r[1], r[6], r[7]) for r in rows][0] == ("??2@YAPAXI@Z", "-", "none"), rows)
-check("no fnvnx_msvcrt_operator_* name is constructed", not any("operator" in r[6] for r in rows), rows)
+ex = {("msvcrt.dll", "??2@YAPAXI@Z"): ("c_new", "func", "i", "i"), ("msvcrt.dll", "??3@YAXPAX@Z"): ("c_free", "func", "v", "i")}
+rows, errs, _ = B.derive(names, spec, None, [], {}, ex)
+check("operator new/delete with records are link rows with the record's symbol and ret", errs == [] and [(r[1], r[4], r[6], r[7]) for r in rows] == [("??2@YAPAXI@Z", "i", "c_new", "link"), ("??3@YAXPAX@Z", "v", "c_free", "link")], (rows, errs))
+rows, errs, _ = B.derive(names, spec, None, [], {}, {k: v for k, v in ex.items() if "??3" in k[1]})
+check("operator new without a record is an error, no invented symbol", any("??2@YAPAXI@Z: no export record" in e for e in errs) and not any("operator" in r[6] for r in rows), (rows, errs))
+# the runtime's own module "!rt": a record gives a keyed row (entry: ret and args from the definer's decltype, no spec), an import of it is red
+rt = {("!rt", "eh_nested_catch"): ("fnvnx_eh_nested_catch", "entry", "-", "-")}
+rows, errs, _ = B.derive("", spec, None, [], {}, rt)
+check("'!rt' record is a row without spec or import name", errs == [] and rows == [("!rt", "eh_nested_catch", "", "cdecl", "-", "", "fnvnx_eh_nested_catch", "entry")], (rows, errs))
+from contract import iat  # noqa: E402
+keys = iat.system_keys([(r[0], r[1], r[3], r[2]) for r in rows])
+check("'!rt' record is keyed", len(keys) == 1, keys)
+rows, errs, _ = B.derive("!rt\teh_nested_catch\n", spec, None, [], {}, rt)
+check("a '!rt' name in an import table is red", any("runtime's own module" in e for e in errs), errs)
 sys.exit(1 if fails else 0)

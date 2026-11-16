@@ -8,6 +8,7 @@ import declared_x86sys; declared_x86sys.configure()
 import capstone as CS, z3
 from proof import forms
 from fnvlift import dsl
+from fnvlift.tests import _inputs; _inputs.configure_declared()
 md = CS.Cs(CS.CS_ARCH_X86, CS.CS_MODE_32); md.detail = True
 FAILS = []; N = [0]
 def check(name, ok):

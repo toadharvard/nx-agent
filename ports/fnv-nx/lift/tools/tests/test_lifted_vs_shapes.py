@@ -9,7 +9,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.pat
 for p in ('tools', ''):
     sys.path.insert(0, os.path.join(LIFT, p))
 import fnvlift as L, lifted
-from fnvlift.tests._inputs import X86SYS, cpufeat_arg
+from fnvlift.tests._inputs import X86SYS, CPUMODEL, sdmrows_arg
 from proof import shape
 
 
@@ -17,7 +17,7 @@ def main():
     import argparse, tempfile, liftgen
     exe = os.path.join(os.environ['FNVNX_INPUT_EXE'], 'FalloutNV.exe'); facts = os.environ['FNVNX_INPUT_FACTS']
     import fnvlift
-    fnvlift.inputs.configure(universe=facts + '/universe.tsv', fpstate=facts + '/fpstate', fpdepth=facts + '/fpmodes/depth.tsv', x86sys=X86SYS, cpufeat=cpufeat_arg())      # the facts external holds fpstate/ and fpmodes/; X86SYS is the tracked platform/declared/x86sys.json
+    fnvlift.inputs.configure(universe=facts + '/universe.tsv', fpstate=facts + '/fpstate', fpdepth=facts + '/fpmodes/depth.tsv', x86sys=X86SYS, sdmrows=sdmrows_arg(), cpumodel=CPUMODEL)      # the facts external holds fpstate/ and fpmodes/; X86SYS is the tracked platform/declared/x86sys.json
     emit, jtab = 'dsl', None
     out = tempfile.mkdtemp(); shapes = out + '/shapes_0.tsv'
     try:
@@ -35,7 +35,7 @@ def compare(shapes, exe, emit, jtab):
         ins = next(iter(L.core.md.disasm(img.bytes(va, 16), va, 1)), None)
         if ins is None:
             from fnvlift import f_sys
-            ins = f_sys.nop_gap(img.bytes(va, 16))
+            ins = f_sys.decode_gap(img.bytes(va, 16))
         assert ins.size == ln, (hex(va), ins.size, ln)
         cnt[(shape.shape_key(ins), shape.family(ins))] += 1; n += 1
     mine = ''.join('\t'.join(map(str, x)) + '\n' for x in [(k, fam, c) for (k, fam), c in sorted(cnt.items(), key=lambda t: (t[0][0].encode(), t[0][1]))])

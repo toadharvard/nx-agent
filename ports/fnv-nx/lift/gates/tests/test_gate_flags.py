@@ -4,11 +4,13 @@ Each case is one body at 0x1000; the gate must give the stated result: None = gr
 Origins: E = as at the entry of the body, C = as after a call, U = left undefined by an instruction."""
 import os
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+import os
+import sys
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), 'proof'))
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 import gate_flags as g
 
@@ -275,7 +277,7 @@ class UndefWhen(unittest.TestCase):
 
 class Agree(unittest.TestCase):
     def test_agreement_rows(self):
-        import flagagree
+        from lift.proof import flagagree
         reps = {'and': bytes.fromhex('21d8'), 'cmp': bytes.fromhex('39c0'), 'imul': bytes.fromhex('0fafc1'), 'shl0': bytes.fromhex('c1e000'),
                 'rol1': bytes.fromhex('d1c0'), 'test_mem': bytes.fromhex('845e00')}
         n, bad = flagagree.agreement(reps)

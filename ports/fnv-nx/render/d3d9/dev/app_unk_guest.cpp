@@ -1,4 +1,5 @@
 // app_unk_guest.cpp: the application's IUnknown objects when the application is the lifted guest. The object is guest memory: [u] = address of its
+// ASM-607 (verify/ASSUMPTIONS.json)
 // vtable of guest code addresses; slot 1 = AddRef, slot 2 = Release, both __stdcall with `this` as the only stack argument, result in eax (COM ABI on x86).
 // The call goes through the lifter runtime's one primitive (lift/rt/imp.h, L3a): args are the x86 stack words in order, kind 0 = integer result.
 #include "obj.h"

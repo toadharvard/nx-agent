@@ -13,6 +13,8 @@ RULE: closure complete -> every residue byte is class DATA = 9, "data-unreached"
 Nothing else decides a residue byte: the sweep below (decodes / undecodable / reloc-not-operand / no-end) is a breakdown printed for information and decides nothing."""
 import os, json, bisect
 from types import SimpleNamespace
+
+PRI = ['decomp', 'entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw', 'inner', 'ptr']      # THE kind vocabulary and its priority: the primary kind of an entry (universe.tsv column 2) is the first of these it carries; the other kinds are in the flags column
 DATA = 9
 TERMS = {'ret', 'retf', 'jmp', 'int3', 'ud2', 'iret', 'iretd'}
 
@@ -39,6 +41,14 @@ def disp_only(md, text, T0, cov, r, bad=()):
     if ins.imm_size == 4 and T0 + s0 + ins.imm_offset == r:
         return False
     return any(op.type == 3 and op.mem.disp & 0xffffffff == int.from_bytes(text[o:o + 4], 'little') for op in ins.operands)       # 3 = X86_OP_MEM
+
+
+def data_proof(facts_dir, a):
+    """the proof id of a byte of class data-reloc: `data-reloc:<relocation site>` from the codemap row that covers it (one predicate with entries_on_data), else '-'."""
+    for l in open(os.path.join(facts_dir, 'codemap.tsv')):
+        f = l.rstrip('\n').split('\t')
+        if len(f) >= 4 and f[2] == 'data-reloc' and int(f[0], 16) <= a < int(f[0], 16) + int(f[1]): return 'data-reloc:' + f[3].split(':')[-1]
+    return '-'
 
 
 def entries_on_data(facts_dir):

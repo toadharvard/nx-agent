@@ -1,0 +1,4 @@
+// a value of another type stored into storage that holds entry values by a generic atomic store: not a same-type copy
+typedef int (*__attribute__((fnvnx_entry)) entry_t)(int);
+typedef struct site_t { entry_t f; int n; } site_t;
+void f(site_t *s, unsigned long long *v) { __atomic_store(s, v, __ATOMIC_RELEASE); }

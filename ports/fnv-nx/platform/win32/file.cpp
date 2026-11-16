@@ -1,5 +1,6 @@
 /* file.cpp - file handles, directories and FindFirstFile over the path mapper (path.cpp).
  * I/O is synchronous; an OVERLAPPED request completes before ReadFile/WriteFile return (its event is set). */
+#include <fnvnx_export.h>
 #include "w32.h"
 
 #include <stdio.h>
@@ -428,6 +429,7 @@ HANDLE w32_create_file_name(LPCSTR name, DWORD access, DWORD share, DWORD disp, 
     return h;
 }
 
+FNVNX_EXPORT("kernel32.dll", "CreateFileA", CreateFileA, "func");
 extern "C" HANDLE CreateFileA(LPCSTR name, DWORD access, DWORD share, void *sa, DWORD disp, DWORD flags, HANDLE tmpl)
 {
     /* hTemplateFile only supplies extended attributes, which this file system has none of. lpSecurityAttributes'
@@ -492,6 +494,7 @@ static int nobuf_ok(struct w32_file *f, const void *buf, DWORD n, LPOVERLAPPED o
     return 1;
 }
 
+FNVNX_EXPORT("kernel32.dll", "ReadFile", ReadFile, "func");
 extern "C" BOOL ReadFile(HANDLE h, LPVOID buf, DWORD n, LPDWORD got, LPOVERLAPPED ov)
 {
     struct w32_file *f = io_file(h, got, ov, ACC_READ);
@@ -535,6 +538,7 @@ extern "C" BOOL ReadFile(HANDLE h, LPVOID buf, DWORD n, LPDWORD got, LPOVERLAPPE
     return TRUE;
 }
 
+FNVNX_EXPORT("kernel32.dll", "WriteFile", WriteFile, "func");
 extern "C" BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD n, LPDWORD put, LPOVERLAPPED ov)
 {
     struct w32_file *f = io_file(h, put, ov, ACC_WRITE);
@@ -579,6 +583,7 @@ extern "C" BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD n, LPDWORD put, LPOVERLAP
     return TRUE;
 }
 
+FNVNX_EXPORT("kernel32.dll", "SetFilePointerEx", SetFilePointerEx, "func");
 extern "C" BOOL SetFilePointerEx(HANDLE h, LARGE_INTEGER dist, PLARGE_INTEGER newpos, DWORD method)
 {
     struct w32_file *f = file_of(h);
@@ -618,6 +623,7 @@ extern "C" BOOL SetFilePointerEx(HANDLE h, LARGE_INTEGER dist, PLARGE_INTEGER ne
     return TRUE;
 }
 
+FNVNX_EXPORT("kernel32.dll", "SetFilePointer", SetFilePointer, "func");
 extern "C" DWORD SetFilePointer(HANDLE h, LONG lo, PLONG hi, DWORD method)
 {
     LARGE_INTEGER d, np;
@@ -635,6 +641,7 @@ extern "C" DWORD SetFilePointer(HANDLE h, LONG lo, PLONG hi, DWORD method)
     return (DWORD)(np.QuadPart & 0xFFFFFFFFu);
 }
 
+FNVNX_EXPORT("kernel32.dll", "GetFileSizeEx", GetFileSizeEx, "func");
 extern "C" BOOL GetFileSizeEx(HANDLE h, PLARGE_INTEGER size)
 {
     struct w32_file *f = file_of(h);
@@ -652,6 +659,7 @@ extern "C" BOOL GetFileSizeEx(HANDLE h, PLARGE_INTEGER size)
     return TRUE;
 }
 
+FNVNX_EXPORT("kernel32.dll", "GetFileSize", GetFileSize, "func");
 extern "C" DWORD GetFileSize(HANDLE h, LPDWORD hi)
 {
     LARGE_INTEGER s;
@@ -667,6 +675,7 @@ extern "C" DWORD GetFileSize(HANDLE h, LPDWORD hi)
     return (DWORD)((uint64_t)s.QuadPart & 0xFFFFFFFFu);
 }
 
+FNVNX_EXPORT("kernel32.dll", "FlushFileBuffers", FlushFileBuffers, "func");
 extern "C" BOOL FlushFileBuffers(HANDLE h)
 {
     struct w32_file *f = file_of(h);
@@ -686,6 +695,7 @@ extern "C" BOOL FlushFileBuffers(HANDLE h)
     return TRUE;
 }
 
+FNVNX_EXPORT("kernel32.dll", "SetEndOfFile", SetEndOfFile, "func");
 extern "C" BOOL SetEndOfFile(HANDLE h)
 {
     struct w32_file *f = file_of(h);
@@ -708,6 +718,7 @@ extern "C" BOOL SetEndOfFile(HANDLE h)
     return TRUE;
 }
 
+FNVNX_EXPORT("kernel32.dll", "GetFileTime", GetFileTime, "func");
 extern "C" BOOL GetFileTime(HANDLE h, LPFILETIME c, LPFILETIME a, LPFILETIME w)
 {
     struct w32_file *f = file_of(h);
@@ -773,14 +784,17 @@ static BOOL delete_core(LPCSTR name, int utf8)
     return ok;
 }
 
+FNVNX_EXPORT("kernel32.dll", "DeleteFileA", DeleteFileA, "func");
 extern "C" BOOL DeleteFileA(LPCSTR name) { return delete_core(name, 0); }
 
+FNVNX_EXPORT("kernel32.dll", "DeleteFileW", DeleteFileW, "func");
 extern "C" BOOL DeleteFileW(LPCWSTR name)
 {
     char u[W32_PATH_MAX * 2];
     return wide_name(name, u, sizeof u) && delete_core(u, 1);
 }
 
+FNVNX_EXPORT("kernel32.dll", "CreateDirectoryA", CreateDirectoryA, "func");
 extern "C" BOOL CreateDirectoryA(LPCSTR name, void *sa)
 {
     W32_UNUSED(sa);
@@ -801,6 +815,7 @@ extern "C" BOOL CreateDirectoryA(LPCSTR name, void *sa)
     return TRUE;
 }
 
+FNVNX_EXPORT("kernel32.dll", "RemoveDirectoryA", RemoveDirectoryA, "func");
 extern "C" BOOL RemoveDirectoryA(LPCSTR name)
 {
     char host[W32_PATH_MAX];
@@ -853,14 +868,17 @@ static BOOL move_core(LPCSTR from, LPCSTR to, int utf8)
     return ok;
 }
 
+FNVNX_EXPORT("kernel32.dll", "MoveFileA", MoveFileA, "func");
 extern "C" BOOL MoveFileA(LPCSTR from, LPCSTR to) { return move_core(from, to, 0); }
 
+FNVNX_EXPORT("kernel32.dll", "MoveFileW", MoveFileW, "func");
 extern "C" BOOL MoveFileW(LPCWSTR from, LPCWSTR to)
 {
     char a[W32_PATH_MAX * 2], b[W32_PATH_MAX * 2];
     return wide_name(from, a, sizeof a) && wide_name(to, b, sizeof b) && move_core(a, b, 1);
 }
 
+FNVNX_EXPORT("kernel32.dll", "CopyFileA", CopyFileA, "func");
 extern "C" BOOL CopyFileA(LPCSTR from, LPCSTR to, BOOL fail_if_exists)
 {
     char a[W32_PATH_MAX], b[W32_PATH_MAX];
@@ -942,6 +960,7 @@ extern "C" BOOL CopyFileA(LPCSTR from, LPCSTR to, BOOL fail_if_exists)
     return ok;
 }
 
+FNVNX_EXPORT("kernel32.dll", "GetFileAttributesA", GetFileAttributesA, "func");
 extern "C" DWORD GetFileAttributesA(LPCSTR name)
 {
     char host[W32_PATH_MAX];
@@ -1032,6 +1051,7 @@ static BOOL find_fill(struct w32_find *f, LPWIN32_FIND_DATAA fd)
     return FALSE;
 }
 
+FNVNX_EXPORT("kernel32.dll", "FindFirstFileA", FindFirstFileA, "func");
 extern "C" HANDLE FindFirstFileA(LPCSTR spec, LPWIN32_FIND_DATAA fd)
 {
     char norm[W32_PATH_MAX];
@@ -1086,12 +1106,14 @@ extern "C" HANDLE FindFirstFileA(LPCSTR spec, LPWIN32_FIND_DATAA fd)
     return h ? h : INVALID_HANDLE_VALUE;
 }
 
+FNVNX_EXPORT("kernel32.dll", "FindNextFileA", FindNextFileA, "func");
 extern "C" BOOL FindNextFileA(HANDLE h, LPWIN32_FIND_DATAA fd)
 {
     struct w32_find *f = (struct w32_find *)w32_obj_get(h, W32_FIND);
     return f ? find_fill(f, fd) : FALSE;
 }
 
+FNVNX_EXPORT("kernel32.dll", "FindClose", FindClose, "func");
 extern "C" BOOL FindClose(HANDLE h)
 {
     return w32_handle_close(h, W32_FIND);
@@ -1108,6 +1130,7 @@ extern "C" DWORD GetEnvironmentVariableA(LPCSTR, LPSTR, DWORD);   /* crt_kernel3
 extern "C" UINT GetWindowsDirectoryA(LPSTR, UINT);
 extern "C" void GetSystemTimeAsFileTime(LPFILETIME);
 
+FNVNX_EXPORT("kernel32.dll", "GetTempPathA", GetTempPathA, "func");
 /* The documented lookup order: the TMP, TEMP, USERPROFILE variables of the environment block, else the Windows
  * directory; the result ends with a backslash. Size protocol: the length without the NUL when the buffer holds it,
  * else the size needed with the NUL. */
@@ -1202,6 +1225,7 @@ static UINT temp_core(const char *dir, const char *base, int enc, UINT unique, c
 /* a path longer than MAX_PATH - 14 leaves no room for "\\pre1234.tmp" */
 #define TEMP_PATH_MAX 246
 
+FNVNX_EXPORT("kernel32.dll", "GetTempFileNameA", GetTempFileNameA, "func");
 extern "C" UINT GetTempFileNameA(LPCSTR path, LPCSTR prefix, UINT unique, LPSTR out)
 {
     unique = W32_DW(unique);
@@ -1229,6 +1253,7 @@ extern "C" UINT GetTempFileNameA(LPCSTR path, LPCSTR prefix, UINT unique, LPSTR 
     return u;
 }
 
+FNVNX_EXPORT("kernel32.dll", "GetTempFileNameW", GetTempFileNameW, "func");
 extern "C" UINT GetTempFileNameW(LPCWSTR path, LPCWSTR prefix, UINT unique, LPWSTR out)
 {
     unique = W32_DW(unique);

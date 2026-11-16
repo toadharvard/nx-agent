@@ -5,6 +5,9 @@ plugbuild.py); its static_asserts hold sizeof/alignof, LDBL_MANT_DIG == 53, __LD
 a compiler that still has a 128-bit long double fails to compile. The MSVC names of the functions are read from the names plugin's
 .fnvnx.sympair rows: ?ld@@YAOON@Z (long double 'O', double 'N'), as cl writes them. No network, no game data.
 Run: python3 -I <this file> from the checkout root."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import re
@@ -115,11 +118,11 @@ def datamodel(td, so):
     check('crossing_forbidden cites existing rows', all(c in rows for c in cf), cf)
     # regeneration: the pinned mirror (fnv-nx-build tools/cpp-docs, tree_sha256 checked by the recipe's own fetch) -> gen.py --check
     import subprocess
-    import recipe
+    from verify import recipe
     gdir = os.path.join(root, 'msvcmodel', 'datamodel')
     mirror = json.load(open(os.path.join(gdir, 'sources.json')))['mirror']
     ext = {k: mirror[k] for k in ('name', 'repo', 'ref', 'commit', 'tree_sha256', 'at')}
-    got = pb.recipe.fetch_externals([ext], pb.STORE, os.path.join(pb.STORE, 'external'), os.path.join(td, 'ext-ws'))
+    got = pb.recipe.fetch_externals([ext], pb.STORE, pb.recipe.ext_of_store(pb.STORE), os.path.join(td, 'ext-ws'))
     g = subprocess.run([sys.executable, '-I', os.path.join(gdir, 'gen.py'), '--mirror', got[ext['name']]['host'],
                         '--out', os.path.join(root, 'msvcmodel', 'DATAMODEL.json'), '--check'], capture_output=True, text=True)
     check('DATAMODEL.json and .md are what gen.py writes from the pinned mirror (--check)', g.returncode == 0, g.stdout + g.stderr)
@@ -161,7 +164,7 @@ def main():
             check('no undefined symbol of the object is a libgcc TFmode soft-float entry (arithmetic, comparisons, conversions, varargs, complex)',
                   not (und & tf), sorted(und & tf))
             ext = json.load(open(os.path.join(pb.REAL, pb.T + 'verify/guest_compiler.json')))
-            co = os.path.join(pb.STORE, 'external', ext['external']['commit'] + '.co')
+            co = pb.recipe.ext_checkout(pb.recipe.ext_of_store(pb.STORE), ext['external']['commit'])
             pd = predefines(os.path.join(co, pb.recipe.pin_drivers()[1]))
             dbl = {k[len('__DBL_'):]: v for k, v in pd.items() if k.startswith('__DBL_')}
             ldbl = {k[len('__LDBL_'):]: v for k, v in pd.items() if k.startswith('__LDBL_')}

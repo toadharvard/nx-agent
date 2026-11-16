@@ -1,8 +1,9 @@
 /* ffp_state.c - D3D9 state -> NxFfpPsState. A copy plus the two type conversions D3D9 itself defines
  * (D3DCOLOR -> rgba floats, DWORD -> float bit pattern). No value is interpreted here: every enumeration value,
- * valid or not, is stored raw and interpreted by the program (see ffp_ps_ref.h). */
+ * valid or not, is stored raw and interpreted by the program (see ffp.frag.glsl). */
 #include <string.h>
 #include "ffp_state.h"
+#include "ffp_layout_ps.gen.h"   /* the std140 offsets of the UBO records (render/gl4shim/ffp/gen_glsl.py): a layout that differs is a compile error */
 
 static void color4(float o[4], uint32_t c)   /* D3DCOLOR 0xAARRGGBB */
 {
@@ -21,17 +22,17 @@ void nx_ffp_ps_state_from_d3d9(const uint32_t tss[8][33], const uint32_t *rs, co
     for (int i = 0; i < NX_FFP_STAGES; i++) {
         const uint32_t *t = tss[i];
         NxFfpStage *s = &out->stage[i];
-        s->colorOp = t[NX_TSS_COLOROP];
-        s->alphaOp = t[NX_TSS_ALPHAOP];
-        s->resultArg = t[NX_TSS_RESULTARG];
-        s->texType = texType[i];
-        s->cArg0 = t[NX_TSS_COLORARG0];
-        s->cArg1 = t[NX_TSS_COLORARG1];
-        s->cArg2 = t[NX_TSS_COLORARG2];
-        s->ttff = t[NX_TSS_TEXTURETRANSFORMFLAGS];
-        s->aArg0 = t[NX_TSS_ALPHAARG0];
-        s->aArg1 = t[NX_TSS_ALPHAARG1];
-        s->aArg2 = t[NX_TSS_ALPHAARG2];
+        s->op[NX_FFP_OP_COLOROP] = t[NX_TSS_COLOROP];
+        s->op[NX_FFP_OP_ALPHAOP] = t[NX_TSS_ALPHAOP];
+        s->op[NX_FFP_OP_RESULTARG] = t[NX_TSS_RESULTARG];
+        s->op[NX_FFP_OP_TEXTYPE] = texType[i];
+        s->carg[NX_FFP_CARG0] = t[NX_TSS_COLORARG0];
+        s->carg[NX_FFP_CARG1] = t[NX_TSS_COLORARG1];
+        s->carg[NX_FFP_CARG2] = t[NX_TSS_COLORARG2];
+        s->carg[NX_FFP_CARG_TTFF] = t[NX_TSS_TEXTURETRANSFORMFLAGS];
+        s->aarg[NX_FFP_AARG0] = t[NX_TSS_ALPHAARG0];
+        s->aarg[NX_FFP_AARG1] = t[NX_TSS_ALPHAARG1];
+        s->aarg[NX_FFP_AARG2] = t[NX_TSS_ALPHAARG2];
         color4(s->constant, t[NX_TSS_CONSTANT]);
         s->bump[0] = bits_f(t[NX_TSS_BUMPENVMAT00]);
         s->bump[1] = bits_f(t[NX_TSS_BUMPENVMAT01]);
@@ -41,5 +42,5 @@ void nx_ffp_ps_state_from_d3d9(const uint32_t tss[8][33], const uint32_t *rs, co
         s->lum[1] = bits_f(t[NX_TSS_BUMPENVLOFFSET]);
     }
     color4(out->tfactor, rs[NX_RS_TEXTUREFACTOR]);
-    out->specularEnable = rs[NX_RS_SPECULARENABLE];
+    out->spec[NX_FFP_SPEC_ENABLE] = rs[NX_RS_SPECULARENABLE];
 }

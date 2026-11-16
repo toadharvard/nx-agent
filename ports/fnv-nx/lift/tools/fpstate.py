@@ -21,7 +21,7 @@ surface, rt/imp.h); ASM-220: the CONTEXT image the runtime hands to guest SEH ha
 import os, sys, hashlib
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import cli
+import cli, libarg; libarg.take()      # --lib DIR: the package fnvlift (a declared input of the stage)
 FPUSAGE = 'usage: fpstate.py scan IMAGE FACTSDIR RETN.tsv OUTDIR LIFTDIR MODULES_TSV NAME | fpstate.py combine OUTDIR MODULES_TSV SCANDIR...'
 sys.path.insert(0, HERE)
 from collections import Counter, defaultdict

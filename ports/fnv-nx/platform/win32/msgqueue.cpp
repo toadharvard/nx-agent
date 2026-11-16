@@ -3,6 +3,7 @@
  * SendInput), hooks, the cursor, and the application lifecycle (platform/win32/LIFECYCLE.md).
  * One lock (g_mql) guards queues, hooks and input state; it is never held across a window procedure, a hook or a
  * call into the window tree. */
+#include <fnvnx_export.h>
 #include "window_int.h"
 
 #include <stdint.h>
@@ -215,6 +216,7 @@ extern "C" void fnmq_purge(HWND h)
 }
 extern "C" LRESULT fnmq_hook(int id, int code, WPARAM w, LPARAM l) { return call_hook(id, code, w, l); }
 
+FNVNX_EXPORT("user32.dll", "SendMessageA", SendMessageA, "func");
 extern "C" LRESULT SendMessageA(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     fnwin_info wi;
@@ -228,6 +230,7 @@ extern "C" LRESULT SendMessageA(HWND h, UINT m, WPARAM w, LPARAM l)
     if (!h || !fnwin_info_get(h, &wi)) { SetLastError(1400); return 0; }
     return wi.tid == GetCurrentThreadId() ? deliver(h, m, w, l, 1) : send_cross(wi.tid, h, m, w, l);
 }
+FNVNX_EXPORT("user32.dll", "PostMessageA", PostMessageA, "func");
 extern "C" BOOL PostMessageA(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     HWND t[256];
@@ -245,6 +248,7 @@ extern "C" BOOL PostMessageA(HWND h, UINT m, WPARAM w, LPARAM l)
 /* PostThreadMessage: a thread message (hwnd NULL) to the thread with id tid; 0 ok, else the error (waveOut CALLBACK_THREAD) */
 extern "C" int fnvnx_post_thread_message(DWORD tid, UINT m, WPARAM w, LPARAM l) { return post_to(tid, NULL, m, w, l); }
 extern "C" void fnvnx_post_message(HWND h, UINT m, WPARAM w, LPARAM l) { PostMessageA(h ? h : fnvnx_main_window(), m, w, l); }
+FNVNX_EXPORT("user32.dll", "PostQuitMessage", PostQuitMessage, "func");
 extern "C" void PostQuitMessage(int code)
 {
     os_lock(&g_mql);
@@ -268,6 +272,7 @@ extern "C" int fnmq_get_message(MSG *m, HWND f, UINT lo, UINT hi)
         os_unlock(&g_mql);
     }
 }
+FNVNX_EXPORT("user32.dll", "PeekMessageA", PeekMessageA, "func");
 extern "C" BOOL PeekMessageA(LPMSG msg, HWND f, UINT lo, UINT hi, UINT flags)
 {
     fnwin_info wi;
@@ -365,6 +370,7 @@ extern "C" int fnvnx_win_vk_char(unsigned vk, int sh, int ctl, int caps, int num
     if (vk >= 0x6A && vk <= 0x6F && vk != 0x6C) return ctl ? -1 : "*+?-?/"[vk - 0x6A];
     return -1;
 }
+FNVNX_EXPORT("user32.dll", "TranslateMessage", TranslateMessage, "func");
 extern "C" BOOL TranslateMessage(const MSG *m)
 {
     if (!m) { SetLastError(998); return FALSE; }
@@ -378,6 +384,7 @@ extern "C" BOOL TranslateMessage(const MSG *m)
     }
     return TRUE;
 }
+FNVNX_EXPORT("user32.dll", "DispatchMessageA", DispatchMessageA, "func");
 extern "C" LRESULT DispatchMessageA(const MSG *m)
 {
     if (!m) { SetLastError(998); return 0; }
@@ -392,6 +399,7 @@ extern "C" LRESULT DispatchMessageA(const MSG *m)
     return wi.hproc ? wi.hproc(m->hwnd, m->message, m->wParam, m->lParam) : wi.proc ? wi.proc(m->hwnd, m->message, m->wParam, m->lParam) : DefWindowProcA(m->hwnd, m->message, m->wParam, m->lParam);
 }
 
+FNVNX_EXPORT("user32.dll", "SetWindowsHookExA", SetWindowsHookExA, "func");
 /* ---- hooks */
 extern "C" HHOOK SetWindowsHookExA(int id, HOOKPROC f, HINSTANCE mod, DWORD tid)
 {
@@ -406,6 +414,7 @@ extern "C" HHOOK SetWindowsHookExA(int id, HOOKPROC f, HINSTANCE mod, DWORD tid)
     os_unlock(&g_mql);
     return (HHOOK)k;
 }
+FNVNX_EXPORT("user32.dll", "UnhookWindowsHookEx", UnhookWindowsHookEx, "func");
 extern "C" BOOL UnhookWindowsHookEx(HHOOK h)
 {
     bool ok = false;
@@ -420,6 +429,7 @@ extern "C" BOOL UnhookWindowsHookEx(HHOOK h)
     if (!ok) SetLastError(1404);
     return ok;
 }
+FNVNX_EXPORT("user32.dll", "CallNextHookEx", CallNextHookEx, "func");
 extern "C" LRESULT CallNextHookEx(HHOOK h, int code, WPARAM w, LPARAM l)
 {
     hook *k = NULL;
@@ -558,6 +568,7 @@ static void mouse_in(int x, int y, unsigned changed, unsigned state, int wheel, 
 }
 extern "C" void fnvnx_win_mouse(int x, int y, unsigned changed, unsigned state, int wheel) { mouse_in(x, y, changed, state, wheel, false, 0); }
 
+FNVNX_EXPORT("user32.dll", "SendInput", SendInput, "func");
 /* INPUT is 28 bytes in the 32-bit guest: type, then MOUSEINPUT (dx dy data flags time extra) or KEYBDINPUT (vk scan flags time extra) */
 extern "C" UINT SendInput(UINT n, void *in, int sz)
 {
@@ -616,11 +627,13 @@ static HCURSOR sys_handle(int *tab, int count, HINSTANCE i, LPCSTR n, const uint
     SetLastError(1814 /* ERROR_RESOURCE_NAME_NOT_FOUND */);
     return NULL;
 }
+FNVNX_EXPORT("user32.dll", "LoadCursorA", LoadCursorA, "func");
 extern "C" HCURSOR LoadCursorA(HINSTANCE i, LPCSTR n)
 {
     static const uint16_t ids[17] = { 32512, 32513, 32514, 32515, 32516, 32640, 32641, 32642, 32643, 32644, 32645, 32646, 32648, 32649, 32650, 32651, 32652 };
     return sys_handle(g_cursors, 17, i, n, ids, 1);
 }
+FNVNX_EXPORT("user32.dll", "LoadIconA", LoadIconA, "func");
 extern "C" HICON LoadIconA(HINSTANCE i, LPCSTR n)
 {
     static const uint16_t ids[8] = { 32512, 32513, 32514, 32515, 32516, 32517, 32518, 32519 };
@@ -636,7 +649,9 @@ extern "C" HCURSOR fnmq_set_cursor(HCURSOR c)
     os_unlock(&g_mql);
     return old;
 }
+FNVNX_EXPORT("user32.dll", "SetCursor", SetCursor, "func");
 extern "C" HCURSOR SetCursor(HCURSOR c) { return fnmq_set_cursor(c); }
+FNVNX_EXPORT("user32.dll", "ShowCursor", ShowCursor, "func");
 extern "C" int ShowCursor(BOOL show)
 {
     os_lock(&g_mql);
@@ -667,6 +682,7 @@ extern "C" void fnvnx_set_cursor_pos(int x, int y)
     cursor_clamp_locked(x, y);
     os_unlock(&g_mql);
 }
+FNVNX_EXPORT("user32.dll", "ClipCursor", ClipCursor, "func");
 /* ClipCursor: confines the cursor to the rectangle (clipped to the desktop), NULL lifts it; the cursor moves into the
  * rectangle at once. A rectangle with no area, or outside the desktop, is ERROR_INVALID_PARAMETER. */
 extern "C" BOOL ClipCursor(const RECT *r)
@@ -690,6 +706,7 @@ extern "C" BOOL ClipCursor(const RECT *r)
     os_unlock(&g_mql);
     return TRUE;
 }
+FNVNX_EXPORT("user32.dll", "GetClipCursor", GetClipCursor, "func");
 extern "C" BOOL GetClipCursor(RECT *r)
 {
     if (!r) { SetLastError(998); return FALSE; }
@@ -698,7 +715,9 @@ extern "C" BOOL GetClipCursor(RECT *r)
     os_unlock(&g_mql);
     return TRUE;
 }
+FNVNX_EXPORT("user32.dll", "SetCursorPos", SetCursorPos, "func");
 extern "C" BOOL SetCursorPos(int x, int y) { fnvnx_set_cursor_pos(x, y); return TRUE; }
+FNVNX_EXPORT("user32.dll", "GetCursorPos", GetCursorPos, "func");
 extern "C" BOOL GetCursorPos(LPPOINT p)
 {
     if (!p) { SetLastError(998); return FALSE; }
@@ -707,7 +726,9 @@ extern "C" BOOL GetCursorPos(LPPOINT p)
     os_unlock(&g_mql);
     return TRUE;
 }
+FNVNX_EXPORT("user32.dll", "GetDoubleClickTime", GetDoubleClickTime, "func");
 extern "C" UINT GetDoubleClickTime(void) { return g_dbl_ms; }
+FNVNX_EXPORT("user32.dll", "SetDoubleClickTime", SetDoubleClickTime, "func");
 extern "C" BOOL SetDoubleClickTime(UINT ms) { g_dbl_ms = ms == 0 ? 500 : ms > 5000 ? 5000 : ms; return TRUE; }
 
 /* ---- lifecycle: Horizon applet events as the messages Windows sends for the same user action */

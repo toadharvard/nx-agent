@@ -19,11 +19,12 @@ struct fnvl_msvcrt_thread {
 static_assert(sizeof(((struct cpu *)0)->msvcrt) == sizeof(struct fnvl_msvcrt_thread), "struct cpu must end with u32 msvcrt[6] (rt/msvcrt.h)");
 static inline struct fnvl_msvcrt_thread *fnvl_msvcrt_td(void) { return (struct fnvl_msvcrt_thread *)c->msvcrt; }
 
-/* Pseudo guest addresses of the two exception handlers the runtime itself registers on the guest fs:[0] chain (a registration's Handler is a guest address that
-   rt/seh.cc's call_handler resolves through fnvl_dispatch): the dispatcher table must map them to the guest entries below. Both lie below FNVL_SENT, below every
-   image and every import key. */
-#define FNVL_EH_KEY_CATCH   0x000fffd0u     /* fnvl_msvcrt_eh_nested_catch:   Wine catch_function_nested_handler */
-#define FNVL_EH_KEY_COLLIDE 0x000fffe0u     /* fnvl_msvcrt_eh_nested_collide: Wine MSVCRT_nested_handler */
+/* The two exception handlers the runtime itself registers on the guest fs:[0] chain (a registration's Handler is a guest address that rt/seh.cc's call_handler resolves
+   through fnvl_dispatch). Each is a guest entry with a FNVNX_EXPORT record of kind entry in the declared runtime pseudo-module "!rt" (rt/msvcrt_eh.cc), so its Handler value is its
+   import key, from the one key allocation the loader uses (fnvnx_import_key): no key is written here. */
+extern "C" u32 fnvnx_import_key(const char *dll, const char *name, u32 ordinal);
+#define FNVL_EH_KEY_CATCH   fnvnx_import_key("!rt", "eh_nested_catch", 0)      /* fnvl_msvcrt_eh_nested_catch:   Wine catch_function_nested_handler */
+#define FNVL_EH_KEY_COLLIDE fnvnx_import_key("!rt", "eh_nested_collide", 0)    /* fnvl_msvcrt_eh_nested_collide: Wine MSVCRT_nested_handler */
 extern "C" {
 void fnvl_msvcrt_eh_nested_catch(void);
 void fnvl_msvcrt_eh_nested_collide(void);

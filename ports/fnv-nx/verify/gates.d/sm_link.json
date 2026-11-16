@@ -1,0 +1,13 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "sm_link",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/render/total/gate_sm_link.py"
+ ],
+ "result": "sm_link.json",
+ "covers": [
+  "product-guest"
+ ]
+}

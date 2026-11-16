@@ -6,7 +6,6 @@ import os, struct, bisect, itertools
 from collections import defaultdict
 import sys
 import capstone
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 from fnvlift.image import Image as _FImage
 from capstone import x86 as X
 

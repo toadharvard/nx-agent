@@ -7,6 +7,7 @@ import os, sys, hashlib
 from collections import Counter, defaultdict
 from multiprocessing import Pool
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import libarg; libarg.take()      # --lib DIR: the package fnvlift (a declared input of the stage)
 import x86flow as W
 from x86flow import X, M32, SUB, mn, rn, memslot, Fn, UNC, KINDS, isx87, depth, track, frame_events, load_universe, pmap
 

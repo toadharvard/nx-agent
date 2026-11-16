@@ -668,8 +668,10 @@ static void order_builtin_call(gimple_stmt_iterator *gsi, gcall *call) {
   }
   attr_fnspec spec = gimple_call_fnspec(call);
   bool rd = false, wr = false;
+  unsigned nptr = 0;
   for (unsigned i = 0; i < gimple_call_num_args(call); i++) {
     tree a = gimple_call_arg(call, i);
+    if (POINTER_TYPE_P(TREE_TYPE(a))) nptr++;
     if (!POINTER_TYPE_P(TREE_TYPE(a)) || pointer_to_constant(a)) continue;
     // the address of an unshared local (the scan left it unshared because this argument does not escape)
     if (TREE_CODE(a) == ADDR_EXPR && local_unshared(ref_base(TREE_OPERAND(a, 0)))) continue;
@@ -677,8 +679,24 @@ static void order_builtin_call(gimple_stmt_iterator *gsi, gcall *call) {
     if (!known || spec.arg_maybe_read_p(i)) rd = true;
     if (!known || spec.arg_maybe_written_p(i)) wr = true;
   }
-  if (!rd && !wr) return;
   const char *asmname = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fn));
+  // A builtin with no library function and with virtual operands (not NOVOPS), none of whose operands is a pointer: __builtin_return_address,
+  // __builtin_frame_address, __builtin_eh_pointer, __builtin_eh_filter...
+  //  - every operand an integer constant: no operand designates an address and none is computed, so the expansion (RTL emitted by GCC for a
+  //    builtin that has no library function and no pointer) can reach only the state the call itself denotes: the registers and the frame chain of
+  //    the calling thread, which are private to it (the D1 class: frame and registers; an unshared local is no shared access). No fence.
+  //  - an operand that is a value computed at run time (an integer that can hold an address, a frame level): nothing says it is not an address, so
+  //    the builtin is ordered as one of unknown effect (read when ECF_PURE, else read and write), by the fences below. A fence is sound for any effect.
+  if (nptr == 0 && strncmp(asmname, "__builtin_", 10) == 0 && !(gimple_call_flags(call) & ECF_NOVOPS)) {
+    bool all_const = true;
+    for (unsigned i = 0; i < gimple_call_num_args(call); i++)
+      if (TREE_CODE(gimple_call_arg(call, i)) != INTEGER_CST) all_const = false;
+    if (!all_const) {
+      rd = true;
+      wr = !(gimple_call_flags(call) & ECF_PURE);
+    }
+  }
+  if (!rd && !wr) return;
   if (strncmp(asmname, "__builtin_", 10) != 0) {
     // LIBRARY CALL. Every GCC rewrite of a call into memory accesses is keyed on the callee being a built-in declaration
     // (DECL_BUILT_IN_CLASS: gimple_fold_builtin, match.pd, expand_builtin); the library declaration has none, so the call
@@ -693,9 +711,49 @@ static void order_builtin_call(gimple_stmt_iterator *gsi, gcall *call) {
   // plain accesses through its pointer operands. GCC's own flags say whether it touches memory at all (ECF_NOVOPS: no virtual
   // operands); one that does and reaches this point is a build error naming the builtin. (A builtin GCC expands before this pass is
   // ordinary GIMPLE here and is ordered as any access.)
-  if (gimple_call_flags(call) & ECF_NOVOPS) return;
-  error_at(gimple_location(call), "%<fnvnx_order%>: builtin %qs has no library function, is expanded at RTL expansion, and reads or "
-           "writes possibly shared memory through a pointer operand", asmname);
+  int fl = gimple_call_flags(call);
+  if (fl & ECF_NOVOPS) return;
+  // THE CLASS "NO LIBRARY FUNCTION, MEMORY EFFECT ONLY THROUGH POINTER OPERANDS" (the setjmp/longjmp family: __builtin_setjmp_setup,
+  // __builtin_setjmp_receiver, __builtin_longjmp, __builtin_update_setjmp_buf, __builtin_nonlocal_goto). It is the builtin that GCC's flags
+  // do not mark NOVOPS and whose fnspec (unknown: every pointer operand both ways, else GCC's own spec) was read above into rd and wr: its
+  // expansion makes plain accesses through those operands and no other (builtins.cc expand_builtin_setjmp_setup / _receiver /
+  // expand_builtin_longjmp: the jmp_buf slots through the operand, the frame pointer and stack pointer registers). A builtin that calls code
+  // through a function-pointer operand (__builtin_apply) has effects that no operand expresses: the one refusal left.
+  for (unsigned i = 0; i < gimple_call_num_args(call); i++) {
+    tree a = gimple_call_arg(call, i);
+    if (POINTER_TYPE_P(TREE_TYPE(a)) && FUNC_OR_METHOD_TYPE_P(TREE_TYPE(TREE_TYPE(a)))) {
+      error_at(gimple_location(call), "%<fnvnx_order%>: builtin %qs has no library function and calls code through a function operand: "
+               "its memory effect is not expressed through its pointer operands", asmname);
+      return;
+    }
+  }
+  // PROOF. TSO order of the thread's accesses to the expansion's plain accesses, by the one form of this pass (ldar for loads, stlr for
+  // stores, no fence around a plain access):
+  //  - BEFORE (when the expansion may write): the expansion's plain stores must follow every earlier access of the thread (x86 stores are
+  //    ordered after earlier loads and stores). A full barrier (dmb ish) before the call does that; stlr alone would only order the accesses
+  //    before it.
+  //  - AFTER, a write: its stores must precede every later store (stlr is a release: it orders every earlier access, the expansion's plain
+  //    stores included, before itself) and may pass later loads (TSO allows store->load). So the later accesses of this pass need nothing; the
+  //    full barrier is placed all the same, so that no later access can pass a plain store of the expansion on any path.
+  //  - AFTER, a read: its plain loads must precede every later access (x86 loads are not reordered with later loads or stores): a later stlr
+  //    orders them, a later ldar does NOT order an earlier plain load. An acquire barrier (dmb ishld) after the call does.
+  // A noreturn call has no later access on its path: no barrier after it (b7f53b595). A returns-twice call's barrier sits right after the
+  // call statement in its own block, which the second return enters at its head, so both returns pass it.
+  auto fence = [&](int model) {
+    gcall *f = gimple_build_call(builtin_decl_explicit(BUILT_IN_ATOMIC_THREAD_FENCE), 1, build_int_cst(integer_type_node, model));
+    gimple_set_location(f, gimple_location(call));
+    generated_stmts.insert(f);
+    return f;
+  };
+  if (wr) gsi_insert_before(gsi, fence(MEMMODEL_SEQ_CST), GSI_SAME_STMT);
+  if (fl & ECF_NORETURN) return;
+  gcall *post = fence(wr ? MEMMODEL_SEQ_CST : MEMMODEL_ACQUIRE);
+  if (stmt_ends_bb_p(call)) {
+    edge e = find_fallthru_edge(gimple_bb(call)->succs);
+    if (e) gsi_insert_on_edge_immediate(e, post);
+  } else {
+    gsi_insert_after(gsi, post, GSI_SAME_STMT);
+  }
 }
 
 // one statement. Every memory operand is classified (local or read-only: plain; else ordered or fenced); a statement

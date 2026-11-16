@@ -11,23 +11,24 @@ from array import array
 from collections import Counter, deque
 from capstone import x86 as X
 import cli
-USAGE = '''usage: universe.py --out OUTDIR (--exe FILE --funcs FILE [--refused FILE] | --module NAME --modules modules.tsv --moddirs DIR[:DIR...] --lib DIR) --keys keys.tsv [--theirs DIR]
+USAGE = '''usage: universe.py --out OUTDIR (--exe FILE --funcs FILE [--refused FILE] | --module NAME --modules modules.tsv --moddirs DIR[:DIR...] --lib DIR) --keys keys.tsv [--theirs DIR] --baddecode FILE --shapes FILE --udsail FILE
+  --baddecode / --shapes: the image's refused-sequence list and decoded-shape universe (BADDECODE, SHAPES outputs). --udsail: the Sail #UD verdicts (proof/udsail.py) for the refused sequences.
   code universe of the exe (--exe, with the decomp function starts --funcs) or of the module NAME (a name or file of modules.tsv; the module table and the directories
   that hold the module files are declared inputs). --keys: the import conventions (keys.tsv). --theirs (optional): with --exe, the directory that holds
   L1's facts.pkl and eh.pkl, for the entry-set comparison (reconcile.py). --refused FILE: one round of the exe's reloc-consistency fixed point (the refusals of the earlier rounds); without it the exe run drives
   the rounds itself. Every path is an explicit argument: no environment variable, no default.'''
-_OPTS = {'--out': True, '--exe': True, '--funcs': True, '--module': True, '--modules': True, '--moddirs': True, '--keys': True, '--theirs': True, '--refused': True, '--lib': True}
+_OPTS = {'--out': True, '--exe': True, '--funcs': True, '--module': True, '--modules': True, '--moddirs': True, '--keys': True, '--theirs': True, '--refused': True, '--lib': True, '--udsail': True, '--baddecode': True, '--shapes': True}
 if __name__ == '__main__': _POS, _O = cli.parse(USAGE, sys.argv[1:], (0, 0), _OPTS)
 else: _O = {}
 def _need(*ks):
     miss = [k for k in ks if k not in _O]
     if miss: sys.exit('universe.py: missing %s\n\n%s' % (' '.join(miss), USAGE))
 MOD = _O.get('--module'); STRICT = MOD is not None   # module mode: pointers are code/data only on evidence
-_need('--out', '--keys'); import ehflow; ehflow.configure_keys(_O['--keys'])
+_need('--out', '--keys', '--baddecode', '--shapes', '--udsail'); import ehflow; ehflow.configure_keys(_O['--keys'])
 if STRICT:      # separate engine (every relocated pointer into executable bytes is an entry)
     _need('--modules', '--moddirs', '--lib'); sys.path.insert(0, _O['--lib'])      # --lib: the directory that holds the package fnvlift (the lifter's PE loader and decoder); a stage mounts it as an input
-    import modlift; modlift.run(MOD, SimpleNamespace(modules=_O['--modules'], moddirs=_O['--moddirs'].split(':'), facts_out=_O['--out'])); sys.exit(0)      # modlift.run raises on failure; its verdict is in the gate JSONs
-_need('--exe', '--funcs')
+    import modlift; modlift.run(MOD, SimpleNamespace(modules=_O['--modules'], moddirs=_O['--moddirs'].split(':'), facts_out=_O['--out'], udsail=_O['--udsail'], baddecode=_O['--baddecode'], shapes=_O['--shapes'])); sys.exit(0)      # modlift.run raises on failure; its verdict is in the gate JSONs
+_need('--exe', '--funcs', '--lib'); sys.path.insert(0, _O['--lib'])      # --lib: the directory that holds the package fnvlift (a declared input of the stage)
 EXE = _O['--exe']; FUNCS = _O['--funcs']; NAME = ''
 OUTD = _O['--out']; OUT = OUTD + '/universe.tsv'; os.makedirs(OUTD, exist_ok=True)
 if '--refused' not in _O:       # driver: reloc-consistency refusals to their fixed point (each round is a whole run; R_{k+1} = R_k + the pointer-only entries with a misfit; refusals only shrink the flow, so R grows monotonically)
@@ -37,14 +38,15 @@ if '--refused' not in _O:       # driver: reloc-consistency refusals to their fi
         _k += 1
         open(_rf, 'w').write(''.join('%08x\n' % a for a in sorted(_R)))
         _p = subprocess.run([sys.executable, '-I', os.path.abspath(__file__)] + sys.argv[1:] + ['--refused', _rf], stdout=subprocess.PIPE, text=True)      # the round's stderr streams to this stage's stderr as it happens
-        if _p.returncode:      # a failed round: its output and the reason go to stderr (a signal kill, e.g. the out-of-memory killer, has a negative returncode and no output of its own)
-            sys.stderr.write(_p.stdout); sys.stderr.write('universe.py: reloc-consistency round %d: the round process %s\n' % (_k, 'was killed by signal %d' % -_p.returncode if _p.returncode < 0 else 'exited with status %d' % _p.returncode)); sys.exit('universe.py: stopped')
+        if _p.returncode:      # a failed round: the tail of its output and the reason go to stderr (its own stderr already streamed; the whole stdout would push that out of a 20-line tail) (a signal kill, e.g. the out-of-memory killer, has a negative returncode and no output of its own)
+            sys.stderr.write(''.join(_p.stdout.splitlines(True)[-8:])); sys.stderr.write('universe.py: reloc-consistency round %d: the round process %s\n' % (_k, 'was killed by signal %d' % -_p.returncode if _p.returncode < 0 else 'exited with status %d' % _p.returncode)); sys.exit('universe.py: stopped')
         _nx = set(int(l.split()[0], 16) for l in open(OUTD + '/refused_next.tsv') if l.strip()) if os.path.exists(OUTD + '/refused_next.tsv') else set()
         if _nx <= _R:
             sys.stdout.write(_p.stdout); print('reloc-consistency fixed point after %d rounds: %d entries refused' % (_k + 1, len(_R)))
             open(_rf, 'w').write('# columns: entry; unproven pointer-only entries refused by reloc-consistency (the bytes go to data, the relocated pointer is a data fact)\n' + ''.join('%08x\n' % a for a in sorted(_R))); sys.exit(0)      # a failed round was reported above
         _R |= _nx
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
+import gapmd; md = gapmd.make(md, _O['--udsail'])
 M = pemod.load(EXE); d, pe, base, secs, loc, off, sec, u32, dirent = M.d, M.pe, M.base, M.secs, M.loc, M.off, M.sec, M.u32, M.dirent
 RL = pemod.relocs(M); relocs = sorted(RL or []); rset = set(relocs); imports = pemod.imports(M)
 T0 = min(a for n, a, z, ro in M.xs); T1 = max(a + z for n, a, z, ro in M.xs); TN = T1 - T0; SINGLE = len(M.xs) == 1
@@ -67,8 +69,8 @@ tbl = bytearray(TN)                       # 1 = jump/index table data
 pedat = bytearray(TN)                     # 1 = named by a PE data directory
 tref = array('I', bytes(4 * TN))          # relocation (site) that names each data byte
 insns = {}                                # addr -> (size, mnem, feat, fall, targets)
-entries = {}; kinds = {}; PRI = ['decomp', 'entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw', 'inner', 'ptr']
-tslots = set(); tstarts = set(); dinfo = Counter(); midsrc = set(); midcall = set(); bad_entries = set(); queue = deque()
+entries = {}; kinds = {};
+BADAT = {}; tslots = set(); tstarts = set(); dinfo = Counter(); midsrc = set(); midcall = set(); bad_entries = set(); queue = deque()
 r3set = set(); vsites = set(); vok = set(); jtab = set(); tcons = {}; straddle = set(); deadops = set(); datarec = []; arrays = []; callers = {}; parent = {}; esite = {}; psites = {}; rejects = {}; settled = set()
 FEATS = ['ijmp_reg', 'ijmp_mem', 'fs', 'sys', 'lock', 'rep', 'x87', 'sse', 'mmx', 'in', 'out', 'cli', 'sti', 'rdtsc', 'cpuid', 'exotic']
 EXOTIC = set('aaa aas daa das aam aad arpl bound in out insb insd outsb outsd sldt hlt lcall ljmp popal pushal iretd retf into salc'.split())
@@ -139,7 +141,7 @@ def walk(start, lo, hi, dec, r3=False):
                     elif not r3 and op.type == X.X86_OP_MEM and op.mem.scale == 4 and op.mem.index and (a + ins.disp_offset) in rset:
                         jtab.add(a); feat |= 2                                  # edges come from jt_pass (tools/jtab.py), never from a pattern at the site
                     else: feat |= 1 if op.type == X.X86_OP_REG else 2
-                elif mn in ('ret', 'retf', 'int3', 'hlt', 'ud2', 'iret', 'iretd'): fall = False
+                elif mn in ('ret', 'retf', 'int3', 'hlt', 'ud2', 'iret', 'iretd', '(ud)'): fall = False
                 elif mn[0] == 'j' or mn in ('loop', 'loope', 'loopne'): tg = (ops[0].imm & 0xffffffff,)
                 elif mn == 'call' and ops[0].type == X.X86_OP_IMM: refs.append(('call', ops[0].imm & 0xffffffff, a))
                 out[a] = (ins.size, mn, feat, fall, tg)
@@ -151,7 +153,7 @@ def walk(start, lo, hi, dec, r3=False):
                 if a in insns or a in out or not (lo <= a < hi) or not V[a - T0] or (not dec and (a in entries or dmap[a - T0])): break
             else:
                 if n >= 150 and a < hi: continue          # chunk boundary
-                if a < hi: ok = False                    # undecodable bytes
+                if a < hi: ok = False; BADAT.setdefault(start, []).append(a)      # undecodable bytes (the address is reported: baddecode.tsv)
                 break
             if stop: break
     return ok, out, refs, tabs
@@ -341,6 +343,7 @@ cont = {}                                 # strict mode: relocated-dword runs st
 for t in sorted(cref) if STRICT else ():
     q = t
     while q in rset: cont[q] = t; q += 4
+PRI = residue.PRI
 U = SimpleNamespace(M=M, insns=insns, PRI=PRI, T0=T0, T1=T1, TN=TN, X=X, V=V, bad_entries=bad_entries, callers=callers, classify=classify, cov=cov, cref=cref, datarec=datarec, dmap=dmap,
                     entries=entries, fsize=fsize, funcs=funcs, indec=indec, intext=intext, kinds=kinds, md=md, pad_split=pad_split, parent=parent, psites=psites,
                     rejects=rejects, relocs=relocs, rset=rset, rvals=rvals, sec=sec, tcons=tcons, text=text, tref=tref, tslots=tslots, tbl=tbl, pedat=pedat, mark=mark,
@@ -394,12 +397,19 @@ def uni(I):
         if o and a <= o[-1][1]: o[-1][1] = max(o[-1][1], e)
         else: o.append([a, e])
     return o
+# ---- no entry on proven data: the SAME predicate as the invariant (residue.entries_on_data reads codemap.tsv's class `data-reloc` = classify() class 3: bytes that a relocation names as data and
+# that no decoded instruction covers). tbl/cov/dmap do not change from here (R3 and closure bodies are not committed), so one classify() answers for every entry made below. An R3 or closure entry
+# on such a byte is not an entry: its pointer is a data address, the proof is the class and the relocation that names the byte, recorded in dropped_on_data.tsv.
+C3 = classify(); DROP = {}
+def on_data(a): return T0 <= a < T1 and C3[a - T0] == 3
+for a in sorted(entries):         # every pointer-only entry (R3 or committed-flow ptr_target whose table mark arrived in a later jtab round), not only r3set
+    if on_data(a) and not (kinds[a] - {'ptr', 'inner'}) and not cov[a - T0]:
+        bad_entries.discard(a); DROP[a] = 'data-reloc:%08x' % tref[a - T0]; del entries[a]; kinds.pop(a, None); esite.pop(a, None); parent.pop(a, None); scx.pop(a, None); udset.discard(a); r3set.discard(a)
 # ---- closure under direct targets (rule C): the entry set is the least fixed point of R3 and of "every direct call target, and every direct jmp/jcc/loop target that leaves
 # the lifter's range [lo,hi), of the body of every entry is an entry". The body and the range are the lifter's own (fnvlift.core.explore from the entry over the range
 # entry_args gives: [parent, parent+size) for an entry with parent=, else [entry, entry+extent)); a call target is an entry even inside the range (the lifter emits
 # L_<target>() for every direct call). A target inside a decomp function gets parent= (kind inner), like every inner entry. Added entries are R3-style entries: their bodies
 # are kept in scx (not in insns/cov), so byte accounting is unchanged. A target outside every executable section is not an entry (counted: lifter needs a rule there).
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fnvlift import Image as LImage; from fnvlift import core as LCore
 limg = LImage(EXE); cl_cache = {}; cl_ft = set(); cl_out = Counter(); cl_outex = {}; cl_outt = {}; cl_outsrc = Counter(); cl_add = Counter(); cl_jx = set(); cl_rounds = 0
 def span_of(a):
@@ -444,6 +454,7 @@ while True:
     if not miss: break
     cl_rounds += 1
     for t in sorted(miss):
+        if on_data(t): DROP[t] = 'data-reloc:%08x' % tref[t - T0]; continue
         kds, a = miss[t]; f = indec(t); entries[t] = None; kinds[t] = set(kds); esite[t] = a; r3set.add(t); cl_add['+'.join(sorted(kds)), 'inner' if f else 'free'] += 1
         if f: parent[t] = f[0]; kinds[t].add('inner')
         if cov[t - T0] == 1: continue
@@ -488,6 +499,9 @@ open(OUT, 'w').write(HD + '; columns: entry, kind, extent, flags; extent is the 
 open(OUTD + '/ranges.tsv', 'w').write(HD + '; columns: entry, half-open ranges start-end (hex) of the instruction bytes reached\n' + '\n'.join(rgs) + '\n')
 rc = residue.write_retn(OUTD, HD, residue.retn_rows(RI)); print('retn.tsv %d rows: %s' % (len(RI), dict(sorted(rc.items()))))
 print('invariant ranges: instructions the lifter reaches outside the entry ranges, other than the dead tail after a call to a never-returning entry: %d (entries %d of %d); dead tails after NORETURN calls: %d instructions in %d entries' % (sum(LOX.values()), sum(1 for v in LOX.values() if v), len(LOX), sum(LOT.values()), sum(1 for v in LOT.values() if v)))
+open(_O['--baddecode'], 'w').write(HD + '; columns: entry, undecodable address, the 15 bytes there (a decoder fetch window; a Sail fetch past the given bytes would be undecided); every bad-decode entry that no proof removed (not on proven data). No SDM invalid-encoding rule decides these sequences yet, so each is UNDECIDED and the codemap gate stays red on it\n' + ''.join('%08x\t%08x\t%s\n' % (e, x, text[x - T0:x - T0 + 15].hex()) for e in sorted(bad_entries) for x in sorted(set(BADAT.get(e, ())))))
+print('shapes.tsv %d shape keys' % gapmd.shapes_tsv(_O['--shapes'], HD, md, text, T0, insns))
+open(OUTD + '/dropped_on_data.tsv', 'w').write(HD + '; columns: address, proof id; pointer-valued sites whose target is a byte of class data-reloc (classify() class 3, the codemap invariant), so not an entry\n' + ''.join('%08x\t%s\n' % kv for kv in sorted(DROP.items())))
 open(OUTD + '/noreturn.tsv', 'w').write(HD + '; columns: entry, reason\n' + ''.join('%08x\t%s\n' % kv for kv in NRR))
 print('R3 pointer entries: %d new (%d insn-start of decoded code, %d bodies re-read from their first byte, %d of them hit undecodable bytes #UD, %d inside decomp functions); direct targets of those bodies: %s' % (
     len(r3set), len(r3set) - len(scx), len(scx), len(udset), sum(1 for a in r3set if a in parent), dict(sorted(r3call.items()))))
@@ -497,7 +511,7 @@ print('closure under direct targets: %d rounds, entries added %s; targets outsid
 print('fall-through successors of lifter bodies (entry, successor) %d, distinct successors %d' % (len(cl_ft), len({t for e, t in cl_ft})))
 print('ranges.tsv %d rows, noreturn.tsv %d rows; range-sum vs extent mismatches %d (non-decomp rows: equality; %d decomp rows: sum <= declared size)' % (len(rgs), len(NRR), rbad, rdec))
 def gate(green, TNu, why):
-    import pcsrc; pc_red, pc_res = pcsrc.run_facts(OUTD, NAME if STRICT else 'exe', text, T0, u32, rset); print('gate %s red=%d sources=%d rows=%d' % (pc_res['name'], pc_red, pc_res['sources'], pc_res['rows']))
+    import pcsrc; pc_red, pc_res = pcsrc.run_facts(OUTD, NAME if STRICT else 'exe', text, T0, u32, rset, imports); print('gate %s red=%d sources=%d rows=%d' % (pc_res['name'], pc_red, pc_res['sources'], pc_res['rows']))
     open(OUTD + '/gate_codemap.json', 'w').write(json.dumps({'schema': 'fnvnx-gate/1', 'name': 'l3.codemap' + ('.' + NAME if STRICT else ''), 'status': 'green' if green else 'red', 'universe': TNu, 'certified': TNu - unexpl, 'uncertified': unexpl}) + '\n')
     print('gate l3.codemap%s: %s (certified %d of %d, uncertified %d, rejected pointers %d, bad-decode entries %d)%s' % ('.' + NAME if STRICT else '', 'green' if green else 'red', TNu - unexpl, TNu, unexpl, len(rejects), len(bad_entries), ''.join('; RED: ' + w for w in why)))
     bad = residue.entries_on_data(OUTD); print('invariant entries on class-3 data bytes: %d%s' % (len(bad), ' RED: ' + ' '.join('%08x' % a for a in bad[:8]) if bad else ''))

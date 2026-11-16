@@ -2,6 +2,9 @@
 """Tests of the f2i reader of lift/proof/gate_fpexact.py (check 3a): the path comes from the `f2i` field of the object's row in objects.json, the
 unit the plugin reports is recipe.sandbox_src(unit). Plain script: one PASS/FAIL line per case, exit 0 on pass. The identity case builds the toy
 root of verify/tests/test_recipe.py with the real recipe and reads the stage documents and the preprocessed text it produced."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import re
@@ -14,14 +17,14 @@ LIFT = os.path.normpath(os.path.join(HERE, "..", ".."))
 VERIFY = os.path.normpath(os.path.join(LIFT, "..", "verify"))
 for p in (os.path.join(LIFT, "proof"), os.path.join(VERIFY, "tests"), VERIFY, os.path.join(LIFT, ".."), os.path.join(LIFT, "..", "contract")):
     sys.path.insert(0, p)
-import scratch  # noqa: E402
+from verify import scratch  # noqa: E402
 
 scratch.install()
-import gate_build  # noqa: E402
+from verify import gate_build  # noqa: E402
 import gate_fpexact as G  # noqa: E402
-import recipe  # noqa: E402
+from verify import recipe  # noqa: E402
 import test_recipe as TR  # noqa: E402
-import unitstage  # noqa: E402
+from verify import unitstage  # noqa: E402
 
 TMP = tempfile.mkdtemp(prefix="fpexact-")
 FAILED = []

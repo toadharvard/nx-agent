@@ -133,12 +133,73 @@ def main():
             r['exe_source'] = f['exe_source']
         r['citations'] = cit
         rows.append(r)
+    byid = {r['id']: r for r in rows}
+    types, seen, pend = [], set(), []
+    tables = {}   # type name -> {page: size from the documented table line that names it}
+    for r in rows:
+        for c in r['citations']:
+            for l in cache[os.path.join(a.docs, c['page'])]:
+                m = re.match(r'\|(.*)\|\s*(\d+) bytes?\s*\|\s*$', l)
+                if m:
+                    for n in re.findall(r'\*\*`([a-z_ ]+)`\*\*', m.group(1)):
+                        tables.setdefault(n, {})[c['page']] = int(m.group(2))
+    for t in F['types']:
+        n = t['type']
+        if n in seen:
+            errs.append('T1 type %s listed twice' % n)
+        seen.add(n)
+        if not (set(t) in ({'type', 'row'}, {'type', 'row', 'size_as'})):
+            errs.append('T1 %s: entry is {type, row} or {type, row, size_as}' % n)
+            continue
+        if t['row'] not in byid:
+            errs.append('T1 %s names unknown row %s' % (n, t['row']))
+            continue
+        row = byid[t['row']]
+        if not row['citations'] or row['status'] != 'closed':
+            errs.append('T1 %s: row %s is not a closed row with a documentation citation' % (n, t['row']))
+        pend.append((t, row))
+    for t, row in pend:
+        n = t['type']
+        if 'size_as' in t:
+            ref = t['size_as']
+            if ref not in tables:
+                errs.append('T3 %s: size_as %s has no documented size' % (n, ref))
+                continue
+            sizes = set(tables[ref].values())
+        else:
+            sizes = set(tables.get(n, {}).values())
+        if len(sizes) != 1:
+            errs.append('T3 %s: the documented size tables give %s (one value required)' % (n, sorted(sizes)))
+            continue
+        size = sizes.pop()
+        quotes = ' '.join(c['quote'] for c in row['citations'])
+        # signedness: only integral types have it. C++ docs: integers are signed unless `unsigned`; char by the row's own quote
+        # (S01: promoted as from signed char), wchar_t by its row's quote (S02: unsigned), bool is unsigned.
+        if n in ('float', 'double', 'long double', 'pointer'):
+            sg = None
+        elif n.startswith('unsigned') or n == 'bool':
+            sg = False
+        elif n == 'wchar_t':
+            sg = False if 'unsigned' in quotes else None
+        elif n == 'char':
+            sg = True if 'signed char' in quotes else None
+        else:
+            sg = True
+        if n in ('wchar_t', 'char') and sg is None:
+            errs.append('T4 %s: row %s does not document its signedness' % (n, row['id']))
+            continue
+        e = {'type': n, 'size': size, 'align': min(size, 8)}
+        if sg is not None:
+            e['signed'] = sg
+        e['row'] = row['id']
+        e['citations'] = row['citations']
+        types.append(e)
     if errs:
         print('\n'.join(errs))
         return 1
     tmrows = [{'entry': k, **tm[k]} for k in sorted(tm)]
     out = {'format': 'fnvnx-datamodel/2', 'target': F['target'], 'pins': json.load(open(os.path.join(os.path.dirname(a.facts), 'sources.json'))),
-           'rows': rows, 'tm': tmrows, 'crossing_forbidden': F['crossing_forbidden']}
+           'rows': rows, 'types': types, 'tm': tmrows, 'crossing_forbidden': F['crossing_forbidden']}
     target = a.out + '.new' if a.check else a.out
     json.dump(out, open(target, 'w', encoding='utf-8'), indent=1, ensure_ascii=False, sort_keys=False)
     open(target, 'a').write('\n')
@@ -148,6 +209,9 @@ def main():
     for r in rows:
         src = '; '.join('%s:%d' % (c['page'], c['line']) for c in r['citations']) or 'exe: ' + r.get('exe_source', '')
         md.append('| %s | %s | %s | %s | %s | %s |' % (r['id'], r['msvc'], r['gcc'], r['mechanism'], r['status'], src))
+    md += ['', '## Types (%d)' % len(types), '', '| type | size | align | signed | row |', '|---|---|---|---|---|']
+    for t in types:
+        md.append('| %s | %d | %d | %s | %s |' % (t['type'], t['size'], t['align'], {True: 'yes', False: 'no'}.get(t.get('signed'), '-'), t['row']))
     md += ['', '## tm.texi entries (%d)' % len(tmrows), '', '| entry | fact or reason |', '|---|---|']
     for t in tmrows:
         md.append('| %s | %s |' % (t['entry'], t['fact'] if 'fact' in t else 'not a layout fact: ' + t['not_layout']))

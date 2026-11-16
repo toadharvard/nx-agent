@@ -6,6 +6,7 @@
 #include <math.h>
 #include <string.h>
 #include "ffp_vs_state.h"
+#include "ffp_layout_vs.gen.h"   /* the std140 offsets of the UBO records (render/gl4shim/ffp/gen_glsl.py): a layout that differs is a compile error */
 
 static float bits_f(uint32_t u) { float f; memcpy(&f, &u, 4); return f; }
 

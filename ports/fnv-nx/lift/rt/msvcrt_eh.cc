@@ -3,12 +3,13 @@
    Reference: Wine 9.0 dlls/msvcrt (i386): except_i386.c, except.c, cpp.c; every function below names the Wine function it transcribes. The code is written
    against the documented MSVC structures (EH_PROLOG frame, FuncInfo / TryBlockMap / HandlerType / UnwindMap, ThrowInfo / CatchableTypeArray, _JUMP_BUFFER),
    with pointers as 32-bit guest addresses read through M8 / M32.
-   Conventions. A guest entry reads its arguments from the guest stack at esp+4.. and ends with `c->ra = M32(sp0); esp = sp0 + 4 [+ 4n for stdcall]`.
+   Conventions. A guest entry (bridge row bind `entry`, FNVNX_EXPORT kind "entry") reads its arguments from the guest stack at esp+4.. and ends by returning: the bridge
+   (tools/impgen.py entry_thunk) does the whole x86 return (ra, esp, the argument bytes) from the row's conv and args; the body never writes ra (rt/fnvl.h: it is const here).
    Guest code is called like rt/seh.cc call_handler does: arguments and the sentinel RET_SENT are pushed, fnvl_dispatch(addr)() runs it, and c->ra == RET_SENT
    afterwards means it returned. Anything else means the callee (or something it called) left by a NON-LOCAL transfer (a catch continuation, an __except block,
-   longjmp, a handler of an older frame): every function here then returns at once, with registers and c->ra exactly as they are (return value 0 of the
-   internal helpers). The same holds for the transfers this file makes itself (jump to an __except block, continue after a catch, longjmp): registers set,
-   c->ra = target, return.
+   longjmp, a handler of an older frame): the entry then leaves through fnvl_native_exit (rt/imp.h) with registers and c->ra exactly as they are (return value 0 of the
+   internal helpers). The transfers this file makes itself (jump to an __except block, continue after a catch, longjmp) are fnvl_native_transfer(eip, esp): registers set, then the
+   one non-local exit; the bridge's return does not run.
    Guest stack: every object the runtime needs (EXCEPTION_POINTERS, registrations, the catch frame) is carved below esp, which is lowered over it, so nested
    guest calls and rt/seh.cc (which builds its records below esp) never overwrite it.
    Per-thread state: struct fnvl_msvcrt_thread (rt/msvcrt.h). Process state: fnvl_msvcrt_sighandlers.
@@ -16,12 +17,12 @@
    Not here (no row, no body): the se_translator branch of Wine's cxx_frame_handler: `_set_se_translator` has no bridge row, so no translator can be installed
    (see the report). */
 #include "fnvl.h"
+#include "fnvnx_export.h"
 #include "imp.h"
 #include "msvcrt.h"
 
 extern "C" {
 void fnvl_os_RtlUnwind(void);
-int fnvl_raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 eip, u32 sp);
 void *fnvnx_win32_lookup_export(const char *dll, const char *name);      /* the platform's msvcrt exports free and abort (bridge rows bind lookup): the same lookup their import entries use */
 u32 fnvl_msvcrt_sighandlers[23];
 void fnvl_msvcrt_except_handler3(void);
@@ -122,11 +123,12 @@ static int local_unwind2(u32 frame, u32 trylevel, u32 ebp_v)
 }
 
 /* guest entry of Wine MSVCRT_nested_handler: (rec, frame, ctx, dispatch) cdecl; an unwind that meets this registration collides: *dispatch = frame, ExceptionCollidedUnwind */
+FNVNX_EXPORT("!rt", "eh_nested_collide", fnvl_msvcrt_eh_nested_collide, "entry");
 extern "C" void fnvl_msvcrt_eh_nested_collide(void)
 {
     u32 sp0 = esp, rec = M32(sp0 + 4), frame = M32(sp0 + 8), disp = M32(sp0 + 16), res = DISP_CONTINUE_SEARCH;
     if (M32(rec + 4) & (EH_UNWINDING | EH_EXIT_UNWIND)) { M32(disp) = frame; res = 3; }
-    eax = res; c->ra = M32(sp0); esp = sp0 + 4;
+    eax = res;
 }
 
 /* ---- Wine _except_handler3 ---- */
@@ -146,8 +148,7 @@ static int except3(u32 rec, u32 frame, u32 ctx, u32 *res)
                 if (!global_unwind2(frame)) return 0;
                 if (!local_unwind2(frame, trylevel, frame + 16)) return 0;
                 M32(frame + 12) = M32(st);              /* trylevel of the enclosing block */
-                ebp = frame + 16; c->ra = M32(st + 8);   /* call_finally_block: ebp, then jump to the __except block (it restores esp itself) */
-                return 0;
+                ebp = frame + 16; fnvl_native_transfer(M32(st + 8), esp);   /* call_finally_block: ebp, then jump to the __except block (it restores esp itself) */
             }
         }
         trylevel = M32(st);
@@ -155,11 +156,12 @@ static int except3(u32 rec, u32 frame, u32 ctx, u32 *res)
     esp = ptrs + 8;
     return 1;
 }
+FNVNX_EXPORT("msvcrt.dll", "_except_handler3", fnvl_msvcrt_except_handler3, "entry");
 extern "C" void fnvl_msvcrt_except_handler3(void)
 {
     u32 sp0 = esp, res;
-    if (!except3(M32(sp0 + 4), M32(sp0 + 8), M32(sp0 + 12), &res)) return;
-    eax = res; c->ra = M32(sp0); esp = sp0 + 4;
+    if (!except3(M32(sp0 + 4), M32(sp0 + 8), M32(sp0 + 12), &res)) fnvl_native_exit();
+    eax = res;
 }
 
 /* ---- the C++ part: Wine except_i386.c ---- */
@@ -334,8 +336,7 @@ static int call_catch_block(u32 rec, u32 ctx, u32 frame, u32 descr, u32 catch_fr
             fs0_set(M32(nf));
             M32(frame - 4) = save_esp;
             if (!unregister_exception_object(nf + 20, 0)) return 0;
-            esp = M32(frame - 4); ebp = frame + 12; c->ra = addr;                  /* continue_after_catch */
-            return 0;
+            ebp = frame + 12; fnvl_native_transfer(addr, M32(frame - 4));         /* continue_after_catch */
         }
     }
     t->processing_throw--;
@@ -370,49 +371,76 @@ static int cxx_frame_handler(u32 rec, u32 frame, u32 ctx, u32 dispatch, u32 desc
 }
 
 /* __CxxFrameHandler: eax = the FuncInfo pointer (the thunk's `mov eax, offset FuncInfo; jmp`), cdecl (rec, frame, context, dispatch) */
+FNVNX_EXPORT("msvcrt.dll", "__CxxFrameHandler", fnvl_msvcrt_CxxFrameHandler, "entry");
 extern "C" void fnvl_msvcrt_CxxFrameHandler(void)
 {
     u32 descr = eax, sp0 = esp, res;
-    if (!cxx_frame_handler(M32(sp0 + 4), M32(sp0 + 8), M32(sp0 + 12), M32(sp0 + 16), descr, 0, &res)) return;
-    eax = res; c->ra = M32(sp0); esp = sp0 + 4;
+    if (!cxx_frame_handler(M32(sp0 + 4), M32(sp0 + 8), M32(sp0 + 12), M32(sp0 + 16), descr, 0, &res)) fnvl_native_exit();
+    eax = res;
 }
 
 /* guest entry of Wine catch_function_nested_handler: the registration of a running catch block; (rec, frame = the catch_func_nested_frame, ctx, dispatch) cdecl */
+FNVNX_EXPORT("!rt", "eh_nested_catch", fnvl_msvcrt_eh_nested_catch, "entry");
 extern "C" void fnvl_msvcrt_eh_nested_catch(void)
 {
     u32 sp0 = esp, rec = M32(sp0 + 4), nf = M32(sp0 + 8), ctx = M32(sp0 + 12), res = DISP_CONTINUE_SEARCH;
     if (M32(rec + 4) & (EH_UNWINDING | EH_EXIT_UNWIND)) {
-        if (!unregister_exception_object(nf + 20, 0)) return;
+        if (!unregister_exception_object(nf + 20, 0)) fnvl_native_exit();
     } else {
         if (rec_code(rec) == CXX_EXCEPTION) {
             u32 prev = fnvl_msvcrt_td()->exc_record;
             if ((!rec_info(rec, 1) && !rec_info(rec, 2)) ||
                 (rec_code(prev) == CXX_EXCEPTION && rec_info(rec, 1) == rec_info(prev, 1) && rec_info(rec, 2) == rec_info(prev, 2)))      /* the exception was rethrown */
-                if (!copy_current_record(rec)) { do_terminate(); return; }
+                if (!copy_current_record(rec)) { do_terminate(); fnvl_native_exit(); }
         }
-        if (!cxx_frame_handler(rec, M32(nf + 8), ctx, 0, M32(nf + 12), nf, &res)) return;
+        if (!cxx_frame_handler(rec, M32(nf + 8), ctx, 0, M32(nf + 12), nf, &res)) fnvl_native_exit();
     }
-    eax = res; c->ra = M32(sp0); esp = sp0 + 4;
+    eax = res;
 }
 
 /* _CxxThrowException(object, type), stdcall: RaiseException(CXX_EXCEPTION, EXCEPTION_NONCONTINUABLE, 3, {magic, object, type}). The record is raised at the
    thrower's return address with the thrower's esp after the `ret 8` (rt/seh.cc fnvl_raise_rec, what fnvl_os_RaiseException does for a direct call): the state
    after it returns -- a handler that continued, or a non-local transfer -- is whatever fnvl_raise_rec left. */
+static int cxx_throw(u32 obj, u32 ti, u32 ra, u32 sp)
+{
+    u32 info[3] = { CXX_MAGIC_VC6, obj, ti };
+    esp = sp;
+    return fnvl_raise_rec(CXX_EXCEPTION, EH_NONCONTINUABLE, ra, 3, info, ra, sp);
+}
+
+/* one body, two ABI entries. The guest entry (lifted code calls the import): stdcall, the arguments on the guest stack. */
+FNVNX_EXPORT("msvcrt.dll", "_CxxThrowException", fnvl_msvcrt_CxxThrowException, "entry");
 extern "C" void fnvl_msvcrt_CxxThrowException(void)
 {
-    u32 ra = M32(esp), info[3] = { CXX_MAGIC_VC6, M32(esp + 4), M32(esp + 8) }, sp = esp + 12;
-    esp = sp;
-    fnvl_raise_rec(CXX_EXCEPTION, EH_NONCONTINUABLE, ra, 3, info, ra, sp);
+    cxx_throw(M32(esp + 4), M32(esp + 8), M32(esp), esp + 12);
+}
+
+/* The native entry: C++ of the platform (platform/crt/cxx_bodies.cpp throw_bad_alloc) running under an import entry calls the bare symbol with the AAPCS arguments (ILP32:
+   a pointer is a guest address). It raises at the guest call site of that import, the ra and esp the import entry recorded (fnvl_native_guest: the return address at the esp
+   of the call, as the raise backend of rt/unhandled.cc does for RaiseException). Windows' msvcrt raises from inside itself, and the dispatcher walks the fs:0 chain, so
+   only guest frames are searched: the guest call site is where that walk starts. Once the raise returns (a lifted catch took the transfer, or the context continues) the
+   native frames are left by the non-local exit of the entry (fnvl_native_exit): this function does not return. */
+/* The invariant that makes the exit total: native code runs only under an entry that linked its frame before the native call (c->nf != 0): tools/impgen.py generates every import
+   entry as `fnvl_native_in(&nf); if (__builtin_setjmp(nf.jb)) { c->nf = nf.prev; return; } <native call>` (impgen.py:68-70) and tools/exitgen.py every native body of a lifted exe function as
+   `fnvl_native_enter(&nf); if (__builtin_setjmp(nf.jb)) { c->nf = nf.prev; return; } ...` (exitgen.py:135-140); there is no other way for guest code to reach native code, so
+   the bare entry has no frameless case and fnvl_native_exit has the setjmp point of the entry on top of c->nf. */
+extern "C" __attribute__((noreturn)) void _CxxThrowException(void *obj, const void *ti)
+{
+    u32 o = (u32)(unsigned long)obj, t = (u32)(unsigned long)ti;
+    u32 base = fnvl_native_guest();
+    cxx_throw(o, t, M32(base), base);
+    fnvl_native_exit();
 }
 
 /* ?terminate@@YAXXZ (cdecl): Wine terminate() */
-extern "C" void fnvl_msvcrt_terminate(void) { do_terminate(); }
+FNVNX_EXPORT("msvcrt.dll", "?terminate@@YAXXZ", fnvl_msvcrt_terminate, "entry");
+extern "C" void fnvl_msvcrt_terminate(void) { do_terminate(); fnvl_native_exit(); }
 
 /* ??1type_info@@UAE@XZ (thiscall, this in ecx): Wine type_info_dtor frees the lazily allocated undecorated name */
+FNVNX_EXPORT("msvcrt.dll", "??1type_info@@UAE@XZ", fnvl_msvcrt_type_info_dtor, "entry");
 extern "C" void fnvl_msvcrt_type_info_dtor(void)
 {
     ((void (*)(void *))fnvnx_win32_lookup_export("msvcrt.dll", "free"))((void *)(unsigned long)(u32)M32(ecx + 4));
-    c->ra = M32(esp); esp += 4;
 }
 
 /* ---- _XcptFilter: Wine msvcrt_exception_filter over the process's signal() handlers ---- */
@@ -459,15 +487,17 @@ static int xcpt_filter(u32 ptrs, u32 *res)
     return 1;
 }
 /* _XcptFilter(ex, ptrs), cdecl: Wine _XcptFilter (ex equals the record's code: ASM-229) */
+FNVNX_EXPORT("msvcrt.dll", "_XcptFilter", fnvl_msvcrt_XcptFilter, "entry");
 extern "C" void fnvl_msvcrt_XcptFilter(void)
 {
     u32 sp0 = esp, res;
-    if (!xcpt_filter(M32(sp0 + 8), &res)) return;
-    eax = res; c->ra = M32(sp0); esp = sp0 + 4;
+    if (!xcpt_filter(M32(sp0 + 8), &res)) fnvl_native_exit();
+    eax = res;
 }
 
 /* ---- setjmp / longjmp: Wine MSVCRT__setjmp3 (DEFINE_SETJMP_ENTRYPOINT + __regs_MSVCRT__setjmp3), MSVCRT_longjmp ---- */
 /* _setjmp3(jmp_buf, nb_args, ...), cdecl. The registers and the Esp / Eip of the call are saved as the entry does (Esp = the address of the return address). */
+FNVNX_EXPORT("msvcrt.dll", "_setjmp3", fnvl_msvcrt_setjmp3, "entry");
 extern "C" void fnvl_msvcrt_setjmp3(void)
 {
     u32 sp0 = esp, jb = M32(sp0 + 4); s32 nb = (s32)M32(sp0 + 8);
@@ -480,20 +510,21 @@ extern "C" void fnvl_msvcrt_setjmp3(void)
         if (nb > 1) M32(jb + 28) = M32(sp0 + 16); else M32(jb + 28) = M32(reg + 12);       /* TryLevel: the argument, or that of the current frame */
         for (s32 i = 0; i < 6 && i < nb - 2; i++) M32(jb + 40 + 4 * i) = M32(sp0 + 20 + 4 * i);    /* UnwindData */
     }
-    eax = 0; c->ra = M32(sp0); esp = sp0 + 4;
+    eax = 0;
 }
 
 /* longjmp(jmp_buf, retval), cdecl. Unwind to the saved registration (RtlUnwind when it is not the current head), run the unwind function of the buffer (or
    _local_unwind2 for a buffer without the 'VC20' cookie), then the transfer: ebp, ebx, edi, esi, esp = Esp + 4 (the return address of the _setjmp3 call is
    popped, as that call's `ret` would), c->ra = Eip, eax = retval (1 for 0). The cookie word lies inside the 64-byte buffer the caller passes (IsBadReadPtr is false). */
+FNVNX_EXPORT("msvcrt.dll", "longjmp", fnvl_msvcrt_longjmp, "entry");
 extern "C" void fnvl_msvcrt_longjmp(void)
 {
     u32 sp0 = esp, jb = M32(sp0 + 4), retval = M32(sp0 + 8), reg = M32(jb + 24);
-    if (fs0_get() != reg && !global_unwind2(reg)) return;
+    if (fs0_get() != reg && !global_unwind2(reg)) fnvl_native_exit();
     if (reg) {
-        if (M32(jb + 32) != JMP_MAGIC) { if (!local_unwind2(reg, M32(jb + 28), M32(jb))) return; }
-        else if (M32(jb + 36)) { u32 r; if (!gcall(M32(jb + 36), 0, 0, 0, &jb, 1, &r)) return; }       /* UnwindFunc(jmp_buf), stdcall */
+        if (M32(jb + 32) != JMP_MAGIC) { if (!local_unwind2(reg, M32(jb + 28), M32(jb))) fnvl_native_exit(); }
+        else if (M32(jb + 36)) { u32 r; if (!gcall(M32(jb + 36), 0, 0, 0, &jb, 1, &r)) fnvl_native_exit(); }       /* UnwindFunc(jmp_buf), stdcall */
     }
     if (!retval) retval = 1;
-    ebp = M32(jb); ebx = M32(jb + 4); edi = M32(jb + 8); esi = M32(jb + 12); esp = M32(jb + 16) + 4; c->ra = M32(jb + 20); eax = retval;
+    ebp = M32(jb); ebx = M32(jb + 4); edi = M32(jb + 8); esi = M32(jb + 12); eax = retval; fnvl_native_transfer(M32(jb + 20), M32(jb + 16) + 4);
 }
