@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
+# reads: ports/fnv-nx/toolchain/names/sympair_kinds.inc ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """gate_abi layout item by the `linkage` column (8th field of .fnvnx.layout): only `external` records pair by key; `internal`, `none` and `c` records are
 distinct entities per unit and never pair by name.  Hand-assembled objects with an empty .fnvnx.sympair.  Run: python3 -I <this file>."""
 import os
@@ -10,6 +10,8 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.join(HERE, '..'), os.path.join(HERE, '..', '..', 'link'), os.path.join(HERE, '..', '..', 'contract')]
 import gate_abi  # noqa: E402
+import l2sections  # noqa: E402
+l2sections.set_kinds(os.path.join(HERE, "..", "..", "toolchain", "names", "sympair_kinds.inc"))
 
 tmp = tempfile.mkdtemp(prefix='abilink-')
 __import__('atexit').register(__import__('shutil').rmtree, tmp, True)   # a test leaves no scratch behind
@@ -77,6 +79,26 @@ if not any('no .fnvnx.decltype' in i for i in ids):
 n, c, ids = judge(obj('ea', [row('S', 4, 'external')], {'v': S1}), obj('eb', [row('S', 4, 'external')], {'v': S2}))
 if not (len(ids) == 1 and ids[0].startswith('ctype:v')):
     fails.append('a decltype section on external-linkage rows is parsed and compared: %r' % ids)
+# an assembly unit carries no .fnvnx.decltype section
+oa, ob = obj('asm_with', [row('S', 4, 'c')], {'v': S1}), obj('asm_without', [])
+n, c, ids, _d = gate_abi.judge_objects([obj('ma', [row('S', 4, 'c')], {'v': S1}), obj('mb', [row('S', 4, 'c')], {'v': S1})], [oa])
+if not any('asm_with:decltype:asm' in i for i in ids):
+    fails.append('an assembly unit with a decltype section is red: %r' % ids)
+n, c, ids, _d = gate_abi.judge_objects([obj('mc', [row('S', 4, 'c')], {'v': S1}), obj('md', [row('S', 4, 'c')], {'v': S1})], [ob])
+if ids:
+    fails.append('an assembly unit without a decltype section is green: %r' % ids)
+# crossing universe and the va forwarders
+VA = 'f\t?f@@YAXXZ\tfunc\tdef\n'
+def jx(name, cross, uni, va=()):
+    return gate_abi.judge_objects([obj(name + 'a', [], sym=VA, cross=cross), obj(name + 'b', [])], (), uni, frozenset(va))[2]
+if jx('u1', 'f\tva_list\n', {'f'}, ['f']):
+    fails.append('an in-universe va crossing with its msvcrt_va record is green')
+if not any('abi:va:f' in i for i in jx('u2', 'f\tva_list\n', {'f'})):
+    fails.append('an in-universe va crossing without its record is red abi:va:f')
+if jx('u3', 'f\tpointer_to_member,va_list\n', {'g'}):
+    fails.append('an out-of-universe symbol with S-terms is not judged')
+if not jx('u4', 'f\tpointer_to_member\n', {'f'}):
+    fails.append('an in-universe symbol with a ptrmem term is red')
 # crossing_forbidden: a boundary symbol has a row and no term
 SY = 'f\t?f@@YAXXZ\tfunc\tdef\n'
 n, c, ids = judge(obj('xa1', [], sym=SY, cross='f\t-\n'), obj('xb1', []))

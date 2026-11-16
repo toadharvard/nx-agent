@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/toolchain/names/sympair_kinds.inc
 """l2sections - the three non-loaded ELF sections that L2's compiler plugins put into every game object (L1 CONTRACT).
 
     parse_sympair(data, where) -> [(symbol, msvc_name, kind, 'def'|'ref')]            .fnvnx.sympair (plugin NAMES1)
@@ -17,16 +16,37 @@ Pure: bytes in, tuples out (rows keep the section's order).
 """
 import os, re, sys
 
-def _sympair_kinds():
-    """the closed set of sympair kinds, read from where the names plugin defines it once (toolchain/names/sympair_kinds.inc, FNVNX_SYMPAIR_KINDS)"""
-    inc = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'toolchain', 'names', 'sympair_kinds.inc')
+REPO_KINDS_INC = 'ports/fnv-nx/toolchain/names/sympair_kinds.inc'   # the table's tracked path: for a caller whose cwd is the checkout root; a recipe stage passes the mounted input it declares
+_kinds = None
+
+
+def sympair_kinds(inc):
+    """the closed set of sympair kinds of the table INC (the names plugin defines it once: toolchain/names/sympair_kinds.inc, FNVNX_SYMPAIR_KINDS; `vtable`: NAMES1
+    writes it for the table groups; `noemit`: a function the unit defines with no symbol in the object)"""
     m = re.search(r'#define FNVNX_SYMPAIR_KINDS\(X\)(.*?)\n\n|#define FNVNX_SYMPAIR_KINDS\(X\)(.*)\Z', open(inc).read(), re.S)
     if not m:
         raise ValueError('%s: no FNVNX_SYMPAIR_KINDS' % inc)
     return frozenset(re.findall(r'X\(([^,()\s]+),', m[1] or m[2]))
 
 
-KINDS = _sympair_kinds()     # `vtable`: NAMES1 writes it for the table groups; `noemit`: a function the unit defines with no symbol in the object (the .inc)
+def set_kinds(inc):
+    """The one table the kind set is read from, for this process: a recipe stage names the declared output of toolchain/names (/uses/.../sympair_kinds.inc), a caller at the checkout root passes REPO_KINDS_INC."""
+    global _kinds
+    _kinds = sympair_kinds(inc)
+
+
+def kinds():
+    if _kinds is None:
+        raise RuntimeError('l2sections: no sympair kind table loaded (set_kinds(path) first: the table is the stage input toolchain/names/sympair_kinds.inc)')
+    return _kinds
+
+
+def __getattr__(name):
+    if name == 'KINDS':   # the module attribute of the tests and of the readers in a checkout
+        return kinds()
+    raise AttributeError(name)
+
+
 NAMELESS = frozenset(('thunk', 'vtable', 'gcc', 'internal'))
 N3_KINDS = frozenset(('', 'thunk', 'inline', 'sdd', 'alias'))
 
@@ -64,7 +84,7 @@ def parse_sympair(data, where):
     for n, ln in enumerate(_lines(data, where), 1):
         sym, ms, kind, df = _fields(ln, where, n, 4, 4)
         _need(sym, where, n, 'symbol')
-        if kind not in KINDS and not (kind.startswith('nodecor:') and len(kind) > 8):
+        if kind not in kinds() and not (kind.startswith('nodecor:') and len(kind) > 8):
             raise ValueError('%s: line %d: unknown kind %r' % (where, n, kind))
         if df not in ('def', 'ref'):
             raise ValueError('%s: line %d: %r is neither def nor ref' % (where, n, df))

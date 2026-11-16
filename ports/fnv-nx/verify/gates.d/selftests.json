@@ -5,6 +5,8 @@
   "python3",
   "-I",
   "ports/fnv-nx/verify/gate_tests.py",
+  "--timeout-s",
+  "900",
   "--jobs",
   "3",
   "ports/fnv-nx/verify",
@@ -14,6 +16,7 @@
   "ports/fnv-nx/rules",
   "ports/fnv-nx/lift",
   "ports/fnv-nx/lift/gates",
+  "ports/fnv-nx/render/total",
   "ports/fnv-nx/manifest"
  ],
  "result": "selftests.json",

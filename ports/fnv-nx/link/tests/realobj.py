@@ -17,6 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.dirname(os.path.dirname(HERE))                    # ports/fnv-nx
 REAL = os.path.dirname(os.path.dirname(TOOL))                    # checkout root
 sys.path.insert(0, os.path.join(TOOL, 'verify'))
+import scratch  # noqa: E402
 import cas  # noqa: E402
 import recipe  # noqa: E402
 
@@ -56,7 +57,7 @@ def _store():
         os.makedirs(d, exist_ok=True)
         return d
     if 'store' not in _cache:
-        _cache['store'] = _mk('realobj-store-')
+        _cache['store'] = scratch.store('realobj-store-')
     return _cache['store']
 
 

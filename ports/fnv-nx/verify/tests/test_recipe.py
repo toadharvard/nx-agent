@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/lib/sha256/build.json ports/fnv-nx/link
-# reads: ports/fnv-nx/loader/build.json ports/fnv-nx/platform/build.json ports/fnv-nx/render/d3d9/build.json ports/fnv-nx/render/gl4/build.json
-# reads: ports/fnv-nx/render/nxgpu/build.json ports/fnv-nx/render/pair/build.json ports/fnv-nx/render/shaders/translator/build.json
-# reads: ports/fnv-nx/render/smscan/build.json ports/fnv-nx/rt/guest/build.json ports/fnv-nx/rt/guest/crt0.s ports/fnv-nx/rt/guest_main/build.json
+# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/link
 # reads: ports/fnv-nx/shim/build.json ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for verify/recipe.py, gate_build.py, gate_determinism.py on a toy product root in a temp git repo. Plain script: exit 0 on
 pass, one PASS/FAIL line per case. Needs root (sandbox) and aarch64-linux-gnu-gcc-13/g++-13. Scratch: mkdtemp, removed at exit."""
@@ -45,12 +42,10 @@ n = len([l for l in open("/in/ports/fnv-nx/toy/ldin.tsv") if l.strip()])
 open("/out/gen/link.ld", "w").write(open("/in/ports/fnv-nx/link/guest.ld").read() + "\\n/* generated for %d rows */\\n" % n)
 '''
 # The toy root is a guest ELF in the sense of RECIPE.md "Link": ILP32, position independent, linked with the product's own link/guest.ld and
-# the product's own crt0 (rt/guest/crt0.s, read from the tree like guest.ld, so the fixture can never drift from the link contract): the
-# FNXG header at the first segment + 8, MOD0 behind it, the entry at the first segment. crt0 branches to __fnvnx_guest_entry, the entry every
-# guest program defines (in the product, runtime.c); the toy's program entry is f_a. The header is OS-layer code (os.S, an os_layer unit);
+# a crt0 fixture (tests/fixtures/toy_crt0.s: the header contract of link/guest.ld; the product crt0 is rt/guest's, a root of its own): the
+# FNXG header at the first segment + 8, MOD0 behind it, the entry at the first segment. crt0 branches to __fnvnx_image_entry, which the host toy root assigns itself (a host root has no link.entry): f_a. The header is OS-layer code (os.S, an os_layer unit);
 # HDR is the same as one assembler statement for the roots that have no os.S (MINI).
-CRT0 = (open(os.path.join(VERIFY, "..", "rt", "guest", "crt0.s")).read()
-        + "\n.text\n.global __fnvnx_guest_entry\n.set __fnvnx_guest_entry, f_a\n")
+CRT0 = open(os.path.join(VERIFY, "tests", "fixtures", "toy_crt0.s")).read() + "\n.text\n.set __fnvnx_image_entry, f_a\n"
 OS_NOLINK = ".text\n.globl os_svc\n.type os_svc,%function\nos_svc:\n svc #0\n ret\n.size os_svc,.-os_svc\n"
 HDR = "__asm__(%s);\n" % json.dumps(CRT0 + ".text\n")
 RECIPE = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
@@ -108,6 +103,7 @@ def make_repo(name, gen_extra="", rec=None, files=None, extra_roots=()):
     w(repo, "gen/gen.py", GEN.replace("@IMPORT@", imp).replace("@EXTRA@", ex or "0"))
     w(repo, "toy/build.json", json.dumps(rec or RECIPE, indent=1))
     w(repo, "verify/env.json", open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(VERIFY))), recipe.ENV_JSON)).read())   # the declared environment
+    w(repo, "verify/declared_sources.json", open(os.path.join(VERIFY, "declared_sources.json")).read())   # the pinned documents of the declared-machine table: the tree's own record, as every root has it
     w(repo, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [
         {"path": ROOT, "class": "product", "target": "host", "recipe": ROOT + "/build.json"},
         {"path": T + "gen", "class": "tool"}, {"path": T + "verify", "class": "tool"},
@@ -139,6 +135,11 @@ def make_guest_repo(name, gen_extra="", rec=None, files=None, extra_roots=(), im
     for r in ad["roots"]:
         if r["path"] == ROOT:
             r["target"] = "guest"
+    real = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))   # checkout root
+    have = {r["path"] for r in ad["roots"]}
+    for r in json.load(open(os.path.join(VERIFY, "admit.json")))["roots"]:   # the admitted root of every plugin file, as the tree under test admits it (a plugin source lies in an admitted root)
+        if r["path"] not in have and any(n == r["path"] or n.startswith(r["path"] + "/") for n in recipe.plugin_files(real)):
+            ad["roots"].append(r)
     w(repo, "verify/admit.json", json.dumps(ad))
     w(repo, "verify/guest_compiler.json", open(os.path.join(VERIFY, "guest_compiler.json")).read())
     if image:   # the guest link profile (script and libraries of every guest link) and the script it names
@@ -402,7 +403,55 @@ def main():
         ok3, k3, r3, d3 = run()
         check("determinism, one changed unit: exactly the stages with new keys executed", ok3 and 0 < r3 <= len(k3 - k1) < len(k3) and r3 < r1, (r3, len(k3 - k1), len(k3), r1, d3))
 
-    for fn in (gate_toy, gate_bad, gate_nd, gate_cases, gate_inc):
+    def shard_merge():
+        """RECIPE.md "Shards": `build --shard i/N` partitions the units by first-stage key, `store-merge` imports the shard stores, the unsharded build on the merge is all hits."""
+        rec = {k: v for k, v in RECIPE.items() if k != "link"}
+        files = {"toy/d%d.c" % i: '#include "toy.h"\nint f_d%d(void) { return TOY + %d; }\n' % (i, i) for i in range(6)}
+        sr = make_repo("shard", rec=rec, files=files)
+        n = 3
+        ref = recipe.build(sr, ROOT, BASE + "/sh-ref", BASE + "/sh-refout")
+        units = sorted(o["unit"] for o in ref["objects"])
+        check("shard toy root has >= 8 units", ref["status"] == "green" and len(units) >= 8, (ref["status"], len(units)))
+        parts = []
+        for i in range(n):
+            r = recipe.build(sr, ROOT, BASE + "/sh-s%d" % i, BASE + "/sh-o%d" % i, shard=(i, n))
+            check("shard %d/%d: green, no ELF, no test, its objects are its shard_units" % (i, n), r["status"] == "green" and r["elf"] is None and not r["tests"]
+                  and sorted(o["unit"] for o in r["objects"]) == sorted(r["shard_units"] or []), (r["status"], r.get("failure")))
+            parts.append(sorted(o["unit"] for o in r["objects"]))
+        flat = [u for p in parts for u in p]
+        check("shards are disjoint and cover the unit set", len(flat) == len(set(flat)) and sorted(flat) == units, (parts, units))
+        check("shard assignment is deterministic: a second shard-0 build gives the same units", sorted(o["unit"] for o in recipe.build(sr, ROOT, BASE + "/sh-s0", BASE + "/sh-o0b", shard=(0, n))["objects"]) == parts[0])
+        for i in range(n):
+            recipe.store_merge(BASE + "/sh-s%d" % i, BASE + "/sh-m")
+        m = recipe.build(sr, ROOT, BASE + "/sh-m", BASE + "/sh-mout")
+        check("merge of the shard stores: object hashes equal the unsharded build's", m["status"] == "green" and [o["sha256"] for o in m["objects"]] == [o["sha256"] for o in ref["objects"]]
+              and m["stage_keys"] == ref["stage_keys"], m.get("failure"))
+        check("the unsharded build on the merged store runs no unit stage (every unit a hit)", m["stages"]["run"] == 0, m["stages"])
+        # a forged record of the same key is red on merge and leaves the target unchanged
+        shutil.copytree(BASE + "/sh-s0", BASE + "/sh-forge", symlinks=True)
+        kd = BASE + "/sh-forge/keys"
+        k = sorted(os.listdir(kd))[0]
+        rp = "%s/%s/result.json" % (kd, k)
+        rec_ = json.load(open(rp))
+        rec_["rc"] = rec_["rc"] + 1
+        os.chmod(rp, 0o644)
+        open(rp, "wb").write(cas.canon(rec_))
+        before = sorted(os.listdir(BASE + "/sh-m/keys"))
+        try:
+            recipe.store_merge(BASE + "/sh-forge", BASE + "/sh-m")
+            got = None
+        except recipe.RecipeError as e:
+            got = " ".join(e.errors)
+        check("store-merge: a forged differing key record is red `store-merge: key <k> differs`", got and "store-merge: key %s differs" % k in got and sorted(os.listdir(BASE + "/sh-m/keys")) == before, got)
+        for bad in ("0/0", "3/3", "1/17", "x", "-1/2"):
+            try:
+                recipe.shard_spec(bad)
+                got = None
+            except recipe.RecipeError:
+                got = "red"
+            check("--shard %s is refused" % bad, got == "red")
+
+    for fn in (gate_toy, gate_bad, gate_nd, gate_cases, gate_inc, shard_merge):
         later(fn)
 
     # --- toy root, shared store: cold, then cached
@@ -436,7 +485,7 @@ def main():
         librec["include"] = []
         a_c = "int f_lib(void);\nint f_a(void) { return f_lib(); }\n"
         lr = make_repo("lr", rec=dict(RECIPE, generated=[], constants=None, include=[], units="all",
-                                      link=dict(RECIPE["link"], roots=[LIB])),
+                                      link=dict(RECIPE["link"])),
                        files={"toy/a.c": a_c, "toy/b.c": None, "toy/c.c": None, "toy/constants.tsv": None, "toy/inc/toy.h": None,
                               "lib/l.c": "int f_lib(void) { return 1; }\n", "lib/build.json": json.dumps(librec)})
         ad = json.load(open(os.path.join(lr, T + "verify/admit.json")))
@@ -445,7 +494,7 @@ def main():
         git(lr, "add", "-A")
         git(lr, "commit", "-q", "-m", "lib")
         x1 = recipe.build(lr, ROOT, LRS, BASE + "/lr1")
-        check("link roots: the image links the objects of the listed root (f_lib resolves)", x1["status"] == "green" and x1["elf"]
+        check("link roots: the image links the objects of the root that defines its undefined f_lib (the definer closure, no list)", x1["status"] == "green" and x1["elf"]
               and [r["root"] for r in x1.get("link_roots", [])] == [LIB], x1.get("failure"))
         w(lr, "lib/l.c", "int f_lib(void) { return 2; }\n")
         git(lr, "add", "-A")
@@ -454,14 +503,15 @@ def main():
         check("link roots: a change in the listed root changes the link key and the ELF", x2["status"] == "green"
               and x2["elf"]["sha256"] != x1["elf"]["sha256"] and set(x2["stage_keys"]) != set(x1["stage_keys"]), (x1["stage_keys"], x2["stage_keys"]))
         nolink = dict(json.load(open(os.path.join(lr, ROOT, "build.json"))))
-        nolink["link"] = dict(nolink["link"], roots=[])
-        w(lr, "toy/build.json", json.dumps(nolink))
+        ad = json.load(open(os.path.join(lr, T + "verify/admit.json")))
+        ad["roots"] = [r for r in ad["roots"] if r["path"] != LIB]       # no admitted root defines f_lib any more
+        w(lr, "verify/admit.json", json.dumps(ad))
         git(lr, "add", "-A")
-        git(lr, "commit", "-q", "-m", "no roots")
+        git(lr, "commit", "-q", "-m", "lib no longer admitted")
         x3 = recipe.build(lr, ROOT, LRS, BASE + "/lr3")
         check("link roots: without the root f_lib has no body and the link is red, never a silent zero", x3["status"] == "red", x3.get("failure"))
         ig = dict(nolink)
-        ig["link"] = dict(nolink["link"], roots=[LIB], flags=["-m", "aarch64linux32", "--unresolved-symbols=ignore-all"])
+        ig["link"] = dict(nolink["link"], flags=["-m", "aarch64linux32", "--unresolved-symbols=ignore-all"])
         w(lr, "toy/build.json", json.dumps(ig))
         git(lr, "add", "-A")
         git(lr, "commit", "-q", "-m", "ignore-all")
@@ -475,16 +525,14 @@ def main():
     later(link_roots)
 
     def host_in_guest_link():
-        """the plugin set is the target profile's (RECIPE.md "Plugins"): a host-profile object never enters a guest image, so a guest link.roots naming a host root is red"""
+        """a host-profile object never enters a guest image: a root of the host profile is no candidate of the definer closure of a guest image; and link.roots is a check error"""
         hp = make_repo("hg")
         roots = dict(recipe.load_admit(hp))
         roots[ROOT] = dict(roots[ROOT], target="guest")
         roots[LIB] = {"path": LIB, "class": "product", "target": "host", "recipe": LIB + "/build.json"}
+        check("target profile: a root of the host profile is no link candidate of a guest image", LIB not in recipe.link_candidates(roots, ROOT, "guest", hp), recipe.link_candidates(roots, ROOT, "guest", hp))
         e = recipe.check(mut(link=dict(RECIPE["link"], roots=[LIB])), ROOT, recipe.tracked(hp), roots, None, hp)
-        check("target profile: a guest image whose link.roots names a root of the host profile is red", any("link.roots" in x and "'host'" in x for x in e), e)
-        roots[ROOT] = dict(roots[ROOT], target="host")
-        e = recipe.check(mut(link=dict(RECIPE["link"], roots=[LIB])), ROOT, recipe.tracked(hp), roots, None, hp)
-        check("target profile: the same link of a host image has no target error", not any("link.roots" in x and "'host'" in x and "has target" in x for x in e), e)
+        check("link.roots is a check error: the members are derived", any("link.roots is derived" in x for x in e), e)
     later(host_in_guest_link)
 
     def declared_outputs():
@@ -498,24 +546,6 @@ def main():
         check("result outputs: a root declaring none has an empty map", recipe.build(make_repo("do0"), ROOT, BASE + "/ss-do", BASE + "/do2").get("outputs") == {})
     later(declared_outputs)
 
-    def include_rule():
-        """RECIPE.md "Include": root C includes B's header dir, B's recipe includes A's: C's unit include path holds A's dir without C naming it"""
-        d = tempfile.mkdtemp(prefix="inc-", dir=BASE)
-        for sub in ("a/include", "a2/include"):   # the carried dirs are checkout directories (generated output of another root is not carried)
-            os.makedirs(os.path.join(d, T + sub))
-        os.makedirs(d + "/b")
-        json.dump({"include": [T + "a/include", "/ext/private/include"]}, open(d + "/b/build.json", "w"))
-        os.makedirs(d + "/b2")
-        json.dump({"include": [T + "b2/include", T + "a2/include"]}, open(d + "/b2/build.json", "w"))
-        roots = {T + "c": {"class": "product", "target": "guest"}, T + "b": {"class": "product", "target": "guest", "recipe": "b/build.json"},
-                 T + "b2": {"class": "product", "target": "guest", "recipe": "b2/build.json"}, T + "a": {"class": "header"}}
-        inc = recipe.include_closure([T + "b/include"], T + "c", roots, d, "guest")
-        check("include closure: the include dirs of the root that ships the header are carried, repo dirs only, after the consumer's own", inc == [T + "b/include", T + "a/include"], inc)
-        inc = recipe.include_closure([T + "b2/include"], T + "c", roots, d, "guest")
-        check("include closure: a dir already named is not added twice, and the order is the recipe's", inc == [T + "b2/include", T + "a2/include"], inc)
-        check("include closure: a root's own include is not widened by itself", recipe.include_closure([T + "b/include"], T + "b", roots, d, "guest") == [T + "b/include"])
-        check("include closure: a root with no recipe for the unit's target carries nothing", recipe.include_closure([T + "b/include"], T + "c", roots, d, "host") == [T + "b/include"])
-    later(include_rule)
     LGS = BASE + "/ss-lg"
 
     def link_generated():
@@ -590,9 +620,9 @@ def main():
         rw = recipe.build(xrepo, ROOT, SS, BASE + "/xo2w", ext=ec)
     finally:
         recipe.cas.ingest, recipe.subprocess.run = real_ingest, real_run
-    check("external: a warm build makes 0 ingests of the external and runs no git read-tree/checkout/fetch",
-          rw["status"] == "green" and not [i for i in ingests if ec in i] and not [c for c in runs if c[:1] == ["git"] and ("checkout-index" in c or "read-tree" in c or "fetch" in c)],
-          (rw.get("failure"), [i for i in ingests if ec in i]))
+    check("external: a warm build ingests no whole external checkout (only the include subtrees a PP stage names) and runs no git read-tree/checkout/fetch",
+          rw["status"] == "green" and not [i for i in ingests if i.rstrip("/") == ec + "/" + commit + ".co"] and not [c for c in runs if c[:1] == ["git"] and ("checkout-index" in c or "read-tree" in c or "fetch" in c)],
+          (rw.get("failure"), [i for i in ingests if ec in i]))   # a PP stage ingests the subtrees its tokens name (pp_subtrees), never the whole checkout
     rv = recipe.build(xrepo, ROOT, BASE + "/store-v", BASE + "/xo2v", ext=ec)   # another store, same external cache: ingests once, no checkout
     check("external: a new store with the same cache ingests the checkout once and stores its own fact", rv["status"] == "green"
           and os.path.isfile(BASE + "/store-v/external-facts/%s-%s.json" % (commit, thash)), rv.get("failure"))
@@ -646,7 +676,7 @@ def main():
     print("INFO +%.1f s: external compiler builds done" % (time.time() - t_start))
     # --- the toy root in the LP64 ABI: ELF64 objects, no ELF (the link is the ILP32 guest ELF); the ILP32 toy (r1) has ELF32 objects and ELF
     t0 = time.time()
-    r64 = recipe.build(make_repo("toy64", rec=abi_rec("lp64")), ROOT, SS, BASE + "/out64")
+    r64 = recipe.build(make_repo("toy64", rec=abi_rec("lp64"), files={"toy/os.S": FILES["toy/os.S"]}), ROOT, SS, BASE + "/out64")   # the same sources as the linked ILP32 toy (its crt0, not the no-link OS layer)
     print("INFO toy LP64 build %.1f s, stages %s" % (time.time() - t0, r64.get("stages")))
     check("toy root builds green: ILP32 objects and ELF are ELF32, the LP64 objects are ELF64 (and no ELF)",
           r64["status"] == "green" and len(r64["objects"]) == 4 and r64["elf"] is None
@@ -729,11 +759,19 @@ def main():
     rfiles = list(recipe.tracked(rk)) + [T + n + "/h.h" for n in ("hdr_prod", "hdr_other", "hdr_tool", "hdr_doc")]
 
     def home(d):
-        return [e for e in recipe.check(mut(include=RECIPE["include"] + [T + d]), ROOT, rfiles, rr, None, rk) if "lies in no admitted header root" in e]
-    check("include dir in a product root of the same target accepted", not home("hdr_prod"), home("hdr_prod"))
+        return [e for e in recipe.check(mut(include=RECIPE["include"] + [T + d]), ROOT, rfiles, rr, None, rk) if "in no directory output of a root that this root `uses`" in e]
+    check("include dir in a product root of the same target, without a declared output and `uses`, rejected", len(home("hdr_prod")) == 1, home("hdr_prod"))
     check("include dir in a product root of the other target rejected", len(home("hdr_other")) == 1, home("hdr_other"))
     check("include dir in a tool root rejected", len(home("hdr_tool")) == 1, home("hdr_tool"))
     check("include dir in a doc root rejected", len(home("hdr_doc")) == 1, home("hdr_doc"))
+    # header home (class header): valid from every target, one rule (header_dirs and the include check)
+    hr = dict(rr, **{T + "hdr_hdr": {"path": T + "hdr_hdr", "class": "header"}})
+    hf = rfiles + [T + "hdr_hdr/h2.h"]
+    for tgt in ("guest", "host"):
+        ent = dict(hr[ROOT], target=tgt)
+        er = [e for e in recipe.check(mut(include=RECIPE["include"] + [T + "hdr_hdr"]), ROOT, hf, dict(hr, **{ROOT: ent}), None, rk) if "in no directory output of a root that this root `uses`" in e]
+        check("include dir in a header-class root, without a declared INCLUDE output and `uses`, rejected from a %s includer (the home is the declared output)" % tgt, len(er) == 1, er)
+        check("header_dirs of a %s root holds the header root" % tgt, T + "hdr_hdr" in recipe.header_dirs(mut(), ROOT, dict(hr, **{ROOT: ent}), rk))
     # one name, one file: two include dirs of one recipe holding a header of the same include-relative path are red
     rr2 = dict(rr, **{T + "hdr_prod2": {"path": T + "hdr_prod2", "class": "product", "target": own}})
     rf2 = rfiles + [T + "hdr_prod2/h.h", T + "hdr_prod2/g.h"]

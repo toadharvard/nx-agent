@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/lib/sha256/build.json ports/fnv-nx/link
-# reads: ports/fnv-nx/loader/build.json ports/fnv-nx/platform/build.json ports/fnv-nx/render/d3d9/build.json ports/fnv-nx/render/gl4/build.json
-# reads: ports/fnv-nx/render/nxgpu/build.json ports/fnv-nx/render/pair/build.json ports/fnv-nx/render/shaders/translator/build.json
-# reads: ports/fnv-nx/render/smscan/build.json ports/fnv-nx/rt/guest/build.json ports/fnv-nx/rt/guest/crt0.s ports/fnv-nx/rt/guest_main/build.json
+# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/link
 # reads: ports/fnv-nx/shim/build.json ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for the guest ELF link through verify/recipe.py (RECIPE.md "Link"): link.roots, link.libs, the options fixed by the rule and the
 `ldcheck` post stage (link/ldcheck.py). Toy product roots in temp git repos, built with the real compiler and linker of env.json in the real
@@ -105,6 +102,9 @@ def err_text(r):
     return "%s: %s" % (f.get("stage"), " | ".join(f.get("stderr", [])))
 
 
+LD = ("ld:" + ROOT, "ld:" + ROOT + ":select")    # the link stage; the member selection is its own stage in the derived link
+
+
 def main():
     subprocess.run(["git", "init", "-q", "--bare", BASE + "/artifacts.git"], check=True)
     os.environ["ARTIFACTS_URL"] = BASE + "/artifacts.git"
@@ -112,10 +112,10 @@ def main():
     LB = (LIB, (LIB_REC, {"l.c": "int f_b(void) { return 14; }\n"}))
 
     # (a) two product roots, one links the other
-    repo = mk("two", main_rec(roots=[LIB]), libs=[LB])
+    repo = mk("two", main_rec(), libs=[LB])
     r = build(repo, SS)
     check = TR.check
-    check("link.roots: two product roots, the second's objects are link inputs after the first's; green", r["status"] == "green" and r["elf"], err_text(r))
+    check("link members (derived): two product roots, the second's objects are link inputs after the first's; green", r["status"] == "green" and r["elf"], err_text(r))
     s = syms(r["elf"]["path"])
     check("the ELF defines f_a (own unit) before f_b (input root), crt0 at 0", s.get("f_a", 1) < s.get("f_b", 0) and s.get("__fnvnx_guest_start") == 0, s)
     w = words(r["elf"]["path"])
@@ -141,10 +141,10 @@ def main():
     r2 = build(repo, SS, BASE + "/o-two2")
     check("second build: every stage a cache hit, same ELF, same input digest", r2["stages"]["run"] == 0 and r2["elf"]["sha256"] == r["elf"]["sha256"]
           and digests(r2) == digests(r), r2["stages"])
-    bad = mk("two-red", main_rec(roots=[LIB]), libs=[(LIB, (LIB_REC, {"l.c": "int f_b(void) { return undeclared_thing; }\n"}))])
+    bad = mk("two-red", main_rec(), libs=[(LIB, (LIB_REC, {"l.c": "int f_b(void) { return undeclared_thing; }\n"}))])
     rb = build(bad, SS)
     check("an input root that is red makes the link red: stage ld:<root> naming the red input root", rb["status"] == "red"
-          and rb["failure"]["stage"] == "ld:" + ROOT and any(LIB in x for x in rb["failure"]["stderr"]) and rb["elf"] is None, err_text(rb))
+          and rb["failure"]["stage"] in LD and any(LIB in x for x in rb["failure"]["stderr"]) and rb["elf"] is None, err_text(rb))
 
     # (b) a weak undefined reference: the linker resolves it to 0 and drops it; the inputs' symbol tables show it
     W = {"toy/w.c": 'extern void wf(void) __attribute__((weak));\nvoid f_w(void) { if (wf) wf(); }\n', "toy/b.c": "int f_b(void) { return 1; }\n"}
@@ -155,25 +155,19 @@ def main():
     A = {"toy/r.c": '__asm__(".section .rodata\\n.balign 4\\n.word f_b\\n.text\\n");\n', "toy/b.c": "int f_b(void) { return 1; }\n"}
     rr = build(mk("abs32", main_rec(), A), SS)
     check("R_AARCH64_P32_ABS32 in .rodata: red (the linker refuses a read-only dynamic relocation, -z text), no ELF", rr["status"] == "red"
-          and rr["failure"]["stage"] in ("ld:" + ROOT, "ldcheck:" + ROOT) and rr["elf"] is None, err_text(rr))
+          and rr["failure"]["stage"] in LD + ("ldcheck:" + ROOT,) and rr["elf"] is None, err_text(rr))
     # (d) the crt0 header: wrong magic, and no crt0 at all
     B = {"toy/b.c": "int f_b(void) { return 1; }\n"}
     rm = build(mk("nomagic", main_rec(), dict(B, **{"toy/a.c": A_C.replace("0x47584e46", "0x12345678")})), SS)
     check("a missing FNXG magic: red at ldcheck:<root>, header id", rm["status"] == "red" and rm["failure"]["stage"] == "ldcheck:" + ROOT
           and any("header:" in x and "FNXG" in x for x in rm["failure"]["stderr"]), err_text(rm))
     rn = build(mk("nocrt0", main_rec(), dict(B, **{"toy/a.c": A_C.replace(TR.HDR, "")})), SS)
-    check("no crt0 header at all (no entry symbol): red", rn["status"] == "red" and rn["failure"]["stage"] in ("ld:" + ROOT, "ldcheck:" + ROOT), err_text(rn))
+    check("no crt0 header at all (no entry symbol): red", rn["status"] == "red" and rn["failure"]["stage"] in LD + ("ldcheck:" + ROOT,), err_text(rn))
 
     # (e) validation: cycle, self, link of an input root, not a product root, flags, libs
     def errs(rec, libs, name):
         repo = mk(name, rec, libs=libs)
         return recipe.check(rec, ROOT, recipe.tracked(repo), recipe.load_admit(repo), None, repo)
-    cyc = errs(main_rec(roots=[LIB]), [(LIB, (dict(LIB_REC, link=dict(TR.RECIPE["link"], roots=[ROOT])), {"l.c": "int f_b(void) { return 1; }\n"}))], "cycle")
-    check("link.roots: a cycle is a check error, listing the cycle", any("cycle" in e and ROOT in e and LIB in e for e in cyc), cyc)
-    check("link.roots: a root that links is no input root", any("has a link of its own" in e for e in cyc), cyc)
-    e2 = errs(main_rec(roots=[ROOT, T + "verify", LIB, LIB]), [LB], "badroots")
-    check("link.roots: itself, a tool root and a duplicate are errors, all listed at once",
-          any("the root itself" in e for e in e2) and any("is a tool root" in e and "product root" in e for e in e2) and any("listed twice" in e for e in e2), e2)
     e3 = errs(main_rec(flags=["-m", "aarch64linux32", "--gc-sections", "-e", "x"]), [], "flags")
     check("link.flags: only the emulation; --gc-sections and -e are errors", sum("not an emulation option" in e for e in e3) == 3 and
           any("--gc-sections" in e for e in e3) and any("-e is" in e or "-e " in e for e in e3), e3)
@@ -202,9 +196,9 @@ def main():
     check("elf facts: the definer of lib_fn (an undefined reference of a.c) is the archive member /ext/gl/lib/libtoy.a(t.o), ld's own name for it",
           {"symbol": "lib_fn", "definer": "/ext/gl/lib/libtoy.a(t.o)"} in lf["references"]["00-own:a.c"], lf["references"])
     rl2 = build(mk("libs-miss", dict(main_rec(libs=dict(libs, names=["nope"])), external=[ex]), L), SS)
-    check("link.libs: a library that is not there is a red ld:<root>", rl2["status"] == "red" and rl2["failure"]["stage"] == "ld:" + ROOT, err_text(rl2))
+    check("link.libs: a library that is not there is a red ld:<root>", rl2["status"] == "red" and rl2["failure"]["stage"] in LD, err_text(rl2))
     rl3 = build(mk("libs-none", main_rec(), L), SS)
-    check("without the library the same undefined reference is red (ld)", rl3["status"] == "red" and rl3["failure"]["stage"] == "ld:" + ROOT, err_text(rl3))
+    check("without the library the same undefined reference is red (ld)", rl3["status"] == "red" and rl3["failure"]["stage"] in LD, err_text(rl3))
     L2 = {"toy/a.c": TR.HDR + '#include "toy.h"\nint lib_fn(void);\nextern char _GLOBAL_OFFSET_TABLE_[];\nint f_a(void) { return lib_fn() + TOY + (int)(long)_GLOBAL_OFFSET_TABLE_; }\n'}
     rl4 = build(mk("libs-none-got", main_rec(), L2), SS)
     fu4 = (rl4.get("failed_units") or [{}])[0]
@@ -216,6 +210,7 @@ def main():
 
 
     # (k) kinds: exe and shared host images (LP64), and the target of the link
+    LP64FL = {"c": ["-O1", "-ffreestanding", "-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"], "cxx": [], "asm": []}
     def host_rec(kind, **kw):
         r = TR.mut(os_layer=[], constants=None, include=[ROOT + "/inc"], flags={"c": ["-O1", "-ffreestanding", "-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"],
                                                                        "cxx": [], "asm": []})
@@ -265,13 +260,13 @@ def main():
     open(BASE + "/so.c", "w").write("int so_fn(void) { return 5; }\n")
     subprocess.run([CC, "-shared", "-nostdlib", "-fPIC", "-o", so, BASE + "/so.c"], check=True)
     rs4b = build(mk("shared-unpinned", host_rec("shared", version_script="exp.map", libs={"system": [so]}), UND), SS)
-    check("kind shared: a system library no pinned package owns is red at ld:<root>, naming it", rs4b["status"] == "red" and rs4b["failure"]["stage"] == "ld:" + ROOT
+    check("kind shared: a system library no pinned package owns is red at ld:<root>, naming it", rs4b["status"] == "red" and rs4b["failure"]["stage"] in LD
           and any(so in x and "no package that env.json pins" in x for x in rs4b["failure"]["stderr"]), err_text(rs4b))
     # link.loader: the defined set of the declared loader root may stay undefined in a shared image
     LDR = T + "loader"
-    rs5 = build(mk("shared-loader", host_rec("shared", version_script="exp.map", loader=LDR), UND, libs=[(LDR, (LIB_REC, {"l.c": "int so_fn(void) { return 5; }\n"}))]), SS)
+    rs5 = build(mk("shared-loader", host_rec("shared", version_script="exp.map", loader=LDR), UND, libs=[(LDR, (dict(LIB_REC, flags=LP64FL), {"l.c": "int so_fn(void) { return 5; }\n"}))]), SS)
     check("kind shared: a name the declared loader root defines may stay undefined: green", rs5["status"] == "green", err_text(rs5))
-    rs6 = build(mk("shared-loader-other", host_rec("shared", version_script="exp.map", loader=LDR), UND, libs=[(LDR, (LIB_REC, {"l.c": "int other_fn(void) { return 5; }\n"}))]), SS)
+    rs6 = build(mk("shared-loader-other", host_rec("shared", version_script="exp.map", loader=LDR), UND, libs=[(LDR, (dict(LIB_REC, flags=LP64FL), {"l.c": "int other_fn(void) { return 5; }\n"}))]), SS)
     check("kind shared: a loader that does not define the name leaves it red at ldcheck:<root>", rs6["status"] == "red" and rs6["failure"]["stage"] == "ldcheck:" + ROOT
           and any("so_fn" in x for x in rs6["failure"]["stderr"]), err_text(rs6))
     e7 = errs(host_rec("shared"), [], "novs")
@@ -279,7 +274,7 @@ def main():
           and any("a pie" in e or "pie" in e for e in errs(main_rec(flags=["-m", "aarch64linux"]), [], "piemu")), e7)
     rt = build(mk("target", dict(main_rec(), flags=TR.RECIPE["flags"] and {"c": ["-O1", "-ffreestanding", "-fPIE"], "cxx": [], "asm": []}), {"toy/b.c": "int f_b(void) { return 1; }\n"}), SS)
     check("a link whose objects have another target (LP64 objects, ILP32 emulation): red, naming the object", rt["status"] == "red"
-          and rt["failure"]["stage"] == "ld:" + ROOT and any("a.c" in x and "target" in x for x in rt["failure"]["stderr"]), err_text(rt))
+          and rt["failure"]["stage"] in LD and any("a.c" in x and ("target" in x or "architecture" in x) for x in rt["failure"]["stderr"]), err_text(rt))
 
     # (m) link.libs archive of an external: the members the linker pulls are recorded (and kept as objects); an unused member is not
     def libpop(d, m1="int f_b(void) { return 21; }\n"):
@@ -337,28 +332,8 @@ def main():
                           "lp64b": {"flags": {"c": FL, "cxx": [], "asm": []}}})
     VF = {"l.c": "int f_b(void) { return 14; }\n"}
 
-    def image(name, emu, roots, cc=None):
-        r = dict(host_rec("exe"), link={"output": name + ".exe", "kind": "exe", "flags": ["-m", emu], "roots": roots})
-        r.pop("constants", None)
-        if cc:
-            r["compiler"] = cc
-        return r
-    IMG = {"toy/a.c": None, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None, "toy/link.ld": None,
-           "toy/e.c": "int f_b(void);\nint main(void) { f_b(); return 0; }\nint __libc_start_main(void *m) { return ((int (*)(void))m)(); }\nvoid abort(void) { for (;;) ; }\n"}
-    IB, IC = T + "imgx", T + "imgbad"
-    vrepo = mk("variants", image("toy", "aarch64linux", [VROOT + "@lp64"]), IMG,
-              libs=[(VROOT, (vlib, VF)), (IB, (dict(image("imgx", "elf_x86_64", [VROOT + "@x86"], X86), flags={"c": FL, "cxx": [], "asm": []}, include=[]), {"e.c": IMG["toy/e.c"]})),
-                    (IC, (dict(image("imgbad", "aarch64linux", [VROOT + "@x86"]), include=[]), {"e.c": IMG["toy/e.c"]}))],
-              classes={ROOT: "test", IB: "test", IC: "test"})
-    ra = build(vrepo, SS)
-    check("variants: image A (aarch64 LP64) links the lp64 variant of the root; green, the input is listed as root@lp64", ra["status"] == "green"
-          and [x["root"] for x in ra["link_roots"]] == [VROOT + "@lp64"] and TR.elf_class(ra["elf"]["path"]) == 64, err_text(ra))
-    rx = recipe.build(vrepo, IB, SS, BASE + "/o-imgx")
-    check("variants: image B (x86_64) links the x86 variant of the same root; green, e_machine 62",
-          rx["status"] == "green" and open(rx["elf"]["path"], "rb").read()[18:20] == (62).to_bytes(2, "little"), err_text(rx))
-    rbad = recipe.build(vrepo, IC, SS, BASE + "/o-imgbad")
-    check("variants: a wrong-target link (x86_64 objects into an aarch64 image) is red, naming the object and both targets", rbad["status"] == "red"
-          and rbad["failure"]["stage"] == "ld:" + IC and any("l.c" in x and "target" in x for x in rbad["failure"]["stderr"]), err_text(rbad))
+    IMG = {"toy/a.c": None, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None, "toy/link.ld": None}
+    vrepo = mk("variants", main_rec(), IMG, libs=[(VROOT, (vlib, VF))], classes={ROOT: "test"})
     vl = recipe.build(vrepo, VROOT + "@lp64", SS, BASE + "/o-vl")
     vb = recipe.build(vrepo, VROOT + "@lp64b", SS, BASE + "/o-vlb")
     v0 = recipe.build(vrepo, VROOT, SS, BASE + "/o-v0")
@@ -370,8 +345,6 @@ def main():
     adm = recipe.load_admit(vrepo)
     check("variants: the effective recipe replaces only the keys the variant names", recipe.load_recipe(vrepo, adm, VROOT + "@x86")["compiler"] == X86
           and recipe.load_recipe(vrepo, adm, VROOT + "@x86")["include"] == vlib["include"] and "variants" not in recipe.load_recipe(vrepo, adm, VROOT), "")
-    ev = errs(image("toy", "aarch64linux", [VROOT + "@nope"]), [(VROOT, (vlib, VF))], "novariant")
-    check("variants: link.roots naming a variant the root does not declare is a check error", any("no variant" in e for e in ev), ev)
     ev2 = recipe.check(dict(vlib, variants={"a b": {"flags": {}}, "c": {"link": {}}}), VROOT, recipe.tracked(vrepo), adm, None, vrepo)
     check("variants: a bad name or a key other than compiler/flags is a check error", any("variants must be" in e for e in ev2), ev2)
 
@@ -401,25 +374,6 @@ def main():
     bad_adm = dict(adm2, **{VROOT: dict(adm2[VROOT], variants={"nope": {"target": "host"}, "lp64": {"target": "mars"}})})
     eb = recipe.check(vlib, VROOT, recipe.tracked(vrepo), bad_adm, None, vrepo)
     check("variant target: an admit variant entry for an undeclared variant or an unknown target is a check error", any("variants must be" in e for e in eb), eb)
-    # the variant rule: a product image links base roots only; a variant is linked by a test root (class test) only
-    ep = recipe.check(image("toy", "aarch64linux", [VROOT + "@lp64"]), ROOT, recipe.tracked(repo2 := mk("varprod", image("toy", "aarch64linux", [VROOT + "@lp64"]), IMG, libs=[(VROOT, (vlib, VF))])),
-                      recipe.load_admit(repo2), None, repo2)
-    check("variants: a product root linking a flags variant root@NAME is red (only a test root links one)", any("is a flags variant" in e and "class test" in e for e in ep), ep)
-    adm_pt = recipe.load_admit(repo2)
-    adm_pt[VROOT] = dict(adm_pt[VROOT], variants={"lp64": {"target": adm_pt[ROOT]["target"], "recipe": adm_pt[VROOT]["recipe"]}})   # a per-target variant (admit.json recipe {guest, host}) of the image's own target
-    ept = recipe.check(image("toy", "aarch64linux", [VROOT + "@lp64"]), ROOT, recipe.tracked(repo2), adm_pt, None, repo2)
-    check("variants: a product image links the per-target variant of its own target (green)", not any("variant" in e for e in ept), ept)
-    repo3 = mk("vartest", image("toy", "aarch64linux", [VROOT + "@lp64"]), IMG, libs=[(VROOT, (vlib, VF))], classes={ROOT: "test"})
-    et = recipe.check(image("toy", "aarch64linux", [VROOT + "@lp64"]), ROOT, recipe.tracked(repo3), recipe.load_admit(repo3), None, repo3)
-    check("variants: a test root linking root@NAME is green", not any("flags variant" in e for e in et), et)
-    # a guest root links a pie: kind exe is host only
-    TR.w(repo3, "verify/admit.json", json.dumps(dict(json.load(open(repo3 + "/" + T + "verify/admit.json")),
-         roots=[dict(x, target="guest") if x["path"] == ROOT else x for x in json.load(open(repo3 + "/" + T + "verify/admit.json"))["roots"]])))
-    TR.git(repo3, "add", "-A")
-    TR.git(repo3, "commit", "-q", "-m", "guest")
-    eg = recipe.check(image("toy", "aarch64linux", [VROOT]), ROOT, recipe.tracked(repo3), recipe.load_admit(repo3), None, repo3)
-    check("link.kind exe on a root of target guest is refused (a guest links a pie)", any("link.kind exe is a host executable" in e for e in eg), eg)
-
     # (f) determinism: two cold builds, two stores, the same bytes
     c1 = recipe.build(repo, ROOT, BASE + "/cold1", BASE + "/oc1")
     c2 = recipe.build(repo, ROOT, BASE + "/cold2", BASE + "/oc2")

@@ -4,7 +4,7 @@
     ldcheck.py --elf LINKED.elf --objs DIR --out DIR --name NAME.elf
 
 verify/recipe.py links the guest ELF as the stage `ld:<root>` (fixed options, RECIPE.md "Link"): the root's objects and the objects of
-its `link.roots` whole, the compiler external's guest libraries searched as the gcc driver searches them.  This tool judges the result
+its derived link members whole (recipe.definer_closure), the compiler external's guest libraries searched as the gcc driver searches them.  This tool judges the result
 from ELF symbol tables only (no linker message, no map file, no name or text pattern), the rules of the former link/ld.py:
   1. no undefined symbol in the output's `.symtab`;
   2. every name the input objects reference or define (the symbol tables of every `*.o` below --objs, weak references included) is defined in the output;

@@ -2,7 +2,7 @@
 """Gate "onedef" (fnvnx-gate/1): one definition, one source. A name, a COMDAT group, a source file and a header each come from ONE place.
     python3 -I gate_onedef.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/onedef.json
 Rules (by symbol tables and file content, never by a name's text):
-  (a) Per linked image (a root with a `link`; its objects are those of the root itself and of every root of its `link.roots`): a GLOBAL or WEAK
+  (a) Per linked image (a root with a `link`; its objects are those of the root itself and of every root of its derived link members, ld's archive selection, recipe.link_candidates): a GLOBAL or WEAK
       definition outside every COMDAT group comes from exactly ONE root. Two roots defining one name is `dup-def`, whatever the binding (strong, weak):
       the linker's choice between them would pick a body by link order.
   (b) COMDAT groups of an image. The instances of one signature that come from different roots must be one definition: one digest of the group's
@@ -138,7 +138,10 @@ def main():
             rec = recipe.load_recipe(repo, adm, spec)
             if not (isinstance(rec, dict) and rec.get("link")):
                 continue
-            group = [spec] + list(rec["link"].get("roots", []))
+            res, _ = gate_build.ensure(spec, cache, repo)     # the image's link members are derived by the build (ld's archive selection, recipe.link_candidates), never written
+            if res["status"] == "red":      # a red link has no derived members to judge (a strong duplicate makes the member selection itself red): the image is red, so is this gate
+                raise recipe.RecipeError(["%s: build red (stage %s)" % (spec, res["failure"]["stage"])])
+            group = [spec] + [x["root"] for x in res.get("link_roots", [])]
             ii, ifs = judge_image(spec, image_parts(spec, group, cache, repo))
             items, finds = items + ii, finds + ifs
     except recipe.RecipeError as e:

@@ -73,16 +73,16 @@ def load(path, gate_cache=None):
 class Gpu:
     """one renderer library bound to one machine; at most one live Gpu per process (the library holds one GL context)"""
 
-    def __init__(self, path, machine, profile="handheld", on_present=None, on_first_call=None, on_exit=None):
+    def __init__(self, path, machine, profile="handheld", on_present=None, on_first_call=None, *, on_exit):
         if profile not in SIZES:
             raise GpuError("profile must be handheld or docked, got %r" % (profile,))
         with open(path, "rb") as f:
             self.sha256 = hashlib.sha256(f.read()).hexdigest()
         self.m, self.presents, self.first_call, self.hook_present, self.hook_first = machine, 0, None, on_present, on_first_call
         shim, self.lib = load(path)
-        # on_exit(code): a host object ended the process through fnvnx_reach_violation with the full 32-bit code; it
-        # ends the process itself. None registers no exit callback: the violation then ends the process with status 1 after its log line.
-        self._cbs = (PTR_CB(self._guest_ptr), PRESENT_CB(self._present), EXIT_CB(on_exit) if on_exit else EXIT_CB())   # alive as long as the library may call them
+        # on_exit(code), required: the host exit slot. A host object ended the process through fnvnx_reach_violation with the full 32-bit
+        # code; the callback ends the process itself. The protocol sets it before the renderer loads: there is no state without it.
+        self._cbs = (PTR_CB(self._guest_ptr), PRESENT_CB(self._present), EXIT_CB(on_exit))   # alive as long as the library may call them
         shim.nxgl4_shim_set(*self._cbs)
         lib = self.lib
         err = ctypes.create_string_buffer(256)

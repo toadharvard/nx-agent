@@ -4,7 +4,7 @@
 It is recipe.semantics_for(pinned driver, language, origin=ORIGIN) on the flags.semantics of verify/guest_compiler.json: the one function the recipe uses
 for every guest compile stage (the set of the root's origin, native = common, lifted = common + lifted_extra, minus the flags the pinned driver itself
 says do not apply to the language). There is no second list.
-The pinned compiler is fetched by the pin of guest_compiler.json (recipe.fetch_externals) into DIR (default $GATE_CACHE, else ~/.cache/fnvnx-guest-flags).
+The pinned compiler is fetched by the pin of guest_compiler.json (recipe.fetch_externals) into the verdict store (GATE_CACHE, required).
 Exit 1 with the reason on stderr if the pinned compiler cannot be fetched."""
 import argparse
 import json
@@ -26,8 +26,8 @@ def flags_for(lang, cache, origin="native"):
     os.makedirs(os.path.join(cache, "store"), exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="gflags-") as ws:   # the checkout is scratch: nothing is left behind
         got = recipe.fetch_externals([ext], os.path.join(cache, "store"), os.path.join(cache, "external"), ws)
-        pre = got[ext["name"]]["host"] + "/bin/aarch64-linux-gnu-"
-        return recipe.semantics_for(pre + ("g++" if lang == "c++" else "gcc"), KIND[lang], origin=origin)
+        cc, cxx = recipe.pin_drivers()    # the drivers derive from the one triplet (targets.drivers), never spelled here
+        return recipe.semantics_for(got[ext["name"]]["host"] + "/" + (cxx if lang == "c++" else cc), KIND[lang], origin=origin)
 
 
 def main(argv=None):

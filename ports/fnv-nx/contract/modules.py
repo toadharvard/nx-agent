@@ -425,7 +425,7 @@ def exe_slots(exe):
     return {exe.base + slot: (dll, name) for dll, items in exe.import_directory() for slot, name in items}
 
 
-def run(exe_path, bridge_path, dirs, out, declared_path, c_out=None, keys_out=None, keys_tsv_out=None, data_out=None, keys_h_out=None, modules_tsv_out=None):
+def run(exe_path, bridge_path, dirs, out, declared_path, c_out=None, keys_out=None, keys_tsv_out=None, data_out=None, keys_h_out=None, modules_tsv_out=None, imported_out=None):
     exe = PE(exepin.load_exe(exe_path), exepin.NAME)
     brows, _ = iat.bridge_rows(bridge_path)
     bridge = [(r['dll'], r['name'], r['conv'], r['ordinal']) for r in brows]
@@ -497,11 +497,11 @@ def run(exe_path, bridge_path, dirs, out, declared_path, c_out=None, keys_out=No
     if c_out:   # the loader's module table, one file (loader/src/modules.c reads fnvnx_modules, fnvnx_module_count)
         with open(c_out, 'w', newline='\n') as fh:
             fh.write(c_source(order))
-    if keys_out or keys_tsv_out or data_out or keys_h_out:   # the one key table (iat.py's rules): the loader's C table, the lifter stubs' keys.tsv, the loader start rule S4's iat_data.tsv
+    if keys_out or keys_tsv_out or data_out or keys_h_out or imported_out:   # the one key table (iat.py's rules): the loader's C table, the lifter stubs' keys.tsv, the loader start rule S4's iat_data.tsv
         brows, table_id = iat.bridge_rows(bridge_path)
         imported = iat.imported_set(brows, list(exe_slots(exe).values()) + [(d, n) for m in order for d, items in m.imports for _, n in items])
         txt, datarows, _ = iat.c_source(brows, table_id, imported)
-        for path, text in ((keys_out, txt), (keys_tsv_out, iat.keys_tsv(brows, table_id)), (data_out, iat.data_tsv(datarows, table_id)), (keys_h_out, iat.key_header(brows, table_id))):
+        for path, text in ((keys_out, txt), (keys_tsv_out, iat.keys_tsv(brows, table_id)), (data_out, iat.data_tsv(datarows, table_id)), (keys_h_out, iat.key_header(brows, table_id)), (imported_out, iat.imported_tsv(brows, table_id, imported))):
             if path:
                 with open(path, 'w', newline='\n') as fh:
                     fh.write(text)
@@ -520,12 +520,13 @@ def main():
     ap.add_argument('--keys-h-out', help='import_keys.h: FNVNX_KEY(dll, name), the key of every function row as a compile-time constant (iat.key_header)')
     ap.add_argument('--modules-tsv-out', help='modules.tsv: the module set, bases and entries (the boot input of the emulator stage)')
     ap.add_argument('--keys-tsv-out', help='keys.tsv: the import keys for the lifter stubs (iat.keys_tsv)')
+    ap.add_argument('--imported-out', help='imported.tsv: the keys.tsv rows that an import slot of a loaded image (the exe and every module) binds to (iat.imported_tsv)')
     ap.add_argument('--data-out', help='iat_data.tsv: the data rows of the import table (build fact of the loader start rule S4, iat.data_tsv)')
     a = ap.parse_args()
-    if not (a.out_dir or a.c_out or a.keys_c_out or a.keys_tsv_out or a.data_out or a.keys_h_out or a.modules_tsv_out):
+    if not (a.out_dir or a.c_out or a.keys_c_out or a.keys_tsv_out or a.data_out or a.keys_h_out or a.modules_tsv_out or a.imported_out):
         ap.error('one of --out-dir, --c-out, --keys-c-out, --keys-tsv-out, --data-out, --keys-h-out, --modules-tsv-out is required')
     try:
-        text, bad = run(a.exe, a.bridge, a.dir, a.out_dir, a.declared, a.c_out, a.keys_c_out, a.keys_tsv_out, a.data_out, a.keys_h_out, a.modules_tsv_out)
+        text, bad = run(a.exe, a.bridge, a.dir, a.out_dir, a.declared, a.c_out, a.keys_c_out, a.keys_tsv_out, a.data_out, a.keys_h_out, a.modules_tsv_out, a.imported_out)
         if not a.out_dir:   # tables-only mode: a slot without a provider is the `iat` gate's finding (it needs the tables), not a failure of the generator
             bad = False
     except (StageError, ValueError, OSError, exepin.ExePinError) as e:

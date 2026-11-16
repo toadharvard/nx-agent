@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/toolchain/names/sympair_kinds.inc
 """Synthetic check of l2sections.py: every parser branch and error, and the ELF read when the cross tools exist."""
 import os, shutil, subprocess, sys, tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import l2sections as L
+INC = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'toolchain', 'names', 'sympair_kinds.inc')
+L.set_kinds(INC)
 
 fails = []
 
@@ -28,6 +31,8 @@ check('sympair', L.parse_sympair(SP, 'o.o'), [('_Z1fv', '?f@@YAXXZ', 'func', 'de
                                               ('_ZN1AC1Ev', '??0A@@QAE@XZ', 'ctor.c1', 'ref'), ('_Z3gccv', '', 'nodecor:localscope', 'def')])
 check('sympair empty', L.parse_sympair(b'', 'o.o'), [])
 err('sympair 3 fields', L.parse_sympair, SP + b'a\tb\tfunc\n', 'line 5')
+check('sympair noemit', L.parse_sympair(b'_Z1gv\t?g@@YAXXZ\tnoemit\tref\n', 'o.o'), [('_Z1gv', '?g@@YAXXZ', 'noemit', 'ref')])
+err('sympair noemit no name', L.parse_sympair, b'_Z1gv\t\tnoemit\tref\n', 'without an MSVC name')
 err('sympair kind', L.parse_sympair, b'a\tb\tfunx\tdef\n', 'unknown kind')
 err('sympair unnamed no reason', L.parse_sympair, b'a\t\tnodecor:\tdef\n', 'unknown kind')
 err('sympair defref', L.parse_sympair, b'a\tb\tfunc\tdefx\n', 'neither def nor ref')
@@ -87,6 +92,18 @@ import re as _re
 _inc = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'toolchain', 'names', 'sympair_kinds.inc')).read()
 check('the kind set is the plugin definition (one X(name, "meaning") per kind of sympair_kinds.inc), noemit among them',
       (L.KINDS == frozenset(_re.findall(r'^\s*(?:#define FNVNX_SYMPAIR_KINDS\(X\)\s*\\\n\s*)?X\(([^,()\s]+),', _inc, _re.M)) and 'noemit' in L.KINDS and len(L.KINDS) == _inc.count('X(') - 1), True)
+_t = tempfile.mkdtemp(prefix='kinds-')
+_x = os.path.join(_t, 'k.inc')
+open(_x, 'w').write(open(INC).read().rstrip('\n') + '\n  X(zz_newkind, "a kind added to the table")\n')
+L.set_kinds(_x)
+check('a kind added to the table is accepted (the table is the only source of the set)', L.parse_sympair(b'_Z1fv\t?f@@YAXXZ\tzz_newkind\tref\n', 'o.o') == [('_Z1fv', '?f@@YAXXZ', 'zz_newkind', 'ref')], True)
+L.set_kinds(INC)
+shutil.rmtree(_t, ignore_errors=True)
+try:
+    L.parse_sympair(b'_Z1fv\t?f@@YAXXZ\tzz_newkind\tref\n', 'o.o')
+    fails.append('a kind of no table is accepted')
+except ValueError:
+    pass
 check('sympair noemit row', L.parse_sympair(b'_Z1fv\t?f@@YAXXZ\tnoemit\tref\n', 'o.o'), [('_Z1fv', '?f@@YAXXZ', 'noemit', 'ref')])
 err('sympair noemit needs the cl name', L.parse_sympair, b'_Z1fv\t\tnoemit\tref\n', 'without an MSVC name')
 
