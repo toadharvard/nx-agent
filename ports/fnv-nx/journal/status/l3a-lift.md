@@ -1284,3 +1284,10 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Rule: one core and two ABI entries. The bare C entry raises at the guest call site of the import bridge that runs the native body, then leaves the native frames through the imp.h nframe non-local exit.
   - Test: a msvcrttest image, try/catch(bad_alloc), built over the real roots.
 - bottleneck: L2's two plugin rules, which block lift/rt → the 7-symbol table → the ELF.
+
+## 2026-11-16 02:05: bare _CxxThrowException (w8, base3 f891b0c5a)
+- One body, `cxx_throw`, with two entries: the guest stdcall import and the bare C ABI. The bare entry raises at the import's guest call site (`fnvl_native_guest`, factored out of fnvl_backend_main) and leaves through the single non-local exit `fnvl_native_exit` (enter.cc).
+- A latent ABI defect is closed: fnvl_raise_rec was defined with 9 parameters and called with 7. Now there is one declaration in rt/fnvl.h, and `fnvl_raise_rec_ctx` is the full form.
+- The test, cx8 (new(0xFFFFFFF0) in a catch(bad_alloc&)), is being written. msvcrttest native takes the real platform/crt root. It builds once lift/rt is green.
+- base3: w28's head (the exec form) is being merged, for lift/sdm.
+- bottleneck: L2's two plugin rules (dispatch atomics, order setjmp/longjmp), which block lift/rt → the 7-symbol table → the ELF.
