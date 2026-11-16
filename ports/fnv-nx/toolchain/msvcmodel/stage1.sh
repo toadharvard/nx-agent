@@ -7,7 +7,7 @@
 #                            compiler's configured paths are absolute; stage 2 puts them back at the same paths, see rt.sh)
 set -euo pipefail
 # a red stage names its failing command, the first error lines of every build log and its tail, the error lines last (the recipe keeps the last 20 stderr lines; the logs are redirected, a failure inside them is otherwise silent)
-trap 'rc=$?; echo "stage failed: line $LINENO: $BASH_COMMAND (exit $rc)" >&2; { echo "== PATH=$PATH"; ls -l /usr/bin/gcc /usr/bin/gcc-13 /usr/bin/x86_64-linux-gnu-gcc /usr/bin/x86_64-linux-gnu-gcc-13 /usr/bin/g++ /usr/bin/ar /usr/bin/as /usr/bin/ld; command -v gcc gcc-13 g++ ar as ld; gcc --version | head -1; } >&2 2>&1 || true; for l in /scratch/w/*.log /scratch/w/b-gcc/config.log; do [ -f "$l" ] && { echo "== $l: tail"; tail -n 30 "$l"; echo "== $l: first error lines"; grep -n -m 20 -i "error" "$l" || true; } >&2; done; exit $rc' ERR
+trap 'rc=$?; echo "stage failed: line $LINENO: $BASH_COMMAND (exit $rc)" >&2; { echo "== PATH=$PATH"; ls -l /usr/bin/gcc /usr/bin/gcc-13 /usr/bin/x86_64-linux-gnu-gcc /usr/bin/x86_64-linux-gnu-gcc-13 /usr/bin/g++ /usr/bin/ar /usr/bin/as /usr/bin/ld; command -v gcc gcc-13 g++ ar as ld; gcc --version | head -1; } >&2 2>&1 || true; for l in /scratch/w/b-gcc/config.log /scratch/w/*.log; do [ -f "$l" ] && { echo "== $l: tail"; tail -n 30 "$l"; echo "== $l: first error lines"; grep -n -m 20 -i "error" "$l" || true; } >&2; done; exit $rc' ERR
 # ---- the constants of this step: every path the step touches (the sandbox's mounts: inputs /in/N in the order of build.json, externals are declared inputs too, {external, path}); a change of the mounts is a change of these lines alone ----
 GCC_TARBALL=/in/4                               # input 4: {external gcc-src, path gcc-13.3.0.tar.xz}, the GNU tarball
 MSVC_PATCH=/in/2                                # input 2: toolchain/msvcmodel/msvcmodel.patch   (input 1 is this script)
@@ -17,9 +17,9 @@ SCRATCH=/scratch                                # the writable scratch directory
 mkdir -p "$SCRATCH/tmp"; export TMPDIR=$SCRATCH/tmp   # the writable temp directory: /tmp is read-only in the sandbox (config.guess, make and the compilers write temp files)
 # the host (build) tools are named by their real files: the unversioned names (gcc, cc, c++) are update-alternatives links, a postinst product that an unpacked deb does not have
 # the default tool names the build tools call by themselves (make recipes, generated scripts) are the same alternatives links: one directory of them, made from the real files the debs
-# unpack, first in PATH: gcc g++ cc c++ from gcc-13/g++-13 and every x86_64-linux-gnu-NAME binutils tool as NAME unless the root has NAME itself
+# unpack, first in PATH: awk and nawk from mawk (its postinst alternatives), gcc g++ cc c++ from gcc-13/g++-13 and every x86_64-linux-gnu-NAME binutils tool as NAME unless the root has NAME itself
 HB=$SCRATCH/hostbin; mkdir -p "$HB"
-for pair in gcc:gcc-13 cc:gcc-13 g++:g++-13 c++:g++-13; do ln -sf "/usr/bin/${pair#*:}" "$HB/${pair%%:*}"; done
+for pair in gcc:gcc-13 cc:gcc-13 g++:g++-13 c++:g++-13 awk:mawk nawk:mawk; do ln -sf "/usr/bin/${pair#*:}" "$HB/${pair%%:*}"; done
 for t in /usr/bin/x86_64-linux-gnu-*; do n=${t##*/x86_64-linux-gnu-}; case "$n" in *-[0-9]*) continue ;; esac; [ -e "/usr/bin/$n" ] || [ -e "$HB/$n" ] || ln -s "$t" "$HB/$n"; done
 export PATH="$HB:$PATH"
 export CC=gcc-13 CXX=g++-13 CPP="gcc-13 -E" CC_FOR_BUILD=gcc-13 CXX_FOR_BUILD=g++-13 AR=x86_64-linux-gnu-ar RANLIB=x86_64-linux-gnu-ranlib NM=x86_64-linux-gnu-nm
