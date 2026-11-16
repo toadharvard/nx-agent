@@ -35,27 +35,6 @@
   ],
   "asm": []
  },
- "include": [
-  "ports/fnv-nx/lib/sha256/include",
-  "ports/fnv-nx/render/shaders/translator/gen",
-  "ports/fnv-nx/render/shaders/translator/include",
-  "/ext/mojoshader",
-  "/ext/mojoshader/profiles"
- ],
- "units": "all",
- "generated": [
-  {
-   "tool": "ports/fnv-nx/render/total/translator_gen/gen_sources.py",
-   "args": [
-    "/ext/mojoshader",
-    "/out/gen/sources.txt"
-   ],
-   "inputs": [],
-   "outputs": [
-    "gen/sources.txt"
-   ]
-  }
- ],
  "sources": "gen/sources.txt",
  "external": [
   {
@@ -68,19 +47,6 @@
   }
  ],
  "link": null,
- "outputs": {
-  "INCLUDE": "include"
- },
- "uses": [
-  {
-   "root": "ports/fnv-nx/lib/sha256",
-   "output": "INCLUDE"
-  },
-  {
-   "root": "ports/fnv-nx/render/shaders/total",
-   "output": "sm_rows"
-  }
- ],
  "include_uses": [
   {
    "root": "ports/fnv-nx/render/shaders/total",
