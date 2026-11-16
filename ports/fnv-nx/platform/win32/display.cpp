@@ -246,8 +246,8 @@ int sm(int i)
 }
 } // namespace
 
-FNVNX_EXPORT("user32.dll", "GetSystemMetrics", GetSystemMetrics, "func");
 extern "C" int GetSystemMetrics(int i) { return sm(i); }
+FNVNX_EXPORT("user32.dll", "GetSystemMetrics", GetSystemMetrics, "func");
 
 /* ---- EnumDisplayDevicesA */
 namespace {
@@ -258,7 +258,6 @@ struct dispdev { uint32_t cb; char name[32], string[128]; uint32_t flags; char i
 #define ADAPTER_NAME "\\\\.\\DISPLAY1"
 #define MONITOR_CLASS "{4d36e96e-e325-11ce-bfc1-08002be10318}"
 } // namespace
-FNVNX_EXPORT("user32.dll", "EnumDisplayDevicesA", EnumDisplayDevicesA, "func");
 extern "C" BOOL EnumDisplayDevicesA(LPCSTR dev, DWORD i, void *out, DWORD flags)
 {
     dispdev *d = (dispdev *)out;
@@ -286,6 +285,7 @@ extern "C" BOOL EnumDisplayDevicesA(LPCSTR dev, DWORD i, void *out, DWORD flags)
     strcpy(d->key, "\\Registry\\Machine\\System\\CurrentControlSet\\Control\\Class\\" MONITOR_CLASS "\\0000");
     return TRUE;
 }
+FNVNX_EXPORT("user32.dll", "EnumDisplayDevicesA", EnumDisplayDevicesA, "func");
 
 /* ---- ChangeDisplaySettingsA */
 namespace {
@@ -306,7 +306,6 @@ uint32_t rd32(const uint8_t *p, unsigned off) { uint32_t v; memcpy(&v, p + off, 
 
 } // namespace
 
-FNVNX_EXPORT("user32.dll", "ChangeDisplaySettingsA", ChangeDisplaySettingsA, "func");
 extern "C" LONG ChangeDisplaySettingsA(void *devmode, DWORD flags)
 {
     flags = W32_DW(flags);
@@ -351,3 +350,4 @@ extern "C" LONG ChangeDisplaySettingsA(void *devmode, DWORD flags)
         fnvnx_app_display_change(fnvnx_display_w(), fnvnx_display_h());
     return SUCCESSFUL;
 }
+FNVNX_EXPORT("user32.dll", "ChangeDisplaySettingsA", ChangeDisplaySettingsA, "func");

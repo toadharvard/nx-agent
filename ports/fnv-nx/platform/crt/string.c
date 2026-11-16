@@ -17,7 +17,6 @@
 static inline int lower(int c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
 static inline int upper(int c) { return c >= 'a' && c <= 'z' ? c - 32 : c; }
 
-FNVNX_EXPORT("msvcrt.dll", "_stricmp", _stricmp, "func");
 /* ---- comparisons (the "C" locale: ASCII folding to lower case, as MSVC's _stricmp does) */
 int _stricmp(const char *a, const char *b)
 {
@@ -27,8 +26,8 @@ int _stricmp(const char *a, const char *b)
             return x - y;
     }
 }
+FNVNX_EXPORT("msvcrt.dll", "_stricmp", _stricmp, "func");
 
-FNVNX_EXPORT("msvcrt.dll", "_strnicmp", _strnicmp, "func");
 int _strnicmp(const char *a, const char *b, size_t n)
 {
     for (; n; n--, a++, b++) {
@@ -38,12 +37,12 @@ int _strnicmp(const char *a, const char *b, size_t n)
     }
     return 0;
 }
+FNVNX_EXPORT("msvcrt.dll", "_strnicmp", _strnicmp, "func");
 
 
 
 
 
-FNVNX_EXPORT("msvcrt.dll", "_strdup", _strdup, "func");
 char *_strdup(const char *s)
 {
     if (!s)
@@ -52,6 +51,7 @@ char *_strdup(const char *s)
     char *d = (char *)malloc(n);
     return d ? (char *)memcpy(d, s, n) : NULL;
 }
+FNVNX_EXPORT("msvcrt.dll", "_strdup", _strdup, "func");
 
 
 
@@ -60,7 +60,6 @@ char *_strdup(const char *s)
 
 
 
-FNVNX_EXPORT("msvcrt.dll", "wcslen", fnvnx_wcslen16, "func");
 size_t fnvnx_wcslen16(const unsigned short *s)
 {
     size_t n = 0;
@@ -68,6 +67,7 @@ size_t fnvnx_wcslen16(const unsigned short *s)
         n++;
     return n;
 }
+FNVNX_EXPORT("msvcrt.dll", "wcslen", fnvnx_wcslen16, "func");
 
 
 /* ---- integer <-> string */
@@ -93,11 +93,11 @@ static char *utoa_base(unsigned long long v, char *buf, int radix, int neg)
     return buf;
 }
 
-FNVNX_EXPORT("msvcrt.dll", "_itoa", _itoa, "func");
 /* MSVC: a negative value is written with '-' only in radix 10; other radices print the two's complement */
 char *_itoa(int v, char *b, int r) { return r == 10 && v < 0 ? utoa_base(0u - (unsigned)v, b, r, 1) : utoa_base((unsigned)v, b, r, 0); }
-FNVNX_EXPORT("msvcrt.dll", "_ultoa", _ultoa, "func");
+FNVNX_EXPORT("msvcrt.dll", "_itoa", _itoa, "func");
 char *_ultoa(unsigned long v, char *b, int r) { return utoa_base((uint32_t)v, b, r, 0); }
+FNVNX_EXPORT("msvcrt.dll", "_ultoa", _ultoa, "func");
 
 
 
@@ -120,20 +120,4 @@ int _vsnprintf(char *buf, size_t n, const char *fmt, va_list ap)
     }
     return fnvnx_msvc_bound(buf, n, fnvnx_msvc_format(buf, n, fmt, ap));
 }
-
-int _snprintf(char *buf, size_t n, const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    int r = _vsnprintf(buf, n, fmt, ap);
-    va_end(ap);
-    return r;
-}
-
-
-
-
-
-
-
 

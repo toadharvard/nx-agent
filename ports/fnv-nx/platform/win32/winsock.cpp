@@ -329,7 +329,6 @@ bool parse_ip(const char *s, uint32_t *out)
 uint32_t bswap(uint32_t v) { return (v >> 24) | ((v >> 8) & 0xFF00) | ((v << 8) & 0xFF0000) | (v << 24); }
 }  // namespace
 
-FNVNX_EXPORT("ws2_32.dll", "WSAStartup", fnvnx_ws2_WSAStartup, "func");
 extern "C" int fnvnx_ws2_WSAStartup(WORD ver, void *data)
 {
     unsigned v = ver & 0xFFFF;
@@ -346,7 +345,7 @@ extern "C" int fnvnx_ws2_WSAStartup(WORD ver, void *data)
     os_unlock(&g_lk);
     return 0;
 }
-FNVNX_EXPORT("ws2_32.dll", "WSACleanup", fnvnx_ws2_WSACleanup, "func");
+FNVNX_EXPORT("ws2_32.dll", "WSAStartup", fnvnx_ws2_WSAStartup, "func");
 extern "C" int fnvnx_ws2_WSACleanup(void)
 {
     os_lock(&g_lk);
@@ -358,12 +357,12 @@ extern "C" int fnvnx_ws2_WSACleanup(void)
     os_unlock(&g_lk);
     return ok ? 0 : fail(10093);
 }
-FNVNX_EXPORT("ws2_32.dll", "WSAGetLastError", fnvnx_ws2_WSAGetLastError, "func");
+FNVNX_EXPORT("ws2_32.dll", "WSACleanup", fnvnx_ws2_WSACleanup, "func");
 extern "C" int fnvnx_ws2_WSAGetLastError(void) { return (int)GetLastError(); }
-FNVNX_EXPORT("ws2_32.dll", "WSASetLastError", fnvnx_ws2_WSASetLastError, "func");
+FNVNX_EXPORT("ws2_32.dll", "WSAGetLastError", fnvnx_ws2_WSAGetLastError, "func");
 extern "C" void fnvnx_ws2_WSASetLastError(int e) { SetLastError((DWORD)e); }
+FNVNX_EXPORT("ws2_32.dll", "WSASetLastError", fnvnx_ws2_WSASetLastError, "func");
 
-FNVNX_EXPORT("ws2_32.dll", "socket", fnvnx_ws2_socket, "func");
 extern "C" UINT_PTR fnvnx_ws2_socket(int af, int type, int proto)
 {
     if (!started()) return ~(UINT_PTR)0;
@@ -383,7 +382,7 @@ extern "C" UINT_PTR fnvnx_ws2_socket(int af, int type, int proto)
     if (!s) { close(fd); SetLastError(10024); return ~(UINT_PTR)0; }
     return s;
 }
-FNVNX_EXPORT("ws2_32.dll", "closesocket", fnvnx_ws2_closesocket, "func");
+FNVNX_EXPORT("ws2_32.dll", "socket", fnvnx_ws2_socket, "func");
 extern "C" int fnvnx_ws2_closesocket(UINT_PTR s)
 {
     Sock k;
@@ -391,7 +390,7 @@ extern "C" int fnvnx_ws2_closesocket(UINT_PTR s)
     with(s, [](Sock &x) { close(x.fd); x = Sock{ 0, 0, NULL, 0, 0 }; });   /* the selection dies with the slot; SO_LINGER is the host's */
     return 0;
 }
-FNVNX_EXPORT("ws2_32.dll", "bind", fnvnx_ws2_bind, "func");
+FNVNX_EXPORT("ws2_32.dll", "closesocket", fnvnx_ws2_closesocket, "func");
 extern "C" int fnvnx_ws2_bind(UINT_PTR s, const void *a, int len)
 {
     Sock k; sockaddr_in h;
@@ -400,7 +399,7 @@ extern "C" int fnvnx_ws2_bind(UINT_PTR s, const void *a, int len)
     if (int w = net_verdict(OP_BIND, reach_of(h.sin_addr))) return fail(w);
     return ::bind(k.fd, (sockaddr *)&h, sizeof h) < 0 ? fail_errno() : 0;
 }
-FNVNX_EXPORT("ws2_32.dll", "listen", fnvnx_ws2_listen, "func");
+FNVNX_EXPORT("ws2_32.dll", "bind", fnvnx_ws2_bind, "func");
 extern "C" int fnvnx_ws2_listen(UINT_PTR s, int backlog)
 {
     Sock k;
@@ -409,7 +408,7 @@ extern "C" int fnvnx_ws2_listen(UINT_PTR s, int backlog)
     with(s, [](Sock &x) { x.f |= F_LISTEN; });
     return 0;
 }
-FNVNX_EXPORT("ws2_32.dll", "accept", fnvnx_ws2_accept, "func");
+FNVNX_EXPORT("ws2_32.dll", "listen", fnvnx_ws2_listen, "func");
 extern "C" UINT_PTR fnvnx_ws2_accept(UINT_PTR s, void *addr, int *len)
 {
     Sock k;
@@ -427,7 +426,7 @@ extern "C" UINT_PTR fnvnx_ws2_accept(UINT_PTR s, void *addr, int *len)
     if (addr && len) { from_host(h, addr); *len = 16; }
     return n;
 }
-FNVNX_EXPORT("ws2_32.dll", "connect", fnvnx_ws2_connect, "func");
+FNVNX_EXPORT("ws2_32.dll", "accept", fnvnx_ws2_accept, "func");
 extern "C" int fnvnx_ws2_connect(UINT_PTR s, const void *a, int len)
 {
     Sock k; sockaddr_in h;
@@ -439,7 +438,7 @@ extern "C" int fnvnx_ws2_connect(UINT_PTR s, const void *a, int len)
     if (e == EINPROGRESS) { with(s, [](Sock &x) { x.f |= F_CONNECTING; }); return fail(10035); }   /* Winsock: WSAEWOULDBLOCK */
     return fail(map_errno(e));
 }
-FNVNX_EXPORT("ws2_32.dll", "send", fnvnx_ws2_send, "func");
+FNVNX_EXPORT("ws2_32.dll", "connect", fnvnx_ws2_connect, "func");
 extern "C" int fnvnx_ws2_send(UINT_PTR s, const char *b, int n, int flags)
 {
     Sock k; int hf;
@@ -454,7 +453,7 @@ extern "C" int fnvnx_ws2_send(UINT_PTR s, const char *b, int n, int flags)
     if (e == EAGAIN || e == EWOULDBLOCK) with(s, [](Sock &x) { x.f |= F_WR_BLOCKED; });
     return fail(map_errno(e));
 }
-FNVNX_EXPORT("ws2_32.dll", "recv", fnvnx_ws2_recv, "func");
+FNVNX_EXPORT("ws2_32.dll", "send", fnvnx_ws2_send, "func");
 extern "C" int fnvnx_ws2_recv(UINT_PTR s, char *b, int n, int flags)
 {
     Sock k; int hf;
@@ -468,7 +467,7 @@ extern "C" int fnvnx_ws2_recv(UINT_PTR s, char *b, int n, int flags)
         return fail(10060);   /* a blocking socket that would block has run into its SO_RCVTIMEO: WSAETIMEDOUT */
     return r < 0 ? fail(map_errno(e)) : (int)r;
 }
-FNVNX_EXPORT("ws2_32.dll", "setsockopt", fnvnx_ws2_setsockopt, "func");
+FNVNX_EXPORT("ws2_32.dll", "recv", fnvnx_ws2_recv, "func");
 /* setsockopt: Winsock's option set at SOL_SOCKET (0xFFFF), IPPROTO_IP (0), IPPROTO_TCP (6) and IPPROTO_UDP (17).
  * Rules (MSDN setsockopt): optval NULL or optlen below the option's size: WSAEFAULT; a level that is none of those: WSAEINVAL;
  * an option that is unknown, get-only, or not supported on the socket: WSAENOPROTOOPT; a value outside its range: WSAEINVAL.
@@ -602,6 +601,7 @@ extern "C" int fnvnx_ws2_setsockopt(UINT_PTR s, int level, int opt, const char *
         with(s, [excl_set](Sock &x) { if (excl_set) x.f |= F_EXCL; else x.f &= ~F_EXCL; });
     return 0;
 }
+FNVNX_EXPORT("ws2_32.dll", "setsockopt", fnvnx_ws2_setsockopt, "func");
 /* wsock32!setsockopt (Winsock 1.1, WSOCK32 ordinal 21): its own thunk, not a forward to ws2_32. The values of the IP_ option numbers differ between
  * winsock.h and winsock2.h, so the option number of level IPPROTO_IP is remapped before the ws2_32 call. This is exactly
  * wine-9.0:dlls/wsock32/socket.c:WS1_setsockopt (wsock32.spec: `21 stdcall setsockopt(long long long ptr long) WS1_setsockopt`) over
@@ -625,12 +625,11 @@ static int wsock32_remap_optname(int level, int optname)
     default: return optname;
     }
 }
-FNVNX_EXPORT("wsock32.dll", "setsockopt", fnvnx_wsock32_setsockopt, "func");
 extern "C" int fnvnx_wsock32_setsockopt(UINT_PTR s, int level, int optname, const char *optval, int optlen)
 {
     return fnvnx_ws2_setsockopt(s, level, wsock32_remap_optname(level, optname), optval, optlen);
 }
-FNVNX_EXPORT("ws2_32.dll", "ioctlsocket", fnvnx_ws2_ioctlsocket, "func");
+FNVNX_EXPORT("wsock32.dll", "setsockopt", fnvnx_wsock32_setsockopt, "func");
 extern "C" int fnvnx_ws2_ioctlsocket(UINT_PTR s, long cmd, unsigned long *arg)
 {
     Sock k;
@@ -666,7 +665,7 @@ extern "C" int fnvnx_ws2_ioctlsocket(UINT_PTR s, long cmd, unsigned long *arg)
     }
     return fail(10022);
 }
-FNVNX_EXPORT("ws2_32.dll", "select", fnvnx_ws2_select, "func");
+FNVNX_EXPORT("ws2_32.dll", "ioctlsocket", fnvnx_ws2_ioctlsocket, "func");
 extern "C" int fnvnx_ws2_select(int, void *r, void *w, void *x, const void *tvp)
 {
     if (!started()) return -1;
@@ -714,7 +713,7 @@ extern "C" int fnvnx_ws2_select(int, void *r, void *w, void *x, const void *tvp)
         if (sets[t]) { memcpy(sets[t]->arr, keep[t], kc[t] * sizeof(UINT_PTR)); sets[t]->count = kc[t]; total += (int)kc[t]; }
     return total;
 }
-FNVNX_EXPORT("ws2_32.dll", "__WSAFDIsSet", fnvnx_ws2_fdisset, "func");
+FNVNX_EXPORT("ws2_32.dll", "select", fnvnx_ws2_select, "func");
 extern "C" int fnvnx_ws2_fdisset(UINT_PTR s, void *set)
 {
     ws_set *f = (ws_set *)set;
@@ -722,7 +721,7 @@ extern "C" int fnvnx_ws2_fdisset(UINT_PTR s, void *set)
         if (f->arr[i] == s) return 1;
     return 0;
 }
-FNVNX_EXPORT("ws2_32.dll", "WSAAsyncSelect", fnvnx_ws2_WSAAsyncSelect, "func");
+FNVNX_EXPORT("ws2_32.dll", "__WSAFDIsSet", fnvnx_ws2_fdisset, "func");
 extern "C" int fnvnx_ws2_WSAAsyncSelect(UINT_PTR s, HWND h, UINT msg, long ev)
 {
     Sock k;
@@ -739,25 +738,25 @@ extern "C" int fnvnx_ws2_WSAAsyncSelect(UINT_PTR s, HWND h, UINT msg, long ev)
     });
     return 0;
 }
+FNVNX_EXPORT("ws2_32.dll", "WSAAsyncSelect", fnvnx_ws2_WSAAsyncSelect, "func");
 
-FNVNX_EXPORT("ws2_32.dll", "htons", fnvnx_ws2_htons, "func");
 extern "C" unsigned short fnvnx_ws2_htons(unsigned short v) { return (unsigned short)((v >> 8) | (v << 8)); }
-FNVNX_EXPORT("ws2_32.dll", "ntohs", fnvnx_ws2_ntohs, "func");
+FNVNX_EXPORT("ws2_32.dll", "htons", fnvnx_ws2_htons, "func");
 extern "C" unsigned short fnvnx_ws2_ntohs(unsigned short v) { return (unsigned short)((v >> 8) | (v << 8)); }
-FNVNX_EXPORT("ws2_32.dll", "inet_addr", fnvnx_ws2_inet_addr, "func");
+FNVNX_EXPORT("ws2_32.dll", "ntohs", fnvnx_ws2_ntohs, "func");
 extern "C" unsigned long fnvnx_ws2_inet_addr(const char *s)
 {
     uint32_t v;
     return s && parse_ip(s, &v) ? (unsigned long)bswap(v) : 0xFFFFFFFFul;
 }
-FNVNX_EXPORT("ws2_32.dll", "inet_ntoa", fnvnx_ws2_inet_ntoa, "func");
+FNVNX_EXPORT("ws2_32.dll", "inet_addr", fnvnx_ws2_inet_addr, "func");
 extern "C" char *fnvnx_ws2_inet_ntoa(unsigned long a)
 {
     static __thread char buf[16];
     snprintf(buf, sizeof buf, "%u.%u.%u.%u", (unsigned)(a & 255), (unsigned)((a >> 8) & 255), (unsigned)((a >> 16) & 255), (unsigned)((a >> 24) & 255));
     return buf;
 }
-FNVNX_EXPORT("ws2_32.dll", "gethostname", fnvnx_ws2_gethostname, "func");
+FNVNX_EXPORT("ws2_32.dll", "inet_ntoa", fnvnx_ws2_inet_ntoa, "func");
 extern "C" int fnvnx_ws2_gethostname(char *b, int n)
 {
     if (!started()) return -1;
@@ -765,7 +764,7 @@ extern "C" int fnvnx_ws2_gethostname(char *b, int n)
     if (!b || !GetComputerNameA(b, &len)) return fail(10014);   /* WSAEFAULT: the name does not fit */
     return 0;
 }
-FNVNX_EXPORT("ws2_32.dll", "gethostbyname", fnvnx_ws2_gethostbyname, "func");
+FNVNX_EXPORT("ws2_32.dll", "gethostname", fnvnx_ws2_gethostname, "func");
 extern "C" void *fnvnx_ws2_gethostbyname(const char *name)
 {
     static __thread struct { ws_hostent h; char name[256]; char *alias[1]; char *list[2]; uint8_t ad[1][4]; } t;
@@ -799,3 +798,4 @@ extern "C" void *fnvnx_ws2_gethostbyname(const char *name)
     t.h = ws_hostent{ t.name, t.alias, 2, 4, t.list };
     return &t.h;
 }
+FNVNX_EXPORT("ws2_32.dll", "gethostbyname", fnvnx_ws2_gethostbyname, "func");

@@ -296,7 +296,8 @@ class Gen:
 
 def main():
     spec_path, rows_path, words_path, out = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-    from contract import proto   # the one decoder of MSVC decorated names (platform declares contract in admit.json `imports`)
+    sys.path.insert(0, sys.argv[6])   # the directory of the declared inputs contract/proto.py and contract/store.py (mounted by the stage)
+    import proto   # the one decoder of MSVC decorated names
     spec = json.load(open(spec_path))
     os.makedirs(out, exist_ok=True)
     # the return letter of every thunk is a column of the bridge rows (bridgefacts/com/comrows.py derives it once)

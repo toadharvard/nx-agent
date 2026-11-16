@@ -39,16 +39,16 @@ static uintptr_t ror(uintptr_t v, unsigned r)
     return r ? (v >> r) | (v << (W - r)) : v;
 }
 
-FNVNX_EXPORT("kernel32.dll", "EncodePointer", EncodePointer, "func");
 extern "C" LPVOID EncodePointer(LPVOID p)
 {
     uintptr_t c = cookie();
     return (LPVOID)ror((uintptr_t)p ^ c, (unsigned)(c % W));
 }
+FNVNX_EXPORT("kernel32.dll", "EncodePointer", EncodePointer, "func");
 
-FNVNX_EXPORT("kernel32.dll", "DecodePointer", DecodePointer, "func");
 extern "C" LPVOID DecodePointer(LPVOID p)
 {
     uintptr_t c = cookie();
     return (LPVOID)(ror((uintptr_t)p, (unsigned)(W - c % W)) ^ c);
 }
+FNVNX_EXPORT("kernel32.dll", "DecodePointer", DecodePointer, "func");

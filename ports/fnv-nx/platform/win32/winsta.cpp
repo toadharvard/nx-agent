@@ -42,13 +42,12 @@ static HANDLE object_handle(HANDLE *slot, int type)
     return h;
 }
 
-FNVNX_EXPORT("user32.dll", "GetProcessWindowStation", GetProcessWindowStation, "func");
 extern "C" HANDLE GetProcessWindowStation(void) { return object_handle(&g_winsta, W32_WINSTA); }
+FNVNX_EXPORT("user32.dll", "GetProcessWindowStation", GetProcessWindowStation, "func");
 
 /* the process's desktop handle (the one desktop of the interactive station) */
 extern "C" HANDLE fnvnx_default_desktop(void) { return object_handle(&g_desktop, W32_DESKTOP); }
 
-FNVNX_EXPORT("user32.dll", "GetUserObjectInformationA", GetUserObjectInformationA, "func");
 extern "C" BOOL GetUserObjectInformationA(HANDLE h, int index, void *info, DWORD len, LPDWORD needed)
 {
     len = W32_DW(len);
@@ -92,3 +91,4 @@ extern "C" BOOL GetUserObjectInformationA(HANDLE h, int index, void *info, DWORD
         memcpy(info, buf, n);
     return TRUE;
 }
+FNVNX_EXPORT("user32.dll", "GetUserObjectInformationA", GetUserObjectInformationA, "func");
