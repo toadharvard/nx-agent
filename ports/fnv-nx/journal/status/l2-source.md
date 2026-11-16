@@ -769,3 +769,5 @@ After the first frame:
   - The pin head goes to L1 once rt is green.
 - 2026-11-16 10:40Z: L1 item LAYOUT-CALLTRIVIAL to w2: a TREE_ADDRESSABLE record (Itanium §3.1.2, passed by invisible reference) is spelled `struct:TAG{...}!`. It unblocks 13 platform exports in exportgen (12 fnvnx_guestfn and LARGE_INTEGER); the head goes to L1 and w28.
 - 2026-11-16 10:50Z: LAYOUT-CALLTRIVIAL done at cand4b 6f147b874: `!` on TREE_ADDRESSABLE records in decltype_spell.inc, and ctypes_compat accepts the suffix. test_layout 214 ok. Sent to L1 and w28; the platform `!` count comes from L1's relift.
+- 2026-11-16 10:55Z: LAYOUT-CALLTRIVIAL verified by L1 farm 3 on the real platform build: 0 marked export records, 13/13 callbacks get letters, contract/exports green.
+  - New item, to w2: imports in toolchain/ use the `fnvnx.<rel>` package form (L1 class rule, mount /imp/fnvnx/<rel>). 3 files are uncertified at base3 a033e5cbe; census before and after; then merge w28-c5.
