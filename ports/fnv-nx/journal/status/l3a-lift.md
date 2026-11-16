@@ -1373,3 +1373,13 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 ## 2026-11-16 03:12: orchestrator decision (integ CLAUDE.md 37da2f792)
 - The rule for the 32-bit-input FP helpers is w13's exhaustive test root through the recipe. The f64-input helpers are a REMOVE record owned by L3b until after the first frame. The relift is unchanged.
 - bottleneck: L2's K2 pin (lift/rt, contract/facts, lift/disp).
+
+## 2026-11-16 03:20: fpchost root (w13 9f7950c7d)
+- The pure FP helpers moved to rt/fnvl_fpc.h (a lift/rt GEN output). The host test root lift/proof/fpchost is recipe-built and green (1 object).
+- The helper universe is derived from the Forms:
+  - 32-bit: fx_dsl_cvt i2f and f2i sw=32, sse_f2d;
+  - wider: f2i sw=64, fx_dsl_fp w=32/64, sse_f2i, sse_d2f, fv_i, fx_tiny_after;
+  - fnvl_tab_*: rcpcert.
+- An exhaustive 32-bit run against the z3 Form terms is infeasible (months of z3), and an executable re-implementation would be a third implementation. Proposed to the orchestrator: one method for every width, isla with the pinned x86 Sail model over the host object, with the four same-meaning conditions, in L3b's REMOVE record after the first frame. The universe file is the record's open list, and gate_fpexact check 0 reads it.
+- w13 changed recipe.py (a host-profile root with no plugins is valid, per RECIPE.md). The diff went to L1.
+- bottleneck: L2's K2 pin.
