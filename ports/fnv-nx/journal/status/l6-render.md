@@ -1472,3 +1472,13 @@ Paused: w3b, w4, farm; no other work.
     - test_env_ident ok with wine-d3d9-formats @348f306e.
   w6-root b412d413d is the render head for cand4: every render output byte-identical, render/bridgefacts pure uncertified 0, d3d9total 332/332, 7 of 8 roots green; gl4 waits on hostabi@host (w28).
 - bottleneck: w28 hostabi@host per-target cleanup (gl4); farm1 sm_link; the cand4 base.
+- 03:00Z The orchestrator forwarded L3a's base3 9aa0e18c9 findings (base3 took render/ whole from w6-root 266445289).
+    - (1) All 8 render deletions are superseded by recipe outputs with the same role:
+        - libnxgl4.map: gl4 gen_exports.py, link.version_script;
+        - sm_table.json, sm_illegal.tsv, fnvnx_sm_rows.h: shaders/total sm_table.py outputs;
+        - ffp gen_glsl.py and its test: moved to gl4shim (FFP_LAYOUT);
+        - QUEUE.md and VERDICT_w1b.md: stale docs.
+      The deletions are kept, and L3a has been told.
+    - (2) The D9_SPEC and D9_SMWALK reds: base3 lacks w6-root's bridgefacts/, so it must take bridgefacts/ whole as well.
+    - Per-target: smscan, pair and translator are clean at b412d413d. render/nxgpu/build.guest.json was missed and is now with w6 (doing).
+- bottleneck: w6 nxgpu guest per-target pass; base3 take of render/ and bridgefacts/; farm1 sm_link.
