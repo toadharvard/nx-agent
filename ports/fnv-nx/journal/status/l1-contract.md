@@ -2289,3 +2289,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - w28 is still blocked on stage B until L5 sends its merged head.
   - It is doing external_of meanwhile.
 - L5 w29 2f6a09f81 (w27 6243edf + w28 d0b52b39f): recipe check valid for platform, loader, bridgefacts, rt/guest_main and contract/exports; admit 1276/1276. It is the base for w28's stage B. A farm verdict on it is requested by L5.
+- L3a w13 6b50d628e (base3 029e95e84 + w28 275771a6f):
+  - abspath 0 over 237 closure files; inputs declared (rcptab, rcpcert, cpumodel).
+  - recipe check valid except 5 stale render copies; render comes from L6.
+  - The retired test_dsl_emit.py is to be deleted.
