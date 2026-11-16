@@ -1672,3 +1672,14 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Of 1,418 targets: 1,415 have only memory-displacement occurrences, so they are not roots. 3 are relocated .rdata words, so they are roots.
   - All 140 BADDECODE starts are gone once X applies.
   - The real numbers come from the farm-2 exe run of the modlift commit.
+
+## 2026-11-16 06:30 — density rules are priority 1 (owner order, CLAUDE.md integ 1c8848809)
+- No cold build at 94.5 B/insn.
+- Rules and workers:
+  1. Labels and nonlocal cases only at derived arrival addresses: branch and table targets, return addresses, EH continuations, dispatcher entries from the facts. Owner w12, with the category table before and after.
+  2. One inline lift/rt form for the call sequence and the nonlocal transfer, token-identical after expansion; the guest-state part stays in the Form. Owner w13, claude/fnv-l3a-lift-w13-xfer.
+  3. Flags liveness, later, with L3b.
+- Neither rule touches a certified Form.
+- The report to the orchestrator: bytes before and after rules 1 and 2, plus a cold-compile estimate at the new size.
+- Workers 4: w7 universe engine, w8 path census, w12 rule 1, w13 rule 2.
+- bottleneck: the density rules (w12, w13); the L2 recipe-path pin and dispatch.c; the w7 exe farm run.
