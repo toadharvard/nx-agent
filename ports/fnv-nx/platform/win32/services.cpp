@@ -282,7 +282,7 @@ static int g_steam_nregs, g_steam_cap;
  * the pipe to the client (HSteamPipe, 0 = none) is never opened. */
 static int g_steam_pipe;
 
-FNVNX_EXPORT("steam_api.dll", "SteamAPI_Shutdown", SteamAPI_Shutdown, "func");
+FNVNX_EXPORT("galaxywrp.dll", "SteamAPI_Shutdown", SteamAPI_Shutdown, "func");
 /* SteamAPI_Shutdown. Steamworks SDK steam_api.h / doc/api/steam_api#SteamAPI_Shutdown: "Shuts down the Steamworks API, releasing the
  * pointers and memory"; the call is valid in the uninitialised state (nothing to release). Releases the pipe to the client (none) and marks
  * the API uninitialised; the registrations belong to their objects (they unregister themselves). */
@@ -293,7 +293,7 @@ extern "C" void SteamAPI_Shutdown(void)
     os_unlock(&g_steam_lock);
 }
 
-FNVNX_EXPORT("steam_api.dll", "SteamAPI_RunCallbacks", SteamAPI_RunCallbacks, "func");
+FNVNX_EXPORT("galaxywrp.dll", "SteamAPI_RunCallbacks", SteamAPI_RunCallbacks, "func");
 /* SteamAPI_RunCallbacks. steam_api.h / doc/api/steam_api#SteamAPI_RunCallbacks: "Dispatches callbacks and call results to all of the
  * registered listeners" - those come from the client over the pipe; without a pipe (SteamAPI_Init failed) nothing is queued, so nothing is
  * dispatched and no registered object is touched. */
@@ -306,7 +306,7 @@ extern "C" void SteamAPI_RunCallbacks(void)
         return;
 }
 
-FNVNX_EXPORT("steam_api.dll", "SteamAPI_RegisterCallback", SteamAPI_RegisterCallback, "func");
+FNVNX_EXPORT("galaxywrp.dll", "SteamAPI_RegisterCallback", SteamAPI_RegisterCallback, "func");
 /* SteamAPI_RegisterCallback (steam_api.h, steam_api_internal.h CCallbackBase: the Steamworks callback registry, the function the
  * STEAM_CALLBACK / CCallback<> constructors call): adds the (object, callback id) pair to the registry. The registry is independent of the
  * connection to the client (the objects register before SteamAPI_Init is called), so it is the real list, not a constant. */
@@ -330,7 +330,7 @@ extern "C" void SteamAPI_RegisterCallback(void *cb, int id)
     os_unlock(&g_steam_lock);
 }
 
-FNVNX_EXPORT("steam_api.dll", "SteamAPI_UnregisterCallback", SteamAPI_UnregisterCallback, "func");
+FNVNX_EXPORT("galaxywrp.dll", "SteamAPI_UnregisterCallback", SteamAPI_UnregisterCallback, "func");
 /* SteamAPI_UnregisterCallback (steam_api.h; the CCallbackBase destructor calls it): removes every registration of the object; an object
  * with none is a no-op. */
 extern "C" void SteamAPI_UnregisterCallback(void *cb)

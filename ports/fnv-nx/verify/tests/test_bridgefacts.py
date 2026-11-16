@@ -31,8 +31,10 @@ check("it declares the COM rows, COM spec, COM words, d3d9 rows and the import b
 u = recipe.load_recipe(repo, roots, "ports/fnv-nx/loader").get("uses") or []
 check("ports/fnv-nx/loader takes the import bridge table BRIDGE through uses", {"root": BF, "output": "BRIDGE"} in u, u)
 plat = recipe.load_recipe(repo, roots, "ports/fnv-nx/platform")
-ins = [i for g in plat["generated"] for i in g["inputs"] if isinstance(i, str)]
-check("ports/fnv-nx/platform reads the msvcrt names by the tracked path of the tool root", BF + "/crt/msvcrt_names.tsv" in ins, ins[:12])
+with open(os.path.join(repo, "ports/fnv-nx/platform/imports.in.json")) as fh:
+    nt = json.load(fh).get("name_table")
+check("ports/fnv-nx/platform names the msvcrt name table (empty: every msvcrt export is a record; the lookup tables are generated from exports.tsv) by the tracked path of the tool root", nt == {"root": BF, "path": "crt/msvcrt_names.tsv"}, nt)
+check("no platform generate step reads the name table", not any(BF + "/crt/msvcrt_names.tsv" in str(g["inputs"]) for g in plat["generated"]))
 check("no consumer root owns a copy of the inputs (spec, name table): the old paths are gone",
       not any(os.path.exists(os.path.join(repo, "ports/fnv-nx", p)) for p in ("platform/com/com_spec.json", "platform/crt/msvcrt_names.tsv", "platform/com/spec_extract.py")))
 # the tool root's inputs are tracked files (a generate input by repo-relative path; recipe.check, run by load_recipe above, judges the declaration)

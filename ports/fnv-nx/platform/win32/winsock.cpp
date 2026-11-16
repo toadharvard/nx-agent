@@ -602,6 +602,34 @@ extern "C" int fnvnx_ws2_setsockopt(UINT_PTR s, int level, int opt, const char *
         with(s, [excl_set](Sock &x) { if (excl_set) x.f |= F_EXCL; else x.f &= ~F_EXCL; });
     return 0;
 }
+/* wsock32!setsockopt (Winsock 1.1, WSOCK32 ordinal 21): its own thunk, not a forward to ws2_32. The values of the IP_ option numbers differ between
+ * winsock.h and winsock2.h, so the option number of level IPPROTO_IP is remapped before the ws2_32 call. This is exactly
+ * wine-9.0:dlls/wsock32/socket.c:WS1_setsockopt (wsock32.spec: `21 stdcall setsockopt(long long long ptr long) WS1_setsockopt`) over
+ * wine-9.0:dlls/wsock32/socket.c:_remap_optname:
+ *   level IPPROTO_IP (0): 2 -> 9 (IP_MULTICAST_IF), 3 -> 10 (IP_MULTICAST_TTL), 4 -> 11 (IP_MULTICAST_LOOP), 5 -> 12 (IP_ADD_MEMBERSHIP),
+ *   6 -> 13 (IP_DROP_MEMBERSHIP), 7 -> 4 (IP_TTL), 8 -> 3 (IP_TOS), 9 -> 14 (IP_DONTFRAGMENT); any other number, and every other level, passes unchanged.
+ * Wine's FIXME on an unknown IP option number is a log line only (the result is the unchanged number): the platform keeps no Wine log channel, so the
+ * branch carries no line. The call is the platform's own ws2_32 setsockopt (fnvnx_ws2_setsockopt), whose result is returned as it is. */
+static int wsock32_remap_optname(int level, int optname)
+{
+    if (level != 0) return optname;                 /* IPPROTO_IP */
+    switch (optname) {
+    case 2: return 9;
+    case 3: return 10;
+    case 4: return 11;
+    case 5: return 12;
+    case 6: return 13;
+    case 7: return 4;
+    case 8: return 3;
+    case 9: return 14;
+    default: return optname;
+    }
+}
+FNVNX_EXPORT("wsock32.dll", "setsockopt", fnvnx_wsock32_setsockopt, "func");
+extern "C" int fnvnx_wsock32_setsockopt(UINT_PTR s, int level, int optname, const char *optval, int optlen)
+{
+    return fnvnx_ws2_setsockopt(s, level, wsock32_remap_optname(level, optname), optval, optlen);
+}
 FNVNX_EXPORT("ws2_32.dll", "ioctlsocket", fnvnx_ws2_ioctlsocket, "func");
 extern "C" int fnvnx_ws2_ioctlsocket(UINT_PTR s, long cmd, unsigned long *arg)
 {
