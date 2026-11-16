@@ -1,0 +1,153 @@
+symbol	class	referencing_roots(count)	first_objects	defined_by	owner_if_d_or_e
+AddDevice	a	platform/os:1;rt/guest:1	platform/os/sock_guest.c;rt/guest/fs.c	pinned runtime external: libsysbase.a	
+_CxxThrowException	d	platform/crt:1	platform/crt/cxx_bodies.cpp	msvcrt import (L3 EH); declared extern in platform/crt/cxx_bodies.cpp, defined nowhere	L3a (lifter runtime, L3 EH)
+_GLOBAL_OFFSET_TABLE_	e	render/gl4:16	render/gl4/gl4_blit.c;render/gl4/gl4_check.c;render/gl4/gl4_core.c	defined by the linker; gl4 (host root) links no ELF in the recipe	L1 (gate b2 for roots without ELF) / L6 gl4
+_Unwind_Resume	a	platform/audio:3;platform/input:1;platform/win32:7	platform/audio/dshow.cpp;platform/audio/dshow_filters.cpp;platform/audio/dsound.cpp	pinned runtime external: libgcc.a	
+_ZNSt20bad_array_new_lengthD0Ev	a	platform/win32:1	platform/win32/ini.cpp	pinned runtime external: libstdc++.a,libsupc++.a	
+_ZNSt20bad_array_new_lengthD1Ev	a	platform/win32:1	platform/win32/ini.cpp	pinned runtime external: libstdc++.a,libsupc++.a	
+_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE15_M_replace_coldEPcjPKcjj	a	platform/win32:4	platform/win32/gdifont.cpp;platform/win32/registry.cpp;platform/win32/registry_seed.cpp	pinned runtime external: libstdc++.a	
+_ZNSt9bad_allocD0Ev	a	platform/win32:1	platform/win32/ini.cpp	pinned runtime external: libstdc++.a,libsupc++.a	
+_ZNSt9bad_allocD1Ev	a	platform/win32:1	platform/win32/ini.cpp	pinned runtime external: libstdc++.a,libsupc++.a	
+_ZNSt9exceptionD0Ev	a	platform/win32:1	platform/win32/ini.cpp	pinned runtime external: libstdc++.a,libsupc++.a	
+_ZNSt9exceptionD1Ev	a	platform/win32:1	platform/win32/ini.cpp	pinned runtime external: libstdc++.a,libsupc++.a	
+_ZSt17__throw_bad_allocv	a	platform/win32:4	platform/win32/gdifont.cpp;platform/win32/registry.cpp;platform/win32/registry_seed.cpp	pinned runtime external: libstdc++.a	
+_ZSt18_Rb_tree_decrementPSt18_Rb_tree_node_base	a	platform/win32:3	platform/win32/gdifont.cpp;platform/win32/ini.cpp;platform/win32/registry.cpp	pinned runtime external: libstdc++.a	
+_ZSt18_Rb_tree_incrementPKSt18_Rb_tree_node_base	a	platform/win32:1	platform/win32/registry.cpp	pinned runtime external: libstdc++.a	
+_ZSt18_Rb_tree_incrementPSt18_Rb_tree_node_base	a	platform/win32:3	platform/win32/gdifont.cpp;platform/win32/ini.cpp;platform/win32/registry.cpp	pinned runtime external: libstdc++.a	
+_ZSt19__throw_logic_errorPKc	a	platform/win32:3	platform/win32/gdifont.cpp;platform/win32/ini.cpp;platform/win32/window.cpp	pinned runtime external: libstdc++.a	
+_ZSt20__throw_length_errorPKc	a	platform/input:1;platform/win32:5	platform/input/swkbd.cpp;platform/win32/gdifont.cpp;platform/win32/ini.cpp	pinned runtime external: libstdc++.a	
+_ZSt24__throw_out_of_range_fmtPKcz	a	platform/win32:3	platform/win32/gdifont.cpp;platform/win32/ini.cpp;platform/win32/registry.cpp	pinned runtime external: libstdc++.a	
+_ZSt28_Rb_tree_rebalance_for_erasePSt18_Rb_tree_node_baseRS_	a	platform/win32:1	platform/win32/registry.cpp	pinned runtime external: libstdc++.a	
+_ZSt28__throw_bad_array_new_lengthv	a	platform/win32:1	platform/win32/gdifont.cpp	pinned runtime external: libstdc++.a	
+_ZSt29_Rb_tree_insert_and_rebalancebPSt18_Rb_tree_node_baseS0_RS_	a	platform/win32:3	platform/win32/gdifont.cpp;platform/win32/ini.cpp;platform/win32/registry.cpp	pinned runtime external: libstdc++.a	
+_ZSt7nothrow	a	platform/audio:3;platform/com:1;platform/input:1;platform/win32:1	platform/audio/dshow.cpp;platform/audio/dshow_filters.cpp;platform/audio/dsound.cpp	pinned runtime external: libstdc++.a,libsupc++.a	
+_ZSt9terminatev	a	platform/audio:1	platform/audio/dshow_filters.cpp	pinned runtime external: libstdc++.a,libsupc++.a	
+_ZTISt9bad_alloc	a	platform/win32:2	platform/win32/ini.cpp;platform/win32/registry.cpp	pinned runtime external: libstdc++.a,libsupc++.a	
+_ZTVN10__cxxabiv117__class_type_infoE.fnvnx_ap8	d	platform/audio:3;platform/com:1;platform/input:1	platform/audio/dshow.cpp;platform/audio/dshow_filters.cpp;platform/audio/dsound.cpp	ap8-suffixed clone of a runtime class vtable: the runtime has only the unsuffixed _ZTV...; no object defines the suffixed name	L2 (addr/sdd plugin + runtime stage over msvcmodel13)
+_ZTVN10__cxxabiv120__si_class_type_infoE.fnvnx_ap8	d	platform/audio:3;platform/com:1;platform/input:1	platform/audio/dshow.cpp;platform/audio/dshow_filters.cpp;platform/audio/dsound.cpp	ap8-suffixed clone of a runtime class vtable: the runtime has only the unsuffixed _ZTV...; no object defines the suffixed name	L2 (addr/sdd plugin + runtime stage over msvcmodel13)
+_ZTVN10__cxxabiv121__vmi_class_type_infoE.fnvnx_ap8	d	platform/audio:2	platform/audio/dshow.cpp;platform/audio/dshow_filters.cpp	ap8-suffixed clone of a runtime class vtable: the runtime has only the unsuffixed _ZTV...; no object defines the suffixed name	L2 (addr/sdd plugin + runtime stage over msvcmodel13)
+_ZTVSt9bad_alloc.fnvnx_ap8	d	platform/win32:1	platform/win32/ini.cpp	ap8-suffixed clone of a runtime class vtable: the runtime has only the unsuffixed _ZTV...; no object defines the suffixed name	L2 (addr/sdd plugin + runtime stage over msvcmodel13)
+_ZdlPv	a	platform/audio:3;platform/com:1;platform/input:2;platform/win32:5;rt/guest:1	platform/audio/dshow.cpp;platform/audio/dshow_filters.cpp;platform/audio/dsound.cpp	pinned runtime external: libstdc++.a,libsupc++.a	
+_ZdlPvRKSt9nothrow_t	a	platform/audio:3	platform/audio/dshow.cpp;platform/audio/dshow_filters.cpp;platform/audio/dsound.cpp	pinned runtime external: libstdc++.a,libsupc++.a	
+_Znaj	a	rt/guest:1	rt/guest/tm.cpp	pinned runtime external: libstdc++.a,libsupc++.a	
+_Znwj	a	platform/audio:1;platform/input:1;platform/win32:4	platform/audio/dshow.cpp;platform/input/swkbd.cpp;platform/win32/gdifont.cpp	pinned runtime external: libstdc++.a,libsupc++.a	
+_ZnwjRKSt9nothrow_t	a	platform/audio:3;platform/com:1;platform/input:1;platform/win32:1	platform/audio/dshow.cpp;platform/audio/dshow_filters.cpp;platform/audio/dsound.cpp	pinned runtime external: libstdc++.a,libsupc++.a	
+__alloc_handle	a	platform/os:1	platform/os/sock_guest.c	pinned runtime external: libsysbase.a	
+__bss_end__	e	rt/guest:2	rt/guest/crt0.s;rt/guest/runtime.c	link/guest.ld defines it; no guest root links an ELF, so rule (b2) cannot certify	L1 (link stage)+L3a (product ELF root)
+__bss_start__	e	rt/guest:2	rt/guest/crt0.s;rt/guest/runtime.c	link/guest.ld defines it; no guest root links an ELF, so rule (b2) cannot certify	L1 (link stage)+L3a (product ELF root)
+__cxa_allocate_exception	a	platform/win32:1	platform/win32/ini.cpp	pinned runtime external: libstdc++.a,libsupc++.a	
+__cxa_begin_catch	a	platform/win32:4	platform/win32/gdifont.cpp;platform/win32/ini.cpp;platform/win32/registry.cpp	pinned runtime external: libstdc++.a,libsupc++.a	
+__cxa_end_catch	a	platform/win32:4	platform/win32/gdifont.cpp;platform/win32/ini.cpp;platform/win32/registry.cpp	pinned runtime external: libstdc++.a,libsupc++.a	
+__cxa_guard_abort	a	platform/win32:1	platform/win32/ini.cpp	pinned runtime external: libstdc++.a,libsupc++.a	
+__cxa_guard_acquire	a	platform/win32:2	platform/win32/gdifont.cpp;platform/win32/ini.cpp	pinned runtime external: libstdc++.a,libsupc++.a	
+__cxa_guard_release	a	platform/win32:2	platform/win32/gdifont.cpp;platform/win32/ini.cpp	pinned runtime external: libstdc++.a,libsupc++.a	
+__cxa_rethrow	a	platform/win32:4	platform/win32/gdifont.cpp;platform/win32/ini.cpp;platform/win32/registry.cpp	pinned runtime external: libstdc++.a,libsupc++.a	
+__cxa_throw	a	platform/win32:1	platform/win32/ini.cpp	pinned runtime external: libstdc++.a,libsupc++.a	
+__data_start	e	rt/guest:1	rt/guest/crt0.s	link/guest.ld defines it; no guest root links an ELF, so rule (b2) cannot certify	L1 (link stage)+L3a (product ELF root)
+__eh_frame_hdr_end	e	rt/guest:1	rt/guest/crt0.s	link/guest.ld defines it; no guest root links an ELF, so rule (b2) cannot certify	L1 (link stage)+L3a (product ELF root)
+__eh_frame_hdr_start	e	rt/guest:1	rt/guest/crt0.s	link/guest.ld defines it; no guest root links an ELF, so rule (b2) cannot certify	L1 (link stage)+L3a (product ELF root)
+__errno	a	platform/crt:6;platform/os:1;platform/win32:1;rt/guest:2	platform/crt/heap.c;platform/crt/iob.c;platform/crt/msvcrt_exports.cpp	pinned runtime external: libc.a	
+__fnvnx_dynamic	e	rt/guest:1	rt/guest/crt0.s	link/guest.ld defines it; no guest root links an ELF, so rule (b2) cannot certify	L1 (link stage)+L3a (product ELF root)
+__fnvnx_image_entry	e	rt/guest:1	rt/guest/crt0.s	assigned by the product image's link.entry (rt/guest/runtime.c __fnvnx_guest_entry); no object defines it	L3a (product ELF root, link.entry)
+__get_handle	a	platform/os:1	platform/os/sock_guest.c	pinned runtime external: libsysbase.a	
+__got_end__	e	rt/guest:1	rt/guest/crt0.s	link/guest.ld defines it; no guest root links an ELF, so rule (b2) cannot certify	L1 (link stage)+L3a (product ELF root)
+__got_start__	e	rt/guest:1	rt/guest/crt0.s	link/guest.ld defines it; no guest root links an ELF, so rule (b2) cannot certify	L1 (link stage)+L3a (product ELF root)
+__gxx_personality_v0	a	platform/audio:3;platform/input:1;platform/win32:7	platform/audio/dshow.cpp;platform/audio/dshow_filters.cpp;platform/audio/dsound.cpp	pinned runtime external: libstdc++.a,libsupc++.a	
+__libc_init_array	a	rt/guest:1	rt/guest/runtime.c	pinned runtime external: libc.a	
+__relro_start	e	rt/guest:1	rt/guest/crt0.s	link/guest.ld defines it; no guest root links an ELF, so rule (b2) cannot certify	L1 (link stage)+L3a (product ELF root)
+__sf	a	rt/guest:1	rt/guest/threads.c	pinned runtime external: libc.a	
+__tdata_lma	e	rt/guest:2	rt/guest/runtime.c;rt/guest/threads.c	link/guest.ld defines it; no guest root links an ELF, so rule (b2) cannot certify	L1 (link stage)+L3a (product ELF root)
+__tdata_lma_end	e	rt/guest:2	rt/guest/runtime.c;rt/guest/threads.c	link/guest.ld defines it; no guest root links an ELF, so rule (b2) cannot certify	L1 (link stage)+L3a (product ELF root)
+__tls_align	e	rt/guest:1	rt/guest/threads.c	link/guest.ld defines it; no guest root links an ELF, so rule (b2) cannot certify	L1 (link stage)+L3a (product ELF root)
+__tls_end	e	rt/guest:1	rt/guest/threads.c	link/guest.ld defines it; no guest root links an ELF, so rule (b2) cannot certify	L1 (link stage)+L3a (product ELF root)
+__tls_start	e	rt/guest:2	rt/guest/runtime.c;rt/guest/threads.c	link/guest.ld defines it; no guest root links an ELF, so rule (b2) cannot certify	L1 (link stage)+L3a (product ELF root)
+__tls_tcb	e	rt/guest:2	rt/guest/runtime.c;rt/guest/threads.c	link/guest.ld defines it; no guest root links an ELF, so rule (b2) cannot certify	L1 (link stage)+L3a (product ELF root)
+_impure_ptr	a	rt/guest:2	rt/guest/runtime.c;rt/guest/threads.c	pinned runtime external: libc.a	
+_reclaim_reent	a	rt/guest:1	rt/guest/threads.c	pinned runtime external: libc.a	
+abs	a	platform/input:1;platform/win32:2	platform/input/keymap.cpp;platform/win32/gdifont.cpp;platform/win32/resource.cpp	pinned runtime external: libc.a	
+acosf	a	platform/audio:1	platform/audio/ds3d.cpp	pinned runtime external: libm.a	
+atexit	a	platform/win32:1	platform/win32/gdifont.cpp	pinned runtime external: libc.a	
+atoi	a	platform/win32:1	platform/win32/gdifont.cpp	pinned runtime external: libc.a	
+calloc	a	platform/audio:5;platform/boundary:1;platform/clock:1;platform/com:1;platform/crt:1;platform/guest:1;platform/input:1;platform/win32:11;render/shaders:2;rt/guest:1	platform/audio/dshow_filters.cpp;platform/audio/dsound.cpp;platform/audio/mixer.cpp	pinned runtime external: libc.a	
+ceil	a	platform/crt:1;platform/win32:1	platform/crt/msvcrt_exports.cpp;platform/win32/gdi32.cpp	pinned runtime external: libm.a	
+close	a	platform/os:1;platform/win32:1	platform/os/sock_guest.c;platform/win32/winsock.cpp	pinned runtime external: libc.a	
+cos	a	platform/win32:1	platform/win32/gdifont.cpp	pinned runtime external: libm.a	
+cosf	a	platform/audio:1	platform/audio/reverb.cpp	pinned runtime external: libm.a	
+devoptab_list	a	platform/os:1;rt/guest:1	platform/os/sock_guest.c;rt/guest/runtime.c	pinned runtime external: libsysbase.a	
+dup	a	platform/os:1	platform/os/sock_guest.c	pinned runtime external: libsysbase.a	
+eglBindAPI	d	render/gl4:1	render/gl4/gl4_core.c	EGL is the GL library below the product boundary; host_exports covers libc6/libgcc-s1/libstdc++6 only	L4 (boot machine GL, shared model) + L1 (gate rule d host set)
+eglCreateContext	d	render/gl4:1	render/gl4/gl4_core.c	EGL is the GL library below the product boundary; host_exports covers libc6/libgcc-s1/libstdc++6 only	L4 (boot machine GL, shared model) + L1 (gate rule d host set)
+eglDestroyContext	d	render/gl4:1	render/gl4/gl4_core.c	EGL is the GL library below the product boundary; host_exports covers libc6/libgcc-s1/libstdc++6 only	L4 (boot machine GL, shared model) + L1 (gate rule d host set)
+eglGetError	d	render/gl4:1	render/gl4/gl4_core.c	EGL is the GL library below the product boundary; host_exports covers libc6/libgcc-s1/libstdc++6 only	L4 (boot machine GL, shared model) + L1 (gate rule d host set)
+eglGetProcAddress	d	render/gl4:1	render/gl4/gl4_core.c	EGL is the GL library below the product boundary; host_exports covers libc6/libgcc-s1/libstdc++6 only	L4 (boot machine GL, shared model) + L1 (gate rule d host set)
+eglInitialize	d	render/gl4:1	render/gl4/gl4_core.c	EGL is the GL library below the product boundary; host_exports covers libc6/libgcc-s1/libstdc++6 only	L4 (boot machine GL, shared model) + L1 (gate rule d host set)
+eglMakeCurrent	d	render/gl4:1	render/gl4/gl4_core.c	EGL is the GL library below the product boundary; host_exports covers libc6/libgcc-s1/libstdc++6 only	L4 (boot machine GL, shared model) + L1 (gate rule d host set)
+eglTerminate	d	render/gl4:1	render/gl4/gl4_core.c	EGL is the GL library below the product boundary; host_exports covers libc6/libgcc-s1/libstdc++6 only	L4 (boot machine GL, shared model) + L1 (gate rule d host set)
+environ	a	rt/guest:1	rt/guest/runtime.c	pinned runtime external: libc.a,libsysbase.a	
+exit	a	platform/guest:1;rt/guest:1	platform/guest/os_guest.c;rt/guest/threads.c	pinned runtime external: libc.a	
+expf	a	platform/audio:1	platform/audio/reverb.cpp	pinned runtime external: libm.a	
+fabs	a	platform/crt:1;platform/win32:1	platform/crt/msvcrt_format.cpp;platform/win32/gdifont.cpp	pinned runtime external: libm.a	
+fabsf	a	platform/audio:1	platform/audio/reverb.cpp	pinned runtime external: libm.a	
+fake_heap_end	a	rt/guest:1	rt/guest/runtime.c	pinned runtime external: libsysbase.a	
+fake_heap_start	a	rt/guest:1	rt/guest/runtime.c	pinned runtime external: libsysbase.a	
+fclose	a	platform/audio:1;platform/freetype:1	platform/audio/backend.cpp;platform/freetype/src/base/ftsystem.c	pinned runtime external: libc.a	
+fflush	a	platform/guest:1;rt/guest:1	platform/guest/os_guest.c;rt/guest/runtime.c	pinned runtime external: libc.a	
+fiprintf	a	rt/guest:1	rt/guest/runtime.c	pinned runtime external: libc.a	
+floor	a	platform/crt:1;platform/win32:1	platform/crt/msvcrt_exports.cpp;platform/win32/gdifont.cpp	pinned runtime external: libm.a	
+fnvl_msvcrt_adjust_fdiv	d	loader/gen:1	loader/gen/import_keys.c	bind l3 row owned by the lifter runtime (imports.tsv); defined nowhere	L3a (lifter runtime lift/rt)
+fnvnx_dispatch	d	loader/src:5;platform/audio:5;platform/clock:1;platform/com:3;platform/freetype:26;platform/guest:1;platform/input:1;platform/win32:12;render/shaders:4;rt/guest:2	loader/src/image.c;loader/src/imports.c;loader/src/modules.c	dispatcher of the lifted code	L3a (generated bridges / lift/rt)
+fnvnx_guest_current	d	platform/boundary:1	platform/boundary/boundary_guest.cpp	contract requested from L3a (platform/boundary/boundary_guest.cpp:20-26); defined nowhere	L3a (lift/rt)
+fnvnx_guest_invoke	d	platform/boundary:1	platform/boundary/boundary_guest.cpp	contract requested from L3a (platform/boundary/boundary_guest.cpp:20-26); defined nowhere	L3a (lift/rt)
+fnvnx_lift_enter	d	loader/src:1;platform/boundary:1	loader/src/start.c;platform/boundary/boundary_guest.cpp	single bridge into lifted code (lift/rt)	L3a (lift/rt)
+fnvnx_lift_imports_init	d	loader/guest:1	loader/guest/boot.c	single bridge into lifted code (lift/rt)	L3a (lift/rt)
+fopen	a	platform/audio:1;platform/freetype:1	platform/audio/backend.cpp;platform/freetype/src/base/ftsystem.c	pinned runtime external: libc.a	
+fread	a	platform/freetype:1	platform/freetype/src/base/ftsystem.c	pinned runtime external: libc.a	
+free	a	loader/guest:1;platform/audio:7;platform/boundary:1;platform/clock:1;platform/com:1;platform/crt:3;platform/freetype:1;platform/guest:1;platform/input:1;platform/os:1;platform/win32:21;render/shaders:4;rt/guest:1	loader/guest/boot.c;platform/audio/backend.cpp;platform/audio/dshow.cpp	pinned runtime external: libc.a	
+frexp	a	platform/crt:1	platform/crt/msvcrt_exports.cpp	pinned runtime external: libc.a,libm.a	
+fseek	a	platform/audio:1;platform/freetype:1	platform/audio/backend.cpp;platform/freetype/src/base/ftsystem.c	pinned runtime external: libc.a	
+ftell	a	platform/freetype:1	platform/freetype/src/base/ftsystem.c	pinned runtime external: libc.a	
+fwrite	a	platform/audio:1	platform/audio/backend.cpp	pinned runtime external: libc.a	
+getenv	a	platform/audio:1;platform/freetype:1;platform/input:1	platform/audio/backend.cpp;platform/freetype/src/base/ftinit.c;platform/input/xinput.cpp	pinned runtime external: libc.a	
+isxdigit	a	platform/crt:1	platform/crt/msvcrt_format.cpp	pinned runtime external: libc.a	
+ldexp	a	platform/crt:1	platform/crt/msvcrt_format.cpp	pinned runtime external: libc.a,libm.a	
+llround	a	platform/audio:1	platform/audio/dshow.cpp	pinned runtime external: libm.a	
+longjmp	a	platform/freetype:2	platform/freetype/src/base/ftbase.c;platform/freetype/src/smooth/smooth.c	pinned runtime external: libc.a	
+lrintf	a	platform/audio:2	platform/audio/ds3d.cpp;platform/audio/mixer.cpp	pinned runtime external: libm.a	
+malloc	a	loader/guest:1;platform/audio:4;platform/crt:5;platform/freetype:1;platform/os:1;platform/win32:15;render/shaders:3	loader/guest/boot.c;platform/audio/backend.cpp;platform/audio/dshow_filters.cpp	pinned runtime external: libc.a	
+memalign	a	loader/guest:1;rt/guest:1	loader/guest/boot.c;rt/guest/threads.c	pinned runtime external: libc.a	
+memchr	a	platform/crt:2;platform/freetype:2;platform/win32:2	platform/crt/iob.c;platform/crt/msvcrt_format.cpp;platform/freetype/src/sfnt/sfnt.c	pinned runtime external: libc.a	
+memcmp	a	loader/src:2;platform/audio:4;platform/com:1;platform/freetype:7;platform/input:2;platform/win32:8	loader/src/modules.c;loader/src/pe.c;platform/audio/dshow.cpp	pinned runtime external: libc.a	
+memcpy	a	lib:1;loader/guest:1;loader/src:5;platform/audio:6;platform/clock:1;platform/com:3;platform/crt:5;platform/freetype:19;platform/guest:2;platform/input:2;platform/os:1;platform/win32:27;render/pair:1;render/shaders:5;rt/guest:3	lib/sha256/sha256.c;loader/guest/boot.c;loader/src/importkey.c	pinned runtime external: libc.a	
+memmove	a	platform/audio:3;platform/crt:2;platform/freetype:7;platform/input:1;platform/win32:7	platform/audio/dshow.cpp;platform/audio/dshow_filters.cpp;platform/audio/mixer.cpp	pinned runtime external: libc.a	
+memset	a	lib:1;loader/guest:1;loader/src:6;platform/audio:6;platform/crt:2;platform/freetype:19;platform/guest:1;platform/input:3;platform/os:1;platform/win32:21;render/shaders:6;render/smscan:1;rt/guest:2	lib/sha256/sha256.c;loader/guest/boot.c;loader/src/image.c	pinned runtime external: libc.a	
+modf	a	platform/crt:1	platform/crt/msvcrt_exports.cpp	pinned runtime external: libc.a,libm.a	
+powf	a	platform/audio:2	platform/audio/mixer.cpp;platform/audio/reverb.cpp	pinned runtime external: libm.a	
+qsort	a	loader/src:1;platform/freetype:7;platform/win32:2	loader/src/image.c;platform/freetype/gen/src/truetype/truetype.c;platform/freetype/src/base/ftbase.c	pinned runtime external: libc.a	
+realloc	a	platform/audio:3;platform/crt:2;platform/freetype:1;platform/win32:9;render/shaders:1	platform/audio/dshow.cpp;platform/audio/dshow_filters.cpp;platform/audio/mixer.cpp	pinned runtime external: libc.a	
+scalbn	a	platform/crt:1	platform/crt/msvcrt_exports.cpp	pinned runtime external: libc.a,libm.a	
+setDefaultDevice	a	rt/guest:1	rt/guest/fs.c	pinned runtime external: libsysbase.a	
+setjmp	a	platform/freetype:2	platform/freetype/src/sfnt/sfnt.c;platform/freetype/src/smooth/smooth.c	pinned runtime external: libc.a	
+setvbuf	a	rt/guest:1	rt/guest/runtime.c	pinned runtime external: libc.a	
+sin	a	platform/win32:1	platform/win32/gdifont.cpp	pinned runtime external: libm.a	
+snprintf	a	loader/guest:1;platform/audio:2;platform/crt:2;platform/freetype:1;platform/guest:1;platform/input:3;platform/win32:12;render/shaders:6	loader/guest/boot.c;platform/audio/backend.cpp;platform/audio/dshow.cpp	pinned runtime external: libc.a	
+sprintf	a	platform/win32:1	platform/win32/module.cpp	pinned runtime external: libc.a	
+sqrtf	a	platform/audio:2	platform/audio/ds3d.cpp;platform/audio/reverb.cpp	pinned runtime external: libm.a	
+strcasecmp	a	platform/input:2;platform/win32:2	platform/input/dinput.cpp;platform/input/register.cpp;platform/win32/gdifont.cpp	pinned runtime external: libc.a	
+strcat	a	platform/freetype:2;platform/win32:1;render/shaders:1	platform/freetype/src/base/ftbase.c;platform/freetype/src/pcf/pcf.c;platform/win32/module.cpp	pinned runtime external: libc.a	
+strchr	a	loader/src:1;platform/crt:2;platform/win32:7;render/shaders:2	loader/src/modules.c;platform/crt/msvcrt_exports.cpp;platform/crt/msvcrt_format.cpp	pinned runtime external: libc.a	
+strcmp	a	loader/src:2;platform/audio:1;platform/crt:2;platform/freetype:14;platform/input:2;platform/win32:7;render/shaders:3;render/smscan:1	loader/src/importkey.c;loader/src/modules.c;platform/audio/backend.cpp	pinned runtime external: libc.a	
+strcpy	a	platform/freetype:2;platform/win32:5;render/shaders:2	platform/freetype/src/pcf/pcf.c;platform/freetype/src/sfnt/sfnt.c;platform/win32/display.cpp	pinned runtime external: libc.a	
+strdup	a	platform/crt:1;platform/win32:4	platform/crt/msvcrt_exports.cpp;platform/win32/crt_kernel32.cpp;platform/win32/file.cpp	pinned runtime external: libc.a	
+strlen	a	loader/guest:1;platform/audio:1;platform/com:1;platform/crt:4;platform/freetype:10;platform/guest:1;platform/input:1;platform/win32:16;render/shaders:5	loader/guest/boot.c;platform/audio/waveout.cpp;platform/com/combridge.cpp	pinned runtime external: libc.a	
+strncasecmp	a	platform/input:1;platform/win32:1	platform/input/register.cpp;platform/win32/sync.cpp	pinned runtime external: libc.a	
+strncmp	a	platform/audio:1;platform/crt:1;platform/freetype:8;render/shaders:1	platform/audio/backend.cpp;platform/crt/msvcrt_exports.cpp;platform/freetype/gen/src/cid/type1cid.c	pinned runtime external: libc.a	
+strncpy	a	platform/crt:1;platform/freetype:1;render/shaders:1	platform/crt/msvcrt_exports.cpp;platform/freetype/src/base/ftbase.c;render/shaders/translator/src/sdp.c	pinned runtime external: libc.a	
+strpbrk	a	platform/win32:2;render/shaders:1	platform/win32/file.cpp;platform/win32/module.cpp;render/shaders/translator/mojoshader/profiles/mojoshader_profile_common.c	pinned runtime external: libc.a	
+strrchr	a	platform/crt:1;platform/freetype:1;platform/win32:3	platform/crt/msvcrt_exports.cpp;platform/freetype/src/base/ftbase.c;platform/win32/file.cpp	pinned runtime external: libc.a	
+strstr	a	platform/freetype:3;platform/win32:1;render/shaders:1	platform/freetype/gen/src/truetype/truetype.c;platform/freetype/src/base/ftbase.c;platform/freetype/src/cff/cff.c	pinned runtime external: libc.a	
+strtod	a	platform/audio:1	platform/audio/dshow.cpp	pinned runtime external: libc.a	
+strtol	a	platform/freetype:5	platform/freetype/gen/src/truetype/truetype.c;platform/freetype/src/autofit/autofit.c;platform/freetype/src/base/ftbase.c	pinned runtime external: libc.a	
+strtoul	a	platform/win32:1	platform/win32/module.cpp	pinned runtime external: libc.a	
+tolower	a	platform/win32:2	platform/win32/gdi32.cpp;platform/win32/gdifont.cpp	pinned runtime external: libc.a	
+vsnprintf	a	loader/src:1;platform/audio:1;platform/win32:1;render/shaders:3	loader/src/pe.c;platform/audio/dshow.cpp;platform/win32/crt_kernel32.cpp	pinned runtime external: libc.a	
+fnvnx_reach_violation	dup	platform/win32/platstat.cpp (product definer); tests/bootrt/rt.c (test root)		duplicate-strong	tests/bootrt/rt.c is the violation (no-doubles order); L5 reports, L4/L1 owns tests/
