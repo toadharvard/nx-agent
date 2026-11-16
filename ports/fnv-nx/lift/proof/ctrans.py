@@ -25,6 +25,8 @@ Semantics (ISO C11 as GCC implements it, ILP32/LP64-independent: the source uses
 import json, os, re, sys
 import z3
 from pycparser import c_parser, c_ast
+try: import fnvnx.lift.proof.ctasm as ctasm
+except ImportError: import ctasm
 
 # The FPCR the terms are a function of.  RMode: Arm ARM (DDI 0487) FPCR.RMode encoding, an architecture constant (00 RN, 01 RP, 10 RM, 11 RZ).  DN and FZ are free inputs
 # `fpcr_dn`, `fpcr_fz`: every FP operation adds the obligation DN = 0 and FZ = 0 to `Result.dom` (the NaN rules and the denormal handling modelled are those of DN = FZ = 0), and
@@ -154,6 +156,7 @@ class Source:
             text = re.sub(r'unsigned\s+__int128', 'u128', text)       # grammar mapping: pycparser has no __int128 (GCC manual "__int128"); u128 is a typedef-name of ctrans
             text = strip_attrs(text)
             text = asm_sysreg(text)
+            text = ctasm.convert_asm(text)
             text = re.sub(r'\bregister\s+struct\s+cpu\s*\*\s*c\s+asm\s*\([^)]*\)\s*;', '', text)
             for it in split_items(text):
                 head = it.split('{')[0]
@@ -376,6 +379,17 @@ def fpflags_cvt(src, dst, e, rmode=None):
 
 
 # ---------------------------------------------------------------- the executor
+class UnionVal(dict):
+    """a union of scalars (ctype 'U'): the stored bit pattern; a member read is its low bits, a member write replaces its low bits and keeps the rest (the bytes of the union object, little-endian target)"""
+    def __init__(self, t, bits): super().__init__(); self.t, self.bits = t, bits; self.mt = dict(t[2])
+    def __getitem__(self, k): mt = self.mt[k]; return V(z3.Extract(mt[1] - 1, 0, self.bits), mt)
+    def __setitem__(self, k, v):
+        if k not in self.mt: return dict.__setitem__(self, k, v)
+        w = self.t[1]; e = v.e
+        self.bits = e if e.size() == w else z3.Concat(z3.Extract(w - 1, e.size(), self.bits), e)
+    def __contains__(self, k): return k in self.mt
+
+
 class Frame:
     def __init__(self, name, L):
         self.name, self.vars, self.L, self.pend, self.ret, self.rett = name, {}, L, {}, None, None
@@ -399,6 +413,10 @@ class Lazy(dict):
         return v
 
 
+MEM_IN = z3.Array('mem0', z3.BitVecSort(64), z3.BitVecSort(8))      # guest memory at entry: byte at a 64-bit address (the asm templates address with the 64-bit register)
+GLOBAL_REGS = ('eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi')      # `register u32 R asm(..)` of rt/fnvl.h: the guest registers, free inputs
+
+
 class Machine:
     def __init__(self, tast, funcs, f2i=()):
         self.funcs, self.structs, self.typedefs, self.enums = funcs, {}, {}, {}
@@ -407,6 +425,7 @@ class Machine:
         self.dom = []
         self.fpsr, self.fpcr, self.rmode = FPSR_IN, FPCR_INIT, ARM_RMODE
         self.fresh = 0
+        self.mem = MEM_IN
         for e in tast.ext: self.declare(e)
 
     # -- declarations
@@ -430,6 +449,9 @@ class Machine:
                 self.structs[n.name or id(n)] = [(d.name, self.ctype(d.type)) for d in n.decls]
             return ('s', n.name or id(n))
         if isinstance(n, c_ast.Union):
+            if n.decls is not None:
+                ms = [(d.name, self.ctype(d.type)) for d in n.decls]
+                if ms and all(t[0] in 'if' for _, t in ms): return ('U', max(t[1] for _, t in ms), tuple(ms))      # a union of scalars: the bit pattern of its largest member (GCC manual, "Structures, unions, enumerations, and bit-fields": type punning through a union reads the bytes of the stored member)
             return ('u', n.name or id(n))   # a union is declared but no value of it is ever built: using one is refused where it is read
         if isinstance(n, c_ast.Enum):
             v = 0
@@ -455,6 +477,7 @@ class Machine:
         if t[0] == 's': return {n: self.zero(ft) for n, ft in self.structs[t[1]]}
         if t[0] == 'a': return [self.zero(t[1]) for _ in range(t[2])]
         if t[0] == 'p': return None
+        if t[0] == 'U': return UnionVal(t, z3.BitVecVal(0, t[1]))
         if t[0] == 'u': return None       # an uninitialised union local (the lifter's xmm_t x0..x7): reading it is an error of the executor, never a value
         raise Unsupported('zero of ' + str(t))
 
@@ -567,6 +590,7 @@ class Machine:
         """-> (container, key, type) of an lvalue"""
         if isinstance(n, c_ast.ID):
             if n.name in fr.vars: return fr.vars, n.name, None
+            if n.name in GLOBAL_REGS: self.eval(n, fr); return self.G, n.name, None
             raise Unsupported('lvalue ' + n.name)
         if isinstance(n, c_ast.StructRef):
             if n.type == '->':
@@ -632,6 +656,9 @@ class Machine:
             return v
         if n.name in self.enums: return V(z3.BitVecVal(self.enums[n.name], 32), INT)
         if n.name == 'c': return Ptr(self.G, 'c', ('s', 'cpu'))
+        if n.name in GLOBAL_REGS:
+            if n.name not in self.G: self.G[n.name] = self.fresh_val(I(32, 0), 'g.' + n.name)
+            return self.G[n.name]
         raise Unsupported('identifier ' + n.name)
 
     def cpu(self):
@@ -690,6 +717,10 @@ class Machine:
             new = V(old.e + one.e if '+' in op else old.e - one.e, old.t)
             cont[key] = self.guard(fr, old, new)
             return old if op.startswith('p') else new
+        if op == 'sizeof':      # C11 6.5.3.4: the size of a scalar type in bytes (an integer or floating type: its width / 8), of type size_t = unsigned int (the data model, ILP32)
+            t = self.ctype(n.expr.type) if isinstance(n.expr, c_ast.Typename) else self.tyof(self.eval(n.expr, fr))
+            if t[0] not in 'if': raise Unsupported('sizeof of a non-scalar')
+            return V(z3.BitVecVal(t[1] // 8, 32), I(32, 0))
         v = self.eval(n.expr, fr)
         if op == '!': return self.bool_(z3.Not(self.truth(v, fr)))
         v = self.promote(v)
@@ -771,7 +802,19 @@ class Machine:
             return V(z3.If(c, a.e, b.e), a.t)
         return self.ite(c, a, b)
 
+    def asm_call(self, k, args, fr):
+        vals = [self.eval(a, fr) for a in args]
+        outs, olist = ctasm.run_asm(self, fr, k, vals, sys.modules[__name__])
+        for (name, a), raw in zip(olist, [a for (kd, nm, cn), a in zip(ctasm.ASMS[k]['ops'], args) if kd == 'out']):
+            cont, key, _ = self.lval(raw, fr); old = cont[key]
+            r = V(z3.Extract(old.e.size() - 1, 0, outs[name]), old.t)
+            cont[key] = self.guard(fr, old, r)
+        return V(z3.BitVecVal(0, 32), INT)
+
     def e_Assignment(self, n, fr):
+        if isinstance(n.lvalue, c_ast.FuncCall) and isinstance(n.lvalue.name, c_ast.ID) and n.lvalue.name.name + '_st' in self.funcs and n.op == '=':      # an accessor temporary written (ctasm)
+            a = [self.eval(x, fr) for x in (n.lvalue.args.exprs if n.lvalue.args else [])]
+            r = self.eval(n.rvalue, fr); self.call(self.funcs[n.lvalue.name.name + '_st'], a + [r], fr); return r
         cont, key, _ = self.lval(n.lvalue, fr)
         old = cont[key]
         r = self.eval(n.rvalue, fr)
@@ -789,6 +832,8 @@ class Machine:
         name = n.name.name if isinstance(n.name, c_ast.ID) else None
         args = n.args.exprs if n.args else []
         if name in BUILTINS: return BUILTINS[name](self, [self.eval(a, fr) for a in args], fr, args)
+        if name and name.startswith('__asm_'): return self.asm_call(int(name[6:]), args, fr)
+        if name and name + '_ld' in self.funcs: return self.call(self.funcs[name + '_ld'], [self.eval(a, fr) for a in args], fr)      # an accessor temporary read (ctasm)
         if name in self.funcs:
             return self.call(self.funcs[name], [self.eval(a, fr) for a in args], fr)
         raise Unsupported('call of ' + str(name))
@@ -935,7 +980,7 @@ class Machine:
     # -- public
     def apply(self, name, args):
         """execute function `name` on `args` (V / dict / Ptr values); -> Result(ret, outs, ub), outs = the final contents of every pointer argument"""
-        self.ub = []; self.dom = []; self.fpsr, self.fpcr, self.rmode = FPSR_IN, FPCR_INIT, ARM_RMODE
+        self.ub = []; self.dom = []; self.fpsr, self.fpcr, self.rmode = FPSR_IN, FPCR_INIT, ARM_RMODE; self.mem = MEM_IN
         fd = self.funcs[name]
         fr = Frame('top', z3.BoolVal(True))
         ret = self.call(fd, args, fr)

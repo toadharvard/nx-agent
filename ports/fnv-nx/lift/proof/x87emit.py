@@ -39,16 +39,37 @@ def _sc(t):
     return re.sub(r'//[^\n]*', '', re.sub(r'/\*.*?\*/', ' ', t, flags=re.S))
 
 
+def boundary():
+    """-> (macro definition lines, C text of the accessor functions): the guest-memory access macros of rt/fnvl.h (M8..MF64, MK8..MKF64) rewritten to calls, and the accessor classes they name read as C functions (ctasm: the operator bodies are the definition; ctrans executes the asm they hold)"""
+    import fnvnx.lift.proof.ctasm as ctasm
+    t = _sc(open(os.path.join(RT, 'fnvl.h')).read()); t = re.sub(r'#include[^\n]*', '', t)
+    o = subprocess.run(['cpp', '-E', '-P', '-x', 'c++', '-DFNVL_TYPES=1', '-'], input=t, capture_output=True, text=True).stdout
+    defs = ctasm.macro_defs(t)
+    uses = set()
+    for m in re.finditer(r'^[ \t]*#define[ \t]+(\w+)\(([^)]*)\)[ \t]*(.*)$', t.replace('\\\n', ' '), re.M):
+        if m.group(1) in defs: uses |= ctasm.rewrite_names(m.group(3))
+    done, code = set(), ''
+    while uses - done:
+        batch = uses - done; done |= batch
+        code += ctasm.accessor_c(o, batch)
+        for cls, ta in batch:      # GMF is over GM<T>, GMKF over GMK<T,A> (the class text names them)
+            if cls == 'GMF': uses.add(('GM', (ta[1],)))
+            if cls == 'GMKF': uses.add(('GMK', (ta[1],)))
+    return ['#define %s(%s) %s' % (k, a, b) for k, (a, b) in defs.items()], code
+
+
 def unit(body):
     """the preprocessed unit: the runtime's type prelude, x87.h, fnvl_x87.h, x87.c (as FNVNX_PP's closure) and `frag` with BODY"""
     rd = lambda n: open(os.path.join(RT, n)).read()
     pre = '\n'.join(l for l in _sc(rd('fnvl.h')).split('\n') if l.startswith(('typedef', 'struct fv ', 'struct cpu ', 'struct fnvl_nframe;')))
     decl = next(l for l in rd('fnvl.h').split('\n') if l.startswith('#define DECL '))
-    segcs = next(l for l in rd('fnvl.h').split('\n') if l.startswith('#define SEG_CS '))
+    segcs = '\n'.join(re.findall(r'^#define \w+ (?:0x[0-9a-fA-F]+|\d+)u?\s*$', _sc(rd('fnvl.h')), re.M) and [l for l in _sc(rd('fnvl.h')).split('\n') if re.fullmatch(r'#define \w+ (?:0x[0-9a-fA-F]+|\d+)u?\s*', l)])      # the integer-constant macros of the header
     txt = pre + '\n' + '\n'.join(_sc(rd(n)) for n in ('x87.h', 'fnvl_x87.h', 'x87.c'))
     txt = '#define FNVL_RA_T u32\n' + re.sub(r'#include[^\n]*', '', txt)       # the writer's view of struct cpu::ra (rt/fnvl.h: FNVL_PRELUDE_H)
     txt = re.sub(r'unsigned\s+__int128', 'u128', txt)
-    txt += '\n' + decl + '\n' + segcs + '\nstatic void frag(void){ DECL;\n' + body + '\n}\n'
+    mdefs, acc = boundary()
+    txt += '\n' + '\n'.join(mdefs) + '\n' + acc
+    if body is not None: txt += '\n' + decl + '\n' + segcs + '\nstatic void frag(void){ DECL;\n' + body + '\n}\n'
     p = subprocess.run(['cpp', '-E', '-x', 'c', '-DFNVL_TYPES=1', '-'], input=txt, capture_output=True, text=True)
     if p.returncode: raise SystemExit(p.stderr[:800])
     return p.stdout
@@ -142,5 +163,7 @@ def de_row(raw, budget_ms=120000, tops=(3,)):
 if __name__ == '__main__':
     if sys.argv[1] == 'reps':
         for c, r in sorted(class_reps(sys.argv[2:]).items(), key=lambda kv: kv[0][:2] + (kv[0][2] or 0, kv[0][3] or 0)): print(c[0], c[1], c[2], c[3], r.hex())
+    elif sys.argv[1] == 'pp':      # the helper closure's preprocessed unit of this checkout's rt (the stand-in of the recipe PP stage's .i for FNVNX_PP)
+        open(sys.argv[2], 'w').write(unit(None))
     elif sys.argv[1] == 'de1':
         print(de_row(bytes.fromhex(sys.argv[2])))
