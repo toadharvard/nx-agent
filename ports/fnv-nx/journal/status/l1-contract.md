@@ -3006,3 +3006,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Expected images 10 -> 8. L5 adds the 2 rows, then w28 goes on to reached + pins.
 - 12:04: corrected the Galaxy rule (w28 found my red was wrong: galaxy and galaxywrp are not in declared_dlls, since Wine has no spec for them). A declared_modules row = a module of the declared install (it has a file) whose service is absent.
   - Red: already declared with no file (redundant); no file; not reached by the closure (orphan); a bad cite, duplicate, bad kind or malformed row; a reached export with no bridge row.
+- 12:05: L4 04f1e5dfb (w11 8ecd2ef0) removes the tests/bootrt double. fnvnx_reach_violation is defined only by platform/win32/platstat.cpp. libnxgl4rt defines only nxgl4_shim_set, guest_ptr and on_present, none of them defined by a product root. test_bootrt: 5 of 5. For cand5: take tests/bootrt from L4 04f1e5dfb (it was dropped from cand4).
