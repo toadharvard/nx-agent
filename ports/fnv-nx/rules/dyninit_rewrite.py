@@ -32,7 +32,7 @@ import json
 import os
 import re
 
-import core
+from fnvnx.rules import core
 
 MARKER = '// fnvnx S10 dyninit_rewrite: '
 TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+(0x[0-9a-fA-F]+)[ \t]*$')

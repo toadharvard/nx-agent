@@ -16,13 +16,13 @@ atexit.register(shutil.rmtree, tempfile.tempdir, True)
 from collections import Counter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-import support  # noqa: E402
-from support import check  # noqa: E402
-import core  # noqa: E402
-import mscgate  # noqa: E402
-import prepare  # noqa: E402
-import s8_asm  # noqa: E402
+sys.path.insert(0, os.path.join(HERE, "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of the rules modules
+from fnvnx.rules.tests import support  # noqa: E402
+from fnvnx.rules.tests.support import check  # noqa: E402
+from fnvnx.rules import core  # noqa: E402
+from fnvnx.rules import mscgate  # noqa: E402
+from fnvnx.rules import prepare  # noqa: E402
+from fnvnx.rules import s8_asm  # noqa: E402
 
 
 def judged(before, after):

@@ -8,7 +8,7 @@ import os
 import re
 import sys
 
-import core
+from fnvnx.rules import core
 
 # ---------------------------------------------------------------------------------------------------------- IFX1
 #
