@@ -2006,3 +2006,11 @@ bottleneck: cand3b (w15: the toolchain sdd split from L2).
   - COMPILER-STAGE rule (w28, cand4): a C/C++ file that is a declared input of a run step is that step's input, not a unit; every other C/C++ file is a unit.
   - w28 also moves gen:file-escape into `recipe check`.
 bottleneck: cand3b (w15: the toolchain revert and the facts input).
+- 01:25 w28 work for cand4:
+  - c557ed084: gen:file-escape in `recipe check`, in one place (pathflow.py).
+  - a7eed7718: a run-step input is not a unit.
+  - For L2 COMPILER-STAGE (w3 d037efb1f), w28 also:
+    1. merges the w12L2 exec-step form into the w28 line;
+    2. makes declared `imports` roots in admit.json, keyed by the ast import closure only (an unused declaration is red);
+    3. writes the admit rows toolchain = product and toolchain-stage1.
+bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
