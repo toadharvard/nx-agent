@@ -1380,3 +1380,10 @@ Paused: w3b, w4, farm; no other work.
     - D9_SPEC byte-identical (71cb85a7…); d3d9total 332/332; test 45/45; test_env_ident passes.
     - It lands with cand4 when L1 carries cand4b.
 - bottleneck: farm1 sm_link numbers; the cand4 base (cand3b, then w28, then L2 cand4b).
+- 01:50Z L5's verdict at e8e54dcea (claude/fnv-l5-platform-w18 cf0ff24, l5-verdict-e8e54dcea/*.tsv), render rows, checked against w6-root 4924ef828:
+    - objstub, 10 V rows: closed at w6-root. 9 have cited rows in render/gl4/constants.tsv and render/shaders/translator/constants.tsv; emit_GLSL_RESERVED is deleted (717e82995). e8e54dcea held the older render copy.
+    - pure: `puregate.py check render/gl4/gen_funcs.py render/smscan/res_smgen.py --base .` at 4924ef828 gives 2 files, 5 violations.
+        - res_smgen.py has 4: the d3d9_tables import through sys.path, os.path.samefile, and 2 unsorted sets. w6 (session_01KmtZKQbpDKvc9qzXT9bLHX) is on it: a declared-root import, sorted sets, res_smtab.gen.h byte-identical. Status: doing.
+        - gen_funcs.py:12 is xml.etree.ElementTree unlisted in the PURE table (verify/, L1). Asked L1 to list it under ASM-032. Status: blocked (L1).
+    - terminator-red platform/win32/render_hooks.cpp belongs to L5.
+- bottleneck: w6 res_smgen fix; L1 on xml.etree PURE row; farm1 sm_link numbers; the cand4 base.
