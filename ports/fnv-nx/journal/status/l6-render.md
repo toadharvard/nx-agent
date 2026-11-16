@@ -1492,3 +1492,9 @@ Paused: w3b, w4, farm; no other work.
     - env: the 6 debs were reported only because cargo was not installed, so there is no defect and setup_verdict_env.sh covers it;
     - a new header-root rule: headers are reached only via `uses {root, output: INCLUDE}` plus include.
   w6 takes verify/ from 2872f3ac8, fixes the render reds by that rule, and builds every root including gl4. Status: doing.
+- 03:13Z w6-root 7a75284ec on w28 2872f3ac8 accepted. recipe check is valid for 9 roots and their variants; the header-root rule needed no render edits.
+    - Builds green, byte-identical to 472d6d56d: d3d9 69, gl4 17 (green again), gl4shim 2, smscan 1, pair 1, translator 8, nxgpu 1, bridgefacts 0, shaders/total 0.
+    - w28's head dropped the L6 admit rows and wine_fixme row 25 again. w6 restored them, and w28 has been asked to carry them for good.
+    - Sent to L3a as the base3 render head.
+    - The gate_d3d9total and gate_pure reruns are with w6.
+- bottleneck: base3 retake (L3a); w28 keeps the L6 rows; farm1 sm_link; the cand4 base.
