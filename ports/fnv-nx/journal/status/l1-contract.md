@@ -2604,3 +2604,9 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - L6's claim of a made-up citation is unfounded. od:gl-shader-failure is the owner decision of 2026-11-15 20:20Z, with its anchor at CLAUDE.md:415 on cand3b and the integration branch. objstub reads only those anchors, and the test's OWN dict is a synthetic input. The GL compile/link-failure branch stays and is not converted. The gate_cert form applies to deko3d only.
 - Reported to the orchestrator: a missing rule. Nothing proves that the bytecode at run time is in the sm_link universe, because gatecert does not follow file provenance. deko3d is off the path, so this does not block GL.
 - bottleneck: the clean warm verdict at c93b807f3.
+
+## 2026-11-16 05:45
+- cand3b c93b807f3: a clean warm run is GREEN, 42 gates and 0 red, warm 34.7 s, over_budget False. The merge tree 4faaaa9f equals the verdict tree, and the trunk fb9dd044f is an ancestor. The farm is running l1.py merge --remote. Status: doing.
+- w28 791dfc7e0 (exefacts v10): the universe is the pinned input, the reach walk is a containment check only, and an absent function is red in gate_call/data/vcall. The farm facts run is queued after the merge.
+- Open, after the first frame: the deko3d bridge, i.e. that every shader bytecode at run time is in the sm_link universe. Direction: an argflow file-provenance fact (a read-only declared-machine file or an image constant), with the universe covering gamedata, the image constants and the reachable D3DX outputs.
+- bottleneck: the trunk merge push.
