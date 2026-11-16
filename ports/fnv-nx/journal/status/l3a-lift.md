@@ -1221,3 +1221,19 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - The ports/fnv-nx/toolchain red is not L2's vbase_bounds.cpp, and a2dc4ecf4 is not an L2 pin (L2's pin is 84f0883e). L2 measured it on cand3b 4c38d7265 and on base3 abbf9662a: 61 errors, made of 60 translation units (8 plugin sources and 52 test fixtures) plus the missing cxx_origin.
 - Cause: cand3b 8b0d9073c made toolchain/ a generated-only root by moving names/build.json up a level. L2 sent L1 the rule: the export stage moves to contract/facts with a `sources` line, and toolchain/build.json is deleted. Owner: L1.
 - bottleneck: L1's cand3b fixes (toolchain root, gen:file-escape for l2sections), then the relift at w7's memo fix.
+
+## 2026-11-16 00:25
+- w7 facts2 06504e91e:
+  - The EH memo is now a compact record (b0c003fa6), and the 'ti' KeyError is fixed (60e0b5ada).
+  - The exe round's peak memory falls from 14 GB to 4.07 GB, 880 s locally; libvorbisfile's output is byte-identical.
+  - The exe exit-1 cause was the missing fnvlift --lib.
+- Doing (w7):
+  - Merge base3 abbf9662a, keeping one --lib mechanism (libarg); then the RUN line goes to the 3 facts farms on the merged head.
+  - Then a pcsrc class proposal.
+- exe facts at 296875f6c, local and not a farm run:
+  - codemap red: 15,098 of 12,440,971 entries uncertified, and 5 bad-decode entries;
+  - pcsrc red: 34,368, over 4,146 sources and 68,632 rows;
+  - entries_on_data: 4;
+  - JTAB_RED: 326 (w13's class report).
+- Doing (w13): close the class "Python branch on a symbolic field" (L3b immsel: 12 of 321,376 instances fail, int 3/4/0x2d).
+- bottleneck: the 3 facts farms on the merged facts2 head, then pcsrc and codemap to 0, then the relift.
