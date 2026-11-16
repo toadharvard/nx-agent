@@ -1,10 +1,9 @@
 {
  "format": "fnvnx-recipe/1",
  "compiler": {
-  "name": "stage1",
-  "root": "ports/fnv-nx/toolchain-stage1",
-  "output": "STAGE1",
-  "at": "/ext/stage1"
+  "external": "stage1",
+  "cc": "prefix/bin/aarch64-none-elf-gcc",
+  "cxx": "prefix/bin/aarch64-none-elf-g++"
  },
  "plugins": [
   {
@@ -33,6 +32,12 @@
   }
  ],
  "external": [
+  {
+   "name": "stage1",
+   "root": "ports/fnv-nx/toolchain-stage1",
+   "output": "STAGE1",
+   "at": "/ext/stage1"
+  },
   {
    "name": "gcc-src",
    "repo": "fnv-nx-build",
