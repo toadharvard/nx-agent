@@ -1466,7 +1466,7 @@ static void finish_unit(void *, void *)
 #define FNVNX_KIND_IS(n, meaning) known = known || r.kind == #n;
     FNVNX_SYMPAIR_KINDS(FNVNX_KIND_IS)
 #undef FNVNX_KIND_IS
-    if (!known) error("%<.fnvnx.sympair%>: the kind %qs of %s is not in FNVNX_SYMPAIR_KINDS (sympair_kinds.inc)", r.kind.c_str(), r.sym.c_str());
+    if (!known) error("%<.fnvnx.sympair%>: the kind %qs of %s is not in %qs (%qs)", r.kind.c_str(), r.sym.c_str(), "FNVNX_SYMPAIR_KINDS", "sympair_kinds.inc");
     fprintf(asm_out_file, "\t.ascii\t\"%s\\t%s\\t%s\\t%s\\n\"\n", r.sym.c_str(), r.ms.c_str(), r.kind.c_str(), r.def ? "def" : "ref");
   }
   /* .fnvnx.names: every function and object the unit named, whether or not the object has a symbol for it (a
