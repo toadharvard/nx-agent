@@ -1206,3 +1206,13 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - The three test entries get crt0's ABI, `uint64_t f(uint64_t)`, held by a shared extern "C" declaration so a mismatch is a compile error.
   - Byte-equality of the re-keyed d3dx9_31 factsimg stage against fnv-nx-build l3a-lift/facts 6944080; then retn.
 - bottleneck: the relift at w7's memo fix, which brings new keys for FACTS, RETN and FPFACTS.
+
+## 2026-11-16 00:05
+- base3 abbf9662a (w8):
+  - cand3b 4c38d7265 is merged. The toolchain tree is now a2dc4ecf4, L2's new pin.
+  - msvcrttest is split into 4 generated images (one per terminal case, no argv). I sent the run list to L4.
+  - The test entries have crt0's ABI, held by lift/rt/fnvl_entry.h.
+- recipe check: 44 roots valid, 1 red, ports/fnv-nx/toolchain. That root is red on cand3b itself: L2's tests/sdd/vbase_bounds.cpp meets L1's admit rule. Owner: L1 and L2, sent to both.
+- hostapi.h now takes the trunk's side, so FNVNX_HOST_HAS is dropped; nothing uses it. L5 was told.
+- Running (w8): the re-keyed d3dx9_31 factsimg against farm facts 6944080, and the compiles of the native test images.
+- bottleneck: the toolchain root's admit (L1/L2), then the relift at w7's memo fix.
