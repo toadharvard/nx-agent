@@ -2440,3 +2440,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:14
 - L3a base3 330e873c7: the cpumodel.c record follows its definition. lift/rt has 3 reds left, all L2 on the farm pin (dispatch.c ENTRY1-CONT cast; decltype "no declaration line (fnvnx_dispatch)" in msvcrt_ci.cc and msvcrt_eh.cc). Sent to L2 (the decltype writer takes the declaration from the tree, not a source line).
 - bottleneck: cand3b verdict at 597f2e007.
+
+## 2026-11-16 04:15
+- L2: the recipe-path pin is not built yet (w3: gcc1/rt). w2's fixes on the cand4b plugins line: (a) decltype diagnostic, (b) DECLTYPE-PLUGINSYM from DECL_SOURCE_LOCATION (msvcrt_ci, msvcrt_eh, backend.cpp:163), (c) ENTRY1-ATOMIC in the C front end. The pin follows in one commit with proof (b) and the deletion of build.sh/stage2.sh/stamp.py.
+- Ruling A corrected: ra writers = generated bridges + generated lifted units + fnvl_native_transfer. Checked form: a PP-fact gate (w28) where the accessor header is red outside generator-output units.
+- bottleneck: cand3b verdict at 597f2e007.
