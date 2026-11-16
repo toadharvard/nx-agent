@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/farm/gamedata_fetch.sh
 """farm/gamedata_fetch.sh reads only what the admitted recipes declare, by commit, tree-checked (`recipe.py externals`):
   - the declared gamedata/exe and gamedata/redist are installed from a toy artifacts repository, by commit, and a second run is "up to date";
   - ARTIFACTS_URL only changes the location: a repository that holds a different tree under the pinned commit's name cannot be installed (red);

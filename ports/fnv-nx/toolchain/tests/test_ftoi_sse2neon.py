@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/shim/include
 """Test of the four sse2neon float -> integer forms (_mm_cvt_ps2pi / _mm_cvtps_pi32, _mm_cvtps_pi16, _mm_cvtps_pi8, _mm_cvt_ss2si) through the real
 shim/include/fnvnx_compat.h and the pinned sse2neon (fnv-nx-build tools/sse2neon), built by the recipe with the msvcmodel compiler and the full native
 plugin set. Static: the unit builds, fnvnx_ftoi rewrote every NEON target builtin the forms reach (no finding), each form's function holds the rule's compare and
