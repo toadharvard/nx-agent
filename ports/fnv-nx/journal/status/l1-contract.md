@@ -2305,3 +2305,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - Both fixes are assigned to w15; the farm sends the sandbox output. One more verdict, then the merge.
 - bottleneck: those 2 selftests.
 - test_objstub_rules sandbox red: its `# reads:` lacks bridgefacts (comrows.py and d9rows.py). w15 declares it, and derives reads if that is possible this round.
+- w15 cand3b 963dce6629bb:
+  - the 4 stale include_closure cases are removed and the RECIPE.md "Include" paragraph matches the rule;
+  - objstub_rules declares bridgefacts;
+  - only the verdict.py part of w28 275771a6f is taken.
+  - The farm verdict is running. Coverage of the include rule is being confirmed.
