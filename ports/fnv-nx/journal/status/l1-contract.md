@@ -2405,3 +2405,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:01
 - L5 w32 d41c03c3d (w31 + w28 abdd9bec6): lookup byte-identical, 567 rows including "5 d3d9 placeholders". Placeholders are forbidden: w32 names them and gives each a real definer or makes the row absent. Rebase onto w28 08109b9ce + 01e91c00d, move the records after their declarations, then one farm verdict.
 - bottleneck: cand3b farm verdict at 963dce662.
+
+## 2026-11-16 04:02
+- L6: the gate_d3d9total red was the stale render cut. At w6-root 9e62a93ea it is a 42-line stage reader (23884c5d0). w28 takes render/ from L6's head.
+- L3a (w8, base3 2d1fc6f80): ruling A writer set = generated bridges + `[[noreturn]] fnvl_native_transfer(eip, esp)` in the bridge TU; five non-local entries use it. Accepted.
+- bottleneck: cand3b farm verdict at 963dce662.
