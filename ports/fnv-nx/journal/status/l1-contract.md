@@ -2651,3 +2651,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - w28-c4 list +9affb1631 (wine_fixme.tsv row 25) and every wine_fixme row on w28's line; +link/ldcheck.py (L6).
 - Orchestrator ruling d4397e9a3: a root may declare external_flags with a cite (file:line in the pinned mirror), only for flags that are neither data-model nor ABI flags; a restatement of semantics is red. Assigned to w15 for cand4; w15 tells L2 when it lands. (Note: -frounding-math is already in semantics.common.)
 - Per-target recipes are deltas over the base (w28 8666fb756), ruled for L6. Host per-target recipes drop plugins.
+- Corrected (integ f1f7b4d7e): the per-root external_flags form is cancelled. A documented library flag lives only in guest_compiler.json flags.semantics, with its citation on the row. cand4 takes only L2's citation field, if it is ready, plus CLAUDE.md whole from integ.
