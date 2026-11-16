@@ -1632,7 +1632,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 ## 2026-11-16 05:58 — assumptions gate at 0 on base3
 - w8 (done, base3 30030c1e8): the assumptions gate is at 148/148 mentions certified, 0 findings.
   - L6 render d98bb7faa is taken whole (14 roots recipe-valid).
-  - ASM-329 replaces ASM-329 (the shared alias).
+  - ASM-329 replaces the older record that shared its alias L3b:A-F2IHELPERS.
   - L3b's gate_fpexact, helpercalls, x86sys and genout come from a1caba273.
 - L3b bases its later handover on 30030c1e8.
 - bottleneck: the L2 recipe-path pin and dispatch.c ENTRY1-CONT (L2 w2); the w7 universe engine (modlift for every image); the int 0x29 / far-selector rows (L5).
