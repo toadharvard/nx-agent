@@ -2548,3 +2548,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:50
 - L3a base3 3e035ada1: lift/ assumptions findings reduced (3 rewordings, ASM-221 deleted, READMEs to .md). Left: stray ASM-234 (L3a lead), prove.py:1/:74 (L3b), the l3a-lift.md ASM-221 citation (L3a lead). Whole tree: 9 findings; ASM-617/619/621 uncited (L6, sent).
 - bottleneck: the cand3b head with the content-keyed memo, then the verdict.
+
+## 2026-11-16 04:51
+- L6: ASM-617/619/621 are cited since w6-root 680ff849a; base3's render/ is stale. L6 head d98bb7faa has 0 ASM-6xx findings; base3 takes render/ and bridgefacts/ from it (L6 told L3a).
+- bottleneck: the cand3b head with the content-keyed memo, then the verdict.
