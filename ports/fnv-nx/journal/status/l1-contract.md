@@ -2862,3 +2862,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - (2) guest.ld split: the layout script keeps the script-defined symbols, and link/guest_image.ld holds the ASSERTs over input-defined symbols (the crt0 hdr and mod0). ldsynth uses the layout script only, and the image link uses both. A selftest checks that each ASSERT is in the right file. This unblocks linkstrict, imports, abi and machine.
   - (3) pure is 83 of 86: l2sections, gate_abs and gate_disp are to be fixed or reported.
 - bottleneck: cand4 verdict; the w28 head for L5; the L3a base3 head.
+- w28-c5 07bfb163a: done. It has synth_names with a test, the guest.ld/guest_image.ld split with test_guest_scripts, and the pure fixes (FPCR in contract/target/fpcr.py; l2sections).
+  - gate_abs and gate_disp are gate drivers, outside the pure universe.
+  - Open: ctypes_compat:187 takes w15's 5e9f645ae (no memo). The L5 lead re-runs on this head.
