@@ -2181,3 +2181,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - bottleneck: cand3b warm verdict (w15).
 - w13: the _CI* set matches the msvcrt imports of the 7-module set. 15 of 15; all 29 msvcrt records are imported. The exe imports no msvcrt. This was a one-off check.
 - The farm job exportl3 is queued: the recipe build of lift/rt @372def0cf plus exportgen, plus the dispatch.c log.
+- abi va rule, settled:
+  - The gate judges only the crossing universe, the symbols the x86 boundary binds, derived the same way as in the imports gate.
+  - va_forwarders = msvcrt_va.tsv column 2.
+  - Native-to-native va_list calls (_vsnprintf → fnvnx_msvc_format/scan, L5 w24 05f2207) are not judged.
+  - No new file and no new rows. Assigned to w28.
