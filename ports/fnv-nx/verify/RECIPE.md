@@ -510,7 +510,7 @@ A guest root's compile reads the pinned runtime's own headers. The compiler's se
 ## Shards and store merge
 
 A cold build of a large root is split over farms by one rule, with no second build path.
-- `recipe build --root R --shard i/N` (N <= 16, 0 <= i < N) builds the units whose first-stage key satisfies `int(key, 16) mod N == i`. The first-stage
+- `recipe build --root R --shard i/N` (N any integer >= 1, 0 <= i < N) builds the units whose first-stage key satisfies `int(key, 16) mod N == i`. The first-stage
   key is the PP stage key on the whole declared trees (`unitstage.Build.first_key`; a `.s` unit: its one stage), computed before anything runs, so every
   shard of one checkout agrees. The recipe asserts from the unit list that the shards are disjoint and together the unit set (`shard_partition`).
   All stages of a unit run in its shard. Root-level stages (tests, link, link tables, gates) do not run in a shard build; its `objects.json` has `shard`.

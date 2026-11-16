@@ -1901,9 +1901,6 @@ def driver_doc(stage, drv, flags, mode, tail, inputs):
             "env": dict(unitstage.ENV, PATH=os.path.dirname(drv)), "outputs": ["/out"], "inputs": inputs}
 
 
-MAX_SHARDS = 16
-
-
 def shard_of(key, n):
     """The shard of a unit whose first-stage key is KEY (hex): int(KEY, 16) mod N. The first-stage key is the PP stage key on the whole trees
     (unitstage.Build.first_key), a function of the unit and the declared inputs, so every shard build of one checkout assigns the same shard."""
@@ -1911,10 +1908,10 @@ def shard_of(key, n):
 
 
 def shard_spec(text):
-    """`i/N` -> (i, N); N in 1..MAX_SHARDS, 0 <= i < N, else RecipeError."""
+    """`i/N` -> (i, N); N any integer >= 1, 0 <= i < N, else RecipeError (no cap: shard_partition asserts the partition)."""
     m = re.fullmatch(r"(0|[1-9][0-9]*)/([1-9][0-9]*)", text or "")
-    if not m or not (int(m.group(2)) <= MAX_SHARDS and int(m.group(1)) < int(m.group(2))):
-        raise RecipeError(["--shard %r: want i/N with 0 <= i < N <= %d" % (text, MAX_SHARDS)])
+    if not m or not int(m.group(1)) < int(m.group(2)):
+        raise RecipeError(["--shard %r: want i/N with N >= 1 and 0 <= i < N" % text])
     return int(m.group(1)), int(m.group(2))
 
 
