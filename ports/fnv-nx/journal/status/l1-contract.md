@@ -2733,3 +2733,9 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - funcfacts/dnfile: only the hand-run manifest/test_import_escape.sh reaches it. Sent to L5: make it a stage of the manifest root (winmd external, dnfile pin from L1) or delete it.
 - w28-c5 head: e26b70863 (on top of 6461d118e); the farm verdict is queued after cand4.
 - bottleneck: the cand4 verdict (farm state unknown); L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
+
+### 2026-11-16: import_escape becomes a stage (L5)
+- L5 ruling: import_escape.tsv is the --escape input of gate_reach and gpa_names, so it is a path step. It becomes a run step of manifest, with the winmd (windows-rs 8ca69fda) as a pinned external, and test_import_escape.sh is deleted.
+- The dnfile pin (env.json and the mirror) is assigned to w28-c5; the commit goes to L1 and L5.
+- cand4 verdict restarted on the farm at 07:25Z, after a container restart killed the first run.
+- bottleneck: the cand4 verdict (running); L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
