@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gate "liftfacts" (fnvnx-gate/1, VERDICT.md class 5: a code address without a dispatcher entry): the lift facts certify every image's code map and every
 code-address source. It reads the GATES output of the lift/facts root and the loader root's MODULES_TSV, as published in GATE_CACHE (it never runs a producer).
-    python3 -I gate_liftfacts.py        cwd = checkout root, env GATE_OUT, GATE_COMMIT, GATE_CACHE; writes GATE_OUT/liftfacts.json
+    python3 -I gate_liftfacts.py        cwd = checkout root, env GATE_OUT, GATE_CACHE; writes GATE_OUT/liftfacts.json
 Input: the declared output GATES of the lift/facts root, as published in GATE_CACHE (gate_build.published_output), a directory with
     summary.tsv                      tab separated, header line starts "# ": image status universe certified uncertified entries_on_data pcsrc_red
                                      s4_violations; one row per image (exe first), then the row `total` (the assembler of the facts, tools/factsassemble.py)

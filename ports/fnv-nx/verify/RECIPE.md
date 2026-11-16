@@ -229,7 +229,13 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
 
   **One recipe per target.** A root whose units serve both targets (the console backend on the guest, the host's gl4 calling the same translator)
   names a recipe per target in admit.json: `"recipe": {"guest": PATH, "host": PATH}` with `"target"` the base's (a plain string is the root's single
-  target, as before). The units are the same for every target; compiler, flags and plugins come from each target's recipe. It is one mechanism with
+  target, as before). The units are the same for every target; compiler, flags and plugins come from each target's recipe.
+  **A per-target recipe holds only what depends on the target:** compiler (or profile), flags, plugins, link, its own `external` toolchain, and `units` or `include` only
+  when they really differ from the base. `generated`, `run`, `uses` and `outputs` live once, in the base recipe, and every target reads them from there: generated
+  and run stages run on the host whatever the target, so they are target-independent by construction. `units` and `include` are inherited; a per-target value equal to
+  the base's is a redundant copy and red, and so is `generated`, `run`, `uses` or `outputs` in a per-target recipe (`recipe.per_target_errors`). The effective recipe
+  of `root@OTHER` is `recipe.inherit(per-target, base)`: the base's stages, outputs, units, include and the externals the per-target recipe does not name, under the
+  per-target fields; an `external` name declared by both with different content is red. `tests/test_pertarget.py`. It is one mechanism with
   `variants`: `recipe.norm_entry` parses the dict to the string spelling plus `variants: {OTHER: {"target": OTHER, "recipe": PATH}}`, and that
   spelling may be written in admit.json directly (it parses to the same structure). `entry_of` resolves the effective target and recipe path; the
   pair `root@OTHER` is built, keyed (the variant name, `FNVNX_TARGET`, its own compiler and flags) and gated separately in `GATE_CACHE`. A per-target
@@ -299,6 +305,7 @@ declared debs, or a file of an external / a built root, see "A tool that is not 
   directory mounted at its own path (`/usr`, `/etc`, `/var`, ...) as a read-only input, each top-level symlink (base-files' `/bin`, `/lib`, `/lib64`, `/sbin`) a
   sandbox link. So the kernel starts dynamic programs through their own PT_INTERP, and a program runs its children by PATH (`/usr/bin:/bin`). The trees are stage inputs: the key holds their
   content, not the package version (envcheck pins the packages to the machine).
+- `debs` is a list of env.json package names, `{"closure": [TOPS]}`, or `{"profile": NAME}`: NAME is a key of env.json `debs.profiles` (`{name: [top package names]}`, one fact in one file), resolved through the same Depends closure as `closure`, so two roots that name one profile have the same debs and the same stage content. An unknown profile is red.
 - `inputs` are at `/in/1`, `/in/2`, ... in list order, as for an artifact step; a ref `{"stage": "<this root>:gen:I" | "<this root>:run:NAME", "path": P}` is a file or
   directory output of an earlier step of this root (a red producer blocks the step).
 - `dirs` are directory outputs (see "Directory outputs"); `scratch` lists absolute paths of writable tmpfs directories (a build works out of tree there; nothing survives,
@@ -405,10 +412,11 @@ declared `uses` input, passed to the tool as an argument (as `--lib` is) or read
 ### Declared imports of a generator's tool (`imports`)
 
 A generator tool may import modules of other admitted roots only through the `imports` of its own root's admit.json row (`{"imports": [root, ...]}`, the form `manifest` uses).
-`gen:foreign-import` accepts an import that resolves inside a tree of a declared import root. The generate stage mounts the tool's own root at `/tool` and, at `/imp` in
-the repo-relative layout, exactly the files of the declared import roots that the import closure (by `ast`, transitively) reaches plus the data those modules read (below), and nothing else of those roots;
+`gen:foreign-import` accepts an import that resolves inside a tree of a declared import root. **One module path.** A declared root R is importable under exactly one module path: its path relative to `ports/fnv-nx` with `/` replaced by `.` (`render/total` -> `render.total`), computed by `gate_admit.import_roots`, the one function that recipe (`foreign_imports`, the mount), `gate_pure` (its `--base` is `ports/fnv-nx`) and the declared-use rule call. The stage mounts R's closure at `/imp/<that relative path>` with `PYTHONPATH=/imp` and nothing else; the packages are namespace packages (PEP 420), no `__init__.py` is invented. The bare name of a module of a declared root (`import x` for `render/total/x.py`) is `gen:foreign-import` with the qualified name as the hint, and so is a bare import of a sibling inside a declared root (use the qualified name or `from . import`). (`gate_abspath` keeps its deliberate superset resolution by path suffix: it only over-approximates the closure it judges.)
+
+The generate stage mounts the tool's own root at `/tool` and, at `/imp`, exactly the files of the declared import roots that the import closure (by `ast`, transitively) reaches plus the data those modules read (below), and nothing else of those roots;
 `PYTHONPATH` lists their directories. The stage key therefore covers only the closure: an edit to another file of an import root leaves the key unchanged. Red:
-an import of a root that is not declared (`gen:foreign-import`); a declared root that no generator of the recipe reaches (`gen:unused-import:<root>:<import root>`); a
+an import of a root that is not declared (`gen:foreign-import`); a declaration that no module of the declaring root imports from (`gen:unused-import:<root>:<import root>`; the rule is per declaring root, never per consuming recipe, so a root with two tools of which one imports the declared root is green for both consumers; the stage of a tool whose closure does not reach the declared root simply mounts none of it); a
 read by a path of its own location (`__file__`) in a module of an import root that leaves that root's tree or that the rule cannot decide. A data file such a module reads by a
 constant path of its own location inside its root's tree (decided by `pathflow`, a directory: every tracked file under it) is mounted with the closure and so is in the key. Functions: `recipe.import_trees`, `recipe.import_mount`. Tests: `tests/test_genimports.py`.
 
@@ -493,7 +501,7 @@ as `-z X` or `-zX`, inside `-Wl,a,b` or after `-Xlinker`, or when it is an `@fil
 
 ## External inputs
 Real sources and toolchains that are not Debian packages of env.json live in the private `fnv-nx-build` repository (a mirror branch). An external
-is fetched ONLY by exact `commit` (`git fetch --depth 1 $ARTIFACTS_URL <commit>`, default https://github.com/toadharvard/fnv-nx-build) into
+is fetched ONLY by exact `commit` (`git fetch --depth 1 <artifacts URL> <commit>`; the URL is the argument `--artifacts` of recipe.py / l1.py, recorded as `<ext cache>/artifacts.url` (recipe.artifacts_url), else the pinned repository of env.json; never the process environment) into
 `<GATE_CACHE>/external/<commit>`, checked out, ingested into the CAS, and its tree hash must equal `tree_sha256` (get it with
 `cas.py ingest`). A mismatch or an unreachable commit makes the build red with stage `external:<name>`. The tree is a declared input at `at`
 of every stage, so a changed mirror changes every stage key. `ref` is documentation only; the commit decides. Validation: `repo` is `fnv-nx-build`,
@@ -512,6 +520,10 @@ it is passed as `-I<that path>` (the external is a declared input of every stage
   input, so it is in the key (another file's commit does not change it), mounted executable at `/exec/<basename>`, and run as `/exec/<basename>`;
 - `{"root": R, "output": NAME}`: a published file output of a root this recipe `uses` (so R is a dependency); resolved like the `uses` mount and mounted at `/exec/<NAME>`.
   A binary built outside the recipe machinery (a farm-built `tools/*` branch) is not accepted here: only an external file whose tree is pinned, or a root's own output.
+
+Either file form may carry `libs`: a list of declared lib directories, each `{"external": NAME, "path": DIR}` or `{"root": R, "output": NAME}` (a directory output of a root this recipe `uses`),
+mounted at `/exec/lib/<i>` with `LD_LIBRARY_PATH` naming them (in the key). A `DT_NEEDED` name that no deb provides resolves by file name in those directories, and the library found there is read in
+turn (its own `DT_NEEDED`, transitively). This is how a built tool (isla) gets a library from a declared input (the z3 wheel's `lib`) without a second build of that library.
 
 Static resolution (no `ldd`, nothing is executed): the ELF64's program headers and dynamic section are read. Its `PT_INTERP` and every `DT_NEEDED` name must be provided by the root layout of the
 step's `debs` (the deb's own symlinks followed; the loader's default directories and the file's absolute RPATH/RUNPATH entries are searched; `$ORIGIN` finds nothing, one file is mounted).

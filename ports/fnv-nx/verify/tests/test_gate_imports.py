@@ -29,7 +29,7 @@ res = {"defined": [{"symbol": "a", "bind": "GLOBAL", "type": "FUNC", "object": "
        "undefined": ["b"]}
 check("symbols: defined entries and referenced names", G.symbols(res) == {"a": [("GLOBAL", "FUNC"), ("WEAK", "FUNC")], "b": [("UND", "NOTYPE")]}, G.symbols(res))
 
-os.environ["ARTIFACTS_URL"] = TR.BASE + "/artifacts.git"
+TR.recipe.ARTIFACTS = TR.BASE + "/artifacts.git"
 TR.subprocess.run(["git", "init", "-q", "--bare", TR.BASE + "/artifacts.git"], check=True)
 GC = TR.BASE + "/cache"
 

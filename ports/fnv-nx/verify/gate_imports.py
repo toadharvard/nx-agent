@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gate "imports" (fnvnx-gate/1, class 4 of VERDICT.md): every import of the manifest has a body, proven by the build products (rules: contract/imports.py).
-    python3 -I gate_imports.py      cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/imports.json and GATE_OUT/imports.ids
+    python3 -I gate_imports.py      cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/imports.json and GATE_OUT/imports.ids
 Roots come only from verify/admit.json (class product); for each the gate calls gate_build.ensure (build or cache hits) and reads the symbol
 tables the recipe wrote (objects.json: defined {symbol, bind, type}, undefined). No nm, no ELF parsing, no probe run.
 A product root DECLARES its imports in `<root>/imports.in.json` ("fnvnx-imports-in/1"):

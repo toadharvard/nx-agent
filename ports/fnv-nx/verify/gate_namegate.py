@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gate "namegate" (fnvnx-gate/1, VERDICT.md class 8): a native body that stands for an exe function carries that function's MSVC name, certified
 against the cl object of the same source (link/gate_names.py rows(): the plugin's name is a definition of the unit's cl object).
-    python3 -I gate_namegate.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/namegate.json
+    python3 -I gate_namegate.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/namegate.json
 Universe: the rows of gate_names.rows() whose symbol bodysel selects as the NATIVE body of an exe function, in each admitted product root with
 "target": "guest", "cxx_origin": "native" and a `game` directory (the join and its inputs: gate_l2native.py). A root without `game`: universe 0 for it;
 no such root: universe 0, green. An uncertified row whose symbol bodysel turns LIFTED is outside the universe, not red.

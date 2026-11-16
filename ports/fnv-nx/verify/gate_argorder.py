@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gate "argordergate" (fnvnx-gate/1, VERDICT.md class: calling convention / argument order): every native C++ unit of a guest root is compiled with
 the fnvnx_order plugin (MSVC evaluation order of arguments, objects, operators, assignments) loaded in the rule's order.
-    python3 -I gate_argorder.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/argordergate.json
+    python3 -I gate_argorder.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/argordergate.json
 Universe: the C++ units of every admitted product root with "target": "guest" and "cxx_origin": "native" (admit.json; the lifter emits the order
 itself, a lifted root has none). No such root: universe 0, green.
 Certificate of a unit, all of: (1) the recipe of its root validates (recipe.check, which holds the plugin rule); (2) the recipe's plugin list is
