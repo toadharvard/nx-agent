@@ -48,9 +48,16 @@ def main():
     e, _, _ = errs("gi3", [LIB], gen="import sys\nopen('/out/gen/o.c', 'w').write('int o;\\n')\n")
     un = [x for x in e if "gen:unused-import" in x]
     check("red: a declared import root that no generator reaches", len(un) == 1 and LIB in un[0], e)
-    e, _, _ = errs("gi4", [LIB], libfiles=dict(LIBFILES, **{"libmod.py": "import os\nopen(os.path.join(os.path.dirname(__file__), 'data.json'))\n"}))
+    lf = dict(LIBFILES, **{"libmod.py": "import os\nopen(os.path.join(os.path.dirname(__file__), 'data.json'))\n", "data.json": "{}\n", "other.json": "{}\n"})
+    e, repo4, roots4 = errs("gi4", [LIB], libfiles=lf)
+    check("green: a module of an import root reading a tracked data file by a path of its own location", [x for x in e if "gen:file-escape" in x] == [], e)
+    bad, m4 = recipe.import_mount(T + "gen/g.py", recipe.tree_of(roots4, T + "gen/g.py"), set(recipe.tracked(repo4)), [], roots4, repo4)
+    check("the data file it reads is mounted with the closure, and only that one (not other.json, not unused.py)", sorted(os.path.basename(f) for f in m4) == ["data.json", "libmod.py"], m4)
+    e, _, _ = errs("gi5", [LIB], libfiles=dict(LIBFILES, **{"libmod.py": "import os\nopen(os.path.join(os.path.dirname(__file__), '..', 'elsewhere.json'))\n"}))
     es = [x for x in e if "gen:file-escape" in x]
-    check("red: a module of an import root reading data by a path of its own location (only its .py closure is mounted)", len(es) == 1 and "libmod.py" in es[0], e)
+    check("red: a read by a path of its own location that leaves the import root's tree", len(es) == 1 and "libmod.py" in es[0], e)
+    e, _, _ = errs("gi6", [LIB], libfiles=dict(LIBFILES, **{"libmod.py": "import os, sys\nopen(os.path.join(os.path.dirname(__file__), sys.argv[1]))\n"}))
+    check("red: a read whose path the rule cannot decide", len([x for x in e if "gen:file-escape" in x]) == 1, e)
     print("%d FAILED" % len(TR.FAILED) if TR.FAILED else "all passed")
     return 1 if TR.FAILED else 0
 

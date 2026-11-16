@@ -37,6 +37,11 @@ def main():
     check("generated-only root: a .cc that is a declared run input is green", e == [], e)
     e = tu([], {"toy/loose.cc": "int f;\n"})
     check("generated-only root: an undeclared .cc is red", len(e) == 1 and "loose.cc" in e[0], e)
+    g = rec([ROOT + "/in.cc"])
+    check("generated-only: run steps and no unit keys", recipe.generated_only(g), "")
+    check("generated-only: `compiler` and `plugins` may be written (the compiler stage)", recipe.generated_only(dict(g, compiler={"name": "s", "root": "r", "output": "O", "at": "/ext/s"}, plugins=[{"name": "p"}])), "")
+    check("not generated-only: any unit key (flags, include, units, link, profile, variants)", not any(recipe.generated_only(dict(g, **{k: 1})) for k in ("flags", "include", "units", "link", "profile", "variants")), "")
+    check("fill keeps the root's own compiler", recipe.fill_generated_only(dict(g, compiler="X"))["compiler"] == "X", "")
     print("%d FAILED" % len(TR.FAILED) if TR.FAILED else "all passed")
     return 1 if TR.FAILED else 0
 

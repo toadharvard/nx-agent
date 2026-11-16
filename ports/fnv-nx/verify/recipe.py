@@ -547,13 +547,14 @@ def profile_fields(profile, pin):
             "external": [dict(ex)]}, []
 
 
-COMPILE_KEYS = ("compiler", "flags", "include", "units", "link", "profile", "variants")
+UNIT_KEYS = ("flags", "include", "units", "link", "profile", "variants")   # the keys of a root that compiles units: a root with none of them has no unit (`compiler` and `plugins` stay allowed: a run step's {"plugin": NAME} input builds against the root's compiler)
 
 
 def generated_only(rec):
     """A recipe of generated stages only (RECIPE.md "Generated-only roots"): `generated` or `run` is a non-empty list and none of the keys that compile or link
-    (COMPILE_KEYS) is written. Such a root has no unit (check refuses a translation unit in it), so it needs no compiler and no flags."""
-    return isinstance(rec, dict) and bool(rec.get("generated") or rec.get("run")) and not any(k in rec for k in COMPILE_KEYS)
+    (UNIT_KEYS) is written; `compiler` and `plugins` may be (the compiler stage: its `run` steps take the root's plugins as inputs). Such a root has no unit (check refuses
+    a translation unit in it), so it needs no flags; with no `compiler` of its own it needs none either."""
+    return isinstance(rec, dict) and bool(rec.get("generated") or rec.get("run")) and not any(k in rec for k in UNIT_KEYS)
 
 
 def fill_generated_only(rec):
@@ -561,7 +562,7 @@ def fill_generated_only(rec):
     never run and no flag is ever passed. Any other recipe: REC unchanged."""
     if not generated_only(rec):
         return rec
-    return dict(rec, units="all", include=[], flags={"c": [], "cxx": [], "asm": []}, compiler=profile_fields("host", None)[0]["compiler"])
+    return dict(rec, units="all", include=[], flags={"c": [], "cxx": [], "asm": []}, compiler=rec.get("compiler") or profile_fields("host", None)[0]["compiler"])
 
 
 def expand_profile(rec, pin):
@@ -655,6 +656,13 @@ def link_candidates(roots, root, target, repo):
     return out
 
 
+def missing_recipes(roots, files):
+    """[str] one error per recipe file that an admit row names (gate_admit.recipe_paths: `recipe` string, {target: path} map, variants) and that is no git-tracked file of
+    FILES: a row without its build.json in the same tree would stop every build with a bare "No such file"."""
+    return ["admit.json: root %s names recipe %s, which is not a tracked file of the tree (the recipe enters with the row, in the same commit)" % (p, rp)
+            for p, r in sorted(roots.items()) for rp in gate_admit.recipe_paths(r) if isinstance(rp, str) and rp not in files]
+
+
 def import_trees(roots, owner):
     """{declared import root: [its trees]} of the admitted root OWNER (admit.json `imports`): the roots whose Python modules a tool of OWNER may import."""
     return {r: gate_admit.trees(roots[r]) for r in (roots[owner].get("imports", []) if owner in roots and isinstance(roots[owner].get("imports", []), list) else []) if r in roots}
@@ -662,11 +670,21 @@ def import_trees(roots, owner):
 
 def import_mount(tool, owner, files, inputs, roots, repo="."):
     """([bad], [files of the declared import roots in the import closure of TOOL]): what the generate stage of TOOL mounts under /imp (repo-relative layout) next to its
-    own root's /tool. The key covers exactly these files: an edit to any other file of an import root leaves the stage's key unchanged."""
+    own root's /tool: the .py closure plus the data files those modules read by a path of their own location (decided by pathflow). The key covers exactly these files: an
+    edit to any other file of an import root leaves the stage's key unchanged."""
     it = import_trees(roots, owner)
     clo = []
     bad = foreign_imports(tool, owner, files, inputs, repo, clo, [t for ts in it.values() for t in ts])
-    return bad, sorted(f for f in set(clo) if any(under(f, t) for ts in it.values() for t in ts))
+    mods = sorted(f for f in set(clo) if any(under(f, t) for ts in it.values() for t in ts))
+    data = set()
+    for f in mods:   # the data a module reads by a path of its own location, resolved by pathflow inside its root's tree (a directory: every tracked file under it)
+        try:
+            ins = []
+            pathflow.escapes_of(f, open(os.path.join(repo, f)).read(), tree_of(roots, f), ins)
+        except (OSError, SyntaxError, ValueError):
+            continue
+        data |= {g for g in files if any(g == p or under(g, p) for p in ins)}
+    return bad, sorted(set(mods) | data)
 
 
 def foreign_imports(tool, owner, files, inputs, repo=".", closure=None, imports=()):
@@ -1460,6 +1478,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
         err.append("format is not " + FORMAT)
     if rec.get("units") != "all":
         err.append('units must be "all" (no tracked source file can be left out)')
+    err += missing_recipes(roots, files)
     mine = {f[len(root) + 1:] for f in files if under(f, root)}
     gen = generated_outputs(rec)
     if gonly:   # no compiler and no flags are written: the root compiles nothing; a source that is no run step's declared input is neither a unit nor an input: red
@@ -1570,8 +1589,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
                 ot = tree_of(roots, cf)
                 if ot is None:
                     continue
-                if any(under(cf, x) for ts in import_trees(roots, owner).values() for x in ts):
-                    ot = "/imp"   # a module of a declared import root: only the .py closure is mounted (at /imp), so a data file read by a path of its own location is not there
+
                 try:
                     src = open(os.path.join(repo, cf)).read()
                     esc = pathflow.escapes_of(cf, src, ot)
@@ -2650,7 +2668,7 @@ class Job:
         env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
         env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "FNVNX_PYMODS": self.pymods})
         if imp:   # the directories of the mounted modules (sorted): a module of a declared import root imports its siblings
-            env["PYTHONPATH"] = ":".join(sorted({"/imp/" + posixpath.dirname(f) for f in imp}))
+            env["PYTHONPATH"] = ":".join(sorted({"/imp/" + posixpath.dirname(f) for f in imp if f.endswith(".py")}))
         doc = {"format": "fnvnx-stage/1", "stage": "gen:%s:%d" % (self.root, i), "class": "build", "tool": "python", "cwd": "/work",
                "argv": [py["python"], "-s", "-B", "/launch/genlaunch.py", "\n".join(g["outputs"] + ["dir:" + d for d in g.get("dirs", [])]), "/tool/" + g["tool"][len(owner) + 1:]] + g["args"] + (["--section", g["objects_of"]["section"]] if isinstance(g.get("objects_of"), dict) and g["objects_of"].get("section") else []), "env": env,
                "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"], "ro_root": True}   # a generator writes only /out
