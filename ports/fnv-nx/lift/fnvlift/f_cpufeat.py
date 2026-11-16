@@ -1,59 +1,86 @@
-"""CPUID-gated instruction forms (task C4a / B4): ONE table, ONE rule.
+"""CPUID-gated instruction forms: ONE rule, ONE source (the Intel SDM opcode tables).
 
-THE RULE (CPUID-UD). The reference CPU model advertises exactly the feature bits that rt/cpumodel.c returns (leaf 1 EDX 0x078bfbff, ECX 0; leaf 0x80000001 EDX 0x00100000, ECX 0; no leaf 7).
-An instruction whose required feature set is not a subset of those bits raises #UD, exactly like `ud2` (SDM Vol 2, "Exceptions" section of every instruction: "#UD  If CPUID feature flag
-<X> is 0" / "If the LOCK prefix ..."; for the x87 FISTTP: SDM Vol 2 FISTTP, "IA-32 Architecture Compatibility: ... #UD if CPUID.01H:ECX.SSE3[bit 0] = 0"). The check is made in core.dispatch
-BEFORE any handler of any family runs, so no handler (x87, SSE, MMX, integer) can implement a form that the model's own CPUID denies.
+THE RULE (CPUID-UD). The declared CPU (verify/cpuid_model.json, derived by cpumodel_bits.model_words, the same words rt/cpumodel.c returns) advertises a set of CPUID feature flags. A decoded form is matched to the SDM's
+opcode-table rows by proof/sdmfeat.match_form (the one match that proof/sdmfeat.py `rows` (L3b's cleared-feature partition) and proof/udsail.py class (a) use): (mandatory prefix, opcode bytes, ModRM.reg or fixed ModRM byte).
+The rows give the form's `CPUID Feature Flag` expression (sdmfeat.needs_of: the column, or the `#UD If CPUID...` lines of the section for the older table layout). The expression is evaluated over the SDM's own flag table
+(Vol. 1 ch. 21, the `sdmrows` input) and the declared CPU. The form is #UD (`missing` non-empty) exactly when the expression is false AND the SDM states no `executed as` alias for the flag (TZCNT as BSF, LZCNT as BSR, PREFETCHW as a
+hint) AND the flag is not one the SDM defines as NOP without it (MPX). The check is made in core.dispatch BEFORE any handler of any family runs, so no handler can implement a form that the declared CPU's CPUID denies.
 
-THE TABLE. Required feature of a form = the union of
-  1. the feature of every capstone instruction group of the decoded form (GROUP_FEATURE: capstone's group is the assembler's "instruction set" tag of the form),
-  2. MNEMONIC_FEATURE: forms that capstone leaves without an SSE3.. group although the SDM gates them (x87 FISTTP is SSE3: capstone tags it `fpu`; POPCNT).
-Completeness argument: a feature is checked iff it is a key of FEATURES; every FEATURES key outside the model (MODEL) is in the "absent" set, and `missing(ins)` is non-empty exactly when a
-group or mnemonic of the form maps to an absent feature. test/cpufeat_check.py proves (a) FEATURES' bits agree with the numbers that rt/cpumodel.c really returns (the C file is compiled and
-called), (b) every form of the instest corpus that is implemented by an x87/SSE/MMX handler has required ⊆ MODEL or lifts to #UD, (c) tools/fpstate.py reports, per module, every instruction that `missing` flags and which handler would otherwise have run.
-Assumption ASM-203: capstone's group tags are a correct classification of the instruction-set extension of a form (they come from LLVM's X86 instruction tables); where they are known to be
-missing (item 2) the table adds the SDM's feature. A tag that is too wide on a feature the model HAS is harmless (the model has it); too wide on an absent feature would raise a wrong #UD:
-test/cpufeat_check.py lists, over every instruction of every module, the forms whose group maps to an absent feature (the A3 table of tools/fpstate.py)."""
+COMPLETENESS (the rule is total over the decoded forms, with no list of names or capstone groups). Every form the lifter decodes has one of three outcomes, decided only by the SDM text:
+  * its rows name one flag expression: present on the declared CPU (lifted by its handler) or absent (#UD), or no flag (base ISA);
+  * no row, but the opcode lies in an opcode-map entry the SDM defines (sdmfeat.OPMAP: x87 escape tables, the 0F map rows with no CPUID flag): base ISA;
+  * no row and no opcode-map entry: the pinned Sail model decides the form's bytes (proof/udsail.py rule b, the `udsail` input): every path #UD -> status `sail`, #UD (needs the call-graph certificate); a completing
+    path is a defined instruction and `Unsupported` until it has a Form; a model error is `Unsupported`;
+  * rows with several flag expressions (ambiguous) or a flag name the SDM's table does not define: `Unsupported`, never a silent default. Such a site is reported (the build is red), not lifted.
+The capstone instruction-group tags and the per-mnemonic tables are NOT read: capstone's classification is not a source (Assumption removed: ASM-203 is deleted with them).
 
-# feature -> (CPUID leaf, register, bit), SDM Vol 2 CPUID tables 3-8 / 3-10 and Vol 1 Ch.12
-FEATURES = {
-    'FPU': (1, 'EDX', 0), 'TSC': (1, 'EDX', 4), 'CX8': (1, 'EDX', 8), 'CMOV': (1, 'EDX', 15), 'MMX': (1, 'EDX', 23), 'FXSR': (1, 'EDX', 24), 'SSE': (1, 'EDX', 25), 'SSE2': (1, 'EDX', 26),
-    'SSE3': (1, 'ECX', 0), 'PCLMULQDQ': (1, 'ECX', 1), 'SSSE3': (1, 'ECX', 9), 'FMA': (1, 'ECX', 12), 'SSE4.1': (1, 'ECX', 19), 'SSE4.2': (1, 'ECX', 20), 'MOVBE': (1, 'ECX', 22),
-    'POPCNT': (1, 'ECX', 23), 'AES': (1, 'ECX', 25), 'AVX': (1, 'ECX', 28), 'F16C': (1, 'ECX', 29), 'RDRAND': (1, 'ECX', 30),
-    'BMI1': (7, 'EBX', 3), 'AVX2': (7, 'EBX', 5), 'BMI2': (7, 'EBX', 8), 'ADX': (7, 'EBX', 19), 'SHA': (7, 'EBX', 29),
-    '3DNOW': (0x80000001, 'EDX', 31), '3DNOWEXT': (0x80000001, 'EDX', 30), 'SSE4A': (0x80000001, 'ECX', 6), 'XOP': (0x80000001, 'ECX', 11), 'FMA4': (0x80000001, 'ECX', 16),
-}
-# the model's answer: the constants of rt/cpumodel.c (leaf 1 EDX/ECX, leaf 0x80000001 EDX/ECX); leaf 7 is above the model's max basic leaf, so every leaf-7 feature is absent
-MODEL_BITS = {(1, 'EDX'): 0x078bfbff, (1, 'ECX'): 0x00000000, (0x80000001, 'EDX'): 0x00100000, (0x80000001, 'ECX'): 0x00000000}
-MODEL = frozenset(f for f, (leaf, reg, bit) in FEATURES.items() if MODEL_BITS.get((leaf, reg), 0) >> bit & 1)
-ABSENT = frozenset(FEATURES) - MODEL
+Source of the declared CPU's words: fnvlift/cpumodel_bits.py (one derivation). The flag leaf is within the declared max basic leaf (cpuid_model.json max_basic) or max extended leaf, as in sdmfeat.present."""
+import json
 
-# capstone group name -> feature
-GROUP_FEATURE = {'mmx': 'MMX', 'sse1': 'SSE', 'sse2': 'SSE2', 'sse3': 'SSE3', 'ssse3': 'SSSE3', 'sse41': 'SSE4.1', 'sse42': 'SSE4.2', 'sse4a': 'SSE4A', 'avx': 'AVX', 'avx2': 'AVX2',
-                 'fma': 'FMA', 'fma4': 'FMA4', 'bmi': 'BMI1', 'bmi2': 'BMI2', 'aes': 'AES', 'pclmul': 'PCLMULQDQ', '3dnow': '3DNOW', 'adx': 'ADX', 'sha': 'SHA', 'xop': 'XOP', 'f16c': 'F16C',
-                 'rdrand': 'RDRAND', 'cmov': 'CMOV'}
-# forms capstone does not tag with the extension that the SDM gates them with
-MNEMONIC_FEATURE = {'fisttp': 'SSE3', 'popcnt': 'POPCNT', 'movbe': 'MOVBE'}
+from . import inputs
+
+_S = {}
 
 
-# forms that the SDM defines as ANOTHER legal instruction on a CPU without the feature (so the absent feature is not #UD): TZCNT F3 0F BC executes as BSF and LZCNT F3 0F BD as BSR (SDM Vol 2
-# TZCNT / LZCNT: "on processors that do not support ... the instruction is executed as BSF / BSR"), PREFETCH / PREFETCHW 0F 0D are reserved-NOP hints (Vol 2 Table A-6, executed as NOP by a CPU
-# that lacks them). They are implemented by fnvlift/f_sys.py (classes 4 and 5), not gated here.
-LEGACY_ALIAS = frozenset(('tzcnt', 'lzcnt', 'prefetch', 'prefetchw'))
+def _cpu():
+    """{(leaf, reg): value, (0,'EAX'): max basic leaf, (0x80000000,'EAX'): max extended leaf}: the declared CPU's words, derived from the `cpumodel` input (verify/cpuid_model.json; cpumodel_bits.model_words)"""
+    from .cpumodel_bits import model_words, I
+    m = json.load(open(inputs.get('cpumodel'))); w = model_words(m)
+    return {(0, 'EAX'): I(m['max_basic']), (0x80000000, 'EAX'): I(m['max_ext']), (1, 'EDX'): w['leaf1_edx'], (1, 'ECX'): w['leaf1_ecx'], (0x80000001, 'EDX'): w['ext1_edx'], (0x80000001, 'ECX'): w['ext1_ecx']}
 
 
-def required(ins):
-    """the set of features the decoded form needs"""
-    mn = ins.mnemonic.split()[-1]
-    if mn in LEGACY_ALIAS:
-        return set()
-    r = {GROUP_FEATURE[n] for n in (ins.group_name(g) for g in getattr(ins, 'groups', ())) if n in GROUP_FEATURE}
-    m = MNEMONIC_FEATURE.get(mn)
-    if m:
-        r.add(m)
+def _state():
+    path = inputs.get('sdmrows')
+    if _S.get('path') != path:
+        from proof import sdmfeat
+        rows, table, nopflags = sdmfeat.load_rows(path)
+        _S.clear(); _S.update(path=path, idx=sdmfeat.index_rows(rows), table=table, nop=nopflags, cpu=_cpu(), memo={})
+    return _S
+
+
+def decide(ins):
+    """-> dict(status found|map|sail, needs, value none|present|absent, exec_as, rows) of a decoded form (sail: value absent); Unsupported when its rows name several flag expressions or an unknown flag, or no row and no Sail #UD verdict"""
+    from proof import sdmfeat
+    from .core import Unsupported
+    S = _state(); key = bytes(ins.bytes)
+    r = S['memo'].get(key)
+    if r is None:
+        cand, kind, mp = sdmfeat.match_form(ins, S['idx'])
+        if cand:
+            st, needs, val, ea, bad = sdmfeat.needs_of(cand, S['table'], S['cpu'], S['nop'])
+            if st != 'found' or bad:
+                r = ('Unsupported', 'SDM rows of %s: %s' % (key.hex(), bad))
+            else:
+                r = dict(status=st, needs=needs, value=val, exec_as=ea, rows=cand)
+        elif mp:
+            r = dict(status='map', needs='-', value='none', exec_as='-', rows=[])
+        else:
+            # no SDM row (the text parse can miss rows; silicon executes some such encodings as aliases, and capstone decoding the form is evidence it is defined): the pinned Sail model decides it on its bytes, by the rule
+            # of proof/udsail.py (b). Every path #UD (a row of the `udsail` input) -> #UD, class sail. A path that completes is a defined instruction and needs its Form; a model error is a gap: both are red here.
+            from . import f_sys
+            u = f_sys.ud_gap(key)
+            if u is None:
+                r = ('Unsupported', 'no SDM row for %s and no Sail #UD verdict (udsail input): a defined instruction needs a Form, a model gap is red' % key.hex())
+            else:
+                r = dict(status='sail', needs='Sail #UD (%s)' % u.ud_class, value='absent', exec_as='-', rows=[])
+        S['memo'][key] = r
+    if isinstance(r, tuple):
+        raise Unsupported(r[1])
     return r
 
 
 def missing(ins):
-    """features the form needs that the model's CPUID denies (non-empty = #UD)"""
-    return sorted(required(ins) & ABSENT)
+    """the CPUID flag expressions the form needs that the declared CPU denies, with no SDM alias (non-empty = #UD)"""
+    d = decide(ins)
+    return [d['needs']] if d['value'] == 'absent' and d['exec_as'] == '-' else []
+
+
+def gates(ins):
+    """-> [(flag, leaf, register, bit, value on the declared CPU)] of every flag the form's expression names: the evidence of `missing` (value 0 = the flag is clear)"""
+    import re
+    from proof import sdmfeat
+    S = _state(); d = decide(ins); out = []
+    for f in sorted({t for t in re.findall(r'[A-Za-z0-9_\.]+', d['needs']) if d['status'] == 'found' and t not in ('AND', 'OR', '-')}):
+        for leaf, sub, reg, bit in S['table'][f][:1]:
+            out.append((f, leaf, reg, bit, int(sdmfeat.present(f, S['table'], S['cpu']))))
+    return out

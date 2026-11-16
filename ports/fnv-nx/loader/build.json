@@ -19,7 +19,8 @@
   "ports/fnv-nx/loader/include",
   "ports/fnv-nx/hostabi/include",
   "/ext/gcc/aarch64-none-elf/include",
-  "ports/fnv-nx/lib/sha256/include"
+  "ports/fnv-nx/lib/sha256/include",
+  "ports/fnv-nx/shim/include"
  ],
  "units": "all",
  "external": [
@@ -140,6 +141,10 @@
   {
    "root": "ports/fnv-nx/bridgefacts",
    "output": "BRIDGE"
+  },
+  {
+   "root": "ports/fnv-nx/shim",
+   "output": "INCLUDE"
   }
  ]
 }
