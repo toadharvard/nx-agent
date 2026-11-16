@@ -8,7 +8,7 @@ reader uses (recipe.runtime_configure, runtime_configure_patch, runtime_cflags, 
     records.py cc OUT VERIFY       T ABI SEMANTICS[] (a library's configure: the flags every guest unit gets)
     records.py stage2 OUT VERIFY   the runtime build: T ABI MLFLAG CFG_SUBDIRS[] RUNTIME_CFLAGS[] SEMANTICS[] PLUGIN_ORDER[] PLUGIN_ARGV_<name>[]
                                      (the load order = recipe.PLUGIN_SOURCES; recipe.plugin_args("native") without PLUGIN_OUT, the recipe stage's report path: a runtime
-                                     build has no /out report)
+                                     build has no /out report; PLUGIN_REPORT[] names the plugins that need a report file)
 Two files, not one: a plugin argument changes the stage-2 file only, so the compiler (stage 1) is not rebuilt for it. VERIFY: the verify directory (default: this
 checkout's; in the sandbox the mounted /in/ports/fnv-nx/verify)."""
 import json
@@ -31,7 +31,7 @@ if mode == "stage1":
     out += ["CPUARCH=%s" % q(t["console_cpu"]["arch"] + "".join("+" + f for f in t["console_cpu"]["features"])), arr("GCC_RT_CONF", recipe.runtime_configure(pin))]
 elif mode == "stage2":   # the data-model table is next to this file: the stage mounts the tool's own root at /tool
     out += [arr("CFG_SUBDIRS", recipe.runtime_configure_patch(pin)["subdirs"]), arr("RUNTIME_CFLAGS", recipe.runtime_cflags(pin)), arr("SEMANTICS", recipe.semantic_flags(os.path.join(HERE, "DATAMODEL.json"))),
-            arr("PLUGIN_ORDER", list(recipe.PLUGIN_SOURCES))]
+            arr("PLUGIN_ORDER", list(recipe.PLUGIN_SOURCES)), arr("PLUGIN_REPORT", sorted(recipe.PLUGIN_OUT))]
     want = recipe.plugin_args("native")
     for n in recipe.PLUGIN_SOURCES:
         out.append(arr("PLUGIN_ARGV_" + n, ["-fplugin-arg-%s-%s%s" % (n, k, "=" + v if v else "") for k, v in want[n].items()]))
