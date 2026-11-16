@@ -17,24 +17,23 @@ import hashlib, os, re, subprocess, sys
 import z3
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-# The toolchain is an explicit input: configure(work, ir, isla) is called by the program that runs the prover (shapeprove.py --sail-work/--sail-ir/--isla;
+# The toolchain is an explicit input: configure(work, ir, isla, cfg) is called by the program that runs the prover (shapeprove.py --sail-work/--sail-ir/--isla;
 # the tests take the same three from their declared inputs). Nothing is read from the environment and no path is defaulted: before configure() every
 # use is an ArgError. The z3 shared libraries are those of the z3 python module this process imported (the pinned wheel), not a path.
-WORK = IR = ISLA = CACHE = None
-CFG = os.path.join(HERE, 'x86.toml')
+WORK = IR = ISLA = CFG = CACHE = None      # CFG: the isla config of the run (x86.toml), the ISLACFG output of the isla root
 Z3LIB = os.path.join(os.path.dirname(os.path.abspath(z3.__file__)), 'lib')
 
 class ArgError(Exception):
     """a required input of the model (work directory, proof IR, isla executable) was not passed"""
 
-def configure(work, ir, isla):
-    global WORK, IR, ISLA, CACHE, _irsha
-    for n, v in (('sail work directory', work), ('proof IR', ir), ('isla executable', isla)):
+def configure(work, ir, isla, cfg):
+    global WORK, IR, ISLA, CFG, CACHE, _irsha
+    for n, v in (('sail work directory', work), ('proof IR', ir), ('isla executable', isla), ('isla config', cfg)):
         if not v: raise ArgError('model_sail.configure: %s is required' % n)
-    WORK, IR, ISLA, CACHE, _irsha = os.path.abspath(work), os.path.abspath(ir), os.path.abspath(isla), os.path.join(os.path.abspath(work), 'sail_cache'), None
+    WORK, IR, ISLA, CFG, CACHE, _irsha = os.path.abspath(work), os.path.abspath(ir), os.path.abspath(isla), os.path.abspath(cfg), os.path.join(os.path.abspath(work), 'sail_cache'), None
 
 def _need():
-    if IR is None: raise ArgError('model_sail: configure(work, ir, isla) was not called (explicit arguments --sail-work --sail-ir --isla)')
+    if IR is None: raise ArgError('model_sail: configure(work, ir, isla, cfg) was not called (explicit arguments --sail-work --sail-ir --isla --isla-cfg)')
 
 def work():
     _need(); return WORK

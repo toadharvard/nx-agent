@@ -85,6 +85,10 @@
   {
    "root": "ports/fnv-nx/platform",
    "output": "X86SYS"
+  },
+  {
+   "root": "ports/fnv-nx/lift/proof/isla",
+   "output": "ISLACFG"
   }
  ],
  "run": [
@@ -159,6 +163,8 @@
     "/in/7",
     "--isla",
     "/bin/true",
+    "--isla-cfg",
+    "/in/19",
     "--x86sys",
     "/in/8"
    ],
@@ -229,6 +235,10 @@
     {
      "stage": "ports/fnv-nx/lift/factsimg/libvorbisfile:gen:0",
      "path": "shapes_libvorbisfile.tsv"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/proof/isla:run:isla",
+     "path": "x86.toml"
     }
    ],
    "debs": {
@@ -278,6 +288,8 @@
     "/in/9",
     "--isla",
     "/scratch/bin/isla",
+    "--isla-cfg",
+    "/in/11",
     "--z3lib",
     "/in/8",
     "--x86sys",
@@ -318,6 +330,10 @@
     {
      "stage": "ports/fnv-nx/platform:gen:21",
      "path": "declared/x86sys.export.json"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/proof/isla:run:isla",
+     "path": "x86.toml"
     }
    ],
    "debs": {
@@ -372,6 +388,8 @@
     "/in/7",
     "--isla",
     "/bin/true",
+    "--isla-cfg",
+    "/in/11",
     "--x86sys",
     "/in/8"
    ],
@@ -410,6 +428,10 @@
     {
      "stage": "ports/fnv-nx/lift/proof/shapeprove:run:prove",
      "path": "rec"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/proof/isla:run:isla",
+     "path": "x86.toml"
     }
    ],
    "debs": {

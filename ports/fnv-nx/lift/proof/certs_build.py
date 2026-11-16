@@ -248,7 +248,7 @@ def main(argv):
     ap.add_argument('--queue')
     ap.add_argument('--report')
     ap.add_argument('--coverage')
-    ap.add_argument('--sail-work'); ap.add_argument('--sail-ir'); ap.add_argument('--isla')      # the toolchain (model_sail.configure): all three, or none when the caller configured model_sail itself
+    ap.add_argument('--sail-work'); ap.add_argument('--sail-ir'); ap.add_argument('--isla'); ap.add_argument('--isla-cfg')      # the toolchain (model_sail.configure): all four, or none when the caller configured model_sail itself
     ap.add_argument('--ir', action='append', default=[], help='an IR file (hashed to its sha) that a record of another model_sha was proved against')
     x86sys.add_arg(ap)
     ap.add_argument('--withheld', help='tsv of Form-equivalence failures (shape_key first column, # comments): those shapes are counted withheld-form-defect and never certify')
@@ -256,7 +256,7 @@ def main(argv):
     if a.withheld:
         with open(a.withheld) as fh: WITHHELD.update(ln.split('\t')[0] for ln in fh if ln.strip() and ln[0] != '#')
     XSHA[0] = x86sys.configure(a.x86sys)
-    if a.sail_work or a.sail_ir or a.isla: model_sail.configure(a.sail_work, a.sail_ir, a.isla)
+    if a.sail_work or a.sail_ir or a.isla or a.isla_cfg: model_sail.configure(a.sail_work, a.sail_ir, a.isla, a.isla_cfg)
     try:
         return _run(a)
     except model_sail.ArgError as e:

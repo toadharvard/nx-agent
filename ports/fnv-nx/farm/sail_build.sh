@@ -69,7 +69,7 @@ export LD_LIBRARY_PATH=$Z3/lib
 python3 -c "
 import sys; sys.path.insert(0, '$HERE/..')
 from proof import model_sail
-model_sail.configure('$WORK', '$OUT.ir', '$REMS/isla/target/release/isla-execute-function')      # explicit toolchain, no environment
+model_sail.configure('$WORK', '$OUT.ir', '$REMS/isla/target/release/isla-execute-function', '$HERE/x86.toml')      # explicit toolchain, no environment
 out, err = model_sail.run_isla(bytes.fromhex('01d8'))
 assert out.count('Result: (_ unit)') >= 1, out[:300]
 print('smoke test ok:', out.count('Result:'), 'paths')"

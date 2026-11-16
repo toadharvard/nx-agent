@@ -65,7 +65,7 @@ PINIR=$(sail_pinned_ir) || { echo "the pinned IR (external x86ir of lift/proof/s
 IR=${SAIL_IR:-$PINIR}
 sail_args "$IR"
 SHA=$(python3 -I "$HERE/certs_build.py" "${TC[@]}" --model-sha) || { echo "the IR $IR does not load" >&2; exit 1; }
-PINSHA=$(python3 -I "$HERE/certs_build.py" --sail-work "$WORKDIR" --sail-ir "$PINIR" --isla "$ISLA" --x86sys "$X86SYS_FILE" --model-sha) || { echo "the pinned IR (external x86ir of lift/proof/sailmodel/build.json) does not load" >&2; exit 1; }
+PINSHA=$(python3 -I "$HERE/certs_build.py" --sail-work "$WORKDIR" --sail-ir "$PINIR" --isla "$ISLA" --isla-cfg "$ISLACFG" --x86sys "$X86SYS_FILE" --model-sha) || { echo "the pinned IR (external x86ir of lift/proof/sailmodel/build.json) does not load" >&2; exit 1; }
 [ "$SHA" = "$PINSHA" ] || { echo "IR sha256 $SHA is not the pinned IR $PINSHA (external x86ir of lift/proof/sailmodel/build.json)" >&2; exit 1; }
 
 if [ -n "$PINQ" ]; then

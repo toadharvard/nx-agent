@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Step `queue` of the lift/proof/shapeprove root: the table of the shapes to prove.
 
-    reprove_queue.py --universe SHAPES.tsv... --old SHARDS... --new SHARDS... --out queue.tsv --info queue.info  --x86sys FILE --sail-work DIR --sail-ir IR --isla ISLA [--limit N]
+    reprove_queue.py --universe SHAPES.tsv... --old SHARDS... --new SHARDS... --out queue.tsv --info queue.info  --x86sys FILE --sail-work DIR --sail-ir IR --isla ISLA --isla-cfg X86.TOML [--limit N]
 
 --universe  the shapes_<image>.tsv of the image stages of the facts roots (one per image; the union is the pack's own shape universe)
 --old       shards (files or directories of *.jsonl) of an earlier prover: every key they certified (proved / agree-except-declared) is proved again
@@ -33,9 +33,9 @@ def files_of(ss):
 def main(argv):
     ap = argparse.ArgumentParser(); ap.add_argument("--universe", nargs="+", required=True); ap.add_argument("--old", nargs="+", required=True); ap.add_argument("--new", nargs="+", required=True)
     ap.add_argument("--out", required=True); ap.add_argument("--info", required=True); ap.add_argument("--limit", type=int)
-    ap.add_argument("--sail-work", required=True); ap.add_argument("--sail-ir", required=True); ap.add_argument("--isla", required=True); x86sys.add_arg(ap)
+    ap.add_argument("--sail-work", required=True); ap.add_argument("--sail-ir", required=True); ap.add_argument("--isla", required=True); ap.add_argument("--isla-cfg", required=True); x86sys.add_arg(ap)
     a = ap.parse_args(argv)
-    xsha = x86sys.configure(a.x86sys); model_sail.configure(a.sail_work, a.sail_ir, a.isla)
+    xsha = x86sys.configure(a.x86sys); model_sail.configure(a.sail_work, a.sail_ir, a.isla, a.isla_cfg)
     keys = set()
     for f, i, r in certs_build.records(files_of(a.old)):
         if r.get("result") in ("proved", "agree-except-declared"): keys.add(r["shape"])
