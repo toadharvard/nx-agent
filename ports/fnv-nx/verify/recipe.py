@@ -1964,26 +1964,23 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant="", repo=".
     cxx = [u for u in units if u.endswith(CXX_EXT)]
     ent = entry_of(roots, root + "@" + variant if variant else root)
     origin = ent.get("cxx_origin")
-    # RULE (orchestrator, 2026-11-12): every guest CC stage, C and C++ alike and whatever the origin of the code, loads the FULL plugin set of
-    # PLUGIN_SOURCES with its fixed arguments in the fixed order. No language declarations, no exception list. The arguments are fixed by the
-    # origin alone, by the one function plugin_args.
-    if ent.get("target") == "guest" and any(u.endswith(CC_EXT + CXX_EXT) for u in units) and not (origin == "native" and cxx):
+    # RULE (RECIPE.md "Plugins"): the plugin set and the SDD flags are a function of the target profile, whatever the language or the origin of the code:
+    # guest = the full set of PLUGIN_SOURCES with its fixed arguments in the fixed order, host = the empty set. A guest root that misses one is red, and so is a host root that loads one.
+    guest = ent.get("target") == "guest"
+    if guest and any(u.endswith(CC_EXT + CXX_EXT) for u in units):
         for n in sorted(PLUGIN_SOURCES):
             if n not in loaded:
                 err.append("guest root %s does not load plugin %s (every guest C and C++ unit is compiled with the full plugin set)" % (root, n))
         if list(loaded) != [n for n in PLUGIN_SOURCES if n in loaded]:
             err.append("plugins must be loaded in the order %s" % list(PLUGIN_SOURCES))
+    elif not guest and loaded:
+        err.append("host root %s loads plugin(s) %s (the host profile has the empty plugin set: the plugins enforce guest-ABI semantics)" % (root, ", ".join(sorted(loaded))))
     if not cxx:
         return err + (["admit.json %s: cxx_origin of a root without C++ units" % root] if origin is not None else [])
     if origin == "native":
-        for n in sorted(PLUGIN_SOURCES):
-            if n not in loaded:
-                err.append("native C++ root %s does not load plugin %s (every native or decomp C++ body is compiled with both)" % (root, n))
-        if list(loaded) != [n for n in PLUGIN_SOURCES if n in loaded]:
-            err.append("plugins must be loaded in the order %s" % list(PLUGIN_SOURCES))
         fl = rec.get("flags", {}).get("cxx", []) if isinstance(rec.get("flags"), dict) else []
-        # fnvnx_sdd needs the define and -fno-devirtualize; a guest root's -fno-devirtualize comes from flags.semantics, its define is per root
-        err += ["native C++ root %s: flags.cxx lacks %s" % (root, f) for f in (SDD_FLAGS if ent.get("target") != "guest" else (SDD_DEFINE,)) if f not in fl]
+        # fnvnx_sdd needs the define and -fno-devirtualize; a guest root's -fno-devirtualize comes from flags.semantics, its define is per root; a host root loads no plugin and needs none
+        err += ["native C++ root %s: flags.cxx lacks %s" % (root, f) for f in ((SDD_DEFINE,) if guest else ()) if f not in fl]
     elif lifted_origin(origin):
         tool, pack, stage = origin["lifted_by"], origin.get("pack"), origin.get("stage")
         for n in ("fnvnx_ftoi",):   # lifted C++ does its conversions in helpers: the plugin proves it (and only it is required)
