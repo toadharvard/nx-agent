@@ -506,3 +506,64 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - shapeprove root (w4): steps closure → queue → prove (foreach) → certs.
   - It is being re-merged with base3 30030c1e8 hunk by hunk; the first merge, 156930ac2, dropped base3 work.
   - Then the 3-row build on farm 4.
+
+- 2026-11-16: density rule 3 projection lemma and liveness certificate written: lift/proof/FLAGLIVE.md (Lemma 1, soundness, P1-P3, gate flaglive). Next: L3b check of rules 1-2 by shape_sha + formgate when L3a lands them.
+- 2026-11-16: sys3 merged (w-sys3 0b0a4901a -> 82a488a89). Sreg write class: Form.sel effect, MOV/POP/PUSH Sreg Forms from x86sys MOV_TO_SREG (L5 w35 894e5a68); seg family 52 keys: 45 proved, 7 uncertified (prefix 26/36/67 claim -> sys4). Form build over the universe: 23,833 ok, 2,664 KeyError, 3 SymbolicBranch, 0 UndecidedRow. int n cd00 252/256 vectors proved, 4 OutsideDomain. far jmp/call all classes proved over jmp_far, 115 undecided GDT indexes OutsideDomain. Tests: lift/proof/tests 43 files, 43 exit 0 at 82a488a89. Doing: sys4 prefix-scope claim (a263326f7dfe45d17).
+- 2026-11-16: sys4 merged (8e97a6d8b -> 34c41822d). Segment-override prefixes claimed by SDM 1:3.7.4 scope from Form.access (no mnemonic list): 4 keys uncertified->proved (2607 261e 3606 3607); seg family 49/52 proved. 0x67 on non-memory push/pop is SDM-reserved (2A:2.1.1): 3 keys (6707 671e 671f) stay uncertified, no Form; recheck after L3a value-occurrence universe, report to orchestrator if reachable. Universe build unchanged 23,833/2,664/3/0. Tests 43 files, 0 fail (worker run at 8e97a6d8b). Doing: sys5 gs row (L5 4ec8cd2c1).
+- 2026-11-16: sys5 merged (405ffb6d1). gs read from x86sys selectors.gs (L5 4ec8cd2c1, =0); null-seg access is a Form fault from x86sys NULL_SEG (333 Forms carry it). Universe build 23,833/2,664/3/0 unchanged; tests 44 files 0 fail (worker). Rules 1+2 (L3a R12 e0e078d1e) checked Form-neutral: 16,032 (A corrected) + 26,500 (B) keys, 0 sha/outcome change. FLAGLIVE: DEF0 kills ef07f250e, P2 suspension-point rule 58ce47b65. X87FORMS design 445074634 (x87 Forms generated from x87spec). Doing: x87form (a4fefc3884cbfe194), sys6 store-through-code-segment class (a263326f7dfe45d17).
+- 2026-11-16: intsys merged (0334d8b8d): legacy BCD/salc/les/lds/sldt/retf Forms proved by SDM spec; CLEARED_UD shift /6 and F6/F7 /1 (opmap). cpufeat merged (5c43afbb8): cleared-feature #UD Forms from CPUREF (3DNow 86/330, AVX 1, SSE3 fisttp 10 keys in A/B), MPX hint space NOP (SDM 1:E.4.1). Form build: A 16,032 keys 14,499 built / 1,524 KeyError / 7 UndecidedRow; B 26,500: 24,325 / 2,165. 7 keys wait on L5 rows (w38 9659524: lar_lsl, iret decided; sgdt.base, iret NT undecided -> reach question to L3a). x87 slice 1 (w-x87f 65c90edb0): 21/92 classes, 125/1,421 keys proved; slice 1b doing. Tests: 47 files per file, 46 exit 0, test_forms_simdclass red at base (worker run, both inputs set).
+- 2026-11-16: sys6/sys6b/sys7 merged (w-sys3 1003f82e0, merge 13849b5c7).
+  - Segment Forms are tied to the x86sys descriptors in the Sail model.
+  - A store through a code-descriptor selector is #GP, by SDM 3A:3.4.5.1. test_codestore_universe proves it over every Form whose access set names a code store: 6,254 proved, 0 differ, 0 missing, in universe B (26,500 keys). By register: ds 5,644, es 33, cs 71, gs 289, fs 217.
+  - Form build over B, worker run at 0334d8b8d and at the merge: 23,983 ok, 2,507 KeyError, 7 UndecidedRow, 3 SymbolicBranch. This differs from the 24,325/2,165 recorded at 0334d8b8d above. The inputs of the two runs differ; to be settled by one recipe run.
+  - Tests at the merge, per file: 46 of 47 exit 0. test_forms_simdclass is red at base: aaa…salc/retf/iret/les/lds are in both Forms and L3a hand handlers; worker a3994d45035f1f412 owns it.
+  - The sys6b prover smoke keys go to the recipe re-prove (w4 shapeprove).
+- 2026-11-16: x87 slices 1 and 1b merged (w-x87f 706153d8a).
+  - x87 Forms are generated from x87spec: domain = FCW masks plus the invariant ES == es_of(FSW, FCW); fcw effect; wide stores split per SDM field; nd resolution table.
+  - Facts universe, 1,421 keys: 27/92 classes proved (141 keys).
+  - Pack universe, 303 keys: 34/122 classes proved (76 keys).
+  - test_codestore_universe over 14,810 keys: 2,237 proved, 0 differ (+9 x87 stores).
+  - Slice 2 boundary ruled: typed FP values over the runtime carrier kinds (fnvl_x87.h fv), each op a helper with its z3 term.
+- 2026-11-16: lariret and the lift/cpufeat root merged (w-intsys 4f57cd0f5, merge 64e1dd116).
+  - LAR/LSL Forms from x86sys; the Accessed bit is read from the record and is UndecidedRow until L5 adds `descriptor.accessed`.
+  - IRETD at CPL 3 is FAILED(record) until L5 fixes loaded_mask 0x254dd7 -> 0x254dd5 (asked).
+  - The legacy hand handlers are deleted (one path), so test_forms_simdclass is green.
+  - Form build: A 16,032 keys -> 14,503 Forms, 1,524 KeyError, 3 UndecidedRow, 2 SymbolicBranch. B 26,500 keys -> 24,329 Forms, 2,165 KeyError, 3 UndecidedRow, 3 SymbolicBranch.
+  - lift/cpufeat root: the feature table is built by the recipe from the pinned SDM and APM (green, byte-identical to the old pin); liftsrc takes it via `uses`, and the external cpufeat is deleted.
+  - rows/partition stage is blocked: lift/facts is red at this base (16 JTAB_RED rows, L3a), and pdfplumber is not in env.json python.modules (L1).
+  - recipe.py python-exec mount fix awaits L1 review.
+  - Red, fixing: test_simdcheck (simdcheck lacks the code-store fault) and test_gate_fpexact (helpers=None caller at 9de00f15d).
+- 2026-11-16: x87 slice 2 part (i) merged (w-x87f 1003b4adb).
+  - ctrans.py translates C to z3 with exact C semantics over preprocessed .i input, with no cpp and no compiler call.
+  - x87carrier.py derives the helper closure from the emission: 59 functions, 51 macros.
+  - Blocked:
+    - (a) the lift/rt root is red on this base (hostabi/product gen:unused-import), so there is no guest .i yet;
+    - (b) there is no console_cpu.fpcr row (DN/FZ/RMode), and enter.cc writes FPCR=0 without a record;
+    - (c) there is no execution path for recipe-built aarch64 helper objects, so the agreement check is not run (L4, after the first frame).
+  - Per-class x87 counts are unchanged: facts 27/92 classes, pack 34/122.
+- 2026-11-16: w-intsys merged (1d8bdc7c5, merge e13391e80).
+  - x86sys is back to L5 w35 4ec8cd2c1: LAR/LSL and IRETD are UndecidedRow until after the first frame.
+  - The 86acc4931 pdfplumber copy is reverted.
+  - test_gate_fpexact (L3a 36d3a8948) and test_simdcheck (code-store fault from sysspec_store's one rule) are green; 52/52 test files pass.
+  - Cleared-#UD partition tools are deleted (owner 07:50Z): udcert.py, cleared_join.py, factsites.py, undecided_sites.py, sdmfeat rows/partition.
+  - Relift check at L3a b6e52e004 vs base3 6d67261ef, over 26,637 keys (B plus 2,833 pack keys; FACTS is red so A is pack-only): 0 sha changes, 0 outcome changes. Both trees give 23,933 built, 2,691 KeyError, 12 AssertionError, 1 SymbolicBranch.
+  - Open: the 12 AssertionError keys are pop Sreg / mov Sreg shapes (07 17 1f 2607 261f 3607 6707 671f 8ecf 8edb 8ee4 8eee). These are reached-site classes; worker a3994 owns the fix.
+- 2026-11-16: int imm8 Form total over the symbolic vector (w-intsys a33f5927b): a case split from the w35 int-n rows, split_ok proved over 8 bits; cd00 252/256 vectors proved, 0x2a excluded. 26,637-key outcome: 24,400 sha, 2,228 KeyError (x87/3DNow), 8 UndecidedRow (sgdt.base, lar_lsl, iret), 1 SymbolicBranch (enter), 0 AssertionError. Tests 52/52. Open defect: shape_sha depends on the process's node serial order (not canonical); fix doing (a3994).
+
+## 2026-11-16 — Form sha canonicity closed (lead 7c3d396b6)
+- Defect cause: the z3→DSL translation for x87 Forms (x87form.py) took operand order from z3 AST ids, a process-global counter, and z3.simplify chose its rewrite by those ids. So a Form's sha depended on what the process had built before it.
+- Rule:
+  - commutative ops (add, mul, and, or, xor, And/Or/Xor) are flattened and sorted by a structural key, skey = sha256(op, w, x, operand keys), via dsl.comm; eq/distinct via comm2;
+  - every simplify runs in a fresh z3 context (_simp), so its result is a function of the term only.
+  - Worker a9f9faade5d009f5d, bbc08a5ab.
+- Global numbers at bbc08a5ab:
+  - test_sha_canonical over union.keys: 26,500 keys, 24,281 built, sorted vs reversed in fresh processes, 0 differing;
+  - test_lift_canonical over the 131,072 synthetic opcode×ModRM units: sorted vs shuffled on another hash seed, plus 20 cold one-per-process units, 0 differing. The emitter itself was clean.
+  - Against 4668fcda2, 296 of the 24,281 built shas changed, so shapes.tsv is regenerated by L3a's pack; built/error status is the same for all 26,500.
+- x87 w-x87f 593328eea merged at 4668fcda2. Pack x87 census 34/122 (6538cb97f). Next, worker a4fefc3884cbfe194:
+  - carrier kind as spec state, so one obligation covers the fast and slow paths;
+  - the view64/bits lemma and the nd.nan.tie NDRES row from Arm FPProcessNaNs;
+  - then the tie and mutation test, and the test_vendormap fix.
+- Known red tests:
+  - test_vendormap (S.Table removed by 1d8bdc7c5; being fixed);
+  - fnvlift test_cs_store and test_null_seg (fail on the base too; L3a).

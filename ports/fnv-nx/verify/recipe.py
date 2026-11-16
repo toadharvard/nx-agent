@@ -3244,7 +3244,9 @@ class Job:
         pyargv = None
         if xs == {"python": True}:   # the one python runtime of generate_one (pyrt): its inputs, env and PATH; the step's own inputs/scratch/stage refs as any tool step
             py = self.pyrt()
-            ins += py["inputs"]
+            clash = lambda a, b: under(a, b) or under(b, a)   # the runtime brings its own paths, as the host resolves them (/lib/x86_64-linux-gnu, /usr/local/bin): a layout link or directory that one of them lies under or over is not mounted
+            rootfs = [l for l in rootfs if not any(under(i["at"], l["at"]) for i in py["inputs"])]
+            ins = [i for i in ins if not any(clash(i["at"], j["at"]) for j in py["inputs"])] + py["inputs"]
             env.update({k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"})
             env.update({"COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "FNVNX_PYMODS": self.pymods})
             env.update(g.get("env", {}))

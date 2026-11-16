@@ -62,7 +62,7 @@ class T(unittest.TestCase):
         self.assertEqual((r, n.startswith('uncertified: record absent')), ('uncertified', True))
 
     def test_uncovered_is_not_proved(self):
-        self.assertEqual(sysspec.check(key('cf'))[0], 'not-covered')
+        self.assertEqual(sysspec.check(key('90'))[0], 'not-covered')      # NOP: no system spec (IRETD, formerly the example, has a Form builder that names its undecided rows: test_sysspec_legacy)
 
     def test_reader(self):
         self.assertEqual(x86sys.cpl(REC), 3)
@@ -87,9 +87,10 @@ class T(unittest.TestCase):
         finally: del REC['cpuid_faulting']
 
     def test_lar_is_decided_by_the_descriptor_rows(self):
-        REC['lar_lsl'] = {'cs': {'lar': {'status': 'undecided', 'why': 'type blocker'}}}
-        try: open(self.f.name, 'w').write(json.dumps(_complete(REC))); r, n = sysspec.check(key('0f0202')); self.assertEqual(r, 'uncertified'); self.assertIn('type blocker', n)
-        finally: del REC['lar_lsl']
+        from fnvlift import x86sys as fx      # the Form builder reads fnvlift.x86sys.REC, loaded once per process: this test hands it the fixture's record
+        REC['lar_lsl'] = {'status': 'undecided', 'why': 'type blocker'}; saved = fx.REC
+        try: open(self.f.name, 'w').write(json.dumps(_complete(REC))); fx.REC = _complete(REC); r, n = sysspec.check(key('0f0302')); self.assertEqual(r, 'uncertified'); self.assertIn('type blocker', n)
+        finally: del REC['lar_lsl']; fx.REC = saved
 
     def test_str_proved_against_the_cited_sdm_operation(self):
         self.assertEqual(sysspec.check(key('0f000f'))[0], 'proved')
@@ -121,7 +122,7 @@ class T(unittest.TestCase):
 
     def test_far_transfer_is_uncertified_while_the_descriptor_rows_are_undecided(self):
         r, n = sysspec.check(key('9a000000000000'))      # the Form of the far CALL (9A) exists on the lift line with the far Forms; without it the shape is not covered
-        self.assertIn(r, ('uncertified', 'not-covered')); self.assertIn('sgdt' if r == 'uncertified' else 'Form', n)
+        self.assertIn(r, ('uncertified', 'not-covered')); self.assertIn('OutsideDomain' if r == 'uncertified' else 'Form', n)
 
 
 if __name__ == '__main__':
