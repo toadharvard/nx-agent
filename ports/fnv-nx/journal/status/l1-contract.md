@@ -2247,3 +2247,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - abspath has a hit in verify/recipe.py.
   - Assigned to w28 as top priority, with the class fix: a gate exit without a result file is a red item carrying its stderr tail.
 - bottleneck: the cand3b farm verdict, and the L1 gate crashes.
+- L5 w26 8cb8603b: header at contract/include, exporthdr gone. L5 w27 (session_01KmtZKR1axvxXyrSRxharqh) merges w28 a6773ff1f, then runs one farm verdict.
