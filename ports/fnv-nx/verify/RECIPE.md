@@ -645,6 +645,8 @@ Tests: `tests/test_shard.py` (partition, merge, forged record, no compiler) and 
 
 A root that another root reaches (`uses`, an external produced by a root, a `pp` input, `objects_of`) is resolved once per process: `recipe.resolved(job, kind, root, output, make)` runs MAKE for the key (store, repo, repo signature, extcache, kind, root, output) and remembers its value, or its red, for every later consumer. A diamond (two roots that use one root) therefore starts the shared root's stages once, however many roots reach it. A value that points at files gone from disk (the objects of an `objects_of` build in a removed workspace) is made again; nothing else is.
 
+The same holds for the artifact a `run` step executes (`artifact` kind) and for the objects a generate step reads (`objects_of`, kind `objects`: the producer's selection is `objects_of_roots`, a rule over the admitted set that never selects the root itself or a root that depends on it). `depends_on` reads the root graph once per process: `root_reach` is one walk with one visited set per (checkout, root), cycle-safe, not a recursion that repeats a diamond once per path.
+
 A root that is reached again from its own resolution (`build` and `resolved` mark it with `entered`) is a cycle: BuildRed `cycle: A -> B -> ... -> A`, with the full path. It is never recomputed.
 
 The root's own admit.json `cxx_origin` stage (`{lifted_by, stage: gen:ROOT:I}`) is judged by `lifted_stage`, the one rule that `check` uses too: a stage that the root's `generated` does not contain is red from `check` and from every resolution of the root, before any of its stages starts. Test: `tests/test_resolve_once.py` (the stage-level count of a diamond of generated stages needs the declared environment: the farm's verdict).
