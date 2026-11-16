@@ -185,5 +185,18 @@ class Aggregate(unittest.TestCase):
         self.assertEqual(certs_build.main(['--x86sys', XPATH, '--coverage', sf, '--shards', a, b, c, '--out', o]), 2)
 
 
+@declared_sail.needs_sail
+class Stamp(unittest.TestCase):
+    """shapeprove.stamp: a v3 record gets x86sys_sha256 only when every part equals what this tree computes."""
+    def test_rule(self):
+        from proof import shapeprove
+        v3 = {k: v for k, v in rec(KEYS[0]).items() if k != 'x86sys_sha256'}
+        self.assertEqual(shapeprove.stamp(v3, XSHA)['x86sys_sha256'], XSHA)
+        for part, bad in (('dsl_sha', 'x'), ('model_sha', 'x'), ('prover_sha', 'x'), ('obligations', ['x'])):
+            self.assertNotIn('x86sys_sha256', shapeprove.stamp(dict(v3, **{part: bad}), XSHA), part)
+        self.assertNotIn('x86sys_sha256', shapeprove.stamp(dict(v3, result='timeout'), XSHA))
+        self.assertEqual(shapeprove.stamp(rec(KEYS[0]), 'other')['x86sys_sha256'], XSHA)       # an existing stamp is never rewritten
+
+
 if __name__ == '__main__':
     unittest.main()

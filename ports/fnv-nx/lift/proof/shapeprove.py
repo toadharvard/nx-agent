@@ -72,6 +72,22 @@ def one(key, args):
     return fin('FAILED(model-defect)' if ids else res, note, defects=ids, assumptions=asm,
                model_terms_sha=extra.get('model_sha256'), def0=extra.get('def0'), declared=extra.get('declared'), platform_sha256=extra.get('platform_sha256'), obligations=list(prove.OBLIGATIONS), prover_sha=certbasis.prover_sha(), isla_paths=model_sail.LAST.get('paths'), isla_fault_paths=model_sail.LAST.get('fault_paths'), **fns_fields())
 
+def stale_reason(rec):
+    """V3 -> x86sys stamp rule: None when EVERY part of the certificate equals what this tree computes for the key (so the record is a certificate of the current declared machine), else the first differing part.
+    Pure comparison, no run: Form sha under the configured x86sys, the pinned IR, the obligation set this prover generates, the prover identity (prove/model_sail/symform/certbasis)."""
+    if rec.get('result') not in ('proved', 'agree-except-declared'): return 'not-a-certificate'
+    if rec.get('model_sha') != model_sail.ir_sha(): return 'model'
+    if rec.get('prover_sha') != certbasis.prover_sha(): return 'prover'
+    if rec.get('obligations') != list(prove.OBLIGATIONS): return 'obligations'
+    try: cur = symform.shape_sha(rec['shape'])
+    except Exception: return 'dsl-undecidable'
+    if rec.get('dsl_sha') is None or rec.get('dsl_sha') != cur: return 'dsl'
+    return None
+
+def stamp(rec, xsha):
+    if rec.get('x86sys_sha256') is not None or stale_reason(rec) is not None: return rec
+    return dict(rec, x86sys_sha256=xsha)
+
 def migrate(rec, args):
     """K migration of a record of this model (model_sha = the pinned IR) made before the closure key: rerun ONLY the isla model run of its shape (deterministic: same IR, config, inputs; the run is cached by the
     same key) and add model_fns + closure_sha.  The proof is not redone: the run that is repeated is the run the proof used."""
@@ -93,7 +109,7 @@ def main():
     if a.migrate:
         with open(a.migrate) as fi, open(path, 'a') as out:
             for ln in fi:
-                if ln.strip(): out.write(json.dumps(migrate(json.loads(ln), a), sort_keys=True) + '\n'); out.flush()
+                if ln.strip(): out.write(json.dumps(stamp(migrate(json.loads(ln), a), xsha), sort_keys=True) + '\n'); out.flush()
         return 0
     keys, bad = load_shapes(a.shapes); keys = keys[::a.slice]
     qsha = {l.split()[0]: l.split()[1] for l in open(a.shapes) if l.strip() and not l.startswith('#') and len(l.split()) > 1}     # the queue row's shape_sha: the Form of the tree must be the Form the queue was built from
