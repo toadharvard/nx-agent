@@ -611,8 +611,8 @@ def solve(path, base, rows, uni, jobs=4):
                 for t, st in contrib: preds[t] = True
         inst = {}
         for e in sorted(rows):
-            kind, fl = uni.get(e, ('decomp', ['ptr']))
-            unknown = 'ptr' in fl or kind not in ('decomp', 'call', 'tail') or e not in preds
+            kind, fl = uni.get(e, ('ptr', ['ptr']))
+            unknown = 'ptr' in fl or kind not in ('call', 'tail') or e not in preds
             inst[e] = ALL_E if unknown else None
         dirty = sorted(e for e in rows if inst[e] is not None)
         while dirty:
