@@ -3039,3 +3039,9 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - 12:19: w29 53b30d9, item 4 (external provenance). recipe.generated_sources records ext_units {unit: external} for declared externals only; it goes into objects.json and its digest. objstub skips V/T judgment for them, and they still count for coverage.
   - The name guess `external_errors`, extconv, the ret plumbing and the plugin's ret output are deleted.
   - test_objstub_rules/x64/consts/assume pass. test_uses and the plugin compile run on w29-c5, which has the /imp fix.
+- 12:26: cand5 assembled: claude/fnv-l1-contract-c5 e6dd9df44 (w28).
+  - pathflow perf: memoised, 0 diffs over 1014 cases, 234.5 s -> 14.6 s. recipe.check over all 29 recipe roots takes 5.4 s.
+  - admit is green: 1419 files, 53 roots. Generator tools: 44, with 0 foreign imports.
+  - 1 red: toolchain declares plugins with the stage1 compiler (RECIPE "Plugins"). Sent to L2: delete the key, or move the guest unit.
+  - ssce5432: the may-load "total" rule (every non-system dll in the exe dir).
+  - Pending: the sweep's FAIL-set diff against the trunk, lift/ from base3, then the farm verdict.
