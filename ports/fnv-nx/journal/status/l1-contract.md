@@ -3018,3 +3018,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Blocker B (L3a): facts pin 163ec389 has no manifest. a0f3d8e has flags 'proven,ptr,seh-handler' that imagerec rejects. Head 6944080 is a partial relift (5 of 8 images).
   - Ruling: imagerec reads flags as a set: exactly one status, plus attributes from the facts manifest's own vocabulary field. No list in imagerec. w28 does it.
   - bottleneck: L3a's complete facts pin (8 of 8, with the manifest vocabulary).
+- 12:10: w28 d22308ddc: declared_modules reds (no file, redundant, orphan, and the rest), images 8. imagerec reads its vocabulary from manifest universe_flags, with every red covered by test_imagerec. The steamworks-sdk cite form is in objstub.
+  - The token set is sent to L3a: status proven/candidate; attr call, first-ud, ptr, seh-handler, reloc-misfit=, ud=. L3a's generator emits it.
+  - L5 adds the cite form to its table header.
+  - w28 next: assemble cand5 on claude/fnv-l1-contract-c5 from the trunk, taking each tree whole from its source (lift/ waits for L3a), then recipe.check over every root.
