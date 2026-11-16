@@ -278,6 +278,9 @@ Readers of the record: gate_tlsmodel (the relocations of the linked ELF), contra
 - `outputs` are root-relative declared paths, stored in the store and copied into the root like generated outputs (they may be units, headers,
   constants ...). A nonzero exit, an undeclared output and a missing declared output are red, naming `run:<root>:<name>`.
 - A `run` stage is not a compile: toolflags does not judge it (its argv[0] is the artifact, never a compiler).
+- A C/C++/asm file of the root that is a declared path input of one of its `run` steps (the file, or a directory holding it) is that step's input, not a unit: mounted at `/in/N`,
+  its content in the step's key (`recipe.run_input_sources`; `all_units_of` leaves it out). Every other source of the root is a unit under the existing rules (`cxx_origin`),
+  and in a generated-only root it is red: a source is a declared run input or a unit, nothing else. Tests: `tests/test_runinsrc.py` (the rule), `tests/test_run.py` family (builds).
 
 ### Tool steps (`exec`)
 

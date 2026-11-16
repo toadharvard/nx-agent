@@ -552,9 +552,9 @@ COMPILE_KEYS = ("compiler", "flags", "include", "units", "link", "profile", "var
 
 
 def generated_only(rec):
-    """A recipe of generated stages only (RECIPE.md "Generated-only roots"): `generated` is a non-empty list and none of the keys that compile or link
+    """A recipe of generated stages only (RECIPE.md "Generated-only roots"): `generated` or `run` is a non-empty list and none of the keys that compile or link
     (COMPILE_KEYS) is written. Such a root has no unit (check refuses a translation unit in it), so it needs no compiler and no flags."""
-    return isinstance(rec, dict) and bool(rec.get("generated")) and not any(k in rec for k in COMPILE_KEYS)
+    return isinstance(rec, dict) and bool(rec.get("generated") or rec.get("run")) and not any(k in rec for k in COMPILE_KEYS)
 
 
 def fill_generated_only(rec):
@@ -810,9 +810,18 @@ def generated_outputs(rec):
     return [o for k in ("generated", "run") for x in (rec.get(k) if isinstance(rec.get(k), list) else []) if isinstance(x, dict) for o in step_outputs(x)]
 
 
+def run_input_sources(rec, root, files):
+    """Root-relative C/C++/asm source files of ROOT that are declared inputs of one of its `run` steps (a path input that is the file, or a directory holding it):
+    the step's input, mounted at /in/N with its content in the step's key, not a recipe unit (RECIPE.md "Run stages")."""
+    ins = [p for g in (rec.get("run") if isinstance(rec.get("run"), list) else []) if isinstance(g, dict) and isinstance(g.get("inputs"), list)
+           for p in g["inputs"] if isinstance(p, str)]
+    return {f[len(root) + 1:] for f in files if under(f, root) and is_unit(f) and any(f == p or under(f, p) for p in ins)}
+
+
 def all_units_of(rec, root, files):
-    """Sorted root-relative paths of every source of the root: tracked source files + generated outputs with a source name."""
-    mine = {f[len(root) + 1:] for f in files if under(f, root)}
+    """Sorted root-relative paths of every source of the root: tracked source files + generated outputs with a source name, minus the sources that are declared
+    inputs of a `run` step of the root (those are the step's inputs, never units)."""
+    mine = {f[len(root) + 1:] for f in files if under(f, root)} - run_input_sources(rec, root, files)
     return sorted(u for u in mine | set(generated_outputs(rec)) if is_unit(u))
 
 
@@ -1413,9 +1422,9 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
         err.append('units must be "all" (no tracked source file can be left out)')
     mine = {f[len(root) + 1:] for f in files if under(f, root)}
     gen = generated_outputs(rec)
-    if gonly:   # no compiler and no flags are written: the root compiles nothing
-        err += ["generated-only root: %s is a translation unit (a root with units writes compiler, flags, include and units)" % u
-                for u in sorted(mine | set(gen)) if u.endswith(CC_EXT + CXX_EXT + ASM_EXT)]
+    if gonly:   # no compiler and no flags are written: the root compiles nothing; a source that is no run step's declared input is neither a unit nor an input: red
+        err += ["generated-only root: %s is a translation unit (a root with units writes compiler, flags, include and units); a source file is a declared input of a `run` step or a unit" % u
+                for u in sorted((mine - run_input_sources(rec, root, files)) | set(gen)) if u.endswith(CC_EXT + CXX_EXT + ASM_EXT)]
     comp, exts, ats = rec.get("compiler"), rec.get("external", []), []
     if not isinstance(exts, list):
         err.append("external must be a list")
