@@ -2355,3 +2355,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - getrandom answered through seccomp.
 - Ruling: every randomness source in the sandbox is a deterministic stream (a function of the stage key), proven by byte-identical rebuilds.
 - The entry kind is next, then one-name-per-module.
+- L5 w30 5f9bc70d5: setsockopt, galaxywrp (11 records) and the va forwarders are fixed; duplicate RaiseException/DebugBreak removed; generated platform/exptable root.
+  - w28 deletes the name_table key, msvcrt_names.tsv and the galaxywrp signature dict.
+  - Not yet measured on built objects.
