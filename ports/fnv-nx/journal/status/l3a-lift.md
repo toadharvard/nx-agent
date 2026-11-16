@@ -1759,3 +1759,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Token diff of all 46: 0. x86sys pinned at L5 4ec8cd2c1.
   - gs over 6 of 7 images: 10 read keys / 15 sites, 0 accesses, 0 writes.
   - fnvl_seg_ok stays: h_lxs and seh.cc use it; checking that gen_sys derives it from x86sys. h_lxs waits on L3b's les-family Forms.
+- L3b: rules 1+2 are Form-neutral at R12 e0e078d1e. 27,606 keys over both universes: 0 shape_sha changed, 0 outcomes changed.
+  - formgate is red: the pinned pack db2aaf6d4 has no shapes.tsv.
+  - Fix: the relifted pack (the density run's final head, via xferpub, with shapes.tsv) becomes the lift/pack pin.
+  - L3b splits 1,098 ValueError pack-only keys by family.
