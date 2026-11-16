@@ -11,12 +11,5 @@
    "-Werror"
   ],
   "asm": []
- },
- "include": [
-  "ports/fnv-nx/hostabi/include"
- ],
- "units": "all",
- "outputs": {
-  "INCLUDE": "include"
  }
 }
