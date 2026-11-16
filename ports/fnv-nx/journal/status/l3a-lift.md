@@ -1799,3 +1799,10 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - L5 attach/detach in enter.cc. dsl_int_classes and dsl_lock are configured and green.
 - Relift head in progress: claude/fnv-l3a-lift-relift (local 499a81e24 = r123p + flagcheck; flagcheck now recomputes with P).
   - Waiting: w14 crmath, w13 clean (2 reds), the full test run.
+- The relift head was pushed: claude/fnv-l3a-lift-relift @499a81e24 (r123p + flagcheck). fnvlift 12/12 green.
+  - Its reds come from the base lineage: defdisp/descclass (L2 revert), plus liftgen_recipe/prelude/root_graph (fixed on w13-clean).
+- Lineage ruling: the relift sits on base3.
+  - w8 merges w13-clean into base3 between the revert and the trunk merge.
+  - Then w13 merges base3 into the relift and adds crmath.
+- (D) part 1 (w7): none of the 11 thread-context/APC/Ex-wait APIs is in any image's IAT or delay imports. The GetProcAddress part waits on the exe run.
+  - w7 sends farm 2 the exe modlift RUN at 7762ba183 (with d3dx9_31/38).
