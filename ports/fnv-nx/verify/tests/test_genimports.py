@@ -19,10 +19,10 @@ FILES = {"gen/g.py": GEN, "toy/b.c": "int f_b(void) { return 1; }\n"}
 LIBFILES = {"libmod.py": "import libdep\n", "libdep.py": "X = 1\n", "unused.py": "Y = 2\n"}
 
 
-def errs(name, imports, gen=GEN, libfiles=LIBFILES):
+def errs(name, imports, gen=GEN, libfiles=LIBFILES, extra=None):
     r = TL.main_rec()
     r["generated"] = [{"tool": T + "gen/g.py", "args": [], "inputs": [], "outputs": ["gen/o.c"]}]
-    repo = TL.mk(name, r, dict(FILES, **{"gen/g.py": gen}), libs=[(LIB, ({"format": "fnvnx-recipe/1"}, libfiles))])
+    repo = TL.mk(name, r, dict(FILES, **{"gen/g.py": gen}, **(extra or {})), libs=[(LIB, ({"format": "fnvnx-recipe/1"}, libfiles))])
     roots = recipe.load_admit(repo)
     ow = recipe.tree_of(roots, T + "gen/g.py")   # the admitted tool root that owns the generator
     roots[ow] = dict(roots[ow], imports=imports)
@@ -48,6 +48,8 @@ def main():
     e, _, _ = errs("gi3", [LIB], gen="import sys\nopen('/out/gen/o.c', 'w').write('int o;\\n')\n")
     un = [x for x in e if "gen:unused-import" in x]
     check("red: a declared import root that no generator reaches", len(un) == 1 and LIB in un[0], e)
+    e, _, _ = errs("gi7", [LIB], gen="import sys\nopen('/out/gen/o.c', 'w').write('int o;\\n')\n", extra={"gen/h.py": "import libmod\n"})
+    check("green: a root with two tools, only one of which imports the declared root (the declaration is per declaring root)", [x for x in e if "gen:unused-import" in x] == [], e)
     lf = dict(LIBFILES, **{"libmod.py": "import os\nopen(os.path.join(os.path.dirname(__file__), 'data.json'))\n", "data.json": "{}\n", "other.json": "{}\n"})
     e, repo4, roots4 = errs("gi4", [LIB], libfiles=lf)
     check("green: a module of an import root reading a tracked data file by a path of its own location", [x for x in e if "gen:file-escape" in x] == [], e)
