@@ -2536,3 +2536,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:47
 - w28 7c0cf9e3f: ASSUMPTIONS 135 -> 124 (ASM-213/214 plus the nine L6 retired, none cited); stale used_by keys and the duplicate ASM-102 removed. 11 findings remain, none L1: all lift/ (5 mention-no-id, stray ASM-234 with no record, ASM-221 uncited), sent to L3a/L3b. Gate side: an extensionless file lexes as text (w28).
 - bottleneck: the cand3b head with the pool, walk and budget fixes.
+
+## 2026-11-16 04:48
+- w15 cand3b d15047cd6: one temporary-store helper (scratch.store; pool leak gone for test_gate_addr/order/rtasm/pi), the cause first in reasons, the budget measured from --started, selftests --timeout-s 900. The stage walk was ported from 3817734d7, whose stat key was rejected: w15 takes the 3ba44146b key (tree content), then the farm runs cold then warm. '!rt' goes to cand4.
+- bottleneck: the cand3b head with the content-keyed memo, then the verdict.
