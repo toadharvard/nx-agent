@@ -17,11 +17,13 @@ def sdmrows_arg():
     i = sys.argv.index('--sdmrows'); p = sys.argv[i + 1]; del sys.argv[i:i + 2]; _SDMROWS.append(p); return p
 
 
-def configure(sdmrows=None):
+def configure(sdmrows=None, udsail=None):
     from fnvlift import inputs
     d = tempfile.mkdtemp(prefix='lifter-inputs-')
     open(d + '/universe.tsv', 'w').close(); open(d + '/depth.tsv', 'w').close()
     import json
+    if udsail is None:
+        udsail = d + '/udsail.tsv'; open(udsail, 'w').write('# fnvnx-udsail/2\n')      # no refused or undefined sequence in a buffer test
     json.dump({'format': 'fnvnx-segwrites/2', 'images': {'buf': {n: {'guard': n == 'gs'} for n in ('es', 'ds', 'fs', 'gs')}}}, open(d + '/segwrites.json', 'w'))      # a buffer has no write site of a segment register
-    inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=X86SYS, sdmrows=sdmrows or sdmrows_arg(), segwrites=d + '/segwrites.json', image='buf')
+    inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=X86SYS, sdmrows=sdmrows or sdmrows_arg(), udsail=udsail, segwrites=d + '/segwrites.json', image='buf')
     from fnvlift import core; from proof import lift_dsl; core.set_emit(lift_dsl.emit_form)      # the proven Forms are the one path for the mnemonics they cover

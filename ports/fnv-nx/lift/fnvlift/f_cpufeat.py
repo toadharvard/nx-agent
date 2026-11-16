@@ -9,8 +9,8 @@ hint) AND the flag is not one the SDM defines as NOP without it (MPX). The check
 COMPLETENESS (the rule is total over the decoded forms, with no list of names or capstone groups). Every form the lifter decodes has one of three outcomes, decided only by the SDM text:
   * its rows name one flag expression: present on the declared CPU (lifted by its handler) or absent (#UD), or no flag (base ISA);
   * no row, but the opcode lies in an opcode-map entry the SDM defines (sdmfeat.OPMAP: x87 escape tables, the 0F map rows with no CPUID flag): base ISA;
-  * no row and no opcode-map entry: an undefined opcode of the SDM, #UD on every CPU (the partition rule of proof/sdmfeat.py `partition`: status `undefined` is cleared; the 3DNow! 0F 0F map, FEMMS, the reserved ModRM.reg
-    encodings). `decide` reports status `undefined` and the site is #UD like any cleared flag; it needs the same call-graph certificate (CLAUDE.md "The declared CPU");
+  * no row and no opcode-map entry: the pinned Sail model decides the form's bytes (proof/udsail.py rule b, the `udsail` input): every path #UD -> status `sail`, #UD (needs the call-graph certificate); a completing
+    path is a defined instruction and `Unsupported` until it has a Form; a model error is `Unsupported`;
   * rows with several flag expressions (ambiguous) or a flag name the SDM's table does not define: `Unsupported`, never a silent default. Such a site is reported (the build is red), not lifted.
 The capstone instruction-group tags and the per-mnemonic tables are NOT read: capstone's classification is not a source (Assumption removed: ASM-203 is deleted with them).
 
@@ -42,7 +42,7 @@ def _state():
 
 
 def decide(ins):
-    """-> dict(status found|map|undefined, needs, value none|present|absent, exec_as, rows) of a decoded form (undefined: value absent); Unsupported when its rows name several flag expressions or an unknown flag"""
+    """-> dict(status found|map|sail, needs, value none|present|absent, exec_as, rows) of a decoded form (sail: value absent); Unsupported when its rows name several flag expressions or an unknown flag, or no row and no Sail #UD verdict"""
     from proof import sdmfeat
     from .core import Unsupported
     S = _state(); key = bytes(ins.bytes)
@@ -58,7 +58,14 @@ def decide(ins):
         elif mp:
             r = dict(status='map', needs='-', value='none', exec_as='-', rows=[])
         else:
-            r = dict(status='undefined', needs='undefined opcode', value='absent', exec_as='-', rows=[])
+            # no SDM row (the text parse can miss rows; silicon executes some such encodings as aliases, and capstone decoding the form is evidence it is defined): the pinned Sail model decides it on its bytes, by the rule
+            # of proof/udsail.py (b). Every path #UD (a row of the `udsail` input) -> #UD, class sail. A path that completes is a defined instruction and needs its Form; a model error is a gap: both are red here.
+            from . import f_sys
+            u = f_sys.ud_gap(key)
+            if u is None:
+                r = ('Unsupported', 'no SDM row for %s and no Sail #UD verdict (udsail input): a defined instruction needs a Form, a model gap is red' % key.hex())
+            else:
+                r = dict(status='sail', needs='Sail #UD (%s)' % u.ud_class, value='absent', exec_as='-', rows=[])
         S['memo'][key] = r
     if isinstance(r, tuple):
         raise Unsupported(r[1])
