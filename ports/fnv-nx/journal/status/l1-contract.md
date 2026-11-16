@@ -3095,3 +3095,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - The probes use one PROBE_ENV.
   - Open: objstub's 5 probes and its version-text-keyed cache, fixed now (tree-hash key).
   - Archive feature (L2's recipe hunk): taken whole if a c5 root uses it; otherwise test_archive_sources is deleted and L2 brings feature and test together later.
+- 12:54: w28 eaeb17ffd (next verdict). No c5 root uses archive or `sources <step>:<dir>`, so test_archive_sources is deleted and L2 brings feature and test together later. objstub's 5 probes use PROBE_ENV, and the errno-probe cache is keyed by the compiler tree hash. w29 3bded003 (item 7: foreach dirs plus the header rule) is accepted, and w7 is told. w29 now does const.h and the format fix.
