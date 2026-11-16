@@ -318,6 +318,27 @@ declared debs, or a file of an external / a built root, see "A tool that is not 
   (`{name, root, output, at}`), `plugins` and the final step taking `{"plugin": NAME}` inputs.
 Tests: `tests/test_toolstep.py`, `tests/test_sandbox.py` case 13.
 
+- `exec: {"python": true}` runs the pinned python runtime of the generated stages (the interpreter and env.json `python.modules`, through the one function `Job.pyrt`; `FNVNX_PYMODS`, the interpreter digest and every module's installed-files digest are in the key). `args` are the interpreter's arguments after `-s -B` (a script path, usually `/in/N`); the step's inputs, `scratch`, `env` and stage refs are as for any tool step. The step names no debs (the machine's layout deb is added as always). A module the env does not pin cannot be imported. Tests: `tests/test_runpython.py`.
+
+### `foreach` (one step per table row)
+
+A `run` step may carry `"foreach": {"table": PATH, "key": COLUMN}` in place of a hand-written list of steps. PATH is a tracked TSV file of the checkout: a header line of column
+names (`[A-Za-z][A-Za-z0-9_]*`, unique), then one row per line with exactly the header's fields. KEY is a column whose values are unique plain names (letters, digits, `_`, `.`, `-`).
+`recipe.expand_foreach` (called by `read_recipe` and by `check`, so it is the one place) replaces the step by one step per row: the step as written, named `NAME.<key field>`, with
+`{COLUMN}` replaced by the row's field in its `args`, `outputs`, `dirs` and `env` values (`{{` and `}}` are literal braces). Every other reader sees plain static steps, so stage refs
+(`ROOT:run:NAME.<key>`), blocked outputs and the key are the ordinary ones.
+- The table is read at expansion and is no stage input. A step's key is therefore a function of its own expanded text (its row's fields), its tool and its inputs: a changed row re-keys
+  only that row's step, an unchanged row is a cache hit, and a step that hits its time limit loses only its own row.
+- Red at check time: a table that is not a tracked file, an empty table or one with no row, a header with a bad or repeated column, a row with the wrong number of fields, a key
+  that is no plain name or occurs twice, a key column that is not in the header, a `{name}` that is no column or a lone brace, and an output that two rows share (an output of a
+  foreach step names the row, for example `proof/{shape}.txt`).
+- `"foreach": {"range": N}` (N an integer >= 1) is the same without a table: N steps named `NAME.<i>` for i = 0..N-1, with `{i}` and `{n}` (= N) replaced like a column. An N below 1 is red.
+- Fan-in. A step of the recipe may take the outputs of all rows of a foreach step as inputs: `{"stage": "ROOT:run:NAME", "path": TEMPLATE, "rows": "all"}`, TEMPLATE being an `outputs` or `dirs` entry of
+  the foreach step as written (for example `part/{i}.txt`). The expansion replaces it by one ordinary stage ref per row, in row order, so they are the consecutive mounts /in/K, and the arg
+  `"@rows"` of that step becomes the list of those mounts in the same order. One `rows` input per step; a `rows` input that names no foreach step of the recipe, a TEMPLATE that is no output of it,
+  and `@rows` without a `rows` input are red. ROOT is the recipe's own root (the rows are this recipe's).
+Test: `tests/test_foreach.py`.
+
 ### Stage refs
 
 `resolve_input` takes a third ref form `{"stage": "ROOT:gen:I" | "ROOT:run:NAME", "path": P}`: the declared output P of generator I (index in
@@ -542,7 +563,7 @@ Tests: `tests/test_toolexec.py` (ELF resolution and the check forms; the sandbox
 Red: the owner is this root (use `{external, path}`); the owner is not an admitted root; the owner is neither in this recipe's `uses` nor in the root's admit.json `imports` (the dependency is declared, never reached by name alone); the owner declares no external NAME; the external is a stage external (take it through `uses`); the path is absolute or leaves the tree. A stage reads it at `/in/N` (run), `/exec` (exec) or `/in/external_of/<owner with / as __>/<name>/<path>` (generated). Selftests: `tests/test_external_of.py`.
 
 ## The include closure of a root (`include_of`)
-An input of a `run` or `generated` step may be `{"include_of": ROOT}`: every tracked file under the repository include directories of ROOT's own recipe (`include`, directories inside an external are the compiler's declared inputs and are not part of it), at its repo-relative path, mounted at `/in/include_of/<ROOT with / as __>/` (`run`: at the step's `at`). It is resolved the way the compile stage resolves them, so a consumer never restates a root's include list. Valid only where ROOT is a root this recipe `uses` or a declared import (`include_of_errors`, the one rule: check and mount); ROOT itself is red (its include dirs are its own sources); a ROOT whose recipe has no repository include directory is red. The content hash of the tree is in the stage key, so a changed header changes the key. Functions: `recipe.include_of_dirs`, `Job.include_of_tree`. Test: `tests/test_external_of.py`.
+An input of a `run` or `generated` step may be `{"include_of": ROOT}`: every tracked file under the repository include directories of ROOT's own recipe (`include`, directories inside an external are the compiler's declared inputs and are not part of it), at its repo-relative path, mounted at `/in/include_of/<ROOT with / as __>/` (a `run` step mounts it like every run input, at `/in/N` in list order: the step's own N-th input). It is resolved the way the compile stage resolves them, so a consumer never restates a root's include list. Valid only where ROOT is a root this recipe `uses` or a declared import (`include_of_errors`, the one rule: check and mount); ROOT itself is red (its include dirs are its own sources); a ROOT whose recipe has no repository include directory is red. The content hash of the tree is in the stage key, so a changed header changes the key. Functions: `recipe.include_of_dirs`, `Job.include_of_tree`. Test: `tests/test_external_of.py`.
 
 The external cache is named once: `recipe.ext_dir(cache)`. A build that is given its own external cache (`--ext`) passes it to every reader (`resolve_input(..., extc)`, `exttree(e, cache, extc)`), so the reader goes where `fetch_externals` wrote.
 

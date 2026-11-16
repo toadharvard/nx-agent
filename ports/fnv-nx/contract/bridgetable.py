@@ -19,7 +19,12 @@ conv  stdcall | cdecl | vararg | thiscall | fastcall | data;  ret v|i|q|f|d;  ar
 A name missing from its spec, a stub in the spec, a forward that cannot be followed or an unknown argument type is an error: total or failing.
 """
 
+import os
 import re
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)
+from contract import dllkind  # noqa: E402
 
 NOSPEC_CONV = "cdecl"   # a module without a reference spec is a vendor SDK's: its exports are the C ABI of the SDK (steam_api.h S_API), whose x86 convention is cdecl
 
@@ -114,6 +119,9 @@ def derive(names, spec_text, syms, extra, va, exports):
         if not line:
             continue
         dll, name = line.split("\t")[:2]
+        if dllkind.is_runtime(dll):
+            errors.append("%s!%s: an import of the runtime's own module: it is no image and has no import table entry" % (dll, name))
+            continue
         if not has_spec(spec_text, dll):   # a module without a reference spec (a vendor SDK's, e.g. galaxywrp.dll): its definer's own declared type is the signature
             rec = exports.get((dll, name))
             if rec is None:
@@ -156,6 +164,13 @@ def derive(names, spec_text, syms, extra, va, exports):
             errors.append("%s!%s: a varargs export has no forwarder in the va record" % (dll, name))
             continue
         rows.append((dll, real, ordn, conv, ret, args, sym, "entry" if kind == "entry" else "link"))
+    for (dll, name), (sym, kind, ret, args) in sorted(exports.items()):   # the runtime's own module: one row per record, conv and args from the definer's declared type like any spec-less module
+        if not dllkind.is_runtime(dll):
+            continue
+        if kind == "data":
+            rows.append((dll, name, "", "data", "-", "", sym, "link"))
+        else:
+            rows.append((dll, name, "", NOSPEC_CONV, ret, "" if args == "-" else args, sym, "entry" if kind == "entry" else "link"))
     for i, text in enumerate(extra):
         for line in text.split("\n"):
             if not line:

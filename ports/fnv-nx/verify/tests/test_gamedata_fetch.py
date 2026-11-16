@@ -5,7 +5,7 @@
   - a data item that no recipe declares is red, naming the remedy;
   - `recipe.py externals` lists the same ref pinned two ways as an error.
 Real git, the real script and the real recipe.py in a toy checkout. Run: python3 -I <this file>. Needs git, sha256sum."""
-import json, os, shutil, subprocess, sys, tempfile
+import hashlib, io, json, os, shutil, subprocess, sys, tarfile, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 NX = os.path.dirname(os.path.dirname(HERE))
@@ -29,7 +29,22 @@ def git(cwd, *a):
 def w(root, rel, text):
     p = os.path.join(root, rel)
     os.makedirs(os.path.dirname(p), exist_ok=True)
-    open(p, "w").write(text)
+    open(p, "w", encoding="latin1", newline="").write(text)
+
+
+def toy_item():
+    """a data item as the artifacts repository holds it: a tar split in two parts and MANIFEST.tsv (name, kind, sha256 of the whole, part rows with size and sha256); latin1 text carries the bytes"""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as t:
+        for n, body in (("a.txt", b"alpha\n"), ("sub/b.bin", b"B" * 1000)):
+            ti = tarfile.TarInfo(n)
+            ti.size = len(body)
+            t.addfile(ti, io.BytesIO(body))
+    raw = buf.getvalue()
+    cut = len(raw) // 2
+    parts = [("Toy.part00", raw[:cut]), ("Toy.part01", raw[cut:])]
+    man = "name\tToy.esm\nkind\ttar\nsha256\t%s\n" % hashlib.sha256(raw).hexdigest() + "".join("part\t%s\t%d\t%s\n" % (f, len(b), hashlib.sha256(b).hexdigest()) for f, b in parts)
+    return dict({f: b.decode("latin1") for f, b in parts}, **{"MANIFEST.tsv": man})
 
 
 def artifacts_repo(td, name, exe_text):
@@ -39,11 +54,11 @@ def artifacts_repo(td, name, exe_text):
     git(repo, "init", "-q")
     git(repo, "config", "uploadpack.allowAnySHA1InWant", "true")
     pins = {}
-    for ref, files in (("gamedata/exe", {"FalloutNV.exe": exe_text, "FalloutPrefs.ini": "[Display]\n"}), ("gamedata/redist", {"d3dx9_31.dll": "dll\n"})):
+    for ref, files in (("gamedata/exe", {"FalloutNV.exe": exe_text, "FalloutPrefs.ini": "[Display]\n"}), ("gamedata/redist", {"d3dx9_31.dll": "dll\n"}), ("gamedata/data/Toy", None)):
         for f in os.listdir(repo):
             if f != ".git":
                 shutil.rmtree(os.path.join(repo, f)) if os.path.isdir(os.path.join(repo, f)) else os.remove(os.path.join(repo, f))
-        for f, t in files.items():
+        for f, t in (files or toy_item()).items():
             w(repo, f, t)
         if ref.endswith("redist"):
             sums = subprocess.run("sha256sum d3dx9_31.dll", shell=True, cwd=repo, capture_output=True, text=True).stdout
@@ -87,6 +102,11 @@ with tempfile.TemporaryDirectory() as td:
     evil, _ = artifacts_repo(td, "evil", "exe v2 (not the pinned tree)\n")
     chk = toy_checkout(td, pins)
     cache, out = os.path.join(td, "cache"), os.path.join(td, "game")
+    r = run(chk, os.path.join(td, "gamed"), good, cache=os.path.join(td, "cached"))
+    gd = os.path.join(td, "gamed", "Data")
+    check("a tar item is installed one item at a time, totals reconcile (pinned = installed + framing), the item's cache is gone",
+          r.returncode == 0 and open(os.path.join(gd, "a.txt")).read() == "alpha\n" and os.path.getsize(os.path.join(gd, "sub/b.bin")) == 1000 and "pinned" in r.stdout and "framing" in r.stdout
+          and not [x for x in os.listdir(os.path.join(td, "cached")) if x.startswith("item-")], (r.returncode, r.stdout[-400:], r.stderr[-300:]))
     r = run(chk, out, good, "--no-data", cache=cache)
     check("the declared exe and redist are installed by commit", r.returncode == 0 and open(os.path.join(out, "FalloutNV.exe")).read() == "exe v1\n" and os.path.isfile(os.path.join(out, "d3dx9_31.dll")), (r.returncode, r.stderr[-300:], r.stdout[-300:]))
     r = run(chk, out, good, "--no-data", cache=cache)
@@ -98,7 +118,7 @@ with tempfile.TemporaryDirectory() as td:
     r = run(chk, os.path.join(td, "game3"), good, "someitem", cache=cache)
     check("a data item that no recipe declares is red and names the remedy", r.returncode == 1 and "declared by no recipe" in r.stderr, (r.returncode, r.stderr[-300:]))
     lst = subprocess.run([sys.executable, "-I", "ports/fnv-nx/verify/recipe.py", "externals", "--ref-prefix", "gamedata/"], cwd=chk, capture_output=True, text=True)
-    check("`recipe.py externals` lists ref, commit, tree", lst.returncode == 0 and sorted(l.split("\t")[0] for l in lst.stdout.split("\n") if l) == ["gamedata/exe", "gamedata/redist"], lst.stderr[-300:])
+    check("`recipe.py externals` lists ref, commit, tree", lst.returncode == 0 and sorted(l.split("\t")[0] for l in lst.stdout.split("\n") if l) == ["gamedata/data/Toy", "gamedata/exe", "gamedata/redist"], lst.stderr[-300:])
     chk2 = toy_checkout(os.path.join(td, "x") if os.makedirs(os.path.join(td, "x")) is None else "", pins, extra=[{"name": "dup", "repo": "x", "ref": "gamedata/exe", "commit": "0" * 40, "tree_sha256": "1" * 64, "at": "/ext/dup"}])
     lst = subprocess.run([sys.executable, "-I", "ports/fnv-nx/verify/recipe.py", "externals", "--ref-prefix", "gamedata/"], cwd=chk2, capture_output=True, text=True)
     check("a ref pinned two ways is an error", lst.returncode != 0 and "pinned two ways" in lst.stderr, (lst.returncode, lst.stderr[-300:]))

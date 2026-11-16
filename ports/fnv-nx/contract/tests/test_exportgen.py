@@ -14,6 +14,14 @@ with open(os.path.join(C, '..', 'toolchain', 'layout', 'decltype_spell.inc')) as
 fails = 0
 
 
+def _ok(f):
+    try:
+        f()
+        return True
+    except ValueError:
+        return False
+
+
 def check(name, ok, info=''):
     global fails
     print('%s %s%s' % ('PASS' if ok else 'FAIL', name, '' if ok else '  ' + repr(info)[:300]))
@@ -152,6 +160,8 @@ spec = {'msvcrt': '1 cdecl free(ptr)\n2 extern _iob\n', 'wsock32': '1 stdcall so
 ex = {('msvcrt.dll', 'free'): ('my_free', 'func', 'v', 'i'), ('msvcrt.dll', '_iob'): ('my_iob', 'data', '-', '-'), ('ws2_32.dll', 'socket'): ('whatever_sock', 'func', 'i', 'iii')}
 rows, errs, _ = B.derive(names, lambda d: spec[d], None, [], {}, ex)
 got = {(r[0], r[1]): (r[4], r[6], r[7]) for r in rows}
+check("parse_export accepts the runtime module '!rt' and still rejects other non *.dll modules",
+      exportgen.parse_export(b"!rt\teh_x\tsym_x\tentry\n", 't') == [('!rt', 'eh_x', 'sym_x', 'entry')] and not any(_ok(lambda m=m: exportgen.parse_export(m.encode(), 't')) for m in ("rt\ta\tb\tfunc\n", "!rt2\ta\tb\tfunc\n")), 0)
 check('derive takes the symbol and the return letter from the record, through the forward chain of the declared machine (wsock32 -> ws2_32)',
       not errs and got == {('msvcrt.dll', 'free'): ('v', 'my_free', 'link'), ('msvcrt.dll', '_iob'): ('-', 'my_iob', 'link'), ('wsock32.dll', 'socket'): ('i', 'whatever_sock', 'link')}, (errs, got))
 rows, errs, _ = B.derive(names, lambda d: spec[d], None, [], {}, {k: v for k, v in ex.items() if k != ('msvcrt.dll', 'free')})

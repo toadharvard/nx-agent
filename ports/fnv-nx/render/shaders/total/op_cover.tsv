@@ -201,19 +201,19 @@ emit	sm:vs:sincos	37	SINCOS	emit_GLSL_SINCOS	own	-	non-empty body
 emit	sm:vs:slt	12	SLT	emit_GLSL_SLT	own	-	non-empty body
 emit	sm:vs:sub	3	SUB	emit_GLSL_SUB	own	-	non-empty body
 emit	sm:vs:texldl	95	TEXLDL	emit_GLSL_TEXLDL	own	-	non-empty body
-emit	table:RESERVED	49	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	50	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	51	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	52	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	53	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	54	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	55	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	56	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	57	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	58	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	59	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	60	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	61	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	62	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	63	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	75	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
+emit	table:RESERVED	49	RESERVED	-	c	-	opcode_string 0: INSTRUCTION_UNASSIGNED, no emitter; see OUT_RESERVED
+emit	table:RESERVED	50	RESERVED	-	c	-	opcode_string 0: INSTRUCTION_UNASSIGNED, no emitter; see OUT_RESERVED
+emit	table:RESERVED	51	RESERVED	-	c	-	opcode_string 0: INSTRUCTION_UNASSIGNED, no emitter; see OUT_RESERVED
+emit	table:RESERVED	52	RESERVED	-	c	-	opcode_string 0: INSTRUCTION_UNASSIGNED, no emitter; see OUT_RESERVED
+emit	table:RESERVED	53	RESERVED	-	c	-	opcode_string 0: INSTRUCTION_UNASSIGNED, no emitter; see OUT_RESERVED
+emit	table:RESERVED	54	RESERVED	-	c	-	opcode_string 0: INSTRUCTION_UNASSIGNED, no emitter; see OUT_RESERVED
+emit	table:RESERVED	55	RESERVED	-	c	-	opcode_string 0: INSTRUCTION_UNASSIGNED, no emitter; see OUT_RESERVED
+emit	table:RESERVED	56	RESERVED	-	c	-	opcode_string 0: INSTRUCTION_UNASSIGNED, no emitter; see OUT_RESERVED
+emit	table:RESERVED	57	RESERVED	-	c	-	opcode_string 0: INSTRUCTION_UNASSIGNED, no emitter; see OUT_RESERVED
+emit	table:RESERVED	58	RESERVED	-	c	-	opcode_string 0: INSTRUCTION_UNASSIGNED, no emitter; see OUT_RESERVED
+emit	table:RESERVED	59	RESERVED	-	c	-	opcode_string 0: INSTRUCTION_UNASSIGNED, no emitter; see OUT_RESERVED
+emit	table:RESERVED	60	RESERVED	-	c	-	opcode_string 0: INSTRUCTION_UNASSIGNED, no emitter; see OUT_RESERVED
+emit	table:RESERVED	61	RESERVED	-	c	-	opcode_string 0: INSTRUCTION_UNASSIGNED, no emitter; see OUT_RESERVED
+emit	table:RESERVED	62	RESERVED	-	c	-	opcode_string 0: INSTRUCTION_UNASSIGNED, no emitter; see OUT_RESERVED
+emit	table:RESERVED	63	RESERVED	-	c	-	opcode_string 0: INSTRUCTION_UNASSIGNED, no emitter; see OUT_RESERVED
+emit	table:RESERVED	75	RESERVED	-	c	-	opcode_string 0: INSTRUCTION_UNASSIGNED, no emitter; see OUT_RESERVED
