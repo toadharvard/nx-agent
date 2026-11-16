@@ -6,7 +6,6 @@ without a row does not compile, a row renamed in the table renames the constant.
 Rows are read with the same fields as verify/objstub.py read_wine_table (which validates the full format in the gate); this tool only needs id and wine_ref."""
 import os, re, sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def main(argv):

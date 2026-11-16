@@ -48,11 +48,13 @@
     "/ext/wine9",
     "--recipe",
     "/in/ports/fnv-nx/render/shaders/total/build.json",
+    "--legacy-dir",
+    "/in/ports/fnv-nx/render/shaders/total",
     "--out",
     "/out/gen"
    ],
    "inputs": [
-    "ports/fnv-nx/render/shaders/total/build.json"
+    "ports/fnv-nx/render/shaders/total"
    ],
    "outputs": [
     "gen/sm_table.json",

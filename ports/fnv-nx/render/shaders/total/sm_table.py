@@ -130,7 +130,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--docs", required=True); ap.add_argument("--wine", required=True); ap.add_argument("--vkd3d", required=True); ap.add_argument("--cites", required=True);
     ap.add_argument("--recipe", required=True, help="build.json of this root: the external pins"); ap.add_argument("--out", required=True, help="output directory")
-    ap.add_argument("--legacy-dir", dest="legacy_dir", default=HERE)
+    ap.add_argument("--legacy-dir", dest="legacy_dir", required=True, help="the directory holding sm_cases.py (an input of the stage)")
     a = ap.parse_args(); p = pins(a.recipe); a.pins = p
     T, regx = build(a)
     os.makedirs(a.out, exist_ok=True); tj = os.path.join(a.out, "sm_table.json")
