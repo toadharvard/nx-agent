@@ -126,8 +126,9 @@ def sections(td, so):
     if r.returncode == 0:
         got = {x[0]: x[2] for x in rows_of(o, '.fnvnx.sympair')}
         want = {'_Z2d1PFvPFviEE': 'nodecor:fnparmform:a parameter written as a function inside a function type',
+                '_Z2d5PFviE': None, '_Z2d6PFvPFviEE': None,
                 '_Z2d2PFvPicE': None, '_Z2d3PFvPisE': 'func', '_Z2d4PFvPiS0_E': 'func'}
-        check('fnparm_domain: a function-typed parameter inside a function type, and a volatile pointer, are `nodecor:fnparmform:<form>`; plain and const pointers are named',
+        check('fnparm_domain: a function-typed parameter inside a function type, one through a typedef of a function type, and a volatile pointer, are `nodecor:fnparmform:<form>`; plain and const pointers are named',
               all(k in got and (v is None and got[k].startswith('nodecor:fnparmform:') or got[k] == v) for k, v in want.items()), got)
     for inst in (False, True):
         o = os.path.join(td, 'pattern%d.o' % inst)
