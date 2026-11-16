@@ -1605,3 +1605,8 @@ Paused: w3b, w4, farm; no other work.
     - L1 ruling (a): per-target recipes stay deltas over the base (w28 8666fb756), so nxgpu/build.guest.json is unchanged.
     - Under cand4 401c3332e, host per-target recipes drop `plugins`: pair/build.host.json and smscan/build.host.json (translator has none).
     - verify/wine_fixme.tsv row 25 has to come in with w28; it is what made L5 w37's render/d3d9 draw_state.cpp:68 red.
+- 06:40Z: w9 `session_01KmtZKQoXRLGELGneCoKHHx` built the joined render head: claude/fnv-l6-render-w9-cand4 02abe75, which is 8faa8175d merged with cand4 62474771c (102 conflicts, resolved by owner; no GL deleted). recipe check: 10 of 12 L6 roots valid.
+    - Red: render/d3d9, because shim declares no INCLUDE output (owner L1/L2).
+    - Red: bridgefacts, because its COM generator reads platform/audio, which cand4 cut.
+    - w9 is doing: split bridgefacts by input closure (D9_* stay; COM_* go to bridgefacts/com) and delete the tracked com_spec.json, which duplicates COM_SPEC. L1 is asked to rule on admitting bridgefacts/com and bridgetable.
+- bottleneck: shim INCLUDE (L1/L2) for d3d9; the bridgefacts split (w9). 1 of 4 workers busy.
