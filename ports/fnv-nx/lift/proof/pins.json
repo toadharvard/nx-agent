@@ -12,9 +12,9 @@
   {
    "path": "ports/fnv-nx/platform/declared/x86sys.json",
    "owner": "L5",
-   "blob": "1a26cb0d4853b32f96e73f2e6515c6175c1099f4",
-   "sha256": "55964ce78657896733a046bb19982c9af922de1056bea5e8a4cd7ad87095ad2e",
-   "commit": "ad3af10c52a8cb97a675b204e625fa1860e03a07"
+   "blob": "55026f36093c7c2f262c08533a638a4fbed3db8a",
+   "sha256": "fa6c99bedb12e6d3fa0e060147cdefffc79b16e75f2017b0638e2e0a9718d627",
+   "commit": "894e5a68ded3d28dd22cf7e4dbc06c6c726f6d84"
   }
  ],
  "external": [

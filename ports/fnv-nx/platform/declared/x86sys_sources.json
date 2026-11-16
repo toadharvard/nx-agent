@@ -54,13 +54,13 @@
    "row": "int_ring3.vectors",
    "key": 41,
    "since_build": 9200,
-   "source": "MSDN __fastfail intrinsic: fast fail is supported from Windows 8 (build 9200); Windows 7 SP1 is build 7601, so int 0x29 is not a fast-fail gate there. What the instruction does on build 7601 is not stated by MSDN: undecided"
+   "source": "MSDN __fastfail intrinsic: fast fail is supported from Windows 8 (build 9200); Windows 7 SP1 is build 7601, so Wine 9.0's int 0x29 case (__fastfail) is not 7601 behaviour and is removed from the Wine set. What `int 0x29` does on build 7601 is derived from the 7601 kernel's IDT (row idt, vector_0x29)"
   }
  ],
  "win7sp1_x86_kernel": {
   "repo": "fnv-nx-build",
   "ref": "tools/win7sp1-x86-kernel",
-  "commit": "cc8376f55daa997b4e4996ae15d66808180efdbf",
+  "commit": "7229600b8dbb89fbb1ada6478b7fde3caee01434",
   "package": {
    "name": "windows6.1-KB976932-X86.exe",
    "sha1": "c3516bc5c9e69fee6d9ac4f981f5b95977a8a2fa",
@@ -93,6 +93,23 @@
      "url": "https://msdl.microsoft.com/download/symbols/ntkrnlmp.pdb/00625D7D36754CBEBA4533BA9A0F3FE22/ntkrnlmp.pdb"
     }
    }
+  },
+  "loader": {
+   "winload.exe": {
+    "path": "kernel/winload.exe",
+    "sha256": "1a516bc932b16ae132cc8a59791abd28b3b343f94b522e2491409dc689c4c8d4",
+    "origin": "the same package, inner directory x86_microsoft-windows-b..vironment-os-loader_31bf3856ad364e35_6.1.7601.17514_none_5d2e241dcae8f953 (the four winload.exe of the package are byte-identical)",
+    "pdb": {
+     "path": "symbols/winload_prod.pdb",
+     "sha256": "4b8ad365e10bd71dc3dcb5d3f030a00bc3d84de3f2bfa8bb00cd2d0eed1ff1c2",
+     "guid_age": "7BFC36F9FE254479B5448E113B3135B51",
+     "url": "https://msdl.microsoft.com/download/symbols/winload_prod.pdb/7BFC36F9FE254479B5448E113B3135B51/winload_prod.pdb"
+    }
+   }
+  },
+  "inner_cab": {
+   "sha256": "e63ad1698c79dd10fcc798c1188967837b9ae6506159fb2f434ea849726822d6",
+   "extract": "7z x package.exe -> file [0]; cabextract [0]"
   }
  }
 }

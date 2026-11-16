@@ -121,7 +121,7 @@ class T(unittest.TestCase):
 
     def test_far_transfer_is_uncertified_while_the_descriptor_rows_are_undecided(self):
         r, n = sysspec.check(key('9a000000000000'))      # the Form of the far CALL (9A) exists on the lift line with the far Forms; without it the shape is not covered
-        self.assertIn(r, ('uncertified', 'not-covered')); self.assertIn('sgdt' if r == 'uncertified' else 'Form', n)
+        self.assertIn(r, ('uncertified', 'not-covered')); self.assertIn('OutsideDomain' if r == 'uncertified' else 'Form', n)
 
 
 if __name__ == '__main__':

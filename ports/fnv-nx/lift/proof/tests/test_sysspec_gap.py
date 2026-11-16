@@ -53,14 +53,14 @@ class Declared(unittest.TestCase):
         self.assertIn('eax', d)
 
     def test_int_n_the_record_vectors_the_other_vectors_and_the_excluded_one(self):
-        self.assertEqual(sysspec_int.row(3)[0], 'gate'); self.assertEqual(sysspec_int.row(0x80)[0], 'other'); self.assertEqual(sysspec_int.row(0x29)[0], 'excluded')
+        self.assertEqual(sysspec_int.row(3)[0], 'gate'); self.assertEqual(sysspec_int.row(0x80)[0], 'other'); self.assertEqual(sysspec_int.row(0x29)[0], 'other'); self.assertEqual(sysspec_int.row(0x2a)[0], 'excluded')
         self.assertTrue(sysspec_int.claims('cd00/1.1.0.0')); self.assertFalse(sysspec_int.claims('cc/0.0.0.0'))
         r, n = sysspec.check('cd00/1.1.0.0')
-        self.assertEqual(r, 'uncertified'); self.assertIn('int_ring3.excluded.41', n); self.assertIn('255 of 256', n)
+        self.assertEqual(r, 'uncertified'); self.assertIn('int_ring3.excluded.42', n); self.assertIn('252 of 256', n)
 
     def test_int_n_concrete_vectors_are_proved(self):
-        for v in (3, 4, 45, 0, 0x80, 0xff): self.assertEqual(sysspec_int.check('cd%02x/0.0.0.0' % v)[0], 'proved', v)
-        self.assertEqual(sysspec_int.check('cd29/0.0.0.0')[0], 'uncertified')
+        for v in (3, 4, 45, 0, 0x29, 0x80, 0xff): self.assertEqual(sysspec_int.check('cd%02x/0.0.0.0' % v)[0], 'proved', v)
+        self.assertEqual(sysspec_int.check('cd29/0.0.0.0')[0], 'proved'); self.assertEqual(sysspec_int.check('cd2a/0.0.0.0')[0], 'uncertified')
 
     def test_cites_check_against_the_pinned_sdm(self):
         sdm = os.environ.get('FNVNX_SDM_TXT', '/tmp/sdmdl/sdm.txt')

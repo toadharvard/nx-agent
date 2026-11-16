@@ -16,6 +16,7 @@ from proof import privset, shape, symform, x86sys  # noqa: E402
 sys.path.insert(0, HERE)
 from fnvlift import dsl  # noqa: E402
 import sysspec_far  # noqa: E402
+import capstone.x86_const as X  # noqa: E402
 
 K_BP, K_UD, K_BOUNDS, K_INTO, K_PRIV, K_AV, K_STEP = 2, 3, 4, 5, 6, 7, 8
 
@@ -114,21 +115,35 @@ def check_far(key, fk, rec):
     """a far transfer: the cases the record decides (the selector of selectors.cs, the NULL selector) against the cited SDM text (sysspec_far.py); every other selector is defined by descriptor rows the record leaves undecided: the shape is
     uncertified, the undecided sites are counted by the caller (the selector of an immediate form is a site field, that of a memory form is data)"""
     call, imm = fk
-    try:
-        x86sys.get(rec, 'selectors', 'cs'); x86sys.get(rec, 'sgdt')
-        return 'uncertified', 'uncertified: far transfer to a selector other than selectors.cs: descriptor rows undecided (sgdt)'      # unreachable until sgdt is decided: kept to name the rule
-    except x86sys.Undecided as e:
-        why = str(e)
     import sysspec_far
     if not imm:      # composition of certificates: the effective address is the PUSH r/m32 Form's, valid only if that shape has a proved certificate (CERTS = the proved shape keys of certs.tsv)
         bk = sysspec_far.basis_key(key)
         if CERTS is None or bk not in CERTS: return 'uncertified', 'uncertified: ea-basis %s not certified' % bk
         if call and sysspec_far.esp_based(key): return 'uncertified', 'uncertified: esp-based effective address of a far CALL: the SDM states the pre-instruction ESP for PUSH (Vol. 2B 4-523) and the near CALL (Vol. 2A 3-122), not for the far CALL'
     try: cases = sysspec_far.check(key, call, rec, imm)
+    except x86sys.Undecided as e: return 'uncertified', 'uncertified: %s' % e
     except (KeyError, AttributeError, AssertionError) as e: return 'not-covered', 'no Form for the far transfer (%s)' % type(e).__name__
     bad = [c for c, r in cases if r != 'proved']
     if bad: return 'FAILED(dsl)', 'far transfer differs from the SDM in: %s' % ','.join(bad)
-    return 'uncertified', 'uncertified: far transfer to a selector other than selectors.cs / NULL (proved: %s): %s' % (','.join(c for c, _ in cases), why)
+    n = sysspec_far.domain(rec)
+    return 'uncertified', 'uncertified: far transfer proved over its domain (cases %s); %d GDT indexes of jmp_far.undecided_descriptors are outside it and the Form carries no domain (OutsideDomain: base3 80bd1328d, not merged here)' % (','.join(c for c, _ in cases), n)
+
+
+def crdr(ins):
+    """MOV to / from a control or debug register (0F 20..23), claimed by the operand kind: the rows 'MOV-Move to/from Control Registers' and '... Debug Registers' of privset.rows() (class cpl0: #GP(0) 'If the current privilege level is not 0.')"""
+    return ins.mnemonic.split()[-1] == 'mov' and any(o.type == X.X86_OP_REG and ins.reg_name(o.reg)[:2] in ('cr', 'dr') for o in ins.operands)
+
+
+def check_crdr(key, rec):
+    import z3
+    rows = [r for r in privset.rows() if r['mnemonics'] == ['mov'] and r['class'] == 'cpl0']
+    if len(rows) != 2: return 'FAILED(facts)', 'the SDM rows of MOV CRn / DRn are not both in privset'
+    if x86sys.cpl(rec) == 0: return 'not-covered', 'no spec for mov CRn/DRn under the record (it does not fault at CPL 0)'
+    f = symform.symbuild(key).form
+    if f.regs or f.flags or f.stores or f.flo is not None or f.xs: return 'FAILED(dsl)', 'a class (a) instruction changes state'
+    if len(f.faults) != 1 or f.faults[0][0] not in (K_PRIV, K_AV): return 'FAILED(dsl)', 'expected one #GP(0) fault (PRIV or AV), got %s' % [k for k, _ in f.faults]
+    s = z3.Solver(); s.add(dsl.to_smt(f.faults[0][1]) != 1)
+    return ('proved', 'privileged at CPL 3: #GP(0) in every state') if s.check() == z3.unsat else ('FAILED(dsl)', 'the fault is conditional')
 
 
 def decl_spec(m):
@@ -172,6 +187,13 @@ def check(key):
     import sysspec_gap
     if sysspec_gap.family(sysspec_gap.decode(key)) is not None:      # bswap, xlat, mov m16 from Sreg, bts: claimed by decoding (sysspec_gap.py, SDM quotes checked against sysspec_gap_pages.tsv)
         try: return sysspec_gap.check(key)
+        except x86sys.Undecided as e: return 'uncertified', 'uncertified: %s' % e
+    if crdr(sysspec_gap.decode(key)):
+        try: return check_crdr(key, x86sys.load())
+        except x86sys.Undecided as e: return 'uncertified', 'uncertified: %s' % e
+    import sysspec_seg
+    if sysspec_seg.family(sysspec_gap.decode(key)) is not None:      # MOV / POP / PUSH of a segment register (sysspec_seg.py, quotes checked against sysspec_seg_pages.tsv)
+        try: return sysspec_seg.check(key)
         except x86sys.Undecided as e: return 'uncertified', 'uncertified: %s' % e
     if m not in PRIV and m not in COND and m not in CLASS_B and m not in DECL and m not in LARFAM and not needs_any(m):
         return 'not-covered', 'no spec for %s' % m

@@ -177,4 +177,4 @@ def build(ins, addr):
     if fn is None: raise KeyError(c.m)
     fn(c)
     if c.F.mmw or any(isvec(o) and o.name.startswith('mm') for o in c.ops): c.F.mmx(c.F.mmw)      # every MMX instruction but EMMS: SDM Vol 1 9.5.1 (the handler of emms calls F.mmx(emms=True) itself)
-    return c.F
+    return c.F.check_state()
