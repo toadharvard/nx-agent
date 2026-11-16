@@ -16,9 +16,9 @@
   "test_formgate_real.py": {
    "references": [
     {
-     "kind": "external",
-     "name": "certs",
-     "path": "certs/certs.tsv"
+     "anchor": "## Classes of run-time failure and their gates",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/VERDICT.md"
     }
    ],
    "subject": [
