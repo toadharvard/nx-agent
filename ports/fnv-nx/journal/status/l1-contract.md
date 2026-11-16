@@ -2293,3 +2293,5 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - abspath 0 over 237 closure files; inputs declared (rcptab, rcpcert, cpumodel).
   - recipe check valid except 5 stale render copies; render comes from L6.
   - The retired test_dsl_emit.py is to be deleted.
+- w28 2fe125d83: external_of. One validator, the owner's pin in the key, 18/18 tests pass, documented in RECIPE.md. Handed to L6 for the d3d9total stages.
+  - test_toolstep is red on base-files (env.json), queued after stage B.
