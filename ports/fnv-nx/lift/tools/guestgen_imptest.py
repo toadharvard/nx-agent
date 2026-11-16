@@ -7,7 +7,6 @@ generates the import entries (tools/impgen.py) and the perfect-hash dispatch tab
 Expected values are computed from the x86 semantics by hand, stated at each case (as in the comments below).
 usage: gen.py OUT_DIR LIFT_DIR --x86sys F --cpumodel F --rcptab F --rcpcert F      (the lifter's declared inputs: lifted.buffer_arguments)"""
 import os, struct, sys, tempfile
-HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.join(HERE, '..', '..', '..')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the tool root (/tool)
 sys.path.insert(0, sys.argv[2])   # lift/, whose fnvlift package is a declared input
 import argparse, lifted

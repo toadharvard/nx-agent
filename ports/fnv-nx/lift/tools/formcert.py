@@ -6,8 +6,6 @@ Certificates are the JSON files written by proof/prove.py under the directory pa
 A form is certified when it has at least one certificate and EVERY certificate of it says "proved", or carries "accepted": true (the only way a refines-model / model-defect
 status counts). Anything else (no file, a failed, gap or timed-out encoding) is `none`; an unreadable file stops the build. A missing directory certifies nothing (`present` False)."""
 import collections, json, os, sys
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))   # LIFT first: fnvlift is the package lift/fnvlift
 
 
 def form_key(ins):
