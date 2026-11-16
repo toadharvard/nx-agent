@@ -332,6 +332,11 @@ names (`[A-Za-z][A-Za-z0-9_]*`, unique), then one row per line with exactly the 
 - Red at check time: a table that is not a tracked file, an empty table or one with no row, a header with a bad or repeated column, a row with the wrong number of fields, a key
   that is no plain name or occurs twice, a key column that is not in the header, a `{name}` that is no column or a lone brace, and an output that two rows share (an output of a
   foreach step names the row, for example `proof/{shape}.txt`).
+- `"foreach": {"range": N}` (N an integer >= 1) is the same without a table: N steps named `NAME.<i>` for i = 0..N-1, with `{i}` and `{n}` (= N) replaced like a column. An N below 1 is red.
+- Fan-in. A step of the recipe may take the outputs of all rows of a foreach step as inputs: `{"stage": "ROOT:run:NAME", "path": TEMPLATE, "rows": "all"}`, TEMPLATE being an `outputs` or `dirs` entry of
+  the foreach step as written (for example `part/{i}.txt`). The expansion replaces it by one ordinary stage ref per row, in row order, so they are the consecutive mounts /in/K, and the arg
+  `"@rows"` of that step becomes the list of those mounts in the same order. One `rows` input per step; a `rows` input that names no foreach step of the recipe, a TEMPLATE that is no output of it,
+  and `@rows` without a `rows` input are red. ROOT is the recipe's own root (the rows are this recipe's).
 Test: `tests/test_foreach.py`.
 
 ### Stage refs
