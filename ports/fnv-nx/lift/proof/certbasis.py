@@ -24,11 +24,37 @@ def platform_sha(fns, root=None):
     return h.hexdigest()
 
 
-PROVER_FILES = ("prove.py", "model_sail.py", "symform.py", "certbasis.py")      # the files that define what a proof compares: a record is valid only under the same bytes of them (a prover fix invalidates by rule, an unrelated edit does not)
+PROVER_ROOTS = ("prove.py", "model_sail.py", "symform.py", "certbasis.py")      # the modules that define what a proof compares; the prover identity is these and everything of this package they import, transitively (a prover fix invalidates by rule, an unrelated edit does not)
+
+
+def _imports(path):
+    """the modules of this package that the file at `path` imports (any depth: function-level imports count), by its syntax tree"""
+    import ast
+    out = set()
+    for n in ast.walk(ast.parse(open(path, "rb").read())):
+        if isinstance(n, ast.Import):
+            names = [a.name for a in n.names]
+        elif isinstance(n, ast.ImportFrom) and n.level == 0 and n.module:
+            names = [n.module] + [n.module + "." + a.name for a in n.names]
+        else:
+            continue
+        for m in names:
+            p = m.split(".")
+            if len(p) == 2 and p[0] == "proof" and os.path.isfile(os.path.join(HERE, p[1] + ".py")): out.add(p[1] + ".py")
+    return out
+
+
+def prover_files():
+    seen, todo = set(), list(PROVER_ROOTS)
+    while todo:
+        f = todo.pop()
+        if f not in seen:
+            seen.add(f); todo.extend(_imports(os.path.join(HERE, f)))
+    return sorted(seen)
 
 
 def prover_sha():
     h = hashlib.sha256()
-    for f in PROVER_FILES:
+    for f in prover_files():
         h.update(f.encode() + b"\0" + open(os.path.join(HERE, f), "rb").read() + b"\0")
     return h.hexdigest()
