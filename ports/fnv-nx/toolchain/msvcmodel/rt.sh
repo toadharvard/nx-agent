@@ -205,7 +205,7 @@ while IFS= read -r l; do
   cp --remove-destination "$t" "$l"
 done < <(find "$P" -type l)
 [ -z "$(find "$P" -type l)" ] || { echo "rt.sh: the prefix holds symlinks:" >&2; find "$P" -type l | head >&2; exit 5; }
-# Host programs (the compiler's own x86-64 executables under bin/ and libexec/) lose their .debug_* sections: a host program is not a guest object, and with -g
+# Host programs (the compiler's own x86-64 executables under bin/ and libexec/) lose their .debug_* sections: a host program is not a guest object, and with debug info (the runtime_cflags record)
 # cc1/cc1plus/lto1/lto-dump exceed the 100 MB file limit of the mirror. The class is every x86-64 ELF file in those two directories; the guest libraries and their
 # members keep all their sections.
 while IFS= read -r f; do
