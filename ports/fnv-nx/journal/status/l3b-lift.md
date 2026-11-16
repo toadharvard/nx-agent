@@ -524,3 +524,12 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
   - Pack universe, 303 keys: 34/122 classes proved (76 keys).
   - test_codestore_universe over 14,810 keys: 2,237 proved, 0 differ (+9 x87 stores).
   - Slice 2 boundary ruled: typed FP values over the runtime carrier kinds (fnvl_x87.h fv), each op a helper with its z3 term.
+- 2026-11-16: lariret and the lift/cpufeat root merged (w-intsys 4f57cd0f5, merge 64e1dd116).
+  - LAR/LSL Forms from x86sys; the Accessed bit is read from the record and is UndecidedRow until L5 adds `descriptor.accessed`.
+  - IRETD at CPL 3 is FAILED(record) until L5 fixes loaded_mask 0x254dd7 -> 0x254dd5 (asked).
+  - The legacy hand handlers are deleted (one path), so test_forms_simdclass is green.
+  - Form build: A 16,032 keys -> 14,503 Forms, 1,524 KeyError, 3 UndecidedRow, 2 SymbolicBranch. B 26,500 keys -> 24,329 Forms, 2,165 KeyError, 3 UndecidedRow, 3 SymbolicBranch.
+  - lift/cpufeat root: the feature table is built by the recipe from the pinned SDM and APM (green, byte-identical to the old pin); liftsrc takes it via `uses`, and the external cpufeat is deleted.
+  - rows/partition stage is blocked: lift/facts is red at this base (16 JTAB_RED rows, L3a), and pdfplumber is not in env.json python.modules (L1).
+  - recipe.py python-exec mount fix awaits L1 review.
+  - Red, fixing: test_simdcheck (simdcheck lacks the code-store fault) and test_gate_fpexact (helpers=None caller at 9de00f15d).
