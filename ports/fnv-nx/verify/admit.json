@@ -116,6 +116,13 @@
    "recipe": "ports/fnv-nx/lift/rcpgen/build.json"
   },
   {
+   "path": "ports/fnv-nx/lift/rt",
+   "class": "product",
+   "target": "guest",
+   "cxx_origin": "native",
+   "recipe": "ports/fnv-nx/lift/rt/build.json"
+  },
+  {
    "path": "ports/fnv-nx/lift/sdm",
    "class": "tool",
    "target": "host",
