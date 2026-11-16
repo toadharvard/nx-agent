@@ -680,3 +680,5 @@ After the first frame:
   - Still owed: the named decltype diagnostic, msvcrt on w28, ENTRY1-ATOMIC in C.
 - 2026-11-16 04:25Z: the base3 merge check (L3a w8, 0dedb050e, 60 roots) has 1 red: the toolchain host root loads plugins, and the host plugin set is empty. To w3 inside COMPILER-STAGE: the plugins are outputs of the root; units compiled with plugins go in a guest-target root.
 - 2026-11-16 04:28Z: L1 w28 c8938b24c: the 3 old-rule test_plugins tests are rewritten or deleted, and a host root loads plugins only when it has a C/C++ unit, so the toolchain root goes green. w3 and w2 merge it into cand4b.
+- 2026-11-16 04:30Z: w3 cand4b 3f1036631 merges L1 c8938b24c: the host-root plugin red is fixed, and ext_checkout replaces ext_of_store. Recipe-path (a) was queued behind the cand3b verdict, so it moves to the L2 farm as its first job: toolchain-stage1, then toolchain, at 3f1036631. w3 readies (b) and the deletion of the old path.
+- bottleneck: the L2 farm's run (a) of recipe-path gcc1/rt at 3f1036631. It blocks the pin, so lift/rt and the ELF.
