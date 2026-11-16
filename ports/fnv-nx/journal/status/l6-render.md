@@ -1601,3 +1601,7 @@ Paused: w3b, w4, farm; no other work.
 - bottleneck: w8's joined head (for L4), then the L1 cand4 head for the rebase. d3d9exports waits on lift/rt (L3a). 1 of 4 workers busy.
 - 06:00Z: L6A confirms that 8faa8175d holds all of its gl4/gl4shim/nxgpu work (8a23b3609 is an ancestor; gl4link2 is retired), so there is no lineage merge. w8 merged trunk fac693694 into it as 084097bfd: 11 of 12 render roots are red. The trunk's verify/ lacks the w28 forms (include_of, external_of, include_uses) and the roots lib/sha256 and tests/bootrt. A verify/ taken from ours would be a second path, so it is refused. The base is the L1 cand4 head after the w28 merge, and L1 has been told what it needs. w8 is archived.
 - bottleneck: the L1 cand4 head with the w28 merge. Then one worker merges it into 8faa8175d for L4 and cand4. 0 of 4 workers busy.
+- 06:10Z, items queued for the joined head (8faa8175d plus cand4 with w28-c4):
+    - L1 ruling (a): per-target recipes stay deltas over the base (w28 8666fb756), so nxgpu/build.guest.json is unchanged.
+    - Under cand4 401c3332e, host per-target recipes drop `plugins`: pair/build.host.json and smscan/build.host.json (translator has none).
+    - verify/wine_fixme.tsv row 25 has to come in with w28; it is what made L5 w37's render/d3d9 draw_state.cpp:68 red.
