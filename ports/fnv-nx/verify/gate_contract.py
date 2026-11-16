@@ -54,10 +54,13 @@ from fnvnx.contract import exepin  # noqa: E402
 from fnvnx.verify import gate_build  # noqa: E402
 from fnvnx.contract import iat  # noqa: E402
 from fnvnx.contract import images  # noqa: E402
+from fnvnx.contract import modules  # noqa: E402
+from fnvnx.contract import declareddlls  # noqa: E402
 from fnvnx.contract import gatefile  # noqa: E402
 from fnvnx.verify import recipe  # noqa: E402
 
 INPUTS = "ports/fnv-nx/verify/contract_inputs.json"
+DECLARED_DLLS = "ports/fnv-nx/verify/declared_dlls.tsv"   # the declared machine's dll set (contract/declareddlls.py)
 FORMAT = "fnvnx-contract-inputs/1"
 KEYS = {"format", "external", "exe", "msvc", "universe", "root_results", "ranges"}
 PATHS = ("exe", "msvc", "universe")
@@ -170,10 +173,9 @@ def py(script, *args):
 def images_of(doc, ext, pinned=True):
     """([(name, pe path, ranges path)] of the images that have range facts, [names without]) of contract.images.image_set."""
     have, lack = [], []
-    bridge = set()          # a bridge dll is never an image (contract/dllkind.py): the dlls with rows in the declared bridge.tsv
-    if doc.get("bridge"):
-        bridge = {r["dll"] for r in iat.bridge_rows(P2(ext, doc["bridge"]))[0]}
-    found = images.image_set(P2(ext, doc["exe"]), [ext[n]["host"] for n in ("exe", "redist")], bridge)
+    dirs = [ext[n]["host"] for n in ("exe", "redist")]
+    served = modules.platform_served(declareddlls.read(DECLARED_DLLS), dirs)   # the declared dll set without a file (contract/modules.py): the platform serves it
+    found = images.image_set(P2(ext, doc["exe"]), dirs, served)
     try:   # the declared machine's image set is the pinned one (PINNED=False: a judge that only reads the images the facts name; the pin is the contract gate's) (contract/exepin.py IMAGES): digests of every guest image DLL
         if pinned:
             exepin.check_images([(n, os.path.getsize(p), hashlib.sha256(open(p, "rb").read()).hexdigest()) for n, p in found if not n.endswith(".exe")])

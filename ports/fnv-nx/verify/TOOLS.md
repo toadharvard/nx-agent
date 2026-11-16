@@ -382,8 +382,8 @@ images - the guest image set of the contract gates (L1 CONTRACT): one pure funct
 RULE (dllkind.py, shared with modules.py): the set is the exe and the dlls reached from its import directories (normal and delay-load, in
 modules.PE's reading) through guest images only.  A dll name (iat.norm_dll) is resolved case-insensitively against the files of the
 given directories; it is a GUEST IMAGE iff it is found, has no bridge row, and its whole normal import closure resolves to guest images
-or bridge dlls.  A bridge dll (rows in bridge.tsv) and a found dll the declared machine cannot load are not images and are not walked
-further; a name that is neither found nor bridged is a platform import (gate `imports`, owner L5).  Dynamic LoadLibrary names are facts of
+or platform-served names.  A name of the declared dll set with no file is served by the platform; a found dll whose closure does not
+resolve is `load-fails` (LoadLibrary NULL/126); neither files nor declared set is `absent` (red).  Neither is walked further.  Dynamic LoadLibrary names are facts of
 the `gpa` gate, not of this rule (VERDICT.md).
 Order: the exe, then the images in discovery order (depth first, import directory then delay-load directory).
 ```
