@@ -33,10 +33,10 @@ for r in rows:
     if r["out"] in units:
         sys.exit("mkunits: two different compiles write %s" % r["out"])
     units[r["out"]] = r
-INC_C = re.compile(r'^\s*#\s*include\s*[<"][^>"]*\.(?:c|S|asm)[>"]', re.M)
+INC_C = re.compile(rb'^\s*#\s*include\s*[<"][^>"]*\.(?:c|S|asm)[>"]', re.M)
 for o, r in sorted(units.items()):
     path = os.path.realpath(os.path.join(r["cwd"], r["src"]))
-    text = open(path).read()
+    text = open(path, "rb").read()
     if INC_C.search(text):
         sys.exit("mkunits: %s includes a C source" % path)
     where = ("src/" + os.path.relpath(path, src)) if path.startswith(src + "/") else ("build/" + os.path.relpath(path, build))
@@ -44,8 +44,8 @@ for o, r in sorted(units.items()):
     name = os.path.splitext(o)[0] + ".c"
     dest = os.path.join(out, "u", name)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
-    with open(dest, "w") as f:
-        f.write("\n".join(defs + ['#line 1 "%s"' % where]) + "\n" + text)
+    with open(dest, "wb") as f:
+        f.write(("\n".join(defs + ['#line 1 "%s"' % where]) + "\n").encode() + text)
 for tag, root in (("build", build), ("src", src)):
     for d, _dirs, files in os.walk(root):
         for fn in sorted(files):
