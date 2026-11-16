@@ -6,14 +6,15 @@
 #   output $OUT_DIR/STAGE1/src      the patched GCC source tree     (all three stay at the absolute paths of $PREFIX, $WORK/b-gcc, $SRC: GCC's Makefiles and the
 #                            compiler's configured paths are absolute; stage 2 puts them back at the same paths, see rt.sh)
 set -euo pipefail
-# a red stage names its failing command, the first error lines of every build log and its tail (the logs are redirected, a failure inside them is otherwise silent)
-trap 'rc=$?; echo "stage failed: line $LINENO: $BASH_COMMAND (exit $rc)" >&2; for l in /scratch/w/*.log /scratch/w/b-gcc/config.log; do [ -f "$l" ] && { echo "== $l: first error lines"; grep -n -m 20 -i "error" "$l"; echo "== $l: tail"; tail -n 30 "$l"; } >&2; done; exit $rc' ERR
+# a red stage names its failing command, the first error lines of every build log and its tail, the error lines last (the recipe keeps the last 20 stderr lines; the logs are redirected, a failure inside them is otherwise silent)
+trap 'rc=$?; echo "stage failed: line $LINENO: $BASH_COMMAND (exit $rc)" >&2; for l in /scratch/w/*.log /scratch/w/b-gcc/config.log; do [ -f "$l" ] && { echo "== $l: tail"; tail -n 30 "$l"; echo "== $l: first error lines"; grep -n -m 20 -i "error" "$l"; } >&2; done; exit $rc' ERR
 # ---- the constants of this step: every path the step touches (the sandbox's mounts: inputs /in/N in the order of build.json, externals are declared inputs too, {external, path}); a change of the mounts is a change of these lines alone ----
 GCC_TARBALL=/in/4                               # input 4: {external gcc-src, path gcc-13.3.0.tar.xz}, the GNU tarball
 MSVC_PATCH=/in/2                                # input 2: toolchain/msvcmodel/msvcmodel.patch   (input 1 is this script)
 RECORDS=/in/3                                   # input 3: records1.sh, the stage ref of the generator `records.py stage1` (compiler configure: T ABI CPUARCH MLFLAG GCC_RT_CONF)
 PY=/usr/bin/python3.12                          # the python3 deb unpacks the interpreter as python3.12; the python3 symlink is made by its postinst, which a sandbox does not run
 SCRATCH=/scratch                                # the writable scratch directory, the same absolute path on every run
+mkdir -p "$SCRATCH/tmp"; export TMPDIR=$SCRATCH/tmp   # the writable temp directory: /tmp is read-only in the sandbox (config.guess, make and the compilers write temp files)
 WORK=$SCRATCH/w; PREFIX=$SCRATCH/prefix         # the absolute build paths
 OUT_DIR=/out
 V=13.3.0

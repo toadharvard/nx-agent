@@ -4,8 +4,8 @@
 # the plugin objects, the patches, the records, the tarballs, the debs and this file; nothing is computed or listed here.
 #   output $OUT_DIR   the compiler tree COMPILER: bin/, lib/, the plugin headers, the runtime libraries and crt, MANIFEST.json
 set -euo pipefail
-# a red stage names its failing command, the first error lines of every build log and its tail (the logs are redirected, a failure inside them is otherwise silent)
-trap 'rc=$?; echo "stage failed: line $LINENO: $BASH_COMMAND (exit $rc)" >&2; for l in /scratch/w/*.log /scratch/w/b-gcc/config.log; do [ -f "$l" ] && { echo "== $l: first error lines"; grep -n -m 20 -i "error" "$l"; echo "== $l: tail"; tail -n 30 "$l"; } >&2; done; exit $rc' ERR
+# a red stage names its failing command, the first error lines of every build log and its tail, the error lines last (the recipe keeps the last 20 stderr lines; the logs are redirected, a failure inside them is otherwise silent)
+trap 'rc=$?; echo "stage failed: line $LINENO: $BASH_COMMAND (exit $rc)" >&2; for l in /scratch/w/*.log /scratch/w/b-gcc/config.log; do [ -f "$l" ] && { echo "== $l: tail"; tail -n 30 "$l"; echo "== $l: first error lines"; grep -n -m 20 -i "error" "$l"; } >&2; done; exit $rc' ERR
 # ---- the constants of this step: every path it touches; the mounts are the sandbox's (a change of the mounts is a change of these lines alone) ----
 STAGE1=/in/10                                # the compiler external (stage 1's output STAGE1): prefix/, b-gcc/, src/ (the absolute paths below are the ones stage 1 built at)
 RECORDS=/in/2                                     # input 2: records2.sh, the stage ref of the generator `records.py stage2` (T ABI MLFLAG, semantics, plugins)   (input 1 is this script)
@@ -24,6 +24,7 @@ AUTOMAKE_TARBALL=/in/14
 BS=/in/15                              # devkitPro/buildscripts at its pinned commit: patches/newlib-$NLV-4.patch
 PY=/usr/bin/python3.12                          # the python3 deb unpacks the interpreter as python3.12; the python3 symlink is made by its postinst, which a sandbox does not run
 SCRATCH=/scratch                                  # the same absolute path as in stage 1
+mkdir -p "$SCRATCH/tmp"; export TMPDIR=$SCRATCH/tmp   # the writable temp directory: /tmp is read-only in the sandbox (config.guess, make and the compilers write temp files)
 WORK=$SCRATCH/w; PREFIX=$SCRATCH/prefix
 OUT_DIR=/out
 V=13.3.0
