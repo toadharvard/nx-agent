@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
-"""apply.py [--stock] [--bump 0|1] SRC PATCHES OUT EXTRA...: the ONE place that composes the patched Sail model (farm/sail_build.sh and the recipe root lift/proof/sailmodel both run it).
+"""apply.py [--stock] [--bump 0|1] [--decl SDMFEAT_PY BITS_PY CPUID_MODEL_JSON] SRC PATCHES OUT EXTRA...: the ONE place that composes the patched Sail model (farm/sail_build.sh and the recipe root lift/proof/sailmodel both run it).
 SRC = the sail-x86-from-acl2 tree (holds model/ and test-generation-patches/); PATCHES = lift/proof/sail_patches; EXTRA = the files spliced / compiled after the patches
 (lift/proof/x86_fetch.sail is spliced; every EXTRA is copied to local/).  OUT is written (it must not exist):
   OUT/model/*.sail   copy of SRC/model/*.sail          OUT/tgp/*.sail    copy of SRC/test-generation-patches/*.sail
   OUT/local/         the patch splices in order, the generated cpuid_dispatch.sail (BUMP=1) and EXTRA
   OUT/SPLICES        one `-splice` file per line, relative to OUT/model, in isla-sail argument order (tgp sorted by name, then the patches, then x86_fetch.sail)
+--decl names the three files the bsf/bsr dispatch script reads the declared CPU from (lift/proof/sdmfeat.py, lift/fnvlift/cpumodel_bits.py, verify/cpuid_model.json); it is required for BUMP=1 (not --stock).
 No IR is built.  Default BUMP=1 (the pinned IR); BUMP=0 is the superseded patch list; --stock applies no patch (the unpatched model, plus x86_fetch.sail as before)."""
 import os, shutil, subprocess, sys
 
 a = sys.argv[1:]
-stock, bump = False, 1
+stock, bump, decl = False, 1, None
 while a and a[0].startswith("--"):
     if a[0] == "--stock":
         stock = True; a = a[1:]
     elif a[0] == "--bump":
         bump = int(a[1]); a = a[2:]
+    elif a[0] == "--decl":
+        decl = a[1:4]; a = a[4:]
+        if len(decl) != 3:
+            sys.exit("apply: --decl takes SDMFEAT_PY BITS_PY CPUID_MODEL_JSON")
     else:
         sys.exit("apply: unknown option " + a[0])
 if len(a) < 3:
@@ -35,11 +40,13 @@ B = lambda n: os.path.join(pat, "bump", n)
 if stock:
     patches = []
 elif bump == 1:
+    if decl is None:
+        sys.exit("apply: --bump 1 needs --decl SDMFEAT_PY BITS_PY CPUID_MODEL_JSON")
     gen = os.path.join(out, "gen")
     os.makedirs(gen)
     run = lambda *c: subprocess.run([sys.executable, "-I"] + list(c), check=True)
     run(B("cpuid_dispatch.py"), model, os.path.join(gen, "cpuid_dispatch0.sail"))
-    run(B("bsf_bsr_dispatch.py"), os.path.join(gen, "cpuid_dispatch0.sail"), os.path.join(gen, "cpuid_dispatch.sail"))
+    run(B("bsf_bsr_dispatch.py"), os.path.join(gen, "cpuid_dispatch0.sail"), os.path.join(gen, "cpuid_dispatch.sail"), *decl)
     patches = [P("rotate_count.sail"), B("ror_cf.sail"), P("bt_bitnumber.sail"), P("segment_bases.sail"), B("cmps.sail"), B("rol_count0.sail"),
                B("sar_bigcount.sail"), B("cpuid.sail"), B("bit_bsf_bsr.sail"), os.path.join(gen, "cpuid_dispatch.sail")]
 else:

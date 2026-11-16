@@ -33,17 +33,23 @@ vend_t = unpack(vendor_gz, "isla-vendor", P["isla-vendor"][3])
 whl = open(wheel, "rb").read()
 if sha(whl) != P["z3-solver"][3]:
     die("z3 wheel sha256 differs from the pin")
-for t in (isla_t, vend_t):
-    with tarfile.open(t) as tf:
-        tf.extractall(W, filter="data")
+# Layouts (farm/sail_setup.sh det_tar): the isla tar holds the directory `isla/` (the source tree); the vendor tar is `tar -C vendor .`, the CONTENT of the
+# cargo vendor directory (members `./<crate>/...`, no `vendor/` prefix), so it is extracted into W/vendor.
+vend = os.path.join(W, "vendor")
+os.makedirs(vend)
+with tarfile.open(isla_t) as tf:
+    tf.extractall(W, filter="data")
+with tarfile.open(vend_t) as tf:
+    tf.extractall(vend, filter="data")
 zipfile.ZipFile(wheel).extractall(os.path.join(W, "z3whl"))
 src = os.path.join(W, "isla")
 if sha(open(os.path.join(src, "Cargo.lock"), "rb").read()) != P["isla-cargo-lock"][3]:
     die("Cargo.lock differs from the pin isla-cargo-lock")
 z3 = os.path.join(W, "z3whl", "z3")
-vend = os.path.join(W, "vendor")
-if not os.path.isdir(vend):
-    die("the vendor tar has no vendor/ directory")
+crates = [d for d in os.listdir(vend) if os.path.isdir(os.path.join(vend, d))]
+bad = [d for d in crates if not os.path.isfile(os.path.join(vend, d, ".cargo-checksum.json"))]
+if not crates or bad:
+    die("the vendor tar (members ./<crate>/.cargo-checksum.json) has no crate directories or these lack .cargo-checksum.json: %s" % bad[:5])
 env = dict(os.environ, CARGO_HOME=os.path.join(W, "cargo-home"), CARGO_TARGET_DIR=os.path.join(W, "target"),
            LIBRARY_PATH=z3 + "/lib", LD_LIBRARY_PATH=z3 + "/lib", C_INCLUDE_PATH=z3 + "/include",
            RUSTFLAGS="--remap-path-prefix=%s=/isla --remap-path-prefix=%s=/vendor" % (src, vend),
