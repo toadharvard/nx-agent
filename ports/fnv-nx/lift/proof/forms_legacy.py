@@ -9,11 +9,13 @@ shape is then uncertified, never given an invented answer).
   LES LDS                   MOV to ES / DS of the loaded selector (forms_move.seg_load: the record's mov_to_sreg rows).
   SGDT                      the record's sgdt limit and base rows.
   LAR IRETD                 rows the record does not have (a descriptor's access rights for LAR; the NT / VM cases of IRET): UndecidedRow."""
-from fnvlift import dsl, x86sys
-from fnvlift.dsl import C, V, bit, concat, eq, extract, ite, trunc, udiv, ult, urem, zext
-from proof.forms import addoff, ea, handler, mload, pzs, rd, sload, store_op, undef, wr
-from fnvlift.faults import BYNAME as _FT
-from proof.forms_sys import K_AV, K_UD, store16
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
+from fnvnx.lift.fnvlift import dsl, x86sys
+from fnvnx.lift.fnvlift.dsl import C, V, bit, concat, eq, extract, ite, trunc, udiv, ult, urem, zext
+from fnvnx.lift.proof.forms import addoff, ea, handler, mload, pzs, rd, sload, store_op, undef, wr
+from fnvnx.lift.fnvlift.faults import BYNAME as _FT
+from fnvnx.lift.proof.forms_sys import K_AV, K_UD, store16
 K_DE = _FT['DE0']['code']
 
 UNDEF_BCD = 'DAA/DAS: "The OF flag is undefined."  AAA/AAS: "The OF, SF, ZF, and PF flags are undefined."  AAM/AAD: "The OF, AF, and CF flags are undefined."'
@@ -77,7 +79,7 @@ def sldt(c):
 
 
 def _undecided_seg(c, reg):
-    from proof.forms_move import seg_load
+    from fnvnx.lift.proof.forms_move import seg_load
     o = c.ops[1]; w = 16 if c.o16 else 32
     sel = zext(mload(ea(o, off=w // 8), 16), 32)                          # LES / LDS r, m16:32 (m16:16): the offset first, the selector after it
     seg_load(c, reg, sel); wr(c.F, c.ops[0], mload(ea(o), w))
@@ -100,7 +102,7 @@ def sgdt(c):
 
 def _rec(*keys):
     """the record row at KEYS (fnvlift.x86sys.REC); a row that is undecided or absent raises dsl.UndecidedRow with the record's own reason (the shape is then uncertified, never given an invented answer)"""
-    from proof import x86sys as px
+    from fnvnx.lift.proof import x86sys as px
     try: return px.get(x86sys.REC, *keys)
     except px.Undecided as e: raise dsl.UndecidedRow(str(e))
 

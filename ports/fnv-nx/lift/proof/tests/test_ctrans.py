@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """ctrans / x87carrier: the closure of the emission is derived; every helper's term agrees with the compiled C on boundary inputs; an altered C body changes the term.
 The tests read the preprocessed lift/rt units (FNVNX_PP); without them they SKIP with that reason."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys, unittest
 import z3
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.join(HERE, '..'), os.path.join(HERE, '..', '..')]
-import ctrans, x87carrier  # noqa: E402
+import fnvnx.lift.proof.ctrans as ctrans; import fnvnx.lift.proof.x87carrier as x87carrier  # noqa: E402
 
 try:
     C = x87carrier.carrier()

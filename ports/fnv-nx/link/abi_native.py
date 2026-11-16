@@ -22,14 +22,17 @@ destructor slot where the Itanium vtable has D1 then D0.  A slot whose symbol (t
 the exe slot of the slot before it, which must have kind `dtor.d1`; so k(j) = j - #(d0 slots at or before j).  The kinds are the
 plugin's own statements about the symbols, not names.  Open (REMOVE, owner L2): the plugin's kinds are right; removed by gate names against cl objects and gate vslots against the exe's vftables.
 """
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import collections
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'contract'))
-import gatefile
-import store
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract import gatefile
+from fnvnx.contract import store
 
 Point = collections.namedtuple('Point', 'object ztv ap d slots claim msvc vfptr vft')
 
@@ -132,7 +135,7 @@ def slot_facts(obj, bind, vfts, img):
     """One SlotFact per slot of every `named` address point (sorted).  `err` is the structural reason the slot cannot be related to an exe slot
     (unbound point, not an exe vftable, offsets disagree, broken destructor pairs, index past the exe vftable); '' when it can.
     `direct` = exevft.entry_offsets of the exe: {function address: COL offsets of the vftables holding it as a slot word}."""
-    import exevft
+    from fnvnx.link import exevft
     direct = exevft.entry_offsets(vfts)
     out = []
     for p in groups(obj, bind):

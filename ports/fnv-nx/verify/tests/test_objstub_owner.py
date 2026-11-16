@@ -4,11 +4,14 @@ Cases: a cited body in the anchor's root is accepted; an unknown id; a citation 
 the anchor reader (missing file, malformed, duplicate)."""
 import os
 import sys
+import shutil
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
-import objstub  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import objstub  # noqa: E402
 
 fails = []
 
@@ -64,6 +67,7 @@ for what, body in (('malformed', '<!-- fnvnx-owner-decision: Bad_Id | class: c |
         pass
 open(p, 'w').write('the marker fnvnx-owner-decision: x is prose\n')
 check('prose mention is no anchor', objstub.read_owner_decisions(p) == {})
+shutil.rmtree(d)   # the scratch is the test's own: it does not outlive it
 if fails:
     print('FAIL', *fails, sep='\n  ')
     sys.exit(1)

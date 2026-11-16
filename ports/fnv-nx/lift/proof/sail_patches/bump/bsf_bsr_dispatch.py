@@ -13,6 +13,9 @@ import sys
 _spec = importlib.util.spec_from_loader('sdmfeat', importlib.machinery.SourceFileLoader('sdmfeat', sys.argv[3]))   # explicit loader: the mounted file is /in/N, no .py suffix
 sdmfeat = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(sdmfeat)
+_bspec = importlib.util.spec_from_loader('cpumodel_bits', importlib.machinery.SourceFileLoader('cpumodel_bits', sys.argv[4]))
+cpumodel_bits = importlib.util.module_from_spec(_bspec)
+_bspec.loader.exec_module(cpumodel_bits)
 
 
 def declared_bit(cpu, leaf, reg, bit):
@@ -20,7 +23,7 @@ def declared_bit(cpu, leaf, reg, bit):
     return leaf <= mx and (cpu.get((leaf, reg), 0) >> bit) & 1 == 1
 
 
-CPU = sdmfeat.declared_cpu(sys.argv[4], sys.argv[5])
+CPU = sdmfeat.declared_cpu(cpumodel_bits, sys.argv[5])
 BMI1 = declared_bit(CPU, 7, 'EBX', 3)
 LZCNT = declared_bit(CPU, 0x80000001, 'ECX', 5)
 

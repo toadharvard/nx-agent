@@ -9,6 +9,8 @@ A Form is an ordered list of effects.  All expressions read the PRE-state (paral
 memory); effects commit in order, so for two writes to one target the later wins.  Flags not written keep their value.
 A flag the SDM leaves undefined is declared with undefined(name, sdm_sentence) and is excluded from any obligation;
 flag(name, e, when=c) is a flag defined only when c holds (e.g. OF of a shift only for count 1)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import hashlib
 import itertools
 
@@ -21,8 +23,14 @@ _I = {}
 _SERIAL = itertools.count()      # node serial numbers: assigned at construction, in construction order (a deterministic key for per-node tables)
 def mask(w): return (1 << w) - 1
 
+class SymbolicBranch(Exception):
+    """a Python-level decision (truth value, comparison, hash, int(), membership) on a DSL node: the value is a symbolic expression, so the decision has no Python answer; a builder computes with it (selidx, ite)"""
+
+
 class N:
     __slots__ = ('op', 'w', 'a', 'x', 'u')
+    def _b(s, *a): raise SymbolicBranch('a DSL node (%s, %d bits) in a Python decision' % (s.op, s.w))
+    __eq__ = __ne__ = __lt__ = __le__ = __gt__ = __ge__ = __bool__ = __int__ = __index__ = __hash__ = __contains__ = __iter__ = __len__ = _b
     def __init__(s, op, w, a, x): s.op, s.w, s.a, s.x, s.u = op, w, a, x, next(_SERIAL)
     def __add__(s, o): return bin_('add', s, o)
     def __radd__(s, o): return bin_('add', o, s)
@@ -42,6 +50,34 @@ def mk(op, w, a=(), x=None):
     n = _I.get(k)
     if n is None: n = _I[k] = N(op, w, tuple(a), x)
     return n
+_SK = {}
+def skey(n):
+    """the STRUCTURAL key of a node: sha256 of (op, width, x, the keys of the operands in order).  A pure function of the term's structure, the same in every process (the serial `.u` and id() are never read);
+    the memo is keyed by the serial only as a process-local cache of that value."""
+    r = _SK.get(n.u)
+    if r is None:
+        h = hashlib.sha256(repr((n.op, n.w, n.x)).encode())
+        for c in n.a: h.update(skey(c).encode())
+        r = _SK[n.u] = h.hexdigest()
+    return r
+COMM = ('add', 'mul', 'and', 'or', 'xor')      # commutative AND associative bit-vector ops (booleans are width 1)
+def comm(op, ops):
+    """the canonical node of the n-ary commutative-associative op OP over OPS: operands that are themselves OP nodes of this width are flattened, the leaves are ordered by skey and left-folded.
+    The result is a function of the multiset of leaves only, so the order in which a producer (z3's simplifier orders by AST id, a process-global counter) lists them does not matter."""
+    assert op in COMM
+    leaves, st = [], list(reversed(ops))
+    while st:
+        n = st.pop()
+        if n.op == op and n.w == ops[0].w: st.extend(reversed(n.a))
+        else: leaves.append(n)
+    leaves.sort(key=skey)
+    r = leaves[0]
+    for n in leaves[1:]: r = bin_(op, r, n)
+    return r
+def comm2(op, x, y):
+    """the canonical node of the commutative binary op OP ('eq': one node, operands ordered by skey)"""
+    assert op == 'eq'
+    return bin_(op, *sorted((x, y), key=skey))
 def _unwrap(v):
     """an object that stands for a DSL node (attribute `_node`, e.g. the symbolic instruction field of proof/symform.py) -> that node"""
     n = getattr(v, '_node', None)
@@ -185,8 +221,9 @@ _RCPT = {}
 def _rcp_tables():
     """the two 2048-entry tables of rt/rcptab.c, read from the file when it is the certified one (sha256 = rcptab.cert.json source_sha256, 0 mismatches)"""
     if _RCPT: return _RCPT
-    import json, os, re
-    rt = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'rt'); src = open(os.path.join(rt, 'rcptab.c'), 'rb').read(); cert = json.load(open(os.path.join(rt, 'rcptab.cert.json')))
+    import json, re
+    from . import inputs
+    src = open(inputs.get('rcptab'), 'rb').read(); cert = json.load(open(inputs.get('rcpcert')))
     if hashlib.sha256(src).hexdigest() != cert['source_sha256'] or cert['mismatches'] != 0: raise ValueError('rcptab.c is not the certified table of the reference CPU')
     t = src.decode()
     for name in ('rcp', 'rsqrt'):
@@ -381,7 +418,7 @@ template<class T> static inline T ashr_(T a, T c, unsigned w, T m) { T s = (a >>
 SEGS = ('es', 'cs', 'ss', 'ds', 'fs', 'gs')      # the segment registers in rt/fnvl.h SEG_* order
 XIN = ('df', 'flo', 'fs_base', 'gs_base') + tuple('sel_' + s for s in SEGS)          # other pre-state: DF (1 bit), the other EFLAGS bits (32, masked), segment bases, the six segment selectors (16 bits, = c->sel[SEG_*])
 SIG = ','.join('[[maybe_unused]] u32& ' + r for r in REGS + FLAGS + XIN) + ',u32& eip'
-from fnvlift.faults import FAULTS, FLT_STATUS, BYNAME as _FBY      # the one fault table (fnvlift/faults.json); kind = runtime code
+from fnvnx.lift.fnvlift.faults import FAULTS, FLT_STATUS, BYNAME as _FBY      # the one fault table (fnvlift/faults.json); kind = runtime code
 INW = {'df': 1, 'flo': 32, 'fs_base': 32, 'gs_base': 32, **{'sel_' + s: 16 for s in SEGS}}
 
 def xc_lines(kind, i, x, ref):
@@ -405,7 +442,7 @@ class UndecidedRow(Exception):
     """a Form builder needs a row of the declared-machine record that the record leaves undecided: there is no Form (str() names the row and its why)"""
 def _fs_flat():
     import z3
-    from fnvlift import x86sys
+    from fnvnx.lift.fnvlift import x86sys
     return z3.BitVecVal(x86sys.SEL['fs'] & 0xfffc, 32)      # SELK(SEL_FS) of rt/fnvl.h, the record's fs selector
 
 class Form:
@@ -559,28 +596,38 @@ class Form:
                 'fr': fr_, 'xmm': xm_, 'ftop': x['ftop'], 'ftag': x['ftag'], 'fsw': x['fsw'], 'fcw': x['fcw'], 'fptr': x['fptr'], 'mxcsr': x['mxcsr'],
                 'sel': {g_: x['sel_' + g_] for g_ in SEGS}, 'fs_base': x['fs_base']}
     def writes_unobserved(s): return s.flo is not None or any(f == 'df' for f, _, _ in s.flags)
-    def to_c_inline(s, varc, fault_fn, flo_fn, force=(), macc='M'):
+    def to_c_inline(s, varc, fault_fn, flo_fn, force=(), macc='M', sect=None):
         """C lines of ONE instruction to be placed inside a block of a lifted function: -> (lines, ref) where ref(node) is the C text of a node
         usable AFTER the lines (a named temporary or an expression over the `in_` snapshots).  Order = the Form's: snapshots of the used pre-state
         (varc(name) -> the C expression of a pre-state variable), temporaries for loads and shared sub-expressions (and the `force`d nodes), faults
         (fault_fn(code, cond_node, ref) -> C line), register writes, flag writes (DEF0: a write with `when` w is `w ? v : 0`, a flag the Form declares undefined is 0),
-        the other-EFLAGS write (flo_fn(ref of the value) -> C line), stores.  The eip node is not emitted: the caller derives the control transfer from it."""
+        the other-EFLAGS write (flo_fn(ref of the value) -> C line), stores.  The eip node is not emitted: the caller derives the control transfer from it.
+        sect: None, or a list that the call fills with the Form section that produced each line (provenance measurement, fnvlift/prov.py); it never changes the lines."""
         e = InlineEmit(s.roots(), force); e.macc = macc; L = []
         for u in sorted(e.used): L.append('const %s in_%s = %s;' % (T(XW.get(u, 32)), u, varc(u)))
+        if sect is not None: sect.extend(['form: snapshots of the pre-state (in_)'] * (len(L) - len(sect)))
         for n in e.order:
             if n.u in e.names: L.append('const %s %s = %s;' % (T(n.w), e.names[n.u], e.ex(n)))
+        if sect is not None: sect.extend(['form: temporaries (loads, shared sub-expressions)'] * (len(L) - len(sect)))
         xm = _FBY['XM']['code']
         for k, c in s.faults:
             if k == xm and s.fxm:      # fault_xm: MXCSR takes the Form's effect just before this fault is raised (an earlier fault of the Form raises first and leaves MXCSR alone)
                 L.append('if (%s) { %s }' % (e.ref(c), ' '.join(xc_lines('mxcsr', None, [x for kk, i, x in s.xs if kk == 'mxcsr'][-1], e.ref))))
             L.append(fault_fn(k, c, e.ref))
+        if sect is not None: sect.extend(['form: faults'] * (len(L) - len(sect)))
         cw = lambda w: '' if w is None else 'if (%s) ' % e.ref(w)
         for r, v, w in s.regs: L.append('%s%s = %s;' % (cw(w), r, e.ref(v)))
+        if sect is not None: sect.extend(['form: register writes'] * (len(L) - len(sect)))
         for f, v, w in s.flags: L.append(s.flag_line(f, v, w, e.ref))        # DEF0: a flag the model leaves free is the constant 0
+        if sect is not None: sect.extend(['form: flag writes'] * (len(L) - len(sect)))
         for f in sorted(s.undef): L.append(s.undef_line(f, e.ref))             # DEF0: a flag the Form declares undefined is the constant 0
+        if sect is not None: sect.extend(['form: undefined flags (constant 0)'] * (len(L) - len(sect)))
         if s.flo is not None: L.append(flo_fn(e.ref(s.flo)))
+        if sect is not None: sect.extend(['form: other-EFLAGS write'] * (len(L) - len(sect)))
         for k, i, x in s.xs: L.extend(xc_lines(k, i, x, e.ref))
+        if sect is not None: sect.extend(['form: x87 / MMX / SSE effects'] * (len(L) - len(sect)))
         for k, (a, v) in enumerate(s.stores): L.append('%s%s%d(%s) = %s;' % (('if (%s) ' % e.ref(s.swhen[k])) if k in s.swhen else '', macc, v.w, e.ref(a), e.ref(v)))
+        if sect is not None: sect.extend(['form: stores (M8/M16/M32 / LK)'] * (len(L) - len(sect)))
         return L, e.ref
     def to_c(s, fname):
         assert not s.xs, 'a Form with x87 / MMX / SSE effects is emitted by to_c_inline only (its state is struct cpu, not the SIG arguments)'

@@ -6,7 +6,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import recipe  # noqa: E402
 
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
 fails = 0
@@ -40,14 +42,14 @@ files = subprocess.run(["git", "ls-files"], cwd=REPO, capture_output=True, text=
 roots = dict(recipe.load_admit(REPO))
 for p, tg in (("ports/fnv-nx/zh", "host"), ("ports/fnv-nx/zg", "guest")):
     roots[p] = {"path": p, "class": "product", "target": tg}
-lk = {"output": "x.elf", "kind": "pie", "flags": ["-m", "aarch64linux32"], "script": "ports/fnv-nx/link/guest.ld", "roots": ["ports/fnv-nx/lib/sha256"]}
+lk = {"output": "x.elf", "kind": "pie", "flags": ["-m", "aarch64linux32"], "script": "ports/fnv-nx/link/guest.ld", "roots": ["ports/fnv-nx/shim"]}
 e = [x for x in recipe.link_errors(lk, "ports/fnv-nx/zg", set(), roots, set(), REPO, files, "") if "link.roots" in x]
 check("a written link.roots is a check error (the members are derived)", len(e) == 1 and "derived" in e[0], e)
 lk.pop("roots")
 e = [x for x in recipe.link_errors(lk, "ports/fnv-nx/zg", set(), roots, set(), REPO, files, "") if "link.roots" in x]
 check("an image without link.roots has no link.roots error", e == [], e)
-SHA = "ports/fnv-nx/lib/sha256"
-TB = {"tool": "ports/fnv-nx/lift/descs/descs.py", "args": ["--out", "x"], "unit": "gen/tab.cc", "section": ".fnvnx.disp"}
+SHA = "ports/fnv-nx/shim"
+TB = {"tool": "ports/fnv-nx/verify/sandbox.py", "args": ["--out", "x"], "unit": "gen/tab.cc", "section": ".fnvnx.disp"}
 terr = lambda tb: [x for x in recipe.link_errors(dict(lk, tables=tb), "ports/fnv-nx/zg", set(), roots, set(), REPO, files, "") if "link.tables" in x]
 check("a well-formed link.tables entry has no error", terr([TB]) == [], terr([TB]))
 for what, bad in (("an unknown key", dict(TB, x=1)), ("a tool that is not tracked", dict(TB, tool="ports/fnv-nx/nope.py")), ("a unit with no source extension", dict(TB, unit="gen/tab.txt")),
@@ -57,7 +59,8 @@ check("link.tables: two entries with one unit are a check error", len(terr([TB, 
 cg = recipe.link_candidates(roots, "ports/fnv-nx/zg", "guest", REPO)
 check("link candidates of a guest image: admitted product roots with a recipe for the guest target, never the image itself, no unadmitted root",
       SHA in cg and "ports/fnv-nx/zg" not in cg and "ports/fnv-nx/zh" not in cg, cg)
+roots[SHA] = dict(roots[SHA], variants={"host": {"target": "host"}})   # the root as a guest root with a host variant
 ch = recipe.link_candidates(roots, "ports/fnv-nx/zh", "host", REPO)
-check("a host image's candidates are resolved to the host recipe of each root (sha256 has a host variant)", SHA + "@host" in ch or SHA in ch, ch)
+check("a host image's candidates are resolved to the host recipe of each root (shim, declared here with a host variant)", SHA + "@host" in ch or SHA in ch, ch)
 print("FAILED %d" % fails if fails else "all pass")
 sys.exit(1 if fails else 0)

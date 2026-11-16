@@ -1,7 +1,9 @@
 """Moves, conversions, stack, EFLAGS and string families (see forms.py)."""
-from fnvlift import dsl
-from fnvlift.dsl import REGS, C, V, ashr, bit, concat, eq, extract, ite, msb, sext, trunc, ult, zext
-from proof.forms import AReg, Op, isvec, cond, dsa, ea, esa, handler, mload, mstore, pzs, rd, sload, sstore, store_op, wr
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
+from fnvnx.lift.fnvlift import dsl
+from fnvnx.lift.fnvlift.dsl import REGS, C, V, ashr, bit, concat, eq, extract, ite, msb, sext, trunc, ult, zext
+from fnvnx.lift.proof.forms import AReg, Op, isvec, cond, dsa, ea, esa, handler, mload, mstore, pzs, rd, sload, sstore, store_op, wr
 
 LAHF_SDM = 'LAHF/SAHF: AH = SF:ZF:0:AF:0:PF:1:CF'
 MODIFIABLE = 0x00240100 | 0x4000      # EFLAGS bits (besides the six, DF) POPFD may change in user mode: TF, NT, AC, ID (IF/IOPL need privilege)
@@ -10,8 +12,8 @@ def seg_load(c, reg, sel):
     a selector the record's mov_to_sreg rows (fnvlift/x86sys.MOV_TO_SREG: the loadable non-null selectors by register, whether null loads) say cannot be loaded is #GP(selector), which
     the runtime reports as the access violation (the fault kind AV, as every #GP of the declared machine); the other selectors load.  Nothing is written when the fault is raised.
     A register for which the record leaves a selector undecided (mov_to_sreg.undecided: es ds fs gs; ss needs a writable data segment and so decides it) has no Form: UndecidedRow."""
-    from fnvlift import x86sys as xs
-    from proof.forms_sys import K_AV, K_UD
+    from fnvnx.lift.fnvlift import x86sys as xs
+    from fnvnx.lift.proof.forms_sys import K_AV, K_UD
     if reg == 'cs': c.F.fault(K_UD, C(1, 1)); return
     sels, null = xs.MOV_TO_SREG[reg]; u = xs.REC['mov_to_sreg']['undecided']
     if reg != 'ss' and u['selectors']: raise dsl.UndecidedRow('uncertified: mov_to_sreg.undecided (selectors %s): %s' % (u['selectors'], u['why']))
@@ -27,7 +29,7 @@ def mov(c):
     if c.ops[0].k == 'r' and c.ops[0].name in dsl.SEGS:      # MOV Sreg, r/m16 (8E /r), claimed by the operand kind
         o = c.ops[1]; return seg_load(c, c.ops[0].name, zext(rd(o, 16 if o.k == 'm' else o.w) if o.w <= 16 or o.k != 'r' else extract(rd(o), 15, 0), 32))
     if any(o.k == 'r' and o.name[:2] in ('cr', 'dr') for o in c.ops):      # MOV to/from CRn / DRn: CPL 0 only (0F 20..23), KiTrap0D's table decides the status
-        from proof import forms_sys
+        from fnvnx.lift.proof import forms_sys
         return forms_sys.privileged(c)
     if c.ops[1].k == 'r' and c.ops[1].name in dsl.SEGS:      # MOV r/m16, Sreg / MOV r32, Sreg (SDM 2B MOV): DEST := the segment selector (the pre-state sel_<reg>, 16 bits), zero-extended into a 32-bit register, a 16-bit quantity in memory
         sel = V('sel_' + c.ops[1].name, 16); return wr(c.F, c.ops[0], zext(sel, c.ops[0].w) if c.ops[0].w > 16 else sel)
@@ -128,9 +130,9 @@ def std(c): c.F.flag('df', C(1, 1))
 @handler('movsb', 'movsw', 'movsd', 'stosb', 'stosw', 'stosd', 'lodsb', 'lodsw', 'lodsd', 'scasb', 'scasw', 'scasd', 'cmpsb', 'cmpsw', 'cmpsd')
 def string(c):
     if any(isvec(o) for o in c.ops):             # the SSE forms of movsd / cmpsd share the mnemonic with the string ops
-        from proof import forms_simd
+        from fnvnx.lift.proof import forms_simd
         if c.m == 'movsd': return forms_simd.movsd_sse(c)
-        if c.m == 'cmpsd': from proof import forms_ssefp; return forms_ssefp.cmp_imm(c, 64, False)
+        if c.m == 'cmpsd': from fnvnx.lift.proof import forms_ssefp; return forms_ssefp.cmp_imm(c, 64, False)
         raise KeyError(c.m)
     """ONE iteration step.  Without a prefix: the body.  With rep/repe/repne: if ecx == 0 nothing happens (eip = next); otherwise the body, ecx - 1,
     and eip stays on the instruction (the step repeats) unless ecx - 1 == 0 or (repe: ZF == 0 / repne: ZF == 1) after the body."""

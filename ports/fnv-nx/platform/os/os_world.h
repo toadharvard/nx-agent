@@ -15,7 +15,6 @@ typedef struct os_wslot {
     struct os_thread *t;
     int linked;                    /* in the registry */
     int dead;                      /* unregistered for good: the thread executes only its exit code */
-    int user;                      /* paused by os_thread_suspend (the Win32 SuspendThread layer) */
 } os_wslot;
 
 /* called by the thread itself, with no platform lock held: first thing before its function runs / last thing after it.

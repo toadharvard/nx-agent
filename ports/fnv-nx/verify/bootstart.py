@@ -40,8 +40,10 @@ import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import bootinputs
-import bootmiles
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import bootinputs
+from fnvnx.verify import bootmiles
 
 PAGE = 4096
 SENTINEL = 0x000FFFF0
@@ -484,7 +486,7 @@ def check(doc, console, pe, expect_sha, iat, modules, modfacts, tls=None, iat_da
         v.fail.append('no "fnvnx-start: image mapped"')
     bad = failure_lines(cl)
     if bad:
-        v.fail.append("the loader logged failure lines: %s" % "; ".join(bad[:5]))
+        v.fail.append("the loader logged failure lines: %s" % "; ".join(bad))
     out.append(v)
     st = None
     # S3

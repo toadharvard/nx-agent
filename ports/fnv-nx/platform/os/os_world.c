@@ -32,18 +32,16 @@
  * window contains no call into the game (obligation above), so it is never held across a game call; it is an os_lock so
  * that the host test backend counts it and would see a violation (tests/s4 nlk_*).
  *
- * COMBINATION WITH SuspendThread. The backend primitive is boolean. os_thread_suspend / os_thread_resume (the user
- * reason) also run under the world lock, so a user operation never interleaves with a stop; stop pauses exactly the
- * registered threads whose `user` flag is clear and resume releases exactly those. So paused = user || world holds
- * whenever a thread's state is observable: a thread suspended before a stop is not touched and stays suspended after
- * resume (ResumeThread during a stop cannot run: caller's obligation, and it would only block on the lock). */
+ * SUSPENDTHREAD. It does not use this primitive: a user suspension is delivered at a safepoint of the target (win32/THREADS.md, rule S),
+ * so the world stop is the only reason a registered thread is paused here.
+ */
 #include "os_world.h"
 #include "fnvl_host.h"
 
 static os_lock_t g_world;
 /* FIFO order of the world lock (a ticket gate in front of g_world). os_lock is a barging mutex: a stopper that runs
  * stop/resume back to back re-takes the lock in the gap between a resume and the next stop, and a thread blocked in
- * os_world_register / os_world_unregister / os_thread_suspend never wins it (observed: four starting threads blocked for
+ * os_world_register / os_world_unregister never wins it (observed: four starting threads blocked for
  * good against 400+ consecutive stops). Tickets are served in arrival order, so every waiter is served after at most the
  * holders that arrived before it: registration, unregistration and a second stop cannot be starved by a stopper. Only the
  * ticket holder takes g_world, so the lock itself is never contended. */
@@ -77,6 +75,8 @@ void os_world_register(os_wslot *s, os_thread *t)
     world_unlock();
 }
 
+os_thread *os_thread_current(void) { return g_self ? g_self->t : NULL; }
+
 void os_world_unregister(os_wslot *s)
 {
     world_lock();
@@ -95,42 +95,11 @@ void os_world_unregister(os_wslot *s)
     world_unlock();
 }
 
-int os_thread_suspend(os_thread *t)
-{
-    if (!t)
-        return -1;
-    os_wslot *s = os_thread_wslot(t);
-    int r = -1;
-    world_lock();
-    if (!s->user && !s->dead && os_raw_pause(t) == 0) {
-        s->user = 1;
-        r = 0;
-    }
-    world_unlock();
-    return r;
-}
-
-int os_thread_resume(os_thread *t)
-{
-    if (!t)
-        return -1;
-    os_wslot *s = os_thread_wslot(t);
-    int r = -1;
-    world_lock();
-    if (s->user) {
-        s->user = 0;
-        os_raw_resume(t);
-        r = 0;
-    }
-    world_unlock();
-    return r;
-}
-
 void fnvl_host_world_stop(void)
 {
     world_lock();
     for (os_wslot *s = g_head; s; s = s->next) {
-        if (s == g_self || s->user)
+        if (s == g_self)
             continue;
         /* a registered thread is alive, started and not the caller: the primitive cannot refuse it */
         os_raw_pause(s->t);
@@ -140,7 +109,7 @@ void fnvl_host_world_stop(void)
 void fnvl_host_world_resume(void)
 {
     for (os_wslot *s = g_head; s; s = s->next) {
-        if (s == g_self || s->user)
+        if (s == g_self)
             continue;
         os_raw_resume(s->t);
     }

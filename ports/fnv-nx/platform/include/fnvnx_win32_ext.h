@@ -47,6 +47,9 @@ extern "C" {
 /* (the other Win32 constants and declarations that were here moved to shim/include/fnvnx_win32.h; the
  * ERROR_* codes stay here: some decomp units define ERROR_SUCCESS... as enumerators of their own) */
 
+/* kernel32 file calls the shim leaves out (win32/crt_kernel32.cpp defines it; the CRT lowio in crt/iob.c calls it) */
+DWORD GetFileType(HANDLE);
+
 /* ---- runtime hooks (not Win32) */
 /* Paths (docs/RUNTIME.md "Paths"). Windows prefix (case-insensitive, '\' or '/') -> host directory. */
 int fnvnx_path_mount(const char *win_prefix, const char *host_dir);
@@ -116,9 +119,6 @@ void fnvnx_plat_note(int cls, const char *name, unsigned caller, const char *det
 /* win: the Windows path as the game gave it; host: what the mapper made of it (NULL if it failed); api: the entry */
 void fnvnx_plat_open_failed(const char *win, const char *host, unsigned err, unsigned caller, const char *api);
 #define FNVNX_NOTE_RA ((unsigned)(unsigned long)__builtin_return_address(0))
-/* builtin modules for LoadLibraryA/GetProcAddress (xinput1_3.dll, ... registered by S6/S7) */
-typedef FARPROC (*fnvnx_module_resolver)(const char *proc);
-void fnvnx_register_module(const char *dll_name, fnvnx_module_resolver resolve);
 /* Win32 export table: implementation of a DLL import by name (for IAT slots resolved from the exe) */
 void *fnvnx_win32_lookup_export(const char *dll, const char *name);
 /* An import slot of the exe, as the loader hands it over: by name (ordinal == FNVNX_IMPORT_BY_NAME, the loader's

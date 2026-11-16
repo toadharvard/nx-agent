@@ -17,7 +17,7 @@ tests/test_sandbox; gcc,as,ld test_sandbox,test_sdcheck; aarch64-linux-gnu-g++ t
 aarch64-linux-gnu-nm,readelf icount.py,test_unitstage; aarch64-linux-gnu-as,ld,objcopy test_icount;
 git verdict.py,l1.py,test_gates; ldd,true test_runtime; g++,llvm-config-18 build a64access.cc (objstub.py, test_a64access).
 The a64access build set is derived the same way: every header `g++ -M` reports for a64access.cc under `llvm-config-18 --cxxflags`,
-and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). The clang set (clang-18 plugins such as vtnames; clang -m32 compiles) is derived the same way: the headers under `llvm-config-18 --includedir` that a plugin includes (CLANG_API) with the whole clang/ tree they sit in, the libraries of CLANG_LIBS under `--libdir`, and every header `clang -m32 -M` reports for a C probe including stdint.h and stdlib.h (gnu/stubs-32.h: libc6-dev-i386). Python modules (version in python.modules, installed-files sha256 in python.installed_files_sha256, see wheel_digest; wheel file sha256 in python.wheel_sha256): capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts, perf, check_mirror); pefile (manifest/regsites.py); numpy (the retired one-instruction harness packer); z3-solver, keystone-engine, gmpy2 (lift/proof, lift/bench, lift/test)."""
+and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). The clang set (clang-18 plugins such as vtnames; clang -m32 compiles) is derived the same way: the headers under `llvm-config-18 --includedir` that a plugin includes (CLANG_API) with the whole clang/ tree they sit in, the libraries of CLANG_LIBS under `--libdir`, and every header `clang -m32 -M` reports for a C probe including stdint.h and stdlib.h (gnu/stubs-32.h: libc6-dev-i386). Python modules (version in python.modules, installed-files sha256 in python.installed_files_sha256, see wheel_digest; wheel file sha256 in python.wheel_sha256): capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts, perf, check_mirror); pefile (manifest/regsites.py); numpy (the retired one-instruction harness packer); z3-solver, keystone-engine, gmpy2 (lift/proof, lift/bench, lift/test); pycparser (L3b ctrans: the x87 terms of lift/rt C)."""
 import argparse
 import csv
 import ctypes
@@ -48,10 +48,13 @@ CLANG_API = ["clang/AST/RecursiveASTVisitor.h", "clang/Frontend/FrontendPluginRe
 CLANG_LIBS = ["libclang-cpp.so.18.1", "libclang.so"]   # under `llvm-config-18 --libdir`: what a clang plugin links / dlopens
 M32_PROBE = "#include <stdint.h>\n#include <stdlib.h>\nint main(){return 0;}\n"   # clang -m32 -M: every header a 32-bit compile of the C library reads (gnu/stubs-32.h: libc6-dev-i386)
 PY_MODULES = {"capstone": "capstone", "gmpy2": "gmpy2", "keystone-engine": "keystone", "numpy": "numpy", "unicorn": "unicorn",
-              "pyelftools": "elftools", "z3-solver": "z3", "pefile": "pefile"}   # distribution -> import name
+              "pyelftools": "elftools", "z3-solver": "z3", "pefile": "pefile",
+              "pycparser": "pycparser"}   # distribution -> import name
 RENDER_LIBS = ["libEGL.so.1", "libEGL_mesa.so.0"]   # ldconfig names: the EGL loader the published libnxgl4.so links, and the Mesa vendor it dispatches to (NXGL4_HOST.md section 2); their loader closure (mesa-libgallium, libllvm, ...) is derived
 RUN_LAYOUT_DEB = "base-files"   # the machine's root layout (./lib -> usr/lib, ./lib64 -> usr/lib64, ./bin, ./sbin): every `run` stage of recipe.py mounts its symlink members
-import hostprofile  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import hostprofile  # noqa: E402
 HOST = hostprofile.HOST
 RENDER_FILES = HOST["egl_vendor_files"]   # read by libEGL.so.1 to find that vendor
 def HOST_GCC_PLUGIN_DIRS(gcc):
@@ -275,7 +278,7 @@ def wheel_digest(dist):
 
 def _root_compilers(repo=None):
     """Driver names of the distribution compilers (no external) of the admitted product roots of the checkout, from admit.json and the recipes."""
-    import recipe
+    from fnvnx.verify import recipe
     repo = repo or os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
     try:
         roots = recipe.load_admit(repo)
@@ -438,8 +441,8 @@ def wheel_pins(prev):
     return sha, files
 
 def snapshot(prev=None):
-    import runtime
-    import unitstage
+    from fnvnx.verify import runtime
+    from fnvnx.verify import unitstage
     own, pk = _owners(), set()
     def add(path, strict=True):
         real = os.path.realpath(path)

@@ -10,8 +10,10 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-import cas  # noqa: E402
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 FAILS = 0
 
@@ -67,18 +69,19 @@ def main():
         outs = [p.communicate() for p in ps]
         rcs = [p.returncode for p in ps]
         check("%d concurrent fetch_externals of one external all succeed" % n, rcs == [0] * n, [o[1][-300:] for o, r in zip(outs, rcs) if r])
-        names = sorted(os.listdir(cache))
-        check("exactly one bare fetch and one checkout exist, no temporary directory remains", names == [commit, commit + ".co"], names)
+        names = sorted(n for n in os.listdir(cache) if n != "artifacts.url")   # the record of where the externals come from (set_artifacts) is not a fetch
+        check("exactly one bare fetch and one checkout exist, no temporary directory remains", names == [os.path.basename(recipe.ext_bare(cache, commit)), os.path.basename(recipe.ext_checkout(cache, commit))], names)
         check("all processes got the same published checkout", len({o[0].strip() for o in outs}) == 1, [o[0] for o in outs])
         # an interrupted extract: only a temporary directory, never a partial target; the next run ignores it
-        shutil.rmtree(os.path.join(cache, commit + ".co"))
-        os.makedirs(os.path.join(cache, commit + ".co.tmp1-dead", "bin"))
-        open(os.path.join(cache, commit + ".co.tmp1-dead", "bin", "f0"), "w").write("partial")
+        co = recipe.ext_checkout(cache, commit)
+        shutil.rmtree(co)
+        os.makedirs(os.path.join(co + ".tmp1-dead", "bin"))
+        open(os.path.join(co + ".tmp1-dead", "bin", "f0"), "w").write("partial")
         e = {"name": "x", "repo": "r", "ref": "r", "commit": commit, "tree_sha256": tree, "at": "/ext/x"}
         shutil.rmtree(os.path.join(store, "external-facts"))
         got = recipe.fetch_externals([e], store, cache, os.path.join(base, "ws-again"))
-        check("an interrupted extract leaves only its temporary directory, and the next run ignores it", got["x"]["host"] == os.path.join(cache, commit + ".co")
-              and cas.ingest(got["x"]["host"], os.path.join(base, "probe-store")) == tree and os.path.isdir(os.path.join(cache, commit + ".co.tmp1-dead")), got)
+        check("an interrupted extract leaves only its temporary directory, and the next run ignores it", got["x"]["host"] == co
+              and cas.ingest(got["x"]["host"], os.path.join(base, "probe-store")) == tree and os.path.isdir(co + ".tmp1-dead"), got)
         # publish_dir: the loser deletes its copy and uses the published one; another error is raised
         fin, tmp = os.path.join(base, "fin"), os.path.join(base, "fin.tmp")
         os.makedirs(os.path.join(fin, "a"))

@@ -8,7 +8,10 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.join(HERE, '..'), os.path.join(HERE, '..', '..', 'link'), os.path.join(HERE, '..', '..', 'contract')]
-import gate_abi  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_abi  # noqa: E402
+from fnvnx.contract import l2sections  # noqa: E402
 
 tmp = tempfile.mkdtemp(prefix='abilink-')
 __import__('atexit').register(__import__('shutil').rmtree, tmp, True)   # a test leaves no scratch behind

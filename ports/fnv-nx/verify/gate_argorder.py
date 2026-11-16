@@ -14,8 +14,10 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import gate_build  # noqa: E402
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 ORDER = "fnvnx_order"
 
@@ -54,7 +56,8 @@ def main():
     cache = os.environ.get("GATE_CACHE")
     if not cache:
         import tempfile
-        cache = tmp = tempfile.mkdtemp(prefix="gate-argorder-")
+        tmp = tempfile.mkdtemp(prefix="gate-argorder-")
+        cache = os.path.join(tmp, "store")   # the pool is the store's sibling: both inside tmp, removed together
     roots = native_guest(repo)
     try:
         u = c = 0
@@ -71,7 +74,7 @@ def main():
     detail = "; ".join(why) or ("%d C++ units of %d native guest roots load fnvnx_order in the rule's order" % (u, len(roots)) if roots else
                                 "no native guest root (universe 0)")
     res = {"format": "fnvnx-gate/1", "name": "argordergate", "status": "red" if why else "green", "universe": u, "certified": c,
-           "uncertified": sorted(ids)[:50], "detail": detail[:900]}
+           "uncertified": sorted(ids), "detail": detail[:900]}
     with open(os.path.join(os.environ["GATE_OUT"], "argordergate.json"), "w") as f:
         json.dump(res, f, sort_keys=True)
     print("argordergate: %s %d/%d %s" % (res["status"], c, u, detail[:200]))

@@ -8,6 +8,9 @@ Origin of each file (the upstream that the pin documents; the mirror is what set
   launchpad Ubuntu pool file of a version that a later update superseded (launchpad.net +files); not in the dated index
   ppa       "+noble1" versions: the deadsnakes PPA pool (ppa.launchpadcontent.net)
 A file whose sha256 differs from its index is an error. Nothing is skipped: any package that cannot be fetched is an error."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import hashlib
 import json
 import lzma
@@ -16,8 +19,8 @@ import re
 import subprocess
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "verify"))
-import envcheck  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import envcheck  # noqa: E402
 
 SUITES = (("noble", "main"), ("noble", "universe"), ("noble-updates", "main"), ("noble-updates", "universe"),
           ("noble-security", "main"), ("noble-security", "universe"))

@@ -1,6 +1,8 @@
 """model_sail.seg_domain ties each segment register's selector to its hidden attributes (read through x86sys) and drops what the model does not decide; the Sail clause store_bytes_to_ea (model/memory_accessors.sail:100-103,
 `seg_reg == 1 | seg_attrs[w] == 0`, w = bit 1 of data_segment_descriptor_attributesbits, segmentation_structures.sail:84-98) is the reference of the DSL code-segment store fault: z3 checks of the two directions of prove.py
 over the domain, on the real Forms.  (No isla here: the clause is transcribed from the Sail source.)"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 import unittest
@@ -9,11 +11,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
 sys.path.insert(0, os.path.join(HERE, '..'))
 sys.path.insert(0, HERE)
-import declared_x86sys
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys
 declared_x86sys.configure()
 import z3
-from fnvlift import dsl, x86sys
-from proof import model_sail, symform
+from fnvnx.lift.fnvlift import dsl, x86sys
+from fnvnx.lift.proof import model_sail, symform
 
 IDX = {'es': 0, 'cs': 1, 'ss': 2, 'ds': 3, 'fs': 4, 'gs': 5}
 

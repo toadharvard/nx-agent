@@ -31,10 +31,12 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import gate_argorder  # noqa: E402
-import gate_build  # noqa: E402
-import gate_contract  # noqa: E402
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_argorder  # noqa: E402
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import gate_contract  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 GATES = ("order", "addr32", "eh", "flags")
 TOOLS = os.path.join("ports", "fnv-nx", "lift", "gates")
@@ -326,7 +328,7 @@ def main(argv):
             shutil.rmtree(tmp, ignore_errors=True)
     detail = "; ".join(why) or ("%d items in %d roots" % (u, len(roots)) if roots else "no lifted or native guest root (universe 0)")
     res = {"format": "fnvnx-gate/1", "name": gate, "status": "red" if why else "green", "universe": u, "certified": c,
-           "uncertified": sorted(ids)[:50], "detail": detail[:900]}
+           "uncertified": sorted(ids), "detail": detail[:900]}
     with open(os.path.join(os.environ["GATE_OUT"], gate + ".json"), "w") as f:
         json.dump(res, f, sort_keys=True)
     print("%s: %s %d/%d %s" % (gate, res["status"], c, u, detail[:200]))

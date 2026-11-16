@@ -2,7 +2,10 @@
 with different stack roots: the ThrowInfo set is {0x0116cdb8, 0x0117fc10}; a seeded instruction on the walk, a non-constant push and an unknown esp change are red."""
 import sys, os, struct
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tools'))
-import capstone, pefile, ehtables
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..")) # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
+import capstone, pefile
+from fnvnx.lift.tools import ehtables
 from types import SimpleNamespace
 cx = capstone.x86
 exe = os.environ.get('FNVNX_EXE')

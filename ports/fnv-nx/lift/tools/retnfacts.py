@@ -3,13 +3,16 @@
     retnfacts.py --exe EXE --universe UNIVERSE.tsv --table MODULES_TSV --image NAME --out retn.tsv [--jobs N]
 A pure function of the image bytes and the universe rows (x86flow.compute); the text is canonical (x86flow.retn_text), so the output is the same for every --jobs. It is the
 declared output of the product root lift/retn (recipe stage, GATE_CACHE), and fpmodes / fpstate take it as a required input (--retn)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import argparse
 import os
 import sys
 from multiprocessing import Pool
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import x86flow as W
+import fnvnx.lift.tools.libarg as libarg; libarg.take()      # --lib DIR: the package fnvlift (a declared input of the stage)
+import fnvnx.lift.tools.x86flow as W
 
 
 def main():

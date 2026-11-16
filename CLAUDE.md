@@ -409,8 +409,13 @@ The owner's words: "делегируй остаток работы аккура�
   - **Shaders.**
     - The game's shaders are a static set from its gamedata. The translator's link check (`sm_link`) over that whole
       set is a gate at 0 failures.
-    - The backends' link-failure branch becomes `fnvnx_reach_violation`, with that gate's certificate as its fact.
-      So neither GL nor deko3d has a run-time link-failure path.
+    - **GL keeps its branch "the shader did not compile or link" (owner, 2026-11-15 20:20Z: "В бэкенде GL есть ветка
+      «шейдер не собрался». Оставь.").** It is not converted to `fnvnx_reach_violation`, and no assumption about the GL
+      library's GLSL compiler is added. The stub gate accepts this branch with this owner decision cited.
+      <!-- fnvnx-owner-decision: gl-shader-failure | class: GL shader compile/link failure | root: ports/fnv-nx/render/gl4 -->
+    - The deko3d backend's link-failure branch becomes `fnvnx_reach_violation`, with the `sm_link` certificate as its fact.
+    - The translator-totality proof over the SM 1-3 grammar (L6, 2026-11-15) waits until after the first frame. `sm_link`
+      over the gamedata set stays the gate.
   - **The product ELF root.**
     - Owner: L3a, with a worker.
     - L1 supplies the link stage (`link/guest.json`) and the onedef and link-root rules.
@@ -555,15 +560,297 @@ a stale tree. The rules below make that class impossible. Adding checks on top o
 - A site in the exe or a module whose answer depends on an undecided row gets a call-graph reach certificate and goes
   to `fnvnx_reach_violation`. Without the certificate the build is red, and the row is reported to the orchestrator.
 - Other code reads these records and never restates them (rule 2). seh.cc's trap rows are an example.
+- **gs on Windows 7 (7601) x86, orchestrator decision 2026-11-15 22:15Z (it replaces the 22:05Z text).**
+  - No pinned document states the initial user-mode gs selector (L5: the whole WDK 7.1 ISO and Wine 9.0). Register dumps
+    of other NT builds do not count.
+  - The source is a Microsoft-published 7601 artefact: the Windows 7 SP1 x86 kernel (`ntkrnlpa.exe`/`ntoskrnl.exe` of
+    build 7601), with its public PDB from Microsoft's symbol server. Both are pinned by sha256 and mirrored in
+    fnv-nx-build `tools/win7sp1-x86-kernel` (private, never in this repository).
+  - The row's value is derived from that binary: the store of `KTRAP_FRAME.SegGs` (offset from the PDB) on the
+    user-thread initialization path. The function and the instruction address are cited in the row. Source 1 above
+    covers this ("the exe and module bytes" class, applied to the declared OS's own binary).
+  - The `null_seg_access` row and the 24 `mov m16, gs` reads then follow by the existing method. They are one row each,
+    with no per-site work.
+  - The gs-prefixed operands that the code universe reaches only by decoding data are a defect of the universe rule.
+    L3a fixes it in the facts stage. A site is never certified around it.
+  - Owner: L5 (a worker, now; it blocks the pack finish). L3a consumes the row.
+- **Where the Microsoft page is narrower (orchestrator, 2026-11-15 13:45Z; it applies to D3D9 and its shader models as well).**
+  - Microsoft does not list a case, but Wine 9.0 accepts it. That case is a silence, not a contradiction, so source 2
+    fills it and the accepted set is the union.
+  - Each such case is a cited conflict row: the Microsoft page and section, and the Wine 9.0 file and line. Examples are
+    `ps_3_0:vFace_src`, `ps:47` and `vs_3_0:v[a0.x]`.
+  - Where Microsoft states the opposite, Microsoft holds.
+  - "The opposite" means a Microsoft statement of what the system itself does: a result, an error code, a behaviour.
+    A rule addressed to the application ("applications may not use vs_3_0 with the fixed function pipeline") names no
+    result of the system, so it is a silence on that result, and Wine 9.0 fills it as above (orchestrator, 2026-11-15 16:00Z).
+
+## Owner order of 2026-11-15 20:25Z: no rework that gives no progress (binding)
+
+The owner's words: "Это переделка хуйни не дающей прогресса. Вот пересборка компилятора быстрая это важно. Все
+остальное что нужно по счету это важно. А это похуй. Уже корректно почти и хуй с ним."
+
+- Work counts only when it moves the next step in order: root, packs as roots, ELF, boot, first frame.
+- **Important now:**
+  - a fast compiler rebuild: the compiler stage and the plugins+runtime stage are separate;
+  - fast builds and verdicts;
+  - the items each step needs, taken in order.
+- **Not now:** reworking or re-proving something that already works and is nearly correct, when it does not block a step.
+  Examples: the shader-failure branch, a stronger proof of an already green gate, a cleaner form of a working rule.
+  - Such an item is written into the lead's status as "after the first frame" and left.
+- A lead asks itself before starting an item: "which step does this unblock, and when?" If it unblocks none, the item
+  waits.
+
+## Owner order of 2026-11-15 21:00Z: the compiler key cannot be wrong (binding for L1, L2)
+
+The owner's words: "По построению не должно быть неправильного ключа".
+
+- **The guest compiler is a recipe stage, like any unit.**
+  - Stage 1 is the compiler; stage 2 is the plugins and the runtime.
+  - Each stage runs in the hermetic sandbox (`sandbox.py`). Its key is the content of exactly what the sandbox mounts for
+    it.
+  - The stage cannot read anything outside its key, so a key that misses an input is impossible.
+  - There are no input lists kept by hand in `stamp.py` or `build.sh`: no env flags, no dpkg versions, no patch hashes.
+    Rule 1 forbids them.
+- **No pin is handed over.**
+  - A candidate names no compiler commit to wait for.
+  - Its recipe computes the stage keys from its own tree. It takes the compiler from `GATE_CACHE` on a hit and builds it
+    on a miss: one farm build, stage 2 only when only a plugin changed.
+  - A mirror in fnv-nx-build is a copy of that cache entry under its key.
+  - "The candidate needs a pin with key X" is therefore no longer a state. A changed plugin is a cache miss, built
+    once.
+- **Owners:** L2 (stages, PINKEY becomes this) and L1 (the recipe takes the compiler by stage key, `admit`, envcheck).
+  Lands with cand3. The cand2 pin 56a4d09c stands; cand2 is not reopened.
+
+## Owner order of 2026-11-15 21:00Z: every generator is a recipe stage; no path outside the key (binding for every layer)
+
+The owner's words: "Что ещё так проебано? Перепроверь. Пересобери."
+
+- **The defect.** The published pack 7b2faae276b2/db2aaf6d4a08 was lifted from a stale module table: galaxy.dll was
+  still a static image, so libvorbis and libvorbisfile were lifted at a base 0x450000 too high, and d3dx9_31, atimgpud
+  and gdffalloutnv were not lifted at all.
+- **The cause.** `lift/tools/pemod.py:7` read `/home/user/wt-l1/modules/modules.tsv`, a container-local copy, outside
+  any key. The same class holds across the whole lift input chain, at L3a 217cb3ce0: the facts and universe under
+  `/home/user/l3facts*`, `funcs.tsv`, `exe_mnemonics.tsv`, the bridges `/home/user/wt-l5/manifest/bridge.tsv`, and the
+  exe and module directories. It holds in other layers too, for example `render/shaders/total/sm_table.py` REF
+  `/home/user/work/l6/ref` and the `/home/user/fnv-nx-build` defaults of `tools/gates/ready.py`.
+- **The rule.**
+  - Every step that produces an input of a product root or a gate is a hermetic recipe stage: facts, universe, module
+    table, bridges, the lifted pack, the shader table and every other generated table.
+  - Its key is the content of what it mounts:
+    - the exe and module bytes from the gamedata external;
+    - modules.tsv and bridge.tsv from the tree at the commit;
+    - facts from their own stage's output.
+  - A stage that opens a path outside its mounts fails. So a stale copy cannot enter.
+  - No tool on a product or gate path has a default absolute path or an environment default. A missing input is an
+    argument error.
+  - The lifted image set is every module of modules.tsv that has code. The pack carries the sha256 of the table it was
+    lifted from, and the pack stage is red when it differs from the loader's.
+- **Owners.**
+  - L3a: the whole lift chain, done in this relift.
+  - L1: generator stages in recipe.py, and a gate that reds on any absolute path (or `os.environ.get` default)
+    reaching a product or gate input, over every tracked tool, by rule.
+  - L5 and L6: their tools of this class.
+  - Tools used only by tests (X11 locks) and scratch notes are outside the product and gate paths; L1's rule decides that
+    from the stage graph, not by a list.
+- **The cold pack build** of the relifted pack runs on up to 16 farms (orchestrator, 2026-11-15 21:00Z, for this one
+  build), and only after the density rules below. It is sharded by the recipe, with N up to 16, and the shards' stores are merged by key.
+
+## Orchestrator decision of 2026-11-15 23:30Z: jump-table index bound under OWNER 6 (binding for L3a, L3b, L1)
+
+- **The case.** MSVC /Od switches keep the index in a frame slot: `cmp [ebp-k],N; ja D; mov r,[ebp-k]; ...; jmp [r*4+T]`.
+  Between the guard and the reload there is no call and no unknown store, so only another thread, through an escaped
+  frame address, could change the slot. At w7 facts2 b9261cd85, 326 of 1005 sites are red this way.
+- **The rule.**
+  - The table read `[r*4+T]` is an array access. Under OWNER 6 its index is in the bounds of T.
+  - T's extent is the N+1 entries fixed by the guard `cmp [ebp-k],N` / `ja` on the same cell. The cell is the same
+    expression, with no redefinition of ebp between, and the guard dominates the jmp.
+  - So the target is one of T's N+1 entries, read statically. Each has a dispatcher entry.
+  - A racing in-range write still lands in T. An out-of-range one is a wild access, which OWNER 6 excludes.
+- **Status.** This is OWNER 6 applied to the table index. It is not a new assumption. The certificate cites OWNER 6, the
+  guard address and the table extent.
+- **The cell defects stay defects.** A join of different esp depths must not kill ebp cells (fix B), and precise escapes
+  are needed (SEH record, the /GS cookie value).
+- **Residue.** A site that this rule does not close, for example with no dominating guard on the same cell, is traced and
+  reported to the orchestrator with its address. Nothing is chosen for it.
+
+## Orchestrator decision of 2026-11-16 03:05Z: lift/rt FP helper bodies (binding for L3b, L3a, L1)
+
+- **The gap.** Shape certificates stop at the call into a lift/rt helper (`sse_f2i`, `fv_i` and every helper a Form
+  calls), so the helper's C body is not certified by them. gate_fpexact check 0 claimed otherwise. That was a false
+  claim, and it is corrected now: the check states exactly what is certified.
+- **One method for every width (revised 03:10Z).** An exhaustive run could only be checked against an executable
+  re-implementation of the z3 terms, and that is a third implementation. So it does not certify. The 32-bit helpers
+  take the same proof as the 64-bit ones.
+- **All Form-called helpers (rcptab aside, which rcpcert covers).** These are a REMOVE record in `verify/ASSUMPTIONS.json`: "the Form-called lift/rt FP
+  helpers equal their Form semantics", owner L3b. It is not an OWNER record and not red.
+  - It is removed by isla over the helper's host object, once the pinned Sail model covers cvttsd2si, ucomisd and the
+    other SSE FP instructions through the ACL2-derived patch that L3b owns for the model gaps. That is sound under
+    OWNER 1 and 9.
+  - The proof carries from the x86-64 host compile to the aarch64-ILP32 object only if each helper in it passes four
+    static checks over the helper universe (L3a, 03:05Z). The removing argument checks all four:
+    1. fixed-width integer types only: no long, size_t or pointer-sized arithmetic;
+    2. no implementation-defined or undefined behaviour on the path: signed overflow, out-of-range FP-to-int casts,
+       shifts by the width or more;
+    3. the same FP settings in both compiles: -ffp-contract=off and FLT_EVAL_METHOD 0;
+    4. no target builtins or intrinsics.
+  - The work comes after the first frame, since it blocks no step of the path.
+  - No new trusted tool (CBMC or ESBMC) is pinned for it.
+- **No new gaps.** A helper added after this decision enters the same rule. The REMOVE record covers exactly the Form-called
+  helpers, derived from the Form→helper call table (L3a w13 lift/proof/fpchost) and not from a list.
+
+## Orchestrator decision of 2026-11-16 04:15Z: an esp the facts cannot fix takes the general form (binding for L3a, L3b, L1)
+
+- **Class.** A site where the static stack analysis cannot give esp a single value. For example, after a virtual call
+  `call/jmp [[reg]+k]` whose callee set mixes pops, the vptr tail jmps and the EH continuations that follow it.
+- **Rule.** A static esp fact is used only where it is proven: a single value, or the finite offset set that collapses
+  at `mov esp, ebp` and `leave`.
+  - Everywhere else the lifter emits the general form, which is correct for every esp value: esp is the run-time
+    register, an indirect jmp or call goes through the dispatcher with the full guest state, and an EH continuation takes
+    esp from the frame the exe's own EH code saved.
+  - This is the same as "a loop that is not proven stays sequential". It is not a red fact and not an assumption.
+- **Gates.** No gate may require a static esp at such a site. A gate that does is a defect of that gate, owner L1. The
+  fact record says `esp: general` and names the reason (the callee set's pops), derived from the facts, not listed.
+- **Refused.**
+  - "Callee pop = bytes the caller pushed" is a new assumption. It is also false in general, since `__cdecl` and
+    `__stdcall` callees share slots.
+  - Whole-program container typing is not on the path.
+- **Speed.** The general form costs only at those sites. After the first frame the instructions-per-frame data shows
+  whether any is hot. Only then is a rule written to narrow it.
+
+## Orchestrator decision of 2026-11-16 04:40Z: the scope of OWNER 10 is derived, not listed (binding for L3b, L3a, L5)
+
+- **Scope.** OWNER 10 covers "the parts that no pinned formal model covers". Its scope is therefore not a list: it is
+  derived. It is every instruction class for which the pinned Sail model's run reports a gap (for example "Opcode
+  Unimplemented in x86isa") and which has a site reachable from a proven root.
+  - The record's scope field in `verify/ASSUMPTIONS.json` is generated by a recipe stage from that model output and the
+    reach facts (rule 1). The word "today" in the record's text names only what that output held at the time.
+  - This is not a widening. A class enters only because the pinned model does not cover it, and a model patch that
+    covers it takes it out again automatically.
+- **At IR 257a93722adb** that output gives x87 plus four classes: rdtsc (3 sites), int3 (5), xlat (1) and mov r/m16
+  from a segment register (78).
+  - Each gets the x87 treatment: a z3 spec transcribed from the Intel SDM, with an SDM citation on every line. The owner
+    is L3b.
+- **Values that belong to the declared machine are read from its records, never restated.**
+  - rdtsc reads the platform monotonic timer (the declared CPU).
+  - int3 is a synchronous exception through the SEH path with the precise CONTEXT. ExceptionAddress and Eip follow the
+    declared OS records, which come from the 7601 kernel.
+  - A segment-register read takes its value from `x86sys.json` selectors.
+    - Every selector that the 78 sites read must be a row derived from the pinned 7601 kernel, the same way as gs.
+    - An undecided row names its blocker. The owner is L5.
+- **Candidate-root sites stay out.** The 1,580 sites with only candidate roots are outside this decision until L3a's
+  code-range rule decides their reachability. Once it does, they enter by this same rule.
+
+## Orchestrator decision of 2026-11-16 07:40Z: declared-machine rows only for reached sites; no Windows media, no PDF scraping (binding for L5, L3b, L1)
+
+The owner asked: "А винду зачем скачали?" and "Зачем пдф ридер."
+- **Scope of the x86sys rows.** A row is written only when a site reached from a proven root reads it. At IR 257a93722adb,
+  that is the selector values that the 78 `mov r/m16,Sreg` sites read, and the int3/rdtsc values above.
+  - Ring-3 selector values come from the WDK 7.1 headers (source 1). The pinned 7601 kernel is used only where the
+    headers say nothing.
+  - These wait until after the first frame, unless a reached site reads them:
+    - drivers, HALs and boot drivers;
+    - IDT gates other than the documented user vectors;
+    - LAR and accessed bits;
+    - iret task returns.
+  - **No Windows installation media.** Nothing is downloaded or pinned from a Windows ISO or wim. The 154 driver and HAL
+    pins already made are not extended.
+- **CPU feature of an instruction.** The CPU feature that each instruction belongs to (for the cleared-#UD partition)
+  comes from Intel's machine-readable tables, the pinned XED (intelxed/xed) ISA_SET and CPUID data. XED is built as a
+  host recipe stage. It is not scraped from the SDM PDF, because reading a PDF's text layout is a heuristic. No PDF
+  reader enters env.json.
+
+## Owner order of 2026-11-16 05:15Z: less generated code before the cold build (binding for L3a, L3b, L1)
+
+The owner's words: "не будем тратить так время... уменьшим количество генерируемого кода".
+
+- **No cold build of the pack at today's density.** It is 758.9 MB for 7.79 M instructions, 94.5 B per instruction
+  (u/000). More farms is not the answer. The relifted pack goes to the cold build only after the density rules below.
+- **Density rules, in this order.** Each one closes its class and gives the same guest semantics by construction.
+  1. **Re-entry only at derived targets.** A label and a nonlocal-switch case exist only at an address where control
+     can arrive: a branch or table target, a call's return address, an EH continuation, a dispatcher entry. These come
+     from the facts, not from a list. Every other instruction has no label and no case. Today every instruction has
+     both, and that makes each function one huge graph for the compiler. This touches no certified Form.
+  2. **One shared form for the call sequence and the nonlocal transfer.** It is an inline function in lift/rt, emitted
+     once instead of open-coded at every site. The code the compiler sees after inlining is identical. This touches no
+     certified Form.
+  3. **Flags only where they are read.** This means EFLAGS liveness from the facts, with L3b's projection lemma and a
+     certificate per function. It does touch the Forms, so it goes after 1 and 2, with L3b.
+- **Measure what each rule saves on the whole pack.** Generated bytes are counted by category and in total, from the
+  generator stage at a commit (rule 6), before and after each rule. Compile time is measured on the whole build, never
+  on a sample.
+- Owners: L3a with workers (1 and 2 now, right behind the relift as stages); L3b (3); L1 (the cold build, ≤16 farms).
+
+## Orchestrator decision of 2026-11-16 05:50Z: x87 transcendentals (binding for L3b, L3a, L2)
+
+- **The case.** F2XM1, FYL2X, FYL2XP1, FPTAN, FPATAN, FSIN, FCOS and FSINCOS. The OWNER-10 x87 spec leaves the function
+  itself uninterpreted, because a correctly rounded sin, log2 and so on is not a finite z3 term.
+- **The value is already decided.** OWNER 8 says "transcendentals return the correctly rounded value at the operand
+  type", and under OWNER 8 that type is binary64. So the spec's uninterpreted `x87_<fn>` *is* CR_binary64(fn). This is a
+  definition by an owner record, not a new assumption.
+- **The implementation is a pinned correctly rounded library: CORE-MATH.**
+  - It is mirrored in fnv-nx-build `tools/core-math`, pinned by commit and `tree_sha256`.
+  - It is built by the recipe with the game's compiler and every plugin, as part of the guest runtime (owner L2).
+  - It is taken by its documentation ("correctly rounded in all rounding modes"). This is the owner's existing rule for
+    external libraries (CLAUDE.md "Memory safety of hand-written native code": libc, libnx, FreeType and minimp3 are taken
+    by their documentation). It is not a widening of OWNER 9, and CORE-MATH's published proofs are not claimed as
+    theorems.
+- **The lowering.** The lifter (L3a) calls the library for each function:
+
+  | Instruction | Library call |
+  |---|---|
+  | F2XM1 | cr_exp2m1 |
+  | FYL2X | `y * cr_log2(x)` |
+  | FYL2XP1 | `y * cr_log2p1(x)` |
+  | FPTAN | cr_tan, then push 1.0 |
+  | FPATAN | cr_atan2(st1, st0) |
+  | FSIN | cr_sin |
+  | FCOS | cr_cos |
+  | FSINCOS | cr_sin and cr_cos |
+
+  - The product in FYL2X and FYL2XP1 is an IEEE binary64 multiply. The transcendental is the log2, and it is the only
+    part that is correctly rounded. That is how OWNER 8 reads for a two-operand instruction.
+  - Everything around the call follows the SDM (OWNER 10): stack, tags, C1 and the C2 out-of-range result
+    (|x| ≥ 2^63 leaves the operand unchanged, C2=1), the domain errors and their #IA when unmasked.
+- **The certificate (L3b).** The Form equals the SDM machinery plus a call of CR(fn) on the operand. It is proved
+  against the spec with `x87_<fn>` bound to the library symbol. The library body is not part of the proof.
+- **An undecided rounding takes Ziv's last step (06:10Z).** CORE-MATH's cr_atan2 has one branch, in tint.h's
+  tint_tod, for a result too close to a rounding boundary to decide. Upstream prints a message and exits there. No
+  certificate can prove that branch unreachable: there are 2^128 binary64 pairs, and no search covers them. So the
+  branch computes `mpfr_atan2` at 53 bits in the current rounding mode.
+  - MPFR is correctly rounded by its documentation, and it is taken under the same external-library rule.
+  - The result is therefore correctly rounded for every input, with no trap. This is an exact algorithm step, not a
+    fallback on a failure.
+  - MPFR and GMP are mirrored in fnv-nx-build `tools/*` and built as guest roots by the recipe, with the game's
+    compiler. Owner: L2.
+  - The redirect is a declared stage patch (`core-math.patch` in the root), never an edit of the mirror.
+  - Every other CORE-MATH exit or printf on the path is closed the same way, or shown dead by the preprocessor.
+- **A library's documented flags (06:15Z, corrected 06:20Z).** A compiler flag that a pinned library's documentation
+  requires for its documented semantics lives in one record: `verify/guest_compiler.json` `flags.semantics`, with the
+  citation (mirror file and line) on that row. CORE-MATH's `-frounding-math` is already the first entry of
+  `flags.semantics.common`; the CORE-MATH citation (README:173) is added to that row.
+  - No root restates such a flag in its build.json, and there is no per-root cited-flag form: a restatement is a second
+    copy of one fact (rule 2) and stays red.
+  - A documented flag not yet in `flags.semantics` is added to that one record with its citation, only if it changes
+    neither the data model nor the ABI (DATAMODEL decides).
+- **No other libm on the path.** A lifted call to newlib's sin, cos or log is not correctly rounded, so it does not meet
+  OWNER 8. The same table applies to it.
 
 ## Orchestrator decision of 2026-11-15 09:20Z: weekly budget (binding for every session)
 
 - The owner's usage page reads: weekly 29 % used, reset on Saturday 2026-11-21 18:00Z. At the pace so far the limit ends
   on 2026-11-16 at night, five days early. The budget is at most about 11 % of the week per day until the reset.
 - Until the orchestrator lifts this:
-  - **Workers:** at most 2 per lead, and each runs only a path item that blocks the next step: first root, packs as roots,
-    ELF, boot.
+  - **Workers:** at most 4 per lead (owner, 2026-11-15 20:00Z: "Разреши лидерам большее количество саб-агентов
+    реализаторов"; it was 2). Each runs only a path item that blocks the next step: first root, packs as roots, ELF, boot.
+    - A lead splits each path item into independent pieces and runs them in parallel, one worker each. While a build runs,
+      its worker prepares the next piece rather than waiting.
+    - A worker whose piece is done, or waits on another layer, is archived, not left idle.
   - **Farms:** at most 4 per layer. Never rerun on unchanged content; a farm stops as soon as its queue is done.
+    - Exception (orchestrator, 2026-11-15 20:15Z, from the leads' bottleneck lines): up to 8 farms for the L3b proof queue
+      (each shard is 3,400-4,400 s), and up to 8 farms for the cold lifted-pack build (4,096 units, about 10 h on one
+      4-core farm).
+    - The pack build is sharded by the recipe itself: each farm builds the unit subset that one rule over the unit key
+      gives it, into the one content-keyed store, and the shards' stores are merged by key. There is no second build path.
   - **Leads:**
     - one message per finished item, no interim reports;
     - no re-reading of large files already read;
@@ -587,3 +874,48 @@ of those turns did nothing. Each turn re-reads the whole context, 200-300k token
   reports to its lead once per item, not per step.
 - Send with `priority: "later"`, unless it unblocks the receiver now.
 - Farm prompts do not tell the farm to read CLAUDE.md: it is loaded automatically.
+
+## Orchestrator decision of 2026-11-15 10:20Z: a candidate is frozen (binding for L1 and its workers)
+
+- The trunk last moved on 2026-11-12. The candidate cand2 is 620 commits ahead of it, and every new item resets its
+  verdict, so nothing merges. That is the cause.
+- Rule:
+  - A candidate's scope is frozen when its verdict starts.
+  - It takes only fixes for the reds of its own verdict.
+  - Every new item goes to the next candidate (cand3), which opens from the trunk right after the merge.
+  - Small candidates, merged often: at least one trunk merge a day while anything is open.
+
+## Orchestrator decision of 2026-11-15 10:30Z: call economy (binding for every session)
+
+Measured by the research session: spend = API calls × the whole context, because every tool call re-reads the full
+context. Mail made up 89 % of L1's calls; re-reading sources made up about 38 % of the workers' calls. So make fewer
+calls, not smaller ones.
+
+- **Calls:**
+  - Run independent tool calls in parallel, in one response.
+  - Chain dependent shell steps in one Bash call (`a && b`).
+  - Read a file once, in full, and re-read only a range that changed. To find a symbol, use one `rg -n` with context,
+    not a series of `sed -n` slices.
+  - Put a script you run more than once in a file instead of retyping it.
+- **Mail:**
+  - Send a message only when the receiver must act or decide, or when a stage is finished. Blockers go at once.
+  - One message per stage: collect the points and send them together.
+  - Read all queued notifications in one ReadNotifications call. Decide, then send every reply in one response, as
+    parallel send_message calls. Never send an acknowledgement.
+  - Use priority "next", unless the receiver must stop what it is doing.
+  - To learn a worker's state, read its status file or call list_sessions with children: true. Do not ask the worker.
+  - Commit the status file once per stage, not after each message.
+- **Code reading goes to a subagent (workers and leads).**
+  - Use the Agent tool, type Explore, when an answer needs more than 3 read or search calls: tracing a function,
+    comparing files, finding every user of a symbol.
+  - The brief gives the question, the paths, what you already know and the output you want: file:line references and
+    identifiers quoted verbatim, under 300 words.
+  - Check every hash, address or id it returns with one targeted command before you commit or send it.
+  - When you know the file and the place, do the one read or grep yourself.
+- **Addendum, 12:45Z (cand2 cannot go green on its own reds).** The candidate merges cut, under the trunk rule "code that
+  does not pass is removed from the trunk whole".
+  - admit.json keeps only the roots that are green over every gate.
+  - A test without a certified reference, and an uncertified generator together with the roots that use it, leave the
+    candidate. Their completion stays on the lead's branch.
+  - A gate's own failing selftest is fixed, not cut.
+  - The warm verdict stays at most 300 s.

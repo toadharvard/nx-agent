@@ -24,7 +24,9 @@ import sys
 import capstone
 from capstone import x86_const as X  # noqa: F401  (the operand and register constants of the decoded instructions)
 
-import modules
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name (contract.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract import modules
 
 M32 = 0xffffffff
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -241,7 +243,7 @@ class ImageRec:
 
 
 def _tree_hash(path):
-    import treehash
+    from fnvnx.contract import treehash
     return treehash.tree_hash(path)
 
 

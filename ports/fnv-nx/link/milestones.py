@@ -15,15 +15,18 @@ line is `# table_id <id>`, the id of keys.tsv, which must equal the id of entrie
   import:<dll>!<name>    import  the import key of keys.tsv for the D3D9 calls that mark the first frame: dll `!idirect3ddevice9.dll` and
                          `!idirect3dswapchain9.dll`, name `Present`; a missing row is no row.
 A pure function of its inputs; a violated precondition is a stage error."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import argparse
 import hashlib
 import os
 import re
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'contract'))
-import modules
-import store
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract import modules
+from fnvnx.contract import store
 
 PRESENT = (('!idirect3ddevice9.dll', 'Present'), ('!idirect3dswapchain9.dll', 'Present'))
 WINMAIN = re.compile(r'^(\?WinMain@@|_WinMain@[0-9]+$)')

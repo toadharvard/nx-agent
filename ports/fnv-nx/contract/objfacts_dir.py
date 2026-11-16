@@ -10,8 +10,9 @@ tuples are empty and the vftable set is empty: this tool collects the section en
 Output: store kind `obj`.  A key present twice is an error (exit 1).  The output depends on the objects' bytes and relative paths only."""
 import argparse, os, sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import l2sections, objfacts, store
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name (contract.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract import l2sections, objfacts, store
 
 
 def collect(root, kinds):

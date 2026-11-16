@@ -20,14 +20,17 @@ Checks (exit 1 with one line per violation):
   C. no scanned file defines a name the header defines;
   D. the host's served set equals the declared set: judged by verify/gate_hostapi.py served_ids (the one home; the hosts and their service tables
      are declared in verify/admit.json "serves"). Every declared service that the header counts has exactly one server with the header's count; a served
-     name the header does not declare, or a declared (counted) service with no server, fails. A host file never serves by a numeric range
-     (FNVNX_PLAT_SOCK_FIRST / _LAST): every number outside the declared set answers NO_SERVICE by the table's own default.
+     name the header does not declare, or a declared (counted) service with no server, fails. A host file never serves by a numeric range:
+     every number outside the declared set answers NO_SERVICE by the table's own default.
   E. the identifiers FNVNX_PLAT_* appear only in hostapi.h's own defines and in unit files (.c, .cpp, and the .inc files a unit includes):
      no other header (.h, .hpp, .hh anywhere under the root but build/out directories) mentions one, comments included. A header
      reaches a service only through a function of a unit.
 Calls on a module other than FNVNX_EXT_PLATFORM (the GPU module) are not services of the table; only their module must be a name.
 Usage: check_hostapi.py [--root ports/fnv-nx] [--selftest]
 """
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import ast
 import json
 import os
@@ -69,8 +72,6 @@ def parse_header(text, errs):
     svc, mod = {}, {}
     for m in re.finditer(r"^[ \t]*#define[ \t]+FNVNX_PLAT_([A-Z0-9_]+)[ \t]+(0[xX][0-9a-fA-F]+|\d+)[uU]?\b", code, re.M):
         name, num = m.group(1), int(m.group(2), 0)
-        if name in ("SOCK_FIRST", "SOCK_LAST"):
-            continue
         if name in svc:
             errs.append("%s: service name %s defined twice" % (HDR, name))
         svc[name] = num
@@ -410,8 +411,7 @@ def main(argv):
                 errs.append("%s:%d: FNVNX_PLAT_%s outside a checked ext_call use" % (rel(f), line_of(code, m.start()), name))
 
     # D: served == declared: one home, verify/gate_hostapi.py (the hostapi gate)
-    sys.path.insert(0, os.path.join(root, "..", "..", "ports", "fnv-nx", "verify"))
-    import gate_hostapi
+    from verify import gate_hostapi
     nserved, hids = gate_hostapi.served_ids(os.path.abspath(os.path.join(root, "..", "..")), svc, count, notserved)
     errs += hids
     served = set(svc) - set(n for n in svc if any(i.startswith("declared %s " % n) for i in hids))

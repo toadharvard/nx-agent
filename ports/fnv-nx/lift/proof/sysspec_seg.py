@@ -18,6 +18,8 @@ PUSH Sreg, SDM 2B:P1811
   'the segment selector is written on the stack using a 16-bit move'   with operand size 32 (the declared CPU is the reference host's: 'leaving the upper portion of the stack location unmodified'), and with the 66 prefix a word;
   ESP is decremented by the operand size before the store, the stack slot is ESP - operand size.
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 
@@ -25,11 +27,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import capstone.x86_const as X  # noqa: E402
 import z3  # noqa: E402
-from fnvlift import dsl  # noqa: E402
-from fnvlift.faults import BYNAME as FT  # noqa: E402
-from proof import symform, x86sys  # noqa: E402
-import sysspec_gap as G  # noqa: E402
-from sysspec_text import SEG as TEXT  # noqa: E402
+from fnvnx.lift.fnvlift import dsl  # noqa: E402
+from fnvnx.lift.fnvlift.faults import BYNAME as FT  # noqa: E402
+from fnvnx.lift.proof import symform, x86sys  # noqa: E402
+import fnvnx.lift.proof.sysspec_gap as G  # noqa: E402
+from fnvnx.lift.proof.sysspec_text import SEG as TEXT  # noqa: E402
 
 K_AV, K_UD = FT['AV']['code'], FT['UD']['code']
 V = G.V

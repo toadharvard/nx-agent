@@ -7,12 +7,14 @@ array, the displacement / immediate field variables free) is compared with simds
   * unsat of  NOT(fault_form == (fault_spec ? AV : 0)  AND  [no fault ->  every xmm, fr, ftop, ftag, mxcsr, the 8 general registers, the memory array equal ])
     is the proof; sat gives a counter-model (a defect of the Form or of the spec, reported with the shape);
   * results: proved | FAILED | no-row (the spec has no row for the encoding) | no-form (no DSL builder).
-Environment: the spec's Res.env (CR0.EM = CR0.TS = 0, CR4.OSFXSR = 1) is assumed; it is L5's x86sys row (journal inbox), named in CERTS.md 'SIMD environment'."""
+Environment: the spec's Res.env (CR0.EM = CR0.TS = 0, CR4.OSFXSR = 1) is the declared environment; it is L5's x86sys row (journal inbox), named in CERTS.md 'SIMD environment'."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.join(HERE, '..')); sys.path.insert(0, HERE)
 import z3
-from fnvlift import dsl
-from proof import x86sys, bounds, forms, shape, symform, simdspec as S, simdsplit
+from fnvnx.lift.fnvlift import dsl
+from fnvnx.lift.proof import x86sys, bounds, forms, shape, symform, simdspec as S, simdsplit
 REG = ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi']
 
 
@@ -43,7 +45,7 @@ def _obligation(rep, F, sins_ops, imm, rlimit):
     nf = P['fault'] == 0
     sf = r.fault
     if r.store and e.mem:      # a store through a segment register whose selector names a code descriptor is #GP(0): the SDM condition of sysspec_store (the one rule that proves the Form's code-store fault for every store Form), by the segment of the memory operand
-        import sysspec_store
+        import fnvnx.lift.proof.sysspec_store as sysspec_store
         op = sins_ops.operands[j]; sf = z3.Or(sf, sysspec_store.code_cond(x86sys.load(), sysspec_store.segment(sins_ops, op)))
     spec_fault = z3.If(sf, z3.BitVecVal(S.AV, 8), z3.BitVecVal(0, 8))
     goals = [P['fault'] == spec_fault]
@@ -123,7 +125,7 @@ def _qc_load():
 
 def _canonical(g, cs, env, fpl, mx):
     """the lane function with its operands abstracted: every FP lane operand of the row (fpl) is replaced by a fresh variable (the same term on both sides of the equality, so this is a substitution of equal
-    terms, not an assumption), and only the hypotheses on MXCSR and those operands are kept (weaker hypotheses: a proof is still a proof).  -> (assertions, ok); ok is False when the part still depends on
+    terms, not a hypothesis), and only the hypotheses on MXCSR and those operands are kept (weaker hypotheses: a proof is still a proof).  -> (assertions, ok); ok is False when the part still depends on
     any other state (a preserved register, memory): it is then not a pure lane function and is asked whole."""
     ops, seen = [], set()
     for w, xs in fpl:
@@ -192,7 +194,7 @@ def check(key, rlimit=bounds.Z3_RLIMIT):
     Python index by it: the Form of the shape cannot be made symbolic), so every one of the 256 immediates was checked with its concrete Form (a complete case split of a
     finite field; the shape's certificate needs L3a to make the builder symbolic in the immediate, or the case split as the certificate's `split`)."""
     rep = symform.parse_key(key)[0]
-    if cleared(rep): return 'ud-class', None                       # the class order: a shape whose feature the declared CPU (CPUREF) denies is #UD (fnvlift.f_cpufeat.missing) before any Form or row step
+    if cleared(rep): return 'ud-class', None                       # the class order: a shape whose feature the declared CPU (CPUREF) denies is #UD (fnvlift.cpufeat.missing) before any Form or row step
     try: S.Enc(rep)
     except (AssertionError, IndexError): return 'no-row', None
     try: S.mem_width(rep)
@@ -210,10 +212,10 @@ def check(key, rlimit=bounds.Z3_RLIMIT):
 
 
 def cleared(rep):
-    """the encoding needs a feature that CPUREF's cpuid denies (f_cpufeat.missing non-empty): #UD on the declared CPU"""
-    from fnvlift import f_cpufeat
+    """the encoding needs a feature that CPUREF's cpuid denies (cpufeat.missing non-empty): #UD on the declared CPU"""
+    from fnvnx.lift.proof import cpufeat
     ins = list(shape.decoder().disasm(rep, 0))
-    return bool(ins) and bool(f_cpufeat.missing(ins[0]))
+    return bool(ins) and bool(cpufeat.missing(ins[0]))
 
 
 def touches_fp(key):
@@ -255,7 +257,7 @@ def main(a):
     if '--cache' not in a: raise SystemExit('usage: simdcheck.py SHAPES.tsv --cache VERDICT_STORE [--only S] [--cpufeat TABLE] [--progress]')
     S.F.configure(a[a.index('--cache') + 1])
     if '--cpufeat' in a:
-        from fnvlift import inputs; inputs.configure(cpufeat=a[a.index('--cpufeat') + 1])          # the CPUID feature-bit table: the class order (cleared) reads it
+        from fnvnx.lift.fnvlift import inputs; inputs.configure(cpufeat=a[a.index('--cpufeat') + 1])          # the CPUID feature-bit table: the class order (cleared) reads it
     only = a[a.index('--only') + 1] if '--only' in a else ''
     keys = [l.split()[0] for l in open(a[0]) if l.strip() and not l.startswith('#')]
     cnt = {}

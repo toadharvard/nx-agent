@@ -29,12 +29,15 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import envcheck  # noqa: E402
-import cas  # noqa: E402
-import gatesdir  # noqa: E402
-import verdict  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import envcheck  # noqa: E402
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import gatesdir  # noqa: E402
+from fnvnx.verify import verdict  # noqa: E402
 
 GATES = "ports/fnv-nx/verify/gates.d"
 ENV = "ports/fnv-nx/verify/env.json"
@@ -69,11 +72,11 @@ def _blocked_env(bad):
     print("\n".join(["blocked: env"] + bad))
     return 4
 
-def _check(repo, commit, vdir, budget, gates, td, env_id):
+def _check(repo, commit, vdir, budget, gates, td, env_id, started):
     """verdict.py run + store for COMMIT; returns the stored verdict dict."""
     outp = os.path.join(td, "verdict.json")
     args = ["--repo", repo, "--commit", commit, "--gates", gates, "--out", outp, "--env-id", env_id,
-            "--cache", os.path.join(vdir, "cache")]  # content-keyed gate results (verdict.py gate contract, GATE_CACHE)
+            "--cache", os.path.join(vdir, "cache"), "--started", repr(started)]  # content-keyed gate results (verdict.py gate contract, GATE_CACHE)
     if budget is not None:
         args += ["--budget-s", budget]
     verdict.cmd_run(args)
@@ -83,21 +86,23 @@ def _check(repo, commit, vdir, budget, gates, td, env_id):
 
 def _artifacts(o):
     """The artifacts repository is a required argument; it is recorded beside the verdict's external cache (recipe.set_artifacts), where every gate reads it."""
-    import recipe
+    from fnvnx.verify import recipe
     recipe.set_artifacts(recipe.ext_dir(os.path.join(os.path.abspath(o["--verdicts"]), "cache")), o["--artifacts"])
 
 def cmd_verdict(a):
+    started = time.time()
     o = _opts(a, ("--commit", "--artifacts"))
     _artifacts(o)
     env_id, bad = _env(o["--repo"], o["--commit"])
     if bad:
         return _blocked_env(bad)
     with tempfile.TemporaryDirectory() as td:
-        v = _check(o["--repo"], o["--commit"], o["--verdicts"], o.get("--budget-s"), _gates_file(o["--repo"], o["--commit"], td), td, env_id)
+        v = _check(o["--repo"], o["--commit"], o["--verdicts"], o.get("--budget-s"), _gates_file(o["--repo"], o["--commit"], td), td, env_id, started)
     print(_line(v))
     return 0 if v["verdict"] == "green" else 2
 
 def cmd_merge(a):
+    started = time.time()
     o = _opts(a, ("--into", "--from", "--artifacts"), ("--remote",))
     _artifacts(o)
     o.setdefault("--remote", None)
@@ -136,7 +141,7 @@ def cmd_merge(a):
         # (it can turn green only by every gate passing), so a red verdict is never a permanent mark on a tree
         if stored is None or stored.get("verdict") != "green":
             cand = verdict._git_ok(repo, "commit-tree", tree, "-p", old, "-p", src, inp="l1 candidate merge of %s\n" % o["--from"])
-            v = _check(repo, cand, vdir, o.get("--budget-s"), gates, td, env_id)
+            v = _check(repo, cand, vdir, o.get("--budget-s"), gates, td, env_id, started)
         else:
             v = stored
         print(_line(v))

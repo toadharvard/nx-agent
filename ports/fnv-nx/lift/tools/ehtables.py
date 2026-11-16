@@ -14,14 +14,16 @@
   Also: the catch continuations (`mov eax, imm32; ret` of a catch funclet) and the frame-handler stubs (`live` iff the stub address is a relocated constant of the universe).
 Used by universe.py, which supplies the descent state (tools/modlift.py supplies it for a module image read through pemod: the same code, rebased addresses; running this
 file runs the whole pipeline). Output: <facts>/ehtables.json (exe) and <facts>/<module>/ehtables.json, which lift/gates/gate_eh.py reads (schema: its docstring). Input: L1's keys.tsv (the import conventions), ehflow.configure_keys(path), passed by universe.py --keys."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, re, sys, json, bisect
 from collections import Counter, defaultdict, deque
 from itertools import islice
 import capstone
 from capstone import x86 as cx
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))      # the tool root: a tool imports its siblings from its own root (the generated stages run it under python3 -I, which has no script directory on the path)
-import ehflow
-from ehflow import Flow, FULL, M32, St, sload, cset
+import fnvnx.lift.tools.ehflow as ehflow
+from fnvnx.lift.tools.ehflow import Flow, FULL, M32, St, sload, cset
 CALLEE_ORDER = ('ebx', 'esi', 'edi', 'ebp')
 MAGIC = (0x19930520, 0x19930521, 0x19930522)
 EXC_CODE = 0xE06D7363           # the thrower is the function whose code copies the EXCEPTION_RECORD template starting with this code
@@ -29,6 +31,33 @@ RE_STUB = re.compile(rb'(?=\xb8(.{4})\xe9(.{4}))', re.S)
 RE_PUSHH = re.compile(rb'(?=\x68(.{4})\x64(?:\xa1|\xff\x35)\x00\x00\x00\x00)', re.S)
 h = lambda a: '0x%08x' % a
 def le(b): return int.from_bytes(b, 'little')
+
+class _Mem:
+    __slots__ = ('base', 'index', 'scale', 'disp', 'segment')
+class _Op:
+    __slots__ = ('type', 'size', 'access', 'reg', 'imm', 'mem')
+class Insn:
+    """the fields of a decoded instruction that EH and ehflow read, as plain slots: the memo of 3.3M instructions must not hold capstone's CsInsn, each of which owns a native cs_insn + cs_detail copy
+    (about 2-3 KB); decoding is a pure function of (bytes, address), so the record is exactly what the CsInsn says for these fields"""
+    __slots__ = ('address', 'size', 'mnemonic', 'operands', 'disp_offset', 'disp_size', 'imm_offset', 'imm_size', 'raw', 'cs')
+    def reg_name(s, r): return s.cs.reg_name(r)
+    def regs_access(s):
+        return next(s.cs.disasm(s.raw, s.address, 1)).regs_access()      # lazy: only the few callers pay for it; the same bytes decode to the same instruction
+def compact(g, cs):
+    """the Insn record of capstone instruction g"""
+    r = Insn(); r.address = g.address; r.size = g.size; r.mnemonic = g.mnemonic; r.cs = cs
+    r.disp_offset = g.disp_offset; r.disp_size = g.disp_size; r.imm_offset = g.imm_offset; r.imm_size = g.imm_size
+    ops = []
+    for o in g.operands:
+        q = _Op(); q.type = o.type; q.size = o.size; q.access = o.access
+        q.reg = o.reg if o.type == cx.X86_OP_REG else 0; q.imm = o.imm if o.type == cx.X86_OP_IMM else 0
+        if o.type == cx.X86_OP_MEM:
+            m = _Mem(); m.base = o.mem.base; m.index = o.mem.index; m.scale = o.mem.scale; m.disp = o.mem.disp; m.segment = o.mem.segment; q.mem = m
+        else: q.mem = None
+        ops.append(q)
+    r.operands = tuple(ops)
+    r.raw = bytes(g.bytes)
+    return r
 
 class EH(Flow):
     def __init__(s, X):
@@ -148,7 +177,7 @@ class EH(Flow):
             for h_ in sorted(Hs): s.emit(h_, 'seh-frame', a)
             cls, arg = s.field_class(sload(st, o + 8)); e = st.regs.get('ebp')
             disp = (o + 12 - e[1]) if isinstance(e, tuple) and e[0] == 'sp' else None
-            r = s.regsites[a] = {'site': a, 'handlers': sorted(Hs), 'kind': cls, 'disp': disp}
+            r = s.regsites[a] = {'site': a, 'handlers': sorted(Hs), 'kind': cls, 'disp': disp, 'push': sorted(st.org.get(o + 4) or ())}
             if cls == 'red': s.seh_red.append((a, 'record field: ' + arg)); continue
             if cls == 'const':
                 for S in sorted(arg):
@@ -215,7 +244,7 @@ class EH(Flow):
     def dis(s, a):
         r = s.dc.get(a)
         if r is None:
-            o = a - s.X.T0; r = s.dc[a] = next(s.cs.disasm(s.X.text[o:o + 15], a, 1), False)
+            o = a - s.X.T0; g = next(s.cs.disasm(s.X.text[o:o + 15], a, 1), None); r = s.dc[a] = compact(g, s.cs) if g is not None else False
         return r or None
 
     def sync(s):
@@ -586,8 +615,6 @@ class EH(Flow):
             live[ss[i]] = v
         for r, v in X.rvals: refs[v].append(r)
         def own(a):
-            f = X.indec(a)
-            if f: return f[0]
             i = bisect.bisect_right(es, a) - 1; return es[i] if i >= 0 else None
         owners = defaultdict(set); fiown = defaultdict(set)
         for a, (fi, tgt) in s.stubs.items():
@@ -611,7 +638,7 @@ class EH(Flow):
             t = tinfo[a]; J['throwinfo'].append({'addr': h(a), 'attrs': t['attrs'], 'unwind': h(t['unwind']) if t['unwind'] else 0,
                 'types': [{'type': h(ty), 'size': sz, 'copy': h(cp) if cp else 0} for _, ty, sz, cp, _ in t['types']]})
         J['conts'] = {h(k): h(v) for k, v in sorted(s.conts.items())}
-        J['registrations'] = [{'site': h(a), 'handlers': [h(x) for x in r['handlers']], 'kind': r['kind'], 'frame_disp': r['disp']} for a, r in sorted(s.regsites.items())]
+        J['registrations'] = [{'site': h(a), 'handlers': [h(x) for x in r['handlers']], 'kind': r['kind'], 'frame_disp': r['disp'], 'push': [h(x) for x in r['push']]} for a, r in sorted(s.regsites.items())]
         J['helpers'] = [{'addr': h(R), 'arg': d['k'], 'handlers': [h(x) for x in sorted(d['handlers'])], 'frame_disp': d['disp'], 'err': d.get('err')} for R, d in sorted(s.hlp.items())]
         J['jtab_red'] = [{'site': h(a), 'why': w} for a, w in sorted(getattr(X, 'jtab_red', {}).items())]; J['jtab_sites'] = len(getattr(X, 'jtab', ()))
         J['jtab_tables'] = [{'site': h(a), 'base': h(t.base), 'lo': t.lo, 'hi': t.hi, 'words': [h(w) for w in t.addrs], 'targets': [h(w) for w in t]} for a, t in sorted(getattr(X, 'jtab_ok', {}).items())]
@@ -643,12 +670,12 @@ class EH(Flow):
         L.append('scope tables v3 %d v4 %d (empty %d), records %d: filters %d, handlers %d (finally %d); SEH helpers %s' % (sv[3], sv[4], sum(1 for sc in s.scopes.values() if not sc['recs']),
             len(recs), sum(1 for r in recs if r[1]), len(recs), sum(1 for r in recs if not r[1]), ' '.join(h(k) for k in sorted(s.helpers))))
         L.append('throwers (_CxxThrowException, by EXCEPTION_RECORD template) %s; throw sites %d (non-constant ThrowInfo %d, rethrow %d), ThrowInfo %d (pmfnUnwind %d, copyFunction %d), failed %d, thrower escapes %d; catch continuations %d' % (
-            ' '.join('%x' % x for x in s.throwers) or '-', len(tsl), sum(1 for x in tsl if x['ti'] is None), sum(1 for x in tsl if x['ti'] == h(0)), len(tinfo), sum(1 for t in tinfo.values() if t['unwind']),
+            ' '.join('%x' % x for x in s.throwers) or '-', len(tsl), sum(1 for x in tsl if x['kind'] == 'red'), sum(1 for x in tsl if x['kind'] == 'rethrow'), len(tinfo), sum(1 for t in tinfo.values() if t['unwind']),
             len({t[3] for r in tinfo.values() for t in r['types'] if t[3]}), len(tfail), len(esc), len(s.conts)))
         L.append('SEH functions %d, non-constant trylevel stores %d, scope tables with err %d; stubs live %d unreferenced %d' % (len({x for sc in s.scopes.values() for x in sc['funcs']}), sum(len(sc['nonconst']) for sc in s.scopes.values()),
             sum(1 for sc in s.scopes.values() if sc['err']), len(live), len(s.stubs) - len(live)))
         L.append('frame-handler targets (stubs with FuncInfo): ' + ', '.join('%s x%d' % kv for kv in sorted(Counter(h(v[1]) for v in s.stubs.values()).items())) + '; mov-eax/jmp stubs whose target is not FuncInfo: ' + (', '.join('%x x%d' % kv for kv in s.noise.most_common(4)) or 'none'))
-        L.append('functions owning a FuncInfo %d, of which decomp %d; FuncInfo without a referenced stub %d' % (len(owners), sum(1 for o in owners if o in X.fsize), sum(1 for a in ok if not fiown[a])))
+        L.append('functions owning a FuncInfo %d; FuncInfo without a referenced stub %d' % (len(owners), sum(1 for a in ok if not fiown[a])))
         scan = set()
         for nm, va, vs, ro, rs in X.secs:
             if X.intext(va): continue

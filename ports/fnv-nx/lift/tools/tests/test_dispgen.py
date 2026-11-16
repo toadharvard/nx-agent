@@ -4,10 +4,12 @@ finds every key (its symbol) and sends every other address to fnvl_nobody.
     dispgentest.py
 The lookup is rt.c fnvl_dispatch() re-read from the generated C++ text: i = ((a ^ g[(a*k1) >> (32-nbits)]) * k2) >> (32-tbits); a slot hits iff its key == a and its
 offset != 0. Prints one line per check; exit status 1 on any failure."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, random, re, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(LIFT, 'tools'))
-import dispgen, phf
+import fnvnx.lift.tools.dispgen as dispgen; import fnvnx.lift.tools.phf as phf
 M = 0xffffffff
 ROWS = ['%08x\tL_%08x\tcode\n' % (a, a) for a in (0x401000, 0x401005, 0x40100a, 0x4010ff, 0x402000, 0x5fffff0, 0x7fffffff, 0xdeadbeef)] + \
        ['000fffd0\tfnvl_msvcrt_eh_nested_catch\truntime\n', '00100000\tI_00100000\timport\n', '# table_id 00\n', '\n']

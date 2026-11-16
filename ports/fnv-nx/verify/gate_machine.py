@@ -10,6 +10,9 @@ Roots come only from verify/admit.json (class product). A root DECLARES its hive
 Universe, classes and certification: contract/hive.py. Writers are read from the objects of the build (recipe.symbols per object: undefined
 names). A dynamic site (root, key or value not statically resolved) is class `dynamic`: the gate is red and its detail says MEASUREMENT, as the reach
 gate treats a dynamic-name GetProcAddress site; there is no allow-list. Universe: gate_build.quantify (the admitted product roots; a root without registry.in.json is one red item, unless it is header-only (gate_build.unitless): 0 items, or outside the class `registry-reader`: its build's symbol table defines and references no registry API and no GetProcAddress / LoadLibrary* (hive_names): 0 items; a root that has one enters the class and is the one red item). No product root: universe 0, green. Bad input, a red build, an invalid recipe or an external that fails its hash is red. Exit 0 iff green."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import shutil
@@ -19,12 +22,13 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), "contract"))
-import cas  # noqa: E402
-import gate_build  # noqa: E402
-import gate_imports  # noqa: E402
-import hive  # noqa: E402
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import gate_imports  # noqa: E402
+from fnvnx.contract import exportgen  # noqa: E402
+from fnvnx.contract import hive  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 IN_KEYS = {"format", "sites", "declared", "seed", "seed_unit"}
 
@@ -58,13 +62,24 @@ def calls_of(res):
     return out
 
 
+def writer_bodies(res):
+    """{unit}: the units of a build that carry an `.fnvnx.export` record (contract/exporthdr/include/fnvnx_export.h) whose import name is a hive-writing API: the import
+    implementations of the writers. Exempt from the writer rule by the record, never by a name."""
+    out = set()
+    for o in res["objects"]:
+        recs = exportgen.records(o["object"])
+        if any(n in hive.WRITERS for _, n, _, _ in recs):
+            out.add(o["unit"])
+    return out
+
+
 def root_items(root, rec, res, decl, repo, cache):
     if set(decl) != IN_KEYS or decl["format"] != "fnvnx-registry-in/1":
         raise ValueError("%s/registry.in.json: need exactly the keys %s and format fnvnx-registry-in/1" % (root, sorted(IN_KEYS)))
     def rp(ref):
         return recipe.resolve_input(root, ref, repo, cache, rec)[0]
     sites, declared, seed = (gate_imports.read(rp(decl[k])) for k in ("sites", "declared", "seed"))
-    return hive.judge(sites, declared, seed, calls_of(res), decl["seed_unit"])
+    return hive.judge(sites, declared, seed, calls_of(res), decl["seed_unit"], writer_bodies(res))
 
 
 def judge_root(root, repo, cache, admit, bad):
@@ -118,7 +133,7 @@ def main():
         if tmp and not os.environ.get("GATE_KEEP"):
             shutil.rmtree(tmp, ignore_errors=True)
     status = "green" if u == c else "red"
-    doc = {"format": "fnvnx-gate/1", "name": "machine", "status": status, "universe": u, "certified": c, "uncertified": ids[:50],
+    doc = {"format": "fnvnx-gate/1", "name": "machine", "status": status, "universe": u, "certified": c, "uncertified": ids,
            "detail": detail}
     out = os.environ["GATE_OUT"]
     with open(os.path.join(out, "machine.json"), "w") as fh:

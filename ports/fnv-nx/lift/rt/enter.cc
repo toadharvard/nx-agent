@@ -25,8 +25,10 @@
 
    The loop in each of them is the non-local-transfer loop of every lifted function (README): while the address the last `ret` popped (c->ra) is not
    the sentinel of this activation, serve it as an entry through the dispatcher. */
+#define FNVL_RA_WRITE 1
 #include "fnvl.h"
 #include "imp.h"
+#include "fnvnx_target.h"
 struct fnvnx_guest_ret { u32 eax, edx; double st0; };
 extern "C" {
 void fnvl_raise_ud(u32 addr);
@@ -54,7 +56,7 @@ static inline void fp_park(void)
     u64 a, b;
     __asm__ volatile("mrs %0, fpcr\n mrs %1, fpsr" : "=r"(a), "=r"(b));
     c->hfpcr = (u32)a; c->hfpsr = (u32)b;
-    a = 0; __asm__ volatile("msr fpcr, %0" :: "r"(a));
+    a = FNVNX_FPCR; __asm__ volatile("msr fpcr, %0" :: "r"(a));
 }
 
 extern "C" u32 fnvl_thread_main(u32 eip, u32 sp, u32 teb)
@@ -91,6 +93,13 @@ extern "C" void fnvl_current_main(u32 *sp, u32 *teb) { struct cpu *p = *fnvl_hos
    - fnvl_invoke_regs_main, fnvnx_guest_invoke_regs: a BRIDGE called from a native body (rt/dispatch.c, tools/bridgegen.py). A native body implements an exe function, so it
      runs under the guest FPCR/FPSR itself and nothing was parked: the entry leaves both registers alone, whatever c->hfpcr/c->hfpsr hold.
    The kind is the entry point, not a state: no flag is read at run time. */
+/* the one non-local transfer of an entry body (imp.h): ra and esp are the target's, then the one non-local exit */
+extern "C" __attribute__((noreturn)) void fnvl_native_transfer(u32 eip, u32 sp) { c->ra = eip; esp = sp; fnvl_native_exit(); }
+/* the raise protocol's resume address (imp.h) */
+extern "C" void fnvl_raise_resume(u32 eip) { c->ra = eip; }
+/* the one non-local exit from native frames (imp.h): the frame on top of c->nf holds the __builtin_setjmp point of the entry that called the native code */
+extern "C" __attribute__((noreturn)) void fnvl_native_exit(void) { __builtin_longjmp((void **)c->nf->jb, 1); }
+
 template <bool FROM_IMPORT>
 static __attribute__((noinline)) void invoke_core(u32 addr, u32 ecxv, u32 edxv, u32 nargs, const u32 *args, u32 kind, struct fnvnx_guest_ret *out)
 {
@@ -106,7 +115,7 @@ static __attribute__((noinline)) void invoke_core(u32 addr, u32 ecxv, u32 edxv, 
         u32 t = c->ra; REGS(); fnvl_dispatch(t)(); REGS();
         if (esp > sp0) {
             if (c->ra == FNVL_SENT) break;
-            if (c->nf) __builtin_longjmp((void **)c->nf->jb, 1);       /* left to a frame older than this callback: imp.h */
+            if (c->nf) fnvl_native_exit();       /* left to a frame older than this callback: imp.h */
         }
     }
     out->eax = eax; out->edx = edx; out->st0 = 0;

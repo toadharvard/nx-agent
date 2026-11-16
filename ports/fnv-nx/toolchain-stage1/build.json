@@ -1,0 +1,62 @@
+{
+ "format": "fnvnx-recipe/1",
+ "external": [
+  {
+   "name": "gcc-src",
+   "repo": "fnv-nx-build",
+   "ref": "tools/gcc-src-13.3.0",
+   "commit": "f445876db6a60cbbeaabb74496feb3ac4d8dd9c0",
+   "tree_sha256": "f50e0b054a167e54dc26e28a4df50dcd1a263f406264904c8b90083b978d20ea",
+   "at": "/ext/gcc"
+  }
+ ],
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/toolchain/msvcmodel/records.py",
+   "args": [
+    "stage1",
+    "/out/records1.sh",
+    "/in/ports/fnv-nx/verify"
+   ],
+   "inputs": [
+    "ports/fnv-nx/verify",
+    "ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json"
+   ],
+   "outputs": [
+    "records1.sh"
+   ]
+  }
+ ],
+ "run": [
+  {
+   "name": "gcc1",
+   "exec": "/usr/bin/bash",
+   "args": [
+    "/in/1"
+   ],
+   "inputs": [
+    "ports/fnv-nx/toolchain/msvcmodel/stage1.sh",
+    "ports/fnv-nx/toolchain/msvcmodel/msvcmodel.patch",
+    {
+     "stage": "ports/fnv-nx/toolchain-stage1:gen:0",
+     "path": "records1.sh"
+    },
+    {
+     "external": "gcc-src",
+     "path": "gcc-13.3.0.tar.xz"
+    }
+   ],
+   "debs": {"profile": "compiler-build"},
+   "outputs": [],
+   "dirs": [
+    "STAGE1"
+   ],
+   "scratch": [
+    "/scratch"
+   ]
+  }
+ ],
+ "outputs": {
+  "STAGE1": "STAGE1"
+ }
+}

@@ -14,7 +14,8 @@
     }
    ],
    "subject": [
-    "ports/fnv-nx/render/total/gate_d3d9total.py"
+    "ports/fnv-nx/render/total/gate_d3d9total.py",
+    "ports/fnv-nx/render/total/d3d9total/stage.py"
    ]
   }
  }

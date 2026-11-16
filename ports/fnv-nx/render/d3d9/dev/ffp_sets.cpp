@@ -54,11 +54,3 @@ uint32_t nx_ffp_stage_mask(const uint32_t tss[8][33], const uint8_t tex[8]) {
     }
     return m;
 }
-
-uint32_t nx_ffp_ps_pairs(uint32_t mask, uint8_t out[31]) {
-    uint32_t n = 0;
-    out[n++] = FNVNX_DK_PAIR(FNVNX_USAGE_COLOR, 0); out[n++] = FNVNX_DK_PAIR(FNVNX_USAGE_COLOR, 1);
-    for (uint32_t s = 0; s < 8; s++) if (mask >> s & 1) out[n++] = FNVNX_DK_PAIR(FNVNX_USAGE_TEXCOORD, s);
-    out[n++] = FNVNX_DK_PAIR(FNVNX_USAGE_FOG, 0);
-    return n;
-}

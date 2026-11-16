@@ -1,15 +1,17 @@
 """The site predicate (fnvlift/sites.py) agrees with the emitter: for every x87 opcode byte D8..DF and every ModRM byte (disp-free memory forms and register forms) the lifter emits a `.fnvl.fsw` record
 (FSW_ST16 / FSW_AX / FNSTENV / FNSAVE) iff sites.site says status-word instruction, with the same form, and for every locked-instruction shape iff `lock_state` says locked (LK_BEGIN ... lk_commit).
     sites_test.py"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys
 LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, LIFT)
 import capstone
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; _inputs.configure()
-import fnvlift as L
-from fnvlift import core, sites
-from fnvlift.core import Unsupported
-from fnvlift.image import Image
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import fnvnx.lift.fnvlift.tests._inputs as _inputs; _inputs.configure()
+import fnvnx.lift.fnvlift as L
+from fnvnx.lift.fnvlift import core, sites
+from fnvnx.lift.fnvlift.core import Unsupported
+from fnvnx.lift.fnvlift.image import Image
 
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
 

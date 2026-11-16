@@ -17,7 +17,9 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import recipe  # noqa: E402
 
 fails = 0
 T = "ports/fnv-nx/"
@@ -43,6 +45,9 @@ def w(repo, rel, text):
 def toy_tree(self, tmp, name, pin):
     """_deb_tree of the toy package: /bin -> usr/bin (a top-level link, like base-files), /usr/bin/busybox and /usr/bin/sh -> busybox, /etc (a second top-level dir)."""
     d = os.path.join(tmp, "deb-" + name)
+    if name != "toybb":   # the machine's layout deb (envcheck.RUN_LAYOUT_DEB, named by every step) ships nothing here: the toy package carries the layout
+        os.makedirs(d)
+        return None
     os.makedirs(os.path.join(d, "usr/bin"))
     shutil.copy(shutil.which("busybox"), os.path.join(d, "usr/bin/busybox"))
     for a in ("sh", "cp", "mkdir", "echo", "cat", "ls", "sleep"):
@@ -53,7 +58,7 @@ def toy_tree(self, tmp, name, pin):
     return None
 
 
-recipe.deb_pins = lambda: {"toybb": {"version": "1", "sha256": "0" * 64}}
+recipe.deb_pins = lambda: {"toybb": {"version": "1", "sha256": "0" * 64}, "base-files": {"version": "1", "sha256": "1" * 64}}
 recipe.Job._deb_tree = toy_tree
 recipe.env_blocked = lambda repo: None   # this machine's pinned packages are not the point of the test
 

@@ -8,6 +8,7 @@
  * the input stream (S7) injects key state through fnvnx_set_key_state, the renderer (S6) sets the display size.
  * Locking: g_ui_lock guards the tree, is never held across a window procedure call and is not recursive; the *_l
  * helpers expect it held. */
+#include <fnvnx_export.h>
 #include "window_int.h"
 #include "font_faces.h"
 #include "fnvnx_boundary.h"
@@ -310,6 +311,7 @@ extern "C" ATOM RegisterClassA(const WNDCLASSA *wc)
         SetLastError(err);
     return a;
 }
+FNVNX_EXPORT("user32.dll", "RegisterClassA", RegisterClassA, "func");
 
 extern "C" BOOL UnregisterClassA(LPCSTR n, HINSTANCE inst)
 {
@@ -335,6 +337,7 @@ extern "C" BOOL UnregisterClassA(LPCSTR n, HINSTANCE inst)
         SetLastError(err);
     return !err;
 }
+FNVNX_EXPORT("user32.dll", "UnregisterClassA", UnregisterClassA, "func");
 
 /* GetClassLong / SetClassLong: non-negative indices address the class extra bytes, the negative ones the fields */
 static DWORD class_long(HWND h, int idx, bool set, LONG v)
@@ -381,7 +384,9 @@ static DWORD class_long(HWND h, int idx, bool set, LONG v)
     return (DWORD)old;
 }
 extern "C" DWORD GetClassLongA(HWND h, int idx) { return class_long(h, idx, false, 0); }
+FNVNX_EXPORT("user32.dll", "GetClassLongA", GetClassLongA, "func");
 extern "C" DWORD SetClassLongA(HWND h, int idx, LONG v) { return class_long(h, idx, true, v); }
+FNVNX_EXPORT("user32.dll", "SetClassLongA", SetClassLongA, "func");
 
 /* ---- geometry: the non-client rule (AdjustWindowRectEx and the client rectangle are both this) */
 struct nc_t { int l, t, r, b; };
@@ -820,6 +825,7 @@ extern "C" HWND SetFocus(HWND h)
     os_unlock(&g_ui_lock);
     return got ? (HWND)old : NULL;
 }
+FNVNX_EXPORT("user32.dll", "SetFocus", SetFocus, "func");
 extern "C" HWND GetFocus(void)
 {
     os_lock(&g_ui_lock);
@@ -827,6 +833,7 @@ extern "C" HWND GetFocus(void)
     os_unlock(&g_ui_lock);
     return h;
 }
+FNVNX_EXPORT("user32.dll", "GetFocus", GetFocus, "func");
 
 /* ---- activation */
 static void activate(window *w)   /* w is a top-level window */
@@ -1093,6 +1100,7 @@ extern "C" HWND CreateWindowExA(DWORD ex, LPCSTR cls, LPCSTR title, DWORD style,
         set_pos(win, NULL, 0, 0, 0, 0, P_SHOWWINDOW | P_NOZORDER | P_NOMOVE | P_NOSIZE | P_FORCE | P_CREATE, -1);
     return hw;
 }
+FNVNX_EXPORT("user32.dll", "CreateWindowExA", CreateWindowExA, "func");
 
 /* destroys w: owned windows, deactivation, hide, WM_DESTROY, the children the same way, WM_NCDESTROY */
 static void destroy_rec(window *w, bool skip_destroy)
@@ -1180,8 +1188,10 @@ extern "C" BOOL DestroyWindow(HWND h)
     destroy_rec(w, false);
     return TRUE;
 }
+FNVNX_EXPORT("user32.dll", "DestroyWindow", DestroyWindow, "func");
 
 extern "C" BOOL IsWindow(HWND h) { return wnd(h) != NULL; }
+FNVNX_EXPORT("user32.dll", "IsWindow", IsWindow, "func");
 
 extern "C" BOOL IsWindowVisible(HWND h)
 {
@@ -1195,11 +1205,13 @@ extern "C" BOOL IsWindowVisible(HWND h)
     os_unlock(&g_ui_lock);
     return v;
 }
+FNVNX_EXPORT("user32.dll", "IsWindowVisible", IsWindowVisible, "func");
 extern "C" BOOL IsIconic(HWND h)
 {
     window *w = wnd_e(h);
     return w && (w->style & S_MINIMIZE) != 0;
 }
+FNVNX_EXPORT("user32.dll", "IsIconic", IsIconic, "func");
 extern "C" DWORD GetWindowThreadProcessId(HWND h, LPDWORD pid)
 {
     window *w = wnd_e(h);
@@ -1209,6 +1221,7 @@ extern "C" DWORD GetWindowThreadProcessId(HWND h, LPDWORD pid)
         *pid = GetCurrentProcessId();
     return w == &g_desk ? GetCurrentThreadId() : w->tid;
 }
+FNVNX_EXPORT("user32.dll", "GetWindowThreadProcessId", GetWindowThreadProcessId, "func");
 
 /* ---- tree queries */
 extern "C" HWND GetWindow(HWND h, UINT cmd)
@@ -1238,6 +1251,7 @@ extern "C" HWND GetWindow(HWND h, UINT cmd)
         SetLastError(err);
     return (HWND)r;
 }
+FNVNX_EXPORT("user32.dll", "GetWindow", GetWindow, "func");
 extern "C" HWND GetTopWindow(HWND h)
 {
     os_lock(&g_ui_lock);
@@ -1249,6 +1263,7 @@ extern "C" HWND GetTopWindow(HWND h)
         SetLastError(1400);
     return r;
 }
+FNVNX_EXPORT("user32.dll", "GetTopWindow", GetTopWindow, "func");
 static void collect_l(window *w, HWND *out, int *n)
 {
     for (window *c = w->first; c; c = c->next) {
@@ -1289,6 +1304,7 @@ extern "C" BOOL EnumChildWindows(HWND h, WNDENUMPROC f, LPARAM l)
     free(a);
     return r;
 }
+FNVNX_EXPORT("user32.dll", "EnumChildWindows", EnumChildWindows, "func");
 extern "C" HWND FindWindowA(LPCSTR cls, LPCSTR title)
 {
     os_lock(&g_ui_lock);
@@ -1305,6 +1321,7 @@ extern "C" HWND FindWindowA(LPCSTR cls, LPCSTR title)
         SetLastError(1407);
     return r;
 }
+FNVNX_EXPORT("user32.dll", "FindWindowA", FindWindowA, "func");
 
 /* ---- DefWindowProc: ONE table, message -> rule. Source of each rule: MSDN's default action for the message and the
  * reference's default_window_proc (win32u defwnd.c, "ref"). A message that has no documented default action is not in the
@@ -2137,6 +2154,7 @@ extern "C" LRESULT DefWindowProcA(HWND h, UINT m, WPARAM w, LPARAM l)
     window *win = wnd(h);
     return win ? def_dispatch(win, h, m, w, l) : 0;
 }
+FNVNX_EXPORT("user32.dll", "DefWindowProcA", DefWindowProcA, "func");
 
 extern "C" BOOL ShowWindow(HWND h, int cmd)
 {
@@ -2149,6 +2167,7 @@ extern "C" BOOL ShowWindow(HWND h, int cmd)
     }
     return show_impl(w, cmd, false);
 }
+FNVNX_EXPORT("user32.dll", "ShowWindow", ShowWindow, "func");
 /* keep_vis: change the state only, leaving the window's visibility as it is (creation of a hidden window) */
 static BOOL show_impl(window *w, int cmd, bool keep_vis)
 {
@@ -2226,6 +2245,7 @@ extern "C" BOOL UpdateWindow(HWND h)
         SendMessageA(h, M_PAINT, 0, 0);   /* DefWindowProc validates; a procedure that does not leaves the region */
     return TRUE;
 }
+FNVNX_EXPORT("user32.dll", "UpdateWindow", UpdateWindow, "func");
 extern "C" BOOL SetForegroundWindow(HWND h)
 {
     window *w = wnd_e(h);
@@ -2242,8 +2262,11 @@ extern "C" BOOL SetForegroundWindow(HWND h)
     activate(w);
     return TRUE;
 }
+FNVNX_EXPORT("user32.dll", "SetForegroundWindow", SetForegroundWindow, "func");
 extern "C" HWND GetForegroundWindow(void) { os_lock(&g_ui_lock); HWND h = (HWND)g_active; os_unlock(&g_ui_lock); return h; }
+FNVNX_EXPORT("user32.dll", "GetForegroundWindow", GetForegroundWindow, "func");
 extern "C" HWND GetActiveWindow(void) { return GetForegroundWindow(); }
+FNVNX_EXPORT("user32.dll", "GetActiveWindow", GetActiveWindow, "func");
 /* MSDN GetLastActivePopup: for an unowned top-level window the owned popup that was most recently active (activation is
  * recorded in note_active_l); hwnd itself when it was the last active, owns no popup, is a child or is owned. A window
  * that is not one: NULL with ERROR_INVALID_WINDOW_HANDLE. */
@@ -2257,6 +2280,7 @@ extern "C" HWND GetLastActivePopup(HWND h)
     os_unlock(&g_ui_lock);
     return (HWND)r;
 }
+FNVNX_EXPORT("user32.dll", "GetLastActivePopup", GetLastActivePopup, "func");
 
 extern "C" BOOL SetWindowTextA(HWND h, LPCSTR t)
 {
@@ -2264,6 +2288,7 @@ extern "C" BOOL SetWindowTextA(HWND h, LPCSTR t)
         return FALSE;
     return SendMessageA(h, 0x000C, 0, (LPARAM)(uintptr_t)(t ? t : "")) != 0;   /* WM_SETTEXT */
 }
+FNVNX_EXPORT("user32.dll", "SetWindowTextA", SetWindowTextA, "func");
 extern "C" int GetWindowTextA(HWND h, LPSTR out, int n)
 {
     if (!wnd_e(h))
@@ -2274,6 +2299,7 @@ extern "C" int GetWindowTextA(HWND h, LPSTR out, int n)
     SetLastError(0);
     return (int)SendMessageA(h, 0x000D, (WPARAM)n, (LPARAM)(uintptr_t)out);   /* WM_GETTEXT: the procedure answers */
 }
+FNVNX_EXPORT("user32.dll", "GetWindowTextA", GetWindowTextA, "func");
 extern "C" int GetClassNameA(HWND h, LPSTR out, int n)
 {
     window *w = wnd_e(h);
@@ -2288,6 +2314,7 @@ extern "C" int GetClassNameA(HWND h, LPSTR out, int n)
     out[k] = 0;
     return (int)k;
 }
+FNVNX_EXPORT("user32.dll", "GetClassNameA", GetClassNameA, "func");
 
 /* SetParent through GWL_HWNDPARENT: a child keeps its place inside the new parent's client area; a top-level window
  * gets a new owner. Returns the previous parent/owner. */
@@ -2351,6 +2378,7 @@ extern "C" LONG GetWindowLongA(HWND h, int idx)
         SetLastError(err);
     return r;
 }
+FNVNX_EXPORT("user32.dll", "GetWindowLongA", GetWindowLongA, "func");
 
 extern "C" LONG SetWindowLongA(HWND h, int idx, LONG v)
 {
@@ -2400,6 +2428,7 @@ extern "C" LONG SetWindowLongA(HWND h, int idx, LONG v)
         SetLastError(err);
     return old;
 }
+FNVNX_EXPORT("user32.dll", "SetWindowLongA", SetWindowLongA, "func");
 
 extern "C" BOOL AdjustWindowRectEx(LPRECT r, DWORD s, BOOL m, DWORD e)
 {
@@ -2408,7 +2437,9 @@ extern "C" BOOL AdjustWindowRectEx(LPRECT r, DWORD s, BOOL m, DWORD e)
     r->left -= n.l; r->top -= n.t; r->right += n.r; r->bottom += n.b;
     return TRUE;
 }
+FNVNX_EXPORT("user32.dll", "AdjustWindowRectEx", AdjustWindowRectEx, "func");
 extern "C" BOOL AdjustWindowRect(LPRECT r, DWORD s, BOOL m) { return AdjustWindowRectEx(r, s, m, 0); }
+FNVNX_EXPORT("user32.dll", "AdjustWindowRect", AdjustWindowRect, "func");
 
 extern "C" BOOL GetClientRect(HWND h, LPRECT r)
 {
@@ -2424,6 +2455,7 @@ extern "C" BOOL GetClientRect(HWND h, LPRECT r)
     r->bottom = c.bottom - c.top;
     return TRUE;
 }
+FNVNX_EXPORT("user32.dll", "GetClientRect", GetClientRect, "func");
 extern "C" BOOL GetWindowRect(HWND h, LPRECT r)
 {
     window *w = wnd_e(h);
@@ -2435,6 +2467,7 @@ extern "C" BOOL GetWindowRect(HWND h, LPRECT r)
     os_unlock(&g_ui_lock);
     return TRUE;
 }
+FNVNX_EXPORT("user32.dll", "GetWindowRect", GetWindowRect, "func");
 extern "C" BOOL SetWindowPos(HWND h, HWND a, int x, int y, int cx, int cy, UINT f)
 {
     window *w = wnd_e(h);
@@ -2452,6 +2485,7 @@ extern "C" BOOL SetWindowPos(HWND h, HWND a, int x, int y, int cx, int cy, UINT 
     }
     return set_pos(w, a, x, y, cx, cy, f, -1);
 }
+FNVNX_EXPORT("user32.dll", "SetWindowPos", SetWindowPos, "func");
 static BOOL map_point(HWND h, LPPOINT p, int sign)
 {
     window *w = wnd_e(h);
@@ -2466,7 +2500,9 @@ static BOOL map_point(HWND h, LPPOINT p, int sign)
     return TRUE;
 }
 extern "C" BOOL ClientToScreen(HWND h, LPPOINT p) { return map_point(h, p, 1); }
+FNVNX_EXPORT("user32.dll", "ClientToScreen", ClientToScreen, "func");
 extern "C" BOOL ScreenToClient(HWND h, LPPOINT p) { return map_point(h, p, -1); }
+FNVNX_EXPORT("user32.dll", "ScreenToClient", ScreenToClient, "func");
 
 static int g_swap_buttons;
 
@@ -2503,12 +2539,15 @@ extern "C" HWND SetCapture(HWND h)
         return NULL;
     return capture_swap(w);
 }
+FNVNX_EXPORT("user32.dll", "SetCapture", SetCapture, "func");
 extern "C" BOOL ReleaseCapture(void)
 {
     capture_swap(NULL);
     return TRUE;
 }
+FNVNX_EXPORT("user32.dll", "ReleaseCapture", ReleaseCapture, "func");
 extern "C" HWND GetCapture(void) { return fnwin_capture(); }
+FNVNX_EXPORT("user32.dll", "GetCapture", GetCapture, "func");
 /* g_pressed: went down since GetAsyncKeyState last read it (its low bit); g_toggle: GetKeyState's toggle bit */
 static volatile uint8_t g_pressed[256], g_toggle[256];
 static void set_key(int vk, int down)
@@ -2543,13 +2582,16 @@ extern "C" short GetAsyncKeyState(int vk)
     }
     return r;
 }
+FNVNX_EXPORT("user32.dll", "GetAsyncKeyState", GetAsyncKeyState, "func");
 extern "C" short GetKeyState(int vk)
 {
     if (vk < 0 || vk >= 256)
         return 0;
     return (short)((g_keys[vk] ? 0x8000 : 0) | g_toggle[vk]);
 }
+FNVNX_EXPORT("user32.dll", "GetKeyState", GetKeyState, "func");
 extern "C" BOOL SwapMouseButton(BOOL s) { BOOL old = g_swap_buttons != 0; g_swap_buttons = s != 0; return old; }
+FNVNX_EXPORT("user32.dll", "SwapMouseButton", SwapMouseButton, "func");
 
 /* GetSystemMetrics, EnumDisplayDevicesA, ChangeDisplaySettingsA: platform/win32/display.cpp */
 /* InitCommonControlsEx, ImageList_*: platform/win32/resource.cpp */
@@ -2969,3 +3011,4 @@ extern "C" int MessageBoxA(HWND owner, LPCSTR text, LPCSTR caption, UINT type)
     if (owner && wnd(owner)) SetForegroundWindow(owner);
     return dlg ? m.result : 0;
 }
+FNVNX_EXPORT("user32.dll", "MessageBoxA", MessageBoxA, "func");

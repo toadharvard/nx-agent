@@ -1,4 +1,6 @@
 """an access through GS follows the record's null_seg_access row (x86sys.NULL_SEG): a fault at the instruction while the GS selector is null; lea has no access; the initial gs is read from the record."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 import unittest
@@ -7,10 +9,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
 sys.path.insert(0, os.path.join(HERE, '..'))
 sys.path.insert(0, HERE)
-import declared_x86sys
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys
 declared_x86sys.configure()
-from fnvlift import dsl, faults, inputs, x86sys
-from proof import symform
+from fnvnx.lift.fnvlift import dsl, faults, inputs, x86sys
+from fnvnx.lift.proof import symform
 
 
 def form(h): return symform.symbuild(h + '/0.0.0.0').form
@@ -77,8 +79,8 @@ class CodeStoreSpec(unittest.TestCase):
 
     def test_prove_codestore_both_halves_and_a_mutated_form(self):
         import copy
-        import sysspec_gap
-        import sysspec_store
+        import fnvnx.lift.proof.sysspec_gap as sysspec_gap
+        import fnvnx.lift.proof.sysspec_store as sysspec_store
         rec = x86sys.REC
         for h in ('8900', '2e8900', '648900'):
             self.assertEqual(sysspec_store.prove_codestore(form(h), sysspec_gap.decode(h + '/0.0.0.0'), rec), 'proved', h)
@@ -86,8 +88,8 @@ class CodeStoreSpec(unittest.TestCase):
         self.assertEqual(sysspec_store.prove_codestore(form('8900'), sysspec_gap.decode('8900/0.0.0.0'), r2), 'differs')
 
     def test_a_missing_segment_is_reported(self):
-        import sysspec_gap
-        import sysspec_store
+        import fnvnx.lift.proof.sysspec_gap as sysspec_gap
+        import fnvnx.lift.proof.sysspec_store as sysspec_store
         f = form('8b00')       # a load: no code-store fault
         self.assertEqual(sysspec_store.prove_codestore(f, sysspec_gap.decode('8900/0.0.0.0')), 'no code-segment store fault')
 

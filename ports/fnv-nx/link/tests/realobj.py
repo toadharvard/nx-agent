@@ -5,6 +5,9 @@ plugins = recipe.PLUGIN_SOURCES / PLUGIN_ARGS), exactly as verify/tests/test_plu
     objects(names)  -> {fixture stem: path of the produced .o}    (built once per process; the store is $GATE_CACHE, else a scratch store)
 The external compiler is fetched by the pin (commit + tree hash) from recipe.ARTIFACTS; when it cannot be fetched this raises, never skips.
 """
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import atexit
 import json
 import os
@@ -16,9 +19,10 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.dirname(os.path.dirname(HERE))                    # ports/fnv-nx
 REAL = os.path.dirname(os.path.dirname(TOOL))                    # checkout root
-sys.path.insert(0, os.path.join(TOOL, 'verify'))
-import cas  # noqa: E402
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import scratch  # noqa: E402
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 T = 'ports/fnv-nx/'
 ROOT = T + 'toy'
@@ -56,7 +60,7 @@ def _store():
         os.makedirs(d, exist_ok=True)
         return d
     if 'store' not in _cache:
-        _cache['store'] = _mk('realobj-store-')
+        _cache['store'] = scratch.store('realobj-store-')
     return _cache['store']
 
 

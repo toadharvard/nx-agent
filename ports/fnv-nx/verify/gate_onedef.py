@@ -28,9 +28,11 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import gate_build  # noqa: E402
-import gate_linkstrict as ls  # noqa: E402
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import gate_linkstrict as ls  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 HDR_EXT = (".h", ".hh", ".hpp", ".hxx", ".inc", ".inl")
 
@@ -139,6 +141,8 @@ def main():
             if not (isinstance(rec, dict) and rec.get("link")):
                 continue
             res, _ = gate_build.ensure(spec, cache, repo)     # the image's link members are derived by the build (ld's archive selection, recipe.link_candidates), never written
+            if res["status"] == "red":      # a red link has no derived members to judge (a strong duplicate makes the member selection itself red): the image is red, so is this gate
+                raise recipe.RecipeError(["%s: build red (stage %s)" % (spec, res["failure"]["stage"])])
             group = [spec] + [x["root"] for x in res.get("link_roots", [])]
             ii, ifs = judge_image(spec, image_parts(spec, group, cache, repo))
             items, finds = items + ii, finds + ifs
@@ -161,7 +165,7 @@ def main():
     else:
         status, detail = "green", "%d items: one definition, one source" % len(items)
     res = {"format": "fnvnx-gate/1", "name": "onedef", "status": status, "universe": len(items), "certified": cert,
-           "uncertified": sorted("%s:%s" % x for x in bad)[:50], "detail": detail}
+           "uncertified": sorted("%s:%s" % x for x in bad), "detail": detail}
     os.makedirs(os.environ["GATE_OUT"], exist_ok=True)
     with open(os.path.join(os.environ["GATE_OUT"], "onedef.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)

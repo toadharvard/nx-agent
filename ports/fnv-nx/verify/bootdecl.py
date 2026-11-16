@@ -100,9 +100,9 @@ def verify(pin, src):
             have.add(pin["path"] + "/" + os.path.relpath(full, base).replace(os.sep, "/"))
         dn[:] = [d for d in dn if not os.path.islink(os.path.join(dp, d))]
     if have - set(want):
-        raise InputError("%s: files not in %s: %s" % (pin["name"], pin["sums"], ", ".join(sorted(have - set(want))[:5])))
+        raise InputError("%s: files not in %s: %s" % (pin["name"], pin["sums"], ", ".join(sorted(have - set(want)))))
     if set(want) - have:
-        raise InputError("%s: files of %s missing: %s" % (pin["name"], pin["sums"], ", ".join(sorted(set(want) - have)[:5])))
+        raise InputError("%s: files of %s missing: %s" % (pin["name"], pin["sums"], ", ".join(sorted(set(want) - have))))
     for n in sorted(want):
         if _sha(os.path.join(src, n)) != want[n]:
             raise InputError("%s: %s: sha256 differs from %s" % (pin["name"], n, pin["sums"]))

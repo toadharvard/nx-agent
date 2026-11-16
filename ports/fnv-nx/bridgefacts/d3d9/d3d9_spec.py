@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
-"""d3d9_spec.py: builds d3d9_spec.json, the one table that describes every method of every D3D9 COM interface (RD1).
-    python3 -I d3d9_spec.py            write d3d9_spec.json next to this script
-    python3 -I d3d9_spec.py --stdout   print it (tests/l6/test_spec.py compares the two)
+"""d3d9_spec.py: builds the D3D9 interface table, the one table that describes every method of every D3D9 COM interface (RD1), and the bridge rows of d3d9.dll.
+    python3 -I d3d9_spec.py OUT_SPEC OUT_ROWS INCDIR   the stage of the tool root bridgefacts: outputs D9_SPEC and D9_ROWS (INCDIR = shim/include); no file of the table is tracked
+    python3 -I d3d9_spec.py --stdout INCDIR          print the table
 Inputs: shim/include/d3d9*.h (method order, types, structs, enums, constants) + d3d9_rules.py / d3d9_cls.py / d3d9_tables.py /
 d3d9_exports.py (the hand tables). Unknown types or invalid rules abort the run: nothing is guessed."""
 import json, os, re, sys
-sys.dont_write_bytecode = True
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
 import d3d9_cls as C, d3d9_exports as EX, d3d9_expr as X, d3d9_rules as R, d3d9_structs as ST, d3d9_tables as T   # noqa: E402
 
 IUNK = [("HRESULT", "QueryInterface", "REFIID riid, void** ppvObj"), ("ULONG", "AddRef", ""), ("ULONG", "Release", "")]
@@ -17,18 +14,18 @@ IUNK = [("HRESULT", "QueryInterface", "REFIID riid, void** ppvObj"), ("ULONG", "
 def die(msg): raise SystemExit("d3d9_spec: " + msg)
 
 
-def parse_headers():
-    text = open(os.path.join(ST.INC, "d3d9.h")).read()
+def parse_headers(inc):
+    text = open(os.path.join(inc, "d3d9.h")).read()
     ifs = {"IUnknown": ("", [(i, r, n, a) for i, (r, n, a) in enumerate(IUNK)])}
     for m in re.finditer(r"struct (IDirect3D\w+)\s*:\s*public (\w+)\s*\{(.*?)\n\};", text, re.S):
         name, base, body = m.groups()
-        ms = [(int(x.group(1)), x.group(2).strip(), x.group(3), " ".join(x.group(4).split()))
+        ms = [(int(x[1]), x[2].strip(), x[3], " ".join(x[4].split()))
               for x in re.finditer(r"/\*\s*(\d+)\s*\*/\s*FNVNX_D3D_METHOD\(([^,]+),\s*(\w+)\)\((.*?)\)\s*=\s*0;", body, re.S)]
         ifs[name] = (base, ms)
     iids = {}
     for m in re.finditer(r"FNVNX_D3D_GUID\(IID_(\w+),\s*(0x\w+),\s*(0x\w+),\s*(0x\w+),\s*\{([^}]*)\}\)", text):
-        b = [int(x, 16) for x in m.group(5).split(",")]
-        iids[m.group(1)] = "%08x-%04x-%04x-%02x%02x-%s" % (int(m.group(2), 16), int(m.group(3), 16), int(m.group(4), 16), b[0], b[1], "".join("%02x" % x for x in b[2:]))
+        b = [int(x, 16) for x in m[5].split(",")]
+        iids[m[1]] = "%08x-%04x-%04x-%02x%02x-%s" % (int(m[2], 16), int(m[3], 16), int(m[4], 16), b[0], b[1], "".join("%02x" % x for x in b[2:]))
     iids["IUnknown"] = "00000000-0000-0000-c000-000000000046"
     return ifs, iids
 
@@ -57,19 +54,19 @@ def split_params(args, mname):
     out = []
     for i, p in enumerate(parts):
         m = re.match(r"^(.*?)(\w+)$", p)
-        if m and m.group(1).strip() not in ("", "const", "struct"): ty, nm = m.group(1).strip(), m.group(2)
+        if m and m[1].strip() not in ("", "const", "struct"): ty, nm = m[1].strip(), m[2]
         else: ty, nm = p, (fix[i] if i < len(fix) and fix[i] else f"arg{i}")
         out.append((" ".join(ty.split()), nm))
     return out
 
 
 class Gen:
-    def __init__(self):
-        self.db = ST.load()
+    def __init__(self, inc):
+        self.db = ST.load(inc)
         self.structs = ST.layout(self.db)
         self.enums = self.db["enums"]
         self.consts = self.db["consts"]
-        self.ifs, self.iids = parse_headers()
+        self.ifs, self.iids = parse_headers(inc)
         self.flat = flatten(self.ifs)
         self.used_consts = set()
 
@@ -170,7 +167,7 @@ class Gen:
             hit = hit or ("det", None)
             m["ret_cls"] = hit[0]
             if hit[1]: m["ret_why"] = hit[1]
-        eff = [x.group(0) for t in T.TAINT if t[0] == name for x in re.finditer(r"(pix|copy)\([^)]*\)", t[1])]
+        eff = [x[0] for t in T.TAINT if t[0] == name for x in re.finditer(r"(pix|copy)\([^)]*\)", t[1])]
         if eff: m["effects"] = eff
         return m
 
@@ -225,6 +222,7 @@ class Gen:
         ifaces = {n: {"base": self.ifs[n][0] or None, "slots": len(self.flat[n]), "iid": self.iids.get(n)}
                   for n in self.flat}
         return {"schema": 1, "interfaces": ifaces, "methods": methods, "structs": self.structs, "enums": self.enums,
+                "enum_values": {e: {n: self.consts[n] for n in ns} for e, ns in sorted(self.enums.items())},
                 "flags": dict(sorted(ST.FAMILIES.items())), "tables": t, "exports": EX.exports()}
 
 
@@ -247,6 +245,13 @@ def render(spec):
 
 
 if __name__ == "__main__":
-    out = render(Gen().build())
+    a = [x for x in sys.argv[1:] if x != "--stdout"]
+    if "--stdout" in sys.argv and len(a) == 1: inc = a[0]
+    elif "--stdout" not in sys.argv and len(a) == 3: inc = a[2]
+    else: die("usage: d3d9_spec.py OUT_SPEC OUT_ROWS INCDIR | --stdout INCDIR")
+    out = render(Gen(inc).build())
     if "--stdout" in sys.argv: sys.stdout.buffer.write(out)
-    else: open(os.path.join(HERE, "d3d9_spec.json"), "wb").write(out)
+    else:
+        import d9rows
+        open(a[0], "wb").write(out)
+        open(a[1], "w").write("".join("\t".join(r) + "\n" for r in d9rows.rows(json.loads(out))))

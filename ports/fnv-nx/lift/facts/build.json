@@ -10,10 +10,6 @@
    "output": "IMG"
   },
   {
-   "root": "ports/fnv-nx/lift/factsimg/exe",
-   "output": "FUNCS"
-  },
-  {
    "root": "ports/fnv-nx/lift/factsimg/atimgpud",
    "output": "IMG"
   },
@@ -52,8 +48,6 @@
    "args": [
     "--table",
     "/uses/ports/fnv-nx/loader/MODULES_TSV",
-    "--funcs",
-    "/uses/ports/fnv-nx/lift/factsimg/exe/FUNCS",
     "--exe",
     "/uses/ports/fnv-nx/lift/factsimg/exe/IMG",
     "--module",

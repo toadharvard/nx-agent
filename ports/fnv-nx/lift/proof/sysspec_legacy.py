@@ -76,6 +76,8 @@ IRETD at CPL 3 (the Operation, PROTECTED-MODE and RETURN-TO-SAME-PRIVILEGE-LEVEL
   Every #GP is the access violation of the declared machine (fault kind AV).  The Form's domain is EFLAGS.NT = 0, CR4.PVI = CR4.VME = 0 and the 32-bit operand; the rows for NT = 1 (task return) and PVI/VME are
   undecided in the record, so the proof is uncertified for them (never proved).
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 
@@ -83,11 +85,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import capstone.x86_const as X  # noqa: E402
 import z3  # noqa: E402
-from fnvlift import dsl  # noqa: E402
-from fnvlift.faults import BYNAME as FT  # noqa: E402
-from proof import intud, shape, symform, x86sys  # noqa: E402
-import sysspec_gap as G  # noqa: E402
-from sysspec_text import LEGACY as TEXT, LR  # noqa: E402
+from fnvnx.lift.fnvlift import dsl  # noqa: E402
+from fnvnx.lift.fnvlift.faults import BYNAME as FT  # noqa: E402
+from fnvnx.lift.proof import intud, shape, symform, x86sys  # noqa: E402
+import fnvnx.lift.proof.sysspec_gap as G  # noqa: E402
+from fnvnx.lift.proof.sysspec_text import LEGACY as TEXT, LR  # noqa: E402
 
 V = G.V
 LEGACY_PFX = (0x66, 0x67, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65, 0xf0, 0xf2, 0xf3)
@@ -201,7 +203,7 @@ def check_sldt(ins, f, fields, rec):
 
 
 def check_lseg(ins, f, fields, rec):
-    import sysspec_seg
+    import fnvnx.lift.proof.sysspec_seg as sysspec_seg
     reg = ins.mnemonic.split()[-1][1:]; w = 16 if ins.prefix[2] == 0x66 else 32
     if rec['mov_to_sreg']['undecided']['selectors']: return 'FAILED(dsl)', TEXT['noundecided']      # the spec says the record decides nothing: the Form raises UndecidedRow before
     a = G.ea(ins, fields); m = dsl.mem_array(); nb = w // 8
@@ -217,7 +219,7 @@ def check_lseg(ins, f, fields, rec):
 
 
 def check_retf(ins, f, fields, rec):
-    import sysspec_far
+    import fnvnx.lift.proof.sysspec_far as sysspec_far
     w = 16 if ins.prefix[2] == 0x66 else 32; nb = w // 8
     r = sysspec_far.rows(rec); cs = x86sys.get(rec, 'selectors', 'cs'); m = dsl.mem_array(); esp = V('esp')
     ld = lambda a, n: z3.Concat(*[z3.Select(m, a + i) for i in reversed(range(n))])
@@ -344,7 +346,7 @@ def check_larlsl(ins, f, fields, rec):
         if keep != 0xffffffff and not same(z3.Extract(19, 16, got), z3.BitVecVal(0, 4)): d.append('DEF0')
     if not same(dsl.to_smt(f.eip), V('eip') + ins.size): d.append('eip')
     if d: return 'FAILED(dsl)', TEXT['diff'] % ','.join(d)
-    import sysspec_far
+    import fnvnx.lift.proof.sysspec_far as sysspec_far
     return 'uncertified', TEXT['larlsl'] % (row.upper(), len(sysspec_far.rows(rec)['undecided']))
 
 
@@ -397,7 +399,7 @@ def check_iret(ins, f, fields, rec):
     wflo = (V('flo') & ~rest) | (ef & rest)
     if f.flo is None or not same(dsl.to_smt(f.flo), wflo): d.append('eflags')
     if d: return 'FAILED(dsl)', TEXT['diff'] % ','.join(d)
-    import sysspec_far
+    import fnvnx.lift.proof.sysspec_far as sysspec_far
     return 'uncertified', TEXT['iret'] % len(sysspec_far.rows(rec)['undecided'])
 
 

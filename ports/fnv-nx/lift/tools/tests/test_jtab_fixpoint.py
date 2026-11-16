@@ -2,9 +2,11 @@
 """The jump-table resolver's worklist terminates: St equality is semantic (the alias PARTITION, not its fresh class labels), so the join of a converged state with a state it already covers is the same state.
 Defect it pins: joinst / copy mint a new alias class id per call, St.__eq__ compared the ids, and a loop whose body copies a register (`mov ecx, eax`) changed its loop-head state on every pass, so
 resolve never returned (d3dx9_31 site 0x15682f3: one resolve, hours, a 3-entry worklist cycling through one 48-byte range).   test_jtab_fixpoint.py  (exit 0 = pass)"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, random, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from tools import jtab as J
+from fnvnx.lift.tools import jtab as J
 FAIL = []
 def check(n, ok):
     if not ok: FAIL.append(n); print('FAIL', n)

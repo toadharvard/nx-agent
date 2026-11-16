@@ -9,15 +9,17 @@ The record (x86sys.py through fnvlift.x86sys) decides, per vector, what the decl
   int_ring3.other_vectors every other vector: the access violation at the instruction, the error code vector*8+2 of the SDM line above (the record row is read, not restated)
 The shape is the 256 concrete vectors the symbolic byte stands for (a complete case split of a finite field); result `proved` iff every vector is decided and its Form is the row, `uncertified` (naming the first
 undecided row, and the vectors proved) when a vector is undecided, `FAILED(dsl)` on any difference."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import z3  # noqa: E402
-from fnvlift import dsl, faults, x86sys as lx  # noqa: E402
-from proof import shape, symform  # noqa: E402
-from sysspec_text import INT as TEXT  # noqa: E402
+from fnvnx.lift.fnvlift import dsl, faults, x86sys as lx  # noqa: E402
+from fnvnx.lift.proof import shape, symform  # noqa: E402
+from fnvnx.lift.proof.sysspec_text import INT as TEXT  # noqa: E402
 
 
 def claims(key):
@@ -42,14 +44,30 @@ def row(v):
 
 
 def form_ok(v, code):
-    f = symform.symbuild('cd%02x/0.0.0.0' % v).form        # the vector as a concrete byte: a symbolic one has no Form (int_ raises SymbolicBranch)
+    f = symform.symbuild('cd%02x/0.0.0.0' % v).form        # the vector as a concrete byte (the one concrete row)
     if f.regs or f.flags or f.stores or f.flo is not None or len(f.faults) != 1 or f.faults[0][0] != code: return False
     s = z3.Solver(); s.add(dsl.to_smt(f.faults[0][1]) != 1)
     return s.check() == z3.unsat
 
 
+def split_ok(key):
+    """the symbolic Form's select over the 8-bit vector equals the spec's case analysis over the full domain: fault kind = the row of the vector (row(v)), no other effect, and the Form's domain is exactly the vectors that are
+    not excluded (an excluded vector has no Form: it is outside the domain, never an invented row)"""
+    f = symform.symbuild(key).form
+    if f.regs or f.flags or f.stores or f.flo is not None or f.xs: return False
+    imm = z3.BitVec('fld_imm', 8); spec = z3.BitVecVal(0, 8); excl = z3.BoolVal(False)
+    for v in reversed(range(256)):
+        kind, x = row(v)
+        if kind == 'excluded': excl = z3.Or(excl, imm == v)
+        else: spec = z3.If(imm == v, z3.BitVecVal(x, 8), spec)
+    dom = z3.And(*[dsl.to_smt(c) == 1 for c in f.domain]) if f.domain else z3.BoolVal(True)
+    s = z3.Solver(); s.add(z3.Or(z3.And(dom, f.fault_term() != spec), dom != z3.Not(excl)))
+    return s.check() == z3.unsat
+
+
 def check(key):
     proved, bad, undecided = 0, [], []
+    if symform.parse_key(key)[1]['imm'] and not split_ok(key): return 'FAILED(dsl)', TEXT['split']
     for v in vectors(key):
         kind, x = row(v)
         if kind == 'excluded': undecided.append((v, x)); continue

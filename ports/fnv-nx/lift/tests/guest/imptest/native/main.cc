@@ -28,12 +28,13 @@ u32 t_call1(u32 cb, u32 arg) { struct fnvnx_guest_ret r; fnvnx_guest_invoke(cb, 
       /* platform/win32/thread.cpp:642 (declared w32.h:304) on origin/claude/fnv-l5-platform: extern "C" void w32_raise(DWORD, DWORD, DWORD, const ULONG_PTR *), 32-bit words under ILP32 */
 u32 t_boom(u32 x) { u32 a[1] = { x }; w32_raise(0xE0000001u, 0, 1, a); return x + 1; }
 }
-#include "/uses/ports/fnv-nx/lift/tests/guest/imptest/lifted/image.inc"
+#include "image.inc"
+#include "fnvl_entry.h"      /* the entry's type: uint64_t(uint64_t api), crt0's call ABI */
 #define MEM_COMMIT_RESERVE 0x3000u
 #define PAGE_RW 4u
 static void *map(u32 at, u32 size) { return VirtualAlloc((void *)(unsigned long)at, size, MEM_COMMIT_RESERVE, PAGE_RW); }
 
-extern "C" int fnvl_imptest_entry(void) {
+extern "C" uint64_t fnvl_imptest_entry(uint64_t) {
   unsigned char *img = (unsigned char *)map(0x400000u, 0x10000u);
   u32 *teb = (u32 *)map(0x50000000u, 0x1000u);
   void *gstack = map(0x60000000u, 0x20000u);

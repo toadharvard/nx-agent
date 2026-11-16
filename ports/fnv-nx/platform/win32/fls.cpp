@@ -18,8 +18,10 @@
  * takes its value under the lock, releases the lock, then calls). Cells are read by FlsGetValue without the lock;
  * every other access to a cell, and the slot table, is under g_fls_lock. A slot being freed stays reserved (busy)
  * until its last callback ran, so FlsAlloc cannot hand it out and a thread ending meanwhile still finds its callback. */
+#include <fnvnx_export.h>
 #include "w32.h"
 #include "fnvnx_guestfn.h"
+#include "../include/fnvnx_fls.h"
 
 #include <stdlib.h>
 
@@ -58,6 +60,7 @@ extern "C" DWORD FlsAlloc(fls_callback cb)
     SetLastError(ERROR_NOT_ENOUGH_MEMORY);
     return FLS_OUT_OF_INDEXES_;
 }
+FNVNX_EXPORT("kernel32.dll", "FlsAlloc", FlsAlloc, "func");
 
 extern "C" LPVOID FlsGetValue(DWORD i)
 {
@@ -70,6 +73,7 @@ extern "C" LPVOID FlsGetValue(DWORD i)
     struct fls_data *d = t_fls;
     return d ? __atomic_load_n(&d->val[i], __ATOMIC_ACQUIRE) : NULL;
 }
+FNVNX_EXPORT("kernel32.dll", "FlsGetValue", FlsGetValue, "func");
 
 extern "C" BOOL FlsSetValue(DWORD i, LPVOID v)
 {
@@ -101,6 +105,7 @@ extern "C" BOOL FlsSetValue(DWORD i, LPVOID v)
     os_unlock(&g_fls_lock);
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "FlsSetValue", FlsSetValue, "func");
 
 /* the first thread (registration order) holding a value in slot i; the value is taken (cell cleared). NULL: none.
  * Caller holds g_fls_lock. */
@@ -139,6 +144,7 @@ extern "C" BOOL FlsFree(DWORD i)
     os_unlock(&g_fls_lock);
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "FlsFree", FlsFree, "func");
 
 /* The calling thread ends (thread.cpp ExitThread / thread start return, module.cpp ExitProcess): callbacks in ascending
  * index order for its non-NULL values, then its cells are released. */

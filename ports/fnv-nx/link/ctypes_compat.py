@@ -47,7 +47,7 @@ class Parse:
         if not m:
             raise ValueError('expected a word at %d of %r' % (self.i, self.s))
         self.i = m.end()
-        return m.group(0)
+        return m[0]
 
     def tag(self):
         if self.peek() == '-':
@@ -105,7 +105,7 @@ class Parse:
                 if not m:
                     raise ValueError('expected a size at %d of %r' % (self.i, self.s))
                 self.i = m.end()
-                fields.append(m.group(0))
+                fields.append(m[0])
                 self.eat(':')
             return (w, tuple(fields), self.ty())
         if w in ('const', 'volatile', 'restrict', 'atomic') and self.peek() == ':':
@@ -152,8 +152,7 @@ def parse(s):
     return t
 
 
-def compatible(a, b, seen=None):
-    seen = set() if seen is None else seen
+def compatible(a, b):
     if a[0] != b[0]:
         return False
     k = a[0]
@@ -162,15 +161,15 @@ def compatible(a, b, seen=None):
     if k == 'host':
         return a[1] == b[1]
     if k in ('vec', 'complex', 'ref'):
-        return a[1] == b[1] and compatible(a[2], b[2], seen)
+        return a[1] == b[1] and compatible(a[2], b[2])
     if k == 'q':
-        return a[1] == b[1] and compatible(a[2], b[2], seen)
+        return a[1] == b[1] and compatible(a[2], b[2])
     if k in ('ptr', 'entry'):
-        return compatible(a[1], b[1], seen)
+        return compatible(a[1], b[1])
     if k == 'arr':
-        return (a[1] is None or b[1] is None or a[1] == b[1]) and compatible(a[2], b[2], seen)
+        return (a[1] is None or b[1] is None or a[1] == b[1]) and compatible(a[2], b[2])
     if k == 'fn':
-        if not compatible(a[3], b[3], seen):
+        if not compatible(a[3], b[3]):
             return False
         if a[1] is None or b[1] is None:
             ps = b[1] if a[1] is None else a[1]
@@ -178,38 +177,33 @@ def compatible(a, b, seen=None):
                 return True
             va = b[2] if a[1] is None else a[2]
             return not va and all(not (p[0] == 'sc' and p[1] in PROMOTED) for p in ps)
-        return len(a[1]) == len(b[1]) and a[2] == b[2] and all(compatible(x, y, seen) for x, y in zip(a[1], b[1]))
+        return len(a[1]) == len(b[1]) and a[2] == b[2] and all(compatible(x, y) for x, y in zip(a[1], b[1]))
     if k in ('struct', 'union'):
         if a[1] != '-' and b[1] != '-' and a[1] != b[1]:
             return False
         if a[2] is None or b[2] is None:
             return a[1] == b[1] and a[1] != '-'
-        key = (id(a), id(b), a[1], b[1])
-        if key in seen:
-            return True
-        seen.add(key)
-        return len(a[2]) == len(b[2]) and all(x[0] == y[0] and x[2] == y[2] and compatible(x[1], y[1], seen) for x, y in zip(a[2], b[2]))
+        # a parsed type is a finite tree (a recursive reference is an incomplete struct, handled above), so the walk terminates with no memo
+        return len(a[2]) == len(b[2]) and all(x[0] == y[0] and x[2] == y[2] and compatible(x[1], y[1]) for x, y in zip(a[2], b[2]))
     if k == 'enum':
-        return a[1] == b[1] and compatible(a[2], b[2], seen)
+        return a[1] == b[1] and compatible(a[2], b[2])
     raise ValueError('unknown type %r' % (a,))
 
 
-def _decltype_reasons():
-    """the closed set of no-row reasons of `.fnvnx.decltype`, read from where the plugin defines it once (toolchain/layout/decltype_spell.inc, FNVNX_DECLTYPE_REASONS)"""
-    inc = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'toolchain', 'layout', 'decltype_spell.inc')
-    m = re.search(r'#define FNVNX_DECLTYPE_REASONS\(X\)((?: X\(\w+\))+)', open(inc).read())
+def decltype_reasons(inc_text):
+    """the closed set of no-row reasons of `.fnvnx.decltype`, from the text of where the plugin defines it once (toolchain/layout/decltype_spell.inc, FNVNX_DECLTYPE_REASONS); the caller passes the file's text, so no module reads a path of its own location"""
+    m = re.search(r'#define FNVNX_DECLTYPE_REASONS\(X\)((?: X\(\w+\))+)', inc_text)
     if not m:
-        raise ValueError('%s: no FNVNX_DECLTYPE_REASONS' % inc)
-    return frozenset(re.findall(r'X\((\w+)\)', m.group(1)))
+        raise ValueError('no FNVNX_DECLTYPE_REASONS')
+    return frozenset(re.findall(r'X\((\w+)\)', m[1]))
 
 
-def parse_decltype_lines(data, where):
+def parse_decltype_lines(data, where, reasons):
     """-> ({symbol: type string}, {symbol: reason}) of the `.fnvnx.decltype` section: LF-terminated lines `symbol<TAB>type` or `symbol<TAB>-reason`, each symbol once
-    (RULE DECLTYPE-COMPLETE: every symbol of the object has exactly one of the two); every type must parse and every reason must be in the plugin's closed set"""
+    (RULE DECLTYPE-COMPLETE: every symbol of the object has exactly one of the two); every type must parse and every reason must be in REASONS, the plugin's closed set (decltype_reasons)"""
     text = data.decode('utf-8')
     if text and not text.endswith('\n'):
         raise ValueError('%s: no final LF' % where)
-    reasons = _decltype_reasons()
     out, why = {}, {}
     for n, ln in enumerate(text.split('\n')[:-1], 1):
         f = ln.split('\t')
@@ -230,9 +224,9 @@ def parse_decltype_lines(data, where):
     return out, why
 
 
-def parse_decltype(data, where):
+def parse_decltype(data, where, reasons):
     """-> {symbol: type string} of the rows of the `.fnvnx.decltype` section (the symbols with a reason instead of a type are not compared: parse_decltype_lines)"""
-    return parse_decltype_lines(data, where)[0]
+    return parse_decltype_lines(data, where, reasons)[0]
 
 
 def check(per_object):

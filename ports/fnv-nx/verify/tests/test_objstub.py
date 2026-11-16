@@ -14,15 +14,17 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import objstub  # noqa: E402
-import scratch  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import objstub  # noqa: E402
+from fnvnx.verify import scratch  # noqa: E402
 
 scratch.install()
 
 sys.path.insert(0, HERE)
-import test_recipe as TR  # noqa: E402
-import recipe  # noqa: E402
-import cas  # noqa: E402
+from fnvnx.verify.tests import test_recipe as TR  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
+from fnvnx.verify import cas  # noqa: E402
 
 CC = "aarch64-linux-gnu-gcc"
 ROOT = tempfile.mkdtemp(prefix="objstub-")
@@ -213,7 +215,7 @@ for abi in ("ilp32", "lp64"):
     check(T("LLVM (a64access) decodes the same words as objdump"), od == cs and len(od) > 10, (len(od), len(cs)))
 
 # --- the target profile of a root decides how its objects are judged (gate_objstub.profile_findings)
-import gate_objstub
+from fnvnx.verify import gate_objstub
 def hdr(cls, machine):
     pth = tempfile.mkstemp(dir=ROOT, suffix=".o")[1]
     open(pth, "wb").write(b"\x7fELF" + bytes([cls, 1, 1]) + bytes(9) + (1).to_bytes(2, "little") + machine.to_bytes(2, "little") + bytes(40))
@@ -730,7 +732,7 @@ wv = objstub.winerror_load(wx, wpin)
 check("winerror_load: decimals, hex with a cast, (WSABASEERR+N) and an alias of another define", wv["ERROR_INVALID_HANDLE"] == 6 and wv["HR_X"] == 0x80070005 and wv["WSAEINTR"] == 10004 and wv["EINTR_ALIAS"] == 10004 and wv["ERROR_ALIAS"] == 6, wv)
 
 # gate on the toy product root of test_recipe.py
-import verdict  # noqa: E402
+from fnvnx.verify import verdict  # noqa: E402
 
 RV = ("#include \"toy.h\"\nvoid fnvnx_reach_violation(unsigned) __attribute__((noreturn));\n"
       "int f_c(int x) { if (x > 3) fnvnx_reach_violation(42); return x + TOY; }\n")
@@ -839,7 +841,7 @@ check("the same text without the root's plugins: a failure of the unit naming th
 # the final image: every function body of the linked ELF is judged for the fixed-failure class (a weak `errno = ENOSYS; return -1` fallback left in it is red;
 # the same image with a strong override is green, the weak body is not in the image)
 ERR = '#include "toy.h"\nstatic int e;\nint *__errno(void) { return &e; }\n'
-WEAK = '#include "toy.h"\nint *__errno(void);\nint __attribute__((weak)) sched_getcpu(void) { *__errno() = 38; return -1; }\n'
+WEAK = '#include "toy.h"\n#include <errno.h>\nint __attribute__((weak)) sched_getcpu(void) { errno = ENOSYS; return -1; }\n'   # the target libc's own ENOSYS and accessor
 USE = '#include "toy.h"\nint sched_getcpu(void);\nint f_c(int x) { return x + TOY + sched_getcpu(); }\n'
 ri = TR.make_guest_repo("os-image-weak", files={"toy/constants.tsv": CONST + "e.c\t__errno\taddr\te\tref e\n", "toy/c.c": USE, "toy/e.c": ERR, "toy/w.c": WEAK}, image="f_a")
 rc, g, _, txt, st = gate(ri, ROOT + "/gi1", GC)
@@ -848,8 +850,8 @@ check("image with a weak errno/-1 fallback: red fixed-failure, the function name
 rs = TR.make_guest_repo("os-image-strong", files={"toy/constants.tsv": CONST + "e.c\t__errno\taddr\te\tref e\n", "toy/c.c": USE, "toy/e.c": ERR, "toy/w.c": WEAK, "toy/s.c": '#include "toy.h"\nint *__errno(void);\nint sched_getcpu(void) { return *__errno() + 3; }\n'}, image="f_a")
 rc, g, _, txt, st = gate(rs, ROOT + "/gi2", GC)
 check("the same image with a strong override: green, the weak body is not in the image", rc == 0 and g["image"]["fixed_failure"] == 0 and g["image"]["bodies"] > 0, (g, txt))
-# errno is derived by a probe compile with the root's own flags: an errno.h the root cannot compile is a red finding `errno-probe`, not a crash
-rn2 = TR.mut(); rn2["flags"] = {k: v + ["-D_ERRNO_H"] for k, v in rn2["flags"].items()}   # errno.h becomes empty: `errno` is undeclared
+# errno is derived by a probe compile with the root's own flags (the include guards of glibc and newlib): an errno.h the root cannot compile is a red finding `errno-probe`, not a crash
+rn2 = TR.mut(); rn2["flags"] = {k: v + ["-D_ERRNO_H", "-D_ERRNO_H_", "-D_SYS_ERRNO_H_"] for k, v in rn2["flags"].items()}   # errno.h becomes empty: `errno` is undeclared
 rd = TR.make_guest_repo("os-image-noprobe", rec=rn2, files={"toy/constants.tsv": CONST}, image="f_a")
 rc, g, _, txt, st = gate(rd, ROOT + "/gi3", GC)
 check("a root whose errno.h does not compile: red errno-probe (the probe does not compile with the root's flags), never green", rc == 2 and "errno-probe" in g["detail"], (g, txt))
@@ -866,6 +868,10 @@ ISL = '.text\n.globl isl\n.type isl,%function\nisl:\n mov w0, #1\n ret\n .word 0
 rj = TR.make_guest_repo("os-image-island", files={"toy/constants.tsv": CONST + "e.c\t__errno\taddr\te\tref e\n", "toy/c.c": USE.replace("sched_getcpu()", "0"), "toy/e.c": ERR, "toy/isl.S": ISL}, image="f_a")
 rc, g, _, txt, st = gate(rj, ROOT + "/gi4", GC)
 check("an image body with a data island is red unjudged", rc == 2 and "unjudged" in g["detail"] and g["image"]["unjudged"] >= 1, (g, txt))
+# the order plugin makes every x86-ordered access an acquire/release word: STLR/LDAR are the plain store/load for these rules; exclusives and CAS are not
+check("plain_ordered: STLR w1,[x0] and LDAR w0,[x0] are plain ordered accesses; STLXR, LDAXR and CAS are not",
+      objstub.plain_ordered(0x889FFC01) and objstub.plain_ordered(0x88DFFC00) and not objstub.plain_ordered(0x8802FC01) and not objstub.plain_ordered(0x885FFC00)
+      and not objstub.plain_ordered(0x88A07C41) and objstub.is_const_store(0x889FFC01) and not objstub.is_const_store(0x88DFFC00) and objstub.is_load(0x88DFFC00))
 
 # a host root: the terminator plugin is built against the plugin headers of the root's own (x86-64 distro) compiler, and sees its noreturn declarations
 xt = tf + ".x86"

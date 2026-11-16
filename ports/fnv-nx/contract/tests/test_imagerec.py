@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Synthetic check of imagerec.py: the record, its refusals (malformed relocations, code read as bytes) and the pinned loader."""
+import os
+import sys
 import hashlib
 import json
 import os
@@ -9,9 +11,9 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
-sys.path.insert(0, os.path.join(HERE, '..', '..', 'verify'))
-import cas
-import imagerec
+from verify import cas
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: contract.X by its qualified name
+from contract import imagerec
 
 BASE, TEXT, RD, REL = 0x400000, 0x1000, 0x2000, 0x3000
 OK = []

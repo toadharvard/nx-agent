@@ -4,11 +4,13 @@
 of rt/msvcrt_ci.cc) and written as the guest test's table. Writes ONLY /out/cases.inc (the table main.cc includes) and /out/labels.txt (one line per case, the number a failing
 guest exit code names).
 usage: gen.py <out dir>"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import math, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the tool root (/tool)
 sys.path.insert(0, sys.argv[2])   # lift/, whose fnvlift package is a declared input
-import mpfr_oracle as O_
+import fnvnx.lift.tools.mpfr_oracle as O_
 import gmpy2
 from fractions import Fraction
 

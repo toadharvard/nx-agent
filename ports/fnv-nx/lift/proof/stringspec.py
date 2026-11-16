@@ -32,14 +32,16 @@ SDM 1:P82  'Set equal to the most-significant bit of the result, which is the si
 SDM 1:P82  'Set if the integer result is too large a positive number or too small a negative number (excluding the sign-bit) to fit in the destination operand; cleared otherwise.'  OF: the signed result a - b does not fit in w bits
 The address size is 32 bits (ESI, EDI, ECX), the segments are flat: a 0x67 prefix or a segment override is outside this spec (uncertified: the reason names it).
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import z3  # noqa: E402
-from fnvlift import dsl  # noqa: E402
-from proof import shape, symform  # noqa: E402
+from fnvnx.lift.fnvlift import dsl  # noqa: E402
+from fnvnx.lift.proof import shape, symform  # noqa: E402
 
 STRING_OPCODES = (0xa4, 0xa5, 0xa6, 0xa7, 0xaa, 0xab, 0xac, 0xad, 0xae, 0xaf)     # one-byte opcode map, SDM Vol 2 Appendix A: MOVS, CMPS, STOS, LODS, SCAS (b / w-d forms); the 0F-map SSE movsd / cmpsd are other instructions of the same mnemonic
 OPS = ('movs', 'stos', 'lods', 'cmps', 'scas')
@@ -105,7 +107,7 @@ def check(key):
     try: f = symform.symbuild(key).form
     except Exception as e: return 'not-covered', 'no Form (%s)' % type(e).__name__
     sr, sf, ss, se = spec(rep, op, w, size)
-    from proof import sysspec_store      # the string destination ES:EDI: a store through ES whose selector names a code descriptor is #GP(0) (sysspec_store); a REP form stores only while ECX != 0 (the ECX = 0 case of the REP rule quoted at the top of this file)
+    from fnvnx.lift.proof import sysspec_store      # the string destination ES:EDI: a store through ES whose selector names a code descriptor is #GP(0) (sysspec_store); a REP form stores only while ECX != 0 (the ECX = 0 case of the REP rule quoted at the top of this file)
     if sysspec_store.faults_ok(f, ins, rep=bool(rep)): return 'FAILED(dsl)', 'faults'
     pr = {r[0]: dsl.to_smt(r[1]) for r in f.regs}; pf = {r[0]: dsl.to_smt(r[1]) for r in f.flags}
     s = z3.Solver()

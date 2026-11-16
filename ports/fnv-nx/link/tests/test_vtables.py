@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Check of link/vtables.py on a synthetic two-class scene (byte-built exe, hand-built object and bind facts, invented names): green on the
 consistent scene, red and named on every broken fact, an error on malformed input."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import os, sys, tempfile
 import atexit  # noqa: E402
 import shutil  # noqa: E402
@@ -9,10 +12,11 @@ tempfile.tempdir = tempfile.mkdtemp(prefix="scratch-")  # every scratch dir of t
 atexit.register(shutil.rmtree, tempfile.tempdir, True)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path[:0] = [HERE, os.path.join(HERE, '..'), os.path.join(HERE, '..', '..', 'contract')]
-import abi_fixture as F
-import abi_gaterun
-import vtables as G
+sys.path[:0] = [HERE, os.path.join(HERE, '..')]
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link.tests import abi_fixture as F
+from fnvnx.link.tests import abi_gaterun
+from fnvnx.link import vtables as G
 
 fails = []
 
@@ -43,7 +47,7 @@ check('destructor pair broken', 'V4 slot 1 is a deleting destructor without the 
 rc, r, *_ = run(drop_native_point=True)
 check('exe vftable of the class left unbound (V5)', (rc, r['uncertified'] and 'V5' in r['uncertified'][0]), (1, True))
 # a missing vtpair row is uncertified; an unnamed row leaves the universe and is counted
-import store
+from fnvnx.contract import store
 d = tempfile.mkdtemp()
 exe, op, bp, a = F.scene(d)
 obj = store.load(op, 'obj')

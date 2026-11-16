@@ -1,11 +1,13 @@
 """sdmfeat.py: the declared CPU is the record and equals the generated tables."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
-from proof import sdmfeat as S  # noqa: E402
+from fnvnx.lift.proof import sdmfeat as S  # noqa: E402
 
 class DeclaredCpu(unittest.TestCase):
     def test_declared_cpu_is_the_record_and_equals_the_generated_tables(self):
@@ -22,7 +24,7 @@ class DeclaredCpu(unittest.TestCase):
         if not os.environ.get('GATE_CACHE'):
             self.skipTest('GATE_CACHE not set: no generated output to compare')
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(S.__file__))))
-        import genout
+        import fnvnx.lift.proof.genout as genout
         gd = genout.gen_dir(os.environ['GATE_CACHE'])
         h = open(os.path.join(gd, 'fnvl_cpuref.h')).read()
         d = dict(re.findall(r'#define (FNVL_\w+) (0x[0-9a-f]+)u', h))

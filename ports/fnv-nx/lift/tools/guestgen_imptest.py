@@ -5,12 +5,15 @@ generates the import entries (tools/impgen.py) and the perfect-hash dispatch tab
   guest.cc   the lifted functions (lifted-code flags)          imp.cc   the generated import entries          tab.cc    the dispatch table
   image.inc  the image bytes, the import table words, the entry address and the expected eax of every case (main.cc includes it)
 Expected values are computed from the x86 semantics by hand, stated at each case (as in the comments below).
-usage: gen.py <out dir>"""
+usage: gen.py OUT_DIR LIFT_DIR --x86sys F --sdmrows F --cpumodel F --rcptab F --rcpcert F      (the lifter's declared inputs: lifted.buffer_arguments)"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, struct, sys, tempfile
-HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.join(HERE, '..', '..', '..')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the tool root (/tool)
 sys.path.insert(0, sys.argv[2])   # lift/, whose fnvlift package is a declared input
-import fnvlift as L, phf, impgen
+import argparse; import fnvnx.lift.tools.lifted as lifted
+import fnvnx.lift.fnvlift as L
+import fnvnx.lift.tools.phf as phf; import fnvnx.lift.tools.impgen as impgen
 from keystone import Ks, KS_ARCH_X86, KS_MODE_32
 
 BASE, IAT, DATA, GSTACK, HSTACK, STOP, TEXT = 0x401000, 0x402000, 0x403000, 0x60000000, 0x70000000, 0x7e000000, 0xE0000000
@@ -84,7 +87,9 @@ def guest():
 
 
 def main():
-    w = sys.argv[1]; os.makedirs(w, exist_ok=True)
+    ap = argparse.ArgumentParser(); ap.add_argument('out'); ap.add_argument('lift'); lifted.buffer_arguments(ap); a = ap.parse_args()
+    w = a.out; os.makedirs(w, exist_ok=True)
+    lifted.configure_buffer(a, tempfile.mkdtemp(dir='/dev/shm'))      # the lifter's inputs: the one way (tools/lifted.py)
     code, ents, cases = guest(); img = Fake(code); img.entries = set(v[0] for v in ents.values())
     work = tempfile.mkdtemp(dir='/dev/shm')            # scratch outside /out: the stage's outputs are exactly the files listed in the header
     open(work + '/bridge.tsv', 'w').write('dll\tname\tordinal\tconv\tret\targs\tnative_symbol\tbind\n' + ''.join('%s\t%s\t\t%s\t%s\t%s\t%s\t%s\n' % r for r in BRIDGE))
@@ -97,7 +102,7 @@ def main():
     syms = {ad: 'L_%08x' % ad for ad, sz, owns in ents.values()}; syms.update({k: s for k, s, *_ in ent})
     if {n: k for k, s, d, n, b in ent} != {r[1]: KEY[r[1]] for r in BRIDGE if r[6] != 'none'}: sys.exit('imptest gen: the import keys differ from the key rule')
     h = phf.build(list(syms))
-    open(w + '/tab.cc', 'w').write(phf.table_c(syms, h)); open(w + '/guest.cc', 'w').write('#include "fnvl.h"\n' + '\n'.join(texts))
+    open(w + '/tab.cc', 'w').write(phf.table_c(syms, h)); open(w + '/guest.cc', 'w').write('#include "fnvl_prelude.h"\n' + '\n'.join(texts))
     open(w + '/imp.cc', 'w').write(open(work + '/imp.cpp').read())
     inc = ['#define IMG_BASE 0x%xu' % BASE, '#define IAT_BASE 0x%xu' % IAT, '#define NCASES %d' % len(cases)]
     inc.append('static const unsigned char IMG[] = {%s};' % ','.join(str(x) for x in code))

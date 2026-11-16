@@ -10,6 +10,8 @@ expansion is bit-vector, array and logic only stays inline: those kinds are the 
 fact (CLAUDE.md 2026-11-15 rule 2). A function that takes the state object (St) or returns a tuple is composition, not a value op: it stays inline. A Real or FP kind that
 reaches the DAG through such a function is `leak(...)`, and the translator raises Unsupported naming it.
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import ast
 import contextlib
 import os
@@ -18,7 +20,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.dirname(HERE), HERE]
 import z3  # noqa: E402
-import x87spec as X  # noqa: E402
+import fnvnx.lift.proof.x87spec as X  # noqa: E402
 
 SPEC = os.path.join(HERE, "x87spec.py")
 
@@ -131,13 +133,19 @@ def instrument():
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # Translator: z3 term -> DSL DAG.  One table, K2OP: z3 decl kind -> how the DSL node is made.  Anything else raises Unsupported naming the kind (no fallback).
-from fnvlift import dsl  # noqa: E402
-from fnvlift.dsl import C, V, mk, bin_, ite, eq, ult, slt, zext, sext, extract, concat  # noqa: E402
+from fnvnx.lift.fnvlift import dsl  # noqa: E402
+from fnvnx.lift.fnvlift.dsl import C, V, mk, bin_, ite, eq, ult, slt, zext, sext, extract, concat  # noqa: E402
 
 Z = z3
 _BIN = {Z.Z3_OP_BADD: "add", Z.Z3_OP_BSUB: "sub", Z.Z3_OP_BMUL: "mul", Z.Z3_OP_BAND: "and", Z.Z3_OP_BOR: "or", Z.Z3_OP_BXOR: "xor", Z.Z3_OP_BSHL: "shl",
         Z.Z3_OP_BLSHR: "lshr", Z.Z3_OP_BASHR: "ashr", Z.Z3_OP_BUDIV: "udiv", Z.Z3_OP_BUREM: "urem", Z.Z3_OP_BUDIV_I: "udiv", Z.Z3_OP_BUREM_I: "urem"}
 MEM_VAR, EF_VARS = "x87_m", ("x87_ef0", "x87_ef1", "x87_ef2")
+
+
+def _simp(t):
+    """z3's simplifier on T, as a pure function of T's structure: z3 orders operands and picks between equal rewrites by AST ids, a counter of the context, so the same term simplified after other work gives another
+    shape.  A fresh context numbers its ASTs by the translation of T alone (a fixed traversal), so its simplifier's result depends on T only."""
+    return z3.simplify(t.translate(z3.Context())).translate(t.ctx)
 
 
 class Tr:
@@ -153,7 +161,7 @@ class Tr:
             return [s.t(t.arg(0))] * 8
         if k == Z.Z3_OP_STORE:
             a, i, v = s.arr(t.arg(0)), s.t(t.arg(1)), s.t(t.arg(2))
-            return [ite(eq(i, C(j, 3)), v, a[j]) for j in range(8)]
+            return [ite(dsl.comm2("eq", i, C(j, 3)), v, a[j]) for j in range(8)]
         if k == Z.Z3_OP_ITE:
             c, a, b = s.t(t.arg(0)), s.arr(t.arg(1)), s.arr(t.arg(2))
             return [ite(c, a[j], b[j]) for j in range(8)]
@@ -165,7 +173,7 @@ class Tr:
             return a[i.x]
         r = a[7]
         for j in range(6, -1, -1):
-            r = ite(eq(i, C(j, 3)), a[j], r)
+            r = ite(dsl.comm2("eq", i, C(j, 3)), a[j], r)
         return r
 
     def t(s, e):
@@ -201,15 +209,10 @@ class Tr:
         if k == Z.Z3_OP_FALSE:
             return C(0, 1)
         if k in _BIN:
-            r = bin_(_BIN[k], a(0), a(1))
-            for j in range(2, e.num_args()):      # z3's simplifier makes bvadd, bvmul, bvand, bvor and bvxor n-ary: left fold
-                r = bin_(_BIN[k], r, a(j))
-            return r
+            if _BIN[k] in dsl.COMM: return dsl.comm(_BIN[k], [a(j) for j in range(e.num_args())])      # z3's simplifier makes bvadd, bvmul, bvand, bvor and bvxor n-ary and orders the operands by its AST ids: canonical order by structure (dsl.comm)
+            return bin_(_BIN[k], a(0), a(1))
         if k in (Z.Z3_OP_AND, Z.Z3_OP_OR):
-            r = a(0)
-            for j in range(1, e.num_args()):
-                r = bin_("and" if k == Z.Z3_OP_AND else "or", r, a(j))
-            return r
+            return dsl.comm("and" if k == Z.Z3_OP_AND else "or", [a(j) for j in range(e.num_args())])
         if k == Z.Z3_OP_NOT:
             return mk("not", 1, (a(0),)) if e.arg(0).sort().kind() == Z.Z3_BOOL_SORT else ~a(0)
         if k == Z.Z3_OP_BNOT:
@@ -217,15 +220,11 @@ class Tr:
         if k == Z.Z3_OP_BNEG:
             return -a(0)
         if k == Z.Z3_OP_XOR:
-            r = a(0)
-            for j in range(1, e.num_args()):
-                r = r ^ a(j)
-            return r
+            return dsl.comm("xor", [a(j) for j in range(e.num_args())])
         if k == Z.Z3_OP_EQ:
-            x, y = a(0), a(1)
-            return eq(x, y)
+            return dsl.comm2("eq", a(0), a(1))
         if k == Z.Z3_OP_DISTINCT and e.num_args() == 2:
-            return mk("not", 1, (eq(a(0), a(1)),))
+            return mk("not", 1, (dsl.comm2("eq", a(0), a(1)),))
         if k == Z.Z3_OP_ULT:
             return ult(a(0), a(1))
         if k == Z.Z3_OP_UGT:
@@ -291,8 +290,8 @@ def nd_names():
 
 def spec_key(raw):
     """(REGISTRY key, register index i or None) of the x87 instruction RAW: the class of x87class, in the spec's key spelling.  None when RAW is no x87 instruction"""
-    import x87class
-    from proof import shape
+    import fnvnx.lift.proof.x87class as x87class
+    from fnvnx.lift.proof import shape
     i = 0
     while i < len(raw) and raw[i] in shape.PFX:
         i += 1
@@ -347,7 +346,7 @@ def resolve(o, m):
 
 def mem_nodes(c, pcs):
     """the DSL node of every memory piece: loads of 64/32/16/8 bits, the lowest address first.  -> (address node, [node])"""
-    from proof import forms
+    from fnvnx.lift.proof import forms
     a = forms.ea(c.ops[0])
     out = []
     for off, w, _ in pcs:
@@ -385,7 +384,7 @@ def carrier_de_refusal(o):
 
 def effects(c, key, i):
     """fill c.F from the spec entry (class KEY, register index I).  Raises Unsupported naming the first thing outside the Form"""
-    from proof import forms
+    from fnvnx.lift.proof import forms
     F = c.F
     c.x87_mem = (None, None)
     d, o, pcs, ef, m = run(key, i)
@@ -406,7 +405,7 @@ def effects(c, key, i):
         raise Unsupported("x87 nondeterminism without a resolution: %s" % ",".join(miss))
     S = (lambda t: z3.substitute(t, *sub)) if sub else (lambda t: t)
     # o.undef / o.mem_undef (the bits the SDM leaves Undefined / reserved): the Form takes the spec's own value for them, a refinement of "any value"; the proof compares exactly
-    post = {k: z3.simplify(S(v)) for k, v in X.to_dsl(o.s).items()}
+    post = {k: _simp(S(v)) for k, v in X.to_dsl(o.s).items()}
     unch = {k: z3.eq(v, d[k]) for k, v in post.items()}      # the field the instruction leaves as it was (z3's own simplifier: the spec's finish() ites)
     node = {k: tr.t(v) for k, v in post.items() if not unch[k]}
     if "fcw" in node:
@@ -420,20 +419,20 @@ def effects(c, key, i):
     if any(k in node for k in ("fip", "fdp", "fop", "fcs", "fds")):
         F.fptr(*[node[k] if k in node else V(k, X.DSL_WIDTH[k]) for k in ("fip", "fdp", "fop", "fcs", "fds")])
     if o.mem is not None:
-        w = tr.t(z3.simplify(S(o.wr)))
+        w = tr.t(_simp(S(o.wr)))
         wn = None if w.op == "const" and w.x == 1 else w
-        mv = z3.simplify(S(o.mem))
+        mv = _simp(S(o.mem))
         for off, wd in mem_pieces(o.mem.size()):
-            forms.mstore(F, a if off == 0 else forms.addoff(a, C(off // 8, 32)), tr.t(z3.simplify(z3.Extract(off + wd - 1, off, mv))), wn)
+            forms.mstore(F, a if off == 0 else forms.addoff(a, C(off // 8, 32)), tr.t(_simp(z3.Extract(off + wd - 1, off, mv))), wn)
     if o.ax is not None:
-        F.reg("eax", concat(extract(V("eax", 32), 31, 16), tr.t(z3.simplify(S(o.ax)))))
+        F.reg("eax", concat(extract(V("eax", 32), 31, 16), tr.t(_simp(S(o.ax)))))
     if o.eflags is not None:      # FCOMI / FUCOMI (SDM 2A:FCOMI Flags): ZF, PF, CF from the compare, OF, SF, AF cleared; the spec's value is the Form's where the SDM leaves them undefined (stack underflow)
         for f, t in zip(("zf", "pf", "cf"), o.eflags[:3]):
-            F.flag(f, tr.t(z3.simplify(S(t))))
+            F.flag(f, tr.t(_simp(S(t))))
         for f in ("of", "sf", "af"):
             F.flag(f, C(0, 1))
     for _, t in domain_terms(o, sub):
-        F.require(tr.t(z3.simplify(t)))
+        F.require(tr.t(_simp(t)))
 
 
 def build(c):
@@ -455,8 +454,8 @@ def prove_form(F):
     """-> (result, note, extras).  F.x87 = (class key, i, address node or None, [(piece var, piece node)] or None).  Every query is unsat at bounds.Z3_RLIMIT, under the Form's own domain
     (F.domain, translated by dsl.to_smt): nd_pre at the resolution holds; then each field of the Form's z3 post-state equals the spec's: the x87 registers, TOP, tags, FSW, FCW, the pointers,
     memory, EAX, the other registers, the flags, EIP, the SSE state.  The Form has no fault: the domain excludes every x87 exception (domain_terms)."""
-    from fnvlift import dsl as D
-    from proof import bounds
+    from fnvnx.lift.fnvlift import dsl as D
+    from fnvnx.lift.proof import bounds
     key, i, a, pn = F.x87
     d, o, pcs, ef, m = run(key, i)
     P = F.post()
@@ -502,7 +501,7 @@ def prove_form(F):
         want["xmm%d" % j] = (P["xmm"][j], z3.BitVec("xmm%d" % j, 128))
     want["mxcsr"] = (P["mxcsr"], z3.BitVec("mxcsr", 32))
     dom = z3.And(*[D.to_smt(n) == 1 for n in F.domain]) if F.domain else z3.BoolVal(True)
-    from fnvlift import faults as FT
+    from fnvnx.lift.fnvlift import faults as FT
     av = FT.BYNAME["AV"]["code"]      # the only fault a Form may carry: forms.mstore's code-segment store fault (selector-based, the state is then the pre-state)
     nf = P["fault"] == 0
     es_post = z3.Extract(X.ES, X.ES, P["fsw"]) == X.K(1, 1)

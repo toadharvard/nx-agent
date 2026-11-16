@@ -48,11 +48,13 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import cas  # noqa: E402
-import sandbox  # noqa: E402
-import toolflags  # noqa: E402
-import unitview  # noqa: E402
-from unitview import UnitError, parse_deps  # noqa: E402,F401
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import sandbox  # noqa: E402
+from fnvnx.verify import toolflags  # noqa: E402
+from fnvnx.verify import unitview  # noqa: E402
+from fnvnx.verify.unitview import UnitError, parse_deps  # noqa: E402,F401
 
 
 def sandbox_src(rel):
@@ -254,11 +256,9 @@ class Build:
                 raise UnitError("dependency %s is in no declared input" % p)
         return out
 
-    def unit(self, rel):
-        e = {"unit": rel, "status": "ok", "cc_status": "skipped", "object": None, "name_tree_id": self.name_tree_id, "pp_iterations": 0,
-             "pp_seconds": 0.0}
-        if rel.endswith(".s"):
-            return self.assemble(e, rel)
+    def pp_loop(self, rel, e):
+        """The PP stage of unit REL on its minimal view (the closure hint, then the fixpoint of the files the run read): the one loop of unit() and pp_file(). E (the unit's result
+        dict) receives pp_key, pp_status, pp_iterations. -> (the PP result, the closure files); (None, None) with E's status and error set when the unit does not preprocess."""
         files, expect, ran = None, None, False
         try:
             hint = json.load(open(hint_path(self.store, rel, self.hint_ns)))
@@ -277,7 +277,7 @@ class Build:
                 miss = {r for r in (self.real(p, False) for p in unitview.placeholder_paths(self.stderr(res))) if r}
                 if files is None or not miss or miss <= files:
                     e["status"], e["error"] = "pp-failed", self.last(res)
-                    return e
+                    return None, None
                 files = files | miss
                 continue
             d, h = self.deps(key), cas.manifest(res["outputs"]["/out"], self.store)["entries"]["unit.ii"]["h"]
@@ -287,6 +287,27 @@ class Build:
             if d == files:
                 break
             expect, files = (d, h), d
+        return res, files
+
+    def pp_file(self, rel):
+        """The preprocessed text of unit REL: the unit.ii that the CC stage compiles (the same PP stage, key and view as unit()) -> path of the file in the store.
+        A unit that does not preprocess raises UnitError with the compiler's last lines."""
+        if rel.endswith(".s"):
+            raise UnitError("%s: a .s unit has no preprocessing stage" % rel)
+        e = {"unit": rel, "status": "ok", "pp_iterations": 0, "pp_seconds": 0.0}
+        res, _ = self.pp_loop(rel, e)
+        if res is None:
+            raise UnitError("%s: %s" % (rel, e["error"]))
+        return cas._obj(self.store, cas.manifest(res["outputs"]["/out"], self.store)["entries"]["unit.ii"])
+
+    def unit(self, rel):
+        e = {"unit": rel, "status": "ok", "cc_status": "skipped", "object": None, "name_tree_id": self.name_tree_id, "pp_iterations": 0,
+             "pp_seconds": 0.0}
+        if rel.endswith(".s"):
+            return self.assemble(e, rel)
+        res, files = self.pp_loop(rel, e)
+        if res is None:
+            return e
         e["closure"], e["files"] = sorted(files), len(files)
         e["du_key"], dres = self.du(rel, files)
         if dres["rc"]:

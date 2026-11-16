@@ -23,11 +23,13 @@ GUEST_ROOT = "ports/fnv-nx/tests/bootguest"   # the recipe root of the guest ima
 GUEST_DIR = os.path.join(REPO, GUEST_ROOT)
 HOSTABI_DIR = os.path.join(REPO, "ports", "fnv-nx", "hostabi", "include")   # hostapi.h, fnvnx/sockwire.h: their one home
 sys.path.insert(0, VERIFY)
-import bootinput  # noqa: E402
-import bootlayout  # noqa: E402
-import boothost  # noqa: E402
-import bootmachine  # noqa: E402
-import gate_build  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import bootinput  # noqa: E402
+from fnvnx.verify import bootlayout  # noqa: E402
+from fnvnx.verify import boothost  # noqa: E402
+from fnvnx.verify import bootmachine  # noqa: E402
+from fnvnx.verify import gate_build  # noqa: E402
 
 QUANTUM = 20000   # instructions per slice (bootmachine.py rule 3): a declared parameter of these runs
 TMP = tempfile.mkdtemp(prefix="bm-")

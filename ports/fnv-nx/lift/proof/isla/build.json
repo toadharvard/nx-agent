@@ -30,7 +30,8 @@
     "/in/2",
     "/in/3",
     "/in/4",
-    "/in/5"
+    "/in/5",
+    "/in/6"
    ],
    "inputs": [
     "ports/fnv-nx/lift/proof/sail_pins.txt",
@@ -46,7 +47,8 @@
     {
      "external": "sail",
      "path": "z3_solver-5.4.0.0-py3-none-manylinux_2_27_x86_64.whl"
-    }
+    },
+    "ports/fnv-nx/lift/proof/x86.toml"
    ],
    "debs": {
     "closure": [
@@ -57,7 +59,8 @@
     ]
    },
    "outputs": [
-    "isla-execute-function"
+    "isla-execute-function",
+    "x86.toml"
    ],
    "scratch": [
     "/scratch"
@@ -75,6 +78,7 @@
  ],
  "outputs": {
   "ISLA": "isla-execute-function",
-  "Z3LIB": "z3lib"
+  "Z3LIB": "z3lib",
+  "ISLACFG": "x86.toml"
  }
 }

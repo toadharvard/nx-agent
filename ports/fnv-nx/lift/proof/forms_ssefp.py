@@ -2,11 +2,13 @@
 fnvlift/dsl.py fp: SDM Vol 1 4.8.3, 4.9.1, 10.2.3, 11.5) on the source type; the status flags of the lanes are ORed into the sticky MXCSR flags (bits 0-5).  An UNMASKED exception (the new
 flag set and its MXCSR mask bit 7-12 clear) is ONE fault, XM (Wine 9.0 fpe_handler: a SIMD exception is STATUS_FLOAT_MULTIPLE_TRAPS, never a per-flag status); on it the exception flags are set in MXCSR and the destination
 is unchanged (SDM Vol 1 11.5.2, Vol 3 6.15: dsl Form.fault_xm).  Aligned 128-bit memory operands fault with kind 7 when misaligned (forms_simd.align)."""
-from fnvlift import dsl
-from fnvlift.dsl import C, V, bit, concat, cvt, cvt_flags, cvt_val, eq, extract, fp, fp_flags, fp_val, ite, tab, ult, zext
-from fnvlift.faults import BYNAME
-from proof.forms import handler, rd, wr
-from proof.forms_simd import align, join, lanes, selidx
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
+from fnvnx.lift.fnvlift import dsl
+from fnvnx.lift.fnvlift.dsl import C, V, bit, concat, cvt, cvt_flags, cvt_val, eq, extract, fp, fp_flags, fp_val, ite, tab, ult, zext
+from fnvnx.lift.fnvlift.faults import BYNAME
+from fnvnx.lift.proof.forms import handler, rd, wr
+from fnvnx.lift.proof.forms_simd import align, join, lanes, selidx
 
 def _unmasked(flags32, mx):
     """some exception flag i (MXCSR bits 0-5) is set whose mask bit i + 7 is clear (SDM Vol 1 11.5.1)"""
@@ -122,9 +124,10 @@ handler('rcpss')(lambda c: recip(c, rcp32, True)); handler('rcpps')(lambda c: re
 handler('rsqrtss')(lambda c: recip(c, rsqrt32, True)); handler('rsqrtps')(lambda c: recip(c, rsqrt32, False))
 
 def _mxcsr_mask():
-    """MXCSR_MASK of the declared CPU: verify/cpuid_model.json `mxcsr_mask` (derived data, SDM Vol 1 11.6.6); a file without it gives no Form (no constant stands in for it)"""
-    import json, os
-    v = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'verify', 'cpuid_model.json'))).get('mxcsr_mask')
+    """MXCSR_MASK of the declared CPU: the `cpumodel` input (verify/cpuid_model.json) `mxcsr_mask` (derived data, SDM Vol 1 11.6.6); a file without it gives no Form (no constant stands in for it)"""
+    import json
+    from fnvnx.lift.fnvlift import inputs
+    v = json.load(open(inputs.get('cpumodel'))).get('mxcsr_mask')
     if v is None: raise KeyError('verify/cpuid_model.json has no mxcsr_mask')
     return int(v, 16)
 @handler('ldmxcsr')

@@ -17,11 +17,13 @@ Control transfer is derived from the Form's eip node by structure: constant == n
 (the Form's esp/store effects) and uses f_flow.call_xfer, anything else f_flow.jump_to; ite(c, constant T, next) -> `if (c) jump_to(T)` (jcc, jecxz,
 loop*, and the step repeat of rep string forms, whose eip is `ite(more, this address, next)`: a goto to the instruction's own label); any other
 expression (indirect jmp / call, ret) -> f_flow.jmp_indirect / call_xfer / ret_xfer with the C text of the node, the kind chosen by the mnemonic."""
-from fnvlift.core import CC, SKIP, SUB, Unsupported
-from fnvlift import f_flow
-from fnvlift import dsl, faults
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
+from fnvnx.lift.fnvlift.core import CC, SKIP, SUB, Unsupported
+from fnvnx.lift.fnvlift import f_flow
+from fnvnx.lift.fnvlift import dsl, faults, prov
 
-from proof import forms, forms_alu, forms_flow, forms_move, forms_simd, forms_ssefp, forms_sys             # noqa: F401  (proof/forms.py: the Form builders; forms_* register their handlers in forms.H)
+from fnvnx.lift.proof import forms, forms_alu, forms_flow, forms_move, forms_simd, forms_ssefp, forms_sys             # noqa: F401  (proof/forms.py: the Form builders; forms_* register their handlers in forms.H)
 
 FAULT = {1: 'DE', 2: 'BP', 3: 'UD', 4: 'BR'}
 STATE = {'df': 'df', 'fs_base': 'fsb', 'flo': '(c->eflx|0x200u)'}      # Form pre-state variables besides the registers and the five flags
@@ -118,21 +120,62 @@ def transfer(cx, ins, F):
     raise Unsupported('eip form of ' + m)
 
 
+_DEAD = {}
+
+
+def _arm_dead(sg, cond, sels):
+    """z3: under the domain `sel_<sg> in sels` (the segment register holds one of the selectors of the image's SEGWRITES fact) the code-selector condition `cond` is unsatisfiable"""
+    import z3
+    key = (sg, dsl.skey(cond), tuple(sels))
+    r = _DEAD.get(key)
+    if r is None:
+        v = z3.BitVec('sel_' + sg, 16); sv = z3.Solver()
+        sv.add(z3.Or(*[v == z3.BitVecVal(x, 16) for x in sels]) if sels else z3.BoolVal(False)); sv.add(dsl.to_smt(cond) == 1)
+        r = _DEAD[key] = sv.check() == z3.unsat
+    return r
+
+
+def specialise(F):
+    """the Form of a store through a segment register whose selector set the facts bound (core.sel_set): the code-selector arm of a store (proof/forms.code_store_fault) whose condition is unsatisfiable under
+    `sel_<sg> in set` is dead and is dropped, by a z3 proof per (condition, set).  An unbounded register (no set) and a cs-override keep the arm.  The Form is not modified (a copy)."""
+    arms = getattr(F, 'cstore', None)
+    if not arms: return F
+    import copy
+    from fnvnx.lift.fnvlift import core
+    dead = []
+    for sg, cond, full in arms:
+        sels = core.sel_set(sg)
+        if sels is not None and _arm_dead(sg, cond, sels): dead.append(full)
+    if not dead: return F
+    g = copy.copy(F); g.faults = [(k, c) for k, c in F.faults if not any(c is d for d in dead)]; g.cstore = [a for a in arms if a[2] not in dead]
+    return g
+
+
 def emit_form(cx, ins):
     """emit the C of one instruction from its Form -> None, or SKIP when the forms do not cover it. A build error propagates."""
     if not supported(ins):
         return SKIP
     try: F = forms.build(ins, cx.a)
     except dsl.UndecidedRow as e: raise Unsupported(str(e)) from None      # a row of the record is undecided: no body (the same class as every other undecided row)
+    F = specialise(F)
     if any(k == 'sel' and i == dsl.SEGS.index('fs') for k, i, _ in F.xs): cx.usesfs = True      # fnvl_seg_set(FS) re-bases the cached `fsb`
     force, xfer = transfer(cx, ins, F)
-    L, ref = F.to_c_inline(varc(cx), fault_fn(cx), flo_fn, force, cx.macc)
+    S = [] if prov.ON else None      # provenance measurement (fnvlift/prov.py): the Form section of each line; the emitted lines are the same
+    L, ref = F.to_c_inline(varc(cx), fault_fn(cx), flo_fn, force, cx.macc, S)
+    nF = len(L)
     L += xfer(ref)
     if L:
+        if S is not None:
+            cx.tag = 'form: block braces'
         cx.em('{')
-        for l in L:
+        for i, l in enumerate(L):
+            if S is not None:
+                cx.tag = S[i] if i < nF else 'form: control transfer (f_flow)'
             cx.em(l)
+        if S is not None:
+            cx.tag = 'form: block braces'
         cx.em('}')
+        cx.tag = None
 
 
 def covers(ins):

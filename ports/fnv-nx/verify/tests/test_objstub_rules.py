@@ -13,7 +13,9 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-import objstub  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import objstub  # noqa: E402
 
 CC = "aarch64-linux-gnu-gcc"
 ROOT = tempfile.mkdtemp(prefix="objstub-rules-")
@@ -262,9 +264,9 @@ for what, cover, syn, hdr in (("a class outside a|b|c|own|none", GOOD_C.replace(
     check("H: records with %s are rejected (ValueError)" % what, ok)
 # ---- the recipe keys
 import json  # noqa: E402
-import recipe  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
-D = "ports/fnv-nx/lift/descs"
+D = "ports/fnv-nx/bridgefacts"
 adm, files = recipe.load_admit(REPO), recipe.tracked(REPO)
 base = json.load(open(os.path.join(REPO, D, "build.json")))
 cov = "ports/fnv-nx/verify/tests/test_objstub.py"   # any tracked file stands for a record path

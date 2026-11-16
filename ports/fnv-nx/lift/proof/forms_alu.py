@@ -1,6 +1,8 @@
 """Arithmetic / logic / shift / bit / multiply / divide families (see forms.py)."""
-from fnvlift.dsl import C, V, ashr, bit, concat, eq, extract, ite, lshr, msb, sext, shl, trunc, udiv, ult, urem, zext
-from proof.forms import Op, addoff, af, ea, handler, mload, pzs, rd, store_op, undef, wr
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
+from fnvnx.lift.fnvlift.dsl import C, V, ashr, bit, concat, eq, extract, ite, lshr, msb, sext, shl, trunc, udiv, ult, urem, zext
+from fnvnx.lift.proof.forms import Op, addoff, af, ea, handler, mload, pzs, rd, store_op, undef, wr
 
 UNDEF_LOGIC = 'AND/OR/XOR/TEST: "The state of the AF flag is undefined."'
 UNDEF_MUL = 'MUL/IMUL: "The SF, ZF, AF, and PF flags are undefined."'

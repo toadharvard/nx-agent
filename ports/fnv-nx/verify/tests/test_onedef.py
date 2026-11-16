@@ -8,11 +8,13 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import test_recipe as TR  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify.tests import test_recipe as TR  # noqa: E402
 
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import gate_onedef as go  # noqa: E402
+from fnvnx.verify import gate_onedef as go  # noqa: E402
 
 T, BASE = TR.T, TR.BASE
 FAILED = []
@@ -37,18 +39,21 @@ H_INC = '.section .text.h,"axG",@progbits,h,comdat\n.weak h\n.type h,%function\n
 def mkrepo(name, libs, extra=None, img=IMG):
     """libs {path: (recipe, {file: text})}; extra {repo file: text} (e.g. headers); the image is the toy root."""
     pulls = sorted(p[len(T):] for p in libs)     # the image calls one function of each lib root: the definer closure links exactly these roots (no list names them)
-    e_c = "".join("int pull_%s(void);\n" % n for n in pulls) + "void _start(void) { %sfor (;;) ; }\n" % "".join("pull_%s(); " % n for n in pulls)
+    e_c = "".join("int pull_%s(void);\n" % n for n in pulls) + "int main(void) { %sreturn 0; }\nint __libc_start_main(void *m) { return ((int (*)(void))m)(); }\nvoid abort(void) { for (;;) ; }\n" % "".join("pull_%s(); " % n for n in pulls)
     repo = TR.make_repo(name, rec=img, files=dict(NONE, **{"toy/e.c": e_c}))
     adm = json.load(open(repo + "/" + T + "verify/admit.json"))
     for path, (r, fs) in libs.items():
+        if any(i.startswith(T + "hdr") for i in r["include"]):
+            r = dict(r, uses=[{"root": T + "hdr", "output": "INCLUDE"}])
         adm["roots"].append({"path": path, "class": "product", "target": "host", "recipe": path + "/build.json"})
         TR.w(repo, path[len(T):] + "/build.json", json.dumps(r))
         for f, text in fs.items():
             TR.w(repo, path[len(T):] + "/" + f, text)
-        TR.w(repo, path[len(T):] + "/pull.c", "int pull_%s(void) { return 0; }\n" % path[len(T):])
-    if any(p.startswith(T + "hdr") for p in (extra or {})) or any(T + "hdr" in r["include"] for r, _ in libs.values()):
-        adm["roots"].append({"path": T + "hdr", "class": "product", "target": "host", "recipe": T + "hdr/build.json"})   # a header home is a product root
-        TR.w(repo, "hdr/build.json", json.dumps(dict(LIB_REC, include=[])))
+        if not any(f.startswith("pull.") for f in fs):    # the member the image reaches; a case that needs its definitions linked puts them in `pull.*`
+            TR.w(repo, path[len(T):] + "/pull.c", "int pull_%s(void) { return 0; }\n" % path[len(T):])
+    if any(p.startswith(T + "hdr") for p in (extra or {})) or any(i.startswith(T + "hdr") for r, _ in libs.values() for i in r["include"]):
+        adm["roots"].append({"path": T + "hdr", "class": "product", "target": "host", "recipe": T + "hdr/build.json"})   # the header home: a root whose directory output INCLUDE the includers `uses`
+        TR.w(repo, "hdr/build.json", json.dumps(dict(LIB_REC, include=[], outputs={"INCLUDE": "include"})))
     for f, text in (extra or {}).items():
         TR.w(repo, f[len(T):], text)
     adm["roots"].sort(key=lambda x: x["path"])
@@ -89,30 +94,30 @@ def main():
     L2 = {"b.c": "int fb(void) { return 2; }\n"}
     r, out = run(mkrepo("one", {T + "lib1": (LIB_REC, L1), T + "lib2": (LIB_REC, L2)}), "one")
     check("one definition per name across two linked roots: green", r and r["status"] == "green", (r, out[-300:]))
-    r, out = run(mkrepo("strong", {T + "lib1": (LIB_REC, {"a.c": "int dup(void) { return 1; }\n"}), T + "lib2": (LIB_REC, {"b.c": "int dup(void) { return 2; }\n"})}), "strong")
-    check("a strong duplicate in two roots is red (dup-def)", r and r["status"] == "red" and "dup-def" in r["detail"], (r, out[-300:]))
+    r, out = run(mkrepo("strong", {T + "lib1": (LIB_REC, {"pull.c": "int pull_lib1(void) { return 0; }\n" + "int dup(void) { return 1; }\n"}), T + "lib2": (LIB_REC, {"pull.c": "int pull_lib2(void) { return 0; }\n" + "int dup(void) { return 2; }\n"})}), "strong")
+    check("a strong duplicate in two roots is red (the image link refuses it: build red at the link stage)", r and r["status"] == "red" and "build red (stage ld:" in r["detail"], (r, out[-300:]))
     wk = "__attribute__((weak)) int dup(void) { return %d; }\n"
-    r, out = run(mkrepo("weak", {T + "lib1": (LIB_REC, {"a.c": wk % 1}), T + "lib2": (LIB_REC, {"b.c": wk % 2})}), "weak")
+    r, out = run(mkrepo("weak", {T + "lib1": (LIB_REC, {"pull.c": "int pull_lib1(void) { return 0; }\n" + wk % 1}), T + "lib2": (LIB_REC, {"pull.c": "int pull_lib2(void) { return 0; }\n" + wk % 2})}), "weak")
     check("a weak duplicate in two roots is red (dup-def)", r and r["status"] == "red" and "dup-def" in r["detail"], (r, out[-300:]))
-    r, out = run(mkrepo("mixed", {T + "lib1": (LIB_REC, {"a.c": "int dup(void) { return 1; }\n"}), T + "lib2": (LIB_REC, {"b.c": wk % 2})}), "mixed")
+    r, out = run(mkrepo("mixed", {T + "lib1": (LIB_REC, {"pull.c": "int pull_lib1(void) { return 0; }\n" + "int dup(void) { return 1; }\n"}), T + "lib2": (LIB_REC, {"pull.c": "int pull_lib2(void) { return 0; }\n" + wk % 2})}), "mixed")
     check("a strong and a weak definition in two roots is red (dup-def)", r and r["status"] == "red" and "dup-def" in r["detail"], (r, out[-300:]))
     r, out = run(mkrepo("same", {T + "lib1": (LIB_REC, {"a.c": "int dup(void) { return 1; }\nint dup2(void) { return 3; }\n"}), T + "lib2": (LIB_REC, L2)}), "same")
     check("one root defining a name once is green", r and r["status"] == "green", (r, out[-300:]))
 
-    hdr = {T + "hdr/h.inc": H_INC}
-    HI = [T + "hdr"]
-    shared = {T + "lib1": (dict(LIB_REC, include=HI, flags={"c": FL, "cxx": [], "asm": ["-DK=1"]}), {"a.S": COMDAT_S + "// lib1\n"}),
-              T + "lib2": (dict(LIB_REC, include=HI, flags={"c": FL, "cxx": [], "asm": ["-DK=1"]}), {"b.S": COMDAT_S + "// lib2\n"})}
+    hdr = {T + "hdr/include/h.inc": H_INC}
+    HI = [T + "hdr/include"]
+    shared = {T + "lib1": (dict(LIB_REC, include=HI, flags={"c": FL, "cxx": [], "asm": ["-DK=1"]}), {"pull.S": ".globl pull_lib1\npull_lib1: ret\n" + COMDAT_S + "// lib1\n"}),
+              T + "lib2": (dict(LIB_REC, include=HI, flags={"c": FL, "cxx": [], "asm": ["-DK=1"]}), {"pull.S": ".globl pull_lib2\npull_lib2: ret\n" + COMDAT_S + "// lib2\n"})}
     r, out = run(mkrepo("comdat-ok", shared, hdr), "cok")
     check("a COMDAT from one shared header in two roots is green; one shared header included by two roots is green", r and r["status"] == "green", (r, out[-300:]))
-    diff = {T + "lib1": shared[T + "lib1"], T + "lib2": (dict(LIB_REC, include=HI, flags={"c": FL, "cxx": [], "asm": ["-DK=2"]}), {"b.S": COMDAT_S + "// lib2\n"})}
+    diff = {T + "lib1": shared[T + "lib1"], T + "lib2": (dict(LIB_REC, include=HI, flags={"c": FL, "cxx": [], "asm": ["-DK=2"]}), {"pull.S": ".globl pull_lib2\npull_lib2: ret\n" + COMDAT_S + "// lib2\n"})}
     r, out = run(mkrepo("comdat-diff", diff, hdr), "cdiff")
     check("a COMDAT with different flags in two roots is red (comdat-differs)", r and r["status"] == "red" and "comdat-differs" in r["detail"], (r, out[-300:]))
 
     body = "int fcopy(void) { return 9; }\n"
     r, out = run(mkrepo("unitcopy", {T + "lib1": (LIB_REC, {"a.c": body}), T + "lib2": (LIB_REC, {"b.c": body})}), "uc")
     check("a source file copied into a second root (same sha256, new path) is red (unit-copy)", r and r["status"] == "red" and "unit-copy" in r["detail"], (r, out[-300:]))
-    r, out = run(mkrepo("hdrcopy", {T + "lib1": (LIB_REC, L1), T + "lib2": (LIB_REC, L2)}, {T + "hdr/h.inc": H_INC, T + "lib1/copy.inc": H_INC}), "hc")
+    r, out = run(mkrepo("hdrcopy", {T + "lib1": (LIB_REC, L1), T + "lib2": (LIB_REC, L2)}, {T + "hdr/include/h.inc": H_INC, T + "lib1/copy.inc": H_INC}), "hc")
     check("a header copied under a new path is red (header-copy)", r and r["status"] == "red" and "header-copy" in r["detail"], (r, out[-300:]))
 
     import shutil

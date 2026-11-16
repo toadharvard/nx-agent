@@ -180,7 +180,9 @@ check("tests: a test file does not see the gate's GATE_* variables", rc == 0 and
 
 # ---- gates.d
 sys.path.insert(0, VERIFY)
-import gatesdir  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gatesdir  # noqa: E402
 spec = gatesdir.load_dir(os.path.join(VERIFY, "gates.d"))
 files_d = sorted(f[:-5] for f in os.listdir(os.path.join(VERIFY, "gates.d")))
 check("gates.d: no gates.json is tracked and every file is one gate named like it", not os.path.exists(os.path.join(VERIFY, "gates.json"))
@@ -190,7 +192,7 @@ check("gates.d: every gate file declares valid covers", all(isinstance(g.get("co
 byname = {g["name"]: g for g in spec["gates"]}
 CONTRACT = ["n1", "n2_data", "n2_call", "n2_vcall", "xc", "xunit", "rtti", "pcrel", "bodysel", "abs", "disp", "reach", "reachlink", "gpa"]
 dirs_pure = byname["pure"]["argv"][3:]
-dirs_tests = [a.rsplit("/", 1)[-1] for a in byname["selftests"]["argv"][5:]]
+dirs_tests = [a.rsplit("/", 1)[-1] for a in byname["selftests"]["argv"][7:]]
 check("gates.d: contract gates run gate_contract.py --gate NAME", all(byname[n]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_contract.py", "--gate", n] and byname[n]["result"] == n + ".json" for n in CONTRACT), spec)
 check("gates.d: format and the gates", spec["format"] == "fnvnx-gates/1" and {"pure", "selftests", "admit", "oracle", "exepin", "assumptions", "build", "objstub", "linkstrict", "determinism", "argordergate", "imports", "machine", "hostapi", "datamodel", "d3d9total", "abi", "namegate", "r7"}.union(CONTRACT) <= set(byname) and {"order", "addr32", "eh"} <= set(byname)
       and all(byname[n]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_%s.py" % n] and byname[n]["result"] == n + ".json"
@@ -199,10 +201,10 @@ check("gates.d: format and the gates", spec["format"] == "fnvnx-gates/1" and {"p
       and byname["datamodel"]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_datamodel.py"] and byname["datamodel"]["result"] == "datamodel.json"
       and byname["d3d9total"]["argv"] == ["python3", "-I", "ports/fnv-nx/render/total/gate_d3d9total.py"] and byname["d3d9total"]["result"] == "d3d9total.json"
       and byname["pure"]["result"] == "pure.json" and byname["selftests"]["result"] == "selftests.json"
-      and dirs_pure == [] and dirs_tests == ["verify", "farm", "contract", "link", "rules", "lift", "gates", "total", "manifest"]
+      and dirs_pure == [] and dirs_tests == []
       and all(byname[n]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_lift.py", "--gate", n] and byname[n]["result"] == n + ".json" for n in ("order", "addr32", "eh"))
       and byname["pure"]["argv"][:3] == ["python3", "-I", "ports/fnv-nx/verify/gate_pure.py"]
-      and byname["selftests"]["argv"][:5] == ["python3", "-I", "ports/fnv-nx/verify/gate_tests.py", "--jobs", "3"], spec)
+      and byname["selftests"]["argv"][:7] == ["python3", "-I", "ports/fnv-nx/verify/gate_tests.py", "--timeout-s", "900", "--jobs", "3"], spec)
 
 # ---- l1
 def l1(*a):
@@ -323,7 +325,7 @@ check("l1 merge: dropping a gate is blocked by the ratchet", rc == 2 and "ratche
 # ---- environment of the verdict (envcheck first, env_id in the verdict, merge needs the same env_id)
 ENVF = os.path.join(VERIFY, "env.json")
 sys.path.insert(0, VERIFY)
-import envcheck  # noqa: E402
+from fnvnx.verify import envcheck  # noqa: E402
 want_id = envcheck.env_id(json.load(open(ENVF)))
 r = small_repo()
 vd = tmp("verdicts")
@@ -554,7 +556,7 @@ check("l1 verdict: gates get GATE_CACHE=VDIR/cache; same tree again reuses the k
 # ---- l1 merge --remote: the remote branch moves only from BASE to the judged merge commit, atomically
 import contextlib  # noqa: E402
 import io  # noqa: E402
-import l1 as l1mod  # noqa: E402
+from fnvnx.verify import l1 as l1mod  # noqa: E402
 
 def l1_inproc(*a, hook=None):
     """l1.main in this process (so a hook can stand in for the verdict step); returns (rc, stdout)."""

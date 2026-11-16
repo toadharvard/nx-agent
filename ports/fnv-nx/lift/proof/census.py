@@ -13,8 +13,10 @@ The ranges are authoritative: exactly the listed byte ranges are decoded (each d
 not decode to whole instructions is an ERROR: it is listed in the header (`# undecodable lo-hi stopped_at=`), the instructions decoded before the
 failure are kept, and the exit status is 1.  A range outside the file's section data, or an instruction the shape rule cannot mask, aborts.
 The family is computed for EVERY decoded instruction (not for the first of its shape); a key that gets two families makes the census fail (ValueError listing the key, the families and the lowest address of each), so
-the family is a function of the key over the whole census by checking the finite set, not by an assumption; the representative encoding is decoded again and must give the same shape and family.  The form key is that of the REPRESENTATIVE (capstone names the predicate of cmpps/cmppd/cmpss/cmpsd by the
+the family is a function of the key over the whole census by checking the finite set, not by a premise; the representative encoding is decoded again and must give the same shape and family.  The form key is that of the REPRESENTATIVE (capstone names the predicate of cmpps/cmppd/cmpss/cmpsd by the
 value of the imm8, so the mnemonic of an occurrence is not a function of the shape; the representative has imm8 = 0)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import hashlib
 import os
 import struct
@@ -22,7 +24,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from proof import forms, shape  # noqa: E402
+from fnvnx.lift.proof import forms, shape  # noqa: E402
 
 BASE_HDR = '# base='
 
@@ -34,9 +36,10 @@ def sha_file(path):
 
 def tool_sha():
     h = hashlib.sha256()
-    for n in ('shape.py', 'census.py'):
-        with open(os.path.join(HERE, n), 'rb') as fh:
-            h.update(fh.read())
+    with open(os.path.join(HERE, 'shape.py'), 'rb') as fh:
+        h.update(fh.read())
+    with open(os.path.join(HERE, 'census.py'), 'rb') as fh:
+        h.update(fh.read())
     return h.hexdigest()
 
 

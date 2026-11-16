@@ -53,12 +53,13 @@ import os
 import struct
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import declareddlls
-import dllkind
-import exepin
-import gatefile
-import iat
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name (contract.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract import declareddlls
+from fnvnx.contract import dllkind
+from fnvnx.contract import exepin
+from fnvnx.contract import gatefile
+from fnvnx.contract import iat
 
 PAGE = 0x1000
 ALIGN = 0x10000
@@ -331,6 +332,8 @@ def closure(exe, system, mods, declared=frozenset()):
     def visit(dll_names):
         for raw in dll_names:
             name = iat.norm_dll(raw)
+            if dllkind.is_runtime(name):
+                raise StageError('import of the runtime\'s own module %s: it is no image, no module imports it' % raw)
             if name in system or name in declared or name in seen:   # a module still being visited: the cycle edge is not followed
                 continue
             if name not in mods:
@@ -443,7 +446,7 @@ def run(exe_path, bridge_path, dirs, out, declared_path, c_out=None, keys_out=No
     exe = PE(exe_bytes, exepin.NAME)
     brows, _ = iat.bridge_rows(bridge_path)
     bridge = [(r['dll'], r['name'], r['conv'], r['ordinal']) for r in brows]
-    system = {r['dll'] for r in brows}
+    system = {r['dll'] for r in brows if not dllkind.is_runtime(r['dll'])}   # the runtime's own module has keyed rows but is no system dll: no handle, 126
     wine = declareddlls.read(declared_path)         # the dlls of the declared machine (Wine 9.0)
     mods = scan(dirs, system)
     me = lower(exepin.NAME)

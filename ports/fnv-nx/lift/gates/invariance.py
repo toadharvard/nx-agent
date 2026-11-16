@@ -21,14 +21,16 @@ RULES (each is what makes a stop red, never green):
     cost a green, never give one.
 Assumptions: ASM-003 (Win32 as documented: no red zone; ESP lies in user space, 0x10000 <= ESP <= 0xFFFF0000, so a push never wraps the address space), ASM-009 (the Forms, certified against the Sail model, are the instruction semantics; z3 is among the
 pinned formal tools)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import z3
 
-from fnvlift import dsl
-from proof import forms
+from fnvnx.lift.fnvlift import dsl
+from fnvnx.lift.proof import forms
 
 MAXI, MAXP, TIMEOUT_MS = 48, 64, 4000
 REGS = dsl.REGS

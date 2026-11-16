@@ -2,16 +2,18 @@
 """MEASUREMENT, not a test and not part of any certificate (CPUREF, CLAUDE.md "One fixed reference CPU model"): the rows of simdspec.py run against the CPU this script runs on, which is
 meaningful only on the pinned reference host.  The very bytes of a row run between ldmxcsr and stmxcsr; value, MXCSR flags and the general-register result are compared with the spec.
 No Unicorn / QEMU (a second path, deleted).  The result is a report: FpRows (add sub mul div min max sqrt cmp comis), CvtRows, MxcsrRows.     python3 -I measure_simd_host.py"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, random, sys, unittest
 import z3
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE)); sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'tests'))
-import simdspec as S
+import fnvnx.lift.proof.simdspec as S
 K = S.K
 N = int(os.environ.get('SIMD_N', '12'))
 FPN = int(os.environ.get('SIMD_FPN', '40'))
 
 
-from test_simdspec import enc_of, val
+from fnvnx.lift.proof.tests.test_simdspec import enc_of, val
 
 
 def fpval(rng, w):

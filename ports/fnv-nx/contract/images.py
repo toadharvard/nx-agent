@@ -12,10 +12,11 @@ Order: the exe, the images reached from the exe in discovery order (depth first,
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import dllkind  # noqa: E402
-import iat  # noqa: E402
-import modules  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name (contract.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract import dllkind  # noqa: E402
+from fnvnx.contract import iat  # noqa: E402
+from fnvnx.contract import modules  # noqa: E402
 
 
 def classify(exe_path, dirs, bridge=frozenset()):

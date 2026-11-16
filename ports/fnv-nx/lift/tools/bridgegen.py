@@ -37,9 +37,11 @@ THE TABLE: key = FNV-1a (32 bit) of the descriptor's bytes; all keys must differ
 of rt/dispatch.c: slot = ((k ^ g[(k*K1) >> (32-NBITS)]) * K2) >> (32-TBITS).  Every slot of a non-empty set is a bridge; the hash is exact over the set, and a
 string outside it cannot reach the lookup (see rt/dispatch.c).
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, re, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))      # the hash lives in this tool root: a tool imports only from its own root
-import phf
+import fnvnx.lift.tools.phf as phf
 
 M = 0xffffffff
 

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""lift/pack/build.json is a pure function of liftgen.recipe: regenerate it from the external it names (ref, commit, tree_sha256) into a scratch file and diff
+"""lift/pack/build.json is a pure function of liftrecipe.recipe: regenerate it from the external it names (ref, commit, tree_sha256) into a scratch file and diff
 it against the tracked file. A hand edit (a duplicate key, a stale plugin_cxx, a plugin entry with source/args) is red."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json
 import os
 import sys
@@ -9,7 +11,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIFT = os.path.normpath(os.path.join(HERE, '..', '..'))
 sys.path.insert(0, os.path.join(LIFT, 'tools'))
-import liftgen
+import fnvnx.lift.tools.liftrecipe as liftrecipe
 
 TRACKED = os.path.join(LIFT, 'pack', 'build.json')
 
@@ -25,12 +27,12 @@ def main():
     e = doc['external'][0]
     with tempfile.TemporaryDirectory() as t:
         out = os.path.join(t, 'build.json')
-        liftgen.recipe(e['ref'], e['commit'], e['tree_sha256'], out)
+        liftrecipe.recipe(e['ref'], e['commit'], e['tree_sha256'], out)
         if open(out).read() != raw:
-            bad.append('lift/pack/build.json differs from liftgen.recipe(%s, %s, %s): regenerate it with `liftgen.py --recipe REF COMMIT TREE`' % (e['ref'], e['commit'][:12], e['tree_sha256'][:12]))
+            bad.append('lift/pack/build.json differs from liftrecipe.recipe(%s, %s, %s): regenerate it with `liftrecipe.py REF COMMIT TREE`' % (e['ref'], e['commit'][:12], e['tree_sha256'][:12]))
     for b in bad:
         print('FAIL', b)
-    print('FAIL' if bad else 'PASS', 'pack build.json == liftgen.recipe')
+    print('FAIL' if bad else 'PASS', 'pack build.json == liftrecipe.recipe')
     return 1 if bad else 0
 
 

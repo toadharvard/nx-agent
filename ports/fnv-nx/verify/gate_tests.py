@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Gate "selftests" (fnvnx-gate/1): every test file of the given directories passes.
-    python3 -I gate_tests.py [--timeout-s N] [--jobs N] [--cache DIR] [--key-dirs D...] [--] DIR...
+    python3 -I gate_tests.py [--timeout-s N] [--jobs N] [--cache DIR] [--key-dirs D...] [--] [DIR...]
 Run in the checkout root with env GATE_OUT; writes GATE_OUT/selftests.json (+ GATE_OUT/selftests.times.json).
-Universe: DIR/tests/test_*.py for each DIR given (a missing DIR contributes nothing), in argument order, each DIR's files
-sorted by name; items are repo-relative paths. Each file runs as `python3 -I FILE` in the checkout with a per-file timeout
+Universe, by one rule over the tree: tests/test_*.py of every root of verify/admit.json (in root order, each root's files sorted by name; a new test file under an
+admitted root is inside with no edit of any gate file); items are repo-relative paths. DIRs on the command line replace the admitted roots (a fixture's scan directories, never the
+product gate: verify/gates.d/selftests.json names none). Each file runs as `python3 -I FILE` in the checkout with a per-file timeout
 (default 300 s; a timeout kills the process group and is a failure). Certified: exit status 0. No skip logic: a test that
 cannot run in this environment (root, namespaces, strace) is uncertified. Zero files: green, universe 0. Exit 0 iff green.
 --jobs N (default 1): N test files run at once, each in its own process; results are reported in sorted universe order.
@@ -30,9 +31,12 @@ cannot run in this environment (root, namespaces, strace) is uncertified. Zero f
   wide key; the entry is keyed by the content of the mount (path and sha256 of every file), so a change outside the mount does not run the file again.
   CUT: a test file whose import closure names a root (a recipe directory, or tests/<name> of class test) that verify/admit.json does not admit belongs to the cut
   of the branch: it is outside the universe (gate oracle judges the same list) and the detail lists `cut:test:<file> (root <r>)`. Detail of a green run: `N of M test files pass, K cached`.
-A test that needs game data declares it in DIR/tests/inputs.json ({"format": "fnvnx-selftest-inputs/1", "tests": {"test_x.py": ["exe"]}}); the names
-are externals of verify/contract_inputs.json (commit + tree_sha256, fetched like a recipe's external). The test gets FNVNX_INPUT_<NAME> = the checked-out
-directory. If the input cannot be fetched or its tree hash differs, the file's status is `blocked-env`: uncertified (the gate is red), never skipped.
+A test that needs game data declares it in DIR/tests/inputs.json ({"format": "fnvnx-selftest-inputs/1", "tests": {"test_x.py": ["exe", {"root": R, "output": NAME}]}}); a name is an
+external of verify/contract_inputs.json (commit + tree_sha256, fetched like a recipe's external). The test gets FNVNX_INPUT_<NAME> = the checked-out directory. If the input cannot be
+fetched or its tree hash differs, the file's status is `blocked-env`: uncertified (the gate is red), never skipped.
+A PRODUCED input {"root": R, "output": NAME} is the declared output NAME of admitted root R (the `outputs` of its recipe, the `uses` form of recipe.py): the gate builds R through the
+recipe in GATE_CACHE (an unchanged root is a cache hit) and the test gets FNVNX_INPUT_<NAME> = the published output, whose hash (the output's tree hash) is the input's pin in the key.
+Red (status `failed`, with the cause): R is not admitted; R does not declare NAME; R's build is red (failing stage and diagnostics); two inputs of one NAME.
 Result extra key "files": [{"name","seconds","status"[,"reason"]}] (status passed|failed|cached; reason of a failed file: exit status or
 timeout, names left in its TMPDIR, the exception/errno text and the tail of its output); same list in selftests.times.json.
 TMPDIR rule: each test file runs with TMPDIR = a fresh directory of its own under the gate's temporary directory. The gate removes it
@@ -54,24 +58,73 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import cas  # noqa: E402
-import envcheck  # noqa: E402
-import opentrace  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import envcheck  # noqa: E402
+from fnvnx.verify import opentrace  # noqa: E402
 
 CACHE_FORMAT = "fnvnx-selftests-cache/2"   # one entry per test file: its key, its read set (or the whole-directory trees of an untraced file)
 KEEP = 8   # entries kept per key (the states of the read set seen on recent commits)
 
 PINS = "ports/fnv-nx/verify/contract_inputs.json"   # the pins of the declared inputs (the one registry of content-pinned fnv-nx-build inputs)
 
+def input_name(e):
+    """The NAME of a declared input entry: a string (an external of contract_inputs.json) or {"root": R, "output": NAME} (a produced input: the declared output NAME of admitted root R)."""
+    return e if isinstance(e, str) else e["output"]
+
+def valid_entry(e):
+    return (isinstance(e, str) and bool(e)) or (isinstance(e, dict) and set(e) == {"root", "output"} and all(isinstance(e[k], str) and e[k] for k in e))
+
 def declared_inputs(path):
-    """{test file: [input names]} from DIR/tests/inputs.json ("fnvnx-selftest-inputs/1": {"tests": {"test_x.py": ["exe"]}}); {} if the file is absent."""
+    """[input entries] of a test file from DIR/tests/inputs.json ("fnvnx-selftest-inputs/1": {"tests": {"test_x.py": ["exe", {"root": R, "output": NAME}]}}); [] if the file is absent
+    or names none; None if the file is not valid (a bad entry, or two inputs of one NAME: they would share FNVNX_INPUT_<NAME>)."""
     try:
         doc = json.load(open(os.path.join(os.path.dirname(path), "inputs.json")))
-        return {n: list(v) for n, v in doc["tests"].items()}.get(os.path.basename(path), []) if doc["format"] == "fnvnx-selftest-inputs/1" else None
+        if doc["format"] != "fnvnx-selftest-inputs/1":
+            return None
+        ent = list(doc["tests"].get(os.path.basename(path), []))
+        if not all(valid_entry(e) for e in ent) or len({input_name(e) for e in ent}) != len(ent):
+            return None
+        return ent
     except OSError:
         return []
     except (ValueError, KeyError, TypeError, AttributeError):
         return None
+
+def produced_input(entry, cache, repo="."):
+    """(host path, output sha256) of the produced input {"root": R, "output": NAME}, or a string: why not. R is built through the recipe in the GATE_CACHE store (gate_build.ensure: a
+    green build is published once, an unchanged root is a cache hit) and its declared output NAME is taken from the published build. Red: R is not admitted, R does not declare NAME, R's
+    build is red (its failing stage and diagnostics)."""
+    from fnvnx.verify import gate_build
+    from fnvnx.verify import recipe
+    r, n = entry["root"], entry["output"]
+    adm = admitted_roots()
+    if adm is None or r not in adm:
+        return "produced input %s of root %s: the root is not admitted (verify/admit.json)" % (n, r)
+    try:
+        roots = recipe.load_admit(repo)
+        outs = recipe.root_outputs(roots, r, repo)[0]   # the one accessor of what a `uses` entry names: a recipe's `outputs`, or the implicit INCLUDE of a header root
+    except (KeyError, OSError, ValueError, AttributeError, TypeError) as x:
+        return "produced input %s of root %s: its recipe cannot be read: %s: %s" % (n, r, type(x).__name__, x)
+    if n not in outs:
+        return "produced input %s: root %s does not declare the output" % (n, r)
+    if roots[r].get("class") == "header":   # no recipe and no stage: the output is the root's own directory, keyed by its tree hash
+        d = os.path.abspath(os.path.join(repo, r))
+        return d, cas.tree_hash(d, skip=("__pycache__",))
+    try:
+        res, _out = gate_build.ensure(r, cache, repo)
+    except recipe.EnvBlocked as x:
+        return "produced input %s of root %s: this machine is not the declared environment: %s" % (n, r, "; ".join(x.errors)[:300])
+    except recipe.RecipeError as x:
+        return "produced input %s of root %s: invalid recipe: %s" % (n, r, "; ".join(x.errors)[:300])
+    if res["status"] != "green":
+        f = res.get("failure") or {}
+        return "produced input %s: root %s build is red: stage %s exit %s: %s" % (n, r, f.get("stage"), f.get("exit"), " | ".join(f.get("stderr", [])[-3:])[:300])
+    try:
+        return gate_build.published_output(cache, r, n, repo)
+    except LookupError as x:
+        return "produced input %s of root %s: %s" % (n, r, x)
 
 TRACERS = ("envcheck", "opentrace", "oraclecheck")   # the modules of the tree that run strace (grep "strace" over the tree's non-test modules: the one source of the rule below)
 _MODS = {}
@@ -201,8 +254,8 @@ def mount_make(files, dest):
             shutil.copy2(a, t)
 
 def fetch_inputs(names, cache, ws):
-    """{FNVNX_INPUT_<NAME>: host dir} of the pinned externals NAMES (recipe.fetch_externals, commit + tree_sha256 checked), or a string: why not."""
-    import recipe
+    """{FNVNX_INPUT_<NAME>: host dir} of the pinned externals NAMES (strings) (recipe.fetch_externals, commit + tree_sha256 checked), or a string: why not."""
+    from fnvnx.verify import recipe
     try:
         pins = {e["name"]: e for e in json.load(open(PINS))["external"]}
         ext = [pins[n] for n in names]
@@ -231,7 +284,7 @@ def guest_externals():
 def fetch_guest(cache, ws):
     """{FNVNX_EXTCACHE: the cache dir of the externals, FNVNX_INPUT_GUEST: the compiler's checked-out tree} of the guest pin (recipe.fetch_externals, commit + tree_sha256 checked), or a
     string: why not. A test that runs the recipe finds the compiler in FNVNX_EXTCACHE (recipe.build's default external cache), so no test fetches it again."""
-    import recipe
+    from fnvnx.verify import recipe
     exts = guest_externals()
     if not exts:
         return {}
@@ -266,7 +319,9 @@ def run_one(path, timeout, base, idx, extra=None, trace=None, cwd=None):
                                  start_new_session=True, env=env, cwd=cwd)
             try:
                 rc = p.wait(timeout=timeout)
-                if rc:
+                if rc < 0:
+                    why.append("killed by signal %d (%s)" % (-rc, signal.Signals(-rc).name if -rc in {int(x) for x in signal.Signals} else "?"))
+                elif rc:
                     why.append("exit %d" % rc)
             except subprocess.TimeoutExpired:
                 why.append("timeout %gs" % timeout)
@@ -464,18 +519,25 @@ def split_cut(files):
         (cut if c else keep).append((f, c) if c else f)
     return keep, cut
 
-def universe(dirs):
-    """the test files of the doc comment's universe (gate "oracle" judges the same list): every tests/test_*.py of the scanned directories minus the cut (split_cut)"""
-    files = []
-    for d in dirs:
-        files += sorted(os.path.normpath(f) for f in glob.glob(os.path.join(glob.escape(d), "tests", "test_*.py")))
-    return split_cut(files)[0]
+def scan_dirs(dirs):
+    """The directories whose tests/test_*.py are the universe: DIRS when a fixture names them, else the admitted roots of verify/admit.json (admitted_roots; sorted). One rule over the
+    tree: a new test file under an admitted root is inside without an edit of any gate file."""
+    if dirs:
+        return list(dirs)
+    return sorted(admitted_roots() or [])
 
-def cut_lines(dirs):
+def listed(dirs):
     files = []
-    for d in dirs:
+    for d in scan_dirs(dirs):
         files += sorted(os.path.normpath(f) for f in glob.glob(os.path.join(glob.escape(d), "tests", "test_*.py")))
-    return ["cut:test:%s (root %s)" % (f, ", ".join(r)) for f, r in split_cut(files)[1]]
+    return files
+
+def universe(dirs=()):
+    """the test files of the doc comment's universe (gate "oracle" judges the same list): every tests/test_*.py of every admitted root minus the cut (split_cut)"""
+    return split_cut(listed(dirs))[0]
+
+def cut_lines(dirs=()):
+    return ["cut:test:%s (root %s)" % (f, ", ".join(r)) for f, r in split_cut(listed(dirs))[1]]
 
 def main(argv):
     o, dirs = parse(argv)
@@ -488,16 +550,31 @@ def main(argv):
         pinned = {e["name"]: e for e in json.load(open(PINS))["external"]}
     except (OSError, ValueError, KeyError, TypeError):
         pinned = {}
-    plan = {}   # file -> (key, untraced, input names)
+    plan = {}   # file -> (key, untraced, entries, mount files, mount digest, produced {FNVNX_INPUT_<NAME>: path} or a string: why not)
+    tmpc = None if o["cache"] else tempfile.mkdtemp(prefix="selftests-prod-")   # no cache: produced inputs are built into the gate's own scratch store
+    built = {}
     for f in files:
-        names = declared_inputs(f)
+        ents = declared_inputs(f)
+        names = None if ents is None else [e for e in ents if isinstance(e, str)]
         pins = [[n, pinned.get(n, {}).get("commit"), pinned.get(n, {}).get("tree_sha256")] for n in (names or [])]
+        prod = {}
+        for e in (ents or []):
+            if isinstance(e, dict):
+                k = (e["root"], e["output"])
+                if k not in built:
+                    built[k] = produced_input(e, o["cache"] or tmpc)
+                got = built[k]
+                if isinstance(got, str):
+                    prod = got
+                    break
+                prod["FNVNX_INPUT_" + e["output"].upper()] = got[0]
+                pins.append(["output:%s:%s" % k, None, got[1]])   # the key holds the output's tree hash
         un = untraced_of(f)
         if un:
             pins += [["guest:" + e["name"], e["commit"], e["tree_sha256"]] for e in guest_externals()]
         mf = mount_files(f) if un else None
-        plan[f] = (key_of(f, sargv, pins, eid), un, names, mf, mount_digest(mf, st) if un else None)
-    hit = {f for f in files if o["cache"] and plan[f][2] is not None and lookup(o["cache"], plan[f][0], st, whole_dirs, plan[f][4])}
+        plan[f] = (key_of(f, sargv, pins, eid), un, ents, mf, mount_digest(mf, st) if un else None, prod)
+    hit = {f for f in files if o["cache"] and plan[f][2] is not None and not isinstance(plan[f][5], str) and lookup(o["cache"], plan[f][0], st, whole_dirs, plan[f][4])}
     todo = [f for f in files if f not in hit]
     res = {}
     if todo:
@@ -508,9 +585,12 @@ def main(argv):
 
         def one(a):
             idx, f = a
-            key, untraced, names, mfiles, mdig = plan[f]
-            if names is None:
+            key, untraced, ents, mfiles, mdig, prod = plan[f]
+            if ents is None:
                 return "failed", 0.0, "tests/inputs.json is not a valid fnvnx-selftest-inputs/1 file"
+            if isinstance(prod, str):
+                return "failed", 0.0, prod
+            names = [e for e in ents if isinstance(e, str)]
             extra = None
             if untraced:   # a file that runs the recipe finds the game's compiler mounted (the guest pin), fetched once into the gate's cache
                 got = fetch_guest(o["cache"], ws)
@@ -522,6 +602,8 @@ def main(argv):
                 if isinstance(got, str):
                     return "blocked-env", 0.0, got
                 extra = dict(extra or {}, **got)
+            if prod:
+                extra = dict(extra or {}, **prod)
             tracing = bool(o["cache"]) and not untraced
             if tracing and shutil.which("strace") is None:
                 return "failed", 0.0, "strace is not installed: the read set of the file cannot be recorded"
@@ -553,6 +635,8 @@ def main(argv):
                     res[f] = r
         finally:
             shutil.rmtree(base, ignore_errors=True)
+    if tmpc:
+        shutil.rmtree(tmpc, ignore_errors=True)
     rows = []
     for f in files:
         if f in hit:
@@ -573,8 +657,8 @@ def main(argv):
     if blocked:
         detail += "; blocked: env (declared input not available) for " + ", ".join(blocked)
     res = {"format": "fnvnx-gate/1", "name": "selftests", "status": status, "universe": len(files), "certified": n,
-           "uncertified": unc[:50], "detail": detail, "files": rows,
-           "reasons": {r["name"]: r["reason"] for r in rows if r["status"] in ("failed", "blocked-env") and r.get("reason") and r["name"] in unc[:50]}}
+           "uncertified": unc, "detail": detail, "files": rows,
+           "reasons": {r["name"]: r["reason"] for r in rows if r["status"] in ("failed", "blocked-env") and r.get("reason") and r["name"] in unc}}
     out = os.environ["GATE_OUT"]
     with open(os.path.join(out, "selftests.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)

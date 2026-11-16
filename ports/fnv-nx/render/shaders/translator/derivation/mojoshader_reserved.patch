@@ -1,0 +1,137 @@
+diff --git a/fnvnx_sm_check.h b/fnvnx_sm_check.h
+index 4ab658a..91a4234 100644
+--- a/fnvnx_sm_check.h
++++ b/fnvnx_sm_check.h
+@@ -6,7 +6,7 @@
+  * mojoshader_internal.h and carries, for every row, emit_<PROFILE>_<op> of every compiled profile (a missing emitter is a link error):
+  *   - the row's NAME is an enumerator built from that list (an unknown NAME is an undeclared identifier);
+  *   - the position of the NAME's entry in the list equals the opcode value (instructions[] is indexed by the opcode token), so a removed,
+- *     moved or RESERVED entry (a RESERVED entry has an empty emitter and fails only at run time) is a failed _Static_assert;
++ *     moved or RESERVED entry (a RESERVED entry has no emitter: INSTRUCTION_UNASSIGNED) is a failed _Static_assert;
+  *   - the entry's shader-type mask contains the row's stage;
+  *   - comparison forms: the control value of the form equals the one the comparison tables of the glsl profile are indexed by;
+  *   - token-level commands (phase) take their token value from the row, the parser compares with it.
+@@ -35,6 +35,7 @@ enum
+     FNVNX_OPIDX_ORIGIN,   /* the entry at position p of the list is FNVNX_OPIDX_ORIGIN + 1 + p (enumerators count up from here) */
+     #define INSTRUCTION_STATE(op, opstr, slots, a, t, w) FNVNX_OPIDX_##op,
+     #define INSTRUCTION(op, opstr, slots, a, t, w) FNVNX_OPIDX_##op,
++    #define INSTRUCTION_UNASSIGNED(op, slots, a, t, w) FNVNX_OPIDX_##op,
+     #define MOJOSHADER_DO_INSTRUCTION_TABLE 1
+     #include "mojoshader_internal.h"
+     FNVNX_OPIDX_END_
+@@ -44,6 +45,7 @@ enum
+ {
+     #define INSTRUCTION_STATE(op, opstr, slots, a, t, w) FNVNX_OPTYPE_##op = (t),
+     #define INSTRUCTION(op, opstr, slots, a, t, w) FNVNX_OPTYPE_##op = (t),
++    #define INSTRUCTION_UNASSIGNED(op, slots, a, t, w) FNVNX_OPTYPE_##op = (t),
+     #define MOJOSHADER_DO_INSTRUCTION_TABLE 1
+     #include "mojoshader_internal.h"
+     FNVNX_OPTYPE_END_
+diff --git a/mojoshader.c b/mojoshader.c
+index ce6afdb..2cd057d 100644
+--- a/mojoshader.c
++++ b/mojoshader.c
+@@ -210,7 +210,6 @@ static inline void adjust_token_position(Context *ctx, const int incr)
+     void emit_##prof##_SETP(Context *ctx); \
+     void emit_##prof##_TEXLDL(Context *ctx); \
+     void emit_##prof##_BREAKP(Context *ctx); \
+-    void emit_##prof##_RESERVED(Context *ctx); \
+     void emit_##prof##_RET(Context *ctx); \
+     const char *get_##prof##_varname(Context *ctx, RegisterType rt, \
+                                      int regnum); \
+@@ -2226,6 +2225,10 @@ static const Instruction instructions[] =
+         opstr, slots, t, parse_args_##a, NULL, PROFILE_EMITTERS(op) \
+     },
+ 
++    #define INSTRUCTION_UNASSIGNED(op, slots, a, t, w) { \
++        NULL, slots, t, parse_args_##a, NULL, { 0 } \
++    },
++
+     #define MOJOSHADER_DO_INSTRUCTION_TABLE 1
+     #include "mojoshader_internal.h"
+ };
+diff --git a/mojoshader_internal.h b/mojoshader_internal.h
+index 123af32..2bda414 100644
+--- a/mojoshader_internal.h
++++ b/mojoshader_internal.h
+@@ -676,6 +676,10 @@ void MOJOSHADER_spirv_link_attributes(const MOJOSHADER_parseData *vertex,
+ // These have to be in the right order! Arrays are indexed by the value
+ //  of the instruction token.
+ 
++// INSTRUCTION_UNASSIGNED is a token value that no D3D9 instruction uses: its opcode_string is NULL, it has no state and NO EMITTER (the profile
++//  tables get zeros). Rule (the table row is the whole proof): parse_instruction_token (mojoshader.c) returns on `opcode_string == NULL`
++//  ("Unknown opcode.") before it reads or calls the emitter, and the emitter pointer is read from this table only, so an emitter for such a
++//  row could never run. Every row of the table with a NULL opcode_string is written with this macro, and only those.
+ // INSTRUCTION_STATE means this opcode has to update the state machine
+ //  (we're entering an ELSE block, etc). INSTRUCTION means there's no
+ //  state, just go straight to the emitters.
+@@ -732,21 +736,21 @@ INSTRUCTION_STATE(BREAKC, "BREAK", 3, SS, MOJOSHADER_TYPE_ANY, 0xF)
+ INSTRUCTION_STATE(MOVA, "MOVA", 1, DS, MOJOSHADER_TYPE_VERTEX, 0xF)
+ INSTRUCTION_STATE(DEFB, "DEFB", 0, DEFB, MOJOSHADER_TYPE_ANY, 0xF)
+ INSTRUCTION_STATE(DEFI, "DEFI", 0, DEFI, MOJOSHADER_TYPE_ANY, 0xF)
+-INSTRUCTION(RESERVED, 0, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
+-INSTRUCTION(RESERVED, 0, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
+-INSTRUCTION(RESERVED, 0, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
+-INSTRUCTION(RESERVED, 0, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
+-INSTRUCTION(RESERVED, 0, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
+-INSTRUCTION(RESERVED, 0, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
+-INSTRUCTION(RESERVED, 0, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
+-INSTRUCTION(RESERVED, 0, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
+-INSTRUCTION(RESERVED, 0, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
+-INSTRUCTION(RESERVED, 0, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
+-INSTRUCTION(RESERVED, 0, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
+-INSTRUCTION(RESERVED, 0, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
+-INSTRUCTION(RESERVED, 0, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
+-INSTRUCTION(RESERVED, 0, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
+-INSTRUCTION(RESERVED, 0, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
++INSTRUCTION_UNASSIGNED(RESERVED, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
++INSTRUCTION_UNASSIGNED(RESERVED, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
++INSTRUCTION_UNASSIGNED(RESERVED, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
++INSTRUCTION_UNASSIGNED(RESERVED, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
++INSTRUCTION_UNASSIGNED(RESERVED, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
++INSTRUCTION_UNASSIGNED(RESERVED, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
++INSTRUCTION_UNASSIGNED(RESERVED, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
++INSTRUCTION_UNASSIGNED(RESERVED, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
++INSTRUCTION_UNASSIGNED(RESERVED, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
++INSTRUCTION_UNASSIGNED(RESERVED, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
++INSTRUCTION_UNASSIGNED(RESERVED, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
++INSTRUCTION_UNASSIGNED(RESERVED, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
++INSTRUCTION_UNASSIGNED(RESERVED, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
++INSTRUCTION_UNASSIGNED(RESERVED, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
++INSTRUCTION_UNASSIGNED(RESERVED, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
+ INSTRUCTION_STATE(TEXCRD, "TEXCRD", 1, TEXCRD, MOJOSHADER_TYPE_PIXEL, 0xF)
+ INSTRUCTION_STATE(TEXKILL, "TEXKILL", 2, D, MOJOSHADER_TYPE_PIXEL, 0xF)
+ INSTRUCTION_STATE(TEXLD, "TEXLD", 1, TEXLD, MOJOSHADER_TYPE_PIXEL, 0xF)
+@@ -758,7 +762,7 @@ INSTRUCTION_STATE(TEXM3X2PAD, "TEXM3X2PAD", 1, DS, MOJOSHADER_TYPE_PIXEL, 0xF)
+ INSTRUCTION_STATE(TEXM3X2TEX, "TEXM3X2TEX", 1, DS, MOJOSHADER_TYPE_PIXEL, 0xF)
+ INSTRUCTION_STATE(TEXM3X3PAD, "TEXM3X3PAD", 1, DS, MOJOSHADER_TYPE_PIXEL, 0xF)
+ INSTRUCTION_STATE(TEXM3X3TEX, "TEXM3X3TEX", 1, DS, MOJOSHADER_TYPE_PIXEL, 0xF)
+-INSTRUCTION(RESERVED, 0, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
++INSTRUCTION_UNASSIGNED(RESERVED, 0, NULL, MOJOSHADER_TYPE_UNKNOWN, 0xF)
+ INSTRUCTION_STATE(TEXM3X3SPEC, "TEXM3X3SPEC", 1, DSS, MOJOSHADER_TYPE_PIXEL, 0xF)
+ INSTRUCTION_STATE(TEXM3X3VSPEC, "TEXM3X3VSPEC", 1, DS, MOJOSHADER_TYPE_PIXEL, 0xF)
+ INSTRUCTION(EXPP, "EXPP", 1, DS, MOJOSHADER_TYPE_ANY, 0xF)
+@@ -784,6 +788,7 @@ INSTRUCTION_STATE(BREAKP, "BREAKP", 3, S, MOJOSHADER_TYPE_ANY, 0xF)
+ #undef MOJOSHADER_DO_INSTRUCTION_TABLE
+ #undef INSTRUCTION
+ #undef INSTRUCTION_STATE
++#undef INSTRUCTION_UNASSIGNED
+ 
+ #endif
+ 
+diff --git a/profiles/mojoshader_profile_glsl.c b/profiles/mojoshader_profile_glsl.c
+index 51a5698..5e3c6ff 100644
+--- a/profiles/mojoshader_profile_glsl.c
++++ b/profiles/mojoshader_profile_glsl.c
+@@ -3805,11 +3805,6 @@ void emit_GLSL_BREAKP(Context *ctx)
+     output_line(ctx, "if (%s) { break; }", src0);
+ } // emit_GLSL_BREAKP
+ 
+-void emit_GLSL_RESERVED(Context *ctx)
+-{
+-    // do nothing; fails in the state machine.
+-} // emit_GLSL_RESERVED
+-
+ #endif  // SUPPORT_PROFILE_GLSL
+ 
+ #pragma GCC visibility pop

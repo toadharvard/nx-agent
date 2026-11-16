@@ -201,6 +201,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 
 HERE, NOP = os.path.dirname(os.path.abspath(__file__)), 0xD503201F
 A64_BUILD = "g++ -std=c++17 -O1 $(llvm-config-18 --cxxflags) a64access.cc -o OUT $(llvm-config-18 --ldflags --libs aarch64 mc mcdisassembler support)"
@@ -297,6 +298,12 @@ def tclass(w):
         return "sys" if (w >> 21) & 7 == 0 and w & 3 else "trap"
     return "trap" if (w >> 25 == 0b1101011 and (w >> 21) & 15 == 4) or w >> 16 == 0 else None
 
+def plain_ordered(w):
+    """LDAR/LDLAR/STLR/STLLR (B, H, W, X): a single register access through [Xn] that only orders (acquire/release). The game's compiler emits every x86-ordered access
+    so (the order plugin), so for the rules here (what a body reads, writes and returns) it is the plain load or store; exclusives (o2 = 0) and CAS (o1 = 1) are not."""
+    return (w >> 24) & 0x3F == 0b001000 and (w >> 23) & 1 == 1 and (w >> 21) & 1 == 0 and (w >> 16) & 31 == 31 and (w >> 10) & 31 == 31
+
+
 def lastkind(w):
     """'call' (BL, BLR*), 'b', 'end' (cannot fall through: BR*, RET*, ERET*, exception generation, UDF), else None."""
     opc = (w >> 21) & 15
@@ -383,7 +390,7 @@ def cfg(words, a, b, rels, obj):
             return None  # BL (except of WINE: transparent), BR/BLR/ERET, SVC/HVC/SMC/BRK/HLT
         if w >> 22 == 0b1101010100 and (w >> 21 & 1 or w >> 19 & 3 or (w >> 12) & 15 not in (2, 3)):
             return None  # system instruction other than hint/barrier (MRS, MSR, SYS)
-        if (w >> 27) & 1 and not (w >> 25) & 1 and ((w >> 24) & 0x3F == 0b001000 or ((w >> 24) & 0x3F == 0b111000 and (w >> 21) & 1 and not (w >> 10) & 3)):
+        if not plain_ordered(w) and (w >> 27) & 1 and not (w >> 25) & 1 and ((w >> 24) & 0x3F == 0b001000 or ((w >> 24) & 0x3F == 0b111000 and (w >> 21) & 1 and not (w >> 10) & 3)):
             return None  # exclusive/ordered/CAS or LSE atomic
         if (w >> 27) & 7 == 0b011 and (w >> 24) & 3 == 0 and not a <= o + 4 * sx((w >> 5) & 0x7FFFF, 19) < b:
             return None  # LDR literal outside the function
@@ -475,12 +482,16 @@ def _flow(words, a, b, rels, obj, dec):
 def is_load(w):
     """A plain load word: LDR/LDP/LDUR/LDRSW and the SIMD forms (the load/store groups 0b101 pair and 0b111 single, with the L bit 22 set).
     Exclusive and atomic words (group 0b001 / the 0b111 register-offset LSE class) are not loads here: they are refused by the T rules."""
+    if plain_ordered(w):
+        return (w >> 22) & 1 == 1
     g = (w >> 27) & 7
     return g in (0b101, 0b111) and (w >> 22) & 1 == 1 and not (g == 0b111 and (w >> 24) & 3 == 0 and (w >> 21) & 1 and (w >> 10) & 3 == 0)
 
 
 def is_const_store(w):
     """A single-register store (STR/STUR/STRB/STRH, immediate forms, not SIMD, not unprivileged, not exclusive/ordered) of the integer register Rt."""
+    if plain_ordered(w):
+        return (w >> 22) & 1 == 0
     return (w >> 27) & 7 == 0b111 and not (w >> 26) & 1 and not (w >> 22) & 1 and (
         (w >> 24) & 3 == 1 or ((w >> 24) & 3 == 0 and not (w >> 21) & 1 and (w >> 10) & 3 != 2))
 
@@ -993,7 +1004,7 @@ def image_check(path, errno):
     skipped: a size that is not a multiple of 4 or leaves the file, a word LLVM rejects, a data island ($d mapping symbol inside the range), a load/store
     word without a memory operand. errno reached through a TLS symbol (form "tls") is kind `unjudged` for the root: its stores are not read."""
     if open(path, "rb").read(20)[18:20] == (62).to_bytes(2, "little"):   # the host profile's image: the same rule over x86-64 (objstub_x64.image_check)
-        import objstub_x64
+        from fnvnx.verify import objstub_x64
         return objstub_x64.image_check(path, errno)
     form, sym = errno
     im = Image(path, sym)
@@ -1284,7 +1295,7 @@ def check_obj(path, terms, os_layer, probe=None, machine=None):
     if machine is not None and o.machine != machine:
         raise ValueError("%s: e_machine %d, the root's profile requires %d" % (path, o.machine, machine))
     if o.machine == 62:
-        import objstub_x64
+        from fnvnx.verify import objstub_x64
         return objstub_x64.check_obj(o, path, terms, os_layer, probe, vjson, read_cites, assume_id)
     items, finds, exit_ok, extra = [], [], set(), {"reach": [], "wine": [], "wine_id": {}, "wine_nz": {}, "cite_sym": {}, "cite": {}, "terms": [], "term_def": [], "alias": {}, "tb": {}, "globals": [], "dref": [], "nr": {}, "nr_tail": {}, "flag": None, "tabs": {}, "assume": []}
     pw = {}   # the probe (recipe error_abi kind flag): name -> (words, a, b, stores, calls) of every function

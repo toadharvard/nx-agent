@@ -13,9 +13,11 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import cas  # noqa: E402
-import gatesdir  # noqa: E402
-import sandbox  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import gatesdir  # noqa: E402
+from fnvnx.verify import sandbox  # noqa: E402
 
 BASE = "/root/l4/verdict-test"
 os.makedirs(BASE, exist_ok=True)
@@ -160,7 +162,7 @@ git(r, "checkout", "main"); commit_file(r, "feat.txt", "other\n", "m")
 blocked("block: merge conflict exit 3", r, 3, ["--verdicts", vd, "--gates", gp], "conflict")
 
 # CAS: another writer moves the branch between commit-tree and update-ref
-import verdict  # noqa: E402
+from fnvnx.verify import verdict  # noqa: E402
 r, d, gp, c, tree, v, vd, rc = prepared([gate("a")], "cas")
 tool("store", "--verdict", v, "--verdicts", vd)
 real = verdict._git
@@ -186,6 +188,9 @@ def red_case(name, g, exp):
     check("gate class: " + name, rc == 2 and vj["verdict"] == "red" and gr["status"] == "red" and exp in gr["reason"], (rc, vj))
 red_case("missing file", gate("g", write="none"), "missing")
 red_case("bad json", gate("g", write="bad"), "invalid")
+crash = gate("g")
+crash["argv"] = [sys.executable, "-I", "-c", "import sys\nsys.stderr.write('Traceback: boom in the gate\\n')\nsys.exit(2)\n"]
+red_case("crash: no result file, the reason carries the gate's stderr", crash, "boom in the gate")
 red_case("exit nonzero with green", gate("g", rc=3), "exit")
 red_case("certified < universe", gate("g", universe=5, certified=3, uncertified=["i1", "i2"]), "i1,i2")
 red_case("certified > universe", gate("g", universe=1, certified=2), "certified")
@@ -198,6 +203,14 @@ r = make_repo(); d = tmp("budget"); gp = gates_file(d, [gate("a")]); v = os.path
 rc, _, _ = run_verdict(r, head(r), gp, v, "--budget-s", "0")
 vj = json.load(open(v))
 check("over_budget reported, verdict stays green", rc == 0 and vj["over_budget"] is True and vj["verdict"] == "green", vj)
+import time  # noqa: E402
+v2 = os.path.join(d, "v2.json")
+rc, _, _ = run_verdict(r, head(r), gp, v2, "--budget-s", "300", "--started", repr(time.time() - 400))
+vj2 = json.load(open(v2))
+check("the budget is the whole check: a start 400 s ago is over a 300 s budget though the gates took no time", vj2["over_budget"] is True and vj2["seconds"] >= 400, vj2)
+v3 = os.path.join(d, "v3.json")
+rc, _, _ = run_verdict(r, head(r), gp, v3, "--budget-s", "300", "--started", repr(time.time()))
+check("a start now is within the budget", json.load(open(v3))["over_budget"] is False)
 
 # no vacuous green: `covers` and the universe-0 rule (gatesdir.py)
 def with_admit(roots):

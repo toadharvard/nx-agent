@@ -24,6 +24,8 @@ Rows are unique and sorted; the output depends on the set of records only (not o
 
 --queue: the shapes of SHAPES.tsv (family int, a symbolic Form exists) that have NO valid certificate in the shards, sorted; the farm proves exactly these
 (farm/farm_shapeprove.sh).  The queue id is the first 12 hex of sha256 over `key TAB shape_sha` of the queue lines: the same queue, the same id."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import argparse
 import hashlib
 import json
@@ -33,7 +35,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIFT = os.path.dirname(HERE)
 sys.path.insert(0, LIFT)
-from proof import certbasis, irdeps, model_sail, prove, shape, symform, x86sys  # noqa: E402
+from fnvnx.lift.proof import certbasis, irdeps, model_sail, prove, shape, symform, x86sys  # noqa: E402
 
 HEADER = '# shape_key\tfamily\tdsl_sha\tmodel_sha\treference\tresult\tobligations\tundef_flags\tdef0_witness\tdef0_free\tnonflag_free\tdeclared\n'
 
@@ -248,15 +250,16 @@ def main(argv):
     ap.add_argument('--queue')
     ap.add_argument('--report')
     ap.add_argument('--coverage')
-    ap.add_argument('--sail-work'); ap.add_argument('--sail-ir'); ap.add_argument('--isla')      # the toolchain (model_sail.configure): all three, or none when the caller configured model_sail itself
+    ap.add_argument('--sail-work'); ap.add_argument('--sail-ir'); ap.add_argument('--isla'); ap.add_argument('--isla-cfg')      # the toolchain (model_sail.configure): all four, or none when the caller configured model_sail itself
     ap.add_argument('--ir', action='append', default=[], help='an IR file (hashed to its sha) that a record of another model_sha was proved against')
-    x86sys.add_arg(ap)
+    x86sys.add_arg(ap); certbasis.add_inputs_args(ap, False)
     ap.add_argument('--withheld', help='tsv of Form-equivalence failures (shape_key first column, # comments): those shapes are counted withheld-form-defect and never certify')
     a = ap.parse_args(argv)
     if a.withheld:
         with open(a.withheld) as fh: WITHHELD.update(ln.split('\t')[0] for ln in fh if ln.strip() and ln[0] != '#')
     XSHA[0] = x86sys.configure(a.x86sys)
-    if a.sail_work or a.sail_ir or a.isla: model_sail.configure(a.sail_work, a.sail_ir, a.isla)
+    certbasis.configure_inputs(a)
+    if a.sail_work or a.sail_ir or a.isla or a.isla_cfg: model_sail.configure(a.sail_work, a.sail_ir, a.isla, a.isla_cfg)
     try:
         return _run(a)
     except model_sail.ArgError as e:

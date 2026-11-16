@@ -15,6 +15,8 @@ DAZ: whether MXCSR bit 6 can be set is a property of the reference CPU, the MXCS
 ldmxcsr / fxrstor, which fault on a bit outside that mask, so the environment row `mxcsr_in_mask` is (MXCSR & ~mask) == 0, with the mask READ from the file.  A file without it makes every
 row of this module `Uncertified`: no constant stands in for it.
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import z3
 from z3 import And, Concat, Extract, If, Not, Or, BitVecVal, ZeroExt
 
@@ -186,7 +188,7 @@ def rcp_tables():
     src = open(os.path.join(_RT, 'rcptab.c'), 'rb').read()
     try: cert = json.load(open(os.path.join(_RT, 'rcptab.cert.json')))
     except (OSError, ValueError): raise Uncertified('rcptab.cert.json missing')
-    import genout
+    import fnvnx.lift.proof.genout as genout
     ref = open(os.path.join(genout.gen_dir(*_CACHE[0]), 'rcpref.h')).read()      # the published GEN output of the root lift/rt (stage gen_cpuref), not a file of rt/
     cpu = (re.search(r'FNVL_RCP_REF_VENDOR "(\w+)"', ref).group(1), int(re.search(r'FNVL_RCP_REF_FAMILY (\d+)', ref).group(1)),
            int(re.search(r'FNVL_RCP_REF_MODEL (\d+)', ref).group(1)), int(re.search(r'FNVL_RCP_REF_STEPPING (\d+)', ref).group(1)))

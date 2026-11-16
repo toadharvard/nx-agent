@@ -4,6 +4,9 @@ l1-contract/elf/<id>), a scratch directory for HOME and a directory with a dummy
 are the tiny ELFs of test_bootmachine.build (MODE 6: a clean exit; MODE 3: a fault), with the code section renamed to
 .text.fnvl as the job's icount spec expects. No network, no game data, no package installs. Plain script: exit 0 on pass.
 Scratch: tempfile.mkdtemp, removed at exit."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import atexit
 import hashlib
 import json
@@ -22,9 +25,10 @@ NX = os.path.dirname(VERIFY)
 REPO = os.path.dirname(os.path.dirname(NX))
 sys.path.insert(0, HERE)
 sys.path.insert(0, VERIFY)
-import boot  # noqa: E402
-import test_bootmachine as tb  # noqa: E402
-import test_bootgpu as tg  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import boot  # noqa: E402
+from fnvnx.verify.tests import test_bootmachine as tb  # noqa: E402
+from fnvnx.verify.tests import test_bootgpu as tg  # noqa: E402
 
 SCRATCH = tempfile.mkdtemp(prefix="bootjob-")
 atexit.register(shutil.rmtree, SCRATCH, ignore_errors=True)
@@ -67,8 +71,7 @@ FONT_FILES = {"fonts/A.ttf": b"alpha", "fonts/Sub/B.ttf": b"bravo"}
 
 
 EXE = _exe()
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "contract"))
-import modules as cmod  # noqa: E402
+from fnvnx.contract import modules as cmod  # noqa: E402
 # modules.tsv of the contract: the exe row (the contract's own PE parse) and one DLL row
 MODULES = cmod.modules_text("falloutnv.exe", EXE, cmod.PE(EXE, "FalloutNV.exe"), [], {}) + "m.dll\t%s\t16\t10000000\t01410000\t00001000\t0\t00000010\t0\t\t1\n" % ("a" * 64)
 

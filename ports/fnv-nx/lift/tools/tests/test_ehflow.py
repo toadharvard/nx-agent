@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Tests of tools/ehflow.py (callee-saved proofs, R2) on real x86-32 code: the machine code below is the assembly in tools/tests/ehflow_test.asm, decoded by capstone like the images' code.
 No double of a product symbol: Flow is the product class, only the image container (decoded instructions, no relocations) is provided here.   python3 test/ehflow_test.py"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys, unittest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'tools'))
 import capstone
 from capstone import x86 as cx
-from ehflow import Flow, CALLEE
+from fnvnx.lift.tools.ehflow import Flow, CALLEE
 CODE = {
     0x1000: '680020000064ff35000000008b442410896c24108d6c241029c4535657a1003000003145fc31e8508965e8ff75f88b45fcc745fcfeffffff8945f88d45f064a300000000c3',   # prolog
     0x1100: '8b4df064890d00000000595f5f5e5b89ec5d51c3',   # epilog

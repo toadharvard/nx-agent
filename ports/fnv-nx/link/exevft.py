@@ -29,6 +29,9 @@ regexes, the deleting-destructor byte patterns (`_FLAGS_TEST`), `delete_this`, `
 getter walker (GETTER_MAX), the constructor "last store wins" rule (exefacts records every vptr store in order), hard-coded
 TEXT/DATA ranges (the section table is used), the JSON cache keyed on mtime.
 """
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import argparse
 import collections
 import json
@@ -40,9 +43,9 @@ import capstone
 from capstone import x86_const as X
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'contract'))
-import abi_msvcname
-import exefacts
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import abi_msvcname
+from fnvnx.contract import exefacts
 
 FORMAT = 'fnvnx-exevft/2'
 Vft = collections.namedtuple('Vft', 'name off bases slots col')

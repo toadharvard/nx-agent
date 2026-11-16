@@ -8,7 +8,7 @@ ABS = re.compile(r"/[A-Za-z0-9_.][^\s]*\Z")
 SINK_PREFIX = ("os.", "shutil.", "subprocess.", "glob.", "pathlib.", "sys.path.")
 SINKS = {"open", "io.open", "tarfile.open", "zipfile.ZipFile", "pathlib.Path", "pathlib.PurePath", "pathlib.PosixPath", "fileinput.input",
          "runpy.run_path", "importlib.util.spec_from_file_location"}
-GUARDS = {"require_mounted"}   # recipe.py: the guards a launcher loads a tool through (the target of a dynamic load must be their result)
+GUARDS = {"require_mounted", "require_mounted_module"}   # recipe.py: the guards a launcher loads a tool through (the target of a dynamic load must be their result)
 
 
 def dotted(n):
@@ -282,6 +282,12 @@ def flow_of(sc):
     flow = []
     for scope, _ in sc:
         d = {}
+        if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):   # a parameter default is an assignment of the parameter: every default form (positional, keyword-only, lambda)
+            a = scope.args
+            pos = a.posonlyargs + a.args
+            for prm, dv in list(zip(pos[len(pos) - len(a.defaults):], a.defaults)) + [(k, v) for k, v in zip(a.kwonlyargs, a.kw_defaults) if v is not None]:
+                if not (isinstance(dv, ast.Name) and dv.id == prm.arg):   # `x=x` reads the enclosing scope's x, which the chain walk below cannot tell from the parameter
+                    d.setdefault(prm.arg, []).append(dv)
         for n in own_nodes(scope):
             tg = None
             if isinstance(n, ast.Assign):

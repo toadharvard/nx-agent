@@ -65,17 +65,19 @@ A pure function of its arguments (no file, no process): the driver verify/gate_i
   names       text of sys_names.tsv (dll TAB name per line) from the private manifest
   spec_text   function dll -> text of the export specification of the reference environment (Wine 9.0 dlls/<dll>/<dll>.spec)
   syms        the set of symbol names that the product objects define or reference (objects.json defined + undefined); None = the rows table
-              (stage A): every row binds by rule alone (sym, data, lookup, l3), no symbol table is read and none is judged; the table is then a
-              function of the names, the specs, the name table and the extra rows only, so the import keys (contract/iat.py) are too.  The
-              symbols are judged against the rows by the gate `imports` (stage B: contract/imports.judge over derive(syms=the objects' symbols))
-  name_table  {msvcrt name: (symbol, kind)} of the name table the product serves msvcrt names from (read_name_table)
+              (stage A, the root `bridgetable`): every row binds by rule alone (link, data, sym), no symbol table is read and none is judged; the
+              table is then a function of the names, the specs, the extra rows and exports.tsv only, so the import keys (contract/iat.py)
+              are too.  The symbols are judged against the rows by the gate `imports` (contract/imports.judge over the members of the link)
   extra       texts of rows in this 8-column format (other owners' rows: COM interfaces); a row of the same (dll, name) replaces the derived one
-bind  sym    native_symbol is a symbol of the product objects     lookup  msvcrt name served by the name table (native_symbol `-`)
-      l3     provided by the lifter runtime under native_symbol   data    the slot holds the address of the object native_symbol
+  exports     {(module, name): (symbol, kind, ret, args)} of exports.tsv (contract/exportgen.py: the `.fnvnx.export` records of the link set, ret and args from the definer's `.fnvnx.decltype`; kind func|entry|data:
+              entry = a guest-state body, definer void(void), the bridge jumps to it and marshals nothing; a module with no reference spec takes its signature from these records)
+bind  link   native_symbol is the symbol of the export record; exactly one member of the link defines it (imports.judge)
+      entry  the same for a record of kind entry (ret `-`; conv and args stay the reference spec's)
+      sym    native_symbol is a symbol of the root's own objects (rows of another owner's file)      data  the same for a data row without a record
       none   no implementation: the gate `imports` is red for the row
 conv  stdcall | cdecl | vararg | thiscall | fastcall | data;  ret v|i|q|f|d;  args: x86 stack slots i|q|f|d.
-A name missing from its spec, a stub in the spec, a forward that cannot be followed or an unknown argument type is an error: total or failing.
-`lookup` is decided by the name table, a declared input (a name is in it or not), not by a run.
+A function name with no export record, a name missing from its spec, a stub in the spec, a forward that cannot be followed, a struct or vector return or an unknown
+argument type is an error: total or failing.
 ```
 
 ## contract/gate_call.py
@@ -267,10 +269,10 @@ gatefile - the result file of a gate, in the shape the L4 merge verdict reads (v
 
     write(name, universe, certified, uncertified_ids, detail)  ->  $GATE_OUT/<name>.json, or nothing if GATE_OUT is unset
 
-    {"certified":C,"detail":"...","format":"fnvnx-gate/1","name":N,"status":"green"|"red","uncertified":[<=50 ids],"universe":U}
+    {"certified":C,"detail":"...","format":"fnvnx-gate/1","name":N,"status":"green"|"red","uncertified":[every id],"uncertified_n":N,"universe":U}
 
 status is green exactly when certified == universe (completeness of certificates, not a run counter); `uncertified`
-is the first 50 of the sorted ids (strings), so the file is a function of its arguments.  Ids of game data are written
+is every uncertified id, sorted (strings), and `uncertified_n` its count, so the file is a function of its arguments.  Ids of game data are written
 to $GATE_OUT only, never committed.  The only environment variable read is the declared GATE_OUT.
 ```
 
@@ -392,15 +394,13 @@ Order: the exe, then the images in discovery order (depth first, import director
 Gate `imports` (class 4 of verify/VERDICT.md), pure judgement: every row of the bridge table has a body proven by the build products.
 
 Inputs (all values, no file): rows from bridgetable.derive; `syms` {symbol: [(bind, type)]} of the product objects (objects.json `defined`);
-`table` the msvcrt name table {name: (symbol, kind)}; `others` the same kind of map over every product root that is not the one the rows belong
+`others` the same kind of map over every product root that is not the one the rows belong
 to; `owner_of` {(dll, name): index} of rows taken from files that belong to another owner's build (the `external` rows).
 A row is certified iff its body is proven by the symbol table of a build product:
   sym/data  a GLOBAL (or UNIQUE) symbol of type FUNC (sym) or OBJECT (data) is defined in the row's root
-  lookup    the name table entry of the name names a symbol defined GLOBAL of type FUNC (kind func) or OBJECT (kind data) in the root
   l3        and rows of another owner's file: such a symbol is defined in another product root (the lifter runtime's build); else `external`
 Classes of an uncertified row: none (no symbol of that name is defined or referenced), unresolved-symbol (referenced only), weak (defined weak
-only), not-a-function (defined global of the wrong type), lookup-miss (an msvcrt name that the name table does not carry, or whose entry names
-no proven symbol), external (l3 or another owner's row that no other root defines).
+only), not-a-function (defined global of the wrong type), external (l3 or another owner's row that no other root defines).
 The decision reads symbol tables and tables, never a source text, a run or a name pattern. Assumption (ASM-052): objects.json lists every global, weak
 and unique symbol of every object of the root (recipe.symbols); locals are not symbols a row can bind to.
 ```
@@ -574,7 +574,7 @@ Steps:
  3 icount.py spec: range lifted = section .text.fnvl, class softfloat from the softfloat file (left out when absent)
  4 SD root: a fresh empty card directory (--root); the installed game is mounted in place at the guest's sdmc:/switch/fnv
    (--game, verify/bootpath.py). The game is GAME_DIR, else fetched by farm/gamedata_fetch.sh into $FARM_HOME/game
-   (the exe, INIs, static modules and d3dx9 DLLs; plus every Data item (gamedata/data/* of the artifacts repository: *.bsa, *.esm, Music,
+   (the exe, INIs, static modules and d3dx9 DLLs; plus every Data item that a recipe declares as an external (gamedata/data/* pinned by commit and tree_sha256; one that no recipe declares is red: *.bsa, *.esm, Music,
    Shaders; every part's and every file's sha256 checked by the fetcher), or only the Data items named in BOOT_DATA_ITEMS; `--no-data`
    there means no Data item, a run without the game's archives). FalloutNV.exe must be in it; its sha256 is printed. The fetched
    Data items are recorded in meta.json (data_items; null with GAME_DIR, whose content the job does not know)
@@ -1311,11 +1311,11 @@ Rule. verify/admit.json ("fnvnx-admit/1") lists the roots of the port tree: {"pa
 import closure of these and of the `generated` tools of the recipes; a script only a gate driver runs is not an entry point.
 `trees` (optional): the list of the directories (or exact files) of one root, at least two, the first equal to "path"; the root's
 universe is their union, and its python is judged in one puregate run, so trees that import each other form ONE root with no
-file moved. Two roots never share or nest a tree. The root is named by "path" in `imports`.
-`imports` (a root's python cross-root imports): a list of paths of other admitted roots; "pure" (gate_pure.py) judges the root
-with its own directory and the parent directory of each imported root as import bases, so a root's python may import another
-root's modules only when it declares it. Each entry must be an admitted root other than the root itself, without repeats; the
-declared imports form no cycle (an error of the table: every file is uncertified).
+file moved. Two roots never share or nest a tree. The cross-root python imports of a root are DERIVED, never declared (`gate_admit.derived_imports`): by `ast` over every tracked .py of the root (any depth),
+each import is resolved by its qualified module path (`import_roots`: `render.total.x` is root render/total); the roots found are the root's imports, which the
+"pure" run (gate_pure.py) takes as import bases and the generator stage mounts at /imp. A dynamic import (importlib.import_module / __import__ with a non-literal
+argument) is an error of the table; an `imports` field in admit.json is an error ("imports are derived"). Cycles between roots are no error: a stage mounts the
+file closure of the tool, never a root.
 Universe: every file git tracks below ports/fnv-nx (`git ls-files -z`), an item is its repo-relative path.
 A file is certified iff ALL hold:
   1. exactly one root contains it (a root is a directory prefix or one exact file path; roots do not nest);
@@ -1403,11 +1403,10 @@ tables the recipe wrote (objects.json: defined {symbol, bind, type}, undefined).
 A product root DECLARES its imports in `<root>/imports.in.json` ("fnvnx-imports-in/1"):
   {"format", "external": NAME of an entry of the root's recipe `external` (the private manifest: fnv-nx-build commit + tree_sha256),
    "names": path of sys_names.tsv inside it, "specs": directory of the reference environment's .spec files inside it,
-   "extra": [row files inside it, judged against this root], "extra_other": [row files of another owner's build, judged against the other roots],
-   "name_table": path inside the root of the msvcrt name table `name TAB symbol TAB func|data` (the same file the root generates its lookup table from)}
+   "extra": [row files inside it, judged against this root], "extra_other": [row files of another owner's build, judged against the other roots]}
 The external is checked out from the build's own fetch (GATE_CACHE/external/<commit>) and its tree hash must equal tree_sha256.
 Universe (gate_build.quantify, the convention of build/objstub): the admitted product roots; per root every row of the bridge table (contract/bridgetable.derive). A root without imports.in.json is one red item. Certified: rows with no class
-(contract/imports.py). uncertified: the first 50 ids `dll!name`; imports.ids lists `id TAB class`, sorted. No product root: universe 0, green. Bad input, a red build, an invalid recipe or an
+(contract/imports.py). uncertified: every id `dll!name`; imports.ids lists `id TAB class`, sorted. No product root: universe 0, green. Bad input, a red build, an invalid recipe or an
 external that fails its hash is red with the reason in detail. Exit 0 iff green.
 ```
 
@@ -1625,7 +1624,7 @@ holds "wine_fixme": {id: call sites} so growth of the simplified bodies is visib
 Reach facts: GATE_CACHE/reach/<git tree>/reach.facts.tsv (rows fact_id<TAB>sha256, written by the gate `reach`, which does not exist yet).
 While the file is absent, every call of fnvnx_reach_violation is the finding `reach-uncertified`.
 Universe: every function of every object of every product root, every uncovered gap, and a root whose recipe is invalid or whose build is
-red (one item `root`, uncertified). Certified: items with no finding. uncertified: the first 50 `unit path:symbol`, sorted. Per object results
+red (one item `root`, uncertified). Certified: items with no finding. uncertified: every `unit path:symbol`, sorted. Per object results
 are cached by (object sha256, os_layer flag, analysis version, the terminators the object mentions) under GATE_CACHE/objstub/<key>.json;
 uncached objects run in --jobs processes (default os.cpu_count()). Exit 0 iff green; unreadable input is red with the reason in detail.
 ```
@@ -1653,7 +1652,7 @@ Flow, computed from the syntax trees of all items together (call structure, not 
            (exepin.py is the one item allowed to open its own parameter: `load_exe` is the function named in the gate).
 A tool that gets the exe path any other way (not `--exe`, not the file name) is outside the rule: that is the stated assumption (ASM-102), and the
 sources are the only two ways the tools of this tree name the exe.
-Result: universe = items, certified = items without a violation, uncertified = the first 50 `path:line what`. Green iff all certified.
+Result: universe = items, certified = items without a violation, uncertified = every `path:line what`. Green iff all certified.
 ```
 
 ## verify/gate_oracle.py
@@ -1663,7 +1662,7 @@ Gate "oracle" (fnvnx-gate/1): every test names where its expected values come fr
 code under test (verify/VERDICT.md class 10).
     python3 -I gate_oracle.py        run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/oracle.json
 
-Universe: the test files of gate "selftests" (the DIRs of its argv in verify/gates.d/selftests.json, DIR/tests/test_*.py, found by
+Universe: the test files of gate "selftests" (tests/test_*.py of every root of verify/admit.json, found by
 gate_tests.universe: one list for both gates). An item is a repo-relative path.
 Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
   {"format": "fnvnx-oracle/1", "tests": {"test_x.py": {"subject": [PATH...], "references": [REF...]}}}
@@ -1720,7 +1719,7 @@ Gate "assumptions" (fnvnx-gate/1): every assumption the rules rest on is in one 
 
 Registry: verify/ASSUMPTIONS.json ("fnvnx-assumptions/1"; the accepted entries are ASM-001 to ASM-009):
   {"format": "fnvnx-assumptions/1", "entries": [ENTRY...]}
-  ENTRY  {"id": "ASM-NNN", "text": STR, "used_by": [PATH...], "aliases": [STR...], "status": "OWNER" | "REMOVE", ...}
+  ENTRY  {"id": "ASM-NNN", "text": STR, "aliases": [STR...], "status": "OWNER" | "REMOVE", ...}
     OWNER   + "decision": {"file": "CLAUDE.md", "quote": STR}   the owner's acceptance, verbatim
     REMOVE  + "removed_by": STR, "owner": LEAD | LEAD+LEAD      the discharge and the stream lead(s) who owe it
     optional: "note": STR. The registry holds exactly the entries that files of THIS tree rely on: the entry of an unmerged
@@ -1737,7 +1736,7 @@ universe is (path, first line of the block). A mention is certified iff ALL hold
   2. every id in it is the id of an entry of the registry.
 The registry is certified iff ALL hold:
   3. ids are unique and well formed, aliases are unique across entries, text is not empty;
-  4. used_by is not empty and every path in it is a tracked file that contains the entry's id (the reliance is written at the
+  4. the entry has a user: at least one tracked text file other than the registry cites its id; the users are derived (users_of), never listed (the reliance is written at the
      place of reliance, so an entry nobody cites is dead and is red); 
   5. an OWNER entry has decision.file CLAUDE.md and decision.quote occurring verbatim inside exactly one numbered item under
      the line "OWNER, the only accepted ones:", no item serves two entries, and every item has an entry: the OWNER set is
@@ -1785,24 +1784,25 @@ drivers (scripts the verdict runs on the host) is outside the universe: it is no
 is special (a file in `tests/` is in the universe iff a stage imports it).
 Certified: items with zero puregate violations that import no HOST-READER module. Each admitted root that names gate "pure" is
 checked in its own puregate run: project imports resolve below the importing file's directory, the root's directories (`trees`) or their
-parents, or the parent directory of a root it DECLARES in admit.json `imports`. An import of a module of another root that is not declared is
-`import-unlisted` (red); a declared-import cycle, an unknown or repeated import is an error of admit.json (red). HOST-READER modules:
+parents, or the parent directory of a root its sources import by the qualified name (derived, gate_admit.derived_imports). A bare import of a module of another root is
+`import-unlisted` (red); an `imports` field or a dynamic import is an error of admit.json (red). HOST-READER modules:
 every file below ports/fnv-nx/verify or ports/fnv-nx/farm (the sandbox, the recipe, the gate drivers, the farm scripts legitimately read
 the host: clock, processes, directory listings; their correctness is the business of the "selftests" gate); a universe file that
 imports one is uncertified, and so is a file that imports one that imports it (those are in the universe, so each is judged itself:
 a module that imports recipe or gate_build lies in verify/ or is red). An entry point or a reached file that is not in a root
 naming gate "pure" is uncertified (nothing judged it).
-uncertified: the first 50 uncertified paths, sorted. Zero items: green, universe 0, said in "detail". Exit 0 iff the result is green.
+uncertified: every uncertified path, sorted. Zero items: green, universe 0, said in "detail". Exit 0 iff the result is green.
 ```
 
 ## verify/gate_tests.py
 
 ```text
-Gate "selftests" (fnvnx-gate/1): every test file of the given directories passes.
-    python3 -I gate_tests.py [--timeout-s N] [--jobs N] [--cache DIR] [--key-dirs D...] [--] DIR...
+Gate "selftests" (fnvnx-gate/1): every test file of every admitted root passes.
+    python3 -I gate_tests.py [--timeout-s N] [--jobs N] [--cache DIR] [--key-dirs D...] [--] [DIR...]
 Run in the checkout root with env GATE_OUT; writes GATE_OUT/selftests.json (+ GATE_OUT/selftests.times.json).
-Universe: DIR/tests/test_*.py for each DIR given (a missing DIR contributes nothing), in argument order, each DIR's files
-sorted by name; items are repo-relative paths. Each file runs as `python3 -I FILE` in the checkout with a per-file timeout
+Universe, by one rule over the tree: tests/test_*.py of every root of verify/admit.json (in root order, each root's files sorted by name; a new test
+file under an admitted root is inside with no edit of any gate file); items are repo-relative paths. DIRs on the command line replace the admitted
+roots (a fixture's scan directories; verify/gates.d/selftests.json names none). Each file runs as `python3 -I FILE` in the checkout with a per-file timeout
 (default 300 s; a timeout kills the process group and is a failure). Certified: exit status 0. No skip logic: a test that
 cannot run in this environment (root, namespaces, strace) is uncertified. Zero files: green, universe 0. Exit 0 iff green.
 --jobs N (default 1): N test files run at once, each in its own process; results are reported in sorted universe order.
@@ -2382,7 +2382,7 @@ Run as `python3 -I verdict.py CMD ...`. Exit codes: 0 ok, 1 usage/format error, 
               given, GATE_CACHE (absolute path of a caller-owned directory that outlives the run). A gate may store results in
               GATE_CACHE only under a key that covers everything it reads (its inputs' content, the declared environment, its own
               arguments); it must work, and give the same verdict, without GATE_CACHE. A gate writes
-              {"format":"fnvnx-gate/1","name","status","universe","certified","uncertified":[<=50 ids],"detail"} at GATE_OUT/<result>.
+              {"format":"fnvnx-gate/1","name","status","universe","certified","uncertified":[every id],"detail"} at GATE_OUT/<result>.
               Gate green iff exit 0, valid result, name equal, status green and certified == universe (completeness of
               certificates, not a run counter; certified > universe is invalid). Verdict green iff >=1 gate and all gates green.
               over_budget is reported only; it never changes the verdict.
@@ -2741,3 +2741,11 @@ loader's stage A reads COM_ROWS through `uses`; the gate `imports` names the sam
 files, L6 the d3d9 rows (still taken from the manifest external's d9bridge_rows.tsv until its generator moves here).
 Test: verify/tests/test_bridgefacts.py.
 ```
+
+## contract/reached.py
+
+reached - the (dll, name) pairs the image set reaches (L1 CONTRACT): `reached.tsv`, columns dll, name, how (`iat` | `gpa`), site (`<image>@<VA>`).
+
+    reached.py --sites dynsites.tsv --image NAME=pe ... --imports NAME=imports.tsv ... --facts DIR --facts-tree SHA --declared declared_dlls.tsv --specs DIR [--modules modules.tsv] --out reached.tsv
+
+`iat` rows: every import slot of every image (the imports/<name>.tsv of modules.py). `gpa` rows: every (module, name) pair a GetProcAddress site can ask for (gpa_names.py's derivation, `analyse`; a module the facts cannot place is `*`). The universe is the images; nothing filters it, and an export nothing reaches is no row. The signature input of the derivation (stack bytes, argument letters of an import) is the reference spec's, through `bridgetable.resolve`, and the may-load set is the images, modules.tsv and declared_dlls.tsv: no bridge.tsv row is an input, so the table that L6's bridgefacts filter by reached.tsv cannot be one (no cycle). An import without a signature is an error and the stage lists every one. Test: `contract/tests/test_reached.py` (a toy image: one IAT import, one resolved GPA name, one unreached export).

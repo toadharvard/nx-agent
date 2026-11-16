@@ -3,7 +3,9 @@
 import os, shutil, subprocess, sys, tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-import l2sections as L
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): contract.X by its qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract import l2sections as L
 INC = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'toolchain', 'names', 'sympair_kinds.inc')
 KINDS = L.load_kinds(INC)
 psk = lambda d, w: L.parse_sympair(d, w, KINDS)  # noqa: E731

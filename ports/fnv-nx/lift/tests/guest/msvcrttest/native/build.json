@@ -15,13 +15,14 @@
   "asm": []
  },
  "include": [
-  "ports/fnv-nx/shim/include"
+  "ports/fnv-nx/shim/include",
+  "ports/fnv-nx/platform/include"
  ],
  "units": "all",
  "uses": [
   {
    "root": "ports/fnv-nx/lift/tests/guest/msvcrttest/lifted",
-   "output": "image.inc"
+   "output": "GEN"
   },
   {
    "root": "ports/fnv-nx/lift/rt",
@@ -30,6 +31,10 @@
   {
    "root": "ports/fnv-nx/shim",
    "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/platform",
+   "output": "INCLUDE"
   }
  ],
  "link": {
@@ -37,7 +42,49 @@
   "flags": [
    "-m",
    "aarch64linux32"
-  ]
+  ],
+  "entry": "fnvl_msvcrttest_entry"
+ },
+ "variants": {
+  "term1": {
+   "defines_add": [
+    "FNVL_TERMINAL_CASE=1"
+   ],
+   "link": {
+    "output": "msvcrttest_term1.elf",
+    "flags": [
+     "-m",
+     "aarch64linux32"
+    ],
+    "entry": "fnvl_msvcrttest_entry"
+   }
+  },
+  "term2": {
+   "defines_add": [
+    "FNVL_TERMINAL_CASE=2"
+   ],
+   "link": {
+    "output": "msvcrttest_term2.elf",
+    "flags": [
+     "-m",
+     "aarch64linux32"
+    ],
+    "entry": "fnvl_msvcrttest_entry"
+   }
+  },
+  "term3": {
+   "defines_add": [
+    "FNVL_TERMINAL_CASE=3"
+   ],
+   "link": {
+    "output": "msvcrttest_term3.elf",
+    "flags": [
+     "-m",
+     "aarch64linux32"
+    ],
+    "entry": "fnvl_msvcrttest_entry"
+   }
+  }
  },
  "external": [
   {
@@ -52,6 +99,10 @@
  "include_uses": [
   {
    "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
+  },
+  {
+   "root": "ports/fnv-nx/lift/tests/guest/msvcrttest/lifted",
    "output": "GEN"
   }
  ]

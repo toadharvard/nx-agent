@@ -15,10 +15,12 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import cas  # noqa: E402
-import sandbox  # noqa: E402
-import unitstage  # noqa: E402
-import unitview  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import sandbox  # noqa: E402
+from fnvnx.verify import unitstage  # noqa: E402
+from fnvnx.verify import unitview  # noqa: E402
 
 ROOT = tempfile.mkdtemp(prefix="views-test-")
 FAILED = []
@@ -116,11 +118,11 @@ def main():
     finally:
         sandbox.MAX_LINKS = old
     # (5) an OSError of the sandbox is a red stage naming the stage
-    real_exec = sandbox.execute
+    real_exec = sandbox.execute_timed
 
     def boom(store, doc, key):
         raise OSError(errno.EMLINK, "Too many links")
-    sandbox.execute = boom
+    sandbox.execute_timed = boom
     try:
         d2 = dict(doc, stage="pp:some/unit.cc")
         try:
@@ -131,7 +133,7 @@ def main():
         check("EMLINK of the sandbox is an SbxError naming the stage (a red stage, not a crash)",
               got is not None and getattr(got, "stage", None) == "pp:some/unit.cc" and "pp:some/unit.cc" in str(got) and "Too many links" in str(got), got)
     finally:
-        sandbox.execute = real_exec
+        sandbox.execute_timed = real_exec
     return 1 if FAILED else 0
 
 

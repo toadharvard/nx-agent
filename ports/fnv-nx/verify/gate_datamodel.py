@@ -29,9 +29,11 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import gate_build  # noqa: E402
-import recipe  # noqa: E402
-import targets  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): `verify` is imported by its qualified name
+from fnvnx.verify import targets  # noqa: E402
 
 ILP32 = targets.abi_flag(targets.load())   # the declared guest platform record, not a literal
 DATAMODEL = targets.load()["references"]["datamodel"]   # the one table of the exe's data model (L2, fnvnx-datamodel/2): its path is a reference of the declared targets

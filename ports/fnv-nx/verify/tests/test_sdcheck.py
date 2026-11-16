@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import time
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.join(os.path.dirname(HERE), "sdcheck.py")
@@ -107,8 +108,8 @@ def main():
            mutate=lambda sd: write(sd + "/switch/fnv/data/A.bsa", b"q"))
     expect("name with colon", 2, ["name-violation", "a:b.txt"], extra_game=[("Data/a:b.txt", b"1")])
     expect("trailing dot", 2, ["name-violation", "x.dot."], extra_game=[("Data/x.dot.", b"1")])
-    sys.path.insert(0, os.path.dirname(HERE))
-    import sdcheck  # the OS caps names at 255 bytes, so the 255-unit rule is tested on the function
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+    from fnvnx.verify import sdcheck  # the OS caps names at 255 bytes, so the 255-unit rule is tested on the function
     case("name 255 units ok, 256 violation", sdcheck.name_violation("Data/" + "n" * 255) is None
          and sdcheck.name_violation("Data/" + "n" * 256) is not None
          and sdcheck.name_violation("Data/" + "\U0001F600" * 128) is not None)

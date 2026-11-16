@@ -5,6 +5,8 @@ The #GP(0) condition list of SDM 3A:7.15 (Event 13) names writing to a code segm
 The segment of an explicit memory operand without override is DS, or SS when the base register is ESP or EBP (the default segment selection of SDM 1:3.7.4; an override prefix is outside the specs that call this).
 The selectors a segment register can hold are the record's (selectors.<reg>.value and mov_to_sreg.<reg>.selectors); a selector is a code selector when the record's GDT descriptor at its index is S=1 with the code type bit (type & 8).
 Written from the raw record rows, not from fnvlift.x86sys.code_indices that the Form builder uses."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 
@@ -12,9 +14,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import z3  # noqa: E402
 from capstone import x86 as X  # noqa: E402
-from fnvlift import dsl  # noqa: E402
-from fnvlift.faults import BYNAME as FT  # noqa: E402
-from proof import x86sys  # noqa: E402
+from fnvnx.lift.fnvlift import dsl  # noqa: E402
+from fnvnx.lift.fnvlift.faults import BYNAME as FT  # noqa: E402
+from fnvnx.lift.proof import x86sys  # noqa: E402
 
 
 SEGREG = {X.X86_REG_CS: 'cs', X.X86_REG_DS: 'ds', X.X86_REG_ES: 'es', X.X86_REG_FS: 'fs', X.X86_REG_GS: 'gs', X.X86_REG_SS: 'ss'}

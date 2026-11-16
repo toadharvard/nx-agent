@@ -11,8 +11,12 @@ the residue is red until checked.
 
 RULE: closure complete -> every residue byte is class DATA = 9, "data-unreached" (not reached by any entry; may-be-read only through a data_in_code range, tools/CODEMAP.md); otherwise every residue byte is UNEXPLAINED (class 8 in modlift, 0 in codemap) with the closure reason.
 Nothing else decides a residue byte: the sweep below (decodes / undecodable / reloc-not-operand / no-end) is a breakdown printed for information and decides nothing."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, json, bisect
 from types import SimpleNamespace
+
+PRI = ['entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw', 'ptr']      # THE kind vocabulary and its priority: the primary kind of an entry (universe.tsv column 2) is the first of these it carries; the other kinds are in the flags column
 DATA = 9
 TERMS = {'ret', 'retf', 'jmp', 'int3', 'ud2', 'iret', 'iretd'}
 
@@ -39,6 +43,14 @@ def disp_only(md, text, T0, cov, r, bad=()):
     if ins.imm_size == 4 and T0 + s0 + ins.imm_offset == r:
         return False
     return any(op.type == 3 and op.mem.disp & 0xffffffff == int.from_bytes(text[o:o + 4], 'little') for op in ins.operands)       # 3 = X86_OP_MEM
+
+
+def data_proof(facts_dir, a):
+    """the proof id of a byte of class data-reloc: `data-reloc:<relocation site>` from the codemap row that covers it (one predicate with entries_on_data), else '-'."""
+    for l in open(os.path.join(facts_dir, 'codemap.tsv')):
+        f = l.rstrip('\n').split('\t')
+        if len(f) >= 4 and f[2] == 'data-reloc' and int(f[0], 16) <= a < int(f[0], 16) + int(f[1]): return 'data-reloc:' + f[3].split(':')[-1]
+    return '-'
 
 
 def entries_on_data(facts_dir):
@@ -169,7 +181,7 @@ EH_KINDS = {'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'se
 
 def pe_sources(M, u32, intext):
     """the PE's own lists of code addresses, read independently of the entry set: -> (exports in the executable span, [entry point], TLS callbacks)"""
-    import pemod
+    import fnvnx.lift.tools.pemod as pemod
     XC = [a for a in pemod.exports(M)[0] if intext(a)]
     entry = [M.base + M.entry] if M.entry else []
     tls = []

@@ -12,46 +12,67 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import plugbuild as pb  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.toolchain.tests import plugbuild as pb  # noqa: E402
 
 check = pb.Checks('test_dispatch')
 FIX = os.path.join(HERE, 'dispatch', 'dispatch.cpp')
 
 
-def body(dis, sym):
-    """the instructions and relocation lines of function SYM of the object (objdump -dr), tabs squeezed to one space"""
-    return '\n'.join(re.sub(r'\s+', ' ', l.strip()) for l in dis.get(sym, []))
+def sym_of(dis, name):
+    """the symbol of the compiled object for the source function NAME: the object's own symbol table, never a typed mangling (the one definition whose
+    mangled name starts _Z<len><name>); None when there is none or more than one"""
+    pre = '_Z%d%s' % (len(name), name)
+    found = [k for k in dis if k.startswith(pre)]
+    return found[0] if len(found) == 1 else None
+
+
+def src_name(sym):
+    """the source name of a `_Z<len><name>...` symbol of the object"""
+    m = re.match(r'_Z(\d+)', sym)
+    return sym[m.end():m.end() + int(m.group(1))] if m else sym
+
+
+def body(dis, name):
+    """the instructions and relocation lines of the function NAME of the object (objdump -dr), tabs squeezed to one space"""
+    return '\n'.join(re.sub(r'\s+', ' ', l.strip()) for l in dis.get(sym_of(dis, name), []))
 
 
 def calls(b, target='fnvnx_dispatch'):
     return len(re.findall(r'R_AARCH64_P32_(?:CALL|JUMP)26 %s\b' % re.escape(target), b))
 
 
+def calls_src(b, name):
+    """calls of the source function NAME (its symbol in the object starts _Z<len><name>)"""
+    return len(re.findall(r'R_AARCH64_P32_(?:CALL|JUMP)26 _Z%d%s\w*' % (len(name), re.escape(name)), b))
+
+
 def checks(obj):
     dis = pb.objdump(obj)
-    want = {'_Z2c1PFiiEi': 1, '_Z2c2P1Ai': 1, '_Z2c3P1A': 1, '_Z2c4PFiiEi': 1, '_Z2c5PFiiES0_i': 2, '_Z2c6i': 0}
+    want = {'c1': 1, 'c2': 1, 'c3': 1, 'c4': 1, 'c5': 2, 'c6': 0}
     for f, n in want.items():
         b = body(dis, f)
         check('%s: %d relocation(s) against fnvnx_dispatch' % (f, n), calls(b) == n, b)
         check('%s: no indirect call without a site check' % f,
               len(re.findall(r'[0-9a-f]+: [0-9a-f]+ (?:blr|br) x\d+', b)) == n and len(re.findall(r'[0-9a-f]+: [0-9a-f]+ cmp w\d+, w\d+', b)) >= n, b)
-    c1 = body(dis, '_Z2c1PFiiEi')
+    c1 = body(dis, 'c1')
     check('hit path: ONE 64-bit acquire load (ldar: the slot is shared memory, R9) of the site, compare the low half of that register, branch, shift the register',
           re.search(r'ldar x(\d+), \[x\d+\].*? cmp (?:w\d+, w\1|w\1, w\d+) [0-9a-f]+: [0-9a-f]+ b\.ne .*? lsr x\d+, x\1, #32', c1.replace('\n', ' '))
           and len(re.findall(r'ldar x\d+, \[x\d+\]', c1)) == 1 and len(re.findall(r'R_AARCH64_P32_ADD_ABS_LO12_NC \.bss', c1)) == 1, c1)
-    c6 = body(dis, '_Z2c6i')
-    check('a direct call is untouched', calls(c6, '_Z6directi') == 1 and 'fnvnx_dispatch' not in c6, c6)
-    n = sum(calls(body(dis, f)) for f in dis)
+    c6 = body(dis, 'c6')
+    check('a direct call is untouched', calls_src(c6, 'direct') == 1 and 'fnvnx_dispatch' not in c6, c6)
+    n = sum(calls(body(dis, src_name(f))) for f in dis)
     sz = pb.section_size(obj, '.bss')
     check('one 8-byte zero site per indirect call', sz == 8 * n and n == 11, '.bss %s bytes, %d dispatch relocations' % (sz, n))
 
     def desc(f):
         m = re.search(r'R_AARCH64_P32_ADR_PREL_PG_HI21 (\.rodata\.str1\.8)(?:\+0x([0-9a-f]+))?', body(dis, f))
         return m and pb.cstring(obj, m.group(1), int(m.group(2) or '0', 16))
-    shapes = {'_Z2c1PFiiEi': 'stack:i:i', '_Z2c2P1Ai': 'this:i:i,i', '_Z2c3P1A': 'this:i:i,i',
-              '_Z2d1PFviifE': 'fast:v:i,i,f', '_Z2d2PFxdxE': 'stack:q:d,q',
-              '_Z2d3PF2V3S_2P23BigcES_S0_S1_': 'stack:a12Hhf:s12hf,s8g,s32r,i', '_Z2d4PF3Big2NTERS0_': 'stack:a32Hm:s4r',
-              '_Z2d5P1BMS_FifdE': 'this:i:i,f,d'}
+    shapes = {'c1': 'stack:i:i', 'c2': 'this:i:i,i', 'c3': 'this:i:i,i',
+              'd1': 'fast:v:i,i,f', 'd2': 'stack:q:d,q',
+              'd3': 'stack:a12Hhf:s12hf,s8g,s32r,i', 'd4': 'stack:a32Hm:s4r',
+              'd5': 'this:i:i,f,d'}
     for f, want_d in shapes.items():
         check('%s: descriptor %s' % (f, want_d), desc(f) == want_d, repr(desc(f)))
 
@@ -132,20 +153,20 @@ def host(td, so):
     check('host.cpp compiles', r.returncode == 0, r.stderr[:2000])
     if r.returncode == 0:
         dis = pb.objdump(obj)
-        fns = {'_Z2h1y': 0, '_Z2h2yy': 0, '_Z2h3iy': 0, '_Z2h4y': 0, '_Z3ordPFyyEy': 1, '_Z5plainPK3Api': 0}
+        fns = {'h1': 0, 'h2': 0, 'h3': 0, 'h4': 0, 'ord': 1, 'plain': 0}
         for f, n in fns.items():
             b = body(dis, f)
             check('%s: %d call(s) of fnvnx_dispatch' % (f, n), calls(b) == n, b)
-        check('a host call is a plain indirect call (blr), with no site', all(re.search(r'\b(?:blr|br) x\d+', body(dis, f)) for f in ('_Z2h1y', '_Z2h2yy', '_Z2h3iy', '_Z2h4y')), body(dis, '_Z2h1y'))
+        check('a host call is a plain indirect call (blr), with no site', all(re.search(r'\b(?:blr|br) x\d+', body(dis, f)) for f in ('h1', 'h2', 'h3', 'h4')), body(dis, 'h1'))
         check('the pointer call of ord is rewritten and its host call is not: one site, two indirect calls',
-              len(re.findall(r'\b(?:blr|br) x\d+', body(dis, '_Z3ordPFyyEy'))) == 2 and pb.section_size(obj, '.bss') == 8, body(dis, '_Z3ordPFyyEy'))
+              len(re.findall(r'\b(?:blr|br) x\d+', body(dis, 'ord'))) == 2 and pb.section_size(obj, '.bss') == 8, body(dis, 'ord'))
         lines = [l.split('\t') for l in pb.section(obj, '.fnvnx.dispatch').splitlines()]
-        rec = {l[0]: tuple(int(x) for x in l[1:]) for l in lines if l[1] != 'host'}
-        want = {'_Z2h1y': (0, 1), '_Z2h2yy': (0, 2), '_Z2h3iy': (0, 1), '_Z2h4y': (0, 1), '_Z3ordPFyyEy': (1, 1)}
+        rec = {src_name(l[0]): tuple(int(x) for x in l[1:]) for l in lines if l[1] != 'host'}
+        want = {'h1': (0, 1), 'h2': (0, 2), 'h3': (0, 1), 'h4': (0, 1), 'ord': (1, 1)}
         check('.fnvnx.dispatch: per function the rewritten sites and the host-ABI calls', rec == want, rec)
-        rows = sorted((l[0], l[2]) for l in lines if l[1] == 'host')
-        wrows = sorted([('_Z2h1y', 'Api.open'), ('_Z2h2yy', 'Api.close'), ('_Z2h2yy', 'Api.open'), ('_Z2h3iy', 'Api.tab'),
-                        ('_Z2h4y', 'Api.open'), ('_Z3ordPFyyEy', 'Api.open')])
+        rows = sorted((src_name(l[0]), l[2]) for l in lines if l[1] == 'host')
+        wrows = sorted([('h1', 'Api.open'), ('h2', 'Api.close'), ('h2', 'Api.open'), ('h3', 'Api.tab'),
+                        ('h4', 'Api.open'), ('ord', 'Api.open')])
         check('.fnvnx.dispatch: one host row per host-ABI call, `symbol host <tag>.<field>` (a slot array names the array member)', rows == wrows, rows)
     for name, fn, err in FORMS:
         src = os.path.join(td, 'form.cpp')
@@ -163,7 +184,7 @@ def host(td, so):
     r = pb.compile(src, os.path.join(td, 'alias.o'), so)
     dis = pb.objdump(os.path.join(td, 'alias.o')) if r.returncode == 0 else ''
     check('a slot typed through a second typedef is a host slot (no dispatch, plain blr)',
-          r.returncode == 0 and calls(body(dis, '_Z2a1y')) == 0 and re.search(r'\b(?:blr|br) x\d+', body(dis, '_Z2a1y')), r.stderr[:500] or body(dis, '_Z2a1y'))
+          r.returncode == 0 and calls(body(dis, 'a1')) == 0 and re.search(r'\b(?:blr|br) x\d+', body(dis, 'a1')), r.stderr[:500] or body(dis, 'a1'))
     # CONT-P allows what is not a loss of the type: a qualifier change, the same record, a callee that takes the table typed
     src = os.path.join(td, 'contp_ok.cpp')
     open(src, 'w').write(PRE + 'unsigned take(const Api *p) { return p->size; }\nunsigned f(Api *p) { return take(p) + take((const Api *)p) + take(host_api); }\n')

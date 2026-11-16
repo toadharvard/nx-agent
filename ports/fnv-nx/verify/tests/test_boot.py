@@ -14,11 +14,13 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
-import boot  # noqa: E402
-import bootdecl  # noqa: E402
-import bootmachine  # noqa: E402
-import boothost  # noqa: E402
-import test_bootmachine as tb  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import boot  # noqa: E402
+from fnvnx.verify import bootdecl  # noqa: E402
+from fnvnx.verify import bootmachine  # noqa: E402
+from fnvnx.verify import boothost  # noqa: E402
+from fnvnx.verify.tests import test_bootmachine as tb  # noqa: E402
 
 LINE = "fnvnx-start: identity ok"
 TABLE = """# milestones of the test guest

@@ -2,12 +2,13 @@
 """Shared x86-32 flow code for fpmodes.py: PE image, recursive-descent decoder with CFG, TOTAL esp/ebp tracking
 (symbolic callee pops solved from join/ret constraints; every instruction ends with a constant or a named reason), frame-address
 events, x87 stack-depth dataflow. No clocks, no entropy; every iteration order is sorted."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, struct, bisect, itertools
 from collections import defaultdict
 import sys
 import capstone
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from fnvlift.image import Image as _FImage
+from fnvnx.lift.fnvlift.image import Image as _FImage
 from capstone import x86 as X
 
 M32 = 0xffffffff
@@ -18,7 +19,7 @@ def image_base(path, table, name):
     """the load base of an image, from its declared source: `exe` = the PE's own ImageBase (the exe is mapped at it, never relocated), else the assigned base of the row `name` (with or without .dll) of the loader's module table."""
     if name == 'exe':
         d = open(path, 'rb').read(); return struct.unpack_from('<I', d, struct.unpack_from('<I', d, 0x3c)[0] + 52)[0]
-    import pemod
+    import fnvnx.lift.tools.pemod as pemod
     r = pemod.modules(table); n = name.lower(); n = n if n in r else n + '.dll'
     if n not in r: sys.exit('x86flow.image_base: %s is not a row of %s' % (name, table))
     return r[n].base
@@ -39,8 +40,8 @@ for _r in 'abcd':
     SUB[_r + 'l'] = ('e' + _r + 'x', 0, 8)
     SUB[_r + 'h'] = ('e' + _r + 'x', 8, 8)
 RETS = ('ret', 'retf', 'int3', 'hlt', 'ud2')
-FUNK = ('inner', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'eh-throw')
-STARTS = ('decomp', 'call', 'entry', 'tail', 'export', 'tls')
+FUNK = ('eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'eh-throw')
+STARTS = ('call', 'entry', 'tail', 'export', 'tls')
 IMG = None
 KINDS, EST, FLAGS = {}, [], {}
 RETN, ALLOCA = {}, []          # entry -> callee-popped bytes (None = several different N); entries that allocate stack (esp -= eax)
@@ -131,7 +132,7 @@ def pmap(pool, fn, items, chunk=100):
     return list(pool.imap(fn, items, chunksize=chunk))
 
 
-def decode(a, ext, kind='decomp'):
+def decode(a, ext, kind):
     """descent over [a, a+ext); non-decomp extents are byte sums, so the range is widened (up to +512) while a jump leaves it towards
     a non-start target and on undecodable tails. -> (insns, succ, tails) or None."""
     hi = a + ext
@@ -139,7 +140,7 @@ def decode(a, ext, kind='decomp'):
         try:
             ins, tb, tk = explore(IMG, a, hi, IMG.bytes(a, hi - a))
         except ValueError:
-            if kind == 'decomp' or hi >= a + ext + 512:
+            if hi >= a + ext + 512:
                 return None
             hi += 16
             continue
@@ -157,7 +158,7 @@ def decode(a, ext, kind='decomp'):
             if out and (m != 'jmp' or o[0].type == X.X86_OP_IMM):
                 tails[x] = out
         far = [t for x in sorted(tails) for t in tails[x] if t != x + ins[x].size and hi <= t < a + ext + 512 and KINDS.get(t) not in STARTS]
-        if kind != 'decomp' and far:
+        if far:
             hi = max(far) + 16
             continue
         return ins, succ, tails
@@ -213,7 +214,7 @@ def track(F):
         return
     st, eqs, kinds, why = {F.a: (F.a, 0, (), (F.a, 0, ()) if F.kind in FUNK else None)}, [], {}, set()   # funclets: ebp = parent's frame pointer, offset 0
     work, multi = [F.a], False
-    funclet = F.kind in ('inner', 'eh-cont')
+    funclet = F.kind in ('eh-cont',)
     while work:
         a = work.pop(); ep, k, vs, bp = st[a]; i = F.ins[a]; m = mn(i); o = i.operands
         r0 = rn(i, o[0]) if o else None; r1 = rn(i, o[1]) if len(o) > 1 else None
@@ -449,7 +450,7 @@ def depth1(F, tabl, ov, start=None):
             elif d0[s_] != nd and d0[s_] is not None and nd is not None:
                 conf.add((s_, d0[s_], nd))
     rd = sorted(r for r in rets if r is not None)
-    return dict(x87=x87, conf=sorted(conf)[:3], nconf=len(conf) + (len(set(rd)) > 1) + (mi < 0 and F.kind == 'decomp'), mx=mx, mi=mi,
+    return dict(x87=x87, conf=sorted(conf)[:3], nconf=len(conf) + (len(set(rd)) > 1), mx=mx, mi=mi,
                 ret=rd[0] if len(set(rd)) == 1 else 0, nodepth=bool(unk), ind=ind, sites=sites,
                 inddep=sum(1 for a in indpos if x87 and F.succ[a] and isx87(mn(F.ins[F.succ[a][0]]))))
 

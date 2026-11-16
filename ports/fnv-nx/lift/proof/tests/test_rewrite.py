@@ -1,11 +1,13 @@
 """proof/rewrite.py and model_sail.zext_add_pairs: every rewrite is an identity of the bit-vector semantics; checked here by z3 on 8/16-bit instances (all inputs)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
 import z3
-from proof import rewrite, model_sail
+from fnvnx.lift.proof import rewrite, model_sail
 
 
 ROWS = {r.split('\t')[0]: r.rstrip('\n').split('\t')[2:] for r in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'smtlib_bv_rows.tsv')) if r[0] != '#' and r.strip()}     # parameters: SMT-LIB FixedSizeBitVectors (tests/smtlib_bv_rows.tsv)

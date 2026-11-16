@@ -20,7 +20,9 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import recipe  # noqa: E402
 
 READELF, AR = "aarch64-linux-gnu-readelf", "aarch64-linux-gnu-ar"   # binutils-aarch64-linux-gnu of env.json
 SRC = {"c": ("c", "int fnvnx_probe;\n"), "cxx": ("c++", "int fnvnx_probe;\n")}

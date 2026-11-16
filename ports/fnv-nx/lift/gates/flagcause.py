@@ -14,13 +14,15 @@ by this precedence:
                  of that entry (`jtab` / `call` / `unknown-consumer`, see consumer())
   iv   call      else (only the C bit): the flag is undefined as after a call
 The origin combinations (letters) are reported as well, so a read that fits several causes shows in each combination."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json
 import multiprocessing
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from gates import gate_flags as g
+from fnvnx.lift.gates import gate_flags as g
 
 E_, C_, U_, N_, P_ = 1, 2, 4, 8, 16
 PB0 = 5                                  # origin bits E C U N, the PASS bit (the call summary), then the producer bits
@@ -140,8 +142,8 @@ def solve(path, base, rows, uni, jobs):
         if p0 is not None: p0.close(); p0.join()
     seed = {}
     for e in sorted(rows):
-        kind, fl = uni.get(e, ('decomp', ['ptr']))
-        seed[e] = 'ptr' if 'ptr' in fl else ('kind:' + kind if kind not in ('decomp', 'call', 'tail') else ('no-direct-pred' if e not in preds else None))
+        kind, fl = uni.get(e, ('ptr', ['ptr']))
+        seed[e] = 'ptr' if 'ptr' in fl else ('kind:' + kind if kind not in ('call', 'tail') else ('no-direct-pred' if e not in preds else None))
     pb = {m: i for i, m in enumerate(sorted(mnems))}
     W = PB0 + len(pb)
     alle = sum(E_ << (W * k) for k in range(NF))

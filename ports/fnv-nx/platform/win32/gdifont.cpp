@@ -13,6 +13,7 @@
  * Stage 1 declared-machine facts: display DC at 96 dpi, MM_TEXT, identity world transform; system locale
  * en-US (name language 0x409); TC_RA_ABLE (bitmap fonts allowed); no vertical (@) families; no FontLink, no
  * fontconfig-derived family fallbacks beyond Wine's three built-in names per family class. */
+#include <fnvnx_export.h>
 #include "w32.h"
 #include "gdi_int.h"
 #include "font_faces.h"
@@ -994,6 +995,7 @@ extern "C" int GetObjectW(HGDIOBJ h, int cb, void *buf)
     memcpy(buf, tmp, (size_t)n);
     return n;
 }
+FNVNX_EXPORT("gdi32.dll", "GetObjectW", GetObjectW, "func");
 extern "C" int GetObjectA(HGDIOBJ h, int cb, void *buf)
 {
     gdi_objinfo oi;
@@ -1007,8 +1009,10 @@ extern "C" int GetObjectA(HGDIOBJ h, int cb, void *buf)
     memcpy(buf, a, (size_t)n);
     return n;
 }
+FNVNX_EXPORT("gdi32.dll", "GetObjectA", GetObjectA, "func");
 static HGDIOBJ create_font(const LF &lf) { return (HGDIOBJ)gdi_font_create(&lf); }
 extern "C" HFONT CreateFontIndirectW(const void *lf) { return lf ? (HFONT)create_font(*(const LF *)lf) : NULL; }
+FNVNX_EXPORT("gdi32.dll", "CreateFontIndirectW", CreateFontIndirectW, "func");
 extern "C" HFONT CreateFontIndirectA(const void *lfa)
 {
     if (!lfa) return NULL;
@@ -1019,6 +1023,7 @@ extern "C" HFONT CreateFontIndirectA(const void *lfa)
     for (int i = 0; i < 31 && a[i]; i++) lf.face[i] = a[i];
     return (HFONT)create_font(lf);
 }
+FNVNX_EXPORT("gdi32.dll", "CreateFontIndirectA", CreateFontIndirectA, "func");
 extern "C" BOOL GetTextMetricsW(HDC hdc, void *out)
 {
     FL l;
@@ -1028,6 +1033,7 @@ extern "C" BOOL GetTextMetricsW(HDC hdc, void *out)
     memcpy(out, &t, sizeof t);
     return TRUE;
 }
+FNVNX_EXPORT("gdi32.dll", "GetTextMetricsW", GetTextMetricsW, "func");
 extern "C" BOOL GetTextMetricsA(HDC hdc, void *out)
 {
     FL l;
@@ -1044,6 +1050,7 @@ extern "C" BOOL GetTextMetricsA(HDC hdc, void *out)
     memset(o + 53, 0, 3);
     return TRUE;
 }
+FNVNX_EXPORT("gdi32.dll", "GetTextMetricsA", GetTextMetricsA, "func");
 static ustr face_name(HDC hdc)
 {
     FL l;
@@ -1064,6 +1071,7 @@ extern "C" int GetTextFaceW(HDC hdc, int count, void *name)
     }
     return len;
 }
+FNVNX_EXPORT("gdi32.dll", "GetTextFaceW", GetTextFaceW, "func");
 extern "C" int GetTextFaceA(HDC hdc, int count, char *name)
 {
     ustr w = face_name(hdc);
@@ -1076,6 +1084,7 @@ extern "C" int GetTextFaceA(HDC hdc, int count, char *name)
     name[k] = 0;
     return k;   /* GetTextFaceA does not count the NUL */
 }
+FNVNX_EXPORT("gdi32.dll", "GetTextFaceA", GetTextFaceA, "func");
 extern "C" UINT GetTextCharsetInfo(HDC hdc, void *fs, DWORD flags)
 {
     W32_UNUSED(flags);
@@ -1085,7 +1094,9 @@ extern "C" UINT GetTextCharsetInfo(HDC hdc, void *fs, DWORD flags)
     if (fs) memcpy(fs, &f->fs, sizeof f->fs);   /* FONTSIGNATURE: usb[4], csb[2] */
     return f->charset;
 }
+FNVNX_EXPORT("gdi32.dll", "GetTextCharsetInfo", GetTextCharsetInfo, "func");
 extern "C" int GetTextCharset(HDC hdc) { return (int)GetTextCharsetInfo(hdc, NULL, 0); }
+FNVNX_EXPORT("gdi32.dll", "GetTextCharset", GetTextCharset, "func");
 extern "C" DWORD GetFontLanguageInfo(HDC hdc)
 {
     FSig fs;
@@ -1114,6 +1125,7 @@ extern "C" DWORD GetFontLanguageInfo(HDC hdc)
     }
     return r;
 }
+FNVNX_EXPORT("gdi32.dll", "GetFontLanguageInfo", GetFontLanguageInfo, "func");
 extern "C" BOOL TranslateCharsetInfo(DWORD *src, void *cs, DWORD flags)
 {
     CSI c;
@@ -1121,6 +1133,7 @@ extern "C" BOOL TranslateCharsetInfo(DWORD *src, void *cs, DWORD flags)
     memcpy(cs, &c, sizeof c);
     return TRUE;
 }
+FNVNX_EXPORT("gdi32.dll", "TranslateCharsetInfo", TranslateCharsetInfo, "func");
 static DWORD get_outline(HDC hdc, UINT ch, UINT format, void *gm, DWORD size, void *buf, const void *mat, bool ansi)
 {
     if (!mat) return GERR;
@@ -1140,7 +1153,9 @@ static DWORD get_outline(HDC hdc, UINT ch, UINT format, void *gm, DWORD size, vo
     return W32_DW(r);
 }
 extern "C" DWORD GetGlyphOutlineA(HDC hdc, UINT ch, UINT format, void *gm, DWORD size, void *buf, const void *mat) { return get_outline(hdc, ch, format, gm, size, buf, mat, true); }
+FNVNX_EXPORT("gdi32.dll", "GetGlyphOutlineA", GetGlyphOutlineA, "func");
 extern "C" DWORD GetGlyphOutlineW(HDC hdc, UINT ch, UINT format, void *gm, DWORD size, void *buf, const void *mat) { return get_outline(hdc, ch, format, gm, size, buf, mat, false); }
+FNVNX_EXPORT("gdi32.dll", "GetGlyphOutlineW", GetGlyphOutlineW, "func");
 
 extern "C" int GetDeviceCaps(HDC, int);
 /* ---- DC text state (stored on the DC object in gdi32.cpp). Each returns the previous value and fails on a bad DC.
@@ -1152,13 +1167,17 @@ static uint32_t dc_swap(HDC hdc, int field, uint32_t v, uint32_t fail)
     return (uint32_t)prev;
 }
 extern "C" COLORREF SetTextColor(HDC hdc, COLORREF c) { return W32_DW(dc_swap(hdc, GDI_TS_TEXTCOLOR, (uint32_t)c, GERR)); }
+FNVNX_EXPORT("gdi32.dll", "SetTextColor", SetTextColor, "func");
 extern "C" COLORREF SetBkColor(HDC hdc, COLORREF c) { return W32_DW(dc_swap(hdc, GDI_TS_BKCOLOR, (uint32_t)c, GERR)); }
+FNVNX_EXPORT("gdi32.dll", "SetBkColor", SetBkColor, "func");
 extern "C" int SetBkMode(HDC hdc, int mode)
 {
     if (mode != 1 && mode != 2) { SetLastError(ERROR_INVALID_PARAMETER); return 0; }   /* TRANSPARENT, OPAQUE */
     return (int)dc_swap(hdc, GDI_TS_BKMODE, (uint32_t)mode, 0);
 }
+FNVNX_EXPORT("gdi32.dll", "SetBkMode", SetBkMode, "func");
 extern "C" UINT SetTextAlign(HDC hdc, UINT align) { return dc_swap(hdc, GDI_TS_ALIGN, align, GERR); }
+FNVNX_EXPORT("gdi32.dll", "SetTextAlign", SetTextAlign, "func");
 extern "C" int SetMapMode(HDC hdc, int mode)   /* MM_TEXT 1 .. MM_ISOTROPIC 7, MM_ANISOTROPIC 8: the extents of each mode (set_map_mode) */
 {
     int32_t prev = 0;
@@ -1183,6 +1202,7 @@ extern "C" int SetMapMode(HDC hdc, int mode)   /* MM_TEXT 1 .. MM_ISOTROPIC 7, M
     }
     return (int)dc_swap(hdc, GDI_TS_MAPMODE, (uint32_t)mode, 0);
 }
+FNVNX_EXPORT("gdi32.dll", "SetMapMode", SetMapMode, "func");
 extern "C" BOOL MoveToEx(HDC hdc, int x, int y, void *prev_point)
 {
     int32_t px = 0, py = 0;
@@ -1190,11 +1210,13 @@ extern "C" BOOL MoveToEx(HDC hdc, int x, int y, void *prev_point)
     if (prev_point) { memcpy(prev_point, &px, 4); memcpy((uint8_t *)prev_point + 4, &py, 4); }   /* POINT: two 32-bit LONGs */
     return TRUE;
 }
+FNVNX_EXPORT("gdi32.dll", "MoveToEx", MoveToEx, "func");
 extern "C" HGDIOBJ GetCurrentObject(HDC hdc, UINT type)
 {
     int k = type == 1 ? GDIK_PEN : type == 2 ? GDIK_BRUSH : type == 5 ? GDIK_PALETTE : type == 6 ? GDIK_FONT : type == 7 ? GDIK_BITMAP : 0;   /* OBJ_* */
     return (HGDIOBJ)(uintptr_t)(k ? gdi_dc_object(hdc, k) : 0);
 }
+FNVNX_EXPORT("gdi32.dll", "GetCurrentObject", GetCurrentObject, "func");
 
 /* ======================================================================================================
  * Stage 2: text output (ExtTextOut), text extents, character placement, outline text metrics, display DC.
@@ -1779,18 +1801,22 @@ extern "C" BOOL ExtTextOutW(HDC hdc, int x, int y, UINT flags, const RECT *rect,
 {
     return ext_text_out(hdc, x, y, flags, rect, (const char16_t *)str, count, dx);
 }
+FNVNX_EXPORT("gdi32.dll", "ExtTextOutW", ExtTextOutW, "func");
 extern "C" BOOL ExtTextOutA(HDC hdc, int x, int y, UINT flags, const RECT *rect, LPCSTR str, UINT count, const INT *dx)
 {
     return ext_text_out_a(hdc, x, y, flags, rect, str, count, dx);
 }
+FNVNX_EXPORT("gdi32.dll", "ExtTextOutA", ExtTextOutA, "func");
 extern "C" BOOL GetTextExtentExPointW(HDC hdc, LPCWSTR str, int count, int max_ext, LPINT nfit, LPINT dxs, SIZE *size)
 {
     return text_extent_w(hdc, (const char16_t *)str, count, max_ext, nfit, dxs, size, false);
 }
+FNVNX_EXPORT("gdi32.dll", "GetTextExtentExPointW", GetTextExtentExPointW, "func");
 extern "C" BOOL GetTextExtentPoint32W(HDC hdc, LPCWSTR str, int count, SIZE *size)
 {
     return text_extent_w(hdc, (const char16_t *)str, count, 0, nullptr, nullptr, size, false);
 }
+FNVNX_EXPORT("gdi32.dll", "GetTextExtentPoint32W", GetTextExtentPoint32W, "func");
 extern "C" BOOL GetTextExtentExPointA(HDC hdc, LPCSTR str, int count, int max_ext, LPINT nfit, LPINT dxs, SIZE *size)
 {
     if (count < 0 || max_ext < -1 || (count && !str) || !size) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
@@ -1810,7 +1836,9 @@ extern "C" BOOL GetTextExtentExPointA(HDC hdc, LPCSTR str, int count, int max_ex
     if (nfit) { int bytes = 0; for (size_t i = 0; i < (size_t)fit && i < lens.size(); i++) bytes += lens[i]; *nfit = bytes; }
     return TRUE;
 }
+FNVNX_EXPORT("gdi32.dll", "GetTextExtentExPointA", GetTextExtentExPointA, "func");
 extern "C" BOOL GetTextExtentPoint32A(HDC hdc, LPCSTR str, int count, SIZE *size) { return GetTextExtentExPointA(hdc, str, count, 0, NULL, NULL, size); }
+FNVNX_EXPORT("gdi32.dll", "GetTextExtentPoint32A", GetTextExtentPoint32A, "func");
 
 /* GetCharacterPlacement: GCP_RESULTS in the guest layout, pointers at native width */
 static DWORD placement(HDC hdc, const char *stra, const char16_t *strw, int count, int max_extent, void *results, DWORD flags)
@@ -1837,10 +1865,12 @@ extern "C" DWORD GetCharacterPlacementW(HDC hdc, LPCWSTR str, int count, int max
 {
     return placement(hdc, nullptr, (const char16_t *)str, count, max_extent, results, flags);
 }
+FNVNX_EXPORT("gdi32.dll", "GetCharacterPlacementW", GetCharacterPlacementW, "func");
 extern "C" DWORD GetCharacterPlacementA(HDC hdc, LPCSTR str, int count, int max_extent, void *results, DWORD flags)
 {
     return placement(hdc, str, nullptr, count, max_extent, results, flags);
 }
+FNVNX_EXPORT("gdi32.dll", "GetCharacterPlacementA", GetCharacterPlacementA, "func");
 
 /* GetOutlineTextMetricsA: OUTLINETEXTMETRICA, strings (family, face, style, full) appended behind the structure; the
  * otmp* fields hold their offsets from the start. A font that is not an outline (TrueType / OpenType) font: 0. */
@@ -1885,6 +1915,7 @@ extern "C" UINT GetOutlineTextMetricsA(HDC hdc, UINT cb, void *buf)
     memcpy(buf, tmp.data(), n);
     return (UINT)n;
 }
+FNVNX_EXPORT("gdi32.dll", "GetOutlineTextMetricsA", GetOutlineTextMetricsA, "func");
 
 /* ---- by glyph index (d3dx9's font code): the same glyph path as GetGlyphOutline / GetTextExtentPoint (glyph_abc), the
  * logical conversion of NtGdiGetCharABCWidthsW with NTGDI_GETCHARABCWIDTHS_INT (each of A, B, C scaled on its own and
@@ -1913,11 +1944,13 @@ extern "C" BOOL GetCharABCWidthsI(HDC hdc, UINT first, UINT cgi, uint16_t *gi, v
     int32_t *o = (int32_t *)abc;   /* ABC {int, UINT, int}: 3 x 32 bits */
     return glyph_widths_i(hdc, first, cgi, gi, true, [&](UINT i, int a, int b, int c) { o[3 * (size_t)i] = a; o[3 * (size_t)i + 1] = b; o[3 * (size_t)i + 2] = c; });
 }
+FNVNX_EXPORT("gdi32.dll", "GetCharABCWidthsI", GetCharABCWidthsI, "func");
 extern "C" BOOL GetCharWidthI(HDC hdc, UINT first, UINT cgi, uint16_t *gi, int *widths)
 {
     if (!widths) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
     return glyph_widths_i(hdc, first, cgi, gi, false, [&](UINT i, int a, int b, int c) { widths[i] = a + b + c; });
 }
+FNVNX_EXPORT("gdi32.dll", "GetCharWidthI", GetCharWidthI, "func");
 
 /* GetFontUnicodeRanges: GLYPHSET {cbThis, flAccel, cGlyphsSupported, cRanges, WCRANGE ranges[]} from the realised face's
  * Unicode cmap (BMP only: WCRANGE holds a WCHAR), contiguous runs of characters that have a glyph, ascending (reference:
@@ -1955,3 +1988,4 @@ extern "C" DWORD GetFontUnicodeRanges(HDC hdc, void *lpgs)
     }
     return size;
 }
+FNVNX_EXPORT("gdi32.dll", "GetFontUnicodeRanges", GetFontUnicodeRanges, "func");

@@ -15,7 +15,7 @@
 struct plugsym_registry {
   std::map<std::string, std::string> syms;   /* symbol -> its `.fnvnx.decltype` type spelling, "" when the writer gives none */
   bool reader = false;                       /* the layout plugin is loaded: it writes the lines of syms */
-  /* GCC runs the PLUGIN_FINISH_UNIT callbacks in an order the plugins do not control, so the reader cannot assume the writers have finished: the lines are written
+  /* GCC runs the PLUGIN_FINISH_UNIT callbacks in an order the plugins do not control, so the reader cannot rely on the writers having finished: the lines are written
    * by whoever finishes LAST. A writer counts itself at plugin_init (plugsym_writer) and reports at the end of its finish_unit (plugsym_writer_done); the reader
    * hands its emitter over at its own finish_unit (plugsym_reader_ready). The emitter runs once, when the reader is ready and every writer is done. */
   int writers = 0, done = 0;

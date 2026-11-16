@@ -44,16 +44,19 @@ documented semantics of an asm statement).  (4) Rule: `.cold` parts of functions
 without a record and are uncertified, so the recipe must not enable that partitioning.  (5) Input fact: the layout file describes the
 layout the linked image is run with (L1 emits it from the link as layout.json, fnvnx-layout/1; this gate checks its form, not the run).
 Pure: a function of the object bytes and the layout file."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(HERE, '..', 'contract'))
-import a64obj  # noqa: E402
-import addrsec  # noqa: E402
-import gatefile  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import a64obj  # noqa: E402
+from fnvnx.link import addrsec  # noqa: E402
+from fnvnx.contract import gatefile  # noqa: E402
 
 NAME = 'addr'
 GUARD = 0x10000

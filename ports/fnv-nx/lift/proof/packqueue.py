@@ -9,6 +9,8 @@ shape_sha in SHARDS (a record whose model_sha is the pin or whose closure_sha is
 excluded here as well: it migrates (shapeprove.py --migrate), it is not proved again.
 Rows: shape_key<TAB>shape_sha, sorted by key (shapeprove.py takes the shapes whose position is = K-1 mod N); header lines '# ...' pin the inputs and give the counts
 (per family: the universe, the queue, and the shapes no prover states: every non-integer family, integer shapes without a Form)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import argparse
 import collections
 import glob
@@ -19,19 +21,19 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from proof import certs_build, model_sail, symform, x86sys  # noqa: E402
+from fnvnx.lift.proof import certs_build, model_sail, symform, x86sys  # noqa: E402
 
 
 def main(argv):
     ap = argparse.ArgumentParser(); ap.add_argument('universe'); ap.add_argument('shards', nargs='*'); ap.add_argument('--pack-commit', required=True)
     ap.add_argument('--prover-commit', required=True); ap.add_argument('--out', required=True); ap.add_argument('--noform')
-    ap.add_argument('--sail-work', required=True); ap.add_argument('--sail-ir', required=True); ap.add_argument('--isla', required=True); x86sys.add_arg(ap)
+    ap.add_argument('--sail-work', required=True); ap.add_argument('--sail-ir', required=True); ap.add_argument('--isla', required=True); ap.add_argument('--isla-cfg', required=True); x86sys.add_arg(ap)
     ap.add_argument('--mode', choices=('int', 'simd'), default='int', help='simd: the queue of the SIMD family (header `# mode=simd`): every SIMD shape with a symbolic Form and no complete non-error record of --tree')
     ap.add_argument('--tree', help='simd: the commit of the prover tree the records must come from (record `tree`)'); ap.add_argument('--qcache', help='simd: BRANCH:FILE of the proved-query cache that seeds the farms (header)')
     ap.add_argument('--cpufeat-file', help='simd: the CPUID feature-bit table (the class order reads it)'); ap.add_argument('--cpufeat-ref', help='simd: BRANCH:FILE where the farms fetch that table (header)')
     a = ap.parse_args(argv)
     xsha = x86sys.configure(a.x86sys)
-    model_sail.configure(a.sail_work, a.sail_ir, a.isla)
+    model_sail.configure(a.sail_work, a.sail_ir, a.isla, a.isla_cfg)
     pin = certs_build.pinned_model()
     fam, hdr, first = {}, [], {}
     with open(a.universe) as fh:
@@ -41,7 +43,7 @@ def main(argv):
     simd = a.mode == 'simd'
     if simd:
         if not (a.tree and a.cpufeat_file and a.cpufeat_ref): ap.error('--mode simd needs --tree, --cpufeat-file and --cpufeat-ref')
-        from fnvlift import inputs; inputs.configure(cpufeat=a.cpufeat_file)        # the class order (simdcheck.cleared) reads the CPUID feature-bit table
+        from fnvnx.lift.fnvlift import inputs; inputs.configure(cpufeat=a.cpufeat_file)        # the class order (simdcheck.cleared) reads the CPUID feature-bit table
     forms = certs_build.forms_of(a.universe, ('simd',) if simd else ('int', 'sys'))
     files = []
     for s in a.shards: files += sorted(glob.glob(os.path.join(s, '**', '*.jsonl'), recursive=True)) if os.path.isdir(s) else [s]

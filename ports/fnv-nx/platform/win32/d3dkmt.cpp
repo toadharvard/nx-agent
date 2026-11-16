@@ -11,6 +11,7 @@
  * dlls/win32u/driver.c NtGdiDdDDIEscape (the gdi32.spec stdcall D3DKMTEscape forwards to it) returns STATUS_NO_MEMORY,
  * for every escape type, with a log line per call. Wine 9.0 parity; neither MSDN nor the reference establishes a
  * different status for a driver without an escape entry. */
+#include <fnvnx_export.h>
 #include "w32.h"
 
 extern "C" int gdi_dc_display(void *hd);   /* gdi32.cpp */
@@ -63,6 +64,7 @@ extern "C" NTSTATUS_ D3DKMTOpenAdapterFromHdc(void *desc)
     d->vidpn = 0;
     return ST_SUCCESS;
 }
+FNVNX_EXPORT("gdi32.dll", "D3DKMTOpenAdapterFromHdc", D3DKMTOpenAdapterFromHdc, "func");
 
 extern "C" NTSTATUS_ D3DKMTEscape(const void *desc)
 {
@@ -79,3 +81,4 @@ extern "C" NTSTATUS_ D3DKMTEscape(const void *desc)
         .s(" bytes): the display driver has no escape entry (Wine 9.0 NtGdiDdDDIEscape: STATUS_NO_MEMORY)").emit();
     return ST_NO_MEMORY;
 }
+FNVNX_EXPORT("gdi32.dll", "D3DKMTEscape", D3DKMTEscape, "func");

@@ -13,8 +13,10 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import test_plugins as tp
-from test_plugins import BASE, ROOT, T, REC, PLUGS, SRC, check, git, w, make_repo, errs, build, disasm, mut, recipe, cas, REAL, VERIFY
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify.tests import test_plugins as tp
+from fnvnx.verify.tests.test_plugins import BASE, ROOT, T, REC, PLUGS, SRC, check, git, w, make_repo, errs, build, disasm, mut, recipe, cas, REAL, VERIFY
 
 
 
@@ -145,7 +147,7 @@ def main():
     print("TIME guest cold A %.1fs, cold B %.1fs, warm %.1fs" % (ta, tb, tw))
     # per-target recipes: one root, one set of units, a recipe per target; the host recipe is a variant keyed by its target
     pt = guest_repo("pt", rec, pin, files={ROOT + "/a.cc": src})
-    w(pt, ROOT + "/host.json", json.dumps(REC))
+    w(pt, ROOT + "/host.json", json.dumps({k: v for k, v in REC.items() if k not in recipe.INHERITED or v != rec.get(k)}))   # units and include are the base's: inherited, never copied
     ad = json.load(open(os.path.join(pt, T + "verify/admit.json")))
     for r in ad["roots"]:
         if r["path"] == ROOT:

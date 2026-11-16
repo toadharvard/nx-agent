@@ -11,7 +11,9 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-import cas  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas  # noqa: E402
 
 ROOT = tempfile.mkdtemp(dir=os.path.expanduser("~"), prefix="cas-test-")
 FAILED = []
@@ -172,7 +174,7 @@ def _():
         return False
     s = cas.hashlib.sha256(b"alpha").hexdigest()
     obj = os.path.join(st, "obj", s[:2], s)
-    os.chmod(obj, 0o644)
+    os.unlink(obj)   # the object is a hard link of the pool's: corrupt this store's name only, never the shared inode
     with open(obj, "wb") as f:
         f.write(b"evil")
     r = subprocess.run(cli + ["verify", st], capture_output=True, text=True)

@@ -18,13 +18,15 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import envcheck  # noqa: E402
-import gate_build  # noqa: E402
-import gate_guestlink  # noqa: E402
-import recipe  # noqa: E402
-import relocs  # noqa: E402
-import undefset  # noqa: E402
-from ldcheck import syms_any  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import envcheck  # noqa: E402
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import gate_guestlink  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
+from fnvnx.link import relocs  # noqa: E402
+from fnvnx.verify import undefset  # noqa: E402
+from fnvnx.link.ldcheck import syms_any  # noqa: E402
 
 BIND = {1: "GLOBAL", 2: "WEAK", 10: "UNIQUE"}
 

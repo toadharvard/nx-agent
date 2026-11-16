@@ -41,19 +41,19 @@ check("checker: a '.co' suffix is a hit", bool(hits('x = p + ".co"\n')))
 check("checker: join(cache, 'external') alone is a hit (use recipe.ext_dir)", bool(hits('import os\nx = os.path.join(cache, "external")\n')))
 check("checker: recipe.exttree(e, cache) is no hit", not hits('import recipe\nx = recipe.exttree(e, cache)\n'))
 
+import subprocess  # noqa: E402
 bad = []
-for top in ("verify", "contract", "link", "lift", "platform"):
-    for dp, dn, fn in os.walk(os.path.join(TREE, top)):
-        dn[:] = [d for d in dn if d not in ("tests", "__pycache__")]
-        for f in fn:
-            p = os.path.join(dp, f)
-            if not f.endswith(".py") or p == os.path.join(TREE, "verify", "recipe.py"):
-                continue
-            try:
-                found = hits(open(p, encoding="utf-8").read(), p)
-            except (SyntaxError, UnicodeDecodeError, ValueError):
-                continue
-            bad += ["%s:%d %s" % (os.path.relpath(p, TREE), l, w) for l, w in found]
+tracked = subprocess.run(["git", "-C", TREE, "ls-files", "-z", "--", "*.py"], capture_output=True, text=True, check=True).stdout.split("\0")   # the universe: every tracked python file of the tree, tests included
+for rel in sorted(x for x in tracked if x):
+    p = os.path.join(TREE, rel)
+    if p in (os.path.join(TREE, "verify", "recipe.py"), os.path.abspath(__file__)) or not os.path.isfile(p):
+        continue
+    try:
+        found = hits(open(p, encoding="utf-8").read(), p)
+    except (SyntaxError, UnicodeDecodeError, ValueError):
+        bad.append("%s: unparseable" % rel)
+        continue
+    bad += ["%s:%d %s" % (rel, l, w) for l, w in found]
 check("no file outside recipe.py builds an external's path by hand", not bad, bad)
 print("fails: %d" % fails)
 sys.exit(1 if fails else 0)

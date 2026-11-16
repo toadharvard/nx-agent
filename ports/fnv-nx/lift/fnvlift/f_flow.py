@@ -29,17 +29,20 @@ def jump_stmt(cx, t):
 
 def jump_out(cx, t, cond=None):
     """a direct jump (cond None) or conditional jump to address t outside the function's range"""
+    cx.xfer = True
     cx.em(('if(%s)' % cond if cond else '') + jump_stmt(cx, t))
 
 
 def jump_to(cx, t):
     """control transfer to the constant address t (jmp, jcc, loop, jecxz, rep step): a label of this function, else jump_stmt. -> C statement"""
+    cx.xfer = True
     return 'goto %s;' % cx.lab(t) if cx.lo <= t < cx.hi else jump_stmt(cx, t)
 
 
 def call_xfer(cx, o, t):
     """transfer half of the call at cx.a (the state effect, esp-=4 and the return address store, is the caller's): `t` is a constant target (int) or
     the name of a C u32 holding it; operand `o` only classifies an indirect call (import or not). -> C text"""
+    cx.xfer = True
     cx.callrets.append(cx.nxt)
     cx.nonlocal_ = True
     if isinstance(t, int):
@@ -58,6 +61,7 @@ def call_xfer(cx, o, t):
 
 def jmp_indirect(cx, o, t):
     """jmp to the C u32 expression t: through the instruction's jump table when it has one, else the non-local loop. -> list of C lines"""
+    cx.xfer = True
     cx.nonlocal_ = True
     cands = cx.tables.get(cx.a)
     if cands is None:
@@ -70,6 +74,7 @@ def jmp_indirect(cx, o, t):
 
 def ret_xfer(cx, ra):
     """return to the C u32 expression ra (esp already popped) -> C text"""
+    cx.xfer = True
     if cx.ops and cx.ops[0].imm:
         cx.kinds.add('retn')
     return 'c->ra=%s; SYNC_OUT; return;' % ra

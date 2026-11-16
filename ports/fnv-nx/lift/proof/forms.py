@@ -5,17 +5,19 @@ Families: forms_alu.py (arithmetic, shifts, bit ops, mul/div), forms_move.py (mo
 Form-level conventions: fault(code, cond) = the instruction raises DE/BP/UD when cond holds (state unchanged, eip = its address);
 `when` on a register/flag write = the SDM defines the value only when `when` holds; df / flo (other EFLAGS bits) are state the
 model driver does not expose, so a form that writes them can only be certified on its observable fields."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from fnvlift.dsl import C, Form, V, bit, concat, eq, extract, load, mm, msb, trunc, xmm, zext
+from fnvnx.lift.fnvlift.dsl import C, Form, V, bit, concat, eq, extract, load, mm, msb, trunc, xmm, zext
 from capstone import x86 as X
-from fnvlift import faults, dsl
+from fnvnx.lift.fnvlift import faults, dsl
 
 R8 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh']; R16 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di']
 SEGPFX = {0x64: 'fs', 0x65: 'gs', 0x2e: 'cs', 0x26: 'es', 0x36: 'ss', 0x3e: 'ds'}      # the segment each override byte names (SDM Vol. 2 2.1.1); es/ss/ds are flat while the selector is a flat one
-from proof.shape import PFX      # the legacy prefix set (SDM vol. 2 2.1.1): one table, shape.py
+from fnvnx.lift.proof.shape import PFX      # the legacy prefix set (SDM vol. 2 2.1.1): one table, shape.py
 SEGS = {'cs', 'ds', 'es', 'ss', 'fs', 'gs'}
-from fnvlift.formkey import is_far_raw
+from fnvnx.lift.fnvlift.formkey import is_far_raw
 def form_key(ins):
     """same as form_key in the retired one-instruction harness (prove.py checks the two agree when the retired one-instruction harness imports)"""
     raw = bytes(ins.bytes); i = 0
@@ -102,14 +104,17 @@ def mload(a, w):
 def code_store_fault(F, sg, when):
     """a store through segment register `sg` whose selector names a code descriptor is #GP(0), reported as AV (SDM Vol. 3A 3.4.5.1 / 5.5: a code segment is not writable): the set of code indexes
     comes from the record (x86sys.code_indices: ss holds none, cs holds only code), so no register is special-cased.  Under a store's own `when` the fault is conditional as the store is."""
-    from fnvlift import x86sys
+    from fnvnx.lift.fnvlift import x86sys
     idx = x86sys.code_indices(sg)
     if not idx or (sg, when.u if when is not None else None) in ACCW: return
     ACCW.add((sg, when.u if when is not None else None)); ACC.add('codestore:' + sg)
     cond = None
     for i in idx:
         t = eq(extract(V('sel_' + sg, 16), 15, 3), C(i, 13)); cond = t if cond is None else cond | t
-    F.fault(faults.BYNAME['AV']['code'], cond if when is None else cond & when)
+    full = cond if when is None else cond & when
+    F.fault(faults.BYNAME['AV']['code'], full)
+    if not hasattr(F, 'cstore'): F.cstore = []
+    F.cstore.append((sg, cond, full))      # the code-selector arm of `sg` and its fault node: the lifter drops it only under a proved selector set of `sg` (lift_dsl.specialise)
 def mstore(F, a, v, when=None, fwhen=None):
     """fwhen: the store is written unconditionally (an inactive REP step rewrites the old value) but is a store only while fwhen holds: it guards the code-segment fault alone"""
     assert a.u in _OK, 'store through an address not made by an address function'
@@ -184,7 +189,7 @@ def handler(*names):
 def null_seg_fault(c, sg):
     """an access through GS while the selector is null: the record's null_seg_access row (x86sys.NULL_SEG, owner L5), a fault at the instruction before any effect.  PRIV or AV by the row's own
     privileged_check_first over the instruction bytes (f_sys.row_privileged).  The row is read, never restated; a record without it leaves the Form undecided."""
-    from fnvlift import x86sys, f_sys
+    from fnvnx.lift.fnvlift import x86sys, f_sys
     r = getattr(x86sys, 'NULL_SEG', None)
     if not r: raise dsl.UndecidedRow('null_seg_access: no row in the declared x86sys record')
     name = 'PRIV' if f_sys.row_privileged(c.ins.bytes, r) else 'AV'
@@ -193,7 +198,7 @@ def null_seg_fault(c, sg):
 
 def build(ins, addr):
     """Form for a decoded instruction at addr; key = form_key(ins).  Raises KeyError for mnemonics outside the covered set."""
-    from proof import forms_alu, forms_move, forms_flow, forms_sys, forms_legacy, forms_simd, forms_ssefp      # noqa: F401  (register their handlers)
+    from fnvnx.lift.proof import forms_alu, forms_move, forms_flow, forms_sys, forms_legacy, forms_simd, forms_ssefp      # noqa: F401  (register their handlers)
     ACC.clear(); ACCW.clear(); c = Ctx(); c.ins, c.addr = ins, addr; c.F = Form(form_key(ins), addr, ins.size)
     words = ins.mnemonic.split(); c.rep = words[0] if len(words) > 1 else ''; c.m = words[-1]
     c.ops = [Op(ins, o) for o in ins.operands]
@@ -208,7 +213,7 @@ def build(ins, addr):
         if o.k == 'm': o.seg = None if o.cseg == X.X86_REG_ES else sp      # the string destination is ES:EDI whatever the override (SDM Vol. 2, MOVS / STOS / SCAS / CMPS)
     c.dseg = sp                      # the effective segment of the implicit DS-default operands (string source, XLAT): the last override prefix
     c.opc = raw[i + 1] if raw[i] == 0x0f else raw[i]; c.raw = raw; c.nprefix = i
-    from proof import intud, forms_legacy, forms_cpufeat, x87form
+    from fnvnx.lift.proof import intud, forms_legacy, forms_cpufeat, x87form
     fn = H.get(c.m)
     if raw[i] != 0x0f and i + 1 < len(raw) and (raw[i], (raw[i + 1] >> 3) & 7) in intud.CLEARED_UD:      # no cell in the SDM opcode map: by encoding, whatever mnemonic the decoder gives
         c.F.fault(forms_legacy.K_UD, C(1, 1)); c.F.access = frozenset(); return c.F.check_state()
