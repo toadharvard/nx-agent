@@ -1,6 +1,6 @@
 """x87 (opcode bytes 0xd8..0xdf): data movement, arithmetic, compares (R8, W13). Stack model and control instructions: f_x87_ctl.py; the carrier
 semantics (what each load/store/arithmetic does to the value) are in rt/fnvl_x87.h. The transcendental / remainder forms (fsin fcos fsincos fptan fpatan f2xm1 fyl2x
-fyl2xp1 fscale fprem fprem1 fxtract) call rt/fmath.c: correctly rounded binary64 (R8, one reference CPU model); fsincos and fptan always use the dynamic stack because
+fyl2xp1 fscale fprem fprem1 fxtract) call rt/fmath.c: correctly rounded binary64 (R8, one reference CPU model; the transcendentals are CORE-MATH cr_*, table CR below); fsincos and fptan always use the dynamic stack because
 their stack effect depends on the operand (C2 = 1: |x| >= 2^63, nothing pushed). fbld / fbstp (packed BCD, rt/x87.c) and fstpnce (D9 D8+i, the undocumented alias of fstp st(i)) are here;
 fldenv / frstor / fnstenv / fnsave (dynamic stack only) are in f_x87_ctl.py. h_x87 is the one entry of every x87 opcode: it records FIP / FOP / FCS / FDP / FDS (ptrs) for the non-control ones.
 
@@ -154,16 +154,23 @@ def x87_reg(cx, ins, b0, mr, g):
         raise Unsupported('x87 ' + cx.m)
 
 
+# the x87 transcendentals are the correctly rounded CORE-MATH functions (CLAUDE.md "x87 transcendentals", OWNER 8 and 10): THE table, the one place the lifter names them
+# (declared in rt/fmath.h, defined by the runtime root). fyl2x / fyl2xp1 are y * cr_log2(x) / y * cr_log2p1(x), fptan pushes 1.0 after cr_tan, fsincos is cr_sin and cr_cos.
+CR = {'f2xm1': 'cr_exp2m1', 'fyl2x': 'cr_log2', 'fyl2xp1': 'cr_log2p1', 'fptan': 'cr_tan', 'fpatan': 'cr_atan2', 'fsin': 'cr_sin', 'fcos': 'cr_cos'}
+
+
 def fmath(cx, mr):
     """fsin fcos fsincos fptan f2xm1 fyl2x fyl2xp1 fpatan fscale fxtract fprem fprem1: macros FM_* of rt/fnvl_x87.h (the same text on the static and the dynamic stack)"""
     em, R, W = cx.em, lambda k: rd(cx, k), lambda k: wr(cx, k)
     nm = FM[mr]
     if nm in ('fsin', 'fcos'):
-        em('FM_TRIG(fnvl_m_%s,%s,%s);' % (nm[1:], W(0), R(0)))
+        em('FM_TRIG(%s,%s,%s);' % (CR[nm], W(0), R(0)))
     elif nm == 'f2xm1':
-        em('FM_UN(fnvl_m_2xm1,%s,%s);' % (W(0), R(0)))
-    elif nm in ('fyl2x', 'fyl2xp1', 'fpatan'):                                     # ST(1) = f(ST(1), ST(0)), pop
-        em('FM_BIN(fnvl_m_%s,%s,%s,%s);%s' % ({'fyl2x': 'yl2x', 'fyl2xp1': 'yl2xp1', 'fpatan': 'atan2'}[nm], W(1), R(1), R(0), pop(cx)))
+        em('FM_UN(%s,%s,%s);' % (CR[nm], W(0), R(0)))
+    elif nm == 'fpatan':                                                           # ST(1) = atan2(ST(1), ST(0)), pop
+        em('FM_ATAN(%s,%s,%s,%s);%s' % (CR[nm], W(1), R(1), R(0), pop(cx)))
+    elif nm in ('fyl2x', 'fyl2xp1'):                                               # ST(1) = ST(1) * log2(ST(0) [+ 1]), pop
+        em('FM_LOG(%s,%s,%s,%s);%s' % (CR[nm], W(1), R(1), R(0), pop(cx)))
     elif nm == 'fscale':
         em('FM_BIN(fnvl_m_scale,%s,%s,%s);' % (W(0), R(0), R(1)))
     elif nm in ('fprem', 'fprem1'):
@@ -173,7 +180,7 @@ def fmath(cx, mr):
     else:                                                                          # fptan fsincos: push only when C2 = 0: data dependent depth
         if cx.xm == 's':
             raise X87Dyn()
-        em('FM_TAN(%s,%s);' % (W(0), R(0)) if nm == 'fptan' else 'FM_SINCOS(%s,%s);' % (W(0), R(0)))
+        em('FM_TAN(%s,%s,%s);' % (CR[nm], W(0), R(0)) if nm == 'fptan' else 'FM_SINCOS(%s,%s,%s,%s);' % (CR['fsin'], CR['fcos'], W(0), R(0)))
 
 
 def x87_mem(cx, ins, b0, mr, g):
