@@ -1428,3 +1428,9 @@ Paused: w3b, w4, farm; no other work.
 - bottleneck: w6 import migration; L1 per-target recipe rule; w28 PURE row; farm1 sm_link; the cand4 base.
 - 02:24Z L1 accepted the per-target recipe rule as w28 item 11. `generated`, `run` and `uses` live only in the base recipe, and `units`/`include` are inherited; an identical copy in a per-target recipe is red. When the head lands, w6 deletes the copies in the smscan, pair and translator host recipes.
 - 02:26Z The per-target recipe rule is at w28 5c7b36289. The render host recipes for smscan, pair and translator are red until their copies are deleted. Handed to w6 together with the import migration (verify/ as of 5c7b36289).
+- 02:32Z w6 266445289 (w6-root, verify/ of w28 9affb1631) accepted as a step.
+    - Results: render/bridgefacts uncertified 0 (whole set 85/94); `recipe check` valid for 7 roots; d3d9total test 332/332, 45/45.
+    - Builds green only with the previous env.json: w28's env.json blocks every build on 8 rust/llvm debs outside the closure.
+    - Sent to w28: (1) env closure, which `recipe check` must judge like build; (2) `from bridgefacts.d3d9 import m` rejected by the checker; (3) sibling-import rule question; (4) L6 admit rows missing in w28 (shaders/total, gl4shim, sm_link*), and the render/total `imports: contract` is unused; (5) wine_fixme row 25 check_fbo_status missing.
+    - w6 next: verify/ of 5c7b36289, then the per-target deletions in the smscan, pair and translator host recipes.
+- bottleneck: w28 env closure (blocks all builds on w28 verify/); w6 per-target pass; farm1 sm_link; the cand4 base.
