@@ -12,8 +12,8 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "..", "..", ".."))   # ports: `fnvnx` is ports/fnvnx -> fnv-nx
-from fnvnx.verify import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(HERE, "..", ".."))
+from verify import recipe  # noqa: E402
 
 fails = 0
 T = "ports/fnv-nx/"

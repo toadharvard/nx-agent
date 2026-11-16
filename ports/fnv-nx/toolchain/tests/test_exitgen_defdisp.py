@@ -7,7 +7,7 @@ bad name is listed in one run; byte-identical rows of two objects count as one r
 No network, no game data.  Run: python3 -I <this file> from the checkout root."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import os
 import shutil
 import subprocess
@@ -18,7 +18,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'lift', 'tools'))
 import plugbuild as pb  # noqa: E402
-from fnvnx.lift.tools import exitgen  # noqa: E402
+from lift.tools import exitgen  # noqa: E402
 
 check = pb.Checks('test_exitgen_defdisp')
 FIX = os.path.join(HERE, 'exitgen_defdisp', 'fixture.cpp')
