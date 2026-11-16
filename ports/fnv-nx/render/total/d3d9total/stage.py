@@ -220,13 +220,8 @@ def vendor_fourcc(inp, work, cache, specp):
     """the vendor FOURCC list of the enum generator: ITS rule (gen_enums.vendor_fourcc over the pinned Wine mirror, the d3d9 root's external wine-d3d9-formats); (list, mirror tree_sha256)"""
     tree = os.path.join(work, "ext", "wine-d3d9-formats")
     h = mount_external(ARGS.wine, tree)
-    env = os.path.join(inp, "render", "d3d9", "env")
-    sys.path.insert(0, env)
-    try:
-        import gen_enums
-        return gen_enums.vendor_fourcc(tree, specp), h
-    finally:
-        sys.path.remove(env)
+    from fnvnx.render.d3d9.env import gen_enums
+    return gen_enums.vendor_fourcc(tree, specp), h
 
 
 def enum_part(inp, work, cache):

@@ -18,8 +18,7 @@ description text of a page is never read for a count.
 Two runs over the same inputs are byte-equal (rows sorted by key, no clock, no path of the machine in the output).
 """
 import hashlib, json, os, re, sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from sm_xref import MODELS, in_range
+from fnvnx.render.shaders.total.sm_xref import MODELS, in_range
 
 HEADER = ("key\topnum\tmodels\tn_dst\tn_src\tn_other\tsyntax\tpage\tpage_sha256\tstatus"
           "\tsrc2\tw_dst\tw_src\tw_models\tagree")

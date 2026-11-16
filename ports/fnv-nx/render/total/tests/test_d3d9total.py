@@ -26,11 +26,10 @@ PORT = os.path.normpath(os.path.join(TOTAL, "..", ".."))
 REPO = os.path.normpath(os.path.join(PORT, "..", ".."))
 PORT_REL = "ports/fnv-nx"
 ROOT = PORT_REL + "/render/total/d3d9total"
-sys.path.insert(0, os.path.join(PORT, "verify"))
-import recipe  # noqa: E402
-_spec = importlib.util.spec_from_file_location("d3d9total_stage", os.path.join(TOTAL, "d3d9total", "stage.py"))
-G = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(G)
+import types
+_pkg = sys.modules.setdefault("fnvnx", types.ModuleType("fnvnx")); _pkg.__path__ = [PORT]   # a host-run driver: `fnvnx` is ports/fnv-nx (the stage mounts it at /imp/fnvnx)
+from fnvnx.verify import recipe  # noqa: E402
+from fnvnx.render.total.d3d9total import stage as G  # noqa: E402
 G.ARGS = argparse.Namespace(treehash=os.path.join(PORT, "contract", "treehash.py"), wine=None)
 URL = os.environ.get("ARTIFACTS_URL")
 if not URL:

@@ -182,5 +182,5 @@ HAND_SB = ["Capture", "Apply"]
 GROUPS_EXTRA = ["LIGHTS"]   # dirty groups of state that lives outside the slot families (sparse lights)
 if __name__ == "__main__":
     import sys
-    import state_gen, state_model   # the model is its own module: this run is the script, state_model the same text as an imported module
+    from fnvnx.render.d3d9.dev import state_gen, state_model  # the model is its own module: this run is the script, state_model the same text as an imported module
     state_gen.emit(state_model, sys.argv[1], sys.argv[2])

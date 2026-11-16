@@ -5,7 +5,7 @@ exit 2, naming it): devtype / adapter-format independence, format classes, usage
 Profiles differ only where reported by the `profile differences` line."""
 import hashlib, os, re, struct, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE); import envq  # noqa: E402
+from fnvnx.render.d3d9.env import envq  # noqa: E402
 # OUT SPEC TSV_DIR D3DTYPES_H WINE_DIR D3D9_H D3D9CAPS_H ENV_PIN RULES_IN: the one place that parses the arguments (no default)
 envq.load(sys.argv[4], sys.argv[2], sys.argv[5], sys.argv[6], sys.argv[7])
 TSV_DIR = sys.argv[3]; ENV_PIN = sys.argv[8]; RULES_IN = sys.argv[9]   # ENV_PIN.txt and env_rules.cpp.in: stage arguments from the declared env directory

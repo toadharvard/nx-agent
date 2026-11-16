@@ -2,7 +2,8 @@
 """selftests of crossing.py: the union, a missing source is red, a bridged import with no row is red, a dispatch `-` slot is excluded.  Run: python3 -I <this file>."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+import types
+_pkg = sys.modules.setdefault("fnvnx", types.ModuleType("fnvnx")); _pkg.__path__ = [os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")]   # a host-run driver: `fnvnx` is ports/fnv-nx (the stage mounts it at /imp/fnvnx)
 import os
 import subprocess
 import sys
@@ -10,8 +11,8 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import crossing  # noqa: E402
-from contract import store  # noqa: E402
+from fnvnx.bridgefacts import crossing  # noqa: E402
+from fnvnx.contract import store  # noqa: E402
 
 fails = []
 with tempfile.TemporaryDirectory() as td:

@@ -6,7 +6,7 @@ Inputs: shim/include/d3d9*.h (method order, types, structs, enums, constants) + 
 d3d9_exports.py (the hand tables). Unknown types or invalid rules abort the run: nothing is guessed."""
 import json, os, re, sys
 
-import d3d9_cls as C, d3d9_exports as EX, d3d9_expr as X, d3d9_rules as R, d3d9_structs as ST, d3d9_tables as T   # noqa: E402
+from fnvnx.bridgefacts.d3d9 import d3d9_cls as C, d3d9_exports as EX, d3d9_expr as X, d3d9_rules as R, d3d9_structs as ST, d3d9_tables as T  # noqa: E402
 
 IUNK = [("HRESULT", "QueryInterface", "REFIID riid, void** ppvObj"), ("ULONG", "AddRef", ""), ("ULONG", "Release", "")]
 
@@ -252,6 +252,6 @@ if __name__ == "__main__":
     out = render(Gen(inc).build())
     if "--stdout" in sys.argv: sys.stdout.buffer.write(out)
     else:
-        import d9rows
+        from fnvnx.bridgefacts.d3d9 import d9rows
         open(a[0], "wb").write(out)
         open(a[1], "w").write("".join("\t".join(r) + "\n" for r in d9rows.rows(json.loads(out))))
