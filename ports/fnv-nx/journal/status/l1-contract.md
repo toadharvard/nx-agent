@@ -2320,3 +2320,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - w15 beb71d2e2 (on top of cand3b): a cas hard-link pool. test_recipe scratch 15.0 → 3.1 GB; 179/179 pass, the hx.exe cases included.
   - Required: no env switch (FNVNX_CAS_POOL); the pool is always on, beside GATE_CACHE/store; a failed link is red, never copied.
   - It goes in as the next candidate after 963dce662 merges.
+- w15 597f2e007 on cand3b: pool = <dirname of store>/pool, always; no env, no copy path; a failed link is a CasError. MAX_LINKS replicas follow the placement rule.
+  - test_recipe 179/179, peak 7.1 GB (one pool per directory).
+  - Accepted as the next candidate. The merge candidate stays 963dce662 (farm verdict pending).
