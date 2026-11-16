@@ -3076,3 +3076,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - 12:47: w29-c5: 51814aff (gatefile needs, topological order) and 1d5da7e2 (ldsynth adds the TLS-defining product objects through onedef; tls-undefined and tls-duplicate are red). test_gatesdir_needs and test_linkset TLS pass.
   - The w29 items (const records, ext_units) break roots that still carry the deleted keys: L5 platform `external_errors` (fix 568d0049, L5 takes it) and L6 gl4 and translator `constants` (L6 converts to .fnvnx.const). The w29 items go into the next candidate, not cand5.
   - Measuring lift/rt with the keys removed locally (a measurement only).
+- 12:48: L5's emitter has been live since cd4f5784b: .fnvnx.const (100) + .fnvnx.ident {fn, k} (2), all P32_ABS32 in the same object, none in alloc sections. w29's parser folded identity into LEN 0 and lost k. w29 adopts L5's two-section format and measures against the real platform objects (expect 0 findings over 102 rows).
