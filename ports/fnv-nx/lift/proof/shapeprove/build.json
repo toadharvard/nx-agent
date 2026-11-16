@@ -217,7 +217,7 @@
      "path": "new"
     },
     {
-     "stage": "ports/fnv-nx/lift/factsimg/exe:gen:0",
+     "stage": "ports/fnv-nx/lift/factsimg/exe:gen:1",
      "path": "shapes_exe.tsv"
     },
     {
