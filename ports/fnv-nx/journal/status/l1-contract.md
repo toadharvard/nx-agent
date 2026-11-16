@@ -2371,3 +2371,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   4. the test_gate_imports rewrite;
   5. the deterministic getrandom stream.
 - L5 5f9bc70d: generated platform/exptable, 562 rows generated against 531 hand rows, every difference named. RaiseException and DebugBreak are owned by lift/rt. WSACleanup and WSASetLastError are dropped, coming back only through GetProcAddress certificates.
+- ELF-path blocker (L2): the recipe-path compiler build is red at stage 1 (cand4b 899545528). pathflow misses path constants used as default arguments (verify/targets.py TARGETS), so targets.json is not mounted.
+  - Top item for w28: every module-level repo-path constant is a declared file of its module, covering every reference form.
+- bottleneck: the cand3b verdict (farm) and this pathflow fix.
