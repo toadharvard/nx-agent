@@ -15,6 +15,9 @@ RECORDS=/in/3                                   # input 3: records1.sh, the stag
 PY=/usr/bin/python3.12                          # the python3 deb unpacks the interpreter as python3.12; the python3 symlink is made by its postinst, which a sandbox does not run
 SCRATCH=/scratch                                # the writable scratch directory, the same absolute path on every run
 mkdir -p "$SCRATCH/tmp"; export TMPDIR=$SCRATCH/tmp   # the writable temp directory: /tmp is read-only in the sandbox (config.guess, make and the compilers write temp files)
+# the host (build) tools are named by their real files: the unversioned names (gcc, cc, c++) are update-alternatives links, a postinst product that an unpacked deb does not have
+export CC=gcc-13 CXX=g++-13 CPP="gcc-13 -E" CC_FOR_BUILD=gcc-13 CXX_FOR_BUILD=g++-13 AR=x86_64-linux-gnu-ar RANLIB=x86_64-linux-gnu-ranlib NM=x86_64-linux-gnu-nm
+export AR_FOR_BUILD=$AR RANLIB_FOR_BUILD=$RANLIB NM_FOR_BUILD=$NM
 WORK=$SCRATCH/w; PREFIX=$SCRATCH/prefix         # the absolute build paths
 OUT_DIR=/out
 V=13.3.0
