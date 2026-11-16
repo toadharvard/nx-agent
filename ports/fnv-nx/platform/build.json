@@ -540,12 +540,6 @@
    }
   }
  },
- "external_errors": {
-  "freetype": {
-   "type": "FT_Error",
-   "success": 0
-  }
- },
  "outputs": {
   "INCLUDE": "include",
   "X86SYS": "declared/x86sys.export.json"
