@@ -93,7 +93,7 @@ def main():
     open(work + '/bridge.tsv', 'w').write('dll\tname\tordinal\tconv\tret\targs\tnative_symbol\tbind\n' + ''.join('%s\t%s\t\t%s\t%s\t%s\t%s\t%s\n' % r for r in BRIDGE))
     KEY = {r['name']: r['key'] for r in impgen.rows(work + '/bridge.tsv')[0] if r['key'] is not None}
     open(work + '/need.tsv', 'w').write(''.join('%08x\t%s\t%s\tkey\t%08x\n' % (SLOT[r[1]], r[0], r[1], KEY[r[1]]) for r in BRIDGE if r[6] != 'none'))
-    ent, blocked, hit, absent = impgen.generate(work + '/bridge.tsv', work, [work + '/need.tsv'], None)
+    ent, blocked, hit, absent = impgen.generate(work + '/bridge.tsv', work, [work + '/need.tsv'], None, None, 'fnvl_prelude.h')
     # the generation is itself a check: 10 entries, exactly the `nobody` row blocked, nothing hit or absent (a violation fails the stage)
     if not (len(ent) == 10 and len(blocked) == 1 and not hit and not absent): sys.exit('imptest gen: %d entries, %d blocked, hit %s absent %s' % (len(ent), len(blocked), hit, absent))
     texts = [L.lift(img, ad, sz, owns=owns)[0] for ad, sz, owns in ents.values()]

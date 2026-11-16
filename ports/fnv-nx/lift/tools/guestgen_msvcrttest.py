@@ -322,7 +322,7 @@ def main():
     open(work + '/bridge.tsv', 'w').write('dll\tname\tordinal\tconv\tret\targs\tnative_symbol\tbind\n' + ''.join('%s\t%s\t\t%s\t%s\t%s\t%s\t%s\n' % r for r in BRIDGE))
     KEY = {r['name']: r['key'] for r in impgen.rows(work + '/bridge.tsv')[0] if r['key'] is not None}
     open(work + '/need.tsv', 'w').write(''.join('%08x\t%s\t%s\tkey\t%08x\n' % (SLOTS[r[1]], r[0], r[1], KEY[r[1]]) for r in BRIDGE))
-    ent, blocked, hit, absent = impgen.generate(work + '/bridge.tsv', work, [work + '/need.tsv'], None)      # a bind-l3 row without a body in the runtime is an undefined symbol at the link
+    ent, blocked, hit, absent = impgen.generate(work + '/bridge.tsv', work, [work + '/need.tsv'], None, None, 'fnvl_prelude.h')      # a bind-l3 row without a body in the runtime is an undefined symbol at the link
     if not (len(ent) == len(BRIDGE) and not blocked and not hit and not absent): sys.exit('msvcrttest gen: %d entries, blocked %s hit %s absent %s' % (len(ent), blocked, hit, absent))
     syms = {x: 'L_%08x' % x for x in starts}; syms.update({k: s for k, s, *_ in ent})
     if {n: k for k, s, d, n, b in ent} != {r[1]: KEY[r[1]] for r in BRIDGE}: sys.exit('msvcrttest gen: the import keys differ from the key rule')
