@@ -17,7 +17,7 @@
 #include <cstdio>
 int plugin_is_GPL_compatible;
 static std::set<tree> decls, defs, declared_noreturn;   // declared_noreturn: noreturn as the source DECLARES it (read while parsing)
-static std::string outpath, retpath;
+static std::string outpath;
 static std::vector<std::string> sjdirs;   // directories of the PINNED libc/runtime headers: only a <setjmp.h> inside one of them is ISO C 7.13's
 static void on_decl(void *gcc_data, void *) {
   tree d = (tree)gcc_data;
@@ -62,28 +62,11 @@ static void on_unit(void *, void *) {
   for (auto &n : term) fprintf(f, "%s\n", n.c_str());
   for (auto &n : unw) if (!term.count(n)) fprintf(f, "~%s\n", n.c_str());
   fclose(f);
-  if (!retpath.empty()) {
-    // The typedef name of the return type of every function DEFINITION (`FT_Error f(...) {..}`: TYPE_NAME of the return type is a TYPE_DECL), one
-    // `assembler-name<TAB>typedef` line, sorted. It is the compiler's own type, not a text match; the error convention of a library
-    // (recipe external_errors) is read against it.
-    std::set<std::string> rows;
-    for (tree d : defs)
-      if (DECL_NAME(d) && DECL_ASSEMBLER_NAME_SET_P(d)) {   // a template pattern has no assembler name (mangling it would be wrong): only emitted definitions
-        tree t = TREE_TYPE(TREE_TYPE(d)), n = t ? TYPE_NAME(t) : NULL_TREE;
-        if (n && TREE_CODE(n) == TYPE_DECL && DECL_NAME(n))
-          rows.insert(std::string(IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d))) + "\t" + IDENTIFIER_POINTER(DECL_NAME(n)));
-      }
-    FILE *g = fopen(retpath.c_str(), "w");
-    if (!g) return;
-    for (auto &r : rows) fprintf(g, "%s\n", r.c_str());
-    fclose(g);
-  }
 }
 int plugin_init(plugin_name_args *a, plugin_gcc_version *v) {
   if (!plugin_default_version_check(v, &gcc_version)) return 1;
   for (int i = 0; i < a->argc; i++)
     if (std::string(a->argv[i].key) == "out") outpath = a->argv[i].value;
-    else if (std::string(a->argv[i].key) == "ret") retpath = a->argv[i].value;
     else if (std::string(a->argv[i].key) == "setjmp-dirs") {
       std::string v = a->argv[i].value;
       for (size_t p = 0, q; p <= v.size(); p = q + 1) { q = v.find(':', p); if (q == std::string::npos) q = v.size(); if (q > p) sjdirs.push_back(v.substr(p, q - p)); }

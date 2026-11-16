@@ -139,7 +139,7 @@ def _plugin_cxx():
 
 PLUGIN_CXX = _plugin_cxx()
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "contract_names", "link", "external",
-        "plugins", "variants", "profile", "outputs", "uses", "include_uses", "sources", "error_abi", "empty_handlers", "external_errors", "tests", "run"}
+        "plugins", "variants", "profile", "outputs", "uses", "include_uses", "sources", "error_abi", "empty_handlers", "tests", "run"}
 VARIANT_KEYS = {"compiler", "flags", "link", "flags_add", "defines_add"}   # the keys a variant may replace (whole: a sanitizer variant names its own link.libs.system) and its two deltas
 VARIANT_DELTAS = {"flags_add", "defines_add"}   # appended to the base flags of the root (RECIPE.md, "Profiles")
 PROFILES = ("guest", "host")
@@ -2158,15 +2158,6 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             (ea.get("kind") == "noreturn" and set(ea) == {"fail", "kind"}) or (ea.get("kind") == "flag" and set(ea) == {"fail", "kind", "flag"} and ident(ea.get("flag"))))):
         err.append('error_abi must be {"fail": SYM, "kind": "noreturn"} or {"fail": SYM, "kind": "flag", "flag": FIELD}: the root\'s one failure function and how its '
                    'definition signals failure (objstub checks the definition)')
-    xe = rec.get("external_errors")
-    if xe is not None:
-        names_ = {e.get("name") for e in rec.get("external", []) if isinstance(e, dict)}
-        if not (isinstance(xe, dict) and xe and all(k in names_ and isinstance(v, dict) and set(v) == {"type", "success"} and ident(v["type"])
-                                                    and isinstance(v["success"], int) and not isinstance(v["success"], bool) for k, v in xe.items())):
-            err.append('external_errors must be {EXTERNAL: {"type": TYPEDEF, "success": INT}} naming declared externals: the error convention of a library whose units come from '
-                       '`sources` (objstub: a V body of such a unit is the library\'s own code unless it returns an error constant)')
-        elif not rec.get("sources"):
-            err.append("external_errors needs `sources` (the units of the external libraries)")
     eh = rec.get("empty_handlers")
     if eh is not None:
         tb = eh.get("tables") if isinstance(eh, dict) else None
@@ -2837,6 +2828,7 @@ class Job:
         self.roots, self.files = load_admit(repo), tracked(repo)
         self.rec = with_guest_link(load_recipe(repo, self.roots, spec), root, self.roots, repo)
         self.keys, self.run, self.hit, self.ext, self.ppkeys, self.built = set(), 0, 0, {}, {}, []
+        self.extunits = {}   # {unit: external name}: the units copied from a pinned external of the recipe (generated_sources), the provenance objstub reads
         self.arts = {}   # {artifact root: its build result}: a root is built once per Job, whatever number of steps run its artifact
         self.shard, self.shard_units = None, None   # (i, N) of a shard build (build(shard=...)); the units it compiled
         self.aux = []   # build(aux): AUX_FLAGS of the CC stage
@@ -3120,6 +3112,7 @@ class Job:
             shutil.copyfile(src, dest)
             if is_unit(unit):
                 out.append(unit)
+                self.extunits[unit] = ext
         return sorted(set(out))
 
     def use_inputs(self, ws):
@@ -4284,7 +4277,7 @@ def map_members(text):
 def objects_digest(res):
     """sha256 of the CONTENT of an objects.json dict: its fields without the machine paths (object, plugin, ELF, contract_names files: their
     sha256 stands for them) and without the cache counters, so two builds of the same sources give the same digest."""
-    keep = {k: res.get(k) for k in ("format", "root", "status", "defined", "undefined", "units", "stage_keys", "pp_keys", "failure")}
+    keep = {k: res.get(k) for k in ("format", "root", "status", "defined", "undefined", "units", "stage_keys", "pp_keys", "ext_units", "failure")}
     keep["link_roots"] = [{"root": x["root"], "sha256": x["sha256"]} for x in res["link_roots"]]
     keep["objects"] = [{k: o[k] for k in ("unit", "sha256", "os_layer")} for o in res["objects"]]
     keep["plugins"] = [{k: p[k] for k in ("name", "sha256")} for p in res["plugins"]]
@@ -4999,7 +4992,7 @@ def _build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=
     if shard:
         res["shard"] = "%d/%d" % shard
         res["shard_units"] = j.shard_units
-    res.update(stage_keys=sorted(j.keys), stages={"run": j.run, "hit": j.hit}, units=all_units, pp_keys=dict(sorted(j.ppkeys.items())), du_keys=dict(sorted(j.dukeys.items())))
+    res.update(stage_keys=sorted(j.keys), stages={"run": j.run, "hit": j.hit}, units=all_units, pp_keys=dict(sorted(j.ppkeys.items())), ext_units=dict(sorted(j.extunits.items())), du_keys=dict(sorted(j.dukeys.items())))
     with open(os.path.join(out, "objects.json"), "w") as f:
         json.dump(res, f, indent=1, sort_keys=True)
         f.write("\n")
