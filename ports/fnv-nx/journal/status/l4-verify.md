@@ -496,3 +496,9 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - Also a regression: w10 copied the old L4 tests/bootrt/rt.c (syscalls, the g_ptr fallback), test_bootrt.py and bootgpu.py over w39's rule-clean versions (the w9 rules). The cause was my instruction to copy L4 paths from the lead branch, which held no w9 merge. Fix: take them from the base.
   - w11 session_01KmtZKRkztiX98rcGcbvajR: doing both, plus the symbol list of libnxgl4rt.so checked against product definers, and test_bootrt/test_bootgpu.
 - bottleneck: w11; lift/rt ENTRY1-CONT (L3a/L2); L1 cand5 | 1 worker, no farms
+- 12:10: done: w11 8ecd2ef0, merged.
+  - tests/bootrt no longer defines fnvnx_reach_violation; platstat.cpp is its only definer. libnxgl4rt.so defines only nxgl4_shim_set, nxgl4_guest_ptr and nxgl4_on_present, and no product root defines any of them.
+  - rt.c is back on the w9 rules (no syscall, no libc, no fallback). bootgpu.on_exit is required; its log-and-status-1 fallback is deleted.
+  - test_bootrt: 5 cases, 0 failed. test_bootgpu: setup ok, then it stops at the bootguest link (lift/rt ENTRY1-CONT, L3a).
+  - w11 archived.
+- bottleneck: lift/rt ENTRY1-CONT (L3a/L2); L1 cand5 (link imports row, .gamedata_pins); the L3a pack store | no workers, no farms
