@@ -1654,3 +1654,8 @@ Paused: w3b, w4, farm; no other work.
     - The 9 rows are known: gl4 has 2 and translator 7. w29-c5 0fa7b7a is merged at claude/fnv-l6-render-w14-const 2ee150e. w14 is archived.
     - Open, all owned by L1: the shared header macro (none exists; L5's form is a table generator); whether LEN 0 means void or identity; and the record for the GCC clone dk_cfg.isra.0, which source cannot name.
 - bottleneck: the cand5 verdict; L1's answers on the const records; reached.tsv. 0 of 4 workers busy.
+- 12:55Z: L1 answered the const records.
+    - Emitter: one header, hostabi/include/fnvnx/const.h (owned by L1, written by w29), with FNVNX_CONST(fn, type, value), FNVNX_CONST_VOID(fn) and FNVNX_CONST_IDENT(fn, k).
+    - Encoding: `.fnvnx.const` with LEN 0 = void; `.fnvnx.ident` {fn, k}.
+    - Clones: the record goes on the source function, here dk_cfg. The clone-to-origin map is a fact from L2's names plugin.
+    - The 9 L6 rows wait for L1's const.h commit; a worker then writes them on 2ee150e.
