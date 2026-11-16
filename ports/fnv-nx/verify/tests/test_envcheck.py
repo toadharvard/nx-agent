@@ -45,7 +45,7 @@ d0 = doc()
 check("env.json: format, programs owned, non-trivial package list", d0["format"] == "fnvnx-env/1" and d0["uid"] == 0
       and d0["arch"] == "x86_64" and {"strace", "busybox", "aarch64-linux-gnu-g++", "aarch64-linux-gnu-as"} <= set(d0["programs"])
       and {"busybox-static", "gcc-13-plugin-dev-aarch64-linux-gnu", "libc6-dev-arm64-cross", "strace"} <= set(d0["packages"])
-      and set(d0["python"]["modules"]) == {"capstone", "gmpy2", "keystone-engine", "numpy", "unicorn", "pyelftools", "z3-solver", "pefile"}, d0["programs"])
+      and set(d0["python"]["modules"]) == set(envcheck.PY_MODULES), d0["programs"])
 
 def mutate(f):
     d = doc()
@@ -134,6 +134,7 @@ check("tree digest ignores foreign files and sees counted ones",
 
 fr = os.path.join(TD, "fakerepo")
 os.makedirs(os.path.join(fr, "ports/fnv-nx/verify"))
+subprocess.run(["git", "init", "-q", fr], check=True)   # load_admit derives the imports from the tracked files
 os.makedirs(os.path.join(fr, "ports/fnv-nx/hroot"))
 json.dump({"roots": [{"path": "ports/fnv-nx/hroot", "class": "product", "target": "host", "recipe": "ports/fnv-nx/hroot/build.json"},
                      {"path": "ports/fnv-nx/gext", "class": "product", "target": "guest", "recipe": "ports/fnv-nx/gext/build.json"}]},
