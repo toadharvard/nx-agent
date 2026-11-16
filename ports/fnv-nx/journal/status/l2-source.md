@@ -751,3 +751,4 @@ After the first frame:
   - atan2.o: no printf and no exit; it needs mpfr_* and fe*.
   - GMP is generic C: its aarch64 asm does not target ILP32, and it runs only on atan2's cold branch.
   - Fix ordered (rule 3): the archive mount carries only the archive; headers come through include_uses for run steps. Then the head goes to L1 for cand5 review.
+- 2026-11-16 07:20Z: w2 7bedd49a8: the archive mount holds only lib<name>.a, and run steps take include_uses through the one resolver. mpfr 257 and coremath 7 green again. Went to L1 for cand5 review. A behavioural test of the run-step include_uses mount replaces the text-match test.
