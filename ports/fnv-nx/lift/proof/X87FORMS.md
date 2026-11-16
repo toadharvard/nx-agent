@@ -89,3 +89,19 @@ The census shows that one DSL op per z3 decl kind is the wrong grain, for two re
    DAG has no FP op and no Real (FLD m64, FILD m32, FLD ST(i), FXCH, FCHS, FABS, FFREE, the control and environment
    instructions).
 2. Slice 2: the op proofs of the rounding machinery, then FLD/FST m32 and m64, the arithmetic and the compares.
+
+## Slice 1 (x87form.py)
+
+- **Entry:** `forms.build` calls `x87form.build` first for an instruction whose opcode byte is D8..DF or 9B. The class is `x87class.x87_class(raw)` in the spec's key spelling; the register index `i` is ModRM.rm.
+  A class outside this slice raises `x87form.Unsupported` naming the thing; `forms.build` then raises `KeyError` with it as `__cause__` (the handler path as before).
+- **Translator:** `Tr`, one table over the z3 decl kinds that the census found (BV arithmetic and logic, compare, ite, extract, concat, extensions, Boolean). An array over BV3 (the register file)
+  is eight DSL nodes; `Select`/`Store` with a symbolic TOP index is an `ite` chain over fr0..fr7. Any other kind raises `Unsupported('x87 op <KIND>')`; an op symbol raises `Unsupported('x87 op symbol <name>')`.
+- **Op symbols:** only part (i) functions with a floating-point or Real expansion (`introduces_fp`). A BV-only part (i) function stays inline: its kinds are the DSL's own ops, already proved by opmap, and a
+  symbol would state the same fact a second time. No op symbol is implemented in this slice, so there is no new C helper and no op proof; the classes that need one are slice 2.
+- **Form effects:** `fr`, `ftop`, `ftag`, `fsw`, `fptr`, one `store`, `eax` (fnstsw ax), and the faults (the trap's kind first, then `fault_kind`, one fault per FLT code).
+  Out of the Form's effects (Unsupported, reason names it): a control-word effect (fldcw, fldenv, frstor), a store wider than the DSL's 128-bit value (fnstenv, fnsave), EFLAGS (fcomi family),
+  the SDM's nondeterminism (`nd`), and an entry precondition (`Out.pre`): the Form has no domain slot.
+- **Undefined bits:** `Out.undef` / `Out.mem_undef` name bits the SDM leaves undefined. The Form takes the spec's own value for them, a refinement of "any value"; the proof compares exactly.
+- **Proof:** `x87form.prove_form`, called from `prove.prove_one` for a Form with `.x87`. The fault kind equals the spec's always; every other field (x87 registers, TOP, tags, FSW, FCW, pointers, memory, EAX,
+  the other registers, flags, EIP, SSE state) equals the spec's when the Form raises no fault, because `Form.post` leaves the state unchanged on a fault. The spec's own state under an unmasked exception
+  (sticky flags in FSW, an unmasked PE stores) is not that semantics and is not proved here.

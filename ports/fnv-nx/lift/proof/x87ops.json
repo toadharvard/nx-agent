@@ -1,752 +1,4782 @@
 {
- "entries": 118,
- "format": "fnvnx-x87ops/1",
- "inputs": [
-  "in_ef1 Bool",
-  "in_ef2 Bool",
-  "in_fcs (_ BitVec 16)",
-  "in_fcw (_ BitVec 16)",
-  "in_fdp (_ BitVec 32)",
-  "in_fds (_ BitVec 16)",
-  "in_fip (_ BitVec 32)",
-  "in_fop (_ BitVec 11)",
-  "in_fr0 (_ BitVec 80)",
-  "in_fr1 (_ BitVec 80)",
-  "in_fr2 (_ BitVec 80)",
-  "in_fr3 (_ BitVec 80)",
-  "in_fr4 (_ BitVec 80)",
-  "in_fr5 (_ BitVec 80)",
-  "in_fr6 (_ BitVec 80)",
-  "in_fr7 (_ BitVec 80)",
-  "in_fsw (_ BitVec 16)",
-  "in_ftag (_ BitVec 16)",
-  "in_ftop (_ BitVec 3)",
-  "in_m (_ BitVec 16)",
-  "in_m (_ BitVec 224)",
-  "in_m (_ BitVec 32)",
-  "in_m (_ BitVec 64)",
-  "in_m (_ BitVec 80)",
-  "in_m (_ BitVec 864)",
-  "nd.f2xm1.out (_ BitVec 80)",
-  "nd.fbld.img (_ BitVec 80)",
-  "nd.fcmov.uf_false Bool",
-  "nd.nan.tie Bool",
-  "nd.prem.N (_ BitVec 16)",
-  "nd.trig.c2 Bool",
-  "nd.trig.push Bool"
- ],
- "ops": {
-  "ADD": {
-   "entries": 8,
-   "nodes": 29,
-   "sorts": [
-    "Real Real -> Real"
-   ]
-  },
-  "AND": {
-   "entries": 110,
-   "nodes": 11343,
-   "sorts": [
-    "Bool Bool -> Bool",
-    "Bool Bool Bool -> Bool",
-    "Bool Bool Bool Bool -> Bool",
-    "Bool Bool Bool Bool Bool -> Bool",
-    "Bool Bool Bool Bool Bool Bool -> Bool",
-    "Bool Bool Bool Bool Bool Bool Bool Bool Bool Bool Bool Bool Bool Bool Bool Bool Bool Bool -> Bool"
-   ]
-  },
-  "ANUM": {
-   "entries": 63,
-   "nodes": 795,
-   "sorts": [
-    " -> Int",
-    " -> Real"
-   ]
-  },
-  "BADD": {
-   "entries": 110,
-   "nodes": 3852,
-   "sorts": [
-    "(_ BitVec 15) (_ BitVec 15) -> (_ BitVec 15)",
-    "(_ BitVec 3) (_ BitVec 3) -> (_ BitVec 3)",
-    "(_ BitVec 64) (_ BitVec 64) -> (_ BitVec 64)"
-   ]
-  },
-  "BAND": {
-   "entries": 118,
-   "nodes": 4713,
-   "sorts": [
-    "(_ BitVec 16) (_ BitVec 16) -> (_ BitVec 16)",
-    "(_ BitVec 6) (_ BitVec 6) -> (_ BitVec 6)",
-    "(_ BitVec 80) (_ BitVec 80) -> (_ BitVec 80)"
-   ]
-  },
-  "BLSHR": {
-   "entries": 109,
-   "nodes": 560,
-   "sorts": [
-    "(_ BitVec 16) (_ BitVec 16) -> (_ BitVec 16)"
-   ]
-  },
-  "BMUL": {
-   "entries": 110,
-   "nodes": 1061,
-   "sorts": [
-    "(_ BitVec 16) (_ BitVec 16) -> (_ BitVec 16)",
-    "(_ BitVec 64) (_ BitVec 64) -> (_ BitVec 64)"
-   ]
-  },
-  "BNEG": {
-   "entries": 10,
-   "nodes": 10,
-   "sorts": [
-    "(_ BitVec 16) -> (_ BitVec 16)",
-    "(_ BitVec 32) -> (_ BitVec 32)",
-    "(_ BitVec 64) -> (_ BitVec 64)"
-   ]
-  },
-  "BNOT": {
-   "entries": 113,
-   "nodes": 2861,
-   "sorts": [
-    "(_ BitVec 16) -> (_ BitVec 16)",
-    "(_ BitVec 6) -> (_ BitVec 6)"
-   ]
-  },
-  "BNUM": {
-   "entries": 118,
-   "nodes": 18872,
-   "sorts": [
-    " -> (_ BitVec 1)",
-    " -> (_ BitVec 11)",
-    " -> (_ BitVec 15)",
-    " -> (_ BitVec 16)",
-    " -> (_ BitVec 2)",
-    " -> (_ BitVec 224)",
-    " -> (_ BitVec 23)",
-    " -> (_ BitVec 29)",
-    " -> (_ BitVec 3)",
-    " -> (_ BitVec 32)",
-    " -> (_ BitVec 4)",
-    " -> (_ BitVec 52)",
-    " -> (_ BitVec 6)",
-    " -> (_ BitVec 63)",
-    " -> (_ BitVec 64)",
-    " -> (_ BitVec 7)",
-    " -> (_ BitVec 79)",
-    " -> (_ BitVec 8)",
-    " -> (_ BitVec 80)",
-    " -> (_ BitVec 864)"
-   ]
-  },
-  "BOR": {
-   "entries": 118,
-   "nodes": 7229,
-   "sorts": [
-    "(_ BitVec 16) (_ BitVec 16) -> (_ BitVec 16)",
-    "(_ BitVec 224) (_ BitVec 224) -> (_ BitVec 224)",
-    "(_ BitVec 6) (_ BitVec 6) -> (_ BitVec 6)",
-    "(_ BitVec 64) (_ BitVec 64) -> (_ BitVec 64)",
-    "(_ BitVec 80) (_ BitVec 80) -> (_ BitVec 80)",
-    "(_ BitVec 864) (_ BitVec 864) -> (_ BitVec 864)"
-   ]
-  },
-  "BSHL": {
-   "entries": 118,
-   "nodes": 4032,
-   "sorts": [
-    "(_ BitVec 16) (_ BitVec 16) -> (_ BitVec 16)",
-    "(_ BitVec 224) (_ BitVec 224) -> (_ BitVec 224)",
-    "(_ BitVec 64) (_ BitVec 64) -> (_ BitVec 64)",
-    "(_ BitVec 864) (_ BitVec 864) -> (_ BitVec 864)"
-   ]
-  },
-  "BSUB": {
-   "entries": 76,
-   "nodes": 1171,
-   "sorts": [
-    "(_ BitVec 15) (_ BitVec 15) -> (_ BitVec 15)",
-    "(_ BitVec 16) (_ BitVec 16) -> (_ BitVec 16)",
-    "(_ BitVec 3) (_ BitVec 3) -> (_ BitVec 3)",
-    "(_ BitVec 64) (_ BitVec 64) -> (_ BitVec 64)"
-   ]
-  },
-  "BUDIV": {
-   "entries": 1,
-   "nodes": 17,
-   "sorts": [
-    "(_ BitVec 64) (_ BitVec 64) -> (_ BitVec 64)"
-   ]
-  },
-  "BUREM": {
-   "entries": 1,
-   "nodes": 18,
-   "sorts": [
-    "(_ BitVec 64) (_ BitVec 64) -> (_ BitVec 64)"
-   ]
-  },
-  "BXOR": {
-   "entries": 2,
-   "nodes": 3,
-   "sorts": [
-    "(_ BitVec 64) (_ BitVec 64) -> (_ BitVec 64)",
-    "(_ BitVec 80) (_ BitVec 80) -> (_ BitVec 80)"
-   ]
-  },
-  "CONCAT": {
-   "entries": 108,
-   "nodes": 6552,
-   "sorts": [
-    "(_ BitVec 1) (_ BitVec 11) -> (_ BitVec 12)",
-    "(_ BitVec 1) (_ BitVec 15) -> (_ BitVec 16)",
-    "(_ BitVec 1) (_ BitVec 63) -> (_ BitVec 64)",
-    "(_ BitVec 1) (_ BitVec 7) -> (_ BitVec 8)",
-    "(_ BitVec 1) (_ BitVec 79) -> (_ BitVec 80)",
-    "(_ BitVec 1) (_ BitVec 8) -> (_ BitVec 9)",
-    "(_ BitVec 10) (_ BitVec 2) -> (_ BitVec 12)",
-    "(_ BitVec 12) (_ BitVec 2) -> (_ BitVec 14)",
-    "(_ BitVec 12) (_ BitVec 23) -> (_ BitVec 35)",
-    "(_ BitVec 12) (_ BitVec 4) -> (_ BitVec 16)",
-    "(_ BitVec 12) (_ BitVec 52) -> (_ BitVec 64)",
-    "(_ BitVec 14) (_ BitVec 2) -> (_ BitVec 16)",
-    "(_ BitVec 16) (_ BitVec 1) -> (_ BitVec 17)",
-    "(_ BitVec 16) (_ BitVec 4) -> (_ BitVec 20)",
-    "(_ BitVec 16) (_ BitVec 64) -> (_ BitVec 80)",
-    "(_ BitVec 17) (_ BitVec 63) -> (_ BitVec 80)",
-    "(_ BitVec 2) (_ BitVec 2) -> (_ BitVec 4)",
-    "(_ BitVec 2) (_ BitVec 3) -> (_ BitVec 5)",
-    "(_ BitVec 20) (_ BitVec 4) -> (_ BitVec 24)",
-    "(_ BitVec 24) (_ BitVec 4) -> (_ BitVec 28)",
-    "(_ BitVec 28) (_ BitVec 4) -> (_ BitVec 32)",
-    "(_ BitVec 32) (_ BitVec 4) -> (_ BitVec 36)",
-    "(_ BitVec 35) (_ BitVec 29) -> (_ BitVec 64)",
-    "(_ BitVec 36) (_ BitVec 4) -> (_ BitVec 40)",
-    "(_ BitVec 4) (_ BitVec 2) -> (_ BitVec 6)",
-    "(_ BitVec 4) (_ BitVec 4) -> (_ BitVec 8)",
-    "(_ BitVec 40) (_ BitVec 4) -> (_ BitVec 44)",
-    "(_ BitVec 44) (_ BitVec 4) -> (_ BitVec 48)",
-    "(_ BitVec 48) (_ BitVec 4) -> (_ BitVec 52)",
-    "(_ BitVec 5) (_ BitVec 11) -> (_ BitVec 16)",
-    "(_ BitVec 52) (_ BitVec 11) -> (_ BitVec 63)",
-    "(_ BitVec 52) (_ BitVec 4) -> (_ BitVec 56)",
-    "(_ BitVec 56) (_ BitVec 4) -> (_ BitVec 60)",
-    "(_ BitVec 6) (_ BitVec 2) -> (_ BitVec 8)",
-    "(_ BitVec 60) (_ BitVec 4) -> (_ BitVec 64)",
-    "(_ BitVec 64) (_ BitVec 4) -> (_ BitVec 68)",
-    "(_ BitVec 68) (_ BitVec 4) -> (_ BitVec 72)",
-    "(_ BitVec 8) (_ BitVec 2) -> (_ BitVec 10)",
-    "(_ BitVec 8) (_ BitVec 4) -> (_ BitVec 12)",
-    "(_ BitVec 8) (_ BitVec 72) -> (_ BitVec 80)",
-    "(_ BitVec 9) (_ BitVec 23) -> (_ BitVec 32)"
-   ]
-  },
-  "CONST_ARRAY": {
-   "entries": 118,
-   "nodes": 356,
-   "sorts": [
-    "(_ BitVec 80) -> (Array (_ BitVec 3) (_ BitVec 80))"
-   ]
-  },
-  "DISTINCT": {
-   "entries": 112,
-   "nodes": 4664,
-   "sorts": [
-    "(_ BitVec 1) (_ BitVec 1) -> Bool",
-    "(_ BitVec 15) (_ BitVec 15) -> Bool",
-    "(_ BitVec 2) (_ BitVec 2) -> Bool",
-    "(_ BitVec 23) (_ BitVec 23) -> Bool",
-    "(_ BitVec 52) (_ BitVec 52) -> Bool",
-    "(_ BitVec 6) (_ BitVec 6) -> Bool",
-    "(_ BitVec 63) (_ BitVec 63) -> Bool",
-    "(_ BitVec 64) (_ BitVec 64) -> Bool",
-    "Real Real -> Bool"
-   ]
-  },
-  "DIV": {
-   "entries": 56,
-   "nodes": 427,
-   "sorts": [
-    "Real Real -> Real"
-   ]
-  },
-  "EQ": {
-   "entries": 114,
-   "nodes": 16095,
-   "sorts": [
-    "(_ BitVec 1) (_ BitVec 1) -> Bool",
-    "(_ BitVec 11) (_ BitVec 11) -> Bool",
-    "(_ BitVec 15) (_ BitVec 15) -> Bool",
-    "(_ BitVec 16) (_ BitVec 16) -> Bool",
-    "(_ BitVec 2) (_ BitVec 2) -> Bool",
-    "(_ BitVec 32) (_ BitVec 32) -> Bool",
-    "(_ BitVec 4) (_ BitVec 4) -> Bool",
-    "(_ BitVec 52) (_ BitVec 52) -> Bool",
-    "(_ BitVec 63) (_ BitVec 63) -> Bool",
-    "(_ BitVec 64) (_ BitVec 64) -> Bool",
-    "(_ BitVec 8) (_ BitVec 8) -> Bool",
-    "Bool Bool -> Bool",
-    "Int Int -> Bool",
-    "Real Real -> Bool"
-   ]
-  },
-  "EXTRACT": {
-   "entries": 118,
-   "nodes": 18046,
-   "sorts": [
-    "(_ BitVec 16) -> (_ BitVec 1)",
-    "(_ BitVec 16) -> (_ BitVec 11)",
-    "(_ BitVec 16) -> (_ BitVec 15)",
-    "(_ BitVec 16) -> (_ BitVec 2)",
-    "(_ BitVec 16) -> (_ BitVec 3)",
-    "(_ BitVec 16) -> (_ BitVec 6)",
-    "(_ BitVec 224) -> (_ BitVec 11)",
-    "(_ BitVec 224) -> (_ BitVec 16)",
-    "(_ BitVec 224) -> (_ BitVec 32)",
-    "(_ BitVec 3) -> (_ BitVec 1)",
-    "(_ BitVec 32) -> (_ BitVec 1)",
-    "(_ BitVec 32) -> (_ BitVec 16)",
-    "(_ BitVec 32) -> (_ BitVec 23)",
-    "(_ BitVec 32) -> (_ BitVec 8)",
-    "(_ BitVec 6) -> (_ BitVec 1)",
-    "(_ BitVec 64) -> (_ BitVec 1)",
-    "(_ BitVec 64) -> (_ BitVec 11)",
-    "(_ BitVec 64) -> (_ BitVec 15)",
-    "(_ BitVec 64) -> (_ BitVec 16)",
-    "(_ BitVec 64) -> (_ BitVec 2)",
-    "(_ BitVec 64) -> (_ BitVec 32)",
-    "(_ BitVec 64) -> (_ BitVec 4)",
-    "(_ BitVec 64) -> (_ BitVec 52)",
-    "(_ BitVec 64) -> (_ BitVec 64)",
-    "(_ BitVec 64) -> (_ BitVec 8)",
-    "(_ BitVec 79) -> (_ BitVec 1)",
-    "(_ BitVec 79) -> (_ BitVec 15)",
-    "(_ BitVec 79) -> (_ BitVec 63)",
-    "(_ BitVec 80) -> (_ BitVec 1)",
-    "(_ BitVec 80) -> (_ BitVec 15)",
-    "(_ BitVec 80) -> (_ BitVec 23)",
-    "(_ BitVec 80) -> (_ BitVec 4)",
-    "(_ BitVec 80) -> (_ BitVec 52)",
-    "(_ BitVec 80) -> (_ BitVec 63)",
-    "(_ BitVec 80) -> (_ BitVec 64)",
-    "(_ BitVec 864) -> (_ BitVec 16)",
-    "(_ BitVec 864) -> (_ BitVec 224)",
-    "(_ BitVec 864) -> (_ BitVec 80)"
-   ]
-  },
-  "FALSE": {
-   "entries": 118,
-   "nodes": 356,
-   "sorts": [
-    " -> Bool"
-   ]
-  },
-  "FPA_ABS": {
-   "entries": 1,
-   "nodes": 1,
-   "sorts": [
-    "(_ FloatingPoint 15 64) -> (_ FloatingPoint 15 64)"
-   ]
-  },
-  "FPA_ADD": {
-   "entries": 7,
-   "nodes": 28,
-   "sorts": [
-    "RoundingMode (_ FloatingPoint 11 53) (_ FloatingPoint 11 53) -> (_ FloatingPoint 11 53)"
-   ]
-  },
-  "FPA_DIV": {
-   "entries": 14,
-   "nodes": 56,
-   "sorts": [
-    "RoundingMode (_ FloatingPoint 11 53) (_ FloatingPoint 11 53) -> (_ FloatingPoint 11 53)"
-   ]
-  },
-  "FPA_EQ": {
-   "entries": 19,
-   "nodes": 75,
-   "sorts": [
-    "(_ FloatingPoint 15 64) (_ FloatingPoint 15 64) -> Bool"
-   ]
-  },
-  "FPA_FP": {
-   "entries": 83,
-   "nodes": 463,
-   "sorts": [
-    "(_ BitVec 1) (_ BitVec 15) (_ BitVec 63) -> (_ FloatingPoint 15 64)"
-   ]
-  },
-  "FPA_IS_INF": {
-   "entries": 54,
-   "nodes": 181,
-   "sorts": [
-    "(_ FloatingPoint 11 53) -> Bool",
-    "(_ FloatingPoint 8 24) -> Bool"
-   ]
-  },
-  "FPA_IS_NAN": {
-   "entries": 1,
-   "nodes": 1,
-   "sorts": [
-    "(_ FloatingPoint 11 53) -> Bool"
-   ]
-  },
-  "FPA_IS_ZERO": {
-   "entries": 3,
-   "nodes": 3,
-   "sorts": [
-    "(_ FloatingPoint 11 53) -> Bool"
-   ]
-  },
-  "FPA_LT": {
-   "entries": 19,
-   "nodes": 75,
-   "sorts": [
-    "(_ FloatingPoint 15 64) (_ FloatingPoint 15 64) -> Bool"
-   ]
-  },
-  "FPA_MINUS_INF": {
-   "entries": 1,
-   "nodes": 1,
-   "sorts": [
-    " -> (_ FloatingPoint 11 53)"
-   ]
-  },
-  "FPA_MUL": {
-   "entries": 8,
-   "nodes": 29,
-   "sorts": [
-    "RoundingMode (_ FloatingPoint 11 53) (_ FloatingPoint 11 53) -> (_ FloatingPoint 11 53)"
-   ]
-  },
-  "FPA_PLUS_INF": {
-   "entries": 1,
-   "nodes": 1,
-   "sorts": [
-    " -> (_ FloatingPoint 11 53)"
-   ]
-  },
-  "FPA_PLUS_ZERO": {
-   "entries": 1,
-   "nodes": 1,
-   "sorts": [
-    " -> (_ FloatingPoint 11 53)"
-   ]
-  },
-  "FPA_RM_NEAREST_TIES_TO_EVEN": {
-   "entries": 67,
-   "nodes": 193,
-   "sorts": [
-    " -> RoundingMode"
-   ]
-  },
-  "FPA_RM_TOWARD_NEGATIVE": {
-   "entries": 64,
-   "nodes": 190,
-   "sorts": [
-    " -> RoundingMode"
-   ]
-  },
-  "FPA_RM_TOWARD_POSITIVE": {
-   "entries": 64,
-   "nodes": 190,
-   "sorts": [
-    " -> RoundingMode"
-   ]
-  },
-  "FPA_RM_TOWARD_ZERO": {
-   "entries": 64,
-   "nodes": 190,
-   "sorts": [
-    " -> RoundingMode"
-   ]
-  },
-  "FPA_ROUND_TO_INTEGRAL": {
-   "entries": 7,
-   "nodes": 7,
-   "sorts": [
-    "RoundingMode (_ FloatingPoint 15 64) -> (_ FloatingPoint 15 64)"
-   ]
-  },
-  "FPA_SQRT": {
-   "entries": 1,
-   "nodes": 1,
-   "sorts": [
-    "RoundingMode (_ FloatingPoint 11 53) -> (_ FloatingPoint 11 53)"
-   ]
-  },
-  "FPA_SUB": {
-   "entries": 14,
-   "nodes": 56,
-   "sorts": [
-    "RoundingMode (_ FloatingPoint 11 53) (_ FloatingPoint 11 53) -> (_ FloatingPoint 11 53)"
-   ]
-  },
-  "FPA_TO_FP": {
-   "entries": 60,
-   "nodes": 1377,
-   "sorts": [
-    "(_ BitVec 32) -> (_ FloatingPoint 8 24)",
-    "(_ BitVec 64) -> (_ FloatingPoint 11 53)",
-    "RoundingMode (_ BitVec 16) -> (_ FloatingPoint 11 53)",
-    "RoundingMode (_ BitVec 32) -> (_ FloatingPoint 11 53)",
-    "RoundingMode (_ FloatingPoint 11 53) -> (_ FloatingPoint 8 24)",
-    "RoundingMode (_ FloatingPoint 15 64) -> (_ FloatingPoint 11 53)",
-    "RoundingMode (_ FloatingPoint 15 64) -> (_ FloatingPoint 30 24)",
-    "RoundingMode (_ FloatingPoint 15 64) -> (_ FloatingPoint 30 53)",
-    "RoundingMode (_ FloatingPoint 15 64) -> (_ FloatingPoint 8 24)",
-    "RoundingMode (_ FloatingPoint 8 24) -> (_ FloatingPoint 11 53)",
-    "RoundingMode Real -> (_ FloatingPoint 11 53)",
-    "RoundingMode Real -> (_ FloatingPoint 30 24)",
-    "RoundingMode Real -> (_ FloatingPoint 30 53)",
-    "RoundingMode Real -> (_ FloatingPoint 8 24)"
-   ]
-  },
-  "FPA_TO_IEEE_BV": {
-   "entries": 61,
-   "nodes": 517,
-   "sorts": [
-    "(_ FloatingPoint 11 53) -> (_ BitVec 64)",
-    "(_ FloatingPoint 15 64) -> (_ BitVec 79)",
-    "(_ FloatingPoint 8 24) -> (_ BitVec 32)"
-   ]
-  },
-  "FPA_TO_REAL": {
-   "entries": 64,
-   "nodes": 881,
-   "sorts": [
-    "(_ FloatingPoint 11 53) -> Real",
-    "(_ FloatingPoint 15 64) -> Real",
-    "(_ FloatingPoint 30 24) -> Real",
-    "(_ FloatingPoint 30 53) -> Real",
-    "(_ FloatingPoint 8 24) -> Real"
-   ]
-  },
-  "FPA_TO_SBV": {
-   "entries": 7,
-   "nodes": 7,
-   "sorts": [
-    "RoundingMode (_ FloatingPoint 11 53) -> (_ BitVec 32)",
-    "RoundingMode (_ FloatingPoint 15 64) -> (_ BitVec 16)",
-    "RoundingMode (_ FloatingPoint 15 64) -> (_ BitVec 32)",
-    "RoundingMode (_ FloatingPoint 15 64) -> (_ BitVec 64)"
-   ]
-  },
-  "GE": {
-   "entries": 9,
-   "nodes": 10,
-   "sorts": [
-    "Real Real -> Bool"
-   ]
-  },
-  "GT": {
-   "entries": 62,
-   "nodes": 188,
-   "sorts": [
-    "Real Real -> Bool"
-   ]
-  },
-  "IDIV": {
-   "entries": 2,
-   "nodes": 4,
-   "sorts": [
-    "Int Int -> Int"
-   ]
-  },
-  "IS_INT": {
-   "entries": 1,
-   "nodes": 1,
-   "sorts": [
-    "Real -> Bool"
-   ]
-  },
-  "ITE": {
-   "entries": 112,
-   "nodes": 25644,
-   "sorts": [
-    "Bool (Array (_ BitVec 3) (_ BitVec 80)) (Array (_ BitVec 3) (_ BitVec 80)) -> (Array (_ BitVec 3) (_ BitVec 80))",
-    "Bool (_ BitVec 1) (_ BitVec 1) -> (_ BitVec 1)",
-    "Bool (_ BitVec 11) (_ BitVec 11) -> (_ BitVec 11)",
-    "Bool (_ BitVec 15) (_ BitVec 15) -> (_ BitVec 15)",
-    "Bool (_ BitVec 16) (_ BitVec 16) -> (_ BitVec 16)",
-    "Bool (_ BitVec 2) (_ BitVec 2) -> (_ BitVec 2)",
-    "Bool (_ BitVec 3) (_ BitVec 3) -> (_ BitVec 3)",
-    "Bool (_ BitVec 32) (_ BitVec 32) -> (_ BitVec 32)",
-    "Bool (_ BitVec 52) (_ BitVec 52) -> (_ BitVec 52)",
-    "Bool (_ BitVec 6) (_ BitVec 6) -> (_ BitVec 6)",
-    "Bool (_ BitVec 64) (_ BitVec 64) -> (_ BitVec 64)",
-    "Bool (_ BitVec 8) (_ BitVec 8) -> (_ BitVec 8)",
-    "Bool (_ BitVec 80) (_ BitVec 80) -> (_ BitVec 80)",
-    "Bool (_ FloatingPoint 11 53) (_ FloatingPoint 11 53) -> (_ FloatingPoint 11 53)",
-    "Bool Bool Bool -> Bool",
-    "Bool Real Real -> Real",
-    "Bool RoundingMode RoundingMode -> RoundingMode"
-   ]
-  },
-  "LE": {
-   "entries": 11,
-   "nodes": 11,
-   "sorts": [
-    "Real Real -> Bool"
-   ]
-  },
-  "LT": {
-   "entries": 63,
-   "nodes": 741,
-   "sorts": [
-    "Real Real -> Bool"
-   ]
-  },
-  "MOD": {
-   "entries": 2,
-   "nodes": 6,
-   "sorts": [
-    "Int Int -> Int"
-   ]
-  },
-  "MUL": {
-   "entries": 13,
-   "nodes": 78,
-   "sorts": [
-    "Real Real -> Real"
-   ]
-  },
-  "NOT": {
-   "entries": 100,
-   "nodes": 3017,
-   "sorts": [
-    "Bool -> Bool"
-   ]
-  },
-  "OR": {
-   "entries": 109,
-   "nodes": 3354,
-   "sorts": [
-    "Bool Bool -> Bool",
-    "Bool Bool Bool -> Bool",
-    "Bool Bool Bool Bool -> Bool"
-   ]
-  },
-  "SELECT": {
-   "entries": 118,
-   "nodes": 3377,
-   "sorts": [
-    "(Array (_ BitVec 3) (_ BitVec 80)) (_ BitVec 3) -> (_ BitVec 80)"
-   ]
-  },
-  "SGT": {
-   "entries": 1,
-   "nodes": 1,
-   "sorts": [
-    "(_ BitVec 32) (_ BitVec 32) -> Bool"
-   ]
-  },
-  "SLEQ": {
-   "entries": 2,
-   "nodes": 2,
-   "sorts": [
-    "(_ BitVec 16) (_ BitVec 16) -> Bool"
-   ]
-  },
-  "SLT": {
-   "entries": 3,
-   "nodes": 6,
-   "sorts": [
-    "(_ BitVec 16) (_ BitVec 16) -> Bool",
-    "(_ BitVec 32) (_ BitVec 32) -> Bool"
-   ]
-  },
-  "STORE": {
-   "entries": 118,
-   "nodes": 3362,
-   "sorts": [
-    "(Array (_ BitVec 3) (_ BitVec 80)) (_ BitVec 3) (_ BitVec 80) -> (Array (_ BitVec 3) (_ BitVec 80))"
-   ]
-  },
-  "SUB": {
-   "entries": 16,
-   "nodes": 61,
-   "sorts": [
-    "Real Real -> Real"
-   ]
-  },
-  "TO_INT": {
-   "entries": 2,
-   "nodes": 9,
-   "sorts": [
-    "Real -> Int"
-   ]
-  },
-  "TO_REAL": {
-   "entries": 2,
-   "nodes": 7,
-   "sorts": [
-    "Int -> Real"
-   ]
-  },
-  "TRUE": {
-   "entries": 118,
-   "nodes": 356,
-   "sorts": [
-    " -> Bool"
-   ]
-  },
-  "UGEQ": {
-   "entries": 2,
-   "nodes": 2,
-   "sorts": [
-    "(_ BitVec 16) (_ BitVec 16) -> Bool"
-   ]
-  },
-  "UGT": {
-   "entries": 47,
-   "nodes": 173,
-   "sorts": [
-    "(_ BitVec 52) (_ BitVec 52) -> Bool"
-   ]
-  },
-  "ULEQ": {
-   "entries": 3,
-   "nodes": 20,
-   "sorts": [
-    "(_ BitVec 16) (_ BitVec 16) -> Bool",
-    "(_ BitVec 4) (_ BitVec 4) -> Bool"
-   ]
-  },
-  "UMINUS": {
-   "entries": 63,
-   "nodes": 565,
-   "sorts": [
-    "Real -> Real"
-   ]
-  },
-  "UNINTERPRETED": {
-   "entries": 7,
-   "nodes": 8,
-   "sorts": [
-    "Real -> Real",
-    "Real Real -> Real"
-   ]
-  },
-  "ZERO_EXT": {
-   "entries": 118,
-   "nodes": 3158,
-   "sorts": [
-    "(_ BitVec 11) -> (_ BitVec 15)",
-    "(_ BitVec 11) -> (_ BitVec 16)",
-    "(_ BitVec 11) -> (_ BitVec 224)",
-    "(_ BitVec 16) -> (_ BitVec 224)",
-    "(_ BitVec 16) -> (_ BitVec 64)",
-    "(_ BitVec 2) -> (_ BitVec 16)",
-    "(_ BitVec 224) -> (_ BitVec 864)",
-    "(_ BitVec 3) -> (_ BitVec 16)",
-    "(_ BitVec 32) -> (_ BitVec 224)",
-    "(_ BitVec 32) -> (_ BitVec 64)",
-    "(_ BitVec 4) -> (_ BitVec 64)",
-    "(_ BitVec 52) -> (_ BitVec 64)",
-    "(_ BitVec 6) -> (_ BitVec 16)",
-    "(_ BitVec 64) -> (_ BitVec 64)",
-    "(_ BitVec 80) -> (_ BitVec 864)"
+ "entries": {
+  "('9b', '-', None, None)": {
+   "leaks": [],
+   "name": "fwait",
+   "ops": [],
+   "plain": [
+    "BAND",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONST_ARRAY",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d8', 'mem', 0, None)": {
+   "leaks": [
+    "ADD",
+    "ANUM",
+    "FPA_ADD",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT"
+   ],
+   "name": "fadd m32fp",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('d8', 'mem', 1, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_MUL",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT",
+    "MUL"
+   ],
+   "name": "fmul m32fp",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('d8', 'mem', 2, None)": {
+   "leaks": [
+    "FPA_EQ",
+    "FPA_LT",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP"
+   ],
+   "name": "fcom m32fp",
+   "ops": [
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d8', 'mem', 3, None)": {
+   "leaks": [
+    "FPA_EQ",
+    "FPA_LT",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP"
+   ],
+   "name": "fcomp m32fp",
+   "ops": [
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d8', 'mem', 4, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_SUB",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT",
+    "SUB"
+   ],
+   "name": "fsub m32fp",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('d8', 'mem', 5, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_SUB",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT",
+    "SUB"
+   ],
+   "name": "fsubr m32fp",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('d8', 'mem', 6, None)": {
+   "leaks": [
+    "ANUM",
+    "DIV",
+    "FPA_DIV",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT"
+   ],
+   "name": "fdiv m32fp",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('d8', 'mem', 7, None)": {
+   "leaks": [
+    "ANUM",
+    "DIV",
+    "FPA_DIV",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT"
+   ],
+   "name": "fdivr m32fp",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('d8', 'reg', 0, None)": {
+   "leaks": [
+    "ADD",
+    "ANUM",
+    "FPA_ADD",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT"
+   ],
+   "name": "fadd st,st(i)",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('d8', 'reg', 1, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_MUL",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT",
+    "MUL"
+   ],
+   "name": "fmul st,st(i)",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('d8', 'reg', 2, None)": {
+   "leaks": [
+    "FPA_EQ",
+    "FPA_LT"
+   ],
+   "name": "fcom st(i)",
+   "ops": [
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d8', 'reg', 3, None)": {
+   "leaks": [
+    "FPA_EQ",
+    "FPA_LT"
+   ],
+   "name": "fcomp st(i)",
+   "ops": [
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d8', 'reg', 4, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_SUB",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT",
+    "SUB"
+   ],
+   "name": "fsub st,st(i)",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('d8', 'reg', 5, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_SUB",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT",
+    "SUB"
+   ],
+   "name": "fsubr st,st(i)",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('d8', 'reg', 6, None)": {
+   "leaks": [
+    "ANUM",
+    "DIV",
+    "FPA_DIV",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT"
+   ],
+   "name": "fdiv st,st(i)",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('d8', 'reg', 7, None)": {
+   "leaks": [
+    "ANUM",
+    "DIV",
+    "FPA_DIV",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT"
+   ],
+   "name": "fdivr st,st(i)",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'mem', 0, None)": {
+   "leaks": [
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP"
+   ],
+   "name": "fld m32fp",
+   "ops": [
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'mem', 2, None)": {
+   "leaks": [
+    "ANUM",
+    "DIV",
+    "FPA_IS_INF",
+    "FPA_TO_FP",
+    "FPA_TO_IEEE_BV",
+    "FPA_TO_REAL",
+    "GT",
+    "LT"
+   ],
+   "name": "fst m32fp",
+   "ops": [
+    "abs_real(Real)->Real",
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)",
+    "rm_of((_ BitVec 16))->RoundingMode"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'mem', 3, None)": {
+   "leaks": [
+    "ANUM",
+    "DIV",
+    "FPA_IS_INF",
+    "FPA_TO_FP",
+    "FPA_TO_IEEE_BV",
+    "FPA_TO_REAL",
+    "GT",
+    "LT"
+   ],
+   "name": "fstp m32fp",
+   "ops": [
+    "abs_real(Real)->Real",
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)",
+    "rm_of((_ BitVec 16))->RoundingMode"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'mem', 4, None)": {
+   "leaks": [],
+   "name": "fldenv",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BAND",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'mem', 5, None)": {
+   "leaks": [],
+   "name": "fldcw",
+   "ops": [],
+   "plain": [
+    "BAND",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'mem', 6, None)": {
+   "leaks": [],
+   "name": "fnstenv",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'mem', 7, None)": {
+   "leaks": [],
+   "name": "fnstcw",
+   "ops": [],
+   "plain": [
+    "BAND",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONST_ARRAY",
+    "EXTRACT",
+    "FALSE",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 0, None)": {
+   "leaks": [],
+   "name": "fld st(i)",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 1, None)": {
+   "leaks": [],
+   "name": "fxch st(i)",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 4, 0)": {
+   "leaks": [],
+   "name": "fchs",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BXOR",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 4, 1)": {
+   "leaks": [],
+   "name": "fabs",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 4, 4)": {
+   "leaks": [
+    "FPA_EQ",
+    "FPA_LT"
+   ],
+   "name": "ftst",
+   "ops": [
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 4, 5)": {
+   "leaks": [],
+   "name": "fxam",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 5, 0)": {
+   "leaks": [],
+   "name": "fld1",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 5, 2)": {
+   "leaks": [],
+   "name": "fldl2e",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 5, 3)": {
+   "leaks": [],
+   "name": "fldpi",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 5, 4)": {
+   "leaks": [],
+   "name": "fldlg2",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 5, 5)": {
+   "leaks": [],
+   "name": "fldln2",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 5, 6)": {
+   "leaks": [],
+   "name": "fldz",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 6, 0)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GE",
+    "GT",
+    "LE",
+    "LT"
+   ],
+   "name": "f2xm1",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)",
+    "x87_exp2m1(Real)->Real"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 6, 1)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_IS_NAN",
+    "FPA_MINUS_INF",
+    "FPA_MUL",
+    "FPA_PLUS_INF",
+    "FPA_PLUS_ZERO",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT",
+    "MUL"
+   ],
+   "name": "fyl2x",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)",
+    "x87_log2(Real)->Real"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "BXOR",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 6, 2)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "LE",
+    "LT"
+   ],
+   "name": "fptan",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)",
+    "x87_tan(Real)->Real"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 6, 3)": {
+   "leaks": [
+    "ANUM",
+    "DIV",
+    "FPA_IS_INF",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT",
+    "MUL"
+   ],
+   "name": "fpatan",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)",
+    "x87_atan2(Real,Real)->Real"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 6, 5)": {
+   "leaks": [
+    "ADD",
+    "ANUM",
+    "DIV",
+    "FPA_IS_ZERO",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "GE",
+    "IDIV",
+    "IS_INT",
+    "ITE",
+    "LT",
+    "MOD",
+    "MUL",
+    "SUB",
+    "TO_INT",
+    "TO_REAL",
+    "UMINUS"
+   ],
+   "name": "fprem1",
+   "ops": [
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "pow2r((_ BitVec 16))->Real",
+    "real((_ BitVec 64))->Real",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "SLEQ",
+    "SLT",
+    "STORE",
+    "TRUE",
+    "UGEQ",
+    "UGT",
+    "ULEQ",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 7, 0)": {
+   "leaks": [
+    "ANUM",
+    "DIV",
+    "FPA_IS_ZERO",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "GE",
+    "IDIV",
+    "ITE",
+    "LT",
+    "MOD",
+    "MUL",
+    "SUB",
+    "TO_INT",
+    "TO_REAL",
+    "UMINUS"
+   ],
+   "name": "fprem",
+   "ops": [
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "pow2r((_ BitVec 16))->Real",
+    "real((_ BitVec 64))->Real",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "SLEQ",
+    "SLT",
+    "STORE",
+    "TRUE",
+    "UGEQ",
+    "UGT",
+    "ULEQ",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 7, 2)": {
+   "leaks": [
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_SQRT",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "MUL"
+   ],
+   "name": "fsqrt",
+   "ops": [
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 7, 3)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "LE",
+    "LT"
+   ],
+   "name": "fsincos",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)",
+    "x87_cos(Real)->Real",
+    "x87_sin(Real)->Real"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 7, 4)": {
+   "leaks": [
+    "FPA_ROUND_TO_INTEGRAL",
+    "FPA_TO_REAL",
+    "GT"
+   ],
+   "name": "frndint",
+   "ops": [
+    "abs_real(Real)->Real",
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)",
+    "img80((_ FloatingPoint 15 64))->(_ BitVec 80)",
+    "rm_of((_ BitVec 16))->RoundingMode"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 7, 5)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_IS_ZERO",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_RM_TOWARD_ZERO",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "FPA_TO_SBV",
+    "GT",
+    "ITE",
+    "LT",
+    "MUL"
+   ],
+   "name": "fscale",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "pow2r((_ BitVec 16))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "SGT",
+    "SLT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 7, 6)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "LE",
+    "LT"
+   ],
+   "name": "fsin",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)",
+    "x87_sin(Real)->Real"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('d9', 'reg', 7, 7)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "LE",
+    "LT"
+   ],
+   "name": "fcos",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)",
+    "x87_cos(Real)->Real"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('da', 'mem', 0, None)": {
+   "leaks": [
+    "ADD",
+    "ANUM",
+    "FPA_ADD",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT"
+   ],
+   "name": "fiadd m32int",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('da', 'mem', 1, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_MUL",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT",
+    "MUL"
+   ],
+   "name": "fimul m32int",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('da', 'mem', 2, None)": {
+   "leaks": [
+    "FPA_EQ",
+    "FPA_LT"
+   ],
+   "name": "ficom m32int",
+   "ops": [
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNEG",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('da', 'mem', 3, None)": {
+   "leaks": [
+    "FPA_EQ",
+    "FPA_LT"
+   ],
+   "name": "ficomp m32int",
+   "ops": [
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNEG",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('da', 'mem', 4, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_SUB",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT",
+    "SUB"
+   ],
+   "name": "fisub m32int",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('da', 'mem', 5, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_SUB",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT",
+    "SUB"
+   ],
+   "name": "fisubr m32int",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('da', 'mem', 6, None)": {
+   "leaks": [
+    "ANUM",
+    "DIV",
+    "FPA_DIV",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT"
+   ],
+   "name": "fidiv m32int",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('da', 'mem', 7, None)": {
+   "leaks": [
+    "ANUM",
+    "DIV",
+    "FPA_DIV",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT"
+   ],
+   "name": "fidivr m32int",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('da', 'reg', 3, None)": {
+   "leaks": [],
+   "name": "fcmovu",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('da', 'reg', 5, 1)": {
+   "leaks": [
+    "FPA_EQ",
+    "FPA_LT"
+   ],
+   "name": "fucompp",
+   "ops": [
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('db', 'mem', 0, None)": {
+   "leaks": [],
+   "name": "fild m32int",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNEG",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('db', 'mem', 2, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_RM_TOWARD_ZERO",
+    "FPA_ROUND_TO_INTEGRAL",
+    "FPA_TO_REAL",
+    "FPA_TO_SBV",
+    "GE",
+    "GT",
+    "LE"
+   ],
+   "name": "fist m32int",
+   "ops": [
+    "abs_real(Real)->Real",
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)",
+    "rm_of((_ BitVec 16))->RoundingMode"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('db', 'mem', 3, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_RM_TOWARD_ZERO",
+    "FPA_ROUND_TO_INTEGRAL",
+    "FPA_TO_REAL",
+    "FPA_TO_SBV",
+    "GE",
+    "GT",
+    "LE"
+   ],
+   "name": "fistp m32int",
+   "ops": [
+    "abs_real(Real)->Real",
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)",
+    "rm_of((_ BitVec 16))->RoundingMode"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('db', 'mem', 5, None)": {
+   "leaks": [],
+   "name": "fld m80fp",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('db', 'mem', 7, None)": {
+   "leaks": [],
+   "name": "fstp m80fp",
+   "ops": [],
+   "plain": [
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('db', 'reg', 0, None)": {
+   "leaks": [],
+   "name": "fcmovnb",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('db', 'reg', 3, None)": {
+   "leaks": [],
+   "name": "fcmovnu",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('db', 'reg', 4, 2)": {
+   "leaks": [],
+   "name": "fnclex",
+   "ops": [],
+   "plain": [
+    "BAND",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONST_ARRAY",
+    "EXTRACT",
+    "FALSE",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('db', 'reg', 5, None)": {
+   "leaks": [
+    "FPA_EQ",
+    "FPA_LT"
+   ],
+   "name": "fucomi st,st(i)",
+   "ops": [
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('db', 'reg', 6, None)": {
+   "leaks": [
+    "FPA_EQ",
+    "FPA_LT"
+   ],
+   "name": "fcomi st,st(i)",
+   "ops": [
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('dc', 'mem', 0, None)": {
+   "leaks": [
+    "ADD",
+    "ANUM",
+    "FPA_ADD",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT"
+   ],
+   "name": "fadd m64fp",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('dc', 'mem', 1, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_MUL",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT",
+    "MUL"
+   ],
+   "name": "fmul m64fp",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('dc', 'mem', 2, None)": {
+   "leaks": [
+    "FPA_EQ",
+    "FPA_LT"
+   ],
+   "name": "fcom m64fp",
+   "ops": [
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('dc', 'mem', 3, None)": {
+   "leaks": [
+    "FPA_EQ",
+    "FPA_LT"
+   ],
+   "name": "fcomp m64fp",
+   "ops": [
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('dc', 'mem', 4, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_SUB",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT",
+    "SUB"
+   ],
+   "name": "fsub m64fp",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('dc', 'mem', 5, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_SUB",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT",
+    "SUB"
+   ],
+   "name": "fsubr m64fp",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('dc', 'mem', 6, None)": {
+   "leaks": [
+    "ANUM",
+    "DIV",
+    "FPA_DIV",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT"
+   ],
+   "name": "fdiv m64fp",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('dc', 'mem', 7, None)": {
+   "leaks": [
+    "ANUM",
+    "DIV",
+    "FPA_DIV",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT"
+   ],
+   "name": "fdivr m64fp",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('dc', 'reg', 0, None)": {
+   "leaks": [
+    "ADD",
+    "ANUM",
+    "FPA_ADD",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT"
+   ],
+   "name": "fadd st(i),st",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('dc', 'reg', 1, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_MUL",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT",
+    "MUL"
+   ],
+   "name": "fmul st(i),st",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('dc', 'reg', 4, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_SUB",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT",
+    "SUB"
+   ],
+   "name": "fsubr st(i),st",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('dc', 'reg', 5, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_SUB",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT",
+    "SUB"
+   ],
+   "name": "fsub st(i),st",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('dc', 'reg', 6, None)": {
+   "leaks": [
+    "ANUM",
+    "DIV",
+    "FPA_DIV",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT"
+   ],
+   "name": "fdivr st(i),st",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('dc', 'reg', 7, None)": {
+   "leaks": [
+    "ANUM",
+    "DIV",
+    "FPA_DIV",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT"
+   ],
+   "name": "fdiv st(i),st",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('dd', 'mem', 0, None)": {
+   "leaks": [],
+   "name": "fld m64fp",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('dd', 'mem', 2, None)": {
+   "leaks": [
+    "ANUM",
+    "DIV",
+    "FPA_IS_INF",
+    "FPA_TO_FP",
+    "FPA_TO_IEEE_BV",
+    "FPA_TO_REAL",
+    "GT",
+    "LT"
+   ],
+   "name": "fst m64fp",
+   "ops": [
+    "abs_real(Real)->Real",
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)",
+    "rm_of((_ BitVec 16))->RoundingMode"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('dd', 'mem', 3, None)": {
+   "leaks": [
+    "ANUM",
+    "DIV",
+    "FPA_IS_INF",
+    "FPA_TO_FP",
+    "FPA_TO_IEEE_BV",
+    "FPA_TO_REAL",
+    "GT",
+    "LT"
+   ],
+   "name": "fstp m64fp",
+   "ops": [
+    "abs_real(Real)->Real",
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)",
+    "rm_of((_ BitVec 16))->RoundingMode"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('dd', 'mem', 4, None)": {
+   "leaks": [],
+   "name": "frstor",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('dd', 'mem', 6, None)": {
+   "leaks": [],
+   "name": "fnsave",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('dd', 'mem', 7, None)": {
+   "leaks": [],
+   "name": "fnstsw m16",
+   "ops": [],
+   "plain": [
+    "BAND",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONST_ARRAY",
+    "EXTRACT",
+    "FALSE",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('dd', 'reg', 0, None)": {
+   "leaks": [],
+   "name": "ffree st(i)",
+   "ops": [],
+   "plain": [
+    "BADD",
+    "BAND",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONST_ARRAY",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('dd', 'reg', 2, None)": {
+   "leaks": [],
+   "name": "fst st(i)",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('dd', 'reg', 3, None)": {
+   "leaks": [],
+   "name": "fstp st(i)",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('dd', 'reg', 4, None)": {
+   "leaks": [
+    "FPA_EQ",
+    "FPA_LT"
+   ],
+   "name": "fucom st(i)",
+   "ops": [
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('dd', 'reg', 5, None)": {
+   "leaks": [
+    "FPA_EQ",
+    "FPA_LT"
+   ],
+   "name": "fucomp st(i)",
+   "ops": [
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('de', 'mem', 0, None)": {
+   "leaks": [
+    "ADD",
+    "ANUM",
+    "FPA_ADD",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT"
+   ],
+   "name": "fiadd m16int",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('de', 'mem', 1, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_MUL",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT",
+    "MUL"
+   ],
+   "name": "fimul m16int",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('de', 'mem', 2, None)": {
+   "leaks": [
+    "FPA_EQ",
+    "FPA_LT"
+   ],
+   "name": "ficom m16int",
+   "ops": [
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNEG",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('de', 'mem', 3, None)": {
+   "leaks": [
+    "FPA_EQ",
+    "FPA_LT"
+   ],
+   "name": "ficomp m16int",
+   "ops": [
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNEG",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('de', 'mem', 4, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_SUB",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT",
+    "SUB"
+   ],
+   "name": "fisub m16int",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('de', 'mem', 5, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_SUB",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT",
+    "SUB"
+   ],
+   "name": "fisubr m16int",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('de', 'mem', 6, None)": {
+   "leaks": [
+    "ANUM",
+    "DIV",
+    "FPA_DIV",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT"
+   ],
+   "name": "fidiv m16int",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('de', 'mem', 7, None)": {
+   "leaks": [
+    "ANUM",
+    "DIV",
+    "FPA_DIV",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT"
+   ],
+   "name": "fidivr m16int",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('de', 'reg', 0, None)": {
+   "leaks": [
+    "ADD",
+    "ANUM",
+    "FPA_ADD",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT"
+   ],
+   "name": "faddp st(i),st",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('de', 'reg', 1, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_MUL",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT",
+    "MUL"
+   ],
+   "name": "fmulp st(i),st",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('de', 'reg', 3, 1)": {
+   "leaks": [
+    "FPA_EQ",
+    "FPA_LT"
+   ],
+   "name": "fcompp",
+   "ops": [
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('de', 'reg', 4, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_SUB",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT",
+    "SUB"
+   ],
+   "name": "fsubrp st(i),st",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('de', 'reg', 5, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_SUB",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT",
+    "SUB"
+   ],
+   "name": "fsubp st(i),st",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('de', 'reg', 6, None)": {
+   "leaks": [
+    "ANUM",
+    "DIV",
+    "FPA_DIV",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT"
+   ],
+   "name": "fdivrp st(i),st",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('de', 'reg', 7, None)": {
+   "leaks": [
+    "ANUM",
+    "DIV",
+    "FPA_DIV",
+    "FPA_IS_INF",
+    "FPA_RM_NEAREST_TIES_TO_EVEN",
+    "FPA_TO_FP",
+    "FPA_TO_REAL",
+    "GT",
+    "ITE",
+    "LT"
+   ],
+   "name": "fdivp st(i),st",
+   "ops": [
+    "abs_real(Real)->Real",
+    "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
+    "fp((_ BitVec 64))->(_ FloatingPoint 11 53)",
+    "min_normal((_ BitVec 2))->Real",
+    "real((_ BitVec 64))->Real",
+    "rm_of((_ BitVec 16))->RoundingMode",
+    "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "UGT",
+    "ZERO_EXT"
+   ]
+  },
+  "('df', 'mem', 0, None)": {
+   "leaks": [],
+   "name": "fild m16int",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNEG",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('df', 'mem', 2, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_RM_TOWARD_ZERO",
+    "FPA_ROUND_TO_INTEGRAL",
+    "FPA_TO_REAL",
+    "FPA_TO_SBV",
+    "GE",
+    "GT",
+    "LE"
+   ],
+   "name": "fist m16int",
+   "ops": [
+    "abs_real(Real)->Real",
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)",
+    "rm_of((_ BitVec 16))->RoundingMode"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('df', 'mem', 3, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_RM_TOWARD_ZERO",
+    "FPA_ROUND_TO_INTEGRAL",
+    "FPA_TO_REAL",
+    "FPA_TO_SBV",
+    "GE",
+    "GT",
+    "LE"
+   ],
+   "name": "fistp m16int",
+   "ops": [
+    "abs_real(Real)->Real",
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)",
+    "rm_of((_ BitVec 16))->RoundingMode"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('df', 'mem', 4, None)": {
+   "leaks": [],
+   "name": "fbld m80bcd",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ULEQ",
+    "ZERO_EXT"
+   ]
+  },
+  "('df', 'mem', 5, None)": {
+   "leaks": [],
+   "name": "fild m64int",
+   "ops": [],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNEG",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BSUB",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('df', 'mem', 6, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_ABS",
+    "FPA_RM_TOWARD_ZERO",
+    "FPA_ROUND_TO_INTEGRAL",
+    "FPA_TO_REAL",
+    "FPA_TO_SBV",
+    "GE",
+    "GT",
+    "LE"
+   ],
+   "name": "fbstp m80bcd",
+   "ops": [
+    "abs_real(Real)->Real",
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)",
+    "rm_of((_ BitVec 16))->RoundingMode"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "BUDIV",
+    "BUREM",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('df', 'mem', 7, None)": {
+   "leaks": [
+    "ANUM",
+    "FPA_RM_TOWARD_ZERO",
+    "FPA_ROUND_TO_INTEGRAL",
+    "FPA_TO_REAL",
+    "FPA_TO_SBV",
+    "GE",
+    "GT",
+    "LE"
+   ],
+   "name": "fistp m64int",
+   "ops": [
+    "abs_real(Real)->Real",
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)",
+    "rm_of((_ BitVec 16))->RoundingMode"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('df', 'reg', 4, 0)": {
+   "leaks": [],
+   "name": "fnstsw ax",
+   "ops": [],
+   "plain": [
+    "BAND",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONST_ARRAY",
+    "EXTRACT",
+    "FALSE",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('df', 'reg', 5, None)": {
+   "leaks": [
+    "FPA_EQ",
+    "FPA_LT"
+   ],
+   "name": "fucomip st,st(i)",
+   "ops": [
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
+   ]
+  },
+  "('df', 'reg', 6, None)": {
+   "leaks": [
+    "FPA_EQ",
+    "FPA_LT"
+   ],
+   "name": "fcomip st,st(i)",
+   "ops": [
+    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+   ],
+   "plain": [
+    "AND",
+    "BADD",
+    "BAND",
+    "BLSHR",
+    "BMUL",
+    "BNOT",
+    "BNUM",
+    "BOR",
+    "BSHL",
+    "CONCAT",
+    "CONST_ARRAY",
+    "DISTINCT",
+    "EQ",
+    "EXTRACT",
+    "FALSE",
+    "ITE",
+    "NOT",
+    "OR",
+    "SELECT",
+    "STORE",
+    "TRUE",
+    "ZERO_EXT"
    ]
   }
+ },
+ "format": "fnvnx-x87ops/2",
+ "kinds": {
+  "AND": 110,
+  "BADD": 110,
+  "BAND": 118,
+  "BLSHR": 109,
+  "BMUL": 110,
+  "BNEG": 7,
+  "BNOT": 113,
+  "BNUM": 118,
+  "BOR": 118,
+  "BSHL": 118,
+  "BSUB": 76,
+  "BUDIV": 1,
+  "BUREM": 1,
+  "BXOR": 2,
+  "CONCAT": 108,
+  "CONST_ARRAY": 118,
+  "DISTINCT": 112,
+  "EQ": 114,
+  "EXTRACT": 118,
+  "FALSE": 118,
+  "ITE": 112,
+  "NOT": 100,
+  "OR": 109,
+  "SELECT": 118,
+  "SGT": 1,
+  "SLEQ": 2,
+  "SLT": 3,
+  "STORE": 118,
+  "TRUE": 118,
+  "UGEQ": 2,
+  "UGT": 47,
+  "ULEQ": 3,
+  "ZERO_EXT": 118
+ },
+ "symbols": {
+  "abs_real(Real)->Real": 61,
+  "bits((_ FloatingPoint 11 53))->(_ BitVec 64)": 56,
+  "fp((_ BitVec 64))->(_ FloatingPoint 11 53)": 45,
+  "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)": 30,
+  "img80((_ FloatingPoint 15 64))->(_ BitVec 80)": 1,
+  "min_normal((_ BitVec 2))->Real": 50,
+  "pow2r((_ BitVec 16))->Real": 3,
+  "real((_ BitVec 64))->Real": 53,
+  "rm_of((_ BitVec 16))->RoundingMode": 62,
+  "view64((_ BitVec 80),(_ BitVec 16))->(_ BitVec 64)": 53,
+  "x87_atan2(Real,Real)->Real": 1,
+  "x87_cos(Real)->Real": 2,
+  "x87_exp2m1(Real)->Real": 1,
+  "x87_log2(Real)->Real": 1,
+  "x87_sin(Real)->Real": 2,
+  "x87_tan(Real)->Real": 1
  }
 }

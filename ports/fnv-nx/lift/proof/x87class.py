@@ -52,12 +52,15 @@ def main(paths):
     _inputs.configure(**{p: f for p in inspect.signature(_inputs.configure).parameters})
     from proof import forms
     dec = shape.decoder()
-    cls, outcome = defaultdict(set), Counter()
+    cls, outcome, cres, proved, seen = defaultdict(set), Counter(), {}, {}, set()
     for p in paths:
         for ln in open(p):
             if ln[0] == "#" or not ln.strip():
                 continue
             k = ln.split("\t")[0]
+            if k in seen:      # the universe is the DISTINCT keys over the files
+                continue
+            seen.add(k)
             try:
                 ins = next(dec.disasm(shape.rep_bytes(k), 0))
             except Exception:
@@ -67,14 +70,22 @@ def main(paths):
             c = x87_class(bytes(ins.bytes))
             cls[c].add(k)
             try:
-                forms.build(ins, 0)
+                F = forms.build(ins, 0)
                 outcome["ok"] += 1
-            except KeyError:
+                if getattr(F, "x87", None):
+                    kk = F.x87[:2]
+                    if kk not in proved:
+                        from proof import prove
+                        proved[kk] = prove.prove_one(None, F, None, None, None)
+                    if cres.get(c, "proved") == "proved":      # one result per class: proved only when every register index seen is
+                        cres[c] = "proved" if proved[kk][0] == "proved" else "uncertified: %s %s" % (proved[kk][0], proved[kk][1])
+            except KeyError as e:
                 outcome["KeyError"] += 1
+                cres[c] = "uncertified: %s" % (e.__cause__ or "no Form")
             except Exception as e:
                 outcome[type(e).__name__] += 1
     for c in sorted(cls):
-        print("%02x %s %s%s\t%d keys" % (c[0], c[1], "" if c[2] is None else "/%d" % c[2], "" if c[3] is None else " rm%d" % c[3], len(cls[c])))
+        print("%02x %s %s%s\t%d keys\t%s" % (c[0], c[1], "" if c[2] is None else "/%d" % c[2], "" if c[3] is None else " rm%d" % c[3], len(cls[c]), cres.get(c, "")))
     print("classes %d, keys %d, build outcome %s" % (len(cls), sum(len(v) for v in cls.values()), dict(outcome)))
 
 
