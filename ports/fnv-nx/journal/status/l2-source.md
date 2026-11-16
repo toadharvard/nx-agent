@@ -607,3 +607,7 @@ After the first frame:
 - 2026-11-16 01:50Z: L5 verdict e8e54dcea (from L1):
   - terminator-red 65 → L1. fnvnx_host and fnvnx_entry are registered by fnvnx_dispatch.cc:456-472, but objstub.unit_terminators runs without the root's plugins. Rule: the terminator run uses the root's recipe plugin argv.
   - nodecor:fnparmform 24 → L2 item NAMES-FNPARM, owner w2, cand4b: the names plugin decorates the whole MSVC parameter-type class (P6/P8 function and member pointers). Status: doing.
+- 2026-11-16 02:00Z: the 4 undefined `_ZTV….fnvnx_ap8` (L5 linkstrict d6817c5) come from L5 linking the interim runtime msvcmodel13, which has no sdd.
+  - The pin 84f0883e runtime defines all 4 (nm on its libstdc++.a, ELF32: class, si_class and vmi_class type_info, bad_alloc).
+  - Over its archive: 1,072 fnvnx_ap mentions, 0 undefined.
+  - Rule: the guest link takes its runtime from the one pinned compiler external. Sent to L1, for L5.
