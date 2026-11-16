@@ -2317,3 +2317,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - RET = the definer's decltype return class as a 5th column; struct/vector returns are red.
   - The hand lists are deleted with an empty diff.
 - plugin_errors rule (w13 91417e05a reported it): the plugins loaded must equal the target profile's required set (guest: the full set; host: ∅). This replaces w13's host special case. Queued for w28 after stage B; lift/proof/fpchost is the test case.
+- w15 beb71d2e2 (on top of cand3b): a cas hard-link pool. test_recipe scratch 15.0 → 3.1 GB; 179/179 pass, the hx.exe cases included.
+  - Required: no env switch (FNVNX_CAS_POOL); the pool is always on, beside GATE_CACHE/store; a failed link is red, never copied.
+  - It goes in as the next candidate after 963dce662 merges.
