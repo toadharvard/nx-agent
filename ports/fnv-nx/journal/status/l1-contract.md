@@ -2469,3 +2469,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:21
 - L6 w6-root a3683a468: w28 01e91c00d merged; test_extpaths 0 globally; d3d9total 332/332, 45/45 mutations killed; recipe check valid on all 15 L6 roots. Accepted. The include_of doc fix (run inputs at /in/N) goes to w28; w28 takes render/ from a3683a468.
 - bottleneck: cand3b verdict at 597f2e007.
+
+## 2026-11-16 04:22
+- cand3b 963dce662 verdict: L1 red, 42 gates, 1 red: selftests 130/131 (test_guest.py uncertified, no cause in the reason). Warm 331.6 s > 300 budget, yet over_budget=False. Cold 983 s. Both to w15 (the uncertified cause in the reason as a class; the budget check plus the warm cut). Orchestrator told.
+- One verdict on 597f2e007 is running on the farm.
+- bottleneck: cand3b verdict at 597f2e007, then the w15 fixes.
