@@ -2285,3 +2285,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - abspath 0, pure 0 for render;
   - d3d9total 332/332, still on the direct-call path.
 - The external_of input form (L6's request) is assigned to w28, so the d3d9total compiles can move onto stages without a second pin.
+- w28 f203e1a1c: used_by is derived (users_of); the field is deleted from all 121 entries. unused and stray-id are red. 125/125 locally.
+  - w28 is still blocked on stage B until L5 sends its merged head.
+  - It is doing external_of meanwhile.
