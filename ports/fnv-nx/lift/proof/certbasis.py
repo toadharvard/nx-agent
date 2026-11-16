@@ -24,23 +24,33 @@ def platform_sha(fns, root=None):
     return h.hexdigest()
 
 
-PROVER_ROOTS = ("prove.py", "model_sail.py", "symform.py", "certbasis.py")      # the modules that define what a proof compares; the prover identity is these and everything of this package they import, transitively (a prover fix invalidates by rule, an unrelated edit does not)
+PROVER_ROOTS = ("proof/prove.py", "proof/model_sail.py", "proof/symform.py", "proof/certbasis.py")      # the modules that define what a proof compares; the prover identity is these and every module of this repository that they import, transitively, paths relative to lift/ (stdlib and pinned wheels stay outside).  A prover fix invalidates by rule, an unrelated edit does not.
 
 
-def _imports(path):
-    """the modules of this package that the file at `path` imports (any depth: function-level imports count), by its syntax tree"""
+def _module_file(m):
+    """lift/-relative file of the repository module `m` (dotted), with the __init__.py of each package it passes through; [] when `m` is not of this repository"""
+    p = m.split(".")
+    out = []
+    for i in range(1, len(p)):
+        init = os.path.join(*p[:i], "__init__.py")
+        if os.path.isfile(os.path.join(LIFT, init)): out.append(init)
+    f = os.path.join(*p) + ".py"
+    if os.path.isfile(os.path.join(LIFT, f)): return out + [f]
+    return []
+
+
+def _imports(rel):
+    """the repository files that the file `rel` imports (any depth: function-level imports count), by its syntax tree"""
     import ast
     out = set()
-    for n in ast.walk(ast.parse(open(path, "rb").read())):
+    for n in ast.walk(ast.parse(open(os.path.join(LIFT, rel), "rb").read())):
         if isinstance(n, ast.Import):
             names = [a.name for a in n.names]
         elif isinstance(n, ast.ImportFrom) and n.level == 0 and n.module:
             names = [n.module] + [n.module + "." + a.name for a in n.names]
         else:
             continue
-        for m in names:
-            p = m.split(".")
-            if len(p) == 2 and p[0] == "proof" and os.path.isfile(os.path.join(HERE, p[1] + ".py")): out.add(p[1] + ".py")
+        for m in names: out.update(_module_file(m))
     return out
 
 
@@ -49,12 +59,12 @@ def prover_files():
     while todo:
         f = todo.pop()
         if f not in seen:
-            seen.add(f); todo.extend(_imports(os.path.join(HERE, f)))
+            seen.add(f); todo.extend(_imports(f))
     return sorted(seen)
 
 
 def prover_sha():
     h = hashlib.sha256()
     for f in prover_files():
-        h.update(f.encode() + b"\0" + open(os.path.join(HERE, f), "rb").read() + b"\0")
+        h.update(f.encode() + b"\0" + open(os.path.join(LIFT, f), "rb").read() + b"\0")
     return h.hexdigest()
