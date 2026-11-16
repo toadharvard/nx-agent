@@ -645,3 +645,10 @@ After the first frame:
   - Decision: the L2 farm builds the pin now through the proven build.sh/stage2.sh path from cand4b 000dfcb89+ (K1 changes, about 13 min), with the toolchain tests. The pin goes to w8, L3a, L1, w2 and w3.
   - w3's recipe-path build must equal it (proof b) before the old path is deleted.
 - bottleneck: the cand4b pin build (farm), then the cand2/cand3 merges (L1). Workers: w2, w3 + farm.
+- 2026-11-16 03:45Z: PIN fnv-nx-build tools/gcc-ilp32-msvcmodel-noneelf @ d1a92e26915a1182c7c6914ddf6ef28c8750f050, tree_sha256 d8bb3cc369f8cf3d…8f38, K1 7bf294c556d7ca8b, K2 b891b26195229e2c, from cand4b b51ad22ee (old path).
+  - Stage times: gcc 406 s, plugins about 40 s, stage 2 225 s. It supersedes 84f0883e. Sent to w8, L3a, L1, w2 and w3.
+  - Tests on the pin: test_dispatch 67 ok, test_dispatch_entry 44 ok, test_ldbl 69 ok.
+  - test_names 30/31: the hand-typed key _Z2d4PFvPiS0_E is wrong; GCC's S_ is right. Fix: keys from the symtab (w2).
+  - test_layout 197/198: the va_list C/C++ check found 0 rows (CTYPE-FE not done; w3).
+  - Skew: test_layout and test_ldbl build their own external path (rule 3; w3).
+  - test_plugins (verify/tests) runs on the farm.
