@@ -611,12 +611,33 @@ def expand_profile(rec, pin):
     return out, err
 
 
+def expand_recipe(rec, pin, repo, files=None):
+    """THE ONE EXPANSION POINT of a recipe: REC with its profile (expand_profile) and its foreach steps (expand_foreach) expanded -> (recipe, profile errors, foreach errors). With FILES
+    (the tracked files) a foreach table that is not tracked is a foreach error. A malformed foreach is a foreach error and the recipe comes back without its foreach steps (every rule
+    then judges the rest). Expansion is a projection, expand(expand(r)) == expand(r): the expanded form is its own expansion. Only this function and nothing else calls expand_profile or
+    expand_foreach (`tests/test_expand_once.py` checks the call sites by ast); read_recipe and check take their recipe from here."""
+    rec, perr = expand_profile(rec, pin)
+    ferr = []
+    try:
+        if files is not None:
+            ferr += ["run foreach table %s is not a tracked file" % t for t in (g["foreach"]["table"] for g in (rec.get("run") if isinstance(rec.get("run"), list) else [])
+                                                                                if isinstance(g, dict) and isinstance(g.get("foreach"), dict) and isinstance(g["foreach"].get("table"), str)) if t not in files]
+        rec = expand_foreach(rec, repo)
+    except ValueError as e:
+        ferr.append(str(e))
+        rec = dict(rec, run=[g for g in (rec.get("run") if isinstance(rec.get("run"), list) else []) if not (isinstance(g, dict) and "foreach" in g)])
+    return rec, perr, ferr
+
+
 def read_recipe(repo, path):
-    """The recipe file PATH of the checkout REPO, its profile expanded (expand_profile with the checkout's guest compiler pin). Errors of the profile are
-    reported by check(), which reads the same file through expand_profile; a reader that only needs the values takes the expanded recipe."""
+    """The recipe file PATH of the checkout REPO, expanded (expand_recipe with the checkout's guest compiler pin). Errors of the profile are reported by check(), which takes its
+    recipe from the same expand_recipe; a reader that only needs the values takes the expanded recipe. ValueError on a malformed foreach."""
     with open(os.path.join(repo, path)) as f:
         rec = json.load(f)
-    return expand_foreach(expand_profile(rec, load_pin(repo))[0], repo)
+    rec, _perr, ferr = expand_recipe(rec, load_pin(repo), repo)
+    if ferr:
+        raise ValueError(ferr[0])
+    return rec
 
 
 FOREACH_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
@@ -694,8 +715,8 @@ def expand_foreach(rec, repo):
     or i = 0..N-1 with n = N): the step is the template with {COLUMN} replaced in its `args`, `outputs`, `dirs` and `env` values, named NAME.<key field>. The table is read
     here and is no stage input, so a changed row changes only the steps whose expanded text changed, and the key of a step is a function of its own row, tool and inputs.
     A consumer's input {"stage": "ROOT:run:NAME", "path": TEMPLATE, "rows": "all"} (TEMPLATE = an output or dir of the foreach step as written) becomes one stage ref per row in
-    row order, and the arg "@rows" becomes the mount paths /in/K of those inputs in that order. This is the one place a foreach is expanded: read_recipe and check call it,
-    so every other reader sees plain static steps. ValueError on a malformed form, table or duplicate output."""
+    row order, and the arg "@rows" becomes the mount paths /in/K of those inputs in that order. This is the one place a foreach is expanded (called by expand_recipe only), so every other reader sees plain static steps.
+    Expansion is a projection: the marker step of a build-time foreach (`foreach` carrying `row`) and the row steps are their own expansion. ValueError on a malformed form, table or duplicate output."""
     rs = rec.get("run")
     if not isinstance(rs, list) or not any(isinstance(g, dict) and ("foreach" in g or any(isinstance(r, dict) and r.get("rows") == "all" for r in (g.get("inputs") if isinstance(g.get("inputs"), list) else []))) for g in rs):
         return rec
@@ -711,6 +732,9 @@ def expand_foreach(rec, repo):
             continue
         if "foreach" not in g:
             out.append(foreach_consume(g, fan))
+            continue
+        if isinstance(g["foreach"], dict) and "row" in g["foreach"] and isinstance(g["foreach"].get("table"), dict):   # the marker step foreach_dynamic returned: expanded already, kept as it is
+            out.append(g)
             continue
         if isinstance(g["foreach"], dict) and isinstance(g["foreach"].get("table"), dict):
             out.append(foreach_dynamic(g, rec))
@@ -1877,15 +1901,8 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
         want = (entry_of(roots, root + "@" + variant) if variant else ent0).get("target")
         if rec["profile"] != want:
             err.append("profile %r: the admit.json target of %s is %r (a root names the profile of its own target)" % (rec["profile"], root, want))
-    rec, perr = expand_profile(rec, pin)
-    err += perr
-    try:   # a foreach step becomes one static step per row of its tracked table: every rule below judges the expanded steps
-        fe_tables = [g["foreach"]["table"] for g in (rec.get("run") if isinstance(rec.get("run"), list) else []) if isinstance(g, dict) and isinstance(g.get("foreach"), dict) and isinstance(g["foreach"].get("table"), str)]
-        err += ["run foreach table %s is not a tracked file" % t for t in fe_tables if t not in files]
-        rec = expand_foreach(rec, repo)
-    except ValueError as e:
-        err.append(str(e))
-        rec = dict(rec, run=[g for g in (rec.get("run") if isinstance(rec.get("run"), list) else []) if not (isinstance(g, dict) and "foreach" in g)])
+    rec, perr, ferr = expand_recipe(rec, pin, repo, files)   # a foreach step becomes one static step per row of its tracked table: every rule below judges the expanded steps
+    err += perr + ferr
     vs = rec.get("variants")
     if vs is not None:
         if not (isinstance(vs, dict) and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9_.-]+", n) and isinstance(v, dict) and v and set(v) <= VARIANT_KEYS
