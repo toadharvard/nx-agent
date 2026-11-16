@@ -1329,3 +1329,13 @@ Paused: w3b, w4, farm; no other work.
 - 00:06Z L1: the file-escape rule now also runs in `recipe check` (w28 c557ed084). Its gen_impl:41 and state_gen:30 rows came from cand3's copy. At w6-cand4 both read the spec as a stage argument.
     - w6 (doing): state_model.py:188 gets a required argument, and the unused __file__ HERE lines go.
     - Then merge c557ed084, `recipe check` with render at 0, and hold for the w28-on-final-cand3 head.
+- 00:15Z w6-root 4a951d6a7 (w28 c557ed084 merged), carried into w6-cand4 209a79246.
+    - The 22 __file__ sites in render/ were sorted by rule:
+        - 4 unused HERE lines deleted;
+        - the gen_expr and sm_table fallbacks became required arguments;
+        - sibling imports stay;
+        - ENV_PIN becomes an argument (w6, doing).
+    - `recipe check` valid on all 8 render roots, 0 file-escape rows; abspath render 0.
+    - Builds green and byte-identical; d3d9total 332/332; test 45/45.
+    - sm_link is still red on "dest exists …/merge1", the second link-workspace collision. Routed to L1 as the whole class: a private mkdtemp for every Job.link path.
+- bottleneck: L1's merge1 fix; the w28-on-final-cand3 head.
