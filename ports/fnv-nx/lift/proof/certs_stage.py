@@ -25,7 +25,7 @@ DECLARED = ("proved", "agree-except-declared", "FAILED(model-defect)", "model-ga
 
 def main(argv):
     ap = argparse.ArgumentParser(); ap.add_argument("--queue", required=True); ap.add_argument("--rows", required=True); ap.add_argument("--out", required=True)
-    ap.add_argument("--sail-work", required=True); ap.add_argument("--sail-ir", required=True); ap.add_argument("--isla", required=True); ap.add_argument("--isla-cfg", required=True); x86sys.add_arg(ap)
+    ap.add_argument("--sail-work", required=True); ap.add_argument("--sail-ir", required=True); ap.add_argument("--isla", required=True); ap.add_argument("--isla-cfg", required=True); x86sys.add_arg(ap); certbasis.add_inputs_args(ap, True)
     a = ap.parse_args(argv)
     red = []
     with open(a.queue) as fh: q = [ln.rstrip("\n").split("\t") for ln in fh][1:]
@@ -47,7 +47,7 @@ def main(argv):
         if res not in DECLARED: red.append("%d record(s) of result %r (not a declared class)" % (n, res))
     with open(os.path.join(a.out, "model_gap.tsv"), "w") as fh:
         fh.write("# shape\tmodel's reason\n" + "".join("%s\t%s\n" % (r["shape"], r.get("note", "")) for r in recs if r.get("result") == "model-gap"))
-    rc = certs_build.main(["--x86sys", a.x86sys, "--sail-work", a.sail_work, "--sail-ir", a.sail_ir, "--isla", a.isla, "--isla-cfg", a.isla_cfg, "--shards", shards, "--out", os.path.join(a.out, "certs.tsv"), "--report", os.path.join(a.out, "report.txt")])
+    rc = certs_build.main(["--x86sys", a.x86sys, "--sail-work", a.sail_work, "--sail-ir", a.sail_ir, "--isla", a.isla, "--isla-cfg", a.isla_cfg, "--cpumodel", a.cpumodel, "--rcptab", a.rcptab, "--rcpcert", a.rcpcert, "--shards", shards, "--out", os.path.join(a.out, "certs.tsv"), "--report", os.path.join(a.out, "report.txt")])
     if rc: red.append("certs_build exit %s" % rc)
     cert = sum(1 for r in recs if r.get("result") in ("proved", "agree-except-declared"))
     nrows = sum(1 for ln in open(os.path.join(a.out, "certs.tsv")) if ln.strip() and ln[0] != "#") if os.path.exists(os.path.join(a.out, "certs.tsv")) else 0

@@ -104,10 +104,10 @@ def main():
     ap.add_argument('--one', metavar='KEY', help='prove exactly this shape (recipe step: one row of the queue table) and write its record to --record; the record is a function of the inputs alone (no wall time, no tree id)')
     ap.add_argument('--shape-sha', help='with --one: the queue row\'s shape_sha; the Form of this tree must be the Form the queue was built from'); ap.add_argument('--record', help='with --one: the file of the record (one json line)')
     ap.add_argument('--z3lib', help='the directory of the libz3 that isla runs with (the isla root\'s Z3LIB); default: the lib of the python z3 package')
-    ap.add_argument('--cpumodel', required=True, help='verify/cpuid_model.json (the declared CPU data: MXCSR_MASK of the Forms)'); ap.add_argument('--rcptab', required=True, help='rt/rcptab.c'); ap.add_argument('--rcpcert', required=True, help='rt/rcptab.cert.json')
+    certbasis.add_inputs_args(ap, True)
     x86sys.add_arg(ap)
     a = ap.parse_args(); model_sail.configure(a.sail_work, a.sail_ir, a.isla, a.isla_cfg)
-    from fnvlift import inputs; inputs.configure(cpumodel=os.path.abspath(a.cpumodel), rcptab=os.path.abspath(a.rcptab), rcpcert=os.path.abspath(a.rcpcert))
+    certbasis.configure_inputs(a)
     if a.z3lib: model_sail.Z3LIB = os.path.abspath(a.z3lib)
     xsha = x86sys.configure(a.x86sys)
     if a.one:

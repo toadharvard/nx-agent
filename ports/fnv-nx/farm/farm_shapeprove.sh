@@ -157,7 +157,7 @@ if [ "$MODE" = simd ]; then
     [ "$(sha256sum "$CF" | cut -d' ' -f1)" = "$CFH" ] || { echo "cpufeat table sha256 differs from the queue header" >&2; exit 1; }
     python3 -I "$HERE/simdshard.py" --cpufeat "$CF" --x86sys "$X86SYS_FILE" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --slice "${SLICE:-1}" --cache "$GATE_CACHE" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
 else
-python3 -I "$HERE/shapeprove.py" "${TC[@]}" --cpumodel "$HERE/../../verify/cpuid_model.json" --rcptab "$HERE/../rt/rcptab.c" --rcpcert "$HERE/../rt/rcptab.cert.json" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --eip "${EIP:-sym}" --slice "${SLICE:-1}" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
+python3 -I "$HERE/shapeprove.py" "${TC[@]}" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --eip "${EIP:-sym}" --slice "${SLICE:-1}" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
 fi
 PP=$!
 trap 'kill $PP 2>/dev/null; wait $PP 2>/dev/null; publish; exit 143' TERM INT

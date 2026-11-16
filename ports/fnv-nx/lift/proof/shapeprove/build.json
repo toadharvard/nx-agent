@@ -100,12 +100,14 @@
     "/in/1",
     "/in/2",
     "/in/3",
+    "/in/4",
     "/out/closure"
    ],
    "inputs": [
     "ports/fnv-nx/lift/proof/mkclosure.py",
     "ports/fnv-nx/lift/proof",
-    "ports/fnv-nx/lift/fnvlift"
+    "ports/fnv-nx/lift/fnvlift",
+    "ports/fnv-nx/verify"
    ],
    "debs": {
     "closure": [
@@ -166,7 +168,13 @@
     "--isla-cfg",
     "/in/19",
     "--x86sys",
-    "/in/8"
+    "/in/8",
+    "--cpumodel",
+    "/in/20",
+    "--rcptab",
+    "/in/21",
+    "--rcpcert",
+    "/in/22"
    ],
    "inputs": [
     "ports/fnv-nx/lift/proof/stage.py",
@@ -239,7 +247,10 @@
     {
      "stage": "ports/fnv-nx/lift/proof/isla:run:isla",
      "path": "x86.toml"
-    }
+    },
+    "ports/fnv-nx/verify/cpuid_model.json",
+    "ports/fnv-nx/lift/rt/rcptab.c",
+    "ports/fnv-nx/lift/rt/rcptab.cert.json"
    ],
    "debs": {
     "closure": [
@@ -293,7 +304,13 @@
     "--z3lib",
     "/in/8",
     "--x86sys",
-    "/in/10"
+    "/in/10",
+    "--cpumodel",
+    "/in/12",
+    "--rcptab",
+    "/in/13",
+    "--rcpcert",
+    "/in/14"
    ],
    "inputs": [
     "ports/fnv-nx/lift/proof/stage.py",
@@ -334,7 +351,10 @@
     {
      "stage": "ports/fnv-nx/lift/proof/isla:run:isla",
      "path": "x86.toml"
-    }
+    },
+    "ports/fnv-nx/verify/cpuid_model.json",
+    "ports/fnv-nx/lift/rt/rcptab.c",
+    "ports/fnv-nx/lift/rt/rcptab.cert.json"
    ],
    "debs": {
     "closure": [
@@ -391,7 +411,13 @@
     "--isla-cfg",
     "/in/11",
     "--x86sys",
-    "/in/8"
+    "/in/8",
+    "--cpumodel",
+    "/in/12",
+    "--rcptab",
+    "/in/13",
+    "--rcpcert",
+    "/in/14"
    ],
    "inputs": [
     "ports/fnv-nx/lift/proof/stage.py",
@@ -432,7 +458,10 @@
     {
      "stage": "ports/fnv-nx/lift/proof/isla:run:isla",
      "path": "x86.toml"
-    }
+    },
+    "ports/fnv-nx/verify/cpuid_model.json",
+    "ports/fnv-nx/lift/rt/rcptab.c",
+    "ports/fnv-nx/lift/rt/rcptab.cert.json"
    ],
    "debs": {
     "closure": [

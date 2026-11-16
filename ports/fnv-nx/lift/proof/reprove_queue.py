@@ -19,7 +19,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from proof import certs_build, model_sail, x86sys  # noqa: E402
+from proof import certbasis, certs_build, model_sail, x86sys  # noqa: E402
 
 KEY = re.compile(r"^[0-9a-f]+/\d+\.\d+\.\d+\.\d+$")
 
@@ -33,9 +33,9 @@ def files_of(ss):
 def main(argv):
     ap = argparse.ArgumentParser(); ap.add_argument("--universe", nargs="+", required=True); ap.add_argument("--old", nargs="+", required=True); ap.add_argument("--new", nargs="+", required=True)
     ap.add_argument("--out", required=True); ap.add_argument("--info", required=True); ap.add_argument("--limit", type=int)
-    ap.add_argument("--sail-work", required=True); ap.add_argument("--sail-ir", required=True); ap.add_argument("--isla", required=True); ap.add_argument("--isla-cfg", required=True); x86sys.add_arg(ap)
+    ap.add_argument("--sail-work", required=True); ap.add_argument("--sail-ir", required=True); ap.add_argument("--isla", required=True); ap.add_argument("--isla-cfg", required=True); x86sys.add_arg(ap); certbasis.add_inputs_args(ap, True)
     a = ap.parse_args(argv)
-    xsha = x86sys.configure(a.x86sys); model_sail.configure(a.sail_work, a.sail_ir, a.isla, a.isla_cfg)
+    certbasis.configure_inputs(a); xsha = x86sys.configure(a.x86sys); model_sail.configure(a.sail_work, a.sail_ir, a.isla, a.isla_cfg)
     keys = set()
     for f, i, r in certs_build.records(files_of(a.old)):
         if r.get("result") in ("proved", "agree-except-declared"): keys.add(r["shape"])
