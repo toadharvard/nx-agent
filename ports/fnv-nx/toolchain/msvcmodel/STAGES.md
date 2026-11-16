@@ -48,3 +48,6 @@ independent (the plugin stage compiles it into a `.so`; rt copies the text), and
 ## Externals are inputs
 A run step sees only its declared inputs, so the source tarballs and the stage-1 tree are `{"external", "path"}` inputs (RECIPE.md "Run stages"), not paths under /ext. gcc1: input 4 is the GNU tarball. rt: inputs 10-15 are the stage-1 tree (`.`), the GNU tarball,
 the newlib tarball, the two autotools tarballs and the devkitPro buildscripts tree (`.`); the plugins follow from input 16 (`{"plugins": "root"}`). The numbers are the constants at the top of rt.sh.
+
+## Ownership
+The sandbox maps the step to an unprivileged root, so a chown to the tarball's uid fails. Every extraction of a source tarball is `tar --no-same-owner -x...` and every tree copy is `cp -a --no-preserve=ownership` (one rule for both scripts: files are owned by the step's user, as `/out` expects).

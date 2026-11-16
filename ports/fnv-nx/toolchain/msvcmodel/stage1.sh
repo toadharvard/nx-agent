@@ -48,7 +48,7 @@ note "# stage 1: gcc $V; binutils: $($LD -v) (aarch64-linux-gnu-* as $T-*)"
 
 rm -rf "$SRC"
 mkdir "$SRC"
-tar -xJf "$GCC_TARBALL" -C "$SRC" --strip-components=1
+tar --no-same-owner -xJf "$GCC_TARBALL" -C "$SRC" --strip-components=1
 patch -s -d "$SRC" -p1 < "$MSVC_PATCH"
 # int32_t is int, as in the exe: newlib-stdint.h (config.gcc, aarch64*-*-elf) makes __INT32_TYPE__ long (and the LEAST32/FAST8
 # types), a different mangled type for every int32_t parameter. glibc-stdint.h is the target stdint macro set the linux compiler
@@ -92,5 +92,5 @@ cd ..
 
 # the outputs: the three trees, kept as they are (absolute paths of this scratch are the contract with stage 2)
 mkdir -p "$OUT_DIR/STAGE1"   # the directory output STAGE1 of build.json
-cp -a "$P" "$OUT_DIR/STAGE1/prefix"; cp -a "$W/b-gcc" "$OUT_DIR/STAGE1/b-gcc"; cp -a "$SRC" "$OUT_DIR/STAGE1/src"
+cp -a --no-preserve=ownership "$P" "$OUT_DIR/STAGE1/prefix"; cp -a --no-preserve=ownership "$W/b-gcc" "$OUT_DIR/STAGE1/b-gcc"; cp -a --no-preserve=ownership "$SRC" "$OUT_DIR/STAGE1/src"
 echo "$P/bin/$T-g++"

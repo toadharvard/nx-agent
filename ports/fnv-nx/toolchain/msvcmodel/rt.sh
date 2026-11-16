@@ -33,7 +33,7 @@ export LC_ALL=C TZ=UTC SOURCE_DATE_EPOCH=0   # the host tools are the declared d
 CONF=$P/CONFIGURE.txt
 note() { printf '%s\n' "$*" >> "$CONF"; }
 # stage 1's output goes back to the absolute paths it was built at (GCC's build tree and the compiler's configured paths are absolute)
-mkdir -p "$W"; cp -a "$STAGE1/prefix" "$P"; cp -a "$STAGE1/b-gcc" "$W/b-gcc"; cp -a "$STAGE1/src" "$SRC"
+mkdir -p "$W"; cp -a --no-preserve=ownership "$STAGE1/prefix" "$P"; cp -a --no-preserve=ownership "$STAGE1/b-gcc" "$W/b-gcc"; cp -a --no-preserve=ownership "$STAGE1/src" "$SRC"
 export PATH=$P/bin:$PATH
 cd "$W"
 note "# stage 2; newlib $NLV; devkitPro/buildscripts at $BS"
@@ -56,7 +56,7 @@ export W
 {
   rm -rf "$NL"
   mkdir "$NL"
-  tar -xzf "$NEWLIB_TARBALL" -C "$NL" --strip-components=1
+  tar --no-same-owner -xzf "$NEWLIB_TARBALL" -C "$NL" --strip-components=1
   patch -s -d "$NL" -p1 < "$BSP"
   apply_p0 "$P_X19"
   apply_p0 "$P_NOSIZED"
@@ -67,13 +67,13 @@ export W
   AT=$W/autotools
   if [ ! -x "$AT/bin/automake" ]; then
     rm -rf "$W/at-src"; mkdir "$W/at-src"
-    tar -xJf "$AUTOCONF_TARBALL" -C "$W/at-src"; tar -xJf "$AUTOMAKE_TARBALL" -C "$W/at-src"
+    tar --no-same-owner -xJf "$AUTOCONF_TARBALL" -C "$W/at-src"; tar --no-same-owner -xJf "$AUTOMAKE_TARBALL" -C "$W/at-src"
     (cd "$W/at-src/autoconf-2.69" && ./configure --prefix="$AT" >/dev/null && make -j"$JOBS" >/dev/null && make install >/dev/null)
     (cd "$W/at-src/automake-1.15.1" && PATH="$AT/bin:$PATH" ./configure --prefix="$AT" >/dev/null && make -j"$JOBS" >/dev/null && make install >/dev/null)
     rm -rf "$W/at-src"
   fi
   regen() { (cd "$1/newlib" && PATH="$AT/bin:$PATH" autoconf && PATH="$AT/bin:$PATH" automake Makefile); }
-  rm -rf "$W/nl-pristine"; mkdir "$W/nl-pristine"; tar -xzf "$NEWLIB_TARBALL" -C "$W/nl-pristine" --strip-components=1
+  rm -rf "$W/nl-pristine"; mkdir "$W/nl-pristine"; tar --no-same-owner -xzf "$NEWLIB_TARBALL" -C "$W/nl-pristine" --strip-components=1
   cp "$W/nl-pristine/newlib/configure" "$W/nl-pristine/newlib/Makefile.in" "$W/"
   regen "$W/nl-pristine"
   cmp "$W/nl-pristine/newlib/configure" "$W/configure" && cmp "$W/nl-pristine/newlib/Makefile.in" "$W/Makefile.in" \
@@ -237,5 +237,5 @@ print("MANIFEST.json: %d plugins, %d libraries" % (len(plugins), len(libs)))
 EOF
 # the output: the compiler tree
 mkdir -p "$OUT_DIR/COMPILER"   # the directory output COMPILER of build.json
-cp -a "$P/." "$OUT_DIR/COMPILER/"
+cp -a --no-preserve=ownership "$P/." "$OUT_DIR/COMPILER/"
 echo "$P/bin/$T-g++"
