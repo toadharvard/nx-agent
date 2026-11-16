@@ -742,3 +742,5 @@ After the first frame:
 - 2026-11-16 06:55Z: L1 accepted both recipe mechanisms with conditions, for cand5. w2 implements them in recipe.py, each with tests and a RECIPE.md section:
   - `sources <step>:<dir>`: same root only; a unit is its text alone (the OPERATION_* compiles become wrapper units);
   - `{"archive": ROOT}`: ROOT in `uses`; run steps only; the probes may compile and link only, and a run probe is reported.
+- 2026-11-16 07:00Z: recipe-path (a) at bbfe38219: toolchain-stage1 gcc1 GREEN (452 s), and all 8 plugin stages green. rt failed after 16 s writing into the read-only copy of STAGE1; 6abb87678 makes that copy writable (the store stays untouched). The farm reruns the toolchain root.
+- bottleneck: rt on the recipe path (farm), then proof (b) and the pin commit (w3).
