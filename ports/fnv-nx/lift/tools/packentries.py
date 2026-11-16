@@ -10,6 +10,8 @@ is red when that stamp is missing, repeated, not the last line, or not the sha25
 the loader's cannot enter the build.
 table_id has ONE computation, here, over the bytes of the table the build uses. The impgen output's header must equal it (the two stages read one table), and an address
 must not be a row of both inputs: a mismatch or a collision is a red stage, never a silent merge."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import hashlib
 import os
 import sys
@@ -52,6 +54,6 @@ def main(entries, imp, bridge, modules, out):
 
 
 if __name__ == '__main__':
-    import cli
+    import fnvnx.lift.tools.cli as cli
     (a, b, c, m, d), _ = cli.parse('usage: packentries.py PACK_ENTRIES IMP_ENTRIES BRIDGE_TSV MODULES_TSV OUT\n  entries.tsv of the pack: the external\'s rows + the import rows, table_id = sha256 of BRIDGE_TSV, module_table = sha256 of MODULES_TSV (checked against the pack\'s stamp)', sys.argv[1:], (5, 5))
     main(a, b, c, m, d)

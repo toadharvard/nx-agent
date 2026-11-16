@@ -14,7 +14,7 @@ _q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__fi
 import os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(LIFT, 'tools')); sys.path.insert(0, LIFT); sys.path.insert(0, HERE)
-import pemod
+import fnvnx.lift.tools.pemod as pemod
 MODS = ['d3dx9_38.dll', 'binkw32.dll', 'libvorbis.dll', 'libvorbisfile.dll', 'd3dx9_31.dll', 'atimgpud.dll']
 def opt(name):
     a = sys.argv; return a[a.index(name) + 1] if name in a else None

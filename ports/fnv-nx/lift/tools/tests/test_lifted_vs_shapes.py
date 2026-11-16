@@ -11,12 +11,12 @@ HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.pat
 for p in ('tools', ''):
     sys.path.insert(0, os.path.join(LIFT, p))
 import fnvnx.lift.fnvlift as L
-import lifted
+import fnvnx.lift.tools.lifted as lifted
 from fnvnx.lift.proof import shape
 
 
 def main():
-    import argparse, tempfile, liftgen
+    import argparse; import tempfile; import fnvnx.lift.tools.liftgen as liftgen
     exe = os.path.join(os.environ['FNVNX_INPUT_EXE'], 'FalloutNV.exe'); facts = os.environ['FNVNX_INPUT_FACTS']
     import fnvnx.lift.fnvlift as fnvlift
     from fnvnx.lift.fnvlift.tests import _inputs; _inputs.configure_image(facts + '/universe.tsv', 'exe')      # the facts external holds fpstate/ and fpmodes/; X86SYS is the tracked platform/declared/x86sys.json

@@ -21,9 +21,9 @@ from fnvnx.verify import scratch  # noqa: E402
 
 scratch.install()
 from fnvnx.verify import gate_build  # noqa: E402
-import gate_fpexact as G  # noqa: E402
+import fnvnx.lift.proof.gate_fpexact as G  # noqa: E402
 from fnvnx.verify import recipe  # noqa: E402
-import test_recipe as TR  # noqa: E402
+import fnvnx.verify.tests.test_recipe as TR  # noqa: E402
 unitstage = recipe.unitstage  # the module object recipe.py itself imports (a sibling of its own root, imported bare there)
 
 TMP = tempfile.mkdtemp(prefix="fpexact-")
@@ -169,7 +169,7 @@ def _run():
 
 import unittest  # noqa: E402
 from fnvnx.lift.fnvlift import dsl  # noqa: E402
-import helpercalls as H  # noqa: E402
+import fnvnx.lift.proof.helpercalls as H  # noqa: E402
 
 
 class HelperTable(unittest.TestCase):

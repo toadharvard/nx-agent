@@ -5,7 +5,7 @@ _q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__fi
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import declared_x86sys; declared_x86sys.configure()      # the declared x86 system record: the one input every Form build needs (declared_x86sys.py)
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys; declared_x86sys.configure()      # the declared x86 system record: the one input every Form build needs (declared_x86sys.py)
 import capstone as CS, z3
 import unittest
 from fnvnx.lift.proof import forms

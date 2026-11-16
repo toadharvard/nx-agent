@@ -27,7 +27,7 @@ ENCS = 4            # encodings listed per form (encs.tsv): the distinct byte st
 NBUCKET = 4096
 ROOT = 'ports/fnv-nx/lift/pack'
 G = {}
-import lifted      # the one definition of the lifted set (the lift step and the census read it from here)
+import fnvnx.lift.tools.lifted as lifted      # the one definition of the lifted set (the lift step and the census read it from here)
 
 
 def bucket(a): return (a >> 4) & (NBUCKET - 1)
@@ -41,7 +41,7 @@ def unit_names(): return ['u/%03x.cpp' % i for i in range(NBUCKET)]
 def lift_one(a):
     """-> (text, (form counter, form rows, shape counter)) or (None, reason)"""
     from fnvnx.lift.proof import shape
-    import formcert
+    import fnvnx.lift.tools.formcert as formcert
     if G.get('prov'):      # --prov: the text is the tag-OFF text; the tag-ON lift of the same entry must give the same bytes (checked here for every entry of the universe)
         from fnvnx.lift.fnvlift import prov
         prov.ON = False
@@ -66,7 +66,7 @@ def prov_record(ins, t0, t):
     """the provenance record of the function just lifted (fnvlift/prov.py), with the section attribute liftgen adds and the bytes per form key / shape family"""
     from fnvnx.lift.fnvlift import prov
     from fnvnx.lift.proof import shape
-    import formcert
+    import fnvnx.lift.tools.formcert as formcert
     r = prov.take()
     if r is None or r['text'] != len(t0): raise SystemExit('liftgen --prov: no provenance record for the text just lifted')
     r['cats']['liftgen | section attribute (.text.fnvl)'] = [len(t) - len(t0), 0]
@@ -139,7 +139,7 @@ def init(exe, base, ent, emit, jtab, pv=False):
 def shard(a):
     import fnvnx.lift.fnvlift as L
     import fnvnx.lift.fnvlift.core as core
-    import formcert
+    import fnvnx.lift.tools.formcert as formcert
     K, N = map(int, a.shard.split('/')); out = a.out
     ent = L.universe.load()[0]; mine = [x for x in sorted(ent) if bucket(x) % N == K]      # shard K of N: the entries whose unit bucket is K mod N (the rule of the pack's units)
     init(a.exe, a.base, ent, a.emit, a.jtab, a.prov)
@@ -223,7 +223,7 @@ def image(d, ent):
 
 def module_table(path):
     """-> (sha256 of the loader's modules.tsv, {lower-case file name: row}) : the ONE source of the module set and of every base (contract/modules.py output; tools/pemod.modules)"""
-    import pemod
+    import fnvnx.lift.tools.pemod as pemod
     return sha(path), pemod.modules(path)
 
 
@@ -293,7 +293,7 @@ def finish(a):
 
 def module_inputs(a):
     """--module NAME: the module's file, its assigned load base (modules.tsv row) and its universe (tools/universe.py --module output below --facts-out), all from declared inputs"""
-    import pemod
+    import fnvnx.lift.tools.pemod as pemod
     path, row = pemod.locate(a.module, a.modules, a.moddirs.split(':'))
     u = '%s/%s/universe.tsv' % (a.facts_out, os.path.splitext(row.name)[0])
     if not os.path.exists(u): sys.exit('--module %s: no universe %s (tools/universe.py --module)' % (a.module, u))

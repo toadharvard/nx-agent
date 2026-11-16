@@ -38,7 +38,7 @@ class Certs:
 
 if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    import cli
+    import fnvnx.lift.tools.cli as cli
     (*cd,), _ = cli.parse('usage: formcert.py [CERTDIR]   count the certified forms of CERTDIR', sys.argv[1:], (1, 1))
     c = Certs(*cd)
     print('certificate dir present: %s; forms with a certificate file %d, certified %d' % (c.present, len(c.ok), sum(c.ok.values())))

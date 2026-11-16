@@ -35,7 +35,7 @@ import capstone.x86_const as X  # noqa: E402
 import z3  # noqa: E402
 from fnvnx.lift.fnvlift import dsl  # noqa: E402
 from fnvnx.lift.proof import shape, symform, x86sys  # noqa: E402
-from sysspec_text import GAP as TEXT  # noqa: E402       # result texts: not SDM quotes, so kept out of the quoted file
+from fnvnx.lift.proof.sysspec_text import GAP as TEXT  # noqa: E402       # result texts: not SDM quotes, so kept out of the quoted file
 
 SREGS = ('es', 'cs', 'ss', 'ds', 'fs', 'gs')
 
@@ -112,7 +112,7 @@ def compare(f, ins, regs, flags, mem):
     """the Form against the spec state: {reg: term}, {flag: 1-bit term} (a flag not named is unchanged, one the SDM calls undefined is not in `flags` and not compared: UNDEF),
     mem = the spec's memory after the instruction (None: unchanged) -> the list of differing parts"""
     d = []
-    import sysspec_store
+    import fnvnx.lift.proof.sysspec_store as sysspec_store
     if sysspec_store.faults_ok(f, ins): return ['faults']
     if f.swhen or f.flo is not None: d.append(TEXT['cond'])
     pr = {r[0]: dsl.to_smt(r[1]) for r in f.regs}

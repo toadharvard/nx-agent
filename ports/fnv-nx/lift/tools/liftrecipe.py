@@ -8,7 +8,7 @@ _q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__fi
 import json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
 sys.path.insert(0, HERE); sys.path.insert(0, LIFT)
-import liftgen
+import fnvnx.lift.tools.liftgen as liftgen
 # The flags of lifted C++: the recipe's (verify/guest_compiler.json flags.semantics + lift/pack/build.json), resolved by resolved_flags() for every test that compiles pack code. No flag that turns an error into a warning or silences one.
 PACK_ROOT_FLAGS = {'c': ['-Werror=attributes'], 'cxx': ['-std=gnu++17', '-O2', '-Werror=attributes'], 'asm': []}   # the per-root classes of the pack (recipe.PER_ROOT); the semantic flags are the pin's, never listed here
 
@@ -30,7 +30,7 @@ def inc_stages():
     """the `generated` steps of the pack's own header directory inc/ (fnvl_prelude.h, imp.h): the runtime's headers of the CURRENT tree, inlined by tools/prelude.py. The
     inputs of each step are the files of the closure of its source over INC_DIRS (prelude.closure: a pure function of the headers' include lines), so a change of
     one of those headers re-keys the step and, through the include directory, every unit; any other file of rt/ does not."""
-    import prelude
+    import fnvnx.lift.tools.prelude as prelude
     repo = os.path.join(LIFT, '..', '..', '..')
     dirs = [os.path.join(repo, d) for d in INC_DIRS]
     out = []

@@ -2,11 +2,13 @@
 """Cases of tools/jtab.py on raw x86-32 bytes (one function at FN, a table at TAB, a read-only byte table, a writable one): signed guard pairs, byte-table indices in a read-only section only,
 `test/jne` facts through a copy, frame cells (kept only while no store through another pointer, no call, no escaping frame address), a constant held in a register, and the negative cases that must be red.
 Ported from the cases of tabguard_test.py (w3).   python3 test/jtab_cases_test.py"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, struct, sys, unittest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'tools'))
 import capstone
 from capstone import x86 as X
-import jtab
+import fnvnx.lift.tools.jtab as jtab
 BASE = 0x400000; FN = BASE + 0x1000; TAB = FN + 0x100; RO = BASE + 0x2000; RW = BASE + 0x3000
 OUT = [0x500000 + 0x10 * i for i in range(8)]
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True

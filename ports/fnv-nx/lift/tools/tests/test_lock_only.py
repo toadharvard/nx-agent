@@ -10,7 +10,7 @@ import os, re, shutil, sys, tempfile
 LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools')); sys.path.insert(0, os.path.join(LIFT, '..', 'toolchain', 'tests'))
 from fnvnx.toolchain.tests import plugbuild as pb
-import prelude
+import fnvnx.lift.tools.prelude as prelude
 import fnvnx.lift.fnvlift as L
 from fnvnx.lift.fnvlift.tests import _inputs
 _inputs.configure()

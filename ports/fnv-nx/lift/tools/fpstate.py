@@ -23,14 +23,14 @@ _q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__fi
 import os, sys, hashlib
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import cli, libarg; libarg.take()      # --lib DIR: the package fnvlift (a declared input of the stage)
+import fnvnx.lift.tools.cli as cli; import fnvnx.lift.tools.libarg as libarg; libarg.take()      # --lib DIR: the package fnvlift (a declared input of the stage)
 FPUSAGE = 'usage: fpstate.py scan IMAGE FACTSDIR RETN.tsv OUTDIR LIFTDIR MODULES_TSV NAME | fpstate.py combine OUTDIR MODULES_TSV SCANDIR...'
 sys.path.insert(0, HERE)
 from collections import Counter, defaultdict
 from multiprocessing import Pool
-import x86flow as W
-import fpmodes as FP
-from x86flow import X, M32, mn, Fn, load_universe
+import fnvnx.lift.tools.x86flow as W
+import fnvnx.lift.tools.fpmodes as FP
+from fnvnx.lift.tools.x86flow import X, M32, mn, Fn, load_universe
 cpufeat = f_sys = f_sse = core = None      # the lifter's handler tables: use_lift(dir) imports them from the explicit directory that holds the fnvlift package
 
 
@@ -346,7 +346,7 @@ def do_scan(exe, facts, retn, out, base):
 
 
 def do_combine(outdir, table, dirs):
-    import pemod
+    import fnvnx.lift.tools.pemod as pemod
     want = sorted(['exe'] + [n[:-4] if n.endswith('.dll') else n for n in pemod.modules(table)]); got = sorted(os.path.basename(d.rstrip('/')) for d in dirs)
     if want != got: sys.exit('fpstate combine: the scanned images are not the exe plus the rows of the module table: missing %s, extra %s' % (sorted(set(want) - set(got)) or '-', sorted(set(got) - set(want)) or '-'))
     rows = []

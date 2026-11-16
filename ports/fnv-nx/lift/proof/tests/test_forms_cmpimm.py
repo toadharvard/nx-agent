@@ -4,7 +4,7 @@ _q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__fi
 import sys; sys.path.insert(0, '.')
 import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import declared_x86sys; declared_x86sys.configure()
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys; declared_x86sys.configure()
 from fnvnx.lift.proof import symform, shape as shp
 PRE = ['0fc244240000/5.1.4.1', '660fc244240000/6.1.5.1', 'f30fc244240000/6.1.5.1', 'f20fc244240000/6.1.5.1']
 bad = 0

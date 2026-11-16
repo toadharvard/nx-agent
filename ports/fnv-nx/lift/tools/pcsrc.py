@@ -18,6 +18,8 @@ RULE (per image; reached code = ranges.tsv; entries = universe.tsv; both are fac
   esp       callee-saved behaviour is read from the callee code only. `esp-lost` counts the places where the tracked esp offset was lost (a call whose stack effect is not known, alloca):
             a read of the stack through a lost esp cannot be typed and is RED (`esp-lost-read`) only if the return-address slot of the entry is still live there.
 Output: <outdir>/pcsources.tsv (entry, site, source, consumer, detail; red rows marked RED) and gate_pcsrc.json. Deterministic (sorted iteration)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys, json, bisect
 from collections import Counter
 import capstone
@@ -880,7 +882,7 @@ def pin_of(facts, name):
 def read_universe(path):
     """-> (entries {addr: every kind the entry carries}, parent {addr: parent}, candidates). universe.tsv column 2 is the primary kind; the others are in the flags column among the flag words, and
     residue.PRI is the one vocabulary that tells a kind from a flag. Every reader of universe.tsv calls this."""
-    import residue
+    import fnvnx.lift.tools.residue as residue
     ent = {}; parent = {}; cand = set()
     for l in open(path):
         if l[0] == '#' or not l.strip(): continue
@@ -907,7 +909,7 @@ def run_facts(facts, name, text, T0, rd=None, rset=None, imports=None):
             if l[0] != '#' and len(f) >= 3 and f[1] in ('caller', 'callee'): pops[int(f[0], 16)] = 0 if f[1] == 'caller' else int(f[2])
     imp = {}       # the import slots of the image: the pop of the imported function from L1's keys.tsv, through the one rule ehflow.import_pop
     if imports:
-        import ehflow; keys = ehflow.load_keys()
+        import fnvnx.lift.tools.ehflow as ehflow; keys = ehflow.load_keys()
         for slot, nm in imports.items():
             r = keys.get(nm.lower()); p = ehflow.import_pop(*r) if r else None
             if p is not None: imp[slot] = p

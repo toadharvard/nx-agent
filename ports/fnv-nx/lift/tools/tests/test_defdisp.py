@@ -16,7 +16,7 @@ import os, re, shutil, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..'))
-import test_descclass as dc
+import fnvnx.lift.tools.tests.test_descclass as dc
 from fnvnx.contract import bridgegen
 from fnvnx.toolchain.tests import plugbuild as pb
 
@@ -136,7 +136,7 @@ def run_all(w):
             check('%s %s' % (kind, n), ok, 'row %s %s, the compiler uses %s' % (fn, d1, want))
     # (4b) DEFDISP-NS (L2's rule, toolchain/tests/test_dispatch_defdisp_ns.py): a definition whose type has no x86 shape compiles quietly, whatever its linkage and
     # whether its address is taken, and gets the row `<asm> -<reason>`; reachability is decided by the join in exitgen, which is red for a JOINED `-` row.
-    import exitgen
+    import fnvnx.lift.tools.exitgen as exitgen
     U = 'typedef unsigned __int128 u128;\n'
     cases = (('u128static', 'static u128 __attribute__((noinline)) sq(u128 x) { return x + 1; }\nextern "C" int use(int a) { return (int)sq(a); }\n', '_ZL2sqo', 'static, address not taken'),
              ('u128taken', 'static u128 __attribute__((noinline)) sq(u128 x) { return x + 1; }\nu128 (*volatile tab)(u128) = sq;\n', '_ZL2sqo', 'static, address taken'),

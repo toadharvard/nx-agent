@@ -11,11 +11,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
 sys.path.insert(0, os.path.join(HERE, '..'))
 sys.path.insert(0, HERE)
-import declared_x86sys
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys
 import z3
 from fnvnx.lift.fnvlift import inputs
 from fnvnx.lift.proof import shape, sysspec, symform, x86sys
-import sysspec_gap
+import fnvnx.lift.proof.sysspec_gap as sysspec_gap
 
 
 def key(h):
@@ -26,7 +26,7 @@ class Declared(unittest.TestCase):
     def setUp(self):
         declared_x86sys.configure()
         global sysspec_int
-        import sysspec_int           # reads fnvlift.x86sys at import: the record is configured first
+        import fnvnx.lift.proof.sysspec_int as sysspec_int           # reads fnvlift.x86sys at import: the record is configured first
     def tearDown(self): inputs.reset()
 
     def test_bswap_every_register_proved(self):

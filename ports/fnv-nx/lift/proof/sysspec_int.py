@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 import z3  # noqa: E402
 from fnvnx.lift.fnvlift import dsl, faults, x86sys as lx  # noqa: E402
 from fnvnx.lift.proof import shape, symform  # noqa: E402
-from sysspec_text import INT as TEXT  # noqa: E402
+from fnvnx.lift.proof.sysspec_text import INT as TEXT  # noqa: E402
 
 
 def claims(key):

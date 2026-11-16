@@ -232,7 +232,7 @@ def analyse(img, ranges, tables, uni, init_null, sel):
 def main():
     ap = argparse.ArgumentParser(); A = ap.add_argument
     A('--out', required=True); A('--facts', required=True); A('--modules', required=True); A('--lift'); A('--exe', required=True); A('--moddirs', required=True); A('--x86sys', required=True)
-    a = ap.parse_args(); import pemod
+    a = ap.parse_args(); import fnvnx.lift.tools.pemod as pemod
     sel = json.load(open(a.x86sys))['selectors']
     init_null = {s: (sel[s]['value'] & 0xfffc) == 0 for s in SEGS}; sel_all = {s: sel[s] for s in VSEGS + ('cs',)}       # an undecided selector is a KeyError: no value is guessed
     imgs = [('exe', a.exe, None, a.facts)]

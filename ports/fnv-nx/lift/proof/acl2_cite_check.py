@@ -4,9 +4,11 @@
 DIR = the checkout root.  A cite is (file, def-inst name, quote): the quote must occur (whitespace-normalised) in the body of `(def-inst NAME` (up to the next def-inst).
 Without --write the resolved file:line of every cite must equal the row of acl2_cites.tsv (the committed record); with --write that file is regenerated.
 Exit 0 = every cite resolves and matches.  Output: OK/MISS lines."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, re, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
-import simdspec as S
+import fnvnx.lift.proof.simdspec as S
 REL = 'books/projects/x86isa/machine/instructions'
 RTL = 'books/rtl/rel11/lib'
 TSV = os.path.join(HERE, 'acl2_cites.tsv')

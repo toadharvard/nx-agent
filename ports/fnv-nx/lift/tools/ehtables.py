@@ -14,14 +14,16 @@
   Also: the catch continuations (`mov eax, imm32; ret` of a catch funclet) and the frame-handler stubs (`live` iff the stub address is a relocated constant of the universe).
 Used by universe.py, which supplies the descent state (tools/modlift.py supplies it for a module image read through pemod: the same code, rebased addresses; running this
 file runs the whole pipeline). Output: <facts>/ehtables.json (exe) and <facts>/<module>/ehtables.json, which lift/gates/gate_eh.py reads (schema: its docstring). Input: L1's keys.tsv (the import conventions), ehflow.configure_keys(path), passed by universe.py --keys."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, re, sys, json, bisect
 from collections import Counter, defaultdict, deque
 from itertools import islice
 import capstone
 from capstone import x86 as cx
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))      # the tool root: a tool imports its siblings from its own root (the generated stages run it under python3 -I, which has no script directory on the path)
-import ehflow
-from ehflow import Flow, FULL, M32, St, sload, cset
+import fnvnx.lift.tools.ehflow as ehflow
+from fnvnx.lift.tools.ehflow import Flow, FULL, M32, St, sload, cset
 CALLEE_ORDER = ('ebx', 'esi', 'edi', 'ebp')
 MAGIC = (0x19930520, 0x19930521, 0x19930522)
 EXC_CODE = 0xE06D7363           # the thrower is the function whose code copies the EXCEPTION_RECORD template starting with this code

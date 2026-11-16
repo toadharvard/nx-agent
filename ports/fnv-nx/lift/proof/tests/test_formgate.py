@@ -16,10 +16,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PROOF = os.path.join(HERE, '..')
 LIFT = os.path.join(PROOF, '..')
 sys.path.insert(0, HERE)
-import declared_x86sys; declared_x86sys.configure()
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys; declared_x86sys.configure()
 sys.path.insert(0, LIFT)
 sys.path.insert(0, os.path.join(LIFT, "..", "verify"))     # cas, recipe: the trunk loader the gate itself uses (-I drops PYTHONPATH)
-import fakeext
+import fnvnx.lift.proof.tests.fakeext as fakeext
 from fnvnx.lift.proof import certbasis, formgate, forms, prove, shape
 from fnvnx.verify import recipe
 

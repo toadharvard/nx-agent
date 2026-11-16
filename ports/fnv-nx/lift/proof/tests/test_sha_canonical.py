@@ -15,10 +15,10 @@ def child(order, out):
     sys.path.insert(0, os.path.join(HERE, '..', '..'))
     sys.path.insert(0, os.path.join(HERE, '..'))
     sys.path.insert(0, HERE)
-    import declared_x86sys
+    import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys
     declared_x86sys.configure()
     sys.path.insert(0, os.path.join(HERE, '..', '..', 'fnvlift', 'tests'))
-    import _inputs
+    import fnvnx.lift.fnvlift.tests._inputs as _inputs
     _inputs.configure_declared()      # the declared-machine files the Form builders read (x86sys, cpumodel, the certified rcp table)
     from fnvnx.lift.proof import symform
     keys = declared_x86sys.shape_keys()

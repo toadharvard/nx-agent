@@ -33,7 +33,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 import z3  # noqa: E402
 from fnvnx.lift.fnvlift import dsl  # noqa: E402
 from fnvnx.lift.proof import shape, symform, x86sys  # noqa: E402
-from sysspec_text import FARROW as ROW  # noqa: E402      # the names of the record's jmp_far members (keys, not quotes)
+from fnvnx.lift.proof.sysspec_text import FARROW as ROW  # noqa: E402      # the names of the record's jmp_far members (keys, not quotes)
 
 
 PREFIX = (0x66, 0x67, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65, 0xf0, 0xf2, 0xf3)

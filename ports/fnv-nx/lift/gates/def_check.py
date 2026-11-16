@@ -25,7 +25,7 @@ import capstone
 from capstone import x86 as X
 
 from fnvnx.lift.proof import forms, shape, lift_dsl
-import gate_flags as g
+import fnvnx.lift.gates.gate_flags as g
 
 _FLAG = re.compile(r'^(cf|pf|af|zf|sf|of|df) = (.*);$')
 

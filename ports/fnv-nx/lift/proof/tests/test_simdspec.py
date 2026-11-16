@@ -7,7 +7,7 @@ _q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__fi
 import os, random, sys, unittest
 import z3
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE)); sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))      # proof/ (bare module names) and lift/ (fnvlift, proof.*)
-import simdspec as S
+import fnvnx.lift.proof.simdspec as S
 CACHE = os.environ.get('GATE_CACHE')      # declared input of this test (the verdict store); without it the tests that need the published GEN output are skipped with the reason
 if CACHE: S.F.configure(CACHE)
 K = S.K

@@ -14,7 +14,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
 sys.path.insert(0, HERE)
-import declared_x86sys; declared_x86sys.configure()
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys; declared_x86sys.configure()
 from fnvnx.lift.proof import defects  # noqa: E402
 from fnvnx.lift.proof import defectspec  # noqa: E402
 

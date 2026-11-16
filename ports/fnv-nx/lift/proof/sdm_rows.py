@@ -8,13 +8,15 @@ ea16: SDM Vol. 2A Table 2-1 "16-Bit Addressing Forms with the ModR/M Byte".  Uni
   The displacement values stimulate each kind at its two ends of the sign: disp8 0x10 and 0xf0 (= -16), disp16 0x1234 and 0xfff0 (= -16); the expected displacement is the signed value of those bytes under Notes 2 and 3.
   The address is the sum of the 16-bit halves mod 2^16 (SDM Vol. 1 3.7.5 "Specifying an Offset"; the test states it).
 Output: `ea16<TAB>encoding hex (67 8B modrm disp)<TAB>citation<TAB>terms<TAB>signed displacement`."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import sdmfeat as S  # noqa: E402
+import fnvnx.lift.proof.sdmfeat as S  # noqa: E402
 
 ROW = re.compile(r'^\s*(\[[A-Z+]+\](?:\+disp(?:8|16)\d?)?|disp16\d?)\s+(?:(\d\d)\s+)?([01]{3})\s+((?:[0-9A-F]{2}\s+){7}[0-9A-F]{2})\s*$')
 DISPS = {'none': [(b'', 0)], 'disp8': [(b'\x10', 16), (b'\xf0', -16)], 'disp16': [(b'\x34\x12', 0x1234), (b'\xf0\xff', -16)]}

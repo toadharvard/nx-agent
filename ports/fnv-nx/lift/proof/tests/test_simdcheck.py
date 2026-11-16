@@ -7,12 +7,12 @@ _q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__fi
 import os, sys, unittest
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE)); sys.path.insert(0, os.path.join(HERE, '..', '..'))
 sys.path.insert(0, HERE)
-import declared_x86sys; declared_x86sys.configure()
-import declared_cpufeat
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys; declared_x86sys.configure()
+import fnvnx.lift.proof.tests.declared_cpufeat as declared_cpufeat
 CPUFEAT, WHY = declared_cpufeat.path()      # declared input: the CPUID feature-bit table (the function of the pins that lift/cpufeat is); simdcheck.check puts a cleared-feature shape in the ud class first
 if CPUFEAT:
     from fnvnx.lift.fnvlift import inputs; inputs.configure(cpufeat=CPUFEAT)
-import simdcheck as C
+import fnvnx.lift.proof.simdcheck as C
 S = C.S
 
 KEYS = {'pxor': '0fef02/0.0.0.0', 'pxor_disp': '0fef0500000000/0.0.3.4', 'movaps_m': '0f2800/0.0.0.0', 'movaps_r': '0f28c1/0.0.0.0', 'paddb_sse': '660ffcc1/0.0.0.0',

@@ -14,11 +14,13 @@ FACTS USED (each by its registry record): OWNER 6 (no wild accesses): a value de
 TOP SOURCES (counted): import-gap writes, loads from TOP cells, esp lost (frame ANY is still an object: not TOP).
 Memory: cells (obj, off) -> value, one global map (Andersen: flow-insensitive per cell, monotone); a write with ANY offset is kept per object (`anyw`). Registers and stack slots are flow-sensitive inside one entry.
 Termination: objects are finite; per object the offsets of a set are widened to ANY above WIDTH distinct offsets, integers above WIDTH constants to the arbitrary integer; values only grow; the global fixpoint ends when a pass changes no cell, no input, no output."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys, bisect
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import capstone
 from capstone import x86 as X
-import pcsrc
+import fnvnx.lift.tools.pcsrc as pcsrc
 from collections import Counter, defaultdict
 
 M32 = 0xffffffff
@@ -475,7 +477,7 @@ class PT:
 
 def load_image(pe, facts):
     """-> (pcsrc.Img with its summaries, M): the PE image `pe` (the stored file, preferred base) with the facts' universe.tsv / ranges.tsv; the driver of the dataflow"""
-    import pemod
+    import fnvnx.lift.tools.pemod as pemod
     nb = None
     for l in open(os.path.join(facts, 'universe.tsv')):
         if l.startswith('#') and 'base=' in l: nb = int(l.split('base=')[1].split(':')[0].split()[0], 16); break
@@ -495,7 +497,7 @@ def main(argv):
     import json, time
     if len(argv) != 2: print('usage: pointsto.py IMAGE FACTS_DIR', file=sys.stderr); return 2
     t0 = time.time(); img, M = load_image(argv[0], argv[1]); t1 = time.time()
-    import pemod
+    import fnvnx.lift.tools.pemod as pemod
     imp = pemod.imports(M)
     pt = PT(img, M, img.summ, imp).run()
     r = pt.report(); r['seconds_pcsrc'] = round(t1 - t0, 1); r['seconds_pointsto'] = round(time.time() - t1, 1)

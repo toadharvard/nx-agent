@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 from fnvnx.lift.proof import privset, shape, symform, x86sys  # noqa: E402
 sys.path.insert(0, HERE)
 from fnvnx.lift.fnvlift import dsl  # noqa: E402
-import sysspec_far  # noqa: E402
+import fnvnx.lift.proof.sysspec_far as sysspec_far  # noqa: E402
 import capstone.x86_const as X  # noqa: E402
 
 K_BP, K_UD, K_BOUNDS, K_INTO, K_PRIV, K_AV, K_STEP = 2, 3, 4, 5, 6, 7, 8
@@ -101,7 +101,7 @@ STR_TEXT = {'effects': 'str: expected one store only (memory form), no register,
 
 def check_str(key, rec):
     """the STR spec is proof/sysspec_str.py (every SDM quote of it is checked by sdm_cite_check.py against sysspec_pages.tsv)"""
-    import sysspec_str
+    import fnvnx.lift.proof.sysspec_str as sysspec_str
     r = sysspec_str.check(key, rec)
     return ('proved', 'SDM STR: DEST := TR(SegmentSelector), the record selectors.tr') if r == 'ok' else ('FAILED(dsl)', STR_TEXT[r])
 
@@ -117,7 +117,7 @@ def check_far(key, fk, rec):
     """a far transfer: the cases the record decides (the selector of selectors.cs, the NULL selector) against the cited SDM text (sysspec_far.py); every other selector is defined by descriptor rows the record leaves undecided: the shape is
     uncertified, the undecided sites are counted by the caller (the selector of an immediate form is a site field, that of a memory form is data)"""
     call, imm = fk
-    import sysspec_far
+    import fnvnx.lift.proof.sysspec_far as sysspec_far
     if not imm:      # composition of certificates: the effective address is the PUSH r/m32 Form's, valid only if that shape has a proved certificate (CERTS = the proved shape keys of certs.tsv)
         bk = sysspec_far.basis_key(key)
         if CERTS is None or bk not in CERTS: return 'uncertified', 'uncertified: ea-basis %s not certified' % bk
@@ -186,7 +186,7 @@ def check(key):
         try: rec = x86sys.load()
         except x86sys.Undecided as e: return 'uncertified', 'uncertified: %s' % e
         return check_far(key, fk, rec)
-    import sysspec_gap, sysspec_legacy
+    import fnvnx.lift.proof.sysspec_gap as sysspec_gap; import fnvnx.lift.proof.sysspec_legacy as sysspec_legacy
     if sysspec_legacy.family(sysspec_gap.decode(key)) is not None:      # BCD adjusts, SALC, SLDT, LES/LDS, far RET: claimed by decoding (sysspec_legacy.py, quotes checked against sysspec_legacy_pages.tsv)
         try: return sysspec_legacy.check(key)
         except x86sys.Undecided as e: return 'uncertified', 'uncertified: %s' % e
@@ -196,7 +196,7 @@ def check(key):
     if crdr(sysspec_gap.decode(key)):
         try: return check_crdr(key, x86sys.load())
         except x86sys.Undecided as e: return 'uncertified', 'uncertified: %s' % e
-    import sysspec_seg
+    import fnvnx.lift.proof.sysspec_seg as sysspec_seg
     if sysspec_seg.family(sysspec_gap.decode(key)) is not None:      # MOV / POP / PUSH of a segment register (sysspec_seg.py, quotes checked against sysspec_seg_pages.tsv)
         try: return sysspec_seg.check(key)
         except x86sys.Undecided as e: return 'uncertified', 'uncertified: %s' % e
@@ -213,7 +213,7 @@ def check(key):
         return 'uncertified', 'uncertified: %s' % why
     if m in DECL:
         return check_decl(key, m, rec)
-    import sysspec_int
+    import fnvnx.lift.proof.sysspec_int as sysspec_int
     if m == 'int' and sysspec_int.claims(key):                       # INT n: the 256 vectors against the record rows (sysspec_int.py, quotes checked against sysspec_int_pages.tsv)
         return sysspec_int.check(key)
     if x86sys.get(rec, 'cr4', 'umip') != 0:

@@ -10,12 +10,14 @@ lifted (fnvlift, capstone); the stage writes
 There is no x86 oracle for msvcrt.dll: every expected value is derived by hand from the MSVC / Wine 9.0 semantics and stated at its case.
 Trace convention: a guest event EV(k) appends the hex digit k to the word TR; a case that ends in a return gives TR in eax. Output words O0.. hold values a case stores.
 usage: gen.py OUT_DIR LIFT_DIR --x86sys F --sdmrows F --cpumodel F --rcptab F --rcpcert F      (the lifter's declared inputs: lifted.buffer_arguments)"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json, os, re, struct, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the tool root (/tool)
 sys.path.insert(0, sys.argv[2])   # lift/, whose fnvlift package is a declared input
-import argparse, lifted
+import argparse; import fnvnx.lift.tools.lifted as lifted
 import fnvnx.lift.fnvlift as L
-import phf, impgen
+import fnvnx.lift.tools.phf as phf; import fnvnx.lift.tools.impgen as impgen
 from keystone import Ks, KS_ARCH_X86, KS_MODE_32
 
 BASE, SLOT, MAINMAX, CODE_END, IAT, DATA, GSTACK, HSTACK, STOP, TEXT, TEB = 0x401000, 0x300, 0x180, 0x420000, 0x421000, 0x430000, 0x60000000, 0x70000000, 0x7e000000, 0xE0000000, 0x50000000

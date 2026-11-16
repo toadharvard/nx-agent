@@ -18,7 +18,7 @@ import traceback
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
 sys.path.insert(0, HERE)
-import simdcheck  # noqa: E402
+import fnvnx.lift.proof.simdcheck as simdcheck  # noqa: E402
 from fnvnx.lift.proof import symform, treeid, x86sys  # noqa: E402
 
 

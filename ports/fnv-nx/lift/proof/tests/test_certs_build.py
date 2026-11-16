@@ -12,8 +12,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
 from fnvnx.lift.proof import certbasis, certs_build, model_sail, prove, shape, symform, x86sys
 
-sys.path.insert(0, HERE); import declared_sail; declared_sail.configure()      # the declared inputs of this test (declared_sail.py); the classes are skipped without them
-sys.path.insert(0, HERE); import declared_x86sys; XPATH = declared_x86sys.PATH; XSHA = declared_x86sys.configure()    # the declared machine of this tree, passed explicitly (--x86sys)
+sys.path.insert(0, HERE); import fnvnx.lift.proof.tests.declared_sail as declared_sail; declared_sail.configure()      # the declared inputs of this test (declared_sail.py); the classes are skipped without them
+sys.path.insert(0, HERE); import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys; XPATH = declared_x86sys.PATH; XSHA = declared_x86sys.configure()    # the declared machine of this tree, passed explicitly (--x86sys)
 
 WORK = tempfile.mkdtemp()    # this test's own scratch directory
 MD = shape.decoder()

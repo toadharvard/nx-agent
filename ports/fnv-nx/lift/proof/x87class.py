@@ -45,7 +45,7 @@ def x87_class(raw):
 def main(paths):
     from collections import Counter, defaultdict
     sys.path.insert(0, os.path.join(HERE, "tests"))
-    import declared_x86sys
+    import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys
     from fnvnx.lift.fnvlift import inputs
     declared_x86sys.configure()
     inputs.configure(cpumodel=os.path.join(HERE, "..", "..", "verify", "cpuid_model.json"))

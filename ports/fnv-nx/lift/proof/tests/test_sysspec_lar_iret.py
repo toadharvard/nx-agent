@@ -13,10 +13,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
 sys.path.insert(0, os.path.join(HERE, '..'))
 sys.path.insert(0, HERE)
-import declared_x86sys
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys
 from fnvnx.lift.fnvlift import dsl, inputs
 from fnvnx.lift.proof import shape, symform, sysspec, x86sys
-import sysspec_legacy as L
+import fnvnx.lift.proof.sysspec_legacy as L
 
 
 def _missing():

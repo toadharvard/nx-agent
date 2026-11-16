@@ -8,9 +8,11 @@ MODULES_TSV is the loader's table. The stage set does NOT depend on the facts: e
 an image takes the functions whose entry has bucket(entry) % N == K (tools/liftgen.py bucket, the rule of the pack's units). A facts change re-keys stages and never changes the stage set. It is not trusted:
 finish refuses an image whose shards do not cover its universe exactly, and a row of the loader's table without an image (tools/liftgen.py check_images). The inputs of a shard are exactly what the lifter reads: the fnvlift package, the runtime headers rt/*.h (lifter_tree), the tool
 root (mounted by the recipe), the externals and the platform's X86SYS."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import argparse, glob, json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import liftrecipe
+import fnvnx.lift.tools.liftrecipe as liftrecipe
 HERE = os.path.dirname(os.path.abspath(__file__)); REPO = os.path.normpath(os.path.join(HERE, '..', '..', '..', '..'))
 ROOT = 'ports/fnv-nx/lift/liftsrc'
 LIFT = 'ports/fnv-nx/lift'

@@ -23,9 +23,9 @@ sys.path.insert(0, VERIFY)
 sys.path.insert(0, os.path.join(VERIFY, "tests"))
 from fnvnx.verify import cas  # noqa: E402
 from fnvnx.verify import recipe  # noqa: E402
-import test_guest as tg  # noqa: E402
-import test_plugins as tp  # noqa: E402
-from test_plugins import BASE, ROOT, T, check, git, w  # noqa: E402
+import fnvnx.verify.tests.test_guest as tg  # noqa: E402
+import fnvnx.verify.tests.test_plugins as tp  # noqa: E402
+from fnvnx.verify.tests.test_plugins import BASE, ROOT, T, check, git, w  # noqa: E402
 
 LIFT = T + "lift/gates/"
 RT = ".data\n.globl fnvnx_lift_cpu_bytes\n.type fnvnx_lift_cpu_bytes,%object\n.size fnvnx_lift_cpu_bytes,4\nfnvnx_lift_cpu_bytes: .word 536\n.text\n.globl fnvl_dispatch\n.type fnvl_dispatch,%function\nfnvl_dispatch: ret\n.size fnvl_dispatch,.-fnvl_dispatch\n"

@@ -45,7 +45,7 @@ def _obligation(rep, F, sins_ops, imm, rlimit):
     nf = P['fault'] == 0
     sf = r.fault
     if r.store and e.mem:      # a store through a segment register whose selector names a code descriptor is #GP(0): the SDM condition of sysspec_store (the one rule that proves the Form's code-store fault for every store Form), by the segment of the memory operand
-        import sysspec_store
+        import fnvnx.lift.proof.sysspec_store as sysspec_store
         op = sins_ops.operands[j]; sf = z3.Or(sf, sysspec_store.code_cond(x86sys.load(), sysspec_store.segment(sins_ops, op)))
     spec_fault = z3.If(sf, z3.BitVecVal(S.AV, 8), z3.BitVecVal(0, 8))
     goals = [P['fault'] == spec_fault]

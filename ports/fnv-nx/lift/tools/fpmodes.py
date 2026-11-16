@@ -3,13 +3,15 @@
 readers, x87 stack depth). Count-only stdout; site lists under --out. Sound = over-approximate:
 anything not decided is reported as unknown. Inputs: --exe, --facts/universe.tsv (read-only). Shared decoder,
 CFG and esp tracking: x86flow.py."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys, hashlib
 from collections import Counter, defaultdict
 from multiprocessing import Pool
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import libarg; libarg.take()      # --lib DIR: the package fnvlift (a declared input of the stage)
-import x86flow as W
-from x86flow import X, M32, SUB, mn, rn, memslot, Fn, UNC, KINDS, isx87, depth, track, frame_events, load_universe, pmap
+import fnvnx.lift.tools.libarg as libarg; libarg.take()      # --lib DIR: the package fnvlift (a declared input of the stage)
+import fnvnx.lift.tools.x86flow as W
+from fnvnx.lift.tools.x86flow import X, M32, SUB, mn, rn, memslot, Fn, UNC, KINDS, isx87, depth, track, frame_events, load_universe, pmap
 
 EXE = OUT = None        # set by main from the explicit arguments
 TABLE = IMAGE = None   # the module table and the image name (x86flow.image_base)
@@ -574,7 +576,7 @@ def main():
 
 if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    import cli
+    import fnvnx.lift.tools.cli as cli
     _U = 'usage: fpmodes.py --exe FILE --facts DIR --retn RETN.tsv --out DIR --table MODULES_TSV --image NAME   x87/SSE control-mode facts of the exe: the exe, the facts directory (universe.tsv, ehtables.json) and the output directory are explicit inputs'
     _o = cli.parse(_U, sys.argv[1:], (0, 0), {'--exe': True, '--facts': True, '--out': True, '--retn': True, '--table': True, '--image': True})[1]
     if len(_o) != 6: sys.exit(_U)

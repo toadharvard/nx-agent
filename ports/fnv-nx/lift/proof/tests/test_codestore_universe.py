@@ -10,11 +10,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
 sys.path.insert(0, os.path.join(HERE, '..'))
 sys.path.insert(0, HERE)
-import declared_x86sys
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys
 declared_x86sys.configure()
 from fnvnx.lift.proof import symform, x86sys
-import sysspec_gap
-import sysspec_store
+import fnvnx.lift.proof.sysspec_gap as sysspec_gap
+import fnvnx.lift.proof.sysspec_store as sysspec_store
 
 
 class Universe(unittest.TestCase):

@@ -1,11 +1,13 @@
 """declared_gen.rows: the rows follow the SDM Operation lines and cpumodel.c's interface; a mismatch of output counts fails."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
-import declared_gen
+import fnvnx.lift.proof.declared_gen as declared_gen
 
 CM = 'void fnvl_cpuid(u32 leaf, u32 sub, u32 o[4]) {}\nunsigned long long fnvl_rdtsc(void) { return 0; }\n'
 SDM = '(EAX, EBX, ECX, EDX) := CPUID_INFO(EAX, ECX)\n        EDX:EAX := TimeStampCounter;\n'

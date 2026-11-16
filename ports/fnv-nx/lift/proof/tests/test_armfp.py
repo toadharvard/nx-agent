@@ -3,13 +3,15 @@
 FPMul, FPDiv, FPSqrt, FPCompare, FPRoundBase (non-altfp), FPConvert, FixedToFP, FPToFixed.  Source: Arm A-profile A64 ISA XML 2023-09 (ISA_A64_xml_A_profile-2023-09.tar.gz sha256 7f2092a1416fa1f8b784e96fbc7cdd67b2ce81f84426968279694f96f1b11596),
 shared_pseudocode.xml.  The Python below is the pseudocode, line by line, with Fraction as `real`.  The cases are operand edge classes crossed with every rounding mode, plus a seeded random set; the
 z3 terms are evaluated on each.  (The pseudocode is the reference; the terms are the class rule of ctrans.py "the cumulative exception bits of the FPSR".)"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, random, sys, unittest
 from fractions import Fraction
 import z3
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.join(HERE, '..')]
-import ctrans  # noqa: E402
+import fnvnx.lift.proof.ctrans as ctrans  # noqa: E402
 
 IOC, DZC, OFC, UFC, IXC = 1, 2, 4, 8, 16
 RN, RP, RM, RZ = 0, 1, 2, 3          # FPCR.RMode encoding
@@ -205,7 +207,7 @@ class T(unittest.TestCase):
                 self.assertEqual(term_val(ctrans.fpflags(kind, [z3.BitVecVal(a, 64)] * 2, ('f', 64), z3.BitVecVal(0, 2))) & 0x80, 0)
 
 
-import x87carrier  # noqa: E402
+import fnvnx.lift.proof.x87carrier as x87carrier  # noqa: E402
 try:
     C = x87carrier.carrier(); NOINPUT = None
 except x87carrier.NoInput as e:

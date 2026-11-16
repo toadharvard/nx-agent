@@ -13,7 +13,7 @@ _q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__fi
 import os, sys, re, multiprocessing as mp
 from collections import Counter
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE)); sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))      # tools/ (pemod) and lift/ (fnvlift)
-import json, pemod
+import json; import fnvnx.lift.tools.pemod as pemod
 def opt(name, default=None):
     a = sys.argv; return a[a.index(name) + 1] if name in a else default
 def conf():

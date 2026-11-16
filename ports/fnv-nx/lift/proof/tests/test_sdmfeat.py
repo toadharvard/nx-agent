@@ -24,7 +24,7 @@ class DeclaredCpu(unittest.TestCase):
         if not os.environ.get('GATE_CACHE'):
             self.skipTest('GATE_CACHE not set: no generated output to compare')
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(S.__file__))))
-        import genout
+        import fnvnx.lift.proof.genout as genout
         gd = genout.gen_dir(os.environ['GATE_CACHE'])
         h = open(os.path.join(gd, 'fnvl_cpuref.h')).read()
         d = dict(re.findall(r'#define (FNVL_\w+) (0x[0-9a-f]+)u', h))

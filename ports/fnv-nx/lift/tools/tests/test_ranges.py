@@ -8,7 +8,7 @@ sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools')); sys.p
 import fnvnx.lift.fnvlift as L
 GEN = os.environ.get('FNVNX_INPUT_GEN') or sys.exit('FNVNX_INPUT_GEN is not mounted (the GEN output of the lift/rt root, a produced input of tests/inputs.json)')
 from fnvnx.toolchain.tests import plugbuild as pb
-import prelude
+import fnvnx.lift.tools.prelude as prelude
 
 SRC = '''
 extern "C" void L_t(u32 ft0){ u32 cf=0,zf=0,sf=0,of=0,pf=0,af=0,c0=0,c2=0,c3=0;

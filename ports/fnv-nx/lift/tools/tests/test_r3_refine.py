@@ -1,10 +1,12 @@
 """R3 refinement termination (modlift.r3_settle): the exclusion-set sequence of an antitone map G, given to r3_settle as its round step (an argument, nothing is replaced).
 G(X) = the sites that stay displacement-only when X is excluded. Cases: a fixed point; a 2-cycle where the sequence reaches L first; a 2-cycle where U is reached first (one extra round with L);
 a 3-cycle is an error. The answer X must satisfy X <= Xo of its own round. The real round (modlift._run) is exercised by the facts stage of every image."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import sys, os, io, contextlib
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
-import modlift
+import fnvnx.lift.tools.modlift as modlift
 
 F = frozenset
 

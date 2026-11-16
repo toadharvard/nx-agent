@@ -23,6 +23,8 @@ The oracle (pure functions, no I/O):
 Findings: every difference between the oracle's table (parsed from the bytes) and the table the lifter encodes, as one record each; the report has
 global counts: tables, states, type entries, decision rows, and the number that agree.
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import argparse
 import hashlib
 import json
@@ -32,7 +34,7 @@ import sys
 
 import pefile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import imageset
+import fnvnx.lift.proof.imageset as imageset
 
 CXX_FRAME_MAGIC_VC6, CXX_FRAME_MAGIC_VC7, CXX_FRAME_MAGIC_VC8 = 0x19930520, 0x19930521, 0x19930522   # cppexcept.h:22-24
 FUNC_DESCR_SYNCHRONOUS = 1                                                                      # cppexcept.h:27

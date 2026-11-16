@@ -4,10 +4,12 @@
 Checks: the grammar (every accepted form, every class of rejected form), the cases the x86 conventions do not define are errors that list every bad descriptor, the output is a
 pure function of the SET of descriptors, the table's lookup (rt/dispatch.c's formula, re-read from the generated text) finds every descriptor's own bridge, FNV-1a is the
 published function, a hash collision is a build error, the empty set gives a table every lookup of which misses."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, re, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(LIFT, 'tools'))
-import bridgegen
+import fnvnx.lift.tools.bridgegen as bridgegen
 M = 0xffffffff
 OK = ['stack:v:', 'this:i:i', 'this:q:i,q,f,d', 'fast:i:i,i', 'fast:i:i,q,i,i', 'stack:a8Rg:i', 'stack:a12Hg:i', 'stack:a16Hg:', 'stack:a8Rhf:', 'stack:a8Rhd:', 'stack:a16Hhd:', 'stack:a12Hhf:i',
       'stack:a20Hm:s4r', 'stack:a4Hm:', 'this:a12Hm:i,q', 'stack:f:s8hf,s16hd,s24hd,s32hd,s3g,s16g', 'stack:d:s100r', 'stack:a3Hg:i', 'stack:a1Rg:', 'this:v:i']

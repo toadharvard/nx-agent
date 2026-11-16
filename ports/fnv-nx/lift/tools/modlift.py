@@ -20,7 +20,7 @@ from types import SimpleNamespace
 import capstone
 from capstone import x86 as X
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))      # the tool root: a tool imports its siblings from its own root (the generated stages run it under python3 -I)
-import pemod, ehtables, codemap, residue, jtab as JT
+import fnvnx.lift.tools.pemod as pemod; import fnvnx.lift.tools.ehtables as ehtables; import fnvnx.lift.tools.codemap as codemap; import fnvnx.lift.tools.residue as residue; import fnvnx.lift.tools.jtab as JT
 from fnvnx.lift.fnvlift import Image as LImage; from fnvnx.lift.fnvlift import core as LCore
 TERM = {'ret', 'retf', 'int3', 'hlt', 'ud2', 'iret', 'iretd', '(ud)'}
 PRI = residue.PRI
@@ -35,7 +35,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     else: path, mrow = pemod.locate(arg, cfg.modules, cfg.moddirs)      # modules.tsv row (missing = KeyError) and the file (sha256 + size checked = ValueError)
     name = os.path.splitext(mrow.name)[0]; outd = cfg.facts_out + '/' + name; os.makedirs(outd, exist_ok=True)
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
-    import gapmd; md = gapmd.make(md, cfg.udsail)
+    import fnvnx.lift.tools.gapmd as gapmd; md = gapmd.make(md, cfg.udsail)
     M = pemod.load(path, mrow.base); u32 = M.u32; RL = pemod.relocs(M); relocs = sorted(RL or []); rset = set(relocs); imports = pemod.imports(M)
     T0 = min(a for n, a, z, ro in M.xs); T1 = max(a + z for n, a, z, ro in M.xs); TN = T1 - T0
     V = bytearray(TN); tx = bytearray(b'\xcc' * TN)
@@ -346,7 +346,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     HD = '# base=0x%08x: absolute VAs at the preferred image base (not RVAs)' % M.base
     print('shapes.tsv %d shape keys' % gapmd.shapes_tsv(cfg.shapes, HD, md, text, T0, dec))
     open(cfg.baddecode, 'w').write(HD + '; columns: entry, undecodable address, the 15 bytes there; every sequence that decode_gap did not decide\n' + ''.join('%08x\t%08x\t%s\n' % (entry_of(a), a, text[a - T0:a - T0 + 15].hex()) for a in sorted(ud)))
-    import pcsrc; pcsrc_red, pcsrc_res = pcsrc.run_facts(outd, name, X_.text, X_.T0, X_.u32, X_.rset, imports)
+    import fnvnx.lift.tools.pcsrc as pcsrc; pcsrc_red, pcsrc_res = pcsrc.run_facts(outd, name, X_.text, X_.T0, X_.u32, X_.rset, imports)
     sys.stderr.write('timing %s: pcsrc %.1f s (this round)\n' % (name, _t.time() - _t0))     # reads only universe.tsv and ranges.tsv; writes gate_pcsrc.json and pcsrc_s4.json
     # residue (valid executable bytes no entry body reaches and no PE directory names), cut by rule into: padding (nop / int3 instructions at the run's ends), dead gap (the run decodes
     # completely from its first byte, ends at a terminator or at the next reached instruction, and has relocated dwords only at operand fields), relocation slots (the bytes of a
@@ -425,7 +425,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     na = sum(1 for v in pt if v in proven); nb = sum(1 for v in pt if v not in proven and (pe[v - T0] or v in dread)); nc = len(pt) - na - nb
     mp = Counter(dec[a][1] for a in pset)
     fi = eh.finish(ent)
-    import dic
+    import fnvnx.lift.tools.dic as dic
     DR = dic.jtab_ranges(outd); dic.write(outd, hd, DR)          # data in code: the ranges a proven consumer reads (tools/dic.py)
     DW, DWd = dic.nonoperand_words(md, text, T0, relocs, {(a, dec[a][0]) for e in E for a in exts[e]}, DR)
     print('data_in_code: %d ranges (jtab %d), %d bytes; relocated words overlapping a reached instruction without being its operand: %d (of them inside a data range %d)' % (len(DR), len(DR), sum(b - a for a, b, k, d in DR), len(DW), len(DWd)))

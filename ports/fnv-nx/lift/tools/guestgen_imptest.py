@@ -6,12 +6,14 @@ generates the import entries (tools/impgen.py) and the perfect-hash dispatch tab
   image.inc  the image bytes, the import table words, the entry address and the expected eax of every case (main.cc includes it)
 Expected values are computed from the x86 semantics by hand, stated at each case (as in the comments below).
 usage: gen.py OUT_DIR LIFT_DIR --x86sys F --sdmrows F --cpumodel F --rcptab F --rcpcert F      (the lifter's declared inputs: lifted.buffer_arguments)"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, struct, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the tool root (/tool)
 sys.path.insert(0, sys.argv[2])   # lift/, whose fnvlift package is a declared input
-import argparse, lifted
+import argparse; import fnvnx.lift.tools.lifted as lifted
 import fnvnx.lift.fnvlift as L
-import phf, impgen
+import fnvnx.lift.tools.phf as phf; import fnvnx.lift.tools.impgen as impgen
 from keystone import Ks, KS_ARCH_X86, KS_MODE_32
 
 BASE, IAT, DATA, GSTACK, HSTACK, STOP, TEXT = 0x401000, 0x402000, 0x403000, 0x60000000, 0x70000000, 0x7e000000, 0xE0000000

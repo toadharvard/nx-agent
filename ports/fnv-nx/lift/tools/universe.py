@@ -2,10 +2,12 @@
 """Code universe of an image: the one engine (modlift.py). Roots by property (entry point, every relocation target in an executable section,
 exports, eh/seh entries, tls); closure over instruction flow; byte accounting. The exe is a PE like any module: its row is built from the file.
 Output: OUTDIR/<image>/{universe,codemap,ranges,...}.tsv and the gate JSONs; exit 1 if any byte is unexplained."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))      # the tool root: a tool imports its siblings from its own root (the generated stages run it under python3 -I, which has no script directory on the path)
 from types import SimpleNamespace
-import cli
+import fnvnx.lift.tools.cli as cli
 USAGE = '''usage: universe.py --out OUTDIR (--exe FILE | --module NAME --modules modules.tsv --moddirs DIR[:DIR...]) --lib DIR --keys keys.tsv --baddecode FILE --shapes FILE --udsail FILE
   --baddecode / --shapes: the image's refused-sequence list and decoded-shape universe (BADDECODE, SHAPES outputs). --udsail: the Sail #UD verdicts (proof/udsail.py) for the refused sequences.
   code universe of the exe (--exe FILE) or of the module NAME (a name or file of modules.tsv; the module table and the directories that hold the module files are declared inputs).
@@ -17,8 +19,8 @@ def _need(*ks):
     if miss: sys.exit('universe.py: missing %s\n\n%s' % (' '.join(miss), USAGE))
 _need('--out', '--keys', '--baddecode', '--shapes', '--udsail', '--lib')
 if ('--exe' in _O) == ('--module' in _O): sys.exit('universe.py: exactly one of --exe, --module\n\n' + USAGE)
-import ehflow; ehflow.configure_keys(_O['--keys']); sys.path.insert(0, _O['--lib'])      # --lib: a declared input of the stage
-import modlift
+import fnvnx.lift.tools.ehflow as ehflow; ehflow.configure_keys(_O['--keys']); sys.path.insert(0, _O['--lib'])      # --lib: a declared input of the stage
+import fnvnx.lift.tools.modlift as modlift
 if '--exe' in _O: modlift.run('exe', SimpleNamespace(exe=_O['--exe'], modules=None, moddirs=[], facts_out=_O['--out'], udsail=_O['--udsail'], baddecode=_O['--baddecode'], shapes=_O['--shapes']))
 else:
     _need('--modules', '--moddirs'); modlift.run(_O['--module'], SimpleNamespace(modules=_O['--modules'], moddirs=_O['--moddirs'].split(':'), facts_out=_O['--out'], udsail=_O['--udsail'], baddecode=_O['--baddecode'], shapes=_O['--shapes']))      # modlift.run raises on failure; its verdict is in the gate JSONs

@@ -6,7 +6,7 @@ _q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__fi
 import os, sys, unittest
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.join(HERE, '..', '..')); sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
-import declared_cpufeat
+import fnvnx.lift.proof.tests.declared_cpufeat as declared_cpufeat
 CPUFEAT, WHY = declared_cpufeat.path()               # derived from the pins (declared_cpufeat); absent input: the test skips with the reason
 if CPUFEAT:
     from fnvnx.lift.fnvlift import inputs

@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32
 from fnvnx.lift.proof import forms, model_sail, prove
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import declared_sail; declared_sail.configure()      # the declared inputs of this test (declared_sail.py); the classes are skipped without them
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import fnvnx.lift.proof.tests.declared_sail as declared_sail; declared_sail.configure()      # the declared inputs of this test (declared_sail.py); the classes are skipped without them
 
 def run(hexbytes):
     code = bytes.fromhex(hexbytes); cs = Cs(CS_ARCH_X86, CS_MODE_32); cs.detail = True; ins = list(cs.disasm(code, prove.ADDR)); assert len(ins) == 1 and ins[0].size == len(code), hexbytes

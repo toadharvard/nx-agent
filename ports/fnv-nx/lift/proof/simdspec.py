@@ -21,11 +21,13 @@ same ea() both sides), a general register source is `gpr[i]`.  An instruction is
 No other exception exists for these instructions in the declared machine's user mode (CR0.EM = 0, CR0.TS = 0, CR4.OSFXSR = 1: the environment rows of L5's x86sys,
 carried as the precondition Res.env over the state variables `cr0_em`, `cr0_ts`, `cr4_osfxsr`; never a constant here).
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys
 import z3
 from z3 import And, Concat, Extract, If, Not, Or, ULT, UGT, UGE, ULE, ZeroExt, SignExt, LShR
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import x87spec as X
+import fnvnx.lift.proof.x87spec as X
 
 K = X.K
 AV = X._faults.BYNAME['AV']['code']
@@ -409,7 +411,7 @@ row('F3', 0x70, 'pshufhw', [cite('pshuf.lisp', 'x86-pshufhw', '(pshufw (logtail 
 
 
 # ==== floating-point arithmetic (ssefp.py: the lane functions; rows: add sub mul div min max sqrt x ps pd ss sd) =====================================================
-import ssefp as F
+import fnvnx.lift.proof.ssefp as F
 
 _FPOPS = {0x58: 'add', 0x59: 'mul', 0x5C: 'sub', 0x5D: 'min', 0x5E: 'div', 0x5F: 'max', 0x51: 'sqrt'}
 _FPFMT = {'': (32, False), '66': (64, False), 'F3': (32, True), 'F2': (64, True)}
@@ -666,5 +668,5 @@ def mem_imm(code):
     return ROWS[k].imm
 
 
-import simdsdm
+import fnvnx.lift.proof.simdsdm as simdsdm
 simdsdm.register(sys.modules[__name__])

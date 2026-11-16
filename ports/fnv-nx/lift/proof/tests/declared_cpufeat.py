@@ -1,6 +1,8 @@
 """The CPUID feature-bit table of lift/proof tests: the same function of the same pins as the recipe stage lift/cpufeat (RECIPE: pdftotext of the pinned SDM and AMD APM volumes, then `sdmfeat.py features`), run here over the
 declared inputs of the test: FNVNX_SDM_TXT (pdftotext -layout of the pinned SDM, its PDF beside it as sdm.pdf) and FNVNX_BUILD (a clone of fnv-nx-build holding the pins of proof/pins.json `external` amd-apm, amd-apm-vol5).  There is no
 committed copy of the table and no file to point at.  path() -> (the table's path, None); (None, reason) when an input is not there (the caller skips with the reason)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import hashlib, json, os, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -28,7 +30,7 @@ def _build(sdm, b):
         subprocess.run(['pdftotext', '-layout', pdf, pdf[:-4] + '.txt'], check=True); apm += ['--apm', pdf]
     out = os.path.join(d, 'cpuid_feature_bits.tsv')
     sys.path.insert(0, PROOF)
-    import sdmfeat
+    import fnvnx.lift.proof.sdmfeat as sdmfeat
     with open(os.devnull, 'w') as nul:
         so, sys.stdout = sys.stdout, nul
         try: assert sdmfeat.main(['features', sdm, out] + apm) == 0

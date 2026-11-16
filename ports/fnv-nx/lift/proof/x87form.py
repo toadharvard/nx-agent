@@ -20,7 +20,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.dirname(HERE), HERE]
 import z3  # noqa: E402
-import x87spec as X  # noqa: E402
+import fnvnx.lift.proof.x87spec as X  # noqa: E402
 
 SPEC = os.path.join(HERE, "x87spec.py")
 
@@ -290,7 +290,7 @@ def nd_names():
 
 def spec_key(raw):
     """(REGISTRY key, register index i or None) of the x87 instruction RAW: the class of x87class, in the spec's key spelling.  None when RAW is no x87 instruction"""
-    import x87class
+    import fnvnx.lift.proof.x87class as x87class
     from fnvnx.lift.proof import shape
     i = 0
     while i < len(raw) and raw[i] in shape.PFX:

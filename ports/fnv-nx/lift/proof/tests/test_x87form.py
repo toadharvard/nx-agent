@@ -11,8 +11,8 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.join(HERE, ".."), os.path.join(HERE, "..", "..")]
-import declared_x86sys  # noqa: E402
-import x87spec as X  # noqa: E402
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys  # noqa: E402
+import fnvnx.lift.proof.x87spec as X  # noqa: E402
 from fnvnx.lift.fnvlift import dsl, inputs  # noqa: E402
 from fnvnx.lift.proof import forms, prove, shape, x87form as XF  # noqa: E402
 

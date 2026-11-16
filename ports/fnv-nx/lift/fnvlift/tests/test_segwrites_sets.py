@@ -12,7 +12,7 @@ _q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__fi
 import json, os, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE))
 sys.path[:0] = [os.path.join(LIFT, 'tools'), LIFT]
-import segwrites as W
+import fnvnx.lift.tools.segwrites as W
 from fnvnx.lift.fnvlift.image import Image
 sel = json.load(open(os.path.join(os.path.dirname(LIFT), 'platform', 'declared', 'x86sys.json')))['selectors']
 code = (bytes.fromhex('b81b0000008ec0c3') +            # mov eax,0x1b ; mov es,ax ; ret

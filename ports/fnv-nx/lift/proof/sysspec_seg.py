@@ -30,8 +30,8 @@ import z3  # noqa: E402
 from fnvnx.lift.fnvlift import dsl  # noqa: E402
 from fnvnx.lift.fnvlift.faults import BYNAME as FT  # noqa: E402
 from fnvnx.lift.proof import symform, x86sys  # noqa: E402
-import sysspec_gap as G  # noqa: E402
-from sysspec_text import SEG as TEXT  # noqa: E402
+import fnvnx.lift.proof.sysspec_gap as G  # noqa: E402
+from fnvnx.lift.proof.sysspec_text import SEG as TEXT  # noqa: E402
 
 K_AV, K_UD = FT['AV']['code'], FT['UD']['code']
 V = G.V

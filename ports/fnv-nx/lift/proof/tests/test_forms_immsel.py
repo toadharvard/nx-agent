@@ -15,7 +15,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import declared_x86sys; declared_x86sys.configure()
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys; declared_x86sys.configure()
 from fnvnx.lift.proof import forms, symform, shape as shp  # noqa: E402
 
 FAILURES_HEADER = '# fnvnx-form-equivalence-failures/1: shape_key<TAB>immediate value (hex)<TAB>why  (test_forms_immsel universe run; the aggregation withholds every listed shape key: certs_build --withheld)'

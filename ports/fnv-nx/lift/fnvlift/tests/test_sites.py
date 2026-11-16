@@ -7,7 +7,7 @@ import os, sys
 LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, LIFT)
 import capstone
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; _inputs.configure()
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import fnvnx.lift.fnvlift.tests._inputs as _inputs; _inputs.configure()
 import fnvnx.lift.fnvlift as L
 from fnvnx.lift.fnvlift import core, sites
 from fnvnx.lift.fnvlift.core import Unsupported
