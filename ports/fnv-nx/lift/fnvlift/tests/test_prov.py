@@ -1,7 +1,7 @@
 """Provenance measurement (fnvlift/prov.py): with the tag ON the lifted text is byte-identical to the text with it OFF, and the categories of the side table add up to exactly the
 bytes of the text (checked by prov.finish for every function), for integer, memory, call / ret, locked, x87 and SSE code.
     test_prov.py --cpufeat TABLE"""
-import os, sys, hashlib
+import os, re, sys, hashlib
 LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, LIFT)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; _inputs.configure()
@@ -32,7 +32,9 @@ for name, hx in sorted(CODE.items()):
         r = prov.take()
     finally:
         prov.ON = False
-    ok = on == off and r is not None and sum(v[0] for v in r['cats'].values()) == len(off) and sum(r['insb'].values()) <= len(off)
+    gotos = set(re.findall(r'goto (L_[0-9a-f]{8});', off)); defs = set(re.findall(r'^(L_[0-9a-f]{8}): ;', off, re.M)) | set(re.findall(r'(L_[0-9a-f]{8}): ; SYNC_OUT', off))
+    labels_ok = gotos <= defs and not (defs - gotos - set(re.findall(r'(L_[0-9a-f]{8}): ; SYNC_OUT', off)))      # density rule 1: every goto has its label, and every label line is named by a goto
+    ok = labels_ok and on == off and r is not None and sum(v[0] for v in r['cats'].values()) == len(off) and sum(r['insb'].values()) <= len(off)
     print('%-5s %6d bytes  categories %2d  %s' % (name, len(off), len(r['cats']) if r else 0, 'ok' if ok else 'FAIL'))
     if not ok: bad += 1
 if bad: sys.exit('prov_test: %d FAIL' % bad)
