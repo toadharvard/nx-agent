@@ -313,7 +313,7 @@ def main():
         host = (hroots, set(host_exports(cache)[0])) if hroots else None
         guest = [r + "/" for r, e in recipe.load_admit(repo).items() if e.get("class") == "product" and e.get("target") == "guest"]
         if guest:
-            runtime = set(linkset.runtime_defs(repo, cache)) | set(linkset.synth_defs(guest[0][:-1], recipe.load_admit(repo), repo, cache))   # the pinned runtime, the script's names and ld's own: the one accessor of the link set
+            runtime = set(linkset.runtime_defs(repo, cache)) | set().union(*(set(linkset.synth_defs(g[:-1], recipe.load_admit(repo), repo, cache)) for g in guest))   # the pinned runtime, the script's names and ld's own: the one accessor of the link set
         for root in roots:
             res, _ = gate_build.ensure(root, cache, repo)
             if res["status"] == "red":

@@ -7,8 +7,8 @@ A root enters the link of the product ELF as RECIPE.md "Link: the guest ELF" der
   3. the names the link SCRIPT assigns (link/guest.json's script: undefset.script_defined) and the image entry the link assigns by --defsym (recipe.IMAGE_ENTRY, when a guest
      image declares `link.entry`).
   4. the names the pinned ld synthesises itself for a link (e.g. _GLOBAL_OFFSET_TABLE_): a function of ld, the target's link form and the guest script, not of any image. They are
-     derived by one stage per link kind (recipe.synth_names: ld on an empty object of the target; the symbols its output defines that the script does not assign), source `ld:<kind>`.
-     The kinds are `pie` for a guest root and `shared` and `exe` for a host root (every host link form of the recipe; a superset is sound for "can a link define it").
+     derived from ld's own answer for each member's own objects (recipe.synth_set: the symbols the linked output defines, GLOBAL or LOCAL, that no input object or script assignment defines;
+     one cached stage per member and kind, `ldsynth:<root>:<kind>`), source `ld:<member>:<kind>`. The kind is `pie` for a guest root, and for a host root the link form its recipe declares (`shared`, `exe` when none).
 A HOST root's definers are its own objects (member specs), the synthesised names, and the defined .dynsym exports of every file of its recipe's `link.libs.system`, each read from the pinned
 deb of env.json that owns it (envcheck.system_lib_errors; a file owned by no pinned deb is ValueError `host-lib-unpinned`). It has no guest runtime and no guest script.
 Result form: {symbol: {source: [(bind, type)]}} with bind in GLOBAL/WEAK/UNIQUE and type as recipe.STYPE names; source is a member spec, `rt:<file>` or `script`."""
@@ -93,13 +93,21 @@ def definers(root, admit, repo, cache):
 
 
 def synth_defs(root, admit, repo, cache):
-    """{name: {"ld:<kind>": [(GLOBAL, NOTYPE)]}}: the names the pinned ld synthesises for a link of ROOT's target (recipe.synth_names; guest: kind pie with the guest script,
-    host: kinds shared and exe). One stage per kind, content-keyed; the same set for every root of a target."""
+    """{name: {"ld:<member>:<kind>": [(GLOBAL, NOTYPE)]}}: the names the pinned ld synthesises for the links ROOT enters, from ld's own answer for each member's OWN objects
+    (recipe.synth_names: GOT, TLS and PLT relocations the objects really carry make ld define exactly the names they need). Guest: kind pie with the guest script; host: the
+    root's own link form (its recipe `link.kind`), `shared` and `exe` when the root declares none. One cached stage per member and kind."""
     guest = recipe.entry_of(admit, root).get("target") == "guest"
     prof = recipe.load_guest_link(repo) if guest else None
     out = {}
-    for kind, names in recipe.synth_names(repo, root, cache, ["pie"] if guest else ["shared", "exe"], recipe.TREE + "/" + prof["script"] if prof else None).items():
-        merge(out, "ld:" + kind, {n: [("GLOBAL", "NOTYPE")] for n in names})
+    for m in link_members(root, admit, repo):
+        res = gate_build.ensure(m, cache, repo)[0]
+        if res["status"] == "red":
+            raise ValueError("%s: build red at stage %s" % (m, res["failure"]["stage"]))
+        lk = recipe.load_recipe(repo, admit, m).get("link")
+        kinds = ["pie"] if guest else ([lk["kind"]] if isinstance(lk, dict) and lk.get("kind") else ["shared", "exe"])
+        objs = [(o["unit"], o["object"]) for o in res["objects"]]
+        for kind, names in recipe.synth_names(repo, m, cache, kinds, recipe.TREE + "/" + prof["script"] if prof else None, objs).items():
+            merge(out, "ld:%s:%s" % (m, kind), {n: [("GLOBAL", "NOTYPE")] for n in names})
     return out
 
 
