@@ -17,9 +17,6 @@
   {
    "path": "ports/fnv-nx/contract",
    "class": "tool",
-   "imports": [
-    "ports/fnv-nx/link"
-   ],
    "entry": [
     "ports/fnv-nx/contract/exefacts.py",
     "ports/fnv-nx/contract/n1.py",
@@ -197,10 +194,21 @@
    "recipe": "ports/fnv-nx/contract/exports/build.json"
   },
   {
+   "path": "ports/fnv-nx/contract/target",
+   "class": "tool",
+   "target": "host",
+   "entry": [],
+   "recipe": "ports/fnv-nx/contract/target/build.json"
+  },
+  {
    "path": "ports/fnv-nx/tests/bootrt",
    "class": "test",
    "target": "host",
    "recipe": "ports/fnv-nx/tests/bootrt/build.json"
+  },
+  {
+   "path": "ports/fnv-nx/contract/exporthdr/include",
+   "class": "header"
   }
  ]
 }

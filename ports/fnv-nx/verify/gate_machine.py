@@ -62,7 +62,7 @@ def calls_of(res):
 
 
 def writer_bodies(res):
-    """{unit}: the units of a build that carry an `.fnvnx.export` record (contract/include/fnvnx_export.h) whose import name is a hive-writing API: the import
+    """{unit}: the units of a build that carry an `.fnvnx.export` record (contract/exporthdr/include/fnvnx_export.h) whose import name is a hive-writing API: the import
     implementations of the writers. Exempt from the writer rule by the record, never by a name."""
     out = set()
     for o in res["objects"]:

@@ -78,6 +78,42 @@ def produced(repo, td, tag):
     return j, os.path.join(ws, "root")
 
 
+# the mounts of a python step (recipe.python_mounts): the runtime brings paths the host resolves (/lib/x86_64-linux-gnu, /usr/local/bin) that nest with the layout of the mounted
+# debs; the sandbox refuses nested paths (sandbox.check_doc). (a) a layout link or directory that a runtime path lies under or over yields; (b) a declared input or scratch that clashes is red
+import sandbox
+
+
+def doc_of(ins, links, scratch=()):
+    return {"format": "fnvnx-stage/1", "stage": "s", "argv": ["/x"], "cwd": "/work", "env": {}, "inputs": sorted(ins, key=lambda i: i["at"]), "outputs": ["/out"], "links": links, "scratch": list(scratch)}
+
+
+T0 = "0" * 64
+layout = [{"at": "/usr", "tree": T0}, {"at": "/etc", "tree": T0}]
+links = [{"at": "/lib", "to": "usr/lib"}, {"at": "/bin", "to": "usr/bin"}]
+rt = [{"at": "/lib/x86_64-linux-gnu", "tree": T0}, {"at": "/usr/local/bin", "tree": T0}, {"at": "/opt/py", "tree": T0}]
+own = [{"at": "/in/1", "tree": T0}]
+ins_, lk_, er_ = recipe.python_mounts(layout, links, own, ["/scratch"], rt)
+check("a nested runtime path under a usr-merge link and under a layout directory mounts green (the layout entries yield)",
+      not er_ and [l["at"] for l in lk_] == ["/bin"] and sorted(i["at"] for i in ins_) == ["/etc", "/in/1", "/lib/x86_64-linux-gnu", "/opt/py", "/usr/local/bin"], (ins_, lk_, er_))
+try:
+    sandbox.check_doc(doc_of(ins_, lk_, ["/scratch"]))
+    ok_doc = True
+except sandbox.SbxError as e:
+    ok_doc = repr(e)
+check("the mounts are accepted by the sandbox's own path rule", ok_doc is True, ok_doc)
+try:
+    sandbox.check_doc(doc_of(layout + own + rt, links))
+    raw = None
+except sandbox.SbxError as e:
+    raw = str(e)
+check("the layout and the runtime together, as they were, are refused (paths nest)", raw is not None and "nest" in raw, raw)
+ins2, lk2, er2 = recipe.python_mounts(layout, links, [{"at": "/usr/local/bin/x", "tree": T0}], ["/opt/py/tmp"], rt)
+check("a declared input at a path that clashes with a runtime path is red, never dropped",
+      any(e == "step input /usr/local/bin/x overlaps the python runtime path /usr/local/bin" for e in er2), er2)
+check("a scratch directory that clashes with a runtime path is red", any(e == "step input /opt/py/tmp overlaps the python runtime path /opt/py" for e in er2), er2)
+check("the step's own input is never among the dropped entries", any(i["at"] == "/usr/local/bin/x" for i in ins2), ins2)
+check("no clash, no change: layout kept whole, runtime appended", recipe.python_mounts(layout, links, own, [], [{"at": "/opt/py", "tree": T0}]) == (layout + own + [{"at": "/opt/py", "tree": T0}], links, []))
+
 with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td:
     repo = make(td, "g", GOOD)
     errs = recipe.check(json.load(open(os.path.join(repo, R, "build.json"))), R, recipe.tracked(repo), recipe.load_admit(repo), None, repo)

@@ -64,7 +64,7 @@ SPEC = {"toy.spec": "1 stdcall f_a()\n2 stdcall f_b(long)\n3 stdcall f_c(long)\n
 
 REAL = os.path.join(HERE, "..", "..")   # ports/fnv-nx of the tree under test
 T = TR.T
-EXPORT_FILES = ("contract/exportgen.py", "contract/dllkind.py", "contract/l2sections.py", "link/ctypes_compat.py", "toolchain/layout/decltype_spell.inc", "contract/include/fnvnx_export.h")
+EXPORT_FILES = ("contract/exportgen.py", "contract/dllkind.py", "contract/l2sections.py", "link/ctypes_compat.py", "toolchain/layout/decltype_spell.inc", "contract/exporthdr/include/fnvnx_export.h")
 # the toy units: (file, definer, decltype, [(module, import name)]); a record is dropped by naming it in `drop`
 UNITS = (("toy/a.c", "f_a", "()int", [("toy.dll", "f_a")]), ("toy/b.c", "f_b", "()int", [("toy.dll", "f_b"), ("msvcrt.dll", "memcpy")]),
          ("toy/c.c", "f_c", "(int)int", [("toy.dll", "f_c"), ("msvcrt.dll", "strlen")]))
@@ -106,11 +106,11 @@ def manifest(names):
 def toy_repo(tag, names, drop=(), decl_extra=None, extra_unit=""):
     commit, thash = TR.publish("im-" + tag, manifest(names))
     ex = {"name": "manifest", "repo": "fnv-nx-build", "ref": "im-" + tag, "commit": commit, "tree_sha256": thash, "at": "/ext/manifest"}
-    rec = dict(TR.RECIPE, external=[ex], include=TR.RECIPE["include"] + [T + "contract/include"], uses=[{"root": T + "contract/include", "output": "INCLUDE"}])
+    rec = dict(TR.RECIPE, external=[ex], include=TR.RECIPE["include"] + [T + "contract/exporthdr/include"], uses=[{"root": T + "contract/exporthdr/include", "output": "INCLUDE"}])
     decl = {"format": "fnvnx-imports-in/1", "names": {"external": "manifest", "path": "sys_names.tsv"}, "specs": {"external": "manifest", "path": "specs"}, "extra": [], "extra_other": [],
             "va": "msvcrt_va.tsv"}
     decl.update(decl_extra or {})
-    roots = [{"path": T + "contract/include", "class": "header"}, {"path": T + "contract/exports", "class": "tool", "target": "host", "entry": [], "recipe": T + "contract/exports/build.json"}]
+    roots = [{"path": T + "contract/exporthdr/include", "class": "header"}, {"path": T + "contract/exports", "class": "tool", "target": "host", "entry": [], "recipe": T + "contract/exports/build.json"}]
     files = dict(tree_files(), **export_files(drop, extra_unit))
     files.update({"toy/imports.in.json": json.dumps(decl), "toy/msvcrt_va.tsv": ""})
     return TR.make_repo("im-" + tag, rec=rec, files=files, extra_roots=roots)
