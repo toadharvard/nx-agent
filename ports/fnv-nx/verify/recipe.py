@@ -21,6 +21,7 @@ Outputs in --out: objects.json ("fnvnx-objects/1": root, objects[{unit,object,sh
 Assumptions: the compiler and ld are deterministic given the flags of unitstage/toolflags (A-env); the sandbox leaves the channels of (ASM-038, ASM-039)
   sandbox.OPEN_CHANNELS open (see gate_determinism.py for which of them two cold builds expose)."""
 import argparse
+import atexit
 import concurrent.futures
 import errno
 import hashlib
@@ -3088,6 +3089,12 @@ class Job:
         for d in g["debs"]:
             if d not in pk:
                 raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["deb %s is not declared in env.json debs.packages" % d]})
+        mkey = (os.path.realpath(self.store), tuple(sorted((d, pk[d]["sha256"]) for d in g["debs"])))   # the layout is a function of the pinned deb contents (their sha256) alone
+        if mkey in ROOTFS_MEMO and all(os.path.isdir(x) for x in ROOTFS_MEMO[mkey][2].values()):
+            for d, home in ROOTFS_MEMO[mkey][2].items():
+                if not os.path.lexists(os.path.join(tmp, "deb-" + d)):
+                    os.symlink(home, os.path.join(tmp, "deb-" + d))   # exec_unresolved and deb_resolve read the unpacked trees under tmp
+            return ROOTFS_MEMO[mkey][0], ROOTFS_MEMO[mkey][1]
         union, owner = os.path.join(tmp, "rootfs"), {}
         os.makedirs(union)
         for d in sorted(g["debs"]):
@@ -3119,6 +3126,14 @@ class Job:
                 links.append({"at": "/" + name, "to": os.readlink(p)})
             elif os.path.isdir(p):
                 ins.append({"at": "/" + name, "tree": cas.ingest(p, self.store)})
+        homes = {}
+        for d in sorted(g["debs"]):   # the unpacked trees outlive this step: one per deb content per process, linked into each later step's tmp
+            home = os.path.join(rootfs_home(), "%s-%s" % (d, pk[d]["sha256"]))
+            if not os.path.isdir(home):
+                shutil.move(os.path.join(tmp, "deb-" + d), home)
+                os.symlink(home, os.path.join(tmp, "deb-" + d))
+            homes[d] = home
+        ROOTFS_MEMO[mkey] = (ins, links, homes)
         return ins, links
 
     def _one_file(self, tmp, name, path, base):
@@ -4247,16 +4262,28 @@ def exec_unresolved(path, tmp, debs, libdirs=()):
     return sorted(bad)
 
 
+ROOTFS_MEMO = {}   # per process: {(store, ((deb, sha256), ...)): (inputs, links, {deb: unpacked tree})}
+_ROOTFS_HOME = []
+
+
+def rootfs_home():
+    """The process's directory of unpacked deb trees (removed at exit)."""
+    if not _ROOTFS_HOME:
+        _ROOTFS_HOME.append(tempfile.mkdtemp(prefix="rootfs-"))
+        atexit.register(shutil.rmtree, _ROOTFS_HOME[0], True)
+    return _ROOTFS_HOME[0]
+
+
 STAGE_MEMO = {}   # per process: {(store, checkout, repo_signature, root, step, path, step declaration): result of stage_output}; the stage's own key decides a hit, this only skips re-deriving it
 
 
 def repo_signature(repo):
-    """The content of the tracked tree of REPO as the build reads it: the index entries (mode, blob, path) and the stat of every tracked file that differs from the index."""
+    """The content of the tracked tree of REPO as the build reads it: the index entries (mode, blob hash, path) and the sha256 of the bytes of every tracked file that differs from the index."""
     h = hashlib.sha256(subprocess.run(["git", "-C", repo, "ls-files", "-s", "-z", "--", TREE], capture_output=True, check=True).stdout)
     for f in subprocess.run(["git", "-C", repo, "ls-files", "-m", "-z", "--", TREE], capture_output=True, check=True).stdout.split(b"\0"):
         if f:
-            st = os.stat(os.path.join(repo, f.decode("utf-8", "surrogateescape")))
-            h.update(f + b"\0%d\0%d\0" % (st.st_mtime_ns, st.st_size))
+            with open(os.path.join(repo, f.decode("utf-8", "surrogateescape")), "rb") as fh:
+                h.update(f + b"\0" + hashlib.sha256(fh.read()).digest())
     return h.hexdigest()
 
 
