@@ -1873,3 +1873,11 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Doing (w13, in the relift after the base3 merge): the CPUID gate's source becomes capstone's group, and the SDM feature path and udcert feature routing are deleted, with lift/sdm and sdmrows deleted too if nothing else consumes them.
   - w7's udcert routing is dropped. (E) sgdt/iretd stays only if a site on the path needs it.
 - Doing (w8): FNVNX_FPCR from L1's contract/target (w28 24ec7e128) into lift/rt enter.cc:58.
+- relift @b7c1e9c36 (w13): the declared-CPU rule is in. Recipe check: 65 recipes, 0 bad. Lift tests: 79 OK, 6 red (unchanged).
+  - proof/cpufeat.py maps capstone group to CPUID bit (cpuid_model.json; totality test over X86_GRP_*). Lowered through f_sys.ud_site.
+  - Deleted: cleared_join.py, cpufeat_diff.py, test_cpufeat_sdm, cpufeat's SDM path; the lifter's sdmrows input is gone.
+  - lift/sdm and lift/sdmrows stay until L3b removes udsail class (a), partition and factsites (sent).
+  - Gaps (fisttp, MMX pshufb and ungrouped 0F38/3A, F3 0F BC/BD, xgetbv, prefetchw): decided by a site count over the universe (a sound superset).
+    - Classes at 0 get a test asserting the 0.
+    - Classes above 0 get a rule from the documented behaviour (OWNER 10). Doing: w13.
+- FNVNX_FPCR (L1 contract/target): on hold until cand5 reaches base3; it needs L1's 82a245d49 (recipe.py and gate_admit).
