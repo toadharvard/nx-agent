@@ -586,7 +586,7 @@ def jmpbuf_facts(repo, cache):
     objs = [o["object"] for o in res["objects"] if o["unit"].endswith("jmpbuf.c")]
     if len(objs) != 1:
         raise ValueError("jmp_buf probe root: %d objects of jmpbuf.c" % len(objs))
-    ext = recipe.exttree(recipe.load_pin(repo)["external"], cache)   # the checkout, through the recipe's own accessor (never a path built by hand)
+    ext = os.path.join(cache, "external", recipe.load_pin(repo)["external"]["commit"])
     hdr = [os.path.join(d, "setjmp.h") for d, _n, fs in os.walk(ext) if "setjmp.h" in fs and os.path.basename(d) == "include"]
     if len(hdr) != 1:
         raise ValueError("the pinned runtime external holds %d include/setjmp.h (want exactly 1)" % len(hdr))

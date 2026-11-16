@@ -226,7 +226,7 @@ def fetch_inputs(names, cache, ws):
     try:
         pins = {e["name"]: e for e in json.load(open(PINS))["external"]}
         ext = [pins[n] for n in names]
-        got = recipe.fetch_externals(ext, os.path.join(cache or ws, "store"), recipe.ext_dir(cache or ws), ws)
+        got = recipe.fetch_externals(ext, os.path.join(cache or ws, "store"), os.path.join(cache or ws, "external"), ws)
     except recipe.BuildRed as x:
         return "%s: %s" % (x.args[0].get("stage"), "; ".join(x.args[0].get("stderr", [])[-3:]))
     except (OSError, ValueError, KeyError) as x:
@@ -255,7 +255,7 @@ def fetch_guest(cache, ws):
     exts = guest_externals()
     if not exts:
         return {}
-    ec = recipe.ext_dir(cache or ws)
+    ec = os.path.join(cache or ws, "external")
     try:
         got = recipe.fetch_externals(exts, os.path.join(cache or ws, "store"), ec, ws)
     except recipe.BuildRed as x:
@@ -271,7 +271,7 @@ def run_one(path, timeout, base, idx, extra=None, trace=None, cwd=None):
     t0 = time.time()
     tdir, logp = os.path.join(base, "t%d" % idx), os.path.join(base, "t%d.log" % idx)
     os.mkdir(tdir)
-    # a test file is not a gate: it does not see GATE_OUT / GATE_CACHE (a test that runs gates of its own
+    # a test file is not a gate: it does not see GATE_OUT / GATE_COMMIT / GATE_CACHE (a test that runs gates of its own
     # would otherwise share this gate's result cache and outputs)
     env = {k: v for k, v in os.environ.items() if not k.startswith("GATE_")}
     env["TMPDIR"] = tdir

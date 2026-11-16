@@ -35,7 +35,8 @@
   "flags": [
    "-m",
    "aarch64linux32"
-  ]
+  ],
+  "entry": "icfx_start"
  },
  "uses": [
   {

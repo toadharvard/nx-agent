@@ -5,7 +5,7 @@ The debs here are a toy package (a static busybox) through the two seams recipe.
   - the step is green; its file and directory outputs and the scratch work are as the script wrote them; JOBS reaches the script;
   - the job count does not change the stage key; a changed input or script does;
   - a later step reads an earlier step's directory output through a stage ref (mounted at /in/N);
-  - a step with timeout_s is red at check time (a time limit would decide red or green).
+  - a step past its timeout is red.
 Run: python3 -I <this file>. Needs root, a static busybox, the declared environment (the recipe refuses to run on another machine)."""
 import json
 import os
@@ -82,7 +82,7 @@ def make(td, name, script, timeout=None, second=True):
 
 
 def produced(repo, td, tag, jobs=2):
-    j = recipe.Job(repo, R, os.path.join(td, "store"), jobs, recipe.ext_of_store(os.path.join(td, "store")))
+    j = recipe.Job(repo, R, os.path.join(td, "store"), jobs, os.path.join(td, "store", "external"))
     ws = tempfile.mkdtemp(prefix="ts-" + tag, dir=td)
     recipe._copy(repo, [f for f in j.files if recipe.under(f, R)], R, os.path.join(ws, "root"))
     j.externals(ws)
@@ -107,9 +107,7 @@ with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td:
         check("the job count is not in any stage key", j2.keys == j1.keys and len(j1.keys) >= 3, (len(j1.keys), len(j2.keys)))
     j3, _ = produced(make(td, "r3", S1.replace("echo hi > /scratch/x/f", "echo hi > /scratch/x/f; echo more > /scratch/x/y")), td, "3")
     check("a changed script re-keys the step and what reads it", len(j3.keys - j1.keys) >= 2, len(j3.keys - j1.keys))
-    r4 = make(td, "r4", "true\n", timeout=1, second=False)
-    j4 = recipe.Job(r4, R, os.path.join(td, "store"), 2, recipe.ext_of_store(os.path.join(td, "store")))
-    errs4 = recipe.check(j4.rec, R, j4.files, j4.roots, repo=r4)
-    check("a step with timeout_s is red at check time", any("timeout_s" in e for e in errs4), errs4)
+    j4, root4 = produced(make(td, "r4", "sleep 30\n", timeout=1, second=False), td, "4")
+    check("a step past its timeout is red, naming the timeout", bool(j4.red) and "timeout" in " ".join(j4.red[0]["stderr"]), j4.red)
 print("fails: %d" % fails)
 sys.exit(1 if fails else 0)

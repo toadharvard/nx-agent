@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gate "tlsmodel" (fnvnx-gate/1, class A of VERDICT.md): every thread-local reference of a guest object and of a linked guest output uses a
 TLS access model the loader supports, and one symbol is accessed with one model.
-    python3 -I gate_tlsmodel.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/tlsmodel.json
+    python3 -I gate_tlsmodel.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/tlsmodel.json
 Roots: every product and test root of verify/admit.json with "target": "guest", built by gate_build.ensure; a root's link group is its own
 objects plus the objects of its derived link members (ld's archive selection, recipe.link_candidates) (the objects that one linked output is made of), and its linked ELF.
 Facts are the relocations of the pinned binutils' own decoding (`aarch64-linux-gnu-readelf -rW`, the binutils of verify/env.json): the type

@@ -79,8 +79,6 @@ for k in ("LANG", "LANGUAGE", "LC_TIME", "PYTHONPATH", "HOME", "USER", "LOGNAME"
           "CPLUS_INCLUDE_PATH", "DEPENDENCIES_OUTPUT", "SUNPRO_DEPENDENCIES", "MAKEFLAGS", "MFLAGS", "MAKELEVEL",
           "PYTHONSTARTUP"):
     expect("env forbidden %s" % k, doc("gcc", GCC, env_with(**{k: "x"})), ["env-forbidden"])
-expect("env PYTHONPATH under declared inputs ok (the /imp dirs of a generator stage)", doc("gcc", GCC, env_with(PYTHONPATH="/tc/lib:/src/x")), [])
-expect("env PYTHONPATH with a component outside the inputs", doc("gcc", GCC, env_with(PYTHONPATH="/tc/lib:/usr/lib/python3")), ["env-forbidden"])
 expect("env PATH outside inputs", doc("gcc", GCC, env_with(PATH="/tc/bin:/usr/bin")), ["env-path"])
 expect("env PATH prefix lookalike", doc("gcc", GCC, env_with(PATH="/tcx/bin")), ["env-path"])
 expect("env TMPDIR under output ok", doc("gcc", GCC, env_with(TMPDIR="/out/tmp")), [])

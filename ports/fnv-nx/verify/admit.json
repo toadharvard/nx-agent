@@ -218,12 +218,6 @@
    "recipe": "ports/fnv-nx/rt/guest_main/build.json"
   },
   {
-   "path": "ports/fnv-nx/verify/probes",
-   "class": "product",
-   "target": "guest",
-   "recipe": "ports/fnv-nx/verify/probes/build.json"
-  },
-  {
    "path": "ports/fnv-nx/hostabi",
    "class": "product",
    "target": "guest",

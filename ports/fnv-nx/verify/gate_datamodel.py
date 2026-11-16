@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gate "datamodel" (fnvnx-gate/1, VERDICT.md class A: data model): every unit of a guest product root is compiled by the pinned game
 compiler in the exe's data model.
-    python3 -I gate_datamodel.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/datamodel.json
+    python3 -I gate_datamodel.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/datamodel.json
 Universe (through gate_build.quantify): the admitted product roots with "target": "guest" (a host root has none); per root one item
 `<root>:compiler` plus one item `<root>/<unit>` per unit of the build. No guest root: universe 0, green.
 Certificate, read from the build's own outputs (objects.json of the root, the CC stage documents of its units in GATE_CACHE/store/stage-docs,
@@ -31,8 +31,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gate_build  # noqa: E402
 import recipe  # noqa: E402
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: `verify` is imported by its qualified name
-from verify import targets  # noqa: E402
+import targets  # noqa: E402
 
 ILP32 = targets.abi_flag(targets.load())   # the declared guest platform record, not a literal
 DATAMODEL = targets.load()["references"]["datamodel"]   # the one table of the exe's data model (L2, fnvnx-datamodel/2): its path is a reference of the declared targets
@@ -188,7 +187,7 @@ def judge_root(root, repo, cache):
     try:
         res, _ = gate_build.ensure(root, cache, repo)
     except recipe.RecipeError as e:
-        us = [root + "/" + u for u in recipe.units_of(rec, root, files, roots, repo)] if isinstance(rec, dict) else []
+        us = [root + "/" + u for u in recipe.units_of(rec, root, files)] if isinstance(rec, dict) else []
         return len(us) + 1, 0, [item] + us, "invalid recipe: %s" % "; ".join(e.errors)[:300]
     units = [recipe.split_spec(root)[0] + "/" + u for u in res.get("units", [])]
     if res["status"] != "green":

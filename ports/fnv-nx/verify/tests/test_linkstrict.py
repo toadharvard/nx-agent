@@ -221,13 +221,6 @@ items, finds = L.judge({"g/o.o": L.elf_symbols(an)}, {}, {}, {}, None, ["g/"])
 check("(e) the same code with -mno-outline-atomics: no reference, no finding", not finds, finds)
 items, finds = L.judge({"h/o.o": L.elf_symbols(ao)}, {}, {}, {}, None, ["g/"])
 check("(e) outside a guest root the clause does not apply (an undefined name only)", [k for _, _, k, _ in finds] == ["undefined"], finds)
-# (g) the pinned runtime and the link script define names for the guest root's references
-items, finds = L.judge({"g/o.o": hs}, {}, {}, {}, None, ["g/"], {"printf"})
-check("(g) a guest reference that the runtime defines (printf) is certified, the name nothing defines stays undefined", [(o, n, k) for o, n, k, _ in finds] == [("g/o.o", "nothere", "undefined")], finds)
-items, finds = L.judge({"g/o.o": hs}, {}, {}, {}, None, ["g/"], set())
-check("(g) with no runtime name both stay undefined", sorted(n for _, n, _, _ in finds) == ["nothere", "printf"], finds)
-items, finds = L.judge({"h/o.o": hs}, {}, {}, {}, None, ["g/"], {"printf", "nothere"})
-check("(g) outside a guest root the runtime does not apply", sorted(n for _, n, _, _ in finds) == ["nothere", "printf"], finds)
 ABI[0] = "lp64"
 print("%d failed, wall %.1f s" % (len(FAILED), time.time() - T0))
 sys.exit(1 if FAILED else 0)

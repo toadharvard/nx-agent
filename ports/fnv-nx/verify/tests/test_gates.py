@@ -55,7 +55,7 @@ def put(d, rel, text, mode=None):
 def gate(script, cwd, args):
     out = tempfile.mkdtemp(dir=ROOT, prefix="out-")
     p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, script)] + args, cwd=cwd, capture_output=True, text=True,
-                       env=dict(os.environ, GATE_OUT=out))
+                       env=dict(os.environ, GATE_OUT=out, GATE_COMMIT="0" * 40))
     res = None
     for f in sorted(x for x in os.listdir(out) if not x.endswith(".times.json")):
         res = json.load(open(os.path.join(out, f)))
@@ -208,7 +208,7 @@ check("gates.d: format and the gates", spec["format"] == "fnvnx-gates/1" and {"p
 
 # ---- l1
 def l1(*a):
-    p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "l1.py"), a[0], "--artifacts", ENV.get("ARTIFACTS_URL", "file:///none")] + list(a[1:]), capture_output=True, text=True, env=ENV)
+    p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "l1.py")] + list(a), capture_output=True, text=True, env=ENV)
     lines = [x for x in p.stdout.splitlines() if x.startswith("L1 ")]
     return p.returncode, lines[-1] if lines else "", p.stdout, p.stderr
 

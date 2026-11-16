@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gate "hostapi" (fnvnx-gate/1): the host services declared in fnvnx/hostapi.h are exactly the services the product calls.
-    python3 -I gate_hostapi.py [--header PATH]     cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/hostapi.json
+    python3 -I gate_hostapi.py [--header PATH]     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/hostapi.json
 Rule (owner order 2026-11-10/11: nothing that the product does not need, no placeholder behind a number): hostapi.h is an interface root's header
 (hostabi/); {service numbers declared in the header} == {service numbers expanded by at least one unit of ANY admitted product root that includes
 it}: the universe is per interface, over the union of all its includers (L1 decision 2026-11-12), never per including root. A service that no

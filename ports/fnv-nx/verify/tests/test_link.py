@@ -107,7 +107,7 @@ LD = ("ld:" + ROOT, "ld:" + ROOT + ":select")    # the link stage; the member se
 
 def main():
     subprocess.run(["git", "init", "-q", "--bare", BASE + "/artifacts.git"], check=True)
-    TR.recipe.ARTIFACTS = BASE + "/artifacts.git"
+    os.environ["ARTIFACTS_URL"] = BASE + "/artifacts.git"
     SS = BASE + "/store"
     LB = (LIB, (LIB_REC, {"l.c": "int f_b(void) { return 14; }\n"}))
 

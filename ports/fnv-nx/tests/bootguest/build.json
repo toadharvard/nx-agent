@@ -30,19 +30,17 @@
  ],
  "units": "all",
  "uses": [
-  {"root": "ports/fnv-nx/hostabi", "output": "INCLUDE"}
+  {
+   "root": "ports/fnv-nx/hostabi",
+   "output": "INCLUDE"
+  }
  ],
  "link": {
   "output": "bootguest.elf",
   "flags": [
    "-m",
    "aarch64linux32"
-  ]
- },
- "uses": [
-  {
-   "root": "ports/fnv-nx/hostabi",
-   "output": "INCLUDE"
-  }
- ]
+  ],
+  "entry": "bootguest_entry"
+ }
 }

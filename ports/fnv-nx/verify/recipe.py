@@ -3854,78 +3854,8 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=N
     return res
 
 
-def need_store(opt):
-    """The --store of a store command: a required argument (no default from the environment)."""
-    if not opt.get("--store"):
-        raise RecipeError(["missing --store DIR"])
-    return opt["--store"]
-
-
-def norm_root(repo, spec):
-    """The one normalization of a --root argument ROOT[@VARIANT]: an absolute path inside the checkout REPO becomes the relative root id; a path outside it is
-    RecipeError "root must be inside the checkout: PATH"; a spec that is not an admitted root with a recipe is RecipeError (never an uncaught KeyError)."""
-    if not isinstance(spec, str) or not spec:
-        raise RecipeError(["missing --root ROOT"])
-    path, sep, var = spec.partition("@")
-    if os.path.isabs(path):
-        top = os.path.realpath(repo)
-        rel = os.path.relpath(os.path.realpath(path), top)
-        if rel == ".." or rel.startswith("../") or rel == ".":
-            raise RecipeError(["root must be inside the checkout: %s" % path])
-        path = rel
-    path = os.path.normpath(path)
-    ent = load_admit(repo).get(path)
-    if not (isinstance(ent, dict) and ent.get("recipe")):
-        raise RecipeError(["root %s is not an admitted root with a recipe" % path])
-    return path + sep + var
-
-
-def declared_externals(repo, prefix=""):
-    """[(ref, commit, tree_sha256)] sorted: the fetched externals (not a root's stage outputs) that the recipes of the admitted roots declare, whose `ref` starts
-    with PREFIX. A rule over the admitted set and the recipes (the variants carry no externals of their own), no list; the same ref pinned two ways by two
-    recipes is RecipeError (a ref has one pin). What a consumer of the declared content (the boot machine's game directory) is allowed to read."""
-    out, bad = {}, []
-    roots = load_admit(repo)
-    for r in sorted(roots):
-        if not roots[r].get("recipe"):
-            continue
-        with open(os.path.join(repo, roots[r]["recipe"])) as fh:
-            rec = json.load(fh)
-        for e in rec.get("external", []) if isinstance(rec, dict) else []:
-            if is_stage_ext(e) or not str(e.get("ref", "")).startswith(prefix):
-                continue
-            pin = (e["commit"], e["tree_sha256"])
-            if out.setdefault(e["ref"], pin) != pin:
-                bad.append("external %s is pinned two ways (%s and %s)" % (e["ref"], out[e["ref"]], pin))
-    if bad:
-        raise RecipeError(bad)
-    return sorted((ref, c, t) for ref, (c, t) in out.items())
-
-
-def externals_cmd(repo, opt):
-    """recipe externals --ref-prefix P [--ref R] [--fetch --store S --ext E --ws W --artifacts URL]: the declared externals with the ref prefix P, one `ref TAB commit TAB
-    tree_sha256` line each; with --fetch, each is fetched by its commit and checked against its tree_sha256 by fetch_externals (the one mechanism of every
-    external: BuildRed on a mismatch), and the line is `ref TAB checkout dir`. A branch head is never fetched."""
-    rows = declared_externals(repo, opt.get("--ref-prefix", ""))
-    if "--ref" in opt:   # exactly one ref (a prefix names Voices1 and Voices10 alike): its declared row, or an error
-        rows = [r for r in rows if r[0] == opt["--ref"]]
-        if not rows:
-            raise RecipeError(["external %s is declared by no recipe" % opt["--ref"]])
-    if "--fetch" not in opt:
-        return ["%s\t%s\t%s" % r for r in rows]
-    store, ext = need_store(opt), opt.get("--ext") or ext_of_store(need_store(opt))
-    if "--artifacts" in opt:
-        set_artifacts(ext, opt["--artifacts"])
-    exts = [{"name": ref.replace("/", "_"), "commit": c, "tree_sha256": t, "at": "/ext/" + ref.replace("/", "_")} for ref, c, t in rows]
-    with tempfile.TemporaryDirectory() as ws:
-        got = fetch_externals(exts, store, ext, ws)
-    return ["%s\t%s" % (ref, got[ref.replace("/", "_")]["host"]) for ref, _, _ in rows]
-
-
 def main(argv):
     opt = dict(zip(argv[1::2], argv[2::2]))
-    if argv[:1] == ["externals"]:   # a flag without a value (--fetch) is read before the pairs are
-        opt = dict(zip([a for a in argv[1:] if a != "--fetch"][0::2], [a for a in argv[1:] if a != "--fetch"][1::2]), **({"--fetch": "1"} if "--fetch" in argv else {}))
     try:
         repo = "."
         if argv[:1] == ["store-merge"]:   # recipe store-merge SRC [--store DST]: DST defaults to $GATE_CACHE/store
@@ -3947,9 +3877,6 @@ def main(argv):
                 print(json.dumps(res["failure"], indent=1))
                 return 2
             print(json.dumps(timing_report(o["--store"], res["stage_keys"]), indent=1, sort_keys=True))
-            return 0
-        if argv[:1] == ["externals"]:
-            print("\n".join(externals_cmd(repo, opt)))
             return 0
         if argv[:1] == ["check"]:
             roots = load_admit(repo)

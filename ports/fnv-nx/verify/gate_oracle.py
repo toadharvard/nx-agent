@@ -31,7 +31,7 @@ Rule. A test file is certified iff ALL hold:
   2. `subject` is not empty and every subject path is a tracked file inside a root of verify/admit.json;
   3. `references` is not empty and every REF has one of the forms above; `wine` is "9.0"; `exe_sha256` equals
      verify/oracle_pins.json "exe_sha256"; the artifact is fetched by its exact commit (`git fetch --depth 1
-     <artifacts URL of the run> <commit>`, cached in GATE_CACHE/external/<commit> like a recipe's external), its tree hash
+     $ARTIFACTS_URL <commit>`, cached in GATE_CACHE/external/<commit> like a recipe's external), its tree hash
      (cas.py) equals `tree_sha256` and `path` is a file of it; every `path` of a spec, contract or model is a tracked
      file inside a root; an external or probe names externals pinned by a recipe or the contract inputs, fetched to their
      tree_sha256, holding the path; a spec's anchor resolves in its file. A spec without a file and an anchor is not a reference;
@@ -325,12 +325,13 @@ def load(path):
         return None
 
 
+ARTIFACTS_URL = "https://github.com/toadharvard/fnv-nx-build"
 
 
 def fetcher(cache):
     """artifact(commit) of judge: the commit of the artifacts repository as a tree hash and its file list.
     Bare fetches are kept in CACHE/<commit> (the layout recipe.py uses for externals); results are memoised per run."""
-    url = recipe.artifacts_url(cache)   # the verdict's record (l1.py --artifacts), beside the external cache
+    url = os.environ.get("ARTIFACTS_URL", ARTIFACTS_URL)
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
     memo = {}
 
@@ -408,7 +409,7 @@ def main():
         with open(p, encoding="utf-8", errors="surrogateescape") as fh:
             return fh.read()
     tmp = None if os.environ.get("GATE_CACHE") else tempfile.mkdtemp(prefix="gate-oracle-cache-")
-    cache = recipe.ext_dir(os.environ.get("GATE_CACHE") or tmp)
+    cache = os.path.join(os.environ.get("GATE_CACHE") or tmp, "external")
     os.makedirs(cache, exist_ok=True)
     try:
         bad = judge(files, decls, tracked, roots, pins, read, fetcher(cache), external_pins(roots))

@@ -11,7 +11,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 import gate_imports as G  # noqa: E402
-import linkset  # noqa: E402
 import test_recipe as TR  # noqa: E402
 import verdict  # noqa: E402
 
@@ -29,7 +28,7 @@ res = {"defined": [{"symbol": "a", "bind": "GLOBAL", "type": "FUNC", "object": "
        "undefined": ["b"]}
 check("symbols: defined entries and referenced names", G.symbols(res) == {"a": [("GLOBAL", "FUNC"), ("WEAK", "FUNC")], "b": [("UND", "NOTYPE")]}, G.symbols(res))
 
-TR.recipe.ARTIFACTS = TR.BASE + "/artifacts.git"
+os.environ["ARTIFACTS_URL"] = TR.BASE + "/artifacts.git"
 TR.subprocess.run(["git", "init", "-q", "--bare", TR.BASE + "/artifacts.git"], check=True)
 GC = TR.BASE + "/cache"
 
@@ -107,10 +106,8 @@ check("imports.in.json with unknown keys is red", rc == 2 and g["status"] == "re
 
 # class import-provider (a fact of the build's symbol table): a second product root that declares nothing is outside the gate's universe when it
 # defines no native symbol of the bridge table (the loader, lib/sha256), and is the one red item when it defines one (f_a here).
-def two_roots(tag, body, names="toy.dll\tf_a\ntoy.dll\tf_b\nmsvcrt.dll\tmemcpy\nmsvcrt.dll\tstrlen\n", table="memcpy\tf_b\tfunc\nstrlen\tf_c\tfunc\n", own=None):
-    repo = toy_repo(tag, names, table)
-    if own:
-        TR.w(repo, "toy/own.c", own)
+def two_roots(tag, body):
+    repo = toy_repo(tag, "toy.dll\tf_a\ntoy.dll\tf_b\nmsvcrt.dll\tmemcpy\nmsvcrt.dll\tstrlen\n", "memcpy\tf_b\tfunc\nstrlen\tf_c\tfunc\n")
     rec2 = {"format": "fnvnx-recipe/1", "compiler": TR.RECIPE["compiler"], "flags": TR.RECIPE["flags"], "include": [], "units": "all", "link": None}
     TR.w(repo, "toy2/x.c", body)
     TR.w(repo, "toy2/build.json", json.dumps(rec2))
