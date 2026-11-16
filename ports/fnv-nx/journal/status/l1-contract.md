@@ -2937,3 +2937,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Red: 6 vacuous (abi, addr32, argordergate, hostapi, order, rtasm); datamodel S29 on 5 roots; imports 0/3; linkstrict (ld: no input files on hostabi); objstub (12 uncited); oracle (2 anchors); pure (gen_header, targets); selftests 105/170.
   - w15 is fixing: linkstrict from the synth_names fix, pure from the FPCR move, the oracle anchors, the host ld for the toy link, and the tempdir leaks. The rest are triaged and reported.
 - bottleneck: cand4 reds (w15).
+- Orchestrator ruling: cand4 gets one fix round. Whatever is still red at the next verdict is dropped, and the green rest merges.
+  - Vacuous gates: by VERDICT.md:118-119, an admitted root with universe 0 is red. The gate reads its roots this round, or the roots are dropped. It is never made green over a universe it does not read.
+  - objstub: L5 gets the 12 findings (sent raw by the farm) and the citation format, with 30 minutes, on claude/fnv-l5-platform-cand4-cite.
