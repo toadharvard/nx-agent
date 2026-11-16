@@ -1,26 +1,36 @@
-"""The CPUID feature-bit table of lift/proof tests, from its ONE pin: the external `cpufeat` of lift/liftsrc/build.json (commit + tree_sha256).  path() -> the file cpuid_feature_bits.tsv of that commit, checked out
-of the fnv-nx-build clone $FNVNX_BUILD and verified against tree_sha256 with verify/cas.ingest (the loader's own tree hash); (None, reason) when the clone, the commit or the hash is not there (the caller skips with the reason).
-FNVNX_CPUFEAT (a file) takes precedence, as in test_simdcheck."""
-import json, os, subprocess, sys, tempfile
+"""The CPUID feature-bit table of lift/proof tests: the same function of the same pins as the recipe stage lift/cpufeat (RECIPE: pdftotext of the pinned SDM and AMD APM volumes, then `sdmfeat.py features`), run here over the
+declared inputs of the test: FNVNX_SDM_TXT (pdftotext -layout of the pinned SDM, its PDF beside it as sdm.pdf) and FNVNX_BUILD (a clone of fnv-nx-build holding the pins of proof/pins.json `external` amd-apm, amd-apm-vol5).  There is no
+committed copy of the table and no file to point at.  path() -> (the table's path, None); (None, reason) when an input is not there (the caller skips with the reason)."""
+import hashlib, json, os, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-FNVNX = os.path.normpath(os.path.join(HERE, '..', '..', '..'))
-FILE = 'cpuid_feature_bits.tsv'
+PROOF = os.path.normpath(os.path.join(HERE, '..'))
+_CACHE = []
 
 
 def path():
-    p = os.environ.get('FNVNX_CPUFEAT')
-    if p: return p, None
-    b = os.environ.get('FNVNX_BUILD')
-    if not b or not os.path.isdir(b): return None, 'declared input not available: FNVNX_CPUFEAT (the table) or FNVNX_BUILD (a clone of fnv-nx-build holding the pin of lift/liftsrc/build.json external cpufeat)'
-    e = [x for x in json.load(open(os.path.join(FNVNX, 'lift', 'liftsrc', 'build.json')))['external'] if x['name'] == 'cpufeat'][0]
-    d = os.path.join(tempfile.mkdtemp(prefix='cpufeat-'), 'tree')
-    os.makedirs(d)
-    try:
-        tar = subprocess.run(['git', '-C', b, 'archive', e['commit']], check=True, capture_output=True).stdout
-        subprocess.run(['tar', '-x', '-C', d], input=tar, check=True)
-    except subprocess.CalledProcessError: return None, 'the pinned commit %s of the external cpufeat is not in %s' % (e['commit'], b)
-    sys.path.insert(0, os.path.join(FNVNX, 'verify'))
-    import cas
-    if cas.ingest(d, tempfile.mkdtemp(prefix='cpufeat-store-')) != e['tree_sha256']: return None, 'tree_sha256 of the checkout differs from the pin of the external cpufeat'
-    return os.path.join(d, FILE), None
+    if _CACHE: return _CACHE[0]
+    sdm, b = os.environ.get('FNVNX_SDM_TXT'), os.environ.get('FNVNX_BUILD')
+    if not sdm or not os.path.isfile(sdm) or not os.path.isfile(sdm[:-4] + '.pdf'): r = (None, 'declared input not available: FNVNX_SDM_TXT (pdftotext -layout of the pinned SDM, sdm.pdf beside it)')
+    elif not b or not os.path.isdir(b): r = (None, 'declared input not available: FNVNX_BUILD (a clone of fnv-nx-build holding the pinned AMD APM volumes of proof/pins.json)')
+    else: r = (_build(sdm, b), None)
+    _CACHE.append(r); return r
+
+
+def _build(sdm, b):
+    pins = [e for e in json.load(open(os.path.join(PROOF, 'pins.json')))['external'] if e['name'].startswith('amd-apm')]
+    d = tempfile.mkdtemp(prefix='cpufeat-'); apm = []
+    for i, pin in enumerate(pins):
+        subprocess.run(['git', '-C', b, 'fetch', '-q', 'origin', pin['ref']], check=True)
+        pdf = os.path.join(d, 'apm%d.pdf' % i)
+        open(pdf, 'wb').write(subprocess.run(['git', '-C', b, 'show', '%s:%s' % (pin['commit'], pin['file'])], check=True, capture_output=True).stdout)
+        assert hashlib.sha256(open(pdf, 'rb').read()).hexdigest() == pin['sha256'], pin['name']
+        subprocess.run(['pdftotext', '-layout', pdf, pdf[:-4] + '.txt'], check=True); apm += ['--apm', pdf]
+    out = os.path.join(d, 'cpuid_feature_bits.tsv')
+    sys.path.insert(0, PROOF)
+    import sdmfeat
+    with open(os.devnull, 'w') as nul:
+        so, sys.stdout = sys.stdout, nul
+        try: assert sdmfeat.main(['features', sdm, out] + apm) == 0
+        finally: sys.stdout = so
+    return out

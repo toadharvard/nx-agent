@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """simdcheck's class order: a shape whose f_cpufeat.missing() is non-empty is ud-class, before any Form or row step, and no other shape is.  The universe is the keys file in $FNV_SIMD_KEYS (one shape key per line; the SIMD shape keys
-of the pack / census, private) and, always, the keys named below.   python3 -I tests/test_simdclass.py [--cpufeat PATH]     (PATH: the CPUID feature-bit table; default: FNVNX_CPUFEAT, else the pin of lift/liftsrc/build.json read from the clone $FNVNX_BUILD; absent: skipped with the reason)"""
+of the pack / census, private) and, always, the keys named below.   python3 -I tests/test_simdclass.py     (the CPUID feature-bit table is derived from the pins by declared_cpufeat, as lift/cpufeat does; an input absent: skipped with the reason)"""
 import os, sys, unittest
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.join(HERE, '..', '..')); sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 import declared_cpufeat
-CPUFEAT, WHY = declared_cpufeat.path()               # --cpufeat PATH on the command line, else FNVNX_CPUFEAT, else the pin of lift/liftsrc/build.json from $FNVNX_BUILD; absent: the test skips with the reason
-if '--cpufeat' in sys.argv:
-    i = sys.argv.index('--cpufeat'); CPUFEAT, WHY = sys.argv[i + 1], None; del sys.argv[i:i + 2]
+CPUFEAT, WHY = declared_cpufeat.path()               # derived from the pins (declared_cpufeat); absent input: the test skips with the reason
 if CPUFEAT:
     from fnvlift import inputs
     inputs.configure(cpufeat=CPUFEAT)                 # before the imports below: f_cpufeat reads the table when it is loaded

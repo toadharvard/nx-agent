@@ -6,7 +6,8 @@ import os, sys, unittest
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE)); sys.path.insert(0, os.path.join(HERE, '..', '..'))
 sys.path.insert(0, HERE)
 import declared_x86sys; declared_x86sys.configure()
-CPUFEAT = os.environ.get('FNVNX_CPUFEAT')      # declared input: the CPUID feature-bit table (sdmfeat.py features ...); simdcheck.check puts a cleared-feature shape in the ud class first
+import declared_cpufeat
+CPUFEAT, WHY = declared_cpufeat.path()      # declared input: the CPUID feature-bit table (the function of the pins that lift/cpufeat is); simdcheck.check puts a cleared-feature shape in the ud class first
 if CPUFEAT:
     from fnvlift import inputs; inputs.configure(cpufeat=CPUFEAT)
 import simdcheck as C
@@ -16,7 +17,7 @@ KEYS = {'pxor': '0fef02/0.0.0.0', 'pxor_disp': '0fef0500000000/0.0.3.4', 'movaps
         'movd_g': '0f6ec1/0.0.0.0', 'movss_m': 'f30f1000/0.0.0.0', 'movups_st': '0f1100/0.0.0.0', 'pcmpgtw': '0f65c1/0.0.0.0', 'movmskps': '0f50c1/0.0.0.0'}
 
 
-@unittest.skipUnless(CPUFEAT, 'declared input not set: FNVNX_CPUFEAT (the CPUID feature-bit table, sdmfeat.py features)')
+@unittest.skipUnless(CPUFEAT, WHY)
 class Check(unittest.TestCase):
     def test_proves(self):
         for n, k in KEYS.items(): self.assertEqual(C.check(k)[0], 'proved', n)
