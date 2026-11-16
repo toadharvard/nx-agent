@@ -454,3 +454,15 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - blocked (owner L1): lift/proof/isla red. verify/sandbox.py:110-118 returns ENOSYS for getrandom; OpenSSL in cargo's libgit2 needs it. The rule (constant stream for every entropy interface) was sent to w28.
 - open (owner L1): recipe.py _deb_tree copies symlink targets from the host (alternatives), not from the deb.
 - doing: integer shards 2 and 3, SIMD shard 1.
+
+## 2026-11-16 04:10Z (claude/fnv-l3b-lift 60525f7a6)
+- done (farm 4, session_01KmtZKTRYAYnFcNiHPpfXLr): the three toolchain roots are green on the recipe.
+  - lift/proof/isla GREEN at 60525f7a6 (288 s cold): ISLA sha256 9d5432cdeed0365a882d22e90625e565d64f06b9cfe428f7f665c990b775b5e5, Z3LIB sha256 63f20f0e05ca7eda917ebac77cfdab7530c88bf70d553b159950794c10fa4455. `--help` runs against Z3LIB.
+  - lift/proof/sailmodel GREEN at 103d1f743: MODEL sha256 ea88b550...2f27.
+  - lift/rcpgen GREEN at 8abd1ab02: rcptab.c sha256 d2a3920e...58f5 = committed.
+  - Fixes taken from L1: debs are each deb's own data (3de3eee4e, 08109b9ce) and getrandom gets the constant stream (c071d7e1b).
+  - Our fixes: TMPDIR=/scratch; linker, CC and CXX = the root's host compiler.
+- done (farms 1-4): integer re-prove of queue 257a93722adb, 515 rows at 48ef39ad8. The farm counts are proved 2, model-gap 501, model-defect 4, timeout 7, agree-except-declared 1. w4 is aggregating (REQUIRE_ALL, WITHHELD) and writing the census by opcode; the next step is the ACL2-derived model patch.
+- red (owner L3a w13): udsail at 183e1ebef. All 6 baddecode sequences are GAP: isla returns no path on the ctrs vector spelling. w13 is to read the IR via formgate.ir_path (8b711fba) and rerun once.
+- doing: SIMD shards 1 and 2 (farms 1 and 3).
+- next: the prover as a recipe stage over ISLA/MODEL, with a pinned deterministic bound in place of the TIMEOUT wall clock.
