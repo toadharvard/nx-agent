@@ -154,13 +154,6 @@
   {
    "id": "ASM-001",
    "text": "The compiler is correct (the pinned msvcmodel GCC and the pinned toolchain).",
-   "used_by": [
-    "ports/fnv-nx/verify/MEMSAFE.md",
-    "ports/fnv-nx/verify/RULES.md",
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/VERDICT.md",
-    "ports/fnv-nx/verify/gate_assumptions.py"
-   ],
    "aliases": [
     "L1:A2",
     "MASTER_PLAN4:A2",
@@ -176,10 +169,6 @@
   {
    "id": "ASM-002",
    "text": "SHA-256 is collision resistant and preimage resistant (cache keys, fact hashes).",
-   "used_by": [
-    "ports/fnv-nx/verify/RULES.md",
-    "ports/fnv-nx/verify/VERDICT.md"
-   ],
    "aliases": [
     "RULES:A9",
     "MASTER_PLAN4:A9"
@@ -193,11 +182,6 @@
   {
    "id": "ASM-003",
    "text": "Win32 and D3D9 behave as documented (no formal model); the declared machine answers as Wine 9.0 / Windows document.",
-   "used_by": [
-    "ports/fnv-nx/contract/iat.py",
-    "ports/fnv-nx/contract/modules.py",
-    "ports/fnv-nx/verify/VERDICT.md"
-   ],
    "aliases": [
     "MASTER_PLAN4:A8",
     "L3b:A-FLAT",
@@ -213,11 +197,6 @@
   {
    "id": "ASM-004",
    "text": "The console's behaviour holds as assumed until a run on it.",
-   "used_by": [
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/VERDICT.md",
-    "ports/fnv-nx/verify/gate_assumptions.py"
-   ],
    "aliases": [
     "Horizon behaviour"
    ],
@@ -230,10 +209,6 @@
   {
    "id": "ASM-005",
    "text": "Native code is tested by ASan/UBSan, not proven; external libraries (libc, libnx, FreeType, minimp3) are taken by their documentation.",
-   "used_by": [
-    "ports/fnv-nx/verify/MEMSAFE.md",
-    "ports/fnv-nx/verify/VERDICT.md"
-   ],
    "aliases": [
     "native code checked not proved",
     "External libraries by documentation"
@@ -247,9 +222,6 @@
   {
    "id": "ASM-006",
    "text": "The exe makes no wild accesses: array indices are in bounds, guest accesses do not reach host pages.",
-   "used_by": [
-    "ports/fnv-nx/verify/VERDICT.md"
-   ],
    "aliases": [
     "L3b:A-SEGLIM",
     "L3b:A-NOSTRADDLE",
@@ -264,9 +236,6 @@
   {
    "id": "ASM-007",
    "text": "The address space is 32-bit, ILP32.",
-   "used_by": [
-    "ports/fnv-nx/verify/VERDICT.md"
-   ],
    "aliases": [],
    "status": "OWNER",
    "decision": {
@@ -277,9 +246,6 @@
   {
    "id": "ASM-008",
    "text": "Floating point is IEEE binary32/binary64.",
-   "used_by": [
-    "ports/fnv-nx/verify/VERDICT.md"
-   ],
    "aliases": [
     "L3b:A-IEEE-X87FLAGS"
    ],
@@ -292,12 +258,6 @@
   {
    "id": "ASM-009",
    "text": "The pinned formal tools and published theorems are correct: the Sail CPU model at its pinned patch, isla and z3, the published proof of the x86-TSO to Arm memory mapping.",
-   "used_by": [
-    "ports/fnv-nx/verify/RULES.md",
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/VERDICT.md",
-    "ports/fnv-nx/verify/gate_assumptions.py"
-   ],
    "aliases": [
     "L3b:A-SAILMODEL",
     "L3b:A-PROVER",
@@ -312,13 +272,6 @@
   {
    "id": "ASM-010",
    "text": "A callee preserves ebx, esi, edi, ebp (and not eax, ecx, edx).",
-   "used_by": [
-    "ports/fnv-nx/contract/argflow.py",
-    "ports/fnv-nx/contract/gate_reach.py",
-    "ports/fnv-nx/contract/memfx.py",
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/VERDICT.md"
-   ],
    "aliases": [
     "argflow A1",
     "memfx A1",
@@ -331,11 +284,6 @@
   {
    "id": "ASM-011",
    "text": "The outgoing-argument area and a frame slot whose address is never taken are written only by the instructions that name them.",
-   "used_by": [
-    "ports/fnv-nx/contract/argflow.py",
-    "ports/fnv-nx/contract/gate_reach.py",
-    "ports/fnv-nx/verify/TOOLS.md"
-   ],
    "aliases": [
     "argflow A2"
    ],
@@ -346,11 +294,6 @@
   {
    "id": "ASM-012",
    "text": "The only way code obtains a code address is a relocated word (no PIC).",
-   "used_by": [
-    "ports/fnv-nx/contract/argflow.py",
-    "ports/fnv-nx/contract/gate_reach.py",
-    "ports/fnv-nx/verify/TOOLS.md"
-   ],
    "aliases": [
     "argflow A3"
    ],
@@ -361,12 +304,6 @@
   {
    "id": "ASM-013",
    "text": "The facts' code ranges contain every instruction of every function and every target of an indirect jump is a relocated word into the ranges; code ranges are instruction-aligned and complete.",
-   "used_by": [
-    "ports/fnv-nx/contract/argflow.py",
-    "ports/fnv-nx/contract/gate_reach.py",
-    "ports/fnv-nx/contract/memfx.py",
-    "ports/fnv-nx/verify/TOOLS.md"
-   ],
    "aliases": [
     "argflow A4",
     "memfx A4",
@@ -379,11 +316,6 @@
   {
    "id": "ASM-014",
    "text": "A call to a direct callee removes the callee's uniform `ret n` bytes.",
-   "used_by": [
-    "ports/fnv-nx/contract/argflow.py",
-    "ports/fnv-nx/contract/gate_reach.py",
-    "ports/fnv-nx/verify/TOOLS.md"
-   ],
    "aliases": [
     "argflow A5"
    ],
@@ -394,11 +326,6 @@
   {
    "id": "ASM-015",
    "text": "Memory [R+d] through a pointer register is not a slot of the current frame.",
-   "used_by": [
-    "ports/fnv-nx/contract/argflow.py",
-    "ports/fnv-nx/contract/gate_reach.py",
-    "ports/fnv-nx/verify/TOOLS.md"
-   ],
    "aliases": [
     "argflow A6"
    ],
@@ -409,11 +336,6 @@
   {
    "id": "ASM-016",
    "text": "Mode 'open' of the handle origin walk (calls transparent): a call between a store through R and a load through R does not write that memory.",
-   "used_by": [
-    "ports/fnv-nx/contract/argflow.py",
-    "ports/fnv-nx/contract/gate_reach.py",
-    "ports/fnv-nx/verify/TOOLS.md"
-   ],
    "aliases": [
     "argflow A7",
     "gate_reach BLOCKING A7"
@@ -426,12 +348,6 @@
   {
    "id": "ASM-017",
    "text": "The provenance premise P of memfx: a value that is not derived from the address of an object does not address it.",
-   "used_by": [
-    "ports/fnv-nx/contract/argflow.py",
-    "ports/fnv-nx/contract/gate_reach.py",
-    "ports/fnv-nx/contract/memfx.py",
-    "ports/fnv-nx/verify/TOOLS.md"
-   ],
    "aliases": [
     "argflow A8",
     "memfx P"
@@ -443,10 +359,6 @@
   {
    "id": "ASM-018",
    "text": "G1: the only way to get an import's address other than its import slot is GetProcAddress.",
-   "used_by": [
-    "ports/fnv-nx/contract/gate_reach.py",
-    "ports/fnv-nx/verify/TOOLS.md"
-   ],
    "aliases": [
     "gate_reach G1"
    ],
@@ -457,10 +369,6 @@
   {
    "id": "ASM-019",
    "text": "G2: a forwarder chain between distinct dll names is not followed.",
-   "used_by": [
-    "ports/fnv-nx/contract/gate_reach.py",
-    "ports/fnv-nx/verify/TOOLS.md"
-   ],
    "aliases": [
     "gate_reach G2"
    ],
@@ -471,10 +379,6 @@
   {
    "id": "ASM-020",
    "text": "No mapping of the process intersects [SENTINEL, LIMIT) (below 0x00200000), so a loader key is never a readable or executable address.",
-   "used_by": [
-    "ports/fnv-nx/contract/iat.py",
-    "ports/fnv-nx/verify/TOOLS.md"
-   ],
    "aliases": [
     "iat sentinel"
    ],
@@ -485,10 +389,6 @@
   {
    "id": "ASM-022",
    "text": "The platform writes through a pointer argument only as ImportInfo says (default: every pointer argument may be written); a callee reads no register of an import call; no code outside the images writes the tracked memory except through the imports.",
-   "used_by": [
-    "ports/fnv-nx/contract/memfx.py",
-    "ports/fnv-nx/verify/TOOLS.md"
-   ],
    "aliases": [
     "memfx platform contract"
    ],
@@ -499,9 +399,6 @@
   {
    "id": "ASM-023",
    "text": "Pointers into .text used as data are absent (jump tables live in .text and are not needed).",
-   "used_by": [
-    "ports/fnv-nx/docs/DATAIMAGE.md"
-   ],
    "aliases": [
     "DATAIMAGE .text pointers"
    ],
@@ -512,11 +409,6 @@
   {
    "id": "ASM-024",
    "text": "IPC 0.8 (range 0.6-1.0) and the clock 1.02-1.785 GHz are the inputs of the instruction budget.",
-   "used_by": [
-    "ports/fnv-nx/docs/PERF.md",
-    "ports/fnv-nx/docs/READINESS.md",
-    "ports/fnv-nx/docs/RENDER_PERF.md"
-   ],
    "aliases": [
     "PERF IPC",
     "READINESS assumptions.ipc"
@@ -528,9 +420,6 @@
   {
    "id": "ASM-025",
    "text": "The render cost model constants (coverage, overdraw, frames in flight, store bandwidth, draw mix, shader stand-ins) are model inputs, not measurements.",
-   "used_by": [
-    "ports/fnv-nx/docs/RENDER_PERF.md"
-   ],
    "aliases": [
     "RENDER_PERF assumptions"
    ],
@@ -541,9 +430,6 @@
   {
    "id": "ASM-026",
    "text": "The render front submits one packet arena per frame.",
-   "used_by": [
-    "ports/fnv-nx/docs/RENDER_NATIVE.md"
-   ],
    "aliases": [
     "RENDER_NATIVE front"
    ],
@@ -554,9 +440,6 @@
   {
    "id": "ASM-027",
    "text": "The list of GCC/MSVC divergences that defines the native subset P is complete (there is no formal semantics of MSVC 2008).",
-   "used_by": [
-    "ports/fnv-nx/verify/RULES.md"
-   ],
    "aliases": [
     "RULES A1"
    ],
@@ -567,9 +450,6 @@
   {
    "id": "ASM-028",
    "text": "The code does not modify itself (.text is mapped read-only).",
-   "used_by": [
-    "ports/fnv-nx/verify/RULES.md"
-   ],
    "aliases": [
     "RULES A6"
    ],
@@ -580,9 +460,6 @@
   {
    "id": "ASM-029",
    "text": "The ARMv8 memory model matches the Cortex-A57.",
-   "used_by": [
-    "ports/fnv-nx/verify/RULES.md"
-   ],
    "aliases": [
     "RULES A7"
    ],
@@ -593,9 +470,6 @@
   {
    "id": "ASM-030",
    "text": "The lifter keeps the exe's access order exactly; a native body runs the source's accesses in GCC's order.",
-   "used_by": [
-    "ports/fnv-nx/verify/RULES.md"
-   ],
    "aliases": [
     "RULES A10",
     "L2:ORDERING A10"
@@ -607,9 +481,6 @@
   {
    "id": "ASM-031",
    "text": "The key (unit, symbol) of a vftable relocation is unambiguous.",
-   "used_by": [
-    "ports/fnv-nx/verify/RULES.md"
-   ],
    "aliases": [
     "RULES key unambiguous"
    ],
@@ -620,11 +491,6 @@
   {
    "id": "ASM-032",
    "text": "Modules of the PURE table and the allowed members of RESTRICTED ones do not read clock, entropy or host identity.",
-   "used_by": [
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/puregate.py",
-    "ports/fnv-nx/verify/puregate_policy.py"
-   ],
    "aliases": [
     "puregate A-stdlib"
    ],
@@ -635,11 +501,6 @@
   {
    "id": "ASM-033",
    "text": "The external modules of puregate are pure.",
-   "used_by": [
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/puregate.py",
-    "ports/fnv-nx/verify/puregate_policy.py"
-   ],
    "aliases": [
     "puregate A-ext"
    ],
@@ -650,10 +511,6 @@
   {
    "id": "ASM-034",
    "text": "PYTHONHASHSEED=0 and set elements of str/bytes/int: set iteration order is a function of the insertion sequence.",
-   "used_by": [
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/puregate.py"
-   ],
    "aliases": [
     "puregate A-hashseed"
    ],
@@ -664,10 +521,6 @@
   {
    "id": "ASM-035",
    "text": "At run time the project imports resolve to the files the gate resolved (no other sys.path content).",
-   "used_by": [
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/puregate.py"
-   ],
    "aliases": [
     "puregate A-path"
    ],
@@ -678,10 +531,6 @@
   {
    "id": "ASM-036",
    "text": "Subprocess children, the files read and the environment are declared inputs (governed by the stage document).",
-   "used_by": [
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/puregate.py"
-   ],
    "aliases": [
     "puregate A-child"
    ],
@@ -692,10 +541,6 @@
   {
    "id": "ASM-037",
    "text": "Strings built at run time are not file names under the host-identity trees.",
-   "used_by": [
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/puregate.py"
-   ],
    "aliases": [
     "puregate A-text"
    ],
@@ -706,12 +551,6 @@
   {
    "id": "ASM-038",
    "text": "External tools invoked through toolflags are deterministic (A-env: the compiler and ld given the flags).",
-   "used_by": [
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/recipe.py",
-    "ports/fnv-nx/verify/toolflags.py",
-    "ports/fnv-nx/verify/toolflags_policy.py"
-   ],
    "aliases": [
     "toolflags A-env",
     "recipe A-env"
@@ -723,10 +562,6 @@
   {
    "id": "ASM-039",
    "text": "The sandbox leaves the channels of sandbox.OPEN_CHANNELS open.",
-   "used_by": [
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/recipe.py"
-   ],
    "aliases": [
     "recipe sandbox open channels"
    ],
@@ -737,10 +572,6 @@
   {
    "id": "ASM-040",
    "text": "GCC reads the content of a file only by lexing it (then it is in deps.d) or it fails.",
-   "used_by": [
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/unitstage.py"
-   ],
    "aliases": [
     "unitstage lexing"
    ],
@@ -751,10 +582,6 @@
   {
    "id": "ASM-041",
    "text": "`git ls-files` lists the tree under test.",
-   "used_by": [
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/gate_admit.py"
-   ],
    "aliases": [
     "gate_admit git ls-files"
    ],
@@ -765,12 +592,6 @@
   {
    "id": "ASM-042",
    "text": "The declaration of a test (the subject list is complete, the references are what it opens) is true.",
-   "used_by": [
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/VERDICT.md",
-    "ports/fnv-nx/verify/gate_oracle.py",
-    "ports/fnv-nx/verify/oraclecheck.py"
-   ],
    "aliases": [
     "gate_oracle declaration"
    ],
@@ -781,12 +602,6 @@
   {
    "id": "ASM-043",
    "text": "The instruction decoders are correct (LLVM's AArch64 descriptions, capstone).",
-   "used_by": [
-    "ports/fnv-nx/lift/proof/gate_fpexact.py",
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/VERDICT.md",
-    "ports/fnv-nx/verify/objstub.py"
-   ],
    "aliases": [
     "objstub LLVM decoder",
     "instrument decoder",
@@ -801,11 +616,6 @@
   {
    "id": "ASM-044",
    "text": "Every terminating routine of the toolchain is declared noreturn in the headers given.",
-   "used_by": [
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/VERDICT.md",
-    "ports/fnv-nx/verify/objstub.py"
-   ],
    "aliases": [
     "objstub noreturn"
    ],
@@ -816,10 +626,6 @@
   {
    "id": "ASM-045",
    "text": "The decoder's write sets name every register an instruction writes.",
-   "used_by": [
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/objstub.py"
-   ],
    "aliases": [
     "objstub write sets"
    ],
@@ -830,9 +636,6 @@
   {
    "id": "ASM-046",
    "text": "A pointer argument is tested alike by its low 32 bits (ILP32) or its full register.",
-   "used_by": [
-    "ports/fnv-nx/verify/objstub.py"
-   ],
    "aliases": [
     "objstub pointer argument"
    ],
@@ -843,11 +646,6 @@
   {
    "id": "ASM-050",
    "text": "The `names` plugin ran on every native C++ unit (the recipe's guest-compiler/plugin rule).",
-   "used_by": [
-    "ports/fnv-nx/contract/gate_call.py",
-    "ports/fnv-nx/verify/RULES.md",
-    "ports/fnv-nx/verify/TOOLS.md"
-   ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: gate datamodel (claude/fnv-l1-contract-w17) proves that every native C++ CC stage loads every required plugin, names included once w4's B2 adds it",
@@ -856,10 +654,6 @@
   {
    "id": "ASM-051",
    "text": "regsites.tsv is complete over the exe and the modules (the registry-site pass reports what it cannot bind as dynamic, never skips); the seed unit and the registry implementation are the only code that reaches the hive, and the implementation creates no key by itself.",
-   "used_by": [
-    "ports/fnv-nx/contract/hive.py",
-    "ports/fnv-nx/verify/TOOLS.md"
-   ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: a gate that the key and value-name arguments of every Reg* call site are statically resolved (the class of gpa's dynamic-name rule)",
@@ -868,10 +662,6 @@
   {
    "id": "ASM-052",
    "text": "objects.json lists every global, weak and unique symbol of every object of the root (recipe.symbols).",
-   "used_by": [
-    "ports/fnv-nx/contract/imports.py",
-    "ports/fnv-nx/verify/TOOLS.md"
-   ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: recipe link check (w15) that objects.json equals the defined global and weak symbols read from the objects",
@@ -880,11 +670,6 @@
   {
    "id": "ASM-053",
    "text": "The pristine cl symbol names are the exe's contract (N1: byte-equal, one symbol map).",
-   "used_by": [
-    "ports/fnv-nx/contract/gate_call.py",
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/RULES.md"
-   ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: gate namegate (L2 w5) compares every name with cl's symbol table",
@@ -893,10 +678,6 @@
   {
    "id": "ASM-054",
    "text": "An external decorated name denotes one entity link-wide.",
-   "used_by": [
-    "ports/fnv-nx/contract/gate_call.py",
-    "ports/fnv-nx/verify/TOOLS.md"
-   ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: a link check that no decorated name has two definitions of different entities (the xc gate judges static initializers only and does not prove it)",
@@ -905,9 +686,6 @@
   {
    "id": "ASM-101",
    "text": "The declaration `lifted_by` of a lifted root names the lifter (admit.json is reviewed); the gate proves only that no hand-written C++ sits in a lifted root.",
-   "used_by": [
-    "ports/fnv-nx/verify/RECIPE.md"
-   ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: gate admit checks that `lifted_by` is the path of the lifter tool liftall.py of an admitted tool root and that every generated step of the root runs it",
@@ -916,11 +694,6 @@
   {
    "id": "ASM-200",
    "text": "A callee in a hand-written assembler object preserves x19-x30 and sp and writes the caller's frame only through an address it was given (ORDERING A1 for .S).",
-   "used_by": [
-    "ports/fnv-nx/docs/ORDERING.md",
-    "ports/fnv-nx/lift/gates/gate_order.py",
-    "ports/fnv-nx/lift/gates/tests/test_gate_order.py"
-   ],
    "aliases": [
     "ORDERING:A1(.S)"
    ],
@@ -931,11 +704,6 @@
   {
    "id": "ASM-201",
    "text": "Guest memory is the mappings below 2^32 the loader made; the host stack, struct cpu and the lifted image are host mappings disjoint from them (ORDERING A2).",
-   "used_by": [
-    "ports/fnv-nx/docs/ORDERING.md",
-    "ports/fnv-nx/lift/gates/gate_order.py",
-    "ports/fnv-nx/lift/gates/tests/test_gate_order.py"
-   ],
    "aliases": [
     "ORDERING:A2"
    ],
@@ -947,10 +715,6 @@
   {
    "id": "ASM-202",
    "text": "Every object linked into the lifted image is in the build manifest and is given to the gate (ORDERING closure, was A3).",
-   "used_by": [
-    "ports/fnv-nx/docs/ORDERING.md",
-    "ports/fnv-nx/lift/gates/gate_order.py"
-   ],
    "aliases": [
     "ORDERING:A3"
    ],
@@ -961,9 +725,6 @@
   {
    "id": "ASM-203",
    "text": "capstone group tags classify the instruction-set extension of a form correctly.",
-   "used_by": [
-    "ports/fnv-nx/lift/fnvlift/f_cpufeat.py"
-   ],
    "aliases": [
     "L3b:A-GROUPS"
    ],
@@ -974,11 +735,6 @@
   {
    "id": "ASM-204",
    "text": "No x87/SSE exception is ever unmasked (I-FPMASK); fwait and FP arithmetic never raise.",
-   "used_by": [
-    "ports/fnv-nx/lift/fnvlift/f_x87.py",
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
-    "ports/fnv-nx/lift/fnvlift/fpfacts.py"
-   ],
    "aliases": [
     "L3b:A-FPMASK",
     "L3b:I-FPMASK"
@@ -990,9 +746,6 @@
   {
    "id": "ASM-205",
    "text": "The product keeps the x87 sticky flags (rt/fnvl_x87.h:32-37); the test harness injected them as not observed (I-FPSTICKY set in instest ASSUME).",
-   "used_by": [
-    "ports/fnv-nx/lift/fnvlift/fpfacts.py"
-   ],
    "aliases": [
     "L3b:A-FPSTICKY",
     "L3b:I-FPSTICKY"
@@ -1004,9 +757,6 @@
   {
    "id": "ASM-208",
    "text": "A handler resuming by ContinueExecution does not change the FP flag owner nor leave the x87/MMX register file in another carrier format.",
-   "used_by": [
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py"
-   ],
    "aliases": [
     "L3b:A-RESUME"
    ],
@@ -1017,9 +767,6 @@
   {
    "id": "ASM-210",
    "text": "fnsave stores the real indefinite for an empty register; fldenv/frstor treat an empty-tagged register per the tag only.",
-   "used_by": [
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py"
-   ],
    "aliases": [
     "L3b:A-EMPTY"
    ],
@@ -1030,9 +777,6 @@
   {
    "id": "ASM-211",
    "text": "ES (bit 7) and B (bit 15) of FSW are 0.",
-   "used_by": [
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py"
-   ],
    "aliases": [
     "L3b:A-ES"
    ],
@@ -1043,9 +787,6 @@
   {
    "id": "ASM-212",
    "text": "FDP after an instruction without memory operand is unchanged (SDM leaves it unspecified).",
-   "used_by": [
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py"
-   ],
    "aliases": [
     "L3b:A-FDP"
    ],
@@ -1056,9 +797,6 @@
   {
    "id": "ASM-213",
    "text": "FDS is DS whenever FDP != 0 (FS-relative operand reported with DS).",
-   "used_by": [
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py"
-   ],
    "aliases": [
     "L3b:A-FDS"
    ],
@@ -1069,9 +807,6 @@
   {
    "id": "ASM-214",
    "text": "FOP is recomputed from the opcode bytes at FIP when an image is written.",
-   "used_by": [
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py"
-   ],
    "aliases": [
     "L3b:A-FOP"
    ],
@@ -1082,9 +817,6 @@
   {
    "id": "ASM-215",
    "text": "Reserved bits of the fnstenv/fnsave image are 0.",
-   "used_by": [
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py"
-   ],
    "aliases": [
     "L3b:A-RES"
    ],
@@ -1095,9 +827,6 @@
   {
    "id": "ASM-216",
    "text": "fbld with a nibble above 9 gives the arithmetic sum nibble*10^i (SDM: undefined).",
-   "used_by": [
-    "ports/fnv-nx/lift/fnvlift/f_x87.py"
-   ],
    "aliases": [
     "L3b:A-BCD"
    ],
@@ -1108,9 +837,6 @@
   {
    "id": "ASM-218",
    "text": "An inline asm without FP/vector operand and without FP clobber does no float->int conversion.",
-   "used_by": [
-    "ports/fnv-nx/lift/proof/gate_fpexact.py"
-   ],
    "aliases": [
     "L3b:A-F2IASM"
    ],
@@ -1121,9 +847,6 @@
   {
    "id": "ASM-221",
    "text": "The lowest index of a jump table is below 16: the table starts at most 16 dwords above the displacement (TAB_BIAS, fnvlift/core.py).",
-   "used_by": [
-    "ports/fnv-nx/lift/fnvlift/core.py"
-   ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: deleted by L3a w3 1292383f; the extents come from the jtab_tables facts (tools/jtab.py, L3a w2)",
@@ -1132,9 +855,6 @@
   {
    "id": "ASM-222",
    "text": "Every FuncInfo of the exe and modules (x86-32 MSVC, VC8..VC10, no FH4) is reached from a decoded frame-handler stub `mov eax, imm32; jmp rel32`; a FuncInfo reached any other way is not enumerated by gate_eh (tools/ehtables.py).",
-   "used_by": [
-    "ports/fnv-nx/lift/gates/gate_eh.py"
-   ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: a census of the FuncInfo magics (0x19930520/1/2) in the image's data, each required to be the imm32 of a decoded stub; an unreached one is red",
@@ -1143,9 +863,6 @@
   {
    "id": "ASM-223",
    "text": "Every ThrowInfo reaches `_CxxThrowException` as a call argument; a ThrowInfo reached through a stored pointer is not enumerated by gate_eh (thrower_escapes covers uses of the thrower, not the pointer's origin).",
-   "used_by": [
-    "ports/fnv-nx/lift/gates/gate_eh.py"
-   ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: the throw-site facts resolve the ThrowInfo of every call of the thrower, and the data census of ThrowInfo objects is matched against the resolved set",
@@ -1154,9 +871,6 @@
   {
    "id": "ASM-224",
    "text": "Every catch funclet of the exe and modules returns its continuation by `mov eax, imm32(reloc); ret`; a funclet that returns it by another form is not enumerated by gate_eh.",
-   "used_by": [
-    "ports/fnv-nx/lift/gates/gate_eh.py"
-   ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: every catch funclet's return forms are classified from its decoded code; an unclassified form is red",
@@ -1165,9 +879,6 @@
   {
    "id": "ASM-225",
    "text": "Fresh stack space (premise F): when esp is loaded from a register that is not a known stack address (chkstk/alloca: esp = esp - size), the fresh space is disjoint from every tracked slot of the old frame: its accesses are below the new esp or inside the allocated block, and the new esp does not lie above a live tracked old slot (size >= 0, no wraparound, no access past the allocated size). A red-free pcsrc result of an entry that creates a fresh space holds under it (cond:fresh, listed as cond_fresh_list in gate_pcsrc.json).",
-   "used_by": [
-    "ports/fnv-nx/lift/tools/pcsrc.py"
-   ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: the affine esp-minus-size domain plus the probe-loop relation (L3a w4)",
@@ -1176,9 +887,6 @@
   {
    "id": "ASM-320",
    "text": "rt/rcptab.cert.json was produced by farm/rcpcert.sh on a CPU with the reference identity.",
-   "used_by": [
-    "ports/fnv-nx/lift/proof/gate_fpexact.py"
-   ],
    "aliases": [
     "L3b:A-RCPHOST"
    ],
@@ -1189,9 +897,6 @@
   {
    "id": "ASM-321",
    "text": "RCPSS/RSQRTSS are pure functions of the input bits: MXCSR does not influence them.",
-   "used_by": [
-    "ports/fnv-nx/lift/proof/gate_fpexact.py"
-   ],
    "aliases": [
     "L3b:A-RCPPURE"
    ],
@@ -1202,9 +907,6 @@
   {
    "id": "ASM-322",
    "text": "The helpers sse_f2i and fv_i are correct (range guard, rounding mode, integer indefinite).",
-   "used_by": [
-    "ports/fnv-nx/lift/proof/gate_fpexact.py"
-   ],
    "aliases": [
     "L3b:A-F2IHELPERS"
    ],
@@ -1215,9 +917,6 @@
   {
    "id": "ASM-323",
    "text": "An object and its .f2i.json come from the same compile.",
-   "used_by": [
-    "ports/fnv-nx/lift/proof/gate_fpexact.py"
-   ],
    "aliases": [
     "L3b:A-F2IKEY"
    ],
@@ -1228,9 +927,6 @@
   {
    "id": "ASM-325",
    "text": "No float->int conversion of a C literal occurs in lifted code (GCC folds an out-of-range constant to the saturated value, not the x86 indefinite).",
-   "used_by": [
-    "ports/fnv-nx/lift/proof/gate_fpexact.py"
-   ],
    "aliases": [
     "L3b:A-F2ICONST"
    ],
@@ -1241,9 +937,6 @@
   {
    "id": "ASM-801",
    "text": "Every FIX_TRUNC_EXPR in a native unit is rewritten to _ftol/fistp semantics, sits in an fnvnx_f2i helper, or is a compile error (fnvnx_ftoi native rule (c), L2 w1 649a2960); native bodies compiled with fnvnx_ftoi are judged by this rule, not by the lifted-code half of fpexact.",
-   "used_by": [
-    "ports/fnv-nx/lift/proof/gate_fpexact.py"
-   ],
    "aliases": [
     "L3b:A-F2INATIVE"
    ],
@@ -1254,11 +947,6 @@
   {
    "id": "ASM-102",
    "text": "The tools of this tree name the player's exe only through their `--exe` option or the file name FalloutNV.exe, and the gate's sink list is the class of ways Python opens a path.",
-   "used_by": [
-    "ports/fnv-nx/verify/RULES.md",
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/gate_exepin.py"
-   ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: gate exepin taints every path value that enters a tool from argv or the environment (sys.argv, argparse, os.environ), not only `--exe`, so no exe path is outside the flow",
@@ -1267,9 +955,6 @@
   {
    "id": "ASM-803",
    "text": "The decomp's `// @fnv 0x...` address tags and the address-range constants of the rules (IAT_RANGE, the image-data and code ranges) are those of the pinned exe.",
-   "used_by": [
-    "ports/fnv-nx/rules/README.md"
-   ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: the range constants come from the pinned exe's section table and L3a ranges.tsv facts, and every @fnv tag is checked against the exe facts by gate namegate",
@@ -1278,9 +963,6 @@
   {
    "id": "ASM-804",
    "text": "A rule does not delete a decomp preprocessor conditional and create a non-permitted one with the same header.",
-   "used_by": [
-    "ports/fnv-nx/rules/mscgate.py"
-   ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: a gate reads the facts of rules/prepare.py, whose mscgate.check_rule_edit checks every edit of every rule at the moment it is made, so the whole-file count does not rest on it",
@@ -1289,23 +971,15 @@
   {
    "id": "ASM-501",
    "text": "The function boundaries and the forward control flow of the platform manifest passes: a function starts at a prologue pattern and ends at the next one, flow is followed forward only.",
-   "used_by": [
-    "ports/fnv-nx/manifest/funcfacts.py",
-    "ports/fnv-nx/manifest/check_funcfacts.py"
-   ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "fact:ports/fnv-nx/manifest/funcfacts.py",
    "owner": "L5+L3a",
-   "note": "removed: the passes read the L3a function facts (facts.json pin); gate check_funcfacts.py keeps image bytes and code facts inside funcfacts.py. Enters the registry with the merge of the L5 manifest, the files of used_by being tracked there."
+   "note": "removed: the passes read the L3a function facts (facts.json pin); gate check_funcfacts.py keeps image bytes and code facts inside funcfacts.py. Enters the registry with the merge of the L5 manifest, the files that cite it being tracked there."
   },
   {
    "id": "ASM-055",
    "text": "The x86 ISA behaves as the Intel SDM documents it, for the parts that no pinned formal model covers (today the x87 machinery).",
-   "used_by": [
-    "ports/fnv-nx/verify/RULES.md",
-    "ports/fnv-nx/verify/VERDICT.md"
-   ],
    "aliases": [
     "L3b:x87 reference",
     "the x86 ISA as the Intel SDM documents it"
@@ -1319,9 +993,6 @@
   {
    "id": "ASM-601",
    "text": "G-PIXEL compares frames against a \"declared tolerance\" that no rule derives.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#1"
    ],
@@ -1332,9 +1003,6 @@
   {
    "id": "ASM-602",
    "text": "pix outputs (occlusion counts, render-target read-back, timing) cannot be equal across GPUs, so they are masked from stream equality.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#2"
    ],
@@ -1345,9 +1013,6 @@
   {
    "id": "ASM-603",
    "text": "Everything a translated program depends on beyond its bytecode is DATA in the driver UBO.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#3"
    ],
@@ -1358,9 +1023,6 @@
   {
    "id": "ASM-604",
    "text": "Every capability, format and mode that the llvmpipe-measured env table promises can be honoured by the deko3d backend on the console.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#5"
    ],
@@ -1371,9 +1033,6 @@
   {
    "id": "ASM-605",
    "text": "VideoMemorySize = 960 MiB is an L5 estimate that \"may be revised\".",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#6"
    ],
@@ -1384,9 +1043,6 @@
   {
    "id": "ASM-606",
    "text": "The original's d3d9 stream is not repeatable run to run without virtual clocks (B5): 163 927 of 1 345 369 records equal.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#7"
    ],
@@ -1397,9 +1053,6 @@
   {
    "id": "ASM-607",
    "text": "A non-local unwind out of fnvnx_guest_invoke leaks one entry.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#8"
    ],
@@ -1410,9 +1063,6 @@
   {
    "id": "ASM-608",
    "text": "A point filter on an exact 2:1 downscale is inconsistent on llvmpipe, so its result is left unchecked.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#10"
    ],
@@ -1423,9 +1073,6 @@
   {
    "id": "ASM-609",
    "text": "A scaled depth Blit is exact only to Z24 ±1 LSB, and depth-stencil Blit between formats, BCn Blit with scaling and an MSAA Blit destination are open.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#11"
    ],
@@ -1436,9 +1083,6 @@
   {
    "id": "ASM-610",
    "text": "X channels of BGRX8/RGBX8 read back as 0xFF.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#13"
    ],
@@ -1449,9 +1093,6 @@
   {
    "id": "ASM-611",
    "text": "Invalid lock rect, lockable MSAA, Levels > 32 (NO source) and a standalone GetContainer were decided with doubt.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#15"
    ],
@@ -1462,9 +1103,6 @@
   {
    "id": "ASM-612",
    "text": "MIN/MAG filter NONE, BOTHSRCALPHA as destination and SRCCOLOR2 in an alpha slot follow Nine where Wine differs.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#16"
    ],
@@ -1475,9 +1113,6 @@
   {
    "id": "ASM-613",
    "text": "Out-of-range ZFUNC/CULLMODE/FILLMODE/SHADEMODE are a latch whose START value is invented.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#17"
    ],
@@ -1488,9 +1123,6 @@
   {
    "id": "ASM-614",
    "text": "The 16 vendor FOURCC formats are a hand list in gen_enums.py copied from Wine's table.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#19"
    ],
@@ -1501,9 +1133,6 @@
   {
    "id": "ASM-615",
    "text": "StretchRect into an MSAA destination and compressed <-> uncompressed StretchRect answer INVALIDCALL where Windows accepts.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#21"
    ],
@@ -1514,9 +1143,6 @@
   {
    "id": "ASM-616",
    "text": "Reset's back buffer count, GetLastPresentCount, Present with a NULL-format back buffer, X8R8G8B8 in GetFrontBufferData and the fullscreen rules: \"Nothing was checked against Windows.\"",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#22"
    ],
@@ -1527,9 +1153,6 @@
   {
    "id": "ASM-617",
    "text": "vblank on GL surfaceless is a MODELLED 60 Hz clock.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#24"
    ],
@@ -1540,9 +1163,6 @@
   {
    "id": "ASM-618",
    "text": "Present with a visible cursor allocates per call and can fail with OUTOFVIDEOMEMORY.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#25"
    ],
@@ -1553,9 +1173,6 @@
   {
    "id": "ASM-619",
    "text": "The Wine citation for the cursor blend order was written from memory.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#26"
    ],
@@ -1566,9 +1183,6 @@
   {
    "id": "ASM-620",
    "text": "D3DRS_LASTPIXEL = TRUE (the default) on line draws cannot be expressed on GL 4.5, and the backend makes the submit BAD_CALL.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#27"
    ],
@@ -1579,9 +1193,6 @@
   {
    "id": "ASM-621",
    "text": "Clip-plane equations, point size, a depth surface larger than the colour targets and the flat variants are not carried to the backend.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#28"
    ],
@@ -1592,9 +1203,6 @@
   {
    "id": "ASM-622",
    "text": "PreLoad of a managed buffer bypasses the draw path's buffer hazard table.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#29"
    ],
@@ -1605,9 +1213,6 @@
   {
    "id": "ASM-623",
    "text": "posfix = (0, 0, 1, 0) because the backend viewport carries the half pixel, which contradicts the shaders README.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#30"
    ],
@@ -1618,9 +1223,6 @@
   {
    "id": "ASM-624",
    "text": "A VS input that the declaration does not supply reads (0,0,0,0), as in Wine (Nine uses w = 1).",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#31"
    ],
@@ -1631,9 +1233,6 @@
   {
    "id": "ASM-625",
    "text": "An indexed draw with a NULL index buffer returns D3D_OK (the Windows row of Wine's test; Wine itself differs).",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#32"
    ],
@@ -1644,9 +1243,6 @@
   {
    "id": "ASM-626",
    "text": "Because the shader cache cannot serve the GL backend, every shader is translated at first use, and that translation never fails at run time.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#33"
    ],
@@ -1657,9 +1253,6 @@
   {
    "id": "ASM-627",
    "text": "Variants keyed by a non-canonical link set are translated at the first draw of the pair.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:census#34"
    ],
@@ -1670,9 +1263,6 @@
   {
    "id": "ASM-630",
    "text": "The non-todo_wine rows of Wine's d3d9 tests are Windows behaviour.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/dev/draw_api.cpp"
-   ],
    "aliases": [
     "L6:census#52"
    ],
@@ -1683,9 +1273,6 @@
   {
    "id": "ASM-631",
    "text": "Where Microsoft's documentation is silent, Wine 9.0 and Mesa Nine are the semantic source.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/dev/copy_stretch.cpp"
-   ],
    "aliases": [
     "L6:census#53"
    ],
@@ -1696,9 +1283,6 @@
   {
    "id": "ASM-632",
    "text": "The perf counter and the vblank clock share one frequency.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/dev/m1_stats.cpp"
-   ],
    "aliases": [
     "L6:census#55"
    ],
@@ -1709,9 +1293,6 @@
   {
    "id": "ASM-633",
    "text": "D3DDECL_END is found at index ≤ 126, from Wine's 128-element loop.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/dev/res_decl.cpp"
-   ],
    "aliases": [
     "L6:census#58"
    ],
@@ -1722,9 +1303,6 @@
   {
    "id": "ASM-634",
    "text": "Vertex count arithmetic wraps as UINT, as in Wine.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/dev/draw_prim.cpp"
-   ],
    "aliases": [
     "L6:census#59"
    ],
@@ -1735,9 +1313,6 @@
   {
    "id": "ASM-635",
    "text": "GetDC needs a GDI DIB.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/dev/res_surf.cpp"
-   ],
    "aliases": [
     "L6:census#60"
    ],
@@ -1748,9 +1323,6 @@
   {
    "id": "ASM-636",
    "text": "An entry point is unreachable.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/dev/d3d9_adapter.cpp"
-   ],
    "aliases": [
     "L6:census#61"
    ],
@@ -1761,9 +1333,6 @@
   {
    "id": "ASM-637",
    "text": "The host CPU sets llvmpipe's vector width, so the measured env rows depend on the host.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/env/ENV_PIN.txt"
-   ],
    "aliases": [
     "L6:census#64"
    ],
@@ -1774,9 +1343,6 @@
   {
    "id": "ASM-638",
    "text": "BC4 is decoded as Mesa util_format_rgtc does.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/front/front_conv.c"
-   ],
    "aliases": [
     "L6:census#65"
    ],
@@ -1787,9 +1353,6 @@
   {
    "id": "ASM-639",
    "text": "Clamping follows Mesa's CLAMP macro, so NaN passes through.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/front/front_dyn.c"
-   ],
    "aliases": [
     "L6:census#66"
    ],
@@ -1800,9 +1363,6 @@
   {
    "id": "ASM-640",
    "text": "The undocumented d3d9 exports have Wine's signatures.",
-   "used_by": [
-    "ports/fnv-nx/bridgefacts/d3d9/d3d9_exports.py"
-   ],
    "aliases": [
     "L6:census#70"
    ],
@@ -1813,9 +1373,6 @@
   {
    "id": "ASM-641",
    "text": "nxd3d_frontbuffer_read relies on NxImageRead with image 0 = the swapchain image, which nxgpu4.h does not state.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/QUEUE.md"
-   ],
    "aliases": [
     "L6:QUEUE-ABI-frontbuffer"
    ],
