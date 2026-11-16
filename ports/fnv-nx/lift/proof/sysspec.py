@@ -16,6 +16,7 @@ from proof import privset, shape, symform, x86sys  # noqa: E402
 sys.path.insert(0, HERE)
 from fnvlift import dsl  # noqa: E402
 import sysspec_far  # noqa: E402
+import capstone.x86_const as X  # noqa: E402
 
 K_BP, K_UD, K_BOUNDS, K_INTO, K_PRIV, K_AV, K_STEP = 2, 3, 4, 5, 6, 7, 8
 
@@ -131,6 +132,23 @@ def check_far(key, fk, rec):
     return 'uncertified', 'uncertified: far transfer to a selector other than selectors.cs / NULL (proved: %s): %s' % (','.join(c for c, _ in cases), why)
 
 
+def crdr(ins):
+    """MOV to / from a control or debug register (0F 20..23), claimed by the operand kind: the rows 'MOV-Move to/from Control Registers' and '... Debug Registers' of privset.rows() (class cpl0: #GP(0) 'If the current privilege level is not 0.')"""
+    return ins.mnemonic.split()[-1] == 'mov' and any(o.type == X.X86_OP_REG and ins.reg_name(o.reg)[:2] in ('cr', 'dr') for o in ins.operands)
+
+
+def check_crdr(key, rec):
+    import z3
+    rows = [r for r in privset.rows() if r['mnemonics'] == ['mov'] and r['class'] == 'cpl0']
+    if len(rows) != 2: return 'FAILED(facts)', 'the SDM rows of MOV CRn / DRn are not both in privset'
+    if x86sys.cpl(rec) == 0: return 'not-covered', 'no spec for mov CRn/DRn under the record (it does not fault at CPL 0)'
+    f = symform.symbuild(key).form
+    if f.regs or f.flags or f.stores or f.flo is not None or f.xs: return 'FAILED(dsl)', 'a class (a) instruction changes state'
+    if len(f.faults) != 1 or f.faults[0][0] not in (K_PRIV, K_AV): return 'FAILED(dsl)', 'expected one #GP(0) fault (PRIV or AV), got %s' % [k for k, _ in f.faults]
+    s = z3.Solver(); s.add(dsl.to_smt(f.faults[0][1]) != 1)
+    return ('proved', 'privileged at CPL 3: #GP(0) in every state') if s.check() == z3.unsat else ('FAILED(dsl)', 'the fault is conditional')
+
+
 def decl_spec(m):
     """the SDM semantics of a DECL instruction as {register: z3 term} over the declared function of declared.json (the uninterpreted function named by the row's ufs): RDTSC `EDX:EAX := TimeStampCounter` (high:low in the basis text),
     CPUID `(EAX, EBX, ECX, EDX) := CPUID_INFO(EAX, ECX)` (the i-th function is the i-th register of the tuple)"""
@@ -172,6 +190,13 @@ def check(key):
     import sysspec_gap
     if sysspec_gap.family(sysspec_gap.decode(key)) is not None:      # bswap, xlat, mov m16 from Sreg, bts: claimed by decoding (sysspec_gap.py, SDM quotes checked against sysspec_gap_pages.tsv)
         try: return sysspec_gap.check(key)
+        except x86sys.Undecided as e: return 'uncertified', 'uncertified: %s' % e
+    if crdr(sysspec_gap.decode(key)):
+        try: return check_crdr(key, x86sys.load())
+        except x86sys.Undecided as e: return 'uncertified', 'uncertified: %s' % e
+    import sysspec_seg
+    if sysspec_seg.family(sysspec_gap.decode(key)) is not None:      # MOV / POP / PUSH of a segment register (sysspec_seg.py, quotes checked against sysspec_seg_pages.tsv)
+        try: return sysspec_seg.check(key)
         except x86sys.Undecided as e: return 'uncertified', 'uncertified: %s' % e
     if m not in PRIV and m not in COND and m not in CLASS_B and m not in DECL and m not in LARFAM and not needs_any(m):
         return 'not-covered', 'no spec for %s' % m

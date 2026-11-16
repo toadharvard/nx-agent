@@ -380,7 +380,7 @@ def xc_lines(kind, i, x, ref):
     """C lines of one x87 / MMX / SSE state effect, on struct cpu as rt/fnvl.h and rt/fnvl_x87.h define it (the helpers fx_dsl_* are the one place that maps the architectural value to the
     carriers): fr<i> = the physical register i (an empty register keeps the written bits, a valid one becomes an M80 carrier), ftop = c->ftop, ftag = fx_dsl_ftag_set (11 frees the register,
     any other tag makes an empty one valid with the bits it holds), fsw = the status word without TOP (sticky flags and C1 in c->fex, ES/B in c->fsw, C0 C2 C3 in the function's c0 c2 c3),
-    fptr = c->fip fdp fop fcs fds, xmm<i> = c->x[i], mxcsr = c->mxcsr (the host FPCR rounding mode follows, the flags of the FPSR the SSE family owns are replaced)."""
+    fptr = c->fip fdp fop fcs fds, sel (index i of SEGS = the SEG_* of rt/fnvl.h) = fnvl_seg_set(c, i, sel): c->sel[i] = sel and, for FS, the cached base `fsb` = c->fs = (SELK(sel)==SELK(SEL_FS)) ? c->teb : 0, xmm<i> = c->x[i], mxcsr = c->mxcsr (the host FPCR rounding mode follows, the flags of the FPSR the SSE family owns are replaced)."""
     if kind == 'fr': return ['fx_dsl_fr_set(%d, %s);' % (i, ref(x))]
     if kind == 'ftop': return ['c->ftop = (%s) & 7u;' % ref(x)]
     if kind == 'ftag': return ['fx_dsl_ftag_set(%s);' % ref(x)]
@@ -389,7 +389,15 @@ def xc_lines(kind, i, x, ref):
         return ['c->%s = %s;' % (f, ref(n) if f != 'fop' else '(%s) & 0x7ffu' % ref(n)) for f, n in zip(('fip', 'fdp', 'fop', 'fcs', 'fds'), x)]
     if kind == 'xmm': return ['fx_dsl_xmm_set(%d, %s);' % (i, ref(x))]
     if kind == 'mxcsr': return ['fx_dsl_mxcsr_set(%s);' % ref(x)]
+    if kind == 'sel': return ['fnvl_seg_set(c, %d, %s);' % (i, ref(x))] + (['fsb = c->fs;'] if i == SEGS.index('fs') else [])
     raise ValueError(kind)
+
+class UndecidedRow(Exception):
+    """a Form builder needs a row of the declared-machine record that the record leaves undecided: there is no Form (str() names the row and its why)"""
+def _fs_flat():
+    import z3
+    from fnvlift import x86sys
+    return z3.BitVecVal(x86sys.SEL['fs'] & 0xfffc, 32)      # SELK(SEL_FS) of rt/fnvl.h, the record's fs selector
 
 class Form:
     def __init__(s, key, addr, size):
@@ -439,6 +447,9 @@ class Form:
         assert (fip.w, fdp.w, fop.w, fcs.w, fds.w) == (32, 32, 11, 16, 16); s.xs.append(('fptr', None, (fip, fdp, fop, fcs, fds)))
     def xmm(s, i, e): assert 0 <= i < 8 and e.w == 128; s.xs.append(('xmm', i, e))
     def mxcsr(s, e): assert e.w == 32; s.xs.append(('mxcsr', None, e))
+    def sel(s, reg, e):
+        """the segment register REG (a name of SEGS) takes the 16-bit selector e (kind sel; for FS the base input fs_base takes the model of fnvl_seg_set too: flat selector of the record -> the TEB, any other -> 0)"""
+        assert reg in SEGS and e.w == 16; s.xs.append(('sel', SEGS.index(reg), e))
     def mmx(s, writes=(), emms=False):
         """THE MMX rule (SDM Vol 1 9.5.1, Table 9-1), the one helper every MMX Form uses. writes: (N, e64) pairs, the 64-bit value written to mmN.
         Every MMX instruction except EMMS: mmN = fr<N>[63:0] and the write sets fr<N>[79:64] = 0xFFFF; TOP = 0; every tag valid (00).  EMMS: every tag empty (11), nothing else."""
@@ -513,9 +524,13 @@ class Form:
         fr_ = [z3.BitVec('fr%d' % i, 80) for i in range(8)]; xm_ = [z3.BitVec('xmm%d' % i, 128) for i in range(8)]
         x = {'ftop': z3.BitVec('ftop', 3), 'ftag': z3.BitVec('ftag', 16), 'fsw': z3.BitVec('fsw', 16), 'mxcsr': z3.BitVec('mxcsr', 32),
              'fptr': tuple(z3.BitVec(n, w) for n, w in (('fip', 32), ('fdp', 32), ('fop', 11), ('fcs', 16), ('fds', 16)))}
+        x.update({'sel_' + g_: z3.BitVec('sel_' + g_, 16) for g_ in SEGS}); x['fs_base'] = z3.BitVec('fs_base', 32)
         pre_x = (list(fr_), list(xm_), dict(x))
         for k, i, e in s.xs:
-            if k == 'fr': fr_[i] = to_smt(e)
+            if k == 'sel':
+                x['sel_' + SEGS[i]] = to_smt(e)
+                if SEGS[i] == 'fs': x['fs_base'] = z3.If(z3.ZeroExt(16, to_smt(e)) & 0xfffc == _fs_flat(), z3.BitVec('teb', 32), z3.BitVecVal(0, 32))      # fnvl_seg_set: p->fs = (SELK(sel)==SELK(SEL_FS)) ? p->teb : 0
+            elif k == 'fr': fr_[i] = to_smt(e)
             elif k == 'xmm': xm_[i] = to_smt(e)
             elif k == 'fptr': x['fptr'] = tuple(to_smt(n) for n in e)
             else: x[k] = to_smt(e)
@@ -528,7 +543,8 @@ class Form:
             x = {k: (tuple(g(a, b) for a, b in zip(v, pre_x[2][k])) if k == 'fptr' else z3.If(nf, v, z3.If(ft == _FBY['XM']['code'], v, pre_x[2][k])) if k == 'mxcsr' and s.fxm else g(v, pre_x[2][k])) for k, v in x.items()}
             eip = g(eip, z3.BitVecVal(s.addr, 32) if isinstance(s.addr, int) else to_smt(s.addr))
         return {'regs': regs, 'flags': flags, 'flo': flo, 'mem': mem, 'eip': eip, 'defined': defined, 'rdefined': rdef, 'fault': ft,
-                'fr': fr_, 'xmm': xm_, 'ftop': x['ftop'], 'ftag': x['ftag'], 'fsw': x['fsw'], 'fptr': x['fptr'], 'mxcsr': x['mxcsr']}
+                'fr': fr_, 'xmm': xm_, 'ftop': x['ftop'], 'ftag': x['ftag'], 'fsw': x['fsw'], 'fptr': x['fptr'], 'mxcsr': x['mxcsr'],
+                'sel': {g_: x['sel_' + g_] for g_ in SEGS}, 'fs_base': x['fs_base']}
     def writes_unobserved(s): return s.flo is not None or any(f == 'df' for f, _, _ in s.flags)
     def to_c_inline(s, varc, fault_fn, flo_fn, force=(), macc='M'):
         """C lines of ONE instruction to be placed inside a block of a lifted function: -> (lines, ref) where ref(node) is the C text of a node
