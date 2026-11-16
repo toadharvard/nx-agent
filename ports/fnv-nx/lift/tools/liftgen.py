@@ -216,7 +216,7 @@ def finish(a):
     for i in range(NBUCKET):
         with open('%s/u/%03x.src' % (pk, i), 'wb') as f: f.write(b'#include "fnvl_prelude.h"\n' + b''.join(units[i]))
     syms = {x: 'L_%08x' % x for x in texts}
-    kind = {x: 'code' for x in syms}                      # the kind of an entry is the producer set its key came from: the keys of texts (the import rows, and the fixed-key runtime entries of tools/ehkeys.py, are the pack's impgen stage)
+    kind = {x: 'code' for x in syms}                      # the kind of an entry is the producer set its key came from: the keys of texts (the import rows, the runtime entries of the FNVNX_EXPORT records included, are the pack's impgen stage)
     w = lambda n, rows: open('%s/%s.tsv' % (pk, n), 'w').write(''.join('\t'.join(map(str, x)) + '\n' for x in rows))
     w('entries', [('%08x' % x, sy, kind[x]) for x, sy in sorted(syms.items())])      # lifted and runtime rows
     open(pk + '/entries.tsv', 'a').write('# module_table sha256 %s\n' % table_sha)      # the loader's modules.tsv this pack was lifted against (the stage packentries.py checks it)

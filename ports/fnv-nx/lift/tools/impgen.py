@@ -23,8 +23,6 @@ Rule (the contract agreed with L1 CONTRACT and L5 PLATFORM):
   loader's business, no entry). They are listed in imp_blocked.tsv; if a row listed there is named by a --need file (column layout of the loader's
   IMPORTED_TSV: key, dll, name, ...), the generator fails: a build that needs the row must fail."""
 import argparse, collections, os, sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import ehkeys
 CT = {'i': 'u32', 'q': 'u64', 'f': 'float', 'd': 'double', 'v': 'void'}
 RD = {'i': ('M32', 4), 'q': ('M64', 8), 'f': ('MF32', 4), 'd': ('MF64', 8)}
 KEY0, KSTEP = 0x00100000, 16
@@ -129,10 +127,6 @@ def generate(bridge, out, need=(), l3=None, rt_defined=None, prelude=None):
         else:
             target = 'fnvl_imp_cell[%d]' % len(look); look.append(r)
         body.append(thunk(r, target)); ent.append((r['key'], 'I_%08x' % r['key'], r['dll'], r['name'], r['bind']))
-    for k, sym, conv, args in ehkeys.EH_KEYS:      # the runtime's own fixed-key entries (tools/ehkeys.py): bridged like every entry row
-        r = dict(key=k, dll='!rt', name=sym, conv=conv, ret='v', args=args, sym=sym)
-        T.append('extern "C" void %s(void);' % sym)
-        body.append(entry_thunk(r)); ent.append((k, 'I_%08x' % k, '!rt', sym, 'entry'))
     T.append('static void *fnvl_imp_cell[%d];' % max(len(look), 1))
     T.append('static const struct { const char *dll, *name; u32 row; } fnvl_imp_look[] = {%s{0,0,0}};' % ''.join('{%s,%s,%d},' % (cstr(r['dll']), cstr(r['name']), r['i']) for r in look))
     T.append('extern "C" int fnvnx_lift_imports_init(void) { fnvl_runtime_install(); for(u32 i=0;fnvl_imp_look[i].dll;i++){ void *p=fnvnx_win32_lookup_export(fnvl_imp_look[i].dll,fnvl_imp_look[i].name); if(!p) return (int)fnvl_imp_look[i].row+1; fnvl_imp_cell[i]=p; } return 0; }')

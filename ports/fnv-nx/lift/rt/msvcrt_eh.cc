@@ -123,6 +123,7 @@ static int local_unwind2(u32 frame, u32 trylevel, u32 ebp_v)
 }
 
 /* guest entry of Wine MSVCRT_nested_handler: (rec, frame, ctx, dispatch) cdecl; an unwind that meets this registration collides: *dispatch = frame, ExceptionCollidedUnwind */
+FNVNX_EXPORT("!rt", "eh_nested_collide", fnvl_msvcrt_eh_nested_collide, "entry");
 extern "C" void fnvl_msvcrt_eh_nested_collide(void)
 {
     u32 sp0 = esp, rec = M32(sp0 + 4), frame = M32(sp0 + 8), disp = M32(sp0 + 16), res = DISP_CONTINUE_SEARCH;
@@ -379,6 +380,7 @@ extern "C" void fnvl_msvcrt_CxxFrameHandler(void)
 }
 
 /* guest entry of Wine catch_function_nested_handler: the registration of a running catch block; (rec, frame = the catch_func_nested_frame, ctx, dispatch) cdecl */
+FNVNX_EXPORT("!rt", "eh_nested_catch", fnvl_msvcrt_eh_nested_catch, "entry");
 extern "C" void fnvl_msvcrt_eh_nested_catch(void)
 {
     u32 sp0 = esp, rec = M32(sp0 + 4), nf = M32(sp0 + 8), ctx = M32(sp0 + 12), res = DISP_CONTINUE_SEARCH;
