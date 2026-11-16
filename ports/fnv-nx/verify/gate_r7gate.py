@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gate "r7" (fnvnx-gate/1, VERDICT.md class 8): every type that a native exe-function body uses has the exe's layout, certified by link/gate_r7.py rows()
 against the cl /Z7 CodeView types of the same source.
-    python3 -I gate_r7gate.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/r7.json
+    python3 -I gate_r7gate.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/r7.json
 Universe: the rows of gate_r7.rows() of the NATIVE-BEARING units (a unit with at least one symbol that bodysel selects as the native body of an exe function;
 the types such a body uses are among the unit's complete records), in each admitted product root with "target": "guest", "cxx_origin": "native" and a `game`
 directory (gate_l2native.py). A root without `game`: universe 0 for it; no such root: universe 0, green.

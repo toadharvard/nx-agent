@@ -1,10 +1,7 @@
 """gate_xc - does every C++ static initializer (facts['xc']) have an address-bound native function? (L1 CONTRACT)"""
 import collections
 
-import os
-import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)
-from contract import store
+import store
 
 NAME = 'xc'
 

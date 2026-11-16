@@ -347,7 +347,7 @@ def audit():
     dirs = [d for d in sys.path if d and os.path.isabs(d) and os.path.isdir(d)]
     clean = found = cmod = 0
     for m in sorted(P.PURE):
-        hit = next((x for d in dirs for x in (os.path.join(d, m.replace(".", os.sep) + ".py"), os.path.join(d, m.replace(".", os.sep)))   # a dotted entry is a path below the package
+        hit = next((x for d in dirs for x in (os.path.join(d, m + ".py"), os.path.join(d, m))
                     if os.path.isfile(x) or os.path.isfile(os.path.join(x, "__init__.py"))), None)
         if hit is None:
             print("%s: c-module, not audited" % m)

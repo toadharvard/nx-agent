@@ -11,16 +11,7 @@ first directory in list order, case-insensitive, two files of one directory that
             neither found nor bridged).  Its entries must be served by bridge rows; the walk does not continue through it.
   platform  a name that is neither FOUND nor in BRIDGE: a platform import of gate `imports` (owner L5), not a module.
 Reach: from the root's import directories (normal, then delay-load, in directory order), depth first through images only.
-RUNTIME is the one declared non-image module, the namespace of lift/rt's own entries (`FNVNX_EXPORT("!rt", name, symbol, kind)`): it has no spec and no file, its rows come from the
-definer's own declared type, it is never in BRIDGE of this rule (LoadLibrary/GetModuleHandle of it is ERROR_MOD_NOT_FOUND like any undeclared name) and no image imports it.
 Pure: the caller supplies imports_of(path) -> (normal names, delay-load names) and find(name) -> path | None."""
-
-RUNTIME = "!rt"
-
-
-def is_runtime(dll):
-    """True iff DLL (a record's module or an iat.norm_dll name) names the runtime's own module."""
-    return dll in (RUNTIME, RUNTIME + ".dll")
 
 
 def images_of(normal_imports, ok):

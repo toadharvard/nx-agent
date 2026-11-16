@@ -35,8 +35,8 @@ Output (store.py kind `n1`, canonical JSON; exe- and decomp-derived: container a
 """
 import argparse, collections, json, os, re, struct, sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)
-from contract import gatefile, store
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gatefile, store
 
 DIR32, DIR32NB, REL32, SECTION, SECREL = 6, 7, 20, 10, 11
 ABSOLUTE = 1 << 32
@@ -240,7 +240,7 @@ def main():
     ap.add_argument('--msvc', required=True)
     ap.add_argument('--out', required=True)
     a = ap.parse_args()
-    from contract import exefacts
+    import exefacts
     try:
         check_objects(a.msvc)
     except ValueError as e:

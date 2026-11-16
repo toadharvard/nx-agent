@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/verify
 """Tests for verify/gate_pure.py cross-root imports (admit.json `imports`) and gate_admit.imports_errors. Cases, each on a toy tree
 run as the gate runs (cwd = checkout root, env GATE_OUT): (1) a root that imports a module of another root WITHOUT declaring it is red
 (import-unlisted) even though the module exists; (2) the same import declared in `imports` is green; (3) a declared import does not
@@ -127,13 +128,19 @@ def main():
     noent = {"path": T + "/x", "class": "tool"}
     check("entry is required for a tool root", any("entry" in x for x in adm([noent])[1]) and adm([dict(noent, entry=[])])[1] == [], adm([noent]))
     check("an entry outside the root's trees or not .py is an error", adm([dict(noent, entry=[T + "/y/a.py"])])[1] != [] and adm([dict(noent, entry=[T + "/x/a.sh"])])[1] != [])
-    # one root, one tree: two trees that import each other are two roots with a declared import, never a `trees` list
+    # one root of two trees
     two = {T + "/contract/a.py": "import b\n", T + "/link/b.py": "import a\n"}
+    tr = {"path": T + "/contract", "trees": [T + "/contract", T + "/link"], "class": "tool", "entry": [T + "/contract/a.py"]}
+    d = tree(two, [tr])
+    rc, res, err = run(d)
+    check("two trees of one root that import each other are green (one puregate run)", rc == 0 and res["universe"] == 2, (res, err))
     d = tree(two, [root("contract", entry=["contract/a.py"]), root("link")])
     rc, res, err = run(d)
-    check("two roots without declared imports that import each other are red", rc == 2 and T + "/contract/a.py" in res["uncertified"], (res, err))
-    check("a `trees` list on a row is red: one root, one tree", adm([dict(noent, entry=[], trees=[T + "/x", T + "/y"])])[1] != [] and adm([dict(noent, entry=[])])[1] == [])
-    check("a root inside another root is no error (the nearest root owns a file)", adm([dict(noent, entry=[]), root("x/sub", entry=["x/sub/s.py"])])[1] == [], adm([dict(noent, entry=[]), root("x/sub", entry=["x/sub/s.py"])]))
+    check("the same two trees as two roots without declared imports are red", rc == 2 and T + "/contract/a.py" in res["uncertified"], (res, err))
+    adm2 = lambda rs: adm(rs, [T + "/contract/a.py", T + "/link/b.py"])
+    check("a file of the second tree is certified by the root", adm2([tr]) == ({}, []), adm2([tr]))
+    check("a root inside another root's trees is no error (the nearest root owns a file)", adm2([tr, root("link/sub", entry=["link/sub/s.py"])])[1] == [], adm2([tr, root("link/sub", entry=["link/sub/s.py"])]))
+    check("trees whose first is not path, or a single tree, are errors", adm2([dict(tr, trees=[T + "/link", T + "/contract"])])[1] != [] and adm2([dict(tr, trees=[T + "/contract"])])[1] != [])
     return 1 if FAILED else 0
 
 

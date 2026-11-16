@@ -1,16 +1,14 @@
 """abi_gaterun - run a gate's main() in-process with a scratch GATE_OUT and return (exit status, result dict).  The scene's exe is
 bytes the test built, so it is handed to the gate as an Image parsed from those bytes (exefacts.Image.parse), not read as the
 player's exe: the pin (exepin.load_exe) guards the player's exe only."""
-import os
-import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import shutil
 import sys
 import tempfile
 
-from contract import exefacts  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'contract'))
+import exefacts  # noqa: E402
 
 
 def run(mod, argv, name):

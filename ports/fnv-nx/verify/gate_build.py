@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gate "build" (fnvnx-gate/1): every product root's recipe (build.json, see RECIPE.md) builds, all in the sandbox.
-    python3 -I gate_build.py        cwd = checkout root (a git worktree), env GATE_OUT, optional GATE_CACHE
+    python3 -I gate_build.py        cwd = checkout root (a git worktree), env GATE_OUT, optional GATE_CACHE, optional GATE_COMMIT
 Universe: every unit of every product root of verify/admit.json (tracked sources + generated sources, recipe.units_of) and the ELF
 of a root with a link. Certified: units whose object was built (+ the ELF). uncertified: repo-relative unit paths (<= 50, sorted).
 No product root: universe 0, green. A recipe that fails validation certifies nothing (units = tracked source files).
@@ -63,11 +63,8 @@ def quantify(repo, judge_root):
 
 
 def tree_of(repo="."):
-    """The tree of the commit under test: a gate runs in the clean worktree of that commit (verdict.py), so it is the checkout's own HEAD. No environment input."""
-    r = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD^{tree}"], capture_output=True, text=True)
-    if r.returncode:
-        raise ValueError("%s is not a checkout of a commit (git rev-parse HEAD^{tree}: %s)" % (repo, r.stderr.strip()[-200:]))   # a named input error, never a crash
-    return r.stdout.strip()
+    return subprocess.run(["git", "-C", repo, "rev-parse", os.environ.get("GATE_COMMIT", "HEAD") + "^{tree}"], capture_output=True,
+                          text=True, check=True).stdout.strip()
 
 
 _PRIVATE = []   # out dirs of a red build: private to this process (never published), removed at exit
@@ -97,7 +94,7 @@ def ensure(root, cache, repo="."):
     os.makedirs(os.path.dirname(final), exist_ok=True)
     tmp = "%s.tmp-%d-%s" % (final, os.getpid(), os.urandom(4).hex())
     try:
-        res = recipe.build(repo, root, os.path.join(cache, "store"), tmp, ext=recipe.ext_dir(cache))
+        res = recipe.build(repo, root, os.path.join(cache, "store"), tmp, ext=os.path.join(cache, "external"))
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)
         raise
@@ -193,7 +190,7 @@ def main():
             try:
                 res, out = ensure(root, cache, repo)
             except recipe.RecipeError as e:
-                items += [root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files, roots, repo) if isinstance(rec, dict)]
+                items += [root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files) if isinstance(rec, dict)]
                 why.append("%s: invalid recipe: %s" % (root, "; ".join(e.errors)[:300]))
                 continue
             items += ids(root, res, rec)

@@ -567,14 +567,6 @@ check("cli: project module violation reported under its own path",
 rc, out, _ = run("check", os.path.join(tmp, "proj", "main.py"))
 check("cli: project module outside the PATHs is import-unlisted",
       rc == 2 and "main.py:1: import-unlisted helper" in out and "main.py:2: import-unlisted pkg" in out, out)
-# xml.etree.ElementTree is PURE (its output is a function of the bytes it parses; the expat backend fetches no entity or DTD); the loaders and the other xml packages stay unlisted
-W("xml/ok.py", "import xml.etree.ElementTree as ET\nfrom xml.etree import ElementTree\nroot = ET.fromstring('<a/>')\n")
-rc, out, _ = run("check", os.path.join(tmp, "xml", "ok.py"))
-check("cli: xml.etree.ElementTree (both import forms) is listed: green", rc == 0, out)
-W("xml/bad.py", "import xml.etree.ElementInclude\nimport xml.dom.minidom\nimport xml.sax\nimport xml.parsers.expat\n")
-rc, out, _ = run("check", os.path.join(tmp, "xml", "bad.py"))
-check("cli: xml.etree.ElementInclude (opens files and URLs), xml.dom, xml.sax, xml.parsers stay import-unlisted",
-      rc == 2 and all(("import-unlisted " + m) in out for m in ("xml.etree.ElementInclude", "xml.dom.minidom", "xml.sax", "xml.parsers.expat")), out)
 W("root/app/a.py", "import shared\n")
 W("root/shared.py", "x = 1\n")
 rc, out, _ = run("check", os.path.join(tmp, "root"))

@@ -3,8 +3,7 @@
 import json, os, sys, shutil, tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: contract.X by its qualified name
-from contract import gatefile, store
+import gatefile, store
 
 d = tempfile.mkdtemp()
 F = dict(a=16, size=4, ret=(0,), calls=[(16, 32)], tails=[], icalls=[(16, 'reg', 'eax', None)], itails=[], stores=[],

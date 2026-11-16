@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """doubles.judge ("no doubles in tests", gate objstub) and the `tests` key of recipe.check, on real AArch64 objects compiled with
 aarch64-linux-gnu-gcc-13 (symbols read by recipe.symbols from the ELF .symtab). Plain script: exit 0 on pass, one ok/FAIL line per case.
 Scratch: tempfile.mkdtemp, removed at exit."""
@@ -47,8 +48,8 @@ def result(units, tests):
     return r
 
 
-def kinds(res, test_roots=()):
-    items, finds, st = doubles.judge(res, test_roots)
+def kinds(res):
+    items, finds, st = doubles.judge(res)
     return sorted({k for _, _, k, _ in finds}), finds, st, items
 
 
@@ -91,17 +92,6 @@ check("undeclared test source (a product unit that replaces a product body): pro
 check("two product objects with the same WEAK symbol: no finding (inline functions)",
       doubles.judge({"R": {"units": ["a", "b"], "defined": [{"symbol": "inl", "bind": "WEAK", "type": "FUNC", "object": "a"},
                                                                 {"symbol": "inl", "bind": "WEAK", "type": "FUNC", "object": "b"}], "tests": []}})[1] == [])
-# a ROOT of admit class test (tests/bootrt): its whole object set is test code
-tr = {"units": ["o"], "defined": defined("t_other") + defined("t_clean"), "tests": []}
-tr["defined"] = [dict(d, object="t_other") for d in defined("t_other")] + [dict(d, object="t_clean") for d in defined("t_clean")]
-k, f, st, items = kinds({"P": result(["a", "o"], []), "T": tr}, {"T"})
-check("a test root that defines a symbol of a product root: red test-double naming the symbol and the product object",
-      k == ["test-double"] and f[0][0] == "T:test-root" and "other_root_fn" in f[0][3] and "P/o" in f[0][3] and st == {"tests_total": 1, "tests_with_doubles": 1, "double_symbols": 1}, (k, f, st))
-tc = {"units": ["t_clean"], "defined": [dict(d, object="t_clean") for d in defined("t_clean")], "tests": []}
-k, f, st, items = kinds({"P": result(["a", "o"], []), "T": tc}, {"T"})
-check("a test root with only its own names: green, its objects are not product objects", k == [] and sorted(i for i, _ in items) == ["P:product-units", "T:test-root"], (k, f, items))
-check("a test root's symbol that a product root defines is red even when the product root is listed after it",
-      kinds({"Z": result(["a", "o"], []), "A": tr}, {"A"})[0] == ["test-double"])
 check("no roots: universe 0, no finding, stats 0", doubles.judge({}) == ([], [], {"tests_total": 0, "tests_with_doubles": 0, "double_symbols": 0}))
 
 # recipe.check: the `tests` key
@@ -126,7 +116,7 @@ def new(**kw):
 
 check("a declared test adds no error", new(tests=[{"name": "t1", "units": ["t1.c"]}]) == [], new(tests=[{"name": "t1", "units": ["t1.c"]}]))
 check("declared test: product units exclude it", True
-      and recipe.units_of(dict(REC, tests=[{"name": "t1", "units": ["t1.c"]}]), T + "r", files, {}) == ["a.c", "b.c", "t2.c"])
+      and recipe.units_of(dict(REC, tests=[{"name": "t1", "units": ["t1.c"]}]), T + "r", files) == ["a.c", "b.c", "t2.c"])
 check("test unit that is no source of the root: error", any("not a source" in e for e in errs(tests=[{"name": "t", "units": ["zz.c"]}])))
 check("unit in two tests: error", any("two tests" in e for e in errs(tests=[{"name": "t", "units": ["t1.c"]}, {"name": "u", "units": ["t1.c"]}])))
 check("duplicate test name: error", any("twice" in e for e in errs(tests=[{"name": "t", "units": ["t1.c"]}, {"name": "t", "units": ["t2.c"]}])))

@@ -36,17 +36,12 @@ import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)   # the gate runs it with -I: the script's directory is not on the path
-from contract import argflow
-from contract import imagerec
-from contract import gatefile
-from contract import iat
-from contract import memfx
-
-
-def module_dlls(text):
-    """The names of the DLL rows of modules.tsv: the kind of a row is its last column, the PE IMAGE_FILE_DLL bit (the exe row has 0)."""
-    return [f[0] for f in (l.split('\t') for l in text.splitlines() if l and l[0] != '#') if f[-1] == '1']
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the gate runs it with -I: the script's directory is not on the path
+import argflow
+import imagerec
+import gatefile
+import iat
+import memfx
 
 
 def pair_key(dll):
@@ -235,12 +230,9 @@ def main(argv=None):
     for im in images.values():
         im.import_stack = stacks
     mayload = {pair_key(n) for n in images}
-    for p in a.mayload:
+    for p in a.mayload + ([a.modules] if a.modules else []):
         with open(p) as fh:
             mayload |= {pair_key(l.split('\t')[0]) for l in fh.read().splitlines() if l and l[0] not in '#' and l.split('\t')[0] != 'module'}
-    if a.modules:
-        with open(a.modules) as fh:
-            mayload |= {pair_key(n) for n in module_dlls(fh.read())}
     if a.bridge:
         with open(a.bridge) as fh:
             mayload |= {pair_key(l.split('\t')[0]) for l in fh.read().splitlines()[1:] if l.strip()}
@@ -264,7 +256,7 @@ def main(argv=None):
         mods = []
         if a.modules:
             with open(a.modules) as fh:
-                mods = module_dlls(fh.read())
+                mods = [l.split('\t')[0] for l in fh.read().splitlines() if l and l[0] != '#']
         with open(a.bridge) as fh:
             have, names, mset = platform_pairs(fh.read(), mods)
         miss = check_platform(results, have, names, mset)

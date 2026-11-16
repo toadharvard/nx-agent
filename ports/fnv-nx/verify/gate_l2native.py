@@ -16,9 +16,6 @@ Inputs of the certificate: the root's game objects (staged as `<UNIT with / -> _
 red item `<root>:inputs` naming it and its owner, never skipped. Stated limit: no `--n3` is passed by the bodysel stage of gate_contract.py yet, so
 bodysel gives no NATIVE and the universe is 0 until L1/L2 wire the N3 verdicts (reported, not worked around)."""
 import os
-import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
-import os
 import shutil
 import sys
 import tempfile
@@ -26,6 +23,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "link"))
+sys.path.insert(0, os.path.join(HERE, "..", "contract"))
 import gate_build  # noqa: E402
 import gate_contract as gc  # noqa: E402
 import gatesdir  # noqa: E402
@@ -43,7 +41,7 @@ def stem_of(unit):
 
 def load_addrmap(path):
     """{(object basename, symbol): exe address} (contract/objfacts.py load_addrmap_tsv)."""
-    from contract import objfacts
+    import objfacts
     return objfacts.load_addrmap_tsv(path)
 
 

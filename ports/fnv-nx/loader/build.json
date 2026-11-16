@@ -126,7 +126,8 @@
   "KEYS_TSV": "gen/keys.tsv",
   "MODULES_TSV": "gen/modules.tsv",
   "IAT_DATA_TSV": "gen/iat_data.tsv",
-  "IMPORTED_TSV": "gen/imported.tsv"
+  "IMPORTED_TSV": "gen/imported.tsv",
+  "INCLUDE": "include"
  },
  "uses": [
   {
@@ -143,10 +144,6 @@
   },
   {
    "root": "ports/fnv-nx/shim",
-   "output": "INCLUDE"
-  },
-  {
-   "root": "ports/fnv-nx/loader/include",
    "output": "INCLUDE"
   }
  ]

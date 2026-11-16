@@ -32,10 +32,9 @@ def pe(entry, base=0x400000):
 
 TID = 'ab' * 32
 exe = pe(0x1234)
-mods = ('# header\nb.dll\t00\t1\t10000000\t01440000\t00068000\t0\t00005fab\t1\t1\t1\n'
-        'a.dll\t00\t1\t10000000\t01410000\t00029000\t0\t00001b0f\t0\t\t1\n'
-        'exe.exe\t00\t1\t00400000\t00400000\t00002000\t0\t00001234\t1\t\t0\n'
-        'z.dll\t00\t1\t10000000\t01500000\t00029000\t0\t00000000\t1\t2\t1\n')
+mods = ('# header\nb.dll\t00\t1\t10000000\t01440000\t00068000\t0\t00005fab\t1\t1\n'
+        'a.dll\t00\t1\t10000000\t01410000\t00029000\t0\t00001b0f\t0\t\n'
+        'z.dll\t00\t1\t10000000\t01500000\t00029000\t0\t00000000\t1\t2\n')
 keys = '# table_id %s\n00100980\t!idirect3ddevice9.dll\tPresent\t17\tstdcall\ti\tiiiii\tnxb_x\n' % TID
 ents = '00100980\tI_1\timport\n# table_id %s\n' % TID
 

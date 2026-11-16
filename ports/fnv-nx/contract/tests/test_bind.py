@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """Synthetic check of bind.py (invented rows and N1 maps): every branch, the CLI, and the store round trip of bind / obj."""
-import os
-import sys
 import json, os, subprocess, sys, tempfile
 
 C = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.insert(0, C)
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: contract.X by its qualified name
-from verify import scratch
+sys.path.insert(0, os.path.join(C, '..', 'verify'))
+import scratch
 scratch.install()
-from contract import bind, store
+import bind, store
 
 fails = []
 
@@ -67,7 +65,7 @@ check('n3 inline row not ok twice', bind.n3_verdicts(3, [('_Zx', 'ok', ('_Zi',),
                                                     dict(_Zx=1)), {1: (bind.NO_VERDICT, [])})
 check('n3 empty', bind.n3_verdicts(3, [], {}), {})
 # bodysel.decide takes the shape
-from contract import bodysel
+import bodysel
 check('bodysel shape', bodysel.decide({0x50: 'f'}, dict(fn={0x50: dict(n1=True, sym='f', why='')}), {}, nv)[0x50], ['NATIVE', 'N1 N2 N3 N4'])
 
 # units and the CLI

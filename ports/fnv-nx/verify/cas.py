@@ -18,9 +18,6 @@ Tree hash definition:
   Hash of a top-level file/symlink input = sha256(canon(its entry)); of a directory = its treehash.
   Empty directories are kept. Nothing else (mtime, owner, mode other than exec) is part of the hash.
 """
-import os
-import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import errno
 import fcntl
 import hashlib
@@ -30,7 +27,8 @@ import shutil
 import stat
 import sys
 
-from contract import treehash  # noqa: E402  (the one home of the tree-hash rule; stdlib only)
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "contract"))
+import treehash  # noqa: E402  (the one home of the tree-hash rule; stdlib only)
 
 FORMAT = treehash.FORMAT
 MAX_LINKS = 60000  # hard links one inode of the store serves (ext4: 65000); past it a replica is made

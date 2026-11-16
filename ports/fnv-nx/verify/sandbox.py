@@ -9,7 +9,7 @@ Sandbox: new mount/net/uts/pid/ipc namespaces; tmpfs root; inputs hardlinked fro
 unitview.PLACEHOLDER, is its all-placeholder base placed once, bound read-only, with each real file's object bound read-only over its
 placeholder path: O(real files) mounts per stage, never a tree per view);
 outputs fresh rw dirs; fresh /proc (time/stat/sys masked), /dev = null+zero, tmpfs /tmp; hostname fnvnx; no interface up;
-stdin /dev/null; umask 022; ASLR off; no core files; all capabilities dropped; seccomp: getrandom is answered by the supervisor with the stage's entropy stream, SHA-256 in counter mode over the stage key (the stream of /dev/urandom) (SECCOMP_RET_USER_NOTIF; x32 ABI and foreign arch killed).
+stdin /dev/null; umask 022; ASLR off; no core files; all capabilities dropped; seccomp: getrandom -> ENOSYS (x32 ABI and foreign arch killed).
 Optional stage fields: "ro_root" (every write outside the outputs fails); "links" [{"at","to"}] (symlinks of the root layout, in the key: a link cannot be an
 input mount); "scratch" [paths] (a writable tmpfs per path, nothing survives, not an output, in the key); "unkeyed" {"env": {K: V}, "timeout": seconds}
 (NOT in the key: the job count and the time limit change how long a stage takes, not what it computes; a stage past its timeout is killed as a whole
@@ -17,12 +17,9 @@ process group and the run raises SbxError naming the timeout). tests/test_sandbo
 Measured (tests/test_sandbox.py case 9), NOT closed, listed in result.json "open_channels":
   wall_clock           clock_gettime/time/statx show real time (vDSO). PR_SET_TSC=SIGSEGV + seccomp on the clock syscalls
                        was tried: dynamic date/python/gcc/make crash at startup (SIGSEGV), coarse clocks stay readable. Dropped.
-  entropy              getrandom, /dev/urandom and /dev/random all return one sha256 stream that is a function of the stage key (stream(): so os.urandom,
-                       OpenSSL and Python's multiprocessing return the same bytes when the stage runs again), but AT_RANDOM (the kernel
-                       puts 16 fresh bytes in the auxiliary vector at exec; a program uses them for its stack canary and pointer guard) and RDRAND
-                       still give fresh bytes. Source: the glibc documentation names the stack canary and the pointer guard as the only uses of
-                       AT_RANDOM (getauxval(3); sysdeps/unix/sysv/linux/dl-osinfo.h _dl_setup_stack_chk_guard / _dl_setup_pointer_guard); RDRAND is
-                       an instruction no stage tool executes for its output. The farm's byte-identical rebuild test (determinism gate) checks it.
+  entropy              getrandom is closed (ENOSYS) and /dev/urandom, /dev/random are a constant 1 MiB file (so os.urandom
+                       and Python's multiprocessing import work and return the same bytes in every run), but AT_RANDOM and
+                       RDRAND still give fresh bytes.
   cpu_count_scheduling sched_getaffinity/nproc show the host CPUs; order of parallel children is not controlled.
   kernel_version       uname shows the host kernel release.
   memory_size          sysinfo shows the host memory size.
@@ -37,7 +34,6 @@ import os
 import platform
 import resource
 import shutil
-import socket
 import struct
 import sys
 import time
@@ -111,82 +107,15 @@ def check_doc(doc):
     if platform.machine() != "x86_64" or os.geteuid() != 0:
         raise SbxError("needs root on x86_64")
 
-SYS_GETRANDOM, SYS_SECCOMP = 318, 317
-SECCOMP_RET_USER_NOTIF = 0x7FC00000
-
-
-def stream(seed, off, n):
-    """Bytes [OFF, OFF+N) of the entropy stream of a stage, a function of its stage key SEED (a hex string): block i is sha256(b"fnvnx-sandbox-entropy/2:" + SEED + b":%d" % i), 32 bytes (SHA-256 in
-    counter mode). /dev/urandom and /dev/random are its first MiB, and getrandom serves the same stream (per calling thread, from offset 0), so every way a program reads entropy returns the same
-    bytes whenever the stage is run again, and different stages (different keys) do not share a stream."""
-    first, last = off // 32, (off + n + 31) // 32
-    pre = b"fnvnx-sandbox-entropy/2:" + seed.encode() + b":"
-    return b"".join(hashlib.sha256(pre + b"%d" % i).digest() for i in range(first, last))[off - first * 32:off - first * 32 + n]
-
-
 def _seccomp():
-    """getrandom -> a user notification answered by the supervisor (fork A, _supervise); x32 ABI (nr >= 0x40000000) and non-x86-64 arch -> kill.
-    -> the listener fd (the caller hands it to the supervisor)."""
+    """getrandom -> ENOSYS; x32 ABI (nr >= 0x40000000) and non-x86-64 arch -> kill."""
     ins = [(0x20, 0, 0, 4), (0x15, 1, 0, 0xC000003E), (0x06, 0, 0, 0x80000000), (0x20, 0, 0, 0),
-           (0x35, 0, 1, 0x40000000), (0x06, 0, 0, 0x80000000), (0x15, 0, 1, SYS_GETRANDOM), (0x06, 0, 0, SECCOMP_RET_USER_NOTIF),
+           (0x35, 0, 1, 0x40000000), (0x06, 0, 0, 0x80000000), (0x15, 0, 1, 318), (0x06, 0, 0, 0x00050000 | 38),
            (0x06, 0, 0, 0x7FFF0000)]
     buf = ctypes.create_string_buffer(b"".join(struct.pack("HBBI", *i) for i in ins))
     fprog = struct.pack("HxxxxxxQ", len(ins), ctypes.addressof(buf))
     _c(libc.prctl(38, 1, 0, 0, 0), "no_new_privs")
-    fd = libc.syscall(SYS_SECCOMP, 1, 8, ctypes.c_char_p(fprog))   # SECCOMP_SET_MODE_FILTER, SECCOMP_FILTER_FLAG_NEW_LISTENER
-    if fd < 0:
-        raise SbxError("seccomp: %s" % os.strerror(ctypes.get_errno()))
-    return fd
-
-
-class _Iov(ctypes.Structure):
-    _fields_ = [("base", ctypes.c_void_p), ("len", ctypes.c_size_t)]
-
-
-def _supervise(listener, child, seed):
-    """Answer the getrandom notifications of the sandboxed command until it exits: each caller thread gets the next bytes of the stage's entropy stream (stream(seed)), written into its
-    buffer with process_vm_writev; the result is the byte count. -> the wait status of CHILD (fork B)."""
-    import fcntl
-    import select
-    offs = {}
-    poll = select.poll()
-    poll.register(listener, select.POLLIN)
-    status = None
-    while True:
-        w, st = os.waitpid(child, os.WNOHANG)
-        if w:
-            status = st
-            break
-        if not poll.poll(50):
-            continue
-        req = bytearray(80)   # struct seccomp_notif: id u64, pid u32, flags u32, seccomp_data{nr s32, arch u32, ip u64, args[6] u64}
-        try:
-            fcntl.ioctl(listener, 0xC0502100, req, True)   # SECCOMP_IOCTL_NOTIF_RECV
-        except OSError:
-            continue    # the target died before it was received, or every holder of the filter is gone
-        nid, pid, _fl, _nr, _arch, _ip = struct.unpack_from("<QIIiIQ", req, 0)
-        buf, n = struct.unpack_from("<QQ", req, 32)
-        val, err = 0, 0
-        try:
-            fcntl.ioctl(listener, 0x40082102, struct.pack("<Q", nid))   # SECCOMP_IOCTL_NOTIF_ID_VALID
-            n = min(n, 1 << 25)
-            if n:
-                data = stream(seed, offs.get(pid, 0), n)
-                local, remote = _Iov(ctypes.cast(ctypes.c_char_p(data), ctypes.c_void_p), n), _Iov(buf, n)
-                got = libc.process_vm_writev(pid, ctypes.byref(local), 1, ctypes.byref(remote), 1, 0)
-                if got < 0:
-                    err = -ctypes.get_errno()
-                else:
-                    val = got
-                    offs[pid] = offs.get(pid, 0) + got
-            fcntl.ioctl(listener, 0x40082102, struct.pack("<Q", nid))
-        except OSError:
-            continue    # the target is gone: nothing to answer
-        try:
-            fcntl.ioctl(listener, 0xC0182101, struct.pack("<QqiI", nid, val, err, 0))   # SECCOMP_IOCTL_NOTIF_SEND
-        except OSError:
-            pass
-    return status
+    _c(libc.prctl(22, 2, ctypes.c_char_p(fprog)), "seccomp")
 
 def _setup_root(doc, root, run, srcs):
     ro_flag = MS_RDONLY if doc.get("ro_root") else 0   # a stage with "ro_root": every write outside its outputs fails (EROFS)
@@ -225,9 +154,10 @@ def _setup_root(doc, root, run, srcs):
         _bind_ro("/dev/" + f, root + "/dev/" + f, ro=False)
     os.mkdir(root + "/dev/shm")   # private and empty in every run: POSIX semaphores and shared memory (multiprocessing). Writable even in a ro_root stage: it is not an output
     _mount("tmpfs", root + "/dev/shm", "tmpfs", 0, "mode=1777")   # (nothing survives the run, so the "writes only /out" rule is unchanged), and a tool that forks workers needs its semaphores
-    for f in ("urandom", "random"):   # entropy read from a device is a function of the stage key
+    for f in ("urandom", "random"):   # a constant: entropy read from a device is a function of the sandbox version
         with open(root + "/dev/" + f, "wb") as g:
-            g.write(stream(key_of(doc), 0, 1 << 20))
+            for n in range(32768):
+                g.write(hashlib.sha256(b"fnvnx-sandbox-urandom/1:%d" % n).digest())
         os.chmod(root + "/dev/" + f, 0o444)
     _mount("tmpfs", root + "/tmp", "tmpfs", ro_flag, "mode=1777")
     _c(libc.syscall(155, root.encode(), (root + "/oldroot").encode()), "pivot_root")
@@ -237,19 +167,15 @@ def _setup_root(doc, root, run, srcs):
     if doc.get("ro_root"):   # the root tmpfs (cwd, the parents of the input mounts) read-only; the outputs, bound rw, stay the only writable paths
         _mount(None, "/", None, MS_BIND | MS_REMOUNT | MS_RDONLY)
 
-def _pid1(doc, root, run, logs, errfd, srcs, sock):
+def _pid1(doc, root, run, logs, errfd, srcs):
     try:
         _setup_root(doc, root, run, srcs)
         _c(libc.sethostname(b"fnvnx", 5), "sethostname")
         os.dup2(os.open("/dev/null", os.O_RDONLY), 0)
         os.dup2(logs[0], 1)
         os.dup2(logs[1], 2)
-        keep = sorted({errfd, sock})
-        prev = 2
-        for k in keep:
-            os.closerange(prev + 1, k)
-            prev = k
-        os.closerange(prev + 1, 4096)
+        os.closerange(3, errfd)
+        os.closerange(errfd + 1, 4096)
         os.chdir(doc["cwd"])
         os.umask(0o022)
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
@@ -257,11 +183,7 @@ def _pid1(doc, root, run, logs, errfd, srcs, sock):
         for cap in range(64):  # drop every capability: no remount-rw, no mount, no chroot
             if libc.prctl(24, cap, 0, 0, 0) != 0:
                 break
-        lfd = _seccomp()
-        ss = socket.socket(fileno=sock)
-        socket.send_fds(ss, [b"L"], [lfd])   # the listener goes to the supervisor, fork A
-        ss.close()
-        os.close(lfd)
+        _seccomp()
         os.execve(doc["argv"][0], doc["argv"], dict(doc["env"], **doc.get("unkeyed", {}).get("env", {})))
     except BaseException as e:
         os.write(errfd, ("%s: %s" % (type(e).__name__, e)).encode()[:1000])
@@ -269,7 +191,6 @@ def _pid1(doc, root, run, logs, errfd, srcs, sock):
 
 def launch(doc, run, root, srcs):
     """Fork A (unshares the namespaces) -> fork B (pid 1 of the new pid namespace, becomes the command)."""
-    seed = key_of(doc)   # the entropy of the stage is a function of its key
     efd = os.pipe()
     logs = [os.open(os.path.join(run, n), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644) for n in ("stdout", "stderr")]
     pid = os.fork()
@@ -287,23 +208,11 @@ def launch(doc, run, root, srcs):
             os.closerange(prev + 1, 1 << 16)
             # NEWNS|NEWUTS|NEWIPC|NEWPID|NEWNET
             _c(libc.unshare(0x00020000 | 0x04000000 | 0x08000000 | 0x20000000 | 0x40000000), "unshare")
-            sk = socket.socketpair()
             b = os.fork()
             if b == 0:
                 os.close(efd[0])
-                sk[0].close()
-                _pid1(doc, root, run, logs, efd[1], srcs, sk[1].detach())
-            sk[1].close()
-            st = None
-            try:   # B sends the seccomp listener before it execs; if it died first, the socket is at EOF
-                _, fds, _fl, _ad = socket.recv_fds(sk[0], 1, 1)
-            except OSError:
-                fds = []
-            if fds:
-                st = _supervise(fds[0], b, seed)
-                os.close(fds[0])
-            if st is None:
-                _, st = os.waitpid(b, 0)
+                _pid1(doc, root, run, logs, efd[1], srcs)
+            _, st = os.waitpid(b, 0)
             os._exit(os.waitstatus_to_exitcode(st) % 256 if st & 0x7f == 0 else 128 + (st & 0x7f))
         except BaseException as e:
             os.write(efd[1], str(e).encode()[:1000])

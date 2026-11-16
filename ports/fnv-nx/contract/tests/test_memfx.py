@@ -2,8 +2,7 @@
 """Synthetic check of memfx.py (the may-write rule) and its use in argflow, on hand-assembled PE32 images (no game data)."""
 import os, struct, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: contract.X by its qualified name
-from contract import argflow, memfx, imagerec
+import argflow, memfx, imagerec
 
 BASE, TEXT, RD, DATA, DATA2 = 0x400000, 0x1000, 0x2000, 0x3000, 0x4000
 IMPS = ['LoadLibraryA', 'GetProcAddress', 'HeapFree', 'CloseHandle']

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gate "contract" family (fnvnx-gate/1, class 8 of VERDICT.md): the whole-binary gates of contract/ judged on the link of the product root.
     python3 -I gate_contract.py --gate NAME     NAME: n1 n2_data n2_call n2_vcall xc xunit rtti pcrel bodysel
-    cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/NAME.json (gatefile.py shape).
+    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/NAME.json (gatefile.py shape).
 One entry per gate file in gates.d, so each is its own line of the verdict; the stages are the ones of contract/verdict.py (exefacts, n1,
 objfacts, registry, xunit, rtti, pcrel, bodysel), run with the same arguments, in the order of their dependencies, each once per input set:
 N3 (the static native-body criterion of the pi plugin's `.fnvnx.n3`) reaches bodysel through the `bind` stage (contract/bind.py: exe addresses of the objects' N3 rows through the N1 certificate, written as n3.tsv) and bodysel's `--n3`; a function without an `ok` N3 row is LIFTED.
@@ -32,9 +32,6 @@ not match its hash, a root that has no link, no "game" (only an image root needs
 n2_data n2_call n2_vcall xc (registry.py counts, rows = functions that are not N2): not failures in themselves (the function becomes LIFTED, a
 legal outcome); the invariant that closes the class is that EVERY row is turned into LIFTED by bodysel. Universe = the functions the gate
 judged, certified = judged minus the rows whose address bodysel does not give LIFTED (the function would run a native body that fails its contract)."""
-import os
-import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import contextlib
 import hashlib
 import json
@@ -47,13 +44,13 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "..", "contract"))
 import cas  # noqa: E402
-from contract import l2sections  # noqa: E402
-from contract import exepin  # noqa: E402
+import exepin  # noqa: E402
 import gate_build  # noqa: E402
-from contract import iat  # noqa: E402
-from contract import images  # noqa: E402
-from contract import gatefile  # noqa: E402
+import iat  # noqa: E402
+import images  # noqa: E402
+import gatefile  # noqa: E402
 import recipe  # noqa: E402
 
 INPUTS = "ports/fnv-nx/verify/contract_inputs.json"
@@ -204,7 +201,7 @@ def stages(w, doc, ext, rp, only=None):
     st = {
         "exefacts": (py("exefacts.py", "--exe", P("exe"), "--units", rp["units"], "--out", w + "/facts.json"), ["facts.json"]),
         "n1": (py("n1.py", "--exe", P("exe"), "--units", rp["units"], "--msvc", P("msvc"), "--out", w + "/n1.json"), ["n1.json", "gate/n1.json"]),
-        "objfacts": (py("objfacts.py", "--link", link, "--facts", w + "/facts.json", "--sympair-kinds", l2sections.KINDS_INC, "--out", w + "/obj.json"), ["obj.json"]),
+        "objfacts": (py("objfacts.py", "--kinds", "ports/fnv-nx/toolchain/names/sympair_kinds.inc", "--link", link, "--facts", w + "/facts.json", "--out", w + "/obj.json"), ["obj.json"]),
         "registry": (py("registry.py", "--facts", w + "/facts.json", "--obj", w + "/obj.json", "--n1", w + "/n1.json", "--link", link,
                         "--out", w + "/gates"), ["gates/gates.json", "gates/bodysel.tsv"]),
         "xunit": (py("gate_xunit.py", "--objects", link + "/game", "--nm", NM), ["gate/xunit.json"]),
@@ -358,7 +355,7 @@ def chain(gate, repo, cache, root):
     w = os.path.join(cache, "contract", key)
     ws = tempfile.mkdtemp(prefix="contract-ext-")
     try:
-        ext = recipe.fetch_externals(doc["external"], os.path.join(cache, "store"), recipe.ext_dir(cache), ws)
+        ext = recipe.fetch_externals(doc["external"], os.path.join(cache, "store"), os.path.join(cache, "external"), ws)
         os.makedirs(w, exist_ok=True)
         if not os.path.isdir(os.path.join(w, "link")):
             tmpl = "%s/link.tmp-%d-%s" % (w, os.getpid(), os.urandom(4).hex())

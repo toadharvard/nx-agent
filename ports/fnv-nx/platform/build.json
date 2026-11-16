@@ -28,7 +28,7 @@
  },
  "include": [
   "ports/fnv-nx/platform/include",
-  "ports/fnv-nx/contract/include",
+  "ports/fnv-nx/contract/exporthdr/include",
   "ports/fnv-nx/loader/include",
   "ports/fnv-nx/lib/sha256/include",
   "ports/fnv-nx/hostabi/include",
@@ -235,10 +235,13 @@
     "/uses/ports/fnv-nx/bridgefacts/COM_ROWS",
     "/uses/ports/fnv-nx/bridgefacts/COM_WORDS",
     "/out/com",
-    "/in/ports/fnv-nx/platform/crt/cxx_types.tsv"
+    "/in/ports/fnv-nx/platform/crt/cxx_types.tsv",
+    "/in/ports/fnv-nx/contract"
    ],
    "inputs": [
-    "ports/fnv-nx/platform/crt/cxx_types.tsv"
+    "ports/fnv-nx/platform/crt/cxx_types.tsv",
+    "ports/fnv-nx/contract/proto.py",
+    "ports/fnv-nx/contract/store.py"
    ],
    "outputs": [
     "com/combridge_cxx.gen.cpp",
@@ -531,23 +534,11 @@
  },
  "uses": [
   {
-   "root": "ports/fnv-nx/contract/include",
-   "output": "INCLUDE"
-  },
-  {
-   "root": "ports/fnv-nx/loader/include",
-   "output": "INCLUDE"
-  },
-  {
    "root": "ports/fnv-nx/lib/sha256",
    "output": "INCLUDE"
   },
   {
    "root": "ports/fnv-nx/hostabi",
-   "output": "INCLUDE"
-  },
-  {
-   "root": "ports/fnv-nx/shim",
    "output": "INCLUDE"
   },
   {
@@ -561,6 +552,18 @@
   {
    "root": "ports/fnv-nx/bridgefacts",
    "output": "COM_WORDS"
+  },
+  {
+   "root": "ports/fnv-nx/contract/exporthdr",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/loader",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/shim",
+   "output": "INCLUDE"
   }
  ]
 }

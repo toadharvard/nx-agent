@@ -11,12 +11,8 @@ Items of the universe and their certification:
                                   (class dynamic). While one exists the verdict is a MEASUREMENT build, as for a dynamic-name GetProcAddress
                                   site in the reach gate (VERDICT.md): a declared row cannot be proven complete against an unresolved site
   seed                            certified iff `seed` equals, byte for byte, the include generate() makes from (sites, declared)
-  writer:<unit>                   every product object with a CALL relocation to a hive-writing API (role create or write, in native code; an
-                                  address taken in an export table is no call); certified iff it is the declared seed unit or an import body of the
-                                  writer (`exempt`: the units that carry an FNVNX_EXPORT record, `.fnvnx.export`, whose import name is a writer API)
-MODEL (orchestrator decision): the seed hive is the declared machine's initial state. Guest calls to RegSetValueEx and the like mutate that same hive at
-run time, as on Windows. The gate states: no native unit other than the seed unit and the writers' own import bodies writes the hive on its own
-initiative, i.e. has a native call site to a writer. The writer bodies are exempt by their export record, never by a name.
+  writer:<unit>                   every product object that references a hive-writing API (role create or write); certified iff it is the
+                                  declared seed unit: no other code of the product makes a hive key
 generate() is the port of manifest/gen_registry_seed.py (L5): it refuses a declared row that no static read site reads, a malformed or
 duplicate row, a value not valid for its type, and a `{` that is not `{game_dir}`. Assumptions (ASM-051): regsites.tsv is complete over the exe and the
 modules (the registry-site pass reports what it cannot bind as dynamic, never skips); the seed unit and the registry implementation are the only
@@ -139,7 +135,7 @@ def generate(sites_text, declared_text):
             + "".join(body) + "    { 0, 0, 0, 0, 0, 0 }\n")
 
 
-def judge(sites_text, declared_text, seed_text, refs, seed_unit, exempt=frozenset()):
+def judge(sites_text, declared_text, seed_text, refs, seed_unit):
     """-> [(item id, class or None)] of the universe in a fixed order; raises ValueError on a malformed input"""
     sites = read_sites(sites_text)
     reads = read_keys(sites)
@@ -156,5 +152,5 @@ def judge(sites_text, declared_text, seed_text, refs, seed_unit, exempt=frozense
     out.append(("seed", cls))
     for unit in sorted(refs):
         if any(w in refs[unit] for w in WRITERS):
-            out.append(("writer:%s" % unit, None if unit == seed_unit or unit in exempt else "foreign-writer"))
+            out.append(("writer:%s" % unit, None if unit == seed_unit else "foreign-writer"))
     return out

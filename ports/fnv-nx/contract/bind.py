@@ -22,8 +22,8 @@ the object's basename; such an object with no unit is not an error: it has no ex
 """
 import argparse, collections, json, os, sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)
-from contract import store
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import store
 
 NO_TWIN = {'thunk': 'no exe twin', 'gcc': 'no exe twin', 'internal': 'no exe twin',
            'vtable': 'no exe twin (its address points are bound by vtpair)'}

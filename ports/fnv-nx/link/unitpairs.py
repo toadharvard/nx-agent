@@ -20,15 +20,13 @@ a GCC twin is not a unit of the gate (nothing of it is certified).
       the one id `error: <message>`
 Exit status of a gate: 0 green, 1 red (also an input error), 2 bad command line.
 """
-import os
-import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import argparse
 import json
 import os
 import sys
 
-from contract import gatefile
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'contract'))
+import gatefile
 
 
 class GateInputError(ValueError):
@@ -84,10 +82,8 @@ def pairs(gcc, cl, units=None):
     return [(s, g[s], c.get(s, [])) for s in sorted(g)]
 
 
-def parse_args(argv, prog, doc, extra=()):
+def parse_args(argv, prog, doc):
     ap = argparse.ArgumentParser(prog=prog, description=doc.split('\n')[0])
-    for flag, kw in extra:
-        ap.add_argument(flag, **kw)
     ap.add_argument('--gcc', action='append', default=[], required=True, help='directory of GCC objects, or one .o (repeatable)')
     ap.add_argument('--cl', action='append', default=[], required=True, help='directory of cl objects, or one .obj (repeatable)')
     ap.add_argument('--units', help='build/units.json of the prepared tree: u<N>.obj stands for its unit N')

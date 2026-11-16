@@ -41,7 +41,7 @@ L5's bridge rows) or absent (not on the declared machine));
 its entries are served by bridge rows.  Only images are lifted modules.
 
 Outputs in OUT: modules.tsv (sorted by name: name, sha256, size, preferred base, assigned base, SizeOfImage, has TLS, entry rva, static,
-load index, dll; hex for addresses; the exe has a row too (assigned base = ImageBase, static 1, no load index); `dll` is the PE characteristics bit IMAGE_FILE_DLL, the kind of a row), tls.tsv + tls/<name>.bin (the TLS directory facts of the exe and of every image of modules.tsv with has TLS = 1; see tls_rows), modules.c (`fnvnx_modules[]` + `fnvnx_module_count` for loader/src/modules.c), exports/<name>.tsv per module,
+load index; hex for addresses), tls.tsv + tls/<name>.bin (the TLS directory facts of the exe and of every image of modules.tsv with has TLS = 1; see tls_rows), modules.c (`fnvnx_modules[]` + `fnvnx_module_count` for loader/src/modules.c), exports/<name>.tsv per module,
 iat.tsv (the exe's import slots through iat.py with these modules), imports/<name>.tsv per module (that module's own
 import slots through iat.py: slot, dll, name, kind, value; empty value + kind `none` = no provider).  Exit 1 when an exe
 slot has no value (gate `iat`).  A module's own slots without provider are listed on stdout (the platform's work list):
@@ -53,12 +53,12 @@ import os
 import struct
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)
-from contract import declareddlls
-from contract import dllkind
-from contract import exepin
-from contract import gatefile
-from contract import iat
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import declareddlls
+import dllkind
+import exepin
+import gatefile
+import iat
 
 PAGE = 0x1000
 ALIGN = 0x10000
@@ -331,8 +331,6 @@ def closure(exe, system, mods, declared=frozenset()):
     def visit(dll_names):
         for raw in dll_names:
             name = iat.norm_dll(raw)
-            if dllkind.is_runtime(name):
-                raise StageError('import of the runtime\'s own module %s: it is no image, no module imports it' % raw)
             if name in system or name in declared or name in seen:   # a module still being visited: the cycle edge is not followed
                 continue
             if name not in mods:
@@ -427,25 +425,11 @@ def exe_slots(exe):
     return {exe.base + slot: (dll, name) for dll, items in exe.import_directory() for slot, name in items}
 
 
-def modules_text(exe_name, exe_bytes, exe, order, load_index):
-    """modules.tsv: the exe row and one row per image of ORDER, sorted by name, all from the one PE parse of this file (PE: the parse that maps an image).
-    Columns: name, sha256, size, preferred_base, assigned_base, SizeOfImage, has_tls, entry_rva, static, load_index, dll. `dll` is the PE characteristics
-    bit IMAGE_FILE_DLL of the row's own image: the kind of a row is that bit, never its name. The exe is placed at its ImageBase (assigned = preferred),
-    is static, and has no load index (it is not an entry of fnvnx_modules[])."""
-    rows = [(exe_name, hashlib.sha256(exe_bytes).hexdigest(), len(exe_bytes), exe, exe.base, True, '')]
-    rows += [(m.name, m.sha256, m.size, m.pe, m.base, m.static, load_index.get(m.name, '')) for m in order]
-    return ('# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index\tdll\n' +
-            ''.join('%s\t%s\t%d\t%08x\t%08x\t%08x\t%d\t%08x\t%d\t%s\t%d\n' % (
-                n, sha, size, pe.base, base, pe.size_of_image, 1 if pe.dirs[9][1] else 0, pe.entry_rva,
-                int(static), idx, 1 if pe.characteristics & FILE_DLL else 0) for n, sha, size, pe, base, static, idx in sorted(rows)))
-
-
 def run(exe_path, bridge_path, dirs, out, declared_path, c_out=None, keys_out=None, keys_tsv_out=None, data_out=None, keys_h_out=None, modules_tsv_out=None, imported_out=None):
-    exe_bytes = exepin.load_exe(exe_path)
-    exe = PE(exe_bytes, exepin.NAME)
+    exe = PE(exepin.load_exe(exe_path), exepin.NAME)
     brows, _ = iat.bridge_rows(bridge_path)
     bridge = [(r['dll'], r['name'], r['conv'], r['ordinal']) for r in brows]
-    system = {r['dll'] for r in brows if not dllkind.is_runtime(r['dll'])}   # the runtime's own module has keyed rows but is no system dll: no handle, 126
+    system = {r['dll'] for r in brows}
     wine = declareddlls.read(declared_path)         # the dlls of the declared machine (Wine 9.0)
     mods = scan(dirs, system)
     me = lower(exepin.NAME)
@@ -459,7 +443,10 @@ def run(exe_path, bridge_path, dirs, out, declared_path, c_out=None, keys_out=No
     put = lambda path, text: tsv(path, text) if out else None   # noqa: E731
     write_table = lambda path, rows: iat.write_table(path, rows) if out else None   # noqa: E731
     load_index = {m.name: i for i, m in enumerate(m for m in order if m.static)}
-    mtext = modules_text(me, exe_bytes, exe, order, load_index)
+    mtext = ('# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index\n' +
+        ''.join('%s\t%s\t%d\t%08x\t%08x\t%08x\t%d\t%08x\t%d\t%s\n' % (
+            m.name, m.sha256, m.size, m.pe.base, m.base, m.pe.size_of_image, 1 if m.pe.dirs[9][1] else 0, m.pe.entry_rva,
+            int(m.static), load_index.get(m.name, '')) for m in sorted(order, key=lambda m: m.name)))
     put(os.path.join(out or '', 'modules.tsv'), mtext)
     if modules_tsv_out:   # modules.tsv as a declared stage output (the boot input of the emulator stage)
         tsv(modules_tsv_out, mtext)

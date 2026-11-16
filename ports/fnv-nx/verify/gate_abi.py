@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gate "abi" (fnvnx-gate/1, VERDICT.md class 8): a reference and the definition it binds to have one calling contract (rule, universe and proof:
 link/abi.py docstring RULE, UNIVERSE, PROOF).
-    python3 -I gate_abi.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/abi.json
+    python3 -I gate_abi.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/abi.json
 Universe: the rows abi.py defines (abi.check), over the C++ objects of every admitted product root with "target": "guest" and "cxx_origin": "native"
 (objects from gate_build.ensure; the contract names are the plugin's `.fnvnx.sympair` of each object), plus the input facts abi.py's PROOF rests on, as items
 of the same gate:
@@ -13,12 +13,8 @@ of the same gate:
          name: C's cross-unit rule is 6.2.7 compatibility of declared types, not a tag name) (without a `nokey:` flag, whose key is not unique by construction) seen in two or more objects has one layout in all of
          them (size, alignment, fields, bases, flags; `layout:<key>`): the same aggregate name is the same type in all units, which is what lets abi pass a
          by-value aggregate by its name alone. (`c` records, whose tag has no linkage, are compared through the external symbols that declare them: item `ctype:<symbol>`, C11 6.2.7p2, link/ctypes_compat.py, from `.fnvnx.decltype`; a C unit without that section is red.) (link/odr.py proves the COMDAT-copy fact only; this item closes the layout fact abi.py's PROOF names.)
-Crossing universe (crossing_universe): a term is judged only for a symbol the x86 boundary binds (IAT natives of the bridge table, the facts root's dispatch rows); a va_list term on such a symbol is red unless the symbol is the native end of a msvcrt_va row. A source that cannot be derived is a red item.
 Red iff an item is uncertified, the root's build is not green, an object has no `.fnvnx.sympair` section or cannot be parsed (red item naming the object). A C++
 unit is an object of the root's recipe (recipe.CXX_EXT). No such root: universe 0, green."""
-import os
-import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import shutil
@@ -28,13 +24,12 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "link"))
+sys.path.insert(0, os.path.join(HERE, "..", "contract"))
 import abi  # noqa: E402
-from contract import bridgetable  # noqa: E402
 import elfobj  # noqa: E402
 import gate_argorder  # noqa: E402
 import gate_build  # noqa: E402
-import gate_imports  # noqa: E402
-from contract import l2sections  # noqa: E402
+import l2sections  # noqa: E402
 import objsections  # noqa: E402
 import odr  # noqa: E402
 import ctypes_compat  # noqa: E402
@@ -42,7 +37,6 @@ import recipe  # noqa: E402
 
 
 DATAMODEL = os.path.join(HERE, "..", "toolchain", "msvcmodel", "DATAMODEL.json")
-REASONS_INC = os.path.join(HERE, "..", "toolchain", "layout", "decltype_spell.inc")
 
 
 def crossing_terms():
@@ -70,16 +64,10 @@ def envid():
     return gate_build.file_sha(os.path.join(HERE, "env.json"))
 
 
-def reasons():
-    with open(REASONS_INC) as f:
-        return ctypes_compat.decltype_reasons(f.read())
-
-
 def read_objects(objs):
     """OBJS: [(id, path)] -> (store {(id, 'sympair'): rows}, {layout key: {id: layout tuple}}, red items {id: reason}, {id: {symbol: declared C type}}, {id: {symbol: crossing terms}})."""
     store, layouts, red, decls = {}, {}, {}, {}
     cross = {}
-    kinds = l2sections.load_kinds(l2sections.KINDS_INC)
     for oid, path in objs:
         try:
             elf = elfobj.read(path)
@@ -87,16 +75,13 @@ def read_objects(objs):
             if sp is None:
                 red[oid + ":sympair"] = "the object has no .fnvnx.sympair section"
                 continue
-            store[(oid, "sympair")] = l2sections.parse_sympair(sp, oid + ":.fnvnx.sympair", kinds)
+            store[(oid, "sympair")] = l2sections.parse_sympair(sp, oid + ":.fnvnx.sympair")
             lays = objsections.parse_layout(objsections.section(elf, ".fnvnx.layout"), oid + ":.fnvnx.layout")
-            dt = elf.section(".fnvnx.decltype")     # RULE DECLTYPE-COMPLETE (link/ctypes_compat.py): every GLOBAL/WEAK symbol of the object has exactly one line, `sym<TAB>type` or `sym<TAB>-reason` (reason from the plugin's closed set); the typed lines are compared by C11 6.2.7
-            types, why = ctypes_compat.parse_decltype_lines(dt if dt is not None else b"", oid + ":.fnvnx.decltype", reasons())
-            have = {n for n, bind, _t, _sh, _v, _sz, _o in elf.symbols() if n and bind in (1, 2)}     # STB_GLOBAL, STB_WEAK
-            for n in sorted(have - set(types) - set(why)):
-                red[oid + ":decltype:missing:" + n] = "global/weak symbol %s has no .fnvnx.decltype line" % n
-            for n in sorted((set(types) | set(why)) - have):
-                red[oid + ":decltype:extra:" + n] = ".fnvnx.decltype line for %s, which is not a global/weak symbol of the object" % n
-            decls[oid] = types
+            dt = elf.section(".fnvnx.decltype")     # a C unit's declared types of external symbols, compared by C11 6.2.7 (link/ctypes_compat.py): the section's presence is the fact, whatever the linkage of the layout rows
+            if dt is not None:
+                decls[oid] = ctypes_compat.parse_decltype(dt, oid + ":.fnvnx.decltype")
+            elif any(lay.linkage == "c" for lay in lays):     # a unit of `c` records without its declared types: nothing to compare them with
+                red[oid + ":decltype"] = "a C unit has no .fnvnx.decltype section"
             cr = elf.section(".fnvnx.crossing")
             if cr is not None:
                 cross[oid] = parse_crossing(cr, oid + ":.fnvnx.crossing")
@@ -191,37 +176,6 @@ def judge_objects(objs, asm=(), universe=None, va_forwarders=frozenset()):
             len(items), len(uni), len(odr_uni), sum(1 for i in items if i.startswith("layout:")), len(red))
 
 
-FACTS_ROOT = "ports/fnv-nx/contract/facts"   # its `native` output: the exe addresses bound to native bodies (the dispatch descriptors' symbols)
-
-
-def crossing_universe(repo, cache, admit):
-    """-> (universe, va_forwarders): the symbols the x86 boundary binds, and the native ends of the msvcrt_va rows.
-    universe = the native symbols of the bridge table of every root that declares imports (gate_imports.natives_of: the IAT bindings, the one derivation of the
-    imports gate) | the symbols of the dispatch rows `native` of the facts root (the native bodies the exe's code addresses reach: the called exports and the
-    dispatch descriptors). Anything else is native-to-native, AAPCS64 on both ends with one compiler, and never crosses (RULE: a term is judged only for a symbol of the universe).
-    va_forwarders = column 2 of the va record each declaring root names (`va` of its imports.in.json, read through recipe.resolve_input), by bridgetable.read_va.
-    ValueError / LookupError / RecipeError when a source is not derivable: the caller is red for it; there is no empty fallback."""
-    roots = gate_build.product_roots(repo)
-    uni = set(gate_imports.natives_of(repo, cache, admit, roots))
-    res = gate_build.ensure(FACTS_ROOT, cache, repo)[0]
-    if res["status"] != "green":
-        raise ValueError("%s: build %s" % (FACTS_ROOT, res["status"]))
-    with open(gate_build.published_output(cache, FACTS_ROOT, "native", repo)[0]) as f:
-        for ln in f.read().split("\n"):
-            if ln:
-                uni.add(ln.split("\t")[1])
-    va = set()
-    for r in roots:
-        p = os.path.join(repo, r, "imports.in.json")
-        if os.path.isfile(p):
-            with open(p) as f:
-                decl = json.load(f)
-            host = recipe.resolve_input(r, decl["va"], repo, cache, recipe.load_recipe(repo, admit, r))[0]
-            with open(host, encoding="latin1") as f:
-                va |= set(bridgetable.read_va(f.read()).values())
-    return uni, va
-
-
 def judge_root(repo, cache, root):
     roots, files = recipe.load_admit(repo), recipe.tracked(repo)
     try:
@@ -233,14 +187,9 @@ def judge_root(repo, cache, root):
         return 1, 0, [root + ":build"], "build %s" % res["status"]
     objs = [(root + "/" + o["unit"], o["object"], o["sha256"]) for o in res["objects"] if o["unit"].endswith(recipe.CC_EXT + recipe.CXX_EXT)]
     asm = [(root + "/" + o["unit"], o["object"], o["sha256"]) for o in res["objects"] if o["unit"].endswith(recipe.ASM_EXT)]
-    try:
-        universe, va = crossing_universe(repo, cache, roots)
-    except (ValueError, LookupError, OSError, KeyError, recipe.RecipeError) as e:
-        return 1, 0, [root + ":crossing-universe"], "the crossing universe is not derivable: %s" % str(e)[:300]
     # the item is the root's C and C++ objects as a set (the ODR and layout joins read all of them): keyed by their ids and sha256 and the tools that read them
-    key = {"gate": "abi", "objects": [[i, h] for i, _, h in objs], "asm": [[i, h] for i, _, h in asm], "tools": gate_build.tool_digest(__file__, abi, odr, elfobj, l2sections, objsections), "kinds": sorted(l2sections.load_kinds(l2sections.KINDS_INC)), "env": envid(),
-           "universe": sorted(universe), "va": sorted(va)}
-    v, _ = gate_build.memo(cache, "abi", key, lambda: list(judge_objects([(i, p) for i, p, _ in objs], [(i, p) for i, p, _ in asm], universe, frozenset(va))))
+    key = {"gate": "abi", "objects": [[i, h] for i, _, h in objs], "asm": [[i, h] for i, _, h in asm], "tools": gate_build.tool_digest(__file__, abi, odr, elfobj, l2sections, objsections), "env": envid()}
+    v, _ = gate_build.memo(cache, "abi", key, lambda: list(judge_objects([(i, p) for i, p, _ in objs], [(i, p) for i, p, _ in asm])))
     return tuple(v)
 
 

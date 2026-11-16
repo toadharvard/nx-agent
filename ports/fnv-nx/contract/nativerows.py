@@ -5,15 +5,15 @@
 
 native.tsv: `address(8 hex)<TAB>symbol`, sorted by address, one row per exe address whose body is NATIVE (bodysel.tsv: verdict native).  The symbol is the one a native
 root DEFINES for that address: the rows of `.fnvnx.sympair` marked `def` (obj.json), with the address bind.json gave it (the compiler plugin's MSVC name through the N1
-certificate).  lift/tools/dispgen.py --prefix fnvnx_native turns the rows into the table `fnvnx_native_disp_table`, which fnvnx_dispatch consults first.
+certificate).  lift/tools/dispgen.py --prefix fnvnx_native --allow-empty turns the rows into the table `fnvnx_native_disp_table`, which fnvnx_dispatch consults first.
 RULE (total: every native address is judged): exactly one defined symbol of the objects carries the address -> its row.  None (a native verdict with no definition
 in the objects) or several different symbols (two names for one exe address, e.g. both constructor variants) is an ERROR listing every such address: the table has
 no rule to choose between bodies, and a guess would be a heuristic.  A symbol defined in several objects (inline functions) counts once.
 The output is a function of the three input files only (rows sorted; no clock, no path)."""
 import argparse, os, sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)
-from contract import store
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import store
 
 FUNC_KINDS = ('func', 'ctor.c1', 'ctor.c2', 'dtor.d2', 'dtor.d1', 'dtor.d0', 'dtor.sdd')
 

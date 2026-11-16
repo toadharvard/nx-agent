@@ -22,10 +22,10 @@
    "args": [
     "--objects",
     "/objs",
-    "--sympair-kinds",
-    "/in/ports/fnv-nx/toolchain/names/sympair_kinds.inc",
     "--out",
-    "/out/obj.json"
+    "/out/obj.json",
+    "--kinds",
+    "/in/ports/fnv-nx/toolchain/names/sympair_kinds.inc"
    ],
    "inputs": [
     "ports/fnv-nx/toolchain/names/sympair_kinds.inc"

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gate "hostapi" (fnvnx-gate/1): the host services declared in fnvnx/hostapi.h are exactly the services the product calls.
-    python3 -I gate_hostapi.py [--header PATH]     cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/hostapi.json
+    python3 -I gate_hostapi.py [--header PATH]     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/hostapi.json
 Rule (owner order 2026-11-10/11: nothing that the product does not need, no placeholder behind a number): hostapi.h is an interface root's header
 (hostabi/); {service numbers declared in the header} == {service numbers expanded by at least one unit of ANY admitted product root that includes
 it}: the universe is per interface, over the union of all its includers (L1 decision 2026-11-12), never per including root. A service that no
@@ -22,9 +22,6 @@ expands, and the -dU position of a define does not matter.
 Limit (stated, not hidden): a use inside a function that no code reaches still counts; reachability is the job of the gates reach / reachlink.
 The module ids (FNVNX_EXT_*) are not services and are not items: a module id names a host module, a service number names an entry of module 11,
 which is the only table of the header. Models of machines below the product boundary (deko3d, libnx, kernel) are modules, not services."""
-import os
-import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import shutil
@@ -279,7 +276,7 @@ def main(argv):
             if sc != su:
                 detail = ("%s; services: %s" % (detail, "; ".join(sids)))[:900]
             sys.path.insert(1, os.path.join(repo, "ports", "fnv-nx", "manifest"))
-            from manifest import check_hostapi   # the header grammar (service numbers, argument counts) has its one home there
+            import check_hostapi   # the header grammar (service numbers, argument counts) has its one home there
             errs = []
             svc, _, count, notserved = check_hostapi.parse_header(header, errs)
             hu, hids = served_ids(repo, svc, count, notserved)

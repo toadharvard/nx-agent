@@ -22,13 +22,11 @@ weakly: the linker resolves such a reference to 0 and drops it from the symbol t
 `header:..`.  Exit 1 on any id; the ids are printed on stderr, the summary line last.
 The ELF is exe-derived (lifted code): container and fnv-nx-build only.
 """
-import os
-import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import argparse, os, re, shutil, struct, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from contract import gatefile
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'contract'))
+import gatefile
 import gateids
 
 EM_AARCH64, SHT_SYMTAB, SHN_UNDEF = 183, 2, 0
