@@ -751,7 +751,6 @@ extern "C" void OutputDebugStringA(LPCSTR s)
         os_debug_print(s);
 }
 
-FNVNX_EXPORT("kernel32.dll", "DebugBreak", DebugBreak, "func");
 /* DebugBreak: EXCEPTION_BREAKPOINT raised by the platform; it returns when the exception was continued. */
 extern "C" void DebugBreak(void) { w32_raise(0x80000003u, 0, 0, NULL); }
 
