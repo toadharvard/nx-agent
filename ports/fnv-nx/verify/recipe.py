@@ -1454,6 +1454,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
         return ["recipe is not a JSON object"]
     err = ["unknown key %r" % k for k in sorted(set(rec) - KEYS)]
     gonly = generated_only(rec)
+    written_compiler = rec.get("compiler")   # before expand_profile fills one in
     if "profile" in rec:
         ent0 = roots.get(root, {})
         want = (entry_of(roots, root + "@" + variant) if variant else ent0).get("target")
@@ -1501,7 +1502,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
         rins = [p for g in (rec.get("run") if isinstance(rec.get("run"), list) else []) if isinstance(g, dict) and isinstance(g.get("inputs"), list) for p in g["inputs"] if isinstance(p, dict)]
         pl = [x.get("name") for x in (rec.get("plugins") if isinstance(rec.get("plugins"), list) else []) if isinstance(x, dict)]
         err += ["gonly:unused-plugin:%s (a root with no unit declares a plugin only when a run step takes it as its {\"plugin\": NAME} input)" % n for n in pl if {"plugin": n} not in rins]
-        cp = rec.get("compiler")
+        cp = written_compiler
         if cp is not None and not (pl or any(set(p) == {"external"} and isinstance(cp, dict) and p["external"] in (cp.get("external"), cp.get("name")) for p in rins)):
             err.append("gonly:unused-compiler (a root with no unit names a compiler only to build its plugins or as a run step's {\"external\": NAME} input)")
     if gonly:   # no compiler and no flags are written: the root compiles nothing; a source that is no run step's declared input is neither a unit nor an input: red
