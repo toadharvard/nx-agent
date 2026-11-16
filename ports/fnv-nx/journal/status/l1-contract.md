@@ -2626,3 +2626,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 06:00
 - cand4: open at bde819407 (fac693694 + shard e9c42d060). Taking w28's line whole is red on the trunk: oracle 50 uncertified tests and 5 dangling keys, admit, assumptions. The cause is that w28 sits on the L5 line. w15's plan is accepted: w28 builds claude/fnv-l1-contract-w28-c4 from fac693694 by cherry-picking its L1-only commits (verify/, contract/, link/, toolchain/, farm/), with '!rt' and without the exefacts series. Status: doing (w28), then one farm verdict.
 - bottleneck: w28-c4 head.
+
+## 2026-11-16 06:05
+- L6 on trunk fac693694: 3 of 13 roots pass recipe check. Missing on the trunk: recipe forms (external_of, include_of, header INCLUDE, per-target host forms, foreach, named rows), the roots lib/sha256, hostabi and tests/bootrt, and L2's DATAMODEL with `types`.
+- cand4 scope: w28-c4 (all those L1 recipe forms, '!rt', shard), plus lib/sha256, hostabi and tests/bootrt with their admit entries, plus L2's DATAMODEL. If L6's 13 roots pass recipe check on that head, they join the same farm verdict.
+- bottleneck: w28-c4 head.
