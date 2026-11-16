@@ -2,6 +2,9 @@
 """Tests of the f2i reader of lift/proof/gate_fpexact.py (check 3a): the path comes from the `f2i` field of the object's row in objects.json, the
 unit the plugin reports is recipe.sandbox_src(unit). Plain script: one PASS/FAIL line per case, exit 0 on pass. The identity case builds the toy
 root of verify/tests/test_recipe.py with the real recipe and reads the stage documents and the preprocessed text it produced."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import re
@@ -14,14 +17,14 @@ LIFT = os.path.normpath(os.path.join(HERE, "..", ".."))
 VERIFY = os.path.normpath(os.path.join(LIFT, "..", "verify"))
 for p in (os.path.join(LIFT, "proof"), os.path.join(VERIFY, "tests"), VERIFY, os.path.join(LIFT, ".."), os.path.join(LIFT, "..", "contract")):
     sys.path.insert(0, p)
-import scratch  # noqa: E402
+from verify import scratch  # noqa: E402
 
 scratch.install()
-import gate_build  # noqa: E402
+from verify import gate_build  # noqa: E402
 import gate_fpexact as G  # noqa: E402
-import recipe  # noqa: E402
+from verify import recipe  # noqa: E402
 import test_recipe as TR  # noqa: E402
-import unitstage  # noqa: E402
+import unitstage  # noqa: E402   (the module object recipe.py itself imports: verify is on sys.path)
 
 TMP = tempfile.mkdtemp(prefix="fpexact-")
 FAILED = []
@@ -135,9 +138,9 @@ def _run():
     bad = os.path.join(TMP, "bad.json")
     open(bad, "w").write("{")
     check("malformed report: red f2i-report-missing", codes(bad) == ["f2i-report-missing"])
-    res = {"objects": [{"unit": "a.c", "object": obj, "f2i": good}, {"unit": "b.c", "object": obj}]}
-    check("read_f2i_paths: the f2i field of each row, None for a row without", G.read_f2i_paths(res) == {"a.c": good, "b.c": None}, G.read_f2i_paths(res))
-    its = G.judge_objects_coded("r", G.read_inputs(res), None, None, None, G.read_f2i_paths(res))
+    rows = {"objects": [{"unit": "a.c", "object": obj, "f2i": good}, {"unit": "b.c", "object": obj}]}      # not `res`: the build result below is read
+    check("read_f2i_paths: the f2i field of each row, None for a row without", G.read_f2i_paths(rows) == {"a.c": good, "b.c": None}, G.read_f2i_paths(rows))
+    its = G.judge_objects_coded("r", G.read_inputs(rows), None, G.helper_items("r", {}, None, [], True, set()), None, G.read_f2i_paths(rows))      # check 0 of a root with no f2i helper: no item
     check("judge_objects_coded takes the path per unit: a.c clean, b.c (no f2i) red", its["f2i:r/a.c"] == [] and [c for c, _ in its["f2i:r/b.c"]] == ["f2i-report-missing"], its)
 
     # identity: the sandbox function is the path the recipe's stages pass and the preprocessed text names
