@@ -1389,3 +1389,8 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - lift/proof/fpchost publishes the derived helper universe as the open list, which gate_fpexact check 0 reads (w13, last step).
 - The path is unchanged: relift as stages → pack external (commit + tree_sha256).
 - bottleneck: L2's K2 pin (lift/rt, contract/facts, lift/disp); pcsrc red (w7 RULE T).
+
+## 2026-11-16 03:30: fpchost closed (w13 c5ff8fed7)
+- lift/proof/fpchost keeps libfpchost.so and its exports; it is recipe-green. fpcuniverse.py and the HELPERS output are deleted: L3b's lift/proof/helpercalls.py is the one helper universe.
+- No 2^32 compare step, because orchestrator a172a44b7 sets isla for every width. L3b's request for -g in lift/rt is declined: check 0 needs no width under the ruling ("every helpercalls helper is under ASM-329 or rcpcert"), and -g would rekey every product stage downstream.
+- bottleneck: L2's K2 pin; pcsrc red (w7 RULE T).
