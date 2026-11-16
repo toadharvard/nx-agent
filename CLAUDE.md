@@ -805,6 +805,12 @@ The owner's words: "не будем тратить так время... умен
     compiler. Owner: L2.
   - The redirect is a declared stage patch (`core-math.patch` in the root), never an edit of the mirror.
   - Every other CORE-MATH exit or printf on the path is closed the same way, or shown dead by the preprocessor.
+- **A library's documented flags (06:15Z).** A pinned external library root may declare in its build.json the compiler
+  flags that its own pinned documentation requires for its documented semantics. CORE-MATH's `-frounding-math` is one.
+  - Each such flag carries the citation (file and line of the mirror) in the same record.
+  - It must change neither the data model nor the ABI (DATAMODEL decides).
+  - The recipe accepts such a flag only with its citation, and L1 owns that check.
+  - It is not a fast-path switch-off, because the semantics need it. Any other per-root flag stays red.
 - **No other libm on the path.** A lifted call to newlib's sin, cos or log is not correctly rounded, so it does not meet
   OWNER 8. The same table applies to it.
 
