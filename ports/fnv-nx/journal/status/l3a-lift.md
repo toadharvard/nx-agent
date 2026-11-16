@@ -1452,3 +1452,10 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Every FNVNX_EXPORT follows its symbol's definition.
 - w8 (doing): the rework on base3 through the recipe; counts per kind with the commit to L1.
 - bottleneck: L2 ENTRY1-ATOMIC for C, the L2 recipe-path pin; w8's entry rework; pcsrc (the 7 vptr sites, w7).
+
+## 2026-11-16 04:08 — lift/rt on base3: 18 of 21 units
+- w8 measured local 02e5b2732 (08109b9ce merged; 32 records kind entry, 1 data record _adjust_fdiv): 18 of 21 objects built.
+- Red, all of it owned by L2:
+  - dispatch.c: ENTRY1-ATOMIC for C.
+  - msvcrt_ci.cc and msvcrt_eh.cc: `.fnvnx.decltype: a referenced symbol has no declaration line`, at the end of the TU, with no symbol named. It is new with cand4b b51ad22ee. L2 was asked to print the symbol and to close the gap.
+- bottleneck: L2 (dispatch.c, the decltype diagnostic, the recipe-path pin); w8 class A/B rework; pcsrc 7 vptr sites (w7).
