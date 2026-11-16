@@ -1547,3 +1547,10 @@ Paused: w3b, w4, farm; no other work.
     - Gates: 0 render findings in pure and abspath; assumptions has no ASM-6xx finding.
 - sm_link: the 8 stage shards take 88-112 s cold; w6 is timing the link shards (commit 9e62a93ea).
 - bottleneck: the sm_link link cost (w6), then the farm1 rerun; the L1 dangling-link rule; base3 retake; the cand4 base.
+- 05:10Z w7 (session_01KmtZKTwJ5fk1PMDTD5fZYh, claude/fnv-l6-render-w7 3d93234): the d3d9.dll export records, at L1's request (L5 w32 found that none existed).
+    - 11 FNVNX_EXPORT records, one per spec export with a signature; exportgen counts 11. The 3 undocumented exports have no signature and get no record.
+    - The hand table g_exports and nx_d3d9_export are deleted (rule 2; no consumer).
+    - The check is a recipe stage: render/total/d3d9exports reads D9_SPEC and contract/exports.tsv.
+    - Blocked: contract/exports is red upstream in lift/rt cpumodel.c:59 (fnvl_msvcrt_adjust_fdiv; owner L3a/L1).
+- 05:10Z gate_d3d9total: L1's ext-cache finding (:317/:463) was read from a stale copy. The w6-root gate is a 42-line reader. w6 is merging w28 01e91c00d and running test_extpaths.
+- bottleneck: sm_link link cost (w6); lift/rt red (L3a) for d3d9exports; base3 retake; the cand4 base.
