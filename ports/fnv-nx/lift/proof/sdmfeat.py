@@ -2,6 +2,7 @@
 """The CPUID feature flag of every instruction form of the pack, read from the Intel SDM and from nothing else (OWNER 10, ASM-009: the x86 ISA as documented in the SDM).
 
     python3 -I sdmfeat.py rows SDM.txt SITES.tsv OUT_ROWS.tsv [PUBLIC_ROWS.tsv]   # the per-form feature rows; OUT_ROWS lists the shapes of each form (exe-derived: private), PUBLIC_ROWS (lift/proof/tests/sdm_cpuid_feature_rows.tsv) only their number
+    python3 -I sdmfeat.py dumprows SDM.txt OUT.json                 # the lifter's input `sdmrows` (fnvlift/f_cpufeat.py): the opcode rows and flag table, nothing exe-derived
     python3 -I sdmfeat.py partition OUT_ROWS.tsv SITES.tsv OUT.tsv  # the cleared sites, from the rows file ONLY
 
 SDM.txt: `pdftotext -layout` of the Intel(R) 64 and IA-32 Architectures SDM, combined volumes (its sha256 is in every output header; the page numbers cited are those of that edition).
@@ -420,11 +421,8 @@ def opmap_cite(lines, text):
     raise SystemExit('SDM text not found: %r' % text)
 
 
-def cmd_rows(sdm, sites, out, public=None):
-    from proof import shape
-    lines = load(sdm); table = flag_table(lines); cpu = declared_cpu()
-    allrows = sdm_rows(lines, table)
-    nopflags = set(re.findall(r'are NOP on processors that report CPUID\.\w+H?\.\w+H?:\w+\.(\w+)\[', ' '.join(l.strip() for l in lines)))     # SDM Vol. 1 ch. 17: all MPX instructions are NOP without the flag
+def index_rows(allrows):
+    """(byfirst, vex): the SDM rows indexed by the first opcode byte (a +r row by its byte & 0xf8), the VEX rows apart"""
     byfirst = collections.defaultdict(list); vex = []
     for r in allrows:
         d = r['p']
@@ -432,24 +430,60 @@ def cmd_rows(sdm, sites, out, public=None):
             vex.append(r)
         else:
             byfirst[d['bytes'][0] & (0xf8 if d['plus_r'] and len(d['bytes']) == 1 else 0xff)].append(r)
+    return byfirst, vex
+
+
+def match_form(ins, idx):
+    """-> (candidate rows, kind, opcode-map entry or None) of a decoded form: the one row match of cmd_rows, shared with the lifter's feature gate (fnvlift/f_cpufeat.py)"""
+    byfirst, vex = idx
+    mand, body, pos = form_of(ins)
+    isvex = body[:1] in (b'\xc4', b'\xc5') and ins.mnemonic.startswith('v')
+    if isvex:
+        cand, kind = match_rows(mand, body, vex)
+    else:
+        b0 = body[0] if body else 0
+        cand, kind = match_rows(mand, body, byfirst.get(b0, []) + byfirst.get(b0 & 0xf8, []))
+    mp = None if cand or isvex else next((o for o in OPMAP if o[1](mand, body)), None)
+    return cand, kind, mp
+
+
+def needs_of(rs, table, cpu, nopflags):
+    """-> (status, needs, value, exec_as, problems) of the matched rows rs: status found | ambiguous; needs: the flag expressions, ' | '-joined; value none | present | absent (the declared CPU); exec_as: the SDM's
+    `executed as` aliases and NOP for an MPX-style flag; problems: unknown flag names"""
+    needset = set(); bad = []
+    for r in rs:
+        if r['fmt'] == 'A' and r['flag']: needset.add(r['flag'])
+        elif r['fmt'] == 'A': needset.add(' AND '.join(r['exc']) or '-')
+        else: needset.add(' AND '.join(r['exc']) or '-')
+    if len(needset) > 1:
+        bad.append(sorted(needset))
+    st = 'found' if len(needset) == 1 else 'ambiguous'
+    needs = ' | '.join(sorted(needset))
+    vals = set()
+    for n in needset:
+        if n == '-': vals.add('none'); continue
+        ok, unk = eval_flag(n, table, cpu)
+        vals.add('present' if ok else 'absent')
+        if unk: bad.append('unknown flag %s' % unk)
+    val = 'none' if vals == {'none'} else ('absent' if 'absent' in vals else 'present')
+    ea = ','.join(sorted({x for r in rs for x in r['exec_as']} | {'NOP' for n in needset for t in re.findall(r'[A-Za-z0-9_\.]+', n) if t in nopflags})) or '-'
+    return st, needs, val, ea, bad
+
+
+def cmd_rows(sdm, sites, out, public=None):
+    from proof import shape
+    lines = load(sdm); table = flag_table(lines); cpu = declared_cpu()
+    allrows = sdm_rows(lines, table)
+    nopflags = set(re.findall(r'are NOP on processors that report CPUID\.\w+H?\.\w+H?:\w+\.(\w+)\[', ' '.join(l.strip() for l in lines)))     # SDM Vol. 1 ch. 17: all MPX instructions are NOP without the flag
+    idx = index_rows(allrows)
     sv = read_sites(sites); shapes = collections.OrderedDict(); count = collections.Counter(); fam = {}
     for a, k, f in sv:
         count[k] += 1; fam[k] = f
     md = shape.decoder(); forms = collections.OrderedDict(); problems = []
     for k in sorted(count):
         ins = decode(shape.rep_bytes(k), md)
-        mand, body, pos = form_of(ins)
-        if body[:1] in (b'\xc4', b'\xc5') and ins.mnemonic.startswith('v'):
-            cand, kind = match_rows(mand, body, vex)
-        else:
-            rows = []
-            b0 = body[0] if body else 0
-            rows = byfirst.get(b0, []) + byfirst.get(b0 & 0xf8, [])
-            cand, kind = match_rows(mand, body, rows)
-        if not cand and not (body[:1] in (b'\xc4', b'\xc5') and ins.mnemonic.startswith('v')):
-            mp = next((o for o in OPMAP if o[1](mand, body)), None)
-        else:
-            mp = None
+        cand, kind, mp = match_form(ins, idx)
+        mand, body, _pos = form_of(ins)
         if not cand and mp:
             key = 'map|%s|%s' % (mp[0], ' '.join('%02X' % b for b in body[:3]))
             e = forms.setdefault(key, {'rows': [], 'shapes': [], 'fam': set(), 'map': mp})
@@ -485,29 +519,40 @@ def cmd_rows(sdm, sites, out, public=None):
             elif not rs:
                 st, needs, val, ea, op, ins, cit = 'undefined', '-', 'none', '-', '-', '-', 'no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")'
             else:
-                needset = set()
-                for r in rs:
-                    if r['fmt'] == 'A' and r['flag']: needset.add(r['flag'])
-                    elif r['fmt'] == 'A': needset.add(' AND '.join(r['exc']) or '-')
-                    else: needset.add(' AND '.join(r['exc']) or '-')
-                if len(needset) > 1:
-                    problems.append((key, sorted(needset)))
-                st = 'found' if len(needset) == 1 else 'ambiguous'
-                needs = ' | '.join(sorted(needset))
-                vals = set()
-                for n in needset:
-                    if n == '-': vals.add('none'); continue
-                    ok, unk = eval_flag(n.replace(' AND ', ' AND '), table, cpu)
-                    vals.add('present' if ok else 'absent')
-                    if unk: problems.append((key, 'unknown flag %s' % unk))
-                val = 'none' if vals == {'none'} else ('absent' if 'absent' in vals else 'present')
-                ea = ','.join(sorted({x for r in rs for x in r['exec_as']} | {'NOP' for n in needset for t in re.findall(r'[A-Za-z0-9_\.]+', n) if t in nopflags})) or '-'
+                st, needs, val, ea, bad = needs_of(rs, table, cpu, nopflags)
+                problems.extend((key, b) for b in bad)
                 op = rs[0]['op']; ins = rs[0]['instr']; cit = 'SDM %s %s %s' % (rs[0]['sec'], rs[0]['page'], ('opcode table row "%s"' % rs[0]['op']) + ('' if rs[0]['fmt'] == 'A' else ' (no flag column; flags from the #UD CPUID lines of the section)'))
             fh.row([key, ','.join(sorted(e['fam'])), st, needs, val, ea, op, ins, cit, ','.join(e['shapes']), str(sum(nsites[k] for k in e['shapes']))])
     for h, full in fhs: h.close()
     sys.stdout.write('forms %d shapes %d sites %d problems %d\n' % (len(forms), len(count), len(sv), len(problems)))
     for p in problems[:40]: sys.stdout.write('  PROBLEM %s\n' % (p,))
     return 1 if problems else 0
+
+
+ROWS_FORMAT = 'fnvnx-sdmrows/1'
+
+
+def cmd_dumprows(sdm, out):
+    """the lifter's input `sdmrows`: every SDM opcode-table row (the fields the form match and the flag decision read), the SDM's flag table and the MPX-style NOP flags, in one JSON file.
+    The opcode cell `p` is re-parsed on load (parse_opcode), so the file holds the SDM's own text only."""
+    import json
+    lines = load(sdm); table = flag_table(lines)
+    nopflags = sorted(set(re.findall(r'are NOP on processors that report CPUID\.\w+H?\.\w+H?:\w+\.(\w+)\[', ' '.join(l.strip() for l in lines))))
+    rows = [{k: r[k] for k in ('op', 'modc', 'instr', 'flag', 'fmt', 'sec', 'page', 'line', 'exc', 'exec_as')} for r in sdm_rows(lines, table)]
+    with open(out, 'w', newline='\n') as fh:
+        json.dump({'format': ROWS_FORMAT, 'sdm_sha256': sha_file(sdm.replace('.txt', '.pdf')) if os.path.exists(sdm.replace('.txt', '.pdf')) else sha_file(sdm),
+                   'flags': {k: [list(t) for t in v] for k, v in sorted(table.items())}, 'nopflags': nopflags, 'rows': rows}, fh, indent=0, sort_keys=True)
+    sys.stdout.write('rows %d flags %d nopflags %d\n' % (len(rows), len(table), len(nopflags)))
+    return 0
+
+
+def load_rows(path):
+    """-> (rows with their parsed opcode, flag table, nopflags) of a dumprows file"""
+    import json
+    d = json.load(open(path))
+    if d.get('format') != ROWS_FORMAT: raise ValueError('sdmrows: %s is not a %s file' % (path, ROWS_FORMAT))
+    rows = [dict(r, p=parse_opcode(r['op'])) for r in d['rows']]
+    return rows, {k: [tuple(t) for t in v] for k, v in d['flags'].items()}, frozenset(d['nopflags'])
 
 
 def cmd_partition(rows, sites, out):
@@ -538,6 +583,7 @@ def cmd_partition(rows, sites, out):
 
 def main(argv):
     if len(argv) in (4, 5) and argv[0] == 'rows': return cmd_rows(*argv[1:])
+    if len(argv) == 3 and argv[0] == 'dumprows': return cmd_dumprows(*argv[1:])
     if len(argv) == 4 and argv[0] == 'partition': return cmd_partition(*argv[1:])
     sys.stderr.write(__doc__); return 2
 
