@@ -3070,3 +3070,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - 12:39: the dispatch.c:69 red was already fixed in cand5's toolchain (L2 ENTRY1-ATOMIC 67164ec5e). base3 lacks it, so w8 builds the loader with cand5's toolchain/.
   - test_runtime_cflags: L2 a36b3c8f2 plus overlay 35e622293, 3 comment spellings removed, test passes. cand5 toolchain/ and rules/ = a36b3c8f2 + 5241e02c7 + c64609950 + 35e622293.
 - 12:40: cand5 lift/ = L3a base3 407914779 (gate_admit 1885/1885; lift/rt green, 12 objects). The loader stops locally only at imptest/lifted `store` (poppler is not in that container), so farm 2 builds it. Bare imports: toolchain/tests 15 (plugbuild) and verify 20, judged by w28's check of the stage closures.
+- 12:41: cand5 c5 ebf18a096 (w28): admit 1805/1805 files, 94 roots. recipe.check: 66 roots, 0 red, 100 s.
+  - loader/ and bridgetable/ come from L5 563e1273f (lift `uses` them). contract/exporthdr is L1's.
+  - Retakes before the verdict: lift/ from 407914779, and toolchain/ and rules/ from a36b3c8f2 + overlay. Then w28 sends the verdict to farm session_01KmtZKTV1mniUErarfUpdJZ.
