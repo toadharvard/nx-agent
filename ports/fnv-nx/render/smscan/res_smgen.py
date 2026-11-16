@@ -1,17 +1,16 @@
 #!/usr/bin/env python3 -I
-"""res_smgen.py OUT_DIR SM_TABLE_JSON SM_ILLEGAL_TSV D3D9_TABLES_PY: writes OUT_DIR/res_smtab.gen.h, the data of smscan.c, from the render/shaders/total stage outputs sm_table.json and sm_illegal.tsv
-(models, registers, modifiers, opcode model sets and operand roles) and spec/d3d9_tables.py SM1_PARAMS (sm1 token-walk operand counts). Nothing is chosen
+"""res_smgen.py OUT_DIR SM_TABLE_JSON SM_ILLEGAL_TSV SM_WALK_JSON: writes OUT_DIR/res_smtab.gen.h, the data of smscan.c, from the render/shaders/total stage outputs sm_table.json and sm_illegal.tsv
+(models, registers, modifiers, opcode model sets and operand roles) and the bridgefacts output D9_SMWALK (SM1_PARAMS and SM_WALK of d3d9_tables.py: sm1 token-walk operand counts). Nothing is chosen
 by hand here: a fact the table does not state is not generated (the checker then accepts: superset)."""
 import csv, json, os, sys
-out, tabj, illj, tabpy = sys.argv[1:5]; os.makedirs(out, exist_ok=True)
+out, tabj, illj, walkj = sys.argv[1:5]; os.makedirs(out, exist_ok=True)
 T = json.load(open(tabj))
 for _c in T["conflicts"]:   # every union row cites the rule, the Microsoft page and section, and the Wine 9.0 file and line (CLAUDE.md: Where the Microsoft page is narrower)
     assert _c.get("decision") == "union" and _c["rule"] and _c["ms"]["page"] and _c["ms"]["section"] and _c["wine"]["file"] and _c["wine"]["line"], _c["id"]
 for _u in T["undetermined"]:   # no undetermined row stays without a decision and a source: included = union (MS silent, Wine accepts), illegal = Microsoft states it
     assert _u["rows"] in ("included", "illegal") and _u["rule"] and _u["ms"]["page"] and _u["ms"]["section"], _u["id"]
     assert _u["decision"] == ("union" if _u["rows"] == "included" else "illegal") and (_u["rows"] == "illegal" or (_u["wine"]["file"] and _u["wine"]["line"])), _u["id"]
-sys.path.insert(0, os.path.dirname(tabpy)); import d3d9_tables as D   # the module of the argument, a plain import from its own directory
-assert os.path.samefile(D.__file__, tabpy), (D.__file__, tabpy)
+WALK = json.load(open(walkj))   # {"SM1_PARAMS": ..., "SM_WALK": ...}: the stage output of bridgefacts, a declared `uses` input
 CLS = ["r", "v", "c", "t", "a0", "aL", "b", "i", "l", "oPos", "oFog", "oPts", "oD", "oT", "o", "oC", "oDepth", "s", "p0", "vPos", "vFace"]
 SRCMOD = ["neg", "bias", "biasneg", "sign", "signneg", "comp", "x2", "x2neg", "dz", "dw", "abs", "absneg"]          # token codes 1..12 (13 = not: predicate only)
 DSTMOD = ["sat", "pp", "centroid", "x2", "x4", "x8", "d2", "d4", "d8"]                                            # bit n; shift codes are decoded by the checker
@@ -30,7 +29,7 @@ for m in order:
         if not s: n.append(0); rel.append(0); continue
         v = s["n"]; v = (env["vs_const"] if m[0] == "v" else env["ps_const"][m]) if c == "c" else (v if isinstance(v, int) else v.get("max", v["min"]))
         n.append(v); rel.append(sum({"a0": 1, "aL": 2}[x] for x in s["rel"]))
-    mask = lambda names: sum(1 << CLS.index(x) for x in set(names) if x in CLS)
+    mask = lambda names: sum(1 << CLS.index(x) for x in sorted(set(names)) if x in CLS)
     for x in list(M["dst_regs"]) + list(M["src_regs"]): assert x in CLS, x
     # writable registers of the table (rw W / ".x only") are destinations too (vs_1_1 `mov a0.x`: dst_regs omits a0); the table's `undetermined`
     # ids vs_a0_src / vs_bi_alu (a0, b#, i# as ALU sources of a vertex shader: MS silent, wine allows) are accepted (superset)
@@ -60,7 +59,7 @@ for k, e in sorted(T["opcodes"].items()):
 L.append("typedef struct NxSmOp { uint8_t stage; uint16_t opnum; uint16_t models; uint8_t d, nsrc, s[5], decl, samples; } NxSmOp;")
 rr = ["{%d,%d,%d,%d,%d,{%s},%d,%d}" % (k[0], k[1], v, k[2], len(k[3]), ",".join(map(str, list(k[3]) + [0] * (5 - len(k[3])))), k[4], k[5]) for k, v in sorted(ops.items())]
 L.append("static const NxSmOp NX_SM_OPS[] = {" + ",\n    ".join(rr) + "};"); L.append("#define NX_SM_NOPS %d" % len(rr))
-num = {e["num"].upper(): e["opnum"] for e in T["opcodes"].values()}; p1 = D.SM1_PARAMS; p14 = D.SM_WALK["ps_1_4"]
+num = {e["num"].upper(): e["opnum"] for e in T["opcodes"].values()}; p1 = WALK["SM1_PARAMS"]; p14 = WALK["SM_WALK"]["ps_1_4"]
 sm1 = sorted((num[k.upper()], v) for k, v in p1.items() if k.upper() in num)   # TEXM3x3DIFF is in no D3D9 model of sm_table.json
 L.append("typedef struct NxSm1P { uint16_t opnum; uint8_t n, n14; } NxSm1P;")
 d14 = {num[k.replace("D3DSIO_", "").upper()]: v for k, v in p14.items()}
@@ -77,7 +76,7 @@ _lk = {(x["model"], x["feature"]) for x in T["legacy"]}   # one record per fact:
 _both = sorted(_lk & {(r["model"], r["feature"]) for r in ill})
 assert not _both, _both
 for nm, suf in (("COORD", "@texld.coord"), ("SAMPLER", "@texld.sampler-src")):
-    L.append("#define NX_SM_TEXLD_%s_MODELS 0x%x" % (nm, sum(1 << MI[m] for m in {r["model"] for r in ill if r["feature"].endswith(suf)})))
+    L.append("#define NX_SM_TEXLD_%s_MODELS 0x%x" % (nm, sum(1 << MI[m] for m in sorted({r["model"] for r in ill if r["feature"].endswith(suf)}))))
 # undetermined rcp_mask (illegal above one component, MS vs masking page): the vs opcodes whose table mask kind is `single`
 vs1 = sorted({e["opnum"] for k, e in T["opcodes"].items() if k[0] == "v" and e.get("mk") == "single"}); W = max(vs1) // 32 + 1
 L.append("#define NX_SM_VS_SINGLE_WORDS %d" % W); L.append("static const uint32_t NX_SM_VS_SINGLE[%d] = {%s};" % (W, ",".join("0x%x" % sum(1 << (o & 31) for o in vs1 if o >> 5 == w) for w in range(W))))

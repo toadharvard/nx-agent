@@ -59,6 +59,16 @@
    ]
   },
   {
+   "tool": "ports/fnv-nx/bridgefacts/d3d9/d3d9_smwalk.py",
+   "args": [
+    "/out/d3d9_smwalk.json"
+   ],
+   "inputs": [],
+   "outputs": [
+    "d3d9_smwalk.json"
+   ]
+  },
+  {
    "tool": "ports/fnv-nx/contract/bridgegen.py",
    "args": [
     "--names",
@@ -99,6 +109,7 @@
   "COM_WORDS": "com_words.tsv",
   "D9_ROWS": "d9bridge_rows.tsv",
   "D9_SPEC": "d3d9_spec.json",
-  "BRIDGE": "bridge.tsv"
+  "BRIDGE": "bridge.tsv",
+  "D9_SMWALK": "d3d9_smwalk.json"
  }
 }
