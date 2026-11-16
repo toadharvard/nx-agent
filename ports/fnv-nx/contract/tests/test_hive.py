@@ -65,6 +65,8 @@ r = dict(H.judge(SITES, DECL, SEED, dict(REFS, **{"evil.c": {"RegSetValueW"}}), 
 check("judge: foreign writer unit", r["writer:evil.c"] == "foreign-writer", r)
 r = dict(H.judge(SITES, DECL, SEED, {"x.c": {"RegCreateKeyA"}}, "seed.c"))
 check("judge: any hive-writing API makes a writer (RegCreateKeyA)", r["writer:x.c"] == "foreign-writer", r)
+r = dict(H.judge(SITES, DECL, SEED, dict(REFS, **{"advapi.c": {"RegSetValueExW"}}), "seed.c", exempt={"advapi.c"}))
+check("judge: the import body of a writer (a unit with its export record) is exempt, by the record", r["writer:advapi.c"] is None, r)
 dyn = SITES + site("a.exe", "0x402000", "RegQueryValueExA", LM, "?", "?", "dynamic")
 r = H.judge(dyn, DECL, SEED, REFS, "seed.c")
 check("judge: a dynamic read site is class dynamic", ("site:a.exe:0x402000:RegQueryValueExA", "dynamic") in r, r)
