@@ -225,7 +225,13 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
 
   **One recipe per target.** A root whose units serve both targets (the console backend on the guest, the host's gl4 calling the same translator)
   names a recipe per target in admit.json: `"recipe": {"guest": PATH, "host": PATH}` with `"target"` the base's (a plain string is the root's single
-  target, as before). The units are the same for every target; compiler, flags and plugins come from each target's recipe. It is one mechanism with
+  target, as before). The units are the same for every target; compiler, flags and plugins come from each target's recipe.
+  **A per-target recipe holds only what depends on the target:** compiler (or profile), flags, plugins, link, its own `external` toolchain, and `units` or `include` only
+  when they really differ from the base. `generated`, `run`, `uses` and `outputs` live once, in the base recipe, and every target reads them from there: generated
+  and run stages run on the host whatever the target, so they are target-independent by construction. `units` and `include` are inherited; a per-target value equal to
+  the base's is a redundant copy and red, and so is `generated`, `run`, `uses` or `outputs` in a per-target recipe (`recipe.per_target_errors`). The effective recipe
+  of `root@OTHER` is `recipe.inherit(per-target, base)`: the base's stages, outputs, units, include and the externals the per-target recipe does not name, under the
+  per-target fields; an `external` name declared by both with different content is red. `tests/test_pertarget.py`. It is one mechanism with
   `variants`: `recipe.norm_entry` parses the dict to the string spelling plus `variants: {OTHER: {"target": OTHER, "recipe": PATH}}`, and that
   spelling may be written in admit.json directly (it parses to the same structure). `entry_of` resolves the effective target and recipe path; the
   pair `root@OTHER` is built, keyed (the variant name, `FNVNX_TARGET`, its own compiler and flags) and gated separately in `GATE_CACHE`. A per-target
