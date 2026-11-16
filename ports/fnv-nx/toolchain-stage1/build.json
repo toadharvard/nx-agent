@@ -67,6 +67,9 @@
      "python3",
      "binutils-aarch64-linux-gnu",
      "g++-13",
+     "g++",
+     "gcc",
+     "binutils",
      "gcc-13"
     ]
    },
