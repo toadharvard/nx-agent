@@ -2865,3 +2865,5 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - w28-c5 07bfb163a: done. It has synth_names with a test, the guest.ld/guest_image.ld split with test_guest_scripts, and the pure fixes (FPCR in contract/target/fpcr.py; l2sections).
   - gate_abs and gate_disp are gate drivers, outside the pure universe.
   - Open: ctypes_compat:187 takes w15's 5e9f645ae (no memo). The L5 lead re-runs on this head.
+- w28-c5 99f6eb846: done. ctypes_compat takes 5e9f645ae, so there is one link/ copy. gate_pure is green at 44 of 44 (local run at 99f6eb846).
+- bottleneck: cand4 verdict; L5's re-run on w28-c5; L3a's base3 head for cand5.
