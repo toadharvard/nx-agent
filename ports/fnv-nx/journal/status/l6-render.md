@@ -1434,3 +1434,9 @@ Paused: w3b, w4, farm; no other work.
     - Sent to w28: (1) env closure, which `recipe check` must judge like build; (2) `from bridgefacts.d3d9 import m` rejected by the checker; (3) sibling-import rule question; (4) L6 admit rows missing in w28 (shaders/total, gl4shim, sm_link*), and the render/total `imports: contract` is unused; (5) wine_fixme row 25 check_fbo_status missing.
     - w6 next: verify/ of 5c7b36289, then the per-target deletions in the smscan, pair and translator host recipes.
 - bottleneck: w28 env closure (blocks all builds on w28 verify/); w6 per-target pass; farm1 sm_link; the cand4 base.
+- 02:34Z w28 d2c0fe379 answers all five:
+    - `recipe check` calls env_blocked, the same function as build;
+    - a subpackage `from` import resolves;
+    - the sibling rule: a file reached through a qualified import imports its siblings relative or qualified, and a tool's own files may import each other bare; the checker walks it;
+    - L6 admit rows and wine_fixme row 25 are taken from w6-root.
+  w6 moves to d2c0fe379 and does the per-target pass.
