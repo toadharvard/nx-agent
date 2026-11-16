@@ -1291,3 +1291,9 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - The test, cx8 (new(0xFFFFFFF0) in a catch(bad_alloc&)), is being written. msvcrttest native takes the real platform/crt root. It builds once lift/rt is green.
 - base3: w28's head (the exec form) is being merged, for lift/sdm.
 - bottleneck: L2's two plugin rules (dispatch atomics, order setjmp/longjmp), which block lift/rt → the 7-symbol table → the ELF.
+
+## 2026-11-16 02:10: test images, the second lifting path (w8, base3 36e071499)
+- cx8 and the invariant comment are in.
+- Finding: guestgen_{imptest,citest,msvcrttest} call the lifter directly, without its inputs (x86sys, sdmrows, cpumodel, image facts). They fail at run time on base3 (`inputs: x86sys was not configured`), so none of the 3 guest test images builds.
+- Ruling: a generator that lifts is a second path. A generator emits only the PE, the expected trace and the bridge rows. The image is lifted by the pack's own stages (the fact tools over the PE, then liftgen). One PE emitter is shared with w7's synthetic-PE modlift test.
+- bottleneck: L2's two plugin rules (lift/rt); the test images, through w8's pipeline rework.
