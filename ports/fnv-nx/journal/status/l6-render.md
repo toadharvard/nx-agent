@@ -1350,3 +1350,4 @@ Paused: w3b, w4, farm; no other work.
     - admit.json:18 admits toolchain as a product root, but the file is in no reachable commit. This is an L1 defect, asked of w28.
     - w6-root stays at b0676a675 (cand4 8a5a43b48) so that it builds with the old recipe.
 - bottleneck: toolchain/build.json from L1 w28; then sm_link; then the w28-on-final-cand3 head.
+- 00:22Z w28 1b7fdb441: the toolchain admit is fixed, and an admit row without a tracked recipe is red in recipe check. w6 (doing): rebuild w6-b28 on it, build the render roots, run the sm_link store and gate, d3d9total and abspath.
