@@ -514,6 +514,10 @@ it is passed as `-I<that path>` (the external is a declared input of every stage
 - `{"root": R, "output": NAME}`: a published file output of a root this recipe `uses` (so R is a dependency); resolved like the `uses` mount and mounted at `/exec/<NAME>`.
   A binary built outside the recipe machinery (a farm-built `tools/*` branch) is not accepted here: only an external file whose tree is pinned, or a root's own output.
 
+Either file form may carry `libs`: a list of declared lib directories, each `{"external": NAME, "path": DIR}` or `{"root": R, "output": NAME}` (a directory output of a root this recipe `uses`),
+mounted at `/exec/lib/<i>` with `LD_LIBRARY_PATH` naming them (in the key). A `DT_NEEDED` name that no deb provides resolves by file name in those directories, and the library found there is read in
+turn (its own `DT_NEEDED`, transitively). This is how a built tool (isla) gets a library from a declared input (the z3 wheel's `lib`) without a second build of that library.
+
 Static resolution (no `ldd`, nothing is executed): the ELF64's program headers and dynamic section are read. Its `PT_INTERP` and every `DT_NEEDED` name must be provided by the root layout of the
 step's `debs` (the deb's own symlinks followed; the loader's default directories and the file's absolute RPATH/RUNPATH entries are searched; `$ORIGIN` finds nothing, one file is mounted).
 Otherwise the stage is red `exec-unresolved:<library>` (or `exec-unresolved:interp:<path>`). A static ELF or a script has nothing to resolve. A further tool the program runs (z3, a compiler)

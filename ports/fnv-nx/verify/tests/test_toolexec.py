@@ -70,6 +70,28 @@ check("timeout_s is red", any("timeout_s" in e for e in errs({"exec": "/usr/bin/
 check("env with PATH is red", any("env must" in e for e in errs({"exec": "/usr/bin/x", "env": {"PATH": "/x"}})))
 check("env with a path outside scratch is red", any("scratch" in e for e in errs({"exec": "/usr/bin/x", "env": {"CARGO_HOME": "/home/x"}})))
 check("env constants and a scratch path are green", errs({"exec": "/usr/bin/x", "env": {"CARGO_HOME": "/scratch/cargo", "RUST_BACKTRACE": "0"}}) == [], errs({"exec": "/usr/bin/x", "env": {"CARGO_HOME": "/scratch/cargo"}}))
+with tempfile.TemporaryDirectory() as td2:
+    d = os.path.join(td2, "deb-libs")
+    os.makedirs(os.path.join(d, "usr/lib64"))
+    os.makedirs(os.path.join(d, "usr/lib/x86_64-linux-gnu"))
+    os.symlink("usr/lib64", os.path.join(d, "lib64"))
+    os.symlink("usr/lib", os.path.join(d, "lib"))
+    interp2, need2, _ = recipe.elf_dyn(host)
+    for n in need2:
+        if n != "libc.so.6":
+            open(os.path.join(d, "usr/lib/x86_64-linux-gnu", n), "w").close()
+    open(os.path.join(d, "usr/lib64", os.path.basename(interp2)), "w").close()
+    ld_ = os.path.join(td2, "libdir")
+    os.makedirs(ld_)
+    check("a NEEDED name in no deb and no lib dir is red", recipe.exec_unresolved(host, td2, ["libs"], [ld_]) == ["libc.so.6"], recipe.exec_unresolved(host, td2, ["libs"], [ld_]))
+    shutil.copy(next(p for p in ("/lib/x86_64-linux-gnu/libc.so.6", "/usr/lib/x86_64-linux-gnu/libc.so.6") if os.path.exists(p)), os.path.join(ld_, "libc.so.6"))
+    sub = recipe.elf_dyn(os.path.join(ld_, "libc.so.6"))[1]
+    check("a library of a declared lib dir resolves the name; its own NEEDED (the loader, in the debs) are read in turn", sub and recipe.exec_unresolved(host, td2, ["libs"], [ld_]) == [], (sub, recipe.exec_unresolved(host, td2, ["libs"], [ld_])))
+    os.remove(os.path.join(d, "usr/lib64", os.path.basename(interp2)))
+    check("the interpreter missing from the debs is red even with lib dirs", "interp:" + interp2 in recipe.exec_unresolved(host, td2, ["libs"], [ld_]), recipe.exec_unresolved(host, td2, ["libs"], [ld_]))
+    check("exec libs with an external dir and a uses dir are green", errs({"exec": {"external": "isla", "path": "bin/isla", "libs": [{"external": "isla", "path": "z3/lib"}, {"root": "ports/fnv-nx/a", "output": "lib"}]}}, [{"root": "ports/fnv-nx/a", "output": "lib"}]) == [], errs({"exec": {"external": "isla", "path": "bin/isla", "libs": [{"external": "isla", "path": "z3/lib"}, {"root": "ports/fnv-nx/a", "output": "lib"}]}}, [{"root": "ports/fnv-nx/a", "output": "lib"}]))
+    check("exec libs naming an undeclared root is red", any("exec.libs" in e for e in errs({"exec": {"external": "isla", "path": "x", "libs": [{"root": "nope", "output": "o"}]}})))
+
 prof = recipe.deb_profiles().get("compiler-build")
 check("debs profile: the tops of env.json debs.profiles, same as the written closure form", prof and recipe.step_debs({"debs": {"profile": "compiler-build"}}, closure=False) == recipe.step_debs({"debs": {"closure": prof}}, closure=False), prof)
 try:

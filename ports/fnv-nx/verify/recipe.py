@@ -1516,8 +1516,17 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
         ar, _, ao = a.partition(":") if isinstance(a, str) and not tool else ("", "", "")
         if tool:
             sc = g.get("scratch", [])
+            xl = a.get("libs", []) if isinstance(a, dict) else []   # the declared lib dirs of a file form: [{external, path} | {root, output}], mounted at /exec/lib/<i>
+            a = {k: v for k, v in a.items() if k != "libs"} if isinstance(a, dict) else a
             ex_ext = isinstance(a, dict) and set(a) == {"external", "path"} and all(isinstance(v, str) for v in a.values())
             ex_root = isinstance(a, dict) and set(a) == {"root", "output"} and all(isinstance(v, str) for v in a.values())
+            if xl and not (ex_ext or ex_root):
+                err.append("run[%d].exec: `libs` belongs to an {external, path} or {root, output} exec" % i)
+            for lb in xl if isinstance(xl, list) else [xl]:
+                okx = isinstance(lb, dict) and set(lb) == {"external", "path"} and lb["external"] in {x.get("name") for x in rec.get("external", []) if isinstance(x, dict)} and isinstance(lb["path"], str) and rel_ok(lb["path"])
+                oku = isinstance(lb, dict) and set(lb) == {"root", "output"} and any(isinstance(u, dict) and u.get("root") == lb["root"] and u.get("output") == lb["output"] for u in rec.get("uses", []))
+                if not (okx or oku):
+                    err.append("run[%d].exec.libs: %r must be an {external, path} of this recipe or a {root, output} it `uses` (a directory)" % (i, lb))
             if ex_ext:   # a file of a pinned external, mounted at /exec/<name> (RECIPE.md "A tool that is not a deb binary")
                 if a["external"] not in {x.get("name") for x in rec.get("external", []) if isinstance(x, dict)} or not rel_ok(a["path"]):
                     err.append("run[%d].exec %r must name an external of this recipe and a path inside its tree" % (i, a))
@@ -2747,14 +2756,27 @@ class Job:
         xs = g["exec"] if tool else None
         if isinstance(xs, dict):   # {external, path} | {root, output}: the tool file is a stage input (in the key by content), mounted executable at /exec/<name>
             if "external" in xs:
-                host, _ = resolve_input(self.root, xs, self.repo, os.path.dirname(self.store), self.rec)
+                host, _ = resolve_input(self.root, {"external": xs["external"], "path": xs["path"]}, self.repo, os.path.dirname(self.store), self.rec)
                 base = os.path.basename(xs["path"])
             else:
                 at = "/uses/%s/%s" % (xs["root"], xs["output"])
                 host = os.path.join(tmp, "xroot")
                 cas.materialize(next(t["tree"] for t in self.use_inputs(ws) if t["at"] == at), self.store, host)
                 base = xs["output"]
-            bad = exec_unresolved(host, tmp, g["debs"])
+            ldirs = []
+            for k, lb in enumerate(xs.get("libs", [])):
+                if "external" in lb:
+                    ld_, _ = resolve_input(self.root, lb, self.repo, os.path.dirname(self.store), self.rec)
+                else:
+                    ld_ = os.path.join(tmp, "xlib%d" % k)
+                    cas.materialize(next(t["tree"] for t in self.use_inputs(ws) if t["at"] == "/uses/%s/%s" % (lb["root"], lb["output"])), self.store, ld_)
+                if not os.path.isdir(ld_):
+                    raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["exec.libs[%d] %r is not a directory" % (k, lb)]})
+                ldirs.append(ld_)
+                ins.append({"at": "/exec/lib/%d" % k, "tree": cas.ingest(ld_, self.store)})
+            if ldirs:
+                env["LD_LIBRARY_PATH"] = ":".join("/exec/lib/%d" % k for k in range(len(ldirs)))
+            bad = exec_unresolved(host, tmp, g["debs"], ldirs)
             if bad:
                 raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["exec-unresolved:%s: %s needs it and the declared debs do not provide it" % (b, base) for b in bad]})
             ins.append({"at": "/exec", "tree": self._one_file(tmp, "exec", host, base)})
@@ -3818,17 +3840,34 @@ def elf_dyn(path):
     return interp, [cstr(fo + v) for t, v in ents if t == 1], [x for t, v in ents if t in (15, 29) for x in cstr(fo + v).split(":") if x]
 
 
-def exec_unresolved(path, tmp, debs):
-    """The DT_NEEDED names and the interpreter of the ELF at PATH that the root layout of DEBS does not provide (deb_resolve over <tmp>/deb-<name>): the
-    loader's default directories and the file's absolute RPATH/RUNPATH entries are searched; an entry that is not absolute ($ORIGIN) finds nothing, because the
-    step mounts one file. A tool that is not an ELF64 (a script) has nothing to resolve. -> sorted names, each "interp:<path>" or the library name."""
+def exec_unresolved(path, tmp, debs, libdirs=()):
+    """The DT_NEEDED names and the interpreter of the ELF at PATH that the step does not provide: the root layout of DEBS (deb_resolve over <tmp>/deb-<name>: the loader's default
+    directories and the file's absolute RPATH/RUNPATH entries) or a declared lib dir (LIBDIRS: host directories mounted for the step, searched by file name; a library found
+    there is read in turn, transitively). An entry that is not absolute ($ORIGIN) finds nothing, because the step mounts one file. A tool that is not an ELF64 (a script) has
+    nothing to resolve. -> sorted names, each "interp:<path>" or the library name."""
     dyn = elf_dyn(path)
     if dyn is None:
         return []
     interp, need, rp = dyn
-    dirs = [x for x in rp if x.startswith("/")] + ["/lib/x86_64-linux-gnu", "/usr/lib/x86_64-linux-gnu", "/lib64", "/usr/lib64", "/lib", "/usr/lib"]
+    defaults = ["/lib/x86_64-linux-gnu", "/usr/lib/x86_64-linux-gnu", "/lib64", "/usr/lib64", "/lib", "/usr/lib"]
     bad = ["interp:" + interp] if interp and not deb_resolve(interp, tmp, debs) else []
-    return sorted(bad + [n for n in need if not any(deb_resolve(posixpath.join(x, n), tmp, debs) for x in dirs)])
+    seen, todo = set(), [(need, rp)]
+    while todo:
+        names, rpaths = todo.pop()
+        for n in names:
+            if n in seen:
+                continue
+            seen.add(n)
+            dirs = [x for x in rpaths if x.startswith("/")] + defaults
+            if any(deb_resolve(posixpath.join(x, n), tmp, debs) for x in dirs):
+                continue
+            f = next((os.path.join(d, n) for d in libdirs if os.path.isfile(os.path.join(d, n))), None)
+            sub = elf_dyn(f) if f else None
+            if f is None or sub is None:
+                bad.append(n)
+            else:
+                todo.append((sub[1], sub[2]))
+    return sorted(bad)
 
 
 def stage_output(root, ref, repo, cache):
