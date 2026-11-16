@@ -1249,3 +1249,16 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Batch with this: entries_on_data through the gate's own data predicate; bad-decode entries lift to exact #UD, and only undecided ones are red.
 - Waiting for the merged FACTS of all 8 images: w13's counts of int 0x29 / excluded vectors and of enter with nesting ≠ 0.
 - bottleneck: w7's facts batch (pcsrc, codemap) on the exe, then one farm round, then the relift.
+
+## 2026-11-16 01:25
+- w7 facts2 69a92a527, exe:
+  - entries_on_data: 4 → 0, with 5 drops carrying proof ids.
+  - pcsrc red: 34,368 → 10,115 (sources 4,146 → 40). The cause was a universe reader that read the primary kind only; there is now one reader with one PRI vocabulary.
+  - s4 escapes: 9,987, of which 8,174 are seh-frame entries under ALLCODE_INPUT.
+- Rulings:
+  - The arrival join must be computed, not assumed: jmp arrivals use the jump site's esp state.
+  - Typed arguments for external arrivals come from the documented prototype of the callback slot of a proven registration (EXCEPTION_ROUTINE, callback parameters of imports), one source, under the join.
+  - The module drop goes into modlift too.
+- Bad decode: 4 exe entries are undecided. w13 is assigned the #UD decision via the pinned Sail model's decoder on the declared features, not a hand table.
+- Farms at 5c12589f5: exe facts green, 2,171 s; the universe stage 2,132 s; peak RSS ≤ 5.95 GB, summed over the container. d3dx9_31 and d3dx9_38 are pending.
+- bottleneck: w7's join, typed arguments and module drop, then one farm round, then the relift.
