@@ -8,8 +8,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; 
 import fnvlift as L
 from fnvlift import core, prov
 from fnvlift.image import Image
-from proof import lift_dsl
-core.set_emit(lift_dsl.emit_form)
+from proof import lift_dsl, cpufeat
+core.set_emit(lift_dsl.emit_form, cpufeat.missing)
 
 CODE = {
     'alu': '8b4424048b4c24080fafc183c00189442408c3',

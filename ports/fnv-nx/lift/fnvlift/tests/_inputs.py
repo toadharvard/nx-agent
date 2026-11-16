@@ -8,16 +8,12 @@ RCPTAB = os.path.join(LIFT, 'rt', 'rcptab.c')
 RCPCERT = os.path.join(LIFT, 'rt', 'rcptab.cert.json')
 
 
-_SDMROWS = []
-
-
 def sdmrows_arg():
-    """the table path: `--sdmrows PATH` of the test's own command line (removed from argv); no default, a missing argument is an error"""
-    if _SDMROWS:
-        return _SDMROWS[0]
-    if '--sdmrows' not in sys.argv or sys.argv.index('--sdmrows') + 1 >= len(sys.argv):
-        raise SystemExit('missing --sdmrows PATH (sdmfeat.py dumprows JSON)')
-    i = sys.argv.index('--sdmrows'); p = sys.argv[i + 1]; del sys.argv[i:i + 2]; _SDMROWS.append(p); return p
+    """the SDM opcode-row table: the mounted produced input SDMROWS of tests/inputs.json ({"root": "ports/fnv-nx/lift/sdmrows", "output": "SDMROWS"}, the selftests gate builds it through the recipe and mounts it as FNVNX_INPUT_SDMROWS); no default, an unmounted input is an error"""
+    p = os.environ.get('FNVNX_INPUT_SDMROWS')
+    if not p:
+        raise SystemExit('FNVNX_INPUT_SDMROWS is not mounted (declare the produced input SDMROWS of root lift/sdmrows in tests/inputs.json)')
+    return os.path.join(p, 'sdmrows.json') if os.path.isdir(p) else p
 
 
 def configure(sdmrows=None, udsail=None):
