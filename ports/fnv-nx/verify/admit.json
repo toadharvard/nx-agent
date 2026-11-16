@@ -195,6 +195,13 @@
    "recipe": "ports/fnv-nx/contract/exports/build.json"
   },
   {
+   "path": "ports/fnv-nx/contract/reached",
+   "class": "tool",
+   "target": "host",
+   "entry": [],
+   "recipe": "ports/fnv-nx/contract/reached/build.json"
+  },
+  {
    "path": "ports/fnv-nx/contract/target",
    "class": "tool",
    "target": "host",
@@ -473,13 +480,6 @@
    "class": "tool",
    "target": "host",
    "recipe": "ports/fnv-nx/lift/sdmrows/build.json",
-   "entry": []
-  },
-  {
-   "path": "ports/fnv-nx/lift/cpufeat",
-   "class": "tool",
-   "target": "host",
-   "recipe": "ports/fnv-nx/lift/cpufeat/build.json",
    "entry": []
   },
   {

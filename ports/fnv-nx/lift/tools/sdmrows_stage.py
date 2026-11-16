@@ -5,7 +5,7 @@
 
 LIFTDIR: the lift/ directory (its proof/ package) as the stage mounts it, a declared input; always an argument, never derived from this file's place (the tool is mounted apart from the tree).
 
-SDM.txt: `pdftotext -layout` of the pinned Intel SDM (the recipe external `sdm`; the same text L3b's proof/sdmfeat.py partition reads). The output is proof/sdmfeat.py `dumprows`: every opcode-table row, the SDM's flag
+SDM.txt: `pdftotext -layout` of the pinned Intel SDM (the recipe external `sdm`; the text that proof/sdmfeat.py dumprows reads). The output is proof/sdmfeat.py `dumprows`: every opcode-table row, the SDM's flag
 table and the NOP flags; the sha256 of the text is in it.  The lifter's CPUID gate (proof/cpufeat.py) reads only this file."""
 import os as _q_os, sys as _q_sys
 _q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)

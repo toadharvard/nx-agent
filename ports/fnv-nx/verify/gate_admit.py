@@ -63,7 +63,7 @@ def trees(r):
     return list(t) if isinstance(t, list) else [r.get("path", "")]
 
 
-MODULE_TOP = "fnvnx"   # the one top-level module name of every project module (checked against the pinned host Python by recipe.module_top_errors)
+from fnvnx.verify.toolflags_policy import IMPORT_TOP as MODULE_TOP  # noqa: E402  # the one top-level module name of every project module (checked against the pinned host Python by recipe.module_top_errors)
 
 
 def module_name(path, tree):

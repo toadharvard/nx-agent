@@ -3,8 +3,7 @@
 and the class is (opcode, form, reg) with form 'mem' (ModRM.mod != 3) or 'reg' (mod == 3) and reg = ModRM.reg (SDM Vol 2 Appendix A.2.1 and Tables A-6..A-9 index the x87
 escape opcodes by exactly these fields).  For mod == 3 the opcodes whose reg row holds several instructions (D9 /4../7, DA /5, DB /4, DE /3, DF /4) are refined by
 ModRM.rm (the same tables, the "ModR/M byte" columns), so a class is one instruction of the SDM opcode map and a builder per class is a builder per instruction page.
-    python3 -I x87class.py KEYS.tsv...      rows `shape_key<TAB>count` (the pack's shapes.tsv layout); prints the keys per class, and the Form.build outcome counts
-No argument other than files is read; the Form build is proof/forms.build on the decoder of proof/shape.py (the one decoder)."""
+The census tool that prints the keys per class and the Form.build outcome counts is x87class_census.py (it uses the prover; this module, imported by the Form builder, does not)."""
 import os as _q_os, sys as _q_sys
 _q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
@@ -40,53 +39,3 @@ def x87_class(raw):
     if mod != 3:
         return op, "mem", reg, None
     return op, "reg", reg, rm if (op, reg) in REFINE_RM else None
-
-
-def main(paths):
-    from collections import Counter, defaultdict
-    sys.path.insert(0, os.path.join(HERE, "tests"))
-    import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys
-    from fnvnx.lift.fnvlift import inputs
-    declared_x86sys.configure()
-    inputs.configure(cpumodel=os.path.join(HERE, "..", "..", "verify", "cpuid_model.json"))
-    from fnvnx.lift.proof import forms
-    dec = shape.decoder()
-    cls, outcome, cres, proved, seen = defaultdict(set), Counter(), {}, {}, set()
-    for p in paths:
-        for ln in open(p):
-            if ln[0] == "#" or not ln.strip():
-                continue
-            k = ln.split("\t")[0]
-            if k in seen:      # the universe is the DISTINCT keys over the files
-                continue
-            seen.add(k)
-            try:
-                ins = next(dec.disasm(shape.rep_bytes(k), 0))
-            except Exception:
-                continue
-            if shape.family(ins) != "x87":
-                continue
-            c = x87_class(bytes(ins.bytes))
-            cls[c].add(k)
-            try:
-                F = forms.build(ins, 0)
-                outcome["ok"] += 1
-                if getattr(F, "x87", None):
-                    kk = F.x87[:2]
-                    if kk not in proved:
-                        from fnvnx.lift.proof import prove
-                        proved[kk] = prove.prove_one(None, F, None, None, None)
-                    if cres.get(c, "proved") == "proved":      # one result per class: proved only when every register index seen is
-                        cres[c] = "proved" if proved[kk][0] == "proved" else "uncertified: %s %s" % (proved[kk][0], proved[kk][1])
-            except KeyError as e:
-                outcome["KeyError"] += 1
-                cres[c] = "uncertified: %s" % (e.__cause__ or "no Form")
-            except Exception as e:
-                outcome[type(e).__name__] += 1
-    for c in sorted(cls):
-        print("%02x %s %s%s\t%d keys\t%s" % (c[0], c[1], "" if c[2] is None else "/%d" % c[2], "" if c[3] is None else " rm%d" % c[3], len(cls[c]), cres.get(c, "")))
-    print("classes %d, keys %d, build outcome %s" % (len(cls), sum(len(v) for v in cls.values()), dict(outcome)))
-
-
-if __name__ == "__main__":
-    main(sys.argv[1:])

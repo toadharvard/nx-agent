@@ -1,6 +1,6 @@
 """Provenance measurement (fnvlift/prov.py): with the tag ON the lifted text is byte-identical to the text with it OFF, and the categories of the side table add up to exactly the
 bytes of the text (checked by prov.finish for every function), for integer, memory, call / ret, locked, x87 and SSE code.
-    test_prov.py --cpufeat TABLE"""
+    test_prov.py     (the declared CPU record verify/cpuid_model.json, mounted as the cpumodel input by the test)"""
 import os as _q_os, sys as _q_sys
 _q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys, hashlib

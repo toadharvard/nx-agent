@@ -611,6 +611,18 @@ check("declared table: header comment and three valid rows (win-doc and wine-9.0
 GAL = "34\tGalaxyInit\tno-galaxy\tgalaxy-sdk:IGalaxy/Init:Init\tu32\t1\t-"
 open(tf_, "w").write(HDR_REAL + "\n" + GAL + "\n")
 check("declared table: a galaxy-sdk row with fact no-galaxy is accepted", rdt(tf_).get(34, ("",))[1:3] == ("no-galaxy", "galaxy-sdk:IGalaxy/Init:Init"), "")
+HDR_STEAM = HDR_REAL.replace(" | galaxy-sdk:<page>:<function>", " | galaxy-sdk:<page>:<function> | steamworks-sdk:<header>#<function>")
+for what, row, want in (("accepted", "36\tSteamAPI_Init\tno-galaxy\tsteamworks-sdk:public/steam/steam_api.h#SteamAPI_Init\tu32\t0\t-", True),
+                        ("malformed: the function after a colon", "36\tSteamAPI_Init\tno-galaxy\tsteamworks-sdk:steam_api.h:SteamAPI_Init\tu32\t0\t-", False),
+                        ("malformed: no function", "36\tSteamAPI_Init\tno-galaxy\tsteamworks-sdk:steam_api.h#\tu32\t0\t-", False),
+                        ("malformed: no header", "36\tSteamAPI_Init\tno-galaxy\tsteamworks-sdk:#SteamAPI_Init\tu32\t0\t-", False)):
+    open(tf_, "w").write(HDR_STEAM + "\n" + row + "\n")
+    try:
+        rdt(tf_)
+        got = True
+    except ValueError:
+        got = False
+    check("declared table: a steamworks-sdk source, " + what, got, want)
 for what, row in (("an undeclared fact", "35\tx\tno-wifi\twin-doc:a/b:f\tu32\t1\t-"), ("an undeclared source prefix", "35\tx\tno-galaxy\tgog-sdk:a/b:f\tu32\t1\t-")):
     open(tf_, "w").write(HDR_REAL + "\n" + row + "\n")
     try:
@@ -802,7 +814,7 @@ check("a malformed facts file: red, input error", rc == 2 and g["status"] == "re
 WC = '#include "toy.h"\nvoid fnvnx_wine_fixme(unsigned);\nint f_c(int x) { (void)x; fnvnx_wine_fixme(5); return 7; }\n'
 for tag, tbl, want in (("row matches", "5\tm\twine-9.0:dlls/x/y.c:f\tu32\t7\n", "green"), ("row value differs", "5\tm\twine-9.0:dlls/x/y.c:f\tu32\t8\n", "red"),
                        ("malformed table", "5\tm\tnot-a-ref\tu32\t7\n", "input")):
-    wr = TR.make_guest_repo("os-wine-" + tag.replace(" ", "-"), rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": WC, "verify/wine_fixme.tsv": tbl})
+    wr = TR.make_guest_repo("os-wine-" + tag.replace(" ", "-"), rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": WC, "toy/wine_fixme.tsv": tbl})
     rc, g, _, txt, st = gate(wr, ROOT + "/gw" + tag.replace(" ", "-"), GC)
     check("gate, wine_fixme table, case %s: expected %s" % (tag, want), (rc == 0 and g["certified"] == g["universe"] and g["wine_fixme"] == {"5": 1} and st[0] == "green") if want == "green" else
           (rc == 2 and ("wine-fixme-mismatch 1" in g["detail"] if want == "red" else "input error" in g["detail"])), (g, txt))

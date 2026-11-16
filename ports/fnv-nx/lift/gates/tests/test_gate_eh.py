@@ -123,9 +123,10 @@ class T(unittest.TestCase):
     def test_missing_key_red(self):
         def f(n, J): del J['text']
         self.pack_write(); self.facts_write(f); r = self.run_gate(); self.assertEqual(r['status'], 'red')
-    def test_entries_beyond_50_truncated_sorted(self):
-        def f(n, J): J['funcinfo'][0]['unwind'] = [[-1, h(0x500000 + 4 * i + (0 if n == 'exe' else 0x10000000))] for i in range(80)]
-        self.pack_write(); self.facts_write(f); r = self.run_gate(); self.assertEqual(len(r['uncertified']), 50); self.assertEqual(r['uncertified'], sorted(r['uncertified']))
+    def test_every_entry_listed_sorted(self):      # the result lists the whole set (L1: no first-50 cut): the count is derived from the injected items, one set per image
+        N = 80
+        def f(n, J): J['funcinfo'][0]['unwind'] = [[-1, h(0x500000 + 4 * i + (0 if n == 'exe' else 0x10000000))] for i in range(N)]
+        self.pack_write(); self.facts_write(f); r = self.run_gate(); self.assertEqual(len(r['uncertified']), N * len(self.bases)); self.assertEqual(len(set(r['uncertified'])), len(r['uncertified'])); self.assertEqual(r['uncertified'], sorted(r['uncertified']))
         self.assertEqual(r['status'], 'red')
 
     def test_conformance_finding_is_red_per_image(self):
