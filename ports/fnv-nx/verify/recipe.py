@@ -1761,6 +1761,48 @@ def symbols(path, unit):
     return defined, undefined
 
 
+# Relocation types that are a call (a branch to a function) per ELF e_machine: AArch64 (183) R_AARCH64_JUMP26 282, CALL26 283; x86-64 (62) R_X86_64_PLT32 4.
+# The same sets as elffacts.CALL_TYPES (readelf names); every other relocation (data, ADRP/ADD, ABS32/64, GOT) takes the address of its target.
+CALL_RELOCS = {183: frozenset((282, 283)), 62: frozenset((4,))}
+
+
+def call_refs(path):
+    """The names of the UNDEFINED global and weak symbols that object PATH (ELF32 or ELF64 little-endian, REL or RELA) reaches by a CALL relocation
+    (CALL_RELOCS of its e_machine; a machine without an entry has none). A symbol whose address is only taken (an export table or vtable entry, a
+    function pointer) is not here: taking an address performs no call. -> set of names."""
+    d = open(path, "rb").read()
+    if d[:4] != b"\x7fELF" or d[4] not in (1, 2) or d[5] != 1:
+        raise ValueError("%s: not an ELF32/ELF64 little-endian object" % path)
+    w64 = d[4] == 2
+    machine, = struct.unpack_from("<H", d, 0x12)
+    calls = CALL_RELOCS.get(machine, frozenset())
+    shoff, = struct.unpack_from("<Q" if w64 else "<I", d, 0x28 if w64 else 0x20)
+    esz, num = struct.unpack_from("<HH", d, 0x3a if w64 else 0x2e)
+    secs = [struct.unpack_from("<IIQQQQIIQQ" if w64 else "<IIIIIIIIII", d, shoff + i * esz) for i in range(num)]
+    out = set()
+    for s in secs:
+        if s[1] not in (4, 9):                                   # SHT_RELA, SHT_REL
+            continue
+        symsec = secs[s[6]]
+        strtab = secs[symsec[6]]
+        names = d[strtab[4]:strtab[4] + strtab[5]]
+        syms = d[symsec[4]:symsec[4] + symsec[5]]
+        ssz = 24 if w64 else 16
+        rsz = (24 if s[1] == 4 else 16) if w64 else (12 if s[1] == 4 else 8)
+        for o in range(s[4], s[4] + s[5], rsz):
+            info, = struct.unpack_from("<Q" if w64 else "<I", d, o + (8 if w64 else 4))
+            typ, k = (info & 0xffffffff, info >> 32) if w64 else (info & 0xff, info >> 8)
+            if typ not in calls or not k:
+                continue
+            if w64:
+                nm, sinfo, _, shndx = struct.unpack_from("<IBBH", syms, k * ssz)
+            else:
+                nm, _, _, sinfo, _, shndx = struct.unpack_from("<IIIBBH", syms, k * ssz)
+            if shndx == 0 and sinfo >> 4 in SBIND and nm:
+                out.add(names[nm:names.index(b"\0", nm)].decode())
+    return out
+
+
 def publish_dir(tmp, final):
     """The one rule that makes a directory of a shared store visible (every external: the bare fetch, the checkout, the exttree): TMP is a sibling of FINAL
     in the same store, complete and (where a tree hash is pinned) already verified; rename(2) publishes it atomically. A writer that loses the race (FINAL

@@ -41,10 +41,20 @@ def hive_names(res):
 
 
 def refs_of(res):
-    """{unit: set of undefined symbol names} of the objects of a build (objects.json `objects`)"""
+    """{unit: set of undefined symbol names} of the objects of a build (objects.json `objects`): every reference, for the reader class (hive_names)."""
     out = {}
     for o in res["objects"]:
         out.setdefault(o["unit"], set()).update(recipe.symbols(o["object"], o["unit"])[1])
+    return out
+
+
+def calls_of(res):
+    """{unit: set of undefined symbol names reached by a CALL relocation} (recipe.call_refs): the writers of the hive. A writer is code that stores
+    into the machine state, directly or through a call that reaches the store; taking a function's address (an export-table or vtable entry) is not a
+    write, and the calls that go through that pointer are judged at their call sites, so only a call relocation to a writer name counts."""
+    out = {}
+    for o in res["objects"]:
+        out.setdefault(o["unit"], set()).update(recipe.call_refs(o["object"]))
     return out
 
 
@@ -54,7 +64,7 @@ def root_items(root, rec, res, decl, repo, cache):
     def rp(ref):
         return recipe.resolve_input(root, ref, repo, cache, rec)[0]
     sites, declared, seed = (gate_imports.read(rp(decl[k])) for k in ("sites", "declared", "seed"))
-    return hive.judge(sites, declared, seed, refs_of(res), decl["seed_unit"])
+    return hive.judge(sites, declared, seed, calls_of(res), decl["seed_unit"])
 
 
 def judge_root(root, repo, cache, admit, bad):
