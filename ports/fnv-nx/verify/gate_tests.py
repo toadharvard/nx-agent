@@ -167,10 +167,13 @@ def reads_of(path):
     return sorted({x for m in READS.findall(text) for x in m.replace(",", " ").split()})
 
 def mount_files(path):
-    """{repo-relative path: absolute path} of the MOUNT of an untraced test file: its import closure (closure_of) and every file under its declared `# reads:` roots, without
+    """{repo-relative path: absolute path} of the MOUNT of an untraced test file: its import closure (closure_of), the declared environment verify/env.json (an input of every key) and every file under its declared `# reads:` roots, without
     __pycache__ and .git. An untraced test runs on this and nothing else of the checkout (mount_run): a read outside it fails, so a missing declaration is a red test."""
     root = os.path.realpath(os.getcwd())
     out = {}
+    env_json = os.path.join(os.path.dirname(os.path.abspath(__file__)), "env.json")   # the declared environment is an input of every key (the envcheck id), so it is in every mount: a module of the closure reads it at import
+    if os.path.realpath(env_json).startswith(root + os.sep) and os.path.isfile(env_json):
+        out[os.path.relpath(os.path.realpath(env_json), root)] = os.path.realpath(env_json)
     for f in closure_of(path)[1]:
         a = os.path.realpath(f)
         if a.startswith(root + os.sep):

@@ -50,9 +50,6 @@
   {
    "path": "ports/fnv-nx/manifest",
    "class": "tool",
-   "imports": [
-    "ports/fnv-nx/contract"
-   ],
    "entry": []
   },
   {
