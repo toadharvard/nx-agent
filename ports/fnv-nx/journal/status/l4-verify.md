@@ -449,3 +449,6 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - Pinned bytes (6,538,365,498) and installed bytes differ by 193,072; L1 asked to reconcile.
   - farm1 archived: its queue is done. The boot farm reinstalls the title (about 8 min) once the ELF exists.
 - bottleneck: L1 contract/facts gen:2 and the w12 cand3 head; the L3a post-cand3 pack store | w8 idle, no farms
+- 05:35: the trunk fac693694 (cand3b) is in; L1 w28 d193554fe fixed gamedata_fetch (one item at a time, cache freed, pinned = installed + framing).
+  - w8 session_01KmtZKS8Qkj4RxpvezPAmzP: doing. Merges the trunk and w28 by the per-layer side rule, keeping the owner heads the trunk lacks (base3, L5 adba10d8e, L6A decb62ead), then reruns recipe.check, the gl4 sha and test_gamedata_fetch.
+- bottleneck: the w8 trunk merge; the L3a post-cand3 pack store | w8 working, no farms
