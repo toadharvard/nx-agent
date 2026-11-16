@@ -2900,3 +2900,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - w28 implements it on w28-c5 (doing). L2, L3a, L5 and L6 rewrite their trees' qualified imports.
 - bridgegen is to list all of its errors, the same class as gatefile MAX_IDS (w28).
 - bottleneck: the w28 fnvnx-prefix head; the L6 d3d9 definers; cand4 verdict; L3a base3 head.
+- d3d9 definers: L6 w11 moves w7's 11 FNVNX_EXPORT records (8bf1aefda, 3d932349e) onto the L6 head.
+  - Ruling for the 3 `_undoc` exports (DebugSetLevel, PSGPError, PSGPSampleTexture; Wine 9.0 `@ stub`): a body is required only for a reached export (IAT, or a resolved GetProcAddress name). An unreached one is no bridge row, with the reach fact as the reason.
+  - This is a measurement until the dynamic GetProcAddress sites are resolved.
