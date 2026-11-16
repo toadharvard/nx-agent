@@ -13,7 +13,7 @@ void *VirtualAlloc(void *addr, unsigned size, unsigned type, unsigned protect); 
 extern u32 fnvl_msvcrt_sighandlers[23];                                                /* rt/msvcrt_eh.cc: process state */
 }
 #include "image.inc"
-#include "/uses/ports/fnv-nx/lift/rt/GEN/fnvl_entry.h"      /* the entry's type: uint64_t(uint64_t api), crt0's call ABI */
+#include "fnvl_entry.h"      /* the entry's type: uint64_t(uint64_t api), crt0's call ABI */
 #define MEM_COMMIT_RESERVE 0x3000u
 #define PAGE_RW 4u
 static u32 *W(u32 a) { return (u32 *)(unsigned long)a; }
