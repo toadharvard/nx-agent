@@ -1466,7 +1466,7 @@ static void finish_unit(void *, void *)
 #define FNVNX_KIND_IS(n, meaning) known = known || r.kind == #n;
     FNVNX_SYMPAIR_KINDS(FNVNX_KIND_IS)
 #undef FNVNX_KIND_IS
-    if (!known) error("%<.fnvnx.sympair%>: the kind \"%s\" of %s is not in FNVNX_SYMPAIR_KINDS (sympair_kinds.inc)", r.kind.c_str(), r.sym.c_str());
+    if (!known) error("%<.fnvnx.sympair%>: the kind %qs of %s is not in FNVNX_SYMPAIR_KINDS (sympair_kinds.inc)", r.kind.c_str(), r.sym.c_str());
     fprintf(asm_out_file, "\t.ascii\t\"%s\\t%s\\t%s\\t%s\\n\"\n", r.sym.c_str(), r.ms.c_str(), r.kind.c_str(), r.def ? "def" : "ref");
   }
   /* .fnvnx.names: every function and object the unit named, whether or not the object has a symbol for it (a
@@ -1544,7 +1544,7 @@ static tree handle_key(tree *node, tree name, tree args, int, bool *no_add_attrs
   tree t = TYPE_P(*node) ? *node : (DECL_P(*node) ? TREE_TYPE(*node) : NULL_TREE);
   if (!v || TREE_CODE(v) != STRING_CST || !t || TREE_CODE(t) != UNION_TYPE
       || (strcmp(TREE_STRING_POINTER(v), "class") && strcmp(TREE_STRING_POINTER(v), "struct") && strcmp(TREE_STRING_POINTER(v), "union"))) {
-    error("%qE takes \"class\", \"struct\" or \"union\" on a union", name); *no_add_attrs = true; return NULL_TREE;
+    error("%qE takes %<class%>, %<struct%> or %<union%> on a union", name); *no_add_attrs = true; return NULL_TREE;
   }
   if (lookup_attribute("fnvnx_key", TYPE_ATTRIBUTES(TYPE_MAIN_VARIANT(t)))) *no_add_attrs = true;   /* the first declaration wins */
   return NULL_TREE;
