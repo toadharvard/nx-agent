@@ -3069,3 +3069,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - a9325a76e: compiler facts come from a hermetic cfact stage. The remaining direct calls (print-prog-name ld, toolrt gcc_set) are to be converted.
 - 12:39: the dispatch.c:69 red was already fixed in cand5's toolchain (L2 ENTRY1-ATOMIC 67164ec5e). base3 lacks it, so w8 builds the loader with cand5's toolchain/.
   - test_runtime_cflags: L2 a36b3c8f2 plus overlay 35e622293, 3 comment spellings removed, test passes. cand5 toolchain/ and rules/ = a36b3c8f2 + 5241e02c7 + c64609950 + 35e622293.
+- 12:40: cand5 lift/ = L3a base3 407914779 (gate_admit 1885/1885; lift/rt green, 12 objects). The loader stops locally only at imptest/lifted `store` (poppler is not in that container), so farm 2 builds it. Bare imports: toolchain/tests 15 (plugbuild) and verify 20, judged by w28's check of the stage closures.
