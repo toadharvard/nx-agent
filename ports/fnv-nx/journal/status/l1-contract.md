@@ -2622,3 +2622,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - w28 farm run at 791dfc7e0: exefacts red on `extent 0` (26 of 101,590 rows of the pinned universe 163ec389, flagged ud). Fixed at f3632f357 (extent ≥ 0 accepted; #UD shapes are a separate gate). test_exevft, abi_gaterun, test_n1_objects, test_gates, test_store and test_exefacts_universe each exit 0.
 - Blocked: the pin 163ec389 is the old format (extent = sum of bytes, not a span). L3a publishes the facts2 universe (o/exe) as a pinned external, then w28 pins it. The exefacts series (2303048551a0..f3632f357) stays out of cand4 until then; cand4 takes w28's line up to the commit before it.
 - bottleneck: the cand4 verdict (w15).
+
+## 2026-11-16 06:00
+- cand4: open at bde819407 (fac693694 + shard e9c42d060). Taking w28's line whole is red on the trunk: oracle 50 uncertified tests and 5 dangling keys, admit, assumptions. The cause is that w28 sits on the L5 line. w15's plan is accepted: w28 builds claude/fnv-l1-contract-w28-c4 from fac693694 by cherry-picking its L1-only commits (verify/, contract/, link/, toolchain/, farm/), with '!rt' and without the exefacts series. Status: doing (w28), then one farm verdict.
+- bottleneck: w28-c4 head.
