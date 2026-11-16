@@ -90,20 +90,16 @@ COMPONENT_ROOTS = ("proof/sailmodel", "proof/isla")      # lift/-relative
 
 
 def component_inputs():
-    """LIFT-relative paths of the declared repository inputs of COMPONENT_ROOTS (files and directories), read through recipe.load_recipe like formgate.ir_file does"""
-    repo = os.path.normpath(os.path.join(LIFT, "..", "..", ".."))
-    sys.path.insert(0, os.path.join(LIFT, "..", "verify"))
-    try:
-        import recipe
-        roots = recipe.load_admit(repo)
-        out = set()
-        for r in COMPONENT_ROOTS:
-            out.add(r)
-            for st in recipe.load_recipe(repo, roots, recipe.TREE + "/lift/" + r).get("run", []):
-                for i in st.get("inputs", []):
-                    if isinstance(i, str) and i.startswith(recipe.TREE + "/lift/"): out.add(i[len(recipe.TREE + "/lift/"):])
-        return out
-    finally: sys.path.pop(0)
+    """lift/-relative paths of the declared repository inputs of COMPONENT_ROOTS (files and directories) and the roots' own directories.  Read straight from the roots' build.json (the one source: `run` and `generated`
+    steps' string inputs under .../lift/), so the identity can be computed wherever lift/proof is mounted, a recipe sandbox included."""
+    out = set()
+    for r in COMPONENT_ROOTS:
+        out.add(r)
+        with open(os.path.join(LIFT, r, "build.json")) as fh: rec = json.load(fh)
+        for st in rec.get("run", []) + rec.get("generated", []):
+            for i in st.get("inputs", []):
+                if isinstance(i, str) and "/lift/" in i: out.add(i.split("/lift/", 1)[1])
+    return out
 
 
 def prover_data_files():
@@ -113,7 +109,7 @@ def prover_data_files():
     for d in pk:
         for root, dirs, files in os.walk(os.path.join(LIFT, d)):
             rel = os.path.relpath(root, LIFT)
-            dirs[:] = sorted(x for x in dirs if x not in ("tests", "__pycache__") and os.path.join(rel, x) not in skip)
+            dirs[:] = sorted(x for x in dirs if x not in ("tests", "__pycache__") and os.path.join(rel, x) not in skip and not os.path.isfile(os.path.join(root, x, "build.json")))      # a directory with a build.json is a recipe root: its files build something, they are not program inputs
             for f in sorted(files):
                 p = os.path.join(rel, f)
                 if not f.endswith((".py", ".pyc", ".md")) and p not in skip: out.append(p)

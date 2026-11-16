@@ -97,12 +97,25 @@ def migrate(rec, args):
     return dict(rec, **fns_fields())
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument('--shapes', required=False, default=None); ap.add_argument('--shard', default='1/1'); ap.add_argument('--out', required=True)
+    ap = argparse.ArgumentParser(); ap.add_argument('--shapes', required=False, default=None); ap.add_argument('--shard', default='1/1'); ap.add_argument('--out')
     ap.add_argument('--eip', choices=('sym', 'fixed'), default='sym'); ap.add_argument('--slice', type=int, default=1)
     ap.add_argument('--only'); ap.add_argument('--migrate', metavar='JSONL', help='K: copy the records of JSONL (a shard of this model) to the shard file, adding model_fns / closure_sha to the proved ones'); ap.add_argument('--limit', type=int)
     ap.add_argument('--sail-work', required=True); ap.add_argument('--sail-ir', required=True); ap.add_argument('--isla', required=True)
+    ap.add_argument('--one', metavar='KEY', help='prove exactly this shape (recipe step: one row of the queue table) and write its record to --record; the record is a function of the inputs alone (no wall time, no tree id)')
+    ap.add_argument('--shape-sha', help='with --one: the queue row\'s shape_sha; the Form of this tree must be the Form the queue was built from'); ap.add_argument('--record', help='with --one: the file of the record (one json line)')
+    ap.add_argument('--z3lib', help='the directory of the libz3 that isla runs with (the isla root\'s Z3LIB); default: the lib of the python z3 package')
     x86sys.add_arg(ap)
-    a = ap.parse_args(); model_sail.configure(a.sail_work, a.sail_ir, a.isla); xsha = x86sys.configure(a.x86sys); k, n = [int(x) for x in a.shard.split('/')]; assert 1 <= k <= n
+    a = ap.parse_args(); model_sail.configure(a.sail_work, a.sail_ir, a.isla)
+    if a.z3lib: model_sail.Z3LIB = os.path.abspath(a.z3lib)
+    xsha = x86sys.configure(a.x86sys)
+    if a.one:
+        if not (a.shape_sha and a.record): ap.error('--one needs --shape-sha and --record')
+        if symform.shape_sha(a.one) != a.shape_sha: raise ValueError('shape_sha of this tree differs from the queue row (the queue was built from another tree)')       # a stale row is a red step, never a record
+        rec = one(a.one, a); rec['x86sys_sha256'] = xsha
+        with open(a.record, 'w') as fh: fh.write(json.dumps(rec, sort_keys=True) + '\n')
+        return 0
+    if not a.out: ap.error('--out is required')
+    k, n = [int(x) for x in a.shard.split('/')]; assert 1 <= k <= n
     os.makedirs(a.out, exist_ok=True); path = os.path.join(a.out, 'shapeprove_%d_of_%d.jsonl' % (k, n))
     if a.migrate:
         with open(a.migrate) as fi, open(path, 'a') as out:
