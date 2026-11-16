@@ -3077,3 +3077,9 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - The w29 items (const records, ext_units) break roots that still carry the deleted keys: L5 platform `external_errors` (fix 568d0049, L5 takes it) and L6 gl4 and translator `constants` (L6 converts to .fnvnx.const). The w29 items go into the next candidate, not cand5.
   - Measuring lift/rt with the keys removed locally (a measurement only).
 - 12:48: L5's emitter has been live since cd4f5784b: .fnvnx.const (100) + .fnvnx.ident {fn, k} (2), all P32_ABS32 in the same object, none in alloc sections. w29's parser folded identity into LEN 0 and lost k. w29 adopts L5's two-section format and measures against the real platform objects (expect 0 findings over 102 rows).
+- 12:49: cand5 c5 dd6084314 is AT THE FARM for the verdict. It has toolchain, stage1 and rules from L2 a36b3c8f2 + 3 overlay commits; lift from 407914779; exporthdr byte-equal to f91b46425.
+  - admit 1805/1805, 94 roots. recipe.check: 66 roots, 0 red, 97 s.
+  - Triage of the 8 new tests: 3 pass (2 after fixture fixes); 4 env-only, all with pinned packages (gmpy2, busybox-static, aarch64 binutils); 1 real, test_archive_sources: L2's `sources <step>:<dir>` hunk goes into c5's recipe for the next verdict.
+  - Direct compiler calls are converted to cfact stages: ld, cc1/cc1plus, search-dirs, dumpmachine, plugin dir.
+    - (a) The sandbox bootstrap discovery is declared bootstrap, on condition that it enters the stage keys and is checked against env.json.
+    - (b) The check-time probes are L1 DEBT until after the first frame (they are pure in the pinned compiler).
