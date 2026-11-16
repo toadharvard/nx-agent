@@ -3049,3 +3049,9 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - The ldsynth premise (own objects alone) is the defect. Rule (L3a's correction, so no synthesized double): ldsynth adds the defining product object of every undefined STT_TLS symbol through onedef, closed transitively. With no definer: red tls-undefined.
   - Item 3: the reach facts were never present at objstub's turn, because the gates run by name and o < r. Rule: a gatefile `needs`, run in topological order, red on a cycle or unknown name. objstub needs reach. A missing facts file gives one finding, reach-facts-missing.
   - Item 5 (doubles per link target) is in w29-c5 2fca329a.
+- 12:28: the toolchain red is an L1 rule gap (L2). The toolchain root has no units; its rt step builds the guest runtime with stage1 plus all plugins, as CLAUDE.md requires. Adopted rule (c):
+  - the plugin is built against the loading compiler's headers, and that compiler is in the plugin key;
+  - a root may load plugins iff its compiler targets the declared guest platform, read as a fact (dumpmachine);
+  - the full set is required;
+  - red: a host compiler with plugins, or a version or ABI mismatch.
+  - w28 implements it on c5.
