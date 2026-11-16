@@ -5,7 +5,9 @@ Checks, all static (text of the emitter and of the header; the semantics of the 
   2. every compare op class passes its own ordering to the helper: the ordered FCOM / FCOMP / FCOMPP / FCOMI / FCOMIP / FICOM / FTST give Q = 0 (IE for any NaN), the unordered FUCOM / FUCOMP / FUCOMPP /
      FUCOMI / FUCOMIP give Q = 1 (IE only for a signaling NaN);
   3. a non-compare operation (FADD with an SNaN operand) takes its flags from the host FPSR owned by the x87 family: the emitted text makes the x87 family the owner (FOWN_X87) or the function's prepass proves it.
-    test_x87_exc_routing.py (the input SDMROWS is mounted)"""
+  4. C1 of FIST / FRNDINT is 1 iff the result rounded away from zero (|r| > |x|): the header computes it at the site, the table checks the predicate against the rounded value of every RC mode.
+The input SDMROWS is mounted only because lifting a byte buffer runs core.dispatch's CPUID gate (proof/cpufeat.missing), which reads the SDM opcode rows for every instruction; the test itself reads no x87 row of the SDM.
+    test_x87_exc_routing.py"""
 import os, re, sys
 LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, LIFT)
@@ -54,4 +56,22 @@ for name, hx, mac, q in CASES:
 # 3. a non-compare op
 t = text(bytes.fromhex('d9442404d8442408d95c240cc3'))
 assert 'FOWN_X87' in t or 'fown' in t, t[:300]
+# 4. C1 of the rounding instructions (FIST, FRNDINT): 1 iff the result rounded away from zero, |r| > |x| (SDM 8.5.1.1 / FIST "C1")
+assert '#define FX_UP(X,R) (__builtin_fabs(R)>__builtin_fabs(X)?0x200u:0u)' in hdr
+for fn in ('FNVL_F2I static inline u64 fv_i(', 'static inline fv fv_rnd('):
+    body = next(p for p in parts if p.startswith(fn))
+    assert 'FX_UP(' in body, fn                     # the fast paths assign C1 from the compare, never a constant 0
+import fractions, math
+def rnd(x, rc):                                      # the four rounding modes of the control word RC: 0 nearest-even, 1 down, 2 up, 3 toward zero (SDM Table 8-4)
+    f = fractions.Fraction(x)
+    if rc == 0: return float(round(f))
+    return float({1: math.floor, 2: math.ceil, 3: math.trunc}[rc](f))
+# (x, mode) -> (r, C1): an operand rounded up in magnitude (C1 = 1) and one rounded down (C1 = 0) in every mode; an exact one raises nothing
+TABLE = [(1.5, 0, 2.0, 1), (2.5, 0, 2.0, 0), (-1.5, 0, -2.0, 1), (-2.5, 0, -2.0, 0), (0.3, 0, 0.0, 0), (0.7, 0, 1.0, 1),
+         (0.3, 1, 0.0, 0), (-0.3, 1, -1.0, 1), (1.7, 1, 1.0, 0), (-1.7, 1, -2.0, 1),
+         (0.3, 2, 1.0, 1), (-0.3, 2, -0.0, 0), (1.7, 2, 2.0, 1), (-1.7, 2, -1.0, 0),
+         (0.3, 3, 0.0, 0), (-0.3, 3, -0.0, 0), (1.7, 3, 1.0, 0), (-1.7, 3, -1.0, 0), (4.0, 0, 4.0, 0), (-4.0, 1, -4.0, 0)]
+for x, rc, r, c1 in TABLE:
+    assert rnd(x, rc) == r, (x, rc, rnd(x, rc), r)
+    assert (abs(r) > abs(x)) == bool(c1), (x, rc, r)      # the predicate FX_UP computes, checked against the rounded value of each mode
 print('x87_exc_routing ok: %d routed helper sites, %d compare classes' % (n_routed, len(CASES)))

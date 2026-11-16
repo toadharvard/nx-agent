@@ -80,6 +80,8 @@ static inline u32 fv_s32(fv a){ u32 f=0;
 static inline u64 fv_s64(fv a){ u32 f=0;
   switch(a.k){ case FK_F64: return a.v; case FK_F32: return d2u((double)u2f((u32)a.v)); case FK_I16: case FK_I32: case FK_I64: return d2u((double)(s64)a.v);
     default: { u64 r=fnvl_x_to_f64(fv_x(a),c->fcw,&f); FXF(f); return r; } } }
+/* C1 of an instruction that rounds (SDM 8.5.1.1 "Precision" / FIST / FRNDINT "C1": set if the result was rounded up, i.e. away from zero in magnitude): |r| > |x| for the finite operand x and the rounded result r, exact in double */
+#define FX_UP(X,R) (__builtin_fabs(R)>__builtin_fabs(X)?0x200u:0u)
 /* fist/fistp/fisttp: round by rc (fist: the control word's RC), out of range and NaN give the integer indefinite. Returns the pattern, the caller truncates it. */
 FNVL_F2I static inline u64 fv_i(fv a,u32 bits,u32 rc){ u64 ind=1ull<<(bits-1); u32 f=0; double d,r;
   switch(a.k){
@@ -87,7 +89,7 @@ FNVL_F2I static inline u64 fv_i(fv a,u32 bits,u32 rc){ u64 ind=1ull<<(bits-1); u
   case FK_F64: case FK_F32: d=fv_d(a); if(d!=d){ FXF(0x1u); return ind; } r=fx_round(d,rc); break;
   default: { u64 o=(u64)fnvl_x_to_i64(fv_x(a),rc,bits,&f); FXF(f); return o; } }
   if(bits==64?!(r>=-9223372036854775808.0&&r<9223372036854775808.0):!(r>=-(double)ind&&r<(double)ind)){ FXF(0x1u); return ind; }
-  FXF(r!=d?0x20u:0u); return (u64)(s64)r; }      /* PE: the rounded value differs from the operand */
+  FXF(r!=d?0x20u|FX_UP(d,r):0u); return (u64)(s64)r; }      /* PE: the rounded value differs from the operand; C1: it rounded away from zero */
 #define FIST(a,bits) fv_i((a),(bits),(c->fcw>>10)&3)
 #define FISTT(a,bits) fv_i((a),(bits),3)
 /* fchs/fabs: the sign of any carrier, nothing else. An integer carrier cannot hold -0 (or 2^63): it becomes F64 (exact) or M80. */
@@ -98,7 +100,7 @@ static inline fv fv_sg(fv a,u32 chs){ s64 x;
     default: return fvmk(FK_M80,a.v,chs?a.e^0x8000u:a.e&0x7fffu); } }
 /* frndint */
 static inline fv fv_rnd(fv a){ u32 f=0, rc=(c->fcw>>10)&3; fnvl_f80 r;
-  switch(a.k){ case FK_F64: case FK_F32: { double d=fv_d(a), q=fx_round(d,rc); FXF((d==d&&q!=d)?0x20u:0u); return fv_f64(q); } case FK_I16: case FK_I32: case FK_I64: FXF(0); return a;
+  switch(a.k){ case FK_F64: case FK_F32: { double d=fv_d(a), q=fx_round(d,rc); FXF((d==d&&q!=d)?0x20u|FX_UP(d,q):0u); return fv_f64(q); } case FK_I16: case FK_I32: case FK_I64: FXF(0); return a;
     default: r=fnvl_x_rndint(fv_x(a),c->fcw,&f); FXF(f); return fvmk(FK_M80,r.m,r.se); } }
 /* compares: C3<<14|C2<<10|C0<<8, exact. Q = 1: the unordered compares FUCOM FUCOMP FUCOMPP FUCOMI FUCOMIP (IE only for a signaling NaN); Q = 0: the ordered ones FCOM FCOMP FCOMPP FCOMI FCOMIP FICOM FTST
    (IE for any NaN), SDM 2A FCOM / FCOMI "Floating-Point Exceptions". Pairs of finite non-denormal F64/F32/I16/I32 are exact in double and raise nothing (C1 = 0); every other pair (a NaN, a denormal: DE,
