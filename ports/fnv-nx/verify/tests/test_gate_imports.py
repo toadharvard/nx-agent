@@ -106,8 +106,10 @@ check("imports.in.json with unknown keys is red", rc == 2 and g["status"] == "re
 
 # class import-provider (a fact of the build's symbol table): a second product root that declares nothing is outside the gate's universe when it
 # defines no native symbol of the bridge table (the loader, lib/sha256), and is the one red item when it defines one (f_a here).
-def two_roots(tag, body):
-    repo = toy_repo(tag, "toy.dll\tf_a\ntoy.dll\tf_b\nmsvcrt.dll\tmemcpy\nmsvcrt.dll\tstrlen\n", "memcpy\tf_b\tfunc\nstrlen\tf_c\tfunc\n")
+def two_roots(tag, body, names="toy.dll\tf_a\ntoy.dll\tf_b\nmsvcrt.dll\tmemcpy\nmsvcrt.dll\tstrlen\n", table="memcpy\tf_b\tfunc\nstrlen\tf_c\tfunc\n", own=None):
+    repo = toy_repo(tag, names, table)
+    if own:
+        TR.w(repo, "toy/own.c", own)
     rec2 = {"format": "fnvnx-recipe/1", "compiler": TR.RECIPE["compiler"], "flags": TR.RECIPE["flags"], "include": [], "units": "all", "link": None}
     TR.w(repo, "toy2/x.c", body)
     TR.w(repo, "toy2/build.json", json.dumps(rec2))
