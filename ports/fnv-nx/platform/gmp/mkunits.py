@@ -11,6 +11,7 @@ import shutil
 import sys
 
 build, src, log, out = [os.path.realpath(p) for p in sys.argv[1:5]]
+supplied = sys.argv[5:]   # -I directories the recipe supplies itself (include_uses: another root's headers): their flag is dropped, the include path of the root has them
 rows = [json.loads(l) for l in open(log)]
 if not rows:
     sys.exit("mkunits: empty compile list")
@@ -18,7 +19,7 @@ KEEP_FIRST = lambda fl: [f for f in fl if not f.startswith("-DOPERATION_")]
 common = KEEP_FIRST(rows[0]["flags"])
 # the common flags are defines (written into every unit below), the two include dirs (the recipe's `include`: build, src) and the optimisation and debug flags
 # the recipe's own flags carry (-O2 -g); anything else would be lost, so it is an error
-ok = [f for f in common if f.startswith("-D") or f in ("-I.", "-g", "-O2") or (f.startswith("-I") and os.path.realpath(os.path.join(rows[0]["cwd"], f[2:])) == src)]
+ok = [f for f in common if f.startswith("-D") or f in ("-I.", "-g", "-O2") or (f.startswith("-I") and (os.path.realpath(os.path.join(rows[0]["cwd"], f[2:])) in (src, os.path.join(src, "src")) or f[2:] in supplied))]
 if ok != common:
     sys.exit("mkunits: flags the unit files cannot carry: %s" % [f for f in common if f not in ok])
 units, seen = {}, {}
