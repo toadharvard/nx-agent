@@ -491,3 +491,18 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - The re-prove queue (w4) has 18,697 rows. It is not published and is rebuilt as a recipe stage output.
   - Its universe is taken from the facts stage's shapes_<img>.tsv.
   - Blocked: L1 w28, foreach over a stage-output table.
+
+### 2026-11-16 05:00Z: OWNER 10 system specs (orchestrator integ b4aad1930)
+- The 35 model-gap keys in the code universe (1,667 sites, facts @f5d49d6fa; d3dx9 pending), measured at bec2c4e74 (w-sys bb4a0cf4d merged):
+  - 33 are proved by sysspec, sysspec_gap, sysspec_int and stringspec.
+  - 2 are uncertified:
+    - cd00 int n: 255 of 256 vectors; row int_ring3.excluded.41 is undecided.
+    - ea ljmp far: the descriptor rows (sgdt) are undecided.
+    - Blocked: L5 rows, sent to the L5 lead at 04:50Z.
+- Form defect: mov r/m16 and r32 from Sreg read a free variable instead of sel_<reg>. Fixed in forms_move. L3a relifts through shape_sha.
+  - The class rule (every free variable of a Form is a declared DSL input) is with worker a2633, together with the stringspec prefix scan.
+- lift/proof/tests at bec2c4e74, every tests/*.py by exit status: 46 files, 45 exit 0. The failing file is fpc_host.py, which base3 deletes (5297ac9d0); it is deleted in the base3 merge.
+- prover_sha is the import closure plus data files, with exclusions derived from the recipe roots: w4 c2c3d9e04, merged in c7400a5fd.
+- shapeprove root (w4): steps closure → queue → prove (foreach) → certs.
+  - It is being re-merged with base3 30030c1e8 hunk by hunk; the first merge, 156930ac2, dropped base3 work.
+  - Then the 3-row build on farm 4.
