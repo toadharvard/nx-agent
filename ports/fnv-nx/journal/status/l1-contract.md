@@ -2237,3 +2237,13 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - a root's own modules are importable under their module path (one module, one path);
   - platform `imports: [contract]`, so gen_combridge's argv path hack is gone.
 - Next: the 79 bare contract imports outside contract/, swept by one rule, and foreign-import extended to every tracked .py.
+
+## 2026-11-16: L5 farm verdict at e7ca820, red
+- 45 gates in 663 s, 20 vacuous.
+- The platform reds follow from one cause: the recipe gen:foreign-import on contract.store. Fixed in w28 a6773ff1f, which L5 merges into w26 for the re-run.
+- L1 gate crashes:
+  - linkstrict, guestlink, tlsmodel and assumptions exit 2 with no detail;
+  - d3d9total wrote no result file;
+  - abspath has a hit in verify/recipe.py.
+  - Assigned to w28 as top priority, with the class fix: a gate exit without a result file is a red item carrying its stderr tail.
+- bottleneck: the cand3b farm verdict, and the L1 gate crashes.
