@@ -1383,3 +1383,9 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - An exhaustive 32-bit run against the z3 Form terms is infeasible (months of z3), and an executable re-implementation would be a third implementation. Proposed to the orchestrator: one method for every width, isla with the pinned x86 Sail model over the host object, with the four same-meaning conditions, in L3b's REMOVE record after the first frame. The universe file is the record's open list, and gate_fpexact check 0 reads it.
 - w13 changed recipe.py (a host-profile root with no plugins is valid, per RECIPE.md). The diff went to L1.
 - bottleneck: L2's K2 pin.
+
+## 2026-11-16 03:25: FP helpers decided (integ CLAUDE.md a172a44b7)
+- One method for every width: isla with the pinned x86 Sail model over the x86-64 host object, plus the four transfer conditions as a static check. All Form-called helpers are in one REMOVE record (owner L3b, after the first frame). fnvl_tab_* stay under rcpcert. The 32-bit exhaustive root is dropped.
+- lift/proof/fpchost publishes the derived helper universe as the open list, which gate_fpexact check 0 reads (w13, last step).
+- The path is unchanged: relift as stages → pack external (commit + tree_sha256).
+- bottleneck: L2's K2 pin (lift/rt, contract/facts, lift/disp); pcsrc red (w7 RULE T).
