@@ -1326,3 +1326,6 @@ Paused: w3b, w4, farm; no other work.
     - Assumptions gate on cand4: 125/125, 108 records.
 - bottleneck: the w28 head on the final cand3, for the w6-cand4 rebase.
 - 22:50Z L6A confirms the NxImageRead P4 contract for deko3d. It is item D-P4 in l6a-deko.md, with GL as the reference, and comes after the first frame.
+- 00:06Z L1: the file-escape rule now also runs in `recipe check` (w28 c557ed084). Its gen_impl:41 and state_gen:30 rows came from cand3's copy. At w6-cand4 both read the spec as a stage argument.
+    - w6 (doing): state_model.py:188 gets a required argument, and the unused __file__ HERE lines go.
+    - Then merge c557ed084, `recipe check` with render at 0, and hold for the w28-on-final-cand3 head.
