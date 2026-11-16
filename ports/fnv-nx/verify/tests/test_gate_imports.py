@@ -10,6 +10,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 import gate_imports as G  # noqa: E402
+import linkset  # noqa: E402
 import test_recipe as TR  # noqa: E402
 import verdict  # noqa: E402
 
