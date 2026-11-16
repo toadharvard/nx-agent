@@ -1,5 +1,5 @@
 """Stage script of the lift/proof/isla root: builds isla-execute-function from the pinned sail-mirror inputs, offline, in the step's private dirs.
-Reads every pin from lift/proof/sail_pins.txt (input /in/1); nothing is copied from it.  argv: ISLA_TAR_GZ VENDOR_TAR_GZ Z3_WHEEL (the mirror files, /in/2..4)."""
+Reads every pin from lift/proof/sail_pins.txt (input /in/1); nothing is copied from it.  argv: ISLA_TAR_GZ VENDOR_TAR_GZ Z3_WHEEL X86_TOML (/in/2..5: mirror files and the isla config)."""
 import gzip, hashlib, os, shutil, subprocess, sys, zipfile, tarfile
 
 def die(m):
@@ -17,7 +17,7 @@ def sha(b):
     return hashlib.sha256(b).hexdigest()
 
 P = pins("/in/1")
-tar_gz, vendor_gz, wheel = sys.argv[1:4]
+tar_gz, vendor_gz, wheel, cfg = sys.argv[1:5]
 W = "/scratch"
 
 def unpack(gz, name, want):
@@ -61,3 +61,4 @@ if r.returncode:
 shutil.copyfile(os.path.join(W, "target", "release", "isla-execute-function"), "/out/isla-execute-function")
 os.chmod("/out/isla-execute-function", 0o755)
 shutil.copytree(os.path.join(z3, "lib"), "/out/z3lib")
+shutil.copyfile(cfg, "/out/x86.toml")      # ISLACFG: the isla config of the pin, published beside ISLA

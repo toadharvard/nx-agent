@@ -2,7 +2,10 @@
 """SSE FP Forms (proof/forms_ssefp.py): directed cases from the SDM text only (flags, faults, the sticky MXCSR bits).  No emulator is an oracle: the certificate of a Form is L3b's reference run (Form == reference per shape).   test_forms_ssefp.py  (exit 0 = all pass)"""
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import declared_x86sys; declared_x86sys.configure()      # the declared x86 system record: the one input every Form build needs (declared_x86sys.py)
 import capstone as CS, z3
+import unittest
 from proof import forms
 from fnvlift import dsl
 from fnvlift.tests import _inputs; _inputs.configure_declared()
@@ -12,6 +15,7 @@ def main():
     # divss xmm1, xmm0 with 1.0 / 0.0
     code = b'\xf3\x0f\x5e\xc8'; ins = next(md.disasm(code, 0x400000)); P = forms.build(ins, 0x400000).post()
     def at(mx, a, b):
+        global N; N += 1
         sub = [(z3.BitVec('mxcsr', 32), z3.BitVecVal(mx, 32)), (z3.BitVec('xmm1', 128), z3.BitVecVal(a, 128)), (z3.BitVec('xmm0', 128), z3.BitVecVal(b, 128))]
         e = lambda x: z3.simplify(z3.substitute(x, *sub)).as_long(); return e(P['fault']), e(P['mxcsr']), e(P['xmm'][1])
     XM = __import__('fnvlift.faults', fromlist=['x']).BYNAME['XM']['code']      # one fault for every unmasked SIMD exception (Wine 9.0 fpe_handler); SDM Vol 1 11.5.2: the flags are set, the destination is unchanged
@@ -26,4 +30,8 @@ def main():
     print('cases', N, 'fails', len(FAILS))
     for f in FAILS: print('FAIL', f)
     return 1 if FAILS else 0
+class T(unittest.TestCase):
+    def test_directed_cases(self): self.assertEqual(main(), 0)
+
+
 if __name__ == '__main__': sys.exit(main())

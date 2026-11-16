@@ -13,7 +13,7 @@ exclusive by their guards and exhaustive because the last one, UD, is the comple
      -> STATUS_ACCESS_VIOLATION otherwise;
   4. reserved-NOP / hint space (0F 0D, 0F 18..0F 1F /r not claimed above: bnd*, cldemote, endbr*, rdssp, nop Ev): SDM Vol 2 A.4, Table A-6 "reserved-NOP": no architectural effect;
   5. prefix-only variants whose prefix the model CPU ignores (F2 BND on branches, 3E NOTRACK, F2/F3 XACQUIRE/XRELEASE with LOCK): the instruction without the prefix;
-  6. UD: only what the declared CPU's CPUID table (f_cpufeat.missing, h_absent_ext) or the SDM opcode map (UD0/UD1/UD2) decides; any other shape without a Form or a handler is a lift error (h_default).  The model advertises none of the extensions that introduced it (VEX/EVEX/XOP encodings, the 0F 38 and 0F 3A maps, SSE3/SSE4a,
+  6. UD: only what the declared CPU's CPUID table (cpufeat.missing, h_absent_ext) or the SDM opcode map (UD0/UD1/UD2) decides; any other shape without a Form or a handler is a lift error (h_default).  The model advertises none of the extensions that introduced it (VEX/EVEX/XOP encodings, the 0F 38 and 0F 3A maps, SSE3/SSE4a,
      MOVBE, POPCNT, RDRAND, XSAVE/OSXSAVE/XGETBV, BMI/ADX/..., VMX/SMX/SVM/SGX, CET, RTM/HLE, MPX, PadLock, SYSCALL/SYSRET/SWAPGS which Intel defines only in 64-bit mode): SDM Vol 2
      "Exceptions" of each instruction lists #UD for CPUID.<feature> = 0.
 Legal-on-the-model instructions that are NOT implemented anywhere are named in LEGAL_UNIMPLEMENTED and stay Unsupported (never silently #UD)."""
@@ -251,7 +251,7 @@ def h_prefix_only(cx, ins):
 
 
 # ---- class 6: UD ------------------------------------------------------------------------------------------------------------------------------------------------------
-UD_OPCODES = ('ud0', 'ud1', 'ud2')      # defined #UD by the SDM opcode map (the other #UD classes: f_cpufeat.missing, h_absent_ext)
+UD_OPCODES = ('ud0', 'ud1', 'ud2')      # defined #UD by the SDM opcode map (the other #UD classes: cpufeat.missing, h_absent_ext)
 LEGAL_UNIMPLEMENTED = {
     'fxsave': 'FXSR is in the model; the 512-byte image is x87 + SSE state (x87 owner)',
     'fxrstor': 'FXSR is in the model; the 512-byte image is x87 + SSE state (x87 owner)',

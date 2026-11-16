@@ -3,6 +3,8 @@
     dsl_lock_test.py     (exit 0 = all pass)"""
 import os, re, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import declared_x86sys; declared_x86sys.configure()
 import capstone
 from fnvlift import core
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'fnvlift', 'tests')); import _inputs; _inputs.configure_declared()      # the declared-machine inputs, as the lifter's program passes them

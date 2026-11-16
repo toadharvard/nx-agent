@@ -44,9 +44,30 @@ def shards(size_of_image):
     return EXE_SHARDS if size_of_image is None else BIG_SHARDS if size_of_image >= BIG_IMAGE else 1
 
 
+def proof_closure():
+    """the modules of lift/proof that the lifter imports: the closure of tools/liftgen.py's imports (every `import` / `from` statement of the source, lazy ones included) over lift/proof, lift/fnvlift and lift/tools. DERIVED
+    from the sources (rule 1): a module the lifter starts to import is a declared input of the shard stages with no edit here."""
+    import ast
+    base = os.path.join(REPO, LIFT)
+    seen, todo = set(), [os.path.join(base, 'tools', 'liftgen.py')]
+    while todo:
+        p = todo.pop()
+        if p in seen or not os.path.isfile(p): continue
+        seen.add(p)
+        for n in ast.walk(ast.parse(open(p).read())):
+            names = [a.name for a in n.names] if isinstance(n, ast.Import) else \
+                    [n.module] + [n.module + '.' + a.name for a in n.names] if isinstance(n, ast.ImportFrom) and n.module and not n.level else []
+            for nm in names:
+                parts = nm.split('.')
+                todo.append(os.path.join(base, *parts) + '.py' if parts[0] in ('proof', 'fnvlift') else os.path.join(base, 'tools', parts[0] + '.py'))
+            if isinstance(n, ast.ImportFrom) and n.level and n.module:
+                todo.append(os.path.join(os.path.dirname(p), *n.module.split('.')) + '.py')
+    return sorted(os.path.relpath(f, REPO) for f in seen if os.sep + 'proof' + os.sep in f) + [LIFT + '/proof/__init__.py']
+
+
 def lift_inputs():
-    """the declared inputs of a shard stage: the lifter package, the runtime headers, the (empty) certificate directory"""
-    return [LIFT + '/fnvlift', LIFT + '/proof/__init__.py', LIFT + '/proof/shape.py', LIFT + '/proof/sdmfeat.py', 'ports/fnv-nx/verify/cpuid_model.json', LIFT + '/rt/rcptab.c', LIFT + '/rt/rcptab.cert.json'] + sorted(os.path.relpath(f, REPO) for f in glob.glob(os.path.join(REPO, LIFT, 'rt', '*.h'))) + [ROOT + '/certs']
+    """the declared inputs of a shard stage: the lifter package, the proof modules it imports (proof_closure), the runtime headers, the (empty) certificate directory"""
+    return [LIFT + '/fnvlift'] + proof_closure() + ['ports/fnv-nx/verify/cpuid_model.json', LIFT + '/rt/rcptab.c', LIFT + '/rt/rcptab.cert.json'] + sorted(os.path.relpath(f, REPO) for f in glob.glob(os.path.join(REPO, LIFT, 'rt', '*.h'))) + [ROOT + '/certs']
 
 
 def images(modules):

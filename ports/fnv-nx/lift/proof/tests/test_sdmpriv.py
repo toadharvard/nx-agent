@@ -1,11 +1,13 @@
-"""sdmpriv: the class of verbatim SDM #GP(0) sentences, and that the committed rows are the privileged set that forms_sys and f_sys read (no hand copy of it)."""
+"""sdmpriv: the class of verbatim SDM #GP(0) sentences, and that the committed rows are the privileged set that forms_sys and sysspec read (no hand copy of it)."""
 import os
 import sys
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
-from proof import privset, sdmpriv, forms_sys
+sys.path.insert(0, HERE)
+import declared_x86sys; declared_x86sys.configure()
+from proof import privset, sdmpriv, forms_sys, sysspec
 
 
 class T(unittest.TestCase):
@@ -19,6 +21,7 @@ class T(unittest.TestCase):
         self.assertEqual(n, 8)
 
     def test_one_source(self):
+        self.assertEqual(sysspec.PRIV.keys(), set(privset.mnemonics()))
         self.assertEqual(set(forms_sys._PRIV), set(privset.mnemonics()))
         self.assertFalse(hasattr(forms_sys, 'PRIV_MN'))
         for m in ('cli', 'hlt', 'in', 'lgdt', 'wrmsr', 'sysexit'):

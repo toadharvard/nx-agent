@@ -3,8 +3,8 @@
 
     python3 -I cpufeat_diff.py --sdmrows SDMROWS.json --cpumodel CPUID_MODEL.json --old-module OLD_f_cpufeat.py --old-cpufeat CPUFEAT.tsv --udsail UDSAIL.tsv [--undefined BAD.tsv] SITES.tsv [OUT.tsv]
 
-SITES.tsv: packuniverse.py's sites file (`module:address<TAB>shape key<TAB>family`), every image. OLD_f_cpufeat.py: the retired fnvlift/f_cpufeat.py (git show <commit>:...), loaded under another name; it reads its feature table
-from --old-cpufeat. The new gate is fnvlift/f_cpufeat.py over --sdmrows. A shape's answer is computed once and applied to every site of the shape (the gate reads the decoded form only).
+SITES.tsv: packuniverse.py's sites file (`module:address<TAB>shape key<TAB>family`), every image. OLD_f_cpufeat.py: the retired proof/cpufeat.py (git show <commit>:...), loaded under another name; it reads its feature table
+from --old-cpufeat. The new gate is proof/cpufeat.py over --sdmrows. A shape's answer is computed once and applied to every site of the shape (the gate reads the decoded form only).
 Output rows: `site  shape  old  new  verdict` for every site where the two differ, and for every site the new gate cannot decide (`unsupported`: no SDM row and no opcode-map entry, or ambiguous rows).
 --udsail: the lifter's `udsail` input (a header-only file for the first pass). --undefined BAD.tsv: a baddecode.tsv (`image<TAB>0<TAB>8 bytes`) of every decoded shape that has no SDM row and no Sail #UD verdict yet,
 to be run through proof/udsail.py together with the images' baddecode.tsv files (the Sail rule b decides them; a completing path is a form that needs a Form).
@@ -42,7 +42,7 @@ def main(argv):
     from fnvlift import inputs
     from proof import sdmfeat, shape
     inputs.configure(sdmrows=rows, cpumodel=cm, udsail=ud)
-    from fnvlift import f_cpufeat as new
+    from proof import cpufeat as new
     O = old_gate(old, cf)
     md = shape.decoder(); by = collections.OrderedDict(); n = collections.Counter(); fam = {}
     sites = sdmfeat.read_sites(a[0])

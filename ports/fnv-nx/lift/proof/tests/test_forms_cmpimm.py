@@ -1,8 +1,8 @@
 """every CMPPS/CMPPD/CMPSS/CMPSD shape x all 256 imm8: imm 0..7 must link (shape Form == concrete Form); imm 8..255 are reserved by the SDM and have no concrete Form (no link claimed)"""
 import sys; sys.path.insert(0, '.')
 import os
-from fnvlift import inputs
-inputs.configure(x86sys=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'platform', 'declared', 'x86sys.json'))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import declared_x86sys; declared_x86sys.configure()
 from proof import symform, shape as shp
 PRE = ['0fc244240000/5.1.4.1', '660fc244240000/6.1.5.1', 'f30fc244240000/6.1.5.1', 'f20fc244240000/6.1.5.1']
 bad = 0

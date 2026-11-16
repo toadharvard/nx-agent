@@ -1,0 +1,38 @@
+{
+ "format": "fnvnx-declared/1",
+ "generated_from": {
+  "rt/cpumodel.c": "b227ffc6297a6edab1723e9f33f04c9ef3ac117113dda3e89bc36c8603edf852",
+  "sdm_sha256": "c87ef800d8e22b84df6da4f3228bf25cb47daa75bdfd685ca6ce810e79fca51c"
+ },
+ "rows": [
+  {
+   "function": "cpuid",
+   "ufs": [
+    "cpuid0",
+    "cpuid1",
+    "cpuid2",
+    "cpuid3"
+   ],
+   "source": "rt/cpumodel.c",
+   "basis": "SDM vol. 2A CPUID Operation: (EAX, EBX, ECX, EDX) := CPUID_INFO(EAX, ECX)",
+   "outputs": [
+    "eax",
+    "ebx",
+    "ecx",
+    "edx"
+   ]
+  },
+  {
+   "function": "rdtsc",
+   "ufs": [
+    "rdtsc"
+   ],
+   "source": "rt/cpumodel.c",
+   "basis": "SDM vol. 2B RDTSC Operation: EDX:EAX := TimeStampCounter (64-bit result of fnvl_rdtsc)",
+   "outputs": [
+    "eax",
+    "edx"
+   ]
+  }
+ ]
+}

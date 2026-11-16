@@ -1,22 +1,89 @@
 #!/usr/bin/env python3
-"""Immediate-selected SIMD forms (pshufd/pshufw/pshuflw/pshufhw, shufps/shufpd, pextrw/pinsrw, pslldq/psrldq): the Form of the SHAPE (immediate = symbolic bits) must exist, and for every one of the 256
-immediate values the shape's Form instantiated with that immediate must equal the concrete instruction's Form (symform.link_ok).  One rule (forms_simd.selidx / setidx / byteshift), no per-shape case.
-test_forms_immsel.py  (exit 0 = all pass)"""
-import os, sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+"""Symbolic immediates (CERTS.md "Oracle rules" 2): for EVERY shape key whose Form has a symbolic immediate field, the shape's Form instantiated at immediate v equals the Form built from the
+concrete instruction with immediate v (symform.link_ok), for every v of the field's width at which the concrete instruction has a Form (a builder that raises KeyError/AssertionError, e.g. reserved cmpps predicates, has nothing to equal).
+The universe is a rule over the decoder, not a list: every byte string  [prefix none/66/f2/f3] [map none/0f/0f38/0f3a] [opcode 00..ff] [ModRM c0/00/40/80] 00*8  that capstone decodes
+(proof/shape.decoder) is reduced with shape.shape_key; the keys with an immediate field (symform.parse_key) that have a symbolic Form (symform.symbuild; a shape without a builder or with a symbolic
+branch is not in the universe: formgate reports those as `unlinked`) are the universe, whatever the family (SIMD pshufd/shufps/pextrw/pslldq, ALU, shifts, imul, enter, far pointers ...).
+Values: a 1-byte field takes all 256; a field of 2, 4 or 6 bytes takes (a) every byte lane x all 256 values with the other lanes 0x00 and (b) every lane at 00/7f/80/ff with the other lanes 0xff
+(2^16 / 2^32 / 2^48 instances are not enumerated: the Form reads the field only through byte-wise slices and zext/sext of them, see symform.derive).  The counts are printed.
+test_forms_immsel.py  (exit 0 = all pass; ~2 min on one core)"""
 import os
-from fnvlift import inputs
-inputs.configure(x86sys=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'platform', 'declared', 'x86sys.json'))
-from proof import symform, shape as shp
-PRE = ['0fc6c0', '660fc6c0', '0f70c0', '660f70c0', 'f20f70c0', 'f30f70c0', '660fc5c0', '0fc5c0', '660fc4c0', '0fc4c0', '660f73f8', '660f73d8', '660fc4c1', '660fc4c7']
-bad = n = 0
-for p in PRE:
-    sf = None
-    for im in range(256):
-        raw = bytes.fromhex(p + '%02x' % im)
-        if sf is None:
-            ins = list(shp.decoder().disasm(raw, 0x401000))[0]; sf = symform.symbuild(shp.shape_key(ins))
-        ok, why = symform.link_ok(sf, raw, 0x401000); n += 1
-        if not ok: bad += 1; print('FAIL', p, im, why)
-print('instances %d fails %d' % (n, bad)); sys.exit(1 if bad else 0)
+import sys
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import declared_x86sys; declared_x86sys.configure()
+from proof import forms, symform, shape as shp  # noqa: E402
+
+FAILURES_HEADER = '# fnvnx-form-equivalence-failures/1: shape_key<TAB>immediate value (hex)<TAB>why  (test_forms_immsel universe run; the aggregation withholds every listed shape key: certs_build --withheld)'
+PREFIXES = ('', '66', 'f2', 'f3'); MAPS = ('', '0f', '0f38', '0f3a'); MODRM = ('c0', '00', '40', '80')
+
+
+def immediate_shape_keys():
+    """the shape keys with an immediate field of the decoder's encoding space (rule above)"""
+    dec, keys = shp.decoder(), set()
+    for pre in PREFIXES:
+        for mp in MAPS:
+            for op in range(256):
+                for mrm in MODRM:
+                    raw = bytes.fromhex('%s%s%02x%s' % (pre, mp, op, mrm) + '00' * 8)
+                    for ins in dec.disasm(raw, 0x401000):
+                        try: k = shp.shape_key(ins)
+                        except shp.ShapeError: break
+                        if symform.parse_key(k)[1]['imm']: keys.add(k)
+                        break
+    return sorted(keys)
+
+
+def universe():
+    """[(key, SymForm)] of the immediate shapes that have a symbolic Form, and the count of those that have none"""
+    out, none = [], 0
+    for k in immediate_shape_keys():
+        try: out.append((k, symform.symbuild(k)))
+        except (KeyError, symform.FieldDecodeError, symform.SymbolicBranch, AssertionError): none += 1
+    return out, none
+
+
+def values(width):
+    """the immediate values of a field of `width` bytes: all (1 byte) or the lane rule (wider)"""
+    if width == 1: return list(range(256))
+    out = set()
+    for lane in range(width):
+        for v in range(256): out.add(v << (8 * lane))
+        for v in (0x00, 0x7f, 0x80, 0xff): out.add(((1 << (8 * width)) - 1) & ~(0xff << (8 * lane)) | (v << (8 * lane)))
+    return sorted(out)
+
+
+FAILURES_HEADER = '# fnvnx-form-equivalence-failures/1: shape_key<TAB>immediate value (hex)<TAB>why  (test_forms_immsel universe run; the aggregation withholds every listed shape key, certs_build --withheld)'
+
+
+def run(failures=None):
+    """the universe run -> (shapes with a Form, shapes without, instances, not compared, [(key, v, why)] failing instances).  `failures`: a path; the failing instances are written there as the tsv the aggregation reads"""
+    uni, none = universe(); bad = n = noconc = 0; width = {}; fails = []
+    for k, sf in uni:
+        rep, f = symform.parse_key(k); off, sz = f['imm']; width[sz] = width.get(sz, 0) + 1
+        for v in values(sz):
+            raw = bytearray(rep); raw[off:off + sz] = v.to_bytes(sz, 'little'); n += 1
+            try: forms.build(list(shp.decoder().disasm(bytes(raw), 0x401000))[0], 0x401000)
+            except (KeyError, AssertionError): noconc += 1; continue          # no concrete Form at this value (cmpps imm >= 8 reserved, an int vector undecided on the declared OS): nothing to equal
+            try: ok, why = symform.link_ok(sf, bytes(raw), 0x401000)
+            except Exception as e: ok, why = False, repr(e)
+            if not ok: bad += 1; fails.append((k, '%x' % v, why)); print('FAIL', k, '%x' % v, why)
+    print('immediate shapes with a Form %d (field widths %s), without a Form %d, instances %d (no concrete Form at the value, not compared: %d), fails %d' % (len(uni), sorted(width.items()), none, n, noconc, bad))
+    if failures is not None:
+        with open(failures, 'w') as fh: fh.write(FAILURES_HEADER + '\n' + ''.join('%s\t%s\t%s\n' % (k, v, str(w).replace('\t', ' ').replace('\n', ' ')[:200]) for k, v, w in fails))
+    return len(uni), none, n, noconc, fails
+
+
+class T(unittest.TestCase):
+    def test_every_immediate_shape_links_at_every_value(self):
+        nuni, _, _, _, fails = run()
+        self.assertGreater(nuni, 0)
+        self.assertEqual(len(fails), 0)
+
+
+if __name__ == '__main__':
+    if len(sys.argv) == 3 and sys.argv[1] == '--failures':       # write the failing instances (the Form-equivalence failures) for the aggregation; exit 0: the file is the result
+        run(sys.argv[2]); sys.exit(0)
+    unittest.main()

@@ -26,7 +26,7 @@ def w(p, t): open(p, 'w').write(t)
 EAX = eax1(ref['family'], ref['model'], ref['stepping'])
 for _d in ('/in/ports/fnv-nx/lift/fnvlift', os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'fnvlift')):
     if os.path.exists(os.path.join(_d, 'cpumodel_bits.py')): sys.path.insert(0, _d); break
-import cpumodel_bits          # the one derivation of the declared machine's feature words, shared with the lifter's feature gate (fnvlift/f_cpufeat.py)
+import cpumodel_bits          # the one derivation of the declared machine's feature words, shared with the lifter's feature gate (proof/cpufeat.py)
 _w = cpumodel_bits.model_words(mod)
 ECX = _w['leaf1_ecx']; EDX = _w['leaf1_edx']
 E1 = [0, 0, _w['ext1_ecx'], _w['ext1_edx']]

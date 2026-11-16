@@ -9,10 +9,11 @@ import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 from fnvlift.dsl import C, Form, V, bit, concat, eq, extract, load, mm, msb, trunc, xmm, zext
 from capstone import x86 as X
+from fnvlift import faults
 
 R8 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh']; R16 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di']
 SEGPFX = {0x64: 'fs', 0x65: 'gs', 0x2e: 'cs', 0x26: None, 0x36: None, 0x3e: None}
-PFX = {0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65}
+from proof.shape import PFX      # the legacy prefix set (SDM vol. 2 2.1.1): one table, shape.py
 SEGS = {'cs', 'ds', 'es', 'ss', 'fs', 'gs'}
 from fnvlift.formkey import is_far_raw
 def form_key(ins):
@@ -106,7 +107,7 @@ def rd(op, w=None):
 def store_op(F, op, addr, v, when=None):
     """the one store of a memory operand.  SDM Vol. 3, 5.6 (data-segment write rule) and 3.4.5.1: a code segment is not writable, so a store whose effective segment is CS
     (the 0x2e override, last prefix wins) raises #GP(0) -- Windows reports STATUS_ACCESS_VIOLATION -- before anything is written: fault code 7 (dsl.FAULTS AV), always."""
-    if op.seg == 'cs': F.fault(7, C(1, 1))
+    if op.seg == 'cs': F.fault(faults.BYNAME['AV']['code'], C(1, 1))
     mstore(F, addr, v, when)
 def wr(F, op, v, when=None):
     if isvec(op):

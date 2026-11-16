@@ -3,6 +3,8 @@
 not from the code under test.  Run through forms.build and the DSL's z3 semantics, and through the DSL emitter.   test_forms_far.py  (exit 0 = all pass)"""
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import declared_x86sys; declared_x86sys.configure()
 import capstone as CS, z3
 from proof import forms
 from fnvlift import x86sys
@@ -31,11 +33,11 @@ for sel, ok in ((CS_, 1), (CS_ & 0xfffc | 0, 1), (0x18, 1), (0x19, 1), (0x1a, 1)
     check('call far [m16:32] sel 0x%x: %s' % (sel, 'transfers' if ok else '#GP (fault 7)'), (f, e) == ((0, 0x12345678) if ok else (7, e)))
 f, e, s, rd, F = run(CALLM, ptr(0x12345678, CS_), eax=0x1000, esp=0x2000)
 check('call far m16:32: ESP - 8', s == 0x2000 - 8)
-check('call far m16:32: [esp+4] = CS zero-extended to 32 bits, [esp] = the return EIP', rd(0x2000 - 4, 4) == CS_ and rd(0x2000 - 8, 4) == A + 2)
+check('call far m16:32: the low 16 bits of [esp+4] = CS (sysspec_far.py: the SDM leaves the high 16 bits of the slot undefined), [esp] = the return EIP', rd(0x2000 - 4, 2) == CS_ and rd(0x2000 - 8, 4) == A + 2)
 f, e, s, rd, F = run(b'\x66\xff\x18', ptr(0x1234, CS_, 2) | {0x1000 + k: v for k, v in ptr(0xdead1234, CS_, 2).items()}, eax=0x1000, esp=0x2000)
 check('66 call far m16:16: EIP = the offset masked to 16 bits, ESP - 4, [esp+2] = CS, [esp] = IP', (f, e, s) == (0, 0x1234, 0x2000 - 4) and rd(0x2000 - 2, 2) == CS_ and rd(0x2000 - 4, 2) == (A + 3) & 0xffff)
 f, e, s, rd, F = run(b'\x9a\x78\x56\x34\x12' + CS_.to_bytes(2, 'little'), esp=0x2000)
-check('9A ptr16:32 with cs: EIP = the offset, pushes CS and the return EIP (next = +7)', (f, e, s) == (0, 0x12345678, 0x2000 - 8) and rd(0x2000 - 4, 4) == CS_ and rd(0x2000 - 8, 4) == A + 7)
+check('9A ptr16:32 with cs: EIP = the offset, pushes CS (low 16 bits) and the return EIP (next = +7)', (f, e, s) == (0, 0x12345678, 0x2000 - 8) and rd(0x2000 - 4, 2) == CS_ and rd(0x2000 - 8, 4) == A + 7)
 f, e, s, rd, F = run(b'\x9a\x78\x56\x34\x12\x23\x00', esp=0x2000)
 check('9A ptr16:32 with a data selector: fault 7', f == 7)
 f, e, s, rd, F = run(b'\xea\x78\x56\x34\x12' + CS_.to_bytes(2, 'little'))

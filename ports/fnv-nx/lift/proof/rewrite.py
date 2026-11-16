@@ -12,10 +12,11 @@ The model computes the remainder as `a - b * floor(a / b)` (Sail `mod` = floor2 
 low_extract: Extract(h, 0, a + b | a - b | a * b) = Extract(h, 0, a) op Extract(h, 0, b) (arithmetic modulo 2^n commutes with truncation: the reduction mod 2^(h+1) is a ring
 homomorphism), so a 32-bit remainder taken from the low half of a 64-bit expression meets the 32-bit expression of the other side term by term."""
 import z3
+from proof import bounds
 K = {z3.Z3_OP_BUDIV: 'u', z3.Z3_OP_BUDIV_I: 'u', z3.Z3_OP_BSDIV: 's', z3.Z3_OP_BSDIV_I: 's'}
 def is_ext(a, n, signed):
     ext = z3.SignExt(a.size() - n, z3.Extract(n - 1, 0, a)) if signed else z3.ZeroExt(a.size() - n, z3.Extract(n - 1, 0, a))
-    s = z3.Solver(); s.set('timeout', 5000); s.add(a != ext); return s.check() == z3.unsat
+    s = z3.Solver(); s.set('rlimit', bounds.Z3_RLIMIT); s.add(a != ext); return s.check() == z3.unsat
 def narrow_div(t, memo=None):
     memo = {} if memo is None else memo
     r = memo.get(t.get_id())

@@ -15,7 +15,7 @@ _inputs.configure()
 if len(sys.argv) != 2: sys.exit('usage: %s GEN   (GEN: the GEN output of the lift/rt root, a declared input of the test root)' % os.path.basename(__file__))
 GEN = sys.argv[1]
 from fnvlift import core, dsl
-from proof import lift_dsl as f_dsl
+from proof import lift_dsl as f_dsl, cpufeat
 from fnvlift.core import Unsupported
 from fnvlift.image import Image
 
@@ -37,11 +37,11 @@ def compiles(body):
 
 def lift_bytes(code, emit):
     img = Image.from_bytes(code, 0x401000)
-    core.set_emit(f_dsl.emit_form if emit == 'dsl' else None)
+    core.set_emit(f_dsl.emit_form if emit == 'dsl' else None, cpufeat.missing)
     try:
         return L.lift(img, 0x401000, len(code))[0]
     finally:
-        core.set_emit(None)
+        core.set_emit(None, cpufeat.missing)
 
 
 def raises(fn):

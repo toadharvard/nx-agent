@@ -1,10 +1,10 @@
-"""f_cpufeat on the SDM rows (--sdmrows: sdmfeat.py dumprows of the SDM text): the gate is the one SDM row match, no capstone groups.
+"""cpufeat on the SDM rows (--sdmrows: sdmfeat.py dumprows of the SDM text): the gate is the one SDM row match, no capstone groups.
     test_cpufeat_sdm.py --sdmrows PATH"""
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; import tempfile
 _u = tempfile.mkdtemp() + '/udsail.tsv'; open(_u, 'w').write('# fnvnx-udsail/2\n0f0e\tUD\t2\tsail\tfixture\n')
 _inputs.configure(_inputs.sdmrows_arg(), udsail=_u)
-from fnvlift import f_cpufeat as F
+from proof import cpufeat as F
 from proof import shape, sdmfeat
 md = shape.decoder()
 dec = lambda h: sdmfeat.decode(bytes.fromhex(h) + b'\0' * 8, md)

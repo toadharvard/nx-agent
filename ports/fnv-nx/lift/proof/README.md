@@ -8,24 +8,20 @@ below); the VEX second model was cancelled and `model_vex.py` was never finished
 * `forms.py`: the slice (add adc sub sbb cmp and or xor test inc dec neg not shl shr sar rol ror imul mul movzx movsx setcc
   cmovcc lea bswap cdq xchg push pop, plus mov and one memory form each way) built from a capstone decode; form keys are the
   ones of the retired one-instruction harness (`form_key` copied; prove.py does not import the retired one-instruction harness, which needs numpy/elftools/unicorn).
-* `enc_table.py`: 393 concrete encodings (keystone + a few raw hex), 270 form keys.
-* `prove.py --model MODULE`: the proof gate, model-agnostic; the plug-in interface is in the docstring of prove.py.
-  Plumbing was checked only with a reference equal to the DSL (proves nothing) and with a deliberately broken copy of
-  forms.py (AF/OF changed) which gives FAILED with a counterexample line.
+* `prove.py`: the obligations of one shape against the reference model (library; `shapeprove.py` is the one prover and calls `prove_one`; plug-in interface in the docstring of prove.py).
+  Its former table mode and `--backends` (encoding tables, emitted-C++ comparison) were deleted: one prover path.
 
 Undefined flags (declared in the forms, excluded from obligations): AF of and/or/xor/test and of shifts; SF ZF AF PF of
 mul/imul; OF of shifts and rotates unless the masked count is 0 or 1.
 Doubts (SDM silent or loose, to be settled by the Sail model): CF of shl/shr/sar with a count above the operand width on
 8/16-bit operands (DSL: last bit shifted out, 0 beyond); CF of rol/ror when the count is a non-zero multiple of the width
 (DSL: lsb/msb of the unchanged result); `lea r16` takes the low 16 bits of the 32-bit address.
-Measured times: see the bottom.
-Backend gate: 270 form keys x 1000 inputs, compile (g++ UBSan) + run + z3 evaluation 153 s total (4 cores shared); 0 disagreements.
+Measured numbers are not kept here: every count, time and result is the output of a run at a commit (`shapeprove.py` records, `certs.tsv`, the verdict's `forms` gate item), read from there.
 
 ## Sail (reference model = Sail x86 model run by isla)
 
 Files: `model_sail.py` (driver), `x86.toml` (isla config), `sail_build.sh` (idempotent rebuild), `x86_fetch.sail` + `x86_code_regs.sail`
-(the two splice files). Gate: `python3 proof/prove.py --model model_sail`. Scratch/cache: `/home/user/l3work/proof` (`sail/x86_proof.ir`,
-`sail_cache/`: raw isla output per encoding, key = sha256 of IR + config + isla arguments + encoding bytes).
+(the two splice files). Gate: `shapeprove.py`. Toolchain, scratch and cache: `$GATE_CACHE/sail/<12 hex of sha256(sail_pins.txt)>/` (`work/sail_cache/`: raw isla output per encoding, key = sha256 of IR + config + isla arguments + encoding bytes); the IR is the external `x86ir` of `formgate_inputs.json`.
 
 **Execution.** `isla-execute-function -A x86_proof.ir -C x86.toml x86_fetch_decode_execute '()'` with `-I` register settings: CS DS ES SS FS GS
 flat (base 0, limit 0xffffffff, attributes 0x0c9a: D/B=1, L=0, present, writable), EFER.LMA=0, CR0..4=0, `app_view=true` (linear memory, no paging),
@@ -50,33 +46,22 @@ to every data address (checked in a run with base 0x10000: lin = base + zero-ext
 Real mode, V86, SMM are not implemented. State selects the mode (`-I` registers), so 32-bit semantics are available: default operand/address size
 from CS.D (memory_accessors.sail `select_address_size`), stack width from SS.D, segment base/limit/attributes honoured (`ea_to_la`, null selector and limit
 checks), 0x40-0x4f are inc/dec (REX only in 64-bit mode; in 64-bit mode `40` decodes as REX + `00 00`, rip+3), 0x66 forms, push/pop/call/ret with a
-32-bit stack (ran: all proved/ran in `/home/user/l3work/proof/t2.py` list) and fs: overrides all execute. Consequently no form needs the 64-bit-mode workaround
+32-bit stack (ran: every form proved or ran) and fs: overrides all execute. Consequently no form needs the 64-bit-mode workaround
 (0x67 / constraining upper halves); the driver still returns the low 32 bits of 64-bit registers with free upper halves, so a dependence on an upper half
 would be a counter-example.
 
-**Gate result** (`prove.py --model model_sail`, 393 encodings / 270 form keys, cold isla cache 251 s, warm 13 s): proved 349, FAILED 42,
-model-gap 2 (bswap: "Opcode Unimplemented in x86isa!"), timeout 0. The 42 FAILED are all rol/ror/shl/shr/sar on 8/16-bit operands and ror/rol OF/CF, and
-every one is a disagreement about a flag or rotate the SDM defines or leaves undefined, none is an arithmetic disagreement:
-* shl/shr (r8,r16): CF for a count >= operand width: the model leaves CF undefined (free value), the SDM says CF is undefined there for SHL and SHR;
-  the DSL claims the last bit shifted out (0 beyond): DSL over-claims. sar (r8,r16): the model is equally loose but the SDM does not exempt SAR; the DSL (sign bit) is right.
-* rol/ror OF with masked count 0: the model leaves OF undefined, the SDM says no flag is affected: DSL right, model under-specified.
-* ror (any width) CF for count >= 2: the model takes CF = bit 0 of the result (rotates_spec.sail ror_spec_*); the SDM says CF = msb: model wrong.
-* rol/ror (r8 count 9..31 except 16/24 coincidences, r16 count 17..31): the model's `rotate_left_bits`/`rotate_right_bits` (prelude.sail) do not reduce the
-  count modulo the width, so the result is wrong (rol bl,9 of 0x7f gives 0, SDM 0xfe): model wrong. For a count equal to the width (8/16) the result is unchanged and rol CF agrees.
-Doubts: (1) CF of shl/shr/sar beyond the width: undefined in the model (see above). (2) CF of rol/ror with a non-zero masked count that is a multiple of the width:
-rol agrees with the DSL (lsb of the unchanged result) at count 8/16; ror disagrees only because of the model's ror CF bug; r8 counts 16/24 hit the rotate bug.
-(3) `lea r16`: proved, low 16 bits of the 32-bit address, upper half of the destination kept. (4) 16-bit cmovcc (all 16 conditions, reg-reg): proved, the upper half is unchanged whether or not the move happens.
+**Gate result**: not kept in this file. The per-shape results of a run are the records of `certs.tsv` and the shard files `shapeprove.py` writes (read them at their commit); the disagreements that this section once listed were the model defects fixed by the pinned IR's patches (`sail_patches/`, `defects.py` header) and the model gap `rep-prefix-ignored`.
 Memory forms rely on the `assume` (no segment-limit #GP: access wrapping past 4 GiB).
 
 ### One-command toolchain build (L3b C2)
 `bash ports/fnv-nx/farm/sail_setup.sh` builds everything from a clean Ubuntu 24.04 root shell: apt packages, opam 2.2.1, opam-repository pinned to one commit,
 switch `sail` (OCaml 4.14.2, the 52 pinned opam packages incl. sail 0.20.3), isla e9b5d94 (`cargo build --release --locked`) and its isla-sail plugin,
 z3-solver 5.4.0.0 (pip, libz3.so.5.4), sail-x86-from-acl2 0c6c023, then `sail_build.sh` (stock IR, proof IR, smoke test); it prints the sha256 of
-`x86_proof.ir` and exits 1 unless it equals the pin. Every version, commit and sha256 is in `proof/sail_pins.txt`. Env: `REMS` `TOOLS` `WORK` `JOBS`.
+`x86_proof.ir` and exits 1 unless it equals the pin. Every version, commit and sha256 is in `proof/sail_pins.txt`. Env: `GATE_CACHE` (required), `REMS` `TOOLS` `WORK` `JOBS` (defaults under `$GATE_CACHE/sail/<pins>`).
 `MIRROR=<dir> bash ports/fnv-nx/farm/sail_setup.sh` takes every download from `<dir>`; `bash ports/fnv-nx/farm/sail_setup.sh --make-mirror <dir>` fills it from the network.
 The IR is path independent: isla-sail records source file names in the IR, so `sail_build.sh` runs it in a staging tree with relative names only.
-Cause of 3acf7d99 (README) vs 66cf6d73 (farm): the old script passed the splice files by absolute path (`$HERE`); run from `/home/user/nx-agent/ports/...` it gives
-3acf7d99 (10,389,604 B), from `/home/user/nx-l3/ports/...` 66cf6d73 (10,389,595 B), both reproduced. The staged build gives 55f87ab6 (10,389,242 B) in every directory.
+Cause of 3acf7d99 (README) vs 66cf6d73 (farm): the old script passed the splice files by absolute path (`$HERE`); run from one checkout path it gives
+3acf7d99 (10,389,604 B), from another checkout path 66cf6d73 (10,389,595 B), both reproduced. The staged build gives 55f87ab6 (10,389,242 B) in every directory.
 
 ### Sail model patches (W9b)
 `proof/sail_patches/rotate_count.sail` (rotate_left_bits/rotate_right_bits reduce the count mod width) and `ror_cf.sail` (ROR CF = msb of the result for masked
@@ -117,14 +102,13 @@ Gate with the patched IR (forms.py md5 5ba2bb32...): proved 358, FAILED 33 (rol/
 ## Gates `forms` and `fpexact` (fnvnx-gate/1, verify/VERDICT.md classes 6 and C)
 Both read their private inputs the way verify/gate_contract.py does: declared as content-pinned externals of fnv-nx-build, loaded by `recipe.fetch_externals`
 from `ports/fnv-nx/verify` (sibling of lift/; a lift-only branch has no verify/, so the gates are red with that reason and the tests overlay it through
-`FNVNX_TEST_VERIFY`). No path arguments, no environment variables other than the verdict's `GATE_OUT` / `GATE_CACHE`. A missing or invalid input is RED with the reason.
+`FNVNX_TEST_VERIFY`). No path arguments, no environment variables other than the verdict's `GATE_OUT` / `GATE_CACHE`, which the gate reads once in `main` and passes on explicitly. The generated headers of lift/rt (`rcpref.h`) are read through `genout.gen_dir(cache)`, which takes the store as an argument (no environment read) and resolves the root's published GEN output with `gate_build.published_output`. A missing or invalid input is RED with the reason.
 * `formgate.py` (gate `forms`): universe = the shapes of `shapes.tsv` in the external `liftpack` (`shape_key<TAB>family<TAB>count`, sorted); certificates = `certs.tsv`
   of the external `certs` (fnv-nx-build `l3b-lift/certs`). Inputs: `formgate_inputs.json` (`fnvnx-forms-inputs/1`; `model_sha256` must equal the `x86_proof.ir` pin of
   `sail_pins.txt`). A shape is certified iff a `proved` row of the pinned model carries the dsl_sha the current code gives. Today the file declares no `liftpack`:
   red, `inputs: external liftpack not declared` (the docstring says what to add). Tests: `tests/test_formgate.py` (local bare repos as externals).
 * `gate_fpexact.py` (gate `fpexact`): per admitted product root (gate_build.quantify convention, no root = universe 0 green): the rcp/rsqrt certificate, no A64
-  estimate instruction, float->int conversions only in marked helpers (plugin `toolchain/ftoi/fnvnx_ftoi.cc` in mode `lifted`, a recipe stage; report `unit.f2i.json`, format `fnvnx-f2i/2`), and the item
-  `<root>:forms` = the gate forms is green (the helpers' correctness is the form certificates'; evaluated by calling `formgate.judge`, since each gate has its own GATE_OUT).
+  estimate instruction, float->int conversions only in marked helpers (plugin `toolchain/ftoi/fnvnx_ftoi.cc` in mode `lifted`, a recipe stage; report `unit.f2i.json`, format `fnvnx-f2i/2`), and check 0, the lift/rt helpers: the universe is the Form -> helper call table derived by `helpercalls.py` (`universe(repo, cache)`); each helper is covered by rcpcert (its defining unit is the rcpcert table unit, from the object symbol tables) or by the REMOVE record ASM-329 (isla over the host object, after the first frame), else red. The gate makes no claim that the shape certificates cover a helper's C body.
   Tests: `tests/test_fpexact.py`.
 
 ### Why the first 340-shape measurement timed out, and the rules that closed it (L3b)
