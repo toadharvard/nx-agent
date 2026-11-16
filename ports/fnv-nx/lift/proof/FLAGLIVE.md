@@ -16,12 +16,16 @@ construction. The rule is checked by a gate; no run decides it.
   - the prior value that an undefined-when or conditional flag write keeps (an `uwhen` or `when` on f reads f).
 
   These are derived from the Form, with no table by mnemonic.
-- **kills(F)**: the flags with an unconditional write in F, with no `when` and no `uwhen`. DEF0 writes of an undefined
-  flag are unconditional writes of 0 and kill. A conditional write does not kill.
+- **kills(F)**: every flag F writes. Under DEF0 (dsl.Form.flag_line, undef_line) every flag write is an unconditional
+  assignment: a write with `when` w is `f = w ? v : 0`, and an undefined flag is `f = 0` or, with `uwhen` c,
+  `f = c ? 0 : f`. The last form reads f, so f is in reads(F) as well (`Form.roots()` lists `V(f)` for every uwhen
+  flag). That keeps it live_in.
 - **escapes(F)**: all of FL when F has a fault row (`F.faults` non-empty). The exception records EFlags in the CONTEXT
   (SEH, the precise CONTEXT of that instruction, CLAUDE.md "hardware exceptions"). This applies to #DE of div/idiv,
   int3, int n, ud2, into, bound and unmasked x87/SSE.
   - Under OWNER 6 a memory access does not fault, so a load or store is not an escape.
+  - A raise that the lifter emits before the instruction (gs_guard: the null-segment access row of x86sys) is the
+    same class: a synchronous SEH raise with the precise CONTEXT. So escapes(i) = FL there too.
 
 ## Lemma 1 (projection)
 
