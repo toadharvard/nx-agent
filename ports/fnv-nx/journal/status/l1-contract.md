@@ -2758,3 +2758,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - The enter.cc FPCR write is generated from that row, and every msr fpcr site in lift/rt and platform reads the generated constant. A hand literal is red. L3a is told.
 - dnfile pinned at w28-c5 7ede87810 and forwarded to L5. The pdfplumber removal is pending.
 - bottleneck: the cand4 verdict (farm restarts); L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
+
+### 2026-11-16: import_escape, dnfile and winmd dropped (orchestrator, via L5)
+- reach takes the sound superset: every pointer-sized import argument escapes.
+- w28-c5 removes the dnfile pin together with pdfplumber. L5 deletes import_escape.py and the dnfile path, and sends lines for gate_reach/gpa_names if a pointer slot without an escape file is not already "e".
