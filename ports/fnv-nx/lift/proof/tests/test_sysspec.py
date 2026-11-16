@@ -62,7 +62,7 @@ class T(unittest.TestCase):
         self.assertEqual((r, n.startswith('uncertified: record absent')), ('uncertified', True))
 
     def test_uncovered_is_not_proved(self):
-        self.assertEqual(sysspec.check(key('cf'))[0], 'not-covered')
+        self.assertEqual(sysspec.check(key('90'))[0], 'not-covered')      # NOP: no system spec (IRETD, formerly the example, has a Form builder that names its undecided rows: test_sysspec_legacy)
 
     def test_reader(self):
         self.assertEqual(x86sys.cpl(REC), 3)

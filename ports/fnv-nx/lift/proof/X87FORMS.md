@@ -54,3 +54,43 @@ path is switched off, so there is no PERFDEBT entry.
 1. x87form.py: the op census (derived) and the translator; the op table; the proof branch. One worker.
 2. The C helpers and their op tests. The same worker, in the same item, so that the census and the helpers stay one set.
 3. Emission switch-over per class, then deletion of the handlers (with L3a, owner of the emitter).
+
+## Ruling after the op census (w-x87f 5217dc179: 73 decl kinds, 118 entries)
+
+The census shows that one DSL op per z3 decl kind is the wrong grain, for two reasons:
+- 64 entries reach exact-real arithmetic (FPA_TO_REAL, Real DIV) inside the part (i) rounding machinery;
+- six transcendentals are uninterpreted.
+
+**Revised ops: the part (i) functions are the ops.**
+- The translator runs each REGISTRY entry with every part (i) machinery function (view64, to_m80, the rounding and
+  conversion helpers, tag_of_img and the rest that the entries call) replaced by a z3 uninterpreted symbol of the same
+  name and sorts.
+- The resulting DAG is over bit-vector, array and logic kinds plus those symbols. Each symbol is one DSL op, so the op
+  set is the spec's own function structure and needs no pattern matching.
+- Real terms appear only inside a part (i) function, never in the DAG. A Real kind that survives in the DAG raises
+  Unsupported, naming the function that leaks it.
+- **Per-op proof.** For each op, prove once and universally, by z3 at the deterministic bound (bounds.Z3_RLIMIT), that the
+  original part (i) function equals the IEEE z3 term that the C helper computes. For example, view64(img, fcw) equals
+  fpToIEEEBV of fpToFP(rm(fcw), the FPSort(15,64) value of img), with the NaN payload rule stated in bit-vector terms.
+- The C helper computes that IEEE term natively (OWNER 1 for the compiler, OWNER 8 for IEEE).
+- The spec text is unchanged. No second formulation of a clause is written; the equivalence is a proof obligation per op.
+- **Entry proof.** Form equals execute() as before, with each op symbol instantiated by its function. This is true by
+  construction, and it checks the translator.
+
+**Transcendentals** (F2XM1, FYL2X, FPTAN, FPATAN, FSIN, FCOS, FSINCOS). Orchestrator ruling, CLAUDE.md integ
+b7b6f0df0:
+- The value of the spec's uninterpreted `x87_<fn>` is CR_binary64(fn), by OWNER 8.
+- The implementation is CORE-MATH (tools/core-math, built into the guest runtime by L2), taken by its documentation under
+  the owner's existing rule for external libraries. No proof is claimed for it.
+- The Form is the SDM machinery around the call: stack, tags, C1, C2 for an out-of-range |x| >= 2^63, the #IA domain when
+  unmasked. That part is certified against the spec, like every other entry.
+- The call of CR(fn) is one op symbol bound to the library symbol. The certificate states the binding, and the op proof
+  for it is the binding itself.
+- The lowering table of that section is L3a's to emit (for example FYL2X = y * cr_log2(x), an IEEE multiply).
+
+**Order.**
+1. Slice 1: the translator with the op-symbol mechanism, the Form entry point and the prover branch, for the classes whose
+   DAG has no FP op and no Real (FLD m64, FILD m32, FLD ST(i), FXCH, FCHS, FABS, FFREE, the control and environment
+   instructions).
+2. Slice 2: the op proofs of the rounding machinery, then FLD/FST m32 and m64, the arithmetic and the compares.
+3. Slice 3: the transcendental classes, with x87_<fn> bound to CORE-MATH.

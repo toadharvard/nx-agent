@@ -50,8 +50,8 @@ fields one by one (prove.OBLIGATIONS).
 return addresses and EH continuations, which are the same derived targets as density rule 1. Nothing is added by hand.
 
 **Equations:**
-- `live_in(i) = reads(F_i) ∪ escapes(F_i) ∪ (live_out(i) \ kills(F_i))`, and `live_in(h) = FL` at every back-edge
-  target h (P2)
+- `live_in(i) = reads(F_i) ∪ escapes(F_i) ∪ (live_out(i) \ kills(F_i))`, and `live_in(p) = FL` at every p of the poll
+  set P (P2)
 - `live_out(i) = ⋃ live_in(j)` over the successors j of i, and **all of FL** at every exit point.
 
 **Exit points (all flags live).** At each of these, control or a state copy leaves what the certificate sees:
@@ -90,10 +90,12 @@ This is the classic liveness-soundness argument, by induction over the steps. �
   the guest threads and delivers a suspension, and with it the context read or write, only at a point of the set S:
   - every transfer site (call, lcall, ret, indirect or out-of-function jmp, import call, blocking or alertable wait),
     which is already an exit with live_out = FL;
-  - the target of every back edge of the function's CFG (DFS over the facts CFG), where live_in(h) = FL is forced in
-    the equations, like an escape.
+  - the poll set P = the target of every back edge of the function's CFG (DFS over the facts CFG) ∪ every function
+    entry. The entries close the interprocedural cycles that have no back edge inside one function: tail-jmp rings,
+    indirect rings and unbounded recursion. live_in(p) = FL is forced at every p ∈ P, as at an escape;
+  - in the platform: the wait core, alertable APC delivery and the self-call path (L5).
 
-  Every infinite path meets S infinitely often, so a suspension is always delivered (liveness). Windows leaves the
+  Every infinite path, within a function or across functions, meets S infinitely often, so a suspension is always delivered (liveness). Windows leaves the
   suspension point of a running thread unspecified: any instruction boundary is valid, and S is a subset (OWNER 3). So
   the projection changes no state any observer can see. The fact that L5's suspension point lies in S is stated and
   checked in L5's code. A suspension implementation that does not meet it makes this rule red.

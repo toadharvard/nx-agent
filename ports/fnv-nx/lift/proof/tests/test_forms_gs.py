@@ -71,5 +71,26 @@ class CodeStore(unittest.TestCase):
         g = form('0f9400'); self.assertEqual(len(g.faults), 1)       # setz [eax]: the fault only when the store is made
 
 
+class CodeStoreSpec(unittest.TestCase):
+    def setUp(self): declared_x86sys.configure()
+    def tearDown(self): inputs.reset()
+
+    def test_prove_codestore_both_halves_and_a_mutated_form(self):
+        import copy
+        import sysspec_gap
+        import sysspec_store
+        rec = x86sys.REC
+        for h in ('8900', '2e8900', '648900'):
+            self.assertEqual(sysspec_store.prove_codestore(form(h), sysspec_gap.decode(h + '/0.0.0.0'), rec), 'proved', h)
+        r2 = copy.deepcopy(rec); r2['gdt']['descriptors']['0x20']['type'] = 10      # the data descriptor made code: the Form (built from the real record) no longer matches
+        self.assertEqual(sysspec_store.prove_codestore(form('8900'), sysspec_gap.decode('8900/0.0.0.0'), r2), 'differs')
+
+    def test_a_missing_segment_is_reported(self):
+        import sysspec_gap
+        import sysspec_store
+        f = form('8b00')       # a load: no code-store fault
+        self.assertEqual(sysspec_store.prove_codestore(f, sysspec_gap.decode('8900/0.0.0.0')), 'no code-segment store fault')
+
+
 if __name__ == '__main__':
     unittest.main()

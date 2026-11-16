@@ -62,6 +62,7 @@ SEG = ('-I', 'msrs=[#x0000000000000000; 7]', '-I', 'ctrs=[#x0000000000000000; 17
        '-I', 'seg_hidden_bases=[#x0000000000000000; 6]', '-I', 'seg_hidden_limits=[#xffffffff; 6]', '-I', 'ms_reg=false', '-I', 'fault_reg=false',
        '-I', 'app_view=true', '-I', 'marking_view=false', '-I', 'log_register_writes=false')
 
+# Segment limits stay the flat literals of SEG for all six registers: a smaller declared limit (the TEB segment 0x38) is passed only by an access beyond it, which is an access fault that does not occur under ASM-006 (verify/ASSUMPTIONS.json: the exe makes no wild accesses).
 # architectural faults the DSL forms do not model (state outside the form's domain): the obligation is restricted to the non-faulting states
 FAULT_OK = {':SEGMENT-LIMIT-FAIL', ':OUT-OF-SEGMENT-INSTRUCTION-POINTER'}     # the second: a branch target whose unwrapped (64-bit) value leaves the 4 GiB code segment
 
