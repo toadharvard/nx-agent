@@ -2962,3 +2962,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - w28 queue: per-root declared and Wine tables; the root_class for no-C++ guest roots; modules.py from declared_dlls; the reached stage.
 - L6 rechecked b80203aca: 0 bare or relative sibling imports in render/ and bridgefacts/. The 7 at w28-c5 come from its stale copy. cand5 takes render/ and bridgefacts/ whole from b80203aca.
 - L2 cand4b c8a00b66a: rules/ bare sibling imports are 39 -> 0 (045fe3d4d), and w3's rt.sh 165619a86 is merged. The 7 rules tests are green. This is the cand5 head for toolchain/ and rules/.
+- L5 w42 d35647fb: manifest/ bare sibling imports are 36 -> 0. L5's remaining finds in L1 are gate_hostapi:283 and toolflags:25, both to fnvnx.* (w28). The dnfile import leaves with w41 9199431.
