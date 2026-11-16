@@ -11,7 +11,7 @@ PORT = os.path.normpath(os.path.join(HERE, "..", "..", ".."))
 WINE = sys.argv[1]   # test_env_ident.py WINE_DIR: the pinned mirror tools/wine-9.0-d3d9-formats (the recipe external "wine-d3d9-formats"), an argument (no default)
 SPEC = os.path.join(tempfile.mkdtemp(prefix="t-env-spec-"), "d3d9_spec.json")   # the interface table, generated as the d3d9 recipe's D9_SPEC is
 with open(SPEC, "wb") as _f:
-    _f.write(subprocess.run([sys.executable, "-I", os.path.join(PORT, "bridgefacts", "d3d9", "d3d9_spec.py"), "--stdout", os.path.join(PORT, "shim", "include")],
+    _f.write(subprocess.run([sys.executable, "-s", "-B", os.path.join(PORT, "bridgefacts", "d3d9", "d3d9_spec.py"), "--stdout", os.path.join(PORT, "shim", "include")],
                             check=True, capture_output=True).stdout)
 
 
