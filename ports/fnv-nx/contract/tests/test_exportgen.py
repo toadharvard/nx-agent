@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for contract/exportgen.py and bridgetable.derive(exports=): objects built with the host gcc from the real header contract/include/fnvnx_export.h.
+"""Tests for contract/exportgen.py and bridgetable.derive(exports=): objects built with the host gcc from the real header contract/exporthdr/include/fnvnx_export.h.
 Run: python3 -I <this file>. Needs gcc and pyelftools."""
 import os, subprocess, sys, tempfile
 
@@ -22,7 +22,7 @@ def obj(td, rel, src):
     os.makedirs(os.path.dirname(p), exist_ok=True)
     c = p[:-2] + '.c'
     open(c, 'w').write('#include "fnvnx_export.h"\n' + src)
-    subprocess.run(['gcc', '-c', '-I', os.path.join(C, 'include'), c, '-o', p], check=True)
+    subprocess.run(['gcc', '-c', '-I', os.path.join(C, 'exporthdr', 'include'), c, '-o', p], check=True)
 
 
 def collect(td):

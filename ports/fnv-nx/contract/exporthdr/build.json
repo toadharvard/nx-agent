@@ -10,11 +10,8 @@
   ],
   "asm": []
  },
- "include": [
-  "ports/fnv-nx/contract/include"
- ],
+ "include": [],
  "units": "all",
- "external": [],
  "outputs": {
   "INCLUDE": "include"
  }
