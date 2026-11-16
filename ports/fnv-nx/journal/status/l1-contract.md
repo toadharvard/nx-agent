@@ -2192,3 +2192,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Its C-vs-C++ test (test_layout decltype_cxx) runs in the cand4b farm job.
   - After that, L5 re-measures fnvnx_msvc_format/scan on the new pin.
 - The cand4b head 000dfcb89 pins guest_compiler 84f0883e. The void 56a4d09c is gone. The pin moves again when w3's farm build lands.
+- w13 a032be733: recipe-measured, pinned env.
+  - lift/rt: 11/12 units; exportgen gives 32 exports, one definer each, equal to the records.
+  - dispatch.c red = ENTRY1-CONT under the old plugin pin 56a4d09c. L2's 84f0883e closes it.
+  - The farm job exportl3 is cancelled.
+- Root form: w13's `contract` product row duplicated the tool row. Replaced by the header root contract/include (both w13 and w28). w28 adds a duplicate-path admit check.
