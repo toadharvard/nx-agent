@@ -24,4 +24,13 @@ rows, errs, _ = B.derive(names, spec, None, [], {}, ex)
 check("operator new/delete with records are link rows with the record's symbol and ret", errs == [] and [(r[1], r[4], r[6], r[7]) for r in rows] == [("??2@YAPAXI@Z", "i", "c_new", "link"), ("??3@YAXPAX@Z", "v", "c_free", "link")], (rows, errs))
 rows, errs, _ = B.derive(names, spec, None, [], {}, {k: v for k, v in ex.items() if "??3" in k[1]})
 check("operator new without a record is an error, no invented symbol", any("??2@YAPAXI@Z: no export record" in e for e in errs) and not any("operator" in r[6] for r in rows), (rows, errs))
+# the runtime's own module "!rt": a record gives a keyed row (entry: ret and args from the definer's decltype, no spec), an import of it is red
+rt = {("!rt", "eh_nested_catch"): ("fnvnx_eh_nested_catch", "entry", "-", "-")}
+rows, errs, _ = B.derive("", spec, None, [], {}, rt)
+check("'!rt' record is a row without spec or import name", errs == [] and rows == [("!rt", "eh_nested_catch", "", "cdecl", "-", "", "fnvnx_eh_nested_catch", "entry")], (rows, errs))
+from contract import iat  # noqa: E402
+keys = iat.system_keys([(r[0], r[1], r[3], r[2]) for r in rows])
+check("'!rt' record is keyed", len(keys) == 1, keys)
+rows, errs, _ = B.derive("!rt\teh_nested_catch\n", spec, None, [], {}, rt)
+check("a '!rt' name in an import table is red", any("runtime's own module" in e for e in errs), errs)
 sys.exit(1 if fails else 0)
