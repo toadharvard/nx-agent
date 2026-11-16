@@ -90,7 +90,7 @@ def main():
     check("descs.py section: the empty section is no descriptor, a valid one is read", DT.read_section(b"", ".fnvnx.disp") == [] and DT.read_section(b"stack:i:\nthis:v:i\n", ".fnvnx.disp") == ["stack:i:", "this:v:i"])
 
     subprocess.run(["git", "init", "-q", "--bare", BASE + "/artifacts.git"], check=True)
-    os.environ["ARTIFACTS_URL"] = BASE + "/artifacts.git"
+    TR.recipe.ARTIFACTS = BASE + "/artifacts.git"
     SS = BASE + "/store"
     # ---- the union over every admitted product root but the excepted one
     ra = repo_of("da", ROOTS)

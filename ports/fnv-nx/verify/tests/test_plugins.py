@@ -254,6 +254,7 @@ def main():
     # --- (d) gate: a native root without a plugin is a red build gate; a lifted root builds without plugins
     bad = make_repo("nogate", mut(plugins=[p for p in PLUGS if p["name"] != "fnvnx_ftoi"]), "native", target="guest")
     os.makedirs(os.path.join(BASE, "gate-out"))
+    recipe.set_artifacts(recipe.ext_dir(os.path.join(BASE, "gate-cache")), recipe.ARTIFACTS)
     p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "gate_build.py")], cwd=bad, env=dict(
         os.environ, GATE_OUT=os.path.join(BASE, "gate-out"), GATE_CACHE=os.path.join(BASE, "gate-cache")), capture_output=True, text=True)
     res = json.load(open(os.path.join(BASE, "gate-out", "build.json")))
@@ -282,7 +283,7 @@ def main():
     # the game's compiler is in the external cache before ARTIFACTS_URL names the fixture's pack repo (which holds no compiler): mounted by the selftest gate (FNVNX_EXTCACHE), else fetched here
     os.environ.setdefault("FNVNX_EXTCACHE", os.path.join(BASE, "extcache"))
     recipe.fetch_externals(list(REC["external"]), os.path.join(BASE, "ingest-store"), os.environ["FNVNX_EXTCACHE"], BASE)
-    os.environ["ARTIFACTS_URL"] = ext
+    recipe.ARTIFACTS = ext
     rl, _ = build(lrepo, "L")
     check("lifted root builds green with only fnvnx_ftoi (lifted)", rl["status"] == "green" and [p["name"] for p in rl["plugins"]] == ["fnvnx_ftoi"], rl.get("failure"))
     if rl["status"] == "green":

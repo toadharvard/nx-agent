@@ -82,7 +82,7 @@ def make(td, name, script, timeout=None, second=True):
 
 
 def produced(repo, td, tag, jobs=2):
-    j = recipe.Job(repo, R, os.path.join(td, "store"), jobs, os.path.join(td, "store", "external"))
+    j = recipe.Job(repo, R, os.path.join(td, "store"), jobs, recipe.ext_of_store(os.path.join(td, "store")))
     ws = tempfile.mkdtemp(prefix="ts-" + tag, dir=td)
     recipe._copy(repo, [f for f in j.files if recipe.under(f, R)], R, os.path.join(ws, "root"))
     j.externals(ws)
@@ -108,7 +108,7 @@ with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td:
     j3, _ = produced(make(td, "r3", S1.replace("echo hi > /scratch/x/f", "echo hi > /scratch/x/f; echo more > /scratch/x/y")), td, "3")
     check("a changed script re-keys the step and what reads it", len(j3.keys - j1.keys) >= 2, len(j3.keys - j1.keys))
     r4 = make(td, "r4", "true\n", timeout=1, second=False)
-    j4 = recipe.Job(r4, R, os.path.join(td, "store"), 2, os.path.join(td, "store", "external"))
+    j4 = recipe.Job(r4, R, os.path.join(td, "store"), 2, recipe.ext_of_store(os.path.join(td, "store")))
     errs4 = recipe.check(j4.rec, R, j4.files, j4.roots, repo=r4)
     check("a step with timeout_s is red at check time", any("timeout_s" in e for e in errs4), errs4)
 print("fails: %d" % fails)

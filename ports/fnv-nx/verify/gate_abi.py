@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gate "abi" (fnvnx-gate/1, VERDICT.md class 8): a reference and the definition it binds to have one calling contract (rule, universe and proof:
 link/abi.py docstring RULE, UNIVERSE, PROOF).
-    python3 -I gate_abi.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/abi.json
+    python3 -I gate_abi.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/abi.json
 Universe: the rows abi.py defines (abi.check), over the C++ objects of every admitted product root with "target": "guest" and "cxx_origin": "native"
 (objects from gate_build.ensure; the contract names are the plugin's `.fnvnx.sympair` of each object), plus the input facts abi.py's PROOF rests on, as items
 of the same gate:
