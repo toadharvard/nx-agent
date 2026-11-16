@@ -44,6 +44,22 @@ for o, r in sorted(units.items()):
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     with open(dest, "wb") as f:
         f.write(("\n".join(defs + ['#line 1 "%s"' % where]) + "\n").encode() + text)
+# A quoted #include resolves first in the directory of the including file (mpf/fits_sint.c includes its sibling "fits_s.h"). The unit is not in that directory, so the headers of each
+# unit's source directory are written beside the unit. Two source directories that map to one unit directory with different headers of one name are a stop: the unit could not tell them apart.
+sib = {}
+for o, r in sorted(units.items()):
+    sdir = os.path.dirname(os.path.realpath(os.path.join(r["cwd"], r["src"])))
+    udir = os.path.join(out, "u", os.path.dirname(o))
+    for fn in sorted(os.listdir(sdir)):
+        if fn.endswith(".h"):
+            data = open(os.path.join(sdir, fn), "rb").read()
+            key = (udir, fn)
+            if key in sib and sib[key] != data:
+                sys.exit("mkunits: %s/%s: two source directories give the unit directory different headers of this name" % (os.path.dirname(o), fn))
+            if key not in sib:
+                sib[key] = data
+                os.makedirs(udir, exist_ok=True)
+                open(os.path.join(udir, fn), "wb").write(data)
 for tag, root in (("build", build), ("src", src)):
     for d, _dirs, files in os.walk(root):
         for fn in sorted(files):
