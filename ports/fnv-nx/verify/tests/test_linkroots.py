@@ -36,7 +36,7 @@ check("an explicit root@variant of another target is none", sp is None and "targ
 sp, why = rs("h", "guest")
 check("a host base root in a guest image, with no guest variant, is none", sp is None, (sp, why))
 check("an unadmitted root is none", rs("zz", "host")[0] is None, rs("zz", "host"))
-# link_errors: link.roots is derived, a written key is a check error; link_candidates and definer_closure are the derivation
+# link_errors: link.roots is derived, a written key is a check error; link_candidates is the derivation (the closure is ld's: test_linkselect)
 files = subprocess.run(["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True).stdout.split("\n")
 roots = dict(recipe.load_admit(REPO))
 for p, tg in (("ports/fnv-nx/zh", "host"), ("ports/fnv-nx/zg", "guest")):
@@ -60,18 +60,5 @@ check("link candidates of a guest image: admitted product roots with a recipe fo
       SHA in cg and "ports/fnv-nx/zg" not in cg and "ports/fnv-nx/zh" not in cg, cg)
 ch = recipe.link_candidates(roots, "ports/fnv-nx/zh", "host", REPO)
 check("a host image's candidates are resolved to the host recipe of each root (sha256 has a host variant)", SHA + "@host" in ch or SHA in ch, ch)
-idx = {"A": {"defined": [{"symbol": "f", "bind": "global"}], "undefined": ["g"]}, "B": {"defined": [{"symbol": "g", "bind": "global"}, {"symbol": "w", "bind": "weak"}], "undefined": []},
-       "C": {"defined": [{"symbol": "x", "bind": "global"}], "undefined": []}, "D": {"defined": [{"symbol": "g", "bind": "global"}], "undefined": []}}
-m, amb, miss = recipe.definer_closure([], ["f", "h"], {k: idx[k] for k in "ABC"})
-check("closure: f pulls A, A's undefined g pulls B, C is not linked, the symbol no root defines is reported with its referencer", (m, amb, miss) == (["A", "B"], {}, {"h": ["(own)"]}), (m, amb, miss))
-m, amb, miss = recipe.definer_closure(["f"], ["f", "g"], {k: idx[k] for k in "ABC"})
-check("closure: a symbol the image defines itself pulls nothing", m == ["B"], m)
-m, amb, miss = recipe.definer_closure([], ["g"], idx)
-check("closure: two roots defining g is reported (onedef's rule), neither is linked", m == [] and amb == {"g": ["B", "D"]}, (m, amb))
-m, amb, miss = recipe.definer_closure([], ["w"], {"B": idx["B"], "E": {"defined": [{"symbol": "w", "bind": "global"}], "undefined": []}})
-check("closure: a global definition wins over a weak one", m == ["E"] and not amb, (m, amb))
-m1 = recipe.definer_closure([], ["g", "f"], {k: idx[k] for k in "ABC"})
-m2 = recipe.definer_closure([], ["f", "g"], {k: idx[k] for k in "CBA"})
-check("closure: the result does not depend on the order of the inputs", m1 == m2, (m1, m2))
 print("FAILED %d" % fails if fails else "all pass")
 sys.exit(1 if fails else 0)

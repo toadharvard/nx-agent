@@ -70,6 +70,10 @@ the hash of the stage document + tool code. All paths are root-relative unless m
 - `external`: content-pinned inputs (see below).
 - `plugins`: GCC plugins of the C++ front end (see "Plugins"). `flags` may not hold any `-fplugin*` token.
 
+## Sources of a root (`own_sources`)
+
+The sources of a root are its tracked files minus (1) every file under a root admitted inside it (nearest-root ownership, as `tree_of` resolves a tool file: `verify/probes` inside `verify`, `toolchain/tests` inside `toolchain`) and (2) every plugin source of `PLUGIN_SOURCES` and the files it includes (`plugin_files`): those are inputs of the plugin stage, keyed by it, never translation units of the root that holds them. One function, `recipe.own_sources(root, files, roots, repo)`; the unit list, `check` and the build all read it.
+
 ## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)
 **The plugin set belongs to the target profile, not to the language.** The guest profile requires the full set (`PLUGIN_SOURCES`, in load order), for C and C++ alike. The host
 profile (`"profile": "host"`) has the empty set, and a host root is required to load none: the plugins enforce guest-ABI semantics (msvcmodel, x86 TSO as `ldar`/`stlr`, MSVC
@@ -151,15 +155,20 @@ Check: `lifted_by` must be a tracked `.py` of an admitted root of class `tool` (
 ## Link: the guest ELF
 There is one way to link: the recipe key `link` (no other path runs a linker; link/ has no subprocess call). Every key below is validated by
 `check()` with all errors listed at once.
-- **Link members (derived; there is no `link.roots`).** The objects an image links after its own units are those of its **definer closure**
-  (`recipe.link_candidates`, `recipe.definer_closure`), computed at the link stage from the symbols: start from the image's undefined symbols minus its own
-  definitions; each goes to the admitted product root that defines it (a global definition; a weak one only when no root has a global one), that root's own
-  undefined symbols join, until the fixed point. The candidates are every admitted `product` root with a recipe and `link` null, in the recipe it has for the
-  image's target (`resolve_link_root`), never the image itself; each is built objects-only by the same machinery (content-keyed, cache hits in GATE_CACHE/store).
-  Members are linked in sorted order, each root's objects in unit order. A symbol defined by several candidates is red, stage `ld:<root>` (onedef's
-  rule: a name has one definer). A symbol no candidate defines stays undefined: the runtime libraries and `ldcheck` judge it, red when nothing defines it. A written
-  `link.roots` is a check error. A red candidate makes the link red, stage `ld:<root>`, naming the root and its failing stage. A root with a `link` is an image and
-  is never a member.
+- **Link members (derived; there is no `link.roots`).** The objects an image links after its own units are chosen by the pinned ld, with archive semantics:
+  every candidate root is offered as an archive of its objects (`recipe.ar_bytes`, members in unit order, inside one `--start-group`), and a root contributes
+  exactly the objects that define a symbol still undefined, transitively. The seed is (1) the undefined symbols of the image's own objects, (2) the symbols
+  the link script itself references, and (3) the declared `link.entry`, the last two as `-u`. The script's symbols are what the pinned ld reports for the script
+  linked alone (`recipe.script_refs_loop`; stage `ldscript:<root>:<n>`, keyed by the script, the flags and the ld; ld stops at the first undefined name of an
+  expression, so the stage repeats with each reported name defined until clean): nothing is read from the script text. The members are ld's own map member
+  list of the selecting link (stage `ld:<root>:select`, unresolved symbols ignored); the final link then takes exactly those objects whole. The candidates are every
+  admitted `product` root with a recipe and `link` null, in the recipe it has for the image's target (`resolve_link_root`), never the image itself; each is built
+  objects-only by the same machinery (content-keyed, cache hits in GATE_CACHE/store). Members are linked in candidate order, each root's chosen objects in unit
+  order. A symbol no candidate defines stays undefined: the runtime libraries and `ldcheck` judge it, red when nothing defines it; a name defined by several roots
+  is onedef's rule (gate onedef over the image's objects). A written `link.roots` is a check error. A red candidate makes the link red, stage `ld:<root>`, naming
+  the root and its failing stage. A root with a `link` is an image and is never a member. Consequence: a test image (its own `link.entry`) gets crt0 (the script
+  needs `__fnvnx_guest_hdr`) and the objects its entry's references need, and no runtime and no pack; the product image (`link.entry` = `__fnvnx_guest_entry`) gets the
+  full closure.
 - **Link tables (`link.tables`: `[{tool, args, unit, section}]`).** A table that lists the objects of an image (the descs/bridges dispatch table) is a product of the link, never a root of its
   own and never a link member. After the members are final, the tool (a tracked `.py` of an admitted tool or product root) runs in the hermetic stage `table:<root>:<i>` over exactly the
   objects of this link, mounted at `/objs/<group>/<unit>.o`, with `--section <section>` appended; it writes the one declared `unit` (a new root-relative C or C++ source), which is compiled with the
@@ -199,7 +208,7 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   `link.libs.system` library defines (its `.dynsym` is read); no TEXTREL; a shared object's exported names (those the version script names) are defined and
   global. `link.libs.system`: `[absolute paths of shared libraries of env.json packages]`, mounted as declared inputs at /syslib (their content is in the key). Any file of a package that env.json pins is admitted, the loader `ld-linux-x86-64.so.2` included (libc6): the link stage asks `envcheck.system_lib_errors` (dpkg's file lists under every usrmerge spelling of the path, against the pinned `packages`); a path no pinned package owns is a red `ld:<root>` stage naming it.
   **Static undefined set.** A red link record (`failed_units[].undefined`, `link_undefined`) carries every unique undefined symbol with all its referencing objects (`<root>:<unit>`), computed by `undefset.closure` from symbol tables, never from ld's text: strong references of the product objects, the start/end files and the archive members the pull-in fixpoint takes, minus names defined by a linked object, by a declared system library's .dynsym or the declared loader's set, or assigned by the link script. A weak reference counts only from a product object (a startfile's or runtime file's weak undefined is the compiler's runtime). ld's status decides the exit; if the set is empty and ld failed, the record carries the finding `static closure disagrees with ld`. The names the pinned ld defines itself (`_GLOBAL_OFFSET_TABLE_`, `_DYNAMIC`, `__bss_start`...) are facts read from a keyed reference link (stage `ldref:<root>`: the same ld, flags, script, inputs and libraries with `--unresolved-symbols=ignore-all`): the names its output defines that no start file or library member defines; with the script's own assignments they are the linker-defined set. A failed reference link leaves the set to the script and the record says so. Gate guestlink also reds a derived start/end file outside the pinned runtime external, or outside the multilib the semantic flags select.
-  **The image entry (`link.entry`).** The entry of a guest image is declared once, by its root: `link.entry` is a symbol name (a C identifier other than `__fnvnx_image_entry`), required of every guest pie root and red on a host root. The ld stage passes `--defsym=__fnvnx_image_entry=<entry>`; the runtime (rt/guest, `__fnvnx_guest_entry`) calls `__fnvnx_image_entry` once its start-up is done and names no entry of any image. `ldcheck` applies the entry rule below to it as well (`entry-none:<entry>` / `entry-duplicate:<entry> <- objects`: exactly one product object defines it, a definition only in a library does not count), and the static undefined set counts `__fnvnx_image_entry` as assigned by the link. The product ELF root declares `main` (rt/guest_main defines it); a test image declares its own entry symbol, which no product root defines, so it does not link rt/guest_main and a test image that defines `main` is a double of the product root's symbol (red by the doubles check, with no exception).
+  **The image entry (`link.entry`).** The entry of a guest image is declared once, by its root: `link.entry` is a symbol name (a C identifier other than `__fnvnx_image_entry`), required of every guest pie root and red on a host root. The ld stage passes `--defsym=__fnvnx_image_entry=<entry>` and `-u <entry>`; crt0 (rt/guest) branches to `__fnvnx_image_entry` and names no entry of any image. The product image's entry is the runtime's `__fnvnx_guest_entry`, which calls `main` once its start-up is done. `ldcheck` applies the entry rule below to it as well (`entry-none:<entry>` / `entry-duplicate:<entry> <- objects`: exactly one product object defines it, a definition only in a library does not count), and the static undefined set counts `__fnvnx_image_entry` as assigned by the link. The product ELF root declares `__fnvnx_guest_entry` (rt/guest); `main` is rt/guest_main's; a test image declares its own entry symbol, which no product root defines, so it does not link rt/guest_main and a test image that defines `main` is a double of the product root's symbol (red by the doubles check, with no exception).
   **One entry (ldcheck).** The entry symbol of a link is `ENTRY(sym)` of its script, else `_start`; exactly one object of the product's roots defines it (`entry-none:<sym>` when none does, a definition only in a startfile or library included; `entry-duplicate:<sym> <- objects` when several do). For the guest profile, when ENTRY is not `_start` the startfile that defines `_start` (the runtime's crt0.o, whose ABS32 relocations in .text fail `-z text`) is the runtime's own process start: the derivation excludes it (`recipe.entry_object`), so link/guest.json lists no crt0.
   **Host exe: start files from the driver.** For `kind exe` the link takes its start files (crt1/Scrt1, crti, crtbegin), end files (crtend, crtn) and the dynamic linker from the recipe's own pinned driver, not from the recipe: stage `drv:<root>` runs `<driver> -pie -###` on a one-line file, with the `.o` files of the driver's own library search directories as declared inputs; the link line it prints gives the `.o` files before the first `-l` (start), after the last (end) and `-dynamic-linker`. Each file must belong to a package env.json pins (`system_lib_errors`). The link stage mounts those files and uses them; a recipe that names `libs.startfiles/endfiles/dirs/names/external` for an exe is red, and `link.flags` carries emulation options only, so no `-e`, `-dynamic-linker` or `-nostartfiles`. The output has the exec bit. Weak undefined, host and guest alike (ruling A): a weak undefined reference is accepted iff no product-root object makes it: one that only a startfile or runtime file of the pinned toolchain carries (`__gmon_start__`, `__cxa_finalize`, `_ITM_*`: the compiler's runtime, value 0 by the gABI) is accepted; one a product object references and nothing defines is red (`weak-undefined:<name> <- <objects>`).
   `link.loader` (kind shared only): the admitted root (product or test, with a recipe, the same target) of the image that loads this one. ldcheck then accepts
@@ -220,7 +229,13 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
 
   **One recipe per target.** A root whose units serve both targets (the console backend on the guest, the host's gl4 calling the same translator)
   names a recipe per target in admit.json: `"recipe": {"guest": PATH, "host": PATH}` with `"target"` the base's (a plain string is the root's single
-  target, as before). The units are the same for every target; compiler, flags and plugins come from each target's recipe. It is one mechanism with
+  target, as before). The units are the same for every target; compiler, flags and plugins come from each target's recipe.
+  **A per-target recipe holds only what depends on the target:** compiler (or profile), flags, plugins, link, its own `external` toolchain, and `units` or `include` only
+  when they really differ from the base. `generated`, `run`, `uses` and `outputs` live once, in the base recipe, and every target reads them from there: generated
+  and run stages run on the host whatever the target, so they are target-independent by construction. `units` and `include` are inherited; a per-target value equal to
+  the base's is a redundant copy and red, and so is `generated`, `run`, `uses` or `outputs` in a per-target recipe (`recipe.per_target_errors`). The effective recipe
+  of `root@OTHER` is `recipe.inherit(per-target, base)`: the base's stages, outputs, units, include and the externals the per-target recipe does not name, under the
+  per-target fields; an `external` name declared by both with different content is red. `tests/test_pertarget.py`. It is one mechanism with
   `variants`: `recipe.norm_entry` parses the dict to the string spelling plus `variants: {OTHER: {"target": OTHER, "recipe": PATH}}`, and that
   spelling may be written in admit.json directly (it parses to the same structure). `entry_of` resolves the effective target and recipe path; the
   pair `root@OTHER` is built, keyed (the variant name, `FNVNX_TARGET`, its own compiler and flags) and gated separately in `GATE_CACHE`. A per-target
@@ -264,7 +279,7 @@ Readers of the record: gate_tlsmodel (the relocations of the linked ELF), contra
   `{stage, path}`, read by resolve_input) at `/in/1`, `/in/2`, ... in list order; the union of the installed files of the declared debs at `/deb/<absolute path>` (`base-files`, the machine's root layout, is implicit in every run stage; two debs shipping one path with different content are red); its `/out`.
   The root is read-only, `/tmp` and `/work` are not writable. `debs` are names of `env.json` `debs.packages`; an undeclared name is red (check).
 - An artifact with a PT_INTERP is started through the file at that path inside a declared deb (`/deb/<name>/<PT_INTERP>`, the deb's own symlinks
-  followed across the union of the declared debs by `deb_resolve`: the usr-merge links are a fact of the declared system, shipped by `base-files`, so a run stage lists `base-files` in `debs`; without it a PT_INTERP such as `/lib64/ld-linux-x86-64.so.2` is red), with `--library-path` over the declared debs'
+  followed across the union of the declared debs by `deb_resolve`: the usr-merge links are a fact of the declared system, shipped by `base-files`, so `base-files` (envcheck.RUN_LAYOUT_DEB, the machine's root layout) joins the debs of every run step automatically, never listed (a recipe that lists it is red); a PT_INTERP such as `/lib64/ld-linux-x86-64.so.2` resolves through it), with `--library-path` over the declared debs'
   `lib/x86_64-linux-gnu` and `usr/lib/x86_64-linux-gnu`. A PT_INTERP that the declared debs do not provide is red; no loader path is hard-coded.
 - `"host_cpu": "cpuref"` (optional): the pin `verify/cpuref.json` {vendor_id, family, model, stepping, microcode, model_name} (the /proc/cpuinfo fields,
   ints as numbers; a null value means the field is ABSENT from /proc/cpuinfo (a VM has no microcode line), never a wildcard) is in the stage key. Before a stage that is not a cache hit runs, every processor of /proc/cpuinfo must equal the pin, else the stage
@@ -273,19 +288,28 @@ Readers of the record: gate_tlsmodel (the relocations of the linked ELF), contra
 - `outputs` are root-relative declared paths, stored in the store and copied into the root like generated outputs (they may be units, headers,
   constants ...). A nonzero exit, an undeclared output and a missing declared output are red, naming `run:<root>:<name>`.
 - A `run` stage is not a compile: toolflags does not judge it (its argv[0] is the artifact, never a compiler).
+- Generated-only roots (`recipe.generated_only`): a root with `generated` or `run` steps and none of `flags`, `include`, `units`, `link`, `profile`, `variants` has no unit. It may write
+  `plugins` and `compiler` only for its run steps to use: a plugin is declared only when some run step takes it as its `{"plugin": NAME}` input (the built `.so` is then a stage input of that
+  step, so its content is in the step's key), and the `compiler` is named only to build those plugins (the plugin stage runs against it, so the compiler's content is in each plugin's key and
+  through it in the steps') or because a step takes it as an `{"external": NAME}` input. An unused plugin (`gonly:unused-plugin:<name>`) or compiler (`gonly:unused-compiler`) is red, as an unused
+  import declaration is. A root with no `compiler` of its own gets the host profile's, never run. Tests: `tests/test_runinsrc.py`.
+- A C/C++/asm file of the root that is a declared path input of one of its `run` steps (the file, or a directory holding it) is that step's input, not a unit: mounted at `/in/N`,
+  its content in the step's key (`recipe.run_input_sources`; `all_units_of` leaves it out). Every other source of the root is a unit under the existing rules (`cxx_origin`),
+  and in a generated-only root it is red: a source is a declared run input or a unit, nothing else. Tests: `tests/test_runinsrc.py` (the rule), `tests/test_run.py` family (builds).
 
 ### Tool steps (`exec`)
 
-`{"name", "exec", "args", "inputs", "debs", "outputs", ["dirs", "scratch", "timeout_s", "host_cpu"]}` is a `run` step with `exec` (an absolute path of a program of the
-declared debs) in place of `artifact`: the way to run a build tool chain (bash, make, gcc, tar) hermetically, for example the compiler stages.
+`{"name", "exec", "args", "inputs", "debs", "outputs", ["dirs", "scratch", "env", "host_cpu"]}` is a `run` step with `exec` (an absolute path of a program of the
+declared debs, or a file of an external / a built root, see "A tool that is not a deb binary") in place of `artifact`: the way to run a build tool chain (bash, make, gcc, tar) hermetically, for example the compiler stages.
 - The stage's root is the declared system: the union of the installed files of `debs` (two debs that ship one path with different content are red), each top-level
   directory mounted at its own path (`/usr`, `/etc`, `/var`, ...) as a read-only input, each top-level symlink (base-files' `/bin`, `/lib`, `/lib64`, `/sbin`) a
   sandbox link. So the kernel starts dynamic programs through their own PT_INTERP, and a program runs its children by PATH (`/usr/bin:/bin`). The trees are stage inputs: the key holds their
   content, not the package version (envcheck pins the packages to the machine).
+- `debs` is a list of env.json package names, `{"closure": [TOPS]}`, or `{"profile": NAME}`: NAME is a key of env.json `debs.profiles` (`{name: [top package names]}`, one fact in one file), resolved through the same Depends closure as `closure`, so two roots that name one profile have the same debs and the same stage content. An unknown profile is red.
 - `inputs` are at `/in/1`, `/in/2`, ... in list order, as for an artifact step; a ref `{"stage": "<this root>:gen:I" | "<this root>:run:NAME", "path": P}` is a file or
   directory output of an earlier step of this root (a red producer blocks the step).
 - `dirs` are directory outputs (see "Directory outputs"); `scratch` lists absolute paths of writable tmpfs directories (a build works out of tree there; nothing survives,
-  they are no outputs; in the key); `timeout_s` (default 7200) kills the step, as a red `run:<root>:<name>`.
+  they are no outputs; in the key). `timeout_s` is red at check time: a time limit would decide red or green, so a step's work is bounded by its `args`; the sandbox's own 7200 s kill (outside the key) stays as a safety net.
 - The job count is the environment variable `JOBS` of the step (the build's job count). It and the timeout are outside the key (sandbox `unkeyed`): they change how long a step
   takes, not what it computes. A step whose output depended on JOBS would be a non-deterministic build, and the determinism gate reds it.
 - An input `{"plugin": NAME}` (a name in the root's `plugins`) is the stage's `/out` tree of that plugin (`NAME.so`), built by the plugin stage against the root's `compiler`
@@ -368,10 +392,43 @@ consumers: a later step's `inputs` ref `{"stage": "<root>:gen:I", "path": DIR}` 
 root reads it through `uses`. A directory output does not overlap another output or a tracked file. A stage whose stage-ref input is an output of a
 red generator is blocked by it (never run on a missing path). Tests: `tests/test_genchain.py` (a 3-stage chain, unmounted paths fail, the re-key rule).
 
+### Derived forms of a run step (`debs.closure`, `{"plugins": "root"}`)
+
+Two sets are never written twice (they are derived once from their source):
+
+- `"debs": {"closure": [TOP, ...]}`: TOP are the packages of the programs the step runs; the step's debs are TOP and their Pre-Depends/Depends closure on the declared machine, `envcheck.dep_closure`, the rule that defines the declared package set itself (`debs.packages` is checked against it). The result is sorted, every deb's sha256 is in the stage key as before. A top that env.json does not declare is red in `check`; a top that is not installed on the declared machine is red in the build. A list of names is still accepted for a step whose few debs are the whole set.
+- `{"plugins": "root"}` as an input: one `{"plugin": NAME}` per plugin of the root's `plugins`, in declaration order (the order is written once). Red when the root declares no plugins or when it is written twice.
+
+`recipe.expand_run` is the one reader of the expanded steps (`check` after the form check, the build).
+
+### Generator tool reads (`gen:file-escape`)
+
+`recipe check` is red with `gen:file-escape:<root>:gen:<I>:<FILE>:<LINE>:<PATH>` when a generator tool, or a module of its import closure, reads a file by a path
+built from `__file__`, `__path__` or `sys.argv[0]` that leaves the tree the stage mounts the file from (a `..` above the tree), or that the rule cannot decide (a
+non-constant part). A resolved file inside the mounted tree and a read through `require_mounted` are green. Data of another root comes only through a
+declared `uses` input, passed to the tool as an argument (as `--lib` is) or read through `require_mounted`. One implementation: `pathflow.escapes` (the abspath gate's
+`abspath:escape` calls the same function). Tests: `tests/test_genescape.py`, `tests/test_gate_abspath.py`.
+
+### Declared imports of a generator's tool (`imports`)
+
+A generator tool may import modules of other admitted roots only through the `imports` of its own root's admit.json row (`{"imports": [root, ...]}`, the form `manifest` uses).
+`gen:foreign-import` accepts an import that resolves inside a tree of a declared import root. **One module path.** A declared root R is importable under exactly one module path: its path relative to `ports/fnv-nx` with `/` replaced by `.` (`render/total` -> `render.total`), computed by `gate_admit.import_roots`, the one function that recipe (`foreign_imports`, the mount), `gate_pure` (its `--base` is `ports/fnv-nx`) and the declared-use rule call. The stage mounts R's closure at `/imp/<that relative path>` with `PYTHONPATH=/imp` and nothing else; the packages are namespace packages (PEP 420), no `__init__.py` is invented. The bare name of a module of a declared root (`import x` for `render/total/x.py`) is `gen:foreign-import` with the qualified name as the hint, and so is a bare import of a sibling inside a declared root (use the qualified name or `from . import`). (`gate_abspath` keeps its deliberate superset resolution by path suffix: it only over-approximates the closure it judges.)
+
+The generate stage mounts the tool's own root at `/tool` and, at `/imp`, exactly the files of the declared import roots that the import closure (by `ast`, transitively) reaches plus the data those modules read (below), and nothing else of those roots;
+`PYTHONPATH` lists their directories. The stage key therefore covers only the closure: an edit to another file of an import root leaves the key unchanged. Red:
+an import of a root that is not declared (`gen:foreign-import`); a declaration that no module of the declaring root imports from (`gen:unused-import:<root>:<import root>`; the rule is per declaring root, never per consuming recipe, so a root with two tools of which one imports the declared root is green for both consumers; the stage of a tool whose closure does not reach the declared root simply mounts none of it); a
+read by a path of its own location (`__file__`) in a module of an import root that leaves that root's tree or that the rule cannot decide. A data file such a module reads by a
+constant path of its own location inside its root's tree (decided by `pathflow`, a directory: every tracked file under it) is mounted with the closure and so is in the key. Functions: `recipe.import_trees`, `recipe.import_mount`. Tests: `tests/test_genimports.py`.
+
 ### Generated `sources`
 `sources: PATH` (a path in generated[].outputs of the root) names a file a generate stage writes, one `<external>:<path>` line per unit; `.` names the root
 itself (a tracked file of it). Each listed file of a declared external is copied into the unit view as the unit `<external>/<path>`, so its content is in
-the unit's keys; the units are built with the root's own. Red (stage `sources:<root>`): a line that is not `<external>:<path>`, an external the recipe does
+the unit's keys; the units are built with the root's own. A line `<root>:<path>` whose first part is an ADMITTED ROOT (a path like `ports/fnv-nx/lift/rt`) names a git-tracked
+file of that root (a file, never a directory or a glob; `..` is red): it is copied into the unit view as the unit `<root with / as __>/<path>`, so its content is in the unit's
+keys exactly as an external's file is. The root must also be listed in the root's `uses` (`{root, output}`), so the stage graph shows the edge and the `uses` cycle check applies;
+the file stays owned by its own root (onedef and objstub judge each product separately, as for externals). Red (stage `sources:<root>`) on a root line: the root is not
+admitted, the file is not tracked, the path leaves the root, the root is not in `uses`. Test: `tests/test_rootsrc.py` (the rule), `tests/test_uses.py` (builds).
+Red (stage `sources:<root>`): a line that is not `<external>:<path>`, an external the recipe does
 not declare, a path that is no file inside the external (`..` included), a `.` path the root does not track. A changed list adds only the new units:
 the other units keep their objects and compile-stage keys (their preprocessing keys follow the view's file names, the compile keys do not).
 
@@ -444,7 +501,7 @@ as `-z X` or `-zX`, inside `-Wl,a,b` or after `-Xlinker`, or when it is an `@fil
 
 ## External inputs
 Real sources and toolchains that are not Debian packages of env.json live in the private `fnv-nx-build` repository (a mirror branch). An external
-is fetched ONLY by exact `commit` (`git fetch --depth 1 $ARTIFACTS_URL <commit>`, default https://github.com/toadharvard/fnv-nx-build) into
+is fetched ONLY by exact `commit` (`git fetch --depth 1 <artifacts URL> <commit>`; the URL is the argument `--artifacts` of recipe.py / l1.py, recorded as `<ext cache>/artifacts.url` (recipe.artifacts_url), else the pinned repository of env.json; never the process environment) into
 `<GATE_CACHE>/external/<commit>`, checked out, ingested into the CAS, and its tree hash must equal `tree_sha256` (get it with
 `cas.py ingest`). A mismatch or an unreachable commit makes the build red with stage `external:<name>`. The tree is a declared input at `at`
 of every stage, so a changed mirror changes every stage key. `ref` is documentation only; the commit decides. Validation: `repo` is `fnv-nx-build`,
@@ -454,6 +511,38 @@ cc1, as, ld relative to itself). It is declared `HOST@AT` to `runtime.py tool`: 
 loader resolves it INSIDE the sandbox (paths under `at` are files of the checked-out tree, other paths are host libraries that become declared
 inputs); a library that cannot be resolved is a red build naming the object and the name. `include` may name a directory inside an external:
 it is passed as `-I<that path>` (the external is a declared input of every stage, so keys stay content-addressed).
+
+## A tool that is not a deb binary (`exec` forms, `env`)
+
+`exec` is one of:
+- an absolute path of a program of the declared debs (as before);
+- `{"external": NAME, "path": FILE}`: a file of a pinned external of this recipe (resolved by `resolve_input`: tree_sha256 checked, a path outside the tree red). The file's content is a stage
+  input, so it is in the key (another file's commit does not change it), mounted executable at `/exec/<basename>`, and run as `/exec/<basename>`;
+- `{"root": R, "output": NAME}`: a published file output of a root this recipe `uses` (so R is a dependency); resolved like the `uses` mount and mounted at `/exec/<NAME>`.
+  A binary built outside the recipe machinery (a farm-built `tools/*` branch) is not accepted here: only an external file whose tree is pinned, or a root's own output.
+
+Either file form may carry `libs`: a list of declared lib directories, each `{"external": NAME, "path": DIR}` or `{"root": R, "output": NAME}` (a directory output of a root this recipe `uses`),
+mounted at `/exec/lib/<i>` with `LD_LIBRARY_PATH` naming them (in the key). A `DT_NEEDED` name that no deb provides resolves by file name in those directories, and the library found there is read in
+turn (its own `DT_NEEDED`, transitively). This is how a built tool (isla) gets a library from a declared input (the z3 wheel's `lib`) without a second build of that library.
+
+Static resolution (no `ldd`, nothing is executed): the ELF64's program headers and dynamic section are read. Its `PT_INTERP` and every `DT_NEEDED` name must be provided by the root layout of the
+step's `debs` (the deb's own symlinks followed; the loader's default directories and the file's absolute RPATH/RUNPATH entries are searched; `$ORIGIN` finds nothing, one file is mounted).
+Otherwise the stage is red `exec-unresolved:<library>` (or `exec-unresolved:interp:<path>`). A static ELF or a script has nothing to resolve. A further tool the program runs (z3, a compiler)
+is a declared input passed by path in `args`; nothing is found through `PATH` outside the declared debs.
+
+`env` (new, tool steps only): a map of constant strings added to the step's environment (in the key). Names are plain upper-case identifiers, never `PATH`, `TZ`, `LC_ALL`, `SOURCE_DATE_EPOCH`,
+`FNVNX_DEBS` or `JOBS`; a value that is a path must lie under one of the step's `scratch` directories (for example `CARGO_HOME=/scratch/cargo`). There is no network: the sandbox runs
+in its own network namespace with no interface (already so for every step), so a tool that wants to fetch fails instead of reading the world; vendored sources are declared inputs.
+Tests: `tests/test_toolexec.py` (ELF resolution and the check forms; the sandboxed green run of an external tool is the `test_toolext.py` pattern, not run on a host without busybox).
+
+## Single file of an external (a document through a tool step)
+A run step's `inputs` entry `{"external": NAME, "path": FILE}` mounts ONE file of a declared external at `/in/N`. The external is pinned as above, by
+`{commit, tree_sha256}` over its whole checkout; `resolve_input` checks that hash, then reads FILE from the checked-out tree (red: the file is not in
+the tree, the path is absolute, has `..` or leaves the tree through a link, the external is not declared, `tree_sha256` is not the checkout's). The step
+key holds the file's content, not the tree's, so a commit that changes other files of the external does not re-key the step.
+Pattern for a document turned into data (the Intel SDM): the external is `tools/intel-sdm` (a pinned PDF); the step is `exec` of `/usr/bin/pdftotext`
+from the pinned deb `poppler-utils` (with its dependency closure in `env.json` `debs.packages`), `args` `["-layout", "/in/1", "/out/sdm.txt"]`, `outputs`
+`["sdm.txt"]`; a later generator or step reads the text through its stage ref. The binary's content is in the key through `debs`. Test: `tests/test_toolext.py`.
 
 ## Result (`objects.json`, "fnvnx-objects/1")
 `objects` [{unit, object, sha256, os_layer}] (product units), `tests`, `elf` {path, sha256}|null, `constants`, `contract_names` (paths of the copies or null),
@@ -495,7 +584,7 @@ A cold build of a large root is split over farms by one rule, with no second bui
   key is the PP stage key on the whole declared trees (`unitstage.Build.first_key`; a `.s` unit: its one stage), computed before anything runs, so every
   shard of one checkout agrees. The recipe asserts from the unit list that the shards are disjoint and together the unit set (`shard_partition`).
   All stages of a unit run in its shard. Root-level stages (tests, link, link tables, gates) do not run in a shard build; its `objects.json` has `shard`.
-- `recipe store-merge SRC [--store DST]` (DST defaults to `$GATE_CACHE/store`) imports the objects, trees, stage documents and key records of the store SRC
+- `recipe store-merge SRC --store DST` (--store is required) imports the objects, trees, stage documents and key records of the store SRC
   by content. A name in both must hold the same bytes, else red `store-merge: key <k> differs` and DST is unchanged. It is the only import path.
 - The link is the normal `recipe build --root R` on the merged store: every unit is a hit; a missing unit builds.
 Tests: `tests/test_shard.py` (partition, merge, forged record, no compiler) and the `shard_merge` scenario of `tests/test_recipe.py` (toy root of 10 units).

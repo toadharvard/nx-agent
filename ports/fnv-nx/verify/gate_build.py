@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gate "build" (fnvnx-gate/1): every product root's recipe (build.json, see RECIPE.md) builds, all in the sandbox.
-    python3 -I gate_build.py        cwd = checkout root (a git worktree), env GATE_OUT, optional GATE_CACHE, optional GATE_COMMIT
+    python3 -I gate_build.py        cwd = checkout root (a git worktree), env GATE_OUT, optional GATE_CACHE
 Universe: every unit of every product root of verify/admit.json (tracked sources + generated sources, recipe.units_of) and the ELF
 of a root with a link. Certified: units whose object was built (+ the ELF). uncertified: repo-relative unit paths (<= 50, sorted).
 No product root: universe 0, green. A recipe that fails validation certifies nothing (units = tracked source files).
@@ -63,8 +63,11 @@ def quantify(repo, judge_root):
 
 
 def tree_of(repo="."):
-    return subprocess.run(["git", "-C", repo, "rev-parse", os.environ.get("GATE_COMMIT", "HEAD") + "^{tree}"], capture_output=True,
-                          text=True, check=True).stdout.strip()
+    """The tree of the commit under test: a gate runs in the clean worktree of that commit (verdict.py), so it is the checkout's own HEAD. No environment input."""
+    r = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD^{tree}"], capture_output=True, text=True)
+    if r.returncode:
+        raise ValueError("%s is not a checkout of a commit (git rev-parse HEAD^{tree}: %s)" % (repo, r.stderr.strip()[-200:]))   # a named input error, never a crash
+    return r.stdout.strip()
 
 
 _PRIVATE = []   # out dirs of a red build: private to this process (never published), removed at exit
@@ -94,7 +97,7 @@ def ensure(root, cache, repo="."):
     os.makedirs(os.path.dirname(final), exist_ok=True)
     tmp = "%s.tmp-%d-%s" % (final, os.getpid(), os.urandom(4).hex())
     try:
-        res = recipe.build(repo, root, os.path.join(cache, "store"), tmp, ext=os.path.join(cache, "external"))
+        res = recipe.build(repo, root, os.path.join(cache, "store"), tmp, ext=recipe.ext_dir(cache))
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)
         raise
@@ -148,6 +151,23 @@ def file_sha(p):
     return h.hexdigest()
 
 
+def published_output(cache, root, name, repo="."):
+    """-> (path, sha256) of the declared output NAME of ROOT as published in GATE_CACHE (`outputs` of the root's objects.json, written by recipe.build: a
+    file or a directory of <root>/outputs). It never builds: a producer that is not published, or does not declare NAME, or whose file is gone, is
+    LookupError with the reason, and every reader of a root's output is red on it (an input that is absent is never skipped)."""
+    base = os.path.join(cache, "objects", tree_of(repo), root.replace("/", "__"))
+    try:
+        with open(os.path.join(base, "objects.json")) as f:
+            outs = json.load(f)["outputs"]
+        ent = outs[name]
+        path, sha = ent["path"], ent["sha256"]
+    except (OSError, ValueError, KeyError, TypeError):
+        raise LookupError("output %s of %s is not published in GATE_CACHE (%s)" % (name, root, base))
+    if not os.path.exists(path):
+        raise LookupError("output %s of %s: the published path %s is gone" % (name, root, path))
+    return path, sha
+
+
 def unitless(root, cache, repo="."):
     """True iff ROOT's green build has no unit and no link output: a header-only root (RECIPE.md "Header-only roots"). It holds no code, so by
     construction it references no import and reads no registry key; the imports and machine gates count 0 items for it and need no declaration.
@@ -173,7 +193,7 @@ def main():
             try:
                 res, out = ensure(root, cache, repo)
             except recipe.RecipeError as e:
-                items += [root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files) if isinstance(rec, dict)]
+                items += [root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files, roots, repo) if isinstance(rec, dict)]
                 why.append("%s: invalid recipe: %s" % (root, "; ".join(e.errors)[:300]))
                 continue
             items += ids(root, res, rec)

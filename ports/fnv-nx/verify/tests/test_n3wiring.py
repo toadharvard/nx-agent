@@ -33,6 +33,8 @@ import gate_build  # noqa: E402
 import gate_contract as gc  # noqa: E402
 import gate_l2native as L  # noqa: E402
 import gate_names  # noqa: E402
+import l2sections  # noqa: E402
+SYMPAIR_KINDS = l2sections.load_kinds(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'toolchain', 'names', 'sympair_kinds.inc'))
 import gate_r7  # noqa: E402
 import l2sections  # noqa: E402
 import store  # noqa: E402
@@ -57,7 +59,7 @@ def chain(tmp, a_obj, b_obj, tag, extra=None):
         ob["src_extra.cc.o"] = extra       # real N3/sympair rows, but the object is in no unit of units.json
     obj = {}
     for name, path in ob.items():
-        for kind, rows in l2sections.read(path).items():
+        for kind, rows in l2sections.read(path, SYMPAIR_KINDS).items():
             obj[(name, kind)] = rows
     store.save(w + "/obj.json", "obj", obj)
     fn = {0x401000: dict(unit=0, sym=G, size=5, n1=True, why="", relocs=[]), 0x401010: dict(unit=1, sym=H, size=5, n1=True, why="", relocs=[])}
@@ -90,7 +92,7 @@ def main():
     ob = {o["unit"]: o["object"] for o in res["objects"]}
     tmp = os.path.join(BASE, "n3work")
     os.makedirs(tmp)
-    a_n3 = l2sections.read(ob["a.cc"])["n3"]
+    a_n3 = l2sections.read(ob["a.cc"], SYMPAIR_KINDS)["n3"]
     check("the real object carries an N3 row for g", any(r[0] == tl.G_SYM and r[1] == "ok" for r in a_n3), a_n3)
     rows, out = chain(tmp, ob["a.cc"], ob["b.cc"], "good")
     check("N1 + N3 ok: g and h are NATIVE in bodysel.tsv", rows.get(0x401000, ("",))[0] == "native" and rows.get(0x401010, ("",))[0] == "native", (rows, out))
@@ -105,7 +107,7 @@ def main():
 
     def judge(a_obj, verd):
         objects = [{"unit": "game/a.cc", "object": a_obj}, {"unit": "game/b.cc", "object": ob["b.cc"]}]
-        n = L.judge_files("game", objects, cld, units, amap, verd, gate_names.rows, lambda r, nt: L.select(r, lambda x: x[0], lambda x: x[1], nt),
+        n = L.judge_files("game", objects, cld, units, amap, verd, (lambda g_, c_, u_: gate_names.rows(g_, c_, SYMPAIR_KINDS, u_)), lambda r, nt: L.select(r, lambda x: x[0], lambda x: x[1], nt),
                           lambda x: not x[3], gate_names.row_id)
         r = L.judge_files("game", objects, cld, units, amap, verd, gate_r7.rows, lambda r_, nt: L.select_units(r_, lambda x: x[0], nt),
                           lambda x: x[2] == "equal", gate_r7.row_id)
@@ -117,7 +119,7 @@ def main():
     m = tl.mutate(ob["a.cc"], tmp + "/a_n3.o", (tl.G_SYM + "\tok\t").encode(), (tl.G_SYM + "\tox\t").encode())
     rows2, out2 = chain(tmp, m, ob["b.cc"], "bad")
     check("N3 violation (mutated verdict): g is LIFTED with the N3 reason", rows2.get(0x401000, ("",))[0] == "lifted" and "N3" in rows2[0x401000][1], (rows2, out2))
-    inl = any(tl.G_SYM in r[2] for r in l2sections.read(ob["b.cc"])["n3"])
+    inl = any(tl.G_SYM in r[2] for r in l2sections.read(ob["b.cc"], SYMPAIR_KINDS)["n3"])
     check("h is LIFTED iff it inlined g (N4)", (rows2.get(0x401010, ("",))[0] == "lifted") == inl, (rows2, inl))
     verd2 = {a: v for a, (v, _) in rows2.items()}
     n2, r2 = judge(m, verd2)
@@ -130,7 +132,7 @@ def main():
     check("N3 violation in every body: no NATIVE row", all(v[0] == "lifted" for v in rows3.values()) and len(rows3) == 2, (rows3, out3))
     objects = [{"unit": "game/a.cc", "object": m}, {"unit": "game/b.cc", "object": m2}]
     v3 = {a: v for a, (v, _) in rows3.items()}
-    n3_ = L.judge_files("game", objects, cld, units, amap, v3, gate_names.rows, lambda r_, nt: L.select(r_, lambda x: x[0], lambda x: x[1], nt), lambda x: not x[3], gate_names.row_id)
+    n3_ = L.judge_files("game", objects, cld, units, amap, v3, (lambda g_, c_, u_: gate_names.rows(g_, c_, SYMPAIR_KINDS, u_)), lambda r_, nt: L.select(r_, lambda x: x[0], lambda x: x[1], nt), lambda x: not x[3], gate_names.row_id)
     r3_ = L.judge_files("game", objects, cld, units, amap, v3, gate_r7.rows, lambda r_, nt: L.select_units(r_, lambda x: x[0], nt), lambda x: x[2] == "equal", gate_r7.row_id)
     check("namegate and r7 universe 0 when every body is LIFTED", n3_[0] == 0 and r3_[0] == 0, (n3_, r3_))
     # an object that carries N3 rows but is in no unit of units.json has no exe function: no error, no NATIVE row for it

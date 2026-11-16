@@ -1,6 +1,5 @@
 """Tests of proof/formgate.py on the real declared inputs (no doubles): formgate_inputs.json, the real certs external of fnv-nx-build fetched by
-recipe.fetch_externals (exact commit, tree_sha256 checked), the real admit.json of this tree. Needs the network (ARTIFACTS_URL or the default
-fnv-nx-build). Cases that need a lifted root's pack, or a broken pack, wait for a lifted product root and for root-level fixtures (L1)."""
+recipe.fetch_externals (exact commit, tree_sha256 checked), the real admit.json of this tree. Needs the network (the pinned fnv-nx-build). Cases that need a lifted root's pack, or a broken pack, wait for a lifted product root and for root-level fixtures (L1)."""
 import os
 import shutil
 import sys
