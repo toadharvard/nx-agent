@@ -2028,3 +2028,14 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - L3b: the rcp host root on 82ff5eb86; delete the gcc calls.
 - open: the tests/bootguest/build.json admit red is not examined yet.
 - bottleneck: cand3b (w15).
+
+## 2026-11-16: w28 admit fixes (head 021845831)
+
+- done (w28):
+  - 1b7fdb441: recipe.missing_recipes. `recipe check` is red for an admit row whose recipe file is not git-tracked (tests/test_missingrecipe.py). The toolchain row is back to class tool, and toolchain-stage1 is removed; both enter with L2's roots.
+  - a27b61b75: removed the orphan tests/bootguest/build.json, which merge 7bbf6025b had taken alone from L4's root. The root enters whole with L4's commit. Admit gate on the w28 tree: 1383/1383.
+  - 021845831: generated-only roots name a plugin only as a run step's {"plugin"} input, and name the compiler only to build those plugins or as an {"external"} step input. An unused one is red (gonly:unused-plugin, gonly:unused-compiler).
+- doing:
+  - L6: re-run sm_link on the w28 head.
+  - L2 w3: mirror the 8 debs into tools/verdict-debs; test_toolstep.
+- bottleneck: cand3b (w15).
