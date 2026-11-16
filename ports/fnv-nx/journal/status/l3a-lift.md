@@ -1400,3 +1400,15 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - rcpgen (L3b farm 4, 8abd1ab02, fresh store): its output is byte-identical to the GENERATED region of lift/rt/rcptab.c. rcptab.c sha256 is d2a3920e…a58f5, equal to the committed file.
 - Red: only lift/rt, contract/facts and lift/disp, on the old K2 pin. L2 was asked to start the farm rebuild.
 - bottleneck: L2's K2 pin; pcsrc red (w7 RULE T).
+
+## 2026-11-16 03:55: one decoder, BADDECODE and SHAPES (w7 30757c325); the K2 measurement pin
+- tools/gapmd.py (capstone plus f_sys.decode_gap) is the one decoder for universe.py and modlift.py.
+- Every image stage outputs baddecode_<img>.tsv and shapes_<img>.tsv. The universes are byte-identical. The EH tables gain the `push` key: 6,239 of 6,239 registrations have a push site.
+- Shape keys: exe 13,532; atimgpud 1,239; binkw32 2,990; gdffalloutnv 898; libvorbis 3,710; libvorbisfile 1,951. The d3dx9 images are pending (farm).
+- Exe baddecode: 6 addresses; 0 in the 5 small images.
+- RULE T measurement over the exe:
+  - jmp operands: 1,297 ld, 87 const global, 25 TOP, 2 arg;
+  - call operands: 36,505 ld, 7,023 const global, 2,301 TOP, 6 arg.
+  - The next rule is scoped to the 13 residue sites. w7 measures their operand classes and the store sets of their globals first.
+- K2: a measurement compiler d1a92e26 (old path) carries ENTRY1-ATOMIC and ORDER-RTLBUILTIN. w8 measures lift/rt, contract/facts and lift/disp on it. The real pin is L2 w3's recipe-path build.
+- bottleneck: L2's recipe-path K2 pin; pcsrc red (RULE T scope).
