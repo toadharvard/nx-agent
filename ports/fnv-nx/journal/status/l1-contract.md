@@ -2375,3 +2375,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Top item for w28: every module-level repo-path constant is a declared file of its module, covering every reference form.
 - bottleneck: the cand3b verdict (farm) and this pathflow fix.
 - w28 35cdcd88f: pathflow counts parameter defaults as reads (6 tests pass); targets.py mounts targets.json, ASSUMPTIONS.json and guest_compiler.json. Handed to L2 for the recipe-path compiler build.
+- The udsail stage (L3a w13) needs z3/capstone, the isla stage binary and scratch together. Ruling: a `run` step with the pinned python runtime mounts python.modules the same way generated steps do, with one function for both. Assigned to w28 after the entry kind.
