@@ -2821,3 +2821,9 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - The lifted_by stage check is one function for check and for resolution.
   - test_resolve_once 12/12. The stage-start count needs the farm env.
 - It goes into the next cand4 head (w15).
+
+### 2026-11-16 08:58Z: include_of/external_of self-declaring (w28-c5 687182c85)
+- include_of and external_of no longer need `uses` or an import. Their edges enter root_edges, so root_reach and the cycle check follow them. 0 cycles over all admitted roots.
+- Found by L3a: render/total/d3d9total was red on base3 after the imports field was deleted.
+- w28-c5 head 687182c85 (resolve-once 296144c9a below it). The next cand4 head (w15) takes it.
+- bottleneck: the cand4 remaining reds (w15) and one farm verdict; L2 path (a) plugin pin; L3a facts2 universe pin.
