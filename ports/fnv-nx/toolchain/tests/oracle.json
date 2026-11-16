@@ -1,0 +1,177 @@
+{
+ "format": "fnvnx-oracle/1",
+ "tests": {
+  "test_cc1.py": {
+   "references": [
+    {
+     "anchor": "### Gate rule: every guest C and C++ unit is compiled with the full plugin set",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/toolchain/names/fnvnx_names.cc",
+    "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc",
+    "ports/fnv-nx/toolchain/order/fnvnx_order.cc"
+   ]
+  },
+  "test_dispatch.py": {
+   "references": [
+    {
+     "anchor": "## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc"
+   ]
+  },
+  "test_dispatch_defdisp_ns.py": {
+   "references": [
+    {
+     "anchor": "## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc",
+    "ports/fnv-nx/lift/tools/exitgen.py"
+   ]
+  },
+  "test_dispatch_entry.py": {
+   "references": [
+    {
+     "anchor": "## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc"
+   ]
+  },
+  "test_exitgen_defdisp.py": {
+   "references": [
+    {
+     "anchor": "## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/tools/exitgen.py"
+   ]
+  },
+  "test_frame.py": {
+   "references": [
+    {
+     "anchor": "# fnvnx_order: what protects an ordered access in the RTL passes",
+     "kind": "spec",
+     "path": "ports/fnv-nx/toolchain/order/README.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/toolchain/order/fnvnx_order.cc",
+    "ports/fnv-nx/toolchain/order/fnvnx_frame.h"
+   ]
+  },
+  "test_ftoi.py": {
+   "references": [
+    {
+     "anchor": "## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc"
+   ]
+  },
+  "test_ftoi_sse2neon.py": {
+   "references": [
+    {
+     "anchor": "## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc"
+   ]
+  },
+  "test_layout.py": {
+   "references": [
+    {
+     "anchor": "## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/toolchain/layout/fnvnx_layout.cc"
+   ]
+  },
+  "test_ldbl.py": {
+   "references": [
+    {
+     "anchor": "## Types (14)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/toolchain/msvcmodel/msvcmodel.patch"
+   ]
+  },
+  "test_names.py": {
+   "references": [
+    {
+     "anchor": "## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/toolchain/names/fnvnx_names.cc"
+   ]
+  },
+  "test_odrdef.py": {
+   "references": [
+    {
+     "anchor": "## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/toolchain/names/fnvnx_names.cc"
+   ]
+  },
+  "test_pi.py": {
+   "references": [
+    {
+     "anchor": "## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/toolchain/pi/fnvnx_pi.cc"
+   ]
+  },
+  "test_sdd.py": {
+   "references": [
+    {
+     "anchor": "## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc"
+   ]
+  }
+ }
+}
