@@ -2210,3 +2210,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - Decision: test_recipe is not cut. The farm runs the full verdict, cold then warm, at 68c45b90c (job cand3b-verdict, top priority). That result decides the merge.
 - The 12 GB scratch peak has been asked about, as a fast-build risk.
 - bottleneck: the cand3b farm verdict.
+- Header root rule (to w28):
+  - A class-header root has exactly one implicit output, INCLUDE (its own directory, tree-keyed), reached only through `uses`.
+  - This replaces the split between header_dirs and uses→INCLUDE.
+  - w13 adopts it for contract/include after w28 lands, and deletes contract/build.json and the duplicate admit row.
