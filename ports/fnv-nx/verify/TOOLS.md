@@ -574,7 +574,7 @@ Steps:
  3 icount.py spec: range lifted = section .text.fnvl, class softfloat from the softfloat file (left out when absent)
  4 SD root: a fresh empty card directory (--root); the installed game is mounted in place at the guest's sdmc:/switch/fnv
    (--game, verify/bootpath.py). The game is GAME_DIR, else fetched by farm/gamedata_fetch.sh into $FARM_HOME/game
-   (the exe, INIs, static modules and d3dx9 DLLs; plus every Data item (gamedata/data/* of the artifacts repository: *.bsa, *.esm, Music,
+   (the exe, INIs, static modules and d3dx9 DLLs; plus every Data item that a recipe declares as an external (gamedata/data/* pinned by commit and tree_sha256; one that no recipe declares is red: *.bsa, *.esm, Music,
    Shaders; every part's and every file's sha256 checked by the fetcher), or only the Data items named in BOOT_DATA_ITEMS; `--no-data`
    there means no Data item, a run without the game's archives). FalloutNV.exe must be in it; its sha256 is printed. The fetched
    Data items are recorded in meta.json (data_items; null with GAME_DIR, whose content the job does not know)
