@@ -155,6 +155,13 @@
    "recipe": "ports/fnv-nx/bridgefacts/build.json"
   },
   {
+   "path": "ports/fnv-nx/bridgefacts/com",
+   "class": "tool",
+   "target": "host",
+   "entry": [],
+   "recipe": "ports/fnv-nx/bridgefacts/com/build.json"
+  },
+  {
    "path": "ports/fnv-nx/contract/facts",
    "class": "tool",
    "target": "host",
