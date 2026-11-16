@@ -152,7 +152,8 @@ def main(argv):
         registry = {e["id"]: e["status"] for e in json.load(open(rp))["entries"]} if os.path.exists(rp) else {}
         its, fs = objstub.judge(results, rows, facts, wine, declared, fails, handlers, stats, extconv, (registry, gen_ids), owners)
         items, finds = items + its, finds + fs
-        dit, dfs, dstats = doubles.judge(built)   # no doubles in tests (doubles.py)
+        adm = recipe.load_admit(repo)
+        dit, dfs, dstats = doubles.judge(built, {r for r in built if adm[recipe.split_spec(r)[0]]["class"] == "test"})   # no doubles in tests (doubles.py)
         items, finds = items + dit, finds + dfs
     except (ValueError, KeyError, OSError, recipe.BuildRed) as e:
         why = "input error: %s" % (str(e)[:300] or type(e).__name__)
