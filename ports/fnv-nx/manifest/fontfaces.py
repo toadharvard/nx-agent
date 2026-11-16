@@ -18,8 +18,8 @@ Image set: the root and the dlls of dllkind role `image` (pemanifest.closure); n
 """
 import os, sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import funcfacts, pemanifest, regsites
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.manifest import funcfacts, pemanifest, regsites
 
 FONT_API = {"CreateFontA", "CreateFontW", "CreateFontIndirectA", "CreateFontIndirectW", "CreateFontIndirectExA", "CreateFontIndirectExW",
             "AddFontResourceA", "AddFontResourceW", "AddFontResourceExA", "AddFontResourceExW", "AddFontMemResourceEx",

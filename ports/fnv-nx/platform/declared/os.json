@@ -1,0 +1,17 @@
+{
+ "format": "fnvnx-declared-os/1",
+ "note": "The one record of the declared operating system (CLAUDE.md 'The declared machine'): native 32-bit Windows 7 SP1. Every value is read by tools (declared/gen_osrec.py, declared/gen_x86sys.py), never restated by hand. A WOW64 machine is another record.",
+ "fields": {
+  "major": {"value": 6, "source": "MSDN 'Operating System Version' table (Windows 7 = 6.1) and OSVERSIONINFOEX.dwMajorVersion"},
+  "minor": {"value": 1, "source": "MSDN 'Operating System Version' table (Windows 7 = 6.1) and OSVERSIONINFOEX.dwMinorVersion"},
+  "build": {"value": 7601, "source": "Windows 7 SP1 build number 7601 (winver 6.1.7601.17514), OSVERSIONINFOEX.dwBuildNumber"},
+  "platform_id": {"value": 2, "source": "OSVERSIONINFOEX.dwPlatformId: VER_PLATFORM_WIN32_NT = 2 (winnt.h)"},
+  "csd": {"value": "Service Pack 1", "source": "OSVERSIONINFOEX.szCSDVersion of Windows 7 SP1: 'Service Pack 1'"},
+  "sp_major": {"value": 1, "source": "OSVERSIONINFOEX.wServicePackMajor of Windows 7 SP1"},
+  "sp_minor": {"value": 0, "source": "OSVERSIONINFOEX.wServicePackMinor of Windows 7 SP1"},
+  "product_type": {"value": 1, "source": "OSVERSIONINFOEX.wProductType: VER_NT_WORKSTATION = 1 (winnt.h)"},
+  "suite_mask": {"value": 256, "source": "OSVERSIONINFOEX.wSuiteMask: VER_SUITE_SINGLEUSERTS = 0x100 (winnt.h), the suite of a Windows 7 workstation"},
+  "native_arch": {"value": 0, "source": "SYSTEM_INFO.wProcessorArchitecture: PROCESSOR_ARCHITECTURE_INTEL = 0 (x86), the native processor architecture of the declared machine"},
+  "process_wow64": {"value": 0, "source": "IsWow64Process: FALSE, the process is native 32-bit on a native x86 machine (MSDN IsWow64Process)"}
+ }
+}

@@ -685,21 +685,25 @@ def trap_candidate(ins, a, b, rel, syms, fn_at):
 
 # ---- the per-object analysis (the result schema of objstub.check_obj) ---------------------------------------------------------------------
 
-def check_obj(o, path, terms, os_layer, probe, jsonv, read_cites_fn, assume_id):
+def check_obj(o, path, terms, os_layer, probe, jsonv, read_cites_fn, assume_id, read_consts_fn):
     """-> (items, findings, extra) exactly as objstub.check_obj. O is the objstub.Obj of the ELF64 x86-64 object; JSONV, READ_CITES_FN, ASSUME_ID (ASM-004) are objstub's
     (vjson, read_cites, assume_id): the rest of the result is the same for both ISAs."""
     if probe and (probe.get("kind") == "flag" or probe.get("tables")):
         raise ValueError("objstub: an error_abi flag probe or an instruction-table probe is not implemented for x86-64 objects (%s)" % path)
     items, finds, exit_ok = [], [], set()
     extra = {"reach": [], "wine": [], "wine_id": {}, "wine_nz": {}, "cite_sym": {}, "cite": {}, "terms": [], "term_def": [], "alias": {}, "tb": {}, "globals": [],
-             "dref": [], "nr": {}, "nr_tail": {}, "flag": None, "tabs": {}, "assume": []}
+             "dref": [], "nr": {}, "nr_tail": {}, "flag": None, "tabs": {}, "assume": [], "const": {}}
     unw = {t[1:] for t in terms if t[:1] == "~"}
     stops = frozenset(t for t in terms if t[:1] != "~")
     cites_at, cbad = read_cites_fn(o)
+    consts_at, kbad = read_consts_fn(o)
     extra["terms"], extra["unw"] = sorted(stops), sorted(unw)
     for nm, why in cbad:
         items.append(nm)
         finds.append((nm, "cite-malformed", why, None))
+    for nm, why in kbad:
+        items.append(nm)
+        finds.append((nm, "const-malformed", why, None))
     tid = {i for i, s in enumerate(o.syms) if s[0] in terms and s[4] != 0 and s[0] not in (REACH, ASSUME) + CITE}
     for si, (sname, stype, sflags, soff, ssize, _, _) in enumerate(o.secs):
         if not sflags & 4 or stype != 1:
@@ -723,7 +727,7 @@ def check_obj(o, path, terms, os_layer, probe, jsonv, read_cites_fn, assume_id):
                     extra["tb"][name] = extra["tb"][last[3]]
                 extra["nr"][name] = extra["nr"].get(last[3])
                 extra["nr_tail"][name] = extra["nr_tail"].get(last[3], [])
-                for key in ("cite", "wine_nz", "wine_id", "cite_sym"):
+                for key in ("cite", "wine_nz", "wine_id", "cite_sym", "const"):
                     if last[3] in extra[key]:
                         extra[key][name] = extra[key][last[3]]
                 exit_ok |= {name} if last[3] in exit_ok else set()
@@ -786,6 +790,8 @@ def check_obj(o, path, terms, os_layer, probe, jsonv, read_cites_fn, assume_id):
             elif lk not in ("jmpd", "jmpi", "ret", "trap"):
                 fnd.append((name, "fallthrough", "last instruction %s can run into the next function" % lastm.mn, None))
             ids = cites_at.get((si, a), [])
+            if (si, a) in consts_at:
+                extra["const"][name] = consts_at[(si, a)]
             ntail = set()
             nrv = nr_ends(ins, a, b, rel, o.syms, fn_at, ntail)
             nterm = bisect.bisect_left(tk, b) - bisect.bisect_left(tk, a)

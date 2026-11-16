@@ -13,8 +13,8 @@ Usage: check_regsites.py [specs dir]   (with a Wine specs dir it also checks the
 """
 import os, struct, sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import funcfacts, pemanifest, regsites
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.manifest import funcfacts, pemanifest, regsites
 
 BASE = 0x400000
 OPEN, QUERY, SETV, SAVE = 0x403000, 0x403004, 0x403008, 0x40300c

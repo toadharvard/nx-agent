@@ -9,6 +9,7 @@
 #define FNVNX_WIN32_EXT_H
 
 #include "fnvnx_win32.h"
+#include "fnvnx/loader_iface.h"   /* fnvnx_declared_fonts, fnvnx_win32_register_image: declared in hostabi/include, shared with the loader */
 
 #ifdef __cplusplus
 extern "C" {
@@ -61,13 +62,6 @@ void fnvnx_set_command_line(int argc, char **argv);
  * machine's rows (manifest/declared_registry.tsv, generated into the build); when it exists, touches nothing */
 void fnvnx_registry_first_run(void);
 void fnvnx_declared_files_first_run(void);
-/* The declared fonts: an input of the platform like the registry hive and FalloutPrefs.ini. The one definition is loader/guest/boot.c, which
- * returns FNVNX_SD_FONTS of hostabi/include/fnvnx/sdlayout.h (the one path record; the boot machine mounts the tools/fonts-wine9 mirror there,
- * read from the same macro), so a root that links the platform without the loader does not link. The directory holds the Wine 9.0 data
- * files (the .fon bitmap fonts and the TrueType files); registry exports and host fonts are not read. There is no setter and no unset
- * state: GDI reads it when the first font is realised. */
-struct fnvnx_font_dirs { const char *dir; };   /* the one declared directory: exactly the fnv-nx-build tools/fonts-wine9 mirror */
-const struct fnvnx_font_dirs *fnvnx_declared_fonts(void);
 /* implicit TLS of the image (.tls section of FalloutNV.exe, from the loader, S3) */
 BOOL fnvnx_tls_set_template(const void *init_data, size_t init_size, size_t total_size);
 void *fnvnx_tls_block(void);                     /* this thread's block; what fs:[0x2c][0] points at */
@@ -125,9 +119,6 @@ void fnvnx_plat_note(int cls, const char *name, unsigned caller, const char *det
 /* win: the Windows path as the game gave it; host: what the mapper made of it (NULL if it failed); api: the entry */
 void fnvnx_plat_open_failed(const char *win, const char *host, unsigned err, unsigned caller, const char *api);
 #define FNVNX_NOTE_RA ((unsigned)(unsigned long)__builtin_return_address(0))
-/* builtin modules for LoadLibraryA/GetProcAddress (xinput1_3.dll, ... registered by S6/S7) */
-typedef FARPROC (*fnvnx_module_resolver)(const char *proc);
-void fnvnx_register_module(const char *dll_name, fnvnx_module_resolver resolve);
 /* Win32 export table: implementation of a DLL import by name (for IAT slots resolved from the exe) */
 void *fnvnx_win32_lookup_export(const char *dll, const char *name);
 /* An import slot of the exe, as the loader hands it over: by name (ordinal == FNVNX_IMPORT_BY_NAME, the loader's
@@ -141,14 +132,8 @@ void *fnvnx_win32_lookup_import(const char *dll, const char *name, unsigned ordi
 typedef void (*fnvnx_raise_fn)(uint32_t code, uint32_t flags, uint32_t nargs, const uintptr_t *args);
 void fnvnx_win32_set_raise_backend(fnvnx_raise_fn fn);
 /* Test hooks. Module table: -1 for a system DLL (pinned), the reference count of a registered module, 0 for a
- * handle that is no module. Steam: the number of (object, id) registrations of SteamAPI_RegisterCallback. */
+ * handle that is no module. */
 int fnvnx_module_load_count(HMODULE);
-/* The loader reports a mapped image (the exe, or a translated game module after mapping it): the module table gets it
- * (HMODULE = base; GetModuleHandle/GetModuleFileName/LoadLibrary/GetProcAddress by the PE export directory in memory,
- * forwarders followed; FindResource* on its resource directory) and the page map records it as MEM_IMAGE, the whole
- * image and then each of its sections with the protection of its R/W/X bits. `name` is the file name or path. */
-void fnvnx_win32_register_image(const char *name, uint32_t base, uint32_t size);
-int fnvnx_steam_callback_count(void);
 /* The i-th system module (the distinct DLL names of the export table, as the exe imports them), NULL past the last */
 const char *fnvnx_win32_system_module(unsigned i);
 /* window/input plumbing for S6/S7 */

@@ -4,8 +4,7 @@
     python3 -I check_funcfacts.py            # scans every .py file of this directory; exit 1 and the findings on stderr if any
 
 Structural rule over the import and data graph (no names, no byte patterns):
-  G1  in platform/ only funcfacts.py imports imagerec (the one constructor, byte reader and decoder of an image, contract/imagerec.py) or
-      dnfile (.NET metadata), and no module imports capstone, pefile, modules (the PE parser), mmap, lief, elftools or ctypes, funcfacts.py
+  G1  in platform/ only funcfacts.py imports imagerec (the one constructor, byte reader and decoder of an image, contract/imagerec.py), and no module imports capstone, pefile, modules (the PE parser), mmap, lief, elftools or ctypes, funcfacts.py
       included: machine code is decoded only by imagerec.
   G2  in the image-pass graph (funcfacts.py and every module that imports, directly or through other modules of this directory, funcfacts
       or a module of the graph: pemanifest, regsites, regclass, rtti, filesites, fontfaces, prefs_settings, ...) a file is opened in
@@ -27,8 +26,8 @@ The self-tests build synthetic modules for each of the three rules and for a mod
 import ast, os, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-READERS = {"capstone", "pefile", "modules", "dnfile", "mmap", "lief", "elftools", "ctypes", "imagerec"}
-FUNCFACTS_MAY = {"imagerec", "dnfile"}   # the readers funcfacts.py itself may import
+READERS = {"capstone", "pefile", "modules", "mmap", "lief", "elftools", "ctypes", "imagerec"}
+FUNCFACTS_MAY = {"imagerec"}   # the readers funcfacts.py itself may import
 PARSER_CALLS = {"get_memory_mapped_image", "get_data", "get_string_at_rva", "read_bytes", "open_bytes"}
 
 
@@ -152,8 +151,7 @@ def main():
 
 def selftest_code_read():
     """G3: a byte read at a code address is red; data reads, a relocated word in code, and decoded facts are not."""
-    sys.path.insert(0, HERE)
-    import funcfacts
+    from fnvnx.manifest import funcfacts
     imagerec = funcfacts.imagerec   # the one module, as funcfacts holds it: the gate itself imports no reader
     assert not hasattr(funcfacts, "CodeRead"), "funcfacts defines no error type of its own"
     code = bytes.fromhex("558bec" "b800304000" "5dc3")            # push ebp; mov ebp,esp; mov eax,0x403000; pop ebp; ret
@@ -191,7 +189,7 @@ def selftest():
     def run(sources):
         trees = {k: ast.parse(v) for k, v in sources.items()}
         return findings(trees)
-    base = {"funcfacts": "import imagerec, dnfile\n"}
+    base = {"funcfacts": "import imagerec\n"}
     assert run({"funcfacts": "import capstone\n"})["funcfacts"][0][1] == "G1"          # funcfacts itself imports no decoder
     assert run(dict(base, a="import imagerec\n"))["a"][0][1] == "G1"                   # only funcfacts imports imagerec
     assert run(dict(base, a="import modules\n"))["a"][0][1] == "G1"

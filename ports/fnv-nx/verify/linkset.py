@@ -46,6 +46,53 @@ def object_defs(data):
     return out
 
 
+def tls_undefined(data):
+    """{symbol} of the undefined thread-local (STT_TLS) global and weak symbols of the ELF relocatable bytes DATA."""
+    return {n for n, bind, _, shndx, typ in syms_any(data, 2) if shndx == 0 and bind in BIND and typ == 6 and n}
+
+
+def tls_closure(objs, definers):
+    """The objects that define the thread-local symbols the OBJS [(unit, path)] leave undefined, to be linked with them (ld 2.42 asserts on an undefined TLS
+    symbol under --unresolved-symbols=ignore-all, so the synthesis link needs the definers, as the real link has them). DEFINERS: {symbol: [object path]},
+    the product objects that define a TLS symbol (the one-definition index over the admitted roots' built objects). Repeats over the added objects' own
+    undefined TLS symbols until none is left. -> ([(unit, path)] added, sorted). ValueError `tls-undefined <sym>` (no definer) or `tls-duplicate <sym>` (two)."""
+    have, add, work = {p for _, p in objs}, [], list(objs)
+    defined = set()
+    for _, p in objs:
+        defined |= {n for n, ents in object_defs(open(p, "rb").read()).items() if any(t == "TLS" for _, t in ents)}
+    while work:
+        _, p = work.pop()
+        for sym in sorted(tls_undefined(open(p, "rb").read()) - defined):
+            ds = sorted(set(definers.get(sym, ())))
+            if not ds:
+                raise ValueError("tls-undefined %s: no admitted product root defines it" % sym)
+            if len(ds) > 1:
+                raise ValueError("tls-duplicate %s: defined by %s" % (sym, ", ".join(ds)))
+            if ds[0] not in have:
+                have.add(ds[0])
+                add.append(("tls:" + sym, ds[0]))
+                work.append(add[-1])
+            defined |= {n for n, ents in object_defs(open(ds[0], "rb").read()).items() if any(t == "TLS" for _, t in ents)}
+    return sorted(add)
+
+
+def tls_definers(m, admit, repo, cache):
+    """{TLS symbol: [object path]} over the built objects of every admitted product root of the target of member M (guest or host), except M itself."""
+    target = recipe.entry_of(admit, m).get("target")
+    out = {}
+    for r in gate_build.product_roots(repo):
+        if r == m or recipe.entry_of(admit, r).get("target") != target:
+            continue
+        res = gate_build.ensure(r, cache, repo)[0]
+        if res["status"] == "red":
+            raise ValueError("%s: build red at stage %s" % (r, res["failure"]["stage"]))
+        paths = {o["unit"]: o["object"] for o in res["objects"]}
+        for d in res["defined"]:
+            if d["type"] == "TLS" and d["bind"] in ("GLOBAL", "WEAK") and d["object"] in paths:
+                out.setdefault(d["symbol"], []).append(paths[d["object"]])
+    return out
+
+
 def merge(into, source, defs):
     for n, ents in defs.items():
         into.setdefault(n, {}).setdefault(source, []).extend(ents)
@@ -108,6 +155,8 @@ def synth_defs(root, admit, repo, cache):
         lk = recipe.load_recipe(repo, admit, m).get("link")
         kinds = ["pie"] if guest else ([lk["kind"]] if isinstance(lk, dict) and lk.get("kind") else ["shared", "exe"])
         objs = [(o["unit"], o["object"]) for o in res["objects"]]
+        if any(tls_undefined(open(p, "rb").read()) for _, p in objs):   # the defining product objects join the synthesis link (their definitions are subtracted like any input's)
+            objs = objs + tls_closure(objs, tls_definers(m, admit, repo, cache))
         for kind, names in recipe.synth_names(repo, m, cache, kinds, recipe.TREE + "/" + prof["script"] if prof else None, objs).items():
             merge(out, "ld:%s:%s" % (m, kind), {n: [("GLOBAL", "NOTYPE")] for n in names})
     return out

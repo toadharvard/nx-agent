@@ -16,8 +16,8 @@ EXTERNAL inputs (key "external", RECIPE.md): fetched only by exact commit from t
   the external). The tree is a declared input at "at" of EVERY stage (the tool runtime lists it), so stage keys cover its hash. A tree
   is the content-pinned INPUT, not a build output: sharing the fetch between two cold builds shares nothing that a build computes.
   compiler {"external": N, cc, cxx}: the tree is declared to runtime.py tool as HOST@AT (loader closure resolved as inside the sandbox, RECIPE.md).
-Outputs in --out: objects.json ("fnvnx-objects/1": root, objects[{unit,object,sha256,os_layer}], elf, constants, defined [{symbol,bind,type,object}] and undefined [symbol] (ELF .symtab of the objects, struct), stage_keys, stages
-  {run,hit}, status green|red, failure {stage,exit,stderr tail 20} / failed_units when red), obj/<unit>.o, <name>.elf, constants.tsv.
+Outputs in --out: objects.json ("fnvnx-objects/1": root, objects[{unit,object,sha256,os_layer}], elf, defined [{symbol,bind,type,object}] and undefined [symbol] (ELF .symtab of the objects, struct), stage_keys, stages
+  {run,hit}, status green|red, failure {stage,exit,stderr tail 20} / failed_units when red), obj/<unit>.o, <name>.elf.
 Assumptions: the compiler and ld are deterministic given the flags of unitstage/toolflags (A-env); the sandbox leaves the channels of (ASM-038, ASM-039)
   sandbox.OPEN_CHANNELS open (see gate_determinism.py for which of them two cold builds expose)."""
 import argparse
@@ -138,8 +138,8 @@ def _plugin_cxx():
 
 
 PLUGIN_CXX = _plugin_cxx()
-KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
-        "plugins", "variants", "profile", "outputs", "uses", "include_uses", "sources", "error_abi", "empty_handlers", "external_errors", "tests", "run"}
+KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "contract_names", "link", "external",
+        "plugins", "variants", "profile", "outputs", "uses", "include_uses", "sources", "error_abi", "empty_handlers", "tests", "run"}
 VARIANT_KEYS = {"compiler", "flags", "link", "flags_add", "defines_add"}   # the keys a variant may replace (whole: a sanitizer variant names its own link.libs.system) and its two deltas
 VARIANT_DELTAS = {"flags_add", "defines_add"}   # appended to the base flags of the root (RECIPE.md, "Profiles")
 PROFILES = ("guest", "host")
@@ -384,7 +384,7 @@ def link_file(rec_file, root, mine, roots, files):
 
 
 def link_generated(rec_file, mine, seen):
-    """REC_FILE is a generated output of the root (SEEN: the outputs of its generated and run stages, as for `constants`) and not a tracked file:
+    """REC_FILE is a generated output of the root (SEEN: the outputs of its generated and run stages, as for `contract_names`) and not a tracked file:
     the link script or version script a generator writes. The ld stage mounts it from the root's view, so its content is in the stage key."""
     return isinstance(rec_file, str) and rel_ok(rec_file) and rec_file in seen and rec_file not in mine
 
@@ -2158,15 +2158,6 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             (ea.get("kind") == "noreturn" and set(ea) == {"fail", "kind"}) or (ea.get("kind") == "flag" and set(ea) == {"fail", "kind", "flag"} and ident(ea.get("flag"))))):
         err.append('error_abi must be {"fail": SYM, "kind": "noreturn"} or {"fail": SYM, "kind": "flag", "flag": FIELD}: the root\'s one failure function and how its '
                    'definition signals failure (objstub checks the definition)')
-    xe = rec.get("external_errors")
-    if xe is not None:
-        names_ = {e.get("name") for e in rec.get("external", []) if isinstance(e, dict)}
-        if not (isinstance(xe, dict) and xe and all(k in names_ and isinstance(v, dict) and set(v) == {"type", "success"} and ident(v["type"])
-                                                    and isinstance(v["success"], int) and not isinstance(v["success"], bool) for k, v in xe.items())):
-            err.append('external_errors must be {EXTERNAL: {"type": TYPEDEF, "success": INT}} naming declared externals: the error convention of a library whose units come from '
-                       '`sources` (objstub: a V body of such a unit is the library\'s own code unless it returns an error constant)')
-        elif not rec.get("sources"):
-            err.append("external_errors needs `sources` (the units of the external libraries)")
     eh = rec.get("empty_handlers")
     if eh is not None:
         tb = eh.get("tables") if isinstance(eh, dict) else None
@@ -2214,7 +2205,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     gm = rec.get("game")
     if gm is not None and not (isinstance(gm, str) and rel_ok(gm) and any(u.startswith(gm.strip("/") + "/") for u in units)):
         err.append("game %r is not a root-relative directory holding units" % (gm,))
-    for key in ("constants", "contract_names"):
+    for key in ("contract_names",):
         c = rec.get(key)
         if c is not None and not (isinstance(c, str) and rel_ok(c) and (c in mine or c in seen)):
             err.append("%s %r is neither a tracked file of the root nor a generated output" % (key, c))
@@ -2346,7 +2337,7 @@ def tail(store, res):
 
 
 def symbols(path, unit):
-    """(defined [{symbol,bind,type,object}], undefined {symbol}) of the global and weak symbols of ELF32 or ELF64 little-endian
+    """(defined [{symbol,bind,type,object,target}], undefined {symbol}) of the global and weak symbols of ELF32 or ELF64 little-endian
     object PATH (.symtab; ELF32 is the ILP32 ABI, ELF64 the LP64 one: the layouts of Elf32_/Elf64_ Shdr and Sym)."""
     d = open(path, "rb").read()
     if d[:4] != b"\x7fELF" or d[4] not in (1, 2) or d[5] != 1:
@@ -2356,6 +2347,7 @@ def symbols(path, unit):
     esz, num = struct.unpack_from("<HH", d, 0x3a if w64 else 0x2e)
     secs = [struct.unpack_from("<IIQQQQIIQQ" if w64 else "<IIIIIIIIII", d, shoff + i * esz) for i in range(num)]   # name type flags addr off size link info align entsize
     defined, undefined = [], set()
+    target = list(object_target(path))   # the object's own (ELF class, e_machine), the link target of RECIPE.md "Target of the link"
     for s in (x for x in secs if x[1] == 2):
         st = secs[s[6]]
         strtab = d[st[4]:st[4] + st[5]]
@@ -2366,7 +2358,7 @@ def symbols(path, unit):
                 if shndx == 0:
                     undefined.add(n)
                 else:
-                    defined.append({"symbol": n, "bind": SBIND[info >> 4], "type": STYPE.get(info & 15, str(info & 15)), "object": unit})
+                    defined.append({"symbol": n, "bind": SBIND[info >> 4], "type": STYPE.get(info & 15, str(info & 15)), "object": unit, "target": target})
     return defined, undefined
 
 
@@ -2836,6 +2828,7 @@ class Job:
         self.roots, self.files = load_admit(repo), tracked(repo)
         self.rec = with_guest_link(load_recipe(repo, self.roots, spec), root, self.roots, repo)
         self.keys, self.run, self.hit, self.ext, self.ppkeys, self.built = set(), 0, 0, {}, {}, []
+        self.extunits = {}   # {unit: external name}: the units copied from a pinned external of the recipe (generated_sources), the provenance objstub reads
         self.arts = {}   # {artifact root: its build result}: a root is built once per Job, whatever number of steps run its artifact
         self.shard, self.shard_units = None, None   # (i, N) of a shard build (build(shard=...)); the units it compiled
         self.aux = []   # build(aux): AUX_FLAGS of the CC stage
@@ -3119,6 +3112,7 @@ class Job:
             shutil.copyfile(src, dest)
             if is_unit(unit):
                 out.append(unit)
+                self.extunits[unit] = ext
         return sorted(set(out))
 
     def use_inputs(self, ws):
@@ -3534,7 +3528,7 @@ class Job:
         ins = [{"at": "/launch/genlaunch.py", "tree": cas.ingest(GEN_LAUNCH, self.store)},
                {"at": "/launch/mounts.json", "tree": self.mounts_file(tmp)}] + xin + self.use_inputs(ws)
         imp = import_mount(g["tool"], owner, set(self.files), [p for p in g["inputs"] if isinstance(p, str)], self.roots, self.repo)[1]
-        ins.append({"at": "/imp/" + gate_admit.MODULE_TOP, "tree": self.ingest_files(tmp, "imp", imp, TREE)})   # the tool and its import closure at /imp/fnvnx/<path relative to the project tree>: the one module path (gate_admit.import_roots); no /tool
+        ins.append({"at": toolflags.IMPORT_ROOT + "/" + gate_admit.MODULE_TOP, "tree": self.ingest_files(tmp, "imp", imp, TREE)})   # the tool and its import closure at /imp/fnvnx/<path relative to the project tree>: the one module path (gate_admit.import_roots); no /tool
         if "objects_of" in g:
             ins.append({"at": "/objs", "tree": self.objects_input(ws, tmp, g)})
         for p in g["inputs"]:
@@ -3556,7 +3550,7 @@ class Job:
                         self.ingest_files(tmp, "in%d" % len(ins), sub, p)})
         env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
         env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "FNVNX_PYMODS": self.pymods})
-        env["PYTHONPATH"] = "/imp"   # the one entry: every module is imported by its qualified name (namespace packages, no __init__.py invented)
+        env["PYTHONPATH"] = toolflags.IMPORT_ROOT   # the one entry: every module is imported by its qualified name (namespace packages, no __init__.py invented)
         doc = {"format": "fnvnx-stage/1", "stage": "gen:%s:%d" % (self.root, i), "class": "build", "tool": "python", "cwd": "/work",
                "argv": [py["python"], "-s", "-B", "/launch/genlaunch.py", "\n".join(g["outputs"] + ["dir:" + d for d in g.get("dirs", [])]), tool_module(g["tool"])[0]] + g["args"] + (["--section", g["objects_of"]["section"]] if isinstance(g.get("objects_of"), dict) and g["objects_of"].get("section") else []), "env": env,
                "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"], "ro_root": True}   # a generator writes only /out
@@ -3588,11 +3582,11 @@ class Job:
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 shutil.copyfile(p, dest)
         imp = import_mount(t["tool"], owner, set(self.files), [], self.roots, self.repo)[1]
-        ins = [{"at": "/imp/" + gate_admit.MODULE_TOP, "tree": self.ingest_files(tmp, "imp", imp, TREE)},
+        ins = [{"at": toolflags.IMPORT_ROOT + "/" + gate_admit.MODULE_TOP, "tree": self.ingest_files(tmp, "imp", imp, TREE)},
                {"at": "/launch/genlaunch.py", "tree": cas.ingest(GEN_LAUNCH, self.store)},
                {"at": "/objs", "tree": cas.ingest(os.path.join(tmp, "objs"), self.store)}]
         env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
-        env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "FNVNX_PYMODS": self.pymods, "PYTHONPATH": "/imp"})
+        env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "FNVNX_PYMODS": self.pymods, "PYTHONPATH": toolflags.IMPORT_ROOT})
         doc = {"format": "fnvnx-stage/1", "stage": "table:%s:%d" % (self.root, ti), "class": "build", "tool": "python", "cwd": "/work",
                "argv": [py["python"], "-s", "-B", "/launch/genlaunch.py", t["unit"], tool_module(t["tool"])[0]] + t["args"] + ["--section", t["section"]],
                "env": env, "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"], "ro_root": True}
@@ -3887,7 +3881,7 @@ class Job:
         lb, pre, post, search, libs, sysin = lk.get("libs"), [], [], [], [], []
         if lb and lb.get("derive"):     # a guest link: the libraries are the pinned driver's answer, derived here (keyed), never stored
             rootdef = set().union(*(undefset.object_symbols(open(p, "rb").read())[0] for _, objs in groups for _, p in objs))
-            lb = dict(self.guest_libs(ws, rootdef, open(os.path.join(sd, os.path.basename(lk["script"]))).read())[0], external=lb["external"])
+            lb = dict(self.guest_libs(ws, rootdef, "".join(open(os.path.join(sd, os.path.basename(lk[k]))).read() + "\n" for k in ("script", "image_script") if k in lk))[0], external=lb["external"])
         if lb and "system" in lb:
             # the shared libraries of env.json packages: their content is the input, mounted at /syslib under their own file names
             yd = os.path.join(pv, "syslib")
@@ -4045,7 +4039,7 @@ class Job:
     def guest_libs(self, ws, rootdef, script_text):
         """The guest link's libraries, derived (keyed stages, nothing stored): the driver's `-###` link command read by parse_driver_link, minus the start
         and end files that the one-definition rule (onedef over ROOTDEF, the symbols the product roots define) or the entry rule (entry_object, the ENTRY
-        of SCRIPT_TEXT) excludes. Every derived file must lie under the pinned runtime external and in the multilib the guest semantic flags select
+        of SCRIPT_TEXT, the text of the link's scripts together) excludes. Every derived file must lie under the pinned runtime external and in the multilib the guest semantic flags select
         (-print-multi-directory). -> ({dirs, names, startfiles, endfiles}, [excluded objects]); BuildRed otherwise."""
         pin = load_pin(self.repo)
         text, at = self.link_probe(ws)
@@ -4150,7 +4144,7 @@ class Job:
         tmp = tempfile.mkdtemp(dir=ws)
         ins = []
         imp = import_mount(LD_TOOL, LD_TOOLS[0], set(self.files), [], self.roots, self.repo)[1]   # ldcheck and its import closure at /imp/fnvnx/<rel>: the one module path, no /tool and no /contract
-        ins.append({"at": "/imp/" + gate_admit.MODULE_TOP, "tree": self.ingest_files(tmp, "imp", imp, TREE)})
+        ins.append({"at": toolflags.IMPORT_ROOT + "/" + gate_admit.MODULE_TOP, "tree": self.ingest_files(tmp, "imp", imp, TREE)})
         if loader_defs is not None:      # the names the declared loader defines, one per line, a declared input at /loader (its content is in the key)
             ld = os.path.join(tmp, "loader")
             os.makedirs(ld)
@@ -4159,11 +4153,11 @@ class Job:
             ins.append({"at": "/loader", "tree": cas.ingest(ld, self.store)})
         ins += [{"at": "/linked", "tree": elf_tree}, {"at": "/objs", "tree": objs_tree}] + extra
         env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
-        env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "PYTHONPATH": "/imp"})
+        env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "PYTHONPATH": toolflags.IMPORT_ROOT})
         doc = {"format": "fnvnx-stage/1", "stage": "ldcheck:" + self.root, "class": "build", "tool": "python", "cwd": "/work",
                "argv": [py["python"], "-s", "-B", "-m", tool_module(LD_TOOL)[0], "--elf", "/linked/" + name, "--objs", "/objs", "--out", "/out", "--name", name, "--kind", lk.get("kind", "pie")]
                + (["--version-script", "/ld/" + os.path.basename(lk["version_script"])] if "version_script" in lk else [])
-               + (["--script", "/ld/" + os.path.basename(lk["script"])] if "script" in lk else [])
+               + [x for k in ("script", "image_script") if k in lk for x in ("--script", "/ld/" + os.path.basename(lk[k]))]
                + (["--entry", lk["entry"]] if "entry" in lk else [])
                + ["--lib=/syslib/" + os.path.basename(p) for p in lk.get("libs", {}).get("system", [])]
                + (["--loader-defs", "/loader/defs.txt"] if loader_defs is not None else []),
@@ -4281,16 +4275,16 @@ def map_members(text):
 
 
 def objects_digest(res):
-    """sha256 of the CONTENT of an objects.json dict: its fields without the machine paths (object, plugin, ELF, constants files: their
+    """sha256 of the CONTENT of an objects.json dict: its fields without the machine paths (object, plugin, ELF, contract_names files: their
     sha256 stands for them) and without the cache counters, so two builds of the same sources give the same digest."""
-    keep = {k: res.get(k) for k in ("format", "root", "status", "defined", "undefined", "units", "stage_keys", "pp_keys", "failure")}
+    keep = {k: res.get(k) for k in ("format", "root", "status", "defined", "undefined", "units", "stage_keys", "pp_keys", "ext_units", "failure")}
     keep["link_roots"] = [{"root": x["root"], "sha256": x["sha256"]} for x in res["link_roots"]]
     keep["objects"] = [{k: o[k] for k in ("unit", "sha256", "os_layer")} for o in res["objects"]]
     keep["plugins"] = [{k: p[k] for k in ("name", "sha256")} for p in res["plugins"]]
     keep["analysis_plugin"] = (res.get("analysis_plugin") or {}).get("sha256")
     keep["link_archives"] = [{k: m[k] for k in ("archive", "member", "sha256")} for m in res.get("link_archives", [])]
     keep["elf"] = res["elf"] and res["elf"]["sha256"]
-    for k in ("constants", "contract_names"):
+    for k in ("contract_names",):
         keep[k] = res[k] and hashlib.sha256(open(res[k], "rb").read()).hexdigest()
     return hashlib.sha256(json.dumps(keep, sort_keys=True).encode()).hexdigest()
 
@@ -4757,7 +4751,7 @@ def _build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=
     if errs:
         raise RecipeError(errs)
     units = units_of(j.rec, root, j.files, j.roots, repo)
-    res = {"format": OBJ_FORMAT, "root": spec, "objects": [], "tests": [], "elf": None, "link_roots": [], "constants": None, "contract_names": None, "defined": [], "undefined": [], "plugins": [],
+    res = {"format": OBJ_FORMAT, "root": spec, "objects": [], "tests": [], "elf": None, "link_roots": [], "contract_names": None, "defined": [], "undefined": [], "plugins": [],
            "link_archives": [], "stage_keys": [], "status": "green"}
     ws = tempfile.mkdtemp(prefix="recipe-")
     os.makedirs(out, exist_ok=True)
@@ -4977,11 +4971,11 @@ def _build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=
                     fu["findings"] = ["static undefined set not computed: %s" % e]
                 res["link_undefined"] = fu.get("undefined")
             res["failed_units"].append(fu)
-        for key in ("constants", "contract_names"):
+        for key in ("contract_names",):
             if j.rec.get(key):
                 shutil.copyfile(os.path.join(ws, "root", j.rec[key]), os.path.join(out, key + ".tsv"))
                 res[key] = os.path.abspath(os.path.join(out, key + ".tsv"))
-    except BuildRed as r:   # a stage of the root's own that is not keep-going (a constants file ...): red, nothing else known
+    except BuildRed as r:   # a stage of the root's own that is not keep-going (a contract_names file ...): red, nothing else known
         j.red.append(dict(r.args[0]))
     except (sandbox.SbxError, OSError, cas.CasError, runtime.RtError, unitstage.UnitError) as e:
         # a store or sandbox failure (EMLINK, ENOSPC, EXDEV ...) is a red build naming its stage: objects.json is always written
@@ -4998,7 +4992,7 @@ def _build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=
     if shard:
         res["shard"] = "%d/%d" % shard
         res["shard_units"] = j.shard_units
-    res.update(stage_keys=sorted(j.keys), stages={"run": j.run, "hit": j.hit}, units=all_units, pp_keys=dict(sorted(j.ppkeys.items())), du_keys=dict(sorted(j.dukeys.items())))
+    res.update(stage_keys=sorted(j.keys), stages={"run": j.run, "hit": j.hit}, units=all_units, pp_keys=dict(sorted(j.ppkeys.items())), ext_units=dict(sorted(j.extunits.items())), du_keys=dict(sorted(j.dukeys.items())))
     with open(os.path.join(out, "objects.json"), "w") as f:
         json.dump(res, f, indent=1, sort_keys=True)
         f.write("\n")

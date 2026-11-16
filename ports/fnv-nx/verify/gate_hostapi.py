@@ -279,8 +279,8 @@ def main(argv):
             u, c, ids = u + su, c + sc, sids + ids
             if sc != su:
                 detail = ("%s; services: %s" % (detail, "; ".join(sids)))[:900]
-            sys.path.insert(1, os.path.join(repo, "ports", "fnv-nx", "manifest"))
-            from manifest import check_hostapi   # the header grammar (service numbers, argument counts) has its one home there
+            sys.path.insert(1, os.path.join(repo, "ports"))   # `fnvnx` is ports/fnvnx -> fnv-nx of the tree under test
+            from fnvnx.manifest import check_hostapi   # the header grammar (service numbers, argument counts) has its one home there
             errs = []
             svc, _, count, notserved = check_hostapi.parse_header(header, errs)
             hu, hids = served_ids(repo, svc, count, notserved)

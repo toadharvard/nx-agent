@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """reached - the (dll, name) pairs the image set reaches (L1 CONTRACT): reached.tsv, columns dll, name, how, site.
 
-    reached.py --sites dynsites.tsv --image NAME=pe ... --imports NAME=imports.tsv ... --facts DIR --facts-tree SHA
-               --declared declared_dlls.tsv --specs DIR [--modules modules.tsv] --out reached.tsv
+    reached.py --sites dynsites.tsv --dir DIR ... --import-names import_names.tsv --facts DIR
+               --declared declared_dlls.tsv --specs DIR --modules modules.tsv --out reached.tsv
 
-how = iat: an import slot of an image (`site` = `<image>@<slot VA>`, from the imports/<image>.tsv of modules.py); how = gpa: a (module, name)
+how = iat: an import slot of an image (`site` = `<image>@<slot VA>`, from the import_names.tsv of modules.py's first entry plus the image base of modules.tsv: no bridge table, no cycle); how = gpa: a (module, name)
 pair a GetProcAddress site can ask for (gpa_names.py, `site` = `<image>@<site VA>`; a module the facts cannot place is `*`). One row per
 (dll, name, how, site), sorted. The universe of the rows is the images; nothing filters it.
 
@@ -20,21 +20,32 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name (contract.X)
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
-from fnvnx.contract import bridgetable, declareddlls, dllkind, gpa_names, iat
+from fnvnx.contract import bridgetable, declareddlls, dllkind, gpa_names, iat, modules, treehash
 
 COLS = ("dll", "name", "how", "site")
 
 
-def read_imports(text):
-    """[(dll, name, slot)] of an imports/<name>.tsv (slot, dll, name, kind, value)."""
-    out = []
+def read_bases(modules_text):
+    """{image name: assigned base} of a modules.tsv (name, sha256, size, preferred_base, assigned_base, ...; the exe's row is the first image)."""
+    return {p[0]: int(p[4], 16) for p in (ln.split("\t") for ln in modules_text.splitlines() if ln and ln[0] != "#")}
+
+
+def read_import_names(text, bases):
+    """{image: [(dll, name, slot VA as 0x<hex>)]} of an import_names.tsv (image, dll, name, slot RVA: the PE import directories alone, written by modules.py's first entry);
+    the slot VA is the image's assigned base (BASES, read_bases) plus the RVA. An image without a base is an error."""
+    out, missing = {}, set()
     for ln in text.splitlines():
-        p = ln.split("\t")
-        if not ln or ln[0] == "#" or p[0] == "slot":
+        if not ln or ln[0] == "#":
             continue
-        if len(p) < 4:
-            raise ValueError("imports row with %d columns, need 4: %r" % (len(p), ln))
-        out.append((p[1], p[2], p[0]))
+        p = ln.split("\t")
+        if len(p) != 4:
+            raise ValueError("import_names row with %d columns, need 4: %r" % (len(p), ln))
+        if p[0] not in bases:
+            missing.add(p[0])
+            continue
+        out.setdefault(p[0], []).append((p[1], p[2], "0x%x" % (bases[p[0]] + int(p[3], 16))))
+    if missing:
+        raise ValueError("no base in modules.tsv for: " + ", ".join(sorted(missing)))
     return out
 
 
@@ -77,20 +88,18 @@ def tsv(rows):
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--sites", required=True)
-    ap.add_argument("--image", action="append", required=True, help="NAME=image path (its runs come from --facts)")
-    ap.add_argument("--imports", action="append", required=True, help="NAME=imports/<name>.tsv of modules.py, one per image")
+    ap.add_argument("--dir", action="append", required=True, help="where the image files are looked for (the declared file set); the images are the names of modules.tsv")
+    ap.add_argument("--import-names", required=True, help="import_names.tsv of modules.py (first entry: the import directories alone, no bridge table)")
     ap.add_argument("--facts", required=True)
-    ap.add_argument("--facts-tree", required=True)
     ap.add_argument("--declared", required=True, help="declared_dlls.tsv: the dlls of the declared machine")
     ap.add_argument("--specs", required=True, help="the Wine 9.0 spec directory (the reference signatures)")
-    ap.add_argument("--modules", help="modules.tsv")
+    ap.add_argument("--modules", required=True, help="modules.tsv (the image bases and the may-load names)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args(argv)
-    imps = {}
-    for s in a.imports:
-        nm, p = s.split("=", 1)
-        with open(p) as fh:
-            imps[nm.lower()] = read_imports(fh.read())
+    with open(a.modules) as fh:
+        modules_text = fh.read()
+    with open(a.import_names) as fh:
+        imps = {k.lower(): v for k, v in read_import_names(fh.read(), {k.lower(): v for k, v in read_bases(modules_text).items()}).items()}
 
     def spec_text(dll):
         with open(os.path.join(a.specs, dll + ".spec")) as fh:
@@ -98,13 +107,16 @@ def main(argv=None):
     sig, errs = signatures([i for v in imps.values() for i in v], spec_text)
     if errs:
         sys.exit("reached: %d imports without a signature:\n%s" % (len(errs), "\n".join(errs)))
-    mayload = set(declareddlls.read(a.declared))
-    if a.modules:
-        with open(a.modules) as fh:
-            mayload |= set(gpa_names.module_dlls(fh.read()))
+    mayload = set(declareddlls.read(a.declared)) | set(gpa_names.module_dlls(modules_text))
     with open(a.sites) as fh:
         rows = gpa_names.read_sites(fh.read())
-    _, results = gpa_names.analyse(a.image, a.facts, a.facts_tree, rows, sig, mayload)
+    images = []
+    for nm in sorted(read_bases(modules_text)):   # the image set is the rows of modules.tsv (exe included), each file found case-insensitively in the declared file set
+        path = modules.find_file(a.dir, nm)
+        if path is None:
+            sys.exit("reached: image %s of modules.tsv has no file in %s" % (nm, ", ".join(a.dir)))
+        images.append("%s=%s" % (nm, path))
+    _, results = gpa_names.analyse(images, a.facts, treehash.tree_hash(a.facts), rows, sig, mayload)   # the facts pin is the tree hash of the mounted directory
     with open(a.out, "w", newline="\n") as fh:
         fh.write(tsv(rows_of(imps, results)))
     return 0

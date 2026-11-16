@@ -1,13 +1,13 @@
 """verify/gates.d: one file per gate (L1 CONTRACT).
     gates.d/<name>.json   {"format": "fnvnx-gatefile/1", "name": NAME, "argv": [...], "result": "NAME.json", "covers": [ROOT_CLASS...]}
-The gates of a tree are the files of this directory, sorted by name; there is no shared list, so adding a gate touches only its own file
+The gates of a tree are the files of this directory, sorted by name, a gate after the gates its optional `needs` names (a gate that reads another gate's output of the same run says so); there is no shared list, so adding a gate touches only its own file
 and two branches that add different gates never conflict. The verdict (l1.py) assembles the sorted entries into the canonical gates
 document (format fnvnx-gates/1) of the commit under test; that document is a value in memory and in the verdict's temporary directory,
 never a tracked file.
 `covers` is the set of ROOT CLASSES the gate judges, declared from what the gate reads: a class is a predicate over root facts, not a list of
 roots. The classes of the admitted roots (verify/admit.json) are derived by one rule, root_classes: class doc -> doc; class tool -> tool; class ref -> ref (a reference root) and class test -> test (gate_admit.py); a product root that holds imports.in.json / registry.in.json is also `import-provider` / `registry-reader` (see declares);
 class product with "target": "host" -> host-product; product with a guest target whose "cxx_origin" is {"lifted_by", "pack"} -> lifted; any
-other product -> product-guest; and a product root whose build.json declares a link stage (`link` not null) is also `linked`. The contract
+other product -> product-guest, which a root whose admit row declares `cxx_origin: "native"` (it has C++ units: recipe.check makes cxx_origin present exactly for a root with C++ units) also has as `product-guest-cxx`. A gate that judges only native C++ units (abi, argordergate, addr32, order) covers `product-guest-cxx`; a C-only or header-only guest root is outside its universe and gives no vacuity red; and a product root whose build.json declares a link stage (`link` not null) is also `linked`. The contract
 gates cover `linked`: a link-null root is outside their universe (they judge a link), and the other gates still cover it. verdict.py judges a gate
 red when its `covers` is missing or not a non-empty list of ROOT_CLASSES, and red when its universe is 0 while an admitted root of a covered
 class exists (a gate that judges nothing where there is something to judge is not green: no vacuous green); with no root of a covered
@@ -22,7 +22,7 @@ DIR = TREE + "/verify/gates.d"
 ADMIT = TREE + "/verify/admit.json"
 FILE_FORMAT = "fnvnx-gatefile/1"
 FORMAT = "fnvnx-gates/1"
-ROOT_CLASSES = ("doc", "tool", "ref", "test", "header", "product-guest", "product-guest-exe", "lifted", "host-product", "linked", "import-provider", "registry-reader")
+ROOT_CLASSES = ("doc", "tool", "ref", "test", "header", "product-guest", "product-guest-cxx", "product-guest-exe", "lifted", "host-product", "linked", "import-provider", "registry-reader")
 
 
 class Bad(ValueError):
@@ -88,6 +88,8 @@ def root_classes(admit, repo=None):
                     s.add("import-provider")
                 if declares(repo, r["path"], "registry.in.json"):
                     s.add("registry-reader")
+            if c == "product-guest" and r.get("cxx_origin") == "native":
+                s.add("product-guest-cxx")
             if c == "product-guest" and repo is not None and has_exe_twin(repo, r):
                 s.add("product-guest-exe")
             out[r["path"]] = s
@@ -108,12 +110,34 @@ def parse_entry(name, text):
     out = {"name": name, "argv": d["argv"], "result": d["result"]}
     if "covers" in d:
         out["covers"] = d["covers"]
+    if "needs" in d:
+        if not (isinstance(d["needs"], list) and all(isinstance(n, str) and n for n in d["needs"]) and len(set(d["needs"])) == len(d["needs"])):
+            raise Bad("gates.d/%s.json: needs is not a list of distinct gate names" % name)
+        out["needs"] = d["needs"]
+    return out
+
+
+def order(entries):
+    """ENTRIES in run order: topological over `needs` (a gate runs after every gate it needs), ties by name. Bad on an unknown name or a cycle."""
+    by = {g["name"]: g for g in entries}
+    for g in entries:
+        for n in g.get("needs", ()):
+            if n not in by:
+                raise Bad("gate %s needs %s, which is no gate" % (g["name"], n))
+    out, done, left = [], set(), sorted(by)
+    while left:
+        ready = [n for n in left if all(m in done for m in by[n].get("needs", ()))]
+        if not ready:
+            raise Bad("gates.d: a cycle in `needs` among %s" % ", ".join(left))
+        out.append(by[ready[0]])
+        done.add(ready[0])
+        left.remove(ready[0])
     return out
 
 
 def document(entries):
-    """The gates document of a list of entries, sorted by name."""
-    return {"format": FORMAT, "gates": sorted(entries, key=lambda g: g["name"])}
+    """The gates document of a list of entries in run order (order): by name, a gate after the gates it `needs`."""
+    return {"format": FORMAT, "gates": order(entries)}
 
 
 def load_dir(path=DIR):

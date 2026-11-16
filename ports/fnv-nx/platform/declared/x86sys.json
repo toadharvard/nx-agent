@@ -1,0 +1,1175 @@
+{
+ "cr0": {
+  "em": {
+   "status": "undecided",
+   "why": "no pinned source states CR0.EM of the declared machine (ks386.inc CR0_EM is a bit constant only; Wine runs on the host CPU); user mode observes CR0 only through smsw, which is itself undecided; blocker: a reach certificate that no site depends on it, or an owner decision to derive it from the CPUID record"
+  },
+  "mp": {
+   "status": "undecided",
+   "why": "no pinned source states CR0.MP (ks386.inc CR0_MP is a bit constant only); user mode sees it only through smsw (undecided)"
+  },
+  "ts": {
+   "status": "undecided",
+   "why": "no pinned source; user mode sees TS only through smsw (undecided); Windows handles #NM transparently (lazy FPU switch), and the lazy-switch behaviour is not a pinned source"
+  }
+ },
+ "cr4": {
+  "pce": {
+   "status": "undecided",
+   "why": "rdpmc at CPL 3 needs CR4.PCE = 1; the SDM only defines the bit, the declared CPU's cpuid does not state it, the WDK 7.1 constants name no PCE bit and Wine 9.0 has no rdpmc case"
+  },
+  "tsd": {
+   "source": "Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6: is_privileged_instr intercepts only the 0F opcodes ['0x20', '0x21', '0x22', '0x23'], so rdtsc (0F 31) runs in user mode; consistent with the owner's decision that rdtsc reads the platform timer",
+   "value": 0
+  },
+  "umip": {
+   "source": "Intel SDM Vol 3A 2.5 CR4.UMIP: the bit is reserved (setting it is #GP) unless CPUID.(EAX=07H,ECX=0):ECX[2] is enumerated; the declared CPU's max basic leaf is 4 (ports/fnv-nx/verify/cpuid_model.json max_basic, sha256 e2686d03bf74), below 7, so there is no leaf 7 and CR4.UMIP is 0",
+   "value": 0
+  }
+ },
+ "cr4_sse": {
+  "osfxsr": {
+   "status": "undecided",
+   "why": "no pinned source states CR4.OSFXSR (ks386.inc CR4_FXSR = 0x200 is a bit constant only); the declared CPU's cpuid (verify/cpuid_model.json leaf 1 EDX) advertises FXSR/SSE/SSE2, but whether the OS enabled them is not a pinned fact; blocker: an owner/L3b decision to take OS support from the CPUID record, or a reach certificate"
+  },
+  "osxmmexcpt": {
+   "status": "undecided",
+   "why": "no pinned source states CR4.OSXMMEXCPT (ks386.inc CR4_XMMEXCPT = 0x400 is a bit constant only); with the initial MXCSR 0x1F80 every SIMD exception is masked, so #XM is not raised until a site unmasks it; blocker: a certificate that every ldmxcsr / fxrstor site keeps the exceptions masked (CLAUDE.md fact, not yet certified)"
+  }
+ },
+ "eflags": {
+  "initial": {
+   "source": "Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6: the initial thread context, context.EFlags",
+   "value": 514
+  },
+  "iopl": {
+   "source": "bits 12-13 of the initial EFLAGS (Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6)",
+   "value": 0
+  },
+  "iopl_user_modifiable": {
+   "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): EFLAGS_USER_SANITIZE = 0x3F4DD7, the EFLAGS bits user code can set; bits 12-13 are not in it",
+   "value": false
+  }
+ },
+ "format": "fnvnx-x86sys/2",
+ "gdt": {
+  "addresses": {
+   "ArchBuildKernelGdt": 4231864,
+   "ArchSetGdtEntry": 4231597,
+   "GDTR_image": 4828008,
+   "IDTR_image": 4828000,
+   "OslArchpKernelSetupPhase0": 4225033,
+   "call_ArchBuildKernelGdt": 4225327,
+   "callers_of_ArchBuildKernelGdt": [
+    4225327
+   ],
+   "callers_of_ArchSetGdtEntry": [
+    4225354,
+    4231883,
+    4231903,
+    4231923,
+    4231947,
+    4231968,
+    4231989,
+    4232013,
+    4232040,
+    4232062
+   ],
+   "lgdt": 4490124,
+   "lidt": 4490131,
+   "memset_call": 4225316
+  },
+  "descriptors": {
+   "0x08": {
+    "avl": 0,
+    "base": 0,
+    "base_is": "a constant",
+    "d_b": 1,
+    "dpl": 0,
+    "g": 1,
+    "high_dword": 13605376,
+    "l": 0,
+    "limit_bytes": 4294967295,
+    "limit_field": 1048575,
+    "low_dword": 65535,
+    "p": 1,
+    "s": 1,
+    "type": 10
+   },
+   "0x10": {
+    "avl": 0,
+    "base": 0,
+    "base_is": "a constant",
+    "d_b": 1,
+    "dpl": 0,
+    "g": 1,
+    "high_dword": 13603328,
+    "l": 0,
+    "limit_bytes": 4294967295,
+    "limit_field": 1048575,
+    "low_dword": 65535,
+    "p": 1,
+    "s": 1,
+    "type": 2
+   },
+   "0x18": {
+    "avl": 0,
+    "base": 0,
+    "base_is": "a constant",
+    "d_b": 1,
+    "dpl": 3,
+    "g": 1,
+    "high_dword": 13629952,
+    "l": 0,
+    "limit_bytes": 4294967295,
+    "limit_field": 1048575,
+    "low_dword": 65535,
+    "p": 1,
+    "s": 1,
+    "type": 10
+   },
+   "0x20": {
+    "avl": 0,
+    "base": 0,
+    "base_is": "a constant",
+    "d_b": 1,
+    "dpl": 3,
+    "g": 1,
+    "high_dword": 13627904,
+    "l": 0,
+    "limit_bytes": 4294967295,
+    "limit_field": 1048575,
+    "low_dword": 65535,
+    "p": 1,
+    "s": 1,
+    "type": 2
+   },
+   "0x28": {
+    "avl": 0,
+    "base": null,
+    "base_is": "the TSS address passed to ArchBuildKernelGdt by its caller",
+    "d_b": 0,
+    "dpl": 0,
+    "g": 0,
+    "high_dword": 2852161792,
+    "l": 0,
+    "limit_bytes": 8363,
+    "limit_field": 8363,
+    "low_dword": 8363,
+    "p": 1,
+    "s": 0,
+    "type": 9
+   },
+   "0x30": {
+    "avl": 0,
+    "base": 4292866048,
+    "base_is": "a constant",
+    "d_b": 1,
+    "dpl": 0,
+    "g": 0,
+    "high_dword": 4282421983,
+    "l": 0,
+    "limit_bytes": 4095,
+    "limit_field": 4095,
+    "low_dword": 4026535935,
+    "p": 1,
+    "s": 1,
+    "type": 2
+   },
+   "0x38": {
+    "avl": 0,
+    "base": 0,
+    "base_is": "a constant",
+    "d_b": 1,
+    "dpl": 3,
+    "g": 0,
+    "high_dword": 4256256,
+    "l": 0,
+    "limit_bytes": 4095,
+    "limit_field": 4095,
+    "low_dword": 4095,
+    "p": 1,
+    "s": 1,
+    "type": 2
+   },
+   "0x40": {
+    "avl": 0,
+    "base": 1024,
+    "base_is": "a constant",
+    "d_b": 0,
+    "dpl": 3,
+    "g": 0,
+    "high_dword": 61952,
+    "l": 0,
+    "limit_bytes": 65535,
+    "limit_field": 65535,
+    "low_dword": 67174399,
+    "p": 1,
+    "s": 1,
+    "type": 2
+   },
+   "0x70": {
+    "avl": 0,
+    "base": null,
+    "base_is": "the GDT page itself",
+    "d_b": 0,
+    "dpl": 0,
+    "g": 0,
+    "high_dword": 536908288,
+    "l": 0,
+    "limit_bytes": 1023,
+    "limit_field": 1023,
+    "low_dword": 1023,
+    "p": 1,
+    "s": 1,
+    "type": 2
+   }
+  },
+  "limit": 1023,
+  "source": "winload.exe 1a516bc932b1: OslArchpKernelSetupPhase0 -> ArchBuildKernelGdt -> ArchSetGdtEntry, interpreted; `base: null` is an address the loader passes (the GDT page, the TSS)",
+  "teb_per_thread": {
+   "selector": 56,
+   "source": "SwapContext stores KTHREAD.Teb into the base of the descriptor at this selector on every switch (row ldt.<kernel>.gdt_writes), so the base is per thread"
+  }
+ },
+ "idt": {
+  "addresses": {
+   "ntkrnlpa.exe": {
+    "KiSwapIDT": 7448946,
+    "KiSystemStartup": 5371096,
+    "call_KiSwapIDT": 5371577,
+    "entry_29_va": 7856812,
+    "rep_movsd_to_idt": 5371624,
+    "table_va": 7856484
+   },
+   "ntoskrnl.exe": {
+    "KiSwapIDT": 7403858,
+    "KiSystemStartup": 5334232,
+    "call_KiSwapIDT": 5334713,
+    "entry_29_va": 7811756,
+    "rep_movsd_to_idt": 5334760,
+    "table_va": 7811428
+   }
+  },
+  "dpl0_present": [
+   "0x00-0x02",
+   "0x05-0x1f",
+   "0x2f-0xff"
+  ],
+  "entries": 256,
+  "limit": 2047,
+  "not_present": [
+   "0x20-0x29"
+  ],
+  "ring3_gates": [
+   "0x03-0x04",
+   "0x2a-0x2e"
+  ],
+  "source": "Windows 7 SP1 ntoskrnl/ntkrnlpa 7601 (both give the same table): the static IDT in the INIT section, word-swapped by KiSwapIDT and copied by KiSystemStartup; access word 0xEE00 is a DPL-3 interrupt gate, 0x8E00 DPL 0, 0 is not a gate",
+  "table_sha256": "01fc99407437e4872c1f27035f8ea4d623d9abfdbcff648b1fe5bd2d7e80d053",
+  "vector_0x29": {
+   "access": 0,
+   "dpl": 0,
+   "handler": null,
+   "present": 0,
+   "result": "#GP(0x14a): the SDM INT n protected-mode check fails the gate-type test, so it joins int_ring3.other_vectors",
+   "selector": 8,
+   "type": 0
+  }
+ },
+ "idtr_limit": {
+  "source": "winload.exe 1a516bc932b1: the IDTR image (limit 0x7ff, base = IDT page) loaded by the one lidt at 0x448393; the kernel keeps it (KiSystemStartup copies 0x800 bytes of its table into that page)",
+  "value": 2047
+ },
+ "int_ring3": {
+  "excluded": {
+   "42": {
+    "status": "undecided",
+    "why": "the 7601 IDT has a present DPL-3 gate at this vector (row idt.ring3_gates) with no row in `vectors`: its behaviour is the kernel's handler, which no pinned source decides; blocker: a reach certificate that no site executes int 0x2a, or a row"
+   },
+   "43": {
+    "status": "undecided",
+    "why": "the 7601 IDT has a present DPL-3 gate at this vector (row idt.ring3_gates) with no row in `vectors`: its behaviour is the kernel's handler, which no pinned source decides; blocker: a reach certificate that no site executes int 0x2b, or a row"
+   },
+   "44": {
+    "status": "undecided",
+    "why": "the 7601 IDT has a present DPL-3 gate at this vector (row idt.ring3_gates) with no row in `vectors`: its behaviour is the kernel's handler, which no pinned source decides; blocker: a reach certificate that no site executes int 0x2c, or a row"
+   },
+   "46": {
+    "status": "undecided",
+    "why": "the 7601 IDT has a present DPL-3 gate at this vector (row idt.ring3_gates) with no row in `vectors`: its behaviour is the kernel's handler, which no pinned source decides; blocker: a reach certificate that no site executes int 0x2e, or a row"
+   }
+  },
+  "other_vectors": {
+   "address": "the int instruction",
+   "applies_to": "every vector that is not a present DPL-3 gate of the 7601 IDT (249 vectors: 0x00-0x02, 0x05-0x29, 0x2f-0xff): SDM Vol 2A INT n protected-mode, a descriptor that is not an interrupt, trap or task gate, or whose DPL < CPL, is #GP(vector*8+2); entries 0x20-0x29 are zero (type 0), every other such entry is a present DPL-0 gate; the present DPL-3 gates are decided by `vectors` or listed in `excluded`",
+   "eip_advance": 0,
+   "error_code": "vector*8+2",
+   "exception_code": 3221225477,
+   "fault": "#GP",
+   "flags": 0,
+   "parameters": [
+    0,
+    4294967295
+   ],
+   "source": "Intel SDM Vol 2 INT n and Vol 3 6.12.1.1 (a user-mode int n at a vector whose gate is not DPL 3 is #GP with error code n*8+2, IDT bit set, EXT 0, saved EIP = the int instruction); Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6: segv_handler TRAP_x86_PROTFLT lines 1925-1941 (err != 0 skips is_privileged_instr; (err & 7) == 2 calls handle_interrupt, which returns FALSE at its `default` line 1804 for every vector but 0x29 and 0x2d; then EXCEPTION_ACCESS_VIOLATION, NumberParameters 2, ExceptionInformation[0] = 0, [1] = 0xffffffff, check_invalid_gs (line 1279) returns FALSE for opcode 0xCD); setup_exception_record line 1449: ExceptionAddress = EIP_sig, context Eip not advanced; segv_handler line 1905: rec = { 0 } so ExceptionFlags 0 (continuable). Precedence (2): MSDN and the WDK state nothing for these vectors; vector 0x29: Wine's case (__fastfail, Windows 8+) is out by the doc gate, and the 7601 IDT entry 0x29 is not present, gate type 0 (row idt, vector_0x29), so the SDM gives #GP(0x29*8+2), the same path as every vector of this row"
+  },
+  "source": "Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6: handle_interrupt cases ['0x2d']; segv_handler / trap_handler map ['TRAP_x86_BPTFLT', 'TRAP_x86_OFLOW'] to #OF / #BP",
+  "vectors": [
+   3,
+   4,
+   45
+  ]
+ },
+ "jmp_far": {
+  "beyond_gdt_limit": {
+   "error_code": "selector & 0xfffc",
+   "fault": "#GP",
+   "selectors": "every selector value with TI = 0 and index*8+7 > the GDT limit 0x3ff, i.e. index >= 0x80 (0x400-0xfff8 and their RPL variants)",
+   "source": "Intel SDM Vol 2A JMP far (protected mode): the descriptor lies outside the GDT limit (row gdt.limit): #GP(selector)"
+  },
+  "cpl": 3,
+  "data_descriptors": {
+   "0x20": "data, DPL 3",
+   "0x38": "data, DPL 3",
+   "0x40": "data, DPL 3"
+  },
+  "gp_selector_descriptors": {
+   "descriptors": {
+    "0x08": "code, DPL 0, non-conforming",
+    "0x10": "data, DPL 0",
+    "0x28": "system descriptor type 0x9, DPL 0",
+    "0x30": "data, DPL 0",
+    "0x50": "system descriptor type 0x9, DPL 0",
+    "0x58": "system descriptor type 0x9, DPL 0",
+    "0x70": "data, DPL 0"
+   },
+   "error_code": "selector & 0xfffc",
+   "fault": "#GP",
+   "source": "Intel SDM Vol 2A JMP far (protected mode): a code segment with DPL != CPL (non-conforming) is #GP(selector); a data segment is #GP(selector); a system descriptor that is not a call gate, task gate or available TSS is #GP(selector); an available 32-bit TSS (GDT 0x28, 0x50, 0x58, type 9) of DPL 0 < max(CPL, RPL) is #GP(selector); the data descriptors 0x20, 0x38, 0x40 are data segments: #GP(selector)"
+  },
+  "jumps": {
+   "result": "CS := selector with RPL set to CPL (0x1b), EIP := the 32-bit offset (any value: the limit is 4 GB)",
+   "selectors": [
+    24,
+    25,
+    26,
+    27
+   ],
+   "source": "Intel SDM Vol 2A JMP far (protected mode): GDT[0x18] is a present non-conforming code segment of DPL 3, RPL <= CPL <= DPL, so the far jmp is the same-privilege transfer (rows gdt.descriptors)"
+  },
+  "ldt_descriptor_0x48": "a system descriptor (type 2) or zero: #GP(selector) either way (SDM JMP far: only a code segment, call gate, task gate or TSS is a legal target)",
+  "no_call_gate_task_gate": "no descriptor of the derived GDT is a call gate (type 0xC) or a task gate (type 5); the only system descriptors are the available TSS (type 9, DPL 0) and the LDT",
+  "null_selector": {
+   "error_code": 0,
+   "fault": "#GP",
+   "selectors": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "source": "Intel SDM Vol 2A JMP far (protected mode): a null selector is #GP(0)"
+  },
+  "operand_size": 32,
+  "ti1": {
+   "error_code": "selector & 0xfffc",
+   "fault": "#GP",
+   "selectors": "every selector value with bit 2 (TI) set",
+   "source": "Intel SDM Vol 2A JMP far (protected mode): a selector in the LDT is checked against the LDT limit; the LDTR is null (row ldt.rule and sldt: a new process has the null LDTR, so every TI=1 selector indexes an empty table), so the limit is exceeded: #GP(selector)"
+  },
+  "undecided_descriptors": {
+   "indexes": [
+    "0x60",
+    "0x68",
+    "0x78",
+    "0x80",
+    "0x88",
+    "0x90",
+    "0x98",
+    "0xa0",
+    "0xa8",
+    "0xb0",
+    "0xb8",
+    "0xc0",
+    "0xc8",
+    "0xd0",
+    "0xd8",
+    "0xe0",
+    "0xe8",
+    "0xf0",
+    "0xf8",
+    "0x100",
+    "0x108",
+    "0x110",
+    "0x118",
+    "0x120",
+    "0x128",
+    "0x130",
+    "0x138",
+    "0x140",
+    "0x148",
+    "0x150",
+    "0x158",
+    "0x160",
+    "0x168",
+    "0x170",
+    "0x178",
+    "0x180",
+    "0x188",
+    "0x190",
+    "0x198",
+    "0x1a0",
+    "0x1a8",
+    "0x1b0",
+    "0x1b8",
+    "0x1c0",
+    "0x1c8",
+    "0x1d0",
+    "0x1d8",
+    "0x1e0",
+    "0x1e8",
+    "0x1f0",
+    "0x1f8",
+    "0x200",
+    "0x208",
+    "0x210",
+    "0x218",
+    "0x220",
+    "0x228",
+    "0x230",
+    "0x238",
+    "0x240",
+    "0x248",
+    "0x250",
+    "0x258",
+    "0x260",
+    "0x268",
+    "0x270",
+    "0x278",
+    "0x280",
+    "0x288",
+    "0x290",
+    "0x298",
+    "0x2a0",
+    "0x2a8",
+    "0x2b0",
+    "0x2b8",
+    "0x2c0",
+    "0x2c8",
+    "0x2d0",
+    "0x2d8",
+    "0x2e0",
+    "0x2e8",
+    "0x2f0",
+    "0x2f8",
+    "0x300",
+    "0x308",
+    "0x310",
+    "0x318",
+    "0x320",
+    "0x328",
+    "0x330",
+    "0x338",
+    "0x340",
+    "0x348",
+    "0x350",
+    "0x358",
+    "0x360",
+    "0x368",
+    "0x370",
+    "0x378",
+    "0x380",
+    "0x388",
+    "0x390",
+    "0x398",
+    "0x3a0",
+    "0x3a8",
+    "0x3b0",
+    "0x3b8",
+    "0x3c0",
+    "0x3c8",
+    "0x3d0",
+    "0x3d8",
+    "0x3e0",
+    "0x3e8",
+    "0x3f0",
+    "0x3f8"
+   ],
+   "why": "inside the GDT limit but not built by winload nor written by a decoded kernel path; the content is not derived, so the fault kind (#GP or #NP) and a possible load are not decided. No consumer treats them as loadable"
+  }
+ },
+ "ldt": {
+  "kernels": {
+   "ntkrnlpa.exe": {
+    "KPROCESS_size_zeroed": 704,
+    "KeInitializeProcess": 6736819,
+    "KiLoadLdtr": 5050688,
+    "KiSwapProcess": 4685172,
+    "KiSwapProcess_lldt": 4685294,
+    "KiSwapProcess_load": 4685241,
+    "KiSwapProcess_mov_gs": 4685227,
+    "LdtDescriptor_offset": 28,
+    "ObCreateObject_call": 6628142,
+    "PspAllocateProcess": 6627923,
+    "gdt_writes": {
+     "KTHREAD_Teb_offset": 136,
+     "KiSystemStartup_tss_access_0x89": {
+      "0x28": 5371237,
+      "0x50": 5371284,
+      "0x58": 5371401
+     },
+     "SwapContext": 4684000,
+     "load_Teb": 4684313,
+     "store_base_high": 4684335,
+     "store_base_low": 4684325,
+     "store_base_mid": 4684332
+    },
+    "memset_call": 6628168
+   },
+   "ntoskrnl.exe": {
+    "KPROCESS_size_zeroed": 704,
+    "KeInitializeProcess": 6471551,
+    "KiLoadLdtr": 4994176,
+    "KiSwapProcess": 4543796,
+    "KiSwapProcess_lldt": 4543918,
+    "KiSwapProcess_load": 4543865,
+    "KiSwapProcess_mov_gs": 4543851,
+    "LdtDescriptor_offset": 28,
+    "ObCreateObject_call": 6449977,
+    "PspAllocateProcess": 6449758,
+    "gdt_writes": {
+     "KTHREAD_Teb_offset": 136,
+     "KiSystemStartup_tss_access_0x89": {
+      "0x28": 5334373,
+      "0x50": 5334420,
+      "0x58": 5334537
+     },
+     "SwapContext": 4542624,
+     "load_Teb": 4542937,
+     "store_base_high": 4542959,
+     "store_base_low": 4542949,
+     "store_base_mid": 4542956
+    },
+    "memset_call": 6450003
+   }
+  },
+  "rule": "a new process has a zero LdtDescriptor and the null LDTR; no LDT exists until a process creates one"
+ },
+ "mov_to_sreg": {
+  "ds": {
+   "null": true,
+   "selectors": [
+    24,
+    25,
+    26,
+    27,
+    32,
+    33,
+    34,
+    35,
+    56,
+    57,
+    58,
+    59,
+    64,
+    65,
+    66,
+    67
+   ],
+   "source": "Intel SDM Vol 3A 3.4.2 and Vol 2B MOV Sreg protected-mode: DS/ES/FS/GS load a data segment or a readable code segment whose DPL >= max(CPL, RPL) (a conforming code segment: no DPL test); GDT[0x18] is the ring-3 code segment (type 0xA: execute/read, non-conforming, DPL 3, present, base 0, limit 4 GB), 0x20 the ring-3 data segment, 0x38 the TEB segment, 0x40 a DPL 3 read/write data segment (rows gdt.descriptors); every RPL 0-3 passes the DPL 3 test; the null selectors 0-3 load (the register becomes null, SDM Vol 3A 3.4.2)"
+  },
+  "es": {
+   "null": true,
+   "selectors": [
+    24,
+    25,
+    26,
+    27,
+    32,
+    33,
+    34,
+    35,
+    56,
+    57,
+    58,
+    59,
+    64,
+    65,
+    66,
+    67
+   ],
+   "source": "Intel SDM Vol 3A 3.4.2 and Vol 2B MOV Sreg protected-mode: DS/ES/FS/GS load a data segment or a readable code segment whose DPL >= max(CPL, RPL) (a conforming code segment: no DPL test); GDT[0x18] is the ring-3 code segment (type 0xA: execute/read, non-conforming, DPL 3, present, base 0, limit 4 GB), 0x20 the ring-3 data segment, 0x38 the TEB segment, 0x40 a DPL 3 read/write data segment (rows gdt.descriptors); every RPL 0-3 passes the DPL 3 test; the null selectors 0-3 load (the register becomes null, SDM Vol 3A 3.4.2)"
+  },
+  "fs": {
+   "null": true,
+   "selectors": [
+    24,
+    25,
+    26,
+    27,
+    32,
+    33,
+    34,
+    35,
+    56,
+    57,
+    58,
+    59,
+    64,
+    65,
+    66,
+    67
+   ],
+   "source": "Intel SDM Vol 3A 3.4.2 and Vol 2B MOV Sreg protected-mode: DS/ES/FS/GS load a data segment or a readable code segment whose DPL >= max(CPL, RPL) (a conforming code segment: no DPL test); GDT[0x18] is the ring-3 code segment (type 0xA: execute/read, non-conforming, DPL 3, present, base 0, limit 4 GB), 0x20 the ring-3 data segment, 0x38 the TEB segment, 0x40 a DPL 3 read/write data segment (rows gdt.descriptors); every RPL 0-3 passes the DPL 3 test; the null selectors 0-3 load (the register becomes null, SDM Vol 3A 3.4.2)"
+  },
+  "gs": {
+   "null": true,
+   "selectors": [
+    24,
+    25,
+    26,
+    27,
+    32,
+    33,
+    34,
+    35,
+    56,
+    57,
+    58,
+    59,
+    64,
+    65,
+    66,
+    67
+   ],
+   "source": "Intel SDM Vol 3A 3.4.2 and Vol 2B MOV Sreg protected-mode: DS/ES/FS/GS load a data segment or a readable code segment whose DPL >= max(CPL, RPL) (a conforming code segment: no DPL test); GDT[0x18] is the ring-3 code segment (type 0xA: execute/read, non-conforming, DPL 3, present, base 0, limit 4 GB), 0x20 the ring-3 data segment, 0x38 the TEB segment, 0x40 a DPL 3 read/write data segment (rows gdt.descriptors); every RPL 0-3 passes the DPL 3 test; the null selectors 0-3 load (the register becomes null, SDM Vol 3A 3.4.2)"
+  },
+  "rule": {
+   "beyond_gdt_limit": {
+    "error_code": "selector & 0xfffc",
+    "fault": "#GP",
+    "selectors": "every selector value with TI = 0 and index*8+7 > the GDT limit 0x3ff, i.e. index >= 0x80 (0x400-0xfff8 and their RPL variants)",
+    "source": "Intel SDM Vol 3A 3.4.2 and Vol 2B MOV Sreg protected-mode: the descriptor lies outside the GDT limit (row gdt.limit): #GP(selector)"
+   },
+   "gp_selector_descriptors": {
+    "descriptors": {
+     "0x08": "code, DPL 0, non-conforming",
+     "0x10": "data, DPL 0",
+     "0x28": "system descriptor type 0x9, DPL 0",
+     "0x30": "data, DPL 0",
+     "0x50": "system descriptor type 0x9, DPL 0",
+     "0x58": "system descriptor type 0x9, DPL 0",
+     "0x70": "data, DPL 0"
+    },
+    "error_code": "selector & 0xfffc",
+    "fault": "#GP",
+    "source": "Intel SDM Vol 3A 3.4.2 and Vol 2B MOV Sreg protected-mode: a code segment of DPL < max(CPL, RPL) that is not conforming (DS/ES/FS/GS) or a system descriptor is #GP(selector); GDT descriptors derived in rows gdt.descriptors and gdt_writes"
+   },
+   "ldt_descriptor_0x48": "GDT[0x48] is written only by a process switch to a process that has an LDT (KiLoadLdtr / KiSwapProcess, row ldt): then it is a system descriptor (type 2), #GP(selector); otherwise it is zero (#NP is not modelled): in both cases the load faults",
+   "null_ss": {
+    "error_code": 0,
+    "fault": "#GP",
+    "selectors": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "source": "Intel SDM Vol 3A 3.4.2 and Vol 2B MOV Sreg protected-mode: loading the null selector into SS is #GP(0)"
+   },
+   "ss_rpl_ne_cpl_or_dpl": {
+    "error_code": "selector & 0xfffc",
+    "fault": "#GP",
+    "source": "Intel SDM Vol 3A 3.4.2 and Vol 2B MOV Sreg protected-mode: SS needs RPL = CPL and DPL = CPL; a selector of any other RPL, a data segment of another DPL, or a segment that is not writable data (code, system) is #GP(selector)"
+   },
+   "ti1": {
+    "error_code": "selector & 0xfffc",
+    "fault": "#GP",
+    "selectors": "every selector value with bit 2 (TI) set",
+    "source": "Intel SDM Vol 3A 3.4.2 and Vol 2B MOV Sreg protected-mode: a selector in the LDT is checked against the LDT limit; the LDTR is null (row ldt.rule and sldt: a new process has the null LDTR, so every TI=1 selector indexes an empty table), so the limit is exceeded: #GP(selector)"
+   },
+   "undecided_descriptors": {
+    "indexes": [
+     "0x60",
+     "0x68",
+     "0x78",
+     "0x80",
+     "0x88",
+     "0x90",
+     "0x98",
+     "0xa0",
+     "0xa8",
+     "0xb0",
+     "0xb8",
+     "0xc0",
+     "0xc8",
+     "0xd0",
+     "0xd8",
+     "0xe0",
+     "0xe8",
+     "0xf0",
+     "0xf8",
+     "0x100",
+     "0x108",
+     "0x110",
+     "0x118",
+     "0x120",
+     "0x128",
+     "0x130",
+     "0x138",
+     "0x140",
+     "0x148",
+     "0x150",
+     "0x158",
+     "0x160",
+     "0x168",
+     "0x170",
+     "0x178",
+     "0x180",
+     "0x188",
+     "0x190",
+     "0x198",
+     "0x1a0",
+     "0x1a8",
+     "0x1b0",
+     "0x1b8",
+     "0x1c0",
+     "0x1c8",
+     "0x1d0",
+     "0x1d8",
+     "0x1e0",
+     "0x1e8",
+     "0x1f0",
+     "0x1f8",
+     "0x200",
+     "0x208",
+     "0x210",
+     "0x218",
+     "0x220",
+     "0x228",
+     "0x230",
+     "0x238",
+     "0x240",
+     "0x248",
+     "0x250",
+     "0x258",
+     "0x260",
+     "0x268",
+     "0x270",
+     "0x278",
+     "0x280",
+     "0x288",
+     "0x290",
+     "0x298",
+     "0x2a0",
+     "0x2a8",
+     "0x2b0",
+     "0x2b8",
+     "0x2c0",
+     "0x2c8",
+     "0x2d0",
+     "0x2d8",
+     "0x2e0",
+     "0x2e8",
+     "0x2f0",
+     "0x2f8",
+     "0x300",
+     "0x308",
+     "0x310",
+     "0x318",
+     "0x320",
+     "0x328",
+     "0x330",
+     "0x338",
+     "0x340",
+     "0x348",
+     "0x350",
+     "0x358",
+     "0x360",
+     "0x368",
+     "0x370",
+     "0x378",
+     "0x380",
+     "0x388",
+     "0x390",
+     "0x398",
+     "0x3a0",
+     "0x3a8",
+     "0x3b0",
+     "0x3b8",
+     "0x3c0",
+     "0x3c8",
+     "0x3d0",
+     "0x3d8",
+     "0x3e0",
+     "0x3e8",
+     "0x3f0",
+     "0x3f8"
+    ],
+    "why": "inside the GDT limit but not built by winload nor written by a decoded kernel path; the content is not derived, so the fault kind (#GP or #NP) and a possible load are not decided. No consumer treats them as loadable"
+   }
+  },
+  "ss": {
+   "null": false,
+   "selectors": [
+    35,
+    59,
+    67
+   ],
+   "source": "Intel SDM Vol 3A 3.4.2 and Vol 2B MOV Sreg protected-mode: SS needs RPL = CPL = 3 and a writable data segment of DPL 3 (GDT 0x20, 0x38, 0x40, rows gdt.descriptors); the null selector is #GP(0); a code segment (0x18) is #GP(selector)"
+  },
+  "undecided": {
+   "selectors": [],
+   "why": "every selector value the record can decide is decided by the rows above; the ones whose GDT descriptor is not derived are in `undecided_descriptors` (none of them is loadable here: the consumers fault on them)"
+  }
+ },
+ "null_seg_access": {
+  "address": "the faulting instruction",
+  "applies_to": [
+   "ds",
+   "es",
+   "fs",
+   "gs"
+  ],
+  "eip_advance": 0,
+  "error_code": 0,
+  "exception_code": 3221225477,
+  "fault": "#GP",
+  "faults": "an instruction with a memory operand whose segment register (default or by prefix) holds the null selector; lea, and a prefixed instruction without a memory operand, do not fault",
+  "flags": 0,
+  "parameters": [
+   0,
+   4294967295
+  ],
+  "privileged_check_first": {
+   "at_limit": "EXCEPTION_ILLEGAL_INSTRUCTION",
+   "otherwise": "the access violation below",
+   "prefix_limit": 15,
+   "prefix_skip": [
+    "0x26",
+    "0x2e",
+    "0x36",
+    "0x3e",
+    "0x64",
+    "0x65",
+    "0x66",
+    "0x67",
+    "0xf0",
+    "0xf2",
+    "0xf3"
+   ],
+   "priv_instruction_0f_second_bytes": [
+    "0x20",
+    "0x21",
+    "0x22",
+    "0x23"
+   ],
+   "priv_instruction_opcodes": [
+    "0x6c",
+    "0x6d",
+    "0x6e",
+    "0x6f",
+    "0xcd",
+    "0xe4",
+    "0xe5",
+    "0xe6",
+    "0xe7",
+    "0xec",
+    "0xed",
+    "0xee",
+    "0xef",
+    "0xf4",
+    "0xfa",
+    "0xfb"
+   ],
+   "result": "EXCEPTION_PRIV_INSTRUCTION"
+  },
+  "source": "Intel SDM Vol 3 3.4.2 (a memory reference through a segment register that holds the null selector is #GP(0) at that instruction); Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6: segv_handler TRAP_x86_PROTFLT lines 1925-1941 (err == 0 runs is_privileged_instr first, lines 1214-1271: prefixes skipped, 15 prefixes give EXCEPTION_ILLEGAL_INSTRUCTION, then the opcode set above gives EXCEPTION_PRIV_INSTRUCTION; otherwise EXCEPTION_ACCESS_VIOLATION, NumberParameters 2, ExceptionInformation[0] = 0, [1] = 0xffffffff because err & 7 != 4); check_invalid_gs line 1288 returns FALSE at a valid code address; setup_exception_record line 1449: ExceptionAddress = EIP_sig, Eip not advanced; segv_handler line 1905: rec = { 0 } so ExceptionFlags 0. Precedence (2): MSDN and the WDK state nothing for this case"
+ },
+ "os": {
+  "build": 7601,
+  "sha256": "623155df2ce5dec30006208c391dd9841f123ab5ca7c0153b246859fe617b460"
+ },
+ "precedence": [
+  "(1) documented Win32 for Windows 7 SP1 build 7601: MSDN and WDK 7.1",
+  "(2) Wine 9.0, only where it contradicts neither (1) nor the declared OS",
+  "(3) nothing else (ReactOS is not a source)"
+ ],
+ "selectors": {
+  "cs": {
+   "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_CODE = 0x18 (the ring-3 code segment) | RPL_MASK 3",
+   "value": 27
+  },
+  "ds": {
+   "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_DATA = 0x20 (the ring-3 data segment) | RPL_MASK 3",
+   "value": 35
+  },
+  "es": {
+   "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_DATA = 0x20 (the ring-3 data segment) | RPL_MASK 3",
+   "value": 35
+  },
+  "fs": {
+   "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_TEB = 0x38 (the TEB's segment) | RPL_MASK 3",
+   "value": 59
+  },
+  "gs": {
+   "applies_to": "every ring-3 thread whose trap frame's SegCs is the record's cs selector (all guest threads); a user CONTEXT with another RPL-3 code selector would keep its own gs",
+   "kernels": {
+    "ntkrnlpa.exe": {
+     "KeContextToKframes": {
+      "and_SegGs_0": "0x4A8E63",
+      "cmp_cs": "0x4A8E5E",
+      "copy_load": "0x4A8E69",
+      "copy_store": "0x4A8E6F",
+      "jne": "0x4A8E61",
+      "va": "0x4A8CEB"
+     },
+     "KiInitializeContextThread": {
+      "call_KeContextToKframes": "0x4B10C7",
+      "je_null_context": "0x4B0F51",
+      "or_RPL_after_call": [
+       "0x4B10CC",
+       "0x4B10D0",
+       "0x4B10D4"
+      ],
+      "test_context": "0x4B0F4F",
+      "va": "0x4B0F15"
+     },
+     "KiThreadStartup": {
+      "iretd": "0x43E4BB",
+      "jmp_out": [
+       "0x4B1220"
+      ],
+      "lea_esp_SegGs": "0x43E498",
+      "pop_gs": "0x43E49B",
+      "va": "0x4B1200"
+     },
+     "PspCreateUserContext": {
+      "stores": {
+       "cs": [
+        "0x67210B",
+        27
+       ],
+       "ds": [
+        "0x6720FF",
+        35
+       ],
+       "es": [
+        "0x6720F9",
+        35
+       ],
+       "fs": [
+        "0x6720EF",
+        59
+       ],
+       "gs": [
+        "0x6720CD",
+        0
+       ],
+       "ss": [
+        "0x672105",
+        35
+       ]
+      },
+      "va": "0x6720C8"
+     },
+     "SegCs_offset": 108,
+     "SegGs_offset": 48,
+     "value": 0
+    },
+    "ntoskrnl.exe": {
+     "KeContextToKframes": {
+      "and_SegGs_0": "0x47CE07",
+      "cmp_cs": "0x47CE02",
+      "copy_load": "0x47CE0D",
+      "copy_store": "0x47CE13",
+      "jne": "0x47CE05",
+      "va": "0x47CC8F"
+     },
+     "KiInitializeContextThread": {
+      "call_KeContextToKframes": "0x484784",
+      "je_null_context": "0x48460E",
+      "or_RPL_after_call": [
+       "0x484789",
+       "0x48478D",
+       "0x484791"
+      ],
+      "test_context": "0x48460C",
+      "va": "0x4845D2"
+     },
+     "KiThreadStartup": {
+      "iretd": "0x435B4B",
+      "jmp_out": [
+       "0x489970"
+      ],
+      "lea_esp_SegGs": "0x435B28",
+      "pop_gs": "0x435B2B",
+      "va": "0x489950"
+     },
+     "PspCreateUserContext": {
+      "stores": {
+       "cs": [
+        "0x669E81",
+        27
+       ],
+       "ds": [
+        "0x669E75",
+        35
+       ],
+       "es": [
+        "0x669E6F",
+        35
+       ],
+       "fs": [
+        "0x669E65",
+        59
+       ],
+       "gs": [
+        "0x669E43",
+        0
+       ],
+       "ss": [
+        "0x669E7B",
+        35
+       ]
+      },
+      "va": "0x669E3E"
+     },
+     "SegCs_offset": 108,
+     "SegGs_offset": 48,
+     "value": 0
+    }
+   },
+   "source": "Windows 7 SP1 (build 7601.17514) x86 kernels ntkrnlpa.exe sha256 d44e8f8420ea5040, ntoskrnl.exe sha256 d74e389d1a3ed4c7, both agreeing; _KTRAP_FRAME.SegGs = 0x30, SegCs = 0x6c (public PDB, OMAP applied; equal to WDK 7.1 ks386.inc TsSegGs / TsSegCs); KeContextToKframes stores SegGs = 0 (`and [tf+SegGs], 0`) when the trap frame's SegCs equals the record's cs selector 0x1b, and copies CONTEXT.SegGs only otherwise; KiInitializeContextThread (the user-thread initialization) calls it on the ContextFrame != 0 path and stores nothing to SegGs afterwards; KiThreadStartup reaches the exit sequence `lea esp, [frame+SegGs]; pop gs; ... iretd`, so user code starts with the frame's SegGs; PspCreateUserContext stores the same constant selectors as the record (cs, ds, es, ss, fs) and SegGs = 0",
+   "tool": {
+    "capstone": "5.0.7"
+   },
+   "value": 0
+  },
+  "ss": {
+   "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_DATA = 0x20 (the ring-3 data segment) | RPL_MASK 3",
+   "value": 35
+  },
+  "tr": {
+   "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_TSS (the task state segment selector)",
+   "value": 40
+  }
+ },
+ "sgdt": {
+  "base": {
+   "status": "undecided",
+   "why": "the GDT base is the page winload allocates; no pinned source fixes its address"
+  },
+  "limit": {
+   "source": "winload.exe 1a516bc932b1: GDTR image limit 0x3ff loaded by the one lgdt at 0x44838c",
+   "value": 1023
+  }
+ },
+ "sidt_base": {
+  "status": "undecided",
+  "why": "the IDT base is a kernel address with no documented fixed value and no pinned source"
+ },
+ "sldt": {
+  "source": "7601 kernels: KPROCESS.LdtDescriptor (+0x1c) is zero for a process that created no LDT (EPROCESS memset 0x2c0 in PspAllocateProcess), and KiLoadLdtr / KiSwapProcess load the null LDTR for a zero descriptor (row ldt)",
+  "value": 0
+ },
+ "sources": {
+  "cpumodel": {
+   "origin": "the declared CPU's cpuid as data (CPUREF: verify/cpuref.json + verify/cpuid_model.json); lift/rt/cpumodel.c is generated from it, not a source",
+   "path": "ports/fnv-nx/verify/cpuid_model.json",
+   "sha256": "e2686d03bf74e56ea57df58e8ca4518622a72b70cce690e91817459a9837daad"
+  },
+  "kernel": {
+   "capstone": "5.0.7",
+   "commit": "7229600b8dbb89fbb1ada6478b7fde3caee01434",
+   "inner_cab": {
+    "extract": "7z x package.exe -> file [0]; cabextract [0]",
+    "sha256": "e63ad1698c79dd10fcc798c1188967837b9ae6506159fb2f434ea849726822d6"
+   },
+   "kernels": {
+    "ntkrnlpa.exe": {
+     "exe": {
+      "path": "kernel/ntkrnlpa.exe",
+      "sha256": "d44e8f8420ea50401d028f4e6de4f9e9d7dfa7de0601fba25e35c2cb581304e6"
+     },
+     "pdb": {
+      "guid_age": "684DA42A30CC450F81C535B4D18944B12",
+      "path": "symbols/ntkrpamp.pdb",
+      "sha256": "abe00d22f2500615971864afc41ea381c152e22bbe25fe3ccaad582dd8d064f8",
+      "url": "https://msdl.microsoft.com/download/symbols/ntkrpamp.pdb/684DA42A30CC450F81C535B4D18944B12/ntkrpamp.pdb"
+     }
+    },
+    "ntoskrnl.exe": {
+     "exe": {
+      "path": "kernel/ntoskrnl.exe",
+      "sha256": "d74e389d1a3ed4c79ffc7c0af1c092102f13e67168ab66a9296cdde62a2c6cf8"
+     },
+     "pdb": {
+      "guid_age": "00625D7D36754CBEBA4533BA9A0F3FE22",
+      "path": "symbols/ntkrnlmp.pdb",
+      "sha256": "f0a8090d2138b26d9352eb4743b802dace5ecc6bbd26510fcf046f7825ce93f1",
+      "url": "https://msdl.microsoft.com/download/symbols/ntkrnlmp.pdb/00625D7D36754CBEBA4533BA9A0F3FE22/ntkrnlmp.pdb"
+     }
+    }
+   },
+   "loader": {
+    "winload.exe": {
+     "origin": "the same package, inner directory x86_microsoft-windows-b..vironment-os-loader_31bf3856ad364e35_6.1.7601.17514_none_5d2e241dcae8f953 (the four winload.exe of the package are byte-identical)",
+     "path": "kernel/winload.exe",
+     "pdb": {
+      "guid_age": "7BFC36F9FE254479B5448E113B3135B51",
+      "path": "symbols/winload_prod.pdb",
+      "sha256": "4b8ad365e10bd71dc3dcb5d3f030a00bc3d84de3f2bfa8bb00cd2d0eed1ff1c2",
+      "url": "https://msdl.microsoft.com/download/symbols/winload_prod.pdb/7BFC36F9FE254479B5448E113B3135B51/winload_prod.pdb"
+     },
+     "sha256": "1a516bc932b16ae132cc8a59791abd28b3b343f94b522e2491409dc689c4c8d4"
+    }
+   },
+   "package": {
+    "name": "windows6.1-KB976932-X86.exe",
+    "origin": "Windows 7 SP1 x86 standalone package, Microsoft Update Catalog (MANIFEST.json of the mirror records the URL and the inner cab)",
+    "sha1": "c3516bc5c9e69fee6d9ac4f981f5b95977a8a2fa",
+    "sha256": "e5449839955a22fc4dd596291aff1433b998f9797e1c784232226aba1f8abd97"
+   },
+   "ref": "tools/win7sp1-x86-kernel",
+   "repo": "fnv-nx-build"
+  },
+  "ks386": {
+   "origin": "Windows Driver Kit 7.1.0 (7600.16385.1), ks386.inc",
+   "path": "headers/_ks386.inc_00858",
+   "sha256": "21b726611a5608bcd21072901667fddca99bbbeb3eb4b944cf9c438b50bbab23"
+  },
+  "mirror": {
+   "commit": "09a54d413da7a42d1956b5d675033e71941ae4da",
+   "ref": "tools/wdk71-headers",
+   "repo": "fnv-nx-build",
+   "tree_sha256": "301fc827dd66a386a425a67cdf586bdd81fac68168c114bc6d8e2b833e302770"
+  },
+  "wine": {
+   "commit": "c8373ee49fb674f3fe535904d24c5670513c56e1",
+   "file": {
+    "origin": "Wine 9.0 dlls/ntdll/unix/signal_i386.c (initial thread context, is_privileged_instr)",
+    "path": "dlls/ntdll/unix/signal_i386.c",
+    "sha256": "70245021f17fae5002aaf3f2ea76f2151eb4c900a83e8ee05225e74ebf9afd0d"
+   }
+  }
+ },
+ "thread_fp_initial": {
+  "applies_to": "the initial context of every thread, the process's first thread and CreateThread threads alike: the documentation names one initial value with no per-kind difference (the INITIAL_* constants of the thread context)",
+  "mxcsr": {
+   "source": "WDK 7.1.0 winnt.h line 3251 and ntddk.h line 480 (INITIAL_MXCSR); Wine 9.0 dlls/ntdll/unix/signal_i386.c line 2498 (call_init_thunk, initial context)",
+   "value": 8064
+  },
+  "x87_control_word": {
+   "source": "WDK 7.1.0 winnt.h line 3252 and ntddk.h line 481 (INITIAL_FPCSR); Wine 9.0 dlls/ntdll/unix/signal_i386.c line 2496 (call_init_thunk, initial context)",
+   "value": 639
+  }
+ },
+ "tss_io_bitmap": {
+  "exception": "EXCEPTION_PRIV_INSTRUCTION",
+  "ports_permitted": [],
+  "source": "Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6: is_privileged_instr returns EXCEPTION_PRIV_INSTRUCTION for every in/out/ins/outs form with no per-port test (the instruction set is L3b's sdm_priv_rows.tsv, iopl class, not restated here), i.e. a Win32 user process has no permitted port; the documentation names the TSS I/O map (WDK 7.1 ks386.inc TssIoMapBase = 0x66, PrIopmOffset = 0x6E) and the exception (MSDN EXCEPTION_PRIV_INSTRUCTION: an instruction not allowed in the current machine mode) but states no permitted port for a user process, so it does not contradict Wine (precedence 2); with IOPL 0 (row eflags) every such instruction at CPL 3 is #GP(0), delivered as that exception",
+  "value": "no port permitted"
+ }
+}

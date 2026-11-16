@@ -2,7 +2,7 @@
 """Gate "objstub" (fnvnx-gate/1, classes 1 and 2 of VERDICT.md): no built function holds a trap/abort path or is vacuous (rules and proofs: objstub.py).
     python3 -I gate_objstub.py [--jobs N]     cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/objstub.json
 Roots come from verify/admit.json, never from arguments: for every product root the gate calls gate_build.ensure(root, GATE_CACHE) (build or
-cache hits) and judges what the recipe says (RECIPE.md): the objects (os_layer ones may hold SVC), the constants table (key (unit, symbol))
+cache hits) and judges what the recipe says (RECIPE.md): the objects (os_layer ones may hold SVC; their `.fnvnx.const` records are the declared constants, there is no constants table)
 and the terminator set DERIVED from the recipe's compiler: objstub.unit_terminators runs the compiler's own plugin over the preprocessed text
 of every C/C++ unit (the stage result unit.ii of the build, found by the pp_key in objects.json), so the set is a function of the compiler,
 its flags and every header the unit really includes (a function of the compiler and the header set; the finer key is the preprocessor stage
@@ -15,8 +15,8 @@ holds "wine_fixme": {id: call sites} so growth of the simplified bodies is visib
 Declared-machine rows: `<root>/declared_machine.tsv` of every admitted root of the tree under test (objstub.read_root_tables),
 judged by the same rule as the Wine rows through `fnvnx_declared_machine(id)`; the result holds "declared_machine": {id: call sites}. Seven fields per row (the
 7th is the last error); the `std:` citations and the lasterror values are checked against the pinned documents of verify/declared_sources.json (declared_pins).
-Reach facts: GATE_CACHE/reach/<git tree>/reach.facts.tsv (rows fact_id<TAB>sha256, written by the gate `reach`, which does not exist yet).
-While the file is absent, every call of fnvnx_reach_violation is the finding `reach-uncertified`.
+Reach facts: GATE_CACHE/reach/<git tree>/reach.facts.tsv (rows fact_id<TAB>sha256, written by the gate `reach`, which runs before this gate: gates.d/objstub.json `needs` it).
+While the file is absent (reach red) the one finding `reach-facts-missing` stands for every call of fnvnx_reach_violation.
 Universe: every function of every object of every product root, every uncovered gap, and a root whose recipe is invalid or whose build is
 red (one item `root`, uncertified). Certified: items with no finding. uncertified: every `unit path:symbol`, sorted. Per object results
 are cached by (object sha256, os_layer flag, analysis version, the terminators the object mentions) under GATE_CACHE/objstub/<key>.json;
@@ -51,30 +51,30 @@ def profile_findings(root, target, objs):
 
 
 def root_check(root, repo, cache, jobs, built=None):
-    """-> (results {unit path: analysis}, rows {(unit path, symbol): row}, ids of the objects of generated units, root-level findings [(id, name, kind, detail)],
+    """-> (results {unit path: analysis}, ids of the objects of generated units, root-level findings [(id, name, kind, detail)],
     the root's `error_abi` (recipe) or None, the root's handler records (recipe empty_handlers) or None, image, ext); BUILT, when given, receives {root: build result} of a green build (doubles.py)"""
     roots = recipe.load_admit(repo)
     rec = recipe.load_recipe(repo, roots, root)
     try:
         res, _ = gate_build.ensure(root, cache, repo)
     except recipe.RecipeError as e:
-        return {}, {}, set(), [("-", root, "recipe-invalid", "; ".join(e.errors)[:200])], None, None, {}, {}
+        return {}, set(), [("-", root, "recipe-invalid", "; ".join(e.errors)[:200])], None, None, {}, {}
     if res["status"] == "red":
         f = res["failure"]
-        return {}, {}, set(), [("-", f["stage"].split(":", 1)[-1] if ":" in f["stage"] else root, "build-red",
+        return {}, set(), [("-", f["stage"].split(":", 1)[-1] if ":" in f["stage"] else root, "build-red",
                                 "root %s stage %s: %s" % (root, f["stage"], " ".join(f.get("stderr") or [])[:160])[:300])], None, None, {}, {}
     if built is not None:
         built[root] = res
     if recipe.entry_of(roots, root).get("target") != "guest":   # the analysis plugin is bound to the guest compiler (RECIPE.md "Plugins"): host roots are not product code, no stub-gate judgment
-        return {}, {}, set(), [], None, None, {}, {}
+        return {}, set(), [], None, None, {}, {}
     base = root + "/"
     objs = [(base + o["unit"], o["object"]) for o in res["objects"]]
     objs += [("%s%s(%s)" % (base, m["archive"].lstrip("/"), m["member"]), m["object"]) for m in res.get("link_archives", [])]   # pulled archive members
     finds = profile_findings(root, recipe.entry_of(roots, root).get("target"), objs)
     if finds:
-        return {}, {}, set(), finds, None, None, {}, {}
+        return {}, set(), finds, None, None, {}, {}
     drv = dict(zip(("c", "c++"), recipe.host_compilers(rec, cache)))
-    store, names, bad, rets = os.path.join(cache, "store"), set(), [], {}
+    store, names, bad = os.path.join(cache, "store"), set(), []
     pin = recipe.load_pin(repo)   # a guest root's libc headers are the pinned compiler tree's (guest_compiler.json "external": the one tree holds the runtime); a host root's the distribution's
     rt_at = ((pin or {}).get("external") or {}).get("at")
     sjdirs = (rt_at,) if rt_at and recipe.entry_of(roots, root).get("target") == "guest" else objstub.SYSTEM_SJ
@@ -83,15 +83,14 @@ def root_check(root, repo, cache, jobs, built=None):
     for lang, ext in (("c", recipe.CC_EXT), ("c++", recipe.CXX_EXT)):
         us = [(k, unitstage.result_file(store, k, "unit.ii"), lang) for u, k in sorted(res["pp_keys"].items()) if u.endswith(ext)]
         if us:
-            ns, _, errs = objstub.unit_terminators(drv[lang], us, {"c": recipe.unit_flags(rec, roots, root, drv["c"], "c"), "c++": recipe.unit_flags(rec, roots, root, drv["c++"], "cxx")}, cache, jobs, rets, sjdirs, (res.get("analysis_plugin") or {}).get("path"),
+            ns, _, errs = objstub.unit_terminators(drv[lang], us, {"c": recipe.unit_flags(rec, roots, root, drv["c"], "c"), "c++": recipe.unit_flags(rec, roots, root, drv["c++"], "cxx")}, cache, jobs, sjdirs, (res.get("analysis_plugin") or {}).get("path"),
                                             rootplug)
             names |= set(ns)
             unit_of = {k: u for u, k in res["pp_keys"].items()}
             bad += [(base + unit_of[k], unit_of[k], "terminator-red", "root %s: %s" % (root, e)[:300]) for k, e in errs]
     if bad:   # the terminator set of the root is incomplete: its objects cannot be judged, each failing unit is a finding
-        return {}, {}, set(), bad, None, None, {}, {}
+        return {}, set(), bad, None, None, {}, {}
     os_ids = {base + o["unit"] for o in res["objects"] if o["os_layer"]}
-    rows = objstub.read_rows(res["constants"], base) if res["constants"] else {}
     eh = rec.get("empty_handlers")
     records = objstub.read_handler_records(recipe.resolve_foreign(root, eh["cover"], repo, cache, rec)[0], recipe.resolve_foreign(root, eh["syntax"], repo, cache, rec)[0]) if eh else None
     abi = rec.get("error_abi")
@@ -107,12 +106,8 @@ def root_check(root, repo, cache, jobs, built=None):
         image = {"bodies": n, "fixed_failure": sum(1 for _, k, _ in ff if k == "fixed-failure"), "unjudged": sum(1 for _, k, _ in ff if k == "unjudged")}
         finds = [(base + rec["link"]["output"], name, kind, d) for name, kind, d in ff]
     gen = {base + u for u in recipe.generated_outputs(rec)}   # the units a generator stage of the recipe outputs: the domains of `assume_violation`
-    ext = {}   # {object id: (error type, success value, {function: return type})}: the units of an external library with a declared error convention
-    for u, k in res["pp_keys"].items():
-        conv = (rec.get("external_errors") or {}).get(u.split("/", 1)[0]) if "/" in u else None
-        if conv and rec.get("sources"):   # a unit `<external>/<path>` is a copy of that external's file (recipe `sources`)
-            ext[base + u] = (conv["type"], conv["success"], rets.get(k, {}))
-    return objstub.analyse_all(objs, names, os_ids, cache, jobs, probe, 183 if recipe.entry_of(roots, root).get("target") == "guest" else 62), rows, gen, finds, abi, records, image, ext
+    ext = {base + u for u in res.get("ext_units", {})}   # the objects of units copied from a pinned external of the recipe: the recipe's own record of provenance (objects.json ext_units)
+    return objstub.analyse_all(objs, names, os_ids, cache, jobs, probe, 183 if recipe.entry_of(roots, root).get("target") == "guest" else 62), gen, finds, abi, records, image, ext
 
 
 def declared_pins(repo, cache):
@@ -132,8 +127,8 @@ def main(argv):
     tmp = None if os.environ.get("GATE_CACHE") else tempfile.mkdtemp(prefix="gate-objstub-")
     cache, repo = os.environ.get("GATE_CACHE") or tmp, "."
     stats = {}   # counts of the rule-H certifications and of the trap bodies
-    items, finds, why, results, rows, roots, image = [], [], "", {}, {}, gate_build.buildable_roots(repo), {}
-    extconv, built, dstats = {}, {}, {"tests_total": 0, "tests_with_doubles": 0, "double_symbols": 0}
+    items, finds, why, results, roots, image = [], [], "", {}, gate_build.buildable_roots(repo), {}
+    external, built, dstats = set(), {}, {"tests_total": 0, "tests_with_doubles": 0, "double_symbols": 0}
     fails, handlers = {}, {}   # {object id: the root's error_abi}, {object id: the root's handler records}
     gen_ids = set()
     try:
@@ -142,8 +137,8 @@ def main(argv):
         owners = objstub.read_owner_decisions(os.path.join(repo, "CLAUDE.md"))   # the owner-decision anchors of the tree under test
         facts = objstub.read_facts(os.path.join(cache, "reach", gate_build.tree_of(repo), "reach.facts.tsv")) if roots else None
         for root in roots:
-            r, w, gm, fs, abi, records, im, ex = root_check(root, repo, cache, jobs, built)
-            extconv.update(ex)
+            r, gm, fs, abi, records, im, ex = root_check(root, repo, cache, jobs, built)
+            external.update(ex)
             image = {k: image.get(k, 0) + v for k, v in im.items()}
             gen_ids |= gm
             results.update(r)
@@ -151,12 +146,11 @@ def main(argv):
             handlers.update({o: records for o in r} if records else {})
             if abi:
                 fs = fs + objstub.error_abi_findings(r, list(r), abi)
-            rows.update(w)
             finds += fs
             items += [(i, n) for i, n, _, _ in fs]
         rp = os.path.join(repo, "ports/fnv-nx/verify/ASSUMPTIONS.json")   # of the tree under test; a tree without one has no OWNER id: every `assume` call is red
         registry = {e["id"]: e["status"] for e in json.load(open(rp))["entries"]} if os.path.exists(rp) else {}
-        its, fs = objstub.judge(results, rows, facts, wine, declared, fails, handlers, stats, extconv, (registry, gen_ids), owners)
+        its, fs = objstub.judge(results, facts, wine, declared, fails, handlers, stats, external, (registry, gen_ids), owners)
         items, finds = items + its, finds + fs + (objstub.orphan_findings(results, row_owner) if roots else [])
         adm = recipe.load_admit(repo)
         dit, dfs, dstats = doubles.judge(built, {r for r in built if adm[recipe.split_spec(r)[0]]["class"] == "test"})   # no doubles in tests (doubles.py)

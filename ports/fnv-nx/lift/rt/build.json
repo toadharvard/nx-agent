@@ -19,7 +19,7 @@
   "ports/fnv-nx/lift/rt/gen",
   "ports/fnv-nx/platform/include",
   "ports/fnv-nx/hostabi/include",
-  "ports/fnv-nx/contract/include"
+  "ports/fnv-nx/contract/exporthdr/include"
  ],
  "units": "all",
  "link": null,
@@ -184,7 +184,7 @@
    "output": "INCLUDE"
   },
   {
-   "root": "ports/fnv-nx/contract/include",
+   "root": "ports/fnv-nx/contract/exporthdr/include",
    "output": "INCLUDE"
   }
  ],
