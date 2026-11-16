@@ -1401,3 +1401,16 @@ Paused: w3b, w4, farm; no other work.
     - Answer: none. render/gl4 is a host root (admit target host, x86_64 gcc-13, libnxgl4.so loaded by the L4 boot machine). Its EGL definer is the declared link.libs.system /usr/lib/x86_64-linux-gnu/libEGL.so.1, from the env.json debs (libegl1 plus libegl-mesa0/mesa-libgallium).
     - Rule proposed: a host root's definers are the dynamic exports of its link.libs.system files, plus ld's linker-defined symbols (`_GLOBAL_OFFSET_TABLE_`).
     - No guest object may reference egl*.
+- 02:05Z w6 83e44f5f1 (w6-root) accepted as a step. render/bridgefacts uncertified 16 → 3 (whole-set gate_pure 82/94). Outputs byte-identical vs bdb3ad1a2 (D9_SPEC 8add21bb…). d3d9total 332/332, test 45/45, test_env_ident ok. Rules applied:
+    - m[n] for re.Match;
+    - cexpr (an ast evaluator) in place of eval;
+    - sibling imports through genlaunch;
+    - dont_write_bytecode and sys.modules deleted;
+    - explicit import lists;
+    - sorted sets.
+  Follow-ups for w6, all doing:
+    - (1) render/gl4 recipe build fails with JSONDecodeError at bdb3ad1a2 and at head. It was green at dfcdc9f67. Find the cause.
+    - (2) gen_bridge reads D9_ROWS (rule 2) instead of importing d9rows.
+    - (4) cexpr's skip on NotConst becomes exact by grammar: function-like macros expand from their header #define (MAKEFOURCC), a non-expression body is not a constant, an undefined name stops. D9_SPEC diff to be reported.
+    - (3) Blocked (L1): gen_expr's import of d3d9_expr needs one cross-root import rule shared by recipe and puregate.
+- bottleneck: gl4 build red (w6, cause unknown); L1 cross-root import rule; w28 PURE/linkstrict host boundary; farm1 sm_link; the cand4 base.
