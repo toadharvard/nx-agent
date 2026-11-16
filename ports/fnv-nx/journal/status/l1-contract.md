@@ -2436,3 +2436,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - L6 w7 3d93234: 11 d3d9.dll records (every spec-signed export; 3 undocumented ones have no signature, so they are red if imported); the g_exports hand table is deleted; new check root render/total/d3d9exports (row set = spec set). Accepted.
 - Blocked: contract/exports gen:0 is red on lift/rt cpumodel.c:59 "fnvl_msvcrt_adjust_fdiv undeclared" (record before declaration). Owner L3a, sent now.
 - bottleneck: cand3b verdict at 597f2e007.
+
+## 2026-11-16 04:14
+- L3a base3 330e873c7: the cpumodel.c record follows its definition. lift/rt has 3 reds left, all L2 on the farm pin (dispatch.c ENTRY1-CONT cast; decltype "no declaration line (fnvnx_dispatch)" in msvcrt_ci.cc and msvcrt_eh.cc). Sent to L2 (the decltype writer takes the declaration from the tree, not a source line).
+- bottleneck: cand3b verdict at 597f2e007.
