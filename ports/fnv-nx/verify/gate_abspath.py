@@ -10,7 +10,7 @@ Universe (from the stage graph, by rule, no list of files): the Python files of
       file of that name (the importer's directory first; with none there, every tracked file of that module path: a superset), and a string constant
       naming a tracked `.py` file (relative to the file's directory or to the checkout root) is a launch edge (gate_contract.py runs bodysel.py).
       A dynamic import that cannot be resolved (importlib.import_module / __import__ / spec_from_file_location / runpy with a non-constant
-      argument) is red `abspath:dynamic-import:FILE:LINE`, unless its target expression is the result of require_mounted(...) or require_under(...)
+      argument) is red `abspath:dynamic-import:FILE:LINE`, unless its target expression is the result of require_mounted(...)
       of recipe.py (a call, or a name all of whose assignments are such calls): those guards raise outside the stage's mounts or the given tree.
 A file outside the closure is not judged. Findings are read from the ast, never from the text:
   abspath:literal:FILE:LINE:VALUE   a str constant that is an absolute path ("/" then a name) and is used as a path: it is, or is inside an argument
@@ -24,7 +24,7 @@ A file outside the closure is not judged. Findings are read from the ast, never 
                                     __file__, __path__ or sys.argv[0] (through names, os.path.dirname/join/abspath, pathlib `/` and .parent) and
                                     resolves outside the tree the stage mounts for that tool (the owner tree of the file: recipe.tree_of, all of its
                                     files are mounted at /tool): any `..` that leaves it. Inside the tree it is a mounted file (green); through
-                                    require_mounted/require_under it is guarded (green).
+                                    require_mounted it is guarded (green).
   abspath:home:FILE:LINE            `~` paths, os.path.expanduser, Path.home().
 Report: the global count of findings per file with the commit; red iff there is any finding or any dynamic import.
 Proof: a stage opens only what its key mounts; a literal absolute path outside the mount prefixes, an environment default, or a home path names

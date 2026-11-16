@@ -282,6 +282,26 @@ Readers of the record: gate_tlsmodel (the relocations of the linked ELF), contra
   its content in the step's key (`recipe.run_input_sources`; `all_units_of` leaves it out). Every other source of the root is a unit under the existing rules (`cxx_origin`),
   and in a generated-only root it is red: a source is a declared run input or a unit, nothing else. Tests: `tests/test_runinsrc.py` (the rule), `tests/test_run.py` family (builds).
 
+### Tool steps (`exec`)
+
+`{"name", "exec", "args", "inputs", "debs", "outputs", ["dirs", "scratch", "timeout_s", "host_cpu"]}` is a `run` step with `exec` (an absolute path of a program of the
+declared debs) in place of `artifact`: the way to run a build tool chain (bash, make, gcc, tar) hermetically, for example the compiler stages.
+- The stage's root is the declared system: the union of the installed files of `debs` (two debs that ship one path with different content are red), each top-level
+  directory mounted at its own path (`/usr`, `/etc`, `/var`, ...) as a read-only input, each top-level symlink (base-files' `/bin`, `/lib`, `/lib64`, `/sbin`) a
+  sandbox link. So the kernel starts dynamic programs through their own PT_INTERP, and a program runs its children by PATH (`/usr/bin:/bin`). The trees are stage inputs: the key holds their
+  content, not the package version (envcheck pins the packages to the machine).
+- `inputs` are at `/in/1`, `/in/2`, ... in list order, as for an artifact step; a ref `{"stage": "<this root>:gen:I" | "<this root>:run:NAME", "path": P}` is a file or
+  directory output of an earlier step of this root (a red producer blocks the step).
+- `dirs` are directory outputs (see "Directory outputs"); `scratch` lists absolute paths of writable tmpfs directories (a build works out of tree there; nothing survives,
+  they are no outputs; in the key); `timeout_s` (default 7200) kills the step, as a red `run:<root>:<name>`.
+- The job count is the environment variable `JOBS` of the step (the build's job count). It and the timeout are outside the key (sandbox `unkeyed`): they change how long a step
+  takes, not what it computes. A step whose output depended on JOBS would be a non-deterministic build, and the determinism gate reds it.
+- An input `{"plugin": NAME}` (a name in the root's `plugins`) is the stage's `/out` tree of that plugin (`NAME.so`), built by the plugin stage against the root's `compiler`
+  external (its `-print-file-name=plugin` headers): a stage input, so the step's key holds the plugin's content, and a plugin source change re-runs that step and what reads it, not the steps before it.
+  A root that builds a compiler in two steps is two roots: the first (the stage-1 compiler, a directory output), the second with `compiler` = that output as a stage external
+  (`{name, root, output, at}`), `plugins` and the final step taking `{"plugin": NAME}` inputs.
+Tests: `tests/test_toolstep.py`, `tests/test_sandbox.py` case 13.
+
 ### Stage refs
 
 `resolve_input` takes a third ref form `{"stage": "ROOT:gen:I" | "ROOT:run:NAME", "path": P}`: the declared output P of generator I (index in
@@ -360,7 +380,7 @@ red generator is blocked by it (never run on a missing path). Tests: `tests/test
 
 `recipe check` is red with `gen:file-escape:<root>:gen:<I>:<FILE>:<LINE>:<PATH>` when a generator tool, or a module of its import closure, reads a file by a path
 built from `__file__`, `__path__` or `sys.argv[0]` that leaves the tree the stage mounts the file from (a `..` above the tree), or that the rule cannot decide (a
-non-constant part). A resolved file inside the mounted tree and a read through `require_mounted`/`require_under` are green. Data of another root comes only through a
+non-constant part). A resolved file inside the mounted tree and a read through `require_mounted` are green. Data of another root comes only through a
 declared `uses` input, passed to the tool as an argument (as `--lib` is) or read through `require_mounted`. One implementation: `pathflow.escapes` (the abspath gate's
 `abspath:escape` calls the same function). Tests: `tests/test_genescape.py`, `tests/test_gate_abspath.py`.
 
