@@ -1452,6 +1452,14 @@
    "status": "REMOVE",
    "removed_by": "planned: an import fact from the exe and modules. Any export that nothing imports gets a reach-violation certificate; the others need a source.",
    "owner": "L6+L1"
+  },
+  {
+   "id": "ASM-234",
+   "text": "A VirtualProtect/WriteProcessMemory/FlushInstructionCache call site whose target range may lie in an image is not shown to leave the image's code unmodified until the points-to; the site is listed OPEN (protect_sites.tsv).",
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: the whole-program points-to (l3a-lift-w4-001 design)",
+   "owner": "L3a"
   }
  ]
 }
