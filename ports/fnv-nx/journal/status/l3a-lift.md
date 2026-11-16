@@ -1275,3 +1275,12 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - The shard byte-identity check runs in the next farm round with w7's batch, which needs the exe and FACTS. w8 merges ccfcffd72 together with sdmgate.
 - udsail stage: waiting for the isla pin form (w28, with L3b's pins). w28 sends it to w13 directly.
 - bottleneck: unchanged (the L2 ENTRY1-CONT atomic rule).
+
+## 2026-11-16 02:00: lift/rt at base3 8579f3baf (split pushed)
+- lift/rt: 9 of 12 units built, 3 red, in two classes. Both are rulings to L2 (fnvnx_order and dispatch plugins); the source stays.
+  - dispatch.c: ENTRY1-CONT on the generic `__atomic_store`. The rule: atomic builtins over one entry-holding type T are a same-type copy.
+  - enter.cc and unhandled.cc: fnvnx_order refuses `__builtin_setjmp`/`__builtin_longjmp`. The rule: RTL-expanded builtins with pointer memory effects get fences as for an unknown fnspec (release before a write, acquire after a read, none after noreturn). This is the existing order_builtin_call rule, extended to the class.
+- Bare `_CxxThrowException`, referenced by platform/crt/cxx_bodies.cpp:16 and :104. Owner: L3a, lift/rt; worker w8.
+  - Rule: one core and two ABI entries. The bare C entry raises at the guest call site of the import bridge that runs the native body, then leaves the native frames through the imp.h nframe non-local exit.
+  - Test: a msvcrttest image, try/catch(bad_alloc), built over the real roots.
+- bottleneck: L2's two plugin rules, which block lift/rt → the 7-symbol table → the ELF.
