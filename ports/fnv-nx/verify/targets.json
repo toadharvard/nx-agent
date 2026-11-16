@@ -155,7 +155,23 @@
     {
      "assumption": "ASM-004"
     }
+   ],
+   "fpcr": [
+    {
+     "doc": "DDI0488H",
+     "section": "14.4.1 Floating-point Control Register",
+     "quote": "[26] AHP 0 IEEE half-precision; [25] DN 0 NaN operands propagate; [24] FZ 0 flush-to-zero disabled; [23:22] RMode 0b00 Round to Nearest; [21:0] RES0 (trap enables clear)"
+    },
+    {
+     "assumption": "ASM-008"
+    }
    ]
+  },
+  "fpcr": {
+   "AHP": 0,
+   "DN": 0,
+   "FZ": 0,
+   "RMode": 0
   }
  },
  "references": {

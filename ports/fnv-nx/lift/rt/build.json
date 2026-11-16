@@ -199,6 +199,16 @@
   {
    "root": "ports/fnv-nx/contract/include",
    "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/contract/target",
+   "output": "INCLUDE"
+  }
+ ],
+ "include_uses": [
+  {
+   "root": "ports/fnv-nx/contract/target",
+   "output": "INCLUDE"
   }
  ],
  "outputs": {
