@@ -14,7 +14,7 @@ input is in exactly one stage; the lists are STAGE1_INPUTS / STAGE2_INPUTS, and 
     python3 -I stamp.py [--patch FILE] [--build FILE] [--patch-dir DIR] [--verify DIR] [--targets FILE]   -> the 16-hex key on stdout   (defaults: this checkout's)"""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import argparse
 import hashlib
 import json
@@ -38,7 +38,7 @@ def build_values(root=None, verify=None, targets=None, recipe=None):
     verify = verify or os.path.join(root or TREE, "verify")
     if recipe is None:
         sys.path.insert(0, verify)
-        from verify import recipe
+        from fnvnx.verify import recipe
     t = json.load(open(targets or os.path.join(verify, "targets.json")))
     pin = json.load(open(os.path.join(verify, "guest_compiler.json")))
     v1 = {"triplet": t["guest_platform"]["triplet"], "abi": t["guest_platform"]["abi"], "code": t["guest_platform"]["code"],
@@ -52,7 +52,7 @@ def plugin_inputs(root=None, recipe=None):
     """-> [tree-relative path]: every file the plugins are built from, read from the recipe's own declaration (PLUGIN_SOURCES and their include closure;
     the runtime is compiled with all of the plugins, so a change to any of these is another plugin ABI in the pinned runtime)."""
     if recipe is None:
-        from verify import recipe
+        from fnvnx.verify import recipe
     root = root or TREE
     roots = recipe.load_admit(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(recipe.__file__))))))   # the recipe's own admitted roots (which root holds a plugin)
     held = sorted(recipe.TREE + "/" + os.path.relpath(os.path.join(d, n), root).replace(os.sep, "/") for d, _, ns in os.walk(root) for n in ns)

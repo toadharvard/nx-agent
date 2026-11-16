@@ -7,7 +7,7 @@ object: key (MSVC's decorated type name), size, align, members, bases; every typ
 unknown plugin argument is an error. No network, no game data. Run: python3 -I <this file> from the checkout root."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import re
 import glob
 import os
@@ -18,11 +18,10 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import plugbuild as pb  # noqa: E402
-sys.path.insert(0, os.path.join(HERE, '..', '..', 'link'))
-import ctypes_compat as cc  # noqa: E402
+from fnvnx.link import ctypes_compat as cc  # noqa: E402
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'layout', 'decltype_spell.inc')) as _f:
     REASONS = cc.decltype_reasons(_f.read())
-from verify import gate_abi  # noqa: E402
+from fnvnx.verify import gate_abi  # noqa: E402
 import json  # noqa: E402
 import subprocess  # noqa: E402
 
