@@ -2968,3 +2968,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - 919f09277: Wine and declared rows are root-owned (objstub.read_root_tables, duplicate ids red, orphan findings, verify/ tables deleted).
   - The rows return with their roots: L6 render/d3d9 (wine 2, 3, 10-15, 20-25, 40-54); L5 platform (wine 200-202, dm 2-12).
   - Admit at 4eb5a2bd4 is 1064 of 1064. Bare cross-root imports are 15 (lift/proof 11, manifest 3, lift/gates 1), sent to their owners.
+- Ruling on modules.py (w28):
+  - platform-served = a declared name with no file. An image = a file whose import closure resolves. A file whose closure does not resolve is `load-fails`: LoadLibrary returns NULL, 126, and it is never served natively.
+  - Split: the first entry, from the declared set and files only, writes modules.tsv, modules.c, tls, exports and each image's import NAMES from the PE directory. `modules iat`, with bridge.tsv as input, writes the keys and iat tables.
+  - reached reads the import names from the first entry, so there is no cycle.
+- w28-c5 heads: 2276c64a3 (gate_pure, empty --lib) and 919f09277 (root-owned rows).
