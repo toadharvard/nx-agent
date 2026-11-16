@@ -2560,3 +2560,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:53
 - cand3b 02f26b3de (w15 = w28 c3bwalk 3478d9f07): tree-content memo, and the rootfs memo hands out copies (fixes the shared-input-list bug of 65bfa6f16 that w28 found). Supersedes 099681332. The farm runs the verdict at 02f26b3de, cold then warm.
 - bottleneck: cand3b verdict at 02f26b3de.
+
+## 2026-11-16 04:54
+- L3a base3 0596da7f4: assumptions gate 144/144 mentions, 123 entries, 5 findings (ASM-329 stray in l3a-lift.md, plus 617/619/621 from the stale render/). L3a takes render/ from L6 d98bb7faa and fixes its status line.
+- w28 farm at e3ea4f5ac: test_runpython 5/0, test_stageref_cost 4/0, test_foreach_dynamic 3/1 (the test's count; fixed at 0d2a5f765, no recipe change), test_sandbox 9a 27/0.
+- bottleneck: cand3b verdict at 02f26b3de.
