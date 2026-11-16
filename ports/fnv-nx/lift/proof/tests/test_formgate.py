@@ -157,7 +157,7 @@ class Green(unittest.TestCase):
                 with open(os.path.join(out, 'forms.json')) as fh:
                     txt = fh.read()
                 d = json.loads(txt)
-                self.assertEqual(sorted(d), ['certified', 'detail', 'format', 'name', 'status', 'uncertified', 'universe'])
+                self.assertEqual(sorted(d), ['certified', 'detail', 'format', 'name', 'status', 'uncertified', 'uncertified_n', 'universe'])
                 self.assertEqual(txt, json.dumps(d, sort_keys=True, separators=(',', ':')) + '\n')
 
 
