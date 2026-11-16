@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.join(HERE, '..', '..'))
 from proof import certbasis, certs_build, model_sail, prove, shape, symform, x86sys
 
 model_sail.configure(os.environ['FNVNX_SAIL_WORK'], os.environ['FNVNX_SAIL_IR'], os.environ['FNVNX_ISLA'])   # the declared inputs of this test (the same three as test_model_patches); no default
-XPATH = os.path.join(HERE, '..', '..', '..', 'platform', 'declared', 'x86sys.json'); XSHA = x86sys.configure(XPATH)    # the declared machine of this tree, passed explicitly (--x86sys)
+sys.path.insert(0, HERE); import declared_x86sys; XPATH = declared_x86sys.PATH; XSHA = declared_x86sys.configure()    # the declared machine of this tree, passed explicitly (--x86sys)
 
 WORK = tempfile.mkdtemp()    # this test's own scratch directory
 MD = shape.decoder()

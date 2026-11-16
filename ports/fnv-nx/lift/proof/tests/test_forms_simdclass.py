@@ -3,6 +3,8 @@
 each Form's C text also emitted by the DSL emitter (to_c_inline).  Expected values come from the SDM text (rounding, indefinite, priority rows), not from the code under test.   test_forms_simdclass.py  (exit 0 = all pass)"""
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import declared_x86sys; declared_x86sys.configure()
 import capstone as CS, z3
 from proof import forms
 from fnvlift import dsl

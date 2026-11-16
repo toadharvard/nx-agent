@@ -9,6 +9,8 @@ Numeric checks evaluate the Form with z3 on concrete states. Negative cases: a 3
 import os, random, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import declared_x86sys; declared_x86sys.configure()
 import capstone, z3
 from capstone import x86 as X
 from fnvlift import core

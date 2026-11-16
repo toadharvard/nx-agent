@@ -4,6 +4,8 @@
 python3 -I tests/test_simdcheck.py"""
 import os, sys, unittest
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE)); sys.path.insert(0, os.path.join(HERE, '..', '..'))
+sys.path.insert(0, HERE)
+import declared_x86sys; declared_x86sys.configure()
 import simdcheck as C
 S = C.S
 

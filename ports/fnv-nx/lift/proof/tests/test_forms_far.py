@@ -3,6 +3,8 @@
 not from the code under test.  Run through forms.build and the DSL's z3 semantics, and through the DSL emitter.   test_forms_far.py  (exit 0 = all pass)"""
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import declared_x86sys; declared_x86sys.configure()
 import capstone as CS, z3
 from proof import forms
 from fnvlift import x86sys

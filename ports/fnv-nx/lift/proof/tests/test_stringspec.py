@@ -8,7 +8,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
 from proof import stringspec, x86sys  # noqa: E402
 
-x86sys.configure(os.path.join(HERE, '..', '..', '..', 'platform', 'declared', 'x86sys.json'))      # the declared machine of this tree, explicit
+sys.path.insert(0, HERE)
+import declared_x86sys; declared_x86sys.configure()      # the declared machine of this tree, explicit
 
 OPS = ('a4', 'a5', 'aa', 'ab', 'ac', 'ad', 'a6', 'a7', 'ae', 'af')
 WORD = ('66a5', '66ab', '66ad', '66a7', '66af')

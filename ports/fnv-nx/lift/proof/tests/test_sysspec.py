@@ -8,6 +8,8 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
+sys.path.insert(0, HERE)
+import declared_x86sys
 from fnvlift import inputs
 from proof import shape, sysspec, x86sys
 
@@ -26,7 +28,7 @@ REC = {'format': 'fnvnx-x86sys/2', 'selectors': {'cs': row(0x1b), 'tr': row(0x28
 
 def _complete(fixture):
     """the fixture's rows over a complete record (the tree's): the Forms read fnvlift.x86sys from the same one input and need every row it names; the rows the fixture states replace the tree's, key by key"""
-    with open(os.path.join(HERE, '..', '..', '..', 'platform', 'declared', 'x86sys.json')) as fh: base = json.load(fh)
+    with open(declared_x86sys.PATH) as fh: base = json.load(fh)
     for k, v in fixture.items(): base[k] = dict(base[k], **v) if isinstance(v, dict) and isinstance(base.get(k), dict) else v
     return base
 

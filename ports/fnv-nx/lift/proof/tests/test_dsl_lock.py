@@ -3,6 +3,8 @@
     dsl_lock_test.py     (exit 0 = all pass)"""
 import os, re, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import declared_x86sys; declared_x86sys.configure()
 import capstone
 from fnvlift import core
 from proof import lift_dsl as f_dsl
