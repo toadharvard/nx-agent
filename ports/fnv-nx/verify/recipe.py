@@ -1654,6 +1654,10 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
                     err += external_of_errors("run[%d].inputs" % i, p, root, rec, roots, repo)
                 elif is_include_of(p):
                     err += include_of_errors("run[%d].inputs" % i, p, root, rec, roots, repo)
+                elif is_archive(p):
+                    err += archive_errors("run[%d].inputs" % i, p, root, rec, roots, repo)
+                    if not tool:
+                        err.append("run[%d].inputs: an archive input is for a tool step (exec) only" % i)
                 elif isinstance(p, dict) and set(p) == {"plugin"}:   # the built plugin of this root (its .so), mounted like a stage input
                     if not (tool and p["plugin"] in [x.get("name") for x in rec.get("plugins", []) if isinstance(x, dict)]):
                         err.append("run[%d].inputs: plugin %r is not declared in this root's `plugins` (or the step is no tool step)" % (i, p["plugin"]))
@@ -2834,6 +2838,26 @@ class Job:
                 for o in step_outputs(g):
                     self.blocked[o] = f["stage"]
 
+    def archive_tree(self, ws, tmp, n, ref):
+        """The tree {lib.a} of archive input REF: the objects of root REF["archive"], built objects-only through the stage cache (the same build a link offers), as ar_bytes in
+        unit order. Its content is the key: a changed unit of the root is a changed archive. A red root is red here (blocked, never an empty archive)."""
+        owner = ref["archive"]
+        r = self.arts.get("archive:" + owner)
+        if r is None:
+            r = self.arts["archive:" + owner] = build(self.repo, owner, self.store, tempfile.mkdtemp(dir=ws), self.jobs, self.extcache, link=False)
+            self.keys |= set(r["stage_keys"])
+        if r["status"] != "green":
+            f = r.get("failure") or {}
+            raise BuildRed({"stage": "archive:" + owner, "exit": f.get("exit"), "stderr": ["archive input %s is red: stage %s" % (owner, f.get("stage"))] + list(f.get("stderr", []))[-18:]})
+        if not r["objects"]:
+            raise BuildRed({"stage": "archive:" + owner, "exit": None, "stderr": ["archive input %s has no objects" % owner]})
+        d = os.path.join(tmp, "ar%d" % n)
+        os.makedirs(d)
+        objs = sorted(r["objects"], key=lambda o: o["unit"])
+        with open(os.path.join(d, "lib.a"), "wb") as f:
+            f.write(ar_bytes([("%05d.o" % i, open(o["object"], "rb").read()) for i, o in enumerate(objs)]))
+        return cas.ingest(d, self.store)
+
     def run_one(self, ws, i, g):
         """Stage `run:<root>:<name>`: executes the artifact (the linked output of an admitted root) in the sandbox. It sees the artifact at /art/<output>,
         the declared inputs at /in/<ident>, each declared deb's installed files at /deb/<name>/<absolute path>, and writes /out. Key = artifact
@@ -2875,6 +2899,8 @@ class Job:
                 ins.append({"at": at, "tree": cas.ingest(self.external_of_host(ws, ref), self.store)})
             elif is_include_of(ref):   # the include closure of another root: its tracked trees, repo-relative
                 ins.append({"at": at, "tree": self.include_of_tree(ref)})
+            elif is_archive(ref):   # the objects of a `uses` root as one archive, keyed by the content of its members (recipe.ar_bytes)
+                ins.append({"at": at, "tree": self.archive_tree(ws, tmp, n, ref)})
             else:   # {external, path} or {stage, path}: resolve_input is the one reader
                 host, _ = resolve_input(self.root, ref, self.repo, os.path.dirname(self.store), self.rec, self.extcache)
                 ins.append({"at": at, "tree": cas.ingest(host, self.store)})
@@ -3848,6 +3874,34 @@ def is_external_of(ref):
 def is_include_of(ref):
     """REF is the input form {"include_of": ROOT}: the tracked trees of ROOT's include closure (RECIPE.md "The include closure of a root")."""
     return isinstance(ref, dict) and set(ref) == {"include_of"} and isinstance(ref["include_of"], str)
+
+
+def is_archive(ref):
+    """REF is the run-step input form {"archive": ROOT}: the objects of guest product root ROOT as one archive (RECIPE.md "Archive inputs")."""
+    return isinstance(ref, dict) and set(ref) == {"archive"} and isinstance(ref["archive"], str)
+
+
+def archive_errors(where, ref, root, rec, roots, repo="."):
+    """[str]: the ONE rule of the `archive` input (check, and the mount). Red: a ref of another shape; ROOT is this root; not an admitted root; not a root this recipe `uses`;
+    its recipe cannot be read, has no units, or has another compiler record than this root (the objects of another compiler are not this root's libraries)."""
+    if not is_archive(ref):
+        return ["%s: %r is not {archive: ROOT}" % (where, ref)]
+    owner, me = ref["archive"], split_spec(root)[0]
+    if owner == me:
+        return ["%s: archive names this root itself: its objects are built by this recipe, not input to it" % where]
+    if owner not in roots:
+        return ["%s: archive %s is not an admitted root" % (where, owner)]
+    if owner not in {u.get("root") for u in (rec.get("uses") or []) if isinstance(u, dict)}:
+        return ["%s: archive %s is not a root this recipe `uses` (declare the dependency)" % (where, owner)]
+    try:
+        orec = load_recipe(repo, roots, owner)
+    except (OSError, ValueError, RecipeError) as e:
+        return ["%s: the recipe of %s cannot be read: %s" % (where, owner, str(e)[:200])]
+    if not isinstance(orec, dict) or not orec.get("units") or not orec.get("compiler"):
+        return ["%s: %s is no product root with units and a compiler" % (where, owner)]
+    if orec.get("compiler") != rec.get("compiler"):
+        return ["%s: %s is built by another compiler record than this root (an archive of objects needs the same compiler)" % (where, owner)]
+    return []
 
 
 def include_of_dirs(owner, roots, repo="."):

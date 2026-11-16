@@ -7,7 +7,7 @@
 # (records.py cc), configure's link tests answered by rule CFG-LINK (toolchain/gcc/cfg_link.py: the linker's own archive closure over the runtime; no start files: the
 # product link has its own entry, so the test link line has none: -nostartfiles).
 set -euo pipefail
-trap 'rc=$?; for l in /scratch/w/b/config.log /scratch/w/make.log; do [ -f "$l" ] && { echo "== $l: tail"; tail -n 6 "$l"; } >&2; done; echo "stage failed: line $LINENO: $BASH_COMMAND (exit $rc)" >&2; exit $rc' ERR
+trap 'rc=$?; for l in /scratch/w/b/config.log /scratch/w/bs.log /scratch/w/make.log; do [ -f "$l" ] && { echo "== $l: tail"; tail -n 6 "$l"; } >&2; done; echo "stage failed: line $LINENO: $BASH_COMMAND (exit $rc)" >&2; exit $rc' ERR
 SCRIPT_DIR_IN=/in
 RECREC=/in/2; MKUNITS=/in/3; CFG_LINK_PY=/in/4; GUEST_LD=/in/5; PROTO_SRC=/in/6; RECORDS=/in/7; TARBALL=/in/8; GCC=/in/9
 PY=/usr/bin/python3.12
@@ -35,6 +35,9 @@ export CC="$GCC/bin/$T-gcc ${SEMANTICS[*]}" LDFLAGS=-nostartfiles
 "$SRC/configure" --host=none-unknown-elf --disable-assembly --disable-shared --enable-static --disable-cxx > ../configure.log 2>&1
 cp "$RECREC" "$W/ccrec"; chmod +x "$W/ccrec"
 export CCREC_LOG=$W/compiles.log
+# the generated headers and tables (fib_table.h, mp_bases.h, ...) are the Makefile's own BUILT_SOURCES, made by its gen-* programs with the build compiler: all of them first, by the Makefile's own variable
+printf 'print-built-sources:\n\t@echo $(BUILT_SOURCES)\n' > "$W/bs.mk"
+make -j"$JOBS" $(make -s -f Makefile -f "$W/bs.mk" print-built-sources) > ../bs.log 2>&1
 make -j"$JOBS" CC="$W/ccrec" AR=true RANLIB=true libgmp.la > ../make.log 2>&1
 "$PY" -I "$MKUNITS" "$W/b" "$SRC" "$CCREC_LOG" "$OUT_DIR"
 echo "gmpgen:u" > "$OUT_DIR/units.list"   # the `sources` line: the units are the files of this step's directory output u (RECIPE.md, Generated sources)
