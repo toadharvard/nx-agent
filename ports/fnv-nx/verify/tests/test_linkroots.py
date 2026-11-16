@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Tests for recipe.resolve_link_root and its use in link_errors: a link.roots entry is the root's recipe for the image's own target. Pure."""
+import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
@@ -46,7 +49,8 @@ check("a written link.roots is a check error (the members are derived)", len(e) 
 lk.pop("roots")
 e = [x for x in recipe.link_errors(lk, "ports/fnv-nx/zg", set(), roots, set(), REPO, files, "") if "link.roots" in x]
 check("an image without link.roots has no link.roots error", e == [], e)
-SHA = "ports/fnv-nx/shim"
+SHA = "ports/fnv-nx/zs"
+roots[SHA] = {"path": SHA, "class": "product", "target": "guest", "recipe": "ports/fnv-nx/zs/build.json"}   # a guest root of the fixture (no admitted root is needed)
 TB = {"tool": "ports/fnv-nx/verify/sandbox.py", "args": ["--out", "x"], "unit": "gen/tab.cc", "section": ".fnvnx.disp"}
 terr = lambda tb: [x for x in recipe.link_errors(dict(lk, tables=tb), "ports/fnv-nx/zg", set(), roots, set(), REPO, files, "") if "link.tables" in x]
 check("a well-formed link.tables entry has no error", terr([TB]) == [], terr([TB]))
@@ -54,11 +58,18 @@ for what, bad in (("an unknown key", dict(TB, x=1)), ("a tool that is not tracke
                   ("an absolute unit path", dict(TB, unit="/gen/tab.cc")), ("a section without the dot", dict(TB, section="fnvnx.disp")), ("args that are not strings", dict(TB, args=[1]))):
     check("link.tables: %s is a check error" % what, len(terr([bad])) == 1, terr([bad]))
 check("link.tables: two entries with one unit are a check error", len(terr([TB, dict(TB)])) == 1, terr([TB, dict(TB)]))
-cg = recipe.link_candidates(roots, "ports/fnv-nx/zg", "guest", REPO)
-check("link candidates of a guest image: admitted product roots with a recipe for the guest target, never the image itself, no unadmitted root",
-      SHA in cg and "ports/fnv-nx/zg" not in cg and "ports/fnv-nx/zh" not in cg, cg)
-roots[SHA] = dict(roots[SHA], variants={"host": {"target": "host"}})   # the root as a guest root with a host variant
-ch = recipe.link_candidates(roots, "ports/fnv-nx/zh", "host", REPO)
-check("a host image's candidates are resolved to the host recipe of each root (shim, declared here with a host variant)", SHA + "@host" in ch or SHA in ch, ch)
+FIX = tempfile.mkdtemp(prefix="linkroots-")   # the fixture root's own recipe (a guest root with no link), in a tree of its own
+try:
+    os.makedirs(os.path.join(FIX, "ports/fnv-nx/zs"))
+    with open(os.path.join(FIX, "ports/fnv-nx/zs/build.json"), "w") as f:
+        json.dump({"format": "fnvnx-recipe/1", "profile": "guest", "flags": {"c": [], "cxx": [], "asm": []}, "include": [], "units": "all"}, f)
+    cg = recipe.link_candidates(roots, "ports/fnv-nx/zg", "guest", FIX)
+    check("link candidates of a guest image: admitted product roots with a recipe for the guest target, never the image itself, no unadmitted root",
+          SHA in cg and "ports/fnv-nx/zg" not in cg and "ports/fnv-nx/zh" not in cg, cg)
+    roots[SHA] = dict(roots[SHA], variants={"host": {"target": "host"}})   # the root as a guest root with a host variant
+    ch = recipe.link_candidates(roots, "ports/fnv-nx/zh", "host", FIX)
+finally:
+    shutil.rmtree(FIX, ignore_errors=True)
+check("a host image's candidates are resolved to the host recipe of each root (a fixture root declared here with a host variant)", SHA + "@host" in ch or SHA in ch, ch)
 print("FAILED %d" % fails if fails else "all pass")
 sys.exit(1 if fails else 0)
