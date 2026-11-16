@@ -176,6 +176,20 @@
    }
   },
   {
+   "path": "ports/fnv-nx/contract/exports",
+   "class": "tool",
+   "target": "host",
+   "entry": [],
+   "recipe": "ports/fnv-nx/contract/exports/build.json"
+  },
+  {
+   "path": "ports/fnv-nx/contract/reached",
+   "class": "tool",
+   "target": "host",
+   "entry": [],
+   "recipe": "ports/fnv-nx/contract/reached/build.json"
+  },
+  {
    "path": "ports/fnv-nx/contract/target",
    "class": "tool",
    "target": "host",

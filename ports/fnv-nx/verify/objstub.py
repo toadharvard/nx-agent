@@ -2143,6 +2143,7 @@ def declared_header(lines):
                 raise ValueError("declared machine table header: a source form is not PREFIX:<..>:<function>: %r" % s.group(1)[:80])
             fn = r":[A-Za-z_][A-Za-z0-9_@]*"
             forms = {"std": r":(?:C11:[0-9]+(?:\.[0-9]+)*|POSIX\.1-2017:[A-Za-z_][A-Za-z0-9_]*)"}   # `std:<doc>:<section>`: the clause of ISO/IEC 9899:2011 (N1570) or the IEEE Std 1003.1-2017 function page; no function component
+            forms["steamworks-sdk"] = r":[A-Za-z0-9_./+-]+#[A-Za-z_][A-Za-z0-9_]*"   # `steamworks-sdk:<header>#<function>`: a function declared in a header of the Steamworks SDK (the interface galaxywrp.dll exports); the function follows `#`
             body = r":[A-Za-z0-9_./#+-]+" + fn
             return set(m.group(1).split(" | ")), "(" + "|".join(re.escape(x.group(1)) + forms.get(x.group(1), body) for x in prefixes) + ")"
     raise ValueError("declared machine table has no header line `# fact: ...; source: ...; kind ...`")
@@ -2217,7 +2218,7 @@ def read_declared_table(path, std_index=None, winerr=None):
     """declared_machine.tsv: `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value<TAB>lasterror`; lines starting with # are comments. fact is one of
     the facts of the table's header line. source is the documented origin of the returned value: one or several tokens joined by `|` (sorted, unique, each of the
     forms the header lists): `win-doc:<Windows documentation page or header path>:<function>`, `wine-9.0:<path in the Wine source tree>:<function name>`,
-    `galaxy-sdk:<page>:<function>`, `hostabi:<header>:<service>`, and `std:<doc>:<section>`: the standard's own clause, `std:C11:<clause number>` (ISO/IEC 9899:2011,
+    `galaxy-sdk:<page>:<function>`, `steamworks-sdk:<header>#<function>` (a body cites the documentation of the interface its dll exports: galaxywrp.dll exports the Steam API), `hostabi:<header>:<service>`, and `std:<doc>:<section>`: the standard's own clause, `std:C11:<clause number>` (ISO/IEC 9899:2011,
     draft N1570) or `std:POSIX.1-2017:<function page>` (IEEE Std 1003.1-2017 System Interfaces). The FORM is validated here; a std token is also checked against the
     pinned index (STD_INDEX: the callable that returns the directory of the std-index tree of declared_sources.json, called once, only when a std token occurs; the
     clause or page must be in the index; None with a std token is an error). Checking win-doc/wine references against a pinned tree is the oracle class, not done.
