@@ -88,7 +88,8 @@ def sym_constraint(code, ranges, eip_sym):
     if eip_sym: cs += ['(= code_base ((_ extract 47 0) rip))', '(bvult rip #x%016x)' % EIP_LIMIT]
     return '(and %s)' % ' '.join(cs)
 
-SEG_FREE = tuple(x for i, x in enumerate(SEG) if x != 'seg_visibles=[#x002b; 6]' and not (i + 1 < len(SEG) and SEG[i + 1] == 'seg_visibles=[#x002b; 6]'))
+FREE_SEG_REGS = ('seg_visibles=[#x002b; 6]', 'seg_hidden_attrs=[#x0c9a; 6]')      # the registers a Form that reads a selector leaves free: the selectors and their hidden attributes, tied by seg_domain (bases and limits stay the flat literals: the declared descriptors are flat)
+SEG_FREE = tuple(x for i, x in enumerate(SEG) if x not in FREE_SEG_REGS and not (i + 1 < len(SEG) and SEG[i + 1] in FREE_SEG_REGS))
 SYMSEL = False      # set by prove.prove_one: the Form reads the segment selectors (sel_*), so the six selectors of the initial state are free (isla gives each element a fresh symbol) instead of the literal 0x2b
 SELREG = ('es', 'cs', 'ss', 'ds', 'fs', 'gs')      # isla prints the register seg_visibles (vector(6, dec, bits(16))) as (_ vec v0 .. v5), element i = rt/fnvl.h SEG_* i (checked: push ds / es / gs proved only in this order)
 
@@ -285,6 +286,10 @@ def run_path(tag, trace, pre, fault=False, extra=None):
         elif h == 'assume': pass                      # the --reset-constraint of a shape run: holds by construction of `extra` (sym_constraint)
         elif h == 'read-reg':
             r = regname(ev[1]); v = unwrap(ev[3])
+            if r == 'seg_hidden_attrs' and isinstance(ev[3], list) and ev[3][:2] == ['_', 'vec']:       # free hidden attributes: element i = the variable attr_<segment>, tied to the selector by seg_domain
+                for s, e in zip(SELREG, ev[3][2:]):
+                    if e in env.pending and e not in env.v: env.v[e] = z3.BitVec('attr_' + s, 16)
+                continue
             if r == 'seg_visibles' and isinstance(ev[3], list) and ev[3][:2] == ['_', 'vec']:       # free selectors: element i of the pre-state = the DSL variable sel_<segment>
                 for s, e in zip(SELREG, ev[3][2:]):
                     if e in env.pending and e not in env.v: env.v[e] = z3.BitVec('sel_' + s, 16)
@@ -397,13 +402,43 @@ def eip_nowrap(terms, eip):
         if not pairs: return terms
         terms = [z3.simplify(z3.substitute(t, *pairs.values())) for t in terms]
 
+def seg_attrs_of(rec, sel):
+    """the model's hidden-attribute word (16 bits) of the descriptor the record gives selector `sel`: type, S, DPL, P from the descriptor's high dword bits 15:8, AVL, L, D/B, G from bits 23:20 (the layout of the literal seg_hidden_attrs of SEG, 0x0c9a for the 0x00cf9a00 descriptor; model/segmentation_structures.sail:84-98 bitfield data_segment_descriptor_attributesbits: g 11, d_b 10, l 9, avl 8, p 7, dpl 6:5, s 4, type msb 3, e 2, w 1, a 0)"""
+    d = rec['gdt']['descriptors']['0x%02x' % ((sel >> 3) * 8)]['high_dword']
+    return ((d >> 8) & 0xff) | (((d >> 20) & 0xf) << 8)
+
+
+def seg_domain():
+    """the pre-states of a run whose Form reads a selector: each segment register holds a NON-NULL selector the declared machine lets it hold (its initial selector, mov_to_sreg, for CS the far-jump targets; read through x86sys) and
+    its hidden attributes are those of that selector's descriptor, a code selector in a data register excepted (see the MODEL CLAUSE note).  The null selector is outside it: its fault is the record's null_seg_access row (the Windows rule, no Sail model clause), proved by the Form's own spec."""
+    from fnvlift import x86sys
+    rec = x86sys.REC; cl = []
+    for s in SELREG:
+        held = {x86sys.SEL[s]} | (set(x86sys.MOV_TO_SREG[s][0]) if s in x86sys.MOV_TO_SREG else set())
+        if s == 'cs': held.update(rec['jmp_far']['jumps']['selectors'])
+        held = {v for v in held if v >> 3}      # the null selector (index 0) is outside the domain
+        if s != 'cs': held = {v for v in held if (v >> 3) not in x86sys.CODE_INDEX}      # MODEL CLAUSE: store_bytes_to_ea reads the writable bit w = bit 1 of the type, which is the READ bit of a code descriptor, and has no code-type test but seg_reg == 1 (CS): a code selector in a data register is outside what the model decides; the DSL's fault for it is checked against the SDM spec (sysspec_store.py)
+        sel, att = z3.BitVec('sel_' + s, 16), z3.BitVec('attr_' + s, 16)
+        cl.append(z3.Or(*[z3.And(sel == v, att == seg_attrs_of(rec, v)) for v in sorted(held)]))
+    return z3.And(*cl)
+
+
 def _post(code, pre, out_err, extra, extra_assume=None):
     out, err = out_err; blocks = split_blocks(out); ok, bad = [], []
     for hdr, tr in blocks:
         (ok if hdr and hdr.startswith('Result: (_ unit)') else bad).append((hdr, tr))
+    ncalls = len(re.findall(r'Calling x86_', err)); msgs = isla_errors(err); ordered_k = None
+    if bad and SYMSEL:            # a fault path whose condition is infeasible under the segment domain (seg_domain) is outside the run's pre-states, not a model fault; the attribution of messages to paths needs one error call per path
+        ordered = [re.sub(r'\\+"', '"', m).strip('"') for m in re.findall(r'Calling x86_(?:fault|model_error)<\w+>\(\["(.*?)"\]\)', err)]
+        if len(ordered) == len(bad) == ncalls:
+            dom = seg_domain(); keep = []
+            for i, (_, tr) in enumerate(bad):
+                sv = z3.Solver(); sv.add(dom, *run_path('d%d' % i, tr, pre, True, extra).pc)
+                if sv.check() != z3.unsat: keep.append(i)
+            bad = [bad[i] for i in keep]; ncalls = len(bad); ordered_k = [ordered[i] for i in keep]; msgs = sorted(set(ordered_k))
     if bad:
-        msgs = isla_errors(err); first = bad[0][0] or ''
-        if (ok or getattr(FAULT_OK, 'declared', False)) and msgs and set(msgs) <= FAULT_OK and len(re.findall(r'Calling x86_', err)) == len(bad): faults = [tr for _, tr in bad]; bad = []
+        first = bad[0][0] or ''
+        if (ok or getattr(FAULT_OK, 'declared', False)) and msgs and set(msgs) <= FAULT_OK and ncalls == len(bad): faults = [tr for _, tr in bad]; bad = []
         else: faults = []
     else: faults = []
     if bad and extra is not None and any((h or '').startswith('Error Timeout') for h, _ in bad): raise ModelBound(err[-120:].replace('\n', ' '))
@@ -419,9 +454,20 @@ def _post(code, pre, out_err, extra, extra_assume=None):
     asm = [s for p in paths for s in p.side]
     LAST.clear(); LAST.update(paths=len(ok), fault_paths=len(faults), fns=list(FNS))
     side = list(asm); nofault = None
-    if faults: nofault = z3.Not(z3.Or(*[run_path('f%d' % i, tr, pre, True, extra).pc for i, tr in enumerate(faults)])); asm.append(nofault)
+    nowrite = z3.BoolVal(True)      # no fault path: the model never takes :NON-WRITABLE-SEGMENT
+    if faults:
+        nowrite = None
+        fpcs = [run_path('f%d' % i, tr, pre, True, extra).pc for i, tr in enumerate(faults)]
+        nofault = z3.Not(z3.Or(*fpcs)); asm.append(nofault)
+        if ordered_k is not None and len(ordered_k) == len(faults): ordered = ordered_k
+        else: ordered = [re.sub(r'\\+"', '"', m).strip('"') for m in re.findall(r'Calling x86_(?:fault|model_error)<\w+>\(\["(.*?)"\]\)', err)]
+        if len(ordered) == len(faults):          # the error calls of the run, one per fault path, in the order of the paths; any other count: no attribution (nowrite stays None and prove.py refuses a store form)
+            wp = [z3.And(*pc) if pc else z3.BoolVal(True) for pc, m in zip(fpcs, ordered) if m == ':NON-WRITABLE-SEGMENT']
+            nowrite = z3.Not(z3.Or(*wp)) if wp else z3.BoolVal(True)
     if asm: ret['assume'] = z3.And(*asm)
     ret['side'] = z3.And(*side) if side else z3.BoolVal(True)       # closed constraints on free values (undefined / nondeterministic results): satisfiable for every pre-state iff satisfiable at all
     ret['nofault'] = nofault if nofault is not None else z3.BoolVal(True)       # the pre-state conditions under which the model does not fault
+    if SYMSEL: extra_assume = seg_domain() if extra_assume is None else z3.And(extra_assume, seg_domain())
     if extra_assume is not None: ret['domain'] = extra_assume
+    if nowrite is not None: ret['nowrite'] = nowrite
     return ret
