@@ -89,6 +89,10 @@ def main(argv):
     roots = admit.get("roots", [])
     bad, graph, why, universe = set(), {}, "", []
     errs = imports_errors(roots)
+    files = sorted(os.path.join(d, f) for d, _, fs in os.walk(TREE) for f in fs if f.endswith(".py"))   # the checkout's python files: the gate reads the checkout
+    derived, derr = gate_admit.derived_imports(roots, files, ".")
+    errs += derr
+    roots = [dict(r, imports=derived.get(r.get("path"), [])) for r in roots]
     entry, eerr = entries(roots)
     errs += eerr
     if errs:

@@ -2,6 +2,7 @@
 # reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """gate_admit.judge: every tracked file under a root (the nearest one), the class of the root one of CLASSES, no row naming gates."""
 import os
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -92,6 +93,7 @@ atexit.register(shutil.rmtree, tempfile.tempdir, True)
 import gate_build as gbd  # noqa: E402
 rp = tempfile.mkdtemp(prefix="admit-roots-")
 os.makedirs(rp + "/ports/fnv-nx/verify")
+subprocess.run(["git", "init", "-q", rp], check=True)   # load_admit derives the imports from the tracked files
 json.dump({"roots": [{"path": T + "/p", "class": "product"}, {"path": T + "/t", "class": "test"}, {"path": T + "/v", "class": "tool"}]},
           open(rp + "/ports/fnv-nx/verify/admit.json", "w"))
 check("the build family judges the product and the test roots; the other gates keep the product roots",

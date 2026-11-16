@@ -17,9 +17,6 @@
   {
    "path": "ports/fnv-nx/contract",
    "class": "tool",
-   "imports": [
-    "ports/fnv-nx/link"
-   ],
    "entry": [
     "ports/fnv-nx/contract/exefacts.py",
     "ports/fnv-nx/contract/n1.py",
@@ -50,9 +47,6 @@
   {
    "path": "ports/fnv-nx/manifest",
    "class": "tool",
-   "imports": [
-    "ports/fnv-nx/contract"
-   ],
    "entry": []
   },
   {
