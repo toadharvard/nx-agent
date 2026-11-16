@@ -5,6 +5,7 @@ Z3_RLIMIT: the z3 resource limit (Solver.set('rlimit', N), z3's own deterministi
   of this line in a reviewed commit, never a choice made from run results; it only decides how much work an item may take before it is reported, never what a result means.
 Z3_RLIMIT_REFINE: the resource limit of simdsplit's query over an exponent interval of several values (a bisection strategy: both halves are a complete partition of the interval, so the value
   changes the path of the proof, never a result's meaning).  A pinned strategy constant (2^24), not read from runs.
+  Rationale: it only chooses where bisection splits.  Both halves are a complete partition and each is decided under Z3_RLIMIT, so no verdict depends on it.
 BOUND: the result class of an item whose query answered `unknown` at a bound.  It is red: no certificate, counted and reported by its class (CERTS.md), never a verdict.
 isla has no bound here: `isla-execute-function` is run without --timeout (see model_sail.run_isla).
 Source of the parameter: z3's documented `rlimit` solver parameter (z3 -p / Solver.set)."""

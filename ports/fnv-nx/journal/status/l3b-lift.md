@@ -466,3 +466,43 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - red (owner L3a w13): udsail at 183e1ebef. All 6 baddecode sequences are GAP: isla returns no path on the ctrs vector spelling. w13 is to read the IR via formgate.ir_path (8b711fba) and rerun once.
 - doing: SIMD shards 1 and 2 (farms 1 and 3).
 - next: the prover as a recipe stage over ISLA/MODEL, with a pinned deterministic bound in place of the TIMEOUT wall clock.
+
+## 2026-11-16 04:35Z (claude/fnv-l3b-lift 38b25ee43)
+- done (7fc353a5e, 6ca68da31, 38b25ee43, worker a263326f7dfe45d17): no clock decides any prover verdict.
+  - z3 rlimit is pinned in lift/proof/bounds.py (Z3_RLIMIT = 2^32-1, which bounds only non-termination; REFINE 2^24 only splits the bisection).
+  - The class `timeout` becomes `bound` (red). isla runs with no clock, and a run that never ends is killed with its stage (no verdict).
+  - The SIMD path is the same.
+  - lift/proof/tests: 39 files, 216 ran, 39 skipped, 0 failed.
+- done (825bf19d6, worker a3994d45035f1f412): the x86ir pin lives only in lift/proof/sailmodel/build.json; formgate.ir_file reads it through the recipe. external_of and include_of taken from L1 (987dbde31, 94058b16b).
+- done (w4, efef73cbe): integer aggregation of the 4 new shards, 3 certificates. Model gaps: 501, of which 444 are inside the pack universe (SHAPES union l3b-lift/shapes @77524556, 26,500 shapes) and 368 of those are unimplemented in x86isa.
+  - v3 migration: stamped 0 of 18,187 (prover_sha differs). All go to one re-prove on the recipe stage.
+- blocked (owner L1 w28): foreach reading a stage-output table. The prover queue is derived from the exe, so it cannot be a tracked file. It blocks the prover root and the re-prove.
+- asked (L3a lead): reachability of the 368 unimplemented-opcode keys (arpl, bound, ins/outs, mov sreg, call far). If unreachable, the code-range rule removes them; otherwise the orchestrator rules on the SDM source.
+- doing: farm 2 runs L3a facts jobs (w7, w13); SIMD shards 1 and 2 (farms 1 and 3, prover eb53b3aa7, wall clock: a measurement).
+
+### 2026-11-16 04:40Z: reachability of the 368 model-gap keys; prover identity
+- Reachability census (w7): fnv-nx-build l3a-lift/udreach/f5d49d6fa, facts @f5d49d6fa. Covers the exe, atimgpud, binkw32, libvorbis, libvorbisfile and gdffalloutnv; d3dx9_31/38 pending.
+  - 333 of the 368 keys have no site in the entry ranges.
+  - 1,667 sites of 35 keys are in the ranges.
+  - 87 sites are under a proven root: rdtsc 3, int3 5, xlat 1, mov r/m16 from a segment register (66 8c) 78.
+  - 1,580 sites have only a candidate root. They are owned by L3a's code-range rule.
+- The source of semantics for the 4 proven-reachable classes (OWNER 10 SDM spec) is asked of the orchestrator. Blocked: orchestrator ruling.
+- prover_sha is the import closure of the prover modules (w4 73445881c, 25 files). Under review, not taken: relative imports, the importlib load in x87spec, data files, and the catch-all in stale_reason are sent back to w4.
+- The re-prove queue (w4) has 18,697 rows. It is not published and is rebuilt as a recipe stage output.
+  - Its universe is taken from the facts stage's shapes_<img>.tsv.
+  - Blocked: L1 w28, foreach over a stage-output table.
+
+### 2026-11-16 05:00Z: OWNER 10 system specs (orchestrator integ b4aad1930)
+- The 35 model-gap keys in the code universe (1,667 sites, facts @f5d49d6fa; d3dx9 pending), measured at bec2c4e74 (w-sys bb4a0cf4d merged):
+  - 33 are proved by sysspec, sysspec_gap, sysspec_int and stringspec.
+  - 2 are uncertified:
+    - cd00 int n: 255 of 256 vectors; row int_ring3.excluded.41 is undecided.
+    - ea ljmp far: the descriptor rows (sgdt) are undecided.
+    - Blocked: L5 rows, sent to the L5 lead at 04:50Z.
+- Form defect: mov r/m16 and r32 from Sreg read a free variable instead of sel_<reg>. Fixed in forms_move. L3a relifts through shape_sha.
+  - The class rule (every free variable of a Form is a declared DSL input) is with worker a2633, together with the stringspec prefix scan.
+- lift/proof/tests at bec2c4e74, every tests/*.py by exit status: 46 files, 45 exit 0. The failing file is fpc_host.py, which base3 deletes (5297ac9d0); it is deleted in the base3 merge.
+- prover_sha is the import closure plus data files, with exclusions derived from the recipe roots: w4 c2c3d9e04, merged in c7400a5fd.
+- shapeprove root (w4): steps closure → queue → prove (foreach) → certs.
+  - It is being re-merged with base3 30030c1e8 hunk by hunk; the first merge, 156930ac2, dropped base3 work.
+  - Then the 3-row build on farm 4.

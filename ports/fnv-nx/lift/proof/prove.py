@@ -77,7 +77,7 @@ def _bounded():
 def check(conds, assume, args):
     """`assume` AND (c1 OR ... OR cn) is checked as the n queries `assume` AND ci, one after the other (a complete case split of the disjunction: the disjunction is unsat iff
     every ci is; a sat ci gives a model of the whole).  Each query is much smaller than the disjunction (one register / flag / the memory), which the solver
-    decides in seconds where the disjunction takes minutes.  -> (sat, solver with the model) | (unknown, s) at the first query that times out | (unsat, s)"""
+    decides in seconds where the disjunction takes minutes.  -> (sat, solver with the model) | (unknown, s) at the first query that is `unknown` at the bound | (unsat, s)"""
     s = _bounded(); s.add(assume)
     for c in conds:
         s.push(); s.add(c); r = s.check()
