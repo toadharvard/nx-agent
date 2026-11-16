@@ -1237,3 +1237,15 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - JTAB_RED: 326 (w13's class report).
 - Doing (w13): close the class "Python branch on a symbolic field" (L3b immsel: 12 of 321,376 instances fail, int 3/4/0x2d).
 - bottleneck: the 3 facts farms on the merged facts2 head, then pcsrc and codemap to 0, then the relift.
+
+## 2026-11-16 00:55
+- w13 symbranch 80bd1328d: done, and w8 merges it into base3.
+  - The symbolic value types (dsl.N, symform.SV) raise SymbolicBranch on every Python decision.
+  - The decoder universe has 2,548 imm/disp keys: 1,974 build, 570 have no builder (as before), and 4 raise SymbolicBranch. Those 4 are `enter`, which correctly has no shape Form for nesting ≠ 0.
+  - int_ is now an exact mux over the x86sys gate rows, with the domain v ∉ int_ring3.excluded.
+  - L3b immsel: 688 shapes and 321,376 instances, 0 fails. Concrete Form.sha: 0 changed over 1,604,968 instances.
+  - Canon changed for the 32 far 9a/ea instances (fault rows that fold to 0 are dropped). L3b states its cert key.
+- w7 pcsrc ruling: an entry's stack is the join over its arrivals (call, in-image jmp state, external callback = call per OWNER 3, the EH funclet frame from the tables), computed to a fixed point. No kind list.
+  - Batch with this: entries_on_data through the gate's own data predicate; bad-decode entries lift to exact #UD, and only undecided ones are red.
+- Waiting for the merged FACTS of all 8 images: w13's counts of int 0x29 / excluded vectors and of enter with nesting ≠ 0.
+- bottleneck: w7's facts batch (pcsrc, codemap) on the exe, then one farm round, then the relift.
