@@ -722,3 +722,4 @@ After the first frame:
   - cc keys: atan2 59660b188825, cos 985d25007856, exp2m1 3f4d2e688f17, log2 eb0cbf61acb6, log2p1 bda91178dbc7, sin 8d3508d93a44, tan 02b02bc94cf0; gen 6d878d4e88c3.
   - Blocked: -frounding-math, which the recipe refuses as a per-root flag. Recommendation to L1: a per-root semantic flag only when cited from the root's external. Until then the objects are not valid for the RZ calls.
   - Open: atan2's printf/exit failure path is a trap path; w2 is listing the sites for the orchestrator.
+- 2026-11-16 06:12Z: L1: -frounding-math is already in flags.semantics.common of guest_compiler.json, so every guest CC stage has it; the per-root restatement is rightly refused. The coremath block is cleared, and w2 checks the argv and adds the RZ test.
