@@ -2747,3 +2747,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - cand5 takes integ CLAUDE.md 69656d214 whole.
 - The farm's w28-c5 job waits for w28's new head.
 - bottleneck: the cand4 verdict (running since 07:25Z); L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
+
+### 2026-11-16 07:31Z: farm container restarts every 5-6 min
+- The farm (session_01KmtZKTV1mniUErarfUpdJZ) loses its background jobs on each restart. The cand4 verdict has not finished.
+- Asked: one job at a time, --jobs N/2, df and free recorded, stale scratch deleted. If it still restarts, the verdict moves to a fresh farm.
+- bottleneck: the cand4 verdict (farm restarts); L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
