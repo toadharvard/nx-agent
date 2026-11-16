@@ -1529,3 +1529,17 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - Scope of ruling A sent to L1: the generated lifted units also write c->ra (the transfer protocol), so the ra accessor is for generated code plus fnvl_native_transfer.
 - Farm 2 (session_01KmtZKUJTJJy6aiVcibniH8) takes the L3a queue: udsail (w13), the d3dx9 facts, shard identity and exe facts (w7).
 - bottleneck: w8 (cpumodel.c push for L1, then class A/B, merges); L2 w2 (3 lift/rt units); w7 pcsrc reclassification.
+
+## 2026-11-16 04:46 — entry return rework complete locally; ra writer gate form
+- w8: base3 330e873c7 pushed (the cpumodel.c record fix). Local stack: class A/B complete and compiling, with only the 3 L2 reds left.
+  - 15 class-A deletions.
+  - 5 class-B sites through fnvl_native_transfer.
+  - 11 entry early-returns through fnvl_native_exit.
+  - Local merge3 0dedb050e: 60 roots recipe valid. One red, the toolchain host root, which loads plugins (L2).
+- Ruled:
+  - fnvl_raise_resume(eip) is accepted: the hardware-raise path from lifted code, part of the generated transfer protocol. Both primitives live in enter.cc, the single hand-written writer of ra.
+  - L1 takes the checked form: w28 writes the PP-fact gate, so the ra accessor header is allowed only in generator outputs and enter.cc.
+  - The fixed EH keys 0xfffd0/0xfffe0 get bridges from bridgegen, which reads EH_KEYS from its one definition. They land in the same stack as the deletions.
+  - The push excludes the local farm-pin commits once they are shown to be redundant with the L2 merge.
+  - w7 facts2 dd2e506e9 is merged into base3, and the farm runs on base3 only.
+- bottleneck: w8 base3 push; L2 (3 lift/rt units, the toolchain host root); w7 pcsrc reclassification.
