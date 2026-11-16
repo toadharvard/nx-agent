@@ -1587,6 +1587,9 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
             ex_ext = isinstance(a, dict) and set(a) == {"external", "path"} and all(isinstance(v, str) for v in a.values())
             ex_root = isinstance(a, dict) and set(a) == {"root", "output"} and all(isinstance(v, str) for v in a.values())
             ex_of = is_external_of(a)
+            ex_py = a == {"python": True}   # the pinned python runtime of the generated stages (pyrt): the interpreter and env.json python.modules
+            if ex_py and raw[i].get("debs"):   # as written: the machine's layout deb is added to every step
+                err.append("run[%d].exec python: the step has no debs (the interpreter's runtime is its root)" % i)
             if ex_of:
                 err += external_of_errors("run[%d].exec" % i, a, root, rec, roots, repo)
             if xl and not (ex_ext or ex_root or ex_of):
@@ -1599,8 +1602,8 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
             if ex_ext:   # a file of a pinned external, mounted at /exec/<name> (RECIPE.md "A tool that is not a deb binary")
                 if a["external"] not in {x.get("name") for x in rec.get("external", []) if isinstance(x, dict)} or not rel_ok(a["path"]):
                     err.append("run[%d].exec %r must name an external of this recipe and a path inside its tree" % (i, a))
-            elif ex_of:
-                pass   # checked above by the one external_of rule
+            elif ex_of or ex_py:
+                pass   # checked above (the one external_of rule; the python runtime)
             elif ex_root:   # the output of a built root this root `uses`: the same resolution as the uses mount
                 if not any(isinstance(u, dict) and u.get("root") == a["root"] and u.get("output") == a["output"] for u in rec.get("uses", [])):
                     err.append("run[%d].exec %r must be a root and output this recipe `uses`" % (i, a))
@@ -2872,7 +2875,16 @@ class Job:
                "FNVNX_DEBS": ";".join("%s=%s" % (d, pk[d]["sha256"]) for d in sorted(g["debs"]))}   # the deb sha256s are in the key
         env.update(g.get("env", {}))   # constant strings (check); the sandbox has no network namespace route, so nothing is fetched
         xs = g["exec"] if tool else None
-        if isinstance(xs, dict):   # {external, path} | {root, output}: the tool file is a stage input (in the key by content), mounted executable at /exec/<name>
+        pyargv = None
+        if xs == {"python": True}:   # the one python runtime of generate_one (pyrt): its inputs, env and PATH; the step's own inputs/scratch/stage refs as any tool step
+            py = self.pyrt()
+            ins += py["inputs"]
+            env.update({k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"})
+            env.update({"COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "FNVNX_PYMODS": self.pymods})
+            env.update(g.get("env", {}))
+            pyargv = [py["python"], "-s", "-B"] + g["args"]
+            xs = None
+        elif isinstance(xs, dict):   # {external, path} | {root, output}: the tool file is a stage input (in the key by content), mounted executable at /exec/<name>
             if "external_of" in xs:
                 host = self.external_of_host(ws, {k: v for k, v in xs.items() if k != "libs"})
                 base = os.path.basename(xs["path"])
@@ -2902,7 +2914,7 @@ class Job:
                 raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["exec-unresolved:%s: %s needs it and the declared debs do not provide it" % (b, base) for b in bad]})
             ins.append({"at": "/exec", "tree": self._one_file(tmp, "exec", host, base)})
             xs = "/exec/" + base
-        argv = [xs] + g["args"] if tool else ["/art/" + aout] + g["args"]
+        argv = pyargv if pyargv else [xs] + g["args"] if tool else ["/art/" + aout] + g["args"]
         interp = None if tool else elf_interp(r["elf"]["path"])
         if interp:   # started through the file at its PT_INTERP path inside a declared deb (the deb's own symlinks followed; no alias is relied on)
             home = deb_resolve(interp, tmp, g["debs"])
