@@ -2272,3 +2272,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Direct run: 127/131 pass. The 4 reds are ENOSPC (test_recipe, test_plugins, test_odr) plus test_objstub_rules under parallel disk pressure; each passes alone.
   - The scratch peak comes from a per-scenario copy of the compiler closure: about 1.2 GB × 3 caches plus 2 × 590 MB stores per scenario. Assigned to w15: one shared read-only content-addressed copy.
 - The farm's verdict at 68c45b90c decides the merge.
+- w28 d0b52b39f:
+  - gate_admit.cross_root_bare: a bare cross-root import is red anywhere.
+  - 72 files rewritten; admit green 1400/1400; 210 test files identical before and after.
+- Next for w28: exports stage B and deleting the L3 lists. Then the one-name-per-module rule: every import qualified, scripts run with -m, sys.path mutation red.
