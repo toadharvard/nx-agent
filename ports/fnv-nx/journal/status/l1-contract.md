@@ -2652,3 +2652,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - Orchestrator ruling d4397e9a3: a root may declare external_flags with a cite (file:line in the pinned mirror), only for flags that are neither data-model nor ABI flags; a restatement of semantics is red. Assigned to w15 for cand4; w15 tells L2 when it lands. (Note: -frounding-math is already in semantics.common.)
 - Per-target recipes are deltas over the base (w28 8666fb756), ruled for L6. Host per-target recipes drop plugins.
 - Corrected (integ f1f7b4d7e): the per-root external_flags form is cancelled. A documented library flag lives only in guest_compiler.json flags.semantics, with its citation on the row. cand4 takes only L2's citation field, if it is ready, plus CLAUDE.md whole from integ.
+
+## 2026-11-16 07:05
+- cand4 head 62474771c (base fac693694) contains: shard cap, DATAMODEL types, the plugin-compiler rule, w28-c4 f5b99b007, CLAUDE.md from integ f1f7b4d7e, and objstub limited to guest roots (34e4aa5ad; host tool roots are not product code). test_plugin_compiler is 5/5 locally; the rest needs the farm. The farm verdict is running. L6 is joining render onto it for cand5. The qualified-imports rule goes to cand5.
+- bottleneck: the cand4 farm verdict at 62474771c.
