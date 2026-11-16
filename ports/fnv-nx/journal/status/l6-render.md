@@ -1487,3 +1487,8 @@ Paused: w3b, w4, farm; no other work.
     - nxgpu builds 1+1 objects, byte-identical to 9acd1223b.
     - Sent to L3a as the render head for base3: render/ and bridgefacts/ whole. gl4 builds on base3 with L3a's hostabi fix 8666fb756.
 - bottleneck: base3 retake; farm1 sm_link; the cand4 base.
+- 03:08Z w28 2872f3ac8 brings three things:
+    - hostabi and lib/sha256 host variants inherit, which unblocks gl4;
+    - env: the 6 debs were reported only because cargo was not installed, so there is no defect and setup_verdict_env.sh covers it;
+    - a new header-root rule: headers are reached only via `uses {root, output: INCLUDE}` plus include.
+  w6 takes verify/ from 2872f3ac8, fixes the render reds by that rule, and builds every root including gl4. Status: doing.
