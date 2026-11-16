@@ -2397,3 +2397,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - Record placement after declaration: L5 platform/*.cpp (worker), L3a lift/rt macro-in-macro records.
 - w28 queue: run+python -> ext_dir -> farm (test_gate_imports, test_sandbox 9a).
 - bottleneck: cand3b farm verdict at 963dce662.
+
+## 2026-11-16 04:00b
+- w28 01e91c00d: ext_dir/ext_bare/ext_checkout are the only accessors of the external cache; test_extpaths universe = every tracked .py. One red left: render/total/gate_d3d9total.py (hand-built cache path plus its own fetch), routed to L6.
+- bottleneck: cand3b farm verdict at 963dce662.
