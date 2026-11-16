@@ -1,8 +1,9 @@
 """flagvocab: the vocabulary is generated from the emitter; --check accepts a status-first row and refuses a row with no status, two statuses, an unknown attr or a bad count attr.
 Usage: test_flagvocab.py [universe.tsv ...]   (the given real universe files must pass too)"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import sys, os, tempfile
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-import flagvocab
+import fnvnx.lift.tools.flagvocab as flagvocab
 v = flagvocab.vocab()
 assert v['status'] == ['proven', 'candidate'] and 'ptr' in v['attr'] and 'first-ud' in v['attr'] and [a for a in v['attr'] if a.endswith('=')] == ['reloc-misfit=', 'ud=', 'xf='] and set(v) == {'status', 'attr'}, v
 def rows(*flags):

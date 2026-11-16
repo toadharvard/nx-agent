@@ -4,10 +4,11 @@
 Images: the exe (files at the top of DIR, as factsassemble lays them out) and every row of the table (DIR/<name without .dll, lower case>/). Per image: the table's sha256 and base, the file names present, the universe row count, the
 status totals and the attr totals (the flags column `status,attr,...` split by the vocabulary of flagvocab.py). `universe_flags` is flagvocab.vocab(). `modules_tsv_sha256` is the sha256 of the table file.
 Fails when an image has no universe.tsv, or a row's flags are outside the vocabulary (flagvocab.check)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import argparse, hashlib, json, os, sys
 from collections import Counter
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import flagvocab
+import fnvnx.lift.tools.flagvocab as flagvocab
 
 FILES = ('universe.tsv', 'ranges.tsv', 'retn.tsv', 'sources.tsv', 'roots.tsv', 'ehtables.json', 'noreturn.tsv')
 
