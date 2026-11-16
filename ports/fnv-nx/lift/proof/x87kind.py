@@ -129,13 +129,29 @@ def ctor_no_snan():
     return out
 
 
-def fv_x_widening_without_fx_den():
-    """the DE defect's own universe: the closure functions that widen a carrier through fv_x (the 80-bit image, in which a binary32/binary64 denormal is normal) and never consult fx_den"""
-    c = XC.carrier(); return sorted(f for f in c['translated'] if 'fv_x(' in c['source'].funcs[f] and 'fx_den' not in c['source'].funcs[f] and f != 'fv_x')
+def compare_de_defects(budget_ms=120000):
+    """the DE defect of the compare macro: {kind pair: counterexample} for every pair of the enum where the emitted fv_cmp's DE differs from spec_fex's DE (the counterexample: the operands' v, e, q and the DE each gives)"""
+    K = kinds(); A, (av, ae, ak), ia = fvvar('a'); B, (bv, be, bk), ib = fvvar('b'); q = z3.BitVec('q', 32)
+    ret, outs, ub, dom = XC.call('fv_cmp', A, B, q)
+    fex1 = dict(XC.carrier()['machine'].G['c'])['fex'].e
+    xa, xb = _fvx(A), _fvx(B); f0 = z3.BitVec('c.fex', 32)
+    want = spec_fex(f0, [(av, ak, xa), (bv, bk, xb)], q)
+    out = {}
+    for n1 in sorted(K, key=K.get):
+        for n2 in sorted(K, key=K.get):
+            if K[n2] < K[n1]: continue
+            s = z3.Solver(); s.set('timeout', budget_ms); s.add(ia, ib, z3.ULE(q, 1), ak == K[n1], bk == K[n2], (fex1 & 2) != (want & 2))
+            r = s.check()
+            if r == z3.sat:
+                m = s.model(); g = lambda x: m.eval(x, True).as_long()
+                out[(n1, n2)] = dict(a_v=hex(g(av)), a_e=g(ae), b_v=hex(g(bv)), b_e=g(be), q=g(q), emitted_DE=(g(fex1) >> 1) & 1, spec_DE=(g(want) >> 1) & 1)
+            elif r != z3.unsat:
+                out[(n1, n2)] = str(r)
+    return out
 
 
 if __name__ == '__main__':
     t = time.time(); res = compare_obligations()
     for p, r in sorted(res.items()): print(p, r)
     print('ctor_no_snan', ctor_no_snan())
-    print('widen without fx_den', fv_x_widening_without_fx_den(), round(time.time() - t))
+    for p, c in sorted(compare_de_defects().items()): print('DE defect', p, c)

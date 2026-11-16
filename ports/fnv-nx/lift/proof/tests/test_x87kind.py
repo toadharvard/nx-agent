@@ -30,10 +30,13 @@ class Kind(unittest.TestCase):
     def test_loaders_do_not_make_an_snan(self):
         self.assertEqual(K.ctor_no_snan(), {'fv_ld32': 'unsat', 'fv_ld64': 'unsat'})
 
-    def test_de_defect_universe_is_derived(self):
-        u = K.fv_x_widening_without_fx_den()
-        self.assertIn('fv_d', u)
-        print('widen through fv_x without fx_den:', u)
+    def test_de_defects_are_the_open_pairs(self):
+        d = K.compare_de_defects(120000)
+        res = K.compare_obligations(120000)
+        self.assertEqual(sorted(d), sorted(p for p, r in res.items() if r['DE'] == 'sat'))
+        for p, c in d.items():
+            self.assertIsInstance(c, dict, p)
+            self.assertNotEqual(c['emitted_DE'], c['spec_DE'], p)
 
 
 if __name__ == '__main__':
