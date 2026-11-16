@@ -636,3 +636,8 @@ After the first frame:
   - NAMES-FNPARM typedef-of-function form: 72af9ba51, nodecor outside the domain (d5/d6 pinned); unverified until the farm build.
   - Pin field on cand4b is still the void 56a4d09c: w2 merges plugins 74c32c454 → 84f0883e (L1 report).
   - CTYPE-FE (L5 via L1): __va_list ctype rows differ between the C and C++ plugin paths. Rule: a target-built record is emitted from its own FIELD_DECLs on both paths, and the test compares C and C++ byte for byte. Owner w3, cand4b. Status: doing.
+- 2026-11-16 02:35Z: cand4b head 000dfcb89 (w2).
+  - Pin field: 84f0883e (plugins 74c32c454 merged; no 56a4d09c left).
+  - ORDER-RTLBUILTIN hole: closed by the D1 proof. A no-library builtin with vops, no pointer operand and only constant operands touches only its own registers and frame chain, so it gets no fence. With a run-time operand it gets the fences. Only __builtin_apply is refused.
+  - test_plugins: 80 checks, locally, with the bypass.
+  - The cand4b farm build carries NAMES-FNPARM, ENTRY1-ATOMIC, ORDER-RTLBUILTIN, CTYPE-FE and COMPILER-STAGE.
