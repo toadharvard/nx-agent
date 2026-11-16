@@ -10,6 +10,8 @@ indirect jmp / another entry / `ud` (bytes that do not decode: the lifted body r
 flow from entry point, exports, TLS, EH tables or from a pointer whose consumer transfers control (vptr-store run, jump table); `candidate` = known only as a relocated
 pointer target. Byte accounting: every byte of the executable sections gets one accounting class (tools/CODEMAP.md: may-execute and may-be-read are independent sets, the class is no partition of them) (entry body, PE-directory data, padding, relocation slot, dead gap) or is
 reported UNEXPLAINED by reason; the gate is red then. Output: cfg.facts_out/<module>/{universe,codemap,ranges,noreturn,outside,imports}.tsv, ehtables.json, gate_codemap.json."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, re, sys, json, bisect, hashlib
 from array import array
 from itertools import groupby
@@ -18,8 +20,8 @@ from types import SimpleNamespace
 import capstone
 from capstone import x86 as X
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))      # the tool root: a tool imports its siblings from its own root (the generated stages run it under python3 -I)
-import pemod, ehtables, codemap, residue, jtab as JT
-from fnvlift import Image as LImage; from fnvlift import core as LCore
+import fnvnx.lift.tools.pemod as pemod; import fnvnx.lift.tools.ehtables as ehtables; import fnvnx.lift.tools.codemap as codemap; import fnvnx.lift.tools.residue as residue; import fnvnx.lift.tools.jtab as JT
+from fnvnx.lift.fnvlift import Image as LImage; from fnvnx.lift.fnvlift import core as LCore
 TERM = {'ret', 'retf', 'int3', 'hlt', 'ud2', 'iret', 'iretd', '(ud)'}
 PRI = residue.PRI
 CN = {1: 'entry-nondecomp', 2: 'entry-nondecomp', 3: 'data-pe-header', 4: 'padding', 5: 'data-reloc', 6: 'dead-gap', 9: 'data-unreached', 8: 'UNEXPLAINED'}      # the exe's class names (codemap.py CLS)
@@ -33,7 +35,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     else: path, mrow = pemod.locate(arg, cfg.modules, cfg.moddirs)      # modules.tsv row (missing = KeyError) and the file (sha256 + size checked = ValueError)
     name = os.path.splitext(mrow.name)[0]; outd = cfg.facts_out + '/' + name; os.makedirs(outd, exist_ok=True)
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
-    import gapmd; md = gapmd.make(md, cfg.udsail)
+    import fnvnx.lift.tools.gapmd as gapmd; md = gapmd.make(md, cfg.udsail)
     M = pemod.load(path, mrow.base); u32 = M.u32; RL = pemod.relocs(M); relocs = sorted(RL or []); rset = set(relocs); imports = pemod.imports(M)
     T0 = min(a for n, a, z, ro in M.xs); T1 = max(a + z for n, a, z, ro in M.xs); TN = T1 - T0
     V = bytearray(TN); tx = bytearray(b'\xcc' * TN)
@@ -344,7 +346,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     HD = '# base=0x%08x: absolute VAs at the preferred image base (not RVAs)' % M.base
     print('shapes.tsv %d shape keys' % gapmd.shapes_tsv(cfg.shapes, HD, md, text, T0, dec))
     open(cfg.baddecode, 'w').write(HD + '; columns: entry, undecodable address, the 15 bytes there; every sequence that decode_gap did not decide\n' + ''.join('%08x\t%08x\t%s\n' % (entry_of(a), a, text[a - T0:a - T0 + 15].hex()) for a in sorted(ud)))
-    import pcsrc; pcsrc_red, pcsrc_res = pcsrc.run_facts(outd, name, X_.text, X_.T0, X_.u32, X_.rset, imports)
+    import fnvnx.lift.tools.pcsrc as pcsrc; pcsrc_red, pcsrc_res = pcsrc.run_facts(outd, name, X_.text, X_.T0, X_.u32, X_.rset, imports)
     sys.stderr.write('timing %s: pcsrc %.1f s (this round)\n' % (name, _t.time() - _t0))     # reads only universe.tsv and ranges.tsv; writes gate_pcsrc.json and pcsrc_s4.json
     # residue (valid executable bytes no entry body reaches and no PE directory names), cut by rule into: padding (nop / int3 instructions at the run's ends), dead gap (the run decodes
     # completely from its first byte, ends at a terminator or at the next reached instruction, and has relocated dwords only at operand fields), relocation slots (the bytes of a
@@ -423,7 +425,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     na = sum(1 for v in pt if v in proven); nb = sum(1 for v in pt if v not in proven and (pe[v - T0] or v in dread)); nc = len(pt) - na - nb
     mp = Counter(dec[a][1] for a in pset)
     fi = eh.finish(ent)
-    import dic
+    import fnvnx.lift.tools.dic as dic
     DR = dic.jtab_ranges(outd); dic.write(outd, hd, DR)          # data in code: the ranges a proven consumer reads (tools/dic.py)
     DW, DWd = dic.nonoperand_words(md, text, T0, relocs, {(a, dec[a][0]) for e in E for a in exts[e]}, DR)
     print('data_in_code: %d ranges (jtab %d), %d bytes; relocated words overlapping a reached instruction without being its operand: %d (of them inside a data range %d)' % (len(DR), len(DR), sum(b - a for a, b, k, d in DR), len(DW), len(DWd)))

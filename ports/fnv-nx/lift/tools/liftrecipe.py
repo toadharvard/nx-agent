@@ -3,10 +3,12 @@
 This tool writes recipes; it runs on the developer's host and is no stage of any recipe (verify/recipe.py imports are fine here). The shard and finish stages are tools/liftgen.py,
 which imports nothing of verify/.
     liftrecipe.py REF COMMIT TREE_SHA256"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..")) # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
 sys.path.insert(0, HERE); sys.path.insert(0, LIFT)
-import liftgen
+import fnvnx.lift.tools.liftgen as liftgen
 # The flags of lifted C++: the recipe's (verify/guest_compiler.json flags.semantics + lift/pack/build.json), resolved by resolved_flags() for every test that compiles pack code. No flag that turns an error into a warning or silences one.
 PACK_ROOT_FLAGS = {'c': ['-Werror=attributes'], 'cxx': ['-std=gnu++17', '-O2', '-Werror=attributes'], 'asm': []}   # the per-root classes of the pack (recipe.PER_ROOT); the semantic flags are the pin's, never listed here
 
@@ -15,7 +17,7 @@ def resolved_flags(driver='aarch64-linux-gnu-g++', kind='cxx'):
     """The flags the recipe passes to a unit of the product root lift/pack: the pin's flags.semantics as DRIVER applies them to KIND (recipe.semantics_for), then the root's own
     flags of lift/pack/build.json. The one list: every test that compiles pack code takes it from here, and nothing else carries a flag list of the lifted code."""
     sys.path.insert(0, os.path.join(LIFT, '..', 'verify'))
-    import recipe as R
+    from fnvnx.verify import recipe as R
     rec = json.load(open(os.path.join(LIFT, 'pack', 'build.json')))
     return R.semantics_for(driver, kind, origin='lifted') + list(rec['flags'][kind])
 GEN_USE = {'root': 'ports/fnv-nx/lift/rt', 'output': 'GEN'}      # the generated rt headers (fnvl_cpuref.h, fnvl_faults.h, fnvl_sys.h): included, not copied
@@ -28,7 +30,7 @@ def inc_stages():
     """the `generated` steps of the pack's own header directory inc/ (fnvl_prelude.h, imp.h): the runtime's headers of the CURRENT tree, inlined by tools/prelude.py. The
     inputs of each step are the files of the closure of its source over INC_DIRS (prelude.closure: a pure function of the headers' include lines), so a change of
     one of those headers re-keys the step and, through the include directory, every unit; any other file of rt/ does not."""
-    import prelude
+    import fnvnx.lift.tools.prelude as prelude
     repo = os.path.join(LIFT, '..', '..', '..')
     dirs = [os.path.join(repo, d) for d in INC_DIRS]
     out = []
@@ -44,7 +46,7 @@ def recipe(ref, commit, tree, dest=None):
     the build.json holds only the per-root classes (PACK_ROOT_FLAGS; recipe.PER_ROOT: -O, -W, -D, -std ...), and the plugins are the full set of recipe.PLUGIN_SOURCES in
     load order with recipe.plugin_args(origin) of the pack's declared lifted origin (fnvnx_ftoi mode lifted); the units are the fixed names."""
     sys.path.insert(0, os.path.join(LIFT, '..', 'verify'))
-    import recipe as R
+    from fnvnx.verify import recipe as R
     keep = lambda fl: [f for f in fl if R.PER_ROOT.fullmatch(f)]
     rec = {'format': 'fnvnx-recipe/1', 'profile': 'guest',      # the game's compiler, its runtime and the full plugin set come from the profile (verify/guest_compiler.json, recipe.py): a root names only its own flags
            'flags': {k: keep(v) for k, v in PACK_ROOT_FLAGS.items()},

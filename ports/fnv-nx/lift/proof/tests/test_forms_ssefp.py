@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """SSE FP Forms (proof/forms_ssefp.py): directed cases from the SDM text only (flags, faults, the sticky MXCSR bits).  No emulator is an oracle: the certificate of a Form is L3b's reference run (Form == reference per shape).   test_forms_ssefp.py  (exit 0 = all pass)"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import declared_x86sys; declared_x86sys.configure()      # the declared x86 system record: the one input every Form build needs (declared_x86sys.py)
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys; declared_x86sys.configure()      # the declared x86 system record: the one input every Form build needs (declared_x86sys.py)
 import capstone as CS, z3
 import unittest
-from proof import forms
-from fnvlift import dsl
-from fnvlift.tests import _inputs; _inputs.configure_declared()
+from fnvnx.lift.proof import forms
+from fnvnx.lift.fnvlift import dsl
+from fnvnx.lift.fnvlift.tests import _inputs; _inputs.configure_declared()
 md = CS.Cs(CS.CS_ARCH_X86, CS.CS_MODE_32); md.detail = True
 FAILS = []; N = 0
 def main():

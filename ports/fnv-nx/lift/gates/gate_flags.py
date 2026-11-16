@@ -41,6 +41,8 @@ other.
 Assumptions: ASM-001 (the compiler), ASM-009 (the Form is certified against the Sail model, whose pinned patch is OWNER 9; so the Form's reads, writes and undefined
 sets are those of the instruction). The facts' decoder (capstone) gives operands and boundaries only; flagagree.py cross-checks its flag table against the Forms and
 a disagreement is a report row, never an input."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..")) # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json
 import multiprocessing
 import os
@@ -52,7 +54,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import capstone
 from capstone import x86 as X
 
-from proof import forms, shape
+from fnvnx.lift.proof import forms, shape
 
 FLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of')
 NF = len(FLAGS)
@@ -337,7 +339,7 @@ def pushf_filter(img, ranges, ins, red):
             if lahf and r[1] == 'of': continue
             mask |= 1 << (WORDBIT[r[1]] + (0 if not lahf else 0))
         if mask and taint_observed(ins, objs, a, mask, lahf):
-            import invariance                      # the taint walk cannot show the bits unobserved: the product-program proof (invariance.py) may still show them dead
+            import fnvnx.lift.gates.invariance as invariance                      # the taint walk cannot show the bits unobserved: the product-program proof (invariance.py) may still show them dead
             ok, why = invariance.prove(objs, a, sorted({r[1] for r in rows if not (lahf and r[1] == 'of')}))
             if not ok: keep += rows
     return sorted(keep)
@@ -661,7 +663,7 @@ def summary(ents, inst, res):
 
 def main(argv):
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools'))
-    import cli
+    from fnvnx.lift.tools import cli
     (path, facts), _ = cli.parse('usage: gate_flags.py IMAGE FACTS_DIR   env GATE_OUT, JOBS', argv, (2, 2))
     base, rows = load_ranges(os.path.join(facts, 'ranges.tsv'))
     uni = load_universe(os.path.join(facts, 'universe.tsv'))
@@ -672,7 +674,7 @@ def main(argv):
     nof = [r for r in red if r[4] == 'no-form']
     out = dict(s, format='fnvnx-gate/1', name='flags', status='green' if not red and not s['undecodable_ranges'] else 'red',
                certified=s['flag_reads'] - s['red_flag_reads'], universe=s['flag_reads'],
-               uncertified=['%08x:%s' % (r[1], r[2]) for r in reads_red[:50]],
+               uncertified=['%08x:%s' % (r[1], r[2]) for r in reads_red],
                no_form_sites=sorted({'%08x' % r[1] for r in nof})[:50],
                pushf_sites=sorted({'%08x' % r[1] for r in red if r[4] == 'pushf'}),
                first_red=[{'entry': '%08x' % e, 'site': '%08x' % a, 'flag': f, 'origin': o, 'class': c, 'mnemonic': m} for e, a, f, o, c, m in reads_red[:50]])

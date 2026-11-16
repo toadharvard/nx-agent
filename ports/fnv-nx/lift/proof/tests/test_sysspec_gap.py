@@ -1,4 +1,6 @@
 """sysspec_gap (BSWAP, XLAT, MOV from Sreg, BTS) and sysspec_int (INT n): claimed by decoding, proved against the SDM spec under the declared record (the tree's x86sys.json); an undecided row is `uncertified: <why>`; a wrong effect is a difference."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json
 import os
 import sys
@@ -9,11 +11,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
 sys.path.insert(0, os.path.join(HERE, '..'))
 sys.path.insert(0, HERE)
-import declared_x86sys
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys
 import z3
-from fnvlift import inputs
-from proof import shape, sysspec, symform, x86sys
-import sysspec_gap
+from fnvnx.lift.fnvlift import inputs
+from fnvnx.lift.proof import shape, sysspec, symform, x86sys
+import fnvnx.lift.proof.sysspec_gap as sysspec_gap
 
 
 def key(h):
@@ -24,7 +26,7 @@ class Declared(unittest.TestCase):
     def setUp(self):
         declared_x86sys.configure()
         global sysspec_int
-        import sysspec_int           # reads fnvlift.x86sys at import: the record is configured first
+        import fnvnx.lift.proof.sysspec_int as sysspec_int           # reads fnvlift.x86sys at import: the record is configured first
     def tearDown(self): inputs.reset()
 
     def test_bswap_every_register_proved(self):
@@ -68,7 +70,7 @@ class Declared(unittest.TestCase):
         for v in (0x03, 0x04, 0x2d, 0x29, 0x80): symform.instantiate(sf, bytes([0xcd, v]), 0x1000)
 
     def test_int_n_a_mutated_row_changes_exactly_its_arm(self):
-        from fnvlift import x86sys as lx
+        from fnvnx.lift.fnvlift import x86sys as lx
         try:
             ref = {v: sysspec_int.row(v) for v in range(256)}
             lx.INT_EXCLUDED = dict(lx.INT_EXCLUDED); lx.INT_EXCLUDED[0x80] = {'status': 'undecided', 'why': 'mutated'}      # one vector's row becomes undecided

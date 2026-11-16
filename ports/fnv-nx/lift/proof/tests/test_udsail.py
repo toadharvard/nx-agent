@@ -1,9 +1,11 @@
 """proof/udsail.classify on the output shapes of isla-execute-function (model_sail.split_blocks: a path is a block, `Result: (_ unit)` completes it; model exceptions are `Calling x86_fault<..>(["msg"])`
 lines of stderr).  The model's own #UD texts: `(:UD)` and the ACL2 `#UD Encountered!`.
     test_udsail.py"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
-from proof import udsail
+from fnvnx.lift.proof import udsail
 
 def blocks(out):
     res, hdr = [], None
@@ -51,7 +53,7 @@ rec = {'cr0': {'em': {'status': 'undecided'}, 'ts': {'status': 'undecided'}}, 'c
 vs = udsail.sysvariants(rec, d)
 assert vs[0][0] == 0 and vs[0][4] == 4 and any(v[4] == 4 | 0x200 for v in vs) and any(v[0] == 4 for v in vs) and any(v[0] == 8 for v in vs) and all(len(v) == 17 for v in vs), vs
 # class (a) from the SDM rows: xbegin (C7 F8, flag RTM), an unflagged row, an `executed as` row, an ambiguous match
-from proof import sdmfeat
+from fnvnx.lift.proof import sdmfeat
 def row(op, flag, modc='any', exec_as=()): return {'op': op, 'p': sdmfeat.parse_opcode(op), 'flag': flag, 'modc': modc, 'exec_as': list(exec_as)}
 TABLE = sdmfeat.Table([dict(canonical=n, sdm_name=n, apm_name='', mirror_of='', leaf=l, sub=0, reg=r, bit=b) for n, l, r, b in (('RTM', 7, 'EBX', 11), ('SSE2', 1, 'EDX', 26))])      # the feature table of sdmfeat (records of unify)
 CPU = {(0, 'EAX'): 0x16, (0x80000000, 'EAX'): 0x80000008, (7, 'EBX'): 0, (1, 'EDX'): 1 << 26}

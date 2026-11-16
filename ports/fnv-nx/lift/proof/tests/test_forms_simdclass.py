@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """The SSE FP flag-priority rule (dsl._pre, SDM Vol 1 11.5.2.1) and the conversion / reciprocal / MXCSR / hint Forms (proof/forms_ssefp.py), run as the real Forms through forms.build and the DSL's z3 semantics,
 each Form's C text also emitted by the DSL emitter (to_c_inline).  Expected values come from the SDM text (rounding, indefinite, priority rows), not from the code under test.   test_forms_simdclass.py  (exit 0 = all pass)"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import declared_x86sys; declared_x86sys.configure()
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys; declared_x86sys.configure()
 import capstone as CS, z3
-from proof import forms
-from fnvlift import dsl
-from fnvlift.tests import _inputs; _inputs.configure_declared()
+from fnvnx.lift.proof import forms
+from fnvnx.lift.fnvlift import dsl
+from fnvnx.lift.fnvlift.tests import _inputs; _inputs.configure_declared()
 md = CS.Cs(CS.CS_ARCH_X86, CS.CS_MODE_32); md.detail = True
 FAILS = []; N = [0]
 def check(name, ok):
@@ -83,7 +85,7 @@ check('rsqrtps lane 0 (1.0)', L[0] == 0x3f7ff000); check('rsqrtps lane 1 (-1.0):
 check('rsqrtps lane 2 (QNaN): quieted unchanged', L[2] == 0x7fc00000); check('rsqrtps lane 3 (+0): +inf', L[3] == 0x7f800000)
 # ---- MXCSR, hints, MMX state
 def selsub():
-    from fnvlift import x86sys
+    from fnvnx.lift.fnvlift import x86sys
     return [(z3.BitVec('sel_' + n, 16), z3.BitVecVal(x86sys.SEL[n], 16)) for n in dsl.SEGS]      # the declared machine's selectors (a store Form's code-segment fault reads sel_<seg>)
 def memval(P, key, mem_bytes, regs):
     """evaluate a post-state field with the memory array set to mem_bytes ({addr: byte}) and the registers regs"""
@@ -123,9 +125,9 @@ for code in (b'\xf3\x0f\x2a\xc1', b'\xf2\x0f\x2a\xc1', b'\x0f\x5b\xc1', b'\xf3\x
         want = {'cvtsi2ss|xmm,r32|0f2a': 'fx_dsl_cvt', 'cvtdq2ps|xmm,xmm|0f5b': 'fx_dsl_cvt', 'cvtsd2si|r32,xmm|0f2d': 'fx_dsl_cvt', 'rcpps|xmm,xmm|0f53': 'fnvl_tab_rcp', 'rsqrtss|xmm,xmm|0f52': 'fnvl_tab_rsqrt', 'divss|xmm,xmm|0f5e': 'fx_dsl_fp'}.get(F.key)
         check('emitter: %s uses %s' % (F.key, want), want is None or want in used)
 # ---- ONE PATH (rule 3): no mnemonic has both a DSL Form and a hand handler.  The sets are read from the registries themselves, not from a list.
-import fnvlift.core as _core
-from fnvlift import f_sse as _f_sse
-from proof import forms as _forms
+import fnvnx.lift.fnvlift.core as _core
+from fnvnx.lift.fnvlift import f_sse as _f_sse
+from fnvnx.lift.proof import forms as _forms
 _cov = lambda m: m in _forms.H or (m[0] == 'j' and m[1:] in _core.CC) or (m.startswith('set') and m[3:] in _core.CC) or (m.startswith('cmov') and m[4:] in _core.CC)
 _both = sorted(m for m in set(_core.OPS) | set(_f_sse.SSE) if _cov(m))
 check('one path: no mnemonic has both a Form and a hand handler: %s' % _both, _both == [])

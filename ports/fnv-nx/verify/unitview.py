@@ -8,7 +8,11 @@ import hashlib
 import posixpath
 import re
 
-import cas
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas
 
 PLACEHOLDER = b"#error fnvnx: file outside the declared closure\n"
 PH_SHA = hashlib.sha256(PLACEHOLDER).hexdigest()

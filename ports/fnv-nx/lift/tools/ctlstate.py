@@ -9,10 +9,12 @@ ldmxcsr / fxrstor (MXCSR), mov to dr0-dr7 (CPL 0 only: #GP at CPL 3, the lifter 
 SetThreadContext / NtSetContextThread / RtlRestoreContext / NtContinue / RtlUnwind(Ex) / longjmp family, plus _controlfp/_control87/_controlfp_s/__control87_2/_fpreset. A CONTEXT is also
 written by a SEH handler or filter through the pointer it is given: those are the entries of the images with an exception-handler kind (eh-*, seh-*) in universe.tsv, listed as `context_handlers`.
 This tool is the INVENTORY (a fact of the code, no value claims). The value of each writer is judged by the value analysis that follows it (R1-R3, see the report to the lead)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..")) # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import collections, json, os, sys
 sys.path[:0] = [os.path.dirname(os.path.dirname(os.path.abspath(__file__))), os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'gates')]
 from capstone import x86 as X
-import gate_flags as g
+from fnvnx.lift.gates import gate_flags as g
 
 CLASS = {'popf': 'popf', 'popfd': 'popf', 'popfw': 'popf', 'iret': 'iret', 'iretd': 'iret', 'iretw': 'iret',
          'fldcw': 'fldcw', 'fninit': 'fninit', 'finit': 'fninit', 'fldenv': 'fldenv', 'frstor': 'frstor', 'fxrstor': 'fxrstor', 'ldmxcsr': 'ldmxcsr',

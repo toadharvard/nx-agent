@@ -7,7 +7,7 @@ a compiler that still has a 128-bit long double fails to compile. The MSVC names
 Run: python3 -I <this file> from the checkout root."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import re
@@ -18,7 +18,8 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import plugbuild as pb  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.toolchain.tests import plugbuild as pb  # noqa: E402
 
 check = pb.Checks('test_ldbl')
 
@@ -118,7 +119,7 @@ def datamodel(td, so):
     check('crossing_forbidden cites existing rows', all(c in rows for c in cf), cf)
     # regeneration: the pinned mirror (fnv-nx-build tools/cpp-docs, tree_sha256 checked by the recipe's own fetch) -> gen.py --check
     import subprocess
-    from verify import recipe
+    from fnvnx.verify import recipe
     gdir = os.path.join(root, 'msvcmodel', 'datamodel')
     mirror = json.load(open(os.path.join(gdir, 'sources.json')))['mirror']
     ext = {k: mirror[k] for k in ('name', 'repo', 'ref', 'commit', 'tree_sha256', 'at')}
@@ -131,6 +132,19 @@ def datamodel(td, so):
     errs = '\n'.join(l for l in r.stderr.splitlines() if 'error' in l)
     failed = sorted(set(re.findall(r'static assertion failed: (S\d+)', r.stderr)))
     check('every DATAMODEL case holds (failing rows: %s)' % failed, r.returncode == 0, errs[:3000])
+    # DATAMODEL.json `types` (generated): one compile, sizeof / alignof / signedness of every entry against the compiler; a mismatch is red.
+    spell = {'pointer': 'void*', 'enum': 'E', 'long long': 'long long', 'long double': 'long double'}
+    tu = ['enum E { E0 };', 'template <class T> struct Sg { static const bool v = (T)-1 < (T)0; };']
+    for t in doc['types']:
+        T = spell.get(t['type'], t['type'])
+        sg = ' && Sg<%s>::v == %s' % (T, 'true' if t['signed'] else 'false') if 'signed' in t else ''   # only integral entries carry `signed`
+        tu.append('static_assert(sizeof(%s) == %d && alignof(%s) == %d%s, "%s");' % (T, t['size'], T, t['align'], sg, t['type']))
+    srcp = os.path.join(td, 'types.cpp')
+    open(srcp, 'w').write('\n'.join(tu) + '\n')
+    rt = pb.compile(srcp, os.path.join(td, 'types.o'), so, native=True)
+    check('every `types` entry (%d: %s) holds on the compiler (sizeof, alignof, signedness; failing: %s)'
+          % (len(doc['types']), ', '.join(t['type'] for t in doc['types']), sorted(set(re.findall(r'static assertion failed: "([^"]+)"', rt.stderr)))),
+          rt.returncode == 0, '\n'.join(l for l in rt.stderr.splitlines() if 'error' in l)[:3000])
     # S14 on the C front end: its own file (c/c-decl.cc finish_enum is not the C++ hunk)
     objc = os.path.join(td, 'datamodel_enum.o')
     rc = pb.compile(os.path.join(HERE, 'ldbl', 'datamodel_enum.c'), objc, so, native=True)

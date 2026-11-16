@@ -22,12 +22,15 @@ contributes its constants (`mov r, imm`, `push imm`, a read of cs: its declared 
 Context restores load captured selectors (the platform's rule, as above). The lifter proves with them that the code-selector arm of a store through S is dead (proof/lift_dsl.py).
 The lifter (core.gs_guard) guards an access through the effective segment S iff S is not non-null in the image (its initial selector is null, or some write of S is possibly null).
 Context restores (SetThreadContext, exception continuation) load the selectors a context holds, which are the captured ones: the platform's rule, not this tool's."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import argparse, json, os, sys
-HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = sys.argv[sys.argv.index('--lift') + 1] if '--lift' in sys.argv else os.path.dirname(HERE)
-sys.path[:0] = [HERE, LIFT]
+HERE = os.path.dirname(os.path.abspath(__file__))
+if '--lift' in sys.argv:      # run as a stage: the lift/ directory is a declared input, always an argument; imported as a module, the importer's own sys.path supplies fnvlift
+    sys.path[:0] = [HERE, sys.argv[sys.argv.index('--lift') + 1]]
 from capstone import x86 as X
-from fnvlift.image import Image
-from proof import census, shape
+from fnvnx.lift.fnvlift.image import Image
+from fnvnx.lift.proof import census, shape
 
 
 
@@ -229,7 +232,7 @@ def analyse(img, ranges, tables, uni, init_null, sel):
 def main():
     ap = argparse.ArgumentParser(); A = ap.add_argument
     A('--out', required=True); A('--facts', required=True); A('--modules', required=True); A('--lift'); A('--exe', required=True); A('--moddirs', required=True); A('--x86sys', required=True)
-    a = ap.parse_args(); import pemod
+    a = ap.parse_args(); import fnvnx.lift.tools.pemod as pemod
     sel = json.load(open(a.x86sys))['selectors']
     init_null = {s: (sel[s]['value'] & 0xfffc) == 0 for s in SEGS}; sel_all = {s: sel[s] for s in VSEGS + ('cs',)}       # an undecided selector is a KeyError: no value is guessed
     imgs = [('exe', a.exe, None, a.facts)]

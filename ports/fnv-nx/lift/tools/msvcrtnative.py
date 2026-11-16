@@ -4,6 +4,8 @@ end in a return, so no image takes an argument: the implicit variant `msvcrttest
 the `index` of terminal.json) runs terminal case N, which main.cc reads as the constant FNVL_TERMINAL_CASE (a define of the variant, so it is in that image's key). The
 number of terminal cases is the one tools/guestgen_msvcrttest.py computes (cases(): every case whose stop is not `ret`).
     msvcrtnative.py LIFT_DIR            (writes LIFT_DIR/tests/guest/msvcrttest/native/build.json)"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = 'tests/guest/msvcrttest/native/build.json'
@@ -14,7 +16,7 @@ ENTRY = 'fnvl_msvcrttest_entry'
 def terminal_cases(lift):
     sys.argv = ['guestgen_msvcrttest.py', '', lift]      # the generator reads the lifter package's directory from argv[2] at import
     sys.path.insert(0, HERE)
-    import guestgen_msvcrttest as G
+    import fnvnx.lift.tools.guestgen_msvcrttest as G
     P = G.program(); P.build()
     return sum(1 for _root, _what, _want, stop, _mem in G.cases(P) if stop != 'ret')
 

@@ -24,6 +24,8 @@ Rows are unique and sorted; the output depends on the set of records only (not o
 
 --queue: the shapes of SHAPES.tsv (family int, a symbolic Form exists) that have NO valid certificate in the shards, sorted; the farm proves exactly these
 (farm/farm_shapeprove.sh).  The queue id is the first 12 hex of sha256 over `key TAB shape_sha` of the queue lines: the same queue, the same id."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import argparse
 import hashlib
 import json
@@ -33,7 +35,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIFT = os.path.dirname(HERE)
 sys.path.insert(0, LIFT)
-from proof import certbasis, irdeps, model_sail, prove, shape, symform, x86sys  # noqa: E402
+from fnvnx.lift.proof import certbasis, irdeps, model_sail, prove, shape, symform, x86sys  # noqa: E402
 
 HEADER = '# shape_key\tfamily\tdsl_sha\tmodel_sha\treference\tresult\tobligations\tundef_flags\tdef0_witness\tdef0_free\tnonflag_free\tdeclared\n'
 

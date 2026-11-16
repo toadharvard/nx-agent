@@ -11,11 +11,13 @@ inline asm over the host FPSR (fnvl_fp_*), memory macros (M16 ...), the register
 
     python3 -I x87carrier.py        prints the closure, the translated / refused counts and the refusals
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import hashlib, json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.dirname(HERE)]
-import ctrans
-import x87spec
+import fnvnx.lift.proof.ctrans as ctrans
+import fnvnx.lift.proof.x87spec as x87spec
 
 RT = os.path.join(os.path.dirname(HERE), 'rt')
 EMITTERS = [os.path.join(os.path.dirname(HERE), 'fnvlift', n) for n in ('f_x87.py', 'f_x87_ctl.py')]

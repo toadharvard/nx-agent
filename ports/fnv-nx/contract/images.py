@@ -4,23 +4,24 @@
 RULE (dllkind.py, shared with modules.py): the set is the exe and every guest image: the images reached from its import directories (normal and
 delay-load, in modules.PE's reading) through images only, then every other dll file of the directories that is an image (a dll loaded later through
 LoadLibrary has its static base, as in modules.py).  A dll name (iat.norm_dll) is resolved case-insensitively against the files of the
-given directories; it is a GUEST IMAGE iff it is found, has no bridge row, and its whole normal import closure resolves to guest images
-or bridge dlls.  A bridge dll (rows in bridge.tsv) and a found dll the declared machine cannot load are not images and are not walked
-further; a name that is neither found nor bridged is a platform import (gate `imports`, owner L5).  Dynamic LoadLibrary names are facts of
+given directories; it is a GUEST IMAGE iff it is found and its whole normal import closure resolves to guest images or served dlls (the
+declared dll set without a file, platform_served).  A served dll is not walked; a found dll whose closure does not resolve is `load-fails`
+(on Windows its load fails: LoadLibrary returns NULL, error 126), never served by a native body; a name that is neither found nor served is `absent`.  Dynamic LoadLibrary names are facts of
 the `gpa` gate, not of this rule (VERDICT.md).
 Order: the exe, the images reached from the exe in discovery order (depth first, import directory then delay-load directory), then the others by name."""
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)
-from contract import dllkind  # noqa: E402
-from contract import iat  # noqa: E402
-from contract import modules  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name (contract.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract import dllkind  # noqa: E402
+from fnvnx.contract import iat  # noqa: E402
+from fnvnx.contract import modules  # noqa: E402
 
 
-def classify(exe_path, dirs, bridge=frozenset()):
-    """-> (order, kind): order = [(name, path)] of the exe's reached dlls that are found (guest images and declared ones, discovery order),
-    kind = {name: image | declared | bridge | platform}; raises modules.StageError.  BRIDGE: iterable of normalised dll names."""
+def classify(exe_path, dirs, served=frozenset()):
+    """-> (order, kind): order = [(name, path)] of the exe's reached dlls that are found (guest images and load-fails ones, discovery order),
+    kind = {name: image | load-fails | served | absent}; raises modules.StageError.  SERVED: iterable of normalised dll names (platform_served)."""
     def read(p):
         with open(p, "rb") as f:
             return f.read()
@@ -43,11 +44,11 @@ def classify(exe_path, dirs, bridge=frozenset()):
     # total over the files: a module loaded later through LoadLibrary must already be a guest image (modules.py gives every dll file a base), so
     # every dll file of the directories is a candidate after the dlls reached from the exe (discovery order first, then name order)
     files = sorted(dict.fromkeys(modules.lower(f) for x in dirs for f in sorted(os.listdir(x)) if modules.lower(f).endswith(".dll")))
-    order, kind = dllkind.classify((n, d, files), imports_of, find, frozenset(bridge), me)
+    order, kind = dllkind.classify((n, d, files), imports_of, find, frozenset(served), me)
     return order, kind
 
 
-def image_set(exe_path, dirs, bridge=frozenset()):
+def image_set(exe_path, dirs, served=frozenset()):
     """-> [(name as the file is called in lowercase, path)], the exe first (its name lowercased): the guest images."""
-    order, kind = classify(exe_path, dirs, bridge)
+    order, kind = classify(exe_path, dirs, served)
     return [(modules.lower(os.path.basename(exe_path)), exe_path)] + [(n, p) for n, p in order if kind[n] == "image"]

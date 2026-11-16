@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json
-# reads: ports/fnv-nx/link
-# reads: ports/fnv-nx/shim/build.json
-# reads: ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for the guest link profile (link/guest.json, recipe.with_guest_link, the guest part of recipe.check): one fact for every guest link.
 Pure: the real checkout's profile and admit.json, synthetic roots, no sandbox."""
 import copy
@@ -14,7 +10,9 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import recipe  # noqa: E402
 
 REPO = os.path.abspath(os.path.join(VERIFY, "..", "..", ".."))
 FAILED = []
@@ -49,7 +47,7 @@ def link_errs(r, root):
 
 
 check("the profile is valid", recipe.guest_link_errors(prof, pin, files, roots) == [], recipe.guest_link_errors(prof, pin, files, roots))
-check("the profile holds the script only: no stored libraries", set(prof) == {"script"}, prof)
+check("the profile holds the scripts only: no stored libraries", set(prof) == {"script", "image_script"}, prof)
 check("a guest exe root with no script and no libs has no link error", link_errs(rec("a.elf"), EXE) == [], link_errs(rec("a.elf"), EXE))
 check("a guest test root likewise", link_errs(rec("t.elf"), TST) == [], link_errs(rec("t.elf"), TST))
 for nm, root_, ent in (("without entry", EXE, None), ("with a non-identifier entry", TST, "a-b"), ("with the runtime's own alias as entry", TST, recipe.IMAGE_ENTRY)):
@@ -81,7 +79,7 @@ check("version_script: an untracked file outside the root is red", any("link mus
 e = link_errs(rec("s.so", kind="shared", version_script="ports/fnv-nx/docs/ARCHITECTURE.md", flags=["-m", "aarch64linux"]), HOST)
 check("version_script: a tracked file of a doc root is red", any("link must be" in x for x in e), e)
 
-# the tools of the ldcheck stage (link/ldcheck.py, link/gateids.py, contract/gatefile.py): tracked files under a tree of an admitted tool root
+# the tools of the ldcheck stage (link/ldcheck.py, contract/gatefile.py): tracked files under a tree of an admitted tool root
 need = lambda rs: [e for e in recipe.check(rec("a.elf"), EXE, files, rs, pin, REPO) if "ldcheck stage needs" in e]  # noqa: E731
 check("link tools under the declared trees of the tool root (contract, link) are valid", need(roots) == [], need(roots))
 cr = next(r for r in roots.values() if r.get("class") == "tool" and "ports/fnv-nx/link" in (r.get("trees") or []))

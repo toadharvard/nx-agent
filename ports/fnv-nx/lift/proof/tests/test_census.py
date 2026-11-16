@@ -1,7 +1,9 @@
 """census.py: the codemap rule (a range whose first byte the codemap accounts as data is not code) and the family check."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys, tempfile, unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-from proof import census
+from fnvnx.lift.proof import census
 
 class Codemap(unittest.TestCase):
     def test_class_by_byte(self):

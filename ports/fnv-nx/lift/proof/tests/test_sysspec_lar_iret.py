@@ -2,6 +2,8 @@
 """LAR / LSL (0F 02, 0F 03, register and memory source, 16- and 32-bit operand) and IRETD at CPL 3: the Forms of the declared record's lar_lsl and iret rows, proved over their domain against the SDM Operation (sysspec_legacy);
 the record's own rows are compared with the SDM rule row by row (record_vs_spec, iret_record_diffs), so a wrong row is a difference, never a silent value.  Needs the CPUID table only for the cleared-feature class (not used here).
 python3 -I tests/test_sysspec_lar_iret.py"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import copy
 import os
 import sys
@@ -11,10 +13,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
 sys.path.insert(0, os.path.join(HERE, '..'))
 sys.path.insert(0, HERE)
-import declared_x86sys
-from fnvlift import dsl, inputs
-from proof import shape, symform, sysspec, x86sys
-import sysspec_legacy as L
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys
+from fnvnx.lift.fnvlift import dsl, inputs
+from fnvnx.lift.proof import shape, symform, sysspec, x86sys
+import fnvnx.lift.proof.sysspec_legacy as L
 
 
 def _missing():
@@ -35,7 +37,7 @@ class LarLsl(unittest.TestCase):
     def setUp(self):
         declared_x86sys.configure(); self.rec = x86sys.load()
         global fx
-        from fnvlift import x86sys as fx
+        from fnvnx.lift.fnvlift import x86sys as fx
         self.saved = fx.REC; r = copy.deepcopy(self.rec)      # a record that carries descriptor.accessed (the field L5 has still to add): a test input, one value per descriptor
         for i, d in enumerate(r['lar_lsl']['descriptors'].values()): d['accessed'] = i & 1
         fx.REC = r; self.load = x86sys.load; x86sys.load = lambda p=None: r

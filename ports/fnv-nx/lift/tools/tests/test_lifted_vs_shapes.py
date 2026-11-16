@@ -4,19 +4,22 @@ the rows of liftgen's shapes_0.tsv of the same image (one shard, K = 0 of N = 1,
 Inputs (inputs.json): the exe and the facts of fnv-nx-build (the universe); the shapes file is generated here into TMPDIR by liftgen.shard, the same step the product runs.
 The proof is liftgen's own output: the shapes file is written by liftgen through lifted.lift_with_instructions, lifted() runs the same step again and counts
 shape_key/family of the instructions it yields (decoded again from the image bytes at (va, length))."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import collections, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE))
 for p in ('tools', ''):
     sys.path.insert(0, os.path.join(LIFT, p))
-import fnvlift as L, lifted
-from proof import shape
+import fnvnx.lift.fnvlift as L
+import fnvnx.lift.tools.lifted as lifted
+from fnvnx.lift.proof import shape
 
 
 def main():
-    import argparse, tempfile, liftgen
+    import argparse; import tempfile; import fnvnx.lift.tools.liftgen as liftgen
     exe = os.path.join(os.environ['FNVNX_INPUT_EXE'], 'FalloutNV.exe'); facts = os.environ['FNVNX_INPUT_FACTS']
-    import fnvlift
-    from fnvlift.tests import _inputs; _inputs.configure_image(facts + '/universe.tsv', 'exe')      # the facts external holds fpstate/ and fpmodes/; X86SYS is the tracked platform/declared/x86sys.json
+    import fnvnx.lift.fnvlift as fnvlift
+    from fnvnx.lift.fnvlift.tests import _inputs; _inputs.configure_image(facts + '/universe.tsv', 'exe')      # the facts external holds fpstate/ and fpmodes/; X86SYS is the tracked platform/declared/x86sys.json
     emit, jtab = 'dsl', None
     out = tempfile.mkdtemp(); shapes = out + '/shapes_0.tsv'
     try:
@@ -33,7 +36,7 @@ def compare(shapes, exe, emit, jtab, facts):
     for va, ln in got:
         ins = next(iter(L.core.md.disasm(img.bytes(va, 16), va, 1)), None)
         if ins is None:
-            from fnvlift import f_sys
+            from fnvnx.lift.fnvlift import f_sys
             ins = f_sys.decode_gap(img.bytes(va, 16))
         assert ins.size == ln, (hex(va), ins.size, ln)
         cnt[(shape.shape_key(ins), shape.family(ins))] += 1; n += 1

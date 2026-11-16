@@ -19,13 +19,15 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
-import boot  # noqa: E402
-import bootgpu  # noqa: E402
-import boothost  # noqa: E402
-import bootmachine  # noqa: E402
-import recipe  # noqa: E402
-import test_bootmachine as tb  # noqa: E402
-from test_boot import cli  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import boot  # noqa: E402
+from fnvnx.verify import bootgpu  # noqa: E402
+from fnvnx.verify import boothost  # noqa: E402
+from fnvnx.verify import bootmachine  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
+from fnvnx.verify.tests import test_bootmachine as tb  # noqa: E402
+from fnvnx.verify.tests.test_boot import cli  # noqa: E402
 
 # The published renderer, pinned exactly as a recipe external (verify/RECIPE.md "External inputs"; NXGL4_HOST.md section 1).
 NXGL4 = {"name": "nxgl4", "repo": "fnv-nx-build", "ref": "l6-render/nxgl4/13c4573c49d7", "commit": "2f0427f556c6a1d5af80d76a313a386abfc6c03a",

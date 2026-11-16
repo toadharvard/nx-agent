@@ -51,3 +51,8 @@ POLICY = {
                      "Python docs, Command line (-B, -E, -I, -s); PEP 552 (pyc embed source mtime)"),
     "python.script": ("python", "script path present, under a declared input", "Python docs, Command line (script)"),
 }
+
+# The import root of a generator/gate stage (recipe.py mounts the tool and its import closure at IMPORT_ROOT/IMPORT_TOP/<path relative to the project tree>; the
+# stage sets PYTHONPATH to IMPORT_ROOT).  One record: recipe.py, gate_admit.py and toolflags.py all read it.
+IMPORT_ROOT = "/imp"
+IMPORT_TOP = "fnvnx"

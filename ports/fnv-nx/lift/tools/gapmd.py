@@ -2,6 +2,8 @@
 A byte sequence capstone refuses is an instruction exactly when f_sys.decode_gap decides it: reserved-NOP space (a nop that falls through), or a #UD that the pinned Sail model
 decided (a row of the `udsail` input; it falls nowhere). The facts then see the same instruction set as the lifter (core.decode). A sequence that decode_gap does not decide stays
 refused: universe.py reports it in baddecode.tsv. The udsail input is always given: on the first pass it has no rows, so only the reserved-NOP rule applies, and BADDECODE (every refused sequence) is the input of proof/udsail.py."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import sys
 
 
@@ -22,7 +24,7 @@ class GapIns:
 
 def make(md, udsail=None):
     """md: a capstone Cs. udsail: the path of the `udsail` input (header-only on the first pass). Returns an object with md's `disasm(code, addr, count=0)` and `detail`"""
-    from fnvlift import f_sys, inputs
+    from fnvnx.lift.fnvlift import f_sys, inputs
     inputs.configure(udsail=udsail)
 
     def gap(b): return f_sys.decode_gap(b)
@@ -46,7 +48,7 @@ def make(md, udsail=None):
 def shapes_tsv(path, hd, md, text, T0, addrs):
     """SHAPES: the decoded-shape universe of one image, one row per shape key over every decoded instruction (proof.shape.shape_key, the key L3b certifies against):
     key, count, first address. An instruction decoded by rule (GapIns) has no encoding shape: its row is `nop:<bytes>` / `ud:<bytes>` (decided by decode_gap, not by a shape proof)."""
-    from proof import shape
+    from fnvnx.lift.proof import shape
     rows = {}
     for a in sorted(addrs):
         ins = next(md.disasm(text[a - T0:a - T0 + 15], a, 1))

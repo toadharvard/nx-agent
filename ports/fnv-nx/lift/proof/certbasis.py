@@ -1,5 +1,7 @@
 """What a certificate is bound to besides the shape, the Form and the IR: the obligations the prover checks, and the platform sources of the declared outputs (declared.json).
 One module, no SMT solver: the prover (prove.py, shapeprove.py), the certificate builder (certs_build.py) and the gate (formgate.py) all import it, so none keeps a copy."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..")) # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import hashlib
 import json
 import os
@@ -67,7 +69,7 @@ def _imports(rel):
         else:
             continue
         if bad: raise DynamicLoad("%s:%d imports %s" % (rel, n.lineno, bad[0]))
-        for m in names: out.update(_module_file(m))
+        for m in names: out.update(_module_file(m[len('fnvnx.lift.'):] if m.startswith('fnvnx.lift.') else m))      # the one module path: lift/<x> is `fnvnx.lift.<x>`; LIFT is lift/
     return out
 
 
@@ -98,7 +100,7 @@ def component_inputs():
     repo = os.path.normpath(os.path.join(LIFT, "..", "..", ".."))
     vdir = os.path.join(repo, "ports", "fnv-nx", "verify")
     if vdir not in sys.path: sys.path.insert(0, vdir)
-    import recipe
+    from fnvnx.verify import recipe
     roots = recipe.load_admit(repo)
     out = set()
     for r in COMPONENT_ROOTS:
@@ -142,5 +144,5 @@ def configure_inputs(a):
     given = [x for x in (a.cpumodel, a.rcptab, a.rcpcert) if x]
     if not given: return
     if len(given) != 3: raise SystemExit('--cpumodel, --rcptab and --rcpcert are given together')
-    from fnvlift import inputs
+    from fnvnx.lift.fnvlift import inputs
     inputs.configure(cpumodel=os.path.abspath(a.cpumodel), rcptab=os.path.abspath(a.rcptab), rcpcert=os.path.abspath(a.rcpcert))

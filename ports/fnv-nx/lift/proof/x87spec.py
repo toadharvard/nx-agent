@@ -46,6 +46,8 @@ Out.pre the Bool (the instruction's behaviour is defined by the SDM and the regi
 A page that says an exception is signalled with TOP and operands unchanged (SDM 1:8.5.1.1, 8.5.1.2,
 8.5.2, 8.5.3) gives the state with the flags set and TOP, tags, registers of the input.
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import z3
 from z3 import (BitVecVal, Extract, Concat, If, And, Or, Not, ZeroExt, SignExt, LShR,
                 UGT, ULT, UGE, ULE)
@@ -2040,7 +2042,7 @@ def emms_effect(d):
 
 # DSL fault kinds: the one source is L3a's fault table fnvlift/faults.json (read through fnvlift/faults.py: FAULTS, BYNAME); the order of the unmasked
 # checks is that of Wine 9.0 get_fpu_code (dlls/ntdll/unix/signal_i386.c): IE (with SF: STACK_CHECK), then DE, ZE, OE, UE, PE.
-from fnvlift import faults as _faults
+from fnvnx.lift.fnvlift import faults as _faults
 FLT = {n: _faults.BYNAME[n]["code"] for n in ("FLT_IE", "FLT_DE", "FLT_ZE", "FLT_OE", "FLT_UE", "FLT_PE", "FLT_SF")}
 
 

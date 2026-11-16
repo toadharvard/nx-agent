@@ -1,14 +1,16 @@
 """CERTS.md "Certificate key K (closure rule)", obligations of item 5.  Differential test of the K key (irdeps.py): the closure_sha of an encoding changes under an edit of a function its run executed (isla call events,
 model_sail.LAST['fns']), and under no edit of a function the run did not call, nor of the position annotations."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import re
 import sys
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
-from proof import irdeps, model_sail  # noqa: E402
-from proof.tests.test_model_patches import run  # noqa: E402
-from proof.tests import declared_sail  # noqa: E402
+from fnvnx.lift.proof import irdeps, model_sail  # noqa: E402
+from fnvnx.lift.proof.tests.test_model_patches import run  # noqa: E402
+from fnvnx.lift.proof.tests import declared_sail  # noqa: E402
 
 
 def mutate(text, irname, how):
@@ -62,7 +64,7 @@ class Closure(unittest.TestCase):
 @declared_sail.needs_sail
 class Refusal(unittest.TestCase):
     def test_an_ir_that_does_not_match_the_pin_is_refused(self):      # item 4: the record's IR is fetched by sha, not trusted: a record whose IR is not provided is REFUSED (never a silent stale); the IR-edit case (an executed function edited in the record's IR -> invalid) is test_certs_build.test_closure_key_keeps_a_record_valid_across_an_ir_change
-        from proof import certs_build
+        from fnvnx.lift.proof import certs_build
         certs_build._K.clear()
         rec = {'model_sha': '1' * 64, 'model_fns': ['f'], 'closure_sha': '2' * 64}
         with self.assertRaises(certs_build.Refused):

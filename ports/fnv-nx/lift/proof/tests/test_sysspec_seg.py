@@ -1,4 +1,6 @@
 """sysspec_seg: MOV Sreg, POP Sreg, PUSH Sreg Forms against the cited SDM spec under the declared record; the segment-register write effect (dsl kind sel) and its C emission."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import copy
 import os
 import sys
@@ -8,12 +10,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
 sys.path.insert(0, os.path.join(HERE, '..'))
 sys.path.insert(0, HERE)
-import declared_x86sys
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys
 declared_x86sys.configure()      # fnvlift.x86sys reads the record at import
 import capstone
 import z3
-from fnvlift import core, dsl, inputs
-from proof import lift_dsl, sysspec, x86sys
+from fnvnx.lift.fnvlift import core, dsl, inputs
+from fnvnx.lift.proof import lift_dsl, sysspec, x86sys
 
 A0 = 0x400000
 
@@ -40,11 +42,11 @@ class Seg(unittest.TestCase):
             r, n = sysspec.check(key(h)); self.assertEqual(r, 'proved', (h, n))
 
     def test_an_undecided_selector_row_has_no_form(self):
-        from fnvlift import x86sys as lx
+        from fnvnx.lift.fnvlift import x86sys as lx
         u = lx.REC['mov_to_sreg']['undecided']; old = list(u['selectors']); u['selectors'][:] = [27]
         rec = copy.deepcopy(x86sys.load()); rec['mov_to_sreg']['undecided']['selectors'] = [27]
         try:
-            import sysspec_seg
+            import fnvnx.lift.proof.sysspec_seg as sysspec_seg
             for h in ('8ec0', '8ed8', '07', '1f', '8e00'):
                 r, n = sysspec_seg.check(key(h), rec); self.assertEqual(r, 'uncertified', h)
             self.assertRaises(core.Unsupported, emit, '8ec0')
@@ -55,7 +57,7 @@ class Seg(unittest.TestCase):
         for h in ('671f', '6707'): self.assertEqual(sysspec.check(key(h))[0], 'uncertified', h)
 
     def test_a_record_that_differs_from_the_form_is_a_difference(self):
-        import sysspec_seg
+        import fnvnx.lift.proof.sysspec_seg as sysspec_seg
         rec = x86sys.load(); rec = copy.deepcopy(rec); rec['mov_to_sreg']['ss']['selectors'].append(0x50)
         r, n = sysspec_seg.check(key('8ed0'), rec); self.assertEqual(r, 'FAILED(dsl)'); self.assertIn('fault', n)
 
@@ -83,7 +85,7 @@ class Seg(unittest.TestCase):
 
 
 def declared_x86sys_fs():
-    from fnvlift import x86sys
+    from fnvnx.lift.fnvlift import x86sys
     return x86sys.SEL['fs'] & 0xfffc
 
 
@@ -111,7 +113,7 @@ class Prefix(unittest.TestCase):
             r, n = sysspec.check(key(h)); self.assertEqual(r, 'uncertified', h); self.assertIn('reserved', n)
 
     def test_forms_record_their_address_kinds(self):
-        import symform
+        import fnvnx.lift.proof.symform as symform
         self.assertEqual(symform.symbuild(key('1e')).form.access, frozenset({'stack'}))
         self.assertIn('explicit', symform.symbuild('8b00/0.0.0.0').form.access)
 
@@ -124,7 +126,7 @@ class Far(unittest.TestCase):
     def tearDown(self): inputs.reset()
 
     def test_far_classes_of_the_record_are_proved_over_the_domain(self):
-        import sysspec_far
+        import fnvnx.lift.proof.sysspec_far as sysspec_far
         rec = x86sys.load()
         for h, call in (('ea000000000000/1.6.0.0', False), ('9a000000000000/1.6.0.0', True)):
             cases = sysspec_far.check(h, call, rec, True); self.assertTrue(all(r == 'proved' for _, r in cases), cases)
@@ -132,7 +134,7 @@ class Far(unittest.TestCase):
         r, n = sysspec.check('ea000000000000/1.6.0.0'); self.assertEqual(r, 'uncertified'); self.assertIn('OutsideDomain', n); self.assertIn('115 GDT indexes', n)
 
     def test_a_record_that_differs_from_the_form_is_a_difference(self):
-        import sysspec_far
+        import fnvnx.lift.proof.sysspec_far as sysspec_far
         rec = copy.deepcopy(x86sys.load()); rec['jmp_far']['jumps']['selectors'].append(0x20)       # a selector the Form faults on is declared valid
         cases = dict(sysspec_far.check('ea000000000000/1.6.0.0', False, rec, True)); self.assertEqual(cases['valid'], 'differs')
         rec = copy.deepcopy(x86sys.load()); del rec['jmp_far']['data_descriptors']['0x20']          # a selector of no class: the partition is not complete

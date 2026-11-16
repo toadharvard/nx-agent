@@ -2,10 +2,12 @@
 """Unit test of tools/prelude.py, the one inliner of the pack's runtime headers (inc/fnvl_prelude.h, inc/imp.h; packstage.py inc), and of its two users:
 the recipe (liftrecipe.inc_stages: the inputs of each step are the closure of its source) and the pack copy step (an external that carries an inc/ is rejected).
     python3 -I test_prelude.py"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json, os, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__)); TOOLS = os.path.dirname(HERE); LIFT = os.path.dirname(TOOLS)
 sys.path.insert(0, TOOLS)
-import prelude, packcopy
+import fnvnx.lift.tools.prelude as prelude; import fnvnx.lift.tools.packcopy as packcopy
 bad = 0
 
 
@@ -49,7 +51,7 @@ with tempfile.TemporaryDirectory() as t:
     check('packcopy: a pack with an inc/ (a carried prelude) is rejected', ok)
 
 # the recipe: the inputs of each inc step are exactly the closure of its source in the real tree, and the build.json says so
-import liftrecipe
+import fnvnx.lift.tools.liftrecipe as liftrecipe
 rec = json.load(open(os.path.join(LIFT, 'pack', 'build.json')))
 steps = {g['outputs'][0]: g for g in rec['generated'] if g['args'][0] == 'inc'}
 repo = os.path.join(LIFT, '..', '..', '..')

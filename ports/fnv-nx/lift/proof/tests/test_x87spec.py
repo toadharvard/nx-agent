@@ -4,11 +4,13 @@ Checks: the status/control word layout, the tag encoding, the FINIT state (also 
 (to_m80 of exactly representable values equals the SDM encoding, from_m80 inverts it), the BCD and integer indefinites, and that the registry covers the instruction list of the pack
 (journal/inbox/l3b-w9-x87-list.md) up to the two encodings that have no SDM page.
 python3 -I tests/test_x87spec.py"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import math, os, re, struct, sys, unittest
 from fractions import Fraction
 import z3
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE)); sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))      # proof/ (bare module names) and lift/ (fnvlift, proof.*)
-import x87spec as X
+import fnvnx.lift.proof.x87spec as X
 K = X.K
 
 def rows(kind):
@@ -155,7 +157,7 @@ class Coverage(unittest.TestCase):
 class Citations(unittest.TestCase):
     def test_every_citation_has_a_page(self):
         with open(os.path.join(os.path.dirname(HERE), 'sdm_pages.tsv'), encoding='utf-8') as fh: tab = [l.rstrip('\n').split('\t') for l in fh][1:]
-        import sdm_pages      # the table holds the keys of the files of sdm_pages.SPECS: the one list, the one key pattern
+        import fnvnx.lift.proof.sdm_pages as sdm_pages      # the table holds the keys of the files of sdm_pages.SPECS: the one list, the one key pattern
         src = ''.join(open(os.path.join(os.path.dirname(HERE), f), encoding='utf-8').read() + '\n' for f in sdm_pages.SPECS)
         want = set('SDM %s:%s' % k for k in re.findall(sdm_pages.KEY, src))
         self.assertEqual(want, set(r[0] for r in tab))

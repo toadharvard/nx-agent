@@ -10,6 +10,8 @@ This tool writes the shape census only.
 A label whose whole body is `fnvl_raise(KIND, ...)` (undecodable bytes, an invalid LOCK) is not a lifted instruction: it is counted in the header (raise_only, by kind) and not in the universe.
 Every other label address must belong to exactly one image and decode to one instruction (capstone, or the reserved-NOP gap fnvlift.f_sys.nop_gap, counted separately as family `nop-gap`); otherwise the run fails.
 OUT.tsv: the format of census.py (`shape<TAB>family<TAB>form_key<TAB>count<TAB>first_address`, count = distinct label addresses), header with the sha256 of every input."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..")) # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import glob
 import hashlib
 import multiprocessing
@@ -20,8 +22,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'tools'))
-from proof import census, forms, shape  # noqa: E402
-import pemod  # noqa: E402
+from fnvnx.lift.proof import census, forms, shape  # noqa: E402
+from fnvnx.lift.tools import pemod  # noqa: E402
 
 
 class Loaded:
@@ -63,7 +65,7 @@ def image_of(a):
 
 def work(chunk):
     md = shape.decoder()
-    from fnvlift import f_sys
+    from fnvnx.lift.fnvlift import f_sys
     shapes, nop, bad = {}, [], []
     for a in chunk:
         i = image_of(a)

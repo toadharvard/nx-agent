@@ -6,9 +6,10 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: `verify` is imported by its qualified name
-from verify import targets  # noqa: E402
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): `verify` is imported by its qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import targets  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 fails = []
 
@@ -42,7 +43,7 @@ u = copy.deepcopy(t)
 u["references"]["x"] = "no/such/file.json"
 check("a reference to a missing file is red", any("no/such" in b for b in targets.check(u, repo=repo)), targets.check(u, repo=repo))
 import tempfile  # noqa: E402
-from contract.target import gen_header as targets_header  # noqa: E402
+from fnvnx.contract.target import gen_header as targets_header  # noqa: E402
 check("fpcr: DN=0 FZ=0 RMode=RN, AHP=0: the derived integer is 0", targets.fpcr_value(t) == 0 and "FNVNX_FPCR 0x0ull" in targets_header.render(t), targets_header.render(t))
 u = copy.deepcopy(t)
 u["console_cpu"]["fpcr"]["RMode"] = 3

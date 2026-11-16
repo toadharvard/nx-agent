@@ -1,5 +1,7 @@
 """The declared x86 system record (platform/declared/x86sys.json, owner: L5 platform) as the ONE source of the process's selectors, the user-callable int vectors and the facts a Form needs about the OS.
 Nothing is typed here: a field with status "undecided" is absent from SEL / INT_VECTORS and is listed in UNDECIDED; a Form or lifter row that needs it is not produced (the instruction is Unsupported)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json
 from . import inputs
 PATH = inputs.get('x86sys')       # explicit: the platform X86SYS output, passed by the program that runs the lifter (fnvlift/inputs.py)
@@ -14,7 +16,7 @@ MOV_TO_SREG = {r: (tuple(REC['mov_to_sreg'][r]['selectors']), REC['mov_to_sreg']
 UNDECIDED = sorted(k for k, v in REC.items() if isinstance(v, dict) and v.get('status') == 'undecided') + ['selectors.' + n for n, v in REC['selectors'].items() if 'value' not in v] \
     + ['mov_to_sreg.' + str(s) for s in REC['mov_to_sreg']['undecided']['selectors']] + ['cr4.' + n for n, v in REC['cr4'].items() if 'value' not in v] \
     + ['int_ring3.other_vectors']
-from fnvlift import faults as _f
+from fnvnx.lift.fnvlift import faults as _f
 _f.check_int_vectors(INT_VECTORS)
 
 

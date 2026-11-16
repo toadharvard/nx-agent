@@ -13,10 +13,12 @@ Reference model plug-in: a module of the MODELS table below (proof/model_sail.py
 Faults: a form with fault(DE) is compared on the pre-states where the DSL does not fault; additionally (1) `assume` => DSL does not fault, and (2) for forms
   without a memory operand, DSL does not fault => `assume` (the model faults exactly where the DSL does).  The model's DE paths are tolerated for such forms only.
 Unobserved: the model interface returns neither DF nor the other EFLAGS bits; a form writing them is certified on its other fields only and reported model-gap."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import hashlib, json, os, re, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import z3
-from proof import bounds, certbasis, defects, rewrite, forms, model_sail
+from fnvnx.lift.proof import bounds, certbasis, defects, rewrite, forms, model_sail
 MODELS = {'model_sail': model_sail}      # the reference models --model can name
 ADDR = 0x401000
 REGS = ('eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi'); FLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of')
@@ -27,7 +29,7 @@ SEVERITY = ['FAILED(dsl)', 'FAILED(def0)', bounds.BOUND, 'FAILED(model-defect)',
 
 MODEL_FAULT_BY_NAME = {'DE': r'\(!!FAULT-FRESH :DE |:(UN)?SIGNED-DIVIDE',            # DSL fault code -> the model's messages of that fault (divide error paths)
                        'AV': r':NON-WRITABLE-SEGMENT$'}                     # a store through CS (memory_accessors.sail store_bytes_to_ea): #GP(0)
-from fnvlift import dsl as _dsl
+from fnvnx.lift.fnvlift import dsl as _dsl
 MODEL_FAULT = {k: MODEL_FAULT_BY_NAME[n] for k, n in _dsl.FAULTS.items() if n in MODEL_FAULT_BY_NAME}      # the kind numbers are the DSL's (dsl.FAULTS), the model's messages are keyed by kind name
 class Perm(set):                      # tolerated model faults of a form: exactly the messages of the fault codes that the form declares (a fault the DSL does not declare stays a model-gap)
     declared = True
@@ -194,7 +196,7 @@ def declared_findings(F):
 def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     """-> (result, note, certificate extras).  Shape proofs (shapeprove.py) pass pre = a pre-state with a symbolic eip, model = a thunk returning the model
     post-state of the shape, fields = {name: (offset, size)} of the symbolic encoding bytes (z3 variables fld_<name>, free = universally quantified)"""
-    if getattr(F, 'x87', None): from proof import x87form; return x87form.prove_form(F)      # an x87 Form is proved against its spec entry (x87spec), the Sail model has no x87
+    if getattr(F, 'x87', None): from fnvnx.lift.proof import x87form; return x87form.prove_form(F)      # an x87 Form is proved against its spec entry (x87spec), the Sail model has no x87
     pre = PRE if pre is None else pre
     model_sail.SYMSEL = any(n.op == 'var' and n.x.startswith('sel_') for n in _nodes(F.roots()))
     base = getattr(mod, 'FAULT_OK_ORIG', None) or set(mod.FAULT_OK); mod.FAULT_OK_ORIG = base; mod.FAULT_OK = Perm(base, {k for k, _ in F.faults}) if F.faults else base

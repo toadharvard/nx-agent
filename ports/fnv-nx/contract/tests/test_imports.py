@@ -6,9 +6,10 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: contract.X by its qualified name
-from contract import bridgetable as B  # noqa: E402
-from contract import imports as I  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): contract.X by its qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract import bridgetable as B  # noqa: E402
+from fnvnx.contract import imports as I  # noqa: E402
 
 FAILED = []
 
@@ -110,7 +111,7 @@ for bad in ("a\n", "a\tb\tc\n", "a\tb\na\tc\n", "a\t1b\n"):
         check("va record bad input %r is an error" % bad, True)
 
 # the rows table (stage A) and its keys: a function of dll, name, conv only
-from contract import iat  # noqa: E402
+from fnvnx.contract import iat  # noqa: E402
 ra, ea, _ = derive(names=NAMES.replace("msvcrt.dll\tnotserved\n", ""))
 rb, _, _ = derive(names=NAMES.replace("msvcrt.dll\tnotserved\n", ""), exports={k: (v[0] if k[1] == "sprintf" else v[0] + "_other", v[1], "v" if v[2] == "i" else v[2], v[3]) for k, v in EXPORTS.items()})
 check("rows table: the import keys do not depend on the symbols or the return letters",

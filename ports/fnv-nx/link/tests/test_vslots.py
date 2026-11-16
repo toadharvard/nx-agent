@@ -3,7 +3,7 @@
 consistent scene, red and named on every broken fact, an error on malformed input."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import os, sys, tempfile
 import atexit  # noqa: E402
 import shutil  # noqa: E402
@@ -13,9 +13,10 @@ atexit.register(shutil.rmtree, tempfile.tempdir, True)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.join(HERE, '..')]
-import abi_fixture as F
-import abi_gaterun
-import vslots as G
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link.tests import abi_fixture as F
+from fnvnx.link.tests import abi_gaterun
+from fnvnx.link import vslots as G
 
 fails = []
 
@@ -31,7 +32,7 @@ def run(**kw):
     rc, r = abi_gaterun.run(G, ['--exe', exe, '--obj', op, '--bind', bp], 'vslots')
     return rc, r, a, (exe, op, bp)
 
-from contract import store
+from fnvnx.contract import store
 rc, r, a, _ = run()
 check('green', (rc, r['universe'], r['certified'], r['name']), (0, 6, 6, 'vslots'))
 rc, r, a, _ = run(g_addr=F.TEXT)

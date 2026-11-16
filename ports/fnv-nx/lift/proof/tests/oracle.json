@@ -487,19 +487,6 @@
     "ports/fnv-nx/lift/proof/treeid.py"
    ]
   },
-  "test_vendormap.py": {
-   "references": [
-    {
-     "anchor": "L1-L402",
-     "kind": "spec",
-     "path": "ports/fnv-nx/lift/proof/tests/vendor_cells.tsv"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/lift/proof/vendormap.py",
-    "ports/fnv-nx/lift/proof/sdmfeat.py"
-   ]
-  },
   "test_x87spec.py": {
    "references": [
     {

@@ -1,5 +1,7 @@
 """Tests of proof/formgate.py: the inputs contract (externals fetched by the trunk's loader from local bare repos, no network), every red reason,
 the certification rule on synthetic encodings (byte strings written here, nothing derived from game data)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", "..")) # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import itertools
 import hashlib
 import json
@@ -14,12 +16,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PROOF = os.path.join(HERE, '..')
 LIFT = os.path.join(PROOF, '..')
 sys.path.insert(0, HERE)
-import declared_x86sys; declared_x86sys.configure()
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys; declared_x86sys.configure()
 sys.path.insert(0, LIFT)
 sys.path.insert(0, os.path.join(LIFT, "..", "verify"))     # cas, recipe: the trunk loader the gate itself uses (-I drops PYTHONPATH)
-import fakeext
-from proof import certbasis, formgate, forms, prove, shape
-import recipe
+import fnvnx.lift.proof.tests.fakeext as fakeext
+from fnvnx.lift.proof import certbasis, formgate, forms, prove, shape
+from fnvnx.verify import recipe
 
 WORK = os.environ.get('FNVNX_TEST_WORK') or __import__('tempfile').mkdtemp(prefix='fnvnx-proof-test-')     # declared input: the directory the fixtures are written below
 _SEQ = itertools.count()
@@ -108,6 +110,9 @@ class Fixture:
             os.makedirs(os.path.dirname(q), exist_ok=True)
             with open(q, 'w') as fh:
                 json.dump(doc, fh)
+        # the pin's checkout is a git repository: recipe.load_admit derives the roots' python imports from the tracked files (gate_admit.derived_imports, `git ls-files`)
+        for cmd in (['init', '-q'], ['add', '-A']):
+            subprocess.run(['git', '-C', root] + cmd, check=True, capture_output=True)
 
     def write(self, declare=('liftpack', 'certs'), **over):
         doc = {'format': 'fnvnx-forms-inputs/1', 'external': [self.ext[n] for n in declare], 'shapes': 'liftpack/shapes.tsv',
@@ -171,7 +176,7 @@ class CertificationRule(unittest.TestCase):
     def test_certificate_stale_after_a_dsl_edit_is_refused(self):
         # certificates written under the current DSL; then the builder of ONE mnemonic (xor) changes: exactly the shapes of xor lose their certificate,
         # the others (their Form did not change) stay certified.  The key of a certificate is (shape, shape_sha of the CURRENT Form, IR sha), nothing else.
-        from proof import forms
+        from fnvnx.lift.proof import forms
         with workdir() as td:
             f = Fixture(td, GOOD)
             self.assertEqual(f.judge()[:3], (2 * len(GOOD), 2 * len(GOOD), []))
@@ -326,6 +331,7 @@ class Cli(unittest.TestCase):
     def run_gate(self, td, f):
         co = os.path.join(td, 'co')
         os.makedirs(os.path.join(co, 'ports', 'fnv-nx'))
+        os.symlink('fnv-nx', os.path.join(co, 'ports', 'fnvnx'))      # the one module path: `fnvnx.<root path>` is ports/fnvnx (a link to the tree, as in the repository)
         shutil.copytree(LIFT, os.path.join(co, 'ports', 'fnv-nx', 'lift'), ignore=skip_cache, copy_function=shutil.copyfile)
         os.makedirs(os.path.join(co, 'ports', 'fnv-nx', 'verify'))      # the real verify/ except admit.json (the fixture's owner row)
         for n in os.listdir(fakeext.VERIFY):
@@ -339,7 +345,7 @@ class Cli(unittest.TestCase):
         f.write_owner(co)
         out = os.path.join(td, 'out')
         os.makedirs(out)
-        import recipe
+        from fnvnx.verify import recipe
         recipe.set_artifacts(recipe.ext_dir(os.path.join(out, 'forms-cache')), f.art.url)    # the artifacts repository is a record beside the cache the gate fills (formgate.cache_dir), never an environment variable
         env = {'PATH': os.environ['PATH'], 'GATE_OUT': out, 'HOME': td, 'GIT_TERMINAL_PROMPT': '0'}
         r = subprocess.run([sys.executable, '-I', 'ports/fnv-nx/lift/proof/formgate.py'], cwd=co, env=env, capture_output=True, text=True)
@@ -383,11 +389,11 @@ class DeclaredOutputs(unittest.TestCase):
 class EaRule(unittest.TestCase):
     """item ea-rule (proof/eaaudit.py): the Form builders of this tree hold the rule; a builder that loads or stores raw, or hands an mload / mstore an address that no address function made, is one violation each"""
     def test_this_tree_holds_the_rule(self):
-        from proof import eaaudit
+        from fnvnx.lift.proof import eaaudit
         self.assertEqual(eaaudit.violations(PROOF), [])
 
     def test_violations_are_found(self):
-        from proof import eaaudit
+        from fnvnx.lift.proof import eaaudit
         with tempfile.TemporaryDirectory() as d:
             with open(os.path.join(d, 'forms.py'), 'w') as f:
                 f.write('def mload(m, a, n): return a\ndef good(c):\n    a = ea(c)\n    return mload(a, 4)\ndef bad(c):\n    return mload(c.raw, 4)\n')

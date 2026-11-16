@@ -1,4 +1,6 @@
 """opmap over the PINNED SDM PDF (fnv-nx-build tools/intel-sdm, fetched and checked by sha256) gives exactly the committed reference cells, proof/tests/opmap_cells.tsv."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import hashlib
 import os
 import subprocess
@@ -8,7 +10,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
-from proof import opmap
+from fnvnx.lift.proof import opmap
 
 B = os.environ.get('FNVNX_BUILD')      # declared input: a clone of fnv-nx-build; without it the class is skipped with that reason
 PIN = 'a4a62e6a7ba11a76c7753a195b825087306812aac39b930973f9168ee599f321'      # tools/intel-sdm MANIFEST.json sha256

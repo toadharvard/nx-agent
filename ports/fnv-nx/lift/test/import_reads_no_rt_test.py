@@ -17,12 +17,12 @@ def hook(ev, args):
         raise RuntimeError('read of ' + os.fsdecode(args[0]))
 sys.path.insert(0, %r)
 sys.addaudithook(hook)
-import fnvlift, fnvlift.dsl
+import fnvnx.lift.fnvlift as fnvlift, fnvnx.lift.fnvlift.dsl
 assert not hasattr(fnvlift, 'PRELUDE')
 assert not hasattr(fnvlift, 'prelude') and not hasattr(fnvlift, 'inline')
 print('no-prelude')
 '''
 
-p = subprocess.run([sys.executable, '-I', '-c', CHILD % (RT, LIFT)], capture_output=True, text=True)
+p = subprocess.run([sys.executable, '-I', '-c', CHILD % (RT, os.path.join(LIFT, '..', '..'))], capture_output=True, text=True)
 assert p.returncode == 0 and p.stdout.strip() == 'no-prelude', (p.returncode, p.stdout, p.stderr[-400:])
-print('import fnvlift, fnvlift.dsl: no rt read; fnvlift has no prelude: ok')
+print('import fnvnx.lift.fnvlift as fnvlift, fnvnx.lift.fnvlift.dsl: no rt read; fnvlift has no prelude: ok')

@@ -43,8 +43,10 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import cas  # noqa: E402
-import unitview  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import unitview  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OPEN_CHANNELS = ["wall_clock", "entropy", "cpu_count_scheduling", "kernel_version", "memory_size",

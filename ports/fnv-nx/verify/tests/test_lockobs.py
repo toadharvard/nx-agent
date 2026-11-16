@@ -12,9 +12,11 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
-import boot  # noqa: E402
-import lockobs  # noqa: E402
-import test_bootmachine as tb  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import boot  # noqa: E402
+from fnvnx.verify import lockobs  # noqa: E402
+from fnvnx.verify.tests import test_bootmachine as tb  # noqa: E402
 
 NAMES = ("t_acquire", "t_try", "t_release")
 RUNNERS = ["case_pair", "case_try", "case_nested", "case_multi", "case_foreign", "case_held", "case_free", "case_leak",

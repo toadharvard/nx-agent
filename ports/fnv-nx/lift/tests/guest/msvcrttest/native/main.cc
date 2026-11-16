@@ -12,8 +12,8 @@ int fnvnx_lift_imports_init(void);
 void *VirtualAlloc(void *addr, unsigned size, unsigned type, unsigned protect);      /* the platform's (platform/win32/memory.cpp) */
 extern u32 fnvl_msvcrt_sighandlers[23];                                                /* rt/msvcrt_eh.cc: process state */
 }
-#include "/uses/ports/fnv-nx/lift/tests/guest/msvcrttest/lifted/image.inc"
-#include "/uses/ports/fnv-nx/lift/rt/GEN/fnvl_entry.h"      /* the entry's type: uint64_t(uint64_t api), crt0's call ABI */
+#include "image.inc"
+#include "fnvl_entry.h"      /* the entry's type: uint64_t(uint64_t api), crt0's call ABI */
 #define MEM_COMMIT_RESERVE 0x3000u
 #define PAGE_RW 4u
 static u32 *W(u32 a) { return (u32 *)(unsigned long)a; }

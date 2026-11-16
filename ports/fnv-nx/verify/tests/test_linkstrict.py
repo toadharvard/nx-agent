@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for verify/gate_linkstrict.py (class 3): the rules on synthetic objects (compiled with aarch64-linux-gnu-gcc) and the gate on the
 toy product root of test_recipe.py (reused by import). Plain script: PASS/FAIL lines, exit 0 on pass."""
 import json
@@ -13,11 +12,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
 sys.path.insert(0, HERE)
-import gate_linkstrict as L  # noqa: E402
-import test_recipe as TR  # noqa: E402
-import verdict  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_linkstrict as L  # noqa: E402
+from fnvnx.verify.tests import test_recipe as TR  # noqa: E402
+from fnvnx.verify import verdict  # noqa: E402
 
-import scratch  # noqa: E402
+from fnvnx.verify import scratch  # noqa: E402
 
 scratch.install()
 ROOT = tempfile.mkdtemp(prefix="linkstrict-")

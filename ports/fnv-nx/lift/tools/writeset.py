@@ -15,11 +15,13 @@ RULE (every instruction of the image's reached ranges, decoded once; both sweeps
   A query's answer is `exact` writers + the number of open stores. The fact "no store writes [lo, hi)" is PROVEN iff exact is empty AND open == 0 (stack stores cannot reach it: the stack is outside every static section); open > 0 makes it
   OPEN, closed only by a proved rule. Stores performed by imports (ReadFile into a buffer, memcpy, ...) are not instructions of the image: they are counted as `import_call_sites` (calls through the IAT) and bound the fact the same way.
 Output rows: site<TAB>class<TAB>lo<TAB>hi<TAB>base (hex; lo/hi empty for open)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys, json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import capstone
 from capstone import x86 as X
-import pcsrc
+import fnvnx.lift.tools.pcsrc as pcsrc
 from collections import Counter
 
 M32 = 0xffffffff

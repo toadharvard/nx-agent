@@ -5,14 +5,14 @@
 Certificates are the JSON files written by proof/prove.py under the directory passed as `d`: {"form": key, "result": "proved"|"FAILED..."|"model-gap"|"timeout"..., ...}.
 A form is certified when it has at least one certificate and EVERY certificate of it says "proved", or carries "accepted": true (the only way a refines-model / model-defect
 status counts). Anything else (no file, a failed, gap or timed-out encoding) is `none`; an unreadable file stops the build. A missing directory certifies nothing (`present` False)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import collections, json, os, sys
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))   # LIFT first: fnvlift is the package lift/fnvlift
 
 
 def form_key(ins):
     from capstone import x86 as X
-    from fnvlift.formkey import form_key as fk
+    from fnvnx.lift.fnvlift.formkey import form_key as fk
     return fk(ins, X)[0]
 
 
@@ -38,7 +38,7 @@ class Certs:
 
 if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    import cli
+    import fnvnx.lift.tools.cli as cli
     (*cd,), _ = cli.parse('usage: formcert.py [CERTDIR]   count the certified forms of CERTDIR', sys.argv[1:], (1, 1))
     c = Certs(*cd)
     print('certificate dir present: %s; forms with a certificate file %d, certified %d' % (c.present, len(c.ok), sum(c.ok.values())))

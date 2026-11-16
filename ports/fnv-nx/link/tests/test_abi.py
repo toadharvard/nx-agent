@@ -3,7 +3,7 @@
 rows (universe, canonical definition, unnamed rows, kind mismatch, undecodable names) and the CLI."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import os, subprocess, sys, tempfile
 import atexit  # noqa: E402
 import shutil  # noqa: E402
@@ -13,9 +13,10 @@ atexit.register(shutil.rmtree, tempfile.tempdir, True)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.join(HERE, '..')]
-import abi
-import abi_gaterun
-from contract import store
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import abi
+from fnvnx.link.tests import abi_gaterun
+from fnvnx.contract import store
 
 fails = []
 

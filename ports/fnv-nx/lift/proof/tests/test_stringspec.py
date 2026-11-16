@@ -1,4 +1,6 @@
 """stringspec: the SDM spec of REP/REPE/REPNE x MOVS/STOS/LODS/CMPS/SCAS at 8/16/32 bits proves the DSL Forms; a mutated spec is refused."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import subprocess
 import sys
@@ -6,10 +8,10 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
-from proof import stringspec, x86sys  # noqa: E402
+from fnvnx.lift.proof import stringspec, x86sys  # noqa: E402
 
 sys.path.insert(0, HERE)
-import declared_x86sys; declared_x86sys.configure()      # the declared machine of this tree, explicit
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys; declared_x86sys.configure()      # the declared machine of this tree, explicit
 
 OPS = ('a4', 'a5', 'aa', 'ab', 'ac', 'ad', 'a6', 'a7', 'ae', 'af')
 WORD = ('66a5', '66ab', '66ad', '66a7', '66af')

@@ -3,9 +3,11 @@
 Green: facts equal to the bytes -> no finding. Red (one finding class each): a wrong catch address, a wrong unwind prev, a wrong scope filter, a thunk whose jump is no frame handler.
 The Wine reference (dlls/msvcrt/except_i386.c, cppexcept.h, cpp.c of the published wine-9.0 tag) is pinned by wine_pin.json; check_wine is tested against a synthetic tree.
 python3 -I tests/test_ehoracle.py"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import hashlib, json, os, struct, sys, tempfile, unittest
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE))
-import ehoracle as E
+import fnvnx.lift.proof.ehoracle as E
 
 BASE, TEXT = 0x400000, 0x1000                      # image base, RVA of the one section
 def va(off): return BASE + TEXT + off

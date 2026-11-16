@@ -7,6 +7,8 @@ x87spec.execute on the from_dsl state over the symbolic DSL pre-state, under x87
 pre, undef, mem_undef, nd, nd_pre). Per entry: `plain` = the z3 decl kinds of the DAG, `ops` = the op symbols (name and sorts) it applies, `leaks` = floating-point or Real kinds
 that reach the DAG outside a symbol (a part (i) function that is not a pure value function: the translator raises Unsupported for them). Output {"format": "fnvnx-x87ops/2", "entries":
 {key: {...}}, "kinds": {kind: entries using it}, "symbols": {symbol: entries using it}}."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json
 import os
 import sys
@@ -14,8 +16,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.dirname(HERE), HERE]
 import z3  # noqa: E402
-import x87form as XF  # noqa: E402
-import x87spec as X  # noqa: E402
+import fnvnx.lift.proof.x87form as XF  # noqa: E402
+import fnvnx.lift.proof.x87spec as X  # noqa: E402
 
 FORMAT = "fnvnx-x87ops/2"
 KIND = {getattr(z3, n): n[len("Z3_OP_"):] for n in dir(z3) if n.startswith("Z3_OP_") and isinstance(getattr(z3, n), int)}

@@ -10,6 +10,8 @@ DIR of --rows holds one record file per queue row (`<name>.json`, the prove step
   - certs_build counts every proved record as a valid certificate of this prover (no stale-* class, no withheld).
 Outputs: certs.tsv (certs_build's table), report.txt, certs.jsonl (the records in queue order), model_gap.tsv, summary.txt (the totals and prover_sha).
 No WITHHELD list is read: the Form-equivalence failures (tests/test_forms_immsel.py --failures) are not a stage of this root yet, so the certificates are not final until that stage feeds this one."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import argparse
 import collections
 import json
@@ -18,7 +20,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from proof import certbasis, certs_build, defectspec, model_sail, x86sys  # noqa: E402
+from fnvnx.lift.proof import certbasis, certs_build, defectspec, model_sail, x86sys  # noqa: E402
 
 DECLARED = ("proved", "agree-except-declared", "FAILED(model-defect)", "model-gap")
 

@@ -13,9 +13,11 @@ atexit.register(shutil.rmtree, tempfile.tempdir, True)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.join(HERE, '..'), os.path.join(HERE, '..', '..', 'contract'), os.path.join(HERE, '..', '..', 'toolchain', 'tests')]
-import abi_gaterun
-import odr
-import plugbuild as pb
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link.tests import abi_gaterun
+from fnvnx.link import odr
+from fnvnx.toolchain.tests import plugbuild as pb
 
 fails = []
 d = tempfile.mkdtemp()

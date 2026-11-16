@@ -10,6 +10,8 @@ expansion is bit-vector, array and logic only stays inline: those kinds are the 
 fact (CLAUDE.md 2026-11-15 rule 2). A function that takes the state object (St) or returns a tuple is composition, not a value op: it stays inline. A Real or FP kind that
 reaches the DAG through such a function is `leak(...)`, and the translator raises Unsupported naming it.
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import ast
 import contextlib
 import os
@@ -18,7 +20,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.dirname(HERE), HERE]
 import z3  # noqa: E402
-import x87spec as X  # noqa: E402
+import fnvnx.lift.proof.x87spec as X  # noqa: E402
 
 SPEC = os.path.join(HERE, "x87spec.py")
 
@@ -131,8 +133,8 @@ def instrument():
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # Translator: z3 term -> DSL DAG.  One table, K2OP: z3 decl kind -> how the DSL node is made.  Anything else raises Unsupported naming the kind (no fallback).
-from fnvlift import dsl  # noqa: E402
-from fnvlift.dsl import C, V, mk, bin_, ite, eq, ult, slt, zext, sext, extract, concat  # noqa: E402
+from fnvnx.lift.fnvlift import dsl  # noqa: E402
+from fnvnx.lift.fnvlift.dsl import C, V, mk, bin_, ite, eq, ult, slt, zext, sext, extract, concat  # noqa: E402
 
 Z = z3
 _BIN = {Z.Z3_OP_BADD: "add", Z.Z3_OP_BSUB: "sub", Z.Z3_OP_BMUL: "mul", Z.Z3_OP_BAND: "and", Z.Z3_OP_BOR: "or", Z.Z3_OP_BXOR: "xor", Z.Z3_OP_BSHL: "shl",
@@ -288,8 +290,8 @@ def nd_names():
 
 def spec_key(raw):
     """(REGISTRY key, register index i or None) of the x87 instruction RAW: the class of x87class, in the spec's key spelling.  None when RAW is no x87 instruction"""
-    import x87class
-    from proof import shape
+    import fnvnx.lift.proof.x87class as x87class
+    from fnvnx.lift.proof import shape
     i = 0
     while i < len(raw) and raw[i] in shape.PFX:
         i += 1
@@ -344,7 +346,7 @@ def resolve(o, m):
 
 def mem_nodes(c, pcs):
     """the DSL node of every memory piece: loads of 64/32/16/8 bits, the lowest address first.  -> (address node, [node])"""
-    from proof import forms
+    from fnvnx.lift.proof import forms
     a = forms.ea(c.ops[0])
     out = []
     for off, w, _ in pcs:
@@ -382,7 +384,7 @@ def carrier_de_refusal(o):
 
 def effects(c, key, i):
     """fill c.F from the spec entry (class KEY, register index I).  Raises Unsupported naming the first thing outside the Form"""
-    from proof import forms
+    from fnvnx.lift.proof import forms
     F = c.F
     c.x87_mem = (None, None)
     d, o, pcs, ef, m = run(key, i)
@@ -452,8 +454,8 @@ def prove_form(F):
     """-> (result, note, extras).  F.x87 = (class key, i, address node or None, [(piece var, piece node)] or None).  Every query is unsat at bounds.Z3_RLIMIT, under the Form's own domain
     (F.domain, translated by dsl.to_smt): nd_pre at the resolution holds; then each field of the Form's z3 post-state equals the spec's: the x87 registers, TOP, tags, FSW, FCW, the pointers,
     memory, EAX, the other registers, the flags, EIP, the SSE state.  The Form has no fault: the domain excludes every x87 exception (domain_terms)."""
-    from fnvlift import dsl as D
-    from proof import bounds
+    from fnvnx.lift.fnvlift import dsl as D
+    from fnvnx.lift.proof import bounds
     key, i, a, pn = F.x87
     d, o, pcs, ef, m = run(key, i)
     P = F.post()
@@ -499,7 +501,7 @@ def prove_form(F):
         want["xmm%d" % j] = (P["xmm"][j], z3.BitVec("xmm%d" % j, 128))
     want["mxcsr"] = (P["mxcsr"], z3.BitVec("mxcsr", 32))
     dom = z3.And(*[D.to_smt(n) == 1 for n in F.domain]) if F.domain else z3.BoolVal(True)
-    from fnvlift import faults as FT
+    from fnvnx.lift.fnvlift import faults as FT
     av = FT.BYNAME["AV"]["code"]      # the only fault a Form may carry: forms.mstore's code-segment store fault (selector-based, the state is then the pre-state)
     nf = P["fault"] == 0
     es_post = z3.Extract(X.ES, X.ES, P["fsw"]) == X.K(1, 1)

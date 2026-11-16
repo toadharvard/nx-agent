@@ -1,6 +1,8 @@
 """udsail stage driver (a recipe run step, `exec /usr/bin/python3 -I`): reads the patched Sail model (the lift/proof/sailmodel root output MODEL, the model of the pinned IR), runs proof/udsail.py over the image BADDECODE and SHAPES files, writes the `udsail` input file.
 usage: python3 -I udsail_stage.py --lift-root DIR --isla ISLA --z3lib Z3LIB --model MODEL --sail-ir X86IR --x86sys X86SYS.json --sdmrows SDMROWS.json --cpumodel CPUMODEL.json --work SCRATCHDIR --out UDSAIL.tsv [--bad F]... [--shapes F]...
 Every path is an argument (the recipe mounts them); nothing is read from the environment or the filesystem outside them.  The step bound is isla's own (model_sail), not a wall clock."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys, argparse
 
 def main(argv):
@@ -14,7 +16,7 @@ def main(argv):
     md = os.path.join(os.path.abspath(a.model), 'model')
     if not os.path.isfile(os.path.join(md, 'step.sail')): raise SystemExit('udsail_stage: %s has no model/step.sail' % a.model)
     os.environ['LD_LIBRARY_PATH'] = os.path.join(os.path.abspath(a.z3lib), 'lib')      # isla's libz3 (the lift/proof/isla root output)
-    from proof import udsail
+    from fnvnx.lift.proof import udsail
     args = ['--sail-work', work, '--sail-ir', a.sail_ir, '--isla', a.isla, '--x86sys', a.x86sys, '--cpumodel', a.cpumodel, '--sdmrows', a.sdmrows, '--model-src', md, '--out', a.out]
     for f in a.bad: args += ['--bad', f]
     for f in a.shapes: args += ['--shapes', f]

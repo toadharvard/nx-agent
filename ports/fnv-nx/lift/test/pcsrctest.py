@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """pcsrc.py on synthetic bytes: a positive per source (get-pc thunk, call $+5; pop, SEH-prolog style moved return address, fnstenv FIP, fxsave FIP) and negatives (escapes)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..")) # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys, tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tools'))
-import pcsrc
+from fnvnx.lift.tools import pcsrc
 T0 = 0x1000
 def build(funcs):
     """funcs: [(addr, bytes)] -> text, entries, ranges"""

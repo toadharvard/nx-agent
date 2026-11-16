@@ -27,7 +27,7 @@ static inline fv fv_ld80(u64 m,u32 se){ return fvmk(FK_M80,m,se&0xffffu); }
 #define FV_INDEF fvmk(FK_M80,0xC000000000000000ull,0xFFFFu)
 /* hooks of R8 control state: ONE place each (README "control state"). The shadow-set rule that separates SSE flags is not implemented yet. */
 static inline void fnvl_fp_set_rc_x87(u32 rc){ static const unsigned char m[4]={0,2,1,3}; u64 f; __asm__ volatile("mrs %0, fpcr":"=r"(f)); f=(f&~(3ull<<22))|((u64)m[rc&3]<<22); __asm__ volatile("msr fpcr, %0"::"r"(f)); }
-static inline u32 fnvl_fp_x87_flags(void){ u64 f; __asm__ volatile("mrs %0, fpsr":"=r"(f)); return (u32)((f&1)|((f>>1&1)<<2)|((f>>2&1)<<3)|((f>>3&1)<<4)|((f>>4&1)<<5)|((f>>7&1)<<1)); }
+static inline u32 fnvl_fp_x87_flags(void){ u64 f; __asm__ volatile("mrs %0, fpsr":"=r"(f)); return (u32)((f&1)|((f>>1&1)<<2)|((f>>2&1)<<3)|((f>>3&1)<<4)|((f>>4&1)<<5)); }
 static inline void fnvl_fp_x87_clear(void){ u64 f; __asm__ volatile("mrs %0, fpsr":"=r"(f)); f&=~0x9full; __asm__ volatile("msr fpsr, %0"::"r"(f)); }
 /* STICKY EXCEPTION FLAGS: two shadow sets, one host FPSR (task C4a / B2; the flags are observable: tools/fpstate.py A2, ASM-205 unproven). x86 keeps the x87 flags (FSW IE DE ZE OE UE PE
    = bits 0-5) and the SSE flags (MXCSR bits 0-5, the same order) in SEPARATE sticky sets; the host has one FPSR. RULE: the live FPSR holds the flags of exactly ONE family, its OWNER
@@ -72,6 +72,7 @@ static __attribute__((noinline)) double fxn_slow(double r,double x,double y){
   return r; }
 static inline double fxn(double r,double x,double y){ return __builtin_expect(r!=r,0)?fxn_slow(r,x,y):r; }
 #define FXN(r,x,y) fxn(r,x,y)
+#define FXD(A,B,R) FXF((c->fex&0x200u)|fx_de((A),(B),(R)!=(R)))      /* DE of an arithmetic result R from its source operands (C1 stays: the arithmetic helpers do not report it) */
 static inline double fx_round(double v,u32 rc){ return rc==0?__builtin_roundeven(v):rc==1?__builtin_floor(v):rc==2?__builtin_ceil(v):__builtin_trunc(v); }
 /* stores */
 static inline u32 fv_s32(fv a){ u32 f=0;
@@ -103,12 +104,18 @@ static inline fv fv_rnd(fv a){ u32 f=0, rc=(c->fcw>>10)&3; fnvl_f80 r;
   switch(a.k){ case FK_F64: case FK_F32: { double d=fv_d(a), q=fx_round(d,rc); FXF((d==d&&q!=d)?0x20u|FX_UP(d,q):0u); return fv_f64(q); } case FK_I16: case FK_I32: case FK_I64: FXF(0); return a;
     default: r=fnvl_x_rndint(fv_x(a),c->fcw,&f); FXF(f); return fvmk(FK_M80,r.m,r.se); } }
 /* compares: C3<<14|C2<<10|C0<<8, exact. Q = 1: the unordered compares FUCOM FUCOMP FUCOMPP FUCOMI FUCOMIP (IE only for a signaling NaN); Q = 0: the ordered ones FCOM FCOMP FCOMPP FCOMI FCOMIP FICOM FTST
-   (IE for any NaN), SDM 2A FCOM / FCOMI "Floating-Point Exceptions". Pairs of finite non-denormal F64/F32/I16/I32 are exact in double and raise nothing (C1 = 0); every other pair (a NaN, a denormal: DE,
-   I64, M80) goes through the 80-bit core, whose exception mask reaches c->fex through FXF. */
-static inline u32 fx_den(fv a){ return a.k==FK_F64?(((a.v>>52)&0x7ffu)==0&&(a.v<<12)!=0):a.k==FK_F32?(((a.v>>23)&0xffu)==0&&(a.v&0x7fffffu)!=0):0; }
+   (IE for any NaN), SDM 2A FCOM / FCOMI "Floating-Point Exceptions". Pairs of finite non-denormal F64/F32/I16/I32 are exact in double and raise nothing (C1 = 0); every other pair goes through the 80-bit core,
+   whose IE and C1 reach c->fex through FXF. DE is NOT read from the host or from the core (the 80-bit image of a binary32/binary64 denormal is a normal number): it is fx_de, ONE rule, SDM 1:8.5.2 and 1:4.9.2:
+   DE = a source operand is a denormal AT ITS OWN TYPE (binary32 / binary64 by its own format, an 80-bit operand by its image, a pseudo-denormal included; integers have none), unless the instruction raises
+   IE or an operand is a QNaN (SDM 1:4.9.2 priority: invalid-operation and the QNaN handling come before the denormal-operand exception). */
+static inline u32 fx_den(fv a){ switch(a.k){ case FK_F64: return ((a.v>>52)&0x7ffu)==0&&(a.v<<12)!=0; case FK_F32: return ((a.v>>23)&0xffu)==0&&(a.v&0x7fffffu)!=0;
+  case FK_I16: case FK_I32: case FK_I64: return 0; default: return (a.e&0x7fffu)==0&&a.v!=0; } }
+static inline u32 fx_nan(fv a){ switch(a.k){ case FK_F64: return ((a.v>>52)&0x7ffu)==0x7ffu&&(a.v<<12)!=0; case FK_F32: return ((a.v>>23)&0xffu)==0xffu&&(a.v&0x7fffffu)!=0;
+  case FK_I16: case FK_I32: case FK_I64: return 0; default: return (a.e&0x7fffu)==0x7fffu&&(a.v>>63)!=0&&(a.v<<1)!=0; } }
+static inline u32 fx_de(fv a,fv b,u32 ie){ return ((fx_den(a)|fx_den(b))&!ie&!(fx_nan(a)|fx_nan(b)))<<1; }   /* the DE bit (c->fex bit 1); it enters c->fex only through FXF */
 static inline u32 fv_cmp(fv a,fv b,u32 q){ u32 f=0, r;
   if(__builtin_expect((0x1eu>>a.k)&(0x1eu>>b.k)&1,1)&&!fx_den(a)&&!fx_den(b)){ double x=fv_d(a),y=fv_d(b); if(x==x&&y==y){ FXF(0); return x==y?0x4000u:x<y?0x100u:0u; } }
-  r=fnvl_x_cmp(fv_x(a),fv_x(b),q,&f); FXF(f); return r; }
+  r=fnvl_x_cmp(fv_x(a),fv_x(b),q,&f); f=(f&~2u)|fx_de(a,b,f&1u); FXF(f); return r; }
 #define FCMP(A,B,Q) do{ u32 r_=fv_cmp((A),(B),(Q)); c0=(r_>>8)&1; c2=(r_>>10)&1; c3=(r_>>14)&1; }while(0)
 #define FCMPI(A,B,Q) do{ u32 r_=fv_cmp((A),(B),(Q)); zf=(r_>>14)&1; pf=(r_>>10)&1; cf=(r_>>8)&1; of=sf=af=0; }while(0)
 #define FXAM(F) do{ fv f_=(F); u32 r_=fnvl_x_xam(fv_x(f_),f_.k==0); c0=(r_>>8)&1; c2=(r_>>10)&1; c3=(r_>>14)&1; c->fex=(c->fex&~0x200u)|(r_&0x200u); }while(0)
@@ -124,12 +131,12 @@ extern "C" u32 fnvl_trace_sw(u32 fsw);   /* test stand: reports the FSW delivere
    rounded up, or fprem's quotient bit Q0) is ASSIGNED (FM_FL) and cleared by FCMP, set by FXAM. C0/C2/C3 are the lifter's locals. fsin/fcos/fsincos/fptan:
    for finite |x| >= 2^63 C2 = 1 and the stack is left unchanged (SDM), otherwise C2 = 0. Data dependent stack depth (fptan, fsincos push only when C2 = 0)
    is why those two always use the dynamic stack. */
-#define FM_UN(FN,D,S) do{ u32 f_=0; double x_=fv_d(S); D=fv_f64(FN(x_,&f_)); FM_FL(f_); }while(0)                                   /* f2xm1 */
-#define FM_BIN(FN,D,A,B) do{ u32 f_=0; double a_=fv_d(A), b_=fv_d(B); D=fv_f64(FN(a_,b_,&f_)); FM_FL(f_); }while(0)               /* fpatan fyl2x fyl2xp1 fscale: FN(first, second) */
-#define FM_TRIG(FN,D,S) do{ u32 f_=0; double x_=fv_d(S); if(fnvl_m_trig_big(x_)) c2=1; else{ c2=0; D=fv_f64(FN(x_,&f_)); FM_FL(f_); } }while(0)      /* fsin fcos */
-#define FM_TAN(D,S) do{ u32 f_=0; double x_=fv_d(S); if(fnvl_m_trig_big(x_)) c2=1; else{ c2=0; D=fv_f64(fnvl_m_tan(x_,&f_)); dyn_push(fvmk(FK_F64,0x3ff0000000000000ull,0)); FM_FL(f_); } }while(0)
-#define FM_SINCOS(D,S) do{ u32 f_=0; double x_=fv_d(S), s_, k_; if(fnvl_m_trig_big(x_)) c2=1; else{ c2=0; fnvl_m_sincos(x_,&s_,&k_,&f_); D=fv_f64(s_); dyn_push(fv_f64(k_)); FM_FL(f_); } }while(0)
-#define FM_PREM(D,A,B,NEAR) do{ double a_=fv_d(A), b_=fv_d(B); u32 f_=0, k_=0; D=fv_f64(fnvl_m_fprem(a_,b_,(NEAR),&k_,&f_)); c0=(k_>>8)&1; c2=(k_>>10)&1; c3=(k_>>14)&1; FM_FL(f_|(k_&0x200u)); }while(0)
+#define FM_UN(FN,D,S) do{ u32 f_=0; fv s_=(S); double x_=fv_d(s_); D=fv_f64(FN(x_,&f_)); FM_FL(f_|fx_de(s_,s_,f_&1u)); }while(0)                                   /* f2xm1 */
+#define FM_BIN(FN,D,A,B) do{ u32 f_=0; fv sa_=(A), sb_=(B); double a_=fv_d(sa_), b_=fv_d(sb_); D=fv_f64(FN(a_,b_,&f_)); FM_FL(f_|fx_de(sa_,sb_,f_&1u)); }while(0)               /* fpatan fyl2x fyl2xp1 fscale: FN(first, second) */
+#define FM_TRIG(FN,D,S) do{ u32 f_=0; fv s_=(S); double x_=fv_d(s_); if(fnvl_m_trig_big(x_)) c2=1; else{ c2=0; D=fv_f64(FN(x_,&f_)); FM_FL(f_|fx_de(s_,s_,f_&1u)); } }while(0)      /* fsin fcos */
+#define FM_TAN(D,S) do{ u32 f_=0; fv s_=(S); double x_=fv_d(s_); if(fnvl_m_trig_big(x_)) c2=1; else{ c2=0; D=fv_f64(fnvl_m_tan(x_,&f_)); dyn_push(fvmk(FK_F64,0x3ff0000000000000ull,0)); FM_FL(f_|fx_de(s_,s_,f_&1u)); } }while(0)
+#define FM_SINCOS(D,S) do{ u32 f_=0; fv sv_=(S); double x_=fv_d(sv_), s_, k_; if(fnvl_m_trig_big(x_)) c2=1; else{ c2=0; fnvl_m_sincos(x_,&s_,&k_,&f_); D=fv_f64(s_); dyn_push(fv_f64(k_)); FM_FL(f_|fx_de(sv_,sv_,f_&1u)); } }while(0)
+#define FM_PREM(D,A,B,NEAR) do{ fv sa_=(A), sb_=(B); double a_=fv_d(sa_), b_=fv_d(sb_); u32 f_=0, k_=0; D=fv_f64(fnvl_m_fprem(a_,b_,(NEAR),&k_,&f_)); c0=(k_>>8)&1; c2=(k_>>10)&1; c3=(k_>>14)&1; FM_FL(f_|(k_&0x200u)|fx_de(sa_,sb_,f_&1u)); }while(0)
 /* control: fldcw keeps the word and synchronises the host rounding mode. The MSVC bracket `fnstcw [a]; or ah,0xc; fldcw [b]; fistp; fldcw [a]` is exact without any special case:
    FIST reads the rounding control from c->fcw at the fistp, FLDCW loads it and sets the host mode, the second FLDCW restores both. Folding it into one truncating store is a pure
    optimisation (it would save two control-word stores and two host-FPCR read-modify-writes per site), not a semantic requirement. */

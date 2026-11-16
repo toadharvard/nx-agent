@@ -1,12 +1,6 @@
 {
  "format": "fnvnx-selftest-inputs/1",
  "tests": {
-  "test_cpufeat_sdm.py": [
-   {
-    "root": "ports/fnv-nx/lift/sdmrows",
-    "output": "SDMROWS"
-   }
-  ],
   "test_cs_store.py": [
    {
     "root": "ports/fnv-nx/lift/sdmrows",

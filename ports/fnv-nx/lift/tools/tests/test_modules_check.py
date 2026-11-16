@@ -9,10 +9,12 @@ Per module (file located by name, sha256 and size checked against modules.tsv; t
   - (d) every export address of the PE export directory that lies in executable bytes is an entry (exports in data sections cannot be code: counted), the export address set equals
     L1's exports/<name>.tsv, the entry point (entry_rva) is an entry, and so is every TLS callback.
 Globally: no address is an entry of two images. Prints counts only. Exit 0 iff all hold."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(LIFT, 'tools')); sys.path.insert(0, LIFT); sys.path.insert(0, HERE)
-import pemod
+import fnvnx.lift.tools.pemod as pemod
 MODS = ['d3dx9_38.dll', 'binkw32.dll', 'libvorbis.dll', 'libvorbisfile.dll', 'd3dx9_31.dll', 'atimgpud.dll']
 def opt(name):
     a = sys.argv; return a[a.index(name) + 1] if name in a else None
@@ -38,7 +40,7 @@ def load_r3():
 
 def one(name, ent_all, noc):
     bad = []; path, row = pemod.locate(name, MODTSV, MODDIRS); nm = os.path.splitext(row.name)[0]; fd = FACTS + '/' + nm
-    M = pemod.load(path, row.base); import fnvlift as L; img = L.Image(path)
+    M = pemod.load(path, row.base); import fnvnx.lift.fnvlift as L; img = L.Image(path)
     print('== %s: sha256 ok, base %08x (preferred %08x), size_of_image %x, entry rva %x, tls %d; relocation sites without file bytes %d' % (row.name, row.base, row.pref, M.sizeimg, row.entry, row.tls, img.nobytes))
     if img.nobytes: bad.append('relocation sites without file bytes')
     if M.base != row.base or img.base != row.base: bad.append('image not at the assigned base')

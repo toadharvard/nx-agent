@@ -1,5 +1,7 @@
 """sysspec: class (a)/(b) shapes prove against the SDM spec under a record; an undecided row gives `uncertified: <why>`; a conditional fault on a privileged instruction fails.
 The record here is a synthetic fixture of the structure (fnvnx-x86sys/2); no value in it is a claim about the declared machine."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json
 import os
 import sys
@@ -9,9 +11,9 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
 sys.path.insert(0, HERE)
-import declared_x86sys
-from fnvlift import inputs
-from proof import shape, sysspec, x86sys
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys
+from fnvnx.lift.fnvlift import inputs
+from fnvnx.lift.proof import shape, sysspec, x86sys
 
 
 def key(h):
@@ -87,7 +89,7 @@ class T(unittest.TestCase):
         finally: del REC['cpuid_faulting']
 
     def test_lar_is_decided_by_the_descriptor_rows(self):
-        from fnvlift import x86sys as fx      # the Form builder reads fnvlift.x86sys.REC, loaded once per process: this test hands it the fixture's record
+        from fnvnx.lift.fnvlift import x86sys as fx      # the Form builder reads fnvlift.x86sys.REC, loaded once per process: this test hands it the fixture's record
         REC['lar_lsl'] = {'status': 'undecided', 'why': 'type blocker'}; saved = fx.REC
         try: open(self.f.name, 'w').write(json.dumps(_complete(REC))); fx.REC = _complete(REC); r, n = sysspec.check(key('0f0302')); self.assertEqual(r, 'uncertified'); self.assertIn('type blocker', n)
         finally: del REC['lar_lsl']; fx.REC = saved
@@ -110,7 +112,7 @@ class T(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout)
 
     def test_far_memory_shape_needs_a_proved_ea_basis(self):
-        from proof import sysspec_far
+        from fnvnx.lift.proof import sysspec_far
         k = 'ff5a00/0.0.2.1'
         self.assertEqual(sysspec_far.basis_key(k), 'ff7200/0.0.2.1')
         self.assertEqual(sysspec_far.basis_key('f3ff5a00/0.0.3.1'), 'ff7200/0.0.2.1')

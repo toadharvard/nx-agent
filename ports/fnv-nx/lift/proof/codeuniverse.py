@@ -16,6 +16,8 @@ Checks, each finding names its image and va (a key finding names the first site 
     code-marker-missing / code-marker-extra / code-marker-count   the address set (with multiplicity) of the rows differs from the markers of u/*.cpp
 The key of every row is recomputed from the image's bytes by proof/shape.py shape_key / family (the census's own key function); nothing is read
 from liftgen's key output except shapes.tsv itself, which is the thing judged. No sampling, no tolerance, no heuristic over the text."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import collections
 import glob
 import hashlib
@@ -25,7 +27,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from proof import shape  # noqa: E402
+from fnvnx.lift.proof import shape  # noqa: E402
 
 FAMILIES = shape.FAMILIES
 MARK = re.compile(rb"^L_([0-9a-f]{8}): ;$", re.M)

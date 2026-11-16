@@ -1,4 +1,6 @@
 """certbasis.prover_files / prover_data_files: the prover identity is the closure of import statements (relative ones too) plus the data files of the packages; a dynamic load is an error."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 import tempfile
@@ -6,7 +8,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
-from proof import certbasis  # noqa: E402
+from fnvnx.lift.proof import certbasis  # noqa: E402
 
 
 class Closure(unittest.TestCase):

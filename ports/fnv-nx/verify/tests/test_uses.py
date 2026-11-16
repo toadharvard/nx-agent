@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/link
-# reads: ports/fnv-nx/shim/build.json ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for cross-root outputs of verify/recipe.py (RECIPE.md "Outputs and uses"): a root declares `outputs`, another admitted root takes them by
 `uses` as stage inputs at /uses/<root>/<name>; the stage key holds the output's content hash. Toy roots in temp git repos, real sandbox stages.
 Plain script: exit 0 on pass, one PASS/FAIL line per case. Needs root (sandbox). Scratch: test_recipe's BASE, removed at exit."""
@@ -11,8 +9,10 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import test_recipe as TR  # noqa: E402
-import test_link as TL  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify.tests import test_recipe as TR  # noqa: E402
+from fnvnx.verify.tests import test_link as TL  # noqa: E402
 
 recipe, T, ROOT, BASE, check = TR.recipe, TR.T, TR.ROOT, TR.BASE, TR.check
 P = T + "prod"

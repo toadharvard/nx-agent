@@ -3,9 +3,11 @@ Universe by rule: every one-instruction unit [opcode map (one byte, 0F), opcode 
 A unit's text is its lift (or 'UNSUPPORTED reason').  Process A lifts the universe in sorted order, process B (another PYTHONHASHSEED) in a seeded shuffle;
 The whole universe is compared (no sampling).  Further, COLD units are lifted one per fresh process and compared with A.
     python3 -I test_lift_canonical.py        (the SDM rows are the mounted input SDMROWS, tests/inputs.json; the children inherit the mount)"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import hashlib, os, random, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE); import _inputs
+sys.path.insert(0, HERE); import fnvnx.lift.fnvlift.tests._inputs as _inputs
 COLD = 20
 
 
@@ -21,8 +23,8 @@ def code(u):
 _DONE = []
 def lift_units(units):
     if not _DONE: _inputs.configure(); _DONE.append(1)
-    import fnvlift as L
-    from fnvlift.image import Image
+    import fnvnx.lift.fnvlift as L
+    from fnvnx.lift.fnvlift.image import Image
     out = {}
     for u in units:
         try: t = L.lift(Image.from_bytes(code(u), 0x401000), 0x401000, len(code(u)))[0]

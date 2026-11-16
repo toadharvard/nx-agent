@@ -1,4 +1,6 @@
 """Tests of proof/certs_build.py on synthetic shard files (shapes of three plain encodings; the records are written here, nothing is exe-derived)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json
 import os
 import shutil
@@ -8,10 +10,10 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
-from proof import certbasis, certs_build, model_sail, prove, shape, symform, x86sys
+from fnvnx.lift.proof import certbasis, certs_build, model_sail, prove, shape, symform, x86sys
 
-sys.path.insert(0, HERE); import declared_sail; declared_sail.configure()      # the declared inputs of this test (declared_sail.py); the classes are skipped without them
-sys.path.insert(0, HERE); import declared_x86sys; XPATH = declared_x86sys.PATH; XSHA = declared_x86sys.configure()    # the declared machine of this tree, passed explicitly (--x86sys)
+sys.path.insert(0, HERE); import fnvnx.lift.proof.tests.declared_sail as declared_sail; declared_sail.configure()      # the declared inputs of this test (declared_sail.py); the classes are skipped without them
+sys.path.insert(0, HERE); import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys; XPATH = declared_x86sys.PATH; XSHA = declared_x86sys.configure()    # the declared machine of this tree, passed explicitly (--x86sys)
 
 WORK = tempfile.mkdtemp()    # this test's own scratch directory
 MD = shape.decoder()
@@ -139,7 +141,7 @@ class Aggregate(unittest.TestCase):
         return open(o).read().split()
 
     def test_dsl_edit_requeues_exactly_the_changed_forms(self):
-        from proof import forms
+        from fnvnx.lift.proof import forms
         keys = KEYS + [key_of('01d8'), key_of('31db')]          # add eax,ebx / xor ebx,ebx: 5 shapes, 2 of them xor
         keys = sorted(set(keys))
         a = self.write('shapeprove_1_of_1.jsonl', [rec(k) for k in keys])
@@ -189,7 +191,7 @@ class Aggregate(unittest.TestCase):
 class Stamp(unittest.TestCase):
     """shapeprove.stamp: a v3 record gets x86sys_sha256 only when every part equals what this tree computes."""
     def test_rule(self):
-        from proof import shapeprove
+        from fnvnx.lift.proof import shapeprove
         v3 = {k: v for k, v in rec(KEYS[0]).items() if k != 'x86sys_sha256'}
         self.assertEqual(shapeprove.stamp(v3, XSHA)['x86sys_sha256'], XSHA)
         for part, bad in (('dsl_sha', 'x'), ('model_sha', 'x'), ('prover_sha', 'x'), ('obligations', ['x'])):

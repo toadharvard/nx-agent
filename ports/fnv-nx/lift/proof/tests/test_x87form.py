@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """x87form: the part (i) set is derived from the ast of x87spec.py; the Form of an x87 class is the spec's own DAG translated to the DSL and is proved against execute(); a class outside the
 translator's table or the Form's effects is uncertified with a reason that names it; a defect of the translator makes the proof fail."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import inspect
 import os
 import sys
@@ -9,17 +11,13 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.join(HERE, ".."), os.path.join(HERE, "..", "..")]
-import declared_x86sys  # noqa: E402
-import x87spec as X  # noqa: E402
-from fnvlift import dsl, inputs  # noqa: E402
-from proof import forms, prove, shape, x87form as XF  # noqa: E402
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys  # noqa: E402
+import fnvnx.lift.proof.x87spec as X  # noqa: E402
+from fnvnx.lift.fnvlift import dsl, inputs  # noqa: E402
+from fnvnx.lift.proof import forms, prove, shape, x87form as XF  # noqa: E402
 
-FIN = os.environ.get("FNVNX_INPUT_SDMROWS")      # the produced input SDMROWS (proof/cpufeat.py reads it)
-CPUFEAT = bool(FIN) and os.path.exists(FIN)
-WHY = "declared input not mounted: FNVNX_INPUT_SDMROWS (the produced input SDMROWS)"
-if CPUFEAT:
-    declared_x86sys.configure()
-    inputs.configure(sdmrows=os.path.join(FIN, "sdmrows.json") if os.path.isdir(FIN) else FIN, cpumodel=os.path.join(HERE, "..", "..", "..", "verify", "cpuid_model.json"))
+declared_x86sys.configure()
+inputs.configure(cpumodel=os.path.join(HERE, "..", "..", "..", "verify", "cpuid_model.json"))
 DEC = shape.decoder()
 
 
@@ -27,7 +25,6 @@ def build(raw):
     return forms.build(next(DEC.disasm(raw, 0x1000)), 0x1000)
 
 
-@unittest.skipUnless(CPUFEAT, WHY)
 class T(unittest.TestCase):
     def test_part_one_is_derived(self):
         ent, p1 = XF.part_one()

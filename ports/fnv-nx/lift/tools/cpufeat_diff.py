@@ -9,6 +9,8 @@ Output rows: `site  shape  old  new  verdict` for every site where the two diffe
 --udsail: the lifter's `udsail` input (a header-only file for the first pass). --undefined BAD.tsv: a baddecode.tsv (`image<TAB>0<TAB>8 bytes`) of every decoded shape that has no SDM row and no Sail #UD verdict yet,
 to be run through proof/udsail.py together with the images' baddecode.tsv files (the Sail rule b decides them; a completing path is a form that needs a Form).
 The global numbers (all sites of all images): sites, cleared by the old gate, cleared by the new gate, sites with a different answer, unsupported sites."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import collections
 import importlib.util
 import os
@@ -19,7 +21,7 @@ sys.path.insert(0, LIFT)
 
 
 def old_gate(path, cpufeat):
-    from fnvlift import inputs
+    from fnvnx.lift.fnvlift import inputs
     spec = importlib.util.spec_from_file_location('fnvlift.f_cpufeat_old', path)
     real = inputs.get
     inputs.get = lambda n: cpufeat if n == 'cpufeat' else real(n)
@@ -39,10 +41,10 @@ def main(argv):
     rows, old, cf, ud, cm = opt('--sdmrows'), opt('--old-module'), opt('--old-cpufeat'), opt('--udsail'), opt('--cpumodel')
     undef = opt('--undefined') if '--undefined' in a else None
     if len(a) not in (1, 2): raise SystemExit(__doc__)
-    from fnvlift import inputs
-    from proof import sdmfeat, shape
+    from fnvnx.lift.fnvlift import inputs
+    from fnvnx.lift.proof import sdmfeat, shape
     inputs.configure(sdmrows=rows, cpumodel=cm, udsail=ud)
-    from proof import cpufeat as new
+    from fnvnx.lift.proof import cpufeat as new
     O = old_gate(old, cf)
     md = shape.decoder(); by = collections.OrderedDict(); n = collections.Counter(); fam = {}
     sites = sdmfeat.read_sites(a[0])

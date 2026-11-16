@@ -30,7 +30,7 @@ To make it live add ONE entry to "external" in formgate_inputs.json:
 import hashlib
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json
 import os
 import re
@@ -43,9 +43,9 @@ LIFT = os.path.dirname(HERE)
 VERIFY = os.path.normpath(os.path.join(LIFT, "..", "verify"))
 sys.path.insert(0, LIFT)
 sys.path.insert(0, VERIFY)
-from proof import certbasis, codeuniverse, eaaudit, shape, symcheck, symform, x86sys  # noqa: E402
-from contract import gatefile  # noqa: E402     (ports/fnv-nx/contract)
-from verify import recipe  # noqa: E402
+from fnvnx.lift.proof import certbasis, codeuniverse, eaaudit, shape, symcheck, symform, x86sys  # noqa: E402
+from fnvnx.contract import gatefile  # noqa: E402     (ports/fnv-nx/contract)
+from fnvnx.verify import recipe  # noqa: E402
 
 NAME = "forms"
 X86SYS = os.path.normpath(os.path.join(LIFT, "..", "platform", "declared", "x86sys.json"))      # the declared x86 system record of this tree: the one input of every Form build (fnvlift/inputs.py), passed explicitly by this program, the one that builds the Forms

@@ -8,11 +8,13 @@ array, the displacement / immediate field variables free) is compared with simds
     is the proof; sat gives a counter-model (a defect of the Form or of the spec, reported with the shape);
   * results: proved | FAILED | no-row (the spec has no row for the encoding) | no-form (no DSL builder).
 Environment: the spec's Res.env (CR0.EM = CR0.TS = 0, CR4.OSFXSR = 1) is the declared environment; it is L5's x86sys row (journal inbox), named in CERTS.md 'SIMD environment'."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.join(HERE, '..')); sys.path.insert(0, HERE)
 import z3
-from fnvlift import dsl
-from proof import x86sys, bounds, forms, shape, symform, simdspec as S, simdsplit
+from fnvnx.lift.fnvlift import dsl
+from fnvnx.lift.proof import x86sys, bounds, forms, shape, symform, simdspec as S, simdsplit
 REG = ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi']
 
 
@@ -43,7 +45,7 @@ def _obligation(rep, F, sins_ops, imm, rlimit):
     nf = P['fault'] == 0
     sf = r.fault
     if r.store and e.mem:      # a store through a segment register whose selector names a code descriptor is #GP(0): the SDM condition of sysspec_store (the one rule that proves the Form's code-store fault for every store Form), by the segment of the memory operand
-        import sysspec_store
+        import fnvnx.lift.proof.sysspec_store as sysspec_store
         op = sins_ops.operands[j]; sf = z3.Or(sf, sysspec_store.code_cond(x86sys.load(), sysspec_store.segment(sins_ops, op)))
     spec_fault = z3.If(sf, z3.BitVecVal(S.AV, 8), z3.BitVecVal(0, 8))
     goals = [P['fault'] == spec_fault]
@@ -211,7 +213,7 @@ def check(key, rlimit=bounds.Z3_RLIMIT):
 
 def cleared(rep):
     """the encoding needs a feature that CPUREF's cpuid denies (cpufeat.missing non-empty): #UD on the declared CPU"""
-    from proof import cpufeat
+    from fnvnx.lift.proof import cpufeat
     ins = list(shape.decoder().disasm(rep, 0))
     return bool(ins) and bool(cpufeat.missing(ins[0]))
 
@@ -252,10 +254,10 @@ def _by_cases(key, rep, rlimit):
 
 
 def main(a):
-    if '--cache' not in a: raise SystemExit('usage: simdcheck.py SHAPES.tsv --cache VERDICT_STORE [--only S] [--cpufeat TABLE] [--progress]')
+    if '--cache' not in a: raise SystemExit('usage: simdcheck.py SHAPES.tsv --cache VERDICT_STORE [--only S] [--cpumodel FILE] [--progress]')
     S.F.configure(a[a.index('--cache') + 1])
-    if '--cpufeat' in a:
-        from fnvlift import inputs; inputs.configure(cpufeat=a[a.index('--cpufeat') + 1])          # the CPUID feature-bit table: the class order (cleared) reads it
+    if '--cpumodel' in a:
+        from fnvnx.lift.fnvlift import inputs; inputs.configure(cpumodel=a[a.index('--cpumodel') + 1])          # the declared CPU record: the class order (cleared, proof/cpufeat.py) reads it
     only = a[a.index('--only') + 1] if '--only' in a else ''
     keys = [l.split()[0] for l in open(a[0]) if l.strip() and not l.startswith('#')]
     cnt = {}

@@ -18,14 +18,15 @@ INPUT FACTS.  The objects are ELF relocatable objects of one target (the objects
 """
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import argparse
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import comdat
-from contract import gatefile
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import comdat
+from fnvnx.contract import gatefile
 
 NAME = 'odr'
 

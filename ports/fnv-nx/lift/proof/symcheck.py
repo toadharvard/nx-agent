@@ -9,10 +9,12 @@ Result classes per instance: linked | MISMATCH | unlinked:<class> (symbuild fail
 so the instance is NOT covered by a shape proof) | no-form (neither builder covers it: the instance is not a Form instance) | shape-error (no shape key).
 RED in the gate: MISMATCH, unlinked:*, and seglim (a relative target whose non-wrapping value addr + size + sext(rel) leaves [0, 2^32): ASM-006, shapeprove.py).
 Memory: the DSL interns every node, so the intern table and the per-shape cache are cleared every CHUNK instances (nodes are compared by serialization, not identity)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import collections, json, os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from proof import forms, symform, shape as shp
-from fnvlift import dsl
+from fnvnx.lift.proof import forms, symform, shape as shp
+from fnvnx.lift.fnvlift import dsl
 CHUNK = 20000
 
 
@@ -60,7 +62,7 @@ def link(instrs, progress=None):
 def main(argv):
     if not argv or len(argv) not in (1, 3) or (len(argv) == 3 and argv[1] != '--out'):
         sys.exit('usage: symcheck.py INSTRS.tsv [--out FILE]')
-    from proof import codeuniverse
+    from fnvnx.lift.proof import codeuniverse
     cnt, red = link(codeuniverse.load_instrs(argv[0]), lambda c: print('%d instances, %s' % (c['instances'], dict(c)), file=sys.stderr, flush=True))
     res = dict(counts=dict(cnt), red=len(red), examples=[list(r[:3]) + [r[3]] for r in red[:20]])
     print(json.dumps(res))

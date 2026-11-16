@@ -2,13 +2,15 @@
 """CS-store rule (core.gs_guard): a store whose effective segment is CS raises #GP(0) = STATUS_ACCESS_VIOLATION {0, 0xFFFFFFFF} at the instruction (FNVL_RAISE_AV, the f_sys.gp_cond row; Wine 9.0
 dlls/ntdll/signal_i386.c segv_handler, case TRAP_x86_PROTFLT); a load through CS is legal and emits no guard. Every write-capable form is covered by the operand's capstone access, not by a list.
     cs_store_test.py     (exit 0 = all pass)"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import capstone
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; _inputs.configure()
-from fnvlift import core
-import fnvlift as L
-from fnvlift.image import Image
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import fnvnx.lift.fnvlift.tests._inputs as _inputs; _inputs.configure()
+from fnvnx.lift.fnvlift import core
+import fnvnx.lift.fnvlift as L
+from fnvnx.lift.fnvlift.image import Image
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
 A0, FAILS = 0x400000, []
 
@@ -41,7 +43,7 @@ for hx, what in (('3e8901', 'mov ds:[ecx], eax'), ('268901', 'mov es:[ecx], eax'
 check('gs store: the Form carries its null-selector and code-selector faults', 'in_sel_gs >> 2' in form_text('658901') and 'in_sel_gs >> 3' in form_text('658901') and 'FNVL_RAISE_AV' in form_text('658901'))
 check('gs load: the Form carries the null-selector fault only', 'in_sel_gs >> 2' in form_text('658b01') and 'in_sel_gs >> 3' not in form_text('658b01'))
 # the facts bound the selectors of ds (its initial selector only): the code-selector arm of a ds store is proved dead and the text has no guard; an unbounded ds, or one whose set holds a code selector, and the cs override keep it
-from fnvlift import inputs
+from fnvnx.lift.fnvlift import inputs
 SEL = {'ds': 0x23, 'cs': 0x1b}
 for sets, want in (([SEL['ds']], False), ([SEL['ds'], SEL['cs']], True), (None, True)):
     inputs.reset(); _inputs.configure(seg={'ds': {'guard': False, 'selectors': sets}})

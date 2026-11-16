@@ -4,6 +4,8 @@ read from the SDM's opcode map and ModRM / SIB tables, not computed by shape.py)
 writes one (instrs.tsv rows, shapes.tsv, u/*.cpp with the lifter's `L_<va>: ;` marker per instruction). Green case and the red cases: a key missing from
 shapes.tsv, an extra key, a wrong count, a byte mismatch against the image, an instruction of the code list without a marker, a marker without a row,
 a doubled marker, an undeclared image, two overlapping images."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import collections
 import os
 import shutil
@@ -13,8 +15,8 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
-from fnvlift.image import Image  # noqa: E402
-from proof import codeuniverse as C  # noqa: E402
+from fnvnx.lift.fnvlift.image import Image  # noqa: E402
+from fnvnx.lift.proof import codeuniverse as C  # noqa: E402
 
 BASE = 0x401000
 ROWS = [r.rstrip("\n").split("\t") for r in open(os.path.join(HERE, "sdm_shape_rows.tsv")) if r[0] != "#"]

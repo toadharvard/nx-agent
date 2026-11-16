@@ -4,20 +4,22 @@ SDM 2B:STR  Operation (the pinned edition):
   'When the destination operand is a memory location, the segment selector is written to memory as a 16-bit quantity, regardless of operand size.'
 its #GP(0) on 'If CR4.UMIP = 1 and CPL > 0.' is the COND row of sdm_priv_rows.tsv; with the record's cr4.umip = 0 the instruction has its ordinary effect, this store.
 Result: 'ok', or the code of the first difference (effects, nstores, width, value)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import z3  # noqa: E402
-from fnvlift import dsl  # noqa: E402
-from proof import symform, x86sys  # noqa: E402
+from fnvnx.lift.fnvlift import dsl  # noqa: E402
+from fnvnx.lift.proof import symform, x86sys  # noqa: E402
 
 
 def check(key, rec):
     f = symform.symbuild(key).form
     import capstone
-    from proof import sysspec_gap, sysspec_store
+    from fnvnx.lift.proof import sysspec_gap, sysspec_store
     if f.regs or f.flags or f.flo is not None or sysspec_store.faults_ok(f, sysspec_gap.decode(key), rec): return 'effects'
     if len(f.stores) != 1: return 'nstores'
     v = dsl.to_smt(f.stores[0][1])

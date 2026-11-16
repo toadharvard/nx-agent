@@ -2,11 +2,13 @@
 """Shared x86-32 flow code for fpmodes.py: PE image, recursive-descent decoder with CFG, TOTAL esp/ebp tracking
 (symbolic callee pops solved from join/ret constraints; every instruction ends with a constant or a named reason), frame-address
 events, x87 stack-depth dataflow. No clocks, no entropy; every iteration order is sorted."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, struct, bisect, itertools
 from collections import defaultdict
 import sys
 import capstone
-from fnvlift.image import Image as _FImage
+from fnvnx.lift.fnvlift.image import Image as _FImage
 from capstone import x86 as X
 
 M32 = 0xffffffff
@@ -17,7 +19,7 @@ def image_base(path, table, name):
     """the load base of an image, from its declared source: `exe` = the PE's own ImageBase (the exe is mapped at it, never relocated), else the assigned base of the row `name` (with or without .dll) of the loader's module table."""
     if name == 'exe':
         d = open(path, 'rb').read(); return struct.unpack_from('<I', d, struct.unpack_from('<I', d, 0x3c)[0] + 52)[0]
-    import pemod
+    import fnvnx.lift.tools.pemod as pemod
     r = pemod.modules(table); n = name.lower(); n = n if n in r else n + '.dll'
     if n not in r: sys.exit('x86flow.image_base: %s is not a row of %s' % (name, table))
     return r[n].base

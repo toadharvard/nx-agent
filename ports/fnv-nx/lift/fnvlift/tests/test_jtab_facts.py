@@ -1,9 +1,11 @@
 """core.tab_tails takes jump-table slots only from the jtab_tables facts: positive (slots outside the range), negative (no record, red site, no facts -> Unsupported)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; _inputs.configure()
-from fnvlift import core
-from fnvlift.core import Unsupported
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import fnvnx.lift.fnvlift.tests._inputs as _inputs; _inputs.configure()
+from fnvnx.lift.fnvlift import core
+from fnvnx.lift.fnvlift.core import Unsupported
 
 
 class Op:

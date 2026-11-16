@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """The far-transfer Form (proof/forms_flow.py far_transfer): CALL / JMP far, SDM Vol 2, protected mode, same privilege.  Expected values come from the SDM pseudocode and platform/declared/x86sys.json (cs = 0x1b),
 not from the code under test.  Run through forms.build and the DSL's z3 semantics, and through the DSL emitter.   test_forms_far.py  (exit 0 = all pass)"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import declared_x86sys; declared_x86sys.configure()
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys; declared_x86sys.configure()
 import capstone as CS, z3
-from proof import forms
-from fnvlift import x86sys
+from fnvnx.lift.proof import forms
+from fnvnx.lift.fnvlift import x86sys
 md = CS.Cs(CS.CS_ARCH_X86, CS.CS_MODE_32); md.detail = True
 FAILS = []; N = [0]
 def check(name, ok):

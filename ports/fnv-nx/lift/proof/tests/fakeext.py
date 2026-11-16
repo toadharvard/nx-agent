@@ -6,10 +6,10 @@ import sys
 
 VERIFY = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'verify'))    # the verify/ of this checkout
 sys.path.insert(0, os.path.join(VERIFY, '..', 'contract'))
-sys.path.insert(0, os.path.join(VERIFY, '..'))      # ports/fnv-nx: qualified imports (verify.X)
+sys.path.insert(0, os.path.join(VERIFY, '..', '..'))      # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports (fnvnx.verify.X)
 sys.path.insert(0, VERIFY)
-import cas       # noqa: E402
-import verdict   # noqa: E402
+from fnvnx.verify import cas       # noqa: E402
+from fnvnx.verify import verdict   # noqa: E402
 
 
 def git(d, *a):
@@ -48,12 +48,12 @@ class use_artifacts:
         self.art = art
 
     def __enter__(self):
-        from verify import recipe      # the module formgate reads (qualified: one module object)
+        from fnvnx.verify import recipe      # the module formgate reads (qualified: one module object)
         self.old = recipe.ARTIFACTS
         recipe.ARTIFACTS = self.art.url
 
     def __exit__(self, *exc):
-        from verify import recipe      # the module formgate reads (qualified: one module object)
+        from fnvnx.verify import recipe      # the module formgate reads (qualified: one module object)
         recipe.ARTIFACTS = self.old
 
 

@@ -7,14 +7,16 @@ branch is not in the universe: formgate reports those as `unlinked`) are the uni
 Values: a 1-byte field takes all 256; a field of 2, 4 or 6 bytes takes (a) every byte lane x all 256 values with the other lanes 0x00 and (b) every lane at 00/7f/80/ff with the other lanes 0xff
 (2^16 / 2^32 / 2^48 instances are not enumerated: the Form reads the field only through byte-wise slices and zext/sext of them, see symform.derive).  The counts are printed.
 test_forms_immsel.py  (exit 0 = all pass; ~2 min on one core)"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import declared_x86sys; declared_x86sys.configure()
-from proof import forms, symform, shape as shp  # noqa: E402
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys; declared_x86sys.configure()
+from fnvnx.lift.proof import forms, symform, shape as shp  # noqa: E402
 
 FAILURES_HEADER = '# fnvnx-form-equivalence-failures/1: shape_key<TAB>immediate value (hex)<TAB>why  (test_forms_immsel universe run; the aggregation withholds every listed shape key: certs_build --withheld)'
 PREFIXES = ('', '66', 'f2', 'f3'); MAPS = ('', '0f', '0f38', '0f3a'); MODRM = ('c0', '00', '40', '80')

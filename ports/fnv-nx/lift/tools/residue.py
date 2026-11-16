@@ -11,6 +11,8 @@ the residue is red until checked.
 
 RULE: closure complete -> every residue byte is class DATA = 9, "data-unreached" (not reached by any entry; may-be-read only through a data_in_code range, tools/CODEMAP.md); otherwise every residue byte is UNEXPLAINED (class 8 in modlift, 0 in codemap) with the closure reason.
 Nothing else decides a residue byte: the sweep below (decodes / undecodable / reloc-not-operand / no-end) is a breakdown printed for information and decides nothing."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, json, bisect
 from types import SimpleNamespace
 
@@ -179,7 +181,7 @@ EH_KINDS = {'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'se
 
 def pe_sources(M, u32, intext):
     """the PE's own lists of code addresses, read independently of the entry set: -> (exports in the executable span, [entry point], TLS callbacks)"""
-    import pemod
+    import fnvnx.lift.tools.pemod as pemod
     XC = [a for a in pemod.exports(M)[0] if intext(a)]
     entry = [M.base + M.entry] if M.entry else []
     tls = []

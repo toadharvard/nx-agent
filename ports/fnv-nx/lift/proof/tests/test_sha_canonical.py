@@ -1,6 +1,8 @@
 """shape_sha is a pure function of the Form's structure: the same in every process, whatever was built before it.
-The universe is a declared input (FNVNX_SHAPE_KEYS, one shape key per line).  Two fresh processes compute the sha of every key of it: one in sorted order, one in reversed order
+The universe is a declared input (the PACK output of lift/liftsrc, its shapes.tsv; tests/inputs.json).  Two fresh processes compute the sha of every key of it: one in sorted order, one in reversed order
 (so node serials, z3 AST ids and the hash-cons table all differ); every sha must be equal.  The whole universe is compared (no sampling)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import subprocess
 import sys
@@ -13,13 +15,13 @@ def child(order, out):
     sys.path.insert(0, os.path.join(HERE, '..', '..'))
     sys.path.insert(0, os.path.join(HERE, '..'))
     sys.path.insert(0, HERE)
-    import declared_x86sys
+    import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys
     declared_x86sys.configure()
     sys.path.insert(0, os.path.join(HERE, '..', '..', 'fnvlift', 'tests'))
-    import _inputs
+    import fnvnx.lift.fnvlift.tests._inputs as _inputs
     _inputs.configure_declared()      # the declared-machine files the Form builders read (x86sys, cpumodel, the certified rcp table)
-    from proof import symform
-    keys = sorted(set(l.strip() for l in open(os.environ['FNVNX_SHAPE_KEYS']) if l.strip()))
+    from fnvnx.lift.proof import symform
+    keys = declared_x86sys.shape_keys()
     sample = keys[::-1] if order == 'reversed' else keys      # the other order is the unrelated batch of every key
     with open(out, 'w') as f:
         for k in sample:

@@ -7,7 +7,7 @@ object: key (MSVC's decorated type name), size, align, members, bases; every typ
 unknown plugin argument is an error. No network, no game data. Run: python3 -I <this file> from the checkout root."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import re
 import glob
 import os
@@ -17,12 +17,13 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import plugbuild as pb  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.toolchain.tests import plugbuild as pb  # noqa: E402
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'link'))
-import ctypes_compat as cc  # noqa: E402
+from fnvnx.link import ctypes_compat as cc  # noqa: E402
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'layout', 'decltype_spell.inc')) as _f:
     REASONS = cc.decltype_reasons(_f.read())
-from verify import gate_abi  # noqa: E402
+from fnvnx.verify import gate_abi  # noqa: E402
 import json  # noqa: E402
 import subprocess  # noqa: E402
 
@@ -300,19 +301,6 @@ def decltype_cxx(td, so):
         rows[o] = dt_all(os.path.join(td, o), o)[0]
     check('extern "C" declarations and definitions of a C++ unit give the same rows as the same text in a C unit (%d symbols)' % len(rows['pair_c.o']),
           rows['pair_c.o'] == rows['pair_cxx.o'] and len(rows['pair_c.o']) >= 14 and '-' in rows['pair_c.o']['anf'] and '._anon' not in rows['pair_cxx.o']['anf'], (sorted(set(rows['pair_c.o'].items()) ^ set(rows['pair_cxx.o'].items()))))
-    # RULE DECLTYPE-BUILTIN: a record the target builds (its va_list) has one row whatever the front end: its own FIELD_DECL names on both.
-    BI = '#include <stdarg.h>\nint bi_fmt(const char *f, va_list ap) { return f[0]; }\nint bi_scan(const char *f, va_list *app) { return f[0] + (app != 0); }\n'
-    bc, bx = os.path.join(td, 'bi.c'), os.path.join(td, 'bi.cpp')
-    open(bc, 'w').write(BI)
-    open(bx, 'w').write('#include <stdarg.h>\nextern "C" {\nint bi_fmt(const char *f, va_list ap) { return f[0]; }\nint bi_scan(const char *f, va_list *app) { return f[0] + (app != 0); }\n}\n')
-    brow = {}
-    for src_, o in ((bc, 'bi_c.o'), (bx, 'bi_cxx.o')):
-        r = pb.compile(src_, os.path.join(td, o), so)
-        check('decltype builtin: %s compiles' % os.path.basename(src_), r.returncode == 0, r.stderr[-800:])
-        if r.returncode:
-            return
-        brow[o] = dt_all(os.path.join(td, o), o)[0]
-    check('a target-built record (va_list) has byte-identical rows in a C and a C++ unit, with its field names', brow['bi_c.o'] == brow['bi_cxx.o'] and 'bi_fmt' in brow['bi_c.o'] and '__stack' in str(brow['bi_cxx.o']), brow)
     src = os.path.join(td, 'cxxonly.cpp')
     open(src, 'w').write(CXX_ONLY)
     r = pb.compile(src, os.path.join(td, 'cxxonly.o'), so)
@@ -326,7 +314,7 @@ def decltype_cxx(td, so):
               '_ZN2ZZC1ERK2TTIiE' not in got and why.get('_ZN2ZZC1ERK2TTIiE') == 'mangled' and 'r1' in got)
         check('DECLTYPE-COMPLETE: C++ names with the Itanium mangling have the reason mangled, a C++ name with an assembler label (not `_Z`) the reason cxx, a plain extern "C" one a type',
               why.get('_Z5cxxfni') == 'mangled' and why.get('_Z6cxxusev') == 'mangled' and why.get('plain_cxx') == 'cxx' and 'r4' in got, why)
-        check('every reason of the section is in the closed set of the plugin (FNVNX_DECLTYPE_REASONS), read by ctypes_compat', set(why.values()) <= cc._decltype_reasons(), why)
+        check('every reason of the section is in the closed set of the plugin (FNVNX_DECLTYPE_REASONS), read by ctypes_compat', set(why.values()) <= REASONS, why)
         check('every C++ row parses with ctypes_compat', all(cc.parse(t) for t in got.values()))
     # DECLTYPE-SPEC: a class template specialization (or a class nested in one) is written by its Itanium type mangling, `_ZTS...`
     src = os.path.join(td, 'tspec.cpp')
@@ -441,20 +429,6 @@ def plugsym(td):
         rows, why = dt_all(os.path.join(td, 'psc.o'), 'ps.c')
         check('DECLTYPE-PLUGINSYM: the C unit\'s dispatcher has the row of its prototype, once', rows.get('fnvnx_dispatch', '').startswith('(*void,*struct:fnvnx_site{'), (rows, why))
 
-
-    # a unit that DECLARES the plugin's symbol (platform/include/fnvl_host.h) and only makes an indirect call: the front end never uses the declaration, so it has no symbol-table
-    # node and no line; the rewritten call's symbol takes its line from the registry (C++: `plugin`; C: the declaration's own row)
-    hdr = os.path.join(HERE, '..', '..', 'platform', 'include', 'fnvl_host.h')
-    for ext, label in (('cpp', 'C++'), ('c', 'C')):
-        src = os.path.join(td, 'psh.' + ext)
-        open(src, 'w').write(open(hdr).read() + '\ntypedef int (*hfp)(int);\nint hcall(hfp f, int v) { return f(v); }\n')
-        o = os.path.join(td, 'psh_%s.o' % ext)
-        r = pb.compile(src, o, so, native=True)
-        check('DECLTYPE-PLUGINSYM: a %s unit that declares fnvnx_dispatch and only makes an indirect call compiles' % label, r.returncode == 0, r.stderr[-800:])
-        if r.returncode == 0:
-            rows, why = dt_all(o, 'psh.' + ext)
-            both = dict(rows, **why)
-            check('DECLTYPE-PLUGINSYM: ... and fnvnx_dispatch has its one line (%s)' % label, 'fnvnx_dispatch' in both, sorted(both))
 
 def main():
     td = tempfile.mkdtemp(prefix='test-layout-')

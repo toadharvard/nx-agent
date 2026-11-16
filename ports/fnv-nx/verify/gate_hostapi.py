@@ -24,7 +24,7 @@ The module ids (FNVNX_EXT_*) are not services and are not items: a module id nam
 which is the only table of the header. Models of machines below the product boundary (deko3d, libnx, kernel) are modules, not services."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import shutil
@@ -32,10 +32,11 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import gate_build  # noqa: E402
-import recipe  # noqa: E402
-import cas  # noqa: E402
-import unitstage  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import unitstage  # noqa: E402
 
 PREFIX = "FNVNX_PLAT_"
 HEADER = "hostapi.h"
@@ -278,8 +279,8 @@ def main(argv):
             u, c, ids = u + su, c + sc, sids + ids
             if sc != su:
                 detail = ("%s; services: %s" % (detail, "; ".join(sids)))[:900]
-            sys.path.insert(1, os.path.join(repo, "ports", "fnv-nx", "manifest"))
-            from manifest import check_hostapi   # the header grammar (service numbers, argument counts) has its one home there
+            sys.path.insert(1, os.path.join(repo, "ports"))   # `fnvnx` is ports/fnvnx -> fnv-nx of the tree under test
+            from fnvnx.manifest import check_hostapi   # the header grammar (service numbers, argument counts) has its one home there
             errs = []
             svc, _, count, notserved = check_hostapi.parse_header(header, errs)
             hu, hids = served_ids(repo, svc, count, notserved)
@@ -294,7 +295,7 @@ def main(argv):
     finally:
         if tmp and not os.environ.get("GATE_KEEP"):
             shutil.rmtree(tmp, ignore_errors=True)
-    res = {"format": "fnvnx-gate/1", "name": "hostapi", "status": status, "universe": u, "certified": c, "uncertified": ids[:50], "detail": detail[:900]}
+    res = {"format": "fnvnx-gate/1", "name": "hostapi", "status": status, "universe": u, "certified": c, "uncertified": ids, "detail": detail[:900]}
     with open(os.path.join(os.environ["GATE_OUT"], "hostapi.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)
     print("hostapi: %s %d/%d %s" % (status, c, u, detail[:200]))

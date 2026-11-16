@@ -1,5 +1,7 @@
 """sysspec_legacy (DAA DAS AAA AAS AAM AAD, SALC, SLDT, LES / LDS, far RET) and the rows the declared record does not decide (SGDT, LAR, IRETD): claimed by decoding, proved against the SDM Operation under the declared record;
 an undecided row is `uncertified: <why>`; a wrong effect is a difference; the cleared-#UD encodings (intud.CLEARED_UD) are the encodings the SDM opcode map gives no cell, found by rule from the pinned cells."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import subprocess
 import sys
@@ -9,9 +11,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
 sys.path.insert(0, os.path.join(HERE, '..'))
 sys.path.insert(0, HERE)
-import declared_x86sys
-from fnvlift import inputs
-from proof import forms, intud, shape, sysspec, symform
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys
+from fnvnx.lift.fnvlift import inputs
+from fnvnx.lift.proof import forms, intud, shape, sysspec, symform
 
 
 def key(h):
@@ -50,7 +52,7 @@ class Legacy(unittest.TestCase):
         k = key('3ed6')      # SALC with a segment prefix: not used elsewhere, so the Form cache holds no other
         symform.symbuild(key('d6')); good = forms.H['salc']      # the first build registers the handlers
         def bad(c):
-            from fnvlift.dsl import C
+            from fnvnx.lift.fnvlift.dsl import C
             good(c); c.F.reg('eax', C(0, 32))
         forms.H['salc'] = bad
         try:

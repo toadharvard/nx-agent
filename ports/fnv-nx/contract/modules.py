@@ -35,10 +35,9 @@ Rules (each violated precondition is a stage error that lists everything it foun
             export), address at the assigned base (empty for a forwarder), forwarder (empty otherwise), ordinal; one row per
             (export, name) sorted by ordinal then name.  A named export is also reachable as #ordinal (iat.py).
 
-Kinds (dllkind.py, the one rule shared with images.py): a dll with bridge rows, or a found dll whose normal import closure needs a dll that is neither found nor
-bridged, is DECLARED: it gets no base and no row of modules.tsv, and is listed in modules_declared.tsv (name, kind bridge|unloadable, sha256, size, missing imports as dll:provider, provider = wine when the dll is in declared_dlls.tsv (the declared machine has it: the gap is
-L5's bridge rows) or absent (not on the declared machine));
-its entries are served by bridge rows.  Only images are lifted modules.
+Kinds (dllkind.py, the one rule shared with images.py): image (lifted, gets a base and a row of modules.tsv); served (a name of the declared dll set
+with no file: the platform serves it); load-fails (a found dll whose closure does not resolve: LoadLibrary NULL/126, listed in modules_declared.tsv with
+its unresolved imports); absent (neither: red, all listed).  Only images are lifted modules.
 
 Outputs in OUT: modules.tsv (sorted by name: name, sha256, size, preferred base, assigned base, SizeOfImage, has TLS, entry rva, static,
 load index, dll; hex for addresses; the exe has a row too (assigned base = ImageBase, static 1, no load index); `dll` is the PE characteristics bit IMAGE_FILE_DLL, the kind of a row), tls.tsv + tls/<name>.bin (the TLS directory facts of the exe and of every image of modules.tsv with has TLS = 1; see tls_rows), modules.c (`fnvnx_modules[]` + `fnvnx_module_count` for loader/src/modules.c), exports/<name>.tsv per module,
@@ -53,12 +52,13 @@ import os
 import struct
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)
-from contract import declareddlls
-from contract import dllkind
-from contract import exepin
-from contract import gatefile
-from contract import iat
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name (contract.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract import declareddlls, declaredmods
+from fnvnx.contract import dllkind
+from fnvnx.contract import exepin
+from fnvnx.contract import gatefile
+from fnvnx.contract import iat
 
 PAGE = 0x1000
 ALIGN = 0x10000
@@ -298,6 +298,37 @@ def find_file(dirs, name):
     return None
 
 
+def platform_served(declared, dirs, absent_services=frozenset()):
+    """The dlls the platform serves: the names of the declared set (declareddlls.read) that have no file in DIRS, plus the names of the declared absent services
+    (declaredmods.read; served even with a file). Any other name with a file is a candidate image."""
+    return frozenset(n for n in declared if not dllkind.is_runtime(n) and find_file(dirs, n) is None) | frozenset(absent_services)
+
+
+def declared_rows(modules_path):
+    with open(modules_path) as f:
+        return declaredmods.read(f.read(), None)
+
+
+def orphan_rows(rows, imported):
+    """The declared_modules rows (names) that no import directory of the exe or of a module file names: an orphan row (red, all listed)."""
+    return sorted(n for n in rows if n not in imported)
+
+
+def read_served(declared_path, modules_path, claude_md_path, dirs):
+    """The served set from the declared inputs (declared_dlls.tsv, declared_modules.tsv, CLAUDE.md or None) and the file directories. CLAUDE.md is read only by the contract gate (the cite check)."""
+    declared = declareddlls.read(declared_path)
+    with open(modules_path) as f:
+        try:
+            absent = declaredmods.read(f.read(), None if claude_md_path is None else open(claude_md_path).read())
+        except declaredmods.DeclaredModsError as e:
+            raise StageError(str(e))
+    errs = ['%s: declared with no file: it is served already, the row is redundant' % n if n in declared else '%s: no file in the declared file set: a row names a module of the declared install' % n
+            for n in sorted(absent) if find_file(dirs, n) is None]
+    if errs:
+        raise StageError('declared_modules.tsv: ' + '; '.join(errs))
+    return platform_served(declared, dirs, absent)
+
+
 def scan(dirs, system):
     """Every *.dll file of the --dir list that is not a system dll: {lowercase name: Module}.  The first directory in list
     order that has a name wins; a file that is not an i386 PE32 DLL image is an error naming it (all are listed)."""
@@ -440,24 +471,41 @@ def modules_text(exe_name, exe_bytes, exe, order, load_index):
                 int(static), idx, 1 if pe.characteristics & FILE_DLL else 0) for n, sha, size, pe, base, static, idx in sorted(rows)))
 
 
-def run(exe_path, bridge_path, dirs, out, declared_path, c_out=None, keys_out=None, keys_tsv_out=None, data_out=None, keys_h_out=None, modules_tsv_out=None, imported_out=None):
+def plan(exe_path, declared_path, dirs, modules_path, claude_md_path):
+    """The classification of the exe's closure from the files and the declared dll set alone (no bridge table): -> dict(exe_bytes, exe, me, served, mods, image, load_fails, order, end).
+    SERVED = the declared dlls without a file in DIRS (the platform serves them); a dll with a file is an image iff its normal import closure resolves to images or served dlls,
+    else it is LOAD-FAILS (the Windows load fails: LoadLibrary returns NULL, ERROR_MOD_NOT_FOUND 126). A dll that the closure reaches and that is neither a file nor served is red
+    (all are listed, by closure)."""
     exe_bytes = exepin.load_exe(exe_path)
     exe = PE(exe_bytes, exepin.NAME)
-    brows, _ = iat.bridge_rows(bridge_path)
-    bridge = [(r['dll'], r['name'], r['conv'], r['ordinal']) for r in brows]
-    system = {r['dll'] for r in brows if not dllkind.is_runtime(r['dll'])}   # the runtime's own module has keyed rows but is no system dll: no handle, 126
-    wine = declareddlls.read(declared_path)         # the dlls of the declared machine (Wine 9.0)
-    mods = scan(dirs, system)
+    served = read_served(declared_path, modules_path, claude_md_path, dirs)
+    mods = scan(dirs, served)
+    imported = {iat.norm_dll(d) for d, _ in exe.import_directory()} | {iat.norm_dll(d) for m in scan(dirs, frozenset()).values() for d, _ in m.imports}   # every import edge of the declared file set
+    orphans = orphan_rows(declared_rows(modules_path), imported)
+    if orphans:
+        raise StageError('declared_modules.tsv: no import directory of the exe or of a file of the declared set names: ' + ', '.join(orphans) + ' (an orphan row)')
     me = lower(exepin.NAME)
-    image = dllkind.images_of({n: [iat.norm_dll(d) for d, _ in m.imports] for n, m in mods.items()}, system | {me})
-    declared_mods = {n: m for n, m in mods.items() if n not in image}   # found, no bridge row, the declared machine cannot load them
-    order = closure(exe, system, {n: m for n, m in mods.items() if n in image}, set(declared_mods))
-    end = assign_bases(exe, order)
+    image = dllkind.images_of({n: [iat.norm_dll(d) for d, _ in m.imports] for n, m in mods.items()}, served | {me})
+    load_fails = {n: m for n, m in mods.items() if n not in image}
+    order = closure(exe, served, {n: m for n, m in mods.items() if n in image}, set(load_fails))
+    return dict(exe_bytes=exe_bytes, exe=exe, me=me, served=served, mods=mods, image=image, load_fails=load_fails, order=order, end=assign_bases(exe, order))
+
+
+def import_names_text(exe_name, exe, order):
+    """import_names.tsv: image, dll (iat.norm_dll of the import directory's name), name or #ordinal, slot RVA (hex): the import directory of the exe and every image, a pure fact of the files."""
+    rows = [(exe_name, iat.norm_dll(d), n, s) for d, items in exe.import_directory() for s, n in items]
+    for m in order:
+        rows += [(m.name, iat.norm_dll(d), n, s) for d, items in m.imports for s, n in items]
+    return '# image\tdll\tname\tslot_rva\n' + ''.join('%s\t%s\t%s\t%08x\n' % r for r in sorted(rows, key=lambda r: (r[0], r[3])))
+
+
+def run(exe_path, dirs, out, declared_path, modules_path, claude_md_path, c_out=None, modules_tsv_out=None, import_names_out=None):
+    """First entry: what the declared dll set and the files decide (modules.tsv, modules.c, tls, exports/, modules_declared.tsv, import_names.tsv). No bridge table is an input."""
+    st = plan(exe_path, declared_path, dirs, modules_path, claude_md_path)
+    exe_bytes, exe, me, served, order, load_fails = st['exe_bytes'], st['exe'], st['me'], st['served'], st['order'], st['load_fails']
     if out:   # no OUT: only the requested outputs are written (a hermetic stage has no scratch directory)
         os.makedirs(os.path.join(out or '', 'exports'), exist_ok=True)
-        os.makedirs(os.path.join(out or '', 'imports'), exist_ok=True)
     put = lambda path, text: tsv(path, text) if out else None   # noqa: E731
-    write_table = lambda path, rows: iat.write_table(path, rows) if out else None   # noqa: E731
     load_index = {m.name: i for i, m in enumerate(m for m in order if m.static)}
     mtext = modules_text(me, exe_bytes, exe, order, load_index)
     put(os.path.join(out or '', 'modules.tsv'), mtext)
@@ -466,52 +514,56 @@ def run(exe_path, bridge_path, dirs, out, declared_path, c_out=None, keys_out=No
     if out:
         write_tls(out, tls_rows(exe, order, load_index))
     put(os.path.join(out or '', 'modules.c'), c_source(order))
-    bridged = []                  # bridge dlls that have a file: the platform serves them, nothing of the file is lifted
-    for n in sorted(system):
-        p = find_file(dirs, n)
-        if p:
-            with open(p, 'rb') as fh:
-                data = fh.read()
-            bridged.append((n, 'bridge', hashlib.sha256(data).hexdigest(), len(data), ''))
-    dec = bridged + [(n, 'unloadable', m.sha256, m.size, ','.join(sorted('%s:%s' % (x, 'wine' if x in wine else 'absent') for x in dict.fromkeys(iat.norm_dll(d) for d, _ in m.imports
-                                                                    if iat.norm_dll(d) not in system and iat.norm_dll(d) not in image))))
-                     for n, m in sorted(declared_mods.items())]
-    put(os.path.join(out or '', 'modules_declared.tsv'), '# name\tkind\tsha256\tsize\tmissing_imports\n' + ''.join('%s\t%s\t%s\t%d\t%s\n' % r for r in sorted(dec)))
-    raw = {}
+    image = st['image']
+    dec = [(n, 'load-fails', m.sha256, m.size, ','.join(sorted(dict.fromkeys(iat.norm_dll(d) for d, _ in m.imports if iat.norm_dll(d) not in served and iat.norm_dll(d) not in image))))
+           for n, m in sorted(load_fails.items())]
+    put(os.path.join(out or '', 'modules_declared.tsv'), '# name\tkind\tsha256\tsize\tunresolved_imports\n' + ''.join('%s\t%s\t%s\t%d\t%s\n' % r for r in sorted(dec)))
+    itext = import_names_text(me, exe, order)
+    put(os.path.join(out or '', 'import_names.tsv'), itext)
+    if import_names_out:
+        tsv(import_names_out, itext)
     for m in order:
-        rows = m.pe.exports()
-        raw[m.name] = [(k, None if r is None else m.base + r, f, o) for k, r, f, o in rows]
         put(os.path.join(out or '', 'exports', m.name + '.tsv'), ''.join(
-            '%s\t%s\t%s\t%d\n' % (k, '' if a is None else '%08x' % a, f or '', o) for k, a, f, o in raw[m.name]))
+            '%s\t%s\t%s\t%d\n' % (k, '' if r is None else '%08x' % (m.base + r), f or '', o) for k, r, f, o in m.pe.exports()))
+    if c_out:   # the loader's module table, one file (loader/src/modules.c reads fnvnx_modules, fnvnx_module_count)
+        with open(c_out, 'w', newline='\n') as fh:
+            fh.write(c_source(order))
+    summary = ['modules %d: range 0x%08x..0x%08x' % (len(order), order and min(m.base for m in order) or 0, st['end'])]
+    summary += ['  %d %s base 0x%08x preferred 0x%08x size 0x%x relocs %d static %d' % (i, m.name, m.base, m.pe.base, m.pe.size_of_image, m.relocs, int(m.static))
+                for i, m in enumerate(order)]
+    summary += ['load-fails %s sha256 %s unresolved imports: %s' % (n, h[:12], miss or '-') for n, _, h, _, miss in sorted(dec)]
+    return '\n'.join(summary)
+
+
+def run_iat(exe_path, bridge_path, dirs, out, declared_path, modules_path, claude_md_path, keys_out=None, keys_tsv_out=None, data_out=None, keys_h_out=None, imported_out=None):
+    """Second entry (inputs: the files, the declared set and bridge.tsv): the slot resolution (iat.tsv, imports/<name>.tsv) and the key tables (import_keys.c/.h, keys.tsv, imported.tsv, iat_data.tsv)."""
+    st = plan(exe_path, declared_path, dirs, modules_path, claude_md_path)
+    exe, order = st['exe'], st['order']
+    brows, table_id = iat.bridge_rows(bridge_path)
+    bridge = [(r['dll'], r['name'], r['conv'], r['ordinal']) for r in brows]
+    if out:
+        os.makedirs(os.path.join(out or '', 'imports'), exist_ok=True)
+    write_table = lambda path, rows: iat.write_table(path, rows) if out else None   # noqa: E731
+    raw = {m.name: [(k, None if r is None else m.base + r, f, o) for k, r, f, o in m.pe.exports()] for m in order}
     values = iat.resolve_exports(raw, bridge)
     rows, bad = iat.table(exe_slots(exe), bridge, values)
     write_table(os.path.join(out or '', 'iat.tsv'), rows)
     gatefile.write('iat', len(rows) + len(bad), len(rows), ['%08x %s!%s: %s' % b for b in bad],
                    '%d slots, %d without a value' % (len(rows) + len(bad), len(bad)))
-    summary = ['modules %d: range 0x%08x..0x%08x' % (len(order), order and min(m.base for m in order) or 0, end)]
-    summary += ['  %d %s base 0x%08x preferred 0x%08x size 0x%x relocs %d static %d' % (i, m.name, m.base, m.pe.base, m.pe.size_of_image, m.relocs, int(m.static))
-                for i, m in enumerate(order)]
-    summary += ['declared %s (%s) sha256 %s missing imports: %s' % (n, k, h[:12], miss or '-') for n, k, h, _, miss in sorted(dec)]
-    summary.append('exe slots with a value %d of %d' % (len(rows), len(rows) + len(bad)))
+    summary = ['exe slots with a value %d of %d' % (len(rows), len(rows) + len(bad))]
     for b in bad:
         summary.append('exe slot %08x %s!%s: %s' % b)
-    mkinds = {}
     for m in order:
         slots = {m.base + slot: (dll, name) for dll, items in m.imports for slot, name in items}
         mrows, mbad = iat.table(slots, bridge, values)
         write_table(os.path.join(out or '', 'imports', m.name + '.tsv'), sorted(
             mrows + [(s, d, n, 'none', None) for s, d, n, _ in mbad]))
-        k = mkinds.setdefault(m.name, {'system': 0, 'module': 0, 'none': 0})
+        k = {'system': 0, 'module': 0, 'none': len(mbad)}
         for r in mrows:
             k['module' if r[3] == 'module' else 'system'] += 1
-        k['none'] = len(mbad)
         summary += ['module import slots %s: via bridge %d, via modules %d, no provider %d' % (m.name, k['system'], k['module'], k['none'])]
         summary += ['  no provider: %s!%s' % (d, n) for _, d, n, _ in mbad]
-    if c_out:   # the loader's module table, one file (loader/src/modules.c reads fnvnx_modules, fnvnx_module_count)
-        with open(c_out, 'w', newline='\n') as fh:
-            fh.write(c_source(order))
-    if keys_out or keys_tsv_out or data_out or keys_h_out or imported_out:   # the one key table (iat.py's rules): the loader's C table, the lifter stubs' keys.tsv, the loader start rule S4's iat_data.tsv
-        brows, table_id = iat.bridge_rows(bridge_path)
+    if keys_out or keys_tsv_out or data_out or keys_h_out or imported_out:
         imported = iat.imported_set(brows, list(exe_slots(exe).values()) + [(d, n) for m in order for d, items in m.imports for _, n in items])
         txt, datarows, _ = iat.c_source(brows, table_id, imported)
         for path, text in ((keys_out, txt), (keys_tsv_out, iat.keys_tsv(brows, table_id)), (data_out, iat.data_tsv(datarows, table_id)), (keys_h_out, iat.key_header(brows, table_id)), (imported_out, iat.imported_tsv(brows, table_id, imported))):
@@ -523,25 +575,37 @@ def run(exe_path, bridge_path, dirs, out, declared_path, c_out=None, keys_out=No
 
 def main():
     ap = argparse.ArgumentParser()
+    sub = ap.add_subparsers(dest='cmd')
+    for name, h in (('iat', 'the slot resolution and the key tables (input: bridge.tsv)'),):
+        sp = sub.add_parser(name, help=h)
+        sp.add_argument('--bridge', required=True)
+        sp.add_argument('--keys-c-out', help='import_keys.c')
+        sp.add_argument('--keys-h-out', help='import_keys.h')
+        sp.add_argument('--keys-tsv-out', help='keys.tsv')
+        sp.add_argument('--imported-out', help='imported.tsv')
+        sp.add_argument('--data-out', help='iat_data.tsv')
+        sp.add_argument('--out-dir', help='iat.tsv and imports/')
     ap.add_argument('--exe', required=True)
-    ap.add_argument('--bridge', required=True)
     ap.add_argument('--dir', action='append', required=True, help='where module files are looked for; first match in list order')
     ap.add_argument('--declared', required=True, help='declared_dlls.tsv (contract/declareddlls.py): the dlls of the declared machine')
-    ap.add_argument('--out-dir', help='the tables of the contract (modules.tsv, exports/, imports/, tls, iat.tsv ...); without it only --c-out and --keys-c-out are written')
+    ap.add_argument('--declared-modules', required=True, help='platform/declared_modules.tsv (contract/declaredmods.py): the dlls whose service the declared machine lacks, served even with a file')
+    ap.add_argument('--claude-md', help='CLAUDE.md: the cite of a declared_modules row is one of its headings (the contract gate passes it; a recipe stage cannot mount it)')
+    ap.add_argument('--out-dir', help='modules.tsv, modules.c, exports/, tls, modules_declared.tsv, import_names.tsv')
     ap.add_argument('--c-out', help='modules.c: the loader module table (fnvnx_modules, fnvnx_module_count)')
-    ap.add_argument('--keys-c-out', help='import_keys.c: the loader import table (fnvnx_import_rows, fnvnx_import_row_count, fnvnx_import_key_count, fnvnx_import_by_key_idx)')
-    ap.add_argument('--keys-h-out', help='import_keys.h: FNVNX_KEY(dll, name), the key of every function row as a compile-time constant (iat.key_header)')
     ap.add_argument('--modules-tsv-out', help='modules.tsv: the module set, bases and entries (the boot input of the emulator stage)')
-    ap.add_argument('--keys-tsv-out', help='keys.tsv: the import keys for the lifter stubs (iat.keys_tsv)')
-    ap.add_argument('--imported-out', help='imported.tsv: the keys.tsv rows that an import slot of a loaded image (the exe and every module) binds to (iat.imported_tsv)')
-    ap.add_argument('--data-out', help='iat_data.tsv: the data rows of the import table (build fact of the loader start rule S4, iat.data_tsv)')
+    ap.add_argument('--import-names-out', help='import_names.tsv: image, dll, name, slot RVA of the import directories')
     a = ap.parse_args()
-    if not (a.out_dir or a.c_out or a.keys_c_out or a.keys_tsv_out or a.data_out or a.keys_h_out or a.modules_tsv_out or a.imported_out):
-        ap.error('one of --out-dir, --c-out, --keys-c-out, --keys-tsv-out, --data-out, --keys-h-out, --modules-tsv-out is required')
     try:
-        text, bad = run(a.exe, a.bridge, a.dir, a.out_dir, a.declared, a.c_out, a.keys_c_out, a.keys_tsv_out, a.data_out, a.keys_h_out, a.modules_tsv_out, a.imported_out)
-        if not a.out_dir:   # tables-only mode: a slot without a provider is the `iat` gate's finding (it needs the tables), not a failure of the generator
-            bad = False
+        if a.cmd == 'iat':
+            if not (a.out_dir or a.keys_c_out or a.keys_tsv_out or a.data_out or a.keys_h_out or a.imported_out):
+                ap.error('iat: one of --out-dir, --keys-c-out, --keys-tsv-out, --data-out, --keys-h-out, --imported-out is required')
+            text, bad = run_iat(a.exe, a.bridge, a.dir, a.out_dir, a.declared, a.declared_modules, a.claude_md, a.keys_c_out, a.keys_tsv_out, a.data_out, a.keys_h_out, a.imported_out)
+            if not a.out_dir:   # tables-only mode: a slot without a provider is the `iat` gate's finding (it needs the tables), not a failure of the generator
+                bad = False
+        else:
+            if not (a.out_dir or a.c_out or a.modules_tsv_out or a.import_names_out):
+                ap.error('one of --out-dir, --c-out, --modules-tsv-out, --import-names-out is required')
+            text, bad = run(a.exe, a.dir, a.out_dir, a.declared, a.declared_modules, a.claude_md, a.c_out, a.modules_tsv_out, a.import_names_out), False
     except (StageError, ValueError, OSError, exepin.ExePinError) as e:
         sys.exit('modules: %s' % e)
     print(text)

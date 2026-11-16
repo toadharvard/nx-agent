@@ -5,7 +5,9 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-import ctypes_compat as C
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import ctypes_compat as C
 
 fails = []
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'toolchain', 'layout', 'decltype_spell.inc')) as _f:
@@ -40,6 +42,8 @@ ok('(?)int', '(int,*char)int', True, 'K&R against promoted-free prototype')
 ok('(?)int', '(char)int', False, 'K&R against a prototype with a promoted parameter')
 ok('struct:L{next:*struct:L}', 'struct:L{next:*struct:L}', True, 'recursive')
 ok('struct:L{next:*struct:L{v:int}}', 'struct:L{next:*struct:L{v:long}}', False, 'recursive, inner member differs')
+ok('struct:L{next:*struct:L{v:int};a:struct:-{w:int}}', 'struct:L{next:*struct:L{v:int};a:struct:-{w:int}}', True, 'recursive named pair with an anonymous member (no memo entry for the anonymous one)')
+ok('struct:L{next:*struct:L{v:int};a:struct:-{w:int}}', 'struct:L{next:*struct:L{v:int};a:struct:-{w:long}}', False, 'recursive named pair, anonymous member differs')
 ok('enum:E=unsigned_int', 'enum:E=unsigned_int', True, 'enum')
 ok('enum:E=unsigned_int', 'enum:E=int', False, 'enum underlying type')
 # per symbol over objects: every pair is judged

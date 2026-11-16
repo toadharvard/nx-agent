@@ -4,12 +4,14 @@
   SSE FP (Vol 1 4.8.3, 4.9.1, 10.2.3): binary32 / binary64 add sub mul div sqrt: values against numpy at the source type (round to nearest even), flags from the SDM rules on chosen operands.
   Faults: a fault leaves the whole state unchanged (the x87 / SIMD kinds are in dsl.FAULTS and the lifter's fault map).
     test_dsl_xsimd.py        (exit 0 = all pass)"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, random, struct, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 import numpy as np, z3
-from fnvlift import dsl
-from fnvlift.dsl import C, V, Form, to_smt, fr, xmm, mm, fp, fp_val, fp_flags, concat, extract
+from fnvnx.lift.fnvlift import dsl
+from fnvnx.lift.fnvlift.dsl import C, V, Form, to_smt, fr, xmm, mm, fp, fp_val, fp_flags, concat, extract
 
 FAILS = []
 def check(name, ok):

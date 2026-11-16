@@ -15,6 +15,8 @@ failure are kept, and the exit status is 1.  A range outside the file's section 
 The family is computed for EVERY decoded instruction (not for the first of its shape); a key that gets two families makes the census fail (ValueError listing the key, the families and the lowest address of each), so
 the family is a function of the key over the whole census by checking the finite set, not by a premise; the representative encoding is decoded again and must give the same shape and family.  The form key is that of the REPRESENTATIVE (capstone names the predicate of cmpps/cmppd/cmpss/cmpsd by the
 value of the imm8, so the mnemonic of an occurrence is not a function of the shape; the representative has imm8 = 0)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import hashlib
 import os
 import struct
@@ -22,7 +24,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from proof import forms, shape  # noqa: E402
+from fnvnx.lift.proof import forms, shape  # noqa: E402
 
 BASE_HDR = '# base='
 

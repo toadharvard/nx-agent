@@ -6,18 +6,20 @@ the 16-bit pop AssertionError). One rule per class, checked here from the SDM, n
   operand size of push / pop (66 prefix, stack size 32) -> the stack moves by 2 and a word is stored / loaded; a 16-bit register destination keeps the upper half (pop sp: SP gets the loaded word).
 Numeric checks evaluate the Form with z3 on concrete states. Negative cases: a 32-bit push / pop still moves by 4; an unknown pre-state variable still raises Unsupported; no GS term without a GS override.
     dsl_int_classes_test.py          (exit 0 = all pass)"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, random, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import declared_x86sys; declared_x86sys.configure()
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys; declared_x86sys.configure()
 import capstone, z3
 from capstone import x86 as X
-from fnvlift import core
-from proof import lift_dsl as f_dsl, cpufeat
+from fnvnx.lift.fnvlift import core
+from fnvnx.lift.proof import lift_dsl as f_dsl, cpufeat
 core.set_emit(f_dsl.emit_form, cpufeat.missing)
-from fnvlift.dsl import to_smt
-from proof import forms
+from fnvnx.lift.fnvlift.dsl import to_smt
+from fnvnx.lift.proof import forms
 
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
 A0, FAILS = 0x400000, []

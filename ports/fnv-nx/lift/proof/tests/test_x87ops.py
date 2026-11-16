@@ -3,12 +3,14 @@
 every input of its sorts, (3) equal, on every input, to the SDM's own reading of the value as a z3 formula: REFERENCE below, one per op (the universe is x87spec.CARRIER_OPS, so a new op without a reference
 fails here).  The value of a Form is then the SDM machinery of the spec around ops that are proved against the SDM text.  The tests read the preprocessed lift/rt units (FNVNX_PP, until the pp run-step input mounts
 them); without them they SKIP with that reason."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys, unittest
 import z3
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.join(HERE, '..'), os.path.join(HERE, '..', '..')]
-import x87carrier, x87spec as X  # noqa: E402
+import fnvnx.lift.proof.x87carrier as x87carrier; import fnvnx.lift.proof.x87spec as X  # noqa: E402
 
 try:
     C = x87carrier.carrier()

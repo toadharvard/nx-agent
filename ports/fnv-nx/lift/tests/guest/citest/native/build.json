@@ -15,13 +15,14 @@
   "asm": []
  },
  "include": [
-  "ports/fnv-nx/shim/include"
+  "ports/fnv-nx/shim/include",
+  "ports/fnv-nx/platform/include"
  ],
  "units": "all",
  "uses": [
   {
    "root": "ports/fnv-nx/lift/tests/guest/citest/lifted",
-   "output": "cases.inc"
+   "output": "GEN"
   },
   {
    "root": "ports/fnv-nx/lift/rt",
@@ -29,6 +30,10 @@
   },
   {
    "root": "ports/fnv-nx/shim",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/platform",
    "output": "INCLUDE"
   }
  ],
@@ -53,6 +58,10 @@
  "include_uses": [
   {
    "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
+  },
+  {
+   "root": "ports/fnv-nx/lift/tests/guest/citest/lifted",
    "output": "GEN"
   }
  ]
