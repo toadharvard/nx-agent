@@ -2511,3 +2511,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:38
 - cand3b 597f2e007 verdict 94f85ab2: L1 red, selftests 128/131 (test_gate_addr, test_gate_order, test_rtasm leave the cas pool in TMPDIR). test_guest is green. Cold 1006 s; warm not measured. To w15: one temporary-store helper for all tests, the cause first in the reason; then one head with w28's walk fix and the budget check, verdict cold then warm. Orchestrator told.
 - bottleneck: the cand3b head with the pool, walk and budget fixes.
+
+## 2026-11-16 04:40
+- w28 3ba44146b: stage memo keyed by tree content (no stat), ROOTFS_MEMO per deb-set content; gamedata_fetch d193554fe (one item at a time, pinned = installed + framing asserted) sent to L4; foreach range + fan-in rows:all (static). Accepted; head to w15 for cand3b. L6 moves sm_link onto range.
+- w28 next: the dynamic foreach table (L3b). ASSUMPTIONS: L6's nine retirements are taken only where the gate finds no citer.
+- bottleneck: the cand3b head with the pool, walk and budget fixes.
