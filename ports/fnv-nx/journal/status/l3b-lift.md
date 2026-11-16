@@ -508,3 +508,4 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
   - Then the 3-row build on farm 4.
 
 - 2026-11-16: density rule 3 projection lemma and liveness certificate written: lift/proof/FLAGLIVE.md (Lemma 1, soundness, P1-P3, gate flaglive). Next: L3b check of rules 1-2 by shape_sha + formgate when L3a lands them.
+- 2026-11-16: sys3 merged (w-sys3 0b0a4901a -> 82a488a89). Sreg write class: Form.sel effect, MOV/POP/PUSH Sreg Forms from x86sys MOV_TO_SREG (L5 w35 894e5a68); seg family 52 keys: 45 proved, 7 uncertified (prefix 26/36/67 claim -> sys4). Form build over the universe: 23,833 ok, 2,664 KeyError, 3 SymbolicBranch, 0 UndecidedRow. int n cd00 252/256 vectors proved, 4 OutsideDomain. far jmp/call all classes proved over jmp_far, 115 undecided GDT indexes OutsideDomain. Tests: lift/proof/tests 43 files, 43 exit 0 at 82a488a89. Doing: sys4 prefix-scope claim (a263326f7dfe45d17).
