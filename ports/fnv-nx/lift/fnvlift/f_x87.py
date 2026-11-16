@@ -120,11 +120,11 @@ def x87_reg(cx, ins, b0, mr, g):
         arith(cx, i, 'fv_d(%s)' % R(i), 'fv_d(%s)' % R(0), ARD[g])
         em(pop(cx) if b0 == 0xde else '')
     elif b0 == 0xd8 and g in (2, 3) or b0 == 0xdd and g in (4, 5):                 # fcom fcomp / fucom fucomp st(i)
-        em('FCMP(%s,%s);%s' % (R(0), R(i), pop(cx) if g in (3, 5) else ''))
+        em('FCMP(%s,%s,%du);%s' % (R(0), R(i), b0 == 0xdd, pop(cx) if g in (3, 5) else ''))
     elif mr == 0xd9 and b0 == 0xde or mr == 0xe9 and b0 == 0xda:                  # fcompp / fucompp
-        em('FCMP(%s,%s);%s' % (R(0), R(1), pop(cx, 2)))
+        em('FCMP(%s,%s,%du);%s' % (R(0), R(1), b0 == 0xda, pop(cx, 2)))
     elif b0 in (0xdb, 0xdf) and g in (5, 6):                                       # fucomi fcomi (p)
-        em('FCMPI(%s,%s);%s' % (R(0), R(i), pop(cx) if b0 == 0xdf else ''))
+        em('FCMPI(%s,%s,%du);%s' % (R(0), R(i), g == 5, pop(cx) if b0 == 0xdf else ''))
     elif b0 in (0xda, 0xdb) and g < 4:                                             # fcmovcc st0, sti
         cond = [('cf', 'zf', '(cf|zf)', 'pf'), ('!cf', '!zf', '!(cf|zf)', '!pf')][b0 == 0xdb][g]
         em('if(%s) %s=%s;' % (cond, wr(cx, 0), R(i)))
@@ -139,7 +139,7 @@ def x87_reg(cx, ins, b0, mr, g):
     elif b0 == 0xd9 and mr == 0xe1:
         em('%s=fv_sg(%s,0);' % (wr(cx, 0), R(0)))
     elif b0 == 0xd9 and mr == 0xe4:                                                # ftst
-        em('FCMP(%s,fv_f64(0.0));' % R(0))
+        em('FCMP(%s,fv_f64(0.0),0u);' % R(0))
     elif b0 == 0xd9 and mr == 0xe5:                                                # fxam
         em('FXAM(%s);' % ('c->fx[c->ftop&7]' if cx.xm == 'd' else R(0)))
     elif b0 == 0xd9 and mr in CONST:
@@ -196,7 +196,7 @@ def x87_mem(cx, ins, b0, mr, g):
             arith(cx, 0, 'fv_d(%s)' % r0(), src[0], AR[g])
             em('}')
         elif g in (2, 3):
-            em(a + 'FCMP(%s,%s); }%s' % (r0(), src[1], pop(cx) if g == 3 else ''))
+            em(a + 'FCMP(%s,%s,0u); }%s' % (r0(), src[1], pop(cx) if g == 3 else ''))
         else:
             raise Unsupported('x87 ' + cx.m)
         return
