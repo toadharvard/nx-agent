@@ -1516,3 +1516,16 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - The last refinement inside the domain (w7, doing): esp after a virtual call is a finite offset set over the callee retn join. It collapses at `mov esp,ebp`, `leave` and `lea esp,[ebp-n]`.
 - Gap reported: the pop of a virtual call has no class rule. The options are (a) the frame-balance assumption (owner), (b) whole-program typing (no rule) and (c) permanent red facts.
 - bottleneck: L2 w2 (3 lift/rt units); w8 rework and merges; the orchestrator's decision on the virtual-call pop; udsail cause (w13).
+
+## 2026-11-16 04:40 — esp at unproven sites: general form (orchestrator ruling (d))
+- Orchestrator ruling (d), CLAUDE.md integ c29de9188: a static esp fact is used only where it is proven. Everywhere else the general lowering applies, and it is not red.
+- Confirmed in lift/fnvlift/f_flow.py:
+  - esp is the run-time register;
+  - an indirect call goes through fnvl_dispatch with the full guest state;
+  - an indirect jmp goes through the non-local loop;
+  - EH continuations take esp from the exe's saved frame, via fnvl_native_transfer.
+  Nothing is missing.
+- w7: the offset-set domain is not built (it closes 0 of the 8 sites, 853 of 36,505 straight-line collapses). pcsrc becomes `esp: proven | general(reason)`, with red only where the lifter cannot lower the site (expected 0). Recompute the exe and the 5 images.
+- Scope of ruling A sent to L1: the generated lifted units also write c->ra (the transfer protocol), so the ra accessor is for generated code plus fnvl_native_transfer.
+- Farm 2 (session_01KmtZKUJTJJy6aiVcibniH8) takes the L3a queue: udsail (w13), the d3dx9 facts, shard identity and exe facts (w7).
+- bottleneck: w8 (cpumodel.c push for L1, then class A/B, merges); L2 w2 (3 lift/rt units); w7 pcsrc reclassification.
