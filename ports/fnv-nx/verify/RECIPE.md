@@ -370,6 +370,10 @@ consumers: a later step's `inputs` ref `{"stage": "<root>:gen:I", "path": DIR}` 
 root reads it through `uses`. A directory output does not overlap another output or a tracked file. A stage whose stage-ref input is an output of a
 red generator is blocked by it (never run on a missing path). Tests: `tests/test_genchain.py` (a 3-stage chain, unmounted paths fail, the re-key rule).
 
+### Stage refs evaluate their closure
+
+A stage-ref input names one output of one run step. Evaluating it evaluates that step and the run steps whose outputs its inputs name (the transitive producers), in declaration order, and no other step of the root: the result and its key are the same as for the whole root, because a step's key is the content of what it mounts. A step that is not a producer cannot change them. One Job builds the root's artifacts once. The per-process memo of a stage-ref result is keyed by the content of the tracked tree (index blob hashes plus the sha256 of modified files), the store, the root, the step, the path and the step declaration; no stat or mtime is in a key.
+
 ### Generator tool reads (`gen:file-escape`)
 
 `recipe check` is red with `gen:file-escape:<root>:gen:<I>:<FILE>:<LINE>:<PATH>` when a generator tool, or a module of its import closure, reads a file by a path
