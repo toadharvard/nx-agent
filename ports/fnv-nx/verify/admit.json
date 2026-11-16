@@ -469,6 +469,12 @@
    "recipe": "ports/fnv-nx/lift/sdmrows/build.json"
   },
   {
+   "path": "ports/fnv-nx/lift/cpufeat",
+   "class": "tool",
+   "target": "host",
+   "recipe": "ports/fnv-nx/lift/cpufeat/build.json"
+  },
+  {
    "path": "ports/fnv-nx/lift/proof/fpchost",
    "class": "test",
    "target": "host",
