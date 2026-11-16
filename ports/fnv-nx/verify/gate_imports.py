@@ -107,6 +107,14 @@ def provider_item(root, repo, cache, admit, roots):
     return sorted({d["symbol"] for d in res["defined"]} & natives_of(repo, cache, admit, roots))
 
 
+def link_members(root, admit, repo):
+    """The members of the link that ROOT enters: ROOT itself and every link candidate of an image of its target (recipe.link_candidates: every admitted product root
+    with a recipe and no link, in the recipe it has for that target; RECIPE.md "Link members"). The set is the recipe's own rule over admit.json: a definer is looked for
+    here, never through the root's `uses` and never over every root. -> sorted specs."""
+    spec = recipe.split_spec(root)[0]
+    return sorted({root} | set(recipe.link_candidates(admit, spec, recipe.entry_of(admit, root).get("target"), repo)))
+
+
 def judge_root(root, repo, cache, admit, roots, bad):
     """One admitted product ROOT -> (universe, certified, ids, detail) (gate_build.quantify); input errors are red with the reason, never raised.
     BAD collects (id, class) of the uncertified rows."""
@@ -125,16 +133,16 @@ def judge_root(root, repo, cache, admit, roots, bad):
         with open(p) as f:
             decl = json.load(f)
         built = {}
-        for r2 in roots:
+        members = link_members(root, admit, repo)
+        for r2 in sorted(set(members) | {root}):
             built[r2] = gate_build.ensure(r2, cache, repo)[0]
             if built[r2]["status"] == "red":
                 raise ValueError("%s: build red at stage %s" % (r2, built[r2]["failure"]["stage"]))
         rec = recipe.load_recipe(repo, admit, root)
         others = {}
-        for r2 in roots:
-            if r2 != root:
-                for k, v in symbols(built[r2]).items():
-                    others.setdefault(k, []).extend(v)
+        for r2 in members:
+            for k, v in symbols(built[r2]).items():
+                others.setdefault(k, {}).setdefault(r2, []).extend(v)
         rows = root_rows(root, rec, built[root], decl, repo, cache, others)
     except recipe.RecipeError as e:
         return 1, 0, [root + ":recipe"], "recipe invalid: %s" % "; ".join(e.errors)[:200]
