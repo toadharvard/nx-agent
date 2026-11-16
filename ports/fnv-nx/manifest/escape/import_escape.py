@@ -34,8 +34,8 @@ Usage: import_escape.py --winmd Windows.Win32.winmd --sha256 HEX --commit ID --b
 """
 import argparse, collections, os, re, sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import funcfacts
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))   # ports/fnv-nx: qualified imports of another root's modules
+from manifest import funcfacts
 
 # ECMA-335 II.23.1.16 element types
 E_VOID, E_BOOL, E_CHAR, E_I1, E_U1, E_I2, E_U2, E_I4, E_U4, E_I8, E_U8, E_R4, E_R8, E_STRING = range(1, 15)
@@ -958,6 +958,8 @@ def main():
     meta = Meta(a.winmd)
     if a.selftest:
         selftest(meta)
+        if a.out:   # the recipe stage declares this marker as an output, and the table steps take it as an input
+            open(a.out, 'w', encoding='utf-8').write('selftest ok\n')
         return
     if a.argext:
         text, report, count = generate_argext(meta, a.bridge, a.commit, sha)
