@@ -2465,3 +2465,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:20
 - w28 666185f35: recipe foreach (test_foreach 15/15 static). chkall 17 reds, all from the stale render cut. w28 has the ruling-A header (lift/rt/fnvl.h, FNVL_PRELUDE_H/FNVL_RA_WRITE; w8 base3 8c8d9b247). Next: the PP gate, then the farm job (test_gate_imports, test_sandbox 9a, test_runpython).
 - bottleneck: cand3b verdict at 597f2e007.
+
+## 2026-11-16 04:21
+- L6 w6-root a3683a468: w28 01e91c00d merged; test_extpaths 0 globally; d3d9total 332/332, 45/45 mutations killed; recipe check valid on all 15 L6 roots. Accepted. The include_of doc fix (run inputs at /in/N) goes to w28; w28 takes render/ from a3683a468.
+- bottleneck: cand3b verdict at 597f2e007.
