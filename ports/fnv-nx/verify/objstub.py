@@ -65,7 +65,7 @@ does exactly what Wine 9.0's simplified implementation of an API does (nothing, 
 is no evidence of a call (rule (i)), and after it x0-x18, x30, v0-v7, v16-v31 are unknown (written with unknown values), so a result
 that depends on them is unknown. A function that calls it and is otherwise V is certified iff (1) w0 at every call is a constant
 (`wine-fixme-nonconstant`), (2) every path passes exactly one id (else `wine-fixme-mismatch`; wine_path_id), (3) the table
-verify/wine_fixme.tsv (`--wine-fixme`; the gate reads the tree under test) has the row of that id (`wine-fixme-unknown-id`) and (4) the
+<root>/wine_fixme.tsv (`--wine-fixme`; the gate reads the tree under test) has the row of that id (`wine-fixme-unknown-id`) and (4) the
 result equals the row's kind/value (void: any; u32/u64: x0 is that constant; addr: x0 is the address of SYMBOL (+ OFFSET): a name at that address, or a symbol whose extent holds it; a LOCAL symbol is matched through its own symbol-table entry (the assembler often relocates against the section symbol + addend, which is resolved back to `symbol+offset` that way); u32nz<N>: below; else `wine-fixme-mismatch`). For such a body
 the input rule (v) of V is replaced by the result rule: reading an input register is no evidence (a debug build spills its arguments),
 because the result must be constant by wine_sim and the effects are frame stores (V (a), (b)). u32nz<N> (a result that depends only on
@@ -87,7 +87,7 @@ Wine 9.0 tree is the oracle class, not done. A row without a call site is no fin
 `.fnvnx.cite` (type PROGBITS, no SHF_ALLOC): u32 function address (an ABS32 relocation of the object's ABI, R_AARCH64_P32_ABS32 for ILP32, against a
 function DEFINED in the same object), u32 length n of the id, the n bytes of the id, padding to 4 (read_cites; any other shape, an id that is not
 `dm:`/`wf:` plus a decimal, a relocation that does not name a function start of this object: `cite-malformed`). `dm:` is the id column of
-verify/declared_machine.tsv (`--declared-machine`; read_declared_table: rows `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`; the facts and the
+<root>/declared_machine.tsv (`--declared-machine`; read_declared_table: rows `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`; the facts and the
 source prefixes are read from the table's own header line; the clause of `c11:<clause>:<function>` is digits and dots, the page of `posix-2017:<page>:<function>`
 a name; kind `noreturn` (value `-`) exactly for the facts process-end and thread-end), `wf:` the id column of wine_fixme.tsv. A cited body is judged by the rules
 of (W) with no call to read: it is analysed with the input rule replaced by the result rule (wine mode); V => it is certified iff the row's kind/value match the
@@ -2066,6 +2066,39 @@ def wine_matches(row, v, nz):
     if kind == "addr":   # as in the constants table: x0 is the address of the symbol VAL (one of the names at that address)
         return x0 is not None and x0[0] == "A" and addr_name(val) in x0[1]
     return kind == "void" or (x0 is not None and x0[0] == "K" and x0[1] & (0xFFFFFFFF if kind == "u32" else 2 ** 64 - 1) == int(val, 0))
+
+
+def read_root_tables(repo, roots, std_index=None, winerr=None):
+    """The declared-machine and Wine rows of the admitted ROOTS (repo-relative paths): each root that has citing bodies carries `<root>/declared_machine.tsv` and
+    `<root>/wine_fixme.tsv` (a root without the file has no row of that class). The tables are the union over the roots; an id that is in two roots' tables of one class
+    is an error (ids are one space per class). -> (wine, declared, owner) with wine/declared as read_wine_table/read_declared_table and OWNER {("wf"|"dm", id): root}.
+    ValueError on a malformed table or a duplicate id."""
+    wine, declared, owner = {}, {}, {}
+    for root in sorted(roots):
+        for fname, kind, dest, load in (("wine_fixme.tsv", "wf", wine, lambda q: read_wine_table(q)),
+                                        ("declared_machine.tsv", "dm", declared, lambda q: read_declared_table(q, std_index, winerr))):
+            q = os.path.join(repo, root, fname)
+            if not os.path.exists(q):
+                continue
+            for i, row in load(q).items():
+                if i in dest:
+                    raise ValueError("%s id %d is a row of two roots: %s and %s" % (fname, i, owner[(kind, i)], root))
+                dest[i], owner[(kind, i)] = row, root
+    return wine, declared, owner
+
+
+def orphan_findings(results, owner):
+    """-> [(object "-", "<root>:<dm|wf>:<id>", "declared-machine-orphan"|"wine-fixme-orphan", detail)]: a row of an admitted root that no record of an object of
+    that root cites. An object belongs to the longest root path that is a prefix of its id."""
+    roots = sorted({r for r in owner.values()}, key=len, reverse=True)
+    cited = {}
+    for oid, r in results.items():
+        root = next((x for x in roots if oid.startswith(x + "/")), None)
+        if root:
+            cited.setdefault(root, set()).update(i for ids in r["cite"].values() for i in ids)
+            cited[root].update("wf:%d" % c for _, _, c in r["wine"] if c is not None)   # the other form of a Wine citation: the constant id a body passes to fnvnx_wine_fixme
+    return sorted(("-", "%s:%s:%d" % (root, k, i), "declared-machine-orphan" if k == "dm" else "wine-fixme-orphan",
+                   "the row %s:%d of %s is cited by no record of that root" % (k, i, root)) for (k, i), root in owner.items() if "%s:%d" % (k, i) not in cited.get(root, set()))
 
 
 def read_wine_table(path):
