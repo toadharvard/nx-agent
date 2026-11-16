@@ -752,3 +752,9 @@ After the first frame:
   - GMP is generic C: its aarch64 asm does not target ILP32, and it runs only on atan2's cold branch.
   - Fix ordered (rule 3): the archive mount carries only the archive; headers come through include_uses for run steps. Then the head goes to L1 for cand5 review.
 - 2026-11-16 07:20Z: w2 7bedd49a8: the archive mount holds only lib<name>.a, and run steps take include_uses through the one resolver. mpfr 257 and coremath 7 green again. Went to L1 for cand5 review. A behavioural test of the run-step include_uses mount replaces the text-match test.
+- 2026-11-16 07:30Z: w2 cand4b 67d1ae6fe, the 4 L1 review items for cand5:
+  - a guest-only archive root;
+  - the "probes compile/link only" rule. gmpgen/mpfrgen now pass --build and assert cross_compiling=yes; the earlier --host-only gap is closed, and every cc stage hit after re-keying;
+  - Job.archives in __init__;
+  - the behavioural include_uses test.
+  - test_archive_sources: 0 fails. Sent to L1 for cand5.
