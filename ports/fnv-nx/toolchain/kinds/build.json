@@ -2,7 +2,7 @@
  "format": "fnvnx-recipe/1",
  "generated": [
   {
-   "tool": "ports/fnv-nx/toolchain/names/export_kinds.py",
+   "tool": "ports/fnv-nx/toolchain/kinds/export_kinds.py",
    "args": [
     "--inc",
     "/in/ports/fnv-nx/toolchain/names/sympair_kinds.inc",
