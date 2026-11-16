@@ -41,7 +41,7 @@ PLUGS = [{"name": n} for n in recipe.PLUGIN_SOURCES]   # a root names only the p
 P = {p["name"]: p for p in PLUGS}
 SRC = "volatile int g;\nint rd() { return g; }\nvoid wr(int v) { g = v; }\nint f2i(float f) { return (int)f; }\nint ic(int (*f)(int)) { return f(1); }\nstruct S { int a; char b; };\nS gs;\nregister int hr asm(\"x27\");\nregister unsigned eax asm(\"x19\");\nint hrw(int v) { hr = v; eax = v + 1; return hr + eax; }\nstatic int arr[7];\nint ua(int i) { return arr[i]; }\nint lf() { static char ls[3]; return ls[0]; }\nextern int ex;\nint uex() { return ex; }\nextern int dg[];\nint udg() { return dg[0]; }\n"
 REC = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
-       "flags": {"c": [], "cxx": ["-O2", "-mabi=ilp32"] + list(recipe.SDD_FLAGS), "asm": []}, "include": [], "units": "all",
+       "flags": {"c": [], "cxx": ["-O2", "-mabi=ilp32"] + [recipe.SDD_DEFINE], "asm": []}, "include": [], "units": "all",
        "plugins": PLUGS}
 
 

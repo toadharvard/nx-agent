@@ -176,7 +176,6 @@ import targets as _targets  # noqa: E402  (the declared targets: verify/targets.
 SEMANTICS_FLAGS = tuple(_targets.semantic_prefix(_targets.load())) + tuple(_sem["common"])   # every guest root (native, decomp, lifted)
 SEMANTICS_LIFTED = SEMANTICS_FLAGS + tuple(_sem["lifted_extra"])   # a root whose cxx_origin is a lifted declaration: the common set plus what the lifter's code is built under
 SDD_DEFINE = "-DFNVNX_SDD=1"   # per root: the plugin fnvnx_sdd needs it (and -fno-devirtualize, which is in the semantic set of a guest root)
-SDD_FLAGS = (SDD_DEFINE, "-fno-devirtualize")   # what a NATIVE C++ root of a host target holds itself
 LANG_X = {"c": "c", "cxx": "c++", "asm": "assembler-with-cpp"}   # the driver's -x language of each kind of unit
 # What a guest build.json may carry (per-root classes); every other -f/-m/... token comes from flags.semantics and is refused here. Warnings and
 # diagnostics, defines, the language standard, the optimisation level (-O0..-O3, -Os, -Og: not -Ofast, which switches FP semantics), debug info,
@@ -1675,6 +1674,14 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant="", repo=".
     cxx = [u for u in units if u.endswith(CXX_EXT)]
     ent = entry_of(roots, root + "@" + variant if variant else root)
     origin = ent.get("cxx_origin")
+    # RULE (L1, 2026-11-16): a GCC plugin is bound to the exact compiler that loads it, and every plugin is built against the guest compiler's plugin headers.
+    # So only a root whose expanded compiler is the guest pin's loads plugins; any other compiler (the host profile, or one named by hand) declaring `plugins` is red.
+    pin = load_pin(repo)
+    gc = (pin or {}).get("external", {}).get("name") if isinstance(pin, dict) else None
+    cc_ = rec.get("compiler") if isinstance(rec.get("compiler"), dict) else {}
+    guest_cc = cc_.get("external") == gc
+    if pl and not guest_cc:
+        return err + ["plugins are bound to the guest compiler; root %s's compiler is %s" % (root, cc_.get("external") or "/".join(str(cc_.get(k)) for k in ("cc", "cxx")))]
     # RULE (orchestrator, 2026-11-12): every guest CC stage, C and C++ alike and whatever the origin of the code, loads the FULL plugin set of
     # PLUGIN_SOURCES with its fixed arguments in the fixed order. No language declarations, no exception list. The arguments are fixed by the
     # origin alone, by the one function plugin_args.
@@ -1686,18 +1693,20 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant="", repo=".
             err.append("plugins must be loaded in the order %s" % list(PLUGIN_SOURCES))
     if not cxx:
         return err + (["admit.json %s: cxx_origin of a root without C++ units" % root] if origin is not None else [])
-    if origin == "native":
+    if origin == "native" and not guest_cc:
+        pass   # a native root of another compiler loads no plugin (they are bound to the guest compiler) and holds no flag for one
+    elif origin == "native":
         for n in sorted(PLUGIN_SOURCES):
             if n not in loaded:
                 err.append("native C++ root %s does not load plugin %s (every native or decomp C++ body is compiled with both)" % (root, n))
         if list(loaded) != [n for n in PLUGIN_SOURCES if n in loaded]:
             err.append("plugins must be loaded in the order %s" % list(PLUGIN_SOURCES))
         fl = rec.get("flags", {}).get("cxx", []) if isinstance(rec.get("flags"), dict) else []
-        # fnvnx_sdd needs the define and -fno-devirtualize; a guest root's -fno-devirtualize comes from flags.semantics, its define is per root
-        err += ["native C++ root %s: flags.cxx lacks %s" % (root, f) for f in (SDD_FLAGS if ent.get("target") != "guest" else (SDD_DEFINE,)) if f not in fl]
+        # fnvnx_sdd needs the define; a guest root's -fno-devirtualize comes from flags.semantics, its define is per root
+        err += ["native C++ root %s: flags.cxx lacks %s" % (root, f) for f in (SDD_DEFINE,) if f not in fl]
     elif lifted_origin(origin):
         tool, pack, stage = origin["lifted_by"], origin.get("pack"), origin.get("stage")
-        for n in ("fnvnx_ftoi",):   # lifted C++ does its conversions in helpers: the plugin proves it (and only it is required)
+        for n in (("fnvnx_ftoi",) if guest_cc else ()):   # lifted C++ does its conversions in helpers: the plugin proves it (and only it is required)
             if n not in loaded:
                 err.append("lifted C++ root %s does not load plugin %s (mode lifted: every conversion outside an fnvnx_f2i function is an error)" % (root, n))
         mine = {f[len(root) + 1:] for f in files if under(f, root)}
@@ -2679,15 +2688,20 @@ class Job:
         out += ["/uses/%s/%s" % (u["root"], u["output"]) for u in self.rec.get("include_uses", [])]   # the mounted directory output of another root, an absolute path inside the sandbox
         return out
 
-    def plugin_env(self, ws, drv=1):
-        """The common inputs of every plugin stage: the host driver `PLUGIN_CXX` (derived from env.json), the plugin headers of the target compiler
-        (`compiler.cxx -print-file-name=plugin`), the tool runtime and the startup files -> dict. A plugin stage's key is f(source content, host
-        compiler, flags, headers)."""
+    def plugin_env(self, ws):
+        """The common inputs of every plugin stage: the host driver `PLUGIN_CXX` (derived from env.json), the plugin headers of the GUEST compiler (the external of
+        verify/guest_compiler.json, `cxx -print-file-name=plugin`, whatever root asks: a plugin is bound to the exact compiler that loads it), the tool runtime and the
+        startup files -> dict. A plugin stage's key is f(source content, host compiler, flags, headers); the consuming root's driver is not in it."""
         host = "/usr/bin/" + PLUGIN_CXX
-        cxx = self.hostpath(self.drivers()[drv])   # the C++ driver (the C driver for a root without C++ units: the same compiler, the same plugin headers)
+        pin = (load_pin(self.repo) or {}).get("external")
+        if not isinstance(pin, dict):
+            raise BuildRed({"stage": "plugin", "exit": None, "stderr": ["%s is missing or has no external" % GUEST_PIN]})
+        if pin["name"] not in self.ext:
+            self.ext.update(fetch_externals([pin], self.store, self.extcache, ws))
+        cxx = self.ext[pin["name"]]["host"] + "/" + pin_drivers()[1]
         pdir = subprocess.run([cxx, "-print-file-name=plugin"], capture_output=True, text=True).stdout.strip()
         if not os.path.isfile(os.path.join(pdir, "include", "gcc-plugin.h")):
-            raise BuildRed({"stage": "plugin", "exit": None, "stderr": ["no plugin headers of %s in %s (gcc-N-plugin-dev of env.json)" % (cxx, pdir)]})
+            raise BuildRed({"stage": "plugin", "exit": None, "stderr": ["no plugin headers of %s in %s (the guest compiler's tree)" % (cxx, pdir)]})
         inc, trees = pdir, [pdir]
         for e in self.ext.values():   # headers inside an external compiler: its tree is a declared input at `at` already
             if under(pdir, e["host"]):
@@ -2747,11 +2761,11 @@ class Job:
             out.append((n, res, flags))
         return out
 
-    def analysis_plugin(self, ws, drv=1):
-        """The plugin of the gate `objstub` (ANALYSIS_PLUGIN): built by the same stage as every plugin, for the target compiler of the root. It is no
+    def analysis_plugin(self, ws):
+        """The plugin of the gate `objstub` (ANALYSIS_PLUGIN): built by the same stage as every plugin, against the guest compiler's headers. It is no
         plugin of the root's compile stages (no root declares it, no CC stage loads it): the gate loads it over the preprocessed text of the units.
         -> tree of its /out."""
-        return self.plugin_build(self.plugin_env(ws, drv), ws, ANALYSIS_PLUGIN[0], ANALYSIS_PLUGIN[1], [])
+        return self.plugin_build(self.plugin_env(ws), ws, ANALYSIS_PLUGIN[0], ANALYSIS_PLUGIN[1], [])
 
     def compile(self, ws, units):
         rec, drv = self.rec, dict(zip(("c", "cxx"), self.drivers()))
@@ -2788,7 +2802,7 @@ class Job:
             self.built = []
         if self.analysis is None and any(k != "asm" for k in kinds.values()):
             try:
-                self.analysis = self.analysis_plugin(ws, 1 if "cxx" in kinds.values() else 0)
+                self.analysis = self.analysis_plugin(ws)
             except BuildRed as r:   # the gate objstub cannot judge the root: red and named, no unit is blocked by it
                 self.red.append(dict(r.args[0]))
         builds = {}
