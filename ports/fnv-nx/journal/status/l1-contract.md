@@ -2162,3 +2162,11 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - The hand lists (L3_MSVCRT, L3_NAMES, L3_KERNEL32, the _CI* rule, the ws2 prefix) are deleted once both tables are measured complete, with an old/new diff.
 - Next for w28: the RET/galaxywrp report, then gamedata_fetch.
 - bottleneck: cand3b warm verdict (w15).
+
+## 2026-11-16: L5 gate items (w19 6077947)
+- abi va: gate_abi.judge_root does not feed `universe` or `va_forwarders` to judge_objects, so every va_list crosser is red. Assigned to w28, with a selftest.
+- abi ctype: the C and C++ plugin paths emit __va_list differently (unnamed vs named fields). Assigned to L2 as one canonical builtin record form, with a test.
+- hive writer rule: it counted undefined symbols, so the export-table address refs counted as writes. Assigned to w28: count call/branch relocations, with the import bodies exempt by their FNVNX_EXPORT record.
+  - Model decision: the seed hive is the initial state; guest RegSetValueEx mutates the same hive at run time, as on Windows.
+- w28 pin: its newest guest_compiler.json names 84f0883e (OK).
+- bottleneck: cand3b warm verdict (w15).
