@@ -1,0 +1,139 @@
+
+/* ---- lookup functions: the rules of README.md as code; every one cites the Wine 9.0 function it restates. Tables above are derived from rows. */
+#include <string.h>
+#define HR_OK 0u
+#define HR_NA 0x8876086Au      /* D3DERR_NOTAVAILABLE */
+#define HR_INV 0x8876086Cu     /* D3DERR_INVALIDCALL */
+#define HR_NOMIP 0x0876086Fu   /* D3DOK_NOAUTOGEN */
+#define FMT_X8 22u
+#define FMT_R5 23u
+#define FMT_X1 24u
+static uint32_t sc(int p, int i) { return T_SCALARS(p)[i]; }
+static int bfind(const uint32_t* a, int n, uint32_t v) { int lo = 0, hi = n - 1; while (lo <= hi) { int m = (lo + hi) / 2; if (a[m] == v) return m; if (a[m] < v) lo = m + 1; else hi = m - 1; } return -1; }
+static int in_range(int p, uint32_t ad) { return ad < sc(p, SC_N); }
+static int printable4(uint32_t f) { int i; for (i = 0; i < 4; i++) { uint32_t b = (f >> (8 * i)) & 255u; if (b < 0x20u || b > 0x7eu) return 0; } return 1; }
+/* The open D3DFORMAT space as classes: d3d9/device.c wined3dformat_from_d3dformat passes a value whose four bytes are printable through as a FOURCC id, maps the enum values
+ * with a case to their wined3d format, everything else to WINED3DFMT_UNKNOWN; wined3d/utils.c get_format_idx knows 24 FOURCCs, any other FOURCC id is looked up as the UNKNOWN format. */
+int nxenv_format_class(uint32_t f) {
+    int i;
+    if (printable4(f)) { i = bfind(KNOWN_FCC, N_FCC, f); return i >= 0 ? i : UNKF; }
+    i = bfind(SWITCH_FMT, N_SWITCH, f); return i >= 0 ? N_FCC + i : UNK0;
+}
+uint32_t nxenv_adapter_count(int p) { return sc(p, SC_N); }                                                       /* d3d9_GetAdapterCount */
+uint32_t nxenv_monitor(int p, uint32_t ad) { return in_range(p, ad) ? sc(p, SC_MON) : 0; }                         /* d3d9_GetAdapterMonitor: NULL when the output desc fails */
+uint32_t nxenv_identifier(int p, uint32_t ad, uint32_t flags, void* out) {                                         /* d3d9_GetAdapterIdentifier; wined3d_adapter_get_identifier: whql_level = flags & WHQL_LEVEL ? 1 : 0 */
+    if (!in_range(p, ad)) return HR_INV;
+    memcpy(out, T_IDENT(p), NXENV_IDENT_SIZE); { uint32_t w = (flags & 2u) ? 1u : 0u; memcpy((uint8_t*)out + 1096, &w, 4); } return HR_OK;
+}
+uint32_t nxenv_display_mode(int p, uint32_t ad, NxEnvMode* m) {                                                    /* d3d9_GetAdapterDisplayMode */
+    if (!in_range(p, ad)) return HR_INV;
+    m->Width = sc(p, SC_W); m->Height = sc(p, SC_H); m->RefreshRate = sc(p, SC_RR); m->Format = FMT_X8; return HR_OK;
+}
+static int mode_fmt(uint32_t f) { return f == FMT_X8 || f == FMT_R5; }                                              /* d3d9_GetAdapterModeCount / EnumAdapterModes: only these two */
+uint32_t nxenv_mode_count(int p, uint32_t ad, uint32_t fmt) { return in_range(p, ad) && mode_fmt(fmt) ? 1u : 0u; }
+uint32_t nxenv_enum_mode(int p, uint32_t ad, uint32_t fmt, uint32_t idx, NxEnvMode* m) {                           /* wined3d_output_get_mode: the idx-th mode that matches; Format = requested */
+    if (!in_range(p, ad) || !mode_fmt(fmt) || idx >= 1u) return HR_INV;
+    m->Width = sc(p, SC_W); m->Height = sc(p, SC_H); m->RefreshRate = sc(p, SC_RR); m->Format = fmt; return HR_OK;
+}
+static int scan_match(int p, uint32_t scan) { return scan == 0u || scan == sc(p, SC_SCAN); }                          /* wined3d mode_matches_filter: UNKNOWN matches every mode, else equal ordering */
+uint32_t nxenv_mode_count_ex(int p, uint32_t ad, uint32_t fmt, uint32_t scan) { return in_range(p, ad) && mode_fmt(fmt) && scan_match(p, scan) ? 1u : 0u; }
+uint32_t nxenv_enum_mode_ex(int p, uint32_t ad, uint32_t fmt, uint32_t scan, uint32_t idx, NxEnvMode* m, uint32_t* so) {   /* d3d9_EnumAdapterModesEx */
+    if (!in_range(p, ad) || !mode_fmt(fmt) || !scan_match(p, scan) || idx >= 1u) return HR_INV;
+    m->Width = sc(p, SC_W); m->Height = sc(p, SC_H); m->RefreshRate = sc(p, SC_RR); m->Format = fmt; *so = sc(p, SC_SCAN); return HR_OK;
+}
+uint32_t nxenv_display_mode_ex(int p, uint32_t ad, uint32_t size, NxEnvMode* m, uint32_t* so, uint32_t* ro) {       /* d3d9_GetAdapterDisplayModeEx: mode->Size must be sizeof(D3DDISPLAYMODEEX) = 24 */
+    if (!in_range(p, ad) || size != 24u) return HR_INV;
+    m->Width = sc(p, SC_W); m->Height = sc(p, SC_H); m->RefreshRate = sc(p, SC_RR); m->Format = FMT_X8; *so = sc(p, SC_SCAN); *ro = sc(p, SC_ROT); return HR_OK;
+}
+uint32_t nxenv_luid(int p, uint32_t ad, uint32_t* lo, int32_t* hi) { if (!in_range(p, ad)) return HR_INV; *lo = sc(p, SC_LUIDLO); *hi = (int32_t)sc(p, SC_LUIDHI); return HR_OK; }   /* d3d9_GetAdapterLUID */
+uint32_t nxenv_caps(int p, uint32_t ad, uint32_t devtype, void* out) {                                             /* d3d9_GetDeviceCaps; wined3d_get_device_caps: DeviceType = HAL ? HAL : REF, every device type succeeds */
+    if (!in_range(p, ad)) return HR_INV;
+    memcpy(out, devtype == 1u ? (const void*)T_CAPS0(p) : (const void*)T_CAPS1(p), NXENV_CAPS_SIZE); return HR_OK;
+}
+uint32_t nxenv_check_device_type(int p, uint32_t ad, uint32_t dev, uint32_t disp, uint32_t bb, uint32_t win) {      /* d3d9_CheckDeviceType -> wined3d_check_device_type; the device type is never read */
+    int di; (void)dev;
+    if (!in_range(p, ad)) return HR_INV;
+    di = disp == FMT_X8 ? 0 : disp == FMT_R5 ? 1 : disp == FMT_X1 ? 2 : disp == 35u ? 3 : -1;                      /* "There are only 4 display formats" (35 = A2R10G10B10) */
+    if (di < 0) return HR_NA;
+    return HRC[T_CDT(p)[((win ? 1 : 0) * 4 + di) * NC + nxenv_format_class(bb)]];
+}
+/* d3d9_CheckDeviceFormat + wined3d_check_device_format. Per (resource class, format class) the table keeps which single requirements the format meets (bits below); the usage word
+ * is conjunctive in Wine: every bit is either rejected by the per-resource allowed set or adds requirements, all must hold, a failed check is always NOTAVAILABLE. */
+enum { B_S0, B_RT, B_DS, B_FILTER, B_POSTPS, B_SRGBR, B_SRGBW, B_VTF, B_BUMP, B_GENH, B_GENOK };
+#define U_SWP 0x10u
+#define U_DYN 0x200u
+#define U_GEN 0x400u
+#define U_BUMP 0x8000u
+#define U_SRGBR 0x10000u
+#define U_FILTER 0x20000u
+#define U_SRGBW 0x40000u
+#define U_POSTPS 0x80000u
+#define U_VTF 0x100000u
+#define U_WRAP 0x200000u
+uint32_t nxenv_check_device_format(int p, uint32_t ad, uint32_t dev, uint32_t af, uint32_t usage, uint32_t rtype, uint32_t fmt) {
+    uint32_t u = usage & 0x103ffff0u, allowed, bindok, bindrt = usage & 1u, binds = usage & 3u, M, req = 0; int rc; (void)dev;   /* usage & (WINED3DUSAGE_MASK | QUERY_MASK); RT / DS become bind flags */
+    if (!in_range(p, ad)) return HR_INV;
+    if (af != FMT_X8 && af != FMT_R5 && af != FMT_X1) return af ? HR_NA : HR_INV;
+    switch (rtype) { case 1: rc = 0; break; case 3: rc = 1; break; case 5: rc = 2; break; case 2: case 4: rc = 3; break; case 6: case 7: rc = 4; break; default: return HR_INV; }
+    switch (rc) {
+    case 0: allowed = U_POSTPS | (bindrt ? U_SRGBW : 0u); bindok = 3u; break;                                           /* WINED3D_RTYPE_TEXTURE_2D without SHADER_RESOURCE */
+    case 1: allowed = U_POSTPS | U_DYN | U_SWP | U_FILTER | U_GEN | U_BUMP | U_SRGBR | U_SRGBW | U_VTF | U_WRAP; bindok = 3u; break;
+    case 2: allowed = U_POSTPS | U_DYN | U_SWP | U_FILTER | U_GEN | U_SRGBR | U_SRGBW | U_VTF | U_WRAP; bindok = 1u; break;   /* LEGACY_CUBEMAP: no bump map, no depth stencil */
+    case 3: allowed = U_DYN | U_SWP | U_FILTER | U_POSTPS | U_SRGBR | U_SRGBW | U_VTF | U_WRAP; bindok = 0u; break;      /* WINED3D_RTYPE_TEXTURE_3D */
+    default: allowed = U_DYN; bindok = 0u; break;                                                                      /* WINED3D_RTYPE_BUFFER */
+    }
+    if ((u & ~allowed) || (binds & ~bindok)) return HR_NA;
+    M = T_CDF(p)[rc * NC + nxenv_format_class(fmt)];
+    if (binds & 1u) req |= 1u << B_RT;
+    if (binds & 2u) req |= 1u << B_DS;
+    if (u & U_FILTER) req |= 1u << B_FILTER;
+    if (u & U_POSTPS) req |= 1u << B_POSTPS;
+    if (u & U_SRGBR) req |= 1u << B_SRGBR;
+    if (u & U_SRGBW) req |= 1u << B_SRGBW;
+    if (u & U_VTF) req |= 1u << B_VTF;
+    if (u & U_BUMP) req |= 1u << B_BUMP;
+    if (u & U_GEN) req |= 1u << B_GENH;
+    if (req ? (M & req) != req : !(M & (1u << B_S0))) return HR_NA;
+    return ((u & U_GEN) && !(M & (1u << B_GENOK))) ? HR_NOMIP : HR_OK;                                                 /* WINED3DOK_NOMIPGEN */
+}
+uint32_t nxenv_check_ds_match(int p, uint32_t ad, uint32_t dev, uint32_t af, uint32_t rt, uint32_t ds) {            /* wined3d_check_depth_stencil_match: RT-capable(rt) and DS-capable(ds); adapter format / device type unused */
+    (void)dev; (void)af;
+    if (!in_range(p, ad)) return HR_INV;
+    return T_RTOK(p)[nxenv_format_class(rt)] && T_DSOK(p)[nxenv_format_class(ds)] ? HR_OK : HR_NA;
+}
+static int pop32(uint32_t v) { int n = 0; while (v) { n += (int)(v & 1u); v >>= 1; } return n; }
+uint32_t nxenv_check_msaa(int p, uint32_t ad, uint32_t dev, uint32_t fmt, uint32_t win, uint32_t t, uint32_t* levels) {   /* d3d9_CheckDeviceMultiSampleType -> wined3d_check_device_multisample_type */
+    int c; uint32_t mask; (void)dev; (void)win;
+    if (!in_range(p, ad) || t > 16u) return HR_INV;                                                                  /* d3d9: type > D3DMULTISAMPLE_16_SAMPLES */
+    c = nxenv_format_class(fmt); if (c == UNK0) return HR_INV;                                                          /* surface_format_id == WINED3DFMT_UNKNOWN */
+    mask = T_MSAA(p)[c];
+    if (t == 0u || (mask & (1u << (t - 1u))) || (t == 1u && mask)) { if (levels) *levels = (t == 1u) ? (uint32_t)pop32(mask) : 1u; return HR_OK; }
+    if (levels) *levels = 1u;                                                                                          /* d3d9: NOTAVAILABLE with a levels pointer sets 1 */
+    return HR_NA;
+}
+uint32_t nxenv_check_conversion(int p, uint32_t ad, uint32_t dev, uint32_t s, uint32_t d) {                         /* d3d9_CheckDeviceFormatConversion: equal values are S_OK; wined3d_check_device_format_conversion: blit-capable source (no depth/stencil), blit-capable RGB destination */
+    (void)dev;
+    if (!in_range(p, ad)) return HR_INV;
+    if (s == d) return HR_OK;
+    return T_SRC(p)[nxenv_format_class(s)] && T_DST(p)[nxenv_format_class(d)] ? HR_OK : HR_NA;
+}
+uint32_t nxenv_video_memory(int p) { return sc(p, SC_VMEM); }                                                      /* wined3d_device_get_available_texture_mem with nothing allocated: VideoMemorySize MiB */
+/* nxenv_stretch_filter_ok: StretchRect's filter argument (d3d9 / wined3d wined3d_device_context_blt: NONE, POINT, LINEAR only; D3DCAPS9.StretchRectFilterCaps tells which of POINT / LINEAR the device offers:
+ * D3DPTFILTERCAPS_MINFPOINT 0x100 + MAGFPOINT 0x1000000, MINFLINEAR 0x200 + MAGFLINEAR 0x2000000). Every other value (ANISOTROPIC, the cubic / quad filters, garbage) is not a StretchRect filter. */
+int nxenv_stretch_filter_ok(int p, uint32_t f) {
+    uint32_t c = sc(p, SC_STRETCH);
+    if (f == 0u) return 1;                                                 /* D3DTEXF_NONE */
+    if (f == 1u) return (c & 0x01000100u) == 0x01000100u;                  /* D3DTEXF_POINT */
+    if (f == 2u) return (c & 0x02000200u) == 0x02000200u;                  /* D3DTEXF_LINEAR */
+    return 0;
+}
+/* The two "environment module" answers the resource layer asks (res_core.h); profile 0: the caps image and the GL version are the same in both profiles (asserted by gen_env.py).
+ * nx_env_decltype_supported: D3DDECLTYPE -> D3DCAPS9.DeclTypes (MS D3DDTCAPS): FLOAT1-4, D3DCOLOR, SHORT2, SHORT4 have no caps bit and always exist; UBYTE4 0x1, UBYTE4N 0x2, SHORT2N 0x4, SHORT4N 0x8,
+ * USHORT2N 0x10, USHORT4N 0x20, UDEC3 0x40, DEC3N 0x80, FLOAT16_2 0x100, FLOAT16_4 0x200; UNUSED (17) and above are no type.
+ * nx_env_query_supported: gen_env.py QUERY_GL: the types wined3d's GL adapter implements whose extension the recorded GL version has (bit t of SC_QMASK). */
+bool nx_env_decltype_supported(uint32_t type) {
+    static const int8_t bit[17] = {-1, -1, -1, -1, -1, 0, -1, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+    if (type > 16u) return false;
+    return bit[type] < 0 || (sc(0, SC_DECLTYPES) >> bit[type] & 1u) != 0u;
+}
+bool nx_env_query_supported(uint32_t type) { return type < 32u && (sc(0, SC_QMASK) >> type & 1u) != 0u; }

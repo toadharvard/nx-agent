@@ -1,0 +1,195 @@
+{
+ "format": "fnvnx-recipe/1",
+ "profile": "guest",
+ "flags": {
+  "c": [
+   "-O2",
+   "-Werror=attributes",
+   "-Wall",
+   "-DSTDMETHODCALLTYPE=",
+   "-std=gnu11"
+  ],
+  "cxx": [
+   "-O2",
+   "-Werror=attributes",
+   "-Wall",
+   "-DSTDMETHODCALLTYPE=",
+   "-DFNVNX_SDD=1",
+   "-std=gnu++20"
+  ],
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/contract/exporthdr/include",
+  "ports/fnv-nx/shim/include",
+  "ports/fnv-nx/render/nxgpu/include",
+  "ports/fnv-nx/render/shaders/translator/include",
+  "ports/fnv-nx/lib/sha256/include",
+  "ports/fnv-nx/render/d3d9/gen",
+  "ports/fnv-nx/render/pair/include",
+  "ports/fnv-nx/render/smscan/include",
+  "ports/fnv-nx/render/gl4shim/include"
+ ],
+ "units": "all",
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/render/d3d9/gen/gen_impl.py",
+   "args": [
+    "/out/gen",
+    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC"
+   ],
+   "inputs": [],
+   "outputs": [
+    "gen/d9impl.gen.h",
+    "gen/d9impl_methods.txt",
+    "gen/d9impl_unk.gen.cpp"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/render/d3d9/dev/state_model.py",
+   "args": [
+    "/out/gen",
+    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC"
+   ],
+   "inputs": [],
+   "outputs": [
+    "gen/state.gen.cpp",
+    "gen/state.gen.h",
+    "gen/state_methods.txt"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/render/d3d9/gen/gen_bridge.py",
+   "args": [
+    "/out/gen",
+    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC",
+    "/uses/ports/fnv-nx/bridgefacts/D9_ROWS"
+   ],
+   "inputs": [],
+   "outputs": [
+    "gen/d9bridge.gen.cpp"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/render/d3d9/env/gen_env.py",
+   "args": [
+    "/out/gen",
+    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC",
+    "/in/ports/fnv-nx/render/d3d9/env",
+    "/in/ports/fnv-nx/shim/include/d3d9types.h",
+    "/ext/wine-d3d9-formats",
+    "/in/ports/fnv-nx/shim/include/d3d9.h",
+    "/in/ports/fnv-nx/shim/include/d3d9caps.h",
+    "/in/ports/fnv-nx/render/d3d9/env/ENV_PIN.txt",
+    "/in/ports/fnv-nx/render/d3d9/env/env_rules.cpp.in"
+   ],
+   "inputs": [
+    "ports/fnv-nx/shim/include/d3d9types.h",
+    "ports/fnv-nx/shim/include/d3d9.h",
+    "ports/fnv-nx/shim/include/d3d9caps.h",
+    "ports/fnv-nx/render/d3d9/env"
+   ],
+   "outputs": [
+    "gen/env_caps.gen.h",
+    "gen/env_table.gen.cpp",
+    "gen/env_table.gen.h",
+    "gen/ident_docked.bin",
+    "gen/ident_handheld.bin"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/render/d3d9/gen/gen_wine_ids.py",
+   "args": [
+    "/out/gen",
+    "/in/ports/fnv-nx/render/d3d9/wine_fixme.tsv"
+   ],
+   "inputs": [
+    "ports/fnv-nx/render/d3d9/wine_fixme.tsv"
+   ],
+   "outputs": [
+    "gen/wine_fixme_ids.gen.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/render/d3d9/env/gen_enums.py",
+   "args": [
+    "/out/gen/d3d9_enums.gen.h",
+    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC",
+    "/ext/wine-d3d9-formats"
+   ],
+   "inputs": [
+    "ports/fnv-nx/render/d3d9/env"
+   ],
+   "outputs": [
+    "gen/d3d9_enums.gen.h"
+   ]
+  }
+ ],
+ "external": [
+  {
+   "name": "wine-d3d9-formats",
+   "repo": "fnv-nx-build",
+   "ref": "tools/wine-9.0-d3d9-formats",
+   "commit": "348f306e22a002a82db5fdad4def20c50b6e2544",
+   "tree_sha256": "342fb6d47a3bfc7cdae569acdd2d60b1a2ff64a3216214925a93c330bf8abd0b",
+   "at": "/ext/wine-d3d9-formats"
+  }
+ ],
+ "link": null,
+ "outputs": {
+  "ident_handheld.bin": "gen/ident_handheld.bin",
+  "ident_docked.bin": "gen/ident_docked.bin"
+ },
+ "uses": [
+  {
+   "root": "ports/fnv-nx/contract/exporthdr/include",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/bridgefacts",
+   "output": "D9_SPEC"
+  },
+  {
+   "root": "ports/fnv-nx/bridgefacts",
+   "output": "D9_ROWS"
+  },
+  {
+   "root": "ports/fnv-nx/render/gl4shim",
+   "output": "FFP_LAYOUT"
+  },
+  {
+   "root": "ports/fnv-nx/render/gl4shim",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/shim",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/render/nxgpu",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/render/shaders/translator",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/lib/sha256",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/render/pair",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/render/smscan",
+   "output": "INCLUDE"
+  }
+ ],
+ "include_uses": [
+  {
+   "root": "ports/fnv-nx/render/gl4shim",
+   "output": "FFP_LAYOUT"
+  }
+ ]
+}
