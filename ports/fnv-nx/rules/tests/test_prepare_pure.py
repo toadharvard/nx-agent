@@ -18,11 +18,12 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-import support  # noqa: E402
-from support import check, tree_hash  # noqa: E402
+sys.path.insert(0, os.path.join(HERE, "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of the rules modules
+from fnvnx.rules.tests import support  # noqa: E402
+from fnvnx.rules.tests.support import check, tree_hash  # noqa: E402
 
-PREPARE = os.path.join(support.RULES, 'prepare.py')
+PORTS = os.path.normpath(os.path.join(HERE, '..', '..', '..'))
+PREPARE = [sys.executable, '-s', '-B', '-m', 'fnvnx.rules.prepare']   # as the stage runs a generator: python -s -B -m fnvnx.<rel>.<tool>, PYTHONPATH the mount of the roots
 W = tempfile.mkdtemp()
 
 SRC_A = '''// synthetic unit
@@ -72,16 +73,16 @@ make_checkout(DEC)
 
 
 def run(out, env, dec=DEC, cwd=None, extra=()):
-    p = subprocess.run([sys.executable, '-I', PREPARE, dec, out, '--win32-header', HDR, '--crt-symbols', CRT, *extra],
+    p = subprocess.run(PREPARE + [dec, out, '--win32-header', HDR, '--crt-symbols', CRT, *extra],
                        env=env, cwd=cwd or W, capture_output=True, text=True)
     return p
 
 
-CLEAN = {'PATH': os.environ.get('PATH', '/usr/bin')}
+CLEAN = {'PATH': os.environ.get('PATH', '/usr/bin'), 'PYTHONPATH': PORTS}
 POISON = dict(CLEAN, FNVNX_PREPARE_SKIP='r_inline_asm,r_sse_members,r_dyninit', FNVNX_PREPARE_MEMO=os.path.join(W, 'memo'),
               FNVNX_RECON=os.path.join(W, 'recon'), FNVNX_RECON_CERTIFY='1', FNVNX_D22='0', FNVNX_FAKE_CLOCK='1', TZ='Pacific/Kiritimati',
               LANG='tr_TR.UTF-8', LC_ALL='tr_TR.UTF-8', PYTHONHASHSEED='12345', TMPDIR='/nonexistent', HOME='/nonexistent',
-              PYTHONPATH='/nonexistent', PYTHONDONTWRITEBYTECODE='1', SOURCE_DATE_EPOCH='1', HTTPS_PROXY='http://127.0.0.1:1')
+              PYTHONPATH=PORTS + os.pathsep + '/nonexistent', PYTHONDONTWRITEBYTECODE='1', SOURCE_DATE_EPOCH='1', HTTPS_PROXY='http://127.0.0.1:1')
 
 hashes = []
 for i, env in enumerate((CLEAN, CLEAN, CLEAN, POISON, POISON)):
@@ -119,9 +120,9 @@ shutil.rmtree(os.path.join(W, 'memo'), ignore_errors=True)
 
 # the argv contract
 for name, args in (('no inputs', []), ('one directory', [DEC]), ('unknown option', [DEC, os.path.join(W, 'o'), '--skip', 'x'])):
-    p = subprocess.run([sys.executable, '-I', PREPARE, *args], capture_output=True, text=True, env=CLEAN)
+    p = subprocess.run(PREPARE + [*args], capture_output=True, text=True, env=CLEAN)
     check('argv contract: %s refused (exit 2)' % name, str(p.returncode), ['2'])
-p = subprocess.run([sys.executable, '-I', PREPARE, DEC, os.path.join(W, 'o'), '--win32-header', HDR], capture_output=True, text=True, env=CLEAN)
+p = subprocess.run(PREPARE + [DEC, os.path.join(W, 'o'), '--win32-header', HDR], capture_output=True, text=True, env=CLEAN)
 check('argv contract: --crt-symbols missing refused (exit 2)', str(p.returncode), ['2'])
 
 # the source of the tool names no environment and no skip list
