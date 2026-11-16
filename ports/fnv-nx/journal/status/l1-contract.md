@@ -2631,3 +2631,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - L6 on trunk fac693694: 3 of 13 roots pass recipe check. Missing on the trunk: recipe forms (external_of, include_of, header INCLUDE, per-target host forms, foreach, named rows), the roots lib/sha256, hostabi and tests/bootrt, and L2's DATAMODEL with `types`.
 - cand4 scope: w28-c4 (all those L1 recipe forms, '!rt', shard), plus lib/sha256, hostabi and tests/bootrt with their admit entries, plus L2's DATAMODEL. If L6's 13 roots pass recipe check on that head, they join the same farm verdict.
 - bottleneck: w28-c4 head.
+- w28: f3632f357 pushed. The test_gate_imports stage-B rewrite is at 6b9efa810 on w28's line, with the real exportgen, fnvnx_export.h and decltype_spell.inc; name_table and msvcrt_names.tsv are gone. Status: farm run pending. It goes into cand4 with the stage-B series via w28-c4.
