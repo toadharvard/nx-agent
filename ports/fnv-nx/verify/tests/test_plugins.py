@@ -40,8 +40,10 @@ ROOT = T + "toy"
 PLUGS = [{"name": n} for n in recipe.PLUGIN_SOURCES]   # a root names only the plugin: source, inputs and arguments are fixed by recipe.py
 P = {p["name"]: p for p in PLUGS}
 SRC = "volatile int g;\nint rd() { return g; }\nvoid wr(int v) { g = v; }\nint f2i(float f) { return (int)f; }\nint ic(int (*f)(int)) { return f(1); }\nstruct S { int a; char b; };\nS gs;\nregister int hr asm(\"x27\");\nregister unsigned eax asm(\"x19\");\nint hrw(int v) { hr = v; eax = v + 1; return hr + eax; }\nstatic int arr[7];\nint ua(int i) { return arr[i]; }\nint lf() { static char ls[3]; return ls[0]; }\nextern int ex;\nint uex() { return ex; }\nextern int dg[];\nint udg() { return dg[0]; }\n"
-REC = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
-       "flags": {"c": [], "cxx": ["-O2", "-mabi=ilp32"] + [recipe.SDD_DEFINE], "asm": []}, "include": [], "units": "all",
+_PIN = recipe.load_pin(REAL)   # the real guest pin: a plugin is bound to the guest compiler, so every toy root that loads plugins is a guest root of the game's compiler
+_CC, _CXX = recipe.pin_drivers()
+REC = {"format": "fnvnx-recipe/1", "compiler": {"external": _PIN["external"]["name"], "cc": _CC, "cxx": _CXX}, "external": [dict(_PIN["external"])],
+       "flags": {"c": [recipe.WERROR_ATTR], "cxx": [recipe.SDD_DEFINE, recipe.WERROR_ATTR], "asm": []}, "include": [], "units": "all",
        "plugins": PLUGS}
 
 
@@ -62,7 +64,7 @@ def w(repo, rel, text):
     open(p, "w").write(text)
 
 
-def make_repo(name, rec, origin, files=None, extra_roots=(), target="host"):
+def make_repo(name, rec, origin, files=None, extra_roots=(), target="guest"):
     repo = os.path.join(BASE, name)
     os.makedirs(repo)
     git(repo, "init", "-q")
@@ -73,6 +75,7 @@ def make_repo(name, rec, origin, files=None, extra_roots=(), target="host"):
         if v is not None:
             w(repo, k, v)
     w(repo, ROOT + "/build.json", json.dumps(rec, indent=1))
+    w(repo, recipe.GUEST_PIN, open(os.path.join(REAL, recipe.GUEST_PIN)).read())   # the real guest compiler record: the pin the plugin headers and the toy's compiler come from
     w(repo, recipe.ENV_JSON, open(os.path.join(REAL, recipe.ENV_JSON)).read())   # the declared environment: a build runs only on the machine it describes
     root = {"path": ROOT, "class": "product", "target": target, "recipe": ROOT + "/build.json"}
     if origin is not None:
@@ -156,8 +159,8 @@ def main():
             except ValueError as e:
                 check("plugin_inputs: %s is a check error (%s)" % (src, want), want in str(e), str(e))
     check("plugins out of load order are red", any("order" in x for x in errs(repo, mut(plugins=PLUGS[::-1]))))
-    check("native root without a semantics flag is red", any("lacks -fno-devirtualize" in x for x in errs(repo, mut(
-        flags={"c": [], "cxx": [f for f in REC["flags"]["cxx"] if f != "-fno-devirtualize"], "asm": []}))))
+    check("native root without the sdd define is red", any("lacks %s" % recipe.SDD_DEFINE in x for x in errs(repo, mut(
+        flags={"c": [], "cxx": [f for f in REC["flags"]["cxx"] if f != recipe.SDD_DEFINE], "asm": []}))))
     check("-fplugin in flags is red", any("plugin" in x for x in errs(repo, mut(flags={"c": [], "cxx": ["-fplugin=/x.so"], "asm": []}))))
     check("a hand-typed plugin_cxx in a build.json is red (the plugin compiler is recipe.PLUGIN_CXX, derived from env.json)",
           any("plugin_cxx" in x for x in errs(repo, mut(plugin_cxx="x86_64-linux-gnu-g++-13"))) and recipe.PLUGIN_CXX == "x86_64-linux-gnu-g++-13")
@@ -261,9 +264,9 @@ def main():
     subprocess.run(["git", "-C", ext, "checkout-index", "-a", "-f", "--prefix=" + chk + "/"], check=True)
     tree = cas.ingest(chk, os.path.join(BASE, "ingest-store"))
     lrec = {"format": "fnvnx-recipe/1", "compiler": REC["compiler"], "flags": REC["flags"], "include": [], "units": "all",
-            "plugins": [dict(P["fnvnx_ftoi"])],
+            "plugins": PLUGS,
             "generated": [{"tool": T + "gen/lift.py", "args": [], "inputs": [], "outputs": ["gen/a.cc"]}],
-            "external": [{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": commit, "tree_sha256": tree, "at": "/ext/pack"}]}
+            "external": REC["external"] + [{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": commit, "tree_sha256": tree, "at": "/ext/pack"}]}
     LSRC = SRC.replace("int f2i(float f)", "__attribute__((fnvnx_f2i)) int f2i(float f)")   # lifted C++ converts inside a helper only
     lift = ('import os\nopen("/out/gen/a.cc", "w").write(%r)\n' % LSRC)
     lrepo = make_repo("lifted", lrec, {"lifted_by": T + "gen/lift.py", "pack": "pack"}, {T + "gen/lift.py": lift, ROOT + "/a.cc": None})
@@ -287,7 +290,7 @@ def main():
         return c, cas.ingest(d, os.path.join(BASE, "ingest-store"))
 
     def xrec(c, t):
-        r = mut(external=[{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": c, "tree_sha256": t, "at": "/ext/pack"}], include=REC["include"] + ["/ext/pack"])
+        r = mut(external=REC["external"] + [{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": c, "tree_sha256": t, "at": "/ext/pack"}], include=REC["include"] + ["/ext/pack"])
         return r
 
     def kinds():
@@ -332,7 +335,7 @@ def main():
     # --- the stage form: the lifted C++ is made by a generated step of the root itself (no pack); exactly one of pack and stage
     st = "gen:%s:0" % ROOT
     srec = {k: v for k, v in lrec.items() if k != "external"}
-    sfiles = {T + "gen/lift.py": lift, ROOT + "/a.cc": None}
+    srec = dict(lrec, external=list(REC["external"])); srec.pop("pack", None)
     sg = make_repo("stagegood", srec, {"lifted_by": T + "gen/lift.py", "stage": st}, sfiles)
     check("stage form: a lifted root made by one of its own generated steps is valid", errs(sg, srec) == [], errs(sg, srec))
     lbad = dict(srec, plugins=[dict(P["fnvnx_ftoi"], args=dict(recipe.PLUGIN_ARGS["fnvnx_ftoi"]))])
