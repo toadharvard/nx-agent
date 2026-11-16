@@ -1517,3 +1517,4 @@ Paused: w3b, w4, farm; no other work.
     - d3d9total-on-stages is blocked (L1/w28) on one missing input form, `{"external_of": root, "name", "path"}`, so the gate root does not restate the wine-d3d9-formats and mojoshader pins (rule 2). The request is sent. w6 holds.
 - bottleneck: w28 external_of input form; base3 retake; farm1 sm_link; the cand4 base.
 - 03:37Z w28 d0b52b39f carries only the render/shaders/total admit row; L6's other rows enter with L6's candidate. It also renames render/total and platform/com imports to the qualified form. w6 merges it into w6-root three-way and reviews the render/total hunks (import lines only).
+- 03:38Z L1 accepted w6-root 00d74f4d5 (13/13 valid, abspath 0, d3d9total 332/332). It accepted the `external_of` form exactly as specified and assigned it to w28.
