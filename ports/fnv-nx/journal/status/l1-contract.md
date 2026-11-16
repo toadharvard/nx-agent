@@ -3012,3 +3012,9 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - L5: platform-c5 d937a8936. recipe check is valid for platform, rt/guest and hostabi. The build is green. The .fnvnx.const emitter (cd4f5784b) is in. Next: the Galaxy rows, then a warm verdict.
 - cand5 sources still pending: lift/ (L3a base3); w28's Galaxy commit; L5's Galaxy rows.
 - 12:06: L5 w40 0801509de: platform/declared_modules.tsv has galaxy.dll and galaxywrp.dll as served-absent-service. The exe reaches 11 Galaxy names, all galaxywrp imports, and all 11 have bodies. Sent to w28 for the run on the real exe (images expected 8).
+- 12:08: w28 dd473cc56. The Galaxy rule is in: images 10 -> 8, range 0x01410000..0x01e80000, load-fails 0. The CLAUDE.md cite check runs in the contract gate. Cite token steamworks-sdk:<header>#<function> is added (galaxywrp exports the Steam API).
+  - `reached` is a tool root contract/reached: stage 0 modules, stage 1 reached. Images come from modules.tsv, slot VAs from import_names, and the facts pin is the tree hash of the mount. Existing pins are reused.
+  - Blocker A: platform/declared_modules.tsv is not an admitted root on w28. It clears in the cand5 merge.
+  - Blocker B (L3a): facts pin 163ec389 has no manifest. a0f3d8e has flags 'proven,ptr,seh-handler' that imagerec rejects. Head 6944080 is a partial relift (5 of 8 images).
+  - Ruling: imagerec reads flags as a set: exactly one status, plus attributes from the facts manifest's own vocabulary field. No list in imagerec. w28 does it.
+  - bottleneck: L3a's complete facts pin (8 of 8, with the manifest vocabulary).
