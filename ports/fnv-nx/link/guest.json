@@ -1,3 +1,4 @@
 {
- "script": "link/guest.ld"
+ "script": "link/guest.ld",
+ "image_script": "link/guest_image.ld"
 }
