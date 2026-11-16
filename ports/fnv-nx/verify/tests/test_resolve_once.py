@@ -140,6 +140,30 @@ def main():
         rr = recipe.load_admit(rp)
         check("a use cycle terminates: each reaches the other", recipe.depends_on(A, B, rr, rp) and recipe.depends_on(B, A, rr, rp))
 
+
+        # an include_of input is itself the edge: a cycle through it is red like a use cycle
+        def toy_inc(name, edges):
+            rp = os.path.join(td, name)
+            os.makedirs(os.path.join(rp, T + "verify"))
+            git(rp, "init", "-q")
+            rws = []
+            for r, tgt in edges.items():
+                os.makedirs(os.path.join(rp, r, "inc"))
+                open(os.path.join(rp, r, "inc", "x.h"), "w").write("\n")
+                gen = [{"tool": T + "x.py", "args": [], "inputs": [{"include_of": t} for t in tgt], "outputs": ["o.txt"]}] if tgt else []
+                open(os.path.join(rp, r, "build.json"), "w").write(json.dumps({"format": "fnvnx-recipe/1", "include": [r + "/inc"], "generated": gen, "outputs": {}}))
+                rws.append({"path": r, "class": "product", "target": "host", "recipe": r + "/build.json"})
+            open(os.path.join(rp, T + "verify/admit.json"), "w").write(json.dumps({"format": "fnvnx-admit/1", "roots": rws}))
+            git(rp, "add", "-A")
+            git(rp, "commit", "-q", "-m", "toy")
+            return rp
+        rp = toy_inc("inc-a", {A: [B], B: []})
+        rr = recipe.load_admit(rp)
+        check("an include_of with no Python import and no `uses` is an edge: A reaches B", recipe.root_reach(A, rr, rp) == {B} and recipe.link_roots_cycle(A, rr, rp) is None, recipe.root_reach(A, rr, rp))
+        rp = toy_inc("inc-b", {A: [B], B: [A]})
+        rr = recipe.load_admit(rp)
+        check("a cycle through include_of is red with its path", recipe.link_roots_cycle(A, rr, rp) == [A, B, A], recipe.link_roots_cycle(A, rr, rp))
+
         # objects_of: a diamond of two generate steps that read the same roots resolves each root once
         rp = toy("objs", {A: [], B: [], C: []})
         rr = recipe.load_admit(rp)
