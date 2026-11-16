@@ -2110,3 +2110,13 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - On w3's farm: test_gate_machine, test_doubles, test_objstub, test_gate_imports, test_toolext, test_toolstep, and the objstub re-measure of 65 + 12.
   - w28: linkstrict over the shared link set, the external-path accessor, PURE, and env.json with dash.
 - bottleneck: cand3b (w15).
+
+## 2026-11-16: isla/udsail stage rulings
+
+- The isla binary is built by an L3b recipe root (cargo, offline, from the pinned source, lock and vendor tars). A farm-published binary is not an input.
+- Pinned externals: the model source mirror (patches applied in a stage), the z3 wheel (unpacked in a run step), and the IR tools/sail-ir-7c3074644653.
+- glibc NEEDED comes from the pinned libc6/libgcc-s1 debs.
+- No wall-clock timeout in a stage; deterministic resource bounds go in args. A call that reaches its bound is red per item; it is not a verdict class.
+- w28 item 9: exec from {external, path} or {root, output}; the NEEDED rule; an env map of constants.
+- lift/rt / lift/disp split verified by w8 on base3 8579f3baf: rt does not depend on facts. Blocked on L2 ENTRY1-CONT (generic __atomic_store, dispatch.c:69).
+- bottleneck: cand3b (w15).
