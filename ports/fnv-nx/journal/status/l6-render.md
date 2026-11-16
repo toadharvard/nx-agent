@@ -1345,3 +1345,8 @@ Paused: w3b, w4, farm; no other work.
 - 00:17Z w6 b0676a675 (cand4 8a5a43b48): gen_env takes ENV_PIN.txt and env_rules.cpp.in as required arguments from declared inputs.
     - test_env_ident passes; recipe check valid; abspath render 0; d3d9 140 files byte-identical.
     - w6 (doing): merge 1aa024320 and run sm_link.
+- 00:19Z w6: sm_link is blocked, not run.
+    - With w28's verify/, toolchain/ and link/ taken whole (side branch w6-b28 7e0d38f5c, render admit entries kept), every recipe build stops: ports/fnv-nx/toolchain/build.json is missing.
+    - admit.json:18 admits toolchain as a product root, but the file is in no reachable commit. This is an L1 defect, asked of w28.
+    - w6-root stays at b0676a675 (cand4 8a5a43b48) so that it builds with the old recipe.
+- bottleneck: toolchain/build.json from L1 w28; then sm_link; then the w28-on-final-cand3 head.
