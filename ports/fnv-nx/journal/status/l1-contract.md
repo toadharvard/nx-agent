@@ -2950,3 +2950,5 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - The 5 guest roots (w28-c4's shim, hostabi, hostabi/product, lib/sha256, verify/probes) are dropped. That clears datamodel S29 (a test-kind row the gate cannot judge, L2), imports (3) and the 6 vacuous gates (root_class puts no-C++ roots in product-guest).
   - For cand5: a root_class rule for guest roots without C++ (L1), and the S29 check form (L2).
   - Selftests (65 failing, 431 s of the 601 s): non-L1 trees go back to trunk content, and their items are dropped. L1-tree merge defects are fixed. No test is deleted while its code stays.
+- Farm 3, w28-exportrec-d9 f91b46425: contract/exports GREEN and bridgetable GREEN, with all 5 d3d9 errors gone. Loader gen 0-2 is done.
+  - The build is now in lift/factsimg/exe:0, cold, 17+ min of CPU and 6 GB RSS. The result comes when it ends.
