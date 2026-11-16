@@ -1306,3 +1306,8 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - The udsail stage computes SHAPES minus sdmrows itself, with sdmgate's match_rows.
 - isla: L3b's root, waiting on w28's recipe.py. The sail tarball and patches are extracted in the stage driver.
 - bottleneck: L2's two plugin rules (lift/rt).
+
+## 2026-11-16 02:20: L2 plugin rules landed (cand4b 0a0615edf)
+- ENTRY1-ATOMIC: the atomic and sync value movers over one entry type are a same-type copy. ORDER-RTLBUILTIN: fences for the RTL-expanded builtins, and __builtin_apply stays an error.
+- Next: the K2 plugin stamp's farm rebuild and pin (L2). Then w8 merges the pin into base3 and rebuilds lift/rt, lift/disp and the test images, and sends the 7-symbol table.
+- bottleneck: the K2 pin rebuild (L2 farm).
