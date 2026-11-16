@@ -2,7 +2,7 @@
 """test_env_ident.py: gen_env.py's ident_handheld.bin / ident_docked.bin (the adapter identity of the declared machine, 1100-byte D3DADAPTER_IDENTIFIER9)
 equal the T_IDENT table of the emitted env_table.gen.cpp (the table the product unit compiles), the description at offset 512 is NUL-terminated
 "NVIDIA GeForce GTX 470", and one flipped byte in one profile's row makes the generator fail (the two images must be byte-equal)."""
-import os, re, shutil, subprocess, sys, tempfile
+import hashlib, os, re, shutil, subprocess, sys, tempfile
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ENV = os.path.normpath(os.path.join(HERE, "..", "env"))
 
@@ -15,8 +15,16 @@ with open(SPEC, "wb") as _f:
                             check=True, capture_output=True).stdout)
 
 
-def gen(out, tsv_dir=None):
-    return subprocess.run([sys.executable, "-I", os.path.join(ENV, "gen_env.py"), out, SPEC, tsv_dir or ENV, os.path.join(PORT, "shim", "include", "d3d9types.h"), WINE, os.path.join(PORT, "shim", "include", "d3d9.h"), os.path.join(PORT, "shim", "include", "d3d9caps.h"), os.path.join(ENV, "ENV_PIN.txt"), os.path.join(ENV, "env_rules.cpp.in")], capture_output=True, text=True)
+def repin(tsv_dir, out):
+    """an ENV_PIN.txt whose recorded sha256 of each profile is the one of the file in tsv_dir (so that the derivation rules, not the pin, are what the test exercises)"""
+    t = open(os.path.join(ENV, "ENV_PIN.txt")).read()
+    for p in ("handheld", "docked"):
+        t = re.sub(r"(env_%s\.tsv sha256 )[0-9a-f]{64}" % p, lambda m: m.group(1) + hashlib.sha256(open(os.path.join(tsv_dir, "env_%s.tsv" % p), "rb").read()).hexdigest(), t)
+    open(out, "w").write(t); return out
+
+
+def gen(out, tsv_dir=None, pin=None):
+    return subprocess.run([sys.executable, "-I", os.path.join(ENV, "gen_env.py"), out, SPEC, tsv_dir or ENV, os.path.join(PORT, "shim", "include", "d3d9types.h"), WINE, os.path.join(PORT, "shim", "include", "d3d9.h"), os.path.join(PORT, "shim", "include", "d3d9caps.h"), pin or os.path.join(ENV, "ENV_PIN.txt"), os.path.join(ENV, "env_rules.cpp.in")], capture_output=True, text=True)
 
 
 def t_ident(cpp):
@@ -39,8 +47,10 @@ with tempfile.TemporaryDirectory() as t:
     for p in ("handheld", "docked"): shutil.copy(os.path.join(ENV, f"env_{p}.tsv"), tsv)
     f = os.path.join(tsv, "env_docked.tsv"); s = open(f).read()
     assert s.count("VendorId=10de") >= 1; open(f, "w").write(s.replace("VendorId=10de", "VendorId=10df", 1))
-    r = gen(os.path.join(t, "o2"), tsv); assert r.returncode != 0 and "RULE VIOLATED" in r.stderr, (r.returncode, r.stderr[-300:])
+    r = gen(os.path.join(t, "o2"), tsv); assert r.returncode != 0 and "sha256 is not the one ENV_PIN.txt records" in r.stderr, (r.returncode, r.stderr[-300:])   # the pin refuses an edited file
+    pin = repin(tsv, os.path.join(t, "pin2.txt"))
+    r = gen(os.path.join(t, "o2b"), tsv, pin); assert r.returncode != 0 and "RULE VIOLATED" in r.stderr and "sha256" not in r.stderr, (r.returncode, r.stderr[-300:])
     # the same flip in every identifier row of the docked profile: each profile is self-consistent, only the profiles differ: the cross-profile rule fails
     ls = [(l.replace("VendorId=10de", "VendorId=10df") if l.startswith("GetAdapterIdentifier(0,") else l) for l in s.split("\n")]; open(f, "w").write("\n".join(ls))
-    r2 = gen(os.path.join(t, "o3"), tsv); assert r2.returncode != 0 and "profiles differ" in r2.stderr, (r2.returncode, r2.stderr[-300:])
+    r2 = gen(os.path.join(t, "o3"), tsv, repin(tsv, os.path.join(t, "pin3.txt"))); assert r2.returncode != 0 and "profiles differ" in r2.stderr, (r2.returncode, r2.stderr[-300:])
     print("ok: ident_*.bin == T_IDENT (1100 bytes each), Description@512 = NVIDIA GeForce GTX 470, one flipped row byte fails the generator:", r.stderr.strip()[-90:])
