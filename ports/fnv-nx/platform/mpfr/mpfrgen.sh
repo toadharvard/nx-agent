@@ -31,7 +31,8 @@ export FNVNX_CFG_NM=$GCC/bin/$T-nm FNVNX_CFG_LD=$GCC/bin/$T-ld FNVNX_CFG_EMUL=aa
 export FNVNX_CFG_GUEST_LD=$GUEST_LD FNVNX_CFG_PROTOCOL_SRC=$PROTO_SRC FNVNX_CFG_CACHE=$W/cfg-cache
 mkdir b; cd b
 export CC="$GCC/bin/$T-gcc ${SEMANTICS[*]}" LDFLAGS=-nostartfiles
-"$SRC/configure" --host=none-unknown-elf --disable-shared --enable-static --disable-float128 --with-gmp-include="$GMPINC" --with-gmp-lib="$GMPDIR" > ../configure.log 2>&1
+"$SRC/configure" --build="$("$SRC/config.guess")" --host=none-unknown-elf --disable-shared --enable-static --disable-float128 --with-gmp-include="$GMPINC" --with-gmp-lib="$GMPDIR" > ../configure.log 2>&1
+grep -q "^checking whether we are cross compiling... yes" ../configure.log || { echo "configure is not cross-compiling: a probe could run" >&2; exit 1; }
 cp "$RECREC" "$W/ccrec"; chmod +x "$W/ccrec"
 export CCREC_LOG=$W/compiles.log
 make -j"$JOBS" -C src CC="$W/ccrec" AR=true RANLIB=true libmpfr.la > ../make.log 2>&1

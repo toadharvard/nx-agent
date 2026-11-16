@@ -32,7 +32,8 @@ export FNVNX_CFG_NM=$GCC/bin/$T-nm FNVNX_CFG_LD=$GCC/bin/$T-ld FNVNX_CFG_EMUL=aa
 export FNVNX_CFG_GUEST_LD=$GUEST_LD FNVNX_CFG_PROTOCOL_SRC=$PROTO_SRC FNVNX_CFG_CACHE=$W/cfg-cache
 mkdir b; cd b
 export CC="$GCC/bin/$T-gcc ${SEMANTICS[*]}" LDFLAGS=-nostartfiles
-"$SRC/configure" --host=none-unknown-elf --disable-assembly --disable-shared --enable-static --disable-cxx > ../configure.log 2>&1
+"$SRC/configure" --build="$("$SRC/config.guess")" --host=none-unknown-elf --disable-assembly --disable-shared --enable-static --disable-cxx > ../configure.log 2>&1
+grep -q "^checking whether we are cross compiling... yes" ../configure.log || { echo "configure is not cross-compiling: a probe could run" >&2; exit 1; }
 cp "$RECREC" "$W/ccrec"; chmod +x "$W/ccrec"
 export CCREC_LOG=$W/compiles.log
 # the generated headers and tables (fib_table.h, mp_bases.h, ...) are the Makefile's own BUILT_SOURCES, made by its gen-* programs with the build compiler: all of them first, by the Makefile's own variable
