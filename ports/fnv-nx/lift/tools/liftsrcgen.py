@@ -9,6 +9,8 @@ an image takes the functions whose entry has bucket(entry) % N == K (tools/liftg
 finish refuses an image whose shards do not cover its universe exactly, and a row of the loader's table without an image (tools/liftgen.py check_images). The inputs of a shard are exactly what the lifter reads: the fnvlift package, the runtime headers rt/*.h (lifter_tree), the tool
 root (mounted by the recipe), the externals and the platform's X86SYS."""
 import argparse, glob, json, os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import liftrecipe
 HERE = os.path.dirname(os.path.abspath(__file__)); REPO = os.path.normpath(os.path.join(HERE, '..', '..', '..', '..'))
 ROOT = 'ports/fnv-nx/lift/liftsrc'
 LIFT = 'ports/fnv-nx/lift'
@@ -125,7 +127,8 @@ def guest_test_recipe(name, rec):
            'inputs': [LIFT + '/fnvlift', 'ports/fnv-nx/verify/cpuid_model.json', LIFT + '/proof', LIFT + '/rt/rcptab.c', LIFT + '/rt/rcptab.cert.json'], 'outputs': outs}]
     uses = [u for u in rec.get('uses', []) if (u['root'], u['output']) not in (('ports/fnv-nx/lift/sdm', 'SDM_TEXT'), (SDMROWS_ROOT, 'SDMROWS'), ('ports/fnv-nx/platform', 'X86SYS'))]
     uses += [{'root': SDMROWS_ROOT, 'output': 'SDMROWS'}, {'root': 'ports/fnv-nx/platform', 'output': 'X86SYS'}]
-    return dict(rec, generated=st, uses=uses)
+    inc = list(dict.fromkeys(liftrecipe.INC_DIRS + rec.get('include', [])))      # the runtime's header directories of the pack's own recipe (liftrecipe.INC_DIRS, the one list), then the root's own
+    return dict(rec, generated=st, uses=uses, include=inc)
 
 
 def main():
