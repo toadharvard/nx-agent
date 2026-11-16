@@ -1529,3 +1529,11 @@ Paused: w3b, w4, farm; no other work.
     - abspath: render 0 (3 findings, all in lift/fnvlift). pure: render 0, whole set 88/96.
     - d3d9total 332/332; recipe check 13/13; all 9 L6 roots build green.
 - bottleneck: d3d9total on stages (w6); base3 retake; farm1 sm_link; the cand4 base.
+- 04:25Z w6-root 23884c5d0: d3d9total runs on recipe stages.
+    - New root render/total/d3d9total: run:gate, debs, external_of for wine-d3d9-formats and mojoshader, plus the sm table and rows.
+    - gate_d3d9total is a thin reader; the direct GCC/CLANG/GIT/fetch path is deleted (rule 3).
+    - d3d9total 332/332; the test kills 45 of 45 mutations. assumptions 137/137. render: 0 pure and 0 abspath findings.
+    - Open rule-2 item: the stage restates each root's include dirs. It is a checked copy. L1/w28 has been asked for an include-closure input form; the lists are deleted when it lands.
+    - L1/w28 has also been asked for a recipe fix: --ext and extcache disagree for external_of.
+- 04:25Z farm1: sm_link at a75543b98 was killed at the 2 h limit (sm_link_prog link-3). There is no result. w6 is measuring the per-link cost (and whether objects are compiled twice) and making the shard count one generated parameter.
+- bottleneck: the sm_link shard split (w6), then the farm1 rerun; base3 retake; the cand4 base; L1 include_of.
