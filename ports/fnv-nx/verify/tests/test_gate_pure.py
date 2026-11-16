@@ -63,7 +63,7 @@ def main():
     d = tree(files, [root("lift/gen", entry=["lift/gen/g.py"]), root("lift/fnvlift")])
     rc, res, err = run(d)
     check("a bare import of another root's module is red (the qualified name is the one spelling)", rc == 2 and res["status"] == "red" and G in res["uncertified"], (res, err))
-    qfiles = dict(lib, **{G: "from lift.fnvlift import m\nx = m.f()\n"})
+    qfiles = dict(lib, **{G: "from fnvnx.lift.fnvlift import m\nx = m.f()\n"})
     d = tree(qfiles, [root("lift/gen", entry=["lift/gen/g.py"]), root("lift/fnvlift")])
     rc, res, err = run(d)
     check("the qualified import needs no declaration: the root edge is derived from the source; the closure holds g.py, m.py and __init__.py",
@@ -82,13 +82,13 @@ def main():
     dd = tree({T + "/lift/gen/g.py": "import importlib\nn = 'x'\nimportlib.import_module(n)\n__import__('os')\n"}, [root("lift/gen")])
     edges, derr = gate_admit.derived_imports([root("lift/gen")], [T + "/lift/gen/g.py"], dd)
     check("a dynamic import with a non-literal name is an error, a literal one is a name", len(derr) == 1 and ":3:" in derr[0], derr)
-    mut = {T + "/a/x.py": "import q\nfrom lift.fnvlift import m\nimport os, json\n", T + "/lift/fnvlift/m.py": "", T + "/b/q.py": ""}
+    mut = {T + "/a/x.py": "import q\nfrom fnvnx.lift.fnvlift import m\nimport os, json\n", T + "/lift/fnvlift/m.py": "", T + "/b/q.py": ""}
     dm = tree(mut, [root("a"), root("lift/fnvlift"), root("b")])
     edges, derr = gate_admit.derived_imports([root("a"), root("lift/fnvlift"), root("b")], list(mut), dm)
     check("the derived edge set: the qualified module is an edge; stdlib and a bare name are none", edges[T + "/a"] == [T + "/lift/fnvlift"] and not derr, (edges, derr))
     check("a derived edge set is cyclic when two roots import each other and that is no error (mounts are per file closure)",
           gate_admit.derived_imports([root("lift/gen"), root("lift/fnvlift")], [T + "/lift/gen/g.py", T + "/lift/fnvlift/m.py"],
-                                     tree({T + "/lift/gen/g.py": "from lift.fnvlift import m\n", T + "/lift/fnvlift/m.py": "from lift.gen import g\n"}, []))[1] == [])
+                                     tree({T + "/lift/gen/g.py": "from fnvnx.lift.fnvlift import m\n", T + "/lift/fnvlift/m.py": "from lift.gen import g\n"}, []))[1] == [])
     # host readers and the universe
     verify = {T + "/verify/recipe.py": "import time\nt = time.time()\n"}
     stage = {T + "/lift/gen/g.py": "import recipe\n"}
@@ -109,12 +109,12 @@ def main():
     check("a moved file keeps its classification: the same driver one directory deeper and the entry renamed is still outside and green",
           rc2 == 0 and res2["universe"] == 1, (res2, err2))
     # entries: recipe generators
-    rec = {T + "/prod/build.json": json.dumps({"generated": [{"tool": T + "/lift/gen/g.py"}]}), T + "/lift/gen/g.py": "from lift import fnvlift\n"}
+    rec = {T + "/prod/build.json": json.dumps({"generated": [{"tool": T + "/lift/gen/g.py"}]}), T + "/lift/gen/g.py": "from fnvnx.lift import fnvlift\n"}
     pr = {"path": T + "/prod", "class": "product", "recipe": T + "/prod/build.json"}
     d = tree(dict(rec, **lib), [root("lift/gen"), root("lift/fnvlift"), pr])
     rc, res, err = run(d)
     check("a generator tool of a recipe is an entry point: its closure is the universe", rc == 0 and res["universe"] == 2, (res, err))
-    d = tree(dict(rec, **{T + "/lift/gen/g.py": "from lift import fnvlift\n", T + "/lift/fnvlift/m.py": "import time\nt = time.time()\n", T + "/lift/fnvlift/__init__.py": "from . import m\n"}),
+    d = tree(dict(rec, **{T + "/lift/gen/g.py": "from fnvnx.lift import fnvlift\n", T + "/lift/fnvlift/m.py": "import time\nt = time.time()\n", T + "/lift/fnvlift/__init__.py": "from . import m\n"}),
              [root("lift/gen"), root("lift/fnvlift"), pr])
     rc, res, err = run(d)
     check("a clock read in a file the generator reaches is red", rc == 2 and T + "/lift/fnvlift/m.py" in res["uncertified"], (res, err))

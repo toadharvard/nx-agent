@@ -4683,8 +4683,19 @@ STAGE_MEMO = {}   # per process: {(store, checkout, repo_signature, root, step, 
 
 
 def repo_signature(repo):
-    """The content of the tracked tree of REPO as the build reads it: the index entries (mode, blob hash, path) and the sha256 of the bytes of every tracked file that differs from the index."""
-    h = hashlib.sha256(subprocess.run(["git", "-C", repo, "ls-files", "-s", "-z", "--", TREE], capture_output=True, check=True).stdout)
+    """The content of the tracked tree of REPO as the build reads it: the index entries (mode, blob hash, path) and the sha256 of the bytes of every tracked file that differs from the index.
+    A directory that is no git checkout (a test's temporary tree) has no index: its tree is every file under TREE, by path and content."""
+    r = subprocess.run(["git", "-C", repo, "ls-files", "-s", "-z", "--", TREE], capture_output=True)
+    if r.returncode != 0:
+        h = hashlib.sha256()
+        for d, ds, fs in sorted(os.walk(os.path.join(repo, TREE))):
+            ds.sort()
+            for f in sorted(fs):
+                p = os.path.join(d, f)
+                with open(p, "rb") as fh:
+                    h.update(os.path.relpath(p, repo).encode("utf-8", "surrogateescape") + b"\0" + hashlib.sha256(fh.read()).digest())
+        return h.hexdigest()
+    h = hashlib.sha256(r.stdout)
     for f in subprocess.run(["git", "-C", repo, "ls-files", "-m", "-z", "--", TREE], capture_output=True, check=True).stdout.split(b"\0"):
         if f:
             with open(os.path.join(repo, f.decode("utf-8", "surrogateescape")), "rb") as fh:
