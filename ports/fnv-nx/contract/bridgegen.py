@@ -12,8 +12,8 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-import bridgetable  # noqa: E402
+sys.path.insert(0, os.path.join(HERE, ".."))   # ports/fnv-nx: contract.X
+from contract import bridgetable  # noqa: E402
 
 
 def read(path):
