@@ -22,6 +22,9 @@ expands, and the -dU position of a define does not matter.
 Limit (stated, not hidden): a use inside a function that no code reaches still counts; reachability is the job of the gates reach / reachlink.
 The module ids (FNVNX_EXT_*) are not services and are not items: a module id names a host module, a service number names an entry of module 11,
 which is the only table of the header. Models of machines below the product boundary (deko3d, libnx, kernel) are modules, not services."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import shutil
@@ -276,7 +279,7 @@ def main(argv):
             if sc != su:
                 detail = ("%s; services: %s" % (detail, "; ".join(sids)))[:900]
             sys.path.insert(1, os.path.join(repo, "ports", "fnv-nx", "manifest"))
-            import check_hostapi   # the header grammar (service numbers, argument counts) has its one home there
+            from manifest import check_hostapi   # the header grammar (service numbers, argument counts) has its one home there
             errs = []
             svc, _, count, notserved = check_hostapi.parse_header(header, errs)
             hu, hids = served_ids(repo, svc, count, notserved)

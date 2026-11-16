@@ -1,0 +1,200 @@
+{
+"_doc": "THE CPU fault table: one record, every consumer is read from it or generated from it by tools/gen_faults.py (the FNVL_* codes; the case rows of rt/seh.cc fnvl_raise; fnvlift/faults.py: dsl.FAULTS / FLT_STATUS / lift_dsl.FAULT_MAP). code = the ONE number (the Form kind and the runtime code are the same). Columns: name; code; form = a Form may raise it (dsl kind); status = NTSTATUS; at = the address handed to the runtime relative to the instruction (a = the instruction, nxt = the next instruction); trap = raised as a trap (raise_site trap); np = ExceptionInformation count; eip = Context.Eip relative to the given address (0 or 1); custom = the case body is hand code in rt/seh.cc (its label is still generated); entry = raise_av for the access-violation path (not a fnvl_raise code); int_vector / int_at = the row is what `int n` does for the ring-3 gate n (int_at = the address relative to the instruction); the set of int_vector values equals int_ring3.vectors of platform/declared/x86sys.json (checked by fnvlift/x86sys.py users). Sources (precedence of the record platform/declared/x86sys.json: documented Win32/WDK for build 7601, then Wine 9.0 where it contradicts neither): the NTSTATUS value is the WDK/MSDN documented one; the trap -> status, ExceptionAddress, ExceptionInformation and Eip rows are Wine 9.0 Wine 9.0 dlls/ntdll/unix/signal_i386.c (segv_handler, trap_handler, fpe_handler, handle_interrupt, get_fpu_code, setup_exception_record, setup_raise_exception); the vector and fault/trap class are the Intel SDM Vol 3 6.15.",
+"rows": [
+{
+"name": "DE0",
+"code": 1,
+"form": true,
+"status": "0xC0000094",
+"at": "a",
+"trap": false,
+"np": 0,
+"eip": 0,
+"src": "Wine 9.0 dlls/ntdll/unix/signal_i386.c fpe_handler TRAP_x86_DIVIDE: EXCEPTION_INT_DIVIDE_BY_ZERO for every #DE, the quotient-overflow disjunct of div/idiv too (Wine has no other #DE status); SDM Vol 3 6.15 vector 0 (fault, EIP = the instruction); ExceptionAddress = EIP_sig (setup_exception_record); status: MSDN GetExceptionCode EXCEPTION_INT_DIVIDE_BY_ZERO"
+},
+{
+"name": "BP",
+"code": 2,
+"form": true,
+"status": "0x80000003",
+"at": "a",
+"trap": true,
+"np": 3,
+"eip": 0,
+"src": "Wine 9.0 dlls/ntdll/unix/signal_i386.c trap_handler TRAP_x86_BPTFLT: EXCEPTION_BREAKPOINT, 3 parameters {0,0,0}; ExceptionAddress = EIP_sig - 1 (the int3 byte), setup_raise_exception then Context.Eip-- (EXCEPTION_BREAKPOINT); SDM Vol 3 6.15 vector 3 is a trap; `int 3` (CD 03) reaches the same case with the next-instruction EIP, so its ExceptionAddress is the imm8 byte (int_at 1)",
+"int_vector": 3,
+"int_at": 1
+},
+{
+"name": "UD",
+"code": 3,
+"form": true,
+"status": "0xC000001D",
+"at": "a",
+"trap": true,
+"np": 0,
+"eip": 0,
+"src": "Wine 9.0 dlls/ntdll/unix/signal_i386.c segv_handler TRAP_x86_PRIVINFLT: EXCEPTION_ILLEGAL_INSTRUCTION for every #UD (a lock-prefixed invalid instruction too); SDM Vol 3 6.15 vector 6 (fault); status: MSDN GetExceptionCode EXCEPTION_ILLEGAL_INSTRUCTION"
+},
+{
+"name": "BOUNDS",
+"code": 4,
+"form": true,
+"status": "0xC000008C",
+"at": "a",
+"trap": false,
+"np": 0,
+"eip": 0,
+"src": "Wine 9.0 dlls/ntdll/unix/signal_i386.c segv_handler TRAP_x86_BOUND: EXCEPTION_ARRAY_BOUNDS_EXCEEDED; SDM Vol 3 6.15 vector 5 (fault); status: MSDN GetExceptionCode EXCEPTION_ARRAY_BOUNDS_EXCEEDED"
+},
+{
+"name": "INTO",
+"code": 5,
+"form": true,
+"status": "0xC0000095",
+"at": "nxt",
+"trap": true,
+"np": 0,
+"eip": 0,
+"src": "Wine 9.0 dlls/ntdll/unix/signal_i386.c segv_handler TRAP_x86_OFLOW: EXCEPTION_INT_OVERFLOW; SDM Vol 3 6.15 vector 4 is a TRAP (the saved EIP is the next instruction): ExceptionAddress = Context.Eip = EIP_sig = the next instruction; also what `int 4` (CD 04) reports (the same gate)",
+"int_vector": 4,
+"int_at": "nxt"
+},
+{
+"name": "PRIV",
+"code": 6,
+"form": true,
+"status": "0xC0000096",
+"at": "a",
+"trap": false,
+"np": 0,
+"eip": 0,
+"src": "Wine 9.0 dlls/ntdll/unix/signal_i386.c is_privileged_instr: EXCEPTION_PRIV_INSTRUCTION for a #GP(0) whose opcode (after the legacy prefixes) is 0F 20-23 (mov CRn/DRn), 6C-6F (ins/outs), E4-E7, EC-EF (in/out), F4 (hlt), FA (cli), FB (sti); every other #GP(0) is EXCEPTION_ACCESS_VIOLATION {0, 0xFFFFFFFF} (segv_handler); status: MSDN EXCEPTION_PRIV_INSTRUCTION"
+},
+{
+"name": "AV",
+"code": 7,
+"form": true,
+"entry": "raise_av",
+"status": "0xC0000005",
+"at": "a",
+"trap": false,
+"np": 2,
+"eip": 0,
+"src": "Wine 9.0 dlls/ntdll/unix/signal_i386.c segv_handler TRAP_x86_PROTFLT / SEGNPFLT: EXCEPTION_ACCESS_VIOLATION, parameters {0, 0xFFFFFFFF} (a non-LDT error code); SDM Vol 3 6.15 vector 13; raised through fnvl_raise_av (parameters access, address)"
+},
+{
+"name": "STEP",
+"code": 8,
+"form": true,
+"status": "0x80000004",
+"at": "nxt",
+"trap": true,
+"np": 0,
+"eip": 0,
+"src": "Wine 9.0 dlls/ntdll/unix/signal_i386.c trap_handler TRAP_x86_TRCTRAP: EXCEPTION_SINGLE_STEP, a trap (SDM Vol 3 6.15 vector 1): ExceptionAddress = EIP_sig = the NEXT instruction; status: MSDN EXCEPTION_SINGLE_STEP"
+},
+{
+"name": "DBGSRV",
+"code": 10,
+"form": true,
+"custom": true,
+"status": "0x80000003",
+"at": "a",
+"trap": false,
+"np": 3,
+"eip": 0,
+"src": "Wine 9.0 dlls/ntdll/unix/signal_i386.c handle_interrupt case 0x2d (interrupt number = error code >> 3 of the #GP): eax 1/3/4/5 continue 3 bytes on, otherwise EXCEPTION_BREAKPOINT, ExceptionAddress = Eip + 3, 3 parameters {eax, ecx, edx}; rt/seh.cc holds the service logic",
+"int_vector": 45,
+"int_at": 0
+},
+{
+"name": "FLT_IE",
+"code": 12,
+"form": true,
+"status": "0xC0000090",
+"at": "a",
+"trap": false,
+"np": 0,
+"eip": 0,
+"src": "Wine 9.0 signal_i386.c get_fpu_code: STATUS_FLOAT_INVALID_OPERATION (IE; with SF -> STACK_CHECK)"
+},
+{
+"name": "FLT_DE",
+"code": 13,
+"form": true,
+"status": "0xC000008D",
+"at": "a",
+"trap": false,
+"np": 0,
+"eip": 0,
+"src": "Wine 9.0 signal_i386.c get_fpu_code (x87 #MF, SDM Vol 3 6.15 vector 16; fpe_handler TRAP_x86_ARITHTRAP sets ExceptionAddress = FloatSave.ErrorOffset): STATUS_FLOAT_DENORMAL_OPERAND"
+},
+{
+"name": "FLT_ZE",
+"code": 14,
+"form": true,
+"status": "0xC000008E",
+"at": "a",
+"trap": false,
+"np": 0,
+"eip": 0,
+"src": "Wine 9.0 signal_i386.c get_fpu_code (x87 #MF, SDM Vol 3 6.15 vector 16; fpe_handler TRAP_x86_ARITHTRAP sets ExceptionAddress = FloatSave.ErrorOffset): STATUS_FLOAT_DIVIDE_BY_ZERO"
+},
+{
+"name": "FLT_OE",
+"code": 15,
+"form": true,
+"status": "0xC0000091",
+"at": "a",
+"trap": false,
+"np": 0,
+"eip": 0,
+"src": "Wine 9.0 signal_i386.c get_fpu_code (x87 #MF, SDM Vol 3 6.15 vector 16; fpe_handler TRAP_x86_ARITHTRAP sets ExceptionAddress = FloatSave.ErrorOffset): STATUS_FLOAT_OVERFLOW"
+},
+{
+"name": "FLT_UE",
+"code": 16,
+"form": true,
+"status": "0xC0000093",
+"at": "a",
+"trap": false,
+"np": 0,
+"eip": 0,
+"src": "Wine 9.0 signal_i386.c get_fpu_code (x87 #MF, SDM Vol 3 6.15 vector 16; fpe_handler TRAP_x86_ARITHTRAP sets ExceptionAddress = FloatSave.ErrorOffset): STATUS_FLOAT_UNDERFLOW"
+},
+{
+"name": "FLT_PE",
+"code": 17,
+"form": true,
+"status": "0xC000008F",
+"at": "a",
+"trap": false,
+"np": 0,
+"eip": 0,
+"src": "Wine 9.0 signal_i386.c get_fpu_code (x87 #MF, SDM Vol 3 6.15 vector 16; fpe_handler TRAP_x86_ARITHTRAP sets ExceptionAddress = FloatSave.ErrorOffset): STATUS_FLOAT_INEXACT_RESULT"
+},
+{
+"name": "FLT_SF",
+"code": 18,
+"form": true,
+"status": "0xC0000092",
+"at": "a",
+"trap": false,
+"np": 0,
+"eip": 0,
+"src": "Wine 9.0 signal_i386.c get_fpu_code (x87 #MF, SDM Vol 3 6.15 vector 16; fpe_handler TRAP_x86_ARITHTRAP sets ExceptionAddress = FloatSave.ErrorOffset): STATUS_FLOAT_STACK_CHECK"
+},
+{
+"name": "XM",
+"code": 21,
+"form": true,
+"status": "0xC00002B5",
+"at": "a",
+"trap": false,
+"np": 1,
+"eip": 0,
+"src": "Wine 9.0 dlls/ntdll/unix/signal_i386.c fpe_handler TRAP_x86_CACHEFLT (SIMD exception, SDM Vol 3 6.15 vector 19 #XM, a fault): STATUS_FLOAT_MULTIPLE_TRAPS, one parameter {0}, whatever the MXCSR flag (Wine does not split a #XM by flag); status: WDK ntstatus.h STATUS_FLOAT_MULTIPLE_TRAPS"
+}
+]
+}

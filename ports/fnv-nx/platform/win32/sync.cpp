@@ -9,6 +9,7 @@
  * and sleeps on its own condition variable; signalling an object wakes exactly the threads linked to it.
  */
 #define FNVNX_W32_IMPL 1   /* the out-of-line Interlocked* (fnvnx_win32.h has inline copies for everyone else) */
+#include <fnvnx_export.h>
 #include "w32.h"
 
 #include <stdio.h>
@@ -24,12 +25,14 @@ static_assert(sizeof(((CRITICAL_SECTION *)0)->LockSemaphore) >= sizeof(os_lock_t
 static inline os_lock_t *cs_lock(LPCRITICAL_SECTION cs) { return (os_lock_t *)(void *)&cs->LockSemaphore; }
 static inline HANDLE tid_handle(DWORD tid) { return (HANDLE)(uintptr_t)tid; }
 
+FNVNX_EXPORT("kernel32.dll", "InitializeCriticalSection", InitializeCriticalSection, "func");
 extern "C" void InitializeCriticalSection(LPCRITICAL_SECTION cs)
 {
     memset(cs, 0, sizeof *cs);
     cs->LockCount = -1;
 }
 
+FNVNX_EXPORT("kernel32.dll", "InitializeCriticalSectionAndSpinCount", InitializeCriticalSectionAndSpinCount, "func");
 extern "C" BOOL InitializeCriticalSectionAndSpinCount(LPCRITICAL_SECTION cs, DWORD spin)
 {
     InitializeCriticalSection(cs);
@@ -66,6 +69,7 @@ static bool cs_spin_acquire(LPCRITICAL_SECTION cs)
     return false;
 }
 
+FNVNX_EXPORT("kernel32.dll", "EnterCriticalSection", EnterCriticalSection, "func");
 extern "C" void EnterCriticalSection(LPCRITICAL_SECTION cs)
 {
     struct w32_thread *self = w32_self();
@@ -88,6 +92,7 @@ extern "C" void EnterCriticalSection(LPCRITICAL_SECTION cs)
     cs->LockCount = 0;
 }
 
+FNVNX_EXPORT("kernel32.dll", "TryEnterCriticalSection", TryEnterCriticalSection, "func");
 extern "C" BOOL TryEnterCriticalSection(LPCRITICAL_SECTION cs)
 {
     DWORD me = w32_self()->tid;
@@ -103,6 +108,7 @@ extern "C" BOOL TryEnterCriticalSection(LPCRITICAL_SECTION cs)
     return TRUE;
 }
 
+FNVNX_EXPORT("kernel32.dll", "LeaveCriticalSection", LeaveCriticalSection, "func");
 extern "C" void LeaveCriticalSection(LPCRITICAL_SECTION cs)
 {
     if (cs->RecursionCount <= 0) {
@@ -116,6 +122,7 @@ extern "C" void LeaveCriticalSection(LPCRITICAL_SECTION cs)
     }
 }
 
+FNVNX_EXPORT("kernel32.dll", "DeleteCriticalSection", DeleteCriticalSection, "func");
 extern "C" void DeleteCriticalSection(LPCRITICAL_SECTION cs) { memset(cs, 0, sizeof *cs); }
 
 /* ---- Interlocked*: full barriers, as on x86. A lock-prefixed instruction orders every earlier access before every
@@ -152,27 +159,32 @@ extern "C" LONG fnvnx_interlocked_slow(int op, volatile LONG *p, LONG a, LONG b)
     }
 }
 
+FNVNX_EXPORT("kernel32.dll", "InterlockedIncrement", InterlockedIncrement, "func");
 extern "C" LONG InterlockedIncrement(volatile LONG *p)
 {
     if (W32_MISALIGNED(p)) return w32_split(p, [](LONG v) { return v + 1; }) + 1;
     return W32_FULL(__atomic_add_fetch(p, 1, __ATOMIC_SEQ_CST));
 }
+FNVNX_EXPORT("kernel32.dll", "InterlockedDecrement", InterlockedDecrement, "func");
 extern "C" LONG InterlockedDecrement(volatile LONG *p)
 {
     if (W32_MISALIGNED(p)) return w32_split(p, [](LONG v) { return v - 1; }) - 1;
     return W32_FULL(__atomic_sub_fetch(p, 1, __ATOMIC_SEQ_CST));
 }
+FNVNX_EXPORT("kernel32.dll", "InterlockedExchange", InterlockedExchange, "func");
 extern "C" LONG InterlockedExchange(volatile LONG *p, LONG v)
 {
     if (W32_MISALIGNED(p)) return w32_split(p, [v](LONG) { return v; });
     return W32_FULL(__atomic_exchange_n(p, v, __ATOMIC_SEQ_CST));
 }
+FNVNX_EXPORT("kernel32.dll", "InterlockedExchangeAdd", InterlockedExchangeAdd, "func");
 extern "C" LONG InterlockedExchangeAdd(volatile LONG *p, LONG v)
 {
     if (W32_MISALIGNED(p)) return w32_split(p, [v](LONG o) { return o + v; });
     return W32_FULL(__atomic_fetch_add(p, v, __ATOMIC_SEQ_CST));
 }
 
+FNVNX_EXPORT("kernel32.dll", "InterlockedCompareExchange", InterlockedCompareExchange, "func");
 extern "C" LONG InterlockedCompareExchange(volatile LONG *p, LONG xchg, LONG cmp)
 {
     if (W32_MISALIGNED(p)) return w32_split(p, [xchg, cmp](LONG o) { return o == cmp ? xchg : o; });
@@ -349,6 +361,7 @@ static HANDLE create_named(const char *name, int type, struct w32_obj *fresh)
     return h;
 }
 
+FNVNX_EXPORT("kernel32.dll", "CreateEventA", CreateEventA, "func");
 extern "C" HANDLE CreateEventA(void *sa, BOOL manual, BOOL initial, LPCSTR name)
 {
     W32_UNUSED(sa);
@@ -360,6 +373,7 @@ extern "C" HANDLE CreateEventA(void *sa, BOOL manual, BOOL initial, LPCSTR name)
     return create_named(name, W32_EVENT, &e->o);
 }
 
+FNVNX_EXPORT("kernel32.dll", "CreateMutexA", CreateMutexA, "func");
 extern "C" HANDLE CreateMutexA(void *sa, BOOL owned, LPCSTR name)
 {
     W32_UNUSED(sa);
@@ -386,6 +400,7 @@ extern "C" HANDLE CreateMutexA(void *sa, BOOL owned, LPCSTR name)
     return h;
 }
 
+FNVNX_EXPORT("kernel32.dll", "CreateSemaphoreA", CreateSemaphoreA, "func");
 extern "C" HANDLE CreateSemaphoreA(void *sa, LONG initial, LONG max, LPCSTR name)
 {
     W32_UNUSED(sa);
@@ -408,6 +423,7 @@ void w32_obj_signal_locked(struct w32_obj *o)
         os_cond_signal(&l->t->waiter.cond);
 }
 
+FNVNX_EXPORT("kernel32.dll", "SetEvent", SetEvent, "func");
 extern "C" BOOL SetEvent(HANDLE h)
 {
     struct w32_event *e = (struct w32_event *)w32_obj_get(h, W32_EVENT);
@@ -420,6 +436,7 @@ extern "C" BOOL SetEvent(HANDLE h)
     return TRUE;
 }
 
+FNVNX_EXPORT("kernel32.dll", "ResetEvent", ResetEvent, "func");
 extern "C" BOOL ResetEvent(HANDLE h)
 {
     struct w32_event *e = (struct w32_event *)w32_obj_get(h, W32_EVENT);
@@ -437,6 +454,7 @@ DWORD w32_wg_mutex_owner_locked(struct w32_obj *o)
     return m->count > 0 ? m->owner : 0;
 }
 
+FNVNX_EXPORT("kernel32.dll", "ReleaseMutex", ReleaseMutex, "func");
 extern "C" BOOL ReleaseMutex(HANDLE h)
 {
     struct w32_mutex *m = (struct w32_mutex *)w32_obj_get(h, W32_MUTEX);
@@ -457,6 +475,7 @@ extern "C" BOOL ReleaseMutex(HANDLE h)
     return TRUE;
 }
 
+FNVNX_EXPORT("kernel32.dll", "ReleaseSemaphore", ReleaseSemaphore, "func");
 extern "C" BOOL ReleaseSemaphore(HANDLE h, LONG n, LPLONG prev)
 {
     struct w32_sem *s = (struct w32_sem *)w32_obj_get(h, W32_SEMAPHORE);
@@ -550,6 +569,7 @@ static DWORD wait_entry(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32_t 
     return r;
 }
 
+FNVNX_EXPORT("kernel32.dll", "WaitForMultipleObjects", WaitForMultipleObjects, "func");
 extern "C" DWORD WaitForMultipleObjects(DWORD n, const HANDLE *hs, BOOL all, DWORD ms)
 {
     return wait_entry(n, hs, all, ms, (uint32_t)(uintptr_t)__builtin_return_address(0));
@@ -656,6 +676,7 @@ static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32
     return res;
 }
 
+FNVNX_EXPORT("kernel32.dll", "WaitForSingleObject", WaitForSingleObject, "func");
 extern "C" DWORD WaitForSingleObject(HANDLE h, DWORD ms)
 {
     return wait_entry(1, &h, FALSE, ms, (uint32_t)(uintptr_t)__builtin_return_address(0));

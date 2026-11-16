@@ -14,6 +14,9 @@ The external is checked out from the build's own fetch (GATE_CACHE/external/<com
 Universe (gate_build.quantify, the convention of build/objstub): the admitted product roots; per root every row of the bridge table (contract/bridgetable.derive). A root without imports.in.json is one red item, unless it is header-only (gate_build.unitless: no unit, no link; it holds no code, so it has no imports by construction): 0 items, or outside the class `import-provider`: the symbol table of its build defines no native symbol of the bridge table (natives_of: the table the declaring roots derive), so it has no import body: 0 items. A root that defines one enters the class and is the one red item. If no root declares imports the table is not known and the root is the one red item. Certified: rows with no class
 (contract/imports.py). uncertified: the first 50 ids `dll!name`; imports.ids lists `id TAB class`, sorted. No product root: universe 0, green. Bad input, a red build, an invalid recipe or an
 external that fails its hash is red with the reason in detail. Exit 0 iff green."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import shutil
@@ -23,15 +26,26 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), "contract"))
-import bridgetable  # noqa: E402
+from contract import bridgetable  # noqa: E402
+from contract import exportgen  # noqa: E402
 import cas  # noqa: E402
 import gate_build  # noqa: E402
-import imports  # noqa: E402
+from contract import imports  # noqa: E402
 import linkset  # noqa: E402
 import recipe  # noqa: E402
 
 IN_KEYS = {"format", "names", "specs", "extra", "extra_other", "name_table", "va"}
+EXPORTS_ROOT = "ports/fnv-nx/contract/exports"   # the producer of exports.tsv: the `.fnvnx.export` records of the link set (contract/exports/build.json)
+
+
+def exports_of(repo, cache):
+    """{(module, name): (symbol, kind, ret)} of the published exports.tsv of the link set at this commit (the stage B input of the bridge table: gate_build.ensure builds or hits the cache, then
+    published_output reads what was published; a red or missing producer is the caller's red)."""
+    res = gate_build.ensure(EXPORTS_ROOT, cache, repo)[0]
+    if res["status"] == "red":
+        raise ValueError("%s: build red at stage %s" % (EXPORTS_ROOT, res["failure"]["stage"]))
+    path, _ = gate_build.published_output(cache, EXPORTS_ROOT, "exports", repo)
+    return exportgen.read(read(path))
 
 
 def symbols(res):
@@ -61,7 +75,7 @@ def bridge_of(root, rec, res, decl, repo, cache):
     specs = rp(decl["specs"])
     rows, errors, extra_of = bridgetable.derive(
         read(rp(decl["names"])), lambda d: read(os.path.join(specs, d + ".spec")), set(syms), table,
-        [read(rp(p)) for p in decl["extra"] + decl["extra_other"]], bridgetable.read_va(read(rp(decl["va"]))))
+        [read(rp(p)) for p in decl["extra"] + decl["extra_other"]], bridgetable.read_va(read(rp(decl["va"]))), exports_of(repo, cache))
     return rows, errors, extra_of, table, syms
 
 
@@ -71,7 +85,7 @@ def root_rows(root, rec, res, decl, repo, cache, others):
     if errors:
         raise ValueError("%d bridge errors, first: %s" % (len(errors), errors[0]))
     other = {k for k, i in sorted(extra_of.items()) if i >= len(decl["extra"])}
-    return imports.judge(rows, syms, table, others, other)
+    return imports.judge(rows, syms, others, other)
 
 
 def natives_of(repo, cache, admit, roots):

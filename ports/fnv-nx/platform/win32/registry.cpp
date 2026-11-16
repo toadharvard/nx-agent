@@ -14,6 +14,7 @@
  * (impossible after an atomic write, so only foreign damage) loads as the empty tree.
  * The first boot's content comes from the installer's seed (registry_seed.cpp), not from this file.
  * Errors are returned as LSTATUS, never via SetLastError. One lock covers the tree and the handle table. */
+#include <fnvnx_export.h>
 #include "w32.h"
 
 #include <map>
@@ -345,6 +346,7 @@ extern "C" void fnvnx_registry_reset_for_test(void)
     os_unlock(&g_lock);
 }
 
+FNVNX_EXPORT("advapi32.dll", "RegOpenKeyExA", RegOpenKeyExA, "func");
 extern "C" LSTATUS RegOpenKeyExA(HKEY k, LPCSTR sub, DWORD o, REGSAM s, PHKEY out)
 {
     W32_UNUSED(o);
@@ -352,6 +354,7 @@ extern "C" LSTATUS RegOpenKeyExA(HKEY k, LPCSTR sub, DWORD o, REGSAM s, PHKEY ou
     try { return do_open(k, sub, s, out, false, 0, NULL); } catch (const std::bad_alloc &) { return ERROR_NOT_ENOUGH_MEMORY; }
 }
 
+FNVNX_EXPORT("advapi32.dll", "RegOpenKeyA", RegOpenKeyA, "func");
 /* the 16-bit-era wrapper: no subkey (NULL or empty) hands back the same key handle, else RegOpenKeyExA with
  * MAXIMUM_ALLOWED access */
 extern "C" LSTATUS RegOpenKeyA(HKEY k, LPCSTR sub, PHKEY out)
@@ -364,6 +367,7 @@ extern "C" LSTATUS RegOpenKeyA(HKEY k, LPCSTR sub, PHKEY out)
     return RegOpenKeyExA(k, sub, 0, 0x02000000u, out);
 }
 
+FNVNX_EXPORT("advapi32.dll", "RegCreateKeyExA", RegCreateKeyExA, "func");
 extern "C" LSTATUS RegCreateKeyExA(HKEY k, LPCSTR sub, DWORD r, LPSTR c, DWORD o, REGSAM s, void *sa, PHKEY out, LPDWORD disp)
 {
     W32_UNUSED(r); W32_UNUSED(c); W32_UNUSED(sa);
@@ -373,6 +377,7 @@ extern "C" LSTATUS RegCreateKeyExA(HKEY k, LPCSTR sub, DWORD r, LPSTR c, DWORD o
     try { return do_open(k, sub, s, out, true, o, disp); } catch (const std::bad_alloc &) { return ERROR_NOT_ENOUGH_MEMORY; }
 }
 
+FNVNX_EXPORT("advapi32.dll", "RegQueryValueExA", RegQueryValueExA, "func");
 extern "C" LSTATUS RegQueryValueExA(HKEY k, LPCSTR name, LPDWORD res, LPDWORD type, LPBYTE data, LPDWORD len)
 {
     W32_UNUSED(res);
@@ -400,6 +405,7 @@ extern "C" LSTATUS RegQueryValueExA(HKEY k, LPCSTR name, LPDWORD res, LPDWORD ty
     } catch (const std::bad_alloc &) { return ERROR_NOT_ENOUGH_MEMORY; }
 }
 
+FNVNX_EXPORT("advapi32.dll", "RegSetValueExA", RegSetValueExA, "func");
 extern "C" LSTATUS RegSetValueExA(HKEY k, LPCSTR name, DWORD res, DWORD type, const BYTE *data, DWORD len)
 {
     W32_UNUSED(res);
@@ -420,6 +426,7 @@ extern "C" LSTATUS RegSetValueExA(HKEY k, LPCSTR name, DWORD res, DWORD type, co
     } catch (const std::bad_alloc &) { return ERROR_NOT_ENOUGH_MEMORY; }
 }
 
+FNVNX_EXPORT("advapi32.dll", "RegCloseKey", RegCloseKey, "func");
 extern "C" LSTATUS RegCloseKey(HKEY k)
 {
     Guard g;

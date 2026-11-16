@@ -17,6 +17,7 @@
  * keep the given spelling, so new files are created as the game names them. The SD card folds case itself,
  * so the directory scan only runs on case-sensitive hosts.
  */
+#include <fnvnx_export.h>
 #include "w32.h"
 
 #include <stdio.h>
@@ -440,6 +441,7 @@ DWORD w32_map_path(const char *win, char *host, size_t n)
 
 extern "C" DWORD fnvnx_path_map(const char *win, char *host, size_t n) { return w32_map_path(win, host, n); }
 
+FNVNX_EXPORT("kernel32.dll", "GetCurrentDirectoryA", GetCurrentDirectoryA, "func");
 extern "C" DWORD GetCurrentDirectoryA(DWORD n, LPSTR buf)
 {
     char cwd[W32_PATH_MAX];
@@ -451,6 +453,7 @@ extern "C" DWORD GetCurrentDirectoryA(DWORD n, LPSTR buf)
     return len;
 }
 
+FNVNX_EXPORT("kernel32.dll", "SetCurrentDirectoryA", SetCurrentDirectoryA, "func");
 extern "C" BOOL SetCurrentDirectoryA(LPCSTR dir)
 {
     char norm[W32_PATH_MAX], host[W32_PATH_MAX];
@@ -471,6 +474,7 @@ extern "C" BOOL SetCurrentDirectoryA(LPCSTR dir)
     return TRUE;
 }
 
+FNVNX_EXPORT("kernel32.dll", "GetFullPathNameA", GetFullPathNameA, "func");
 extern "C" DWORD GetFullPathNameA(LPCSTR in, DWORD n, LPSTR buf, LPSTR *file_part)
 {
     char c[W32_PATH_MAX * 2];

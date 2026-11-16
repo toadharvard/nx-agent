@@ -5,6 +5,9 @@ a byte mutation of such an object. The only synthetic input is the cl REFERENCE 
 the pristine MSVC objects are exe-derived and not in the repository. Cases: no root -> universe 0 green (3 gates); abi positive / mutated contract name /
 missing `.fnvnx.sympair`; namegate and r7 on files (positive, mutated object red, symbol LIFTED outside the universe, symbol with no exe address outside);
 a root with `game` and no link result is red naming the input; a root without `game` is universe 0."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import subprocess
@@ -20,9 +23,11 @@ sys.path.insert(0, VERIFY)
 sys.path.insert(0, os.path.join(REAL, T + "link", "tests"))
 import gate_abi  # noqa: E402
 import gate_l2native as L  # noqa: E402
+import l2sections  # noqa: E402
+l2sections.set_kinds(os.path.join(REAL, T + "toolchain", "names", "sympair_kinds.inc"))
 import gate_build  # noqa: E402
 import gate_names  # noqa: E402
-import l2sections  # noqa: E402
+from contract import l2sections  # noqa: E402
 SYMPAIR_KINDS = l2sections.load_kinds(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'toolchain', 'names', 'sympair_kinds.inc'))
 import gate_r7  # noqa: E402
 import synth  # noqa: E402

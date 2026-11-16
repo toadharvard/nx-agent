@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """The loader's generated tables (loader/build.json): the eight symbols the loader links against come from generator stages over the pinned exe, never from a
 tracked file. Pure: reads the recipe and runs the producers' text functions on toy rows; no private input."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import subprocess
@@ -9,10 +12,9 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 TREE = os.path.join(HERE, "..", "..")
 sys.path.insert(0, os.path.join(HERE, ".."))
-sys.path.insert(0, os.path.join(TREE, "contract"))
-import iat  # noqa: E402
-import mkidentity  # noqa: E402
-import modules  # noqa: E402
+from contract import iat  # noqa: E402
+from contract import mkidentity  # noqa: E402
+from contract import modules  # noqa: E402
 import recipe  # noqa: E402
 
 fails = 0
@@ -36,13 +38,13 @@ ext = {e["name"]: e for e in rec["external"]}
 check("the exe, redist and wine externals of the loader are exactly the pins of contract_inputs.json (no second pin)",
       all(ext.get(n) == pins[n] for n in ("exe", "redist", "wine")) and "manifest" not in ext, {n: ext.get(n) for n in ("exe",)})
 tools = [g["tool"] for g in gen]
-check("one generator each: declareddlls, modules, mkidentity (the bridge table is bridgefacts' own stage)", sorted(tools) == sorted(["ports/fnv-nx/contract/declareddlls.py", "ports/fnv-nx/contract/modules.py", "ports/fnv-nx/contract/mkidentity.py"]), tools)
+check("one generator each: declareddlls, modules, mkidentity (the bridge table is the bridgetable root's own stage)", sorted(tools) == sorted(["ports/fnv-nx/contract/declareddlls.py", "ports/fnv-nx/contract/modules.py", "ports/fnv-nx/contract/mkidentity.py"]), tools)
 check("the exe pin read by every generator is the external `exe`", all("/ext/exe/FalloutNV.exe" in g["args"] for g in gen if g["tool"].endswith(("modules.py", "mkidentity.py"))), "")
 check("the tables are outputs of the loader's own generators, named as units", {"gen/modules.c", "gen/import_keys.c", "gen/import_keys.h", "gen/keys.tsv", "gen/iat_data.tsv", "gen/modules.tsv", "gen/identity.c"} <= outs, outs)
 check("the loader recipe exports the key header as output IMPORT_KEYS_H (a consumer root takes it through `uses`)", rec.get("outputs", {}).get("IMPORT_KEYS_H") == "gen/import_keys.h" and {"KEYS_TSV", "MODULES_TSV", "IAT_DATA_TSV"} <= set(rec["outputs"]), rec.get("outputs"))
 mod = next(g for g in gen if g["tool"].endswith("modules.py"))
-check("modules.py reads the bridge table that the bridgefacts root generates (output BRIDGE, through `uses`), never the manifest external's pinned bridge.tsv",
-      mod["args"][mod["args"].index("--bridge") + 1] == "/uses/ports/fnv-nx/bridgefacts/BRIDGE" and {"root": "ports/fnv-nx/bridgefacts", "output": "BRIDGE"} in rec.get("uses", []) and not any("bridge.tsv" in a and a.startswith("/ext/") for g in gen for a in g["args"]), mod["args"])
+check("modules.py reads the bridge table that the bridgetable root generates (output BRIDGE, through `uses`), never the manifest external's pinned bridge.tsv",
+      mod["args"][mod["args"].index("--bridge") + 1] == "/uses/ports/fnv-nx/bridgetable/BRIDGE" and {"root": "ports/fnv-nx/bridgetable", "output": "BRIDGE"} in rec.get("uses", []) and not any("bridge.tsv" in a and a.startswith("/ext/") for g in gen for a in g["args"]), mod["args"])
 files = subprocess.run(["git", "-C", repo, "ls-files", "ports/fnv-nx/loader"], capture_output=True, text=True).stdout.split()
 SYMS = ["fnvnx_modules", "fnvnx_module_count", "fnvnx_import_rows", "fnvnx_import_row_count", "fnvnx_import_key_count", "fnvnx_import_by_key_idx", "fnvnx_exe_sha256", "fnvnx_exe_size"]
 import re  # noqa: E402

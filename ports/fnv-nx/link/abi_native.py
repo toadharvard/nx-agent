@@ -22,14 +22,16 @@ destructor slot where the Itanium vtable has D1 then D0.  A slot whose symbol (t
 the exe slot of the slot before it, which must have kind `dtor.d1`; so k(j) = j - #(d0 slots at or before j).  The kinds are the
 plugin's own statements about the symbols, not names.  Open (REMOVE, owner L2): the plugin's kinds are right; removed by gate names against cl objects and gate vslots against the exe's vftables.
 """
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import collections
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'contract'))
-import gatefile
-import store
+from contract import gatefile
+from contract import store
 
 Point = collections.namedtuple('Point', 'object ztv ap d slots claim msvc vfptr vft')
 

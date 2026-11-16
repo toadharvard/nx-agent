@@ -36,13 +36,15 @@ nothing); vtpair rows with a name.  Pairing is by file stem (the `u<N>` rule of 
 """
 import os
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+import os
+import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(HERE, '..', 'contract'))
 import coffobj
 import elfobj
-import l2sections
+from contract import l2sections
 import objsections
 import unitpairs
 

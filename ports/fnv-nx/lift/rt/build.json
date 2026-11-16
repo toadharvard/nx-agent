@@ -1,0 +1,194 @@
+{
+ "format": "fnvnx-recipe/1",
+ "profile": "guest",
+ "flags": {
+  "c": [
+   "-O2",
+   "-Werror=attributes"
+  ],
+  "cxx": [
+   "-std=gnu++17",
+   "-O2",
+   "-DFNVNX_SDD=1",
+   "-Werror=attributes"
+  ],
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/lift/rt",
+  "ports/fnv-nx/lift/rt/gen",
+  "ports/fnv-nx/platform/include",
+  "ports/fnv-nx/hostabi/include",
+  "ports/fnv-nx/contract/include"
+ ],
+ "units": "all",
+ "link": null,
+ "external": [],
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_faults.py",
+   "args": [
+    "/out/gen"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift/faults.json"
+   ],
+   "outputs": [
+    "gen/fnvl_faults.h",
+    "gen/seh_faults.inc"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_cpuref.py",
+   "args": [
+    "/out/gen"
+   ],
+   "inputs": [
+    "ports/fnv-nx/verify/cpuref.json",
+    "ports/fnv-nx/verify/cpuid_model.json",
+    "ports/fnv-nx/lift/fnvlift/cpumodel_bits.py"
+   ],
+   "outputs": [
+    "gen/fnvl_cpuref.h",
+    "gen/rcpref.h",
+    "gen/cpumodel_tab.inc"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_sys.py",
+   "args": [
+    "/uses/ports/fnv-nx/platform/X86SYS",
+    "/out/gen"
+   ],
+   "inputs": [],
+   "outputs": [
+    "gen/fnvl_sys.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/fmath.h",
+    "/out/gen/fmath.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/fmath.h"
+   ],
+   "outputs": [
+    "gen/fmath.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/fnvl.h",
+    "/out/gen/fnvl.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/fnvl.h"
+   ],
+   "outputs": [
+    "gen/fnvl.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/fnvl_abi.h",
+    "/out/gen/fnvl_abi.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/fnvl_abi.h"
+   ],
+   "outputs": [
+    "gen/fnvl_abi.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/fnvl_x87.h",
+    "/out/gen/fnvl_x87.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "outputs": [
+    "gen/fnvl_x87.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/imp.h",
+    "/out/gen/imp.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/imp.h"
+   ],
+   "outputs": [
+    "gen/imp.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/msvcrt.h",
+    "/out/gen/msvcrt.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/msvcrt.h"
+   ],
+   "outputs": [
+    "gen/msvcrt.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/x87.h",
+    "/out/gen/x87.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/x87.h"
+   ],
+   "outputs": [
+    "gen/x87.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/fnvl_entry.h",
+    "/out/gen/fnvl_entry.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/fnvl_entry.h"
+   ],
+   "outputs": [
+    "gen/fnvl_entry.h"
+   ]
+  }
+ ],
+ "uses": [
+  {
+   "root": "ports/fnv-nx/platform",
+   "output": "X86SYS"
+  },
+  {
+   "root": "ports/fnv-nx/platform",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/hostabi",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/contract/include",
+   "output": "INCLUDE"
+  }
+ ],
+ "outputs": {
+  "GEN": "gen"
+ }
+}

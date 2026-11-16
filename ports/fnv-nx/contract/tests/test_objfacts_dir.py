@@ -5,7 +5,8 @@ import os, shutil, subprocess, sys, tempfile
 
 C = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.insert(0, C)
-import l2sections, objfacts_dir, store
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: contract.X by its qualified name
+from contract import l2sections, objfacts_dir, store
 INC = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'toolchain', 'names', 'sympair_kinds.inc')
 
 CC = shutil.which('aarch64-linux-gnu-gcc-13') or shutil.which('aarch64-linux-gnu-gcc')

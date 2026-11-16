@@ -9,14 +9,16 @@ Fixture fixtures/order_local.cc, built by the recipe with the full plugin set (r
   escaped         a local whose address is passed to a function: its stores are `stlr`, its address is recorded, gate_order certifies all
 No network, no game data.  Run: python3 -I <this file> from the checkout root."""
 import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+import os
 import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..'))
-sys.path.insert(0, os.path.join(HERE, '..', '..', 'contract'))
-import gate_order  # noqa: E402
+from lift.gates import gate_order  # noqa: E402
 import realobj  # noqa: E402
 import test_sdd_order as T  # noqa: E402
 

@@ -33,6 +33,9 @@ comparison name unknown. Each mutated compile must give an error located (caret 
 NAME renamed must make mojoshader.c fail (all other rows unchanged, the baseline compiles, so the token is consumed). K is certified iff
 the rows header is generated, the baseline compiles and every mutation of every line of K is killed.
 Nothing is decided from names, text matching of messages, runs or samples. Result extras: "parts"."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import ast, hashlib, json, os, shutil, stat, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -113,8 +116,7 @@ def copy_tree(src, dst):
 
 
 # ---------------------------------------------------------------- tree hash (the one home: contract/treehash.py; a test cross-checks it with cas)
-sys.path.append(os.path.join(PORT, "contract"))
-import treehash  # noqa: E402
+from contract import treehash  # noqa: E402
 
 
 def tree_hash(path):
@@ -438,6 +440,21 @@ def sm_part(inp, work, cache):
 
 
 def main():
+    """The gate ends in a result file with reasons whatever happens: an exception of any part (a tool that cannot run, a file that cannot be read) is a red result
+    that names it, never an exit without a file (the verdict runner turns a missing result into red too, but the reason belongs here)."""
+    try:
+        return evaluate()
+    except Exception:   # noqa: BLE001  the total rule: every failure is a finding
+        import traceback
+        out = os.environ["GATE_OUT"]
+        shutil.rmtree(os.path.join(out, "d3d9total.work"), ignore_errors=True)
+        write(os.path.join(out, "d3d9total.json"), json.dumps({
+            "format": "fnvnx-gate/1", "name": "d3d9total", "status": "red", "universe": 0, "certified": 0, "uncertified": [],
+            "detail": ("gate crashed: " + " | ".join(traceback.format_exc().strip().splitlines()[-6:]))[:900]}, sort_keys=True, indent=1) + "\n")
+        return 2
+
+
+def evaluate():
     out = os.environ["GATE_OUT"]
     work = os.path.join(out, "d3d9total.work")
     if os.path.isdir(work):

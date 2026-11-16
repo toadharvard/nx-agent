@@ -19,7 +19,8 @@
   "ports/fnv-nx/loader/include",
   "ports/fnv-nx/hostabi/include",
   "/ext/gcc/aarch64-none-elf/include",
-  "ports/fnv-nx/lib/sha256/include"
+  "ports/fnv-nx/lib/sha256/include",
+  "ports/fnv-nx/shim/include"
  ],
  "units": "all",
  "external": [
@@ -68,7 +69,7 @@
     "--exe",
     "/ext/exe/FalloutNV.exe",
     "--bridge",
-    "/uses/ports/fnv-nx/bridgefacts/BRIDGE",
+    "/uses/ports/fnv-nx/bridgetable/BRIDGE",
     "--dir",
     "/ext/exe",
     "--dir",
@@ -121,7 +122,6 @@
   }
  ],
  "outputs": {
-  "INCLUDE": "include",
   "IMPORT_KEYS_H": "gen/import_keys.h",
   "KEYS_TSV": "gen/keys.tsv",
   "MODULES_TSV": "gen/modules.tsv",
@@ -138,8 +138,16 @@
    "output": "INCLUDE"
   },
   {
-   "root": "ports/fnv-nx/bridgefacts",
+   "root": "ports/fnv-nx/bridgetable",
    "output": "BRIDGE"
+  },
+  {
+   "root": "ports/fnv-nx/shim",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/loader/include",
+   "output": "INCLUDE"
   }
  ]
 }

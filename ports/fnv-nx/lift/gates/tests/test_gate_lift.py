@@ -4,6 +4,9 @@ product symbol. Lifted roots: the lifted C++ unit is the output of a generator s
 tracked input; the runtime unit rt.S defines fnvnx_lift_cpu_bytes; the pack is a content-pinned external fetched from a stand-in of fnv-nx-build
 (recipe.ARTIFACTS). Native roots: the pinned guest compiler of verify/guest_compiler.json (fetched; red with the reason when it cannot be).
 Plain script: exit 0 on pass, one PASS/FAIL line per case. Needs root (sandbox) and the compilers of verify/env.json."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import atexit
 import copy
 import json
@@ -18,8 +21,8 @@ REAL = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.d
 VERIFY = os.path.join(REAL, "ports", "fnv-nx", "verify")
 sys.path.insert(0, VERIFY)
 sys.path.insert(0, os.path.join(VERIFY, "tests"))
-import cas  # noqa: E402
-import recipe  # noqa: E402
+from verify import cas  # noqa: E402
+from verify import recipe  # noqa: E402
 import test_guest as tg  # noqa: E402
 import test_plugins as tp  # noqa: E402
 from test_plugins import BASE, ROOT, T, check, git, w  # noqa: E402
@@ -92,6 +95,8 @@ def lifted_repo(name, body, pack, ehfacts=None, rts=(RT,), image=True):
     os.makedirs(os.path.join(repo, LIFT), exist_ok=True)
     for f in ("gate_order.py", "gate_eh.py"):
         shutil.copyfile(os.path.join(REAL, LIFT, f), os.path.join(repo, LIFT, f))
+    os.makedirs(os.path.join(repo, T + "lift/tools"), exist_ok=True)      # the entry points declare their argv with lift/tools/cli.py
+    shutil.copyfile(os.path.join(REAL, T + "lift/tools/cli.py"), os.path.join(repo, T + "lift/tools/cli.py"))
     if ehfacts is not None:
         doc = inputs_doc(ehfacts["ext"])
         if ehfacts["key"]:
@@ -160,9 +165,11 @@ def flags_repo(name, code, cache, extra_entries=()):
     doc = {"format": "fnvnx-contract-inputs/1", "external": [exe, redist, facts], "exe": "exe/a.exe", "msvc": "facts/msvc", "universe": "facts/universe.tsv",
            "root_results": {"units": "units.json", "addrmap": "addrmap.tsv", "aliases": "aliases.ld"}, "ranges": {"exe": "facts/ranges.tsv", "module": "facts/%s/ranges.tsv"}}
     repo = lifted_repo(name, BODIES["ordered"][0], pk)
-    for f in ("gate_flags.py",):
+    for f in ("gate_flags.py", "invariance.py"):
         shutil.copyfile(os.path.join(REAL, LIFT, f), os.path.join(repo, LIFT, f))
-    for pkg in ("proof", "fnvlift"):
+    os.makedirs(os.path.join(repo, T + "lift/tools"), exist_ok=True)
+    shutil.copyfile(os.path.join(REAL, T + "lift/tools/cli.py"), os.path.join(repo, T + "lift/tools/cli.py"))
+    for pkg in ("proof", "fnvlift", "rt"):
         shutil.copytree(os.path.join(REAL, T + "lift/" + pkg), os.path.join(repo, T + "lift/" + pkg), ignore=shutil.ignore_patterns("__pycache__", "tests"))
     w(repo, T + "verify/contract_inputs.json", json.dumps(doc))
     git(repo, "add", "-A")
