@@ -2524,3 +2524,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:42
 - L6 needs named row inputs ("as" plus "@rows:NAME") for the sm_link summary (two row groups). w28, ahead of the dynamic table. Meanwhile w6 folds sm_link into one root (stage range 8, link range 8), deleting the 8 copies and count_stage_evals.py.
 - bottleneck: the cand3b head with the pool, walk and budget fixes.
+
+## 2026-11-16 04:44
+- w28 9bece3474: build-time foreach table (stage/external table, rows into DIR, red on empty/bad/shared rows; test_foreach_dynamic is farm-only); ASSUMPTIONS takes L6's retirements (no citers). Accepted. Asked for: the 7 assumptions findings (146/153) to route; whether L3b needs cross-root DIR consumption. Next: named rows.
+- bottleneck: the cand3b head with the pool, walk and budget fixes.
