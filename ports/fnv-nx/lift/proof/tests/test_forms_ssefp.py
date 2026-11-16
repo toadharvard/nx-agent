@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SSE FP Forms (proof/forms_ssefp.py): directed cases from the SDM text only (flags, faults, the sticky MXCSR bits).  No emulator is an oracle: the certificate of a Form is L3b's reference run (Form == reference per shape), and fpc_host.py is a measurement of the C helper against the z3 rule.   test_forms_ssefp.py  (exit 0 = all pass)"""
+"""SSE FP Forms (proof/forms_ssefp.py): directed cases from the SDM text only (flags, faults, the sticky MXCSR bits).  No emulator is an oracle: the certificate of a Form is L3b's reference run (Form == reference per shape).   test_forms_ssefp.py  (exit 0 = all pass)"""
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import capstone as CS, z3
