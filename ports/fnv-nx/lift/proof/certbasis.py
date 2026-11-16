@@ -97,7 +97,8 @@ def component_inputs():
     if os.path.exists(os.path.join(HERE, CLOSURE_MARK)): return set()
     repo = os.path.normpath(os.path.join(LIFT, "..", "..", ".."))
     vdir = os.path.join(repo, "ports", "fnv-nx", "verify")
-    if vdir not in sys.path: sys.path.insert(0, vdir)
+    for d in (os.path.join(repo, "ports", "fnv-nx"), vdir):      # verify/ for recipe, ports/fnv-nx for the contract/ and link/ packages it imports (python -I ignores PYTHONPATH)
+        if d not in sys.path: sys.path.insert(0, d)
     import recipe
     roots = recipe.load_admit(repo)
     out = set()
