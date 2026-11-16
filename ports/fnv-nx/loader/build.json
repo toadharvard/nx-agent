@@ -16,7 +16,7 @@
   "asm": []
  },
  "include": [
-  "ports/fnv-nx/loader/include",
+  "ports/fnv-nx/loader/hdr/include",
   "ports/fnv-nx/hostabi/include",
   "/ext/gcc/aarch64-none-elf/include",
   "ports/fnv-nx/lib/sha256/include",
@@ -146,7 +146,7 @@
    "output": "INCLUDE"
   },
   {
-   "root": "ports/fnv-nx/loader/include",
+   "root": "ports/fnv-nx/loader/hdr",
    "output": "INCLUDE"
   }
  ]

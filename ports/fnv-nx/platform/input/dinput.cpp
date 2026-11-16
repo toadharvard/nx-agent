@@ -845,7 +845,6 @@ struct DInput final : IDirectInput8A {
 #include "dinput.env_const.gen.inc"   /* Device::SendForceFeedbackCommand: manifest/env_const.tsv */
 } // namespace
 
-FNVNX_EXPORT("dinput8.dll", "DirectInput8Create", DirectInput8Create, "func");
 extern "C" HRESULT WINAPI DirectInput8Create(HINSTANCE, DWORD ver, REFIID iid, LPVOID *out, LPUNKNOWN outer)
 {
     if (!out) return DIERR_INVALIDPARAM;
@@ -859,6 +858,7 @@ extern "C" HRESULT WINAPI DirectInput8Create(HINSTANCE, DWORD ver, REFIID iid, L
     *out = static_cast<IDirectInput8A *>(d);
     return DI_OK;
 }
+FNVNX_EXPORT("dinput8.dll", "DirectInput8Create", DirectInput8Create, "func");
 
 /* CoCreateInstance(CLSID_DirectInput8): the object is born uninitialised; IDirectInput8::Initialize(hinst, 0x0800) readies it */
 extern "C" HRESULT fnvnx_dinput_com_factory(const GUID *iid, void **out)

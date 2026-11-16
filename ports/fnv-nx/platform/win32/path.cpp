@@ -441,7 +441,6 @@ DWORD w32_map_path(const char *win, char *host, size_t n)
 
 extern "C" DWORD fnvnx_path_map(const char *win, char *host, size_t n) { return w32_map_path(win, host, n); }
 
-FNVNX_EXPORT("kernel32.dll", "GetCurrentDirectoryA", GetCurrentDirectoryA, "func");
 extern "C" DWORD GetCurrentDirectoryA(DWORD n, LPSTR buf)
 {
     char cwd[W32_PATH_MAX];
@@ -452,8 +451,8 @@ extern "C" DWORD GetCurrentDirectoryA(DWORD n, LPSTR buf)
     memcpy(buf, cwd, len + 1);
     return len;
 }
+FNVNX_EXPORT("kernel32.dll", "GetCurrentDirectoryA", GetCurrentDirectoryA, "func");
 
-FNVNX_EXPORT("kernel32.dll", "SetCurrentDirectoryA", SetCurrentDirectoryA, "func");
 extern "C" BOOL SetCurrentDirectoryA(LPCSTR dir)
 {
     char norm[W32_PATH_MAX], host[W32_PATH_MAX];
@@ -473,8 +472,8 @@ extern "C" BOOL SetCurrentDirectoryA(LPCSTR dir)
     os_unlock(&g_path_lock);
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "SetCurrentDirectoryA", SetCurrentDirectoryA, "func");
 
-FNVNX_EXPORT("kernel32.dll", "GetFullPathNameA", GetFullPathNameA, "func");
 extern "C" DWORD GetFullPathNameA(LPCSTR in, DWORD n, LPSTR buf, LPSTR *file_part)
 {
     char c[W32_PATH_MAX * 2];
@@ -505,3 +504,4 @@ extern "C" DWORD GetFullPathNameA(LPCSTR in, DWORD n, LPSTR buf, LPSTR *file_par
     }
     return len;
 }
+FNVNX_EXPORT("kernel32.dll", "GetFullPathNameA", GetFullPathNameA, "func");
