@@ -1446,3 +1446,13 @@ Paused: w3b, w4, farm; no other work.
     - recipe check was valid for 8 roots plus 3 @host variants at 5c7b36289.
     - At 018e4fac1, blocked: env. cargo and rustc are not installed (w6 runs setup_verdict_env.sh). 6 debs fall outside the declared closure (w28 defect, sent). Rebuild and test_env_ident follow the w28 fix.
 - bottleneck: w28 env closure (blocks every build and check); farm1 sm_link; the cand4 base.
+- 02:44Z w6 rebuild of b412d413d render/ through recipe.py, on a scratch env (env.json of fd0aed381; not b412d413d's own):
+    - bridgefacts 0 objects (run 0/hit 4)
+    - d3d9 69 objects (147/15)
+    - gl4shim 2 (0/6)
+    - smscan 1 (12/6)
+    - shaders/total 0 (0/1)
+    - pair 1 (2/10)
+    - translator 8 (26/1)
+    - gl4 BLOCKED: its input root hostabi@host is red under the per-target rule (outputs and units copies). Not ours; sent to w28, whose rule line cleans every recipe it judges.
+    - The byte-identical check vs 9acd1223b and the real-env rerun follow (w6 running setup_verdict_env.sh).
