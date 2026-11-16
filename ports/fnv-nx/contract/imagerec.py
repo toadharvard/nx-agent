@@ -99,8 +99,9 @@ def _universe_of(text, name='universe'):
 
 def universe_spans(text, name='universe'):
     """universe.tsv text -> ({entry: extent}, base from the `# base=` header or None): the SPAN [entry, entry+extent) of every code entry.
-    Row: `entry<TAB>kind<TAB>extent<TAB>flags`, the first three columns read here; a row with fewer, a non-hex entry or a non-decimal-or-hex
-    extent below 1 is an ImageError; an entry twice is an ImageError."""
+    Row: `entry<TAB>kind<TAB>extent<TAB>flags`, the first three columns read here; a row with fewer, a non-hex entry or an extent that is not
+    a non-negative decimal or 0x-hex integer is an ImageError; an entry twice is an ImageError. Extent 0 is valid: an entry with no decodable bytes
+    (flag `ud`) spans nothing but is still an entry."""
     out, base = {}, None
     for ln in text.splitlines():
         if ln.startswith('# base='):
@@ -113,8 +114,10 @@ def universe_spans(text, name='universe'):
             e, x = int(f[0], 16), int(f[2], 0)
         except (ValueError, IndexError):
             raise ImageError('%s: malformed line %r' % (name, ln[:60]))
-        if x < 1 or e in out:
-            raise ImageError('%s: entry %x has extent %d or occurs twice' % (name, e, x))
+        if x < 0:
+            raise ImageError('%s: entry %x has a negative extent' % (name, e))
+        if e in out:
+            raise ImageError('%s: entry %x occurs twice' % (name, e))
         out[e] = x
     return out, base
 

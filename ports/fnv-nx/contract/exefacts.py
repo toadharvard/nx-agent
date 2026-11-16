@@ -353,7 +353,7 @@ def read_universe(path, img):
         uni, base = imagerec.universe_spans(fh.read(), path)
     if base is not None and base != img.base:
         raise SystemExit('exefacts: %s has base 0x%x, the exe has 0x%x' % (path, base, img.base))
-    out = [a for a, x in sorted(uni.items()) if not (img.intext(a) and img.intext(a + x - 1))]
+    out = [a for a, x in sorted(uni.items()) if not (img.intext(a) and (x == 0 or img.intext(a + x - 1)))]
     if out:
         raise SystemExit('exefacts: %d universe entries (first %08x) are not inside .text' % (len(out), out[0]))
     return uni
@@ -365,7 +365,7 @@ def reach_outside(img, fn, ptrs, spans):
     ents = sorted(spans)
     def inside(t):
         k = bisect.bisect_right(ents, t) - 1
-        return k >= 0 and t < ents[k] + spans[ents[k]]
+        return k >= 0 and (t == ents[k] or t < ents[k] + spans[ents[k]])
     bad = {(0, img.entry)} if not inside(img.entry) else set()
     bad |= {(r, v) for r, v in ptrs if not inside(v)}
     for a, F in fn.items():

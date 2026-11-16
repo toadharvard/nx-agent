@@ -23,11 +23,11 @@ class Img:
         return 0x400000 <= a < 0x410000
 
 
-txt = '# base=0x400000\n401000\tfunc\t16\t-\n401020\tfunc\t0x20\tfunc,x\n'
+txt = '# base=0x400000\n401000\tfunc\t16\t-\n401020\tfunc\t0x20\tfunc,x\n401040\tinner\t0\tptr,ud,parent=00401000\n'
 spans, base = imagerec.universe_spans(txt)
-check('spans', spans, {0x401000: 16, 0x401020: 0x20})
+check('spans (an extent of 0 is an entry)', spans, {0x401000: 16, 0x401020: 0x20, 0x401040: 0})
 check('base', base, 0x400000)
-for bad in ('401000\tfunc\n', 'zz\tfunc\t4\t-\n', '401000\tfunc\t0\t-\n', '401000\tfunc\t4\t-\n401000\tfunc\t4\t-\n'):
+for bad in ('401000\tfunc\n', 'zz\tfunc\t4\t-\n', '401000\tfunc\t-1\t-\n', '401000\tfunc\t4\t-\n401000\tfunc\t4\t-\n'):
     try:
         imagerec.universe_spans(bad)
         got = None
@@ -35,7 +35,7 @@ for bad in ('401000\tfunc\n', 'zz\tfunc\t4\t-\n', '401000\tfunc\t0\t-\n', '40100
         got = 'red'
     check('malformed %r' % bad[:12], got, 'red')
 fn = {0x401000: dict(calls=[(0, 0x401020), (0, 0x401028)], tails=[], codeptrs=[])}      # an entry, a mid-function target
-check('inside', exefacts.reach_outside(Img, fn, [(0x500000, 0x401004)], spans), [])
+check('inside', exefacts.reach_outside(Img, fn, [(0x500000, 0x401004), (0x500004, 0x401040)], spans), [])   # a mid-function target; a zero-extent entry itself
 fn[0x401000]['calls'].append((0, 0x401010))       # the gap between the two spans: neither entry nor inside
 fn[0x401000]['codeptrs'].append((0, 0x402000))
 check('outside', exefacts.reach_outside(Img, fn, [(0x500004, 0x401010)], spans),
