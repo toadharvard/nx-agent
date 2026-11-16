@@ -1745,3 +1745,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - It measures bytes, B/insn and CPU-s, plus the PP token diffs B/R12 (must be equal) and R12/R123, and a CC probe.
 - Red base tests, identical on B: defdisp, descclass (L1 sympair_kinds.inc), liftgen_recipe, prelude, root_graph cycle. Doing (w13): the cleanup on base3.
 - bottleneck: farm 2's queue (path census → exe modlift → density).
+- L3b reviewed rule 3: the solver is accepted (lemma fixed in claude/fnv-l3b-lift ef07f250e; the gs_guard escape confirmed). Two pieces are missing:
+  1. P2. L3a proposed P2' to L3b: a cross-thread context is observed only at the target's transfer site (L5's SuspendThread), so no per-image switch-off is needed. Waiting on L3b.
+  2. The flaglive gate, which recomputes flagdrop and diffs it. Doing: w14 session_01KmtZKT4sxjNZYVhoZFrMb2, claude/fnv-l3a-lift-w14-flagcheck.
+- Pending (L3b): shape_sha and formgate at R12.
