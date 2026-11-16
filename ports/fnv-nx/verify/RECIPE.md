@@ -293,16 +293,17 @@ Readers of the record: gate_tlsmodel (the relocations of the linked ELF), contra
 
 ### Tool steps (`exec`)
 
-`{"name", "exec", "args", "inputs", "debs", "outputs", ["dirs", "scratch", "timeout_s", "host_cpu"]}` is a `run` step with `exec` (an absolute path of a program of the
-declared debs) in place of `artifact`: the way to run a build tool chain (bash, make, gcc, tar) hermetically, for example the compiler stages.
+`{"name", "exec", "args", "inputs", "debs", "outputs", ["dirs", "scratch", "env", "host_cpu"]}` is a `run` step with `exec` (an absolute path of a program of the
+declared debs, or a file of an external / a built root, see "A tool that is not a deb binary") in place of `artifact`: the way to run a build tool chain (bash, make, gcc, tar) hermetically, for example the compiler stages.
 - The stage's root is the declared system: the union of the installed files of `debs` (two debs that ship one path with different content are red), each top-level
   directory mounted at its own path (`/usr`, `/etc`, `/var`, ...) as a read-only input, each top-level symlink (base-files' `/bin`, `/lib`, `/lib64`, `/sbin`) a
   sandbox link. So the kernel starts dynamic programs through their own PT_INTERP, and a program runs its children by PATH (`/usr/bin:/bin`). The trees are stage inputs: the key holds their
   content, not the package version (envcheck pins the packages to the machine).
+- `debs` is a list of env.json package names, `{"closure": [TOPS]}`, or `{"profile": NAME}`: NAME is a key of env.json `debs.profiles` (`{name: [top package names]}`, one fact in one file), resolved through the same Depends closure as `closure`, so two roots that name one profile have the same debs and the same stage content. An unknown profile is red.
 - `inputs` are at `/in/1`, `/in/2`, ... in list order, as for an artifact step; a ref `{"stage": "<this root>:gen:I" | "<this root>:run:NAME", "path": P}` is a file or
   directory output of an earlier step of this root (a red producer blocks the step).
 - `dirs` are directory outputs (see "Directory outputs"); `scratch` lists absolute paths of writable tmpfs directories (a build works out of tree there; nothing survives,
-  they are no outputs; in the key); `timeout_s` (default 7200) kills the step, as a red `run:<root>:<name>`.
+  they are no outputs; in the key). `timeout_s` is red at check time: a time limit would decide red or green, so a step's work is bounded by its `args`; the sandbox's own 7200 s kill (outside the key) stays as a safety net.
 - The job count is the environment variable `JOBS` of the step (the build's job count). It and the timeout are outside the key (sandbox `unkeyed`): they change how long a step
   takes, not what it computes. A step whose output depended on JOBS would be a non-deterministic build, and the determinism gate reds it.
 - An input `{"plugin": NAME}` (a name in the root's `plugins`) is the stage's `/out` tree of that plugin (`NAME.so`), built by the plugin stage against the root's `compiler`
@@ -405,10 +406,11 @@ declared `uses` input, passed to the tool as an argument (as `--lib` is) or read
 ### Declared imports of a generator's tool (`imports`)
 
 A generator tool may import modules of other admitted roots only through the `imports` of its own root's admit.json row (`{"imports": [root, ...]}`, the form `manifest` uses).
-`gen:foreign-import` accepts an import that resolves inside a tree of a declared import root. The generate stage mounts the tool's own root at `/tool` and, at `/imp` in
-the repo-relative layout, exactly the files of the declared import roots that the import closure (by `ast`, transitively) reaches plus the data those modules read (below), and nothing else of those roots;
+`gen:foreign-import` accepts an import that resolves inside a tree of a declared import root. **One module path.** A declared root R is importable under exactly one module path: its path relative to `ports/fnv-nx` with `/` replaced by `.` (`render/total` -> `render.total`), computed by `gate_admit.import_roots`, the one function that recipe (`foreign_imports`, the mount), `gate_pure` (its `--base` is `ports/fnv-nx`) and the declared-use rule call. The stage mounts R's closure at `/imp/<that relative path>` with `PYTHONPATH=/imp` and nothing else; the packages are namespace packages (PEP 420), no `__init__.py` is invented. The bare name of a module of a declared root (`import x` for `render/total/x.py`) is `gen:foreign-import` with the qualified name as the hint, and so is a bare import of a sibling inside a declared root (use the qualified name or `from . import`). (`gate_abspath` keeps its deliberate superset resolution by path suffix: it only over-approximates the closure it judges.)
+
+The generate stage mounts the tool's own root at `/tool` and, at `/imp`, exactly the files of the declared import roots that the import closure (by `ast`, transitively) reaches plus the data those modules read (below), and nothing else of those roots;
 `PYTHONPATH` lists their directories. The stage key therefore covers only the closure: an edit to another file of an import root leaves the key unchanged. Red:
-an import of a root that is not declared (`gen:foreign-import`); a declared root that no generator of the recipe reaches (`gen:unused-import:<root>:<import root>`); a
+an import of a root that is not declared (`gen:foreign-import`); a declaration that no module of the declaring root imports from (`gen:unused-import:<root>:<import root>`; the rule is per declaring root, never per consuming recipe, so a root with two tools of which one imports the declared root is green for both consumers; the stage of a tool whose closure does not reach the declared root simply mounts none of it); a
 read by a path of its own location (`__file__`) in a module of an import root that leaves that root's tree or that the rule cannot decide. A data file such a module reads by a
 constant path of its own location inside its root's tree (decided by `pathflow`, a directory: every tracked file under it) is mounted with the closure and so is in the key. Functions: `recipe.import_trees`, `recipe.import_mount`. Tests: `tests/test_genimports.py`.
 
@@ -503,6 +505,38 @@ cc1, as, ld relative to itself). It is declared `HOST@AT` to `runtime.py tool`: 
 loader resolves it INSIDE the sandbox (paths under `at` are files of the checked-out tree, other paths are host libraries that become declared
 inputs); a library that cannot be resolved is a red build naming the object and the name. `include` may name a directory inside an external:
 it is passed as `-I<that path>` (the external is a declared input of every stage, so keys stay content-addressed).
+
+## A tool that is not a deb binary (`exec` forms, `env`)
+
+`exec` is one of:
+- an absolute path of a program of the declared debs (as before);
+- `{"external": NAME, "path": FILE}`: a file of a pinned external of this recipe (resolved by `resolve_input`: tree_sha256 checked, a path outside the tree red). The file's content is a stage
+  input, so it is in the key (another file's commit does not change it), mounted executable at `/exec/<basename>`, and run as `/exec/<basename>`;
+- `{"root": R, "output": NAME}`: a published file output of a root this recipe `uses` (so R is a dependency); resolved like the `uses` mount and mounted at `/exec/<NAME>`.
+  A binary built outside the recipe machinery (a farm-built `tools/*` branch) is not accepted here: only an external file whose tree is pinned, or a root's own output.
+
+Either file form may carry `libs`: a list of declared lib directories, each `{"external": NAME, "path": DIR}` or `{"root": R, "output": NAME}` (a directory output of a root this recipe `uses`),
+mounted at `/exec/lib/<i>` with `LD_LIBRARY_PATH` naming them (in the key). A `DT_NEEDED` name that no deb provides resolves by file name in those directories, and the library found there is read in
+turn (its own `DT_NEEDED`, transitively). This is how a built tool (isla) gets a library from a declared input (the z3 wheel's `lib`) without a second build of that library.
+
+Static resolution (no `ldd`, nothing is executed): the ELF64's program headers and dynamic section are read. Its `PT_INTERP` and every `DT_NEEDED` name must be provided by the root layout of the
+step's `debs` (the deb's own symlinks followed; the loader's default directories and the file's absolute RPATH/RUNPATH entries are searched; `$ORIGIN` finds nothing, one file is mounted).
+Otherwise the stage is red `exec-unresolved:<library>` (or `exec-unresolved:interp:<path>`). A static ELF or a script has nothing to resolve. A further tool the program runs (z3, a compiler)
+is a declared input passed by path in `args`; nothing is found through `PATH` outside the declared debs.
+
+`env` (new, tool steps only): a map of constant strings added to the step's environment (in the key). Names are plain upper-case identifiers, never `PATH`, `TZ`, `LC_ALL`, `SOURCE_DATE_EPOCH`,
+`FNVNX_DEBS` or `JOBS`; a value that is a path must lie under one of the step's `scratch` directories (for example `CARGO_HOME=/scratch/cargo`). There is no network: the sandbox runs
+in its own network namespace with no interface (already so for every step), so a tool that wants to fetch fails instead of reading the world; vendored sources are declared inputs.
+Tests: `tests/test_toolexec.py` (ELF resolution and the check forms; the sandboxed green run of an external tool is the `test_toolext.py` pattern, not run on a host without busybox).
+
+## Single file of an external (a document through a tool step)
+A run step's `inputs` entry `{"external": NAME, "path": FILE}` mounts ONE file of a declared external at `/in/N`. The external is pinned as above, by
+`{commit, tree_sha256}` over its whole checkout; `resolve_input` checks that hash, then reads FILE from the checked-out tree (red: the file is not in
+the tree, the path is absolute, has `..` or leaves the tree through a link, the external is not declared, `tree_sha256` is not the checkout's). The step
+key holds the file's content, not the tree's, so a commit that changes other files of the external does not re-key the step.
+Pattern for a document turned into data (the Intel SDM): the external is `tools/intel-sdm` (a pinned PDF); the step is `exec` of `/usr/bin/pdftotext`
+from the pinned deb `poppler-utils` (with its dependency closure in `env.json` `debs.packages`), `args` `["-layout", "/in/1", "/out/sdm.txt"]`, `outputs`
+`["sdm.txt"]`; a later generator or step reads the text through its stage ref. The binary's content is in the key through `debs`. Test: `tests/test_toolext.py`.
 
 ## Result (`objects.json`, "fnvnx-objects/1")
 `objects` [{unit, object, sha256, os_layer}] (product units), `tests`, `elf` {path, sha256}|null, `constants`, `contract_names` (paths of the copies or null),

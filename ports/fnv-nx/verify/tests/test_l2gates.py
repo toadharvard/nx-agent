@@ -22,6 +22,8 @@ import gate_abi  # noqa: E402
 import gate_l2native as L  # noqa: E402
 import gate_build  # noqa: E402
 import gate_names  # noqa: E402
+import l2sections  # noqa: E402
+SYMPAIR_KINDS = l2sections.load_kinds(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'toolchain', 'names', 'sympair_kinds.inc'))
 import gate_r7  # noqa: E402
 import synth  # noqa: E402
 
@@ -97,7 +99,7 @@ def main():
     def judge(kind, o_a, o_b, verd, am=amap):
         objects = [{"unit": "game/a.cc", "object": o_a}, {"unit": "game/b.cc", "object": o_b}]
         if kind == "namegate":
-            return L.judge_files("game", objects, cld, units, am, verd, gate_names.rows,
+            return L.judge_files("game", objects, cld, units, am, verd, (lambda g_, c_, u_: gate_names.rows(g_, c_, SYMPAIR_KINDS, u_)),
                                  lambda rows, nt: L.select(rows, lambda r: r[0], lambda r: r[1], nt), lambda r: not r[3], gate_names.row_id)
         return L.judge_files("game", objects, cld, units, am, verd, gate_r7.rows, lambda rows, nt: L.select_units(rows, lambda r: r[0], nt),
                              lambda r: r[2] == "equal", gate_r7.row_id)
