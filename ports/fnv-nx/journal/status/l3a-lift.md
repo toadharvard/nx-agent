@@ -1689,3 +1689,9 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - Assumptions gate: 152/152, 0 findings at be2f01990.
 - Doing (w8): the recipe check over all admitted roots at be2f01990 (was 61/61 valid at f96997661); the path census on farm 2.
 - bottleneck: the density rules (w12 rule 1, w13 rule 2); the L2 recipe-path pin and dispatch.c; the w7 exe farm run.
+- Done (w7): one universe engine for exe and modules, claude/fnv-l3a-lift-w7-facts2 @87b8dd3d2.
+  - Deleted: the exe decomp engine, funcsfacts.py, reconcile.py, the funcs.tsv stage, the decomp external and FUNCS output.
+  - The 5 small images are identical to 90b46fee4, with entries_on_data 0 on all 5.
+  - Shapes/baddecode are in fnv-nx-build l3a-lift/shapesfacts/87b8dd3d2-<img>.
+- Doing (w8): merge into base3. Then the exe modlift run on farm 2; it OOMs at 6.6 GB in a worker.
+- Blocked (L1): contract/exefacts.py F['decomp'] and gate_xc 'missing_decomp' still read the decomp list. Asked L1 to remove or rebase them.
