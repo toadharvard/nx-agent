@@ -115,13 +115,13 @@ PROBE_LINE = re.compile(r'^\[\x1b\[\d+m\d+\s+\x1b\[0m\]: ')
 ERRCALL = re.compile(r'^\[\x1b\[\d+m\d+\s+\x1b\[0m\]: Calling x86_(?:fault|model_error)<')
 CALLING = re.compile(r'\]: Calling (\S+?)\(', re.M)
 
-def run_isla(code, timeout=600, sym=None):
+def run_isla(code, sym=None):
     """raw isla output (stdout, stderr) for one encoding, from the on-disk cache when present.  sym = (ranges, eip_sym): a SHAPE run, see sym_constraint"""
     _need()
     if not os.path.exists(IR): raise RuntimeError('missing %s: run ports/fnv-nx/farm/sail_build.sh' % IR)
     args = list(SEG_FREE if SYMSEL else SEG) + sum([['--probe', f] for f in errfns()], []) + sum([['-L', f] for f in LINEARIZE], [])     # the cache key (kept: old outputs stay valid); the run itself probes every call, see below
     cons = sym_constraint(code, *sym) if sym else ''
-    key = hashlib.sha256(('|'.join([ir_sha(), hashlib.sha256(open(CFG, 'rb').read()).hexdigest(), ' '.join(args), code.hex(), str(ADDR), 'v1'] + ([str(timeout)] if timeout != 600 else []) + ([cons] if sym else []))).encode()).hexdigest()
+    key = hashlib.sha256(('|'.join([ir_sha(), hashlib.sha256(open(CFG, 'rb').read()).hexdigest(), ' '.join(args), code.hex(), str(ADDR), 'v1'] + ([cons] if sym else []))).encode()).hexdigest()
     os.makedirs(CACHE, exist_ok=True); base = os.path.join(CACHE, key)
     if all(os.path.exists(base + e) for e in ('.out', '.err', '.fns')):
         with open(base + '.fns') as fh: FNS.clear(); FNS.extend(fh.read().split())
@@ -131,11 +131,9 @@ def run_isla(code, timeout=600, sym=None):
         regs += ['--reset-constraint', cons]
     else: regs = ['-I', 'code_base=#x%012x' % ADDR, '-I', 'code_bytes=#x' + code.ljust(16, b'\0')[::-1].hex(), '-I', 'rip=#x%016x' % ADDR]
     run_args = list(SEG_FREE if SYMSEL else SEG) + ['--probe-all'] + sum([['-L', f] for f in LINEARIZE], [])           # --probe-all only logs: every call event "Calling NAME(" names a function the run executed (K, irdeps.py)
-    cmd = [ISLA, '-A', IR, '-C', CFG, '-T', '1', '--timeout', str(timeout), 'x86_fetch_decode_execute', '()'] + regs + run_args + ['-D', 'p', '--traces', '--error-traces', '-s']
+    cmd = [ISLA, '-A', IR, '-C', CFG, '-T', '1', 'x86_fetch_decode_execute', '()'] + regs + run_args + ['-D', 'p', '--traces', '--error-traces', '-s']
     env = dict(os.environ, LD_LIBRARY_PATH=Z3LIB)
-    try: r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout + 20)     # isla's own --timeout is not honoured while z3 is busy
-    except subprocess.TimeoutExpired:
-        return 'Error Timeout\n(trace\n  (write-reg |Final result| nil (_ poison)))\n', 'hard timeout %ds\n' % (timeout + 20)
+    r = subprocess.run(cmd, capture_output=True, text=True, env=env)     # no time limit (proof/bounds.py): the result never depends on a clock; a run that does not end is killed with its stage, no record
     if r.returncode not in (0, 1): raise RuntimeError('isla failed (%d): %s' % (r.returncode, r.stderr[-400:]))
     fns = sorted(set(CALLING.findall(r.stderr))); FNS.clear(); FNS.extend(fns)
     err = '\n'.join(l for l in r.stderr.split('\n') if not PROBE_LINE.match(l) or ERRCALL.match(l))             # the probe log is ~4 MB: keep the error-function calls (isla_errors, _post) and the non-probe lines
@@ -318,14 +316,14 @@ def merge(paths, pick):
     for p in reversed(paths[:-1]): r = z3.If(p.pc, pick(p), r)
     return r
 
-class ModelTimeout(Exception):
-    """isla did not finish within the timeout (prove-side result class `timeout`)"""
+class ModelBound(Exception):
+    """a cached isla output that ended at isla's own Error Timeout (an output of a run made before the bound rule): prove-side result class `bound` (red), never a verdict"""
 LAST = {}
 
 def model_post(code, pre):
     return _post(code, pre, run_isla(code), None)
 
-def model_post_shape(code, fields, pre, eip_sym=True, timeout=600):
+def model_post_shape(code, fields, pre, eip_sym=True):
     """model_post for a whole encoding shape: `code` = representative bytes, fields = {name: (offset, size) | None} (imm / disp byte ranges), the bytes of
     the fields are the z3 variables fld_<name> (BitVec 8*size), eip is pre['eip'] (a variable when eip_sym: then code_base = rip = pre['eip'] and the
     assumption eip < EIP_LIMIT (A-EIPRANGE) is part of `assume`; otherwise the constant 0x401000, assumption A-EIP in the certificate)"""
@@ -335,7 +333,7 @@ def model_post_shape(code, fields, pre, eip_sym=True, timeout=600):
         for k in range(n): byte[o + k] = z3.Extract(8 * k + 7, 8 * k, var[nm])
     cb = z3.Concat(*[byte.get(i, z3.BitVecVal(code[i] if i < len(code) else 0, 8)) for i in reversed(range(16))])
     extra = {'code_bytes': cb, 'code_base': z3.ZeroExt(16, pre['eip'])}
-    out = run_isla(code, timeout, (tuple(rg), eip_sym))
+    out = run_isla(code, (tuple(rg), eip_sym))
     r = _post(code, pre, out, extra, z3.ULT(pre['eip'], z3.BitVecVal(EIP_LIMIT, 32)) if eip_sym else None)
     if eip_sym:                                      # terms of the dict, flattened, rewritten, put back
         flat = [(k, None, v) for k, v in r.items() if not isinstance(v, dict) and k not in ('domain', 'complete')] + [(k, n, x) for k, v in r.items() if isinstance(v, dict) for n, x in v.items()]
@@ -408,7 +406,7 @@ def _post(code, pre, out_err, extra, extra_assume=None):
         if (ok or getattr(FAULT_OK, 'declared', False)) and msgs and set(msgs) <= FAULT_OK and len(re.findall(r'Calling x86_', err)) == len(bad): faults = [tr for _, tr in bad]; bad = []
         else: faults = []
     else: faults = []
-    if bad and extra is not None and (any((h or '').startswith('Error Timeout') for h, _ in bad) or 'hard timeout' in err): raise ModelTimeout(err[-120:].replace('\n', ' '))
+    if bad and extra is not None and any((h or '').startswith('Error Timeout') for h, _ in bad): raise ModelBound(err[-120:].replace('\n', ' '))
     if bad:
         raise ModelGap('model exception on %d of %d paths: %s' % (len(bad), len(blocks), '; '.join(msgs[:2]) if msgs else first[:80]))
     if not ok and not faults: raise ModelGap('isla returned no path: ' + err[-120:].replace('\n', ' '))

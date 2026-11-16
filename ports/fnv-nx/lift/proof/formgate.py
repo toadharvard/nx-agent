@@ -16,10 +16,10 @@ relative-target fields as variables; the same function the prover writes the fie
 is uncertified), the sha256 of the pinned x86_proof.ir (derived from the external) and result == proved. The hash binds the certificate to the builder code (forms*.py, dsl.py, symform.py)
 and to the object that was proved. The gate imports no SMT solver (the DSL imports z3 only inside to_smt / post).
 
-Pinned model: the external `x86ir` is the one place x86_proof.ir is pinned (commit + tree_sha256); every reader derives the sha256 from its file.
+Pinned model: the external `x86ir` is declared once, in the build.json of the root that owns the model (OWNER, lift/proof/sailmodel: commit + tree_sha256); every reader takes the file through ir_file (recipe.resolve_input on the owner's recipe) and derives the sha256 from it.
 
 RED with the reason (item `inputs`, universe 1, certified 0), never skipped: no inputs file; not JSON; wrong format or keys; a path key naming an
-external that is not declared (`inputs: external NAME not declared`); a missing `x86ir` external; an external
+external that is not declared (`inputs: external NAME not declared`); an `x86ir` that the owner's recipe does not declare; an external
 that does not fetch or whose tree does not match its hash; shapes.tsv or certs.tsv absent from its external or malformed. Otherwise the items are the
 shapes; uncertified = shapes without a certificate (first 50, sorted); detail keeps the certified/universe count per family.
 
@@ -52,7 +52,9 @@ INPUTS = os.path.join(HERE, "formgate_inputs.json")
 FORMAT = "fnvnx-forms-inputs/1"
 EXT_KEYS = recipe.EXT_KEYS
 KEYS = {"format", "external", "shapes", "certs", "instrs"}
-IR_EXT = "x86ir"      # the external that pins x86_proof.ir: the one place the model is pinned; its sha256 is derived from the file
+IR_EXT = "x86ir"      # the external that pins x86_proof.ir: declared once, in the build.json of OWNER; its sha256 is derived from the file
+OWNER = recipe.TREE + "/lift/proof/sailmodel"      # the root that owns the model and so its IR pin
+REPO = os.path.normpath(os.path.join(LIFT, "..", "..", ".."))      # the checkout whose admit.json and recipes are read
 REFERENCES = ("sail", "fpsmt", "k", "sdm", "table")
 FAMILIES = shape.FAMILIES
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
@@ -71,8 +73,7 @@ def rows(path):
 
 
 def load_externals(path=INPUTS):
-    """-> the inputs document with its externals validated (format, keys, every external, x86ir declared); raises Red naming the problem.
-    The prover reads only this part (ir_path): the pinned IR does not depend on which pack the forms gate checks."""
+    """-> the inputs document with its externals validated (format, keys, every external, x86ir not repeated); raises Red naming the problem."""
     if not os.path.isfile(path):
         raise Red("inputs: no %s: the pack's shapes.tsv and certs.tsv are not declared as content-pinned externals of fnv-nx-build" % os.path.basename(path))
     try:
@@ -96,8 +97,8 @@ def load_externals(path=INPUTS):
     names = [e["name"] for e in exts]
     if len(set(names)) != len(names):
         raise Red("inputs: external names are not unique")
-    if IR_EXT not in names:
-        raise Red("inputs: external %s (the pinned x86_proof.ir) not declared" % IR_EXT)
+    if IR_EXT in names:
+        raise Red("inputs: external %s is declared once, in the recipe of %s: remove it here" % (IR_EXT, OWNER))
     return doc
 
 
@@ -140,11 +141,27 @@ def path_in(ext, v, what):
     return p
 
 
+def ir_file(cache, repo=REPO):
+    """the path of the pinned x86_proof.ir: the external IR_EXT of the recipe of OWNER (its own commit and tree_sha256), fetched by the loader of the trunk into `cache`
+    and read by recipe.resolve_input, the one reader (it checks the tree against the pin). Red when OWNER's recipe does not declare it."""
+    try:
+        orec = recipe.load_recipe(repo, recipe.load_admit(repo), OWNER)
+    except (OSError, ValueError, recipe.RecipeError) as e:
+        raise Red("inputs: the recipe of %s cannot be read: %s" % (OWNER, str(e)[:200]))
+    ent = [e for e in orec.get("external", []) if e.get("name") == IR_EXT]
+    if not ent:
+        raise Red("inputs: external %s (the pinned x86_proof.ir) is not declared by the recipe of %s" % (IR_EXT, OWNER))
+    fetch({"external": ent}, cache)
+    try:
+        host, _ = recipe.resolve_input(OWNER, {"external": IR_EXT, "path": "ir/x86_proof.ir"}, repo, cache, orec)
+    except ValueError as e:
+        raise Red("inputs: x86_proof.ir: %s" % str(e)[:300])
+    return host
+
+
 def ir_path(cache):
-    """the path of the pinned x86_proof.ir: the external x86ir of the inputs file, fetched by the loader of the trunk into `cache` (commit + tree_sha256); the farm script passes it to the prover as --sail-ir"""
-    doc = load_externals()
-    ext = fetch({"external": [e for e in doc["external"] if e["name"] == IR_EXT]}, cache)
-    return path_in(ext, IR_EXT + "/ir/x86_proof.ir", "x86_proof.ir")
+    """ir_file for the farm scripts and the prover programs (--sail-ir); the name stays"""
+    return ir_file(cache)
 
 
 def dsl_sha(key, md):
@@ -221,13 +238,13 @@ def analyse(shapes_path, certs_path, model_sha):
     return fam, cert, nobuilder
 
 
-def judge(cache, inputs=INPUTS):
+def judge(cache, inputs=INPUTS, repo=REPO):
     """-> (universe, certified, uncertified ids, detail); never raises for an input problem"""
     x86sys.configure(X86SYS)
     try:
         doc = load_inputs(inputs)
         ext = fetch(doc, cache)
-        fam, cert, nobuilder = analyse(path_in(ext, doc["shapes"], "shapes"), path_in(ext, doc["certs"], "certs"), file_sha(path_in(ext, IR_EXT + "/ir/x86_proof.ir", "x86_proof.ir")))
+        fam, cert, nobuilder = analyse(path_in(ext, doc["shapes"], "shapes"), path_in(ext, doc["certs"], "certs"), file_sha(ir_file(cache, repo)))
     except Red as e:
         return 1, 0, ["inputs"], str(e)[:600]
     except (OSError, ValueError) as e:

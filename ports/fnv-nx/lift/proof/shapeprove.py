@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Sharded prover of ENCODING SHAPES (rule R2): one obligation per shape, immediate / displacement / relative-target bytes (and eip) symbolic.
-  shapeprove.py --shapes FILE --shard K/N --out DIR [--timeout SEC] [--eip sym|fixed] [--slice STRIDE] [--only SUBSTR] --sail-work DIR --sail-ir FILE --isla EXE
+  shapeprove.py --shapes FILE --shard K/N --out DIR [--eip sym|fixed] [--slice STRIDE] [--only SUBSTR] --sail-work DIR --sail-ir FILE --isla EXE
 FILE: shapes.tsv (first column = shape key; '#' lines ignored; the output of proof/census.py); a key is re-derived by shape.shape_key from
 its representative bytes, so the canonical key (shape.py) is the unit whatever the census format.  Integer family only (shape.family == 'int'); the other
 families have their own provers.  Order: sorted canonical keys; shard K/N (K = 1..N) takes the shapes whose position is = K-1 mod N.  --slice STRIDE keeps
@@ -9,7 +9,7 @@ Output DIR/shapeprove_K_of_N.jsonl, one JSON line per shape (resumable: shapes a
   shape, form_key, dsl_sha (sha256 of the serialization of the SYMBOLIC Form: symform.shape_sha(shape) recomputes it without z3), model_sha (IR sha256),
   model_terms_sha, result, defects, `assumptions`, split, eip_dependence, note
 Obligation = prove.prove_one (imported, not forked): no pre-state AND no value of the field variables (free in the unsat query = universally quantified)
-gives a DSL post-state different from the Sail post-state.  Results: proved | FAILED(dsl) | FAILED(model-defect:ids) | model-gap | timeout, and the classes of a
+gives a DSL post-state different from the Sail post-state.  Results: proved | FAILED(dsl) | FAILED(model-defect:ids) | model-gap | bound (a z3 query `unknown` at proof/bounds.py Z3_RLIMIT, red, never a verdict), and the classes of a
 shape that has no obligation to run: no-form (no DSL builder / builder precondition) | builder-branches-on-field (file:line) | field-decode (capstone fits
 no hypothesis of symform.py) | decode (the representative is not one instruction).
 Certificate field `assumptions` (ids):
@@ -23,7 +23,7 @@ into are exhaustive with their path conditions in the merge)."""
 import argparse, collections, json, os, sys, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import z3
-from proof import shape as shp, symform, prove, model_sail, certbasis, treeid, x86sys
+from proof import bounds, shape as shp, symform, prove, model_sail, certbasis, treeid, x86sys
 
 def load_shapes(path):
     """canonical integer-family shape keys, sorted"""
@@ -64,9 +64,9 @@ def one(key, args):
     asm = ['A-FLAT', 'A-EIPRANGE' if eip_sym else 'A-EIP']
     try:
         res, note, extra = prove.prove_one(model_sail, F, rep, sf.form.key, args, pre=pre, fields={k: v for k, v in fields.items() if v},
-                                           model=lambda: model_sail.model_post_shape(rep, fields, pre, eip_sym, int(args.timeout)))
+                                           model=lambda: model_sail.model_post_shape(rep, fields, pre, eip_sym))
     except model_sail.ModelGap as e: res, note, extra = 'model-gap', 'GAP ' + str(e)[:200], {}
-    except model_sail.ModelTimeout as e: res, note, extra = 'timeout', 'isla: ' + str(e), {}
+    except model_sail.ModelBound as e: res, note, extra = bounds.BOUND, 'isla: ' + str(e), {}
     if model_sail.LAST.get('fault_paths'): asm.append('A-SEGLIM')
     ids = res[len('FAILED(model-defect:'):-1].split(',') if res.startswith('FAILED(model-defect:') else []
     return fin('FAILED(model-defect)' if ids else res, note, defects=ids, assumptions=asm,
@@ -95,12 +95,12 @@ def migrate(rec, args):
     if rec.get('model_fns'): return dict(rec, closure_sha=model_sail.closure_sha(rec['model_fns']))     # re-key (closure rule changed, env v2): pure recomputation over the recorded executed set, on the IR the record was proved against
     if rec.get('closure_sha'): return rec
     rep, fields = symform.parse_key(rec['shape']); eip_sym = rec.get('eip_mode', 'sym') == 'sym'
-    model_sail.LAST.clear(); model_sail.model_post_shape(rep, fields, pre_state(eip_sym), eip_sym, int(args.timeout))
+    model_sail.LAST.clear(); model_sail.model_post_shape(rep, fields, pre_state(eip_sym), eip_sym)
     return dict(rec, **fns_fields())
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument('--shapes', required=False, default=None); ap.add_argument('--shard', default='1/1'); ap.add_argument('--out', required=True)
-    ap.add_argument('--timeout', type=float, default=600); ap.add_argument('--eip', choices=('sym', 'fixed'), default='sym'); ap.add_argument('--slice', type=int, default=1)
+    ap.add_argument('--eip', choices=('sym', 'fixed'), default='sym'); ap.add_argument('--slice', type=int, default=1)
     ap.add_argument('--only'); ap.add_argument('--migrate', metavar='JSONL', help='K: copy the records of JSONL (a shard of this model) to the shard file, adding model_fns / closure_sha to the proved ones'); ap.add_argument('--limit', type=int)
     ap.add_argument('--sail-work', required=True); ap.add_argument('--sail-ir', required=True); ap.add_argument('--isla', required=True)
     x86sys.add_arg(ap)

@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import declared_
 def run(hexbytes):
     code = bytes.fromhex(hexbytes); cs = Cs(CS_ARCH_X86, CS_MODE_32); cs.detail = True; ins = list(cs.disasm(code, prove.ADDR)); assert len(ins) == 1 and ins[0].size == len(code), hexbytes
     F = forms.build(ins[0], prove.ADDR)
-    return prove.prove_one(model_sail, F, code, forms.form_key(ins[0]), argparse.Namespace(timeout=300))
+    return prove.prove_one(model_sail, F, code, forms.form_key(ins[0]), argparse.Namespace())
 
 @declared_sail.needs_sail
 class ModelPatches(unittest.TestCase):
@@ -53,7 +53,7 @@ class Def0(unittest.TestCase):
     def test_a_defined_model_flag_declared_undefined_is_red(self):      # add defines CF: declaring it undefined (value 0) is a mismatch, never a free pass
         code = bytes.fromhex('01c8'); cs = Cs(CS_ARCH_X86, CS_MODE_32); cs.detail = True; ins = list(cs.disasm(code, prove.ADDR))[0]
         F = forms.build(ins, prove.ADDR); F.undefined('cf', 'test')
-        r, note, _ = prove.prove_one(model_sail, F, code, forms.form_key(ins), argparse.Namespace(timeout=300))
+        r, note, _ = prove.prove_one(model_sail, F, code, forms.form_key(ins), argparse.Namespace())
         self.assertEqual(r, 'FAILED(def0)', note)
 
 @declared_sail.needs_sail
@@ -67,7 +67,7 @@ class DefPrior(unittest.TestCase):
         M['regs']['eax'] = model_eax; D['regs']['eax'] = lifted_eax
         for k, v in (extra_out or {}).items(): M['regs'][k] = v
         ex = {}
-        res, note = prove.def0(M, D, prove.FLAGS, z3.BoolVal(True), side if side is not None else z3.BoolVal(True), argparse.Namespace(timeout=60), ex, pre)
+        res, note = prove.def0(M, D, prove.FLAGS, z3.BoolVal(True), side if side is not None else z3.BoolVal(True), argparse.Namespace(), ex, pre)
         return res, ex['def0']
     def test_single_register_output_is_proved_under_defprior(self):
         z3 = self._z; p = z3.BitVec('p1_x', 32)
@@ -90,7 +90,7 @@ class DefPrior(unittest.TestCase):
         Mf['regs']['eax'] = p; Mf['flags']['cf'] = zz.Extract(0, 0, p)
         D = {'regs': dict(Mf['regs']), 'defined': {f: zz.BoolVal(f != 'cf') for f in prove.FLAGS}}
         D['regs']['eax'] = pre['regs']['eax']
-        ex = {}; prove.def0(Mf, D, prove.FLAGS, zz.BoolVal(True), zz.BoolVal(True), argparse.Namespace(timeout=60), ex, pre)
+        ex = {}; prove.def0(Mf, D, prove.FLAGS, zz.BoolVal(True), zz.BoolVal(True), argparse.Namespace(), ex, pre)
         self.assertEqual([c['class'] for c in ex['def0']['classes']], ['multi'])
         self.assertEqual(ex['def0']['defprior'], [])
 

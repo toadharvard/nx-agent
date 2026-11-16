@@ -8,7 +8,7 @@
 # cargo-home, isla-vendor), WORK (work/), JOBS (2: opam/dune/cargo parallelism).  Idempotent: finished steps are skipped.
 # Default (a proving farm): apt -> sources (isla) -> z3 -> isla (cargo --locked).  NO IR is produced here: the proof IR is an external fetched by its pinned sha (tools/sail-ir-<sha 12>).
 # FULL=1 (the one machine that PRODUCES the IR): additionally opam binary -> opam switch+packages -> isla-sail -> sail_build.sh (PUBLISH_IR=1 publishes it) -> check.
-# The result (sha256 of x86_proof.ir) is compared with the sha256 of the pinned IR (the external x86ir of formgate_inputs.json); a mismatch exits 1.  No step may fail silently.
+# The result (sha256 of x86_proof.ir) is compared with the sha256 of the pinned IR (the external x86ir of lift/proof/sailmodel/build.json); a mismatch exits 1.  No step may fail silently.
 set -euo pipefail
 FARM=$(cd "$(dirname "$0")" && pwd); HERE=$(cd "$FARM/../lift/proof" && pwd); PINS=$HERE/sail_pins.txt
 . "$FARM/sail_toolchain.sh"      # SAILBASE, sail_pinned_ir (the toolchain paths are derived in that one file)

@@ -13,6 +13,7 @@ operands and the SAT core times out.  The rule, in four steps (each a sound rest
 A pair that is not proved leaves the part to the whole query (None): matching is sufficient, not necessary, so a failed pair is never a counter-example.  completeness_theorem() proves the partitions with z3."""
 import hashlib, os
 import z3
+from proof import bounds
 
 _QCFILE = os.environ.get('SIMD_QCACHE')
 _PROVED, _UNDECIDED = set(), set()          # canonical piece queries of this process: proved (unsat) / not decided within the limit
@@ -142,7 +143,7 @@ def _leaf_subst(pairs_ops):
 
 
 NORMAL = 4                      # classes(): index of the class 'exponent neither all zeros nor all ones'
-REFINE_MS = 3000               # time limit (ms) of a query over an interval of several exponent values; a single value gets the caller's full limit
+REFINE_RLIMIT = bounds.Z3_RLIMIT_REFINE      # resource limit of a query over an interval of several exponent values (a bisection strategy knob: both halves are a complete partition, so it never changes a result's meaning); a single value gets the caller's full limit
 MAX_ASKS = 256                  # solver calls one case may use for its exponent refinement (a bound of work: a case that needs more is undecided)
 
 
@@ -161,7 +162,7 @@ def _load():
         _MT[0] = os.path.getmtime(_QCFILE); _PROVED.update(l.strip() for l in open(_QCFILE))
 
 
-def _decide(mk_solver, cs, goal, nrm, timeout, _):
+def _decide(mk_solver, cs, goal, nrm, rlimit, _):
     """'unsat' iff  cs and goal  is unsat.  When the solver does not decide it, the exponent interval of a normal operand is bisected: the two halves are a complete, disjoint partition of the interval (the base interval 1 .. 2^eb - 2 is
     the class itself), and the case holds iff both halves hold; sat in any piece is sat of the case.  A single exponent value that is still undecided, or more than MAX_ASKS calls, is 'unknown'."""
     asks = [0]
@@ -173,7 +174,7 @@ def _decide(mk_solver, cs, goal, nrm, timeout, _):
         asks[0] += 1
         if asks[0] > MAX_ASKS: return 'unknown'
         widths = [hi - lo for lo, hi in ivs]
-        res = mk_solver(q, timeout if not ivs or max(widths) == 0 else min(timeout, REFINE_MS)).check()          # an interval that is not a single exponent value is asked briefly: undecided means bisect
+        res = mk_solver(q, rlimit if not ivs or max(widths) == 0 else min(rlimit, REFINE_RLIMIT)).check()          # an interval that is not a single exponent value is asked briefly: undecided means bisect
         if res == z3.unsat: _proved(qk); return 'unsat'
         if res == z3.sat: return 'sat'
         if not ivs or max(widths) == 0: _UNDECIDED.add(qk); return 'unknown'
@@ -185,9 +186,9 @@ def _decide(mk_solver, cs, goal, nrm, timeout, _):
     return go([(1, (1 << EXP[w][0]) - 2) for w, v in nrm])
 
 
-def prove_flags(g0, nf, env, mx, fpl, mk_solver, timeout):
+def prove_flags(g0, nf, env, mx, fpl, mk_solver, rlimit):
     """-> True iff the equality g0 (one bit of the post-MXCSR, Form == spec) is proved by the per-lane split; 'unknown' when a piece ran out of the time limit; None when the split does not apply or a piece is not proved (the caller asks the whole part).
-    mk_solver(assertions, timeout) -> a z3 solver for them (the caller's tactic)."""
+    mk_solver(assertions, rlimit) -> a z3 solver for them (the caller's tactic)."""
     try:
         ops, seen = [], set()
         for w, xs in fpl:
@@ -240,9 +241,9 @@ def prove_flags(g0, nf, env, mx, fpl, mk_solver, timeout):
             for idx in itertools.product(*[range(len(f)) for f in facs]):
                 cs = [f[i] for f, i in zip(facs, idx)]
                 nrm = [bn[k] for k, i in zip(ovs, idx[2:]) if i == NORMAL]            # the operands of the class 'exponent neither zeros nor ones': their exponent value is refined where the case is not decided
-                r = _decide(mk_solver, cs, z3.Not(lt == rt), nrm, timeout, None)
+                r = _decide(mk_solver, cs, z3.Not(lt == rt), nrm, rlimit, None)
                 if r == 'unsat': continue
                 if os.environ.get('SIMD_TRACE'): print('  simdsplit piece', sorted(key), r, [str(c)[:50] for c in cs])
-                return 'unknown' if r == 'unknown' else _no(7)             # unknown: a piece not decided leaves the shape timeout (the whole query reads more operands, no easier); sat: the matching of disjuncts is not the structure of the terms, the caller asks the whole part
+                return 'unknown' if r == 'unknown' else _no(7)             # unknown: a piece not decided leaves the shape rlimit (the whole query reads more operands, no easier); sat: the matching of disjuncts is not the structure of the terms, the caller asks the whole part
         return True
     except z3.Z3Exception: return _no(8)

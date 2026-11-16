@@ -4,7 +4,7 @@
 # --queue FILE: the PINNED queue of a pack (fnv-nx-build branch l3b-lift/queue/<pack12>-<prover12>, file queue.tsv, proof/packqueue.py): the rows `shape_key<TAB>shape_sha`
 #   are the work, split by position mod N; nothing is fetched or scanned (steps 2 and 2b are skipped), so every farm of one run has the same queue.  The header's ir_sha256 must be
 #   the IR of this machine and the rows must hash to the header's queue_id, else exit 1.  Output branch id = <IR id>-<queue_id>.  Every record carries model_fns / closure_sha (K).
-# Mode: a queue whose header has `# mode=simd` is checked by simdshard.py (simdcheck.check per shape, wall-clock budget TIMEOUT s, default 60) instead of shapeprove.py; same shards, records, branches, resume.  `# qcache=<branch>:<file>` seeds simdcheck's proved-query cache.
+# Mode: a queue whose header has `# mode=simd` is checked by simdshard.py (simdcheck.check per shape, bounded by proof/bounds.py only) instead of shapeprove.py; same shards, records, branches, resume.  `# qcache=<branch>:<file>` seeds simdcheck's proved-query cache.
 # Inputs (private / exe-derived, fetched from the artifacts repository fnv-nx-build, never stored in this repository):
 #   branch l3b-lift/shapes        KEYS.tsv + <module>/shapes.tsv (output of proof/census.py); every shapes.tsv is checked against KEYS.tsv
 #   branch tools/sail-mirror      the pinned downloads of the Sail/isla toolchain; used by farm/sail_setup.sh (MIRROR=...) only when the toolchain
@@ -18,7 +18,7 @@
 # Resumable and incremental: the shard's results branch is updated every PUBLISH_EVERY seconds (default 600) and on SIGTERM/SIGINT; a rerun of the same command resumes from the published file (shapes with a record are skipped), so a time limit, a crash or a kill loses at most one increment.
 # Env: GATE_CACHE (required: the verdict cache; the Sail toolchain and caches are under it)  FNVNX_BUILD (clone of fnv-nx-build)  FNVNX_WORK (default $GATE_CACHE/farm-shapeprove)
 #      SHAPES_BRANCH (default l3b-lift/shapes; the census branch, KEYS.tsv-pinned; a re-pinned census goes to ANOTHER branch, the running farms read the head of this one)  BRANCH_PREFIX (default l3b-lift/shapeprove; tests use l3b-lift/shapeprove-test)  PUBLISH (1 default; 0: prove only)
-#      TIMEOUT (s per shape, default 600)  EIP (sym|fixed, default sym)  SLICE (default 1)  LIMIT (first LIMIT shapes of the shard, default all)
+#      EIP (sym|fixed, default sym)  SLICE (default 1)  LIMIT (first LIMIT shapes of the shard, default all)
 #      VMEM_KB (address-space limit per process, default 6000000)  SHAPES (a shapes.tsv: skips the fetch of l3b-lift/shapes; local tests)
 # Last line: SHAPEPROVE shard=K/N id=ID shapes=<n> proved=<n> ... seconds=<wall> ; exit 1 if publication failed.
 set -euo pipefail
@@ -54,19 +54,19 @@ if ! python3 -c 'import capstone, keystone' 2>/dev/null; then
 fi
 
 # 1. toolchain: the installed isla binary, else built from the mirror branch (sail_setup.sh).  The proof IR is NOT built here: it is fetched by its sha (the pin of
-#    formgate_inputs.json, the external x86ir) from the artifacts repository by the loader; farm/sail_build.sh produced and published it once (PUBLISH_IR=1)
+#    lift/proof/sailmodel/build.json, the external x86ir) from the artifacts repository by the loader; farm/sail_build.sh produced and published it once (PUBLISH_IR=1)
 if [ ! -x "$ISLA" ]; then
     fetch_branch tools/sail-mirror "$W/in/sail-mirror"
     MIRROR="$W/in/sail-mirror" bash "$FARM/sail_setup.sh" > "$W/sail_setup_$K.log" 2>&1 || { echo "sail_setup.sh failed (see $W/sail_setup_$K.log)" >&2; exit 1; }
 fi
-# the IR is pinned in ONE place: the external x86ir of formgate_inputs.json (commit + tree_sha256); formgate.ir_path fetches it through the trunk's loader into GATE_CACHE.  No pin literal here.
+# the IR is pinned in ONE place: the external x86ir of lift/proof/sailmodel/build.json (commit + tree_sha256); formgate.ir_path fetches it through the trunk's loader into GATE_CACHE.  No pin literal here.
 # The toolchain is passed to every prover program as explicit arguments (model_sail.configure): --sail-work --sail-ir --isla; no program reads it from the environment.  SAIL_IR (a farm build of the series) replaces the pinned IR.
-PINIR=$(sail_pinned_ir) || { echo "the pinned IR (external x86ir of formgate_inputs.json) does not load" >&2; exit 1; }
+PINIR=$(sail_pinned_ir) || { echo "the pinned IR (external x86ir of lift/proof/sailmodel/build.json) does not load" >&2; exit 1; }
 IR=${SAIL_IR:-$PINIR}
 sail_args "$IR"
 SHA=$(python3 -I "$HERE/certs_build.py" "${TC[@]}" --model-sha) || { echo "the IR $IR does not load" >&2; exit 1; }
-PINSHA=$(python3 -I "$HERE/certs_build.py" --sail-work "$WORKDIR" --sail-ir "$PINIR" --isla "$ISLA" --x86sys "$X86SYS_FILE" --model-sha) || { echo "the pinned IR (external x86ir of formgate_inputs.json) does not load" >&2; exit 1; }
-[ "$SHA" = "$PINSHA" ] || { echo "IR sha256 $SHA is not the pinned IR $PINSHA (external x86ir of formgate_inputs.json)" >&2; exit 1; }
+PINSHA=$(python3 -I "$HERE/certs_build.py" --sail-work "$WORKDIR" --sail-ir "$PINIR" --isla "$ISLA" --x86sys "$X86SYS_FILE" --model-sha) || { echo "the pinned IR (external x86ir of lift/proof/sailmodel/build.json) does not load" >&2; exit 1; }
+[ "$SHA" = "$PINSHA" ] || { echo "IR sha256 $SHA is not the pinned IR $PINSHA (external x86ir of lift/proof/sailmodel/build.json)" >&2; exit 1; }
 
 if [ -n "$PINQ" ]; then
     # 2. the pinned queue: its header names the IR and the queue id; the rows must hash to it
@@ -155,9 +155,9 @@ if [ "$MODE" = simd ]; then
     [ -n "$CFS" ] || { echo "a simd queue needs '# cpufeat=<branch>:<file>' (the CPUID feature-bit table)" >&2; exit 1; }
     fetch_branch "${CFS%%:*}" "$W/in/cpufeat-$K"; CF="$W/in/cpufeat-$K/${CFS#*:}"
     [ "$(sha256sum "$CF" | cut -d' ' -f1)" = "$CFH" ] || { echo "cpufeat table sha256 differs from the queue header" >&2; exit 1; }
-    python3 -I "$HERE/simdshard.py" --cpufeat "$CF" --x86sys "$X86SYS_FILE" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --timeout "${TIMEOUT:-60}" --slice "${SLICE:-1}" --cache "$GATE_CACHE" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
+    python3 -I "$HERE/simdshard.py" --cpufeat "$CF" --x86sys "$X86SYS_FILE" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --slice "${SLICE:-1}" --cache "$GATE_CACHE" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
 else
-python3 -I "$HERE/shapeprove.py" "${TC[@]}" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --timeout "${TIMEOUT:-600}" --eip "${EIP:-sym}" --slice "${SLICE:-1}" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
+python3 -I "$HERE/shapeprove.py" "${TC[@]}" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --eip "${EIP:-sym}" --slice "${SLICE:-1}" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
 fi
 PP=$!
 trap 'kill $PP 2>/dev/null; wait $PP 2>/dev/null; publish; exit 143' TERM INT
