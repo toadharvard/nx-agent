@@ -2346,7 +2346,7 @@ def tail(store, res):
 
 
 def symbols(path, unit):
-    """(defined [{symbol,bind,type,object}], undefined {symbol}) of the global and weak symbols of ELF32 or ELF64 little-endian
+    """(defined [{symbol,bind,type,object,target}], undefined {symbol}) of the global and weak symbols of ELF32 or ELF64 little-endian
     object PATH (.symtab; ELF32 is the ILP32 ABI, ELF64 the LP64 one: the layouts of Elf32_/Elf64_ Shdr and Sym)."""
     d = open(path, "rb").read()
     if d[:4] != b"\x7fELF" or d[4] not in (1, 2) or d[5] != 1:
@@ -2356,6 +2356,7 @@ def symbols(path, unit):
     esz, num = struct.unpack_from("<HH", d, 0x3a if w64 else 0x2e)
     secs = [struct.unpack_from("<IIQQQQIIQQ" if w64 else "<IIIIIIIIII", d, shoff + i * esz) for i in range(num)]   # name type flags addr off size link info align entsize
     defined, undefined = [], set()
+    target = list(object_target(path))   # the object's own (ELF class, e_machine), the link target of RECIPE.md "Target of the link"
     for s in (x for x in secs if x[1] == 2):
         st = secs[s[6]]
         strtab = d[st[4]:st[4] + st[5]]
@@ -2366,7 +2367,7 @@ def symbols(path, unit):
                 if shndx == 0:
                     undefined.add(n)
                 else:
-                    defined.append({"symbol": n, "bind": SBIND[info >> 4], "type": STYPE.get(info & 15, str(info & 15)), "object": unit})
+                    defined.append({"symbol": n, "bind": SBIND[info >> 4], "type": STYPE.get(info & 15, str(info & 15)), "object": unit, "target": target})
     return defined, undefined
 
 

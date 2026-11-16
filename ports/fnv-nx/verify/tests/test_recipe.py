@@ -473,7 +473,7 @@ def main():
     check("warm == cold (objects, ELF)", [o["sha256"] for o in r1["objects"]] == [o["sha256"] for o in r2["objects"]]
           and r1["elf"]["sha256"] == r2["elf"]["sha256"] and r1["stage_keys"] == r2["stage_keys"])
     d, u = r1["defined"], r1["undefined"]
-    check("objects.json: defined symbols from .symtab (struct), undefined list", {"symbol": "f_a", "bind": "GLOBAL", "type": "FUNC", "object": "a.c"} in d
+    check("objects.json: defined symbols from .symtab (struct), undefined list", any(x["symbol"] == "f_a" and x["bind"] == "GLOBAL" and x["type"] == "FUNC" and x["object"] == "a.c" and x["target"] in ([1, 183], [2, 183]) for x in d)
           and any(x["symbol"] == "os_svc" and x["object"] == "os.S" for x in d) and {"f_a", "f_b"} <= set(u) and "f_c" not in u
           and d == sorted(d, key=lambda x: (x["symbol"], x["object"])) and u == sorted(u), (d, u))
 
