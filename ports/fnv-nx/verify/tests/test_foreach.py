@@ -106,6 +106,21 @@ for what, mut, want in (("a range of 0", lambda: dict(rr, run=[dict(sh, foreach=
     except ValueError as e:
         msg = str(e)
     check("%s is red" % what, want in msg, msg)
+# {range: {rows_of: NAME}}: N is the row count of an earlier foreach step, so the literal lives once
+lk = dict(sh, name="link", foreach={"range": {"rows_of": "shard"}}, outputs=["l/{i}.txt"])
+exl = recipe.expand_foreach(dict(rr, run=[sh, lk]), None)["run"]
+check("rows_of: link has as many steps as shard, with i and n", [g["name"] for g in exl[3:]] == ["link.0", "link.1", "link.2"] and exl[5]["args"] == ["/in/1", "2", "3"], [g["name"] for g in exl])
+check("rows_of follows a changed literal", len(recipe.expand_foreach(dict(rr, run=[dict(sh, foreach={"range": 5}), lk]), None)["run"]) == 10)
+for what, run, want in (("rows_of naming a later step", [lk, sh], "not a foreach step earlier"),
+                        ("rows_of naming no foreach step", [dict(lk, foreach={"range": {"rows_of": "nope"}})], "not a foreach step earlier"),
+                        ("rows_of of itself", [dict(lk, foreach={"range": {"rows_of": "link"}})], "not a foreach step earlier"),
+                        ("a range dict with another key", [sh, dict(lk, foreach={"range": {"rows_of": "shard", "x": 1}})], "range must be")):
+    try:
+        recipe.expand_foreach(dict(rr, run=run), None)
+        msg = ""
+    except ValueError as e:
+        msg = str(e)
+    check("%s is red" % what, want in msg, msg)
 # named rows inputs: two groups, `as`, and @rows:NAME in row order
 sh2 = dict(sh, name="shard2", foreach={"range": 2}, outputs=["q/{i}.txt"])
 two = dict(cons, inputs=[R + "/p.sh", {"stage": R + ":run:shard", "path": "part/{i}.txt", "rows": "all", "as": "a"}, {"stage": R + ":run:shard2", "path": "q/{i}.txt", "rows": "all", "as": "b"}],

@@ -333,6 +333,7 @@ names (`[A-Za-z][A-Za-z0-9_]*`, unique), then one row per line with exactly the 
   that is no plain name or occurs twice, a key column that is not in the header, a `{name}` that is no column or a lone brace, and an output that two rows share (an output of a
   foreach step names the row, for example `proof/{shape}.txt`).
 - `"foreach": {"range": N}` (N an integer >= 1) is the same without a table: N steps named `NAME.<i>` for i = 0..N-1, with `{i}` and `{n}` (= N) replaced like a column. An N below 1 is red.
+  - `"foreach": {"range": {"rows_of": "NAME"}}` takes N as the row count of the foreach step NAME of the same recipe, which must be earlier in it and have a range or a static table (anything else is red). N then lives in that one step, and a fan-in `rows: all` from NAME matches this step's rows by construction; `{i}` and `{n}` are replaced as for a literal range.
 - Fan-in. A step of the recipe may take the outputs of all rows of a foreach step as inputs: `{"stage": "ROOT:run:NAME", "path": TEMPLATE, "rows": "all"}`, TEMPLATE being an `outputs` or `dirs` entry of
   the foreach step as written (for example `part/{i}.txt`). The expansion replaces it by one ordinary stage ref per row, in row order, so they are the consecutive mounts /in/K, and the arg
   `"@rows"` of that step becomes the list of those mounts in the same order. A `rows` input that names no foreach step of the recipe, a TEMPLATE that is no output of it,

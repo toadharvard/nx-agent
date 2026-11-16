@@ -669,11 +669,19 @@ def foreach_subst(text, row, where):
     return out
 
 
-def foreach_spec_rows(g, repo):
-    """(rows, key) of the foreach of step G: `{table, key}` (a tracked TSV file) or `{range: N}` (N rows with the columns i = 0..N-1 and n = N, key i)."""
+def foreach_spec_rows(g, repo, fan=None):
+    """(rows, key) of the foreach of step G: `{table, key}` (a tracked TSV file) or `{range: N}` (N rows with the columns i = 0..N-1 and n = N, key i).
+    `{range: {rows_of: NAME}}`: N is the row count of the foreach step NAME, which must be earlier in the recipe (FAN holds the steps expanded so far) and have
+    a range or a static table; the one literal then lives in that step, and a fan-in over it matches this step's rows by construction."""
     fe, name = g["foreach"], g.get("name")
     if isinstance(fe, dict) and set(fe) == {"range"}:
         n = fe["range"]
+        if isinstance(n, dict):
+            if not (set(n) == {"rows_of"} and isinstance(n["rows_of"], str)):
+                raise ValueError("run %r: foreach range must be an integer >= 1 or {rows_of: NAME}" % name)
+            if n["rows_of"] not in (fan or {}):
+                raise ValueError("run %r: foreach range rows_of %r is not a foreach step earlier in the recipe with a range or a static table" % (name, n["rows_of"]))
+            n = len(fan[n["rows_of"]][1])
         if not (isinstance(n, int) and not isinstance(n, bool) and n >= 1):
             raise ValueError("run %r: foreach range must be an integer >= 1 (an empty fan-out is red)" % name)
         return [{"i": str(i), "n": str(n)} for i in range(n)], "i"
@@ -703,7 +711,7 @@ def expand_foreach(rec, repo):
     for g in rs:
         if not (isinstance(g, dict) and "foreach" in g) or isinstance(g["foreach"].get("table") if isinstance(g["foreach"], dict) else None, dict):
             continue
-        rows, key = foreach_spec_rows(g, repo)
+        rows, key = foreach_spec_rows(g, repo, fan)
         fan[g.get("name")] = (g, rows, key)
     for g in rs:
         if not isinstance(g, dict):
