@@ -1783,3 +1783,8 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - susp is at offset 504 and sizeof(cpu) is 512. Relaxed atomic load. P = back edges ∪ entries. test_poll and 11/11 fnvlift tests pass.
   - Doing (w13): the poll redirect becomes the return protocol (no nonlocal block per function). It was 28,175→35,769 B on the 52 buffers with goto nonlocal.
   - Red on r123 too: proof test_dsl_int_classes and test_dsl_lock (x86sys not configured). Added to w13's cleanup.
+- base3 7762ba183 (w8): facts2 87b8dd3d2 merged; w12 recipe fixes and the provenance feature in; w4 02a6d00a1 in. Assumptions 152/152; recipe check 64 roots valid, 0 red.
+  - Trunk fac693694 merge: ruled a 3-way merge against e8e54dcea.
+    - The trunk's cut deletions do not delete base3's files (the lead branch holds the completion).
+    - The ASSUMPTIONS and admit merges are 3-way by id.
+  - Doing (w8): the NAMES-FNPARM revert, then the merge, then the exe RUN on farm 2.
