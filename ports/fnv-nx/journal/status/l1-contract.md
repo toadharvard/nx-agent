@@ -2457,3 +2457,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:18
 - w28 c8938b24c: test_plugins rewritten (tool-tree case deleted; header-home case split into a uses-INCLUDE green case and a red case); host-root plugin rule: plugins are red only with a C/C++ unit (generated-only host roots green). Forwarded to L2.
 - bottleneck: cand3b verdict at 597f2e007.
+
+## 2026-11-16 04:19
+- L3a base3 8c8d9b247: ra typing + entry bridge; lift/rt records entry 32 / data 1 / func 0. Accepted, except the 2 fixed-key EH rows (tools/ehkeys.py, '!rt', 0x000fffd0/0x000fffe0): they become FNVNX_EXPORT entry records in a declared pseudo-module with allocated (or exe-fact-derived) keys, and ehkeys.py is deleted.
+- bottleneck: cand3b verdict at 597f2e007.
