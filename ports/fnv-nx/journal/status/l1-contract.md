@@ -3055,3 +3055,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - the full set is required;
   - red: a host compiler with plugins, or a version or ABI mismatch.
   - w28 implements it on c5.
+- 12:29: w29 item 6 covers only the constant-store half. A lock call stays an effect, with no lockop marker.
+  - KNOWN GAP, for the orchestrator report: vacuity hidden behind calls (lock/unlock around dead state). It is fixed for the only known case (Steam dm:20/21). No class rule today.
+  - w29 item 7 (L3a): foreach_dynamic `dirs` plus the table header rule (first line `#`, other `#` lines red), so lift/factsimg becomes one foreach.
