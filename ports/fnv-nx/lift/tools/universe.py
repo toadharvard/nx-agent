@@ -399,9 +399,9 @@ def uni(I):
 # on such a byte is not an entry: its pointer is a data address, the proof is the class and the relocation that names the byte, recorded in dropped_on_data.tsv.
 C3 = classify(); DROP = {}
 def on_data(a): return T0 <= a < T1 and C3[a - T0] == 3
-for a in sorted(r3set):
-    if on_data(a) and not (kinds[a] - {'ptr', 'inner'}):
-        DROP[a] = 'data-reloc:%08x' % tref[a - T0]; del entries[a]; kinds.pop(a, None); esite.pop(a, None); parent.pop(a, None); scx.pop(a, None); udset.discard(a); r3set.discard(a)
+for a in sorted(entries):         # every pointer-only entry (R3 or committed-flow ptr_target whose table mark arrived in a later jtab round), not only r3set
+    if on_data(a) and not (kinds[a] - {'ptr', 'inner'}) and not cov[a - T0]:
+        bad_entries.discard(a); DROP[a] = 'data-reloc:%08x' % tref[a - T0]; del entries[a]; kinds.pop(a, None); esite.pop(a, None); parent.pop(a, None); scx.pop(a, None); udset.discard(a); r3set.discard(a)
 # ---- closure under direct targets (rule C): the entry set is the least fixed point of R3 and of "every direct call target, and every direct jmp/jcc/loop target that leaves
 # the lifter's range [lo,hi), of the body of every entry is an entry". The body and the range are the lifter's own (fnvlift.core.explore from the entry over the range
 # entry_args gives: [parent, parent+size) for an entry with parent=, else [entry, entry+extent)); a call target is an entry even inside the range (the lifter emits
