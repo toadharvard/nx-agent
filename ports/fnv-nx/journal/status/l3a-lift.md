@@ -1788,3 +1788,9 @@ One bounded read-only pass over lift/. Each item gives its replacement.
     - The trunk's cut deletions do not delete base3's files (the lead branch holds the completion).
     - The ASSUMPTIONS and admit merges are 3-way by id.
   - Doing (w8): the NAMES-FNPARM revert, then the merge, then the exe RUN on farm 2.
+- w13 cleanup, claude/fnv-l3a-lift-w13-clean @adc346dcd:
+  - root_graph is acyclic (cpufeat moved to proof/); prelude, liftgen_recipe and cpufeat_sdm are fixed.
+  - Still red (ours, doing): gate_flags (proof.flagagree missing), gate_fpexact (helpers=None).
+  - Red from L2 NAMES-FNPARM: defdisp, descclass, gate_lift toy; w8 is reverting.
+- w13 queue: r123p return redirect plus attach/detach → the two reds → compose the relift head.
+- Doing (w7): (D) for L5, whether the context/APC/alertable-wait imports are reached, plus the unresolved GetProcAddress sites.
