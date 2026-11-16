@@ -1385,12 +1385,15 @@ DEBS_CLOSURE_ERR = 'debs is a list of env.json package names or {"closure": [top
 def step_debs(g, closure=True):
     """The debs of run step G as a sorted list of names: the written list, or for {"closure": [TOPS]} the Depends closure of TOPS (deb_closure), so a package that a
     dependency adds is written in no build.json; plus the machine's root layout package (envcheck.RUN_LAYOUT_DEB, base-files: the usr-merge links /lib /lib64 /bin /sbin
-    that every PT_INTERP and every program path resolves through), which is a fact of the declared machine and in every run step, never listed by a recipe.
+    that every PT_INTERP and every program path resolves through), which is a fact of the declared machine and in every run step: a recipe that lists it is red (as a
+    duplicated declaration).
     ValueError on a form that is neither; CLOSURE False takes the tops themselves (the check does not read the machine)."""
     import envcheck
     d = g.get("debs")
     if isinstance(d, list) and all(isinstance(x, str) for x in d):
         got = list(d)
+        if envcheck.RUN_LAYOUT_DEB in got:
+            raise ValueError("debs: %s is the machine's root layout and in every run step: do not list it" % envcheck.RUN_LAYOUT_DEB)
     elif isinstance(d, dict) and set(d) == {"closure"} and isinstance(d["closure"], list) and d["closure"] and all(isinstance(x, str) for x in d["closure"]):
         got = deb_closure(d["closure"]) if closure else list(d["closure"])
     else:
@@ -1439,6 +1442,7 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
                 err.append('run[%d].inputs: {"plugins": "root"} is written once' % i)
             if not any(isinstance(x, dict) for x in (rec.get("plugins") if isinstance(rec.get("plugins"), list) else [])):
                 err.append('run[%d].inputs: {"plugins": "root"} needs the root to declare `plugins`' % i)
+    raw = rs
     rs = expand_run(rec, closure=False)["run"]
     pk = deb_pins()
     names = set()
@@ -1482,7 +1486,7 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
         if not (isinstance(g["args"], list) and all(isinstance(x, str) for x in g["args"])):
             err.append("run[%d].args must be strings" % i)
         try:
-            err += ["run[%d].debs: %s is not declared in env.json debs.packages" % (i, d) for d in step_debs(g, closure=False) if d not in pk]
+            err += ["run[%d].debs: %s is not declared in env.json debs.packages" % (i, d) for d in step_debs(raw[i], closure=False) if d not in pk]
         except ValueError as e:
             err.append("run[%d].%s" % (i, e))
         ins = g["inputs"]
