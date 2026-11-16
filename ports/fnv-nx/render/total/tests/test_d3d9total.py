@@ -30,7 +30,10 @@ import gate_d3d9total as G  # noqa: E402
 SWITCHED = G.module_lists(os.path.join(PORT, "render", "d3d9", "env", "gen_enums.py"), ["SWITCHED", "INDEXED"])["SWITCHED"]
 CACHE = os.path.join(tempfile.mkdtemp(prefix="t-d3d9total-"), "cache")   # the one cache of this test (a test does not see GATE_CACHE)
 os.makedirs(CACHE)
-VENDOR = G.vendor_fourcc(PORT, tempfile.mkdtemp(prefix="t-d3d9total-wine-"), CACHE)[0]   # the generator's own rule over the recipe's pinned Wine mirror
+SPEC_PATH = os.path.join(tempfile.mkdtemp(prefix="t-d3d9total-spec-"), "d3d9_spec.json")   # D9_SPEC, written by the generator itself
+with open(SPEC_PATH, "w") as _f:
+    _f.write(subprocess.run([sys.executable, "-E", "-s", "-B", os.path.join(PORT, "bridgefacts", "d3d9", "d3d9_spec.py"), "--stdout", os.path.join(PORT, "shim", "include")], check=True, capture_output=True, text=True).stdout)
+VENDOR = G.vendor_fourcc(PORT, tempfile.mkdtemp(prefix="t-d3d9total-wine-"), CACHE, SPEC_PATH)[0]   # the generator's own rule over the recipe's pinned Wine mirror
 OPS = json.load(open(G.total_output("gen/sm_table.json", CACHE)))["opcodes"]   # the generated table, read as the gate reads it
 SM_ALL = ["sm:" + k for k in sorted(OPS)]
 SM_OP = ["sm:" + k for k in sorted(OPS) if OPS[k]["opnum"] < 0xFFF0]

@@ -224,7 +224,7 @@ def front_build(front, incs, flags):
     return ok, errs
 
 
-def vendor_fourcc(inp, work, cache):
+def vendor_fourcc(inp, work, cache, specp):
     """the vendor FOURCC list of the enum generator: ITS rule (gen_enums.vendor_fourcc over the pinned Wine mirror of the d3d9 recipe), loaded from the checkout; (list, mirror tree_sha256)"""
     exts = [x for x in json.load(open(os.path.join(inp, D3D9_REC)))["external"] if x.get("name") == "wine-d3d9-formats"]
     if len(exts) != 1 or exts[0].get("repo") != "fnv-nx-build":
@@ -235,7 +235,7 @@ def vendor_fourcc(inp, work, cache):
     sys.path.insert(0, env)
     try:
         import gen_enums
-        return gen_enums.vendor_fourcc(tree, os.path.join(inp, "shim", "include", "d3d9types.h")), h
+        return gen_enums.vendor_fourcc(tree, specp), h
     finally:
         sys.path.remove(env)
 
@@ -244,11 +244,11 @@ def enum_part(inp, work, cache):
     front, backend = os.path.join(inp, "render", "d3d9", "front"), [os.path.join(inp, i) for i in INCLUDES]
     gen = module_lists(os.path.join(inp, "render", "d3d9", "env", "gen_enums.py"), ["SWITCHED", "INDEXED"])
     os.makedirs(work)
-    gen["VENDOR_FOURCC"], wine_hash = vendor_fourcc(inp, work, cache)
     # the interface table is a build output (bridgefacts D9_SPEC): the gate runs the same generator on the same tree
     specp = os.path.join(work, "d3d9_spec.json")
     if run([sys.executable, "-E", "-s", "-B", os.path.join(inp, "bridgefacts", "d3d9", "d3d9_spec.py"), specp, os.path.join(work, "d9bridge_rows.tsv"), os.path.join(inp, "shim", "include")]).returncode:
         raise Red("d3d9_spec.py failed")
+    gen["VENDOR_FOURCC"], wine_hash = vendor_fourcc(inp, work, cache, specp)
     spec = json.load(open(specp))["enums"]
     names = gen["SWITCHED"] + gen["INDEXED"]
     want_names = {e: list(spec[e]) for e in names}
@@ -257,7 +257,7 @@ def enum_part(inp, work, cache):
     gdir = os.path.join(work, "gen")
     os.makedirs(gdir)
     hpath = os.path.join(gdir, "d3d9_enums.gen.h")
-    if run([sys.executable, "-I", os.path.join(inp, "render", "d3d9", "env", "gen_enums.py"), hpath, specp, os.path.join(work, "ext", "wine-d3d9-formats"), os.path.join(inp, "shim", "include", "d3d9types.h")]).returncode:
+    if run([sys.executable, "-I", os.path.join(inp, "render", "d3d9", "env", "gen_enums.py"), hpath, specp, os.path.join(work, "ext", "wine-d3d9-formats")]).returncode:
         raise Red("gen_enums.py failed")
     inc = ["-m32", "-ffreestanding", "-I", gdir, "-I", os.path.join(inp, "shim", "include")]
     ginc = [gdir, os.path.join(inp, "shim", "include")]

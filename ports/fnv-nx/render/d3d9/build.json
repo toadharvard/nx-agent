@@ -117,11 +117,9 @@
    "args": [
     "/out/gen/d3d9_enums.gen.h",
     "/uses/ports/fnv-nx/bridgefacts/D9_SPEC",
-    "/ext/wine-d3d9-formats",
-    "/in/ports/fnv-nx/shim/include/d3d9types.h"
+    "/ext/wine-d3d9-formats"
    ],
    "inputs": [
-    "ports/fnv-nx/shim/include/d3d9types.h",
     "ports/fnv-nx/render/d3d9/env"
    ],
    "outputs": [

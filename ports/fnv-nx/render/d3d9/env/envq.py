@@ -9,31 +9,24 @@ import wine_fourcc
 fcc = wine_fourcc.fcc
 
 
-def enum_items(hdr, typedef):
-    """[(name, value)] of `typedef enum TYPEDEF { .. }` of the header, in order; an enumerator without `=` takes the previous value + 1 (C rule)"""
-    t = open(hdr).read(); t = t[t.index("typedef enum " + typedef):]; t = t[t.index("{") + 1:t.index("}")]
-    t = re.sub(r"/\*.*?\*/|//[^\n]*", "", t, flags=re.S); out = []; v = -1
-    for item in t.split(","):
-        m = re.fullmatch(r"\s*(\w+)\s*(?:=\s*(0x[0-9A-Fa-f]+|\d+))?\s*", item)
-        if not m: continue
-        v = int(m[2], 0) if m[2] else v + 1; out.append((m[1], v))
-    return out
+def enum_items(spec, typedef):
+    """[(name, value)] of `typedef enum TYPEDEF { .. }` of the header, in order: the members and the values of D9_SPEC (`enums`, `enum_values`), which bridgefacts evaluates by the C constant
+    grammar from the header itself (macro calls expanded, implicit values counted, anything unknown stops). TYPEDEF may be the enum's tag (`_D3DDEVTYPE`)."""
+    d = json.load(open(spec)); t = typedef.lstrip("_")
+    return [(n, d["enum_values"][t][n]) for n in d["enums"][t]]
 
 
-def enum_domain(hdr, typedef, force):
+def enum_domain(spec, typedef, force):
     """(members, complement) of a header enum: members = every enumerator value but the FORCE_DWORD one (force = (typename, enumerator) or None); complement = representatives of every other
     32-bit value: min - 1 (when min > 0), max + 1 and 0x7fffffff (the largest signed 32-bit value; the probe rows of the table were taken with it). The representatives stand for the whole
     complement only where the closing rule of the enum (proved at its use in load()) shows that Wine's code treats every value outside the enum alike."""
-    mem = sorted(v for n, v in enum_items(hdr, typedef) if not (force and n == force[1]))
+    mem = sorted(v for n, v in enum_items(spec, typedef) if not (force and n == force[1]))
     return mem, ([mem[0] - 1] if mem[0] > 0 else []) + [mem[-1] + 1, 0x7fffffff]
 
 
-def d3dformat_enum(hdr):
-    """{name: value} of the D3DFORMAT enumerators of the header (MAKEFOURCC ones evaluated)"""
-    t = open(hdr).read(); t = t[t.index("typedef enum _D3DFORMAT"):]; t = t[:t.index("} D3DFORMAT;")]; out = {}
-    for m in re.finditer(r"(D3DFMT_\w+)\s*=\s*(?:MAKEFOURCC\('(.)',\s*'(.)',\s*'(.)',\s*'(.)'\)|(0x[0-9A-Fa-f]+|\d+))", t):
-        out[m[1]] = fcc("".join(m[i] for i in range(2, 6))) if m[2] else int(m[6], 0)
-    return out
+def d3dformat_enum(spec):
+    """{name: value} of the D3DFORMAT enumerators of the header (the FOURCC ones included), from D9_SPEC"""
+    return dict(enum_items(spec, "D3DFORMAT"))
 
 
 def d3d_results(d3d9h):
@@ -100,9 +93,9 @@ NARGS = {"GetAdapterCount": 0, "GetAdapterIdentifier": 2, "GetAdapterMonitor": 1
          "EnumAdapterModesEx": 4, "GetAdapterDisplayModeEx": 2, "GetAdapterLUID": 1, "Direct3DCreate9": 1, "Direct3DCreate9Ex": 1}
 
 
-def c_defines_enum(hdr, typedef):
+def c_defines_enum(spec, typedef):
     """{suffix: value} of an enum of the header: the enumerator names without their D3D..._ prefix (D3DRTYPE_SURFACE -> SURFACE)"""
-    return {n.split("_", 1)[1]: v for n, v in enum_items(hdr, typedef)}
+    return {n.split("_", 1)[1]: v for n, v in enum_items(spec, typedef)}
 
 
 def c_defines(path, prefix):
@@ -121,9 +114,7 @@ def load(hdr, spec, wine, d3d9h, caps):
     Builds FMT (and its domain D["FMT"]) and sets SPEC; nothing of this module is valid before it is called."""
     global CAPS, WU, DU, MSAA_MAX, FMT, SPEC, X8, R5, X1, A2R10, SWITCH, NA, INV, NOAUTOGEN
     global KNOWN_FCC
-    FN = d3dformat_enum(hdr)
-    for e, vals in json.load(open(spec))["enum_values"].items():   # the header's own enumerator values, evaluated by the C constant grammar in bridgefacts (D9_SPEC): every D3DFORMAT value (the FOURCC ones included) agrees, or the build stops
-        if e == "D3DFORMAT" and (set(vals) != set(FN) or any(FN[n] != v for n, v in vals.items())): raise SystemExit("envq: D3DFORMAT enumerators of the header disagree with D9_SPEC: %s" % sorted(n for n in set(vals) | set(FN) if vals.get(n) != FN.get(n))[:8])
+    FN = d3dformat_enum(spec)
     KNOWN_FCC = sorted(known_fourcc(wine))
     SWITCH = switch_formats(wine, FN)
     X8, R5, X1, A2R10 = (FN["D3DFMT_" + n] for n in ("X8R8G8B8", "R5G6B5", "X1R5G5B5", "A2R10G10B10"))
@@ -133,7 +124,7 @@ def load(hdr, spec, wine, d3d9h, caps):
     # ordinals / counts of the declared machine: one adapter (D3DADAPTER_DEFAULT), one mode per accepted format (README: Modes); gen_env asserts both on the rows
     AD = c_defines(d3d9h, "D3DADAPTER_DEFAULT")["D3DADAPTER_DEFAULT"]; ADAPTERS = MODES = 1
     D["A0"] = [AD]
-    D["HAL"] = [c_defines_enum(hdr, "_D3DDEVTYPE")["HAL"]]
+    D["HAL"] = [c_defines_enum(spec, "_D3DDEVTYPE")["HAL"]]
     D["WIN"] = [0, 1]   # BOOL Windowed: FALSE, TRUE (Wine passes it as `!!windowed` through wined3d_check_device_type)
     # OORA: adapter ordinals past the last adapter. Closing proof (Wine 9.0 dlls/d3d9/directx.c:130 and the first statement of every d3d9_* method): `output_idx >= wined3d_output_count` returns
     #   D3DERR_INVALIDCALL (GetAdapterModeCount(Ex): 0, GetAdapterMonitor: NULL) before anything else is read: one behaviour for every ordinal >= the adapter count. Representatives: the count,
@@ -145,7 +136,7 @@ def load(hdr, spec, wine, d3d9h, caps):
     # SCAN: the D3DSCANLINEORDERING filter of the Ex mode calls: members of the enum + representatives of its complement. Proof: wined3d_scanline_ordering_from_d3d is a cast (d3d9_private.h:414) and
     #   mode_matches_filter (wined3d/directx.c:1290-1293) rejects the mode iff `filter != UNKNOWN && mode != UNKNOWN && filter != mode`: for every value other than UNKNOWN the answer is `filter == the
     #   mode's ordering`, so every value outside the enum behaves as INTERLACED (the mode is PROGRESSIVE).
-    so, sbad = enum_domain(hdr, "D3DSCANLINEORDERING", None); D["SCAN"] = so + sbad
+    so, sbad = enum_domain(spec, "D3DSCANLINEORDERING", None); D["SCAN"] = so + sbad
     # SZ: D3DDISPLAYMODEEX.Size of GetAdapterDisplayModeEx. Proof: directx.c:582 `mode->Size != sizeof(*mode)` returns D3DERR_INVALIDCALL before anything is read: one behaviour for every value but
     #   sizeof(D3DDISPLAYMODEEX). Representatives: that size, sizeof(D3DDISPLAYMODE), 0, size + 4, the largest value.
     ST = json.load(open(spec))["structs"]; sz = ST["D3DDISPLAYMODEEX"]["size"]
@@ -162,13 +153,13 @@ def load(hdr, spec, wine, d3d9h, caps):
     WU = c_defines(os.path.join(wine, "include", "wine", "wined3d.h"), "WINED3DUSAGE_"); DU = c_defines(hdr, "D3DUSAGE_")
     MASK = WU["WINED3DUSAGE_MASK"] | WU["WINED3DUSAGE_QUERY_MASK"] | DU["D3DUSAGE_RENDERTARGET"] | DU["D3DUSAGE_DEPTHSTENCIL"]
     EFF = [b for b in USAGE_BITS if b & MASK]
-    MSAA_MAX = max(enum_domain(hdr, "_D3DMULTISAMPLE_TYPE", ("D3DMULTISAMPLE_TYPE", "D3DMULTISAMPLE_FORCE_DWORD"))[0])   # D3DMULTISAMPLE_16_SAMPLES
+    MSAA_MAX = max(enum_domain(spec, "_D3DMULTISAMPLE_TYPE", ("D3DMULTISAMPLE_TYPE", "D3DMULTISAMPLE_FORCE_DWORD"))[0])   # D3DMULTISAMPLE_16_SAMPLES
     D["PAIRS"] = [a | b for i, a in enumerate(EFF) for b in EFF[i + 1:]]
     RTV, DSV = DU["D3DUSAGE_RENDERTARGET"], DU["D3DUSAGE_DEPTHSTENCIL"]; q = lambda n: WU["WINED3DUSAGE_QUERY_" + n]
     D["USM3"] = [0, RTV, DSV]
     D["USM"] = [0, RTV, DSV, RTV | DSV, q("SRGBWRITE") | RTV, q("FILTER"), q("SRGBREAD"), WU["WINED3DUSAGE_DYNAMIC"], q("GENMIPMAP"), q("GENMIPMAP") | RTV]
     # resource-type classes (README: SURFACE, TEXTURE, CUBE, VOLUME(=VOLUMETEXTURE), BUFFER(=VB=IB)), one representative each, by name; RT2 = the two that can be render targets
-    RN = c_defines_enum(hdr, "_D3DRESOURCETYPE")
+    RN = c_defines_enum(spec, "_D3DRESOURCETYPE")
     D["SMALLRT"] = [RN[n] for n in ("SURFACE", "TEXTURE", "VOLUMETEXTURE", "CUBETEXTURE", "VERTEXBUFFER")]
     D["RT2"] = [RN["SURFACE"], RN["TEXTURE"]]
     # FMT12 / FMT_SM: the formats of the 12-value and 8-value probe axes, each by its name in the header (a FOURCC by its four characters; a value of the complement by UNKNOWN_FMT)
@@ -179,11 +170,11 @@ def load(hdr, spec, wine, d3d9h, caps):
     D["FMT"] = FMT
     # D3DDEVTYPE: Wine 9.0 (tools/wine-9.0 c8373ee4) never reads the value except in dlls/wined3d/directx.c:2320 (wined3d_get_device_caps: DeviceType = HAL ? HAL : REF,
     #   the result is the same for every value other than HAL) and passes it through by cast (dlls/d3d9/d3d9_private.h:409); so every value outside the enum behaves as REF.
-    DEVT, devt_bad = enum_domain(hdr, "_D3DDEVTYPE", ("D3DDEVTYPE", "D3DDEVTYPE_FORCE_DWORD"))
+    DEVT, devt_bad = enum_domain(spec, "_D3DDEVTYPE", ("D3DDEVTYPE", "D3DDEVTYPE_FORCE_DWORD"))
     # D3DRESOURCETYPE: dlls/d3d9/directx.c:301-326 d3d9_CheckDeviceFormat: the switch names the 7 values, `default:` returns WINED3DERR_INVALIDCALL: uniform for every other value.
-    RTYPE, rtype_bad = enum_domain(hdr, "_D3DRESOURCETYPE", ("D3DRESOURCETYPE", "D3DRTYPE_FORCE_DWORD"))
+    RTYPE, rtype_bad = enum_domain(spec, "_D3DRESOURCETYPE", ("D3DRESOURCETYPE", "D3DRTYPE_FORCE_DWORD"))
     # D3DMULTISAMPLE_TYPE: dlls/d3d9/directx.c:363 d3d9_CheckDeviceMultiSampleType: `type > D3DMULTISAMPLE_16_SAMPLES` returns D3DERR_INVALIDCALL: uniform for every value above the enum.
-    MSAA, msaa_bad = enum_domain(hdr, "_D3DMULTISAMPLE_TYPE", ("D3DMULTISAMPLE_TYPE", "D3DMULTISAMPLE_FORCE_DWORD"))
+    MSAA, msaa_bad = enum_domain(spec, "_D3DMULTISAMPLE_TYPE", ("D3DMULTISAMPLE_TYPE", "D3DMULTISAMPLE_FORCE_DWORD"))
     D["DEVT"], D["DEVTX"] = DEVT, DEVT + devt_bad
     D["RTYPE"], D["RTYPEX"] = RTYPE, RTYPE + rtype_bad
     D["MSAA"] = MSAA + msaa_bad

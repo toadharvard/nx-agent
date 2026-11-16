@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """gen_enums.py: the C enums of the D3D9 enumerations the state translation consumes (RD-front, rule "total by construction").
 
-    python3 -I gen_enums.py OUT_HEADER SPEC WINE_DIR D3DTYPES_H        (a `generated` step of the recipe of render/d3d9: gen/d3d9_enums.gen.h is a build output, nothing is committed)
+    python3 -I gen_enums.py OUT_HEADER SPEC WINE_DIR        (a `generated` step of the recipe of render/d3d9: gen/d3d9_enums.gen.h is a build output, nothing is committed)
 
 Membership of every enumeration comes from the interface table the bridgefacts D9_SPEC output ("enums": enumerator names, in
 header order). The generator writes no number for them: the enumerator NX_<name> is initialised with the shim header's own enumerator <name>
@@ -22,7 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import envq        # noqa: E402
 import wine_fourcc  # noqa: E402
 
-WINE = D3DTYPES_H = None   # argv[3], argv[4]: the pinned Wine mirror directory and the shim d3d9types.h (inputs of the recipe stage)
+WINE = None   # argv[3]: the pinned Wine mirror directory (an input of the recipe stage)
 SPEC = None   # the interface table the bridgefacts D9_SPEC output, argv[2] (an input of the recipe stage)
 # the enumerations the translation reads (switch over the enum type) or indexes by (state-type enums)
 SWITCHED = ["D3DBLEND", "D3DBLENDOP", "D3DCMPFUNC", "D3DCULL", "D3DFILLMODE", "D3DFOGMODE", "D3DFORMAT", "D3DSHADEMODE",
@@ -32,9 +32,9 @@ ident = lambda s: "D3DFMT_" + s.strip()
 fcc = wine_fourcc.fcc
 
 
-def vendor_fourcc(wine, hdr):
-    """['ABCD'] of the Wine 9.0 FOURCC format ids that d3d9types.h has no D3DFORMAT enumerator for (header order): wine_fourcc.members(wine) minus the values of envq.d3dformat_enum(hdr)"""
-    have = set(envq.d3dformat_enum(hdr).values())
+def vendor_fourcc(wine, spec):
+    """['ABCD'] of the Wine 9.0 FOURCC format ids that d3d9types.h has no D3DFORMAT enumerator for (header order): wine_fourcc.members(wine) minus the values of envq.d3dformat_enum(spec) (the D3DFORMAT enumerators of D9_SPEC)"""
+    have = set(envq.d3dformat_enum(spec).values())
     return [c for _, c in wine_fourcc.members(wine) if fcc(c) not in have]
 
 
@@ -43,7 +43,7 @@ def build():
     computes it, the header carries no number), the value of a vendor FOURCC code is its four bytes."""
     spec = json.load(open(SPEC))["enums"]
     vals = {e: [(n, n) for n in spec[e]] for e in SWITCHED + INDEXED}
-    vals["D3DFORMAT"] += [(ident(s), str(fcc(s))) for s in vendor_fourcc(WINE, D3DTYPES_H)]
+    vals["D3DFORMAT"] += [(ident(s), str(fcc(s))) for s in vendor_fourcc(WINE, SPEC)]
     return vals
 
 
@@ -67,8 +67,8 @@ def render(vals):
 
 
 def main(argv):
-    global SPEC, WINE, D3DTYPES_H
-    SPEC, WINE, D3DTYPES_H = argv[1], argv[2], argv[3]
+    global SPEC, WINE
+    SPEC, WINE = argv[1], argv[2]
     os.makedirs(os.path.dirname(os.path.abspath(argv[0])), exist_ok=True)
     open(argv[0], "w").write(render(build()))
     return 0
