@@ -2616,3 +2616,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - cand4 (w15): branched from fac693694, takes w28's line (shard e9c42d060, '!rt' 741e4a5e8, … 791dfc7e0 once the facts run confirms it). Status: doing.
 - Note: the farm's default checkout has an older l1.py that requires --artifacts. The farm ran the merge from the c93b807f3 checkout.
 - bottleneck: the w28 facts run at 791dfc7e0 (for cand4).
+- cand4 also takes CLAUDE.md whole from the integration branch at candidate time (orchestrator; the trunk copy is 107 lines behind).
