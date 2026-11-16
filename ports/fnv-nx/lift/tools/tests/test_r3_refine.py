@@ -3,7 +3,7 @@ G(X) = the sites that stay displacement-only when X is excluded. Cases: a fixed 
 a 3-cycle is an error. The answer X must satisfy X <= Xo of its own round."""
 import sys, os, tempfile, io, contextlib
 from types import SimpleNamespace
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')); sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
 import modlift
 
 
