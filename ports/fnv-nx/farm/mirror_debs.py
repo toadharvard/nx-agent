@@ -10,7 +10,7 @@ Origin of each file (the upstream that the pin documents; the mirror is what set
 A file whose sha256 differs from its index is an error. Nothing is skipped: any package that cannot be fetched is an error."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import hashlib
 import json
 import lzma
@@ -19,7 +19,7 @@ import re
 import subprocess
 import sys
 
-from verify import envcheck  # noqa: E402
+from fnvnx.verify import envcheck  # noqa: E402
 
 SUITES = (("noble", "main"), ("noble", "universe"), ("noble-updates", "main"), ("noble-updates", "universe"),
           ("noble-security", "main"), ("noble-security", "universe"))

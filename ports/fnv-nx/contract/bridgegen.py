@@ -12,9 +12,9 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, ".."))   # ports/fnv-nx: contract.X
-from contract import bridgetable  # noqa: E402
-from contract import exportgen  # noqa: E402
+sys.path.insert(0, os.path.join(HERE, "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): contract.X
+from fnvnx.contract import bridgetable  # noqa: E402
+from fnvnx.contract import exportgen  # noqa: E402
 
 
 def read(path):

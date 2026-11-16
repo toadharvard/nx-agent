@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A build-time foreach (RECIPE.md "foreach"): the table is an earlier step's output, the rows are made when it exists.
   - one root: step `mk` writes rows.tsv, step `prove` has foreach {table: {stage: mk, path: rows.tsv}, key, into: proof} and writes proof/<row>.txt per row: the root is green and proof/ holds one file per row;
-  - one more row in the table: exactly one stage executes (the new row; the others and `mk` are hits): a row's key is a function of its own row, tool and inputs;
+  - one more row in the table: `mk` (whose script holds the table) and the new row execute; the old rows are hits: a row's key is a function of its own row, tool and inputs;
   - an empty table is red; an output outside `into` is red.
 Run: python3 -I <this file>. Needs root and the declared environment (the pinned python runtime); run on a farm."""
 import json
@@ -72,7 +72,7 @@ os.makedirs(store)
 r1, o1 = build(make(td, "a", "shape\tclass\nadd\tint\nmul\tint\n"), store, "1")
 check("a table made at build time gives one step per row, the directory holds one file per row", r1["status"] == "green", r1.get("failure"))
 r2, _ = build(make(td, "b", "shape\tclass\nadd\tint\nmul\tint\nsub\tint\n"), store, "2")
-check("one more row executes exactly one stage", r2["status"] == "green" and r2["stages"]["run"] == 1, r2["stages"])
+check("one more row executes the table step (its script holds the table) and exactly one row step; the two old rows are hits", r2["status"] == "green" and r2["stages"]["run"] == 2 and r2["stages"]["hit"] >= 2, r2["stages"])
 r3, _ = build(make(td, "c", "shape\tclass\n"), store, "3")
 check("an empty table is red", r3["status"] == "red", r3["status"])
 try:

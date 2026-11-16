@@ -75,6 +75,12 @@ the hash of the stage document + tool code. All paths are root-relative unless m
 The sources of a root are its tracked files minus (1) every file under a root admitted inside it (nearest-root ownership, as `tree_of` resolves a tool file: `verify/probes` inside `verify`, `toolchain/tests` inside `toolchain`) and (2) every plugin source of `PLUGIN_SOURCES` and the files it includes (`plugin_files`): those are inputs of the plugin stage, keyed by it, never translation units of the root that holds them. One function, `recipe.own_sources(root, files, roots, repo)`; the unit list, `check` and the build all read it.
 
 ## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)
+**A plugin is bound to the compiler that loads it, and that compiler is the guest pin's.** Every plugin stage is built against the plugin headers of the guest compiler
+(`verify/guest_compiler.json`), whichever root consumes it; the consuming root's driver is not in its key, so a plugin's key is the same for every consumer. Only a root whose
+expanded compiler is the guest pin's loads plugins: a root with any other compiler (the host profile, or one named by hand) that declares `plugins` is red
+(`plugins are bound to the guest compiler; root R's compiler is X`). The full-set and native-C++ requirements below apply to roots of the guest compiler only; a host native C++ root loads
+no plugin, and no host flag stands for one (the SDD define is a guest root's). A root with a C, C++ or assembly unit and no `compiler` (nor `profile`) is red (`missing key 'compiler'`).
+Selftest: `tests/test_plugin_compiler.py`.
 **The plugin set belongs to the target profile, not to the language.** The guest profile requires the full set (`PLUGIN_SOURCES`, in load order), for C and C++ alike. The host
 profile (`"profile": "host"`) has the empty set, and a host root is required to load none: the plugins enforce guest-ABI semantics (msvcmodel, x86 TSO as `ldar`/`stlr`, MSVC
 argument order, `_ftol` conversion, layout records) that a host object does not have, and they are built against the aarch64 compiler's plugin headers. The set cannot leak
@@ -93,8 +99,8 @@ root's `plugins` is `{"name": PLUGIN}` and nothing else, in the order of `PLUGIN
 `PLUGIN_SOURCES` is an error. So a change of an input of a plugin (for example `f2i_builtins.inc` of `fnvnx_ftoi`) changes the key of every root that loads it and no build.json needs editing. The host driver under `/usr/bin` that builds
 them is `recipe.PLUGIN_CXX`, DERIVED from env.json (the one pinned package `g++-N-x86-64-linux-gnu` provides `x86_64-linux-gnu-g++-N`; the bare `g++-N` prints no path for `as`/`ld`), the GCC version of `compiler.cxx`. A `plugin_cxx` in a build.json is red: no hand-typed compiler name.
 - Stage `plugin:<name>` (sandbox, class build): `recipe.PLUGIN_CXX -shared -nostdlib -fPIC -fno-rtti -fno-exceptions -O2 -I<compiler.cxx -print-file-name=plugin>/include
-  crti.o crtbeginS.o SOURCE crtendS.o crtn.o`. Declared inputs: the driver's tool runtime, the plugin headers of the target compiler
-  (gcc-13-plugin-dev-aarch64-linux-gnu of env.json), the source, crti.o/crtn.o of libc6-dev. Key = content of these + driver + flags, like every stage.
+  crti.o crtbeginS.o SOURCE crtendS.o crtn.o`. Declared inputs: the driver's tool runtime, the plugin headers of the GUEST compiler
+  (the external of guest_compiler.json: `cxx -print-file-name=plugin` of its tree, whatever root asks), the source, crti.o/crtn.o of libc6-dev. Key = content of these + driver + flags, like every stage.
   The `.so` is stored in `GATE_CACHE/store`, copied to `OUT/plugins/<name>.so`, listed in `objects.json` (`plugins`: name, sha256, path).
   It is linked against no library (symbols come from the compiler that loads it; `-fno-exceptions` because `_Unwind_Resume` is not exported by cc1plus).
 - CC stage of every C++ unit (only C++: C and assembler units load nothing): the `.so` of each plugin is a declared input at `/plug/<name>`,
@@ -176,7 +182,7 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   because of the fixed-point gate: the table's own object must hold no entry of `section` (red `table:<root>:<i>` otherwise), and its undefined symbols must not pull a root the table was not made over
   (the closure is recomputed; a different member set is red). An image with no lifted code gets an empty table. Only facts that really are root-level (`contract/facts`, `contract/factscheck`,
   read through `objects_of`) keep the fact-universe rule; a table of one image's objects is `link.tables`.
-- `link.script`, `link.libs` (guest roots): one fact for every guest link. `ports/fnv-nx/link/guest.json` = `{"script": "link/guest.ld"}` and nothing else: the libraries are not stored anywhere. The link derives them (keyed stages `drv:<root>` and `mld:<root>`: the pinned runtime's driver with `flags.semantics`, `-pie -###`, and `-print-multi-directory`): dirs, names, start files, end files of that link command, minus the start/end files the one-definition rule (they define a symbol a product root defines) or the entry rule (they define `_start` while the script's ENTRY is another symbol) excludes. A derived file outside the pinned runtime external or outside the selected multilib is a red `drv:<root>`.
+- `link.script`, `link.libs` (guest roots): one fact for every guest link. `ports/fnv-nx/link/guest.json` = `{"script": "link/guest.ld", "image_script": "link/guest_image.ld"}` and nothing else (`script` is every guest link's script, the synthesised-names links included; `image_script` holds only ASSERTs over symbols an input object defines, so only the image link, which has the objects, passes it as a second `-T`; test_guest_scripts.py reads both mechanically). A root without objects (header-only) has no synthesised names: `synth_names` answers the empty set per kind without a link (test_synth_names.py): the libraries are not stored anywhere. The link derives them (keyed stages `drv:<root>` and `mld:<root>`: the pinned runtime's driver with `flags.semantics`, `-pie -###`, and `-print-multi-directory`): dirs, names, start files, end files of that link command, minus the start/end files the one-definition rule (they define a symbol a product root defines) or the entry rule (they define `_start` while the script's ENTRY is another symbol) excludes. A derived file outside the pinned runtime external or outside the selected multilib is a red `drv:<root>`.
   Every root whose admit.json `target` is guest and that links (the product ELF and every guest test image) gets exactly this script and these libraries; the link
   stage is `startfiles -L<external at>/<dir>.. [objects, whole] --start-group -l<name>.. --end-group endfiles`, so two guest links differ only by output and objects.
   `libs.external` is the guest runtime external pinned in `verify/guest_compiler.json` (`runtime`: the guest's libc, libm, libstdc++), which the root declares like
@@ -318,7 +324,7 @@ declared debs, or a file of an external / a built root, see "A tool that is not 
   (`{name, root, output, at}`), `plugins` and the final step taking `{"plugin": NAME}` inputs.
 Tests: `tests/test_toolstep.py`, `tests/test_sandbox.py` case 13.
 
-- `exec: {"python": true}` runs the pinned python runtime of the generated stages (the interpreter and env.json `python.modules`, through the one function `Job.pyrt`; `FNVNX_PYMODS`, the interpreter digest and every module's installed-files digest are in the key). `args` are the interpreter's arguments after `-s -B` (a script path, usually `/in/N`); the step's inputs, `scratch`, `env` and stage refs are as for any tool step. The step names no debs (the machine's layout deb is added as always). A module the env does not pin cannot be imported. The runtime mounts its own library paths as the host resolves them (`/lib/x86_64-linux-gnu`, `/usr/local/bin`); the layout link or directory that one of them lies under or over is not mounted in that step (`recipe.py`, python exec branch), so the step starts on a usr-merged host. Tests: `tests/test_runpython.py`.
+- `exec: {"python": true}` runs the pinned python runtime of the generated stages (the interpreter and env.json `python.modules`, through the one function `Job.pyrt`; `FNVNX_PYMODS`, the interpreter digest and every module's installed-files digest are in the key). `args` are the interpreter's arguments after `-s -B` (a script path, usually `/in/N`); the step's inputs, `scratch`, `env` and stage refs are as for any tool step. The step names no debs (the machine's layout deb is added as always). A module the env does not pin cannot be imported. Tests: `tests/test_runpython.py`.
 
 ### `foreach` (one step per table row)
 
@@ -417,9 +423,14 @@ consumers: a later step's `inputs` ref `{"stage": "<root>:gen:I", "path": DIR}` 
 root reads it through `uses`. A directory output does not overlap another output or a tracked file. A stage whose stage-ref input is an output of a
 red generator is blocked by it (never run on a missing path). Tests: `tests/test_genchain.py` (a 3-stage chain, unmounted paths fail, the re-key rule).
 
-### Stage refs evaluate their closure
+### Derived forms of a run step (`debs.closure`, `{"plugins": "root"}`)
 
-A stage-ref input names one output of one run step. Evaluating it evaluates that step and the run steps whose outputs its inputs name (the transitive producers), in declaration order, and no other step of the root: the result and its key are the same as for the whole root, because a step's key is the content of what it mounts. A step that is not a producer cannot change them. One Job builds the root's artifacts once. The per-process memo of a stage-ref result is keyed by the content of the tracked tree (index blob hashes plus the sha256 of modified files), the store, the root, the step, the path and the step declaration; no stat or mtime is in a key.
+Two sets are never written twice (they are derived once from their source):
+
+- `"debs": {"closure": [TOP, ...]}`: TOP are the packages of the programs the step runs; the step's debs are TOP and their Pre-Depends/Depends closure on the declared machine, `envcheck.dep_closure`, the rule that defines the declared package set itself (`debs.packages` is checked against it). The result is sorted, every deb's sha256 is in the stage key as before. A top that env.json does not declare is red in `check`; a top that is not installed on the declared machine is red in the build. A list of names is still accepted for a step whose few debs are the whole set.
+- `{"plugins": "root"}` as an input: one `{"plugin": NAME}` per plugin of the root's `plugins`, in declaration order (the order is written once). Red when the root declares no plugins or when it is written twice.
+
+`recipe.expand_run` is the one reader of the expanded steps (`check` after the form check, the build).
 
 ### Generator tool reads (`gen:file-escape`)
 
@@ -432,7 +443,7 @@ declared `uses` input, passed to the tool as an argument (as `--lib` is) or read
 ### Declared imports of a generator's tool (`imports`)
 
 A generator tool may import modules of other admitted roots only by their qualified name; the roots a root imports are DERIVED from its tracked sources (`gate_admit.derived_imports`, by `ast`, any depth), never declared: admit.json has no `imports` field (a row carrying one is red), and a dynamic import (importlib.import_module / __import__ with a non-literal argument) is red.
-`gen:foreign-import` accepts an import that resolves inside a tree of a derived import root. **One module path.** A declared root R is importable under exactly one module path: its path relative to `ports/fnv-nx` with `/` replaced by `.` (`render/total` -> `render.total`), computed by `gate_admit.import_roots`, the one function that recipe (`foreign_imports`, the mount), `gate_pure` (its `--base` is `ports/fnv-nx`) and the declared-use rule call. The stage mounts R's closure at `/imp/<that relative path>` with `PYTHONPATH=/imp` and nothing else; the packages are namespace packages (PEP 420), no `__init__.py` is invented. The bare name of a module of a declared root (`import x` for `render/total/x.py`) is `gen:foreign-import` with the qualified name as the hint, and so is a bare import of a sibling inside a declared root (use the qualified name or `from . import`). (`gate_abspath` keeps its deliberate superset resolution by path suffix: it only over-approximates the closure it judges.)
+`gen:foreign-import` accepts an import that resolves inside a tree of a derived import root. **Boundary of the rule.** The derivation covers the qualified spelling only. A bare import that resolves through `sys.path.insert` in a host-run script (a gate driver, a farm script, a test: for example `import relocs` in verify/recipe.py) is not stage code and gives no root edge; where such a module reaches the import closure of a generator tool, `gen:foreign-import` is red for it. So a bare import is either outside every stage (not governed by this rule) or red (governed), never silently mounted. **One module path.** Every project module has one top-level name, `fnvnx`, and a declared root R is importable as `fnvnx.<R's path relative to ports/fnv-nx, with / replaced by .>` (`render/total` -> `fnvnx.render.total`, `platform` -> `fnvnx.platform`), computed by `gate_admit.import_roots` (`module_name`), the one function that recipe (`foreign_imports`, the mount), `gate_pure` (it gives the run a copy of the declared roots' `.py` files at `fnvnx/<rel>` as its `--base`) and the declared-use rule call. The top name is what makes the path unique: a bare root name (`platform`, `link`) can shadow a standard-library or pinned module, `fnvnx` cannot, and `recipe.module_top_errors` checks that, never assumes it (`fnvnx` is not in `sys.stdlib_module_names`, not an `env.json` pinned module, not a top-level name of any installed host distribution; red otherwise). The stage mounts R's closure at `/imp/fnvnx/<that relative path>` with `PYTHONPATH=/imp` and nothing else; the packages are namespace packages (PEP 420), no `__init__.py` is invented. A host run (gate driver, test, farm script) puts `ports` on `sys.path`; `ports/fnvnx` is a tracked symlink to `fnv-nx` (outside every tree, so no gate universe sees it). A qualified import without the top name (`from contract import x`) and the bare name of a module of a declared root (`import x` for `render/total/x.py`) are `gen:foreign-import` with the prefixed name as the hint (`fnvnx.contract`, `fnvnx.render.total.x`), and so is a bare import of a sibling inside a declared root (use the qualified name or `from . import`). (`gate_abspath` keeps its deliberate superset resolution by path suffix: it only over-approximates the closure it judges.)
 
 The generate stage mounts the tool's own root at `/tool` and, at `/imp`, exactly the files of the declared import roots that the import closure (by `ast`, transitively) reaches plus the data those modules read (below), and nothing else of those roots;
 `PYTHONPATH` lists their directories. The stage key therefore covers only the closure: an edit to another file of an import root leaves the key unchanged. Red:
@@ -566,6 +577,16 @@ An input of a `run` or `generated` step may be `{"include_of": ROOT}`: every tra
 
 The external cache is named once: `recipe.ext_dir(cache)`. A build that is given its own external cache (`--ext`) passes it to every reader (`resolve_input(..., extc)`, `exttree(e, cache, extc)`), so the reader goes where `fetch_externals` wrote.
 
+## The preprocessed text of a unit (`pp`)
+A `run` step's `inputs` entry `{"pp": ROOT, "unit": PATH}` mounts ONE file at `/in/N`: the preprocessed text (`unit.ii`) of unit PATH (root-relative, as `objects.json` names it) of the guest root ROOT. It is exactly the
+output of that unit's PP stage (`unitstage`, `Build.pp_file`: the same loop as the unit's own build) in ROOT's own build: the same compiler, flags, defines and include closure that the CC stage compiles, served from the store by the
+stage key. The step key holds the file's content, so a changed header (or a changed flag, define or compiler of ROOT) is a changed input. No step runs a preprocessor of its own over product source: that would be a second build path
+whose flags could diverge from what is compiled.
+Red (one rule, `recipe.pp_errors`, called by `check` for every run input and by `Job.pp_tree` for the mount): ROOT is not a root this recipe `uses`; ROOT is not an admitted root; ROOT is not a guest root; PATH is not a unit of ROOT
+(`all_units_of`: its sources and generated sources; a header or an absent file is none) or is a `.s` unit (assembled directly, no PP stage); the input has any other shape (keys other than `pp` and `unit`, a non-string value). The
+producing build is `Job.compile(..., pp_only=True)`: the plugins and the analysis plugin are not built (preprocessing loads none), the generated sources of ROOT are produced first as in its own build.
+Tests: `tests/test_pp_input.py` (each red case, `check` and the mount agree; the stage case, run on a farm: a header edit changes the step's key and input).
+
 ## Single file of an external (a document through a tool step)
 A run step's `inputs` entry `{"external": NAME, "path": FILE}` mounts ONE file of a declared external at `/in/N`. The external is pinned as above, by
 `{commit, tree_sha256}` over its whole checkout; `resolve_input` checks that hash, then reads FILE from the checked-out tree (red: the file is not in
@@ -611,7 +632,7 @@ A guest root's compile reads the pinned runtime's own headers. The compiler's se
 ## Shards and store merge
 
 A cold build of a large root is split over farms by one rule, with no second build path.
-- `recipe build --root R --shard i/N` (N <= 16, 0 <= i < N) builds the units whose first-stage key satisfies `int(key, 16) mod N == i`. The first-stage
+- `recipe build --root R --shard i/N` (N any integer >= 1, 0 <= i < N) builds the units whose first-stage key satisfies `int(key, 16) mod N == i`. The first-stage
   key is the PP stage key on the whole declared trees (`unitstage.Build.first_key`; a `.s` unit: its one stage), computed before anything runs, so every
   shard of one checkout agrees. The recipe asserts from the unit list that the shards are disjoint and together the unit set (`shard_partition`).
   All stages of a unit run in its shard. Root-level stages (tests, link, link tables, gates) do not run in a shard build; its `objects.json` has `shard`.

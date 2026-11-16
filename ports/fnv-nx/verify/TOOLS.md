@@ -1662,7 +1662,7 @@ Gate "oracle" (fnvnx-gate/1): every test names where its expected values come fr
 code under test (verify/VERDICT.md class 10).
     python3 -I gate_oracle.py        run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/oracle.json
 
-Universe: the test files of gate "selftests" (the DIRs of its argv in verify/gates.d/selftests.json, DIR/tests/test_*.py, found by
+Universe: the test files of gate "selftests" (tests/test_*.py of every root of verify/admit.json, found by
 gate_tests.universe: one list for both gates). An item is a repo-relative path.
 Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
   {"format": "fnvnx-oracle/1", "tests": {"test_x.py": {"subject": [PATH...], "references": [REF...]}}}
@@ -1797,11 +1797,12 @@ uncertified: the first 50 uncertified paths, sorted. Zero items: green, universe
 ## verify/gate_tests.py
 
 ```text
-Gate "selftests" (fnvnx-gate/1): every test file of the given directories passes.
-    python3 -I gate_tests.py [--timeout-s N] [--jobs N] [--cache DIR] [--key-dirs D...] [--] DIR...
+Gate "selftests" (fnvnx-gate/1): every test file of every admitted root passes.
+    python3 -I gate_tests.py [--timeout-s N] [--jobs N] [--cache DIR] [--key-dirs D...] [--] [DIR...]
 Run in the checkout root with env GATE_OUT; writes GATE_OUT/selftests.json (+ GATE_OUT/selftests.times.json).
-Universe: DIR/tests/test_*.py for each DIR given (a missing DIR contributes nothing), in argument order, each DIR's files
-sorted by name; items are repo-relative paths. Each file runs as `python3 -I FILE` in the checkout with a per-file timeout
+Universe, by one rule over the tree: tests/test_*.py of every root of verify/admit.json (in root order, each root's files sorted by name; a new test
+file under an admitted root is inside with no edit of any gate file); items are repo-relative paths. DIRs on the command line replace the admitted
+roots (a fixture's scan directories; verify/gates.d/selftests.json names none). Each file runs as `python3 -I FILE` in the checkout with a per-file timeout
 (default 300 s; a timeout kills the process group and is a failure). Certified: exit status 0. No skip logic: a test that
 cannot run in this environment (root, namespaces, strace) is uncertified. Zero files: green, universe 0. Exit 0 iff green.
 --jobs N (default 1): N test files run at once, each in its own process; results are reported in sorted universe order.

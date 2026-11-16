@@ -31,7 +31,7 @@ TEXT/DATA ranges (the section table is used), the JSON cache keyed on mtime.
 """
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import argparse
 import collections
 import json
@@ -44,7 +44,7 @@ from capstone import x86_const as X
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import abi_msvcname
-from contract import exefacts
+from fnvnx.contract import exefacts
 
 FORMAT = 'fnvnx-exevft/2'
 Vft = collections.namedtuple('Vft', 'name off bases slots col')

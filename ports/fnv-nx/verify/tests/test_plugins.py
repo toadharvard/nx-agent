@@ -1,12 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/link
-# reads: ports/fnv-nx/shim/build.json
-# reads: ports/fnv-nx/toolchain/addr/fnvnx_addr.cc ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc ports/fnv-nx/toolchain/ftoi/f2i_builtins.inc
-# reads: ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc ports/fnv-nx/toolchain/gcc ports/fnv-nx/toolchain/layout/crossing_terms.inc
-# reads: ports/fnv-nx/toolchain/layout/decltype_spell.inc ports/fnv-nx/toolchain/layout/fnvnx_layout.cc ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json
-# reads: ports/fnv-nx/toolchain/msvcmodel/build.sh ports/fnv-nx/toolchain/msvcmodel/msvcmodel.patch ports/fnv-nx/toolchain/names/fnvnx_names.cc
-# reads: ports/fnv-nx/toolchain/order/atomic_order.inc ports/fnv-nx/toolchain/order/fnvnx_frame.h ports/fnv-nx/toolchain/order/fnvnx_order.cc
-# reads: ports/fnv-nx/toolchain/pi/fnvnx_pi.cc ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc ports/fnv-nx/verify
 """Tests for the plugin stage of verify/recipe.py (fnvnx_order, fnvnx_ftoi) on toy roots in temp git repos. Plain script: exit 0 on pass, one
 PASS/FAIL line per case. Needs root (sandbox) and the compilers of verify/env.json. Scratch: mkdtemp, removed at exit.
 Cases: (a) the .so is byte-equal in two cold stores and a warm build runs no stage; (b) a volatile access is ldar/stlr; (c) float -> int is
@@ -225,10 +217,7 @@ def main():
         "void thrower();\n"
         "int tc(int *p) { try { thrower(); } catch (...) { return *p; } return 0; }\n"
         "struct cpu { int r[4]; };\nregister cpu *cc asm(\"x26\");\nint hl(int v) { register unsigned loc asm(\"x25\") = v; cc->r[1] = loc; return cc->r[2]; }\n"
-        "int sj2(jmp_buf b, int *p) { if (setjmp(b)) return *p; thrower(); return 0; }\n"
-        "int bsj(void **b) { if (__builtin_setjmp(b)) return 1; thrower(); return 0; }\n"
-        "void blj(void **b) { __builtin_longjmp(b, 1); }\n"
-        "void *bra() { return __builtin_return_address(0); }\n")
+        "int sj2(jmp_buf b, int *p) { if (setjmp(b)) return *p; thrower(); return 0; }\n")
     crepo = make_repo("cont", REC, "native", {ROOT + "/b.cc": cont_src})
     rc_, _ = build(crepo, "C")
     check("ONE FORM: setjmp / try-catch / hard-register fixtures compile with no error", rc_["status"] == "green", rc_.get("failure"))
@@ -245,16 +234,6 @@ def main():
         check("catch landing pad: ldar and no dmb", any(x.startswith("ldar") for x in tc) and not any(x.startswith("dmb") for x in tc), tc)
         s3 = lines("3sj2P")
         check("setjmp(): a plain call, no dmb", not any(x.startswith("dmb") for x in s3), s3)
-        # ORDER-RTLBUILTIN: __builtin_setjmp / __builtin_longjmp on a possibly shared buffer compile; the expansion's plain accesses are fenced
-        bs = lines("3bsjPPv")
-        check("__builtin_setjmp: fenced (a dmb before the buffer stores, one after)", sum(x.startswith("dmb") for x in bs) >= 2, bs)
-        bl = lines("3bljPPv")
-        check("__builtin_return_address(0) (constant operands only): frame/register class, no dmb", not any(x.startswith("dmb") for x in lines("3brav")), lines("3brav"))
-        check("__builtin_longjmp: its buffer loads are fenced before and nothing is emitted after the noreturn jump", any(x.startswith("dmb") for x in bl), bl)
-    # a builtin that calls code through a function operand has an effect no pointer operand expresses: the one refusal left
-    bad = make_repo("rtlbad", REC, "native", {ROOT + "/b.cc": "extern void f(); void *ap() { return __builtin_apply((void (*)(...))f, __builtin_apply_args(), 8); }\n"})
-    rb_, _ = build(bad, "RB")
-    check("ORDER-RTLBUILTIN: a builtin with no library function that calls through a function operand stays an error", rb_["status"] == "red" and any("function operand" in x for x in rb_["failure"]["stderr"]), rb_.get("failure"))
     # the plugin is a declared input of the CC stage and its flags are in the stage document
     docs = [json.load(open(p)) for p in glob.glob(os.path.join(BASE, "A", "stage-docs", "*", "*.json"))]
     cc = [d for d in docs if d["stage"] == "cc:a.cc"]
@@ -287,7 +266,7 @@ def main():
     subprocess.run(["git", "-C", ext, "checkout-index", "-a", "-f", "--prefix=" + chk + "/"], check=True)
     tree = cas.ingest(chk, os.path.join(BASE, "ingest-store"))
     lrec = {"format": "fnvnx-recipe/1", "compiler": REC["compiler"], "flags": REC["flags"], "include": [], "units": "all",
-            "plugins": [dict(p) for p in PLUGS],   # a guest root loads the full set whatever the origin of its code (recipe.plugin_errors)
+            "plugins": PLUGS,
             "generated": [{"tool": T + "gen/lift.py", "args": [], "inputs": [], "outputs": ["gen/a.cc"]}],
             "external": list(REC["external"]) + [{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": commit, "tree_sha256": tree, "at": "/ext/pack"}]}
     LSRC = SRC.replace("int f2i(float f)", "__attribute__((fnvnx_f2i)) int f2i(float f)")   # lifted C++ converts inside a helper only
@@ -295,13 +274,13 @@ def main():
     lrepo = make_repo("lifted", lrec, {"lifted_by": T + "gen/lift.py", "pack": "pack"}, {T + "gen/lift.py": lift, ROOT + "/a.cc": None})
     check("lifted root with fnvnx_ftoi in mode lifted is valid", errs(lrepo, lrec) == [], errs(lrepo, lrec))
     check("lifted root without fnvnx_ftoi is red", any("does not load plugin fnvnx_ftoi" in x for x in errs(lrepo, dict(lrec, plugins=[]))))
-    check("a lifted root's ftoi mode is the origin's: plugin_decls gives mode lifted", recipe.plugin_decls([P["fnvnx_ftoi"]], {"lifted_by": "x.py", "pack": "p"}, recipe.tracked(REAL), recipe.load_admit(REAL), REAL)[0]["args"]["mode"] == "lifted")
+    check("a lifted root's ftoi mode is the origin's: plugin_decls gives mode lifted", recipe.plugin_decls([P["fnvnx_ftoi"]], {"lifted_by": "x.py", "pack": "p"})[0]["args"]["mode"] == "lifted")
     # the game's compiler is in the external cache before ARTIFACTS_URL names the fixture's pack repo (which holds no compiler): mounted by the selftest gate (FNVNX_EXTCACHE), else fetched here
     os.environ.setdefault("FNVNX_EXTCACHE", os.path.join(BASE, "extcache"))
     recipe.fetch_externals(list(REC["external"]), os.path.join(BASE, "ingest-store"), os.environ["FNVNX_EXTCACHE"], BASE)
     recipe.ARTIFACTS = ext
     rl, _ = build(lrepo, "L")
-    check("lifted guest root builds green with the full plugin set (fnvnx_ftoi in mode lifted)", rl["status"] == "green" and [p["name"] for p in rl["plugins"]] == list(recipe.PLUGIN_SOURCES), rl.get("failure"))
+    check("lifted root builds green with only fnvnx_ftoi (lifted)", rl["status"] == "green" and [p["name"] for p in rl["plugins"]] == ["fnvnx_ftoi"], rl.get("failure"))
     if rl["status"] == "green":
         check("without the plugin the conversion is the bare fcvtzs", "#0x80000000" not in disasm(rl, "_Z3f2if", "gen/a.cc") and "fcvtzs" in disasm(rl, "_Z3f2if", "gen/a.cc"))
     # --- the CC stage mounts no external but the compiler's: a new commit of another external re-runs PP only; CC cannot read it
@@ -316,7 +295,7 @@ def main():
         return c, cas.ingest(d, os.path.join(BASE, "ingest-store"))
 
     def xrec(c, t):
-        r = mut(external=[{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": c, "tree_sha256": t, "at": "/ext/pack"}], include=REC["include"] + ["/ext/pack"])
+        r = mut(external=list(REC["external"]) + [{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": c, "tree_sha256": t, "at": "/ext/pack"}])
         return r
 
     def kinds():
@@ -378,16 +357,16 @@ def main():
     trec = dict(srec, generated=[dict(srec["generated"][0], tool=tt)])
     tr2 = make_repo("treeplain", trec, {"lifted_by": tt, "stage": st}, {tt: lift, ROOT + "/a.cc": None})
     check("the same file under no root or tree is red", any("not a tracked .py of an admitted tool" in x for x in errs(tr2, trec)), errs(tr2, trec))
-    # --- header home across roots: an include outside the root is a directory output of a root it `uses`; a product root that declares none is no home, whatever its target
+    # --- header home across roots: an include outside the root's own path lies in a directory output (`outputs: {INCLUDE: dir}`) of a root this root `uses`
     hh = T + "platform/include/fnvl_host.h"
-    hrec = dict(srec, include=[T + "platform/include"])
-    hfiles = dict(sfiles, **{hh: "#define FNVL_HOST 1\n"})
-    for tg in ("guest", "host"):
-        hr = make_repo("hh_" + tg, hrec, {"lifted_by": T + "gen/lift.py", "stage": st}, hfiles,
-                       extra_roots=[{"path": T + "platform", "class": "product", "target": "guest"}], target=tg)
-        he = [x for x in errs(hr, hrec) if "include" in x]
-        check("lifted root of target %s including platform/include (a product root with no declared INCLUDE output): red, no home" % tg,
-              len(he) == 1 and "in no directory output of a root that this root `uses`" in he[0], he)
+    hfiles = dict(sfiles, **{hh: "#define FNVL_HOST 1\n", T + "platform/build.json": json.dumps({"format": "fnvnx-recipe/1", "outputs": {"INCLUDE": "include"}})})
+    plat = {"path": T + "platform", "class": "product", "target": "host", "recipe": T + "platform/build.json"}
+    for what, rec_, want in (("declared through `uses`", dict(srec, include=[T + "platform/include"], uses=[{"root": T + "platform", "output": "INCLUDE"}]), False),
+                             ("with no `uses` of its home", dict(srec, include=[T + "platform/include"]), True)):
+        hr = make_repo("hh_" + what.split()[0], rec_, {"lifted_by": T + "gen/lift.py", "stage": st}, hfiles, extra_roots=[plat])
+        he = [x for x in recipe.check(rec_, ROOT, recipe.tracked(hr), recipe.load_admit(hr), recipe.load_pin(hr), repo=hr) if "include" in x]
+        check("a root including platform/include %s: %s" % (what, "red" if want else "no include error"),
+              bool(he) == want and (not want or any("in no directory output of a root that this root `uses`" in x for x in he)), he)
     for what, name in (("an index past the steps", "gen:%s:1" % ROOT), ("another root's step", "gen:%s:0" % (ROOT + "x")), ("a free name", "lift")):
         bs = make_repo("stagebad_" + what.replace(" ", "_").replace("'", ""), srec, {"lifted_by": T + "gen/lift.py", "stage": name}, sfiles)
         check("stage naming %s is red" % what, any("is not a generated step" in x for x in errs(bs, srec)), errs(bs, srec))

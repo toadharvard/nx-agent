@@ -1,11 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/toolchain/names/sympair_kinds.inc ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/link
-# reads: ports/fnv-nx/shim/build.json
-# reads: ports/fnv-nx/toolchain/addr/fnvnx_addr.cc ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc ports/fnv-nx/toolchain/ftoi/f2i_builtins.inc
-# reads: ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc ports/fnv-nx/toolchain/layout/crossing_terms.inc ports/fnv-nx/toolchain/layout/decltype_spell.inc
-# reads: ports/fnv-nx/toolchain/layout/fnvnx_layout.cc ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/toolchain/names/fnvnx_names.cc
-# reads: ports/fnv-nx/toolchain/order/atomic_order.inc ports/fnv-nx/toolchain/order/fnvnx_frame.h ports/fnv-nx/toolchain/order/fnvnx_order.cc
-# reads: ports/fnv-nx/toolchain/pi/fnvnx_pi.cc ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc ports/fnv-nx/verify
 """Test of the N3 wiring of verify/gate_contract.py (stages bind -> bodysel --n3) and its effect on gates namegate and r7. Plain script, needs root
 (sandbox) and the pinned guest compiler (as test_l2gates.py). The objects are the real ones of a toy native guest root built by recipe.py (their `.fnvnx.n3`,
 `.fnvnx.sympair`, `.fnvnx.layout` sections are the plugins' own output); the stage commands are the ones gate_contract.stages() gives (bind.py, bodysel.py, run
@@ -15,7 +8,7 @@ universes > 0 and certified; (3) the same with a byte mutation of g's N3 verdict
 and the universes of namegate and r7 shrink to the native-bearing units only (0 when no unit has a native body)."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import subprocess
@@ -33,11 +26,11 @@ import gate_build  # noqa: E402
 import gate_contract as gc  # noqa: E402
 import gate_l2native as L  # noqa: E402
 import gate_names  # noqa: E402
-from contract import l2sections  # noqa: E402
+from fnvnx.contract import l2sections  # noqa: E402
 SYMPAIR_KINDS = l2sections.load_kinds(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'toolchain', 'names', 'sympair_kinds.inc'))
 import gate_r7  # noqa: E402
-from contract import l2sections  # noqa: E402
-from contract import store  # noqa: E402
+from fnvnx.contract import l2sections  # noqa: E402
+from fnvnx.contract import store  # noqa: E402
 import test_l2gates as tl  # noqa: E402
 
 G, H = "?g@@YAHH@Z", "?h@@YAHXZ"

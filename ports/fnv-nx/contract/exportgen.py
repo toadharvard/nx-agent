@@ -5,7 +5,7 @@
                                                                               section its recipe names: contract/exports/build.json, `objects_of` guest + section: the objects of
                                                                               every guest product root outside the consumers of the table, the link set)
 
-Every object may carry the section `.fnvnx.export` (contract/include/fnvnx_export.h): one record per FNVNX_EXPORT: the strings module, import name, kind (func|entry|data), each NUL-terminated, then a
+Every object may carry the section `.fnvnx.export` (contract/exporthdr/include/fnvnx_export.h): one record per FNVNX_EXPORT: the strings module, import name, kind (func|entry|data), each NUL-terminated, then a
 pointer-sized field that carries a RELOCATION against the definer's symbol (`&symbol` in the C/C++ source, so the compiler resolves the identity: an undeclared name is a compile error, and
 the symbol is named by the object's own symbol table, never read from text); records are separated by zero padding.  The tool
 writes the union, sorted, as six columns: the four fields, `ret` (the return class of a function export) and `args` (the argument classes, `-` for none), both read from the definer's own
@@ -22,10 +22,10 @@ to it, nothing is marshalled, the return and argument slots do not apply); `data
 The output depends on the objects' bytes and relative paths only."""
 import argparse, os, re, sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)
-from contract import dllkind
-from contract import l2sections
-from link import ctypes_compat
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name (contract.X)
+from fnvnx.contract import dllkind
+from fnvnx.contract import l2sections
+from fnvnx.link import ctypes_compat
 
 SECTION = '.fnvnx.export'   # the default; the recipe names the section (`objects_of.section`, the one place) and passes --section
 DECLTYPE = '.fnvnx.decltype'

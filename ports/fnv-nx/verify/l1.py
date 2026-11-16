@@ -89,7 +89,8 @@ def _artifacts(o):
 
 def cmd_verdict(a):
     started = time.time()
-    o = _opts(a, ("--commit",))
+    o = _opts(a, ("--commit", "--artifacts"))
+    _artifacts(o)
     env_id, bad = _env(o["--repo"], o["--commit"])
     if bad:
         return _blocked_env(bad)
@@ -100,7 +101,8 @@ def cmd_verdict(a):
 
 def cmd_merge(a):
     started = time.time()
-    o = _opts(a, ("--into", "--from"), ("--remote",))
+    o = _opts(a, ("--into", "--from", "--artifacts"), ("--remote",))
+    _artifacts(o)
     o.setdefault("--remote", None)
     repo, vdir, remote, bname = o["--repo"], o["--verdicts"], o["--remote"], o["--into"]
     if remote:

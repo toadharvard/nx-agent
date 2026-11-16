@@ -8,17 +8,7 @@
   "--timeout-s",
   "900",
   "--jobs",
-  "3",
-  "ports/fnv-nx/verify",
-  "ports/fnv-nx/farm",
-  "ports/fnv-nx/contract",
-  "ports/fnv-nx/link",
-  "ports/fnv-nx/rules",
-  "ports/fnv-nx/lift",
-  "ports/fnv-nx/lift/proof",
-  "ports/fnv-nx/lift/gates",
-  "ports/fnv-nx/render/total",
-  "ports/fnv-nx/manifest"
+  "3"
  ],
  "result": "selftests.json",
  "covers": [

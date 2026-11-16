@@ -12,7 +12,7 @@ names). A dynamic site (root, key or value not statically resolved) is class `dy
 gate treats a dynamic-name GetProcAddress site; there is no allow-list. Universe: gate_build.quantify (the admitted product roots; a root without registry.in.json is one red item, unless it is header-only (gate_build.unitless): 0 items, or outside the class `registry-reader`: its build's symbol table defines and references no registry API and no GetProcAddress / LoadLibrary* (hive_names): 0 items; a root that has one enters the class and is the one red item). No product root: universe 0, green. Bad input, a red build, an invalid recipe or an external that fails its hash is red. Exit 0 iff green."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import shutil
@@ -25,8 +25,8 @@ sys.path.insert(0, HERE)
 import cas  # noqa: E402
 import gate_build  # noqa: E402
 import gate_imports  # noqa: E402
-from contract import exportgen  # noqa: E402
-from contract import hive  # noqa: E402
+from fnvnx.contract import exportgen  # noqa: E402
+from fnvnx.contract import hive  # noqa: E402
 import recipe  # noqa: E402
 
 IN_KEYS = {"format", "sites", "declared", "seed", "seed_unit"}
@@ -62,7 +62,7 @@ def calls_of(res):
 
 
 def writer_bodies(res):
-    """{unit}: the units of a build that carry an `.fnvnx.export` record (contract/include/fnvnx_export.h) whose import name is a hive-writing API: the import
+    """{unit}: the units of a build that carry an `.fnvnx.export` record (contract/exporthdr/include/fnvnx_export.h) whose import name is a hive-writing API: the import
     implementations of the writers. Exempt from the writer rule by the record, never by a name."""
     out = set()
     for o in res["objects"]:

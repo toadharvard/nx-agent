@@ -42,9 +42,9 @@ import struct
 
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)
-from contract import imagerec
-from contract.imagerec import X
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name (contract.X)
+from fnvnx.contract import imagerec
+from fnvnx.contract.imagerec import X
 
 PARENT = {}
 for _n in ('ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'):
@@ -971,7 +971,7 @@ def _jcc_kind(kind, K, m):
 def _path_pred(img, fn, C, S, K):
     """Every path of fn from the call at C to the instruction at S crosses an edge of a conditional branch that is decided by flags
     from a compare of a copy of the result of C with K and takes the `!= K` side.  -> (ok, [(compare va, branch va)], [(va, why)])."""
-    from contract import memfx
+    from fnvnx.contract import memfx
     fb = fn.ebp_frame() and not memfx.frame_exposed(fn)
     brk = {}
 
@@ -1098,7 +1098,7 @@ def result_predicate(img, call_site_va, k, callee_set, relation, constant):
     and ja/jbe (K = 0); inc r / add r,1 with je/jne (K = 0xffffffff).  The flags must not be redefined between the compare and
     the branch.  Anything else is reported as a break.  -> Result: .closed, .leaves ('pred', (dll, name, call va), chain of
     (compare va, branch va)), .breaks."""
-    from contract import iat
+    from fnvnx.contract import iat
     res = Result()
     if relation != '!=':
         res.brk(call_site_va, 'unsupported relation %r' % relation)

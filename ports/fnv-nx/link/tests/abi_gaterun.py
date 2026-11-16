@@ -3,14 +3,14 @@ bytes the test built, so it is handed to the gate as an Image parsed from those 
 player's exe: the pin (exepin.load_exe) guards the player's exe only."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import shutil
 import sys
 import tempfile
 
-from contract import exefacts  # noqa: E402
+from fnvnx.contract import exefacts  # noqa: E402
 
 
 def run(mod, argv, name):

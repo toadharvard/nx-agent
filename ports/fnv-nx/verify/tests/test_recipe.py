@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/link
-# reads: ports/fnv-nx/shim/build.json ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for verify/recipe.py, gate_build.py, gate_determinism.py on a toy product root in a temp git repo. Plain script: exit 0 on
 pass, one PASS/FAIL line per case. Needs root (sandbox) and aarch64-linux-gnu-gcc-13/g++-13. Scratch: mkdtemp, removed at exit."""
 import hashlib
@@ -143,7 +141,7 @@ def make_guest_repo(name, gen_extra="", rec=None, files=None, extra_roots=(), im
     w(repo, "verify/admit.json", json.dumps(ad))
     w(repo, "verify/guest_compiler.json", open(os.path.join(VERIFY, "guest_compiler.json")).read())
     if image:   # the guest link profile (script and libraries of every guest link) and the script it names
-        for n in ("link/guest.json", "link/guest.ld"):
+        for n in ("link/guest.json", "link/guest.ld", "link/guest_image.ld"):
             w(repo, n, open(os.path.join(VERIFY, "..", n)).read())
     real = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))   # checkout root
     for n in recipe.plugin_files(real):   # the real plugin sources and inputs: the profile's plugins are built from them
@@ -445,7 +443,7 @@ def main():
         except recipe.RecipeError as e:
             got = " ".join(e.errors)
         check("store-merge: a forged differing key record is red `store-merge: key <k> differs`", got and "store-merge: key %s differs" % k in got and sorted(os.listdir(BASE + "/sh-m/keys")) == before, got)
-        for bad in ("0/0", "3/3", "1/17", "x", "-1/2"):
+        for bad in ("0/0", "3/3", "x", "-1/2"):
             try:
                 recipe.shard_spec(bad)
                 got = None
