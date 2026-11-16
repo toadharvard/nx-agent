@@ -17,6 +17,7 @@
    machine has none set), reported and restored like Wine's x86_thread_data()->dr0..dr7. FloatSave is derived from the FXSAVE image by Wine's own function (dlls/ntdll/unix/thread.c fpux_to_fpu), and a restore without
    CONTEXT_EXTENDED_REGISTERS takes it back through fpu_to_fpux (same file); with CONTEXT_EXTENDED_REGISTERS the image is restored with StatusWord &= ControlWord | 0xff80 (dlls/ntdll/unix/signal_i386.c, the CONTEXT_EXTENDED_REGISTERS arm of the CONTEXT restore: "reset the current interrupt status"). */
 #include "fnvl.h"
+#include "fnvnx_export.h"
 #include "imp.h"
 extern "C" {
 u32 fnvl_os_unhandled(u32 record, u32 context);
@@ -226,6 +227,7 @@ extern "C" void fnvl_raise_av(u32 access, u32 addr, u32 at) {
 }
 
 /* guest entry, stdcall: RaiseException(code, flags, nargs, args) */
+FNVNX_EXPORT("kernel32.dll", "RaiseException", fnvl_os_RaiseException, "func");
 extern "C" void fnvl_os_RaiseException(void) {
     u32 ra = M32(esp), code = M32(esp + 4), fl = M32(esp + 8), n = M32(esp + 12), args = M32(esp + 16), sp = esp + 20, info[15];
     if (n > 15) n = 15;
@@ -236,6 +238,7 @@ extern "C" void fnvl_os_RaiseException(void) {
 }
 
 /* guest entry, stdcall, no arguments: kernel32!DebugBreak = EXCEPTION_BREAKPOINT reported at the return address; continuing resumes there */
+FNVNX_EXPORT("kernel32.dll", "DebugBreak", fnvl_os_DebugBreak, "func");
 extern "C" void fnvl_os_DebugBreak(void) {
     u32 ra = M32(esp), sp = esp + 4, info[1] = { 0 };
     esp = sp;
@@ -243,6 +246,7 @@ extern "C" void fnvl_os_DebugBreak(void) {
 }
 
 /* guest entry, stdcall: RtlUnwind(TargetFrame, TargetIp, ExceptionRecord, ReturnValue) */
+FNVNX_EXPORT("kernel32.dll", "RtlUnwind", fnvl_os_RtlUnwind, "func");
 extern "C" void fnvl_os_RtlUnwind(void) {
     u32 ra = M32(esp), target = M32(esp + 4), rec = M32(esp + 12), rv = M32(esp + 16), sp0 = esp, sp = esp + 20;
     if (!rec) { rec = sp0 - REC_SIZE; zero(rec, REC_SIZE); M32(rec) = 0xC0000027u; M32(rec + 12) = ra; sp0 = rec; }
