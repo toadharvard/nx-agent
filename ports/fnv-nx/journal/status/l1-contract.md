@@ -2649,3 +2649,5 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - bottleneck: w28-c4 head + w15 fixture migration.
 - L2 asked for a ruling on -frounding-math for platform/coremath (CORE-MATH README:173, RZ/RD). Ruling: it is already in guest_compiler.json flags.semantics.common, so every guest CC stage has it. The refusal was a per-root restatement, which is correct. coremath drops it from its own flags and stays a guest root. No new recipe class.
 - w28-c4 list +9affb1631 (wine_fixme.tsv row 25) and every wine_fixme row on w28's line; +link/ldcheck.py (L6).
+- Orchestrator ruling d4397e9a3: a root may declare external_flags with a cite (file:line in the pinned mirror), only for flags that are neither data-model nor ABI flags; a restatement of semantics is red. Assigned to w15 for cand4; w15 tells L2 when it lands. (Note: -frounding-math is already in semantics.common.)
+- Per-target recipes are deltas over the base (w28 8666fb756), ruled for L6. Host per-target recipes drop plugins.
