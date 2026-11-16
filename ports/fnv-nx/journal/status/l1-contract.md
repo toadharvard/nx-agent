@@ -3083,3 +3083,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Direct compiler calls are converted to cfact stages: ld, cc1/cc1plus, search-dirs, dumpmachine, plugin dir.
     - (a) The sandbox bootstrap discovery is declared bootstrap, on condition that it enters the stage keys and is checked against env.json.
     - (b) The check-time probes are L1 DEBT until after the first frame (they are pure in the pinned compiler).
+- 12:50: constant records, final:
+  - .fnvnx.const {fn, len, value}, LEN 0 = void;
+  - .fnvnx.ident {fn, k};
+  - one emitter header, hostabi/include/fnvnx/const.h (L1, w29), which L5's generator and L6's 9 rows will use;
+  - clones (dk_cfg.isra.0) map to their origin through an L2 names-plugin fact (clone_of + param map), not a suffix parse. Routed to L2.
