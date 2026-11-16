@@ -198,21 +198,23 @@ for ml in "" $MLFLAG; do
 done
 # The prefix is self-contained real files: every symlink (libtool's .so version chain of libcc1 and the plugin libraries) becomes a copy of the regular file it resolves to
 # inside the prefix; any other kind is an error.
+find "$P" -type l > "$W/symlinks.txt"   # a list file, not a process substitution: the stage sandbox has no /dev/fd
 while IFS= read -r l; do
   t=$(readlink -f "$l")
   case "$t" in "$P"/*) [ -f "$t" ] || { echo "rt.sh: symlink $l does not resolve to a file ($t)" >&2; exit 5; } ;;
     *) echo "rt.sh: symlink $l resolves outside the prefix ($t)" >&2; exit 5 ;; esac
   cp --remove-destination "$t" "$l"
-done < <(find "$P" -type l)
+done < "$W/symlinks.txt"
 [ -z "$(find "$P" -type l)" ] || { echo "rt.sh: the prefix holds symlinks:" >&2; find "$P" -type l | head >&2; exit 5; }
 # Host programs (the compiler's own x86-64 executables under bin/ and libexec/) lose their .debug_* sections: a host program is not a guest object, and with debug info (the runtime_cflags record)
 # cc1/cc1plus/lto1/lto-dump exceed the 100 MB file limit of the mirror. The class is every x86-64 ELF file in those two directories; the guest libraries and their
 # members keep all their sections.
+find "$P/bin" "$P/libexec" -type f > "$W/hostfiles.txt"
 while IFS= read -r f; do
   [ "$(head -c4 "$f" | od -An -c | tr -d ' ')" = '177ELF' ] || continue
   [ "$(readelf -h "$f" | sed -n 's/^ *Machine: *//p')" = "Advanced Micro Devices X86-64" ] || continue
   strip --strip-debug "$f"
-done < <(find "$P/bin" "$P/libexec" -type f)
+done < "$W/hostfiles.txt"
 # MANIFEST.json (fnvnx-runtime-manifest/1): the facts of this build for the recipe and the gates, all derived from the mounts: the plugin objects' sha256 in the records'
 # PLUGIN_ORDER with their arguments, the flags of the target libraries, the multilib set, every library's sha256, CFG-LINK's answers. There is no key in it: the key of
 # this tree is the stage key of the step that wrote it (the sandbox's content key).
