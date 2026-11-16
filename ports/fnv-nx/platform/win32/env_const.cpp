@@ -5,13 +5,13 @@
 #include "w32.h"
 
 #include "env_const.gen.inc"
-FNVNX_EXPORT("steam_api.dll", "SteamUserStats", SteamUserStats, "func");
-FNVNX_EXPORT("steam_api.dll", "SteamApps", SteamApps, "func");
-FNVNX_EXPORT("steam_api.dll", "SteamUtils", SteamUtils, "func");
-FNVNX_EXPORT("steam_api.dll", "SteamFriends", SteamFriends, "func");
-FNVNX_EXPORT("steam_api.dll", "SteamUser", SteamUser, "func");
-FNVNX_EXPORT("steam_api.dll", "SteamAPI_IsSteamRunning", SteamAPI_IsSteamRunning, "func");
-FNVNX_EXPORT("steam_api.dll", "SteamAPI_Init", SteamAPI_Init, "func");
+FNVNX_EXPORT("galaxywrp.dll", "SteamUserStats", SteamUserStats, "func");
+FNVNX_EXPORT("galaxywrp.dll", "SteamApps", SteamApps, "func");
+FNVNX_EXPORT("galaxywrp.dll", "SteamUtils", SteamUtils, "func");
+FNVNX_EXPORT("galaxywrp.dll", "SteamFriends", SteamFriends, "func");
+FNVNX_EXPORT("galaxywrp.dll", "SteamUser", SteamUser, "func");
+FNVNX_EXPORT("galaxywrp.dll", "SteamAPI_IsSteamRunning", SteamAPI_IsSteamRunning, "func");
+FNVNX_EXPORT("galaxywrp.dll", "SteamAPI_Init", SteamAPI_Init, "func");
 FNVNX_EXPORT("kernel32.dll", "FreeResource", FreeResource, "func");
 FNVNX_EXPORT("kernel32.dll", "LockResource", LockResource, "func");
 FNVNX_EXPORT("kernel32.dll", "SetHandleCount", SetHandleCount, "func");

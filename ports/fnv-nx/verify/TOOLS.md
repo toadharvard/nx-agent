@@ -66,12 +66,13 @@ A pure function of its arguments (no file, no process): the driver verify/gate_i
   spec_text   function dll -> text of the export specification of the reference environment (Wine 9.0 dlls/<dll>/<dll>.spec)
   syms        the set of symbol names that the product objects define or reference (objects.json defined + undefined); None = the rows table
               (stage A, the root `bridgetable`): every row binds by rule alone (link, data, sym), no symbol table is read and none is judged; the
-              table is then a function of the names, the specs, the name table, the extra rows and exports.tsv only, so the import keys (contract/iat.py)
+              table is then a function of the names, the specs, the extra rows and exports.tsv only, so the import keys (contract/iat.py)
               are too.  The symbols are judged against the rows by the gate `imports` (contract/imports.judge over the members of the link)
-  name_table  {msvcrt name: (symbol, kind)} of the name table that serves msvcrt data names (read_name_table)
   extra       texts of rows in this 8-column format (other owners' rows: COM interfaces); a row of the same (dll, name) replaces the derived one
-  exports     {(module, name): (symbol, kind, ret)} of exports.tsv (contract/exportgen.py: the `.fnvnx.export` records of the link set, ret from the definer's `.fnvnx.decltype`)
+  exports     {(module, name): (symbol, kind, ret, args)} of exports.tsv (contract/exportgen.py: the `.fnvnx.export` records of the link set, ret and args from the definer's `.fnvnx.decltype`; kind func|entry|data:
+              entry = a guest-state body, definer void(void), the bridge jumps to it and marshals nothing; a module with no reference spec takes its signature from these records)
 bind  link   native_symbol is the symbol of the export record; exactly one member of the link defines it (imports.judge)
+      entry  the same for a record of kind entry (ret `-`; conv and args stay the reference spec's)
       sym    native_symbol is a symbol of the root's own objects (rows of another owner's file)      data  the same for a data row without a record
       none   no implementation: the gate `imports` is red for the row
 conv  stdcall | cdecl | vararg | thiscall | fastcall | data;  ret v|i|q|f|d;  args: x86 stack slots i|q|f|d.
@@ -393,15 +394,13 @@ Order: the exe, then the images in discovery order (depth first, import director
 Gate `imports` (class 4 of verify/VERDICT.md), pure judgement: every row of the bridge table has a body proven by the build products.
 
 Inputs (all values, no file): rows from bridgetable.derive; `syms` {symbol: [(bind, type)]} of the product objects (objects.json `defined`);
-`table` the msvcrt name table {name: (symbol, kind)}; `others` the same kind of map over every product root that is not the one the rows belong
+`others` the same kind of map over every product root that is not the one the rows belong
 to; `owner_of` {(dll, name): index} of rows taken from files that belong to another owner's build (the `external` rows).
 A row is certified iff its body is proven by the symbol table of a build product:
   sym/data  a GLOBAL (or UNIQUE) symbol of type FUNC (sym) or OBJECT (data) is defined in the row's root
-  lookup    the name table entry of the name names a symbol defined GLOBAL of type FUNC (kind func) or OBJECT (kind data) in the root
   l3        and rows of another owner's file: such a symbol is defined in another product root (the lifter runtime's build); else `external`
 Classes of an uncertified row: none (no symbol of that name is defined or referenced), unresolved-symbol (referenced only), weak (defined weak
-only), not-a-function (defined global of the wrong type), lookup-miss (an msvcrt name that the name table does not carry, or whose entry names
-no proven symbol), external (l3 or another owner's row that no other root defines).
+only), not-a-function (defined global of the wrong type), external (l3 or another owner's row that no other root defines).
 The decision reads symbol tables and tables, never a source text, a run or a name pattern. Assumption (ASM-052): objects.json lists every global, weak
 and unique symbol of every object of the root (recipe.symbols); locals are not symbols a row can bind to.
 ```
@@ -1404,8 +1403,7 @@ tables the recipe wrote (objects.json: defined {symbol, bind, type}, undefined).
 A product root DECLARES its imports in `<root>/imports.in.json` ("fnvnx-imports-in/1"):
   {"format", "external": NAME of an entry of the root's recipe `external` (the private manifest: fnv-nx-build commit + tree_sha256),
    "names": path of sys_names.tsv inside it, "specs": directory of the reference environment's .spec files inside it,
-   "extra": [row files inside it, judged against this root], "extra_other": [row files of another owner's build, judged against the other roots],
-   "name_table": path inside the root of the msvcrt name table `name TAB symbol TAB func|data` (the same file the root generates its lookup table from)}
+   "extra": [row files inside it, judged against this root], "extra_other": [row files of another owner's build, judged against the other roots]}
 The external is checked out from the build's own fetch (GATE_CACHE/external/<commit>) and its tree hash must equal tree_sha256.
 Universe (gate_build.quantify, the convention of build/objstub): the admitted product roots; per root every row of the bridge table (contract/bridgetable.derive). A root without imports.in.json is one red item. Certified: rows with no class
 (contract/imports.py). uncertified: the first 50 ids `dll!name`; imports.ids lists `id TAB class`, sorted. No product root: universe 0, green. Bad input, a red build, an invalid recipe or an

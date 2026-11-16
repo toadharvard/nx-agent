@@ -112,7 +112,7 @@ def lifted_repo(name, body, pack, ehfacts=None, rts=(RT,), image=True):
 def gate(repo, name, cache):
     out = os.path.join(BASE, "out-%s-%s" % (os.path.basename(repo), name))
     os.makedirs(out, exist_ok=True)
-    recipe.set_artifacts(os.path.join(cache, "external"), recipe.ARTIFACTS)   # the run's repository, beside the cache
+    recipe.set_artifacts(recipe.ext_dir(cache), recipe.ARTIFACTS)   # the run's repository, beside the cache
     p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "gate_lift.py"), "--gate", name], cwd=repo,
                        env=dict(os.environ, GATE_OUT=out, GATE_CACHE=cache), capture_output=True, text=True)
     f = os.path.join(out, name + ".json")

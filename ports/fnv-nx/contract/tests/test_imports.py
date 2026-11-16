@@ -27,11 +27,11 @@ SPECS = {"kernel32": "1 stdcall Foo(long ptr)\n2 stdcall Bar()\n3 stdcall Baz()\
 NAMES = ("kernel32.dll\tFoo\nkernel32.dll\tBar\nkernel32.dll\tBaz\nkernel32.dll\tQux\nkernel32.dll\tFwd\nmsvcrt.dll\tmemcpy\n"
          "msvcrt.dll\tstrlen\nmsvcrt.dll\tnotserved\nmsvcrt.dll\tmemset\nmsvcrt.dll\t_iob\nmsvcrt.dll\tsprintf\n")
 # the records (exports.tsv): the definer of every function row, with the return letter of its declared type; notserved has none
-EXPORTS = {("kernel32.dll", "Foo"): ("Foo", "func", "i"), ("kernel32.dll", "Bar"): ("Bar", "func", "v"), ("kernel32.dll", "Baz"): ("Baz", "func", "i"),
-           ("kernel32.dll", "Qux"): ("Qux", "func", "i"), ("other.dll", "Real"): ("Fwd", "func", "q"),
-           ("msvcrt.dll", "memcpy"): ("fnvnx_memcpy", "func", "i"), ("msvcrt.dll", "strlen"): ("fnvnx_strlen", "func", "i"),
-           ("msvcrt.dll", "memset"): ("fnvnx_memset", "func", "i"), ("msvcrt.dll", "_iob"): ("fnvnx_iob", "data", "-"),
-           ("msvcrt.dll", "sprintf"): ("fnvnx_msvcrt_va_sprintf", "func", "i")}
+EXPORTS = {("kernel32.dll", "Foo"): ("Foo", "func", "i", "-"), ("kernel32.dll", "Bar"): ("Bar", "func", "v", "-"), ("kernel32.dll", "Baz"): ("Baz", "func", "i", "-"),
+           ("kernel32.dll", "Qux"): ("Qux", "func", "i", "-"), ("other.dll", "Real"): ("Fwd", "func", "q", "-"),
+           ("msvcrt.dll", "memcpy"): ("fnvnx_memcpy", "func", "i", "-"), ("msvcrt.dll", "strlen"): ("fnvnx_strlen", "func", "i", "-"),
+           ("msvcrt.dll", "memset"): ("fnvnx_memset", "func", "i", "-"), ("msvcrt.dll", "_iob"): ("fnvnx_iob", "data", "-", "-"),
+           ("msvcrt.dll", "sprintf"): ("fnvnx_msvcrt_va_sprintf", "func", "i", "-")}
 # who defines what over the link (the members of the link the root enters): judge checks a link row against these
 LINK = {"Foo": {"platform": [("GLOBAL", "FUNC")]},            # certified
         "Bar": {"platform": [("UND", "NOTYPE")]},             # unresolved-symbol is not a definer: external
@@ -43,11 +43,18 @@ LINK = {"Foo": {"platform": [("GLOBAL", "FUNC")]},            # certified
         "fnvnx_iob": {"platform": [("GLOBAL", "OBJECT")]},
         "fnvnx_msvcrt_va_sprintf": {"lift/rt": [("GLOBAL", "FUNC")]}}   # defined by another member: green
 VA = B.read_va("sprintf\tfnvnx_msvcrt_va_sprintf\n")
-TABLE = B.read_name_table("_iob\tfnvnx_iob\tdata\n")
 
 
-def derive(names=NAMES, specs=SPECS, syms=(), table=TABLE, extra=(), va=VA, exports=EXPORTS):
-    return B.derive(names, lambda d: specs[d], set(syms), table, list(extra), va, exports)
+def spec_of(specs):
+    def f(d):
+        if d not in specs:
+            raise FileNotFoundError(d)
+        return specs[d]
+    return f
+
+
+def derive(names=NAMES, specs=SPECS, syms=(), extra=(), va=VA, exports=EXPORTS):
+    return B.derive(names, spec_of(specs), set(syms), list(extra), va, exports)
 
 
 rows, errs, _ = derive()
@@ -89,9 +96,10 @@ check("derive: extra row with a bad column count is an error", derive(names=NN, 
 check("derive: stub in the spec is an error", derive(names="kernel32.dll\tFoo\n", specs={"kernel32": "1 stub Foo\n"})[1] != [])
 check("derive: name missing from the spec is an error", derive(names="kernel32.dll\tMissing\n")[1] != [])
 
-# the data row symbol comes from the record, else the name table (msvcrt); a varargs export needs its va row; each missing is an error, never a default
-check("derive: a data export with neither record nor name table row is an error", derive(exports={k: v for k, v in EXPORTS.items() if k[1] != "_iob"}, table={})[1] != [])
-check("derive: a data export without a record is served by the name table (link-free, judged by the root's own symbols)", [(r[6], r[7]) for r in derive(exports={k: v for k, v in EXPORTS.items() if k[1] != "_iob"}, syms=["fnvnx_iob"])[0] if r[1] == "_iob"] == [("fnvnx_iob", "data")])
+# the data row symbol comes from the record, else its own name when the product defines it (bind data), else none; a varargs export needs its va row
+NOREC = {k: v for k, v in EXPORTS.items() if k[1] != "_iob"}
+check("derive: a data export without a record and without a symbol of its own name is bind none", [(r[6], r[7]) for r in derive(exports=NOREC)[0] if r[1] == "_iob"] == [("-", "none")])
+check("derive: a data export without a record binds the symbol of its own name when the product defines it", [(r[6], r[7]) for r in derive(exports=NOREC, syms=["_iob"])[0] if r[1] == "_iob"] == [("_iob", "data")])
 check("derive: a varargs export without a va row is an error", any("no forwarder in the va record" in e for e in derive(names="msvcrt.dll\tsprintf\n", va={})[1]))
 check("derive: a va row naming another symbol than the record is an error", any("the va record names" in e for e in derive(names="msvcrt.dll\tsprintf\n", va={"sprintf": "other"})[1]))
 for bad in ("a\n", "a\tb\tc\n", "a\tb\na\tc\n", "a\t1b\n"):
@@ -101,19 +109,10 @@ for bad in ("a\n", "a\tb\tc\n", "a\tb\na\tc\n", "a\t1b\n"):
     except ValueError:
         check("va record bad input %r is an error" % bad, True)
 
-# bad name tables are errors, never silently empty
-for bad in ("a\tb\n", "a\tb\tproc\n", "a\tb\tfunc\na\tc\tfunc\n", "a\t\tfunc\n"):
-    try:
-        B.read_name_table(bad)
-        check("name table bad input %r is an error" % bad, False)
-    except ValueError:
-        check("name table bad input %r is an error" % bad, True)
-check("name table: empty text is the empty table", B.read_name_table("") == {})
-
 # the rows table (stage A) and its keys: a function of dll, name, conv only
 from contract import iat  # noqa: E402
 ra, ea, _ = derive(names=NAMES.replace("msvcrt.dll\tnotserved\n", ""))
-rb, _, _ = derive(names=NAMES.replace("msvcrt.dll\tnotserved\n", ""), exports={k: (v[0] if k[1] == "sprintf" else v[0] + "_other", v[1], "v" if v[2] == "i" else v[2]) for k, v in EXPORTS.items()})
+rb, _, _ = derive(names=NAMES.replace("msvcrt.dll\tnotserved\n", ""), exports={k: (v[0] if k[1] == "sprintf" else v[0] + "_other", v[1], "v" if v[2] == "i" else v[2], v[3]) for k, v in EXPORTS.items()})
 check("rows table: the import keys do not depend on the symbols or the return letters",
       iat.system_keys([(r[0], r[1], r[3], r[2]) for r in ra]) == iat.system_keys([(r[0], r[1], r[3], r[2]) for r in rb]))
 import subprocess  # noqa: E402
@@ -122,12 +121,29 @@ with tempfile.TemporaryDirectory() as td:
     for dll, text in SPECS.items():
         open(os.path.join(td, dll + ".spec"), "w").write(text)
     open(os.path.join(td, "names"), "w").write(NAMES.replace("msvcrt.dll\tnotserved\n", ""))
-    open(os.path.join(td, "table"), "w").write("_iob\tfnvnx_iob\tdata\n")
     open(os.path.join(td, "va"), "w").write("sprintf\tfnvnx_msvcrt_va_sprintf\n")
     open(os.path.join(td, "exports"), "w").write("".join("\t".join((m, n) + v) + "\n" for (m, n), v in sorted(EXPORTS.items())))
-    r = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(HERE), "bridgegen.py"), "--names", td + "/names", "--specs", td, "--name-table", td + "/table", "--va", td + "/va", "--exports", td + "/exports", "--out", td + "/bridge.tsv"],
+    r = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(HERE), "bridgegen.py"), "--names", td + "/names", "--specs", td, "--va", td + "/va", "--exports", td + "/exports", "--out", td + "/bridge.tsv"],
                        capture_output=True, text=True)
     got = open(td + "/bridge.tsv").read() if r.returncode == 0 else ""
     check("bridgegen: the stage writes the header and the rows of derive", got == "dll\tname\tordinal\tconv\tret\targs\tnative_symbol\tbind\n" + "".join("\t".join(x) + "\n" for x in ra), (r.stderr[-200:], got[:200]))
+
+# the entry kind: the record says the body works on the guest state; the row binds `entry`, ret `-`, conv and args stay the spec's; judged like a link row
+ENT = {**EXPORTS, ("kernel32.dll", "Bar"): ("fnvl_Bar", "entry", "-", "-")}
+re_, ee, _ = derive(names=NN, exports=ENT)
+brow = [r for r in re_ if r[1] == "Bar"][0]
+check("derive: an entry record gives bind entry, ret -, the spec's conv", ee == [] and brow[7] == "entry" and brow[4] == "-" and brow[3] == "stdcall" and brow[6] == "fnvl_Bar", (ee, brow))
+check("derive: an entry record for a data import is an error", derive(names="msvcrt.dll\t_iob\n", exports={("msvcrt.dll", "_iob"): ("x", "entry", "-", "-")})[1] != [])
+check("judge: an entry row is certified by exactly one FUNC definer over the link", I.judge([brow], {}, {"fnvl_Bar": {"lift/rt": [("GLOBAL", "FUNC")]}}, {}) == [("kernel32.dll!Bar", None)]
+      and I.judge([brow], {}, {}, {}) == [("kernel32.dll!Bar", "external")]
+      and I.judge([brow], {}, {"fnvl_Bar": {"a": [("GLOBAL", "FUNC")], "b": [("GLOBAL", "FUNC")]}}, {}) == [("kernel32.dll!Bar", "multiple-definers")])
+# a module without a reference spec (a vendor SDK's): the signature is the definer's declared type (ret and args of the record), never a constant of derive
+GAL = {("galaxywrp.dll", "SteamAPI_RegisterCallback"): ("SteamAPI_RegisterCallback", "func", "v", "ii"), ("galaxywrp.dll", "SteamAPI_Shutdown"): ("SteamAPI_Shutdown", "func", "v", "-"),
+       ("galaxywrp.dll", "SteamAPI_Init"): ("SteamAPI_Init", "func", "i", "-")}
+gn = "".join("galaxywrp.dll\t%s\n" % k[1] for k in GAL)
+rg, eg, _ = derive(names=gn, exports=GAL)
+check("derive: a module with no spec takes ret and args from its records", eg == [] and {r[1]: (r[3], r[4], r[5], r[7]) for r in rg} == {
+    "SteamAPI_RegisterCallback": ("cdecl", "v", "ii", "link"), "SteamAPI_Shutdown": ("cdecl", "v", "", "link"), "SteamAPI_Init": ("cdecl", "i", "", "link")}, (eg, rg))
+check("derive: an import of a module with no spec and no record is an error", derive(names=gn, exports={})[1] != [])
 print("%d failed" % len(FAILED) if FAILED else "all passed")
 sys.exit(1 if FAILED else 0)

@@ -54,7 +54,7 @@ def origin_class(origin):
 def semantics_set(origin):
     """The semantic flag set (before the per-language drop of semantics_for) of a root with `cxx_origin` ORIGIN: SEMANTICS_LIFTED for a lifted
     root, SEMANTICS_FLAGS for every other."""
-    return SEMANTICS_LIFTED if origin_class(origin) == "lifted" else SEMANTICS_FLAGS
+    return semantic_lifted() if origin_class(origin) == "lifted" else semantic_flags()
 
 
 def plugin_args(origin):
@@ -73,8 +73,27 @@ def plugin_args(origin):
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "guest_compiler.json")) as _f:
     _sem = json.load(_f)["flags"]["semantics"]
 from verify import targets as _targets  # noqa: E402  (the declared targets: verify/targets.json)
-SEMANTICS_FLAGS = tuple(_targets.semantic_prefix(_targets.load())) + tuple(_sem["common"])   # every guest root (native, decomp, lifted)
-SEMANTICS_LIFTED = SEMANTICS_FLAGS + tuple(_sem["lifted_extra"])   # a root whose cxx_origin is a lifted declaration: the common set plus what the lifter's code is built under
+
+
+def semantic_flags(datamodel=None):
+    """The semantic set of every guest root (native, decomp, lifted), evaluated when asked, never at import: its data-model run reads DATAMODEL.json, which a stage that only imports this file
+    does not have at the repository path. DATAMODEL: the table's path when the caller holds it elsewhere (the stage's own input); else the record's reference in this checkout."""
+    return tuple(_targets.semantic_prefix(_targets.load(), None, datamodel)) + tuple(_sem["common"])
+
+
+def semantic_lifted(datamodel=None):
+    """A root whose cxx_origin is a lifted declaration: the common set plus what the lifter's code is built under."""
+    return semantic_flags(datamodel) + tuple(_sem["lifted_extra"])
+
+
+def __getattr__(name):   # PEP 562: SEMANTICS_FLAGS / SEMANTICS_LIFTED are the sets over this checkout's DATAMODEL, computed on first use
+    if name == "SEMANTICS_FLAGS":
+        return semantic_flags()
+    if name == "SEMANTICS_LIFTED":
+        return semantic_lifted()
+    raise AttributeError(name)
+
+
 SDD_DEFINE = "-DFNVNX_SDD=1"   # per root: the plugin fnvnx_sdd needs it (and -fno-devirtualize, which is in the semantic set of a guest root)
 SDD_FLAGS = (SDD_DEFINE, "-fno-devirtualize")   # what a NATIVE C++ root of a host target holds itself
 
