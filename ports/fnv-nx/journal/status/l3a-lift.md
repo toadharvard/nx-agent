@@ -1369,3 +1369,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - Ruling for w13: the helper test root is built through the recipe for the product target (aarch64 ILP32 with msvcmodel, run under the boot machine). The helper universe comes from the Forms. 32-bit inputs are exhaustive. The 64-bit helpers (sse_f2i(double), fv_i, fx_dsl fp/cvt w=64) are an explicit open list. gate_fpexact check 0 reads that list instead of "forms".
 - Reported to the orchestrator as a step with no known rule. A non-sampled 64-bit proof needs a tool beyond OWNER 9. Recommendation: isla with the Arm Sail model over the product object (an extension of OWNER 9). The alternatives are CBMC, or OWNER 5 (tested).
 - bottleneck: L2's K2 pin.
+
+## 2026-11-16 03:12: orchestrator decision (integ CLAUDE.md 37da2f792)
+- The rule for the 32-bit-input FP helpers is w13's exhaustive test root through the recipe. The f64-input helpers are a REMOVE record owned by L3b until after the first frame. The relift is unchanged.
+- bottleneck: L2's K2 pin (lift/rt, contract/facts, lift/disp).
