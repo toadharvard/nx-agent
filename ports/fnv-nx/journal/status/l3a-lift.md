@@ -1881,3 +1881,11 @@ One bounded read-only pass over lift/. Each item gives its replacement.
     - Classes at 0 get a test asserting the 0.
     - Classes above 0 get a rule from the documented behaviour (OWNER 10). Doing: w13.
 - FNVNX_FPCR (L1 contract/target): on hold until cand5 reaches base3; it needs L1's 82a245d49 (recipe.py and gate_admit).
+- L3b (6779fd37c) on the relift:
+  - Rules 1+2 at b6e52e004 vs base3 6d67261ef: Form-neutral. 26,637 shape keys, 0 sha changes, 0 build-outcome changes; 23,933 built, 2,691 KeyError, 12 AssertionError (the Sreg forms, L3b is fixing), 1 SymbolicBranch.
+  - P2' polls: sound.
+  - shape_sha/formgate wait for the pack's shapes.tsv.
+- L3b's SDM consumers are deleted on its branch.
+  - lift/sdm and lift/sdmrows stay: the 8 fnvlift x86sys tests and test_x87_exc_routing still read SDMROWS. Revisit after the first frame.
+- x87 exception routing: base3 eee971323 (w8; FXF is the one path, 12 helper sites, the FCOM/FUCOM Q class). Doing: C1 round-up on the carrier fast paths.
+- Doing (w13): one liftsrcgen include function for every lifted-text root (the imptest root lacked platform/include).
