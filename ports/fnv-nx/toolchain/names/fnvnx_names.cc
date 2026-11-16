@@ -358,6 +358,20 @@ struct M {
     else if (mv == char8_type_node) out += "_Q";
     else if (mv == char16_type_node) out += "_S";
     else if (mv == char32_type_node) out += "_U";
+    else if (TREE_CODE(mv) == INTEGER_TYPE) {
+      /* RULE NAMES-INTN: an integer type with no node of the table above (a mode-attribute type, an __intN_t chain) is decorated by (precision, signedness): the code of the
+       * ONE named row of the table with that precision and signedness (MSVC's __int8 `C`/`E`, __int16 `F`/`G`, __int64 `_J`/`_K` are those rows: sized integers are the
+       * same types as the named ones). A (precision, signedness) that two rows share (32 bits: int and long are distinct in MSVC) or none names is an error with that reason. */
+      struct row { tree node; const char *code; };
+      const row rows[] = { { signed_char_type_node, "C" }, { unsigned_char_type_node, "E" }, { short_integer_type_node, "F" }, { short_unsigned_type_node, "G" },
+                           { integer_type_node, "H" }, { unsigned_type_node, "I" }, { long_integer_type_node, "J" }, { long_unsigned_type_node, "K" },
+                           { long_long_integer_type_node, "_J" }, { long_long_unsigned_type_node, "_K" } };
+      const char *hit = NULL; int n = 0;
+      for (const row &r : rows)
+        if (TYPE_PRECISION(r.node) == TYPE_PRECISION(mv) && !!TYPE_UNSIGNED(r.node) == !!TYPE_UNSIGNED(mv)) { hit = r.code; n++; }
+      if (n == 1) out += hit;
+      else fail(std::string("integer type of ") + std::to_string(TYPE_PRECISION(t)) + (TYPE_UNSIGNED(mv) ? " bits unsigned" : " bits signed") + (n ? ": two named rows share it" : ": no named row"));
+    }
     else fail(std::string("builtin type ") + get_tree_code_name(TREE_CODE(t)) + " of " + std::to_string(TYPE_PRECISION(t)) + " bits");
   }
 
