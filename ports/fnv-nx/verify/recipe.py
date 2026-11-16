@@ -1409,6 +1409,15 @@ def deb_pins():
         return {}
 
 
+def deb_profiles():
+    """The named top lists of verify/env.json `debs.profiles` ({name: [top package names]}): one fact in one file; {} when unreadable."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "env.json")) as f:
+            return json.load(f)["debs"].get("profiles", {})
+    except (OSError, KeyError, ValueError):
+        return {}
+
+
 def deb_closure(tops):
     """Sorted package names of TOPS and everything their Pre-Depends/Depends need on the declared machine (envcheck.dep_closure, the rule that defines the
     declared package set: what `dpkg -i` of the pins needs to be complete). A top that is not installed there is not in the result; the build refuses it."""
@@ -1420,7 +1429,7 @@ def deb_closure(tops):
     return sorted(have)
 
 
-DEBS_CLOSURE_ERR = 'debs is a list of env.json package names or {"closure": [top package names]} (the dependency closure of the programs the step runs, resolved by the recipe)'
+DEBS_CLOSURE_ERR = 'debs is a list of env.json package names, {"closure": [top package names]} or {"profile": NAME} (NAME in env.json debs.profiles: the tops of a named closure; the dependency closure of the programs the step runs, resolved by the recipe)'
 
 
 def step_debs(g, closure=True):
@@ -1437,6 +1446,11 @@ def step_debs(g, closure=True):
             raise ValueError("debs: %s is the machine's root layout and in every run step: do not list it" % envcheck.RUN_LAYOUT_DEB)
     elif isinstance(d, dict) and set(d) == {"closure"} and isinstance(d["closure"], list) and d["closure"] and all(isinstance(x, str) for x in d["closure"]):
         got = deb_closure(d["closure"]) if closure else list(d["closure"])
+    elif isinstance(d, dict) and set(d) == {"profile"} and isinstance(d["profile"], str):
+        tops = deb_profiles().get(d["profile"])
+        if not (isinstance(tops, list) and tops and all(isinstance(x, str) for x in tops)):
+            raise ValueError("debs.profile: %r is not a profile of env.json debs.profiles (%s)" % (d["profile"], ", ".join(sorted(deb_profiles())) or "none"))
+        got = deb_closure(tops) if closure else list(tops)
     else:
         raise ValueError(DEBS_CLOSURE_ERR)
     return sorted(set(got) | {envcheck.RUN_LAYOUT_DEB})

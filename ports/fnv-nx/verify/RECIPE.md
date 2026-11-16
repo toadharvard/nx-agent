@@ -299,6 +299,7 @@ declared debs, or a file of an external / a built root, see "A tool that is not 
   directory mounted at its own path (`/usr`, `/etc`, `/var`, ...) as a read-only input, each top-level symlink (base-files' `/bin`, `/lib`, `/lib64`, `/sbin`) a
   sandbox link. So the kernel starts dynamic programs through their own PT_INTERP, and a program runs its children by PATH (`/usr/bin:/bin`). The trees are stage inputs: the key holds their
   content, not the package version (envcheck pins the packages to the machine).
+- `debs` is a list of env.json package names, `{"closure": [TOPS]}`, or `{"profile": NAME}`: NAME is a key of env.json `debs.profiles` (`{name: [top package names]}`, one fact in one file), resolved through the same Depends closure as `closure`, so two roots that name one profile have the same debs and the same stage content. An unknown profile is red.
 - `inputs` are at `/in/1`, `/in/2`, ... in list order, as for an artifact step; a ref `{"stage": "<this root>:gen:I" | "<this root>:run:NAME", "path": P}` is a file or
   directory output of an earlier step of this root (a red producer blocks the step).
 - `dirs` are directory outputs (see "Directory outputs"); `scratch` lists absolute paths of writable tmpfs directories (a build works out of tree there; nothing survives,
