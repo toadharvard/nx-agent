@@ -165,6 +165,34 @@ def _run():
 
 
 import unittest  # noqa: E402
+from fnvlift import dsl  # noqa: E402
+import helpercalls as H  # noqa: E402
+
+
+class HelperTable(unittest.TestCase):
+    """check 0: the real emitter (dsl.InlineEmit) and the real registry decide; no double"""
+    def test_call_table_from_nodes(self):
+        mx = dsl.V("mx", 32)
+        c = dsl.cvt("f2i", dsl.V("a", 64), mx, 32, True)
+        self.assertEqual(H.node_call(c), ("fx_dsl_cvt", 96))
+        self.assertEqual(H.node_call(dsl.tab("rcp", dsl.V("i", 11))), ("fnvl_tab_rcp", 11))
+        self.assertIsNone(H.node_call(dsl.uf("rdtsc", 64)))
+        self.assertIsNone(H.node_call(dsl.V("a", 32)))
+        self.assertEqual({n.op for n in H.nodes([dsl.cvt_val(c)])} >= {"cvt", "extract", "var"}, True)
+
+    def test_classes_and_items(self):
+        self.assertEqual((H.classify(11), H.classify(32), H.classify(33), H.classify(None)), ("narrow", "narrow", "wide", "wide"))
+        tab = {"fx_dsl_cvt": {"bits": 96, "ops": ["cvt"]}, "fnvl_tab_rcp": {"bits": 11, "ops": ["tab"]}}
+        it = G.helper_items("r", tab, None, ["sse_f2i"], True)
+        self.assertEqual([c for c, _ in it["helper:r/fnvl_tab_rcp"]], ["helper-no-exhaustive-cert"])
+        self.assertEqual((it["helper:r/fx_dsl_cvt"], it["helper:r/sse_f2i"], it["r:helper-record"]), ([], [], []))
+        self.assertEqual([c for c, _ in G.helper_items("r", tab, None, ["sse_f2i"], False)["r:helper-record"]], ["helper-record-missing"])
+        self.assertEqual(G.wide_scope(tab, ["sse_f2i"]), ["fx_dsl_cvt", "sse_f2i"])
+        self.assertEqual(G.helper_items("r", None, "why", ["x"], True), {"r:helper-table": [("helper-table-inputs", "why")]})
+        self.assertEqual(G.helper_items("r", tab, None, [], True), {})
+
+    def test_record_is_in_the_registry(self):
+        self.assertTrue(G.record_ok(os.path.normpath(os.path.join(LIFT, "..", "..", ".."))))
 
 
 @unittest.skipIf(BLOCKED, BLOCKED)

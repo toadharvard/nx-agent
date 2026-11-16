@@ -11,10 +11,17 @@ its object}: the `f2i` field of the object's row, the single place where the rec
 The table files are files of the admitted root that holds them (L3a's guest root lift/rt: rcptab.c, rcptab.cert.json; rcpref.h is in the root's published GEN output, genout.gen_dir): the item
 `<image>:rcpcert` exists per linked image (a root with a link stage) iff another object of the image references a symbol that the object compiled from the unit rcptab.c defines (symbol tables of the objects: the link resolves exactly those references); no image, or no such reference: no item (universe 0 for check 1).
 
-Check 0, dependency (item `<root>:forms`): the correctness of the helpers sse_f2i / fv_i, whose conversions this gate lets through, is
-established by the form certificates, not here. The item is certified iff the gate `forms` (formgate.py, the one copy) is green on its own
-declared inputs; fpexact evaluates it by calling formgate.judge(repo, cache) (verdict.py gives every gate its own GATE_OUT, so one gate cannot read another's
-result file; the same code on the same declared inputs gives the same verdict). Red reason `forms: not green` plus forms' own reason.
+Check 0, the helpers of lift/rt (items `helper:<root>/<callee>`, `<root>:helper-table`, `<root>:helper-record`). The shape certificates (gate "forms") prove that a Form equals the Sail model;
+they stop at the call into a lift/rt helper, so the C body of a helper is NOT covered by them, and this gate makes no claim that it is. What this check certifies, exactly:
+  the HELPER UNIVERSE is derived, never listed: (A) the Form -> helper call table of proof/helpercalls.py (the lifter's own emitter decides which Form node is a call; the Forms are
+  those of the lifted pack of formgate_inputs.json), and (B) the functions that the plugin fnvnx_ftoi reports as `helpers` (attribute fnvnx_f2i) in the f2i files of the root's objects. A root has
+  these items iff (B) is not empty there (the root of the lift/rt runtime holds the FNVL_F2I helpers; (A) is the table of that runtime).
+  Each helper is classified by INPUT BITS (A: the sum of the operand widths of the call, the largest over the Forms; B: not derived, so wide): narrow = at most 32 bits, wide = anything else.
+  narrow: certified only by the exhaustive host-test result of the lift/rt root (L3a w13). No such result exists yet: the item is red, code `helper-no-exhaustive-cert`, "no exhaustive helper certificate".
+  wide: not red. Its C body is tested, not proven, and is covered by the REMOVE record ASM-329 (verify/ASSUMPTIONS.json, owner L3b); the gate reports the wide helpers by name in its detail and computes
+  that scope from the table, the record does not list them. The item `<root>:helper-record` is red (`helper-record-missing`) when a wide helper exists and ASM-329 is not a REMOVE record of L3b.
+  `<root>:helper-table` is red (`helper-table-inputs`) when the Forms of the pack cannot be read (the declared inputs of formgate): the universe cannot be derived, nothing is skipped.
+Check 0 says nothing about the rcp table (check 1) or about the conversion sites (check 3).
 
 Check 1, certificate (item `<root>:rcpcert`, files of the root): rcptab.c is the table of RCPSS / RSQRTSS of the one reference CPU. The pinned certificate
 rt/rcptab.cert.json (made on that CPU by farm/rcpcert.sh: CPUID identity read with the instruction, all 2^32 inputs of both functions
@@ -68,12 +75,12 @@ object-level necessary condition:
   transformation; outside the attributed helpers none exists, so the conversion instructions of the object are copies of the helpers'
   bodies. The helpers' own correctness (range guard, rounding mode, indefinite value) is not decided here: it is by review, and it is
   listed per object in the output (`helpers` of each result file are the analysed helper functions). Registered assumptions (ASSUMPTIONS.l3b.json), none new:
-  ASM-322 (the helpers are correct: removed by the dependency on the gate forms, item `<root>:forms`), ASM-323 (an object and its result file
+  ASM-329 (the f2i-attributed helpers equal their SDM semantics: REMOVE, check 0), ASM-323 (an object and its result file
   come from the same compile: the recipe's stage key binds both), ASM-218 (an inline asm without a float / vector operand and without an FP register
   clobber does no conversion; 3b backs it up for units with no site), ASM-325 (no conversion of a C literal occurs in lifted code), ASM-801
   (native bodies compiled with the fnvnx_ftoi plugin are judged by the L2 rules, not here).
 
-Universe: per product root: `<root>:rcpcert` (per image, when it uses the table), `<root>:forms`, and for every object `rcp:<root>/<unit>` and `f2i:<root>/<unit>`; a root that does not
+Universe: per product root: `<root>:rcpcert` (per image, when it uses the table), the items of check 0, and for every object `rcp:<root>/<unit>` and `f2i:<root>/<unit>`; a root that does not
 build or whose recipe is invalid is the one item `<root>:inputs` (uncertified, reason in detail: never skipped). Certified: items with no finding.
 uncertified: the first 50 ids sorted. Exit 0 iff green."""
 import hashlib
@@ -94,7 +101,7 @@ VERIFY = os.path.normpath(os.path.join(LIFT, "..", "verify"))
 sys.path.insert(0, LIFT)
 sys.path.insert(0, os.path.join(VERIFY, "..", "contract"))
 sys.path.insert(0, VERIFY)
-from proof import formgate, genout  # noqa: E402     (genout: the one reader of the lift/rt GEN output)
+from proof import formgate, genout, helpercalls  # noqa: E402     (genout: the one reader of the lift/rt GEN output; helpercalls: the Form -> helper call table)
 import gate_build  # noqa: E402
 import gate_datamodel  # noqa: E402     (cc_docs: the reader of the CC stage documents, the one copy)
 import gatefile  # noqa: E402     (ports/fnv-nx/contract)
@@ -426,11 +433,44 @@ def object_result(oid, path, asm, unit, f2i_path, cache):
     return {k: [tuple(x) for x in items] for k, items in v.items()}
 
 
-def judge_objects_coded(root, objs, image_dir, forms_ok, docs=None, f2i=None, cache=None):
-    """-> {item id: [(code, text)]} of one root: OBJS [(unit, path)], IMAGE_DIR (see table_item), FORMS_OK (reason string or None: the dependency on the
-    gate forms), DOCS ({unit: CC document} of a native root; None: lifted root), F2I ({unit: the `f2i` of the row}, read_f2i_paths; a unit without an entry
+def helper_items(root, tab, why, names, record_ok):
+    """-> {item id: [(code, text)]} of check 0 for one root. TAB: the call table (helpercalls.table) or None with WHY (reason string); NAMES: the helper names of the objects' f2i files
+    (empty: the root holds no f2i helper and has no item of check 0); RECORD_OK: ASM-329 is a REMOVE record of L3b. The detail of the wide class is `wide_scope`."""
+    if not names:
+        return {}
+    if tab is None:
+        return {root + ":helper-table": [("helper-table-inputs", why)]}
+    bits = {k: v["bits"] for k, v in tab.items()}
+    bits.update({n: bits.get(n) for n in names})      # a B helper that no Form calls: width not derived (None) = wide
+    items = {}
+    for h in sorted(bits):
+        items["helper:%s/%s" % (root, h)] = [("helper-no-exhaustive-cert", "helper %s (%s input bits): no exhaustive helper certificate" % (h, bits[h]))] if helpercalls.classify(bits[h]) == "narrow" else []
+    if any(helpercalls.classify(b) == "wide" for b in bits.values()):
+        items[root + ":helper-record"] = [] if record_ok else [("helper-record-missing", "wide helpers exist and %s is not a REMOVE record of L3b in verify/ASSUMPTIONS.json" % RECORD)]
+    return items
+
+
+def wide_scope(tab, names):
+    """the helpers that ASM-329 covers: the wide class of the derived universe, sorted"""
+    bits = {k: v["bits"] for k, v in (tab or {}).items()}
+    bits.update({n: bits.get(n) for n in names})
+    return sorted(h for h, b in bits.items() if helpercalls.classify(b) == "wide")
+
+
+def record_ok(repo):
+    """ASM-329 is a REMOVE record of owner L3b in the registry of this tree"""
+    try:
+        with open(os.path.join(repo, "ports", "fnv-nx", "verify", "ASSUMPTIONS.json")) as fh:
+            ents = json.load(fh)["entries"]
+    except (OSError, ValueError, KeyError):
+        return False
+    return any(e.get("id") == RECORD and e.get("status") == "REMOVE" and e.get("owner") == "L3b" for e in ents)
+
+
+def judge_objects_coded(root, objs, image_dir, helpers, docs=None, f2i=None, cache=None):
+    """-> {item id: [(code, text)]} of one root: OBJS [(unit, path)], IMAGE_DIR (see table_item), HELPERS ({item id: [(code, text)]} of check 0, helper_items), DOCS ({unit: CC document} of a native root; None: lifted root), F2I ({unit: the `f2i` of the row}, read_f2i_paths; a unit without an entry
     has none)."""
-    items = {root + ":forms": [("forms-not-green", forms_ok)] if forms_ok else []}
+    items = dict(helpers)
     cert = table_item(objs, image_dir, cache)
     if cert is not None:
         items[root + ":rcpcert"] = [("rcpcert", t) for t in cert]
@@ -442,31 +482,27 @@ def judge_objects_coded(root, objs, image_dir, forms_ok, docs=None, f2i=None, ca
     return items
 
 
-def judge_objects(root, objs, image_dir, forms_ok, docs=None, f2i=None):
+def judge_objects(root, objs, image_dir, helpers, docs=None, f2i=None):
     """-> {item id: [findings]}, see judge_objects_coded"""
-    return {k: [t for _, t in v] for k, v in judge_objects_coded(root, objs, image_dir, forms_ok, docs, f2i).items()}
+    return {k: [t for _, t in v] for k, v in judge_objects_coded(root, objs, image_dir, helpers, docs, f2i).items()}
 
 
 def fixture_findings(root, items):
     """-> [{"id", "code"}] (RECIPE.md "Fixtures"): one per distinct code of each item: `rcp:<root>/<unit>` and `f2i:<root>/<unit>` give id `<root>/<unit>`;
-    `<root>:forms` and `<root>:rcpcert` give id `<root>/forms` and `<root>/rcpcert` (a finding id is under its root: gate_fixtures.py)"""
+    `helper:<root>/<callee>` gives id `<root>/<callee>`; `<root>:helper-table`, `<root>:helper-record` and `<root>:rcpcert` give id `<root>/helper-table` ... (a finding id is under its root: gate_fixtures.py)"""
     out = set()
     for k, v in items.items():
-        i = k.split(":", 1)[1] if k.split(":", 1)[0] in ("rcp", "f2i") else root + "/" + k.split(":", 1)[1]
+        i = k.split(":", 1)[1] if k.split(":", 1)[0] in ("rcp", "f2i", "helper") else root + "/" + k.split(":", 1)[1]
         out |= {(i, c) for c, _ in v}
     return [{"id": i, "code": c} for i, c in sorted(out)]
 
 
-def forms_reason(repo, cache):
-    """None iff the gate forms is green on its declared inputs, else `forms: not green: <its reason>`"""
-    u, c, ids, detail = formgate.judge(repo, cache)
-    return None if u == c else "forms: not green: %s" % detail[:300]
-
-
+RECORD = "ASM-329"       # the REMOVE record of the wide helpers (verify/ASSUMPTIONS.json)
+WIDE = {}                # root -> the wide helpers of this run (the scope of RECORD)
 FINDINGS = []   # every finding of the run as {id, code}, written to fpexact.json (RECIPE.md "Fixtures")
 
 
-def judge_root(root, repo, cache, forms):
+def judge_root(root, repo, cache, table):
     """One admitted product ROOT -> (universe, certified, ids, detail); an input problem is one red item, never a skip"""
     try:
         rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
@@ -484,7 +520,11 @@ def judge_root(root, repo, cache, forms):
         image = os.path.join(repo, root) if res.get("elf") else None
         native = recipe.load_admit(repo).get(root, {}).get("cxx_origin") == "native"
         docs = gate_datamodel.cc_docs(os.path.join(cache, "store"), res) if native else None
-        coded = judge_objects_coded(root, read_inputs(res), image, forms(), docs, read_f2i_paths(res), cache)
+        paths = read_f2i_paths(res)
+        names = sorted({h for p in paths.values() if p for h in ((read_f2i(p)[0] or {}).get("helpers") or [])})
+        tab, why = table() if names else (None, None)
+        WIDE[root] = wide_scope(tab, names)
+        coded = judge_objects_coded(root, read_inputs(res), image, helper_items(root, tab, why, names, record_ok(repo)), docs, paths, cache)
         FINDINGS.extend(fixture_findings(root, coded))
         items = {k: [t for _, t in v] for k, v in coded.items()}
     except (OSError, ValueError, ELFError) as e:
@@ -511,12 +551,15 @@ def main(argv):
     os.makedirs(cache, exist_ok=True)
     memo = []
 
-    def forms():
+    def table():      # (call table, None) or (None, reason): derived once per run from the Forms of the lifted pack
         if not memo:
-            memo.append(forms_reason(".", os.path.join(cache, "forms")))
+            try:
+                memo.append((helpercalls.table(helpercalls.pack_forms(os.path.join(cache, "forms"))), None))
+            except (formgate.Red, OSError, ValueError) as e:
+                memo.append((None, "the Forms of the pack cannot be read: %s" % str(e)[:300]))
         return memo[0]
-    u, c, ids, detail = gate_build.quantify(".", lambda root: judge_root(root, ".", cache, forms))
-    gatefile.write(NAME, u, c, ids, detail if u != c else ("rcp table certified, no rcp/rsqrt estimate instruction and no uncertified float->int conversion in %d items" % u if u else detail))
+    u, c, ids, detail = gate_build.quantify(".", lambda root: judge_root(root, ".", cache, table))
+    gatefile.write(NAME, u, c, ids, detail if u != c else ("rcp table certified, no rcp/rsqrt estimate instruction and no uncertified float->int conversion in %d items" % u + ("; wide helpers, covered by %s (tested, not proven): %s" % (RECORD, "; ".join("%s: %s" % kv for kv in sorted(WIDE.items()) if kv[1])[:600]) if any(WIDE.values()) else "") if u else detail))
     st = "green" if u == c else "red"
     if os.environ.get("GATE_OUT"):     # also in normal mode: a whole-root fixture is judged in normal mode
         path = os.path.join(os.environ["GATE_OUT"], NAME + ".json")

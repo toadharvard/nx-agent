@@ -118,6 +118,10 @@
    ]
   },
   {
+   "id": "ASM-322",
+   "aliases": []
+  },
+  {
    "id": "ASM-324",
    "aliases": []
   },
@@ -1442,19 +1446,6 @@
    "owner": "L3b"
   },
   {
-   "id": "ASM-322",
-   "text": "The helpers sse_f2i and fv_i are correct (range guard, rounding mode, integer indefinite).",
-   "used_by": [
-    "ports/fnv-nx/lift/proof/gate_fpexact.py"
-   ],
-   "aliases": [
-    "L3b:A-F2IHELPERS"
-   ],
-   "status": "REMOVE",
-   "removed_by": "gate:fpexact",
-   "owner": "L3b"
-  },
-  {
    "id": "ASM-323",
    "text": "An object and its .f2i.json come from the same compile.",
    "used_by": [
@@ -1492,6 +1483,20 @@
    "used_by": [
     "ports/fnv-nx/lift/README.md"
    ]
+  },
+  {
+   "id": "ASM-329",
+   "text": "The C bodies of the lift/rt helpers with an input wider than 32 bits (the f64-input FP helpers: the helpers the Form -> helper call table of lift/proof/helpercalls.py derives with more than 32 input bits, and the fnvnx_f2i helpers whose width is not derived) equal their SDM instruction semantics: they are tested, not proven, until the remover. The scope is computed by gate fpexact check 0, not listed here.",
+   "used_by": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py",
+    "ports/fnv-nx/lift/proof/helpercalls.py"
+   ],
+   "aliases": [
+    "L3b:A-F2IHELPERS"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned (after the first frame): isla over the host x86_64 object of each helper of the derived universe, under the pinned Sail x86 model, once the SSE FP model gaps (cvttsd2si, ucomisd and the rest) are patched from the pinned ACL2 source (owner L3b); no CBMC or ESBMC. The host-to-aarch64 transfer of that proof holds only under four static checks over the helper universe (the derived Form->helper call table, not a list): (1) fixed-width integer types only; (2) no implementation-defined or undefined behaviour on the path; (3) -ffp-contract=off and FLT_EVAL_METHOD 0 in both compiles (host x86_64 and aarch64 guest); (4) no target builtins",
+   "owner": "L3b"
   },
   {
    "id": "ASM-801",

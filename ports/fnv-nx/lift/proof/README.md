@@ -108,8 +108,7 @@ from `ports/fnv-nx/verify` (sibling of lift/; a lift-only branch has no verify/,
   `sail_pins.txt`). A shape is certified iff a `proved` row of the pinned model carries the dsl_sha the current code gives. Today the file declares no `liftpack`:
   red, `inputs: external liftpack not declared` (the docstring says what to add). Tests: `tests/test_formgate.py` (local bare repos as externals).
 * `gate_fpexact.py` (gate `fpexact`): per admitted product root (gate_build.quantify convention, no root = universe 0 green): the rcp/rsqrt certificate, no A64
-  estimate instruction, float->int conversions only in marked helpers (plugin `toolchain/ftoi/fnvnx_ftoi.cc` in mode `lifted`, a recipe stage; report `unit.f2i.json`, format `fnvnx-f2i/2`), and the item
-  `<root>:forms` = the gate forms is green (the helpers' correctness is the form certificates'; evaluated by calling `formgate.judge`, since each gate has its own GATE_OUT).
+  estimate instruction, float->int conversions only in marked helpers (plugin `toolchain/ftoi/fnvnx_ftoi.cc` in mode `lifted`, a recipe stage; report `unit.f2i.json`, format `fnvnx-f2i/2`), and check 0, the lift/rt helpers: the universe is the Form -> helper call table derived by `helpercalls.py`; narrow helpers (<= 32 input bits) are red until the exhaustive host-test certificate (L3a w13) exists, wide ones are covered by the REMOVE record ASM-329 and reported by name. The gate makes no claim that the shape certificates cover a helper's C body.
   Tests: `tests/test_fpexact.py`.
 
 ### Why the first 340-shape measurement timed out, and the rules that closed it (L3b)
