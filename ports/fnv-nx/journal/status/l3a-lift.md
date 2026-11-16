@@ -1751,3 +1751,6 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - Pending (L3b): shape_sha and formgate at R12.
 - Done (w12): R123 claude/fnv-l3a-lift-w12-r123 @0a878998a. 10/10 fnvlift tests pass; the reds are identical to B.
   - Sent to farm 2 and to w14 (as its base). w12 is archived (context full).
+- P2' is agreed with L3b. A suspension is delivered only at S = transfer sites ∪ back-edge targets (loop headers), which keeps suspension live.
+  - Doing (w13): back-edge esc in flaglive, plus FNVL_POLL at loop headers. The new head is claude/fnv-l3a-lift-w13-r123p.
+  - Blocked (L5): the poll ABI (field and function), plus SuspendThread/ResumeThread and Get/SetThreadContext over S.
