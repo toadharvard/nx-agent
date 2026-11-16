@@ -652,3 +652,5 @@ After the first frame:
   - test_layout 197/198: the va_list C/C++ check found 0 rows (CTYPE-FE not done; w3).
   - Skew: test_layout and test_ldbl build their own external path (rule 3; w3).
   - test_plugins (verify/tests) runs on the farm.
+- 2026-11-16 03:50Z: L1 ruling: d1a92e26 (old path) is a measurement and does not enter guest_compiler.json. The pin that enters is the recipe-path build, in one commit with proof (b) and the deletion of the old path; the trunk stays at 84f0883e. w2's guest_compiler.json change is withdrawn. w3: gcc1/rt green on the recipe path first. L3a measures on d1a92e26 only. w2 c76891e22 fixed the d4 key; keys from the symtab are still owed.
+- bottleneck: COMPILER-STAGE recipe path gcc1 green (w3). It blocks the pin, so lift/rt and the ELF.
