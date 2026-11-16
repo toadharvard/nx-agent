@@ -2933,3 +2933,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - 17 of 17 L6 roots are valid. There are 0 L6 admit or pure findings and 0 bare sibling imports.
   - L1 defect sent to w28: gate_pure gives universe 0 when a root has no .py (an empty --lib).
   - Admit at b80203aca is 66 uncertified, in non-L6 trees; w28 recounts.
+- cand4 4fa00a7cb verdict: RED, 601.6 s, 32 of 45 gates green and 13 red.
+  - Red: 6 vacuous (abi, addr32, argordergate, hostapi, order, rtasm); datamodel S29 on 5 roots; imports 0/3; linkstrict (ld: no input files on hostabi); objstub (12 uncited); oracle (2 anchors); pure (gen_header, targets); selftests 105/170.
+  - w15 is fixing: linkstrict from the synth_names fix, pure from the FPCR move, the oracle anchors, the host ld for the toy link, and the tempdir leaks. The rest are triaged and reported.
+- bottleneck: cand4 reds (w15).
