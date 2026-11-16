@@ -382,17 +382,6 @@
    "entry": []
   },
   {
-   "path": "ports/fnv-nx/manifest/escape",
-   "class": "tool",
-   "target": "host",
-   "imports": [
-    "ports/fnv-nx/contract",
-    "ports/fnv-nx/manifest"
-   ],
-   "entry": [],
-   "recipe": "ports/fnv-nx/manifest/escape/build.json"
-  },
-  {
    "path": "ports/fnv-nx/platform",
    "class": "product",
    "target": "guest",

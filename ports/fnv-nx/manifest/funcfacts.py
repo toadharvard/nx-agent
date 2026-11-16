@@ -14,7 +14,7 @@ No other fact is read (universe.tsv's extent column is not).
 
 Image access: this is the only module of platform/ that imports imagerec (contract/imagerec.py, THE constructor, byte reader and decoder
 of an image: it opens the image file, checks the facts tree against the pin and the image against the manifest's sha256, rebases the runs,
-refuses reads of code with imagerec.CodeRead, and decodes x86). It imports no capstone, pefile or mmap (dnfile only for .NET metadata).
+refuses reads of code with imagerec.CodeRead, and decodes x86). It imports no capstone, pefile or mmap.
 `Image` is the typed record of one PE image on top of an imagerec.ImageRec: base, relocations, imports, exports and the data accessors
 (u8/u32/bytes_at/data_at/zstr/cstr/string_at/find_bytes), each of which goes through ImageRec.read/word and so refuses code. An image
 without function facts has no runs, so every executable section counts as code for these accessors. There is one CodeRead (imagerec's);
@@ -85,12 +85,6 @@ def sha256_file(path):
         for ch in iter(lambda: f.read(1 << 20), b""):
             h.update(ch)
     return h.hexdigest()
-
-
-def open_dotnet(path):
-    """The ECMA-335 metadata of a .NET image (dnfile), for the passes that decode interface metadata; not code, not an x86 image."""
-    import dnfile
-    return dnfile.dnPE(path)
 
 
 class Image:
