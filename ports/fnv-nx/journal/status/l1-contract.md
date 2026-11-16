@@ -3089,3 +3089,9 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - one emitter header, hostabi/include/fnvnx/const.h (L1, w29), which L5's generator and L6's 9 rows will use;
   - clones (dk_cfg.isra.0) map to their origin through an L2 names-plugin fact (clone_of + param map), not a suffix parse. Routed to L2.
 - 12:52: w29 ec4a03b1, item 6. objstub.const_cells: LOCAL STT_OBJECT cells reached only by ADRP and lo12 plain ld/st, where every store is the initializer, so they are not effects. test_objstub_cells passes 21 of 21. 0 bodies change class over 195 store objects (gl4 and translator not included: they are red on the constants key). Next: const.h and the format fix, then the lift/rt measurement, then item 7.
+- 12:53: w28 a5d63df41 (next verdict).
+  - Bootstrap discovery is in the stage keys (sandbox.py:77, cas.py:43).
+  - recipe.discovered_errors gives BuildRed on a path outside the env.json pins.
+  - The probes use one PROBE_ENV.
+  - Open: objstub's 5 probes and its version-text-keyed cache, fixed now (tree-hash key).
+  - Archive feature (L2's recipe hunk): taken whole if a c5 root uses it; otherwise test_archive_sources is deleted and L2 brings feature and test together later.
