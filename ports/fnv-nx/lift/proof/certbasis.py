@@ -106,7 +106,7 @@ def component_inputs():
         out.add(r)
         spec = "ports/fnv-nx/lift/" + r
         rec = recipe.load_recipe(repo, roots, spec)
-        for st in recipe.expand_run(rec).get("run", []) + rec.get("generated", []):
+        for st in recipe.expand_run(rec, closure=False).get("run", []) + rec.get("generated", []):
             for i in st.get("inputs", []):
                 if isinstance(i, str) and "/lift/" in i: out.add(i.split("/lift/", 1)[1])
     return out
