@@ -77,6 +77,8 @@ def main():
     check("a plugin no run step takes is red (gonly:unused-plugin)", len(e) == 1 and "unused-plugin:q" in e[0], e)
     e = gu({"compiler": cmp_}, [])
     check("a compiler with no plugin and no step using it is red (gonly:unused-compiler)", len(e) == 1 and "unused-compiler" in e[0], e)
+    e = gu({}, [])
+    check("a generated-only root that writes no compiler gets none counted as unused (the filled profile compiler is not a written one)", e == [], e)
     print("%d FAILED" % len(TR.FAILED) if TR.FAILED else "all passed")
     return 1 if TR.FAILED else 0
 
