@@ -620,3 +620,7 @@ After the first frame:
   - Defect: dispatch contp_walk rejects `__atomic_store` on fnvnx_site_t*, because only memcpy, memmove and mempcpy are exempt.
   - Rule: the generic and _N atomic and value-moving __sync builtins, derived from sync-builtins.def, are a same-type copy, exempt only when every data pointer is the same entry type T; fetch_op on an entry is red.
   - Owner w2, cand4b, ahead of NAMES-FNPARM. Status: doing.
+- 2026-11-16 02:12Z: ORDER-RTLBUILTIN (asked for by L3a; lift/rt base3 8579f3baf): fnvnx_order refuses __builtin_setjmp and __builtin_longjmp.
+  - Rule: order_builtin_call extends to the class of builtins with no library function whose effect goes through their pointer arguments, derived from GCC's builtin facts.
+  - Fences: release before a write; after the call, an ordering fence (full when it writes); none after noreturn; for returns_twice, at the join.
+  - Owner w2, in the same commit as ENTRY1-ATOMIC. Status: doing.
