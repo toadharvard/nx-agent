@@ -11,7 +11,7 @@ from array import array
 from collections import Counter, deque
 from capstone import x86 as X
 import cli
-USAGE = '''usage: universe.py --out OUTDIR (--exe FILE --funcs FILE [--refused FILE] | --module NAME --modules modules.tsv --moddirs DIR[:DIR...] --lib DIR) --keys keys.tsv [--theirs DIR]
+USAGE = '''usage: universe.py --out OUTDIR (--exe FILE --funcs FILE [--refused FILE] | --module NAME --modules modules.tsv --moddirs DIR[:DIR...]) --lib DIR --keys keys.tsv [--theirs DIR]
   code universe of the exe (--exe, with the decomp function starts --funcs) or of the module NAME (a name or file of modules.tsv; the module table and the directories
   that hold the module files are declared inputs). --keys: the import conventions (keys.tsv). --theirs (optional): with --exe, the directory that holds
   L1's facts.pkl and eh.pkl, for the entry-set comparison (reconcile.py). --refused FILE: one round of the exe's reloc-consistency fixed point (the refusals of the earlier rounds); without it the exe run drives
@@ -23,9 +23,9 @@ def _need(*ks):
     miss = [k for k in ks if k not in _O]
     if miss: sys.exit('universe.py: missing %s\n\n%s' % (' '.join(miss), USAGE))
 MOD = _O.get('--module'); STRICT = MOD is not None   # module mode: pointers are code/data only on evidence
-_need('--out', '--keys'); import ehflow; ehflow.configure_keys(_O['--keys'])
+_need('--out', '--keys', '--lib'); sys.path.insert(0, _O['--lib']); import ehflow; ehflow.configure_keys(_O['--keys'])      # --lib: the directory that holds the package fnvlift (the lifter's PE loader and decoder); a stage mounts it as an input
 if STRICT:      # separate engine (every relocated pointer into executable bytes is an entry)
-    _need('--modules', '--moddirs', '--lib'); sys.path.insert(0, _O['--lib'])      # --lib: the directory that holds the package fnvlift (the lifter's PE loader and decoder); a stage mounts it as an input
+    _need('--modules', '--moddirs')
     import modlift; modlift.run(MOD, SimpleNamespace(modules=_O['--modules'], moddirs=_O['--moddirs'].split(':'), facts_out=_O['--out'])); sys.exit(0)      # modlift.run raises on failure; its verdict is in the gate JSONs
 _need('--exe', '--funcs')
 EXE = _O['--exe']; FUNCS = _O['--funcs']; NAME = ''
