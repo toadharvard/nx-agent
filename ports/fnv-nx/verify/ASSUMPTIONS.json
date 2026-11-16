@@ -958,14 +958,6 @@
    "owner": "L3a"
   },
   {
-   "id": "ASM-221",
-   "text": "The lowest index of a jump table is below 16: the table starts at most 16 dwords above the displacement (TAB_BIAS, fnvlift/core.py).",
-   "aliases": [],
-   "status": "REMOVE",
-   "removed_by": "planned: deleted by L3a w3 1292383f; the extents come from the jtab_tables facts (tools/jtab.py, L3a w2)",
-   "owner": "L3a"
-  },
-  {
    "id": "ASM-222",
    "text": "Every FuncInfo of the exe and modules (x86-32 MSVC, VC8..VC10, no FH4) is reached from a decoded frame-handler stub `mov eax, imm32; jmp rel32`; a FuncInfo reached any other way is not enumerated by gate_eh (tools/ehtables.py).",
    "aliases": [],
