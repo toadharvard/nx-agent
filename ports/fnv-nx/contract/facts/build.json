@@ -40,8 +40,6 @@
    "args": [
     "--exe",
     "/ext/exe/FalloutNV.exe",
-    "--units",
-    "/ext/units/units.json",
     "--out",
     "/out/facts.json"
    ],
@@ -72,10 +70,10 @@
    "args": [
     "--objects",
     "/objs",
+    "--sympair-kinds",
+    "/in/ports/fnv-nx/toolchain/names/sympair_kinds.inc",
     "--out",
-    "/out/obj.json",
-    "--kinds",
-    "/in/ports/fnv-nx/toolchain/names/sympair_kinds.inc"
+    "/out/obj.json"
    ],
    "inputs": [
     "ports/fnv-nx/toolchain/names/sympair_kinds.inc"

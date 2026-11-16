@@ -1,4 +1,3 @@
-# reads: ports/fnv-nx/toolchain/layout/decltype_spell.inc
 """ctypes_compat - C11 6.2.7 compatibility of the declared types of one external symbol across translation units (gate abi, the `c` records).
 
 C records have no linkage ([6.2.2]p6: a tag is never an entity with linkage), so they are never paired by tag name.  C's cross-unit rule is 6.2.7p2: all
@@ -195,22 +194,20 @@ def compatible(a, b, seen=None):
     raise ValueError('unknown type %r' % (a,))
 
 
-def _decltype_reasons():
-    """the closed set of no-row reasons of `.fnvnx.decltype`, read from where the plugin defines it once (toolchain/layout/decltype_spell.inc, FNVNX_DECLTYPE_REASONS)"""
-    inc = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'toolchain', 'layout', 'decltype_spell.inc')
-    m = re.search(r'#define FNVNX_DECLTYPE_REASONS\(X\)((?: X\(\w+\))+)', open(inc).read())
+def decltype_reasons(inc_text):
+    """the closed set of no-row reasons of `.fnvnx.decltype`, from the text of where the plugin defines it once (toolchain/layout/decltype_spell.inc, FNVNX_DECLTYPE_REASONS); the caller passes the file's text, so no module reads a path of its own location"""
+    m = re.search(r'#define FNVNX_DECLTYPE_REASONS\(X\)((?: X\(\w+\))+)', inc_text)
     if not m:
-        raise ValueError('%s: no FNVNX_DECLTYPE_REASONS' % inc)
+        raise ValueError('no FNVNX_DECLTYPE_REASONS')
     return frozenset(re.findall(r'X\((\w+)\)', m.group(1)))
 
 
-def parse_decltype_lines(data, where):
+def parse_decltype_lines(data, where, reasons):
     """-> ({symbol: type string}, {symbol: reason}) of the `.fnvnx.decltype` section: LF-terminated lines `symbol<TAB>type` or `symbol<TAB>-reason`, each symbol once
-    (RULE DECLTYPE-COMPLETE: every symbol of the object has exactly one of the two); every type must parse and every reason must be in the plugin's closed set"""
+    (RULE DECLTYPE-COMPLETE: every symbol of the object has exactly one of the two); every type must parse and every reason must be in REASONS, the plugin's closed set (decltype_reasons)"""
     text = data.decode('utf-8')
     if text and not text.endswith('\n'):
         raise ValueError('%s: no final LF' % where)
-    reasons = _decltype_reasons()
     out, why = {}, {}
     for n, ln in enumerate(text.split('\n')[:-1], 1):
         f = ln.split('\t')
@@ -231,9 +228,9 @@ def parse_decltype_lines(data, where):
     return out, why
 
 
-def parse_decltype(data, where):
+def parse_decltype(data, where, reasons):
     """-> {symbol: type string} of the rows of the `.fnvnx.decltype` section (the symbols with a reason instead of a type are not compared: parse_decltype_lines)"""
-    return parse_decltype_lines(data, where)[0]
+    return parse_decltype_lines(data, where, reasons)[0]
 
 
 def check(per_object):

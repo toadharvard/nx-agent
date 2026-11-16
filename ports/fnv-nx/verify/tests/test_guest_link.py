@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json
-# reads: ports/fnv-nx/link
-# reads: ports/fnv-nx/shim/build.json
-# reads: ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for the guest link profile (link/guest.json, recipe.with_guest_link, the guest part of recipe.check): one fact for every guest link.
 Pure: the real checkout's profile and admit.json, synthetic roots, no sandbox."""
 import copy

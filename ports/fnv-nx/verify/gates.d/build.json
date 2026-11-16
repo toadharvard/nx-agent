@@ -9,6 +9,8 @@
  "result": "build.json",
  "covers": [
   "test",
-  "compiled"
+  "product-guest",
+  "lifted",
+  "host-product"
  ]
 }
