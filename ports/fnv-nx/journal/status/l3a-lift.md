@@ -1505,3 +1505,8 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - "no path" is a stage failure, not a refusal.
 - w13 (doing): find the cause, make "no path" a red stage error rather than a GAP row, reconcile the baddecode count (6 vs 4) globally, then the farm run on base3 via L3b.
 - bottleneck: L2 w2 (3 lift/rt units); w8 rework and merges; pcsrc vptr pop (w7); udsail stage (w13).
+
+## 2026-11-16 04:28 — vptr arrival set: the RTTI-only set is unsound
+- w7, exe facts 30757c325: 8,687 vptr-like `mov [mem], imm32` stores. 8,105 of them store RTTI vtables. 582 stores (268 runs) store code-pointer runs without a COL (/GR- classes). Slot k over the RTTI vtables alone is therefore rejected.
+- Ruled: the sound arrival set is t+4k over every relocation target t, code or data, that lands in a run of relocated code pointers. It holds only if the no-PIC fact "every in-image address is relocated" is a gate; until then the set is the whole ptr set. The pop is still open; next is (2), the interprocedural origin on the 8 sites.
+- bottleneck: L2 w2 (3 lift/rt units); w8 rework and merges; pcsrc vptr pop (w7); udsail stage (w13).
