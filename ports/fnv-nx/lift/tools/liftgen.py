@@ -363,7 +363,7 @@ def main():
     if a.module: module_inputs(a)
     import fnvlift
     from fnvlift import density
-    density.configure(a.density)
+    density.configure(a.density, os.path.join(a.lift, 'rt', 'fnvl.h') if a.lift else None)
     if not a.finish: fnvlift.inputs.configure(universe=a.universe, fpstate=a.fpstate, fpdepth=a.fpdepth, x86sys=a.x86sys, cpumodel=a.cpumodel, rcptab=a.rcptab, rcpcert=a.rcpcert, segwrites=a.segwrites, **({'udsail': a.udsail} if a.udsail else {}), image=os.path.splitext(a.module)[0].lower() if a.module else 'exe')      # finish merges texts: it reads no lifter input
     os.makedirs(a.out, exist_ok=True)
     if a.finish: finish(a)

@@ -32,7 +32,7 @@ FORM = re.compile(r'\bFNVL_(?:CALLXP?|CALLDP?|TAILXP?|JMPNP?|RETP?)\(')
 
 
 def lift(spec):
-    density.configure(spec)
+    density.configure(spec, os.path.join(_inputs.LIFT, 'rt', 'fnvl.h'))
     try: return L.lift(Image.from_bytes(code, B), B, len(code))[0]
     finally: density.configure(None)
 

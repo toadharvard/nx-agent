@@ -16,8 +16,9 @@ ON = frozenset(RULES)
 _S = {'on': ON}
 
 
-def configure(spec):
-    """spec: None / '' = every rule, else the comma-separated rules in force ('-' = none)"""
+def configure(spec, header=None):
+    """spec: None / '' = every rule, else the comma-separated rules in force ('-' = none). HEADER: the path of rt/fnvl.h (a declared input of the stage, passed as an argument: the form definitions are read from it); needed with `forms` off"""
+    _S['header'] = header
     on = ON if not spec else frozenset() if spec == '-' else frozenset(spec.split(','))
     bad = on - ON
     if bad:
@@ -38,8 +39,9 @@ _FORMS = ('CALLX', 'CALLD', 'TAILX', 'JMPN', 'RET')
 def _defs():
     """{form: (parameter names, body)} of the FNVL_<form> macros of rt/fnvl.h"""
     if not _DEF:
-        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rt', 'fnvl.h')
-        text = open(path).read()
+        if not _S.get('header'):
+            raise ValueError('--density without `forms` needs the header rt/fnvl.h (liftgen --lift)')
+        text = open(_S['header']).read()
         for f in _FORMS:
             m = re.search(r'^#define FNVL_%s\(([^)]*)\) (.*)$' % f, text, re.M)
             if not m:
