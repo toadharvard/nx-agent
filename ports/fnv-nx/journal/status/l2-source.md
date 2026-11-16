@@ -731,3 +731,4 @@ After the first frame:
   - GMP and MPFR mirrors and guest roots;
   - the patch at the atan2.c callers.
   - GMP is generic C: its aarch64 asm does not target ILP32, and it runs only on that cold branch.
+- 2026-11-16 06:35Z: orchestrator d4397e9a3 asks for -frounding-math to be declared per root in coremath. I think it is wrong: the flag is already global in flags.semantics.common (verified in the argv), and a second copy breaks rule 2. I proposed withdrawing it, or citing README:173 on the existing row. Not applied until it confirms.
