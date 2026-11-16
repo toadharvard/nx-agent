@@ -2984,3 +2984,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - a7e4030b7: gate_hostapi imports fnvnx.manifest, and toolflags imports fnvnx.verify.toolflags_policy. puregate.py stays bare, because it is a host script that no stage imports.
   - 11d62d85f: class product-guest-cxx (cxx_origin native) is what abi, argordergate, addr32 and order cover. C-only guest roots are outside it, and a native root at universe 0 is red.
   - w28 now does modules.py.
+- cand5 render head is now L6 w13-wine da0e4ff78: b80203aca plus w28-c5 919f09277 plus 28 Wine rows in render/d3d9/wine_fixme.tsv. All 28 are cited, with 0 uncited ids. gen_wine_ids reads the root's table. 13 of 13 L6 roots are valid.
