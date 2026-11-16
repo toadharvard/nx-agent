@@ -28,6 +28,8 @@ def check_flags(r):
     for f in r["flags"]:
         if f.startswith("-D") or f in ("-g", "-O2"):
             continue
+        if f.startswith("-W") and not f.startswith(("-Werror", "-Wl,", "-Wa,", "-Wp,")):
+            continue   # a warning option only chooses which diagnostics are printed, never the object code (GCC manual, "Options to Request or Suppress Warnings")
         if f.startswith("-I") and (f[2:] in supplied or real(r, f[2:]) in own_dirs(r) | {build, src}):
             continue
         sys.exit("mkunits: %s: the flag %s cannot be carried by a unit" % (r["out"], f))
