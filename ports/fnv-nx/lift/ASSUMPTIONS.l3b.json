@@ -62,7 +62,7 @@
   {
    "id": "A-GROUPS",
    "area": "lift",
-   "file": "lift/fnvlift/f_cpufeat.py",
+   "file": "lift/proof/cpufeat.py",
    "statement": "capstone group tags classify the instruction-set extension of a form correctly.",
    "disposition": "gate: same decoder-agreement gate, extension class compared with XED isa-set on every instruction"
   },

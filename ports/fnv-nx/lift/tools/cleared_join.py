@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""cleared_join: join the cpufeat-#UD census of def_check (instructions whose required CPUID feature is absent in the reference CPU, fnvlift/f_cpufeat.py) with L3b's cleared_sites.tsv
+"""cleared_join: join the cpufeat-#UD census of def_check (instructions whose required CPUID feature is absent in the reference CPU, proof/cpufeat.py) with L3b's cleared_sites.tsv
 (fnv-nx-build l3b-lift/sdm-partition/..., module:address, shape, form, reason), per site.
     cleared_join.py CLEARED.tsv IMAGE FACTS [IMAGE FACTS ...]  -> prints the sets and the symmetric difference, one line per site only in one set: SIDE module:addr mnemonic reason
 Sites are those of the decode of def_check.universe (every range of the facts); module = the image's file name without extension."""
@@ -15,14 +15,14 @@ from proof import shape
 
 def ours(pairs):
     out = {}
-    from fnvlift import f_cpufeat
+    from proof import cpufeat
     for pe, facts in pairs:
         mod = os.path.splitext(os.path.basename(pe))[0]
         for ad, i in sorted(def_check.instructions(pe, facts).items()):
             try: shape.shape_key(i)
             except shape.ShapeError: continue
             if def_check.lifted_by(i) == 'cpufeat-UD':
-                gs = f_cpufeat.gates(i)
+                gs = cpufeat.gates(i)
                 out['%s:%08x' % (mod, ad)] = (i.mnemonic, ';'.join(x[0] for x in gs), i.bytes.hex())
     return out
 

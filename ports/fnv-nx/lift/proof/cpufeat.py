@@ -4,7 +4,7 @@ THE RULE (CPUID-UD). The declared CPU (verify/cpuid_model.json, derived by cpumo
 opcode-table rows by proof/sdmfeat.match_form (the one match that proof/sdmfeat.py `rows` (L3b's cleared-feature partition) and proof/udsail.py class (a) use): (mandatory prefix, opcode bytes, ModRM.reg or fixed ModRM byte).
 The rows give the form's `CPUID Feature Flag` expression (sdmfeat.needs_of: the column, or the `#UD If CPUID...` lines of the section for the older table layout). The expression is evaluated over the SDM's own flag table
 (Vol. 1 ch. 21, the `sdmrows` input) and the declared CPU. The form is #UD (`missing` non-empty) exactly when the expression is false AND the SDM states no `executed as` alias for the flag (TZCNT as BSF, LZCNT as BSR, PREFETCHW as a
-hint) AND the flag is not one the SDM defines as NOP without it (MPX). The check is made in core.dispatch BEFORE any handler of any family runs, so no handler can implement a form that the declared CPU's CPUID denies.
+hint) AND the flag is not one the SDM defines as NOP without it (MPX). The check is made in core.dispatch (the gate it is given: core.set_emit(emit, missing=this module's `missing`)) BEFORE any handler of any family runs, so no handler can implement a form that the declared CPU's CPUID denies.
 
 COMPLETENESS (the rule is total over the decoded forms, with no list of names or capstone groups). Every form the lifter decodes has one of three outcomes, decided only by the SDM text:
   * its rows name one flag expression: present on the declared CPU (lifted by its handler) or absent (#UD), or no flag (base ISA);
@@ -17,14 +17,14 @@ The capstone instruction-group tags and the per-mnemonic tables are NOT read: ca
 Source of the declared CPU's words: fnvlift/cpumodel_bits.py (one derivation). The flag leaf is within the declared max basic leaf (cpuid_model.json max_basic) or max extended leaf, as in sdmfeat.present."""
 import json
 
-from . import inputs
+from fnvlift import inputs
 
 _S = {}
 
 
 def _cpu():
     """{(leaf, reg): value, (0,'EAX'): max basic leaf, (0x80000000,'EAX'): max extended leaf}: the declared CPU's words, derived from the `cpumodel` input (verify/cpuid_model.json; cpumodel_bits.model_words)"""
-    from .cpumodel_bits import model_words, I
+    from fnvlift.cpumodel_bits import model_words, I
     m = json.load(open(inputs.get('cpumodel'))); w = model_words(m)
     return {(0, 'EAX'): I(m['max_basic']), (0x80000000, 'EAX'): I(m['max_ext']), (1, 'EDX'): w['leaf1_edx'], (1, 'ECX'): w['leaf1_ecx'], (0x80000001, 'EDX'): w['ext1_edx'], (0x80000001, 'ECX'): w['ext1_ecx']}
 
@@ -41,7 +41,7 @@ def _state():
 def decide(ins):
     """-> dict(status found|map|sail, needs, value none|present|absent, exec_as, rows) of a decoded form (sail: value absent); Unsupported when its rows name several flag expressions or an unknown flag, or no row and no Sail #UD verdict"""
     from proof import sdmfeat
-    from .core import Unsupported
+    from fnvlift.core import Unsupported
     S = _state(); key = bytes(ins.bytes)
     r = S['memo'].get(key)
     if r is None:
@@ -57,7 +57,7 @@ def decide(ins):
         else:
             # no SDM row (the text parse can miss rows; silicon executes some such encodings as aliases, and capstone decoding the form is evidence it is defined): the pinned Sail model decides it on its bytes, by the rule
             # of proof/udsail.py (b). Every path #UD (a row of the `udsail` input) -> #UD, class sail. A path that completes is a defined instruction and needs its Form; a model error is a gap: both are red here.
-            from . import f_sys
+            from fnvlift import f_sys
             u = f_sys.ud_gap(key)
             if u is None:
                 r = ('Unsupported', 'no SDM row for %s and no Sail #UD verdict (udsail input): a defined instruction needs a Form, a model gap is red' % key.hex())
@@ -81,6 +81,6 @@ def gates(ins):
     from proof import sdmfeat
     S = _state(); d = decide(ins); out = []
     for f in sorted({t for t in re.findall(r'[A-Za-z0-9_\.]+', d['needs']) if d['status'] == 'found' and t not in ('AND', 'OR', '-')}):
-        for leaf, sub, reg, bit in S['table'][f][:1]:
+        for leaf, sub, reg, bit in sorted(S['table'].addresses(f))[:1]:
             out.append((f, leaf, reg, bit, int(sdmfeat.present(f, S['table'], S['cpu']))))
     return out

@@ -156,7 +156,7 @@ def main(argv=None):
     ap.add_argument('--sdmrows', required=True, help='the sdmrows stage output (proof/sdmfeat.py dumprows): the SDM opcode rows, their flag table and NOP flags')
     ap.add_argument('--model-src', required=True, help='the pinned sail-x86-from-acl2 model/ directory (default arms, bit fields)')
     ap.add_argument('--bad', action='append', default=[], help='an image BADDECODE (entry, address, 8 bytes): the sequences capstone refuses (f_sys.decode_gap)')
-    ap.add_argument('--shapes', action='append', default=[], help='an image SHAPES file (first column the shape key, `<hex of the representative bytes>/...`; # comments): the decoded shapes of the image.  Those with no SDM row and no opcode-map entry (sdmfeat.match_form, the rule of fnvlift/f_cpufeat.decide) get a Sail verdict too')
+    ap.add_argument('--shapes', action='append', default=[], help='an image SHAPES file (first column the shape key, `<hex of the representative bytes>/...`; # comments): the decoded shapes of the image.  Those with no SDM row and no opcode-map entry (sdmfeat.match_form, the rule of fnvlift/cpufeat.decide) get a Sail verdict too')
     ap.add_argument('--out', required=True)
     a = ap.parse_args(argv)
     from fnvlift import inputs
@@ -169,8 +169,8 @@ def main(argv=None):
     import json
     model = os.path.abspath(a.model_src); record = json.load(open(a.x86sys)); defaults = default_opcodes(model); variants = sysvariants(record, model)
     from proof import sdmfeat
-    from fnvlift import f_cpufeat
-    allrows, table, nopflags = sdmfeat.load_rows(a.sdmrows); cpu = f_cpufeat._cpu()
+    from proof import cpufeat
+    allrows, table, nopflags = sdmfeat.load_rows(a.sdmrows); cpu = cpufeat._cpu()
     def feature_ud(r):
         kd = f_sys.encoding(B(r))[0]
         return kd if kd in ('vex', 'evex', 'xop', 'map38', 'map3a', 'map0f') else sdm_feature(r, allrows, table, cpu, nopflags)

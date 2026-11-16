@@ -218,11 +218,17 @@ def explore(img, lo, hi, code, start=None, extra=(), fall_hi=None):
 EMIT = None   # the emitter of integer instructions from the proven DSL forms (proof/lift_dsl.py emit_form(cx, ins) -> None | SKIP), called before the hand handlers; None = the hand handlers only. Set by the caller with set_emit (an argument of the generator, no environment); fnvlift imports nothing from proof
 
 
-def set_emit(fn):
-    global EMIT
+MISSING = None   # the CPUID-UD gate (proof/cpufeat.py `missing`): ins -> the flag expressions the declared CPU denies. proof is above fnvlift, so the lifter takes the gate as a function, like EMIT; it has no default
+
+
+def set_emit(fn, missing):
+    """the two functions the layer above gives the lifter: the Form emitter `fn` (or None: the hand handlers only) and the CPUID-UD gate `missing` (required: the lifter never runs without it)"""
+    global EMIT, MISSING
     if fn is not None and not callable(fn):
         raise ValueError('emit %r (want a function or None)' % (fn,))
-    EMIT = fn
+    if not callable(missing):
+        raise ValueError('missing %r (want the CPUID-UD gate function)' % (missing,))
+    EMIT, MISSING = fn, missing
 
 
 JTAB = None      # facts of tools/jtab.py: {site: (lo, hi, targets)} from the `jtab_tables` records of ehtables.json; set by set_jtab()
@@ -257,11 +263,13 @@ def tab_tails(img, insns, lo, hi):
 
 
 def dispatch(cx, ins):
-    from . import f_cpufeat, f_sys
+    from . import f_sys
+    if MISSING is None:
+        raise RuntimeError('core.dispatch: no CPUID-UD gate (core.set_emit(emit, missing))')
     if getattr(ins, 'ud_gap', False):      # a Sail-decided #UD sequence (f_sys.UdIns): no Form, no operands
         f_sys.ud_site(cx)
         return
-    if f_cpufeat.missing(ins):         # CPUID-UD rule (f_cpufeat.py): a form the model's CPUID denies is #UD before any handler of any family runs
+    if MISSING(ins):         # CPUID-UD rule (proof/cpufeat.py): a form the model's CPUID denies is #UD before any handler of any family runs
         f_sys.ud_site(cx)
         return
     if EMIT is not None and EMIT(cx, ins) is not SKIP:

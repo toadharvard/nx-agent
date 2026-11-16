@@ -3,7 +3,7 @@
 
     python3 -I sdmfeat.py rows SDM.txt SITES.tsv OUT_ROWS.tsv [PUBLIC_ROWS.tsv] --apm APM.pdf [--apm ...] (one per pinned AMD volume, Vol. 3 and Vol. 5; APM.txt beside each)  # the per-form feature rows; OUT_ROWS lists the shapes of each form (exe-derived: private), PUBLIC_ROWS (lift/proof/tests/sdm_cpuid_feature_rows.tsv) only their number
     python3 -I sdmfeat.py features SDM.txt OUT.tsv --apm APM.pdf [--apm ...]   # the feature -> CPUID leaf/reg/bit table (SDM U APM, a page cite per row)
-    python3 -I sdmfeat.py dumprows SDM.txt OUT.json                 # the lifter's input `sdmrows` (fnvlift/f_cpufeat.py): the opcode rows and flag table, nothing exe-derived
+    python3 -I sdmfeat.py dumprows SDM.txt OUT.json                 # the lifter's input `sdmrows` (proof/cpufeat.py): the opcode rows and flag table, nothing exe-derived
     python3 -I sdmfeat.py partition OUT_ROWS.tsv SITES.tsv OUT.tsv  # the cleared sites, from the rows file ONLY
 
 SDM.txt: `pdftotext -layout` of the Intel(R) 64 and IA-32 Architectures SDM, combined volumes (its sha256 is in every output header; the page numbers cited are those of that edition).
@@ -538,7 +538,7 @@ def index_rows(allrows):
 
 
 def match_form(ins, idx):
-    """-> (candidate rows, kind, opcode-map entry or None) of a decoded form: the one row match of cmd_rows, shared with the lifter's feature gate (fnvlift/f_cpufeat.py)"""
+    """-> (candidate rows, kind, opcode-map entry or None) of a decoded form: the one row match of cmd_rows, shared with the lifter's feature gate (proof/cpufeat.py)"""
     byfirst, vex = idx
     mand, body, pos = form_of(ins)
     isvex = body[:1] in (b'\xc4', b'\xc5') and ins.mnemonic.startswith('v')
