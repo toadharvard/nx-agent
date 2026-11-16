@@ -155,7 +155,8 @@ def main(argv=None):
     ap.add_argument('--x86sys', required=True); ap.add_argument('--cpumodel', required=True)
     ap.add_argument('--sdmrows', required=True, help='the sdmrows stage output (proof/sdmfeat.py dumprows): the SDM opcode rows, their flag table and NOP flags')
     ap.add_argument('--model-src', required=True, help='the pinned sail-x86-from-acl2 model/ directory (default arms, bit fields)')
-    ap.add_argument('--bad', action='append', required=True, help='an image baddecode.tsv (entry, address, 8 bytes)')
+    ap.add_argument('--bad', action='append', default=[], help='an image BADDECODE (entry, address, 8 bytes): the sequences capstone refuses (f_sys.decode_gap)')
+    ap.add_argument('--shapes', action='append', default=[], help='an image SHAPES file (first column the shape key, `<hex of the representative bytes>/...`; # comments): the decoded shapes of the image.  Those with no SDM row and no opcode-map entry (sdmfeat.match_form, the rule of fnvlift/f_cpufeat.decide) get a Sail verdict too')
     ap.add_argument('--out', required=True)
     a = ap.parse_args(argv)
     from fnvlift import inputs
@@ -180,6 +181,17 @@ def main(argv=None):
         for ln in open(f):
             if ln.startswith('#') or not ln.strip(): continue
             e, x, h = ln.split('\t')[:3]; rows.setdefault(h.strip(), []).append((os.path.basename(os.path.dirname(os.path.abspath(f))), x))
+    from proof import shape
+    md = shape.decoder()
+    for f in a.shapes:
+        idx = sdmfeat.index_rows(allrows)
+        for ln in open(f):
+            if ln.startswith('#') or not ln.strip(): continue
+            raw = shape.rep_bytes(ln.split('\t')[0].strip()); ins = sdmfeat.decode(raw, md)
+            if ins is None or bytes(ins.bytes) != raw: continue         # a sequence capstone refuses is BADDECODE's
+            cand, _kind, mp = sdmfeat.match_form(ins, idx)
+            if not cand and not mp: rows.setdefault(raw.hex(), []).append((os.path.basename(os.path.dirname(os.path.abspath(f))), '0'))
+    if not a.bad and not a.shapes: ap.error('--bad or --shapes is required')
     res, red = [], 0
     for h in sorted(rows):
         raw = bytes.fromhex(h)
