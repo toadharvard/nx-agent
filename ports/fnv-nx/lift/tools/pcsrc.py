@@ -344,6 +344,7 @@ def analyse_entry(img, e, mode='owner', force=False):
             succ = [nxt]
         elif mn == 'call':
             o = ops[0]; tg = img.calltg.get(a); sm = None
+            islot = (o.mem.disp & M32) if o.type == X.X86_OP_MEM and not o.mem.base and not o.mem.index and not o.mem.segment and (o.mem.disp & M32) in img.slots else (regs[R32[o.reg]][1] if o.type == X.X86_OP_REG and isinstance(regs.get(R32.get(o.reg)), tuple) and regs[R32[o.reg]][0] == 'imp' else None)      # a call of an import: through its slot or through a register that holds it
             if o.type == X.X86_OP_REG and regs.get(R32.get(o.reg)) is not None and tracked(regs[R32[o.reg]]):
                 v = regs[R32[o.reg]]; consume(v, 'code-target', 'call reg', False)
                 if v[0] == 'abs':
@@ -367,7 +368,7 @@ def analyse_entry(img, e, mode='owner', force=False):
                 v = regs[n]
                 if v is None: continue
                 # the callee's code decides: it reads the register first (a pass), overwrites it on every path (the value dies), or leaves it (the value survives)
-                fate = path_kill(img, tg, n) if (tg is not None and tg in img.entries) else 'read'
+                fate = path_kill(img, tg, n) if (tg is not None and tg in img.entries) else 'live' if islot is not None and n in ('ebx', 'esi', 'edi', 'ebp') else 'read'      # an import preserves ebx, esi, edi, ebp (the Win32 ABI, OWNER 3)
                 if v == T_S4 and fate == 'read': emit(a, 's4', 'escape-passed', 'register %s read by the callee' % n, True)
                 if (tracked(v) or v == 'mix') and fate == 'read': emit(a, vsrc(v) if v != 'mix' else 'pc', 'passed', 'register %s read by the callee%s' % (n, '' if tg is not None and tg in img.entries else ' (callee unknown)'), True)
                 if fate == 'live' and n not in CALLER_SAVED_NEVER: keep[n] = v
@@ -375,7 +376,7 @@ def analyse_entry(img, e, mode='owner', force=False):
             if sm is not None and sm['regs']:
                 for n, k in sm['regs'].items():
                     regs[n] = ('abs', frozenset({nxt + k[1]}))
-            pp = sm['pop'] if sm is not None and sm['pop'] is not None else img.pops.get(tg) if tg is not None else (img.imp.get(o.mem.disp & M32) if o.type == X.X86_OP_MEM and not o.mem.base and not o.mem.index and not o.mem.segment else None)
+            pp = sm['pop'] if sm is not None and sm['pop'] is not None else img.pops.get(tg) if tg is not None else img.imp.get(islot) if islot is not None else None
             if pp is not None and esp is not None: esp = esp + pp
             else:
                 if esp is not None: img.info['esp-lost'] += 1
@@ -485,6 +486,7 @@ def analyse_entry(img, e, mode='owner', force=False):
                 if s.type == X.X86_OP_REG: write_reg(d, regval(s))
                 elif s.type == X.X86_OP_MEM:
                     v = read_mem(s)
+                    if v is None and d.size == 4 and not s.mem.base and not s.mem.index and not s.mem.segment and (s.mem.disp & M32) in img.slots: v = ('imp', s.mem.disp & M32)      # the loader's IAT is read-only: the register holds that import
                     if v is None and d.size == 4 and reloc_load(s): v = T_CODE
                     if d.size == 4: write_reg(d, v)
                     else: write_reg(d, 'mix' if tracked(v) else None)
