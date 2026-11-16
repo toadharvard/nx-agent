@@ -23,8 +23,9 @@ Context restores load captured selectors (the platform's rule, as above). The li
 The lifter (core.gs_guard) guards an access through the effective segment S iff S is not non-null in the image (its initial selector is null, or some write of S is possibly null).
 Context restores (SetThreadContext, exception continuation) load the selectors a context holds, which are the captured ones: the platform's rule, not this tool's."""
 import argparse, json, os, sys
-HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = sys.argv[sys.argv.index('--lift') + 1]      # the lift/ directory: a declared input, always an argument
-sys.path[:0] = [HERE, LIFT]
+HERE = os.path.dirname(os.path.abspath(__file__))
+if '--lift' in sys.argv:      # run as a stage: the lift/ directory is a declared input, always an argument; imported as a module, the importer's own sys.path supplies fnvlift
+    sys.path[:0] = [HERE, sys.argv[sys.argv.index('--lift') + 1]]
 from capstone import x86 as X
 from fnvlift.image import Image
 from proof import census, shape
