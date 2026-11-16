@@ -1498,3 +1498,7 @@ Paused: w3b, w4, farm; no other work.
     - Sent to L3a as the base3 render head.
     - The gate_d3d9total and gate_pure reruns are with w6.
 - bottleneck: base3 retake (L3a); w28 keeps the L6 rows; farm1 sm_link; the cand4 base.
+- 03:15Z Head checks at w6-root 7a75284ec:
+    - gate_d3d9total green, 332/332.
+    - gate_pure whole set 85/94; render/bridgefacts uncertified 0. The 9 others are contract/ (L1), manifest/ and platform/ (L5).
+- bottleneck: base3 retake (L3a); farm1 sm_link; the cand4 base.
