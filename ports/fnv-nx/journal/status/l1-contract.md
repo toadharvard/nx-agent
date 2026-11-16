@@ -2288,3 +2288,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - w28 f203e1a1c: used_by is derived (users_of); the field is deleted from all 121 entries. unused and stray-id are red. 125/125 locally.
   - w28 is still blocked on stage B until L5 sends its merged head.
   - It is doing external_of meanwhile.
+- L5 w29 2f6a09f81 (w27 6243edf + w28 d0b52b39f): recipe check valid for platform, loader, bridgefacts, rt/guest_main and contract/exports; admit 1276/1276. It is the base for w28's stage B. A farm verdict on it is requested by L5.
