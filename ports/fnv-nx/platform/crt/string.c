@@ -2,6 +2,7 @@
  *
  * The secure (_s) functions follow the CRT's documented behaviour with the default invalid-parameter handler
  * replaced by "log, clear the destination, return the error" (the retail game never relies on the crash). */
+#include <fnvnx_export.h>
 #include "fnvnx_msvcrt.h"
 
 #include <ctype.h>
@@ -16,6 +17,7 @@
 static inline int lower(int c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
 static inline int upper(int c) { return c >= 'a' && c <= 'z' ? c - 32 : c; }
 
+FNVNX_EXPORT("msvcrt.dll", "_stricmp", _stricmp, "func");
 /* ---- comparisons (the "C" locale: ASCII folding to lower case, as MSVC's _stricmp does) */
 int _stricmp(const char *a, const char *b)
 {
@@ -26,6 +28,7 @@ int _stricmp(const char *a, const char *b)
     }
 }
 
+FNVNX_EXPORT("msvcrt.dll", "_strnicmp", _strnicmp, "func");
 int _strnicmp(const char *a, const char *b, size_t n)
 {
     for (; n; n--, a++, b++) {
@@ -40,6 +43,7 @@ int _strnicmp(const char *a, const char *b, size_t n)
 
 
 
+FNVNX_EXPORT("msvcrt.dll", "_strdup", _strdup, "func");
 char *_strdup(const char *s)
 {
     if (!s)
@@ -56,6 +60,7 @@ char *_strdup(const char *s)
 
 
 
+FNVNX_EXPORT("msvcrt.dll", "wcslen", fnvnx_wcslen16, "func");
 size_t fnvnx_wcslen16(const unsigned short *s)
 {
     size_t n = 0;
@@ -88,8 +93,10 @@ static char *utoa_base(unsigned long long v, char *buf, int radix, int neg)
     return buf;
 }
 
+FNVNX_EXPORT("msvcrt.dll", "_itoa", _itoa, "func");
 /* MSVC: a negative value is written with '-' only in radix 10; other radices print the two's complement */
 char *_itoa(int v, char *b, int r) { return r == 10 && v < 0 ? utoa_base(0u - (unsigned)v, b, r, 1) : utoa_base((unsigned)v, b, r, 0); }
+FNVNX_EXPORT("msvcrt.dll", "_ultoa", _ultoa, "func");
 char *_ultoa(unsigned long v, char *b, int r) { return utoa_base((uint32_t)v, b, r, 0); }
 
 
@@ -114,6 +121,7 @@ int _vsnprintf(char *buf, size_t n, const char *fmt, va_list ap)
     return fnvnx_msvc_bound(buf, n, fnvnx_msvc_format(buf, n, fmt, ap));
 }
 
+FNVNX_EXPORT("msvcrt.dll", "_snprintf", _snprintf, "func");
 int _snprintf(char *buf, size_t n, const char *fmt, ...)
 {
     va_list ap;

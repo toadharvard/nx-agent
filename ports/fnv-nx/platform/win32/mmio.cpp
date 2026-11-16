@@ -11,6 +11,7 @@
  *
  * Built-in procedures: DOS files (fccIOProc 0 or 'DOS ', through CreateFileA) and memory files ('MEM ': the buffer
  * is the file). The I/O procedure gets the handle's own MMIOINFO, which is what mmioGetInfo copies out. */
+#include <fnvnx_export.h>
 #include "w32.h"
 #include "../include/fnvnx_mmio.h"
 
@@ -161,6 +162,7 @@ bool read_exact(mmio *m, void *dst, LONG n) { return mmioRead((HMMIO)m, (char *)
 
 extern "C" {
 
+FNVNX_EXPORT("winmm.dll", "mmioOpenA", mmioOpenA, "func");
 HMMIO mmioOpenA(LPSTR name, LPMMIOINFO in, DWORD flags)
 {
     flags = W32_DW(flags);
@@ -283,6 +285,7 @@ HMMIO mmioOpenA(LPSTR name, LPMMIOINFO in, DWORD flags)
     return (HMMIO)m;
 }
 
+FNVNX_EXPORT("winmm.dll", "mmioClose", mmioClose, "func");
 UINT mmioClose(HMMIO h, UINT flags)
 {
     mmio *m = from(h);
@@ -298,6 +301,7 @@ UINT mmioClose(HMMIO h, UINT flags)
     return r;
 }
 
+FNVNX_EXPORT("winmm.dll", "mmioRead", mmioRead, "func");
 LONG mmioRead(HMMIO h, char *dst, LONG n)
 {
     mmio *m = from(h);
@@ -327,6 +331,7 @@ LONG mmioRead(HMMIO h, char *dst, LONG n)
     return total;
 }
 
+FNVNX_EXPORT("winmm.dll", "mmioWrite", mmioWrite, "func");
 LONG mmioWrite(HMMIO h, const char *src, LONG n)
 {
     mmio *m = from(h);
@@ -375,6 +380,7 @@ LONG mmioWrite(HMMIO h, const char *src, LONG n)
     return total;
 }
 
+FNVNX_EXPORT("winmm.dll", "mmioSeek", mmioSeek, "func");
 LONG mmioSeek(HMMIO h, LONG off, int origin)
 {
     mmio *m = from(h);
@@ -412,6 +418,7 @@ LONG mmioSeek(HMMIO h, LONG off, int origin)
     return m->info.lDiskOffset;
 }
 
+FNVNX_EXPORT("winmm.dll", "mmioGetInfo", mmioGetInfo, "func");
 UINT mmioGetInfo(HMMIO h, LPMMIOINFO out, UINT flags)
 {
     mmio *m = from(h);
@@ -421,6 +428,7 @@ UINT mmioGetInfo(HMMIO h, LPMMIOINFO out, UINT flags)
     return 0;
 }
 
+FNVNX_EXPORT("winmm.dll", "mmioSetInfo", mmioSetInfo, "func");
 UINT mmioSetInfo(HMMIO h, const MMIOINFO *in, UINT flags)
 {
     mmio *m = from(h);
@@ -442,6 +450,7 @@ UINT mmioSetInfo(HMMIO h, const MMIOINFO *in, UINT flags)
     return 0;
 }
 
+FNVNX_EXPORT("winmm.dll", "mmioAdvance", mmioAdvance, "func");
 UINT mmioAdvance(HMMIO h, LPMMIOINFO io, UINT flags)
 {
     mmio *m = from(h);
@@ -469,6 +478,7 @@ UINT mmioAdvance(HMMIO h, LPMMIOINFO io, UINT flags)
     return 0;
 }
 
+FNVNX_EXPORT("winmm.dll", "mmioFlush", mmioFlush, "func");
 UINT mmioFlush(HMMIO h, UINT flags)
 {
     mmio *m = from(h);
@@ -484,6 +494,7 @@ UINT mmioFlush(HMMIO h, UINT flags)
     return 0;
 }
 
+FNVNX_EXPORT("winmm.dll", "mmioDescend", mmioDescend, "func");
 UINT mmioDescend(HMMIO h, LPMMCKINFO ck, const MMCKINFO *parent, UINT flags)
 {
     mmio *m = from(h);
@@ -526,6 +537,7 @@ UINT mmioDescend(HMMIO h, LPMMCKINFO ck, const MMCKINFO *parent, UINT flags)
     }
 }
 
+FNVNX_EXPORT("winmm.dll", "mmioAscend", mmioAscend, "func");
 UINT mmioAscend(HMMIO h, LPMMCKINFO ck, UINT flags)
 {
     mmio *m = from(h);
@@ -554,6 +566,7 @@ UINT mmioAscend(HMMIO h, LPMMCKINFO ck, UINT flags)
     return mmioSeek(h, next, SEEK_SET) == next ? 0 : MMIOERR_CANNOTSEEK;
 }
 
+FNVNX_EXPORT("winmm.dll", "mmioCreateChunk", mmioCreateChunk, "func");
 UINT mmioCreateChunk(HMMIO h, LPMMCKINFO ck, UINT flags)
 {
     mmio *m = from(h);
@@ -573,12 +586,14 @@ UINT mmioCreateChunk(HMMIO h, LPMMCKINFO ck, UINT flags)
     return 0;
 }
 
+FNVNX_EXPORT("winmm.dll", "mmioSendMessage", mmioSendMessage, "func");
 LRESULT mmioSendMessage(HMMIO h, UINT msg, LPARAM l1, LPARAM l2)
 {
     mmio *m = from(h);
     return m ? send(m, msg, l1, l2) : 0;
 }
 
+FNVNX_EXPORT("winmm.dll", "mmioStringToFOURCCA", mmioStringToFOURCCA, "func");
 FOURCC mmioStringToFOURCCA(LPCSTR s, UINT flags)
 {
     char c[4] = {' ', ' ', ' ', ' '};

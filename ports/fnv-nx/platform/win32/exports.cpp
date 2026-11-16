@@ -6,6 +6,8 @@
  * DirectInput/DirectSound/XInput, d3dx9_38 -> their providers' registered modules). */
 #include "w32.h"
 #include "../include/fnvnx_mmio.h"
+#include "../include/fnvnx_fls.h"
+#include "../include/fnvnx_waveout.h"
 
 extern "C" {
 /* platform/win32/gdi32.cpp */
@@ -115,24 +117,12 @@ void *LockResource(void *);
 DWORD SizeofResource(HMODULE, void *);
 BOOL FreeResource(void *);
 BOOL EnumResourceNamesA(HMODULE, LPCSTR, ENUMRESNAMEPROCA, LONG_PTR);
-/* winmm waveOut (platform/audio/waveout.cpp) */
-#define FNVNX_WAVEOUT_EXPORTS(X)                                                                            \
-    X(waveOutOpen) X(waveOutClose) X(waveOutPrepareHeader) X(waveOutUnprepareHeader) X(waveOutWrite)         \
-    X(waveOutPause) X(waveOutRestart) X(waveOutReset) X(waveOutSetVolume) X(waveOutGetVolume)                \
-    X(waveOutGetPosition) X(waveOutGetNumDevs) X(waveOutGetDevCapsA) X(waveOutGetErrorTextA)
-#define FNVNX_WAVEOUT_DECL(f) void f(void);
-FNVNX_WAVEOUT_EXPORTS(FNVNX_WAVEOUT_DECL)
-#undef FNVNX_WAVEOUT_DECL
 }
 
-/* kernel32 (encptr.cpp, fls.cpp) */
+/* kernel32 (encptr.cpp) */
 extern "C" {
 LPVOID EncodePointer(LPVOID);
 LPVOID DecodePointer(LPVOID);
-DWORD FlsAlloc(void *);   /* its parameter is the game's callback: one guest word */
-BOOL FlsFree(DWORD);
-LPVOID FlsGetValue(DWORD);
-BOOL FlsSetValue(DWORD, LPVOID);
 }
 
 /* user32 window functions without a declaration in the shim (platform/win32/window.cpp) */

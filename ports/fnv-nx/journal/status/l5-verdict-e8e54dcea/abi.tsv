@@ -1,0 +1,100 @@
+item	reason
+abi:va:_vsnprintf	a va_list crossing symbol with no msvcrt_va forwarder record
+abi:va:_vsnprintf	a va_list crossing symbol with no msvcrt_va forwarder record
+abi:va:_vsnprintf	a va_list crossing symbol with no msvcrt_va forwarder record
+abi:va:fnvnx_msvc_format	a va_list crossing symbol with no msvcrt_va forwarder record
+abi:va:fnvnx_msvc_format	a va_list crossing symbol with no msvcrt_va forwarder record
+abi:va:fnvnx_msvc_format	a va_list crossing symbol with no msvcrt_va forwarder record
+abi:va:fnvnx_msvc_scan	a va_list crossing symbol with no msvcrt_va forwarder record
+abi:va:fnvnx_msvc_scan	a va_list crossing symbol with no msvcrt_va forwarder record
+abi:va:fnvnx_msvc_scan	a va_list crossing symbol with no msvcrt_va forwarder record
+abi:va:vsnprintf	a va_list crossing symbol with no msvcrt_va forwarder record
+abi:va:vsnprintf	a va_list crossing symbol with no msvcrt_va forwarder record
+abi:va:vsnprintf	a va_list crossing symbol with no msvcrt_va forwarder record
+ctype:FlsAlloc	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform/win32/exports.cpp has (*void)long_unsigned_int, ports/fnv-nx/platform/win32/fls.cpp has (struct:_ZTS13fnvnx_guestfnIFvPvEE{v_:unsigned_int})long_unsigned_int
+ctype:FlsAlloc	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@time/win32/exports.cpp has (*void)long_unsigned_int, ports/fnv-nx/platform@time/win32/fls.cpp has (struct:_ZTS13fnvnx_guestfnIFvPvEE{v_:unsigned_int})long_unsigned_int
+ctype:FlsAlloc	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@vclock/win32/exports.cpp has (*void)long_unsigned_int, ports/fnv-nx/platform@vclock/win32/fls.cpp has (struct:_ZTS13fnvnx_guestfnIFvPvEE{v_:unsigned_int})long_unsigned_int
+ctype:GetFileType	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform/crt/iob.c has (*void)unsigned_int, ports/fnv-nx/platform/win32/crt_kernel32.cpp has (*void)long_unsigned_int
+ctype:GetFileType	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@time/crt/iob.c has (*void)unsigned_int, ports/fnv-nx/platform@time/win32/crt_kernel32.cpp has (*void)long_unsigned_int
+ctype:GetFileType	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@vclock/crt/iob.c has (*void)unsigned_int, ports/fnv-nx/platform@vclock/win32/crt_kernel32.cpp has (*void)long_unsigned_int
+ctype:GetLastError	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform/audio/dshow_filters.cpp has ()long_unsigned_int, ports/fnv-nx/platform/crt/iob.c has ()unsigned_int
+ctype:GetLastError	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@time/audio/dshow_filters.cpp has ()long_unsigned_int, ports/fnv-nx/platform@time/crt/iob.c has ()unsigned_int
+ctype:GetLastError	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@vclock/audio/dshow_filters.cpp has ()long_unsigned_int, ports/fnv-nx/platform@vclock/crt/iob.c has ()unsigned_int
+ctype:ReadFile	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform/audio/dshow_filters.cpp has (*void,*void,long_unsigned_int,*long_unsigned_int,*struct:_OVERLAPPED{Internal:long_unsigned_int;InternalHigh:long_unsig, ports/fnv-nx/platform/crt/iob.c has (*void,*void,unsigned_int,*unsigned_int,*void)int
+ctype:ReadFile	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@time/audio/dshow_filters.cpp has (*void,*void,long_unsigned_int,*long_unsigned_int,*struct:_OVERLAPPED{Internal:long_unsigned_int;InternalHigh:long_unsig, ports/fnv-nx/platform@time/crt/iob.c has (*void,*void,unsigned_int,*unsigned_int,*void)int
+ctype:ReadFile	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@vclock/audio/dshow_filters.cpp has (*void,*void,long_unsigned_int,*long_unsigned_int,*struct:_OVERLAPPED{Internal:long_unsigned_int;InternalHigh:long_unsig, ports/fnv-nx/platform@vclock/crt/iob.c has (*void,*void,unsigned_int,*unsigned_int,*void)int
+ctype:SetFilePointerEx	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform/audio/dshow_filters.cpp has (*void,union:_LARGE_INTEGER{-:struct:-{LowPart:long_unsigned_int;HighPart:long_int};u:struct:-{LowPart:long_unsigned_int, ports/fnv-nx/platform/crt/iob.c has (*void,long_long_int,*long_long_int,unsigned_int)int
+ctype:SetFilePointerEx	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@time/audio/dshow_filters.cpp has (*void,union:_LARGE_INTEGER{-:struct:-{LowPart:long_unsigned_int;HighPart:long_int};u:struct:-{LowPart:long_unsigned_int, ports/fnv-nx/platform@time/crt/iob.c has (*void,long_long_int,*long_long_int,unsigned_int)int
+ctype:SetFilePointerEx	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@vclock/audio/dshow_filters.cpp has (*void,union:_LARGE_INTEGER{-:struct:-{LowPart:long_unsigned_int;HighPart:long_int};u:struct:-{LowPart:long_unsigned_int, ports/fnv-nx/platform@vclock/crt/iob.c has (*void,long_long_int,*long_long_int,unsigned_int)int
+ctype:WriteFile	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform/audio/dshow.cpp has (*void,*const:void,long_unsigned_int,*long_unsigned_int,*struct:_OVERLAPPED{Internal:long_unsigned_int;InternalHigh:long, ports/fnv-nx/platform/crt/iob.c has (*void,*const:void,unsigned_int,*unsigned_int,*void)int
+ctype:WriteFile	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@time/audio/dshow.cpp has (*void,*const:void,long_unsigned_int,*long_unsigned_int,*struct:_OVERLAPPED{Internal:long_unsigned_int;InternalHigh:long, ports/fnv-nx/platform@time/crt/iob.c has (*void,*const:void,unsigned_int,*unsigned_int,*void)int
+ctype:WriteFile	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@vclock/audio/dshow.cpp has (*void,*const:void,long_unsigned_int,*long_unsigned_int,*struct:_OVERLAPPED{Internal:long_unsigned_int;InternalHigh:long, ports/fnv-nx/platform@vclock/crt/iob.c has (*void,*const:void,unsigned_int,*unsigned_int,*void)int
+ctype:fnvnx_msvc_format	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform/crt/msvcrt_exports.cpp has (*char,unsigned_int,*const:char,struct:__va_list{-:*void;-:*void;-:*void;-:int;-:int})int, ports/fnv-nx/platform/crt/string.c has (*char,unsigned_int,*const:char,struct:__va_list{__stack:*void;__gr_top:*void;__vr_top:*void;__gr_offs:int;__vr_offs:int
+ctype:fnvnx_msvc_format	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@time/crt/msvcrt_exports.cpp has (*char,unsigned_int,*const:char,struct:__va_list{-:*void;-:*void;-:*void;-:int;-:int})int, ports/fnv-nx/platform@time/crt/string.c has (*char,unsigned_int,*const:char,struct:__va_list{__stack:*void;__gr_top:*void;__vr_top:*void;__gr_offs:int;__vr_offs:int
+ctype:fnvnx_msvc_format	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@vclock/crt/msvcrt_exports.cpp has (*char,unsigned_int,*const:char,struct:__va_list{-:*void;-:*void;-:*void;-:int;-:int})int, ports/fnv-nx/platform@vclock/crt/string.c has (*char,unsigned_int,*const:char,struct:__va_list{__stack:*void;__gr_top:*void;__vr_top:*void;__gr_offs:int;__vr_offs:int
+ctype:waveOutClose	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform/audio/waveout.cpp has (*void)unsigned_int, ports/fnv-nx/platform/win32/exports.cpp has ()void
+ctype:waveOutClose	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@time/audio/waveout.cpp has (*void)unsigned_int, ports/fnv-nx/platform@time/win32/exports.cpp has ()void
+ctype:waveOutClose	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@vclock/audio/waveout.cpp has (*void)unsigned_int, ports/fnv-nx/platform@vclock/win32/exports.cpp has ()void
+ctype:waveOutGetDevCapsA	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform/audio/waveout.cpp has (unsigned_int,*void,unsigned_int)unsigned_int, ports/fnv-nx/platform/win32/exports.cpp has ()void
+ctype:waveOutGetDevCapsA	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@time/audio/waveout.cpp has (unsigned_int,*void,unsigned_int)unsigned_int, ports/fnv-nx/platform@time/win32/exports.cpp has ()void
+ctype:waveOutGetDevCapsA	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@vclock/audio/waveout.cpp has (unsigned_int,*void,unsigned_int)unsigned_int, ports/fnv-nx/platform@vclock/win32/exports.cpp has ()void
+ctype:waveOutGetErrorTextA	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform/audio/waveout.cpp has (unsigned_int,*char,unsigned_int)unsigned_int, ports/fnv-nx/platform/win32/exports.cpp has ()void
+ctype:waveOutGetErrorTextA	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@time/audio/waveout.cpp has (unsigned_int,*char,unsigned_int)unsigned_int, ports/fnv-nx/platform@time/win32/exports.cpp has ()void
+ctype:waveOutGetErrorTextA	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@vclock/audio/waveout.cpp has (unsigned_int,*char,unsigned_int)unsigned_int, ports/fnv-nx/platform@vclock/win32/exports.cpp has ()void
+ctype:waveOutGetNumDevs	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform/audio/waveout.cpp has ()unsigned_int, ports/fnv-nx/platform/win32/exports.cpp has ()void
+ctype:waveOutGetNumDevs	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@time/audio/waveout.cpp has ()unsigned_int, ports/fnv-nx/platform@time/win32/exports.cpp has ()void
+ctype:waveOutGetNumDevs	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@vclock/audio/waveout.cpp has ()unsigned_int, ports/fnv-nx/platform@vclock/win32/exports.cpp has ()void
+ctype:waveOutGetPosition	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform/audio/waveout.cpp has (*void,*void,unsigned_int)unsigned_int, ports/fnv-nx/platform/win32/exports.cpp has ()void
+ctype:waveOutGetPosition	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@time/audio/waveout.cpp has (*void,*void,unsigned_int)unsigned_int, ports/fnv-nx/platform@time/win32/exports.cpp has ()void
+ctype:waveOutGetPosition	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@vclock/audio/waveout.cpp has (*void,*void,unsigned_int)unsigned_int, ports/fnv-nx/platform@vclock/win32/exports.cpp has ()void
+ctype:waveOutGetVolume	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform/audio/waveout.cpp has (*void,*long_unsigned_int)unsigned_int, ports/fnv-nx/platform/win32/exports.cpp has ()void
+ctype:waveOutGetVolume	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@time/audio/waveout.cpp has (*void,*long_unsigned_int)unsigned_int, ports/fnv-nx/platform@time/win32/exports.cpp has ()void
+ctype:waveOutGetVolume	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@vclock/audio/waveout.cpp has (*void,*long_unsigned_int)unsigned_int, ports/fnv-nx/platform@vclock/win32/exports.cpp has ()void
+ctype:waveOutOpen	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform/audio/waveout.cpp has (**void,unsigned_int,*const:void,unsigned_int,unsigned_int,long_unsigned_int)unsigned_int, ports/fnv-nx/platform/win32/exports.cpp has ()void
+ctype:waveOutOpen	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@time/audio/waveout.cpp has (**void,unsigned_int,*const:void,unsigned_int,unsigned_int,long_unsigned_int)unsigned_int, ports/fnv-nx/platform@time/win32/exports.cpp has ()void
+ctype:waveOutOpen	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@vclock/audio/waveout.cpp has (**void,unsigned_int,*const:void,unsigned_int,unsigned_int,long_unsigned_int)unsigned_int, ports/fnv-nx/platform@vclock/win32/exports.cpp has ()void
+ctype:waveOutPause	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform/audio/waveout.cpp has (*void)unsigned_int, ports/fnv-nx/platform/win32/exports.cpp has ()void
+ctype:waveOutPause	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@time/audio/waveout.cpp has (*void)unsigned_int, ports/fnv-nx/platform@time/win32/exports.cpp has ()void
+ctype:waveOutPause	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@vclock/audio/waveout.cpp has (*void)unsigned_int, ports/fnv-nx/platform@vclock/win32/exports.cpp has ()void
+ctype:waveOutPrepareHeader	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform/audio/waveout.cpp has (*void,*void,unsigned_int)unsigned_int, ports/fnv-nx/platform/win32/exports.cpp has ()void
+ctype:waveOutPrepareHeader	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@time/audio/waveout.cpp has (*void,*void,unsigned_int)unsigned_int, ports/fnv-nx/platform@time/win32/exports.cpp has ()void
+ctype:waveOutPrepareHeader	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@vclock/audio/waveout.cpp has (*void,*void,unsigned_int)unsigned_int, ports/fnv-nx/platform@vclock/win32/exports.cpp has ()void
+ctype:waveOutReset	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform/audio/waveout.cpp has (*void)unsigned_int, ports/fnv-nx/platform/win32/exports.cpp has ()void
+ctype:waveOutReset	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@time/audio/waveout.cpp has (*void)unsigned_int, ports/fnv-nx/platform@time/win32/exports.cpp has ()void
+ctype:waveOutReset	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@vclock/audio/waveout.cpp has (*void)unsigned_int, ports/fnv-nx/platform@vclock/win32/exports.cpp has ()void
+ctype:waveOutRestart	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform/audio/waveout.cpp has (*void)unsigned_int, ports/fnv-nx/platform/win32/exports.cpp has ()void
+ctype:waveOutRestart	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@time/audio/waveout.cpp has (*void)unsigned_int, ports/fnv-nx/platform@time/win32/exports.cpp has ()void
+ctype:waveOutRestart	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@vclock/audio/waveout.cpp has (*void)unsigned_int, ports/fnv-nx/platform@vclock/win32/exports.cpp has ()void
+ctype:waveOutSetVolume	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform/audio/waveout.cpp has (*void,long_unsigned_int)unsigned_int, ports/fnv-nx/platform/win32/exports.cpp has ()void
+ctype:waveOutSetVolume	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@time/audio/waveout.cpp has (*void,long_unsigned_int)unsigned_int, ports/fnv-nx/platform@time/win32/exports.cpp has ()void
+ctype:waveOutSetVolume	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@vclock/audio/waveout.cpp has (*void,long_unsigned_int)unsigned_int, ports/fnv-nx/platform@vclock/win32/exports.cpp has ()void
+ctype:waveOutUnprepareHeader	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform/audio/waveout.cpp has (*void,*void,unsigned_int)unsigned_int, ports/fnv-nx/platform/win32/exports.cpp has ()void
+ctype:waveOutUnprepareHeader	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@time/audio/waveout.cpp has (*void,*void,unsigned_int)unsigned_int, ports/fnv-nx/platform@time/win32/exports.cpp has ()void
+ctype:waveOutUnprepareHeader	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@vclock/audio/waveout.cpp has (*void,*void,unsigned_int)unsigned_int, ports/fnv-nx/platform@vclock/win32/exports.cpp has ()void
+ctype:waveOutWrite	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform/audio/waveout.cpp has (*void,*void,unsigned_int)unsigned_int, ports/fnv-nx/platform/win32/exports.cpp has ()void
+ctype:waveOutWrite	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@time/audio/waveout.cpp has (*void,*void,unsigned_int)unsigned_int, ports/fnv-nx/platform@time/win32/exports.cpp has ()void
+ctype:waveOutWrite	declared types incompatible (C11 6.2.7p2): ports/fnv-nx/platform@vclock/audio/waveout.cpp has (*void,*void,unsigned_int)unsigned_int, ports/fnv-nx/platform@vclock/win32/exports.cpp has ()void
+ports/fnv-nx/platform/win32/d3dkmt.cpp:_Z11w32_obj_newijPFvP7w32_objE	the row has no MSVC name (nodecor:fnparmform)
+ports/fnv-nx/platform/win32/file.cpp:_Z11w32_obj_newijPFvP7w32_objE	the row has no MSVC name (nodecor:fnparmform)
+ports/fnv-nx/platform/win32/filemap.cpp:_Z11w32_obj_newijPFvP7w32_objE	the row has no MSVC name (nodecor:fnparmform)
+ports/fnv-nx/platform/win32/filemap.cpp:_Z17fm_backing_createPK7fm_specPFmPvS2_ES2_Pm	the row has no MSVC name (nodecor:fnparmform)
+ports/fnv-nx/platform/win32/filemap.cpp:_Z17w32_vm_view_placejjPFPvS_jS_ES_mmiii	the row has no MSVC name (nodecor:fnparmform)
+ports/fnv-nx/platform/win32/sync.cpp:_Z11w32_obj_newijPFvP7w32_objE	the row has no MSVC name (nodecor:fnparmform)
+ports/fnv-nx/platform/win32/thread.cpp:_Z11w32_obj_newijPFvP7w32_objE	the row has no MSVC name (nodecor:fnparmform)
+ports/fnv-nx/platform/win32/winsta.cpp:_Z11w32_obj_newijPFvP7w32_objE	the row has no MSVC name (nodecor:fnparmform)
+ports/fnv-nx/platform@time/win32/d3dkmt.cpp:_Z11w32_obj_newijPFvP7w32_objE	the row has no MSVC name (nodecor:fnparmform)
+ports/fnv-nx/platform@time/win32/file.cpp:_Z11w32_obj_newijPFvP7w32_objE	the row has no MSVC name (nodecor:fnparmform)
+ports/fnv-nx/platform@time/win32/filemap.cpp:_Z11w32_obj_newijPFvP7w32_objE	the row has no MSVC name (nodecor:fnparmform)
+ports/fnv-nx/platform@time/win32/filemap.cpp:_Z17fm_backing_createPK7fm_specPFmPvS2_ES2_Pm	the row has no MSVC name (nodecor:fnparmform)
+ports/fnv-nx/platform@time/win32/filemap.cpp:_Z17w32_vm_view_placejjPFPvS_jS_ES_mmiii	the row has no MSVC name (nodecor:fnparmform)
+ports/fnv-nx/platform@time/win32/sync.cpp:_Z11w32_obj_newijPFvP7w32_objE	the row has no MSVC name (nodecor:fnparmform)
+ports/fnv-nx/platform@time/win32/thread.cpp:_Z11w32_obj_newijPFvP7w32_objE	the row has no MSVC name (nodecor:fnparmform)
+ports/fnv-nx/platform@time/win32/winsta.cpp:_Z11w32_obj_newijPFvP7w32_objE	the row has no MSVC name (nodecor:fnparmform)
+ports/fnv-nx/platform@vclock/win32/d3dkmt.cpp:_Z11w32_obj_newijPFvP7w32_objE	the row has no MSVC name (nodecor:fnparmform)
+ports/fnv-nx/platform@vclock/win32/file.cpp:_Z11w32_obj_newijPFvP7w32_objE	the row has no MSVC name (nodecor:fnparmform)
+ports/fnv-nx/platform@vclock/win32/filemap.cpp:_Z11w32_obj_newijPFvP7w32_objE	the row has no MSVC name (nodecor:fnparmform)
+ports/fnv-nx/platform@vclock/win32/filemap.cpp:_Z17fm_backing_createPK7fm_specPFmPvS2_ES2_Pm	the row has no MSVC name (nodecor:fnparmform)
+ports/fnv-nx/platform@vclock/win32/filemap.cpp:_Z17w32_vm_view_placejjPFPvS_jS_ES_mmiii	the row has no MSVC name (nodecor:fnparmform)
+ports/fnv-nx/platform@vclock/win32/sync.cpp:_Z11w32_obj_newijPFvP7w32_objE	the row has no MSVC name (nodecor:fnparmform)
+ports/fnv-nx/platform@vclock/win32/thread.cpp:_Z11w32_obj_newijPFvP7w32_objE	the row has no MSVC name (nodecor:fnparmform)
+ports/fnv-nx/platform@vclock/win32/winsta.cpp:_Z11w32_obj_newijPFvP7w32_objE	the row has no MSVC name (nodecor:fnparmform)

@@ -11,6 +11,7 @@
  * have no SID, the documented result then is success with *lpnLengthNeeded 0. A buffer smaller than the data fails
  * with ERROR_INSUFFICIENT_BUFFER and *lpnLengthNeeded; a buffer that is large enough but NULL with ERROR_NOACCESS.
  * UOI_HEAPSIZE (5) and UOI_IO (6) are not documented for user32 on Windows 7: invalid index. */
+#include <fnvnx_export.h>
 #include "w32.h"
 
 #ifndef ERROR_INSUFFICIENT_BUFFER
@@ -41,11 +42,13 @@ static HANDLE object_handle(HANDLE *slot, int type)
     return h;
 }
 
+FNVNX_EXPORT("user32.dll", "GetProcessWindowStation", GetProcessWindowStation, "func");
 extern "C" HANDLE GetProcessWindowStation(void) { return object_handle(&g_winsta, W32_WINSTA); }
 
 /* the process's desktop handle (the one desktop of the interactive station) */
 extern "C" HANDLE fnvnx_default_desktop(void) { return object_handle(&g_desktop, W32_DESKTOP); }
 
+FNVNX_EXPORT("user32.dll", "GetUserObjectInformationA", GetUserObjectInformationA, "func");
 extern "C" BOOL GetUserObjectInformationA(HANDLE h, int index, void *info, DWORD len, LPDWORD needed)
 {
     len = W32_DW(len);

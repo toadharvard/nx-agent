@@ -1,7 +1,7 @@
 {
  "format": "fnvnx-oracle/1",
  "tests": {
-  "test_formgate.py": {
+  "test_formgate_real.py": {
    "references": [
     {
      "anchor": "## Classes of run-time failure and their gates",
@@ -13,7 +13,7 @@
     "ports/fnv-nx/lift/proof/formgate.py"
    ]
   },
-  "test_fpexact.py": {
+  "test_fpexact_host.py": {
    "references": [
     {
      "anchor": "## Classes of run-time failure and their gates",
