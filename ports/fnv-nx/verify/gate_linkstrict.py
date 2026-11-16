@@ -34,7 +34,7 @@ its objects (relocatable) and of its linked ELF, never a name's text. Rules:
       two body ids is `contract-duplicate`. Without the key rule (c) has universe 0 for that root.
   (g) The runtime of a guest root. A reference of a GUEST root's object that no object defines is certified iff the link it enters defines it from outside the roots: the pinned runtime
       (the start and end files and libraries of the guest driver's own link command, read from the compiler external guest_compiler.json pins) or the link script's own
-      assignments (linkset.runtime_defs, the one accessor that gate imports reads too). Names the ld synthesises for an image stay `undefined` for a root that links none.
+      assignments (linkset.runtime_defs, the one accessor that gate imports reads too). The names the pinned ld synthesises (linkset.synth_defs) are in the set too.
   (e) No guest object references a libgcc outline-atomics helper (__aarch64_{cas,swp,ldadd,ldclr,ldeor,ldset}<bytes>_<memory model>): the helpers
       choose LSE or LL/SC through getauxval, which Horizon lacks, and the declared CPU (Cortex-A57) has no LSE, so guest roots build with
       -mno-outline-atomics (a member of guest_compiler.json "flags"."semantics", appended by the recipe and read back by gate datamodel). Finding `outline-atomic`, per reference.
@@ -313,7 +313,7 @@ def main():
         host = (hroots, set(host_exports(cache)[0])) if hroots else None
         guest = [r + "/" for r, e in recipe.load_admit(repo).items() if e.get("class") == "product" and e.get("target") == "guest"]
         if guest:
-            runtime = set(linkset.runtime_defs(repo, cache))   # the pinned runtime's libraries and the script's names: the one accessor of the link set
+            runtime = set(linkset.runtime_defs(repo, cache)) | set(linkset.synth_defs(guest[0][:-1], recipe.load_admit(repo), repo, cache))   # the pinned runtime, the script's names and ld's own: the one accessor of the link set
         for root in roots:
             res, _ = gate_build.ensure(root, cache, repo)
             if res["status"] == "red":

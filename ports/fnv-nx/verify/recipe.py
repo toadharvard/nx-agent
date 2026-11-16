@@ -3353,6 +3353,30 @@ class Job:
         own = set().union(*(v[0] for v in rt.values()), *(a[1] for a in arch)) if (rt or arch) else set()
         return {n for n, _, _, shndx, typ in ldcheck_syms(d, 2) if shndx != 0 and typ not in (3, 4)} - own
 
+    def synthesised(self, ws, kind, script=None):
+        """Stage `ldsynth:<root>:<kind>`: the names the pinned ld defines for a link of KIND (LD_KIND) of an EMPTY object of the kind's target (emulation: KIND_EMU, the first
+        that TARGETS maps to this root's target class), with the link script SCRIPT (a repo path, or None) and nothing else. Its output's defined symbols minus those the script
+        assigns are the ones no input defines: derived from ld's own output, listed nowhere. Needs self.rec["link"] = {"flags", "kind"} (ld_tool). -> set of names.
+        A failed link is BuildRed."""
+        lk = self.rec["link"]
+        ld, rt = self.ld_tool()
+        sd = os.path.join(tempfile.mkdtemp(dir=ws), "ldsynth")
+        os.makedirs(sd)
+        emu = emulation_of(lk["flags"])
+        with open(os.path.join(sd, "empty.o"), "wb") as f:
+            f.write(empty_object(*TARGETS[emu]))
+        text = ""
+        if script:
+            text = open(os.path.join(self.repo, script)).read()
+            with open(os.path.join(sd, "link.ld"), "w") as f:
+                f.write(text)
+        argv = [ld] + LD_KIND[kind] + lk["flags"] + (["-T", "/ld/link.ld"] if script else []) + ["--unresolved-symbols=ignore-all", "-o", "/out/x.elf", "/ld/empty.o"]
+        doc = {"format": "fnvnx-stage/1", "stage": "ldsynth:%s:%s" % (self.root, kind), "argv": argv, "cwd": "/", "class": "build", "tool": "ld",
+               "env": dict(unitstage.ENV, PATH=os.path.dirname(ld)), "outputs": ["/out"], "inputs": merge_inputs(rt["inputs"] + [{"at": "/ld", "tree": cas.ingest(sd, self.store)}], [], self.store, ws)}
+        res = self.stage(doc)[1]
+        d = open(cas._obj(self.store, cas.manifest(res["outputs"]["/out"], self.store)["entries"]["x.elf"]), "rb").read()
+        return {n for n, _, _, shndx, typ in ldcheck_syms(d, 2) if shndx != 0 and typ not in (3, 4) and n} - undefset.script_defined(text)
+
     def link_probe(self, ws):
         """Stage `drv:<root>`: the guest runtime's C++ driver (the cxx driver of the triplet, inside the pinned compiler tree that holds the runtime) run with the guest semantic flags
         (the common set: the profile is one fact for every guest link, native and lifted alike) and `-###` on the link of a one-line C++ file, hermetic (the driver prints the commands it would run; none is run).
@@ -3444,6 +3468,25 @@ def loader_defined(repo, loader, store, jobs, extcache, ws, stage):
         names |= {x["symbol"] for x in r["defined"]}
         rs.append(r)
     return names, rs
+
+
+def synth_names(repo, root, cache, kinds, script=None):
+    """The linker-synthesised names of ROOT's target for each link kind in KINDS (Job.synthesised): ld with the pinned compiler of ROOT and the kind's fixed options on an empty
+    object. A guest kind is `pie` (emulation aarch64linux32, link/guest.json's SCRIPT); a host kind is `shared` or `exe` (elf_x86_64, no script). -> {kind: set of names}.
+    BuildRed/RecipeError as the stage."""
+    store = os.path.join(cache, "store")
+    j = Job(repo, root, store, 1, os.path.join(cache, "external"))
+    ws = tempfile.mkdtemp(prefix="synth-")
+    try:
+        j.externals(ws)
+        out = {}
+        for k in kinds:
+            emu = next(e for e in KIND_EMU[k] if TARGETS[e][1] == (183 if entry_of(j.roots, root).get("target") == "guest" else 62))
+            j.rec = dict(j.rec, link={"output": "x.elf", "flags": ["-m", emu], "kind": k})
+            out[k] = j.synthesised(ws, k, script)
+        return out
+    finally:
+        shutil.rmtree(ws, ignore_errors=True)
 
 
 def emulation_of(flags):
