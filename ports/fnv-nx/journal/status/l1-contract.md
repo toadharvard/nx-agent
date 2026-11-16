@@ -2423,3 +2423,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:05
 - L6 w7 (session_01KmtZKTwJ5fk1PMDTD5fZYh, claude/fnv-l6-render-w7): d3d9.dll records for all 11 spec-derived exports, after their definers in render/d3d9/dev/d3d9_exports.cpp. The g_exports/nx_d3d9_export hand table is deleted unless something outside L6 consumes it. Accepted, waiting on the head.
 - bottleneck: cand3b farm verdict at 963dce662.
+
+## 2026-11-16 04:06
+- w13 ff086e540 (claude/fnv-l3a-lift-w13-udsailstage): lift/udsail recipe valid over w28 322698c53 (not executed: isla unbuilt). base3 must merge w28 first (w8), then w13. Generator-index stage refs are checked against declared outputs.
+- bottleneck: cand3b farm verdict at 963dce662.
