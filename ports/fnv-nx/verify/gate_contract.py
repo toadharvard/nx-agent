@@ -46,6 +46,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "contract"))
 import cas  # noqa: E402
+import l2sections  # noqa: E402
 import exepin  # noqa: E402
 import gate_build  # noqa: E402
 import iat  # noqa: E402
@@ -201,7 +202,7 @@ def stages(w, doc, ext, rp, only=None):
     st = {
         "exefacts": (py("exefacts.py", "--exe", P("exe"), "--units", rp["units"], "--out", w + "/facts.json"), ["facts.json"]),
         "n1": (py("n1.py", "--exe", P("exe"), "--units", rp["units"], "--msvc", P("msvc"), "--out", w + "/n1.json"), ["n1.json", "gate/n1.json"]),
-        "objfacts": (py("objfacts.py", "--link", link, "--facts", w + "/facts.json", "--out", w + "/obj.json"), ["obj.json"]),
+        "objfacts": (py("objfacts.py", "--link", link, "--facts", w + "/facts.json", "--sympair-kinds", l2sections.KINDS_INC, "--out", w + "/obj.json"), ["obj.json"]),
         "registry": (py("registry.py", "--facts", w + "/facts.json", "--obj", w + "/obj.json", "--n1", w + "/n1.json", "--link", link,
                         "--out", w + "/gates"), ["gates/gates.json", "gates/bodysel.tsv"]),
         "xunit": (py("gate_xunit.py", "--objects", link + "/game", "--nm", NM), ["gate/xunit.json"]),

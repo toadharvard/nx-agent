@@ -91,7 +91,7 @@ def tree_files(repo, adm, files):
         if spec != root:
             continue          # a variant's sources are its base's
         rec = recipe.load_recipe(repo, adm, root)
-        for u in recipe.units_of(rec, root, files) if isinstance(rec, dict) else []:
+        for u in recipe.units_of(rec, root, files, adm, repo) if isinstance(rec, dict) else []:
             p = root + "/" + u
             owners.setdefault(p, set()).add(root)
             if p in files:

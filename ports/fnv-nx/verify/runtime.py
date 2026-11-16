@@ -79,6 +79,12 @@ def ident(path):
         return None
     return h[4], h[5], struct.unpack_from("<H" if h[5] == 1 else ">H", h, 18)[0]
 
+def loadable(p):
+    """Is P an x86-64 ELF executable or shared object (e_type ET_EXEC or ET_DYN): what the host loader can map."""
+    with open(p, "rb") as f:
+        h = f.read(20)
+    return ident(p) == X86_64 and struct.unpack_from("<H", h, 16)[0] in (2, 3)
+
 def elf(path):
     """None if not an ELF file; else (interp or None, needed [str], rpath [str], runpath [str]) of an x86-64 ELF64 LE file."""
     with open(path, "rb") as f:
@@ -259,9 +265,6 @@ def build(store, python, sites, paths=()):
 
 def build_tool(store, exes, trees):
     """Tool runtime (see the docstring): exes = [AT], trees = [DIR or HOST@AT]."""
-    def loadable(p):
-        h = open(p, "rb").read(20)
-        return ident(p) == X86_64 and struct.unpack_from("<H", h, 16)[0] in (2, 3)
     ats = sorted({os.path.normpath(os.path.abspath(e)) for e in exes})
     def hostat(t):
         h, sep, at = t.partition("@")

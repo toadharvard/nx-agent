@@ -825,6 +825,17 @@ open(bad_ii, "w").write("int f(void) { return +; }\n")
 tc = objstub.unit_terminators("aarch64-linux-gnu-g++", [("pk-bad", bad_ii, "c")], {"c": []}, tempfile.mkdtemp(prefix="objstub-tc-"), 1, so=plug("aarch64-linux-gnu-g++"))
 check("a unit the terminator plugin cannot process: a failure of that unit in the result (no exception)", tc[0] == [] and len(tc[2]) == 1 and tc[2][0][0] == "pk-bad", tc)
 
+# the terminator run loads the ROOT'S OWN plugins as its compile stage does (recipe.root_plugin_flags): a unit that uses a dispatch attribute (fnvnx_host,
+# registered by the root's fnvnx_dispatch plugin) is green in the gate; the same preprocessed text without the root's plugins is an unknown attribute (-Werror=attributes)
+ATTR = '#include "toy.h"\ntypedef unsigned long long __attribute__((fnvnx_host)) hslot;\nhslot slot_a;\nint f_c(int x) { return x + TOY + (slot_a != 0); }\n'
+ra = TR.make_guest_repo("os-attr", files={"toy/constants.tsv": CONST, "toy/c.c": ATTR})
+rc, g, _, txt, st = gate(ra, ROOT + "/gattr", GC)
+check("a unit that uses a dispatch attribute: no terminator-red (the root's plugins are loaded in the terminator run)", "terminator-red" not in g.get("detail", "") and not any(":f_c" in u and "terminator" in g["detail"] for u in g["uncertified"]), (g, txt))
+ii = tf + ".attr.ii"
+open(ii, "w").write("typedef unsigned long long __attribute__((fnvnx_host)) hslot;\nhslot slot_a;\nint f(void) { return slot_a != 0; }\n")
+tcn = objstub.unit_terminators("aarch64-linux-gnu-g++", [("pk-attr", ii, "c")], {"c": ["-Werror=attributes"]}, tempfile.mkdtemp(prefix="objstub-tc-"), 1, so=plug("aarch64-linux-gnu-g++"))
+check("the same text without the root's plugins: a failure of the unit naming the unknown attribute (so the plugins must be loaded)", len(tcn[2]) == 1 and "attribute" in tcn[2][0][1], tcn)
+
 # the final image: every function body of the linked ELF is judged for the fixed-failure class (a weak `errno = ENOSYS; return -1` fallback left in it is red;
 # the same image with a strong override is green, the weak body is not in the image)
 ERR = '#include "toy.h"\nstatic int e;\nint *__errno(void) { return &e; }\n'
