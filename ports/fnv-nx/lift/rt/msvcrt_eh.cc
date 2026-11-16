@@ -415,6 +415,10 @@ extern "C" void fnvl_msvcrt_CxxThrowException(void)
    of the call, as the raise backend of rt/unhandled.cc does for RaiseException). Windows' msvcrt raises from inside itself, and the dispatcher walks the fs:0 chain, so
    only guest frames are searched: the guest call site is where that walk starts. Once the raise returns (a lifted catch took the transfer, or the context continues) the
    native frames are left by the non-local exit of the entry (fnvl_native_exit): this function does not return. */
+/* The invariant that makes the exit total: native code runs only under an entry that linked its frame before the native call (c->nf != 0): tools/impgen.py generates every import
+   entry as `fnvl_native_in(&nf); if (__builtin_setjmp(nf.jb)) { c->nf = nf.prev; return; } <native call>` (impgen.py:68-70) and tools/exitgen.py every native body of a lifted exe function as
+   `fnvl_native_enter(&nf); if (__builtin_setjmp(nf.jb)) { c->nf = nf.prev; return; } ...` (exitgen.py:135-140); there is no other way for guest code to reach native code, so
+   the bare entry has no frameless case and fnvl_native_exit has the setjmp point of the entry on top of c->nf. */
 extern "C" __attribute__((noreturn)) void _CxxThrowException(void *obj, const void *ti)
 {
     u32 o = (u32)(unsigned long)obj, t = (u32)(unsigned long)ti;
