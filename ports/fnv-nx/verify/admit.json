@@ -16,25 +16,9 @@
   },
   {
    "path": "ports/fnv-nx/contract",
-   "trees": [
-    "ports/fnv-nx/contract",
-    "ports/fnv-nx/link"
-   ],
-   "class": "tool",
-   "entry": [
-    "ports/fnv-nx/contract/exefacts.py",
-    "ports/fnv-nx/contract/n1.py",
-    "ports/fnv-nx/contract/objfacts.py",
-    "ports/fnv-nx/contract/registry.py",
-    "ports/fnv-nx/contract/gate_xunit.py",
-    "ports/fnv-nx/contract/gate_rtti.py",
-    "ports/fnv-nx/contract/gate_pcrel.py",
-    "ports/fnv-nx/contract/bodysel.py",
-    "ports/fnv-nx/link/gate_abs.py",
-    "ports/fnv-nx/contract/gpa_names.py",
-    "ports/fnv-nx/contract/gate_reach.py",
-    "ports/fnv-nx/link/gate_disp.py"
-   ]
+   "class": "product",
+   "target": "guest",
+   "recipe": "ports/fnv-nx/contract/build.json"
   },
   {
    "path": "ports/fnv-nx/docs",
