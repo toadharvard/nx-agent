@@ -1859,3 +1859,13 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Taken: per-instruction memo 51073b0d3, byte-identical on the 5 small images.
   - After the first frame: a region walk memoised by (addr, state) across entries. It isn't blocking, because the stage is content-keyed and runs on farms.
 - recipe ROOTFS_MEMO aliasing: already fixed on the trunk by w28 3478d9f07. base3 and the relift have it; farm 3 cherry-picks it onto the 4 old density heads.
+- base3 @b2212b5bc (w8). It holds:
+  - one SDM-rows stage (lift/sdmrows), with liftsrc, liftprov and the guest roots using it;
+  - inputs for the 5 tools tests;
+  - the bridgefacts tool files restored;
+  - facts2 6294cd5a4 (roots.tsv, span test, widening, pcsrc memo);
+  - expand_run 32acca813.
+  - Assumptions gate 152/152.
+- Doing:
+  - farm 2: build of every root and the 3 facts tests, after its census;
+  - w13: merge base3 into the relift.
