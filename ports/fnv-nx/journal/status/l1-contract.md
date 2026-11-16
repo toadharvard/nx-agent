@@ -2647,3 +2647,5 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 06:40
 - cand4 401c3332e (w15): the plugin compiler binding rule is in. recipe check over the 5 admitted roots on cand4: 0 red. Test fixtures are red: 8 test_recipe cases ("guest_compiler.json missing"), test_plugins and the plugbuild users (stock-g++ plugin toys). Base before the change: 1 failing case. w15 migrates the fixtures to profile guest with the real pin, checks why roots without plugins read the pin (a defect unless only plugin stages read it), adds the same-key-for-every-consumer test, and runs the whole set on the farm. Status: doing.
 - bottleneck: w28-c4 head + w15 fixture migration.
+- L2 asked for a ruling on -frounding-math for platform/coremath (CORE-MATH README:173, RZ/RD). Ruling: it is already in guest_compiler.json flags.semantics.common, so every guest CC stage has it. The refusal was a per-root restatement, which is correct. coremath drops it from its own flags and stays a guest root. No new recipe class.
+- w28-c4 list +9affb1631 (wine_fixme.tsv row 25) and every wine_fixme row on w28's line; +link/ldcheck.py (L6).
