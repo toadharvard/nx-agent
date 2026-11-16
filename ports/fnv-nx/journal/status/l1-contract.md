@@ -2039,3 +2039,14 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - L6: re-run sm_link on the w28 head.
   - L2 w3: mirror the 8 debs into tools/verdict-debs; test_toolstep.
 - bottleneck: cand3b (w15).
+
+## 2026-11-16: cand3b cut decision
+
+- cand3b (w15, claude/fnv-l1-contract-cand3b @ 9df135ee8): the cold verdict v11 took 21 min and was red in abi, imports, machine, linkstrict, objstub, pure, rtasm and selftests.
+- Decision: cut platform, loader, bridgefacts and rt/guest_main whole, by the graph, under the cand2 rule. None of them is on the trunk now.
+- Kept as wiring: resolve_input {root,path} and {root,output}; registry.in.json declared/seed; split_spec for the platform@ variants.
+- Next for w15: a warm verdict (≤300 s), then the merge.
+- Content reds go to their owners:
+  - L5: imports 3021/3132, with 32 'external' CRT/EH symbols; machine foreign-writer; abi msvcrt_va for `_vsnprintf` and `fnvnx_msvc_format`; objstub on platform/audio.
+  - L1 (loader): objstub on loader/guest/boot.c, and linkstrict. The worker will be assigned when w15 sends the full lists.
+- bottleneck: cand3b (w15) warm verdict.
