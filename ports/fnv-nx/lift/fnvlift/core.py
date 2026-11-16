@@ -436,8 +436,8 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     graph = {a: sorted(t for t in cx.succ.get(a, ()) if t in cx.insns) for a in cx.insns}
     for a, r in cx.finfo.items():          # a Form instruction has two derivations of its successors (its eip node, the emitted gotos). Every edge the emitter wrote is one the solver follows, or the solver
         assert set(graph[a]) <= set(r['succs']) or flaglive.EXIT in r['succs'], (hex(a), r['succs'], graph[a])      # treats the instruction as an exit (all flags live): the solver never misses a successor
-    P = flaglive.poll_set(graph, [start] + [a for a in cx.insns if a in cx.uent])
-    drop = flaglive.dropped(cx.finfo, P)
+    P = frozenset()                                    # MEASUREMENT BRANCH (density R12, never merged): no suspension polls
+    drop = {}                                          # MEASUREMENT BRANCH: no flag-write dropping (rule 3 off)
     txt, meta2, cx2 = _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, drop, P)
     assert meta2['paths'] == meta['paths'] and {a: cx2.succ.get(a, set()) for a in cx2.insns} == {a: cx.succ.get(a, set()) for a in cx.insns}
     meta2['flagdrop'] = {a: flaglive.mask(m) for a, m in sorted(drop.items())}
