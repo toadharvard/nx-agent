@@ -17,7 +17,7 @@ rule and must make exactly the ids that check guards uncertified (red):
 The assertion mutations are made on the pinned mirror itself: the test takes the checkout of the translator recipe's mojoshader external from the
 build cache, mutates one file, commits the tree into a bare repository placed in the cache under the new commit, and points the scratch recipe at the new
 commit and tree hash. Plus the stage's tree hash equals verify/cas.py ingest (files, exec bit, symlink, empty dir, and the fetched external)."""
-import argparse, importlib.util, json, os, re, shutil, subprocess, sys, tempfile
+import argparse, json, os, re, shutil, subprocess, sys, tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__))

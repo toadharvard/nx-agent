@@ -10,7 +10,6 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
 from fnvnx.bridgefacts import crossing  # noqa: E402
 from fnvnx.contract import store  # noqa: E402
 
