@@ -172,7 +172,11 @@ def ij_why(esp, st, fpe=None):
 
 
 def feed(img, t, regs_t, stk_t):
-    """the state of one call site (typed registers, typed stack slots at the callee's offsets; None = esp unknown) joins into the input of callee t."""
+    """the state of one call site (typed registers, typed stack slots at the callee's offsets; None = esp unknown) joins into the input of callee t.
+    Termination of the argument fixpoint (analyse): an input is (registers, slots). A value is None < T_CODE < T_S4 and j() is the least upper bound on that chain, so an input only grows.
+    The slot keys are bounded: a call site with an unknown esp, or with any slot deeper than ARG_LIMIT bytes above the callee's esp, makes the input ALLCODE_INPUT, the top (every register and slot possibly a code address). An entry in img.allcode returns at once and is never dirty again.
+    So each entry's input has at most 7 registers + ARG_LIMIT slots, each on a chain of height 2: it changes finitely often, and the outer loop reanalyses an entry only when its input changed.
+    Soundness: the top is the over-approximation 'possibly code'. Every consumer of an input (analyse_entry, line 'inr, ins, anycode') reads a typed value as 'may be a code address' and the top as every value may be one, so the universe stays a superset."""
     if t in img.allcode: return
     if regs_t is None or any(k > ARG_LIMIT for k in stk_t):      # widening: slots deeper than ARG_LIMIT bytes above the callee's esp (a recursive call chain deepens them without bound) make the input unknown (possibly code), the sound top; each input then changes finitely often
 
