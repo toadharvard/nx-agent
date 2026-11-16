@@ -257,15 +257,15 @@ def main():
     A('--lift', help='the lift/ directory (fnvlift/, rt/) when it is not the parent of this tool (a recipe stage mounts it as a declared input)')
     A('--image', action='append', default=[], metavar='DIR=UNIVERSE.tsv', help='finish: one image (exe and every module row): its shard directory and its universe')
     A('--fpstate', help='directory of the fp-state facts (invariants.tsv)')
-    A('--certs', help='the directory of the form certificates (proof/prove.py output; shard mode)'); A('--fpdepth', help='the x87 stack-depth facts (depth.tsv)'); A('--cpufeat', help='the CPUID feature-bit table (L3b cpuid_feature_bits.tsv)'); A('--segwrites', help='the per-image write sites of the data segment registers (lift/facts SEGWRITES)'); A('--x86sys', help='the declared x86 system record (platform X86SYS output)')
+    A('--certs', help='the directory of the form certificates (proof/prove.py output; shard mode)'); A('--fpdepth', help='the x87 stack-depth facts (depth.tsv)'); A('--sdmrows', help='the SDM opcode rows (sdmfeat.py dumprows JSON)'); A('--segwrites', help='the per-image write sites of the data segment registers (lift/facts SEGWRITES)'); A('--x86sys', help='the declared x86 system record (platform X86SYS output)')
     a = ap.parse_args()
-    need = ['out'] + (['exe', 'modules', 'image'] if a.finish else ['fpstate', 'fpdepth', 'x86sys', 'cpufeat', 'segwrites', 'certs'] + (['modules', 'moddirs', 'facts_out', 'module'] if a.module else ['exe', 'universe']))      # --finish merges texts and reads no lifter input but the universe files
+    need = ['out'] + (['exe', 'modules', 'image'] if a.finish else ['fpstate', 'fpdepth', 'x86sys', 'sdmrows', 'segwrites', 'certs'] + (['modules', 'moddirs', 'facts_out', 'module'] if a.module else ['exe', 'universe']))      # --finish merges texts and reads no lifter input but the universe files
     miss = ['--' + k.replace('_', '-') for k in need if getattr(a, k) is None]
     if miss: ap.error('missing %s' % ' '.join(miss))
     a.base = None
     if a.module: module_inputs(a)
     import fnvlift
-    if not a.finish: fnvlift.inputs.configure(universe=a.universe, fpstate=a.fpstate, fpdepth=a.fpdepth, x86sys=a.x86sys, cpufeat=a.cpufeat, segwrites=a.segwrites, image=os.path.splitext(a.module)[0].lower() if a.module else 'exe')      # finish merges texts: it reads no lifter input
+    if not a.finish: fnvlift.inputs.configure(universe=a.universe, fpstate=a.fpstate, fpdepth=a.fpdepth, x86sys=a.x86sys, sdmrows=a.sdmrows, segwrites=a.segwrites, image=os.path.splitext(a.module)[0].lower() if a.module else 'exe')      # finish merges texts: it reads no lifter input
     os.makedirs(a.out, exist_ok=True)
     if a.finish: finish(a)
     elif a.shard: shard(a)

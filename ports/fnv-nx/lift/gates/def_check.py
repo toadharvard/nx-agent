@@ -165,8 +165,8 @@ def run(uni):
 
 
 def main(argv):
-    if len(argv) < 4 or argv[0] != '--cpufeat' or len(argv) % 2: print('usage: def_check.py --cpufeat CPUID_FEATURE_BITS.TSV IMAGE FACTS [IMAGE FACTS ...]', file=sys.stderr); return 2
-    from fnvlift import inputs; inputs.configure(cpufeat=argv[1]); argv = argv[2:]
+    if len(argv) < 4 or argv[0] != '--sdmrows' or len(argv) % 2: print('usage: def_check.py --sdmrows SDMROWS.JSON IMAGE FACTS [IMAGE FACTS ...]', file=sys.stderr); return 2
+    from fnvlift import inputs; inputs.configure(sdmrows=argv[1]); argv = argv[2:]
     res = run(universe(list(zip(argv[::2], argv[1::2]))))
     d = os.environ.get('GATE_OUT')
     if d:
