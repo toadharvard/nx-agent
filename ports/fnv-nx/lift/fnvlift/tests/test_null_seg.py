@@ -61,4 +61,17 @@ for b in range(256):
     assert f_sys.row_privileged(bytes([0x65, b, 0, 0]), row) == want, b
 # (4) mov gs, ax loads through fnvl_seg_set (state the guard reads)
 assert 'fnvl_seg_set(c, 5,' in lift(bytes([0x8e, 0xe8, 0xc3]))
+# (5) the selector sets of the facts (tools/segwrites.py): a store through gs / ds whose set holds no code selector has no code-selector arm in its text; the null-selector arm (a different condition) is untouched
+def sel_cfg(**sets):
+    inputs.reset(); d = tempfile.mkdtemp(prefix='nullseg-')
+    g = {n: {'guard': n == 'gs', 'selectors': sets.get(n)} for n in ('es', 'ds', 'fs', 'gs')}
+    json.dump({'format': 'fnvnx-segwrites/2', 'images': {'buf': g}}, open(d + '/segwrites.json', 'w'))
+    open(d + '/universe.tsv', 'w').close(); open(d + '/depth.tsv', 'w').close()
+    inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, sdmrows=SDMROWS, cpumodel=_inputs.CPUMODEL, segwrites=d + '/segwrites.json', image='buf')
+sel_cfg(gs=[0, 0x23], ds=[0x23])
+t = lift(bytes([0x65, 0x89, 0x01, 0xc3])); assert GUARD['gs'] in t and 'in_sel_gs >> 3' not in t, t[:500]      # gs: null guard kept, code-selector arm dropped
+t = lift(bytes([0x89, 0x01, 0xc3])); assert 'in_sel_ds >> 3' not in t, t[:500]
+sel_cfg(gs=[0, 0x1b], ds=None)
+t = lift(bytes([0x65, 0x89, 0x01, 0xc3])); assert GUARD['gs'] in t and 'in_sel_gs >> 3' in t, t[:500]          # gs may hold the code selector 0x1b
+t = lift(bytes([0x89, 0x01, 0xc3])); assert 'in_sel_ds >> 3' in t, t[:500]                                       # unbounded ds
 print('null_seg: ok')

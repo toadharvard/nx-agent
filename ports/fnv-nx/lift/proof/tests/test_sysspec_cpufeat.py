@@ -39,7 +39,12 @@ class Cleared(unittest.TestCase):
     def tearDown(self): inputs.reset()
 
     def test_3dnow_avx_sse3_are_ud(self):
-        for h in ('0f0fc10d', '0f0f0094', '0f0e', 'c5f1e3c2', 'db08', 'dd08', 'df08'):
+        # the decision is proof/cpufeat's, through the declared CPU's words (verify/cpuid_model.json): a form with no SDM row whose capstone group maps to a cleared CPUID bit is #UD (owner rule 07:50Z: capstone group -> cleared CPUID bit; the group rule of L3a w13, no SDM row, no UDSAIL, no certificate)
+        from proof import cpufeat
+        for h in ('0f0fc10d', '0f0e', 'c5f1e3c2', 'db08', 'dd08', 'df08'):
+            real = next(iter(shape.decoder().disasm(bytes.fromhex(h), 0)))
+            self.assertTrue(cpufeat.missing(real), h)
+        for h in ('0f0fc10d', '0f0e', 'c5f1e3c2', 'db08', 'dd08', 'df08'):
             r, n = S.check(key(h)); self.assertEqual(r, 'proved', (h, n))
             self.assertEqual([k for k, _ in symform.symbuild(key(h)).form.faults], [3], h)
 

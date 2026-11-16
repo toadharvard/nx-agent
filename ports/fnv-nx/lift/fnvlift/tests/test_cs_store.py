@@ -40,4 +40,11 @@ for hx, what in (('3e8901', 'mov ds:[ecx], eax'), ('268901', 'mov es:[ecx], eax'
     check('no null guard %-21s' % what, 'SELK(c->sel[' not in guard(hx) and 'SELK(SEL_CS)' not in guard(hx))
 check('gs store: the Form carries its null-selector and code-selector faults', 'in_sel_gs >> 2' in form_text('658901') and 'in_sel_gs >> 3' in form_text('658901') and 'FNVL_RAISE_AV' in form_text('658901'))
 check('gs load: the Form carries the null-selector fault only', 'in_sel_gs >> 2' in form_text('658b01') and 'in_sel_gs >> 3' not in form_text('658b01'))
+# the facts bound the selectors of ds (its initial selector only): the code-selector arm of a ds store is proved dead and the text has no guard; an unbounded ds, or one whose set holds a code selector, and the cs override keep it
+from fnvlift import inputs
+SEL = {'ds': 0x23, 'cs': 0x1b}
+for sets, want in (([SEL['ds']], False), ([SEL['ds'], SEL['cs']], True), (None, True)):
+    inputs.reset(); _inputs.configure(seg={'ds': {'guard': False, 'selectors': sets}})
+    check('ds store with selectors %s: code-selector fault %s' % (sets, 'kept' if want else 'dropped'), ('in_sel_ds >> 3' in form_text('8901')) == want)
+    check('cs override keeps its fault whatever ds holds (%s)' % (sets,), AV in form_text('2e8901'))
 sys.exit(1 if FAILS else 0)
