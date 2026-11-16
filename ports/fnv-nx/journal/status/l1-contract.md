@@ -3026,3 +3026,5 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - dm:13-19 are the 7 constant galaxywrp bodies (no-galaxy, u32 0).
   - The 4 real bodies (Shutdown, RunCallbacks, Register/UnregisterCallback: lock + registry) take no row, and I accepted that.
   - test_env_const_rows is new, and 6 dead platform_host rows are deleted. L5's warm verdict is running.
+- 12:14: L5 found its own vacuous bodies. SteamAPI_Shutdown and RunCallbacks only locked and stored g_steam_pipe, a dead static (always 0). Fix (w40): delete g_steam_pipe; the two become void bodies dm:20 and dm:21 (no-galaxy, SDK cite). Accepted.
+  - L1 gap: objstub classed a dead-store body as an implementation. w29 item 6 adds a value-set rule: an internal, non-escaping object whose every store writes its initializer is constant, so its stores are not effects, and a body left with only those stores and locks is V. Measured globally.
