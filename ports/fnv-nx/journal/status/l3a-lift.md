@@ -1342,3 +1342,10 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - The drop test (manifest/pefixture build_pe, the real universe.py --module) found that modlift's entries_on_data was vacuously 0: class data-reloc was never emitted. Fix: in the closure-complete residue, relocated slots are class 5 data-reloc (the exe's class-3 predicate). The 5 small images are unchanged.
 - Order restated to w7: the esp domain (register-relative stack, return through an RA jmp, reasons for every site) → residue → (B). The decode_gap merge into base3 goes through w8, with the BADDECODE/SHAPES outputs in the same batch. A synthetic exe-mode R3 drop case is added.
 - Bottlenecks: L2's K2 pin (lift/rt, contract/facts, lift/disp); pcsrc red at 75,171 (the esp domain, w7).
+
+## 2026-11-16 02:50: pcsrc indirect-jmp residue (w7 ddbabe680)
+- 133 exe indirect jmps: 120 clean, 13 not clean. Every site has a reason in pcsrc_ijmp.tsv. Red is 75,171 (the RA-jmp return matches 0 sites; the register-relative stack domain already existed).
+- Residue: 7 esp-lost after an indirect call; 5 esp-fresh (3 after `call reg; add esp`, 2 EH continuations `mov esp,[ebx-k]`); 1 thunk at ec3cdd.
+- Ruling, RULE T: indirect jmp and call target sets come from the value domain. That domain has origin-carrying values (the same change as (B)'s option (i)), interprocedural stack-slot inputs, and loads from identified tables. The whole ptr set is used only for TOP. The pop of an indirect call is the join of retn over the callee set. A vptr-slot residue, if it remains, gets its own ruling.
+- w7 order: decode_gap/BADDECODE/SHAPES → origin values (EH tables byte-identical, L3b told) → RULE T → recompute.
+- Bottlenecks: L2's K2 pin (lift/rt, contract/facts, lift/disp); pcsrc red at 75,171 (RULE T, w7).
