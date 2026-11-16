@@ -2415,3 +2415,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - L5 w32 1897a4fcc (w28 01e91c00d + 08109b9ce merged): 510 platform records, 493 moved after their definitions, 0 violations; the farm verdict is asked. Lookup 562 rows. The "placeholders" were proof-only and not committed.
 - Open: d3d9.dll has no export records (D3DPERF_SetOptions, DebugSetMute, Direct3DCreate9, Direct3DCreate9Ex, Direct3DShaderValidatorCreate9). Owner L6, asked.
 - bottleneck: cand3b farm verdict at 963dce662.
+
+## 2026-11-16 04:04
+- w28 322698c53: run+python (exec python -> Job.pyrt, one path; debs named there are red). test_runpython goes on the farm job. Forwarded to w13 for lift/udsail.
+- bottleneck: cand3b farm verdict at 963dce662.
