@@ -12,6 +12,13 @@ Updated 2026-11-14 23:30Z (path plan). Older sections below are from 2026-11-12 
 - Goal path: product roots -> lifted packs as roots -> ELF -> boot -> WinMain -> menu -> first frame (GL in the emulator).
 
 
+**2026-11-16 06:15Z (orchestrator).** Trunk fac693694; cand4 34e4aa5ad is in progress. Sources: the CORE-MATH root platform/coremath is in (mirror tools/core-math 1e8252b65, 7 objects green). Rulings:
+- b7b6f0df0: x87 transcendentals are CR binary64 by OWNER 8, computed by CORE-MATH.
+- 5009d67dd: an undecided rounding in cr_atan2 goes to MPFR at 53 bits; no trap.
+- d4397e9a3: a library root declares its documented flags with a citation (-frounding-math).
+- Plugins are built against the msvcmodel headers whatever root consumes them, and the loader declares msvcmodel; sent to L1 for cand4.
+Render lineages L6/L6A are being joined by L6 w8. Platform: w37 moves the loader headers, w38 derives the x86sys rows L3b needs. Emulator: waiting on the GL library build.
+
 **2026-11-16 05:30Z (orchestrator).** TRUNK MOVED: claude/fnv-nx-clean fac693694, the merge of cand3b c93b807f3. Green, 42 gates, 0 red, warm 34.7 s, tree 4faaaa9f. Next: cand4 on that head (w28, the exefacts universe rebase, and integ CLAUDE.md taken whole). Render: sm_link is green at L6 w6-root 21872d6be, with 1,809 shader bytecodes, 121,394 programs and 0 failed (cold 37.5 min, warm 51 s). Owner order 05:15Z (CLAUDE.md 1c8848809): the density rules come before the cold pack build, on ≤16 farms.
 
 **2026-11-16 05:10Z (orchestrator).** Trunk fb9dd044f. The cand3b verdict at 597f2e007 was red: selftests 128/131, with the cas pool left in TMPDIR. w15 fixes it with one temp-store helper; the head is now 02f26b3de and its verdict is next. The cold pack build is raised to ≤32 farms (CLAUDE.md 428b3dd5b); the recipe MAX_SHARDS=16 cap is lifted by w28 in the following candidate. L2 reports the 3 platform roots build 112/112 with plugins and test_dispatch 50/50; the pin and lift/rt wait on the compiler build at 3f1036631. Rulings: OWNER 10 scope derived from the pinned model's gaps (b4aad1930), now 35 keys at 1,667 sites; undname.c is the source for the MSVC decoration letters, after the first frame.
