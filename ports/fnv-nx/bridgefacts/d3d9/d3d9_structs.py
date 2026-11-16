@@ -4,7 +4,6 @@ x86 SDK rules, which AArch64-ILP32 reproduces: every pointer/HANDLE/HWND/long is
 (LARGE_INTEGER 8). The result is cross-checked by tests/l6/test_spec.py against a g++ -m32 probe of the headers."""
 import os, re
 
-INC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shim", "include")
 HDRS = ("d3d9types.h", "d3d9caps.h", "d3d9.h")
 WIN_STRUCTS = ("GUID", "POINT", "RECT", "PALETTEENTRY", "RGNDATAHEADER", "RGNDATA", "LUID")
 # base type -> (size, signed, kind)
@@ -50,8 +49,29 @@ def strip(t):
     return re.sub(r"//[^\n]*", " ", t)
 
 
-def text(f):
-    return strip(open(os.path.join(INC, f)).read())
+def text(inc, f):
+    return strip(open(os.path.join(inc, f)).read())
+
+
+def pack_map(src):
+    """[(offset, pack)] of the `#pragma pack` lines of SRC after comment stripping: pack(push, N) pushes N, pack(pop) pops, pack(N) sets; None = no pragma in force (natural
+    alignment). The member alignment of a struct is min(natural, pack) at its position (pack_at), read from the headers, stated nowhere else."""
+    st, out = [None], []
+    for m in re.finditer(r"#\s*pragma\s+pack\s*\(([^)]*)\)", src):
+        a = [x.strip() for x in m.group(1).split(",") if x.strip()]
+        if a and a[0] == "push": st.append(int(a[1]) if len(a) > 1 else st[-1])
+        elif a and a[0] == "pop": st.pop()
+        elif a: st[-1] = int(a[0])
+        else: st[-1] = None
+        out.append((m.start(), st[-1]))
+    return out
+
+
+def pack_at(pm, pos):
+    cur = None
+    for off, p in pm:
+        if off < pos: cur = p
+    return cur
 
 
 def body_of(t, start):
@@ -74,8 +94,8 @@ def split_top(t):
     return out + ["".join(cur)]
 
 
-def load():
-    t = {f: text(f) for f in HDRS + ("fnvnx_win32.h",)}
+def load(inc):
+    t = {f: text(inc, f) for f in HDRS + ("fnvnx_win32.h",)}
     allt = "\n".join(t[h] for h in HDRS)
     consts = {}
     for m in re.finditer(r"#define\s+(\w+)\s+([0-9xXa-fA-F() <>|+*-]+?)[LlUu]*\s*$", allt, re.M):
@@ -102,12 +122,13 @@ def load():
         except Exception: pass
     raw = {}
     for src, filt in ((allt, None), (t["fnvnx_win32.h"], WIN_STRUCTS)):
+        pm = pack_map(src)
         for m in re.finditer(r"typedef\s+struct\s*\w*\s*\{", src):
             body, end = body_of(src, m.end() - 1)
             names = [x.strip() for x in src[end:src.index(";", end)].split(",")]
             nm = names[0]
             if (filt is None or nm in filt) and nm not in raw and "{" not in body and nm not in HAND:
-                raw[nm] = (body, filt is not None)
+                raw[nm] = (body, pack_at(pm, m.start()))
     return {"enums": enums, "consts": consts, "raw": raw}
 
 
@@ -145,7 +166,7 @@ def layout(db):
             size, al, fl = HAND[name]
             done[name] = {"size": size, "align": al, "fields": [dict(name=a, off=b, size=c, kind=k, **({"signed": s} if k != "float" else {})) for a, b, c, k, s in fl]}
             return done[name]
-        body, win = raw[name]
+        body, pack = raw[name]
         pos, al, fields = 0, 1, []
         for ty, fname, arr in decl_fields(body):
             n = dims(arr) if arr else 1
@@ -167,7 +188,7 @@ def layout(db):
                 if fam: f["kind"], f["flags"] = "flags", fam; f.pop("signed", None)
             else:
                 raise SystemExit(f"d3d9_structs: unknown type {ty!r} in {name}.{fname}")
-            if not win: ea = min(ea, 4)
+            if pack: ea = min(ea, pack)
             if pos % ea: fields.append({"name": f"_pad{pos}", "off": pos, "size": ea - pos % ea, "kind": "pad"}); pos += ea - pos % ea
             f.update(off=pos, size=esz * n)
             if arr: f["count"] = n

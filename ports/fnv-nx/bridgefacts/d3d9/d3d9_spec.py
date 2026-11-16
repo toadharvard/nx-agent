@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """d3d9_spec.py: builds the D3D9 interface table, the one table that describes every method of every D3D9 COM interface (RD1), and the bridge rows of d3d9.dll.
     python3 -I d3d9_spec.py OUT_SPEC OUT_ROWS INCDIR   the stage of the tool root bridgefacts: outputs D9_SPEC and D9_ROWS (INCDIR = shim/include); no file of the table is tracked
-    python3 -I d3d9_spec.py --stdout [INCDIR]          print the table
+    python3 -I d3d9_spec.py --stdout INCDIR          print the table
 Inputs: shim/include/d3d9*.h (method order, types, structs, enums, constants) + d3d9_rules.py / d3d9_cls.py / d3d9_tables.py /
 d3d9_exports.py (the hand tables). Unknown types or invalid rules abort the run: nothing is guessed."""
 import json, os, re, sys
@@ -17,8 +17,8 @@ IUNK = [("HRESULT", "QueryInterface", "REFIID riid, void** ppvObj"), ("ULONG", "
 def die(msg): raise SystemExit("d3d9_spec: " + msg)
 
 
-def parse_headers():
-    text = open(os.path.join(ST.INC, "d3d9.h")).read()
+def parse_headers(inc):
+    text = open(os.path.join(inc, "d3d9.h")).read()
     ifs = {"IUnknown": ("", [(i, r, n, a) for i, (r, n, a) in enumerate(IUNK)])}
     for m in re.finditer(r"struct (IDirect3D\w+)\s*:\s*public (\w+)\s*\{(.*?)\n\};", text, re.S):
         name, base, body = m.groups()
@@ -64,12 +64,12 @@ def split_params(args, mname):
 
 
 class Gen:
-    def __init__(self):
-        self.db = ST.load()
+    def __init__(self, inc):
+        self.db = ST.load(inc)
         self.structs = ST.layout(self.db)
         self.enums = self.db["enums"]
         self.consts = self.db["consts"]
-        self.ifs, self.iids = parse_headers()
+        self.ifs, self.iids = parse_headers(inc)
         self.flat = flatten(self.ifs)
         self.used_consts = set()
 
@@ -248,10 +248,10 @@ def render(spec):
 
 if __name__ == "__main__":
     a = [x for x in sys.argv[1:] if x != "--stdout"]
-    if "--stdout" in sys.argv: ST.INC = a[0] if a else ST.INC
-    elif len(a) == 3: ST.INC = a[2]
-    else: die("usage: d3d9_spec.py OUT_SPEC OUT_ROWS INCDIR | --stdout [INCDIR]")
-    out = render(Gen().build())
+    if "--stdout" in sys.argv and len(a) == 1: inc = a[0]
+    elif "--stdout" not in sys.argv and len(a) == 3: inc = a[2]
+    else: die("usage: d3d9_spec.py OUT_SPEC OUT_ROWS INCDIR | --stdout INCDIR")
+    out = render(Gen(inc).build())
     if "--stdout" in sys.argv: sys.stdout.buffer.write(out)
     else:
         import d9rows
