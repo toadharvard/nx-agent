@@ -413,11 +413,12 @@ def merge_inputs(base, extra, store, ws):
             out.append(dict(e))
             continue
         n += 1
-        d = os.path.join(ws, "merge%d" % n)
+        pv = tempfile.mkdtemp(dir=ws)   # private: merge_inputs runs more than once in one workspace (a name built from ws and a counter collides across calls)
+        d = os.path.join(pv, "merged")
         cas.materialize(host["tree"], store, d)
         sub = os.path.join(d, e["at"][len(host["at"]) + 1:])   # (the input's own root when the paths are equal)
         os.makedirs(sub, exist_ok=True)
-        ov = os.path.join(ws, "overlay%d" % n)
+        ov = os.path.join(pv, "overlay")
         cas.materialize(e["tree"], store, ov)
         for f in os.listdir(ov):
             if os.path.lexists(os.path.join(sub, f)):
