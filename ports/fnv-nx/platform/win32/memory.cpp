@@ -304,7 +304,6 @@ static void release_alloc(size_t first)   /* a private allocation, all of it */
 
 #define VA_KNOWN (MEM_COMMIT | MEM_RESERVE | MEM_RESET | MEM_RESET_UNDO | MEM_TOP_DOWN | MEM_WRITE_WATCH | MEM_PHYSICAL | MEM_LARGE_PAGES)
 
-FNVNX_EXPORT("kernel32.dll", "VirtualAlloc", VirtualAlloc, "func");
 extern "C" LPVOID VirtualAlloc(LPVOID addr, SIZE_T size, DWORD type, DWORD protect)
 {
     type = W32_DW(type);
@@ -445,8 +444,8 @@ bad:
         fnvnx_mem_fail(MEMK_VIRTUAL, (size_t)sz, caller);
     return NULL;
 }
+FNVNX_EXPORT("kernel32.dll", "VirtualAlloc", VirtualAlloc, "func");
 
-FNVNX_EXPORT("kernel32.dll", "VirtualFree", VirtualFree, "func");
 extern "C" BOOL VirtualFree(LPVOID addr, SIZE_T size, DWORD type)
 {
     type = W32_DW(type);
@@ -508,6 +507,7 @@ bad:
     SetLastError(err);
     return FALSE;
 }
+FNVNX_EXPORT("kernel32.dll", "VirtualFree", VirtualFree, "func");
 
 /* the access a thread of the guest has to [a, a + n) by the map: 1 yes. access 0 read, 1 write, 8 code. A guard page
  * is no access (the first access is the exception): consume_guard clears the bit of the first one found, as
@@ -590,7 +590,6 @@ static DWORD protect_pages(uint64_t a, uint64_t sz, DWORD prot, DWORD *was)
     return err;
 }
 
-FNVNX_EXPORT("kernel32.dll", "VirtualProtect", VirtualProtect, "func");
 extern "C" BOOL VirtualProtect(LPVOID addr, SIZE_T size, DWORD prot, PDWORD old)
 {
     prot = W32_DW(prot);
@@ -608,8 +607,8 @@ extern "C" BOOL VirtualProtect(LPVOID addr, SIZE_T size, DWORD prot, PDWORD old)
     *old = was;
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "VirtualProtect", VirtualProtect, "func");
 
-FNVNX_EXPORT("kernel32.dll", "VirtualQuery", VirtualQuery, "func");
 extern "C" SIZE_T VirtualQuery(LPCVOID addr, PMEMORY_BASIC_INFORMATION mbi, SIZE_T len)
 {
     uint64_t a = (uint64_t)(uintptr_t)addr;
@@ -652,6 +651,7 @@ extern "C" SIZE_T VirtualQuery(LPCVOID addr, PMEMORY_BASIC_INFORMATION mbi, SIZE
     mbi->State = MEM_FREE;
     return sizeof *mbi;
 }
+FNVNX_EXPORT("kernel32.dll", "VirtualQuery", VirtualQuery, "func");
 
 /* a memory fault at addr, by the map (the host fault handler of the lifter runtime asks) */
 extern "C" int fnvnx_win32_vm_fault(uintptr_t addr, int access, uint32_t *code_out)
@@ -702,7 +702,6 @@ static void watch_rearm(size_t i)
         os_vm_protect((void *)paddr(i), FNVNX_PAGE_SIZE, os_prot_pg(g_pg[i]));
 }
 
-FNVNX_EXPORT("kernel32.dll", "GetWriteWatch", GetWriteWatch, "func");
 /* GetWriteWatch: the page addresses in [base, base + size) written since allocation or the last reset, in address order
  * (at most *count of them; *count = the number stored, *granularity = the page size). WRITE_WATCH_FLAG_RESET (1)
  * re-arms the pages it returned. 0, or ~0u with ERROR_INVALID_PARAMETER: another flag, no output, or a range that is not
@@ -733,8 +732,8 @@ extern "C" UINT GetWriteWatch(DWORD flags, PVOID base, SIZE_T size, PVOID *addre
     *granularity = FNVNX_PAGE_SIZE;
     return 0;
 }
+FNVNX_EXPORT("kernel32.dll", "GetWriteWatch", GetWriteWatch, "func");
 
-FNVNX_EXPORT("kernel32.dll", "ResetWriteWatch", ResetWriteWatch, "func");
 /* ResetWriteWatch: every page of the range is clean and armed again. 0, or ~0u with ERROR_INVALID_PARAMETER. */
 extern "C" UINT ResetWriteWatch(PVOID base, SIZE_T size)
 {
@@ -750,6 +749,7 @@ extern "C" UINT ResetWriteWatch(PVOID base, SIZE_T size)
     os_unlock(&g_vm_lock);
     return 0;
 }
+FNVNX_EXPORT("kernel32.dll", "ResetWriteWatch", ResetWriteWatch, "func");
 
 /* memory that did not come from VirtualAlloc: the loader's image sections, heap regions and thread stacks */
 extern "C" void fnvnx_win32_vm_note(uintptr_t base, size_t size, DWORD type, DWORD protect)
@@ -956,7 +956,6 @@ static void heap_free_blk(w32_heap *h, heap_blk *b)   /* under the heap's lock; 
     free(b);
 }
 
-FNVNX_EXPORT("kernel32.dll", "HeapCreate", HeapCreate, "func");
 extern "C" HANDLE HeapCreate(DWORD f, SIZE_T i, SIZE_T m)
 {
     w32_heap *h = (w32_heap *)calloc(1, sizeof *h);
@@ -976,8 +975,8 @@ extern "C" HANDLE HeapCreate(DWORD f, SIZE_T i, SIZE_T m)
     os_unlock(&g_heaps_lock);
     return (HANDLE)h;
 }
+FNVNX_EXPORT("kernel32.dll", "HeapCreate", HeapCreate, "func");
 
-FNVNX_EXPORT("kernel32.dll", "HeapDestroy", HeapDestroy, "func");
 extern "C" BOOL HeapDestroy(HANDLE hh)
 {
     w32_heap *h = NULL;
@@ -1005,6 +1004,7 @@ extern "C" BOOL HeapDestroy(HANDLE hh)
     fnvnx_mem_leave(in);
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "HeapDestroy", HeapDestroy, "func");
 
 static void *heap_alloc(unsigned ra, HANDLE hh, DWORD flags, SIZE_T n)
 {
@@ -1021,10 +1021,9 @@ static void *heap_alloc(unsigned ra, HANDLE hh, DWORD flags, SIZE_T n)
     return p ? p : heap_failed(eff);
 }
 
-FNVNX_EXPORT("kernel32.dll", "HeapAlloc", HeapAlloc, "func");
 extern "C" LPVOID HeapAlloc(HANDLE h, DWORD flags, SIZE_T n) { return heap_alloc(MEM_RA, h, flags, n); }
+FNVNX_EXPORT("kernel32.dll", "HeapAlloc", HeapAlloc, "func");
 
-FNVNX_EXPORT("kernel32.dll", "HeapReAlloc", HeapReAlloc, "func");
 extern "C" LPVOID HeapReAlloc(HANDLE hh, DWORD flags, LPVOID p, SIZE_T n)
 {
     if (!p) {   /* unlike realloc, a NULL block is an error */
@@ -1057,6 +1056,7 @@ extern "C" LPVOID HeapReAlloc(HANDLE hh, DWORD flags, LPVOID p, SIZE_T n)
     }
     return q ? q : heap_failed(eff);
 }
+FNVNX_EXPORT("kernel32.dll", "HeapReAlloc", HeapReAlloc, "func");
 
 static BOOL heap_free(unsigned ra, HANDLE hh, DWORD flags, LPVOID p)
 {
@@ -1074,10 +1074,9 @@ static BOOL heap_free(unsigned ra, HANDLE hh, DWORD flags, LPVOID p)
     return TRUE;
 }
 
-FNVNX_EXPORT("kernel32.dll", "HeapFree", HeapFree, "func");
 extern "C" BOOL HeapFree(HANDLE h, DWORD flags, LPVOID p) { return heap_free(MEM_RA, h, flags, p); }
+FNVNX_EXPORT("kernel32.dll", "HeapFree", HeapFree, "func");
 
-FNVNX_EXPORT("kernel32.dll", "HeapSize", HeapSize, "func");
 extern "C" SIZE_T HeapSize(HANDLE hh, DWORD flags, LPCVOID p)
 {
     if (!p) {
@@ -1091,20 +1090,21 @@ extern "C" SIZE_T HeapSize(HANDLE hh, DWORD flags, LPCVOID p)
     heap_leave(h, eff);
     return n;
 }
+FNVNX_EXPORT("kernel32.dll", "HeapSize", HeapSize, "func");
 
-FNVNX_EXPORT("kernel32.dll", "LocalAlloc", LocalAlloc, "func");
 /* LMEM_FIXED blocks are blocks of the process heap */
 extern "C" HANDLE LocalAlloc(UINT flags, SIZE_T n)
 {
     return (HANDLE)heap_alloc(MEM_RA, PROCESS_HEAP, (flags & 0x40 /* LMEM_ZEROINIT */) ? HEAP_ZERO_MEMORY : 0, n);
 }
+FNVNX_EXPORT("kernel32.dll", "LocalAlloc", LocalAlloc, "func");
 
-FNVNX_EXPORT("kernel32.dll", "LocalFree", LocalFree, "func");
 extern "C" HANDLE LocalFree(HANDLE h)
 {
     heap_free(MEM_RA, PROCESS_HEAP, 0, h);
     return NULL;
 }
+FNVNX_EXPORT("kernel32.dll", "LocalFree", LocalFree, "func");
 
 /* ---- status
  * The page-file fields are Windows' commit limit: RAM plus the page file (a system-managed one is about RAM's
@@ -1125,7 +1125,6 @@ static uint64_t virt_avail(void)
     return n * FNVNX_PAGE_SIZE;
 }
 
-FNVNX_EXPORT("kernel32.dll", "GlobalMemoryStatus", GlobalMemoryStatus, "func");
 extern "C" void GlobalMemoryStatus(LPMEMORYSTATUS ms)
 {
     uint64_t t, a;
@@ -1141,8 +1140,8 @@ extern "C" void GlobalMemoryStatus(LPMEMORYSTATUS ms)
     ms->dwTotalVirtual = (SIZE_T)virt_total();   /* both below 2 GiB: no clamping applies */
     ms->dwAvailVirtual = (SIZE_T)virt_avail();
 }
+FNVNX_EXPORT("kernel32.dll", "GlobalMemoryStatus", GlobalMemoryStatus, "func");
 
-FNVNX_EXPORT("kernel32.dll", "GlobalMemoryStatusEx", GlobalMemoryStatusEx, "func");
 extern "C" BOOL GlobalMemoryStatusEx(LPMEMORYSTATUSEX ms)
 {
     if (!ms || W32_DW(ms->dwLength) != sizeof *ms) {
@@ -1162,8 +1161,8 @@ extern "C" BOOL GlobalMemoryStatusEx(LPMEMORYSTATUSEX ms)
     ms->ullAvailExtendedVirtual = 0;
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "GlobalMemoryStatusEx", GlobalMemoryStatusEx, "func");
 
-FNVNX_EXPORT("kernel32.dll", "GetSystemInfo", GetSystemInfo, "func");
 extern "C" void GetSystemInfo(LPSYSTEM_INFO si)
 {
     memset(si, 0, sizeof *si);
@@ -1177,3 +1176,4 @@ extern "C" void GetSystemInfo(LPSYSTEM_INFO si)
     si->dwAllocationGranularity = FNVNX_VM_ALIGN;
     si->wProcessorLevel = 6;
 }
+FNVNX_EXPORT("kernel32.dll", "GetSystemInfo", GetSystemInfo, "func");

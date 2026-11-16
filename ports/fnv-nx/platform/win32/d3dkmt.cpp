@@ -47,7 +47,6 @@ static HANDLE adapter_handle(void)
     return h;
 }
 
-FNVNX_EXPORT("gdi32.dll", "D3DKMTOpenAdapterFromHdc", D3DKMTOpenAdapterFromHdc, "func");
 extern "C" NTSTATUS_ D3DKMTOpenAdapterFromHdc(void *desc)
 {
     kmt_open *d = (kmt_open *)desc;
@@ -65,8 +64,8 @@ extern "C" NTSTATUS_ D3DKMTOpenAdapterFromHdc(void *desc)
     d->vidpn = 0;
     return ST_SUCCESS;
 }
+FNVNX_EXPORT("gdi32.dll", "D3DKMTOpenAdapterFromHdc", D3DKMTOpenAdapterFromHdc, "func");
 
-FNVNX_EXPORT("gdi32.dll", "D3DKMTEscape", D3DKMTEscape, "func");
 extern "C" NTSTATUS_ D3DKMTEscape(const void *desc)
 {
     const kmt_escape *e = (const kmt_escape *)desc;
@@ -82,3 +81,4 @@ extern "C" NTSTATUS_ D3DKMTEscape(const void *desc)
         .s(" bytes): the display driver has no escape entry (Wine 9.0 NtGdiDdDDIEscape: STATUS_NO_MEMORY)").emit();
     return ST_NO_MEMORY;
 }
+FNVNX_EXPORT("gdi32.dll", "D3DKMTEscape", D3DKMTEscape, "func");

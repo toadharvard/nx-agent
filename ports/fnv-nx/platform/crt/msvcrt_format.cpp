@@ -875,7 +875,7 @@ extern "C" int fnvnx_msvc_scan_words(const char *in, const char *fmt, const uint
     return scan_impl(in, fmt, a);
 }
 
-FNVNX_EXPORT("msvcrt.dll", "sprintf", fnvnx_msvcrt_va_sprintf, "func");   /* the varargs export is its forwarder (bridgefacts/crt/msvcrt_va.tsv) */
+/* the varargs export is its forwarder (bridgefacts/crt/msvcrt_va.tsv) */
 extern "C" int fnvnx_msvcrt_va_sprintf(char *dst, const char *fmt, const uint32_t *args)
 {
     if (!dst || !fmt) {
@@ -887,7 +887,7 @@ extern "C" int fnvnx_msvcrt_va_sprintf(char *dst, const char *fmt, const uint32_
         dst[r] = 0;
     return r;
 }
-FNVNX_EXPORT("msvcrt.dll", "_vsnprintf", fnvnx_msvcrt_va_vsnprintf, "func");
+FNVNX_EXPORT("msvcrt.dll", "sprintf", fnvnx_msvcrt_va_sprintf, "func");   
 extern "C" int fnvnx_msvcrt_va_vsnprintf(char *dst, size_t count, const char *fmt, const uint32_t *args)
 {
     if (!fmt || (!dst && count)) {
@@ -896,18 +896,20 @@ extern "C" int fnvnx_msvcrt_va_vsnprintf(char *dst, size_t count, const char *fm
     }
     return fnvnx_msvc_bound(dst, count, fnvnx_msvc_format_words(dst, count, fmt, args));
 }
-FNVNX_EXPORT("msvcrt.dll", "_snprintf", fnvnx_msvcrt_va_snprintf, "func");   /* the varargs export is its forwarder (bridgefacts/crt/msvcrt_va.tsv) */
+FNVNX_EXPORT("msvcrt.dll", "_vsnprintf", fnvnx_msvcrt_va_vsnprintf, "func");
+/* the varargs export is its forwarder (bridgefacts/crt/msvcrt_va.tsv) */
 extern "C" int fnvnx_msvcrt_va_snprintf(char *dst, size_t count, const char *fmt, const uint32_t *args)
 {
     return fnvnx_msvcrt_va_vsnprintf(dst, count, fmt, args);
 }
-FNVNX_EXPORT("msvcrt.dll", "sscanf", fnvnx_msvcrt_va_sscanf, "func");   /* the varargs export is its forwarder (bridgefacts/crt/msvcrt_va.tsv) */
+FNVNX_EXPORT("msvcrt.dll", "_snprintf", fnvnx_msvcrt_va_snprintf, "func");   
+/* the varargs export is its forwarder (bridgefacts/crt/msvcrt_va.tsv) */
 extern "C" int fnvnx_msvcrt_va_sscanf(const char *src, const char *fmt, const uint32_t *args)
 {
     return fnvnx_msvc_scan_words(src, fmt, args);
 }
+FNVNX_EXPORT("msvcrt.dll", "sscanf", fnvnx_msvcrt_va_sscanf, "func");   
 
-FNVNX_EXPORT("msvcrt.dll", "strtod", fnvnx_msvc_strtod, "func");
 /* strtod: leading white space, then the longest decimal float prefix; ERANGE on overflow and on a nonzero value
  * that rounds to 0 */
 extern "C" double fnvnx_msvc_strtod(const char *s, char **end)
@@ -929,3 +931,4 @@ extern "C" double fnvnx_msvc_strtod(const char *s, char **end)
         *end = (char *)p + l;
     return r;
 }
+FNVNX_EXPORT("msvcrt.dll", "strtod", fnvnx_msvc_strtod, "func");

@@ -144,7 +144,6 @@ extern "C" int fnvnx_module_load_count(HMODULE h)
     return n;
 }
 
-FNVNX_EXPORT("kernel32.dll", "GetModuleHandleA", GetModuleHandleA, "func");
 extern "C" HMODULE GetModuleHandleA(LPCSTR name)
 {
     if (!name)
@@ -154,8 +153,8 @@ extern "C" HMODULE GetModuleHandleA(LPCSTR name)
         SetLastError(ERROR_MOD_NOT_FOUND);
     return h;
 }
+FNVNX_EXPORT("kernel32.dll", "GetModuleHandleA", GetModuleHandleA, "func");
 
-FNVNX_EXPORT("kernel32.dll", "LoadLibraryA", LoadLibraryA, "func");
 extern "C" HMODULE LoadLibraryA(LPCSTR name)
 {
     if (!name) {
@@ -207,10 +206,10 @@ extern "C" HMODULE LoadLibraryA(LPCSTR name)
     }
     return h;
 }
+FNVNX_EXPORT("kernel32.dll", "LoadLibraryA", LoadLibraryA, "func");
 
 extern "C" void fnvnx_resource_register_image(HMODULE m, const void *base, size_t size);   /* resource.cpp */
 
-FNVNX_EXPORT("kernel32.dll", "FreeLibrary", FreeLibrary, "func");
 /* FreeLibrary. A reference is dropped; the platform's own count of a translated image (refs - 1: the extra one is the
  * loader's registration) reaching 0 hands the module to the loader (fnvnx_bnd_module_unload), whose rule is that of the
  * Windows loader: UNLOADED removes the image from the module table and its pages from the page map, KEPT leaves it
@@ -262,8 +261,8 @@ extern "C" BOOL FreeLibrary(HMODULE h)
     }
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "FreeLibrary", FreeLibrary, "func");
 
-FNVNX_EXPORT("kernel32.dll", "DisableThreadLibraryCalls", DisableThreadLibraryCalls, "func");
 /* The exe and the platform's own modules have no per-thread notifications to suppress: the handle is only validated. A
  * translated module (a registered image) is told to the loader (fnvnx_bnd_disable_thread_calls). */
 extern "C" BOOL DisableThreadLibraryCalls(HMODULE h)
@@ -286,6 +285,7 @@ extern "C" BOOL DisableThreadLibraryCalls(HMODULE h)
     }
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "DisableThreadLibraryCalls", DisableThreadLibraryCalls, "func");
 
 /* ---- the PE export directory of a registered image, read from memory (every offset bounds-checked against the
  * image: a malformed directory is "not found"). 0: found (*rva = the export's address, or *fwd = its forwarder string,
@@ -429,8 +429,8 @@ static FARPROC proc_address(HMODULE h, LPCSTR proc, int depth)
     return f;
 }
 
-FNVNX_EXPORT("kernel32.dll", "GetProcAddress", GetProcAddress, "func");
 extern "C" FARPROC GetProcAddress(HMODULE h, LPCSTR proc) { return proc_address(h, proc, 0); }
+FNVNX_EXPORT("kernel32.dll", "GetProcAddress", GetProcAddress, "func");
 
 /* ---- images (fnvnx_win32_ext.h) */
 extern "C" HMODULE fnvnx_win32_exe_module(void) { return (HMODULE)(uintptr_t)g_exe_base; }
@@ -517,7 +517,6 @@ extern "C" void fnvnx_win32_register_image(const char *name, uint32_t base, uint
     note_sections(base, size);
 }
 
-FNVNX_EXPORT("kernel32.dll", "GetModuleFileNameA", GetModuleFileNameA, "func");
 extern "C" DWORD GetModuleFileNameA(HMODULE h, LPSTR buf, DWORD n)
 {
     n = W32_DW(n);
@@ -548,6 +547,7 @@ extern "C" DWORD GetModuleFileNameA(HMODULE h, LPSTR buf, DWORD n)
     memcpy(buf, path, len + 1);
     return len;
 }
+FNVNX_EXPORT("kernel32.dll", "GetModuleFileNameA", GetModuleFileNameA, "func");
 
 /* ---- command line */
 static char *g_cmdline_a;
@@ -585,23 +585,22 @@ extern "C" void fnvnx_set_command_line(int argc, char **argv)
             g_cmdline_w[i] = (WCHAR)(unsigned char)s[i]; /* the command line is ASCII here */
 }
 
-FNVNX_EXPORT("kernel32.dll", "GetCommandLineA", GetCommandLineA, "func");
 extern "C" LPSTR GetCommandLineA(void)
 {
     if (!g_cmdline_a)
         fnvnx_set_command_line(0, NULL);
     return g_cmdline_a;
 }
+FNVNX_EXPORT("kernel32.dll", "GetCommandLineA", GetCommandLineA, "func");
 
-FNVNX_EXPORT("kernel32.dll", "GetCommandLineW", GetCommandLineW, "func");
 extern "C" LPWSTR GetCommandLineW(void)
 {
     if (!g_cmdline_w)
         fnvnx_set_command_line(0, NULL);
     return g_cmdline_w;
 }
+FNVNX_EXPORT("kernel32.dll", "GetCommandLineW", GetCommandLineW, "func");
 
-FNVNX_EXPORT("shell32.dll", "CommandLineToArgvW", CommandLineToArgvW, "func");
 /* CommandLineToArgvW: the shell32 rules. argv[0] ends at the next space or closing quote (no escapes); then
  * 2n backslashes + quote -> n backslashes and a quote toggles quoting; 2n+1 backslashes + quote -> n
  * backslashes and a literal quote; "" inside quotes -> literal quote. One LocalAlloc block, freed by LocalFree. */
@@ -691,8 +690,8 @@ extern "C" LPWSTR *CommandLineToArgvW(LPCWSTR cmd, int *argc)
     *argc = n;
     return argv;
 }
+FNVNX_EXPORT("shell32.dll", "CommandLineToArgvW", CommandLineToArgvW, "func");
 
-FNVNX_EXPORT("kernel32.dll", "ExitProcess", ExitProcess, "func");
 /* ---- process */
 extern "C" void ExitProcess(UINT code)
 {
@@ -704,17 +703,17 @@ extern "C" void ExitProcess(UINT code)
     fnvnx_plat_flush();      /* the platform lane's counts and summary, when it is on */
     os_exit_process((int)code);
 }
+FNVNX_EXPORT("kernel32.dll", "ExitProcess", ExitProcess, "func");
 FNVNX_CITE(ExitProcess, "dm:2");
 
-FNVNX_EXPORT("kernel32.dll", "OutputDebugStringA", OutputDebugStringA, "func");
 extern "C" void OutputDebugStringA(LPCSTR s)
 {
     if (s)
         os_debug_print(s);
 }
+FNVNX_EXPORT("kernel32.dll", "OutputDebugStringA", OutputDebugStringA, "func");
 
 
-FNVNX_EXPORT("kernel32.dll", "FatalAppExitA", FatalAppExitA, "func");
 /* FatalAppExitA: Wine 9.0 dlls/kernelbase/debug.c FatalAppExitA, as it is there: user32's MessageBoxA when the module and the export exist
  * (MB_SYSTEMMODAL | MB_OK, no caption, the action argument unused), else the text goes to the log (Wine's ERR), then RtlExitUserProcess(1) = ExitProcess(1). */
 extern "C" void FatalAppExitA(UINT action, LPCSTR msg)
@@ -731,18 +730,18 @@ extern "C" void FatalAppExitA(UINT action, LPCSTR msg)
         W32Log().s("err: ").s(msg ? msg : "(null)").emit();
     ExitProcess(1);
 }
+FNVNX_EXPORT("kernel32.dll", "FatalAppExitA", FatalAppExitA, "func");
 FNVNX_CITE(FatalAppExitA, "dm:11");
 
-FNVNX_EXPORT("kernel32.dll", "IsBadCodePtr", IsBadCodePtr, "func");
 /* answered from the page map for every byte of the range; a guard page makes the probe fail and consumes the guard
  * (the probe's own access is the first one). IsBadCodePtr probes one byte for read, as Windows does. */
 extern "C" BOOL IsBadCodePtr(FARPROC p) { return !w32_vm_probe((const void *)p, 1, 8); }
-FNVNX_EXPORT("kernel32.dll", "IsBadReadPtr", IsBadReadPtr, "func");
+FNVNX_EXPORT("kernel32.dll", "IsBadCodePtr", IsBadCodePtr, "func");
 extern "C" BOOL IsBadReadPtr(const void *p, UINT_PTR n) { return !w32_vm_probe(p, (size_t)n, 0); }
-FNVNX_EXPORT("kernel32.dll", "IsBadWritePtr", IsBadWritePtr, "func");
+FNVNX_EXPORT("kernel32.dll", "IsBadReadPtr", IsBadReadPtr, "func");
 extern "C" BOOL IsBadWritePtr(LPVOID p, UINT_PTR n) { return !w32_vm_probe(p, (size_t)n, 1); }
+FNVNX_EXPORT("kernel32.dll", "IsBadWritePtr", IsBadWritePtr, "func");
 
-FNVNX_EXPORT("kernel32.dll", "GetComputerNameA", GetComputerNameA, "func");
 extern "C" BOOL GetComputerNameA(LPSTR buf, LPDWORD n)
 {
     static const char name[] = "SWITCH";
@@ -756,6 +755,7 @@ extern "C" BOOL GetComputerNameA(LPSTR buf, LPDWORD n)
     *n = sizeof name - 1;
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "GetComputerNameA", GetComputerNameA, "func");
 
 /* GetEnvironmentVariableA: crt_kernel32.cpp, next to the environment block it reads */
 
@@ -1169,7 +1169,6 @@ DWORD fm_find_system(DWORD lang, DWORD id, char *out, size_t n)
 
 static DWORD fm_message(DWORD, LPCVOID, DWORD, DWORD, LPSTR, DWORD, void *, char *, char *, char *, char *, unsigned long);
 
-FNVNX_EXPORT("kernel32.dll", "FormatMessageA", FormatMessageA, "func");
 extern "C" DWORD FormatMessageA(DWORD flags, LPCVOID src, DWORD id, DWORD lang, LPSTR buf, DWORD n, void *args)
 {
     flags = W32_DW(flags);
@@ -1200,6 +1199,7 @@ extern "C" DWORD FormatMessageA(DWORD flags, LPCVOID src, DWORD id, DWORD lang, 
     free(wk);
     return ret;
 }
+FNVNX_EXPORT("kernel32.dll", "FormatMessageA", FormatMessageA, "func");
 
 static DWORD fm_message(DWORD flags, LPCVOID src, DWORD id, DWORD lang, LPSTR buf, DWORD n, void *args, char *text, char *out, char *tmp, char *conv, unsigned long width)
 {
@@ -1266,14 +1266,13 @@ static DWORD fm_message(DWORD flags, LPCVOID src, DWORD id, DWORD lang, LPSTR bu
     return len;
 }
 
+extern "C" LPSTR lstrcpyA(LPSTR d, LPCSTR s) { return d && s ? strcpy(d, s) : NULL; }
 FNVNX_EXPORT("kernel32.dll", "lstrcpyA", lstrcpyA, "func");
 FNVNX_EXPORT("kernel32.dll", "lstrcpy", lstrcpyA, "func");
-extern "C" LPSTR lstrcpyA(LPSTR d, LPCSTR s) { return d && s ? strcpy(d, s) : NULL; }
-FNVNX_EXPORT("kernel32.dll", "lstrcatA", lstrcatA, "func");
 extern "C" LPSTR lstrcatA(LPSTR d, LPCSTR s) { return d && s ? strcat(d, s) : NULL; }
-FNVNX_EXPORT("kernel32.dll", "lstrlenA", lstrlenA, "func");
+FNVNX_EXPORT("kernel32.dll", "lstrcatA", lstrcatA, "func");
 extern "C" int lstrlenA(LPCSTR s) { return s ? (int)strlen(s) : 0; }
-FNVNX_EXPORT("kernel32.dll", "lstrcmpiA", lstrcmpiA, "func");
+FNVNX_EXPORT("kernel32.dll", "lstrlenA", lstrlenA, "func");
 /* lstrcmpiA: the locale comparison CompareStringA(LOCALE_USER_DEFAULT, NORM_IGNORECASE) with word sort, minus 2
  * (less -1, equal 0, greater 1); a NULL string sorts before any string, two NULLs are equal */
 extern "C" int CompareStringA(LCID, DWORD, LPCSTR, int, LPCSTR, int);   /* nls.cpp */
@@ -1283,4 +1282,5 @@ extern "C" int lstrcmpiA(LPCSTR a, LPCSTR b)
         return a == b ? 0 : !a ? -1 : 1;
     return CompareStringA(0x0400 /* LOCALE_USER_DEFAULT */, 0x00000001 /* NORM_IGNORECASE */, a, -1, b, -1) - 2;
 }
+FNVNX_EXPORT("kernel32.dll", "lstrcmpiA", lstrcmpiA, "func");
 

@@ -44,14 +44,14 @@ static void self_release(void)
     g_self_live = 0;
 }
 
-FNVNX_EXPORT("kernel32.dll", "GetLastError", GetLastError, "func");
 extern "C" DWORD GetLastError(void) { return w32_self()->last_error; }
-FNVNX_EXPORT("kernel32.dll", "SetLastError", SetLastError, "func");
+FNVNX_EXPORT("kernel32.dll", "GetLastError", GetLastError, "func");
 extern "C" void SetLastError(DWORD e) { w32_self()->last_error = e; }
-FNVNX_EXPORT("kernel32.dll", "GetCurrentThreadId", GetCurrentThreadId, "func");
+FNVNX_EXPORT("kernel32.dll", "SetLastError", SetLastError, "func");
 extern "C" DWORD GetCurrentThreadId(void) { return w32_self()->tid; }
-FNVNX_EXPORT("kernel32.dll", "GetCurrentProcessId", GetCurrentProcessId, "func");
+FNVNX_EXPORT("kernel32.dll", "GetCurrentThreadId", GetCurrentThreadId, "func");
 extern "C" DWORD GetCurrentProcessId(void) { return os_process_id(); }
+FNVNX_EXPORT("kernel32.dll", "GetCurrentProcessId", GetCurrentProcessId, "func");
 
 /* ---- TlsAlloc: a global bitmap of 1088 slots, values in the per-thread block.
  * Zero-initialisation in every thread without stopping any: each slot has a global generation, bumped by every
@@ -91,7 +91,6 @@ static void **tls_cell(struct w32_thread *t, DWORD i, bool create)
     return cell;
 }
 
-FNVNX_EXPORT("kernel32.dll", "TlsAlloc", TlsAlloc, "func");
 extern "C" DWORD TlsAlloc(void)
 {
     os_lock(&g_tls_lock);
@@ -106,8 +105,8 @@ extern "C" DWORD TlsAlloc(void)
     SetLastError(ERROR_NOT_ENOUGH_MEMORY);
     return TLS_OUT_OF_INDEXES_;
 }
+FNVNX_EXPORT("kernel32.dll", "TlsAlloc", TlsAlloc, "func");
 
-FNVNX_EXPORT("kernel32.dll", "TlsFree", TlsFree, "func");
 extern "C" BOOL TlsFree(DWORD i)
 {
     bool was_used = false;
@@ -123,8 +122,8 @@ extern "C" BOOL TlsFree(DWORD i)
     }
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "TlsFree", TlsFree, "func");
 
-FNVNX_EXPORT("kernel32.dll", "TlsGetValue", TlsGetValue, "func");
 extern "C" LPVOID TlsGetValue(DWORD i)
 {
     struct w32_thread *t = w32_self();
@@ -138,8 +137,8 @@ extern "C" LPVOID TlsGetValue(DWORD i)
     void **cell = tls_cell(t, i, false);
     return cell ? *cell : NULL;
 }
+FNVNX_EXPORT("kernel32.dll", "TlsGetValue", TlsGetValue, "func");
 
-FNVNX_EXPORT("kernel32.dll", "TlsSetValue", TlsSetValue, "func");
 extern "C" BOOL TlsSetValue(DWORD i, LPVOID v)
 {
     struct w32_thread *t = w32_self();
@@ -155,6 +154,7 @@ extern "C" BOOL TlsSetValue(DWORD i, LPVOID v)
     *cell = v;
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "TlsSetValue", TlsSetValue, "func");
 
 /* ---- implicit TLS of the image: __declspec(thread) data of FalloutNV.exe is reached as
  * ((char**)__readfsdword(0x2c))[_tls_index] + offset. The loader (S3) passes the .tls template; every thread
@@ -337,7 +337,6 @@ static void thread_trampoline(void *p)
     self_release();
 }
 
-FNVNX_EXPORT("kernel32.dll", "CreateThread", CreateThread, "func");
 extern "C" HANDLE CreateThread(void *sa, SIZE_T stack, LPTHREAD_START_ROUTINE fn, LPVOID arg, DWORD flags,
                                LPDWORD tid_out)
 {
@@ -401,6 +400,7 @@ extern "C" HANDLE CreateThread(void *sa, SIZE_T stack, LPTHREAD_START_ROUTINE fn
     }
     return w32_handle_open(&t->o);
 }
+FNVNX_EXPORT("kernel32.dll", "CreateThread", CreateThread, "func");
 
 /* handle -> thread object. NULL with *bad == 0: the pseudo handle of a thread CreateThread did not start (the
  * main thread); NULL with *bad == 1: invalid handle (ERROR_INVALID_HANDLE set) */
@@ -419,7 +419,6 @@ static struct w32_thread_obj *thread_of(HANDLE h)
     return thread_resolve(h, &bad);
 }
 
-FNVNX_EXPORT("kernel32.dll", "ResumeThread", ResumeThread, "func");
 extern "C" DWORD ResumeThread(HANDLE h)
 {
     int bad;
@@ -444,8 +443,8 @@ extern "C" DWORD ResumeThread(HANDLE h)
     }
     return (DWORD)prev;
 }
+FNVNX_EXPORT("kernel32.dll", "ResumeThread", ResumeThread, "func");
 
-FNVNX_EXPORT("kernel32.dll", "SuspendThread", SuspendThread, "func");
 extern "C" DWORD SuspendThread(HANDLE h)
 {
     int bad;
@@ -471,8 +470,8 @@ extern "C" DWORD SuspendThread(HANDLE h)
     }
     return (DWORD)prev;
 }
+FNVNX_EXPORT("kernel32.dll", "SuspendThread", SuspendThread, "func");
 
-FNVNX_EXPORT("kernel32.dll", "GetExitCodeThread", GetExitCodeThread, "func");
 extern "C" BOOL GetExitCodeThread(HANDLE h, LPDWORD code)
 {
     int bad;
@@ -492,8 +491,8 @@ extern "C" BOOL GetExitCodeThread(HANDLE h, LPDWORD code)
     os_unlock(&w32_wait_lock);
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "GetExitCodeThread", GetExitCodeThread, "func");
 
-FNVNX_EXPORT("kernel32.dll", "ExitThread", ExitThread, "func");
 extern "C" void ExitThread(DWORD code)
 {
     struct w32_thread *self = w32_self();
@@ -512,13 +511,13 @@ extern "C" void ExitThread(DWORD code)
     }
     os_thread_exit();
 }
+FNVNX_EXPORT("kernel32.dll", "ExitThread", ExitThread, "func");
 FNVNX_CITE(ExitThread, "dm:7");
 
 /* priority/ideal processor of threads CreateThread did not start (per host thread) */
 static __thread int g_main_prio;
 static __thread int g_main_cpu = -1;
 
-FNVNX_EXPORT("kernel32.dll", "SetThreadPriority", SetThreadPriority, "func");
 extern "C" BOOL SetThreadPriority(HANDLE h, int prio)
 {
     int bad;
@@ -539,8 +538,8 @@ extern "C" BOOL SetThreadPriority(HANDLE h, int prio)
         g_main_prio = prio;
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "SetThreadPriority", SetThreadPriority, "func");
 
-FNVNX_EXPORT("kernel32.dll", "GetThreadPriority", GetThreadPriority, "func");
 extern "C" int GetThreadPriority(HANDLE h)
 {
     int bad;
@@ -549,16 +548,16 @@ extern "C" int GetThreadPriority(HANDLE h)
         return 0x7FFFFFFF;   /* THREAD_PRIORITY_ERROR_RETURN */
     return t ? t->prio : g_main_prio;
 }
+FNVNX_EXPORT("kernel32.dll", "GetThreadPriority", GetThreadPriority, "func");
 
-FNVNX_EXPORT("kernel32.dll", "SetThreadPriorityBoost", SetThreadPriorityBoost, "func");
 extern "C" BOOL SetThreadPriorityBoost(HANDLE h, BOOL disable)
 {
     W32_UNUSED(h);
     W32_UNUSED(disable);
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "SetThreadPriorityBoost", SetThreadPriorityBoost, "func");
 
-FNVNX_EXPORT("kernel32.dll", "SetThreadAffinityMask", SetThreadAffinityMask, "func");
 extern "C" DWORD_PTR SetThreadAffinityMask(HANDLE h, DWORD_PTR mask)
 {
     DWORD_PTR all = os_cpu_mask();
@@ -572,8 +571,8 @@ extern "C" DWORD_PTR SetThreadAffinityMask(HANDLE h, DWORD_PTR mask)
         return 0;
     return all; /* previous mask: "all" */
 }
+FNVNX_EXPORT("kernel32.dll", "SetThreadAffinityMask", SetThreadAffinityMask, "func");
 
-FNVNX_EXPORT("kernel32.dll", "SetThreadIdealProcessor", SetThreadIdealProcessor, "func");
 extern "C" DWORD SetThreadIdealProcessor(HANDLE h, DWORD cpu)
 {
     int bad;
@@ -595,8 +594,8 @@ extern "C" DWORD SetThreadIdealProcessor(HANDLE h, DWORD cpu)
     os_thread_set_affinity(t ? t->os : NULL, (int)cpu, 0); /* a preference: the mask stays */
     return prev;
 }
+FNVNX_EXPORT("kernel32.dll", "SetThreadIdealProcessor", SetThreadIdealProcessor, "func");
 
-FNVNX_EXPORT("kernel32.dll", "Sleep", Sleep, "func");
 extern "C" void Sleep(DWORD ms)
 {
     ms = W32_DW(ms);
@@ -606,21 +605,22 @@ extern "C" void Sleep(DWORD ms)
     else
         clk_sleep_ns((uint64_t)ms * 1000000ull);   /* Sleep(0) yields; the virtual clock advances by ms (0: one quantum) */
 }
+FNVNX_EXPORT("kernel32.dll", "Sleep", Sleep, "func");
 
-FNVNX_EXPORT("kernel32.dll", "SleepEx", SleepEx, "func");
 extern "C" DWORD SleepEx(DWORD ms, BOOL alertable)
 {
     W32_UNUSED(alertable);
     Sleep(ms);
     return 0;
 }
+FNVNX_EXPORT("kernel32.dll", "SleepEx", SleepEx, "func");
 
-FNVNX_EXPORT("kernel32.dll", "SwitchToThread", SwitchToThread, "func");
 extern "C" BOOL SwitchToThread(void)
 {
     os_yield();
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "SwitchToThread", SwitchToThread, "func");
 
 /* Exceptions raised by platform code. The lifter runtime installs the SEH dispatcher over the guest's fs:[0]
  * chain as the backend. Without one no guest frame exists, so no handler does: the documented sequence of a
