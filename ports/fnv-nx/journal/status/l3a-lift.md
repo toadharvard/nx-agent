@@ -1908,3 +1908,6 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - The liftsrc loop is gone on w28's relift: 642 stage starts, 6m42s.
 - Blocker for every liftsrc and facts build: the platform root has 10 red cc stages (crt/iob.c __pioinfo/__badioinfo: export records before their declarations). It is pre-merge too (607880467). Owner L5, sent.
 - Density heads (w13): dens-b afff94d57, dens-r1 c3d5a6ada, dens-r12 a4ff69c1a, dens-r123p e6617eaaa. They wait for the platform fix.
+- Priority 1 (orchestrator, 09:10): lift/rt dispatch.c is red on the cand4/L5 line. It blocks loader, exports and bridgetable (L5) and the GPU test and boot (L4). On base3 4577ca607, lift/rt is green.
+  - Doing: w15 (session_01KmtZKUTz38RgDfhd7k1M1W, branch claude/fnv-l3a-lift-w15-rt off L5 w39 0a3f9b76) reproduces it, names the cause, and fixes it by rule. Cause and commit to follow.
+- base3 @4577ca607 (+296144c9a). Doing (w8): platform trees from L5 0a3f9b76, plus 687182c85 (include_of counts as a declaration).
