@@ -419,7 +419,6 @@ static int mb_decompose(const uint16_t *mb, const unsigned char *s, int n, WCHAR
     return dstlen - len;
 }
 
-FNVNX_EXPORT("kernel32.dll", "MultiByteToWideChar", MultiByteToWideChar, "func");
 extern "C" int MultiByteToWideChar(UINT cp, DWORD flags, LPCSTR src, int srclen, LPWSTR dst, int dstlen)
 {
     flags = W32_DW(flags);
@@ -472,6 +471,7 @@ extern "C" int MultiByteToWideChar(UINT cp, DWORD flags, LPCSTR src, int srclen,
         dst[i] = (WCHAR)mb[s[i]];
     return dstlen < srclen ? er(ERROR_INSUFFICIENT_BUFFER) : srclen;
 }
+FNVNX_EXPORT("kernel32.dll", "MultiByteToWideChar", MultiByteToWideChar, "func");
 
 /* ---- WideCharToMultiByte */
 static bool valid_map(const nls_cp *t, DWORD flags, unsigned wch, unsigned b)   /* b = the wide->multibyte entry */
@@ -485,7 +485,6 @@ static unsigned wc_entry(const nls_cp *t, unsigned wch)
     return t->wc[t->wcidx[wch >> 8] * 256 + (wch & 255)];
 }
 
-FNVNX_EXPORT("kernel32.dll", "WideCharToMultiByte", WideCharToMultiByte, "func");
 extern "C" int WideCharToMultiByte(UINT cp, DWORD flags, LPCWSTR src, int srclen, LPSTR dst, int dstlen,
                                    LPCSTR defchar, LPBOOL useddef)
 {
@@ -582,19 +581,19 @@ extern "C" int WideCharToMultiByte(UINT cp, DWORD flags, LPCWSTR src, int srclen
         return er(ERROR_INSUFFICIENT_BUFFER);
     return count;
 }
+FNVNX_EXPORT("kernel32.dll", "WideCharToMultiByte", WideCharToMultiByte, "func");
 
-FNVNX_EXPORT("kernel32.dll", "GetACP", GetACP, "func");
 extern "C" UINT GetACP(void) { return klocale_us[55]; }
-FNVNX_EXPORT("kernel32.dll", "GetOEMCP", GetOEMCP, "func");
+FNVNX_EXPORT("kernel32.dll", "GetACP", GetACP, "func");
 extern "C" UINT GetOEMCP(void) { return klocale_us[56]; }
-FNVNX_EXPORT("kernel32.dll", "IsValidCodePage", IsValidCodePage, "func");
+FNVNX_EXPORT("kernel32.dll", "GetOEMCP", GetOEMCP, "func");
 extern "C" BOOL IsValidCodePage(UINT cp)
 {
     cpi ci;
     return cp > 3 && cp_get(cp, &ci);
 }
+FNVNX_EXPORT("kernel32.dll", "IsValidCodePage", IsValidCodePage, "func");
 
-FNVNX_EXPORT("kernel32.dll", "GetCPInfo", GetCPInfo, "func");
 extern "C" BOOL GetCPInfo(UINT cp, LPCPINFO info)
 {
     cpi ci;
@@ -607,6 +606,7 @@ extern "C" BOOL GetCPInfo(UINT cp, LPCPINFO info)
     info->DefaultChar[1] = (BYTE)(def >> 8);
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "GetCPInfo", GetCPInfo, "func");
 
 /* ---- locales: the NLS_LOCALE_DATA record (164 words) of locale.nls and the string pool it points into */
 static const uint16_t *loc_rec(LCID lcid)
@@ -902,10 +902,9 @@ static int locale_info_w(LCID lcid, LCTYPE type, WCHAR *out, int cch)
     return get_locale_info(r, W32_DW(lcid), W32_DW(type), out, cch);
 }
 
-FNVNX_EXPORT("kernel32.dll", "GetLocaleInfoW", GetLocaleInfoW, "func");
 extern "C" int GetLocaleInfoW(LCID lcid, LCTYPE type, LPWSTR out, int cch) { return locale_info_w(lcid, type, out, cch); }
+FNVNX_EXPORT("kernel32.dll", "GetLocaleInfoW", GetLocaleInfoW, "func");
 
-FNVNX_EXPORT("kernel32.dll", "GetLocaleInfoA", GetLocaleInfoA, "func");
 extern "C" int GetLocaleInfoA(LCID lcid, LCTYPE type, LPSTR out, int cch)
 {
     DWORD ty = W32_DW(type);
@@ -930,15 +929,15 @@ extern "C" int GetLocaleInfoA(LCID lcid, LCTYPE type, LPSTR out, int cch)
     free(w);
     return ret;
 }
+FNVNX_EXPORT("kernel32.dll", "GetLocaleInfoA", GetLocaleInfoA, "func");
 
-FNVNX_EXPORT("kernel32.dll", "IsValidLocale", IsValidLocale, "func");
 extern "C" BOOL IsValidLocale(LCID lcid, DWORD flags)
 {
     unsigned l = (unsigned)W32_DW(lcid);
     return l != 0 && l != 0x400 && l != 0x800 && loc_rec(lcid) != NULL;
 }
+FNVNX_EXPORT("kernel32.dll", "IsValidLocale", IsValidLocale, "func");
 
-FNVNX_EXPORT("kernel32.dll", "EnumSystemLocalesA", EnumSystemLocalesA, "func");
 extern "C" BOOL EnumSystemLocalesA(LOCALE_ENUMPROCA proc, DWORD flags)
 {
     DWORD f = W32_DW(flags);
@@ -951,6 +950,7 @@ extern "C" BOOL EnumSystemLocalesA(LOCALE_ENUMPROCA proc, DWORD flags)
         proc(id);
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "EnumSystemLocalesA", EnumSystemLocalesA, "func");
 
 /* ---- GetDateFormatA / GetTimeFormatA: the picture-string grammar over the locale record's own strings
  * (short/long date, year-month, time format, day/month names, AM/PM markers) and the calendar's era name. Both
@@ -1211,19 +1211,18 @@ static int dt_format(LCID lcid, DWORD flags, bool date, const SYSTEMTIME *in, LP
     return ret;
 }
 
-FNVNX_EXPORT("kernel32.dll", "GetDateFormatA", GetDateFormatA, "func");
 extern "C" int GetDateFormatA(LCID lcid, DWORD flags, const SYSTEMTIME *date, LPCSTR fmt, LPSTR out, int cch)
 {
     return dt_format(lcid, W32_DW(flags), true, date, fmt, out, cch);
 }
+FNVNX_EXPORT("kernel32.dll", "GetDateFormatA", GetDateFormatA, "func");
 
-FNVNX_EXPORT("kernel32.dll", "GetTimeFormatA", GetTimeFormatA, "func");
 extern "C" int GetTimeFormatA(LCID lcid, DWORD flags, const SYSTEMTIME *time, LPCSTR fmt, LPSTR out, int cch)
 {
     return dt_format(lcid, W32_DW(flags), false, time, fmt, out, cch);
 }
+FNVNX_EXPORT("kernel32.dll", "GetTimeFormatA", GetTimeFormatA, "func");
 
-FNVNX_EXPORT("kernel32.dll", "GetStringTypeW", GetStringTypeW, "func");
 /* ---- character types */
 extern "C" BOOL GetStringTypeW(DWORD info, LPCWSTR src, int cch, LPWORD out)
 {
@@ -1236,8 +1235,8 @@ extern "C" BOOL GetStringTypeW(DWORD info, LPCWSTR src, int cch, LPWORD out)
         out[i] = (WORD)char_type(info, (uint16_t)src[i]);
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "GetStringTypeW", GetStringTypeW, "func");
 
-FNVNX_EXPORT("kernel32.dll", "GetStringTypeA", GetStringTypeA, "func");
 extern "C" BOOL GetStringTypeA(LCID lcid, DWORD info, LPCSTR src, int cch, LPWORD out)
 {
     if (!src)
@@ -1255,6 +1254,7 @@ extern "C" BOOL GetStringTypeA(LCID lcid, DWORD info, LPCSTR src, int cch, LPWOR
     free(w);
     return ret;
 }
+FNVNX_EXPORT("kernel32.dll", "GetStringTypeA", GetStringTypeA, "func");
 
 /* ---- collation: the sort-key construction of kernelbase for the default sort (no exception table, no compression
  * table: the weights are ksort_keys[c], expansions ksort_expansions, Hangul jamo ksort_jamo) */
@@ -1721,13 +1721,12 @@ static int compare_w(LCID lcid, DWORD f, const WCHAR *a, int na, const WCHAR *b,
     return r < 0 ? 1 : r > 0 ? 3 : 2;
 }
 
-FNVNX_EXPORT("kernel32.dll", "CompareStringW", CompareStringW, "func");
 extern "C" int CompareStringW(LCID lcid, DWORD flags, LPCWSTR a, int na, LPCWSTR b, int nb)
 {
     return compare_w(lcid, W32_DW(flags), a, na, b, nb);
 }
+FNVNX_EXPORT("kernel32.dll", "CompareStringW", CompareStringW, "func");
 
-FNVNX_EXPORT("kernel32.dll", "CompareStringA", CompareStringA, "func");
 extern "C" int CompareStringA(LCID lcid, DWORD flags, LPCSTR a, int na, LPCSTR b, int nb)
 {
     DWORD f = W32_DW(flags);
@@ -1755,6 +1754,7 @@ extern "C" int CompareStringA(LCID lcid, DWORD flags, LPCSTR a, int na, LPCSTR b
     free(wb);
     return ret;
 }
+FNVNX_EXPORT("kernel32.dll", "CompareStringA", CompareStringA, "func");
 
 /* ---- LCMapString (kernelbase's lcmap_string) */
 static int map_ignored(DWORD fl, const WCHAR *s, int n, WCHAR *d, int dstlen)   /* NORM_IGNORENONSPACE / IGNORESYMBOLS */
@@ -1934,13 +1934,12 @@ static int lcmap_w(LCID lcid, DWORD f, const WCHAR *src, int n, void *dst, int d
     return lcmap_string(f, src, n, (WCHAR *)dst, dstlen);
 }
 
-FNVNX_EXPORT("kernel32.dll", "LCMapStringW", LCMapStringW, "func");
 extern "C" int LCMapStringW(LCID lcid, DWORD flags, LPCWSTR src, int srclen, LPWSTR dst, int dstlen)
 {
     return lcmap_w(lcid, W32_DW(flags), src, srclen, dst, dstlen);
 }
+FNVNX_EXPORT("kernel32.dll", "LCMapStringW", LCMapStringW, "func");
 
-FNVNX_EXPORT("kernel32.dll", "LCMapStringA", LCMapStringA, "func");
 extern "C" int LCMapStringA(LCID lcid, DWORD flags, LPCSTR src, int srclen, LPSTR dst, int dstlen)
 {
     DWORD f = W32_DW(flags);
@@ -1971,3 +1970,4 @@ extern "C" int LCMapStringA(LCID lcid, DWORD flags, LPCSTR src, int srclen, LPST
     free(ws);
     return ret;
 }
+FNVNX_EXPORT("kernel32.dll", "LCMapStringA", LCMapStringA, "func");

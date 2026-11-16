@@ -21,16 +21,15 @@ static UINT dir_out(const char *d, LPSTR buf, UINT n)
     return len;
 }
 
-FNVNX_EXPORT("kernel32.dll", "GetSystemDirectoryA", GetSystemDirectoryA, "func");
 extern "C" UINT GetSystemDirectoryA(LPSTR buf, UINT n) { return dir_out(W32_SYS_DIR, buf, n); }
-FNVNX_EXPORT("kernel32.dll", "GetWindowsDirectoryA", GetWindowsDirectoryA, "func");
+FNVNX_EXPORT("kernel32.dll", "GetSystemDirectoryA", GetSystemDirectoryA, "func");
 extern "C" UINT GetWindowsDirectoryA(LPSTR buf, UINT n) { return dir_out(W32_WIN_DIR, buf, n); }
+FNVNX_EXPORT("kernel32.dll", "GetWindowsDirectoryA", GetWindowsDirectoryA, "func");
 
 /* ---- version: the declared OS (declared/os.json) */
 struct w32_osvi { DWORD dwOSVersionInfoSize, dwMajorVersion, dwMinorVersion, dwBuildNumber, dwPlatformId; char szCSDVersion[128]; };
 struct w32_osviex { w32_osvi b; WORD wServicePackMajor, wServicePackMinor, wSuiteMask; BYTE wProductType, wReserved; };
 
-FNVNX_EXPORT("kernel32.dll", "GetVersionExA", GetVersionExA, "func");
 extern "C" BOOL GetVersionExA(void *p)
 {
     if (!p) {
@@ -59,10 +58,11 @@ extern "C" BOOL GetVersionExA(void *p)
     }
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "GetVersionExA", GetVersionExA, "func");
 
-FNVNX_EXPORT("kernel32.dll", "GetVersion", GetVersion, "func");
 /* low byte major, next byte minor, high word the build (the high bit clear: NT platform) */
 extern "C" DWORD GetVersion(void) { return (DWORD)(FNVNX_OS_MAJOR | (FNVNX_OS_MINOR << 8) | ((DWORD)FNVNX_OS_BUILD << 16)); }
+FNVNX_EXPORT("kernel32.dll", "GetVersion", GetVersion, "func");
 
 /* ---- processor features: the reference CPU's table (indices of the PF_* constants); everything else is absent.
  * Present: PF_COMPARE_EXCHANGE_DOUBLE 2, PF_MMX_INSTRUCTIONS_AVAILABLE 3, PF_XMMI_INSTRUCTIONS_AVAILABLE 6,
@@ -71,22 +71,21 @@ extern "C" const unsigned char fnvnx_pf_table[64] = {
     0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1,
 };
 
-FNVNX_EXPORT("kernel32.dll", "IsProcessorFeaturePresent", IsProcessorFeaturePresent, "func");
 extern "C" BOOL IsProcessorFeaturePresent(DWORD f)
 {
     f = W32_DW(f);
     return f < 64 && fnvnx_pf_table[f] ? TRUE : FALSE;
 }
+FNVNX_EXPORT("kernel32.dll", "IsProcessorFeaturePresent", IsProcessorFeaturePresent, "func");
 
 /* ---- error mode: process-wide */
 static UINT g_error_mode;
-FNVNX_EXPORT("kernel32.dll", "SetErrorMode", SetErrorMode, "func");
 extern "C" UINT SetErrorMode(UINT mode)
 {
     return (UINT)__atomic_exchange_n(&g_error_mode, (UINT)W32_DW(mode), __ATOMIC_SEQ_CST);
 }
+FNVNX_EXPORT("kernel32.dll", "SetErrorMode", SetErrorMode, "func");
 
-FNVNX_EXPORT("kernel32.dll", "IsDBCSLeadByte", IsDBCSLeadByte, "func");
 /* ---- DBCS: a byte is a lead byte when it lies in a LeadByte range of the ANSI code page's CPINFO */
 extern "C" BOOL IsDBCSLeadByte(BYTE c)
 {
@@ -99,6 +98,7 @@ extern "C" BOOL IsDBCSLeadByte(BYTE c)
             return TRUE;
     return FALSE;
 }
+FNVNX_EXPORT("kernel32.dll", "IsDBCSLeadByte", IsDBCSLeadByte, "func");
 
 /* ---- ExpandEnvironmentStringsA: each %NAME% naming a variable of the block becomes its value; a pair whose name is
  * empty or not defined, and a '%' with no closing one, stay as written. The result is the size in characters,
@@ -123,7 +123,6 @@ static void xput(xbuf *b, const char *s, size_t n)
 }
 
 extern "C" DWORD GetEnvironmentVariableA(LPCSTR, LPSTR, DWORD);
-FNVNX_EXPORT("kernel32.dll", "ExpandEnvironmentStringsA", ExpandEnvironmentStringsA, "func");
 extern "C" DWORD ExpandEnvironmentStringsA(LPCSTR src, LPSTR dst, DWORD n)
 {
     n = W32_DW(n);
@@ -188,3 +187,4 @@ extern "C" DWORD ExpandEnvironmentStringsA(LPCSTR src, LPSTR dst, DWORD n)
     free(b.p);
     return need;
 }
+FNVNX_EXPORT("kernel32.dll", "ExpandEnvironmentStringsA", ExpandEnvironmentStringsA, "func");

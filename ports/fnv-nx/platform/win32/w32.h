@@ -86,6 +86,7 @@ void w32_mutexes_abandon_locked(DWORD tid);        /* a thread ended: its mutexe
 struct w32_thread_obj;
 int w32_thread_signaled(struct w32_obj *o);
 DWORD w32_thread_obj_tid(struct w32_obj *o);       /* the thread id of a W32_THREAD object */
+void w32_susp_point(void);                         /* thread.cpp, rule S: the calling thread parks here while its suspend count is above 0 (the exits of the wait core, Sleep) */
 
 /* ---- wait-graph watchdog (waitgraph.cpp; off unless fnvnx_waitgraph_start was called) */
 extern volatile int w32_wg_on;

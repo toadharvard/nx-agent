@@ -418,13 +418,12 @@ template <class F> auto guarded(F body, decltype(body()) failed) -> decltype(bod
 
 static BOOL write_string(LPCSTR sec, LPCSTR key, LPCSTR val, LPCSTR file);
 
-FNVNX_EXPORT("kernel32.dll", "GetPrivateProfileStringA", GetPrivateProfileStringA, "func");
 extern "C" DWORD GetPrivateProfileStringA(LPCSTR sec, LPCSTR key, LPCSTR def, LPSTR buf, DWORD size, LPCSTR file)
 {
     return guarded([&] { return get_string(sec, key, def, buf, size, file); }, (DWORD)0);
 }
+FNVNX_EXPORT("kernel32.dll", "GetPrivateProfileStringA", GetPrivateProfileStringA, "func");
 
-FNVNX_EXPORT("kernel32.dll", "GetPrivateProfileIntA", GetPrivateProfileIntA, "func");
 extern "C" UINT GetPrivateProfileIntA(LPCSTR sec, LPCSTR key, INT def, LPCSTR file)
 {
     char buf[30];
@@ -441,14 +440,14 @@ extern "C" UINT GetPrivateProfileIntA(LPCSTR sec, LPCSTR key, INT def, LPCSTR fi
         v = v * 10u + (uint32_t)(*p - '0');
     return (UINT)(neg ? 0u - v : v);
 }
+FNVNX_EXPORT("kernel32.dll", "GetPrivateProfileIntA", GetPrivateProfileIntA, "func");
 
-FNVNX_EXPORT("kernel32.dll", "GetPrivateProfileSectionNamesA", GetPrivateProfileSectionNamesA, "func");
 extern "C" DWORD GetPrivateProfileSectionNamesA(LPSTR buf, DWORD size, LPCSTR file)
 {
     return GetPrivateProfileStringA(NULL, NULL, NULL, buf, size, file);
 }
+FNVNX_EXPORT("kernel32.dll", "GetPrivateProfileSectionNamesA", GetPrivateProfileSectionNamesA, "func");
 
-FNVNX_EXPORT("kernel32.dll", "GetPrivateProfileSectionA", GetPrivateProfileSectionA, "func");
 extern "C" DWORD GetPrivateProfileSectionA(LPCSTR sec, LPSTR buf, DWORD size, LPCSTR file)
 {
     size = W32_DW(size);
@@ -466,6 +465,7 @@ extern "C" DWORD GetPrivateProfileSectionA(LPCSTR sec, LPSTR buf, DWORD size, LP
     return copy_list(items, buf, size);
     }, (DWORD)0);
 }
+FNVNX_EXPORT("kernel32.dll", "GetPrivateProfileSectionA", GetPrivateProfileSectionA, "func");
 
 static BOOL write_string(LPCSTR sec, LPCSTR key, LPCSTR val, LPCSTR file)
 {
@@ -527,13 +527,12 @@ static BOOL write_string(LPCSTR sec, LPCSTR key, LPCSTR val, LPCSTR file)
     return ok;
 }
 
-FNVNX_EXPORT("kernel32.dll", "WritePrivateProfileStringA", WritePrivateProfileStringA, "func");
 extern "C" BOOL WritePrivateProfileStringA(LPCSTR sec, LPCSTR key, LPCSTR val, LPCSTR file)
 {
     return guarded([&] { return write_string(sec, key, val, file); }, (BOOL)FALSE);
 }
+FNVNX_EXPORT("kernel32.dll", "WritePrivateProfileStringA", WritePrivateProfileStringA, "func");
 
-FNVNX_EXPORT("kernel32.dll", "WritePrivateProfileSectionA", WritePrivateProfileSectionA, "func");
 extern "C" BOOL WritePrivateProfileSectionA(LPCSTR sec, LPCSTR data, LPCSTR file)
 {
     /* data: "key=value\0key=value\0\0"; replaces the whole section; NULL deletes it */
@@ -557,3 +556,4 @@ extern "C" BOOL WritePrivateProfileSectionA(LPCSTR sec, LPCSTR data, LPCSTR file
     return TRUE;
     }, (BOOL)FALSE);
 }
+FNVNX_EXPORT("kernel32.dll", "WritePrivateProfileSectionA", WritePrivateProfileSectionA, "func");
