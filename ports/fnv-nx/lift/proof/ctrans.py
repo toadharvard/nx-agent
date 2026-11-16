@@ -962,6 +962,12 @@ def b_unary_fp(kind):
     return f
 
 
+def b_fabs(m, a, fr, raw):
+    """__builtin_fabs(x): the sign bit cleared (GCC manual "Other Builtins"); FABS (Arm ARM) raises nothing, an SNaN included"""
+    x = m.cast(a[0], F64, fr)
+    return V(x.e & z3.BitVecVal((1 << 63) - 1, 64), F64)
+
+
 def b_nan(m, a, fr, raw):
     """__builtin_nan(""): a quiet NaN with a zero payload: 0x7FF8000000000000 (GCC manual: 'Return a quiet NaN')"""
     return V(z3.BitVecVal(0x7FF8000000000000, 64), F64)
@@ -995,7 +1001,7 @@ def b_msr(reg):
 
 
 BUILTINS = {'__builtin_expect': b_expect, '__builtin_clzll': b_clzll, '__builtin_roundeven': b_unary_fp('roundeven'), '__builtin_floor': b_unary_fp('floor'),
-            '__builtin_ceil': b_unary_fp('ceil'), '__builtin_trunc': b_unary_fp('trunc'), '__builtin_sqrt': b_unary_fp('sqrt'), '__builtin_nan': b_nan,
+            '__builtin_ceil': b_unary_fp('ceil'), '__builtin_trunc': b_unary_fp('trunc'), '__builtin_sqrt': b_unary_fp('sqrt'), '__builtin_nan': b_nan, '__builtin_fabs': b_fabs,
             '__builtin_memcpy': b_memcpy,
             **{'__arm_mrs_' + r: b_mrs(r) for r in SYSREGS}, **{'__arm_msr_' + r: b_msr(r) for r in SYSREGS}}
 
