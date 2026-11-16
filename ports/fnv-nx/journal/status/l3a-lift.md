@@ -1725,3 +1725,6 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Doing (w7): the 2,664-key family split for L3b, then the move to path=form and the deletion of h_segshapes.
   - Blocked (L5): the initial gs selector in x86sys.
 - Unblocked (L5): initial gs = 0, x86sys.json at claude/fnv-l5-platform-w35 @4ec8cd2c1, from both 7601 kernels. Pinned until the L5 candidate merges.
+- L1 took universe.tsv as its one function set (w28 791dfc7e0 / f3632f357), with extent as the span.
+  - Doing (w7): publish the facts2 universe of all images in the span schema, with commit and tree_sha256, after the farm-2 exe run.
+  - This blocks L1's cand4 pin.
