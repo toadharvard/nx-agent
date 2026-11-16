@@ -16,14 +16,14 @@ def sdmrows_arg():
     return os.path.join(p, 'sdmrows.json') if os.path.isdir(p) else p
 
 
-def configure(sdmrows=None, udsail=None):
+def configure(sdmrows=None, udsail=None, seg=None):
     from fnvlift import inputs
     d = tempfile.mkdtemp(prefix='lifter-inputs-')
     open(d + '/universe.tsv', 'w').close(); open(d + '/depth.tsv', 'w').close()
     import json
     if udsail is None:
         udsail = d + '/udsail.tsv'; open(udsail, 'w').write('# fnvnx-udsail/2\n')      # no refused or undefined sequence in a buffer test
-    json.dump({'format': 'fnvnx-segwrites/2', 'images': {'buf': {n: {'guard': n == 'gs'} for n in ('es', 'ds', 'fs', 'gs')}}}, open(d + '/segwrites.json', 'w'))      # a buffer has no write site of a segment register
+    json.dump({'format': 'fnvnx-segwrites/2', 'images': {'buf': {**{n: {'guard': n == 'gs'} for n in ('es', 'ds', 'fs', 'gs')}, **(seg or {})}}}, open(d + '/segwrites.json', 'w'))      # seg: per-register overrides of the fact (`guard`, `selectors`)      # a buffer has no write site of a segment register
     inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=X86SYS, sdmrows=sdmrows or sdmrows_arg(), cpumodel=CPUMODEL, rcptab=RCPTAB, rcpcert=RCPCERT, udsail=udsail, segwrites=d + '/segwrites.json', image='buf')
     from fnvlift import core; from proof import lift_dsl, cpufeat; core.set_emit(lift_dsl.emit_form, cpufeat.missing)      # the proven Forms are the one path for the mnemonics they cover
 

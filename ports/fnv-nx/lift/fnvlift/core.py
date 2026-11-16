@@ -394,6 +394,17 @@ def may_null(i):
     return _SEGW[path][inputs.get('image')][n]['guard']
 
 
+def sel_set(n):
+    """the selectors the segment register `n` (es ds fs gs ss) can hold in the image being lifted: the sorted list of the SEGWRITES fact (tools/segwrites.py `selectors`), or None = unbounded (the field is absent
+    or null).  The facts are the one source: no byte is scanned here."""
+    import json
+    from . import inputs
+    path = inputs.get('segwrites')
+    if path not in _SEGW:
+        d = json.load(open(path)); assert d['format'] == 'fnvnx-segwrites/2', d['format']; _SEGW[path] = d['images']
+    return _SEGW[path][inputs.get('image')].get(n, {}).get('selectors')
+
+
 def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     from . import f_x87_ctl as xc, f_sys
     addr, size = lo, hi - lo
