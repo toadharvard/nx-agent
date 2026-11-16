@@ -140,6 +140,12 @@ _BIN = {Z.Z3_OP_BADD: "add", Z.Z3_OP_BSUB: "sub", Z.Z3_OP_BMUL: "mul", Z.Z3_OP_B
 MEM_VAR, EF_VARS = "x87_m", ("x87_ef0", "x87_ef1", "x87_ef2")
 
 
+def _simp(t):
+    """z3's simplifier on T, as a pure function of T's structure: z3 orders operands and picks between equal rewrites by AST ids, a counter of the context, so the same term simplified after other work gives another
+    shape.  A fresh context numbers its ASTs by the translation of T alone (a fixed traversal), so its simplifier's result depends on T only."""
+    return z3.simplify(t.translate(z3.Context())).translate(t.ctx)
+
+
 class Tr:
     """translates the z3 terms of one execute() run; ENV maps a z3 variable name to its DSL node (the DSL state inputs by their own names, the memory operand, the EFLAGS booleans)"""
 
@@ -196,15 +202,10 @@ class Tr:
         if k == Z.Z3_OP_FALSE:
             return C(0, 1)
         if k in _BIN:
-            r = bin_(_BIN[k], a(0), a(1))
-            for j in range(2, e.num_args()):      # z3's simplifier makes bvadd, bvmul, bvand, bvor and bvxor n-ary: left fold
-                r = bin_(_BIN[k], r, a(j))
-            return r
+            if _BIN[k] in dsl.COMM: return dsl.comm(_BIN[k], [a(j) for j in range(e.num_args())])      # z3's simplifier makes bvadd, bvmul, bvand, bvor and bvxor n-ary and orders the operands by its AST ids: canonical order by structure (dsl.comm)
+            return bin_(_BIN[k], a(0), a(1))
         if k in (Z.Z3_OP_AND, Z.Z3_OP_OR):
-            r = a(0)
-            for j in range(1, e.num_args()):
-                r = bin_("and" if k == Z.Z3_OP_AND else "or", r, a(j))
-            return r
+            return dsl.comm("and" if k == Z.Z3_OP_AND else "or", [a(j) for j in range(e.num_args())])
         if k == Z.Z3_OP_NOT:
             return mk("not", 1, (a(0),)) if e.arg(0).sort().kind() == Z.Z3_BOOL_SORT else ~a(0)
         if k == Z.Z3_OP_BNOT:
@@ -212,15 +213,11 @@ class Tr:
         if k == Z.Z3_OP_BNEG:
             return -a(0)
         if k == Z.Z3_OP_XOR:
-            r = a(0)
-            for j in range(1, e.num_args()):
-                r = r ^ a(j)
-            return r
+            return dsl.comm("xor", [a(j) for j in range(e.num_args())])
         if k == Z.Z3_OP_EQ:
-            x, y = a(0), a(1)
-            return eq(x, y)
+            return dsl.comm2("eq", a(0), a(1))
         if k == Z.Z3_OP_DISTINCT and e.num_args() == 2:
-            return mk("not", 1, (eq(a(0), a(1)),))
+            return mk("not", 1, (dsl.comm2("eq", a(0), a(1)),))
         if k == Z.Z3_OP_ULT:
             return ult(a(0), a(1))
         if k == Z.Z3_OP_UGT:
@@ -390,7 +387,7 @@ def effects(c, key, i):
     if o.eflags is not None:
         raise Unsupported("x87 EFLAGS effect (fcomi): not in this slice")
     # o.undef / o.mem_undef (the bits the SDM leaves Undefined / reserved): the Form takes the spec's own value for them, a refinement of "any value"; the proof compares exactly
-    post = {k: z3.simplify(S(v)) for k, v in X.to_dsl(o.s).items()}
+    post = {k: _simp(S(v)) for k, v in X.to_dsl(o.s).items()}
     unch = {k: z3.eq(v, d[k]) for k, v in post.items()}      # the field the instruction leaves as it was (z3's own simplifier: the spec's finish() ites)
     node = {k: tr.t(v) for k, v in post.items() if not unch[k]}
     if "fcw" in node:
@@ -404,15 +401,15 @@ def effects(c, key, i):
     if any(k in node for k in ("fip", "fdp", "fop", "fcs", "fds")):
         F.fptr(*[node[k] if k in node else V(k, X.DSL_WIDTH[k]) for k in ("fip", "fdp", "fop", "fcs", "fds")])
     if o.mem is not None:
-        w = tr.t(z3.simplify(S(o.wr)))
+        w = tr.t(_simp(S(o.wr)))
         wn = None if w.op == "const" and w.x == 1 else w
-        mv = z3.simplify(S(o.mem))
+        mv = _simp(S(o.mem))
         for off, wd in mem_pieces(o.mem.size()):
-            forms.mstore(F, a if off == 0 else forms.addoff(a, C(off // 8, 32)), tr.t(z3.simplify(z3.Extract(off + wd - 1, off, mv))), wn)
+            forms.mstore(F, a if off == 0 else forms.addoff(a, C(off // 8, 32)), tr.t(_simp(z3.Extract(off + wd - 1, off, mv))), wn)
     if o.ax is not None:
-        F.reg("eax", concat(extract(V("eax", 32), 31, 16), tr.t(z3.simplify(S(o.ax)))))
+        F.reg("eax", concat(extract(V("eax", 32), 31, 16), tr.t(_simp(S(o.ax)))))
     for _, t in domain_terms(o, sub):
-        F.require(tr.t(z3.simplify(t)))
+        F.require(tr.t(_simp(t)))
 
 
 def build(c):

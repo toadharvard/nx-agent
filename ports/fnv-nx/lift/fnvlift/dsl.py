@@ -42,6 +42,34 @@ def mk(op, w, a=(), x=None):
     n = _I.get(k)
     if n is None: n = _I[k] = N(op, w, tuple(a), x)
     return n
+_SK = {}
+def skey(n):
+    """the STRUCTURAL key of a node: sha256 of (op, width, x, the keys of the operands in order).  A pure function of the term's structure, the same in every process (the serial `.u` and id() are never read);
+    the memo is keyed by the serial only as a process-local cache of that value."""
+    r = _SK.get(n.u)
+    if r is None:
+        h = hashlib.sha256(repr((n.op, n.w, n.x)).encode())
+        for c in n.a: h.update(skey(c).encode())
+        r = _SK[n.u] = h.hexdigest()
+    return r
+COMM = ('add', 'mul', 'and', 'or', 'xor')      # commutative AND associative bit-vector ops (booleans are width 1)
+def comm(op, ops):
+    """the canonical node of the n-ary commutative-associative op OP over OPS: operands that are themselves OP nodes of this width are flattened, the leaves are ordered by skey and left-folded.
+    The result is a function of the multiset of leaves only, so the order in which a producer (z3's simplifier orders by AST id, a process-global counter) lists them does not matter."""
+    assert op in COMM
+    leaves, st = [], list(reversed(ops))
+    while st:
+        n = st.pop()
+        if n.op == op and n.w == ops[0].w: st.extend(reversed(n.a))
+        else: leaves.append(n)
+    leaves.sort(key=skey)
+    r = leaves[0]
+    for n in leaves[1:]: r = bin_(op, r, n)
+    return r
+def comm2(op, x, y):
+    """the canonical node of the commutative binary op OP ('eq': one node, operands ordered by skey)"""
+    assert op == 'eq'
+    return bin_(op, *sorted((x, y), key=skey))
 def _unwrap(v):
     """an object that stands for a DSL node (attribute `_node`, e.g. the symbolic instruction field of proof/symform.py) -> that node"""
     n = getattr(v, '_node', None)
