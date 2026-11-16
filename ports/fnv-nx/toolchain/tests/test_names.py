@@ -125,11 +125,14 @@ def sections(td, so):
     check('fnparm_domain: compiles', r.returncode == 0, r.stderr[-2000:])
     if r.returncode == 0:
         got = {x[0]: x[2] for x in rows_of(o, '.fnvnx.sympair')}
-        want = {'_Z2d1PFvPFviEE': 'nodecor:fnparmform:a parameter written as a function inside a function type',
-                '_Z2d5PFviE': None, '_Z2d6PFvPFviEE': None,
-                '_Z2d2PFvPicE': None, '_Z2d3PFvPisE': 'func', '_Z2d4PFvPiS_E': 'func'}
+        # the keys are the object's own symbols (the source name d<N> selects the one row), never a typed mangling
+        def key(n):
+            ks = [k for k in got if k.startswith('_Z2d%d' % n)]
+            return ks[0] if len(ks) == 1 else None
+        want = {key(1): 'nodecor:fnparmform:a parameter written as a function inside a function type', key(5): None, key(6): None,
+                key(2): None, key(3): 'func', key(4): 'func'}
         check('fnparm_domain: a function-typed parameter inside a function type, one through a typedef of a function type, and a volatile pointer, are `nodecor:fnparmform:<form>`; plain and const pointers are named',
-              all(k in got and (v is None and got[k].startswith('nodecor:fnparmform:') or got[k] == v) for k, v in want.items()), got)
+              all(k is not None and k in got and (v is None and got[k].startswith('nodecor:fnparmform:') or got[k] == v) for k, v in want.items()), got)
     for inst in (False, True):
         o = os.path.join(td, 'pattern%d.o' % inst)
         r = pb.compile(os.path.join(HERE, 'names', 'pattern.cpp'), o, so, flags=pb.PRODUCT_FLAGS + ['-O0'] + (['-DINSTANTIATE'] if inst else []))
