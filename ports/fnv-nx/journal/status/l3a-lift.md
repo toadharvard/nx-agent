@@ -1705,3 +1705,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - On the 5 small images, 0 roots lie inside a proven jtab extent. X excludes every relocation target inside a jtab extent: 11/23/9/15/10. The rule closes the class there.
   - The libvorbis int-n sites are 16 × `int 6` in may-entries rooted by data words. They are closed by the L5 IDT row for vector 6; no site gets special handling.
   - The exe (0x7becd0, the jtab class, the 16 exe int-n sites) waits on the farm-2 run.
+- Done (w13): the farm tools xfertally.py and xferpp.py, claude/fnv-l3a-lift-w13-xfer @e5b9e5591.
+- Doing (w13): xferpub.py, which publishes and pins the before/after pack externals.
+- Closed (L5): int 6 is covered by x86sys.json int_ring3.other_vectors (claude/fnv-l5-platform-w35 @4ec8cd2c1, 249 vectors): #GP → STATUS_ACCESS_VIOLATION, eip_advance 0.
+  - Open on L5: the vectors 0x2a/0x2b/0x2c/0x2e. Once the farm-2 exe run lands, send L5 the vectors of the exe int-n sites.
