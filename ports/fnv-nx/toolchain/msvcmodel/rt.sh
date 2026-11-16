@@ -4,6 +4,8 @@
 # the plugin objects, the patches, the records, the tarballs, the debs and this file; nothing is computed or listed here.
 #   output $OUT_DIR   the compiler tree COMPILER: bin/, lib/, the plugin headers, the runtime libraries and crt, MANIFEST.json
 set -euo pipefail
+# a red stage names its failing command and the tail of every build log (the logs are redirected, a failure inside them is otherwise silent)
+trap 'rc=$?; echo "stage failed: line $LINENO: $BASH_COMMAND (exit $rc)" >&2; for l in /scratch/w/*.log /scratch/w/b-gcc/config.log; do [ -f "$l" ] && { echo "== $l"; tail -n 30 "$l"; } >&2; done; exit $rc' ERR
 # ---- the constants of this step: every path it touches; the mounts are the sandbox's (a change of the mounts is a change of these lines alone) ----
 STAGE1=/in/10                                # the compiler external (stage 1's output STAGE1): prefix/, b-gcc/, src/ (the absolute paths below are the ones stage 1 built at)
 RECORDS=/in/2                                     # input 2: records2.sh, the stage ref of the generator `records.py stage2` (T ABI MLFLAG, semantics, plugins)   (input 1 is this script)

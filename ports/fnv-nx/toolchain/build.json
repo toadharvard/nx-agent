@@ -140,6 +140,7 @@
     "closure": [
      "base-files",
      "bash",
+     "dash",
      "coreutils",
      "sed",
      "grep",
