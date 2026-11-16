@@ -2771,3 +2771,15 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - Open class (deferred until after the first frame, blocks no path step): every msr fpcr source operand traces to FNVNX_FPCR or to an mrs/saved value, from parsed source (an L2 plugin fact). No regex gate.
 - The farm runs w28-c5 at 24ec7e128 after cand4 and the L2 toolchain rerun.
 - bottleneck: the cand4 verdict (farm restarts); L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
+
+### 2026-11-16 07:40Z: cand4 62474771c verdict RED (farm, 448.9 s, 23 of 47 gates red)
+- Causes:
+  - 76 of 148 selftests uncertified: env.json is not in the test mount (hostprofile reads it at import).
+  - manifest's `imports` declares contract, which manifest no longer imports, so hostabi/product is invalid. It cascades into build, determinism, guestlink, linkstrict, tlsmodel, hostapi, imports, machine, objstub, rawrite, fpexact, datamodel and rtasm.
+  - gates.d rows d3d9total and sm_link have no gate files.
+  - abspath: 5 files uncertified. pure: 4 files.
+  - oracle: test_plugin_compiler.py has no entry.
+  - test_gate_imports toy: its recipe is untracked.
+- All assigned to w15 with a rule each: declared reads in the closure, remove the stale import declaration, gates.d rows enter with their files, and so on.
+- No trunk merge. Trunk stays at fac693694.
+- bottleneck: the cand4 fixes (w15), then one farm verdict; L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
