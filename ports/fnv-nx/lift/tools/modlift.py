@@ -20,7 +20,7 @@ from capstone import x86 as X
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))      # the tool root: a tool imports its siblings from its own root (the generated stages run it under python3 -I)
 import pemod, ehtables, codemap, residue, jtab as JT
 from fnvlift import Image as LImage; from fnvlift import core as LCore
-TERM = {'ret', 'retf', 'int3', 'hlt', 'ud2', 'iret', 'iretd'}
+TERM = {'ret', 'retf', 'int3', 'hlt', 'ud2', 'iret', 'iretd', '(ud)'}
 PRI = residue.PRI
 CN = {1: 'entry-nondecomp', 2: 'entry-nondecomp', 3: 'data-pe-header', 4: 'padding', 5: 'data-reloc', 6: 'dead-gap', 9: 'data-unreached', 8: 'UNEXPLAINED'}      # the exe's class names (codemap.py CLS)
 M32 = 0xffffffff
@@ -31,6 +31,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     path, mrow = pemod.locate(arg, cfg.modules, cfg.moddirs)      # modules.tsv row (missing = KeyError) and the file (sha256 + size checked = ValueError)
     name = os.path.splitext(mrow.name)[0]; outd = cfg.facts_out + '/' + name; os.makedirs(outd, exist_ok=True)
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
+    import gapmd; md = gapmd.make(md, cfg.udsail)
     M = pemod.load(path, mrow.base); u32 = M.u32; RL = pemod.relocs(M); relocs = sorted(RL or []); rset = set(relocs); imports = pemod.imports(M)
     T0 = min(a for n, a, z, ro in M.xs); T1 = max(a + z for n, a, z, ro in M.xs); TN = T1 - T0
     V = bytearray(TN); tx = bytearray(b'\xcc' * TN)
@@ -338,6 +339,9 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     # ---- the residue is settled HERE, after universe.tsv / ranges.tsv exist and after the pcsrc facts of this run (pcsrc_s4.json) have been written: residue.closure reads them (tools/residue.py)
     # (the call that runs pcsrc.run_facts(outd, ...) must come before this point)
     import time as _t; _t0 = _t.time()
+    HD = '# base=0x%08x: absolute VAs at the preferred image base (not RVAs)' % M.base
+    print('shapes.tsv %d shape keys' % gapmd.shapes_tsv(cfg.shapes, HD, md, text, T0, dec))
+    open(cfg.baddecode, 'w').write(HD + '; columns: entry, undecodable address, the 15 bytes there; every sequence that decode_gap did not decide\n' + ''.join('%08x\t%08x\t%s\n' % (entry_of(a), a, text[a - T0:a - T0 + 15].hex()) for a in sorted(ud)))
     import pcsrc; pcsrc_red, pcsrc_res = pcsrc.run_facts(outd, name, X_.text, X_.T0, X_.u32, X_.rset, imports)
     sys.stderr.write('timing %s: pcsrc %.1f s (this round)\n' % (name, _t.time() - _t0))     # reads only universe.tsv and ranges.tsv; writes gate_pcsrc.json and pcsrc_s4.json
     # residue (valid executable bytes no entry body reaches and no PE directory names), cut by rule into: padding (nop / int3 instructions at the run's ends), dead gap (the run decodes

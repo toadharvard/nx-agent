@@ -50,7 +50,7 @@ cl, x = rows(0, (0, 0), unent=(9,)); check('unentried relocated value: r3_reloc 
 # ORDER: one real modlift run with STALE files claiming everything is closed
 d = tempfile.mkdtemp(); os.makedirs(d + '/' + mod)
 json.dump({'s4_violations': 0}, open('%s/%s/pcsrc_s4.json' % (d, mod), 'w')); json.dump({'red': 0, 's4_red': 0, 'stale': True}, open('%s/%s/gate_pcsrc.json' % (d, mod), 'w'))
-r = subprocess.run([sys.executable, TOOL, '--module', mod, '--out', d, '--modules', MODS, '--moddirs', MODDIRS, '--keys', KEYS], capture_output=True, text=True); o = r.stdout
+r = subprocess.run([sys.executable, TOOL, '--module', mod, '--out', d, '--modules', MODS, '--moddirs', MODDIRS, '--keys', KEYS, '--baddecode', d + '/bd.tsv', '--shapes', d + '/sh.tsv'], capture_output=True, text=True); o = r.stdout
 g = json.load(open('%s/%s/gate_pcsrc.json' % (d, mod))); s4 = json.load(open('%s/%s/pcsrc_s4.json' % (d, mod))); x = src('%s/%s/sources.tsv' % (d, mod))
 check('the run rewrote gate_pcsrc.json (stale marker gone)', 'stale' not in g and g['name'] == 'l3.pcsrc.' + mod)
 check('pcsrc_s4.json is this run\'s s4_red', s4['s4_violations'] == g['s4_red'])

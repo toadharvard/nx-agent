@@ -17,7 +17,8 @@ with tempfile.TemporaryDirectory() as td:
     row = ['syn.dll', hashlib.sha256(pe).hexdigest(), str(len(pe)), '%08x' % BASE, '%08x' % BASE, '%08x' % 0x3000, '0', '%08x' % 0x1000, '0']
     open(td + '/modules.tsv', 'w').write('# synthetic\n' + '\t'.join(row) + '\n')
     open(td + '/keys.tsv', 'w').write('# table_id 0\n')
-    r = subprocess.run([sys.executable, '-I', os.path.join(TOOLS, 'universe.py'), '--out', td + '/out', '--module', 'syn.dll', '--modules', td + '/modules.tsv', '--moddirs', td, '--keys', td + '/keys.tsv', '--lib', LIFT],
+    open(td + '/udsail.tsv', 'w').write('# fnvnx-udsail/2\n')
+    r = subprocess.run([sys.executable, '-I', os.path.join(TOOLS, 'universe.py'), '--out', td + '/out', '--module', 'syn.dll', '--modules', td + '/modules.tsv', '--moddirs', td, '--keys', td + '/keys.tsv', '--lib', LIFT, '--baddecode', td + '/bad.tsv', '--shapes', td + '/shapes.tsv', '--udsail', td + '/udsail.tsv'],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stdout[-1500:] + r.stderr[-1500:]
     d = td + '/out/syn'; g = json.load(open(d + '/gate_codemap.json'))
