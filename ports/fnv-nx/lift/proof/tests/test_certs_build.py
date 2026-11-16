@@ -74,6 +74,13 @@ class Aggregate(unittest.TestCase):
             self.assertEqual(self.run_main([a], o), 0)
             self.assertEqual([ln.split('\t')[0] for ln in open(o).read().splitlines()[1:]], [KEYS[1]])
 
+    def test_withheld_form_defect_is_its_own_class_never_proved(self):
+        o = os.path.join(self.d, 'o'); w = self.write('w.tsv', []); open(w, 'w').write('# header\n%s\t1\tdiffers at 3\n' % KEYS[0])
+        a = self.write('shapeprove_1_of_1.jsonl', [rec(KEYS[0]), rec(KEYS[1])])
+        self.assertEqual(certs_build.main(['--x86sys', XPATH, '--withheld', w, '--shards', a, '--out', o]), 0)
+        self.assertEqual([ln.split('\t')[0] for ln in open(o).read().splitlines()[1:]], [KEYS[1]])
+        self.assertEqual(certs_build.scan([a])[1].get('withheld-form-defect'), 1)
+
     def test_def0_columns_and_stale_defprior(self):
         o = os.path.join(self.d, 'o')
         d_old = dict(rec(KEYS[0]), def0={'undef_flags': ['af'], 'witness': 0, 'free': 2, 'nonflag_free': ['eax']})          # before DEFPRIOR: listed only
