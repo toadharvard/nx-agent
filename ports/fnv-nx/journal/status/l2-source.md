@@ -591,3 +591,7 @@ After the first frame:
   - Proposed to L1: the export stage goes to contract/facts with a `sources ports/fnv-nx/toolchain:names/sympair_kinds.inc` line, and toolchain/build.json is deleted.
   - For COMPILER-STAGE, L1 decides the run-step-input rule.
   - Owner L1; L2 changes nothing.
+- 2026-11-16 00:25Z: L1 accepted the toolchain-root cause.
+  - The fix is w15's, on cand3b: 8b0d9073c is reverted, and contract/facts declares sympair_kinds.inc as a stage input.
+  - Rule for cand4: a C/C++ file that is a declared input of a root's `run` step is that step's input, not a unit; any other file is a unit or red. w28 implements it in recipe.py.
+  - w3 builds the COMPILER-STAGE toolchain recipe against it. Its check is `recipe.py check --root ports/fnv-nx/toolchain`: 61 errors today, "recipe valid" required.
