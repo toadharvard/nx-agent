@@ -2254,7 +2254,7 @@ def plugin_hash(so):
 SYSTEM_SJ = ("/usr/include", "/usr/aarch64-linux-gnu/include")   # the pinned distribution's libc headers (env.json: libc6-dev, libc6-dev-arm64-cross)
 
 
-def unit_terminators(cc, units, flags, cache, jobs, rets=None, sjdirs=SYSTEM_SJ, so=None):
+def unit_terminators(cc, units, flags, cache, jobs, rets=None, sjdirs=SYSTEM_SJ, so=None, root_plugins=None):
     """Terminator set of a root = union over its C/C++ units of the noreturn declarations the compiler CC itself sees in the unit's
     preprocessed text (the plugin runs on unit.ii with the unit's flags: exactly the TU the compile stage compiles, headers included).
     UNITS [(pp_key, ii path, lang c|c++)]; FLAGS {lang: [..]}. Per unit cached CACHE/objstub/t-<key>.txt, key = pp_key (a hash of
@@ -2263,16 +2263,20 @@ def unit_terminators(cc, units, flags, cache, jobs, rets=None, sjdirs=SYSTEM_SJ,
     `ret` output, the compiler's own type; only typedef-named and builtin-named return types are listed).
     SJDIRS: the directories of the pinned headers (the guest runtime external's mount point for a guest root; the distribution's include dirs otherwise): a function
     is an unwinder by <setjmp.h> only when DECL_SOURCE_FILE is a file named setjmp.h INSIDE one of them (a same-named header elsewhere does not count).
+    ROOT_PLUGINS (key, flags_of) or None: the plugins of the root's own compile stage, loaded before the terminator plugin, so that the compiler sees the
+    dialect they register (the dispatch attributes fnvnx_host, fnvnx_entry, ...) as it does in the stage. KEY (JSON-able) holds their hashes and the
+    arguments; FLAGS_OF(dir) gives the flags that load them, with their -out files in the directory DIR. The caller derives both from recipe.root_plugin_flags.
     -> (sorted names, sha256, failures [(pp_key, message)]): a unit the plugin cannot process is a failure of that unit, never an exception."""
-    ph = plugin_hash(so)   # SO: the root's analysis plugin (objects.json `analysis_plugin`)
+    ph = plugin_hash(so)
+    rkey, rflags = root_plugins if root_plugins else (None, lambda d: [])   # SO: the root's analysis plugin (objects.json `analysis_plugin`)
 
     def one(u):
         pk, ii, lang = u
-        key = hashlib.sha256(json.dumps([pk, ph, lang, flags[lang], list(sjdirs)]).encode()).hexdigest()
+        key = hashlib.sha256(json.dumps([pk, ph, lang, flags[lang], list(sjdirs), rkey]).encode()).hexdigest()
         cp, rp = (os.path.join(cache, "objstub", "t-%s.%s" % (key, e)) for e in ("txt", "ret"))
         if not (os.path.exists(cp) and os.path.exists(rp)):
             with tempfile.TemporaryDirectory() as td:
-                r = subprocess.run([cc, "-S", "-o", os.devnull, "-fplugin=" + so, "-fplugin-arg-objstub_plugin-out=" + td + "/o.txt",
+                r = subprocess.run([cc, "-S", "-o", os.devnull] + rflags(td) + ["-fplugin=" + so, "-fplugin-arg-objstub_plugin-out=" + td + "/o.txt",
                                     "-fplugin-arg-objstub_plugin-ret=" + td + "/r.txt",
                                     "-fplugin-arg-objstub_plugin-setjmp-dirs=" + ":".join(sjdirs)] + flags[lang]
                                    + ["-x", lang, "-fpreprocessed", ii], capture_output=True, text=True)

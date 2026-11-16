@@ -145,6 +145,20 @@ def plugin_decls(names, origin, files=(), roots=(), repo="."):
     return [{"name": p["name"], "source": PLUGIN_SOURCES[p["name"]], "inputs": plugin_inputs(PLUGIN_SOURCES[p["name"]], files, roots, repo), "args": want[p["name"]]} for p in names]
 
 
+def plugin_flags(name, args, so, out=None):
+    """The compiler arguments that load plugin NAME from the file SO with its fixed ARGS (and its -out file OUT, when it has one): the ONE place they are spelled,
+    used by the CC stage (Job.plugins: SO is the stage's mount) and by the gates that run the compiler on a unit's preprocessed text (root_plugin_flags)."""
+    return ["-fplugin=" + so] + ["-fplugin-arg-%s-%s%s" % (name, k, "=" + v if v else "") for k, v in args.items()] + (["-fplugin-arg-%s-out=%s" % (name, out)] if out else [])
+
+
+def root_plugin_flags(built_plugins, origin, outdir):
+    """The flags that load, in load order, every plugin the build of a root used (objects.json `plugins` [{name, path}]: the .so files of its plugin stages) for a
+    root with `cxx_origin` ORIGIN: what the CC stage loads, with the plugins' -out files in the directory OUTDIR. A gate that compiles a unit of the root outside the
+    stage must see the same dialect (the attributes the root's plugins register), so it takes these and no list of its own."""
+    want = plugin_args(origin)
+    return [f for p in built_plugins for f in plugin_flags(p["name"], want[p["name"]], p["path"], os.path.join(outdir, os.path.basename(PLUGIN_OUT[p["name"]])) if p["name"] in PLUGIN_OUT else None)]
+
+
 def origin_class(origin):
     """"lifted" iff the declared `cxx_origin` ORIGIN is a lifted declaration (lifted_origin: {"lifted_by", "pack"} or {"lifted_by", "stage"}), else "native" (also for no origin): the one
     place the origin's class is read (the class name "lifted" itself is accepted, for the CLI); plugin_args and semantics_set are functions of it."""
@@ -2787,9 +2801,7 @@ class Job:
         for p in pl:
             n = p["name"]
             res = self.plugin_build(env, ws, n, p["source"], p.get("inputs", []))
-            flags = ["-fplugin=/plug/%s/%s.so" % (n, n)] + ["-fplugin-arg-%s-%s%s" % (n, k, "=" + v if v else "") for k, v in p["args"].items()] + (
-                ["-fplugin-arg-%s-out=%s" % (n, PLUGIN_OUT[n])] if n in PLUGIN_OUT else [])
-            out.append((n, res, flags))
+            out.append((n, res, plugin_flags(n, p["args"], "/plug/%s/%s.so" % (n, n), PLUGIN_OUT.get(n))))
         return out
 
     def analysis_plugin(self, ws, drv=1):
