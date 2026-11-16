@@ -2135,3 +2135,19 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - w28 queue: mirror pin; unused-import per declaring root; bridgetable.native names from the definer's export table (??2@YAPAXI@Z → c_new); ldsynth on the root's objects.
 - L3b: lift/proof/isla 407114cb3. Its recipe.py is taken from w28 whole.
 - bottleneck: cand3b (w15).
+
+## 2026-11-16: first farm run of the w28 tests (at f3cbb982c)
+
+- Farm session_01KmtZKTV1mniUErarfUpdJZ, each test run alone with `python3 -I`.
+- Green: test_doubles, test_puregate, test_extpaths, test_toolexec.
+- Red, with causes in our code:
+  - test_gate_machine 4/14 and test_gate_imports 7/13: the gates read GATE_COMMIT from os.environ;
+  - test_toolstep 1/4: ARTIFACTS_URL from os.environ, and a fixture deb (base-files) that is not pinned;
+  - test_linkstrict 45/49: crash at :375;
+  - test_objstub 318/335: crash at :140;
+  - test_toolext: external store layout mismatch (exttree).
+  - guest_compiler.json pins 56a4d09c instead of L2's 84f0883e.
+- w28 fixes these (environment never an input; one store-layout function; missing input = named red), then the farm re-runs at the new head.
+- The platform re-measure needs L5's line merged with w28's verify/; L5 produces it.
+- w28 head 9affb1631: import_roots, exec libs, debs profile, ldsynth over the root's objects, mirror 0bc84222 (396/396).
+- bottleneck: cand3b (w15).
