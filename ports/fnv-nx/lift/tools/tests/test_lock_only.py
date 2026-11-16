@@ -3,7 +3,7 @@
   prelude: every plain accessor macro of rt/fnvl.h passes `lkwin_` to its accessor and LK_BEGIN declares a block-local `lkwin_` of another type, so any spelling of a plain accessor (hand, DSL, helper)
   inside the window does not compile. Positive: the hand handlers of every LOCKABLE form lift, and the lifted unit compiles with the pack flags. Negative: the old defect (the DSL emitter handling a
   locked add) raises at the emitter; a plain accessor of every kind inside LK_BEGIN fails to compile. The accessor list is read from rt/fnvl.h (every `#define M..(a)` that is a guest accessor).
-  Every compile is a stage of the recipe (toolchain/tests/plugbuild.py: the pinned msvcmodel compiler, the full plugin set, a lifted root), no direct compiler call.   test_lock_only.py"""
+  Every compile is a stage of the recipe (toolchain/tests/plugbuild.py: the pinned msvcmodel compiler, the full plugin set, a lifted root), no direct compiler call.   test_lock_only.py (the inputs SDMROWS and GEN are mounted)"""
 import os, re, shutil, sys, tempfile
 LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools')); sys.path.insert(0, os.path.join(LIFT, '..', 'toolchain', 'tests'))
@@ -12,8 +12,7 @@ import prelude
 import fnvlift as L
 from fnvlift.tests import _inputs
 _inputs.configure()
-if len(sys.argv) != 2: sys.exit('usage: %s GEN   (GEN: the GEN output of the lift/rt root, a declared input of the test root)' % os.path.basename(__file__))
-GEN = sys.argv[1]
+GEN = os.environ.get('FNVNX_INPUT_GEN') or sys.exit('FNVNX_INPUT_GEN is not mounted (the GEN output of the lift/rt root, a produced input of tests/inputs.json)')
 from fnvlift import core, dsl
 from proof import lift_dsl as f_dsl, cpufeat
 from fnvlift.core import Unsupported

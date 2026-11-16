@@ -1,6 +1,6 @@
 """f_sys.decode_gap / ud_gap, consumed by core.decode and core.dispatch: a byte sequence capstone refuses is lifted as a #UD site exactly when a row of the `udsail` input (proof/udsail.py output) is a prefix of it;
 the lifter never decides it.  The rows here are an input fixture (the verdicts of the pinned Sail model come from the farm run of proof/udsail.py).
-    test_ud_gap.py --sdmrows PATH"""
+    test_ud_gap.py (the input SDMROWS is mounted)"""
 import os, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; SDMROWS = _inputs.sdmrows_arg(); _inputs.configure(SDMROWS)
 import fnvlift as L

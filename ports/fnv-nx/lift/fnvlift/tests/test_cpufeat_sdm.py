@@ -1,5 +1,5 @@
 """cpufeat on the SDM rows (--sdmrows: sdmfeat.py dumprows of the SDM text): the gate is the one SDM row match, no capstone groups.
-    test_cpufeat_sdm.py --sdmrows PATH"""
+    test_cpufeat_sdm.py (the input SDMROWS is mounted)"""
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; import tempfile
 _u = tempfile.mkdtemp() + '/udsail.tsv'; open(_u, 'w').write('# fnvnx-udsail/2\n0f0e\tUD\t2\tsail\tfixture\n')

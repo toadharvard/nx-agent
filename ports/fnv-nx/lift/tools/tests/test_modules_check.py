@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Gate M (module universes):  modules_check.py [MODULE.dll ...] [--no-c]     (default: the six lifted modules; --modules modules.tsv, --moddirs D1:D2 (module files), --facts-out DIR = parent of the per-module dirs, the exe universe is DIR/universe.tsv;
---exe PATH the exe; --fpstate/--fpdepth are handed to universe_r3_check for (c); no environment variable)
+"""Gate M (module universes):  modules_check.py [MODULE.dll ...] [--no-c]     (default: the six lifted modules; the declared inputs of tests/inputs.json: FNVNX_INPUT_FACTS = lift/facts FACTS (the parent of the per-module dirs, the exe universe is FACTS/universe.tsv),
+FNVNX_INPUT_EXE and FNVNX_INPUT_REDIST (the module files, the exe), FNVNX_INPUT_MODULES_TSV = the loader's modules.tsv, FNVNX_INPUT_SDMROWS, FPSTATE, FPDEPTH, SEGWRITES for the lifter of (c))
 Per module (file located by name, sha256 and size checked against modules.tsv; the image is the one at the base the loader assigned there):
   - the image range [assigned_base, assigned_base + SizeOfImage) is disjoint from the exe's [0x00400000, + its SizeOfImage) and from every other module of modules.tsv;
     every HIGHLOW relocation site has file bytes (the rebase can patch it);
@@ -16,9 +16,15 @@ import pemod
 MODS = ['d3dx9_38.dll', 'binkw32.dll', 'libvorbis.dll', 'libvorbisfile.dll', 'd3dx9_31.dll', 'atimgpud.dll']
 def opt(name):
     a = sys.argv; return a[a.index(name) + 1] if name in a else None
-FACTS = opt('--facts-out'); EXE = opt('--exe')
-MODTSV = opt('--modules'); MODDIRS = (opt('--moddirs') or '').split(':')      # the loader's modules.tsv and the directories of the module files (declared inputs)
-FWD = [x for k in ('--fpstate', '--fpdepth') if opt(k) for x in (k, opt(k))]
+def need(n):
+    if not os.environ.get(n): raise SystemExit('%s is not mounted (declared input of tests/inputs.json)' % n)
+    return os.environ[n]
+
+
+FACTS = need('FNVNX_INPUT_FACTS')      # lift/facts FACTS: the parent of the per-module facts dirs, the exe universe is FACTS/universe.tsv
+EXE = os.path.join(need('FNVNX_INPUT_EXE'), 'FalloutNV.exe')
+MODTSV = need('FNVNX_INPUT_MODULES_TSV')      # the loader's modules.tsv
+MODDIRS = [need('FNVNX_INPUT_EXE'), need('FNVNX_INPUT_REDIST')]      # the directories of the module files: the pinned game files
 
 
 def universe(fd):
@@ -42,7 +48,7 @@ def one(name, ent_all, noc):
     print('entries %d, outside the executable sections: %d' % (len(ent), sum(1 for a in ent if not ix(a))))
     if any(not ix(a) for a in ent): bad.append('entries outside executable sections')
     # (a)(b)(c): the exe's gate
-    sys.modules.pop('universe_r3_check', None); r3 = load_r3(); sys.argv = ['universe_r3_check.py', fd, '--exe', path, '--base', '%08x' % row.base] + FWD + (['--no-c'] if noc else [])
+    sys.modules.pop('universe_r3_check', None); r3 = load_r3(); sys.argv = ['universe_r3_check.py', fd, '--exe', path, '--base', '%08x' % row.base] + (['--no-c'] if noc else [])
     try: rc = r3.main()
     except SystemExit as e: rc = e.code
     if rc: bad.append('universe_r3_check (a)(b)(c) failed')
@@ -65,8 +71,7 @@ def one(name, ent_all, noc):
 
 
 def main():
-    if not (FACTS and EXE and MODTSV): raise SystemExit('needs --facts-out DIR, --exe PATH and --modules modules.tsv [--moddirs D1:D2]')
-    a = [x for i, x in enumerate(sys.argv[1:], 1) if not x.startswith('-') and sys.argv[i - 1] not in ('--facts-out', '--exe', '--modules', '--moddirs', '--fpstate', '--fpdepth')]; noc = '--no-c' in sys.argv; mods = a or MODS; bad = []; ent_all = {}
+    a = [x for i, x in enumerate(sys.argv[1:], 1) if not x.startswith('-')]; noc = '--no-c' in sys.argv; mods = a or MODS; bad = []; ent_all = {}
     exe = pemod.load(EXE); lo = exe.pref; ranges = [('FalloutNV.exe', lo, lo + exe.sizeimg)] + [(r.name, r.base, r.base + r.sizeimg) for r in pemod.modules(MODTSV).values()]
     ov = [(x[0], y[0]) for i, x in enumerate(ranges) for y in ranges[i + 1:] if x[1] < y[2] and y[1] < x[2]]
     print('image ranges: exe [%08x, %08x), %d modules of modules.tsv; overlapping pairs %d %s' % (lo, lo + exe.sizeimg, len(ranges) - 1, len(ov), ov[:4]))

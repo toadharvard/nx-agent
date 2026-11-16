@@ -21,9 +21,11 @@ EXTERNALS = [
     {'name': 'exe', 'repo': 'fnv-nx-build', 'ref': 'gamedata/exe', 'commit': '0948da1e89ab719dcf8471e45b67bc60575f6b93', 'tree_sha256': 'ba933b684b5e221e74b8a841a0ebb35ea8599c78a4d582ca0c376ef5a424ef2b', 'at': '/ext/exe'},
     {'name': 'redist', 'repo': 'fnv-nx-build', 'ref': 'gamedata/redist', 'commit': 'c53729e3bac168798fddcf4312f5a64a9b5eb08f', 'tree_sha256': 'fe7d3b56dba13c2bb236bdd3f7681dab41029f192283b7d4ba0c81105878bfd2', 'at': '/ext/redist'},
 ]
-USES = [{'root': 'ports/fnv-nx/lift/sdm', 'output': 'SDM_TEXT'}, {'root': 'ports/fnv-nx/loader', 'output': 'MODULES_TSV'}, {'root': 'ports/fnv-nx/lift/facts', 'output': 'FACTS'}, {'root': 'ports/fnv-nx/lift/facts', 'output': 'SEGWRITES'}, {'root': 'ports/fnv-nx/lift/fpfacts', 'output': 'FPSTATE'}, {'root': 'ports/fnv-nx/lift/fpfacts', 'output': 'FPDEPTH'}, {'root': 'ports/fnv-nx/platform', 'output': 'X86SYS'}]
+USES = [{'root': 'ports/fnv-nx/lift/sdmrows', 'output': 'SDMROWS'}, {'root': 'ports/fnv-nx/loader', 'output': 'MODULES_TSV'}, {'root': 'ports/fnv-nx/lift/facts', 'output': 'FACTS'}, {'root': 'ports/fnv-nx/lift/facts', 'output': 'SEGWRITES'}, {'root': 'ports/fnv-nx/lift/fpfacts', 'output': 'FPSTATE'}, {'root': 'ports/fnv-nx/lift/fpfacts', 'output': 'FPDEPTH'}, {'root': 'ports/fnv-nx/platform', 'output': 'X86SYS'}]
 MOD = '/uses/ports/fnv-nx/loader/MODULES_TSV'
 SDM_PDF = 'intel-64-ia-32-sdm-combined.pdf'      # the one file of the `sdm` external (tools/intel-sdm MANIFEST.json); the pdf's sha256 a4a62e6a7ba11a76c7753a195b825087306812aac39b930973f9168ee599f321
+SDMROWS_ROOT = 'ports/fnv-nx/lift/sdmrows'      # the one producer of the lifter's `sdmrows` input (sdmrows_recipe()): every root that lifts `uses` it
+SDMROWS_FILE = '/uses/' + SDMROWS_ROOT + '/SDMROWS'
 SDMTOOL = LIFT + '/tools/sdmrows_stage.py'
 SDM_ROOT = 'ports/fnv-nx/lift/sdm'      # the generated-only root that turns the pinned SDM pdf into text (sdmroot_recipe())
 PROV_ROOT = 'ports/fnv-nx/lift/liftprov'      # the measurement root: the same shard stages with --prov (tools/liftgen.py), merged by tools/provtable.py into the density table
@@ -31,10 +33,6 @@ PROVTOOL = LIFT + '/tools/provtable.py'
 FCTOOL = LIFT + '/tools/flagcheck.py'
 
 
-def sdmrows(root): return {'stage': root + ':gen:0', 'path': 'sdmrows/sdmrows.json'}      # generator 0 of the root: the lifter's `sdmrows` input
-
-
-SDMROWS = sdmrows(ROOT)
 SDM_EXTERNAL = {'name': 'sdm', 'repo': 'fnv-nx-build', 'ref': 'tools/intel-sdm', 'commit': '0768b0baf29a625871084414338c12f65d0f2cc8', 'tree_sha256': '07c5cdf925d7c929a81d0819a409667b212a307a89a90d5bdd04e1bf82e9b389', 'at': '/ext/sdm'}
 SDMTEXT = {'name': 'sdmtext', 'exec': '/usr/bin/pdftotext', 'args': ['-layout', '/in/1', '/out/sdm.txt'], 'inputs': [{'external': 'sdm', 'path': SDM_PDF}], 'debs': {'closure': ['poppler-utils']}, 'outputs': ['sdm.txt']}
 
@@ -82,13 +80,13 @@ def image_shards(name, n, where, common, root=ROOT, prov=False):
     out = []
     for k in range(n):
         outs = ['%s/prov_%d.json' % (name, k)] if prov else ['%s/%s_%d.%s' % (name, f, k, x) for f, x in (('texts', 'txt'), ('missing', 'tsv'), ('forms', 'tsv'), ('encs', 'tsv'), ('shapes', 'tsv'), ('flagdrop', 'tsv'), ('inputs', 'json'))]
-        out.append({'tool': LIFTGEN, 'args': where + common + ['--shard', '%d/%d' % (k, n), '--out', '/out/' + name] + (['--prov'] if prov else []), 'inputs': lift_inputs() + [sdmrows(root)], 'outputs': outs, '_image': name})
+        out.append({'tool': LIFTGEN, 'args': where + common + ['--shard', '%d/%d' % (k, n), '--out', '/out/' + name] + (['--prov'] if prov else []), 'inputs': lift_inputs(), 'outputs': outs, '_image': name})
     return out
 
 
 def shard_stages(modules, root=ROOT, prov=False):
-    common = ['--lift', '/in/' + LIFT, '--fpstate', '/uses/ports/fnv-nx/lift/fpfacts/FPSTATE', '--fpdepth', '/uses/ports/fnv-nx/lift/fpfacts/FPDEPTH', '--x86sys', '/uses/ports/fnv-nx/platform/X86SYS', '--sdmrows', '/stage/sdmrows/sdmrows.json', '--cpumodel', '/in/ports/fnv-nx/verify/cpuid_model.json', '--rcptab', '/in/'+LIFT+'/rt/rcptab.c', '--rcpcert', '/in/'+LIFT+'/rt/rcptab.cert.json', '--segwrites', '/uses/ports/fnv-nx/lift/facts/SEGWRITES', '--certs', '/in/' + ROOT + '/certs', '--jobs', '4']
-    gen, imgargs = [{'tool': SDMTOOL, 'args': ['--sdm', '/uses/ports/fnv-nx/lift/sdm/SDM_TEXT', '--out', '/out'], 'inputs': [LIFT + '/proof/sdmfeat.py', LIFT + '/proof/__init__.py'], 'outputs': ['sdmrows/sdmrows.json']}], []
+    common = ['--lift', '/in/' + LIFT, '--fpstate', '/uses/ports/fnv-nx/lift/fpfacts/FPSTATE', '--fpdepth', '/uses/ports/fnv-nx/lift/fpfacts/FPDEPTH', '--x86sys', '/uses/ports/fnv-nx/platform/X86SYS', '--sdmrows', SDMROWS_FILE, '--cpumodel', '/in/ports/fnv-nx/verify/cpuid_model.json', '--rcptab', '/in/'+LIFT+'/rt/rcptab.c', '--rcpcert', '/in/'+LIFT+'/rt/rcptab.cert.json', '--segwrites', '/uses/ports/fnv-nx/lift/facts/SEGWRITES', '--certs', '/in/' + ROOT + '/certs', '--jobs', '4']
+    gen, imgargs = [], []
     for name, mod, size in images(modules):
         n = shards(size)
         where = ['--exe', '/ext/exe/' + EXE, '--universe', '/uses/ports/fnv-nx/lift/facts/FACTS/universe.tsv', '--jtab', '/uses/ports/fnv-nx/lift/facts/FACTS/ehtables.json'] if mod is None else \
@@ -102,7 +100,7 @@ def recipe(modules, exts=EXTERNALS):
     gen, imgargs = shard_stages(modules)
     # finish: the shards' outputs are stage inputs (the stage's key holds their content); the pack tree is its output
     stage = lambda i, p: {'stage': '%s:gen:%d' % (ROOT, i), 'path': p}
-    fin_in = [stage(i, o) for i, g in enumerate(gen) if g['tool'] != SDMTOOL for o in g['outputs']]
+    fin_in = [stage(i, o) for i, g in enumerate(gen) for o in g['outputs']]
     pk = ['u/%03x.src' % i for i in range(4096)] + ['entries.tsv', 'forms.tsv', 'encs.tsv', 'shapes.tsv', 'flagdrop.tsv', 'gate_liftgen.json', 'manifest.json']
     args = ['--finish', '--out', '/out', '--exe', '/ext/exe/' + EXE, '--modules', MOD]
     for _, im in imgargs: args += ['--image', im]
@@ -117,7 +115,7 @@ def provrecipe(modules, exts=EXTERNALS):
     one stage that merges the side tables into the density table (tools/provtable.py). Output TABLE. It produces no text: the pack is lift/liftsrc."""
     gen, imgargs = shard_stages(modules, PROV_ROOT, True)
     stage = lambda i, p: {'stage': '%s:gen:%d' % (PROV_ROOT, i), 'path': p}
-    ins = [stage(i, o) for i, g in enumerate(gen) if g['tool'] != SDMTOOL for o in g['outputs']]
+    ins = [stage(i, o) for i, g in enumerate(gen) for o in g['outputs']]
     gen.append({'tool': PROVTOOL, 'args': ['--stage', '/stage', '--out', '/out/table'], 'inputs': ins, 'outputs': ['table/' + o for o in ('categories.tsv', 'roots.tsv', 'forms.tsv', 'families.tsv', 'images.tsv', 'shards.tsv', 'summary.json')]})
     for g in gen: g.pop('_image', None)
     return {'format': 'fnvnx-recipe/1', 'external': exts, 'uses': USES, 'generated': gen, 'outputs': {'TABLE': 'table'}}
@@ -144,10 +142,17 @@ def provrecipe(modules, exts=EXTERNALS):
     one stage that merges the side tables into the density table (tools/provtable.py). Output TABLE. It produces no text: the pack is lift/liftsrc."""
     gen, imgargs = shard_stages(modules, PROV_ROOT, True)
     stage = lambda i, p: {'stage': '%s:gen:%d' % (PROV_ROOT, i), 'path': p}
-    ins = [stage(i, o) for i, g in enumerate(gen) if g['tool'] != SDMTOOL for o in g['outputs']]
+    ins = [stage(i, o) for i, g in enumerate(gen) for o in g['outputs']]
     gen.append({'tool': PROVTOOL, 'args': ['--stage', '/stage', '--out', '/out/table'], 'inputs': ins, 'outputs': ['table/' + o for o in ('categories.tsv', 'roots.tsv', 'forms.tsv', 'families.tsv', 'images.tsv', 'shards.tsv', 'summary.json')]})
     for g in gen: g.pop('_image', None)
     return {'format': 'fnvnx-recipe/1', 'external': exts, 'uses': USES, 'generated': gen, 'outputs': {'TABLE': 'table'}}
+
+
+def sdmrows_recipe():
+    """lift/sdmrows/build.json: the one producer of the lifter's `sdmrows` input (sdmfeat.py dumprows of the SDM text of lift/sdm); output SDMROWS"""
+    return {'format': 'fnvnx-recipe/1', 'uses': [{'root': SDM_ROOT, 'output': 'SDM_TEXT'}],
+            'generated': [{'tool': SDMTOOL, 'args': ['--sdm', '/uses/' + SDM_ROOT + '/SDM_TEXT', '--out', '/out'], 'inputs': [LIFT + '/proof/sdmfeat.py', LIFT + '/proof/__init__.py'], 'outputs': ['sdmrows/sdmrows.json']}],
+            'outputs': {'SDMROWS': 'sdmrows/sdmrows.json'}}
 
 
 def sdmroot_recipe():
@@ -165,12 +170,11 @@ def guest_test_recipe(name, rec):
     gen = rec['generated'][-1]
     assert gen['tool'] == LIFT + '/tools/' + GUEST_TESTS[name], gen['tool']
     outs = gen['outputs']
-    st = [{'tool': SDMTOOL, 'args': ['--sdm', '/uses/ports/fnv-nx/lift/sdm/SDM_TEXT', '--out', '/out'], 'inputs': [LIFT + '/proof/sdmfeat.py', LIFT + '/proof/__init__.py'], 'outputs': ['sdmrows/sdmrows.json']},
-          {'tool': gen['tool'], 'args': ['/out/gen', '/in/' + LIFT, '--x86sys', '/uses/ports/fnv-nx/platform/X86SYS', '--sdmrows', '/stage/sdmrows/sdmrows.json', '--cpumodel', '/in/ports/fnv-nx/verify/cpuid_model.json',
+    st = [{'tool': gen['tool'], 'args': ['/out/gen', '/in/' + LIFT, '--x86sys', '/uses/ports/fnv-nx/platform/X86SYS', '--sdmrows', SDMROWS_FILE, '--cpumodel', '/in/ports/fnv-nx/verify/cpuid_model.json',
                                          '--rcptab', '/in/' + LIFT + '/rt/rcptab.c', '--rcpcert', '/in/' + LIFT + '/rt/rcptab.cert.json'],
-           'inputs': [LIFT + '/fnvlift', 'ports/fnv-nx/verify/cpuid_model.json', LIFT + '/proof', LIFT + '/rt/rcptab.c', LIFT + '/rt/rcptab.cert.json', sdmrows(root)], 'outputs': outs}]
-    uses = [u for u in rec.get('uses', []) if (u['root'], u['output']) not in (('ports/fnv-nx/lift/sdm', 'SDM_TEXT'), ('ports/fnv-nx/platform', 'X86SYS'))]
-    uses += [{'root': 'ports/fnv-nx/lift/sdm', 'output': 'SDM_TEXT'}, {'root': 'ports/fnv-nx/platform', 'output': 'X86SYS'}]
+           'inputs': [LIFT + '/fnvlift', 'ports/fnv-nx/verify/cpuid_model.json', LIFT + '/proof', LIFT + '/rt/rcptab.c', LIFT + '/rt/rcptab.cert.json'], 'outputs': outs}]
+    uses = [u for u in rec.get('uses', []) if (u['root'], u['output']) not in (('ports/fnv-nx/lift/sdm', 'SDM_TEXT'), (SDMROWS_ROOT, 'SDMROWS'), ('ports/fnv-nx/platform', 'X86SYS'))]
+    uses += [{'root': SDMROWS_ROOT, 'output': 'SDMROWS'}, {'root': 'ports/fnv-nx/platform', 'output': 'X86SYS'}]
     return dict(rec, generated=st, uses=uses)
 
 
@@ -186,6 +190,7 @@ def main():
     os.makedirs(os.path.join(REPO, PROV_ROOT), exist_ok=True)
     with open(os.path.join(REPO, PROV_ROOT, 'build.json'), 'w') as f: json.dump(provrecipe(a.modules), f, indent=1); f.write('\n')
     with open(os.path.join(REPO, SDM_ROOT, 'build.json'), 'w') as f: json.dump(sdmroot_recipe(), f, indent=1); f.write('\n')
+    with open(os.path.join(REPO, SDMROWS_ROOT, 'build.json'), 'w') as f: json.dump(sdmrows_recipe(), f, indent=1); f.write('\n')
     print('liftsrc: %d shard stages + finish, %d outputs' % (len(rec['generated']) - 1, len(rec['generated'][-1]['outputs'])))
 
 

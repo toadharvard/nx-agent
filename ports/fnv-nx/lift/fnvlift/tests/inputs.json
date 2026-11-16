@@ -1,0 +1,53 @@
+{
+ "format": "fnvnx-selftest-inputs/1",
+ "tests": {
+  "test_cpufeat_sdm.py": [
+   {
+    "root": "ports/fnv-nx/lift/sdmrows",
+    "output": "SDMROWS"
+   }
+  ],
+  "test_cs_store.py": [
+   {
+    "root": "ports/fnv-nx/lift/sdmrows",
+    "output": "SDMROWS"
+   }
+  ],
+  "test_int_vectors.py": [
+   {
+    "root": "ports/fnv-nx/lift/sdmrows",
+    "output": "SDMROWS"
+   }
+  ],
+  "test_jtab_facts.py": [
+   {
+    "root": "ports/fnv-nx/lift/sdmrows",
+    "output": "SDMROWS"
+   }
+  ],
+  "test_null_seg.py": [
+   {
+    "root": "ports/fnv-nx/lift/sdmrows",
+    "output": "SDMROWS"
+   }
+  ],
+  "test_prov.py": [
+   {
+    "root": "ports/fnv-nx/lift/sdmrows",
+    "output": "SDMROWS"
+   }
+  ],
+  "test_sites.py": [
+   {
+    "root": "ports/fnv-nx/lift/sdmrows",
+    "output": "SDMROWS"
+   }
+  ],
+  "test_ud_gap.py": [
+   {
+    "root": "ports/fnv-nx/lift/sdmrows",
+    "output": "SDMROWS"
+   }
+  ]
+ }
+}
