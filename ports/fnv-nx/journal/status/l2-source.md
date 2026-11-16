@@ -693,3 +693,7 @@ After the first frame:
   - Next for w2:
     - test_dispatch_entry 49/54: the platform header tests must take their flags from the owning root;
     - the NAMES type-code table generated from a pinned MSVC doc (rule 1).
+- 2026-11-16 04:50Z: L1 ruling: export-record placement is closed by C's declare-before-use (a compile error, never a wrong row).
+  - cpumodel.c is fixed at L3a base3 330e873c7. iob.c goes to L5.
+  - Placement independence (a plugin attribute at PLUGIN_FINISH_UNIT) waits until after the first frame.
+  - No L2 item.
