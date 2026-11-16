@@ -121,15 +121,13 @@
   },
   "('d8', 'mem', 2, None)": {
    "leaks": [
-    "FPA_EQ",
-    "FPA_LT",
     "FPA_RM_NEAREST_TIES_TO_EVEN",
     "FPA_TO_FP"
    ],
    "name": "fcom m32fp",
    "ops": [
     "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
-    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+    "fx_dsl_x_cmp((_ BitVec 80),(_ BitVec 80))->(_ BitVec 32)"
    ],
    "plain": [
     "AND",
@@ -159,15 +157,13 @@
   },
   "('d8', 'mem', 3, None)": {
    "leaks": [
-    "FPA_EQ",
-    "FPA_LT",
     "FPA_RM_NEAREST_TIES_TO_EVEN",
     "FPA_TO_FP"
    ],
    "name": "fcomp m32fp",
    "ops": [
     "bits((_ FloatingPoint 11 53))->(_ BitVec 64)",
-    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+    "fx_dsl_x_cmp((_ BitVec 80),(_ BitVec 80))->(_ BitVec 32)"
    ],
    "plain": [
     "AND",
@@ -496,13 +492,10 @@
    ]
   },
   "('d8', 'reg', 2, None)": {
-   "leaks": [
-    "FPA_EQ",
-    "FPA_LT"
-   ],
+   "leaks": [],
    "name": "fcom st(i)",
    "ops": [
-    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+    "fx_dsl_x_cmp((_ BitVec 80),(_ BitVec 80))->(_ BitVec 32)"
    ],
    "plain": [
     "AND",
@@ -530,13 +523,10 @@
    ]
   },
   "('d8', 'reg', 3, None)": {
-   "leaks": [
-    "FPA_EQ",
-    "FPA_LT"
-   ],
+   "leaks": [],
    "name": "fcomp st(i)",
    "ops": [
-    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+    "fx_dsl_x_cmp((_ BitVec 80),(_ BitVec 80))->(_ BitVec 32)"
    ],
    "plain": [
     "AND",
@@ -1089,13 +1079,10 @@
    ]
   },
   "('d9', 'reg', 4, 4)": {
-   "leaks": [
-    "FPA_EQ",
-    "FPA_LT"
-   ],
+   "leaks": [],
    "name": "ftst",
    "ops": [
-    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+    "fx_dsl_x_cmp((_ BitVec 80),(_ BitVec 80))->(_ BitVec 32)"
    ],
    "plain": [
     "AND",
@@ -2018,13 +2005,10 @@
    ]
   },
   "('da', 'mem', 2, None)": {
-   "leaks": [
-    "FPA_EQ",
-    "FPA_LT"
-   ],
+   "leaks": [],
    "name": "ficom m32int",
    "ops": [
-    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+    "fx_dsl_x_cmp((_ BitVec 80),(_ BitVec 80))->(_ BitVec 32)"
    ],
    "plain": [
     "AND",
@@ -2054,13 +2038,10 @@
    ]
   },
   "('da', 'mem', 3, None)": {
-   "leaks": [
-    "FPA_EQ",
-    "FPA_LT"
-   ],
+   "leaks": [],
    "name": "ficomp m32int",
    "ops": [
-    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+    "fx_dsl_x_cmp((_ BitVec 80),(_ BitVec 80))->(_ BitVec 32)"
    ],
    "plain": [
     "AND",
@@ -2318,13 +2299,10 @@
    ]
   },
   "('da', 'reg', 5, 1)": {
-   "leaks": [
-    "FPA_EQ",
-    "FPA_LT"
-   ],
+   "leaks": [],
    "name": "fucompp",
    "ops": [
-    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+    "fx_dsl_x_cmp((_ BitVec 80),(_ BitVec 80))->(_ BitVec 32)"
    ],
    "plain": [
     "AND",
@@ -2601,13 +2579,10 @@
    ]
   },
   "('db', 'reg', 5, None)": {
-   "leaks": [
-    "FPA_EQ",
-    "FPA_LT"
-   ],
+   "leaks": [],
    "name": "fucomi st,st(i)",
    "ops": [
-    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+    "fx_dsl_x_cmp((_ BitVec 80),(_ BitVec 80))->(_ BitVec 32)"
    ],
    "plain": [
     "AND",
@@ -2635,13 +2610,10 @@
    ]
   },
   "('db', 'reg', 6, None)": {
-   "leaks": [
-    "FPA_EQ",
-    "FPA_LT"
-   ],
+   "leaks": [],
    "name": "fcomi st,st(i)",
    "ops": [
-    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+    "fx_dsl_x_cmp((_ BitVec 80),(_ BitVec 80))->(_ BitVec 32)"
    ],
    "plain": [
     "AND",
@@ -2769,13 +2741,10 @@
    ]
   },
   "('dc', 'mem', 2, None)": {
-   "leaks": [
-    "FPA_EQ",
-    "FPA_LT"
-   ],
+   "leaks": [],
    "name": "fcom m64fp",
    "ops": [
-    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+    "fx_dsl_x_cmp((_ BitVec 80),(_ BitVec 80))->(_ BitVec 32)"
    ],
    "plain": [
     "AND",
@@ -2804,13 +2773,10 @@
    ]
   },
   "('dc', 'mem', 3, None)": {
-   "leaks": [
-    "FPA_EQ",
-    "FPA_LT"
-   ],
+   "leaks": [],
    "name": "fcomp m64fp",
    "ops": [
-    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+    "fx_dsl_x_cmp((_ BitVec 80),(_ BitVec 80))->(_ BitVec 32)"
    ],
    "plain": [
     "AND",
@@ -3601,13 +3567,10 @@
    ]
   },
   "('dd', 'reg', 4, None)": {
-   "leaks": [
-    "FPA_EQ",
-    "FPA_LT"
-   ],
+   "leaks": [],
    "name": "fucom st(i)",
    "ops": [
-    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+    "fx_dsl_x_cmp((_ BitVec 80),(_ BitVec 80))->(_ BitVec 32)"
    ],
    "plain": [
     "AND",
@@ -3635,13 +3598,10 @@
    ]
   },
   "('dd', 'reg', 5, None)": {
-   "leaks": [
-    "FPA_EQ",
-    "FPA_LT"
-   ],
+   "leaks": [],
    "name": "fucomp st(i)",
    "ops": [
-    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+    "fx_dsl_x_cmp((_ BitVec 80),(_ BitVec 80))->(_ BitVec 32)"
    ],
    "plain": [
     "AND",
@@ -3769,13 +3729,10 @@
    ]
   },
   "('de', 'mem', 2, None)": {
-   "leaks": [
-    "FPA_EQ",
-    "FPA_LT"
-   ],
+   "leaks": [],
    "name": "ficom m16int",
    "ops": [
-    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+    "fx_dsl_x_cmp((_ BitVec 80),(_ BitVec 80))->(_ BitVec 32)"
    ],
    "plain": [
     "AND",
@@ -3805,13 +3762,10 @@
    ]
   },
   "('de', 'mem', 3, None)": {
-   "leaks": [
-    "FPA_EQ",
-    "FPA_LT"
-   ],
+   "leaks": [],
    "name": "ficomp m16int",
    "ops": [
-    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+    "fx_dsl_x_cmp((_ BitVec 80),(_ BitVec 80))->(_ BitVec 32)"
    ],
    "plain": [
     "AND",
@@ -4141,13 +4095,10 @@
    ]
   },
   "('de', 'reg', 3, 1)": {
-   "leaks": [
-    "FPA_EQ",
-    "FPA_LT"
-   ],
+   "leaks": [],
    "name": "fcompp",
    "ops": [
-    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+    "fx_dsl_x_cmp((_ BitVec 80),(_ BitVec 80))->(_ BitVec 32)"
    ],
    "plain": [
     "AND",
@@ -4657,13 +4608,10 @@
    ]
   },
   "('df', 'reg', 5, None)": {
-   "leaks": [
-    "FPA_EQ",
-    "FPA_LT"
-   ],
+   "leaks": [],
    "name": "fucomip st,st(i)",
    "ops": [
-    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+    "fx_dsl_x_cmp((_ BitVec 80),(_ BitVec 80))->(_ BitVec 32)"
    ],
    "plain": [
     "AND",
@@ -4691,13 +4639,10 @@
    ]
   },
   "('df', 'reg', 6, None)": {
-   "leaks": [
-    "FPA_EQ",
-    "FPA_LT"
-   ],
+   "leaks": [],
    "name": "fcomip st,st(i)",
    "ops": [
-    "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)"
+    "fx_dsl_x_cmp((_ BitVec 80),(_ BitVec 80))->(_ BitVec 32)"
    ],
    "plain": [
     "AND",
@@ -4765,7 +4710,8 @@
   "abs_real(Real)->Real": 61,
   "bits((_ FloatingPoint 11 53))->(_ BitVec 64)": 56,
   "fp((_ BitVec 64))->(_ FloatingPoint 11 53)": 45,
-  "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)": 30,
+  "fp80((_ BitVec 80))->(_ FloatingPoint 15 64)": 11,
+  "fx_dsl_x_cmp((_ BitVec 80),(_ BitVec 80))->(_ BitVec 32)": 19,
   "img80((_ FloatingPoint 15 64))->(_ BitVec 80)": 1,
   "min_normal((_ BitVec 2))->Real": 50,
   "pow2r((_ BitVec 16))->Real": 3,
