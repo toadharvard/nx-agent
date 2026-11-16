@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/include/fnvnx/hostapi.h ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json
+# reads: ports/fnv-nx/verify
 """Tests for verify/gate_hostapi.py: declared = used per root, negatives, universe 0. No game data."""
 import json
 import os

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Check: the lifted set of tools/lifted.py equals what liftgen lifted, byte for byte at the census: the per-shape counts of lifted() are exactly
-the rows of liftgen's shapes_0.tsv of the same image (one shard, K = 0 of N = 1, no jump-table facts, emit '').
+the rows of liftgen's shapes_0.tsv of the same image (one shard, K = 0 of N = 1, no jump-table facts, emit dsl).
 Inputs (inputs.json): the exe and the facts of fnv-nx-build (the universe); the shapes file is generated here into TMPDIR by liftgen.shard, the same step the product runs.
 The proof is liftgen's own output: the shapes file is written by liftgen through lifted.lift_with_instructions, lifted() runs the same step again and counts
 shape_key/family of the instructions it yields (decoded again from the image bytes at (va, length))."""
@@ -9,7 +9,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.pat
 for p in ('tools', ''):
     sys.path.insert(0, os.path.join(LIFT, p))
 import fnvlift as L, lifted
-from fnvlift.tests._inputs import X86SYS
+from fnvlift.tests._inputs import X86SYS, cpufeat_arg
 from proof import shape
 
 
@@ -17,8 +17,8 @@ def main():
     import argparse, tempfile, liftgen
     exe = os.path.join(os.environ['FNVNX_INPUT_EXE'], 'FalloutNV.exe'); facts = os.environ['FNVNX_INPUT_FACTS']
     import fnvlift
-    fnvlift.inputs.configure(universe=facts + '/universe.tsv', fpstate=facts + '/fpstate', fpdepth=facts + '/fpmodes/depth.tsv', x86sys=X86SYS)      # the facts external holds fpstate/ and fpmodes/; X86SYS is the tracked platform/declared/x86sys.json
-    emit, jtab = '', None
+    fnvlift.inputs.configure(universe=facts + '/universe.tsv', fpstate=facts + '/fpstate', fpdepth=facts + '/fpmodes/depth.tsv', x86sys=X86SYS, cpufeat=cpufeat_arg())      # the facts external holds fpstate/ and fpmodes/; X86SYS is the tracked platform/declared/x86sys.json
+    emit, jtab = 'dsl', None
     out = tempfile.mkdtemp(); shapes = out + '/shapes_0.tsv'
     try:
         liftgen.shard(argparse.Namespace(shard='0/1', out=out, jobs=os.cpu_count() or 1, exe=exe, base=None, universe=facts + '/universe.tsv', emit=emit, jtab=jtab))

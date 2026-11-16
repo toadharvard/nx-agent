@@ -47,7 +47,7 @@ struct CSI { uint32_t cs, acp; FSig fs; };
 static_assert(sizeof(LF) == 92 && sizeof(TMW) == 60 && sizeof(CSI) == 32, "guest layouts");
 
 enum { NTM_ITALIC = 1, NTM_BOLD = 0x20, NTM_REGULAR = 0x40, NTM_PS_OPENTYPE = 0x20000 };
-enum { FS_LATIN1 = 1, FS_SYMBOL = 0x80000000u };
+enum : uint32_t { FS_LATIN1 = 1, FS_SYMBOL = 0x80000000u };   /* fixed underlying type: FS_SYMBOL does not fit int, and the braced initialisers of uint32_t members must not narrow */
 enum { ANSI_CS = 0, DEFAULT_CS = 1, SYMBOL_CS = 2, OEM_CS = 255 };
 const uint32_t GERR = 0xFFFFFFFFu;
 

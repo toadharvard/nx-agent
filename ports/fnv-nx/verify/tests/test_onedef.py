@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/rt/guest/crt0.s ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for verify/gate_onedef.py (gate "onedef", clauses (a) (b) (c') (c'')): the pure judges, and the gate itself in toy repos built with the real
 compiler and linker through verify/recipe.py (images that link two library roots). Plain script: exit 0 on pass. Needs root (sandbox).
 Scratch: test_recipe's BASE, removed at exit."""

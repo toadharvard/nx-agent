@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/verify
 """Tests for envcheck.system_lib_errors / spellings: the link.libs.system rule (a system library of a link is a file of a package env.json pins; the
 loader is a library like another). The rule on synthetic file lists, then on this machine's dpkg state and the real env.json."""
 import json

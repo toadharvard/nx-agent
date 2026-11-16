@@ -53,11 +53,11 @@
     "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
+    "ports/fnv-nx/lift/fnvlift",
     {
      "stage": "ports/fnv-nx/lift/factsimg/exe:gen:0",
      "path": "funcs.tsv"
-    },
-    "ports/fnv-nx/lift/fnvlift"
+    }
    ],
    "outputs": [],
    "dirs": [

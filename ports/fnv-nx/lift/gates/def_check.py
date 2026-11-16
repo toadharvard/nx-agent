@@ -105,7 +105,7 @@ def lifted_by(ins):
     """which builder of the lifter takes an instruction that has no Form: the mnemonic handler (OPS, by its module) or the first FALLBACK whose predicate holds
     (the order of fnvlift.core.dispatch), else 'none' (a lift gap). The probe context carries what the predicates read."""
     import types
-    from fnvlift import core, f_cpufeat, f_sys, f_sse, f_x87, f_int, f_string, f_flow, f_simd_int, f_x87_ctl     # noqa: F401  (register their handlers)
+    from fnvlift import core, f_cpufeat, f_sys, f_sse, f_x87, f_int, f_flow, f_simd_int, f_x87_ctl     # noqa: F401  (register their handlers)
     m = ins.mnemonic.split()[-1]
     cx = types.SimpleNamespace(m=m, ops=list(ins.operands), b0=ins.opcode[0], modrm=ins.modrm, pfx='')
     try:
@@ -113,10 +113,10 @@ def lifted_by(ins):
     except Exception: pass
     h = core.OPS.get(m)
     if h is not None: return 'ops:' + h.__module__.split('.')[-1]
-    for pred, fn in core.FALLBACKS:
+    for pred, fn in core.SHAPE_HANDLERS:
         try: ok = pred(cx, ins)
         except Exception: return 'undetermined'
-        if ok: return 'fallback:' + fn.__module__.split('.')[-1] + '.' + fn.__name__
+        if ok: return 'shape_handler:' + fn.__module__.split('.')[-1] + '.' + fn.__name__
     return 'none'
 
 
@@ -165,7 +165,8 @@ def run(uni):
 
 
 def main(argv):
-    if not argv or len(argv) % 2: print('usage: def_check.py IMAGE FACTS [IMAGE FACTS ...]', file=sys.stderr); return 2
+    if len(argv) < 4 or argv[0] != '--cpufeat' or len(argv) % 2: print('usage: def_check.py --cpufeat CPUID_FEATURE_BITS.TSV IMAGE FACTS [IMAGE FACTS ...]', file=sys.stderr); return 2
+    from fnvlift import inputs; inputs.configure(cpufeat=argv[1]); argv = argv[2:]
     res = run(universe(list(zip(argv[::2], argv[1::2]))))
     d = os.environ.get('GATE_OUT')
     if d:

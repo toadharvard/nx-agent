@@ -25,6 +25,7 @@ static inline u32 fnvl_fp_x87_flags(void){ int e=fetestexcept(FE_ALL_EXCEPT); re
 static inline void sse_fpcr(u32 mx){ static const int m[4]={FE_TONEAREST,FE_DOWNWARD,FE_UPWARD,FE_TOWARDZERO}; fesetround(m[(mx>>13)&3]); }
 '''
 CODE = SHIM + body + r'''
+extern "C" void dsl_cvt(u32 k, u32 sw, u32 rw, u32 t, u64 a, u32 mx, u64 *val, u32 *fl){ u128 r=fx_dsl_cvt(k,sw,rw,t,a,mx); *val=(u64)r & (k==0&&rw==64?~0ull:0xffffffffull); *fl=(u32)(r>>(k==0?rw:32))&0x3f; }
 extern "C" void dsl_fp(u32 op, u32 w, u64 a, u64 b, u32 mx, u64 *val, u32 *fl){ u128 r=fx_dsl_fp(op,w,a,b,mx); *val=(u64)r & (w==32?0xffffffffull:~0ull); *fl=(u32)(r>>w)&0x3f; }
 '''
 def build():
@@ -62,6 +63,32 @@ def main():
                             if (zv, zf) != (v.value, f.value):
                                 bad += 1
                                 if bad <= 12: print('DISAGREE %s%d a=%x b=%x mx=%x z3=(%x,%02x) c=(%x,%02x)' % (op, w, a, b, mx, zv, zf, v.value, f.value))
+    lib.dsl_cvt.argtypes = [ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_ulonglong, ctypes.c_uint, ctypes.POINTER(ctypes.c_ulonglong), ctypes.POINTER(ctypes.c_uint)]
+    I32 = [0, 1, 0xffffffff, 0x7fffffff, 0x80000000, 0x80000001, 0x1000000, 0x1000001, 0x1000003, 0xfffffff, 0x2000001, 0x7fffff80, 0x7fffffc0, 0x7fffffbf, 0x80000040, 0x80000041]
+    FSP = {32: SP[32] + [0x4f000000, 0xcf000000, 0x4effffff, 0xcf000001, 0x3f000000, 0x3fc00000, 0xbf000000, 0x40200000, 0x4b800000, 0x3effffff],
+           64: SP[64] + [0x41e0000000000000, 0xc1e0000000000000, 0x41dfffffffc00000, 0xc1e0000000200000, 0x3fe0000000000000, 0x3ff8000000000000, 0xbfe0000000000000, 0x4004000000000000, 0x41dfffffffffffff]}
+    for kind, sw, rw, tr in [('i2f', 32, 32, 0), ('i2f', 32, 64, 0), ('f2i', 32, 32, 0), ('f2i', 32, 32, 1), ('f2i', 64, 32, 0), ('f2i', 64, 32, 1)]:
+        a_ = dsl.V('a', sw); n = dsl.cvt(kind, a_, dsl.V('mxcsr', 32), rw, bool(tr)); vv, ff = to_smt(dsl.cvt_val(n)), to_smt(dsl.cvt_flags(n))
+        cases = (I32 if kind == 'i2f' else FSP[sw]) + [rng.getrandbits(sw) for _ in range(N * 20)]
+        for a in cases:
+            for mx in [0x1f80 | (rc << 13) | (daz << 6) for rc in range(4) for daz in (0, 1)]:
+                v = ctypes.c_ulonglong(); f = ctypes.c_uint(); lib.dsl_cvt(0 if kind == 'i2f' else 1, sw, rw, tr, a, mx, ctypes.byref(v), ctypes.byref(f))
+                sub = [(z3.BitVec('a', sw), z3.BitVecVal(a, sw)), (z3.BitVec('mxcsr', 32), z3.BitVecVal(mx, 32))]
+                zv = z3.simplify(z3.substitute(vv, *sub)).as_long(); zf = z3.simplify(z3.substitute(ff, *sub)).as_long(); tot += 1
+                if (zv, zf) != (v.value, f.value):
+                    bad += 1
+                    if bad <= 12: print('DISAGREE cvt %s %d->%d t%d a=%x mx=%x z3=(%x,%02x) c=(%x,%02x)' % (kind, sw, rw, tr, a, mx, zv, zf, v.value, f.value))
+    # dsl.tab: every entry of both tables, z3 (rcptab.c read by dsl) against the C accessors that read rcptab.c's own functions
+    from fnvlift import rtgen
+    tdir = rtgen.tmpdir(); i0 = src.index('/* dsl.tab:'); acc = src[i0:src.index('\n', src.index('static inline u32 fnvl_tab_rsqrt'))]      # the shipped accessors, cut out of rt/fnvl.h
+    tsrc = os.path.join(tdir, 't.cc')
+    open(tsrc, 'w').write('typedef unsigned int u32;\nextern "C" u32 fnvl_rcp32(u32); extern "C" u32 fnvl_rsqrt32(u32);\n' + acc + '\nextern "C" u32 t_rcp(u32 i){ return fnvl_tab_rcp(i); } extern "C" u32 t_rsq(u32 i){ return fnvl_tab_rsqrt(i); }\n')
+    subprocess.check_call(['g++', '-O1', '-shared', '-fPIC', '-I', tdir, '-o', os.path.join(tdir, 't.so'), '-x', 'c++', tsrc, '-x', 'c', os.path.join(LIFT, 'rt', 'rcptab.c')])
+    tl = ctypes.CDLL(os.path.join(tdir, 't.so'))
+    for nm, fn in (('rcp', tl.t_rcp), ('rsqrt', tl.t_rsq)):
+        tabs = dsl._rcp_tables()[nm]; tot += 2048
+        for i in range(2048):
+            if fn(i) != tabs[i]: bad += 1; print('DISAGREE tab %s %d' % (nm, i))
     print('fx_dsl_fp C vs z3: %d cases, %d disagree' % (tot, bad))
     return 1 if bad else 0
 if __name__ == '__main__': sys.exit(main())

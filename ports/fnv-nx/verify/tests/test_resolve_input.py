@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for recipe.resolve_input (the one reader of a path named by a gate input file): a bare path resolves to the tracked file of the root,
 an external to its mounted, checked tree; red for an undeclared external, a path that leaves the tree, a missing or untracked path, a
 tree_sha256 mismatch. Plain script: exit 0 on pass. Needs only git."""

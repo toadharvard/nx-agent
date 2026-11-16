@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for verify/gate_guestlink.py and the derivation helpers of recipe.py: parse_driver_link (the driver's -### line -> profile libs), onedef (the
 one-definition exclusion), outside_files and in_multilib. Pure: a canned driver line, no build."""
 import os
@@ -21,13 +22,18 @@ def check(name, ok, info=""):
 # the driver text is the pinned compiler's own -### output (the external of guest_compiler.json, mounted: FNVNX_EXTCACHE or fetched), never a canned line
 import json  # noqa: E402
 import subprocess  # noqa: E402
+import atexit  # noqa: E402
+import shutil  # noqa: E402
 import tempfile  # noqa: E402
+SCRATCH = tempfile.mkdtemp(prefix="gl-")  # one scratch dir per run, removed at exit
+atexit.register(shutil.rmtree, SCRATCH, ignore_errors=True)
 PIN = json.load(open(os.path.join(HERE, "..", "guest_compiler.json")))["external"]
-EXTC = os.environ.get("FNVNX_EXTCACHE") or tempfile.mkdtemp(prefix="glx-")
-AT = recipe.fetch_externals([PIN], tempfile.mkdtemp(prefix="gls-"), EXTC, tempfile.mkdtemp(prefix="glw-"))[PIN["name"]]["host"]
+EXTC = os.environ.get("FNVNX_EXTCACHE") or os.path.join(SCRATCH, "x")
+AT = recipe.fetch_externals([PIN], os.path.join(SCRATCH, "s"), EXTC, os.path.join(SCRATCH, "w"))[PIN["name"]]["host"]
 DRV = os.path.join(AT, recipe.pin_drivers()[1])
 FL = recipe.semantics_for(DRV, "cxx", recipe.SEMANTICS_FLAGS)
-_d = tempfile.mkdtemp(prefix="glp-")
+_d = os.path.join(SCRATCH, "p")
+os.makedirs(_d, exist_ok=True)
 open(os.path.join(_d, "x.cc"), "w").write(recipe.PROBE_SRC)
 TEXT = subprocess.run([DRV] + FL + ["-pie", "-###", os.path.join(_d, "x.cc"), "-o", "/out/x.elf"], capture_output=True, text=True, check=True).stderr
 ML = subprocess.run([DRV] + FL + ["-print-multi-directory"], capture_output=True, text=True, check=True).stdout.strip()
@@ -51,10 +57,10 @@ check("entry_object: ENTRY names another symbol, the startfile that defines _sta
       recipe.entry_object(crt, "__fnvnx_guest_start") == ["crt0.o"], recipe.entry_object(crt, "__fnvnx_guest_start"))
 check("entry_object: the default entry _start keeps it", recipe.entry_object(crt, "_start") == [], "")
 
-check("outside_files: every .o of the link under the runtime external (the program's /tmp/cc*.o excepted): none", recipe.outside_files(TEXT, AT) == [], recipe.outside_files(TEXT, AT))
-check("outside_files: a start file of another place is reported", recipe.outside_files(TEXT.replace([x for x in TEXT.split() if x.strip('"').endswith("/crt0.o")][0].strip('"'), "/usr/lib/crt1.o"), AT) == ["/usr/lib/crt1.o"], "")
+check("outside_files: every .o of the link under the runtime external (the program's /tmp/cc*.o excepted): none", recipe.outside_files(TEXT, AT, tempfile.gettempdir()) == [], recipe.outside_files(TEXT, AT, tempfile.gettempdir()))
+check("outside_files: a start file of another place is reported", recipe.outside_files(TEXT.replace([x for x in TEXT.split() if x.strip('"').endswith("/crt0.o")][0].strip('"'), "/usr/lib/crt1.o"), AT, tempfile.gettempdir()) == ["/usr/lib/crt1.o"], "")
 check("the pinned link is all in the multilib the flags select (-print-multi-directory %r) and under the external" % ML,
-      recipe.in_multilib([x for k in ("startfiles", "endfiles") for x in raw[k]] + raw["dirs"][:2], ML) == [] and recipe.outside_files(TEXT, AT) == [], (ML, raw))
+      recipe.in_multilib([x for k in ("startfiles", "endfiles") for x in raw[k]] + raw["dirs"][:2], ML) == [] and recipe.outside_files(TEXT, AT, tempfile.gettempdir()) == [], (ML, raw))
 SF = [x for x in raw["startfiles"] if os.path.basename(x) == "crtbegin.o"][0]
 check("in_multilib: the pinned crtbegin is in the multilib directory the flags select", recipe.in_multilib([SF], ML) == [], (SF, ML))
 OTHER = SF.replace(ML, "zz/other") if ML not in (".", "") else "lib/zz/other/crtbegin.o"

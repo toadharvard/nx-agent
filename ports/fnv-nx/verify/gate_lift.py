@@ -169,6 +169,22 @@ def judge_lifted_order(gate, root, repo, cache):
     return u, c, ids, "; ".join(why) or "%d items in %d images" % (u, len(images_naming(root, repo, cache)))
 
 
+def pack_of(repo, cache, root, rec, ws):
+    """-> {"host": dir of the pack, "tree": its hash} of the pack that ROOT's cxx_origin names: an external of the recipe (fetched), or an admitted root in
+    its `uses` (its declared PACK output, as published in GATE_CACHE: gate_build.published_output; absent is red, the gate never builds or guesses it)."""
+    pack = recipe.load_admit(repo)[root]["cxx_origin"]["pack"]
+    pe = [e for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == pack]
+    if len(pe) == 1:
+        return recipe.fetch_externals(pe, os.path.join(cache, "store"), os.path.join(cache, "external"), os.path.join(ws, "pack"))[pack]
+    if pe or not any(isinstance(u, dict) and u.get("root") == pack and u.get("output") == "PACK" for u in rec.get("uses", [])):
+        raise gate_contract.Red("input missing: cxx_origin.pack %r of %s is neither one external of its recipe nor a root in its `uses` with output PACK" % (pack, root))
+    try:
+        path, sha = gate_build.published_output(cache, pack, "PACK", repo)
+    except LookupError as e:
+        raise gate_contract.Red("input missing: %s" % e)
+    return {"host": path, "tree": sha}
+
+
 def eh_inputs(repo, cache, root, rec, ws):
     """-> (pack dir, facts dir, pack tree, facts tree); raises gate_contract.Red"""
     doc = gate_contract.load_inputs(os.path.join(repo, gate_contract.INPUTS))
@@ -176,12 +192,8 @@ def eh_inputs(repo, cache, root, rec, ws):
     if not ef:
         raise gate_contract.Red("input missing: %s declares no ehfacts (the external that holds ehtables.json of the exe and every module; owner L3a)"
                                 % gate_contract.INPUTS)
-    pack = recipe.load_admit(repo)[root]["cxx_origin"]["pack"]
-    pe = [e for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == pack]
-    if len(pe) != 1:
-        raise gate_contract.Red("input missing: the recipe of %s has no external %r (cxx_origin.pack)" % (root, pack))
     store, extc = os.path.join(cache, "store"), os.path.join(cache, "external")
-    pk = recipe.fetch_externals(pe, store, extc, os.path.join(ws, "pack"))[pack]
+    pk = pack_of(repo, cache, root, rec, ws)
     ex = recipe.fetch_externals(doc["external"], store, extc, os.path.join(ws, "facts"))
     name, _, sub = ef.partition("/")
     return pk["host"], os.path.join(ex[name]["host"], sub), pk["tree"], ex[name]["tree"]
@@ -230,14 +242,11 @@ def judge_lifted_flags(root, repo, cache):
     may-undefined origin reaches."""
     rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
     doc = gate_contract.load_inputs(os.path.join(repo, gate_contract.INPUTS))
-    pack = recipe.load_admit(repo)[root]["cxx_origin"]["pack"]
-    pe = [e for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == pack]
-    if len(pe) != 1:
-        raise gate_contract.Red("input missing: the recipe of %s has no external %r (cxx_origin.pack)" % (root, pack))
     ws = tempfile.mkdtemp(prefix="gate-lift-ext-")
     try:
         store, extc = os.path.join(cache, "store"), os.path.join(cache, "external")
-        pk = recipe.fetch_externals(pe, store, extc, os.path.join(ws, "pack"))[pack]
+        pack = recipe.load_admit(repo)[root]["cxx_origin"]["pack"]
+        pk = pack_of(repo, cache, root, rec, ws)
         ext = recipe.fetch_externals(doc["external"], store, extc, os.path.join(ws, "facts"))
         ef = os.path.join(pk["host"], "entries.tsv")
         if not os.path.isfile(ef):
@@ -254,7 +263,7 @@ def judge_lifted_flags(root, repo, cache):
             covered |= mine
             if not mine:
                 continue
-            r = run_tool(repo, cache, "gate_flags.py", [pepath, os.path.dirname(rg)], ("flags",), [name, trees], {"JOBS": os.environ.get("JOBS", "4")})["flags"]
+            r = run_tool(repo, cache, "gate_flags.py", [pepath, os.path.dirname(rg)], ("flags",), [name, trees], {"JOBS": "4"})["flags"]
             nf = r.get("no_form_rows", 0)
             reads, bad = r.get("flag_reads", 0), r.get("undecodable_ranges", 0)
             red = r.get("red_flag_reads", 0)

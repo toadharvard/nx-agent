@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/lib/sha256/build.json ports/fnv-nx/link
+# reads: ports/fnv-nx/loader/build.json ports/fnv-nx/platform/build.json ports/fnv-nx/render/d3d9/build.json ports/fnv-nx/render/gl4/build.json
+# reads: ports/fnv-nx/render/nxgpu/build.json ports/fnv-nx/render/pair/build.json ports/fnv-nx/render/shaders/translator/build.json
+# reads: ports/fnv-nx/render/smscan/build.json ports/fnv-nx/rt/guest/build.json ports/fnv-nx/rt/guest/crt0.s ports/fnv-nx/rt/guest_main/build.json
+# reads: ports/fnv-nx/shim/build.json ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for the guest ELF link through verify/recipe.py (RECIPE.md "Link"): link.roots, link.libs, the options fixed by the rule and the
 `ldcheck` post stage (link/ldcheck.py). Toy product roots in temp git repos, built with the real compiler and linker of env.json in the real
 sandbox stages; fixtures are those of test_recipe.py (the toy root is an ILP32 PIE guest linked with the tree's own link/guest.ld).

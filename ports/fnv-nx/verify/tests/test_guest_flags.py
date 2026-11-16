@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for verify/guest_flags.py: its --lang output equals the set the recipe passes to a C, a C++ and an asm unit (recipe.semantics_for on the
 pinned driver). Plain script: PASS/FAIL lines, exit 0 on pass."""
 import json

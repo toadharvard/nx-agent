@@ -325,13 +325,12 @@ def load(path):
         return None
 
 
-ARTIFACTS_URL = "https://github.com/toadharvard/fnv-nx-build"
 
 
 def fetcher(cache):
     """artifact(commit) of judge: the commit of the artifacts repository as a tree hash and its file list.
     Bare fetches are kept in CACHE/<commit> (the layout recipe.py uses for externals); results are memoised per run."""
-    url = os.environ.get("ARTIFACTS_URL", ARTIFACTS_URL)
+    url = os.environ["ARTIFACTS_URL"]   # a required input of the verdict (l1.py --artifacts)
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
     memo = {}
 

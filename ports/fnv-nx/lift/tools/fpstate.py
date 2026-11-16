@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """C4a: whole-program facts about the x87 / MMX / SSE control state, and the invariants that certify the lifter's no-effect bodies.
 
-    fpstate.py scan    <pe image> <facts dir> <retn.tsv>           one module: writes <facts dir>/fpstate/{fcw_loads,mxcsr_loads,readers,a3,scan}.tsv, prints counts only
-    fpstate.py combine <facts dir> [<facts dir> ...]      the PROGRAM invariants = AND over the modules; writes <facts dir>/fpstate/invariants.tsv into every directory
+    fpstate.py scan    <pe image> <facts dir> <retn.tsv> <out dir> <lift dir> <modules.tsv> <name>   one image (name: `exe`, or a row of the module table; its base is x86flow.image_base) (lift dir: the directory that holds the fnvlift package): reads the facts directory, writes <out dir>/{fcw_loads,mxcsr_loads,readers,a3,scan}.tsv, prints counts only
+    fpstate.py combine <out dir> <modules.tsv> <scan dir> [<scan dir> ...]      the PROGRAM invariants = AND over the modules (the scan dirs); writes <out dir>/invariants.tsv
 
 Deterministic: a pure function of the PE image and <facts dir>/universe.tsv (every iteration order is sorted, no clocks). Exe-derived outputs live only under the facts directories.
 Decoder, CFG, esp tracking and the value-set walk are the shared ones (x86flow.py, fpmodes.py).
@@ -21,15 +21,22 @@ surface, rt/imp.h); ASM-220: the CONTEXT image the runtime hands to guest SEH ha
 import os, sys, hashlib
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import cli
-FPUSAGE = 'usage: fpstate.py scan IMAGE FACTSDIR RETN.tsv | fpstate.py combine DIR...'
-sys.path.insert(0, HERE); sys.path.insert(0, os.path.dirname(HERE))
+import cli, libarg; libarg.take()      # --lib DIR: the package fnvlift (a declared input of the stage)
+FPUSAGE = 'usage: fpstate.py scan IMAGE FACTSDIR RETN.tsv OUTDIR LIFTDIR MODULES_TSV NAME | fpstate.py combine OUTDIR MODULES_TSV SCANDIR...'
+sys.path.insert(0, HERE)
 from collections import Counter, defaultdict
 from multiprocessing import Pool
 import x86flow as W
 import fpmodes as FP
 from x86flow import X, M32, mn, Fn, load_universe
-from fnvlift import f_cpufeat, f_sys, f_sse, core
+f_cpufeat = f_sys = f_sse = core = None      # the lifter's handler tables: use_lift(dir) imports them from the explicit directory that holds the fnvlift package
+
+
+def use_lift(d):
+    global f_cpufeat, f_sys, f_sse, core
+    sys.path.insert(0, d)
+    from fnvlift import f_cpufeat as a, f_sys as b, f_sse as c, core as e
+    f_cpufeat, f_sys, f_sse, core = a, b, c, e
 
 FCW_START, MXCSR_START = 0x027F, 0x1F80
 FCW_FIELDS = (('masks', 0x003F), ('PC', 0x0300), ('RC', 0x0C00), ('IC', 0x1000))
@@ -229,9 +236,8 @@ def analyse(sites, start, fl, entries_of, kinds):
     return dict(cls=cls, consts=sorted(consts), trans=sorted(trans), unk=sorted(set(unk)), R=R, fields=fields(R, start, fl))
 
 
-def do_scan(exe, facts, retn, base):
+def do_scan(exe, facts, retn, out, base):
     raw, rows = load_universe(exe, base)
-    out = os.path.join(facts, 'fpstate')
     os.makedirs(out, exist_ok=True)
     W.load_retn(retn)
     kind = {a: k for a, e, k in rows}; ext = {a: e for a, e, k in rows}
@@ -329,18 +335,21 @@ def do_scan(exe, facts, retn, base):
         return 'proven-nearest' if v == {0} else ('proven-other:%s' % ','.join('%x' % x for x in sorted(v))) if 0 not in v else 'mixed:%s' % ','.join('%x' % x for x in sorted(v))
     rc_x87, rc_sse = rcclass(A1), rcclass(A1m)
     with open(out + '/scan.tsv', 'w') as f:
-        f.write('module\t%s\nexe_sha256\t%s\nuniverse_md5\t%s\nI-FPMASK\t%s\tunknown_fcw=%d unknown_mxcsr=%d cleared_mask_bits=%s\nI-FPSTICKY\t%s\tobservers=%d\nRC_X87\t%s\nRC_SSE\t%s\n' % (
+        f.write('module\t%s\nexe_sha256\t%s\nuniverse_md5\t%s\nASM-204\t%s\tunknown_fcw=%d unknown_mxcsr=%d cleared_mask_bits=%s\nASM-205\t%s\tobservers=%d\nRC_X87\t%s\nRC_SSE\t%s\n' % (
             os.path.basename(exe), hashlib.sha256(open(exe, 'rb').read()).hexdigest(), hashlib.md5(raw).hexdigest(), 'holds' if mask_ok else 'unproven', unk_f, unk_m,
             ','.join(map(str, cleared)) or '-', 'holds' if stat_ok else 'unproven', nobs, rc_x87, rc_sse))
     L.append('module invariants: ASM-204 %s (unknown loads fcw %d mxcsr %d, mask bits clearable %s)  ASM-205 %s (observers %d)' % ('holds' if mask_ok else 'unproven', unk_f, unk_m, cleared or '-', 'holds' if stat_ok else 'unproven', nobs))
     print('\n'.join(L))
 
 
-def do_combine(dirs):
+def do_combine(outdir, table, dirs):
+    import pemod
+    want = sorted(['exe'] + [n[:-4] if n.endswith('.dll') else n for n in pemod.modules(table)]); got = sorted(os.path.basename(d.rstrip('/')) for d in dirs)
+    if want != got: sys.exit('fpstate combine: the scanned images are not the exe plus the rows of the module table: missing %s, extra %s' % (sorted(set(want) - set(got)) or '-', sorted(set(got) - set(want)) or '-'))
     rows = []
     for d in dirs:
         kv = {}
-        for ln in open(os.path.join(d, 'fpstate', 'scan.tsv')):
+        for ln in open(os.path.join(d, 'scan.tsv')):
             f = ln.rstrip('\n').split('\t')
             kv[f[0]] = f[1:]
         rows.append((d, kv))
@@ -348,8 +357,9 @@ def do_combine(dirs):
     for inv in ('ASM-204', 'ASM-205'):
         holds = all(kv[inv][0] == 'holds' for d, kv in rows)
         prog[inv] = 'holds' if holds else 'unproven'
-    for d, kv in rows:
-        with open(os.path.join(d, 'fpstate', 'invariants.tsv'), 'w') as f:
+    os.makedirs(outdir, exist_ok=True)
+    for _ in (0,):
+        with open(os.path.join(outdir, 'invariants.tsv'), 'w') as f:
             f.write('# program-level invariants = AND over the modules below (tools/fpstate.py combine); status holds | unproven\n')
             for inv in sorted(prog):
                 f.write('%s\t%s\t%s\n' % (inv, prog[inv], ' '.join('%s:%s' % (kv2['module'][0], kv2[inv][0]) for d2, kv2 in rows)))
@@ -357,9 +367,9 @@ def do_combine(dirs):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) == 6 and sys.argv[1] == 'scan':
-        W.configure(sys.argv[3]); do_scan(sys.argv[2], sys.argv[3], sys.argv[4], int(sys.argv[5], 16))
-    elif len(sys.argv) >= 3 and sys.argv[1] == 'combine':
-        do_combine(sys.argv[2:])
+    if len(sys.argv) == 9 and sys.argv[1] == 'scan':
+        use_lift(sys.argv[6]); W.configure(sys.argv[3]); do_scan(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], W.image_base(sys.argv[2], sys.argv[7], sys.argv[8]))
+    elif len(sys.argv) >= 5 and sys.argv[1] == 'combine':
+        do_combine(sys.argv[2], sys.argv[3], sys.argv[4:])
     else:
         cli.parse(FPUSAGE, sys.argv[1:], (99, 99))

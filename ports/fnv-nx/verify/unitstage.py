@@ -116,21 +116,35 @@ def prog(p):
     resolved on the host PATH the way the compiler would exec it (a cross compiler answers its absolute path)."""
     return p if os.path.isabs(p) else (shutil.which(p) or p)
 
+def progress(stage, key, what, sec=None):
+    """One flushed line on stderr per stage start and end: `stage ID KEY start` / `stage ID KEY hit|built|failed SECONDS`. A line is in no key and changes no
+    output: a long build shows where it is."""
+    sys.stderr.write("stage %s %s %s%s\n" % (stage, key, what, "" if sec is None else " %.2fs" % sec))
+    sys.stderr.flush()
+
+
 def run_stage(store, doc, cold):
     sandbox.check_doc(doc)
     key = sandbox.key_of(doc)
     cas._put(store, "stage-docs", key + ".json", cas.canon(doc) + b"\n")
     old = sandbox._load(store, key)
+    progress(doc["stage"], key, "start")
     if old is not None and not cold:
+        progress(doc["stage"], key, "hit" if not old.get("rc") else "failed", 0.0)
         return key, old, "hit", 0.0
     t0 = time.time()
     try:
         res, tm = sandbox.execute_timed(store, doc, key)
     except OSError as e:   # EMLINK, ENOSPC, EXDEV ... of the store or the sandbox set-up: a red stage naming the stage, never a crash
+        progress(doc["stage"], key, "failed", time.time() - t0)
         x = sandbox.SbxError("stage %s: %s (errno %s)" % (doc["stage"], e.strerror or e, e.errno))
         x.stage = doc["stage"]
         raise x
+    except BaseException:
+        progress(doc["stage"], key, "failed", time.time() - t0)
+        raise
     sec = time.time() - t0
+    progress(doc["stage"], key, "built" if not res.get("rc") else "failed", sec)
     sandbox.write_time(store, key, tm)    # the timing sidecar of an execution (a miss); a hit wrote none
     if old is None:
         sandbox._store_result(store, key, res)
@@ -143,6 +157,7 @@ class Build:
     def __init__(self, a):
         self.store, self.cold, self.cxx, self.cache = a.store, a.cold, a.cxx, {}
         self.hint_ns = getattr(a, "hint_ns", "")   # the root that owns the units (hint_path); "" for a caller with a store of its own
+        self.compiler_key = ""   # stage key of the compiler stage (recipe.Job.compiler_key): in the env, so in every PP and CC key
         self.variant = ""   # recipe variant: its name is in the env, so in every stage key ("" adds nothing)
         self.cc_drop = set()   # `at` of tool-runtime inputs the CC stage does not mount (externals other than the compiler's)
         self.cc_flags, self.cc_inputs = [], []   # plugins: flags and declared inputs [(at, tree)] of the CC stage only (a plugin is part of its key)
@@ -176,7 +191,8 @@ class Build:
         argv = [self.cxx] + (self.iargs if inc else []) + self.flags + (self.cc_flags if kind == "cc" else []) + ["-frandom-seed=" + seed, "-Werror=date-time"]
         argv += ["-ffile-prefix-map=%s=%s" % (at, at[1:]) for at, _ in self.roots] + tail + [src]
         doc = {"format": "fnvnx-stage/1", "stage": "%s:%s" % (kind, rel), "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
-               "env": dict(ENV, PATH=os.path.dirname(self.cxx), **({"FNVNX_VARIANT": self.variant} if self.variant else {})), "outputs": ["/out"],
+               "env": dict(ENV, PATH=os.path.dirname(self.cxx), **({"FNVNX_VARIANT": self.variant} if self.variant else {}),
+                                                                  **({"FNVNX_COMPILER_KEY": self.compiler_key} if self.compiler_key else {})), "outputs": ["/out"],
                "inputs": sorted([i for i in self.rt["inputs"] if kind != "cc" or i["at"] not in self.cc_drop] +
                                 [{"at": at, "tree": t} for at, t in inputs + (self.cc_inputs if kind == "cc" else [])],
                                 key=lambda i: i["at"])}

@@ -6,12 +6,21 @@ import os, struct, bisect, itertools
 from collections import defaultdict
 import sys
 import capstone
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 from fnvlift.image import Image as _FImage
 from capstone import x86 as X
 
 M32 = 0xffffffff
 FACTS = UNI = EHJ = None      # set by configure(): the facts root of the image under analysis, passed explicitly by the program (no environment variable, no default)
+
+
+def image_base(path, table, name):
+    """the load base of an image, from its declared source: `exe` = the PE's own ImageBase (the exe is mapped at it, never relocated), else the assigned base of the row `name` (with or without .dll) of the loader's module table."""
+    if name == 'exe':
+        d = open(path, 'rb').read(); return struct.unpack_from('<I', d, struct.unpack_from('<I', d, 0x3c)[0] + 52)[0]
+    import pemod
+    r = pemod.modules(table); n = name.lower(); n = n if n in r else n + '.dll'
+    if n not in r: sys.exit('x86flow.image_base: %s is not a row of %s' % (name, table))
+    return r[n].base
 
 
 def configure(facts):

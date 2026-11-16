@@ -6,7 +6,7 @@ Form-level conventions: fault(code, cond) = the instruction raises DE/BP/UD when
 `when` on a register/flag write = the SDM defines the value only when `when` holds; df / flo (other EFLAGS bits) are state the
 model driver does not expose, so a form that writes them can only be certified on its observable fields."""
 import os, sys
-sys.path.insert(0, os.environ.get('FNVLIFT_ROOT') or os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 from fnvlift.dsl import C, Form, V, bit, concat, eq, extract, load, mm, msb, trunc, xmm, zext
 from capstone import x86 as X
 
@@ -14,6 +14,7 @@ R8 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh']; R16 = ['ax', 'cx', 'dx', 
 SEGPFX = {0x64: 'fs', 0x65: 'gs', 0x2e: 'cs', 0x26: None, 0x36: None, 0x3e: None}
 PFX = {0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65}
 SEGS = {'cs', 'ds', 'es', 'ss', 'fs', 'gs'}
+from fnvlift.formkey import is_far_raw
 def form_key(ins):
     """same as form_key in the retired one-instruction harness (prove.py checks the two agree when the retired one-instruction harness imports)"""
     raw = bytes(ins.bytes); i = 0
@@ -27,7 +28,7 @@ def form_key(ins):
                       else 'r8' if n in R8 else 'r16' if n in R16 else 'r32' if n in ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi'] else n)
         elif o.type == X.X86_OP_IMM: ks.append('imm')
         else: ks.append('m%d' % (o.size * 8) + {X.X86_REG_FS: ':fs', X.X86_REG_GS: ':gs'}.get(o.mem.segment, ''))
-    return '%s|%s|%s' % (ins.mnemonic, ','.join(ks), opc.hex())
+    return '%s|%s|%s' % (ins.mnemonic, ','.join(ks), opc.hex() + ('/far' if is_far_raw(raw[i:]) else ''))
 
 class Op:
     a16 = False                      # address-size attribute 16 (set by build() from the 0x67 prefix)
@@ -167,7 +168,7 @@ def build(ins, addr):
         o.a16 = c.a16
         if o.k == 'm': o.seg = None if o.cseg == X.X86_REG_ES else sp      # the string destination is ES:EDI whatever the override (SDM Vol. 2, MOVS / STOS / SCAS / CMPS)
     c.dseg = sp                      # the effective segment of the implicit DS-default operands (string source, XLAT): the last override prefix
-    c.opc = raw[i + 1] if raw[i] == 0x0f else raw[i]; c.raw = raw
+    c.opc = raw[i + 1] if raw[i] == 0x0f else raw[i]; c.raw = raw; c.nprefix = i
     fn = H.get(c.m)
     if fn is None and c.m[0] == 'j': fn = H['jcc']
     if fn is None and c.m.startswith('set'): fn = H['setcc']

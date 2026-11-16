@@ -37,7 +37,8 @@
   "flags": [
    "-m",
    "aarch64linux32"
-  ]
+  ],
+  "entry": "fnvl_imptest_entry"
  },
  "external": [
   {

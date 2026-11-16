@@ -8,8 +8,6 @@
  ],
  "result": "hostapi.json",
  "covers": [
-  "product-guest",
-  "lifted",
-  "host-product"
+  "compiled"
  ]
 }

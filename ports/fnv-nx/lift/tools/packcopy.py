@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The `generated` stage of the product root lift/pack (build.json): copy the units of the published pack tree into the root's view.
-    packcopy.py PACK OUT        PACK/u/000.cpp .. PACK/u/fff.cpp -> OUT/<same names>
-The names are fixed (tools/liftgen.py unit_names); a file the pack lacks makes the stage fail, an extra one is not copied."""
+    packcopy.py PACK OUT        PACK/u/000.src .. PACK/u/fff.src -> OUT/u/000.cpp .. OUT/u/fff.cpp
+The names are fixed (tools/liftgen.py unit_names); a file the pack lacks makes the stage fail, an extra one is not copied. An external with an inc/ directory is rejected: the runtime's headers are generated, not carried."""
 import os
 import shutil
 import sys
@@ -12,9 +12,11 @@ def names():
 
 
 def main(pack, out):
+    if os.path.exists(os.path.join(pack, 'inc')):
+        sys.exit('packcopy: %s/inc exists: the pack external holds no header of the runtime (inc/fnvl_prelude.h and inc/imp.h are the pack\'s own generated stage, packstage.py inc, from the runtime\'s current headers)' % pack)
     os.makedirs(os.path.join(out, 'u'), exist_ok=True)
     for n in names():
-        shutil.copyfile(os.path.join(pack, n), os.path.join(out, n))
+        shutil.copyfile(os.path.join(pack, n[:-4] + '.src'), os.path.join(out, n))
 
 
 if __name__ == '__main__':
