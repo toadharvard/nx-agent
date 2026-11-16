@@ -185,7 +185,12 @@ class Tr:
                 if n not in s.env:
                     raise Unsupported("x87 variable %s" % n)
                 return s.env[n]
-            raise Unsupported("x87 op symbol %s" % e.decl().name())
+            name = e.decl().name()
+            if name in X.CARRIER_OPS:      # a carrier op (x87spec.CARRIER_OPS): the DSL node of the same name
+                ws, rw = X.CARRIER_OPS[name]
+                assert tuple(e.arg(j).size() for j in range(e.num_args())) == ws and e.size() == rw, name
+                return dsl.cop(name, rw, *[s.t(e.arg(j)) for j in range(e.num_args())])
+            raise Unsupported("x87 op symbol %s" % name)
         if _fp_node(e):
             raise Unsupported("x87 op %s" % KINDNAME.get(k, k))
         a = lambda j: s.t(e.arg(j))
@@ -365,7 +370,17 @@ def domain_terms(o, sub):
     s0 = X.from_dsl(pre_vars())
     fcw = z3.BitVec("fcw", 16)
     inv = (z3.Extract(X.ES, X.ES, s0.fsw) == X.K(1, 1)) == X.es_of(s0.fsw, s0.fcw)      # ES is stored state, recomputed by every writing instruction (sync_es): the invariant that it holds the derived value
-    return [("masks", z3.Extract(5, 0, fcw) == z3.BitVecVal(0x3f, 6)), ("ES invariant", inv), ("pre", S(o.pre)), ("nd_pre", S(o.nd_pre))]
+    d = [("masks", z3.Extract(5, 0, fcw) == z3.BitVecVal(0x3f, 6)), ("ES invariant", inv), ("pre", S(o.pre)), ("nd_pre", S(o.nd_pre))]
+    if o.eflags is not None:
+        d.append(("eflags written", S(o.eflags[3])))      # the EFLAGS write happens unless an unmasked IE / DE aborts it (SDM 2A:FCOMI Operation); the masks fact excludes that
+    return d
+
+
+def carrier_de_refusal(o):
+    """the reason an Out has no Form (ruling 3b), or None: its DE is evaluated on a register image, whose carrier kind the spec state does not hold (x87spec CARRIER_DE)"""
+    if getattr(o, "carrier_de", False):
+        return "x87 DE of a register operand is defined at its carrier type (OWNER 8): the carrier kind is not in the spec state (x87spec CARRIER_DE)"
+    return None
 
 
 def effects(c, key, i):
@@ -374,6 +389,9 @@ def effects(c, key, i):
     F = c.F
     c.x87_mem = (None, None)
     d, o, pcs, ef, m = run(key, i)
+    why = carrier_de_refusal(o)
+    if why:
+        raise Unsupported(why)
     env = {n: V(n, w) for n, w in X.DSL_WIDTH.items()}
     a = None
     if pcs is not None:
@@ -387,8 +405,6 @@ def effects(c, key, i):
     if miss:
         raise Unsupported("x87 nondeterminism without a resolution: %s" % ",".join(miss))
     S = (lambda t: z3.substitute(t, *sub)) if sub else (lambda t: t)
-    if o.eflags is not None:
-        raise Unsupported("x87 EFLAGS effect (fcomi): not in this slice")
     # o.undef / o.mem_undef (the bits the SDM leaves Undefined / reserved): the Form takes the spec's own value for them, a refinement of "any value"; the proof compares exactly
     post = {k: z3.simplify(S(v)) for k, v in X.to_dsl(o.s).items()}
     unch = {k: z3.eq(v, d[k]) for k, v in post.items()}      # the field the instruction leaves as it was (z3's own simplifier: the spec's finish() ites)
@@ -411,6 +427,11 @@ def effects(c, key, i):
             forms.mstore(F, a if off == 0 else forms.addoff(a, C(off // 8, 32)), tr.t(z3.simplify(z3.Extract(off + wd - 1, off, mv))), wn)
     if o.ax is not None:
         F.reg("eax", concat(extract(V("eax", 32), 31, 16), tr.t(z3.simplify(S(o.ax)))))
+    if o.eflags is not None:      # FCOMI / FUCOMI (SDM 2A:FCOMI Flags): ZF, PF, CF from the compare, OF, SF, AF cleared; the spec's value is the Form's where the SDM leaves them undefined (stack underflow)
+        for f, t in zip(("zf", "pf", "cf"), o.eflags[:3]):
+            F.flag(f, tr.t(z3.simplify(S(t))))
+        for f in ("of", "sf", "af"):
+            F.flag(f, C(0, 1))
     for _, t in domain_terms(o, sub):
         F.require(tr.t(z3.simplify(t)))
 
@@ -469,8 +490,13 @@ def prove_form(F):
     want["mem"] = (P["mem"], mem)
     for r in D.REGS:
         want[r] = (P["regs"][r], z3.Concat(z3.Extract(31, 16, z3.BitVec(r, 32)), S(o.ax)) if (r == "eax" and o.ax is not None) else z3.BitVec(r, 32))
+    one, zero = z3.BitVecVal(1, 1), z3.BitVecVal(0, 1)
+    ef_post = {}
+    if o.eflags is not None:
+        ef_post = {f: z3.If(S(t), one, zero) for f, t in zip(("zf", "pf", "cf"), o.eflags[:3])}
+        ef_post.update({f: zero for f in ("of", "sf", "af")})
     for f in D.FLAGS + ("df",):
-        want[f] = (P["flags"][f], z3.BitVec(f, 1))
+        want[f] = (P["flags"][f], ef_post.get(f, z3.BitVec(f, 1)))
     want["eip"] = (P["eip"], z3.BitVecVal(F.eip.x, 32))
     for j in range(8):
         want["xmm%d" % j] = (P["xmm"][j], z3.BitVec("xmm%d" % j, 128))
