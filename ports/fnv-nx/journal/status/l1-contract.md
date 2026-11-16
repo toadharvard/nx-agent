@@ -2225,3 +2225,9 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Undeclared consumers are now red: the farm/boot_job.sh BOOT_DATA_ITEMS, tests/s5/farm_boot.sh, gamedata/shaders and gamedata/gog. The boot root's owner (L4) declares the data items it needs as externals.
 - bottleneck: the cand3b farm verdict.
 - L5 w25 cbc2b5b30: 511 FNVNX_EXPORT records (adds the dsound, dinput8 and xinput resolvers, diff empty). The platform recipe check is red only on contract/proto.py's bare `import store` (L1's). The fix and a sweep of contract/ are assigned to w28.
+- w28 2872f3ac8:
+  - abi: universe = bridge natives plus the facts native rows; va_forwarders = the va records, through the resolver; 3/3 tests pass.
+  - hive: writer bodies exempt by their FNVNX_EXPORT record.
+  - header root: an implicit INCLUDE output, through root_outputs, 5/5 tests pass. recipe.check gives 23 errors before and after, all render/* (L6).
+- Final header home: contract/include, a header root reached through uses. contract/exporthdr is withdrawn; L5 and w13 move to it.
+- RET/galaxywrp rule: the return class and argument slots come from the bound definer's own ctype/crossing record. No Wine spec, no SDK header. An import whose definer has no type record is red. Derived at stage B.
