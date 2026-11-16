@@ -26,7 +26,7 @@ void fnvl_raise_av(u32 access, u32 addr, u32 at);
 void fnvl_os_RtlUnwind(void);
 void fnvl_os_RaiseException(void);
 void fnvl_os_DebugBreak(void);
-int fnvl_raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 eip, u32 sp, u32 cxf, u32 ef);
+int fnvl_raise_rec_ctx(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 eip, u32 sp, u32 cxf, u32 ef);
 }
 enum { CTX_SIZE = 716, REC_SIZE = 80, RET_SENT = 0xDEADBEE0u, EXC_UNWINDING = 2, EXC_EXIT_UNWIND = 4, EXC_NONCONT = 1 };
 enum { C_FLAGS = 0, C_FLOAT = 28, C_GS = 140, C_FS = 144, C_ES = 148, C_DS = 152, C_EDI = 156, C_ESI = 160, C_EBX = 164, C_EDX = 168, C_ECX = 172, C_EAX = 176,
@@ -173,7 +173,7 @@ static int dispatch(u32 rec, u32 ctx) {
 }
 
 /* -> 1 execution continues from the CONTEXT (registers loaded, c->ra = Context.Eip), 0 a handler or the filter left by a non-local transfer */
-int fnvl_raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 eip, u32 sp, u32 cxf, u32 ef) {
+int fnvl_raise_rec_ctx(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 eip, u32 sp, u32 cxf, u32 ef) {
     u32 rec = sp - REC_SIZE; zero(rec, REC_SIZE);
     M32(rec) = code; M32(rec + 4) = flags; M32(rec + 12) = addr; M32(rec + 16) = np;
     for (u32 i = 0; i < np; i++) M32(rec + 20 + 4 * i) = info[i];
@@ -184,6 +184,12 @@ int fnvl_raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 e
         ctx_restore(ctx);
     }
     return d != 0;
+}
+
+/* A software raise (RaiseException): the record with the full context of a software raise, EFLAGS as a call leaves them (SW_EFL). The one declaration of every caller
+   outside this file is in rt/fnvl.h; the context flags and EFLAGS are this function's, not a caller's parameter. */
+extern "C" int fnvl_raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 eip, u32 sp) {
+    return fnvl_raise_rec_ctx(code, flags, addr, np, info, eip, sp, CX_EXCEPTION, SW_EFL);
 }
 
 /* Hardware exception -> NTSTATUS record, a TOTAL switch over the codes of rt/fnvl.h (the lifter emits no other value; there is no default arm, so a code outside the list is not
@@ -208,7 +214,7 @@ extern "C" void fnvl_raise(u32 code, u32 at) {
         break;
     }
     if (nt == 0) __builtin_unreachable();       /* not reached: every emitted code is a case above */
-    fnvl_raise_rec(nt, 0, addr, np, info, eip, sp, CX_EXCEPTION, c->eflags);   /* hardware: EFLAGS as the lifted site flushed it (RAISE_OUT) */
+    fnvl_raise_rec_ctx(nt, 0, addr, np, info, eip, sp, CX_EXCEPTION, c->eflags);   /* hardware: EFLAGS as the lifted site flushed it (RAISE_OUT) */
 }
 
 /* a transfer to an address without a body (the dispatcher's miss, rt/rt.c): #UD at that address */
@@ -216,7 +222,7 @@ extern "C" void fnvl_raise_ud(u32 at) { fnvl_raise(FNVL_UD, at); }
 
 extern "C" void fnvl_raise_av(u32 access, u32 addr, u32 at) {
     u32 info[2] = { access, addr };
-    fnvl_raise_rec(0xC0000005u, 0, at, 2, info, at, esp, CX_EXCEPTION, c->eflags);
+    fnvl_raise_rec_ctx(0xC0000005u, 0, at, 2, info, at, esp, CX_EXCEPTION, c->eflags);
 }
 
 /* guest entry, stdcall: RaiseException(code, flags, nargs, args) */
@@ -225,7 +231,7 @@ extern "C" void fnvl_os_RaiseException(void) {
     if (n > 15) n = 15;
     for (u32 i = 0; i < n; i++) info[i] = M32(args + 4 * i);
     esp = sp;                                              /* the caller's state after the call returns */
-    fnvl_raise_rec(code, fl, ra, n, info, ra, sp, CX_EXCEPTION, SW_EFL);
+    fnvl_raise_rec_ctx(code, fl, ra, n, info, ra, sp, CX_EXCEPTION, SW_EFL);
     c->ra = c->ra;                                         /* ContinueExecution: c->ra = Context.Eip (the return address), registers loaded */
 }
 
@@ -233,7 +239,7 @@ extern "C" void fnvl_os_RaiseException(void) {
 extern "C" void fnvl_os_DebugBreak(void) {
     u32 ra = M32(esp), sp = esp + 4, info[1] = { 0 };
     esp = sp;
-    fnvl_raise_rec(0x80000003u, 0, ra, 1, info, ra, sp, CX_EXCEPTION, SW_EFL);
+    fnvl_raise_rec_ctx(0x80000003u, 0, ra, 1, info, ra, sp, CX_EXCEPTION, SW_EFL);
 }
 
 /* guest entry, stdcall: RtlUnwind(TargetFrame, TargetIp, ExceptionRecord, ReturnValue) */

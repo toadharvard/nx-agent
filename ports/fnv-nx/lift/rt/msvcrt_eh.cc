@@ -21,7 +21,6 @@
 
 extern "C" {
 void fnvl_os_RtlUnwind(void);
-int fnvl_raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 eip, u32 sp);
 void *fnvnx_win32_lookup_export(const char *dll, const char *name);      /* the platform's msvcrt exports free and abort (bridge rows bind lookup): the same lookup their import entries use */
 u32 fnvl_msvcrt_sighandlers[23];
 void fnvl_msvcrt_except_handler3(void);
@@ -398,11 +397,30 @@ extern "C" void fnvl_msvcrt_eh_nested_catch(void)
 /* _CxxThrowException(object, type), stdcall: RaiseException(CXX_EXCEPTION, EXCEPTION_NONCONTINUABLE, 3, {magic, object, type}). The record is raised at the
    thrower's return address with the thrower's esp after the `ret 8` (rt/seh.cc fnvl_raise_rec, what fnvl_os_RaiseException does for a direct call): the state
    after it returns -- a handler that continued, or a non-local transfer -- is whatever fnvl_raise_rec left. */
+static int cxx_throw(u32 obj, u32 ti, u32 ra, u32 sp)
+{
+    u32 info[3] = { CXX_MAGIC_VC6, obj, ti };
+    esp = sp;
+    return fnvl_raise_rec(CXX_EXCEPTION, EH_NONCONTINUABLE, ra, 3, info, ra, sp);
+}
+
+/* one body, two ABI entries. The guest entry (lifted code calls the import): stdcall, the arguments on the guest stack. */
 extern "C" void fnvl_msvcrt_CxxThrowException(void)
 {
-    u32 ra = M32(esp), info[3] = { CXX_MAGIC_VC6, M32(esp + 4), M32(esp + 8) }, sp = esp + 12;
-    esp = sp;
-    fnvl_raise_rec(CXX_EXCEPTION, EH_NONCONTINUABLE, ra, 3, info, ra, sp);
+    cxx_throw(M32(esp + 4), M32(esp + 8), M32(esp), esp + 12);
+}
+
+/* The native entry: C++ of the platform (platform/crt/cxx_bodies.cpp throw_bad_alloc) running under an import entry calls the bare symbol with the AAPCS arguments (ILP32:
+   a pointer is a guest address). It raises at the guest call site of that import, the ra and esp the import entry recorded (fnvl_native_guest: the return address at the esp
+   of the call, as the raise backend of rt/unhandled.cc does for RaiseException). Windows' msvcrt raises from inside itself, and the dispatcher walks the fs:0 chain, so
+   only guest frames are searched: the guest call site is where that walk starts. Once the raise returns (a lifted catch took the transfer, or the context continues) the
+   native frames are left by the non-local exit of the entry (fnvl_native_exit): this function does not return. */
+extern "C" __attribute__((noreturn)) void _CxxThrowException(void *obj, const void *ti)
+{
+    u32 o = (u32)(unsigned long)obj, t = (u32)(unsigned long)ti;
+    u32 base = fnvl_native_guest();
+    cxx_throw(o, t, M32(base), base);
+    fnvl_native_exit();
 }
 
 /* ?terminate@@YAXXZ (cdecl): Wine terminate() */

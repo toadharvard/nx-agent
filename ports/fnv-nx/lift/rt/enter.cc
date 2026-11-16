@@ -91,6 +91,9 @@ extern "C" void fnvl_current_main(u32 *sp, u32 *teb) { struct cpu *p = *fnvl_hos
    - fnvl_invoke_regs_main, fnvnx_guest_invoke_regs: a BRIDGE called from a native body (rt/dispatch.c, tools/bridgegen.py). A native body implements an exe function, so it
      runs under the guest FPCR/FPSR itself and nothing was parked: the entry leaves both registers alone, whatever c->hfpcr/c->hfpsr hold.
    The kind is the entry point, not a state: no flag is read at run time. */
+/* the one non-local exit from native frames (imp.h): the frame on top of c->nf holds the __builtin_setjmp point of the entry that called the native code */
+extern "C" __attribute__((noreturn)) void fnvl_native_exit(void) { __builtin_longjmp((void **)c->nf->jb, 1); }
+
 template <bool FROM_IMPORT>
 static __attribute__((noinline)) void invoke_core(u32 addr, u32 ecxv, u32 edxv, u32 nargs, const u32 *args, u32 kind, struct fnvnx_guest_ret *out)
 {
@@ -106,7 +109,7 @@ static __attribute__((noinline)) void invoke_core(u32 addr, u32 ecxv, u32 edxv, 
         u32 t = c->ra; REGS(); fnvl_dispatch(t)(); REGS();
         if (esp > sp0) {
             if (c->ra == FNVL_SENT) break;
-            if (c->nf) __builtin_longjmp((void **)c->nf->jb, 1);       /* left to a frame older than this callback: imp.h */
+            if (c->nf) fnvl_native_exit();       /* left to a frame older than this callback: imp.h */
         }
     }
     out->eax = eax; out->edx = edx; out->st0 = 0;
