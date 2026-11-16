@@ -47,6 +47,9 @@ extern "C" {
 /* (the other Win32 constants and declarations that were here moved to shim/include/fnvnx_win32.h; the
  * ERROR_* codes stay here: some decomp units define ERROR_SUCCESS... as enumerators of their own) */
 
+/* kernel32 file calls the shim leaves out (win32/crt_kernel32.cpp defines it; the CRT lowio in crt/iob.c calls it) */
+DWORD GetFileType(HANDLE);
+
 /* ---- runtime hooks (not Win32) */
 /* Paths (docs/RUNTIME.md "Paths"). Windows prefix (case-insensitive, '\' or '/') -> host directory. */
 int fnvnx_path_mount(const char *win_prefix, const char *host_dir);

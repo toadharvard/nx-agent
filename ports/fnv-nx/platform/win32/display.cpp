@@ -11,7 +11,7 @@
  * on the two-mode set.
  * ChangeDisplaySettingsA accepts a mode iff it equals the mode the output currently provides (the console cannot
  * switch its output on request), so it never changes the mode; the settings it persists are therefore always the
- * current mode. Registry layout (the reference's, Wine): the adapter's video key, values DefaultSettings.*.
+ * current mode. It makes no registry key: the hive is written only by the seed unit (registry_seed.cpp).
  * WM_DISPLAYCHANGE goes to the top-level windows when the mode changes (dock change) and when CDS_RESET asks for
  * the settings to be applied although they are unchanged.
  * The metrics table values are the reference environment's (Wine 9.0 prefix, HKCU\Control Panel\Desktop\WindowMetrics:
@@ -301,21 +301,6 @@ const dmfield k_dmfields[] = { { DM_POSITION, 44, 8 }, { DM_DISPLAYORIENTATION, 
     { DM_DISPLAYFREQUENCY, 120, 4 } };
 uint32_t rd32(const uint8_t *p, unsigned off) { uint32_t v; memcpy(&v, p + off, 4); return v; }
 
-/* the settings are kept per user (HKCU) or, with CDS_GLOBAL, for all users (HKLM): the adapter's video key */
-bool persist(HKEY root)
-{
-    HKEY k;
-    if (RegCreateKeyExA(root, VIDEO_KEY, 0, NULL, 0, 0xF003F, NULL, &k, NULL) != ERROR_SUCCESS) return false;
-    const struct { const char *name; uint32_t v; } vals[] = {
-        { "DefaultSettings.BitsPerPel", MODE_BPP }, { "DefaultSettings.XResolution", (uint32_t)fnvnx_display_w() },
-        { "DefaultSettings.YResolution", (uint32_t)fnvnx_display_h() }, { "DefaultSettings.VRefresh", MODE_HZ },
-        { "DefaultSettings.Flags", 0 }, { "DefaultSettings.XPanning", 0 }, { "DefaultSettings.YPanning", 0 },
-        { "DefaultSettings.Orientation", 0 }, { "DefaultSettings.FixedOutput", 0 } };
-    bool ok = true;
-    for (const auto &v : vals)
-        ok = ok && RegSetValueExA(k, v.name, 0, REG_DWORD, (const BYTE *)&v.v, 4) == ERROR_SUCCESS;
-    return RegCloseKey(k) == ERROR_SUCCESS && ok;
-}
 } // namespace
 
 extern "C" LONG ChangeDisplaySettingsA(void *devmode, DWORD flags)
@@ -355,9 +340,9 @@ extern "C" LONG ChangeDisplaySettingsA(void *devmode, DWORD flags)
         if (!ok) return BADMODE;
     }
     if (flags & CDS_TEST) return SUCCESSFUL;
-    if ((flags & CDS_UPDATEREGISTRY) && devmode) {
-        if (!persist(HKEY_CURRENT_USER) || ((flags & CDS_GLOBAL) && !persist(HKEY_LOCAL_MACHINE))) return NOTUPDATED;
-    }
+    /* CDS_UPDATEREGISTRY: the declared machine's hive is written only by the seed unit (registry_seed.cpp, rows of
+     * manifest/declared_registry.tsv: exactly the keys the exe and the modules read), so the accepted mode (the only one the
+     * output provides, checked above) is the persistent one already; no key is made here */
     if (flags & (CDS_RESET | CDS_RESET_EX))   /* applied although unchanged */
         fnvnx_app_display_change(fnvnx_display_w(), fnvnx_display_h());
     return SUCCESSFUL;
