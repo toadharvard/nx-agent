@@ -16,10 +16,10 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of the rules modules
-from fnvnx.rules.tests import support  # noqa: E402
+sys.path.insert(0, HERE)
+import support  # noqa: E402
 support.legacy_units_lookup()
-from fnvnx.rules import s2_bodies   # noqa: E402
+import s2_bodies   # noqa: E402
 
 SRC = '''extern "C" int stub_a(int);
 extern "C" int stub_b(int);
