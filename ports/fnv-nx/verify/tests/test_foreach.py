@@ -106,5 +106,27 @@ for what, mut, want in (("a range of 0", lambda: dict(rr, run=[dict(sh, foreach=
     except ValueError as e:
         msg = str(e)
     check("%s is red" % what, want in msg, msg)
+# build-time table (a stage output): the step stays one marker step that declares the directory `into`; the row template is kept; the recipe is valid
+with tempfile.TemporaryDirectory() as td2:
+    gen = {"name": "mk", "exec": "/usr/bin/sh", "args": ["/in/1"], "inputs": [R + "/p.sh"], "debs": ["toybb"], "outputs": ["mk.tsv"]}
+    dyn = {"name": "prove", "foreach": {"table": {"stage": R + ":run:mk", "path": "mk.tsv"}, "key": "shape", "into": "proof"}, "exec": "/usr/bin/sh", "args": ["/in/1", "{shape}"],
+           "inputs": [R + "/p.sh"], "debs": ["toybb"], "outputs": ["proof/{shape}.txt"]}
+    r, rc = make(td2, "dyn", TABLE)
+    rc = dict(rc, run=[gen, dyn], outputs={"o": "proof"})
+    ex = recipe.expand_foreach(rc, r)["run"]
+    check("build-time foreach: one marker step that declares only the directory, the row template kept", len(ex) == 2 and ex[1]["dirs"] == ["proof"] and ex[1]["outputs"] == [] and ex[1]["foreach"]["row"]["outputs"] == ["proof/{shape}.txt"], ex[1])
+    e = recipe.check(rc, R, recipe.tracked(r), recipe.load_admit(r), None, r)
+    check("build-time foreach: the recipe is valid (a consumer reads the directory)", not [x for x in e if "foreach" in x or "run[1]" in x], e)
+    for what, mut, want in (("an output outside into", dict(dyn, outputs=["other/{shape}.txt"]), "lie under"),
+                            ("an output that does not name the row", dict(dyn, outputs=["proof/all.txt"]), "lie under"),
+                            ("a table of another form", dict(dyn, foreach={"table": {"nope": 1}, "key": "shape", "into": "proof"}), "build-time foreach is"),
+                            ("an undeclared external table", dict(dyn, foreach={"table": {"external": "x", "path": "t.tsv"}, "key": "shape", "into": "proof"}), "not declared"),
+                            ("dirs beside into", dict(dyn, dirs=["z"]), "`into`")):
+        try:
+            recipe.expand_foreach(dict(rc, run=[gen, mut]), r)
+            msg = ""
+        except ValueError as ex2:
+            msg = str(ex2)
+        check("build-time foreach: %s is red" % what, want in msg, msg)
 print("fails: %d" % fails)
 sys.exit(1 if fails else 0)
