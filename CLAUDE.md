@@ -652,8 +652,8 @@ The owner's words: "Что ещё так проебано? Перепровер�
   - L5 and L6: their tools of this class.
   - Tools used only by tests (X11 locks) and scratch notes are outside the product and gate paths; L1's rule decides that
     from the stage graph, not by a list.
-- **The cold pack build** of the relifted pack runs on up to 16 farms (orchestrator, 2026-11-15 21:00Z, for this one
-  build). It is sharded by the recipe, with N up to 16, and the shards' stores are merged by key.
+- **The cold pack build** of the relifted pack runs on up to 32 farms (orchestrator, 2026-11-15 21:00Z, raised from 16
+  on 2026-11-16 05:00Z, for this one build). It is sharded by the recipe, with N up to 32, and the shards' stores are merged by key.
 
 ## Orchestrator decision of 2026-11-15 23:30Z: jump-table index bound under OWNER 6 (binding for L3a, L3b, L1)
 
