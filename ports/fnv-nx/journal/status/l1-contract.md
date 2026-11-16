@@ -3058,3 +3058,5 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - 12:29: w29 item 6 covers only the constant-store half. A lock call stays an effect, with no lockop marker.
   - KNOWN GAP, for the orchestrator report: vacuity hidden behind calls (lock/unlock around dead state). It is fixed for the only known case (Steam dm:20/21). No class rule today.
   - w29 item 7 (L3a): foreach_dynamic `dirs` plus the table header rule (first line `#`, other `#` lines red), so lift/factsimg becomes one foreach.
+- 12:29: w28 9e6df3336 brings rule (c) onto c5. Plugins are built against the loading compiler's own headers, with its tree in the key. dumpmachine must equal the guest triplet. A host driver with plugins is red. All 29 recipe roots: 0 red.
+  - Follow-up: the dumpmachine and print-file-name reads become a hermetic `compilerfacts` stage per compiler; the direct calls are deleted. Next is the FAIL-set diff (trunk sweep at 44/148).
