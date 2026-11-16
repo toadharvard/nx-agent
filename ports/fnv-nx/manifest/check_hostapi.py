@@ -33,6 +33,7 @@ import json
 import os
 import re
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 
 HDR = "hostabi/include/fnvnx/hostapi.h"
 SCAN = ["platform", "rt/guest"]
@@ -408,8 +409,7 @@ def main(argv):
                 errs.append("%s:%d: FNVNX_PLAT_%s outside a checked ext_call use" % (rel(f), line_of(code, m.start()), name))
 
     # D: served == declared: one home, verify/gate_hostapi.py (the hostapi gate)
-    sys.path.insert(0, os.path.join(root, "..", "..", "ports", "fnv-nx", "verify"))
-    import gate_hostapi
+    from fnvnx.verify import gate_hostapi
     nserved, hids = gate_hostapi.served_ids(os.path.abspath(os.path.join(root, "..", "..")), svc, count, notserved)
     errs += hids
     served = set(svc) - set(n for n in svc if any(i.startswith("declared %s " % n) for i in hids))

@@ -20,8 +20,8 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from gen_wine_cites import strip_comments  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.manifest.gen_wine_cites import strip_comments  # noqa: E402
 
 FILE = "dlls/win32u/sysparams.c"
 FUNC = "get_system_metrics"

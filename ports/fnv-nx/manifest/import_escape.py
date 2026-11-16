@@ -34,8 +34,8 @@ Usage: import_escape.py --winmd Windows.Win32.winmd --sha256 HEX --commit ID --b
 """
 import argparse, collections, os, re, sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import funcfacts
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.manifest import funcfacts
 
 # ECMA-335 II.23.1.16 element types
 E_VOID, E_BOOL, E_CHAR, E_I1, E_U1, E_I2, E_U2, E_I4, E_U4, E_I8, E_U8, E_R4, E_R8, E_STRING = range(1, 15)

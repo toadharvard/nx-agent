@@ -6,6 +6,7 @@
 import os, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 GEN = os.path.join(HERE, "gen_fontmachine.py")
 INF = '[Fonts]\nHKLM,%FontSubStr%,"Helv",,"MS Sans Serif"\nHKLM,%FontSubStr%,"Arial CE,238",,"Arial,238"\n'
 FONTC = '''    /* Latin 1 (United States) */
@@ -64,8 +65,7 @@ with tempfile.TemporaryDirectory() as td:
         want("refuses no substitutes", rc != 0 and "no FontSubstitutes" in e)
 fd = os.environ.get("FNVNX_FONTS")   # the pure family reader equals fc-scan (FreeType) on every file of the declared set
 if fd and os.path.isdir(fd):
-    sys.path.insert(0, HERE)
-    import fontfamilies
+    from fnvnx.manifest import fontfamilies
     ref = {}
     for l in subprocess.run(["fc-scan", "--format", "%{file}\t%{family}\n", fd], capture_output=True, text=True).stdout.splitlines():
         f, n = l.split("\t", 1)

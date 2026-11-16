@@ -42,8 +42,7 @@ import os
 import struct
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import funcfacts
+from fnvnx.manifest import funcfacts
 X = funcfacts.X
 
 MAXJOBS = 6000

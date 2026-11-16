@@ -27,6 +27,7 @@ The self-tests build synthetic modules for each of the three rules and for a mod
 import ast, os, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 READERS = {"capstone", "pefile", "modules", "dnfile", "mmap", "lief", "elftools", "ctypes", "imagerec"}
 FUNCFACTS_MAY = {"imagerec", "dnfile"}   # the readers funcfacts.py itself may import
 PARSER_CALLS = {"get_memory_mapped_image", "get_data", "get_string_at_rva", "read_bytes", "open_bytes"}
@@ -152,8 +153,7 @@ def main():
 
 def selftest_code_read():
     """G3: a byte read at a code address is red; data reads, a relocated word in code, and decoded facts are not."""
-    sys.path.insert(0, HERE)
-    import funcfacts
+    from fnvnx.manifest import funcfacts
     imagerec = funcfacts.imagerec   # the one module, as funcfacts holds it: the gate itself imports no reader
     assert not hasattr(funcfacts, "CodeRead"), "funcfacts defines no error type of its own"
     code = bytes.fromhex("558bec" "b800304000" "5dc3")            # push ebp; mov ebp,esp; mov eax,0x403000; pop ebp; ret
