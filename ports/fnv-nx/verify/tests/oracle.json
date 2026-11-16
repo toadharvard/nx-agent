@@ -1009,7 +1009,7 @@
   "test_pp_input.py": {
    "references": [
     {
-     "anchor": "## The preprocessed text of a unit",
+     "anchor": "## The preprocessed text of a unit (`pp`)",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/RECIPE.md"
     }
@@ -1151,7 +1151,7 @@
   "test_resolve_once.py": {
    "references": [
     {
-     "anchor": "## One resolution per root",
+     "anchor": "## One resolution per root (`resolved`, `entered`)",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/RECIPE.md"
     }
@@ -1330,6 +1330,18 @@
    "subject": [
     "ports/fnv-nx/verify/recipe.py",
     "ports/fnv-nx/verify/sandbox.py"
+   ]
+  },
+  "test_synth_names.py": {
+   "references": [
+    {
+     "anchor": "## Link: the guest ELF",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
    ]
   },
   "test_systemlibs.py": {
