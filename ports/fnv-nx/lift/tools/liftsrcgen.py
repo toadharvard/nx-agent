@@ -105,12 +105,34 @@ def sdmroot_recipe():
     return {'format': 'fnvnx-recipe/1', 'external': [SDM_EXTERNAL], 'run': [SDMTEXT], 'outputs': {'SDM_TEXT': 'sdm.txt'}}
 
 
+GUEST_TESTS = {'imptest': 'guestgen_imptest.py', 'msvcrttest': 'guestgen_msvcrttest.py'}      # the lifted roots of lift/tests/guest whose generator lifts a byte buffer (tools/lifted.py configure_buffer)
+
+
+def guest_test_recipe(name, rec):
+    """lift/tests/guest/NAME/lifted/build.json: REC (the existing recipe) with its generated stages rewritten: the sdmrows generator, then the root's guest generator with the lifter's declared inputs as explicit arguments
+    (the same mounts as the shard stages: X86SYS from the platform root, the SDM rows from the SDM text, the tracked cpuid model and rcptab)"""
+    root = 'ports/fnv-nx/lift/tests/guest/%s/lifted' % name
+    gen = rec['generated'][-1]
+    assert gen['tool'] == LIFT + '/tools/' + GUEST_TESTS[name], gen['tool']
+    outs = gen['outputs']
+    st = [{'tool': SDMTOOL, 'args': ['--sdm', '/uses/ports/fnv-nx/lift/sdm/SDM_TEXT', '--out', '/out'], 'inputs': [LIFT + '/proof/sdmfeat.py', LIFT + '/proof/__init__.py'], 'outputs': ['sdmrows/sdmrows.json']},
+          {'tool': gen['tool'], 'args': ['/out/gen', '/in/' + LIFT, '--x86sys', '/uses/ports/fnv-nx/platform/X86SYS', '--sdmrows', '/stage/sdmrows/sdmrows.json', '--cpumodel', '/in/ports/fnv-nx/verify/cpuid_model.json',
+                                         '--rcptab', '/in/' + LIFT + '/rt/rcptab.c', '--rcpcert', '/in/' + LIFT + '/rt/rcptab.cert.json'],
+           'inputs': [LIFT + '/fnvlift', 'ports/fnv-nx/verify/cpuid_model.json', LIFT + '/proof', LIFT + '/rt/rcptab.c', LIFT + '/rt/rcptab.cert.json', sdmrows(root)], 'outputs': outs}]
+    uses = [u for u in rec.get('uses', []) if (u['root'], u['output']) not in (('ports/fnv-nx/lift/sdm', 'SDM_TEXT'), ('ports/fnv-nx/platform', 'X86SYS'))]
+    uses += [{'root': 'ports/fnv-nx/lift/sdm', 'output': 'SDM_TEXT'}, {'root': 'ports/fnv-nx/platform', 'output': 'X86SYS'}]
+    return dict(rec, generated=st, uses=uses)
+
+
 def main():
     ap = argparse.ArgumentParser(); A = ap.add_argument
     A('--modules', required=True); A('--dest', default=os.path.join(REPO, ROOT, 'build.json'))
     a = ap.parse_args()
     rec = recipe(a.modules)
     with open(a.dest, 'w') as f: json.dump(rec, f, indent=1); f.write('\n')
+    for n in GUEST_TESTS:
+        gp = os.path.join(REPO, LIFT, 'tests', 'guest', n, 'lifted', 'build.json'); g = json.load(open(gp))
+        with open(gp, 'w') as f: json.dump(guest_test_recipe(n, g), f, indent=1); f.write('\n')
     os.makedirs(os.path.join(REPO, PROV_ROOT), exist_ok=True)
     with open(os.path.join(REPO, PROV_ROOT, 'build.json'), 'w') as f: json.dump(provrecipe(a.modules), f, indent=1); f.write('\n')
     with open(os.path.join(REPO, SDM_ROOT, 'build.json'), 'w') as f: json.dump(sdmroot_recipe(), f, indent=1); f.write('\n')
