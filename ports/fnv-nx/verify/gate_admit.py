@@ -2,7 +2,7 @@
 """Gate "admit" (fnvnx-gate/1): nothing is in the trunk without the gates that close its classes of failure.
     python3 -I gate_admit.py        run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/admit.json
 
-Rule. verify/admit.json ("fnvnx-admit/1") lists the roots of the port tree: {"path", "class", ["recipe"], ["imports"], ["entry"]}; the gate set of a root is derived: the gates of verify/gates.d whose `covers` holds the root class (gatesdir.root_class), so no table here restates it.
+Rule. verify/admit.json ("fnvnx-admit/1") lists the roots of the port tree: {"path", "class", ["recipe"], ["trees"], ["entry"]} (the cross-root Python imports of a root are derived from its sources, derived_imports); the gate set of a root is derived: the gates of verify/gates.d whose `covers` holds the root class (gatesdir.root_class), so no table here restates it.
 `entry` (class tool: required, may be empty): the stage entry points of the root, .py files inside its trees. gate_pure's universe is the
 import closure of these and of the `generated` tools of the recipes; a script only a gate driver runs is not an entry point.
 A row is one root with one tree, its "path"; a `trees` list is red (a second tree is a second root that the first declares in `imports`). Two roots never share a tree; a root may lie inside another (a header root of a product root's include directory, a generated-only product root inside
@@ -87,38 +87,76 @@ def recipe_paths(r):
     return out + [v["recipe"] for v in vs.values() if isinstance(v, dict) and "recipe" in v] if isinstance(vs, dict) else out
 
 
-def imports_errors(roots):
-    """Errors of the declared imports of ROOTS (list of admit root dicts): an unknown root, itself, a repeat, a cycle."""
-    by = {r.get("path"): r for r in roots}
-    errs, edges = [], {}
-    for r in roots:
-        imp = r.get("imports", [])
-        p = r.get("path")
-        if not isinstance(imp, list) or any(not isinstance(i, str) for i in imp):
-            errs.append("root %s: imports is not a list of paths" % p)
-            continue
-        if len(set(imp)) != len(imp):
-            errs.append("root %s: imports repeats a root" % p)
-        for i in imp:
-            if i == p:
-                errs.append("root %s imports itself" % p)
-            elif i not in by:
-                errs.append("root %s: import %s is not an admitted root" % (p, i))
-        edges[p] = [i for i in imp if i in by and i != p]
-    state = {}
+_IMPORT_MEMO = {}   # (abspath, mtime_ns, size) -> ([dotted module names a file imports], [line of a dynamic import])
 
-    def visit(n, stack):
-        state[n] = 1
-        for m in sorted(edges.get(n, [])):
-            if state.get(m) == 1:
-                errs.append("imports cycle: " + " -> ".join(stack[stack.index(m):] + [n, m] if m in stack else [n, m]))
-            elif m not in state:
-                visit(m, stack + [n])
-        state[n] = 2
-    for n in sorted(edges):
-        if n not in state:
-            visit(n, [])
-    return errs
+
+def file_imports(path):
+    """([dotted names a tracked .py file imports at any depth], [lines of dynamic imports]): by `ast` over Import and ImportFrom (`from m import a` names m and m.a; a relative
+    import names nothing: it stays inside its package), and over importlib.import_module / __import__ calls, whose literal argument is a name and whose non-literal one is a
+    dynamic import. An unparsable file names nothing (the python gates judge it)."""
+    import ast
+    st = os.stat(path)
+    key = (os.path.abspath(path), st.st_mtime_ns, st.st_size)
+    if key not in _IMPORT_MEMO:
+        names, dyn = [], []
+        try:
+            with open(path, "rb") as f:
+                tree = ast.parse(f.read())
+        except (SyntaxError, ValueError):
+            tree = None
+        for n in ast.walk(tree) if tree is not None else ():
+            if isinstance(n, ast.Import):
+                names += [a.name for a in n.names]
+            elif isinstance(n, ast.ImportFrom) and not n.level and n.module:
+                names += [n.module] + [n.module + "." + a.name for a in n.names]
+            elif isinstance(n, ast.Call):
+                fn = n.func.attr if isinstance(n.func, ast.Attribute) else n.func.id if isinstance(n.func, ast.Name) else None
+                if fn in ("import_module", "__import__"):
+                    a0 = n.args[0] if n.args else None
+                    if isinstance(a0, ast.Constant) and isinstance(a0.value, str):
+                        names.append(a0.value)
+                    else:
+                        dyn.append(n.lineno)
+        _IMPORT_MEMO[key] = (names, dyn)
+    return _IMPORT_MEMO[key]
+
+
+def derived_imports(rows, files, repo="."):
+    """({root path: sorted paths of the OTHER roots whose modules its tracked .py files import}, [errors]): the ONE rule of cross-root Python imports, derived from the
+    sources, never declared. ROWS: the admit root dicts; FILES: the tracked paths. A file belongs to the nearest root (longest tree). An import resolves by its
+    qualified module path (import_roots: the deepest root whose prefix it names); a standard-library, pinned or root-local module is no edge. A dynamic import
+    (importlib.import_module / __import__ with a non-literal argument) is an error: its edge cannot be derived. A bare module of another root (`import x`) is no
+    spelling of this rule (the stage tools' import closure makes it red, recipe.foreign_imports)."""
+    paths = sorted({r.get("path", "") for r in rows})
+    prefixes = {}
+    for p in paths:
+        rel = os.path.relpath(os.path.normpath(p), TREE)
+        if not rel.startswith("..") and rel != ".":
+            prefixes[".".join(rel.split(os.sep))] = p
+    trees_of = sorted(((t, r["path"]) for r in rows for t in trees(r)), key=lambda x: -len(x[0]))
+    edges = {p: set() for p in paths}
+    errs = []
+    for f in files:
+        if not f.endswith(".py"):
+            continue
+        own = next((p for t, p in trees_of if f == t or f.startswith(t + "/")), None)
+        if own is None:
+            continue
+        names, dyn = file_imports(os.path.join(repo, f))
+        errs += ["%s:%d: a dynamic import (importlib.import_module or __import__ with a non-literal argument): its root edge cannot be derived" % (f, ln) for ln in dyn]
+        for nm in names:
+            hit = [pre for pre in prefixes if nm == pre or nm.startswith(pre + ".")]
+            if hit:
+                r = prefixes[max(hit, key=len)]
+                if r != own:
+                    edges[own].add(r)
+    return {p: sorted(v) for p, v in edges.items()}, errs
+
+
+def imports_errors(roots):
+    """Errors of the `imports` field of ROOTS (admit root dicts): there is none, the imports of a root are derived (derived_imports)."""
+    return ["root %s: admit.json `imports` is derived from the sources of the root (derived_imports): delete the field" % r.get("path")
+            for r in roots if "imports" in r]
 
 
 def is_test_file(f):
@@ -161,7 +199,7 @@ def cross_root_bare(files, admit, read):
     return bad
 
 
-def judge(files, admit, exists, ref_paths=frozenset(), read=None):
+def judge(files, admit, exists, ref_paths=frozenset(), read=None, repo=None):
     """-> (uncertified {path: reason}, root errors [str]); pure function of its arguments. REF_PATHS: the tracked paths that a tests/oracle.json
     reference (spec, contract, model) points at; the files of a root of class ref must all be among them."""
     roots, errors = [], []
@@ -211,6 +249,8 @@ def judge(files, admit, exists, ref_paths=frozenset(), read=None):
                         why.append("recipe %r is not an existing file inside the root" % (rec,))
         roots.append((trees(r) if not why else [path], why))
     errors += imports_errors(admit.get("roots", []))
+    if repo is not None:
+        errors += derived_imports(admit.get("roots", []), files, repo)[1]
     paths = [t for ts, _ in roots for t in ts]
     errors += ["trees %s is named twice" % t for t in sorted({t for t in paths if paths.count(t) > 1})]   # nested roots are fine: a file belongs to the nearest one
     cls_of = {r.get("path", ""): r.get("class") for r in admit.get("roots", [])}
@@ -252,7 +292,7 @@ def main():
     def read(p):
         with open(p, encoding="utf-8") as fh:
             return fh.read()
-    bad, errors = judge(files, admit, os.path.isfile, ref_paths, read)
+    bad, errors = judge(files, admit, os.path.isfile, ref_paths, read, ".")
     red = bool(bad or errors)
     certified = 0 if errors else len(files) - len(bad)
     detail = "%d files, %d roots; %s" % (len(files), len(admit.get("roots", [])),

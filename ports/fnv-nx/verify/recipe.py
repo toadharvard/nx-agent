@@ -515,8 +515,11 @@ def with_guest_link(rec, root, roots, repo):
 
 
 def load_admit(repo="."):
+    """{root path: entry}; every entry carries `imports`, the roots whose modules its sources import (gate_admit.derived_imports): derived, never declared."""
     with open(os.path.join(repo, ADMIT)) as f:
-        return {r["path"]: norm_entry(r) for r in json.load(f)["roots"]}
+        rows = json.load(f)["roots"]
+    derived, _ = gate_admit.derived_imports(rows, tracked(repo), repo)
+    return {r["path"]: norm_entry(dict(r, imports=derived.get(r["path"], []))) for r in rows}
 
 
 def own_recipes(ent):
@@ -906,30 +909,6 @@ def missing_recipes(roots, files):
 def import_trees(roots, owner):
     """{declared import root: [its trees]} of the admitted root OWNER (admit.json `imports`): the roots whose Python modules a tool of OWNER may import."""
     return {r: gate_admit.trees(roots[r]) for r in (roots[owner].get("imports", []) if owner in roots and isinstance(roots[owner].get("imports", []), list) else []) if r in roots}
-
-
-def declared_import_uses(owner, imports, files, repo="."):
-    """{declared import root} that some module of the declaring root OWNER imports from: every tracked .py file of OWNER, its absolute imports (`ast`, any depth) taken by the
-    one rule (gate_admit.import_roots: a name that is, or lies under, the module prefix of a declared root; `from a import b` also tries `a.b`). IMPORTS: {root: [its trees]}
-    (import_trees). A declaration is unused iff its root is not in this set: per declaring root, never per consuming recipe (the stage of one tool mounts only its own closure)."""
-    import ast
-    pre = gate_admit.import_roots(list(imports), TREE)
-
-    def home(name):
-        return next((r for p, r in pre.items() if name == p or name.startswith(p + ".")), None)
-    out = set()
-    for f in files:
-        if not (f.endswith(".py") and under(f, owner)):
-            continue
-        try:
-            tree = ast.parse(open(os.path.join(repo, f)).read())
-        except (OSError, SyntaxError, ValueError):
-            continue
-        for n in ast.walk(tree):
-            names = [a.name for a in n.names] if isinstance(n, ast.Import) else (
-                [n.module] + [n.module + "." + a.name for a in n.names] if isinstance(n, ast.ImportFrom) and not n.level and n.module else [])
-            out |= {r for r in map(home, names) if r}
-    return out
 
 
 def import_prefixes(roots, owner):
@@ -1942,7 +1921,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     mine = own_sources(root, files, roots, repo)
     gen = generated_outputs(rec)
     if gonly:   # `compiler` and `plugins` of a root with no unit are used only by its run steps: a plugin is a step's {"plugin": NAME} input, the compiler builds the plugins
-        # (or is a step's {"external": NAME} input); an unused one is red, as gen:unused-import is
+        # (or is a step's {"external": NAME} input); an unused one is red, as an unused `uses` is
         rins = [p for g in (expand_run(rec, closure=False).get("run") if isinstance(rec.get("run"), list) else []) if isinstance(g, dict) and isinstance(g.get("inputs"), list) for p in g["inputs"] if isinstance(p, dict)]
         pl = [x.get("name") for x in (rec.get("plugins") if isinstance(rec.get("plugins"), list) else []) if isinstance(x, dict)]
         err += ["gonly:unused-plugin:%s (a root with no unit declares a plugin only when a run step takes it as its {\"plugin\": NAME} input)" % n for n in pl if {"plugin": n} not in rins]
@@ -2098,8 +2077,6 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             if o in seen:
                 err.append("generated output %s is produced twice" % o)
             seen.add(o)
-    err += ["gen:unused-import:%s:%s (admit.json `imports` of %s declares a root that no module of %s imports from: remove the declaration)" % (o, ir, o, o)
-            for o in sorted(used) for ir in sorted(set(import_trees(roots, o)) - declared_import_uses(o, import_trees(roots, o), files, repo))]
     err += run_errors(rec, root, files, roots, mine, seen, repo)
     err += uses_errors(rec, root, roots, repo, files) + include_uses_errors(rec, roots, repo)
     ea, ident = rec.get("error_abi"), lambda x: isinstance(x, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", x)
