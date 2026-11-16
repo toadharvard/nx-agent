@@ -39,7 +39,7 @@ def supported(ins):
     operand is a general register (the string forms' mnemonics movsd/cmpsd are also SSE2 instructions)"""
     m = ins.mnemonic.split()[-1]
     ok = m in forms.H or (m[0] == 'j' and m[1:] in CC) or (m.startswith('set') and m[3:] in CC) or (m.startswith('cmov') and m[4:] in CC)
-    return ok and all(ins.reg_name(o.reg) in SUB or forms.isvec(forms.Op(ins, o)) for o in ins.operands if o.type == forms.X.X86_OP_REG)
+    return ok and all(ins.reg_name(o.reg) in SUB or ins.reg_name(o.reg) in dsl.SEGS or ins.reg_name(o.reg)[:2] in ('cr', 'dr') or forms.isvec(forms.Op(ins, o)) for o in ins.operands if o.type == forms.X.X86_OP_REG)
 
 
 def varc(cx):
@@ -50,6 +50,8 @@ def varc(cx):
             cx.usesfs = True
         if name in XSTATE:
             return XSTATE[name]
+        if name in dsl.XIN and name.startswith('sel_'):      # the segment register state: fnvl_seg_get (rt/fnvl.h), c->sel[SEG_*]
+            return 'fnvl_seg_get(c,%d)' % dsl.SEGS.index(name[4:])
         if name in dsl.REGS or name in SIXFLAGS or name in STATE:
             return STATE.get(name, name)
         raise Unsupported('form variable ' + name)
@@ -133,7 +135,9 @@ def emit_form(cx, ins):
     """emit the C of one instruction from its Form -> None, or SKIP when the forms do not cover it. A build error propagates."""
     if not supported(ins):
         return SKIP
-    F = forms.build(ins, cx.a)
+    try: F = forms.build(ins, cx.a)
+    except dsl.UndecidedRow as e: raise Unsupported(str(e)) from None      # a row of the record is undecided: no body (the same class as every other undecided row)
+    if any(k == 'sel' and i == dsl.SEGS.index('fs') for k, i, _ in F.xs): cx.usesfs = True      # fnvl_seg_set(FS) re-bases the cached `fsb`
     force, xfer = transfer(cx, ins, F)
     if cx.macc == 'M' and not cx.pfx:
         cx.finfo[cx.a] = flaglive.info(F, dsl.InlineEmit(F.roots(), ()).used, succs(cx, F, ins), cx.a in cx.guarded)
@@ -161,3 +165,16 @@ def emit_form(cx, ins):
             cx.tag = 'form: block braces'
         cx.em('}')
         cx.tag = None
+
+
+def covers(ins):
+    """is this instruction emitted from its Form (emit_form does not SKIP it)? core.gs_guard asks: the Form carries the null-selector fault of forms.NULL_CHECKED and every code-segment store fault"""
+    return supported(ins)
+
+
+def carried_null():
+    """the state indexes (dsl.SEGS) of the segment registers whose null-selector access fault the Form carries"""
+    return frozenset(dsl.SEGS.index(n) for n in forms.NULL_CHECKED)
+
+
+emit_form.covers, emit_form.carried_null = covers, carried_null

@@ -56,13 +56,26 @@ def family(ins):
     return None
 
 
-def unclaimed_prefix(ins):
-    """a prefix outside the spec -> why: a segment override, the address-size prefix, LOCK/REP"""
+def consumed(key):
+    """the address kinds the Form of the key uses (forms.ACC): explicit (a ModRM/SIB address), ds (implicit DS source), es, stack (implicit SS), areg (an address-size register of string/loop/xlat); None when no Form builds"""
+    try: return symform.symbuild(key).form.access
+    except Exception: return None
+
+
+def unclaimed_prefix(ins, key=None):
+    """a prefix outside the spec -> why.  Claimed by its SDM scope, from the Form's address kinds and the operands (never a mnemonic or a key list):
+      a segment override (26 2E 36 3E 64 65) applies to an explicit memory operand or an implicit DS-default operand only; a push or pop reference is always SS (SDM 1:3.7.4 'Push and pop operations must always reference the SS segment.'; SDM 1:6.2.3 the stack address attribute is that of the stack segment, not of an instruction prefix), so a Form
+      whose addresses are stack and ES only takes the prefix with no effect;
+      0x67 is consumed by an explicit address, a string/xlat/loop/jcxz register; on an instruction with none SDM 2A:2.1.1 'Using this prefix and/or other undefined opcodes when operands for the instruction do not reside in memory is reserved; such use may cause unpredictable behavior.' calls the use reserved: it stays unclaimed (TEXT['addr']);
+      LOCK/REP stay outside."""
     rp, seg, _op, addr = ins.prefix
-    if addr: return TEXT['addr']
-    if seg: return TEXT['seg']
-    if rp: return TEXT['rep'] % rp
     mem = [x for x in ins.operands if x.type == X.X86_OP_MEM]
+    kinds = consumed(key) if key else None
+    used = (kinds is None) or bool(kinds & {'explicit', 'ds'}) or bool(mem)
+    if addr and ((kinds is None) or bool(kinds & {'explicit', 'ds', 'areg'}) or bool(mem)): return TEXT['addr']
+    if addr: return TEXT['addrres']
+    if seg and used: return TEXT['seg']
+    if rp: return TEXT['rep'] % rp
     if mem and mem[0].mem.segment: return TEXT['segmem']
     return None
 
@@ -97,7 +110,8 @@ def compare(f, ins, regs, flags, mem):
     """the Form against the spec state: {reg: term}, {flag: 1-bit term} (a flag not named is unchanged, one the SDM calls undefined is not in `flags` and not compared: UNDEF),
     mem = the spec's memory after the instruction (None: unchanged) -> the list of differing parts"""
     d = []
-    if f.faults: return ['faults']
+    import sysspec_store
+    if sysspec_store.faults_ok(f, ins): return ['faults']
     if f.swhen or f.flo is not None: d.append(TEXT['cond'])
     pr = {r[0]: dsl.to_smt(r[1]) for r in f.regs}
     for n in sorted(set(pr) | set(regs)):
@@ -172,7 +186,7 @@ def bts(ins, f, rec, fields):
 def check(key, rec=None):
     ins = decode(key); fam = family(ins)
     if fam is None: return 'not-covered', 'no spec'
-    why = unclaimed_prefix(ins)
+    why = unclaimed_prefix(ins, key)
     if why: return 'uncertified', TEXT['unc'] % why
     fields = symform.parse_key(key)[1]
     if fam == 'bswap' and ins.operands[0].size != 4: return 'uncertified', TEXT['bswap16']      # no Form is asked for: the SDM states no result

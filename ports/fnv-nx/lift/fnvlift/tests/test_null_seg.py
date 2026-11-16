@@ -32,7 +32,7 @@ def lift(code):
 
 
 AVC = 'FNVL_RAISE_AV(%d,0x%xu,0x401000u)' % (row['parameters'][0], row['parameters'][1])
-GUARD = {'es': 'SELK(c->sel[0])==0', 'ds': 'SELK(c->sel[3])==0', 'fs': 'SELK(c->sel[4])==0', 'gs': 'SELK(c->sel[5])==0'}
+GUARD = {'es': 'SELK(c->sel[0])==0', 'ds': 'SELK(c->sel[3])==0', 'fs': 'SELK(c->sel[4])==0', 'gs': '(in_sel_gs >> 2)'}      # gs: the null-selector fault the Form carries (proof/forms.NULL_CHECKED, proved by sysspec_seg); es/ds/fs: core.gs_guard's text
 PFX = {'es': 0x26, 'ds': 0x3e, 'fs': 0x64, 'gs': 0x65}
 
 # (1) gs read: the record's initial gs (0) is a value, the read is lifted (state read)
@@ -48,17 +48,17 @@ configure(ds=True, es=True, fs=True)
 for seg in ('es', 'ds', 'fs', 'gs'):
     t = lift(bytes([PFX[seg], 0x8b, 0x00, 0xc3])); assert GUARD[seg] in t and AVC in t, (seg, t[:300])
 assert GUARD['ds'] in lift(bytes([0x8b, 0x00, 0xc3]))                   # default ds
-assert 'SELK(c->sel[' not in lift(bytes([0x8b, 0x45, 0x08, 0xc3]))      # [ebp+8]: ss
-assert 'SELK(c->sel[' not in lift(bytes([0x8b, 0x04, 0x24, 0xc3]))      # [esp]: ss
+assert 'SELK(c->sel[' not in lift(bytes([0x8b, 0x45, 0x08, 0xc3])) and 'in_sel_' not in lift(bytes([0x8b, 0x45, 0x08, 0xc3]))      # [ebp+8]: ss
+assert 'SELK(c->sel[' not in lift(bytes([0x8b, 0x04, 0x24, 0xc3])) and 'in_sel_' not in lift(bytes([0x8b, 0x04, 0x24, 0xc3]))      # [esp]: ss
 assert GUARD['es'] in lift(bytes([0xaa, 0xc3])) and GUARD['ds'] in lift(bytes([0xd7, 0xc3]))      # stosb es:[edi]; xlatb ds:[ebx+al]
 # (3) lea and a prefixed instruction without a memory operand: no guard
 for b in ([0x65, 0x8d, 0x00, 0xc3], [0x3e, 0x8d, 0x00, 0xc3], [0x65, 0x90, 0xc3]):
-    assert 'SELK(c->sel[' not in lift(bytes(b)), b
+    assert 'SELK(c->sel[' not in lift(bytes(b)) and 'in_sel_gs >> 2' not in lift(bytes(b)), b
 # privileged-opcode check of the row
 from fnvlift import f_sys
 for b in range(256):
     want = ('0x%x' % b) in row['privileged_check_first']['priv_instruction_opcodes']
     assert f_sys.row_privileged(bytes([0x65, b, 0, 0]), row) == want, b
 # (4) mov gs, ax loads through fnvl_seg_set (state the guard reads)
-assert 'fnvl_seg_set(c,5,' in lift(bytes([0x8e, 0xe8, 0xc3]))
+assert 'fnvl_seg_set(c, 5,' in lift(bytes([0x8e, 0xe8, 0xc3]))
 print('null_seg: ok')

@@ -212,3 +212,9 @@ static inline u32 fx_dsl_ftag(void){ u32 t=0; for(u32 i=0;i<8;i++) t|=fx_tag(&c-
 static inline void fx_dsl_ftag_set(u32 t){ for(u32 i=0;i<8;i++){ fv *p=&c->fx[i]; if(((t>>(2*i))&3u)==3u) fv_free(p); else if(!p->k){ p->k=FK_M80; } } }
 static inline u32 fx_dsl_fsw(u32 c0,u32 c2,u32 c3){ return ((c->fex&FEX_X87)|(fx_live()&0x3fu)|fx_esb()|((c0&1u)<<8)|((c2&1u)<<10)|((c3&1u)<<14))&0xffffu; }
 #define FX_DSL_FSW_SET(V) do{ u32 v_=(V); c->fex=(c->fex&~FEX_X87)|(v_&FEX_X87); c->fsw=v_&0x8080u; if(fown()==1u) fnvl_fp_x87_clear(); c0=(v_>>8)&1u; c2=(v_>>10)&1u; c3=(v_>>14)&1u; }while(0)
+/* CARRIER OPS of the DSL (fnvlift/dsl.py `cop`; proof/x87spec.py CARRIER_OPS): the value computations of a proven x87 Form.  The op symbol IS the name of the function below: the DSL node, the
+   spec's uninterpreted symbol and the emitted call carry that one name, and proof/x87carrier.py derives the z3 term of the op from this very C (ctrans).  The arguments are architectural values:
+   an 80-bit register image is a u128 (se<<64 | m); a result is the bit pattern the instruction semantics reads.  A wrapper holds no state and raises no host flag the Form reads. */
+static inline fnvl_f80 fx_dsl_img(u128 v){ fnvl_f80 r; r.m=(u64)v; r.se=(u16)(v>>64); return r; }
+/* the condition codes of FCOM / FUCOM / FCOMI of two register images: C3<<14 | C2<<10 | C0<<8, exact (rt/x87.c fnvl_x_cmp; unordered and unsupported operands give 111) */
+static inline u32 fx_dsl_x_cmp(u128 a,u128 b){ u32 f=0; return fnvl_x_cmp(fx_dsl_img(a),fx_dsl_img(b),1u,&f); }

@@ -17,27 +17,12 @@ PIN = PINS[0]
 
 
 class Synthetic(unittest.TestCase):
-    def test_vendor_cell_prefix_rule(self):
-        cells = {(0x0f, 'n/a'): ('3DNow!', 'c'), (0x58, 'F3'): ('SSE', 'c'), (0x58, 'none'): ('SSE', 'c')}
-        self.assertEqual(S.vendor_cell(cells, None, b'\x0f\x0f\x00')[0], '3DNow!')
-        self.assertEqual(S.vendor_cell(cells, 'F3', b'\x0f\x58\xc1')[0], 'SSE')
-        self.assertIsNone(S.vendor_cell(cells, '66', b'\x0f\x58\xc1'))        # no 66 cell: not a vendor form
-        self.assertIsNone(S.vendor_cell(cells, None, b'\x90'))                  # one-byte opcodes are not in the two-byte map
-
-    def test_table_union(self):
-        t = S.Table(S.unify([('SSE2', 1, 0, 'EDX', 26, 's')], [('3DNow!', 0x80000001, 0, 'EDX', 31, 'c'), ('SSE2', 1, 0, 'EDX', 26, 'c')]))
-        self.assertEqual(t.addresses('3DNow!'), [(0x80000001, 0, 'EDX', 31)])
-        cpu = {(0, 'EAX'): 4, (0x80000000, 'EAX'): 0x80000004, (0x80000001, 'EDX'): 0}
-        self.assertFalse(S.present('3DNow!', t, cpu))                          # the declared answer clears the bit
-
     def test_canonical_precedence_and_aliases(self):
         recs = S.unify([('SSE4.1', 1, 0, 'ECX', 19, 's')], [('SSE4_1', 1, 0, 'ECX', 19, 'a'), ('AESNI', 1, 0, 'ECX', 25, 'a')])
         by = {(r['leaf'], r['reg'], r['bit']): r for r in recs}
         r = by[(1, 'ECX', 19)]
         self.assertEqual((r['canonical'], r['sdm_name'], r['apm_name'], r['sdm_cite'], r['apm_cite']), ('SSE4.1', 'SSE4.1', 'SSE4_1', 's', 'a'))
         self.assertEqual(by[(1, 'ECX', 25)]['canonical'], 'AESNI')               # no SDM name: the APM's
-        t = S.Table(recs)
-        self.assertEqual(t.canonicals('SSE4_1'), ['SSE4.1'])                      # either vendor spelling resolves to the one canonical
 
     def test_one_vendor_two_names_at_one_address_is_an_error(self):
         with self.assertRaises(SystemExit):

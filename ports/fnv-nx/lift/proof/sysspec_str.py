@@ -16,7 +16,9 @@ from proof import symform, x86sys  # noqa: E402
 
 def check(key, rec):
     f = symform.symbuild(key).form
-    if f.regs or f.flags or f.flo is not None or f.faults: return 'effects'
+    import capstone
+    from proof import sysspec_gap, sysspec_store
+    if f.regs or f.flags or f.flo is not None or sysspec_store.faults_ok(f, sysspec_gap.decode(key), rec): return 'effects'
     if len(f.stores) != 1: return 'nstores'
     v = dsl.to_smt(f.stores[0][1])
     if v.size() != 16: return 'width'

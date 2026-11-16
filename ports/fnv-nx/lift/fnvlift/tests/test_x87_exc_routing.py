@@ -16,6 +16,7 @@ from fnvlift.core import Unsupported
 from fnvlift.image import Image
 
 # 1. the header
+sys.path.insert(0, os.path.join(LIFT, 'proof')); import x87spec      # CARRIER_OPS: the value computations of the proven Forms (their exception flags are the spec's own terms, not a helper mask)
 hdr = open(os.path.join(LIFT, 'rt', 'fnvl_x87.h')).read()
 parts = re.split(r'\n(?=static |FNVL_F2I |#define |template)', hdr)
 routed = []
@@ -26,6 +27,8 @@ for p in parts:
     if 'FXF(f' in p or 'FM_FL(f' in p:
         routed.append(head)
         continue
+    if re.match(r'static inline \w+ (fx_dsl_\w+)\(', head) and re.match(r'static inline \w+ (fx_dsl_\w+)\(', head).group(1) in x87spec.CARRIER_OPS:
+        continue      # a carrier op of the DSL (x87spec.CARRIER_OPS): a value computation that holds no state; the Form's FSW carries its exception flags (rt/fnvl_x87.h, CARRIER OPS)
     m = re.match(r'static inline (fnvl_f80|double) (\w+)\(fv a\)\{', head)
     assert m, 'a helper output that never reaches c->fex: ' + head[:100]
 for fn in ('fv_s32(', 'fv_s64(', 'fv_i(', 'fv_rnd(', 'fv_cmp(', 'fv_stbcd('):

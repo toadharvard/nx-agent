@@ -166,40 +166,12 @@ def pop_sreg(cx, ins, sg):
     cx.em('{ u32 s=M%d(esp)&0xffffu; %s esp+=%du; }' % (8 * w, seg_load(cx, sg), w))
 
 
-@op('les', 'lds', 'lss', 'lfs', 'lgs')
+@op('lss', 'lfs', 'lgs')
 def h_lxs(cx, ins):
-    """LES/LDS/LSS/LFS/LGS r, m16:16|32: offset, then selector; the segment register is loaded (and may fault) before the general register is written (SDM pseudo-code)"""
-    sg = {'les': 'es', 'lds': 'ds', 'lss': 'ss', 'lfs': 'fs', 'lgs': 'gs'}[cx.m]
+    """LSS/LFS/LGS r, m16:16|32: offset, then selector; the segment register is loaded (and may fault) before the general register is written (SDM pseudo-code)"""
+    sg = {'lss': 'ss', 'lfs': 'fs', 'lgs': 'gs'}[cx.m]
     w = cx.ops[0].size
     cx.em('{ u32 ad=%s; u32 o=M%d(ad); u32 s=M16(ad+%du); %s %s }' % (cx.ea(ins, cx.ops[1]), 8 * w, w, seg_load(cx, sg), cx.wr(ins, cx.ops[0], 'o')))
-
-
-@op('retf')
-def h_retf(cx, ins):
-    """RETF [imm16]: pops EIP then CS (and imm16 bytes). Same-level return only (an outer level would need RPL > CPL = 3): valid exactly when the popped CS is SEL_CS (index of CS, RPL 3);
-    RPL < CPL, another index, the null selector are #GP(selector) (SDM Vol 2 RET, protected-mode far return: "#GP(selector) if the return code segment selector RPL is less than CPL / null / not a code segment")."""
-    n = cx.ops[0].imm & 0xffff if cx.ops else 0
-    if n:
-        cx.kinds.add('retn')
-    cx.kinds.add('farret')
-    w = 2 if osz16(ins) else 4
-    cx.em('{ u32 ra=M%d(esp), s=M%d(esp+%du)&0xffffu; %s esp+=%du; c->ra=ra; SYNC_OUT; return; }' % (8 * w, 8 * w, w, gp_cond(cx, 's!=SEL_CS'), 2 * w + n))
-    cx.term = True
-
-
-@op('iretd', 'iret')
-def h_iret(cx, ins):
-    """IRET/IRETD at CPL 3 returning to CPL 3 (SDM Vol 3 6.12.1 "Return from interrupt... without privilege change"): pops EIP, CS, EFLAGS; CS checked like RETF. EFLAGS loads like POPF at CPL 3
-    (EFL_POP: the arithmetic flags and DF, AC/ID; IOPL, IF, TF, NT, RF, VM, VIF, VIP are not changed by a CPL 3 IRET or not modelled: header comment of EFL_POP). A 16-bit IRET pops IP, CS, FLAGS
-    (word): EIP = IP, the high EFLAGS bits stay."""
-    w = 2 if cx.m == 'iret' else 4
-    cx.kinds.add('farret')
-    t = 'EFL_POP(fl);' if w == 4 else '{ u32 k=c->eflx; EFL_POP(fl); c->eflx=k; }'
-    cx.em('{ u32 ra=M%d(esp), s=M%d(esp+%du)&0xffffu, fl=M%d(esp+%du); %s esp+=%du; %s c->ra=ra; SYNC_OUT; return; }' % (
-        8 * w, 8 * w, w, 8 * w, 2 * w, gp_cond(cx, 's!=SEL_CS'), 3 * w, t))
-    cx.term = True
-
-
 
 
 def store16(cx, ins, o, val):
