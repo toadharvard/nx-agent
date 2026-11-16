@@ -1352,3 +1352,12 @@ Paused: w3b, w4, farm; no other work.
 - bottleneck: toolchain/build.json from L1 w28; then sm_link; then the w28-on-final-cand3 head.
 - 00:22Z w28 1b7fdb441: the toolchain admit is fixed, and an admit row without a tracked recipe is red in recipe check. w6 (doing): rebuild w6-b28 on it, build the render roots, run the sm_link store and gate, d3d9total and abspath.
 - 00:25Z w6-b28 on w28 021845831: recipe check valid on all 9 render roots. Every build is blocked by envcheck: debs.packages MISMATCH (8 packages: bash, diffutils, findutils, grep, gzip, patch, sed, xz-utils) against the dep closure. That is verify/env.json data, reported to w28. bottleneck: that L1 fix, then the builds and sm_link.
+- 01:12Z w6 claude/fnv-l6-render-w6-b28 a75543b98 (on w28 b03650ca1):
+    - envcheck OK; recipe check valid on all 9 render roots.
+    - Every render root builds green: translator 8 objects, smscan 1, d3d9 69, gl4 17, nxgpu 1, pair 1, gl4shim 2, sm_link 1. The sm_link run stages reach Mesa.
+    - d3d9total 332/332; test 45/45.
+    - The sm_link gate runs on farm1 (over 10 min); abspath is pending.
+    - Lead review:
+        - base-files is hand-written in 18 run stages. The rule (PT_INTERP owner joins the closure) is asked of w28, and the entries are deleted when it lands.
+        - checker.c's 64-dir cap goes; it iterates exactly the mounted debs.
+- bottleneck: the farm1 sm_link result; the w28 PT_INTERP rule; the w28-on-final-cand3 head.
