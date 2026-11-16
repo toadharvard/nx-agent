@@ -41,17 +41,19 @@ import z3  # noqa: E402
 from fnvlift import dsl  # noqa: E402
 from proof import shape, symform  # noqa: E402
 
-OTHER_PREFIX = (0x67, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65, 0xf0)
+STRING_OPCODES = (0xa4, 0xa5, 0xa6, 0xa7, 0xaa, 0xab, 0xac, 0xad, 0xae, 0xaf)     # one-byte opcode map, SDM Vol 2 Appendix A: MOVS, CMPS, STOS, LODS, SCAS (b / w-d forms); the 0F-map SSE movsd / cmpsd are other instructions of the same mnemonic
 OPS = ('movs', 'stos', 'lods', 'cmps', 'scas')
 
 
 def decode(key):
+    """-> None (not a string instruction) | (ins, rep, op, w, size).  Claimed by the decoded opcode, never by the key's bytes or the mnemonic alone"""
     ins = next(iter(shape.decoder().disasm(shape.rep_bytes(key), shape.ADDR)))
+    if ins.opcode[0] not in STRING_OPCODES: return None
     t = ins.mnemonic.split()
     rep = t[0] if len(t) > 1 else None
     m = t[-1]
     if m[:4] not in OPS or len(m) != 5 or m[4] not in 'bwd' or rep not in (None, 'rep', 'repe', 'repne', 'repz', 'repnz'): return None
-    return rep, m[:4], {'b': 8, 'w': 16, 'd': 32}[m[4]], ins.size
+    return ins, rep, m[:4], {'b': 8, 'w': 16, 'd': 32}[m[4]], ins.size
 
 
 def V(n, w): return dsl.to_smt(dsl.V(n, w))
@@ -94,11 +96,11 @@ def spec(rep, op, w, size):
 
 
 def check(key):
-    pre = bytes.fromhex(key.split('/')[0])
-    if any(b in OTHER_PREFIX for b in pre): return 'uncertified', 'uncertified: ' + 'addr-seg pfx'
     dc = decode(key)
     if dc is None: return 'not-covered', 'no string'
-    rep, op, w, size = dc
+    ins, rep, op, w, size = dc
+    pfx_rep, pfx_seg, _pfx_op, pfx_addr = ins.prefix          # the decoder's prefixes (capstone prefix array: group 1, segment, operand size, address size)
+    if pfx_addr or pfx_seg or pfx_rep == 0xf0: return 'uncertified', 'uncertified: ' + 'addr-seg pfx'
     if rep in ('repe', 'repz', 'repne', 'repnz') and op not in ('cmps', 'scas'): return 'uncertified', 'uncertified: ' + 'rep-zf only'
     try: f = symform.symbuild(key).form
     except Exception as e: return 'not-covered', 'no Form (%s)' % type(e).__name__

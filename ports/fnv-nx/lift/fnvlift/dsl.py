@@ -51,6 +51,11 @@ def C(v, w):
     v = _unwrap(v)
     if isinstance(v, N): return v if v.w == w else (extract(v, w - 1, 0) if v.w > w else mk('zext', w, (v,)))
     return mk('const', w, (), v & mask(w))
+def state_width(name):
+    """the width of the declared pre-state input NAME, or None: the GPRs and eip (32), the arithmetic flags (1), the x87 / SSE state (XW), the other inputs (XIN, widths INW; DF 1, FLO 32, the segment bases 32, the six selectors 16)"""
+    if name in REGS or name == 'eip': return 32
+    if name in FLAGS: return 1
+    return XW.get(name) or INW.get(name)
 def V(name, w):
     assert XW.get(name, w) == w, ('state variable %s has width %d' % (name, XW[name]), w)
     return mk('var', w, (), name)
@@ -397,7 +402,7 @@ class Form:
         s.fxm = False     # fault_xm(): on the SIMD floating-point exception fault the Form's MXCSR effect (the exception flags) still happens, every other effect does not (SDM Vol 1 11.5.2, Vol 3 6.15)
         s.xs = []         # x87 / MMX / SSE state effects, in order: (kind, index or None, node, ...); the later effect on one target wins (kinds: fr ftop ftag fsw fptr xmm mxcsr)
     def cur(s, name): return s.pend.get(name, V(name, 32))      # pending value, only for composing partial-register writes
-    def reg(s, name, v, when=None): assert v.w == 32; s.regs.append((name, v, when)); s.pend[name] = v
+    def reg(s, name, v, when=None): assert v.w == 32 and name in REGS, ('a register write names a GPR', name); s.regs.append((name, v, when)); s.pend[name] = v
     def flag(s, name, v, when=None): assert v.w == 1 and name in FLAGS + ('df',); s.flags.append((name, v, when))
     def setflo(s, v): assert v.w == 32; s.flo = v
     def undefined(s, name, sdm, when=None):
@@ -451,6 +456,18 @@ class Form:
         return [x for f in sorted(s.uwhen) for x in (s.uwhen[f], V(f, 1))] + [v for _, v, _ in s.regs] + [w for _, _, w in s.regs if w is not None] + [v for _, v, _ in s.flags] + \
                [w for _, _, w in s.flags if w is not None] + [x for st in s.stores for x in st] + [c for _, c in s.faults] + [s.swhen[i] for i in sorted(s.swhen)] + \
                ([s.flo] if s.flo is not None else []) + s.xnodes() + [s.eip]
+    def check_state(s):
+        """every free variable of the Form is a declared pre-state input (state_width) of its declared width (rule 8: a register name outside the state, as the 'ees' of a segment register read, was a free variable silently).  Called by proof/forms.build, which every Form passes through"""
+        seen = set(); st = list(s.roots())
+        while st:
+            n = st.pop()
+            if n.u in seen: continue
+            seen.add(n.u); st.extend(n.a)
+            if n.op == 'var':
+                dw = state_width(n.x)
+                assert dw is not None, 'Form %s: variable %r is not a declared DSL state input (GPR, eip, flag, XW, XIN)' % (s.key, n.x)
+                assert dw == n.w, 'Form %s: state variable %s has width %d, used at %d' % (s.key, n.x, dw, n.w)
+        return s
     def serialize(s):
         """canonical DAG text (hash input of the certificates)"""
         ids, out = {}, []
