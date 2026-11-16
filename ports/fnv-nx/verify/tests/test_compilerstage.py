@@ -66,6 +66,7 @@ with tempfile.TemporaryDirectory() as td:
     try:
         user = object.__new__(recipe_job)
         user.repo, user.store, user.jobs, user.extcache, user.keys, user.run, user.hit = repo, store, 1, cache, set(), 0, 0
+        user.roots, user.files = {}, []
         user.ext, user.rec = {}, {"external": [ext], "compiler": {"external": "gcc", "cc": "bin/gcc", "cxx": "bin/g++"}}
         ws = tempfile.mkdtemp(dir=td)
         user.externals(ws)
@@ -77,10 +78,12 @@ with tempfile.TemporaryDirectory() as td:
         user.externals(tempfile.mkdtemp(dir=td))
         check("the same producer keys give the same key", user.compiler_key() == k1)
         out["keys"] = {"k1", "k3"}
+        recipe.RESOLVE_MEMO.clear()   # the memo is per (checkout content): a producer that answers differently stands for another checkout
         user.externals(tempfile.mkdtemp(dir=td))
         k2 = user.compiler_key()
         check("another producer key (a plugin stage changed) gives another compiler key, same output tree", k2 != k1 and user.ext["gcc"]["tree"] == e["tree"])
         out["payload"] = "bin2"
+        recipe.RESOLVE_MEMO.clear()
         user.externals(tempfile.mkdtemp(dir=td))
         check("another output content gives another tree", user.ext["gcc"]["tree"] != e["tree"])
         host_only = object.__new__(recipe_job)

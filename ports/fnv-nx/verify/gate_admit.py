@@ -172,7 +172,16 @@ def derived_imports(rows, files, repo="."):
                 r = prefixes[max(hit, key=len)]
                 if r != own:
                     edges[own].add(r)
-    return {p: sorted(v) for p, v in edges.items()}, errs
+    closed = {}
+    for p in edges:   # a module of a root imports modules of other roots: a root's import roots are the transitive closure of the edges (the stage mounts only the closure files of those trees)
+        seen, todo = set(), list(edges[p])
+        while todo:
+            q = todo.pop()
+            if q != p and q not in seen:
+                seen.add(q)
+                todo += edges.get(q, ())
+        closed[p] = sorted(seen)
+    return closed, errs
 
 
 def imports_errors(roots):
