@@ -632,3 +632,7 @@ After the first frame:
   - ENTRY1-ATOMIC: accepted.
   - ORDER-RTLBUILTIN: the fence rule is accepted. Open: builtins with vops and no pointer operand are unclassified, so they get the fences or a GCC-fact D1 proof. w2.
   - Farm: w3 reruns the line head after gcc1 is green.
+- 2026-11-16 02:30Z:
+  - NAMES-FNPARM typedef-of-function form: 72af9ba51, nodecor outside the domain (d5/d6 pinned); unverified until the farm build.
+  - Pin field on cand4b is still the void 56a4d09c: w2 merges plugins 74c32c454 → 84f0883e (L1 report).
+  - CTYPE-FE (L5 via L1): __va_list ctype rows differ between the C and C++ plugin paths. Rule: a target-built record is emitted from its own FIELD_DECLs on both paths, and the test compares C and C++ byte for byte. Owner w3, cand4b. Status: doing.
