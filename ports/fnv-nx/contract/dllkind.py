@@ -53,7 +53,7 @@ def classify(root_imports, imports_of, find, served, root=None):
                 if name == root:
                     kind0[name] = "root"
                     continue
-                p = find(name)
+                p = None if name in served else find(name)   # a served name (a declared absent service) is never read from its file
                 if p is None:
                     kind0[name] = "served" if name in served else "absent"
                     continue

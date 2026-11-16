@@ -60,6 +60,8 @@ from fnvnx.contract import gatefile  # noqa: E402
 from fnvnx.verify import recipe  # noqa: E402
 
 INPUTS = "ports/fnv-nx/verify/contract_inputs.json"
+DECLARED_MODULES = "ports/fnv-nx/platform/declared_modules.tsv"   # the declared absent services (contract/declaredmods.py; owner L5)
+CLAUDE_MD = "CLAUDE.md"   # the cite of a declared_modules row is a heading of it
 DECLARED_DLLS = "ports/fnv-nx/verify/declared_dlls.tsv"   # the declared machine's dll set (contract/declareddlls.py)
 FORMAT = "fnvnx-contract-inputs/1"
 KEYS = {"format", "external", "exe", "msvc", "universe", "root_results", "ranges"}
@@ -174,7 +176,7 @@ def images_of(doc, ext, pinned=True):
     """([(name, pe path, ranges path)] of the images that have range facts, [names without]) of contract.images.image_set."""
     have, lack = [], []
     dirs = [ext[n]["host"] for n in ("exe", "redist")]
-    served = modules.platform_served(declareddlls.read(DECLARED_DLLS), dirs)   # the declared dll set without a file (contract/modules.py): the platform serves it
+    served = modules.read_served(DECLARED_DLLS, DECLARED_MODULES, CLAUDE_MD, dirs)   # the declared dll set without a file (contract/modules.py): the platform serves it
     found = images.image_set(P2(ext, doc["exe"]), dirs, served)
     try:   # the declared machine's image set is the pinned one (PINNED=False: a judge that only reads the images the facts name; the pin is the contract gate's) (contract/exepin.py IMAGES): digests of every guest image DLL
         if pinned:
