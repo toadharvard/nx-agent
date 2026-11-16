@@ -1,10 +1,12 @@
 """gen_meth.py: emits one wrapped method / export of d9wrap.gen.cpp from its spec entry (kinds, rules, effects exactly as d3d9_spec.json defines them)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import re
-from gen_expr import Ctx, GenError
-import gen_tab as T
+from fnvnx.render.d3d9.gen.gen_expr import Ctx, GenError
+import fnvnx.render.d3d9.gen.gen_tab as T
 
 CLS = {"det": 0, "env": 1, "pix": 2}
-from gen_expr import REFS  # noqa: E402
+from fnvnx.render.d3d9.gen.gen_expr import REFS  # noqa: E402
 
 
 def isptr(p):

@@ -10,6 +10,8 @@
 
     python3 -I rules/tests/test_prepare_pure.py
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json
 import os
 import shutil
@@ -19,8 +21,8 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import support  # noqa: E402
-from support import check, tree_hash  # noqa: E402
+import fnvnx.rules.tests.support as support  # noqa: E402
+from fnvnx.rules.tests.support import check, tree_hash  # noqa: E402
 
 PREPARE = os.path.join(support.RULES, 'prepare.py')
 W = tempfile.mkdtemp()

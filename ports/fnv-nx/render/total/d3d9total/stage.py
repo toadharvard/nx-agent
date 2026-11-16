@@ -21,6 +21,8 @@ TOKEN: NAME renamed. Each mutated compile must give an error located on that row
 compiles and every mutation of every line of K is killed.
 Every directory an include of the two recipes names under ports/fnv-nx/ must be one of the mounted trees (a recipe include that is not mounted is red: the stage reads
 no include that its key does not hold). Nothing is decided from names, text matching of messages, runs or samples."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import argparse, ast, hashlib, importlib.machinery, importlib.util, json, os, shutil, stat, subprocess, sys
 
 D3D9_REC, TRANSLATOR_REC = "render/d3d9/build.json", "render/shaders/translator/build.json"
@@ -223,7 +225,7 @@ def vendor_fourcc(inp, work, cache, specp):
     env = os.path.join(inp, "render", "d3d9", "env")
     sys.path.insert(0, env)
     try:
-        import gen_enums
+        import fnvnx.render.d3d9.env.gen_enums as gen_enums
         return gen_enums.vendor_fourcc(tree, specp), h
     finally:
         sys.path.remove(env)

@@ -22,12 +22,14 @@ as a mandatory argument and store it in the object, so the count of `none` rows 
 Function boundaries: the entries of the L3a function facts (funcfacts.py, `--facts DIR`), never a prologue pattern. A site in no entry is listed as an
 `# unresolved site` comment line of the .required file. A pattern window is the contiguous instructions of one entry around the site (a gap between runs ends it).
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, re, struct, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import funcfacts
+import fnvnx.manifest.funcfacts as funcfacts
 
-import pemanifest
+import fnvnx.manifest.pemanifest as pemanifest
 
 
 def main(exe, out):

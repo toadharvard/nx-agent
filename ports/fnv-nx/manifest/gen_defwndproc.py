@@ -13,12 +13,14 @@ Errors (exit 1, the stage is red): a label with no id; a label with no handler (
 not a label (a message Wine's procedure does not handle); a name defined twice; a duplicate id.
 Output <out.inc>: forward declarations of the handlers and the table `k_defrules[]` {id, handler, citation}, sorted by id; the citation is
 `wine-9.0:dlls/win32u/defwnd.c:default_window_proc case WM_X (line N)`, the line of the label in the tree. Python 3 standard library only."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from gen_wine_cites import strip_comments  # noqa: E402
+from fnvnx.manifest.gen_wine_cites import strip_comments  # noqa: E402
 
 FILE = "dlls/win32u/defwnd.c"
 FUNC = "default_window_proc"

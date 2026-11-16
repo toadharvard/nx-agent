@@ -5,6 +5,8 @@ address and other casts stay; line numbers stay.
 
     python3 -I rules/tests/test_addrfn1.py
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import collections
 import json
 import os
@@ -14,10 +16,10 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import support  # noqa: E402
+import fnvnx.rules.tests.support as support  # noqa: E402
 support.legacy_units_lookup()
-import s1_compile  # noqa: E402
-import s2_bodies   # noqa: E402
+import fnvnx.rules.s1_compile as s1_compile  # noqa: E402
+import fnvnx.rules.s2_bodies as s2_bodies   # noqa: E402
 
 SRC = '''struct F { void* rh; void* wh; void* dh; void* uh; int n; };
 void Set(F* f)

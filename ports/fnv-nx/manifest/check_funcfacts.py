@@ -24,6 +24,8 @@ A module outside the graph (the generators of the platform tables, which read th
 holds for every module. The graph is computed from the imports, never listed.
 The self-tests build synthetic modules for each of the three rules and for a module that reaches the graph through another module.
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import ast, os, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -153,7 +155,7 @@ def main():
 def selftest_code_read():
     """G3: a byte read at a code address is red; data reads, a relocated word in code, and decoded facts are not."""
     sys.path.insert(0, HERE)
-    import funcfacts
+    import fnvnx.manifest.funcfacts as funcfacts
     imagerec = funcfacts.imagerec   # the one module, as funcfacts holds it: the gate itself imports no reader
     assert not hasattr(funcfacts, "CodeRead"), "funcfacts defines no error type of its own"
     code = bytes.fromhex("558bec" "b800304000" "5dc3")            # push ebp; mov ebp,esp; mov eax,0x403000; pop ebp; ret

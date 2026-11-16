@@ -14,10 +14,12 @@ declared row that nothing reads, an unreadable or missing input, a malformed row
 `{` that is not `{game_dir}` stops with exit status 2 and writes no output. --uncovered writes the static read sites with no
 declared row (the keys a real Windows or Wine populates; they stay absent here): module, site, api, root, key, value.
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import regtable
+import fnvnx.manifest.regtable as regtable
 
 ROOTS = {"HKEY_CLASSES_ROOT": 0x80000000, "HKEY_CURRENT_USER": 0x80000001, "HKEY_LOCAL_MACHINE": 0x80000002, "HKEY_USERS": 0x80000003}
 TYPES = {"REG_SZ": 1, "REG_EXPAND_SZ": 2, "REG_BINARY": 3, "REG_DWORD": 4, "REG_MULTI_SZ": 7, "REG_QWORD": 11}

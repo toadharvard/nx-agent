@@ -9,11 +9,13 @@ are the externals of the roots that pin them (`external_of`), the SM table and r
 tracked trees it reads are declared inputs. The result is read through recipe.resolve_input
 {"stage": "ports/fnv-nx/render/total/d3d9total:run:gate", "path": "d3d9total.json"}, the one reader of a stage output; a stage that did not run
 or whose result is not a fnvnx-gate/1 record of this gate is red with the reason. Green iff the stage's own result is green."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json, os, sys
 
 REPO = os.getcwd()
 sys.path.insert(0, os.path.join(REPO, "ports", "fnv-nx", "verify"))
-import recipe  # noqa: E402
+import fnvnx.verify.recipe as recipe  # noqa: E402
 
 ROOT = "ports/fnv-nx/render/total/d3d9total"
 

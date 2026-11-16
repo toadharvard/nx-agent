@@ -17,17 +17,19 @@ XC1 (s10_startup), the compile rules (s1_compile), the body rules (s2_bodies) an
 its edits in stats[<rule id>]. After the tree is written the dual-compile check (mscgate.py) runs over every
 rewritten file and fails the run when a rule introduced a `_MSC_VER` conditional that is not of the permitted form.
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import core            # noqa: E402
-import mscgate         # noqa: E402
-import s10_startup     # noqa: E402
-import s1_compile      # noqa: E402
-import s2_bodies       # noqa: E402
-import s8_asm          # noqa: E402
+import fnvnx.rules.core as core            # noqa: E402
+import fnvnx.rules.mscgate as mscgate         # noqa: E402
+import fnvnx.rules.s10_startup as s10_startup     # noqa: E402
+import fnvnx.rules.s1_compile as s1_compile      # noqa: E402
+import fnvnx.rules.s2_bodies as s2_bodies       # noqa: E402
+import fnvnx.rules.s8_asm as s8_asm          # noqa: E402
 
 MODULES = [s10_startup, s1_compile, s2_bodies, s8_asm]
 SOURCE_SUFFIXES = ('.cpp', '.h', '.hpp', '.inl', '.c')

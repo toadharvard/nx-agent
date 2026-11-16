@@ -1,10 +1,12 @@
 """MEASUREMENT TOOL, not run by any gate: Counts how often each run step of the sm_link roots is evaluated when the sm_link gate reads its summary through recipe.resolve_input.
 The sandbox is stubbed: Job.run_one records the step, resolves the step's stage-ref inputs exactly as the real run_one does (recipe.resolve_input),
 and writes its declared outputs as empty files. Nothing else of recipe.py is changed."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import collections, os, sys, tempfile
 repo = sys.argv[1]
 sys.path.insert(0, os.path.join(repo, "ports/fnv-nx/verify"))
-import recipe
+import fnvnx.verify.recipe as recipe
 calls = collections.Counter()
 def run_one(self, ws, i, g):
     calls[(self.root.split("/")[-1], g["name"])] += 1

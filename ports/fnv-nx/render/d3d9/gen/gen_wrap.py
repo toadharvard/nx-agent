@@ -2,12 +2,14 @@
 """gen_wrap.py OUTDIR [SPEC.json]: generates the D3D9 journaling wrapper (RD1) from d3d9_spec.json:
    OUTDIR/d9wrap.gen.h, d9wrap.gen.cpp, d9wrap.manifest.txt.  Exits 2 naming the item when the spec has a kind, rule function, effect or
    field kind that has no emitter (no fallbacks).  See README.md."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import hashlib, json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE); sys.dont_write_bytecode = True
-from gen_expr import GenError                                  # noqa: E402
-from gen_meth import Meth                                      # noqa: E402
-import gen_tab as T                                            # noqa: E402
+from fnvnx.render.d3d9.gen.gen_expr import GenError                                  # noqa: E402
+from fnvnx.render.d3d9.gen.gen_meth import Meth                                      # noqa: E402
+import fnvnx.render.d3d9.gen.gen_tab as T                                            # noqa: E402
 
 
 def generate(spec, raw, out):

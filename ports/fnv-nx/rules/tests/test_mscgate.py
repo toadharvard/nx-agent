@@ -5,6 +5,8 @@ forbidden split named by prepare.prepare. Synthetic snippets only.
 
     python3 -I rules/tests/test_mscgate.py
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 import tempfile
@@ -17,12 +19,12 @@ from collections import Counter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import support  # noqa: E402
-from support import check  # noqa: E402
-import core  # noqa: E402
-import mscgate  # noqa: E402
-import prepare  # noqa: E402
-import s8_asm  # noqa: E402
+import fnvnx.rules.tests.support as support  # noqa: E402
+from fnvnx.rules.tests.support import check  # noqa: E402
+import fnvnx.rules.core as core  # noqa: E402
+import fnvnx.rules.mscgate as mscgate  # noqa: E402
+import fnvnx.rules.prepare as prepare  # noqa: E402
+import fnvnx.rules.s8_asm as s8_asm  # noqa: E402
 
 
 def judged(before, after):

@@ -27,12 +27,14 @@ reference binds to its address. A copy of such a definition in a unit that does 
 says which unit defines it) becomes a plain extern declaration.
 """
 from __future__ import annotations
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 
 import json
 import os
 import re
 
-import core
+import fnvnx.rules.core as core
 
 MARKER = '// fnvnx S10 dyninit_rewrite: '
 TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+(0x[0-9a-fA-F]+)[ \t]*$')

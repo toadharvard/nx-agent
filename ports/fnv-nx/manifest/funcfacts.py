@@ -35,6 +35,8 @@ Rules (each one closes the whole class):
             the facts' rule R3 makes each relocated pointer into executable bytes an entry, and a jump-table slot is such a pointer
             (ASM-012: the only way code obtains a code address is a relocated word). `ijumps(entry)` lists the indirect jumps.
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
@@ -121,7 +123,7 @@ class Image:
     def synthetic(cls, name, base, img, relocs, imports, code, runs=None, facts=None):
         """An image built from given bytes (the self-tests' synthetic PEs, pefixture.build_pe): an imagerec.ImageRec of a PE that is built
         in memory, with the function facts `runs` ({entry: [(a, b)]}), or with no facts and the reason `facts` ("no function facts")."""
-        import pefixture
+        import fnvnx.manifest.pefixture as pefixture
         self = cls.__new__(cls)
         self._set(imagerec.ImageRec(pefixture.build_pe(base, img, relocs, imports, code), name, runs or {}, facts if runs is None else None), None)
         return self

@@ -11,7 +11,7 @@ RULES = os.path.normpath(os.path.join(Ent01, '..'))
 if RULES not in sys.path:
     sys.path.insert(0, RULES)
 
-import core  # noqa: E402
+import fnvnx.rules.core as core  # noqa: E402
 
 FAILS = []
 
