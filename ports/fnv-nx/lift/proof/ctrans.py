@@ -426,6 +426,8 @@ class Machine:
         self.fpsr, self.fpcr, self.rmode = FPSR_IN, FPCR_INIT, ARM_RMODE
         self.fresh = 0
         self.mem = MEM_IN
+        self.post = {}      # struct name -> f(value dict) -> z3 Bool: the postcondition every function returning that struct must establish (checked at each call made from inside an executed function: `obl`)
+        self.obl = []       # [(caller, callee, k, Bool)]: the postcondition at the k-th such call of the caller, under the call's path condition
         for e in tast.ext: self.declare(e)
 
     # -- declarations
@@ -851,6 +853,8 @@ class Machine:
         fr.rett = rett
         fr.ret = self.zero(rett) if rett != ('v',) else None
         self.run(fd.body, fr)
+        if rett[0] == 's' and rett[1] in self.post and caller.name != 'top' and isinstance(fr.ret, dict):
+            self.obl.append((caller.name, fd.decl.name, sum(1 for o in self.obl if o[0] == caller.name), z3.Implies(caller.L, self.post[rett[1]](fr.ret))))
         self.last_vars = fr.vars          # the callee's final locals (the fragment executor reads the lifter's own flag locals c0 c2 c3 zf pf cf ...)
         return fr.ret
 
@@ -980,7 +984,7 @@ class Machine:
     # -- public
     def apply(self, name, args):
         """execute function `name` on `args` (V / dict / Ptr values); -> Result(ret, outs, ub), outs = the final contents of every pointer argument"""
-        self.ub = []; self.dom = []; self.fpsr, self.fpcr, self.rmode = FPSR_IN, FPCR_INIT, ARM_RMODE; self.mem = MEM_IN
+        self.ub = []; self.dom = []; self.fpsr, self.fpcr, self.rmode = FPSR_IN, FPCR_INIT, ARM_RMODE; self.mem = MEM_IN; self.obl = []
         fd = self.funcs[name]
         fr = Frame('top', z3.BoolVal(True))
         ret = self.call(fd, args, fr)

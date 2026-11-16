@@ -174,7 +174,19 @@ def de_universe():
 
 if __name__ == '__main__':
     import json
-    if sys.argv[1] == 'universe':
+    if sys.argv[1] == 'batch':      # batch OUT.jsonl JOBS [TOPS...]: every class of the DE universe, one subprocess each (bounded memory), JOBS in parallel
+        import subprocess, concurrent.futures as cf
+        out, jobs, tops = sys.argv[2], int(sys.argv[3]), sys.argv[4:] or ['0']
+        keys = de_universe()
+        def one(k):
+            try:
+                p = subprocess.run([sys.executable, '-I', os.path.abspath(__file__), json.dumps(k)] + tops, capture_output=True, text=True, timeout=5400)
+                line = p.stdout.strip().split('\n')[-1] if p.returncode == 0 and p.stdout.strip() else json.dumps({'key': k, 'error': (p.stderr or '')[-300:]})
+            except subprocess.TimeoutExpired: line = json.dumps({'key': k, 'error': 'timeout'})
+            r = json.loads(line); r['key'] = k; return json.dumps(r)
+        with cf.ThreadPoolExecutor(jobs) as ex, open(out, 'w') as fh:
+            for line in ex.map(one, keys): fh.write(line + '\n'); fh.flush()
+    elif sys.argv[1] == 'universe':
         for k in de_universe(): print(json.dumps(k))
     else:
         raw = key_bytes(tuple(json.loads(sys.argv[1])))
