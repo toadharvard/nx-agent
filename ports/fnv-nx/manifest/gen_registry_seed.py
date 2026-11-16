@@ -16,8 +16,8 @@ declared row (the keys a real Windows or Wine populates; they stay absent here):
 """
 import os, sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import regtable
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.manifest import regtable
 
 ROOTS = {"HKEY_CLASSES_ROOT": 0x80000000, "HKEY_CURRENT_USER": 0x80000001, "HKEY_LOCAL_MACHINE": 0x80000002, "HKEY_USERS": 0x80000003}
 TYPES = {"REG_SZ": 1, "REG_EXPAND_SZ": 2, "REG_BINARY": 3, "REG_DWORD": 4, "REG_MULTI_SZ": 7, "REG_QWORD": 11}

@@ -151,8 +151,7 @@ def main():
 
 def selftest_code_read():
     """G3: a byte read at a code address is red; data reads, a relocated word in code, and decoded facts are not."""
-    sys.path.insert(0, HERE)
-    import funcfacts
+    from fnvnx.manifest import funcfacts
     imagerec = funcfacts.imagerec   # the one module, as funcfacts holds it: the gate itself imports no reader
     assert not hasattr(funcfacts, "CodeRead"), "funcfacts defines no error type of its own"
     code = bytes.fromhex("558bec" "b800304000" "5dc3")            # push ebp; mov ebp,esp; mov eax,0x403000; pop ebp; ret

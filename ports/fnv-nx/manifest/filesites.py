@@ -22,9 +22,9 @@ Image set: the root and the dlls of dllkind role `image` (pemanifest.closure); n
 """
 import collections, os, re, sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import funcfacts, pemanifest, regsites
-from regsites import Analyzer, NOPUSH
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.manifest import funcfacts, pemanifest, regsites
+from fnvnx.manifest.regsites import Analyzer, NOPUSH
 
 # (nargs, None (no key argument), name arg index, extra name arg index, out buffer arg index, kind)
 _B = {

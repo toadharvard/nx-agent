@@ -46,8 +46,8 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-from contract import imagerec
-from contract.imagerec import X   # the operand/register constants of the decoded instructions, for the passes that read them
+from fnvnx.contract import imagerec
+from fnvnx.contract.imagerec import X   # the operand/register constants of the decoded instructions, for the passes that read them
 
 PIN = os.path.join(HERE, "facts.json")
 _dir = None
@@ -115,7 +115,7 @@ class Image:
     def synthetic(cls, name, base, img, relocs, imports, code, runs=None, facts=None):
         """An image built from given bytes (the self-tests' synthetic PEs, pefixture.build_pe): an imagerec.ImageRec of a PE that is built
         in memory, with the function facts `runs` ({entry: [(a, b)]}), or with no facts and the reason `facts` ("no function facts")."""
-        import pefixture
+        from fnvnx.manifest import pefixture
         self = cls.__new__(cls)
         self._set(imagerec.ImageRec(pefixture.build_pe(base, img, relocs, imports, code), name, runs or {}, facts if runs is None else None), None)
         return self

@@ -13,8 +13,8 @@ Usage: check_filesites.py
 """
 import os, struct, sys, tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import funcfacts, pemanifest, filesites, fileset_classes
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.manifest import funcfacts, pemanifest, filesites, fileset_classes
 
 BASE = 0x400000
 IMP = {"CreateFileA": 0x403000, "DeleteFileA": 0x403004, "GetModuleFileNameA": 0x403008, "CreateDirectoryA": 0x40300c,
