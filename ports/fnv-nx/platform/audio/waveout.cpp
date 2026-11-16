@@ -12,6 +12,7 @@
  * inside the mixer's render lock, so a holder of wlock never calls the mixer or takes g_lock (order: g_lock >
  * mixer lock > wlock > g_qlock). A block's length must be whole frames (else MMSYSERR_INVALPARAM). CALLBACK_THREAD
  * posts a thread message to the thread whose id the caller gave (dwCallback), as the documented contract. */
+#include <fnvnx_export.h>
 #include "../win32/w32.h"
 #include "../include/fnvnx_waveout.h"
 #include <dsound.h>
@@ -225,7 +226,9 @@ void fnvnx_waveout_service(void)
 }
 
 #include "waveout.env_const.gen.inc"   /* waveOutGetNumDevs: manifest/env_const.tsv */
+FNVNX_EXPORT("winmm.dll", "waveOutGetNumDevs", waveOutGetNumDevs, "func");
 
+FNVNX_EXPORT("winmm.dll", "waveOutGetDevCapsA", waveOutGetDevCapsA, "func");
 UINT waveOutGetDevCapsA(uintptr_t id, void *out, UINT cb)
 {
     os_lock(&g_lock);
@@ -241,6 +244,7 @@ UINT waveOutGetDevCapsA(uintptr_t id, void *out, UINT cb)
     return OK;
 }
 
+FNVNX_EXPORT("winmm.dll", "waveOutGetErrorTextA", waveOutGetErrorTextA, "func");
 UINT waveOutGetErrorTextA(UINT e, char *text, UINT cch)
 {
     static const char *const t[] = {
@@ -272,6 +276,7 @@ UINT waveOutGetErrorTextA(UINT e, char *text, UINT cch)
     return OK;
 }
 
+FNVNX_EXPORT("winmm.dll", "waveOutOpen", waveOutOpen, "func");
 UINT waveOutOpen(void **phwo, UINT dev, const void *pwfx, uintptr_t cb, uintptr_t inst, DWORD fl)
 {
     if (fl & ~0x7000Fu) return INVALFLAG;
@@ -308,6 +313,7 @@ UINT waveOutOpen(void **phwo, UINT dev, const void *pwfx, uintptr_t cb, uintptr_
     return OK;
 }
 
+FNVNX_EXPORT("winmm.dll", "waveOutClose", waveOutClose, "func");
 UINT waveOutClose(void *h)
 {
     os_lock(&g_lock);
@@ -327,6 +333,7 @@ UINT waveOutClose(void *h)
     return OK;
 }
 
+FNVNX_EXPORT("winmm.dll", "waveOutPrepareHeader", waveOutPrepareHeader, "func");
 UINT waveOutPrepareHeader(void *h, void *hdr, UINT cb)
 {
     os_lock(&g_lock);
@@ -339,6 +346,7 @@ UINT waveOutPrepareHeader(void *h, void *hdr, UINT cb)
     return rc;
 }
 
+FNVNX_EXPORT("winmm.dll", "waveOutUnprepareHeader", waveOutUnprepareHeader, "func");
 UINT waveOutUnprepareHeader(void *h, void *hdr, UINT cb)
 {
     os_lock(&g_lock);
@@ -351,6 +359,7 @@ UINT waveOutUnprepareHeader(void *h, void *hdr, UINT cb)
     return rc;
 }
 
+FNVNX_EXPORT("winmm.dll", "waveOutWrite", waveOutWrite, "func");
 UINT waveOutWrite(void *h, void *hdr, UINT cb)
 {
     os_lock(&g_lock);
@@ -381,6 +390,7 @@ UINT waveOutWrite(void *h, void *hdr, UINT cb)
     return rc;
 }
 
+FNVNX_EXPORT("winmm.dll", "waveOutPause", waveOutPause, "func");
 UINT waveOutPause(void *h)
 {
     os_lock(&g_lock);
@@ -390,6 +400,7 @@ UINT waveOutPause(void *h)
     return w ? OK : INVALHANDLE;
 }
 
+FNVNX_EXPORT("winmm.dll", "waveOutRestart", waveOutRestart, "func");
 UINT waveOutRestart(void *h)
 {
     os_lock(&g_lock);
@@ -404,6 +415,7 @@ UINT waveOutRestart(void *h)
     return w ? OK : INVALHANDLE;
 }
 
+FNVNX_EXPORT("winmm.dll", "waveOutReset", waveOutReset, "func");
 UINT waveOutReset(void *h)
 {
     os_lock(&g_lock);
@@ -427,6 +439,7 @@ UINT waveOutReset(void *h)
     return w ? OK : INVALHANDLE;
 }
 
+FNVNX_EXPORT("winmm.dll", "waveOutGetPosition", waveOutGetPosition, "func");
 UINT waveOutGetPosition(void *h, void *out, UINT cb)
 {
     os_lock(&g_lock);
@@ -446,6 +459,7 @@ UINT waveOutGetPosition(void *h, void *out, UINT cb)
     return rc;
 }
 
+FNVNX_EXPORT("winmm.dll", "waveOutSetVolume", waveOutSetVolume, "func");
 UINT waveOutSetVolume(void *h, DWORD vol)
 {
     os_lock(&g_lock);
@@ -460,6 +474,7 @@ UINT waveOutSetVolume(void *h, DWORD vol)
     return rc;
 }
 
+FNVNX_EXPORT("winmm.dll", "waveOutGetVolume", waveOutGetVolume, "func");
 UINT waveOutGetVolume(void *h, DWORD *vol)
 {
     os_lock(&g_lock);

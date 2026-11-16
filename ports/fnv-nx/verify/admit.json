@@ -28,6 +28,7 @@
   {"path": "ports/fnv-nx/rules", "class": "tool", "entry": []},
   {"path": "ports/fnv-nx/verify/probes", "class": "product", "target": "guest", "recipe": "ports/fnv-nx/verify/probes/build.json"},
   {"path": "ports/fnv-nx/shim", "class": "product", "target": "guest", "recipe": "ports/fnv-nx/shim/build.json"},
+  {"path": "ports/fnv-nx/contract/exporthdr", "class": "product", "target": "guest", "recipe": "ports/fnv-nx/contract/exporthdr/build.json"},
   {"path": "ports/fnv-nx/hostabi/product", "class": "product", "target": "guest", "recipe": "ports/fnv-nx/hostabi/product/build.json"},
   {"path": "ports/fnv-nx/hostabi", "class": "product", "target": "guest", "recipe": {"guest": "ports/fnv-nx/hostabi/build.json", "host": "ports/fnv-nx/hostabi/build.host.json"}},
   {"path": "ports/fnv-nx/platform/include", "class": "header"},

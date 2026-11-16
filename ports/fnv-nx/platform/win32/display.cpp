@@ -17,6 +17,7 @@
  * The metrics table values are the reference environment's (Wine 9.0 prefix, HKCU\Control Panel\Desktop\WindowMetrics:
  * BorderWidth 1, CaptionWidth 18, CaptionHeight 25, MenuWidth/Height 18, ScrollWidth/Height 17, SmCaptionWidth/Height
  * 17, PaddedBorderWidth 0, IconSpacing 75 px) and Wine's rules for what is derived from them. */
+#include <fnvnx_export.h>
 #include "window_int.h"
 #include "font_faces.h"
 
@@ -245,6 +246,7 @@ int sm(int i)
 }
 } // namespace
 
+FNVNX_EXPORT("user32.dll", "GetSystemMetrics", GetSystemMetrics, "func");
 extern "C" int GetSystemMetrics(int i) { return sm(i); }
 
 /* ---- EnumDisplayDevicesA */
@@ -256,6 +258,7 @@ struct dispdev { uint32_t cb; char name[32], string[128]; uint32_t flags; char i
 #define ADAPTER_NAME "\\\\.\\DISPLAY1"
 #define MONITOR_CLASS "{4d36e96e-e325-11ce-bfc1-08002be10318}"
 } // namespace
+FNVNX_EXPORT("user32.dll", "EnumDisplayDevicesA", EnumDisplayDevicesA, "func");
 extern "C" BOOL EnumDisplayDevicesA(LPCSTR dev, DWORD i, void *out, DWORD flags)
 {
     dispdev *d = (dispdev *)out;
@@ -303,6 +306,7 @@ uint32_t rd32(const uint8_t *p, unsigned off) { uint32_t v; memcpy(&v, p + off, 
 
 } // namespace
 
+FNVNX_EXPORT("user32.dll", "ChangeDisplaySettingsA", ChangeDisplaySettingsA, "func");
 extern "C" LONG ChangeDisplaySettingsA(void *devmode, DWORD flags)
 {
     flags = W32_DW(flags);
