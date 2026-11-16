@@ -64,8 +64,14 @@ PLUGIN_OUT = plugsem.PLUGIN_OUT
 origin_class = plugsem.origin_class
 semantics_set = plugsem.semantics_set
 plugin_args = plugsem.plugin_args
-SEMANTICS_FLAGS = plugsem.SEMANTICS_FLAGS
-SEMANTICS_LIFTED = plugsem.SEMANTICS_LIFTED
+
+
+def __getattr__(name):   # PEP 562: the semantic sets are computed on first use (plugsem.semantic_flags), never at import
+    if name in ("SEMANTICS_FLAGS", "SEMANTICS_LIFTED"):
+        return getattr(plugsem, name)
+    raise AttributeError(name)
+
+
 SDD_DEFINE = plugsem.SDD_DEFINE
 SDD_FLAGS = plugsem.SDD_FLAGS
 ANALYSIS_PLUGIN = plugsem.ANALYSIS_PLUGIN
@@ -3577,7 +3583,7 @@ class Job:
         if rt["name"] not in self.ext:
             self.externals(ws)
         drv = rt["at"] + "/" + pin_drivers()[1]
-        flags = semantics_for(self.hostpath(self.drivers()[1]), "cxx", SEMANTICS_FLAGS)
+        flags = semantics_for(self.hostpath(self.drivers()[1]), "cxx", plugsem.semantic_flags())
         tr = self.toolrt([drv])[1]
         pd = os.path.join(tempfile.mkdtemp(dir=ws), "probe")
         os.makedirs(pd)

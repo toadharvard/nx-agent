@@ -229,19 +229,6 @@
    ]
   },
   {
-   "tool": "ports/fnv-nx/platform/crt/gen_msvcrt_table.py",
-   "args": [
-    "/in/ports/fnv-nx/bridgefacts/crt/msvcrt_names.tsv",
-    "/out/crt/msvcrt_table.gen.cpp"
-   ],
-   "inputs": [
-    "ports/fnv-nx/bridgefacts/crt/msvcrt_names.tsv"
-   ],
-   "outputs": [
-    "crt/msvcrt_table.gen.cpp"
-   ]
-  },
-  {
    "tool": "ports/fnv-nx/platform/com/gen_combridge.py",
    "args": [
     "/uses/ports/fnv-nx/bridgefacts/COM_SPEC",
