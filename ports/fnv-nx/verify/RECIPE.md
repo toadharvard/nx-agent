@@ -278,6 +278,8 @@ Readers of the record: gate_tlsmodel (the relocations of the linked ELF), contra
 - `outputs` are root-relative declared paths, stored in the store and copied into the root like generated outputs (they may be units, headers,
   constants ...). A nonzero exit, an undeclared output and a missing declared output are red, naming `run:<root>:<name>`.
 - A `run` stage is not a compile: toolflags does not judge it (its argv[0] is the artifact, never a compiler).
+- Generated-only roots (`recipe.generated_only`): a root with `generated` or `run` steps and none of `flags`, `include`, `units`, `link`, `profile`, `variants` has no unit. `compiler` and `plugins`
+  may be written in it (the compiler stage: a step's `{"plugin": NAME}` input is built against the root's compiler); a root with no `compiler` of its own gets the host profile's, never run.
 - A C/C++/asm file of the root that is a declared path input of one of its `run` steps (the file, or a directory holding it) is that step's input, not a unit: mounted at `/in/N`,
   its content in the step's key (`recipe.run_input_sources`; `all_units_of` leaves it out). Every other source of the root is a unit under the existing rules (`cxx_origin`),
   and in a generated-only root it is red: a source is a declared run input or a unit, nothing else. Tests: `tests/test_runinsrc.py` (the rule), `tests/test_run.py` family (builds).
@@ -388,11 +390,11 @@ declared `uses` input, passed to the tool as an argument (as `--lib` is) or read
 
 A generator tool may import modules of other admitted roots only through the `imports` of its own root's admit.json row (`{"imports": [root, ...]}`, the form `manifest` uses).
 `gen:foreign-import` accepts an import that resolves inside a tree of a declared import root. The generate stage mounts the tool's own root at `/tool` and, at `/imp` in
-the repo-relative layout, exactly the files of the declared import roots that the import closure (by `ast`, transitively) reaches, and nothing else of those roots;
+the repo-relative layout, exactly the files of the declared import roots that the import closure (by `ast`, transitively) reaches plus the data those modules read (below), and nothing else of those roots;
 `PYTHONPATH` lists their directories. The stage key therefore covers only the closure: an edit to another file of an import root leaves the key unchanged. Red:
 an import of a root that is not declared (`gen:foreign-import`); a declared root that no generator of the recipe reaches (`gen:unused-import:<root>:<import root>`); a
-read by a path of its own location (`__file__`) in a module of an import root (only its `.py` closure is mounted, so the data is not there: pass the data as a declared
-input). Functions: `recipe.import_trees`, `recipe.import_mount`. Tests: `tests/test_genimports.py`.
+read by a path of its own location (`__file__`) in a module of an import root that leaves that root's tree or that the rule cannot decide. A data file such a module reads by a
+constant path of its own location inside its root's tree (decided by `pathflow`, a directory: every tracked file under it) is mounted with the closure and so is in the key. Functions: `recipe.import_trees`, `recipe.import_mount`. Tests: `tests/test_genimports.py`.
 
 ### Generated `sources`
 `sources: PATH` (a path in generated[].outputs of the root) names a file a generate stage writes, one `<external>:<path>` line per unit; `.` names the root
