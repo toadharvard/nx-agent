@@ -567,3 +567,15 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - Known red tests:
   - test_vendormap (S.Table removed by 1d8bdc7c5; being fixed);
   - fnvlift test_cs_store and test_null_seg (fail on the base too; L3a).
+
+## 2026-11-16 10:50Z — base3 merge for L3a (claude/fnv-l3b-lift-w-base3 4c6c59ffc)
+- What it is: our x87 line merged onto L3a base3 0fd113912 (a2b3c2544), which w8 takes whole, plus a code-selector store guard kept only where a proof of range allows a code selector.
+  - The sets come from segwrites SetDomain: initial x86sys selectors joined with every sreg-write site; any cut-off makes the set ⊤.
+  - A precondition in lift_dsl.specialise makes z3 prove the arm dead.
+- Pack, before: 9/76 buildable shapes carry the arm. After: needs the real SEGWRITES facts (L3a farm and relift).
+- Open soundness conditions, asked of L3a: (a) the sets are joined over every image; (b) CONTEXT Seg* writes before continue/SetThreadContext are included.
+- test_sysspec_cpufeat 3DNow #UD: red until L3a w13's capstone-group rule lands in proof/cpufeat.py.
+- Global numbers at 4c6c59ffc:
+  - sha canonical: 26,500 keys, 24,281 built, 0 differing;
+  - lift canonical: 131,072 units plus 20 cold, 0 differing.
+- Doing: worker a4fefc3884cbfe194, x87 carrier kind in the spec state (pack x87 34/122 at 6538cb97f).
