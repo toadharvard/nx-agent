@@ -2763,3 +2763,11 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - reach takes the sound superset: every pointer-sized import argument escapes.
 - w28-c5 removes the dnfile pin together with pdfplumber. L5 deletes import_escape.py and the dnfile path, and sends lines for gate_reach/gpa_names if a pointer slot without an escape file is not already "e".
 - Checked: with no escape row, a slot is "e" (contract/memfx.py ImportInfo escape: no row = all e). No change to gate_reach or gpa_names. L5 deleted import_escape at claude/fnv-l5-platform-w41 9199431, which is in the cand5 offer.
+
+### 2026-11-16: w28-c5 head 24ec7e128
+- The PDF reader and dnfile are removed, and integ CLAUDE.md 69656d214 is taken. Admit green 1057/1057, 34 roots.
+- fpcr: targets.json console_cpu.fpcr, cited to DDI0488H 14.4.1 and ASM-008. targets.fpcr_value/fpcr_errors. New tool root contract/target generates fnvnx_target.h (FNVNX_FPCR).
+- msr fpcr sites on the L3a relift: 5 in all, 1 constant write (enter.cc:58). L3a is asked to include the header and use FNVNX_FPCR.
+- Open class (deferred until after the first frame, blocks no path step): every msr fpcr source operand traces to FNVNX_FPCR or to an mrs/saved value, from parsed source (an L2 plugin fact). No regex gate.
+- The farm runs w28-c5 at 24ec7e128 after cand4 and the L2 toolchain rerun.
+- bottleneck: the cand4 verdict (farm restarts); L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
