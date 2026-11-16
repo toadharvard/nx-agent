@@ -653,7 +653,113 @@ The owner's words: "Что ещё так проебано? Перепровер�
   - Tools used only by tests (X11 locks) and scratch notes are outside the product and gate paths; L1's rule decides that
     from the stage graph, not by a list.
 - **The cold pack build** of the relifted pack runs on up to 16 farms (orchestrator, 2026-11-15 21:00Z, for this one
-  build). It is sharded by the recipe, with N up to 16, and the shards' stores are merged by key.
+  build), and only after the density rules below. It is sharded by the recipe, with N up to 16, and the shards' stores are merged by key.
+
+## Orchestrator decision of 2026-11-15 23:30Z: jump-table index bound under OWNER 6 (binding for L3a, L3b, L1)
+
+- **The case.** MSVC /Od switches keep the index in a frame slot: `cmp [ebp-k],N; ja D; mov r,[ebp-k]; ...; jmp [r*4+T]`.
+  Between the guard and the reload there is no call and no unknown store, so only another thread, through an escaped
+  frame address, could change the slot. At w7 facts2 b9261cd85, 326 of 1005 sites are red this way.
+- **The rule.**
+  - The table read `[r*4+T]` is an array access. Under OWNER 6 its index is in the bounds of T.
+  - T's extent is the N+1 entries fixed by the guard `cmp [ebp-k],N` / `ja` on the same cell. The cell is the same
+    expression, with no redefinition of ebp between, and the guard dominates the jmp.
+  - So the target is one of T's N+1 entries, read statically. Each has a dispatcher entry.
+  - A racing in-range write still lands in T. An out-of-range one is a wild access, which OWNER 6 excludes.
+- **Status.** This is OWNER 6 applied to the table index. It is not a new assumption. The certificate cites OWNER 6, the
+  guard address and the table extent.
+- **The cell defects stay defects.** A join of different esp depths must not kill ebp cells (fix B), and precise escapes
+  are needed (SEH record, the /GS cookie value).
+- **Residue.** A site that this rule does not close, for example with no dominating guard on the same cell, is traced and
+  reported to the orchestrator with its address. Nothing is chosen for it.
+
+## Orchestrator decision of 2026-11-16 03:05Z: lift/rt FP helper bodies (binding for L3b, L3a, L1)
+
+- **The gap.** Shape certificates stop at the call into a lift/rt helper (`sse_f2i`, `fv_i` and every helper a Form
+  calls), so the helper's C body is not certified by them. gate_fpexact check 0 claimed otherwise. That was a false
+  claim, and it is corrected now: the check states exactly what is certified.
+- **One method for every width (revised 03:10Z).** An exhaustive run could only be checked against an executable
+  re-implementation of the z3 terms, and that is a third implementation. So it does not certify. The 32-bit helpers
+  take the same proof as the 64-bit ones.
+- **All Form-called helpers (rcptab aside, which rcpcert covers).** These are a REMOVE record in `verify/ASSUMPTIONS.json`: "the Form-called lift/rt FP
+  helpers equal their Form semantics", owner L3b. It is not an OWNER record and not red.
+  - It is removed by isla over the helper's host object, once the pinned Sail model covers cvttsd2si, ucomisd and the
+    other SSE FP instructions through the ACL2-derived patch that L3b owns for the model gaps. That is sound under
+    OWNER 1 and 9.
+  - The proof carries from the x86-64 host compile to the aarch64-ILP32 object only if each helper in it passes four
+    static checks over the helper universe (L3a, 03:05Z). The removing argument checks all four:
+    1. fixed-width integer types only: no long, size_t or pointer-sized arithmetic;
+    2. no implementation-defined or undefined behaviour on the path: signed overflow, out-of-range FP-to-int casts,
+       shifts by the width or more;
+    3. the same FP settings in both compiles: -ffp-contract=off and FLT_EVAL_METHOD 0;
+    4. no target builtins or intrinsics.
+  - The work comes after the first frame, since it blocks no step of the path.
+  - No new trusted tool (CBMC or ESBMC) is pinned for it.
+- **No new gaps.** A helper added after this decision enters the same rule. The REMOVE record covers exactly the Form-called
+  helpers, derived from the Form→helper call table (L3a w13 lift/proof/fpchost) and not from a list.
+
+## Orchestrator decision of 2026-11-16 04:15Z: an esp the facts cannot fix takes the general form (binding for L3a, L3b, L1)
+
+- **Class.** A site where the static stack analysis cannot give esp a single value. For example, after a virtual call
+  `call/jmp [[reg]+k]` whose callee set mixes pops, the vptr tail jmps and the EH continuations that follow it.
+- **Rule.** A static esp fact is used only where it is proven: a single value, or the finite offset set that collapses
+  at `mov esp, ebp` and `leave`.
+  - Everywhere else the lifter emits the general form, which is correct for every esp value: esp is the run-time
+    register, an indirect jmp or call goes through the dispatcher with the full guest state, and an EH continuation takes
+    esp from the frame the exe's own EH code saved.
+  - This is the same as "a loop that is not proven stays sequential". It is not a red fact and not an assumption.
+- **Gates.** No gate may require a static esp at such a site. A gate that does is a defect of that gate, owner L1. The
+  fact record says `esp: general` and names the reason (the callee set's pops), derived from the facts, not listed.
+- **Refused.**
+  - "Callee pop = bytes the caller pushed" is a new assumption. It is also false in general, since `__cdecl` and
+    `__stdcall` callees share slots.
+  - Whole-program container typing is not on the path.
+- **Speed.** The general form costs only at those sites. After the first frame the instructions-per-frame data shows
+  whether any is hot. Only then is a rule written to narrow it.
+
+## Orchestrator decision of 2026-11-16 04:40Z: the scope of OWNER 10 is derived, not listed (binding for L3b, L3a, L5)
+
+- **Scope.** OWNER 10 covers "the parts that no pinned formal model covers". Its scope is therefore not a list: it is
+  derived. It is every instruction class for which the pinned Sail model's run reports a gap (for example "Opcode
+  Unimplemented in x86isa") and which has a site reachable from a proven root.
+  - The record's scope field in `verify/ASSUMPTIONS.json` is generated by a recipe stage from that model output and the
+    reach facts (rule 1). The word "today" in the record's text names only what that output held at the time.
+  - This is not a widening. A class enters only because the pinned model does not cover it, and a model patch that
+    covers it takes it out again automatically.
+- **At IR 257a93722adb** that output gives x87 plus four classes: rdtsc (3 sites), int3 (5), xlat (1) and mov r/m16
+  from a segment register (78).
+  - Each gets the x87 treatment: a z3 spec transcribed from the Intel SDM, with an SDM citation on every line. The owner
+    is L3b.
+- **Values that belong to the declared machine are read from its records, never restated.**
+  - rdtsc reads the platform monotonic timer (the declared CPU).
+  - int3 is a synchronous exception through the SEH path with the precise CONTEXT. ExceptionAddress and Eip follow the
+    declared OS records, which come from the 7601 kernel.
+  - A segment-register read takes its value from `x86sys.json` selectors.
+    - Every selector that the 78 sites read must be a row derived from the pinned 7601 kernel, the same way as gs.
+    - An undecided row names its blocker. The owner is L5.
+- **Candidate-root sites stay out.** The 1,580 sites with only candidate roots are outside this decision until L3a's
+  code-range rule decides their reachability. Once it does, they enter by this same rule.
+
+## Owner order of 2026-11-16 05:15Z: less generated code before the cold build (binding for L3a, L3b, L1)
+
+The owner's words: "не будем тратить так время... уменьшим количество генерируемого кода".
+
+- **No cold build of the pack at today's density.** It is 758.9 MB for 7.79 M instructions, 94.5 B per instruction
+  (u/000). More farms is not the answer. The relifted pack goes to the cold build only after the density rules below.
+- **Density rules, in this order.** Each one closes its class and gives the same guest semantics by construction.
+  1. **Re-entry only at derived targets.** A label and a nonlocal-switch case exist only at an address where control
+     can arrive: a branch or table target, a call's return address, an EH continuation, a dispatcher entry. These come
+     from the facts, not from a list. Every other instruction has no label and no case. Today every instruction has
+     both, and that makes each function one huge graph for the compiler. This touches no certified Form.
+  2. **One shared form for the call sequence and the nonlocal transfer.** It is an inline function in lift/rt, emitted
+     once instead of open-coded at every site. The code the compiler sees after inlining is identical. This touches no
+     certified Form.
+  3. **Flags only where they are read.** This means EFLAGS liveness from the facts, with L3b's projection lemma and a
+     certificate per function. It does touch the Forms, so it goes after 1 and 2, with L3b.
+- **Measure what each rule saves on the whole pack.** Generated bytes are counted by category and in total, from the
+  generator stage at a commit (rule 6), before and after each rule. Compile time is measured on the whole build, never
+  on a sample.
+- Owners: L3a with workers (1 and 2 now, right behind the relift as stages); L3b (3); L1 (the cold build, ≤16 farms).
 
 ## Orchestrator decision of 2026-11-15 09:20Z: weekly budget (binding for every session)
 
