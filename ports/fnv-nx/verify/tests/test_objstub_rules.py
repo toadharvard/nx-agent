@@ -266,7 +266,7 @@ for what, cover, syn, hdr in (("a class outside a|b|c|own|none", GOOD_C.replace(
 import json  # noqa: E402
 import recipe  # noqa: E402
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
-D = "ports/fnv-nx/lift/descs"
+D = "ports/fnv-nx/bridgefacts"
 adm, files = recipe.load_admit(REPO), recipe.tracked(REPO)
 base = json.load(open(os.path.join(REPO, D, "build.json")))
 cov = "ports/fnv-nx/verify/tests/test_objstub.py"   # any tracked file stands for a record path

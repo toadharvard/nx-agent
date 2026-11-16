@@ -318,7 +318,7 @@ def main():
     PR = T + "src"
     prod = {"path": PR, "class": "tool", "target": "host", "recipe": PR + "/build.json"}
     pfiles = {T + "gen/lift.py": lift, ROOT + "/a.cc": None, PR + "/build.json": json.dumps({"format": "fnvnx-recipe/1", "outputs": {"PACK": "pack"}}), PR + "/pack/x.txt": "x\n"}
-    urec = dict(lrec, external=list(REC["external"]), uses=[{"root": PR, "output": "PACK"}])
+    urec = dict(lrec, external=list(lrec["external"]), uses=[{"root": PR, "output": "PACK"}])
     def uerrs(repo, rec):   # the `uses` recipes are read from the toy checkout
         return recipe.check(rec, ROOT, recipe.tracked(repo), recipe.load_admit(repo), recipe.load_pin(repo), repo=repo)
     ug = make_repo("usesgood", urec, {"lifted_by": T + "gen/lift.py", "pack": PR}, pfiles, [prod])

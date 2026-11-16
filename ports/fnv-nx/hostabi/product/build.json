@@ -12,9 +12,6 @@
  },
  "include": [],
  "units": "all",
- "uses": [
-  {"root": "ports/fnv-nx/hostabi", "output": "INCLUDE"}
- ],
  "generated": [
   {
    "tool": "ports/fnv-nx/manifest/gen_wire_errno.py",
@@ -28,11 +25,13 @@
     "--linux-errno",
     "/ext/linuxerrno/asm-generic/errno.h",
     "--committed",
-    "/uses/ports/fnv-nx/hostabi/INCLUDE/fnvnx/sockwire_errno.h",
+    "/in/ports/fnv-nx/hostabi/include/fnvnx/sockwire_errno.h",
     "--out",
     "/out/wire_errno.stamp"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/hostabi/include/fnvnx/sockwire_errno.h"
+   ],
    "outputs": [
     "wire_errno.stamp"
    ]
