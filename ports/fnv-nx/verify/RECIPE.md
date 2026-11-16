@@ -335,8 +335,15 @@ names (`[A-Za-z][A-Za-z0-9_]*`, unique), then one row per line with exactly the 
 - `"foreach": {"range": N}` (N an integer >= 1) is the same without a table: N steps named `NAME.<i>` for i = 0..N-1, with `{i}` and `{n}` (= N) replaced like a column. An N below 1 is red.
 - Fan-in. A step of the recipe may take the outputs of all rows of a foreach step as inputs: `{"stage": "ROOT:run:NAME", "path": TEMPLATE, "rows": "all"}`, TEMPLATE being an `outputs` or `dirs` entry of
   the foreach step as written (for example `part/{i}.txt`). The expansion replaces it by one ordinary stage ref per row, in row order, so they are the consecutive mounts /in/K, and the arg
-  `"@rows"` of that step becomes the list of those mounts in the same order. One `rows` input per step; a `rows` input that names no foreach step of the recipe, a TEMPLATE that is no output of it,
+  `"@rows"` of that step becomes the list of those mounts in the same order. A `rows` input that names no foreach step of the recipe, a TEMPLATE that is no output of it,
   and `@rows` without a `rows` input are red. ROOT is the recipe's own root (the rows are this recipe's).
+  Several groups: a rows input may carry `"as": NAME` and the arg `@rows:NAME` is that group's mounts in row order; a bare `@rows` is valid only for a step with exactly one rows input.
+  Two groups without `as`, a repeated name and an `@rows:NAME` with no such input are red.
+- Build-time table: `"foreach": {"table": {"stage": ROOT:run:NAME, "path": P} | {"external": NAME, "path": P}, "key": COLUMN, "into": DIR}`. The table is an earlier step's output of this
+  root, another root's stage output, or a declared external, so its rows are known only when the build runs. The step stays one step to every other reader: it declares the directory DIR
+  (`dirs: [DIR]`) and no `outputs`; its `outputs` as written (each under DIR, each naming `{COLUMN}`) are the row template. At build time one step per row runs as an ordinary step (named
+  `NAME.<key>`), each writing under DIR; a consumer reads DIR by content, so DIR's identity is the set of its rows' results, which are keyed by (row, tool, inputs) alone: an unchanged
+  row is a hit whatever the other rows are. An empty table, a bad row, an output outside DIR and one that two rows share are red. A `rows: all` fan-in needs a static table or range.
 Test: `tests/test_foreach.py`.
 
 ### Stage refs

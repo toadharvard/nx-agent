@@ -99,12 +99,52 @@ for what, mut, want in (("a range of 0", lambda: dict(rr, run=[dict(sh, foreach=
                         ("a boolean range", lambda: dict(rr, run=[dict(sh, foreach={"range": True}), cons]), "range must be"),
                         ("a rows input naming no foreach step", lambda: dict(rr, run=[sh, dict(cons, inputs=[R + "/p.sh", {"stage": R + ":run:nope", "path": "part/{i}.txt", "rows": "all"}])]), "names no foreach step"),
                         ("a rows path that is no output as written", lambda: dict(rr, run=[sh, dict(cons, inputs=[R + "/p.sh", {"stage": R + ":run:shard", "path": "part/0.txt", "rows": "all"}])]), "no output of foreach step"),
-                        ("@rows with no rows input", lambda: dict(rr, run=[sh, dict(cons, inputs=[R + "/p.sh"])]), "@rows needs")):
+                        ("@rows with no rows input", lambda: dict(rr, run=[sh, dict(cons, inputs=[R + "/p.sh"])]), "@rows arg needs")):
     try:
         recipe.expand_foreach(mut(), None)
         msg = ""
     except ValueError as e:
         msg = str(e)
     check("%s is red" % what, want in msg, msg)
+# named rows inputs: two groups, `as`, and @rows:NAME in row order
+sh2 = dict(sh, name="shard2", foreach={"range": 2}, outputs=["q/{i}.txt"])
+two = dict(cons, inputs=[R + "/p.sh", {"stage": R + ":run:shard", "path": "part/{i}.txt", "rows": "all", "as": "a"}, {"stage": R + ":run:shard2", "path": "q/{i}.txt", "rows": "all", "as": "b"}],
+           args=["/in/1", "@rows:b", "@rows:a"])
+ex2 = recipe.expand_foreach(dict(rr, run=[sh, sh2, two]), None)["run"][-1]
+check("named rows inputs: @rows:NAME is that group's mounts in row order", ex2["args"] == ["/in/1", "/in/5", "/in/6", "/in/2", "/in/3", "/in/4"] and len(ex2["inputs"]) == 6, ex2)
+for what, mut, want in (("two rows inputs without as", dict(two, inputs=[two["inputs"][0], dict(two["inputs"][1], **{}), two["inputs"][2]]), "each needs `as`"),
+                        ("a duplicate name", dict(two, inputs=[two["inputs"][0], two["inputs"][1], dict(two["inputs"][2], **{"as": "a"})]), "twice"),
+                        ("@rows:NAME with no such input", dict(two, args=["@rows:zz"]), "names no rows input"),
+                        ("a bare @rows with two named inputs", dict(two, args=["@rows"]), "names no rows input")):
+    if what.startswith("two rows"):
+        mut = dict(mut, inputs=[mut["inputs"][0]] + [{k: v for k, v in x.items() if k != "as"} for x in mut["inputs"][1:]])
+    try:
+        recipe.expand_foreach(dict(rr, run=[sh, sh2, mut]), None)
+        msg = ""
+    except ValueError as e:
+        msg = str(e)
+    check("%s is red" % what, want in msg, msg)
+# build-time table (a stage output): the step stays one marker step that declares the directory `into`; the row template is kept; the recipe is valid
+with tempfile.TemporaryDirectory() as td2:
+    gen = {"name": "mk", "exec": "/usr/bin/sh", "args": ["/in/1"], "inputs": [R + "/p.sh"], "debs": ["toybb"], "outputs": ["mk.tsv"]}
+    dyn = {"name": "prove", "foreach": {"table": {"stage": R + ":run:mk", "path": "mk.tsv"}, "key": "shape", "into": "proof"}, "exec": "/usr/bin/sh", "args": ["/in/1", "{shape}"],
+           "inputs": [R + "/p.sh"], "debs": ["toybb"], "outputs": ["proof/{shape}.txt"]}
+    r, rc = make(td2, "dyn", TABLE)
+    rc = dict(rc, run=[gen, dyn], outputs={"o": "proof"})
+    ex = recipe.expand_foreach(rc, r)["run"]
+    check("build-time foreach: one marker step that declares only the directory, the row template kept", len(ex) == 2 and ex[1]["dirs"] == ["proof"] and ex[1]["outputs"] == [] and ex[1]["foreach"]["row"]["outputs"] == ["proof/{shape}.txt"], ex[1])
+    e = recipe.check(rc, R, recipe.tracked(r), recipe.load_admit(r), None, r)
+    check("build-time foreach: the recipe is valid (a consumer reads the directory)", not [x for x in e if "foreach" in x or "run[1]" in x], e)
+    for what, mut, want in (("an output outside into", dict(dyn, outputs=["other/{shape}.txt"]), "lie under"),
+                            ("an output that does not name the row", dict(dyn, outputs=["proof/all.txt"]), "lie under"),
+                            ("a table of another form", dict(dyn, foreach={"table": {"nope": 1}, "key": "shape", "into": "proof"}), "build-time foreach is"),
+                            ("an undeclared external table", dict(dyn, foreach={"table": {"external": "x", "path": "t.tsv"}, "key": "shape", "into": "proof"}), "not declared"),
+                            ("dirs beside into", dict(dyn, dirs=["z"]), "`into`")):
+        try:
+            recipe.expand_foreach(dict(rc, run=[gen, mut]), r)
+            msg = ""
+        except ValueError as ex2:
+            msg = str(ex2)
+        check("build-time foreach: %s is red" % what, want in msg, msg)
 print("fails: %d" % fails)
 sys.exit(1 if fails else 0)
