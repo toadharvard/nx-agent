@@ -30,22 +30,46 @@ def disp_rows(obj):
         return s.data().decode().split('\n')[:-1] if s is not None else []
 
 
-def headers(td, so):
-    """a header of platform/include is included from C and from C++ units: each one compiles as both languages under the recipe's flags and plugins
-    (the C++ unit with the C++ keywords only: g++ rejects `_Static_assert` and `_Alignof`)"""
+def header_languages(outs, store, inc_dir):
+    """THE UNIVERSE OF THE HEADER TESTS, from the recipe's own PP-stage dependency facts: a header of INC_DIR (the owning root's first include directory, which the
+    stage sees as /inc/0, and as /src/include after the root's own relative `../include` quote) is tested as C if and only if some C unit of the product root includes
+    it, and as C++ if and only if some C++ unit does. A header that no unit includes is in neither. OUTS: the objects.json files of builds of the root (its variants
+    included); each has `pp_keys` (unit -> key of its PP stage), and the PP stage's `deps.d` lists every file the unit read."""
+    langs = {}
+    for out in outs:
+        pp = json.load(open(os.path.join(out, 'objects.json')))['pp_keys']
+        for unit, key in pp.items():
+            res = json.load(open(os.path.join(store, 'keys', key, 'result.json')))
+            tree = res['outputs']['/out']
+            entries = json.load(open(os.path.join(store, 'tree', tree[:2], tree + '.json')))['entries']
+            h = entries['deps.d']['h']
+            deps = open(os.path.join(store, 'obj', h[:2], h)).read().replace('\\\n', ' ')
+            lang = 'C' if unit.endswith('.c') else 'C++'
+            for path in deps.split()[1:]:
+                n = os.path.normpath(path)
+                for pre in ('/inc/0/', '/src/include/'):
+                    if n.startswith(pre) and n.endswith('.h') and '/' not in n[len(pre):]:
+                        langs.setdefault(n[len(pre):], set()).add(lang)
+    return {h: l for h, l in langs.items() if os.path.isfile(os.path.join(inc_dir, h))}
+
+
+def headers(td, so, outs, store):
+    """a header of platform/include is compiled in the languages of the units that include it (header_languages), under the recipe's flags and plugins. The include
+    dirs are the owning root's own (platform/build.json `include`: the repository directories of the root and of the roots it `uses`), copied whole under the toy
+    root, in the root's order; the pinned externals of that list are the toy root's own toolchain."""
     inc = os.path.join(HERE, '..', '..', 'platform', 'include')
-    # the include dirs are the owning root's own (platform/build.json `include`: the repository directories of the root and of the roots it `uses`), copied whole under the
-    # toy root, in the root's order; the pinned externals of that list are the toy root's own toolchain
+    uni = header_languages(outs, store, inc)
     owner = json.load(open(os.path.join(HERE, '..', '..', 'platform', 'build.json')))
     repo = os.path.abspath(os.path.join(HERE, '..', '..', '..', '..'))   # a directory the root generates (a stage output) is not a repository directory: it is no header home here
     for i, d in enumerate(x for x in owner['include'] if x.startswith('ports/fnv-nx/') and os.path.isdir(os.path.join(repo, x))):
         pb.EXTRA['copy'].append((d, 'inc%d' % i))
         pb.EXTRA['include'].append(pb.ROOT + '/inc%d' % i)
+    print('header universe: %d headers; C %d, C++ %d' % (len(uni), sum('C' in v for v in uni.values()), sum('C++' in v for v in uni.values())))
     try:
-        # the universe: every header of the directory whose includes stay inside it and the shim (a header that reaches a sibling tree by `../` needs that tree's
-        # own product root as its home; it is covered where that root is built)
-        for h in sorted(f for f in os.listdir(inc) if f.endswith('.h') and '#include "../' not in open(os.path.join(inc, f)).read()):
+        for h in sorted(uni):
             for ext, lang in (('c', 'C'), ('cpp', 'C++')):
+                if lang not in uni[h]:
+                    continue
                 src = os.path.join(td, 'hdr_%s.%s' % (h[:-2], ext))
                 open(src, 'w').write('#include "%s"\n' % h)
                 r = pb.compile(src, os.path.join(td, 'hdr_%s_%s.o' % (h[:-2], ext)), so)
@@ -54,7 +78,12 @@ def headers(td, so):
         pb.EXTRA['copy'].clear(); pb.EXTRA['include'].clear()
 
 
-def main():
+def main(argv):
+    # the facts of the header universe are an argument of the run (no default path): --platform-out DIR (objects.json of a build of the platform root, repeatable) --store DIR
+    outs = [argv[i + 1] for i, a in enumerate(argv) if a == '--platform-out']
+    store = next((argv[i + 1] for i, a in enumerate(argv) if a == '--store'), None)
+    if not outs or not store:
+        sys.exit('test_dispatch_entry: missing --platform-out DIR (objects.json of a build of the platform root) and --store DIR')
     td = tempfile.mkdtemp(prefix='test-dispatch-entry-')
     try:
         so = [pb.build(n, td) for n in ('sdd', 'names', 'dispatch')]
@@ -91,7 +120,7 @@ def main():
         check('ENTRY1-ATOMIC (C): a generic atomic store of a local object of the same type is a same-type copy', r.returncode == 0, r.stderr[:1500])
         r = pb.compile(os.path.join(FIX, 'bad_atomic_store_local.c'), os.path.join(td, 'atlb.o'), so)
         check('ENTRY1-ATOMIC (C): a generic atomic store of a local object of another type is the error ENTRY1-CONT', r.returncode != 0 and 'ENTRY1-CONT' in r.stderr, r.stderr[:900])
-        headers(td, so)
+        headers(td, so, outs, store)
         r = pb.compile(os.path.join(FIX, 'bad_attr.cpp'), os.path.join(td, 'a.o'), so)
         check('the attribute on a function type (not a pointer) is an error', r.returncode != 0 and 'applies to a pointer-to-function type' in r.stderr, r.stderr[:900])
     finally:
@@ -100,4 +129,4 @@ def main():
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
