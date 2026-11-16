@@ -57,7 +57,8 @@
     {
      "stage": "ports/fnv-nx/lift/factsimg/exe:gen:0",
      "path": "funcs.tsv"
-    }
+    },
+    "ports/fnv-nx/lift/proof"
    ],
    "outputs": [],
    "dirs": [
