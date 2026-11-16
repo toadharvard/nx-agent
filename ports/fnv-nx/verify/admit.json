@@ -106,10 +106,7 @@
    "path": "ports/fnv-nx/toolchain",
    "class": "product",
    "target": "host",
-   "recipe": "ports/fnv-nx/toolchain/build.json",
-   "imports": [
-    "ports/fnv-nx/verify"
-   ]
+   "recipe": "ports/fnv-nx/toolchain/build.json"
   },
   {
    "path": "ports/fnv-nx/verify",
@@ -134,10 +131,7 @@
    "class": "product",
    "target": "guest",
    "cxx_origin": "native",
-   "recipe": "ports/fnv-nx/platform/build.json",
-   "imports": [
-    "ports/fnv-nx/contract"
-   ]
+   "recipe": "ports/fnv-nx/platform/build.json"
   },
   {
    "path": "ports/fnv-nx/rt/guest",
@@ -501,10 +495,7 @@
    "class": "product",
    "target": "guest",
    "cxx_origin": "native",
-   "recipe": "ports/fnv-nx/render/d3d9/build.json",
-   "imports": [
-    "ports/fnv-nx/bridgefacts"
-   ]
+   "recipe": "ports/fnv-nx/render/d3d9/build.json"
   },
   {
    "path": "ports/fnv-nx/render/shaders/build.sh",
@@ -674,11 +665,7 @@
    "class": "tool",
    "target": "host",
    "entry": [],
-   "recipe": "ports/fnv-nx/render/total/d3d9total/build.json",
-   "imports": [
-    "ports/fnv-nx/render/d3d9",
-    "ports/fnv-nx/render/shaders/translator"
-   ]
+   "recipe": "ports/fnv-nx/render/total/d3d9total/build.json"
   },
   {
    "path": "ports/fnv-nx/lift/proof/shapeprove",
