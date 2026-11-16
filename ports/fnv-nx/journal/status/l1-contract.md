@@ -2884,3 +2884,10 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - L2 has 3 (toolchain/tests, s23_codeview), L6 has 4 (render/total) and L5 has 1 (gen_combridge). Each is sent to its owner.
   - The admit `imports` field was deleted from 4 rows on base3. In cand5, verify/admit.json comes from w28-c5, and w28 confirms that file has none.
 - bottleneck: farm 3 relift; cand4 verdict; L3a base3 head; the owner heads of the import fixes.
+- w28-c5 c36feeccb: done. gate_admit lists every uncertified file plus uncertified_n. Measured at 99f6eb846:
+  - admit: 1062 files, 34 roots, 0 uncertified;
+  - pure: 44 of 44;
+  - admit.json: 0 imports fields.
+  - The 12 L1 files from w8's census were base3's stale copies; cand5 takes link/ and verify/ from w28-c5.
+- Class to close (w28, doing): contract/gatefile.MAX_IDS=50 truncates every gate's uncertified list. Every gate is to list the whole set plus uncertified_n, and link/gateids.py is deleted if it only made the full list.
+- bottleneck: farm 3 relift; cand4 verdict; L3a base3 head.
