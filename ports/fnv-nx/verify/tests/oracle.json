@@ -25,6 +25,18 @@
     "ports/fnv-nx/verify/gate_abi.py"
    ]
   },
+  "test_abi_va.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_abi.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_abi.py"
+   ]
+  },
   "test_admit.py": {
    "references": [
     {
@@ -134,6 +146,18 @@
     "ports/fnv-nx/verify/bootmachine.py"
    ]
   },
+  "test_callrefs.py": {
+   "references": [
+    {
+     "anchor": "## verify/recipe.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
   "test_cas.py": {
    "references": [
     {
@@ -183,6 +207,24 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/gate_datamodel.py",
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
+  "test_deb_tree.py": {
+   "references": [
+    {
+     "anchor": "## verify/cas.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## verify/recipe.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/cas.py",
     "ports/fnv-nx/verify/recipe.py"
    ]
   },
@@ -253,6 +295,42 @@
     "ports/fnv-nx/verify/recipe.py"
    ]
   },
+  "test_external_of.py": {
+   "references": [
+    {
+     "anchor": "## An external of another root",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
+  "test_foreach.py": {
+   "references": [
+    {
+     "anchor": "### `foreach` (one step per table row)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
+  "test_foreach_dynamic.py": {
+   "references": [
+    {
+     "anchor": "### `foreach` (one step per table row)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
   "test_fpbound.py": {
    "references": [
     {
@@ -263,6 +341,18 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/fpbound.py"
+   ]
+  },
+  "test_gamedata_fetch.py": {
+   "references": [
+    {
+     "anchor": "## verify/cas.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/cas.py"
    ]
   },
   "test_gate_assumptions.py": {
@@ -534,6 +624,18 @@
     "ports/fnv-nx/verify/gate_guestlink.py"
    ]
   },
+  "test_header_root.py": {
+   "references": [
+    {
+     "anchor": "## Outputs and uses",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
   "test_icount.py": {
    "references": [
     {
@@ -639,6 +741,24 @@
     }
    ],
    "subject": [
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
+  "test_linkset.py": {
+   "references": [
+    {
+     "anchor": "## verify/envcheck.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## verify/recipe.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/envcheck.py",
     "ports/fnv-nx/verify/recipe.py"
    ]
   },
@@ -837,6 +957,18 @@
     "ports/fnv-nx/verify/recipe.py"
    ]
   },
+  "test_pertarget.py": {
+   "references": [
+    {
+     "anchor": "## Keys (any other key is an error; all problems are listed at once)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
   "test_plugins.py": {
    "references": [
     {
@@ -979,6 +1111,18 @@
     "ports/fnv-nx/verify/recipe.py"
    ]
   },
+  "test_rootsrc.py": {
+   "references": [
+    {
+     "anchor": "## verify/recipe.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
   "test_rtasm.py": {
    "references": [
     {
@@ -1001,6 +1145,18 @@
    ],
    "subject": [
     "ports/fnv-nx/farm/runner.sh"
+   ]
+  },
+  "test_runpython.py": {
+   "references": [
+    {
+     "anchor": "## verify/recipe.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
    ]
   },
   "test_runtime.py": {
@@ -1053,6 +1209,18 @@
     "ports/fnv-nx/verify/sdcheck.py"
    ]
   },
+  "test_sha256_isa.py": {
+   "references": [
+    {
+     "anchor": "## verify/recipe.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
   "test_shard.py": {
    "references": [
     {
@@ -1068,7 +1236,7 @@
   "test_stageref_cost.py": {
    "references": [
     {
-     "anchor": "### Stage refs evaluate their closure",
+     "anchor": "### Stage refs",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/RECIPE.md"
     }
@@ -1137,6 +1305,36 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/gate_tlsmodel.py"
+   ]
+  },
+  "test_toolexec.py": {
+   "references": [
+    {
+     "anchor": "## verify/recipe.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
+  "test_toolext.py": {
+   "references": [
+    {
+     "anchor": "## verify/cas.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## verify/recipe.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/cas.py",
+    "ports/fnv-nx/verify/recipe.py"
    ]
   },
   "test_toolflags.py": {

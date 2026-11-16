@@ -186,6 +186,9 @@ def red_case(name, g, exp):
     check("gate class: " + name, rc == 2 and vj["verdict"] == "red" and gr["status"] == "red" and exp in gr["reason"], (rc, vj))
 red_case("missing file", gate("g", write="none"), "missing")
 red_case("bad json", gate("g", write="bad"), "invalid")
+crash = gate("g")
+crash["argv"] = [sys.executable, "-I", "-c", "import sys\nsys.stderr.write('Traceback: boom in the gate\\n')\nsys.exit(2)\n"]
+red_case("crash: no result file, the reason carries the gate's stderr", crash, "boom in the gate")
 red_case("exit nonzero with green", gate("g", rc=3), "exit")
 red_case("certified < universe", gate("g", universe=5, certified=3, uncertified=["i1", "i2"]), "i1,i2")
 red_case("certified > universe", gate("g", universe=1, certified=2), "certified")

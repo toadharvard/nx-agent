@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify ports/fnv-nx/farm/setup_verdict_env.sh
 """Tests for verify/envcheck.py and farm/setup_verdict_env.sh: the declared environment of the verdict. Plain script: exit 0 on
 pass, one PASS/FAIL line per case. Needs the declared environment itself (a mismatch here IS the failure the file reports)."""
 import hashlib
@@ -186,8 +185,8 @@ def closure_doc(top_ver="1", pin_ver="1"):
 IT = os.path.join(TD, "inst-tmp")
 os.makedirs(IT)
 def inst(path):
-    p = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(VERIFY), "farm", "install_mirror.py"), "--env", path, "--dry"],
-                       capture_output=True, text=True, env=dict(os.environ, ARTIFACTS_URL="file://" + MR, TMPDIR=IT))
+    p = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(VERIFY), "farm", "install_mirror.py"), "--env", path, "--artifacts", "file://" + MR, "--dry"],
+                       capture_output=True, text=True, env=dict(os.environ, TMPDIR=IT))
     return p.returncode, p.stdout, p.stderr
 rc, out, err = inst(mirror_doc())
 check("install_mirror: right tree and sha256 -> 1 package from the mirror (dry)", rc == 0 and "1 packages, 1 installed from the mirror, 0 already present" in out and "1 modules, 1 installed from the mirror" in out, (rc, out, err))

@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/link
-# reads: ports/fnv-nx/shim/build.json ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for verify/recipe.py, gate_build.py, gate_determinism.py on a toy product root in a temp git repo. Plain script: exit 0 on
 pass, one PASS/FAIL line per case. Needs root (sandbox) and aarch64-linux-gnu-gcc-13/g++-13. Scratch: mkdtemp, removed at exit."""
 import hashlib
@@ -160,6 +158,8 @@ def gate(repo, name, out, cache=None):
     if cache:
         env["GATE_CACHE"] = cache
     os.makedirs(out, exist_ok=True)
+    if cache:
+        recipe.set_artifacts(recipe.ext_dir(cache), BASE + "/artifacts.git")   # the run's artifacts repository, beside the cache (l1.py does the same)
     t0 = time.time()
     p = subprocess.run(PY + [VERIFY + "/gate_%s.py" % name], cwd=repo, env=env, capture_output=True, text=True)
     r = json.load(open(out + "/%s.json" % name)) if os.path.exists(out + "/%s.json" % name) else None
@@ -224,7 +224,7 @@ def make_toolchain(dst):
 
 def publish(name, populate):
     """A work repo with one commit of the tree made by populate(dir), pushed to branch NAME of the bare artifacts repo (a stand-in for
-    fnv-nx-build, ARTIFACTS_URL) -> (commit, tree_sha256 of the checked-out tree)."""
+    fnv-nx-build, recipe.ARTIFACTS) -> (commit, tree_sha256 of the checked-out tree)."""
     d = os.path.join(BASE, "pub-" + name)
     os.makedirs(d)
     populate(d)
@@ -239,7 +239,7 @@ def publish(name, populate):
 def main():
     t_start = time.time()
     subprocess.run(["git", "init", "-q", "--bare", BASE + "/artifacts.git"], check=True)
-    os.environ["ARTIFACTS_URL"] = BASE + "/artifacts.git"
+    recipe.ARTIFACTS = BASE + "/artifacts.git"
     # Everything below that does not assert coldness shares ONE store (SS: the tool runtime is ingested once, stages are cached by
     # key) and one gate cache (GC). What asserts coldness runs in a fresh store or in the determinism gate (always two cold builds).
     SS, GC = BASE + "/store", BASE + "/cache"
@@ -349,7 +349,7 @@ def main():
         check("recipe.build on a mismatched env raises EnvBlocked naming the mismatch, before any stage", bool(raised) and any(k in l for l in raised), raised)
         check("nothing is stored by a blocked build (no stage result, red or green, in the store; no objects.json)",
               not os.path.exists(es) or not any(files for _, _, files in os.walk(es)) and not os.path.exists(BASE + "/env-out/objects.json"))
-        p = subprocess.run(PY + [VERIFY + "/recipe.py", "build", "--root", ROOT, "--store", BASE + "/env-store2", "--out", BASE + "/env-out2"],
+        p = subprocess.run(PY + [VERIFY + "/recipe.py", "build", "--root", ROOT, "--store", BASE + "/env-store2", "--out", BASE + "/env-out2", "--artifacts", BASE + "/artifacts.git"],
                            cwd=env, capture_output=True, text=True)
         check("recipe.py build on a mismatched env prints `blocked: env` and exits 4, storing nothing",
               p.returncode == 4 and p.stdout.startswith("blocked: env") and not os.path.exists(BASE + "/env-store2"), (p.returncode, p.stdout[:200], p.stderr[:200]))
@@ -610,7 +610,7 @@ def main():
     fdir = SS + "/external-facts"
     facts = sorted(os.listdir(fdir)) if os.path.isdir(fdir) else []
     check("external: one fact per (commit, tree_sha256) in the store, one checkout per commit in the external cache",
-          facts == ["%s-%s.json" % (commit, thash)] and os.path.isdir(ec + "/" + commit + ".co"), (facts, os.listdir(ec)))
+          facts == ["%s-%s.json" % (commit, thash)] and os.path.isdir(recipe.ext_checkout(ec, commit)), (facts, os.listdir(ec)))
     ingests, runs = [], []
     real_ingest, real_run = recipe.cas.ingest, recipe.subprocess.run
     recipe.cas.ingest = lambda p, st, exclude=(): ingests.append(p) or real_ingest(p, st, exclude)
@@ -687,23 +687,21 @@ def main():
           [(x["symbol"], x["bind"], x["type"], x["object"]) for x in d64] == [(x["symbol"], x["bind"], x["type"], x["object"]) for x in d]
           and r64["undefined"] == u and [o["sha256"] for o in r64["objects"]] != [o["sha256"] for o in r1["objects"]], (d64, r64["undefined"]))
 
-    # --- tool-file membership: the trees of an admitted tool root (admit.json trees), one definition for the ldcheck tools and link.script
+    # --- tool-file membership: the trees of an admitted tool root (an admitted root's one tree), one definition for the ldcheck tools and link.script
     xf = {"link/guest.ld": open(os.path.join(VERIFY, "..", "link", "guest.ld")).read(), "other/x.ld": "/* under no root */\n"}
 
     def tree_errs(name, trees, rec):
         repo = os.path.join(BASE, name)
         r = make_repo(name, rec=rec, files=xf)
         am = json.load(open(os.path.join(repo, T + "verify/admit.json")))
-        am["roots"] = [x for x in am["roots"] if x["path"] != T + "link"]
-        for x in am["roots"]:
-            if x["path"] == T + "contract" and trees:
-                x["trees"] = [T + "contract", T + "link"]
+        if not trees:   # the tool root `link` is admitted (its own root, one tree) or it is not
+            am["roots"] = [x for x in am["roots"] if x["path"] != T + "link"]
         open(os.path.join(repo, T + "verify/admit.json"), "w").write(json.dumps(am))
         return recipe.check(rec, ROOT, recipe.tracked(r), recipe.load_admit(repo), None, repo)
     e1 = tree_errs("tr1", True, RECIPE)
-    check("ldcheck tools in a tree (link/ of the tool root contract), not under a root path: green", e1 == [], e1)
+    check("ldcheck tools under the admitted tool root link: green", e1 == [], e1)
     e2 = tree_errs("tr2", False, RECIPE)
-    check("ldcheck tools under no admitted root nor tree: red", any("ldcheck stage needs" in e for e in e2), e2)
+    check("ldcheck tools under no admitted root: red", any("ldcheck stage needs" in e for e in e2), e2)
     gl = T + "link/guest.ld"
     ms = mut()
     ms["link"]["script"] = gl
@@ -943,7 +941,7 @@ def check_run(SS):
     check("host_cpu: pin microcode null matches a VM cpuinfo with no microcode line", recipe.cpu_mismatch(vpin, vm) == [], recipe.cpu_mismatch(vpin, vm))
     check("host_cpu: pin microcode null is NOT a wildcard: a host with a microcode line is a mismatch", len(recipe.cpu_mismatch(vpin, vm.replace("stepping", "microcode\t: 0x1\nstepping"))) == 1, recipe.cpu_mismatch(vpin, vm.replace("stepping", "microcode\t: 0x1\nstepping")))
     check("host_cpu: a pin with a microcode value is a mismatch on a host that has no microcode line", len(recipe.cpu_mismatch(dict(vpin, microcode=1), vm)) == 1)
-    jb = recipe.Job(good, ROOT, SS, 1, os.path.join(SS, "external"))
+    jb = recipe.Job(good, ROOT, SS, 1, recipe.ext_of_store(SS))
     ver = lambda n: {"version": subprocess.run(["dpkg-query", "-W", "-f=${Version}", n], capture_output=True, text=True).stdout}   # noqa: E731
     dtmp = BASE + "/un-debs"
     os.makedirs(dtmp)
@@ -1022,7 +1020,7 @@ def check_tc_gate(repo, tcc, tiny):
     print("INFO gate determinism, external compiler + external include tree (2 cold + warm) %.1f s: %s" % (td, g and g["detail"]))
     check("determinism gate with the compiler as an external tree at /opt/tc and a second external: green, accepted by verdict, each fetched once",
           rc == 0 and g["universe"] == 2 == g["certified"] and accepted("determinism", BASE + "/gtc")[0] == "green"
-          and sorted(os.listdir(BASE + "/tccache/external")) == sorted([tcc, tiny, tcc + ".co", tiny + ".co"]), (g, txt))
+          and sorted(os.listdir(recipe.ext_dir(BASE + "/tccache"))) == sorted([tcc, tiny, os.path.basename(recipe.ext_checkout("", tcc)), os.path.basename(recipe.ext_checkout("", tiny))]), (g, txt))
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@
 Rows `name<TAB>kind<TAB>value<TAB>source` (value: 8 hex digits, the address in the guest's address space or the import key); the last
 line is `# table_id <id>`, the id of keys.tsv, which must equal the id of entries.tsv.  The rows, in this order:
   exe_entry              exe_entry  PE ImageBase + AddressOfEntryPoint of the exe file.
-  module_entry:<name>    module_entry  assigned_base + entry rva of every modules.tsv row with a non-zero entry rva (sorted by name);
+  module_entry:<name>    module_entry  assigned_base + entry rva of every DLL row (last column 1: the PE IMAGE_FILE_DLL bit) of modules.tsv with a non-zero entry rva (sorted by name);
                          a 5th column holds the row's `static` flag (1 = in the exe's import closure).
   WinMain                winmain  the address of the N1 function whose decorated name is the global function WinMain
                          (`?WinMain@@...` or `_WinMain@N`).  N1 (n1.py) holds a function only when its MSVC object bytes equal the exe's
@@ -15,15 +15,17 @@ line is `# table_id <id>`, the id of keys.tsv, which must equal the id of entrie
   import:<dll>!<name>    import  the import key of keys.tsv for the D3D9 calls that mark the first frame: dll `!idirect3ddevice9.dll` and
                          `!idirect3dswapchain9.dll`, name `Present`; a missing row is no row.
 A pure function of its inputs; a violated precondition is a stage error."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import argparse
 import hashlib
 import os
 import re
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'contract'))
-import modules
-import store
+from contract import modules
+from contract import store
 
 PRESENT = (('!idirect3ddevice9.dll', 'Present'), ('!idirect3dswapchain9.dll', 'Present'))
 WINMAIN = re.compile(r'^(\?WinMain@@|_WinMain@[0-9]+$)')
@@ -50,7 +52,7 @@ def build(exe, modules_tsv, n1, keys_tsv, entries_tsv):
     out = [('exe_entry', 'exe_entry', pe.base + pe.entry_rva, 'exe PE ImageBase+AddressOfEntryPoint', '')]
     for r in sorted(rows(modules_tsv), key=lambda r: r[0]):
         base, entry = int(r[4], 16), int(r[7], 16)
-        if entry:
+        if entry and r[10] == '1':   # the DLL rows (PE IMAGE_FILE_DLL bit): the exe's entry is the exe_entry row
             out.append(('module_entry:' + r[0], 'module_entry', base + entry,
                         'modules.tsv assigned_base+entry_rva', r[8]))
     wm = sorted({a for a, f in n1['fn'].items() if f['n1'] and WINMAIN.match(f['sym'])})

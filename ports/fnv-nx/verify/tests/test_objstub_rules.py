@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/bridgefacts ports/fnv-nx/contract ports/fnv-nx/link
-# reads: ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for the two objstub rules on top of the V class (objstub.py (T-B) and (H)):
   (T-B) a trap-shaped body: every path ends in a call of the root's failure function (recipe `error_abi`) and the body has no output effect
         (no store outside its own frame, no return value; loads and the arguments of the call do not matter); the declared kind of the

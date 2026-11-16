@@ -18,7 +18,7 @@
 #  3 icount.py spec: range lifted = section .text.fnvl, class softfloat from the softfloat file (left out when absent)
 #  4 SD root: a fresh empty card directory (--root); the installed game is mounted in place at the guest's sdmc:/switch/fnv
 #    (--game, verify/bootpath.py). The game is GAME_DIR, else fetched by farm/gamedata_fetch.sh into $FARM_HOME/game
-#    (the exe, INIs, static modules and d3dx9 DLLs; plus every Data item (gamedata/data/* of the artifacts repository: *.bsa, *.esm, Music,
+#    (the exe, INIs, static modules and d3dx9 DLLs; plus every Data item that a recipe declares as an external (gamedata/data/* pinned by commit and tree_sha256; one that no recipe declares is red: *.bsa, *.esm, Music,
 #    Shaders; every part's and every file's sha256 checked by the fetcher), or only the Data items named in BOOT_DATA_ITEMS; `--no-data`
 #    there means no Data item, a run without the game's archives). FalloutNV.exe must be in it; its sha256 is printed. The fetched
 #    Data items are recorded in meta.json (data_items; null with GAME_DIR, whose content the job does not know)
@@ -49,7 +49,7 @@
 #    job runs with the contract rows only and the final line says stage_table=absent; a present branch without the file fails the job.
 # The declared inputs (verify/env.json, verify/boot_inputs.json) are read only from the tree the job runs from; no variable redirects them.
 # Env: ARTIFACTS (clone of the artifacts repository, default $FARM_HOME/artifacts; cloned --filter=blob:none --no-checkout
-# when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build), FARM_HOME (required),
+# when absent), ARTIFACTS_URL (default: verify/artifacts.py url, the repository env.json pins), FARM_HOME (required),
 # WORK (default $FARM_HOME/boot/<elf_id>), GAME_DIR (an installed game; never inside a git checkout). The profile is
 # passed to boot.py, recorded in meta.json and exported as FNVNX_PROFILE (a render host library reads it).
 # --quantum N (required, no default): instructions per slice of a core's thread in the N-core machine (bootmachine.py rule 3); passed to boot.py
@@ -84,7 +84,7 @@ case $GPU_BRANCH in *[!A-Za-z0-9._/-]*|-*) die "--gpu-branch '$GPU_BRANCH' is no
 
 FARM_HOME=${FARM_HOME:?FARM_HOME (the farm work directory)}
 ARTIFACTS=${ARTIFACTS:-$FARM_HOME/artifacts}
-ARTIFACTS_URL=${ARTIFACTS_URL:-https://github.com/toadharvard/fnv-nx-build}
+ARTIFACTS_URL=${ARTIFACTS_URL:-$(python3 -I "$NX/verify/artifacts.py" url)}   # the pinned repository of env.json: one accessor (verify/artifacts.py)
 WORK=${WORK:-$FARM_HOME/boot/$ELF_ID}
 IN_BRANCH=l1-contract/elf/$ELF_ID; OUT_BRANCH=l4-verify/boot/$ELF_ID
 GIT_ID=(-c user.name=fnv-nx-farm -c user.email=farm@invalid)

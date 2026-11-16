@@ -23,9 +23,9 @@ with a verdict (totality).  The result is a function of the argument files only;
 """
 import argparse, collections, os, sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import store
-import gatefile
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)
+from contract import store
+from contract import gatefile
 
 
 def decide(universe, n1, gate_rows, n3):
