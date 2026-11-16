@@ -2267,3 +2267,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - assumptions: 38 used_by entries name untracked files. Rule to w28: used_by is derived from the tracked files that cite the id, and the hand field is deleted.
   - abspath: 9 findings in 5 files.
 - The cand3b verdict @68c45b90c is running on the farm, cold then warm.
+- w15 cold verdict @68c45b90c (tree 81c4221a): 814.8 s, 42 gates, 41 green.
+  - selftests died with no result file (that class is fixed in w28 275771a6f).
+  - Direct run: 127/131 pass. The 4 reds are ENOSPC (test_recipe, test_plugins, test_odr) plus test_objstub_rules under parallel disk pressure; each passes alone.
+  - The scratch peak comes from a per-scenario copy of the compiler closure: about 1.2 GB × 3 caches plus 2 × 590 MB stores per scenario. Assigned to w15: one shared read-only content-addressed copy.
+- The farm's verdict at 68c45b90c decides the merge.
