@@ -1,0 +1,94 @@
+{
+ "format": "fnvnx-recipe/1",
+ "profile": "guest",
+ "flags": {
+  "c": [
+   "-O2",
+   "-g",
+   "-ffunction-sections",
+   "-fdata-sections",
+   "-Werror=attributes"
+  ],
+  "cxx": [
+   "-O2",
+   "-g",
+   "-ffunction-sections",
+   "-fdata-sections",
+   "-std=gnu++20",
+   "-DFNVNX_SDD=1",
+   "-Werror=attributes"
+  ],
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/platform/gmp/gen/inc/build",
+  "ports/fnv-nx/platform/gmp/gen/inc/src"
+ ],
+ "units": "all",
+ "external": [
+  {
+   "name": "gmp",
+   "repo": "fnv-nx-build",
+   "ref": "tools/gmp",
+   "commit": "e666faffef4cca56f9c6a4cf3fb71b2c0199180b",
+   "tree_sha256": "029e9a14d5f75324350a9a99aa896e2396087f27997d279341627132d3ea4583",
+   "at": "/ext/gmp"
+  }
+ ],
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/toolchain/msvcmodel/records.py",
+   "args": [
+    "cc",
+    "/out/records.sh",
+    "/in/ports/fnv-nx/verify"
+   ],
+   "inputs": [
+    "ports/fnv-nx/verify",
+    "ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json"
+   ],
+   "outputs": [
+    "records.sh"
+   ]
+  }
+ ],
+ "run": [
+  {
+   "name": "gmpgen",
+   "exec": "/usr/bin/bash",
+   "args": [
+    "/in/1"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/gmp/gmpgen.sh",
+    "ports/fnv-nx/platform/gmp/ccrec.py",
+    "ports/fnv-nx/platform/gmp/mkunits.py",
+    "ports/fnv-nx/toolchain/gcc/cfg_link.py",
+    "ports/fnv-nx/link/guest.ld",
+    "ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc",
+    {
+     "stage": "ports/fnv-nx/platform/gmp:gen:0",
+     "path": "records.sh"
+    },
+    {
+     "external": "gmp",
+     "path": "gmp-6.3.0.tar.xz"
+    },
+    {
+     "external": "gcc-msvcmodel",
+     "path": "."
+    }
+   ],
+   "debs": {
+    "profile": "compiler-build"
+   },
+   "outputs": [],
+   "dirs": [
+    "gen"
+   ],
+   "scratch": [
+    "/scratch"
+   ]
+  }
+ ]
+}
