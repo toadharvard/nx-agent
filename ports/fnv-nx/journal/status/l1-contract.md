@@ -2673,3 +2673,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - Orchestrator / L3b lift/cpufeat (claude/fnv-l3b-lift 277706092), two items for w28-c5:
   (1) pdfplumber plus its full closure pinned in env.json python.modules, mirrored in tools/verdict-debs, checked by envcheck. It is the one PDF reader, so L3b's pdftotext moves to it.
   (2) python exec with a nested runtime path. L3b's 4f57cd0f5 hunk is not taken as is, because it silently drops declared step inputs. Rule: rootfs layout entries yield to runtime inputs, and a declared input that clashes is red. Both cases go into test_runpython.
+- L4: link/milestones.py imports contract, but link's admit row lacks the imports field, so the boot root is red. Rule for w28-c5: cross-root Python imports are derived by ast through import_roots, and the admit `imports` field is deleted (red if present). Dynamic and unresolved imports are red.
