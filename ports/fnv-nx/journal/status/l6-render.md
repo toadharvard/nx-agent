@@ -1427,3 +1427,4 @@ Paused: w3b, w4, farm; no other work.
     - Next for w6: the w28 import rule, then a rebuild of every render root.
 - bottleneck: w6 import migration; L1 per-target recipe rule; w28 PURE row; farm1 sm_link; the cand4 base.
 - 02:24Z L1 accepted the per-target recipe rule as w28 item 11. `generated`, `run` and `uses` live only in the base recipe, and `units`/`include` are inherited; an identical copy in a per-target recipe is red. When the head lands, w6 deletes the copies in the smscan, pair and translator host recipes.
+- 02:26Z The per-target recipe rule is at w28 5c7b36289. The render host recipes for smscan, pair and translator are red until their copies are deleted. Handed to w6 together with the import migration (verify/ as of 5c7b36289).
