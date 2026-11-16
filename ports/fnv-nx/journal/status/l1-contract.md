@@ -2316,3 +2316,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - A .fnvnx.export record in an excluded object is red.
   - RET = the definer's decltype return class as a 5th column; struct/vector returns are red.
   - The hand lists are deleted with an empty diff.
+- plugin_errors rule (w13 91417e05a reported it): the plugins loaded must equal the target profile's required set (guest: the full set; host: ∅). This replaces w13's host special case. Queued for w28 after stage B; lift/proof/fpchost is the test case.
