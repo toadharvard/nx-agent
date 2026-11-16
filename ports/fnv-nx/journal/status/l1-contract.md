@@ -2929,3 +2929,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - cand5 toolchain/ head: L2 cand4b 410ab9d13 (on 6f147b874), with fnvnx imports and no sys.path inserts; toolchain/ is at 0 under c5's gate.
   - It runs only under c5's recipe, so the cand5 verdict is its first run.
   - L2 counted 131 bare imports outside toolchain/ on the c5 tree, against w28's 0 uncertified (1064 files). The two are to be reconciled at the cand5 verdict.
+- cand5 render head: L6 w12-cand5 b80203aca (w9-cand4, w10 imports, w11 records, merged with w28-c5 e5685a6bf; d3d9 uses contract/exporthdr).
+  - 17 of 17 L6 roots are valid. There are 0 L6 admit or pure findings and 0 bare sibling imports.
+  - L1 defect sent to w28: gate_pure gives universe 0 when a root has no .py (an empty --lib).
+  - Admit at b80203aca is 66 uncertified, in non-L6 trees; w28 recounts.
