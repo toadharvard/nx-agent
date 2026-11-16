@@ -1709,3 +1709,5 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - Doing (w13): xferpub.py, which publishes and pins the before/after pack externals.
 - Closed (L5): int 6 is covered by x86sys.json int_ring3.other_vectors (claude/fnv-l5-platform-w35 @4ec8cd2c1, 249 vectors): #GP → STATUS_ACCESS_VIOLATION, eip_advance 0.
   - Open on L5: the vectors 0x2a/0x2b/0x2c/0x2e. Once the farm-2 exe run lands, send L5 the vectors of the exe int-n sites.
+- Done (w13): xferpub.py @1fbcf5384, which publishes and pins the pack externals; test 8/8.
+- Queued on farm 2: xfer-density, variants B (72d7bb259) and R2 (1fbcf5384), all images: tally, publish, PP token diff. R12 follows w12's rule 1.
