@@ -36,8 +36,7 @@
   }
  ],
  "outputs": {
-  "cases.inc": "gen/cases.inc",
-  "labels.txt": "gen/labels.txt"
+  "GEN": "gen"
  },
  "external": [],
  "uses": [

@@ -93,9 +93,7 @@
   }
  ],
  "outputs": {
-  "image.inc": "gen/image.inc",
-  "labels.txt": "gen/labels.txt",
-  "terminal.json": "gen/terminal.json"
+  "GEN": "gen"
  },
  "external": [],
  "uses": [

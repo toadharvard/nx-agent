@@ -30,7 +30,7 @@ typedef unsigned long long u64;
 #define NAN_BITS 0x7ff0000000000001ull          /* table marker: the expected value is any NaN */
 struct Case { u32 entry, nvals, under; u64 v[8]; u64 bits; int err; u32 flags; u32 ind; };
 static const Case K[] = {
-#include "/uses/ports/fnv-nx/lift/tests/guest/citest/lifted/cases.inc"
+#include "cases.inc"
 #include "/uses/ports/fnv-nx/lift/rt/GEN/fnvl_entry.h"      /* the entry's type: uint64_t(uint64_t api), crt0's call ABI */
 };
 struct Res { u32 depth, err, fex, esp_d, ra; u64 st[3]; u32 ok; };

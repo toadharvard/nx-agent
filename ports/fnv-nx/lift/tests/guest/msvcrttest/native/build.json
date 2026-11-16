@@ -22,7 +22,7 @@
  "uses": [
   {
    "root": "ports/fnv-nx/lift/tests/guest/msvcrttest/lifted",
-   "output": "image.inc"
+   "output": "GEN"
   },
   {
    "root": "ports/fnv-nx/lift/rt",
@@ -99,6 +99,10 @@
  "include_uses": [
   {
    "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
+  },
+  {
+   "root": "ports/fnv-nx/lift/tests/guest/msvcrttest/lifted",
    "output": "GEN"
   }
  ]
