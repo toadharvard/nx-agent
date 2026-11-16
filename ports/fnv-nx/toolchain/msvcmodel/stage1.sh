@@ -7,7 +7,7 @@
 #                            compiler's configured paths are absolute; stage 2 puts them back at the same paths, see rt.sh)
 set -euo pipefail
 # a red stage names its failing command, the first error lines of every build log and its tail, the error lines last (the recipe keeps the last 20 stderr lines; the logs are redirected, a failure inside them is otherwise silent)
-trap 'rc=$?; echo "stage failed: line $LINENO: $BASH_COMMAND (exit $rc)" >&2; for l in /scratch/w/*.log /scratch/w/b-gcc/config.log; do [ -f "$l" ] && { echo "== $l: tail"; tail -n 30 "$l"; echo "== $l: first error lines"; grep -n -m 20 -i "error" "$l"; } >&2; done; exit $rc' ERR
+trap 'rc=$?; echo "stage failed: line $LINENO: $BASH_COMMAND (exit $rc)" >&2; { echo "== PATH=$PATH"; ls -l /usr/bin/gcc /usr/bin/gcc-13 /usr/bin/x86_64-linux-gnu-gcc /usr/bin/x86_64-linux-gnu-gcc-13 /usr/bin/g++ /usr/bin/ar /usr/bin/as /usr/bin/ld; command -v gcc gcc-13 g++ ar as ld; gcc --version | head -1; } >&2 2>&1 || true; for l in /scratch/w/*.log /scratch/w/b-gcc/config.log; do [ -f "$l" ] && { echo "== $l: tail"; tail -n 30 "$l"; echo "== $l: first error lines"; grep -n -m 20 -i "error" "$l"; } >&2; done; exit $rc' ERR
 # ---- the constants of this step: every path the step touches (the sandbox's mounts: inputs /in/N in the order of build.json, externals are declared inputs too, {external, path}); a change of the mounts is a change of these lines alone ----
 GCC_TARBALL=/in/4                               # input 4: {external gcc-src, path gcc-13.3.0.tar.xz}, the GNU tarball
 MSVC_PATCH=/in/2                                # input 2: toolchain/msvcmodel/msvcmodel.patch   (input 1 is this script)

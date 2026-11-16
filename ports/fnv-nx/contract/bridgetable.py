@@ -114,8 +114,6 @@ def native(dll, name):
         return "fnvl_os_" + name
     if dll == "wsock32.dll":
         return "fnvnx_ws2_" + {"__WSAFDIsSet": "fdisset"}.get(name, name)
-    if dll == "msvcrt.dll" and name.startswith("?"):
-        return {"??2@YAPAXI@Z": "fnvnx_msvcrt_operator_new", "??3@YAXPAX@Z": "fnvnx_msvcrt_operator_delete"}[name]
     return name
 
 
