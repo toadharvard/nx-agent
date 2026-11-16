@@ -41,16 +41,31 @@
    ]
   },
   {
-   "tool": "ports/fnv-nx/bridgefacts/d3d9/d9rows.py",
+   "tool": "ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.py",
    "args": [
+    "/out/d3d9_spec.json",
     "/out/d9bridge_rows.tsv",
-    "/in/ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json"
+    "/in/ports/fnv-nx/shim/include"
    ],
    "inputs": [
-    "ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json"
+    "ports/fnv-nx/shim/include/d3d9.h",
+    "ports/fnv-nx/shim/include/d3d9caps.h",
+    "ports/fnv-nx/shim/include/d3d9types.h",
+    "ports/fnv-nx/shim/include/fnvnx_win32.h"
    ],
    "outputs": [
+    "d3d9_spec.json",
     "d9bridge_rows.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/bridgefacts/d3d9/d3d9_smwalk.py",
+   "args": [
+    "/out/d3d9_smwalk.json"
+   ],
+   "inputs": [],
+   "outputs": [
+    "d3d9_smwalk.json"
    ]
   },
   {
@@ -93,6 +108,8 @@
   "COM_SPEC": "com_spec.json",
   "COM_WORDS": "com_words.tsv",
   "D9_ROWS": "d9bridge_rows.tsv",
-  "BRIDGE": "bridge.tsv"
+  "D9_SPEC": "d3d9_spec.json",
+  "BRIDGE": "bridge.tsv",
+  "D9_SMWALK": "d3d9_smwalk.json"
  }
 }
