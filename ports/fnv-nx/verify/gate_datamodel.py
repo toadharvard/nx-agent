@@ -46,6 +46,24 @@ def case_of(row):
     return (m.group(2), m.group(1)) if m else None
 
 
+def test_check(row):
+    """-> (file relative to ports/fnv-nx/, function id) when the row's `check` is the structured {"kind": "test", "file", "id"} (the form gen.py validates), else None."""
+    c = row.get("check")
+    if isinstance(c, dict) and c.get("kind") == "test" and isinstance(c.get("file"), str) and isinstance(c.get("id"), str):
+        return c["file"], c["id"]
+    return None
+
+
+def test_check_why(repo, row):
+    """[] when the row's structured test check names a test file of the tree that defines the function `id` (`def <id>(`), else the reasons. The function itself is run by
+    the test file's own gate; this gate reads that the row's evidence exists and is named by the table, never a name in a comment."""
+    f, i = test_check(row)
+    path = os.path.join(repo, "ports/fnv-nx", f)
+    if not os.path.isfile(path):
+        return ["no test file " + f]
+    return [] if re.search(r"^def %s\(" % re.escape(i), open(path, encoding="utf-8", errors="replace").read(), re.M) else ["%s defines no function %s" % (f, i)]
+
+
 def case_file(row):
     c = case_of(row)
     return c[0] if c else None
@@ -132,7 +150,13 @@ def model_rows(repo, root, cxx, sem):
         return 1, [root + ":datamodel"], ["no " + DATAMODEL]
     rows = json.load(open(path))["rows"]
     bad, why = [], []
-    unjudged = [r for r in rows if case_of(r) is None]
+    for r in rows:
+        if test_check(r):
+            w = test_check_why(repo, r)
+            if w or (r.get("flag") and r["flag"] not in sem):
+                bad.append("%s:datamodel:%s" % (root, r["id"]))
+                why.append("%s: %s" % (r["id"], ", ".join(w) or "flag %s is not in the semantic set" % r["flag"]))
+    unjudged = [r for r in rows if case_of(r) is None and not test_check(r)]
     for r in unjudged:
         bad.append("%s:datamodel:%s" % (root, r["id"]))
         why.append("%s: check is not a static_assert case: %r" % (r["id"], r.get("check")))

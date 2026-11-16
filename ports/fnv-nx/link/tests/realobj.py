@@ -17,6 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.dirname(os.path.dirname(HERE))                    # ports/fnv-nx
 REAL = os.path.dirname(os.path.dirname(TOOL))                    # checkout root
 sys.path.insert(0, os.path.join(TOOL, 'verify'))
+import scratch  # noqa: E402
 import cas  # noqa: E402
 import recipe  # noqa: E402
 
@@ -56,7 +57,7 @@ def _store():
         os.makedirs(d, exist_ok=True)
         return d
     if 'store' not in _cache:
-        _cache['store'] = _mk('realobj-store-')
+        _cache['store'] = scratch.store('realobj-store-')
     return _cache['store']
 
 
@@ -109,7 +110,7 @@ def build(sources, plugins=None, lifted=False, flags=()):
         recipe.ARTIFACTS = pack
     else:
         for n, text in sources.items():
-            _w(repo, ROOT + '/%s.cc' % n, text)
+            _w(repo, ROOT + '/' + (n if os.path.splitext(n)[1] in recipe.CC_EXT + recipe.CXX_EXT + recipe.ASM_EXT else n + '.cc'), text)   # a name with a unit suffix is the unit; a bare name is a C++ unit
         root['cxx_origin'] = 'native'
     _w(repo, ROOT + '/build.json', json.dumps(rec, indent=1))
     _w(repo, T + 'verify/guest_compiler.json', json.dumps(pin))

@@ -172,7 +172,7 @@ def _():
         return False
     s = cas.hashlib.sha256(b"alpha").hexdigest()
     obj = os.path.join(st, "obj", s[:2], s)
-    os.chmod(obj, 0o644)
+    os.unlink(obj)   # the object is a hard link of the pool's: corrupt this store's name only, never the shared inode
     with open(obj, "wb") as f:
         f.write(b"evil")
     r = subprocess.run(cli + ["verify", st], capture_output=True, text=True)

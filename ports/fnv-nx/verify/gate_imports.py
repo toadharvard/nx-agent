@@ -111,7 +111,7 @@ def provider_item(root, repo, cache, admit, roots):
 def judge_root(root, repo, cache, admit, roots, bad):
     """One admitted product ROOT -> (universe, certified, ids, detail) (gate_build.quantify); input errors are red with the reason, never raised.
     BAD collects (id, class) of the uncertified rows."""
-    p = os.path.join(repo, root, "imports.in.json")
+    p = os.path.join(repo, recipe.split_spec(root)[0], "imports.in.json")
     try:
         if not os.path.isfile(p):
             if gate_build.unitless(root, cache, repo):

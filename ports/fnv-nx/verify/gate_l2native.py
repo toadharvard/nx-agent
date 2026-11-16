@@ -130,7 +130,8 @@ def run_gate(name, judge_root):
     repo = "."
     cache, tmp = os.environ.get("GATE_CACHE"), None
     if not cache:
-        cache = tmp = tempfile.mkdtemp(prefix="gate-%s-" % name)
+        tmp = tempfile.mkdtemp(prefix="gate-%s-" % name)
+        cache = os.path.join(tmp, "store")   # the pool is the store's sibling: both inside tmp, removed together
     try:
         u = c = 0
         ids, why = [], []

@@ -85,8 +85,9 @@ import sys
 
 from elftools.common.exceptions import ELFError
 from elftools.elf.elffile import ELFFile
-from capstone import CS_ARCH_ARM64, CS_MODE_ARM, Cs
+from capstone import CS_ARCH_ARM64, CS_ARCH_X86, CS_MODE_64, CS_MODE_ARM, Cs
 import capstone.arm64_const as A
+import capstone.x86_const as X
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIFT = os.path.dirname(HERE)
@@ -107,6 +108,8 @@ RECIP = {A.ARM64_INS_FRECPE: "frecpe", A.ARM64_INS_FRECPS: "frecps", A.ARM64_INS
 FCVT = {A.ARM64_INS_FCVTZS: "fcvtzs", A.ARM64_INS_FCVTZU: "fcvtzu", A.ARM64_INS_FCVTNS: "fcvtns", A.ARM64_INS_FCVTNU: "fcvtnu",
         A.ARM64_INS_FCVTMS: "fcvtms", A.ARM64_INS_FCVTMU: "fcvtmu", A.ARM64_INS_FCVTPS: "fcvtps", A.ARM64_INS_FCVTPU: "fcvtpu",
         A.ARM64_INS_FCVTAS: "fcvtas", A.ARM64_INS_FCVTAU: "fcvtau", A.ARM64_INS_FJCVTZS: "fjcvtzs"}
+X86_RECIP = {X.X86_INS_RCPSS: "rcpss", X.X86_INS_RCPPS: "rcpps", X.X86_INS_RSQRTSS: "rsqrtss", X.X86_INS_RSQRTPS: "rsqrtps",
+             X.X86_INS_VRCPSS: "vrcpss", X.X86_INS_VRCPPS: "vrcpps", X.X86_INS_VRSQRTSS: "vrsqrtss", X.X86_INS_VRSQRTPS: "vrsqrtps"}
 REF_KEYS = ("VENDOR", "FAMILY", "MODEL", "STEPPING")
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 SHF_EXECINSTR = 4
@@ -215,14 +218,41 @@ def owner(funcs, off, secname):
     return "%s+0x%x" % (secname, off)
 
 
+def scan_x86(elf, res):
+    """The host-target profile (RECIPE.md TARGETS elf_x86_64): the object's own e_machine is its root's profile. x86-64 has no mapping symbols: every byte of an
+    executable section is code. The float->int conversions (cvtt*) ARE the x86 semantics, so none is a finding; the estimate instructions RCPSS / RSQRTSS and the
+    packed ones return the executing CPU's table, which is what the rcp item judges (the same class as FRECPE)."""
+    res["arch"] = "x86_64"
+    md = Cs(CS_ARCH_X86, CS_MODE_64)
+    for idx, sec in enumerate(elf.iter_sections()):
+        if not sec["sh_flags"] & SHF_EXECINSTR or sec["sh_type"] != "SHT_PROGBITS":
+            continue
+        data = sec.data()
+        funcs = functions(elf, idx)
+        pos = 0
+        while pos < len(data):
+            seen_end = pos
+            for ins in md.disasm(data[pos:], pos):
+                seen_end = ins.address + ins.size
+                if ins.id in X86_RECIP:
+                    res["recip"].append((owner(funcs, ins.address, sec.name), X86_RECIP[ins.id]))
+            if seen_end < len(data):
+                res["undecodable"].append("%s@0x%x" % (owner(funcs, seen_end, sec.name), seen_end))
+                seen_end += 1
+            pos = seen_end
+    return res
+
+
 def scan_object(path):
     """-> {"recip": [(where, mnemonic)], "fcvt": [(where, mnemonic)], "undecodable": [where]} over all executable sections of the object"""
-    md = Cs(CS_ARCH_ARM64, CS_MODE_ARM)
-    res = {"recip": [], "fcvt": [], "undecodable": []}
+    res = {"recip": [], "fcvt": [], "undecodable": [], "arch": "aarch64"}
     with open(path, "rb") as fh:
         elf = ELFFile(fh)
-        if elf["e_machine"] != "EM_AARCH64" or elf["e_type"] != "ET_REL" or elf.little_endian is not True:
-            raise ValueError("%s is not a little-endian AArch64 relocatable object" % path)
+        if elf["e_type"] != "ET_REL" or elf.little_endian is not True or elf["e_machine"] not in ("EM_AARCH64", "EM_X86_64"):
+            raise ValueError("%s is not a little-endian AArch64 or x86-64 relocatable object" % path)
+        if elf["e_machine"] == "EM_X86_64":
+            return scan_x86(elf, res)
+        md = Cs(CS_ARCH_ARM64, CS_MODE_ARM)
         for idx, sec in enumerate(elf.iter_sections()):
             if not sec["sh_flags"] & SHF_EXECINSTR or sec["sh_type"] != "SHT_PROGBITS":
                 continue
@@ -353,10 +383,10 @@ def judge_object_coded(oid, path, asm=False, unit=None, f2i_path=None):
     und = [("undecodable", "undecodable bytes at %s" % w) for w in scan["undecodable"]]
     rcp += und
     f2i += und
-    d, why = ({"format": F2I_FORMAT, "findings": [], "ranged": [], "sites": 0, "rewritten": 0, "helper": 0, "helpers": []}, None) if asm else read_f2i(f2i_path)
+    d, why = ({"format": F2I_FORMAT, "findings": [], "ranged": [], "sites": 0, "rewritten": 0, "helper": 0, "helpers": []}, None) if asm or scan["arch"] == "x86_64" else read_f2i(f2i_path)
     if d is None:
         f2i.append(("f2i-report-missing", why))
-    elif not asm and d["unit"] != recipe.sandbox_src(unit):
+    elif not asm and scan["arch"] != "x86_64" and d["unit"] != recipe.sandbox_src(unit):
         f2i.append(("f2i-report-unit", "result file names the unit %r, not %r" % (d["unit"], recipe.sandbox_src(unit))))
     else:
         f2i += [("f2i-" + f["kind"], "%s:%s in %s: %s outside a conversion helper, not rewritten" % (f["file"], f["line"], f["function"], f["kind"]))

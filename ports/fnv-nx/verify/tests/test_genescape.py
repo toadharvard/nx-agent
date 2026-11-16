@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """gen:file-escape (recipe.check, pathflow.escapes: the rule the abspath gate runs too): a generator tool (or a module it imports) that reads a file by a path built from
 __file__ / __path__ / sys.argv[0] is red when the path leaves the tree the stage mounts the tool from, or cannot be decided; green for a file inside that tree and for a
-read guarded by require_mounted. Toy repos in temp git dirs; `recipe.check` only (no stage runs)."""
+read guarded by require_mounted/require_under. Toy repos in temp git dirs; `recipe.check` only (no stage runs)."""
 import os
 import sys
 
