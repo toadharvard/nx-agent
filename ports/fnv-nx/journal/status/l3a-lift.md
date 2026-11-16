@@ -1606,3 +1606,16 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - The ASM-234 record (VirtualProtect/WriteProcessMemory/FlushInstructionCache protect sites stay OPEN until the points-to) is added as REMOVE, owner L3a.
   - Left for others: prove.py (L3b) and ASM-617/619/621 (L6).
 - bottleneck: the L2 recipe-path pin; the universe root recount (w7); the farm-2 runs.
+
+## 2026-11-16 05:38 — universe = closure of property roots; decomp roots deleted
+- w7 recount by property (udreach/f5d49d6fa @87d6623). Exe:
+  - 67,371 roots;
+  - 3,438,510 of 3,612,804 instructions reached;
+  - 550,048 bytes (4.6 %) unreached, all in 2,604 decomp-only entries. Those have 0 relocated words and 0 pcsrc rows into them, and 105 gap sites.
+  The small images have 4-6 unreached bytes each, in 1 tail entry.
+- Ruled:
+  - The universe is the property-root closure. The decomp list is no root source; residual soundness is ASM-012, as for every non-entry address.
+  - The relocation targets that are not decoded instruction starts (exe 1,404; small images 17/27/20/14/12) are decoded as may-entries, overlap allowed, and none is exempted as data.
+- w7 (doing): ranges/entries become that closure, and the decomp root input is deleted. Then recompute and report to L3b.
+- w8: L6 render head d98bb7faa into base3 (it clears ASM-617/619/621).
+- bottleneck: the L2 recipe-path pin; the w7 universe recompute; the farm-2 runs.
