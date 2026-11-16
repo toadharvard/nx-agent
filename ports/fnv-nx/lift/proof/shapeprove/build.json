@@ -205,7 +205,7 @@
      "path": "ir/x86_proof.ir"
     },
     {
-     "stage": "ports/fnv-nx/platform:gen:21",
+     "stage": "ports/fnv-nx/platform:gen:20",
      "path": "declared/x86sys.export.json"
     },
     {
@@ -349,7 +349,7 @@
      "path": "ir/x86_proof.ir"
     },
     {
-     "stage": "ports/fnv-nx/platform:gen:21",
+     "stage": "ports/fnv-nx/platform:gen:20",
      "path": "declared/x86sys.export.json"
     },
     {
@@ -448,7 +448,7 @@
      "path": "ir/x86_proof.ir"
     },
     {
-     "stage": "ports/fnv-nx/platform:gen:21",
+     "stage": "ports/fnv-nx/platform:gen:20",
      "path": "declared/x86sys.export.json"
     },
     {
