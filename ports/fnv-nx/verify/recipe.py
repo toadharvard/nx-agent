@@ -21,6 +21,7 @@ Outputs in --out: objects.json ("fnvnx-objects/1": root, objects[{unit,object,sh
 Assumptions: the compiler and ld are deterministic given the flags of unitstage/toolflags (A-env); the sandbox leaves the channels of (ASM-038, ASM-039)
   sandbox.OPEN_CHANNELS open (see gate_determinism.py for which of them two cold builds expose)."""
 import argparse
+import atexit
 import concurrent.futures
 import errno
 import hashlib
@@ -615,7 +616,150 @@ def read_recipe(repo, path):
     reported by check(), which reads the same file through expand_profile; a reader that only needs the values takes the expanded recipe."""
     with open(os.path.join(repo, path)) as f:
         rec = json.load(f)
-    return expand_profile(rec, load_pin(repo))[0]
+    return expand_foreach(expand_profile(rec, load_pin(repo))[0], repo)
+
+
+FOREACH_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
+FOREACH_KEY = re.compile(r"[A-Za-z0-9_.-]+")
+FOREACH_TOKEN = re.compile(r"\{\{|\}\}|\{([A-Za-z][A-Za-z0-9_]*)\}")
+
+
+def foreach_rows(table, key, text):
+    """The rows of a foreach table (RECIPE.md "foreach"): TSV, a header line of column names, then one row per line, each with exactly the header's fields. KEY is a column
+    whose values are unique plain names (FOREACH_KEY). -> [{column: field}]; ValueError for any malformed, empty or duplicate row."""
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    if not lines:
+        raise ValueError("foreach %s: the table is empty (it needs a header line)" % table)
+    head = lines[0].split("\t")
+    if not all(FOREACH_NAME.fullmatch(c) for c in head) or len(set(head)) != len(head):
+        raise ValueError("foreach %s: the header must be unique column names [A-Za-z][A-Za-z0-9_]*, tab separated" % table)
+    if key not in head:
+        raise ValueError("foreach %s: the key column %r is not in the header %s" % (table, key, head))
+    rows, seen = [], set()
+    for n, ln in enumerate(lines[1:], 2):
+        f = ln.split("\t")
+        if len(f) != len(head):
+            raise ValueError("foreach %s: line %d has %d fields, the header has %d" % (table, n, len(f), len(head)))
+        r = dict(zip(head, f))
+        if not FOREACH_KEY.fullmatch(r[key]):
+            raise ValueError("foreach %s: line %d: key %r is not a plain name (letters, digits, _ . -)" % (table, n, r[key]))
+        if r[key] in seen:
+            raise ValueError("foreach %s: line %d: key %r twice" % (table, n, r[key]))
+        seen.add(r[key])
+        rows.append(r)
+    if not rows:
+        raise ValueError("foreach %s: the table has no row" % table)
+    return rows
+
+
+def foreach_subst(text, row, where):
+    """TEXT with every {COLUMN} replaced by the row's field ({{ and }} are literal braces); a name that is no column, or a lone brace, is ValueError."""
+    def one(m):
+        if m.group(0) in ("{{", "}}"):
+            return m.group(0)[0]
+        if m.group(1) not in row:
+            raise ValueError("%s: {%s} is no column of the table (%s)" % (where, m.group(1), sorted(row)))
+        return row[m.group(1)]
+    out = FOREACH_TOKEN.sub(one, text)
+    rest = FOREACH_TOKEN.sub("", text)
+    if "{" in rest or "}" in rest:
+        raise ValueError("%s: a lone brace in %r (write {COLUMN}, {{ or }})" % (where, text))
+    return out
+
+
+def foreach_spec_rows(g, repo):
+    """(rows, key) of the foreach of step G: `{table, key}` (a tracked TSV file) or `{range: N}` (N rows with the columns i = 0..N-1 and n = N, key i)."""
+    fe, name = g["foreach"], g.get("name")
+    if isinstance(fe, dict) and set(fe) == {"range"}:
+        n = fe["range"]
+        if not (isinstance(n, int) and not isinstance(n, bool) and n >= 1):
+            raise ValueError("run %r: foreach range must be an integer >= 1 (an empty fan-out is red)" % name)
+        return [{"i": str(i), "n": str(n)} for i in range(n)], "i"
+    if not (isinstance(fe, dict) and set(fe) == {"table", "key"} and isinstance(fe["table"], str) and isinstance(fe["key"], str) and rel_ok(fe["table"])):
+        raise ValueError("run %r: foreach must be {table: tracked file path, key: column} or {range: N}" % name)
+    if repo is None:
+        raise ValueError("run %r: foreach needs the checkout to read its table" % name)
+    try:
+        with open(os.path.join(repo, fe["table"]), encoding="utf-8") as f:
+            text = f.read()
+    except (OSError, UnicodeDecodeError) as e:
+        raise ValueError("run %r: foreach table %s cannot be read: %s" % (name, fe["table"], e))
+    return foreach_rows(fe["table"], fe["key"], text), fe["key"]
+
+
+def expand_foreach(rec, repo):
+    """REC with every `run` step that has `foreach: {table, key}` or `foreach: {range: N}` replaced by one step per row (a row of a tracked TSV file of the checkout REPO,
+    or i = 0..N-1 with n = N): the step is the template with {COLUMN} replaced in its `args`, `outputs`, `dirs` and `env` values, named NAME.<key field>. The table is read
+    here and is no stage input, so a changed row changes only the steps whose expanded text changed, and the key of a step is a function of its own row, tool and inputs.
+    A consumer's input {"stage": "ROOT:run:NAME", "path": TEMPLATE, "rows": "all"} (TEMPLATE = an output or dir of the foreach step as written) becomes one stage ref per row in
+    row order, and the arg "@rows" becomes the mount paths /in/K of those inputs in that order. This is the one place a foreach is expanded: read_recipe and check call it,
+    so every other reader sees plain static steps. ValueError on a malformed form, table or duplicate output."""
+    rs = rec.get("run")
+    if not isinstance(rs, list) or not any(isinstance(g, dict) and ("foreach" in g or any(isinstance(r, dict) and r.get("rows") == "all" for r in (g.get("inputs") if isinstance(g.get("inputs"), list) else []))) for g in rs):
+        return rec
+    out, outputs, fan = [], {}, {}   # fan: {NAME: (template step, rows, key)}
+    for g in rs:
+        if not (isinstance(g, dict) and "foreach" in g):
+            continue
+        rows, key = foreach_spec_rows(g, repo)
+        fan[g.get("name")] = (g, rows, key)
+    for g in rs:
+        if not isinstance(g, dict):
+            out.append(g)
+            continue
+        if "foreach" not in g:
+            out.append(foreach_consume(g, fan))
+            continue
+        name, (_, rows, key) = g.get("name"), fan[g.get("name")]
+        for row in rows:
+            where = "run %r row %s" % (name, row[key])
+            st = {k: v for k, v in g.items() if k != "foreach"}
+            st["name"] = "%s.%s" % (name, row[key])
+            for k in ("args", "outputs", "dirs"):
+                if isinstance(st.get(k), list):
+                    st[k] = [foreach_subst(x, row, where) if isinstance(x, str) else x for x in st[k]]
+            if isinstance(st.get("env"), dict):
+                st["env"] = {k: foreach_subst(v, row, where) if isinstance(v, str) else v for k, v in st["env"].items()}
+            for o in step_outputs(st):
+                if o in outputs:
+                    raise ValueError("%s: output %s is also an output of %s (an output of a foreach step must name the row: {%s})" % (where, o, outputs[o], key))
+                outputs[o] = st["name"]
+            out.append(foreach_consume(st, fan))
+    return dict(rec, run=out)
+
+
+def foreach_consume(g, fan):
+    """Step G with its `"rows": "all"` inputs expanded (see expand_foreach)."""
+    ins = g.get("inputs")
+    if not isinstance(ins, list) or not any(isinstance(r, dict) and r.get("rows") == "all" for r in ins):
+        if isinstance(g.get("args"), list) and "@rows" in g["args"]:
+            raise ValueError("run %r: the arg @rows needs an input {stage, path, rows: all}" % g.get("name"))
+        return g
+    new, at = [], []
+    for r in ins:
+        if not (isinstance(r, dict) and r.get("rows") == "all"):
+            new.append(r)
+            continue
+        if set(r) != {"stage", "path", "rows"} or not all(isinstance(r[k], str) for k in ("stage", "path")):
+            raise ValueError("run %r: a rows input is exactly {stage: ROOT:run:NAME, path: TEMPLATE, rows: \"all\"}" % g.get("name"))
+        if at:
+            raise ValueError("run %r: one `rows: all` input per step (the arg @rows names its mounts)" % g.get("name"))
+        _, _, step = r["stage"].partition(":")
+        kind, _, nm = step.partition(":")
+        if kind != "run" or nm not in fan:
+            raise ValueError("run %r: rows input %s names no foreach step of this recipe" % (g.get("name"), r["stage"]))
+        tmpl, rows, key = fan[nm]
+        if r["path"] not in step_outputs(tmpl):
+            raise ValueError("run %r: rows input path %r is no output of foreach step %s as written (%s)" % (g.get("name"), r["path"], nm, step_outputs(tmpl)))
+        for row in rows:
+            at.append("/in/%d" % (len(new) + 1))
+            new.append({"stage": "%s:run:%s.%s" % (r["stage"].partition(":")[0], nm, row[key]), "path": foreach_subst(r["path"], row, "run %r row %s" % (nm, row[key]))})
+    args = g.get("args")
+    if isinstance(args, list):
+        args = [m for a in args for m in (at if a == "@rows" else [a])]
+    return dict(g, inputs=new, args=args if args is not None else g.get("args"))
 
 
 def effective(rec, name):
@@ -1587,6 +1731,9 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
             ex_ext = isinstance(a, dict) and set(a) == {"external", "path"} and all(isinstance(v, str) for v in a.values())
             ex_root = isinstance(a, dict) and set(a) == {"root", "output"} and all(isinstance(v, str) for v in a.values())
             ex_of = is_external_of(a)
+            ex_py = a == {"python": True}   # the pinned python runtime of the generated stages (pyrt): the interpreter and env.json python.modules
+            if ex_py and raw[i].get("debs"):   # as written: the machine's layout deb is added to every step
+                err.append("run[%d].exec python: the step has no debs (the interpreter's runtime is its root)" % i)
             if ex_of:
                 err += external_of_errors("run[%d].exec" % i, a, root, rec, roots, repo)
             if xl and not (ex_ext or ex_root or ex_of):
@@ -1599,8 +1746,8 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
             if ex_ext:   # a file of a pinned external, mounted at /exec/<name> (RECIPE.md "A tool that is not a deb binary")
                 if a["external"] not in {x.get("name") for x in rec.get("external", []) if isinstance(x, dict)} or not rel_ok(a["path"]):
                     err.append("run[%d].exec %r must name an external of this recipe and a path inside its tree" % (i, a))
-            elif ex_of:
-                pass   # checked above by the one external_of rule
+            elif ex_of or ex_py:
+                pass   # checked above (the one external_of rule; the python runtime)
             elif ex_root:   # the output of a built root this root `uses`: the same resolution as the uses mount
                 if not any(isinstance(u, dict) and u.get("root") == a["root"] and u.get("output") == a["output"] for u in rec.get("uses", [])):
                     err.append("run[%d].exec %r must be a root and output this recipe `uses`" % (i, a))
@@ -1684,6 +1831,13 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             err.append("profile %r: the admit.json target of %s is %r (a root names the profile of its own target)" % (rec["profile"], root, want))
     rec, perr = expand_profile(rec, pin)
     err += perr
+    try:   # a foreach step becomes one static step per row of its tracked table: every rule below judges the expanded steps
+        fe_tables = [g["foreach"]["table"] for g in (rec.get("run") if isinstance(rec.get("run"), list) else []) if isinstance(g, dict) and isinstance(g.get("foreach"), dict) and isinstance(g["foreach"].get("table"), str)]
+        err += ["run foreach table %s is not a tracked file" % t for t in fe_tables if t not in files]
+        rec = expand_foreach(rec, repo)
+    except ValueError as e:
+        err.append(str(e))
+        rec = dict(rec, run=[g for g in (rec.get("run") if isinstance(rec.get("run"), list) else []) if not (isinstance(g, dict) and "foreach" in g)])
     vs = rec.get("variants")
     if vs is not None:
         if not (isinstance(vs, dict) and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9_.-]+", n) and isinstance(v, dict) and v and set(v) <= VARIANT_KEYS
@@ -2003,7 +2157,7 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant="", repo=".
                 err.append("guest root %s does not load plugin %s (every guest C and C++ unit is compiled with the full plugin set)" % (root, n))
         if list(loaded) != [n for n in PLUGIN_SOURCES if n in loaded]:
             err.append("plugins must be loaded in the order %s" % list(PLUGIN_SOURCES))
-    elif not guest and loaded:
+    elif not guest and loaded and any(u.endswith(CC_EXT + CXX_EXT) for u in units):   # a host root loads a plugin only where its compile stage compiles a unit with it (a generated-only root's plugins are its run steps' inputs)
         err.append("host root %s loads plugin(s) %s (the host profile has the empty plugin set: the plugins enforce guest-ABI semantics)" % (root, ", ".join(sorted(loaded))))
     if not cxx:
         return err + (["admit.json %s: cxx_origin of a root without C++ units" % root] if origin is not None else [])
@@ -2467,12 +2621,15 @@ def timing_report(store, keys):
 
 
 class Job:
+    stats = {"run_one": 0, "artifact_builds": 0}   # evaluations of `run` steps and builds of artifact roots in this process: what the regression tests count (never a stub of run_one)
+
     def __init__(self, repo, spec, store, jobs, ext):
         root, self.variant = split_spec(spec)
         self.repo, self.root, self.store, self.jobs, self.extcache = repo, root, store, jobs, ext
         self.roots, self.files = load_admit(repo), tracked(repo)
         self.rec = with_guest_link(load_recipe(repo, self.roots, spec), root, self.roots, repo)
         self.keys, self.run, self.hit, self.ext, self.ppkeys, self.built = set(), 0, 0, {}, {}, []
+        self.arts = {}   # {artifact root: its build result}: a root is built once per Job, whatever number of steps run its artifact
         self.shard, self.shard_units = None, None   # (i, N) of a shard build (build(shard=...)); the units it compiled
         self.aux = []   # build(aux): AUX_FLAGS of the CC stage
         self.analysis = None   # tree of the objstub plugin's /out (analysis_plugin), built once per root that has C/C++ units
@@ -2799,8 +2956,28 @@ class Job:
                 for o in step_outputs(g):
                     self.blocked[o] = f["stage"]
 
-    def run_all(self, ws):
-        """The `run` stages of the recipe (RECIPE.md "Run stages"), after the generators; a red one blocks its outputs like a generator."""
+    def step_closure(self, steps, name):
+        """The steps that produce NAME's inputs, transitively, and NAME itself, in recipe order: an input that is a stage ref of this root names its producer
+        (`ROOT:run:STEP`), or is an output (file or directory) of one step; a step outside the closure cannot change what NAME reads."""
+        by_name = {g["name"]: g for g in steps}
+        if name not in by_name:
+            raise ValueError("%s: root declares no run step %r" % (self.root, name))
+        need, todo = set(), [name]
+        while todo:
+            n = todo.pop()
+            if n in need:
+                continue
+            need.add(n)
+            for ref in by_name[n]["inputs"]:
+                if not (isinstance(ref, dict) and "stage" in ref and ref["stage"].partition(":")[0] == self.root):
+                    continue
+                kind, _, key = ref["stage"].partition(":")[2].partition(":")
+                todo += [key] if kind == "run" and key in by_name else [g["name"] for g in steps if ref["path"] in g["outputs"] or any(under(ref["path"], d) for d in g.get("dirs", []))]
+        return [g for g in steps if g["name"] in need]
+
+    def run_all(self, ws, only=None):
+        """The `run` stages of the recipe (RECIPE.md "Run stages"), after the generators; a red one blocks its outputs like a generator. ONLY = the name of one step: that
+        step and the steps its inputs come from run, no other."""
         try:
             steps = expand_run(self.rec).get("run", [])
         except ValueError as e:
@@ -2809,6 +2986,8 @@ class Job:
                 for o in step_outputs(g):
                     self.blocked[o] = "run:%s" % self.root
             return
+        if only is not None:
+            steps = self.step_closure(steps, only)
         for i, g in enumerate(steps):
             try:
                 self.run_one(ws, i, g)
@@ -2822,13 +3001,17 @@ class Job:
         """Stage `run:<root>:<name>`: executes the artifact (the linked output of an admitted root) in the sandbox. It sees the artifact at /art/<output>,
         the declared inputs at /in/<ident>, each declared deb's installed files at /deb/<name>/<absolute path>, and writes /out. Key = artifact
         content + input contents + deb sha256 (env.json) + argv. A nonzero exit, an undeclared or a missing output is red."""
+        Job.stats["run_one"] += 1
         tmp = tempfile.mkdtemp(dir=ws)
         tool = "exec" in g
         if tool:
             ins, rootfs = self._rootfs(tmp, g)
         else:
             aroot, aout = g["artifact"].split(":", 1)
-            r = build(self.repo, aroot, self.store, os.path.join(tmp, "art"), self.jobs, self.extcache)
+            if aroot not in self.arts:
+                Job.stats["artifact_builds"] += 1
+                self.arts[aroot] = build(self.repo, aroot, self.store, tempfile.mkdtemp(dir=ws), self.jobs, self.extcache)
+            r = self.arts[aroot]
             if r["status"] != "green" or not r["elf"] or os.path.basename(r["elf"]["path"]) != aout:
                 raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["artifact %s is not produced (root status %s)" % (g["artifact"], r["status"])]})
             ins = [{"at": "/art", "tree": self._one_file(tmp, "art", r["elf"]["path"], aout)}]
@@ -2872,7 +3055,16 @@ class Job:
                "FNVNX_DEBS": ";".join("%s=%s" % (d, pk[d]["sha256"]) for d in sorted(g["debs"]))}   # the deb sha256s are in the key
         env.update(g.get("env", {}))   # constant strings (check); the sandbox has no network namespace route, so nothing is fetched
         xs = g["exec"] if tool else None
-        if isinstance(xs, dict):   # {external, path} | {root, output}: the tool file is a stage input (in the key by content), mounted executable at /exec/<name>
+        pyargv = None
+        if xs == {"python": True}:   # the one python runtime of generate_one (pyrt): its inputs, env and PATH; the step's own inputs/scratch/stage refs as any tool step
+            py = self.pyrt()
+            ins += py["inputs"]
+            env.update({k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"})
+            env.update({"COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "FNVNX_PYMODS": self.pymods})
+            env.update(g.get("env", {}))
+            pyargv = [py["python"], "-s", "-B"] + g["args"]
+            xs = None
+        elif isinstance(xs, dict):   # {external, path} | {root, output}: the tool file is a stage input (in the key by content), mounted executable at /exec/<name>
             if "external_of" in xs:
                 host = self.external_of_host(ws, {k: v for k, v in xs.items() if k != "libs"})
                 base = os.path.basename(xs["path"])
@@ -2902,7 +3094,7 @@ class Job:
                 raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["exec-unresolved:%s: %s needs it and the declared debs do not provide it" % (b, base) for b in bad]})
             ins.append({"at": "/exec", "tree": self._one_file(tmp, "exec", host, base)})
             xs = "/exec/" + base
-        argv = [xs] + g["args"] if tool else ["/art/" + aout] + g["args"]
+        argv = pyargv if pyargv else [xs] + g["args"] if tool else ["/art/" + aout] + g["args"]
         interp = None if tool else elf_interp(r["elf"]["path"])
         if interp:   # started through the file at its PT_INTERP path inside a declared deb (the deb's own symlinks followed; no alias is relied on)
             home = deb_resolve(interp, tmp, g["debs"])
@@ -2949,6 +3141,12 @@ class Job:
         for d in g["debs"]:
             if d not in pk:
                 raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["deb %s is not declared in env.json debs.packages" % d]})
+        mkey = (os.path.realpath(self.store), tuple(sorted((d, pk[d]["sha256"]) for d in g["debs"])))   # the layout is a function of the pinned deb contents (their sha256) alone
+        if mkey in ROOTFS_MEMO and all(os.path.isdir(x) for x in ROOTFS_MEMO[mkey][2].values()):
+            for d, home in ROOTFS_MEMO[mkey][2].items():
+                if not os.path.lexists(os.path.join(tmp, "deb-" + d)):
+                    os.symlink(home, os.path.join(tmp, "deb-" + d))   # exec_unresolved and deb_resolve read the unpacked trees under tmp
+            return ROOTFS_MEMO[mkey][0], ROOTFS_MEMO[mkey][1]
         union, owner = os.path.join(tmp, "rootfs"), {}
         os.makedirs(union)
         for d in sorted(g["debs"]):
@@ -2980,6 +3178,14 @@ class Job:
                 links.append({"at": "/" + name, "to": os.readlink(p)})
             elif os.path.isdir(p):
                 ins.append({"at": "/" + name, "tree": cas.ingest(p, self.store)})
+        homes = {}
+        for d in sorted(g["debs"]):   # the unpacked trees outlive this step: one per deb content per process, linked into each later step's tmp
+            home = os.path.join(rootfs_home(), "%s-%s" % (d, pk[d]["sha256"]))
+            if not os.path.isdir(home):
+                shutil.move(os.path.join(tmp, "deb-" + d), home)
+                os.symlink(home, os.path.join(tmp, "deb-" + d))
+            homes[d] = home
+        ROOTFS_MEMO[mkey] = (ins, links, homes)
         return ins, links
 
     def _one_file(self, tmp, name, path, base):
@@ -4108,6 +4314,31 @@ def exec_unresolved(path, tmp, debs, libdirs=()):
     return sorted(bad)
 
 
+ROOTFS_MEMO = {}   # per process: {(store, ((deb, sha256), ...)): (inputs, links, {deb: unpacked tree})}
+_ROOTFS_HOME = []
+
+
+def rootfs_home():
+    """The process's directory of unpacked deb trees (removed at exit)."""
+    if not _ROOTFS_HOME:
+        _ROOTFS_HOME.append(tempfile.mkdtemp(prefix="rootfs-"))
+        atexit.register(shutil.rmtree, _ROOTFS_HOME[0], True)
+    return _ROOTFS_HOME[0]
+
+
+STAGE_MEMO = {}   # per process: {(store, checkout, repo_signature, root, step, path, step declaration): result of stage_output}; the stage's own key decides a hit, this only skips re-deriving it
+
+
+def repo_signature(repo):
+    """The content of the tracked tree of REPO as the build reads it: the index entries (mode, blob hash, path) and the sha256 of the bytes of every tracked file that differs from the index."""
+    h = hashlib.sha256(subprocess.run(["git", "-C", repo, "ls-files", "-s", "-z", "--", TREE], capture_output=True, check=True).stdout)
+    for f in subprocess.run(["git", "-C", repo, "ls-files", "-m", "-z", "--", TREE], capture_output=True, check=True).stdout.split(b"\0"):
+        if f:
+            with open(os.path.join(repo, f.decode("utf-8", "surrogateescape")), "rb") as fh:
+                h.update(f + b"\0" + hashlib.sha256(fh.read()).digest())
+    return h.hexdigest()
+
+
 def stage_output(root, ref, repo, cache):
     """{"stage": "ROOT:gen:I" | "ROOT:run:NAME", "path": P}: the declared output P of a generate (I = index in `generated`) or run stage of an admitted
     root, produced by that stage (cached by its key in CACHE/store) and written to CACHE/stageout/<sha256>/P. Red (ValueError) for an unknown root or
@@ -4127,12 +4358,15 @@ def stage_output(root, ref, repo, cache):
     if ref["path"] not in ent["outputs"]:
         raise ValueError("%s: stage %s of %s does not declare the output %r (declared: %s)" % (root, name, sroot, ref["path"], ent["outputs"]))
     store = os.path.join(cache, "store")
+    memo_key = (os.path.realpath(store), os.path.realpath(repo), repo_signature(repo), sroot, name, ref["path"], json.dumps(ent, sort_keys=True))
+    if memo_key in STAGE_MEMO and os.path.exists(STAGE_MEMO[memo_key][0]):
+        return STAGE_MEMO[memo_key]
     j = Job(repo, sroot, store, 1, ext_dir(cache))
     ws = tempfile.mkdtemp(prefix="stageref-")
     try:
         j.externals(ws)
         j.generate(ws)
-        j.run_all(ws)
+        j.run_all(ws, only=key if kind == "run" else None)
         if j.red:
             raise ValueError("%s: stage %s of %s is red: %s" % (root, name, sroot, j.red[0]["stage"] + ": " + " ".join(j.red[0]["stderr"][-3:])))
         data = open(os.path.join(ws, "root", ref["path"]), "rb").read()
@@ -4143,7 +4377,8 @@ def stage_output(root, ref, repo, cache):
     h = hashlib.sha256(data).hexdigest()
     dest = os.path.join(cache, "stageout", h, ref["path"])
     cas.publish_file(dest, data)
-    return dest, "stage:%s:%s:%s:%s" % (sroot, name, ref["path"], h)
+    STAGE_MEMO[memo_key] = (dest, "stage:%s:%s:%s:%s" % (sroot, name, ref["path"], h))
+    return STAGE_MEMO[memo_key]
 
 
 def host_compilers(rec, cache):
@@ -4474,10 +4709,14 @@ def declared_externals(repo, prefix=""):
 
 
 def externals_cmd(repo, opt):
-    """recipe externals --ref-prefix P [--fetch --store S --ext E --ws W --artifacts URL]: the declared externals with the ref prefix P, one `ref TAB commit TAB
+    """recipe externals --ref-prefix P [--ref R] [--fetch --store S --ext E --ws W --artifacts URL]: the declared externals with the ref prefix P, one `ref TAB commit TAB
     tree_sha256` line each; with --fetch, each is fetched by its commit and checked against its tree_sha256 by fetch_externals (the one mechanism of every
     external: BuildRed on a mismatch), and the line is `ref TAB checkout dir`. A branch head is never fetched."""
     rows = declared_externals(repo, opt.get("--ref-prefix", ""))
+    if "--ref" in opt:   # exactly one ref (a prefix names Voices1 and Voices10 alike): its declared row, or an error
+        rows = [r for r in rows if r[0] == opt["--ref"]]
+        if not rows:
+            raise RecipeError(["external %s is declared by no recipe" % opt["--ref"]])
     if "--fetch" not in opt:
         return ["%s\t%s\t%s" % r for r in rows]
     store, ext = need_store(opt), opt.get("--ext") or ext_of_store(need_store(opt))
