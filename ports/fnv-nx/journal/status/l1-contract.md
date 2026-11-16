@@ -2610,3 +2610,9 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - w28 791dfc7e0 (exefacts v10): the universe is the pinned input, the reach walk is a containment check only, and an absent function is red in gate_call/data/vcall. The farm facts run is queued after the merge.
 - Open, after the first frame: the deko3d bridge, i.e. that every shader bytecode at run time is in the sm_link universe. Direction: an argflow file-provenance fact (a read-only declared-machine file or an image constant), with the universe covering gamedata, the image constants and the reachable D3DX outputs.
 - bottleneck: the trunk merge push.
+
+## 2026-11-16 05:50
+- MERGED: trunk claude/fnv-nx-clean is at fac693694 (fb9dd044f + cand3b c93b807f3, tree 4faaaa9f). Green, 42 gates, 0 red, warm 34.7 s. w15 sends the head to the leads.
+- cand4 (w15): branched from fac693694, takes w28's line (shard e9c42d060, '!rt' 741e4a5e8, … 791dfc7e0 once the facts run confirms it). Status: doing.
+- Note: the farm's default checkout has an older l1.py that requires --artifacts. The farm ran the merge from the c93b807f3 checkout.
+- bottleneck: the w28 facts run at 791dfc7e0 (for cand4).
