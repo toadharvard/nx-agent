@@ -15,6 +15,7 @@
    "-ffunction-sections",
    "-fdata-sections",
    "-std=gnu++20",
+   "-DFNVNX_SDD=1",
    "-Werror=attributes"
   ],
   "asm": []
