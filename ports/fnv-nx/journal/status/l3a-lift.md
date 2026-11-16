@@ -1813,3 +1813,8 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Cross-check on 200k operands per function: sin/cos/tan/2xm1/atan2 are identical. fyl2x/fyl2xp1 are up to 1 ulp off, from the binary64 product the rule prescribes.
   - L2 told: CORE-MATH needs -frounding-math; pin @a44b8b08.
   - w14 archived.
+- base3 607880467 (w8): NAMES-FNPARM reverted (ba2aa4dcb); lift/rt is green on 84f0883e (12 objects); pack/build.json takes fnvl_fpc.h.
+  - Recipe check: 64 roots valid, 0 red.
+  - Lift tests: 58/73 OK; 11 of the reds only lack inputs.
+  - root_graph is fixed on w13-clean (which w8 merges next).
+  - gate_fpexact and gate_flags went to L3b.
