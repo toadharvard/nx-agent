@@ -1,0 +1,31 @@
+{
+ "format": "fnvnx-recipe/1",
+ "profile": "host",
+ "flags": {
+  "c": [
+   "-fms-extensions",
+   "-fshort-wchar",
+   "-frounding-math",
+   "-fsigned-char",
+   "-fno-strict-aliasing",
+   "-fwrapv",
+   "-fno-delete-null-pointer-checks",
+   "-fno-lifetime-dse",
+   "-ffp-contract=off",
+   "-O2",
+   "-Werror=attributes",
+   "-Wall",
+   "-Wextra",
+   "-Wshadow",
+   "-Wconversion",
+   "-Wno-sign-conversion",
+   "-Werror",
+   "-std=c99",
+   "-fPIC"
+  ],
+  "cxx": [
+   "-fPIC"
+  ],
+  "asm": []
+ }
+}
