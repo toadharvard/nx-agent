@@ -68,7 +68,7 @@ pedat = bytearray(TN)                     # 1 = named by a PE data directory
 tref = array('I', bytes(4 * TN))          # relocation (site) that names each data byte
 insns = {}                                # addr -> (size, mnem, feat, fall, targets)
 entries = {}; kinds = {}; PRI = ['decomp', 'entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw', 'inner', 'ptr']
-tslots = set(); tstarts = set(); dinfo = Counter(); midsrc = set(); midcall = set(); bad_entries = set(); queue = deque()
+BADAT = {}; tslots = set(); tstarts = set(); dinfo = Counter(); midsrc = set(); midcall = set(); bad_entries = set(); queue = deque()
 r3set = set(); vsites = set(); vok = set(); jtab = set(); tcons = {}; straddle = set(); deadops = set(); datarec = []; arrays = []; callers = {}; parent = {}; esite = {}; psites = {}; rejects = {}; settled = set()
 FEATS = ['ijmp_reg', 'ijmp_mem', 'fs', 'sys', 'lock', 'rep', 'x87', 'sse', 'mmx', 'in', 'out', 'cli', 'sti', 'rdtsc', 'cpuid', 'exotic']
 EXOTIC = set('aaa aas daa das aam aad arpl bound in out insb insd outsb outsd sldt hlt lcall ljmp popal pushal iretd retf into salc'.split())
@@ -151,7 +151,7 @@ def walk(start, lo, hi, dec, r3=False):
                 if a in insns or a in out or not (lo <= a < hi) or not V[a - T0] or (not dec and (a in entries or dmap[a - T0])): break
             else:
                 if n >= 150 and a < hi: continue          # chunk boundary
-                if a < hi: ok = False                    # undecodable bytes
+                if a < hi: ok = False; BADAT.setdefault(start, []).append(a)      # undecodable bytes (the address is reported: baddecode.tsv)
                 break
             if stop: break
     return ok, out, refs, tabs
@@ -496,6 +496,7 @@ open(OUT, 'w').write(HD + '; columns: entry, kind, extent, flags; extent is the 
 open(OUTD + '/ranges.tsv', 'w').write(HD + '; columns: entry, half-open ranges start-end (hex) of the instruction bytes reached\n' + '\n'.join(rgs) + '\n')
 rc = residue.write_retn(OUTD, HD, residue.retn_rows(RI)); print('retn.tsv %d rows: %s' % (len(RI), dict(sorted(rc.items()))))
 print('invariant ranges: instructions the lifter reaches outside the entry ranges, other than the dead tail after a call to a never-returning entry: %d (entries %d of %d); dead tails after NORETURN calls: %d instructions in %d entries' % (sum(LOX.values()), sum(1 for v in LOX.values() if v), len(LOX), sum(LOT.values()), sum(1 for v in LOT.values() if v)))
+open(OUTD + '/baddecode.tsv', 'w').write(HD + '; columns: entry, undecodable address, the 8 bytes there; every bad-decode entry that no proof removed (not on proven data). No SDM invalid-encoding rule decides these sequences yet, so each is UNDECIDED and the codemap gate stays red on it\n' + ''.join('%08x\t%08x\t%s\n' % (e, x, text[x - T0:x - T0 + 8].hex()) for e in sorted(bad_entries) for x in sorted(set(BADAT.get(e, ())))))
 open(OUTD + '/dropped_on_data.tsv', 'w').write(HD + '; columns: address, proof id; pointer-valued sites whose target is a byte of class data-reloc (classify() class 3, the codemap invariant), so not an entry\n' + ''.join('%08x\t%s\n' % kv for kv in sorted(DROP.items())))
 open(OUTD + '/noreturn.tsv', 'w').write(HD + '; columns: entry, reason\n' + ''.join('%08x\t%s\n' % kv for kv in NRR))
 print('R3 pointer entries: %d new (%d insn-start of decoded code, %d bodies re-read from their first byte, %d of them hit undecodable bytes #UD, %d inside decomp functions); direct targets of those bodies: %s' % (
