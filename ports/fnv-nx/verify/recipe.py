@@ -931,12 +931,40 @@ def pairs_of(rec, root, ent=None):
     return [root] + ["%s@%s" % (root, n) for n in variant_names(rec, ent)]
 
 
+BASE_ONLY = ("generated", "run", "uses", "outputs")   # the stages and their outputs: host work whatever the target, so they live once, in the base recipe
+INHERITED = ("units", "include")                      # taken from the base unless the per-target recipe really differs
+
+
+def per_target_errors(prec, base):
+    """The problems of the RAW per-target recipe PREC against the base recipe BASE (RECIPE.md "One recipe per target"): a key of BASE_ONLY is red, a `units`
+    or `include` equal to the base's is a redundant copy, an `external` name that the base declares differently is two facts for one name."""
+    err = ["%r is a key of the base recipe only (generated and run stages run on the host whatever the target: they live once)" % k for k in BASE_ONLY if k in prec]
+    err += ["%r equals the base recipe's: a redundant copy (leave it out, the target inherits it)" % k for k in INHERITED if k in prec and prec[k] == base.get(k)]
+    bx = {e.get("name"): e for e in base.get("external", []) if isinstance(e, dict)} if isinstance(base.get("external"), list) else {}
+    err += ["external %r differs from the base recipe's entry of that name" % e.get("name") for e in (prec.get("external") if isinstance(prec.get("external"), list) else [])
+            if isinstance(e, dict) and e.get("name") in bx and bx[e["name"]] != e]
+    return err
+
+
+def inherit(prec, base):
+    """The effective per-target recipe: PREC with the BASE_ONLY keys, an absent `units` or `include`, and the base externals it does not name taken from BASE
+    (both expanded, no variants)."""
+    out = dict(prec)
+    for k in BASE_ONLY + INHERITED:
+        if k in base and k not in out:
+            out[k] = base[k]
+    if isinstance(base.get("external"), list):
+        have = {e.get("name") for e in out.get("external", []) if isinstance(e, dict)}
+        out["external"] = list(out.get("external") or []) + [e for e in base["external"] if not (isinstance(e, dict) and e.get("name") in have)]
+    return out
+
+
 def load_recipe(repo, roots, spec):
     """The effective recipe of a root or of a 'root@NAME' pair."""
     root, name = split_spec(spec)
     rec = read_recipe(repo, entry_of(roots, spec)["recipe"])
-    if name in own_recipes(roots[root]):   # a per-target recipe is a whole recipe, with no variants of its own
-        return effective(rec, "")
+    if name in own_recipes(roots[root]):   # a per-target recipe has no variants of its own; the stages and the shared fields come from the base
+        return inherit(effective(rec, ""), effective(read_recipe(repo, roots[root]["recipe"]), ""))
     return effective(rec, name) if not name or name in variant_names(rec) else rec
 
 
@@ -1701,7 +1729,9 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
                 continue
             if isinstance(prec, dict) and "variants" in prec:
                 err.append("variant %s: a per-target recipe declares no variants (its pair is one build)" % n)
-            err += ["variant %s: %s" % (n, e) for e in check(prec, root, files, roots, pin, repo, n)]
+            base = effective(rec, "") if isinstance(rec, dict) else {}
+            err += ["variant %s: %s" % (n, e) for e in (per_target_errors(prec, base) if isinstance(prec, dict) else [])]
+            err += ["variant %s: %s" % (n, e) for e in check(inherit(prec, base) if isinstance(prec, dict) else prec, root, files, roots, pin, repo, n)]
     err += ["missing key %r" % k for k in ("format", "compiler", "flags", "include", "units") if k not in rec]
     if rec.get("format") != FORMAT:
         err.append("format is not " + FORMAT)
