@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """simdcheck's class order: a shape whose f_cpufeat.missing() is non-empty is ud-class, before any Form or row step, and no other shape is.  The universe is the keys file in $FNV_SIMD_KEYS (one shape key per line; the SIMD shape keys
-of the pack / census, private) and, always, the keys named below.   python3 -I tests/test_simdclass.py"""
+of the pack / census, private) and, always, the keys named below.   python3 -I tests/test_simdclass.py --cpufeat PATH     (PATH: the CPUID feature-bit table, cpuid_feature_bits.tsv, the same input as the other lift tests)"""
 import os, sys, unittest
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.join(HERE, '..', '..')); sys.path.insert(0, os.path.dirname(HERE))
+from fnvlift.tests import _inputs
+from fnvlift import inputs
+inputs.configure(cpufeat=_inputs.cpufeat_arg())                 # before the imports below: f_cpufeat reads the table when it is loaded
 from fnvlift import f_cpufeat
 from proof import shape, symform, simdcheck as C
 

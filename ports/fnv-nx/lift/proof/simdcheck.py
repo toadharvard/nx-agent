@@ -240,8 +240,10 @@ def _by_cases(key, rep, timeout):
 
 
 def main(a):
-    if '--cache' not in a: raise SystemExit('usage: simdcheck.py SHAPES.tsv --cache VERDICT_STORE [--only S] [--cleared F] [--timeout MS] [--budget S] [--progress]')
+    if '--cache' not in a: raise SystemExit('usage: simdcheck.py SHAPES.tsv --cache VERDICT_STORE [--only S] [--cleared F] [--cpufeat TABLE] [--timeout MS] [--budget S] [--progress]')
     S.F.configure(a[a.index('--cache') + 1])
+    if '--cpufeat' in a:
+        from fnvlift import inputs; inputs.configure(cpufeat=a[a.index('--cpufeat') + 1])          # the CPUID feature-bit table: the class order (cleared) reads it
     only = a[a.index('--only') + 1] if '--only' in a else ''
     ud = set()
     if '--cleared' in a:                                   # the partition of sdmfeat.py (`partition`): the shapes of the cleared sites, #UD on the declared CPU (CPUREF), each by its SDM-derived reason
