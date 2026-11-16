@@ -1701,3 +1701,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Global bytes: not measured yet. They come from one farm liftsrc run at before / +rule 1 / +rule 1+2.
 - Doing (w13): the tally and PP-diff tools for that run.
 - Waiting: w12, rule 1.
+- Done (w7): modlift writes <img>/roots.tsv, with the rooting kind and jtab extent per relocation target.
+  - On the 5 small images, 0 roots lie inside a proven jtab extent. X excludes every relocation target inside a jtab extent: 11/23/9/15/10. The rule closes the class there.
+  - The libvorbis int-n sites are 16 × `int 6` in may-entries rooted by data words. They are closed by the L5 IDT row for vector 6; no site gets special handling.
+  - The exe (0x7becd0, the jtab class, the 16 exe int-n sites) waits on the farm-2 run.
