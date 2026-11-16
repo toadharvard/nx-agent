@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gate "linkstrict" (fnvnx-gate/1, class 3 of VERDICT.md): no symbol is unresolved or substitutable. Decides on symbol tables only.
-    python3 -I gate_linkstrict.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/linkstrict.json
+    python3 -I gate_linkstrict.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/linkstrict.json
 Roots come from verify/admit.json: for every product root the gate calls gate_build.ensure(root, GATE_CACHE) and reads the ELF `.symtab` of
 its objects (relocatable) and of its linked ELF, never a name's text. Rules:
   (a) a root that links an ELF (the linked output of every product and test root, whatever flags the link used): the ELF has no undefined
@@ -313,7 +313,7 @@ def main():
         host = (hroots, set(host_exports(cache)[0])) if hroots else None
         guest = [r + "/" for r, e in recipe.load_admit(repo).items() if e.get("class") == "product" and e.get("target") == "guest"]
         if guest:
-            runtime = set(linkset.runtime_defs(repo, cache)) | set(linkset.synth_defs(guest[0][:-1], recipe.load_admit(repo), repo, cache))   # the pinned runtime, the script's names and ld's own: the one accessor of the link set
+            runtime = set(linkset.runtime_defs(repo, cache)) | set().union(*(set(linkset.synth_defs(g[:-1], recipe.load_admit(repo), repo, cache)) for g in guest))   # the pinned runtime, the script's names and ld's own: the one accessor of the link set
         for root in roots:
             res, _ = gate_build.ensure(root, cache, repo)
             if res["status"] == "red":

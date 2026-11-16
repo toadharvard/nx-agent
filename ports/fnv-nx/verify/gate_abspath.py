@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gate "abspath" (fnvnx-gate/1, owner order of 2026-11-15 21:00Z "every generator is a recipe stage; no path outside the key"): no absolute host
 path and no environment default can reach an input of a product stage or a gate stage.
-    python3 -I gate_abspath.py        cwd = checkout root, env GATE_OUT, optional GATE_COMMIT; writes GATE_OUT/abspath.json
+    python3 -I gate_abspath.py        cwd = checkout root, env GATE_OUT; writes GATE_OUT/abspath.json
 Universe (from the stage graph, by rule, no list of files): the Python files of
   (a) the tools the recipe runs as stages: `generated[].tool` of every recipe of every admitted root (admit.json), and the stage launchers of
       recipe.py itself (GEN_LAUNCH, LD_TOOLS files, unitstage.py);
@@ -250,9 +250,7 @@ def read_tree(commit):
 
 def main():
     out = os.environ["GATE_OUT"]
-    commit = os.environ.get("GATE_COMMIT")
-    if commit is None:
-        commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()   # the worktree of the commit under test
     names, show = read_tree(commit)
     files = {p: show(p) for p in names if p.endswith(".py")}
     seeds, tool_seeds = seeds_of(set(names), show)

@@ -22,7 +22,7 @@ def check(name, ok, extra=""):
         FAILED.append(name)
 
 
-os.environ["ARTIFACTS_URL"] = TR.BASE + "/artifacts.git"
+TR.recipe.ARTIFACTS = TR.BASE + "/artifacts.git"
 TR.subprocess.run(["git", "init", "-q", "--bare", TR.BASE + "/artifacts.git"], check=True)
 GC = TR.BASE + "/cache"
 LM = "HKEY_LOCAL_MACHINE"
