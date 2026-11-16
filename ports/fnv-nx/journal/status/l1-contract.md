@@ -2377,3 +2377,15 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - w28 35cdcd88f: pathflow counts parameter defaults as reads (6 tests pass); targets.py mounts targets.json, ASSUMPTIONS.json and guest_compiler.json. Handed to L2 for the recipe-path compiler build.
 - The udsail stage (L3a w13) needs z3/capstone, the isla stage binary and scratch together. Ruling: a `run` step with the pinned python runtime mounts python.modules the same way generated steps do, with one function for both. Assigned to w28 after the entry kind.
 - The FNVNX_EXPORT lines fail L2's decltype writer (the symbol is named as text in asm). Ruling: the macro emits a relocated address of the declared entity plus the kind (func/entry/data), and exportgen reads the relocation. The L2 writer is unchanged. Top item for w28.
+- w28 abdd9bec6:
+  - the entry kind (an entry is void(void));
+  - exports.tsv has 6 columns;
+  - name_table, msvcrt_names.tsv and the galaxywrp dict are deleted;
+  - a module with no spec takes ret/args from the decltype, cdecl;
+  - test_bridgefacts is on the bridgetable root.
+- Ruling: the bridge alone owns an entry's x86 return (pop ra plus the stdcall bytes from the spec). Entry bodies never write ra or esp for the return, and doing so is red. L3a removes its return lines.
+- Ruling: dangling deb links are mounted as dpkg leaves them; the red is reverted. A needed missing target fails with ENOENT, and then its package is declared.
+- L6 w6-root 9e62a93ea:
+  - include_of in, the rule-2 item closed;
+  - no L6 host root loads plugins;
+  - render merges keep the render tree, resolved as L6's.
