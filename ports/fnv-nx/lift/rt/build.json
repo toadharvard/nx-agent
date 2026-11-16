@@ -182,6 +182,10 @@
   {
    "root": "ports/fnv-nx/hostabi",
    "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/contract",
+   "output": "INCLUDE"
   }
  ],
  "outputs": {
