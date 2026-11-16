@@ -12,6 +12,13 @@ Updated 2026-11-14 23:30Z (path plan). Older sections below are from 2026-11-12 
 - Goal path: product roots -> lifted packs as roots -> ELF -> boot -> WinMain -> menu -> first frame (GL in the emulator).
 
 
+**2026-11-16 01:10Z (orchestrator).**
+- Trunk fb9dd044f. cand3b (w15) is cut to the green roots and waits on a warm verdict before merge. Red at f536286ff: cold 789 s, 42 gates.
+- Cut again: platform, loader, bridgefacts, rt/guest_main and the render roots. Their reds are with their owners:
+  - L5 (platform 9df135ee8): imports 3021/3132, with 32 external symbols that have no definer (_CI*, RtlUnwind, RaiseException, terminate); machine foreign-writer (display.cpp, exports.cpp); objstub 75 (platform/audio); abi (msvcrt_va for _vsnprintf, fnvnx_msvc_format); linkstrict 832.
+  - L1: loader objstub (boot.c) and linkstrict.
+- L2 COMPILER-STAGE (w3 d037efb1f) and L1 w28 declared imports (22af0d841) go to cand4.
+
 **2026-11-16 00:10Z (orchestrator).**
 - Trunk fb9dd044f.
 - cand3: w12 stalled at 8fc4c58b9, so w15 took it over as cand3b 4c38d7265 on fb9dd044f.
