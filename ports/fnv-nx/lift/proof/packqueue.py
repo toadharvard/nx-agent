@@ -30,7 +30,7 @@ def main(argv):
     ap.add_argument('--sail-work', required=True); ap.add_argument('--sail-ir', required=True); ap.add_argument('--isla', required=True); ap.add_argument('--isla-cfg', required=True); x86sys.add_arg(ap)
     ap.add_argument('--mode', choices=('int', 'simd'), default='int', help='simd: the queue of the SIMD family (header `# mode=simd`): every SIMD shape with a symbolic Form and no complete non-error record of --tree')
     ap.add_argument('--tree', help='simd: the commit of the prover tree the records must come from (record `tree`)'); ap.add_argument('--qcache', help='simd: BRANCH:FILE of the proved-query cache that seeds the farms (header)')
-    ap.add_argument('--cpufeat-file', help='simd: the CPUID feature-bit table (the class order reads it)'); ap.add_argument('--cpufeat-ref', help='simd: BRANCH:FILE where the farms fetch that table (header)')
+    ap.add_argument('--cpumodel-file', help='simd: the declared CPU record verify/cpuid_model.json (the class order reads it)'); ap.add_argument('--cpumodel-ref', help='simd: BRANCH:FILE where the farms fetch that record (header)')
     a = ap.parse_args(argv)
     xsha = x86sys.configure(a.x86sys)
     model_sail.configure(a.sail_work, a.sail_ir, a.isla, a.isla_cfg)
@@ -42,8 +42,8 @@ def main(argv):
             p = ln.rstrip('\n').split('\t'); fam[p[0]] = (p[1], int(p[3])); first[p[0]] = p[4]
     simd = a.mode == 'simd'
     if simd:
-        if not (a.tree and a.cpufeat_file and a.cpufeat_ref): ap.error('--mode simd needs --tree, --cpufeat-file and --cpufeat-ref')
-        from fnvnx.lift.fnvlift import inputs; inputs.configure(cpufeat=a.cpufeat_file)        # the class order (simdcheck.cleared) reads the CPUID feature-bit table
+        if not (a.tree and a.cpumodel_file and a.cpumodel_ref): ap.error('--mode simd needs --tree, --cpumodel-file and --cpumodel-ref')
+        from fnvnx.lift.fnvlift import inputs; inputs.configure(cpumodel=a.cpumodel_file)        # the class order (simdcheck.cleared, proof/cpufeat.py) reads the declared CPU record
     forms = certs_build.forms_of(a.universe, ('simd',) if simd else ('int', 'sys'))
     files = []
     for s in a.shards: files += sorted(glob.glob(os.path.join(s, '**', '*.jsonl'), recursive=True)) if os.path.isdir(s) else [s]
@@ -60,8 +60,8 @@ def main(argv):
     noform = sorted(k for k, (f, _) in fam.items() if f in (('simd',) if simd else ('int', 'sys')) and k not in forms)
     xhdr = []
     if simd:
-        with open(a.cpufeat_file, 'rb') as fh: csha = hashlib.sha256(fh.read()).hexdigest()
-        xhdr = ['# mode=simd', '# subject=%s' % a.tree] + (['# qcache=%s' % a.qcache] if a.qcache else []) + ['# cpufeat=%s' % a.cpufeat_ref, '# cpufeat_sha256=%s' % csha]
+        with open(a.cpumodel_file, 'rb') as fh: csha = hashlib.sha256(fh.read()).hexdigest()
+        xhdr = ['# mode=simd', '# subject=%s' % a.tree] + (['# qcache=%s' % a.qcache] if a.qcache else []) + ['# cpumodel=%s' % a.cpumodel_ref, '# cpumodel_sha256=%s' % csha]
     lines = ['# fnvnx-shapequeue/1 queue_id=%s' % qid] + xhdr + [
              '# pack_commit=%s' % a.pack_commit, '# prover_commit=%s' % a.prover_commit, '# ir_sha256=%s' % pin, '# x86sys_sha256=%s' % xsha,
              '# universe: %s' % ' '.join(h[2:] for h in hdr[:1]),

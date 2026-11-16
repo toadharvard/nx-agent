@@ -46,10 +46,6 @@
   {
    "root": "ports/fnv-nx/platform",
    "output": "X86SYS"
-  },
-  {
-   "root": "ports/fnv-nx/lift/cpufeat",
-   "output": "CPUFEAT"
   }
  ],
  "generated": [

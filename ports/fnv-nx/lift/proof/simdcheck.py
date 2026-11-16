@@ -254,10 +254,10 @@ def _by_cases(key, rep, rlimit):
 
 
 def main(a):
-    if '--cache' not in a: raise SystemExit('usage: simdcheck.py SHAPES.tsv --cache VERDICT_STORE [--only S] [--cpufeat TABLE] [--progress]')
+    if '--cache' not in a: raise SystemExit('usage: simdcheck.py SHAPES.tsv --cache VERDICT_STORE [--only S] [--cpumodel FILE] [--progress]')
     S.F.configure(a[a.index('--cache') + 1])
-    if '--cpufeat' in a:
-        from fnvnx.lift.fnvlift import inputs; inputs.configure(cpufeat=a[a.index('--cpufeat') + 1])          # the CPUID feature-bit table: the class order (cleared) reads it
+    if '--cpumodel' in a:
+        from fnvnx.lift.fnvlift import inputs; inputs.configure(cpumodel=a[a.index('--cpumodel') + 1])          # the declared CPU record: the class order (cleared, proof/cpufeat.py) reads it
     only = a[a.index('--only') + 1] if '--only' in a else ''
     keys = [l.split()[0] for l in open(a[0]) if l.strip() and not l.startswith('#')]
     cnt = {}

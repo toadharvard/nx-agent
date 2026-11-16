@@ -11,11 +11,13 @@ from fnvnx.lift.proof import sdmfeat as S  # noqa: E402
 
 class DeclaredCpu(unittest.TestCase):
     def test_declared_cpu_is_the_record_and_equals_the_generated_tables(self):
-        """declared_cpu() reads verify/cpuid_model.json through the one derivation (cpumodel_bits.model_words); when the generated cpumodel_tab.inc / fnvl_cpuref.h of root lift/rt are available
+        """declared_cpu(cpumodel_bits, record) reads the record (verify/cpuid_model.json) through the one derivation (cpumodel_bits.model_words); when the generated cpumodel_tab.inc / fnvl_cpuref.h of root lift/rt are available
         (env GATE_CACHE) the same values are in them"""
         import json, re
-        cpu = S.declared_cpu()
-        mod = json.load(open(os.path.join(os.path.dirname(os.path.abspath(S.__file__)), '..', '..', 'verify', 'cpuid_model.json')))
+        from fnvnx.lift.fnvlift import cpumodel_bits
+        rec = os.path.join(os.path.dirname(os.path.abspath(S.__file__)), '..', '..', 'verify', 'cpuid_model.json')
+        cpu = S.declared_cpu(cpumodel_bits, rec)
+        mod = json.load(open(rec))
         self.assertEqual(cpu[(0, 'EAX')], mod['max_basic'])
         self.assertEqual(cpu[(0x80000000, 'EAX')], int(mod['max_ext'], 0))
         self.assertEqual(cpu[(1, 'EDX')], int(mod['leaf1_edx_raw'], 0) & ~int(mod['leaf1_edx_clear'], 0) & 0xffffffff)
