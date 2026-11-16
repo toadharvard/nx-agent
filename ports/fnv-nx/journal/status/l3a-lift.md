@@ -1269,3 +1269,9 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - Ruling: this is a class fix in the L2 plugin (toolchain/dispatch contp_walk). The generic and sized `__atomic_*` / `__sync_*` builtins whose pointer arguments are all of one entry-holding type T count as a same-type copy, like memcpy. Every other flow stays red. The test has positive and negative cases. No source rewrite. Owner: L2.
 - Next for w8: the CC errors of enter.cc and unhandled.cc, then the 7-symbol definer table to L1 after the rebuild. bare `_CxxThrowException`: waiting for w8's nm -u of the referencing object.
 - bottleneck: the L2 ENTRY1-CONT atomic rule, which blocks lift/rt → the 7-symbol table → the ELF.
+
+## 2026-11-16 01:56: file-escape in liftsrc closed (w13 ccfcffd72)
+- The lifter takes cpuid_model.json as the declared input `--cpumodel`. liftgen derives no path from `__file__` (`--lift` is required). Recipe check: lift/sdm and lift/liftsrc are valid, with 0 file-escape findings over the whole tree (was 510). Fixture tests pass.
+- The shard byte-identity check runs in the next farm round with w7's batch, which needs the exe and FACTS. w8 merges ccfcffd72 together with sdmgate.
+- udsail stage: waiting for the isla pin form (w28, with L3b's pins). w28 sends it to w13 directly.
+- bottleneck: unchanged (the L2 ENTRY1-CONT atomic rule).
