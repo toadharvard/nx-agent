@@ -3029,3 +3029,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - 12:14: L5 found its own vacuous bodies. SteamAPI_Shutdown and RunCallbacks only locked and stored g_steam_pipe, a dead static (always 0). Fix (w40): delete g_steam_pipe; the two become void bodies dm:20 and dm:21 (no-galaxy, SDK cite). Accepted.
   - L1 gap: objstub classed a dead-store body as an implementation. w29 item 6 adds a value-set rule: an internal, non-escaping object whose every store writes its initializer is constant, so its stores are not effects, and a body left with only those stores and locks is V. Measured globally.
 - 12:16: L5 platform-c5 563e1273f: dm:20 and dm:21 (Shutdown, RunCallbacks; void; SDK cite). Platform build green. The cand5 platform head is now 563e1273f. w7 (L3a) facts: the flag vocabulary matches imagerec. w28 sends w7 the 8-image modules.tsv; w7's old 4eb5a2bd4 run gave 7, without ssce5432.
+- 12:17: w29 0fa7b7a.
+  - Item 1: .fnvnx.const parser (contract/l2consts.py), with objstub reporting const-missing, duplicate and mismatch. constants.tsv and --constants are deleted. test_objstub_consts passes 24 of 24. test_objstub gives 324 PASS and 18 FAIL: the 18 are toy gates that need the guest compiler (pre-existing), so they run on a farm.
+  - Item 2A: ENTRY is in guest_image.ld, and test_guest_scripts passes 8 of 8.
+  - Items 2B and 3: their base lacked lift/rt and platform/win32. They are rebased onto L5 platform-c5 563e1273f as w29-c5.
+  - Item 4 is in progress.
