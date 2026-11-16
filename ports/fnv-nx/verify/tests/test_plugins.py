@@ -109,6 +109,9 @@ def main():
     check("target profile: a host root with no plugin has no plugin error", pl(errs(hrepo, mut(plugins=[]))) == [], pl(errs(hrepo, mut(plugins=[]))))
     he = pl(errs(hrepo, mut(plugins=PLUGS)))
     check("target profile: a host root that loads the plugins is red (host = the empty set)", any("host root" in x and "loads plugin" in x for x in he), he)
+    grepo = make_repo("gen-only-host", REC, "native", {ROOT + "/a.cc": None, ROOT + "/t.txt": "x\n"}, target="host")
+    ge = pl(errs(grepo, mut(plugins=PLUGS)))
+    check("target profile: a generated-only host root (no C/C++ unit) that declares plugins for its run steps has no `loads plugin` error", not any("loads plugin" in x for x in ge), ge)
     he1 = pl(errs(hrepo, mut(plugins=[P["fnvnx_ftoi"]])))
     check("target profile: a host root that loads one plugin is red", any("loads plugin(s) fnvnx_ftoi" in x for x in he1), he1)
     check("target profile: a host native C++ root needs no SDD flag", not any("lacks" in x for x in errs(hrepo, mut(plugins=[], flags={"c": [], "cxx": ["-O2"], "asm": []}))))
@@ -361,24 +364,21 @@ def main():
     check("both pack and stage: red", any("exactly one of pack and stage" in x for x in errs(both, lrec)), errs(both, lrec))
     neither = make_repo("stageneither", srec, {"lifted_by": T + "gen/lift.py"}, sfiles)
     check("neither pack nor stage: red", any("exactly one of pack and stage" in x for x in errs(neither, srec)), errs(neither, srec))
-    # --- tool-file membership is over the trees of an admitted root (admit.json trees), not the root path only
+    # --- tool-file membership: one root, one tree (a tool file lies under the admitted tool root's own path)
     tt = T + "gen2tree/lift.py"
     trec = dict(srec, generated=[dict(srec["generated"][0], tool=tt)])
-    tr = make_repo("treetool", trec, {"lifted_by": tt, "stage": st}, {tt: lift, T + "gen2/x.py": "", ROOT + "/a.cc": None},
-                   extra_roots=[{"path": T + "gen2", "class": "tool", "trees": [T + "gen2", T + "gen2tree"]}])
-    check("a tool file in a tree of an admitted tool root (not under the root path) is a valid lifted_by and generator tool", errs(tr, trec) == [], errs(tr, trec))
     tr2 = make_repo("treeplain", trec, {"lifted_by": tt, "stage": st}, {tt: lift, ROOT + "/a.cc": None})
     check("the same file under no root or tree is red", any("not a tracked .py of an admitted tool" in x for x in errs(tr2, trec)), errs(tr2, trec))
-    # --- header home across roots: a lifted root includes the platform's header (L5 fnvl_host.h): green iff platform is a product root of its target
+    # --- header home across roots: an include outside the root's own path lies in a directory output (`outputs: {INCLUDE: dir}`) of a root this root `uses`
     hh = T + "platform/include/fnvl_host.h"
-    hrec = dict(srec, include=[T + "platform/include"])
-    hfiles = dict(sfiles, **{hh: "#define FNVL_HOST 1\n"})
-    for tg, want in (("guest", False), ("host", True)):
-        hr = make_repo("hh_" + tg, hrec, {"lifted_by": T + "gen/lift.py", "stage": st}, hfiles,
-                       extra_roots=[{"path": T + "platform", "class": "product", "target": "guest"}], target=tg)
-        he = [x for x in errs(hr, hrec) if "include" in x]
-        check("lifted root of target %s including platform/include (a guest product root): %s" % (tg, "red, the other target is no home" if want else "no include error"),
-              bool(he) == want and (not want or any("lies in no admitted header root and no product root of target" in x for x in he)), he)
+    hfiles = dict(sfiles, **{hh: "#define FNVL_HOST 1\n", T + "platform/build.json": json.dumps({"format": "fnvnx-recipe/1", "outputs": {"INCLUDE": "include"}})})
+    plat = {"path": T + "platform", "class": "product", "target": "host", "recipe": T + "platform/build.json"}
+    for what, rec_, want in (("declared through `uses`", dict(srec, include=[T + "platform/include"], uses=[{"root": T + "platform", "output": "INCLUDE"}]), False),
+                             ("with no `uses` of its home", dict(srec, include=[T + "platform/include"]), True)):
+        hr = make_repo("hh_" + what.split()[0], rec_, {"lifted_by": T + "gen/lift.py", "stage": st}, hfiles, extra_roots=[plat])
+        he = [x for x in recipe.check(rec_, ROOT, recipe.tracked(hr), recipe.load_admit(hr), recipe.load_pin(hr), repo=hr) if "include" in x]
+        check("a root including platform/include %s: %s" % (what, "red" if want else "no include error"),
+              bool(he) == want and (not want or any("in no directory output of a root that this root `uses`" in x for x in he)), he)
     for what, name in (("an index past the steps", "gen:%s:1" % ROOT), ("another root's step", "gen:%s:0" % (ROOT + "x")), ("a free name", "lift")):
         bs = make_repo("stagebad_" + what.replace(" ", "_").replace("'", ""), srec, {"lifted_by": T + "gen/lift.py", "stage": name}, sfiles)
         check("stage naming %s is red" % what, any("is not a generated step" in x for x in errs(bs, srec)), errs(bs, srec))
