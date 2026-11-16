@@ -628,7 +628,8 @@ def gate_main():
     repo, tmp = ".", None
     cache = os.environ.get("GATE_CACHE")
     if not cache:
-        cache = tmp = tempfile.mkdtemp(prefix="gate-rtasm-")
+        tmp = tempfile.mkdtemp(prefix="gate-rtasm-")
+        cache = os.path.join(tmp, "store")   # the pool is the store's sibling: both inside tmp, removed together
     try:
         u = c = 0
         ids, why = [], []
