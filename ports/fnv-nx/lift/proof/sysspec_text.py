@@ -20,6 +20,7 @@ GAP = {
 INT = {
     'inv': 'int_ring3.other_vectors is not the access violation of the fault table',
     'bad': 'INT n differs from the record row at vector(s) %s',
+    'split': 'the symbolic INT n case split differs from the record rows over the 8-bit vector domain',
     'unc': 'uncertified: int_ring3.excluded.%d: %s (%d of %d vectors proved)',
     'ok': 'SDM INT n: every vector is a record row (%d vectors)',
     'addr': 'the int instruction',
