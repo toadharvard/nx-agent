@@ -65,22 +65,6 @@
    ]
   },
   {
-   "tool": "ports/fnv-nx/lift/tools/dispgen.py",
-   "args": [
-    "--prefix",
-    "fnvnx_native",
-    "--rows",
-    "/out/native_disp_rows.tsv",
-    "/uses/ports/fnv-nx/contract/facts/native",
-    "/out/native_disp.cc"
-   ],
-   "inputs": [],
-   "outputs": [
-    "native_disp.cc",
-    "native_disp_rows.tsv"
-   ]
-  },
-  {
    "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
    "args": [
     "/in/ports/fnv-nx/lift/rt/fmath.h",
@@ -191,10 +175,6 @@
    "output": "X86SYS"
   },
   {
-   "root": "ports/fnv-nx/contract/facts",
-   "output": "native"
-  },
-  {
    "root": "ports/fnv-nx/platform",
    "output": "INCLUDE"
   },
@@ -204,7 +184,6 @@
   }
  ],
  "outputs": {
-  "GEN": "gen",
-  "NATIVE_DISP_ROWS": "native_disp_rows.tsv"
+  "GEN": "gen"
  }
 }
