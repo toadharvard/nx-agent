@@ -5,11 +5,12 @@ generates the import entries (tools/impgen.py) and the perfect-hash dispatch tab
   guest.cc   the lifted functions (lifted-code flags)          imp.cc   the generated import entries          tab.cc    the dispatch table
   image.inc  the image bytes, the import table words, the entry address and the expected eax of every case (main.cc includes it)
 Expected values are computed from the x86 semantics by hand, stated at each case (as in the comments below).
-usage: gen.py <out dir>"""
+usage: gen.py OUT_DIR LIFT_DIR --x86sys F --sdmrows F --cpumodel F --rcptab F --rcpcert F      (the lifter's declared inputs: lifted.buffer_arguments)"""
 import os, struct, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.join(HERE, '..', '..', '..')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the tool root (/tool)
 sys.path.insert(0, sys.argv[2])   # lift/, whose fnvlift package is a declared input
+import argparse, lifted
 import fnvlift as L, phf, impgen
 from keystone import Ks, KS_ARCH_X86, KS_MODE_32
 
@@ -84,7 +85,9 @@ def guest():
 
 
 def main():
-    w = sys.argv[1]; os.makedirs(w, exist_ok=True)
+    ap = argparse.ArgumentParser(); ap.add_argument('out'); ap.add_argument('lift'); lifted.buffer_arguments(ap); a = ap.parse_args()
+    w = a.out; os.makedirs(w, exist_ok=True)
+    lifted.configure_buffer(a, tempfile.mkdtemp(dir='/dev/shm'))      # the lifter's inputs: the one way (tools/lifted.py)
     code, ents, cases = guest(); img = Fake(code); img.entries = set(v[0] for v in ents.values())
     work = tempfile.mkdtemp(dir='/dev/shm')            # scratch outside /out: the stage's outputs are exactly the files listed in the header
     open(work + '/bridge.tsv', 'w').write('dll\tname\tordinal\tconv\tret\targs\tnative_symbol\tbind\n' + ''.join('%s\t%s\t\t%s\t%s\t%s\t%s\t%s\n' % r for r in BRIDGE))
