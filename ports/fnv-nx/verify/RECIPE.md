@@ -278,8 +278,11 @@ Readers of the record: gate_tlsmodel (the relocations of the linked ELF), contra
 - `outputs` are root-relative declared paths, stored in the store and copied into the root like generated outputs (they may be units, headers,
   constants ...). A nonzero exit, an undeclared output and a missing declared output are red, naming `run:<root>:<name>`.
 - A `run` stage is not a compile: toolflags does not judge it (its argv[0] is the artifact, never a compiler).
-- Generated-only roots (`recipe.generated_only`): a root with `generated` or `run` steps and none of `flags`, `include`, `units`, `link`, `profile`, `variants` has no unit. `compiler` and `plugins`
-  may be written in it (the compiler stage: a step's `{"plugin": NAME}` input is built against the root's compiler); a root with no `compiler` of its own gets the host profile's, never run.
+- Generated-only roots (`recipe.generated_only`): a root with `generated` or `run` steps and none of `flags`, `include`, `units`, `link`, `profile`, `variants` has no unit. It may write
+  `plugins` and `compiler` only for its run steps to use: a plugin is declared only when some run step takes it as its `{"plugin": NAME}` input (the built `.so` is then a stage input of that
+  step, so its content is in the step's key), and the `compiler` is named only to build those plugins (the plugin stage runs against it, so the compiler's content is in each plugin's key and
+  through it in the steps') or because a step takes it as an `{"external": NAME}` input. An unused plugin (`gonly:unused-plugin:<name>`) or compiler (`gonly:unused-compiler`) is red, as an unused
+  import declaration is. A root with no `compiler` of its own gets the host profile's, never run. Tests: `tests/test_runinsrc.py`.
 - A C/C++/asm file of the root that is a declared path input of one of its `run` steps (the file, or a directory holding it) is that step's input, not a unit: mounted at `/in/N`,
   its content in the step's key (`recipe.run_input_sources`; `all_units_of` leaves it out). Every other source of the root is a unit under the existing rules (`cxx_origin`),
   and in a generated-only root it is red: a source is a declared run input or a unit, nothing else. Tests: `tests/test_runinsrc.py` (the rule), `tests/test_run.py` family (builds).
