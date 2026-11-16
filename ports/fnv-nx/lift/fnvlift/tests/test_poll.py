@@ -76,5 +76,12 @@ check('the poll macro and the susp field are in rt/fnvl.h', all(s in open(os.pat
 # x87 function: the poll re-enters with the pre-state of its instruction
 t, m = lift('d9e8' 'dd d8'.replace(' ', '') + 'c3')    # fld1; fstp st(0); ret (static x87 stack)
 check('x87 function: the poll has the x87 stack store before SYNC_OUT and the load after SYNC_IN', bool(re.search(r'FNVL_POLL\([^\n]*c->ftop=[^\n]*SYNC_OUT;,SYNC_IN;[^\n]*ft0=', t)))
+# the redirect is the lifter's return protocol (FNVL_RET: SYNC_OUT done, c->ra = target, return): no non-local block, switch case or kept label belongs to a poll
+H = open(os.path.join(_inputs.LIFT, 'rt', 'fnvl.h')).read()
+check('the poll redirect returns (c->ra set by fnvnx_safepoint, SYNC_OUT before the call); it does not jump to nonlocal',
+      bool(re.search(r'#define FNVL_POLL\(SO,SI,h\)[^\n]*SO REGS\(\); if\(fnvnx_safepoint\(c,h\)!=h\)\{ REGS\(\); return; \}', H)) and 'goto nonlocal' not in re.search(r'#define FNVL_POLL\(SO,SI,h\)[^\n]*', H)[0])
+for h in ('4975fdc3', '31c04975fdc3', '01d801d1c3'):
+    t, m = lift(h)
+    check('%s: the polls add no nonlocal loop, no switch' % h, 'nonlocal:' not in t and 'goto nonlocal' not in t)
 print('FAIL: %s' % FAILS if FAILS else 'all ok')
 sys.exit(1 if FAILS else 0)

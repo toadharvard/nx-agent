@@ -63,6 +63,7 @@ extern "C" u32 fnvl_thread_main(u32 eip, u32 sp, u32 teb)
     struct cpu cpu;
     cpu_reset(&cpu, sp, teb);
     c = &cpu; *fnvl_host_tls_slot() = c;
+    fnvnx_susp_attach(c, &c->susp, &c->ra);
     eax = ecx = edx = ebx = ebp = esi = edi = 0; esp = sp;
     fp_set(0, 0);
     M32(sp) = FNVL_SENT;
@@ -70,6 +71,7 @@ extern "C" u32 fnvl_thread_main(u32 eip, u32 sp, u32 teb)
     do { u32 t = c->ra; REGS(); fnvl_dispatch(t)(); REGS(); } while (!(c->ra == FNVL_SENT && esp > sp));
     u32 r = eax;
     fp_set(0, 0);
+    fnvnx_susp_detach(c);
     *fnvl_host_tls_slot() = 0;
     return r;
 }
@@ -79,9 +81,10 @@ extern "C" void fnvl_attach_main(void *mem, u32 sp, u32 teb)
     struct cpu *p = (struct cpu *)mem;
     cpu_reset(p, sp, teb);
     *fnvl_host_tls_slot() = p;
+    fnvnx_susp_attach(p, &p->susp, &p->ra);
 }
 
-extern "C" void fnvl_detach_main(void) { *fnvl_host_tls_slot() = 0; }
+extern "C" void fnvl_detach_main(void) { fnvnx_susp_detach(*fnvl_host_tls_slot()); *fnvl_host_tls_slot() = 0; }
 
 /* esp and TEB of the guest thread this host thread carries: during an import call, the esp of the call (it points at the return address) */
 extern "C" void fnvl_current_main(u32 *sp, u32 *teb) { struct cpu *p = *fnvl_host_tls_slot(); *sp = p->r[4]; *teb = p->teb; }

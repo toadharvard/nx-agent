@@ -478,7 +478,6 @@ def _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, drop, poll):
         cx.xdp = cx.xd.get(a, 0)
         n0 = len(cx.L)
         if a in poll:       # a suspension point: the poll is the first emission of the instruction (inside fix_lines' range: the x87 hooks extend its SYNC_OUT / SYNC_IN)
-            cx.nonlocal_ = True
             em('FNVL_POLL(SYNC_OUT;,SYNC_IN;,0x%xu)' % a)
         cx.b0 = ins.opcode[0]
         cx.modrm = ins.modrm
@@ -520,7 +519,7 @@ def _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, drop, poll):
             cx.P.insert(0, ('lift2', 'lift2:entry goto'))
             cx.PX[:] = [(i + 1, k, d) for i, k, d in cx.PX]
     if cx.nonlocal_:
-        labs = sorted(set(x for x in cx.callrets + owns + list(tables_all(tables)) + taken + sorted(cx.raises | bad) + sorted(poll) if x in insns or x in bad))
+        labs = sorted(set(x for x in cx.callrets + owns + list(tables_all(tables)) + taken + sorted(cx.raises | bad) if x in insns or x in bad))
         cases = ' '.join('case 0x%xu: %sgoto %s;' % (x, xc.case_pre(cx, x), cx.lab(x)) for x in labs)
         em('after_tail: ; if(esp>E){ SYNC_OUT; return; }')
         em('nonlocal: ; for(;;){ u32 t=c->ra; if(esp>E){ SYNC_OUT; return; } switch(t){ %s default: break; } SYNC_OUT; REGS(); fnvl_dispatch(t)(); REGS(); SYNC_IN; }' % cases)

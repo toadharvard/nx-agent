@@ -223,9 +223,11 @@ template<u32 PC, class T> static inline __attribute__((always_inline)) bool lk_c
 #define FNVL_RETP(r) FNVL_RET(SYNC_OUT;,r)
 /* The suspension poll (the lifter's safepoint rule, fnvlift/flaglive.py poll_set): at every back-edge target and every function entry, first thing at the label. c->susp is written only by the platform and
    read here with a relaxed atomic load (a plain load of a loop without stores may be hoisted out of the loop); non-zero: the guest state is flushed, fnvnx_safepoint (L5, C linkage) returns the eip to
-   continue at and stores it in c->ra; the same pc continues in line, another one leaves through the non-local loop. SO/SI are the visible hooks of the other transfer forms (the static x87 path extends them). */
+   continue at and stores it in c->ra; the same pc continues in line; another one leaves as every transfer does (FNVL_RET: c->ra = the target, SYNC_OUT done, return) and the caller's `c->ra != next` test or fnvnx_lift_enter's loop dispatches it. So a poll needs no non-local block, switch case or label. SO/SI are the visible hooks of the other transfer forms (the static x87 path extends them). */
 extern "C" u32 fnvnx_safepoint(void *c, u32 pc);
-#define FNVL_POLL(SO,SI,h) if(__builtin_expect(__atomic_load_n(&c->susp,__ATOMIC_RELAXED),0)){ SO REGS(); if(fnvnx_safepoint(c,h)!=h){ REGS(); SI goto nonlocal; } REGS(); SI }
+extern "C" void fnvnx_susp_attach(void *cpu, volatile u32 *susp, u32 *ra);   /* platform/win32/thread.cpp: the thread's suspension word and ra, for the life of its frame */
+extern "C" void fnvnx_susp_detach(void *cpu);
+#define FNVL_POLL(SO,SI,h) if(__builtin_expect(__atomic_load_n(&c->susp,__ATOMIC_RELAXED),0)){ SO REGS(); if(fnvnx_safepoint(c,h)!=h){ REGS(); return; } REGS(); SI }
 #define FNVL_POLLP(h) FNVL_POLL(SYNC_OUT;,SYNC_IN;,h)
 /* `.fnvl.fsw` (the same 12-byte layout), an x87 status instruction (FSTSW, FNSTENV, FNSAVE): the range is the store of the status word, one instruction, and nothing else. FSW_ST16 / FSW_ST32 store it as `dmb ishst; str`
    (a status-word store needs no more than TSO: every earlier guest load is an acquire, so it is ordered before the store, and `dmb ishst` orders the earlier stores; a plain str also takes an unaligned

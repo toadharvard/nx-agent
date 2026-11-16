@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 import capstone, z3
 from capstone import x86 as X
 from fnvlift import core
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'fnvlift', 'tests')); import _inputs; _inputs.configure_declared()      # the declared-machine inputs, as the lifter's program passes them
 from proof import lift_dsl as f_dsl
 core.set_emit(f_dsl.emit_form)
 from fnvlift.dsl import to_smt

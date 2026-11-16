@@ -5,6 +5,7 @@ import os, re, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import capstone
 from fnvlift import core
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'fnvlift', 'tests')); import _inputs; _inputs.configure_declared()      # the declared-machine inputs, as the lifter's program passes them
 from proof import lift_dsl as f_dsl
 from proof import forms
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
