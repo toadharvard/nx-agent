@@ -1592,3 +1592,10 @@ Paused: w3b, w4, farm; no other work.
     - w6 is archived. Its prepared takeover is mechanical: checkout of w6-root 8faa8175d's L6 paths, then recipe check.
 - workers: none active (w6 and w7 archived; they wait on other layers).
 - bottleneck: L1 names the trunk head with the w28 recipe forms and the lib/sha256, shim, hostabi and bootrt roots; base3 (L3a); lift/rt (L3a).
+
+## 2026-11-16 05:55Z
+- L4 render/d3d9 file-escape report: closed on the L6 head w6-root 8faa8175d. Every generator reads only argument paths that are declared mounts (/uses D9_SPEC; /in d3d9types.h, d3d9.h, d3d9caps.h and verify/wine_fixme.tsv are stage inputs). L4 had measured L6A's older render copy, decb62ead.
+- Two render lineages (L4, rule 3): L6 8faa8175d and L6A decb62ead, neither containing the other (merge base 41a8855d4, 18 L6A commits). L6 produces the one head: w8 `session_01KmtZKQqu3rk1pJjXfu9dk9`, claude/fnv-l6-render-w8-join, doing.
+    - It is a real three-way merge. Paths resolve by owner: gl4, gl4shim and backend take L6A's side; d3d9, shaders and bridgefacts take L6's; nxgpu keeps both lines' hunks.
+    - recipe check runs on every render root, and gl4 reports its sha.
+- bottleneck: w8's joined head (for L4), then the L1 cand4 head for the rebase. d3d9exports waits on lift/rt (L3a). 1 of 4 workers busy.
