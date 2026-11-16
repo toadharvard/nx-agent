@@ -1495,7 +1495,7 @@
     "L3b:A-F2IHELPERS"
    ],
    "status": "REMOVE",
-   "removed_by": "planned (after the first frame): isla over the host x86_64 object of each helper of the derived universe, under the pinned Sail x86 model, once the SSE FP model gaps (cvttsd2si, ucomisd and the rest) are patched from the pinned ACL2 source (owner L3b); no CBMC or ESBMC. The host-to-aarch64 transfer of that proof holds only under four static checks over the helper universe (the derived Form->helper call table, not a list): (1) fixed-width integer types only; (2) no implementation-defined or undefined behaviour on the path; (3) -ffp-contract=off and FLT_EVAL_METHOD 0 in both compiles (host x86_64 and aarch64 guest); (4) no target builtins",
+   "removed_by": "planned: after the first frame, isla over the host x86_64 object of each helper of the derived universe, under the pinned Sail x86 model, once the SSE FP model gaps (cvttsd2si, ucomisd and the rest) are patched from the pinned ACL2 source (owner L3b); no CBMC or ESBMC. The host-to-aarch64 transfer of that proof holds only under four static checks over the helper universe (the derived Form->helper call table, not a list): (1) fixed-width integer types only; (2) no implementation-defined or undefined behaviour on the path; (3) -ffp-contract=off and FLT_EVAL_METHOD 0 in both compiles (host x86_64 and aarch64 guest); (4) no target builtins",
    "owner": "L3b"
   },
   {
