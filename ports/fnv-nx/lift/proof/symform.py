@@ -277,6 +277,7 @@ def normalize(form, env=None):
     S = Subst(e); g = copy.copy(form)
     g.regs = [(r, S(v), None if w is None else S(w)) for r, v, w in form.regs]; g.flags = [(f, S(v), None if w is None else S(w)) for f, v, w in form.flags]
     g.stores = [(S(a), S(v)) for a, v in form.stores]; g.swhen = {i: S(w) for i, w in form.swhen.items()}; g.faults = [(k, c) for k, c in ((k, S(c)) for k, c in form.faults) if not (c.op == 'const' and not c.x)];      # a fault row whose condition folded to 0 never fires (a vector row of a shape at another vector)
+    g.domain = [c for c in (S(c) for c in form.domain) if not (c.op == 'const' and c.x)]      # a condition that folded to true holds at this instance and is not part of its Form
     g.undef = dict(form.undef); g.uwhen = {f: S(w) for f, w in form.uwhen.items()}      # the `when` of an undefined flag (DEF0) and the x87 / SIMD effects hold nodes too
     g.xs = [(k, i, tuple(S(x) for x in e) if k == 'fptr' else S(e)) for k, i, e in form.xs]; g.mmw = []
     g.eip = S(form.eip); g.flo = None if form.flo is None else S(form.flo); g.pend = {}
@@ -284,12 +285,16 @@ def normalize(form, env=None):
         a = S(form.addr); g.addr = a.x if a.op == 'const' else a
     return g
 
+class OutsideDomain(AssertionError): pass
+
 def canon(form): return normalize(form).serialize()
 
 def instantiate(sf, raw, addr):
     """the symbolic Form with the field bytes of the instruction `raw` and its address substituted"""
     env = dict(field_values(raw, sf.fields)); env['eip'] = addr
-    return normalize(sf.form, env)
+    g = normalize(sf.form, env)
+    if any(c.op == 'const' for c in g.domain): raise OutsideDomain('%s: the field values of %s are outside the domain of the shape (the concrete builder has no Form there)' % (sf.key, raw.hex() if isinstance(raw, (bytes, bytearray)) else raw))
+    return g
 
 def link_ok(sf, raw, addr):
     """the certificate's link for ONE instruction: canon(forms.build(i, addr)) == canon(symbuild(shape(i))[fields := i, eip := addr]).  -> (equal, why)"""

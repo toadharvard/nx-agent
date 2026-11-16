@@ -401,6 +401,7 @@ class Form:
         s.eip = C(addr + size, 32); s.pend = {}; s.flo = None
         s.mmw = []        # MMX register writes of a builder, (N, 64-bit value): proof/forms.build hands them to mmx() once the handler is done
         s.fxm = False     # fault_xm(): on the SIMD floating-point exception fault the Form's MXCSR effect (the exception flags) still happens, every other effect does not (SDM Vol 1 11.5.2, Vol 3 6.15)
+        s.domain = []     # 1-bit nodes over the fields that hold on the values at which the shape has a Form (a field value outside it has no Form: the concrete builder asserts there); empty for a concrete Form
         s.xs = []         # x87 / MMX / SSE state effects, in order: (kind, index or None, node, ...); the later effect on one target wins (kinds: fr ftop ftag fsw fptr xmm mxcsr)
     def cur(s, name): return s.pend.get(name, V(name, 32))      # pending value, only for composing partial-register writes
     def reg(s, name, v, when=None): assert v.w == 32; s.regs.append((name, v, when)); s.pend[name] = v
@@ -425,6 +426,7 @@ class Form:
     def store(s, addr, v, when=None):
         if when is not None: assert when.w == 1; s.swhen[len(s.stores)] = when
         s.stores.append((addr, v))
+    def require(s, cond): assert cond.w == 1; s.domain.append(cond)
     def fault(s, code, cond): assert cond.w == 1; s.faults.append((code, cond))
     def fault_xm(s, cond):
         """the SIMD floating-point exception (#XM, fault kind XM; Wine 9.0 fpe_handler STATUS_FLOAT_MULTIPLE_TRAPS) when `cond` (an exception flag set whose MXCSR mask bit is clear).
@@ -471,6 +473,7 @@ class Form:
         for f in sorted(s.undef): out.append('undef ' + f + (' when n%d' % go(s.uwhen[f]) if f in s.uwhen else ''))
         for i, (a, v) in enumerate(s.stores): out.append('store n%d n%d' % (go(a), go(v)) + (' when n%d' % go(s.swhen[i]) if i in s.swhen else ''))
         for k, c in s.faults: out.append('fault %d n%d' % (k, go(c)))
+        for c in s.domain: out.append('domain n%d' % go(c))
         if s.fxm: out.append('fault_xm')
         if s.flo is not None: out.append('flo n%d' % go(s.flo))
         for k, i, e in s.xs: out.append('x %s %s %s' % (k, '-' if i is None else i, ' '.join('n%d' % go(x) for x in (e if k == 'fptr' else (e,)))))

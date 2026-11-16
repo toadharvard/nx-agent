@@ -39,13 +39,18 @@ def int_(c):
         _other(c, 'int 0x%x' % v, C(1, 1))
         return
     # a SHAPE: the vector is the symbolic immediate byte.  One row per vector of the record, selected by v == k (the mux of forms_simd.selidx): each gate its trap row, and the access violation of
-    # other_vectors for every vector that is neither a gate nor excluded.  An excluded vector is undecided (no body): the concrete builder has no Form there, so no instance is ever linked at it.
+    # other_vectors for every vector that is neither a gate nor excluded.  An excluded vector is undecided: the Form carries the domain v not in int_ring3.excluded, and instantiating it there raises OutsideDomain (red at lift, as the concrete builder asserts).
     v = C(v, 8)
     for k, kind in INT_KIND.items(): c.F.fault(kind, eq(v, C(k, 8)))
     named = [eq(v, C(k, 8)) for k in sorted(set(INT_KIND) | set(x86sys.INT_EXCLUDED))]
     hit = named[0]
     for n in named[1:]: hit = hit | n
     _other(c, 'int n', ~hit)
+    exc = [eq(v, C(k, 8)) for k in sorted(x86sys.INT_EXCLUDED)]      # the domain: the vector is not in the record's int_ring3.excluded (a vector there is undecided on the declared OS: the instance is red at lift, as the concrete path asserts)
+    if exc:
+        e = exc[0]
+        for n in exc[1:]: e = e | n
+        c.F.require(~e)
 def _other(c, what, cond):
     o = x86sys.INT_OTHER                                  # every other vector: the record's other_vectors row is the access violation {0, 0xffffffff} at the int (error code vector*8+2)
     assert (o['fault'] == '#GP' and o['exception_code'] == int(_FT['AV']['status'], 16) and o['flags'] == 0 and o['eip_advance'] == 0 and o['address'] == 'the int instruction'

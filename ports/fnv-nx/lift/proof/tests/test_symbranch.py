@@ -29,6 +29,13 @@ class T(unittest.TestCase):
             self.assertTrue(ok, (v, why))
         self.assertEqual(n, 255)
 
+    def test_excluded_vector_is_red_at_instantiation(self):
+        from fnvlift import x86sys
+        sf = symform.symbuild('cd00/1.1.0.0')
+        self.assertTrue(x86sys.INT_EXCLUDED)
+        for v in x86sys.INT_EXCLUDED:
+            with self.assertRaises(symform.OutsideDomain): symform.instantiate(sf, bytes([0xcd, v]), 0x401000)
+
     def test_enter_has_no_shape_form(self):
         with self.assertRaises(symform.SymbolicBranch): symform.symbuild('c8000000/1.3.0.0')
 
