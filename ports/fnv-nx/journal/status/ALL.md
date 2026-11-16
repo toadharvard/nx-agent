@@ -12,6 +12,14 @@ Updated 2026-11-14 23:30Z (path plan). Older sections below are from 2026-11-12 
 - Goal path: product roots -> lifted packs as roots -> ELF -> boot -> WinMain -> menu -> first frame (GL in the emulator).
 
 
+**2026-11-16 08:15Z (orchestrator).** Trunk fac693694. cand4 c35a5e6a is red; L1 w15 is finding the root cause. The owner cut off-path work at 07:40-07:50Z:
+- no Windows media, no PDF reader, no XED (integ 69656d214, 3bd5022ed);
+- #UD sites are lowered to a synchronous #UD, with no certificates;
+- import_escape/winmd dropped, and reach uses the superset (every pointer argument escapes);
+- L5 w38 archived; x86sys reached rows from w35 (WDK 7.1).
+
+Open requests: console_cpu.fpcr row (L1, cand5); L1 to review L3b's recipe python-exec fix. L3b's lift/rt red was from a stale render/ copy (L6: take it from cand4). L4 waits on L1 cand5 and L3a dispatch.c.
+
 **2026-11-16 06:15Z (orchestrator).** Trunk fac693694; cand4 34e4aa5ad is in progress. Sources: the CORE-MATH root platform/coremath is in (mirror tools/core-math 1e8252b65, 7 objects green). Rulings:
 - b7b6f0df0: x87 transcendentals are CR binary64 by OWNER 8, computed by CORE-MATH.
 - 5009d67dd: an undecided rounding in cr_atan2 goes to MPFR at 53 bits; no trap.
