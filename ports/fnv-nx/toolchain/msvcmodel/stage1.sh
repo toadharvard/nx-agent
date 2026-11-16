@@ -10,6 +10,7 @@ set -euo pipefail
 GCC_TARBALL=/in/4                               # input 4: {external gcc-src, path gcc-13.3.0.tar.xz}, the GNU tarball
 MSVC_PATCH=/in/2                                # input 2: toolchain/msvcmodel/msvcmodel.patch   (input 1 is this script)
 RECORDS=/in/3                                   # input 3: records1.sh, the stage ref of the generator `records.py stage1` (compiler configure: T ABI CPUARCH MLFLAG GCC_RT_CONF)
+PY=/usr/bin/python3.12                          # the python3 deb unpacks the interpreter as python3.12; the python3 symlink is made by its postinst, which a sandbox does not run
 SCRATCH=/scratch                                # the writable scratch directory, the same absolute path on every run
 WORK=$SCRATCH/w; PREFIX=$SCRATCH/prefix         # the absolute build paths
 OUT_DIR=/out
@@ -54,7 +55,7 @@ patch -s -d "$SRC" -p1 < "$MSVC_PATCH"
 # types), a different mangled type for every int32_t parameter. glibc-stdint.h is the target stdint macro set the linux compiler
 # had (int32 = int, int_fast8 = signed char, as Visual C++'s <stdint.h>); newlib's _default_types.h takes __INT32_TYPE__ from the
 # compiler. (No stdint macro file at all crashes aarch64-sve init_builtins.)
-python3 -I - "$SRC/gcc/config.gcc" <<'EOF2'
+"$PY" -I - "$SRC/gcc/config.gcc" <<'EOF2'
 import re, sys
 p = sys.argv[1]; s = open(p).read()
 s2, n = re.subn(r'(aarch64\*-\*-elf \| [^\n]*\n(?:[^\n]*\n){0,3}?\ttm_file="\$\{tm_file\} elfos.h) newlib-stdint.h"', r'\1 glibc-stdint.h"', s, count=1)
@@ -62,7 +63,7 @@ assert n == 1, "aarch64 newlib-stdint.h line not found"
 open(p, "w").write(s2)
 EOF2
 # The multilib table: the one variant the guest uses, built with the code model's selector (MLIB1: the defaults of the compiler are the guest record).
-python3 -I - "$SRC/gcc/config/aarch64/t-aarch64" "$MLFLAG" <<'EOF3'
+"$PY" -I - "$SRC/gcc/config/aarch64/t-aarch64" "$MLFLAG" <<'EOF3'
 import re, sys
 p, fl = sys.argv[1], [f[1:] for f in sys.argv[2].split()]   # fPIC
 names = {"fPIC": "pic"}

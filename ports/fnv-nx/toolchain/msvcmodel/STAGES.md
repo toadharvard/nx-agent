@@ -51,3 +51,6 @@ the newlib tarball, the two autotools tarballs and the devkitPro buildscripts tr
 
 ## Ownership
 The sandbox maps the step to an unprivileged root, so a chown to the tarball's uid fails. Every extraction of a source tarball is `tar --no-same-owner -x...` and every tree copy is `cp -a --no-preserve=ownership` (one rule for both scripts: files are owned by the step's user, as `/out` expects).
+
+## Interpreter
+The debs are unpacked, not installed: the `/usr/bin/python3` symlink comes from the deb's postinst and is absent. The scripts call the interpreter the deb ships, `/usr/bin/python3.12` (Ubuntu 24.04's python3 closure, pinned in env.json), as `$PY`.

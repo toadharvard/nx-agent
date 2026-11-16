@@ -20,6 +20,7 @@ NEWLIB_TARBALL=/in/12
 AUTOCONF_TARBALL=/in/13   # the autotools newlib's own generated files state (configure: Autoconf 2.69, Makefile.in: automake 1.15.1)
 AUTOMAKE_TARBALL=/in/14
 BS=/in/15                              # devkitPro/buildscripts at its pinned commit: patches/newlib-$NLV-4.patch
+PY=/usr/bin/python3.12                          # the python3 deb unpacks the interpreter as python3.12; the python3 symlink is made by its postinst, which a sandbox does not run
 SCRATCH=/scratch                                  # the same absolute path as in stage 1
 WORK=$SCRATCH/w; PREFIX=$SCRATCH/prefix
 OUT_DIR=/out
@@ -43,7 +44,7 @@ BSP=$BS/patches/newlib-$NLV-4.patch
 
 # apply one -p0 patch of L5 (it names the trees of the old two-compiler build): the sections whose tree this build has
 apply_p0() {
-  python3 -I - "$1" <<'EOF' | patch -s -p0 -d "$W"
+  "$PY" -I - "$1" <<'EOF' | patch -s -p0 -d "$W"
 import os, re, sys
 W = os.environ["W"]
 secs = re.split(r"(?m)^(?=--- )", open(sys.argv[1]).read())
@@ -61,7 +62,7 @@ export W
   apply_p0 "$P_X19"
   apply_p0 "$P_NOSIZED"
   # CFG-LINK: every runtime subdir's generated configure answers its link tests by a static link (see the libs step)
-  for d in "${CFG_SUBDIRS[@]}"; do python3 -I "$CFG_LINK_PY" patch "$SRC/$d/configure"; done
+  for d in "${CFG_SUBDIRS[@]}"; do "$PY" -I "$CFG_LINK_PY" patch "$SRC/$d/configure"; done
   # NL-LDBL (newlib-guest.patch): configure and Makefile.in are regenerated with the autotools the tarball's files state. Proof that
   # the tooling is the right one: on the pristine tarball tree the regeneration reproduces its configure and Makefile.in byte for byte.
   AT=$W/autotools
@@ -147,7 +148,7 @@ printf '*lib:\n%%{!shared:%%{g*:-lg} %%{!p:%%{!pg:--start-group -lc -lsysbase --
   # Rule CFG-LINK (toolchain/gcc/cfg_link.py, recorded as guest_compiler.json runtime_configure_patch). The configure scripts of the runtime
   # subdirs (patched in the unpack step) answer every link test by a static link: the test compiles, and the linker's own archive closure
   # (ld -r over the driver's -### link line) leaves only linker-script and product-protocol symbols undefined.
-  export PYTHON_CFG_LINK="python3 -I $CFG_LINK_PY"
+  export PYTHON_CFG_LINK=""$PY" -I $CFG_LINK_PY"
   export FNVNX_CFG_NM=$P/bin/$T-nm FNVNX_CFG_LD=$P/bin/$T-ld FNVNX_CFG_EMUL=aarch64elf${ABI#ilp}
   export FNVNX_CFG_GUEST_LD=$CFG_GUEST_LD FNVNX_CFG_PROTOCOL_SRC=$CFG_PROTOCOL_SRC FNVNX_CFG_CACHE=$W/cfg-cache
   note "target libraries: make -C b-gcc CFLAGS_FOR_TARGET='$TLC' CXXFLAGS_FOR_TARGET='$TLCXX'"
@@ -155,7 +156,7 @@ printf '*lib:\n%%{!shared:%%{g*:-lg} %%{!p:%%{!pg:--start-group -lc -lsysbase --
   make -C b-gcc install CFLAGS_FOR_TARGET="$TLC" CXXFLAGS_FOR_TARGET="$TLCXX" > install-libs.log 2>&1
   # The record of what the configure computed under CFG-LINK: the ac_cv_func_* / ac_cv_search_* values of each multilib's config.log (the
   # cache-variable section). The multilibs must agree; the MANIFEST carries it as cfg_func.
-  python3 -I - "$W/b-gcc/$T" "$P/CFG-FUNC.json" <<'EOF5'
+  "$PY" -I - "$W/b-gcc/$T" "$P/CFG-FUNC.json" <<'EOF5'
 import json, re, sys
 base, out = sys.argv[1:3]
 def cache(path):
@@ -204,7 +205,7 @@ done < <(find "$P/bin" "$P/libexec" -type f)
 # this tree is the stage key of the step that wrote it (the sandbox's content key).
 PLUGLIST=$W/plugins.tsv; : > "$PLUGLIST"
 i=0; for n in "${PLUGIN_ORDER[@]}"; do eval "printf '%s\\t%s\\t%s\\n' \"\$n\" \"\$(sha256sum \"\${PLUGIN_SO[$i]}\" | cut -d' ' -f1)\" \"\${PLUGIN_ARGV_$n[*]}\"" >> "$PLUGLIST"; i=$((i+1)); done
-python3 -I - "$P" "$T" "$V" "$(sha256sum "$GCC_TARBALL" | cut -d' ' -f1)" "$(sha256sum "$MSVC_PATCH" | cut -d' ' -f1)" "$MLFLAG" "$TLC" "$TLCXX" "$CONF" "$PLUGLIST" "$P/bin/$T-gcc" <<'EOF'
+"$PY" -I - "$P" "$T" "$V" "$(sha256sum "$GCC_TARBALL" | cut -d' ' -f1)" "$(sha256sum "$MSVC_PATCH" | cut -d' ' -f1)" "$MLFLAG" "$TLC" "$TLCXX" "$CONF" "$PLUGLIST" "$P/bin/$T-gcc" <<'EOF'
 import sys, os, json, hashlib, subprocess
 P, T, V, SHA, PATCH_SHA, ML, TLC, TLCXX, CONF, PLUGLIST, GCC = sys.argv[1:12]
 h = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()
