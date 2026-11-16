@@ -663,3 +663,6 @@ After the first frame:
   - ENTRY1-ATOMIC misses the C front end (dispatch.c `__atomic_store`). Both go to w2, ahead of the test_plugins fixtures.
 - bottleneck: COMPILER-STAGE recipe path gcc1 green (w3), then DECLTYPE-REF and ENTRY1-ATOMIC-C (w2). They block lift/rt and the platform root. render/gl4's ld also waits on the recipe-path toolchain root (w3).
 - 2026-11-16 04:05Z: L1 ruling: the FNVNX_EXPORT decltype sites (lift/rt msvcrt_ci and msvcrt_eh) are closed by the macro. w28 makes it a relocated address of the declared function, and the writer does not change. The writer-side asmname resolution is withdrawn. w2's item 1 narrows to DECLTYPE-PLUGINSYM: the writer/reader handoff for fnvnx_dispatch at platform backend.cpp:163.
+- 2026-11-16 04:10Z: L3a reports that the decltype error at lift/rt msvcrt_ci.cc:69 and msvcrt_eh.cc:530 points to the end of the TU and names no symbol. It is absent on 84f0883e and present from cand4b on. To w2, first under item 1:
+  - every decltype error names the symbol and the referencing location; the commit goes straight to w8;
+  - then a rebuild with L1 w28 08109b9ce (the FNVNX_EXPORT `&symbol` form). If still red, w2 closes the cand4b gap as a class.
