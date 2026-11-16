@@ -1370,3 +1370,7 @@ Paused: w3b, w4, farm; no other work.
 - 01:20Z L1: bridgefacts/d3d9 is L6's. w6-root dfcdc9f67 is the cand4 render candidate; it enters after cand3b merges and w28 rebases onto it.
     - w6 (doing): d3d9_structs.py:54 gets the include directory as a stage argument.
     - Also rule 5: the BASE type-size table restates DATAMODEL, so it is derived from the one DATAMODEL record plus the shim typedefs, with pack read from the headers.
+- 01:23Z w6-root 4924ef828: d3d9_structs gets its include directory as a stage argument, and the pack rule is read from the headers' #pragma pack regions.
+    - D9_SPEC (71cb85a7…) and the d9bridge rows are byte-identical; d3d9total 332/332; test 45/45.
+    - abspath: 0 in render and bridgefacts. The 7 findings left are contract/l2sections.py:22 (w28) and lift x3, an old copy that cand4 replaces from L3a.
+    - Blocked, owner L2: BASE, the type-size table, needs a machine-typed `types` section in DATAMODEL.json; it is prose only today. Asked of L2.
