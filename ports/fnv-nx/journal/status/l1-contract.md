@@ -2960,3 +2960,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
     - bridgefacts 6/1 and render 1/1 (L6, possibly a stale copy).
   - S29's test-kind check is already judged on w28-c5.
 - w28 queue: per-root declared and Wine tables; the root_class for no-C++ guest roots; modules.py from declared_dlls; the reached stage.
+- L6 rechecked b80203aca: 0 bare or relative sibling imports in render/ and bridgefacts/. The 7 at w28-c5 come from its stale copy. cand5 takes render/ and bridgefacts/ whole from b80203aca.
