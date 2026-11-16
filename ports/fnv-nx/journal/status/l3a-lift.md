@@ -1392,7 +1392,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 
 ## 2026-11-16 03:30: fpchost closed (w13 c5ff8fed7)
 - lift/proof/fpchost keeps libfpchost.so and its exports; it is recipe-green. fpcuniverse.py and the HELPERS output are deleted: L3b's lift/proof/helpercalls.py is the one helper universe.
-- No 2^32 compare step, because orchestrator a172a44b7 sets isla for every width. L3b's request for -g in lift/rt is declined: check 0 needs no width under the ruling ("every helpercalls helper is under ASM-329 or rcpcert"), and -g would rekey every product stage downstream.
+- No 2^32 compare step, because orchestrator a172a44b7 sets isla for every width. L3b's request for -g in lift/rt is declined: check 0 needs no width under the ruling (every helpercalls helper is under the Form-helper REMOVE record of a172a44b7 or under rcpcert), and -g would rekey every product stage downstream.
 - bottleneck: L2's K2 pin; pcsrc red (w7 RULE T).
 
 ## 2026-11-16 03:35: base3 d3c287860, 55/55 valid; rcpgen green
@@ -1606,3 +1606,25 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - The ASM-234 record (VirtualProtect/WriteProcessMemory/FlushInstructionCache protect sites stay OPEN until the points-to) is added as REMOVE, owner L3a.
   - Left for others: prove.py (L3b) and ASM-617/619/621 (L6).
 - bottleneck: the L2 recipe-path pin; the universe root recount (w7); the farm-2 runs.
+
+## 2026-11-16 05:38 — universe = closure of property roots; decomp roots deleted
+- w7 recount by property (udreach/f5d49d6fa @87d6623). Exe:
+  - 67,371 roots;
+  - 3,438,510 of 3,612,804 instructions reached;
+  - 550,048 bytes (4.6 %) unreached, all in 2,604 decomp-only entries. Those have 0 relocated words and 0 pcsrc rows into them, and 105 gap sites.
+  The small images have 4-6 unreached bytes each, in 1 tail entry.
+- Ruled:
+  - The universe is the property-root closure. The decomp list is no root source; residual soundness is ASM-012, as for every non-entry address.
+  - The relocation targets that are not decoded instruction starts (exe 1,404; small images 17/27/20/14/12) are decoded as may-entries, overlap allowed, and none is exempted as data.
+- w7 (doing): ranges/entries become that closure, and the decomp root input is deleted. Then recompute and report to L3b.
+- w8: L6 render head d98bb7faa into base3 (it clears ASM-617/619/621).
+- bottleneck: the L2 recipe-path pin; the w7 universe recompute; the farm-2 runs.
+
+## 2026-11-16 05:45 — universe rule refined: roots by value occurrence; one engine
+- Ruled to w7:
+  - A relocation target is a root only through a value occurrence: an imm operand, a lea displacement or a relocated data word. A target addressed only as a memory-operand displacement is not a root, and that is refinement X, which is sound and kept.
+  - R and DD are kept only if they are the same kind of fact; otherwise they are deleted.
+  - entries_on_data > 0 by rule goes to L1 with the sites.
+  - The exe moves to the property-rooted modlift engine. The exe decomp engine, funcsfacts.py and the funcs.tsv stage are deleted, together with every consumer of the decomp ranges, in one commit.
+- w7 (doing): the 5 small images, then the exe (farm 2 if it takes more than 10 min).
+- bottleneck: the L2 recipe-path pin; the w7 universe engine; w8 assumptions gate to 0.
