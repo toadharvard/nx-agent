@@ -1543,3 +1543,16 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - The push excludes the local farm-pin commits once they are shown to be redundant with the L2 merge.
   - w7 facts2 dd2e506e9 is merged into base3, and the farm runs on base3 only.
 - bottleneck: w8 base3 push; L2 (3 lift/rt units, the toolchain host root); w7 pcsrc reclassification.
+
+## 2026-11-16 04:52 — base3 8c8d9b247: entry return, the fixed-key EH bridges, merges
+- w8 (done, claude/fnv-l3a-lift-base3 8c8d9b247, old pin 84f0883e): pushed on top of 330e873c7.
+  - Merged in: class A/B; w28 322698c53 and 08109b9ce; w13 ff086e540; w7 facts2 dd2e506e9.
+  - The fixed-key EH bridges have one definition, tools/ehkeys.py, from which impgen emits thunks I_000fffd0 / I_000fffe0. The liftgen list and the guestgen copy are deleted.
+- Counts:
+  - class A: 15 deleted;
+  - class B: 5 via fnvl_native_transfer;
+  - fnvl_native_exit: 11;
+  - fnvl_raise_resume: 2.
+- Exports in lift/rt: entry 32, data 1, func 0, plus 2 ehkeys bridge-only entries.
+- lift/rt at 8c8d9b247 is red: every unit is blocked at the plugin:fnvnx_names stage, because the cand4b plugin sources do not build against the old 84f0883e compiler headers. On the farm pin (local, the same code before the EH-bridge commit) it is 18 of 21, and the 3 reds are L2's.
+- bottleneck: the L2 recipe-path pin (it blocks every lift/rt unit on base3); L2 w2 (3 units); w7 pcsrc reclassification; the farm-2 runs on 8c8d9b247.
