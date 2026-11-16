@@ -1426,3 +1426,4 @@ Paused: w3b, w4, farm; no other work.
     - d3d9total 332/332, test 45/45, test_env_ident ok, gate_pure 83/94.
     - Next for w6: the w28 import rule, then a rebuild of every render root.
 - bottleneck: w6 import migration; L1 per-target recipe rule; w28 PURE row; farm1 sm_link; the cand4 base.
+- 02:24Z L1 accepted the per-target recipe rule as w28 item 11. `generated`, `run` and `uses` live only in the base recipe, and `units`/`include` are inherited; an identical copy in a per-target recipe is red. When the head lands, w6 deletes the copies in the smscan, pair and translator host recipes.
