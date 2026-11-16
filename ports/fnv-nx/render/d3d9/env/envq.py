@@ -122,6 +122,8 @@ def load(hdr, spec, wine, d3d9h, caps):
     global CAPS, WU, DU, MSAA_MAX, FMT, SPEC, X8, R5, X1, A2R10, SWITCH, NA, INV, NOAUTOGEN
     global KNOWN_FCC
     FN = d3dformat_enum(hdr)
+    for e, vals in json.load(open(spec))["enum_values"].items():   # the header's own enumerator values, evaluated by the C constant grammar in bridgefacts (D9_SPEC): every D3DFORMAT value (the FOURCC ones included) agrees, or the build stops
+        if e == "D3DFORMAT" and (set(vals) != set(FN) or any(FN[n] != v for n, v in vals.items())): raise SystemExit("envq: D3DFORMAT enumerators of the header disagree with D9_SPEC: %s" % sorted(n for n in set(vals) | set(FN) if vals.get(n) != FN.get(n))[:8])
     KNOWN_FCC = sorted(known_fourcc(wine))
     SWITCH = switch_formats(wine, FN)
     X8, R5, X1, A2R10 = (FN["D3DFMT_" + n] for n in ("X8R8G8B8", "R5G6B5", "X1R5G5B5", "A2R10G10B10"))

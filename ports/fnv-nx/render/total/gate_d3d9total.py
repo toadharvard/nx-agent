@@ -247,7 +247,7 @@ def enum_part(inp, work, cache):
     gen["VENDOR_FOURCC"], wine_hash = vendor_fourcc(inp, work, cache)
     # the interface table is a build output (bridgefacts D9_SPEC): the gate runs the same generator on the same tree
     specp = os.path.join(work, "d3d9_spec.json")
-    if run([sys.executable, "-s", "-B", os.path.join(inp, "bridgefacts", "d3d9", "d3d9_spec.py"), specp, os.path.join(work, "d9bridge_rows.tsv"), os.path.join(inp, "shim", "include")]).returncode:
+    if run([sys.executable, "-E", "-s", "-B", os.path.join(inp, "bridgefacts", "d3d9", "d3d9_spec.py"), specp, os.path.join(work, "d9bridge_rows.tsv"), os.path.join(inp, "shim", "include")]).returncode:
         raise Red("d3d9_spec.py failed")
     spec = json.load(open(specp))["enums"]
     names = gen["SWITCHED"] + gen["INDEXED"]

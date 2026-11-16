@@ -222,6 +222,7 @@ class Gen:
         ifaces = {n: {"base": self.ifs[n][0] or None, "slots": len(self.flat[n]), "iid": self.iids.get(n)}
                   for n in self.flat}
         return {"schema": 1, "interfaces": ifaces, "methods": methods, "structs": self.structs, "enums": self.enums,
+                "enum_values": {e: {n: self.consts[n] for n in ns} for e, ns in sorted(self.enums.items())},
                 "flags": dict(sorted(ST.FAMILIES.items())), "tables": t, "exports": EX.exports()}
 
 
