@@ -7,6 +7,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <fnvnx/cite.h>
 
 /* ---- shell32 */
 extern "C" HINSTANCE ShellExecuteA(HWND h, LPCSTR op, LPCSTR file, LPCSTR params, LPCSTR dir, INT show)
@@ -279,31 +280,24 @@ static struct steam_reg { void *cb; int id; } *g_steam_regs;
 static int g_steam_nregs, g_steam_cap;
 
 /* SteamAPI_Init, SteamAPI_IsSteamRunning and the interface accessors: env_const.tsv (ENV:M6). Init never succeeds, so
- * the pipe to the client (HSteamPipe, 0 = none) is never opened. */
-static int g_steam_pipe;
+ * there is never a connection to the client. */
 
 /* steamworks-sdk:steam_api.h#SteamAPI_Shutdown. Steamworks SDK steam_api.h / doc/api/steam_api#SteamAPI_Shutdown: "Shuts down the Steamworks API, releasing the
- * pointers and memory"; the call is valid in the uninitialised state (nothing to release). Releases the pipe to the client (none) and marks
- * the API uninitialised; the registrations belong to their objects (they unregister themselves). */
+ * pointers and memory"; the call is valid in the uninitialised state, and on the declared machine
+ * SteamAPI_Init never succeeds, so there is nothing to release; the registrations belong to their objects (they unregister themselves). */
 extern "C" void SteamAPI_Shutdown(void)
 {
-    os_lock(&g_steam_lock);
-    g_steam_pipe = 0;
-    os_unlock(&g_steam_lock);
 }
+FNVNX_CITE(SteamAPI_Shutdown, "dm:20");
 FNVNX_EXPORT("galaxywrp.dll", "SteamAPI_Shutdown", SteamAPI_Shutdown, "func");
 
 /* steamworks-sdk:steam_api.h#SteamAPI_RunCallbacks. steam_api.h / doc/api/steam_api#SteamAPI_RunCallbacks: "Dispatches callbacks and call results to all of the
- * registered listeners" - those come from the client over the pipe; without a pipe (SteamAPI_Init failed) nothing is queued, so nothing is
+ * registered listeners" - those come from the client over the pipe; without a client (SteamAPI_Init failed) nothing is queued, so nothing is
  * dispatched and no registered object is touched. */
 extern "C" void SteamAPI_RunCallbacks(void)
 {
-    os_lock(&g_steam_lock);
-    int pipe = g_steam_pipe;
-    os_unlock(&g_steam_lock);
-    if (!pipe)
-        return;
 }
+FNVNX_CITE(SteamAPI_RunCallbacks, "dm:21");
 FNVNX_EXPORT("galaxywrp.dll", "SteamAPI_RunCallbacks", SteamAPI_RunCallbacks, "func");
 
 /* steamworks-sdk:steam_api.h#SteamAPI_RegisterCallback (steam_api.h, steam_api_internal.h CCallbackBase: the Steamworks callback registry, the function the
@@ -343,11 +337,3 @@ extern "C" void SteamAPI_UnregisterCallback(void *cb)
     os_unlock(&g_steam_lock);
 }
 FNVNX_EXPORT("galaxywrp.dll", "SteamAPI_UnregisterCallback", SteamAPI_UnregisterCallback, "func");
-
-extern "C" int fnvnx_steam_callback_count(void)
-{
-    os_lock(&g_steam_lock);
-    int n = g_steam_nregs;
-    os_unlock(&g_steam_lock);
-    return n;
-}
