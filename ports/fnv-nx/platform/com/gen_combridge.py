@@ -296,8 +296,7 @@ class Gen:
 
 def main():
     spec_path, rows_path, words_path, out = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-    sys.path.insert(0, sys.argv[5])   # contract/: proto.py, the one decoder of MSVC decorated names
-    import proto
+    from contract import proto   # the one decoder of MSVC decorated names (platform declares contract in admit.json `imports`)
     spec = json.load(open(spec_path))
     os.makedirs(out, exist_ok=True)
     # the return letter of every thunk is a column of the bridge rows (bridgefacts/com/comrows.py derives it once)
@@ -443,7 +442,7 @@ template <class MP> int vslot(MP mp)
         cpp.append(f"    g_iids[{i}].iface = NXIF_{n};")
     cpp.append("}\n}   // namespace nxcom")
     cpp += chk
-    _crows, cthunks, chdr, cdecl, ccode, cinit = gen_cxx.build(sys.argv[6], proto)   # the bridge rows come from bridgefacts (COM_ROWS); the record kind's own rows are not a bridge input
+    _crows, cthunks, chdr, cdecl, ccode, cinit = gen_cxx.build(sys.argv[5], proto)   # the bridge rows come from bridgefacts (COM_ROWS); the record kind's own rows are not a bridge input
     open(os.path.join(out, "combridge_cxx.gen.h"), "w").write("\n".join(
         [HEAD, "#ifndef FNVNX_COMBRIDGE_CXX_GEN_H", "#define FNVNX_COMBRIDGE_CXX_GEN_H", "#include <stdint.h>", "#include <stddef.h>"] + chdr + ["#endif"]) + "\n")
     open(os.path.join(out, "combridge_cxx.gen.cpp"), "w").write("\n".join(

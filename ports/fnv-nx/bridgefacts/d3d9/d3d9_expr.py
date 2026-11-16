@@ -47,7 +47,7 @@ def tokens(s):
             if s[pos:].strip():
                 raise ValueError(f"bad character at {pos} in {s!r}")
             break
-        out.append(m.group(1)); pos = m.end()
+        out.append(m[1]); pos = m.end()
     return out
 
 

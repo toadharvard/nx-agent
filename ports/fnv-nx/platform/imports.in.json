@@ -12,6 +12,5 @@
   {"root": "ports/fnv-nx/bridgefacts", "output": "COM_ROWS"}
  ],
  "extra_other": [],
- "name_table": {"root": "ports/fnv-nx/bridgefacts", "path": "crt/msvcrt_names.tsv"},
  "va": {"root": "ports/fnv-nx/bridgefacts", "path": "crt/msvcrt_va.tsv"}
 }

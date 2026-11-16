@@ -122,9 +122,10 @@ handler('rcpss')(lambda c: recip(c, rcp32, True)); handler('rcpps')(lambda c: re
 handler('rsqrtss')(lambda c: recip(c, rsqrt32, True)); handler('rsqrtps')(lambda c: recip(c, rsqrt32, False))
 
 def _mxcsr_mask():
-    """MXCSR_MASK of the declared CPU: verify/cpuid_model.json `mxcsr_mask` (derived data, SDM Vol 1 11.6.6); a file without it gives no Form (no constant stands in for it)"""
-    import json, os
-    v = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'verify', 'cpuid_model.json'))).get('mxcsr_mask')
+    """MXCSR_MASK of the declared CPU: the `cpumodel` input (verify/cpuid_model.json) `mxcsr_mask` (derived data, SDM Vol 1 11.6.6); a file without it gives no Form (no constant stands in for it)"""
+    import json
+    from fnvlift import inputs
+    v = json.load(open(inputs.get('cpumodel'))).get('mxcsr_mask')
     if v is None: raise KeyError('verify/cpuid_model.json has no mxcsr_mask')
     return int(v, 16)
 @handler('ldmxcsr')

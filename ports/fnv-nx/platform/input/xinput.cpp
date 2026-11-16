@@ -10,6 +10,7 @@
 #include <xinput.h>
 #include "input.h"
 #include "../os/os.h"
+#include <fnvnx_export.h>
 #include "../include/fnvnx_clock.h"
 
 #include <stdlib.h>
@@ -219,6 +220,9 @@ static DWORD check_user(DWORD user, int any)
     return user ? ERROR_DEVICE_NOT_CONNECTED : ERROR_SUCCESS;
 }
 
+FNVNX_EXPORT("xinput1_3.dll", "XInputGetState", XInputGetState, "func");
+FNVNX_EXPORT("xinput1_4.dll", "XInputGetState", XInputGetState, "func");
+FNVNX_EXPORT("xinput9_1_0.dll", "XInputGetState", XInputGetState, "func");
 extern "C" DWORD WINAPI XInputGetState(DWORD user, XINPUT_STATE *st)
 {
     if (user >= XUSER_MAX_COUNT || !st) return ERROR_BAD_ARGUMENTS;
@@ -244,6 +248,9 @@ static void apply_rumble(void)   /* g_xlock held by nobody: reads under it, driv
     if (source()->vibrate) source()->vibrate(0, lo, hi);
 }
 
+FNVNX_EXPORT("xinput1_3.dll", "XInputSetState", XInputSetState, "func");
+FNVNX_EXPORT("xinput1_4.dll", "XInputSetState", XInputSetState, "func");
+FNVNX_EXPORT("xinput9_1_0.dll", "XInputSetState", XInputSetState, "func");
 extern "C" DWORD WINAPI XInputSetState(DWORD user, XINPUT_VIBRATION *v)
 {
     if (user >= XUSER_MAX_COUNT || !v) return ERROR_BAD_ARGUMENTS;
@@ -256,6 +263,9 @@ extern "C" DWORD WINAPI XInputSetState(DWORD user, XINPUT_VIBRATION *v)
     return ERROR_SUCCESS;
 }
 
+FNVNX_EXPORT("xinput1_3.dll", "XInputGetCapabilities", XInputGetCapabilities, "func");
+FNVNX_EXPORT("xinput1_4.dll", "XInputGetCapabilities", XInputGetCapabilities, "func");
+FNVNX_EXPORT("xinput9_1_0.dll", "XInputGetCapabilities", XInputGetCapabilities, "func");
 extern "C" DWORD WINAPI XInputGetCapabilities(DWORD user, DWORD flags, XINPUT_CAPABILITIES *c)
 {
     if (user >= XUSER_MAX_COUNT && user != XUSER_INDEX_ANY) return ERROR_BAD_ARGUMENTS;
@@ -272,6 +282,9 @@ extern "C" DWORD WINAPI XInputGetCapabilities(DWORD user, DWORD flags, XINPUT_CA
     return ERROR_SUCCESS;
 }
 
+FNVNX_EXPORT("xinput1_3.dll", "XInputEnable", XInputEnable, "func");
+FNVNX_EXPORT("xinput1_4.dll", "XInputEnable", XInputEnable, "func");
+FNVNX_EXPORT("xinput9_1_0.dll", "XInputEnable", XInputEnable, "func");
 extern "C" void WINAPI XInputEnable(BOOL enable)
 {
     os_lock(&g_xlock);
@@ -280,6 +293,9 @@ extern "C" void WINAPI XInputEnable(BOOL enable)
     apply_rumble();
 }
 
+FNVNX_EXPORT("xinput1_3.dll", "XInputGetDSoundAudioDeviceGuids", XInputGetDSoundAudioDeviceGuids, "func");
+FNVNX_EXPORT("xinput1_4.dll", "XInputGetDSoundAudioDeviceGuids", XInputGetDSoundAudioDeviceGuids, "func");
+FNVNX_EXPORT("xinput9_1_0.dll", "XInputGetDSoundAudioDeviceGuids", XInputGetDSoundAudioDeviceGuids, "func");
 extern "C" DWORD WINAPI XInputGetDSoundAudioDeviceGuids(DWORD user, GUID *render, GUID *capture)
 {
     if (user >= XUSER_MAX_COUNT || !render || !capture) return ERROR_BAD_ARGUMENTS;
@@ -289,6 +305,9 @@ extern "C" DWORD WINAPI XInputGetDSoundAudioDeviceGuids(DWORD user, GUID *render
     return ERROR_SUCCESS;
 }
 
+FNVNX_EXPORT("xinput1_3.dll", "XInputGetBatteryInformation", XInputGetBatteryInformation, "func");
+FNVNX_EXPORT("xinput1_4.dll", "XInputGetBatteryInformation", XInputGetBatteryInformation, "func");
+FNVNX_EXPORT("xinput9_1_0.dll", "XInputGetBatteryInformation", XInputGetBatteryInformation, "func");
 extern "C" DWORD WINAPI XInputGetBatteryInformation(DWORD user, BYTE devtype, XINPUT_BATTERY_INFORMATION *b)
 {
     if (user >= XUSER_MAX_COUNT || !b || devtype > BATTERY_DEVTYPE_HEADSET) return ERROR_BAD_ARGUMENTS;
@@ -298,6 +317,9 @@ extern "C" DWORD WINAPI XInputGetBatteryInformation(DWORD user, BYTE devtype, XI
     return ERROR_SUCCESS;
 }
 
+FNVNX_EXPORT("xinput1_3.dll", "XInputGetKeystroke", XInputGetKeystroke, "func");
+FNVNX_EXPORT("xinput1_4.dll", "XInputGetKeystroke", XInputGetKeystroke, "func");
+FNVNX_EXPORT("xinput9_1_0.dll", "XInputGetKeystroke", XInputGetKeystroke, "func");
 extern "C" DWORD WINAPI XInputGetKeystroke(DWORD user, DWORD reserved, XINPUT_KEYSTROKE *ks)
 {
     if (!ks || (user >= XUSER_MAX_COUNT && user != XUSER_INDEX_ANY)) return ERROR_BAD_ARGUMENTS;

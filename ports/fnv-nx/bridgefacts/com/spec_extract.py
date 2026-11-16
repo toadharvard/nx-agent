@@ -165,7 +165,7 @@ def parse_methods(body, subst=None):
     body = strip_comments(body)
     ms = []
     for m in re.finditer(r"virtual\s+([\w:\s\*]+?)\s+(?:STDMETHODCALLTYPE\s+)?(\w+)\s*\(([^)]*)\)\s*=\s*0\s*;", body):
-        ret, name, params = m.group(1).strip(), m.group(2), m.group(3)
+        ret, name, params = m[1].strip(), m[2], m[3]
         ps = []
         for k, p in enumerate(split_params(params)):
             if subst:
@@ -173,7 +173,7 @@ def parse_methods(body, subst=None):
             mm = re.match(r"^(.*?[\s\*&])(\w+)$", p)
             # a trailing identifier is the parameter name unless the whole text is one type word (unnamed `uint32_t`)
             if mm and not re.match(r"^(const\s+)?[\w:]+\s*[\*&]*$", p.strip()):
-                ctype, pname = mm.group(1).strip(), mm.group(2)
+                ctype, pname = mm[1].strip(), mm[2]
             else:
                 ctype, pname = p.strip(), "a%d" % k
             ctype = re.sub(r"\s+", " ", ctype).replace(" *", " *")
@@ -257,7 +257,7 @@ def extract(dirs):
         texts[h] = open(os.path.join(dirs[d], h)).read()
     for h, t in texts.items():
         for m in re.finditer(r"FNVNX_CALLBACK_T\((\w+),\s*(\w+),\s*\(([^)]*)\)\)", t):
-            CB[m.group(1)] = "%s(%s)" % (m.group(2), m.group(3).strip())
+            CB[m[1]] = "%s(%s)" % (m[2], m[3].strip())
     by_name = {}
     own = {}   # spec iface -> list of own methods (declaration order)
     for n, h, st, cxx, base, fam, iid, al in IFACES:

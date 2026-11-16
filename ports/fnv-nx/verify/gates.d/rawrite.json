@@ -1,0 +1,15 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "rawrite",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_rawrite.py"
+ ],
+ "result": "rawrite.json",
+ "covers": [
+  "product-guest",
+  "lifted",
+  "host-product"
+ ]
+}

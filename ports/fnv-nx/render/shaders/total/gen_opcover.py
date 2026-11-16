@@ -35,7 +35,7 @@ the same inputs are byte-equal.
 """
 import json, os, re, sys
 
-ROW = re.compile(r'^INSTRUCTION(_STATE)?\((\w+),\s*(0|"[^"]*"),\s*(\d+),\s*(\w+),\s*(\w+),\s*(\w+)\)', re.M)
+ROW = re.compile(r'^INSTRUCTION(_STATE|_UNASSIGNED)?\((\w+),\s*(?:(0|"[^"]*"),\s*)?(\d+),\s*(\w+),\s*(\w+),\s*(\w+)\)', re.M)   # INSTRUCTION_UNASSIGNED rows have no opcode_string argument: it is NULL
 
 
 def strip_comments(s):
@@ -67,7 +67,7 @@ def body_of(src, name_re):
 def load(tree):
     ints = open(os.path.join(tree, "mojoshader_internal.h")).read()
     t0 = ints.index("#if MOJOSHADER_DO_INSTRUCTION_TABLE")
-    table = [(m[2], m[3], int(m[4]), m[5], bool(m[1])) for m in ROW.finditer(ints[t0:ints.index("#undef MOJOSHADER_DO_INSTRUCTION_TABLE", t0)])]
+    table = [(m[2], m[3] or "0", int(m[4]), m[5], m[1] == "_STATE") for m in ROW.finditer(ints[t0:ints.index("#undef MOJOSHADER_DO_INSTRUCTION_TABLE", t0)])]
     msrc = open(os.path.join(tree, "mojoshader.c")).read()
     glsl = open(os.path.join(tree, "profiles", "mojoshader_profile_glsl.c")).read()
     return table, msrc, glsl
@@ -158,11 +158,11 @@ def main(argv):
         fname = "emit_GLSL_phase" if idx == 0xFFFD else "emit_GLSL_" + op
         is_empty = fname in empty_emit
         cls, covering, evid = "own", "-", "non-empty body"
-        if is_empty:
+        if ostr == "0":   # INSTRUCTION_UNASSIGNED (mojoshader_reserved.patch): no emitter exists; parse_instruction_token returns before the emitter call
+            cls, evid, fname = "c", "opcode_string 0: INSTRUCTION_UNASSIGNED, no emitter; see OUT_RESERVED", None
+        elif is_empty:
             allz = keys and all(syn.get(k, [None] * 15)[9] in ("ok", "wine-only") and syn[k][3:6] == ["0", "0", "0"] for k in keys)
-            if ostr == "0":
-                cls, evid = "c", "opcode_string 0: see OUT_RESERVED"
-            elif allz:
+            if allz:
                 cls, evid = "a", "op_syntax (%s): 0 dst 0 src 0 other in %d form(s)" % (",".join(sorted({syn[k][9] for k in keys})), len(keys))
             else:
                 cov, ev = cover(op)
@@ -172,7 +172,7 @@ def main(argv):
                 else:
                     cls, evid = "none", ev if cov else "no covering emitter"
         for k in (keys or [None]):
-            rows.append(("emit", idn(k, op), idx, op, sym(fname), cls, ",".join(sym(c) for c in covering.split(",")) if covering != "-" else "-", evid))
+            rows.append(("emit", idn(k, op), idx, op, sym(fname) if fname else "-", cls, ",".join(sym(c) for c in covering.split(",")) if covering != "-" else "-", evid))
         if args == "NULL":
             if ostr == "0":
                 acls, aev = "c", "opcode_string 0"
@@ -208,7 +208,7 @@ def main(argv):
     reserved.append(("emitter_use_sites", "instruction emitters are called only in parse_instruction_token (count of `emitter(` / `->emitter[` in mojoshader.c)", str(uses_ins_emitter)))
     reserved.append(("rows_opcode_string_0", "table rows with opcode_string 0: %d of %d; all named %s; shader_types UNKNOWN" % (len(res_rows), len(table), ",".join(res_ops)), "all" if all(r[3] == "NULL" for r in res_rows) else "NO"))
     reserved.append(("second_rejection", "(ctx->shader_type & instruction->shader_types) == 0 -> failf, MOJOSHADER_TYPE_UNKNOWN", "mojoshader.c:%d" % line_of("(ctx->shader_type & instruction->shader_types) == 0")))
-    reserved.append(("glsl_body", "emit_GLSL_RESERVED: empty (comment: fails in the state machine)", "mojoshader_profile_glsl.c:%d" % (emit["emit_GLSL_RESERVED"][1])))
+    reserved.append(("no_emitter", "the opcode_string 0 rows are INSTRUCTION_UNASSIGNED and have no emitter: no function emit_GLSL_RESERVED in the glsl profile", "absent" if "emit_GLSL_RESERVED" not in emit else "NO"))
 
     rows.sort(key=lambda r: (r[0], r[1], r[3], r[2]))
     text = "slot\tid\topnum\top\thandler\tclass\tcovering\tevidence\n" + "".join("\t".join(str(c) for c in r) + "\n" for r in rows)

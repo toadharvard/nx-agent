@@ -2,7 +2,9 @@
 """modlift.run (R3 / reloc-consistency fixed point): a cycle of (X, R) states is red (RuntimeError), never a result; a run that converges returns. _run is replaced by a scripted producer
 ONLY to feed the loop (the loop under test is modlift.run itself; no product symbol is defined here)."""
 import os, sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, '..'))      # the tool root
+sys.path.insert(0, os.path.join(HERE, '..', '..'))      # lift/: the package fnvlift (modlift imports it; the tool takes it from its stage's --lib, a test from its checkout)
 import modlift
 F = []
 def check(n, c):

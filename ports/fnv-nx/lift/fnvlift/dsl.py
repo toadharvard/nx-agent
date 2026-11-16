@@ -21,8 +21,14 @@ _I = {}
 _SERIAL = itertools.count()      # node serial numbers: assigned at construction, in construction order (a deterministic key for per-node tables)
 def mask(w): return (1 << w) - 1
 
+class SymbolicBranch(Exception):
+    """a Python-level decision (truth value, comparison, hash, int(), membership) on a DSL node: the value is a symbolic expression, so the decision has no Python answer; a builder computes with it (selidx, ite)"""
+
+
 class N:
     __slots__ = ('op', 'w', 'a', 'x', 'u')
+    def _b(s, *a): raise SymbolicBranch('a DSL node (%s, %d bits) in a Python decision' % (s.op, s.w))
+    __eq__ = __ne__ = __lt__ = __le__ = __gt__ = __ge__ = __bool__ = __int__ = __index__ = __hash__ = __contains__ = __iter__ = __len__ = _b
     def __init__(s, op, w, a, x): s.op, s.w, s.a, s.x, s.u = op, w, a, x, next(_SERIAL)
     def __add__(s, o): return bin_('add', s, o)
     def __radd__(s, o): return bin_('add', o, s)
@@ -173,8 +179,9 @@ _RCPT = {}
 def _rcp_tables():
     """the two 2048-entry tables of rt/rcptab.c, read from the file when it is the certified one (sha256 = rcptab.cert.json source_sha256, 0 mismatches)"""
     if _RCPT: return _RCPT
-    import json, os, re
-    rt = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'rt'); src = open(os.path.join(rt, 'rcptab.c'), 'rb').read(); cert = json.load(open(os.path.join(rt, 'rcptab.cert.json')))
+    import json, re
+    from . import inputs
+    src = open(inputs.get('rcptab'), 'rb').read(); cert = json.load(open(inputs.get('rcpcert')))
     if hashlib.sha256(src).hexdigest() != cert['source_sha256'] or cert['mismatches'] != 0: raise ValueError('rcptab.c is not the certified table of the reference CPU')
     t = src.decode()
     for name in ('rcp', 'rsqrt'):
@@ -395,6 +402,7 @@ class Form:
         s.eip = C(addr + size, 32); s.pend = {}; s.flo = None
         s.mmw = []        # MMX register writes of a builder, (N, 64-bit value): proof/forms.build hands them to mmx() once the handler is done
         s.fxm = False     # fault_xm(): on the SIMD floating-point exception fault the Form's MXCSR effect (the exception flags) still happens, every other effect does not (SDM Vol 1 11.5.2, Vol 3 6.15)
+        s.domain = []     # 1-bit nodes over the fields that hold on the values at which the shape has a Form (a field value outside it has no Form: the concrete builder asserts there); empty for a concrete Form
         s.xs = []         # x87 / MMX / SSE state effects, in order: (kind, index or None, node, ...); the later effect on one target wins (kinds: fr ftop ftag fsw fptr xmm mxcsr)
     def cur(s, name): return s.pend.get(name, V(name, 32))      # pending value, only for composing partial-register writes
     def reg(s, name, v, when=None): assert v.w == 32; s.regs.append((name, v, when)); s.pend[name] = v
@@ -419,6 +427,7 @@ class Form:
     def store(s, addr, v, when=None):
         if when is not None: assert when.w == 1; s.swhen[len(s.stores)] = when
         s.stores.append((addr, v))
+    def require(s, cond): assert cond.w == 1; s.domain.append(cond)
     def fault(s, code, cond): assert cond.w == 1; s.faults.append((code, cond))
     def fault_xm(s, cond):
         """the SIMD floating-point exception (#XM, fault kind XM; Wine 9.0 fpe_handler STATUS_FLOAT_MULTIPLE_TRAPS) when `cond` (an exception flag set whose MXCSR mask bit is clear).
@@ -465,6 +474,7 @@ class Form:
         for f in sorted(s.undef): out.append('undef ' + f + (' when n%d' % go(s.uwhen[f]) if f in s.uwhen else ''))
         for i, (a, v) in enumerate(s.stores): out.append('store n%d n%d' % (go(a), go(v)) + (' when n%d' % go(s.swhen[i]) if i in s.swhen else ''))
         for k, c in s.faults: out.append('fault %d n%d' % (k, go(c)))
+        for c in s.domain: out.append('domain n%d' % go(c))
         if s.fxm: out.append('fault_xm')
         if s.flo is not None: out.append('flo n%d' % go(s.flo))
         for k, i, e in s.xs: out.append('x %s %s %s' % (k, '-' if i is None else i, ' '.join('n%d' % go(x) for x in (e if k == 'fptr' else (e,)))))

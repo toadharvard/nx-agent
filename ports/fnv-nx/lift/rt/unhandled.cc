@@ -14,7 +14,6 @@ void fnvnx_win32_set_raise_backend(void (*)(u32 code, u32 flags, u32 nargs, cons
 void fnvnx_lift_raise_backend(u32 code, u32 flags, u32 nargs, const u32 *args);
 void fnvl_backend_main(u32 code, u32 flags, u32 nargs, const u32 *args) __attribute__((noinline));
 void fnvl_runtime_install(void);
-int fnvl_raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 eip, u32 sp);
 u32 fnvl_os_unhandled(u32 record, u32 context);     /* 1: continue from the CONTEXT; 0: the filter left by a non-local transfer */
 }
 extern "C" u32 fnvl_os_unhandled(u32 record, u32 context)
@@ -38,16 +37,22 @@ extern "C" u32 fnvl_os_unhandled(u32 record, u32 context)
    the CONTEXT of a system DLL frame has no counterpart here). A handler that leaves by a non-local transfer discards the native frames
    (imp.h); on a thread with no import frame the guest code simply goes on from the address it jumped to.
    fnvnx_lift_raise_backend is the AAPCS function the platform is given (fnvl_runtime_install, called from fnvnx_lift_imports_init). */
-extern "C" void fnvl_backend_main(u32 code, u32 flags, u32 nargs, const u32 *args) {
+/* the guest state of the import call in the registers: c->r[] and the parked FPCR/FPSR (imp.h) */
+extern "C" u32 fnvl_native_guest(void) {
     c = *fnvl_host_tls_slot();
-    u32 base = c->r[4], info[15];
+    u32 base = c->r[4];
     eax = c->r[0]; ecx = c->r[1]; edx = c->r[2]; ebx = c->r[3]; esp = base; ebp = c->r[5]; esi = c->r[6]; edi = c->r[7];
     { u64 a = c->hfpcr, b = c->hfpsr; __asm__ volatile("msr fpcr, %0\n msr fpsr, %1" :: "r"(a), "r"(b)); }
+    return base;
+}
+
+extern "C" void fnvl_backend_main(u32 code, u32 flags, u32 nargs, const u32 *args) {
+    u32 base = fnvl_native_guest(), info[15];
     if (nargs > 15) nargs = 15;
     for (u32 i = 0; i < nargs; i++) info[i] = args[i];
     u32 ra = M32(base);
     if (!fnvl_raise_rec(code, flags, ra, nargs, info, ra, base)) {
-        if (c->nf) __builtin_longjmp((void **)c->nf->jb, 1);
+        if (c->nf) fnvl_native_exit();
         for (;;) { u32 t = c->ra; REGS(); fnvl_dispatch(t)(); REGS(); }
     }
     { u64 a, b; __asm__ volatile("mrs %0, fpcr\n mrs %1, fpsr" : "=r"(a), "=r"(b)); c->hfpcr = (u32)a; c->hfpsr = (u32)b; a = 0; __asm__ volatile("msr fpcr, %0" :: "r"(a)); }

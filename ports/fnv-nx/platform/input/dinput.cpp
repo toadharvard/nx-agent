@@ -12,6 +12,7 @@
 
 #include "input.h"
 #include "../os/os.h"
+#include <fnvnx_export.h>
 #include "../include/fnvnx_clock.h"
 
 #include <stddef.h>
@@ -844,6 +845,7 @@ struct DInput final : IDirectInput8A {
 #include "dinput.env_const.gen.inc"   /* Device::SendForceFeedbackCommand: manifest/env_const.tsv */
 } // namespace
 
+FNVNX_EXPORT("dinput8.dll", "DirectInput8Create", DirectInput8Create, "func");
 extern "C" HRESULT WINAPI DirectInput8Create(HINSTANCE, DWORD ver, REFIID iid, LPVOID *out, LPUNKNOWN outer)
 {
     if (!out) return DIERR_INVALIDPARAM;

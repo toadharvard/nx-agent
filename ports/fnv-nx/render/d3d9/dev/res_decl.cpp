@@ -1,7 +1,9 @@
 // NxVertexDeclaration9: CreateVertexDeclaration validation and GetDeclaration. Source: Wine 9.0 d3d9 vertexdeclaration.c convert_to_wined3d_declaration + vertexdeclaration_init,
 // wined3d vertexdeclaration.c vertexdeclaration_init; HRESULTs from Wine tests device.c test_vertex_declaration_alignment / test_unused_declaration_type (Windows-validated): E_FAIL.
-// ASM-633 (verify/ASSUMPTIONS.json)
-//  D1 the array ends at the first element with Stream == 0xFF (spec decl_bytes); END must be at index <= 126 (Wine's 128-count loop), else E_FAIL.
+//  D1 the array ends at the first element with Stream == 0xFF (spec decl_bytes); END must be at index <= MAXD3DDECLLENGTH (d3d9types.h, documented: the maximum number of elements of a
+//     declaration, END excluded), else E_FAIL. Wine's loop (d3d9 vertexdeclaration.c convert_to_wined3d_declaration: `while (element++->Stream != 0xff && count++ < 128)`, E_FAIL when count == 128)
+//     accepts END up to index 126, a superset of this bound (126 >= MAXD3DDECLLENGTH = 64): every declaration that is within the documented limit passes Wine's loop too, so the HRESULT of
+//     the accepted ones is Wine's; the declarations of 65..126 elements that Wine accepts are outside the document and are refused (E_FAIL, the code of Wine's own refusal).
 //  D2 Type >= D3DDECLTYPE_UNUSED (17) = E_FAIL.  D3 for Stream < 16 (other streams are tessellator pseudo streams: no further checks): Offset must be a multiple of 4 (every type is
 //  4 bytes or larger: alignment = min(bytes, 4)), else E_FAIL; and the type must be supported by the environment (nx_env_decltype_supported, caps DeclTypes), else E_FAIL.
 //  NOT validated (Wine does not): Usage / UsageIndex / Method ranges, duplicate usages, overlapping elements. Null elements / ppDecl = D3DERR_INVALIDCALL (Windows faults).
@@ -12,8 +14,8 @@
 #include <string.h>
 
 HRESULT nx_decl_validate(const D3DVERTEXELEMENT9* e, uint32_t* n) {
-    uint32_t k = 0; while (k < 127 && e[k].Stream != 0xFF) k++;
-    if (k == 127) return E_FAIL;
+    uint32_t k = 0; while (k <= MAXD3DDECLLENGTH && e[k].Stream != 0xFF) k++;
+    if (k > MAXD3DDECLLENGTH) return E_FAIL;
     for (uint32_t i = 0; i < k; i++) {
         if (e[i].Type >= D3DDECLTYPE_UNUSED) return E_FAIL;
         if (e[i].Stream < 16 && ((e[i].Offset & 3) || !nx_env_decltype_supported(e[i].Type))) return E_FAIL;

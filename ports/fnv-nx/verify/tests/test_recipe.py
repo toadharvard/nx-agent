@@ -630,7 +630,7 @@ def main():
     fdir = SS + "/external-facts"
     facts = sorted(os.listdir(fdir)) if os.path.isdir(fdir) else []
     check("external: one fact per (commit, tree_sha256) in the store, one checkout per commit in the external cache",
-          facts == ["%s-%s.json" % (commit, thash)] and os.path.isdir(ec + "/" + commit + ".co"), (facts, os.listdir(ec)))
+          facts == ["%s-%s.json" % (commit, thash)] and os.path.isdir(recipe.ext_checkout(ec, commit)), (facts, os.listdir(ec)))
     ingests, runs = [], []
     real_ingest, real_run = recipe.cas.ingest, recipe.subprocess.run
     recipe.cas.ingest = lambda p, st, exclude=(): ingests.append(p) or real_ingest(p, st, exclude)
@@ -707,23 +707,21 @@ def main():
           [(x["symbol"], x["bind"], x["type"], x["object"]) for x in d64] == [(x["symbol"], x["bind"], x["type"], x["object"]) for x in d]
           and r64["undefined"] == u and [o["sha256"] for o in r64["objects"]] != [o["sha256"] for o in r1["objects"]], (d64, r64["undefined"]))
 
-    # --- tool-file membership: the trees of an admitted tool root (admit.json trees), one definition for the ldcheck tools and link.script
+    # --- tool-file membership: the trees of an admitted tool root (an admitted root's one tree), one definition for the ldcheck tools and link.script
     xf = {"link/guest.ld": open(os.path.join(VERIFY, "..", "link", "guest.ld")).read(), "other/x.ld": "/* under no root */\n"}
 
     def tree_errs(name, trees, rec):
         repo = os.path.join(BASE, name)
         r = make_repo(name, rec=rec, files=xf)
         am = json.load(open(os.path.join(repo, T + "verify/admit.json")))
-        am["roots"] = [x for x in am["roots"] if x["path"] != T + "link"]
-        for x in am["roots"]:
-            if x["path"] == T + "contract" and trees:
-                x["trees"] = [T + "contract", T + "link"]
+        if not trees:   # the tool root `link` is admitted (its own root, one tree) or it is not
+            am["roots"] = [x for x in am["roots"] if x["path"] != T + "link"]
         open(os.path.join(repo, T + "verify/admit.json"), "w").write(json.dumps(am))
         return recipe.check(rec, ROOT, recipe.tracked(r), recipe.load_admit(repo), None, repo)
     e1 = tree_errs("tr1", True, RECIPE)
-    check("ldcheck tools in a tree (link/ of the tool root contract), not under a root path: green", e1 == [], e1)
+    check("ldcheck tools under the admitted tool root link: green", e1 == [], e1)
     e2 = tree_errs("tr2", False, RECIPE)
-    check("ldcheck tools under no admitted root nor tree: red", any("ldcheck stage needs" in e for e in e2), e2)
+    check("ldcheck tools under no admitted root: red", any("ldcheck stage needs" in e for e in e2), e2)
     gl = T + "link/guest.ld"
     ms = mut()
     ms["link"]["script"] = gl
@@ -1042,7 +1040,7 @@ def check_tc_gate(repo, tcc, tiny):
     print("INFO gate determinism, external compiler + external include tree (2 cold + warm) %.1f s: %s" % (td, g and g["detail"]))
     check("determinism gate with the compiler as an external tree at /opt/tc and a second external: green, accepted by verdict, each fetched once",
           rc == 0 and g["universe"] == 2 == g["certified"] and accepted("determinism", BASE + "/gtc")[0] == "green"
-          and sorted(os.listdir(BASE + "/tccache/external")) == sorted([tcc, tiny, tcc + ".co", tiny + ".co"]), (g, txt))
+          and sorted(os.listdir(recipe.ext_dir(BASE + "/tccache"))) == sorted([tcc, tiny, os.path.basename(recipe.ext_checkout("", tcc)), os.path.basename(recipe.ext_checkout("", tiny))]), (g, txt))
 
 
 if __name__ == "__main__":

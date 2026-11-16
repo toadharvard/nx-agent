@@ -189,7 +189,7 @@ def main():
     A('--out', required=True); A('--facts', required=True); A('--modules', required=True); A('--lift'); A('--exe', required=True); A('--moddirs', required=True); A('--x86sys', required=True)
     a = ap.parse_args(); import pemod
     sel = json.load(open(a.x86sys))['selectors']
-    init_null = {s: (sel[s]['value'] & 0xfffc) == 0 for s in SEGS}       # an undecided selector is a KeyError: no value is assumed
+    init_null = {s: (sel[s]['value'] & 0xfffc) == 0 for s in SEGS}       # an undecided selector is a KeyError: no value is guessed
     imgs = [('exe', a.exe, None, a.facts)]
     for n, row in sorted(pemod.modules(a.modules).items()):
         path, _ = pemod.locate(n, a.modules, a.moddirs.split(':'))

@@ -28,9 +28,11 @@ SYM = {'_except_handler3': 'except_handler3', '__CxxFrameHandler': 'CxxFrameHand
        '?terminate@@YAXXZ': 'terminate', '??1type_info@@UAE@XZ': 'type_info_dtor', '_setjmp3': 'setjmp3', 'longjmp': 'longjmp', '_controlfp': 'controlfp',
        '_clearfp': 'clearfp', '_fpclass': 'fpclass', '_finite': 'finite', '_isnan': 'isnan'}
 BRIDGE = [('msvcrt.dll', n, cv, rt, ar, 'fnvl_msvcrt_' + SYM[n], 'l3') for n, cv, rt, ar in ROWS]
+# the platform's own body of the exe CRT's operator new (bridgefacts/crt/msvcrt_names.tsv: ??2@YAPAXI@Z -> c_new, platform/crt/msvcrt_exports.cpp): a bind-sym row, so the derived link takes the real
+# platform/crt objects (c_new, throw_bad_alloc, the cxx_types records) into the image; no stand-in
+BRIDGE.append(('msvcrt.dll', '??2@YAPAXI@Z', 'cdecl', 'i', 'i', 'c_new', 'sym'))
 KEY = None      # name -> import key: impgen.rows of the bridge.tsv written below (the one key rule), set by gen()
 SLOTS = {r[1]: IAT + 4 * i for i, r in enumerate(BRIDGE)}
-EH_KEYS = {0x000fffd0: 'fnvl_msvcrt_eh_nested_catch', 0x000fffe0: 'fnvl_msvcrt_eh_nested_collide'}      # rt/msvcrt.h: the runtime's own registrations
 class Fake:
     def __init__(s, code): s.d = code; s.secs = [('.text', BASE, len(code), 0, len(code))]; s.rset = set(); s.taken = []; s.base = BASE
     def bytes(s, a, n): return s.d[a - BASE:a - BASE + n]
@@ -135,6 +137,7 @@ def program():
     # ---- C++ (__CxxFrameHandler). type_info: {vtable, name, mangled}; thunk: mov eax, FuncInfo; jmp __CxxFrameHandler
     def td(n, mangled): dat(n, [0, 0] + [struct.unpack('<I', (mangled + '\0' * 8)[i:i + 4].encode())[0] for i in (0, 4)])
     td('TD_int', '.H'); td('TD_char', '.D'); td('TD_B', '.?AUB@@'); td('TD_D', '.?AUD@@')
+    dat('TD_bad_alloc', [0, 0] + [struct.unpack('<I', ('.?AVbad_alloc@std@@' + '\0' * 8)[i:i + 4].encode())[0] for i in range(0, 20, 4)])   # type_info {vtable, name, mangled}: the name the platform's record of bad_alloc carries (cxx_types.tsv)
     thunk = lambda n, fi: fn(n, 'mov eax, @%s; jmp dword ptr [@S.__CxxFrameHandler]' % fi)
     # simple type int: CT {flags 1 (simple), type_info, this_offset 0, vbase_descr -1, vbase_offset 0, size 4, copy_ctor 0}; CTA {count, CT..}; ThrowInfo {flags, destructor, custom_handler, CTA}
     dat('CT_int', [1, 'TD_int', 0, M, 0, 4, 0]); dat('CTA_int', [1, 'CT_int']); dat('TI_int', [0, 0, 0, 'CTA_int'])
@@ -182,6 +185,11 @@ def program():
     dat('CT_D', [0, 'TD_D', 0, M, 0, 16, 0]); dat('CT_B', [0, 'TD_B', 8, M, 0, 8, 'ctorB']); dat('CTA_D', [2, 'CT_D', 'CT_B']); dat('TI_D', [0, 0, 0, 'CTA_D'])
     thr_D = ('push ebp; mov ebp, esp; sub esp, 16; mov dword ptr [ebp-16], 0x11; mov dword ptr [ebp-12], 0x22; mov dword ptr [ebp-8], 0x33; mov dword ptr [ebp-4], 0x44;'
              'lea eax, [ebp-16]; mov dword ptr [@O1], eax; push @TI_D; push eax;' + THROW + EV(9) + 'mov esp, ebp; pop ebp; ret')
+    # cx8: the thrower is the platform's native operator new (c_new) with a size no allocation satisfies: the native body ends in throw_bad_alloc -> the bare _CxxThrowException under the import
+    #      entry -> the raise at the guest call site -> catch(std::bad_alloc&) two frames up (the type names compared with the platform's record), the native frames left by the entry's non-local exit.
+    #      EV1 a, EV2 b, EV3 the unwind action of b, EV4 the catch block, EV5 the continuation: TR = 0x12345 (never EV9: the call did not return)
+    chain('cx8', 'push ebp; mov ebp, esp; push 0xfffffff0; call dword ptr [@S.??2@YAPAXI@Z]; add esp, 4;' + EV(9) + 'mov esp, ebp; pop ebp; ret', [(0, 0, 1, CB(8, 'TD_bad_alloc', -20, 'cx8ac'))])
+    fn('cx8ac', EV(4) + 'mov eax, @cx8a.k; ret')
     chain('cx6', thr_D, [(0, 0, 1, CB(8, 'TD_B', -20, 'cx6ac'))])
     fn('cx6ac', EV(4) + 'mov eax, dword ptr [ebp-20]; mov dword ptr [@O0], eax; mov eax, @cx6a.k; ret')
     # cx7: catch(B b) by value of a class type: the copy constructor ctorB (thiscall, this = the catch variable at [ebp-24], arguments (source = base subobject, 1)) copies two words
@@ -263,7 +271,7 @@ def program():
     return P
 
 
-ENTRY = {'s2': 's2o', 's4': 's4o', 'cx1': 'cx1a', 'cx2': 'cx2a', 'cx3': 'cx3a', 'cx5': 'cx5a', 'cx6': 'cx6a', 'cx7': 'cx7a', 'sj1': 'sj1a', 'sj2': 'sj2a', 'sj3': 'sj3a'}
+ENTRY = {'s2': 's2o', 's4': 's4o', 'cx1': 'cx1a', 'cx2': 'cx2a', 'cx3': 'cx3a', 'cx5': 'cx5a', 'cx6': 'cx6a', 'cx8': 'cx8a', 'cx7': 'cx7a', 'sj1': 'sj1a', 'sj2': 'sj2a', 'sj3': 'sj3a'}
 
 
 def cases(P):
@@ -278,6 +286,7 @@ def cases(P):
         ('cx2', 'catch(char) skipped (type names compared), catch(...) takes it', 0x12345, 'ret', {}),
         ('cx3', 'rethrow from a catch block; object destroyed once after the outer catch', 0x12345, 'ret', {'O0': [42], 'O1': [42], 'O2': [1]}),
         ('cx5', 'throw; with nothing being handled -> terminate -> abort', None, 'abort', {'O0': [42], 'TR': [0x1234]}),
+        ('cx8', 'the platform operator new fails: throw_bad_alloc -> bare _CxxThrowException under the import entry, catch(std::bad_alloc&) in the lifted frames', 0x12345, 'ret', {}),
         ('cx6', 'catch(B&): reference to the base subobject (this_offset 8)', 0x12345, 'ret', {}),
         ('cx7', 'catch(B) by value: copy constructor (this, src, 1)', 0x126345, 'ret', {'O0': [0x33], 'O1': [0x44], 'O2': [1]}),
         ('uh', 'throw without a handler: UnhandledExceptionFilter, ExitProcess(0xE06D7363)', None, 'exit', {}),
@@ -312,7 +321,7 @@ def main():
     open(work + '/need.tsv', 'w').write(''.join('%08x\t%s\t%s\tkey\t%08x\n' % (SLOTS[r[1]], r[0], r[1], KEY[r[1]]) for r in BRIDGE))
     ent, blocked, hit, absent = impgen.generate(work + '/bridge.tsv', work, [work + '/need.tsv'], None)      # a bind-l3 row without a body in the runtime is an undefined symbol at the link
     if not (len(ent) == len(BRIDGE) and not blocked and not hit and not absent): sys.exit('msvcrttest gen: %d entries, blocked %s hit %s absent %s' % (len(ent), blocked, hit, absent))
-    syms = {x: 'L_%08x' % x for x in starts}; syms.update({k: s for k, s, *_ in ent}); syms.update(EH_KEYS)
+    syms = {x: 'L_%08x' % x for x in starts}; syms.update({k: s for k, s, *_ in ent})
     if {n: k for k, s, d, n, b in ent} != {r[1]: KEY[r[1]] for r in BRIDGE}: sys.exit('msvcrttest gen: the import keys differ from the key rule')
     open(w + '/guest.cc', 'w').write('#include "fnvl.h"\n' + '\n'.join(texts)); open(w + '/imp.cc', 'w').write(open(work + '/imp.cpp').read())
     hh = phf.build(list(syms)); open(w + '/tab.cc', 'w').write(phf.table_c(syms, hh))

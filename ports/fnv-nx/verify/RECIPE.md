@@ -229,7 +229,13 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
 
   **One recipe per target.** A root whose units serve both targets (the console backend on the guest, the host's gl4 calling the same translator)
   names a recipe per target in admit.json: `"recipe": {"guest": PATH, "host": PATH}` with `"target"` the base's (a plain string is the root's single
-  target, as before). The units are the same for every target; compiler, flags and plugins come from each target's recipe. It is one mechanism with
+  target, as before). The units are the same for every target; compiler, flags and plugins come from each target's recipe.
+  **A per-target recipe holds only what depends on the target:** compiler (or profile), flags, plugins, link, its own `external` toolchain, and `units` or `include` only
+  when they really differ from the base. `generated`, `run`, `uses` and `outputs` live once, in the base recipe, and every target reads them from there: generated
+  and run stages run on the host whatever the target, so they are target-independent by construction. `units` and `include` are inherited; a per-target value equal to
+  the base's is a redundant copy and red, and so is `generated`, `run`, `uses` or `outputs` in a per-target recipe (`recipe.per_target_errors`). The effective recipe
+  of `root@OTHER` is `recipe.inherit(per-target, base)`: the base's stages, outputs, units, include and the externals the per-target recipe does not name, under the
+  per-target fields; an `external` name declared by both with different content is red. `tests/test_pertarget.py`. It is one mechanism with
   `variants`: `recipe.norm_entry` parses the dict to the string spelling plus `variants: {OTHER: {"target": OTHER, "recipe": PATH}}`, and that
   spelling may be written in admit.json directly (it parses to the same structure). `entry_of` resolves the effective target and recipe path; the
   pair `root@OTHER` is built, keyed (the variant name, `FNVNX_TARGET`, its own compiler and flags) and gated separately in `GATE_CACHE`. A per-target
@@ -329,8 +335,10 @@ names (`[A-Za-z][A-Za-z0-9_]*`, unique), then one row per line with exactly the 
 - `"foreach": {"range": N}` (N an integer >= 1) is the same without a table: N steps named `NAME.<i>` for i = 0..N-1, with `{i}` and `{n}` (= N) replaced like a column. An N below 1 is red.
 - Fan-in. A step of the recipe may take the outputs of all rows of a foreach step as inputs: `{"stage": "ROOT:run:NAME", "path": TEMPLATE, "rows": "all"}`, TEMPLATE being an `outputs` or `dirs` entry of
   the foreach step as written (for example `part/{i}.txt`). The expansion replaces it by one ordinary stage ref per row, in row order, so they are the consecutive mounts /in/K, and the arg
-  `"@rows"` of that step becomes the list of those mounts in the same order. One `rows` input per step; a `rows` input that names no foreach step of the recipe, a TEMPLATE that is no output of it,
+  `"@rows"` of that step becomes the list of those mounts in the same order. A `rows` input that names no foreach step of the recipe, a TEMPLATE that is no output of it,
   and `@rows` without a `rows` input are red. ROOT is the recipe's own root (the rows are this recipe's).
+  Several groups: a rows input may carry `"as": NAME` and the arg `@rows:NAME` is that group's mounts in row order; a bare `@rows` is valid only for a step with exactly one rows input.
+  Two groups without `as`, a repeated name and an `@rows:NAME` with no such input are red.
 - Build-time table: `"foreach": {"table": {"stage": ROOT:run:NAME, "path": P} | {"external": NAME, "path": P}, "key": COLUMN, "into": DIR}`. The table is an earlier step's output of this
   root, another root's stage output, or a declared external, so its rows are known only when the build runs. The step stays one step to every other reader: it declares the directory DIR
   (`dirs: [DIR]`) and no `outputs`; its `outputs` as written (each under DIR, each naming `{COLUMN}`) are the row template. At build time one step per row runs as an ordinary step (named
@@ -562,7 +570,7 @@ Tests: `tests/test_toolexec.py` (ELF resolution and the check forms; the sandbox
 Red: the owner is this root (use `{external, path}`); the owner is not an admitted root; the owner is neither in this recipe's `uses` nor in the root's admit.json `imports` (the dependency is declared, never reached by name alone); the owner declares no external NAME; the external is a stage external (take it through `uses`); the path is absolute or leaves the tree. A stage reads it at `/in/N` (run), `/exec` (exec) or `/in/external_of/<owner with / as __>/<name>/<path>` (generated). Selftests: `tests/test_external_of.py`.
 
 ## The include closure of a root (`include_of`)
-An input of a `run` or `generated` step may be `{"include_of": ROOT}`: every tracked file under the repository include directories of ROOT's own recipe (`include`, directories inside an external are the compiler's declared inputs and are not part of it), at its repo-relative path, mounted at `/in/include_of/<ROOT with / as __>/` (`run`: at the step's `at`). It is resolved the way the compile stage resolves them, so a consumer never restates a root's include list. Valid only where ROOT is a root this recipe `uses` or a declared import (`include_of_errors`, the one rule: check and mount); ROOT itself is red (its include dirs are its own sources); a ROOT whose recipe has no repository include directory is red. The content hash of the tree is in the stage key, so a changed header changes the key. Functions: `recipe.include_of_dirs`, `Job.include_of_tree`. Test: `tests/test_external_of.py`.
+An input of a `run` or `generated` step may be `{"include_of": ROOT}`: every tracked file under the repository include directories of ROOT's own recipe (`include`, directories inside an external are the compiler's declared inputs and are not part of it), at its repo-relative path, mounted at `/in/include_of/<ROOT with / as __>/` (a `run` step mounts it like every run input, at `/in/N` in list order: the step's own N-th input). It is resolved the way the compile stage resolves them, so a consumer never restates a root's include list. Valid only where ROOT is a root this recipe `uses` or a declared import (`include_of_errors`, the one rule: check and mount); ROOT itself is red (its include dirs are its own sources); a ROOT whose recipe has no repository include directory is red. The content hash of the tree is in the stage key, so a changed header changes the key. Functions: `recipe.include_of_dirs`, `Job.include_of_tree`. Test: `tests/test_external_of.py`.
 
 The external cache is named once: `recipe.ext_dir(cache)`. A build that is given its own external cache (`--ext`) passes it to every reader (`resolve_input(..., extc)`, `exttree(e, cache, extc)`), so the reader goes where `fetch_externals` wrote.
 

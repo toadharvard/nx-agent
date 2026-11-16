@@ -34,9 +34,10 @@ def sha_file(path):
 
 def tool_sha():
     h = hashlib.sha256()
-    for n in ('shape.py', 'census.py'):
-        with open(os.path.join(HERE, n), 'rb') as fh:
-            h.update(fh.read())
+    with open(os.path.join(HERE, 'shape.py'), 'rb') as fh:
+        h.update(fh.read())
+    with open(os.path.join(HERE, 'census.py'), 'rb') as fh:
+        h.update(fh.read())
     return h.hexdigest()
 
 

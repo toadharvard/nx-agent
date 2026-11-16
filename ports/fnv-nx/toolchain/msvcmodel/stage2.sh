@@ -214,7 +214,9 @@ if [ -n "${FNVNX_PLUGINS_JSON:-}" ]; then
   [ -z "$(git -C "$TCDIR" status --porcelain -- .)" ] || { echo "build.sh: the toolchain directory has uncommitted changes; commit them first" >&2; exit 6; }
   TC_GIT=$(git -C "$TCDIR" rev-parse HEAD:./)
   rm -rf "$W/tc-arch" "$W/tc-store"; mkdir "$W/tc-arch"
-  git -C "$TCDIR" archive --format=tar "$TC_GIT" | tar -x -C "$W/tc-arch"
+  # archived from the repository top (a `git archive TREE` run inside a subdirectory restricts itself to that prefix and yields nothing for the subtree's own id)
+  git -C "$(git -C "$TCDIR" rev-parse --show-toplevel)" archive --format=tar "$TC_GIT" | tar -x -C "$W/tc-arch"
+  [ -n "$(ls -A "$W/tc-arch")" ] || { echo "build.sh: the archive of the toolchain tree $TC_GIT is empty" >&2; exit 6; }
   TC_CAS=$(python3 -I "$VERIFY/cas.py" ingest "$W/tc-store" "$W/tc-arch")
   rm -rf "$W/tc-arch" "$W/tc-store"
   python3 -I - "$P" "$T" "$V" "$SHA256" "$STAMP" "$MSVC_PATCH" "$MLFLAGS" "$PLUG_C" "$PLUG_CXX" "$TLC" "$TLCXX" "$CONF" "$FNVNX_PLUGINS_JSON" "$VERIFY" "$P/bin/$T-gcc" "$K1" "$TC_GIT" "$TC_CAS" <<'EOF'
