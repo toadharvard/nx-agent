@@ -282,6 +282,12 @@ def flow_of(sc):
     flow = []
     for scope, _ in sc:
         d = {}
+        if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):   # a parameter default is an assignment of the parameter: every default form (positional, keyword-only, lambda)
+            a = scope.args
+            pos = a.posonlyargs + a.args
+            for prm, dv in list(zip(pos[len(pos) - len(a.defaults):], a.defaults)) + [(k, v) for k, v in zip(a.kwonlyargs, a.kw_defaults) if v is not None]:
+                if not (isinstance(dv, ast.Name) and dv.id == prm.arg):   # `x=x` reads the enclosing scope's x, which the chain walk below cannot tell from the parameter
+                    d.setdefault(prm.arg, []).append(dv)
         for n in own_nodes(scope):
             tg = None
             if isinstance(n, ast.Assign):
