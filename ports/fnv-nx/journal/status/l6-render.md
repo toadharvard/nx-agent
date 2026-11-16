@@ -1572,3 +1572,12 @@ Paused: w3b, w4, farm; no other work.
 - 06:25Z ASM-617, ASM-619 and ASM-621 are cited at w6-root since 680ff849a. base3 3e035ada1 has the older render. L3a has been told to take render/, bridgefacts/ and the L6 ids from d98bb7faa or later.
 - Next: inventory of the backends' link-failure branches (w6). The fnvnx_reach_violation certificate form has been asked of L1. w6 also writes N once.
 - bottleneck: L1 certificate form for sm_link; lift/rt red (L3a) for d3d9exports; base3 retake; cand3b → cand4 base.
+- 06:35Z L1 corrected: GL's shader-failure branch is the owner decision gl-shader-failure (CLAUDE.md, 2026-11-15 20:20Z). It stays as it is, with its citation; no gate_cert for GL. My branch's CLAUDE.md was old; it is now taken from the integration branch (6887b6f45).
+- deko3d reach_violation: L6A's, off the path until the first frame. L1 has taken the missing producer rule (file-read bytecode) to the orchestrator.
+- After the first frame (owner order 20:25Z, "no rework"):
+    - sm_link N written once (rows_of);
+    - the d3d9total stage's exec paths;
+    - the deko3d dkShaderInitialize checks (L6A).
+- w7: archived. Its d3d9 export records are at claude/fnv-l6-render-w7 3d93234. They wait on lift/rt (L3a); the d3d9exports stage runs when lift/rt is green.
+- w6: the CLAUDE.md merge into w6-root and objstub over the L6 roots, for cand4. Then archived until L1 names the cand4 base (after cand3b).
+- bottleneck: cand3b merge → cand4 base (L1); base3 retake (L3a); lift/rt red (L3a).
