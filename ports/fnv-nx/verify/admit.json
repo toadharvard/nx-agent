@@ -445,6 +445,13 @@
    "recipe": "ports/fnv-nx/tests/bootrt/build.json"
   },
   {
+   "path": "ports/fnv-nx/lift/proof/fpchost",
+   "class": "test",
+   "target": "host",
+   "recipe": "ports/fnv-nx/lift/proof/fpchost/build.json",
+   "cxx_origin": "native"
+  },
+  {
    "path": "ports/fnv-nx/contract/include",
    "class": "header"
   },

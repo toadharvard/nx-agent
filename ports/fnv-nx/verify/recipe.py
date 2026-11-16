@@ -1965,7 +1965,9 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant="", repo=".
             err.append("plugins must be loaded in the order %s" % list(PLUGIN_SOURCES))
     if not cxx:
         return err + (["admit.json %s: cxx_origin of a root without C++ units" % root] if origin is not None else [])
-    if origin == "native":
+    if origin == "native" and ent.get("target") == "host" and not loaded:
+        pass      # a host profile root has the empty plugin set (RECIPE.md "The plugin set belongs to the target profile"): its C++ is plain host C++, nothing of the guest ABI semantics applies
+    elif origin == "native":
         for n in sorted(PLUGIN_SOURCES):
             if n not in loaded:
                 err.append("native C++ root %s does not load plugin %s (every native or decomp C++ body is compiled with both)" % (root, n))

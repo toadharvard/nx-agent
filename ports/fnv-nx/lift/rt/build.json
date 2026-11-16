@@ -107,6 +107,19 @@
   {
    "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
    "args": [
+    "/in/ports/fnv-nx/lift/rt/fnvl_fpc.h",
+    "/out/gen/fnvl_fpc.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/fnvl_fpc.h"
+   ],
+   "outputs": [
+    "gen/fnvl_fpc.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
     "/in/ports/fnv-nx/lift/rt/fnvl_x87.h",
     "/out/gen/fnvl_x87.h"
    ],
