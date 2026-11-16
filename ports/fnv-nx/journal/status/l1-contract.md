@@ -3036,3 +3036,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Item 4 is in progress.
 - 12:18: L3a w8 base3 ac2c51094: lift/ bare imports 217 -> 0, gate_admit 1889/1889 (100 roots). Its non-lift reds are stale (base 4eb5a2bd4); w8 merges d22308ddc.
   - Perf red: `recipe check --root lift/liftsrc` takes >16 min in pathflow.mentions_self (recursive ast.walk). To w28 first, with the rule: memoise by (node, idx, name), name sets computed in one bottom-up walk, a per-module cache by content hash, and equivalence with the old function over the whole set. Budget ≤300 s warm.
+- 12:19: w29 53b30d9, item 4 (external provenance). recipe.generated_sources records ext_units {unit: external} for declared externals only; it goes into objects.json and its digest. objstub skips V/T judgment for them, and they still count for coverage.
+  - The name guess `external_errors`, extconv, the ret plumbing and the plugin's ret output are deleted.
+  - test_objstub_rules/x64/consts/assume pass. test_uses and the plugin compile run on w29-c5, which has the /imp fix.
