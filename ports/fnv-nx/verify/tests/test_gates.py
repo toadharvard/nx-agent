@@ -76,6 +76,17 @@ rc, r, e = pure(d)
 check("pure: no entry points -> green, universe 0", rc == 0 and r and r["name"] == "pure" and r["format"] == "fnvnx-gate/1"
       and r["status"] == "green" and r["universe"] == 0 and r["certified"] == 0 and "nothing to certify" in r["detail"], (rc, r, e))
 
+d = tmp("pure-nopy-root")
+put(d, V + "link/a.py", CLEAN)
+put(d, V + "rules/run.sh", "#!/bin/sh\necho hi\n", 0o755)
+rc, r, e = pure(d, "a.py")
+check("pure: a root with no python module contributes no --lib path (whole-tree run is not an error)", rc == 0 and r["status"] == "green" and (r["universe"], r["certified"]) == (1, 1), (rc, r, e))
+
+d = tmp("pure-vacuous")
+put(d, V + "link/a.py", CLEAN)
+rc, r, e = pure(d)
+check("pure: universe 0 over a tree that has python files is red (vacuous)", rc != 0 and r["status"] == "red" and r["universe"] == 0 and "vacuous" in r["detail"], (rc, r, e))
+
 d = tmp("pure-clean")
 put(d, V + "link/a.py", CLEAN)
 put(d, V + "rules/b.py", CLEAN)
