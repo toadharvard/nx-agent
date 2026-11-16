@@ -52,6 +52,8 @@ Enumeration completeness (tools/ehtables.py), the rule and its assumptions, stat
 Callee-saved registers across calls are not assumed (tools/ehflow.py): ebx/esi/edi/ebp survive a call only where the callee is proven (every ret restores them) or is a platform import (Win32 as
 documented, ASM-003); the proofs are the facts `preserves`, counted globally by tools/ehtables.py.
 Exit 0 iff green."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import sys
@@ -194,7 +196,7 @@ def check(pack, root):
 
 def main(argv):
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools'))
-    import cli
+    from lift.tools import cli
     (pack, root), _ = cli.parse('usage: gate_eh.py PACK ROOT   exception-handling gate', argv, (2, 2))
     uni, unc, why, red = check(pack, root)
     nred = sum(len(x) for v in red.values() for x in v.values())

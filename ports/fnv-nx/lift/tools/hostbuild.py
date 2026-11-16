@@ -4,8 +4,8 @@ usage: hostbuild.py CACHE ROOT [OUTPUT]     (OUTPUT: a declared output NAME of t
 Exit 1 with the recipe's findings when the build is not green. The one way a lift tool or farm job obtains a host program: no compiler call of its own."""
 import os, sys
 H = os.path.dirname(os.path.abspath(__file__)); REPO = os.path.normpath(os.path.join(H, '..', '..', '..', '..'))
-sys.path.insert(0, os.path.join(REPO, 'ports', 'fnv-nx', 'verify'))
-import gate_build, recipe  # noqa: E402
+sys.path.insert(0, os.path.join(REPO, 'ports', 'fnv-nx'))
+from verify import gate_build, recipe  # noqa: E402
 
 
 def host_exe(cache, root, output=None):

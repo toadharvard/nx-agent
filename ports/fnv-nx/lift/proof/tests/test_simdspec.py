@@ -2,6 +2,8 @@
 """proof/simdspec.py against its references: the SDM cells (stated values of the pages, quoted per test), the SDM 1:9.6.2 MMX rule through x87spec, and the transcription of rt/rcptab.c
 against the C function itself.  No emulator (Unicorn / QEMU) and no host CPU: those are not references of a certificate (measure_simd_host.py is the CPUREF measurement).  The ACL2
 citations are checked by acl2_cite_check.py DIR, the SDM quotes by sdm_cite_check.py.     python3 -I tests/test_simdspec.py"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import os, random, sys, unittest
 import z3
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE)); sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))      # proof/ (bare module names) and lift/ (fnvlift, proof.*)
@@ -74,7 +76,7 @@ class RcpRows(unittest.TestCase):
         if not CACHE: self.skipTest('GATE_CACHE (declared input: the verdict store) is not set')
         # the shared object is the linked output of the host root lift/rcphost (unit lift/rt:rcptab.c, rcpref.h from lift/rt GEN), built by the recipe in the declared cache
         sys.path.insert(0, os.path.join(HERE, '..', '..', '..', 'verify'))
-        import gate_build
+        from verify import gate_build
         res, _ = gate_build.ensure('ports/fnv-nx/lift/rcphost', CACHE, os.path.normpath(os.path.join(HERE, '..', '..', '..', '..', '..')))
         so = res['elf']['path']
         lib = ctypes.CDLL(so); lib.fnvl_rcp32.restype = lib.fnvl_rsqrt32.restype = ctypes.c_uint32; lib.fnvl_rcp32.argtypes = lib.fnvl_rsqrt32.argtypes = [ctypes.c_uint32]

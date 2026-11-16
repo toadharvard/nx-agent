@@ -12,13 +12,15 @@ checks for consistency with the size (an element code that does not divide the s
     test_descclass.py
 Every compile is a stage of the recipe (toolchain/tests/plugbuild.py): the prepared machinery, the pinned msvcmodel compiler, no direct compiler call.
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import os, re, shutil, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE)); FNV = os.path.dirname(LIFT)
 sys.path.insert(0, LIFT + '/tools')
 sys.path.insert(0, os.path.join(FNV, 'toolchain', 'tests'))
-import bridgegen
-import plugbuild as pb
+from contract import bridgegen
+from toolchain.tests import plugbuild as pb
 
 # name -> declaration text; every type is used as an argument and as a result
 TYPES = [

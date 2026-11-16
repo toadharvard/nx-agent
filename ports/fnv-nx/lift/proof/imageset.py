@@ -9,6 +9,8 @@ closure over the declared system32, with its assigned base) and nothing else. A 
     assigned(modules_tsv)        -> {name: assigned base}
     reader(M)                    -> read(address, n): bytes of the mapped image, clamped to the section
 A module whose file is in no directory is an error (the table and the gamedata must agree)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import os
 import sys
 
@@ -48,7 +50,7 @@ def assigned(modules_tsv):
 
 
 def mapped(path, base):
-    import pemod
+    from lift.tools import pemod
     return pemod.load(path, base)
 
 

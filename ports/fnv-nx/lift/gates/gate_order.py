@@ -110,6 +110,8 @@ operand, "2 HEXADDR mem|ax" for every FPU status instruction, from the facts' sh
 every record's address is in the file. One row per address of either set.
 
 Exit 0 iff all three results are green."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import multiprocessing
 import os
@@ -937,7 +939,7 @@ def verdict(g, rws, n):
 
 def main(argv):
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools'))
-    import cli
+    from lift.tools import cli
     cli.parse('usage: gate_order.py IMAGE [OBJ...] [--asm FILE]... [--sites FILE]   memory-ordering completeness gate over the objects', argv, (1, 10**9), {'--asm': True, '--sites': True})
     objs, asm, k, locks = [], [], 1, None
     while k < len(argv):

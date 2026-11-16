@@ -17,7 +17,7 @@ from fnvlift.core import Unsupported
 from fnvlift.image import Image
 
 # 1. the header
-sys.path.insert(0, os.path.join(LIFT, 'proof')); import x87spec      # CARRIER_OPS: the value computations of the proven Forms (their exception flags are the spec's own terms, not a helper mask)
+sys.path.insert(0, os.path.join(LIFT, '..')); from lift.proof import x87spec      # CARRIER_OPS: the value computations of the proven Forms (their exception flags are the spec's own terms, not a helper mask)
 hdr = open(os.path.join(LIFT, 'rt', 'fnvl_x87.h')).read()
 parts = re.split(r'\n(?=static |FNVL_F2I |#define |template)', hdr)
 routed = []

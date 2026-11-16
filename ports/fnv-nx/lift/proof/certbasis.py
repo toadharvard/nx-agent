@@ -1,5 +1,7 @@
 """What a certificate is bound to besides the shape, the Form and the IR: the obligations the prover checks, and the platform sources of the declared outputs (declared.json).
 One module, no SMT solver: the prover (prove.py, shapeprove.py), the certificate builder (certs_build.py) and the gate (formgate.py) all import it, so none keeps a copy."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import hashlib
 import json
 import os
@@ -98,7 +100,7 @@ def component_inputs():
     repo = os.path.normpath(os.path.join(LIFT, "..", "..", ".."))
     vdir = os.path.join(repo, "ports", "fnv-nx", "verify")
     if vdir not in sys.path: sys.path.insert(0, vdir)
-    import recipe
+    from verify import recipe
     roots = recipe.load_admit(repo)
     out = set()
     for r in COMPONENT_ROOTS:

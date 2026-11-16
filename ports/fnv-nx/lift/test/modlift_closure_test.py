@@ -5,6 +5,8 @@ ORDER: modlift runs pcsrc BEFORE it settles the residue, so sources.tsv and the 
 modlift residual rule (item 22 b): the residue is data (class 9, gate green) only when the closure is complete, i.e. every relocated in-span value is an entry (R3)
 AND pcsrc's s4 result (<facts>/<module>/pcsrc_s4.json) says 0 violations. No pcsrc file -> red 's4-unchecked' (never read as green); violations > 0 -> red 's4-violation'.
     modlift_closure_test.py MODULES.TSV DIR:DIR KEYS.TSV [module=binkw32]       (exit 0 = all pass; needs the module's DLL, there is no skip)"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import os, subprocess, sys, tempfile, json
 HERE = os.path.dirname(os.path.abspath(__file__)); TOOL = os.path.join(os.path.dirname(HERE), 'tools', 'universe.py')
 MODS, MODDIRS, KEYS = sys.argv[1:4]; mod = sys.argv[4] if len(sys.argv) > 4 else 'binkw32'; FAILS = []
@@ -20,7 +22,7 @@ def check(n, ok):
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'tools'))
-import residue
+from lift.tools import residue
 
 
 def facts(s4, pc):

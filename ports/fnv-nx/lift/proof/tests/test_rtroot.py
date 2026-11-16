@@ -4,6 +4,8 @@ an error). The semantic flags of the lifted code are the pin's flags.semantics (
 the build.json holds none of them, so the test reads no second copy. Checked: the recipe accepts the root, its effective flags are the pin's semantics followed by
 the root's own, the plugins are exactly recipe.py's PLUGIN_SOURCES in load order with PLUGIN_ARGS, units are all, and no tracked .c under lift/rt is C++
 (a unit's language is its extension)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import re
@@ -16,7 +18,7 @@ LIFT = os.path.normpath(os.path.join(HERE, '..', '..'))
 VERIFY = os.path.normpath(os.path.join(LIFT, '..', 'verify'))
 sys.path.insert(0, os.path.join(LIFT, 'tools'))
 sys.path.insert(0, VERIFY)
-import recipe as R  # noqa: E402
+from verify import recipe as R  # noqa: E402
 
 bad = []
 
@@ -37,7 +39,7 @@ check('the recipe accepts the root (guest_errors)', R.guest_errors(rec, ROOT, ro
 fl = rec['flags']
 sem = pin['flags']['semantics']   # {"common": [...], "lifted_extra": [...]}: the one source; the recipe reads it, the test reads it again
 origin = roots[ROOT].get('cxx_origin')
-import targets as T  # noqa: E402
+from verify import targets as T  # noqa: E402
 prefix = list(T.semantic_prefix(T.load()))      # ABI, architecture, tuning, code model and the DATAMODEL rows: generated from the declared targets (verify/targets.py), the leading run of the set
 want = prefix + list(sem['common']) + (list(sem['lifted_extra']) if R.origin_class(origin) == 'lifted' else [])
 check('effective semantic flags of the root are the pin semantics (the prefix of the targets, the common set of the pin, plus lifted_extra for a lifted origin)', list(R.semantics_set(origin)) == want, (origin, list(R.semantics_set(origin)), want))
