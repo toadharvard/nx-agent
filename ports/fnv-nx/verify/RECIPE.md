@@ -273,7 +273,7 @@ Readers of the record: gate_tlsmodel (the relocations of the linked ELF), contra
   `{stage, path}`, read by resolve_input) at `/in/1`, `/in/2`, ... in list order; the union of the installed files of the declared debs at `/deb/<absolute path>` (`base-files`, the machine's root layout, is implicit in every run stage; two debs shipping one path with different content are red); its `/out`.
   The root is read-only, `/tmp` and `/work` are not writable. `debs` are names of `env.json` `debs.packages`; an undeclared name is red (check).
 - An artifact with a PT_INTERP is started through the file at that path inside a declared deb (`/deb/<name>/<PT_INTERP>`, the deb's own symlinks
-  followed across the union of the declared debs by `deb_resolve`: the usr-merge links are a fact of the declared system, shipped by `base-files`, so a run stage lists `base-files` in `debs`; without it a PT_INTERP such as `/lib64/ld-linux-x86-64.so.2` is red), with `--library-path` over the declared debs'
+  followed across the union of the declared debs by `deb_resolve`: the usr-merge links are a fact of the declared system, shipped by `base-files`, so `base-files` (envcheck.RUN_LAYOUT_DEB, the machine's root layout) joins the debs of every run step automatically, listed or not; a PT_INTERP such as `/lib64/ld-linux-x86-64.so.2` resolves through it), with `--library-path` over the declared debs'
   `lib/x86_64-linux-gnu` and `usr/lib/x86_64-linux-gnu`. A PT_INTERP that the declared debs do not provide is red; no loader path is hard-coded.
 - `"host_cpu": "cpuref"` (optional): the pin `verify/cpuref.json` {vendor_id, family, model, stepping, microcode, model_name} (the /proc/cpuinfo fields,
   ints as numbers; a null value means the field is ABSENT from /proc/cpuinfo (a VM has no microcode line), never a wildcard) is in the stage key. Before a stage that is not a cache hit runs, every processor of /proc/cpuinfo must equal the pin, else the stage
@@ -384,6 +384,15 @@ paths). The directory is ingested into the store by content and copied whole int
 consumers: a later step's `inputs` ref `{"stage": "<root>:gen:I", "path": DIR}` mounts it at `/stage/DIR`, a root's `outputs` map may name it, and another
 root reads it through `uses`. A directory output does not overlap another output or a tracked file. A stage whose stage-ref input is an output of a
 red generator is blocked by it (never run on a missing path). Tests: `tests/test_genchain.py` (a 3-stage chain, unmounted paths fail, the re-key rule).
+
+### Derived forms of a run step (`debs.closure`, `{"plugins": "root"}`)
+
+Two sets are never written twice (they are derived once from their source):
+
+- `"debs": {"closure": [TOP, ...]}`: TOP are the packages of the programs the step runs; the step's debs are TOP and their Pre-Depends/Depends closure on the declared machine, `envcheck.dep_closure`, the rule that defines the declared package set itself (`debs.packages` is checked against it). The result is sorted, every deb's sha256 is in the stage key as before. A top that env.json does not declare is red in `check`; a top that is not installed on the declared machine is red in the build. A list of names is still accepted for a step whose few debs are the whole set.
+- `{"plugins": "root"}` as an input: one `{"plugin": NAME}` per plugin of the root's `plugins`, in declaration order (the order is written once). Red when the root declares no plugins or when it is written twice.
+
+`recipe.expand_run` is the one reader of the expanded steps (`check` after the form check, the build).
 
 ### Generator tool reads (`gen:file-escape`)
 

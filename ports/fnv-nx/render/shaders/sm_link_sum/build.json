@@ -130,7 +130,6 @@
     }
    ],
    "debs": [
-    "base-files",
     "libc6",
     "libegl1",
     "libegl-mesa0",
