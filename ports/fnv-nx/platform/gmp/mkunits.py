@@ -11,7 +11,8 @@ import shutil
 import sys
 
 build, src, log, out = [os.path.realpath(p) for p in sys.argv[1:5]]
-supplied = sys.argv[5:]   # -I directories the recipe supplies itself (include_uses: another root's headers): their flag is dropped, the include path of the root has them
+carried = [a for a in sys.argv[5:] if a.startswith("-")]   # codegen flags the recipe's own `flags` carry for every unit of this root (named by the stage that generates the units)
+supplied = [a for a in sys.argv[5:] if not a.startswith("-")]   # -I directories the recipe supplies itself (include_uses: another root's headers): their flag is dropped, the include path of the root has them
 rows = [json.loads(l) for l in open(log)]
 if not rows:
     sys.exit("mkunits: empty compile list")
@@ -26,7 +27,7 @@ def own_dirs(r):   # the compile's own directory in the build tree and in the so
     return {os.path.realpath(r["cwd"]), os.path.realpath(os.path.join(src, rel)), os.path.dirname(real(r, r["src"]))}
 def check_flags(r):
     for f in r["flags"]:
-        if f.startswith("-D") or f in ("-g", "-O2"):
+        if f.startswith("-D") or f in ("-g", "-O2") or f in carried:
             continue
         if f.startswith("-W") and not f.startswith(("-Werror", "-Wl,", "-Wa,", "-Wp,")):
             continue   # a warning option only chooses which diagnostics are printed, never the object code (GCC manual, "Options to Request or Suppress Warnings")
