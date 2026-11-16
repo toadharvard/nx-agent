@@ -39,7 +39,7 @@ for o, r in sorted(units.items()):
     path = os.path.realpath(os.path.join(r["cwd"], r["src"]))
     text = open(path, "rb").read()
     where = ("src/" + os.path.relpath(path, src)) if path.startswith(src + "/") else ("build/" + os.path.relpath(path, build))
-    defs = ["#define %s" % f[2:].replace("=", " ", 1) for f in r["flags"] if f.startswith("-D")]
+    defs = ["#define %s" % (f[2:].replace("=", " ", 1) if "=" in f else f[2:] + " 1") for f in r["flags"] if f.startswith("-D")]   # -DNAME is NAME defined as 1 (C99 6.10.2 as cc documents it)
     name = os.path.splitext(o)[0] + ".c"
     dest = os.path.join(out, "u", name)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
