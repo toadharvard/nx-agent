@@ -441,3 +441,16 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
   - the rcpgen check;
   - the recipe builds of lift/proof/isla and lift/proof/sailmodel (isla debs = the closure of python3 and cargo).
 - doing: integer shards 2 and 3 (resuming), SIMD shard 1 (resuming).
+
+## 2026-11-16 03:20Z (claude/fnv-l3b-lift c31ed7f26)
+- done (9de00f15d, worker a4fefc3884cbfe194): check 0 under the one-method ruling (integ a172a44b7).
+  - Every helper in helpercalls.universe is covered by rcpcert (its defining unit is rcptab.c's object, decided from the symbol table) or by ASM-329; a helper covered by neither is red.
+  - fnvl_tab_* are inline in fnvl.h, so they fall under ASM-329. The width derivation is deleted.
+  - gate_assumptions findings: 23 = 23.
+- done (8abd1ab02, b0b2af12e, c31ed7f26, worker a3994d45035f1f412): toolchain roots on the recipe.
+  - lift/rcpgen GREEN (farm 4): rcptab.c sha256 d2a3920e...58f5, equal to the committed file.
+  - lift/proof/sailmodel GREEN (farm 4): MODEL sha256 ea88b550d8a7f88d90c56ca8eb4d3a202a203e592353c5218373b5d824a42f27.
+  - Fixes: exec /usr/bin/python3.12; debs by closure; the render/total unused import dropped; the isla vendor layout; the patch-script modules mounted as inputs and loaded by SourceFileLoader.
+- blocked (owner L1): lift/proof/isla red. verify/sandbox.py:110-118 returns ENOSYS for getrandom; OpenSSL in cargo's libgit2 needs it. The rule (constant stream for every entropy interface) was sent to w28.
+- open (owner L1): recipe.py _deb_tree copies symlink targets from the host (alternatives), not from the deb.
+- doing: integer shards 2 and 3, SIMD shard 1.
