@@ -815,15 +815,24 @@ def pin_of(facts, name):
     return None
 
 
+def read_universe(path):
+    """-> (entries {addr: every kind the entry carries}, parent {addr: parent}, candidates). universe.tsv column 2 is the primary kind; the others are in the flags column among the flag words, and
+    residue.PRI is the one vocabulary that tells a kind from a flag. Every reader of universe.tsv calls this."""
+    import residue
+    ent = {}; parent = {}; cand = set()
+    for l in open(path):
+        if l[0] == '#' or not l.strip(): continue
+        f = l.rstrip('\n').split('\t'); a = int(f[0], 16); fl = f[3].split(',') if len(f) > 3 else []
+        ent[a] = {f[1]} | {x for x in fl if x in residue.PRI}
+        for x in fl:
+            if x.startswith('parent='): parent[a] = int(x[7:], 16)
+            if x == 'candidate': cand.add(a)
+    return ent, parent, cand
+
+
 def run_facts(facts, name, text, T0, rd=None, rset=None):
     """facts: directory holding universe.tsv and ranges.tsv of the image; text/T0 the executable span; rd(va) reads a 32-bit word of the image, rset the relocated words. Same outputs as run()."""
-    ent = {}; parent = {}; cand = set()
-    for l in open(facts + '/universe.tsv'):
-        if l[0] == '#' or not l.strip(): continue
-        f = l.rstrip('\n').split('\t'); ent[int(f[0], 16)] = set(f[1].split(','))
-        for x in (f[3].split(',') if len(f) > 3 else ()):
-            if x.startswith('parent='): parent[int(f[0], 16)] = int(x[7:], 16)
-            if x == 'candidate': cand.add(int(f[0], 16))
+    ent, parent, cand = read_universe(facts + '/universe.tsv')
     rg = []
     for l in open(facts + '/ranges.tsv'):
         if l[0] == '#' or not l.strip(): continue

@@ -13,6 +13,8 @@ RULE: closure complete -> every residue byte is class DATA = 9, "data-unreached"
 Nothing else decides a residue byte: the sweep below (decodes / undecodable / reloc-not-operand / no-end) is a breakdown printed for information and decides nothing."""
 import os, json, bisect
 from types import SimpleNamespace
+
+PRI = ['decomp', 'entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw', 'inner', 'ptr']      # THE kind vocabulary and its priority: the primary kind of an entry (universe.tsv column 2) is the first of these it carries; the other kinds are in the flags column
 DATA = 9
 TERMS = {'ret', 'retf', 'jmp', 'int3', 'ud2', 'iret', 'iretd'}
 
