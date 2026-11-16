@@ -2585,3 +2585,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 05:12
 - cand3b 02f26b3de verdict: 41/42 green, cold 1047.8 s, warm 34.2 s (was 331.6), selftests 132/132. Only red: oracle 131/132 (test_stageref_cost had no oracle entry), fixed at c93b807f3 (RECIPE.md + oracle.json only). The farm runs the warm verdict at c93b807f3; on green, it merges into the trunk.
 - bottleneck: warm verdict at c93b807f3.
+
+## 2026-11-16 05:25
+- New (from L3a): the decomp list is no longer a facts source (claude/fnv-l3a-lift-w7-facts2 @87b8dd3d2). w28 removes exefacts F['decomp'] and gate_xc's missing_decomp/missing_other split (now one class, 'missing'), and rebases function sizes and vftables on the universe output (o/exe). Status: doing.
+- cand3b: waiting for the farm's warm verdict at c93b807f3. A fallback check is scheduled for 06:01Z.
+- bottleneck: the warm verdict at c93b807f3.
