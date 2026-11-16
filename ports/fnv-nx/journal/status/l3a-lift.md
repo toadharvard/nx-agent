@@ -1420,3 +1420,14 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - contract/facts and lift/disp are red behind lift/rt.
 - render/gl4: the ld stage needs L2's recipe-path toolchain root (w3).
 - bottleneck: L2 ENTRY1-ATOMIC for C, the L1/L2 decltype export line, and the L2 recipe-path pin.
+
+## 2026-11-16 04:05: the 13 pcsrc residue sites classified (w7, facts at 30757c325)
+- 10 are tail calls through a vptr after an epilogue (`jmp [[this]+k]`). Before them, esp is lost at an indirect call: 4 `call reg` (TOP), 6 vptr calls, 2 earlier losses.
+- 2 are `jmp [IAT slot]` (LeaveCriticalSection, InterlockedIncrement). 3 are EH continuations.
+- mem[const global] over the exe: 7,110 sites, of which 7,022 are IAT slots. No store-set rule is needed.
+- Rulings:
+  - `jmp [IAT]` is a tail call to the import, with the pop from keys.tsv. The proof is the loader mapping the IAT read-only plus OWNER 6.
+  - vtable slot: the callee set is slot k of every vtable in the exe's RTTI (CompleteObjectLocator-anchored, structural, no names), and the pop is the join. Measure the join per offset before building it.
+  - The TOP register calls: measure their value sources.
+- w8: one recipe emitter, lift/tools/imagechain.py (the pack chain per image). The guestgen_* scripts are reduced to PE emitters.
+- bottleneck: L2 ENTRY1-ATOMIC for C, the L1 w28 export-record form, the L2 recipe-path pin; pcsrc (the vtable join measurement).
