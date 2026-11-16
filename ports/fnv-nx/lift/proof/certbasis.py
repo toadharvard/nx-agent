@@ -3,6 +3,7 @@ One module, no SMT solver: the prover (prove.py, shapeprove.py), the certificate
 import hashlib
 import json
 import os
+import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIFT = os.path.dirname(HERE)
@@ -79,23 +80,43 @@ def prover_files():
     return sorted(seen)
 
 
-# Data files of the closure's packages (everything that is not .py, tests/ and caches left out): they decide verdicts (fnvlift/faults.json, proof/declared.json, the page tables ...), so the identity hashes them all.
-# Left out, each because it is already its own certificate component (named here beside it):
-#   model_sha / closure_sha: the IR and the isla run inputs: sailmodel/, isla/ (the recipe roots that build them), sail_patches/, x86_fetch.sail, x86_code_regs.sail, x86.toml, sail_pins.txt (irdeps.py: the run's key)
-#   x86sys_sha256: platform/declared/x86sys.json (outside these directories)
-COMPONENT_INPUTS = ("proof/sailmodel", "proof/isla", "proof/sail_patches", "proof/x86_fetch.sail", "proof/x86_code_regs.sail", "proof/x86.toml", "proof/sail_pins.txt")
+# Data files of the closure's packages: everything that is not .py or documentation (*.md: under the repository convention no code reads them, so they are not program inputs), tests/ and caches left out.
+# They decide verdicts (fnvlift/faults.json, proof/declared.json, the page tables ...), so the identity hashes them all.
+# Left out, because they are already their own certificate component:
+#   model_sha / closure_sha: the declared inputs of the recipe roots whose outputs those components are (COMPONENT_ROOTS, read from their recipes, the roots' own directories included);
+#   x86sys_sha256: platform/declared/x86sys.json (outside these directories).
+# A model input under proof/ that no component root declares stays hashed: it over-invalidates and is safe.
+COMPONENT_ROOTS = ("proof/sailmodel", "proof/isla")      # lift/-relative
+
+
+def component_inputs():
+    """LIFT-relative paths of the declared repository inputs of COMPONENT_ROOTS (files and directories), read through recipe.load_recipe like formgate.ir_file does"""
+    repo = os.path.normpath(os.path.join(LIFT, "..", "..", ".."))
+    sys.path.insert(0, os.path.join(LIFT, "..", "verify"))
+    try:
+        import recipe
+        roots = recipe.load_admit(repo)
+        out = set()
+        for r in COMPONENT_ROOTS:
+            out.add(r)
+            for st in recipe.load_recipe(repo, roots, recipe.TREE + "/lift/" + r).get("run", []):
+                for i in st.get("inputs", []):
+                    if isinstance(i, str) and i.startswith(recipe.TREE + "/lift/"): out.add(i[len(recipe.TREE + "/lift/"):])
+        return out
+    finally: sys.path.pop(0)
 
 
 def prover_data_files():
     pk = sorted({os.path.dirname(f) for f in prover_files()})
+    skip = component_inputs()
     out = []
     for d in pk:
         for root, dirs, files in os.walk(os.path.join(LIFT, d)):
             rel = os.path.relpath(root, LIFT)
-            dirs[:] = sorted(x for x in dirs if x not in ("tests", "__pycache__") and os.path.join(rel, x) not in COMPONENT_INPUTS)
+            dirs[:] = sorted(x for x in dirs if x not in ("tests", "__pycache__") and os.path.join(rel, x) not in skip)
             for f in sorted(files):
                 p = os.path.join(rel, f)
-                if not f.endswith((".py", ".pyc")) and p not in COMPONENT_INPUTS: out.append(p)
+                if not f.endswith((".py", ".pyc", ".md")) and p not in skip: out.append(p)
     return out
 
 
