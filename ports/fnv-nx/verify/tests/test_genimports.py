@@ -55,6 +55,8 @@ def main():
     check("green: a file of a declared root imports its sibling relative", [x for x in e if "gen:foreign-import" in x] == [], e)
     e, _, _ = errs("gi2e", [LIB], gen="import sys\nfrom lib import libmod\nopen('/out/gen/o.c', 'w').write('int o;\\n')\n")
     check("green: `from lib import libmod` (a namespace package of the declared root) resolves", [x for x in e if "gen:foreign-import" in x or "gen:unused-import" in x] == [], e)
+    e, _, _ = errs("gi2f", [LIB], gen="import sys\nfrom lib.sub import m\nopen('/out/gen/o.c', 'w').write('int o;\\n')\n", libfiles=dict(LIBFILES, **{"sub/m.py": "Z = 1\n"}))
+    check("green: `from lib.sub import m` (a subpackage directory of the declared root) resolves like `import lib.sub.m`", [x for x in e if "gen:foreign-import" in x or "gen:unused-import" in x] == [], e)
     e, _, _ = errs("gi3", [LIB], gen="import sys\nopen('/out/gen/o.c', 'w').write('int o;\\n')\n")
     un = [x for x in e if "gen:unused-import" in x]
     check("red: a declared import root that no generator reaches", len(un) == 1 and LIB in un[0], e)

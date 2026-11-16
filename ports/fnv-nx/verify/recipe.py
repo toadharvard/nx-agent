@@ -37,6 +37,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import artifacts  # noqa: E402
 import cas  # noqa: E402
 import elffacts  # noqa: E402
 import gate_admit  # noqa: E402
@@ -60,14 +61,8 @@ ADMIT = TREE + "/verify/admit.json"
 ENV_JSON = TREE + "/verify/env.json"   # the declared environment of the checkout (l1.py checks the same file)
 
 
-def _pinned_artifacts():
-    """The artifacts repository of env.json (debs.mirror.repo): the one pinned default of every external fetch."""
-    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "env.json")) as f:
-        return "https://github.com/%s" % json.load(f)["debs"]["mirror"]["repo"]
-
-
-ARTIFACTS = _pinned_artifacts()   # a test fixture may assign a toy repository (the same seam as deb_pins); no other code does
-ARTIFACTS_FILE = "artifacts.url"
+ARTIFACTS = artifacts.pinned()   # the pinned repository of env.json (artifacts.py, the one source); a test fixture may assign a toy repository (the same seam as deb_pins); no other code does
+ARTIFACTS_FILE = artifacts.FILE
 
 
 def ext_dir(cache):
@@ -85,17 +80,11 @@ def artifacts_url(extcache):
     """Where the externals of EXTCACHE come from: the record `EXTCACHE/artifacts.url` that the caller of a run wrote (set_artifacts: l1.py --artifacts,
     recipe.py --artifacts), else the pinned repository of env.json. Never the process environment: a URL is an argument of the run, kept beside the
     cache it fills, so a gate subprocess and a test read the same one."""
-    p = os.path.join(extcache, ARTIFACTS_FILE)
-    if os.path.isfile(p):
-        with open(p) as f:
-            return f.read().strip()
-    return ARTIFACTS
+    return artifacts.recorded(extcache) or ARTIFACTS
 
 
 def set_artifacts(extcache, url):
-    os.makedirs(extcache, exist_ok=True)
-    with open(os.path.join(extcache, ARTIFACTS_FILE), "w") as f:
-        f.write(url + "\n")
+    artifacts.record(extcache, url)
 
 
 def _plugin_cxx():
@@ -799,6 +788,10 @@ def foreign_imports(tool, owner, files, inputs, repo=".", closure=None, imports=
                         return c
         return None
 
+    def pkg_dir(name):   # a directory of a declared root that holds modules, named by the qualified rule: an implicit (PEP 420) namespace package, `from <it> import <module>`
+        d = TREE + "/" + name.replace(".", "/") + "/"
+        return any(name == pre or name.startswith(pre + ".") for pre in prefixes) and any(c.startswith(d) for c in theirs_set)
+
     def find(name, rel):    # the tracked file of module NAME (dotted): in the tool's own root, or carried by a declared input
         parts = name.split(".")
         hit = qualified(name)
@@ -855,7 +848,7 @@ def foreign_imports(tool, owner, files, inputs, repo=".", closure=None, imports=
                 names += [(n.module + "." + a.name, 0) for a in n.names if qualified(n.module + "." + a.name)]
             for name, level in names:
                 top = name.split(".")[0]
-                if top in std or top in pinned or not top or name in ns or (name in prefixes and not qualified(name)):
+                if top in std or top in pinned or not top or name in ns or pkg_dir(name) or (name in prefixes and not qualified(name)):
                     continue
                 got = find(name, f) or find(top, f)
                 if got is None:
@@ -4346,6 +4339,7 @@ def main(argv):
             print(json.dumps(timing_report(o["--store"], res["stage_keys"]), indent=1, sort_keys=True))
             return 0
         if argv[:1] == ["check"]:
+            env_blocked(repo)   # the declared environment is judged here by the same function as before a build (the dependency closure of env.json included)
             roots = load_admit(repo)
             root, _ = split_spec(opt["--root"])   # the one place the spec is split: nothing below sees root@NAME
             rec = load_recipe(repo, roots, opt["--root"]) if _ else json.load(open(os.path.join(repo, roots[root]["recipe"])))   # a base is checked whole (raw: check() expands its profile): with its variants
