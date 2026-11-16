@@ -698,6 +698,25 @@ The owner's words: "Что ещё так проебано? Перепровер�
 - **No new gaps.** A helper added after this decision enters the same rule. The REMOVE record covers exactly the Form-called
   helpers, derived from the Form→helper call table (L3a w13 lift/proof/fpchost) and not from a list.
 
+## Orchestrator decision of 2026-11-16 04:15Z: an esp the facts cannot fix takes the general form (binding for L3a, L3b, L1)
+
+- **Class.** A site where the static stack analysis cannot give esp a single value. For example, after a virtual call
+  `call/jmp [[reg]+k]` whose callee set mixes pops, the vptr tail jmps and the EH continuations that follow it.
+- **Rule.** A static esp fact is used only where it is proven: a single value, or the finite offset set that collapses
+  at `mov esp, ebp` and `leave`.
+  - Everywhere else the lifter emits the general form, which is correct for every esp value: esp is the run-time
+    register, an indirect jmp or call goes through the dispatcher with the full guest state, and an EH continuation takes
+    esp from the frame the exe's own EH code saved.
+  - This is the same as "a loop that is not proven stays sequential". It is not a red fact and not an assumption.
+- **Gates.** No gate may require a static esp at such a site. A gate that does is a defect of that gate, owner L1. The
+  fact record says `esp: general` and names the reason (the callee set's pops), derived from the facts, not listed.
+- **Refused.**
+  - "Callee pop = bytes the caller pushed" is a new assumption. It is also false in general, since `__cdecl` and
+    `__stdcall` callees share slots.
+  - Whole-program container typing is not on the path.
+- **Speed.** The general form costs only at those sites. After the first frame the instructions-per-frame data shows
+  whether any is hot. Only then is a rule written to narrow it.
+
 ## Orchestrator decision of 2026-11-15 09:20Z: weekly budget (binding for every session)
 
 - The owner's usage page reads: weekly 29 % used, reset on Saturday 2026-11-21 18:00Z. At the pace so far the limit ends
