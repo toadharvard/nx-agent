@@ -1442,6 +1442,7 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
                 err.append('run[%d].inputs: {"plugins": "root"} is written once' % i)
             if not any(isinstance(x, dict) for x in (rec.get("plugins") if isinstance(rec.get("plugins"), list) else [])):
                 err.append('run[%d].inputs: {"plugins": "root"} needs the root to declare `plugins`' % i)
+    raw = rs
     rs = expand_run(rec, closure=False)["run"]
     pk = deb_pins()
     names = set()
@@ -1485,7 +1486,7 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
         if not (isinstance(g["args"], list) and all(isinstance(x, str) for x in g["args"])):
             err.append("run[%d].args must be strings" % i)
         try:
-            err += ["run[%d].debs: %s is not declared in env.json debs.packages" % (i, d) for d in step_debs(g, closure=False) if d not in pk]
+            err += ["run[%d].debs: %s is not declared in env.json debs.packages" % (i, d) for d in step_debs(raw[i], closure=False) if d not in pk]
         except ValueError as e:
             err.append("run[%d].%s" % (i, e))
         ins = g["inputs"]
