@@ -2006,7 +2006,7 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant="", repo=".
                 err.append("guest root %s does not load plugin %s (every guest C and C++ unit is compiled with the full plugin set)" % (root, n))
         if list(loaded) != [n for n in PLUGIN_SOURCES if n in loaded]:
             err.append("plugins must be loaded in the order %s" % list(PLUGIN_SOURCES))
-    elif not guest and loaded:
+    elif not guest and loaded and any(u.endswith(CC_EXT + CXX_EXT) for u in units):   # a host root loads a plugin only where its compile stage compiles a unit with it (a generated-only root's plugins are its run steps' inputs)
         err.append("host root %s loads plugin(s) %s (the host profile has the empty plugin set: the plugins enforce guest-ABI semantics)" % (root, ", ".join(sorted(loaded))))
     if not cxx:
         return err + (["admit.json %s: cxx_origin of a root without C++ units" % root] if origin is not None else [])
