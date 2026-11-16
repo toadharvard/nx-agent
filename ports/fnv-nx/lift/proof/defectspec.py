@@ -11,12 +11,15 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from proof import stringspec  # noqa: E402
+from proof import stringspec, x86sys  # noqa: E402
 
 SPECS = {'rep-prefix-ignored': stringspec.check}      # defect id -> check(shape key) -> (result, note); defects.py ids and these keys must be equal (test_defectspec)
 
 
 def main(argv):
+    argv = list(argv)
+    if '--x86sys' not in argv: sys.stderr.write('defectspec: --x86sys PATH is required (the specs build Forms; no default, no environment)\n'); return 2
+    i = argv.index('--x86sys'); x86sys.configure(argv[i + 1]); del argv[i:i + 2]
     rows, cnt, bad = [], collections.Counter(), 0
     for p in sorted(glob.glob(os.path.join(argv[0], '*.jsonl'))):
         for ln in open(p):
