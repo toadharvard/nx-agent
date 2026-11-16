@@ -2516,3 +2516,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - w28 3ba44146b: stage memo keyed by tree content (no stat), ROOTFS_MEMO per deb-set content; gamedata_fetch d193554fe (one item at a time, pinned = installed + framing asserted) sent to L4; foreach range + fan-in rows:all (static). Accepted; head to w15 for cand3b. L6 moves sm_link onto range.
 - w28 next: the dynamic foreach table (L3b). ASSUMPTIONS: L6's nine retirements are taken only where the gate finds no citer.
 - bottleneck: the cand3b head with the pool, walk and budget fixes.
+
+## 2026-11-16 04:41
+- L2 (cand4b 4e40b5970): the only reds left in lift/rt and platform are 3 records placed before their declarations; all decltype and ENTRY1 reds are gone. The ruling stays (C declare-before-use, so the compiler enforces it). cpumodel.c is fixed at base3 330e873c7; L5 extends the move to every platform unit (iob.c __pioinfo/__badioinfo). A placement-free plugin attribute waits until after the first frame.
+- bottleneck: the cand3b head with the pool, walk and budget fixes.
