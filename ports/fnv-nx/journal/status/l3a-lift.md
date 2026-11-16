@@ -1577,3 +1577,15 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - On the committed old pin lift/rt stays red (plugin:fnvnx_names). It turns green when L2 w3's recipe-path pin lands.
 - w8 next: imagechain.py and the test-generator rework.
 - bottleneck: the L2 recipe-path pin; w7 pcsrc reclassification and the udreach census; the farm-2 runs.
+
+## 2026-11-16 05:15 — model-gap keys: candidate roots stay in the universe
+- w7's census, fnv-nx-build l3a-lift/udreach/f5d49d6fa (exe + 5 images; d3dx9_31/38 pending the farm):
+  - 333 of the 368 keys have no site.
+  - 1,667 sites of 35 keys are inside the ranges: 87 under a proven root, 1,580 with a candidate (R3) root only.
+  - ranges.tsv is the reached closure of the entries.
+- Ruled to L3b: candidate (R3) roots are in the universe. Every general transfer's arrival set is the whole ptr set while ASM-012 has no gate. Removing them would need a proof that their relocated word reaches no transfer. L3b covers all 1,667 sites.
+- Semantics on the declared machine:
+  - ordinary user-mode instructions take ordinary semantics;
+  - privileged instructions at CPL 3 / IOPL 0 raise #GP via SEH (OWNER 3).
+- w7 (doing): per-key counts for exactly the x86isa-unimplemented rows, and the split by root kind. Decomp-only roots are not a rule source.
+- bottleneck: the L2 recipe-path pin; the w7 census split; the farm-2 runs.
