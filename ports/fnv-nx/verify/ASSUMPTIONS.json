@@ -764,11 +764,6 @@
   {
    "id": "ASM-102",
    "text": "The tools of this tree name the player's exe only through their `--exe` option or the file name FalloutNV.exe, and the gate's sink list is the class of ways Python opens a path.",
-   "used_by": [
-    "ports/fnv-nx/verify/RULES.md",
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/gate_exepin.py"
-   ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: gate exepin taints every path value that enters a tool from argv or the environment (sys.argv, argparse, os.environ), not only `--exe`, so no exe path is outside the flow",
@@ -840,11 +835,6 @@
   {
    "id": "ASM-206",
    "text": "GCC keeps an FP operation before the FPSR read that follows it in program order (GCC has no FENV_ACCESS).",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h",
-    "ports/fnv-nx/lift/test/fpflags.py"
-   ],
    "aliases": [
     "ASM-307",
     "L3b:A-ORDER"
@@ -856,12 +846,6 @@
   {
    "id": "ASM-207",
    "text": "Host code between guest instructions (imports, native bodies) runs with the guest FPSR parked or raises nothing the guest sees.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
-    "ports/fnv-nx/journal/inbox/l3a-w8-native-fp.md",
-    "ports/fnv-nx/journal/status/l3a-lift.md",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h"
-   ],
    "aliases": [
     "ASM-308",
     "L3b:A-NATIVE"
@@ -883,10 +867,6 @@
   {
    "id": "ASM-209",
    "text": "An MMX read of a register popped by a static-stack function, with no MMX write since, reads data undefined on the CPU too.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h"
-   ],
    "aliases": [
     "ASM-310",
     "L3b:A-STALE"
@@ -958,10 +938,6 @@
   {
    "id": "ASM-219",
    "text": "Every guest thread starts with FCW 0x027F and MXCSR 0x1F80.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
-    "ports/fnv-nx/lift/tools/fpstate.py"
-   ],
    "aliases": [
     "ASM-327",
     "L3b:A-START"
@@ -973,10 +949,6 @@
   {
    "id": "ASM-220",
    "text": "The CONTEXT image handed to guest SEH handlers is only read back by the runtime restore, which restores a reachable control state.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
-    "ports/fnv-nx/lift/tools/fpstate.py"
-   ],
    "aliases": [
     "ASM-328",
     "L3b:A-CTX"
@@ -1028,9 +1000,6 @@
   {
    "id": "ASM-226",
    "text": "A handler's change to the CONTEXT of an exception raised inside an import does not reach the native body.",
-   "used_by": [
-    "ports/fnv-nx/lift/rt/unhandled.cc"
-   ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: a static fact from the EH tables and flow that no reachable filter returning EXCEPTION_CONTINUE_EXECUTION for an import-raised exception writes CONTEXT",
@@ -1039,9 +1008,6 @@
   {
    "id": "ASM-227",
    "text": "Only the C++ frame handler reads the FuncInfo IP-to-state key list.",
-   "used_by": [
-    "ports/fnv-nx/lift/tools/ehtables.py"
-   ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: the consumer fact of the IP-to-state list from the points-to (L3a w4)",
@@ -1050,9 +1016,6 @@
   {
    "id": "ASM-228",
    "text": "A callee does not read eax at a call.",
-   "used_by": [
-    "ports/fnv-nx/lift/tools/fpmodes.py"
-   ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: the callee read set from the code (pcsrc)",
@@ -1061,9 +1024,6 @@
   {
    "id": "ASM-229",
    "text": "The ex argument of _XcptFilter equals the exception record's code.",
-   "used_by": [
-    "ports/fnv-nx/lift/rt/msvcrt_eh.cc"
-   ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: a call-site fact that every caller of _XcptFilter passes GetExceptionCode() of the same record",
@@ -1072,9 +1032,6 @@
   {
    "id": "ASM-230",
    "text": "The truncation error of the generated pi/ln2 table is within its stated bound.",
-   "used_by": [
-    "ports/fnv-nx/lift/rt/fmath.c"
-   ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: the table generator checks the bound in exact rational arithmetic",
@@ -1083,9 +1040,6 @@
   {
    "id": "ASM-232",
    "text": "The precision of Ziv's strategy in rt/fmath.c never exceeds 2^15 limbs (4 MiB of mantissa).",
-   "used_by": [
-    "ports/fnv-nx/lift/rt/fmath.c"
-   ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: a static bound on the precision schedule from the published worst cases for correct rounding of each function at binary32/binary64 (OWNER 9, published theorems), checked by the generator",
@@ -1094,9 +1048,6 @@
   {
    "id": "ASM-233",
    "text": "A relocated dword in the middle of an instruction's bytes is table data and is never executed (lift/tools/ehtables.py code-vs-data decode).",
-   "used_by": [
-    "ports/fnv-nx/lift/tools/ehtables.py"
-   ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: the reloc-consistency rule of L3a w7's facts commit after a0f3d8e, plus data_in_code.tsv per image. A decoding is code only if every relocation lands on an imm32/disp32 field; a misfit refuses candidates and is red under proven flow in all images; jtab, EH and class-3 consumer ranges are data by their rule; the L2 code/data classification is an input",
@@ -1160,10 +1111,7 @@
    "status": "REMOVE",
    "owner": "L3b",
    "text": "The sdm-class reference (float->int E1, compare flag mapping E2, fnstsw/fldcw/fnstenv/fnsave/frstor, cpuid, rdtsc) was transcribed from SDM prose and compared with the host; prose transcription is not a formal source.",
-   "removed_by": "planned: each sdm-class mnemonic is certified against a formal source instead: E1/E2 and the SSE conversions against the K x86-64 semantics or ACL2 x86isa master (transcription, ASM-009 class); x87 control/state against ACL2 x86isa master where defined; cpuid and rdtsc are declared-machine facts (owner: one fixed reference CPU; reference cpuid answer, platform monotonic timer), not model semantics. Whatever has no formal source is reported to the orchestrator. Owner L3b, after the first frame unless it blocks the pack roots.",
-   "used_by": [
-    "ports/fnv-nx/lift/README.md"
-   ]
+   "removed_by": "planned: each sdm-class mnemonic is certified against a formal source instead: E1/E2 and the SSE conversions against the K x86-64 semantics or ACL2 x86isa master (transcription, ASM-009 class); x87 control/state against ACL2 x86isa master where defined; cpuid and rdtsc are declared-machine facts (owner: one fixed reference CPU; reference cpuid answer, platform monotonic timer), not model semantics. Whatever has no formal source is reported to the orchestrator. Owner L3b, after the first frame unless it blocks the pack roots."
   },
   {
    "id": "ASM-801",
@@ -1174,14 +1122,6 @@
    "status": "REMOVE",
    "removed_by": "gate:fpexact",
    "owner": "L2"
-  },
-  {
-   "id": "ASM-102",
-   "text": "The tools of this tree name the player's exe only through their `--exe` option or the file name FalloutNV.exe, and the gate's sink list is the class of ways Python opens a path.",
-   "aliases": [],
-   "status": "REMOVE",
-   "removed_by": "planned: gate exepin taints every path value that enters a tool from argv or the environment (sys.argv, argparse, os.environ), not only `--exe`, so no exe path is outside the flow",
-   "owner": "L1"
   },
   {
    "id": "ASM-803",
