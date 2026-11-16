@@ -3,15 +3,15 @@
 python3 -I tests/test_simdsplit.py"""
 import os, sys, unittest
 import z3
-HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE))
-import simdsplit as P
+HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
+from proof import bounds, simdsplit as P
 
 
 CALLS = []
 
 
-def solver(asserts, timeout):
-    CALLS.append(len(asserts)); s = z3.Solver(); s.set('timeout', timeout); s.add(*asserts); return s
+def solver(asserts, rlimit):
+    CALLS.append(len(asserts)); s = z3.Solver(); s.set('rlimit', rlimit); s.add(*asserts); return s
 
 
 class T(unittest.TestCase):
@@ -33,12 +33,12 @@ class T(unittest.TestCase):
     def test_lane_split_proves(self):
         g, env, mx, fpl = self.setup_lanes(False)
         del CALLS[:]
-        self.assertIs(P.prove_flags(g, z3.BoolVal(True), env, mx, fpl, solver, 20000), True)
+        self.assertIs(P.prove_flags(g, z3.BoolVal(True), env, mx, fpl, solver, bounds.Z3_RLIMIT), True)
         self.assertTrue(CALLS)                                         # the lane pieces were asked (it was not true by simplification alone)
 
     def test_lane_split_does_not_prove_a_different_lane(self):
         g, env, mx, fpl = self.setup_lanes(True)
-        self.assertIsNot(P.prove_flags(g, z3.BoolVal(True), env, mx, fpl, solver, 20000), True)
+        self.assertIsNot(P.prove_flags(g, z3.BoolVal(True), env, mx, fpl, solver, bounds.Z3_RLIMIT), True)
 
 
 if __name__ == '__main__': unittest.main()

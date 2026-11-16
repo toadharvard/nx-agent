@@ -4,7 +4,7 @@
 # --queue FILE: the PINNED queue of a pack (fnv-nx-build branch l3b-lift/queue/<pack12>-<prover12>, file queue.tsv, proof/packqueue.py): the rows `shape_key<TAB>shape_sha`
 #   are the work, split by position mod N; nothing is fetched or scanned (steps 2 and 2b are skipped), so every farm of one run has the same queue.  The header's ir_sha256 must be
 #   the IR of this machine and the rows must hash to the header's queue_id, else exit 1.  Output branch id = <IR id>-<queue_id>.  Every record carries model_fns / closure_sha (K).
-# Mode: a queue whose header has `# mode=simd` is checked by simdshard.py (simdcheck.check per shape, wall-clock budget TIMEOUT s, default 60) instead of shapeprove.py; same shards, records, branches, resume.  `# qcache=<branch>:<file>` seeds simdcheck's proved-query cache.
+# Mode: a queue whose header has `# mode=simd` is checked by simdshard.py (simdcheck.check per shape, bounded by proof/bounds.py only) instead of shapeprove.py; same shards, records, branches, resume.  `# qcache=<branch>:<file>` seeds simdcheck's proved-query cache.
 # Inputs (private / exe-derived, fetched from the artifacts repository fnv-nx-build, never stored in this repository):
 #   branch l3b-lift/shapes        KEYS.tsv + <module>/shapes.tsv (output of proof/census.py); every shapes.tsv is checked against KEYS.tsv
 #   branch tools/sail-mirror      the pinned downloads of the Sail/isla toolchain; used by farm/sail_setup.sh (MIRROR=...) only when the toolchain
@@ -155,7 +155,7 @@ if [ "$MODE" = simd ]; then
     [ -n "$CFS" ] || { echo "a simd queue needs '# cpufeat=<branch>:<file>' (the CPUID feature-bit table)" >&2; exit 1; }
     fetch_branch "${CFS%%:*}" "$W/in/cpufeat-$K"; CF="$W/in/cpufeat-$K/${CFS#*:}"
     [ "$(sha256sum "$CF" | cut -d' ' -f1)" = "$CFH" ] || { echo "cpufeat table sha256 differs from the queue header" >&2; exit 1; }
-    python3 -I "$HERE/simdshard.py" --cpufeat "$CF" --x86sys "$X86SYS_FILE" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --timeout "${TIMEOUT:-60}" --slice "${SLICE:-1}" --cache "$GATE_CACHE" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
+    python3 -I "$HERE/simdshard.py" --cpufeat "$CF" --x86sys "$X86SYS_FILE" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --slice "${SLICE:-1}" --cache "$GATE_CACHE" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
 else
 python3 -I "$HERE/shapeprove.py" "${TC[@]}" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --eip "${EIP:-sym}" --slice "${SLICE:-1}" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
 fi

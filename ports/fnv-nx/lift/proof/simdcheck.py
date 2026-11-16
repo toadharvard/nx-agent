@@ -12,7 +12,7 @@ import json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.join(HERE, '..')); sys.path.insert(0, HERE)
 import z3
 from fnvlift import dsl
-from proof import forms, shape, symform, simdspec as S, simdsplit
+from proof import bounds, forms, shape, symform, simdspec as S, simdsplit
 REG = ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi']
 
 
@@ -23,7 +23,7 @@ def _load(M0, a, w):
     return bs[0] if len(bs) == 1 else z3.Concat(*bs)
 
 
-def _obligation(rep, F, sins_ops, imm, timeout):
+def _obligation(rep, F, sins_ops, imm, rlimit):
     """refinement query of one Form F (symbolic or concrete) against the spec on the encoding rep; sins_ops: the instruction whose operands give the memory operand"""
     e = S.Enc(rep)
     P = F.post()
@@ -58,7 +58,7 @@ def _obligation(rep, F, sins_ops, imm, timeout):
         sa, sv, sb = r.store
         for k in range(sb // 8): mem = z3.Store(mem, sa + k, z3.Extract(8 * k + 7, 8 * k, sv))
     eq.append(P['mem'] == mem)
-    return _discharge(r.env, nf, goals, eq, timeout, r.fpl, d['mxcsr'])
+    return _discharge(r.env, nf, goals, eq, rlimit, r.fpl, d['mxcsr'])
 
 
 def _components(e, bits=False):
@@ -108,7 +108,6 @@ def _consts(e):
     return acc
 
 
-_BUDGET = [0, 0.0]                  # [seconds per shape (0: none), deadline of the shape being checked]
 _QC = {}                              # canonical query -> proved (unsat): sha256 of the SMT-LIB text of the canonical assertions
 _QCFILE = os.environ.get('SIMD_QCACHE')
 
@@ -138,22 +137,19 @@ def _canonical(g, cs, env, fpl, mx):
 
 class _Ask:
     """one goal decided by the fast pipeline (bit-blast -> sat); only when it answers `unknown` (the SAT core cannot decide the array terms that remain after bit-blasting, so a SATISFIABLE query that reads memory, i.e. a
-    refutation, comes back unknown at once) the same goal goes to the complete `smt` pipeline.  Both are sound for unsat; smt is complete over arrays and bit-vectors, so the result is exact.  `timeout` (ms) covers both steps."""
-    def __init__(s, asserts, timeout): s.asserts, s.timeout, s.s = asserts, timeout, None
+    refutation, comes back unknown at once) the same goal goes to the complete `smt` pipeline.  Both are sound for unsat; smt is complete over arrays and bit-vectors, so the result is exact.  `rlimit` (z3 resource limit, proof/bounds.py; no clock) is given to each of the two steps."""
+    def __init__(s, asserts, rlimit): s.asserts, s.rlimit, s.s = asserts, rlimit, None
     def check(s):
-        import time
-        t0 = time.time(); s.s = _TAC.solver(); s.s.set('timeout', s.timeout); s.s.add(*s.asserts); r = s.s.check()
+        s.s = _TAC.solver(); s.s.set('rlimit', s.rlimit); s.s.add(*s.asserts); r = s.s.check()
         if r != z3.unknown: return r
-        left = s.timeout - int(1000 * (time.time() - t0))
-        if left <= 0: return r
-        s.s = _TAC_SMT.solver(); s.s.set('timeout', left); s.s.add(*s.asserts); return s.s.check()
+        s.s = _TAC_SMT.solver(); s.s.set('rlimit', s.rlimit); s.s.add(*s.asserts); return s.s.check()
     def model(s): return s.s.model()
 
 
-def _ask(asserts, timeout): return _Ask(asserts, timeout)
+def _ask(asserts, rlimit): return _Ask(asserts, rlimit)
 
 
-def _discharge(env, nf, goals, eq, timeout, fpl=(), mx=None):
+def _discharge(env, nf, goals, eq, rlimit, fpl=(), mx=None):
     """proved iff every part of every goal is unsat under env (and nf for the state parts), in every case of its case partition (FP rows: _case_partition; others: one case).  Parts that simplify to true
     (a register the instruction does not touch) are not asked.  An FP part that is a pure function of its lane operands and MXCSR is asked in its canonical form (_canonical), and a proved canonical query
     is remembered (the same lane function of the builder is proved once, whatever register or address the shape names); anything the canonical query does not prove is asked whole."""
@@ -166,9 +162,8 @@ def _discharge(env, nf, goals, eq, timeout, fpl=(), mx=None):
         if z3.is_true(g): continue
         cases = _case_partition(fpl, chunk, mx) if fpl else [[]]
         for cs in cases:
-            if _BUDGET[0] and time.time() > _BUDGET[1]: unknown = True; break          # the shape's wall-clock budget is spent: the rest is not decided (timeout)
             if fpl and state and cs is cases[0] and chunk is None:
-                sp = simdsplit.prove_flags(g0, nf, env, mx, fpl, _ask, timeout)          # the per-lane split of simdsplit: proved for the whole part (all its cases), or a piece undecided
+                sp = simdsplit.prove_flags(g0, nf, env, mx, fpl, _ask, rlimit)          # the per-lane split of simdsplit: proved for the whole part (all its cases), or a piece undecided
                 if sp == 'unknown': unknown = True; break
                 if sp: break
             if fpl and state:
@@ -176,19 +171,19 @@ def _discharge(env, nf, goals, eq, timeout, fpl=(), mx=None):
                 if can is not None:
                     key = hashlib.sha256(z3.And(*can).sexpr().encode()).hexdigest()
                     if key in _QC: continue
-                    if _ask(can, timeout).check() == z3.unsat:
+                    if _ask(can, rlimit).check() == z3.unsat:
                         _QC[key] = True
                         if _QCFILE: open(_QCFILE, 'a').write(key + '\n')
                         continue
-            s = _ask([env, *cs, z3.And(nf, z3.Not(g)) if state else z3.Not(g)], timeout)          # FP terms are bit-blasted (fpa2bv) and decided by the SAT core
+            s = _ask([env, *cs, z3.And(nf, z3.Not(g)) if state else z3.Not(g)], rlimit)          # FP terms are bit-blasted (fpa2bv) and decided by the SAT core
             t0 = time.time(); res = s.check()
             if os.environ.get('SIMD_TRACE') and (res != z3.unsat or time.time() - t0 > 2): print('  part', str(g)[:70].replace('\n', ' '), res, round(time.time() - t0, 1), flush=True)
             if res == z3.sat: return 'FAILED', str(s.model())[:400]
             if res != z3.unsat: unknown = True
-    return ('timeout', None) if unknown else ('proved', None)
+    return (bounds.BOUND, None) if unknown else ('proved', None)
 
 
-def check(key, timeout=60000):
+def check(key, rlimit=bounds.Z3_RLIMIT):
     """-> (result, info).  proved: the symbolic Form of the shape refines the spec.  proved-by-cases: the builder branches on the immediate (symform.SymbolicBranch or a
     Python index by it: the Form of the shape cannot be made symbolic), so every one of the 256 immediates was checked with its concrete Form (a complete case split of a
     finite field; the shape's certificate needs L3a to make the builder symbolic in the immediate, or the case split as the certificate's `split`)."""
@@ -203,11 +198,11 @@ def check(key, timeout=60000):
     except KeyError: return 'no-form', None
     except symform.FieldDecodeError:
         if imm is None: return 'no-form', None
-        return _concrete(rep, timeout)
+        return _concrete(rep, rlimit)
     except (symform.SymbolicBranch, TypeError, AssertionError) as ex:
         if imm is None: return 'builder-branches-on-field', str(ex)[:120]
-        return _by_cases(key, rep, timeout)
-    return _obligation(rep, sf.form, symform.symins(key)[0], imm, timeout)
+        return _by_cases(key, rep, rlimit)
+    return _obligation(rep, sf.form, symform.symins(key)[0], imm, rlimit)
 
 
 def cleared(rep):
@@ -233,27 +228,27 @@ def touches_fp(key):
     except (S.F.Uncertified, KeyError): return False
 
 
-def _concrete(rep, timeout):
+def _concrete(rep, rlimit):
     """a shape whose immediate byte is part of the mnemonic (the cmpeqps ... cmpnleps / cmpeqpd ... pseudo-ops: one predicate each): the immediate is the shape's fixed byte, not a field"""
     md = shape.decoder(); ins = list(md.disasm(rep, 0))[0]
     try: F = forms.build(ins, 0)
     except KeyError: return 'no-form', None
-    return _obligation(rep, F, ins, z3.BitVecVal(rep[-1], 8), timeout)
+    return _obligation(rep, F, ins, z3.BitVecVal(rep[-1], 8), rlimit)
 
 
-def _by_cases(key, rep, timeout):
+def _by_cases(key, rep, rlimit):
     md = shape.decoder()
     for v in range(256):
         code = rep[:-1] + bytes([v]); ins = list(md.disasm(code, 0))[0]
         try: F = forms.build(ins, 0)
         except KeyError: return 'no-form', None
-        r, info = _obligation(code, F, ins, z3.BitVecVal(v, 8), timeout)
+        r, info = _obligation(code, F, ins, z3.BitVecVal(v, 8), rlimit)
         if r != 'proved': return r, 'imm=%d %s' % (v, info)
     return 'proved-by-cases', None
 
 
 def main(a):
-    if '--cache' not in a: raise SystemExit('usage: simdcheck.py SHAPES.tsv --cache VERDICT_STORE [--only S] [--cleared F] [--cpufeat TABLE] [--timeout MS] [--budget S] [--progress]')
+    if '--cache' not in a: raise SystemExit('usage: simdcheck.py SHAPES.tsv --cache VERDICT_STORE [--only S] [--cleared F] [--cpufeat TABLE] [--progress]')
     S.F.configure(a[a.index('--cache') + 1])
     if '--cpufeat' in a:
         from fnvlift import inputs; inputs.configure(cpufeat=a[a.index('--cpufeat') + 1])          # the CPUID feature-bit table: the class order (cleared) reads it
@@ -265,14 +260,13 @@ def main(a):
     cnt = {}
     for k in keys:
         if only not in k: continue
-        if '--budget' in a: import time; _BUDGET[0] = int(a[a.index('--budget') + 1]); _BUDGET[1] = time.time() + _BUDGET[0]
-        r, info = check(k, int(a[a.index('--timeout') + 1]) if '--timeout' in a else 60000)
+        r, info = check(k)
         if r == 'no-row' and k in ud: r = 'ud-class'                  # no spec row by rule: the opmap's cleared class (Form.fault(UD) is its own certificate), not a SIMD row
         cnt[r] = cnt.get(r, 0) + 1
         if '--progress' in a: print('PROGRESS', k, r, flush=True)
-        if r in ('FAILED', 'timeout'): print(r, k, info)
+        if r in ('FAILED', bounds.BOUND): print(r, k, info)
     print(cnt)
-    return 0 if not cnt.get('FAILED') and not cnt.get('timeout') else 1
+    return 0 if not cnt.get('FAILED') and not cnt.get(bounds.BOUND) else 1
 
 
 if __name__ == '__main__': sys.exit(main(sys.argv[1:]))
