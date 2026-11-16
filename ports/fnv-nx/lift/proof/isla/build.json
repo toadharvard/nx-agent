@@ -1,0 +1,80 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "cc": "x86_64-linux-gnu-gcc-13",
+  "cxx": "x86_64-linux-gnu-g++-13"
+ },
+ "flags": {
+  "c": [],
+  "cxx": [],
+  "asm": []
+ },
+ "include": [],
+ "units": "all",
+ "external": [
+  {
+   "name": "sail",
+   "repo": "fnv-nx-build",
+   "ref": "tools/sail-mirror",
+   "commit": "b4cf9ee3a15f99037e7a28a91e0494d1a8cb7fc2",
+   "tree_sha256": "1ba45588e2824da0cca9d9ec3e04ec9b4e1fa06a3a20db04e22bdc4966991631",
+   "at": "/ext/sail"
+  }
+ ],
+ "run": [
+  {
+   "name": "isla",
+   "exec": "/usr/bin/python3.12",
+   "args": [
+    "-I",
+    "/in/2",
+    "/in/3",
+    "/in/4",
+    "/in/5"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/proof/sail_pins.txt",
+    "ports/fnv-nx/lift/proof/isla/build_isla.py",
+    {
+     "external": "sail",
+     "path": "isla-e9b5d9453942.tar.gz"
+    },
+    {
+     "external": "sail",
+     "path": "isla-vendor.tar.gz"
+    },
+    {
+     "external": "sail",
+     "path": "z3_solver-5.4.0.0-py3-none-manylinux_2_27_x86_64.whl"
+    }
+   ],
+   "debs": {
+    "closure": [
+     "python3",
+     "cargo",
+     "gcc-13",
+     "g++-13"
+    ]
+   },
+   "outputs": [
+    "isla-execute-function"
+   ],
+   "scratch": [
+    "/scratch"
+   ],
+   "dirs": [
+    "z3lib"
+   ],
+   "env": {
+    "TMPDIR": "/scratch",
+    "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER": "x86_64-linux-gnu-gcc-13",
+    "CC": "x86_64-linux-gnu-gcc-13",
+    "CXX": "x86_64-linux-gnu-g++-13"
+   }
+  }
+ ],
+ "outputs": {
+  "ISLA": "isla-execute-function",
+  "Z3LIB": "z3lib"
+ }
+}

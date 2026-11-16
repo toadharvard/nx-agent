@@ -4,7 +4,7 @@
         (the object id and the `unit` of a constants row are the path as given)
     objstub.py terminators --cc CC [--cflag F]... [--lang c|c++] --header H... -o FILE
 Inputs: ELF relocatable objects, ELF32 (ILP32; SHT_RELA with Elf32_Rela, R_AARCH64_P32_* kinds) or ELF64, AArch64, little endian. Decoder: ONE source, verify/a64access.cc (built with
-the host g++ against LLVM 18's MC layer; env var A64ACCESS names a prebuilt binary): per word the registers read and written
+the host g++ against LLVM 18's MC layer): per word the registers read and written
 (MCInstrDesc defs/uses/implicit, tied operands), the memory operand and the kind. Everything the T and V classes need beyond that
 is read from architectural encoding fields (Arm ARM A64 top-level table), never from mnemonics. Assumption: LLVM's AArch64 (ASM-043)
 instruction descriptions and disassembler are correct; the test cross-checks the decoded word set against objdump. Output: one line `obj:symbol: KIND detail`, sorted; exit 0 iff no finding.
@@ -207,12 +207,10 @@ A64_BUILD = "g++ -std=c++17 -O1 $(llvm-config-18 --cxxflags) a64access.cc -o OUT
 _TOOL = []
 
 def tool(cache=None):
-    """Path of the a64access binary: $A64ACCESS, else CACHE/objstub/a64access-<hash of the source, the build line and the LLVM and g++
+    """Path of the a64access binary: CACHE/objstub/a64access-<hash of the source, the build line and the LLVM and g++
     versions> (built once), else built once per process into a temporary directory (removed at exit)."""
     if not _TOOL:
-        if os.environ.get("A64ACCESS"):
-            _TOOL.append(os.environ["A64ACCESS"])
-        elif cache:
+        if cache:
             q = lambda *a: subprocess.run(list(a), capture_output=True, text=True).stdout
             h = hashlib.sha256((open(os.path.join(HERE, "a64access.cc")).read() + A64_BUILD + q("llvm-config-18", "--version") + q("g++", "--version")).encode()).hexdigest()
             p = os.path.join(cache, "objstub", "a64access-" + h)
@@ -2244,7 +2242,7 @@ def plugin_hash(so):
 SYSTEM_SJ = ("/usr/include", "/usr/aarch64-linux-gnu/include")   # the pinned distribution's libc headers (env.json: libc6-dev, libc6-dev-arm64-cross)
 
 
-def unit_terminators(cc, units, flags, cache, jobs, rets=None, sjdirs=SYSTEM_SJ, so=None):
+def unit_terminators(cc, units, flags, cache, jobs, rets=None, sjdirs=SYSTEM_SJ, so=None, root_plugins=None):
     """Terminator set of a root = union over its C/C++ units of the noreturn declarations the compiler CC itself sees in the unit's
     preprocessed text (the plugin runs on unit.ii with the unit's flags: exactly the TU the compile stage compiles, headers included).
     UNITS [(pp_key, ii path, lang c|c++)]; FLAGS {lang: [..]}. Per unit cached CACHE/objstub/t-<key>.txt, key = pp_key (a hash of
@@ -2253,16 +2251,20 @@ def unit_terminators(cc, units, flags, cache, jobs, rets=None, sjdirs=SYSTEM_SJ,
     `ret` output, the compiler's own type; only typedef-named and builtin-named return types are listed).
     SJDIRS: the directories of the pinned headers (the guest runtime external's mount point for a guest root; the distribution's include dirs otherwise): a function
     is an unwinder by <setjmp.h> only when DECL_SOURCE_FILE is a file named setjmp.h INSIDE one of them (a same-named header elsewhere does not count).
+    ROOT_PLUGINS (key, flags_of) or None: the plugins of the root's own compile stage, loaded before the terminator plugin, so that the compiler sees the
+    dialect they register (the dispatch attributes fnvnx_host, fnvnx_entry, ...) as it does in the stage. KEY (JSON-able) holds their hashes and the
+    arguments; FLAGS_OF(dir) gives the flags that load them, with their -out files in the directory DIR. The caller derives both from recipe.root_plugin_flags.
     -> (sorted names, sha256, failures [(pp_key, message)]): a unit the plugin cannot process is a failure of that unit, never an exception."""
-    ph = plugin_hash(so)   # SO: the root's analysis plugin (objects.json `analysis_plugin`)
+    ph = plugin_hash(so)
+    rkey, rflags = root_plugins if root_plugins else (None, lambda d: [])   # SO: the root's analysis plugin (objects.json `analysis_plugin`)
 
     def one(u):
         pk, ii, lang = u
-        key = hashlib.sha256(json.dumps([pk, ph, lang, flags[lang], list(sjdirs)]).encode()).hexdigest()
+        key = hashlib.sha256(json.dumps([pk, ph, lang, flags[lang], list(sjdirs), rkey]).encode()).hexdigest()
         cp, rp = (os.path.join(cache, "objstub", "t-%s.%s" % (key, e)) for e in ("txt", "ret"))
         if not (os.path.exists(cp) and os.path.exists(rp)):
             with tempfile.TemporaryDirectory() as td:
-                r = subprocess.run([cc, "-S", "-o", os.devnull, "-fplugin=" + so, "-fplugin-arg-objstub_plugin-out=" + td + "/o.txt",
+                r = subprocess.run([cc, "-S", "-o", os.devnull] + rflags(td) + ["-fplugin=" + so, "-fplugin-arg-objstub_plugin-out=" + td + "/o.txt",
                                     "-fplugin-arg-objstub_plugin-ret=" + td + "/r.txt",
                                     "-fplugin-arg-objstub_plugin-setjmp-dirs=" + ":".join(sjdirs)] + flags[lang]
                                    + ["-x", lang, "-fpreprocessed", ii], capture_output=True, text=True)

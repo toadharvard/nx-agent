@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Page table of the citations of proof/x87spec.py in the pinned Intel SDM.
-    python3 -I sdm_pages.py SDM.txt [x87spec.py] > sdm_pages.tsv
+"""Page table of the citations of the proof specs in the pinned Intel SDM: every key `SDM <vol>:<id>` in the files of SPECS (the x87 spec, the SIMD integer rows and their quotes).
+    python3 -I sdm_pages.py SDM.txt [SPEC ...] > sdm_pages.tsv      (without SPEC: SPECS)
     python3 -I sdm_pages.py --cites SDM.txt sdm_oracle_req.tsv > tests/sdm_oracle_cites.txt     (the oracle cites: the SDM text of each statement a test relies on, see cites())
 SDM.txt is `pdftotext -layout` of the pinned PDF (fnv-nx-build tools/intel-sdm commit 0768b0baf29a625871084414338c12f65d0f2cc8, PDF sha256 a4a62e6a7ba11a76c7753a195b825087306812aac39b930973f9168ee599f321; its MANIFEST.json holds edition, order numbers and sha256). A citation key is
 `SDM <vol>:<id>`: id = a section number (8.5.1.1), a table (T8-6), or an instruction page (FADD, F2XM1). The search for a key is limited to the pages of its volume (page_volume/volume_range: the pages whose own footer names the volume; a key never resolves into another volume). The tool resolves every distinct key that the spec's text carries
@@ -8,7 +8,11 @@ to the printed page of its heading ("Vol. 1 8-19", "Vol. 2A 3-123") and the PDF 
 defect of the citation, not of the tool. Rules: a section heading is a line that starts with the number followed by a capitalised title, the last match after the table of contents;
 a table heading is a line `Table <n>-<m>. ` or `Table <n>-<m> Title`, last match; an instruction page is the first line after the table of contents that starts with the mnemonic or a slash
 list containing it, followed by an em dash (the title of the instruction pages)."""
-import re, sys
+import os, re, sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SPECS = ('x87spec.py', 'simdsdm.py', 'simdsdm_cites.txt')      # the one list of the files whose citation keys the table holds; the table is generated from them and never extended by hand (test_x87spec reads this list)
+KEY = r'SDM (1|2A|2B|2C|2D|3A):(T\d+-\d+|\d+(?:\.\d+)*|[A-Za-z][A-Za-z0-9]*)'
 
 def pages(txt): return txt.split('\f')
 
@@ -106,8 +110,8 @@ def main(argv):
     if argv[1] == '--cites':          # python3 -I sdm_pages.py --cites SDM.txt tests/sdm_oracle_req.tsv > tests/sdm_oracle_cites.txt
         o, bad = cites(open(argv[2], encoding='utf-8', errors='replace').read(), open(argv[3], encoding='utf-8').read()); sys.stdout.write(o); sys.exit(1 if bad else 0)
     txt = open(argv[1], encoding='utf-8', errors='replace').read()
-    spec = open(argv[2] if len(argv) > 2 else __file__.replace('sdm_pages.py', 'x87spec.py'), encoding='utf-8').read()
-    keys = sorted(set(re.findall(r'SDM (1|2A|2B|2C|2D|3A):(T\d+-\d+|\d+(?:\.\d+)*|[A-Za-z][A-Za-z0-9]*)', spec)), key=lambda k: (k[0], k[1]))
+    spec = ''.join(open(f, encoding='utf-8').read() + '\n' for f in (argv[2:] or [os.path.join(HERE, f) for f in SPECS]))
+    keys = sorted(set(re.findall(KEY, spec)), key=lambda k: (k[0], k[1]))
     print('key\tpdf_page\tprinted_page')
     for vol, ident in keys:
         r = resolve(txt, vol, ident)

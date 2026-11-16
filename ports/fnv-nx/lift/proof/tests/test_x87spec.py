@@ -136,8 +136,9 @@ class Coverage(unittest.TestCase):
 class Citations(unittest.TestCase):
     def test_every_citation_has_a_page(self):
         with open(os.path.join(os.path.dirname(HERE), 'sdm_pages.tsv'), encoding='utf-8') as fh: tab = [l.rstrip('\n').split('\t') for l in fh][1:]
-        with open(os.path.join(os.path.dirname(HERE), 'x87spec.py'), encoding='utf-8') as fh: src = fh.read()
-        want = set('SDM %s:%s' % k for k in re.findall(r'SDM (1|2A|2B|2C|2D|3A):(T\d+-\d+|\d+(?:\.\d+)*|[A-Za-z][A-Za-z0-9]*)', src))
+        import sdm_pages      # the table holds the keys of the files of sdm_pages.SPECS: the one list, the one key pattern
+        src = ''.join(open(os.path.join(os.path.dirname(HERE), f), encoding='utf-8').read() + '\n' for f in sdm_pages.SPECS)
+        want = set('SDM %s:%s' % k for k in re.findall(sdm_pages.KEY, src))
         self.assertEqual(want, set(r[0] for r in tab))
         self.assertEqual([r for r in tab if not r[1].isdigit()], [])                              # the key is the PDF page index
         self.assertEqual([r for r in tab if r[2] and not r[2].startswith('Vol. ')], [])            # a printed page is read text or empty

@@ -410,3 +410,59 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - Decision: the trunk claude/fnv-nx-clean is NOT merged into the L3b lead. Trunk fb9dd044f deletes the roots it cut (platform, render, rt/guest, loader, lib, tests; 463 files) and those live on their leads' branches, so a merge here would delete other layers' work (55 conflicts). gate_oracle for L3b roots is judged on the lead's own tree.
 - lift/proof tests run bare (37 files): 13 fail, none for x86sys. Environment: certs_build/irdeps/model_patches need the Sail inputs, ehoracle needs pefile, gate_fpexact needs elftools. Open: immsel (the int defect); declared_gen (committed rows sha); forms_ssefp (exit 5); formgate (DATAMODEL.json missing in the checkout); opmap_sdm; rtroot (KeyError 'cc'); simdcheck test_wrong_lane_op_is_refuted (timeout where FAILED is expected); x87spec citation pages. Next worker item.
 - bottleneck: farms 1-4 (post-v3 queue); the L3a int_/SV class fix.
+
+## 2026-11-16 00:45Z
+- 2.6 integer re-prove (queue 257a93722adb, 515 rows, fnv-nx-build l3b-lift/queue/7ef692b5b853-d68f125e11f7 @5e78d3544): the first 4 farms never ran. Farms 2-4: short SHA ref_not_found. Farm 1: empty checkout. All 4 archived. New farms l3b-int 1-4 started at nx-agent claude/fnv-l3b-lift, shards K/4: session_01KmtZKS324Mh9CWZ3APuCUm, session_01KmtZKUJTJJy6aiVcibniH8, session_01KmtZKSmRUeqtQGLhvG1YkA, session_01KmtZKTRYAYnFcNiHPpfXLr. Farm 4 also runs the rcpgen acceptance check (sha d2a3920e).
+- Defect closed, 48ef39ad8: at d68f125 the farms could not load the pinned IR. formgate.ir_path validated the whole forms-gate document, so the liftpack external, which is not declared yet, made the IR unloadable. Fix: load_externals (format, keys, externals, x86ir) for the prover; load_inputs adds the pack keys for the forms gate. Farms rerun at 48ef39ad8. x86sys sha 55964ce7 is unchanged, so the queue header still matches.
+- 2.8 lift/proof tests, 451c3d4c5 (worker aef9b4b70f184e145): all 37 files exit 0 when run bare. Not run here, because a declared input is missing from this container: certs_build, model_patches, irdeps (Sail), gate_fpexact (pinned env), opmap_sdm (FNVNX_BUILD). Defects fixed: formgate configures x86sys; forms_sys int_ raises SymbolicBranch on a symbolic vector, so `cd n` has no shape Form; sdm_pages SPECS is the one key source; simdcheck refuted queries no longer read as timeout. Open: the simdcheck tactic, smt only on sat=unknown, keeps the fast path (worker doing). Open: the int vector 0x29 row is undecided, which blocks a `cd n` mux.
+
+## 2026-11-16 02:30Z
+- Toolchain on the recipe (L1 rulings: isla is built by a recipe root, no farm-built binaries; no wall clock in a stage; a timeout is never a verdict):
+  - lift/proof/isla (ISLA, Z3LIB): fb0f3c211 / 407114cb3. Its input is tools/sail-mirror b4cf9ee3 (tree 1ba45588). It uses the rust debs of env.json (mirror e37c2692). It passes `check` and is not yet built: no pinned machine here.
+  - lift/proof/sailmodel (MODEL): the patched model. It goes through the one patch script sail_patches/apply.py, which sail_build.sh also calls. diff -r against the old patch section: identical.
+  - The lead takes verify/recipe.py, RECIPE.md, env.json and the verify tests whole from L1 w28 a081cba96 (eec789cf5, 1c81f6c6a). formgate goes through recipe.ext_dir. The lead-only recipe.py commits were sent to L1 to place on w28. 17 of 45 roots are red under the new gen and guest rules; the owners are L3a and L6, routed by L1.
+  - simdcheck eb53b3aa7: sat stays the fast path; only an unknown goes to smt.
+- Next for L3b: move the prover's wall-clock TIMEOUT to a pinned deterministic bound (z3 rlimit, isla step bound). Today's farm runs are measurements: only `proved` certifies.
+- 2.6 integer queue 257a93722adb: shard 1/4 is final, 129 rows: proved 1, model-defect 1, model-gap 126, timeout 1 (3450 s). The v3 model-gap keys stay model-gap. Next: w4 counts the 451 gaps by opcode, and a model patch follows from the pinned ACL2 source. Shards 2-4 are running. SIMD shard 1/4 runs on farm 1 at eb53b3aa7.
+- udsail (L3a w13 183e1ebef): rule accepted with 4 conditions. Farm 2 runs it after its shard, as a classifier check, not as an input.
+
+## 2026-11-16 03:25Z (claude/fnv-l3b-lift 472616f5f)
+- done (f1db9564f, dc9511205, fc6f17a43, e6ed32b7e, 472616f5f, worker a4fefc3884cbfe194): gate_fpexact check 0 certifies only what is proven.
+  - Universe: one source, lift/proof/helpercalls.universe(repo, cache, objects). It reads the Form -> helper calls from the lifter's emitter, plus the fnvnx_ftoi helpers record.
+  - Widths: only from the DWARF formal_parameter types of the defining object. Underived is red (helper-width-underived).
+  - Narrow (<= 32 bits): red helper-no-exhaustive-cert until lift/proof/fpchost (w13) reports 0 mismatches per helper over 2^32 inputs, with the Form term compiled to C by one op table as the reference.
+  - Wide: REMOVE record ASM-329 (owner L3b). Removal: isla over the host x86_64 object after the SSE FP model patch, with the four static conditions of integ e8faa4266. ASM-322 retired, replaced by 329.
+  - gate_assumptions findings: 23 at 4865c26a1, 23 at e6ed32b7e (pre-existing red, not raised).
+  - Nothing run end to end: the pinned env is absent here. The universe needs the liftpack declared in formgate_inputs.json.
+- blocked: lift/rt needs -g for the DWARF widths (asked the L3a lead).
+- blocked: w13's compare stage; fpcuniverse.py is to be deleted as a second copy.
+- doing (farm 4, session_01KmtZKTRYAYnFcNiHPpfXLr): at 4865c26a1:
+  - envcheck with the env.json rust profile (L1 bc9de3d83 -> 04a66bb77);
+  - the rcpgen check;
+  - the recipe builds of lift/proof/isla and lift/proof/sailmodel (isla debs = the closure of python3 and cargo).
+- doing: integer shards 2 and 3 (resuming), SIMD shard 1 (resuming).
+
+## 2026-11-16 03:20Z (claude/fnv-l3b-lift c31ed7f26)
+- done (9de00f15d, worker a4fefc3884cbfe194): check 0 under the one-method ruling (integ a172a44b7).
+  - Every helper in helpercalls.universe is covered by rcpcert (its defining unit is rcptab.c's object, decided from the symbol table) or by ASM-329; a helper covered by neither is red.
+  - fnvl_tab_* are inline in fnvl.h, so they fall under ASM-329. The width derivation is deleted.
+  - gate_assumptions findings: 23 = 23.
+- done (8abd1ab02, b0b2af12e, c31ed7f26, worker a3994d45035f1f412): toolchain roots on the recipe.
+  - lift/rcpgen GREEN (farm 4): rcptab.c sha256 d2a3920e...58f5, equal to the committed file.
+  - lift/proof/sailmodel GREEN (farm 4): MODEL sha256 ea88b550d8a7f88d90c56ca8eb4d3a202a203e592353c5218373b5d824a42f27.
+  - Fixes: exec /usr/bin/python3.12; debs by closure; the render/total unused import dropped; the isla vendor layout; the patch-script modules mounted as inputs and loaded by SourceFileLoader.
+- blocked (owner L1): lift/proof/isla red. verify/sandbox.py:110-118 returns ENOSYS for getrandom; OpenSSL in cargo's libgit2 needs it. The rule (constant stream for every entropy interface) was sent to w28.
+- open (owner L1): recipe.py _deb_tree copies symlink targets from the host (alternatives), not from the deb.
+- doing: integer shards 2 and 3, SIMD shard 1.
+
+## 2026-11-16 04:10Z (claude/fnv-l3b-lift 60525f7a6)
+- done (farm 4, session_01KmtZKTRYAYnFcNiHPpfXLr): the three toolchain roots are green on the recipe.
+  - lift/proof/isla GREEN at 60525f7a6 (288 s cold): ISLA sha256 9d5432cdeed0365a882d22e90625e565d64f06b9cfe428f7f665c990b775b5e5, Z3LIB sha256 63f20f0e05ca7eda917ebac77cfdab7530c88bf70d553b159950794c10fa4455. `--help` runs against Z3LIB.
+  - lift/proof/sailmodel GREEN at 103d1f743: MODEL sha256 ea88b550...2f27.
+  - lift/rcpgen GREEN at 8abd1ab02: rcptab.c sha256 d2a3920e...58f5 = committed.
+  - Fixes taken from L1: debs are each deb's own data (3de3eee4e, 08109b9ce) and getrandom gets the constant stream (c071d7e1b).
+  - Our fixes: TMPDIR=/scratch; linker, CC and CXX = the root's host compiler.
+- done (farms 1-4): integer re-prove of queue 257a93722adb, 515 rows at 48ef39ad8. The farm counts are proved 2, model-gap 501, model-defect 4, timeout 7, agree-except-declared 1. w4 is aggregating (REQUIRE_ALL, WITHHELD) and writing the census by opcode; the next step is the ACL2-derived model patch.
+- red (owner L3a w13): udsail at 183e1ebef. All 6 baddecode sequences are GAP: isla returns no path on the ctrs vector spelling. w13 is to read the IR via formgate.ir_path (8b711fba) and rerun once.
+- doing: SIMD shards 1 and 2 (farms 1 and 3).
+- next: the prover as a recipe stage over ISLA/MODEL, with a pinned deterministic bound in place of the TIMEOUT wall clock.

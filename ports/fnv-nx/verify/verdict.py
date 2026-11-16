@@ -2,8 +2,8 @@
 """L4 verdict: gate certificates, merge gate, build/verification separation, rule-defect queue. stdlib only.
 Run as `python3 -I verdict.py CMD ...`. Exit codes: 0 ok, 1 usage/format error, 2 red/blocked, 3 merge conflict.
   run         --repo R --commit C --gates GATES.json --out V.json [--budget-s 300] [--env-id H] [--cache DIR]
-              Runs each gate (argv, cwd = clean git worktree of C, env + GATE_OUT + GATE_DETAIL (OUT.detail/<gate>, kept) + GATE_COMMIT [+ GATE_CACHE]), in file order.
-              Gate contract for the environment: GATE_OUT (result directory), GATE_COMMIT (commit under test) and, when --cache is
+              Runs each gate (argv, cwd = clean git worktree of C, env + GATE_OUT + GATE_DETAIL (OUT.detail/<gate>, kept) [+ GATE_CACHE]), in file order.
+              Gate contract for the environment: GATE_OUT (result directory; the commit under test is the HEAD of the gate's worktree, never an environment value) and, when --cache is
               given, GATE_CACHE (absolute path of a caller-owned directory that outlives the run). A gate may store results in
               GATE_CACHE only under a key that covers everything it reads (its inputs' content, the declared environment, its own
               arguments); it must work, and give the same verdict, without GATE_CACHE. A gate writes
@@ -148,7 +148,7 @@ def cmd_run(a):
     work = tempfile.mkdtemp(prefix="verdict-")
     wt = os.path.join(work, "wt")
     _git_ok(o["--repo"], "worktree", "add", "--detach", wt, commit)
-    genv = dict(os.environ, GATE_COMMIT=commit)
+    genv = dict(os.environ)
     genv.pop("GATE_CACHE", None)
     if "--cache" in o:
         genv["GATE_CACHE"] = os.path.abspath(o["--cache"])

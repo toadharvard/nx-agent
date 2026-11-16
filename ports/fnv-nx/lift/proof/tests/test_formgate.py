@@ -291,10 +291,14 @@ class Cli(unittest.TestCase):
         shutil.copytree(LIFT, os.path.join(co, 'ports', 'fnv-nx', 'lift'), ignore=skip_cache, copy_function=shutil.copyfile)
         os.symlink(os.path.abspath(fakeext.VERIFY), os.path.join(co, 'ports', 'fnv-nx', 'verify'))
         os.symlink(os.path.abspath(os.path.join(fakeext.VERIFY, '..', 'contract')), os.path.join(co, 'ports', 'fnv-nx', 'contract'))
+        os.symlink(os.path.abspath(os.path.join(fakeext.VERIFY, '..', 'toolchain')), os.path.join(co, 'ports', 'fnv-nx', 'toolchain'))      # recipe.py reads the DATAMODEL table that verify/targets.json references (references.datamodel)
+        os.symlink(os.path.abspath(os.path.join(fakeext.VERIFY, '..', 'platform')), os.path.join(co, 'ports', 'fnv-nx', 'platform'))      # the declared x86 system record (formgate.X86SYS)
         shutil.copyfile(f.inputs, os.path.join(co, 'ports', 'fnv-nx', 'lift', 'proof', 'formgate_inputs.json'))
         out = os.path.join(td, 'out')
         os.makedirs(out)
-        env = {'PATH': os.environ['PATH'], 'GATE_OUT': out, 'ARTIFACTS_URL': f.art.url, 'HOME': td, 'GIT_TERMINAL_PROMPT': '0'}
+        import recipe
+        recipe.set_artifacts(recipe.ext_dir(os.path.join(out, 'forms-cache')), f.art.url)    # the artifacts repository is a record beside the cache the gate fills (formgate.cache_dir), never an environment variable
+        env = {'PATH': os.environ['PATH'], 'GATE_OUT': out, 'HOME': td, 'GIT_TERMINAL_PROMPT': '0'}
         r = subprocess.run([sys.executable, '-I', 'ports/fnv-nx/lift/proof/formgate.py'], cwd=co, env=env, capture_output=True, text=True)
         return r, out
 

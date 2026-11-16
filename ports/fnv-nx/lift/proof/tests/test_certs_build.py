@@ -10,7 +10,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
 from proof import certbasis, certs_build, model_sail, prove, shape, symform, x86sys
 
-model_sail.configure(os.environ['FNVNX_SAIL_WORK'], os.environ['FNVNX_SAIL_IR'], os.environ['FNVNX_ISLA'])   # the declared inputs of this test (the same three as test_model_patches); no default
+sys.path.insert(0, HERE); import declared_sail; declared_sail.configure()      # the declared inputs of this test (declared_sail.py); the classes are skipped without them
 sys.path.insert(0, HERE); import declared_x86sys; XPATH = declared_x86sys.PATH; XSHA = declared_x86sys.configure()    # the declared machine of this tree, passed explicitly (--x86sys)
 
 WORK = tempfile.mkdtemp()    # this test's own scratch directory
@@ -23,13 +23,14 @@ def key_of(h):
 
 
 KEYS = sorted(key_of(h) for h in ('01c8', '31c0', '8b4510'))
-MODEL = certs_build.pinned_model()
+MODEL = certs_build.pinned_model() if not declared_sail.MISSING else None      # the sha of the declared IR; None only when the classes are skipped
 
 
 def rec(key, result='proved', model=MODEL, dsl=None):
     return {'shape': key, 'result': result, 'model_sha': model, 'dsl_sha': dsl or symform.shape_sha(key), 'obligations': list(certbasis.OBLIGATIONS), 'prover_sha': certbasis.prover_sha(), 'x86sys_sha256': XSHA}
 
 
+@declared_sail.needs_sail
 class Aggregate(unittest.TestCase):
     def setUp(self):
         self.d = os.path.join(WORK, 'certs_build')

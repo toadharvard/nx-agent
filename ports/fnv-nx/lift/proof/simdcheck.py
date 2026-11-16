@@ -73,7 +73,8 @@ def _components(e, bits=False):
 
 
 _EXP = {32: (8, 23), 64: (11, 52)}
-_TAC = z3.Then('simplify', 'propagate-values', 'solve-eqs', 'fpa2bv', 'simplify', 'bit-blast', 'sat')
+_TAC = z3.Then('simplify', 'propagate-values', 'solve-eqs', 'fpa2bv', 'simplify', 'bit-blast', 'sat')      # the fast path: every FP and bit-vector query
+_TAC_SMT = z3.Then('simplify', 'propagate-values', 'solve-eqs', 'fpa2bv', 'simplify', 'bit-blast', 'smt')   # the complete solver, asked only where the SAT core answers unknown
 
 
 def _classes(x, w):
@@ -135,9 +136,21 @@ def _canonical(g, cs, env, fpl, mx):
     return keep + cs2 + [z3.Not(g2)]
 
 
-def _ask(asserts, timeout):
-    s = _TAC.solver(); s.set('timeout', timeout); s.add(*asserts)
-    return s
+class _Ask:
+    """one goal decided by the fast pipeline (bit-blast -> sat); only when it answers `unknown` (the SAT core cannot decide the array terms that remain after bit-blasting, so a SATISFIABLE query that reads memory, i.e. a
+    refutation, comes back unknown at once) the same goal goes to the complete `smt` pipeline.  Both are sound for unsat; smt is complete over arrays and bit-vectors, so the result is exact.  `timeout` (ms) covers both steps."""
+    def __init__(s, asserts, timeout): s.asserts, s.timeout, s.s = asserts, timeout, None
+    def check(s):
+        import time
+        t0 = time.time(); s.s = _TAC.solver(); s.s.set('timeout', s.timeout); s.s.add(*s.asserts); r = s.s.check()
+        if r != z3.unknown: return r
+        left = s.timeout - int(1000 * (time.time() - t0))
+        if left <= 0: return r
+        s.s = _TAC_SMT.solver(); s.s.set('timeout', left); s.s.add(*s.asserts); return s.s.check()
+    def model(s): return s.s.model()
+
+
+def _ask(asserts, timeout): return _Ask(asserts, timeout)
 
 
 def _discharge(env, nf, goals, eq, timeout, fpl=(), mx=None):

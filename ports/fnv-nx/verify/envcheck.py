@@ -411,7 +411,9 @@ def deb_pins(doc):
     if not (isinstance(m.get("repo"), str) and hx(m.get("commit"), 40) and hx(m.get("tree_sha256"), 64)
             and hx(m.get("wheels_tree_sha256"), 64)):
         out.append("env: debs.mirror: needs repo, a 40-hex commit, a 64-hex tree_sha256 (debs/) and wheels_tree_sha256 (wheels/)")
-    want = dict(dep_closure(doc["packages"]), **doc["packages"])
+    profiles = dp.get("profiles") if isinstance(dp.get("profiles"), dict) else {}
+    tops = set(doc["packages"]) | {t for ts in profiles.values() if isinstance(ts, list) for t in ts if isinstance(t, str)}   # the roots of the set: the declared packages and the tops of every named profile
+    want = dict(dep_closure(tops), **doc["packages"])
     for p in sorted(set(want) ^ set(dp["packages"])):
         out.append("env: debs.packages: %s %s" % (p, "has no deb pin" if p in want else "is not in the packages or their dependency closure"))
     for p, e in sorted(dp["packages"].items()):
@@ -468,8 +470,7 @@ def snapshot(prev=None):
     files = [os.path.join(r, f) for t in trees for r, _, fs in os.walk(t) for f in fs]
     for p in files:
         add(p)
-    loads([os.path.realpath(e) for e in exes] + [p for p in files if os.path.isfile(p) and not os.path.islink(p)
-          and runtime.ident(p) == runtime.X86_64 and open(p, "rb").read(18)[16:18] in (b"\x02\x00", b"\x03\x00")])
+    loads([os.path.realpath(e) for e in exes] + [p for p in files if os.path.isfile(p) and not os.path.islink(p) and runtime.loadable(p)])
     src, comps = A64ACCESS
     cxx = subprocess.run(["llvm-config-18", "--cxxflags"], capture_output=True, text=True, check=True).stdout.split()
     deps = subprocess.run(["g++", "-std=c++17"] + cxx + ["-M", src], capture_output=True, text=True, check=True).stdout

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """l2sections - the three non-loaded ELF sections that L2's compiler plugins put into every game object (L1 CONTRACT).
 
-    parse_sympair(data, where) -> [(symbol, msvc_name, kind, 'def'|'ref')]            .fnvnx.sympair (plugin NAMES1)
+    parse_sympair(data, where, kinds) -> [(symbol, msvc_name, kind, 'def'|'ref')]            .fnvnx.sympair (plugin NAMES1)
     parse_vtpair(data, where)  -> [(ztv symbol, address point, ??_7 name, vfptr offset)]   .fnvnx.vtpair (NAMES1)
     parse_n3(data, where)      -> [(symbol, verdict, (inlined symbols), kind, (types))]   .fnvnx.n3 (plugin pi, sdd)
-    read(path)                 -> {'sympair': [...], 'vtpair': [...], 'n3': [...]}; an absent section gives []
+    read(path, kinds)          -> {'sympair': [...], 'vtpair': [...], 'n3': [...]}; an absent section gives []
 
 Format: plain text, LF-terminated lines, TAB-separated.  sympair: exactly 4 fields, kind one of KINDS or
 `nodecor:<reason>` (reason not empty); the name may be empty only for the kinds in NAMELESS.  vtpair: exactly 4
@@ -16,16 +16,19 @@ Pure: bytes in, tuples out (rows keep the section's order).
 """
 import os, re, sys
 
-def _sympair_kinds():
-    """the closed set of sympair kinds, read from where the names plugin defines it once (toolchain/names/sympair_kinds.inc, FNVNX_SYMPAIR_KINDS)"""
-    inc = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'toolchain', 'names', 'sympair_kinds.inc')
-    m = re.search(r'#define FNVNX_SYMPAIR_KINDS\(X\)(.*?)\n\n|#define FNVNX_SYMPAIR_KINDS\(X\)(.*)\Z', open(inc).read(), re.S)
+KINDS_INC = 'ports/fnv-nx/toolchain/names/sympair_kinds.inc'   # the repo path of the one definition of the kinds (the names plugin's FNVNX_SYMPAIR_KINDS); a stage declares it as an input, a gate reads it from the checkout
+
+
+def load_kinds(inc):
+    """the closed set of sympair kinds, read from the file INC (toolchain/names/sympair_kinds.inc, FNVNX_SYMPAIR_KINDS): a declared input passed by the caller, never found through this module's own location"""
+    with open(inc) as fh:
+        text = fh.read()
+    m = re.search(r'#define FNVNX_SYMPAIR_KINDS\(X\)(.*?)\n\n|#define FNVNX_SYMPAIR_KINDS\(X\)(.*)\Z', text, re.S)
     if not m:
         raise ValueError('%s: no FNVNX_SYMPAIR_KINDS' % inc)
     return frozenset(re.findall(r'X\(([^,()\s]+),', m.group(1) or m.group(2)))
 
 
-KINDS = _sympair_kinds()     # `vtable`: NAMES1 writes it for the table groups; `noemit`: a function the unit defines with no symbol in the object (the .inc)
 NAMELESS = frozenset(('thunk', 'vtable', 'gcc', 'internal'))
 N3_KINDS = frozenset(('', 'thunk', 'inline', 'sdd', 'alias'))
 
@@ -58,12 +61,12 @@ def _need(s, where, n, what):
         raise ValueError('%s: line %d: %s is empty or holds a blank: %r' % (where, n, what, s))
 
 
-def parse_sympair(data, where):
+def parse_sympair(data, where, kinds):
     out = []
     for n, ln in enumerate(_lines(data, where), 1):
         sym, ms, kind, df = _fields(ln, where, n, 4, 4)
         _need(sym, where, n, 'symbol')
-        if kind not in KINDS and not (kind.startswith('nodecor:') and len(kind) > 8):
+        if kind not in kinds and not (kind.startswith('nodecor:') and len(kind) > 8):
             raise ValueError('%s: line %d: unknown kind %r' % (where, n, kind))
         if df not in ('def', 'ref'):
             raise ValueError('%s: line %d: %r is neither def nor ref' % (where, n, df))
@@ -101,16 +104,17 @@ def parse_n3(data, where):
     return out
 
 
-SECTIONS = (('sympair', '.fnvnx.sympair', parse_sympair), ('vtpair', '.fnvnx.vtpair', parse_vtpair), ('n3', '.fnvnx.n3', parse_n3))
+SECTIONS = (('sympair', '.fnvnx.sympair', None), ('vtpair', '.fnvnx.vtpair', parse_vtpair), ('n3', '.fnvnx.n3', parse_n3))   # sympair's parser takes the kinds: read() binds them
 
 
-def read(path):
+def read(path, kinds):
     from elftools.elf.elffile import ELFFile
     where = os.path.basename(path)
     out = {}
     with open(path, 'rb') as fh:
         e = ELFFile(fh)
         for key, name, parse in SECTIONS:
+            parse = parse or (lambda d, w: parse_sympair(d, w, kinds))
             s = e.get_section_by_name(name)
             out[key] = parse(s.data(), where + ':' + name) if s is not None else []
     return out
@@ -118,4 +122,4 @@ def read(path):
 
 if __name__ == '__main__':
     for p in sys.argv[1:]:
-        print(p, {k: len(v) for k, v in sorted(read(p).items())})
+        print(p, {k: len(v) for k, v in sorted(read(p, load_kinds(KINDS_INC)).items())})

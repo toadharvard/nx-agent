@@ -31,27 +31,21 @@ eval "$($TOOLS/opam env --switch=sail)"; export PATH=$REMS/isla/isla-sail:$PATH
 [ -f "$MODEL/x86.ir" ] || make -C "$MODEL" x86.ir
 
 # proof IR: same file list as the model Makefile (PRELUDE_SAILS MODEL_SAILS MAIN_SAIL), plus the window registers first
-OUT=$WORK/sail/x86_proof; PATCHES="$HERE/sail_patches/rotate_count.sail $HERE/sail_patches/ror_cf.sail $HERE/sail_patches/bt_bitnumber.sail $HERE/sail_patches/segment_bases.sail"
-[ $STOCK = 1 ] && { OUT=${OUT}_stock; PATCHES=""; }
-# The pinned IR (BUMP defaults to 1; BUMP=0 rebuilds the superseded IR 70c8dc39...): the stock model + transcriptions of ACL2 master hunks in sail_patches/bump/ (cmps, rol/ror count 0, ror CF, sar count >= size, cpuid, bsf/bsr, + their dispatch arms)
-if [ "${BUMP:-1}" = 1 ] && [ $STOCK != 1 ]; then
-    B=$HERE/sail_patches/bump; mkdir -p "$WORK/sail/gen"; python3 "$B/cpuid_dispatch.py" "$MODEL" "$WORK/sail/gen/cpuid_dispatch0.sail" \
-      && python3 "$B/bsf_bsr_dispatch.py" "$WORK/sail/gen/cpuid_dispatch0.sail" "$WORK/sail/gen/cpuid_dispatch.sail"
-    PATCHES="$HERE/sail_patches/rotate_count.sail $B/ror_cf.sail $HERE/sail_patches/bt_bitnumber.sail $HERE/sail_patches/segment_bases.sail $B/cmps.sail $B/rol_count0.sail $B/sar_bigcount.sail $B/cpuid.sail $B/bit_bsf_bsr.sail $WORK/sail/gen/cpuid_dispatch.sail"
-fi
+OUT=$WORK/sail/x86_proof; APPLY="--bump ${BUMP:-1}"
+[ $STOCK = 1 ] && { OUT=${OUT}_stock; APPLY="--stock"; }
+# The pinned IR (BUMP defaults to 1; BUMP=0 rebuilds the superseded IR 70c8dc39...): the stock model + transcriptions of ACL2 master hunks in sail_patches/bump/ (cmps, rol/ror count 0, ror CF, sar count >= size, cpuid, bsf/bsr, + their dispatch arms).
+# The patch list and the generated dispatch splices are composed by sail_patches/apply.py, the same script the recipe root lift/proof/sailmodel runs.
 FILES="prelude.sail register_types.sail registers.sail register_accessors.sail opcode_ext.sail memory_accessors.sail init.sail config.sail logging.sail step.sail main.sail"
-newest=$(ls -t $PATCHES "$HERE/x86_fetch.sail" "$HERE/x86_code_regs.sail" $(for f in $FILES; do echo "$MODEL/$f"; done) "$MODEL"/../test-generation-patches/*.sail | head -1)
+newest=$(ls -t "$HERE"/sail_patches/*.sail "$HERE"/sail_patches/bump/* "$HERE/sail_patches/apply.py" "$HERE/sdmfeat.py" "$HERE/../fnvlift/cpumodel_bits.py" "$HERE/../../verify/cpuid_model.json" "$HERE/x86_fetch.sail" "$HERE/x86_code_regs.sail" $(for f in $FILES; do echo "$MODEL/$f"; done) "$MODEL"/../test-generation-patches/*.sail | head -1)
 if [ ! -f "$OUT.ir" ] || [ "$newest" -nt "$OUT.ir" ]; then
   # Path independence: isla-sail records source file names in the IR, so it is run in a staging tree with only relative names
   # (model/ = copy of all model/*.sail because of its relative $include, tgp/ = test-generation-patches, local/ = splices of this
   # directory, sail/ = the Sail library, found through SAIL_DIR=../sail).  The IR then depends on file contents only, not on REMS / WORK / checkout paths.
-  STAGE=$WORK/sail/stage; rm -rf "$STAGE"; mkdir -p "$STAGE/tgp" "$STAGE/local"
-  mkdir "$STAGE/model"; cp "$MODEL"/*.sail "$STAGE/model/"; cp "$MODEL"/../test-generation-patches/*.sail "$STAGE/tgp/"
-  cp $PATCHES "$HERE/x86_fetch.sail" "$HERE/x86_code_regs.sail" "$STAGE/local/"
+  STAGE=$WORK/sail/stage; rm -rf "$STAGE"
+  python3 -I "$HERE/sail_patches/apply.py" $APPLY --decl "$HERE/sdmfeat.py" "$HERE/../fnvlift/cpumodel_bits.py" "$HERE/../../verify/cpuid_model.json" "$MODEL/.." "$HERE/sail_patches" "$STAGE" "$HERE/x86_fetch.sail" "$HERE/x86_code_regs.sail"
   # the Sail library files (flow.sail, vector.sail, option.sail) are recorded with the path found through SAIL_DIR: use a staged copy
   SAILSHARE=$(dirname "$(dirname "$(command -v sail)")")/share/sail; mkdir "$STAGE/sail"; cp -r "$SAILSHARE/lib" "$STAGE/sail/lib"
-  SPL=""; for f in "$STAGE"/tgp/*.sail; do SPL="$SPL -splice ../tgp/$(basename "$f")"; done
-  for f in $PATCHES "$HERE/x86_fetch.sail"; do SPL="$SPL -splice ../local/$(basename "$f")"; done
+  SPL=""; while read -r f; do SPL="$SPL -splice $f"; done < "$STAGE/SPLICES"
   ( cd "$STAGE/model" && SAIL_DIR=../sail isla-sail $SPL -verbose 1 -o ../x86_proof ../local/x86_code_regs.sail $FILES ) > "$WORK/sail/build.log" 2>&1
   mv "$STAGE/x86_proof.ir" "$OUT.ir"; rm -rf "$STAGE"
   echo "built $OUT.ir ($(stat -c %s "$OUT.ir") bytes)"

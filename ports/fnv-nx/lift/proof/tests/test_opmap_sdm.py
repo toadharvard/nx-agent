@@ -10,7 +10,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
 from proof import opmap
 
-B = os.environ.get('FNVNX_BUILD') or sys.exit('FNVNX_BUILD (a clone of fnv-nx-build, the declared input of this test) is not set')
+B = os.environ.get('FNVNX_BUILD')      # declared input: a clone of fnv-nx-build; without it the class is skipped with that reason
 PIN = 'a4a62e6a7ba11a76c7753a195b825087306812aac39b930973f9168ee599f321'      # tools/intel-sdm MANIFEST.json sha256
 
 
@@ -24,6 +24,7 @@ def pinned_sdm(d):
     return pdf, os.path.join(d, 'sdm.txt')
 
 
+@unittest.skipUnless(B, 'FNVNX_BUILD (a clone of fnv-nx-build, the declared input of this test) is not set')
 class T(unittest.TestCase):
     def test_cells_equal_the_reference(self):
         with tempfile.TemporaryDirectory() as d:

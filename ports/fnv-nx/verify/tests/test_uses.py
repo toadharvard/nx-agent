@@ -41,7 +41,7 @@ def repo_of(name, prec=PREC, pfiles=PF, crec=None):
 
 def main():
     subprocess.run(["git", "init", "-q", "--bare", BASE + "/artifacts.git"], check=True)
-    os.environ["ARTIFACTS_URL"] = BASE + "/artifacts.git"
+    TR.recipe.ARTIFACTS = BASE + "/artifacts.git"
     SS = BASE + "/store"
     ra = repo_of("ua")
     r = recipe.build(ra, ROOT, SS, BASE + "/o-ua")
