@@ -16,6 +16,9 @@ of the same gate:
 Crossing universe (crossing_universe): a term is judged only for a symbol the x86 boundary binds (IAT natives of the bridge table, the facts root's dispatch rows); a va_list term on such a symbol is red unless the symbol is the native end of a msvcrt_va row. A source that cannot be derived is a red item.
 Red iff an item is uncertified, the root's build is not green, an object has no `.fnvnx.sympair` section or cannot be parsed (red item naming the object). A C++
 unit is an object of the root's recipe (recipe.CXX_EXT). No such root: universe 0, green."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import shutil
@@ -25,14 +28,13 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "link"))
-sys.path.insert(0, os.path.join(HERE, "..", "contract"))
 import abi  # noqa: E402
-import bridgetable  # noqa: E402
+from contract import bridgetable  # noqa: E402
 import elfobj  # noqa: E402
 import gate_argorder  # noqa: E402
 import gate_build  # noqa: E402
 import gate_imports  # noqa: E402
-import l2sections  # noqa: E402
+from contract import l2sections  # noqa: E402
 import objsections  # noqa: E402
 import odr  # noqa: E402
 import ctypes_compat  # noqa: E402
@@ -40,6 +42,7 @@ import recipe  # noqa: E402
 
 
 DATAMODEL = os.path.join(HERE, "..", "toolchain", "msvcmodel", "DATAMODEL.json")
+REASONS_INC = os.path.join(HERE, "..", "toolchain", "layout", "decltype_spell.inc")
 
 
 def crossing_terms():
@@ -67,6 +70,11 @@ def envid():
     return gate_build.file_sha(os.path.join(HERE, "env.json"))
 
 
+def reasons():
+    with open(REASONS_INC) as f:
+        return ctypes_compat.decltype_reasons(f.read())
+
+
 def read_objects(objs):
     """OBJS: [(id, path)] -> (store {(id, 'sympair'): rows}, {layout key: {id: layout tuple}}, red items {id: reason}, {id: {symbol: declared C type}}, {id: {symbol: crossing terms}})."""
     store, layouts, red, decls = {}, {}, {}, {}
@@ -81,11 +89,14 @@ def read_objects(objs):
                 continue
             store[(oid, "sympair")] = l2sections.parse_sympair(sp, oid + ":.fnvnx.sympair", kinds)
             lays = objsections.parse_layout(objsections.section(elf, ".fnvnx.layout"), oid + ":.fnvnx.layout")
-            dt = elf.section(".fnvnx.decltype")     # a C unit's declared types of external symbols, compared by C11 6.2.7 (link/ctypes_compat.py): the section's presence is the fact, whatever the linkage of the layout rows
-            if dt is not None:
-                decls[oid] = ctypes_compat.parse_decltype(dt, oid + ":.fnvnx.decltype")
-            elif any(lay.linkage == "c" for lay in lays):     # a unit of `c` records without its declared types: nothing to compare them with
-                red[oid + ":decltype"] = "a C unit has no .fnvnx.decltype section"
+            dt = elf.section(".fnvnx.decltype")     # RULE DECLTYPE-COMPLETE (link/ctypes_compat.py): every GLOBAL/WEAK symbol of the object has exactly one line, `sym<TAB>type` or `sym<TAB>-reason` (reason from the plugin's closed set); the typed lines are compared by C11 6.2.7
+            types, why = ctypes_compat.parse_decltype_lines(dt if dt is not None else b"", oid + ":.fnvnx.decltype", reasons())
+            have = {n for n, bind, _t, _sh, _v, _sz, _o in elf.symbols() if n and bind in (1, 2)}     # STB_GLOBAL, STB_WEAK
+            for n in sorted(have - set(types) - set(why)):
+                red[oid + ":decltype:missing:" + n] = "global/weak symbol %s has no .fnvnx.decltype line" % n
+            for n in sorted((set(types) | set(why)) - have):
+                red[oid + ":decltype:extra:" + n] = ".fnvnx.decltype line for %s, which is not a global/weak symbol of the object" % n
+            decls[oid] = types
             cr = elf.section(".fnvnx.crossing")
             if cr is not None:
                 cross[oid] = parse_crossing(cr, oid + ":.fnvnx.crossing")

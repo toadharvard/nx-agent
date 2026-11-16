@@ -232,8 +232,94 @@
  #undef TARGET_SCALAR_MODE_SUPPORTED_P
  #define TARGET_SCALAR_MODE_SUPPORTED_P aarch64_scalar_mode_supported_p
  
+--- a/gcc/cp/cp-tree.h
++++ b/gcc/cp/cp-tree.h
+@@ -4868,6 +4868,17 @@
+ #define DECL_ARRAY_PARAMETER_P(NODE) \
+   DECL_LANG_FLAG_1 (PARM_DECL_CHECK (NODE))
+ 
++/* fnv-nx MSVCMODEL1: nonzero for PARM_DECL node means that the parameter was declared with a function type (`void g(int)`, or a typedef of one),
++   which the front end adjusts to a pointer to function.  DECL_LANG_FLAG_7 is used on a PARM_DECL by nothing else in GCC 13.3
++   (DECL_THUNK_P and DECL_NORMAL_CAPTURE_P are checked for FUNCTION_DECL and FIELD_DECL).  */
++#define DECL_FUNCTION_PARAMETER_P(NODE) \
++  DECL_LANG_FLAG_7 (PARM_DECL_CHECK (NODE))
++
++/* fnv-nx MSVCMODEL1: nonzero for a PARM_DECL whose function type came from a typedef or alias (`F g` with `typedef void F(int)`), as opposed
++   to a declarator (`void g(int)`).  DECL_LANG_FLAG_8 is checked on VAR_OR_FUNCTION_DECL only in GCC 13.3, so a PARM_DECL has it free.  */
++#define DECL_FUNCTION_TYPEDEF_PARAMETER_P(NODE) \
++  DECL_LANG_FLAG_8 (PARM_DECL_CHECK (NODE))
++
+ /* Nonzero for a FIELD_DECL who's NSMDI is currently being
+    instantiated.  */
+ #define DECL_INSTANTIATING_NSDMI_P(NODE) \
 --- a/gcc/cp/decl.cc
 +++ b/gcc/cp/decl.cc
+@@ -11952,6 +11952,8 @@
+   bool consteval_p = decl_spec_seq_has_spec_p (declspecs, ds_consteval);
+   bool late_return_type_p = false;
+   bool array_parameter_p = false;
++  bool function_parameter_p = false;
++  bool function_typedef_p = false;
+   tree reqs = NULL_TREE;
+ 
+   signed_p = decl_spec_seq_has_spec_p (declspecs, ds_signed);
+@@ -13361,6 +13362,34 @@
+ 
+ 	    type = build_function_type (type, arg_types);
+ 
++	    /* fnv-nx MSVCMODEL1 (names plugin, DATAMODEL S01-S14 are not involved): the name cl gives a function type depends on how each parameter was
++	       DECLARED, which the type does not keep (build_function_type above hash-conses `void (int *)`, `void (int [])` and `void (int *const)` into
++	       one node; grokparms strips top-level cv, and the PARM_DECLs in PARMS are dropped with this call).  Their forms are the facts: for each
++	       parameter, `p` plain, `a` array (DECL_ARRAY_PARAMETER_P, set by this function for PARM at "A parameter declared as an array of T"),
++	       `f` written as a function, `t` as a typedef of a function type (DECL_FUNCTION_PARAMETER_P and DECL_FUNCTION_TYPEDEF_PARAMETER_P, the same place); then the top-level cv-qualifiers of the declared type, as the digit
++	       of TYPE_QUAL_CONST 1, TYPE_QUAL_VOLATILE 2, TYPE_QUAL_RESTRICT 4 (cp_type_quals of TREE_TYPE of the PARM_DECL, which grokparms above has not
++	       changed: it strips on a copy).  The type attribute fnvnx_parmform carries the string, and only when some parameter is not `p0`, so the
++	       absence of the attribute is the positive fact "every parameter plain" and plain function types stay shared.  Like fnvnx_cc it does not
++	       affect type identity (comptypes ignores an attribute with no attribute_spec).  */
++	    {
++	      auto_vec<char> forms;
++	      bool nonplain = false;
++	      for (tree p = parms; p; p = DECL_CHAIN (p))
++		{
++		  char form = DECL_ARRAY_PARAMETER_P (p) ? 'a' : DECL_FUNCTION_TYPEDEF_PARAMETER_P (p) ? 't' : DECL_FUNCTION_PARAMETER_P (p) ? 'f' : 'p';
++		  int cv = cp_type_quals (TREE_TYPE (p)) & (TYPE_QUAL_CONST | TYPE_QUAL_VOLATILE | TYPE_QUAL_RESTRICT);
++		  forms.safe_push (form);
++		  forms.safe_push ((char) ('0' + cv));
++		  if (form != 'p' || cv)
++		    nonplain = true;
++		}
++	      if (nonplain)
++		type = cp_build_type_attribute_variant
++		  (type, tree_cons (get_identifier ("fnvnx_parmform"),
++				    build_tree_list (NULL_TREE, build_string (forms.length (), forms.address ())),
++				    TYPE_ATTRIBUTES (type)));
++	    }
++
+ 	    tree attrs = declarator->std_attributes;
+ 	    if (tx_qual)
+ 	      {
+@@ -14108,7 +14137,11 @@
+ 	  array_parameter_p = true;
+ 	}
+       else if (TREE_CODE (type) == FUNCTION_TYPE)
+-	type = build_pointer_type (type);
++	{
++	  function_typedef_p = typedef_variant_p (type);
++	  type = build_pointer_type (type);
++	  function_parameter_p = true;
++	}
+     }
+ 
+   if (ctype && TREE_CODE (type) == FUNCTION_TYPE && staticp < 2
+@@ -14130,6 +14162,8 @@
+       {
+ 	decl = cp_build_parm_decl (NULL_TREE, unqualified_id, type);
+ 	DECL_ARRAY_PARAMETER_P (decl) = array_parameter_p;
++	DECL_FUNCTION_PARAMETER_P (decl) = function_parameter_p;
++	DECL_FUNCTION_TYPEDEF_PARAMETER_P (decl) = function_typedef_p;
+ 
+ 	bad_specifiers (decl, BSP_PARM, virtualp,
+ 			memfn_quals != TYPE_UNQUALIFIED,
 @@ -16714,7 +16714,17 @@
  	 enumeration.  We must do this before the type of MINNODE and
  	 MAXNODE are transformed, since tree_int_cst_min_precision relies

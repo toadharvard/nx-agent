@@ -35,6 +35,9 @@ Rules (each one closes the whole class):
             the facts' rule R3 makes each relocated pointer into executable bytes an entry, and a jump-table slot is such a pointer
             (ASM-012: the only way code obtains a code address is a relocated word). `ijumps(entry)` lists the indirect jumps.
 """
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import bisect
 import collections
 import hashlib
@@ -43,9 +46,8 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "..", "contract"))
-import imagerec
-from imagerec import X   # the operand/register constants of the decoded instructions, for the passes that read them
+from contract import imagerec
+from contract.imagerec import X   # the operand/register constants of the decoded instructions, for the passes that read them
 
 PIN = os.path.join(HERE, "facts.json")
 _dir = None

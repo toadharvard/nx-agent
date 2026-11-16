@@ -1,19 +1,13 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/toolchain/names/sympair_kinds.inc ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/lib/sha256/build.json ports/fnv-nx/link
-# reads: ports/fnv-nx/loader/build.json ports/fnv-nx/platform/build.json ports/fnv-nx/render/d3d9/build.json ports/fnv-nx/render/gl4/build.json
-# reads: ports/fnv-nx/render/nxgpu/build.json ports/fnv-nx/render/pair/build.json ports/fnv-nx/render/shaders/translator/build.json
-# reads: ports/fnv-nx/render/smscan/build.json ports/fnv-nx/rt/guest/build.json ports/fnv-nx/rt/guest_main/build.json ports/fnv-nx/shim/build.json
-# reads: ports/fnv-nx/toolchain/addr/fnvnx_addr.cc ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc ports/fnv-nx/toolchain/ftoi/f2i_builtins.inc
-# reads: ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc ports/fnv-nx/toolchain/layout/crossing_terms.inc ports/fnv-nx/toolchain/layout/decltype_spell.inc
-# reads: ports/fnv-nx/toolchain/layout/fnvnx_layout.cc ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/toolchain/names/fnvnx_names.cc
-# reads: ports/fnv-nx/toolchain/order/atomic_order.inc ports/fnv-nx/toolchain/order/fnvnx_frame.h ports/fnv-nx/toolchain/order/fnvnx_order.cc
-# reads: ports/fnv-nx/toolchain/pi/fnvnx_pi.cc ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc ports/fnv-nx/verify
 """Tests for the L2 per-root gates abi, namegate, r7 (verify/gate_abi.py, gate_namegate.py, gate_r7gate.py, gate_l2native.py). Plain script, needs root
 (sandbox) and the pinned guest compiler (as test_argorder.py). Objects are the real ones of a toy native guest root built by recipe.py; every negative case is
 a byte mutation of such an object. The only synthetic input is the cl REFERENCE side (COFF with the names / CodeView records of the same toy source, link/tests/synth.py):
 the pristine MSVC objects are exe-derived and not in the repository. Cases: no root -> universe 0 green (3 gates); abi positive / mutated contract name /
 missing `.fnvnx.sympair`; namegate and r7 on files (positive, mutated object red, symbol LIFTED outside the universe, symbol with no exe address outside);
 a root with `game` and no link result is red naming the input; a root without `game` is universe 0."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import subprocess
@@ -33,7 +27,7 @@ import l2sections  # noqa: E402
 l2sections.set_kinds(os.path.join(REAL, T + "toolchain", "names", "sympair_kinds.inc"))
 import gate_build  # noqa: E402
 import gate_names  # noqa: E402
-import l2sections  # noqa: E402
+from contract import l2sections  # noqa: E402
 SYMPAIR_KINDS = l2sections.load_kinds(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'toolchain', 'names', 'sympair_kinds.inc'))
 import gate_r7  # noqa: E402
 import synth  # noqa: E402

@@ -1,4 +1,5 @@
 /* handles.cpp - kernel object handles, CloseHandle, shared helpers. */
+#include <fnvnx_export.h>
 #include "w32.h"
 
 #include <stdio.h>
@@ -123,6 +124,7 @@ void w32_obj_unref(struct w32_obj *o)
     }
 }
 
+FNVNX_EXPORT("kernel32.dll", "CloseHandle", CloseHandle, "func");
 extern "C" BOOL CloseHandle(HANDLE h)
 {
     if (h == W32_PSEUDO_THREAD || h == W32_PSEUDO_PROCESS)

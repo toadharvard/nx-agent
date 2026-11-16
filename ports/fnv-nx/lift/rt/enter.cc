@@ -25,6 +25,7 @@
 
    The loop in each of them is the non-local-transfer loop of every lifted function (README): while the address the last `ret` popped (c->ra) is not
    the sentinel of this activation, serve it as an entry through the dispatcher. */
+#define FNVL_RA_WRITE 1
 #include "fnvl.h"
 #include "imp.h"
 struct fnvnx_guest_ret { u32 eax, edx; double st0; };
@@ -91,6 +92,10 @@ extern "C" void fnvl_current_main(u32 *sp, u32 *teb) { struct cpu *p = *fnvl_hos
    - fnvl_invoke_regs_main, fnvnx_guest_invoke_regs: a BRIDGE called from a native body (rt/dispatch.c, tools/bridgegen.py). A native body implements an exe function, so it
      runs under the guest FPCR/FPSR itself and nothing was parked: the entry leaves both registers alone, whatever c->hfpcr/c->hfpsr hold.
    The kind is the entry point, not a state: no flag is read at run time. */
+/* the one non-local transfer of an entry body (imp.h): ra and esp are the target's, then the one non-local exit */
+extern "C" __attribute__((noreturn)) void fnvl_native_transfer(u32 eip, u32 sp) { c->ra = eip; esp = sp; fnvl_native_exit(); }
+/* the raise protocol's resume address (imp.h) */
+extern "C" void fnvl_raise_resume(u32 eip) { c->ra = eip; }
 /* the one non-local exit from native frames (imp.h): the frame on top of c->nf holds the __builtin_setjmp point of the entry that called the native code */
 extern "C" __attribute__((noreturn)) void fnvl_native_exit(void) { __builtin_longjmp((void **)c->nf->jb, 1); }
 

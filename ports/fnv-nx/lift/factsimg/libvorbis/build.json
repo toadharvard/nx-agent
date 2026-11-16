@@ -43,19 +43,30 @@
     "--keys",
     "/uses/ports/fnv-nx/loader/KEYS_TSV",
     "--lib",
-    "/in/ports/fnv-nx/lift"
+    "/in/ports/fnv-nx/lift",
+    "--baddecode",
+    "/out/baddecode_libvorbis.tsv",
+    "--shapes",
+    "/out/shapes_libvorbis.tsv",
+    "--udsail",
+    "/in/ports/fnv-nx/lift/proof/udsail_input.tsv"
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
     "ports/fnv-nx/lift/proof"
    ],
-   "outputs": [],
+   "outputs": [
+    "baddecode_libvorbis.tsv",
+    "shapes_libvorbis.tsv"
+   ],
    "dirs": [
     "o"
    ]
   }
  ],
  "outputs": {
-  "IMG": "o"
+  "IMG": "o",
+  "BADDECODE": "baddecode_libvorbis.tsv",
+  "SHAPES": "shapes_libvorbis.tsv"
  }
 }

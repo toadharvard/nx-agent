@@ -16,11 +16,10 @@
   },
   {
    "path": "ports/fnv-nx/contract",
-   "trees": [
-    "ports/fnv-nx/contract",
+   "class": "tool",
+   "imports": [
     "ports/fnv-nx/link"
    ],
-   "class": "tool",
    "entry": [
     "ports/fnv-nx/contract/exefacts.py",
     "ports/fnv-nx/contract/n1.py",
@@ -30,10 +29,8 @@
     "ports/fnv-nx/contract/gate_rtti.py",
     "ports/fnv-nx/contract/gate_pcrel.py",
     "ports/fnv-nx/contract/bodysel.py",
-    "ports/fnv-nx/link/gate_abs.py",
     "ports/fnv-nx/contract/gpa_names.py",
-    "ports/fnv-nx/contract/gate_reach.py",
-    "ports/fnv-nx/link/gate_disp.py"
+    "ports/fnv-nx/contract/gate_reach.py"
    ]
   },
   {
@@ -110,15 +107,12 @@
   },
   {
    "path": "ports/fnv-nx/toolchain",
-   "class": "tool",
-   "entry": []
-  },
-  {
-   "path": "ports/fnv-nx/toolchain/kinds",
-   "class": "tool",
-   "entry": [],
-   "recipe": "ports/fnv-nx/toolchain/kinds/build.json",
-   "target": "host"
+   "class": "product",
+   "target": "host",
+   "recipe": "ports/fnv-nx/toolchain/build.json",
+   "imports": [
+    "ports/fnv-nx/verify"
+   ]
   },
   {
    "path": "ports/fnv-nx/verify",
@@ -445,6 +439,26 @@
    "recipe": "ports/fnv-nx/tests/bootrt/build.json"
   },
   {
+   "path": "ports/fnv-nx/lift/proof/isla",
+   "class": "tool",
+   "target": "host",
+   "entry": [],
+   "recipe": "ports/fnv-nx/lift/proof/isla/build.json"
+  },
+  {
+   "path": "ports/fnv-nx/lift/proof/sailmodel",
+   "class": "tool",
+   "target": "host",
+   "entry": [],
+   "recipe": "ports/fnv-nx/lift/proof/sailmodel/build.json"
+  },
+  {
+   "path": "ports/fnv-nx/lift/udsail",
+   "class": "tool",
+   "target": "host",
+   "recipe": "ports/fnv-nx/lift/udsail/build.json"
+  },
+  {
    "path": "ports/fnv-nx/lift/proof/fpchost",
    "class": "test",
    "target": "host",
@@ -572,15 +586,48 @@
    "recipe": "ports/fnv-nx/render/shaders/sm_link/build.json"
   },
   {
-   "path": "ports/fnv-nx/contract/include",
-   "class": "header"
-  },
-  {
    "path": "ports/fnv-nx/contract/exports",
    "class": "tool",
    "target": "host",
    "entry": [],
    "recipe": "ports/fnv-nx/contract/exports/build.json"
+  },
+  {
+   "path": "ports/fnv-nx/link",
+   "class": "tool",
+   "entry": [
+    "ports/fnv-nx/link/gate_abs.py",
+    "ports/fnv-nx/link/gate_disp.py"
+   ]
+  },
+  {
+   "path": "ports/fnv-nx/loader/include",
+   "class": "header"
+  },
+  {
+   "path": "ports/fnv-nx/bridgetable",
+   "class": "tool",
+   "target": "host",
+   "entry": [],
+   "recipe": "ports/fnv-nx/bridgetable/build.json"
+  },
+  {
+   "path": "ports/fnv-nx/toolchain/tests",
+   "class": "tool",
+   "entry": []
+  },
+  {
+   "path": "ports/fnv-nx/toolchain-stage1",
+   "class": "product",
+   "target": "host",
+   "recipe": "ports/fnv-nx/toolchain-stage1/build.json"
+  },
+  {
+   "path": "ports/fnv-nx/platform/exptable",
+   "class": "product",
+   "target": "guest",
+   "cxx_origin": "native",
+   "recipe": "ports/fnv-nx/platform/exptable/build.json"
   }
  ]
 }

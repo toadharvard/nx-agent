@@ -5,9 +5,10 @@ The images are bytes in hand (exefacts.Image.parse); the CLI reads a file only t
 import json, os, shutil, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path[:0] = [HERE, os.path.join(HERE, '..'), os.path.join(HERE, '..', '..', 'contract')]
+sys.path[:0] = [HERE, os.path.join(HERE, '..'), os.path.join(HERE, '..', '..')]   # the test dir, link/, ports/fnv-nx (contract.X by its qualified name)
 import abi_fixture as F
-import exefacts, exevft
+from contract import exefacts
+import exevft
 
 fails = []
 

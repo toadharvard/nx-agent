@@ -3,10 +3,16 @@
  "generated": [
   {
    "tool": "ports/fnv-nx/contract/exportgen.py",
-   "args": [],
-   "inputs": [],
+   "args": [
+    "--reasons",
+    "/in/ports/fnv-nx/toolchain/layout/decltype_spell.inc"
+   ],
+   "inputs": [
+    "ports/fnv-nx/toolchain/layout/decltype_spell.inc"
+   ],
    "objects_of": {
-    "target": "guest"
+    "target": "guest",
+    "section": ".fnvnx.export"
    },
    "outputs": [
     "exports.tsv"

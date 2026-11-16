@@ -35,22 +35,22 @@ static void ci_errno(double r, double a, double b, u32 fl, int nandom) {
 
 #define CI1(NAME, FN, NANDOM) \
   extern "C" void fnvl_msvcrt_CI##NAME(void) { \
-    u32 ra = M32(esp), f_ = 0; \
+    u32 f_ = 0; \
     double a_ = fv_d(dyn_rd(0)); dyn_pop(); \
     double r_ = FN(a_, &f_); \
     ci_errno(r_, a_, 0.0, f_, NANDOM); \
     dyn_push(fv_f64(r_)); FM_FL(f_); \
-    c->ra = ra; esp += 4; } \
-  FNVNX_EXPORT("msvcrt.dll", "_CI" #NAME, fnvl_msvcrt_CI##NAME, "func");
+  } \
+  FNVNX_EXPORT("msvcrt.dll", "_CI" #NAME, fnvl_msvcrt_CI##NAME, "entry");
 #define CI2(NAME, FN) \
   extern "C" void fnvl_msvcrt_CI##NAME(void) { \
-    u32 ra = M32(esp), f_ = 0; \
+    u32 f_ = 0; \
     double a_ = fv_d(dyn_rd(1)), b_ = fv_d(dyn_rd(0)); dyn_pop(); dyn_pop(); \
     double r_ = FN(a_, b_, &f_); \
     ci_errno(r_, a_, b_, f_, 0); \
     dyn_push(fv_f64(r_)); FM_FL(f_); \
-    c->ra = ra; esp += 4; } \
-  FNVNX_EXPORT("msvcrt.dll", "_CI" #NAME, fnvl_msvcrt_CI##NAME, "func");
+  } \
+  FNVNX_EXPORT("msvcrt.dll", "_CI" #NAME, fnvl_msvcrt_CI##NAME, "entry");
 
 CI1(acos, fnvl_m_acos, 0)
 CI1(asin, fnvl_m_asin, 1)

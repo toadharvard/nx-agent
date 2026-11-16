@@ -33,7 +33,6 @@ BRIDGE = [('msvcrt.dll', n, cv, rt, ar, 'fnvl_msvcrt_' + SYM[n], 'l3') for n, cv
 BRIDGE.append(('msvcrt.dll', '??2@YAPAXI@Z', 'cdecl', 'i', 'i', 'c_new', 'sym'))
 KEY = None      # name -> import key: impgen.rows of the bridge.tsv written below (the one key rule), set by gen()
 SLOTS = {r[1]: IAT + 4 * i for i, r in enumerate(BRIDGE)}
-EH_KEYS = {0x000fffd0: 'fnvl_msvcrt_eh_nested_catch', 0x000fffe0: 'fnvl_msvcrt_eh_nested_collide'}      # rt/msvcrt.h: the runtime's own registrations
 class Fake:
     def __init__(s, code): s.d = code; s.secs = [('.text', BASE, len(code), 0, len(code))]; s.rset = set(); s.taken = []; s.base = BASE
     def bytes(s, a, n): return s.d[a - BASE:a - BASE + n]
@@ -322,7 +321,7 @@ def main():
     open(work + '/need.tsv', 'w').write(''.join('%08x\t%s\t%s\tkey\t%08x\n' % (SLOTS[r[1]], r[0], r[1], KEY[r[1]]) for r in BRIDGE))
     ent, blocked, hit, absent = impgen.generate(work + '/bridge.tsv', work, [work + '/need.tsv'], None)      # a bind-l3 row without a body in the runtime is an undefined symbol at the link
     if not (len(ent) == len(BRIDGE) and not blocked and not hit and not absent): sys.exit('msvcrttest gen: %d entries, blocked %s hit %s absent %s' % (len(ent), blocked, hit, absent))
-    syms = {x: 'L_%08x' % x for x in starts}; syms.update({k: s for k, s, *_ in ent}); syms.update(EH_KEYS)
+    syms = {x: 'L_%08x' % x for x in starts}; syms.update({k: s for k, s, *_ in ent})
     if {n: k for k, s, d, n, b in ent} != {r[1]: KEY[r[1]] for r in BRIDGE}: sys.exit('msvcrttest gen: the import keys differ from the key rule')
     open(w + '/guest.cc', 'w').write('#include "fnvl.h"\n' + '\n'.join(texts)); open(w + '/imp.cc', 'w').write(open(work + '/imp.cpp').read())
     hh = phf.build(list(syms)); open(w + '/tab.cc', 'w').write(phf.table_c(syms, hh))

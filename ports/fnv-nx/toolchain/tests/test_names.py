@@ -75,8 +75,9 @@ def checks(obj):
     unnamed = [r for r in rows if r[2].startswith('nodecor:') and r[2] != 'nodecor:vtordisp']
     reasons = {}
     for r in unnamed: reasons.setdefault(r[2], []).append(r[0])
-    check('a symbol with no decoration source carries a typed reason: nested-block statics and classes `localscope`, a function-type parameter whose declared form is lost `fnparmform`',
-          set(reasons) == {'nodecor:localscope', 'nodecor:fnparmform'} and len(reasons['nodecor:localscope']) == 4, reasons)
+    check('a symbol with no decoration source carries a typed reason: nested-block statics and classes `localscope` (the forms of function-type parameters are in the type: msvcmodel.patch '
+          'fnvnx_parmform, so no `fnparmform` row is left in names.cpp, f8 is cl\'s name)',
+          set(reasons) == {'nodecor:localscope'} and len(reasons['nodecor:localscope']) == 4, reasons)
     vtor = sorted(r[0] for r in rows if r[2] == 'nodecor:vtordisp')
     check('a destructor thunk of a class with virtual bases is `vtordisp` (cl\'s vtordisp needs the exe\'s vbptr layout)', len(vtor) == 4 and all('fnvnx_sdd' in x for x in vtor), vtor)
     missing = want - got
@@ -118,6 +119,17 @@ def sections(td, so):
         if r.returncode == 0:
             have = pb.elfobj.read(o)
             check('%s: the unit carries .fnvnx.sympair, empty' % fx, have.section('.fnvnx.sympair') == b'', have.section('.fnvnx.sympair'))
+    # forms of a function-type parameter that cl 15.00 has no recorded name for are typed facts, never a guessed name
+    o = os.path.join(td, 'fnparm_domain.o')
+    r = pb.compile(os.path.join(HERE, 'names', 'fnparm_domain.cpp'), o, so, flags=pb.PRODUCT_FLAGS + ['-O0'])
+    check('fnparm_domain: compiles', r.returncode == 0, r.stderr[-2000:])
+    if r.returncode == 0:
+        got = {x[0]: x[2] for x in rows_of(o, '.fnvnx.sympair')}
+        want = {'_Z2d1PFvPFviEE': 'nodecor:fnparmform:a parameter written as a function inside a function type',
+                '_Z2d5PFviE': None, '_Z2d6PFvPFviEE': None,
+                '_Z2d2PFvPicE': None, '_Z2d3PFvPisE': 'func', '_Z2d4PFvPiS0_E': 'func'}
+        check('fnparm_domain: a function-typed parameter inside a function type, one through a typedef of a function type, and a volatile pointer, are `nodecor:fnparmform:<form>`; plain and const pointers are named',
+              all(k in got and (v is None and got[k].startswith('nodecor:fnparmform:') or got[k] == v) for k, v in want.items()), got)
     for inst in (False, True):
         o = os.path.join(td, 'pattern%d.o' % inst)
         r = pb.compile(os.path.join(HERE, 'names', 'pattern.cpp'), o, so, flags=pb.PRODUCT_FLAGS + ['-O0'] + (['-DINSTANTIATE'] if inst else []))

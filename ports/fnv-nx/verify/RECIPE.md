@@ -318,6 +318,8 @@ declared debs, or a file of an external / a built root, see "A tool that is not 
   (`{name, root, output, at}`), `plugins` and the final step taking `{"plugin": NAME}` inputs.
 Tests: `tests/test_toolstep.py`, `tests/test_sandbox.py` case 13.
 
+- `exec: {"python": true}` runs the pinned python runtime of the generated stages (the interpreter and env.json `python.modules`, through the one function `Job.pyrt`; `FNVNX_PYMODS`, the interpreter digest and every module's installed-files digest are in the key). `args` are the interpreter's arguments after `-s -B` (a script path, usually `/in/N`); the step's inputs, `scratch`, `env` and stage refs are as for any tool step. The step names no debs (the machine's layout deb is added as always). A module the env does not pin cannot be imported. Tests: `tests/test_runpython.py`.
+
 ### Stage refs
 
 `resolve_input` takes a third ref form `{"stage": "ROOT:gen:I" | "ROOT:run:NAME", "path": P}`: the declared output P of generator I (index in
@@ -534,6 +536,17 @@ is a declared input passed by path in `args`; nothing is found through `PATH` ou
 `FNVNX_DEBS` or `JOBS`; a value that is a path must lie under one of the step's `scratch` directories (for example `CARGO_HOME=/scratch/cargo`). There is no network: the sandbox runs
 in its own network namespace with no interface (already so for every step), so a tool that wants to fetch fails instead of reading the world; vendored sources are declared inputs.
 Tests: `tests/test_toolexec.py` (ELF resolution and the check forms; the sandboxed green run of an external tool is the `test_toolext.py` pattern, not run on a host without busybox).
+
+## An external of another root
+
+`{"external_of": ROOT, "name": EXTERNAL, "path": SUB}` is an input of a `run`, `exec` or `generated` step. It names a path inside an external that the recipe of ANOTHER admitted root declares (a fetched commit, never a root's built output). The pin is that root's own (commit and `tree_sha256`), so the stage key holds the owner's tree and a changed owner pin is a changed key. The one validator `recipe.external_of_errors` serves check, key and mount; `resolve_input` is the one reader.
+
+Red: the owner is this root (use `{external, path}`); the owner is not an admitted root; the owner is neither in this recipe's `uses` nor in the root's admit.json `imports` (the dependency is declared, never reached by name alone); the owner declares no external NAME; the external is a stage external (take it through `uses`); the path is absolute or leaves the tree. A stage reads it at `/in/N` (run), `/exec` (exec) or `/in/external_of/<owner with / as __>/<name>/<path>` (generated). Selftests: `tests/test_external_of.py`.
+
+## The include closure of a root (`include_of`)
+An input of a `run` or `generated` step may be `{"include_of": ROOT}`: every tracked file under the repository include directories of ROOT's own recipe (`include`, directories inside an external are the compiler's declared inputs and are not part of it), at its repo-relative path, mounted at `/in/include_of/<ROOT with / as __>/` (`run`: at the step's `at`). It is resolved the way the compile stage resolves them, so a consumer never restates a root's include list. Valid only where ROOT is a root this recipe `uses` or a declared import (`include_of_errors`, the one rule: check and mount); ROOT itself is red (its include dirs are its own sources); a ROOT whose recipe has no repository include directory is red. The content hash of the tree is in the stage key, so a changed header changes the key. Functions: `recipe.include_of_dirs`, `Job.include_of_tree`. Test: `tests/test_external_of.py`.
+
+The external cache is named once: `recipe.ext_dir(cache)`. A build that is given its own external cache (`--ext`) passes it to every reader (`resolve_input(..., extc)`, `exttree(e, cache, extc)`), so the reader goes where `fetch_externals` wrote.
 
 ## Single file of an external (a document through a tool step)
 A run step's `inputs` entry `{"external": NAME, "path": FILE}` mounts ONE file of a declared external at `/in/N`. The external is pinned as above, by

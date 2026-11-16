@@ -28,6 +28,7 @@
  },
  "include": [
   "ports/fnv-nx/platform/include",
+  "ports/fnv-nx/contract/include",
   "ports/fnv-nx/loader/include",
   "ports/fnv-nx/lib/sha256/include",
   "ports/fnv-nx/hostabi/include",
@@ -225,19 +226,6 @@
    ],
    "outputs": [
     "input/dinput.env_const.gen.inc"
-   ]
-  },
-  {
-   "tool": "ports/fnv-nx/platform/crt/gen_msvcrt_table.py",
-   "args": [
-    "/in/ports/fnv-nx/bridgefacts/crt/msvcrt_names.tsv",
-    "/out/crt/msvcrt_table.gen.cpp"
-   ],
-   "inputs": [
-    "ports/fnv-nx/bridgefacts/crt/msvcrt_names.tsv"
-   ],
-   "outputs": [
-    "crt/msvcrt_table.gen.cpp"
    ]
   },
   {
@@ -543,7 +531,11 @@
  },
  "uses": [
   {
-   "root": "ports/fnv-nx/loader",
+   "root": "ports/fnv-nx/contract/include",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/loader/include",
    "output": "INCLUDE"
   },
   {

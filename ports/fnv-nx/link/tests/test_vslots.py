@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Check of link/vslots.py on a synthetic two-class scene (byte-built exe, hand-built object and bind facts, invented names): green on the
 consistent scene, red and named on every broken fact, an error on malformed input."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import os, sys, tempfile
 import atexit  # noqa: E402
 import shutil  # noqa: E402
@@ -9,7 +12,7 @@ tempfile.tempdir = tempfile.mkdtemp(prefix="scratch-")  # every scratch dir of t
 atexit.register(shutil.rmtree, tempfile.tempdir, True)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path[:0] = [HERE, os.path.join(HERE, '..'), os.path.join(HERE, '..', '..', 'contract')]
+sys.path[:0] = [HERE, os.path.join(HERE, '..')]
 import abi_fixture as F
 import abi_gaterun
 import vslots as G
@@ -28,7 +31,7 @@ def run(**kw):
     rc, r = abi_gaterun.run(G, ['--exe', exe, '--obj', op, '--bind', bp], 'vslots')
     return rc, r, a, (exe, op, bp)
 
-import store
+from contract import store
 rc, r, a, _ = run()
 check('green', (rc, r['universe'], r['certified'], r['name']), (0, 6, 6, 'vslots'))
 rc, r, a, _ = run(g_addr=F.TEXT)

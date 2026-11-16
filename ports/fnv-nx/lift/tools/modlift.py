@@ -20,8 +20,8 @@ from capstone import x86 as X
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))      # the tool root: a tool imports its siblings from its own root (the generated stages run it under python3 -I)
 import pemod, ehtables, codemap, residue, jtab as JT
 from fnvlift import Image as LImage; from fnvlift import core as LCore
-TERM = {'ret', 'retf', 'int3', 'hlt', 'ud2', 'iret', 'iretd'}
-PRI = ['entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw', 'ptr']
+TERM = {'ret', 'retf', 'int3', 'hlt', 'ud2', 'iret', 'iretd', '(ud)'}
+PRI = residue.PRI
 CN = {1: 'entry-nondecomp', 2: 'entry-nondecomp', 3: 'data-pe-header', 4: 'padding', 5: 'data-reloc', 6: 'dead-gap', 9: 'data-unreached', 8: 'UNEXPLAINED'}      # the exe's class names (codemap.py CLS)
 M32 = 0xffffffff
 
@@ -31,6 +31,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     path, mrow = pemod.locate(arg, cfg.modules, cfg.moddirs)      # modules.tsv row (missing = KeyError) and the file (sha256 + size checked = ValueError)
     name = os.path.splitext(mrow.name)[0]; outd = cfg.facts_out + '/' + name; os.makedirs(outd, exist_ok=True)
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
+    import gapmd; md = gapmd.make(md, cfg.udsail)
     M = pemod.load(path, mrow.base); u32 = M.u32; RL = pemod.relocs(M); relocs = sorted(RL or []); rset = set(relocs); imports = pemod.imports(M)
     T0 = min(a for n, a, z, ro in M.xs); T1 = max(a + z for n, a, z, ro in M.xs); TN = T1 - T0
     V = bytearray(TN); tx = bytearray(b'\xcc' * TN)
@@ -338,7 +339,10 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     # ---- the residue is settled HERE, after universe.tsv / ranges.tsv exist and after the pcsrc facts of this run (pcsrc_s4.json) have been written: residue.closure reads them (tools/residue.py)
     # (the call that runs pcsrc.run_facts(outd, ...) must come before this point)
     import time as _t; _t0 = _t.time()
-    import pcsrc; pcsrc_red, pcsrc_res = pcsrc.run_facts(outd, name, X_.text, X_.T0, X_.u32, X_.rset)
+    HD = '# base=0x%08x: absolute VAs at the preferred image base (not RVAs)' % M.base
+    print('shapes.tsv %d shape keys' % gapmd.shapes_tsv(cfg.shapes, HD, md, text, T0, dec))
+    open(cfg.baddecode, 'w').write(HD + '; columns: entry, undecodable address, the 15 bytes there; every sequence that decode_gap did not decide\n' + ''.join('%08x\t%08x\t%s\n' % (entry_of(a), a, text[a - T0:a - T0 + 15].hex()) for a in sorted(ud)))
+    import pcsrc; pcsrc_red, pcsrc_res = pcsrc.run_facts(outd, name, X_.text, X_.T0, X_.u32, X_.rset, imports)
     sys.stderr.write('timing %s: pcsrc %.1f s (this round)\n' % (name, _t.time() - _t0))     # reads only universe.tsv and ranges.tsv; writes gate_pcsrc.json and pcsrc_s4.json
     # residue (valid executable bytes no entry body reaches and no PE directory names), cut by rule into: padding (nop / int3 instructions at the run's ends), dead gap (the run decodes
     # completely from its first byte, ends at a terminator or at the next reached instruction, and has relocated dwords only at operand fields), relocation slots (the bytes of a
@@ -353,7 +357,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     def residual(p, q):
         """[p, q) offsets of one residue run: tools/residue.py (closure complete -> data, else UNEXPLAINED with the closure reason); the sweep is a breakdown, it decides nothing"""
         brk[residue.sweep(md, text, T0, TN, relocs, rsl, cov, p, q)] += q - p
-        if closure_complete: cl[p:q] = bytes([residue.DATA]) * (q - p)
+        if closure_complete: cl[p:q] = bytes(5 if rsl[k] else residue.DATA for k in range(p, q))      # relocation-named bytes no instruction covers are class data-reloc (the exe's class 3: the byte of a relocated slot, the proof is the relocation); the rest is data-unreached
         else: cl[p:q] = b'\x08' * (q - p); unx.append((T0 + p, q - p, closure_reason))
     for m in re.finditer(rb'\x00+', bytes(cl)):
         s, e = m.span(); p = s
@@ -472,7 +476,7 @@ def run(arg, cfg):
     the entries on the value sites (not in X). Round k runs the whole producer with X_k excluded and yields X_{k+1} = X(flow of round k); X_0 = empty. Done when X_{k+1} == X_k: every excluded site is a
     displacement inside the final flow and every entry is justified by a value site or a root. A cycle is an error (never a result); the rounds are not capped (R grows, the states are finite)."""
     import io, contextlib
-    X = frozenset(); R = frozenset(); seen = []; refinfo = {}
+    X = frozenset(); R = frozenset(); DD = frozenset(); seen = []; refinfo = {}
     k = -1
     while True:      # terminates: R only grows and the states (X, R) are finite; a state seen twice is a cycle, which is an error (below); there is no round cap
         k += 1; buf = io.StringIO()
@@ -483,8 +487,13 @@ def run(arg, cfg):
             sys.stdout.write(buf.getvalue()); print('R3 refinement: fixed point after %d rounds, %d displacement-only relocation sites excluded from the entry rule' % (k + 1, len(X)))
             print('reloc-consistency: entries %d (candidates %d); refused (unproven, decoding has a relocation-misfit) %d; proven entries with a misfit %d%s' % (nE, nC, len(R), len(PMF), ' RED: ' + ' '.join('%08x' % a for a in PMF[:8]) if PMF else ''))
             od = cfg.facts_out + '/' + os.path.splitext(pemod.locate(arg, cfg.modules, cfg.moddirs)[1].name)[0]
-            open(od + '/refused.tsv', 'w').write('# columns: entry, relocation-misfit instructions in its decoding, reason; unproven candidate entries refused by reloc-consistency (the bytes go to data, the relocated pointer is a data fact)\n' + ''.join('%08x\t%d\treloc-misfit\n' % (e, refinfo[e]) for e in sorted(R)))
-            bad = residue.entries_on_data(od); print('invariant entries on class-3 data bytes: %d%s' % (len(bad), ' RED: ' + ' '.join('%08x' % a for a in bad[:8]) if bad else ''))
+            open(od + '/refused.tsv', 'w').write('# columns: entry, relocation-misfit instructions in its decoding, reason; unproven candidate entries refused by reloc-consistency (the bytes go to data, the relocated pointer is a data fact)\n' + ''.join('%08x\t%d\treloc-misfit\n' % (e, refinfo[e]) for e in sorted(R - DD)))
+            bad = residue.entries_on_data(od)
+            dn = frozenset(bad) - R - DD
+            if dn:      # the same invariant the gate reads: a pointer-only entry on proven data (codemap class data-reloc) is not an entry; it is refused, and the next round rebuilds the facts without it
+                DD = DD | dn; R = R | dn; seen.append((X, R)); continue
+            open(od + '/dropped_on_data.tsv', 'w').write('# columns: address, proof id; pointer-valued sites whose target is a byte of class data-reloc (the codemap invariant, residue.entries_on_data), so not an entry\n' + ''.join('%08x\t%s\n' % (a, residue.data_proof(od, a)) for a in sorted(DD)))
+            print('invariant entries on class-3 data bytes: %d%s' % (len(bad), ' RED: ' + ' '.join('%08x' % a for a in bad[:8]) if bad else ''))
             return 0      # the facts are written; the verdict is gate_codemap.json / gate_pcsrc.json (status, entries_on_data), judged by the gate that reads them
         seen.append((X, R)); X = frozenset(Xo); R = R | frozenset(Ro)          # a refusal is intrinsic to the bytes (the misfit) and the proven set only shrinks with the universe: R grows monotonically
         if (X, R) in seen:

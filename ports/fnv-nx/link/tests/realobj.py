@@ -5,6 +5,9 @@ plugins = recipe.PLUGIN_SOURCES / PLUGIN_ARGS), exactly as verify/tests/test_plu
     objects(names)  -> {fixture stem: path of the produced .o}    (built once per process; the store is $GATE_CACHE, else a scratch store)
 The external compiler is fetched by the pin (commit + tree hash) from recipe.ARTIFACTS; when it cannot be fetched this raises, never skips.
 """
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import atexit
 import json
 import os
@@ -16,9 +19,8 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.dirname(os.path.dirname(HERE))                    # ports/fnv-nx
 REAL = os.path.dirname(os.path.dirname(TOOL))                    # checkout root
-sys.path.insert(0, os.path.join(TOOL, 'verify'))
-import cas  # noqa: E402
-import recipe  # noqa: E402
+from verify import cas  # noqa: E402
+from verify import recipe  # noqa: E402
 
 T = 'ports/fnv-nx/'
 ROOT = T + 'toy'
@@ -109,7 +111,7 @@ def build(sources, plugins=None, lifted=False, flags=()):
         recipe.ARTIFACTS = pack
     else:
         for n, text in sources.items():
-            _w(repo, ROOT + '/' + (n if os.path.splitext(n)[1] in recipe.CC_EXT + recipe.CXX_EXT + recipe.ASM_EXT else n + '.cc'), text)   # a name with a unit suffix is the unit; a bare name is a C++ unit
+            _w(repo, ROOT + '/%s.cc' % n, text)
         root['cxx_origin'] = 'native'
     _w(repo, ROOT + '/build.json', json.dumps(rec, indent=1))
     _w(repo, T + 'verify/guest_compiler.json', json.dumps(pin))

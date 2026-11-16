@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/lib/sha256/build.json ports/fnv-nx/link
-# reads: ports/fnv-nx/loader/build.json ports/fnv-nx/platform/build.json ports/fnv-nx/render/d3d9/build.json ports/fnv-nx/render/gl4/build.json
-# reads: ports/fnv-nx/render/nxgpu/build.json ports/fnv-nx/render/pair/build.json ports/fnv-nx/render/shaders/translator/build.json
-# reads: ports/fnv-nx/render/smscan/build.json ports/fnv-nx/rt/guest/build.json ports/fnv-nx/rt/guest_main/build.json ports/fnv-nx/shim/build.json
-# reads: ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for verify/gate_pure.py, verify/gate_tests.py, verify/gates.d and verify/l1.py.
 Plain script: exit 0 on pass, one PASS/FAIL line per case. Uses temp git repositories."""
 import json
@@ -476,11 +471,10 @@ check("tests cache (view): a path the test saw as absent now exists -> that file
 # a test whose import closure reaches a module that runs strace is untraced (derived, no list) and keyed by whole directories
 d4 = tmp("tests-cache-untraced")
 c4 = os.path.join(d4, "cache")
-LOG4 = os.path.join(d4, "ran.log")   # an untraced test runs in its own mount directory: the log is an absolute path
-mk(d4, test_u="# reads: other\nopen(%r, 'a').write('u\\n')\nCHILD = \"\"\"\nimport envcheck\n\"\"\"\n" % LOG4, test_t="open(%r, 'a').write('t\\n')\n" % LOG4)
+mk(d4, test_u="open('ran.log', 'a').write('u\\n')\nCHILD = \"\"\"\nimport envcheck\n\"\"\"\n", test_t="open('ran.log', 'a').write('t\\n')\n")
 put(d4, "other/data.txt", "1\n")
 ran4 = lambda: open(os.path.join(d4, "ran.log")).read().split() if os.path.exists(os.path.join(d4, "ran.log")) else []
-ex4 = ()   # the untraced file declares its data (`# reads: other`); no key-dirs
+ex4 = ("--key-dirs", "verify", "other", "--")
 tests_c(d4, c4, extra=ex4)
 tests_c(d4, c4, extra=ex4)
 check("tests cache (untraced): unchanged -> both cached", sorted(ran4()) == ["t", "u"], ran4())

@@ -24,7 +24,6 @@ BATCH = 60
 ENCS = 4            # encodings listed per form (encs.tsv): the distinct byte strings at the lowest addresses; the universe of the retired one-instruction harness
 NBUCKET = 4096
 ROOT = 'ports/fnv-nx/lift/pack'
-EH_KEYS = ((0x000fffd0, 'fnvl_msvcrt_eh_nested_catch'), (0x000fffe0, 'fnvl_msvcrt_eh_nested_collide'))    # rt/msvcrt.h FNVL_EH_KEY_*: the two handlers the msvcrt EH runtime registers on fs:[0]
 G = {}
 import lifted      # the one definition of the lifted set (the lift step and the census read it from here)
 
@@ -217,10 +216,7 @@ def finish(a):
     for i in range(NBUCKET):
         with open('%s/u/%03x.src' % (pk, i), 'wb') as f: f.write(b'#include "fnvl_prelude.h"\n' + b''.join(units[i]))
     syms = {x: 'L_%08x' % x for x in texts}
-    kind = {x: 'code' for x in syms}                      # the kind of an entry is the producer set its key came from: the keys of texts, EH_KEYS (the import rows are the pack's impgen stage)
-    for k, sy in EH_KEYS:
-        assert k not in syms
-        syms[k] = sy; kind[k] = 'runtime'
+    kind = {x: 'code' for x in syms}                      # the kind of an entry is the producer set its key came from: the keys of texts (the import rows, and the fixed-key runtime entries of tools/ehkeys.py, are the pack's impgen stage)
     w = lambda n, rows: open('%s/%s.tsv' % (pk, n), 'w').write(''.join('\t'.join(map(str, x)) + '\n' for x in rows))
     w('entries', [('%08x' % x, sy, kind[x]) for x, sy in sorted(syms.items())])      # lifted and runtime rows
     open(pk + '/entries.tsv', 'a').write('# module_table sha256 %s\n' % table_sha)      # the loader's modules.tsv this pack was lifted against (the stage packentries.py checks it)

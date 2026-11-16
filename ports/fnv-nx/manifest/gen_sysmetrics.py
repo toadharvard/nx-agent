@@ -49,7 +49,7 @@ def groups(tree):
         elif depth == 1:
             lm = re.compile(r"(case[ \t\n]+(SM_[A-Z0-9_]+)[ \t\n]*:|default[ \t\n]*:)").match(text, pos)
             if lm and (pos == 0 or not (text[pos - 1].isalnum() or text[pos - 1] == "_")):
-                marks.append((lm.group(2), lm.start(), lm.end()))
+                marks.append((lm[2], lm.start(), lm.end()))
                 pos = lm.end()
                 continue
         pos += 1
@@ -66,7 +66,7 @@ def groups(tree):
         stop = marks[j][1] if j < len(marks) else end - 1
         body = text[marks[j - 1][2]:stop]
         lit = LITERAL.fullmatch(body.strip())
-        out.append((names, text.count("\n", 0, marks[i][1]) + 1, lit.group(1) if lit else None, [text.count("\n", 0, marks[k][1]) + 1 for k in range(i, j)]))
+        out.append((names, text.count("\n", 0, marks[i][1]) + 1, lit[1] if lit else None, [text.count("\n", 0, marks[k][1]) + 1 for k in range(i, j)]))
         i = j
     return out
 
@@ -76,7 +76,7 @@ def main():
     errors = []
     defs = {}
     for m in re.finditer(r"^#[ \t]*define[ \t]+(SM_[A-Z0-9_]+)[ \t]+(0x[0-9A-Fa-f]+|[0-9]+|SM_[A-Z0-9_]+)\b", open(os.path.join(tree, IDS), encoding="utf-8", errors="replace").read(), re.M):
-        defs.setdefault(m.group(1), m.group(2))
+        defs.setdefault(m[1], m[2])
 
     def ident(n):
         v, hops = defs.get(n), 0
@@ -86,15 +86,15 @@ def main():
 
     handlers = {}
     for m in HANDLER.finditer(open(cpp, encoding="utf-8").read()):
-        if m.group(2) in handlers:
-            errors.append("handler %s is defined twice" % m.group(1))
-        handlers[m.group(2)] = (m.group(1), m.group(3).strip())
+        if m[2] in handlers:
+            errors.append("handler %s is defined twice" % m[1])
+        handlers[m[2]] = (m[1], m[3].strip())
     consts = set()
     for m in CONST.finditer(open(cpp, encoding="utf-8").read()):
-        if m.group(2) in handlers:
-            errors.append("%s is defined twice" % m.group(1))
-        handlers[m.group(2)] = (m.group(1), "return %s;" % m.group(3).strip())
-        consts.add(m.group(2))
+        if m[2] in handlers:
+            errors.append("%s is defined twice" % m[1])
+        handlers[m[2]] = (m[1], "return %s;" % m[3].strip())
+        consts.add(m[2])
     rows, names = [], set()
     for labs, _, lit, lines in groups(tree):
         for n, line in zip(labs, lines):
@@ -109,7 +109,7 @@ def main():
             if lit is not None:
                 want = ident(lit) if lit.startswith("SM_") else int(lit)
                 mine = re.fullmatch(r"return\s*(-?[0-9]+|SM_[A-Z0-9_]+)\s*;", handlers[n][1])
-                got = None if not mine else (ident(mine.group(1)) if mine.group(1).startswith("SM_") else int(mine.group(1)))
+                got = None if not mine else (ident(mine[1]) if mine[1].startswith("SM_") else int(mine[1]))
                 if got is None or got != want:
                     errors.append("%s (%s:%d): the reference returns the literal %s; %s is `%s`" % (n, FILE, line, lit, handlers[n][0], handlers[n][1]))
             rows.append((idx, n, line))

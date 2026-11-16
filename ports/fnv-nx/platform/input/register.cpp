@@ -22,22 +22,17 @@ HRESULT fnvnx_dshow_com_factory(const GUID *iid, void **out);   /* platform/audi
 HRESULT fnvnx_dshow_mapper_factory(const GUID *iid, void **out);
 }
 
+/* the rows of the generated export table (platform/exptable: exports.tsv and the bridge table), see win32/exports.cpp */
+extern "C" {
+struct fnvnx_export_row { const char *dll, *name; void *fn; };
+extern const fnvnx_export_row fnvnx_export_rows[];
+extern const unsigned fnvnx_export_nrows;
+}
+
 namespace {
-struct exp { const char *dll, *name; FARPROC fn; };
-#define X(dll, name, fn) { dll, name, (FARPROC)(void *)&fn }
-const exp g_exports[] = {
-    X("dsound", "DirectSoundCreate8", DirectSoundCreate8),
-    X("dsound", "DirectSoundCreate", DirectSoundCreate),
-    X("dsound", "DirectSoundEnumerateA", DirectSoundEnumerateA),
-    X("dinput8", "DirectInput8Create", DirectInput8Create),
-    X("xinput1_3", "XInputGetState", XInputGetState),
-    X("xinput1_3", "XInputSetState", XInputSetState),
-    X("xinput1_3", "XInputGetCapabilities", XInputGetCapabilities),
-    X("xinput1_3", "XInputEnable", XInputEnable),
-    X("xinput1_3", "XInputGetDSoundAudioDeviceGuids", XInputGetDSoundAudioDeviceGuids),
-    X("xinput1_3", "XInputGetBatteryInformation", XInputGetBatteryInformation),
-    X("xinput1_3", "XInputGetKeystroke", XInputGetKeystroke),
-};
+/* the modules this file serves: the DLL replacements of S7 (audio/input). Each is registered with its own resolver, whose rows are the module's rows of the generated table. */
+const char *const g_served[] = { "dsound.dll", "dinput8.dll", "xinput1_3.dll", "xinput1_4.dll", "xinput9_1_0.dll" };
+constexpr unsigned N_SERVED = sizeof g_served / sizeof g_served[0];
 
 const char *base(const char *p)
 {
@@ -47,27 +42,36 @@ const char *base(const char *p)
     return b;
 }
 
-/* "XINPUT1_3.DLL" == "xinput1_3"; xinput1_4 and xinput9_1_0 resolve to the same functions */
+/* "XINPUT1_3.DLL" == "xinput1_3.dll": the base name without a ".dll", ignoring case */
 bool dll_eq(const char *a, const char *want)
 {
     a = base(a);
-    size_t la = strlen(a);
+    size_t la = strlen(a), lw = strlen(want);
     if (la > 4 && !strcasecmp(a + la - 4, ".dll")) la -= 4;
-    auto is = [&](const char *n) { return la == strlen(n) && !strncasecmp(a, n, la); };
-    if (!strcmp(want, "xinput1_3")) return is("xinput1_3") || is("xinput1_4") || is("xinput9_1_0");
-    return is(want);
+    if (lw > 4 && !strcasecmp(want + lw - 4, ".dll")) lw -= 4;
+    return la == lw && !strncasecmp(a, want, la);
 }
 
-FARPROC find(const char *dll, const char *name)
+FARPROC find_in(const char *dll, const char *name)
 {
-    for (const exp &e : g_exports)
-        if (!strcmp(e.name, name) && (!dll || dll_eq(dll, e.dll))) return e.fn;
+    for (unsigned i = 0; i < fnvnx_export_nrows; i++) {
+        const fnvnx_export_row &e = fnvnx_export_rows[i];
+        if (!strcmp(e.name, name) && dll_eq(dll, e.dll)) return (FARPROC)e.fn;
+    }
     return nullptr;
 }
 
-FARPROC r_dsound(const char *n) { return find("dsound", n); }
-FARPROC r_dinput8(const char *n) { return find("dinput8", n); }
-FARPROC r_xinput(const char *n) { return find("xinput1_3", n); }
+/* dll named: its rows; dll NULL: the rows of any served module */
+FARPROC find(const char *dll, const char *name)
+{
+    if (dll) return find_in(dll, name);
+    for (const char *m : g_served)
+        if (FARPROC f = find_in(m, name)) return f;
+    return nullptr;
+}
+
+template <unsigned I> FARPROC resolve(const char *n) { return find_in(g_served[I], n); }
+const fnvnx_module_resolver g_resolvers[N_SERVED] = { resolve<0>, resolve<1>, resolve<2>, resolve<3>, resolve<4> };
 
 int g_done;
 } // namespace
@@ -80,11 +84,8 @@ extern "C" void *fnvnx_audio_input_lookup_export(const char *dll, const char *na
 extern "C" void fnvnx_audio_input_register(void)
 {
     if (__atomic_exchange_n(&g_done, 1, __ATOMIC_ACQ_REL)) return;
-    fnvnx_register_module("dsound.dll", r_dsound);
-    fnvnx_register_module("dinput8.dll", r_dinput8);
-    fnvnx_register_module("xinput1_3.dll", r_xinput);
-    fnvnx_register_module("xinput1_4.dll", r_xinput);
-    fnvnx_register_module("xinput9_1_0.dll", r_xinput);
+    for (unsigned i = 0; i < N_SERVED; i++)
+        fnvnx_register_module(g_served[i], g_resolvers[i]);
     fnvnx_register_com_class(&CLSID_DirectSound8, fnvnx_dsound_com_factory);
     fnvnx_register_com_class(&CLSID_DirectSound, fnvnx_dsound_com_factory);
     fnvnx_register_com_class(&CLSID_DirectInput8, fnvnx_dinput_com_factory);

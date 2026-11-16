@@ -50,7 +50,13 @@
     "--keys",
     "/uses/ports/fnv-nx/loader/KEYS_TSV",
     "--lib",
-    "/in/ports/fnv-nx/lift"
+    "/in/ports/fnv-nx/lift",
+    "--baddecode",
+    "/out/baddecode_exe.tsv",
+    "--shapes",
+    "/out/shapes_exe.tsv",
+    "--udsail",
+    "/in/ports/fnv-nx/lift/proof/udsail_input.tsv"
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
@@ -60,7 +66,10 @@
     },
     "ports/fnv-nx/lift/proof"
    ],
-   "outputs": [],
+   "outputs": [
+    "baddecode_exe.tsv",
+    "shapes_exe.tsv"
+   ],
    "dirs": [
     "exe"
    ]
@@ -68,6 +77,8 @@
  ],
  "outputs": {
   "IMG": "exe",
-  "FUNCS": "funcs.tsv"
+  "FUNCS": "funcs.tsv",
+  "BADDECODE": "baddecode_exe.tsv",
+  "SHAPES": "shapes_exe.tsv"
  }
 }
