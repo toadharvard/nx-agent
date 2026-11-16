@@ -633,13 +633,15 @@ def gate_main():
         u = c = 0
         ids, why = [], []
         adm = recipe.load_admit(repo)
-        roots = [r for r in gate_build.product_roots(repo) if recipe.entry_of(adm, r).get("target") == "guest"]
-        try:
-            jb = jmpbuf_facts(repo, cache)
-        except (ValueError, recipe.RecipeError) as e:
-            jb, why = ((), 0), ["jmp_buf facts: %s" % str(e)[:200]]
-            u += 1
-            ids.append("jmpbuf:probe")
+        roots = [r for r in gate_build.product_roots(repo) if recipe.entry_of(adm, r).get("target") == "guest" and not gate_build.unitless(r, cache, repo)]   # a header-only root has no object to judge (by construction)
+        jb = ((), 0)
+        if roots:   # the jmp_buf facts are the judge of the guest roots' routines: without a guest root there is nothing to judge, and the facts are not asked for
+            try:
+                jb = jmpbuf_facts(repo, cache)
+            except (ValueError, recipe.RecipeError) as e:
+                jb, why = ((), 0), ["jmp_buf facts: %s" % str(e)[:200]]
+                u += 1
+                ids.append("jmpbuf:probe")
         for r in roots:
             rep, w = judge_root_objects(repo, cache, r, jb)
             if rep is None:

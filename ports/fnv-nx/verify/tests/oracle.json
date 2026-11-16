@@ -74,24 +74,6 @@
     "ports/fnv-nx/verify/bootmachine.py"
    ]
   },
-  "test_bootinputs.py": {
-   "references": [
-    {
-     "anchor": "## verify/bootinputs.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    },
-    {
-     "anchor": "## verify/boot.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/bootinputs.py",
-    "ports/fnv-nx/verify/boot.py"
-   ]
-  },
   "test_bootlayout.py": {
    "references": [
     {
@@ -116,31 +98,6 @@
     "ports/fnv-nx/verify/bootmiles.py"
    ]
   },
-  "test_bootpath.py": {
-   "references": [
-    {
-     "anchor": "## verify/bootpath.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/bootpath.py"
-   ]
-  },
-  "test_bootrt.py": {
-   "references": [
-    {
-     "anchor": "## verify/bootmachine.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/bootmachine.py",
-    "ports/fnv-nx/verify/boothost.py"
-   ]
-  },
   "test_bootsock.py": {
    "references": [
     {
@@ -151,18 +108,6 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/bootsock.py"
-   ]
-  },
-  "test_bootstart.py": {
-   "references": [
-    {
-     "anchor": "## verify/bootstart.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/bootstart.py"
    ]
   },
   "test_bootthreadcpu.py": {
@@ -238,19 +183,6 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/gate_datamodel.py",
-    "ports/fnv-nx/verify/recipe.py"
-   ]
-  },
-  "test_descs.py": {
-   "references": [
-    {
-     "anchor": "### Objects of every admitted product root (`objects_of`): the fact universe",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/RECIPE.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/lift/descs/descs.py",
     "ports/fnv-nx/verify/recipe.py"
    ]
   },
