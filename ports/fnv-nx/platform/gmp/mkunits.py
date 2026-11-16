@@ -41,6 +41,33 @@ def check_flags(r):
 def where_of(p):
     return ("src/" + os.path.relpath(p, src)) if p.startswith(src + "/") else ("build/" + os.path.relpath(p, build))
 INC_C = re.compile(rb'^[ \t]*#[ \t]*include[ \t]+"([^"]+\.c)"[^\n]*$', re.M)
+def block_comment_starts(text):
+    """{offset of each line start that lies inside a /* */ comment}: the scan C's translation phases give (comments, string and character literals, line comments); a #include
+    inside a comment is no include."""
+    inside, i, n, in_c = set(), 0, len(text), False
+    while i < n:
+        c = text[i:i + 1]
+        if in_c:
+            if text.startswith(b"*/", i):
+                in_c, i = False, i + 2
+                continue
+        elif text.startswith(b"/*", i):
+            in_c, i = True, i + 2
+            continue
+        elif text.startswith(b"//", i):
+            j = text.find(b"\n", i)
+            i = n if j < 0 else j
+            continue
+        elif c in (b'"', b"'"):
+            j = i + 1
+            while j < n and text[j:j + 1] != c and text[j:j + 1] != b"\n":
+                j += 2 if text[j:j + 1] == b"\\" else 1
+            i = j + 1
+            continue
+        if c == b"\n" and in_c:
+            inside.add(i + 1)
+        i += 1
+    return inside
 def inline_c(path, r, depth):
     if depth > 8:
         sys.exit("mkunits: C sources include each other too deep at %s" % path)
@@ -53,7 +80,8 @@ def inline_c(path, r, depth):
                 lineno = text.count(b"\n", 0, m.start()) + 2
                 return (b'#line 1 "%s"\n' % where_of(cand).encode() + inline_c(cand, r, depth + 1) + b'\n#line %d "%s"' % (lineno, where_of(path).encode()))
         return m.group(0)
-    return INC_C.sub(sub, text)
+    inside = block_comment_starts(text)
+    return INC_C.sub(lambda m: m.group(0) if m.start() in inside else sub(m), text)
 units, seen = {}, {}
 for r in rows:
     check_flags(r)
