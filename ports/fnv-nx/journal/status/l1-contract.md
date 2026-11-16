@@ -2847,3 +2847,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - FTOI/ is a declared output of the rt step.
 - The recipe adds one objects.json row per member, with "f2i" in the same form as the CC rows. That reader extension is L1's and follows when the rt step lands.
 - bottleneck: cand4 verdict (w15/farm); cand5 waits on the L3a base3 head and the L2 w2 toolchain head.
+- Refinement of the f2i ruling (answer to w3's design):
+  - The report sits next to its object, at <-o path>.f2i.json.
+  - Each archive member is paired with its object by sha256 of its bytes, not by name. An ambiguous or unmatched member is red, and a member that occurs twice in one archive gets the suffix .<n>.
+  - A member is null exactly when no report sits next to its object.
