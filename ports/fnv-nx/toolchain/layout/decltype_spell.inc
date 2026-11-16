@@ -24,6 +24,12 @@ static void dl_error(const char *what, const std::string &name)
  * skip. The members of a class are the FIELD_DECLs the front end makes (base-class subobjects and the vptr are artificial fields, spelled `-`: the layout the
  * C view sees); member functions and static members are not part of the object. A C unit's rows are unchanged (its TYPE_CONTEXT is not read). */
 static bool dl_cxx() { return !strncmp(lang_hooks.name, "GNU C++", 7); }
+static bool dl_builtin_record(tree t)
+{
+  tree n = TYPE_NAME(t);
+  if (n && TREE_CODE(n) == TYPE_DECL) return DECL_IS_UNDECLARED_BUILTIN(n) || DECL_SOURCE_LOCATION(n) == BUILTINS_LOCATION;
+  return false;
+}
 static bool dl_ident(const char *s)
 {
   if (!*s) return false;
@@ -137,7 +143,10 @@ static std::string dl_type(tree t, std::vector<tree> &stk)
     for (tree f = TYPE_FIELDS(t); f; f = DECL_CHAIN(f)) {
       if (TREE_CODE(f) != FIELD_DECL) continue;
       bool bf = DECL_C_BIT_FIELD(f);
-      const char *mn = DECL_NAME(f) && !(dl_cxx() && DECL_ARTIFICIAL(f)) ? IDENTIFIER_POINTER(DECL_NAME(f)) : "-";   /* a base subobject or the vptr has no source name */
+      /* RULE (DECLTYPE-BUILTIN): a record the target builds (no source declaration: its TYPE_NAME is an undeclared builtin, e.g. the target's va_list) keeps the
+       * names of its own FIELD_DECLs on both front ends; only the artificial fields the C++ front end adds to a source class (base subobjects, vptr) have no name. */
+      bool art = dl_cxx() && DECL_ARTIFICIAL(f) && !dl_builtin_record(t);
+      const char *mn = DECL_NAME(f) && !art ? IDENTIFIER_POINTER(DECL_NAME(f)) : "-";
       if (dl_cxx() && strcmp(mn, "-") && !dl_ident(mn)) { dl_error("a member name outside the grammar", mn); return "?"; }
       std::string m = std::string(mn) + ":"
                     + dl_type(bf && DECL_BIT_FIELD_TYPE(f) ? DECL_BIT_FIELD_TYPE(f) : TREE_TYPE(f), stk);

@@ -296,6 +296,19 @@ def decltype_cxx(td, so):
         rows[o] = dt_all(os.path.join(td, o), o)[0]
     check('extern "C" declarations and definitions of a C++ unit give the same rows as the same text in a C unit (%d symbols)' % len(rows['pair_c.o']),
           rows['pair_c.o'] == rows['pair_cxx.o'] and len(rows['pair_c.o']) >= 14 and '-' in rows['pair_c.o']['anf'] and '._anon' not in rows['pair_cxx.o']['anf'], (sorted(set(rows['pair_c.o'].items()) ^ set(rows['pair_cxx.o'].items()))))
+    # RULE DECLTYPE-BUILTIN: a record the target builds (its va_list) has one row whatever the front end: its own FIELD_DECL names on both.
+    BI = '#include <stdarg.h>\nint bi_fmt(const char *f, va_list ap);\nint bi_scan(const char *f, va_list *app);\n'
+    bc, bx = os.path.join(td, 'bi.c'), os.path.join(td, 'bi.cpp')
+    open(bc, 'w').write(BI)
+    open(bx, 'w').write('#include <stdarg.h>\nextern "C" {\nint bi_fmt(const char *f, va_list ap);\nint bi_scan(const char *f, va_list *app);\n}\n')
+    brow = {}
+    for src_, o in ((bc, 'bi_c.o'), (bx, 'bi_cxx.o')):
+        r = pb.compile(src_, os.path.join(td, o), so)
+        check('decltype builtin: %s compiles' % os.path.basename(src_), r.returncode == 0, r.stderr[-800:])
+        if r.returncode:
+            return
+        brow[o] = dt_all(os.path.join(td, o), o)[0]
+    check('a target-built record (va_list) has byte-identical rows in a C and a C++ unit, with its field names', brow['bi_c.o'] == brow['bi_cxx.o'] and 'bi_fmt' in brow['bi_c.o'] and '__stack' in str(brow['bi_cxx.o']), brow)
     src = os.path.join(td, 'cxxonly.cpp')
     open(src, 'w').write(CXX_ONLY)
     r = pb.compile(src, os.path.join(td, 'cxxonly.o'), so)
