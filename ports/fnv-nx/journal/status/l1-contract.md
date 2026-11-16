@@ -2248,3 +2248,11 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Assigned to w28 as top priority, with the class fix: a gate exit without a result file is a red item carrying its stderr tail.
 - bottleneck: the cand3b farm verdict, and the L1 gate crashes.
 - L5 w26 8cb8603b: header at contract/include, exporthdr gone. L5 w27 (session_01KmtZKR1axvxXyrSRxharqh) merges w28 a6773ff1f, then runs one farm verdict.
+- w28 275771a6f:
+  - verdict.py: gate stderr is captured. A non-green exit or a missing/invalid result file is red with its stderr tail, so "exit 2" alone is gone.
+  - assumptions green 125/125 (plugsym.inc wording).
+  - abspath: /exec is a declared mount.
+  - d3d9total is total: it crashes red, on clang missing `bits/libc-header-start.h` (L6).
+  - Also in this head: the exports root (contract/exports).
+  - linkstrict, guestlink and tlsmodel are env-blocked locally; their detail comes from the next farm run (L5 merges 275771a6f).
+- L6 has 17 abspath findings plus the d3d9total include set and 23 recipe.check render/* errors, all sent to L6.
