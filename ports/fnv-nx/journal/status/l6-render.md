@@ -1554,3 +1554,12 @@ Paused: w3b, w4, farm; no other work.
     - Blocked: contract/exports is red upstream in lift/rt cpumodel.c:59 (fnvl_msvcrt_adjust_fdiv; owner L3a/L1).
 - 05:10Z gate_d3d9total: L1's ext-cache finding (:317/:463) was read from a stale copy. The w6-root gate is a 42-line reader. w6 is merging w28 01e91c00d and running test_extpaths.
 - bottleneck: sm_link link cost (w6); lift/rt red (L3a) for d3d9exports; base3 retake; the cand4 base.
+- 05:25Z w6-root a3683a468 merges w28 01e91c00d (three-way) and the dangling-link revert.
+    - d3d9total 332/332; its test kills 45 of 45 mutations.
+    - test_extpaths: 0 globally. The one L6 finding was in test_d3d9total, now on ext_dir.
+    - recipe check valid on all 15 L6 roots; L6 builds green.
+- 05:25Z sm_link: the 2 h limit was not link cost (cold compute is about 30 min on the farm and locally). It was a defect in verify/recipe.py.
+    - stage_output runs every step of a root (run_all), and each stage-ref input recurses into its owner's run_all again.
+    - One summary read costs 4,754 run-step evaluations instead of 18. Measured by w6 at a3683a468.
+    - Reported to L1/w28 with the fix: evaluate only the requested step plus a content-keyed memo. The gate side is already a single resolve_input.
+- bottleneck: L1/w28 recipe stage_output fix (sm_link and the verdict budget); lift/rt red (L3a) for d3d9exports; base3 retake; the cand4 base.
