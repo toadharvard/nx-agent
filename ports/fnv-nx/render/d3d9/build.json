@@ -20,7 +20,7 @@
   "asm": []
  },
  "include": [
-  "ports/fnv-nx/contract/include",
+  "ports/fnv-nx/contract/exporthdr/include",
   "ports/fnv-nx/shim/include",
   "ports/fnv-nx/render/nxgpu/include",
   "ports/fnv-nx/render/shaders/translator/include",
@@ -142,7 +142,7 @@
  },
  "uses": [
   {
-   "root": "ports/fnv-nx/contract/include",
+   "root": "ports/fnv-nx/contract/exporthdr/include",
    "output": "INCLUDE"
   },
   {
