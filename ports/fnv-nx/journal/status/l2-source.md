@@ -726,3 +726,4 @@ After the first frame:
 - 2026-11-16 06:20Z: CORE-MATH trap sites: one live site, atan2/tint.h:413 (printf + exit when the rounding cannot be decided). Unreachability is not certifiable (the 2-argument worst-case search is not exhaustive). Went to the orchestrator; recommendation: (a) a Ziv fallback to mpfr_atan2 on that branch via a declared stage patch, with MPFR/GMP as guest roots.
   - The per-function .wc tests wait on the product ELF root (the boot machine runs only full ELFs). No harness.
 - bottleneck: the L2 farm's recipe-path gcc1/rt -> w3's pin commit.
+- 2026-11-16 06:25Z: coremath: all 7 CC argv carry -frounding-math from the pin's flags.semantics (checked from the stage docs). The RZ and .wc tests wait on the product ELF root; there is no static stand-in. w2 waits on the orchestrator's atan2 ruling.
