@@ -1,18 +1,8 @@
 """gen_expr.py: compiles the closed length-rule language (d3d9_expr.py) to C++ uint64_t expressions. Unknown names/functions raise GenError."""
-import os, sys
-X = None   # d3d9_expr of bridgefacts/d3d9, imported by use_spec(DIR) (the directory is an input of the stage that calls it)
+from bridgefacts.d3d9 import d3d9_expr as X   # the length-rule language of bridgefacts (a declared import root of render/d3d9; qualified module path)
 
 
-def use_spec(d):
-    global X
-    sys.path.insert(0, d)
-    import d3d9_expr
-    X = d3d9_expr
-
-
-def _x():
-    if X is None: raise GenError("gen_expr: use_spec(dir) was not called: the spec directory is an argument of the caller")
-    return X
+def _x(): return X
 
 
 class GenError(Exception):

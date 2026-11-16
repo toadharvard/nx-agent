@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gen_bridge.py OUT SPEC.json BRIDGEFACTS_D3D9_DIR D9_ROWS.tsv: the guest bridge of our d3d9.dll, generated from the interface table (nothing per method).
+"""gen_bridge.py OUT SPEC.json D9_ROWS.tsv: the guest bridge of our d3d9.dll, generated from the interface table (nothing per method).
   The slot and return rules are D9_ROWS of the tool root bridgefacts (bridgefacts/d3d9/d9rows.py, the one source; the platform's bridge.tsv rows). This file takes the rows as a declared input and
   checks every thunk against its row (the number of stack slots, void or not): a method without a row, or a thunk that disagrees with it, stops the generator.
   OUT/d9bridge.gen.cpp    the thunks (extern "C", arguments = the stack slots in order), the key tables and nx_bridge_keytab (dev/face.h).
@@ -17,11 +17,9 @@ def die(msg): sys.stderr.write("gen_bridge: " + msg + "\n"); sys.exit(2)
 
 
 ROWS = {}   # native_symbol -> (ret, args): the bridge row of every thunk (D9_ROWS)
-for _l in open(sys.argv[4]).read().splitlines():
+for _l in open(sys.argv[3]).read().splitlines():
     _c = _l.split("\t"); ROWS[_c[6]] = (_c[4], _c[5])
 from gen_impl import cname  # noqa: E402
-import gen_expr  # noqa: E402
-gen_expr.use_spec(sys.argv[3])
 from gen_expr import Ctx  # noqa: E402
 from gen_expr import REFS  # noqa: E402
 
