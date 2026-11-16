@@ -189,8 +189,8 @@ def build(files):
     return [rows[k] for k in sorted(rows)], counts, status
 
 
-def forms_of(shapes_path):
-    """{shape key: current shape_sha}: the integer-family shapes of the shapes file that have a symbolic Form (the set the farms must cover)"""
+def forms_of(shapes_path, families=('int', 'sys')):
+    """{shape key: current shape_sha}: the shapes of the given families (default the integer family) of the shapes file that have a symbolic Form (the set the farms must cover)"""
     md = shape.decoder()
     out = {}
     with open(shapes_path) as fh:
@@ -206,8 +206,8 @@ def forms_of(shapes_path):
                 fam = shape.family(ins[0])
             except shape.ShapeError:
                 continue
-            if fam not in ('int', 'sys'):
-                continue                                        # only these families are proved here: a SIMD/x87 Form builder is not run (its errors are not this queue's)
+            if fam not in families:
+                continue                                        # the other families are another queue's (the default: a SIMD/x87 Form builder is not run for an integer queue)
             d = current_sha(ck)
             if d is not None:
                 out[ck] = d

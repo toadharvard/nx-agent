@@ -25,7 +25,11 @@ from proof import certs_build, model_sail, symform, x86sys  # noqa: E402
 def main(argv):
     ap = argparse.ArgumentParser(); ap.add_argument('universe'); ap.add_argument('shards', nargs='*'); ap.add_argument('--pack-commit', required=True)
     ap.add_argument('--prover-commit', required=True); ap.add_argument('--out', required=True); ap.add_argument('--noform')
-    ap.add_argument('--sail-work', required=True); ap.add_argument('--sail-ir', required=True); ap.add_argument('--isla', required=True); x86sys.add_arg(ap); a = ap.parse_args(argv)
+    ap.add_argument('--sail-work', required=True); ap.add_argument('--sail-ir', required=True); ap.add_argument('--isla', required=True); x86sys.add_arg(ap)
+    ap.add_argument('--mode', choices=('int', 'simd'), default='int', help='simd: the queue of the SIMD family (header `# mode=simd`): every SIMD shape with a symbolic Form and no complete non-error record of --tree')
+    ap.add_argument('--tree', help='simd: the commit of the prover tree the records must come from (record `tree`)'); ap.add_argument('--qcache', help='simd: BRANCH:FILE of the proved-query cache that seeds the farms (header)')
+    ap.add_argument('--cpufeat-file', help='simd: the CPUID feature-bit table (the class order reads it)'); ap.add_argument('--cpufeat-ref', help='simd: BRANCH:FILE where the farms fetch that table (header)')
+    a = ap.parse_args(argv)
     xsha = x86sys.configure(a.x86sys)
     model_sail.configure(a.sail_work, a.sail_ir, a.isla)
     pin = certs_build.pinned_model()
@@ -34,25 +38,35 @@ def main(argv):
         for ln in fh:
             if ln[0] == '#': hdr.append(ln.rstrip('\n')); continue
             p = ln.rstrip('\n').split('\t'); fam[p[0]] = (p[1], int(p[3])); first[p[0]] = p[4]
-    forms = certs_build.forms_of(a.universe)
+    simd = a.mode == 'simd'
+    if simd:
+        if not (a.tree and a.cpufeat_file and a.cpufeat_ref): ap.error('--mode simd needs --tree, --cpufeat-file and --cpufeat-ref')
+        from fnvlift import inputs; inputs.configure(cpufeat=a.cpufeat_file)        # the class order (simdcheck.cleared) reads the CPUID feature-bit table
+    forms = certs_build.forms_of(a.universe, ('simd',) if simd else ('int', 'sys'))
     files = []
     for s in a.shards: files += sorted(glob.glob(os.path.join(s, '**', '*.jsonl'), recursive=True)) if os.path.isdir(s) else [s]
     done = set()
     for f, i, r in certs_build.records(files):
         k = r.get('shape')
-        if r.get('result') == 'proved' and k in forms and r.get('dsl_sha') == forms[k] and certs_build.model_valid(r, pin): done.add(k)
+        if simd:       # complete = a non-error record of THIS tree at the current shape_sha (a timeout / no-row / ud-class record is a result; an error record is not)
+            if k in forms and r.get('result') != 'error' and r.get('tree') == a.tree and r.get('shape_sha') == forms[k]: done.add(k)
+        elif r.get('result') == 'proved' and k in forms and r.get('dsl_sha') == forms[k] and certs_build.model_valid(r, pin): done.add(k)
     q = sorted((k, d) for k, d in forms.items() if k not in done)
     qid = hashlib.sha256(''.join('%s\t%s\n' % x for x in q).encode()).hexdigest()[:12]
     cu = collections.Counter(f for f, _ in fam.values()); sites = collections.Counter()
     for f, c in fam.values(): sites[f] += c
-    noform = sorted(k for k, (f, _) in fam.items() if f in ('int', 'sys') and k not in forms)
-    lines = ['# fnvnx-shapequeue/1 queue_id=%s' % qid,
+    noform = sorted(k for k, (f, _) in fam.items() if f in (('simd',) if simd else ('int', 'sys')) and k not in forms)
+    xhdr = []
+    if simd:
+        with open(a.cpufeat_file, 'rb') as fh: csha = hashlib.sha256(fh.read()).hexdigest()
+        xhdr = ['# mode=simd', '# subject=%s' % a.tree] + (['# qcache=%s' % a.qcache] if a.qcache else []) + ['# cpufeat=%s' % a.cpufeat_ref, '# cpufeat_sha256=%s' % csha]
+    lines = ['# fnvnx-shapequeue/1 queue_id=%s' % qid] + xhdr + [
              '# pack_commit=%s' % a.pack_commit, '# prover_commit=%s' % a.prover_commit, '# ir_sha256=%s' % pin, '# x86sys_sha256=%s' % xsha,
              '# universe: %s' % ' '.join(h[2:] for h in hdr[:1]),
              '# universe shapes: ' + ' '.join('%s=%d' % x for x in sorted(cu.items())) + ' total=%d' % sum(cu.values()),
              '# universe instruction addresses: ' + ' '.join('%s=%d' % x for x in sorted(sites.items())) + ' total=%d' % sum(sites.values()),
-             '# int shapes with a Form=%d  already proved at the same shape_sha (migrate, not queued)=%d  QUEUE: int=%d x87=0 simd=0 sys=0 total=%d' % (len(forms), len(done), len(q), len(q)),
-             '# no prover states: x87=%d simd=%d sys=%d (shapes; the DSL has no builders for them yet) and int without a Form=%d (shapes, %d addresses)' % (cu['x87'], cu['simd'], cu['sys'], len(noform), sum(fam[k][1] for k in noform)),
+             '# %s shapes with a Form=%d  already done (%s)=%d  QUEUE: %s=%d total=%d' % (a.mode, len(forms), 'complete non-error record of the tree' if simd else 'proved at the same shape_sha: migrate, not queued', len(done), a.mode, len(q), len(q)),
+             '# no prover states: x87=%d simd=%d sys=%d (shapes; the DSL has no builders for them yet) and %s without a Form=%d (shapes, %d addresses)' % (cu['x87'], cu['simd'], cu['sys'], a.mode, len(noform), sum(fam[k][1] for k in noform)),
              '# shards read: %d files, %d records' % (len(files), sum(1 for _ in certs_build.records(files)))]
     with open(a.out, 'w') as fh:
         fh.write('\n'.join(lines) + '\n' + ''.join('%s\t%s\n' % x for x in q))

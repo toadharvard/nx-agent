@@ -151,7 +151,11 @@ MODE=$(sed -n 's/^# mode=//p' "$QUEUE" | head -1)
 if [ "$MODE" = simd ]; then
     QCS=$(sed -n 's/^# qcache=//p' "$QUEUE" | head -1)
     if [ -n "$QCS" ]; then fetch_branch "${QCS%%:*}" "$W/in/simdqc-$K"; cp "$W/in/simdqc-$K/${QCS#*:}" "$W/qcache-$K.txt"; export SIMD_QCACHE="$W/qcache-$K.txt"; fi
-    python3 -I "$HERE/simdshard.py" --x86sys "$X86SYS_FILE" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --timeout "${TIMEOUT:-60}" --slice "${SLICE:-1}" --cache "$GATE_CACHE" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
+    CFS=$(sed -n 's/^# cpufeat=//p' "$QUEUE" | head -1); CFH=$(sed -n 's/^# cpufeat_sha256=//p' "$QUEUE" | head -1)
+    [ -n "$CFS" ] || { echo "a simd queue needs '# cpufeat=<branch>:<file>' (the CPUID feature-bit table)" >&2; exit 1; }
+    fetch_branch "${CFS%%:*}" "$W/in/cpufeat-$K"; CF="$W/in/cpufeat-$K/${CFS#*:}"
+    [ "$(sha256sum "$CF" | cut -d' ' -f1)" = "$CFH" ] || { echo "cpufeat table sha256 differs from the queue header" >&2; exit 1; }
+    python3 -I "$HERE/simdshard.py" --cpufeat "$CF" --x86sys "$X86SYS_FILE" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --timeout "${TIMEOUT:-60}" --slice "${SLICE:-1}" --cache "$GATE_CACHE" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
 else
 python3 -I "$HERE/shapeprove.py" "${TC[@]}" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --timeout "${TIMEOUT:-600}" --eip "${EIP:-sym}" --slice "${SLICE:-1}" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
 fi
