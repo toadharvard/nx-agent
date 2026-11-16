@@ -17,7 +17,7 @@ they stop at the call into a lift/rt helper, so the C body of a helper is NOT co
   those of the lifted pack of formgate_inputs.json), and (B) the functions that the plugin fnvnx_ftoi reports as `helpers` (attribute fnvnx_f2i) in the f2i files of the root's objects. A root has
   these items iff (B) is not empty there (the root of the lift/rt runtime holds the FNVL_F2I helpers; (A) is the table of that runtime).
   Each helper is classified by INPUT BITS (A: the sum of the operand widths of the call, the largest over the Forms; B: not derived, so wide): narrow = at most 32 bits, wide = anything else.
-  narrow: certified only by the exhaustive host-test result of the lift/rt root (L3a w13). No such result exists yet: the item is red, code `helper-no-exhaustive-cert`, "no exhaustive helper certificate".
+  narrow: certified only by the exhaustive-compare output of the host-test root lift/proof/fpchost (L3a w13; libfpchost.so exporting fpc_cvt, fpc_fp, fpc_f2i): a run step that reports per helper 0 mismatches, the term sha and the object sha. That output does not exist yet and is read only when present (its reader is written with the step, no format is guessed here): the item is red, code `helper-no-exhaustive-cert`, "no exhaustive helper certificate".
   wide: not red. Its C body is tested, not proven, and is covered by the REMOVE record ASM-329 (verify/ASSUMPTIONS.json, owner L3b); the gate reports the wide helpers by name in its detail and computes
   that scope from the table, the record does not list them. The item `<root>:helper-record` is red (`helper-record-missing`) when a wide helper exists and ASM-329 is not a REMOVE record of L3b.
   `<root>:helper-table` is red (`helper-table-inputs`) when the Forms of the pack cannot be read (the declared inputs of formgate): the universe cannot be derived, nothing is skipped.
@@ -444,7 +444,7 @@ def helper_items(root, tab, why, names, record_ok):
     bits.update({n: bits.get(n) for n in names})      # a B helper that no Form calls: width not derived (None) = wide
     items = {}
     for h in sorted(bits):
-        items["helper:%s/%s" % (root, h)] = [("helper-no-exhaustive-cert", "helper %s (%s input bits): no exhaustive helper certificate" % (h, bits[h]))] if helpercalls.classify(bits[h]) == "narrow" else []
+        items["helper:%s/%s" % (root, h)] = [("helper-no-exhaustive-cert", "helper %s (%s input bits): no exhaustive helper certificate (certifier: root lift/proof/fpchost, exhaustive-compare output absent)" % (h, bits[h]))] if helpercalls.classify(bits[h]) == "narrow" else []
     if any(helpercalls.classify(b) == "wide" for b in bits.values()):
         items[root + ":helper-record"] = [] if record_ok else [("helper-record-missing", "wide helpers exist and %s is not a REMOVE record of L3b in verify/ASSUMPTIONS.json" % RECORD)]
     return items
