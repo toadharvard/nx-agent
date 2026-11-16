@@ -2980,3 +2980,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - objstub excludes objects of declared external library trees, by provenance (FreeType).
 - Test doubles routed: sm_link `main` (L6), tests/bootrt `fnvnx_reach_violation` (L4).
 - Ruling (L6's correction, accepted): the test-double intersection is per link target (ELF class and e_machine). sm_link's host `main` is not a double of the guest rt/guest_main. w29 fixes objstub (item 5) and checks tests/bootrt the same way. L3a and w29 split the lift/rt BFD assert by reloc class.
+- w28-c5: done.
+  - a7e4030b7: gate_hostapi imports fnvnx.manifest, and toolflags imports fnvnx.verify.toolflags_policy. puregate.py stays bare, because it is a host script that no stage imports.
+  - 11d62d85f: class product-guest-cxx (cxx_origin native) is what abi, argordergate, addr32 and order cover. C-only guest roots are outside it, and a native root at universe 0 is red.
+  - w28 now does modules.py.
