@@ -13,7 +13,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 import gate_flags as g
-from fnvlift.tests import _inputs; _inputs.configure_declared()      # the declared-machine inputs the Form builders read (as the proof tests do)
 
 A = 0x1000
 
@@ -278,7 +277,7 @@ class UndefWhen(unittest.TestCase):
 
 class Agree(unittest.TestCase):
     def test_agreement_rows(self):
-        import flagagree
+        from lift.proof import flagagree
         reps = {'and': bytes.fromhex('21d8'), 'cmp': bytes.fromhex('39c0'), 'imul': bytes.fromhex('0fafc1'), 'shl0': bytes.fromhex('c1e000'),
                 'rol1': bytes.fromhex('d1c0'), 'test_mem': bytes.fromhex('845e00')}
         n, bad = flagagree.agreement(reps)

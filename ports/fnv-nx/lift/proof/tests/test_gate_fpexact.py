@@ -140,7 +140,7 @@ def _run():
     check("malformed report: red f2i-report-missing", codes(bad) == ["f2i-report-missing"])
     res = {"objects": [{"unit": "a.c", "object": obj, "f2i": good}, {"unit": "b.c", "object": obj}]}
     check("read_f2i_paths: the f2i field of each row, None for a row without", G.read_f2i_paths(res) == {"a.c": good, "b.c": None}, G.read_f2i_paths(res))
-    its = G.judge_objects_coded("r", G.read_inputs(res), None, {}, None, G.read_f2i_paths(res))
+    its = G.judge_objects_coded("r", G.read_inputs(res), None, None, None, G.read_f2i_paths(res))
     check("judge_objects_coded takes the path per unit: a.c clean, b.c (no f2i) red", its["f2i:r/a.c"] == [] and [c for c, _ in its["f2i:r/b.c"]] == ["f2i-report-missing"], its)
 
     # identity: the sandbox function is the path the recipe's stages pass and the preprocessed text names
