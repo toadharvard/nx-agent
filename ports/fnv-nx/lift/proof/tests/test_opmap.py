@@ -1,11 +1,13 @@
 """opmap.lookup on synthetic maps (the cells are the shapes of Tables A-2, A-3 and A-6, written here; the real tables are read from the pinned SDM PDF by opmap.load)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
-from proof import opmap
+from fnvnx.lift.proof import opmap
 
 M = {'one': {(0xc4, ''): (['LESi64 Gz, Mp', 'VEX+2byte'], 1), (0x27, ''): (['DAAi64'], 1), (0x63, ''): (['ESC'], 1)},
      'two': {(0x19, ''): (['Reserved-NOP'], 2), (0x1f, ''): (['NOP /0 Ev'], 2)},

@@ -5,6 +5,8 @@ Rows are `shape_key<TAB>shape_sha`; the shard is the rows at position = K-1 mod 
 (proved | proved-by-cases | FAILED | bound | no-row | no-form | uncertified | ud-class).  A queue row whose shape_sha is not symform.shape_sha(key) of this tree (the subject of
 the queue is not the tree that runs) is an `error` record, so such a shard never counts as complete.  A prover exception is an `error` record with its traceback hash.
 simdcheck is bounded by proof/bounds.py Z3_RLIMIT only (no clock); its proved-query cache is the file SIMD_QCACHE (seeded by the farm from the queue's `# qcache=` branch)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import argparse
 import hashlib
 import json
@@ -17,7 +19,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
 sys.path.insert(0, HERE)
 import simdcheck  # noqa: E402
-from proof import symform, treeid, x86sys  # noqa: E402
+from fnvnx.lift.proof import symform, treeid, x86sys  # noqa: E402
 
 
 def main():
@@ -25,7 +27,7 @@ def main():
     ap.add_argument('--shapes', required=True); ap.add_argument('--shard', default='1/1'); ap.add_argument('--out', required=True)
     ap.add_argument('--slice', type=int, default=1); ap.add_argument('--limit', type=int); ap.add_argument('--cache', required=True)
     x86sys.add_arg(ap); ap.add_argument('--cpufeat', required=True, help='the CPUID feature-bit table (l3b-lift/cpuid-feature-bits): the class order reads it; its sha256 is in every record')
-    a = ap.parse_args(); xsha = x86sys.configure(a.x86sys); from fnvlift import inputs; inputs.configure(cpufeat=a.cpufeat); csha = hashlib.sha256(open(a.cpufeat, 'rb').read()).hexdigest(); simdcheck.S.F.configure(a.cache); k, n = [int(x) for x in a.shard.split('/')]; assert 1 <= k <= n
+    a = ap.parse_args(); xsha = x86sys.configure(a.x86sys); from fnvnx.lift.fnvlift import inputs; inputs.configure(cpufeat=a.cpufeat); csha = hashlib.sha256(open(a.cpufeat, 'rb').read()).hexdigest(); simdcheck.S.F.configure(a.cache); k, n = [int(x) for x in a.shard.split('/')]; assert 1 <= k <= n
     os.makedirs(a.out, exist_ok=True); path = os.path.join(a.out, 'shapeprove_%d_of_%d.jsonl' % (k, n))
     rows = [l.rstrip('\n').split('\t') for l in open(a.shapes) if l.strip() and l[0] != '#'][::a.slice]
     mine = [r for i, r in enumerate(rows) if i % n == k - 1][:a.limit]

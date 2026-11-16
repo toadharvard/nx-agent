@@ -5,12 +5,14 @@ escape opcodes by exactly these fields).  For mod == 3 the opcodes whose reg row
 ModRM.rm (the same tables, the "ModR/M byte" columns), so a class is one instruction of the SDM opcode map and a builder per class is a builder per instruction page.
     python3 -I x87class.py KEYS.tsv...      rows `shape_key<TAB>count` (the pack's shapes.tsv layout); prints the keys per class, and the Form.build outcome counts
 No argument other than files is read; the Form build is proof/forms.build on the decoder of proof/shape.py (the one decoder)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.dirname(HERE), HERE]
-from proof import shape  # noqa: E402
+from fnvnx.lift.proof import shape  # noqa: E402
 
 REFINE_RM = {(0xd9, 4), (0xd9, 5), (0xd9, 6), (0xd9, 7), (0xda, 5), (0xdb, 4), (0xde, 3), (0xdf, 4)}      # mod == 3 rows of the opcode map that hold several instructions (SDM Vol 2 A.2.1 Tables A-7..A-9)
 
@@ -44,10 +46,10 @@ def main(paths):
     from collections import Counter, defaultdict
     sys.path.insert(0, os.path.join(HERE, "tests"))
     import declared_x86sys
-    from fnvlift import inputs
+    from fnvnx.lift.fnvlift import inputs
     declared_x86sys.configure()
     inputs.configure(cpumodel=os.path.join(HERE, "..", "..", "verify", "cpuid_model.json"))
-    from proof import forms
+    from fnvnx.lift.proof import forms
     dec = shape.decoder()
     cls, outcome, cres, proved, seen = defaultdict(set), Counter(), {}, {}, set()
     for p in paths:
@@ -72,7 +74,7 @@ def main(paths):
                 if getattr(F, "x87", None):
                     kk = F.x87[:2]
                     if kk not in proved:
-                        from proof import prove
+                        from fnvnx.lift.proof import prove
                         proved[kk] = prove.prove_one(None, F, None, None, None)
                     if cres.get(c, "proved") == "proved":      # one result per class: proved only when every register index seen is
                         cres[c] = "proved" if proved[kk][0] == "proved" else "uncertified: %s %s" % (proved[kk][0], proved[kk][1])

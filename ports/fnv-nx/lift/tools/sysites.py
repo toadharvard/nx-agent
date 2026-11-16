@@ -4,9 +4,11 @@ Rule (one pass over every instruction of the image's ranges.tsv, the census deco
 an undecided field:  int N with N not in int_ring3.vectors (class int_other; N = 0x29 and the listed vectors are decided);  sgdt / sidt / sldt (classes sgdt, sidt, sldt);  mov/pop/lds-class writes of a data
 segment register (class sreg_load: the loaded value may be the undecided 0x1b; the immediate / register source is not resolved here: every such site is listed);  reads of the gs SELECTOR (class gs_read:
 mov r, gs / push gs) and gs-prefixed memory operands (class gs_mem).   usage: sysites.py x86sys.json outdir  image.dll ranges.tsv [image ranges ...]   -> outdir/sysites.tsv, one `image site class text` row per site; totals on stdout."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from proof import census, shape
+from fnvnx.lift.proof import census, shape
 import capstone as CS
 from capstone import x86 as X
 

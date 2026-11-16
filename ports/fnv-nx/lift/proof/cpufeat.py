@@ -8,9 +8,11 @@ lifted set (MMX, SSE, SSE2) is what the record's words leave set; nothing here r
 
 COMPLETENESS (total over the decoder's groups, no list of mnemonics): every X86_GRP_* constant of the pinned capstone is a key of `capstone_groups` or a member of `capstone_nonfeature` (tests/test_cleared_groups.py;
 `_groups` raises otherwise, so a decoder with a new group cannot lift silently). There are no certificates: the instruction is lowered to the synchronous #UD raise of f_sys.ud_site at its address."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json
 
-from fnvlift import inputs
+from fnvnx.lift.fnvlift import inputs
 
 _S = {}
 
@@ -18,10 +20,10 @@ _S = {}
 def _model():
     path = inputs.get('cpumodel')
     if _S.get('path') != path:
-        from fnvlift.cpumodel_bits import model_words, I
+        from fnvnx.lift.fnvlift.cpumodel_bits import model_words, I
         m = json.load(open(path)); w = model_words(m)
         cpu = {(0, 'EAX'): I(m['max_basic']), (0x80000000, 'EAX'): I(m['max_ext']), (1, 'EDX'): w['leaf1_edx'], (1, 'ECX'): w['leaf1_ecx'], (0x80000001, 'EDX'): w['ext1_edx'], (0x80000001, 'ECX'): w['ext1_ecx']}
-        from fnvlift.cpumodel_bits import I as _I
+        from fnvnx.lift.fnvlift.cpumodel_bits import I as _I
         _S.clear(); _S.update(path=path, cpu=cpu, groups=_groups(m), ud={k: (_I(v[0]), v[1], v[2], v[3], v[4]) for k, v in m['ud_encodings'].items()}, nop={k: (_I(v[0]), v[1], v[2], v[3], v[4]) for k, v in m['exec_as_nop'].items()}, memo={})
     return _S
 
@@ -34,7 +36,7 @@ def _cpu():
 def _groups(m):
     """{capstone group id: (name, leaf, reg, bit)} of the record's `capstone_groups`; ValueError when a capstone X86_GRP_* constant is in neither `capstone_groups` nor `capstone_nonfeature`, or a row names no constant"""
     from capstone import x86_const as X
-    from fnvlift.cpumodel_bits import I
+    from fnvnx.lift.fnvlift.cpumodel_bits import I
     consts = {k[8:]: v for k, v in vars(X).items() if k.startswith('X86_GRP_')}
     rows, non = m['capstone_groups'], set(m['capstone_nonfeature'])
     bad = sorted(n for n in consts if n not in rows and n not in non) + sorted(n for n in list(rows) + list(non) if n not in consts)

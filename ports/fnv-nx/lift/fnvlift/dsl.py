@@ -9,6 +9,8 @@ A Form is an ordered list of effects.  All expressions read the PRE-state (paral
 memory); effects commit in order, so for two writes to one target the later wins.  Flags not written keep their value.
 A flag the SDM leaves undefined is declared with undefined(name, sdm_sentence) and is excluded from any obligation;
 flag(name, e, when=c) is a flag defined only when c holds (e.g. OF of a shift only for count 1)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import hashlib
 import itertools
 
@@ -416,7 +418,7 @@ template<class T> static inline T ashr_(T a, T c, unsigned w, T m) { T s = (a >>
 SEGS = ('es', 'cs', 'ss', 'ds', 'fs', 'gs')      # the segment registers in rt/fnvl.h SEG_* order
 XIN = ('df', 'flo', 'fs_base', 'gs_base') + tuple('sel_' + s for s in SEGS)          # other pre-state: DF (1 bit), the other EFLAGS bits (32, masked), segment bases, the six segment selectors (16 bits, = c->sel[SEG_*])
 SIG = ','.join('[[maybe_unused]] u32& ' + r for r in REGS + FLAGS + XIN) + ',u32& eip'
-from fnvlift.faults import FAULTS, FLT_STATUS, BYNAME as _FBY      # the one fault table (fnvlift/faults.json); kind = runtime code
+from fnvnx.lift.fnvlift.faults import FAULTS, FLT_STATUS, BYNAME as _FBY      # the one fault table (fnvlift/faults.json); kind = runtime code
 INW = {'df': 1, 'flo': 32, 'fs_base': 32, 'gs_base': 32, **{'sel_' + s: 16 for s in SEGS}}
 
 def xc_lines(kind, i, x, ref):
@@ -440,7 +442,7 @@ class UndecidedRow(Exception):
     """a Form builder needs a row of the declared-machine record that the record leaves undecided: there is no Form (str() names the row and its why)"""
 def _fs_flat():
     import z3
-    from fnvlift import x86sys
+    from fnvnx.lift.fnvlift import x86sys
     return z3.BitVecVal(x86sys.SEL['fs'] & 0xfffc, 32)      # SELK(SEL_FS) of rt/fnvl.h, the record's fs selector
 
 class Form:

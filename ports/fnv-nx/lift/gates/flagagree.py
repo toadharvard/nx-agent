@@ -9,6 +9,8 @@ lifter class, decoder class) where the two differ is RED: one of the two tables 
 A shift or rotate whose immediate count has all of its low five bits 0 writes nothing and is not compared (the decoder side has no effect; the DSL's
 shape stands for every count). Universe: the distinct shapes (proof/shape.py shape_key) that the image's instruction bytes contain and that
 forms.build covers; the distinct shapes are decoded once."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import collections
 import json
 import os
@@ -17,7 +19,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE)); sys.path.insert(0, HERE)
 import gate_flags as g
-from proof import forms, shape
+from fnvnx.lift.proof import forms, shape
 X = g.X
 
 

@@ -23,14 +23,16 @@ Every one of these is the access violation of the declared machine (the fault ki
 transfer, no fault, EIP := the offset (the segment limit is 4 GB, row gdt).  The 115-odd GDT indexes that jmp_far.undecided_descriptors lists are the DOMAIN's complement: the Form is proved over the selectors outside it.
 Result: a list of (case, proved or differs): one case per class of the record, `complete` (every selector value is in exactly one class or in the undecided indexes) and the effect cases.
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import z3  # noqa: E402
-from fnvlift import dsl  # noqa: E402
-from proof import shape, symform, x86sys  # noqa: E402
+from fnvnx.lift.fnvlift import dsl  # noqa: E402
+from fnvnx.lift.proof import shape, symform, x86sys  # noqa: E402
 from sysspec_text import FARROW as ROW  # noqa: E402      # the names of the record's jmp_far members (keys, not quotes)
 
 

@@ -4,12 +4,14 @@
   every other vector    -> the record's other_vectors row: FNVL_RAISE_AV(parameters[0], parameters[1], address of the int), no advance of Eip.
 The expected text is built from the record's fields here, not from constants.
     test_int_vectors.py"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; _inputs.configure()
-import fnvlift as L
-from fnvlift import x86sys
-from fnvlift.core import Unsupported
-from fnvlift.image import Image
+import fnvnx.lift.fnvlift as L
+from fnvnx.lift.fnvlift import x86sys
+from fnvnx.lift.fnvlift.core import Unsupported
+from fnvnx.lift.fnvlift.image import Image
 REC = json.load(open(_inputs.X86SYS))['int_ring3']
 
 

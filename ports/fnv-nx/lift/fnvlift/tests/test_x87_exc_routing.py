@@ -8,13 +8,15 @@ Checks, all static (text of the emitter and of the header; the semantics of the 
   4. C1 of FIST / FRNDINT is 1 iff the result rounded away from zero (|r| > |x|): the header computes it at the site, the table checks the predicate against the rounded value of every RC mode.
 The input SDMROWS is mounted only because lifting a byte buffer runs core.dispatch's CPUID gate (proof/cpufeat.missing), which reads the SDM opcode rows for every instruction; the test itself reads no x87 row of the SDM.
     test_x87_exc_routing.py"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, re, sys
 LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, LIFT)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; _inputs.configure()
-import fnvlift as L
-from fnvlift.core import Unsupported
-from fnvlift.image import Image
+import fnvnx.lift.fnvlift as L
+from fnvnx.lift.fnvlift.core import Unsupported
+from fnvnx.lift.fnvlift.image import Image
 
 # 1. the header
 sys.path.insert(0, os.path.join(LIFT, '..', '..')); from fnvnx.lift.proof import x87spec      # CARRIER_OPS: the value computations of the proven Forms (their exception flags are the spec's own terms, not a helper mask)

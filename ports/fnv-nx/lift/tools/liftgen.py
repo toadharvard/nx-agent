@@ -15,6 +15,8 @@ Symbols the pack references in the runtime (bind-l3 import rows, the two EH hand
 not define is an undefined symbol of the link, which the linkstrict gate refuses.
 Deterministic: sorted iteration, no clocks or paths in the outputs. Inputs: explicit arguments only (--exe, --universe, --certs, ...); outputs only under --out
 (exe-derived: they go to the private fnv-nx-build repository, never into this one)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import argparse, collections, glob, hashlib, json, multiprocessing as mp, os, re, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIFT = sys.argv[sys.argv.index('--lift') + 1] if '--lift' in sys.argv else None      # the lift/ directory (fnvlift/, rt/, proof/): a declared input of the stage, always an argument (no default from this file's place)
@@ -38,10 +40,10 @@ def unit_names(): return ['u/%03x.cpp' % i for i in range(NBUCKET)]
 
 def lift_one(a):
     """-> (text, (form counter, form rows, shape counter)) or (None, reason)"""
-    from proof import shape
+    from fnvnx.lift.proof import shape
     import formcert
     if G.get('prov'):      # --prov: the text is the tag-OFF text; the tag-ON lift of the same entry must give the same bytes (checked here for every entry of the universe)
-        from fnvlift import prov
+        from fnvnx.lift.fnvlift import prov
         prov.ON = False
         t, ins, paths = lifted.lift_with_paths(a)
         if t is None: return None, ins
@@ -62,8 +64,8 @@ def lift_one(a):
 
 def prov_record(ins, t0, t):
     """the provenance record of the function just lifted (fnvlift/prov.py), with the section attribute liftgen adds and the bytes per form key / shape family"""
-    from fnvlift import prov
-    from proof import shape
+    from fnvnx.lift.fnvlift import prov
+    from fnvnx.lift.proof import shape
     import formcert
     r = prov.take()
     if r is None or r['text'] != len(t0): raise SystemExit('liftgen --prov: no provenance record for the text just lifted')
@@ -129,13 +131,15 @@ def read_texts(path):
 
 def init(exe, base, ent, emit, jtab, pv=False):
     """the state of a lifting process (the parent and every pool worker), built from the arguments: the result does not depend on the start method"""
-    import fnvlift as L
+    import fnvnx.lift.fnvlift as L
     G.update(ent=ent, prov=pv)
     lifted.begin(L.Image(exe, base), emit, jtab)
 
 
 def shard(a):
-    import fnvlift as L, fnvlift.core as core, formcert
+    import fnvnx.lift.fnvlift as L
+    import fnvnx.lift.fnvlift.core as core
+    import formcert
     K, N = map(int, a.shard.split('/')); out = a.out
     ent = L.universe.load()[0]; mine = [x for x in sorted(ent) if bucket(x) % N == K]      # shard K of N: the entries whose unit bucket is K mod N (the rule of the pack's units)
     init(a.exe, a.base, ent, a.emit, a.jtab, a.prov)
@@ -243,7 +247,7 @@ def check_images(images, table, exe_sha):
 
 
 def finish(a):
-    import fnvlift as L
+    import fnvnx.lift.fnvlift as L
     out = a.out; pk = out + '/pack'
     os.makedirs(pk + '/u', exist_ok=True)
     images = [(d, L.universe.load(u)[0]) for d, u in (x.split('=', 1) for x in a.image)]      # every image: its shard directory and its universe (the exe's included)
@@ -316,7 +320,7 @@ def main():
     if miss: ap.error('missing %s' % ' '.join(miss))
     a.base = None
     if a.module: module_inputs(a)
-    import fnvlift
+    import fnvnx.lift.fnvlift as fnvlift
     if not a.finish: fnvlift.inputs.configure(universe=a.universe, fpstate=a.fpstate, fpdepth=a.fpdepth, x86sys=a.x86sys, sdmrows=a.sdmrows, cpumodel=a.cpumodel, rcptab=a.rcptab, rcpcert=a.rcpcert, segwrites=a.segwrites, **({'udsail': a.udsail} if a.udsail else {}), image=os.path.splitext(a.module)[0].lower() if a.module else 'exe')      # finish merges texts: it reads no lifter input
     os.makedirs(a.out, exist_ok=True)
     if a.finish: finish(a)

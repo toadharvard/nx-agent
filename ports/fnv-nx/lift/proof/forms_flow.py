@@ -1,8 +1,10 @@
 """Control-flow and fault forms (see forms.py): the eip effect carries the branch; the target of a relative branch is the capstone absolute target."""
-from fnvlift import x86sys
-from fnvlift.formkey import is_far_raw
-from fnvlift.dsl import C, V, eq, ite, slt, zext
-from proof.forms import AReg, cond, ea, handler, mload, rd, sload, sstore
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
+from fnvnx.lift.fnvlift import x86sys
+from fnvnx.lift.fnvlift.formkey import is_far_raw
+from fnvnx.lift.fnvlift.dsl import C, V, eq, ite, slt, zext
+from fnvnx.lift.proof.forms import AReg, cond, ea, handler, mload, rd, sload, sstore
 
 def target(c):
     o = c.ops[0]

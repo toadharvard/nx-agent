@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """x87form: the part (i) set is derived from the ast of x87spec.py; the Form of an x87 class is the spec's own DAG translated to the DSL and is proved against execute(); a class outside the
 translator's table or the Form's effects is uncertified with a reason that names it; a defect of the translator makes the proof fail."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import inspect
 import os
 import sys
@@ -11,8 +13,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.join(HERE, ".."), os.path.join(HERE, "..", "..")]
 import declared_x86sys  # noqa: E402
 import x87spec as X  # noqa: E402
-from fnvlift import dsl, inputs  # noqa: E402
-from proof import forms, prove, shape, x87form as XF  # noqa: E402
+from fnvnx.lift.fnvlift import dsl, inputs  # noqa: E402
+from fnvnx.lift.proof import forms, prove, shape, x87form as XF  # noqa: E402
 
 declared_x86sys.configure()
 inputs.configure(cpumodel=os.path.join(HERE, "..", "..", "..", "verify", "cpuid_model.json"))

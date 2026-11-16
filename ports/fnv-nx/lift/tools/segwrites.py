@@ -22,13 +22,15 @@ contributes its constants (`mov r, imm`, `push imm`, a read of cs: its declared 
 Context restores load captured selectors (the platform's rule, as above). The lifter proves with them that the code-selector arm of a store through S is dead (proof/lift_dsl.py).
 The lifter (core.gs_guard) guards an access through the effective segment S iff S is not non-null in the image (its initial selector is null, or some write of S is possibly null).
 Context restores (SetThreadContext, exception continuation) load the selectors a context holds, which are the captured ones: the platform's rule, not this tool's."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import argparse, json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 if '--lift' in sys.argv:      # run as a stage: the lift/ directory is a declared input, always an argument; imported as a module, the importer's own sys.path supplies fnvlift
     sys.path[:0] = [HERE, sys.argv[sys.argv.index('--lift') + 1]]
 from capstone import x86 as X
-from fnvlift.image import Image
-from proof import census, shape
+from fnvnx.lift.fnvlift.image import Image
+from fnvnx.lift.proof import census, shape
 
 
 

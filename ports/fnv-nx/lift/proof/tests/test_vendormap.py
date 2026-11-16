@@ -1,5 +1,7 @@
 """vendormap / sdmfeat vendor rule: (1) synthetic cells (the rule on fixed values); (2) over the PINNED AMD APM (fnv-nx-build tools/amd-apm, commit and sha256 in pins.json `external`) the parsed Appendix E CPUID bit rows, map cells and subsets equal the committed
 reference, proof/tests/vendor_cells.tsv, the cells of the declared-CPU-cleared feature (3DNow) are 0F 0E (Vol. 5) and 0F 0F (Vol. 3), no bit carries two features, and every row sits under its own function table."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import hashlib
 import json
 import os
@@ -10,7 +12,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
-from proof import sdmfeat as S, vendormap as V  # noqa: E402
+from fnvnx.lift.proof import sdmfeat as S, vendormap as V  # noqa: E402
 
 PINS = [e for e in json.load(open(os.path.join(HERE, '..', 'pins.json')))['external'] if e['name'].startswith('amd-apm')]     # every pinned AMD volume (Vol. 3, Vol. 5)
 PIN = PINS[0]

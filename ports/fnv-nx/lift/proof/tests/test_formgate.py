@@ -20,7 +20,7 @@ import declared_x86sys; declared_x86sys.configure()
 sys.path.insert(0, LIFT)
 sys.path.insert(0, os.path.join(LIFT, "..", "verify"))     # cas, recipe: the trunk loader the gate itself uses (-I drops PYTHONPATH)
 import fakeext
-from proof import certbasis, formgate, forms, prove, shape
+from fnvnx.lift.proof import certbasis, formgate, forms, prove, shape
 from fnvnx.verify import recipe
 
 WORK = os.environ.get('FNVNX_TEST_WORK') or __import__('tempfile').mkdtemp(prefix='fnvnx-proof-test-')     # declared input: the directory the fixtures are written below
@@ -176,7 +176,7 @@ class CertificationRule(unittest.TestCase):
     def test_certificate_stale_after_a_dsl_edit_is_refused(self):
         # certificates written under the current DSL; then the builder of ONE mnemonic (xor) changes: exactly the shapes of xor lose their certificate,
         # the others (their Form did not change) stay certified.  The key of a certificate is (shape, shape_sha of the CURRENT Form, IR sha), nothing else.
-        from proof import forms
+        from fnvnx.lift.proof import forms
         with workdir() as td:
             f = Fixture(td, GOOD)
             self.assertEqual(f.judge()[:3], (2 * len(GOOD), 2 * len(GOOD), []))
@@ -389,11 +389,11 @@ class DeclaredOutputs(unittest.TestCase):
 class EaRule(unittest.TestCase):
     """item ea-rule (proof/eaaudit.py): the Form builders of this tree hold the rule; a builder that loads or stores raw, or hands an mload / mstore an address that no address function made, is one violation each"""
     def test_this_tree_holds_the_rule(self):
-        from proof import eaaudit
+        from fnvnx.lift.proof import eaaudit
         self.assertEqual(eaaudit.violations(PROOF), [])
 
     def test_violations_are_found(self):
-        from proof import eaaudit
+        from fnvnx.lift.proof import eaaudit
         with tempfile.TemporaryDirectory() as d:
             with open(os.path.join(d, 'forms.py'), 'w') as f:
                 f.write('def mload(m, a, n): return a\ndef good(c):\n    a = ea(c)\n    return mload(a, 4)\ndef bad(c):\n    return mload(c.raw, 4)\n')

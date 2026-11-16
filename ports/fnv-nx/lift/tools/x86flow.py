@@ -2,11 +2,13 @@
 """Shared x86-32 flow code for fpmodes.py: PE image, recursive-descent decoder with CFG, TOTAL esp/ebp tracking
 (symbolic callee pops solved from join/ret constraints; every instruction ends with a constant or a named reason), frame-address
 events, x87 stack-depth dataflow. No clocks, no entropy; every iteration order is sorted."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, struct, bisect, itertools
 from collections import defaultdict
 import sys
 import capstone
-from fnvlift.image import Image as _FImage
+from fnvnx.lift.fnvlift.image import Image as _FImage
 from capstone import x86 as X
 
 M32 = 0xffffffff

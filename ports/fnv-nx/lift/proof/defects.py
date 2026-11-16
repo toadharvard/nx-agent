@@ -5,8 +5,10 @@ obligation after the fact, it never changes the DSL form.
 The four former entries (rot-count-modulo, ror-cf, rot-of-count0, sar-cf-big-count) were model defects fixed by the transcription patches of the pinned IR (x86ir, bump IR 7c307464: zrol_spec, zror_spec, zsar_spec); they are deleted, not gated (by-construction row #8).
 A region here is a MODEL GAP (the pinned model does not implement the instruction as the SDM states): the SDM text is the decision, the model source is cited.
 entry: id, keys (regex on the form key), parts = [(fields or None = every other field, region(ctx) -> z3 Bool)], sdm."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import re, z3
-from proof.shape import PFX
+from fnvnx.lift.proof.shape import PFX
 ALL = None
 def prefix_skip(code):
     i = 0

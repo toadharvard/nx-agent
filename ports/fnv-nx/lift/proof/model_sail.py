@@ -13,6 +13,8 @@ How one instruction is run (details in README.md, section Sail):
   makes the encoding a ModelGap: the model does not define the behaviour.
 Upper halves of the 64-bit registers are free z3 variables <reg>_hi (rax_hi ...); the results are the low 32 bits, so
 a result that depended on an upper half would show up as a prover counter-example, which is the independence check."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import hashlib, os, re, subprocess, sys
 import z3
 
@@ -55,7 +57,7 @@ LINEARIZE = ['bool_to_bits', 'bits_to_bool', 'zf_spec']
 # functions whose calls are printed (-D p) so that a model exception can be reported with its message
 def errfns():
     """the functions whose calls are printed (-D p) so that a model exception can be reported with its message: every function of the IR named x86_fault<..> or x86_model_error<..> (derived from the IR, sorted)"""
-    from proof import irdeps
+    from fnvnx.lift.proof import irdeps
     return sorted(n for n in (irdeps.decode(z) for z in irdeps.load(ir_file()).fns) if re.fullmatch(r'x86_(?:fault|model_error)<[A-Za-z0-9]+>', n))      # the instances over a plain type; the four tuple instances (x86_model_error<z8..z9>) need isla's probe spelling: not probed, as before (reported)
 SEG = ('-I', 'msrs=[#x0000000000000000; 7]', '-I', 'ctrs=[#x0000000000000000; 17]', '-I', 'seg_visibles=[#x002b; 6]', '-I', 'seg_hidden_attrs=[#x0c9a; 6]',
        '-I', 'seg_hidden_bases=[#x0000000000000000; 6]', '-I', 'seg_hidden_limits=[#xffffffff; 6]', '-I', 'ms_reg=false', '-I', 'fault_reg=false',
@@ -108,7 +110,7 @@ def run_env_sha():
 
 def closure_sha(fns):
     """K key of a run: irdeps.closure_sha over the pinned IR file for the executed functions `fns` (LAST['fns'])"""
-    from proof import irdeps
+    from fnvnx.lift.proof import irdeps
     return irdeps.sha_of_file(ir_file(), fns, run_env_sha())
 
 FNS = []     # the functions the last run_isla executed (isla call events), sorted; K
@@ -414,7 +416,7 @@ def seg_attrs_of(rec, sel):
 def seg_domain():
     """the pre-states of a run whose Form reads a selector: each segment register holds a NON-NULL selector the declared machine lets it hold (its initial selector, mov_to_sreg, for CS the far-jump targets; read through x86sys) and
     its hidden attributes are those of that selector's descriptor, a code selector in a data register excepted (see the MODEL CLAUSE note).  The null selector is outside it: its fault is the record's null_seg_access row (the Windows rule, no Sail model clause), proved by the Form's own spec."""
-    from fnvlift import x86sys
+    from fnvnx.lift.fnvlift import x86sys
     rec = x86sys.REC; cl = []
     for s in SELREG:
         held = {x86sys.SEL[s]} | (set(x86sys.MOV_TO_SREG[s][0]) if s in x86sys.MOV_TO_SREG else set())

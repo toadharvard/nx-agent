@@ -5,7 +5,7 @@ _q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__fi
 import os, re, shutil, subprocess, sys, tempfile
 LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools')); sys.path.insert(0, os.path.join(LIFT, '..', 'toolchain', 'tests'))
-import fnvlift as L
+import fnvnx.lift.fnvlift as L
 GEN = os.environ.get('FNVNX_INPUT_GEN') or sys.exit('FNVNX_INPUT_GEN is not mounted (the GEN output of the lift/rt root, a produced input of tests/inputs.json)')
 from fnvnx.toolchain.tests import plugbuild as pb
 import prelude

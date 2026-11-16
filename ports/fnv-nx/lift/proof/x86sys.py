@@ -3,6 +3,8 @@
 The record is the only place that holds the selectors, ring-3 interrupt vectors, CR4 bits and IOPL of the declared machine: this module holds no value of it.
 A row is `{value, source}` or `{status: "undecided", why}`; get() returns the value of a decided row and raises Undecided(why) for an undecided one, for an absent row (the record lacks the key: its `why` says so) and for an absent record.
 Location: the one explicit input fnvlift.inputs x86sys, set by the program that runs the prover (--x86sys PATH, configure() below): no environment variable and no default path."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import hashlib
 import json
 import os
@@ -10,7 +12,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from fnvlift import inputs  # noqa: E402
+from fnvnx.lift.fnvlift import inputs  # noqa: E402
 FORMAT = 'fnvnx-x86sys/2'
 
 

@@ -16,14 +16,16 @@ addr + size when relative); a decoder whose value fits none of them raises Field
 derivation is a hypothesis about capstone; its soundness for every instruction of the exe is established exhaustively by symcheck.py.
 Builders may only compute with the field (DSL nodes).  A builder that BRANCHES on it (compares, truth value, int()) raises SymbolicBranch(file:line):
 that builder cannot be made symbolic by substitution (class `builder-branches-on-field`)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys, traceback
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import hashlib
-from fnvlift import dsl
-from fnvlift.dsl import N, mk, C, V, F, mask
+from fnvnx.lift.fnvlift import dsl
+from fnvnx.lift.fnvlift.dsl import N, mk, C, V, F, mask
 from capstone import x86 as X
-from proof import forms, shape as shp
-from proof.detrand import Rng
+from fnvnx.lift.proof import forms, shape as shp
+from fnvnx.lift.proof.detrand import Rng
 
 M32 = 0xffffffff
 def eip(): return V('eip', 32)

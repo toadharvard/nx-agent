@@ -1,8 +1,10 @@
 """tools/segwrites.py analyse(): write sites of es/ds/fs/gs and the proof that the loaded selector is non-null (backward walk over unique predecessors, greatest fixpoint over S'), on synthetic images.
     test_segwrites.py"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path[:0] = [os.path.dirname(HERE), os.path.dirname(os.path.dirname(HERE))]
-from fnvlift.image import Image
+from fnvnx.lift.fnvlift.image import Image
 import segwrites
 
 INIT = dict(es=False, ds=False, fs=False, gs=True)      # initial null: gs only (x86sys selectors)

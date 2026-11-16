@@ -9,6 +9,8 @@ shape_sha in SHARDS (a record whose model_sha is the pin or whose closure_sha is
 excluded here as well: it migrates (shapeprove.py --migrate), it is not proved again.
 Rows: shape_key<TAB>shape_sha, sorted by key (shapeprove.py takes the shapes whose position is = K-1 mod N); header lines '# ...' pin the inputs and give the counts
 (per family: the universe, the queue, and the shapes no prover states: every non-integer family, integer shapes without a Form)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import argparse
 import collections
 import glob
@@ -19,7 +21,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from proof import certs_build, model_sail, symform, x86sys  # noqa: E402
+from fnvnx.lift.proof import certs_build, model_sail, symform, x86sys  # noqa: E402
 
 
 def main(argv):
@@ -41,7 +43,7 @@ def main(argv):
     simd = a.mode == 'simd'
     if simd:
         if not (a.tree and a.cpufeat_file and a.cpufeat_ref): ap.error('--mode simd needs --tree, --cpufeat-file and --cpufeat-ref')
-        from fnvlift import inputs; inputs.configure(cpufeat=a.cpufeat_file)        # the class order (simdcheck.cleared) reads the CPUID feature-bit table
+        from fnvnx.lift.fnvlift import inputs; inputs.configure(cpufeat=a.cpufeat_file)        # the class order (simdcheck.cleared) reads the CPUID feature-bit table
     forms = certs_build.forms_of(a.universe, ('simd',) if simd else ('int', 'sys'))
     files = []
     for s in a.shards: files += sorted(glob.glob(os.path.join(s, '**', '*.jsonl'), recursive=True)) if os.path.isdir(s) else [s]

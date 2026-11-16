@@ -8,6 +8,8 @@ in an executable section) and checks (a) every target is an entry of universe.ts
 every byte of the executable sections exactly once (contiguous runs, no UNEXPLAINED); (c) closure under direct targets: lifting every entry with fnvlift
 (lift_entry over FACTS_DIR/universe.tsv) the direct call targets and the jmp/jcc/loop targets leaving the range (meta calls, tails) are all entries
 (entries whose lift raises Unsupported are counted by reason class and do not enter (c); --no-c skips it). Prints counts only. Exit 0 iff all hold."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys, re, multiprocessing as mp
 from collections import Counter
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE)); sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))      # tools/ (pemod) and lift/ (fnvlift)
@@ -23,8 +25,8 @@ def conf():
 def lift_part(arg):
     """worker: lift entries[k::n] -> (missing target -> number of entries naming it, reason class -> count, entries lifted, direct targets seen)"""
     exe, base, fd, image, k, n = arg; sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
-    import fnvlift as L
-    from fnvlift.tests import _inputs; _inputs.configure_image(fd + '/universe.tsv', image)      # the image: the exe, or the module whose facts dir fd is
+    import fnvnx.lift.fnvlift as L
+    from fnvnx.lift.fnvlift.tests import _inputs; _inputs.configure_image(fd + '/universe.tsv', image)      # the image: the exe, or the module whose facts dir fd is
     img = L.Image(exe, base); ent = [int(l.split('\t')[0], 16) for l in open(fd + '/universe.tsv') if l.strip() and not l.startswith('#')]; es = set(ent)
     miss = Counter(); why = Counter(); ne = Counter(); ok = seen = 0
     for a in ent[k::n]:

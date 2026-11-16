@@ -6,6 +6,8 @@
 RULE: the basis shape of every far memory shape of the universe (sysspec_far.basis_key: the PUSH r/m32 shape with the same ModRM/SIB/displacement) is in the queue,
 unless a record of SHARDS already proved it at the current shape_sha.  The far shapes are derived from the universe by sysspec_far (no list); the basis keys are derived from them.
 A basis shape without a symbolic Form is reported (stderr) and not queued.  The queue id is recomputed over the rows (the header counts are kept, one line is added)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import glob
 import hashlib
 import json
@@ -17,10 +19,10 @@ sys.path.insert(0, os.path.dirname(HERE)); sys.path.insert(0, HERE)
 
 
 def main(argv):
-    argv = list(argv); i = argv.index('--x86sys'); from proof import x86sys; x86sys.configure(argv[i + 1]); del argv[i:i + 2]
+    argv = list(argv); i = argv.index('--x86sys'); from fnvnx.lift.proof import x86sys; x86sys.configure(argv[i + 1]); del argv[i:i + 2]
     i = argv.index('--out'); out = argv[i + 1]; del argv[i:i + 2]
     queue, universe, shards = argv[0], argv[1], argv[2:]
-    from proof import sysspec, sysspec_far, symform, certs_build, shape
+    from fnvnx.lift.proof import sysspec, sysspec_far, symform, certs_build, shape
     hdr, rows = [], {}
     for ln in open(queue):
         if ln[0] == '#': hdr.append(ln.rstrip('\n'))

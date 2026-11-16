@@ -2,6 +2,8 @@
 """The cleared-feature class (proof/forms_cpufeat.py, sysspec_cpufeat.py): an instruction whose CPUID feature the declared CPU clears is the Form fault(UD) with no other effect; the MPX hint-NOP encodings (0F 1A/1B) are the Form NOP
 with no memory access (SDM Vol. 1 E.4.1).  Needs the mounted SDMROWS input (FNVNX_INPUT_SDMROWS) and the declared CPU model (verify/cpuid_model.json) and the pinned SDM text (FNVNX_SDM_TXT) for the page table check.
 python3 -I tests/test_sysspec_cpufeat.py"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import subprocess
 import sys
@@ -12,8 +14,8 @@ sys.path.insert(0, os.path.join(HERE, '..', '..'))
 sys.path.insert(0, os.path.join(HERE, '..'))
 sys.path.insert(0, HERE)
 import declared_x86sys
-from fnvlift import inputs
-from proof import forms, shape, symform
+from fnvnx.lift.fnvlift import inputs
+from fnvnx.lift.proof import forms, shape, symform
 import sysspec_cpufeat as S
 
 SDM = os.environ.get('FNVNX_SDM_TXT')
@@ -38,7 +40,7 @@ class Cleared(unittest.TestCase):
 
     def test_3dnow_avx_sse3_are_ud(self):
         # the decision is proof/cpufeat's, through the declared CPU's words (verify/cpuid_model.json): a form with no SDM row whose capstone group maps to a cleared CPUID bit is #UD (owner rule 07:50Z: capstone group -> cleared CPUID bit; the group rule of L3a w13, no SDM row, no UDSAIL, no certificate)
-        from proof import cpufeat
+        from fnvnx.lift.proof import cpufeat
         for h in ('0f0fc10d', '0f0e', 'c5f1e3c2', 'db08', 'dd08', 'df08'):
             real = next(iter(shape.decoder().disasm(bytes.fromhex(h), 0)))
             self.assertTrue(cpufeat.missing(real), h)
@@ -66,7 +68,7 @@ class Cleared(unittest.TestCase):
         self.assertEqual([r for r in two if r[1] in ('0E', '0F')], [])
 
     def test_the_decision_is_the_declared_cpus(self):
-        from proof import cpufeat
+        from fnvnx.lift.proof import cpufeat
         for h, ud in (('c5f1e3c2', True), ('0fef02', False), ('660ffcc1', False)):
             real = next(iter(shape.decoder().disasm(bytes.fromhex(h), 0)))
             self.assertEqual(bool(cpufeat.missing(real)), ud, h)

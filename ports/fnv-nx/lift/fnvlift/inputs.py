@@ -19,11 +19,17 @@ NAMES = ('universe', 'fpstate', 'fpdepth', 'x86sys', 'sdmrows', 'cpumodel', 'seg
 _I = {}
 
 
+def _same_file(a, b):
+    """two spellings of one input file (a path through ports/fnvnx, the module path's link, or through ports/fnv-nx): the same file, so the same value"""
+    import os
+    return isinstance(a, str) and isinstance(b, str) and os.path.exists(a) and os.path.exists(b) and os.path.samefile(a, b)
+
+
 def configure(**kw):
     for k, v in kw.items():
         if k not in NAMES:
             raise ValueError('inputs: %r is not a lifter input (%s)' % (k, ', '.join(NAMES)))
-        if k in _I and _I[k] != v:
+        if k in _I and _I[k] != v and not _same_file(_I[k], v):
             raise ValueError('inputs: %s is already %r; one process has one input set' % (k, _I[k]))
         _I[k] = v
 

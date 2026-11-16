@@ -69,7 +69,7 @@ def _imports(rel):
         else:
             continue
         if bad: raise DynamicLoad("%s:%d imports %s" % (rel, n.lineno, bad[0]))
-        for m in names: out.update(_module_file(m))
+        for m in names: out.update(_module_file(m[len('fnvnx.lift.'):] if m.startswith('fnvnx.lift.') else m))      # the one module path: lift/<x> is `fnvnx.lift.<x>`; LIFT is lift/
     return out
 
 
@@ -144,5 +144,5 @@ def configure_inputs(a):
     given = [x for x in (a.cpumodel, a.rcptab, a.rcpcert) if x]
     if not given: return
     if len(given) != 3: raise SystemExit('--cpumodel, --rcptab and --rcpcert are given together')
-    from fnvlift import inputs
+    from fnvnx.lift.fnvlift import inputs
     inputs.configure(cpumodel=os.path.abspath(a.cpumodel), rcptab=os.path.abspath(a.rcptab), rcpcert=os.path.abspath(a.rcpcert))

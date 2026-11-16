@@ -1,6 +1,8 @@
 """defectspec (CERTS.md "Oracle rules" 1): every declared model defect has exactly one certifying spec, and a FAILED(model-defect) record counts only when its spec proves it; it is never a pass by itself.
 The counting clause is defectspec.main: a record that names a defect is `proved` only when the spec of EVERY named id returns proved; a spec that does not prove, and an id without a spec (`no-spec`), are
 not counted (row status != proved, exit 1).  The tests run the real main over real shard files in a temporary directory (no replaced function)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import contextlib
 import io
 import json
@@ -13,8 +15,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
 sys.path.insert(0, HERE)
 import declared_x86sys; declared_x86sys.configure()
-from proof import defects  # noqa: E402
-from proof import defectspec  # noqa: E402
+from fnvnx.lift.proof import defects  # noqa: E402
+from fnvnx.lift.proof import defectspec  # noqa: E402
 
 REP_MOVSB = 'f3a4/0.0.0.0'      # rep movsb: the string spec proves it
 REP_SEG = '2ef3a4/0.0.0.0'      # a segment prefix: stringspec.check answers `uncertified`, not proved

@@ -11,14 +11,14 @@ LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools')); sys.path.insert(0, os.path.join(LIFT, '..', 'toolchain', 'tests'))
 from fnvnx.toolchain.tests import plugbuild as pb
 import prelude
-import fnvlift as L
-from fnvlift.tests import _inputs
+import fnvnx.lift.fnvlift as L
+from fnvnx.lift.fnvlift.tests import _inputs
 _inputs.configure()
 GEN = os.environ.get('FNVNX_INPUT_GEN') or sys.exit('FNVNX_INPUT_GEN is not mounted (the GEN output of the lift/rt root, a produced input of tests/inputs.json)')
-from fnvlift import core, dsl
-from proof import lift_dsl as f_dsl, cpufeat
-from fnvlift.core import Unsupported
-from fnvlift.image import Image
+from fnvnx.lift.fnvlift import core, dsl
+from fnvnx.lift.proof import lift_dsl as f_dsl, cpufeat
+from fnvnx.lift.fnvlift.core import Unsupported
+from fnvnx.lift.fnvlift.image import Image
 
 CASES = [('f00108', 'lock add [eax],ecx'), ('f0ff08', 'lock dec dword [eax]'), ('870a', 'xchg [edx],ecx'), ('f00fb10a', 'lock cmpxchg [edx],ecx'), ('f00fc10a', 'lock xadd [edx],ecx'),
          ('f00fc70a', 'lock cmpxchg8b [edx]'), ('f00fab08', 'lock bts [eax],ecx'), ('f0800a01', 'lock or byte [edx],1')]

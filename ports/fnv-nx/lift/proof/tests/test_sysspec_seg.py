@@ -1,4 +1,6 @@
 """sysspec_seg: MOV Sreg, POP Sreg, PUSH Sreg Forms against the cited SDM spec under the declared record; the segment-register write effect (dsl kind sel) and its C emission."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import copy
 import os
 import sys
@@ -12,8 +14,8 @@ import declared_x86sys
 declared_x86sys.configure()      # fnvlift.x86sys reads the record at import
 import capstone
 import z3
-from fnvlift import core, dsl, inputs
-from proof import lift_dsl, sysspec, x86sys
+from fnvnx.lift.fnvlift import core, dsl, inputs
+from fnvnx.lift.proof import lift_dsl, sysspec, x86sys
 
 A0 = 0x400000
 
@@ -40,7 +42,7 @@ class Seg(unittest.TestCase):
             r, n = sysspec.check(key(h)); self.assertEqual(r, 'proved', (h, n))
 
     def test_an_undecided_selector_row_has_no_form(self):
-        from fnvlift import x86sys as lx
+        from fnvnx.lift.fnvlift import x86sys as lx
         u = lx.REC['mov_to_sreg']['undecided']; old = list(u['selectors']); u['selectors'][:] = [27]
         rec = copy.deepcopy(x86sys.load()); rec['mov_to_sreg']['undecided']['selectors'] = [27]
         try:
@@ -83,7 +85,7 @@ class Seg(unittest.TestCase):
 
 
 def declared_x86sys_fs():
-    from fnvlift import x86sys
+    from fnvnx.lift.fnvlift import x86sys
     return x86sys.SEL['fs'] & 0xfffc
 
 

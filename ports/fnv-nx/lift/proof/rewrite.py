@@ -11,8 +11,10 @@ The model computes the remainder as `a - b * floor(a / b)` (Sail `mod` = floor2 
 (z3 cannot relate a divider and a remainder circuit: even the 16-bit instance of this identity is `unknown` after 60 s).
 low_extract: Extract(h, 0, a + b | a - b | a * b) = Extract(h, 0, a) op Extract(h, 0, b) (arithmetic modulo 2^n commutes with truncation: the reduction mod 2^(h+1) is a ring
 homomorphism), so a 32-bit remainder taken from the low half of a 64-bit expression meets the 32-bit expression of the other side term by term."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import z3
-from proof import bounds
+from fnvnx.lift.proof import bounds
 K = {z3.Z3_OP_BUDIV: 'u', z3.Z3_OP_BUDIV_I: 'u', z3.Z3_OP_BSDIV: 's', z3.Z3_OP_BSDIV_I: 's'}
 def is_ext(a, n, signed):
     ext = z3.SignExt(a.size() - n, z3.Extract(n - 1, 0, a)) if signed else z3.ZeroExt(a.size() - n, z3.Extract(n - 1, 0, a))

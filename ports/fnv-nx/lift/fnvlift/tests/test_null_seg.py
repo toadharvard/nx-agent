@@ -4,17 +4,19 @@
   (3) lea and a prefixed instruction without a memory operand have no guard;
   (4) a load of a segment register (mov sreg, r/m16) sets the state the guard reads (fnvl_seg_set).
     test_null_seg.py"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; SDMROWS = _inputs.sdmrows_arg(); _inputs.configure(SDMROWS)
-import fnvlift as L
-from fnvlift import x86sys
-from fnvlift.core import Unsupported
-from fnvlift.image import Image
+import fnvnx.lift.fnvlift as L
+from fnvnx.lift.fnvlift import x86sys
+from fnvnx.lift.fnvlift.core import Unsupported
+from fnvnx.lift.fnvlift.image import Image
 R = json.load(open(_inputs.X86SYS))
 row = R['null_seg_access']
 assert x86sys.SEL['gs'] == 0 and R['selectors']['gs'].get('value') == 0      # the record decides gs: the null selector (Windows 7 SP1 KeContextToKframes)
 import tempfile
-from fnvlift import inputs
+from fnvnx.lift.fnvlift import inputs
 
 
 def configure(**guard):
@@ -55,7 +57,7 @@ assert GUARD['es'] in lift(bytes([0xaa, 0xc3])) and GUARD['ds'] in lift(bytes([0
 for b in ([0x65, 0x8d, 0x00, 0xc3], [0x3e, 0x8d, 0x00, 0xc3], [0x65, 0x90, 0xc3]):
     assert 'SELK(c->sel[' not in lift(bytes(b)) and 'in_sel_gs >> 2' not in lift(bytes(b)), b
 # privileged-opcode check of the row
-from fnvlift import f_sys
+from fnvnx.lift.fnvlift import f_sys
 for b in range(256):
     want = ('0x%x' % b) in row['privileged_check_first']['priv_instruction_opcodes']
     assert f_sys.row_privileged(bytes([0x65, b, 0, 0]), row) == want, b

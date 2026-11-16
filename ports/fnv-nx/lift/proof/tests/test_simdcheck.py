@@ -2,6 +2,8 @@
 """simdcheck.py is a refinement CHECK: it must prove the Forms that agree with the spec and refute a Form or a spec row that differs.  Mutations of the spec rows
 (a wrong lane operation, a missing alignment fault, a wrong register write) must give FAILED for the shapes of that row; unmutated rows prove.
 python3 -I tests/test_simdcheck.py"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys, unittest
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE)); sys.path.insert(0, os.path.join(HERE, '..', '..'))
 sys.path.insert(0, HERE)
@@ -9,7 +11,7 @@ import declared_x86sys; declared_x86sys.configure()
 import declared_cpufeat
 CPUFEAT, WHY = declared_cpufeat.path()      # declared input: the CPUID feature-bit table (the function of the pins that lift/cpufeat is); simdcheck.check puts a cleared-feature shape in the ud class first
 if CPUFEAT:
-    from fnvlift import inputs; inputs.configure(cpufeat=CPUFEAT)
+    from fnvnx.lift.fnvlift import inputs; inputs.configure(cpufeat=CPUFEAT)
 import simdcheck as C
 S = C.S
 

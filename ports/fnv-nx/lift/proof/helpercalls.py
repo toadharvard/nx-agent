@@ -10,14 +10,16 @@ Not in the table, by rule: `uf` nodes (the declared platform functions, certifie
 `pack_forms(cache)` -> [(shape key, Form)] of every shape of the lifted pack of formgate_inputs.json that has a symbolic builder (the shapes that formgate judges);
 raises formgate.Red when the inputs are not declared.
 Every helper of the table is covered by the REMOVE record ASM-329 (any width), or by rcpcert when its defining unit is the rcpcert table unit (decided by gate_fpexact from the object symbol tables)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIFT = os.path.dirname(HERE)
 sys.path.insert(0, LIFT)
-from fnvlift import dsl  # noqa: E402
-from proof import formgate, shape, symform, x86sys  # noqa: E402
+from fnvnx.lift.fnvlift import dsl  # noqa: E402
+from fnvnx.lift.proof import formgate, shape, symform, x86sys  # noqa: E402
 
 def node_call(n):
     """-> (callee, input bits) iff the emitter writes node N as a call of a runtime helper, else None"""

@@ -7,11 +7,13 @@ Synthetic image (one run, no joins), each case below one write site:
   mov ss,ax (eax not defined here)  ss unbounded
 and the SEGWRITES guard fields stay what the null analysis gives.
     test_segwrites_sets.py"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json, os, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE))
 sys.path[:0] = [os.path.join(LIFT, 'tools'), LIFT]
 import segwrites as W
-from fnvlift.image import Image
+from fnvnx.lift.fnvlift.image import Image
 sel = json.load(open(os.path.join(os.path.dirname(LIFT), 'platform', 'declared', 'x86sys.json')))['selectors']
 code = (bytes.fromhex('b81b0000008ec0c3') +            # mov eax,0x1b ; mov es,ax ; ret
         bytes.fromhex('6a381fc3') +                      # push 0x38 ; pop ds ; ret

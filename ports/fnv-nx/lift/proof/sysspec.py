@@ -7,14 +7,16 @@ Class (a): privileged instructions executed at CPL 3 (SDM Vol. 2 per instruction
 Class (b): INT3 (SDM `INT3`: #BP, vector 3), INT1 (`INT1`: #DB, vector 1) and INTO (`INTO`: #OF, vector 4, only when EFLAGS.OF = 1; no exception otherwise, the instruction is a no-op), no other effect.
 Shapes that depend on a row the record does not decide (`int n`: other_vectors; mov to a segment register; sgdt/sidt/sldt; IN/OUT: the TSS I/O bitmap; RDPMC: cr4.pce) are `uncertified: <the row's why>`, with no default.
 Output: one line per shape `shape<TAB>mnemonic<TAB>result<TAB>note`; exit 1 if any shape fails."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from proof import privset, shape, symform, x86sys  # noqa: E402
+from fnvnx.lift.proof import privset, shape, symform, x86sys  # noqa: E402
 sys.path.insert(0, HERE)
-from fnvlift import dsl  # noqa: E402
+from fnvnx.lift.fnvlift import dsl  # noqa: E402
 import sysspec_far  # noqa: E402
 import capstone.x86_const as X  # noqa: E402
 

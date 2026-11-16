@@ -5,12 +5,14 @@
 Certificates are the JSON files written by proof/prove.py under the directory passed as `d`: {"form": key, "result": "proved"|"FAILED..."|"model-gap"|"timeout"..., ...}.
 A form is certified when it has at least one certificate and EVERY certificate of it says "proved", or carries "accepted": true (the only way a refines-model / model-defect
 status counts). Anything else (no file, a failed, gap or timed-out encoding) is `none`; an unreadable file stops the build. A missing directory certifies nothing (`present` False)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import collections, json, os, sys
 
 
 def form_key(ins):
     from capstone import x86 as X
-    from fnvlift.formkey import form_key as fk
+    from fnvnx.lift.fnvlift.formkey import form_key as fk
     return fk(ins, X)[0]
 
 

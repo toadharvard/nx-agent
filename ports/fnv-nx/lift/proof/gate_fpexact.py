@@ -105,7 +105,7 @@ VERIFY = os.path.normpath(os.path.join(LIFT, "..", "verify"))
 sys.path.insert(0, LIFT)
 sys.path.insert(0, os.path.join(VERIFY, "..", "contract"))
 sys.path.insert(0, VERIFY)
-from proof import formgate, genout, helpercalls  # noqa: E402     (genout: the one reader of the lift/rt GEN output; helpercalls: the Form -> helper call table)
+from fnvnx.lift.proof import formgate, genout, helpercalls  # noqa: E402     (genout: the one reader of the lift/rt GEN output; helpercalls: the Form -> helper call table)
 from fnvnx.verify import gate_build  # noqa: E402
 from fnvnx.verify import gate_datamodel  # noqa: E402     (cc_docs: the reader of the CC stage documents, the one copy)
 from fnvnx.contract import gatefile  # noqa: E402     (ports/fnv-nx/contract)

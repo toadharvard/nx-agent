@@ -6,13 +6,15 @@ KiTrap0D / Wine 9.0), the machine constants are rt/fnvl.h's.  Fault kinds (dsl.F
   INT n / INTO / INT1   the int_vector column of faults.json
   STR   the record's TR selector (SLDT SMSW SGDT SIDT SLDT LAR LSL VERR VERW: undecided fields, no Form)
   CPUID RDTSC   the reference CPU's fixed answer / the platform timer: uf nodes (dsl.uf)"""
-from fnvlift.dsl import C, V, eq, extract, ite, slt, uf, ult, zext
-from proof.forms import Op, ea, handler, rd, store_op, wr
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
+from fnvnx.lift.fnvlift.dsl import C, V, eq, extract, ite, slt, uf, ult, zext
+from fnvnx.lift.proof.forms import Op, ea, handler, rd, store_op, wr
 
-from fnvlift import x86sys
-from fnvlift.f_sys import wine_is_privileged
-from fnvlift.faults import BYNAME as _FT, INT_ROWS
-from proof import privset
+from fnvnx.lift.fnvlift import x86sys
+from fnvnx.lift.fnvlift.f_sys import wine_is_privileged
+from fnvnx.lift.fnvlift.faults import BYNAME as _FT, INT_ROWS
+from fnvnx.lift.proof import privset
 K_UD, K_BOUNDS, K_INTO, K_PRIV, K_AV, K_STEP = (_FT[n]['code'] for n in ('UD', 'BOUNDS', 'INTO', 'PRIV', 'AV', 'STEP'))      # the one fault table, fnvlift/faults.json
 INT_KIND = {v: _FT[n]['code'] for v, (n, _at) in INT_ROWS.items()}      # the int_vector column of faults.json; a vector outside the record's int_ring3.vectors is undecided (no Form)
 _PRIV = privset.mnemonics()      # the SDM rows of proof/sdm_priv_rows.tsv (class cpl0 / iopl)

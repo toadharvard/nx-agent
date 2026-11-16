@@ -10,6 +10,8 @@ indirect jmp / another entry / `ud` (bytes that do not decode: the lifted body r
 flow from entry point, exports, TLS, EH tables or from a pointer whose consumer transfers control (vptr-store run, jump table); `candidate` = known only as a relocated
 pointer target. Byte accounting: every byte of the executable sections gets one accounting class (tools/CODEMAP.md: may-execute and may-be-read are independent sets, the class is no partition of them) (entry body, PE-directory data, padding, relocation slot, dead gap) or is
 reported UNEXPLAINED by reason; the gate is red then. Output: cfg.facts_out/<module>/{universe,codemap,ranges,noreturn,outside,imports}.tsv, ehtables.json, gate_codemap.json."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, re, sys, json, bisect, hashlib
 from array import array
 from itertools import groupby
@@ -19,7 +21,7 @@ import capstone
 from capstone import x86 as X
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))      # the tool root: a tool imports its siblings from its own root (the generated stages run it under python3 -I)
 import pemod, ehtables, codemap, residue, jtab as JT
-from fnvlift import Image as LImage; from fnvlift import core as LCore
+from fnvnx.lift.fnvlift import Image as LImage; from fnvnx.lift.fnvlift import core as LCore
 TERM = {'ret', 'retf', 'int3', 'hlt', 'ud2', 'iret', 'iretd', '(ud)'}
 PRI = residue.PRI
 CN = {1: 'entry-nondecomp', 2: 'entry-nondecomp', 3: 'data-pe-header', 4: 'padding', 5: 'data-reloc', 6: 'dead-gap', 9: 'data-unreached', 8: 'UNEXPLAINED'}      # the exe's class names (codemap.py CLS)

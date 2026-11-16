@@ -3,6 +3,8 @@
 transcription (OWNER 10).  The universe is every shard record that names a defect (result FAILED(model-defect) or agree-except-declared), whatever the defect id.
     python3 defectspec.py SHARDS_DIR > defectspec.tsv        columns: shape, defects, result, note; the totals per defect id on stderr
 A defect id without a spec in SPECS gives `no-spec` (reported, never passed); exit 1 if any row is FAILED or no-spec."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import collections
 import glob
 import json
@@ -11,7 +13,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from proof import stringspec, x86sys  # noqa: E402
+from fnvnx.lift.proof import stringspec, x86sys  # noqa: E402
 
 SPECS = {'rep-prefix-ignored': stringspec.check}      # defect id -> check(shape key) -> (result, note); defects.py ids and these keys must be equal (test_defectspec)
 

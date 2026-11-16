@@ -17,11 +17,13 @@ Control transfer is derived from the Form's eip node by structure: constant == n
 (the Form's esp/store effects) and uses f_flow.call_xfer, anything else f_flow.jump_to; ite(c, constant T, next) -> `if (c) jump_to(T)` (jcc, jecxz,
 loop*, and the step repeat of rep string forms, whose eip is `ite(more, this address, next)`: a goto to the instruction's own label); any other
 expression (indirect jmp / call, ret) -> f_flow.jmp_indirect / call_xfer / ret_xfer with the C text of the node, the kind chosen by the mnemonic."""
-from fnvlift.core import CC, SKIP, SUB, Unsupported
-from fnvlift import f_flow
-from fnvlift import dsl, faults, prov
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
+from fnvnx.lift.fnvlift.core import CC, SKIP, SUB, Unsupported
+from fnvnx.lift.fnvlift import f_flow
+from fnvnx.lift.fnvlift import dsl, faults, prov
 
-from proof import forms, forms_alu, forms_flow, forms_move, forms_simd, forms_ssefp, forms_sys             # noqa: F401  (proof/forms.py: the Form builders; forms_* register their handlers in forms.H)
+from fnvnx.lift.proof import forms, forms_alu, forms_flow, forms_move, forms_simd, forms_ssefp, forms_sys             # noqa: F401  (proof/forms.py: the Form builders; forms_* register their handlers in forms.H)
 
 FAULT = {1: 'DE', 2: 'BP', 3: 'UD', 4: 'BR'}
 STATE = {'df': 'df', 'fs_base': 'fsb', 'flo': '(c->eflx|0x200u)'}      # Form pre-state variables besides the registers and the five flags
@@ -139,7 +141,7 @@ def specialise(F):
     arms = getattr(F, 'cstore', None)
     if not arms: return F
     import copy
-    from fnvlift import core
+    from fnvnx.lift.fnvlift import core
     dead = []
     for sg, cond, full in arms:
         sels = core.sel_set(sg)

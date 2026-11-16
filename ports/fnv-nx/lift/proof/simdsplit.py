@@ -11,9 +11,11 @@ operands and the SAT core times out.  The rule, in four steps (each a sound rest
      matching is a bijection and every matched pair is equal (or is commutative and associative, so equal disjunct multisets are equal terms).  Each pair reads at most two operands and MXCSR; it is decided by the
      case product  RC (4) x FTZ (1 bit) x class(operand) per operand  (classes(): exponent zero / ones / other x fraction zero / nonzero), a complete and disjoint partition of every bit pattern.
 A pair that is not proved leaves the part to the whole query (None): matching is sufficient, not necessary, so a failed pair is never a counter-example.  completeness_theorem() proves the partitions with z3."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import hashlib, os
 import z3
-from proof import bounds
+from fnvnx.lift.proof import bounds
 
 _QCFILE = os.environ.get('SIMD_QCACHE')
 _PROVED, _UNDECIDED = set(), set()          # canonical piece queries of this process: proved (unsat) / not decided within the limit

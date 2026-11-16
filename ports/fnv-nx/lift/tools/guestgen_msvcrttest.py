@@ -14,7 +14,8 @@ import json, os, re, struct, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the tool root (/tool)
 sys.path.insert(0, sys.argv[2])   # lift/, whose fnvlift package is a declared input
 import argparse, lifted
-import fnvlift as L, phf, impgen
+import fnvnx.lift.fnvlift as L
+import phf, impgen
 from keystone import Ks, KS_ARCH_X86, KS_MODE_32
 
 BASE, SLOT, MAINMAX, CODE_END, IAT, DATA, GSTACK, HSTACK, STOP, TEXT, TEB = 0x401000, 0x300, 0x180, 0x420000, 0x421000, 0x430000, 0x60000000, 0x70000000, 0x7e000000, 0xE0000000, 0x50000000

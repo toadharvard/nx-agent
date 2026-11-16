@@ -18,6 +18,8 @@ A2  READERS of sticky status: `fnstsw ax` (fpmodes.statclass: forward walk of th
 A3  OCCURRENCES: wait forms, MMX instructions, instructions whose CPUID feature the model (rt/cpumodel.c) does not have (proof/cpufeat.py), with the handler that would take them.
 Assumptions: ASM-219 above; ASM-003: an imported system function changes the x87/SSE control state only if it is one of the control imports above (the runtime implements the Win32/CRT
 surface, rt/imp.h); ASM-220: the CONTEXT image the runtime hands to guest SEH handlers is only read back by the runtime's own restore, which restores a snapshot of a state that was reachable."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys, hashlib
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -35,8 +37,8 @@ cpufeat = f_sys = f_sse = core = None      # the lifter's handler tables: use_li
 def use_lift(d):
     global cpufeat, f_sys, f_sse, core
     sys.path.insert(0, d)
-    from proof import cpufeat as a
-    from fnvlift import f_sys as b, f_sse as c, core as e
+    from fnvnx.lift.proof import cpufeat as a
+    from fnvnx.lift.fnvlift import f_sys as b, f_sse as c, core as e
     cpufeat, f_sys, f_sse, core = a, b, c, e
 
 FCW_START, MXCSR_START = 0x027F, 0x1F80

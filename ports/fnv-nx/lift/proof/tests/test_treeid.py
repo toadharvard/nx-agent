@@ -1,4 +1,6 @@
 """treeid.resume: only the complete, non-error records of the running tree are resumed; everything else is dropped and the shape is done again."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json
 import os
 import sys
@@ -7,7 +9,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
-from proof import treeid  # noqa: E402
+from fnvnx.lift.proof import treeid  # noqa: E402
 
 
 class T(unittest.TestCase):

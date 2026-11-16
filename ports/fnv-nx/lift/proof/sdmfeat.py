@@ -18,6 +18,8 @@ Source of each fact:
  * a form with no row in the SDM opcode tables is an undefined opcode: #UD on every CPU (the 3DNow! 0F 0F family is AMD's; the Intel SDM defines no 0F 0F).  Its row is `undefined`.
  * the SDM states that a few forms execute as another legal instruction on a CPU without the flag (TZCNT/LZCNT as BSF/BSR, PREFETCHW as a hint).  Each such statement is cited in the row's `exec_as` column.
 The capstone groups are not read here.  Rows are matched to a decoded form by (mandatory prefix, opcode bytes, ModRM.reg or fixed ModRM byte); an ambiguity (two rows with different flags) is an error, not a choice."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import collections
 import hashlib
 import json
@@ -148,7 +150,7 @@ class Table:
 
 def cmd_features(sdm, apm, out):
     """the feature -> CPUID bit table of the partition: Intel SDM Vol. 1 ch. 21 leaf tables U AMD APM Vol. 3 Appendix E CPUID function tables, ONE row per address (leaf, sub, reg, bit) with the canonical name, both vendor names and both citations"""
-    from proof import vendormap
+    from fnvnx.lift.proof import vendormap
     apm = apm if isinstance(apm, list) else [apm]
     arows = []; mirrors = []
     for a in apm:
@@ -167,7 +169,7 @@ def declared_cpu(cpumodel_bits=None, model_json=None):
     (the generator of rt/cpumodel_tab.inc and fnvl_cpuref.h) and the lifter's feature gate call; the max leaves are that record's too.  Nothing is compiled.  Only the fields a feature flag can
     sit in are given (leaf 1 ECX/EDX, 0x80000001 ECX/EDX, the max leaves); a leaf above its range's max is absent (`present` tests it), and fields the platform owns (leaf 1 EBX, leaf 4 EAX) are not features."""
     if cpumodel_bits is None:      # CPUMODEL_BITS / MODEL_JSON: the module object and the file the caller names (the sailmodel stage loads the mounted file itself); the defaults are the tree's own
-        from fnvlift import cpumodel_bits
+        from fnvnx.lift.fnvlift import cpumodel_bits
     mod = json.load(open(model_json or os.path.join(HERE, '..', '..', 'verify', 'cpuid_model.json')))
     w = cpumodel_bits.model_words(mod); I = cpumodel_bits.I
     return {(0, 'EAX'): mod['max_basic'], (0x80000000, 'EAX'): I(mod['max_ext']), (1, 'ECX'): w['leaf1_ecx'], (1, 'EDX'): w['leaf1_edx'],
@@ -575,7 +577,7 @@ def needs_of(rs, table, cpu, nopflags):
 
 
 def cmd_rows(sdm, sites, out, public=None, apm=()):
-    from proof import shape, vendormap
+    from fnvnx.lift.proof import shape, vendormap
     lines = load(sdm); cpu = declared_cpu()
     afeat, vcells = vendormap.layer([(a, a.replace('.pdf', '.txt')) for a in apm])   # every pinned AMD volume: the Appendix E bit rows and the vendor map cells that name a feature (Appendix A maps with Tables 3-1 / D-1, instruction references)
     mirrors = sorted({m for a in apm for m in vendormap.cpuid_mirrors(a.replace('.pdf', '.txt'))})

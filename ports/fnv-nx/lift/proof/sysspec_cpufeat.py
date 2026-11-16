@@ -13,15 +13,17 @@ NOP, SDM 1:P579, Appendix E (Intel MPX), E.4.1 Instruction Encoding:
   'All Intel MPX instructions are NOP on processors that report CPUID.07H.00H:EBX.MPX[14] = 0'
 The opcodes 0F 1A and 0F 1B hold only MPX cells (opmap).  The Form has no effect: no register, flag, memory access or fault; EIP advances over the encoding.
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import z3  # noqa: E402
-from fnvlift import dsl, inputs  # noqa: E402
-from fnvlift.faults import BYNAME as FT  # noqa: E402
-from proof import forms_cpufeat, shape, symform  # noqa: E402
+from fnvnx.lift.fnvlift import dsl, inputs  # noqa: E402
+from fnvnx.lift.fnvlift.faults import BYNAME as FT  # noqa: E402
+from fnvnx.lift.proof import forms_cpufeat, shape, symform  # noqa: E402
 import sysspec_gap as G  # noqa: E402
 from sysspec_text import CPUFEAT as TEXT  # noqa: E402
 
@@ -48,6 +50,6 @@ def check(key, rec=None):
     else:
         if f.faults: d.append('fault')
         if G.differs(dsl.to_smt(f.eip), G.V('eip') + ins.size): d.append('eip')
-    from proof import cpufeat
+    from fnvnx.lift.proof import cpufeat
     what = ','.join(cpufeat.missing(next(iter(shape.decoder().disasm(bytes(ins.bytes), 0))))) or 'MPX'
     return ('proved', TEXT['ud' if k == 'ud' else 'nop'] % what) if not d else ('FAILED(dsl)', TEXT['diff'] % ','.join(d))

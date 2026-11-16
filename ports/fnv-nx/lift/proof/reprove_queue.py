@@ -9,6 +9,8 @@
 Rows = those keys that are in the universe and have a symbolic Form (certs_build.forms_of), sorted by key.  Table columns: name (the key with '/' replaced by '_': a plain name, injective because a key is
 `<hex>/<n>.<n>.<n>.<n>` and hex has no '_'), shape (the key), shape_sha (the Form's sha of this tree: the prove step refuses a row whose Form differs).  --limit N keeps the first N rows (a test of the root).
 Keys outside the universe or without a Form are counted in the info file, never queued; the info file holds the totals and the shas that make the queue reproducible."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import argparse
 import glob
 import hashlib
@@ -19,7 +21,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from proof import certbasis, certs_build, model_sail, x86sys  # noqa: E402
+from fnvnx.lift.proof import certbasis, certs_build, model_sail, x86sys  # noqa: E402
 
 KEY = re.compile(r"^[0-9a-f]+/\d+\.\d+\.\d+\.\d+$")
 

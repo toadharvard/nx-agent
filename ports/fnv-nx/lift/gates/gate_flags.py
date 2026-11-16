@@ -54,7 +54,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import capstone
 from capstone import x86 as X
 
-from proof import forms, shape
+from fnvnx.lift.proof import forms, shape
 
 FLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of')
 NF = len(FLAGS)

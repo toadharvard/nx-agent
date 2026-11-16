@@ -1,4 +1,6 @@
 """Every free variable of a Form is a declared DSL state input (dsl.V is the one constructor; rule 8 of the 2026-11-15 order), and the string spec claims by the decoder's opcode and prefixes."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 import unittest
@@ -8,8 +10,8 @@ sys.path.insert(0, os.path.join(HERE, '..', '..'))
 sys.path.insert(0, os.path.join(HERE, '..'))
 sys.path.insert(0, HERE)
 import declared_x86sys
-from fnvlift import dsl, inputs
-from proof import stringspec, symform
+from fnvnx.lift.fnvlift import dsl, inputs
+from fnvnx.lift.proof import stringspec, symform
 
 
 class State(unittest.TestCase):
@@ -30,7 +32,7 @@ class State(unittest.TestCase):
         f = dsl.Form('k', 0, 1); self.assertRaises(AssertionError, f.reg, 'ees', dsl.C(0, 32))
 
     def test_a_segment_register_destination_without_a_decided_row_has_no_form(self):
-        from fnvlift import x86sys as lx
+        from fnvnx.lift.fnvlift import x86sys as lx
         u = lx.REC['mov_to_sreg']['undecided']; old = list(u['selectors']); u['selectors'][:] = [27]
         try:
             for k in ('8e00/0.0.0.0', '6607/0.0.0.0'): self.assertRaises(dsl.UndecidedRow, symform.symbuild, k)      # es: mov_to_sreg.undecided

@@ -20,10 +20,12 @@ Certificate field `assumptions` (ids):
               (non-wrapping) address leaves [0, 2^32) (model_sail.FAULT_OK); symcheck.py checks it for every relative target of the exe
 Split record: always 'none' (no field is case-split: isla runs on the symbolic bytes without forking on them in a way that needs it; the paths it forks
 into are exhaustive with their path conditions in the merge)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import argparse, collections, json, os, sys, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import z3
-from proof import bounds, shape as shp, symform, prove, model_sail, certbasis, treeid, x86sys
+from fnvnx.lift.proof import bounds, shape as shp, symform, prove, model_sail, certbasis, treeid, x86sys
 
 def load_shapes(path):
     """canonical integer-family shape keys, sorted"""

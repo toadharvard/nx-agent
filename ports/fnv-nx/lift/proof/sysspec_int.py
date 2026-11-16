@@ -9,14 +9,16 @@ The record (x86sys.py through fnvlift.x86sys) decides, per vector, what the decl
   int_ring3.other_vectors every other vector: the access violation at the instruction, the error code vector*8+2 of the SDM line above (the record row is read, not restated)
 The shape is the 256 concrete vectors the symbolic byte stands for (a complete case split of a finite field); result `proved` iff every vector is decided and its Form is the row, `uncertified` (naming the first
 undecided row, and the vectors proved) when a vector is undecided, `FAILED(dsl)` on any difference."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import z3  # noqa: E402
-from fnvlift import dsl, faults, x86sys as lx  # noqa: E402
-from proof import shape, symform  # noqa: E402
+from fnvnx.lift.fnvlift import dsl, faults, x86sys as lx  # noqa: E402
+from fnvnx.lift.proof import shape, symform  # noqa: E402
 from sysspec_text import INT as TEXT  # noqa: E402
 
 

@@ -76,6 +76,8 @@ IRETD at CPL 3 (the Operation, PROTECTED-MODE and RETURN-TO-SAME-PRIVILEGE-LEVEL
   Every #GP is the access violation of the declared machine (fault kind AV).  The Form's domain is EFLAGS.NT = 0, CR4.PVI = CR4.VME = 0 and the 32-bit operand; the rows for NT = 1 (task return) and PVI/VME are
   undecided in the record, so the proof is uncertified for them (never proved).
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 
@@ -83,9 +85,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import capstone.x86_const as X  # noqa: E402
 import z3  # noqa: E402
-from fnvlift import dsl  # noqa: E402
-from fnvlift.faults import BYNAME as FT  # noqa: E402
-from proof import intud, shape, symform, x86sys  # noqa: E402
+from fnvnx.lift.fnvlift import dsl  # noqa: E402
+from fnvnx.lift.fnvlift.faults import BYNAME as FT  # noqa: E402
+from fnvnx.lift.proof import intud, shape, symform, x86sys  # noqa: E402
 import sysspec_gap as G  # noqa: E402
 from sysspec_text import LEGACY as TEXT, LR  # noqa: E402
 

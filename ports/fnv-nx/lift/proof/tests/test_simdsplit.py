@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """proof/simdsplit.py: the completeness theorem of its partitions (z3), and the per-lane split on a two-lane flag function whose reference is known (a sum of lane flags is split per lane and proved; a differing lane is not proved).
 python3 -I tests/test_simdsplit.py"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys, unittest
 import z3
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
-from proof import bounds, simdsplit as P
+from fnvnx.lift.proof import bounds, simdsplit as P
 
 
 CALLS = []

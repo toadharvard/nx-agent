@@ -5,6 +5,8 @@ imports the `proof` package; a recipe stage mounts each declared input at /in/N.
     python3 -I cpufeat_stage.py --work DIR --src proof/NAME.py=PATH [--src ...] --sdm-pdf P --sdm-txt P --apm PDF TXT [--apm PDF TXT ...] features --out OUT
 
 The command is sdmfeat's own (`features SDM.txt OUT --apm VOL.pdf ...`); nothing is computed here."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import argparse
 import os
 import sys
@@ -27,7 +29,7 @@ def main(argv):
         names += [('apm%d.pdf' % i, pdf), ('apm%d.txt' % i, txt)]; apm += ['--apm', os.path.join(docs, 'apm%d.pdf' % i)]
     for n, p in names: os.symlink(p, os.path.join(docs, n))
     sys.path.insert(0, a.work)
-    from proof import sdmfeat
+    from fnvnx.lift.proof import sdmfeat
     return sdmfeat.main([a.command, os.path.join(docs, 'sdm.txt'), a.out] + apm)
 
 

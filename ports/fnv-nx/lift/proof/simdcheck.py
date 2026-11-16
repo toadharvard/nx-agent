@@ -8,11 +8,13 @@ array, the displacement / immediate field variables free) is compared with simds
     is the proof; sat gives a counter-model (a defect of the Form or of the spec, reported with the shape);
   * results: proved | FAILED | no-row (the spec has no row for the encoding) | no-form (no DSL builder).
 Environment: the spec's Res.env (CR0.EM = CR0.TS = 0, CR4.OSFXSR = 1) is the declared environment; it is L5's x86sys row (journal inbox), named in CERTS.md 'SIMD environment'."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.join(HERE, '..')); sys.path.insert(0, HERE)
 import z3
-from fnvlift import dsl
-from proof import x86sys, bounds, forms, shape, symform, simdspec as S, simdsplit
+from fnvnx.lift.fnvlift import dsl
+from fnvnx.lift.proof import x86sys, bounds, forms, shape, symform, simdspec as S, simdsplit
 REG = ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi']
 
 
@@ -211,7 +213,7 @@ def check(key, rlimit=bounds.Z3_RLIMIT):
 
 def cleared(rep):
     """the encoding needs a feature that CPUREF's cpuid denies (cpufeat.missing non-empty): #UD on the declared CPU"""
-    from proof import cpufeat
+    from fnvnx.lift.proof import cpufeat
     ins = list(shape.decoder().disasm(rep, 0))
     return bool(ins) and bool(cpufeat.missing(ins[0]))
 
@@ -255,7 +257,7 @@ def main(a):
     if '--cache' not in a: raise SystemExit('usage: simdcheck.py SHAPES.tsv --cache VERDICT_STORE [--only S] [--cpufeat TABLE] [--progress]')
     S.F.configure(a[a.index('--cache') + 1])
     if '--cpufeat' in a:
-        from fnvlift import inputs; inputs.configure(cpufeat=a[a.index('--cpufeat') + 1])          # the CPUID feature-bit table: the class order (cleared) reads it
+        from fnvnx.lift.fnvlift import inputs; inputs.configure(cpufeat=a[a.index('--cpufeat') + 1])          # the CPUID feature-bit table: the class order (cleared) reads it
     only = a[a.index('--only') + 1] if '--only' in a else ''
     keys = [l.split()[0] for l in open(a[0]) if l.strip() and not l.startswith('#')]
     cnt = {}

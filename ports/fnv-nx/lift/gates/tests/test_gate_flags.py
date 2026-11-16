@@ -262,7 +262,7 @@ class UndefWhen(unittest.TestCase):
     (AF of shl/shr/sar/shld/shrd: undefined for a non-zero count, unchanged for count 0); an unconditional one stays `f = 0;`"""
     def test_emission(self):
         import capstone
-        from proof import forms
+        from fnvnx.lift.proof import forms
         md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
 
         def lines(hx):

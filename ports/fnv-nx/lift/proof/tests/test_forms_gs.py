@@ -1,4 +1,6 @@
 """an access through GS follows the record's null_seg_access row (x86sys.NULL_SEG): a fault at the instruction while the GS selector is null; lea has no access; the initial gs is read from the record."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 import unittest
@@ -9,8 +11,8 @@ sys.path.insert(0, os.path.join(HERE, '..'))
 sys.path.insert(0, HERE)
 import declared_x86sys
 declared_x86sys.configure()
-from fnvlift import dsl, faults, inputs, x86sys
-from proof import symform
+from fnvnx.lift.fnvlift import dsl, faults, inputs, x86sys
+from fnvnx.lift.proof import symform
 
 
 def form(h): return symform.symbuild(h + '/0.0.0.0').form

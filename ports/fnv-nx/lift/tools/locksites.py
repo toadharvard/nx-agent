@@ -11,6 +11,8 @@ A locked instruction: a valid LOCK prefix (fnvlift/f_sys.py lock_ok) or XCHG wit
   const     the operand is an absolute address (no base, no index): aligned iff address mod size == 0 (const-misaligned otherwise)
   unproven  the address has a register: its alignment is a run-time fact (rt/fnvl.h LKA tests it at every execution)
 Prints one line of counts. Nothing is decided from this count; it states the size of the domain of rule LOCK-SPLIT."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 
@@ -25,7 +27,7 @@ def scan(exe, ranges, base):
     """-> [(address, site)] of every instruction of the ranges, in address order; site is fnvlift.sites.site(ins): (1,) a locked instruction, (2, 'mem'|'ax') a status-word instruction. The address is
     stated at BASE (the ranges' base). One decoder predicate for the lifter and for these facts: fnvlift/sites.py."""
     import x86flow
-    from fnvlift import sites
+    from fnvnx.lift.fnvlift import sites
     img = x86flow.Image(exe, int(base, 16))      # the image at the assigned base, through the one loader
     d = 0
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
@@ -49,7 +51,7 @@ def lines(found):
 
 
 def main(exe, ranges, base):
-    from fnvlift import f_sys
+    from fnvnx.lift.fnvlift import f_sys
     n = {}
     for a, (ins, k) in scan(exe, ranges, base):
         if k[0] == 2:

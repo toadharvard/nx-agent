@@ -168,7 +168,7 @@ def _run():
 
 
 import unittest  # noqa: E402
-from fnvlift import dsl  # noqa: E402
+from fnvnx.lift.fnvlift import dsl  # noqa: E402
 import helpercalls as H  # noqa: E402
 
 

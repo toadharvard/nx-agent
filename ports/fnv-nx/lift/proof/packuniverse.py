@@ -22,7 +22,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'tools'))
-from proof import census, forms, shape  # noqa: E402
+from fnvnx.lift.proof import census, forms, shape  # noqa: E402
 from fnvnx.lift.tools import pemod  # noqa: E402
 
 
@@ -65,7 +65,7 @@ def image_of(a):
 
 def work(chunk):
     md = shape.decoder()
-    from fnvlift import f_sys
+    from fnvnx.lift.fnvlift import f_sys
     shapes, nop, bad = {}, [], []
     for a in chunk:
         i = image_of(a)
