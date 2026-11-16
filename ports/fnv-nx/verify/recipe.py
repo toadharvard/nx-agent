@@ -1223,18 +1223,32 @@ def foreign_search_dirs(dirs, ext_hosts):
     return sorted({t for t in dirs if not under_ext(t) or not under_ext(os.path.realpath(t))})
 
 
+HEADER_OUTPUT = "INCLUDE"   # the one implicit output of a header root: its own directory (a srcdir, keyed by its tree hash)
+
+
+def root_outputs(roots, r, repo):
+    """-> ({NAME: root-relative path}, generated outputs) that admitted root R declares for `uses`: the `outputs` of its recipe, or for a header root (class header,
+    no recipe, no units) the one implicit output INCLUDE = its own directory (".": nothing generated, every tracked file below the root). The ONE accessor of
+    what a `uses` entry names: the check, the include homes, the include_uses rule and the stage input all read it, so a header root is reached one way only.
+    KeyError for a root that is not admitted, OSError/ValueError for an unreadable recipe."""
+    ent = roots[r]
+    if ent.get("class") == "header":
+        return {HEADER_OUTPUT: "."}, set()
+    prod = read_recipe(repo, ent["recipe"])
+    return prod.get("outputs") or {}, generated_outputs(prod)
+
+
 def include_home(d, rec, roots, repo, files):
-    """D (a repo directory) lies in a directory output of tracked files (a `srcdir`) of a root that REC `uses`."""
+    """D (a repo directory) lies in a directory output of tracked files (a `srcdir`) of a root that REC `uses` (a header root's INCLUDE is its own directory)."""
     for u in rec.get("uses") or []:
-        ent = roots.get(u.get("root")) if isinstance(u, dict) else None
-        if not (ent and isinstance(ent.get("recipe"), str)):
+        if not (isinstance(u, dict) and isinstance(roots.get(u.get("root")), dict)):
             continue
         try:
-            prod = read_recipe(repo, ent["recipe"])
-            p = (prod.get("outputs") or {}).get(u["output"])
+            outs, gen = root_outputs(roots, u["root"], repo)
+            p = outs.get(u["output"])
         except (OSError, ValueError, KeyError, AttributeError, TypeError):
             continue
-        if isinstance(p, str) and output_kind(p, u["root"], generated_outputs(prod), files) == "srcdir" and under(d, u["root"] + "/" + p):
+        if isinstance(p, str) and output_kind(p, u["root"], gen, files) == "srcdir" and under(d, u["root"] if p == "." else u["root"] + "/" + p):
             return True
     return False
 
@@ -1245,7 +1259,7 @@ def output_kind(p, root, gen, files):
     files below one directory: red), or None."""
     if p in gen:
         return "file"
-    full = root + "/" + p
+    full = root if p == "." else root + "/" + p
     gdir = dir_output(p, gen)
     tdir = any(under(f, full) for f in files)
     if gdir and tdir:
@@ -1269,11 +1283,11 @@ def include_uses_errors(rec, roots, repo):
             err.append("include_uses: %s/%s is not in `uses`" % (u["root"], u["output"]))
             continue
         try:
-            prod = read_recipe(repo, roots[u["root"]]["recipe"])
-            p = (prod.get("outputs") or {}).get(u["output"])
+            outs, gen = root_outputs(roots, u["root"], repo)
+            p = outs.get(u["output"])
         except (OSError, ValueError, KeyError, AttributeError, TypeError):
             continue    # uses_errors reports an unreadable or undeclared producer
-        if not (isinstance(p, str) and output_kind(p, u["root"], generated_outputs(prod), tracked(repo)) in ("gendir", "srcdir")):
+        if not (isinstance(p, str) and output_kind(p, u["root"], gen, tracked(repo)) in ("gendir", "srcdir")):
             err.append("include_uses: output %r of %s is not a directory output (outputs: {NAME: a directory of generated files, or of tracked files})" % (u["output"], u["root"]))
     return err
 
@@ -1301,11 +1315,11 @@ def uses_errors(rec, root, roots, repo, files=None):
             err.append("uses: %s/%s is listed twice" % (r, n))
         if r == root:
             err.append("uses: %s is the root itself" % r)
-        elif not ent or not ent.get("recipe"):
-            err.append("uses: %s is not an admitted root with a recipe" % r)
+        elif not ent or not (ent.get("recipe") or ent.get("class") == "header"):
+            err.append("uses: %s is not an admitted root with a recipe or a header root" % r)
         else:
             try:
-                decl = read_recipe(repo, ent["recipe"]).get("outputs")
+                decl = root_outputs(roots, r, repo)[0]
             except (OSError, ValueError, AttributeError):
                 err.append("uses: the recipe of %s is unreadable" % r)
                 continue
@@ -1407,8 +1421,8 @@ def header_dirs(rec, root, roots, repo=".", variant=""):
         dirs.update(d for d in inc if isinstance(d, str) and not d.startswith("/"))
     add(rec.get("include") if isinstance(rec.get("include"), list) else [])
     for p, r in roots.items():
-        if r.get("class") == "header":
-            dirs.add(p)   # a header root is a home for every target
+        if r.get("class") == "header" and any(isinstance(u, dict) and u.get("root") == p and u.get("output") == HEADER_OUTPUT for u in rec.get("uses") or []):
+            dirs.add(p)   # a header root is a home only for a recipe that `uses` its INCLUDE
         if r.get("class") == "product" and tg in targets_of(r):
             dirs.add(include_dir(roots, p))
             for path in [r.get("recipe") if r.get("target") == tg else None] + [q for t, q in own_recipes(r).values() if t == tg]:
@@ -2635,6 +2649,11 @@ class Job:
             return self._uses
         out = []
         for u in self.rec.get("uses", []):
+            if self.roots[u["root"]].get("class") == "header":   # a header root has no recipe and no stage: INCLUDE is its tracked files, keyed by their tree hash
+                pws = tempfile.mkdtemp(dir=ws)
+                _copy(self.repo, [f for f in self.files if under(f, u["root"])], u["root"], os.path.join(pws, "root"))
+                out.append({"at": "/uses/%s/%s" % (u["root"], u["output"]), "tree": cas.ingest(os.path.join(pws, "root"), self.store)})
+                continue
             p = Job(self.repo, u["root"], self.store, self.jobs, self.extcache)
             pws = tempfile.mkdtemp(dir=ws)
             rel = (p.rec.get("outputs") or {}).get(u["output"])
