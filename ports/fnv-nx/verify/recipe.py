@@ -23,6 +23,7 @@ Assumptions: the compiler and ld are deterministic given the flags of unitstage/
 import argparse
 import atexit
 import concurrent.futures
+import contextlib
 import errno
 import hashlib
 import importlib.util
@@ -36,6 +37,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import artifacts  # noqa: E402
@@ -1296,16 +1298,33 @@ def depends_on(cand, root, roots, repo, seen=()):
     that reads the objects of a root that uses ROOT depends on it too), transitively. `objects_of` edges are taken whole (every product root they could select,
     no selector exclusion: that is what keeps this function free of recursion), a superset. Read from the recipes at REPO; a root without a readable recipe has
     no edges."""
-    if cand == root:
-        return True
-    if cand in seen:
-        return False
-    ent = roots.get(cand)
-    try:
-        rec = json.load(open(os.path.join(repo, ent["recipe"]))) if ent and ent.get("recipe") else None
-    except (OSError, ValueError):
-        rec = None
-    return any(depends_on(d, root, roots, repo, tuple(seen) + (cand,)) for d in root_edges(rec, cand, roots) if d != cand) if isinstance(rec, dict) else False
+    return cand == root or root in root_reach(cand, roots, repo)
+
+
+REACH_MEMO = {}   # per process: {(repo, tracked-tree signature, root): (the roots dict it was read with, the set of roots it reaches)}
+
+
+def root_reach(cand, roots, repo):
+    """The set of admitted roots that CAND reaches through root_edges, transitively (CAND excluded unless a cycle returns to it), read from the recipes at REPO: one walk with one visited set,
+    memoised per process for (REPO's tracked tree, CAND), so a diamond of roots is read once however many paths lead to it. A root without a readable recipe has no edges."""
+    key = (os.path.realpath(repo), repo_signature(repo), cand)
+    m = REACH_MEMO.get(key)
+    if m is not None and m[0] is roots:
+        return m[1]
+    seen, todo = set(), [cand]
+    while todo:
+        n = todo.pop()
+        ent = roots.get(n)
+        try:
+            rec = json.load(open(os.path.join(repo, ent["recipe"]))) if ent and ent.get("recipe") else None
+        except (OSError, ValueError):
+            rec = None
+        for d in (root_edges(rec, n, roots) if isinstance(rec, dict) else []):
+            if d != n and d not in seen:
+                seen.add(d)
+                todo.append(d)
+    REACH_MEMO[key] = (roots, seen)
+    return seen
 
 
 def objects_of_roots(rec, root, roots, repo=None):
@@ -2156,6 +2175,24 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     return err
 
 
+def lifted_stage(origin, root, steps):
+    """-> ([problems], [the one generated step]) of a cxx_origin {lifted_by: TOOL, stage: gen:ROOT:I}: STEPS (the recipe's `generated`) must hold step I and its tool must be lifted_by. The one
+    rule: `check` calls it, and so does every resolution of ROOT (`resolved`), so a stage that the recipe does not contain is red whichever way the root is reached."""
+    stage, tool = origin.get("stage"), origin.get("lifted_by")
+    m = re.fullmatch(re.escape("gen:%s:" % root) + r"(0|[1-9][0-9]*)", stage) if isinstance(stage, str) else None
+    if not (m and int(m.group(1)) < len(steps) and isinstance(steps[int(m.group(1))], dict) and steps[int(m.group(1))].get("tool") == tool):
+        return ["cxx_origin.stage %r is not a generated step gen:%s:I of this recipe whose tool is lifted_by" % (stage, root)], []
+    return [], [steps[int(m.group(1))]]
+
+
+def origin_stage_errors(rec, root, roots):
+    """The problems of the root's admit.json cxx_origin stage (lifted_stage) against its recipe REC; none for a root whose origin names no stage."""
+    origin = (roots.get(root) or {}).get("cxx_origin")
+    if not (isinstance(origin, dict) and "stage" in origin and "lifted_by" in origin):
+        return []
+    return lifted_stage(origin, root, rec.get("generated", []) if isinstance(rec.get("generated"), list) else [])[0]
+
+
 def plugin_errors(rec, root, files, roots, units, ext_names, variant="", repo="."):
     """Problems of the plugin declaration of recipe REC of ROOT, and the gate rule: a product root with native or decomp C++ loads both
     plugins of PLUGIN_SOURCES with their fixed arguments; a root whose C++ is all lifted needs none. What is lifted is declared in the
@@ -2231,12 +2268,8 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant="", repo=".
         if "pack" in origin and pack not in ext_names and not (pack in uses_roots and pack in roots):
             err.append("cxx_origin.pack %r names neither an external of the recipe nor an admitted root in its `uses`" % (pack,))
         if "stage" in origin:
-            m = re.fullmatch(re.escape("gen:%s:" % root) + r"(0|[1-9][0-9]*)", stage) if isinstance(stage, str) else None
-            if not (m and int(m.group(1)) < len(steps) and isinstance(steps[int(m.group(1))], dict) and steps[int(m.group(1))].get("tool") == tool):
-                err.append("cxx_origin.stage %r is not a generated step gen:%s:I of this recipe whose tool is lifted_by" % (stage, root))
-                steps = []
-            else:
-                steps = [steps[int(m.group(1))]]
+            serr, steps = lifted_stage(origin, root, steps)
+            err += serr
         else:
             steps = [g for g in steps if isinstance(g, dict) and g.get("tool") == tool]
         made = {o for g in steps if isinstance(g.get("outputs"), list) for o in g["outputs"] if isinstance(o, str)}
@@ -2686,6 +2719,60 @@ def python_mounts(layout_ins, links, own_ins, scratch, rt_inputs):
     return keep_ins + list(own_ins) + list(rt_inputs), keep_links, errs
 
 
+RESOLVE_MEMO = {}   # per process: {(store, repo, repo signature, extcache, kind, root, output): ("ok", value) | ("red", failure dict)}: what a root resolves to for its consumers
+_RESOLVING = threading.local()   # the roots whose resolution is in progress in this thread, in order of entry
+
+
+class entered:
+    """`with entered(repo, root):` marks ROOT as being resolved. Entering a root that is already being resolved is a cycle: BuildRed "cycle: A -> B -> ... -> A", never a recomputation."""
+
+    def __init__(self, repo, root):
+        self.key, self.root = (os.path.realpath(repo), root), root
+
+    def __enter__(self):
+        st = getattr(_RESOLVING, "stack", None)
+        if st is None:
+            st = _RESOLVING.stack = []
+        if self.key in st:
+            path = [r for _, r in st[st.index(self.key):]] + [self.root]
+            raise BuildRed({"stage": "cycle:%s" % self.root, "exit": None, "stderr": ["cycle: " + " -> ".join(path)]})
+        st.append(self.key)
+
+    def __exit__(self, *exc):
+        _RESOLVING.stack.pop()
+
+
+def resolved(job, kind, root, output, make, valid=None, enter=True):
+    """The one resolution of a root's output for a consumer (uses, stage external, pp input, objects_of): MAKE() runs once per process for (store, repo, signature, extcache, kind, ROOT,
+    OUTPUT), a diamond resolves the shared root once, and a failure is remembered the same way (a red root is red for every consumer without being built again). ROOT is `entered`
+    while MAKE runs, so a root reached again from its own resolution is a cycle. ENTER=False when MAKE enters ROOT itself (build). VALID(value) tells a remembered value that points at files gone from disk to be made again. The root's own
+    admit.json origin stage is judged first (origin_stage_errors, the rule `check` uses). A memoised value is shared: callers copy what they mutate."""
+    key = (os.path.realpath(job.store), os.path.realpath(job.repo), job.signature(), os.path.realpath(job.extcache) if job.extcache else "", kind, root, output)
+    m = RESOLVE_MEMO.get(key)
+    if m is not None and (m[0] != "ok" or valid is None or valid(m[1])):
+        return _resolution(m)
+    with (entered(job.repo, root) if enter else contextlib.nullcontext()):
+        try:
+            bad = origin_stage_errors(load_recipe(job.repo, job.roots, root), root, job.roots) if root in job.roots and job.roots[root].get("recipe") else []
+            if bad:
+                raise BuildRed({"stage": "origin:" + root, "exit": None, "stderr": bad})
+            m = ("ok", make())
+        except BuildRed as r:
+            m = ("red", dict(r.args[0]))
+        except RecipeError as x:   # an invalid recipe is invalid for every consumer of the root
+            m = ("err", x)
+    RESOLVE_MEMO[key] = m
+    return _resolution(m)
+
+
+def _resolution(m):
+    if m[0] == "red":
+        raise BuildRed(dict(m[1]))
+    if m[0] == "err":
+        raise m[1]
+    return m[1]
+
+
 class Job:
     stats = {"run_one": 0, "artifact_builds": 0}   # evaluations of `run` steps and builds of artifact roots in this process: what the regression tests count (never a stub of run_one)
 
@@ -2702,6 +2789,12 @@ class Job:
         self.dukeys = {}   # {unit: key of its macro-fact stage (-dU, unitstage.DU_TAIL)}
         self.red, self.blocked, self.failed = [], {}, []   # KEEP GOING: red stages (failure dicts) and {unit: stage it is blocked by}; nothing is masked (see build)
         os.makedirs(os.path.join(store, "rt"), exist_ok=True)
+
+    def signature(self):
+        """repo_signature of this Job's checkout, read once per Job (the tracked tree does not change while a Job resolves)."""
+        if getattr(self, "_sig", None) is None:
+            self._sig = repo_signature(self.repo)
+        return self._sig
 
     def stage(self, doc):
         if self.variant:     # the variant name is in every stage key (the implicit variant adds nothing: its keys are those of a root without variants)
@@ -2761,6 +2854,9 @@ class Job:
         errs = pp_errors(where, ref, self.root, self.rec, self.roots, self.files, self.repo)
         if errs:
             raise BuildRed({"stage": "pp:%s" % ref.get("pp", "?"), "exit": None, "stderr": errs})
+        return resolved(self, "pp", ref["pp"], ref["unit"], lambda: self.pp_make(ws, ref))
+
+    def pp_make(self, ws, ref):
         p = Job(self.repo, ref["pp"], self.store, self.jobs, self.extcache)
         pws = tempfile.mkdtemp(dir=ws)
         _copy(self.repo, [f for f in p.files if under(f, ref["pp"])], ref["pp"], os.path.join(pws, "root"))
@@ -2790,6 +2886,10 @@ class Job:
             raise BuildRed({"stage": "external_of:%s" % ref["external_of"], "exit": None, "stderr": [str(x)]})
 
     def stage_external(self, ws, e):
+        """The external E as the output of its producer root (_stage_external), once per process (`resolved`); the caller gets its own copy of the record."""
+        return dict(resolved(self, "external", e["root"], "%s|%s|%s" % (e["output"], e["name"], e["at"]), lambda: self._stage_external(ws, e)))
+
+    def _stage_external(self, ws, e):
         """The output E["output"] of root E["root"], built by that root's generated and run stages (cached by key: a hit costs the lookups, a plugin
         change re-runs the plugin stage only, an input of an earlier stage re-runs everything after it), ingested, and materialised once at
         EXTCACHE/stage-<tree> for the mount. -> {host, tree, at, stage_key}; stage_key = sha256 of the producer's sorted stage keys: the key of
@@ -2979,25 +3079,28 @@ class Job:
                 _copy(self.repo, [f for f in self.files if under(f, u["root"])], u["root"], os.path.join(pws, "root"))
                 out.append({"at": "/uses/%s/%s" % (u["root"], u["output"]), "tree": cas.ingest(os.path.join(pws, "root"), self.store)})
                 continue
-            p = Job(self.repo, u["root"], self.store, self.jobs, self.extcache)
-            pws = tempfile.mkdtemp(dir=ws)
-            rel = (p.rec.get("outputs") or {}).get(u["output"])
-            if isinstance(rel, str) and output_kind(rel, u["root"], generated_outputs(p.rec), p.files) == "srcdir":
-                # a directory of tracked files: its content is the output, no stage of the producer runs (a header-only root has nothing to build)
-                _copy(self.repo, [f for f in p.files if under(f, u["root"] + "/" + rel)], u["root"], os.path.join(pws, "root"))
-                out.append({"at": "/uses/%s/%s" % (u["root"], u["output"]), "tree": cas.ingest(os.path.join(pws, "root", rel), self.store)})
-                continue
-            try:
-                p.externals(pws)
-                p.generate(pws)
-                if p.red:   # the output this root uses is not produced
-                    raise BuildRed({"stage": "uses:" + u["root"], "exit": None, "stderr": ["producer %s is red: %s" % (u["root"], p.red[0]["stage"])] + list(p.red[0]["stderr"])[-18:]})
-                path = os.path.join(pws, "root", p.rec["outputs"][u["output"]])
-                out.append({"at": "/uses/%s/%s" % (u["root"], u["output"]), "tree": cas.ingest(path, self.store)})
-            finally:
-                self.run, self.hit = self.run + p.run, self.hit + p.hit
+            out.append({"at": "/uses/%s/%s" % (u["root"], u["output"]), "tree": resolved(self, "uses", u["root"], u["output"], lambda u=u: self.use_tree(ws, u))})
         self._uses = sorted(out, key=lambda i: i["at"])
         return self._uses
+
+    def use_tree(self, ws, u):
+        """-> the CAS tree of the output U["output"] of root U["root"] (this root `uses` it): a directory of tracked files as it is, else what the producer's generate stages write, once per process
+        (`resolved`)."""
+        p = Job(self.repo, u["root"], self.store, self.jobs, self.extcache)
+        pws = tempfile.mkdtemp(dir=ws)
+        rel = (p.rec.get("outputs") or {}).get(u["output"])
+        if isinstance(rel, str) and output_kind(rel, u["root"], generated_outputs(p.rec), p.files) == "srcdir":
+            # a directory of tracked files: its content is the output, no stage of the producer runs (a header-only root has nothing to build)
+            _copy(self.repo, [f for f in p.files if under(f, u["root"] + "/" + rel)], u["root"], os.path.join(pws, "root"))
+            return cas.ingest(os.path.join(pws, "root", rel), self.store)
+        try:
+            p.externals(pws)
+            p.generate(pws)
+            if p.red:   # the output this root uses is not produced
+                raise BuildRed({"stage": "uses:" + u["root"], "exit": None, "stderr": ["producer %s is red: %s" % (u["root"], p.red[0]["stage"])] + list(p.red[0]["stderr"])[-18:]})
+            return cas.ingest(os.path.join(pws, "root", p.rec["outputs"][u["output"]]), self.store)
+        finally:
+            self.run, self.hit = self.run + p.run, self.hit + p.hit
 
     def objects_input(self, ws, tmp, g):
         """The tree mounted at /objs of a generate stage with `objects_of`: the objects of every admitted product root (implicit variant) the rule
@@ -3007,7 +3110,8 @@ class Job:
         os.makedirs(out, exist_ok=True)
         for d in objects_of_roots({"generated": [g]}, self.root, self.roots, self.repo):
             try:
-                r = build(self.repo, d, self.store, os.path.join(ws, "objs-" + d.replace("/", "__")), self.jobs, self.extcache)
+                r = resolved(self, "objects", d, "", lambda d=d: build(self.repo, d, self.store, os.path.join(ws, "objs-" + d.replace("/", "__")), self.jobs, self.extcache),
+                             valid=lambda r: all(os.path.exists(o["object"]) for o in r["objects"]), enter=False)   # build() enters the root itself
             except RecipeError as x:
                 raise BuildRed({"stage": "objects_of:" + self.root, "exit": None, "stderr": ["root %s: invalid recipe: %s" % (d, x)][:20]})
             self.keys |= set(r["stage_keys"])
@@ -3142,7 +3246,8 @@ class Job:
             aroot, aout = g["artifact"].split(":", 1)
             if aroot not in self.arts:
                 Job.stats["artifact_builds"] += 1
-                self.arts[aroot] = build(self.repo, aroot, self.store, tempfile.mkdtemp(dir=ws), self.jobs, self.extcache)
+                self.arts[aroot] = resolved(self, "artifact", aroot, "", lambda: build(self.repo, aroot, self.store, tempfile.mkdtemp(dir=ws), self.jobs, self.extcache),
+                                            valid=lambda r: not r.get("elf") or os.path.exists(r["elf"]["path"]), enter=False)   # build() enters the root itself
             r = self.arts[aroot]
             if r["status"] != "green" or not r["elf"] or os.path.basename(r["elf"]["path"]) != aout:
                 raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["artifact %s is not produced (root status %s)" % (g["artifact"], r["status"])] + ([] if not r.get("failure") else ["its failure: stage %s: %s" % (r["failure"]["stage"], " | ".join(r["failure"].get("stderr") or [])[:600])])})
@@ -4580,6 +4685,12 @@ def host_compilers(rec, cache):
 
 
 def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=None):
+    """The build of ROOT (_build), with ROOT marked as being resolved: a root that its own stages reach again (objects_of, uses) is a cycle (`entered`), never built twice over."""
+    with entered(repo, root):
+        return _build(repo, root, store, out, jobs, ext, aux, link, shard)
+
+
+def _build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=None):
     """Build product ROOT of the checkout REPO into STORE; write OUT/objects.json and the files it names. EXT: bare cache dir of
     externals (default: the sibling of STORE, ext_of_store). SHARD: (i, N), build only the units of shard i (shard_of); root-level stages (tests, link, tables) do not run
     in a shard build, its objects.json says `shard`. -> the objects dict; raises RecipeError for an invalid recipe."""
