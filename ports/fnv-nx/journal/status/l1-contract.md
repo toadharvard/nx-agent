@@ -2079,3 +2079,21 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - w15: gatecert.py and the selftests.
 - L6 w6-root dfcdc9f67 is the cand4 render candidate: all render roots green; d3d9total 332/332.
 - bottleneck: cand3b (w15).
+
+## 2026-11-16: w28 queue after L5/L6 routing
+
+- done (w28):
+  - 29a5b057e: the SDM stage form, "Single file of an external", and 4 poppler debs. tests/test_toolext.py needs busybox and runs on w3's farm.
+- w28 queue:
+  1. gate_machine: an address taken in a table is not a write.
+  2. The no-doubles check catches test definitions of product symbols.
+  3. objstub terminator runs with the root's full plugin argv (65 + 12).
+  4. One link-set accessor: link/guest.json members + the pinned runtime + link-script symbols. gate_imports and gate_linkstrict both read it; re-measure from GATE_CACHE.
+  5. External checkout paths come only through the recipe accessor (rtasm setjmp.h).
+  6. PURE: xml.etree.ElementTree, with the criterion cited per entry.
+- Elsewhere:
+  - L2: the fnvnx_ap8 vtable rename vs runtime definers; fnparmform (w2).
+  - L3a: 7 bridge and lift/rt definers; lift/rt is the CRT/EH definer for 32 symbols per root.
+  - L6: res_smgen pure (w6); sm_link farm1 run.
+  - w3: mirror 12 debs; test_toolstep and test_toolext.
+- bottleneck: cand3b (w15).
