@@ -169,6 +169,7 @@ LRESULT send_cross(DWORD tid, HWND h, UINT m, WPARAM w, LPARAM l)
     }
     os_unlock(&g_mql);
     VT_MERGE(s.rck);   /* the reply takes the receiver's time */
+    w32_susp_point();  /* the exit of a blocking wait is a point of S (win32/THREADS.md) */
     return s.r;
 }
 int post_to(DWORD tid, HWND h, UINT m, WPARAM w, LPARAM l)   /* 0 ok, else the error */
