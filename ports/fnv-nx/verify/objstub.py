@@ -203,6 +203,9 @@ import sys
 import tempfile
 
 HERE, NOP = os.path.dirname(os.path.abspath(__file__)), 0xD503201F
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+import hostprofile  # noqa: E402
 A64_BUILD = "g++ -std=c++17 -O1 $(llvm-config-18 --cxxflags) a64access.cc -o OUT $(llvm-config-18 --ldflags --libs aarch64 mc mcdisassembler support)"
 _TOOL = []
 
@@ -2249,7 +2252,7 @@ def plugin_hash(so):
     return hashlib.sha256(open(so, "rb").read()).hexdigest()
 
 
-SYSTEM_SJ = ("/usr/include", "/usr/aarch64-linux-gnu/include")   # the pinned distribution's libc headers (env.json: libc6-dev, libc6-dev-arm64-cross)
+SYSTEM_SJ = tuple(hostprofile.HOST["sysinclude"])   # the pinned distribution's libc headers (env.json host record: libc6-dev, libc6-dev-arm64-cross)
 
 
 def unit_terminators(cc, units, flags, cache, jobs, rets=None, sjdirs=SYSTEM_SJ, so=None, root_plugins=None):

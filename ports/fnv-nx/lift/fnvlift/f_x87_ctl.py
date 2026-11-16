@@ -1,7 +1,7 @@
 """x87, part 2: the stack-depth pre-pass, the per-site stack sync of the static path, and the control/status instructions.
 
 Two stack models (R8). STATIC: the pre-pass proves a depth 0..8 at every instruction (entry 0; a call changes it by the callee's net return depth from
-/home/user/l3facts/fpmodes/depth.tsv, tools/fpmodes.py: columns addr, status, max, min, ret=, conf=, ind=; override with FNVNX_FPDEPTH); each stack slot is a
+the table of tools/fpmodes.py: columns addr, status, max, min, ret=, conf=, ind=; path in FNVNX_FPDEPTH, required); each stack slot is a
 C local s<j> (j = 0 is the bottom of the function's own stack, so st(i) at depth d is s<d-1-i>; GCC keeps them in registers); c->fx[] / c->ftop are touched
 only at calls, tail jumps, returns and non-local exits (store the live slots) and after a call or at a non-local re-entry (reload). ft0 is the physical
 register that the function's bottom slot sits above: slot j lives in c->fx[(ft0-1-j)&7], TOP = (ft0-depth)&7. DYNAMIC: everything goes through c->fx / c->ftop
@@ -13,7 +13,6 @@ from capstone import x86 as X
 from .core import X87Dyn, Unsupported
 
 TAB = None
-DEFAULT = '/home/user/l3facts/fpmodes/depth.tsv'
 
 
 def table():
@@ -21,8 +20,11 @@ def table():
     global TAB
     if TAB is None:
         TAB = {}
+        path = os.environ.get('FNVNX_FPDEPTH')
+        if not path:
+            raise RuntimeError('FNVNX_FPDEPTH (the fpmodes depth table) is an input of the lift: pass it')
         try:
-            for l in open(os.environ.get('FNVNX_FPDEPTH', DEFAULT)):
+            for l in open(path):
                 f = l.rstrip('\n').split('\t')
                 kv = dict(x.split('=') for x in f[2:] if '=' in x)
                 TAB[int(f[0], 16)] = (f[1], int(kv['ret']))

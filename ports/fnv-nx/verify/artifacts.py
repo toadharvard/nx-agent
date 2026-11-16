@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/verify/env.json
 """artifacts - the one source of the artifacts repository URL (L1; stdlib only, so the farm's setup scripts can run it before anything is installed).
     artifacts.py url [--ext DIR] [--env F]     prints the URL: the record DIR/artifacts.url when DIR has one, else the repository pinned by env.json (debs.mirror.repo)
 A run's caller records its URL beside the external cache (l1.py --artifacts, recipe.py --artifacts: `record`); nothing reads the process environment."""

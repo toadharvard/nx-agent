@@ -117,7 +117,7 @@ def elf(path):
     col = lambda tg: [x for t, v in tags if t == tg for x in s(v).split(":") if x]  # noqa: E731
     return interp, [s(v) for t, v in tags if t == 1], col(15), col(29)
 
-def conf_dirs(path="/etc/ld.so.conf"):
+def conf_dirs(path=hostprofile.HOST["ld_so_conf"]):
     out = []
     for line in open(path):
         line = line.split("#")[0].strip()

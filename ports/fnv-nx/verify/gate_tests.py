@@ -167,6 +167,39 @@ def reads_of(path):
     return sorted({x for m in READS.findall(text) for x in m.replace(",", " ").split()})
 
 def mount_files(path):
+    """{repo-relative path: absolute path} of the MOUNT of an untraced test file: its import closure (closure_of) and every file under its declared `# reads:` roots (those of the test file and of every module of its closure, one rule: a file a module reads is part of its closure as an import is), without
+    __pycache__ and .git. An untraced test runs on this and nothing else of the checkout (mount_run): a read outside it fails, so a missing declaration is a red test."""
+    root = os.path.realpath(os.getcwd())
+    out = {}
+    for f in closure_of(path)[1]:
+        try:
+            text = open(f).read()
+        except OSError:
+            continue
+        out |= set(TEST_ROOT.findall(text))
+        for m in ROOT_LIT.findall(text):
+            for q in (m, os.path.dirname(m)):   # `<root>/build.json`, `<root>/inc`: the root is the nearest ancestor with a recipe
+                if is_recipe(os.path.join(root, q, "build.json")):
+                    out.add(q)
+                    break
+    return sorted(out)
+
+def cut_of(path, admitted):
+    """The roots of a test file that are not admitted (verify/admit.json): when there is one, the test belongs to the CUT of this branch (its root is not part of it), reported as
+    `cut:test:<file> (root <r>)` and never run: a test is certified against the roots it builds, and a root that is not admitted is not built."""
+    return [r for r in roots_of(path) if r not in admitted]
+
+READS = re.compile(r"^#[ \t]*reads:[ \t]*(.*)$", re.M)
+
+def reads_of(path):
+    """The data roots a test file declares (`# reads: <path> <path>...` lines of its text): repo-relative files or directories its run reads besides its import closure."""
+    try:
+        text = open(path).read()
+    except OSError:
+        return []
+    return sorted({x for m in READS.findall(text) for x in m.replace(",", " ").split()})
+
+def mount_files(path):
     """{repo-relative path: absolute path} of the MOUNT of an untraced test file: its import closure (closure_of), the declared environment verify/env.json (an input of every key) and every file under its declared `# reads:` roots, without
     __pycache__ and .git. An untraced test runs on this and nothing else of the checkout (mount_run): a read outside it fails, so a missing declaration is a red test."""
     root = os.path.realpath(os.getcwd())
@@ -178,7 +211,8 @@ def mount_files(path):
         a = os.path.realpath(f)
         if a.startswith(root + os.sep):
             out[a[len(root) + 1:]] = a
-    for r in reads_of(path):
+    mods = [f for f in closure_of(path)[1]]
+    for r in sorted({x for p in [path] + mods for x in reads_of(p)}):
         base = os.path.join(root, r)
         if os.path.isfile(base):
             out[r] = base

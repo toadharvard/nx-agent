@@ -1,4 +1,4 @@
-"""The entry universe (tools/universe.py output, FNVNX_UNIVERSE, default /home/user/l3facts/universe.tsv): entry -> (kind, extent, parent).
+"""The entry universe (tools/universe.py output, FNVNX_UNIVERSE, no default): entry -> (kind, extent, parent).
 lift() consults it for the defaults: an entry with a parent is lifted from its label inside the parent's range, a function gets all its own labels."""
 import collections, os
 
@@ -6,7 +6,9 @@ _U = {}
 
 
 def load(path=None):
-    path = path or os.environ.get('FNVNX_UNIVERSE', '/home/user/l3facts/universe.tsv')
+    path = path or os.environ.get('FNVNX_UNIVERSE')
+    if not path:
+        raise RuntimeError('FNVNX_UNIVERSE (the entry universe, tools/universe.py output) is an input of the lift: pass it')
     if path not in _U:
         ent, kids = {}, collections.defaultdict(list)
         if os.path.exists(path):

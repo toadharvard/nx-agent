@@ -2,7 +2,7 @@
 fact file of the module being lifted, never assumed (ASM-204).
 
     <facts>/fpstate/invariants.tsv     lines `ASM-204 <holds|unproven> <per-module detail>` (written by `fpstate.py combine`: the PROGRAM invariant = AND over all modules)
-    <facts> = $FNVNX_FPSTATE_DIR, else $FNVNX_FACTS/fpstate, else /home/user/l3facts/fpstate
+    <facts> = $FNVNX_FPSTATE_DIR, else $FNVNX_FACTS/fpstate (an input: no default)
 
 ASM-204    no x87 or SSE exception is ever unmasked at any instruction of any module: every load of the x87 control word / MXCSR (fldcw, ldmxcsr, fninit, frstor, fldenv, fxrstor, the _controlfp family)
             is a constant or a transform that cannot clear a mask bit, starting from FCW 0x027F / MXCSR 0x1F80 (thread start, rt/enter.cc). Consequence: `fwait` never raises #MF, and x87/SSE arithmetic
@@ -24,7 +24,10 @@ _CACHE = {}
 def _path():
     d = os.environ.get('FNVNX_FPSTATE_DIR')
     if d is None:
-        d = os.path.join(os.environ.get('FNVNX_FACTS', '/home/user/l3facts'), 'fpstate')
+        facts = os.environ.get('FNVNX_FACTS')
+        if not facts:
+            raise RuntimeError('FNVNX_FPSTATE_DIR or FNVNX_FACTS (the facts directory) is an input of the lift: pass it')
+        d = os.path.join(facts, 'fpstate')
     return os.path.join(d, 'invariants.tsv')
 
 
