@@ -20,6 +20,7 @@
  * until its last callback ran, so FlsAlloc cannot hand it out and a thread ending meanwhile still finds its callback. */
 #include "w32.h"
 #include "fnvnx_guestfn.h"
+#include "../include/fnvnx_fls.h"
 
 #include <stdlib.h>
 

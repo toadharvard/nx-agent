@@ -28,15 +28,9 @@ void fnvnx_plat_open_failed(const char *win, const char *host, unsigned err, uns
 
 #include "../os/os.h"
 
-unsigned long fnvnx_path_map(const char *win, char *host, size_t n); /* win32/path.cpp */
 
-/* kernel32 (platform/win32), the objects a descriptor holds: HANDLE = void * (ILP32) */
-typedef void *HANDLE;
-int ReadFile(HANDLE h, void *buf, unsigned n, unsigned *got, void *overlapped);
-int WriteFile(HANDLE h, const void *buf, unsigned n, unsigned *put, void *overlapped);
-int SetFilePointerEx(HANDLE h, long long dist, long long *newpos, unsigned method);
-unsigned GetFileType(HANDLE h);
-unsigned GetLastError(void);
+/* kernel32 (platform/win32), the objects a descriptor holds: HANDLE = void * (ILP32); one declaration, the platform header */
+#include "../include/fnvnx_win32_ext.h"
 #define MSVCRT_NO_CONSOLE_FD (-2)
 #define MSVCRT_NO_CONSOLE ((HANDLE)MSVCRT_NO_CONSOLE_FD)
 #define INVALID_HANDLE ((HANDLE)(intptr_t)-1)
@@ -205,7 +199,7 @@ int fnvnx_open_osfhandle(intptr_t handle, int oflags)
 {
     if (!(oflags & (MSVCRT_O_BINARY | MSVCRT_O_TEXT)))
         oflags |= MSVCRT_O_BINARY;
-    unsigned type = GetFileType((HANDLE)handle);
+    DWORD type = GetFileType((HANDLE)handle);
     if (type == FILE_TYPE_UNKNOWN && GetLastError() != 0)
         return fail(win_errno(GetLastError()));
     unsigned flags = type == FILE_TYPE_CHAR ? WX_TTY : 0;
@@ -221,13 +215,14 @@ static int64_t raw_write(struct fnvnx_ioinfo *d, const void *p, size_t n)
 {
     HANDLE h = fd_handle(d);
     if (d->wxflag & WX_APPEND) {
-        long long np;
-        SetFilePointerEx(h, 0, &np, 2 /* FILE_END */);
+        LARGE_INTEGER zero, np;
+        zero.QuadPart = 0;
+        SetFilePointerEx(h, zero, &np, FILE_END);
     }
     size_t done = 0;
     while (done < n) {
-        unsigned w = 0;
-        if (!WriteFile(h, (const char *)p + done, (unsigned)(n - done), &w, NULL))
+        DWORD w = 0;
+        if (!WriteFile(h, (const char *)p + done, (DWORD)(n - done), &w, NULL))
             return -(int64_t)GetLastError();
         if (!w)
             return -(int64_t)112; /* ERROR_DISK_FULL */
@@ -290,13 +285,15 @@ long long fnvnx_lseeki64(int fd, long long off, int whence)
     if (whence < 0 || whence > 2)
         return fail(EINVAL);
     os_lock(fd_lock(d));
-    long long pos = 0;
-    int ok = SetFilePointerEx(fd_handle(d), off, &pos, (unsigned)whence);   /* FILE_BEGIN / CURRENT / END are 0 / 1 / 2 */
+    LARGE_INTEGER dist, pos;
+    dist.QuadPart = off;
+    pos.QuadPart = 0;
+    int ok = SetFilePointerEx(fd_handle(d), dist, &pos, (DWORD)whence);   /* FILE_BEGIN / CURRENT / END are 0 / 1 / 2 */
     unsigned err = ok ? 0 : GetLastError();
     if (ok)
         d->wxflag &= (uint8_t)~WX_ATEOF;
     os_unlock(fd_lock(d));
-    return ok ? pos : fail(win_errno(err));
+    return ok ? pos.QuadPart : fail(win_errno(err));
 }
 
 /* ---- streams */
@@ -385,7 +382,11 @@ static int wflush(struct _iobuf *f, struct sext *x)
 static void rdrop(struct sext *x, struct fnvnx_ioinfo *d)
 {
     if (x->rlen > x->rpos && d && !(d->wxflag & WX_TTY))
-        SetFilePointerEx(fd_handle(d), -(long long)(x->rlen - x->rpos), NULL, 1 /* FILE_CURRENT */);
+    {
+            LARGE_INTEGER back;
+            back.QuadPart = -(long long)(x->rlen - x->rpos);
+            SetFilePointerEx(fd_handle(d), back, NULL, FILE_CURRENT);
+        }
     x->rpos = x->rlen = 0;
     x->nungot = 0;
 }
@@ -430,7 +431,7 @@ static int rfill(struct _iobuf *f, struct sext *x, struct fnvnx_ioinfo *d)
         errno = ENOMEM;
         return -1;
     }
-    unsigned got = 0;
+    DWORD got = 0;
     int ok = ReadFile(fd_handle(d), x->rbuf, BUFSZ, &got, NULL);
     unsigned err = ok ? 0 : GetLastError();
     x->rpos = 0;
@@ -498,8 +499,8 @@ static size_t sread(struct _iobuf *f, struct sext *x, struct fnvnx_ioinfo *d, un
                 continue;
             }
             if (n - o >= BUFSZ && !(d->wxflag & WX_TTY)) { /* large binary read: straight from the file */
-                unsigned got = 0;
-                int ok = ReadFile(fd_handle(d), out + o, (unsigned)(n - o), &got, NULL);
+                DWORD got = 0;
+                int ok = ReadFile(fd_handle(d), out + o, (DWORD)(n - o), &got, NULL);
                 unsigned err = ok ? 0 : GetLastError();
                 int64_t r = ok ? (int64_t)got : (err == 109 ? 0 : -1);
                 if (r < 0) {

@@ -13,6 +13,7 @@
  * mixer lock > wlock > g_qlock). A block's length must be whole frames (else MMSYSERR_INVALPARAM). CALLBACK_THREAD
  * posts a thread message to the thread whose id the caller gave (dwCallback), as the documented contract. */
 #include "../win32/w32.h"
+#include "../include/fnvnx_waveout.h"
 #include <dsound.h>
 #include "backend.h"
 #include "mixer.h"
