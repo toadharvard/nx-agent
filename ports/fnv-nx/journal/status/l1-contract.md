@@ -2739,3 +2739,11 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - The dnfile pin (env.json and the mirror) is assigned to w28-c5; the commit goes to L1 and L5.
 - cand4 verdict restarted on the farm at 07:25Z, after a container restart killed the first run.
 - bottleneck: the cand4 verdict (running); L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
+
+### 2026-11-16: orchestrator correction (integ 69656d214): no PDF reader
+- The pdfplumber pin and its closure are removed from w28-c5. pycparser 3.12 stays as its own pin, for L3b's ctrans, and the dnfile pin goes ahead.
+- L3b takes instruction features from pinned XED (a host recipe stage).
+- The python_mounts fix and test_runpython stay, as confirmed by the orchestrator.
+- cand5 takes integ CLAUDE.md 69656d214 whole.
+- The farm's w28-c5 job waits for w28's new head.
+- bottleneck: the cand4 verdict (running since 07:25Z); L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
