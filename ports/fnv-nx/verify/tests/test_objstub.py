@@ -861,6 +861,10 @@ ISL = '.text\n.globl isl\n.type isl,%function\nisl:\n mov w0, #1\n ret\n .word 0
 rj = TR.make_guest_repo("os-image-island", files={"toy/constants.tsv": CONST + "e.c\t__errno\taddr\te\tref e\n", "toy/c.c": USE.replace("sched_getcpu()", "0"), "toy/e.c": ERR, "toy/isl.S": ISL}, image="f_a")
 rc, g, _, txt, st = gate(rj, ROOT + "/gi4", GC)
 check("an image body with a data island is red unjudged", rc == 2 and "unjudged" in g["detail"] and g["image"]["unjudged"] >= 1, (g, txt))
+# the order plugin makes every x86-ordered access an acquire/release word: STLR/LDAR are the plain store/load for these rules; exclusives and CAS are not
+check("plain_ordered: STLR w1,[x0] and LDAR w0,[x0] are plain ordered accesses; STLXR, LDAXR and CAS are not",
+      objstub.plain_ordered(0x889FFC01) and objstub.plain_ordered(0x88DFFC00) and not objstub.plain_ordered(0x8802FC01) and not objstub.plain_ordered(0x885FFC00)
+      and not objstub.plain_ordered(0x88A07C41) and objstub.is_const_store(0x889FFC01) and not objstub.is_const_store(0x88DFFC00) and objstub.is_load(0x88DFFC00))
 
 # a host root: the terminator plugin is built against the plugin headers of the root's own (x86-64 distro) compiler, and sees its noreturn declarations
 xt = tf + ".x86"
