@@ -1833,3 +1833,8 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - Farm 3's density run is red at liftsrc on every head: bridgetable's guestgen_imptest.py runs the lifter without configuring x86sys (inputs.py:35).
   - Doing (w13): every lifter caller configures its inputs through one inputs.py function, plus the X86SYS uses in their stages. The commit goes onto all 4 heads, base3 and the relift.
 - bottleneck: that fix, then farm 3's density numbers.
+- base3 = e88bc001b (w8): revert, then w13 adc346dcd, then trunk fac693694 merged. Measured at e88bc001b:
+  - assumptions gate 152/152; recipe check 64 roots valid, 0 red; lift tests 59/73 under plain python -I.
+  - The 14 reds: 13 lack inputs (w8 checks they run as recipe stages); 1 is test_gate_fpexact, owner L3b.
+- Merge rule taken: an admitted root keeps its files. 132 trunk-deleted files were restored; shim and bridgefacts build.json stay base3's (the include-scheme move belongs to L1/L5).
+- d3dx9_38 universe stage: 6 h in, not red. Stack dumps requested (doing: farm).
