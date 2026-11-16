@@ -39,9 +39,9 @@
     "--tree",
     "12=render/shaders/translator/build.json",
     "--include-of",
-    "/in/include_of/ports__fnv-nx__render__d3d9",
+    "/in/13",
     "--include-of",
-    "/in/include_of/ports__fnv-nx__render__shaders__translator"
+    "/in/14"
    ],
    "inputs": [
     "ports/fnv-nx/render/total/d3d9total/stage.py",
