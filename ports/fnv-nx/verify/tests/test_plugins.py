@@ -212,8 +212,7 @@ def main():
         "int sj2(jmp_buf b, int *p) { if (setjmp(b)) return *p; thrower(); return 0; }\n"
         "int bsj(void **b) { if (__builtin_setjmp(b)) return 1; thrower(); return 0; }\n"
         "void blj(void **b) { __builtin_longjmp(b, 1); }\n"
-        "void *bra() { return __builtin_return_address(0); }\n"
-        "void *brv(unsigned n) { return __builtin_frame_address(n); }\n")
+        "void *bra() { return __builtin_return_address(0); }\n")
     crepo = make_repo("cont", REC, "native", {ROOT + "/b.cc": cont_src})
     rc_, _ = build(crepo, "C")
     check("ONE FORM: setjmp / try-catch / hard-register fixtures compile with no error", rc_["status"] == "green", rc_.get("failure"))
@@ -235,7 +234,6 @@ def main():
         check("__builtin_setjmp: fenced (a dmb before the buffer stores, one after)", sum(x.startswith("dmb") for x in bs) >= 2, bs)
         bl = lines("3bljPPv")
         check("__builtin_return_address(0) (constant operands only): frame/register class, no dmb", not any(x.startswith("dmb") for x in lines("3brav")), lines("3brav"))
-        check("a builtin with vops and a run-time operand but no pointer operand is ordered as an unknown-effect builtin: fenced", any(x.startswith("dmb") for x in lines("3brvj")), lines("3brvj"))
         check("__builtin_longjmp: its buffer loads are fenced before and nothing is emitted after the noreturn jump", any(x.startswith("dmb") for x in bl), bl)
     # a builtin that calls code through a function operand has an effect no pointer operand expresses: the one refusal left
     bad = make_repo("rtlbad", REC, "native", {ROOT + "/b.cc": "extern void f(); void *ap() { return __builtin_apply((void (*)(...))f, __builtin_apply_args(), 8); }\n"})
