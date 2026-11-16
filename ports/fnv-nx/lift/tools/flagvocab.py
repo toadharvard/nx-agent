@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """flagvocab.py: the vocabulary of the flags column of universe.tsv, GENERATED from the one emitter (tools/modlift.py `fl = [...]`) and the kind list it uses (tools/residue.py PRI), never written a second time.
-    flagvocab.py --out vocab.json        write {"status": [...], "attr": [...], "count_attr": [...]}
-    flagvocab.py --check universe.tsv    every row: exactly one status (the first token), every other token an attr or a `count_attr=N`; exit 1 naming the rows that are not
-The flags column is `status,attr,attr,...`: the status is `proven` or `candidate` (the two string literals of the first element of the emitter's list), the attrs are the entry kinds (PRI), `first-ud`, and the count attrs written as name=N (the first elements of the tuples of the emitter's last element)."""
+    flagvocab.py --out vocab.json        write {"status": [...], "attr": [...]}: an attr ending in `=` is a count attr written name=N
+    flagvocab.py --check universe.tsv    every row: exactly one status (the first token), every other token an attr, or `name=N` with `name=` an attr and N decimal; exit 1 naming the rows that are not
+The flags column is `status,attr,attr,...`: the status is `proven` or `candidate` (the two string literals of the first element of the emitter's list), the attrs are the entry kinds (PRI), `first-ud`, and the count attrs, listed as `name=` (the first elements of the tuples of the emitter's last element)."""
 import ast, json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -30,7 +30,7 @@ def vocab():
     for t in terms:
         for n in ast.walk(t):
             if isinstance(n, ast.Tuple) and len(n.elts) == 2 and isinstance(n.elts[0], ast.Constant) and isinstance(n.elts[0].value, str) and not isinstance(n.elts[1], ast.Constant): counts.append(n.elts[0].value)
-    return {'status': status, 'attr': sorted(set(attr)), 'count_attr': sorted(set(counts))}
+    return {'status': status, 'attr': sorted(set(attr) | {c + '=' for c in counts})}      # an attr ending in `=` takes a decimal value (imagerec's reading)
 
 
 def check(path, v=None):
@@ -41,8 +41,8 @@ def check(path, v=None):
         toks = f[3].split(',') if len(f) > 3 else []
         if not toks or toks[0] not in v['status']: bad.append((ln, 'no status first: %r' % (f[3:4],))); continue
         for t in toks[1:]:
-            n = t.split('=')[0]
-            if t in v['status'] or not (t in v['attr'] or (('=' in t) and n in v['count_attr'] and t.split('=', 1)[1].isdigit())): bad.append((ln, 'token %r outside the vocabulary' % t))
+            ok = t in v['attr'] and not t.endswith('=') or ('=' in t and t.split('=')[0] + '=' in v['attr'] and t.split('=', 1)[1].isdigit())
+            if t in v['status'] or not ok: bad.append((ln, 'token %r outside the vocabulary' % t))
     return bad
 
 
