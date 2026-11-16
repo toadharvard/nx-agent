@@ -121,7 +121,6 @@ int _vsnprintf(char *buf, size_t n, const char *fmt, va_list ap)
     return fnvnx_msvc_bound(buf, n, fnvnx_msvc_format(buf, n, fmt, ap));
 }
 
-FNVNX_EXPORT("msvcrt.dll", "_snprintf", _snprintf, "func");
 int _snprintf(char *buf, size_t n, const char *fmt, ...)
 {
     va_list ap;

@@ -5,14 +5,20 @@
                                                                               section its recipe names: contract/exports/build.json, `objects_of` guest + section: the objects of
                                                                               every guest product root outside the consumers of the table, the link set)
 
-Every object may carry the section `.fnvnx.export` (contract/include/fnvnx_export.h): lines `module TAB import name TAB symbol TAB func|data`.  The tool
-writes the union, sorted, as five columns: the four fields and `ret`, the return class of a function export read from the definer's own `.fnvnx.decltype` record (`-` for data).  RULE (total, nothing is skipped or guessed):
-  - a line that is not exactly four fields, with a module that is not a lower-case `*.dll` name, a symbol that is not a C identifier or a kind other than
-    func|data is an error;
+Every object may carry the section `.fnvnx.export` (contract/include/fnvnx_export.h): one record per FNVNX_EXPORT: the strings module, import name, kind (func|entry|data), each NUL-terminated, then a
+pointer-sized field that carries a RELOCATION against the definer's symbol (`&symbol` in the C/C++ source, so the compiler resolves the identity: an undeclared name is a compile error, and
+the symbol is named by the object's own symbol table, never read from text); records are separated by zero padding.  The tool
+writes the union, sorted, as six columns: the four fields, `ret` (the return class of a function export) and `args` (the argument classes, `-` for none), both read from the definer's own
+`.fnvnx.decltype` record (`-` for data and for an entry).  The kinds: `func` is a native function the bridge marshals by its type; `entry` is a body that works on the guest state itself (the bridge jumps
+to it, nothing is marshalled, the return and argument slots do not apply); `data` is an object.  RULE (total, nothing is skipped or guessed):
+  - a record that is malformed (a string not NUL-terminated, a missing or extra relocation, a relocation that is not against a named symbol with addend 0, an empty field), with a module that is not a
+    lower-case `*.dll` name, a symbol that is not a C identifier or a kind other than func|entry|data is an error;
+  - the definer of an `entry` has the type `void(void)` in its `.fnvnx.decltype` (it takes and returns nothing: its operands are the guest state); any other type is an error;
   - a (module, name) given twice (in one object or two) is an error;
   - the symbol must be defined (global, in a section) by the object that carries the record, and by no other object of the tree: exactly one definer;
   - a function export's definer has a type row for the symbol in its `.fnvnx.decltype` (link/ctypes_compat.py grammar): no row, or a reason instead of a type, is an error; the type must be a
-    function type, and its return type has a class (ret_class): a struct, union, vector, complex or reference return is an error (the bridge table's `ret` is one of v i q f d).
+    function type, and its return type has a class (ret_class): a struct, union, vector, complex or reference return is an error (the bridge table's `ret` is one of v i q f d); every parameter has a
+    class (args_class: i q f d): a struct, union, vector or complex parameter, a missing prototype or varargs is an error.
 The output depends on the objects' bytes and relative paths only."""
 import argparse, os, re, sys
 
@@ -24,22 +30,80 @@ SECTION = '.fnvnx.export'   # the default; the recipe names the section (`object
 DECLTYPE = '.fnvnx.decltype'
 LONGLONG = ('long_long_int', 'long_long_unsigned_int')   # the integer words wider than a register of the ILP32 data model (DATAMODEL, OWNER 7): everything else integer is <= 4 bytes
 FLOATS = {'float': 'f', 'double': 'd', 'long_double': 'd'}   # DATAMODEL: long double is binary64 (it returns as a double)
+KINDS = ('func', 'entry', 'data')
+ENTRY_TYPE = ('fn', (), False, ('sc', 'void'))   # the type of an `entry` definer: void(void)
 MODULE = re.compile(r'[a-z0-9_.\-]+\.dll\Z')
 IDENT = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\Z')
 
 
+def check_fields(mod, name, sym, kind, where, n):
+    if not MODULE.match(mod):
+        raise ValueError('%s: record %d: module %r is not a lower-case *.dll name' % (where, n, mod))
+    l2sections._need(name, where, n, 'import name')
+    if not IDENT.match(sym):
+        raise ValueError('%s: record %d: symbol %r is not a C identifier' % (where, n, sym))
+    if kind not in KINDS:
+        raise ValueError('%s: record %d: kind %r is none of func, entry, data' % (where, n, kind))
+
+
 def parse_export(data, where):
+    """The text form `module TAB name TAB symbol TAB kind` LF-terminated (exports.tsv's first four columns): [(module, name, symbol, kind)]"""
     out = []
     for n, ln in enumerate(l2sections._lines(data, where), 1):
         mod, name, sym, kind = l2sections._fields(ln, where, n, 4, 4)
-        if not MODULE.match(mod):
-            raise ValueError('%s: line %d: module %r is not a lower-case *.dll name' % (where, n, mod))
-        l2sections._need(name, where, n, 'import name')
-        if not IDENT.match(sym):
-            raise ValueError('%s: line %d: symbol %r is not a C identifier' % (where, n, sym))
-        if kind not in ('func', 'data'):
-            raise ValueError('%s: line %d: kind %r is neither func nor data' % (where, n, kind))
+        check_fields(mod, name, sym, kind, where, n)
         out.append((mod, name, sym, kind))
+    return out
+
+
+def parse_records(data, relocs, psize, where):
+    """-> [(module, name, symbol, kind)] of the section bytes DATA of an object. RELOCS {offset: (symbol name or None, addend)} are the section's relocations, PSIZE the pointer size of the object's ELF class.
+    A record: three NUL-terminated strings (module, name, kind), then a pointer-sized field aligned to PSIZE, whose relocation names the definer; zero padding follows up to the next record."""
+    out, off, n, seen = [], 0, 0, set()
+    while True:
+        while off < len(data) and data[off] == 0:
+            off += 1
+        if off >= len(data):
+            break
+        n += 1
+        strs = []
+        for what in ('module', 'import name', 'kind'):
+            e = data.find(b'\0', off)
+            if e < 0:
+                raise ValueError('%s: record %d: the %s is not NUL-terminated' % (where, n, what))
+            if e == off:
+                raise ValueError('%s: record %d: the %s is empty' % (where, n, what))
+            strs.append(data[off:e].decode('latin1'))
+            off = e + 1
+        po = -(-off // psize) * psize
+        r = relocs.get(po)
+        if r is None or r[0] is None or r[1] != 0:
+            raise ValueError('%s: record %d (%s!%s): the pointer field at offset %d has no relocation against a named symbol with addend 0 (got %r)' % (where, n, strs[0], strs[1], po, r))
+        if po + psize > len(data):
+            raise ValueError('%s: record %d: the pointer field is cut off' % (where, n))
+        seen.add(po)
+        check_fields(strs[0], strs[1], r[0], strs[2], where, n)
+        out.append((strs[0], strs[1], r[0], strs[2]))
+        off = po + psize
+    extra = sorted(set(relocs) - seen)
+    if extra:
+        raise ValueError('%s: relocation at offset %d belongs to no record' % (where, extra[0]))
+    return out
+
+
+def relocs_of(e, section):
+    """{offset: (symbol name or None, addend)} of the relocations of SECTION of the ELFFile E (.rela<section> or .rel<section>); a section symbol has no name (None); an implicit addend (REL) is read as 0
+    only when the pointer bytes are zero (checked by the caller's data: the field is zero in the object)."""
+    out = {}
+    for pre in ('.rela', '.rel'):
+        rs = e.get_section_by_name(pre + section)
+        if rs is None:
+            continue
+        sy = e.get_section(rs['sh_link'])
+        for r in rs.iter_relocations():
+            sym = sy.get_symbol(r['r_info_sym'])
+            named = sym.name and sym['st_info']['type'] != 'STT_SECTION'
+            out[r['r_offset']] = (sym.name if named else None, r['r_addend'] if 'r_addend' in r.entry else 0)
     return out
 
 
@@ -59,12 +123,35 @@ def ret_class(t, sym='?'):
     return 'v' if w == 'void' else FLOATS.get(w) or ('q' if w in LONGLONG else 'i')
 
 
+def args_class(t, sym='?'):
+    """The bridge table's `args` letters (i q f d, in order; `-` for none) of a function type T by its parameters: a pointer, reference, array, entry pointer, enumeration and every scalar word of at most 4 bytes
+    i; the 64-bit integers q; float f; double and long double d. A struct, union, vector or complex parameter, a missing prototype (K&R) or varargs has no letter: ValueError."""
+    if t[0] != 'fn':
+        raise ValueError('%s: the type of a function export is not a function type' % sym)
+    if t[1] is None:
+        raise ValueError('%s: a function export has no prototype' % sym)
+    if t[2]:
+        raise ValueError('%s: a varargs function export has no argument classes (name the forwarder)' % sym)
+    out = ''
+    for a in t[1]:
+        while a[0] in ('q', 'enum', 'host'):
+            a = ('sc', a[1]) if a[0] == 'host' else a[2]
+        if a[0] in ('ptr', 'entry', 'ref', 'arr'):
+            out += 'i'
+        elif a[0] == 'sc' and a[1] != 'void':
+            out += FLOATS.get(a[1]) or ('q' if a[1] in LONGLONG else 'i')
+        else:
+            raise ValueError('%s: a %s parameter has no class of the bridge table (i q f d)' % (sym, a[0] if a[0] != 'sc' else 'void'))
+    return out or '-'
+
+
 def records(path, section=SECTION):
     """-> the export records [(module, name, symbol, kind)] of the object at PATH (no decltype)"""
     from elftools.elf.elffile import ELFFile
     with open(path, 'rb') as fh:
-        s = ELFFile(fh).get_section_by_name(section)
-        return parse_export(s.data(), os.path.basename(path) + ':' + section) if s is not None else []
+        e = ELFFile(fh)
+        s = e.get_section_by_name(section)
+        return parse_records(s.data(), relocs_of(e, section), e.elfclass // 8, os.path.basename(path) + ':' + section) if s is not None else []
 
 
 def scan(path, reasons, section=SECTION):
@@ -73,7 +160,7 @@ def scan(path, reasons, section=SECTION):
     with open(path, 'rb') as fh:
         e = ELFFile(fh)
         s = e.get_section_by_name(section)
-        recs = parse_export(s.data(), os.path.basename(path) + ':' + section) if s is not None else []
+        recs = parse_records(s.data(), relocs_of(e, section), e.elfclass // 8, os.path.basename(path) + ':' + section) if s is not None else []
         dt = e.get_section_by_name(DECLTYPE)
         types, why = ctypes_compat.parse_decltype_lines(dt.data(), os.path.basename(path) + ':' + DECLTYPE, reasons) if dt is not None else ({}, {})
         st = e.get_section_by_name('.symtab')
@@ -86,7 +173,7 @@ def scan(path, reasons, section=SECTION):
 
 
 def collect(root, reasons, section=SECTION):
-    """-> sorted rows (module, name, symbol, kind, ret); ValueError listing every violation"""
+    """-> sorted rows (module, name, symbol, kind, ret, args); ValueError listing every violation"""
     rows, definers, errs, seen = [], {}, [], {}
     per = []
     for d, ds, fs in os.walk(root):
@@ -110,12 +197,19 @@ def collect(root, reasons, section=SECTION):
             elif len(definers[sym]) != 1:
                 errs.append('%s!%s: %s has %d definers (%s)' % (mod, name, sym, len(definers[sym]), ' '.join(sorted(definers[sym]))))
             elif kind == 'data':
-                rows.append((mod, name, sym, kind, '-'))
+                rows.append((mod, name, sym, kind, '-', '-'))
             elif sym not in types:
                 errs.append('%s!%s: %s has no type row in the .fnvnx.decltype of %s (%s)' % (mod, name, sym, rel, 'reason ' + why[sym] if sym in why else 'no record'))
+            elif kind == 'entry':
+                t = ctypes_compat.parse(types[sym])
+                if t != ENTRY_TYPE:
+                    errs.append('%s!%s: the definer %s of an entry has the type %s, not void(void) (an entry works on the guest state, it takes and returns nothing)' % (mod, name, sym, types[sym]))
+                else:
+                    rows.append((mod, name, sym, kind, '-', '-'))
             else:
                 try:
-                    rows.append((mod, name, sym, kind, ret_class(ctypes_compat.parse(types[sym]), sym)))
+                    t = ctypes_compat.parse(types[sym])
+                    rows.append((mod, name, sym, kind, ret_class(t, sym), args_class(t, sym)))
                 except ValueError as e:
                     errs.append('%s!%s: %s' % (mod, name, e))
     if errs:
@@ -127,19 +221,23 @@ RETS = ('v', 'i', 'q', 'f', 'd')
 
 
 def read(text):
-    """{(module, name): (symbol, kind, ret)} from exports.tsv text: five columns, `ret` one of v i q f d for a function and `-` for data"""
+    """{(module, name): (symbol, kind, ret, args)} from exports.tsv text: six columns; `ret` is one of v i q f d and `args` letters of i q f d or `-` for a func, both `-` for an entry and a data export"""
     out = {}
     for n, ln in enumerate(text.split('\n'), 1):
         if not ln:
             continue
         f = ln.split('\t')
-        if len(f) != 5:
-            raise ValueError('exports.tsv line %d: need module TAB name TAB symbol TAB func|data TAB ret' % n)
-        m, name, sym, kind, ret = f
+        if len(f) != 6:
+            raise ValueError('exports.tsv line %d: need module TAB name TAB symbol TAB func|entry|data TAB ret TAB args' % n)
+        m, name, sym, kind, ret, args = f
         parse_export(('%s\t%s\t%s\t%s\n' % (m, name, sym, kind)).encode(), 'exports.tsv:%d' % n)
-        if ret != ('-' if kind == 'data' else ret) or (kind == 'func' and ret not in RETS) or (m, name) in out:
-            raise ValueError('exports.tsv line %d: bad ret %r or %s!%s twice' % (n, ret, m, name))
-        out[(m, name)] = (sym, kind, ret)
+        if kind == 'func':
+            ok = ret in RETS and re.fullmatch(r'-|[iqfd]+', args) is not None
+        else:
+            ok = ret == '-' and args == '-'
+        if not ok or (m, name) in out:
+            raise ValueError('exports.tsv line %d: bad ret %r or args %r for kind %s, or %s!%s twice' % (n, ret, args, kind, m, name))
+        out[(m, name)] = (sym, kind, ret, args)
     return out
 
 

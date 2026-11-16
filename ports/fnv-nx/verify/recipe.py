@@ -64,8 +64,14 @@ PLUGIN_OUT = plugsem.PLUGIN_OUT
 origin_class = plugsem.origin_class
 semantics_set = plugsem.semantics_set
 plugin_args = plugsem.plugin_args
-SEMANTICS_FLAGS = plugsem.SEMANTICS_FLAGS
-SEMANTICS_LIFTED = plugsem.SEMANTICS_LIFTED
+
+
+def __getattr__(name):   # PEP 562: the semantic sets are computed on first use (plugsem.semantic_flags), never at import
+    if name in ("SEMANTICS_FLAGS", "SEMANTICS_LIFTED"):
+        return getattr(plugsem, name)
+    raise AttributeError(name)
+
+
 SDD_DEFINE = plugsem.SDD_DEFINE
 SDD_FLAGS = plugsem.SDD_FLAGS
 ANALYSIS_PLUGIN = plugsem.ANALYSIS_PLUGIN
@@ -88,6 +94,16 @@ def ext_dir(cache):
     """THE external cache of a verdict/run cache CACHE (bare fetches CACHE/external/<commit>, stage-ext records, artifacts.url): the sibling of CACHE/store.
     Fetch, build, exttree, resolve_input and every gate name it through this one function."""
     return os.path.join(cache, "external")
+
+
+def ext_bare(extc, commit):
+    """The bare fetch of the external at COMMIT in the external cache EXTC."""
+    return os.path.join(extc, commit)
+
+
+def ext_checkout(extc, commit):
+    """The checkout of the external fetched at COMMIT in the external cache EXTC (fetch_externals writes it, every reader names it through this function)."""
+    return os.path.join(extc, commit + ".co")
 
 
 def ext_of_store(store):
@@ -1571,6 +1587,9 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
             ex_ext = isinstance(a, dict) and set(a) == {"external", "path"} and all(isinstance(v, str) for v in a.values())
             ex_root = isinstance(a, dict) and set(a) == {"root", "output"} and all(isinstance(v, str) for v in a.values())
             ex_of = is_external_of(a)
+            ex_py = a == {"python": True}   # the pinned python runtime of the generated stages (pyrt): the interpreter and env.json python.modules
+            if ex_py and raw[i].get("debs"):   # as written: the machine's layout deb is added to every step
+                err.append("run[%d].exec python: the step has no debs (the interpreter's runtime is its root)" % i)
             if ex_of:
                 err += external_of_errors("run[%d].exec" % i, a, root, rec, roots, repo)
             if xl and not (ex_ext or ex_root or ex_of):
@@ -1583,8 +1602,8 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
             if ex_ext:   # a file of a pinned external, mounted at /exec/<name> (RECIPE.md "A tool that is not a deb binary")
                 if a["external"] not in {x.get("name") for x in rec.get("external", []) if isinstance(x, dict)} or not rel_ok(a["path"]):
                     err.append("run[%d].exec %r must name an external of this recipe and a path inside its tree" % (i, a))
-            elif ex_of:
-                pass   # checked above by the one external_of rule
+            elif ex_of or ex_py:
+                pass   # checked above (the one external_of rule; the python runtime)
             elif ex_root:   # the output of a built root this root `uses`: the same resolution as the uses mount
                 if not any(isinstance(u, dict) and u.get("root") == a["root"] and u.get("output") == a["output"] for u in rec.get("uses", [])):
                     err.append("run[%d].exec %r must be a root and output this recipe `uses`" % (i, a))
@@ -2141,7 +2160,7 @@ def fetch_externals(exts, store, extcache, ws):
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
     os.makedirs(ws, exist_ok=True)   # the index files live in WS: every caller may name a fresh sub-path of its scratch directory
     for e in exts:
-        stage, bare, co = "external:" + e["name"], os.path.join(extcache, e["commit"]), os.path.join(extcache, e["commit"] + ".co")
+        stage, bare, co = "external:" + e["name"], ext_bare(extcache, e["commit"]), ext_checkout(extcache, e["commit"])
         fact = os.path.join(store, "external-facts", "%s-%s.json" % (e["commit"], e["tree_sha256"]))
         if os.path.isfile(fact) and os.path.isdir(co) and os.path.isfile(os.path.join(store, "tree", e["tree_sha256"][:2], e["tree_sha256"] + ".json")):
             out[e["name"]] = {"host": co, "tree": e["tree_sha256"], "at": e["at"]}
@@ -2856,7 +2875,16 @@ class Job:
                "FNVNX_DEBS": ";".join("%s=%s" % (d, pk[d]["sha256"]) for d in sorted(g["debs"]))}   # the deb sha256s are in the key
         env.update(g.get("env", {}))   # constant strings (check); the sandbox has no network namespace route, so nothing is fetched
         xs = g["exec"] if tool else None
-        if isinstance(xs, dict):   # {external, path} | {root, output}: the tool file is a stage input (in the key by content), mounted executable at /exec/<name>
+        pyargv = None
+        if xs == {"python": True}:   # the one python runtime of generate_one (pyrt): its inputs, env and PATH; the step's own inputs/scratch/stage refs as any tool step
+            py = self.pyrt()
+            ins += py["inputs"]
+            env.update({k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"})
+            env.update({"COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "FNVNX_PYMODS": self.pymods})
+            env.update(g.get("env", {}))
+            pyargv = [py["python"], "-s", "-B"] + g["args"]
+            xs = None
+        elif isinstance(xs, dict):   # {external, path} | {root, output}: the tool file is a stage input (in the key by content), mounted executable at /exec/<name>
             if "external_of" in xs:
                 host = self.external_of_host(ws, {k: v for k, v in xs.items() if k != "libs"})
                 base = os.path.basename(xs["path"])
@@ -2886,7 +2914,7 @@ class Job:
                 raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["exec-unresolved:%s: %s needs it and the declared debs do not provide it" % (b, base) for b in bad]})
             ins.append({"at": "/exec", "tree": self._one_file(tmp, "exec", host, base)})
             xs = "/exec/" + base
-        argv = [xs] + g["args"] if tool else ["/art/" + aout] + g["args"]
+        argv = pyargv if pyargv else [xs] + g["args"] if tool else ["/art/" + aout] + g["args"]
         interp = None if tool else elf_interp(r["elf"]["path"])
         if interp:   # started through the file at its PT_INTERP path inside a declared deb (the deb's own symlinks followed; no alias is relied on)
             home = deb_resolve(interp, tmp, g["debs"])
@@ -2955,9 +2983,6 @@ class Job:
                         os.symlink(os.readlink(src), os.path.join(union, p))
                     else:
                         shutil.copy2(src, os.path.join(union, p), follow_symlinks=False)
-        bad = rootfs_dangling(union)
-        if bad:
-            raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["a symlink of the assembled root leaves the declared closure (its target is in no deb of the step): " + "; ".join(bad[:8])]})
         ins, links = [], []
         for name in sorted(os.listdir(union)):
             p = os.path.join(union, name)
@@ -3577,7 +3602,7 @@ class Job:
         if rt["name"] not in self.ext:
             self.externals(ws)
         drv = rt["at"] + "/" + pin_drivers()[1]
-        flags = semantics_for(self.hostpath(self.drivers()[1]), "cxx", SEMANTICS_FLAGS)
+        flags = semantics_for(self.hostpath(self.drivers()[1]), "cxx", plugsem.semantic_flags())
         tr = self.toolrt([drv])[1]
         pd = os.path.join(tempfile.mkdtemp(dir=ws), "probe")
         os.makedirs(pd)
@@ -3997,43 +4022,6 @@ def cpu_mismatch(pin, text=None):
             if have != want:
                 bad.append("processor %d %s is %r, reference %r" % (i, name, have, want))
     return bad[:6] if procs else ["/proc/cpuinfo lists no processor"]
-
-
-SANDBOX_ROOTS = ("/proc", "/dev", "/tmp", "/in", "/out", "/work", "/scratch")
-
-
-def rootfs_dangling(union, limit=40):
-    """[\"/link -> target\"] of the symlinks of the assembled root UNION whose target (absolute targets taken in the root, relative ones from the link's directory, every
-    component followed) does not exist in it: the closure of the step's debs is the whole root, so such a link is red. Targets in the sandbox's own directories are the sandbox's."""
-    def exists(path):
-        parts, cur = [x for x in path.split("/") if x], ""
-        for _ in range(limit * 8):
-            if not parts:
-                return True
-            nxt = cur + "/" + parts[0]
-            if nxt in SANDBOX_ROOTS:
-                return True
-            real = union + nxt
-            if os.path.islink(real):
-                limit_ = os.readlink(real)
-                full = os.path.normpath(limit_ if limit_.startswith("/") else os.path.join(cur or "/", limit_))
-                parts = [x for x in full.split("/") if x] + parts[1:]
-                cur = ""
-                continue
-            if not os.path.lexists(real):
-                return False
-            cur, parts = nxt, parts[1:]
-        return False
-    out = []
-    for dp, dn, fn in os.walk(union):
-        for n in dn + fn:
-            q = os.path.join(dp, n)
-            if os.path.islink(q):
-                t = os.readlink(q)
-                full = os.path.normpath(t if t.startswith("/") else os.path.join("/" + os.path.relpath(dp, union), t))
-                if not exists(full):
-                    out.append("/%s -> %s" % (os.path.relpath(q, union), t))
-    return sorted(out)
 
 
 def deb_resolve(path, tmp, debs, limit=40):

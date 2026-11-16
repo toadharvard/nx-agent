@@ -40,8 +40,6 @@
     "/ext/manifest/manifest/sys_names.tsv",
     "--specs",
     "/ext/wine-specs/specs",
-    "--name-table",
-    "/in/ports/fnv-nx/bridgefacts/crt/msvcrt_names.tsv",
     "--va",
     "/in/ports/fnv-nx/bridgefacts/crt/msvcrt_va.tsv",
     "--extra",
@@ -54,7 +52,6 @@
     "/out/bridge.tsv"
    ],
    "inputs": [
-    "ports/fnv-nx/bridgefacts/crt/msvcrt_names.tsv",
     "ports/fnv-nx/bridgefacts/crt/msvcrt_va.tsv"
    ],
    "outputs": [
