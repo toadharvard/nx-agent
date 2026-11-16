@@ -196,7 +196,7 @@ def mut_patch(old, new):
         for cmd in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "m"]):
             subprocess.run(["git", "-C", src, *cmd], check=True, env=env)
         commit_id = subprocess.run(["git", "-C", src, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
-        bare = os.path.join(CACHE, "external", commit_id)
+        bare = recipe.ext_bare(recipe.ext_dir(CACHE), commit_id)
         os.makedirs(bare)
         for cmd in (["init", "-q", "--bare"], ["fetch", "-q", src, commit_id]):
             subprocess.run(["git", "-C", bare, *cmd], check=True, env=env, capture_output=True)
@@ -288,9 +288,9 @@ def main():
         if FAIL:
             raise SystemExit("\n".join(FAIL))
         recs = {e["name"]: e for e in json.load(open(os.path.join(base, PORT_REL, "render/shaders/translator/build.json")))["external"]}
-        MIRROR["co"] = os.path.join(CACHE, "external", recs["mojoshader"]["commit"] + ".co")
+        MIRROR["co"] = recipe.ext_checkout(recipe.ext_dir(CACHE), recs["mojoshader"]["commit"])
         wine = {e["name"]: e for e in json.load(open(os.path.join(base, PORT_REL, "render/d3d9/build.json")))["external"]}["wine-d3d9-formats"]
-        G.ARGS.wine = os.path.join(CACHE, "external", wine["commit"] + ".co")
+        G.ARGS.wine = recipe.ext_checkout(recipe.ext_dir(CACHE), wine["commit"])
         specp = os.path.join(TMP, "d3d9_spec.json")
         subprocess.run([sys.executable, "-E", "-s", "-B", os.path.join(PORT, "bridgefacts", "d3d9", "d3d9_spec.py"), specp, os.path.join(TMP, "d9bridge_rows.tsv"), os.path.join(PORT, "shim", "include")], check=True, capture_output=True)
         SPEC = json.load(open(specp))["enums"]
