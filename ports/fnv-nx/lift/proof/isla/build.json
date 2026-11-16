@@ -52,7 +52,8 @@
     "closure": [
      "python3",
      "cargo",
-     "gcc-13"
+     "gcc-13",
+     "g++-13"
     ]
    },
    "outputs": [
@@ -66,7 +67,9 @@
    ],
    "env": {
     "TMPDIR": "/scratch",
-    "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER": "x86_64-linux-gnu-gcc-13"
+    "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER": "x86_64-linux-gnu-gcc-13",
+    "CC": "x86_64-linux-gnu-gcc-13",
+    "CXX": "x86_64-linux-gnu-g++-13"
    }
   }
  ],
