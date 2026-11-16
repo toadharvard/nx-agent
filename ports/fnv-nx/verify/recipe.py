@@ -1304,13 +1304,13 @@ def depends_on(cand, root, roots, repo, seen=()):
     return cand == root or root in root_reach(cand, roots, repo)
 
 
-REACH_MEMO = {}   # per process: {(repo, tracked-tree signature, root): (the roots dict it was read with, the set of roots it reaches)}
+REACH_MEMO = {}   # per process: {(repo, root): (the roots dict it was read with, the set of roots it reaches)}: valid for the one roots dict (load_admit's answer) the caller walks with
 
 
 def root_reach(cand, roots, repo):
     """The set of admitted roots that CAND reaches through root_edges, transitively (CAND excluded unless a cycle returns to it), read from the recipes at REPO: one walk with one visited set,
-    memoised per process for (REPO's tracked tree, CAND), so a diamond of roots is read once however many paths lead to it. A root without a readable recipe has no edges."""
-    key = (os.path.realpath(repo), repo_signature(repo), cand)
+    memoised per process for (REPO, CAND) and the one ROOTS dict the caller holds (no tree hash on a hit: a hit is a dict lookup), so a diamond of roots is read once however many paths lead to it. A root without a readable recipe has no edges."""
+    key = (os.path.realpath(repo), cand)
     m = REACH_MEMO.get(key)
     if m is not None and m[0] is roots:
         return m[1]
@@ -1415,19 +1415,24 @@ def generated_trees(roots, repo, files=None):
     return out
 
 
-def link_roots_cycle(root, roots, repo, seen=()):
-    """The cycle through ROOT in the graph of `link.roots` and `uses` between roots, as a list of roots, or None."""
+def link_roots_cycle(root, roots, repo, seen=(), done=None):
+    """The cycle through ROOT in the graph of `link.roots` and `uses` between roots, as a list of roots, or None. One depth-first walk: DONE holds the roots whose whole
+    subgraph has no cycle, so each root's edges are read once however many paths lead to it (the cost is the roots, not the paths)."""
+    done = set() if done is None else done
     if root in seen:
         return list(seen[seen.index(root):]) + [root]
+    if root in done:
+        return None
     ent = roots.get(root)
     try:
         rec = read_recipe(repo, ent["recipe"]) if ent and ent.get("recipe") else None
     except (OSError, ValueError):
         rec = None
     for d in root_edges(rec, root, roots, repo):
-        c = link_roots_cycle(d, roots, repo, tuple(seen) + (root,))
+        c = link_roots_cycle(d, roots, repo, tuple(seen) + (root,), done)
         if c:
             return c
+    done.add(root)
     return None
 
 
