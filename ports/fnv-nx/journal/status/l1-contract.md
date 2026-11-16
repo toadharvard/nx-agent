@@ -2449,3 +2449,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:16
 - w28 order: (1) test_plugins, 3 old-rule tests rewritten (L2 cand4b ce44e31fa: 85/88); (2) recipe foreach for L3b shapeprove (515 integer + 3,960 SIMD rows, one keyed run step per row, expanded at check time from content); (3) ruling-A PP gate; (4) test_gate_imports onto stage B.
 - bottleneck: cand3b verdict at 597f2e007.
+
+## 2026-11-16 04:17
+- Ruling A typing (w8): fnvl.h makes ra const unless FNVL_PRELUDE_H or FNVL_RA_WRITE; hand writers fnvl_native_transfer + fnvl_raise_resume in lift/rt/enter.cc; impgen's entry thunk does the return. Accepted; w8 pushes now. The w28 PP gate closes the escape.
+- bottleneck: cand3b verdict at 597f2e007.
