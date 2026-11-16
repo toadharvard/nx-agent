@@ -1496,3 +1496,12 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Next to measure: interprocedural origin, the caller join of the receiver class and the constructors of the field objects.
   - A site still without a single pop goes to the orchestrator as a gap.
 - bottleneck: L2 w2 (3 lift/rt units); w8 rework and merges; pcsrc vptr pop (w7); the udsail farm run.
+
+## 2026-11-16 04:24 — udsail first farm run: measurement only
+- The farm run used IR 48ef39ad (not the pinned x86ir 8b711fba9b93), model 0c6c023dccc7, and w13 183e1ebef (not base3).
+- Result: 6 of 6 baddecode sequences "isla returned no path", #UD 0, not decided 6.
+- Rejected as a certificate input, for two reasons:
+  - It was not the recipe target with the pinned externals.
+  - "no path" is a stage failure, not a refusal.
+- w13 (doing): find the cause, make "no path" a red stage error rather than a GAP row, reconcile the baddecode count (6 vs 4) globally, then the farm run on base3 via L3b.
+- bottleneck: L2 w2 (3 lift/rt units); w8 rework and merges; pcsrc vptr pop (w7); udsail stage (w13).
