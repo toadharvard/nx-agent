@@ -1,4 +1,5 @@
 // Device Create* of textures, volume textures, cube textures, render targets, depth-stencil and offscreen plain surfaces. Sources: Wine 9.0 d3d9/device.c (d3d9_device_Create{Texture,VolumeTexture,CubeTexture,
+// ASM-611 (verify/ASSUMPTIONS.json)
 // RenderTarget,DepthStencilSurface,OffscreenPlainSurface}{,Ex}, d3d9_device_create_surface: WINED3DERR_NOTAVAILABLE -> D3DERR_INVALIDCALL), d3d9/texture.c d3d9_texture_init, wined3d/texture.c wined3d_texture_create /
 // wined3d_texture_init, wined3d/resource.c resource_init. Format and multisample legality come ONLY from the generated env table (env_table.gen.h): the wined3d format-cap loop of resource_init is
 //  texture bind (SHADER_RESOURCE) = CheckDeviceFormat(usage 0, TEXTURE / CUBETEXTURE / VOLUMETEXTURE), render target = (usage RT), depth = (usage DS) of the same resource class; SURFACE class for surfaces.

@@ -370,6 +370,9 @@ static inline u32 sse_pmovmskb(xmm_t s,int n){ u32 r=0; for(int i=0;i<n;i++) r|=
 extern "C" { void fnvl_cpuid(u32 leaf, u32 sub, u32 out[4]); u64 fnvl_rdtsc(void); }
 /* The hardware-raise entries of the runtime (rt/seh.cc) are declared ONLY here, inside namespace fnvl_rt, and only FNVL_RAISE / FNVL_RAISE_AV below name them: a lifted unit that calls the raw
    fnvl_raise or fnvl_raise_av (no EFLAGS / C0 C2 C3 flush) does not find the name and is a compile error. They are the same C-linkage functions as the definitions in seh.cc. */
+/* rt/seh.cc: the software raise of an exception record (RaiseException's context flags and EFLAGS) at eip with esp sp: 1 execution continues from the CONTEXT, 0 a handler or the
+   filter left by a non-local transfer. The ONE declaration: a caller outside seh.cc takes it from here (a second spelling of the prototype would pass other arguments). */
+extern "C" int fnvl_raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 eip, u32 sp);
 namespace fnvl_rt { extern "C" { void fnvl_raise(u32 code, u32 at); void fnvl_raise_av(u32 access, u32 addr, u32 at); } }
 #define FNVL_EFL_KEEP 0x244000u      /* the non-arithmetic EFLAGS bits a user-mode popfd can change and pushfd shows: NT (14), AC (18), ID (21) */
 /* EFLAGS image of pushfd: the arithmetic flags and DF of the lifted state, bit 1, IF (9) set, AC and ID from c->eflx, everything else 0.

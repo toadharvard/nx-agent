@@ -77,11 +77,14 @@ SEG_FREE = tuple(x for i, x in enumerate(SEG) if x != 'seg_visibles=[#x002b; 6]'
 SYMSEL = False      # set by prove.prove_one: the Form reads the segment selectors (sel_*), so the six selectors of the initial state are free (isla gives each element a fresh symbol) instead of the literal 0x2b
 SELREG = ('es', 'cs', 'ss', 'ds', 'fs', 'gs')      # isla prints the register seg_visibles (vector(6, dec, bits(16))) as (_ vec v0 .. v5), element i = rt/fnvl.h SEG_* i (checked: push ds / es / gs proved only in this order)
 
-def run_isla(code, timeout=600, sym=None):
+def run_isla(code, timeout=600, sym=None, ctrs=None):
     """raw isla output (stdout, stderr) for one encoding, from the on-disk cache when present.  sym = (ranges, eip_sym): a SHAPE run, see sym_constraint"""
     _need()
     if not os.path.exists(IR): raise RuntimeError('missing %s: run ports/fnv-nx/farm/sail_build.sh' % IR)
-    args = list(SEG_FREE if SYMSEL else SEG) + sum([['--probe', f] for f in ERRFNS], []) + sum([['-L', f] for f in LINEARIZE], [])
+    args = list(SEG_FREE if SYMSEL else SEG)
+    if ctrs is not None:      # the control registers of the run (17 words, CR0 = element 0, CR4 = element 4: config.sail __SetConfig): proof/udsail.py's system-state variants
+        assert len(ctrs) == 17; args[args.index('ctrs=[#x0000000000000000; 17]')] = 'ctrs=[%s]' % ', '.join('#x%016x' % w for w in ctrs)
+    args += sum([['--probe', f] for f in ERRFNS], []) + sum([['-L', f] for f in LINEARIZE], [])
     cons = sym_constraint(code, *sym) if sym else ''
     key = hashlib.sha256(('|'.join([ir_sha(), hashlib.sha256(open(CFG, 'rb').read()).hexdigest(), ' '.join(args), code.hex(), str(ADDR), 'v1'] + ([str(timeout)] if timeout != 600 else []) + ([cons] if sym else []))).encode()).hexdigest()
     os.makedirs(CACHE, exist_ok=True); base = os.path.join(CACHE, key)

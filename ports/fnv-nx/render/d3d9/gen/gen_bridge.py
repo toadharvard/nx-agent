@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""gen_bridge.py OUT SPEC.json BRIDGEFACTS_D3D9_DIR: the guest bridge of our d3d9.dll, generated from the interface table (nothing per method).
-  The rows for the platform's bridge.tsv are D9_ROWS of the tool root bridgefacts (bridgefacts/d3d9/d9rows.py, which holds the slot and return rules used here).
+"""gen_bridge.py OUT SPEC.json D9_ROWS.tsv: the guest bridge of our d3d9.dll, generated from the interface table (nothing per method).
+  The slot and return rules are D9_ROWS of the tool root bridgefacts (bridgefacts/d3d9/d9rows.py, the one source; the platform's bridge.tsv rows). This file takes the rows as a declared input and
+  checks every thunk against its row (the number of stack slots, void or not): a method without a row, or a thunk that disagrees with it, stops the generator.
   OUT/d9bridge.gen.cpp    the thunks (extern "C", arguments = the stack slots in order), the key tables and nx_bridge_keytab (dev/face.h).
 Rules (total over the spec's item kinds; an item this file has no rule for stops the generator with exit 2):
   value / enum / flags / ohandle by value   one slot `i` (size must be 4);   float by value   one slot `f`
@@ -12,15 +13,15 @@ Rules (total over the spec's item kinds; an item this file has no rule for stops
                             object model makes on it (AddRef / Release) go through nxd3d_app_* (dev/app_unk_guest.cpp -> fnvnx_guest_invoke of L3a)
   ret: void `v`, float `f` (x87 ST0 on the guest side), everything else one 32-bit `i` (HRESULT, counts, enums, opaque handles)."""
 import json, os, sys
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-sys.path.insert(0, sys.argv[3])   # the directory of bridgefacts/d3d9 (the spec json, d9rows.py): an input of the stage
-from d9rows import die, slot_of, ret_of  # noqa: E402
+def die(msg): sys.stderr.write("gen_bridge: " + msg + "\n"); sys.exit(2)
+
+
+ROWS = {}   # native_symbol -> (ret, args): the bridge row of every thunk (D9_ROWS)
+for _l in open(sys.argv[3]).read().splitlines():
+    _c = _l.split("\t"); ROWS[_c[6]] = (_c[4], _c[5])
 from gen_impl import cname  # noqa: E402
-import gen_expr  # noqa: E402
-gen_expr.use_spec(sys.argv[3])
 from gen_expr import Ctx  # noqa: E402
-REFS = ("REFIID", "REFGUID")
+from gen_expr import REFS  # noqa: E402
 
 
 
@@ -30,7 +31,6 @@ def thunk(spec, what, sym, m, callee, this_t):
     if this_t: decl.append("void* nxb_this"); pre.append(f"{this_t}* o = ({this_t}*)nx_unface_this(nxb_this);")
     for p in P:
         n, k, ct = p["name"], p["kind"], p["ctype"]
-        slot_of(what, p)
         if ct in REFS: decl.append(f"const GUID* {n}"); args.append(f"*{n}"); continue
         if k == "handle" and not p["byref"]:
             if p["dir"] != "in": die(f"{what}: handle {n} by value with dir {p['dir']} has no rule")
@@ -54,6 +54,8 @@ def thunk(spec, what, sym, m, callee, this_t):
                 args.append(f"nxb_a_{n}"); continue
             if as_ != "ohandle": die(f"{what}: canon {as_} of {n} has no rule")
         decl.append(f"{ct} {n}"); args.append(n)
+    if sym not in ROWS: die(f"{what}: no bridge row {sym} in D9_ROWS")
+    if len(decl) != len(ROWS[sym][1]) or (m["ret"] == "void") != (ROWS[sym][0] == "v"): die(f"{what}: the thunk ({len(decl)} slots, ret {m['ret']}) disagrees with its row {ROWS[sym]}")
     call = f"{callee}({', '.join(args)})"; ret = m["ret"]; L = [f"{ret} {sym}({', '.join(decl) or 'void'}) {{"] + ["    " + x for x in pre]
     if m.get("ret_kind") == "handle": L.append(f"    return ({ret})nx_face((IUnknown*){call});") if not post else die(f"{what}: handle return with out handles has no rule")
     elif ret == "void": L += [f"    {call};"] + ["    " + x for x in post]

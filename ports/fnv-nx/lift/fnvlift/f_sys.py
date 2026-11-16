@@ -350,6 +350,54 @@ def nop_gap(b):
     return NopIns(b[:n], pfx, b[i + 1], m)
 
 
+class UdIns(NopIns):
+    """a decoded-by-rule #UD: a byte sequence capstone refuses, decided #UD by the pinned Sail model (proof/udsail.py).  It executes nothing, so core.dispatch raises FNVL_UD at it"""
+    mnemonic = '(ud)'
+    ud_gap = True
+
+    def __init__(self, raw, pfx):
+        self.bytes, self.size = bytes(raw), len(raw)
+        self.opcode = [raw[len(pfx)], 0, 0, 0]
+        self.modrm = raw[len(pfx) + 1] if len(raw) > len(pfx) + 1 else 0
+        self.prefix = [0, 0, 0x66 if 0x66 in pfx else 0, 0x67 if 0x67 in pfx else 0]
+
+
+_UD_ROWS = {}
+
+
+def _ud_rows():
+    from . import inputs
+    path = inputs.get('udsail')
+    if path not in _UD_ROWS:
+        rows = []
+        for ln in open(path):
+            if ln.startswith('#') or not ln.strip():
+                continue
+            h, verdict, _extent, cls = ln.rstrip('\n').split('\t')[:4]
+            assert verdict == 'UD' and cls in ('sail', 'feature'), ln
+            rows.append((bytes.fromhex(h), cls))
+        _UD_ROWS[path] = rows
+    return _UD_ROWS[path]
+
+
+def ud_gap(b):
+    """the byte sequence `b` that capstone refuses, as a UdIns when the pinned Sail model decided it #UD on the bytes up to its decode extent (a row of the udsail input: the row's bytes are a prefix of b), else None (undecided: the caller reports a bad decode)"""
+    b = bytes(b)
+    for r, cls in _ud_rows():
+        if b.startswith(r):
+            i = 0
+            while r[i] in WINE_PREFIX:
+                i += 1
+            u = UdIns(r, r[:i]); u.ud_class = cls      # `feature`: the class is decided, the site still needs its call-graph certificate (CLAUDE.md, the declared CPU)
+            return u
+    return None
+
+
+def decode_gap(b):
+    """the one decoder completeness rule for a sequence capstone refuses: reserved-NOP space (nop_gap), else a Sail-decided #UD (ud_gap), else None"""
+    return nop_gap(b) or ud_gap(b)
+
+
 # ---- LOCK validity (for core.lift2, which strips the `lock ` word) ---------------------------------------------------------------------------------------------------
 LOCKABLE = ('add', 'adc', 'and', 'btc', 'btr', 'bts', 'cmpxchg', 'cmpxchg8b', 'dec', 'inc', 'neg', 'not', 'or', 'sbb', 'sub', 'xor', 'xadd', 'xchg')
 

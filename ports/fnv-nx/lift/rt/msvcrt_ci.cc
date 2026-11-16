@@ -16,6 +16,7 @@
    The platform function used: `int *_errno(void)` (platform/crt/heap.c, bridge row msvcrt.dll _errno, bind lookup): the address of the calling thread's errno, written with the MSVC values EDOM = 33, ERANGE = 34 (the
    same numbers as the platform's newlib / glibc errno.h). Nothing else is called. */
 #include "fnvl.h"
+#include "fnvnx_export.h"
 extern "C" void *fnvnx_win32_lookup_export(const char *dll, const char *name);      /* the platform's own table of its msvcrt exports: the same lookup the import entry of the row uses (resolved for every lookup row before the first guest instruction: fnvnx_lift_imports_init) */
 enum { CI_EDOM = 33, CI_ERANGE = 34 };
 
@@ -39,7 +40,8 @@ static void ci_errno(double r, double a, double b, u32 fl, int nandom) {
     double r_ = FN(a_, &f_); \
     ci_errno(r_, a_, 0.0, f_, NANDOM); \
     dyn_push(fv_f64(r_)); FM_FL(f_); \
-    c->ra = ra; esp += 4; }
+    c->ra = ra; esp += 4; } \
+  FNVNX_EXPORT("msvcrt.dll", "_CI" #NAME, fnvl_msvcrt_CI##NAME, "func");
 #define CI2(NAME, FN) \
   extern "C" void fnvl_msvcrt_CI##NAME(void) { \
     u32 ra = M32(esp), f_ = 0; \
@@ -47,7 +49,8 @@ static void ci_errno(double r, double a, double b, u32 fl, int nandom) {
     double r_ = FN(a_, b_, &f_); \
     ci_errno(r_, a_, b_, f_, 0); \
     dyn_push(fv_f64(r_)); FM_FL(f_); \
-    c->ra = ra; esp += 4; }
+    c->ra = ra; esp += 4; } \
+  FNVNX_EXPORT("msvcrt.dll", "_CI" #NAME, fnvl_msvcrt_CI##NAME, "func");
 
 CI1(acos, fnvl_m_acos, 0)
 CI1(asin, fnvl_m_asin, 1)

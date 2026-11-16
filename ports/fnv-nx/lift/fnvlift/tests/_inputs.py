@@ -3,25 +3,28 @@ import os, sys, tempfile
 LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, LIFT)
 X86SYS = os.path.join(os.path.dirname(LIFT), 'platform', 'declared', 'x86sys.json')
+CPUMODEL = os.path.join(os.path.dirname(LIFT), 'verify', 'cpuid_model.json')
 
 
-_CPUFEAT = []
+_SDMROWS = []
 
 
-def cpufeat_arg():
-    """the table path: `--cpufeat PATH` of the test's own command line (removed from argv); no default, a missing argument is an error"""
-    if _CPUFEAT:
-        return _CPUFEAT[0]
-    if '--cpufeat' not in sys.argv or sys.argv.index('--cpufeat') + 1 >= len(sys.argv):
-        raise SystemExit('missing --cpufeat PATH (the CPUID feature-bit table, L3b cpuid_feature_bits.tsv)')
-    i = sys.argv.index('--cpufeat'); p = sys.argv[i + 1]; del sys.argv[i:i + 2]; _CPUFEAT.append(p); return p
+def sdmrows_arg():
+    """the table path: `--sdmrows PATH` of the test's own command line (removed from argv); no default, a missing argument is an error"""
+    if _SDMROWS:
+        return _SDMROWS[0]
+    if '--sdmrows' not in sys.argv or sys.argv.index('--sdmrows') + 1 >= len(sys.argv):
+        raise SystemExit('missing --sdmrows PATH (sdmfeat.py dumprows JSON)')
+    i = sys.argv.index('--sdmrows'); p = sys.argv[i + 1]; del sys.argv[i:i + 2]; _SDMROWS.append(p); return p
 
 
-def configure(cpufeat=None):
+def configure(sdmrows=None, udsail=None):
     from fnvlift import inputs
     d = tempfile.mkdtemp(prefix='lifter-inputs-')
     open(d + '/universe.tsv', 'w').close(); open(d + '/depth.tsv', 'w').close()
     import json
+    if udsail is None:
+        udsail = d + '/udsail.tsv'; open(udsail, 'w').write('# fnvnx-udsail/2\n')      # no refused or undefined sequence in a buffer test
     json.dump({'format': 'fnvnx-segwrites/2', 'images': {'buf': {n: {'guard': n == 'gs'} for n in ('es', 'ds', 'fs', 'gs')}}}, open(d + '/segwrites.json', 'w'))      # a buffer has no write site of a segment register
-    inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=X86SYS, cpufeat=cpufeat or cpufeat_arg(), segwrites=d + '/segwrites.json', image='buf')
+    inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=X86SYS, sdmrows=sdmrows or sdmrows_arg(), cpumodel=CPUMODEL, udsail=udsail, segwrites=d + '/segwrites.json', image='buf')
     from fnvlift import core; from proof import lift_dsl; core.set_emit(lift_dsl.emit_form)      # the proven Forms are the one path for the mnemonics they cover

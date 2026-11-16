@@ -26,7 +26,8 @@
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
-    "ports/fnv-nx/verify/cpuid_model.json"
+    "ports/fnv-nx/verify/cpuid_model.json",
+    "ports/fnv-nx/lift/proof"
    ],
    "outputs": [
     "gen/guest.cc",

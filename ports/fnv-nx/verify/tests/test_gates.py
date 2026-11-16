@@ -57,7 +57,7 @@ def put(d, rel, text, mode=None):
 def gate(script, cwd, args):
     out = tempfile.mkdtemp(dir=ROOT, prefix="out-")
     p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, script)] + args, cwd=cwd, capture_output=True, text=True,
-                       env=dict(os.environ, GATE_OUT=out, GATE_COMMIT="0" * 40))
+                       env=dict(os.environ, GATE_OUT=out))
     res = None
     for f in sorted(x for x in os.listdir(out) if not x.endswith(".times.json")):
         res = json.load(open(os.path.join(out, f)))

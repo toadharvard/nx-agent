@@ -16,12 +16,15 @@ Depends only on the accepted OWNER item 1 (the compiler is correct): the symbol 
 import os
 
 
-def judge(results):
+def judge(results, test_roots=()):
     """RESULTS {root: objects dict of a green build} -> (items [(id, "test")], findings [(id, "test", kind, detail)], stats dict).
-    One item per declared test and one `<root>:product-units` item per root; stats: tests_total, tests_with_doubles, double_symbols."""
-    product = {}   # symbol -> sorted product objects (repo-relative) defining it, over all roots
+    TEST_ROOTS: the keys of RESULTS that are roots of admit class `test` (the whole root is a test: every object of it is test code); every other key is a
+    product root. One item per declared test, one `<root>:product-units` item per product root and one `<root>:test-root` item per test root; stats:
+    tests_total, tests_with_doubles, double_symbols. A test root is judged like a declared test: (symbols its objects define) INTERSECT (symbols the objects of
+    all product roots define) = EMPTY (`test-double`); its objects are not product objects, so they never count in the product set."""
+    product = {}   # symbol -> sorted product objects (repo-relative) defining it, over all product roots
     items, finds, doubles, with_doubles, total = [], [], 0, 0, 0
-    for root in sorted(results):
+    for root in sorted(r for r in results if r not in test_roots):
         res, strong = results[root], {}
         pid = root + ":product-units"
         items.append((pid, "test"))
@@ -32,7 +35,15 @@ def judge(results):
                 strong.setdefault(d["symbol"], set()).add(obj)
         for sym in sorted(s for s, o in strong.items() if len(o) > 1):
             finds.append((pid, "test", "product-duplicate", "%s is defined by %s" % (sym, ", ".join(sorted(strong[sym])))))
-    for root in sorted(results):
+    for root in sorted(r for r in results if r in test_roots):
+        tid, total = root + ":test-root", total + 1
+        items.append((tid, "test"))
+        bad = [(s, sorted(product[s])) for s in sorted({d["symbol"] for d in results[root]["defined"]}) if s in product]
+        doubles += len(bad)
+        with_doubles += bool(bad)
+        for s, objs in bad:
+            finds.append((tid, "test", "test-double", "%s defined by the test root is a symbol of product object %s" % (s, ", ".join(objs))))
+    for root in sorted(r for r in results if r not in test_roots):
         res = results[root]
         units = set(res["units"])
         for t in res.get("tests", []):

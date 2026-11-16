@@ -17,10 +17,9 @@ Deterministic: sorted iteration, no clocks or paths in the outputs. Inputs: expl
 (exe-derived: they go to the private fnv-nx-build repository, never into this one)."""
 import argparse, collections, glob, hashlib, json, multiprocessing as mp, os, re, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
-LIFT = os.path.dirname(HERE)      # the lift/ directory (fnvlift/, rt/); under a recipe stage the tool root is /tool and lift/ is a declared input: --lift DIR
-if '--lift' in sys.argv: LIFT = sys.argv[sys.argv.index('--lift') + 1]
+LIFT = sys.argv[sys.argv.index('--lift') + 1] if '--lift' in sys.argv else None      # the lift/ directory (fnvlift/, rt/, proof/): a declared input of the stage, always an argument (no default from this file's place)
 for p in (HERE, LIFT):
-    sys.path.insert(0, p)
+    if p: sys.path.insert(0, p)
 BATCH = 60
 ENCS = 4            # encodings listed per form (encs.tsv): the distinct byte strings at the lowest addresses; the universe of the retired one-instruction harness
 NBUCKET = 4096
@@ -127,8 +126,9 @@ def sha(path):
 
 def lifter_tree():
     """sha256 over (path, content) of every file the generated text is a function of: the lifter package, the runtime headers it inlines and the generator tools"""
+    if LIFT is None: raise SystemExit('liftgen: --lift DIR (the declared lifter tree) is required')
     fs = [(os.path.relpath(f, LIFT), f) for f in glob.glob(LIFT + '/fnvlift/*.py') + glob.glob(LIFT + '/fnvlift/*/*.py') + glob.glob(LIFT + '/rt/*.h') + [LIFT + '/proof/__init__.py', LIFT + '/proof/shape.py']]
-    fs += [('tools/%s.py' % n, '%s/%s.py' % (HERE, n)) for n in ('liftgen', 'impgen', 'dispgen', 'formcert')]      # names, not paths: the same under a stage (/tool) and in a checkout
+    fs += [('tools/%s.py' % n, os.path.join(HERE, n + '.py')) for n in ('liftgen', 'impgen', 'dispgen', 'formcert')]      # names, not paths: the same under a stage (/tool) and in a checkout
     h = hashlib.sha256()
     for k, f in sorted(fs): h.update(k.encode() + b'\0' + hashlib.sha256(open(f, 'rb').read()).digest())
     return h.hexdigest()
@@ -257,15 +257,15 @@ def main():
     A('--lift', help='the lift/ directory (fnvlift/, rt/) when it is not the parent of this tool (a recipe stage mounts it as a declared input)')
     A('--image', action='append', default=[], metavar='DIR=UNIVERSE.tsv', help='finish: one image (exe and every module row): its shard directory and its universe')
     A('--fpstate', help='directory of the fp-state facts (invariants.tsv)')
-    A('--certs', help='the directory of the form certificates (proof/prove.py output; shard mode)'); A('--fpdepth', help='the x87 stack-depth facts (depth.tsv)'); A('--cpufeat', help='the CPUID feature-bit table (L3b cpuid_feature_bits.tsv)'); A('--segwrites', help='the per-image write sites of the data segment registers (lift/facts SEGWRITES)'); A('--x86sys', help='the declared x86 system record (platform X86SYS output)')
+    A('--certs', help='the directory of the form certificates (proof/prove.py output; shard mode)'); A('--fpdepth', help='the x87 stack-depth facts (depth.tsv)'); A('--sdmrows', help='the SDM opcode rows (sdmfeat.py dumprows JSON)'); A('--cpumodel', help='the declared CPU data (verify/cpuid_model.json)'); A('--udsail', help='the Sail #UD verdicts (proof/udsail.py output): read only when a refused sequence or a form with no SDM row is met'); A('--segwrites', help='the per-image write sites of the data segment registers (lift/facts SEGWRITES)'); A('--x86sys', help='the declared x86 system record (platform X86SYS output)')
     a = ap.parse_args()
-    need = ['out'] + (['exe', 'modules', 'image'] if a.finish else ['fpstate', 'fpdepth', 'x86sys', 'cpufeat', 'segwrites', 'certs'] + (['modules', 'moddirs', 'facts_out', 'module'] if a.module else ['exe', 'universe']))      # --finish merges texts and reads no lifter input but the universe files
+    need = ['out'] + (['exe', 'modules', 'image'] if a.finish else ['fpstate', 'fpdepth', 'x86sys', 'sdmrows', 'cpumodel', 'segwrites', 'certs'] + (['modules', 'moddirs', 'facts_out', 'module'] if a.module else ['exe', 'universe']))      # --finish merges texts and reads no lifter input but the universe files
     miss = ['--' + k.replace('_', '-') for k in need if getattr(a, k) is None]
     if miss: ap.error('missing %s' % ' '.join(miss))
     a.base = None
     if a.module: module_inputs(a)
     import fnvlift
-    if not a.finish: fnvlift.inputs.configure(universe=a.universe, fpstate=a.fpstate, fpdepth=a.fpdepth, x86sys=a.x86sys, cpufeat=a.cpufeat, segwrites=a.segwrites, image=os.path.splitext(a.module)[0].lower() if a.module else 'exe')      # finish merges texts: it reads no lifter input
+    if not a.finish: fnvlift.inputs.configure(universe=a.universe, fpstate=a.fpstate, fpdepth=a.fpdepth, x86sys=a.x86sys, sdmrows=a.sdmrows, cpumodel=a.cpumodel, segwrites=a.segwrites, **({'udsail': a.udsail} if a.udsail else {}), image=os.path.splitext(a.module)[0].lower() if a.module else 'exe')      # finish merges texts: it reads no lifter input
     os.makedirs(a.out, exist_ok=True)
     if a.finish: finish(a)
     elif a.shard: shard(a)

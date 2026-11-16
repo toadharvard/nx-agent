@@ -14,7 +14,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 V = os.path.dirname(HERE)
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(V)))
 sys.path.insert(0, V)
-import targets  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: `verify` is imported by its qualified name
+from verify import targets  # noqa: E402
+import recipe  # noqa: E402
 
 FAILED = []
 
@@ -36,7 +38,7 @@ def objdump_count(spec, tool):
     with tempfile.TemporaryDirectory(prefix="sha-isa-") as d:
         store, ext = os.environ.get("GATE_CACHE", "/tmp/v12/cache"), None
         cmd = [sys.executable, "-I", os.path.join(V, "recipe.py"), "build", "--root", spec, "--store", os.path.join(store, "store"),
-               "--ext", os.path.join(store, "external"), "--out", d, "--jobs", "4", "--artifacts", os.environ["ARTIFACTS_URL"]]
+               "--ext", recipe.ext_dir(store), "--out", d, "--jobs", "4", "--artifacts", recipe.artifacts_url(recipe.ext_dir(store))]
         r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
         if r.returncode:
             return None, r.stdout + r.stderr

@@ -83,7 +83,6 @@ check("a malformed image row is an error", G.judge(d)[3] is not None)
 # wiring: the loader root's MODULES_TSV is read from the published out dir; absent is an error
 import json as _j, tempfile as _t
 w = _t.mkdtemp()
-os.environ["GATE_COMMIT"] = "HEAD"   # the tree key of the published objects: the checkout the test runs in
 os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", ".."))
 TREE = G.gate_build.tree_of(".")
 base = os.path.join(w, "objects", TREE, G.LOADER_ROOT.replace("/", "__"))

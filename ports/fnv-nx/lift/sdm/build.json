@@ -1,0 +1,39 @@
+{
+ "format": "fnvnx-recipe/1",
+ "external": [
+  {
+   "name": "sdm",
+   "repo": "fnv-nx-build",
+   "ref": "tools/intel-sdm",
+   "commit": "0768b0baf29a625871084414338c12f65d0f2cc8",
+   "tree_sha256": "07c5cdf925d7c929a81d0819a409667b212a307a89a90d5bdd04e1bf82e9b389",
+   "at": "/ext/sdm"
+  }
+ ],
+ "run": [
+  {
+   "name": "sdmtext",
+   "exec": "/usr/bin/pdftotext",
+   "args": [
+    "-layout",
+    "/in/1",
+    "/out/sdm.txt"
+   ],
+   "inputs": [
+    {
+     "external": "sdm",
+     "path": "intel-64-ia-32-sdm-combined.pdf"
+    }
+   ],
+   "debs": [
+    "poppler-utils"
+   ],
+   "outputs": [
+    "sdm.txt"
+   ]
+  }
+ ],
+ "outputs": {
+  "SDM_TEXT": "sdm.txt"
+ }
+}

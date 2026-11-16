@@ -16,10 +16,8 @@
  * files <dir>/frame_%06u.rgba (the whole swapchain image, RGBA8, top row first) and <dir>/frame_%06u.txt
  * ("width height") are written; a file that cannot be written makes the call BAD_CALL and no hook runs).
  *
- * The software cursor (NxPresent.cursor, rule in nxgpu4.h) is blended onto the swapchain image after the back
- * buffer rect was written and before the frame file / the hook, on the CPU: one read of the clipped rect, the exact
- * integer rule out = (s * a + d * (255 - a) + 127) / 255 per colour channel (round to nearest, no ties exist), one
- * upload. A cursor entirely outside the swapchain image changes nothing.
+ * The software cursor (NxPresent.cursor, rule P2 of nxgpu4.h, Wine 9.0 cs.c wined3d_cs_exec_present) is stamped into the SOURCE image before the present blit (gl4_scale.c gl4_cursor_stamp): the
+ * cursor texels whose alpha is not 0 replace the image's texels, so the gamma ramp of the blit applies to them and the image keeps the cursor. A cursor entirely outside the image changes nothing.
  *
  * NXGPU_FN_WAIT_VBLANK: GL on a surfaceless context has no display. The host reference models the output as a 60 Hz
  * panel whose vertical blanks are the instants k * 10^9 / 60 ns (k integer) of CLOCK_MONOTONIC; the call returns at the
@@ -47,36 +45,6 @@ int gl4_swap_zero(void) {
     p_glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     p_glTextureSubImage2D(sw->tex, 0, 0, 0, sw->w, sw->h, GL_RGBA, GL_UNSIGNED_BYTE, z);
     free(z);
-    return p_glGetError() != 0;
-}
-
-/* the cursor of NxPresent (BGRA bytes, top row first) over the swapchain image, clipped; ramp: the gamma ramp or NULL */
-static int blend_cursor(const Gl4Image* sw, const NxPresent* p, const uint8_t* px, const uint16_t* ramp) {
-    int64_t x0 = p->cx < 0 ? 0 : p->cx, y0 = p->cy < 0 ? 0 : p->cy, x1 = (int64_t)p->cx + p->cw, y1 = (int64_t)p->cy + p->ch;
-    if (x1 > sw->w) x1 = sw->w;
-    if (y1 > sw->h) y1 = sw->h;
-    if (x0 >= x1 || y0 >= y1) return 0;
-    uint32_t w = (uint32_t)(x1 - x0), h = (uint32_t)(y1 - y0);
-    uint8_t* buf = (uint8_t*)malloc((size_t)w * h * 4);
-    if (!buf) return 1;
-    p_glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    p_glPixelStorei(GL_PACK_ROW_LENGTH, 0);
-    p_glGetTextureSubImage(sw->tex, 0, (GLint)x0, (GLint)y0, 0, (GLsizei)w, (GLsizei)h, 1, GL_RGBA, GL_UNSIGNED_BYTE, (GLsizei)(w * h * 4), buf);
-    for (uint32_t j = 0; j < h; j++)
-        for (uint32_t i = 0; i < w; i++) {
-            const uint8_t* s = px + ((size_t)(y0 - p->cy + j) * p->cw + (size_t)(x0 - p->cx + i)) * 4;   /* B G R A */
-            uint8_t* d = buf + ((size_t)j * w + i) * 4;
-            uint32_t a = s[3];
-            for (int c = 0; c < 3; c++) {
-                uint32_t v = s[2 - c];
-                if (ramp) v = ramp[c * 256 + v] >> 8;
-                d[c] = (uint8_t)((v * a + d[c] * (255 - a) + 127) / 255);
-            }
-        }
-    p_glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    p_glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    p_glTextureSubImage2D(sw->tex, 0, (GLint)x0, (GLint)y0, (GLsizei)w, (GLsizei)h, GL_RGBA, GL_UNSIGNED_BYTE, buf);
-    free(buf);
     return p_glGetError() != 0;
 }
 
@@ -112,6 +80,7 @@ uint64_t gl4_api_present(uint64_t a) {
         gl4_err("present: bad image %u, rects, interval %u or gamma ramp", p->image, p->interval);
         return NXGPU_BAD_CALL;
     }
+    if (cur && gl4_cursor_stamp(src, p->cx, p->cy, p->cw, p->ch, cur)) { gl4_err("present: cursor"); return NXGPU_BAD_CALL; }
     Gl4Image t = *src;
     GLuint tmp = 0;
     if (src->samples > 1) { tmp = gl4_resolve_tex(src); t.tex = tmp; t.target = GL_TEXTURE_2D; t.samples = 1; }
@@ -120,7 +89,6 @@ uint64_t gl4_api_present(uint64_t a) {
     while (p_glGetError()) {}
     gl4_scale_point(&s, &d, ramp);
     if (tmp) p_glDeleteTextures(1, &tmp);
-    if (cur && blend_cursor(sw, p, cur, ramp)) { gl4_err("present: cursor"); return NXGPU_BAD_CALL; }
     p_glFinish();
     if (p_glGetError()) { gl4_err("present: GL error"); return NXGPU_BAD_CALL; }
     const char* dir = getenv("NXGL4_FRAMES");

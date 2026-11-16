@@ -5,6 +5,7 @@
    fields (leaf 1 EBX, leaf 4 EAX), the SDM rule for a leaf above the maximum, and the TSC. A leaf above the max of its range returns the data of the highest basic leaf (Intel SDM, CPUID: "if a value entered for
    CPUID.EAX is higher than the maximum input value for basic or extended function ... the data for the highest basic information leaf is returned"), i.e. leaf 4 with the given subleaf. */
 #include "fnvl_abi.h"
+#include "fnvnx_export.h"
 #include "fnvnx/placement.h"   /* FNVNX_NPROC: the one declaration of the declared machine's processor count (L5, hostabi/include) */
 /* Leaf 1 EBX: [31:24] initial APIC id 0 (the boot thread's; per-thread ids are the platform's), [23:16] maximum addressable IDs for logical processors in the package
    = FNVNX_NPROC (3 cores x 1 thread; valid because EDX bit 28 HTT is set), [15:8] CLFLUSH line size in 8-byte units (8 = 64 bytes), [7:0] brand index 0. */
@@ -55,4 +56,5 @@ unsigned long long fnvl_rdtsc(void) {
 
 /* msvcrt!_adjust_fdiv (a data export: the import slot holds the address of this object). The C runtime sets it to 1 at start-up on a CPU with the
    Pentium FDIV flaw and compiled code tests it before a division; the reference CPU divides correctly, so the value is 0 and nothing writes it. */
+FNVNX_EXPORT("msvcrt.dll", "_adjust_fdiv", fnvl_msvcrt_adjust_fdiv, "data");
 int fnvl_msvcrt_adjust_fdiv = 0;
