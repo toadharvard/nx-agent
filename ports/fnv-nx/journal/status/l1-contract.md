@@ -2186,3 +2186,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - va_forwarders = msvcrt_va.tsv column 2.
   - Native-to-native va_list calls (_vsnprintf → fnvnx_msvc_format/scan, L5 w24 05f2207) are not judged.
   - No new file and no new rows. Assigned to w28.
+- L2 CTYPE-FE fix, rule DECLTYPE-BUILTIN:
+  - Under C++, records of undeclared builtin types keep their FIELD_DECL names; only the artificial base and vptr fields of source classes stay `-`.
+  - Head 0e9b4bcc6 on cand4b.
+  - Its C-vs-C++ test (test_layout decltype_cxx) runs in the cand4b farm job.
+  - After that, L5 re-measures fnvnx_msvc_format/scan on the new pin.
