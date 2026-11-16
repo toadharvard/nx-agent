@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gate "linkstrict" (fnvnx-gate/1, class 3 of VERDICT.md): no symbol is unresolved or substitutable. Decides on symbol tables only.
-    python3 -I gate_linkstrict.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/linkstrict.json
+    python3 -I gate_linkstrict.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/linkstrict.json
 Roots come from verify/admit.json: for every product root the gate calls gate_build.ensure(root, GATE_CACHE) and reads the ELF `.symtab` of
 its objects (relocatable) and of its linked ELF, never a name's text. Rules:
   (a) a root that links an ELF (the linked output of every product and test root, whatever flags the link used): the ELF has no undefined

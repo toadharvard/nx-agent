@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gate "objstub" (fnvnx-gate/1, classes 1 and 2 of VERDICT.md): no built function holds a trap/abort path or is vacuous (rules and proofs: objstub.py).
-    python3 -I gate_objstub.py [--jobs N]     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/objstub.json
+    python3 -I gate_objstub.py [--jobs N]     cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/objstub.json
 Roots come from verify/admit.json, never from arguments: for every product root the gate calls gate_build.ensure(root, GATE_CACHE) (build or
 cache hits) and judges what the recipe says (RECIPE.md): the objects (os_layer ones may hold SVC), the constants table (key (unit, symbol))
 and the terminator set DERIVED from the recipe's compiler: objstub.unit_terminators runs the compiler's own plugin over the preprocessed text
@@ -119,7 +119,7 @@ def declared_pins(repo, cache):
     def tree(key):
         e = pin[key]
         return recipe.fetch_externals([{"name": key, "commit": e["commit"], "tree_sha256": e["tree_sha256"], "at": key}], os.path.join(cache, "store"),
-                                      os.path.join(cache, "external"), os.path.join(cache, "ws-declared"))[key]["host"]
+                                      recipe.ext_dir(cache), os.path.join(cache, "ws-declared"))[key]["host"]
     return (lambda: objstub.std_index_load(tree("std_index"), pin["std_index"])), (lambda: objstub.winerror_load(tree("wdk"), pin["wdk"]))
 
 
