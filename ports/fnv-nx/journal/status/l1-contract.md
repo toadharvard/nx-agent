@@ -2632,3 +2632,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - cand4 scope: w28-c4 (all those L1 recipe forms, '!rt', shard), plus lib/sha256, hostabi and tests/bootrt with their admit entries, plus L2's DATAMODEL. If L6's 13 roots pass recipe check on that head, they join the same farm verdict.
 - bottleneck: w28-c4 head.
 - w28: f3632f357 pushed. The test_gate_imports stage-B rewrite is at 6b9efa810 on w28's line, with the real exportgen, fnvnx_export.h and decltype_spell.inc; name_table and msvcrt_names.tsv are gone. Status: farm run pending. It goes into cand4 with the stage-B series via w28-c4.
+
+## 2026-11-16 06:15
+- w13 (L3a): plugin:fnvnx_names does not compile on base3 be2f01990, which makes descclass/defdisp and every full-plugin-set test red. Cause: the pinned compiler (guest_compiler.json, 84f0883e7, repinned 11-15 20:39) predates L2's msvcmodel.patch changes ae8d87972/72af9ba51 (NAMES-FNPARM), so its plugin headers lack the new macros. plugin_env correctly uses the pinned compiler's headers. Missing rule, owner L2: the compiler the recipe runs is the build of the tree's toolchain sources. Either via recipe path (a), so it holds by construction, or a manifest check that turns a stale pin red (compiler-pin-stale). The trunk fac693694 is unaffected: no root declares plugins.
+- bottleneck: w28-c4 head (cand4).
