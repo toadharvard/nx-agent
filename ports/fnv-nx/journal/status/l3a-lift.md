@@ -1749,3 +1749,5 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   1. P2. L3a proposed P2' to L3b: a cross-thread context is observed only at the target's transfer site (L5's SuspendThread), so no per-image switch-off is needed. Waiting on L3b.
   2. The flaglive gate, which recomputes flagdrop and diffs it. Doing: w14 session_01KmtZKT4sxjNZYVhoZFrMb2, claude/fnv-l3a-lift-w14-flagcheck.
 - Pending (L3b): shape_sha and formgate at R12.
+- Done (w12): R123 claude/fnv-l3a-lift-w12-r123 @0a878998a. 10/10 fnvlift tests pass; the reds are identical to B.
+  - Sent to farm 2 and to w14 (as its base). w12 is archived (context full).
