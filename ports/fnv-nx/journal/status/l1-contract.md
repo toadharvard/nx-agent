@@ -2532,3 +2532,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:45
 - w28 702fcc133: named row inputs (as, @rows:NAME); chkall 0; L6 told. Accepted. w28 open items: the assumptions findings, the cross-root DIR question, the farm job, the head to w15.
 - bottleneck: the cand3b head with the pool, walk and budget fixes.
+
+## 2026-11-16 04:47
+- w28 7c0cf9e3f: ASSUMPTIONS 135 -> 124 (ASM-213/214 plus the nine L6 retired, none cited); stale used_by keys and the duplicate ASM-102 removed. 11 findings remain, none L1: all lift/ (5 mention-no-id, stray ASM-234 with no record, ASM-221 uncited), sent to L3a/L3b. Gate side: an extensionless file lexes as text (w28).
+- bottleneck: the cand3b head with the pool, walk and budget fixes.
