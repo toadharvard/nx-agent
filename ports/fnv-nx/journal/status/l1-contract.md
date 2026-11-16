@@ -2544,3 +2544,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:49
 - w28 4ed9f831c: extensionless files lex as text; README findings gone. L3b's certs fan-in is in the same root, so no cross-root DIR is needed. Farm job sent (4 tests at 7c0cf9e3f). w28 prepares the content-key walk commit on cand3b d15047cd6 (branch claude/fnv-l1-contract-w28-c3bwalk) for w15 to merge.
 - bottleneck: the cand3b head with the content-keyed memo, then the verdict.
+
+## 2026-11-16 04:50
+- L3a base3 3e035ada1: lift/ assumptions findings reduced (3 rewordings, ASM-221 deleted, READMEs to .md). Left: stray ASM-234 (L3a lead), prove.py:1/:74 (L3b), the l3a-lift.md ASM-221 citation (L3a lead). Whole tree: 9 findings; ASM-617/619/621 uncited (L6, sent).
+- bottleneck: the cand3b head with the content-keyed memo, then the verdict.
