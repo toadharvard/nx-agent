@@ -1456,3 +1456,13 @@ Paused: w3b, w4, farm; no other work.
     - translator 8 (26/1)
     - gl4 BLOCKED: its input root hostabi@host is red under the per-target rule (outputs and units copies). Not ours; sent to w28, whose rule line cleans every recipe it judges.
     - The byte-identical check vs 9acd1223b and the real-env rerun follow (w6 running setup_verdict_env.sh).
+- 02:48Z b412d413d on its real env.json, after setup_verdict_env.sh. recipe check valid. Builds green from the store:
+    - d3d9 69 objects (run 0, hit 162)
+    - gl4shim 2 (0/6)
+    - smscan 1 (0/18)
+    - shaders/total 0 (0/1)
+    - pair 1 (0/12)
+    - translator 8 (0/27)
+    - bridgefacts 0 (0/4)
+    - gl4 blocked on hostabi@host (w28).
+  Outputs vs 9acd1223b are identical except: (a) the pair.c object hash, fa113600… vs aa46608a…; (b) D9_SPEC enum_values, which should already be in the base. w6 is tracing both from stage keys and disassembly, then runs test_env_ident.
