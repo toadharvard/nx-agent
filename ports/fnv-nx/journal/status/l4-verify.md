@@ -444,3 +444,8 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - farm1 session_01KmtZKSy2ykkoDJ6ctHodUe: doing. It runs the full boot gamedata install of 13 pins, measuring disk first.
   - Open at L1: contract/facts gen:2 (sympair_kinds.inc not mounted), and w12's head (link.entry, archive closure, bootguest admit row).
 - bottleneck: L1 contract/facts and the w12 head; farm1 install | w8 idle, farm1 working
+- 04:30: done: farm1 installed the boot gamedata green at 3e51a5ce1. 13 items, 6,538,172,426 bytes, sha checked against each MANIFEST.tsv and SHA256SUMS, about 502 s (farm/gamedata_fetch.sh, rc=0).
+  - Defect reported to L1 (its cause is fetchall): the cache is never freed. Peak cache was 19.09 GB and peak need about 27 GB for a 6.54 GB title, and the temp concat is left behind when the script dies. Rule: one item at a time, free each item's cache once it is verified.
+  - Pinned bytes (6,538,365,498) and installed bytes differ by 193,072; L1 asked to reconcile.
+  - farm1 archived: its queue is done. The boot farm reinstalls the title (about 8 min) once the ELF exists.
+- bottleneck: L1 contract/facts gen:2 and the w12 cand3 head; the L3a post-cand3 pack store | w8 idle, no farms
