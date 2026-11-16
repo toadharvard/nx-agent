@@ -1537,3 +1537,13 @@ Paused: w3b, w4, farm; no other work.
     - L1/w28 has also been asked for a recipe fix: --ext and extcache disagree for external_of.
 - 04:25Z farm1: sm_link at a75543b98 was killed at the 2 h limit (sm_link_prog link-3). There is no result. w6 is measuring the per-link cost (and whether objects are compiled twice) and making the shard count one generated parameter.
 - bottleneck: the sm_link shard split (w6), then the farm1 rerun; base3 retake; the cand4 base; L1 include_of.
+- 04:55Z w6-root 9e62a93ea merges w28 c071d7e1b.
+    - w28's lineage cuts render/ (f14ac37e9, 147 files). w6 resolved render/ and bridgefacts/d3d9 as ours; the render set is 218 files before and after. Reported to L1.
+    - Plugin rule: no L6 host root loads plugins, so no recipe change. recipe check valid on all 15 L6 roots.
+    - include_of replaces the restated include lists in the d3d9total stage, so the rule-2 item is closed. Execs are by name: python3, gcc, clang.
+    - L6 builds green.
+    - Blocked: d3d9total run:gate is red under w28's dangling-link rule (3de3eee4e). The dangling links are inside the pinned debs (tar /etc/rmt, the clang-18 lib link, doc and man links, tzdata). The rule is with L1/w28. It was 332/332 at 23884c5d0.
+    - bridgetable is red in lift/rt dispatch.c (owner L3a/L1).
+    - Gates: 0 render findings in pure and abspath; assumptions has no ASM-6xx finding.
+- sm_link: the 8 stage shards take 88-112 s cold; w6 is timing the link shards (commit 9e62a93ea).
+- bottleneck: the sm_link link cost (w6), then the farm1 rerun; the L1 dangling-link rule; base3 retake; the cand4 base.
