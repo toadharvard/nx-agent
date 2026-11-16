@@ -4,10 +4,10 @@
  "files": [
   {
    "path": "ports/fnv-nx/lift/tools/udcert.py",
-   "blob": "188730a94113e265c08d44b4566a56b2ae7fa73f",
-   "sha256": "b7f5a4a0035368787117e968a84e0b6013a37cb6b1fe6291285bdc1068137d4e",
+   "blob": "5b85e72b6cb1c7f9731102d82573c2a32d895977",
+   "sha256": "a88ff7e7f280ecc51954d1b09377efb35bdbc6fc5fa86864775eedd69ec8101e",
    "owner": "L3a",
-   "commit": "b686b191d94b7314ce173041f1dbd4e25ccab841"
+   "commit": "cf953325e6b54621f02ebc314c591dd52269f499"
   },
   {
    "path": "ports/fnv-nx/platform/declared/x86sys.json",

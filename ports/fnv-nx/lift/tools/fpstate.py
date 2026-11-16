@@ -15,7 +15,7 @@ A1  FCW / MXCSR LOAD SITES.  A load is `fldcw m16`, `ldmxcsr m32`, `fninit`/`fin
     Start values: thread entry (rt/enter.cc: FCW 0x027F, MXCSR 0x1F80, assumption ASM-219: every guest thread starts there).
 A2  READERS of sticky status: `fnstsw ax` (fpmodes.statclass: forward walk of the value through eax/ah/flags; cc-only = only C0-C3/TOP can influence anything), `fnstsw m16`, `fnstenv`,
     `fnsave`, `stmxcsr`, `fxsave` (the value escapes to memory: all bits observed), the imports _clearfp/_statusfp/_status87/_controlfp.  `fnclex` sites are listed.
-A3  OCCURRENCES: wait forms, MMX instructions, instructions whose CPUID feature the model (rt/cpumodel.c) does not have (fnvlift/f_cpufeat.py), with the handler that would take them.
+A3  OCCURRENCES: wait forms, MMX instructions, instructions whose CPUID feature the model (rt/cpumodel.c) does not have (proof/cpufeat.py), with the handler that would take them.
 Assumptions: ASM-219 above; ASM-003: an imported system function changes the x87/SSE control state only if it is one of the control imports above (the runtime implements the Win32/CRT
 surface, rt/imp.h); ASM-220: the CONTEXT image the runtime hands to guest SEH handlers is only read back by the runtime's own restore, which restores a snapshot of a state that was reachable."""
 import os, sys, hashlib
@@ -29,14 +29,15 @@ from multiprocessing import Pool
 import x86flow as W
 import fpmodes as FP
 from x86flow import X, M32, mn, Fn, load_universe
-f_cpufeat = f_sys = f_sse = core = None      # the lifter's handler tables: use_lift(dir) imports them from the explicit directory that holds the fnvlift package
+cpufeat = f_sys = f_sse = core = None      # the lifter's handler tables: use_lift(dir) imports them from the explicit directory that holds the fnvlift package
 
 
 def use_lift(d):
-    global f_cpufeat, f_sys, f_sse, core
+    global cpufeat, f_sys, f_sse, core
     sys.path.insert(0, d)
-    from fnvlift import f_cpufeat as a, f_sys as b, f_sse as c, core as e
-    f_cpufeat, f_sys, f_sse, core = a, b, c, e
+    from proof import cpufeat as a
+    from fnvlift import f_sys as b, f_sse as c, core as e
+    cpufeat, f_sys, f_sse, core = a, b, c, e
 
 FCW_START, MXCSR_START = 0x027F, 0x1F80
 FCW_FIELDS = (('masks', 0x003F), ('PC', 0x0300), ('RC', 0x0C00), ('IC', 0x1000))
@@ -115,7 +116,7 @@ def a3_tags(ins, m):
     elif ins.bytes[0] == 0x9b and m.startswith('f'):
         t.append('wait-prefix:' + m)
     ops = ins.operands
-    miss = f_cpufeat.missing(ins)
+    miss = cpufeat.missing(ins)
     if not miss and (m == 'emms' or any(o.type == X.X86_OP_REG and ins.reg_name(o.reg).startswith('mm') for o in ops)):      # an MMX instruction of the model (3DNow! forms, which also use mm registers, are counted under absent:3DNOW)
         t.append('mmx:' + m)
     for f in miss:

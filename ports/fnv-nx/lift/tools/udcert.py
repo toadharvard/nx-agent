@@ -3,7 +3,7 @@
 
     udcert.py --model cpuid_model.json --cleared CLEARED.tsv --lib DIR --out udcert.tsv  IMAGE:PE:FACTS_DIR ...
 
-THE RULE. An instruction whose CPUID feature is cleared in the declared CPU (fnvlift/f_cpufeat.py over verify/cpuid_model.json) is #UD. It is certified unreachable on the
+THE RULE. An instruction whose CPUID feature is cleared in the declared CPU (proof/cpufeat.py over verify/cpuid_model.json) is #UD. It is certified unreachable on the
 declared machine iff every path of the interprocedural CFG from every entry the facts know (a ROOT) to it crosses an EXCLUDED EDGE: a conditional branch whose condition is decided
 by the declared cpuid answer (a value that came out of a `cpuid` instruction of the image itself), the excluded edge being the direction that is not taken under that answer.
   Graph  : node = instruction address (decoded from the facts' ranges.tsv, one decoder). Edges: fall-through, direct jump / branch targets, direct call targets, and the
@@ -48,7 +48,7 @@ LOW8 = {'al': 'eax', 'cl': 'ecx', 'dl': 'edx', 'bl': 'ebx'}
 
 # ---------------------------------------------------------------- the declared answer (data)
 def load_model(path, lib):
-    """-> {leaf: {reg: (known, value)}}: the declared cpuid answer, from the one derivation of the model (cpumodel_bits.model_words) as the lifter's f_cpufeat reads it"""
+    """-> {leaf: {reg: (known, value)}}: the declared cpuid answer, from the one derivation of the model (cpumodel_bits.model_words) as the lifter's cpufeat reads it"""
     pkg = types.ModuleType('fnvlift'); pkg.__path__ = [lib]; sys.modules['fnvlift'] = pkg
     from fnvlift.cpumodel_bits import model_words
     m = json.load(open(path))
@@ -602,12 +602,12 @@ def hx(x):
     return '%08x' % x
 
 
-def image_rows(name, pe_path, facts, model, cleared, f_cpufeat):
+def image_rows(name, pe_path, facts, model, cleared, cpufeat):
     base, ranges = load_ranges(os.path.join(facts, 'ranges.tsv'))
     uni = load_universe(os.path.join(facts, 'universe.tsv'))
     def gate(i):
         try:
-            return bool(f_cpufeat.missing(i))
+            return bool(cpufeat.missing(i))
         except Exception:
             return False
     g = Graph(Pe(pe_path, base), ranges, uni, gate)
@@ -639,7 +639,7 @@ def image_rows(name, pe_path, facts, model, cleared, f_cpufeat):
         form = i.bytes.hex()
         mn = i.mnemonic
         try:
-            gs = [x for x in f_cpufeat.gates(i) if x[4] == 0] if f_cpufeat.missing(i) else []
+            gs = [x for x in cpufeat.gates(i) if x[4] == 0] if cpufeat.missing(i) else []
         except Exception:
             gs = []
         gate = ';'.join('%s:%x.%s.%d=%d' % (f, l, r, b, v) for f, l, r, b, v in gs) or '-'
@@ -677,17 +677,17 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--model', required=True)
     ap.add_argument('--cleared', required=True)
-    ap.add_argument('--lib', required=True, help='the directory holding f_cpufeat.py and cpumodel_bits.py (the lifter package files)')
+    ap.add_argument('--lib', required=True, help='the directory holding cpufeat.py and cpumodel_bits.py (the lifter package files)')
     ap.add_argument('--out', required=True)
     ap.add_argument('images', nargs='+', help='NAME:PE:FACTS_DIR')
     a = ap.parse_args()
     model = load_model(a.model, a.lib)
-    from fnvlift import f_cpufeat
+    from proof import cpufeat
     cleared = load_cleared(a.cleared)
     allrows, stats = [], {}
     for spec in a.images:
         name, pe, facts = spec.split(':')
-        rows, st = image_rows(name, pe, facts, model, cleared, f_cpufeat)
+        rows, st = image_rows(name, pe, facts, model, cleared, cpufeat)
         allrows += rows
         stats[name] = st
     tot = defaultdict(int)

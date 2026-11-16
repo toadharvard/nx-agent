@@ -4,7 +4,7 @@
     sdmrows_stage.py --sdm SDM.txt --out OUTDIR      -> OUTDIR/sdmrows/sdmrows.json
 
 SDM.txt: `pdftotext -layout` of the pinned Intel SDM (the recipe external `sdm`; the same text L3b's proof/sdmfeat.py partition reads). The output is proof/sdmfeat.py `dumprows`: every opcode-table row, the SDM's flag
-table and the NOP flags; the sha256 of the text is in it.  The lifter's CPUID gate (fnvlift/f_cpufeat.py) reads only this file."""
+table and the NOP flags; the sha256 of the text is in it.  The lifter's CPUID gate (proof/cpufeat.py) reads only this file."""
 import argparse
 import os
 import sys

@@ -24,8 +24,8 @@ def install(img, emit, jtab):
     """the state of a lifting process: the emit mode, the jump-table facts (ehtables.json of the module: the only source of jump-table extents) and the capture wrapper around core.explore (once per process)"""
     import fnvlift as L, fnvlift.core as core
     if emit != 'dsl': raise ValueError('emit %r (the proven DSL forms are the only path for the mnemonics they cover)' % (emit,))
-    from proof import lift_dsl
-    core.set_emit(lift_dsl.emit_form)
+    from proof import lift_dsl, cpufeat
+    core.set_emit(lift_dsl.emit_form, cpufeat.missing)
     core.set_jtab(json.load(open(jtab)) if jtab else None)
     S['cap'] = []
     if 'orig_explore' not in S:

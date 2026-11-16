@@ -29,7 +29,7 @@ def configure(sdmrows=None, udsail=None):
         udsail = d + '/udsail.tsv'; open(udsail, 'w').write('# fnvnx-udsail/2\n')      # no refused or undefined sequence in a buffer test
     json.dump({'format': 'fnvnx-segwrites/2', 'images': {'buf': {n: {'guard': n == 'gs'} for n in ('es', 'ds', 'fs', 'gs')}}}, open(d + '/segwrites.json', 'w'))      # a buffer has no write site of a segment register
     inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=X86SYS, sdmrows=sdmrows or sdmrows_arg(), cpumodel=CPUMODEL, rcptab=RCPTAB, rcpcert=RCPCERT, udsail=udsail, segwrites=d + '/segwrites.json', image='buf')
-    from fnvlift import core; from proof import lift_dsl; core.set_emit(lift_dsl.emit_form)      # the proven Forms are the one path for the mnemonics they cover
+    from fnvlift import core; from proof import lift_dsl, cpufeat; core.set_emit(lift_dsl.emit_form, cpufeat.missing)      # the proven Forms are the one path for the mnemonics they cover
 
 
 def configure_declared():
