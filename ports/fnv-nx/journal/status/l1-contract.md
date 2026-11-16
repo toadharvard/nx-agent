@@ -2197,3 +2197,16 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - dispatch.c red = ENTRY1-CONT under the old plugin pin 56a4d09c. L2's 84f0883e closes it.
   - The farm job exportl3 is cancelled.
 - Root form: w13's `contract` product row duplicated the tool row. Replaced by the header root contract/include (both w13 and w28). w28 adds a duplicate-path admit check.
+
+## 2026-11-16: cand3b (w15 68c45b90c)
+- Selftests: all suites pass except test_recipe (161 pass, 4 fail). The 4 are hx.exe run-stage cases failing with ENOSPC, a container disk limit (12 GB scratch peak).
+- Recipe and gate defects fixed:
+  - merge_inputs scratch collision;
+  - readelf now pinned by the compiler external's tree;
+  - plugin and readelf stages now mount only the compiler's external (keys were moving);
+  - objstub misses on stlr/ldar fixed;
+  - driver names now derived from pin_drivers;
+  - onedef green on a red image (now red).
+- Decision: test_recipe is not cut. The farm runs the full verdict, cold then warm, at 68c45b90c (job cand3b-verdict, top priority). That result decides the merge.
+- The 12 GB scratch peak has been asked about, as a fast-build risk.
+- bottleneck: the cand3b farm verdict.
