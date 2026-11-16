@@ -1641,3 +1641,7 @@ Paused: w3b, w4, farm; no other work.
     - recipe check: 17 of 17 admitted L6 roots and variants valid. gate_admit: 0 L6 findings. gate_pure: 0 L6 findings (restricted run). The whole-tree run has universe 0 because of an L1 run_unit defect with roots that have no .py, which is reported.
     - Not run: bridgetable (farm; needs contract/exports and bridgefacts/com).
 - bottleneck: L1's cand5 verdict and farm 3's bridgetable run; reached.tsv (L1 w28). 0 of 4 workers busy.
+- 11:50Z:
+    - Farm 3: bridgetable is GREEN with the L6 d3d9.dll records and the exporthdr edit (f91b46425).
+    - L1's 7 bare sibling imports at w28-c5 4eb5a2bd4 are in its older copy of render/ and bridgefacts/. On b80203aca the ast scan finds 0 bare or relative sibling imports. L1 is told to take render/ and bridgefacts/ from b80203aca.
+- bottleneck: the cand5 verdict (L1); reached.tsv (L1 w28). 0 of 4 workers busy.
