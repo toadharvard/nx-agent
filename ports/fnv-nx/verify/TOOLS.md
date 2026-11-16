@@ -2741,3 +2741,11 @@ loader's stage A reads COM_ROWS through `uses`; the gate `imports` names the sam
 files, L6 the d3d9 rows (still taken from the manifest external's d9bridge_rows.tsv until its generator moves here).
 Test: verify/tests/test_bridgefacts.py.
 ```
+
+## contract/reached.py
+
+reached - the (dll, name) pairs the image set reaches (L1 CONTRACT): `reached.tsv`, columns dll, name, how (`iat` | `gpa`), site (`<image>@<VA>`).
+
+    reached.py --sites dynsites.tsv --image NAME=pe ... --imports NAME=imports.tsv ... --facts DIR --facts-tree SHA --declared declared_dlls.tsv --specs DIR [--modules modules.tsv] --out reached.tsv
+
+`iat` rows: every import slot of every image (the imports/<name>.tsv of modules.py). `gpa` rows: every (module, name) pair a GetProcAddress site can ask for (gpa_names.py's derivation, `analyse`; a module the facts cannot place is `*`). The universe is the images; nothing filters it, and an export nothing reaches is no row. The signature input of the derivation (stack bytes, argument letters of an import) is the reference spec's, through `bridgetable.resolve`, and the may-load set is the images, modules.tsv and declared_dlls.tsv: no bridge.tsv row is an input, so the table that L6's bridgefacts filter by reached.tsv cannot be one (no cycle). An import without a signature is an error and the stage lists every one. Test: `contract/tests/test_reached.py` (a toy image: one IAT import, one resolved GPA name, one unreached export).

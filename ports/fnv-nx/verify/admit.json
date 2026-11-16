@@ -27,6 +27,7 @@
     "ports/fnv-nx/contract/gate_pcrel.py",
     "ports/fnv-nx/contract/bodysel.py",
     "ports/fnv-nx/contract/gpa_names.py",
+    "ports/fnv-nx/contract/reached.py",
     "ports/fnv-nx/contract/gate_reach.py"
    ]
   },
