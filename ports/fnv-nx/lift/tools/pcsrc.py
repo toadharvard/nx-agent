@@ -31,11 +31,11 @@ CALLER_SAVED_NEVER = ()
 COPYLIKE = {'mov', 'push', 'pop', 'call', 'jmp', 'ret', 'cmp', 'test', 'nop', 'leave', 'movzx', 'movsx', 'int3', 'hlt', 'ud2', 'iret', 'iretd', 'retf', 'wait', 'fwait'}
 COPYLIKE |= {'j' + c for c in ('o','no','b','ae','e','ne','be','a','s','ns','p','np','l','ge','le','g','ecxz','cxz')} | {'loop', 'loope', 'loopne'}
 COPYLIKE |= {'set' + c for c in ('o','no','b','ae','e','ne','be','a','s','ns','p','np','l','ge','le','g')}
-BLOCK_KINDS = {'tail', 'inner', 'eh-unwind', 'eh-catch', 'eh-cont', 'eh-throw'}
+BLOCK_KINDS = {'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'eh-throw'}
 FP_ENV = {'fnstenv': 28, 'fstenv': 28, 'fnsave': 108, 'fsave': 108}      # 32-bit protected mode image: FIP at +12, FDP at +20
 FP_FXSAVE = ('fxsave',)                                                   # FIP at +8, FDP at +16
 FPU_CONTROL = {'fnstenv', 'fstenv', 'fnsave', 'fsave', 'fldenv', 'frstor', 'fnstcw', 'fstcw', 'fldcw', 'fnstsw', 'fstsw', 'fnclex', 'fclex', 'fninit', 'finit', 'fwait', 'wait', 'fxsave', 'fxrstor'}
-CALL_KINDS = {'call', 'ptr', 'export', 'entry', 'decomp', 'tls', 'seh-handler', 'seh-filter'}   # entered by a call (or by the runtime through one): owns a return-address slot
+CALL_KINDS = {'call', 'ptr', 'export', 'entry', 'tls', 'seh-handler', 'seh-filter'}   # entered by a call (or by the runtime through one): owns a return-address slot
 INDIRECT_KINDS = {'ptr', 'export', 'entry', 'tls', 'seh-handler', 'seh-filter'}                  # callers the facts do not enumerate
 RETS = ('ret', 'retf', 'iret', 'iretd')
 
@@ -796,9 +796,7 @@ def resolve(img, e, ev, kinds, mode, retscratch):
 def analyse(img, kinds_of, parent=None):
     scan_calls(img)
     rows = []; parent = parent or {}
-    isdec = lambda a: 'decomp' in (img.entries.get(a) or ())
-    roots = [e for e in sorted(img.entries) if img.reached(e) and owner(img, e) and not isdec(e)]
-    img.info['decomp-owner-skipped'] = sum(1 for e in img.entries if img.reached(e) and owner(img, e) and isdec(e))
+    roots = [e for e in sorted(img.entries) if img.reached(e) and owner(img, e)]
     for e in roots:
         if (img.entries.get(e) or set()) & INDIRECT_KINDS or e in img.jtargets or not img.callers.get(e): img.allcode.add(e); img.inp[e] = ALLCODE_INPUT
     # the incoming arguments of an entry are the join over its callers' call-site states; analysis repeats for the entries whose input grew (monotone, finite)
@@ -821,8 +819,6 @@ def analyse(img, kinds_of, parent=None):
         rows.extend(resolve(img, e, ev, kinds_of.get(e, set()), 'owner', img.pk.get((e, 'owner'), [])))
     for e in sorted(img.entries):
         if not img.reached(e) or owner(img, e) or e in img.visited: continue
-        p = parent.get(e)
-        if p is not None and isdec(p): img.info['decomp-block-skipped'] += 1; continue
         img.info['blocks-without-visible-predecessor'] += 1
         ev, sm = analyse_entry(img, e, 'possibly')
         rows.extend(resolve(img, e, ev, kinds_of.get(e, set()), 'possibly', img.pk.get((e, 'possibly'), [])))

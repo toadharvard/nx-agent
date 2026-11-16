@@ -14,7 +14,7 @@ Nothing else decides a residue byte: the sweep below (decodes / undecodable / re
 import os, json, bisect
 from types import SimpleNamespace
 
-PRI = ['decomp', 'entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw', 'inner', 'ptr']      # THE kind vocabulary and its priority: the primary kind of an entry (universe.tsv column 2) is the first of these it carries; the other kinds are in the flags column
+PRI = ['entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw', 'ptr']      # THE kind vocabulary and its priority: the primary kind of an entry (universe.tsv column 2) is the first of these it carries; the other kinds are in the flags column
 DATA = 9
 TERMS = {'ret', 'retf', 'jmp', 'int3', 'ud2', 'iret', 'iretd'}
 

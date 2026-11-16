@@ -29,7 +29,7 @@ _INSMEMO = {}; _RESMEMO = {}
 def _run(arg, cfg, XEX, REF=frozenset()):
     """cfg: modules (the module table), moddirs (list), facts_out: declared inputs, passed by universe.py"""
     if getattr(cfg, 'exe', None):      # the process image: no modules.tsv row, it is mapped at its preferred base (the loader maps it there; it has no assigned base)
-        path = cfg.exe; _m = pemod.load(path); mrow = SimpleNamespace(name=os.path.basename(path), base=None, size=len(_m.d), sizeimg=_m.sizeimg, pref=_m.base, entry=_m.entry, tls=1 if _m.dirent(9)[0] else 0)
+        path = cfg.exe; _m = pemod.load(path); mrow = SimpleNamespace(name='exe', base=None, size=len(_m.d), sizeimg=_m.sizeimg, pref=_m.base, entry=_m.entry, tls=1 if _m.dirent(9)[0] else 0)
     else: path, mrow = pemod.locate(arg, cfg.modules, cfg.moddirs)      # modules.tsv row (missing = KeyError) and the file (sha256 + size checked = ValueError)
     name = os.path.splitext(mrow.name)[0]; outd = cfg.facts_out + '/' + name; os.makedirs(outd, exist_ok=True)
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
@@ -107,7 +107,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
             if fall: st.append(x + sz)
         return seen
     X_ = SimpleNamespace(d=M.d, secs=M.secs, text=text, T0=T0, T1=T1, cov=cov, insns=dec, rset=rset, u32=u32, sec=M.sec, intext=intext, callers=callers, isdata=lambda a: M.sec(a) is not None,
-                         indec=lambda a: None, emit=lambda t, k, s: add(t, k, True), relocs=relocs, extent_insns=extent_insns, rvals=rvals, fsize={}, mark=lambda *a: None, imports=imports,
+                         indec=lambda a: None, emit=lambda t, k, s: add(t, k, True), relocs=relocs, extent_insns=extent_insns, rvals=rvals, mark=lambda *a: None, imports=imports,
                          outdir=outd, cstr=M.cstr, strict=True, entry_of=entry_of)
     eh = ehtables.EH(X_)
     if M.entry: add(M.base + M.entry, 'entry', True)
@@ -143,7 +143,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
         ex = JT.exclusive(jt_ok, svals)
         def seeded(x):
             if x in callers: return True
-            if x in ent and (ent[x] - {'ptr', 'tail', 'inner'}): return True
+            if x in ent and (ent[x] - {'ptr', 'tail'}): return True
             return any(r not in ex for r in vrefs.get(x, ()))
         n = 0
         for a in sorted(jtab):
@@ -493,7 +493,7 @@ def run(arg, cfg):
         if frozenset(Xo) == X:
             sys.stdout.write(buf.getvalue()); print('R3 refinement: fixed point after %d rounds, %d displacement-only relocation sites excluded from the entry rule' % (k + 1, len(X)))
             print('universe: entries %d (candidates %d)' % (nE, nC))
-            od = cfg.facts_out + '/' + os.path.splitext(os.path.basename(cfg.exe) if getattr(cfg, 'exe', None) else pemod.locate(arg, cfg.modules, cfg.moddirs)[1].name)[0]
+            od = cfg.facts_out + '/' + os.path.splitext('exe' if getattr(cfg, 'exe', None) else pemod.locate(arg, cfg.modules, cfg.moddirs)[1].name)[0]
             bad = residue.entries_on_data(od)      # roots by rule whose bytes are also data-reloc words: reported, never dropped (the invariant is L1's to change)
             open(od + '/entries_on_data.tsv', 'w').write('# columns: root address, proof id of the data-reloc byte; roots (by a value occurrence) whose bytes are also a relocation-named data word\n' + ''.join('%08x\t%s\n' % (a, residue.data_proof(od, a)) for a in bad))
             print('entries on class-3 data bytes (roots by rule): %d' % len(bad))
