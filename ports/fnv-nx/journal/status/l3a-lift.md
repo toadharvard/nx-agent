@@ -1475,3 +1475,24 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - w8 (doing): merge w28 322698c53, then ff086e540, into base3; where the isla/sailmodel files differ, take L3b's.
 - w13 next: the farm run via L3b, then udsail.tsv as an fnv-nx-build external, then w7 replaces udsail_input.tsv.
 - bottleneck: L2 w2 (3 lift/rt units); w8 rework and merges; pcsrc 8 vptr + 3 EH (w7); the udsail farm run.
+
+## 2026-11-16 04:20 — pcsrc after the IAT rules; vptr narrowing is not decidable locally
+- w7 (done, claude/fnv-l3a-lift-w7-facts2 after e34e81730; exe facts 30757c325): red per image after (ii) + (C), with the earlier value in brackets:
+
+  | Image | Red | Before |
+  |---|---|---|
+  | exe | 75,192 | 75,171 |
+  | atimgpud | 1,242 | 1,279 |
+  | binkw32 | 3,008 | 3,015 |
+  | gdffalloutnv | 240 | 277 |
+  | libvorbis | 2,175 | 2,170 |
+  | libvorbisfile | 1,212 | 1,199 |
+
+  Not-clean indirect jmps: exe 11, small images 1/1/0/1/1.
+- The 8 vptr tail-jmp functions contain no dominating vptr store, because the receiver is an incoming `this` or a loaded member. Local class narrowing closes none of them.
+- Ruled:
+  - The slot-k arrival set (slot k of every RTTI vtable) holds only if every vptr store in the image stores an RTTI vtable; w7 checks this per image.
+  - The pop by an esp bound is rejected (frame balance).
+  - Next to measure: interprocedural origin, the caller join of the receiver class and the constructors of the field objects.
+  - A site still without a single pop goes to the orchestrator as a gap.
+- bottleneck: L2 w2 (3 lift/rt units); w8 rework and merges; pcsrc vptr pop (w7); the udsail farm run.
