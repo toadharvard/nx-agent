@@ -19,6 +19,7 @@ def die(msg): sys.stderr.write("gen_bridge: " + msg + "\n"); sys.exit(2)
 ROWS = {}   # native_symbol -> (ret, args): the bridge row of every thunk (D9_ROWS)
 for _l in open(sys.argv[3]).read().splitlines():
     _c = _l.split("\t"); ROWS[_c[6]] = (_c[4], _c[5])
+sys.path.insert(0, sys.argv[4])   # the root of the declared input bridgefacts/d3d9/d3d9_expr.py (mounted by the stage)
 from gen_impl import cname  # noqa: E402
 from gen_expr import Ctx  # noqa: E402
 from gen_expr import REFS  # noqa: E402
