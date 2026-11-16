@@ -12,7 +12,8 @@ A row with both a Wine and a documented source takes the documented one (sources
 Rows:
   selectors      cs ds es ss fs: KGDT_R3_CODE / KGDT_R3_DATA / KGDT_R3_TEB of ks386.inc | RPL_MASK, by the role the WDK names (code segment -> cs, data segment
                  -> ds es ss, the TEB's segment -> fs); gs: undecided (no WDK role); tr = KGDT_TSS.
-  mov_to_sreg    the selectors a `mov sreg, r` can load at CPL 3: null for es/ds/fs/gs; the ring-3 data selectors for every register; the code selector: undecided.
+  mov_to_sreg    the selectors a `mov sreg, r` can load at CPL 3: null for es/ds/fs/gs; the ring-3 code and data selectors (0x18-0x1b readable code, 0x20, 0x38, 0x40 data, every RPL) for ds/es/fs/gs, writable data with RPL 3 for ss, the rest by rule.
+  jmp_far        what `jmp ptr16:32` does at CPL 3 for every 16-bit selector value (SDM JMP far over the derived GDT and the empty LDT).
   null_seg_access  a memory operand through a null segment register (es/ds/fs/gs, as mov_to_sreg lets them hold null): #GP(0) at the instruction, delivered as Wine 9.0 does (privileged-opcode check, else access violation).
   int_ring3      the vectors Wine 9.0 handles, minus those a documented gate excludes at build 7601 (0x29: MSDN __fastfail, Windows 8+; undecided in `excluded`) for a user-mode `int n` (handle_interrupt cases) and the traps it maps to #BP / #OF (vectors 3, 4); every other
                  vector except the excluded ones: other_vectors, the SDM #GP(n*8+2) delivered as Wine 9.0 does (access violation, precedence 2).
@@ -976,6 +977,103 @@ def ks386_equ(text):
     return {m.group(1): int(m.group(2), 16) for m in re.finditer(r"^(\w+)\s+equ\s+([0-9A-Fa-f]+)H\s*$", text, re.M)}
 
 
+def segment_load_rows(kg, sel, gdt, ldtf, wlim, ks):
+    """mov_to_sreg and jmp_far: what loading a selector into a segment register / a far jmp through it does at CPL 3, decided for EVERY 16-bit selector value by the SDM rules over the
+    GDT descriptors derived above (winload's table plus the two kernel writes that add the TSS descriptors 0x50, 0x58) and the empty LDT. A selector whose descriptor index is inside the GDT limit
+    but not derived is listed under `undecided_descriptors` (never guessed)."""
+    sdm_mov = "Intel SDM Vol 3A 3.4.2 and Vol 2B MOV Sreg protected-mode"
+    sdm_jmp = "Intel SDM Vol 2A JMP far (protected mode)"
+    limit = wlim["gdt_limit"]
+    kw = {}
+    for n, k in ldtf.items():
+        kw[n] = k["gdt_writes"]["KiSystemStartup_tss_access_0x89"]
+    tss_extra = None
+    for n, w in kw.items():
+        got = sorted(int(x, 16) for x in w)
+        if tss_extra is not None and tss_extra != got:
+            raise SystemExit("gen_x86sys: the two kernels set different TSS descriptors in KiSystemStartup")
+        tss_extra = got
+    if tss_extra != [0x28, 0x50, 0x58]:
+        raise SystemExit("gen_x86sys: KiSystemStartup does not make exactly the descriptors 0x28, 0x50, 0x58 available TSS (got %s)" % [hex(x) for x in tss_extra])
+    known = {k: dict(v) for k, v in gdt.items()}
+    for k in (0x50, 0x58):
+        if k in known:
+            raise SystemExit("gen_x86sys: winload already builds GDT[%#x]" % k)
+        known[k] = {"s": 0, "type": 9, "dpl": 0, "p": 1, "how": "KiSystemStartup sets the access byte 0x89 (available 32-bit TSS, DPL 0, present)"}
+    if known[0x28]["type"] != 9 or known[0x28]["s"] != 0 or known[0x28]["dpl"] != 0:
+        raise SystemExit("gen_x86sys: GDT[0x28] is not an available 32-bit TSS of DPL 0")
+    # SDM Vol 3A 3.4.5.1: S=1 type bit 3 = code; bit 1 of a code type = readable, bit 2 = conforming; bit 1 of a data type = writable.
+    ro = lambda d: d["s"] == 1 and bool(d["type"] & 8) and bool(d["type"] & 2)
+    code = lambda d: d["s"] == 1 and bool(d["type"] & 8)
+    wr = lambda d: d["s"] == 1 and not (d["type"] & 8) and bool(d["type"] & 2)
+    inlimit = lambda i: i * 8 + 7 <= limit
+    der = sorted(known)
+    for k in der:
+        d = known[k]
+        if not d["p"]:
+            raise SystemExit("gen_x86sys: GDT[%#x] is not present; #NP rows are not modelled" % k)
+    rpl_all = lambda i: [i * 8 + r for r in range(4)]
+    # per register: DS/ES/FS/GS accept a data segment or a readable code segment whose DPL >= max(CPL 3, RPL) = 3 (a conforming code segment is exempt from the DPL test); SS needs RPL = CPL = 3, DPL = 3, writable data
+    loads = {r: sorted(s for k in der for s in rpl_all(k >> 3) if (wr(known[k]) or ro(known[k])) and (known[k]["dpl"] == 3 or (code(known[k]) and known[k]["type"] & 4)))
+             for r in ("es", "ds", "fs", "gs")}
+    ss_ok = sorted(k | 3 for k in der if wr(known[k]) and known[k]["dpl"] == 3)
+    if len({tuple(v) for v in loads.values()}) != 1:
+        raise SystemExit("gen_x86sys: internal: the four data registers differ")
+    ds_loads = loads["ds"]
+    expect = sorted([0x18 + r for r in range(4)] + [0x20 + r for r in range(4)] + [0x38 + r for r in range(4)] + [0x40 + r for r in range(4)])
+    if ds_loads != expect or ss_ok != [0x23, 0x3b, 0x43]:
+        raise SystemExit("gen_x86sys: the derived loadable selectors are not 0x18-0x1b, 0x20-0x23, 0x38-0x3b, 0x40-0x43 (ss 0x23, 0x3b, 0x43): %s %s" % ([hex(x) for x in ds_loads], [hex(x) for x in ss_ok]))
+    for k in (0x18, 0x20, 0x38, 0x40):
+        if sel and known[k]["dpl"] != 3:
+            raise SystemExit("gen_x86sys: GDT[%#x] has DPL != 3" % k)
+    c = known[0x18]
+    if not (c["s"] == 1 and c["type"] == 0xa and c["dpl"] == 3 and c["p"] == 1 and ro(c) and not (c["type"] & 4) and c["limit_bytes"] == 0xffffffff and c["base"] == 0):
+        raise SystemExit("gen_x86sys: GDT[0x18] is not a present, readable, non-conforming code segment of DPL 3, base 0, limit 4 GB")
+    undec_idx = sorted(i for i in range(1, (limit + 1) // 8) if i * 8 not in known and i * 8 != 0x48)
+    ldt_ref = "row ldt.rule and sldt: a new process has the null LDTR, so every TI=1 selector indexes an empty table"
+    def ti1(sdm):
+        return {"selectors": "every selector value with bit 2 (TI) set", "fault": "#GP", "error_code": "selector & 0xfffc",
+                "source": "%s: a selector in the LDT is checked against the LDT limit; the LDTR is null (%s), so the limit is exceeded: #GP(selector)" % (sdm, ldt_ref)}
+
+    def beyond(sdm):
+        return {"selectors": "every selector value with TI = 0 and index*8+7 > the GDT limit 0x%x, i.e. index >= 0x%x (0x%x-0xfff8 and their RPL variants)" % (limit, (limit + 1) // 8, limit + 1),
+                "fault": "#GP", "error_code": "selector & 0xfffc", "source": "%s: the descriptor lies outside the GDT limit (row gdt.limit): #GP(selector)" % sdm}
+    mv_ti1, mv_bl, jm_ti1, jm_bl = ti1(sdm_mov), beyond(sdm_mov), ti1(sdm_jmp), beyond(sdm_jmp)
+    fault_gp = {}
+    for k in sorted(known):
+        if k in (0x18, 0x20, 0x38, 0x40):
+            continue
+        d = known[k]
+        fault_gp["0x%02x" % k] = "code, DPL %d, non-conforming" % d["dpl"] if code(d) and not (d["type"] & 4) else ("data, DPL %d" % d["dpl"] if d["s"] == 1 else "system descriptor type %#x, DPL %d" % (d["type"], d["dpl"]))
+    why_data = {r: "%s: DS/ES/FS/GS load a data segment or a readable code segment whose DPL >= max(CPL, RPL) (a conforming code segment: no DPL test); GDT[0x18] is the ring-3 code segment (type 0xA: execute/read, non-conforming, DPL 3, present, base 0, limit 4 GB), 0x20 the ring-3 data segment, 0x38 the TEB segment, 0x40 a DPL 3 read/write data segment (rows gdt.descriptors); every RPL 0-3 passes the DPL 3 test" % sdm_mov for r in ("es", "ds", "fs", "gs")}
+    mov = {r: {"null": True, "selectors": ds_loads, "source": why_data[r] + "; the null selectors 0-3 load (the register becomes null, SDM Vol 3A 3.4.2)"} for r in ("es", "ds", "fs", "gs")}
+    mov["ss"] = {"null": False, "selectors": ss_ok, "source": "%s: SS needs RPL = CPL = 3 and a writable data segment of DPL 3 (GDT 0x20, 0x38, 0x40, rows gdt.descriptors); the null selector is #GP(0); a code segment (0x18) is #GP(selector)" % sdm_mov}
+    mov["undecided"] = {"selectors": [], "why": "every selector value the record can decide is decided by the rows above; the ones whose GDT descriptor is not derived are in `undecided_descriptors` (none of them is loadable here: the consumers fault on them)"}
+    mov["rule"] = {"null_ss": {"selectors": [0, 1, 2, 3], "fault": "#GP", "error_code": 0, "source": "%s: loading the null selector into SS is #GP(0)" % sdm_mov},
+                   "ss_rpl_ne_cpl_or_dpl": {"fault": "#GP", "error_code": "selector & 0xfffc", "source": "%s: SS needs RPL = CPL and DPL = CPL; a selector of any other RPL, a data segment of another DPL, or a segment that is not writable data (code, system) is #GP(selector)" % sdm_mov},
+                   "ti1": mv_ti1, "beyond_gdt_limit": mv_bl,
+                   "gp_selector_descriptors": {"descriptors": fault_gp, "fault": "#GP", "error_code": "selector & 0xfffc",
+                                               "source": "%s: a code segment of DPL < max(CPL, RPL) that is not conforming (DS/ES/FS/GS) or a system descriptor is #GP(selector); GDT descriptors derived in rows gdt.descriptors and gdt_writes" % sdm_mov},
+                   "ldt_descriptor_0x48": "GDT[0x48] is written only by a process switch to a process that has an LDT (KiLoadLdtr / KiSwapProcess, row ldt): then it is a system descriptor (type 2), #GP(selector); otherwise it is zero (#NP is not modelled): in both cases the load faults",
+                   "undecided_descriptors": {"indexes": ["0x%02x" % (i * 8) for i in undec_idx],
+                                             "why": "inside the GDT limit but not built by winload nor written by a decoded kernel path; the content is not derived, so the fault kind (#GP or #NP) and a possible load are not decided. No consumer treats them as loadable"}}
+    jmp = {"cpl": 3, "operand_size": 32,
+           "jumps": {"selectors": [0x18 + r for r in range(4)], "result": "CS := selector with RPL set to CPL (0x1b), EIP := the 32-bit offset (any value: the limit is 4 GB)",
+                     "source": "%s: GDT[0x18] is a present non-conforming code segment of DPL 3, RPL <= CPL <= DPL, so the far jmp is the same-privilege transfer (rows gdt.descriptors)" % sdm_jmp},
+           "null_selector": {"selectors": [0, 1, 2, 3], "fault": "#GP", "error_code": 0, "source": "%s: a null selector is #GP(0)" % sdm_jmp},
+           "ti1": jm_ti1, "beyond_gdt_limit": jm_bl,
+           "gp_selector_descriptors": {"descriptors": fault_gp, "fault": "#GP", "error_code": "selector & 0xfffc",
+                                       "source": "%s: a code segment with DPL != CPL (non-conforming) is #GP(selector); a data segment is #GP(selector); a system descriptor that is not a call gate, task gate or available TSS is #GP(selector); an available 32-bit TSS (GDT 0x28, 0x50, 0x58, type 9) of DPL 0 < max(CPL, RPL) is #GP(selector); the data descriptors 0x20, 0x38, 0x40 are data segments: #GP(selector)" % sdm_jmp},
+           "data_descriptors": {"0x20": "data, DPL 3", "0x38": "data, DPL 3", "0x40": "data, DPL 3"},
+           "ldt_descriptor_0x48": "a system descriptor (type 2) or zero: #GP(selector) either way (SDM JMP far: only a code segment, call gate, task gate or TSS is a legal target)",
+           "undecided_descriptors": mov["rule"]["undecided_descriptors"],
+           "no_call_gate_task_gate": "no descriptor of the derived GDT is a call gate (type 0xC) or a task gate (type 5); the only system descriptors are the available TSS (type 9, DPL 0) and the LDT"}
+    for k, d in known.items():
+        if d["s"] == 0 and d["type"] not in (9,):
+            raise SystemExit("gen_x86sys: GDT[%#x] is a system descriptor of type %#x (not an available TSS): the jmp_far rows do not cover it" % (k, d["type"]))
+    return mov, jmp
+
+
 def build(osrec, src, mirror, wine, cpumodel, kernel):
     undec = lambda why: {"status": "undecided", "why": why}
     fl = osrec["fields"]
@@ -1008,10 +1106,7 @@ def build(osrec, src, mirror, wine, cpumodel, kernel):
     g29 = idtg[0x29]
     if g29["present"] or g29["type"] != 0 or g29["handler"] is not None or g29["access"] != 0:
         raise SystemExit("gen_x86sys: IDT entry 0x29 is not the zero entry (not present, gate type 0) the row idt.vector_0x29 describes")
-    data = sorted({sel["ds"]["value"], sel["fs"]["value"]})
-    why_ds = "KGDT_R3_DATA and KGDT_R3_TEB are the ring-3 data segments of the WDK's GDT constants (ks386.inc); SDM Vol 3 MOV Sreg: a data segment of DPL 3 is loadable at CPL 3 with RPL 3"
-    mov = {r: {"null": r != "ss", "selectors": data, "source": why_ds + ("; ss needs a writable data segment, not the null selector" if r == "ss" else "")} for r in ("es", "ds", "fs", "gs", "ss")}
-    mov["undecided"] = {"selectors": [sel["cs"]["value"]], "why": "the ring-3 code descriptor's readable bit is not stated in a pinned source, so whether es/ds/fs/gs may load it is undecided"}   # the GDT row (gdt.descriptors) now states it; this row is left for its consumers
+    mov, jmpf = segment_load_rows(kg, sel, gdt_ents, ldtf, wlim, ks)
     wf = src["wine"]["files"]["signal_i386"]
     wt = pinned(os.path.join(wine, wf["path"]), wf, wf["path"])
     wsrc = "Wine 9.0 %s @ %s" % (wf["path"], src["wine"]["commit"][:12])
@@ -1134,6 +1229,7 @@ def build(osrec, src, mirror, wine, cpumodel, kernel):
         "sources": {"mirror": src["mirror"], "kernel": src["win7sp1_x86_kernel"], "ks386": kf, "wine": {"commit": src["wine"]["commit"], "file": wf}, "cpumodel": cm},
         "selectors": sel,
         "mov_to_sreg": mov,
+        "jmp_far": jmpf,
         "null_seg_access": null_row,
         "int_ring3": {"vectors": vec, "other_vectors": other,
                       "source": "%s: handle_interrupt cases %s; segv_handler / trap_handler map %s to #OF / #BP" % (wsrc, [hex(i) for i in ints], sorted(traps)),

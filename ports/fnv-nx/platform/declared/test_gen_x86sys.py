@@ -38,6 +38,12 @@ checks = [("x86sys.json is the generator's output", ok), ("precedence is in the 
           ("idt: limit 0x7ff, 256 entries, 0x2a-0x2e are ring-3 gates, both kernels' addresses", (rec["idt"]["limit"], rec["idt"]["entries"]) == (0x7ff, 256) and "0x2a-0x2e" in rec["idt"]["ring3_gates"] and sorted(rec["idt"]["addresses"]) == ["ntkrnlpa.exe", "ntoskrnl.exe"]),
           ("gdt: limit 0x3ff; ring-3 code 0x18 type 0xA DPL3, data 0x20 and TEB 0x38 type 2 DPL3, all present, S=1",
            rec["gdt"]["limit"] == 0x3ff and all((d["p"], d["s"], d["dpl"], d["type"]) == (1, 1, 3, t) for d, t in ((rec["gdt"]["descriptors"]["0x18"], 0xa), (rec["gdt"]["descriptors"]["0x20"], 2), (rec["gdt"]["descriptors"]["0x38"], 2)))),
+          ("mov_to_sreg: ds/es/fs/gs load 0x18-0x1b (readable code), 0x20-0x23, 0x38-0x3b, 0x40-0x43 and null; ss only 0x23, 0x3b, 0x43; nothing undecided",
+           all(rec["mov_to_sreg"][r]["selectors"] == sorted(list(range(0x18, 0x1c)) + list(range(0x20, 0x24)) + list(range(0x38, 0x3c)) + list(range(0x40, 0x44))) and rec["mov_to_sreg"][r]["null"] for r in ("es", "ds", "fs", "gs"))
+           and rec["mov_to_sreg"]["ss"]["selectors"] == [0x23, 0x3b, 0x43] and not rec["mov_to_sreg"]["ss"]["null"] and rec["mov_to_sreg"]["undecided"]["selectors"] == []),
+          ("jmp_far: 0x18-0x1b jump; null #GP(0); TI=1 and beyond-limit and every other known descriptor #GP(selector)",
+           (lambda j: j["jumps"]["selectors"] == [0x18, 0x19, 0x1a, 0x1b] and j["null_selector"]["error_code"] == 0 and j["ti1"]["fault"] == "#GP" and j["beyond_gdt_limit"]["fault"] == "#GP"
+            and j["gp_selector_descriptors"]["fault"] == "#GP" and "0x08" in j["gp_selector_descriptors"]["descriptors"] and "0x18" not in j["gp_selector_descriptors"]["descriptors"])(rec["jmp_far"])),
           ("ldt: a new process has the null LDTR (sldt 0)", rec["sldt"]["value"] == 0 and "rule" in rec["ldt"] and rec["idtr_limit"]["value"] == 0x7ff and rec["sgdt"]["limit"]["value"] == 0x3ff and rec["sgdt"]["base"]["status"] == "undecided"),
           ("0x29 is not a ring-3 vector", 0x29 not in rec["int_ring3"]["vectors"]), ("no opcode list in tss_io_bitmap", "opcodes" not in rec["tss_io_bitmap"]),
           ("every CR0/CR4 SSE row is undecided with a why", all(v.get("status") == "undecided" and v.get("why") for k in ("cr0", "cr4_sse") for v in rec[k].values()))]
