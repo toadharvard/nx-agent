@@ -57,7 +57,7 @@ def j(a, b):
 
 
 class Img:
-    def __init__(self, text, T0, entries, ranges, rd=None, rset=None):
+    def __init__(self, text, T0, entries, ranges, rd=None, rset=None, pops=None, imp=None):
         """text: bytes of the executable span at T0; entries: {addr: set(kinds)}; ranges: sorted list of reached [start, end) byte ranges (any overlap)."""
         self.text, self.T0, self.T1 = text, T0, T0 + len(text); self.entries = entries
         self.md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); self.md.detail = True
@@ -66,7 +66,7 @@ class Img:
             if mer and a <= mer[-1][1]: mer[-1][1] = max(mer[-1][1], b)
             else: mer.append([a, b])
         self.mer = mer; self.ms = [a for a, b in mer]; self.cache = {}
-        self.rd = rd; self.rset = rset or set(); self.inp = {}; self.allcode = set(); self.dirty = set(); self.refs = None; self.tabslots = set(); self.visited = set(); self.jtargets = set(); self.pk = {}; self.wmemo = {}; self.calltg = {}; self.retsites = set(); self.callers = {}; self.summ = {}; self.busy = set(); self.fresh = set(); self.asm225 = 'ASM-225'; self.rows = []; self.info = Counter()
+        self.rd = rd; self.rset = rset or set(); self.inp = {}; self.allcode = set(); self.dirty = set(); self.refs = None; self.tabslots = set(); self.visited = set(); self.pops = pops or {}; self.imp = imp or {}; self.jtargets = set(); self.badarr = set(); self.ijbad = set(); self.ijall = set(); self.ijwhy = {}; self.ijret = set(); self.pk = {}; self.wmemo = {}; self.calltg = {}; self.retsites = set(); self.callers = {}; self.summ = {}; self.busy = set(); self.fresh = set(); self.asm225 = 'ASM-225'; self.rows = []; self.info = Counter()
     def reached(self, a):
         i = bisect.bisect_right(self.ms, a) - 1
         return i >= 0 and a < self.mer[i][1]
@@ -155,13 +155,23 @@ def new_fresh(esp, st, mark, e):
 
 
 ALLREGS = ('eax', 'ebx', 'ecx', 'edx', 'esi', 'edi', 'ebp')
+ARG_LIMIT = 256      # widening bound of feed(): 64 stack argument words. 256 is a PRECISION parameter, not a correctness one: an input slot deeper than it goes to ALLCODE_INPUT, the top of the lattice (every register and slot possibly a code address), which is sound for any bound; with the bound the set of slot keys of an input is finite, so a join chain is finite and the argument pass terminates
 ALLCODE_INPUT = ({n: T_CODE for n in ALLREGS}, {}, True)      # an unknown input is possibly a code address: the sound value, not a fallback
+
+
+def ij_why(esp, st):
+    """why an indirect jmp is not a clean arrival (esp 0 and the entry's return address still at [esp]): the recorded reason of its residue row."""
+    if esp is None: return 'esp-lost'
+    if is_fresh(esp): return 'esp-fresh (esp loaded from a value that is not entry_esp + k)'
+    if esp != 0: return 'esp=%d' % esp
+    return 'ra-slot-%s' % ('absent' if 0 not in st else 'overwritten')
 
 
 def feed(img, t, regs_t, stk_t):
     """the state of one call site (typed registers, typed stack slots at the callee's offsets; None = esp unknown) joins into the input of callee t."""
     if t in img.allcode: return
-    if regs_t is None:
+    if regs_t is None or any(k > ARG_LIMIT for k in stk_t):      # widening: slots deeper than ARG_LIMIT bytes above the callee's esp (a recursive call chain deepens them without bound) make the input unknown (possibly code), the sound top; each input then changes finitely often
+
         img.allcode.add(t); img.inp[t] = ALLCODE_INPUT; img.dirty.add(t); return
     cur = img.inp.get(t) or ({}, {}, False)
     r = dict(cur[0]); st = dict(cur[1]); ch = False
@@ -365,7 +375,8 @@ def analyse_entry(img, e, mode='owner', force=False):
             if sm is not None and sm['regs']:
                 for n, k in sm['regs'].items():
                     regs[n] = ('abs', frozenset({nxt + k[1]}))
-            if sm is not None and sm['pop'] is not None and esp is not None: esp = esp + sm['pop']
+            pp = sm['pop'] if sm is not None and sm['pop'] is not None else img.pops.get(tg) if tg is not None else (img.imp.get(o.mem.disp & M32) if o.type == X.X86_OP_MEM and not o.mem.base and not o.mem.index and not o.mem.segment else None)
+            if pp is not None and esp is not None: esp = esp + pp
             else:
                 if esp is not None: img.info['esp-lost'] += 1
                 esp = None
@@ -397,6 +408,10 @@ def analyse_entry(img, e, mode='owner', force=False):
             o = ops[0]
             if o.type == X.X86_OP_REG:
                 v = regs.get(R32.get(o.reg))
+                if not anyra and isinstance(v, tuple) and v[0] == 'ra': img.ijret.add(a)      # a jmp to this entry's own return-address symbol is a return to the caller's continuation: not an arrival at any entry (ruling 2026-11-16)
+                elif not anyra:
+                    img.ijall.add(a)
+                    if esp != 0 or st.get(0) != ('ra', 0): img.ijbad.add(a); img.ijwhy[a] = ij_why(esp, st)
                 if v == T_S4: emit(a, 's4', 'target-s4', 'jmp through a register holding arithmetic on a code address', True)
                 elif v == T_CODE: emit(a, 'code', 'code-target', 'jmp reg', False)
                 if tracked(v):
@@ -417,10 +432,16 @@ def analyse_entry(img, e, mode='owner', force=False):
                         if not (img.T0 <= w < img.T1 and img.reached(w)): break
                         succ.append(w); t += 4; n_ += 1
                     term = False
-                    for w in succ: img.jtargets.add(w)
+                    for w in succ:
+                        img.jtargets.add(w)
+                        if not anyra and (esp != 0 or st.get(0) != ('ra', 0)) and w in img.entries and owner(img, w): img.badarr.add(w)
+                else:       # an indirect jmp through memory that is not a table of relocated words: its targets are not enumerated
+                    if not anyra: img.ijall.add(a)
+                    if not anyra and (esp != 0 or st.get(0) != ('ra', 0)): img.ijbad.add(a); img.ijwhy[a] = ij_why(esp, st)
             else:
                 t = o.imm & M32
                 if t != e and t in img.entries and owner(img, t):
+                    if not anyra and (esp != 0 or st.get(0) != ('ra', 0)): img.badarr.add(t)       # arrival join: this jmp arrives with a stack whose [esp] is not the return address of the entry
                     if esp != 0: feed(img, t, None, None)
                     else: feed(img, t, {n_: v_ for n_, v_ in regs.items() if v_ in TYPES}, {off: v_ for off, v_ in st.items() if off > 0 and v_ in TYPES})
                     for n in sorted(regs):
@@ -771,6 +792,14 @@ def analyse(img, kinds_of, parent=None):
         for e in todo: analyse_entry(img, e, 'owner', True)
         todo = sorted(e for e in img.dirty if e in set(roots))
     img.info['arg-passes'] = passes
+    # arrival join (lead ruling 2026-11-16): the entries that an indirect jmp can reach are the ptr set (the dispatcher's targets for a jmp that is not a certified table); an entry that any in-image jmp
+    # reaches with a stack whose [esp] is not its return address is not known to be called with [esp] = RA: it is also analysed as 'possibly' (every stack slot possibly the return address)
+    if img.ijbad: img.badarr |= {t for t in roots if 'ptr' in (img.entries.get(t) or ())}
+    img.info['indirect-jmp-sites'] = len(img.ijall); img.info['indirect-jmp-sites-bad'] = len(img.ijbad)
+    img.info['arrival-disagree'] = len(img.badarr & set(roots))
+    for e in sorted(img.badarr & set(roots)):
+        ev, sm = analyse_entry(img, e, 'possibly')
+        rows.extend(resolve(img, e, ev, kinds_of.get(e, set()), 'possibly', img.pk.get((e, 'possibly'), [])))
     for e in roots:
         ev = img.summ[e][0]
         rows.extend(resolve(img, e, ev, kinds_of.get(e, set()), 'owner', img.pk.get((e, 'owner'), [])))
@@ -784,9 +813,9 @@ def analyse(img, kinds_of, parent=None):
     return rows
 
 
-def run(text, T0, entries, ranges, outdir, name, rd=None, rset=None, parent=None, cand=None):
+def run(text, T0, entries, ranges, outdir, name, rd=None, rset=None, parent=None, cand=None, pops=None, imp=None):
     """-> (red count, summary dict); writes outdir/pcsources.tsv and gate_pcsrc.json."""
-    img = Img(text, T0, entries, ranges, rd, rset)
+    img = Img(text, T0, entries, ranges, rd, rset, pops, imp)
     rows = analyse(img, entries, parent)
     red = [r for r in rows if r[5]]
     with open(outdir + '/pcsources.tsv', 'w') as f:
@@ -799,6 +828,9 @@ def run(text, T0, entries, ranges, outdir, name, rd=None, rset=None, parent=None
     res = dict(schema='fnvnx-gate/1', name='l3.pcsrc.' + name, status='red' if red else 'green', sources=sources, rows=len(rows), red=len(red), by_class={'%s/%s' % k: n for k, n in sorted(byc.items())},
                red_by_class={'%s/%s' % k: n for k, n in sorted(redc.items())}, s4_red=sum(1 for r in red if r[2] == 's4'), s4_target=sum(1 for r in red if r[2] == 's4' and not r[3].startswith('escape')), s4_escape_red=sum(1 for r in red if r[2] == 's4' and r[3].startswith('escape')), s4_red_proven=sum(1 for r in red if r[2] == 's4' and r[0] not in cand), s4_escapes=sum(1 for r in rows if r[2] == 's4' and not r[5]), code_sources=sum(1 for r in rows if r[2] == 'code'), red_candidate_entries=redcand, red_proven_entries=len(red) - redcand, esp_lost=img.info['esp-lost'], cond_fresh_entries=len(img.fresh), cond_fresh_list=['%08x' % x for x in sorted(img.fresh)], entries=len(entries), info=dict(img.info))
     json.dump(res, open(outdir + '/gate_pcsrc.json', 'w'), sort_keys=True)
+    with open(outdir + '/pcsrc_ijmp.tsv', 'w') as f:      # the indirect jmp sites of the owners' flow and how each arrives: clean, a return through the RA symbol, or the recorded reason it is not clean
+        f.write('# site, status (clean | return | not-clean), reason; a not-clean site gives the whole ptr set as its dispatcher targets (arrival join)\n')
+        for a in sorted(img.ijall | img.ijret): f.write('%08x\t%s\t%s\n' % (a, 'return' if a in img.ijret else 'not-clean' if a in img.ijbad else 'clean', img.ijwhy.get(a, '-')))
     json.dump({'s4_violations': res['s4_red']}, open(outdir + '/pcsrc_s4.json', 'w'), sort_keys=True)      # read by modlift's residual: no file = unchecked, N > 0 = violation
     return len(red), res
 
@@ -815,21 +847,41 @@ def pin_of(facts, name):
     return None
 
 
-def run_facts(facts, name, text, T0, rd=None, rset=None):
-    """facts: directory holding universe.tsv and ranges.tsv of the image; text/T0 the executable span; rd(va) reads a 32-bit word of the image, rset the relocated words. Same outputs as run()."""
+def read_universe(path):
+    """-> (entries {addr: every kind the entry carries}, parent {addr: parent}, candidates). universe.tsv column 2 is the primary kind; the others are in the flags column among the flag words, and
+    residue.PRI is the one vocabulary that tells a kind from a flag. Every reader of universe.tsv calls this."""
+    import residue
     ent = {}; parent = {}; cand = set()
-    for l in open(facts + '/universe.tsv'):
+    for l in open(path):
         if l[0] == '#' or not l.strip(): continue
-        f = l.rstrip('\n').split('\t'); ent[int(f[0], 16)] = set(f[1].split(','))
-        for x in (f[3].split(',') if len(f) > 3 else ()):
-            if x.startswith('parent='): parent[int(f[0], 16)] = int(x[7:], 16)
-            if x == 'candidate': cand.add(int(f[0], 16))
+        f = l.rstrip('\n').split('\t'); a = int(f[0], 16); fl = f[3].split(',') if len(f) > 3 else []
+        ent[a] = {f[1]} | {x for x in fl if x in residue.PRI}
+        for x in fl:
+            if x.startswith('parent='): parent[a] = int(x[7:], 16)
+            if x == 'candidate': cand.add(a)
+    return ent, parent, cand
+
+
+def run_facts(facts, name, text, T0, rd=None, rset=None, imports=None):
+    """facts: directory holding universe.tsv and ranges.tsv of the image; text/T0 the executable span; rd(va) reads a 32-bit word of the image, rset the relocated words. Same outputs as run()."""
+    ent, parent, cand = read_universe(facts + '/universe.tsv')
     rg = []
     for l in open(facts + '/ranges.tsv'):
         if l[0] == '#' or not l.strip(): continue
         for r in l.rstrip('\n').split('\t')[1].split(','):
             if '-' in r: a, b = r.split('-'); rg.append((int(a, 16), int(b, 16)))
-    red, res = run(text, T0, ent, rg, facts, name, rd, rset, parent, cand)
+    pops = {}      # retn.tsv (residue.retn_rows): an entry whose every ret pops 0 (caller) or N (callee) pops that; mixed / open / noreturn entries are not decided
+    if os.path.exists(facts + '/retn.tsv'):
+        for l in open(facts + '/retn.tsv'):
+            f = l.rstrip('\n').split('\t')
+            if l[0] != '#' and len(f) >= 3 and f[1] in ('caller', 'callee'): pops[int(f[0], 16)] = 0 if f[1] == 'caller' else int(f[2])
+    imp = {}       # the import slots of the image: the pop of the imported function from L1's keys.tsv, through the one rule ehflow.import_pop
+    if imports:
+        import ehflow; keys = ehflow.load_keys()
+        for slot, nm in imports.items():
+            r = keys.get(nm.lower()); p = ehflow.import_pop(*r) if r else None
+            if p is not None: imp[slot] = p
+    red, res = run(text, T0, ent, rg, facts, name, rd, rset, parent, cand, pops, imp)
     res['input'] = pin_of(facts, name)       # the pinned gamedata external the image was read from (facts manifest.json), or None when the facts dir has no manifest
     json.dump(res, open(facts + '/gate_pcsrc.json', 'w'), sort_keys=True)
     return red, res
