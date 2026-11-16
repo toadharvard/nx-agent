@@ -236,8 +236,8 @@ class State(unittest.TestCase):
         a, r = self.run_fn('fnvl_fp_x87_flags')
         f = ctrans.FPSR_IN
         bit = lambda i: z3.ZeroExt(31, z3.Extract(i, i, f))
-        # the x87 flag word: IE <- IOC, DE <- IDC, ZE <- DZC, OE <- OFC, UE <- UFC, PE <- IXC (FSW bits 0..5; SDM 1:8.1.3.2)
-        want = bit(0) | (bit(7) << 1) | (bit(1) << 2) | (bit(2) << 3) | (bit(3) << 4) | (bit(4) << 5)
+        # the x87 flag word: IE <- IOC, ZE <- DZC, OE <- OFC, UE <- UFC, PE <- IXC (FSW bits 0..5; SDM 1:8.1.3.2); DE is never read from the host (IDC is not raised with FPCR.FZ = 0): rt/fnvl_x87.h fx_de
+        want = bit(0) | (bit(1) << 2) | (bit(2) << 3) | (bit(3) << 4) | (bit(4) << 5)
         self.assertTrue(valid(r.ret.e == want))
         self.assertTrue(valid(r.fpsr == f))
 
