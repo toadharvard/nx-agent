@@ -6,8 +6,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-import bridgetable as B  # noqa: E402
-import imports as I  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: contract.X by its qualified name
+from contract import bridgetable as B  # noqa: E402
+from contract import imports as I  # noqa: E402
 
 FAILED = []
 
@@ -112,7 +113,7 @@ check("judge: green case", I.judge(g, {"F": [("GLOBAL", "FUNC")]}, {}, {}, {}) =
 check("judge: UNIQUE counts as global", I.judge(g, {"F": [("UNIQUE", "FUNC")]}, {}, {}, {}) == [("a.dll!F", None)])
 
 # the rows table (stage A): syms=None binds by rule, never reads a symbol table, and its keys equal the keys of every judged derivation
-import iat  # noqa: E402
+from contract import iat  # noqa: E402
 ra, ea, _ = B.derive(NAMES, lambda d: SPECS[d], None, TABLE, [], VA)
 check("rows table: no errors", ea == [], ea)
 check("rows table: every symbol row binds sym, data binds data (iob), msvcrt binds lookup by the name table, a name outside it is none",

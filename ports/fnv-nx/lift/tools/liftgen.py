@@ -202,11 +202,11 @@ def finish(a):
         texts.update(t)
         for f in sorted(glob.glob(d + '/forms_*.tsv')):
             for form, n, s in tsv(f): forms[form][0] += int(n); forms[form][1] = s
-            e = f.replace('/forms_', '/encs_')
+            e = os.path.join(os.path.dirname(f), 'encs_' + os.path.basename(f)[len('forms_'):])
             if not os.path.isfile(e): sys.exit('finish: %s: no encodings list beside %s' % (d, os.path.basename(f)))
             enc_add(encs, [(form, bytes.fromhex(r), int(x, 16)) for form, r, x in tsv(e)])
         for f in sorted(glob.glob(d + '/texts_*.txt')):      # completeness: every shard that has texts has its shapes
-            sf = f.replace('/texts_', '/shapes_').replace('.txt', '.tsv')
+            sf = os.path.join(os.path.dirname(f), 'shapes_' + os.path.basename(f)[len('texts_'):-len('.txt')] + '.tsv')
             if not os.path.isfile(sf): sys.exit('finish: %s: no shapes list beside %s' % (d, os.path.basename(f)))
             for k, fam, n in tsv(sf):
                 if shape_fam.setdefault(k, fam) != fam: sys.exit('finish: shape %s has two families (%s, %s)' % (k, shape_fam[k], fam))
@@ -257,15 +257,15 @@ def main():
     A('--lift', help='the lift/ directory (fnvlift/, rt/) when it is not the parent of this tool (a recipe stage mounts it as a declared input)')
     A('--image', action='append', default=[], metavar='DIR=UNIVERSE.tsv', help='finish: one image (exe and every module row): its shard directory and its universe')
     A('--fpstate', help='directory of the fp-state facts (invariants.tsv)')
-    A('--certs', help='the directory of the form certificates (proof/prove.py output; shard mode)'); A('--fpdepth', help='the x87 stack-depth facts (depth.tsv)'); A('--sdmrows', help='the SDM opcode rows (sdmfeat.py dumprows JSON)'); A('--cpumodel', help='the declared CPU data (verify/cpuid_model.json)'); A('--udsail', help='the Sail #UD verdicts (proof/udsail.py output): read only when a refused sequence or a form with no SDM row is met'); A('--segwrites', help='the per-image write sites of the data segment registers (lift/facts SEGWRITES)'); A('--x86sys', help='the declared x86 system record (platform X86SYS output)')
+    A('--certs', help='the directory of the form certificates (proof/prove.py output; shard mode)'); A('--fpdepth', help='the x87 stack-depth facts (depth.tsv)'); A('--sdmrows', help='the SDM opcode rows (sdmfeat.py dumprows JSON)'); A('--cpumodel', help='the declared CPU data (verify/cpuid_model.json)'); A('--rcptab', help='rt/rcptab.c (the certified table source)'); A('--rcpcert', help='rt/rcptab.cert.json'); A('--udsail', help='the Sail #UD verdicts (proof/udsail.py output): read only when a refused sequence or a form with no SDM row is met'); A('--segwrites', help='the per-image write sites of the data segment registers (lift/facts SEGWRITES)'); A('--x86sys', help='the declared x86 system record (platform X86SYS output)')
     a = ap.parse_args()
-    need = ['out'] + (['exe', 'modules', 'image'] if a.finish else ['fpstate', 'fpdepth', 'x86sys', 'sdmrows', 'cpumodel', 'segwrites', 'certs'] + (['modules', 'moddirs', 'facts_out', 'module'] if a.module else ['exe', 'universe']))      # --finish merges texts and reads no lifter input but the universe files
+    need = ['out'] + (['exe', 'modules', 'image'] if a.finish else ['fpstate', 'fpdepth', 'x86sys', 'sdmrows', 'cpumodel', 'rcptab', 'rcpcert', 'segwrites', 'certs'] + (['modules', 'moddirs', 'facts_out', 'module'] if a.module else ['exe', 'universe']))      # --finish merges texts and reads no lifter input but the universe files
     miss = ['--' + k.replace('_', '-') for k in need if getattr(a, k) is None]
     if miss: ap.error('missing %s' % ' '.join(miss))
     a.base = None
     if a.module: module_inputs(a)
     import fnvlift
-    if not a.finish: fnvlift.inputs.configure(universe=a.universe, fpstate=a.fpstate, fpdepth=a.fpdepth, x86sys=a.x86sys, sdmrows=a.sdmrows, cpumodel=a.cpumodel, segwrites=a.segwrites, **({'udsail': a.udsail} if a.udsail else {}), image=os.path.splitext(a.module)[0].lower() if a.module else 'exe')      # finish merges texts: it reads no lifter input
+    if not a.finish: fnvlift.inputs.configure(universe=a.universe, fpstate=a.fpstate, fpdepth=a.fpdepth, x86sys=a.x86sys, sdmrows=a.sdmrows, cpumodel=a.cpumodel, rcptab=a.rcptab, rcpcert=a.rcpcert, segwrites=a.segwrites, **({'udsail': a.udsail} if a.udsail else {}), image=os.path.splitext(a.module)[0].lower() if a.module else 'exe')      # finish merges texts: it reads no lifter input
     os.makedirs(a.out, exist_ok=True)
     if a.finish: finish(a)
     elif a.shard: shard(a)

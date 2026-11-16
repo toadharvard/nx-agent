@@ -93,7 +93,7 @@ if [ "$PUBLISH" = 1 ] && git -C "$B" ls-remote --exit-code origin "refs/heads/$B
 
 # 3. prove
 ulimit -v "${VMEM_KB:-6000000}"
-python3 -I "$HERE/shapeprove.py" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --timeout "${TIMEOUT:-600}" --eip "${EIP:-sym}" --slice "${SLICE:-1}" --sail-work "$WORKDIR" --sail-ir "${SAIL_IR:-$WORKDIR/sail/x86_proof.ir}" --isla "$ISLA" ${LIMIT:+--limit "$LIMIT"} > "$OUT/shapeprove_${K}_of_$N.log" 2>&1 || true
+python3 -I "$HERE/shapeprove.py" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --timeout "${TIMEOUT:-600}" --eip "${EIP:-sym}" --slice "${SLICE:-1}" --sail-work "$WORKDIR" --sail-ir "${SAIL_IR:-$WORKDIR/sail/x86_proof.ir}" --isla "$ISLA" --cpumodel "$HERE/../../verify/cpuid_model.json" --rcptab "$HERE/../rt/rcptab.c" --rcpcert "$HERE/../rt/rcptab.cert.json" ${LIMIT:+--limit "$LIMIT"} > "$OUT/shapeprove_${K}_of_$N.log" 2>&1 || true
 J="$OUT/shapeprove_${K}_of_$N.jsonl"
 [ -f "$J" ] || { echo "no result file; see $OUT/shapeprove_${K}_of_$N.log" >&2; tail -n 5 "$OUT/shapeprove_${K}_of_$N.log" >&2; exit 1; }
 SUM=$(python3 -I - "$J" <<'PY'

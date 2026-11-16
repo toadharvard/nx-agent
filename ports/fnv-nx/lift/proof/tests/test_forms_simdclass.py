@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 import capstone as CS, z3
 from proof import forms
 from fnvlift import dsl
+from fnvlift.tests import _inputs; _inputs.configure_declared()
 md = CS.Cs(CS.CS_ARCH_X86, CS.CS_MODE_32); md.detail = True
 FAILS = []; N = [0]
 def check(name, ok):

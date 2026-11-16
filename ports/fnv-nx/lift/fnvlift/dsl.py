@@ -179,8 +179,9 @@ _RCPT = {}
 def _rcp_tables():
     """the two 2048-entry tables of rt/rcptab.c, read from the file when it is the certified one (sha256 = rcptab.cert.json source_sha256, 0 mismatches)"""
     if _RCPT: return _RCPT
-    import json, os, re
-    rt = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'rt'); src = open(os.path.join(rt, 'rcptab.c'), 'rb').read(); cert = json.load(open(os.path.join(rt, 'rcptab.cert.json')))
+    import json, re
+    from . import inputs
+    src = open(inputs.get('rcptab'), 'rb').read(); cert = json.load(open(inputs.get('rcpcert')))
     if hashlib.sha256(src).hexdigest() != cert['source_sha256'] or cert['mismatches'] != 0: raise ValueError('rcptab.c is not the certified table of the reference CPU')
     t = src.decode()
     for name in ('rcp', 'rsqrt'):
