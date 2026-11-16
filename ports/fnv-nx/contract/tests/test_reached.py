@@ -30,7 +30,14 @@ def spec_text(dll):
     return SPECS[dll]
 
 
-imports = {"syn.exe": reached.read_imports("slot\tdll\tname\tkind\tvalue\n0x402000\tkernel32.dll\tLoadLibraryA\tkey\t0\n0x402004\tKERNEL32\tGetProcAddress\tkey\t0\n")}
+bases = reached.read_bases("# name\tsha\tsize\tpb\tab\nsyn.exe\t00\t1\t00400000\t00400000\n")
+imports = reached.read_import_names("# image\tdll\tname\tslot_rva\nsyn.exe\tkernel32.dll\tLoadLibraryA\t00002000\nsyn.exe\tKERNEL32\tGetProcAddress\t00002004\n", bases)
+check("import_names: the slot VA is the image base plus the slot RVA", imports["syn.exe"][0], ("kernel32.dll", "LoadLibraryA", "0x402000"))
+try:
+    reached.read_import_names("syn.exe\tk.dll\tx\t00000001\nother.dll\tk.dll\ty\t00000002\n", bases)
+    check("import_names: an image without a base is an error", "no error", "ValueError")
+except ValueError as e:
+    check("import_names: an image without a base is an error", str(e), "no base in modules.tsv for: other.dll")
 sig, errs = reached.signatures([i for v in imports.values() for i in v], spec_text)
 check("signatures: no error", errs, [])
 check("signatures: stack bytes from the spec alone", sorted(gpa_names.import_stacks(sig).items()),

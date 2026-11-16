@@ -37,10 +37,11 @@ def images_of(normal_imports, ok):
     return image
 
 
-def classify(root_imports, imports_of, find, bridge, root=None):
+def classify(root_imports, imports_of, find, served, root=None):
     """root_imports: (normal, delay) dll names of the root (the exe).  -> (order, kind): order = [(name, path)] of the dlls reached
     from the root in discovery order (found, not bridge; the walk goes through candidates that are images only); kind = {name: 'image' |
-    'declared' | 'bridge' | 'platform' | 'root'} for every dll name met."""
+    'load-fails' | 'served' | 'absent' | 'root'} for every dll name met. SERVED: the names the platform serves (the declared dll set without a file, platform_served); a name with a file is never served.
+    'load-fails': found, whose import closure does not resolve (on Windows its load fails: LoadLibrary returns NULL, error 126). 'absent': neither found nor served."""
     import_of = {}                       # name -> (path, normal, delay) of the found non-bridge dlls reached through found dlls
     met = []                             # discovery order of every name met
 
@@ -52,12 +53,9 @@ def classify(root_imports, imports_of, find, bridge, root=None):
                 if name == root:
                     kind0[name] = "root"
                     continue
-                if name in bridge:
-                    kind0[name] = "bridge"
-                    continue
-                p = find(name)
+                p = None if name in served else find(name)   # a served name (a declared absent service) is never read from its file
                 if p is None:
-                    kind0[name] = "platform"
+                    kind0[name] = "served" if name in served else "absent"
                     continue
                 kind0[name] = "found"
                 n, d = imports_of(p)
@@ -67,17 +65,17 @@ def classify(root_imports, imports_of, find, bridge, root=None):
 
     kind0 = {}
     meet(list(root_imports))
-    image = images_of({n: v[1] for n, v in import_of.items()}, {n for n, k in kind0.items() if k in ("bridge", "root")})
-    kind = {n: ("image" if n in image else "declared") if k == "found" else k for n, k in kind0.items()}
+    image = images_of({n: v[1] for n, v in import_of.items()}, {n for n, k in kind0.items() if k in ("served", "root")})
+    kind = {n: ("image" if n in image else "load-fails") if k == "found" else k for n, k in kind0.items()}
     order, seen = [], set()
 
     def walk(raw_lists):
         for raw in raw_lists:
             for name in raw:
-                if name in seen or kind[name] in ("platform",):
+                if name in seen or kind[name] in ("served", "absent"):
                     continue
                 seen.add(name)
-                if kind[name] == "image" or kind[name] == "declared":
+                if kind[name] == "image" or kind[name] == "load-fails":
                     order.append((name, import_of[name][0]))
                 if kind[name] == "image":
                     walk([import_of[name][1], import_of[name][2]])

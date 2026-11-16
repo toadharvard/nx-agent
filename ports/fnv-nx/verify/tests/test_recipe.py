@@ -62,8 +62,8 @@ FILES = {
     "toy/os.S": CRT0 + ".text\n.globl os_svc\n.type os_svc,%function\nos_svc:\n svc #0\n ret\n.size os_svc,.-os_svc\n",
     "toy/inc/toy.h": "#define TOY 7\n",
     "toy/constants.tsv": "f_c\t1\nf_b\t2\n",
-    "verify/wine_fixme.tsv": "# id\tcontract_name\twine_ref\tkind\tvalue\n",
-    "verify/declared_machine.tsv": "# id\tcontract_name\tfact\tsource\tkind\tvalue\n# fact: no-network | time-zone | registry | no-galaxy (fixture); source: win-doc:<page>:<function> | wine-9.0:<path>:<function> | galaxy-sdk:<page>:<function>; kind void|u32\n",
+    "toy/wine_fixme.tsv": "# id\tcontract_name\twine_ref\tkind\tvalue\n",
+    "toy/declared_machine.tsv": "# id\tcontract_name\tfact\tsource\tkind\tvalue\n# fact: no-network | time-zone | registry | no-galaxy (fixture); source: win-doc:<page>:<function> | wine-9.0:<path>:<function> | galaxy-sdk:<page>:<function>; kind void|u32\n",
     "toy/link.ld": open(os.path.join(VERIFY, "..", "link", "guest.ld")).read(),
 }
 LINK_TOOLS = ("link/ldcheck.py", "contract/gatefile.py", "verify/objstub_plugin.cc")   # the real files of the tree: the ldcheck stage mounts them; objstub_plugin.cc is the source of the analysis plugin every root with C/C++ units builds

@@ -71,20 +71,20 @@ def tree(files):
 
 
 d = tree({"A.exe": pe(["B.DLL"]), "b.dll": pe(["C.dll", "kernel32.dll"])})
-check("A imports B, B imports missing C -> B is declared, not an image: {A}", [n for n, _ in images.image_set(d + "/A.exe", [d])] == ["a.exe"])
-check("... the declared B is reached but not walked", [n for n, _ in images.classify(d + "/A.exe", [d])[0]] == ["b.dll"]
-      and images.classify(d + "/A.exe", [d])[1] == {"b.dll": "declared", "c.dll": "platform", "kernel32.dll": "platform"}, images.classify(d + "/A.exe", [d])[1])
-check("C and kernel32 bridged -> B is an image again", [n for n, _ in images.image_set(d + "/A.exe", [d], {"c.dll", "kernel32.dll"})] == ["a.exe", "b.dll"])
+check("A imports B, B imports missing C -> B is load-fails, not an image: {A}", [n for n, _ in images.image_set(d + "/A.exe", [d])] == ["a.exe"])
+check("... the load-fails B is reached but not walked", [n for n, _ in images.classify(d + "/A.exe", [d])[0]] == ["b.dll"]
+      and images.classify(d + "/A.exe", [d])[1] == {"b.dll": "load-fails", "c.dll": "absent", "kernel32.dll": "absent"}, images.classify(d + "/A.exe", [d])[1])
+check("C and kernel32 served -> B is an image again", [n for n, _ in images.image_set(d + "/A.exe", [d], {"c.dll", "kernel32.dll"})] == ["a.exe", "b.dll"])
 dB = tree({"A.exe": pe(["B.DLL", "kernel32.dll"]), "b.dll": pe(["C.dll"]), "c.dll": pe(["kernel32.dll"])})
-kB = images.classify(dB + "/A.exe", [dB], {"b.dll", "kernel32.dll"})
-check("a bridge dll with a found file is not an image and is not walked (c.dll is an image on its own, as a file of the directory, not through b)",
-      [n for n, _ in images.image_set(dB + "/A.exe", [dB], {"b.dll", "kernel32.dll"})] == ["a.exe", "c.dll"]
-      and kB[1]["b.dll"] == "bridge" and [n for n, _ in kB[0]] == ["c.dll"], kB[1])
-check("without the bridge row the same chain is images",
+kB = images.classify(dB + "/A.exe", [dB], {"c.dll", "kernel32.dll"})
+check("a served name with a file is a candidate image, never served: platform_served leaves it out",
+      modules.platform_served({"b.dll", "kernel32.dll"}, [dB]) == {"kernel32.dll"}
+      and kB[1]["kernel32.dll"] == "served", kB[1])
+check("with kernel32 served the chain is images",
       [n for n, _ in images.image_set(dB + "/A.exe", [dB], {"kernel32.dll"})] == ["a.exe", "b.dll", "c.dll"])
-check("an image whose dependency is a declared dll is itself declared (closure, no named list)",
+check("an image whose dependency is not served is itself load-fails (closure, no named list)",
       [n for n, _ in images.image_set(dB + "/A.exe", [dB], set())] == ["a.exe"]
-      and images.classify(dB + "/A.exe", [dB], set())[1]["c.dll"] == "declared")
+      and images.classify(dB + "/A.exe", [dB], set())[1]["c.dll"] == "load-fails")
 d2 = tree({"A.exe": pe(["B"], ["D.dll"]), "b.DLL": pe(["A.exe"]), "d.dll": pe(["b"])})
 check("delay-load imports count, cycles end, names fold case and the .dll extension",
       [n for n, _ in images.image_set(d2 + "/A.exe", [d2])] == ["a.exe", "b.dll", "d.dll"])

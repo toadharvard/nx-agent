@@ -382,8 +382,8 @@ images - the guest image set of the contract gates (L1 CONTRACT): one pure funct
 RULE (dllkind.py, shared with modules.py): the set is the exe and the dlls reached from its import directories (normal and delay-load, in
 modules.PE's reading) through guest images only.  A dll name (iat.norm_dll) is resolved case-insensitively against the files of the
 given directories; it is a GUEST IMAGE iff it is found, has no bridge row, and its whole normal import closure resolves to guest images
-or bridge dlls.  A bridge dll (rows in bridge.tsv) and a found dll the declared machine cannot load are not images and are not walked
-further; a name that is neither found nor bridged is a platform import (gate `imports`, owner L5).  Dynamic LoadLibrary names are facts of
+or platform-served names.  A name of the declared dll set with no file is served by the platform; a found dll whose closure does not
+resolve is `load-fails` (LoadLibrary NULL/126); neither files nor declared set is `absent` (red).  Neither is walked further.  Dynamic LoadLibrary names are facts of
 the `gpa` gate, not of this rule (VERDICT.md).
 Order: the exe, then the images in discovery order (depth first, import directory then delay-load directory).
 ```
@@ -1619,7 +1619,7 @@ and the terminator set DERIVED from the recipe's compiler: objstub.unit_terminat
 of every C/C++ unit (the stage result unit.ii of the build, found by the pp_key in objects.json), so the set is a function of the compiler,
 its flags and every header the unit really includes (a function of the compiler and the header set; the finer key is the preprocessor stage
 key). The set is cached per unit under GATE_CACHE/objstub. No product root: universe 0, green.
-Wine rows: verify/wine_fixme.tsv of the tree under test (objstub.read_wine_table; missing or malformed is a gate error, red); the result
+Wine rows: `<root>/wine_fixme.tsv` of every admitted root of the tree under test (objstub.read_root_tables; malformed or a duplicate id is a gate error, red; an orphan row is a finding); the result
 holds "wine_fixme": {id: call sites} so growth of the simplified bodies is visible.
 Reach facts: GATE_CACHE/reach/<git tree>/reach.facts.tsv (rows fact_id<TAB>sha256, written by the gate `reach`, which does not exist yet).
 While the file is absent, every call of fnvnx_reach_violation is the finding `reach-uncertified`.
@@ -1956,7 +1956,7 @@ does exactly what Wine 9.0's simplified implementation of an API does (nothing, 
 is no evidence of a call (rule (i)), and after it x0-x18, x30, v0-v7, v16-v31 are unknown (written with unknown values), so a result
 that depends on them is unknown. A function that calls it and is otherwise V is certified iff (1) w0 at every call is a constant
 (`wine-fixme-nonconstant`), (2) every path passes exactly one id (else `wine-fixme-mismatch`; wine_path_id), (3) the table
-verify/wine_fixme.tsv (`--wine-fixme`; the gate reads the tree under test) has the row of that id (`wine-fixme-unknown-id`) and (4) the
+<root>/wine_fixme.tsv (`--wine-fixme`; the gate reads the tree under test) has the row of that id (`wine-fixme-unknown-id`) and (4) the
 result equals the row's kind/value (void: any; u32/u64: x0 is that constant; addr: x0 is the address of SYMBOL (+ OFFSET): a name at that address, or a symbol whose extent holds it; a LOCAL symbol is matched through its own symbol-table entry (the assembler often relocates against the section symbol + addend, which is resolved back to `symbol+offset` that way); u32nz<N>: below; else `wine-fixme-mismatch`). For such a body
 the input rule (v) of V is replaced by the result rule: reading an input register is no evidence (a debug build spills its arguments),
 because the result must be constant by wine_sim and the effects are frame stores (V (a), (b)). u32nz<N> (a result that depends only on
@@ -1978,7 +1978,7 @@ Wine 9.0 tree is the oracle class, not done. A row without a call site is no fin
 `.fnvnx.cite` (type PROGBITS, no SHF_ALLOC): u32 function address (an ABS32 relocation of the object's ABI, R_AARCH64_P32_ABS32 for ILP32, against a
 function DEFINED in the same object), u32 length n of the id, the n bytes of the id, padding to 4 (read_cites; any other shape, an id that is not
 `dm:`/`wf:` plus a decimal, a relocation that does not name a function start of this object: `cite-malformed`). `dm:` is the id column of
-verify/declared_machine.tsv (`--declared-machine`; read_declared_table: rows `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`; the facts and the
+<root>/declared_machine.tsv (`--declared-machine`; read_declared_table: rows `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`; the facts and the
 source prefixes are read from the table's own header line; the clause of `c11:<clause>:<function>` is digits and dots, the page of `posix-2017:<page>:<function>`
 a name; kind `noreturn` (value `-`) exactly for the facts process-end and thread-end), `wf:` the id column of wine_fixme.tsv. A cited body is judged by the rules
 of (W) with no call to read: it is analysed with the input rule replaced by the result rule (wine mode); V => it is certified iff the row's kind/value match the
@@ -2746,6 +2746,6 @@ Test: verify/tests/test_bridgefacts.py.
 
 reached - the (dll, name) pairs the image set reaches (L1 CONTRACT): `reached.tsv`, columns dll, name, how (`iat` | `gpa`), site (`<image>@<VA>`).
 
-    reached.py --sites dynsites.tsv --image NAME=pe ... --imports NAME=imports.tsv ... --facts DIR --facts-tree SHA --declared declared_dlls.tsv --specs DIR [--modules modules.tsv] --out reached.tsv
+    reached.py --sites dynsites.tsv --dir DIR ... --import-names import_names.tsv --facts DIR --declared declared_dlls.tsv --specs DIR --modules modules.tsv --out reached.tsv
 
-`iat` rows: every import slot of every image (the imports/<name>.tsv of modules.py). `gpa` rows: every (module, name) pair a GetProcAddress site can ask for (gpa_names.py's derivation, `analyse`; a module the facts cannot place is `*`). The universe is the images; nothing filters it, and an export nothing reaches is no row. The signature input of the derivation (stack bytes, argument letters of an import) is the reference spec's, through `bridgetable.resolve`, and the may-load set is the images, modules.tsv and declared_dlls.tsv: no bridge.tsv row is an input, so the table that L6's bridgefacts filter by reached.tsv cannot be one (no cycle). An import without a signature is an error and the stage lists every one. Test: `contract/tests/test_reached.py` (a toy image: one IAT import, one resolved GPA name, one unreached export).
+`iat` rows: every import slot of every image (the import_names.tsv of modules.py's first entry, slot VA = the image base of modules.tsv + the slot RVA). `gpa` rows: every (module, name) pair a GetProcAddress site can ask for (gpa_names.py's derivation, `analyse`; a module the facts cannot place is `*`). The universe is the images; nothing filters it, and an export nothing reaches is no row. The signature input of the derivation (stack bytes, argument letters of an import) is the reference spec's, through `bridgetable.resolve`, and the may-load set is the images, modules.tsv and declared_dlls.tsv: no bridge.tsv row is an input, so the table that L6's bridgefacts filter by reached.tsv cannot be one (no cycle). An import without a signature is an error and the stage lists every one. Test: `contract/tests/test_reached.py` (a toy image: one IAT import, one resolved GPA name, one unreached export).

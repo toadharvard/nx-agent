@@ -65,7 +65,7 @@ does exactly what Wine 9.0's simplified implementation of an API does (nothing, 
 is no evidence of a call (rule (i)), and after it x0-x18, x30, v0-v7, v16-v31 are unknown (written with unknown values), so a result
 that depends on them is unknown. A function that calls it and is otherwise V is certified iff (1) w0 at every call is a constant
 (`wine-fixme-nonconstant`), (2) every path passes exactly one id (else `wine-fixme-mismatch`; wine_path_id), (3) the table
-verify/wine_fixme.tsv (`--wine-fixme`; the gate reads the tree under test) has the row of that id (`wine-fixme-unknown-id`) and (4) the
+<root>/wine_fixme.tsv (`--wine-fixme`; the gate reads the tree under test) has the row of that id (`wine-fixme-unknown-id`) and (4) the
 result equals the row's kind/value (void: any; u32/u64: x0 is that constant; addr: x0 is the address of SYMBOL (+ OFFSET): a name at that address, or a symbol whose extent holds it; a LOCAL symbol is matched through its own symbol-table entry (the assembler often relocates against the section symbol + addend, which is resolved back to `symbol+offset` that way); u32nz<N>: below; else `wine-fixme-mismatch`). For such a body
 the input rule (v) of V is replaced by the result rule: reading an input register is no evidence (a debug build spills its arguments),
 because the result must be constant by wine_sim and the effects are frame stores (V (a), (b)). u32nz<N> (a result that depends only on
@@ -87,7 +87,7 @@ Wine 9.0 tree is the oracle class, not done. A row without a call site is no fin
 `.fnvnx.cite` (type PROGBITS, no SHF_ALLOC): u32 function address (an ABS32 relocation of the object's ABI, R_AARCH64_P32_ABS32 for ILP32, against a
 function DEFINED in the same object), u32 length n of the id, the n bytes of the id, padding to 4 (read_cites; any other shape, an id that is not
 `dm:`/`wf:` plus a decimal, a relocation that does not name a function start of this object: `cite-malformed`). `dm:` is the id column of
-verify/declared_machine.tsv (`--declared-machine`; read_declared_table: rows `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`; the facts and the
+<root>/declared_machine.tsv (`--declared-machine`; read_declared_table: rows `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`; the facts and the
 source prefixes are read from the table's own header line; the clause of `c11:<clause>:<function>` is digits and dots, the page of `posix-2017:<page>:<function>`
 a name; kind `noreturn` (value `-`) exactly for the facts process-end and thread-end), `wf:` the id column of wine_fixme.tsv. A cited body is judged by the rules
 of (W) with no call to read: it is analysed with the input rule replaced by the result rule (wine mode); V => it is certified iff the row's kind/value match the
@@ -2068,6 +2068,39 @@ def wine_matches(row, v, nz):
     return kind == "void" or (x0 is not None and x0[0] == "K" and x0[1] & (0xFFFFFFFF if kind == "u32" else 2 ** 64 - 1) == int(val, 0))
 
 
+def read_root_tables(repo, roots, std_index=None, winerr=None):
+    """The declared-machine and Wine rows of the admitted ROOTS (repo-relative paths): each root that has citing bodies carries `<root>/declared_machine.tsv` and
+    `<root>/wine_fixme.tsv` (a root without the file has no row of that class). The tables are the union over the roots; an id that is in two roots' tables of one class
+    is an error (ids are one space per class). -> (wine, declared, owner) with wine/declared as read_wine_table/read_declared_table and OWNER {("wf"|"dm", id): root}.
+    ValueError on a malformed table or a duplicate id."""
+    wine, declared, owner = {}, {}, {}
+    for root in sorted(roots):
+        for fname, kind, dest, load in (("wine_fixme.tsv", "wf", wine, lambda q: read_wine_table(q)),
+                                        ("declared_machine.tsv", "dm", declared, lambda q: read_declared_table(q, std_index, winerr))):
+            q = os.path.join(repo, root, fname)
+            if not os.path.exists(q):
+                continue
+            for i, row in load(q).items():
+                if i in dest:
+                    raise ValueError("%s id %d is a row of two roots: %s and %s" % (fname, i, owner[(kind, i)], root))
+                dest[i], owner[(kind, i)] = row, root
+    return wine, declared, owner
+
+
+def orphan_findings(results, owner):
+    """-> [(object "-", "<root>:<dm|wf>:<id>", "declared-machine-orphan"|"wine-fixme-orphan", detail)]: a row of an admitted root that no record of an object of
+    that root cites. An object belongs to the longest root path that is a prefix of its id."""
+    roots = sorted({r for r in owner.values()}, key=len, reverse=True)
+    cited = {}
+    for oid, r in results.items():
+        root = next((x for x in roots if oid.startswith(x + "/")), None)
+        if root:
+            cited.setdefault(root, set()).update(i for ids in r["cite"].values() for i in ids)
+            cited[root].update("wf:%d" % c for _, _, c in r["wine"] if c is not None)   # the other form of a Wine citation: the constant id a body passes to fnvnx_wine_fixme
+    return sorted(("-", "%s:%s:%d" % (root, k, i), "declared-machine-orphan" if k == "dm" else "wine-fixme-orphan",
+                   "the row %s:%d of %s is cited by no record of that root" % (k, i, root)) for (k, i), root in owner.items() if "%s:%d" % (k, i) not in cited.get(root, set()))
+
+
 def read_wine_table(path):
     """wine_fixme.tsv: `id<TAB>contract_name<TAB>wine_ref<TAB>kind<TAB>value`; lines starting with # are comments. id decimal < 2**32,
     wine_ref `wine-9.0:<path in the Wine source tree>:<function name>` (the FORM is validated; checking it against a pinned Wine 9.0 tree
@@ -2110,6 +2143,7 @@ def declared_header(lines):
                 raise ValueError("declared machine table header: a source form is not PREFIX:<..>:<function>: %r" % s.group(1)[:80])
             fn = r":[A-Za-z_][A-Za-z0-9_@]*"
             forms = {"std": r":(?:C11:[0-9]+(?:\.[0-9]+)*|POSIX\.1-2017:[A-Za-z_][A-Za-z0-9_]*)"}   # `std:<doc>:<section>`: the clause of ISO/IEC 9899:2011 (N1570) or the IEEE Std 1003.1-2017 function page; no function component
+            forms["steamworks-sdk"] = r":[A-Za-z0-9_./+-]+#[A-Za-z_][A-Za-z0-9_]*"   # `steamworks-sdk:<header>#<function>`: a function declared in a header of the Steamworks SDK (the interface galaxywrp.dll exports); the function follows `#`
             body = r":[A-Za-z0-9_./#+-]+" + fn
             return set(m.group(1).split(" | ")), "(" + "|".join(re.escape(x.group(1)) + forms.get(x.group(1), body) for x in prefixes) + ")"
     raise ValueError("declared machine table has no header line `# fact: ...; source: ...; kind ...`")
@@ -2184,7 +2218,7 @@ def read_declared_table(path, std_index=None, winerr=None):
     """declared_machine.tsv: `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value<TAB>lasterror`; lines starting with # are comments. fact is one of
     the facts of the table's header line. source is the documented origin of the returned value: one or several tokens joined by `|` (sorted, unique, each of the
     forms the header lists): `win-doc:<Windows documentation page or header path>:<function>`, `wine-9.0:<path in the Wine source tree>:<function name>`,
-    `galaxy-sdk:<page>:<function>`, `hostabi:<header>:<service>`, and `std:<doc>:<section>`: the standard's own clause, `std:C11:<clause number>` (ISO/IEC 9899:2011,
+    `galaxy-sdk:<page>:<function>`, `steamworks-sdk:<header>#<function>` (a body cites the documentation of the interface its dll exports: galaxywrp.dll exports the Steam API), `hostabi:<header>:<service>`, and `std:<doc>:<section>`: the standard's own clause, `std:C11:<clause number>` (ISO/IEC 9899:2011,
     draft N1570) or `std:POSIX.1-2017:<function page>` (IEEE Std 1003.1-2017 System Interfaces). The FORM is validated here; a std token is also checked against the
     pinned index (STD_INDEX: the callable that returns the directory of the std-index tree of declared_sources.json, called once, only when a std token occurs; the
     clause or page must be in the index; None with a std token is an error). Checking win-doc/wine references against a pinned tree is the oracle class, not done.
