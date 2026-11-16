@@ -2001,3 +2001,8 @@ bottleneck: cand3 (w15).
   - jtab-guard (w13's fnvnx-jtabcert/1): w28 writes the gate side.
   - cand3b 4c38d7265 is red on toolchain: L2's pin a2dc4ecf4 adds tests/sdd/vbase_bounds.cpp. Ruling: the unit gets its own test root (compiler, flags, cxx_origin native, admit row), landed by L2; toolchain stays generated-only.
 bottleneck: cand3b (w15: the toolchain sdd split from L2).
+- 01:15 Correction: the toolchain red in cand3b (61 errors, measured by L2) comes from cand3b 8b0d9073c, which made toolchain/ a generated-only root over 60 translation units. It does not come from vbase_bounds; that ruling is withdrawn.
+  - Fix (w15): revert toolchain/build.json. contract/facts declares sympair_kinds.inc as a stage input and passes it as an argument.
+  - COMPILER-STAGE rule (w28, cand4): a C/C++ file that is a declared input of a run step is that step's input, not a unit; every other C/C++ file is a unit.
+  - w28 also moves gen:file-escape into `recipe check`.
+bottleneck: cand3b (w15: the toolchain revert and the facts input).
