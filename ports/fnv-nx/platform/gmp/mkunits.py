@@ -63,16 +63,19 @@ sib = {}
 for o, r in sorted(units.items()):
     udir = os.path.join(out, "u", os.path.dirname(o))
     for sdir in sorted(d for d in own_dirs(r) if os.path.isdir(d)):
-      for fn in sorted(os.listdir(sdir)):
-        if fn.endswith(".h"):
-            data = open(os.path.join(sdir, fn), "rb").read()
-            key = (udir, fn)
-            if key in sib and sib[key] != data:
-                sys.exit("mkunits: %s/%s: two source directories give the unit directory different headers of this name" % (os.path.dirname(o), fn))
-            if key not in sib:
-                sib[key] = data
-                os.makedirs(udir, exist_ok=True)
-                open(os.path.join(udir, fn), "wb").write(data)
+        for dp, _dn, fns in sorted(os.walk(sdir)):   # a header found beside the unit may include one below its own directory (mpfr's mparam.h includes "generic/mparam.h")
+            for fn in sorted(fns):
+                if not fn.endswith(".h"):
+                    continue
+                rel = os.path.relpath(os.path.join(dp, fn), sdir)
+                data = open(os.path.join(dp, fn), "rb").read()
+                key = (udir, rel)
+                if key in sib and sib[key] != data:
+                    sys.exit("mkunits: %s/%s: two source directories give the unit directory different headers of this name" % (os.path.dirname(o), rel))
+                if key not in sib:
+                    sib[key] = data
+                    os.makedirs(os.path.dirname(os.path.join(udir, rel)), exist_ok=True)
+                    open(os.path.join(udir, rel), "wb").write(data)
 for tag, root in (("build", build), ("src", src)):
     for d, _dirs, files in os.walk(root):
         for fn in sorted(files):
