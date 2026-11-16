@@ -2916,3 +2916,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - w28-c5 8f25aa926: done. One module path is `fnvnx.<rel>`, at /imp/fnvnx, and module_top_errors checks the name `fnvnx`.
   - 183 imports were rewritten in 113 L1 files. ports/fnvnx is a symlink for host runs. test_modpath is green.
   - The head was sent to L5, L2 and L3a. The own-root mount follows, and L6 waits on it.
+- w28-c5 671b7b1d4: done. Gate results list the whole set plus uncertified_n; MAX_IDS and gateids.py are deleted.
+  - bridgegen, gate_imports, declareddlls, bootdecl, gpa_names, bootstart and assumptions report every error. test_verdict is green.
+  - Next for w28: the own-root mount, then reached.tsv.
