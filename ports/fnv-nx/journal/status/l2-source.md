@@ -628,3 +628,7 @@ After the first frame:
   - The msvcmodel.patch hunk in grokdeclarator cdk_function adds fnvnx_parmform; it applies cleanly with --dry-run.
   - names: the back-reference key now includes the form; the f8 domain is certified; outside it the result is nodecor:fnparmform:<form>.
   - It goes with COMPILER-STAGE's farm build (w3 told); proofs f8, test_plugins and the 24 rows come after that build.
+- 2026-11-16 02:20Z: ENTRY1-ATOMIC and ORDER-RTLBUILTIN on cand4b, merge head 0a0615edf (w2 8b50252e7). Locally, with the K2 bypass: test_dispatch_entry 44, test_dispatch 67, test_plugins pass.
+  - ENTRY1-ATOMIC: accepted.
+  - ORDER-RTLBUILTIN: the fence rule is accepted. Open: builtins with vops and no pointer operand are unclassified, so they get the fences or a GCC-fact D1 proof. w2.
+  - Farm: w3 reruns the line head after gcc1 is green.
