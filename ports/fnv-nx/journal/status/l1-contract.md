@@ -2276,3 +2276,12 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - gate_admit.cross_root_bare: a bare cross-root import is red anywhere.
   - 72 files rewritten; admit green 1400/1400; 210 test files identical before and after.
 - Next for w28: exports stage B and deleting the L3 lists. Then the one-name-per-module rule: every import qualified, scripts run with -m, sys.path mutation red.
+- Stage B base: L5 merges w28 d0b52b39f into w26 and resolves its own files. w28 then merges that head plus w13 9a5206d73 and wires stage B.
+  - The diff must be empty: 543 records (511 + 32) against the hand lists' constructed set.
+  - No switch on table state.
+- L6 w6-root 00d74f4d5:
+  - a three-way merge of w28 275771a6f;
+  - recipe check 13/13 valid;
+  - abspath 0, pure 0 for render;
+  - d3d9total 332/332, still on the direct-call path.
+- The external_of input form (L6's request) is assigned to w28, so the d3d9total compiles can move onto stages without a second pin.
