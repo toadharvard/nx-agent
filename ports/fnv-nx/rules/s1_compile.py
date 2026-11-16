@@ -2,15 +2,13 @@
 
 Each rule is fn(path, text, stats) -> text (see tools/rules/README.md); ids are cited in the journal.
 """
-import os as _q_os, sys as _q_sys
-_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import bisect
 import collections
 import os
 import re
 import sys
 
-import fnvnx.rules.core as core
+from fnvnx.rules import core
 
 # ---------------------------------------------------------------------------------------------------------- IFX1
 #

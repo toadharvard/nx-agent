@@ -8,8 +8,6 @@ namespace-scope prototypes, extern "C" dropped); a tagged one, a member, a refer
 block-scope declaration before it, one with an undefined overload's prototype and one another unit declares
 (and takes the address of) keep their linkage.
 """
-import os as _q_os, sys as _q_sys
-_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import collections
 import json
 import os
@@ -18,10 +16,10 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-import fnvnx.rules.tests.support as support  # noqa: E402
+sys.path.insert(0, os.path.join(HERE, "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of the rules modules
+from fnvnx.rules.tests import support  # noqa: E402
 support.legacy_units_lookup()
-import fnvnx.rules.s2_bodies as s2_bodies   # noqa: E402
+from fnvnx.rules import s2_bodies   # noqa: E402
 
 SRC = '''extern "C" int stub_a(int);
 extern "C" int stub_b(int);
