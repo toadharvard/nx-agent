@@ -2762,3 +2762,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ### 2026-11-16: import_escape, dnfile and winmd dropped (orchestrator, via L5)
 - reach takes the sound superset: every pointer-sized import argument escapes.
 - w28-c5 removes the dnfile pin together with pdfplumber. L5 deletes import_escape.py and the dnfile path, and sends lines for gate_reach/gpa_names if a pointer slot without an escape file is not already "e".
+- Checked: with no escape row, a slot is "e" (contract/memfx.py ImportInfo escape: no row = all e). No change to gate_reach or gpa_names. L5 deleted import_escape at claude/fnv-l5-platform-w41 9199431, which is in the cand5 offer.
