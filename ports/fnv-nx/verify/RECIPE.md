@@ -314,6 +314,20 @@ Tests: `tests/test_toolstep.py`, `tests/test_sandbox.py` case 13.
 
 - `exec: {"python": true}` runs the pinned python runtime of the generated stages (the interpreter and env.json `python.modules`, through the one function `Job.pyrt`; `FNVNX_PYMODS`, the interpreter digest and every module's installed-files digest are in the key). `args` are the interpreter's arguments after `-s -B` (a script path, usually `/in/N`); the step's inputs, `scratch`, `env` and stage refs are as for any tool step. The step names no debs (the machine's layout deb is added as always). A module the env does not pin cannot be imported. Tests: `tests/test_runpython.py`.
 
+### `foreach` (one step per table row)
+
+A `run` step may carry `"foreach": {"table": PATH, "key": COLUMN}` in place of a hand-written list of steps. PATH is a tracked TSV file of the checkout: a header line of column
+names (`[A-Za-z][A-Za-z0-9_]*`, unique), then one row per line with exactly the header's fields. KEY is a column whose values are unique plain names (letters, digits, `_`, `.`, `-`).
+`recipe.expand_foreach` (called by `read_recipe` and by `check`, so it is the one place) replaces the step by one step per row: the step as written, named `NAME.<key field>`, with
+`{COLUMN}` replaced by the row's field in its `args`, `outputs`, `dirs` and `env` values (`{{` and `}}` are literal braces). Every other reader sees plain static steps, so stage refs
+(`ROOT:run:NAME.<key>`), blocked outputs and the key are the ordinary ones.
+- The table is read at expansion and is no stage input. A step's key is therefore a function of its own expanded text (its row's fields), its tool and its inputs: a changed row re-keys
+  only that row's step, an unchanged row is a cache hit, and a step that hits its time limit loses only its own row.
+- Red at check time: a table that is not a tracked file, an empty table or one with no row, a header with a bad or repeated column, a row with the wrong number of fields, a key
+  that is no plain name or occurs twice, a key column that is not in the header, a `{name}` that is no column or a lone brace, and an output that two rows share (an output of a
+  foreach step names the row, for example `proof/{shape}.txt`).
+Test: `tests/test_foreach.py`.
+
 ### Stage refs
 
 `resolve_input` takes a third ref form `{"stage": "ROOT:gen:I" | "ROOT:run:NAME", "path": P}`: the declared output P of generator I (index in
