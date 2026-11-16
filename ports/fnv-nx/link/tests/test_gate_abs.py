@@ -2,6 +2,9 @@
 """Check of link/gate_abs.py (H3a): a relocation to an absolute symbol is red, in a loose object and in an archive member; so are an absolute
 definition and a reference to a name the linked image defines as absolute; clean inputs are green.  Needs the AArch64 cross toolchain
 (as test_link_synth.py)."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import subprocess
@@ -10,8 +13,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
-sys.path.append(os.path.join(HERE, '..', '..', 'verify'))
-import scratch
+from verify import scratch
 scratch.install()
 import gate_abs
 import relocs

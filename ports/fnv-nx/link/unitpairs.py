@@ -20,13 +20,15 @@ a GCC twin is not a unit of the gate (nothing of it is certified).
       the one id `error: <message>`
 Exit status of a gate: 0 green, 1 red (also an input error), 2 bad command line.
 """
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import argparse
 import json
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'contract'))
-import gatefile
+from contract import gatefile
 
 
 class GateInputError(ValueError):

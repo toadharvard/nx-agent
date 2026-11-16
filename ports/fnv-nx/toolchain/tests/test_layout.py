@@ -5,6 +5,9 @@ input of the layout plugin's build. Compiles layout/layout.cpp (ILP32) with the 
 collection after every function (--param ggc-min-expand=0 ggc-min-heapsize=0), and checks the lines read in-process from the
 object: key (MSVC's decorated type name), size, align, members, bases; every type of pi's `types` column has a layout line; an
 unknown plugin argument is an error. No network, no game data. Run: python3 -I <this file> from the checkout root."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import re
 import glob
 import os
@@ -17,8 +20,7 @@ sys.path.insert(0, HERE)
 import plugbuild as pb  # noqa: E402
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'link'))
 import ctypes_compat as cc  # noqa: E402
-sys.path.insert(0, os.path.join(HERE, '..', '..', 'verify'))
-import gate_abi  # noqa: E402
+from verify import gate_abi  # noqa: E402
 import json  # noqa: E402
 import subprocess  # noqa: E402
 

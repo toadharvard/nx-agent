@@ -129,7 +129,42 @@ def is_test_file(f):
     return b == "build.json" or (b.startswith("test_") and b.endswith(".py")) or "/tests/" in f
 
 
-def judge(files, admit, exists, ref_paths=frozenset()):
+def cross_root_bare(files, admit, read):
+    """{file: reason} of the tracked .py files that import a module of ANOTHER admitted root by its bare name (RULE QUALIFIED-IMPORT, one module path per module): the
+    module table is the top-level .py files of each admitted root, and a root's module is imported by its qualified path (`contract.store`, `lift.proof.formgate`: the root's
+    path below TREE, `/` as `.`, import_roots) from every file of every root. A bare name that is a sibling in the file's own directory, or a top-level module of the file's own
+    root, is the file's own (it resolves first); any other bare name of a module of a root is the finding. READ(path) -> text (a file that does not parse is not judged here)."""
+    import ast
+    rts = sorted({r["path"] for r in admit.get("roots", []) if isinstance(r.get("path"), str) and r.get("class") != "doc"}, key=len, reverse=True)
+    root_of = lambda f: next((r for r in rts if f.startswith(r + "/")), None)   # noqa: E731
+    mods = {}
+    for f in files:
+        r = root_of(f)
+        if r and f.endswith(".py") and f.rsplit("/", 1)[0] == r:
+            mods.setdefault(f.rsplit("/", 1)[1][:-3], []).append(f)
+    std = set(sys.stdlib_module_names)
+    bad = {}
+    for f in files:
+        if not f.endswith(".py"):
+            continue
+        r = root_of(f)
+        try:
+            tree = ast.parse(read(f))
+        except (OSError, SyntaxError, ValueError):
+            continue
+        for n in ast.walk(tree):
+            names = [a.name for a in n.names] if isinstance(n, ast.Import) else [n.module] if isinstance(n, ast.ImportFrom) and not n.level and n.module else []
+            for full in names:
+                m = full.split(".")[0]
+                hits = mods.get(m)
+                if m in std or not hits or any(x.rsplit("/", 1)[0] in (f.rsplit("/", 1)[0], r) for x in hits):
+                    continue
+                bad.setdefault(f, "imports %s bare: a module of %s (qualified: %s)" % (
+                    m, ", ".join(sorted({root_of(x) for x in hits})), ", ".join(sorted(".".join(os.path.relpath(root_of(x), TREE).split(os.sep) + [m]) for x in hits))))
+    return bad
+
+
+def judge(files, admit, exists, ref_paths=frozenset(), read=None):
     """-> (uncertified {path: reason}, root errors [str]); pure function of its arguments. REF_PATHS: the tracked paths that a tests/oracle.json
     reference (spec, contract, model) points at; the files of a root of class ref must all be among them."""
     roots, errors = [], []
@@ -197,6 +232,9 @@ def judge(files, admit, exists, ref_paths=frozenset()):
             bad[f] = "root %s is a ref root: %s" % (hit[0][0], "a build file or a test is not a reference" if is_test_file(f)
                                                    else "the file is not the path of a reference of any tests/oracle.json")
     errors += ["root %s: %s" % (ts[0], "; ".join(why)) for ts, why in roots if why]
+    if read is not None:
+        for f, why in cross_root_bare(files, admit, read).items():
+            bad.setdefault(f, why)
     return bad, errors
 
 
@@ -215,7 +253,10 @@ def main():
                         ref_paths.update(x["path"] for x in e.get("references", []) if isinstance(x, dict) and x.get("kind") in ("spec", "contract", "model") and isinstance(x.get("path"), str))
             except (OSError, ValueError, AttributeError):
                 pass          # gate oracle judges a malformed declaration; here it names no reference
-    bad, errors = judge(files, admit, os.path.isfile, ref_paths)
+    def read(p):
+        with open(p, encoding="utf-8") as fh:
+            return fh.read()
+    bad, errors = judge(files, admit, os.path.isfile, ref_paths, read)
     red = bool(bad or errors)
     certified = 0 if errors else len(files) - len(bad)
     detail = "%d files, %d roots; %s" % (len(files), len(admit.get("roots", [])),

@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Synthetic check of bind.py (invented rows and N1 maps): every branch, the CLI, and the store round trip of bind / obj."""
+import os
+import sys
 import json, os, subprocess, sys, tempfile
 
 C = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.insert(0, C)
-sys.path.insert(0, os.path.join(C, '..', 'verify'))
-import scratch
-scratch.install()
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: contract.X by its qualified name
+from verify import scratch
+scratch.install()
 from contract import bind, store
 
 fails = []
