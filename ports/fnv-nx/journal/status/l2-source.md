@@ -586,3 +586,8 @@ After the first frame:
   - The 102 s expand figure was an artifact of -fdump-rtl-expand-details (dump_var_map is quadratic).
   - b3c (28,576 sites) is heavy without the plugin too (RTL df at 6.3 GB), so the cost is GCC's own passes on functions with thousands of labels. The lever is the lifter's function size (L3a).
   - The item reopens if b3c's -ftime-report shows the plugin's PTA (compute_may_aliases) as a measurable share.
+- 2026-11-16 00:20Z: toolchain-root red in cand3b (reported by L3a and L1 as tests/sdd/vbase_bounds.cpp): measured with `recipe.py check --root ports/fnv-nx/toolchain` at 4c38d7265 and at base3 abbf9662a. Both give 61 errors: 60 translation units (8 plugin sources and 52 test fixtures) plus the missing cxx_origin.
+  - Cause: cand3b 8b0d9073c moved names/build.json to toolchain/build.json, which makes all of toolchain/ a generated-only root. a2dc4ecf4 is not an L2 pin.
+  - Proposed to L1: the export stage goes to contract/facts with a `sources ports/fnv-nx/toolchain:names/sympair_kinds.inc` line, and toolchain/build.json is deleted.
+  - For COMPILER-STAGE, L1 decides the run-step-input rule.
+  - Owner L1; L2 changes nothing.
