@@ -1351,3 +1351,4 @@ Paused: w3b, w4, farm; no other work.
     - w6-root stays at b0676a675 (cand4 8a5a43b48) so that it builds with the old recipe.
 - bottleneck: toolchain/build.json from L1 w28; then sm_link; then the w28-on-final-cand3 head.
 - 00:22Z w28 1b7fdb441: the toolchain admit is fixed, and an admit row without a tracked recipe is red in recipe check. w6 (doing): rebuild w6-b28 on it, build the render roots, run the sm_link store and gate, d3d9total and abspath.
+- 00:25Z w6-b28 on w28 021845831: recipe check valid on all 9 render roots. Every build is blocked by envcheck: debs.packages MISMATCH (8 packages: bash, diffutils, findutils, grep, gzip, patch, sed, xz-utils) against the dep closure. That is verify/env.json data, reported to w28. bottleneck: that L1 fix, then the builds and sm_link.
