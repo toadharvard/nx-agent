@@ -53,8 +53,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import a64obj  # noqa: E402
-import addrsec  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import a64obj  # noqa: E402
+from fnvnx.link import addrsec  # noqa: E402
 from fnvnx.contract import gatefile  # noqa: E402
 
 NAME = 'addr'

@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import argparse, os, re, shutil, struct, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 from fnvnx.contract import gatefile
 
 EM_AARCH64, SHT_SYMTAB, SHN_UNDEF = 183, 2, 0

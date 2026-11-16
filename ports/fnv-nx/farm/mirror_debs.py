@@ -19,6 +19,7 @@ import re
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 from fnvnx.verify import envcheck  # noqa: E402
 
 SUITES = (("noble", "main"), ("noble", "universe"), ("noble-updates", "main"), ("noble-updates", "universe"),

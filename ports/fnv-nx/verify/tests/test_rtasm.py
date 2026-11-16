@@ -9,8 +9,10 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.join(HERE, '..'), os.path.join(HERE, '..', '..', 'link', 'tests'), os.path.join(HERE, '..', '..', 'link'), os.path.join(HERE, '..', '..', 'contract')]
-import realobj  # noqa: E402
-import gate_rtasm as rtasm  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link.tests import realobj  # noqa: E402
+from fnvnx.verify import gate_rtasm as rtasm  # noqa: E402
 
 SRC = {
     'd1.S': '''

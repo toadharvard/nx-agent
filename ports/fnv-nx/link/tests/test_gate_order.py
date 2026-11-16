@@ -21,9 +21,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'contract'))
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'toolchain', 'tests'))
-import a64order
-import framesec
-import plugbuild as pb
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import a64order
+from fnvnx.link import framesec
+from fnvnx.toolchain.tests import plugbuild as pb
 
 fails = []
 tmp = tempfile.mkdtemp(prefix='gate-order-')

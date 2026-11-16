@@ -27,6 +27,18 @@
    "ports/fnv-nx/verify/gate_admit.py"
   ]
  },
+ "test_roottables.py": {
+  "references": [
+   {
+    "anchor": "## Declared-machine bodies (owner decision of 2026-11-11, CLAUDE.md \"The declared machine\")",
+    "kind": "spec",
+    "path": "ports/fnv-nx/verify/VERDICT.md"
+   }
+  ],
+  "subject": [
+   "ports/fnv-nx/verify/objstub.py"
+  ]
+ },
  "test_synth_names.py": {
   "references": [
    {

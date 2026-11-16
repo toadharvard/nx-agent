@@ -25,9 +25,11 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import gate_admit  # noqa: E402
-import gatesdir  # noqa: E402
-from gate_admit import imports_errors  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_admit  # noqa: E402
+from fnvnx.verify import gatesdir  # noqa: E402
+from fnvnx.verify.gate_admit import imports_errors  # noqa: E402
 
 ADMIT = "ports/fnv-nx/verify/admit.json"
 TREE = "ports/fnv-nx"
@@ -64,8 +66,9 @@ def run_unit(td, n, unit, imports):
                     dst = os.path.join(d, os.path.relpath(os.path.join(root, f), r))
                     os.makedirs(os.path.dirname(dst), exist_ok=True)
                     shutil.copyfile(os.path.join(root, f), dst)
-        alias[d] = r
-        argv += ["--lib", d]
+        if os.path.isdir(d):   # a root with no python module has no view and contributes no --lib path: an empty view is never passed
+            alias[d] = r
+            argv += ["--lib", d]
     if alias:
         argv += ["--base", mod]
     p = subprocess.run(argv + ["--json", js], capture_output=True, text=True)
@@ -138,8 +141,10 @@ def main(argv):
         status, detail = "red", why
     elif unc:
         status, detail = "red", "%d of %d files have puregate violations, are host readers or import one" % (len(unc), len(universe))
+    elif not universe and files:
+        status, detail = "red", "universe 0 over a tree of %d python files: no stage entry point reaches any of them, so nothing is certified (vacuous)" % len(files)
     elif not universe:
-        status, detail = "green", "no stage entry points at this commit (nothing to certify)"
+        status, detail = "green", "no python files at this commit (nothing to certify)"
     else:
         status, detail = "green", "%d of %d files accepted by puregate" % (len(universe), len(universe))
     res = {"format": "fnvnx-gate/1", "name": "pure", "status": status, "universe": len(universe), "certified": len(universe) - len(unc),

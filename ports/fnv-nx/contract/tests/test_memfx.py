@@ -3,6 +3,7 @@
 import os, struct, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): contract.X by its qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 from fnvnx.contract import argflow, memfx, imagerec
 
 BASE, TEXT, RD, DATA, DATA2 = 0x400000, 0x1000, 0x2000, 0x3000, 0x4000

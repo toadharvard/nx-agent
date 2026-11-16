@@ -58,9 +58,11 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import cas  # noqa: E402
-import envcheck  # noqa: E402
-import opentrace  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import envcheck  # noqa: E402
+from fnvnx.verify import opentrace  # noqa: E402
 
 CACHE_FORMAT = "fnvnx-selftests-cache/2"   # one entry per test file: its key, its read set (or the whole-directory trees of an untraced file)
 KEEP = 8   # entries kept per key (the states of the read set seen on recent commits)
@@ -94,8 +96,8 @@ def produced_input(entry, cache, repo="."):
     """(host path, output sha256) of the produced input {"root": R, "output": NAME}, or a string: why not. R is built through the recipe in the GATE_CACHE store (gate_build.ensure: a
     green build is published once, an unchanged root is a cache hit) and its declared output NAME is taken from the published build. Red: R is not admitted, R does not declare NAME, R's
     build is red (its failing stage and diagnostics)."""
-    import gate_build
-    import recipe
+    from fnvnx.verify import gate_build
+    from fnvnx.verify import recipe
     r, n = entry["root"], entry["output"]
     adm = admitted_roots()
     if adm is None or r not in adm:
@@ -253,7 +255,7 @@ def mount_make(files, dest):
 
 def fetch_inputs(names, cache, ws):
     """{FNVNX_INPUT_<NAME>: host dir} of the pinned externals NAMES (strings) (recipe.fetch_externals, commit + tree_sha256 checked), or a string: why not."""
-    import recipe
+    from fnvnx.verify import recipe
     try:
         pins = {e["name"]: e for e in json.load(open(PINS))["external"]}
         ext = [pins[n] for n in names]
@@ -282,7 +284,7 @@ def guest_externals():
 def fetch_guest(cache, ws):
     """{FNVNX_EXTCACHE: the cache dir of the externals, FNVNX_INPUT_GUEST: the compiler's checked-out tree} of the guest pin (recipe.fetch_externals, commit + tree_sha256 checked), or a
     string: why not. A test that runs the recipe finds the compiler in FNVNX_EXTCACHE (recipe.build's default external cache), so no test fetches it again."""
-    import recipe
+    from fnvnx.verify import recipe
     exts = guest_externals()
     if not exts:
         return {}

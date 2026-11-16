@@ -42,9 +42,10 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import abi_msvcname
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import abi_msvcname
 from fnvnx.contract import gatefile
-import abi_native as N
+from fnvnx.link import abi_native as N
 
 NAME = 'abi'
 FUNC_KINDS = frozenset(('func', 'ctor.c1', 'ctor.c2', 'dtor.d2', 'dtor.d1', 'dtor.d0', 'dtor.sdd', 'dtor.sdd.thunk'))

@@ -58,6 +58,7 @@ Rules fixed here (all three consumers use them through this file and importkey.c
 import argparse, hashlib, os, re, sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name (contract.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 from fnvnx.contract import gatefile, store
 
 SENTINEL, IMPORT_BASE, STEP, LIMIT = 0x000ffff0, 0x00100000, 16, 0x00200000

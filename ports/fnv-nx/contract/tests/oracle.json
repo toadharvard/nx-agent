@@ -1,5 +1,17 @@
 {
  "format": "fnvnx-oracle/1",
+ "test_reached.py": {
+  "references": [
+   {
+    "anchor": "## contract/reached.py",
+    "kind": "spec",
+    "path": "ports/fnv-nx/verify/TOOLS.md"
+   }
+  ],
+  "subject": [
+   "ports/fnv-nx/contract/reached.py"
+  ]
+ },
  "tests": {
   "test_bind.py": {
    "references": [

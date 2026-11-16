@@ -10,6 +10,7 @@ import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import struct
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 
 BASE = 0x400000
 TEXT, RDATA, DATA, RELOC = BASE + 0x1000, BASE + 0x2000, BASE + 0x3000, BASE + 0x4000

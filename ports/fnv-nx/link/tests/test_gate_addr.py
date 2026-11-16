@@ -18,11 +18,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'contract'))
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'toolchain', 'tests'))
-import a64obj
-import addrsec
-import gate_addr
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import a64obj
+from fnvnx.link import addrsec
+from fnvnx.link import gate_addr
 
-import plugbuild as pb
+from fnvnx.toolchain.tests import plugbuild as pb
 
 TOOL = os.path.join(HERE, '..', '..', 'toolchain', 'addr', 'fnvnx_addr.cc')
 

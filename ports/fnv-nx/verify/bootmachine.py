@@ -104,9 +104,12 @@ from unicorn import unicorn_const as UCC
 from unicorn.arm64_const import UC_ARM64_REG_CPACR_EL1, UC_ARM64_REG_LR, UC_ARM64_REG_PC, UC_ARM64_REG_SP, \
     UC_ARM64_REG_TPIDR_EL0, UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3, UC_ARM64_REG_X4
 
-import bootlayout
-import bootsock
-import icount
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import bootlayout
+from fnvnx.verify import bootsock
+from fnvnx.verify import icount
 
 PAGE, U64 = 0x1000, (1 << 64) - 1
 REACH_VIOLATION = 0x52   # top byte of a guest exit code 0x52000000 | fact_id: a build invariant was violated (fnvnx_reach_violation)

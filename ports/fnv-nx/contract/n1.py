@@ -36,6 +36,7 @@ Output (store.py kind `n1`, canonical JSON; exe- and decomp-derived: container a
 import argparse, collections, json, os, re, struct, sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name (contract.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 from fnvnx.contract import gatefile, store
 
 DIR32, DIR32NB, REL32, SECTION, SECREL = 6, 7, 20, 10, 11

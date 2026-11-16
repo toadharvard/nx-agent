@@ -17,9 +17,10 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import plugbuild as pb  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.toolchain.tests import plugbuild as pb  # noqa: E402
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'link'))
-import ctypes_compat as cc  # noqa: E402
+from fnvnx.link import ctypes_compat as cc  # noqa: E402
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'layout', 'decltype_spell.inc')) as _f:
     REASONS = cc.decltype_reasons(_f.read())
 from fnvnx.verify import gate_abi  # noqa: E402

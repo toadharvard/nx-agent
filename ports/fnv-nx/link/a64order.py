@@ -93,8 +93,12 @@ import collections
 import capstone
 from capstone import arm64_const as K
 
-import a64obj
-import framesec as a64frame
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import a64obj
+from fnvnx.link import framesec as a64frame
 
 _MD = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM)
 _MD.detail = True

@@ -23,6 +23,7 @@ The output depends on the objects' bytes and relative paths only."""
 import argparse, os, re, sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name (contract.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 from fnvnx.contract import dllkind
 from fnvnx.contract import l2sections
 from fnvnx.link import ctypes_compat

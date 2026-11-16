@@ -14,7 +14,9 @@ VERIFY = os.path.dirname(HERE)
 SETUP = os.path.join(os.path.dirname(VERIFY), "farm", "setup_verdict_env.sh")
 ENVF = os.path.join(VERIFY, "env.json")
 sys.path.insert(0, VERIFY)
-import envcheck  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import envcheck  # noqa: E402
 TD = tempfile.mkdtemp(prefix="envcheck-test-")
 FAILED = []
 
@@ -116,7 +118,7 @@ check("snapshot needs --from-code and -o", ec("snapshot")[0] != 0)
 
 # the plugin headers of the distro compilers of admitted roots (objstub builds its terminator plugin against them)
 sys.path.insert(0, VERIFY)
-import envcheck  # noqa: E402
+from fnvnx.verify import envcheck  # noqa: E402
 # foreign files: owned only by packages outside the pins -> listed, not in the digest; unowned and pinned-owner files count
 ft = os.path.join(TD, "ftree")
 os.makedirs(ft)
@@ -163,7 +165,7 @@ check("setup --print: install_mirror.py (debs and wheels from the mirror, no apt
 
 # install_mirror.py against a local mirror repo (ARTIFACTS_URL): checks tree hash and every sha256 BEFORE dpkg (--dry: dpkg never runs)
 sys.path.insert(0, VERIFY)
-import cas  # noqa: E402
+from fnvnx.verify import cas  # noqa: E402
 MR = os.path.join(TD, "mirror")
 os.makedirs(os.path.join(MR, "debs"))
 os.makedirs(os.path.join(MR, "wheels"))

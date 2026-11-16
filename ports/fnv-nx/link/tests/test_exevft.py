@@ -6,9 +6,11 @@ import json, os, shutil, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.join(HERE, '..'), os.path.join(HERE, '..', '..', '..')]   # the test dir, link/, ports (`fnvnx.contract.X` by its qualified name)
-import abi_fixture as F
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link.tests import abi_fixture as F
 from fnvnx.contract import exefacts
-import exevft
+from fnvnx.link import exevft
 
 fails = []
 

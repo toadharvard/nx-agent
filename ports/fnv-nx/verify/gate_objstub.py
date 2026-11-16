@@ -10,9 +10,9 @@ key). The set is cached per unit under GATE_CACHE/objstub.
 No doubles in tests (doubles.py, owner order of 2026-11-11 night): per declared test of every root (RECIPE.md "tests"), symbols its own objects define INTERSECT
 symbols the objects of ALL product roots define = EMPTY, the test link holds every product unit, no GLOBAL symbol twice among a root's product objects.
 Result fields: tests_total, tests_with_doubles, double_symbols, doubles. No product root: universe 0, green.
-Wine rows: verify/wine_fixme.tsv of the tree under test (objstub.read_wine_table; missing or malformed is a gate error, red); the result
+Wine rows: `<root>/wine_fixme.tsv` of every admitted root of the tree under test (objstub.read_root_tables; malformed or a duplicate id is a gate error, red; an orphan row is a finding); the result
 holds "wine_fixme": {id: call sites} so growth of the simplified bodies is visible.
-Declared-machine rows: verify/declared_machine.tsv of the tree under test (objstub.read_declared_table; missing or malformed is a gate error, red),
+Declared-machine rows: `<root>/declared_machine.tsv` of every admitted root of the tree under test (objstub.read_root_tables),
 judged by the same rule as the Wine rows through `fnvnx_declared_machine(id)`; the result holds "declared_machine": {id: call sites}. Seven fields per row (the
 7th is the last error); the `std:` citations and the lasterror values are checked against the pinned documents of verify/declared_sources.json (declared_pins).
 Reach facts: GATE_CACHE/reach/<git tree>/reach.facts.tsv (rows fact_id<TAB>sha256, written by the gate `reach`, which does not exist yet).
@@ -28,11 +28,13 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import doubles  # noqa: E402
-import gate_build  # noqa: E402
-import objstub  # noqa: E402
-import recipe  # noqa: E402
-import unitstage  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import doubles  # noqa: E402
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import objstub  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
+from fnvnx.verify import unitstage  # noqa: E402
 
 
 def profile_findings(root, target, objs):
@@ -135,9 +137,8 @@ def main(argv):
     fails, handlers = {}, {}   # {object id: the root's error_abi}, {object id: the root's handler records}
     gen_ids = set()
     try:
-        wine = objstub.read_wine_table(os.path.join(repo, "ports/fnv-nx/verify/wine_fixme.tsv"))   # the table of the tree under test
         std_ix, winerr = declared_pins(repo, cache)
-        declared = objstub.read_declared_table(os.path.join(repo, "ports/fnv-nx/verify/declared_machine.tsv"), std_ix, winerr)   # the table of the tree under test
+        wine, declared, row_owner = objstub.read_root_tables(repo, sorted(recipe.load_admit(repo)), std_ix, winerr)   # the rows of the admitted roots, each root's own tables
         owners = objstub.read_owner_decisions(os.path.join(repo, "CLAUDE.md"))   # the owner-decision anchors of the tree under test
         facts = objstub.read_facts(os.path.join(cache, "reach", gate_build.tree_of(repo), "reach.facts.tsv")) if roots else None
         for root in roots:
@@ -156,7 +157,7 @@ def main(argv):
         rp = os.path.join(repo, "ports/fnv-nx/verify/ASSUMPTIONS.json")   # of the tree under test; a tree without one has no OWNER id: every `assume` call is red
         registry = {e["id"]: e["status"] for e in json.load(open(rp))["entries"]} if os.path.exists(rp) else {}
         its, fs = objstub.judge(results, rows, facts, wine, declared, fails, handlers, stats, extconv, (registry, gen_ids), owners)
-        items, finds = items + its, finds + fs
+        items, finds = items + its, finds + fs + (objstub.orphan_findings(results, row_owner) if roots else [])
         adm = recipe.load_admit(repo)
         dit, dfs, dstats = doubles.judge(built, {r for r in built if adm[recipe.split_spec(r)[0]]["class"] == "test"})   # no doubles in tests (doubles.py)
         items, finds = items + dit, finds + dfs

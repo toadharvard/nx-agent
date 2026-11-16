@@ -31,10 +31,12 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import gate_argorder  # noqa: E402
-import gate_build  # noqa: E402
-import gate_contract  # noqa: E402
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_argorder  # noqa: E402
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import gate_contract  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 GATES = ("order", "addr32", "eh", "flags")
 TOOLS = os.path.join("ports", "fnv-nx", "lift", "gates")

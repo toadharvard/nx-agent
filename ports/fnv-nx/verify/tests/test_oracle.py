@@ -9,9 +9,11 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-import gate_oracle as G  # noqa: E402
-import recipe  # noqa: E402
-import scratch  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_oracle as G  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
+from fnvnx.verify import scratch  # noqa: E402
 
 scratch.install()
 
@@ -196,7 +198,7 @@ recipe.set_artifacts(os.path.join(ftmp, "cache"), repo)
 fetch = G.fetcher(os.path.join(ftmp, "cache"))
 tree, files = fetch(commit)
 sys.path.insert(0, os.path.dirname(HERE))
-import cas  # noqa: E402
+from fnvnx.verify import cas  # noqa: E402
 plain = os.path.join(ftmp, "plain")
 os.makedirs(os.path.join(plain, "ref"))
 open(os.path.join(plain, "ref", "x.bin"), "w").write("dump\n")
