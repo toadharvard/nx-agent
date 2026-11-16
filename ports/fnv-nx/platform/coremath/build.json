@@ -47,7 +47,8 @@
     "log2p1",
     "tan",
     "sin",
-    "cos"
+    "cos",
+    "corepatch:atan2"
    ],
    "inputs": [],
    "outputs": [
@@ -81,6 +82,26 @@
    "scratch": [
     "/scratch"
    ]
+  }
+ ],
+ "uses": [
+  {
+   "root": "ports/fnv-nx/platform/gmp",
+   "output": "INC_BUILD"
+  },
+  {
+   "root": "ports/fnv-nx/platform/mpfr",
+   "output": "INC_SRC"
+  }
+ ],
+ "include_uses": [
+  {
+   "root": "ports/fnv-nx/platform/gmp",
+   "output": "INC_BUILD"
+  },
+  {
+   "root": "ports/fnv-nx/platform/mpfr",
+   "output": "INC_SRC"
   }
  ]
 }
