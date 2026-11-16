@@ -554,7 +554,7 @@
    "output": "COM_WORDS"
   },
   {
-   "root": "ports/fnv-nx/contract/exporthdr",
+   "root": "ports/fnv-nx/contract/exporthdr/include",
    "output": "INCLUDE"
   },
   {

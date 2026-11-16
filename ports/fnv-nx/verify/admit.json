@@ -48,12 +48,6 @@
    ]
   },
   {
-   "path": "ports/fnv-nx/contract/exporthdr",
-   "class": "product",
-   "target": "guest",
-   "recipe": "ports/fnv-nx/contract/exporthdr/build.json"
-  },
-  {
    "path": "ports/fnv-nx/contract/exporthdr/include",
    "class": "header"
   },
