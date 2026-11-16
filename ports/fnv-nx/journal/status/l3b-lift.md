@@ -506,3 +506,5 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - shapeprove root (w4): steps closure → queue → prove (foreach) → certs.
   - It is being re-merged with base3 30030c1e8 hunk by hunk; the first merge, 156930ac2, dropped base3 work.
   - Then the 3-row build on farm 4.
+
+- 2026-11-16: density rule 3 projection lemma and liveness certificate written: lift/proof/FLAGLIVE.md (Lemma 1, soundness, P1-P3, gate flaglive). Next: L3b check of rules 1-2 by shape_sha + formgate when L3a lands them.
