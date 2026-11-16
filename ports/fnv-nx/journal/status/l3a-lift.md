@@ -1806,3 +1806,10 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Then w13 merges base3 into the relift and adds crmath.
 - (D) part 1 (w7): none of the 11 thread-context/APC/Ex-wait APIs is in any image's IAT or delay imports. The GetProcAddress part waits on the exe run.
   - w7 sends farm 2 the exe modlift RUN at 7762ba183 (with d3dx9_31/38).
+- Done (w14): the x87 transcendentals call CORE-MATH, claude/fnv-l3a-lift-w14-crmath @c5c4822bf.
+  - One table CR in f_x87.py. The cr_* externs are only in rt/fmath.h. The old trig/exp/log engine paths are deleted.
+  - PE/OE/UE come from argument rules; C1 from an RN vs RZ call.
+  - test_crmath is green.
+  - Cross-check on 200k operands per function: sin/cos/tan/2xm1/atan2 are identical. fyl2x/fyl2xp1 are up to 1 ulp off, from the binary64 product the rule prescribes.
+  - L2 told: CORE-MATH needs -frounding-math; pin @a44b8b08.
+  - w14 archived.
