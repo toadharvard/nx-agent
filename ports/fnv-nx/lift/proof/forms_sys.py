@@ -6,7 +6,7 @@ KiTrap0D / Wine 9.0), the machine constants are rt/fnvl.h's.  Fault kinds (dsl.F
   INT n / INTO / INT1   the int_vector column of faults.json
   STR   the record's TR selector (SLDT SMSW SGDT SIDT SLDT LAR LSL VERR VERW: undecided fields, no Form)
   CPUID RDTSC   the reference CPU's fixed answer / the platform timer: uf nodes (dsl.uf)"""
-from fnvlift.dsl import C, V, extract, ite, slt, uf, ult, zext
+from fnvlift.dsl import C, V, eq, extract, ite, slt, uf, ult, zext
 from proof.forms import Op, ea, handler, rd, store_op, wr
 
 from fnvlift import x86sys
@@ -29,16 +29,35 @@ def privileged(c):
     c.F.fault(K_PRIV if wine_is_privileged(c.raw) else K_AV, C(1, 1))
 handler(*_PRIV)(privileged)
 
+def _int_other():
+    """the record's other_vectors row (the access violation {0, 0xffffffff} at the int, error code vector*8+2) checked against the runtime's fault: every vector that is neither a gate nor excluded takes it"""
+    o = x86sys.INT_OTHER
+    assert (o['fault'] == '#GP' and o['exception_code'] == int(_FT['AV']['status'], 16) and o['flags'] == 0 and o['eip_advance'] == 0 and o['address'] == 'the int instruction'
+            and o['error_code'] == 'vector*8+2' and o['parameters'] == [0, 0xffffffff]), 'int: the other_vectors row of x86sys int_ring3 is not the access violation the runtime raises'
+    return K_AV
+
 @handler('int')
 def int_(c):
-    v = int(c.ops[0].val) & 0xff                          # the vector decides which row: a symbolic vector (a shape's field) raises SymbolicBranch here (symform.SV.__int__), never falls through to the 'other vectors' row by a failed dict lookup; the vector 0x29 of int_ring3.excluded is undecided, so no Form covers every value of the field
-    if v in INT_KIND:                                     # a gate of the record: its trap row
-        c.F.fault(INT_KIND[v], C(1, 1)); return
-    assert v not in x86sys.INT_EXCLUDED, 'int 0x%x: undecided on the declared OS (x86sys int_ring3)' % v
-    o = x86sys.INT_OTHER                                  # every other vector: the record's other_vectors row is the access violation {0, 0xffffffff} at the int (error code vector*8+2)
-    assert (o['fault'] == '#GP' and o['exception_code'] == int(_FT['AV']['status'], 16) and o['flags'] == 0 and o['eip_advance'] == 0 and o['address'] == 'the int instruction'
-            and o['error_code'] == 'vector*8+2' and o['parameters'] == [0, 0xffffffff]), 'int 0x%x: the other_vectors row of x86sys int_ring3 is not the access violation the runtime raises' % v
-    c.F.fault(K_AV, C(1, 1))
+    """INT imm8 over the record's rows (x86sys int_ring3): a gate vector (INT_KIND) is its trap row, an excluded vector (INT_EXCLUDED: undecided on the declared OS) has no Form, every other vector is the other_vectors row.
+    A concrete vector is that one row.  A symbolic vector (a shape's imm field) is the case split over all 256 vectors derived from the same rows: one arm per fault kind (the vectors with the same row collapse into one
+    condition), the other_vectors arm is the complement of the gates and the excluded vectors, and each excluded vector is a domain exclusion of the shape (F.require: the values outside the domain have no Form,
+    symform.OutsideDomain); no fault code is invented for it and the other arms are unaffected."""
+    v = c.ops[0].val & 0xff
+    if isinstance(v, int):                                # a concrete vector
+        if v in INT_KIND: c.F.fault(INT_KIND[v], C(1, 1)); return
+        assert v not in x86sys.INT_EXCLUDED, 'int 0x%x: undecided on the declared OS (x86sys int_ring3)' % v
+        c.F.fault(_int_other(), C(1, 1)); return
+    F = c.F; hit = lambda vs: _any(eq(v, C(x, v.w)) for x in sorted(vs))
+    arms = {}
+    for x, k in INT_KIND.items(): arms.setdefault(k, set()).add(x)
+    for k, vs in sorted(arms.items()): F.fault(k, hit(vs))
+    F.fault(_int_other(), ~hit(set(INT_KIND) | set(x86sys.INT_EXCLUDED)))
+    for x in sorted(x86sys.INT_EXCLUDED): F.require(~eq(v, C(x, v.w)))
+
+def _any(it):
+    it = list(it); r = it[0]
+    for e in it[1:]: r = r | e
+    return r
 @handler('into')
 def into(c): c.F.fault(K_INTO, V('of', 1))
 @handler('int1')
