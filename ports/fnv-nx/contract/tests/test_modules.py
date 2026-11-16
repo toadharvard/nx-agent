@@ -169,7 +169,10 @@ with tempfile.TemporaryDirectory() as tmp:
     exepin.load_exe.__defaults__ = (pin,)
     try:
         mc, kc = os.path.join(tmp, "modules.c"), os.path.join(tmp, "import_keys.c")
-        modules.run(exe, bridge, [os.path.join(tmp, "dir")], None, declared, mc, kc, os.path.join(tmp, "keys.tsv"), os.path.join(tmp, "iat_data.tsv"))
+        dirs = [os.path.join(tmp, "dir")]
+        inames = os.path.join(tmp, "import_names.tsv")
+        modules.run(exe, dirs, None, declared, mc, import_names_out=inames)
+        modules.run_iat(exe, bridge, dirs, None, declared, kc, os.path.join(tmp, "keys.tsv"), os.path.join(tmp, "iat_data.tsv"))
     finally:
         exepin.load_exe.__defaults__ = old
     mt, kt = open(mc).read(), open(kc).read()
@@ -179,5 +182,20 @@ with tempfile.TemporaryDirectory() as tmp:
     check("out None: the table tree is not written (a stage has no scratch directory)", not os.path.exists(os.path.join(tmp, "o")) and "tempfile" not in open(modules.__file__).read(), None)
     kv, dv = open(os.path.join(tmp, "keys.tsv")).read(), open(os.path.join(tmp, "iat_data.tsv")).read()
     check("keys_tsv_out: keys.tsv has the row of the exe's import and data_out: iat_data.tsv has the table_id line", "ExitProcess" in kv and dv.startswith("# table_id "), (kv, dv))
+    check("import_names_out: the exe's import directory as (image, dll, name, slot RVA), from the files alone (no bridge table)",
+          "\tkernel32.dll\tExitProcess\t00001180\n" in open(inames).read(), open(inames).read())
+    check("the first entry takes no bridge table: modules.run has no bridge parameter", "bridge" not in modules.run.__code__.co_varnames)
+    other = os.path.join(tmp, "declared_other.tsv")
+    open(other, "w").write("# name\tsha\nother.dll\t00\n")
+    exepin.load_exe.__defaults__ = (pin,)
+    try:
+        try:
+            modules.plan(exe, other, dirs)
+            check("a dll the closure reaches that is neither a file nor in the declared set is red, listed", False)
+        except modules.StageError as e:
+            check("a dll the closure reaches that is neither a file nor in the declared set is red, listed", "kernel32.dll" in str(e), str(e))
+        check("a declared dll without a file is served; with a file it is not", modules.platform_served({"kernel32.dll", "other.dll"}, dirs) == {"kernel32.dll", "other.dll"}, None)
+    finally:
+        exepin.load_exe.__defaults__ = old
 print("FAILED: %d" % len(FAILED) if FAILED else "all passed")
 sys.exit(1 if FAILED else 0)

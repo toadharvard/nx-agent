@@ -22,7 +22,7 @@ import shlex
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx)
-from fnvnx.verify.toolflags_policy import (FIXED, FORBID_ENV, GNU, KINDS, POLICY, PYENV_OK)  # noqa: E402
+from fnvnx.verify.toolflags_policy import (FIXED, FORBID_ENV, GNU, IMPORT_ROOT, IMPORT_TOP, KINDS, POLICY, PYENV_OK)  # noqa: E402
 
 FORMAT = "fnvnx-toolflags/1"
 
@@ -50,6 +50,18 @@ class Ctx:
         if not under(path, self.ins if bases is None else bases):
             self.v("path-outside-inputs", "%s %s" % (what, path), key)
 
+def import_root_ok(c, comp):
+    """A PYTHONPATH component that is the stage's import root (IMPORT_ROOT): admitted iff at least one declared input lies under it, every such input is
+    a mount of the import closure (IMPORT_ROOT/IMPORT_TOP...), and no declared output and no TMPDIR lies under it, so the only thing importable
+    from it is a declared input."""
+    if not isinstance(comp, str) or os.path.normpath(comp) != IMPORT_ROOT:
+        return False
+    under_root = [i for i in c.ins if under(i, [IMPORT_ROOT])]
+    top = IMPORT_ROOT + "/" + IMPORT_TOP
+    tmp = c.doc["env"].get("TMPDIR")
+    return (bool(under_root) and all(under(i, [top]) for i in under_root)
+            and not any(under(o, [IMPORT_ROOT]) for o in c.outs) and not (isinstance(tmp, str) and under(tmp, [IMPORT_ROOT])))
+
 def check_env(c):
     e = c.doc["env"]
     for k, want in FIXED:
@@ -68,7 +80,7 @@ def check_env(c):
             c.v("env-forbidden", k, "env.forbidden")
     if "PYTHONPATH" in e:   # the declared imports of a generator stage (recipe `imports`, mounted at /imp/<dir>): every component must lie under a declared input
         for comp in e["PYTHONPATH"].split(":"):
-            if not under(comp, c.ins):
+            if not (under(comp, c.ins) or import_root_ok(c, comp)):
                 c.v("env-forbidden", "PYTHONPATH component '%s' not under a declared input" % comp, "env.forbidden")
     for comp in e["PATH"].split(":") if "PATH" in e else c.v("env-missing", "PATH", "env.path") or []:
         if not under(comp, c.ins):
