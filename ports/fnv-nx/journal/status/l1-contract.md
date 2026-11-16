@@ -2495,3 +2495,10 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:28
 - L6 found a recipe.py defect: resolve_input of a run stage costs 4,754 step evaluations instead of 18 (run_all of the whole owner, per-step artifact rebuild, recursion); on the farm sm_link never finishes. w28's top item: requested-step-only evaluation, a content-key memo, one artifact build per Job, plus a regression test counting through Job.stats (no stub). Head goes to w15 for cand3b, together with the test_guest and budget fixes.
 - bottleneck: the recipe walk fix, then the cand3b verdict.
+
+## 2026-11-16 04:30
+- L4: gamedata_fetch.sh is green but peaks at about 27 GB (all items fetched at once, nothing freed, concat temp leaked); pinned and installed totals differ by 193,072 bytes. w28 item 2: one item at a time with free after verify, a trap, and pinned = installed + named bytes asserted.
+- L6 fan-out request merged into foreach: {"range": N} table plus "rows": "all" consumer refs (one form). count_stage_evals.py is deleted once the Job.stats test lands.
+- w28 queue: walk fix, gamedata fetch, '!rt', foreach (+range).
+- cand4 base = the trunk head after the cand3b merge.
+- bottleneck: the recipe walk fix, then the cand3b verdict.
