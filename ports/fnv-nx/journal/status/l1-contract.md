@@ -2214,3 +2214,13 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - A class-header root has exactly one implicit output, INCLUDE (its own directory, tree-keyed), reached only through `uses`.
   - This replaces the split between header_dirs and uses→INCLUDE.
   - w13 adopts it for contract/include after w28 lands, and deletes contract/build.json and the duplicate admit row.
+
+## 2026-11-16: export tables, both sides marked
+- L5 w23 418ecba: 486 records (kernel32 200, msvcrt 76, user32 71, gdi32 50, winmm 31, ws2_32 23, steam_api 11, advapi32 8, ole32 8, comctl32 5, shell32 3). Equal to the hand mapping, diff empty (static, over the sources). Next on L5: r_dsound, r_dinput8 and r_xinput.
+- Header home: contract/exporthdr (a root with a recipe, INCLUDE output, reached through uses). The header-class rule is withdrawn and deferred until after the first frame. w13 and w28 take it.
+- Lookup: exports.tsv is the interface.
+  - w28: the exportgen stage form, gate_imports/bridgetable on exports.tsv, then deleting the L3 hand lists.
+  - L5: the generated platform lookup table, replacing g_exports, msvcrt_names.tsv and the ws2 rows.
+- w28 8e917f591: gamedata_fetch fetches the declared gamedata/ externals by commit and tree. `.gamedata_heads` is replaced by `.gamedata_pins`, and 6 tests pass.
+  - Undeclared consumers are now red: the farm/boot_job.sh BOOT_DATA_ITEMS, tests/s5/farm_boot.sh, gamedata/shaders and gamedata/gog. The boot root's owner (L4) declares the data items it needs as externals.
+- bottleneck: the cand3b farm verdict.
