@@ -110,7 +110,8 @@ def compare(f, ins, regs, flags, mem):
     """the Form against the spec state: {reg: term}, {flag: 1-bit term} (a flag not named is unchanged, one the SDM calls undefined is not in `flags` and not compared: UNDEF),
     mem = the spec's memory after the instruction (None: unchanged) -> the list of differing parts"""
     d = []
-    if f.faults: return ['faults']
+    import sysspec_store
+    if sysspec_store.faults_ok(f, ins): return ['faults']
     if f.swhen or f.flo is not None: d.append(TEXT['cond'])
     pr = {r[0]: dsl.to_smt(r[1]) for r in f.regs}
     for n in sorted(set(pr) | set(regs)):
