@@ -1,0 +1,2 @@
+gl4_core.c	gl4_api_mem_gpu_addr	u64	0	ports/fnv-nx/render/nxgpu/include/nx/gpu_abi.h:mem_gpu_addr
+gl4_stream.c	gl4_api_wait_frame	u64	0	ports/fnv-nx/render/nxgpu/include/nx/gpu_abi.h:wait_frame

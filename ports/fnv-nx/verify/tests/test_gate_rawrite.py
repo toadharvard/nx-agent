@@ -47,5 +47,13 @@ u, c, ids = g.judge([unit("r:e1.cc", du=WRITE_DU, defines=g.WRITER_SYMBOLS), uni
 check("a second TU that defines the pair is red (the exception is one TU)", (u, c) == (2, 0) and len(ids) == 2, (u, c, ids))
 u, c, ids = g.judge([])
 check("no unit: universe 0", (u, c, ids) == (0, 0, []))
+# a lifted root's units are generator output in every origin form (pack external, pack root in `uses`, stage): the recipe's lifted-origin rule makes each an output of a step of lifted_by
+step = {"tool": "t/lift.py", "args": [], "inputs": [], "outputs": ["gen/a.cc", "gen/b.cc"]}
+for form, rec in (("pack external", {"generated": [step], "external": [{"name": "pack"}]}), ("pack root in uses", {"generated": [step], "uses": [{"root": "r", "output": "PACK"}]}),
+                  ("stage", {"generated": [step]}), ("run step output", {"run": [{"name": "x", "outputs": ["gen/a.cc"]}]})):
+    gu = g.generated_units(rec)
+    check("lifted %s: its units are generator output, a tracked file is not" % form, "gen/a.cc" in gu and "hand.cc" not in gu, gu)
+u, c, ids = g.judge([unit("r:gen/a.cc", du=WRITE_DU, generated="gen/a.cc" in g.generated_units({"generated": [step]})), unit("r:hand.cc", du=WRITE_DU, generated="hand.cc" in g.generated_units({"generated": [step]}))])
+check("a lifted writer is green, a hand-written one red, by the same rule", (u, c) == (2, 1) and "r:hand.cc" in ids[0], (u, c, ids))
 print("fails: %d" % fails)
 sys.exit(1 if fails else 0)
