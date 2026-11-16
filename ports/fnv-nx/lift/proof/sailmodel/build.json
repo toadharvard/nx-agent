@@ -1,0 +1,67 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "cc": "x86_64-linux-gnu-gcc-13",
+  "cxx": "x86_64-linux-gnu-g++-13"
+ },
+ "flags": {
+  "c": [],
+  "cxx": [],
+  "asm": []
+ },
+ "include": [],
+ "units": "all",
+ "external": [
+  {
+   "name": "sail",
+   "repo": "fnv-nx-build",
+   "ref": "tools/sail-mirror",
+   "commit": "b4cf9ee3a15f99037e7a28a91e0494d1a8cb7fc2",
+   "tree_sha256": "1ba45588e2824da0cca9d9ec3e04ec9b4e1fa06a3a20db04e22bdc4966991631",
+   "at": "/ext/sail"
+  }
+ ],
+ "run": [
+  {
+   "name": "model",
+   "exec": "/usr/bin/python3",
+   "args": [
+    "-I",
+    "/in/2",
+    "/in/3",
+    "/in/4",
+    "/in/5",
+    "/in/6"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/proof/sail_pins.txt",
+    "ports/fnv-nx/lift/proof/sailmodel/build_model.py",
+    {
+     "external": "sail",
+     "path": "sail-x86-from-acl2-0c6c023dccc7.tar.gz"
+    },
+    "ports/fnv-nx/lift/proof/sail_patches",
+    "ports/fnv-nx/lift/proof/x86_fetch.sail",
+    "ports/fnv-nx/lift/proof/x86_code_regs.sail"
+   ],
+   "debs": [
+    "python3",
+    "python3-minimal",
+    "python3.12",
+    "python3.12-minimal",
+    "libpython3.12-stdlib",
+    "libpython3.12-minimal"
+   ],
+   "dirs": [
+    "model"
+   ],
+   "outputs": [],
+   "scratch": [
+    "/scratch"
+   ]
+  }
+ ],
+ "outputs": {
+  "MODEL": "model"
+ }
+}
