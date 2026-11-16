@@ -1,0 +1,119 @@
+diff -ruN a/src/binary64/atan2/atan2.c b/src/binary64/atan2/atan2.c
+--- a/src/binary64/atan2/atan2.c
++++ b/src/binary64/atan2/atan2.c
+@@ -29,7 +29,7 @@
+    over (0,1). See comments before P[] and Q[] below. */
+ 
+ #include <fenv.h> // for fenv_t, feholdexcept, fetestexcept, ...
+-#include <stdio.h> // needed in case of correct rounding failure
++#include <mpfr.h> // the last step of Ziv's strategy when the rounding cannot be decided
+ #include <stdint.h>
+ #ifdef CORE_MATH_SUPPORT_ERRNO
+ #include <errno.h>
+@@ -48,6 +48,39 @@
+ 
+ #define MASK 0x7fffffffffffffffull // 2^63-1 (mask the sign bit)
+ 
++/* Last step of Ziv's strategy: atan2(y,x) correctly rounded in the current rounding mode, by MPFR at 53 bits (tint_tod could not decide the rounding).
++   The exponent range of MPFR is set to binary64's for the call and mpfr_subnormalize rounds a subnormal result once. */
++static double
++atan2_mpfr (double y, double x)
++{
++  mpfr_rnd_t rnd;
++  switch (fegetround ())
++    {
++    case FE_TONEAREST: rnd = MPFR_RNDN; break;
++    case FE_TOWARDZERO: rnd = MPFR_RNDZ; break;
++    case FE_UPWARD: rnd = MPFR_RNDU; break;
++    default: rnd = MPFR_RNDD; break; /* FE_DOWNWARD: the four rounding modes of <fenv.h> on this target are these */
++    }
++  mpfr_exp_t emin = mpfr_get_emin (), emax = mpfr_get_emax ();
++  mpfr_set_emin (-1073);
++  mpfr_set_emax (1024);
++  mpfr_t Y, X, R;
++  mpfr_init2 (Y, 53);
++  mpfr_init2 (X, 53);
++  mpfr_init2 (R, 53);
++  mpfr_set_d (Y, y, MPFR_RNDN); /* exact */
++  mpfr_set_d (X, x, MPFR_RNDN); /* exact */
++  int t = mpfr_atan2 (R, Y, X, rnd);
++  mpfr_subnormalize (R, t, rnd);
++  double r = mpfr_get_d (R, rnd);
++  mpfr_clear (Y);
++  mpfr_clear (X);
++  mpfr_clear (R);
++  mpfr_set_emin (emin);
++  mpfr_set_emax (emax);
++  return r;
++}
++
+ // PI_H+PI_L approximates pi with error bounded by 2^-108.041
+ #define PI_H 0x1.921fb54442d18p+1
+ #define	PI_L 0x1.1a62633145c07p-53
+@@ -205,6 +238,7 @@
+   int underflow;
+   int overflow = fetestexcept (FE_OVERFLOW);
+   double res;
++  int undecided = 0;
+   /* First check when t=y/x is small and exact and x > 0, since for
+      |t| <= 0x1.d12ed0af1a27fp-27, atan(t) rounds to t (to nearest). */
+   double t = y / x;
+@@ -283,7 +317,9 @@
+       z->l -= 2;
+       z->m -= (z->l < 2);
+       z->h -= (z->m < 1);
+-      res = tint_tod (z, 1, y, x);
++      res = tint_tod (z, 1, &undecided);
++      if (undecided)
++        res = atan2_mpfr (y, x);
+       goto end;
+     }
+ 
+@@ -380,7 +416,9 @@
+     }
+     err = 266;
+   }
+-  res = tint_tod (z, err, y, x);
++  res = tint_tod (z, err, &undecided);
++  if (undecided)
++    res = atan2_mpfr (y, x);
+  end:
+   if (!overflow)
+     feclearexcept (FE_OVERFLOW);
+diff -ruN a/src/binary64/atan2/tint.h b/src/binary64/atan2/tint.h
+--- a/src/binary64/atan2/tint.h
++++ b/src/binary64/atan2/tint.h
+@@ -383,9 +383,9 @@
+ // convert a to a double with correct rouding
+ // If err=0, we are converting a double value.
+ // Otherwise, err is a bound in ulps on the maximal error on a->l
+-// y,x are the inputs of atan2 (in case we can't round correctly)
++// *undecided is set to 1, and 0.0 is returned, when the rounding cannot be decided (the caller then takes the MPFR path)
+ static inline double
+-tint_tod (const tint_t *a, uint64_t err, double y, double x)
++tint_tod (const tint_t *a, uint64_t err, int *undecided)
+ {
+   if (a->ex >= 1025) // overflow: |a| >= 2^1024
+     return a->sgn ? -0x1p1023 - 0x1p1023 : 0x1p1023 + 0x1p1023;
+@@ -410,9 +410,8 @@
+     if ((mm == 0 && (low == 0 || low == 0x400) && ll < err) ||
+         (~mm == 0 && (low == 0x3ff || low == 0x7ff) && ~ll < err))
+     {
+-      printf ("Unexpected worst-case found, please report to core-math@inria.fr:\n");
+-      printf ("Worst-case of atan2 found: y,x=%la,%la\n", y, x);
+-      exit (1);
++      *undecided = 1;
++      return 0.0;
+     }
+   if (ex <= -1022) // subnormal case
+   {
+@@ -453,7 +452,8 @@
+ static inline void inv_tint (tint_t *r, const tint_t *A)
+ {
+   tint_t q[1];
+-  double a = tint_tod (A, 0, 0, 0); // exact
++  int undecided_unused = 0;
++  double a = tint_tod (A, 0, &undecided_unused); // exact (err = 0: never undecided)
+   // To simplify the error analysis, we assume 0.5 <= a < 1
+   int subnormal = __builtin_fabs (a) < 0x1p-1022;
+   if (subnormal)

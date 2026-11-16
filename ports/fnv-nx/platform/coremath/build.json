@@ -21,7 +21,8 @@
   "asm": []
  },
  "include": [
-  "ports/fnv-nx/platform/coremath/inc"
+  "ports/fnv-nx/platform/coremath/inc",
+  "ports/fnv-nx/platform/coremath/atan2"
  ],
  "units": "all",
  "sources": "units.list",
@@ -45,15 +46,40 @@
     "log2",
     "log2p1",
     "tan",
-    "atan2",
     "sin",
     "cos"
    ],
    "inputs": [],
    "outputs": [
     "units.list",
-    "inc/tint.h",
     "inc/dint_log2p1.h"
+   ]
+  }
+ ],
+ "run": [
+  {
+   "name": "corepatch",
+   "exec": "/usr/bin/bash",
+   "args": [
+    "/in/1"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/coremath/apply_patch.sh",
+    "ports/fnv-nx/platform/coremath/core-math.patch",
+    {
+     "external": "core-math",
+     "path": "src/binary64"
+    }
+   ],
+   "debs": {
+    "profile": "compiler-build"
+   },
+   "outputs": [],
+   "dirs": [
+    "atan2"
+   ],
+   "scratch": [
+    "/scratch"
    ]
   }
  ]
