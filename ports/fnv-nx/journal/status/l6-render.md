@@ -1375,3 +1375,8 @@ Paused: w3b, w4, farm; no other work.
     - abspath: 0 in render and bridgefacts. The 7 findings left are contract/l2sections.py:22 (w28) and lift x3, an old copy that cand4 replaces from L3a.
     - Blocked, owner L2: BASE, the type-size table, needs a machine-typed `types` section in DATAMODEL.json; it is prose only today. Asked of L2.
 - 01:23Z L2 accepted DATAMODEL-TYPES (worker w2, cand4b line): a generated `types` section in toolchain/msvcmodel/DATAMODEL.json. bridgefacts declares it as a path input and reads .types; w6 then deletes BASE.
+- 01:35Z w6 claude/fnv-l6-render-w6-dm (w6-root 4924ef828 + DATAMODEL.json from L2 badb397be): BASE is deleted (rule 5).
+    - Every Win32/D3D name resolves through its typedef chain from the headers down to DATAMODEL `types`. LARGE_INTEGER, ULARGE_INTEGER and D3DMATRIX are typed fields. A name with no chain stops the generator.
+    - D9_SPEC byte-identical (71cb85a7…); d3d9total 332/332; test 45/45; test_env_ident passes.
+    - It lands with cand4 when L1 carries cand4b.
+- bottleneck: farm1 sm_link numbers; the cand4 base (cand3b, then w28, then L2 cand4b).
