@@ -1830,3 +1830,6 @@ One bounded read-only pass over lift/. Each item gives its replacement.
     - liftsrcgen.proof_closure() now derives them from liftgen's import closure.
     - Before, a shard failed in its sandbox; base3 has the same defect.
   - Missing from the relift: base3's facts2 and the revert. w13 merges base3 when w8 reports.
+- Farm 3's density run is red at liftsrc on every head: bridgetable's guestgen_imptest.py runs the lifter without configuring x86sys (inputs.py:35).
+  - Doing (w13): every lifter caller configures its inputs through one inputs.py function, plus the X86SYS uses in their stages. The commit goes onto all 4 heads, base3 and the relift.
+- bottleneck: that fix, then farm 3's density numbers.
