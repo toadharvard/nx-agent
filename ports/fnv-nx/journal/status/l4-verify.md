@@ -472,3 +472,10 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - The heads: L5 w37 c90e09e (platform 3x112 objects, hostabi, sha256, rt/guest_main green, all on the trunk) and L6's single render head (L6A's gl4link2 is retired).
   - Both are blocked only on cand4: nxgpu delta recipes (w28 8666fb756), wine_fixme row 25, the shim INCLUDE (2872f3ac8), and .gamedata_pins.
 - bottleneck: L1 cand4; the L3a post-cand3 pack store | no workers, no farms
+- 07:00: the cand4 set is consistent. L5 w39 0a3f9b767 holds L1 cand4 62474771c and L6's render head ce86bbd83, and the gl4 link is green there.
+  - w10 session_01KmtZKTTdSBgqaxRFBcEvFh: doing.
+    - It moves L4's own paths onto w39; every other path stays w39's.
+    - It runs recipe.check on the L4 and render roots, and builds gl4 by recipe (sha against 7da199c1…).
+    - It runs test_bootgpu on the recipe-built libnxgl4.so (the boot machine's GL from the recipe, path plan 2026-11-14), plus test_bootrt and test_boot.
+  - Still on cand5 (L1 w28): .gamedata_pins and the shim INCLUDE (d3d9).
+- bottleneck: w10; L2 pin 67164ec5e into cand4 (lift/rt dispatch.c, loader red); L1 cand5; the L3a pack store | 1 worker, no farms
