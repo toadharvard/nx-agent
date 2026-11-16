@@ -23,7 +23,7 @@ def configure(**guard):
     g = {**dict(es=False, ds=False, fs=False, gs=True), **guard}
     json.dump({'format': 'fnvnx-segwrites/2', 'images': {'buf': {n: {'guard': v} for n, v in g.items()}}}, open(d + '/segwrites.json', 'w'))
     open(d + '/universe.tsv', 'w').close(); open(d + '/depth.tsv', 'w').close()
-    inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, sdmrows=SDMROWS, segwrites=d + '/segwrites.json', image='buf')
+    inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, sdmrows=SDMROWS, cpumodel=_inputs.CPUMODEL, segwrites=d + '/segwrites.json', image='buf')
 
 
 def lift(code):

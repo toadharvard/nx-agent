@@ -24,7 +24,7 @@ def lift_part(arg):
     """worker: lift entries[k::n] -> (missing target -> number of entries naming it, reason class -> count, entries lifted, direct targets seen)"""
     exe, base, fd, x86sys, fps, fpd, cf, k, n = arg; sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
     import fnvlift as L
-    L.inputs.configure(universe=fd + '/universe.tsv', fpstate=fps or fd + '/fpstate', fpdepth=fpd or fd + '/fpmodes/depth.tsv', x86sys=x86sys, sdmrows=cf)
+    L.inputs.configure(universe=fd + '/universe.tsv', fpstate=fps or fd + '/fpstate', fpdepth=fpd or fd + '/fpmodes/depth.tsv', x86sys=x86sys, sdmrows=cf, cpumodel=__import__('fnvlift.tests._inputs', fromlist=['CPUMODEL']).CPUMODEL)
     img = L.Image(exe, base); ent = [int(l.split('\t')[0], 16) for l in open(fd + '/universe.tsv') if l.strip() and not l.startswith('#')]; es = set(ent)
     miss = Counter(); why = Counter(); ne = Counter(); ok = seen = 0
     for a in ent[k::n]:

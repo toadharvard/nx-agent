@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """cpufeat_diff: the old capstone-group gate against the SDM-row gate, per site and in global numbers.
 
-    python3 -I cpufeat_diff.py --sdmrows SDMROWS.json --old-module OLD_f_cpufeat.py --old-cpufeat CPUFEAT.tsv --udsail UDSAIL.tsv [--undefined BAD.tsv] SITES.tsv [OUT.tsv]
+    python3 -I cpufeat_diff.py --sdmrows SDMROWS.json --cpumodel CPUID_MODEL.json --old-module OLD_f_cpufeat.py --old-cpufeat CPUFEAT.tsv --udsail UDSAIL.tsv [--undefined BAD.tsv] SITES.tsv [OUT.tsv]
 
 SITES.tsv: packuniverse.py's sites file (`module:address<TAB>shape key<TAB>family`), every image. OLD_f_cpufeat.py: the retired fnvlift/f_cpufeat.py (git show <commit>:...), loaded under another name; it reads its feature table
 from --old-cpufeat. The new gate is fnvlift/f_cpufeat.py over --sdmrows. A shape's answer is computed once and applied to every site of the shape (the gate reads the decoded form only).
@@ -36,12 +36,12 @@ def main(argv):
     def opt(n):
         if n not in a: raise SystemExit('missing %s' % n)
         i = a.index(n); v = a[i + 1]; del a[i:i + 2]; return v
-    rows, old, cf, ud = opt('--sdmrows'), opt('--old-module'), opt('--old-cpufeat'), opt('--udsail')
+    rows, old, cf, ud, cm = opt('--sdmrows'), opt('--old-module'), opt('--old-cpufeat'), opt('--udsail'), opt('--cpumodel')
     undef = opt('--undefined') if '--undefined' in a else None
     if len(a) not in (1, 2): raise SystemExit(__doc__)
     from fnvlift import inputs
     from proof import sdmfeat, shape
-    inputs.configure(sdmrows=rows, udsail=ud)
+    inputs.configure(sdmrows=rows, cpumodel=cm, udsail=ud)
     from fnvlift import f_cpufeat as new
     O = old_gate(old, cf)
     md = shape.decoder(); by = collections.OrderedDict(); n = collections.Counter(); fam = {}

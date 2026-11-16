@@ -12,7 +12,7 @@ d = tempfile.mkdtemp(prefix='udgap-')
 open(d + '/udsail.tsv', 'w').write('# fnvnx-udsail/2\nc7d8\tUD\t2\tsail\tfixture\n8fe0\tUD\t2\tfeature\tfixture\n')
 open(d + '/universe.tsv', 'w').close(); open(d + '/depth.tsv', 'w').close()
 inputs.reset()
-inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, sdmrows=SDMROWS, udsail=d + '/udsail.tsv', segwrites=d + '/none.json', image='buf')
+inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, sdmrows=SDMROWS, cpumodel=_inputs.CPUMODEL, udsail=d + '/udsail.tsv', segwrites=d + '/none.json', image='buf')
 
 assert f_sys.ud_gap(bytes.fromhex('c7d8112233445566')).size == 2           # the row is the decode extent: bytes after it are not part of the instruction
 assert f_sys.ud_gap(bytes.fromhex('c7c8')) is None                        # c7 /1: no row: undecided

@@ -16,7 +16,6 @@ The capstone instruction-group tags and the per-mnemonic tables are NOT read: ca
 
 Source of the declared CPU's words: fnvlift/cpumodel_bits.py (one derivation). The flag leaf is within the declared max basic leaf (cpuid_model.json max_basic) or max extended leaf, as in sdmfeat.present."""
 import json
-import os
 
 from . import inputs
 
@@ -24,11 +23,9 @@ _S = {}
 
 
 def _cpu():
-    """{(leaf, reg): value, (0,'EAX'): max basic leaf, (0x80000000,'EAX'): max extended leaf}: the declared CPU's words, derived from verify/cpuid_model.json (cpumodel_bits.model_words)"""
+    """{(leaf, reg): value, (0,'EAX'): max basic leaf, (0x80000000,'EAX'): max extended leaf}: the declared CPU's words, derived from the `cpumodel` input (verify/cpuid_model.json; cpumodel_bits.model_words)"""
     from .cpumodel_bits import model_words, I
-    here = os.path.dirname(os.path.abspath(__file__)); rel = 'ports/fnv-nx/verify/cpuid_model.json'
-    path = next(p for p in (os.path.join('/in', rel), os.path.join(here, '..', '..', 'verify', 'cpuid_model.json')) if os.path.exists(p))
-    m = json.load(open(path)); w = model_words(m)
+    m = json.load(open(inputs.get('cpumodel'))); w = model_words(m)
     return {(0, 'EAX'): I(m['max_basic']), (0x80000000, 'EAX'): I(m['max_ext']), (1, 'EDX'): w['leaf1_edx'], (1, 'ECX'): w['leaf1_ecx'], (0x80000001, 'EDX'): w['ext1_edx'], (0x80000001, 'ECX'): w['ext1_ecx']}
 
 

@@ -36,8 +36,8 @@ def theirs(p):
 
 
 def main(a):
-    if len(a) < 3 or a[0] != '--sdmrows': print('usage: cleared_join.py --sdmrows SDMROWS.JSON CLEARED_SITES.TSV [IMAGE FACTS ...]', file=sys.stderr); return 2
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))); from fnvlift import inputs; inputs.configure(sdmrows=a[1]); a = a[2:]
+    if len(a) < 5 or a[0] != '--sdmrows' or a[2] != '--cpumodel': print('usage: cleared_join.py --sdmrows SDMROWS.JSON --cpumodel CPUID_MODEL.JSON CLEARED_SITES.TSV [IMAGE FACTS ...]', file=sys.stderr); return 2
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))); from fnvlift import inputs; inputs.configure(sdmrows=a[1], cpumodel=a[3]); a = a[4:]
     o = ours(list(zip(a[1::2], a[2::2]))); t = theirs(a[0])
     print('ours %d theirs %d both %d' % (len(o), len(t), len(set(o) & set(t))))
     for k in sorted(set(o) - set(t)): print('OURS-ONLY', k, o[k][0], o[k][1], o[k][2])
