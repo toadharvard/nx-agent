@@ -50,8 +50,6 @@ def varc(cx):
         if name in XSTATE:
             return XSTATE[name]
         if name in dsl.XIN and name.startswith('sel_'):      # the segment register state: fnvl_seg_get (rt/fnvl.h), c->sel[SEG_*]
-            from fnvlift import x86sys
-            if name == 'sel_gs' and 'gs' not in x86sys.SEL: raise Unsupported('read of gs: the initial gs is undecided in x86sys selectors')
             return 'fnvl_seg_get(c,%d)' % dsl.SEGS.index(name[4:])
         if name in dsl.REGS or name in SIXFLAGS or name in STATE:
             return STATE.get(name, name)
