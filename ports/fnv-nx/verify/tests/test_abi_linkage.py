@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
+# reads: ports/fnv-nx/toolchain/names/sympair_kinds.inc ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """gate_abi layout item by the `linkage` column (8th field of .fnvnx.layout): only `external` records pair by key; `internal`, `none` and `c` records are
 distinct entities per unit and never pair by name.  Hand-assembled objects with an empty .fnvnx.sympair.  Run: python3 -I <this file>."""
 import os
@@ -10,6 +10,8 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.join(HERE, '..'), os.path.join(HERE, '..', '..', 'link'), os.path.join(HERE, '..', '..', 'contract')]
 import gate_abi  # noqa: E402
+import l2sections  # noqa: E402
+l2sections.set_kinds(os.path.join(HERE, "..", "..", "toolchain", "names", "sympair_kinds.inc"))
 
 tmp = tempfile.mkdtemp(prefix='abilink-')
 __import__('atexit').register(__import__('shutil').rmtree, tmp, True)   # a test leaves no scratch behind

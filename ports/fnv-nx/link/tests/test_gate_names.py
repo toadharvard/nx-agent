@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/toolchain/names/sympair_kinds.inc
 """Check of link/gate_names.py on synthetic ELF and COFF objects (invented names, no game data, no cl, no network):
 a definition whose name cl does not define is red and named; an unnamed row, an unnamed vftable, a unit without a cl object, an
 unreadable cl object and an unreadable GCC object are red; weak, COMDAT, reference and nameless rows are outside the universe;
@@ -16,6 +17,8 @@ sys.path.insert(0, os.path.join(HERE, '..'))
 import gate_names
 import synth
 import unitpairs
+import l2sections
+l2sections.set_kinds(os.path.join(HERE, "..", "..", "toolchain", "names", "sympair_kinds.inc"))
 
 fails = []
 
