@@ -53,10 +53,29 @@ import runtime  # noqa: E402
 import sandbox  # noqa: E402
 import toolflags  # noqa: E402
 import unitstage  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the parent of the package `verify` (a stage mounts it at /imp)
+from verify import plugsem  # noqa: E402
+from verify import targets as _targets  # noqa: E402  (the declared targets: verify/targets.json)  (the guest compiler record's facts, one source)
+BuildRed = plugsem.BuildRed
+lifted_origin = plugsem.lifted_origin
+PLUGIN_SOURCES = plugsem.PLUGIN_SOURCES
+PLUGIN_ARGS = plugsem.PLUGIN_ARGS
+PLUGIN_OUT = plugsem.PLUGIN_OUT
+origin_class = plugsem.origin_class
+semantics_set = plugsem.semantics_set
+plugin_args = plugsem.plugin_args
+SEMANTICS_FLAGS = plugsem.SEMANTICS_FLAGS
+SEMANTICS_LIFTED = plugsem.SEMANTICS_LIFTED
+SDD_DEFINE = plugsem.SDD_DEFINE
+SDD_FLAGS = plugsem.SDD_FLAGS
+ANALYSIS_PLUGIN = plugsem.ANALYSIS_PLUGIN
+runtime_cflags = plugsem.runtime_cflags
+runtime_configure = plugsem.runtime_configure
+runtime_configure_patch = plugsem.runtime_configure_patch
 sandbox_src = unitstage.sandbox_src   # the one function that composes a unit's sandbox source path (the unit a plugin reports)
 
 FORMAT, OBJ_FORMAT = "fnvnx-recipe/1", "fnvnx-objects/1"
-TREE = "ports/fnv-nx"
+TREE = plugsem.TREE
 ADMIT = TREE + "/verify/admit.json"
 ENV_JSON = TREE + "/verify/env.json"   # the declared environment of the checkout (l1.py checks the same file)
 
@@ -105,26 +124,8 @@ VARIANT_DELTAS = {"flags_add", "defines_add"}   # appended to the base flags of 
 PROFILES = ("guest", "host")
 PLUGIN_FIXED = {"source": "PLUGIN_SOURCES", "inputs": "plugin_inputs, derived from the source", "args": "PLUGIN_ARGS"}   # what recipe.py fixes for a plugin: a root entry names only the plugin
 GUEST_LINK = TREE + "/link/guest.json"   # the guest link profile: {"script": path inside TREE, "libs": {LIBS_KEYS}}, one fact for every guest link (RECIPE.md, Link)
-GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
+GUEST_PIN = plugsem.GUEST_PIN
 GUEST_TARGETS = ("guest", "host")
-# The plugins every product root with native or decomp C++ loads, their only admitted sources and their fixed arguments (RECIPE.md,
-# "Plugins"). The arguments are the MSVC semantics (evaluation order of arguments, objects, operators, assignments; enum conversion
-# an error as for cl). The other values the plugins accept (ltr, first, cpp17) exist for A/B measurements and are no product.
-# The plugin fnvnx_order has no memory-ordering option: every access to shared memory is ordered (x86 TSO), whatever the arguments.
-# The set and the LOAD ORDER of compile.sh (fnv-l2-source): ftoi, order, sdd, pi, dispatch, addr, names, layout. A plugin that includes another source
-# (layout includes names' .cc) is mounted with it: plugin_inputs() derives the set from the #include closure of the source.
-_T = TREE + "/toolchain/"
-PLUGIN_SOURCES = {"fnvnx_ftoi": _T + "ftoi/fnvnx_ftoi.cc", "fnvnx_order": _T + "order/fnvnx_order.cc", "fnvnx_sdd": _T + "sdd/fnvnx_sdd.cc",
-                  "fnvnx_pi": _T + "pi/fnvnx_pi.cc", "fnvnx_dispatch": _T + "dispatch/fnvnx_dispatch.cc", "fnvnx_addr": _T + "addr/fnvnx_addr.cc",
-                  "fnvnx_names": _T + "names/fnvnx_names.cc", "fnvnx_layout": _T + "layout/fnvnx_layout.cc"}
-PLUGIN_ARGS = {n: {} for n in PLUGIN_SOURCES}
-ANALYSIS_PLUGIN = ("objstub_plugin", TREE + "/verify/objstub_plugin.cc")   # the gate objstub's plugin (RECIPE.md "Plugins"): built for every root with C/C++ units, loaded by no compile stage
-PLUGIN_ARGS["fnvnx_ftoi"] = {"mode": "native"}
-# fnvnx_ftoi is one plugin with two modes, chosen by the root's cxx_origin (no free choice): native C++ takes the MSVC rewrite, lifted C++ has
-# no rewrite and every float -> integer conversion outside an fnvnx_f2i function is an error. Both write their report (gate fpexact) to
-# PLUGIN_OUT of the CC stage's own /out; the recipe passes it, a build.json does not declare it.
-PLUGIN_OUT = {"fnvnx_ftoi": "/out/unit.f2i.json"}
-PLUGIN_ARGS["fnvnx_order"] = {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}
 
 
 _QINC = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', re.M)
@@ -186,38 +187,6 @@ def root_plugin_flags(built_plugins, origin, outdir):
     return [f for p in built_plugins for f in plugin_flags(p["name"], want[p["name"]], p["path"], os.path.join(outdir, os.path.basename(PLUGIN_OUT[p["name"]])) if p["name"] in PLUGIN_OUT else None)]
 
 
-def origin_class(origin):
-    """"lifted" iff the declared `cxx_origin` ORIGIN is a lifted declaration (lifted_origin: {"lifted_by", "pack"} or {"lifted_by", "stage"}), else "native" (also for no origin): the one
-    place the origin's class is read (the class name "lifted" itself is accepted, for the CLI); plugin_args and semantics_set are functions of it."""
-    return "lifted" if origin == "lifted" or lifted_origin(origin) else "native"
-
-
-def semantics_set(origin):
-    """The semantic flag set (before the per-language drop of semantics_for) of a root with `cxx_origin` ORIGIN: SEMANTICS_LIFTED for a lifted
-    root, SEMANTICS_FLAGS for every other."""
-    return SEMANTICS_LIFTED if origin_class(origin) == "lifted" else SEMANTICS_FLAGS
-
-
-def plugin_args(origin):
-    """{plugin name: its fixed arguments} for a root whose declared `cxx_origin` is ORIGIN ("native", a {"lifted_by", "pack"} dict, or None): the ONE
-    place the expected arguments are decided, used by plugin_errors, the gates and the fold of L2. A function of the root's declared fact only, no second
-    table: PLUGIN_ARGS, with fnvnx_ftoi's `mode` = the origin's class (lifted or native). No separate table for lifted roots."""
-    out = {n: dict(a) for n, a in PLUGIN_ARGS.items()}
-    out["fnvnx_ftoi"]["mode"] = origin_class(origin)
-    return out
-
-
-# The semantic flags of a guest root (data model, ABI, target, FP, aliasing, overflow, language model, calling convention): ONE ordered set. Its leading
-# run (ABI, architecture, tuning, code model) is generated from the declared targets (targets.json, targets.semantic_prefix); the rest is the guest
-# compiler pin's "flags"."semantics" (guest_compiler.json, next to this file). The RECIPE appends it to every guest compile stage, C, C++ and
-# assembler alike, minus what the pinned driver itself says does not apply to that language (semantics_for); a guest build.json carries none of them.
-with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "guest_compiler.json")) as _f:
-    _sem = json.load(_f)["flags"]["semantics"]
-import targets as _targets  # noqa: E402  (the declared targets: verify/targets.json)
-SEMANTICS_FLAGS = tuple(_targets.semantic_prefix(_targets.load())) + tuple(_sem["common"])   # every guest root (native, decomp, lifted)
-SEMANTICS_LIFTED = SEMANTICS_FLAGS + tuple(_sem["lifted_extra"])   # a root whose cxx_origin is a lifted declaration: the common set plus what the lifter's code is built under
-SDD_DEFINE = "-DFNVNX_SDD=1"   # per root: the plugin fnvnx_sdd needs it (and -fno-devirtualize, which is in the semantic set of a guest root)
-SDD_FLAGS = (SDD_DEFINE, "-fno-devirtualize")   # what a NATIVE C++ root of a host target holds itself
 LANG_X = {"c": "c", "cxx": "c++", "asm": "assembler-with-cpp"}   # the driver's -x language of each kind of unit
 # What a guest build.json may carry (per-root classes); every other -f/-m/... token comes from flags.semantics and is refused here. Warnings and
 # diagnostics, defines, the language standard, the optimisation level (-O0..-O3, -Os, -Og: not -Ofast, which switches FP semantics), debug info,
@@ -258,10 +227,6 @@ class RecipeError(Exception):
     def __init__(self, errors):
         Exception.__init__(self, "; ".join(errors))
         self.errors = list(errors)
-
-
-class BuildRed(Exception):
-    pass
 
 
 class EnvBlocked(RecipeError):
@@ -1030,38 +995,6 @@ def load_pin(repo="."):
     return json.load(open(p)) if os.path.exists(p) else None
 
 
-def runtime_cflags(pin):
-    """The flags the guest runtime (newlib, libstdc++) is built with beyond the semantic set: the `runtime_cflags` of the one guest compiler record.
-    They apply to every runtime translation unit: C, C++ and assembly (.S) alike. The runtime build reads them here (guest_flags.py --runtime); no build script spells them."""
-    v = pin.get("runtime_cflags") if isinstance(pin, dict) else None
-    if not isinstance(v, list) or not all(isinstance(x, str) and x.startswith("-") for x in v):
-        raise BuildRed("%s: runtime_cflags must be a list of compiler flags" % GUEST_PIN)
-    return list(v)
-
-
-def runtime_configure(pin):
-    """The gcc configure options of the guest compiler build (build.sh of toolchain/msvcmodel): the `runtime_configure` of the one guest compiler record.
-    The build reads them here; no build script spells them."""
-    v = pin.get("runtime_configure") if isinstance(pin, dict) else None
-    if not isinstance(v, list) or not all(isinstance(x, str) and x.startswith("--") for x in v):
-        raise BuildRed("%s: runtime_configure must be a list of configure options" % GUEST_PIN)
-    cite = pin.get("runtime_configure_cite")
-    missing = [o for o in v if not isinstance(cite, dict) or not isinstance(cite.get(o), str) or not cite[o].strip()]
-    if missing:
-        raise BuildRed("%s: runtime_configure options without a cite in runtime_configure_cite: %s" % (GUEST_PIN, ", ".join(missing)))
-    return list(v)
-
-
-def runtime_configure_patch(pin):
-    """The patch of the runtime subdirs' generated configure scripts (rule CFG-LINK): the `runtime_configure_patch` of the one guest compiler record.
-    The build reads the script, the subdirs and its two fact sources here; no build script spells them."""
-    v = pin.get("runtime_configure_patch") if isinstance(pin, dict) else None
-    keys = ("script", "subdirs", "protocol_source", "guest_script", "cite")
-    if not isinstance(v, dict) or any(k not in v for k in keys) or not isinstance(v["subdirs"], list) or not all(isinstance(v[k], str) and v[k].strip() for k in keys if k != "subdirs"):
-        raise BuildRed("%s: runtime_configure_patch needs %s (cite non-empty)" % (GUEST_PIN, ", ".join(keys)))
-    return dict(v)
-
-
 def guest_link_part(rec, root, pin, prof, files, roots):
     """The link of a guest root (part of guest_errors): script and libs are the profile's (link/guest.json), one fact for every guest link."""
     lk = rec.get("link")
@@ -1290,18 +1223,32 @@ def foreign_search_dirs(dirs, ext_hosts):
     return sorted({t for t in dirs if not under_ext(t) or not under_ext(os.path.realpath(t))})
 
 
+HEADER_OUTPUT = "INCLUDE"   # the one implicit output of a header root: its own directory (a srcdir, keyed by its tree hash)
+
+
+def root_outputs(roots, r, repo):
+    """-> ({NAME: root-relative path}, generated outputs) that admitted root R declares for `uses`: the `outputs` of its recipe, or for a header root (class header,
+    no recipe, no units) the one implicit output INCLUDE = its own directory (".": nothing generated, every tracked file below the root). The ONE accessor of
+    what a `uses` entry names: the check, the include homes, the include_uses rule and the stage input all read it, so a header root is reached one way only.
+    KeyError for a root that is not admitted, OSError/ValueError for an unreadable recipe."""
+    ent = roots[r]
+    if ent.get("class") == "header":
+        return {HEADER_OUTPUT: "."}, set()
+    prod = read_recipe(repo, ent["recipe"])
+    return prod.get("outputs") or {}, generated_outputs(prod)
+
+
 def include_home(d, rec, roots, repo, files):
-    """D (a repo directory) lies in a directory output of tracked files (a `srcdir`) of a root that REC `uses`."""
+    """D (a repo directory) lies in a directory output of tracked files (a `srcdir`) of a root that REC `uses` (a header root's INCLUDE is its own directory)."""
     for u in rec.get("uses") or []:
-        ent = roots.get(u.get("root")) if isinstance(u, dict) else None
-        if not (ent and isinstance(ent.get("recipe"), str)):
+        if not (isinstance(u, dict) and isinstance(roots.get(u.get("root")), dict)):
             continue
         try:
-            prod = read_recipe(repo, ent["recipe"])
-            p = (prod.get("outputs") or {}).get(u["output"])
+            outs, gen = root_outputs(roots, u["root"], repo)
+            p = outs.get(u["output"])
         except (OSError, ValueError, KeyError, AttributeError, TypeError):
             continue
-        if isinstance(p, str) and output_kind(p, u["root"], generated_outputs(prod), files) == "srcdir" and under(d, u["root"] + "/" + p):
+        if isinstance(p, str) and output_kind(p, u["root"], gen, files) == "srcdir" and under(d, u["root"] if p == "." else u["root"] + "/" + p):
             return True
     return False
 
@@ -1312,7 +1259,7 @@ def output_kind(p, root, gen, files):
     files below one directory: red), or None."""
     if p in gen:
         return "file"
-    full = root + "/" + p
+    full = root if p == "." else root + "/" + p
     gdir = dir_output(p, gen)
     tdir = any(under(f, full) for f in files)
     if gdir and tdir:
@@ -1336,11 +1283,11 @@ def include_uses_errors(rec, roots, repo):
             err.append("include_uses: %s/%s is not in `uses`" % (u["root"], u["output"]))
             continue
         try:
-            prod = read_recipe(repo, roots[u["root"]]["recipe"])
-            p = (prod.get("outputs") or {}).get(u["output"])
+            outs, gen = root_outputs(roots, u["root"], repo)
+            p = outs.get(u["output"])
         except (OSError, ValueError, KeyError, AttributeError, TypeError):
             continue    # uses_errors reports an unreadable or undeclared producer
-        if not (isinstance(p, str) and output_kind(p, u["root"], generated_outputs(prod), tracked(repo)) in ("gendir", "srcdir")):
+        if not (isinstance(p, str) and output_kind(p, u["root"], gen, tracked(repo)) in ("gendir", "srcdir")):
             err.append("include_uses: output %r of %s is not a directory output (outputs: {NAME: a directory of generated files, or of tracked files})" % (u["output"], u["root"]))
     return err
 
@@ -1368,11 +1315,11 @@ def uses_errors(rec, root, roots, repo, files=None):
             err.append("uses: %s/%s is listed twice" % (r, n))
         if r == root:
             err.append("uses: %s is the root itself" % r)
-        elif not ent or not ent.get("recipe"):
-            err.append("uses: %s is not an admitted root with a recipe" % r)
+        elif not ent or not (ent.get("recipe") or ent.get("class") == "header"):
+            err.append("uses: %s is not an admitted root with a recipe or a header root" % r)
         else:
             try:
-                decl = read_recipe(repo, ent["recipe"]).get("outputs")
+                decl = root_outputs(roots, r, repo)[0]
             except (OSError, ValueError, AttributeError):
                 err.append("uses: the recipe of %s is unreadable" % r)
                 continue
@@ -1474,8 +1421,8 @@ def header_dirs(rec, root, roots, repo=".", variant=""):
         dirs.update(d for d in inc if isinstance(d, str) and not d.startswith("/"))
     add(rec.get("include") if isinstance(rec.get("include"), list) else [])
     for p, r in roots.items():
-        if r.get("class") == "header":
-            dirs.add(p)   # a header root is a home for every target
+        if r.get("class") == "header" and any(isinstance(u, dict) and u.get("root") == p and u.get("output") == HEADER_OUTPUT for u in rec.get("uses") or []):
+            dirs.add(p)   # a header root is a home only for a recipe that `uses` its INCLUDE
         if r.get("class") == "product" and tg in targets_of(r):
             dirs.add(include_dir(roots, p))
             for path in [r.get("recipe") if r.get("target") == tg else None] + [q for t, q in own_recipes(r).values() if t == tg]:
@@ -1962,12 +1909,6 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     err += guest_errors(rec, root + "@" + variant if variant else root, roots, pin, load_guest_link(repo), files)
     err += plugin_errors(rec, root, files, roots, units, names, variant, repo)
     return err
-
-
-def lifted_origin(origin):
-    """cxx_origin of a lifted root: {"lifted_by": TOOL.py, "pack": EXTERNAL} (the lifted C++ is made from an external pack) or {"lifted_by": TOOL.py,
-    "stage": "gen:<root>:<i>"} (made by a generated step of this root's own recipe, no pack): exactly one of pack and stage."""
-    return isinstance(origin, dict) and (set(origin) == {"lifted_by", "pack"} or set(origin) == {"lifted_by", "stage"})
 
 
 def plugin_errors(rec, root, files, roots, units, ext_names, variant="", repo="."):
@@ -2708,6 +2649,11 @@ class Job:
             return self._uses
         out = []
         for u in self.rec.get("uses", []):
+            if self.roots[u["root"]].get("class") == "header":   # a header root has no recipe and no stage: INCLUDE is its tracked files, keyed by their tree hash
+                pws = tempfile.mkdtemp(dir=ws)
+                _copy(self.repo, [f for f in self.files if under(f, u["root"])], u["root"], os.path.join(pws, "root"))
+                out.append({"at": "/uses/%s/%s" % (u["root"], u["output"]), "tree": cas.ingest(os.path.join(pws, "root"), self.store)})
+                continue
             p = Job(self.repo, u["root"], self.store, self.jobs, self.extcache)
             pws = tempfile.mkdtemp(dir=ws)
             rel = (p.rec.get("outputs") or {}).get(u["output"])
@@ -4312,8 +4258,48 @@ def norm_root(repo, spec):
     return path + sep + var
 
 
+def declared_externals(repo, prefix=""):
+    """[(ref, commit, tree_sha256)] sorted: the fetched externals (not a root's stage outputs) that the recipes of the admitted roots declare, whose `ref` starts
+    with PREFIX. A rule over the admitted set and the recipes (the variants carry no externals of their own), no list; the same ref pinned two ways by two
+    recipes is RecipeError (a ref has one pin). What a consumer of the declared content (the boot machine's game directory) is allowed to read."""
+    out, bad = {}, []
+    roots = load_admit(repo)
+    for r in sorted(roots):
+        if not roots[r].get("recipe"):
+            continue
+        with open(os.path.join(repo, roots[r]["recipe"])) as fh:
+            rec = json.load(fh)
+        for e in rec.get("external", []) if isinstance(rec, dict) else []:
+            if is_stage_ext(e) or not str(e.get("ref", "")).startswith(prefix):
+                continue
+            pin = (e["commit"], e["tree_sha256"])
+            if out.setdefault(e["ref"], pin) != pin:
+                bad.append("external %s is pinned two ways (%s and %s)" % (e["ref"], out[e["ref"]], pin))
+    if bad:
+        raise RecipeError(bad)
+    return sorted((ref, c, t) for ref, (c, t) in out.items())
+
+
+def externals_cmd(repo, opt):
+    """recipe externals --ref-prefix P [--fetch --store S --ext E --ws W --artifacts URL]: the declared externals with the ref prefix P, one `ref TAB commit TAB
+    tree_sha256` line each; with --fetch, each is fetched by its commit and checked against its tree_sha256 by fetch_externals (the one mechanism of every
+    external: BuildRed on a mismatch), and the line is `ref TAB checkout dir`. A branch head is never fetched."""
+    rows = declared_externals(repo, opt.get("--ref-prefix", ""))
+    if "--fetch" not in opt:
+        return ["%s\t%s\t%s" % r for r in rows]
+    store, ext = need_store(opt), opt.get("--ext") or ext_of_store(need_store(opt))
+    if "--artifacts" in opt:
+        set_artifacts(ext, opt["--artifacts"])
+    exts = [{"name": ref.replace("/", "_"), "commit": c, "tree_sha256": t, "at": "/ext/" + ref.replace("/", "_")} for ref, c, t in rows]
+    with tempfile.TemporaryDirectory() as ws:
+        got = fetch_externals(exts, store, ext, ws)
+    return ["%s\t%s" % (ref, got[ref.replace("/", "_")]["host"]) for ref, _, _ in rows]
+
+
 def main(argv):
     opt = dict(zip(argv[1::2], argv[2::2]))
+    if argv[:1] == ["externals"]:   # a flag without a value (--fetch) is read before the pairs are
+        opt = dict(zip([a for a in argv[1:] if a != "--fetch"][0::2], [a for a in argv[1:] if a != "--fetch"][1::2]), **({"--fetch": "1"} if "--fetch" in argv else {}))
     try:
         repo = "."
         if "--root" in opt:
@@ -4337,6 +4323,9 @@ def main(argv):
                 print(json.dumps(res["failure"], indent=1))
                 return 2
             print(json.dumps(timing_report(o["--store"], res["stage_keys"]), indent=1, sort_keys=True))
+            return 0
+        if argv[:1] == ["externals"]:
+            print("\n".join(externals_cmd(repo, opt)))
             return 0
         if argv[:1] == ["check"]:
             env_blocked(repo)   # the declared environment is judged here by the same function as before a build (the dependency closure of env.json included)
