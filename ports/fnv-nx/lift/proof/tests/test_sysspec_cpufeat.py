@@ -16,7 +16,6 @@ from fnvlift import inputs
 from proof import forms, shape, symform
 import sysspec_cpufeat as S
 
-FIN = os.environ.get('FNVNX_INPUT_SDMROWS'); CPUFEAT = bool(FIN) and os.path.exists(FIN); WHY = 'declared input not mounted: FNVNX_INPUT_SDMROWS (the produced input SDMROWS)'
 SDM = os.environ.get('FNVNX_SDM_TXT')
 PROOF = os.path.join(HERE, '..')
 
@@ -33,9 +32,8 @@ def _udsail():
     return p
 
 
-@unittest.skipUnless(CPUFEAT, WHY)
 class Cleared(unittest.TestCase):
-    def setUp(self): declared_x86sys.configure(); inputs.configure(sdmrows=os.path.join(FIN, 'sdmrows.json') if os.path.isdir(FIN) else FIN, cpumodel=os.path.join(HERE, '..', '..', '..', 'verify', 'cpuid_model.json'), udsail=_udsail())
+    def setUp(self): declared_x86sys.configure(); inputs.configure(cpumodel=os.path.join(HERE, '..', '..', '..', 'verify', 'cpuid_model.json'), udsail=_udsail())
     def tearDown(self): inputs.reset()
 
     def test_3dnow_avx_sse3_are_ud(self):
@@ -54,7 +52,7 @@ class Cleared(unittest.TestCase):
         for h in ('90', '0fef02', '660ffcc1', '0f2800', '01c1'): self.assertEqual(S.check(key(h))[0], 'not-covered', h)
 
     def test_mpx_class_is_every_cell_of_the_opcode_pair(self):
-        # evidence of forms_cpufeat.MPX_OPCODES: every cell of the SDM opcode map at 0F 1A / 0F 1B is an MPX instruction, and the map has no cell at 0F 0E / 0F 0F (3DNow)
+        # evidence of the record's exec_as_nop: every cell of the SDM opcode map at 0F 1A / 0F 1B is an MPX instruction, and the map has no cell at 0F 0E / 0F 0F (3DNow)
         rows = [l.rstrip('\n').split('\t') for l in open(os.path.join(HERE, 'opmap_cells.tsv')) if l.strip() and not l.startswith('#')]
         two = [r for r in rows if r[0] == 'two']
         for op in ('1A', '1B'):
@@ -67,7 +65,7 @@ class Cleared(unittest.TestCase):
         for h, ud in (('c5f1e3c2', True), ('0fef02', False), ('660ffcc1', False)):
             real = next(iter(shape.decoder().disasm(bytes.fromhex(h), 0)))
             self.assertEqual(bool(cpufeat.missing(real)), ud, h)
-        self.assertIn('NOP', cpufeat.decide(next(iter(shape.decoder().disasm(bytes.fromhex('0f1a00'), 0))))['exec_as'])      # MPX: NOP on the declared CPU
+        self.assertEqual(cpufeat.nop(bytes.fromhex('0f1a00'), 0), 'MPX')      # MPX: NOP on the declared CPU
 
     def test_unconfigured_input_gives_no_decision(self):
         inputs.reset()

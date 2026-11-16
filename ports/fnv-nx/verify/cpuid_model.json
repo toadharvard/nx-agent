@@ -54,6 +54,14 @@
   "3DNOW": [2147483649, "EDX", 31]
  },
  "capstone_nonfeature": ["INVALID", "JUMP", "CALL", "RET", "INT", "IRET", "PRIVILEGE", "BRANCH_RELATIVE", "MODE32", "MODE64", "16BITMODE", "NOT64BITMODE", "NOVLX", "ENDING"],
+ "exec_as_nop_doc": "The encodings that a CPU WITHOUT the feature executes as NOP, one row per feature: [leaf, register, bit, [opcode byte pairs 0F xx (hex), the cells of the SDM opcode map that hold only that feature's instructions: lift/proof/tests/opmap_cells.tsv], the SDM citation]. An instruction at such an encoding whose CPUID bit is 0 on the declared CPU executes as NOP (a Form with no effect, no memory access and no fault); every other cleared feature is #UD (capstone_groups). Read by lift/proof/cpufeat.py nop(); no feature or opcode appears in the lifter.",
+ "exec_as_nop": {
+  "MPX": [7, "EBX", 14, ["0f1a", "0f1b"], "Intel SDM Vol. 1, Appendix E.4.1 Instruction Encoding: 'All Intel MPX instructions are NOP on processors that report CPUID.07H.00H:EBX.MPX[14] = 0'"]
+ },
+ "ud_encodings_doc": "Encodings of a feature that the pinned decoder (capstone) gives NO feature group (capstone_groups has no row for them), one row per feature: [leaf, register, bit, [{op: opcode byte after the legacy prefixes, reg: the ModRM reg field, mem: true = memory form only}], the SDM citation of the #UD line]. An instruction at such an encoding whose CPUID bit is 0 on the declared CPU is #UD, like a capstone group (cpufeat.missing). The census of the gaps is lift/proof/udcensus.py.",
+ "ud_encodings": {
+  "SSE3_FISTTP": [1, "ECX", 0, [{"op": "db", "reg": 1, "mem": true}, {"op": "dd", "reg": 1, "mem": true}, {"op": "df", "reg": 1, "mem": true}], "Intel SDM Vol. 2A, FISTTP: '#UD If CPUID.01H:ECX.SSE3[0] = 0.'"]
+ },
  "raw": {
   "2": [
    "0x00feff01",

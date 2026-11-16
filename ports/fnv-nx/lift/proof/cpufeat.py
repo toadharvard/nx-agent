@@ -21,7 +21,8 @@ def _model():
         from fnvlift.cpumodel_bits import model_words, I
         m = json.load(open(path)); w = model_words(m)
         cpu = {(0, 'EAX'): I(m['max_basic']), (0x80000000, 'EAX'): I(m['max_ext']), (1, 'EDX'): w['leaf1_edx'], (1, 'ECX'): w['leaf1_ecx'], (0x80000001, 'EDX'): w['ext1_edx'], (0x80000001, 'ECX'): w['ext1_ecx']}
-        _S.clear(); _S.update(path=path, cpu=cpu, groups=_groups(m), memo={})
+        from fnvlift.cpumodel_bits import I as _I
+        _S.clear(); _S.update(path=path, cpu=cpu, groups=_groups(m), ud={k: (_I(v[0]), v[1], v[2], v[3], v[4]) for k, v in m['ud_encodings'].items()}, nop={k: (_I(v[0]), v[1], v[2], v[3], v[4]) for k, v in m['exec_as_nop'].items()}, memo={})
     return _S
 
 
@@ -54,6 +55,27 @@ def gates(ins):
     return sorted((n, leaf, reg, bit, _bit(S, leaf, reg, bit)) for n, leaf, reg, bit in (S['groups'][g] for g in ins.groups if g in S['groups']))
 
 
+def _enc(raw):
+    """the opcode byte after the legacy prefixes, and the ModRM byte (None at the end of the bytes)"""
+    i = 0
+    while i < len(raw) and raw[i] in (0x66, 0xf2, 0xf3, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65, 0x67, 0xf0): i += 1
+    return (raw[i] if i < len(raw) else None), (raw[i + 1] if i + 1 < len(raw) else None)
+
+
 def missing(ins):
-    """the feature groups of the instruction that the declared CPU's CPUID denies (non-empty = #UD)"""
-    return [n for n, leaf, reg, bit, v in gates(ins) if v == 0]
+    """the features of the instruction that the declared CPU's CPUID denies (non-empty = #UD): its capstone groups with a clear bit, and the `ud_encodings` rows of the record that match its bytes"""
+    out = [n for n, leaf, reg, bit, v in gates(ins) if v == 0]
+    S = _model(); op, modrm = _enc(bytes(ins.bytes))
+    for name, (leaf, reg, bit, encs, cite) in S['ud'].items():
+        if modrm is not None and not _bit(S, leaf, reg, bit) and any(e['op'] == '%02x' % op and e['reg'] == (modrm >> 3) & 7 and (not e['mem'] or modrm >> 6 != 3) for e in encs):
+            out.append(name)
+    return out
+
+
+def nop(raw, i):
+    """the feature (a key of the record's `exec_as_nop`) whose encoding RAW (the instruction's bytes, I = the index of its opcode byte after the legacy prefixes) is and whose CPUID bit is 0 on the declared CPU: such an instruction executes as NOP (the SDM's statement, cited in the record); None otherwise"""
+    S = _model()
+    for name, (leaf, reg, bit, ops, cite) in S['nop'].items():
+        if raw[i:i + 2].hex() in ops and not _bit(S, leaf, reg, bit):
+            return name
+    return None

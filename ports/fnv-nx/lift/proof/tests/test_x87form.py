@@ -14,12 +14,8 @@ import x87spec as X  # noqa: E402
 from fnvlift import dsl, inputs  # noqa: E402
 from proof import forms, prove, shape, x87form as XF  # noqa: E402
 
-FIN = os.environ.get("FNVNX_INPUT_SDMROWS")      # the produced input SDMROWS (proof/cpufeat.py reads it)
-CPUFEAT = bool(FIN) and os.path.exists(FIN)
-WHY = "declared input not mounted: FNVNX_INPUT_SDMROWS (the produced input SDMROWS)"
-if CPUFEAT:
-    declared_x86sys.configure()
-    inputs.configure(sdmrows=os.path.join(FIN, "sdmrows.json") if os.path.isdir(FIN) else FIN, cpumodel=os.path.join(HERE, "..", "..", "..", "verify", "cpuid_model.json"))
+declared_x86sys.configure()
+inputs.configure(cpumodel=os.path.join(HERE, "..", "..", "..", "verify", "cpuid_model.json"))
 DEC = shape.decoder()
 
 
@@ -27,7 +23,6 @@ def build(raw):
     return forms.build(next(DEC.disasm(raw, 0x1000)), 0x1000)
 
 
-@unittest.skipUnless(CPUFEAT, WHY)
 class T(unittest.TestCase):
     def test_part_one_is_derived(self):
         ent, p1 = XF.part_one()
