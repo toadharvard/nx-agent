@@ -75,6 +75,12 @@ the hash of the stage document + tool code. All paths are root-relative unless m
 The sources of a root are its tracked files minus (1) every file under a root admitted inside it (nearest-root ownership, as `tree_of` resolves a tool file: `verify/probes` inside `verify`, `toolchain/tests` inside `toolchain`) and (2) every plugin source of `PLUGIN_SOURCES` and the files it includes (`plugin_files`): those are inputs of the plugin stage, keyed by it, never translation units of the root that holds them. One function, `recipe.own_sources(root, files, roots, repo)`; the unit list, `check` and the build all read it.
 
 ## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)
+**A plugin is bound to the compiler that loads it, and that compiler is the guest pin's.** Every plugin stage is built against the plugin headers of the guest compiler
+(`verify/guest_compiler.json`), whichever root consumes it; the consuming root's driver is not in its key, so a plugin's key is the same for every consumer. Only a root whose
+expanded compiler is the guest pin's loads plugins: a root with any other compiler (the host profile, or one named by hand) that declares `plugins` is red
+(`plugins are bound to the guest compiler; root R's compiler is X`). The full-set and native-C++ requirements below apply to roots of the guest compiler only; a host native C++ root loads
+no plugin, and no host flag stands for one (the SDD define is a guest root's). A root with a C, C++ or assembly unit and no `compiler` (nor `profile`) is red (`missing key 'compiler'`).
+Selftest: `tests/test_plugin_compiler.py`.
 **The plugin set belongs to the target profile, not to the language.** The guest profile requires the full set (`PLUGIN_SOURCES`, in load order), for C and C++ alike. The host
 profile (`"profile": "host"`) has the empty set, and a host root is required to load none: the plugins enforce guest-ABI semantics (msvcmodel, x86 TSO as `ldar`/`stlr`, MSVC
 argument order, `_ftol` conversion, layout records) that a host object does not have, and they are built against the aarch64 compiler's plugin headers. The set cannot leak
@@ -93,8 +99,8 @@ root's `plugins` is `{"name": PLUGIN}` and nothing else, in the order of `PLUGIN
 `PLUGIN_SOURCES` is an error. So a change of an input of a plugin (for example `f2i_builtins.inc` of `fnvnx_ftoi`) changes the key of every root that loads it and no build.json needs editing. The host driver under `/usr/bin` that builds
 them is `recipe.PLUGIN_CXX`, DERIVED from env.json (the one pinned package `g++-N-x86-64-linux-gnu` provides `x86_64-linux-gnu-g++-N`; the bare `g++-N` prints no path for `as`/`ld`), the GCC version of `compiler.cxx`. A `plugin_cxx` in a build.json is red: no hand-typed compiler name.
 - Stage `plugin:<name>` (sandbox, class build): `recipe.PLUGIN_CXX -shared -nostdlib -fPIC -fno-rtti -fno-exceptions -O2 -I<compiler.cxx -print-file-name=plugin>/include
-  crti.o crtbeginS.o SOURCE crtendS.o crtn.o`. Declared inputs: the driver's tool runtime, the plugin headers of the target compiler
-  (gcc-13-plugin-dev-aarch64-linux-gnu of env.json), the source, crti.o/crtn.o of libc6-dev. Key = content of these + driver + flags, like every stage.
+  crti.o crtbeginS.o SOURCE crtendS.o crtn.o`. Declared inputs: the driver's tool runtime, the plugin headers of the GUEST compiler
+  (the external of guest_compiler.json: `cxx -print-file-name=plugin` of its tree, whatever root asks), the source, crti.o/crtn.o of libc6-dev. Key = content of these + driver + flags, like every stage.
   The `.so` is stored in `GATE_CACHE/store`, copied to `OUT/plugins/<name>.so`, listed in `objects.json` (`plugins`: name, sha256, path).
   It is linked against no library (symbols come from the compiler that loads it; `-fno-exceptions` because `_Unwind_Resume` is not exported by cc1plus).
 - CC stage of every C++ unit (only C++: C and assembler units load nothing): the `.so` of each plugin is a declared input at `/plug/<name>`,
@@ -382,10 +388,7 @@ no object) makes the CC stage print GCC's pass table to stderr, kept in the reco
 ...) and per unit, the TIMEREPORT summed per pass, and the stages that have no sidecar (hits only). Build with `@time` into a fresh store to time every pass.
 
 ## Include
-`include` is the unit's include path in order. A repo directory of it that lies in another admitted product root P (with a recipe for the unit's target) also brings
-P's own repo directories of `include`, transitively, after the consumer's own and each once (`recipe.include_closure`): a header that P ships names its dependencies once,
-in the recipe of P, and every consumer finds them. The entries of P's `include` that lie in an external are P's toolchain and are not carried. A directory of P's `include` that holds no tracked file is a generated tree of P and is not carried either (it does not exist in a consumer's tree): its headers reach a consumer through `include_uses`. A header root
-(class header) has no recipe and carries nothing; a header it includes from another root is named by the consumer.
+`include` is the unit's include path in order, and it is the whole path: a directory of another root enters it only by being named here (a root of class `header`, or a directory output the recipe `uses`, `include_uses`), never by being carried from the recipe of the root that ships it. A header that a root ships names its own dependencies in that root's recipe; a consumer that includes it names them as well. The entries that lie in an external are the toolchain's. A directory of another root's tree that is neither a header home nor a `uses` output is a check error (`include_uses_errors`, `include_home`).
 
 **A path into another root.** An `include` entry inside a generated tree of another root (a directory a generate stage of that root writes into that holds no tracked file, `recipe.generated_trees`, for example `platform/freetype/gen/include`) is a check error: a generated file of a root is its declared output, and a consumer takes it through `uses`. The root's own generated tree is not affected.
 
@@ -619,7 +622,7 @@ A guest root's compile reads the pinned runtime's own headers. The compiler's se
 ## Shards and store merge
 
 A cold build of a large root is split over farms by one rule, with no second build path.
-- `recipe build --root R --shard i/N` (N <= 16, 0 <= i < N) builds the units whose first-stage key satisfies `int(key, 16) mod N == i`. The first-stage
+- `recipe build --root R --shard i/N` (N any integer >= 1, 0 <= i < N) builds the units whose first-stage key satisfies `int(key, 16) mod N == i`. The first-stage
   key is the PP stage key on the whole declared trees (`unitstage.Build.first_key`; a `.s` unit: its one stage), computed before anything runs, so every
   shard of one checkout agrees. The recipe asserts from the unit list that the shards are disjoint and together the unit set (`shard_partition`).
   All stages of a unit run in its shard. Root-level stages (tests, link, link tables, gates) do not run in a shard build; its `objects.json` has `shard`.

@@ -131,6 +131,19 @@ def datamodel(td, so):
     errs = '\n'.join(l for l in r.stderr.splitlines() if 'error' in l)
     failed = sorted(set(re.findall(r'static assertion failed: (S\d+)', r.stderr)))
     check('every DATAMODEL case holds (failing rows: %s)' % failed, r.returncode == 0, errs[:3000])
+    # DATAMODEL.json `types` (generated): one compile, sizeof / alignof / signedness of every entry against the compiler; a mismatch is red.
+    spell = {'pointer': 'void*', 'enum': 'E', 'long long': 'long long', 'long double': 'long double'}
+    tu = ['enum E { E0 };', 'template <class T> struct Sg { static const bool v = (T)-1 < (T)0; };']
+    for t in doc['types']:
+        T = spell.get(t['type'], t['type'])
+        sg = ' && Sg<%s>::v == %s' % (T, 'true' if t['signed'] else 'false') if 'signed' in t else ''   # only integral entries carry `signed`
+        tu.append('static_assert(sizeof(%s) == %d && alignof(%s) == %d%s, "%s");' % (T, t['size'], T, t['align'], sg, t['type']))
+    srcp = os.path.join(td, 'types.cpp')
+    open(srcp, 'w').write('\n'.join(tu) + '\n')
+    rt = pb.compile(srcp, os.path.join(td, 'types.o'), so, native=True)
+    check('every `types` entry (%d: %s) holds on the compiler (sizeof, alignof, signedness; failing: %s)'
+          % (len(doc['types']), ', '.join(t['type'] for t in doc['types']), sorted(set(re.findall(r'static assertion failed: "([^"]+)"', rt.stderr)))),
+          rt.returncode == 0, '\n'.join(l for l in rt.stderr.splitlines() if 'error' in l)[:3000])
     # S14 on the C front end: its own file (c/c-decl.cc finish_enum is not the C++ hunk)
     objc = os.path.join(td, 'datamodel_enum.o')
     rc = pb.compile(os.path.join(HERE, 'ldbl', 'datamodel_enum.c'), objc, so, native=True)

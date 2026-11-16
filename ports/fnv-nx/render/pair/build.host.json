@@ -16,7 +16,6 @@
   "asm": []
  },
  "link": null,
- "plugins": [],
  "include_uses": [
   {
    "root": "ports/fnv-nx/render/gl4shim",

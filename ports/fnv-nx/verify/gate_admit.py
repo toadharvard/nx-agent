@@ -78,6 +78,26 @@ def import_namespaces(prefixes):
     return {".".join(p.split(".")[:k]) for p in prefixes for k in range(1, len(p.split(".")))}
 
 
+def import_roots(imports, tree):
+    """{module prefix: root path} of the roots a root DECLARES in admit.json `imports` (IMPORTS: their repo paths; TREE: the project tree, ports/fnv-nx): the ONE rule of
+    cross-root Python imports. A declared root R is importable under exactly one module path: its path relative to TREE with `/` replaced by `.` (render/total ->
+    `render.total`, so `import render.total.x`). Every consumer calls this: recipe.foreign_imports, the /imp mount (R is mounted at /imp/<that relative path>, /imp is
+    the PYTHONPATH), gate_pure (the --base of the run is TREE) and gate_abspath. The packages are namespace packages (PEP 420): no __init__.py is invented. A bare
+    import of a module of another root (`import x` for render/total/x.py) is not a spelling of this rule: it is red, with the qualified name as the hint."""
+    out = {}
+    for r in imports:
+        rel = os.path.relpath(os.path.normpath(r), tree)
+        if rel.startswith(".."):
+            raise ValueError("import root %s lies outside %s" % (r, tree))
+        out[".".join(rel.split(os.sep))] = r
+    return out
+
+
+def import_namespaces(prefixes):
+    """The dotted prefixes that are namespace packages of PREFIXES (`render` for `render.total`): importable, no file of their own."""
+    return {".".join(p.split(".")[:k]) for p in prefixes for k in range(1, len(p.split(".")))}
+
+
 def recipe_paths(r):
     """The recipe files of an admit entry as written: its `recipe` path, or the paths of a {target: path} recipe, and the `recipe` of each entry
     variant (a per-target recipe spelled as a variant)."""

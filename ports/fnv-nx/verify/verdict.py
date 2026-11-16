@@ -13,7 +13,7 @@ Run as `python3 -I verdict.py CMD ...`. Exit codes: 0 ok, 1 usage/format error, 
               that leaves entries in it, or any untracked or ignored file in its worktree (but Python's __pycache__/*.pyc), is red with the names.
               Gate green iff exit 0, valid result, name equal, status green and certified == universe (completeness of
               certificates, not a run counter; certified > universe is invalid). Verdict green iff >=1 gate and all gates green.
-              over_budget is reported only; it never changes the verdict.
+              over_budget is reported only; it never changes the verdict. `seconds` is the wall time of the whole check (from --started, default the start of this run: worktree, gates).
   store       --verdict V.json --verdicts VDIR   copy to VDIR/<tree>.json if self-consistent (red verdicts are stored too).
   merge       --repo R --into B --from REF --verdicts VDIR --gates GATES.json [--prev-verdict V.json] [--message-prefix T]
               Merge result computed with `git merge-tree --write-tree` (no worktree touched). Needs VDIR/<tree>.json: green, same
@@ -81,6 +81,11 @@ def _opts(a, names):
         raise Err("missing " + ",".join(miss))
     return o
 
+def _ends(text, head=600, tail=400):
+    """TEXT cut to its first HEAD and last TAIL characters: a reason names its cause first (exit status, signal, timeout, leftover) and ends with the
+    output, so both ends are kept; cutting only one end drops either the cause or the output."""
+    return text if len(text) <= head + tail + 5 else text[:head] + " ... " + text[-tail:]
+
 def _gate_result(g, out_dir, rc):
     """Returns (status, universe, certified, reason) from a gate's result file."""
     path = os.path.join(out_dir, g["result"])
@@ -103,7 +108,7 @@ def _gate_result(g, out_dir, rc):
         return "red", u, c, "certified %d > universe %d" % (c, u)
     if c < u:
         why = r.get("reasons") if isinstance(r.get("reasons"), dict) else {}   # optional {id: text}: why a test/item is uncertified
-        more = "".join("\n  %s: %s" % (x, str(why[x]).replace("\n", " ")[-400:]) for x in r["uncertified"][:10] if isinstance(why.get(x), str))
+        more = "".join("\n  %s: %s" % (x, _ends(str(why[x]).replace("\n", " "))) for x in r["uncertified"][:10] if isinstance(why.get(x), str))
         return "red", u, c, "certified %d < universe %d; uncertified: %s%s" % (c, u, ",".join(r["uncertified"][:50]), more)
     if r["status"] != "green":   # the gate's own detail first: a red gate exits nonzero by contract, and the reason is what it found, not the exit code
         return "red", u, c, "gate status red: " + r["detail"] + ("" if rc == 0 else " (exit %d)" % rc)
@@ -145,7 +150,8 @@ def _covers_verdict(g, st, u, present):
 
 
 def cmd_run(a):
-    o = _opts(a, {"--repo": 0, "--commit": 0, "--gates": 0, "--out": 0, "--budget-s": 1, "--env-id": 1, "--cache": 1})
+    o = _opts(a, {"--repo": 0, "--commit": 0, "--gates": 0, "--out": 0, "--budget-s": 1, "--env-id": 1, "--cache": 1, "--started": 1})
+    started = float(o["--started"]) if "--started" in o else time.time()   # the budget is the whole check: from its caller's start (environment check, gate file, worktree) to the verdict
     spec = _load(o["--gates"], "gates")
     gates = spec.get("gates") if isinstance(spec, dict) and spec.get("format") == "fnvnx-gates/1" else None
     if not isinstance(gates, list) or not all(isinstance(g, dict) and isinstance(g.get("name"), str) and g.get("argv")
@@ -165,7 +171,7 @@ def cmd_run(a):
         os.makedirs(genv["GATE_CACHE"], exist_ok=True)
     detail = o["--out"] + ".detail"   # the gates' full findings outlive the temporary work directory: GATE_DETAIL/<gate> beside the verdict file
     shutil.rmtree(detail, ignore_errors=True)
-    res, t_all = [], time.time()
+    res, t_all = [], started
     try:
         present = _present_classes(wt)
         for g in gates:

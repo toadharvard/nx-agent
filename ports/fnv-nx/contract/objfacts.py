@@ -265,13 +265,11 @@ from contract.objfacts_merge import summary   # one definition; the merge stage 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--link', required=True)
-    ap.add_argument('--kinds', required=True, help='the sympair kind table (toolchain/names/sympair_kinds.inc)')
     ap.add_argument('--facts', required=True)
     ap.add_argument('--out', required=True)
     ap.add_argument('--sympair-kinds', required=True, help='toolchain/names/sympair_kinds.inc (the kinds of .fnvnx.sympair)')
     ap.add_argument('--jobs', type=int, default=4)
     a = ap.parse_args()
-    l2sections.set_kinds(a.kinds)
     F = store.load(a.facts, 'facts')
     out = build(a.link, set(F['vft']), l2sections.load_kinds(a.sympair_kinds), a.jobs)
     store.save(a.out, 'obj', out)

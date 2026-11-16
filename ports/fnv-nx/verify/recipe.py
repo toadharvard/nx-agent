@@ -2196,6 +2196,14 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant="", repo=".
     cxx = [u for u in units if u.endswith(CXX_EXT)]
     ent = entry_of(roots, root + "@" + variant if variant else root)
     origin = ent.get("cxx_origin")
+    # RULE (L1, 2026-11-16): a GCC plugin is bound to the exact compiler that loads it, and every plugin is built against the guest compiler's plugin headers.
+    # So only a root whose expanded compiler is the guest pin's loads plugins; any other compiler (the host profile, or one named by hand) declaring `plugins` is red.
+    pin = load_pin(repo)
+    gc = (pin or {}).get("external", {}).get("name") if isinstance(pin, dict) else None
+    cc_ = rec.get("compiler") if isinstance(rec.get("compiler"), dict) else {}
+    guest_cc = cc_.get("external") == gc
+    if pl and not guest_cc:
+        return err + ["plugins are bound to the guest compiler; root %s's compiler is %s" % (root, cc_.get("external") or "/".join(str(cc_.get(k)) for k in ("cc", "cxx")))]
     # RULE (RECIPE.md "Plugins"): the plugin set and the SDD flags are a function of the target profile, whatever the language or the origin of the code:
     # guest = the full set of PLUGIN_SOURCES with its fixed arguments in the fixed order, host = the empty set. A guest root that misses one is red, and so is a host root that loads one.
     guest = ent.get("target") == "guest"
@@ -2211,11 +2219,11 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant="", repo=".
         return err + (["admit.json %s: cxx_origin of a root without C++ units" % root] if origin is not None else [])
     if origin == "native":
         fl = rec.get("flags", {}).get("cxx", []) if isinstance(rec.get("flags"), dict) else []
-        # fnvnx_sdd needs the define and -fno-devirtualize; a guest root's -fno-devirtualize comes from flags.semantics, its define is per root; a host root loads no plugin and needs none
-        err += ["native C++ root %s: flags.cxx lacks %s" % (root, f) for f in ((SDD_DEFINE,) if guest else ()) if f not in fl]
+        # fnvnx_sdd needs the define; a guest root's -fno-devirtualize comes from flags.semantics, its define is per root; a root of another compiler loads no plugin and needs none
+        err += ["native C++ root %s: flags.cxx lacks %s" % (root, f) for f in ((SDD_DEFINE,) if guest and guest_cc else ()) if f not in fl]
     elif lifted_origin(origin):
         tool, pack, stage = origin["lifted_by"], origin.get("pack"), origin.get("stage")
-        for n in ("fnvnx_ftoi",):   # lifted C++ does its conversions in helpers: the plugin proves it (and only it is required)
+        for n in (("fnvnx_ftoi",) if guest_cc else ()):   # lifted C++ does its conversions in helpers: the plugin proves it (and only it is required)
             if n not in loaded:
                 err.append("lifted C++ root %s does not load plugin %s (mode lifted: every conversion outside an fnvnx_f2i function is an error)" % (root, n))
         mine = own_sources(root, files, roots, repo)
@@ -2385,6 +2393,8 @@ def fetch_externals(exts, store, extcache, ws):
                 shutil.rmtree(tmpco, ignore_errors=True)
             raise BuildRed({"stage": stage, "exit": None, "stderr": ["tree_sha256 is %s, recipe says %s" % (tree, e["tree_sha256"])]})
         if tmpco:
+            shutil.rmtree(tmpco)   # the checkout was only the thing to hash: the published one is the verified tree placed as hard links of the store's objects (one copy of the bytes)
+            cas.materialize(tree, store, tmpco)
             publish_dir(tmpco, co)   # a lost race: the published checkout is the same commit and the same verified tree
         os.makedirs(os.path.dirname(fact), exist_ok=True)
         ftmp = "%s.tmp%d-%s" % (fact, os.getpid(), os.urandom(4).hex())
@@ -2467,9 +2477,6 @@ def driver_doc(stage, drv, flags, mode, tail, inputs):
             "env": dict(unitstage.ENV, PATH=os.path.dirname(drv)), "outputs": ["/out"], "inputs": inputs}
 
 
-MAX_SHARDS = 16
-
-
 def shard_of(key, n):
     """The shard of a unit whose first-stage key is KEY (hex): int(KEY, 16) mod N. The first-stage key is the PP stage key on the whole trees
     (unitstage.Build.first_key), a function of the unit and the declared inputs, so every shard build of one checkout assigns the same shard."""
@@ -2477,10 +2484,10 @@ def shard_of(key, n):
 
 
 def shard_spec(text):
-    """`i/N` -> (i, N); N in 1..MAX_SHARDS, 0 <= i < N, else RecipeError."""
+    """`i/N` -> (i, N); N any integer >= 1, 0 <= i < N, else RecipeError (no cap: shard_partition asserts the partition)."""
     m = re.fullmatch(r"(0|[1-9][0-9]*)/([1-9][0-9]*)", text or "")
-    if not m or not (int(m.group(2)) <= MAX_SHARDS and int(m.group(1)) < int(m.group(2))):
-        raise RecipeError(["--shard %r: want i/N with 0 <= i < N <= %d" % (text, MAX_SHARDS)])
+    if not m or not int(m.group(1)) < int(m.group(2)):
+        raise RecipeError(["--shard %r: want i/N with N >= 1 and 0 <= i < N" % text])
     return int(m.group(1)), int(m.group(2))
 
 
@@ -2774,7 +2781,8 @@ class Job:
         host = os.path.join(self.extcache, "stage-" + tree)
         if not os.path.isdir(host):
             tmp = "%s.tmp%d-%s" % (host, os.getpid(), os.urandom(4).hex())
-            shutil.copytree(path, tmp, symlinks=True)
+            os.makedirs(self.extcache, exist_ok=True)
+            cas.materialize(tree, self.store, tmp)   # hard links of the store's objects: the mount is the ingested tree itself, not a second copy
             publish_dir(tmp, host)
         os.makedirs(os.path.join(self.extcache, "stage-ext"), exist_ok=True)   # the pointer a gate reads (host_compilers): name -> the tree this build used
         ptr = os.path.join(self.extcache, "stage-ext", e["name"] + ".json")
@@ -3103,7 +3111,7 @@ class Job:
                 self.arts[aroot] = build(self.repo, aroot, self.store, tempfile.mkdtemp(dir=ws), self.jobs, self.extcache)
             r = self.arts[aroot]
             if r["status"] != "green" or not r["elf"] or os.path.basename(r["elf"]["path"]) != aout:
-                raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["artifact %s is not produced (root status %s)" % (g["artifact"], r["status"])]})
+                raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["artifact %s is not produced (root status %s)" % (g["artifact"], r["status"])] + ([] if not r.get("failure") else ["its failure: stage %s: %s" % (r["failure"]["stage"], " | ".join(r["failure"].get("stderr") or [])[:600])])})
             ins = [{"at": "/art", "tree": self._one_file(tmp, "art", r["elf"]["path"], aout)}]
         n = 0
         for ref in g["inputs"]:
@@ -3236,7 +3244,7 @@ class Job:
             for d, home in ROOTFS_MEMO[mkey][2].items():
                 if not os.path.lexists(os.path.join(tmp, "deb-" + d)):
                     os.symlink(home, os.path.join(tmp, "deb-" + d))   # exec_unresolved and deb_resolve read the unpacked trees under tmp
-            return ROOTFS_MEMO[mkey][0], ROOTFS_MEMO[mkey][1]
+            return list(ROOTFS_MEMO[mkey][0]), list(ROOTFS_MEMO[mkey][1])   # copies: the caller appends its own inputs
         union, owner = os.path.join(tmp, "rootfs"), {}
         os.makedirs(union)
         for d in sorted(g["debs"]):
@@ -3275,7 +3283,7 @@ class Job:
                 shutil.move(os.path.join(tmp, "deb-" + d), home)
                 os.symlink(home, os.path.join(tmp, "deb-" + d))
             homes[d] = home
-        ROOTFS_MEMO[mkey] = (ins, links, homes)
+        ROOTFS_MEMO[mkey] = (list(ins), list(links), homes)
         return ins, links
 
     def _one_file(self, tmp, name, path, base):
@@ -3419,19 +3427,26 @@ class Job:
         out += ["/uses/%s/%s" % (u["root"], u["output"]) for u in self.rec.get("include_uses", [])]   # the mounted directory output of another root, an absolute path inside the sandbox
         return out
 
-    def plugin_env(self, ws, drv=1):
-        """The common inputs of every plugin stage: the host driver `PLUGIN_CXX` (derived from env.json), the plugin headers of the target compiler
-        (`compiler.cxx -print-file-name=plugin`), the tool runtime and the startup files -> dict. A plugin stage's key is f(source content, host
-        compiler, flags, headers)."""
+    def plugin_env(self, ws):
+        """The common inputs of every plugin stage: the host driver `PLUGIN_CXX` (derived from env.json), the plugin headers of the GUEST compiler (the external of
+        verify/guest_compiler.json, `cxx -print-file-name=plugin`, whatever root asks: a plugin is bound to the exact compiler that loads it), the tool runtime and the
+        startup files -> dict. A plugin stage's key is f(source content, host compiler, flags, headers); the consuming root's driver is not in it."""
         host = os.path.join(hostprofile.HOST["bindir"], PLUGIN_CXX)
-        cxx = self.hostpath(self.drivers()[drv])   # the C++ driver (the C driver for a root without C++ units: the same compiler, the same plugin headers)
+        pin = (load_pin(self.repo) or {}).get("external")
+        if not isinstance(pin, dict):
+            raise BuildRed({"stage": "plugin", "exit": None, "stderr": ["%s is missing or has no external" % GUEST_PIN]})
+        if pin["name"] not in self.ext:
+            self.ext.update(fetch_externals([pin], self.store, self.extcache, ws))
+        cxx = self.ext[pin["name"]]["host"] + "/" + pin_drivers()[1]
         pdir = subprocess.run([cxx, "-print-file-name=plugin"], capture_output=True, text=True).stdout.strip()
         if not os.path.isfile(os.path.join(pdir, "include", "gcc-plugin.h")):
-            raise BuildRed({"stage": "plugin", "exit": None, "stderr": ["no plugin headers of %s in %s (gcc-N-plugin-dev of env.json)" % (cxx, pdir)]})
+            raise BuildRed({"stage": "plugin", "exit": None, "stderr": ["no plugin headers of %s in %s (the guest compiler's tree)" % (cxx, pdir)]})
         inc, trees = pdir, [pdir]
         for e in self.ext.values():   # headers inside an external compiler: its tree is a declared input at `at` already
             if under(pdir, e["host"]):
                 inc, trees = e["at"] + pdir[len(e["host"]):], []
+
+        pnames = {n for n, e in self.ext.items() if under(cxx, e["host"]) or under(pdir, e["host"])}   # the externals the plugin stage reads: the one holding its compiler, no other
 
         def make():
             exes, ts = unitstage.gcc_set(host)
@@ -3439,8 +3454,8 @@ class Job:
             # linking a shared object also needs collect2 and ld, which gcc_set (compile only) does not list
             q = lambda n: subprocess.run([host, "-print-prog-name=" + n], capture_output=True, text=True).stdout.strip()  # noqa: E731
             exes = [e if e.startswith("/") else "/usr/bin/" + e for e in exes + [q("collect2"), q("ld")]]
-            return self.plus(runtime.build_tool(self.store, sorted(set(exes)), sorted(set(ts + [t for t in trees if not any(under(t, x) for x in ts)]))))   # the plugin headers of the host compiler itself are in its own tree already
-        rt = self.cached_rt("tool-plugin-" + hashlib.sha256(repr((host, pdir, sorted((e["at"], e["tree"]) for e in self.ext.values()))).encode()).hexdigest()[:16], make)[1]
+            return self.plus(runtime.build_tool(self.store, sorted(set(exes)), sorted(set(ts + [t for t in trees if not any(under(t, x) for x in ts)]))), pnames)   # the plugin headers of the host compiler itself are in its own tree already
+        rt = self.cached_rt("tool-plugin-" + hashlib.sha256(repr((host, pdir, sorted((e["at"], e["tree"]) for n, e in self.ext.items() if n in pnames))).encode()).hexdigest()[:16], make)[1]
         # A plugin is linked against nothing (its symbols come from the compiler that loads it): -nostdlib, with the startup files the
         # driver would pass (crti/crtbeginS ... crtendS/crtn: __dso_handle, .init/.fini). crtbeginS/crtendS are in the driver's own
         # tree (a declared input); crti/crtn are libc6-dev's files, copied by name into a tree of their own.
@@ -3483,11 +3498,11 @@ class Job:
             out.append((n, res, plugin_flags(n, p["args"], "/plug/%s/%s.so" % (n, n), PLUGIN_OUT.get(n))))
         return out
 
-    def analysis_plugin(self, ws, drv=1):
-        """The plugin of the gate `objstub` (ANALYSIS_PLUGIN): built by the same stage as every plugin, for the target compiler of the root. It is no
+    def analysis_plugin(self, ws):
+        """The plugin of the gate `objstub` (ANALYSIS_PLUGIN): built by the same stage as every plugin, against the guest compiler's headers. It is no
         plugin of the root's compile stages (no root declares it, no CC stage loads it): the gate loads it over the preprocessed text of the units.
         -> tree of its /out."""
-        return self.plugin_build(self.plugin_env(ws, drv), ws, ANALYSIS_PLUGIN[0], ANALYSIS_PLUGIN[1], [])
+        return self.plugin_build(self.plugin_env(ws), ws, ANALYSIS_PLUGIN[0], ANALYSIS_PLUGIN[1], [])
 
     def compile(self, ws, units):
         rec, drv = self.rec, dict(zip(("c", "cxx"), self.drivers()))
@@ -3522,9 +3537,9 @@ class Job:
             units = [u for u in units if u not in self.blocked]
             kinds = {u: k for u, k in kinds.items() if u in units}
             self.built = []
-        if self.analysis is None and any(k != "asm" for k in kinds.values()):
+        if self.analysis is None and guest and any(k != "asm" for k in kinds.values()):   # the analysis plugin is bound to the guest compiler: a host root has none
             try:
-                self.analysis = self.analysis_plugin(ws, 1 if "cxx" in kinds.values() else 0)
+                self.analysis = self.analysis_plugin(ws)
             except BuildRed as r:   # the gate objstub cannot judge the root: red and named, no unit is blocked by it
                 self.red.append(dict(r.args[0]))
         builds = {}
@@ -3781,11 +3796,18 @@ class Job:
         pn = subprocess.run([self.hostpath(self.drivers()[0]), "-print-prog-name=ld"], capture_output=True, text=True).stdout.strip()
         d, b = posixpath.split(posixpath.normpath(unitstage.prog(pn)))
         rd = posixpath.join(d, b[:-2] + "readelf") if b.endswith("ld") else ""
-        bad = envcheck.system_lib_errors([rd], json.load(open(os.path.join(self.repo, ENV_JSON)))["packages"], envcheck.file_owners()) if rd else ["the linker %r has no readelf beside it" % b]
-        if bad:
-            raise BuildRed({"stage": stage, "exit": None, "stderr": ["the pinned readelf beside the linker: %s" % x for x in bad]})
-        rt = self.cached_rt("tool-readelf-" + hashlib.sha256(repr((rd, sorted((e["at"], e["tree"]) for e in self.ext.values()))).encode()).hexdigest()[:16],
-                            lambda: self.plus(runtime.build_tool(self.store, [rd], [])))[1]
+        # pinned by content when the linker lies in the compiler's declared external (commit + tree_sha256: the compiler's own binutils, mounted like its ld);
+        # else a file of a package env.json pins
+        ce = self.ext.get(self.rec["compiler"].get("external")) if "external" in self.rec["compiler"] else None
+        if ce is not None and rd.startswith(ce["host"] + "/"):
+            rd = ce["at"] + rd[len(ce["host"]):]
+            rt = self.toolrt([self.drivers()[0]], {self.rec["compiler"]["external"]})[1]
+        else:
+            bad = envcheck.system_lib_errors([rd], json.load(open(os.path.join(self.repo, ENV_JSON)))["packages"], envcheck.file_owners()) if rd else ["the linker %r has no readelf beside it" % b]
+            if bad:
+                raise BuildRed({"stage": stage, "exit": None, "stderr": ["the pinned readelf beside the linker: %s" % x for x in bad]})
+            rt = self.cached_rt("tool-readelf-" + hashlib.sha256(repr(rd).encode()).hexdigest()[:16],    # a package's readelf reads no external
+                                lambda: runtime.build_tool(self.store, [rd], []))[1]
         doc = {"format": "fnvnx-stage/1", "stage": stage, "argv": [rd, "-W", "-h", "-S", "-r", "-s", "/linked/" + name], "cwd": "/", "class": "build", "tool": "readelf",
                "env": dict(unitstage.ENV, PATH=os.path.dirname(rd)), "outputs": [],
                "inputs": merge_inputs(rt["inputs"] + [{"at": "/linked", "tree": fin}], [], self.store, ws)}
@@ -4589,6 +4611,7 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=N
               lk = j.rec["link"]
               name = lk["output"]
               groups = [("00-own", [(u, o["object"]) for u, o in zip(units, res["objects"])])]
+              loader_defs = None    # set once the link's loader is read; the red path below reads it whichever stage failed
               res["link_roots"], defs = [], {}
               built_in = {}     # every candidate root, built objects-only through the stage cache: the symbol index of the definer closure
               for d in link_candidates(j.roots, root, entry_of(j.roots, spec).get("target"), repo):

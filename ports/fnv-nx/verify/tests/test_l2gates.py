@@ -24,7 +24,6 @@ sys.path.insert(0, os.path.join(REAL, T + "link", "tests"))
 import gate_abi  # noqa: E402
 import gate_l2native as L  # noqa: E402
 import l2sections  # noqa: E402
-l2sections.set_kinds(os.path.join(REAL, T + "toolchain", "names", "sympair_kinds.inc"))
 import gate_build  # noqa: E402
 import gate_names  # noqa: E402
 from contract import l2sections  # noqa: E402

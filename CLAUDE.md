@@ -761,6 +761,61 @@ The owner's words: "не будем тратить так время... умен
   on a sample.
 - Owners: L3a with workers (1 and 2 now, right behind the relift as stages); L3b (3); L1 (the cold build, ≤16 farms).
 
+## Orchestrator decision of 2026-11-16 05:50Z: x87 transcendentals (binding for L3b, L3a, L2)
+
+- **The case.** F2XM1, FYL2X, FYL2XP1, FPTAN, FPATAN, FSIN, FCOS and FSINCOS. The OWNER-10 x87 spec leaves the function
+  itself uninterpreted, because a correctly rounded sin, log2 and so on is not a finite z3 term.
+- **The value is already decided.** OWNER 8 says "transcendentals return the correctly rounded value at the operand
+  type", and under OWNER 8 that type is binary64. So the spec's uninterpreted `x87_<fn>` *is* CR_binary64(fn). This is a
+  definition by an owner record, not a new assumption.
+- **The implementation is a pinned correctly rounded library: CORE-MATH.**
+  - It is mirrored in fnv-nx-build `tools/core-math`, pinned by commit and `tree_sha256`.
+  - It is built by the recipe with the game's compiler and every plugin, as part of the guest runtime (owner L2).
+  - It is taken by its documentation ("correctly rounded in all rounding modes"). This is the owner's existing rule for
+    external libraries (CLAUDE.md "Memory safety of hand-written native code": libc, libnx, FreeType and minimp3 are taken
+    by their documentation). It is not a widening of OWNER 9, and CORE-MATH's published proofs are not claimed as
+    theorems.
+- **The lowering.** The lifter (L3a) calls the library for each function:
+
+  | Instruction | Library call |
+  |---|---|
+  | F2XM1 | cr_exp2m1 |
+  | FYL2X | `y * cr_log2(x)` |
+  | FYL2XP1 | `y * cr_log2p1(x)` |
+  | FPTAN | cr_tan, then push 1.0 |
+  | FPATAN | cr_atan2(st1, st0) |
+  | FSIN | cr_sin |
+  | FCOS | cr_cos |
+  | FSINCOS | cr_sin and cr_cos |
+
+  - The product in FYL2X and FYL2XP1 is an IEEE binary64 multiply. The transcendental is the log2, and it is the only
+    part that is correctly rounded. That is how OWNER 8 reads for a two-operand instruction.
+  - Everything around the call follows the SDM (OWNER 10): stack, tags, C1 and the C2 out-of-range result
+    (|x| ≥ 2^63 leaves the operand unchanged, C2=1), the domain errors and their #IA when unmasked.
+- **The certificate (L3b).** The Form equals the SDM machinery plus a call of CR(fn) on the operand. It is proved
+  against the spec with `x87_<fn>` bound to the library symbol. The library body is not part of the proof.
+- **An undecided rounding takes Ziv's last step (06:10Z).** CORE-MATH's cr_atan2 has one branch, in tint.h's
+  tint_tod, for a result too close to a rounding boundary to decide. Upstream prints a message and exits there. No
+  certificate can prove that branch unreachable: there are 2^128 binary64 pairs, and no search covers them. So the
+  branch computes `mpfr_atan2` at 53 bits in the current rounding mode.
+  - MPFR is correctly rounded by its documentation, and it is taken under the same external-library rule.
+  - The result is therefore correctly rounded for every input, with no trap. This is an exact algorithm step, not a
+    fallback on a failure.
+  - MPFR and GMP are mirrored in fnv-nx-build `tools/*` and built as guest roots by the recipe, with the game's
+    compiler. Owner: L2.
+  - The redirect is a declared stage patch (`core-math.patch` in the root), never an edit of the mirror.
+  - Every other CORE-MATH exit or printf on the path is closed the same way, or shown dead by the preprocessor.
+- **A library's documented flags (06:15Z, corrected 06:20Z).** A compiler flag that a pinned library's documentation
+  requires for its documented semantics lives in one record: `verify/guest_compiler.json` `flags.semantics`, with the
+  citation (mirror file and line) on that row. CORE-MATH's `-frounding-math` is already the first entry of
+  `flags.semantics.common`; the CORE-MATH citation (README:173) is added to that row.
+  - No root restates such a flag in its build.json, and there is no per-root cited-flag form: a restatement is a second
+    copy of one fact (rule 2) and stays red.
+  - A documented flag not yet in `flags.semantics` is added to that one record with its citation, only if it changes
+    neither the data model nor the ABI (DATAMODEL decides).
+- **No other libm on the path.** A lifted call to newlib's sin, cos or log is not correctly rounded, so it does not meet
+  OWNER 8. The same table applies to it.
+
 ## Orchestrator decision of 2026-11-15 09:20Z: weekly budget (binding for every session)
 
 - The owner's usage page reads: weekly 29 % used, reset on Saturday 2026-11-21 18:00Z. At the pace so far the limit ends

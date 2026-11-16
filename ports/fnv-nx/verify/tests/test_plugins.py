@@ -54,7 +54,7 @@ def w(repo, rel, text):
     open(p, "w").write(text)
 
 
-def make_repo(name, rec, origin, files=None, extra_roots=(), target="host"):
+def make_repo(name, rec, origin, files=None, extra_roots=(), target="guest"):
     repo = os.path.join(BASE, name)
     os.makedirs(repo)
     git(repo, "init", "-q")
@@ -266,7 +266,7 @@ def main():
     subprocess.run(["git", "-C", ext, "checkout-index", "-a", "-f", "--prefix=" + chk + "/"], check=True)
     tree = cas.ingest(chk, os.path.join(BASE, "ingest-store"))
     lrec = {"format": "fnvnx-recipe/1", "compiler": REC["compiler"], "flags": REC["flags"], "include": [], "units": "all",
-            "plugins": [dict(P["fnvnx_ftoi"])],
+            "plugins": PLUGS,
             "generated": [{"tool": T + "gen/lift.py", "args": [], "inputs": [], "outputs": ["gen/a.cc"]}],
             "external": list(REC["external"]) + [{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": commit, "tree_sha256": tree, "at": "/ext/pack"}]}
     LSRC = SRC.replace("int f2i(float f)", "__attribute__((fnvnx_f2i)) int f2i(float f)")   # lifted C++ converts inside a helper only
@@ -286,6 +286,7 @@ def main():
     # --- the CC stage mounts no external but the compiler's: a new commit of another external re-runs PP only; CC cannot read it
     def pack_commit(text):
         w(ext, "pack.txt", text)
+        w(ext, "pack.h", "/* %s */\n" % text.strip())    # the PP stage reads it (the unit names /ext/pack); a comment leaves the preprocessed text equal
         git(ext, "add", "-A")
         git(ext, "commit", "-q", "-m", text)
         c = git(ext, "rev-parse", "HEAD").strip()
@@ -302,11 +303,12 @@ def main():
         return {k: ds.count(k) for k in ("pp", "cc")}
 
     c1, t1 = pack_commit("one\n")
-    x1 = make_repo("ext1", xrec(c1, t1), "native")
+    PK = {ROOT + "/a.cc": SRC + '#include "pack.h"\n'}     # a stage mounts the externals its include path and flags name: PP mounts the pack (-I /ext/pack)
+    x1 = make_repo("ext1", xrec(c1, t1), "native", PK)
     r1, _ = build(x1, "X")
     k1 = kinds()
     c2, t2 = pack_commit("two\n")
-    x2 = make_repo("ext2", xrec(c2, t2), "native")
+    x2 = make_repo("ext2", xrec(c2, t2), "native", PK)
     r2, _ = build(x2, "X", os.path.join(BASE, "out-X2"))
     k2 = kinds()
     check("external commit change: PP re-runs, CC runs nothing", r1["status"] == r2["status"] == "green" and k2["pp"] > k1["pp"] and k2["cc"] == k1["cc"]
@@ -321,12 +323,12 @@ def main():
     tracked = make_repo("liftedbad", lrec, {"lifted_by": T + "gen/lift.py", "pack": "pack"}, {T + "gen/lift.py": lift, ROOT + "/b.cc": "int b;\n", ROOT + "/a.cc": None})
     check("lifted root with a tracked C++ unit is red", any("is not an output" in x for x in errs(tracked, lrec)), errs(tracked, lrec))
     nopack = make_repo("nopack", lrec, {"lifted_by": T + "gen/lift.py", "pack": "nope"}, {T + "gen/lift.py": lift, ROOT + "/a.cc": None})
-    check("lifted root naming no external is red", any("names no external" in x for x in errs(nopack, lrec)), errs(nopack, lrec))
+    check("lifted root naming no external is red", any("names neither an external" in x for x in errs(nopack, lrec)), errs(nopack, lrec))
     # --- the pack is a root in `uses` (its declared PACK output) instead of an external: the units are still checked against the generated steps of lifted_by
     PR = T + "src"
     prod = {"path": PR, "class": "tool", "target": "host", "recipe": PR + "/build.json"}
     pfiles = {T + "gen/lift.py": lift, ROOT + "/a.cc": None, PR + "/build.json": json.dumps({"format": "fnvnx-recipe/1", "outputs": {"PACK": "pack"}}), PR + "/pack/x.txt": "x\n"}
-    urec = dict(lrec, external=list(REC["external"]), uses=[{"root": PR, "output": "PACK"}])
+    urec = dict(lrec, external=list(lrec["external"]), uses=[{"root": PR, "output": "PACK"}])
     def uerrs(repo, rec):   # the `uses` recipes are read from the toy checkout
         return recipe.check(rec, ROOT, recipe.tracked(repo), recipe.load_admit(repo), recipe.load_pin(repo), repo=repo)
     ug = make_repo("usesgood", urec, {"lifted_by": T + "gen/lift.py", "pack": PR}, pfiles, [prod])

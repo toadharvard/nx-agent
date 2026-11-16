@@ -79,7 +79,7 @@ def reg(tok):
     """Register number of a w/x register token, 'zr' for wzr/xzr, 'sp', None otherwise."""
     m = re.fullmatch(r'[wx](\d+)', tok.strip())
     if m:
-        return int(m.group(1))
+        return int(m[1])
     return {'wzr': 'zr', 'xzr': 'zr', 'sp': 'sp', 'wsp': 'sp'}.get(tok.strip())
 
 
@@ -90,7 +90,7 @@ def parse_objdump(text):
     for ln in text.split('\n'):
         m = re.match(r'^(.*?):\s+file format', ln)
         if m:
-            obj = m.group(1)
+            obj = m[1]
             p.objects.append(obj)
             fn = section = datasec = last = None
             continue
@@ -98,40 +98,40 @@ def parse_objdump(text):
             continue
         m = re.match(r'^Disassembly of section (\S+):', ln)
         if m:
-            section, datasec, fn = m.group(1), None, None
+            section, datasec, fn = m[1], None, None
             continue
         m = re.match(r'^RELOCATION RECORDS FOR \[(\S+)\]:', ln)
         if m:
-            datasec, fn = m.group(1), None
+            datasec, fn = m[1], None
             continue
         m = re.match(r'^([0-9a-f]+) (.{7}) (\S+)\t([0-9a-f]+) (.*)$', ln)
         if m and datasec is None and not re.match(r'^[0-9a-f]+ <', ln):
-            name = m.group(5).split()[-1]
-            flags, sec = m.group(2), m.group(3)
-            p.syms[(obj, name)] = dict(size=int(m.group(4), 16), section=sec, value=int(m.group(1), 16), glob='g' in flags or 'w' in flags,
+            name = m[5].split()[-1]
+            flags, sec = m[2], m[3]
+            p.syms[(obj, name)] = dict(size=int(m[4], 16), section=sec, value=int(m[1], 16), glob='g' in flags or 'w' in flags,
                                        defined=sec != '*UND*')
             p.syms[(obj, name)]['global'] = p.syms[(obj, name)].pop('glob')
             continue
         m = re.match(r'^([0-9a-f]+) <(\S+)>:$', ln)
         if m:
-            fn = (obj, m.group(2))
-            p.funcs[fn] = dict(start=int(m.group(1), 16), section=section, insns=[])
+            fn = (obj, m[2])
+            p.funcs[fn] = dict(start=int(m[1], 16), section=section, insns=[])
             last = None
             continue
         m = re.match(r'^\s+([0-9a-f]+):\s+(R_AARCH64_\w+)\s+(\S+)', ln)
         if m and fn is not None and last is not None:
-            sym, _, add = m.group(3).partition('+')
-            last.rel = (m.group(2), sym, int(add, 16) if add else 0)
+            sym, _, add = m[3].partition('+')
+            last.rel = (m[2], sym, int(add, 16) if add else 0)
             continue
         m = re.match(r'^([0-9a-f]+) (R_AARCH64_\w+)\s+(\S+)', ln)
         if m and datasec is not None:
-            sym, _, add = m.group(3).partition('+')
-            p.datarel.append((obj, datasec, int(m.group(1), 16), m.group(2), sym, int(add, 16) if add else 0))
+            sym, _, add = m[3].partition('+')
+            p.datarel.append((obj, datasec, int(m[1], 16), m[2], sym, int(add, 16) if add else 0))
             continue
         m = re.match(r'^\s+([0-9a-f]+):\s+([a-z][\w.]*)\s*(.*)$', ln)
         if m and fn is not None:
-            ops = m.group(3).split('//')[0].strip()
-            last = Insn(int(m.group(1), 16), m.group(2), ops)
+            ops = m[3].split('//')[0].strip()
+            last = Insn(int(m[1], 16), m[2], ops)
             p.funcs[fn]['insns'].append(last)
     return p
 
@@ -148,8 +148,8 @@ class Fn:
                 self.preds[n].add(n - 1)
             if (i.mn == 'b' or i.mn.startswith('b.') or i.mn in ('cbz', 'cbnz', 'tbz', 'tbnz')) and i.rel is None:
                 m = re.search(r'(?:^|[\s,])([0-9a-f]+)\s+<', i.ops)
-                if m and int(m.group(1), 16) in self.at:
-                    self.preds[self.at[int(m.group(1), 16)]].add(n)
+                if m and int(m[1], 16) in self.at:
+                    self.preds[self.at[int(m[1], 16)]].add(n)
 
 
 def writes(i, r):
@@ -320,9 +320,9 @@ class Prover:
         if not ins.mn.startswith('b.') or ins.rel is not None or q == 0 or f.preds[q] != {q - 1} or f.insns[q - 1].mn != 'cmp':
             return None
         m = re.search(r'(?:^|[\s,])([0-9a-f]+)\s+<', ins.ops)
-        if not m or int(m.group(1), 16) not in f.at:
+        if not m or int(m[1], 16) not in f.at:
             return None
-        taken, fall = f.at[int(m.group(1), 16)], q + 1
+        taken, fall = f.at[int(m[1], 16)], q + 1
         if taken == fall or n not in (taken, fall):
             return None
         ops = split_ops(f.insns[q - 1].ops)
