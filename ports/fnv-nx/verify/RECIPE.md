@@ -529,6 +529,12 @@ is a declared input passed by path in `args`; nothing is found through `PATH` ou
 in its own network namespace with no interface (already so for every step), so a tool that wants to fetch fails instead of reading the world; vendored sources are declared inputs.
 Tests: `tests/test_toolexec.py` (ELF resolution and the check forms; the sandboxed green run of an external tool is the `test_toolext.py` pattern, not run on a host without busybox).
 
+## An external of another root
+
+`{"external_of": ROOT, "name": EXTERNAL, "path": SUB}` is an input of a `run`, `exec` or `generated` step. It names a path inside an external that the recipe of ANOTHER admitted root declares (a fetched commit, never a root's built output). The pin is that root's own (commit and `tree_sha256`), so the stage key holds the owner's tree and a changed owner pin is a changed key. The one validator `recipe.external_of_errors` serves check, key and mount; `resolve_input` is the one reader.
+
+Red: the owner is this root (use `{external, path}`); the owner is not an admitted root; the owner is neither in this recipe's `uses` nor in the root's admit.json `imports` (the dependency is declared, never reached by name alone); the owner declares no external NAME; the external is a stage external (take it through `uses`); the path is absolute or leaves the tree. A stage reads it at `/in/N` (run), `/exec` (exec) or `/in/external_of/<owner with / as __>/<name>/<path>` (generated). Selftests: `tests/test_external_of.py`.
+
 ## Single file of an external (a document through a tool step)
 A run step's `inputs` entry `{"external": NAME, "path": FILE}` mounts ONE file of a declared external at `/in/N`. The external is pinned as above, by
 `{commit, tree_sha256}` over its whole checkout; `resolve_input` checks that hash, then reads FILE from the checked-out tree (red: the file is not in
