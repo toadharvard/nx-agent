@@ -143,7 +143,10 @@
    "class": "product",
    "target": "guest",
    "cxx_origin": "native",
-   "recipe": "ports/fnv-nx/platform/build.json"
+   "recipe": "ports/fnv-nx/platform/build.json",
+   "imports": [
+    "ports/fnv-nx/contract"
+   ]
   },
   {
    "path": "ports/fnv-nx/rt/guest",
@@ -560,6 +563,17 @@
    "class": "test",
    "target": "host",
    "recipe": "ports/fnv-nx/render/shaders/sm_link/build.json"
+  },
+  {
+   "path": "ports/fnv-nx/contract/include",
+   "class": "header"
+  },
+  {
+   "path": "ports/fnv-nx/contract/exports",
+   "class": "tool",
+   "target": "host",
+   "entry": [],
+   "recipe": "ports/fnv-nx/contract/exports/build.json"
   }
  ]
 }

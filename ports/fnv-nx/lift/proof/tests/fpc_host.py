@@ -8,6 +8,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.pat
 sys.path.insert(0, LIFT)
 import z3
 from fnvlift import dsl
+from fnvlift.tests import _inputs; _inputs.configure_declared()
 from fnvlift.dsl import V, fp, fp_val, fp_flags, to_smt
 
 src = open(os.path.join(LIFT, 'rt', 'fnvl.h')).read()

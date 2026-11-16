@@ -6,7 +6,8 @@ import os, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 C = os.path.dirname(HERE)
 sys.path.insert(0, C)
-import exportgen, bridgetable as B  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: contract.X by its qualified name
+from contract import exportgen, bridgetable as B  # noqa: E402
 
 fails = 0
 

@@ -4,6 +4,8 @@ LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, LIFT)
 X86SYS = os.path.join(os.path.dirname(LIFT), 'platform', 'declared', 'x86sys.json')
 CPUMODEL = os.path.join(os.path.dirname(LIFT), 'verify', 'cpuid_model.json')
+RCPTAB = os.path.join(LIFT, 'rt', 'rcptab.c')
+RCPCERT = os.path.join(LIFT, 'rt', 'rcptab.cert.json')
 
 
 _SDMROWS = []
@@ -26,5 +28,11 @@ def configure(sdmrows=None, udsail=None):
     if udsail is None:
         udsail = d + '/udsail.tsv'; open(udsail, 'w').write('# fnvnx-udsail/2\n')      # no refused or undefined sequence in a buffer test
     json.dump({'format': 'fnvnx-segwrites/2', 'images': {'buf': {n: {'guard': n == 'gs'} for n in ('es', 'ds', 'fs', 'gs')}}}, open(d + '/segwrites.json', 'w'))      # a buffer has no write site of a segment register
-    inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=X86SYS, sdmrows=sdmrows or sdmrows_arg(), cpumodel=CPUMODEL, udsail=udsail, segwrites=d + '/segwrites.json', image='buf')
+    inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=X86SYS, sdmrows=sdmrows or sdmrows_arg(), cpumodel=CPUMODEL, rcptab=RCPTAB, rcpcert=RCPCERT, udsail=udsail, segwrites=d + '/segwrites.json', image='buf')
     from fnvlift import core; from proof import lift_dsl; core.set_emit(lift_dsl.emit_form)      # the proven Forms are the one path for the mnemonics they cover
+
+
+def configure_declared():
+    """the declared-machine files only (x86sys, cpumodel, the certified rcp table): for the proof tests that build Forms and read no module facts"""
+    from fnvlift import inputs
+    inputs.configure(x86sys=X86SYS, cpumodel=CPUMODEL, rcptab=RCPTAB, rcpcert=RCPCERT)

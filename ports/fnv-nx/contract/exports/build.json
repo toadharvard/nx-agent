@@ -1,0 +1,19 @@
+{
+ "format": "fnvnx-recipe/1",
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/contract/exportgen.py",
+   "args": [],
+   "inputs": [],
+   "objects_of": {
+    "target": "guest"
+   },
+   "outputs": [
+    "exports.tsv"
+   ]
+  }
+ ],
+ "outputs": {
+  "exports": "exports.tsv"
+ }
+}

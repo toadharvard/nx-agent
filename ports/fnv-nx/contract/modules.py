@@ -53,12 +53,12 @@ import os
 import struct
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import declareddlls
-import dllkind
-import exepin
-import gatefile
-import iat
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)
+from contract import declareddlls
+from contract import dllkind
+from contract import exepin
+from contract import gatefile
+from contract import iat
 
 PAGE = 0x1000
 ALIGN = 0x10000

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """exportgen - exports.tsv of a directory tree of objects (L1 CONTRACT; the recipe stage that reads the `.fnvnx.export` records).
 
-    exportgen.py --objects <dir of <root>/<unit>.o> --out exports.tsv
+    exportgen.py [--objects <dir of <root>/<unit>.o>] [--out exports.tsv]     defaults /objs and /out/exports.tsv (the generate stage's mounts: contract/exports/build.json,
+                                                                              `objects_of` guest: the objects of every guest product root, the link set)
 
 Every object may carry the section `.fnvnx.export` (contract/include/fnvnx_export.h): lines `module TAB import name TAB symbol TAB func|data`.  The tool
 writes the union, sorted, as the same four columns.  RULE (total, nothing is skipped or guessed):
@@ -12,8 +13,8 @@ writes the union, sorted, as the same four columns.  RULE (total, nothing is ski
 The output depends on the objects' bytes and relative paths only."""
 import argparse, os, re, sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import l2sections
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)
+from contract import l2sections
 
 SECTION = '.fnvnx.export'
 MODULE = re.compile(r'[a-z0-9_.\-]+\.dll\Z')
@@ -92,8 +93,8 @@ def read(text):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--objects', required=True)
-    ap.add_argument('--out', required=True)
+    ap.add_argument('--objects', default='/objs')
+    ap.add_argument('--out', default='/out/exports.tsv')
     a = ap.parse_args()
     try:
         rows = collect(a.objects)

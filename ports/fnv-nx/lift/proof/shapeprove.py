@@ -71,7 +71,10 @@ def main():
     ap.add_argument('--timeout', type=float, default=600); ap.add_argument('--eip', choices=('sym', 'fixed'), default='sym'); ap.add_argument('--slice', type=int, default=1)
     ap.add_argument('--only'); ap.add_argument('--limit', type=int)
     ap.add_argument('--sail-work', required=True); ap.add_argument('--sail-ir', required=True); ap.add_argument('--isla', required=True)
-    a = ap.parse_args(); model_sail.configure(a.sail_work, a.sail_ir, a.isla); k, n = [int(x) for x in a.shard.split('/')]; assert 1 <= k <= n
+    ap.add_argument('--cpumodel', required=True, help='verify/cpuid_model.json (the declared CPU data: MXCSR_MASK of the Forms)'); ap.add_argument('--rcptab', required=True, help='rt/rcptab.c'); ap.add_argument('--rcpcert', required=True, help='rt/rcptab.cert.json')
+    a = ap.parse_args(); model_sail.configure(a.sail_work, a.sail_ir, a.isla)
+    from fnvlift import inputs; inputs.configure(cpumodel=os.path.abspath(a.cpumodel), rcptab=os.path.abspath(a.rcptab), rcpcert=os.path.abspath(a.rcpcert))
+    k, n = [int(x) for x in a.shard.split('/')]; assert 1 <= k <= n
     os.makedirs(a.out, exist_ok=True); path = os.path.join(a.out, 'shapeprove_%d_of_%d.jsonl' % (k, n))
     keys, bad = load_shapes(a.shapes); keys = keys[::a.slice]
     if a.only: keys = [x for x in keys if a.only in x]
