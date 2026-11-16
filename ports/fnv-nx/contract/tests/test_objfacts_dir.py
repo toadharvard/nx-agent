@@ -5,7 +5,8 @@ import os, shutil, subprocess, sys, tempfile
 
 C = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.insert(0, C)
-import objfacts_dir, store
+import l2sections, objfacts_dir, store
+INC = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'toolchain', 'names', 'sympair_kinds.inc')
 
 CC = shutil.which('aarch64-linux-gnu-gcc-13') or shutil.which('aarch64-linux-gnu-gcc')
 fails = []
@@ -17,7 +18,7 @@ with tempfile.TemporaryDirectory() as d:
         os.makedirs(os.path.join(d, 'objs', r))
         open(d + '/f.c', 'w').write('int f(int x) { return x + 1; }\n')
         subprocess.run([CC, '-c', '-O1', '-o', os.path.join(d, 'objs', r, 'x.c.o'), d + '/f.c'], check=True)
-    out = objfacts_dir.collect(d + '/objs')
+    out = objfacts_dir.collect(d + '/objs', l2sections.load_kinds(INC))
     names = sorted({k[0] for k in out})
     if names != ['rootA/x.c.o', 'rootB/sub/x.c.o']:
         fails.append('object names %r' % names)
@@ -25,7 +26,7 @@ with tempfile.TemporaryDirectory() as d:
         fails.append('section entries missing: %r' % sorted(out))
     outs = []
     for i in (1, 2):
-        r = subprocess.run([sys.executable, '-I', C + '/objfacts_dir.py', '--objects', d + '/objs', '--out', '%s/o%d.json' % (d, i)], capture_output=True, text=True)
+        r = subprocess.run([sys.executable, '-I', C + '/objfacts_dir.py', '--objects', d + '/objs', '--sympair-kinds', INC, '--out', '%s/o%d.json' % (d, i)], capture_output=True, text=True)
         if r.returncode:
             fails.append('cli: ' + r.stderr[-200:])
         outs.append(open('%s/o%d.json' % (d, i), 'rb').read())

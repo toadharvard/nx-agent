@@ -30,7 +30,7 @@ def judge_root(root, repo, cache, plugin=ORDER):
     gate_lift.py asks for fnvnx_order (gate order) and fnvnx_addr (gate addr32), the same rule: a plugin of the rule's list, rule's arguments)."""
     roots, files = recipe.load_admit(repo), recipe.tracked(repo)
     rec = recipe.load_recipe(repo, roots, root)
-    cxx = sorted(root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files) if u.endswith(recipe.CXX_EXT)) if isinstance(rec, dict) else []
+    cxx = sorted(root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files, roots, repo) if u.endswith(recipe.CXX_EXT)) if isinstance(rec, dict) else []
     errs = recipe.check(rec, recipe.split_spec(root)[0], files, roots, recipe.load_pin(repo), repo)
     if errs:
         return len(cxx), 0, cxx, "invalid recipe: %s" % "; ".join(errs)[:300]

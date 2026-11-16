@@ -187,7 +187,7 @@ def judge_root(root, repo, cache):
     try:
         res, _ = gate_build.ensure(root, cache, repo)
     except recipe.RecipeError as e:
-        us = [root + "/" + u for u in recipe.units_of(rec, root, files)] if isinstance(rec, dict) else []
+        us = [root + "/" + u for u in recipe.units_of(rec, root, files, roots, repo)] if isinstance(rec, dict) else []
         return len(us) + 1, 0, [item] + us, "invalid recipe: %s" % "; ".join(e.errors)[:300]
     units = [recipe.split_spec(root)[0] + "/" + u for u in res.get("units", [])]
     if res["status"] != "green":
