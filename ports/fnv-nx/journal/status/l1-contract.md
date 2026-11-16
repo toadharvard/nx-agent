@@ -2358,3 +2358,16 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - L5 w30 5f9bc70d5: setsockopt, galaxywrp (11 records) and the va forwarders are fixed; duplicate RaiseException/DebugBreak removed; generated platform/exptable root.
   - w28 deletes the name_table key, msvcrt_names.tsv and the galaxywrp signature dict.
   - Not yet measured on built objects.
+- Order 3 (one name per module) measured by w28 @c071d7e1b:
+  - 626 .py in 71 roots;
+  - 599 sys.path mutations in 421 files;
+  - 760 bare stem imports;
+  - about 290 by-path launch sites.
+  - It touches every lane and blocks no path step, so it is deferred until after the first frame (a codemod at a quiet point).
+- w28 now:
+  1. the entry kind;
+  2. deleting name_table, msvcrt_names.tsv and the galaxywrp dict;
+  3. test_bridgefacts 1-2;
+  4. the test_gate_imports rewrite;
+  5. the deterministic getrandom stream.
+- L5 5f9bc70d: generated platform/exptable, 562 rows generated against 531 hand rows, every difference named. RaiseException and DebugBreak are owned by lift/rt. WSACleanup and WSASetLastError are dropped, coming back only through GetProcAddress certificates.
