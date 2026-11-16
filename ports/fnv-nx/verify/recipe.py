@@ -2568,12 +2568,15 @@ def timing_report(store, keys):
 
 
 class Job:
+    stats = {"run_one": 0, "artifact_builds": 0}   # evaluations of `run` steps and builds of artifact roots in this process: what the regression tests count (never a stub of run_one)
+
     def __init__(self, repo, spec, store, jobs, ext):
         root, self.variant = split_spec(spec)
         self.repo, self.root, self.store, self.jobs, self.extcache = repo, root, store, jobs, ext
         self.roots, self.files = load_admit(repo), tracked(repo)
         self.rec = with_guest_link(load_recipe(repo, self.roots, spec), root, self.roots, repo)
         self.keys, self.run, self.hit, self.ext, self.ppkeys, self.built = set(), 0, 0, {}, {}, []
+        self.arts = {}   # {artifact root: its build result}: a root is built once per Job, whatever number of steps run its artifact
         self.shard, self.shard_units = None, None   # (i, N) of a shard build (build(shard=...)); the units it compiled
         self.aux = []   # build(aux): AUX_FLAGS of the CC stage
         self.analysis = None   # tree of the objstub plugin's /out (analysis_plugin), built once per root that has C/C++ units
@@ -2900,8 +2903,28 @@ class Job:
                 for o in step_outputs(g):
                     self.blocked[o] = f["stage"]
 
-    def run_all(self, ws):
-        """The `run` stages of the recipe (RECIPE.md "Run stages"), after the generators; a red one blocks its outputs like a generator."""
+    def step_closure(self, steps, name):
+        """The steps that produce NAME's inputs, transitively, and NAME itself, in recipe order: an input that is a stage ref of this root names its producer
+        (`ROOT:run:STEP`), or is an output (file or directory) of one step; a step outside the closure cannot change what NAME reads."""
+        by_name = {g["name"]: g for g in steps}
+        if name not in by_name:
+            raise ValueError("%s: root declares no run step %r" % (self.root, name))
+        need, todo = set(), [name]
+        while todo:
+            n = todo.pop()
+            if n in need:
+                continue
+            need.add(n)
+            for ref in by_name[n]["inputs"]:
+                if not (isinstance(ref, dict) and "stage" in ref and ref["stage"].partition(":")[0] == self.root):
+                    continue
+                kind, _, key = ref["stage"].partition(":")[2].partition(":")
+                todo += [key] if kind == "run" and key in by_name else [g["name"] for g in steps if ref["path"] in g["outputs"] or any(under(ref["path"], d) for d in g.get("dirs", []))]
+        return [g for g in steps if g["name"] in need]
+
+    def run_all(self, ws, only=None):
+        """The `run` stages of the recipe (RECIPE.md "Run stages"), after the generators; a red one blocks its outputs like a generator. ONLY = the name of one step: that
+        step and the steps its inputs come from run, no other."""
         try:
             steps = expand_run(self.rec).get("run", [])
         except ValueError as e:
@@ -2910,6 +2933,8 @@ class Job:
                 for o in step_outputs(g):
                     self.blocked[o] = "run:%s" % self.root
             return
+        if only is not None:
+            steps = self.step_closure(steps, only)
         for i, g in enumerate(steps):
             try:
                 self.run_one(ws, i, g)
@@ -2923,13 +2948,17 @@ class Job:
         """Stage `run:<root>:<name>`: executes the artifact (the linked output of an admitted root) in the sandbox. It sees the artifact at /art/<output>,
         the declared inputs at /in/<ident>, each declared deb's installed files at /deb/<name>/<absolute path>, and writes /out. Key = artifact
         content + input contents + deb sha256 (env.json) + argv. A nonzero exit, an undeclared or a missing output is red."""
+        Job.stats["run_one"] += 1
         tmp = tempfile.mkdtemp(dir=ws)
         tool = "exec" in g
         if tool:
             ins, rootfs = self._rootfs(tmp, g)
         else:
             aroot, aout = g["artifact"].split(":", 1)
-            r = build(self.repo, aroot, self.store, os.path.join(tmp, "art"), self.jobs, self.extcache)
+            if aroot not in self.arts:
+                Job.stats["artifact_builds"] += 1
+                self.arts[aroot] = build(self.repo, aroot, self.store, tempfile.mkdtemp(dir=ws), self.jobs, self.extcache)
+            r = self.arts[aroot]
             if r["status"] != "green" or not r["elf"] or os.path.basename(r["elf"]["path"]) != aout:
                 raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["artifact %s is not produced (root status %s)" % (g["artifact"], r["status"])]})
             ins = [{"at": "/art", "tree": self._one_file(tmp, "art", r["elf"]["path"], aout)}]
@@ -4218,6 +4247,19 @@ def exec_unresolved(path, tmp, debs, libdirs=()):
     return sorted(bad)
 
 
+STAGE_MEMO = {}   # per process: {(store, checkout, repo_signature, root, step, path, step declaration): result of stage_output}; the stage's own key decides a hit, this only skips re-deriving it
+
+
+def repo_signature(repo):
+    """The content of the tracked tree of REPO as the build reads it: the index entries (mode, blob, path) and the stat of every tracked file that differs from the index."""
+    h = hashlib.sha256(subprocess.run(["git", "-C", repo, "ls-files", "-s", "-z", "--", TREE], capture_output=True, check=True).stdout)
+    for f in subprocess.run(["git", "-C", repo, "ls-files", "-m", "-z", "--", TREE], capture_output=True, check=True).stdout.split(b"\0"):
+        if f:
+            st = os.stat(os.path.join(repo, f.decode("utf-8", "surrogateescape")))
+            h.update(f + b"\0%d\0%d\0" % (st.st_mtime_ns, st.st_size))
+    return h.hexdigest()
+
+
 def stage_output(root, ref, repo, cache):
     """{"stage": "ROOT:gen:I" | "ROOT:run:NAME", "path": P}: the declared output P of a generate (I = index in `generated`) or run stage of an admitted
     root, produced by that stage (cached by its key in CACHE/store) and written to CACHE/stageout/<sha256>/P. Red (ValueError) for an unknown root or
@@ -4237,12 +4279,15 @@ def stage_output(root, ref, repo, cache):
     if ref["path"] not in ent["outputs"]:
         raise ValueError("%s: stage %s of %s does not declare the output %r (declared: %s)" % (root, name, sroot, ref["path"], ent["outputs"]))
     store = os.path.join(cache, "store")
+    memo_key = (os.path.realpath(store), os.path.realpath(repo), repo_signature(repo), sroot, name, ref["path"], json.dumps(ent, sort_keys=True))
+    if memo_key in STAGE_MEMO and os.path.exists(STAGE_MEMO[memo_key][0]):
+        return STAGE_MEMO[memo_key]
     j = Job(repo, sroot, store, 1, ext_dir(cache))
     ws = tempfile.mkdtemp(prefix="stageref-")
     try:
         j.externals(ws)
         j.generate(ws)
-        j.run_all(ws)
+        j.run_all(ws, only=key if kind == "run" else None)
         if j.red:
             raise ValueError("%s: stage %s of %s is red: %s" % (root, name, sroot, j.red[0]["stage"] + ": " + " ".join(j.red[0]["stderr"][-3:])))
         data = open(os.path.join(ws, "root", ref["path"]), "rb").read()
@@ -4253,7 +4298,8 @@ def stage_output(root, ref, repo, cache):
     h = hashlib.sha256(data).hexdigest()
     dest = os.path.join(cache, "stageout", h, ref["path"])
     cas.publish_file(dest, data)
-    return dest, "stage:%s:%s:%s:%s" % (sroot, name, ref["path"], h)
+    STAGE_MEMO[memo_key] = (dest, "stage:%s:%s:%s:%s" % (sroot, name, ref["path"], h))
+    return STAGE_MEMO[memo_key]
 
 
 def host_compilers(rec, cache):
