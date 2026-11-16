@@ -1,0 +1,120 @@
+{
+ "format": "fnvnx-recipe/1",
+ "profile": "guest",
+ "flags": {
+  "c": [
+   "-O2",
+   "-g",
+   "-ffunction-sections",
+   "-fdata-sections",
+   "-Werror=attributes"
+  ],
+  "cxx": [
+   "-O2",
+   "-g",
+   "-ffunction-sections",
+   "-fdata-sections",
+   "-std=gnu++20",
+   "-DFNVNX_SDD=1",
+   "-Werror=attributes"
+  ],
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/platform/mpfr/inc/build",
+  "ports/fnv-nx/platform/mpfr/inc/src"
+ ],
+ "units": "all",
+ "external": [
+  {
+   "name": "mpfr",
+   "repo": "fnv-nx-build",
+   "ref": "tools/mpfr",
+   "commit": "3e0575200463312ae5ab66c41cf0872497e51abf",
+   "tree_sha256": "4bf5632ac075671e49c71b428357109eb31572f06fb2a9ba553014058dc06857",
+   "at": "/ext/mpfr"
+  }
+ ],
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/toolchain/msvcmodel/records.py",
+   "args": [
+    "cc",
+    "/out/records.sh",
+    "/in/ports/fnv-nx/verify"
+   ],
+   "inputs": [
+    "ports/fnv-nx/verify",
+    "ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json"
+   ],
+   "outputs": [
+    "records.sh"
+   ]
+  }
+ ],
+ "run": [
+  {
+   "name": "mpfrgen",
+   "exec": "/usr/bin/bash",
+   "args": [
+    "/in/1"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/mpfr/mpfrgen.sh",
+    "ports/fnv-nx/platform/gmp/ccrec.py",
+    "ports/fnv-nx/platform/gmp/mkunits.py",
+    "ports/fnv-nx/toolchain/gcc/cfg_link.py",
+    "ports/fnv-nx/link/guest.ld",
+    "ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc",
+    {
+     "stage": "ports/fnv-nx/platform/mpfr:gen:0",
+     "path": "records.sh"
+    },
+    {
+     "external": "mpfr",
+     "path": "mpfr-4.2.1.tar.xz"
+    },
+    {
+     "external": "gcc-msvcmodel",
+     "path": "."
+    },
+    {
+     "archive": "ports/fnv-nx/platform/gmp"
+    }
+   ],
+   "debs": {
+    "profile": "compiler-build"
+   },
+   "outputs": [
+    "units.list"
+   ],
+   "dirs": [
+    "u",
+    "inc/build",
+    "inc/src",
+    "pub"
+   ],
+   "scratch": [
+    "/scratch"
+   ]
+  }
+ ],
+ "sources": "units.list",
+ "outputs": {
+  "INC_BUILD": "inc/build",
+  "INC_SRC": "inc/src",
+  "INC_PUBLIC": "pub"
+ },
+ "uses": [
+  {
+   "root": "ports/fnv-nx/platform/gmp",
+   "output": "INC_BUILD"
+  }
+ ],
+ "include_uses": [
+  {
+   "root": "ports/fnv-nx/platform/gmp",
+   "output": "INC_BUILD"
+  }
+ ]
+}

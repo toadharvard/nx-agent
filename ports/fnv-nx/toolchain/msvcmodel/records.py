@@ -5,6 +5,7 @@ declarations is the file this writes, mounted as an input and so in the key of e
 reader uses (recipe.runtime_configure, runtime_configure_patch, runtime_cflags, semantics_set, plugin_args, PLUGIN_SOURCES): one source, no copy.
 
     records.py stage1 OUT VERIFY   the compiler's configure: T ABI CPUARCH MLFLAG GCC_RT_CONF[]
+    records.py cc OUT VERIFY       T ABI SEMANTICS[] (a library's configure: the flags every guest unit gets)
     records.py stage2 OUT VERIFY   the runtime build: T ABI MLFLAG CFG_SUBDIRS[] RUNTIME_CFLAGS[] SEMANTICS[] PLUGIN_ORDER[] PLUGIN_ARGV_<name>[]
                                      (the load order = recipe.PLUGIN_SOURCES; recipe.plugin_args("native") without PLUGIN_OUT, the recipe stage's report path: a runtime
                                      build has no /out report)
@@ -34,7 +35,9 @@ elif mode == "stage2":   # the data-model table is next to this file: the stage 
     want = recipe.plugin_args("native")
     for n in recipe.PLUGIN_SOURCES:
         out.append(arr("PLUGIN_ARGV_" + n, ["-fplugin-arg-%s-%s%s" % (n, k, "=" + v if v else "") for k, v in want[n].items()]))
+elif mode == "cc":   # a library root's configure (GMP, MPFR): the guest compiler's semantic flags, the one set every guest unit is compiled with
+    out += [arr("SEMANTICS", recipe.semantic_flags(os.path.join(HERE, "DATAMODEL.json")))]
 else:
-    sys.exit("records.py: mode is stage1 or stage2")
+    sys.exit("records.py: mode is stage1, stage2 or cc")
 os.makedirs(os.path.dirname(os.path.abspath(outpath)), exist_ok=True)
 open(outpath, "w").write("\n".join(out) + "\n")

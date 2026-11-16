@@ -17,7 +17,8 @@ def main(argv):
     if len(argv) < 3:
         sys.exit("usage: gen_units.py EXT OUT FUNCTION...")
     ext, out, funcs = argv[0], argv[1], argv[2:]
-    lines = []
+    lines = [a for a in funcs if ":" in a]   # an argument `<run step>:<dir>` is a `sources` line as it stands (the units of a run step's directory output, RECIPE.md)
+    funcs = [a for a in funcs if ":" not in a]
     for f in funcs:
         rel = "src/binary64/%s/%s.c" % (f, f)
         if not os.path.isfile(os.path.join(ext, rel)):
