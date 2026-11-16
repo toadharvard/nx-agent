@@ -1622,3 +1622,9 @@ Paused: w3b, w4, farm; no other work.
     - w11 `session_01KmtZKTsmVdWoA9TUGo1JL7` is doing the d3d9.dll export records, on claude/fnv-l6-render-w11-exports. w7's 8bf1aefda and 3d932349e (11 FNVNX_EXPORT records) move onto w9-cand4. bridgetable is red on D3DPERF_SetOptions plus 4 more.
     - The 3 `_undoc` exports (DebugSetLevel, PSGPError, PSGPSampleTexture) get no invented body. A ruling follows from their reach and Wine 9.0's d3d9.spec.
 - bottleneck: w10 and w11, then the cand5 render head to L1. 2 of 4 workers busy.
+- 10:58Z: w11, done (96fcecc): the d3d9.dll export records are on w9-cand4. There are 11 FNVNX_EXPORT records, one per documented export, with Wine 9.0 citations; this covers bridgetable's D3DPERF_SetOptions. They are sent to L1 for a farm bridgetable run. w11 is archived.
+    - Undoc ruling (b) is blocked. The reached set (IAT ∪ resolved GPA names) has no recipe stage: gpa_names runs only inside the gpa gate. An IAT-only filter would drop 4 live exports that are reached by GPA from d3dx9.
+    - L6 proposed to L1 a `reached.tsv` stage (dll, name, how, site) with only the dll set as its bridge input; owner to be named by L1.
+    - Measured, not a fact run (exe 0948da1e8, redist c53729e3b): 11/11 documented with a record, 0 undoc reached, 3 undoc unreached.
+- w10, doing: 8cacf9e has the `fnvnx.` imports (23 files). Path-loaded modules are being converted; waiting for L1's prefix-aware gate and the env check.
+- bottleneck: L1's prefix-aware gate (w28-c5); the owner of the reached.tsv stage. 1 of 4 workers busy.
