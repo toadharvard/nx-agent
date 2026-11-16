@@ -1467,3 +1467,11 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Next: RTTI class narrowing (ruled 04:00).
 - L1 accepted the ra writer set: the generated bridges plus `fnvl_native_transfer`, both in the bridge TU. w8 proceeds with class A and class B.
 - bottleneck: L2 (dispatch.c, the decltype diagnostic, the recipe-path pin); w8 rework; pcsrc 8 vptr + 3 EH (w7).
+
+## 2026-11-16 04:15 — udsail stage root accepted
+- w13 (done, claude/fnv-l3a-lift-w13-udsailstage ff086e540): the root lift/udsail is a recipe tool with a python run step.
+  - Inputs: the 8 facts roots' baddecode/shapes, isla + z3lib, sailmodel, the x86ir external (fnv-nx-build tools/sail-ir 8b711fba9b93), X86SYS, sdmrows and cpuid_model.json.
+  - Output: UDSAIL. The recipe check is valid. It has not been executed yet.
+- w8 (doing): merge w28 322698c53, then ff086e540, into base3; where the isla/sailmodel files differ, take L3b's.
+- w13 next: the farm run via L3b, then udsail.tsv as an fnv-nx-build external, then w7 replaces udsail_input.tsv.
+- bottleneck: L2 w2 (3 lift/rt units); w8 rework and merges; pcsrc 8 vptr + 3 EH (w7); the udsail farm run.
