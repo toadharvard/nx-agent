@@ -1522,3 +1522,10 @@ Paused: w3b, w4, farm; no other work.
     - One defect came from the merge: w28's crash wrapper `run()` shadowed the gate's subprocess helper `run()`. Fixed by renaming the entry to evaluate(); w28 has been told to carry the rename.
     - recipe check 13/13; abspath render 0 (6 findings, all in lift/); pure render 0 (whole set 88/96); d3d9total 332/332.
 - bottleneck: w28 external_of; base3 retake; farm1 sm_link; the cand4 base.
+- 04:00Z w28 2fe125d83 lands external_of (one validator for check, key and mount; 18/18 tests) and carries the evaluate() rename. w6 is on d3d9total-on-stages and is deleting the direct path.
+- 04:02Z w6-root 680ff849a merges w28 f203e1a1c (used_by derived from tracked citations).
+    - 12 L6 entries went unused. 9 are retired: each is resolved in the code or relied on by no tracked file (601 606 608 613 614 620 622 633 641). 3 are cited at their code sites: 617 and 619 in gl4_present.c, 621 in d3d9/dev/README.md. Spot-checked.
+    - assumptions: green, 137/137 mentions, 112 entries (10 OWNER, 102 REMOVE).
+    - abspath: render 0 (3 findings, all in lift/fnvlift). pure: render 0, whole set 88/96.
+    - d3d9total 332/332; recipe check 13/13; all 9 L6 roots build green.
+- bottleneck: d3d9total on stages (w6); base3 retake; farm1 sm_link; the cand4 base.
