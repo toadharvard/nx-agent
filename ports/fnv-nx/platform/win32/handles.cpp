@@ -124,13 +124,13 @@ void w32_obj_unref(struct w32_obj *o)
     }
 }
 
-FNVNX_EXPORT("kernel32.dll", "CloseHandle", CloseHandle, "func");
 extern "C" BOOL CloseHandle(HANDLE h)
 {
     if (h == W32_PSEUDO_THREAD || h == W32_PSEUDO_PROCESS)
         return TRUE;
     return w32_handle_close(h, 0);
 }
+FNVNX_EXPORT("kernel32.dll", "CloseHandle", CloseHandle, "func");
 
 W32Log::W32Log() : n(0)
 {

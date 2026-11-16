@@ -396,7 +396,6 @@ uint32_t rop3(int idx, uint32_t p, uint32_t s, uint32_t d)
 }
 } // namespace
 
-FNVNX_EXPORT("gdi32.dll", "GetStockObject", GetStockObject, "func");
 /* ---- objects and DCs */
 extern "C" HGDIOBJ GetStockObject(int i)
 {
@@ -405,7 +404,7 @@ extern "C" HGDIOBJ GetStockObject(int i)
     init_stock();
     return (HGDIOBJ)(uintptr_t)stock_h(i);
 }
-FNVNX_EXPORT("gdi32.dll", "DeleteObject", DeleteObject, "func");
+FNVNX_EXPORT("gdi32.dll", "GetStockObject", GetStockObject, "func");
 extern "C" BOOL DeleteObject(HGDIOBJ h)
 {
     Lk l;
@@ -417,7 +416,7 @@ extern "C" BOOL DeleteObject(HGDIOBJ h)
     release((uint32_t)(uintptr_t)h);
     return TRUE;
 }
-FNVNX_EXPORT("gdi32.dll", "CreateCompatibleDC", CreateCompatibleDC, "func");
+FNVNX_EXPORT("gdi32.dll", "DeleteObject", DeleteObject, "func");
 extern "C" HDC CreateCompatibleDC(HDC src)
 {
     Lk l;
@@ -425,7 +424,7 @@ extern "C" HDC CreateCompatibleDC(HDC src)
     if (src && !get(src, T_DC)) { SetLastError(ERROR_INVALID_HANDLE); return NULL; }
     return (HDC)(uintptr_t)new_dc(K_MEM, NULL);
 }
-FNVNX_EXPORT("gdi32.dll", "DeleteDC", DeleteDC, "func");
+FNVNX_EXPORT("gdi32.dll", "CreateCompatibleDC", CreateCompatibleDC, "func");
 extern "C" BOOL DeleteDC(HDC hd)
 {
     Lk l;
@@ -434,7 +433,7 @@ extern "C" BOOL DeleteDC(HDC hd)
     free_dc((uint32_t)(uintptr_t)hd, d);
     return TRUE;
 }
-FNVNX_EXPORT("gdi32.dll", "CreateCompatibleBitmap", CreateCompatibleBitmap, "func");
+FNVNX_EXPORT("gdi32.dll", "DeleteDC", DeleteDC, "func");
 extern "C" HBITMAP CreateCompatibleBitmap(HDC hd, int w, int h)
 {
     Lk l;
@@ -453,7 +452,7 @@ extern "C" HBITMAP CreateCompatibleBitmap(HDC hd, int w, int h)
     memcpy(b->mask, s.m, sizeof b->mask);
     return (HBITMAP)(uintptr_t)bh;
 }
-FNVNX_EXPORT("gdi32.dll", "CreateDIBSection", CreateDIBSection, "func");
+FNVNX_EXPORT("gdi32.dll", "CreateCompatibleBitmap", CreateCompatibleBitmap, "func");
 /* CreateDIBSection (MSDN): the bits are system memory, or, with hSection, a view of that file-mapping object starting at
  * dwOffset (a multiple of 4; the view itself starts at the allocation granularity below it, and the bits are at the rest).
  * The view keeps the section referenced until the bitmap is deleted. The section must be writable (PAGE_READWRITE or
@@ -498,7 +497,7 @@ extern "C" HBITMAP CreateDIBSection(HDC hd, const void *bmi, UINT usage, void **
     *ppv = o->bits;
     return (HBITMAP)(uintptr_t)bh;
 }
-FNVNX_EXPORT("gdi32.dll", "SelectObject", SelectObject, "func");
+FNVNX_EXPORT("gdi32.dll", "CreateDIBSection", CreateDIBSection, "func");
 extern "C" HGDIOBJ SelectObject(HDC hd, HGDIOBJ ho)
 {
     Lk l;
@@ -528,8 +527,8 @@ extern "C" HGDIOBJ SelectObject(HDC hd, HGDIOBJ ho)
     *fld = nh;
     return (HGDIOBJ)(uintptr_t)prev;
 }
+FNVNX_EXPORT("gdi32.dll", "SelectObject", SelectObject, "func");
 
-FNVNX_EXPORT("gdi32.dll", "GetPixel", GetPixel, "func");
 /* ---- pixels */
 extern "C" COLORREF GetPixel(HDC hd, int x, int y)
 {
@@ -539,7 +538,7 @@ extern "C" COLORREF GetPixel(HDC hd, int x, int y)
     if (!d || !dc_surf(d, s) || x < 0 || y < 0 || x >= s.w || y >= s.h) return (COLORREF)CLRINV;
     return (COLORREF)swp(px_get(s, x, y));
 }
-FNVNX_EXPORT("gdi32.dll", "SetPixel", SetPixel, "func");
+FNVNX_EXPORT("gdi32.dll", "GetPixel", GetPixel, "func");
 extern "C" COLORREF SetPixel(HDC hd, int x, int y, COLORREF c)
 {
     Lk l;
@@ -550,7 +549,7 @@ extern "C" COLORREF SetPixel(HDC hd, int x, int y, COLORREF c)
     dirty(s, x, y, x + 1, y + 1);
     return (COLORREF)swp(px_get(s, x, y));
 }
-FNVNX_EXPORT("gdi32.dll", "SetStretchBltMode", SetStretchBltMode, "func");
+FNVNX_EXPORT("gdi32.dll", "SetPixel", SetPixel, "func");
 extern "C" int SetStretchBltMode(HDC hd, int mode)
 {
     Lk l;
@@ -560,8 +559,8 @@ extern "C" int SetStretchBltMode(HDC hd, int mode)
     d->smode = mode;
     return p;
 }
+FNVNX_EXPORT("gdi32.dll", "SetStretchBltMode", SetStretchBltMode, "func");
 
-FNVNX_EXPORT("gdi32.dll", "StretchBlt", StretchBlt, "func");
 extern "C" BOOL StretchBlt(HDC hd, int x, int y, int w, int h, HDC hs, int sx, int sy, int sw, int sh, DWORD rop)
 {
     Lk l;
@@ -638,8 +637,8 @@ extern "C" BOOL StretchBlt(HDC hd, int x, int y, int w, int h, HDC hs, int sx, i
     dirty(D, (int)cx0, (int)cy0, (int)cx1, (int)cy1);
     return TRUE;
 }
+FNVNX_EXPORT("gdi32.dll", "StretchBlt", StretchBlt, "func");
 
-FNVNX_EXPORT("gdi32.dll", "GetDIBits", GetDIBits, "func");
 /* GetDIBits (MSDN; the reference's NtGdiGetDIBitsInternal is the data for what the text leaves open).
  * lpbi may be a BITMAPCOREHEADER or a BITMAPINFOHEADER (or larger): the header says what format the caller wants. The bitmap
  * may be selected into a DC. With no bits and biBitCount 0 the call describes the bitmap: width, height, planes, bit count
@@ -756,8 +755,8 @@ extern "C" int GetDIBits(HDC hd, HBITMAP hb, UINT start, UINT lines, void *bits,
     if (bits) return copied;
     return 1;
 }
+FNVNX_EXPORT("gdi32.dll", "GetDIBits", GetDIBits, "func");
 
-FNVNX_EXPORT("gdi32.dll", "GetDeviceCaps", GetDeviceCaps, "func");
 extern "C" int GetDeviceCaps(HDC hd, int idx)
 {
     Lk l;
@@ -803,18 +802,18 @@ extern "C" int GetDeviceCaps(HDC hd, int idx)
     default: return 0;
     }
 }
+FNVNX_EXPORT("gdi32.dll", "GetDeviceCaps", GetDeviceCaps, "func");
 
 /* ---- user32, DC side */
 struct fnvnx_paintstruct { HDC hdc; int fErase; RECT rcPaint; int fRestore, fIncUpdate; uint8_t rgb[32]; };
 
-FNVNX_EXPORT("user32.dll", "GetDC", GetDC, "func");
 extern "C" HDC GetDC(HWND hw)
 {
     Lk l;
     if (hw && !IsWindow(hw)) { SetLastError(ERROR_INVALID_HANDLE); return NULL; }
     return (HDC)(uintptr_t)new_dc(hw ? K_WIN : K_SCR, hw);
 }
-FNVNX_EXPORT("user32.dll", "ReleaseDC", ReleaseDC, "func");
+FNVNX_EXPORT("user32.dll", "GetDC", GetDC, "func");
 extern "C" int ReleaseDC(HWND hw, HDC hd)
 {
     Lk l;
@@ -823,6 +822,7 @@ extern "C" int ReleaseDC(HWND hw, HDC hd)
     free_dc((uint32_t)(uintptr_t)hd, d);
     return 1;
 }
+FNVNX_EXPORT("user32.dll", "ReleaseDC", ReleaseDC, "func");
 /* the DC's clip: nothing is written outside the rectangles (a DC without a clip writes everywhere) */
 extern "C" void gdi_dc_set_clip(void *hdv, const RECT *r, int n)
 {
@@ -900,7 +900,6 @@ extern "C" int gdi_fill_rect(void *hd, const RECT *rc, void *hbr)
     if (x1 > x0 && y1 > y0) dirty(s, x0, y0, x1, y1);
     return 1;
 }
-FNVNX_EXPORT("user32.dll", "BeginPaint", BeginPaint, "func");
 /* BeginPaint (MSDN, reference user32): WM_NCPAINT when the frame is pending, rcPaint = the update region clipped to the
  * client area (less the clipped children), the region is validated, the DC is clipped to it, and WM_ERASEBKGND is sent
  * when the region was marked for erasing: fErase is TRUE when the procedure did not erase. */
@@ -931,7 +930,7 @@ extern "C" HDC BeginPaint(HWND hw, void *psv)
         ps->fErase = SendMessageA(hw, 0x0014, (WPARAM)(uintptr_t)hd, 0) == 0;   /* WM_ERASEBKGND */
     return hd;
 }
-FNVNX_EXPORT("user32.dll", "EndPaint", EndPaint, "func");
+FNVNX_EXPORT("user32.dll", "BeginPaint", BeginPaint, "func");
 extern "C" BOOL EndPaint(HWND hw, const void *psv)
 {
     const fnvnx_paintstruct *ps = (const fnvnx_paintstruct *)psv;
@@ -942,6 +941,7 @@ extern "C" BOOL EndPaint(HWND hw, const void *psv)
     free_dc((uint32_t)(uintptr_t)ps->hdc, d);
     return TRUE;
 }
+FNVNX_EXPORT("user32.dll", "EndPaint", EndPaint, "func");
 
 /* ---- interface for gdifont.cpp (gdi_int.h): object queries and font objects */
 extern "C" int gdi_obj_info(void *h, struct gdi_objinfo *oi)
@@ -1000,7 +1000,6 @@ extern "C" uint32_t gdi_dc_object(void *hd, int kind)
 
 /* ---- CreateDC / ExtEscape: the set of devices is exactly the display of ENV_TRUTH D1 */
 static bool ieq(const char *a, const char *b) { for (; *a && *b; a++, b++) if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return false; return !*a && !*b; }
-FNVNX_EXPORT("gdi32.dll", "CreateDCA", CreateDCA, "func");
 extern "C" HDC CreateDCA(LPCSTR driver, LPCSTR device, LPCSTR output, const void *devmode)
 {
     W32_UNUSED(output); W32_UNUSED(devmode);   /* a display DC has no output port and always shows the desktop mode */
@@ -1011,7 +1010,7 @@ extern "C" HDC CreateDCA(LPCSTR driver, LPCSTR device, LPCSTR output, const void
     if (!hd) SetLastError(ERROR_NOT_ENOUGH_MEMORY);
     return hd;
 }
-FNVNX_EXPORT("gdi32.dll", "ExtEscape", ExtEscape, "func");
+FNVNX_EXPORT("gdi32.dll", "CreateDCA", CreateDCA, "func");
 /* The display driver of the environment is not a vendor driver: it implements no escape. QUERYESCSUPPORT therefore
  * answers 0 ("not supported") for every code and every other escape is "not implemented" (0). Errors are < 0. */
 extern "C" int ExtEscape(HDC hd, int esc, int cb_in, LPCSTR in, int cb_out, LPSTR out)
@@ -1026,6 +1025,7 @@ extern "C" int ExtEscape(HDC hd, int esc, int cb_in, LPCSTR in, int cb_out, LPST
     }
     return 0;
 }
+FNVNX_EXPORT("gdi32.dll", "ExtEscape", ExtEscape, "func");
 
 /* 1: hd is a DC of the display (screen, window, paint, CreateDC("DISPLAY")); 0: a memory DC; -1: not a DC (d3dkmt.cpp) */
 extern "C" int gdi_dc_display(void *hd)

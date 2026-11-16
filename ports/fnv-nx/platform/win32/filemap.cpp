@@ -245,7 +245,6 @@ static DWORD image_load(struct w32_map *m, uint64_t fsize, uint32_t *preferred_b
     return err;
 }
 
-FNVNX_EXPORT("kernel32.dll", "CreateFileMappingA", CreateFileMappingA, "func");
 /* ---- CreateFileMappingA */
 extern "C" HANDLE CreateFileMappingA(HANDLE file, void *sa, DWORD flprot, DWORD maxhi, DWORD maxlo, LPCSTR name)
 {
@@ -402,6 +401,7 @@ extern "C" HANDLE CreateFileMappingA(HANDLE file, void *sa, DWORD flprot, DWORD 
         SetLastError(ERROR_SUCCESS);
     return h;
 }
+FNVNX_EXPORT("kernel32.dll", "CreateFileMappingA", CreateFileMappingA, "func");
 
 /* ---- views */
 struct view {
@@ -445,7 +445,6 @@ static bool writeback(struct view *v, uintptr_t from, size_t n)   /* [from, from
     return fm_file_io(v->m->fh, (void *)from, off, n, true, NULL);
 }
 
-FNVNX_EXPORT("kernel32.dll", "MapViewOfFile", MapViewOfFile, "func");
 extern "C" LPVOID MapViewOfFile(HANDLE hmap, DWORD access, DWORD offhi, DWORD offlo, SIZE_T bytes)
 {
     access = W32_DW(access);
@@ -565,8 +564,8 @@ out:
     SetLastError(err);
     return NULL;
 }
+FNVNX_EXPORT("kernel32.dll", "MapViewOfFile", MapViewOfFile, "func");
 
-FNVNX_EXPORT("kernel32.dll", "UnmapViewOfFile", UnmapViewOfFile, "func");
 extern "C" BOOL UnmapViewOfFile(LPCVOID addr)
 {
     struct view *v = NULL;
@@ -592,8 +591,8 @@ extern "C" BOOL UnmapViewOfFile(LPCVOID addr)
         SetLastError(err);
     return ok;
 }
+FNVNX_EXPORT("kernel32.dll", "UnmapViewOfFile", UnmapViewOfFile, "func");
 
-FNVNX_EXPORT("kernel32.dll", "FlushViewOfFile", FlushViewOfFile, "func");
 extern "C" BOOL FlushViewOfFile(LPCVOID addr, SIZE_T bytes)
 {
     BOOL ok = TRUE;
@@ -618,3 +617,4 @@ extern "C" BOOL FlushViewOfFile(LPCVOID addr, SIZE_T bytes)
         SetLastError(err);
     return ok;
 }
+FNVNX_EXPORT("kernel32.dll", "FlushViewOfFile", FlushViewOfFile, "func");
