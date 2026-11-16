@@ -1364,3 +1364,8 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - L3b: shape certification stops at the call. rcptab.c is covered by rcpcert (2^32 on the reference CPU). The fnvl.h FP and conversion helpers are NOT covered; gate_fpexact check 0 falsely says they are.
 - w13: a recipe host-test root over lift/rt's fnvl.h output, with the helper universe derived from the Forms and 32-bit inputs exhaustive. The 64-bit helpers' proof method gets a ruling before it is built. Then L3b points check 0 at that root.
 - bottleneck: L2's K2 pin.
+
+## 2026-11-16 03:10: the fnvl.h FP helpers, no known rule for 64-bit
+- Ruling for w13: the helper test root is built through the recipe for the product target (aarch64 ILP32 with msvcmodel, run under the boot machine). The helper universe comes from the Forms. 32-bit inputs are exhaustive. The 64-bit helpers (sse_f2i(double), fv_i, fx_dsl fp/cvt w=64) are an explicit open list. gate_fpexact check 0 reads that list instead of "forms".
+- Reported to the orchestrator as a step with no known rule. A non-sampled 64-bit proof needs a tool beyond OWNER 9. Recommendation: isla with the Arm Sail model over the product object (an extension of OWNER 9). The alternatives are CBMC, or OWNER 5 (tested).
+- bottleneck: L2's K2 pin.
