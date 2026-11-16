@@ -16,3 +16,17 @@ UNDECIDED = sorted(k for k, v in REC.items() if isinstance(v, dict) and v.get('s
     + ['int_ring3.other_vectors']
 from fnvlift import faults as _f
 _f.check_int_vectors(INT_VECTORS)
+
+
+# The code descriptors of the declared GDT and the data segment registers that can hold one (SDM Vol. 3A 3.4.5.1 / 5.5: a code segment is not writable, a store through it is #GP).  Derived from the record, nothing typed:
+# the GDT indexes whose descriptor is S=1 with the code type bit, intersected, per register, with the selectors the record lets that register hold (its initial selector, mov_to_sreg, and for CS the far-jump targets).
+CODE_INDEX = frozenset(int(k, 16) >> 3 for k, d in REC['gdt']['descriptors'].items() if d['s'] == 1 and d['type'] & 8)
+
+
+def code_indices(reg):
+    """the GDT indexes of a code descriptor that segment register `reg` may hold, from the record (empty: no store through `reg` can fault on its type)"""
+    held = set()
+    if reg in SEL: held.add(SEL[reg])
+    if reg in MOV_TO_SREG: held.update(MOV_TO_SREG[reg][0])
+    if reg == 'cs': held.update(REC['jmp_far']['jumps']['selectors'])
+    return tuple(sorted({v >> 3 for v in held} & CODE_INDEX))
