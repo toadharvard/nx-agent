@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""gen_env.py OUTDIR SPEC TSV_DIR D3DTYPES_H WINE_DIR D3D9_H D3D9CAPS_H: env_handheld.tsv + env_docked.tsv (tests/l6/env/make_env.py: our measurement of Wine 9.0 + Mesa llvmpipe) -> env_table.gen.h/.cpp (not checked in).
+"""gen_env.py OUTDIR SPEC TSV_DIR D3DTYPES_H WINE_DIR D3D9_H D3D9CAPS_H ENV_PIN RULES_IN: env_handheld.tsv + env_docked.tsv (tests/l6/env/make_env.py: our measurement of Wine 9.0 + Mesa llvmpipe) -> env_table.gen.h/.cpp (not checked in).
 Every table cell is DERIVED from rows through the closing rules of README.md, and every rule's premise is asserted on all rows it covers (a violated rule stops the generator,
 exit 2, naming it): devtype / adapter-format independence, format classes, usage-bit conjunction, struct writes iff success. The lookup functions are in env_rules.cpp.in.
 Profiles differ only where reported by the `profile differences` line."""
 import hashlib, os, re, struct, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.dont_write_bytecode = True
 sys.path.insert(0, HERE); import envq  # noqa: E402
-# OUT SPEC TSV_DIR D3DTYPES_H WINE_DIR D3D9_H D3D9CAPS_H: the one place that parses the arguments (no default)
+# OUT SPEC TSV_DIR D3DTYPES_H WINE_DIR D3D9_H D3D9CAPS_H ENV_PIN RULES_IN: the one place that parses the arguments (no default)
 envq.load(sys.argv[4], sys.argv[2], sys.argv[5], sys.argv[6], sys.argv[7])
-TSV_DIR = sys.argv[3]
+TSV_DIR = sys.argv[3]; ENV_PIN = sys.argv[8]; RULES_IN = sys.argv[9]   # ENV_PIN.txt and env_rules.cpp.in: stage arguments from the declared env directory
 PROFILES = ["handheld", "docked"]; X8, R5, X1, A2R10 = envq.X8, envq.R5, envq.X1, envq.A2R10; HRC = [0, envq.NA, envq.INV, envq.NOAUTOGEN];  # all by name from d3d9types.h / d3d9.h
 HRN = {v: i for i, v in enumerate(HRC)}
 NA, INV = envq.NA, envq.INV
@@ -19,7 +19,7 @@ QUERY_GL = {8: 32, 9: 15, 10: 33, 11: 33, 12: 33}   # D3DQUERYTYPE -> core GL ve
 
 
 def gl_versions():
-    t = open(os.path.join(HERE, "ENV_PIN.txt")).read(); v = {int(a) * 10 + int(b) for a, b in re.findall(r'GL_VERSION: "(\d+)\.(\d+) \(Core Profile\)', t)}
+    t = open(ENV_PIN).read(); v = {int(a) * 10 + int(b) for a, b in re.findall(r'GL_VERSION: "(\d+)\.(\d+) \(Core Profile\)', t)}
     if len(v) != 1: die("ENV_PIN.txt records one core-profile GL_VERSION for both profiles")
     return v.pop()
 
@@ -46,7 +46,7 @@ def die(msg): sys.stderr.write("gen_env: RULE VIOLATED: " + msg + "\n"); sys.exi
 def load(path):
     """the rows of one recorded profile. Pin: the sha256 of the file is the one ENV_PIN.txt records for it (the rows are exactly the recording made in the pinned environment, host CPU included;
     an edited or re-recorded file stops the generator)"""
-    pin = re.findall(r"%s sha256 ([0-9a-f]{64})" % re.escape(os.path.basename(path)), open(os.path.join(HERE, "ENV_PIN.txt")).read())
+    pin = re.findall(r"%s sha256 ([0-9a-f]{64})" % re.escape(os.path.basename(path)), open(ENV_PIN).read())
     if len(pin) != 1 or pin[0] != hashlib.sha256(open(path, "rb").read()).hexdigest(): die(f"{os.path.basename(path)}: its sha256 is not the one ENV_PIN.txt records")
     R, DEV = {}, []
     for l in open(path):
@@ -315,7 +315,7 @@ def main():
                 "int nxenv_stretch_filter_ok(int p, uint32_t filter)"]:
         h.append(sig + ";")
     h.append("#ifdef __cplusplus\n}\n#endif")
-    rules = open(os.path.join(HERE, "env_rules.cpp.in")).read()
+    rules = open(RULES_IN).read()
     for p, t in zip(PROFILES, Ts): open(os.path.join(out, f"ident_{p}.bin"), "wb").write(bytes(t["IDENT"]))   # the 1100-byte D3DADAPTER_IDENTIFIER9 image = T_IDENT of that profile
     open(os.path.join(out, "env_table.gen.h"), "w").write("\n".join(h) + "\n"); open(os.path.join(out, "env_table.gen.cpp"), "w").write("\n".join(c) + "\n" + rules)
     # the caps the backend ABI is checked against (one record: the tsv; nothing is restated in render/nxgpu): per profile and device-type class, the two fields of D3DCAPS9 that the

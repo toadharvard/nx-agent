@@ -80,7 +80,9 @@
     "/in/ports/fnv-nx/shim/include/d3d9types.h",
     "/ext/wine-d3d9-formats",
     "/in/ports/fnv-nx/shim/include/d3d9.h",
-    "/in/ports/fnv-nx/shim/include/d3d9caps.h"
+    "/in/ports/fnv-nx/shim/include/d3d9caps.h",
+    "/in/ports/fnv-nx/render/d3d9/env/ENV_PIN.txt",
+    "/in/ports/fnv-nx/render/d3d9/env/env_rules.cpp.in"
    ],
    "inputs": [
     "ports/fnv-nx/shim/include/d3d9types.h",
