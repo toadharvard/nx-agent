@@ -578,6 +578,10 @@ static bool atomic_arg_type(tree a, std::vector<tree> &chain, tree &T)
     return TREE_TYPE(p) && POINTER_TYPE_P(TREE_TYPE(p)) && TYPE_MAIN_VARIANT(strip_array_types(TREE_TYPE(TREE_TYPE(p)))) == TYPE_MAIN_VARIANT(strip_array_types(T));
   }
   if (!TREE_TYPE(o)) return false;
+  /* the C front end folds the generic form's `*(U *)&obj` of an OBJECT into the object itself or a view conversion of it (same size): a value argument that is no
+   * constant and no pointer names the object it reads, and it moves that object's own type. A constant (an order, a flag, a size) moves nothing; a non-constant
+   * order is read as a moved value of its integer type, so the call is no same-type move: refused (never accepted wrongly). */
+  if (!POINTER_TYPE_P(TREE_TYPE(o)) && TREE_CODE(o) != INTEGER_CST && !entry_type(TREE_TYPE(o))) { T = TREE_TYPE(o); return true; }
   if (POINTER_TYPE_P(TREE_TYPE(o)) && POINTER_TYPE_P(TREE_TYPE(a)) && !entry_type(TREE_TYPE(o))) { T = TREE_TYPE(TREE_TYPE(o)); return true; }
   if (entry_type(TREE_TYPE(o)) && !POINTER_TYPE_P(TREE_TYPE(a))) { T = TREE_TYPE(o); return true; }   /* an entry VALUE moved as the value argument of a sized builtin */
   return false;

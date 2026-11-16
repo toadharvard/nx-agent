@@ -76,11 +76,17 @@ def main():
                        ('union', 'ENTRY1-UNION'), ('union_nested', 'ENTRY1-UNION'), ('memcpy_other', 'ENTRY1-CONT'), ('memset', 'ENTRY1-CONT'), ('memmove_cast', 'ENTRY1-CONT')):
             r = pb.compile(os.path.join(FIX, 'bad_%s.cpp' % n), os.path.join(td, n + '.o'), so)
             check('%s is an error (%s)' % (n, tag), r.returncode != 0 and tag in r.stderr, r.stderr[:900])
-        r = pb.compile(os.path.join(FIX, 'ok_atomic.cpp'), os.path.join(td, 'at.o'), so)
-        check('ENTRY1-ATOMIC: generic and sized atomic load, store, exchange and compare-exchange, and the __sync movers, of one entry-holding type are same-type copies', r.returncode == 0, r.stderr[:1500])
-        for n in ('atomic_store_other', 'atomic_load_other', 'atomic_fetch_add'):
-            r = pb.compile(os.path.join(FIX, 'bad_%s.cpp' % n), os.path.join(td, n + '.o'), so)
-            check('%s is the error ENTRY1-CONT (an atomic move of another type, an arithmetic builtin on an entry)' % n, r.returncode != 0 and 'ENTRY1-CONT' in r.stderr, r.stderr[:900])
+        for ext, lang in (('cpp', 'C++'), ('c', 'C')):
+            r = pb.compile(os.path.join(FIX, 'ok_atomic.' + ext), os.path.join(td, 'at_%s.o' % ext), so)
+            check('ENTRY1-ATOMIC (%s): generic and sized atomic load, store, exchange and compare-exchange, and the __sync movers, of one entry-holding type are same-type copies' % lang, r.returncode == 0, r.stderr[:1500])
+            for n in ('atomic_store_other', 'atomic_load_other', 'atomic_fetch_add'):
+                r = pb.compile(os.path.join(FIX, 'bad_%s.%s' % (n, ext)), os.path.join(td, '%s_%s.o' % (n, ext)), so)
+                check('%s (%s) is the error ENTRY1-CONT (an atomic move of another type, an arithmetic builtin on an entry)' % (n, lang), r.returncode != 0 and 'ENTRY1-CONT' in r.stderr, r.stderr[:900])
+        # C front end: the generic form's `*(U *)&obj` of an object is the object (or a view conversion of it), not a pointer
+        r = pb.compile(os.path.join(FIX, 'ok_atomic_local.c'), os.path.join(td, 'atl.o'), so)
+        check('ENTRY1-ATOMIC (C): a generic atomic store of a local object of the same type is a same-type copy', r.returncode == 0, r.stderr[:1500])
+        r = pb.compile(os.path.join(FIX, 'bad_atomic_store_local.c'), os.path.join(td, 'atlb.o'), so)
+        check('ENTRY1-ATOMIC (C): a generic atomic store of a local object of another type is the error ENTRY1-CONT', r.returncode != 0 and 'ENTRY1-CONT' in r.stderr, r.stderr[:900])
         headers(td, so)
         r = pb.compile(os.path.join(FIX, 'bad_attr.cpp'), os.path.join(td, 'a.o'), so)
         check('the attribute on a function type (not a pointer) is an error', r.returncode != 0 and 'applies to a pointer-to-function type' in r.stderr, r.stderr[:900])
