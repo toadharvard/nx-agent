@@ -28,7 +28,9 @@ M32 = 0xffffffff
 _INSMEMO = {}; _RESMEMO = {}
 def _run(arg, cfg, XEX, REF=frozenset()):
     """cfg: modules (the module table), moddirs (list), facts_out: declared inputs, passed by universe.py"""
-    path, mrow = pemod.locate(arg, cfg.modules, cfg.moddirs)      # modules.tsv row (missing = KeyError) and the file (sha256 + size checked = ValueError)
+    if getattr(cfg, 'exe', None):      # the process image: no modules.tsv row, it is mapped at its preferred base (the loader maps it there; it has no assigned base)
+        path = cfg.exe; _m = pemod.load(path); mrow = SimpleNamespace(name=os.path.basename(path), base=None, size=len(_m.d), sizeimg=_m.sizeimg, pref=_m.base, entry=_m.entry, tls=1 if _m.dirent(9)[0] else 0)
+    else: path, mrow = pemod.locate(arg, cfg.modules, cfg.moddirs)      # modules.tsv row (missing = KeyError) and the file (sha256 + size checked = ValueError)
     name = os.path.splitext(mrow.name)[0]; outd = cfg.facts_out + '/' + name; os.makedirs(outd, exist_ok=True)
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
     import gapmd; md = gapmd.make(md, cfg.udsail)
@@ -39,7 +41,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     text = bytes(tx)
     def intext(a): return T0 <= a < T1 and V[a - T0] == 1
     rvals_all = [(r, v) for r, v in ((r, u32(r)) for r in relocs) if intext(v)]
-    rvals = [(r, v) for r, v in rvals_all if r not in XEX and v not in REF]          # R3 refined (residue.disp_only): the value sites; XEX = the displacement-only sites of the previous round
+    rvals = list(rvals_all)          # every relocation target inside an executable section is a root (ruling 2026-11-16: roots by property, no displacement-only / misfit / on-data refinement)
     ent = {}; roots = set(); queue = deque(); dec = {}; cov = bytearray(TN); ud = set(); xf = set(); misfit = set(); callers = {}; calltg = {}; leaves = set(); jtab = {}; jins = []
     refhit = set()
     def add(a, kind, proven=False):
@@ -472,29 +474,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
 
 
 def run(arg, cfg):
-    """R3 refined, to its fixed point: X = {relocation sites that are only the displacement of a non-lea memory operand of an instruction of the flow} (residue.disp_only); the flow depends on the entries,
-    the entries on the value sites (not in X). Round k runs the whole producer with X_k excluded and yields X_{k+1} = X(flow of round k); X_0 = empty. Done when X_{k+1} == X_k: every excluded site is a
-    displacement inside the final flow and every entry is justified by a value site or a root. A cycle is an error (never a result); the rounds are not capped (R grows, the states are finite)."""
-    import io, contextlib
-    X = frozenset(); R = frozenset(); DD = frozenset(); seen = []; refinfo = {}
-    k = -1
-    while True:      # terminates: R only grows and the states (X, R) are finite; a state seen twice is a cycle, which is an error (below); there is no round cap
-        k += 1; buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            code, Xo, Ro, PMF, nE, nC, nh = _run(arg, cfg, X, R)
-        refinfo.update(Ro); print('round %d: X %d R %d (+%d refused, %d displacement-only sites)' % (k, len(X), len(R), len(set(Ro) - R), len(Xo)), file=sys.stderr, flush=True)
-        if frozenset(Xo) == X and set(Ro) <= R:
-            sys.stdout.write(buf.getvalue()); print('R3 refinement: fixed point after %d rounds, %d displacement-only relocation sites excluded from the entry rule' % (k + 1, len(X)))
-            print('reloc-consistency: entries %d (candidates %d); refused (unproven, decoding has a relocation-misfit) %d; proven entries with a misfit %d%s' % (nE, nC, len(R), len(PMF), ' RED: ' + ' '.join('%08x' % a for a in PMF[:8]) if PMF else ''))
-            od = cfg.facts_out + '/' + os.path.splitext(pemod.locate(arg, cfg.modules, cfg.moddirs)[1].name)[0]
-            open(od + '/refused.tsv', 'w').write('# columns: entry, relocation-misfit instructions in its decoding, reason; unproven candidate entries refused by reloc-consistency (the bytes go to data, the relocated pointer is a data fact)\n' + ''.join('%08x\t%d\treloc-misfit\n' % (e, refinfo[e]) for e in sorted(R - DD)))
-            bad = residue.entries_on_data(od)
-            dn = frozenset(bad) - R - DD
-            if dn:      # the same invariant the gate reads: a pointer-only entry on proven data (codemap class data-reloc) is not an entry; it is refused, and the next round rebuilds the facts without it
-                DD = DD | dn; R = R | dn; seen.append((X, R)); continue
-            open(od + '/dropped_on_data.tsv', 'w').write('# columns: address, proof id; pointer-valued sites whose target is a byte of class data-reloc (the codemap invariant, residue.entries_on_data), so not an entry\n' + ''.join('%08x\t%s\n' % (a, residue.data_proof(od, a)) for a in sorted(DD)))
-            print('invariant entries on class-3 data bytes: %d%s' % (len(bad), ' RED: ' + ' '.join('%08x' % a for a in bad[:8]) if bad else ''))
-            return 0      # the facts are written; the verdict is gate_codemap.json / gate_pcsrc.json (status, entries_on_data), judged by the gate that reads them
-        seen.append((X, R)); X = frozenset(Xo); R = R | frozenset(Ro)          # a refusal is intrinsic to the bytes (the misfit) and the proven set only shrinks with the universe: R grows monotonically
-        if (X, R) in seen:
-            raise RuntimeError('R3 refinement does not converge (cycle at round %d)' % k)
+    """One round: the roots are the PE entry point, the exports, the TLS callbacks, the EH/SEH targets and EVERY relocation target inside an executable section; the entry set is closed under rule C. There is no refinement (ruling 2026-11-16)."""
+    code, Xo, Ro, PMF, nE, nC, nh = _run(arg, cfg, frozenset(), frozenset())
+    print('universe: entries %d (candidates %d)' % (nE, nC))
+    return 0
