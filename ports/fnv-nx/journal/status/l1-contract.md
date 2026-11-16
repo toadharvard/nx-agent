@@ -2798,3 +2798,11 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - cand4 head 5e9f645ae: w28-c5 merged with no conflicts; CLAUDE.md from integ 3bd5022ed.
 - ctypes_compat: the memo is deleted, not re-keyed. My tag key was wrong: it called two different inner definitions of the same tag equal. The proof that it terminates without a memo: a parsed type is a finite tree, and a recursive reference is an incomplete struct that returns before recursing. Two cases added, and test_ctypes passes.
 - The farm verdict is requested at 5e9f645ae.
+- cand4 head c35a5e6a4: oracle, rtasm (verify/probes root restored), selftest reads headers, pure targets.py. The farm verdict is requested there.
+- Still red at 5e9f645ae:
+  - vacuous universe 0 in abi, addr32, argordergate, hostapi and order;
+  - datamodel S29 on 4 roots;
+  - imports on lib/sha256;
+  - linkstrict on hostabi:pie;
+  - objstub: 12 declared-machine bodies uncited.
+  w15 triages all of them, with w28 for the roots it added. Citations come only from sources read, and each body owned by another layer goes to its lead.
