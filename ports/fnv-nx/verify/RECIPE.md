@@ -312,7 +312,7 @@ declared debs, or a file of an external / a built root, see "A tool that is not 
   (`{name, root, output, at}`), `plugins` and the final step taking `{"plugin": NAME}` inputs.
 Tests: `tests/test_toolstep.py`, `tests/test_sandbox.py` case 13.
 
-- `exec: {"python": true}` runs the pinned python runtime of the generated stages (the interpreter and env.json `python.modules`, through the one function `Job.pyrt`; `FNVNX_PYMODS`, the interpreter digest and every module's installed-files digest are in the key). `args` are the interpreter's arguments after `-s -B` (a script path, usually `/in/N`); the step's inputs, `scratch`, `env` and stage refs are as for any tool step. The step names no debs (the machine's layout deb is added as always). A module the env does not pin cannot be imported. The runtime mounts its own library paths as the host resolves them (`/lib/x86_64-linux-gnu`, `/usr/local/bin`); the layout link or directory that one of them lies under or over is not mounted in that step (`recipe.py`, python exec branch), so the step starts on a usr-merged host. Tests: `tests/test_runpython.py`.
+- `exec: {"python": true}` runs the pinned python runtime of the generated stages (the interpreter and env.json `python.modules`, through the one function `Job.pyrt`; `FNVNX_PYMODS`, the interpreter digest and every module's installed-files digest are in the key). `args` are the interpreter's arguments after `-s -B` (a script path, usually `/in/N`); the step's inputs, `scratch`, `env` and stage refs are as for any tool step. The step names no debs (the machine's layout deb is added as always). A module the env does not pin cannot be imported. Tests: `tests/test_runpython.py`.
 
 ### `foreach` (one step per table row)
 
