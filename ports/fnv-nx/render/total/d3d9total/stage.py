@@ -103,6 +103,8 @@ def recipe_includes(inp, path):
 
 def overlay(src, dst):
     """the files of directory SRC (repo-relative paths under ports/fnv-nx/) placed under DST, mode kept; a path two closures both hold is one file"""
+    if not os.path.isdir(src):
+        raise Red("include closure mount %s is not a directory" % src)
     for d, dirs, files in os.walk(src):
         for f in sorted(files):
             s = os.path.join(d, f)
@@ -235,7 +237,7 @@ def enum_part(inp, work, cache):
     specp = os.path.join(work, "d3d9_spec.json")
     r = run([sys.executable, "-E", "-s", "-B", os.path.join(inp, "bridgefacts", "d3d9", "d3d9_spec.py"), specp, os.path.join(work, "d9bridge_rows.tsv"), os.path.join(inp, "shim", "include")])
     if r.returncode:
-        raise Red("d3d9_spec.py failed: " + (r.stderr or r.stdout or "")[-400:].replace("\n", " | "))
+        raise Red("d3d9_spec.py failed: " + (r.stderr or r.stdout or "")[-900:].replace("\n", " | "))
     gen["VENDOR_FOURCC"], wine_hash = vendor_fourcc(inp, work, cache, specp)
     spec = json.load(open(specp))["enums"]
     names = gen["SWITCHED"] + gen["INDEXED"]
