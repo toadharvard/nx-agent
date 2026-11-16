@@ -431,7 +431,7 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
   - Universe: one source, lift/proof/helpercalls.universe(repo, cache, objects). It reads the Form -> helper calls from the lifter's emitter, plus the fnvnx_ftoi helpers record.
   - Widths: only from the DWARF formal_parameter types of the defining object. Underived is red (helper-width-underived).
   - Narrow (<= 32 bits): red helper-no-exhaustive-cert until lift/proof/fpchost (w13) reports 0 mismatches per helper over 2^32 inputs, with the Form term compiled to C by one op table as the reference.
-  - Wide: REMOVE record ASM-329 (owner L3b). Removal: isla over the host x86_64 object after the SSE FP model patch, with the four static conditions of integ e8faa4266. ASM-322 retired, replaced by 329.
+  - Wide: REMOVE record ASM-329 (owner L3b). Removal: isla over the host x86_64 object after the SSE FP model patch, with the four static conditions of integ e8faa4266. The earlier L3b record is retired, replaced by 329.
   - gate_assumptions findings: 23 at 4865c26a1, 23 at e6ed32b7e (pre-existing red, not raised).
   - Nothing run end to end: the pinned env is absent here. The universe needs the liftpack declared in formgate_inputs.json.
 - blocked: lift/rt needs -g for the DWARF widths (asked the L3a lead).

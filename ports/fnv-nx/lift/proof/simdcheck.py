@@ -7,7 +7,7 @@ array, the displacement / immediate field variables free) is compared with simds
   * unsat of  NOT(fault_form == (fault_spec ? AV : 0)  AND  [no fault ->  every xmm, fr, ftop, ftag, mxcsr, the 8 general registers, the memory array equal ])
     is the proof; sat gives a counter-model (a defect of the Form or of the spec, reported with the shape);
   * results: proved | FAILED | no-row (the spec has no row for the encoding) | no-form (no DSL builder).
-Environment: the spec's Res.env (CR0.EM = CR0.TS = 0, CR4.OSFXSR = 1) is assumed; it is L5's x86sys row (journal inbox), named in CERTS.md 'SIMD environment'."""
+Environment: the spec's Res.env (CR0.EM = CR0.TS = 0, CR4.OSFXSR = 1) is the declared environment; it is L5's x86sys row (journal inbox), named in CERTS.md 'SIMD environment'."""
 import json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.join(HERE, '..')); sys.path.insert(0, HERE)
 import z3
@@ -119,7 +119,7 @@ def _qc_load():
 
 def _canonical(g, cs, env, fpl, mx):
     """the lane function with its operands abstracted: every FP lane operand of the row (fpl) is replaced by a fresh variable (the same term on both sides of the equality, so this is a substitution of equal
-    terms, not an assumption), and only the hypotheses on MXCSR and those operands are kept (weaker hypotheses: a proof is still a proof).  -> (assertions, ok); ok is False when the part still depends on
+    terms, not a hypothesis), and only the hypotheses on MXCSR and those operands are kept (weaker hypotheses: a proof is still a proof).  -> (assertions, ok); ok is False when the part still depends on
     any other state (a preserved register, memory): it is then not a pure lane function and is asked whole."""
     ops, seen = [], set()
     for w, xs in fpl:
