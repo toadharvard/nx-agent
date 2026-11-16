@@ -685,6 +685,13 @@ The owner's words: "Что ещё так проебано? Перепровер�
   - It is removed by isla over the helper's host object, once the pinned Sail model covers cvttsd2si, ucomisd and the
     other SSE FP instructions through the ACL2-derived patch that L3b owns for the model gaps. That is sound under
     OWNER 1 and 9.
+  - The proof carries from the x86-64 host compile to the aarch64-ILP32 object only if each helper in it passes four
+    static checks over the helper universe (L3a, 03:05Z). The removing argument checks all four:
+    1. fixed-width integer types only: no long, size_t or pointer-sized arithmetic;
+    2. no implementation-defined or undefined behaviour on the path: signed overflow, out-of-range FP-to-int casts,
+       shifts by the width or more;
+    3. the same FP settings in both compiles: -ffp-contract=off and FLT_EVAL_METHOD 0;
+    4. no target builtins or intrinsics.
   - The work comes after the first frame, since it blocks no step of the path.
   - No new trusted tool (CBMC or ESBMC) is pinned for it.
 - **No new gaps.** A helper added after this decision enters the same rule. The REMOVE record covers exactly the f64-input
