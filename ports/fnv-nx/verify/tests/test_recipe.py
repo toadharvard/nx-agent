@@ -141,7 +141,7 @@ def make_guest_repo(name, gen_extra="", rec=None, files=None, extra_roots=(), im
     w(repo, "verify/admit.json", json.dumps(ad))
     w(repo, "verify/guest_compiler.json", open(os.path.join(VERIFY, "guest_compiler.json")).read())
     if image:   # the guest link profile (script and libraries of every guest link) and the script it names
-        for n in ("link/guest.json", "link/guest.ld"):
+        for n in ("link/guest.json", "link/guest.ld", "link/guest_image.ld"):
             w(repo, n, open(os.path.join(VERIFY, "..", n)).read())
     real = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))   # checkout root
     for n in recipe.plugin_files(real):   # the real plugin sources and inputs: the profile's plugins are built from them

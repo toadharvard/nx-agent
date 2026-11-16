@@ -73,10 +73,10 @@ def make(td, ext, uses=True, imports=False, stage_ext=False):
     con = {"format": "fnvnx-recipe/1", "outputs": {"c": "c.txt"}, "uses": [{"root": T + "own", "output": "o"}] if uses else [],
            "generated": [{"tool": T + "con/g.py", "args": [], "inputs": [ref], "outputs": ["c.txt"]}]}
     w(repo, T + "con/build.json", json.dumps(con))
-    w(repo, T + "con/g.py", "open('/out/c.txt','w').write('x')\n")
+    w(repo, T + "con/g.py", ("import own.g\n" if imports else "") + "open('/out/c.txt','w').write('x')\n")   # the import of the owner root is derived from this line
     adm = {"format": "fnvnx-admit/1", "roots": [
         {"path": T + "own", "class": "product", "target": "host", "recipe": T + "own/build.json"},
-        dict({"path": T + "con", "class": "product", "target": "host", "recipe": T + "con/build.json"}, **({"imports": [T + "own"]} if imports else {}))]}
+        {"path": T + "con", "class": "product", "target": "host", "recipe": T + "con/build.json"}]}
     w(repo, T + "verify/admit.json", json.dumps(adm))
     w(repo, T + "verify/env.json", open(os.path.join(HERE, "..", "env.json")).read())
     git(repo, "add", "-A")
@@ -95,9 +95,9 @@ with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td:
     repo, ref = make(os.path.join(td, "a"), e1)
     check("declared through `uses`: green", errs(repo, ref) == [], errs(repo, ref))
     repo2, ref2 = make(os.path.join(td, "b"), e1, uses=False, imports=True)
-    check("declared through admit.json `imports`: green", errs(repo2, ref2) == [], errs(repo2, ref2))
+    check("declared by an import of the owner root (derived edge): green", errs(repo2, ref2) == [], errs(repo2, ref2))
     repo3, ref3 = make(os.path.join(td, "c"), e1, uses=False)
-    check("an owner that is neither used nor imported is red", any("declare the dependency" in e for e in errs(repo3, ref3)), errs(repo3, ref3))
+    check("an owner that is neither used nor imported is green: the input written in the recipe is the declaration of the edge", errs(repo3, ref3) == [], errs(repo3, ref3))
     check("an unknown external name is red", any("declares no external" in e for e in errs(repo, dict(ref, name="nope"))), errs(repo, dict(ref, name="nope")))
     check("an owner that is no admitted root is red", any("not an admitted root" in e for e in errs(repo, dict(ref, external_of=T + "ghost"))))
     check("the root itself as owner is red (that is {external, path})", any("itself" in e for e in errs(repo, dict(ref, external_of=T + "con"))))
@@ -114,7 +114,8 @@ with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td:
     check("recipe.check of the consuming root holds no external_of error", not [e for e in e_ok if "external_of" in e], e_ok)
     roots3 = recipe.load_admit(repo3)
     e_bad = recipe.check(recipe.load_recipe(repo3, roots3, T + "con"), T + "con", recipe.tracked(repo3), roots3, None, repo3)
-    check("recipe.check of a root with an undeclared owner is red", any("external_of" in e and "declare the dependency" in e for e in e_bad), e_bad)
+    check("recipe.check of a root whose owner is named only by the input holds no external_of error", not [e for e in e_bad if "external_of" in e], e_bad)
+    check("the external_of owner is an edge of the root graph (input_roots, root_edges)", recipe.input_roots(recipe.load_recipe(repo3, roots3, T + "con")) == [T + "own"] and T + "own" in recipe.root_edges(recipe.load_recipe(repo3, roots3, T + "con"), T + "con", roots3), recipe.input_roots(recipe.load_recipe(repo3, roots3, T + "con")))
     # the reader: mount by the owner's pin; a different owner pin is a different tree (a different key)
     cache = os.path.join(td, "cache")
     os.makedirs(os.path.join(cache, "store"), exist_ok=True)
@@ -133,11 +134,6 @@ with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td:
     recipe.fetch_externals([o2], os.path.join(cache, "store"), ext, os.path.join(td, "ws2"))
     h2, t2 = recipe.resolve_input(T + "con", ref5, repo5, cache, recipe.load_recipe(repo5, roots5, T + "con"))
     check("a different owner pin is a different tree: the key changes", t1 != t2 and t2 == "%s:d/f.txt" % o2["tree_sha256"], (t1, t2))
-    try:
-        recipe.resolve_input(T + "con", ref3, repo3, cache, None)
-        check("the reader refuses an undeclared owner", False)
-    except ValueError as x:
-        check("the reader refuses an undeclared owner", "declare the dependency" in str(x), x)
     try:
         recipe.resolve_input(T + "con", dict(ref, name="nope"), repo, cache, rc)
         check("the reader refuses an unknown name", False)
@@ -180,7 +176,8 @@ with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td:
     check("include_of: the repository include dirs only (a dir inside an external is no tracked tree)", recipe.include_of_dirs(T + "own", iroots, ir) == [T + "own/inc"], recipe.include_of_dirs(T + "own", iroots, ir))
     check("include_of this root itself is red", any("itself" in e for e in ie({"include_of": T + "con"})))
     check("include_of a root that is no admitted root is red", any("not an admitted root" in e for e in ie({"include_of": T + "ghost"})))
-    check("include_of a root that is neither used nor imported is red", any("declare the dependency" in e for e in ie({"include_of": T + "own"}, dict(irec, uses=[]))))
+    check("include_of a root that is neither used nor imported is green: no Python import, no `uses`; the input is the declaration", ie({"include_of": T + "own"}, dict(irec, uses=[])) == [], ie({"include_of": T + "own"}, dict(irec, uses=[])))
+    check("the include_of owner is an edge of the root graph", T + "own" in recipe.root_edges(irec, T + "con", iroots), recipe.root_edges(irec, T + "con", iroots))
     check("a malformed include_of is red", any("is not {include_of" in e for e in ie({"include_of": 1})) and recipe.is_include_of({"include_of": T + "own"}) and not recipe.is_include_of({"include_of": "x", "k": "y"}))
     ee = recipe.check(irec, T + "con", recipe.tracked(ir), iroots, None, ir)
     check("recipe.check of the consuming root holds no include_of error", not [e for e in ee if "include_of" in e], ee)

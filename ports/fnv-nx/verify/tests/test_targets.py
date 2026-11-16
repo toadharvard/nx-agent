@@ -42,6 +42,26 @@ u = copy.deepcopy(t)
 u["references"]["x"] = "no/such/file.json"
 check("a reference to a missing file is red", any("no/such" in b for b in targets.check(u, repo=repo)), targets.check(u, repo=repo))
 import tempfile  # noqa: E402
+sys.path.insert(0, os.path.join(HERE, "..", "..", "contract", "target"))   # gen_header imports its sibling fpcr by its plain name, as the stage runs it
+import gen_header as targets_header  # noqa: E402
+check("fpcr: DN=0 FZ=0 RMode=RN, AHP=0: the derived integer is 0", targets.fpcr_value(t) == 0 and "FNVNX_FPCR 0x0ull" in targets_header.render(t), targets_header.render(t))
+u = copy.deepcopy(t)
+u["console_cpu"]["fpcr"]["RMode"] = 3
+check("fpcr: the row changes the integer and the generated header (RMode at bit 22)", targets.fpcr_value(u) == 3 << 22 and "FNVNX_FPCR 0xc00000ull" in targets_header.render(u), targets_header.render(u))
+u = copy.deepcopy(t)
+u["console_cpu"]["fpcr"]["FZ"] = 2
+check("fpcr: a value outside the field's width is red, and no header is written", any("fpcr.FZ" in b for b in targets.check(u)), targets.check(u))
+try:
+    targets_header.render(u)
+    check("fpcr: render refuses a bad row", False)
+except ValueError:
+    check("fpcr: render refuses a bad row", True)
+u = copy.deepcopy(t)
+u["console_cpu"]["fpcr"]["IOE"] = 1
+check("fpcr: an unknown field is red", any("exactly the fields" in b for b in targets.check(u)), targets.check(u))
+u = copy.deepcopy(t)
+del u["console_cpu"]["cite"]["fpcr"]
+check("fpcr: the row needs its citation", any("fpcr has no citation" in b for b in targets.check(u)), targets.check(u))
 with tempfile.TemporaryDirectory() as d:
     os.makedirs(d + "/nx")
     open(d + "/nx/Makefile", "w").write("\n" * 26 + "ARCH := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIC -ftls-model=local-exec\n")
