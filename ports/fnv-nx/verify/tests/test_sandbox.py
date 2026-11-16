@@ -274,7 +274,7 @@ echo "mounts=$(wc -l < /proc/mounts)"'''
     ch = {}
     ch["wall_clock"] = (A["clock_ns"] != B["clock_ns"] or A["time_s"] != B["time_s"],
                         "clock_ns %s vs %s, file mtime %s vs %s" % (A["clock_ns"], B["clock_ns"], A["file_mtime"], B["file_mtime"]))
-    ch["entropy"] = (A["at_random"] != B["at_random"] or A["getrandom_bytes"] != B["getrandom_bytes"],
+    ch["entropy"] = (A["at_random"] != B["at_random"],
                      "getrandom: %s, AT_RANDOM %s vs %s, dev_urandom %s" % (A["getrandom_rc"], A["at_random"][:8], B["at_random"][:8], A["dev_urandom"]))
     ch["cpu_count_scheduling"] = (A["ncpu"] != B["ncpu"], "ncpu %s vs %s under taskset; scheduling order not controlled" % (A["ncpu"], B["ncpu"]))
     ch["uid_gid"] = (not (A["uid"] == B["uid"] == "0 gid=0 euid=0"), "uid/gid %s / %s" % (A["uid"], B["uid"]))
@@ -291,8 +291,13 @@ echo "mounts=$(wc -l < /proc/mounts)"'''
         print("channel %s: %s (%s)" % (name, "OPEN" if is_open else "closed", ev))
         if is_open:
             opened.add(name)
-    win = sandbox.stream(0, 256).hex()   # the libc of the probe may take some bytes first (malloc's random): the probe's 16 bytes are a window of the stream
-    check("9a getrandom returns the constant stream of /dev/urandom, the same in two runs", A["getrandom_rc"] == "16 errno=0" and A["getrandom_bytes"] in win and A["getrandom_bytes"] == B["getrandom_bytes"], (A["getrandom_rc"], A["getrandom_bytes"]))
+    win = sandbox.stream(r_a[1]["key"], 0, 256).hex()   # the libc of the probe may take some bytes first (malloc's random): the probe's 16 bytes are a window of the stage's stream
+    store3 = fresh("store3")
+    r_c = run(store3, mkstage(store3, "probe", {"/bin": bb, "/p": probe}, ["/out"], sh("/p > /out/o")))
+    C = probes(r_c, store3)
+    check("9a getrandom returns the stage's entropy stream (a function of its key): a window of stream(key), the same when the stage runs again, another one for another stage",
+          A["getrandom_rc"] == "16 errno=0" and A["getrandom_bytes"] in win and r_c[1]["key"] == r_a[1]["key"] and C["getrandom_bytes"] == A["getrandom_bytes"]
+          and r_b[1]["key"] != r_a[1]["key"] and B["getrandom_bytes"] != A["getrandom_bytes"], (A["getrandom_rc"], A["getrandom_bytes"], B["getrandom_bytes"], C["getrandom_bytes"]))
     check("9b no /dev/urandom, entropy files in /proc empty or absent",
           A["dev_urandom"].startswith("ERR") and A["proc_uuid"] in ("len0",) or A["proc_uuid"].startswith("ERR"), str(A))
     check("9c measured OPEN set == result.json open_channels", opened == set(r_a[1]["open_channels"]),
