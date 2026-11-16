@@ -1718,3 +1718,9 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - The prov tag tool (b5a902dd) is accepted.
 - Found (w12): recipe.use_inputs skipped `run` steps (fix 5511b3f0); the lift/sdm debs lacked their closure; lift/liftsrc/build.json was stale. Sent to w8 for base3.
 - Doing (w12): three heads b/r1/r12 with the same recipe. Farm 2's density STARTs are on hold and will be replaced by one brief over them.
+- The trunk is at fac693694 (cand3b). Took its CLAUDE.md (1da51bbe2).
+  - A full trunk merge into claude/fnv-l3a-lift conflicts in 36 files, most of them lift/.
+  - So w8 merges the trunk into base3 under the stated conflict rule, then base3 is merged here.
+- L3b certified the segment-register Forms (claude/fnv-l3b-lift 82a488a89): 52 keys, 45 proved, 7 waiting on sys4.
+  - Doing (w7): the 2,664-key family split for L3b, then the move to path=form and the deletion of h_segshapes.
+  - Blocked (L5): the initial gs selector in x86sys.
