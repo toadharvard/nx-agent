@@ -1650,3 +1650,7 @@ Paused: w3b, w4, farm; no other work.
     - recipe check: 13 of 13 admitted L6 base roots valid. The full objstub run waits for the farm cold build.
     - L1 withdrew the sm_link `main` double finding: the double rule is taken per link target (host vs guest), and L1 w29 fixes objstub.
 - bottleneck: the cand5 verdict (L1); reached.tsv (L1 w28). 0 of 4 workers busy.
+- 12:52Z: `.fnvnx.const` records (L1 w29, next candidate) are blocked on L1.
+    - The 9 rows are known: gl4 has 2 and translator 7. w29-c5 0fa7b7a is merged at claude/fnv-l6-render-w14-const 2ee150e. w14 is archived.
+    - Open, all owned by L1: the shared header macro (none exists; L5's form is a table generator); whether LEN 0 means void or identity; and the record for the GCC clone dk_cfg.isra.0, which source cannot name.
+- bottleneck: the cand5 verdict; L1's answers on the const records; reached.tsv. 0 of 4 workers busy.
