@@ -1771,3 +1771,6 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - L3b correction: the 1,098 ValueError came from reading encs.tsv's form_key as a shape key. Corrected universe A is 16,032 keys: 14,335 with a Form, 1,683 KeyError, 13 AssertionError, 1 SymbolicBranch.
   - Rules 1+2 are still Form-neutral on all 16,032.
   - shapes.tsv in the relifted pack removes the re-derivation path.
+- L2: descclass/defdisp/plugbuild._trivial are red on base3 because NAMES-FNPARM (ae8d87972, 72af9ba51) needs a msvcmodel.patch attribute the 84f0883e pin lacks.
+  - Doing (w8): revert both in one commit, then re-apply on the recipe-path pin (L2 w3).
+  - w13's cleanup is narrowed to liftgen_recipe/prelude/root_graph.
