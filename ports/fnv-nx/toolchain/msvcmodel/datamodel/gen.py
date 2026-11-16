@@ -133,12 +133,41 @@ def main():
             r['exe_source'] = f['exe_source']
         r['citations'] = cit
         rows.append(r)
+    byid = {r['id']: r for r in rows}
+    types, seen = [], set()
+    tables = {}   # type name -> {page: size from the documented table line that names it}
+    for r in rows:
+        for c in r['citations']:
+            for l in cache[os.path.join(a.docs, c['page'])]:
+                m = re.match(r'\|(.*)\|\s*(\d+) bytes?\s*\|\s*$', l)
+                if m:
+                    for n in re.findall(r'\*\*`([a-z_ ]+)`\*\*', m.group(1)):
+                        tables.setdefault(n, {})[c['page']] = int(m.group(2))
+    for t in F['types']:
+        n = t['type']
+        if n in seen:
+            errs.append('T1 type %s listed twice' % n)
+        seen.add(n)
+        if sorted(t) != ['align', 'row', 'signed', 'size', 'type'] or not isinstance(t['signed'], bool) or not all(isinstance(t[k], int) for k in ('size', 'align')):
+            errs.append('T1 %s: entry is {type, size, align, signed, row}' % n)
+            continue
+        if t['row'] not in byid:
+            errs.append('T1 %s names unknown row %s' % (n, t['row']))
+            continue
+        if not byid[t['row']]['citations'] or byid[t['row']]['status'] != 'closed':
+            errs.append('T1 %s: row %s is not a closed row with a documentation citation' % (n, t['row']))
+        if t['align'] != min(t['size'], 8):
+            errs.append('T2 %s: align %d is not min(size %d, 8) (row S13)' % (n, t['align'], t['size']))
+        for pg, sz in tables.get(n, {}).items():
+            if sz != t['size']:
+                errs.append('T3 %s: size %d, the documented table of %s says %d' % (n, t['size'], pg, sz))
+        types.append({**t, 'citations': byid[t['row']]['citations']})
     if errs:
         print('\n'.join(errs))
         return 1
     tmrows = [{'entry': k, **tm[k]} for k in sorted(tm)]
     out = {'format': 'fnvnx-datamodel/2', 'target': F['target'], 'pins': json.load(open(os.path.join(os.path.dirname(a.facts), 'sources.json'))),
-           'rows': rows, 'tm': tmrows, 'crossing_forbidden': F['crossing_forbidden']}
+           'rows': rows, 'types': types, 'tm': tmrows, 'crossing_forbidden': F['crossing_forbidden']}
     target = a.out + '.new' if a.check else a.out
     json.dump(out, open(target, 'w', encoding='utf-8'), indent=1, ensure_ascii=False, sort_keys=False)
     open(target, 'a').write('\n')
@@ -148,6 +177,9 @@ def main():
     for r in rows:
         src = '; '.join('%s:%d' % (c['page'], c['line']) for c in r['citations']) or 'exe: ' + r.get('exe_source', '')
         md.append('| %s | %s | %s | %s | %s | %s |' % (r['id'], r['msvc'], r['gcc'], r['mechanism'], r['status'], src))
+    md += ['', '## Types (%d)' % len(types), '', '| type | size | align | signed | row |', '|---|---|---|---|---|']
+    for t in types:
+        md.append('| %s | %d | %d | %s | %s |' % (t['type'], t['size'], t['align'], 'yes' if t['signed'] else 'no', t['row']))
     md += ['', '## tm.texi entries (%d)' % len(tmrows), '', '| entry | fact or reason |', '|---|---|']
     for t in tmrows:
         md.append('| %s | %s |' % (t['entry'], t['fact'] if 'fact' in t else 'not a layout fact: ' + t['not_layout']))
