@@ -645,20 +645,20 @@ def cmd_rows(sdm, sites, out, public=None, apm=()):
     return 1 if problems else 0
 
 
-ROWS_FORMAT = 'fnvnx-sdmrows/1'
+ROWS_FORMAT = 'fnvnx-sdmrows/2'
 
 
 def cmd_dumprows(sdm, out):
     """the lifter's input `sdmrows`: every SDM opcode-table row (the fields the form match and the flag decision read), the SDM's flag table and the MPX-style NOP flags, in one JSON file.
     The opcode cell `p` is re-parsed on load (parse_opcode), so the file holds the SDM's own text only."""
     import json
-    lines = load(sdm); table = flag_table(lines)
+    lines = load(sdm); recs = unify(flag_rows(lines), [], []); table = Table(recs)      # the SDM's own feature table (no vendor layer): the records are the file's `features`
     nopflags = sorted(set(re.findall(r'are NOP on processors that report CPUID\.\w+H?\.\w+H?:\w+\.(\w+)\[', ' '.join(l.strip() for l in lines))))
     rows = [{k: r[k] for k in ('op', 'modc', 'instr', 'flag', 'fmt', 'sec', 'page', 'line', 'exc', 'exec_as')} for r in sdm_rows(lines, table)]
     with open(out, 'w', newline='\n') as fh:
         json.dump({'format': ROWS_FORMAT, 'sdm_sha256': sha_file(sdm.replace('.txt', '.pdf')) if os.path.exists(sdm.replace('.txt', '.pdf')) else sha_file(sdm),
-                   'flags': {k: [list(t) for t in v] for k, v in sorted(table.items())}, 'nopflags': nopflags, 'rows': rows}, fh, indent=0, sort_keys=True)
-    sys.stdout.write('rows %d flags %d nopflags %d\n' % (len(rows), len(table), len(nopflags)))
+                   'features': recs, 'nopflags': nopflags, 'rows': rows}, fh, indent=0, sort_keys=True)
+    sys.stdout.write('rows %d features %d nopflags %d\n' % (len(rows), len(recs), len(nopflags)))
     return 0
 
 
@@ -668,7 +668,7 @@ def load_rows(path):
     d = json.load(open(path))
     if d.get('format') != ROWS_FORMAT: raise ValueError('sdmrows: %s is not a %s file' % (path, ROWS_FORMAT))
     rows = [dict(r, p=parse_opcode(r['op'])) for r in d['rows']]
-    return rows, {k: [tuple(t) for t in v] for k, v in d['flags'].items()}, frozenset(d['nopflags'])
+    return rows, Table(d['features']), frozenset(d['nopflags'])
 
 
 def cmd_partition(rows, sites, out):

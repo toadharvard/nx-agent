@@ -53,7 +53,7 @@ assert vs[0][0] == 0 and vs[0][4] == 4 and any(v[4] == 4 | 0x200 for v in vs) an
 # class (a) from the SDM rows: xbegin (C7 F8, flag RTM), an unflagged row, an `executed as` row, an ambiguous match
 from proof import sdmfeat
 def row(op, flag, modc='any', exec_as=()): return {'op': op, 'p': sdmfeat.parse_opcode(op), 'flag': flag, 'modc': modc, 'exec_as': list(exec_as)}
-TABLE = {'RTM': [(7, 0, 'EBX', 11)], 'SSE2': [(1, 0, 'EDX', 26)]}
+TABLE = sdmfeat.Table([dict(canonical=n, sdm_name=n, apm_name='', mirror_of='', leaf=l, sub=0, reg=r, bit=b) for n, l, r, b in (('RTM', 7, 'EBX', 11), ('SSE2', 1, 'EDX', 26))])      # the feature table of sdmfeat (records of unify)
 CPU = {(0, 'EAX'): 0x16, (0x80000000, 'EAX'): 0x80000008, (7, 'EBX'): 0, (1, 'EDX'): 1 << 26}
 ROWS = [row('C7 F8', 'RTM'), row('C7 /0', ''), row('0F 28 /r', 'SSE2'), row('0F BC /r', 'RTM', exec_as=('BSF',))]
 assert udsail.sdm_feature(bytes.fromhex('c7f8aabbccdd'), ROWS, TABLE, CPU) == ('RTM', 2)
