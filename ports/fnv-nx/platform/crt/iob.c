@@ -92,6 +92,7 @@ static struct fnvnx_ioinfo g_info[MSVCRT_MAX_FILES] = {
     [0] = IOINFO_STD, [1] = IOINFO_STD, [2] = IOINFO_STD,
     [3 ... MSVCRT_MAX_FILES - 1] = IOINFO_FREE,
 };
+extern struct fnvnx_ioinfo *__pioinfo[MSVCRT_MAX_FILES / MSVCRT_FD_BLOCK_SIZE];   /* the export record takes the address: declared before it */
 FNVNX_EXPORT("msvcrt.dll", "__pioinfo", __pioinfo, "data");
 struct fnvnx_ioinfo *__pioinfo[MSVCRT_MAX_FILES / MSVCRT_FD_BLOCK_SIZE] = {   /* every block exists: MAX_FD == MSVCRT_MAX_FILES */
     g_info + 0, g_info + 32, g_info + 64, g_info + 96,
@@ -112,6 +113,7 @@ struct fnvnx_ioinfo *__pioinfo[MSVCRT_MAX_FILES / MSVCRT_FD_BLOCK_SIZE] = {   /*
     g_info + 1920, g_info + 1952, g_info + 1984, g_info + 2016
 };
 _Static_assert(MAX_FD == MSVCRT_MAX_FILES, "one block pointer per MSVCRT_FD_BLOCK_SIZE descriptors");
+extern struct fnvnx_ioinfo __badioinfo;
 FNVNX_EXPORT("msvcrt.dll", "__badioinfo", __badioinfo, "data");
 struct fnvnx_ioinfo __badioinfo = { 0xFFFFFFFFu, WX_TEXT, { 0 }, 0, { 0 }, 0, 0, { 0 }, { 0 }, 0, { 0 }, 0 };
 /* Wine 9.0 dlls/msvcrt/errno.c msvcrt_set_errno: the CRT errno of a Win32 error (the cases of that switch, grouped as its fallthroughs group them) */
