@@ -2581,3 +2581,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 05:06
 - w28 e9c42d060 (claude/fnv-l1-contract-w28-shard, on cand3b 02f26b3de): MAX_SHARDS removed, any N >= 1; test_shard covers N=1..16, 32, 41, 100 (empty shards). Accepted; it goes into the next cand3b/cand4 head after the 02f26b3de verdict.
 - bottleneck: cand3b verdict at 02f26b3de.
+
+## 2026-11-16 05:12
+- cand3b 02f26b3de verdict: 41/42 green, cold 1047.8 s, warm 34.2 s (was 331.6), selftests 132/132. Only red: oracle 131/132 (test_stageref_cost had no oracle entry), fixed at c93b807f3 (RECIPE.md + oracle.json only). The farm runs the warm verdict at c93b807f3; on green, it merges into the trunk.
+- bottleneck: warm verdict at c93b807f3.
