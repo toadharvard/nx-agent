@@ -19,8 +19,8 @@
 #  4 SD root: a fresh empty card directory (--root); the installed game is mounted in place at the guest's sdmc:/switch/fnv
 #    (--game, verify/bootpath.py). The game is GAME_DIR, else fetched by farm/gamedata_fetch.sh into $FARM_HOME/game
 #    (the exe, INIs, static modules and d3dx9 DLLs; plus every Data item (gamedata/data/* of the artifacts repository: *.bsa, *.esm, Music,
-#    Shaders; every part's and every file's sha256 checked by the fetcher), or only the Data items named in BOOT_DATA_ITEMS; `--no-data`
-#    there means no Data item, a run without the game's archives). FalloutNV.exe must be in it; its sha256 is printed. The fetched
+#    Shaders; every part's and every file's sha256 checked by the fetcher: the declared machine's game directory is the whole installed title, the items the boot
+#    root declares as externals). FalloutNV.exe must be in it; its sha256 is printed. The fetched
 #    Data items are recorded in meta.json (data_items; null with GAME_DIR, whose content the job does not know)
 #    The declared port input (manifest/fonts_mirror.json: the font mirror, fnv-nx-build tools/fonts-wine9 at a pinned commit and tree_sha256) is fetched
 #    by boot.py --declared-inputs through the recipe's external mechanism (recipe.fetch_externals; commit and tree hash verified) and mounted read-only
@@ -143,8 +143,8 @@ log "icount spec: lifted=section:.text.fnvl softfloat=$SOFT"
 DATA_ITEMS=""
 if [ -z "${GAME_DIR:-}" ]; then
   GAME_DIR=$FARM_HOME/game
-  ARTIFACTS_URL=$ARTIFACTS_URL bash "$NX/farm/gamedata_fetch.sh" "$GAME_DIR" ${BOOT_DATA_ITEMS:-} > "$WORK/gamedata.log" 2>&1 || die "farm/gamedata_fetch.sh failed: $(tail -1 "$WORK/gamedata.log" | cut -c1-300)"
-  DATA_ITEMS=$(ls "$GAME_DIR/.gamedata_items" 2> /dev/null | sort | tr '\n' ' '); DATA_ITEMS="fetched:$DATA_ITEMS"
+  ARTIFACTS_URL=$ARTIFACTS_URL bash "$NX/farm/gamedata_fetch.sh" "$GAME_DIR" > "$WORK/gamedata.log" 2>&1 || die "farm/gamedata_fetch.sh failed: $(tail -1 "$WORK/gamedata.log" | cut -c1-300)"
+  DATA_ITEMS=$(sed -n 's/^items: //p' "$GAME_DIR/.gamedata_pins" 2> /dev/null | tr ' ' '\n' | sort | tr '\n' ' '); DATA_ITEMS="fetched:$DATA_ITEMS"
 fi
 [ -d "$GAME_DIR" ] || die "GAME_DIR $GAME_DIR is not a directory"
 [ -s "$GAME_DIR/FalloutNV.exe" ] || die "$GAME_DIR/FalloutNV.exe is missing or empty"
