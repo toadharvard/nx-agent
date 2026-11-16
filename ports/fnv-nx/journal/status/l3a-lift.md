@@ -1869,3 +1869,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - Doing:
   - farm 2: build of every root and the 3 facts tests, after its census;
   - w13: merge base3 into the relift.
+- Owner rule 07:50Z (CLAUDE.md integ 3bd5022ed): a cleared-feature site lowers to a synchronous #UD through SEH, with its precise CONTEXT. The feature is the capstone group, mapped by CPUREF; no certificate or partition.
+  - Doing (w13, in the relift after the base3 merge): the CPUID gate's source becomes capstone's group, and the SDM feature path and udcert feature routing are deleted, with lift/sdm and sdmrows deleted too if nothing else consumes them.
+  - w7's udcert routing is dropped. (E) sgdt/iretd stays only if a site on the path needs it.
+- Doing (w8): FNVNX_FPCR from L1's contract/target (w28 24ec7e128) into lift/rt enter.cc:58.
