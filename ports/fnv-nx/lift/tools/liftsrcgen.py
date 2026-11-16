@@ -47,6 +47,16 @@ def images(modules):
     return [('exe', None, None)] + [(r[0][:-4] if r[0].lower().endswith('.dll') else r[0], r[0], int(r[5], 16)) for r in rows]      # modules.tsv column 6: size_of_image
 
 
+def image_shards(name, n, where, common):
+    """the N shard stages of one image NAME. WHERE is the image-specific part of the lifter's argv (the image file and its facts: `--exe ... --universe ... --jtab ...` for the exe, `--module ...` for a loader row);
+    COMMON is the argv every image shares. The stages of a test root's image (a PE emitted by its generator) come from this same function with its own WHERE: one lifting path, the image an input."""
+    out = []
+    for k in range(n):
+        outs = ['%s/%s_%d.%s' % (name, f, k, x) for f, x in (('texts', 'txt'), ('missing', 'tsv'), ('forms', 'tsv'), ('encs', 'tsv'), ('shapes', 'tsv'), ('inputs', 'json'))]
+        out.append({'tool': LIFTGEN, 'args': where + common + ['--shard', '%d/%d' % (k, n), '--out', '/out/' + name], 'inputs': lift_inputs() + [SDMROWS], 'outputs': outs, '_image': name})
+    return out
+
+
 def recipe(modules, exts=EXTERNALS):
     common = ['--lift', '/in/' + LIFT, '--fpstate', '/uses/ports/fnv-nx/lift/fpfacts/FPSTATE', '--fpdepth', '/uses/ports/fnv-nx/lift/fpfacts/FPDEPTH', '--x86sys', '/uses/ports/fnv-nx/platform/X86SYS', '--sdmrows', '/stage/sdmrows/sdmrows.json', '--cpumodel', '/in/ports/fnv-nx/verify/cpuid_model.json', '--segwrites', '/uses/ports/fnv-nx/lift/facts/SEGWRITES', '--certs', '/in/' + ROOT + '/certs', '--jobs', '4']
     gen, imgargs = [{'tool': SDMTOOL, 'args': ['--sdm', '/uses/ports/fnv-nx/lift/sdm/SDM_TEXT', '--out', '/out'], 'inputs': [LIFT + '/proof/sdmfeat.py', LIFT + '/proof/__init__.py'], 'outputs': ['sdmrows/sdmrows.json']}], []
@@ -54,9 +64,7 @@ def recipe(modules, exts=EXTERNALS):
         n = shards(size)
         where = ['--exe', '/ext/exe/' + EXE, '--universe', '/uses/ports/fnv-nx/lift/facts/FACTS/universe.tsv', '--jtab', '/uses/ports/fnv-nx/lift/facts/FACTS/ehtables.json'] if mod is None else \
                 ['--module', mod, '--modules', MOD, '--moddirs', '/ext/exe:/ext/redist', '--facts-out', '/uses/ports/fnv-nx/lift/facts/FACTS']
-        for k in range(n):
-            outs = ['%s/%s_%d.%s' % (name, f, k, x) for f, x in (('texts', 'txt'), ('missing', 'tsv'), ('forms', 'tsv'), ('encs', 'tsv'), ('shapes', 'tsv'), ('inputs', 'json'))]
-            gen.append({'tool': LIFTGEN, 'args': where + common + ['--shard', '%d/%d' % (k, n), '--out', '/out/' + name], 'inputs': lift_inputs() + [SDMROWS], 'outputs': outs, '_image': name})
+        gen += image_shards(name, n, where, common)
         imgargs.append((name, '/stage/%s=%s' % (name, '/uses/ports/fnv-nx/lift/facts/FACTS/universe.tsv' if mod is None else '/uses/ports/fnv-nx/lift/facts/FACTS/%s/universe.tsv' % name)))
     # finish: the shards' outputs are stage inputs (the stage's key holds their content); the pack tree is its output
     stage = lambda i, p: {'stage': '%s:gen:%d' % (ROOT, i), 'path': p}
