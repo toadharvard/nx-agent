@@ -21,8 +21,14 @@ _I = {}
 _SERIAL = itertools.count()      # node serial numbers: assigned at construction, in construction order (a deterministic key for per-node tables)
 def mask(w): return (1 << w) - 1
 
+class SymbolicBranch(Exception):
+    """a Python-level decision (truth value, comparison, hash, int(), membership) on a DSL node: the value is a symbolic expression, so the decision has no Python answer; a builder computes with it (selidx, ite)"""
+
+
 class N:
     __slots__ = ('op', 'w', 'a', 'x', 'u')
+    def _b(s, *a): raise SymbolicBranch('a DSL node (%s, %d bits) in a Python decision' % (s.op, s.w))
+    __eq__ = __ne__ = __lt__ = __le__ = __gt__ = __ge__ = __bool__ = __int__ = __index__ = __hash__ = __contains__ = __iter__ = __len__ = _b
     def __init__(s, op, w, a, x): s.op, s.w, s.a, s.x, s.u = op, w, a, x, next(_SERIAL)
     def __add__(s, o): return bin_('add', s, o)
     def __radd__(s, o): return bin_('add', o, s)
