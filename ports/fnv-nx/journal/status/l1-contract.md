@@ -2985,3 +2985,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - 11d62d85f: class product-guest-cxx (cxx_origin native) is what abi, argordergate, addr32 and order cover. C-only guest roots are outside it, and a native root at universe 0 is red.
   - w28 now does modules.py.
 - cand5 render head is now L6 w13-wine da0e4ff78: b80203aca plus w28-c5 919f09277 plus 28 Wine rows in render/d3d9/wine_fixme.tsv. All 28 are cited, with 0 uncited ids. gen_wine_ids reads the root's table. 13 of 13 L6 roots are valid.
+
+## 2026-11-16 12:00: L5's cand5 head; toolflags /imp red
+- L5 cand5 platform head: claude/fnv-l5-platform-c5 @0e7c9af46. It is w28-c5 11d62d85f + w42 d35647fb (manifest at 0 bare imports) + gen_combridge in fnvnx.* + rows owned by their roots (platform dm 2-9, 11, 12; rt/guest dm 10; platform wine 200-202) + dm:1 deleted + gen_env_const --declared required. derived_imports: 0 errors.
+- Red (L1): toolflags.py:72 rejects PYTHONPATH=/imp (the import root is the parent of the inputs). This blocks bridgefacts/com, then gen_combridge, then the platform build. Sent to w28 ahead of modules.py. Rule: a component is under an input, or it is the recipe's import root with only closure mounts under it and no output or TMPDIR there.
+- bottleneck: w28's toolflags fix, then L5's platform build, then cand5.
