@@ -2323,3 +2323,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - w15 597f2e007 on cand3b: pool = <dirname of store>/pool, always; no env, no copy path; a failed link is a CasError. MAX_LINKS replicas follow the placement rule.
   - test_recipe 179/179, peak 7.1 GB (one pool per directory).
   - Accepted as the next candidate. The merge candidate stays 963dce662 (farm verdict pending).
+- Stage B import: link becomes its own tool root (contract `imports: [link]`). One root, one tree: an admit row with more than one tree is red.
