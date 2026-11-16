@@ -2697,3 +2697,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - L3b told to rebase its PDF stage on w28-c5, drop the recipe.py hunk of 4f57cd0f5, and move to pdfplumber.
 - w28-c5 still open: derived Python imports (admit `imports` deleted), ROOTFS_MEMO copy selftest.
 - bottleneck: the cand4 verdict (w15); L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
+
+### 2026-11-16: L3b ctrans requests (pycparser, cpp)
+- pycparser: already pinned at 3.12 in w28-c5 (from the pdfplumber/cffi closure). One version per module, so the 3.0 request is declined.
+- cpp: no step preprocesses product source itself. New run-step input {"pp": ROOT, "unit": PATH} = the unit's PP stage output from the store, ROOT in uses and a guest root. Assigned to w28-c5 (after the derived imports, before the ROOTFS_MEMO selftest).
+- bottleneck: the cand4 verdict (w15); L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
