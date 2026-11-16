@@ -744,3 +744,10 @@ After the first frame:
   - `{"archive": ROOT}`: ROOT in `uses`; run steps only; the probes may compile and link only, and a run probe is reported.
 - 2026-11-16 07:00Z: recipe-path (a) at bbfe38219: toolchain-stage1 gcc1 GREEN (452 s), and all 8 plugin stages green. rt failed after 16 s writing into the read-only copy of STAGE1; 6abb87678 makes that copy writable (the store stays untouched). The farm reruns the toolchain root.
 - bottleneck: rt on the recipe path (farm), then proof (b) and the pin commit (w3).
+- 2026-11-16 07:15Z: w2 cand4b 53682dfa7 (measured on scratch4 2f2eb2b2d/434813099, store /tmp/pf/store). The recipe builds `sources <step>:<dir>` and `{"archive": ROOT}`.
+  - gmp green: 516 objects (198 wrappers), gmpgen 04d80b70…
+  - mpfr green: 257 objects (--disable-float128), mpfrgen 56c387bf…, tools/mpfr 3e057520, tree 4bf5632a…
+  - coremath with core-math.patch green: 7 objects, corepatch 1f136d01…
+  - atan2.o: no printf and no exit; it needs mpfr_* and fe*.
+  - GMP is generic C: its aarch64 asm does not target ILP32, and it runs only on atan2's cold branch.
+  - Fix ordered (rule 3): the archive mount carries only the archive; headers come through include_uses for run steps. Then the head goes to L1 for cand5 review.
