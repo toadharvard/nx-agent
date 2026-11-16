@@ -47,7 +47,7 @@ assert gatefile.write('t', 1, 1, [], '') is None
 os.environ['GATE_OUT'] = d
 gatefile.write('t', 100, 40, ['%d' % i for i in range(60, 0, -1)], 'x')
 r = json.load(open(d + '/t.json'))
-assert list(r) == sorted(r) and r['format'] == 'fnvnx-gate/1' and r['status'] == 'red' and len(r['uncertified']) == 50
+assert list(r) == sorted(r) and r['format'] == 'fnvnx-gate/1' and r['status'] == 'red' and len(r['uncertified']) == 60 and r['uncertified_n'] == 60   # the whole list, no cap
 assert r['uncertified'] == sorted(r['uncertified'])
 gatefile.write('t', 3, 3, [], 'x')
 assert json.load(open(d + '/t.json'))['status'] == 'green'

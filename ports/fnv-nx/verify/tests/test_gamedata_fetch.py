@@ -81,6 +81,7 @@ def toy_checkout(td, pins, extra=()):
     git(chk, "init", "-q")
     for d in ("verify", "link", "contract"):
         shutil.copytree(os.path.join(NX, d), os.path.join(chk, "ports/fnv-nx", d), ignore=shutil.ignore_patterns("__pycache__", "tests"))
+    os.symlink("fnv-nx", os.path.join(chk, "ports/fnvnx"))   # the one module path fnvnx.<rel>
     os.makedirs(os.path.join(chk, "ports/fnv-nx/farm"))
     os.makedirs(os.path.join(chk, "ports/fnv-nx/toolchain/msvcmodel"))
     shutil.copy(os.path.join(NX, "toolchain/msvcmodel/DATAMODEL.json"), os.path.join(chk, "ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json"))   # recipe.py reads the data model when it is imported

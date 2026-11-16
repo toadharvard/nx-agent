@@ -35,6 +35,8 @@ def commit(d):
 def run(d, cache, out):
     os.makedirs(out, exist_ok=True)
     p = subprocess.run([sys.executable, "-I", T + "verify/gate_tests.py", "--jobs", "2"], cwd=d, env=dict(os.environ, GATE_OUT=out, GATE_CACHE=cache), capture_output=True, text=True)
+    if not os.path.exists(os.path.join(out, "selftests.json")):
+        raise SystemExit("gate_tests wrote no selftests.json: rc=%s stderr=%s" % (p.returncode, p.stderr[-600:]))
     r = json.load(open(os.path.join(out, "selftests.json")))
     return p.returncode, r, {os.path.basename(f["name"]): f for f in r["files"]}
 
@@ -42,6 +44,8 @@ PASS_BODY = "import os\nassert os.environ['FNVNX_INPUT_%s'], 'no input'\nd = os.
 
 with tempfile.TemporaryDirectory() as d:
     subprocess.run("git ls-files -z ports/fnv-nx | xargs -0 cp --parents -t " + d, shell=True, cwd=REPO, check=True)
+    if not os.path.lexists(os.path.join(d, "ports/fnvnx")):
+        os.symlink("fnv-nx", os.path.join(d, "ports/fnvnx"))   # the one module path fnvnx.<rel>; the symlink is a tracked file of the real tree
     subprocess.run(["git", "init", "-q"], cwd=d, check=True)
     adm = json.load(open(os.path.join(d, T + "verify/admit.json")))
     adm["roots"] = [{"path": T + "h", "class": "header"},
