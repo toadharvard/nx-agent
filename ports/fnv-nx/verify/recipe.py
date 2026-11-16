@@ -2499,16 +2499,22 @@ def _dynsyms(path, defined):
     return {t[-1].split("@")[0] for t in rows if defined or (len(t) >= 2 and t[-2] not in ("w", "v"))}
 
 
-def plugin_languages(cc, cxx, sos):
-    """{kind: [plugin names that front end can load]} for kind "c" (cc1) and "cxx" (cc1plus), in the order of SOS ({name: path of the .so}). A plugin
+def plugin_languages(prog, sos):
+    """{kind: [plugin names that front end can load]} for kind "c" (cc1) and "cxx" (cc1plus), in the order of SOS ({name: path of the .so}); PROG = {kind: host path of that front end's program},
+    the compiler's own answers (`-print-prog-name=cc1` / `cc1plus`, the cfact stages). A plugin
     loads into a front end iff it has no STRONG undefined reference to a symbol that only the OTHER front end defines: the symbols only cc1plus defines are the dynamic symbols
     of cc1plus not defined by cc1, and the other way round (nm -D of the two compiler programs and of the plugin: a static fact of the ELF files,
     not a name or a run). A plugin that references C++-front-end symbols (cp_global_trees, ...) is not loadable by cc1: there is no C instance of it."""
-    prog = {k: subprocess.run([d, "-print-prog-name=" + p], capture_output=True, text=True).stdout.strip() for k, d, p in (("c", cc, "cc1"), ("cxx", cxx, "cc1plus"))}
     defs = {k: _dynsyms(v, True) for k, v in prog.items()}
     only = {"c": defs["c"] - defs["cxx"], "cxx": defs["cxx"] - defs["c"]}   # symbols only that front end defines
     refs = {n: _dynsyms(p, False) for n, p in sos.items()}
     return {k: [n for n in sos if not (refs[n] & only["cxx" if k == "c" else "c"])] for k in ("c", "cxx")}
+
+
+def front_end_progs(cc, cxx):
+    """{kind: path of the front end program} of the HOST compilers CC and CXX (`-print-prog-name=cc1` / `cc1plus`): for the gates and tests that run a compiler on the host over the
+    cache's external tree (gate_datamodel, test_guest). The build itself asks its compiler through the stage cfact (Recipe.compiler_fact), never through this."""
+    return {k: subprocess.run([d, "-print-prog-name=" + p], capture_output=True, text=True).stdout.strip() for k, d, p in (("c", cc, "cc1"), ("cxx", cxx, "cc1plus"))}
 
 
 def predefined(driver, kind, flags):
@@ -3629,12 +3635,13 @@ class Job:
         return out
 
     def compiler_fact(self, query):
-        """The answer of this root's external compiler to QUERY (a driver flag: -dumpmachine, -print-file-name=X), from the hermetic stage `cfact:<external>:<query>`
-        (compilerfact_doc, keyed by the compiler tree), never from a direct call. -> stdout stripped; paths in it are sandbox paths (the external's `at`)."""
+        """The answer of this root's compiler (its external, or the distribution compiler of env.json) to QUERY (a driver flag: -dumpmachine, -print-file-name=X,
+        -print-prog-name=X, -print-search-dirs), from the hermetic stage `cfact:<external|host>:<query>` (compilerfact_doc, keyed by the compiler's tree and runtime), never from a
+        direct call. -> stdout stripped; paths in it are sandbox paths (an external's `at`; a distribution compiler's own paths)."""
         c = self.rec["compiler"]
         drv = self.drivers()[1]
-        ins = sorted(self.toolrt([drv], {c["external"]})[1]["inputs"], key=lambda i: i["at"])
-        res = self.stage(compilerfact_doc(c["external"], drv, query, ins))[1]
+        ins = sorted(self.toolrt([drv], {c["external"]} if "external" in c else set())[1]["inputs"], key=lambda i: i["at"])
+        res = self.stage(compilerfact_doc(c.get("external", "host"), drv, query, ins))[1]
         return open(cas._obj(self.store, cas.manifest(res["stdout"], self.store)), errors="replace").read().strip()
 
     def plugin_env(self, ws):
@@ -3651,6 +3658,7 @@ class Job:
         if got != want:
             raise BuildRed({"stage": "plugin", "exit": None, "stderr": ["compiler %s targets %r, not the guest platform %r (targets.json): it loads no plugin" % (c["cxx"], got, want)]})
         e = self.ext[c["external"]]
+        cxx = e["host"] + "/" + c["cxx"]
         pdir = self.compiler_fact("-print-file-name=plugin")   # a path inside the compiler's external, at its mount point
         if not under(pdir, e["at"]) or not os.path.isfile(os.path.join(self.hostpath(pdir), "include", "gcc-plugin.h")):
             raise BuildRed({"stage": "plugin", "exit": None, "stderr": ["no plugin headers of %s in %r (the loading compiler's tree)" % (c["cxx"], pdir)]})
@@ -3756,7 +3764,7 @@ class Job:
         sos = {}
         for n, t, _ in self.built:   # the plugins each front end can load (plugin_languages): the stage loads exactly those, the gate reads the same fact
             sos[n] = cas._obj(self.store, cas.manifest(t, self.store)["entries"][n + ".so"])
-        loadable = plugin_languages(self.hostpath(drv["c"]), self.hostpath(drv["cxx"]), sos) if sos else {"c": [], "cxx": []}
+        loadable = plugin_languages({k: self.hostpath(self.compiler_fact("-print-prog-name=" + p)) for k, p in (("c", "cc1"), ("cxx", "cc1plus"))}, sos) if sos else {"c": [], "cxx": []}
         # RULE: the CC stage (-fpreprocessed, input unit.ii) mounts, and so keys on, only the compiler (its external, if it is one), the
         # declared plugin .so files and unit.ii. Any other external is not mounted there: what is not mounted cannot be read, so the object
         # does not depend on it by construction (a new commit of such an external changes the PP keys, not the CC keys).
@@ -3820,13 +3828,11 @@ class Job:
     def ld_tool(self):
         """(path of the pinned ld, its tool runtime) for this root's link stages: the linker of the compiler, with the compiler's external and that of `link.libs` mounted."""
         lk, cc = self.rec["link"], self.drivers()[0]
-        pn = subprocess.run([self.hostpath(cc), "-print-prog-name=ld"], capture_output=True, text=True).stdout.strip()
+        pn = self.compiler_fact("-print-prog-name=ld")   # the compiler's own answer (stage cfact), a sandbox path
         ld = unitstage.prog(posixpath.normpath(pn))
         # the ld stage reads the compiler's external (the linker is in it, when the compiler is one) and the external of link.libs: it mounts those, no other
         names = ({self.rec["compiler"]["external"]} if "external" in self.rec["compiler"] else set()) | ({lk["libs"]["external"]} if "external" in (lk.get("libs") or {}) else set())
         if "external" in self.rec["compiler"]:
-            e = self.ext[self.rec["compiler"]["external"]]
-            ld = e["at"] + ld[len(e["host"]):] if ld.startswith(e["host"] + "/") else ld
             rt = self.toolrt([cc], names)[1]
         else:
             rt = self.cached_rt("tool-ld-" + hashlib.sha256(repr((ld, sorted((e["at"], e["tree"]) for n, e in self.ext.items() if n in names))).encode()).hexdigest()[:16], lambda: self.plus(runtime.build_tool(self.store, [ld], []), names))[1]
@@ -3957,7 +3963,7 @@ class Job:
         declared inputs. -> ({interp, startfiles, endfiles}, [the declared input trees of those files for the link stage])."""
         cxx = self.drivers()[1]
         host = self.hostpath(cxx)
-        sd = subprocess.run([host, "-print-search-dirs"], capture_output=True, text=True).stdout
+        sd = self.compiler_fact("-print-search-dirs")   # the compiler's own answer (stage cfact)
         libs = next(ln for ln in sd.splitlines() if ln.startswith("libraries:")).split("=", 1)[1].split(":")
         crt = lambda d: [f for f in sorted(os.listdir(d)) if f.endswith(".o") and os.path.isfile(os.path.join(d, f))]  # noqa: E731
         dirs = sorted({os.path.realpath(posixpath.normpath(d)) for d in libs if os.path.isdir(d)})
@@ -4011,14 +4017,13 @@ class Job:
         -> the record (elffacts.record). BuildRed(stage ldfacts:<root>) if the pinned readelf is not a file of a pinned package, or a layout does not fit."""
         lk, stage = self.rec["link"], "ldfacts:" + self.root
         name = lk["output"]
-        pn = subprocess.run([self.hostpath(self.drivers()[0]), "-print-prog-name=ld"], capture_output=True, text=True).stdout.strip()
+        pn = self.compiler_fact("-print-prog-name=ld")   # the compiler's own answer (stage cfact), a sandbox path
         d, b = posixpath.split(posixpath.normpath(unitstage.prog(pn)))
         rd = posixpath.join(d, b[:-2] + "readelf") if b.endswith("ld") else ""
         # pinned by content when the linker lies in the compiler's declared external (commit + tree_sha256: the compiler's own binutils, mounted like its ld);
         # else a file of a package env.json pins
         ce = self.ext.get(self.rec["compiler"].get("external")) if "external" in self.rec["compiler"] else None
-        if ce is not None and rd.startswith(ce["host"] + "/"):
-            rd = ce["at"] + rd[len(ce["host"]):]
+        if ce is not None and rd.startswith(ce["at"] + "/"):
             rt = self.toolrt([self.drivers()[0]], {self.rec["compiler"]["external"]})[1]
         else:
             bad = envcheck.system_lib_errors([rd], json.load(open(os.path.join(self.repo, ENV_JSON)))["packages"], envcheck.file_owners()) if rd else ["the linker %r has no readelf beside it" % b]
