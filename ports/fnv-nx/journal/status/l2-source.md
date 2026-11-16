@@ -678,3 +678,4 @@ After the first frame:
   - test_plugins 85/88. The 3 failures are L1 rule tests on the old semantics and went to L1. The __builtin_apply result varies between runs; w2 is isolating it.
   - New for w2: NAMES-INTN, sized-integer MSVC codes keyed by (precision, signedness) through DATAMODEL. The count of nodecor rows the exe or a module names must be 0.
   - Still owed: the named decltype diagnostic, msvcrt on w28, ENTRY1-ATOMIC in C.
+- 2026-11-16 04:25Z: the base3 merge check (L3a w8, 0dedb050e, 60 roots) has 1 red: the toolchain host root loads plugins, and the host plugin set is empty. To w3 inside COMPILER-STAGE: the plugins are outputs of the root; units compiled with plugins go in a guest-target root.
