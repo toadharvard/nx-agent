@@ -342,7 +342,6 @@
     }
    ],
    "subject": [
-    "ports/fnv-nx/lift/tools/udcert.py",
     "ports/fnv-nx/platform/declared/x86sys.json"
    ]
   },
