@@ -1321,6 +1321,15 @@ def header_dirs(rec, root, roots, repo=".", variant=""):
     return sorted(dirs)
 
 
+def deb_mirror():
+    """The deb mirror pin {commit, ...} of verify/env.json (debs.mirror: the private fnv-nx-build branch tools/verdict-debs); {} when unreadable."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "env.json")) as f:
+            return json.load(f)["debs"]["mirror"]
+    except (OSError, KeyError, ValueError):
+        return {}
+
+
 def deb_pins():
     """The declared debs {name: {version, sha256, ...}} of verify/env.json (the one record of the declared system's packages); {} when unreadable."""
     try:
@@ -1860,6 +1869,19 @@ def publish_dir(tmp, final):
             raise
 
 
+def ensure_bare(extcache, commit):
+    """The bare fetch EXTCACHE/<commit> of the artifacts repository at exactly COMMIT (shallow, atomic): the one place a pinned commit is fetched, by externals and by the deb mirror."""
+    bare = os.path.join(extcache, commit)
+    if not os.path.isdir(bare):
+        env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+        tmp = "%s.tmp%d-%s" % (bare, os.getpid(), os.urandom(4).hex())
+        os.makedirs(tmp)
+        for cmd in (["init", "-q", "--bare"], ["fetch", "-q", "--depth", "1", artifacts_url(extcache), commit]):
+            subprocess.run(["git", "-C", tmp] + cmd, env=env, check=True, capture_output=True)
+        publish_dir(tmp, bare)
+    return bare
+
+
 def fetch_externals(exts, store, extcache, ws):
     """Content-pinned inputs: each external of EXTS fetched by exact commit into the bare cache EXTCACHE/<commit>, checked out ONCE at
     EXTCACHE/<commit>.co, ingested into the CAS STORE; its tree hash must equal tree_sha256 (BuildRed naming the external). -> {name:
@@ -1879,12 +1901,7 @@ def fetch_externals(exts, store, extcache, ws):
             continue
         tmpco = None
         try:
-            if not os.path.isdir(bare):
-                tmp = "%s.tmp%d-%s" % (bare, os.getpid(), os.urandom(4).hex())
-                os.makedirs(tmp)
-                for cmd in (["init", "-q", "--bare"], ["fetch", "-q", "--depth", "1", url, e["commit"]]):
-                    subprocess.run(["git", "-C", tmp] + cmd, env=env, check=True, capture_output=True)
-                publish_dir(tmp, bare)
+            ensure_bare(extcache, e["commit"])
             dest = co
             if not os.path.isdir(co):
                 dest = tmpco = "%s.tmp%d-%s" % (co, os.getpid(), os.urandom(4).hex())
@@ -2643,6 +2660,9 @@ class Job:
                         os.symlink(os.readlink(src), os.path.join(union, p))
                     else:
                         shutil.copy2(src, os.path.join(union, p), follow_symlinks=False)
+        bad = rootfs_dangling(union)
+        if bad:
+            raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["a symlink of the assembled root leaves the declared closure (its target is in no deb of the step): " + "; ".join(bad[:8])]})
         ins, links = [], []
         for name in sorted(os.listdir(union)):
             p = os.path.join(union, name)
@@ -2670,20 +2690,34 @@ class Job:
         return cas.ingest(d, self.store)
 
     def _deb_tree(self, tmp, name, pin):
-        """The installed files of the env.json package NAME (dpkg -L: regular files and symlinks) under <tmp>/deb-<name>/<absolute path>. The package
-        is the pinned one (envcheck checks version and the deb's sha256 pin: debs.packages.<name>.sha256, which is also in the stage key by `env`)."""
-        v = subprocess.run(["dpkg-query", "-W", "-f=${Version}", name], capture_output=True, text=True).stdout
-        if v != pin["version"]:
-            raise BuildRed({"stage": "deb:" + name, "exit": None, "stderr": ["package %s is installed at %r, env.json pins %s" % (name, v, pin["version"])]})
+        """The files of the env.json package NAME under <tmp>/deb-<name>/<absolute path>: the data members of the pinned deb itself (the mirror's debs/<file> at the pinned
+        mirror commit, checked against debs.packages.<name>.sha256), unpacked by `dpkg-deb -x`, with the symlink targets the archive holds. Nothing is read from the host's
+        installed files, alternatives or maintainer scripts: the tree is a function of the pin alone. An absolute link target is made relative to the package tree."""
+        mir = deb_mirror()
+        try:
+            bare = ensure_bare(self.extcache, mir["commit"])
+            blob = subprocess.run(["git", "--git-dir", bare, "show", "%s:debs/%s" % (mir["commit"], pin["file"])], check=True, capture_output=True).stdout
+        except (KeyError, subprocess.CalledProcessError, OSError) as x:
+            raise BuildRed({"stage": "deb:" + name, "exit": None, "stderr": ["the deb %s of the mirror pin cannot be fetched: %s" % (pin.get("file"), (getattr(x, "stderr", b"") or str(x).encode()).decode(errors="replace")[-300:])]})
+        if hashlib.sha256(blob).hexdigest() != pin["sha256"]:
+            raise BuildRed({"stage": "deb:" + name, "exit": None, "stderr": ["the deb %s of the mirror has sha256 %s, env.json pins %s" % (pin["file"], hashlib.sha256(blob).hexdigest(), pin["sha256"])]})
         dest = os.path.join(tmp, "deb-" + name)
-        for p in subprocess.run(["dpkg-query", "-L", name], capture_output=True, text=True).stdout.splitlines():
-            if os.path.isfile(p) or os.path.islink(p):
-                os.makedirs(os.path.dirname(dest + p), exist_ok=True)
-                if os.path.islink(p):   # an absolute target is made relative to the package tree: it must resolve inside /deb/<name>
-                    t = os.readlink(p)
-                    os.symlink(os.path.relpath(t, os.path.dirname(p)) if t.startswith("/") else t, dest + p)
-                else:
-                    shutil.copy2(p, dest + p)
+        debf = os.path.join(tmp, "pkg-" + name + ".deb")
+        with open(debf, "wb") as f:
+            f.write(blob)
+        os.makedirs(dest)
+        r = subprocess.run(["dpkg-deb", "-x", debf, dest], capture_output=True, text=True)
+        os.unlink(debf)
+        if r.returncode:
+            raise BuildRed({"stage": "deb:" + name, "exit": r.returncode, "stderr": r.stderr.splitlines()[-20:]})
+        for dp, dn, fn in os.walk(dest):
+            for n in dn + fn:
+                q = os.path.join(dp, n)
+                if os.path.islink(q):
+                    t = os.readlink(q)
+                    if t.startswith("/"):
+                        os.unlink(q)
+                        os.symlink(os.path.relpath(t, os.path.dirname(q[len(dest):]) or "/"), q)
         return cas.ingest(dest, self.store)
 
     def generate_one(self, ws, i, g, py, xin):
@@ -3600,6 +3634,43 @@ def cpu_mismatch(pin, text=None):
             if have != want:
                 bad.append("processor %d %s is %r, reference %r" % (i, name, have, want))
     return bad[:6] if procs else ["/proc/cpuinfo lists no processor"]
+
+
+SANDBOX_ROOTS = ("/proc", "/dev", "/tmp", "/in", "/out", "/work", "/scratch")
+
+
+def rootfs_dangling(union, limit=40):
+    """[\"/link -> target\"] of the symlinks of the assembled root UNION whose target (absolute targets taken in the root, relative ones from the link's directory, every
+    component followed) does not exist in it: the closure of the step's debs is the whole root, so such a link is red. Targets in the sandbox's own directories are the sandbox's."""
+    def exists(path):
+        parts, cur = [x for x in path.split("/") if x], ""
+        for _ in range(limit * 8):
+            if not parts:
+                return True
+            nxt = cur + "/" + parts[0]
+            if nxt in SANDBOX_ROOTS:
+                return True
+            real = union + nxt
+            if os.path.islink(real):
+                limit_ = os.readlink(real)
+                full = os.path.normpath(limit_ if limit_.startswith("/") else os.path.join(cur or "/", limit_))
+                parts = [x for x in full.split("/") if x] + parts[1:]
+                cur = ""
+                continue
+            if not os.path.lexists(real):
+                return False
+            cur, parts = nxt, parts[1:]
+        return False
+    out = []
+    for dp, dn, fn in os.walk(union):
+        for n in dn + fn:
+            q = os.path.join(dp, n)
+            if os.path.islink(q):
+                t = os.readlink(q)
+                full = os.path.normpath(t if t.startswith("/") else os.path.join("/" + os.path.relpath(dp, union), t))
+                if not exists(full):
+                    out.append("/%s -> %s" % (os.path.relpath(q, union), t))
+    return sorted(out)
 
 
 def deb_resolve(path, tmp, debs, limit=40):
