@@ -2560,6 +2560,12 @@ def driver_doc(stage, drv, flags, mode, tail, inputs):
             "env": dict(unitstage.ENV, PATH=os.path.dirname(drv)), "outputs": ["/out"], "inputs": inputs}
 
 
+def compilerfact_doc(name, drv, query, inputs):
+    """The stage doc of one compiler fact (`cfact:<external>:<query>`): the compiler's own answer to QUERY (`-dumpmachine`, `-print-file-name=plugin`, ...), run hermetically
+    from the compiler tree alone. A pure function of (external, driver, query, tree): the same compiler gives the same key, so a cached answer is reused, never asked twice."""
+    return driver_doc("cfact:%s:%s" % (name, query), drv, [], [], [query], inputs)
+
+
 def shard_of(key, n):
     """The shard of a unit whose first-stage key is KEY (hex): int(KEY, 16) mod N. The first-stage key is the PP stage key on the whole trees
     (unitstage.Build.first_key), a function of the unit and the declared inputs, so every shard build of one checkout assigns the same shard."""
@@ -3622,27 +3628,33 @@ class Job:
         out += ["/uses/%s/%s" % (u["root"], u["output"]) for u in self.rec.get("include_uses", [])]   # the mounted directory output of another root, an absolute path inside the sandbox
         return out
 
+    def compiler_fact(self, query):
+        """The answer of this root's external compiler to QUERY (a driver flag: -dumpmachine, -print-file-name=X), from the hermetic stage `cfact:<external>:<query>`
+        (compilerfact_doc, keyed by the compiler tree), never from a direct call. -> stdout stripped; paths in it are sandbox paths (the external's `at`)."""
+        c = self.rec["compiler"]
+        drv = self.drivers()[1]
+        ins = sorted(self.toolrt([drv], {c["external"]})[1]["inputs"], key=lambda i: i["at"])
+        res = self.stage(compilerfact_doc(c["external"], drv, query, ins))[1]
+        return open(cas._obj(self.store, cas.manifest(res["stdout"], self.store)), errors="replace").read().strip()
+
     def plugin_env(self, ws):
         """The common inputs of every plugin stage: the host driver `PLUGIN_CXX` (derived from env.json), the plugin headers of the compiler of THIS root
-        (`cxx -print-file-name=plugin` of its external: a plugin is built against the headers of the exact compiler that loads it), the tool runtime and the startup files -> dict.
-        The compiler must target the declared guest platform: its `-dumpmachine` is the triplet of targets.json (a fact of the compiler, not its name). A plugin stage's key is
+        (its fact `-print-file-name=plugin`: a plugin is built against the headers of the exact compiler that loads it), the tool runtime and the startup files -> dict.
+        The compiler must target the declared guest platform: its fact `-dumpmachine` is the triplet of targets.json (a fact of the compiler, not its name). A plugin stage's key is
         f(source content, host compiler, flags, headers, the loading compiler's tree): two roots with the same compiler share it."""
         host = os.path.join(hostprofile.HOST["bindir"], PLUGIN_CXX)
         c = self.rec.get("compiler") or {}
         if "external" not in c or c["external"] not in self.ext:
             raise BuildRed({"stage": "plugin", "exit": None, "stderr": ["root %s: plugins need an external compiler that targets the guest platform" % self.root]})
-        cxx = self.ext[c["external"]]["host"] + "/" + c["cxx"]
         want = _targets.load()["guest_platform"]["triplet"]
-        got = subprocess.run([cxx, "-dumpmachine"], capture_output=True, text=True).stdout.strip()
+        got = self.compiler_fact("-dumpmachine")
         if got != want:
-            raise BuildRed({"stage": "plugin", "exit": None, "stderr": ["compiler %s targets %r, not the guest platform %r (targets.json): it loads no plugin" % (cxx, got, want)]})
-        pdir = subprocess.run([cxx, "-print-file-name=plugin"], capture_output=True, text=True).stdout.strip()
-        if not os.path.isfile(os.path.join(pdir, "include", "gcc-plugin.h")):
-            raise BuildRed({"stage": "plugin", "exit": None, "stderr": ["no plugin headers of %s in %s (the loading compiler's tree)" % (cxx, pdir)]})
-        inc, trees = pdir, [pdir]
-        for e in self.ext.values():   # headers inside an external compiler: its tree is a declared input at `at` already
-            if under(pdir, e["host"]):
-                inc, trees = e["at"] + pdir[len(e["host"]):], []
+            raise BuildRed({"stage": "plugin", "exit": None, "stderr": ["compiler %s targets %r, not the guest platform %r (targets.json): it loads no plugin" % (c["cxx"], got, want)]})
+        e = self.ext[c["external"]]
+        pdir = self.compiler_fact("-print-file-name=plugin")   # a path inside the compiler's external, at its mount point
+        if not under(pdir, e["at"]) or not os.path.isfile(os.path.join(self.hostpath(pdir), "include", "gcc-plugin.h")):
+            raise BuildRed({"stage": "plugin", "exit": None, "stderr": ["no plugin headers of %s in %r (the loading compiler's tree)" % (c["cxx"], pdir)]})
+        inc, trees, pdir = pdir, [], self.hostpath(pdir)   # headers inside the external compiler: its tree is a declared input at `at` already
 
         pnames = {n for n, e in self.ext.items() if under(cxx, e["host"]) or under(pdir, e["host"])}   # the externals the plugin stage reads: the one holding its compiler, no other
 

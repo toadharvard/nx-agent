@@ -56,9 +56,10 @@ import tempfile  # noqa: E402
 R = [c for c in vars(recipe).values() if isinstance(c, type) and hasattr(c, "plugin_env")][0]
 
 
-def env_err(rec, ext):
+def env_err(rec, ext, facts=None):
     r = R.__new__(R)
     r.rec, r.ext, r.root = rec, ext, ROOT
+    r.compiler_fact = lambda q: (facts or {})[q]   # the stage's answer; the real method runs the hermetic stage cfact:<external>:<query>
     try:
         r.plugin_env(tempfile.mkdtemp())
     except recipe.BuildRed as x:
@@ -66,10 +67,13 @@ def env_err(rec, ext):
     return ""
 
 
-d = tempfile.mkdtemp()
-os.makedirs(d + "/bin")
-open(d + "/bin/cxx", "w").write("#!/bin/sh\n[ \"$1\" = -dumpmachine ] && echo x86_64-linux-gnu\n")
-os.chmod(d + "/bin/cxx", 0o755)
-check("a compiler whose -dumpmachine is not the guest triplet loads no plugin", "targets 'x86_64-linux-gnu'" in env_err({"compiler": {"external": "h", "cxx": "bin/cxx"}}, {"h": {"host": d, "at": "/ext/h"}}))
+c = {"compiler": {"external": "h", "cxx": "bin/cxx"}}
+x = {"h": {"host": "/nonexistent", "at": "/ext/h"}}
+check("a compiler whose -dumpmachine fact is not the guest triplet loads no plugin", "targets 'x86_64-linux-gnu'" in env_err(c, x, {"-dumpmachine": "x86_64-linux-gnu"}))
+check("a plugin header dir outside the compiler's tree is red", "no plugin headers" in env_err(c, x, {"-dumpmachine": recipe._targets.load()["guest_platform"]["triplet"], "-print-file-name=plugin": "/usr/lib/gcc/plugin"}))
 check("a host-driver compiler has no plugin env", "external compiler" in env_err({"compiler": {"cxx": "g++"}}, {}))
+ins = [{"at": "/ext/h", "tree": "t1"}]
+d1, d2 = recipe.compilerfact_doc("h", "/ext/h/bin/cxx", "-dumpmachine", ins), recipe.compilerfact_doc("h", "/ext/h/bin/cxx", "-dumpmachine", list(ins))
+check("the same compiler and query make the same stage doc, hence the same key: a cached answer is reused, no second compiler run", d1 == d2 and d1["stage"] == "cfact:h:-dumpmachine" and d1["argv"][-1] == "-dumpmachine", d1)
+check("another compiler tree makes another stage", recipe.compilerfact_doc("h", "/ext/h/bin/cxx", "-dumpmachine", [{"at": "/ext/h", "tree": "t2"}]) != d1)
 sys.exit(1 if fails else 0)
