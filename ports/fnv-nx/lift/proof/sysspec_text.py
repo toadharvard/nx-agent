@@ -1,6 +1,7 @@
 """Result texts of the system specs (sysspec_gap.py, sysspec_int.py): messages only, no SDM quotes (the quote checker reads the spec files, not this one)."""
 GAP = {
     'addr': 'address-size prefix 0x67 (16-bit addressing is outside this spec)',
+    'addrres': 'address-size prefix 0x67 on an instruction with no memory operand: the SDM calls that use reserved (no behaviour is defined)',
     'seg': 'segment override (the spec is the flat DS/ES of the declared machine)',
     'rep': 'LOCK/REP prefix 0x%02x',
     'segmem': 'segment override on the memory operand',
