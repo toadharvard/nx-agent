@@ -1733,3 +1733,15 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Not global yet: d3dx9_31/38 are being added.
   - 3dnow and avx go to udcert as #UD sites.
 - Doing (w7): (B), off base3 be2f01990 plus L3b 82a488a89.
+
+## 2026-11-16 05:35 — density rules 1-3 built; one farm run
+- Done (w8): the recipe check at base3 be2f01990: 64 roots valid, 0 red (87 admitted paths, 23 of them not roots). No regression from 61.
+- Done (w13): rule 3, flags liveness, claude/fnv-l3a-lift-w13-flaglive @699a71597. No Form text changed. The dropped set is in pack/flagdrop.tsv.
+  - Hand buffers: add;add;ret 1268→823, prologue 4435→1969, ALU chain 6207→2634.
+  - The 52 transfer buffers are unchanged.
+  - Sent to L3b for the FLAGLIVE check. The gs_guard escape needs confirming.
+- Done (w12): heads with the same recipe: B 0e2f98c0d, R1 33dd527b5, R12 e0e078d1e. R123 is pending.
+- Queued (farm 2, after the path census and the exe modlift run): density over B/R1/R12/R123, all 7 images.
+  - It measures bytes, B/insn and CPU-s, plus the PP token diffs B/R12 (must be equal) and R12/R123, and a CC probe.
+- Red base tests, identical on B: defdisp, descclass (L1 sympair_kinds.inc), liftgen_recipe, prelude, root_graph cycle. Doing (w13): the cleanup on base3.
+- bottleneck: farm 2's queue (path census → exe modlift → density).
