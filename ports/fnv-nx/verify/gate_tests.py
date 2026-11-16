@@ -195,39 +195,7 @@ def roots_of(path):
         except OSError:
             continue
         out |= set(TEST_ROOT.findall(text))
-        for m in ROOT_LIT.findall(text):
-            for q in (m, os.path.dirname(m)):   # `<root>/build.json`, `<root>/inc`: the root is the nearest ancestor with a recipe
-                if is_recipe(os.path.join(root, q, "build.json")):
-                    out.add(q)
-                    break
-    return sorted(out)
-
-def cut_of(path, admitted):
-    """The roots of a test file that are not admitted (verify/admit.json): when there is one, the test belongs to the CUT of this branch (its root is not part of it), reported as
-    `cut:test:<file> (root <r>)` and never run: a test is certified against the roots it builds, and a root that is not admitted is not built."""
-    return [r for r in roots_of(path) if r not in admitted]
-
-READS = re.compile(r"^#[ \t]*reads:[ \t]*(.*)$", re.M)
-
-def reads_of(path):
-    """The data roots a test file declares (`# reads: <path> <path>...` lines of its text): repo-relative files or directories its run reads besides its import closure."""
-    try:
-        text = open(path).read()
-    except OSError:
-        return []
-    return sorted({x for m in READS.findall(text) for x in m.replace(",", " ").split()})
-
-def mount_files(path):
-    """{repo-relative path: absolute path} of the MOUNT of an untraced test file: its import closure (closure_of) and every file under its declared `# reads:` roots (those of the test file and of every module of its closure, one rule: a file a module reads is part of its closure as an import is), without
-    __pycache__ and .git. An untraced test runs on this and nothing else of the checkout (mount_run): a read outside it fails, so a missing declaration is a red test."""
-    root = os.path.realpath(os.getcwd())
-    out = {}
-    for f in closure_of(path)[1]:
-        try:
-            text = open(f).read()
-        except OSError:
-            continue
-        out |= set(TEST_ROOT.findall(text))
+        out |= {r for r in reads_of(f) if r != "@admitted-recipes" and not os.path.exists(os.path.join(root, r))}   # a declared input (`# reads:`) this tree does not hold: the root it names was cut
         for m in ROOT_LIT.findall(text):
             for q in (m, os.path.dirname(m)):   # `<root>/build.json`, `<root>/inc`: the root is the nearest ancestor with a recipe
                 if is_recipe(os.path.join(root, q, "build.json")):
@@ -263,7 +231,13 @@ def mount_files(path):
         if a.startswith(root + os.sep):
             out[a[len(root) + 1:]] = a
     mods = [f for f in closure_of(path)[1]]
-    for r in sorted({x for p in [path] + mods for x in reads_of(p)}):
+    wanted = sorted({x for p in [path] + mods for x in reads_of(p)})
+    if "@admitted-recipes" in wanted:   # the token: the recipe file of every admitted root (gate_admit.recipe_paths: the one reading of an admit row), as the checkout holds them
+        import gate_admit  # noqa: E402
+        with open(os.path.join(root, "ports/fnv-nx/verify/admit.json")) as f:
+            wanted += [rp for r in json.load(f)["roots"] for rp in gate_admit.recipe_paths(r) if isinstance(rp, str) and os.path.isfile(os.path.join(root, rp))]
+        wanted.remove("@admitted-recipes")
+    for r in wanted:
         base = os.path.join(root, r)
         if os.path.isfile(base):
             out[r] = base
@@ -287,6 +261,12 @@ def mount_make(files, dest):
             os.link(a, t)
         except OSError:
             shutil.copy2(a, t)
+    # the mount is a git repository of exactly its files (one commit): a test that asks git which files are tracked (recipe.tracked, git ls-files) sees
+    # the mount's own tree, the same rule as the checkout's, so no test needs the checkout's .git
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null", GIT_AUTHOR_DATE="2000-01-01T00:00:00Z", GIT_COMMITTER_DATE="2000-01-01T00:00:00Z")
+    for a in (["init", "-q"], ["add", "-A", "-f"], ["-c", "user.name=m", "-c", "user.email=m@m", "commit", "-q", "-m", "mount"]):
+        subprocess.run(["git", "-C", dest] + a, env=env, capture_output=True, check=True)
 
 def fetch_inputs(names, cache, ws):
     """{FNVNX_INPUT_<NAME>: host dir} of the pinned externals NAMES (strings) (recipe.fetch_externals, commit + tree_sha256 checked), or a string: why not."""

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """doubles.judge ("no doubles in tests", gate objstub) and the `tests` key of recipe.check, on real AArch64 objects compiled with
 aarch64-linux-gnu-gcc-13 (symbols read by recipe.symbols from the ELF .symtab). Plain script: exit 0 on pass, one ok/FAIL line per case.
 Scratch: tempfile.mkdtemp, removed at exit."""
