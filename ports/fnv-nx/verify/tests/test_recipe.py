@@ -443,7 +443,7 @@ def main():
         except recipe.RecipeError as e:
             got = " ".join(e.errors)
         check("store-merge: a forged differing key record is red `store-merge: key <k> differs`", got and "store-merge: key %s differs" % k in got and sorted(os.listdir(BASE + "/sh-m/keys")) == before, got)
-        for bad in ("0/0", "3/3", "1/9", "x", "-1/2"):
+        for bad in ("0/0", "3/3", "1/17", "x", "-1/2"):
             try:
                 recipe.shard_spec(bad)
                 got = None
@@ -777,8 +777,8 @@ def main():
     rfiles = list(recipe.tracked(rk)) + [T + n + "/h.h" for n in ("hdr_prod", "hdr_other", "hdr_tool", "hdr_doc")]
 
     def home(d):
-        return [e for e in recipe.check(mut(include=RECIPE["include"] + [T + d]), ROOT, rfiles, rr, None, rk) if "lies in no admitted header root" in e]
-    check("include dir in a product root of the same target accepted", not home("hdr_prod"), home("hdr_prod"))
+        return [e for e in recipe.check(mut(include=RECIPE["include"] + [T + d]), ROOT, rfiles, rr, None, rk) if "in no directory output of a root that this root `uses`" in e]
+    check("include dir in a product root of the same target, without a declared output and `uses`, rejected", len(home("hdr_prod")) == 1, home("hdr_prod"))
     check("include dir in a product root of the other target rejected", len(home("hdr_other")) == 1, home("hdr_other"))
     check("include dir in a tool root rejected", len(home("hdr_tool")) == 1, home("hdr_tool"))
     check("include dir in a doc root rejected", len(home("hdr_doc")) == 1, home("hdr_doc"))
@@ -787,7 +787,7 @@ def main():
     hf = rfiles + [T + "hdr_hdr/h2.h"]
     for tgt in ("guest", "host"):
         ent = dict(hr[ROOT], target=tgt)
-        er = [e for e in recipe.check(mut(include=RECIPE["include"] + [T + "hdr_hdr"]), ROOT, hf, dict(hr, **{ROOT: ent}), None, rk) if "lies in no admitted header root" in e]
+        er = [e for e in recipe.check(mut(include=RECIPE["include"] + [T + "hdr_hdr"]), ROOT, hf, dict(hr, **{ROOT: ent}), None, rk) if "in no directory output of a root that this root `uses`" in e]
         check("include dir in a header-class root accepted from a %s includer" % tgt, not er, er)
         check("header_dirs of a %s root holds the header root" % tgt, T + "hdr_hdr" in recipe.header_dirs(mut(), ROOT, dict(hr, **{ROOT: ent}), rk))
     # one name, one file: two include dirs of one recipe holding a header of the same include-relative path are red
