@@ -656,6 +656,13 @@ def link_candidates(roots, root, target, repo):
     return out
 
 
+def missing_recipes(roots, files):
+    """[str] one error per recipe file that an admit row names (gate_admit.recipe_paths: `recipe` string, {target: path} map, variants) and that is no git-tracked file of
+    FILES: a row without its build.json in the same tree would stop every build with a bare "No such file"."""
+    return ["admit.json: root %s names recipe %s, which is not a tracked file of the tree (the recipe enters with the row, in the same commit)" % (p, rp)
+            for p, r in sorted(roots.items()) for rp in gate_admit.recipe_paths(r) if isinstance(rp, str) and rp not in files]
+
+
 def import_trees(roots, owner):
     """{declared import root: [its trees]} of the admitted root OWNER (admit.json `imports`): the roots whose Python modules a tool of OWNER may import."""
     return {r: gate_admit.trees(roots[r]) for r in (roots[owner].get("imports", []) if owner in roots and isinstance(roots[owner].get("imports", []), list) else []) if r in roots}
@@ -1471,6 +1478,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
         err.append("format is not " + FORMAT)
     if rec.get("units") != "all":
         err.append('units must be "all" (no tracked source file can be left out)')
+    err += missing_recipes(roots, files)
     mine = {f[len(root) + 1:] for f in files if under(f, root)}
     gen = generated_outputs(rec)
     if gonly:   # no compiler and no flags are written: the root compiles nothing; a source that is no run step's declared input is neither a unit nor an input: red
