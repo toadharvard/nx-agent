@@ -90,6 +90,7 @@ class Ctx:
         self.finfo = {}                          # flags liveness (fnvlift/flaglive.py): address -> the record of an instruction emitted from its Form
         self.guarded = set()                     # addresses whose gs_guard emitted a raise (the flags are all live there)
         self.drop = {}                           # address -> the flags whose write is not emitted (second pass)
+        self.fsw = []                            # flag-write record (tools/flagcheck.py): one (address, the flags the Form writes in emission order, block emitted) per Form instruction, in emission order; never read by the emitter
         self.raises = set()                      # addresses of instructions that can raise: ContinueExecution resumes there, so they are labels of the loop
 
     def em(self, t):
@@ -418,12 +419,15 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     from . import flaglive
     txt, meta, cx = _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, {})
     drop = flaglive.dropped(cx.finfo)
+    fl = dict(finfo=cx.finfo)
     meta['flagdrop'] = {a: flaglive.mask(m) for a, m in sorted(drop.items())}
     if drop:
         txt, meta2, cx = _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, drop)
         assert meta2['paths'] == meta['paths']
         meta2['flagdrop'] = meta['flagdrop']
         meta = meta2
+    fl['fsw'] = cx.fsw       # the record of the pass whose text is returned
+    meta['fl'] = fl
     return txt, meta
 
 

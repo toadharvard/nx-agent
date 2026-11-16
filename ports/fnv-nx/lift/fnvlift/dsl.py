@@ -523,6 +523,9 @@ class Form:
         return {'regs': regs, 'flags': flags, 'flo': flo, 'mem': mem, 'eip': eip, 'defined': defined, 'rdefined': rdef, 'fault': ft,
                 'fr': fr_, 'xmm': xm_, 'ftop': x['ftop'], 'ftag': x['ftag'], 'fsw': x['fsw'], 'fptr': x['fptr'], 'mxcsr': x['mxcsr']}
     def writes_unobserved(s): return s.flo is not None or any(f == 'df' for f, _, _ in s.flags)
+    def flag_names(s):
+        """the flags this Form writes, in the order to_c_inline emits their stores: the writes, then the undefined ones sorted (the one definition that tools/flagcheck.py reads)"""
+        return tuple([f for f, _, _ in s.flags] + sorted(s.undef))
     def to_c_inline(s, varc, fault_fn, flo_fn, force=(), macc='M', sect=None):
         """C lines of ONE instruction to be placed inside a block of a lifted function: -> (lines, ref) where ref(node) is the C text of a node
         usable AFTER the lines (a named temporary or an expression over the `in_` snapshots).  Order = the Form's: snapshots of the used pre-state

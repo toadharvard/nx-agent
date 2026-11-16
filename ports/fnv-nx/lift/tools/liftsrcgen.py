@@ -28,6 +28,7 @@ SDMTOOL = LIFT + '/tools/sdmrows_stage.py'
 SDM_ROOT = 'ports/fnv-nx/lift/sdm'      # the generated-only root that turns the pinned SDM pdf into text (sdmroot_recipe())
 PROV_ROOT = 'ports/fnv-nx/lift/liftprov'      # the measurement root: the same shard stages with --prov (tools/liftgen.py), merged by tools/provtable.py into the density table
 PROVTOOL = LIFT + '/tools/provtable.py'
+FCTOOL = LIFT + '/tools/flagcheck.py'
 
 
 def sdmrows(root): return {'stage': root + ':gen:0', 'path': 'sdmrows/sdmrows.json'}      # generator 0 of the root: the lifter's `sdmrows` input
@@ -59,7 +60,7 @@ def image_shards(name, n, where, common, root=ROOT, prov=False):
     COMMON is the argv every image shares. The stages of a test root's image (a PE emitted by its generator) come from this same function with its own WHERE: one lifting path, the image an input."""
     out = []
     for k in range(n):
-        outs = ['%s/prov_%d.json' % (name, k)] if prov else ['%s/%s_%d.%s' % (name, f, k, x) for f, x in (('texts', 'txt'), ('missing', 'tsv'), ('forms', 'tsv'), ('encs', 'tsv'), ('shapes', 'tsv'), ('inputs', 'json'))]
+        outs = ['%s/prov_%d.json' % (name, k)] if prov else ['%s/%s_%d.%s' % (name, f, k, x) for f, x in (('texts', 'txt'), ('missing', 'tsv'), ('forms', 'tsv'), ('encs', 'tsv'), ('shapes', 'tsv'), ('flagdrop', 'tsv'), ('inputs', 'json'))]
         out.append({'tool': LIFTGEN, 'args': where + common + ['--shard', '%d/%d' % (k, n), '--out', '/out/' + name] + (['--prov'] if prov else []), 'inputs': lift_inputs() + [sdmrows(root)], 'outputs': outs, '_image': name})
     return out
 
@@ -81,12 +82,13 @@ def recipe(modules, exts=EXTERNALS):
     # finish: the shards' outputs are stage inputs (the stage's key holds their content); the pack tree is its output
     stage = lambda i, p: {'stage': '%s:gen:%d' % (ROOT, i), 'path': p}
     fin_in = [stage(i, o) for i, g in enumerate(gen) if g['tool'] != SDMTOOL for o in g['outputs']]
-    pk = ['u/%03x.src' % i for i in range(4096)] + ['entries.tsv', 'forms.tsv', 'encs.tsv', 'shapes.tsv', 'gate_liftgen.json', 'manifest.json']
+    pk = ['u/%03x.src' % i for i in range(4096)] + ['entries.tsv', 'forms.tsv', 'encs.tsv', 'shapes.tsv', 'flagdrop.tsv', 'gate_liftgen.json', 'manifest.json']
     args = ['--finish', '--out', '/out', '--exe', '/ext/exe/' + EXE, '--modules', MOD]
     for _, im in imgargs: args += ['--image', im]
     gen.append({'tool': LIFTGEN, 'args': ['--lift', '/in/' + LIFT] + args, 'inputs': fin_in + lift_inputs()[:-1], 'outputs': ['pack/' + o for o in pk]})
+    gen += flagcheck_stages(gen[:-1], len(gen) - 1)
     for g in gen: g.pop('_image', None)
-    return {'format': 'fnvnx-recipe/1', 'external': exts, 'uses': USES, 'generated': gen, 'outputs': {'PACK': 'pack'}}
+    return {'format': 'fnvnx-recipe/1', 'external': exts, 'uses': USES, 'generated': gen, 'outputs': {'PACK': 'pack', 'FLAGLIVE': 'flaglive'}}
 
 
 def provrecipe(modules, exts=EXTERNALS):
@@ -98,6 +100,22 @@ def provrecipe(modules, exts=EXTERNALS):
     gen.append({'tool': PROVTOOL, 'args': ['--stage', '/stage', '--out', '/out/table'], 'inputs': ins, 'outputs': ['table/' + o for o in ('categories.tsv', 'roots.tsv', 'forms.tsv', 'families.tsv', 'images.tsv', 'shards.tsv', 'summary.json')]})
     for g in gen: g.pop('_image', None)
     return {'format': 'fnvnx-recipe/1', 'external': exts, 'uses': USES, 'generated': gen, 'outputs': {'TABLE': 'table'}}
+
+
+def flagcheck_stages(gen, fin):
+    """the flaglive check stages (proof/FLAGLIVE.md rule 2), appended to the recipe of the lifted source after the finish stage (nothing consumes them, so the pack never depends on them): for every shard stage of GEN the
+    SAME stage (one rule, tools/liftgen.py) run with --flagcheck over that shard's own texts_K.txt and flagdrop_K.tsv, and one stage that merges the shard results and checks that the pack's flagdrop.tsv (FIN, the
+    index of the finish stage) is the union of the shards' lists (tools/flagcheck.py). Output FLAGLIVE (flaglive.json). A difference fails its stage, so the root is red."""
+    st = lambda i, p: {'stage': '%s:gen:%d' % (ROOT, i), 'path': p}
+    out, ins = [], [st(fin, 'pack/flagdrop.tsv')]
+    for i, g in enumerate(gen):
+        if '--shard' not in g['args']: continue
+        im, k = g['_image'], g['args'][g['args'].index('--shard') + 1].split('/')[0]
+        o = '%s/flagcheck_%s.json' % (im, k)
+        out.append({'tool': LIFTGEN, 'args': g['args'] + ['--flagcheck', '/stage/' + im], 'inputs': g['inputs'] + [st(i, '%s/texts_%s.txt' % (im, k)), st(i, '%s/flagdrop_%s.tsv' % (im, k))], 'outputs': [o]})
+        ins += [st(len(gen) + 1 + len(out) - 1, o), st(i, '%s/flagdrop_%s.tsv' % (im, k))]
+    out.append({'tool': FCTOOL, 'args': ['--stage', '/stage', '--pack-flagdrop', '/stage/pack/flagdrop.tsv', '--out', '/out/flaglive'], 'inputs': ins, 'outputs': ['flaglive/flaglive.json']})
+    return out
 
 
 def sdmroot_recipe():
