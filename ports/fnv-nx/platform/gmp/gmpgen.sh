@@ -24,7 +24,7 @@ export CC_FOR_BUILD=gcc-13 CPP_FOR_BUILD="gcc-13 -E"
 JOBS=${JOBS:-$(nproc)}
 W=$SCRATCH/w; OUT_DIR=/out
 mkdir -p "$W"; cd "$W"
-tar xf "$TARBALL"
+tar --no-same-owner -xf "$TARBALL"
 SRC=$W/gmp-6.3.0
 "$PY" -I "$CFG_LINK_PY" patch "$SRC/configure"
 export PYTHON_CFG_LINK="$PY -I $CFG_LINK_PY"
