@@ -49,7 +49,7 @@ def link_errs(r, root):
 
 
 check("the profile is valid", recipe.guest_link_errors(prof, pin, files, roots) == [], recipe.guest_link_errors(prof, pin, files, roots))
-check("the profile holds the script only: no stored libraries", set(prof) == {"script"}, prof)
+check("the profile holds the scripts only: no stored libraries", set(prof) == {"script", "image_script"}, prof)
 check("a guest exe root with no script and no libs has no link error", link_errs(rec("a.elf"), EXE) == [], link_errs(rec("a.elf"), EXE))
 check("a guest test root likewise", link_errs(rec("t.elf"), TST) == [], link_errs(rec("t.elf"), TST))
 for nm, root_, ent in (("without entry", EXE, None), ("with a non-identifier entry", TST, "a-b"), ("with the runtime's own alias as entry", TST, recipe.IMAGE_ENTRY)):

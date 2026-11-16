@@ -498,13 +498,15 @@ def load_guest_link(repo="."):
 def guest_link_errors(prof, pin, files, roots):
     """Problems of the guest link profile PROF (load_guest_link): exactly {script}; `script` a tracked file under a tree of an admitted tool root
     (tool_file). The libraries are not stored anywhere: the link derives them (Job.guest_libs, a keyed stage)."""
-    if not isinstance(prof, dict) or set(prof) != {"script"}:
-        return ["%s must be {script}: the libraries are derived by the link from the pinned runtime's driver" % GUEST_LINK]
-    sc = prof["script"]
-    full = TREE + "/" + sc if isinstance(sc, str) and rel_ok(sc) else None
-    if not (full and tool_file(roots, files, full)):
-        return ["%s: script %r is not a tracked file of an admitted tool root (a path inside %s)" % (GUEST_LINK, sc, TREE)]
-    return []
+    if not isinstance(prof, dict) or set(prof) != {"script", "image_script"}:
+        return ["%s must be {script, image_script}: the libraries are derived by the link from the pinned runtime's driver" % GUEST_LINK]
+    bad = []
+    for k in ("script", "image_script"):
+        sc = prof[k]
+        full = TREE + "/" + sc if isinstance(sc, str) and rel_ok(sc) else None
+        if not (full and tool_file(roots, files, full)):
+            bad.append("%s: %s %r is not a tracked file of an admitted tool root (a path inside %s)" % (GUEST_LINK, k, sc, TREE))
+    return bad
 
 
 def with_guest_link(rec, root, roots, repo):
@@ -513,7 +515,7 @@ def with_guest_link(rec, root, roots, repo):
     lk, prof = rec.get("link"), load_guest_link(repo)
     if not (isinstance(lk, dict) and prof and entry_of(roots, root).get("target") == "guest"):
         return rec
-    return dict(rec, link=dict(lk, script=TREE + "/" + prof["script"], libs={"external": load_pin(repo)["external"]["name"], "derive": True}))
+    return dict(rec, link=dict(lk, script=TREE + "/" + prof["script"], image_script=TREE + "/" + prof["image_script"], libs={"external": load_pin(repo)["external"]["name"], "derive": True}))
 
 
 def load_admit(repo="."):
@@ -1221,7 +1223,7 @@ def guest_link_part(rec, root, pin, prof, files, roots):
     lk = rec.get("link")
     if not isinstance(lk, dict):
         return []
-    bad = ["link.%s is declared: script and libs of a guest link come from %s" % (k, GUEST_LINK) for k in ("script", "libs") if k in lk]
+    bad = ["link.%s is declared: script and libs of a guest link come from %s" % (k, GUEST_LINK) for k in ("script", "image_script", "libs") if k in lk]
     bad += guest_link_errors(prof, pin, files, roots) if prof is not None else ["%s is missing" % GUEST_LINK]
     return ["guest root %s: %s" % (root, b) for b in bad]
 
@@ -1260,7 +1262,7 @@ def guest_errors(rec, spec, roots, pin, prof=None, files=()):
 
 
 LINK_KEYS = {"output", "flags"}
-LINK_OPT = {"script", "kind", "version_script", "roots", "libs", "loader", "entry", "tables"}
+LINK_OPT = {"script", "image_script", "kind", "version_script", "roots", "libs", "loader", "entry", "tables"}
 IMAGE_ENTRY = "__fnvnx_image_entry"   # the symbol the runtime (rt/guest) calls once its start-up is done; the link assigns it the root's declared `link.entry` (--defsym)
 LIBS_KEYS = {"external", "dirs", "names", "startfiles", "endfiles"}
 KINDS = ("pie", "exe", "shared")
@@ -1590,7 +1592,7 @@ def link_errors(lk, root, mine, roots, ext_names, repo, files=(), variant="", se
     if not (isinstance(lk, dict) and LINK_KEYS <= set(lk) <= LINK_KEYS | LINK_OPT and isinstance(lk["flags"], list)
             and all(isinstance(t, str) for t in lk["flags"]) and isinstance(lk["output"], str) and kind in KINDS
             and re.fullmatch(r"[A-Za-z0-9._-]+\.(elf|so|exe)", lk["output"])
-            and all(k not in lk or link_file(lk[k], root, mine, roots, files) or link_generated(lk[k], mine, seen) for k in ("script", "version_script"))
+            and all(k not in lk or link_file(lk[k], root, mine, roots, files) or link_generated(lk[k], mine, seen) for k in ("script", "image_script", "version_script"))
             and ("script" in lk or kind != "pie" or guest) and ("version_script" in lk) == (kind == "shared")):
         return ["link must be {output: NAME.elf|.so|.exe, flags: [..]} with `script` (a tracked file of the root, a generated output of the root, or a tracked file of a tree of an admitted tool root; required for kind pie, the default), kind pie|exe|shared, "
                 "`version_script` (a tracked file of the root, a generated output of the root, or of a tool tree: required for, and only for, kind shared), optionally roots, libs"]
@@ -3783,7 +3785,7 @@ class Job:
                 arch_args.append("/arch/%s.a" % label)
             arch_in = [{"at": "/arch", "tree": cas.ingest(ad, self.store)}]
         kind = lk.get("kind", "pie")
-        for k in ("script", "version_script"):
+        for k in ("script", "image_script", "version_script"):
             if k in lk:
                 mine = {f[len(self.root) + 1:] for f in self.files if under(f, self.root)}
                 src = os.path.join(ws, "root", lk[k]) if link_generated(lk[k], mine, set(generated_outputs(self.rec))) else os.path.join(self.repo, link_file(lk[k], self.root, mine, self.roots, self.files))
@@ -3825,7 +3827,7 @@ class Job:
                           "script": open(os.path.join(sd, os.path.basename(lk["script"]))).read() if "script" in lk else "",
                           "system": list(lb["system"]) if lb and "system" in lb else [], "entry": lk.get("entry")}
         vs = ["--version-script=/ld/" + os.path.basename(lk["version_script"])] if "version_script" in lk else []
-        sc = ["-T", "/ld/" + os.path.basename(lk["script"])] if "script" in lk else []
+        sc = [x for k in ("script", "image_script") if k in lk for x in ("-T", "/ld/" + os.path.basename(lk[k]))]
         ds = ["--defsym=%s=%s" % (IMAGE_ENTRY, lk["entry"])] if "entry" in lk else []
         sel = (["--unresolved-symbols=ignore-all"] if offer is not None else []) + [x for r in refs for x in ("-u", r)]
         argv = [ld] + LD_KIND[kind] + dl + lk["flags"] + sc + vs + ds + sel + ["--cref", "--no-demangle", "-o", "/out/" + output, "-Map=/out/" + output + ".map"] + pre + search + [
