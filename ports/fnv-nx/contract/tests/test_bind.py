@@ -7,6 +7,7 @@ import json, os, subprocess, sys, tempfile
 C = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.insert(0, C)
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): contract.X by its qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 from fnvnx.verify import scratch
 scratch.install()
 from fnvnx.contract import bind, store

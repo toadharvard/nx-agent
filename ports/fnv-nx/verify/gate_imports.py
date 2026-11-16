@@ -26,13 +26,14 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 from fnvnx.contract import bridgetable  # noqa: E402
 from fnvnx.contract import exportgen  # noqa: E402
-import cas  # noqa: E402
-import gate_build  # noqa: E402
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import gate_build  # noqa: E402
 from fnvnx.contract import imports  # noqa: E402
-import linkset  # noqa: E402
-import recipe  # noqa: E402
+from fnvnx.verify import linkset  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 IN_KEYS = {"format", "names", "specs", "extra", "extra_other", "va"}
 EXPORTS_ROOT = "ports/fnv-nx/contract/exports"   # the producer of exports.tsv: the `.fnvnx.export` records of the link set (contract/exports/build.json)

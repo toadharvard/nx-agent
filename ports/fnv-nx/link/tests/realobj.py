@@ -19,6 +19,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.dirname(os.path.dirname(HERE))                    # ports/fnv-nx
 REAL = os.path.dirname(os.path.dirname(TOOL))                    # checkout root
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 from fnvnx.verify import scratch  # noqa: E402
 from fnvnx.verify import cas  # noqa: E402
 from fnvnx.verify import recipe  # noqa: E402

@@ -8,11 +8,13 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import test_recipe as TR  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify.tests import test_recipe as TR  # noqa: E402
 
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import gate_onedef as go  # noqa: E402
+from fnvnx.verify import gate_onedef as go  # noqa: E402
 
 T, BASE = TR.T, TR.BASE
 FAILED = []

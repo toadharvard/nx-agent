@@ -25,9 +25,10 @@ NX = os.path.dirname(VERIFY)
 REPO = os.path.dirname(os.path.dirname(NX))
 sys.path.insert(0, HERE)
 sys.path.insert(0, VERIFY)
-import boot  # noqa: E402
-import test_bootmachine as tb  # noqa: E402
-import test_bootgpu as tg  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import boot  # noqa: E402
+from fnvnx.verify.tests import test_bootmachine as tb  # noqa: E402
+from fnvnx.verify.tests import test_bootgpu as tg  # noqa: E402
 
 SCRATCH = tempfile.mkdtemp(prefix="bootjob-")
 atexit.register(shutil.rmtree, SCRATCH, ignore_errors=True)

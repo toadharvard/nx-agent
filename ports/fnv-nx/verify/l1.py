@@ -32,10 +32,12 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import envcheck  # noqa: E402
-import cas  # noqa: E402
-import gatesdir  # noqa: E402
-import verdict  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import envcheck  # noqa: E402
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import gatesdir  # noqa: E402
+from fnvnx.verify import verdict  # noqa: E402
 
 GATES = "ports/fnv-nx/verify/gates.d"
 ENV = "ports/fnv-nx/verify/env.json"
@@ -84,7 +86,7 @@ def _check(repo, commit, vdir, budget, gates, td, env_id, started):
 
 def _artifacts(o):
     """The artifacts repository is a required argument; it is recorded beside the verdict's external cache (recipe.set_artifacts), where every gate reads it."""
-    import recipe
+    from fnvnx.verify import recipe
     recipe.set_artifacts(recipe.ext_dir(os.path.join(os.path.abspath(o["--verdicts"]), "cache")), o["--artifacts"])
 
 def cmd_verdict(a):

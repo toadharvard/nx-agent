@@ -70,8 +70,9 @@ import re
 import struct
 import sys
 
-import boot
-import bootmiles
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import boot
+from fnvnx.verify import bootmiles
 from fnvnx.contract import exepin
 
 MODULE_HEADER = "# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index\tdll"

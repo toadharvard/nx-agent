@@ -15,7 +15,9 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import recipe  # noqa: E402
 
 fails = 0
 T = "ports/fnv-nx/"
@@ -80,7 +82,7 @@ def produced(repo, td, tag):
 
 # the mounts of a python step (recipe.python_mounts): the runtime brings paths the host resolves (/lib/x86_64-linux-gnu, /usr/local/bin) that nest with the layout of the mounted
 # debs; the sandbox refuses nested paths (sandbox.check_doc). (a) a layout link or directory that a runtime path lies under or over yields; (b) a declared input or scratch that clashes is red
-import sandbox
+from fnvnx.verify import sandbox
 
 
 def doc_of(ins, links, scratch=()):

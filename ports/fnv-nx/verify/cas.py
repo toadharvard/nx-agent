@@ -30,6 +30,7 @@ import shutil
 import stat
 import sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 from fnvnx.contract import treehash  # noqa: E402  (the one home of the tree-hash rule; stdlib only)
 
 FORMAT = treehash.FORMAT

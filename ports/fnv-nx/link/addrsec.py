@@ -11,6 +11,9 @@ line is an error `<where>: line N: <what>`; no line is skipped, a final line wit
 is [].  Pure: bytes in, tuples out.
 """
 import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 
 SECTION = '.fnvnx.addr'
 
@@ -46,5 +49,5 @@ def from_sections(sections, where):
 
 
 def read(path):
-    import a64obj
+    from fnvnx.link import a64obj
     return from_sections(a64obj.read(path).sections, os.path.basename(path))

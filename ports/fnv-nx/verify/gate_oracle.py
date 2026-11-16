@@ -58,11 +58,13 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import cas  # noqa: E402
-import recipe  # noqa: E402
-import gate_admit  # noqa: E402
-import gate_tests  # noqa: E402
-import gatesdir  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
+from fnvnx.verify import gate_admit  # noqa: E402
+from fnvnx.verify import gate_tests  # noqa: E402
+from fnvnx.verify import gatesdir  # noqa: E402
 
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"

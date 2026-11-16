@@ -42,11 +42,12 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import coffobj
-import elfobj
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import coffobj
+from fnvnx.link import elfobj
 from fnvnx.contract import l2sections
-import objsections
-import unitpairs
+from fnvnx.link import objsections
+from fnvnx.link import unitpairs
 
 NAME = 'names'
 NAMED = frozenset(('func', 'data', 'ctor.c1', 'ctor.c2', 'dtor.d2', 'dtor.d1', 'dtor.d0', 'dtor.sdd', 'dtor.sdd.thunk'))

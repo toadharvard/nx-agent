@@ -14,7 +14,9 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import cas  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas  # noqa: E402
 
 BASE = tempfile.mkdtemp(dir="/root/l4" if os.path.isdir("/root/l4") else os.path.expanduser("~"), prefix="rt-")  # short: the PT_INTERP probe below needs BASE + "/i" within 27 bytes  # own dir per run: files run concurrently
 atexit.register(shutil.rmtree, BASE, ignore_errors=True)
@@ -165,7 +167,7 @@ def hdr(cls, data, machine, etype=3):
 
 def loader_rule():
     """The dynamic loader skips candidates of another class/encoding/machine and goes on (ld.so(8))."""
-    import runtime
+    from fnvnx.verify import runtime
     d = BASE + "/loader"
     shutil.rmtree(d, ignore_errors=True)
     for n in ("w32", "w64", "wbe", "warm", "only32"):
@@ -217,7 +219,7 @@ def loader_rule():
 def tool_tree_map():
     """--tree HOST@AT: a toolchain tree that lives at HOST here and at /opt/tc in the sandbox; its binaries find a private library
     through an absolute RUNPATH into their own prefix (/opt/tc/lib), another through $ORIGIN, a third through an old-style RPATH."""
-    import runtime
+    from fnvnx.verify import runtime
     h = BASE + "/tc"
     shutil.rmtree(h, ignore_errors=True)
     for n in ("bin", "lib", "lib2", "lib3", "src"):

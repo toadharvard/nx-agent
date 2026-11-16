@@ -16,9 +16,11 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..'))
-import gate_r7
-import synth
-from synth import member, bclass, vbclass, vfunctab, cstr, num
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import gate_r7
+from fnvnx.link.tests import synth
+from fnvnx.link.tests.synth import member, bclass, vbclass, vfunctab, cstr, num
 
 fails = []
 
@@ -196,7 +198,7 @@ try:
         g, c = fixture(tmp + '/m_' + what.replace(' ', '_'), text, synth.debug_object(SERIES))
         u, r, _ = gate_r7.check(g, c)
         check('malformed ' + what, (u, len(r), r[0].startswith('u:error: ')), (1, 1, True))
-    import objsections
+    from fnvnx.link import objsections
     for v in ('none', 'internal', 'external', 'c'):
         rows = objsections.parse_layout(line('k', 1, 1, linkage=v).encode(), 'x')
         check('linkage %s is accepted' % v, [r.linkage for r in rows], [v])

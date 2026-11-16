@@ -16,10 +16,11 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..'))
-import gate_names
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import gate_names
 from fnvnx.contract import l2sections
-import synth
-import unitpairs
+from fnvnx.link.tests import synth
+from fnvnx.link import unitpairs
 KINDS_INC = os.path.join(HERE, '..', '..', 'toolchain', 'names', 'sympair_kinds.inc')
 KINDS = l2sections.load_kinds(KINDS_INC)
 

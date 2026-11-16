@@ -15,6 +15,7 @@ import hashlib
 import os
 import re
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 
 SIZES = {"handheld": (1280, 720), "docked": (1920, 1080)}   # the swapchain image of the profile (docked 1080p, handheld 720p)
 MODULE = 10
@@ -36,8 +37,8 @@ def bootrt_path(gate_cache=None):
     cache = gate_cache or os.environ.get("GATE_CACHE")
     if not cache:
         raise GpuError("GATE_CACHE is not set: the embedder symbols are the recipe product of %s, built in the verdict's store" % BOOTRT_ROOT)
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    import gate_build
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+    from fnvnx.verify import gate_build
     res, _out = gate_build.ensure(BOOTRT_ROOT, cache, REPO)
     if res.get("status") != "green" or not res.get("elf"):
         raise GpuError("%s is not green: %s" % (BOOTRT_ROOT, (res.get("failure") or {}).get("stage", res.get("status"))))

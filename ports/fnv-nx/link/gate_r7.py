@@ -41,11 +41,13 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..', 'contract'))
-import codeview
-import coffobj
-import elfobj
-import objsections
-import unitpairs
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import codeview
+from fnvnx.link import coffobj
+from fnvnx.link import elfobj
+from fnvnx.link import objsections
+from fnvnx.link import unitpairs
 
 NAME = 'r7'
 GRec = collections.namedtuple('GRec', 'size fields bases vf nokey dup')

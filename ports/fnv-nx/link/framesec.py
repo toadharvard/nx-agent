@@ -17,7 +17,11 @@ one blank each, sorted ascending (by offset, then size). OFFSET is a decimal int
 leading zeros (`0`, `-4`, `16`); SIZE is a decimal integer of at least 1 without leading zeros. OFFSET is relative to the CFA (the stack
 pointer at function entry): a variable at [CFA-16, CFA-4) is `-16:12`. Any other line is an error `<where>: line N: <what>`; no
 line is skipped, a final line without LF is an error, an empty section is []. Pure: bytes in, tuples out."""
-import a64obj
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import a64obj
 
 SECTION = '.fnvnx.frame'
 DYNAMIC = 'dynamic'

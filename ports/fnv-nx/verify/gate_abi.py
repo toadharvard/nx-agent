@@ -28,17 +28,18 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "link"))
-import abi  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import abi  # noqa: E402
 from fnvnx.contract import bridgetable  # noqa: E402
-import elfobj  # noqa: E402
-import gate_argorder  # noqa: E402
-import gate_build  # noqa: E402
-import gate_imports  # noqa: E402
+from fnvnx.link import elfobj  # noqa: E402
+from fnvnx.verify import gate_argorder  # noqa: E402
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import gate_imports  # noqa: E402
 from fnvnx.contract import l2sections  # noqa: E402
-import objsections  # noqa: E402
-import odr  # noqa: E402
-import ctypes_compat  # noqa: E402
-import recipe  # noqa: E402
+from fnvnx.link import objsections  # noqa: E402
+from fnvnx.link import odr  # noqa: E402
+from fnvnx.link import ctypes_compat  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 
 DATAMODEL = os.path.join(HERE, "..", "toolchain", "msvcmodel", "DATAMODEL.json")

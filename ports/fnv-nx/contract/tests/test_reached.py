@@ -9,7 +9,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): contract.X by its qualified name
 with contextlib.redirect_stdout(io.StringIO()):
-    import test_gpa_names as T   # builds the toy image and runs its own checks
+    from fnvnx.contract.tests import test_gpa_names as T   # builds the toy image and runs its own checks
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 from fnvnx.contract import gpa_names, reached
 
 fails = []
