@@ -1367,3 +1367,6 @@ Paused: w3b, w4, farm; no other work.
     - abspath: render 0. The 8 findings outside render are lift/fnvlift x6, bridgefacts/d3d9/d3d9_structs.py:54 (owner asked of L1) and contract/l2sections.py:22.
     - The sm_link gate runs on farm1.
 - bottleneck: the farm1 sm_link numbers; the w28-on-final-cand3 head for cand4.
+- 01:20Z L1: bridgefacts/d3d9 is L6's. w6-root dfcdc9f67 is the cand4 render candidate; it enters after cand3b merges and w28 rebases onto it.
+    - w6 (doing): d3d9_structs.py:54 gets the include directory as a stage argument.
+    - Also rule 5: the BASE type-size table restates DATAMODEL, so it is derived from the one DATAMODEL record plus the shim typedefs, with pack read from the headers.
