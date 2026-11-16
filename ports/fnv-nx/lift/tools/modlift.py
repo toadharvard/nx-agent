@@ -474,6 +474,13 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     occ = Counter('displacement-only' if r in Xs else 'operand (imm or lea) of a decoded instruction' if T0 <= r < T1 and cov[r - T0] else 'relocated data word' for r, v in rvals_all)
     tg_all = {v for r, v in rvals_all}; tg_val = {v for r, v in rvals_all if r not in Xs}
     print('roots by occurrence: %s; relocation targets %d, rooted by a value occurrence %d, excluded (only displacement-only words) %d' % (dict(occ), len(tg_all), len(tg_val), len(tg_all - tg_val)))
+    kind_of = lambda r: 'displacement-only' if r in Xs else 'operand' if T0 <= r < T1 and cov[r - T0] else 'data-word'
+    jw = {}      # the word addresses of every proven jump table -> its base
+    for t in json.load(open(outd + '/ehtables.json')).get('jtab_tables', ()):
+        for w in t['words']: jw[int(w, 16)] = t['base']
+    by = {}
+    for r, v in rvals_all: by.setdefault(v, []).append((r, kind_of(r)))
+    open(outd + '/roots.tsv', 'w').write('# columns: relocation target; rooted (yes = some value occurrence, no = only displacement-only words); occurrences site:kind; table = base of the proven jump table whose word extent contains the target, else -\n' + ''.join('%08x\t%s\t%s\t%s\n' % (v, 'yes' if any(k != 'displacement-only' for _, k in oc) else 'no', ','.join('%08x:%s' % o for o in sorted(oc)), jw.get(v, '-')) for v, oc in sorted(by.items())))
     return (0 if green else 1), Xs, REFO, PMF, len(E), sum(1 for e in E if e not in proven), len(refhit)
 
 
