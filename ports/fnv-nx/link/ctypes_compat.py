@@ -14,7 +14,8 @@ layout plugin of a C unit) has one line per external symbol the unit declares or
     array         `[N]`T (N decimal) | `[]`T (incomplete)
     function      `(`P,P,...`)`T  with P a type, `...` last for varargs; `(?)`T has no prototype (K&R)
     struct/union  `struct:`TAG`{`m:T;m:T:W;...`}`  complete (member name, type, bit-field width W; an unnamed member has name `-`); `struct:`TAG  incomplete;
-                  TAG is `-` for an unnamed tag; `union:` likewise
+                  TAG is `-` for an unnamed tag; `union:` likewise. A complete record whose compiler type is TREE_ADDRESSABLE (non-trivial for the purposes of calls,
+                  Itanium C++ ABI 3.1.2) has a trailing `!` after `}`: `struct:`TAG`{...}!`
     enum          `enum:`TAG`=`T   (T the compatible integer type of the enumeration)
 RULE (6.2.7p1/p2, 6.7.2.1, 6.7.6.2, 6.7.6.3): two types are compatible iff the same constructor with compatible parts: qualifiers equal; pointee compatible; arrays
 compatible element types and equal sizes when both are known; functions compatible return type, same parameter count, compatible parameters (qualifiers of
@@ -135,6 +136,8 @@ class Parse:
                     bw = self.num()
                 ms.append((n, t, bw))
             self.eat('}')
+            if self.peek() == '!':   # LAYOUT-CALLTRIVIAL: the record is non-trivial for the purposes of calls (invisible reference); a fact of the spelling, not of compatibility
+                self.i += 1
             return (w, tag, tuple(ms))
         if w == 'enum' and self.peek() == ':':
             self.i += 1
