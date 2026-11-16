@@ -2946,3 +2946,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - cand4: dm:1-12 leave the table, since no citing root is admitted.
   - cand5: per-root tables, with objstub reading the union over admitted roots (w28).
   - Row 1 (TerminateProcess) is not needed, because SetLastError is a store and so the body is not V. L5 deletes the citation.
+- cand4 2332cf999 holds items 1, 2, 3 and 7. The last round:
+  - The 5 guest roots (w28-c4's shim, hostabi, hostabi/product, lib/sha256, verify/probes) are dropped. That clears datamodel S29 (a test-kind row the gate cannot judge, L2), imports (3) and the 6 vacuous gates (root_class puts no-C++ roots in product-guest).
+  - For cand5: a root_class rule for guest roots without C++ (L1), and the S29 check form (L2).
+  - Selftests (65 failing, 431 s of the 601 s): non-L1 trees go back to trunk content, and their items are dropped. L1-tree merge defects are fixed. No test is deleted while its code stays.
