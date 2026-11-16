@@ -7,7 +7,7 @@ THE RULE. An instruction whose CPUID feature is cleared in the declared CPU (fnv
 declared machine iff every path of the interprocedural CFG from every entry the facts know (a ROOT) to it crosses an EXCLUDED EDGE: a conditional branch whose condition is decided
 by the declared cpuid answer (a value that came out of a `cpuid` instruction of the image itself), the excluded edge being the direction that is not taken under that answer.
   Graph  : node = instruction address (decoded from the facts' ranges.tsv, one decoder). Edges: fall-through, direct jump / branch targets, direct call targets, and the
-           call-site -> next instruction edge (the callee is assumed to return: more paths, never fewer). An indirect call or jump has no edge; its possible targets are roots.
+           call-site -> next instruction edge (the callee is taken as returning, an over-approximation: more paths, never fewer). An indirect call or jump has no edge; its possible targets are roots.
   Roots  : every universe entry whose kinds (primary kind and flags of universe.tsv) are not all of call / tail / inner: entry, tls, export, ptr (every relocated pointer), eh-*,
            seh-*, decomp without a direct call. A node whose only incoming flow is the graph's edges is not a root.
   Decided: a forward known-bits dataflow over the nodes that every root path reaches only through a `cpuid` (the region D: reachable from the roots only through a cpuid node).
