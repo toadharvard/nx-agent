@@ -1,11 +1,10 @@
 """`.fnvl.sites` records (16 bytes: kind, x86 pc, host start, host end) on a compiled unit: each record is kind and pc plain, start and end R_AARCH64_P32_ABS32 in .text, and the range is exactly
-the exclusive sequence (kind 1: ldaxr .. cbnz) or the one store / the one bfxil (kind 2). Compiled by a stage of the recipe (toolchain/tests/plugbuild.py), no direct compiler call.   test_ranges.py"""
+the exclusive sequence (kind 1: ldaxr .. cbnz) or the one store / the one bfxil (kind 2). Compiled by a stage of the recipe (toolchain/tests/plugbuild.py), no direct compiler call.   test_ranges.py (the input GEN is mounted)"""
 import os, re, shutil, subprocess, sys, tempfile
 LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools')); sys.path.insert(0, os.path.join(LIFT, '..', 'toolchain', 'tests'))
 import fnvlift as L
-if len(sys.argv) != 2: sys.exit('usage: %s GEN   (GEN: the GEN output of the lift/rt root, a declared input of the test root)' % os.path.basename(__file__))
-GEN = sys.argv[1]
+GEN = os.environ.get('FNVNX_INPUT_GEN') or sys.exit('FNVNX_INPUT_GEN is not mounted (the GEN output of the lift/rt root, a produced input of tests/inputs.json)')
 import plugbuild as pb
 import prelude
 

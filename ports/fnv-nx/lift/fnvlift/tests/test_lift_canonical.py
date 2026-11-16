@@ -2,11 +2,10 @@
 Universe by rule: every one-instruction unit [opcode map (one byte, 0F), opcode byte, ModRM byte, four zero bytes, RET] of the synthetic image Image.from_bytes at 0x401000 (the buffers of test_sites).
 A unit's text is its lift (or 'UNSUPPORTED reason').  Process A lifts the universe in sorted order, process B (another PYTHONHASHSEED) in a seeded shuffle;
 The whole universe is compared (no sampling).  Further, COLD units are lifted one per fresh process and compared with A.
-    python3 -I test_lift_canonical.py --cpufeat PATH"""
+    python3 -I test_lift_canonical.py        (the SDM rows are the mounted input SDMROWS, tests/inputs.json; the children inherit the mount)"""
 import hashlib, os, random, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE); import _inputs
-CF = _inputs.cpufeat_arg() if '--child' not in sys.argv else None
 COLD = 20
 
 
@@ -20,8 +19,8 @@ def code(u):
 
 
 _DONE = []
-def lift_units(units, cpufeat):
-    if not _DONE: _inputs.configure(cpufeat); _DONE.append(1)
+def lift_units(units):
+    if not _DONE: _inputs.configure(); _DONE.append(1)
     import fnvlift as L
     from fnvlift.image import Image
     out = {}
@@ -32,24 +31,24 @@ def lift_units(units, cpufeat):
     return out
 
 
-def child(mode, outp, cpufeat):
+def child(mode, outp):
     U = universe()
     if mode == 'shuffled': random.Random(11).shuffle(U)
     elif mode.startswith('cold'): U = [U[int(mode[4:])]]
-    res = lift_units(U, cpufeat)
+    res = lift_units(U)
     with open(outp, 'w') as f:
         for u, h in sorted(res.items()): f.write('%d %d %d %s\n' % (*u, h))
 
 
 def run(mode, seed):
     p = tempfile.mktemp(prefix='liftcanon-')
-    subprocess.run([sys.executable, '-P', '-s', os.path.abspath(__file__), '--child', mode, p, CF], check=True, env={**os.environ, 'PYTHONHASHSEED': seed})
+    subprocess.run([sys.executable, '-P', '-s', os.path.abspath(__file__), '--child', mode, p], check=True, env={**os.environ, 'PYTHONHASHSEED': seed})
     return dict((tuple(map(int, l.split()[:3])), l.split()[3]) for l in open(p))
 
 
 if __name__ == '__main__':
     if len(sys.argv) > 2 and sys.argv[1] == '--child':
-        child(sys.argv[2], sys.argv[3], sys.argv[4]); sys.exit(0)
+        child(sys.argv[2], sys.argv[3]); sys.exit(0)
     a = run('sorted', '1'); b = run('shuffled', '2')
     diff = [u for u in a if a[u] != b.get(u)]
     n = len(universe()); cold = 0; cdiff = []

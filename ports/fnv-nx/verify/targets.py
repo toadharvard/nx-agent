@@ -31,18 +31,37 @@ def drivers(t):
     return "bin/%s-gcc" % tr, "bin/%s-g++" % tr
 
 
-def semantic_prefix(t, repo=None):
+def semantic_prefix(t, repo=None, datamodel=None):
     """The leading run of the guest semantic flags, from the records: ABI of the platform, architecture and tuning of the CPU, the platform's code model,
     then the flags of the data-model rows."""
     p, c = t["guest_platform"], t["console_cpu"]
-    return ["-mabi=" + p["abi"], arch_flag(c), "-mtune=" + c["core"].lower()] + list(p["code"]) + datamodel_flags(t, repo)
+    return ["-mabi=" + p["abi"], arch_flag(c), "-mtune=" + c["core"].lower()] + list(p["code"]) + datamodel_flags(t, repo, datamodel)
 
 
-def datamodel_flags(t, repo=None):
-    """The flags the exe's data model needs, from the rows of the DATAMODEL table the record references: each row's `flag`, in row order."""
+def datamodel_flags(t, repo=None, datamodel=None):
+    """The flags the exe's data model needs, from the rows of the DATAMODEL table the record references: each row's `flag`, in row order. DATAMODEL: the path of that table when the
+    caller holds it elsewhere than in the repository tree (a stage that mounts it as its own input); else it is the record's reference inside REPO (default: this checkout)."""
     repo = repo or os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
-    with open(os.path.join(repo, t["references"]["datamodel"])) as f:
+    with open(datamodel or os.path.join(repo, t["references"]["datamodel"])) as f:
         return [r["flag"] for r in json.load(f)["rows"] if r.get("flag")]
+
+
+FPCR_FIELDS = {"AHP": (26, 1), "DN": (25, 1), "FZ": (24, 1), "RMode": (22, 2)}   # name -> (low bit, width): DDI0488H 14.4.1, Table 14-3; the other bits are RES0 (trap enables included)
+
+
+def fpcr_value(t):
+    """The one integer of the console CPU's FPCR for guest code: each field of the record at its bit position (FPCR_FIELDS). Everything that writes FPCR (`msr fpcr`) reads this value, generated into
+    fnvnx_target.h by targets_header.py. The record's shape is judged in `check`."""
+    f = t["console_cpu"]["fpcr"]
+    return sum(f[n] << lo for n, (lo, _) in FPCR_FIELDS.items())
+
+
+def fpcr_errors(t):
+    """Shape of the row `console_cpu.fpcr`: exactly the fields of FPCR_FIELDS, each one integer that fits its width."""
+    f = t["console_cpu"].get("fpcr")
+    if not isinstance(f, dict) or set(f) != set(FPCR_FIELDS):
+        return ["console_cpu.fpcr has exactly the fields %s" % sorted(FPCR_FIELDS)]
+    return ["console_cpu.fpcr.%s is one integer of %d bit(s)" % (n, w) for n, (lo, w) in sorted(FPCR_FIELDS.items()) if type(f[n]) is not int or not 0 <= f[n] < (1 << w)]
 
 
 def abi_flag(t):
@@ -59,7 +78,7 @@ def check(t, ext=None, assumptions=None, repo=None):
     for rec in ("guest_platform", "console_cpu", "host_gl"):
         r = t.get(rec) or {}
         cites = r.get("cite") or {}
-        for field in sorted(set(r) - {"cite"} - ({"features"} if rec == "console_cpu" else set())):   # each feature is cited under its own name
+        for field in sorted(set(r) - {"cite"} - ({"features"} if rec == "console_cpu" else set())):   # each feature is cited under its own name; fpcr is one cited row
             if not cites.get(field):
                 bad.append("%s.%s has no citation" % (rec, field))
         for field, cs in sorted(cites.items()):
@@ -93,6 +112,7 @@ def check(t, ext=None, assumptions=None, repo=None):
     for f in t["console_cpu"]["features"]:
         if not t["console_cpu"]["cite"].get(f):
             bad.append("console_cpu feature %s has no citation" % f)
+    bad += fpcr_errors(t)
     for name, d in sorted(t.get("docs", {}).items()):
         if d["external"] not in t["externals"] or len(d["sha256"]) != 64:
             bad.append("doc %s: external or sha256" % name)

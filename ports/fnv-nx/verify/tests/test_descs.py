@@ -2,6 +2,9 @@
 """Tests for the `descs` fact (lift/descs, recipe `objects_of`, `forbid_sections`): the sorted union of the `.fnvnx.disp` sections of every
 admitted product root's objects but the excepted ones, a recipe output that a consumer takes by `uses`. Toy roots in temp git repos, real sandbox
 stages. Plain script: exit 0 on pass, one PASS/FAIL line per case. Needs root (sandbox). Scratch: test_recipe's BASE, removed at exit."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import subprocess
@@ -72,7 +75,7 @@ UNION = b"fast:q:i,i,s12g\nstack:a8hf:s16hf,d\nstack:i:\nthis:v:i\n"
 
 def main():
     sys.path.insert(0, os.path.join(VERIFY, "..", "lift", "descs"))
-    import descs as DT
+    from lift.descs import descs as DT
     # ---- the tool alone: grammar, sortedness, final LF
     good = ["this:v:i", "this:i:i,i,d", "fast:q:i,i,s12g", "stack:i:", "stack:a8hf:s16hf,d", "stack:a16hv8:s16hv16,q", "stack:m24:s8r,f", "this:a4x:i", "stack:v:s8hq,s8hh"]
     bad = ["", "that:v:i", "this:v", "this:x:i", "this:v:i,", "this:v:,i", "this:v:s12", "this:v:sg", "stack:ahf:i", "stack:v:s8hz", "stack:v:i i", "Stack:v:i", "stack:a8:i:"]

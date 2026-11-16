@@ -26,8 +26,8 @@ import capstone
 from elftools.elf.elffile import ELFFile
 from elftools.elf.relocation import RelocationSection
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import store, l2sections
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)
+from contract import store, l2sections
 
 IM = re.compile(r'__fnv_([0-9a-f]{8})$')
 R_GOT_PAGE, R_GOT_LO12, R_CALL26, R_JUMP26 = 26, 27, 20, 21   # R_AARCH64_P32_*
@@ -259,17 +259,19 @@ def build(link, vftset, kinds, jobs=4):
     return out
 
 
-from objfacts_merge import summary   # one definition; the merge stage must not need the disassembler
+from contract.objfacts_merge import summary   # one definition; the merge stage must not need the disassembler
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--link', required=True)
+    ap.add_argument('--kinds', required=True, help='the sympair kind table (toolchain/names/sympair_kinds.inc)')
     ap.add_argument('--facts', required=True)
     ap.add_argument('--out', required=True)
     ap.add_argument('--sympair-kinds', required=True, help='toolchain/names/sympair_kinds.inc (the kinds of .fnvnx.sympair)')
     ap.add_argument('--jobs', type=int, default=4)
     a = ap.parse_args()
+    l2sections.set_kinds(a.kinds)
     F = store.load(a.facts, 'facts')
     out = build(a.link, set(F['vft']), l2sections.load_kinds(a.sympair_kinds), a.jobs)
     store.save(a.out, 'obj', out)

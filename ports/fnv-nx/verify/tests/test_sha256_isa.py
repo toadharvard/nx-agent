@@ -13,7 +13,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 V = os.path.dirname(HERE)
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(V)))
 sys.path.insert(0, V)
-import targets  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: `verify` is imported by its qualified name
+from verify import targets  # noqa: E402
 import recipe  # noqa: E402
 
 FAILED = []

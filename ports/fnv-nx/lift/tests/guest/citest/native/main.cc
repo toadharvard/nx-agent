@@ -31,6 +31,7 @@ typedef unsigned long long u64;
 struct Case { u32 entry, nvals, under; u64 v[8]; u64 bits; int err; u32 flags; u32 ind; };
 static const Case K[] = {
 #include "/uses/ports/fnv-nx/lift/tests/guest/citest/lifted/cases.inc"
+#include "/uses/ports/fnv-nx/lift/rt/GEN/fnvl_entry.h"      /* the entry's type: uint64_t(uint64_t api), crt0's call ABI */
 };
 struct Res { u32 depth, err, fex, esp_d, ra; u64 st[3]; u32 ok; };
 extern "C" Res g_res[NCASES];
@@ -38,7 +39,7 @@ Res g_res[NCASES];
 static struct cpu cpu0;
 static bool is_nan(u64 x) { return (x & 0x7ff0000000000000ull) == 0x7ff0000000000000ull && (x & 0xfffffffffffffull); }
 
-extern "C" int fnvl_citest_entry(void) {
+extern "C" uint64_t fnvl_citest_entry(uint64_t) {
   c = &cpu0;
   u32 first = 0;
   for (u32 i = 0; i < NCASES; i++) {

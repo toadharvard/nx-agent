@@ -8,8 +8,8 @@
 // anything else = the backend refused the call (a defect: the device validated everything first; D3DERR_DRIVERINTERNALERROR).
 enum { NXD3D_HOOK_NOMEM = 2 };
 // NxGpuApi4.present: `p` is the NxPresent of the call (image = the GPU image id of the chain's current back buffer 0, rects, interval 0-4, gamma = 0 or the HOST address of the chain's D3DGAMMARAMP, frame = the
-// device's present counter, cursor = 0 or the HOST address of the software cursor's A8R8G8B8 pixels with (cx, cy, cw, ch) = its place in the presented image: nxgpu4.h rule P2, the cursor is blended onto the
-// presented image by the backend as part of the present and never touches the back buffer). The hook copies the host memory into nxd3d_gpu_alloc memory; `p` itself is the caller's.
+// device's present counter, cursor = 0 or the HOST address of the software cursor's A8R8G8B8 pixels with (cx, cy, cw, ch) = its place in the back buffer (pixels of the source image): nxgpu4.h rule P2, the backend stamps the cursor
+// into the back buffer before the present blit, as part of the present). The hook copies the host memory into nxd3d_gpu_alloc memory; `p` itself is the caller's.
 int nxd3d_present(NxObj* chain, const NxPresent* p);
 // Waits until all submitted work has completed (the backend's image_read semantics without a read; used by Reset before images are destroyed).
 void nxd3d_wait_idle(NxObj* device);

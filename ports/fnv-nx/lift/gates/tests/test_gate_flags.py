@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""Self-test of gates/gate_flags.py (flag liveness, item 21) and of proof/flagagree.py on hand-assembled x86-32 bytes (no game data).   python3 -I tests/test_gate_flags.py
+"""Self-test of gates/gate_flags.py (flag liveness, item 21) and of gates/flagagree.py on hand-assembled x86-32 bytes (no game data).   python3 -I tests/test_gate_flags.py
 Each case is one body at 0x1000; the gate must give the stated result: None = green, else the (flag, origin, class) rows of the red reads.
 Origins: E = as at the entry of the body, C = as after a call, U = left undefined by an instruction."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import os
 import sys
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), 'proof'))
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), '..', 'fnvlift', 'tests')); import _inputs; _inputs.configure_declared()      # the declared-machine inputs, as the lifter's program passes them
 import gate_flags as g
 
 A = 0x1000

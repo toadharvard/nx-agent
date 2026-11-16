@@ -109,7 +109,10 @@ def code_store_fault(F, sg, when):
     cond = None
     for i in idx:
         t = eq(extract(V('sel_' + sg, 16), 15, 3), C(i, 13)); cond = t if cond is None else cond | t
-    F.fault(faults.BYNAME['AV']['code'], cond if when is None else cond & when)
+    full = cond if when is None else cond & when
+    F.fault(faults.BYNAME['AV']['code'], full)
+    if not hasattr(F, 'cstore'): F.cstore = []
+    F.cstore.append((sg, cond, full))      # the code-selector arm of `sg` and its fault node: the lifter drops it only under a proved selector set of `sg` (lift_dsl.specialise)
 def mstore(F, a, v, when=None, fwhen=None):
     """fwhen: the store is written unconditionally (an inactive REP step rewrites the old value) but is a store only while fwhen holds: it guards the code-segment fault alone"""
     assert a.u in _OK, 'store through an address not made by an address function'

@@ -29,7 +29,7 @@ M32 = 0xffffffff
 def eip(): return V('eip', 32)
 
 class FieldDecodeError(Exception): pass
-class SymbolicBranch(Exception): pass
+SymbolicBranch = dsl.SymbolicBranch
 
 # ------------------------------------------------------------------------------------------------ key
 def parse_key(key):
@@ -51,7 +51,7 @@ class SV:
     """a 32-bit DSL node posing as the Python integer value of an operand: arithmetic builds nodes, every Python-level decision raises SymbolicBranch"""
     def __init__(s, node, what): s._node = node; s._what = what
     def _b(s, *a): raise SymbolicBranch(s._what)
-    __eq__ = __ne__ = __lt__ = __le__ = __gt__ = __ge__ = __bool__ = __int__ = __index__ = __hash__ = _b
+    __eq__ = __ne__ = __lt__ = __le__ = __gt__ = __ge__ = __bool__ = __int__ = __index__ = __hash__ = __contains__ = __iter__ = __len__ = _b
     def __and__(s, o): return s._node & o
     __rand__ = __and__
     def __or__(s, o): return s._node | o
@@ -282,9 +282,9 @@ def normalize(form, env=None):
     for k, v in (env or {}).items(): e[('var' if k == 'eip' else 'fld', k)] = v
     S = Subst(e); g = copy.copy(form)
     g.regs = [(r, S(v), None if w is None else S(w)) for r, v, w in form.regs]; g.flags = [(f, S(v), None if w is None else S(w)) for f, v, w in form.flags]
-    g.stores = [(S(a), S(v)) for a, v in form.stores]; g.swhen = {i: S(w) for i, w in form.swhen.items()}; g.faults = [(k, c) for k, c in ((k, S(c)) for k, c in form.faults) if not (c.op == 'const' and not c.x)];      # a fault arm whose condition folded to false at this instance is not part of its Form (a total select, such as INT n over its vector, keeps one arm per row)
-    g.undef = dict(form.undef); g.uwhen = {f: S(w) for f, w in form.uwhen.items()}      # the `when` of an undefined flag (DEF0) and the x87 / SIMD effects hold nodes too
+    g.stores = [(S(a), S(v)) for a, v in form.stores]; g.swhen = {i: S(w) for i, w in form.swhen.items()}; g.faults = [(k, c) for k, c in ((k, S(c)) for k, c in form.faults) if not (c.op == 'const' and not c.x)];      # a fault row whose condition folded to 0 never fires (a vector row of a shape at another vector)
     g.domain = [c for c in (S(c) for c in form.domain) if not (c.op == 'const' and c.x)]      # a condition that folded to true holds at this instance and is not part of its Form
+    g.undef = dict(form.undef); g.uwhen = {f: S(w) for f, w in form.uwhen.items()}      # the `when` of an undefined flag (DEF0) and the x87 / SIMD effects hold nodes too
     g.xs = [(k, i, tuple(S(x) for x in e) if k == 'fptr' else S(e)) for k, i, e in form.xs]; g.mmw = []
     g.eip = S(form.eip); g.flo = None if form.flo is None else S(form.flo); g.pend = {}
     if isinstance(form.addr, N):

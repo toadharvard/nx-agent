@@ -9,12 +9,9 @@ over-approximations are what the lift and the gates use:
 
 Facts about a byte that need "not code" or "not data" must be stated from the two sets above, never from the class name.
 
-# entry-decomp
-Instruction bytes of a decomp function row (funcs.tsv size). May-execute. May-be-read: only through a data_in_code range overlapping it (none in a proven run: a relocated word in a proven run is an operand, else red).
-
 # entry-nondecomp
-Instruction bytes of a non-decomp entry (call, tail, ptr, export, tls, eh-*, seh-*, inner). May-execute. A `candidate` entry (module universe.tsv column 4) is an R3 pointer value with no proven flow: may-execute
-until the points-to proves its value reaches no control transfer; a candidate with a relocation misfit is refused (refused.tsv) and its bytes are no entry.
+Instruction bytes of an entry (call, tail, ptr, export, tls, eh-*, seh-*). May-execute. A `candidate` entry (module universe.tsv column 4) is an R3 pointer value with no proven flow: may-execute
+until the points-to proves its value reaches no control transfer.
 
 # data-reloc
 Bytes of a relocated dword slot outside every reached instruction (class 3, "named by a relocation"): a jump table, vtable or pointer table in .text. May-be-read. Proven consumer: the DIC kind of the range that holds

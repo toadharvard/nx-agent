@@ -229,7 +229,13 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
 
   **One recipe per target.** A root whose units serve both targets (the console backend on the guest, the host's gl4 calling the same translator)
   names a recipe per target in admit.json: `"recipe": {"guest": PATH, "host": PATH}` with `"target"` the base's (a plain string is the root's single
-  target, as before). The units are the same for every target; compiler, flags and plugins come from each target's recipe. It is one mechanism with
+  target, as before). The units are the same for every target; compiler, flags and plugins come from each target's recipe.
+  **A per-target recipe holds only what depends on the target:** compiler (or profile), flags, plugins, link, its own `external` toolchain, and `units` or `include` only
+  when they really differ from the base. `generated`, `run`, `uses` and `outputs` live once, in the base recipe, and every target reads them from there: generated
+  and run stages run on the host whatever the target, so they are target-independent by construction. `units` and `include` are inherited; a per-target value equal to
+  the base's is a redundant copy and red, and so is `generated`, `run`, `uses` or `outputs` in a per-target recipe (`recipe.per_target_errors`). The effective recipe
+  of `root@OTHER` is `recipe.inherit(per-target, base)`: the base's stages, outputs, units, include and the externals the per-target recipe does not name, under the
+  per-target fields; an `external` name declared by both with different content is red. `tests/test_pertarget.py`. It is one mechanism with
   `variants`: `recipe.norm_entry` parses the dict to the string spelling plus `variants: {OTHER: {"target": OTHER, "recipe": PATH}}`, and that
   spelling may be written in admit.json directly (it parses to the same structure). `entry_of` resolves the effective target and recipe path; the
   pair `root@OTHER` is built, keyed (the variant name, `FNVNX_TARGET`, its own compiler and flags) and gated separately in `GATE_CACHE`. A per-target
@@ -329,8 +335,10 @@ names (`[A-Za-z][A-Za-z0-9_]*`, unique), then one row per line with exactly the 
 - `"foreach": {"range": N}` (N an integer >= 1) is the same without a table: N steps named `NAME.<i>` for i = 0..N-1, with `{i}` and `{n}` (= N) replaced like a column. An N below 1 is red.
 - Fan-in. A step of the recipe may take the outputs of all rows of a foreach step as inputs: `{"stage": "ROOT:run:NAME", "path": TEMPLATE, "rows": "all"}`, TEMPLATE being an `outputs` or `dirs` entry of
   the foreach step as written (for example `part/{i}.txt`). The expansion replaces it by one ordinary stage ref per row, in row order, so they are the consecutive mounts /in/K, and the arg
-  `"@rows"` of that step becomes the list of those mounts in the same order. One `rows` input per step; a `rows` input that names no foreach step of the recipe, a TEMPLATE that is no output of it,
+  `"@rows"` of that step becomes the list of those mounts in the same order. A `rows` input that names no foreach step of the recipe, a TEMPLATE that is no output of it,
   and `@rows` without a `rows` input are red. ROOT is the recipe's own root (the rows are this recipe's).
+  Several groups: a rows input may carry `"as": NAME` and the arg `@rows:NAME` is that group's mounts in row order; a bare `@rows` is valid only for a step with exactly one rows input.
+  Two groups without `as`, a repeated name and an `@rows:NAME` with no such input are red.
 - Build-time table: `"foreach": {"table": {"stage": ROOT:run:NAME, "path": P} | {"external": NAME, "path": P}, "key": COLUMN, "into": DIR}`. The table is an earlier step's output of this
   root, another root's stage output, or a declared external, so its rows are known only when the build runs. The step stays one step to every other reader: it declares the directory DIR
   (`dirs: [DIR]`) and no `outputs`; its `outputs` as written (each under DIR, each naming `{COLUMN}`) are the row template. At build time one step per row runs as an ordinary step (named
@@ -374,10 +382,7 @@ no object) makes the CC stage print GCC's pass table to stderr, kept in the reco
 ...) and per unit, the TIMEREPORT summed per pass, and the stages that have no sidecar (hits only). Build with `@time` into a fresh store to time every pass.
 
 ## Include
-`include` is the unit's include path in order. A repo directory of it that lies in another admitted product root P (with a recipe for the unit's target) also brings
-P's own repo directories of `include`, transitively, after the consumer's own and each once (`recipe.include_closure`): a header that P ships names its dependencies once,
-in the recipe of P, and every consumer finds them. The entries of P's `include` that lie in an external are P's toolchain and are not carried. A directory of P's `include` that holds no tracked file is a generated tree of P and is not carried either (it does not exist in a consumer's tree): its headers reach a consumer through `include_uses`. A header root
-(class header) has no recipe and carries nothing; a header it includes from another root is named by the consumer.
+`include` is the unit's include path in order, and it is the whole path: a directory of another root enters it only by being named here (a root of class `header`, or a directory output the recipe `uses`, `include_uses`), never by being carried from the recipe of the root that ships it. A header that a root ships names its own dependencies in that root's recipe; a consumer that includes it names them as well. The entries that lie in an external are the toolchain's. A directory of another root's tree that is neither a header home nor a `uses` output is a check error (`include_uses_errors`, `include_home`).
 
 **A path into another root.** An `include` entry inside a generated tree of another root (a directory a generate stage of that root writes into that holds no tracked file, `recipe.generated_trees`, for example `platform/freetype/gen/include`) is a check error: a generated file of a root is its declared output, and a consumer takes it through `uses`. The root's own generated tree is not affected.
 
@@ -412,14 +417,9 @@ consumers: a later step's `inputs` ref `{"stage": "<root>:gen:I", "path": DIR}` 
 root reads it through `uses`. A directory output does not overlap another output or a tracked file. A stage whose stage-ref input is an output of a
 red generator is blocked by it (never run on a missing path). Tests: `tests/test_genchain.py` (a 3-stage chain, unmounted paths fail, the re-key rule).
 
-### Derived forms of a run step (`debs.closure`, `{"plugins": "root"}`)
+### Stage refs evaluate their closure
 
-Two sets are never written twice (they are derived once from their source):
-
-- `"debs": {"closure": [TOP, ...]}`: TOP are the packages of the programs the step runs; the step's debs are TOP and their Pre-Depends/Depends closure on the declared machine, `envcheck.dep_closure`, the rule that defines the declared package set itself (`debs.packages` is checked against it). The result is sorted, every deb's sha256 is in the stage key as before. A top that env.json does not declare is red in `check`; a top that is not installed on the declared machine is red in the build. A list of names is still accepted for a step whose few debs are the whole set.
-- `{"plugins": "root"}` as an input: one `{"plugin": NAME}` per plugin of the root's `plugins`, in declaration order (the order is written once). Red when the root declares no plugins or when it is written twice.
-
-`recipe.expand_run` is the one reader of the expanded steps (`check` after the form check, the build).
+A stage-ref input names one output of one run step. Evaluating it evaluates that step and the run steps whose outputs its inputs name (the transitive producers), in declaration order, and no other step of the root: the result and its key are the same as for the whole root, because a step's key is the content of what it mounts. A step that is not a producer cannot change them. One Job builds the root's artifacts once. The per-process memo of a stage-ref result is keyed by the content of the tracked tree (index blob hashes plus the sha256 of modified files), the store, the root, the step, the path and the step declaration; no stat or mtime is in a key.
 
 ### Generator tool reads (`gen:file-escape`)
 
@@ -431,12 +431,12 @@ declared `uses` input, passed to the tool as an argument (as `--lib` is) or read
 
 ### Declared imports of a generator's tool (`imports`)
 
-A generator tool may import modules of other admitted roots only through the `imports` of its own root's admit.json row (`{"imports": [root, ...]}`, the form `manifest` uses).
-`gen:foreign-import` accepts an import that resolves inside a tree of a declared import root. **One module path.** A declared root R is importable under exactly one module path: its path relative to `ports/fnv-nx` with `/` replaced by `.` (`render/total` -> `render.total`), computed by `gate_admit.import_roots`, the one function that recipe (`foreign_imports`, the mount), `gate_pure` (its `--base` is `ports/fnv-nx`) and the declared-use rule call. The stage mounts R's closure at `/imp/<that relative path>` with `PYTHONPATH=/imp` and nothing else; the packages are namespace packages (PEP 420), no `__init__.py` is invented. The bare name of a module of a declared root (`import x` for `render/total/x.py`) is `gen:foreign-import` with the qualified name as the hint, and so is a bare import of a sibling inside a declared root (use the qualified name or `from . import`). (`gate_abspath` keeps its deliberate superset resolution by path suffix: it only over-approximates the closure it judges.)
+A generator tool may import modules of other admitted roots only by their qualified name; the roots a root imports are DERIVED from its tracked sources (`gate_admit.derived_imports`, by `ast`, any depth), never declared: admit.json has no `imports` field (a row carrying one is red), and a dynamic import (importlib.import_module / __import__ with a non-literal argument) is red.
+`gen:foreign-import` accepts an import that resolves inside a tree of a derived import root. **One module path.** A declared root R is importable under exactly one module path: its path relative to `ports/fnv-nx` with `/` replaced by `.` (`render/total` -> `render.total`), computed by `gate_admit.import_roots`, the one function that recipe (`foreign_imports`, the mount), `gate_pure` (its `--base` is `ports/fnv-nx`) and the declared-use rule call. The stage mounts R's closure at `/imp/<that relative path>` with `PYTHONPATH=/imp` and nothing else; the packages are namespace packages (PEP 420), no `__init__.py` is invented. The bare name of a module of a declared root (`import x` for `render/total/x.py`) is `gen:foreign-import` with the qualified name as the hint, and so is a bare import of a sibling inside a declared root (use the qualified name or `from . import`). (`gate_abspath` keeps its deliberate superset resolution by path suffix: it only over-approximates the closure it judges.)
 
 The generate stage mounts the tool's own root at `/tool` and, at `/imp`, exactly the files of the declared import roots that the import closure (by `ast`, transitively) reaches plus the data those modules read (below), and nothing else of those roots;
 `PYTHONPATH` lists their directories. The stage key therefore covers only the closure: an edit to another file of an import root leaves the key unchanged. Red:
-an import of a root that is not declared (`gen:foreign-import`); a declaration that no module of the declaring root imports from (`gen:unused-import:<root>:<import root>`; the rule is per declaring root, never per consuming recipe, so a root with two tools of which one imports the declared root is green for both consumers; the stage of a tool whose closure does not reach the declared root simply mounts none of it); a
+an import of a root that is not declared (`gen:foreign-import`); a
 read by a path of its own location (`__file__`) in a module of an import root that leaves that root's tree or that the rule cannot decide. A data file such a module reads by a
 constant path of its own location inside its root's tree (decided by `pathflow`, a directory: every tracked file under it) is mounted with the closure and so is in the key. Functions: `recipe.import_trees`, `recipe.import_mount`. Tests: `tests/test_genimports.py`.
 
@@ -559,10 +559,10 @@ Tests: `tests/test_toolexec.py` (ELF resolution and the check forms; the sandbox
 
 `{"external_of": ROOT, "name": EXTERNAL, "path": SUB}` is an input of a `run`, `exec` or `generated` step. It names a path inside an external that the recipe of ANOTHER admitted root declares (a fetched commit, never a root's built output). The pin is that root's own (commit and `tree_sha256`), so the stage key holds the owner's tree and a changed owner pin is a changed key. The one validator `recipe.external_of_errors` serves check, key and mount; `resolve_input` is the one reader.
 
-Red: the owner is this root (use `{external, path}`); the owner is not an admitted root; the owner is neither in this recipe's `uses` nor in the root's admit.json `imports` (the dependency is declared, never reached by name alone); the owner declares no external NAME; the external is a stage external (take it through `uses`); the path is absolute or leaves the tree. A stage reads it at `/in/N` (run), `/exec` (exec) or `/in/external_of/<owner with / as __>/<name>/<path>` (generated). Selftests: `tests/test_external_of.py`.
+Red: the owner is this root (use `{external, path}`); the owner is not an admitted root; the owner declares no external NAME; the external is a stage external (take it through `uses`); the path is absolute or leaves the tree. A stage reads it at `/in/N` (run), `/exec` (exec) or `/in/external_of/<owner with / as __>/<name>/<path>` (generated). Selftests: `tests/test_external_of.py`.
 
 ## The include closure of a root (`include_of`)
-An input of a `run` or `generated` step may be `{"include_of": ROOT}`: every tracked file under the repository include directories of ROOT's own recipe (`include`, directories inside an external are the compiler's declared inputs and are not part of it), at its repo-relative path, mounted at `/in/include_of/<ROOT with / as __>/` (`run`: at the step's `at`). It is resolved the way the compile stage resolves them, so a consumer never restates a root's include list. Valid only where ROOT is a root this recipe `uses` or a declared import (`include_of_errors`, the one rule: check and mount); ROOT itself is red (its include dirs are its own sources); a ROOT whose recipe has no repository include directory is red. The content hash of the tree is in the stage key, so a changed header changes the key. Functions: `recipe.include_of_dirs`, `Job.include_of_tree`. Test: `tests/test_external_of.py`.
+An input of a `run` or `generated` step may be `{"include_of": ROOT}`: every tracked file under the repository include directories of ROOT's own recipe (`include`, directories inside an external are the compiler's declared inputs and are not part of it), at its repo-relative path, mounted at `/in/include_of/<ROOT with / as __>/` (a `run` step mounts it like every run input, at `/in/N` in list order: the step's own N-th input). It is resolved the way the compile stage resolves them, so a consumer never restates a root's include list. Valid where ROOT is an admitted root other than this one whose recipe has a repository include directory (`include_of_errors`, the one rule: check and mount). The input written in the recipe is itself the declaration of the edge: no `uses` and no Python import is needed, and the root graph (`root_edges`, `input_roots`; `root_reach`, the cycle checks) follows it, so a cycle through `include_of` is red; ROOT itself is red (its include dirs are its own sources); a ROOT whose recipe has no repository include directory is red. The content hash of the tree is in the stage key, so a changed header changes the key. Functions: `recipe.include_of_dirs`, `Job.include_of_tree`. Test: `tests/test_external_of.py`.
 
 The external cache is named once: `recipe.ext_dir(cache)`. A build that is given its own external cache (`--ext`) passes it to every reader (`resolve_input(..., extc)`, `exttree(e, cache, extc)`), so the reader goes where `fetch_externals` wrote.
 
@@ -619,3 +619,13 @@ A cold build of a large root is split over farms by one rule, with no second bui
   by content. A name in both must hold the same bytes, else red `store-merge: key <k> differs` and DST is unchanged. It is the only import path.
 - The link is the normal `recipe build --root R` on the merged store: every unit is a hit; a missing unit builds.
 Tests: `tests/test_shard.py` (partition, merge, forged record, no compiler) and the `shard_merge` scenario of `tests/test_recipe.py` (toy root of 10 units).
+
+## One resolution per root (`resolved`, `entered`)
+
+A root that another root reaches (`uses`, an external produced by a root, a `pp` input, `objects_of`) is resolved once per process: `recipe.resolved(job, kind, root, output, make)` runs MAKE for the key (store, repo, repo signature, extcache, kind, root, output) and remembers its value, or its red, for every later consumer. A diamond (two roots that use one root) therefore starts the shared root's stages once, however many roots reach it. A value that points at files gone from disk (the objects of an `objects_of` build in a removed workspace) is made again; nothing else is.
+
+The same holds for the artifact a `run` step executes (`artifact` kind) and for the objects a generate step reads (`objects_of`, kind `objects`: the producer's selection is `objects_of_roots`, a rule over the admitted set that never selects the root itself or a root that depends on it). `depends_on` reads the root graph once per process: `root_reach` is one walk with one visited set per (checkout, root), cycle-safe, not a recursion that repeats a diamond once per path.
+
+A root that is reached again from its own resolution (`build` and `resolved` mark it with `entered`) is a cycle: BuildRed `cycle: A -> B -> ... -> A`, with the full path. It is never recomputed.
+
+The root's own admit.json `cxx_origin` stage (`{lifted_by, stage: gen:ROOT:I}`) is judged by `lifted_stage`, the one rule that `check` uses too: a stage that the root's `generated` does not contain is red from `check` and from every resolution of the root, before any of its stages starts. Test: `tests/test_resolve_once.py` (the stage-level count of a diamond of generated stages needs the declared environment: the farm's verdict).

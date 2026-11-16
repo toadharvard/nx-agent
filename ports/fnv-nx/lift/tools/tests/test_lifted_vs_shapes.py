@@ -9,7 +9,6 @@ HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.pat
 for p in ('tools', ''):
     sys.path.insert(0, os.path.join(LIFT, p))
 import fnvlift as L, lifted
-from fnvlift.tests._inputs import X86SYS, cpufeat_arg
 from proof import shape
 
 
@@ -17,17 +16,17 @@ def main():
     import argparse, tempfile, liftgen
     exe = os.path.join(os.environ['FNVNX_INPUT_EXE'], 'FalloutNV.exe'); facts = os.environ['FNVNX_INPUT_FACTS']
     import fnvlift
-    fnvlift.inputs.configure(universe=facts + '/universe.tsv', fpstate=facts + '/fpstate', fpdepth=facts + '/fpmodes/depth.tsv', x86sys=X86SYS, cpufeat=cpufeat_arg())      # the facts external holds fpstate/ and fpmodes/; X86SYS is the tracked platform/declared/x86sys.json
+    from fnvlift.tests import _inputs; _inputs.configure_image(facts + '/universe.tsv', 'exe')      # the facts external holds fpstate/ and fpmodes/; X86SYS is the tracked platform/declared/x86sys.json
     emit, jtab = 'dsl', None
     out = tempfile.mkdtemp(); shapes = out + '/shapes_0.tsv'
     try:
-        liftgen.shard(argparse.Namespace(shard='0/1', out=out, jobs=os.cpu_count() or 1, exe=exe, base=None, universe=facts + '/universe.tsv', emit=emit, jtab=jtab))
-        return compare(shapes, exe, emit, jtab)
+        liftgen.shard(argparse.Namespace(shard='0/1', out=out, jobs=os.cpu_count() or 1, exe=exe, base=None, universe=facts + '/universe.tsv', emit=emit, jtab=jtab, prov=False))
+        return compare(shapes, exe, emit, jtab, facts)
     finally:
         import shutil; shutil.rmtree(out, ignore_errors=True)
 
 
-def compare(shapes, exe, emit, jtab):
+def compare(shapes, exe, emit, jtab, facts):
     img = L.Image(exe)
     got = lifted.lifted(img, facts + '/universe.tsv', emit, jtab)
     cnt = collections.Counter(); n = 0
@@ -35,11 +34,14 @@ def compare(shapes, exe, emit, jtab):
         ins = next(iter(L.core.md.disasm(img.bytes(va, 16), va, 1)), None)
         if ins is None:
             from fnvlift import f_sys
-            ins = f_sys.nop_gap(img.bytes(va, 16))
+            ins = f_sys.decode_gap(img.bytes(va, 16))
         assert ins.size == ln, (hex(va), ins.size, ln)
         cnt[(shape.shape_key(ins), shape.family(ins))] += 1; n += 1
     mine = ''.join('\t'.join(map(str, x)) + '\n' for x in [(k, fam, c) for (k, fam), c in sorted(cnt.items(), key=lambda t: (t[0][0].encode(), t[0][1]))])
-    want = open(shapes).read()
+    w = collections.Counter()      # liftgen's rows are (key, family, count, path): the census compares the counts of a (key, family) over all its paths
+    for l in open(shapes):
+        k, fam, c, _path = l.rstrip('\n').split('\t'); w[(k, fam)] += int(c)
+    want = ''.join('\t'.join(map(str, x)) + '\n' for x in [(k, fam, c) for (k, fam), c in sorted(w.items(), key=lambda t: (t[0][0].encode(), t[0][1]))])
     ok = mine == want
     print('lifted instructions %d, shape rows %d: %s' % (n, len(cnt), 'EQUAL to ' + shapes if ok else 'DIFFERENT from ' + shapes))
     if not ok:

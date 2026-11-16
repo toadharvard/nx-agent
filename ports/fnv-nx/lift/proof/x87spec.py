@@ -1476,7 +1476,7 @@ EXP2M1 = z3.Function("x87_exp2m1", _R, _R)         # 2^x - 1
 LOG2 = z3.Function("x87_log2", _R, _R)
 ATAN2 = z3.Function("x87_atan2", _R, _R, _R)       # atan2(y, x)
 ZR = z3.RealVal(0)
-# AXIOMS: every one is a theorem of real analysis, so none stands in for an assumption (the lead's rule); the exact values at 0, 1 and -1
+# AXIOMS: every one is a theorem of real analysis, so none stands in for a premise (the lead's rule); the exact values at 0, 1 and -1
 # are what the SDM tables list for them (SDM 2A:F2XM1 Table 1-12; SDM 2A:FSIN Table 1-31 +-0 -> +-0; SDM 2A:FCOS +-0 -> +1; SDM 2A:FPTAN Table 1-29;
 # SDM 2A:FYL2X Table 1-44, ST(0) = 1 -> 0).
 AXIOMS = [SIN(ZR) == 0,                                        # sin 0 = 0 (power series; the first term vanishes)

@@ -43,18 +43,30 @@
     "--keys",
     "/uses/ports/fnv-nx/loader/KEYS_TSV",
     "--lib",
-    "/in/ports/fnv-nx/lift"
+    "/in/ports/fnv-nx/lift",
+    "--baddecode",
+    "/out/baddecode_binkw32.tsv",
+    "--shapes",
+    "/out/shapes_binkw32.tsv",
+    "--udsail",
+    "/in/ports/fnv-nx/lift/proof/udsail_input.tsv"
    ],
    "inputs": [
-    "ports/fnv-nx/lift/fnvlift"
+    "ports/fnv-nx/lift/fnvlift",
+    "ports/fnv-nx/lift/proof"
    ],
-   "outputs": [],
+   "outputs": [
+    "baddecode_binkw32.tsv",
+    "shapes_binkw32.tsv"
+   ],
    "dirs": [
     "o"
    ]
   }
  ],
  "outputs": {
-  "IMG": "o"
+  "IMG": "o",
+  "BADDECODE": "baddecode_binkw32.tsv",
+  "SHAPES": "shapes_binkw32.tsv"
  }
 }

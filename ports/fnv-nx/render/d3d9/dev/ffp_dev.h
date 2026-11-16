@@ -8,6 +8,7 @@
 #include "draw_core.h"
 #include "../gen/d9impl.gen.h"
 #include "state_rt.h"
+#include "nx_gl4shim.h"
 #define NX_RS_COUNT NX_FFP_PS_RS_COUNT_   // ffp_state.h declares its own NX_RS_COUNT (= 210); the device's generated one (state.gen.h) is the same number: keep both, rename the module's
 extern "C" {
 #include "../ffp/ffp_state.h"
@@ -37,20 +38,16 @@ void nx_ffp_ps_block(NxDeviceCore* d, const uint8_t tex_types[8], NxFfpPsState* 
 // program inputs of the vertex stage: attribute set of the program (fixed locations of ffp.vert.glsl) intersected with what the declaration provides and the program reads for these states
 uint32_t nx_ffp_vs_inputs(const NxFfpVsKey& k, NxFfpVsBind* out);                    // n_in, in_pair, in_loc; returns n_in
 uint32_t nx_ffp_stage_mask(const uint32_t tss[8][33], const uint8_t tex_types[8]);    // PS tex_mask: stages the cascade reaches (before the first COLOROP DISABLE) whose texture type is not NONE
-uint32_t nx_ffp_ps_pairs(uint32_t tex_mask, uint8_t out[31]);                         // varyings the pixel program reads: COLOR0, COLOR1, TEXCOORDn (n in the mask), FOG0; returns the count
 // ---- ffp_dev.cpp: the per-device record (an IUnknown private-data entry of the device: it dies with the device)
 struct NxFfpDev : IUnknown {
     long refs = 1;
-    uint32_t vs[2] = {0, 0}, ps[2] = {0, 0};             // backend shader ids by flat shading (0 = not made)
     bool vs_ok = false; NxFfpVsKey key; NxFfpVsState vsb; NxFfpPsState psb;
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, void** pp) override { *pp = nullptr; return E_NOINTERFACE; }
     ULONG STDMETHODCALLTYPE AddRef() override { return ++refs; }
     ULONG STDMETHODCALLTYPE Release() override { long r = --refs; if (!r) delete this; return r; }
     void* operator new(size_t n) noexcept NX_MUST_USE NX_USE_MAKE { return nxd3d_alloc(n); } void operator delete(void* p) { nxd3d_free(p); }   // made by nx_make_plain<NxFfpDev>()
-    virtual ~NxFfpDev();                                          // destroys the backend programs (the pending stream is submitted first) and forgets them in the state table
 };
 NxFfpDev* nx_ffp_dev(NxDeviceCore* d);                    // the device's record, made at the first call; null = no memory. The pointer is valid as long as the device is.
 // ---- ffp_prog.cpp
 enum NxBackendKind : uint32_t { NX_BACKEND_DEKO3D = 1, NX_BACKEND_GL = 2 };   // NxGpuInfo.backend (gpu_abi.h)
 bool nx_ffp_flat(NxDeviceCore* d, uint32_t* flat);        // the program variant: D3DRS_SHADEMODE FLAT (the front's flat_shade rule over the draw path's latch); false = no memory for the latch
-uint32_t nx_ffp_make_program(NxFfpDev* f, uint32_t stage /* NxStage */, uint32_t flat);   // a backend shader id (>= 1) of the program, 0 = not made

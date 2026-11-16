@@ -5,7 +5,7 @@
   (4) a load of a segment register (mov sreg, r/m16) sets the state the guard reads (fnvl_seg_set).
     test_null_seg.py"""
 import json, os, sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; CPUFEAT = _inputs.cpufeat_arg(); _inputs.configure(CPUFEAT)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; SDMROWS = _inputs.sdmrows_arg(); _inputs.configure(SDMROWS)
 import fnvlift as L
 from fnvlift import x86sys
 from fnvlift.core import Unsupported
@@ -23,7 +23,7 @@ def configure(**guard):
     g = {**dict(es=False, ds=False, fs=False, gs=True), **guard}
     json.dump({'format': 'fnvnx-segwrites/2', 'images': {'buf': {n: {'guard': v} for n, v in g.items()}}}, open(d + '/segwrites.json', 'w'))
     open(d + '/universe.tsv', 'w').close(); open(d + '/depth.tsv', 'w').close()
-    inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, cpufeat=CPUFEAT, segwrites=d + '/segwrites.json', image='buf')
+    inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, sdmrows=SDMROWS, cpumodel=_inputs.CPUMODEL, segwrites=d + '/segwrites.json', image='buf')
 
 
 def lift(code):
@@ -32,7 +32,7 @@ def lift(code):
 
 
 AVC = 'FNVL_RAISE_AV(%d,0x%xu,0x401000u)' % (row['parameters'][0], row['parameters'][1])
-GUARD = {'es': 'SELK(c->sel[0])==0', 'ds': 'SELK(c->sel[3])==0', 'fs': 'SELK(c->sel[4])==0', 'gs': 'SELK(c->sel[5])==0'}
+GUARD = {'es': 'SELK(c->sel[0])==0', 'ds': 'SELK(c->sel[3])==0', 'fs': 'SELK(c->sel[4])==0', 'gs': '(in_sel_gs >> 2)'}      # gs: the null-selector fault the Form carries (proof/forms.NULL_CHECKED, proved by sysspec_seg); es/ds/fs: core.gs_guard's text
 PFX = {'es': 0x26, 'ds': 0x3e, 'fs': 0x64, 'gs': 0x65}
 
 # (1) gs read: the record's initial gs (0) is a value, the read is lifted (state read)
@@ -48,17 +48,30 @@ configure(ds=True, es=True, fs=True)
 for seg in ('es', 'ds', 'fs', 'gs'):
     t = lift(bytes([PFX[seg], 0x8b, 0x00, 0xc3])); assert GUARD[seg] in t and AVC in t, (seg, t[:300])
 assert GUARD['ds'] in lift(bytes([0x8b, 0x00, 0xc3]))                   # default ds
-assert 'SELK(c->sel[' not in lift(bytes([0x8b, 0x45, 0x08, 0xc3]))      # [ebp+8]: ss
-assert 'SELK(c->sel[' not in lift(bytes([0x8b, 0x04, 0x24, 0xc3]))      # [esp]: ss
+assert 'SELK(c->sel[' not in lift(bytes([0x8b, 0x45, 0x08, 0xc3])) and 'in_sel_' not in lift(bytes([0x8b, 0x45, 0x08, 0xc3]))      # [ebp+8]: ss
+assert 'SELK(c->sel[' not in lift(bytes([0x8b, 0x04, 0x24, 0xc3])) and 'in_sel_' not in lift(bytes([0x8b, 0x04, 0x24, 0xc3]))      # [esp]: ss
 assert GUARD['es'] in lift(bytes([0xaa, 0xc3])) and GUARD['ds'] in lift(bytes([0xd7, 0xc3]))      # stosb es:[edi]; xlatb ds:[ebx+al]
 # (3) lea and a prefixed instruction without a memory operand: no guard
 for b in ([0x65, 0x8d, 0x00, 0xc3], [0x3e, 0x8d, 0x00, 0xc3], [0x65, 0x90, 0xc3]):
-    assert 'SELK(c->sel[' not in lift(bytes(b)), b
+    assert 'SELK(c->sel[' not in lift(bytes(b)) and 'in_sel_gs >> 2' not in lift(bytes(b)), b
 # privileged-opcode check of the row
 from fnvlift import f_sys
 for b in range(256):
     want = ('0x%x' % b) in row['privileged_check_first']['priv_instruction_opcodes']
     assert f_sys.row_privileged(bytes([0x65, b, 0, 0]), row) == want, b
 # (4) mov gs, ax loads through fnvl_seg_set (state the guard reads)
-assert 'fnvl_seg_set(c,5,' in lift(bytes([0x8e, 0xe8, 0xc3]))
+assert 'fnvl_seg_set(c, 5,' in lift(bytes([0x8e, 0xe8, 0xc3]))
+# (5) the selector sets of the facts (tools/segwrites.py): a store through gs / ds whose set holds no code selector has no code-selector arm in its text; the null-selector arm (a different condition) is untouched
+def sel_cfg(**sets):
+    inputs.reset(); d = tempfile.mkdtemp(prefix='nullseg-')
+    g = {n: {'guard': n == 'gs', 'selectors': sets.get(n)} for n in ('es', 'ds', 'fs', 'gs')}
+    json.dump({'format': 'fnvnx-segwrites/2', 'images': {'buf': g}}, open(d + '/segwrites.json', 'w'))
+    open(d + '/universe.tsv', 'w').close(); open(d + '/depth.tsv', 'w').close()
+    inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, sdmrows=SDMROWS, cpumodel=_inputs.CPUMODEL, segwrites=d + '/segwrites.json', image='buf')
+sel_cfg(gs=[0, 0x23], ds=[0x23])
+t = lift(bytes([0x65, 0x89, 0x01, 0xc3])); assert GUARD['gs'] in t and 'in_sel_gs >> 3' not in t, t[:500]      # gs: null guard kept, code-selector arm dropped
+t = lift(bytes([0x89, 0x01, 0xc3])); assert 'in_sel_ds >> 3' not in t, t[:500]
+sel_cfg(gs=[0, 0x1b], ds=None)
+t = lift(bytes([0x65, 0x89, 0x01, 0xc3])); assert GUARD['gs'] in t and 'in_sel_gs >> 3' in t, t[:500]          # gs may hold the code selector 0x1b
+t = lift(bytes([0x89, 0x01, 0xc3])); assert 'in_sel_ds >> 3' in t, t[:500]                                       # unbounded ds
 print('null_seg: ok')

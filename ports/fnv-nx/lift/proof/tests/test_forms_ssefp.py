@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SSE FP Forms (proof/forms_ssefp.py): directed cases from the SDM text only (flags, faults, the sticky MXCSR bits).  No emulator is an oracle: the certificate of a Form is L3b's reference run (Form == reference per shape), and fpc_host.py is a measurement of the C helper against the z3 rule.   test_forms_ssefp.py  (exit 0 = all pass)"""
+"""SSE FP Forms (proof/forms_ssefp.py): directed cases from the SDM text only (flags, faults, the sticky MXCSR bits).  No emulator is an oracle: the certificate of a Form is L3b's reference run (Form == reference per shape).   test_forms_ssefp.py  (exit 0 = all pass)"""
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -8,6 +8,7 @@ import capstone as CS, z3
 import unittest
 from proof import forms
 from fnvlift import dsl
+from fnvlift.tests import _inputs; _inputs.configure_declared()
 md = CS.Cs(CS.CS_ARCH_X86, CS.CS_MODE_32); md.detail = True
 FAILS = []; N = 0
 def main():

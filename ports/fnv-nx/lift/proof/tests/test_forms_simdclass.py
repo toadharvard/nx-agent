@@ -8,6 +8,7 @@ import declared_x86sys; declared_x86sys.configure()
 import capstone as CS, z3
 from proof import forms
 from fnvlift import dsl
+from fnvlift.tests import _inputs; _inputs.configure_declared()
 md = CS.Cs(CS.CS_ARCH_X86, CS.CS_MODE_32); md.detail = True
 FAILS = []; N = [0]
 def check(name, ok):
@@ -26,7 +27,7 @@ def run(code, **kv):
     for r in ('eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi'): env.setdefault(r, (0, 32))
     env.setdefault('ftag', (0, 16)); env.setdefault('ftop', (0, 3))
     return P, env
-HDR = open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'rt', 'fnvl.h')).read() + open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'rt', 'fnvl_x87.h')).read()
+HDR = ''.join(open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'rt', h)).read() for h in ('fnvl.h', 'fnvl_x87.h', 'fnvl_fpc.h'))      # the shipped helpers: the headers that dsl.to_c_inline's helper names are defined in
 QN, SN, DEN, ONE, ZERO = 0x7fc00000, 0x7fa00000, 0x00000001, 0x3f800000, 0
 def at(code, a, b, mx=0x1f80):
     """a two-operand register form xmm0 (dest), xmm1 (src): -> (fault, mxcsr, xmm0 low 32 bits)"""

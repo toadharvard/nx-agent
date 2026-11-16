@@ -25,14 +25,11 @@
    "tool": "ports/fnv-nx/render/smscan/res_smgen.py",
    "args": [
     "/out/gen",
-    "/in/ports/fnv-nx/render/shaders/total/sm_table.json",
-    "/in/ports/fnv-nx/bridgefacts/d3d9/d3d9_tables.py"
+    "/uses/ports/fnv-nx/render/shaders/total/sm_table",
+    "/uses/ports/fnv-nx/render/shaders/total/sm_illegal",
+    "/uses/ports/fnv-nx/bridgefacts/D9_SMWALK"
    ],
-   "inputs": [
-    "ports/fnv-nx/render/shaders/total/sm_table.json",
-    "ports/fnv-nx/render/shaders/total/sm_illegal.tsv",
-    "ports/fnv-nx/bridgefacts/d3d9/d3d9_tables.py"
-   ],
+   "inputs": [],
    "outputs": [
     "gen/res_smtab.gen.h"
    ]
@@ -40,5 +37,19 @@
  ],
  "outputs": {
   "INCLUDE": "include"
- }
+ },
+ "uses": [
+  {
+   "root": "ports/fnv-nx/render/shaders/total",
+   "output": "sm_table"
+  },
+  {
+   "root": "ports/fnv-nx/render/shaders/total",
+   "output": "sm_illegal"
+  },
+  {
+   "root": "ports/fnv-nx/bridgefacts",
+   "output": "D9_SMWALK"
+  }
+ ]
 }

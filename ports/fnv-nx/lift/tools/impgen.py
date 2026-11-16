@@ -71,6 +71,19 @@ def thunk(r, target):
             '  fnvl_native_out(&nf); REGS(); %s c->ra=M32(sp); esp=sp+%du; }\n') % (r['key'], r['dll'], r['name'], conv, ret, args, do, put, pop)
 
 
+def entry_thunk(r):
+    """bind entry: the definer is `void f(void)` working on the guest state (an entry body, rt/*.cc). The bridge does the whole x86 return from the row's conv and args:
+    ra = the return address, esp popped (stdcall / thiscall: the argument bytes). The body never writes ra or the return esp; its non-local transfer is fnvl_native_transfer (rt/imp.h),
+    which leaves through the frame linked here (the setjmp branch below), so the return is not run."""
+    off = 4 + sum(RD[a][1] for a in r['args'])
+    pop = off if r['conv'] in ('stdcall', 'thiscall') else 4
+    return ('extern "C" __attribute__((section(".text.fnvl"))) void I_%08x(void)   /* %s!%s %s entry(%s) */\n'
+            '{ struct fnvl_nframe nf; u32 sp=esp; fnvl_native_enter(&nf);\n'
+            '  if(__builtin_setjmp((void **)nf.jb)){ c->nf=nf.prev; return; }\n'
+            '  REGS(); %s(); REGS();\n'
+            '  fnvl_native_leave(&nf); c->ra=M32(sp); esp=sp+%du; }\n') % (r['key'], r['dll'], r['name'], r['conv'], r['args'], r['sym'], pop)
+
+
 def generate(bridge, out, need=(), l3=None, rt_defined=None, prelude=None):
     """rt_defined: the global symbols the runtime objects define (nm); a bind-l3 row whose symbol is not among them has no body yet and is blocked like a
     bind-none row (None: not checked, the unit test's case)."""
@@ -85,7 +98,7 @@ def generate(bridge, out, need=(), l3=None, rt_defined=None, prelude=None):
         for l in open(f):
             if l.strip() and l[0] != '#':
                 p = l.rstrip('\n').split('\t'); needed.add((p[1].lower(), p[2]))
-    T = ['#include "fnvl.h"' if prelude is None else '#include "%s"' % prelude, '#include "imp.h"', 'extern "C" { void *fnvnx_win32_lookup_export(const char *dll, const char *name); int fnvnx_lift_imports_init(void); void fnvl_runtime_install(void); }']
+    T = ['#define FNVL_RA_WRITE 1', '#include "fnvl.h"' if prelude is None else '#include "%s"' % prelude, '#include "imp.h"', 'extern "C" { void *fnvnx_win32_lookup_export(const char *dll, const char *name); int fnvnx_lift_imports_init(void); void fnvl_runtime_install(void); }']
     ent, blocked, look, body = [], [], [], []
     for r in rs:
         k = (r['dll'], r['name'])
@@ -96,6 +109,13 @@ def generate(bridge, out, need=(), l3=None, rt_defined=None, prelude=None):
             if rt_defined is not None and s not in rt_defined:
                 blocked.append((r['key'], r['dll'], r['name'], 'no body in the lifter runtime (bind l3)')); continue
             ent.append((r['key'], s, r['dll'], r['name'], 'l3')); continue
+        if r['bind'] == 'entry':
+            if r['conv'] not in ('stdcall', 'cdecl', 'thiscall', 'vararg') or any(x not in RD for x in r['args']):
+                sys.exit('impgen: row %d (%s!%s) is outside the table grammar' % (r['i'], r['dll'], r['name']))
+            if rt_defined is not None and r['sym'] not in rt_defined:
+                blocked.append((r['key'], r['dll'], r['name'], 'no body in the lifter runtime (bind entry)')); continue
+            T.append('extern "C" void %s(void);' % r['sym'])
+            body.append(entry_thunk(r)); ent.append((r['key'], 'I_%08x' % r['key'], r['dll'], r['name'], 'entry')); continue
         why = ('no body in the platform (bind none)' if r['bind'] == 'none' else 'object address, not code (bind data)' if r['bind'] == 'data' or r['conv'] == 'data'
                else None)
         if why is None and (r['conv'] not in ('stdcall', 'cdecl', 'thiscall', 'vararg') or r['ret'] not in CT or any(a not in RD for a in r['args']) or r['bind'] not in ('sym', 'lookup')):

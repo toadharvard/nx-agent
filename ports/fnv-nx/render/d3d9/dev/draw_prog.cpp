@@ -55,6 +55,7 @@ HRESULT nx_prog_resolve(NxDeviceCore* d, NxProg* p) {
     } else {
         p->vs = nx_ffp_vs_program(d, &p->fv); if (!p->vs) return D3DERR_DRIVERINTERNALERROR;
         p->sig.n = p->fv.n_in > 16 ? 16 : p->fv.n_in; memcpy(p->sig.pair, p->fv.in_pair, p->sig.n); memcpy(p->sig.loc, p->fv.in_loc, p->sig.n);
+        nvo = nx_pair_ffp_vs_writes(vout);
     }
     if (psc) {
         p->pi = &psc->iface; p->ps_version = psc->iface.major << 8 | psc->iface.minor;

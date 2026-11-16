@@ -10,6 +10,7 @@
 #include <xinput.h>
 #include "input.h"
 #include "../os/os.h"
+#include <fnvnx_export.h>
 #include "../include/fnvnx_clock.h"
 
 #include <stdlib.h>
@@ -235,6 +236,9 @@ extern "C" DWORD WINAPI XInputGetState(DWORD user, XINPUT_STATE *st)
     st->Gamepad.sThumbRY = x.ry;
     return ERROR_SUCCESS;
 }
+FNVNX_EXPORT("xinput1_3.dll", "XInputGetState", XInputGetState, "func");
+FNVNX_EXPORT("xinput1_4.dll", "XInputGetState", XInputGetState, "func");
+FNVNX_EXPORT("xinput9_1_0.dll", "XInputGetState", XInputGetState, "func");
 
 static void apply_rumble(void)   /* g_xlock held by nobody: reads under it, drives outside */
 {
@@ -255,6 +259,9 @@ extern "C" DWORD WINAPI XInputSetState(DWORD user, XINPUT_VIBRATION *v)
     apply_rumble();   /* XInputEnable(FALSE) keeps the motors at 0 but remembers the request */
     return ERROR_SUCCESS;
 }
+FNVNX_EXPORT("xinput1_3.dll", "XInputSetState", XInputSetState, "func");
+FNVNX_EXPORT("xinput1_4.dll", "XInputSetState", XInputSetState, "func");
+FNVNX_EXPORT("xinput9_1_0.dll", "XInputSetState", XInputSetState, "func");
 
 extern "C" DWORD WINAPI XInputGetCapabilities(DWORD user, DWORD flags, XINPUT_CAPABILITIES *c)
 {
@@ -271,6 +278,9 @@ extern "C" DWORD WINAPI XInputGetCapabilities(DWORD user, DWORD flags, XINPUT_CA
     c->Vibration.wLeftMotorSpeed = c->Vibration.wRightMotorSpeed = 0xFFFF;
     return ERROR_SUCCESS;
 }
+FNVNX_EXPORT("xinput1_3.dll", "XInputGetCapabilities", XInputGetCapabilities, "func");
+FNVNX_EXPORT("xinput1_4.dll", "XInputGetCapabilities", XInputGetCapabilities, "func");
+FNVNX_EXPORT("xinput9_1_0.dll", "XInputGetCapabilities", XInputGetCapabilities, "func");
 
 extern "C" void WINAPI XInputEnable(BOOL enable)
 {
@@ -279,6 +289,9 @@ extern "C" void WINAPI XInputEnable(BOOL enable)
     os_unlock(&g_xlock);
     apply_rumble();
 }
+FNVNX_EXPORT("xinput1_3.dll", "XInputEnable", XInputEnable, "func");
+FNVNX_EXPORT("xinput1_4.dll", "XInputEnable", XInputEnable, "func");
+FNVNX_EXPORT("xinput9_1_0.dll", "XInputEnable", XInputEnable, "func");
 
 extern "C" DWORD WINAPI XInputGetDSoundAudioDeviceGuids(DWORD user, GUID *render, GUID *capture)
 {
@@ -288,6 +301,9 @@ extern "C" DWORD WINAPI XInputGetDSoundAudioDeviceGuids(DWORD user, GUID *render
     memset(capture, 0, sizeof(GUID));
     return ERROR_SUCCESS;
 }
+FNVNX_EXPORT("xinput1_3.dll", "XInputGetDSoundAudioDeviceGuids", XInputGetDSoundAudioDeviceGuids, "func");
+FNVNX_EXPORT("xinput1_4.dll", "XInputGetDSoundAudioDeviceGuids", XInputGetDSoundAudioDeviceGuids, "func");
+FNVNX_EXPORT("xinput9_1_0.dll", "XInputGetDSoundAudioDeviceGuids", XInputGetDSoundAudioDeviceGuids, "func");
 
 extern "C" DWORD WINAPI XInputGetBatteryInformation(DWORD user, BYTE devtype, XINPUT_BATTERY_INFORMATION *b)
 {
@@ -297,6 +313,9 @@ extern "C" DWORD WINAPI XInputGetBatteryInformation(DWORD user, BYTE devtype, XI
     b->BatteryLevel = devtype == BATTERY_DEVTYPE_GAMEPAD ? BATTERY_LEVEL_FULL : BATTERY_LEVEL_EMPTY;
     return ERROR_SUCCESS;
 }
+FNVNX_EXPORT("xinput1_3.dll", "XInputGetBatteryInformation", XInputGetBatteryInformation, "func");
+FNVNX_EXPORT("xinput1_4.dll", "XInputGetBatteryInformation", XInputGetBatteryInformation, "func");
+FNVNX_EXPORT("xinput9_1_0.dll", "XInputGetBatteryInformation", XInputGetBatteryInformation, "func");
 
 extern "C" DWORD WINAPI XInputGetKeystroke(DWORD user, DWORD reserved, XINPUT_KEYSTROKE *ks)
 {
@@ -317,3 +336,6 @@ extern "C" DWORD WINAPI XInputGetKeystroke(DWORD user, DWORD reserved, XINPUT_KE
     os_unlock(&g_xlock);
     return r;
 }
+FNVNX_EXPORT("xinput1_3.dll", "XInputGetKeystroke", XInputGetKeystroke, "func");
+FNVNX_EXPORT("xinput1_4.dll", "XInputGetKeystroke", XInputGetKeystroke, "func");
+FNVNX_EXPORT("xinput9_1_0.dll", "XInputGetKeystroke", XInputGetKeystroke, "func");

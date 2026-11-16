@@ -35,7 +35,6 @@ char *_itoa(int, char *, int);
 char *_ultoa(unsigned long, char *, int);
 
 /* ---- formatted output: MSVC semantics */
-int _snprintf(char *, size_t, const char *, ...);          /* no terminator when full; -1 on truncation */
 int _vsnprintf(char *, size_t, const char *, va_list);
 
 /* ---- the one formatter and the one scanner (msvcrt_format.cpp), parameterised by an argument source.

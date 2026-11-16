@@ -181,8 +181,6 @@ HAND = ["SetLight", "GetLight", "LightEnable", "GetLightEnable", "SetPaletteEntr
 HAND_SB = ["Capture", "Apply"]
 GROUPS_EXTRA = ["LIGHTS"]   # dirty groups of state that lives outside the slot families (sparse lights)
 if __name__ == "__main__":
-    import os, sys
-    sys.dont_write_bytecode = True
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    import state_gen
-    state_gen.emit(sys.modules[__name__], sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)
+    import sys
+    import state_gen, state_model   # the model is its own module: this run is the script, state_model the same text as an imported module
+    state_gen.emit(state_model, sys.argv[1], sys.argv[2])

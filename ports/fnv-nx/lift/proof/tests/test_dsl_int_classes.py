@@ -14,8 +14,8 @@ import declared_x86sys; declared_x86sys.configure()
 import capstone, z3
 from capstone import x86 as X
 from fnvlift import core
-from proof import lift_dsl as f_dsl
-core.set_emit(f_dsl.emit_form)
+from proof import lift_dsl as f_dsl, cpufeat
+core.set_emit(f_dsl.emit_form, cpufeat.missing)
 from fnvlift.dsl import to_smt
 from proof import forms
 

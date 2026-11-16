@@ -31,11 +31,11 @@ CALLER_SAVED_NEVER = ()
 COPYLIKE = {'mov', 'push', 'pop', 'call', 'jmp', 'ret', 'cmp', 'test', 'nop', 'leave', 'movzx', 'movsx', 'int3', 'hlt', 'ud2', 'iret', 'iretd', 'retf', 'wait', 'fwait'}
 COPYLIKE |= {'j' + c for c in ('o','no','b','ae','e','ne','be','a','s','ns','p','np','l','ge','le','g','ecxz','cxz')} | {'loop', 'loope', 'loopne'}
 COPYLIKE |= {'set' + c for c in ('o','no','b','ae','e','ne','be','a','s','ns','p','np','l','ge','le','g')}
-BLOCK_KINDS = {'tail', 'inner', 'eh-unwind', 'eh-catch', 'eh-cont', 'eh-throw'}
+BLOCK_KINDS = {'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'eh-throw'}
 FP_ENV = {'fnstenv': 28, 'fstenv': 28, 'fnsave': 108, 'fsave': 108}      # 32-bit protected mode image: FIP at +12, FDP at +20
 FP_FXSAVE = ('fxsave',)                                                   # FIP at +8, FDP at +16
 FPU_CONTROL = {'fnstenv', 'fstenv', 'fnsave', 'fsave', 'fldenv', 'frstor', 'fnstcw', 'fstcw', 'fldcw', 'fnstsw', 'fstsw', 'fnclex', 'fclex', 'fninit', 'finit', 'fwait', 'wait', 'fxsave', 'fxrstor'}
-CALL_KINDS = {'call', 'ptr', 'export', 'entry', 'decomp', 'tls', 'seh-handler', 'seh-filter'}   # entered by a call (or by the runtime through one): owns a return-address slot
+CALL_KINDS = {'call', 'ptr', 'export', 'entry', 'tls', 'seh-handler', 'seh-filter'}   # entered by a call (or by the runtime through one): owns a return-address slot
 INDIRECT_KINDS = {'ptr', 'export', 'entry', 'tls', 'seh-handler', 'seh-filter'}                  # callers the facts do not enumerate
 RETS = ('ret', 'retf', 'iret', 'iretd')
 
@@ -57,7 +57,7 @@ def j(a, b):
 
 
 class Img:
-    def __init__(self, text, T0, entries, ranges, rd=None, rset=None):
+    def __init__(self, text, T0, entries, ranges, rd=None, rset=None, pops=None, imp=None, slots=None):
         """text: bytes of the executable span at T0; entries: {addr: set(kinds)}; ranges: sorted list of reached [start, end) byte ranges (any overlap)."""
         self.text, self.T0, self.T1 = text, T0, T0 + len(text); self.entries = entries
         self.md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); self.md.detail = True
@@ -66,7 +66,7 @@ class Img:
             if mer and a <= mer[-1][1]: mer[-1][1] = max(mer[-1][1], b)
             else: mer.append([a, b])
         self.mer = mer; self.ms = [a for a, b in mer]; self.cache = {}
-        self.rd = rd; self.rset = rset or set(); self.inp = {}; self.allcode = set(); self.dirty = set(); self.refs = None; self.tabslots = set(); self.visited = set(); self.jtargets = set(); self.pk = {}; self.wmemo = {}; self.calltg = {}; self.retsites = set(); self.callers = {}; self.summ = {}; self.busy = set(); self.fresh = set(); self.asm225 = 'ASM-225'; self.rows = []; self.info = Counter()
+        self.rd = rd; self.rset = rset or set(); self.inp = {}; self.allcode = set(); self.dirty = set(); self.refs = None; self.tabslots = set(); self.visited = set(); self.pops = pops or {}; self.imp = imp or {}; self.jtargets = set(); self.badarr = set(); self.ijbad = set(); self.ijall = set(); self.ijwhy = {}; self.ijret = set(); self.ijimp = set(); self.slots = frozenset(slots or ()); self.pk = {}; self.wmemo = {}; self.calltg = {}; self.retsites = set(); self.callers = {}; self.summ = {}; self.busy = set(); self.fresh = set(); self.asm225 = 'ASM-225'; self.rows = []; self.info = Counter()
     def reached(self, a):
         i = bisect.bisect_right(self.ms, a) - 1
         return i >= 0 and a < self.mer[i][1]
@@ -155,13 +155,31 @@ def new_fresh(esp, st, mark, e):
 
 
 ALLREGS = ('eax', 'ebx', 'ecx', 'edx', 'esi', 'edi', 'ebp')
+ESPLOST = ('esplost',)      # key of the fpe dict (never an FPU image key): where the tracked esp was first lost on this path and the class; a join of paths that lost it differently drops the key, which is the class 'set join'
+ARG_LIMIT = 256      # widening bound of feed(): 64 stack argument words. 256 is a PRECISION parameter, not a correctness one: an input slot deeper than it goes to ALLCODE_INPUT, the top of the lattice (every register and slot possibly a code address), which is sound for any bound; with the bound the set of slot keys of an input is finite, so a join chain is finite and the argument pass terminates
 ALLCODE_INPUT = ({n: T_CODE for n in ALLREGS}, {}, True)      # an unknown input is possibly a code address: the sound value, not a fallback
 
 
+def ij_why(esp, st, fpe=None):
+    """why an indirect jmp is not a clean arrival (esp 0 and the entry's return address still at [esp]): the recorded reason of its residue row.
+    esp is general there (the lifter keeps the run-time register); the reason names where and why the static value was lost."""
+    if esp is None:
+        c = (fpe or {}).get(ESPLOST)
+        return 'esp: general, first lost at %08x: %s' % c if c else 'esp: general, set join (paths disagree on the esp offset or its cause)'
+    if is_fresh(esp): return 'esp: general, esp loaded from a value that is not entry_esp + k (fresh stack space)'
+    if esp != 0: return 'esp: %d (proven)' % esp
+    return 'esp: 0 (proven), ra-slot-%s' % ('absent' if 0 not in st else 'overwritten')
+
+
 def feed(img, t, regs_t, stk_t):
-    """the state of one call site (typed registers, typed stack slots at the callee's offsets; None = esp unknown) joins into the input of callee t."""
+    """the state of one call site (typed registers, typed stack slots at the callee's offsets; None = esp unknown) joins into the input of callee t.
+    Termination of the argument fixpoint (analyse): an input is (registers, slots). A value is None < T_CODE < T_S4 and j() is the least upper bound on that chain, so an input only grows.
+    The slot keys are bounded: a call site with an unknown esp, or with any slot deeper than ARG_LIMIT bytes above the callee's esp, makes the input ALLCODE_INPUT, the top (every register and slot possibly a code address). An entry in img.allcode returns at once and is never dirty again.
+    So each entry's input has at most 7 registers + ARG_LIMIT slots, each on a chain of height 2: it changes finitely often, and the outer loop reanalyses an entry only when its input changed.
+    Soundness: the top is the over-approximation 'possibly code'. Every consumer of an input (analyse_entry, line 'inr, ins, anycode') reads a typed value as 'may be a code address' and the top as every value may be one, so the universe stays a superset."""
     if t in img.allcode: return
-    if regs_t is None:
+    if regs_t is None or any(k > ARG_LIMIT for k in stk_t):      # widening: slots deeper than ARG_LIMIT bytes above the callee's esp (a recursive call chain deepens them without bound) make the input unknown (possibly code), the sound top; each input then changes finitely often
+
         img.allcode.add(t); img.inp[t] = ALLCODE_INPUT; img.dirty.add(t); return
     cur = img.inp.get(t) or ({}, {}, False)
     r = dict(cur[0]); st = dict(cur[1]); ch = False
@@ -323,8 +341,10 @@ def analyse_entry(img, e, mode='owner', force=False):
                     key = memkey(img, g, o, esp, regs)
                     if key is not None and key[0] == 'stk': st[key[1]] = T_S4
                     else: emit(a, 's4', 'escape-stored', 'arithmetic result stored to memory', True)
-            if X.X86_REG_ESP in g.regs_access()[1]:
-                img.info['esp-lost'] += 1; esp = None
+            if X.X86_REG_ESP in rw(g)[1]:
+                img.info['esp-lost'] += 1
+                if esp is not None: fpe[ESPLOST] = (a, 'esp written by an arithmetic form')
+                esp = None
             succ = [nxt]
         elif mn == 'call' and img.calltg.get(a) == nxt:
             # call $+5: pushes the concrete address of the next instruction (a typed source of its own)
@@ -334,6 +354,7 @@ def analyse_entry(img, e, mode='owner', force=False):
             succ = [nxt]
         elif mn == 'call':
             o = ops[0]; tg = img.calltg.get(a); sm = None
+            islot = (o.mem.disp & M32) if o.type == X.X86_OP_MEM and not o.mem.base and not o.mem.index and not o.mem.segment and (o.mem.disp & M32) in img.slots else (regs[R32[o.reg]][1] if o.type == X.X86_OP_REG and isinstance(regs.get(R32.get(o.reg)), tuple) and regs[R32[o.reg]][0] == 'imp' else None)      # a call of an import: through its slot or through a register that holds it
             if o.type == X.X86_OP_REG and regs.get(R32.get(o.reg)) is not None and tracked(regs[R32[o.reg]]):
                 v = regs[R32[o.reg]]; consume(v, 'code-target', 'call reg', False)
                 if v[0] == 'abs':
@@ -357,7 +378,7 @@ def analyse_entry(img, e, mode='owner', force=False):
                 v = regs[n]
                 if v is None: continue
                 # the callee's code decides: it reads the register first (a pass), overwrites it on every path (the value dies), or leaves it (the value survives)
-                fate = path_kill(img, tg, n) if (tg is not None and tg in img.entries) else 'read'
+                fate = path_kill(img, tg, n) if (tg is not None and tg in img.entries) else 'live' if islot is not None and n in ('ebx', 'esi', 'edi', 'ebp') else 'read'      # an import preserves ebx, esi, edi, ebp (the Win32 ABI, OWNER 3)
                 if v == T_S4 and fate == 'read': emit(a, 's4', 'escape-passed', 'register %s read by the callee' % n, True)
                 if (tracked(v) or v == 'mix') and fate == 'read': emit(a, vsrc(v) if v != 'mix' else 'pc', 'passed', 'register %s read by the callee%s' % (n, '' if tg is not None and tg in img.entries else ' (callee unknown)'), True)
                 if fate == 'live' and n not in CALLER_SAVED_NEVER: keep[n] = v
@@ -365,9 +386,12 @@ def analyse_entry(img, e, mode='owner', force=False):
             if sm is not None and sm['regs']:
                 for n, k in sm['regs'].items():
                     regs[n] = ('abs', frozenset({nxt + k[1]}))
-            if sm is not None and sm['pop'] is not None and esp is not None: esp = esp + sm['pop']
+            pp = sm['pop'] if sm is not None and sm['pop'] is not None else img.pops.get(tg) if tg is not None else img.imp.get(islot) if islot is not None else None
+            if pp is not None and esp is not None: esp = esp + pp
             else:
-                if esp is not None: img.info['esp-lost'] += 1
+                if esp is not None:
+                    img.info['esp-lost'] += 1
+                    fpe[ESPLOST] = (a, 'vptr or function-pointer call (pop unknown)' if tg is None and islot is None else 'call of an entry whose pop is unknown' if tg is not None else 'import whose pop is unknown')
                 esp = None
             for k in [k for k in st if esp is None or (k < esp and is_fresh(k) == is_fresh(esp))]: st.pop(k)
             succ = [nxt]
@@ -397,6 +421,10 @@ def analyse_entry(img, e, mode='owner', force=False):
             o = ops[0]
             if o.type == X.X86_OP_REG:
                 v = regs.get(R32.get(o.reg))
+                if not anyra and isinstance(v, tuple) and v[0] == 'ra': img.ijret.add(a)      # a jmp to this entry's own return-address symbol is a return to the caller's continuation: not an arrival at any entry (ruling 2026-11-16)
+                elif not anyra:
+                    img.ijall.add(a)
+                    if esp != 0 or st.get(0) != ('ra', 0): img.ijbad.add(a); img.ijwhy[a] = ij_why(esp, st, fpe)
                 if v == T_S4: emit(a, 's4', 'target-s4', 'jmp through a register holding arithmetic on a code address', True)
                 elif v == T_CODE: emit(a, 'code', 'code-target', 'jmp reg', False)
                 if tracked(v):
@@ -417,10 +445,18 @@ def analyse_entry(img, e, mode='owner', force=False):
                         if not (img.T0 <= w < img.T1 and img.reached(w)): break
                         succ.append(w); t += 4; n_ += 1
                     term = False
-                    for w in succ: img.jtargets.add(w)
+                    for w in succ:
+                        img.jtargets.add(w)
+                        if not anyra and (esp != 0 or st.get(0) != ('ra', 0)) and w in img.entries and owner(img, w): img.badarr.add(w)
+                elif not anyra and not o.mem.base and not o.mem.index and not o.mem.segment and (o.mem.disp & M32) in img.slots:
+                    img.ijimp.add(a)       # a tail call through an import slot (the loader's IAT): the callee is an import, not an entry of the image, so no arrival is recorded
+                else:       # an indirect jmp through memory that is not a table of relocated words: its targets are not enumerated
+                    if not anyra: img.ijall.add(a)
+                    if not anyra and (esp != 0 or st.get(0) != ('ra', 0)): img.ijbad.add(a); img.ijwhy[a] = ij_why(esp, st, fpe)
             else:
                 t = o.imm & M32
                 if t != e and t in img.entries and owner(img, t):
+                    if not anyra and (esp != 0 or st.get(0) != ('ra', 0)): img.badarr.add(t)       # arrival join: this jmp arrives with a stack whose [esp] is not the return address of the entry
                     if esp != 0: feed(img, t, None, None)
                     else: feed(img, t, {n_: v_ for n_, v_ in regs.items() if v_ in TYPES}, {off: v_ for off, v_ in st.items() if off > 0 and v_ in TYPES})
                     for n in sorted(regs):
@@ -462,6 +498,7 @@ def analyse_entry(img, e, mode='owner', force=False):
                 if s.type == X.X86_OP_REG: write_reg(d, regval(s))
                 elif s.type == X.X86_OP_MEM:
                     v = read_mem(s)
+                    if v is None and d.size == 4 and not s.mem.base and not s.mem.index and not s.mem.segment and (s.mem.disp & M32) in img.slots: v = ('imp', s.mem.disp & M32)      # the loader's IAT is read-only: the register holds that import
                     if v is None and d.size == 4 and reloc_load(s): v = T_CODE
                     if d.size == 4: write_reg(d, v)
                     else: write_reg(d, 'mix' if tracked(v) else None)
@@ -476,7 +513,7 @@ def analyse_entry(img, e, mode='owner', force=False):
                 if v is not None and tracked(v):
                     if key is not None and key[0] == 'stk': st[key[1]] = v
                     else: emit(a, vsrc(v), 'store', 'mov to memory', True)
-                elif v in TYPES and key is not None and key[0] == 'stk': st[key[1]] = v
+                elif (v in TYPES or (isinstance(v, tuple) and v[0] == 'imp')) and key is not None and key[0] == 'stk': st[key[1]] = v      # an import value stays a value through a spill
                 elif v == T_S4: emit(a, 's4', 'escape-stored', 'mov to memory', True)
                 elif key is not None and key[0] == 'stk': st.pop(key[1], None)
                 for r_ in (d.mem.base, d.mem.index):
@@ -547,7 +584,9 @@ def analyse_entry(img, e, mode='owner', force=False):
         elif mn == 'leave':
             al = None
             v = regs.get('ebp'); esp = (v[1] + 4) if isinstance(v, tuple) and v[0] == 'sp' else None
-            if esp is None: img.info['esp-lost'] += 1
+            if esp is None:
+                img.info['esp-lost'] += 1
+                fpe[ESPLOST] = (a, 'leave with an ebp that is not a tracked frame pointer')
             else:
                 pv = st.pop(esp - 4, None); regs.pop('ebp', None)
             for k in [k for k in st if esp is None or (k < esp and is_fresh(k) == is_fresh(esp))]: st.pop(k)
@@ -570,7 +609,7 @@ def analyse_entry(img, e, mode='owner', force=False):
         else:
             for o in ops:
                 if o.type == X.X86_OP_MEM and o.access & capstone.CS_AC_READ: read_mem(o)
-            rd, wr = g.regs_access(); written = set()
+            rd, wr = rw(g); written = set()
             for r in wr:
                 n = R32.get(r)
                 if n and n != 'esp': written.add(n)
@@ -583,7 +622,9 @@ def analyse_entry(img, e, mode='owner', force=False):
                 regs.pop(n, None)
                 for ik in [k for k in fpe if k[0] == 'reg' and k[1] == n]: fpe.pop(ik)
             if X.X86_REG_ESP in wr and mn not in ('push', 'pop'):
-                if esp is not None: img.info['esp-lost'] += 1
+                if esp is not None:
+                    img.info['esp-lost'] += 1
+                    fpe[ESPLOST] = (a, 'esp written by %s' % mn)
                 esp = None
             succ = [nxt]
         if term: continue
@@ -593,6 +634,7 @@ def analyse_entry(img, e, mode='owner', force=False):
             if t not in states: states[t] = ns; work.append(t)
             else:
                 o = states[t]
+                if o == ns: continue      # an equal state joins to itself (j(x, x) = x, every other component equal): nothing to rebuild or requeue
                 r2 = {k: j(o[0].get(k), regs.get(k)) for k in set(o[0]) | set(regs)}
                 r2 = {k: v for k, v in r2.items() if v is not None}
                 s2 = {k: j(o[1].get(k), st.get(k)) for k in set(o[1]) | set(st)}
@@ -639,7 +681,7 @@ def writes_of_unused(img, e, _memo={}):
             while a not in vis and img.reached(a):
                 vis.add(a); g = img.dec(a)
                 if not g: break
-                rd, wr = g.regs_access()
+                rd, wr = rw(g)
                 for r in wr:
                     n = R32.get(r)
                     if n: out.add(n)
@@ -667,9 +709,22 @@ def writes_of_unused(img, e, _memo={}):
 FULL32 = {X.X86_REG_EAX: 'eax', X.X86_REG_EBX: 'ebx', X.X86_REG_ECX: 'ecx', X.X86_REG_EDX: 'edx', X.X86_REG_ESI: 'esi', X.X86_REG_EDI: 'edi', X.X86_REG_EBP: 'ebp'}
 
 
+def rw(g):
+    """g.regs_access(), computed once per decoded instruction (a pure function of its bytes; the memo lives on the instruction object, so it is dropped with the decode cache). The analysis visits an instruction once per worklist round of every entry that contains it and once per argument pass."""
+    r = getattr(g, '_rw', None)
+    if r is None: r = g._rw = g.regs_access()
+    return r
+
+
 def access(g):
-    """(registers read at all, registers fully overwritten) by one instruction; a partial write or a conditional write does not kill."""
-    rd, wr = g.regs_access(); mn = g.mnemonic
+    """(registers read at all, registers fully overwritten) by one instruction; a partial write or a conditional write does not kill. Memoised on the instruction like rw(); the sets are never mutated by a caller."""
+    r = getattr(g, '_acc', None)
+    if r is None: r = g._acc = _access(g)
+    return r
+
+
+def _access(g):
+    rd, wr = rw(g); mn = g.mnemonic
     rn = {R32[r] for r in rd if r in R32}; wn = {FULL32[r] for r in wr if r in FULL32}
     o = g.operands
     if mn in ('xor', 'sub') and len(o) == 2 and o[0].type == o[1].type == X.X86_OP_REG and o[0].reg == o[1].reg: rn -= wn
@@ -759,9 +814,7 @@ def resolve(img, e, ev, kinds, mode, retscratch):
 def analyse(img, kinds_of, parent=None):
     scan_calls(img)
     rows = []; parent = parent or {}
-    isdec = lambda a: 'decomp' in (img.entries.get(a) or ())
-    roots = [e for e in sorted(img.entries) if img.reached(e) and owner(img, e) and not isdec(e)]
-    img.info['decomp-owner-skipped'] = sum(1 for e in img.entries if img.reached(e) and owner(img, e) and isdec(e))
+    roots = [e for e in sorted(img.entries) if img.reached(e) and owner(img, e)]
     for e in roots:
         if (img.entries.get(e) or set()) & INDIRECT_KINDS or e in img.jtargets or not img.callers.get(e): img.allcode.add(e); img.inp[e] = ALLCODE_INPUT
     # the incoming arguments of an entry are the join over its callers' call-site states; analysis repeats for the entries whose input grew (monotone, finite)
@@ -771,22 +824,28 @@ def analyse(img, kinds_of, parent=None):
         for e in todo: analyse_entry(img, e, 'owner', True)
         todo = sorted(e for e in img.dirty if e in set(roots))
     img.info['arg-passes'] = passes
+    # arrival join (lead ruling 2026-11-16): the entries that an indirect jmp can reach are the ptr set (the dispatcher's targets for a jmp that is not a certified table); an entry that any in-image jmp
+    # reaches with a stack whose [esp] is not its return address is not known to be called with [esp] = RA: it is also analysed as 'possibly' (every stack slot possibly the return address)
+    if img.ijbad: img.badarr |= {t for t in roots if 'ptr' in (img.entries.get(t) or ())}
+    img.info['indirect-jmp-sites'] = len(img.ijall); img.info['indirect-jmp-sites-bad'] = len(img.ijbad)
+    img.info['arrival-disagree'] = len(img.badarr & set(roots))
+    for e in sorted(img.badarr & set(roots)):
+        ev, sm = analyse_entry(img, e, 'possibly')
+        rows.extend(resolve(img, e, ev, kinds_of.get(e, set()), 'possibly', img.pk.get((e, 'possibly'), [])))
     for e in roots:
         ev = img.summ[e][0]
         rows.extend(resolve(img, e, ev, kinds_of.get(e, set()), 'owner', img.pk.get((e, 'owner'), [])))
     for e in sorted(img.entries):
         if not img.reached(e) or owner(img, e) or e in img.visited: continue
-        p = parent.get(e)
-        if p is not None and isdec(p): img.info['decomp-block-skipped'] += 1; continue
         img.info['blocks-without-visible-predecessor'] += 1
         ev, sm = analyse_entry(img, e, 'possibly')
         rows.extend(resolve(img, e, ev, kinds_of.get(e, set()), 'possibly', img.pk.get((e, 'possibly'), [])))
     return rows
 
 
-def run(text, T0, entries, ranges, outdir, name, rd=None, rset=None, parent=None, cand=None):
+def run(text, T0, entries, ranges, outdir, name, rd=None, rset=None, parent=None, cand=None, pops=None, imp=None, slots=None):
     """-> (red count, summary dict); writes outdir/pcsources.tsv and gate_pcsrc.json."""
-    img = Img(text, T0, entries, ranges, rd, rset)
+    img = Img(text, T0, entries, ranges, rd, rset, pops, imp, slots)
     rows = analyse(img, entries, parent)
     red = [r for r in rows if r[5]]
     with open(outdir + '/pcsources.tsv', 'w') as f:
@@ -799,6 +858,9 @@ def run(text, T0, entries, ranges, outdir, name, rd=None, rset=None, parent=None
     res = dict(schema='fnvnx-gate/1', name='l3.pcsrc.' + name, status='red' if red else 'green', sources=sources, rows=len(rows), red=len(red), by_class={'%s/%s' % k: n for k, n in sorted(byc.items())},
                red_by_class={'%s/%s' % k: n for k, n in sorted(redc.items())}, s4_red=sum(1 for r in red if r[2] == 's4'), s4_target=sum(1 for r in red if r[2] == 's4' and not r[3].startswith('escape')), s4_escape_red=sum(1 for r in red if r[2] == 's4' and r[3].startswith('escape')), s4_red_proven=sum(1 for r in red if r[2] == 's4' and r[0] not in cand), s4_escapes=sum(1 for r in rows if r[2] == 's4' and not r[5]), code_sources=sum(1 for r in rows if r[2] == 'code'), red_candidate_entries=redcand, red_proven_entries=len(red) - redcand, esp_lost=img.info['esp-lost'], cond_fresh_entries=len(img.fresh), cond_fresh_list=['%08x' % x for x in sorted(img.fresh)], entries=len(entries), info=dict(img.info))
     json.dump(res, open(outdir + '/gate_pcsrc.json', 'w'), sort_keys=True)
+    with open(outdir + '/pcsrc_ijmp.tsv', 'w') as f:      # the indirect jmp sites of the owners' flow and how each arrives: clean, a return through the RA symbol, or the recorded reason it is not clean
+        f.write('# site, status (clean | return | import-tail | not-clean), esp fact; esp is a proven single value or general (the lifter then uses the run-time register: dispatcher or non-local loop); a not-clean site gives the whole ptr set as its dispatcher targets (arrival join)\n')
+        for a in sorted(img.ijall | img.ijret | img.ijimp): f.write('%08x\t%s\t%s\n' % (a, 'import-tail' if a in img.ijimp else 'return' if a in img.ijret else 'not-clean' if a in img.ijbad else 'clean', img.ijwhy.get(a, 'esp: 0 (proven)' if a not in img.ijret and a not in img.ijimp else '-')))
     json.dump({'s4_violations': res['s4_red']}, open(outdir + '/pcsrc_s4.json', 'w'), sort_keys=True)      # read by modlift's residual: no file = unchecked, N > 0 = violation
     return len(red), res
 
@@ -815,21 +877,41 @@ def pin_of(facts, name):
     return None
 
 
-def run_facts(facts, name, text, T0, rd=None, rset=None):
-    """facts: directory holding universe.tsv and ranges.tsv of the image; text/T0 the executable span; rd(va) reads a 32-bit word of the image, rset the relocated words. Same outputs as run()."""
+def read_universe(path):
+    """-> (entries {addr: every kind the entry carries}, parent {addr: parent}, candidates). universe.tsv column 2 is the primary kind; the others are in the flags column among the flag words, and
+    residue.PRI is the one vocabulary that tells a kind from a flag. Every reader of universe.tsv calls this."""
+    import residue
     ent = {}; parent = {}; cand = set()
-    for l in open(facts + '/universe.tsv'):
+    for l in open(path):
         if l[0] == '#' or not l.strip(): continue
-        f = l.rstrip('\n').split('\t'); ent[int(f[0], 16)] = set(f[1].split(','))
-        for x in (f[3].split(',') if len(f) > 3 else ()):
-            if x.startswith('parent='): parent[int(f[0], 16)] = int(x[7:], 16)
-            if x == 'candidate': cand.add(int(f[0], 16))
+        f = l.rstrip('\n').split('\t'); a = int(f[0], 16); fl = f[3].split(',') if len(f) > 3 else []
+        ent[a] = {f[1]} | {x for x in fl if x in residue.PRI}
+        for x in fl:
+            if x.startswith('parent='): parent[a] = int(x[7:], 16)
+            if x == 'candidate': cand.add(a)
+    return ent, parent, cand
+
+
+def run_facts(facts, name, text, T0, rd=None, rset=None, imports=None):
+    """facts: directory holding universe.tsv and ranges.tsv of the image; text/T0 the executable span; rd(va) reads a 32-bit word of the image, rset the relocated words. Same outputs as run()."""
+    ent, parent, cand = read_universe(facts + '/universe.tsv')
     rg = []
     for l in open(facts + '/ranges.tsv'):
         if l[0] == '#' or not l.strip(): continue
         for r in l.rstrip('\n').split('\t')[1].split(','):
             if '-' in r: a, b = r.split('-'); rg.append((int(a, 16), int(b, 16)))
-    red, res = run(text, T0, ent, rg, facts, name, rd, rset, parent, cand)
+    pops = {}      # retn.tsv (residue.retn_rows): an entry whose every ret pops 0 (caller) or N (callee) pops that; mixed / open / noreturn entries are not decided
+    if os.path.exists(facts + '/retn.tsv'):
+        for l in open(facts + '/retn.tsv'):
+            f = l.rstrip('\n').split('\t')
+            if l[0] != '#' and len(f) >= 3 and f[1] in ('caller', 'callee'): pops[int(f[0], 16)] = 0 if f[1] == 'caller' else int(f[2])
+    imp = {}       # the import slots of the image: the pop of the imported function from L1's keys.tsv, through the one rule ehflow.import_pop
+    if imports:
+        import ehflow; keys = ehflow.load_keys()
+        for slot, nm in imports.items():
+            r = keys.get(nm.lower()); p = ehflow.import_pop(*r) if r else None
+            if p is not None: imp[slot] = p
+    red, res = run(text, T0, ent, rg, facts, name, rd, rset, parent, cand, pops, imp, frozenset(imports or ()))
     res['input'] = pin_of(facts, name)       # the pinned gamedata external the image was read from (facts manifest.json), or None when the facts dir has no manifest
     json.dump(res, open(facts + '/gate_pcsrc.json', 'w'), sort_keys=True)
     return red, res

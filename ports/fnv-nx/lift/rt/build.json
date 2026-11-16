@@ -18,7 +18,8 @@
   "ports/fnv-nx/lift/rt",
   "ports/fnv-nx/lift/rt/gen",
   "ports/fnv-nx/platform/include",
-  "ports/fnv-nx/hostabi/include"
+  "ports/fnv-nx/hostabi/include",
+  "ports/fnv-nx/contract/exporthdr/include"
  ],
  "units": "all",
  "link": null,
@@ -65,22 +66,6 @@
    ]
   },
   {
-   "tool": "ports/fnv-nx/lift/tools/dispgen.py",
-   "args": [
-    "--prefix",
-    "fnvnx_native",
-    "--rows",
-    "/out/native_disp_rows.tsv",
-    "/uses/ports/fnv-nx/contract/facts/native",
-    "/out/native_disp.cc"
-   ],
-   "inputs": [],
-   "outputs": [
-    "native_disp.cc",
-    "native_disp_rows.tsv"
-   ]
-  },
-  {
    "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
    "args": [
     "/in/ports/fnv-nx/lift/rt/fmath.h",
@@ -117,6 +102,19 @@
    ],
    "outputs": [
     "gen/fnvl_abi.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/fnvl_fpc.h",
+    "/out/gen/fnvl_fpc.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/fnvl_fpc.h"
+   ],
+   "outputs": [
+    "gen/fnvl_fpc.h"
    ]
   },
   {
@@ -170,6 +168,19 @@
    "outputs": [
     "gen/x87.h"
    ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/fnvl_entry.h",
+    "/out/gen/fnvl_entry.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/fnvl_entry.h"
+   ],
+   "outputs": [
+    "gen/fnvl_entry.h"
+   ]
   }
  ],
  "uses": [
@@ -178,20 +189,29 @@
    "output": "X86SYS"
   },
   {
-   "root": "ports/fnv-nx/contract/facts",
-   "output": "native"
-  },
-  {
    "root": "ports/fnv-nx/platform",
    "output": "INCLUDE"
   },
   {
    "root": "ports/fnv-nx/hostabi",
    "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/contract/exporthdr",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/contract/target",
+   "output": "INCLUDE"
+  }
+ ],
+ "include_uses": [
+  {
+   "root": "ports/fnv-nx/contract/target",
+   "output": "INCLUDE"
   }
  ],
  "outputs": {
-  "GEN": "gen",
-  "NATIVE_DISP_ROWS": "native_disp_rows.tsv"
+  "GEN": "gen"
  }
 }

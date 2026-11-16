@@ -86,24 +86,29 @@ def prover_files():
 #   model_sha / closure_sha: the declared inputs of the recipe roots whose outputs those components are (COMPONENT_ROOTS, read from their recipes, the roots' own directories included);
 #   x86sys_sha256: platform/declared/x86sys.json (outside these directories).
 # A model input under proof/ that no component root declares stays hashed: it over-invalidates and is safe.
+CLOSURE_MARK = "PROVER_SHA"      # the file mkclosure writes into a closure directory (it is the directory's marker, in lift/proof/)
 COMPONENT_ROOTS = ("proof/sailmodel", "proof/isla")      # lift/-relative
 
 
 def component_inputs():
-    """LIFT-relative paths of the declared repository inputs of COMPONENT_ROOTS (files and directories), read through recipe.load_recipe like formgate.ir_file does"""
+    """lift/-relative paths of the declared repository inputs of COMPONENT_ROOTS (files and directories) and the roots' own directories, read through the recipe loader of the trunk (verify/recipe.py load_recipe,
+    expand_run: the one parser of the recipe format) from the checkout this tree is part of.  Inside a closure directory (CLOSURE_MARK present) there is no checkout: mkclosure built that directory from exactly
+    prover_files() + prover_data_files() of the checkout, verified its prover_sha equal, and no component input is in it, so the exclusion set is empty there."""
+    if os.path.exists(os.path.join(HERE, CLOSURE_MARK)): return set()
     repo = os.path.normpath(os.path.join(LIFT, "..", "..", ".."))
-    sys.path.insert(0, os.path.join(LIFT, "..", "verify"))
-    try:
-        import recipe
-        roots = recipe.load_admit(repo)
-        out = set()
-        for r in COMPONENT_ROOTS:
-            out.add(r)
-            for st in recipe.load_recipe(repo, roots, recipe.TREE + "/lift/" + r).get("run", []):
-                for i in st.get("inputs", []):
-                    if isinstance(i, str) and i.startswith(recipe.TREE + "/lift/"): out.add(i[len(recipe.TREE + "/lift/"):])
-        return out
-    finally: sys.path.pop(0)
+    vdir = os.path.join(repo, "ports", "fnv-nx", "verify")
+    if vdir not in sys.path: sys.path.insert(0, vdir)
+    import recipe
+    roots = recipe.load_admit(repo)
+    out = set()
+    for r in COMPONENT_ROOTS:
+        out.add(r)
+        spec = "ports/fnv-nx/lift/" + r
+        rec = recipe.load_recipe(repo, roots, spec)
+        for st in recipe.expand_run(rec).get("run", []) + rec.get("generated", []):
+            for i in st.get("inputs", []):
+                if isinstance(i, str) and "/lift/" in i: out.add(i.split("/lift/", 1)[1])
+    return out
 
 
 def prover_data_files():
@@ -113,10 +118,10 @@ def prover_data_files():
     for d in pk:
         for root, dirs, files in os.walk(os.path.join(LIFT, d)):
             rel = os.path.relpath(root, LIFT)
-            dirs[:] = sorted(x for x in dirs if x not in ("tests", "__pycache__") and os.path.join(rel, x) not in skip)
+            dirs[:] = sorted(x for x in dirs if x not in ("tests", "__pycache__") and os.path.join(rel, x) not in skip and not os.path.isfile(os.path.join(root, x, "build.json")))      # a directory with a build.json is a recipe root: its files build something, they are not program inputs
             for f in sorted(files):
                 p = os.path.join(rel, f)
-                if not f.endswith((".py", ".pyc", ".md")) and p not in skip: out.append(p)
+                if not f.endswith((".py", ".pyc", ".md")) and p not in skip and p != os.path.join("proof", CLOSURE_MARK): out.append(p)
     return out
 
 
@@ -125,3 +130,17 @@ def prover_sha():
     for f in prover_files() + prover_data_files():
         h.update(f.encode() + b"\0" + open(os.path.join(LIFT, f), "rb").read() + b"\0")
     return h.hexdigest()
+
+
+def add_inputs_args(ap, required):
+    """the lifter inputs a Form reads (fnvlift/inputs.py: cpumodel, rcptab, rcpcert), explicit arguments of every program that computes a shape's Form or its shape_sha; REQUIRED False: all three or none"""
+    ap.add_argument('--cpumodel', required=required, help='verify/cpuid_model.json (the declared CPU data: MXCSR_MASK of the Forms)')
+    ap.add_argument('--rcptab', required=required, help='rt/rcptab.c'); ap.add_argument('--rcpcert', required=required, help='rt/rcptab.cert.json')
+
+
+def configure_inputs(a):
+    given = [x for x in (a.cpumodel, a.rcptab, a.rcpcert) if x]
+    if not given: return
+    if len(given) != 3: raise SystemExit('--cpumodel, --rcptab and --rcpcert are given together')
+    from fnvlift import inputs
+    inputs.configure(cpumodel=os.path.abspath(a.cpumodel), rcptab=os.path.abspath(a.rcptab), rcpcert=os.path.abspath(a.rcpcert))

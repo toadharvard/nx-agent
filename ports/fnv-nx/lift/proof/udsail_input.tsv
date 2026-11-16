@@ -1,0 +1,1 @@
+# fnvnx-udsail/2; columns: decided bytes (the decode extent), verdict, extent, class (sail|feature), evidence.  Rows of verdict UD only (proof/udsail.py). FIRST PASS: no rows. The stages' BADDECODE outputs are the input of proof/udsail.py; its output replaces this file (a fnv-nx-build external, it is derived from the exe)

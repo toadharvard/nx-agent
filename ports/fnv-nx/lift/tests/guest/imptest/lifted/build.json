@@ -22,11 +22,24 @@
    "tool": "ports/fnv-nx/lift/tools/guestgen_imptest.py",
    "args": [
     "/out/gen",
-    "/in/ports/fnv-nx/lift"
+    "/in/ports/fnv-nx/lift",
+    "--x86sys",
+    "/uses/ports/fnv-nx/platform/X86SYS",
+    "--sdmrows",
+    "/uses/ports/fnv-nx/lift/sdmrows/SDMROWS",
+    "--cpumodel",
+    "/in/ports/fnv-nx/verify/cpuid_model.json",
+    "--rcptab",
+    "/in/ports/fnv-nx/lift/rt/rcptab.c",
+    "--rcpcert",
+    "/in/ports/fnv-nx/lift/rt/rcptab.cert.json"
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
-    "ports/fnv-nx/verify/cpuid_model.json"
+    "ports/fnv-nx/verify/cpuid_model.json",
+    "ports/fnv-nx/lift/proof",
+    "ports/fnv-nx/lift/rt/rcptab.c",
+    "ports/fnv-nx/lift/rt/rcptab.cert.json"
    ],
    "outputs": [
     "gen/guest.cc",
@@ -50,6 +63,14 @@
   {
    "root": "ports/fnv-nx/shim",
    "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/lift/sdmrows",
+   "output": "SDMROWS"
+  },
+  {
+   "root": "ports/fnv-nx/platform",
+   "output": "X86SYS"
   }
  ],
  "include_uses": [

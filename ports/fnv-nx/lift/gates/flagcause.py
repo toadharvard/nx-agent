@@ -140,8 +140,8 @@ def solve(path, base, rows, uni, jobs):
         if p0 is not None: p0.close(); p0.join()
     seed = {}
     for e in sorted(rows):
-        kind, fl = uni.get(e, ('decomp', ['ptr']))
-        seed[e] = 'ptr' if 'ptr' in fl else ('kind:' + kind if kind not in ('decomp', 'call', 'tail') else ('no-direct-pred' if e not in preds else None))
+        kind, fl = uni.get(e, ('ptr', ['ptr']))
+        seed[e] = 'ptr' if 'ptr' in fl else ('kind:' + kind if kind not in ('call', 'tail') else ('no-direct-pred' if e not in preds else None))
     pb = {m: i for i, m in enumerate(sorted(mnems))}
     W = PB0 + len(pb)
     alle = sum(E_ << (W * k) for k in range(NF))

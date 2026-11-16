@@ -9,16 +9,17 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.join(HERE, ".."), os.path.join(HERE, "..", "..")]
-import declared_cpufeat  # noqa: E402
 import declared_x86sys  # noqa: E402
 import x87spec as X  # noqa: E402
 from fnvlift import dsl, inputs  # noqa: E402
 from proof import forms, prove, shape, x87form as XF  # noqa: E402
 
-CPUFEAT, WHY = declared_cpufeat.path()
+FIN = os.environ.get("FNVNX_INPUT_SDMROWS")      # the produced input SDMROWS (proof/cpufeat.py reads it)
+CPUFEAT = bool(FIN) and os.path.exists(FIN)
+WHY = "declared input not mounted: FNVNX_INPUT_SDMROWS (the produced input SDMROWS)"
 if CPUFEAT:
     declared_x86sys.configure()
-    inputs.configure(cpufeat=CPUFEAT)
+    inputs.configure(sdmrows=os.path.join(FIN, "sdmrows.json") if os.path.isdir(FIN) else FIN, cpumodel=os.path.join(HERE, "..", "..", "..", "verify", "cpuid_model.json"))
 DEC = shape.decoder()
 
 

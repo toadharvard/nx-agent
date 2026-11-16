@@ -18,6 +18,9 @@ Tree hash definition:
   Hash of a top-level file/symlink input = sha256(canon(its entry)); of a directory = its treehash.
   Empty directories are kept. Nothing else (mtime, owner, mode other than exec) is part of the hash.
 """
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import errno
 import fcntl
 import hashlib
@@ -27,8 +30,7 @@ import shutil
 import stat
 import sys
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "contract"))
-import treehash  # noqa: E402  (the one home of the tree-hash rule; stdlib only)
+from contract import treehash  # noqa: E402  (the one home of the tree-hash rule; stdlib only)
 
 FORMAT = treehash.FORMAT
 MAX_LINKS = 60000  # hard links one inode of the store serves (ext4: 65000); past it a replica is made
@@ -83,7 +85,32 @@ def _put(store, kind, name, data=None, mode=0o444):
     _publish(tmp, final)
     return final
 
+# POOL: the one copy of every object of the stores that lie in one directory D is D/pool (beside the store, so on the same filesystem by
+# construction). Objects are immutable and named by their content, so a store does not hold its own bytes: the object is made once in
+# D/pool and the store hard-links it (an inode serves MAX_LINKS names, then a replica is made: the placement rule). A link that fails
+# (EXDEV, a read-only pool) is an error naming the path; there is no copy of the bytes into the store. A store that is itself a pool
+# (basename "pool") holds its objects.
+def pool_of(store):
+    return os.path.join(os.path.dirname(os.path.abspath(store)), "pool")
+
 def _ingest_file(path, store, x):
+    pool = pool_of(store)
+    if os.path.realpath(pool) == os.path.realpath(store):
+        return _ingest_obj(path, store, x)
+    hx = _ingest_obj(path, pool, x)
+    name = hx + (".x" if x else "")
+    final = os.path.join(store, "obj", hx[:2], name)
+    if not os.path.exists(final):
+        os.makedirs(os.path.dirname(final), exist_ok=True)
+        try:
+            _link_obj(os.path.join(pool, "obj", hx[:2], name), final)
+        except FileExistsError:
+            pass
+        except OSError as ex:
+            raise CasError("cannot hardlink the pool object %s into store %s: %s" % (name, store, ex))
+    return hx
+
+def _ingest_obj(path, store, x):
     st = os.lstat(path)
     d = os.path.join(store, "obj")
     os.makedirs(d, exist_ok=True)

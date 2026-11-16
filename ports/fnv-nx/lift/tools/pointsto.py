@@ -481,10 +481,7 @@ def load_image(pe, facts):
         if l.startswith('#') and 'base=' in l: nb = int(l.split('base=')[1].split(':')[0].split()[0], 16); break
     M = pemod.load(pe, nb)             # the facts speak the load base of the image (modlift); the exe's is its preferred base
     nm, va, sz, ro = M.xs[0]; text = M.d[ro:ro + sz]
-    ent, rg = {}, []
-    for l in open(os.path.join(facts, 'universe.tsv')):
-        if l[0] == '#' or not l.strip(): continue
-        f = l.rstrip('\n').split('\t'); ent[int(f[0], 16)] = set(f[1].split(','))
+    ent, rg = pcsrc.read_universe(os.path.join(facts, 'universe.tsv'))[0], []
     for l in open(os.path.join(facts, 'ranges.tsv')):
         if l[0] == '#' or not l.strip(): continue
         for r in l.rstrip('\n').split('\t')[1].split(','):

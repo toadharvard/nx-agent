@@ -1,4 +1,5 @@
 /* handles.cpp - kernel object handles, CloseHandle, shared helpers. */
+#include <fnvnx_export.h>
 #include "w32.h"
 
 #include <stdio.h>
@@ -129,6 +130,7 @@ extern "C" BOOL CloseHandle(HANDLE h)
         return TRUE;
     return w32_handle_close(h, 0);
 }
+FNVNX_EXPORT("kernel32.dll", "CloseHandle", CloseHandle, "func");
 
 W32Log::W32Log() : n(0)
 {

@@ -105,11 +105,12 @@ def lifted_by(ins):
     """which builder of the lifter takes an instruction that has no Form: the mnemonic handler (OPS, by its module) or the first FALLBACK whose predicate holds
     (the order of fnvlift.core.dispatch), else 'none' (a lift gap). The probe context carries what the predicates read."""
     import types
-    from fnvlift import core, f_cpufeat, f_sys, f_sse, f_x87, f_int, f_flow, f_simd_int, f_x87_ctl     # noqa: F401  (register their handlers)
+    from proof import cpufeat
+    from fnvlift import core, f_sys, f_sse, f_x87, f_int, f_flow, f_simd_int, f_x87_ctl     # noqa: F401  (register their handlers)
     m = ins.mnemonic.split()[-1]
     cx = types.SimpleNamespace(m=m, ops=list(ins.operands), b0=ins.opcode[0], modrm=ins.modrm, pfx='')
     try:
-        if f_cpufeat.missing(ins): return 'cpufeat-UD'
+        if cpufeat.missing(ins): return 'cpufeat-UD'
     except Exception: pass
     h = core.OPS.get(m)
     if h is not None: return 'ops:' + h.__module__.split('.')[-1]
@@ -129,8 +130,8 @@ def run(uni):
             res['no_form'] += 1; res['no_form_sites'] += n
             how = lifted_by(ins)
             if how == 'cpufeat-UD':
-                from fnvlift import f_cpufeat
-                for f, leaf, reg, bit, val in f_cpufeat.gates(ins):
+                from proof import cpufeat
+                for f, leaf, reg, bit, val in cpufeat.gates(ins):
                     if not val:
                         k = '%s: CPUID.%x.%s[%d] = %d' % (f, leaf, reg, bit, val); g = res['cpufeat_gates'].setdefault(k, dict(shapes=0, sites=0, mnemonics=[])); g['shapes'] += 1; g['sites'] += n
                         if ins.mnemonic.split()[-1] not in g['mnemonics']: g['mnemonics'].append(ins.mnemonic.split()[-1])
@@ -165,8 +166,8 @@ def run(uni):
 
 
 def main(argv):
-    if len(argv) < 4 or argv[0] != '--cpufeat' or len(argv) % 2: print('usage: def_check.py --cpufeat CPUID_FEATURE_BITS.TSV IMAGE FACTS [IMAGE FACTS ...]', file=sys.stderr); return 2
-    from fnvlift import inputs; inputs.configure(cpufeat=argv[1]); argv = argv[2:]
+    if len(argv) < 6 or argv[0] != '--sdmrows' or argv[2] != '--cpumodel' or len(argv) % 2: print('usage: def_check.py --sdmrows SDMROWS.JSON --cpumodel CPUID_MODEL.JSON IMAGE FACTS [IMAGE FACTS ...]', file=sys.stderr); return 2
+    from fnvlift import inputs; inputs.configure(sdmrows=argv[1], cpumodel=argv[3]); argv = argv[4:]
     res = run(universe(list(zip(argv[::2], argv[1::2]))))
     d = os.environ.get('GATE_OUT')
     if d:

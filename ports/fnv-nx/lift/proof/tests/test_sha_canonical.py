@@ -15,6 +15,9 @@ def child(order, out):
     sys.path.insert(0, HERE)
     import declared_x86sys
     declared_x86sys.configure()
+    sys.path.insert(0, os.path.join(HERE, '..', '..', 'fnvlift', 'tests'))
+    import _inputs
+    _inputs.configure_declared()      # the declared-machine files the Form builders read (x86sys, cpumodel, the certified rcp table)
     from proof import symform
     keys = sorted(set(l.strip() for l in open(os.environ['FNVNX_SHAPE_KEYS']) if l.strip()))
     sample = keys[::-1] if order == 'reversed' else keys      # the other order is the unrelated batch of every key

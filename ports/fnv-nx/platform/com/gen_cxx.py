@@ -51,8 +51,8 @@ def split_sig(sig, line):
     m = re.fullmatch(r"(.+?)\((.*)\)", sig)
     if not m:
         die("row %d: signature %r" % (line, sig))
-    args = [a.strip() for a in m.group(2).split(",") if a.strip()]
-    return m.group(1).strip(), args
+    args = [a.strip() for a in m[2].split(",") if a.strip()]
+    return m[1].strip(), args
 
 
 def build(path, proto):

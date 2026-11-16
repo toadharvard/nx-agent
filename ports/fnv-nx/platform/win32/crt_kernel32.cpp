@@ -13,6 +13,7 @@
  *
  * There is no console and no standard handle (ENV_TRUTH F5): as in a Windows GUI process GetStdHandle gives NULL until
  * SetStdHandle sets one, and every console call fails with ERROR_INVALID_HANDLE. */
+#include <fnvnx_export.h>
 #include "w32.h"
 #include <fnvnx/cite.h>
 
@@ -36,12 +37,14 @@ extern "C" UINT GetConsoleCP(void)
     SetLastError(ERROR_INVALID_HANDLE);
     return 0;
 }
+FNVNX_EXPORT("kernel32.dll", "GetConsoleCP", GetConsoleCP, "func");
 
 extern "C" UINT GetConsoleOutputCP(void)
 {
     SetLastError(ERROR_INVALID_HANDLE);
     return 0;
 }
+FNVNX_EXPORT("kernel32.dll", "GetConsoleOutputCP", GetConsoleOutputCP, "func");
 
 /* GetTimeZoneInformation: time.cpp, next to the rule its time conversions apply */
 
@@ -67,6 +70,7 @@ extern "C" HANDLE GetStdHandle(DWORD which)
     }
     return __atomic_load_n(&g_std[i], __ATOMIC_SEQ_CST);
 }
+FNVNX_EXPORT("kernel32.dll", "GetStdHandle", GetStdHandle, "func");
 
 extern "C" BOOL SetStdHandle(DWORD which, HANDLE h)
 {
@@ -78,6 +82,7 @@ extern "C" BOOL SetStdHandle(DWORD which, HANDLE h)
     __atomic_store_n(&g_std[i], h, __ATOMIC_SEQ_CST);
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "SetStdHandle", SetStdHandle, "func");
 
 bool w32_file_is_device(HANDLE h);   /* file.cpp */
 extern "C" DWORD GetFileType(HANDLE h)
@@ -90,6 +95,7 @@ extern "C" DWORD GetFileType(HANDLE h)
     SetLastError(ERROR_SUCCESS);
     return FILE_TYPE_UNKNOWN;
 }
+FNVNX_EXPORT("kernel32.dll", "GetFileType", GetFileType, "func");
 
 /* the console functions act on console handles; the process has no console object, so no handle is one */
 extern "C" BOOL GetConsoleMode(HANDLE h, LPDWORD mode)
@@ -99,6 +105,7 @@ extern "C" BOOL GetConsoleMode(HANDLE h, LPDWORD mode)
     SetLastError(ERROR_INVALID_HANDLE);
     return FALSE;
 }
+FNVNX_EXPORT("kernel32.dll", "GetConsoleMode", GetConsoleMode, "func");
 
 extern "C" BOOL WriteConsoleA(HANDLE h, const void *buf, DWORD n, LPDWORD put, LPVOID reserved)
 {
@@ -106,6 +113,7 @@ extern "C" BOOL WriteConsoleA(HANDLE h, const void *buf, DWORD n, LPDWORD put, L
     SetLastError(ERROR_INVALID_HANDLE);
     return FALSE;
 }
+FNVNX_EXPORT("kernel32.dll", "WriteConsoleA", WriteConsoleA, "func");
 
 extern "C" BOOL WriteConsoleW(HANDLE h, const void *buf, DWORD n, LPDWORD put, LPVOID reserved)
 {
@@ -113,6 +121,7 @@ extern "C" BOOL WriteConsoleW(HANDLE h, const void *buf, DWORD n, LPDWORD put, L
     SetLastError(ERROR_INVALID_HANDLE);
     return FALSE;
 }
+FNVNX_EXPORT("kernel32.dll", "WriteConsoleW", WriteConsoleW, "func");
 
 typedef PHANDLER_ROUTINE ctrl_handler_fn;
 static ctrl_handler_fn *g_ctrl;   /* the handler list; most recently added first on delivery (none is delivered) */
@@ -150,6 +159,7 @@ extern "C" BOOL SetConsoleCtrlHandler(ctrl_handler_fn fn, BOOL add)
     os_unlock(&g_ctrl_lock);
     return r;
 }
+FNVNX_EXPORT("kernel32.dll", "SetConsoleCtrlHandler", SetConsoleCtrlHandler, "func");
 
 /* ---- files and modules by UTF-16 name: as the A functions, with the name in the ANSI code page */
 static bool narrow_name(LPCWSTR w, char *out, size_t n)
@@ -194,6 +204,7 @@ extern "C" HANDLE CreateFileW(LPCWSTR name, DWORD access, DWORD share, void *sa,
     u[o] = 0;
     return w32_create_file_name(u, access, share, disp, flags, 1);
 }
+FNVNX_EXPORT("kernel32.dll", "CreateFileW", CreateFileW, "func");
 
 extern "C" HMODULE GetModuleHandleW(LPCWSTR name)
 {
@@ -206,28 +217,7 @@ extern "C" HMODULE GetModuleHandleW(LPCWSTR name)
     }
     return GetModuleHandleA(a);
 }
-
-/* kernel32.dll and user32.dll as modules: the CRT's _mtinit fails without GetModuleHandleW(L"KERNEL32.DLL") (it
- * then asks it for FlsAlloc/EncodePointer, absent here: it falls back to TLS), and __crtMessageBoxA reaches
- * MessageBoxA through LoadLibraryA("USER32.DLL"). GetProcAddress serves the export table; the guard stops the
- * table's fallback to registered modules from asking this resolver again. */
-static __thread int g_sys_depth;
-static FARPROC sys_export(const char *dll, const char *proc)
-{
-    if (g_sys_depth)
-        return NULL;
-    g_sys_depth++;
-    void *p = fnvnx_win32_lookup_export(dll, proc);
-    g_sys_depth--;
-    return (FARPROC)p;
-}
-static FARPROC kernel32_export(const char *proc) { return sys_export("kernel32", proc); }
-static FARPROC user32_export(const char *proc) { return sys_export("user32", proc); }
-__attribute__((constructor(FNVNX_INIT_MODULES))) static void sys_modules_register(void)
-{
-    fnvnx_register_module("kernel32.dll", kernel32_export);
-    fnvnx_register_module("user32.dll", user32_export);
-}
+FNVNX_EXPORT("kernel32.dll", "GetModuleHandleW", GetModuleHandleW, "func");
 
 /* ---- process */
 extern "C" BOOL TerminateProcess(HANDLE h, UINT code)
@@ -239,6 +229,7 @@ extern "C" BOOL TerminateProcess(HANDLE h, UINT code)
     SetLastError(ERROR_INVALID_HANDLE);   /* no other processes */
     return FALSE;
 }
+FNVNX_EXPORT("kernel32.dll", "TerminateProcess", TerminateProcess, "func");
 FNVNX_CITE(TerminateProcess, "dm:1");   /* verify/declared_machine.tsv row 1: the non-self path is the declared machine's answer */
 
 void w32_log_unhandled(const void *ep, const char *tail);   /* thread.cpp: next to the record layout */
@@ -249,6 +240,7 @@ extern "C" LPTOP_LEVEL_EXCEPTION_FILTER SetUnhandledExceptionFilter(LPTOP_LEVEL_
 {
     return LPTOP_LEVEL_EXCEPTION_FILTER(__atomic_exchange_n(&g_top_filter, f.value(), __ATOMIC_SEQ_CST));
 }
+FNVNX_EXPORT("kernel32.dll", "SetUnhandledExceptionFilter", SetUnhandledExceptionFilter, "func");
 
 /* as on Windows: the top-level filter decides; without one (or when it continues the search) the process is to
  * be terminated by the caller (EXCEPTION_EXECUTE_HANDLER) - there is no error reporting dialog */
@@ -263,6 +255,7 @@ extern "C" LONG UnhandledExceptionFilter(struct _EXCEPTION_POINTERS *ep)
     }
     return EXCEPTION_EXECUTE_HANDLER;
 }
+FNVNX_EXPORT("kernel32.dll", "UnhandledExceptionFilter", UnhandledExceptionFilter, "func");
 
 extern "C" void GetStartupInfoA(LPSTARTUPINFOA si)
 {
@@ -271,6 +264,7 @@ extern "C" void GetStartupInfoA(LPSTARTUPINFOA si)
     memset(si, 0, sizeof *si);
     si->cb = sizeof *si;
 }
+FNVNX_EXPORT("kernel32.dll", "GetStartupInfoA", GetStartupInfoA, "func");
 
 extern "C" UINT GetDriveTypeA(LPCSTR root)
 {
@@ -286,6 +280,7 @@ extern "C" UINT GetDriveTypeA(LPCSTR root)
     os_stat_t st;
     return !w32_map_path(win, host, sizeof host) && !os_stat(host, &st) && st.is_dir ? DRIVE_FIXED : DRIVE_NO_ROOT_DIR;
 }
+FNVNX_EXPORT("kernel32.dll", "GetDriveTypeA", GetDriveTypeA, "func");
 
 /* ---- environment: a process-local block (the CRT builds its environ from it), seeded with the variables a
  * Windows session always has (PATH, TEMP, SystemRoot, USERPROFILE, APPDATA...) on first use */
@@ -429,6 +424,7 @@ extern "C" BOOL SetEnvironmentVariableA(LPCSTR name, LPCSTR value)
     os_unlock(&g_env_lock);
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "SetEnvironmentVariableA", SetEnvironmentVariableA, "func");
 
 extern "C" DWORD GetEnvironmentVariableA(LPCSTR name, LPSTR buf, DWORD n)
 {
@@ -458,6 +454,7 @@ extern "C" DWORD GetEnvironmentVariableA(LPCSTR name, LPSTR buf, DWORD n)
     os_unlock(&g_env_lock);
     return r;
 }
+FNVNX_EXPORT("kernel32.dll", "GetEnvironmentVariableA", GetEnvironmentVariableA, "func");
 
 extern "C" char *GetEnvironmentStrings(void)
 {
@@ -489,6 +486,7 @@ extern "C" char *GetEnvironmentStrings(void)
         SetLastError(ERROR_NOT_ENOUGH_MEMORY);
     return b;
 }
+FNVNX_EXPORT("kernel32.dll", "GetEnvironmentStrings", GetEnvironmentStrings, "func");
 
 extern "C" WCHAR *GetEnvironmentStringsW(void)
 {
@@ -508,18 +506,21 @@ extern "C" WCHAR *GetEnvironmentStringsW(void)
     free(a);
     return w;
 }
+FNVNX_EXPORT("kernel32.dll", "GetEnvironmentStringsW", GetEnvironmentStringsW, "func");
 
 extern "C" BOOL FreeEnvironmentStringsA(char *b)
 {
     free(b);
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "FreeEnvironmentStringsA", FreeEnvironmentStringsA, "func");
 
 extern "C" BOOL FreeEnvironmentStringsW(WCHAR *b)
 {
     free(b);
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "FreeEnvironmentStringsW", FreeEnvironmentStringsW, "func");
 
 /* ---- advapi32 / user32 */
 extern "C" BOOL GetUserNameA(LPSTR buf, LPDWORD size)
@@ -538,3 +539,4 @@ extern "C" BOOL GetUserNameA(LPSTR buf, LPDWORD size)
     *size = sizeof name;   /* NUL included */
     return TRUE;
 }
+FNVNX_EXPORT("advapi32.dll", "GetUserNameA", GetUserNameA, "func");

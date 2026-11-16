@@ -4,7 +4,7 @@
   "external": "manifest",
   "path": "manifest/regsites.tsv"
  },
- "declared": "manifest/declared_registry.tsv",
- "seed": "win32/registry_seed.gen.inc",
+ "declared": {"root": "ports/fnv-nx/manifest", "path": "declared_registry.tsv"},
+ "seed": {"stage": "ports/fnv-nx/platform:gen:17", "path": "win32/registry_seed.gen.inc"},
  "seed_unit": "win32/registry_seed.cpp"
 }

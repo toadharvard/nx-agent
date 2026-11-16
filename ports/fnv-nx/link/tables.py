@@ -19,10 +19,12 @@ L3's codemap classes as data placed in .text.  A violation is "universe/certific
 
 vtsites.tsv is exe-derived: container and fnv-nx-build only.
 """
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import argparse, collections, json, os, sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'contract'))
-import store
+from contract import store
 
 
 def load_universe(path):

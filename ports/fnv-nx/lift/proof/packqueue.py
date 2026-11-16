@@ -25,13 +25,13 @@ from proof import certs_build, model_sail, symform, x86sys  # noqa: E402
 def main(argv):
     ap = argparse.ArgumentParser(); ap.add_argument('universe'); ap.add_argument('shards', nargs='*'); ap.add_argument('--pack-commit', required=True)
     ap.add_argument('--prover-commit', required=True); ap.add_argument('--out', required=True); ap.add_argument('--noform')
-    ap.add_argument('--sail-work', required=True); ap.add_argument('--sail-ir', required=True); ap.add_argument('--isla', required=True); x86sys.add_arg(ap)
+    ap.add_argument('--sail-work', required=True); ap.add_argument('--sail-ir', required=True); ap.add_argument('--isla', required=True); ap.add_argument('--isla-cfg', required=True); x86sys.add_arg(ap)
     ap.add_argument('--mode', choices=('int', 'simd'), default='int', help='simd: the queue of the SIMD family (header `# mode=simd`): every SIMD shape with a symbolic Form and no complete non-error record of --tree')
     ap.add_argument('--tree', help='simd: the commit of the prover tree the records must come from (record `tree`)'); ap.add_argument('--qcache', help='simd: BRANCH:FILE of the proved-query cache that seeds the farms (header)')
     ap.add_argument('--cpufeat-file', help='simd: the CPUID feature-bit table (the class order reads it)'); ap.add_argument('--cpufeat-ref', help='simd: BRANCH:FILE where the farms fetch that table (header)')
     a = ap.parse_args(argv)
     xsha = x86sys.configure(a.x86sys)
-    model_sail.configure(a.sail_work, a.sail_ir, a.isla)
+    model_sail.configure(a.sail_work, a.sail_ir, a.isla, a.isla_cfg)
     pin = certs_build.pinned_model()
     fam, hdr, first = {}, [], {}
     with open(a.universe) as fh:

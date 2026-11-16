@@ -43,14 +43,13 @@ def x87_class(raw):
 def main(paths):
     from collections import Counter, defaultdict
     sys.path.insert(0, os.path.join(HERE, "tests"))
-    import declared_cpufeat
     import declared_x86sys
     from fnvlift import inputs
-    cpufeat, why = declared_cpufeat.path()
-    if not cpufeat:
-        raise SystemExit(why)
+    fin = os.environ.get("FNVNX_INPUT_SDMROWS")      # the produced input SDMROWS (proof/cpufeat.py reads it) and the declared CPU model
+    if not fin or not os.path.exists(fin):
+        raise SystemExit("declared input not mounted: FNVNX_INPUT_SDMROWS (the produced input SDMROWS)")
     declared_x86sys.configure()
-    inputs.configure(cpufeat=cpufeat)
+    inputs.configure(sdmrows=os.path.join(fin, "sdmrows.json") if os.path.isdir(fin) else fin, cpumodel=os.path.join(HERE, "..", "..", "verify", "cpuid_model.json"))
     from proof import forms
     dec = shape.decoder()
     cls, outcome, cres, proved, seen = defaultdict(set), Counter(), {}, {}, set()

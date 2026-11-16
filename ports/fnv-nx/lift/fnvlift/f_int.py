@@ -118,9 +118,6 @@ def h_shift(cx, ins):
 
 
 
-@op('wait', 'fnclex', 'fwait')
-def h_nop(cx, ins):
-    pass
 
 
 

@@ -1,0 +1,558 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "cc": "x86_64-linux-gnu-gcc-13",
+  "cxx": "x86_64-linux-gnu-g++-13"
+ },
+ "flags": {
+  "c": [
+   "-Werror=attributes"
+  ],
+  "cxx": [
+   "-Werror=attributes"
+  ],
+  "asm": []
+ },
+ "include": [],
+ "units": "all",
+ "external": [
+  {
+   "name": "shaders",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/shaders",
+   "commit": "b545961fad52aaf65474038dba302c32f7d37569",
+   "tree_sha256": "a19fc6e63372561044329b7d43e89e5da01e37c1ab0b03c31f37fc8b452f4e6f",
+   "at": "/ext/shaders"
+  }
+ ],
+ "run": [
+  {
+   "name": "stage-0",
+   "artifact": "ports/fnv-nx/render/shaders/sm_link:sm_link_check.exe",
+   "args": [
+    "--deb",
+    "/deb",
+    "stage",
+    "/in/1",
+    "0",
+    "8",
+    "/out/stage-0.jsonl"
+   ],
+   "inputs": [
+    {
+     "external": "shaders",
+     "path": "."
+    }
+   ],
+   "debs": [
+    "libc6",
+    "libegl1",
+    "libegl-mesa0",
+    "mesa-libgallium",
+    "libgbm1",
+    "libglvnd0",
+    "libdrm2",
+    "libllvm20",
+    "libexpat1",
+    "libffi8",
+    "libzstd1",
+    "zlib1g",
+    "libstdc++6",
+    "libgcc-s1",
+    "libelf1t64",
+    "libsensors5",
+    "libx11-xcb1",
+    "libx11-6",
+    "libxcb1",
+    "libxcb-dri3-0",
+    "libxcb-present0",
+    "libxcb-randr0",
+    "libxcb-sync1",
+    "libxcb-xfixes0",
+    "libxcb-shm0",
+    "libxcb-glx0",
+    "libxshmfence1",
+    "libwayland-client0",
+    "libxau6",
+    "libxdmcp6",
+    "libxext6",
+    "libxxf86vm1",
+    "libbsd0",
+    "libmd0",
+    "libpciaccess0",
+    "libdrm-amdgpu1",
+    "libdrm-intel1",
+    "libedit2",
+    "libtinfo6",
+    "libxml2",
+    "liblzma5",
+    "libicu74"
+   ],
+   "outputs": [
+    "stage-0.jsonl"
+   ]
+  },
+  {
+   "name": "stage-1",
+   "artifact": "ports/fnv-nx/render/shaders/sm_link:sm_link_check.exe",
+   "args": [
+    "--deb",
+    "/deb",
+    "stage",
+    "/in/1",
+    "1",
+    "8",
+    "/out/stage-1.jsonl"
+   ],
+   "inputs": [
+    {
+     "external": "shaders",
+     "path": "."
+    }
+   ],
+   "debs": [
+    "libc6",
+    "libegl1",
+    "libegl-mesa0",
+    "mesa-libgallium",
+    "libgbm1",
+    "libglvnd0",
+    "libdrm2",
+    "libllvm20",
+    "libexpat1",
+    "libffi8",
+    "libzstd1",
+    "zlib1g",
+    "libstdc++6",
+    "libgcc-s1",
+    "libelf1t64",
+    "libsensors5",
+    "libx11-xcb1",
+    "libx11-6",
+    "libxcb1",
+    "libxcb-dri3-0",
+    "libxcb-present0",
+    "libxcb-randr0",
+    "libxcb-sync1",
+    "libxcb-xfixes0",
+    "libxcb-shm0",
+    "libxcb-glx0",
+    "libxshmfence1",
+    "libwayland-client0",
+    "libxau6",
+    "libxdmcp6",
+    "libxext6",
+    "libxxf86vm1",
+    "libbsd0",
+    "libmd0",
+    "libpciaccess0",
+    "libdrm-amdgpu1",
+    "libdrm-intel1",
+    "libedit2",
+    "libtinfo6",
+    "libxml2",
+    "liblzma5",
+    "libicu74"
+   ],
+   "outputs": [
+    "stage-1.jsonl"
+   ]
+  },
+  {
+   "name": "stage-2",
+   "artifact": "ports/fnv-nx/render/shaders/sm_link:sm_link_check.exe",
+   "args": [
+    "--deb",
+    "/deb",
+    "stage",
+    "/in/1",
+    "2",
+    "8",
+    "/out/stage-2.jsonl"
+   ],
+   "inputs": [
+    {
+     "external": "shaders",
+     "path": "."
+    }
+   ],
+   "debs": [
+    "libc6",
+    "libegl1",
+    "libegl-mesa0",
+    "mesa-libgallium",
+    "libgbm1",
+    "libglvnd0",
+    "libdrm2",
+    "libllvm20",
+    "libexpat1",
+    "libffi8",
+    "libzstd1",
+    "zlib1g",
+    "libstdc++6",
+    "libgcc-s1",
+    "libelf1t64",
+    "libsensors5",
+    "libx11-xcb1",
+    "libx11-6",
+    "libxcb1",
+    "libxcb-dri3-0",
+    "libxcb-present0",
+    "libxcb-randr0",
+    "libxcb-sync1",
+    "libxcb-xfixes0",
+    "libxcb-shm0",
+    "libxcb-glx0",
+    "libxshmfence1",
+    "libwayland-client0",
+    "libxau6",
+    "libxdmcp6",
+    "libxext6",
+    "libxxf86vm1",
+    "libbsd0",
+    "libmd0",
+    "libpciaccess0",
+    "libdrm-amdgpu1",
+    "libdrm-intel1",
+    "libedit2",
+    "libtinfo6",
+    "libxml2",
+    "liblzma5",
+    "libicu74"
+   ],
+   "outputs": [
+    "stage-2.jsonl"
+   ]
+  },
+  {
+   "name": "stage-3",
+   "artifact": "ports/fnv-nx/render/shaders/sm_link:sm_link_check.exe",
+   "args": [
+    "--deb",
+    "/deb",
+    "stage",
+    "/in/1",
+    "3",
+    "8",
+    "/out/stage-3.jsonl"
+   ],
+   "inputs": [
+    {
+     "external": "shaders",
+     "path": "."
+    }
+   ],
+   "debs": [
+    "libc6",
+    "libegl1",
+    "libegl-mesa0",
+    "mesa-libgallium",
+    "libgbm1",
+    "libglvnd0",
+    "libdrm2",
+    "libllvm20",
+    "libexpat1",
+    "libffi8",
+    "libzstd1",
+    "zlib1g",
+    "libstdc++6",
+    "libgcc-s1",
+    "libelf1t64",
+    "libsensors5",
+    "libx11-xcb1",
+    "libx11-6",
+    "libxcb1",
+    "libxcb-dri3-0",
+    "libxcb-present0",
+    "libxcb-randr0",
+    "libxcb-sync1",
+    "libxcb-xfixes0",
+    "libxcb-shm0",
+    "libxcb-glx0",
+    "libxshmfence1",
+    "libwayland-client0",
+    "libxau6",
+    "libxdmcp6",
+    "libxext6",
+    "libxxf86vm1",
+    "libbsd0",
+    "libmd0",
+    "libpciaccess0",
+    "libdrm-amdgpu1",
+    "libdrm-intel1",
+    "libedit2",
+    "libtinfo6",
+    "libxml2",
+    "liblzma5",
+    "libicu74"
+   ],
+   "outputs": [
+    "stage-3.jsonl"
+   ]
+  },
+  {
+   "name": "stage-4",
+   "artifact": "ports/fnv-nx/render/shaders/sm_link:sm_link_check.exe",
+   "args": [
+    "--deb",
+    "/deb",
+    "stage",
+    "/in/1",
+    "4",
+    "8",
+    "/out/stage-4.jsonl"
+   ],
+   "inputs": [
+    {
+     "external": "shaders",
+     "path": "."
+    }
+   ],
+   "debs": [
+    "libc6",
+    "libegl1",
+    "libegl-mesa0",
+    "mesa-libgallium",
+    "libgbm1",
+    "libglvnd0",
+    "libdrm2",
+    "libllvm20",
+    "libexpat1",
+    "libffi8",
+    "libzstd1",
+    "zlib1g",
+    "libstdc++6",
+    "libgcc-s1",
+    "libelf1t64",
+    "libsensors5",
+    "libx11-xcb1",
+    "libx11-6",
+    "libxcb1",
+    "libxcb-dri3-0",
+    "libxcb-present0",
+    "libxcb-randr0",
+    "libxcb-sync1",
+    "libxcb-xfixes0",
+    "libxcb-shm0",
+    "libxcb-glx0",
+    "libxshmfence1",
+    "libwayland-client0",
+    "libxau6",
+    "libxdmcp6",
+    "libxext6",
+    "libxxf86vm1",
+    "libbsd0",
+    "libmd0",
+    "libpciaccess0",
+    "libdrm-amdgpu1",
+    "libdrm-intel1",
+    "libedit2",
+    "libtinfo6",
+    "libxml2",
+    "liblzma5",
+    "libicu74"
+   ],
+   "outputs": [
+    "stage-4.jsonl"
+   ]
+  },
+  {
+   "name": "stage-5",
+   "artifact": "ports/fnv-nx/render/shaders/sm_link:sm_link_check.exe",
+   "args": [
+    "--deb",
+    "/deb",
+    "stage",
+    "/in/1",
+    "5",
+    "8",
+    "/out/stage-5.jsonl"
+   ],
+   "inputs": [
+    {
+     "external": "shaders",
+     "path": "."
+    }
+   ],
+   "debs": [
+    "libc6",
+    "libegl1",
+    "libegl-mesa0",
+    "mesa-libgallium",
+    "libgbm1",
+    "libglvnd0",
+    "libdrm2",
+    "libllvm20",
+    "libexpat1",
+    "libffi8",
+    "libzstd1",
+    "zlib1g",
+    "libstdc++6",
+    "libgcc-s1",
+    "libelf1t64",
+    "libsensors5",
+    "libx11-xcb1",
+    "libx11-6",
+    "libxcb1",
+    "libxcb-dri3-0",
+    "libxcb-present0",
+    "libxcb-randr0",
+    "libxcb-sync1",
+    "libxcb-xfixes0",
+    "libxcb-shm0",
+    "libxcb-glx0",
+    "libxshmfence1",
+    "libwayland-client0",
+    "libxau6",
+    "libxdmcp6",
+    "libxext6",
+    "libxxf86vm1",
+    "libbsd0",
+    "libmd0",
+    "libpciaccess0",
+    "libdrm-amdgpu1",
+    "libdrm-intel1",
+    "libedit2",
+    "libtinfo6",
+    "libxml2",
+    "liblzma5",
+    "libicu74"
+   ],
+   "outputs": [
+    "stage-5.jsonl"
+   ]
+  },
+  {
+   "name": "stage-6",
+   "artifact": "ports/fnv-nx/render/shaders/sm_link:sm_link_check.exe",
+   "args": [
+    "--deb",
+    "/deb",
+    "stage",
+    "/in/1",
+    "6",
+    "8",
+    "/out/stage-6.jsonl"
+   ],
+   "inputs": [
+    {
+     "external": "shaders",
+     "path": "."
+    }
+   ],
+   "debs": [
+    "libc6",
+    "libegl1",
+    "libegl-mesa0",
+    "mesa-libgallium",
+    "libgbm1",
+    "libglvnd0",
+    "libdrm2",
+    "libllvm20",
+    "libexpat1",
+    "libffi8",
+    "libzstd1",
+    "zlib1g",
+    "libstdc++6",
+    "libgcc-s1",
+    "libelf1t64",
+    "libsensors5",
+    "libx11-xcb1",
+    "libx11-6",
+    "libxcb1",
+    "libxcb-dri3-0",
+    "libxcb-present0",
+    "libxcb-randr0",
+    "libxcb-sync1",
+    "libxcb-xfixes0",
+    "libxcb-shm0",
+    "libxcb-glx0",
+    "libxshmfence1",
+    "libwayland-client0",
+    "libxau6",
+    "libxdmcp6",
+    "libxext6",
+    "libxxf86vm1",
+    "libbsd0",
+    "libmd0",
+    "libpciaccess0",
+    "libdrm-amdgpu1",
+    "libdrm-intel1",
+    "libedit2",
+    "libtinfo6",
+    "libxml2",
+    "liblzma5",
+    "libicu74"
+   ],
+   "outputs": [
+    "stage-6.jsonl"
+   ]
+  },
+  {
+   "name": "stage-7",
+   "artifact": "ports/fnv-nx/render/shaders/sm_link:sm_link_check.exe",
+   "args": [
+    "--deb",
+    "/deb",
+    "stage",
+    "/in/1",
+    "7",
+    "8",
+    "/out/stage-7.jsonl"
+   ],
+   "inputs": [
+    {
+     "external": "shaders",
+     "path": "."
+    }
+   ],
+   "debs": [
+    "libc6",
+    "libegl1",
+    "libegl-mesa0",
+    "mesa-libgallium",
+    "libgbm1",
+    "libglvnd0",
+    "libdrm2",
+    "libllvm20",
+    "libexpat1",
+    "libffi8",
+    "libzstd1",
+    "zlib1g",
+    "libstdc++6",
+    "libgcc-s1",
+    "libelf1t64",
+    "libsensors5",
+    "libx11-xcb1",
+    "libx11-6",
+    "libxcb1",
+    "libxcb-dri3-0",
+    "libxcb-present0",
+    "libxcb-randr0",
+    "libxcb-sync1",
+    "libxcb-xfixes0",
+    "libxcb-shm0",
+    "libxcb-glx0",
+    "libxshmfence1",
+    "libwayland-client0",
+    "libxau6",
+    "libxdmcp6",
+    "libxext6",
+    "libxxf86vm1",
+    "libbsd0",
+    "libmd0",
+    "libpciaccess0",
+    "libdrm-amdgpu1",
+    "libdrm-intel1",
+    "libedit2",
+    "libtinfo6",
+    "libxml2",
+    "liblzma5",
+    "libicu74"
+   ],
+   "outputs": [
+    "stage-7.jsonl"
+   ]
+  }
+ ]
+}

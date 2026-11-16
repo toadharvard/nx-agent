@@ -12,6 +12,7 @@
  * rounded strtod (glibc and newlib's gdtoa round exactly, to nearest even); qsort is an in-place heapsort whose
  * indices stay below n whatever the comparator answers; character classes come from the layer's own NLS tables
  * (GetStringTypeW / LCMapStringW) for every code page the layer supports ("C" = identity below 128, 1252). */
+#include <fnvnx_export.h>
 #include <fnvnx/cite.h>
 #include "../win32/w32.h"
 
@@ -47,6 +48,7 @@ extern "C" void *c_malloc(size_t n)
         errno = ENOMEM;
     return p;
 }
+FNVNX_EXPORT("msvcrt.dll", "malloc", c_malloc, "func");
 /* ??2@YAPAXI@Z, operator new(size_t): Wine 9.0 dlls/msvcrt/heap.c operator_new (_MSVCR_VER >= 80):
  *   do { retval = msvcrt_heap_alloc(0, size); if (retval) return retval; } while (_callnewh(size)); throw_bad_alloc();
  * _callnewh calls MSVCRT_new_handler, whose only writer is _set_new_handler. That function (and set_new_handler,
@@ -60,6 +62,7 @@ extern "C" void *c_new(size_t n)
         return p;
     throw_bad_alloc();
 }
+FNVNX_EXPORT("msvcrt.dll", "??2@YAPAXI@Z", c_new, "func");
 extern "C" void *c_calloc(size_t a, size_t b)
 {
     if (b && a > (size_t)-1 / b) {
@@ -72,6 +75,7 @@ extern "C" void *c_calloc(size_t a, size_t b)
         errno = ENOMEM;
     return p;
 }
+FNVNX_EXPORT("msvcrt.dll", "calloc", c_calloc, "func");
 extern "C" void *c_realloc(void *p, size_t n)
 {
     if (!p)
@@ -85,7 +89,10 @@ extern "C" void *c_realloc(void *p, size_t n)
         errno = ENOMEM;
     return q;
 }
+FNVNX_EXPORT("msvcrt.dll", "realloc", c_realloc, "func");
 extern "C" void c_free(void *p) { free(p); }
+FNVNX_EXPORT("msvcrt.dll", "??3@YAXPAX@Z", c_free, "func");
+FNVNX_EXPORT("msvcrt.dll", "free", c_free, "func");
 
 /* ---------------------------------------------------------------- locale and ctype */
 enum { T_UP = 1, T_LO = 2, T_DIG = 4, T_SP = 8, T_PU = 0x10, T_CT = 0x20, T_BL = 0x40, T_HEX = 0x80, T_AL = 0x100 };
@@ -167,6 +174,7 @@ mixed:
              g_cat[1], g_cat[2], g_cat[3], g_cat[4], g_cat[5]);
     return composite;
 }
+FNVNX_EXPORT("msvcrt.dll", "setlocale", c_setlocale, "func");
 
 /* the C-locale table is built on first use of any ctype entry: setlocale(NULL) alone must not need it */
 inline const ctab *cur()
@@ -181,15 +189,23 @@ inline const ctab *cur()
 }
 inline int cls(int c, unsigned m) { return c >= 0 && c <= 255 ? cur()->t[c] & m : 0; } /* EOF and out of range: 0 */
 extern "C" int c_isalpha(int c) { return cls(c, T_AL | T_UP | T_LO); }
+FNVNX_EXPORT("msvcrt.dll", "isalpha", c_isalpha, "func");
 extern "C" int c_isalnum(int c) { return cls(c, T_AL | T_UP | T_LO | T_DIG); }
+FNVNX_EXPORT("msvcrt.dll", "isalnum", c_isalnum, "func");
 extern "C" int c_isdigit(int c) { return cls(c, T_DIG); }
+FNVNX_EXPORT("msvcrt.dll", "isdigit", c_isdigit, "func");
 extern "C" int c_isspace(int c) { return cls(c, T_SP); }
+FNVNX_EXPORT("msvcrt.dll", "isspace", c_isspace, "func");
 extern "C" int c_isxdigit(int c) { return cls(c, T_HEX); }
+FNVNX_EXPORT("msvcrt.dll", "isxdigit", c_isxdigit, "func");
 extern "C" {
 #include "env_const.gen.inc"   /* c_isleadbyte: manifest/env_const.tsv */
 }
+FNVNX_EXPORT("msvcrt.dll", "isleadbyte", c_isleadbyte, "func");
 extern "C" int c_tolower(int c) { return c >= 0 && c <= 255 ? cur()->lo[c] : c; }
+FNVNX_EXPORT("msvcrt.dll", "tolower", c_tolower, "func");
 extern "C" int c_toupper(int c) { return c >= 0 && c <= 255 ? cur()->up[c] : c; }
+FNVNX_EXPORT("msvcrt.dll", "toupper", c_toupper, "func");
 int wcls(int c, unsigned m)
 {
     if (c < 0 || c >= 0xFFFF) /* WEOF and out of range */
@@ -200,9 +216,13 @@ int wcls(int c, unsigned m)
     return t & m;
 }
 extern "C" int c_iswalpha(int c) { return wcls(c, C1_ALPHA); }
+FNVNX_EXPORT("msvcrt.dll", "iswalpha", c_iswalpha, "func");
 extern "C" int c_iswdigit(int c) { return wcls(c, C1_DIGIT); }
+FNVNX_EXPORT("msvcrt.dll", "iswdigit", c_iswdigit, "func");
 extern "C" int c_iswpunct(int c) { return wcls(c, C1_PUNCT); }
+FNVNX_EXPORT("msvcrt.dll", "iswpunct", c_iswpunct, "func");
 extern "C" int c_iswspace(int c) { return wcls(c, C1_SPACE); }
+FNVNX_EXPORT("msvcrt.dll", "iswspace", c_iswspace, "func");
 
 /* wide -> narrow in the current code page; 1 on success */
 int wc_to_byte(u16 wc, unsigned char *out)
@@ -241,6 +261,7 @@ extern "C" size_t c_wcstombs(char *d, const u16 *s, size_t n)
         k++;
     }
 }
+FNVNX_EXPORT("msvcrt.dll", "wcstombs", c_wcstombs, "func");
 extern "C" int c_wctomb(char *d, u16 wc)
 {
     if (!d)
@@ -253,33 +274,11 @@ extern "C" int c_wctomb(char *d, u16 wc)
     *d = (char)b;
     return 1;
 }
-
-/* ---------------------------------------------------------------- printf and scanf: the engine is msvcrt_format.cpp */
-extern "C" int c_sprintf(char *buf, const char *fmt, ...)
-{
-    if (!buf || !fmt) {
-        errno = EINVAL;
-        return -1;
-    }
-    va_list ap;
-    va_start(ap, fmt);
-    int r = fnvnx_msvc_format(buf, (size_t)-1, fmt, ap);
-    va_end(ap);
-    if (r >= 0)
-        buf[r] = 0;
-    return r;
-}
-extern "C" int c_sscanf(const char *in, const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    int r = fnvnx_msvc_scan(in, fmt, ap);
-    va_end(ap);
-    return r;
-}
+FNVNX_EXPORT("msvcrt.dll", "wctomb", c_wctomb, "func");
 
 /* ---------------------------------------------------------------- numbers */
 extern "C" double c_atof(const char *s) { return fnvnx_msvc_strtod(s, NULL); }
+FNVNX_EXPORT("msvcrt.dll", "atof", c_atof, "func");
 /* atox.c: a 32-bit long accumulates c - '0' unchecked: values past the range wrap, as in MSVCRT.DLL */
 int32_t atox(const char *s)
 {
@@ -294,11 +293,15 @@ int32_t atox(const char *s)
     return (int32_t)(neg ? 0u - t : t);
 }
 extern "C" int c_atoi(const char *s) { return atox(s); }
+FNVNX_EXPORT("msvcrt.dll", "atoi", c_atoi, "func");
 extern "C" long c_atol(const char *s) { return (long)atox(s); }
+FNVNX_EXPORT("msvcrt.dll", "atol", c_atol, "func");
 
 /* ---------------------------------------------------------------- strings, sort, misc */
 extern "C" char *w_strchr(const char *s, int c) { return (char *)strchr(s, c); }
+FNVNX_EXPORT("msvcrt.dll", "strchr", w_strchr, "func");
 extern "C" char *w_strrchr(const char *s, int c) { return (char *)strrchr(s, c); }
+FNVNX_EXPORT("msvcrt.dll", "strrchr", w_strrchr, "func");
 
 /* the comparator is the game's: a guest address, called through the boundary */
 FNVNX_CALLBACK_T(cmp_t, int, (const void *, const void *));
@@ -342,6 +345,7 @@ extern "C" void c_qsort(void *base, size_t n, size_t w, cmp_t cmp)
         sift(a, w, 0, e, cmp);
     }
 }
+FNVNX_EXPORT("msvcrt.dll", "qsort", c_qsort, "func");
 
 extern "C" char *c_strdate(char *b)
 {
@@ -352,6 +356,7 @@ extern "C" char *c_strdate(char *b)
     memcpy(b, o, 9);
     return b;
 }
+FNVNX_EXPORT("msvcrt.dll", "_strdate", c_strdate, "func");
 extern "C" char *c_strtime(char *b)
 {
     SYSTEMTIME t;
@@ -361,6 +366,7 @@ extern "C" char *c_strtime(char *b)
     memcpy(b, o, 9);
     return b;
 }
+FNVNX_EXPORT("msvcrt.dll", "_strtime", c_strtime, "func");
 
 extern "C" char *c_tempnam(const char *dir, const char *prefix)
 {
@@ -390,6 +396,7 @@ extern "C" char *c_tempnam(const char *dir, const char *prefix)
             return r;
     }
 }
+FNVNX_EXPORT("msvcrt.dll", "_tempnam", c_tempnam, "func");
 
 /* ---------------------------------------------------------------- process: init/exit, locks, environment */
 FNVNX_CALLBACK_T(pvfv, void, (void));       /* _initterm's table entries: guest addresses (one word each in the game) */
@@ -400,9 +407,11 @@ extern "C" void c_initterm(pvfv *first, pvfv *last)
         if (*first)
             (*first)();   /* through the boundary */
 }
+FNVNX_EXPORT("msvcrt.dll", "_initterm", c_initterm, "func");
 
 /* _onexit: the handler (a game function pointer) goes into the exit-handler list (exitlist.cpp) */
 extern "C" onexit_fn c_onexit(onexit_fn f) { return fnvnx_exit_register((uintptr_t)f) == 0 ? f : NULL; }
+FNVNX_EXPORT("msvcrt.dll", "_onexit", c_onexit, "func");
 /* __dllonexit: the DLL's own table [*begin, *end), grown by one on the msvcrt heap; both pointers updated */
 extern "C" onexit_fn c_dllonexit(onexit_fn f, onexit_fn **begin, onexit_fn **end)
 {
@@ -416,6 +425,7 @@ extern "C" onexit_fn c_dllonexit(onexit_fn f, onexit_fn **begin, onexit_fn **end
     *begin = t, *end = t + len;
     return f;
 }
+FNVNX_EXPORT("msvcrt.dll", "__dllonexit", c_dllonexit, "func");
 /* C11 7.22.4.4 exit: cannot return to its caller (abort: 7.22.4.1; _amsg_exit: Wine 9.0 dlls/msvcrt/exit.c _amsg_exit ends in _exit) */
 extern "C" void c_exit(int code)
 {
@@ -423,6 +433,7 @@ extern "C" void c_exit(int code)
     fnvnx_iob_fflush(NULL);
     ExitProcess((UINT)code);
 }
+FNVNX_EXPORT("msvcrt.dll", "exit", c_exit, "func");
 FNVNX_CITE(c_exit, "dm:3");
 extern "C" void c_abort(void)
 {
@@ -430,6 +441,7 @@ extern "C" void c_abort(void)
     fnvnx_write(2, m, sizeof m - 1);
     ExitProcess(3);
 }
+FNVNX_EXPORT("msvcrt.dll", "abort", c_abort, "func");
 FNVNX_CITE(c_abort, "dm:4");
 extern "C" void c_amsg_exit(int n)
 {
@@ -450,8 +462,10 @@ extern "C" void c_amsg_exit(int n)
     fnvnx_write(2, m, (unsigned)l);
     ExitProcess(255);
 }
+FNVNX_EXPORT("msvcrt.dll", "_amsg_exit", c_amsg_exit, "func");
 FNVNX_CITE(c_amsg_exit, "dm:5");
 extern "C" void c_purecall(void) { c_amsg_exit(25); }
+FNVNX_EXPORT("msvcrt.dll", "_purecall", c_purecall, "func");
 FNVNX_CITE(c_purecall, "dm:9");
 
 struct rlock { os_lock_t m; void *volatile owner; int count; };
@@ -471,6 +485,7 @@ extern "C" void c_lock(int n)
     os_glock(&l.m);   /* _lock: the game's own lock, held across its callbacks (os.h) */
     l.owner = me, l.count = 1;
 }
+FNVNX_EXPORT("msvcrt.dll", "_lock", c_lock, "func");
 extern "C" void c_unlock(int n)
 {
     if (n < 0 || n >= 64)
@@ -481,6 +496,7 @@ extern "C" void c_unlock(int n)
     l.owner = NULL;
     os_gunlock(&l.m);
 }
+FNVNX_EXPORT("msvcrt.dll", "_unlock", c_unlock, "func");
 
 struct envc { char *key, *val; envc *next; };
 os_lock_t g_env_lock = OS_LOCK_INIT;
@@ -530,6 +546,7 @@ extern "C" char *c_getenv(const char *name)
     os_unlock(&g_env_lock);
     return r;
 }
+FNVNX_EXPORT("msvcrt.dll", "getenv", c_getenv, "func");
 
 /* ---------------------------------------------------------------- math */
 extern "C" double c_ldexp(double x, int e)
@@ -539,6 +556,7 @@ extern "C" double c_ldexp(double x, int e)
         errno = ERANGE;
     return r;
 }
+FNVNX_EXPORT("msvcrt.dll", "ldexp", c_ldexp, "func");
 extern "C" double c_frexp(double x, int *e)
 {
     if (!std::isfinite(x)) {
@@ -547,9 +565,13 @@ extern "C" double c_frexp(double x, int *e)
     }
     return frexp(x, e);
 }
+FNVNX_EXPORT("msvcrt.dll", "frexp", c_frexp, "func");
 extern "C" double c_ceil(double x) { return ceil(x); }
+FNVNX_EXPORT("msvcrt.dll", "ceil", c_ceil, "func");
 extern "C" double c_floor(double x) { return floor(x); }
+FNVNX_EXPORT("msvcrt.dll", "floor", c_floor, "func");
 extern "C" double c_modf(double x, double *ip) { return modf(x, ip); }
+FNVNX_EXPORT("msvcrt.dll", "modf", c_modf, "func");
 
 }   // namespace fnvnx_msvcrt_impl
 using namespace fnvnx_msvcrt_impl;
@@ -557,10 +579,15 @@ using namespace fnvnx_msvcrt_impl;
 /* the names that msvcrt shares with the libc: the body is the libc's, and a symbol of this product is what the name table (msvcrt_names.tsv)
    names, so that the gate `imports` proves the row from the product objects */
 extern "C" void *fnvnx_msvcrt_memcpy(void *d, const void *s, size_t n) { return memcpy(d, s, n); }
+FNVNX_EXPORT("msvcrt.dll", "memcpy", fnvnx_msvcrt_memcpy, "func");
 extern "C" void *fnvnx_msvcrt_memmove(void *d, const void *s, size_t n) { return memmove(d, s, n); }
+FNVNX_EXPORT("msvcrt.dll", "memmove", fnvnx_msvcrt_memmove, "func");
 extern "C" void *fnvnx_msvcrt_memset(void *d, int c, size_t n) { return memset(d, c, n); }
+FNVNX_EXPORT("msvcrt.dll", "memset", fnvnx_msvcrt_memset, "func");
 extern "C" int fnvnx_msvcrt_strncmp(const char *a, const char *b, size_t n) { return strncmp(a, b, n); }
+FNVNX_EXPORT("msvcrt.dll", "strncmp", fnvnx_msvcrt_strncmp, "func");
 extern "C" char *fnvnx_msvcrt_strncpy(char *d, const char *s, size_t n) { return strncpy(d, s, n); }
+FNVNX_EXPORT("msvcrt.dll", "strncpy", fnvnx_msvcrt_strncpy, "func");
 
 /* the code-page conversions of the formatter and scanner (msvcrt_format.cpp): the current locale's narrow <-> UTF-16 */
 extern "C" int fnvnx_msvcrt_wc_to_byte(unsigned short wc, unsigned char *out) { return wc_to_byte(wc, out); }

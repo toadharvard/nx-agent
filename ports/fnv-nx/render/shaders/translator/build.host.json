@@ -35,59 +35,22 @@
   ],
   "asm": []
  },
- "include": [
-  "ports/fnv-nx/lib/sha256/include",
-  "ports/fnv-nx/render/shaders/translator/gen",
-  "ports/fnv-nx/render/shaders/translator/include",
-  "/ext/mojoshader",
-  "/ext/mojoshader/profiles"
- ],
- "units": "all",
- "generated": [
-  {
-   "tool": "ports/fnv-nx/render/shaders/total/gen_sm_rows.py",
-   "args": [
-    "/in/ports/fnv-nx/render/shaders/total/sm_table.json",
-    "/out/gen/fnvnx_sm_rows.h"
-   ],
-   "inputs": [
-    "ports/fnv-nx/render/shaders/total/sm_table.json"
-   ],
-   "outputs": [
-    "gen/fnvnx_sm_rows.h"
-   ]
-  },
-  {
-   "tool": "ports/fnv-nx/render/total/translator_gen/gen_sources.py",
-   "args": [
-    "/ext/mojoshader",
-    "/out/gen/sources.txt"
-   ],
-   "inputs": [],
-   "outputs": [
-    "gen/sources.txt"
-   ]
-  }
- ],
  "sources": "gen/sources.txt",
  "external": [
   {
    "name": "mojoshader",
    "repo": "fnv-nx-build",
    "ref": "tools/mojoshader-glsldk",
-   "commit": "6e7f17919b962b9a6c44a249f5b68b6611f127b9",
-   "tree_sha256": "af453ab90c1dc2a88616c43362af09c31f4f1e90d090851105b11d4ff5f5bb8a",
+   "commit": "7693847e3ba4fc85c51aad2ddd19bf795c608daf",
+   "tree_sha256": "bc0ea3c1432f5ab3739e15de8040a23bf5bba5c433c8005901a6f44649a38097",
    "at": "/ext/mojoshader"
   }
  ],
  "link": null,
- "outputs": {
-  "INCLUDE": "include"
- },
- "uses": [
+ "include_uses": [
   {
-   "root": "ports/fnv-nx/lib/sha256",
-   "output": "INCLUDE"
+   "root": "ports/fnv-nx/render/shaders/total",
+   "output": "sm_rows"
   }
  ]
 }

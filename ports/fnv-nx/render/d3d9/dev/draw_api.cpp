@@ -1,4 +1,5 @@
 // draw_api.cpp: DrawPrimitive, DrawIndexedPrimitive, DrawPrimitiveUP, DrawIndexedPrimitiveUP of NxDevice9 and NxDevice9Ex: validation and HRESULTs. One draw = draw_exec.cpp.
+// ASM-625 (verify/ASSUMPTIONS.json)
 // Sources: Wine 9.0 d3d9/device.c d3d9_device_DrawPrimitive / DrawIndexedPrimitive / DrawPrimitiveUP / DrawIndexedPrimitiveUP (checks and their order) and the rows of Wine's d3d9/tests/device.c
 // ASM-630 (verify/ASSUMPTIONS.json)
 // test_draw_primitive (the rows after "SetVertexDeclaration(device, NULL)") that are NOT todo_wine = validated on Windows.

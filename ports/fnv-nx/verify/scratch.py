@@ -36,3 +36,11 @@ def install():
     tempfile.mkdtemp = mkdtemp
     _installed.append(real)
     atexit.register(_rm)
+
+
+def store(prefix):
+    """A temporary CAS store for a test: T/<name>/store, T a fresh directory of this process.  The store's pool is its sibling (cas.pool_of), so
+    both live inside T and T is removed, store and pool together, when the interpreter exits.  A test never makes a store of a bare mkdtemp
+    directory (its pool would land in TMPDIR and the gate would find it left there).  -> the store path (not yet created)."""
+    install()
+    return os.path.join(tempfile.mkdtemp(prefix=prefix), "store")
