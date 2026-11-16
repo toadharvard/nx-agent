@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """gen_env_const - bodies of the imports whose documented result is one constant in this environment.
 
-    gen_env_const.py env_const.tsv out.inc [--only PREFIX] [--probe] [--declared verify/declared_machine.tsv]
+    gen_env_const.py env_const.tsv out.inc [--only PREFIX] [--probe] --declared <root>/declared_machine.tsv
 
 A row of manifest/env_const.tsv states a fact of the contract, not code: for every argument, in the
 environment of ENV_TRUTH.md, the function returns `value`. Columns (TAB separated, header line required):
@@ -14,8 +14,7 @@ environment of ENV_TRUTH.md, the function returns `value`. Columns (TAB separate
     quals    optional: text after the parameter list of a member (const, noexcept)
     file     the source file (relative to platform/) that includes the generated bodies; --only selects by prefix
              (a .c file gets plain C definitions)
-Declared-machine citation (verify/VERDICT.md "Declared-machine bodies"): the table verify/declared_machine.tsv (default: next to this
-tree, ../verify/declared_machine.tsv; rows `id contract_name fact source kind value`) is read; a symbol that has a row there (contract_name ==
+Declared-machine citation (verify/VERDICT.md "Declared-machine bodies"): the table <root>/declared_machine.tsv (required argument; rows `id contract_name fact source kind value`) is read; a symbol that has a row there (contract_name ==
 symbol) gets `FNVNX_CITE(<symbol>, "<id>");` after its body (hostabi/include/fnvnx/cite.h: one record in the non-alloc section .fnvnx.cite, no call), and its row's kind/value must equal the row's constant; the symbol must have C linkage (the record names the assembler symbol)
 (false, NULL and 0 are 0). A row whose symbol has no body in this table is cited by a hand-written body (FNVNX_CITE there); the gate matches rows to records. A value `identity:<k>` means the function returns its argument k unchanged (body `return <name of parameter k>;`, the parameter named in the params column). One rule for every row: no list of functions here.
 Checks, each an error: a row without a source of one of the two forms, an empty value, a void return, a symbol
@@ -44,7 +43,7 @@ COLS = ["symbol", "linkage", "ret", "params", "value", "source", "quals", "file"
 
 
 def declared_rows(path):
-    """{contract_name: (id, value)} of verify/declared_machine.tsv; a malformed row is an error."""
+    """{contract_name: (id, value)} of the --declared table; a malformed row is an error."""
     rows = {}
     if not os.path.exists(path):
         return rows
@@ -81,11 +80,12 @@ def const_value(v):
 
 def main(argv):
     only = None
-    dpath = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "verify", "declared_machine.tsv")
-    if "--declared" in argv:
-        i = argv.index("--declared")
-        dpath = argv[i + 1]
-        del argv[i:i + 2]
+    if "--declared" not in argv:
+        print("gen_env_const: --declared <root>/declared_machine.tsv is required (the rows belong to the root whose body cites them)", file=sys.stderr)
+        return 1
+    i = argv.index("--declared")
+    dpath = argv[i + 1]
+    del argv[i:i + 2]
     decl = declared_rows(dpath)
     probe = "--probe" in argv
     if probe:
