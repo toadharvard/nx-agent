@@ -28,6 +28,7 @@
 #define FNVL_RA_WRITE 1
 #include "fnvl.h"
 #include "imp.h"
+#include "fnvnx_target.h"
 struct fnvnx_guest_ret { u32 eax, edx; double st0; };
 extern "C" {
 void fnvl_raise_ud(u32 addr);
@@ -55,7 +56,7 @@ static inline void fp_park(void)
     u64 a, b;
     __asm__ volatile("mrs %0, fpcr\n mrs %1, fpsr" : "=r"(a), "=r"(b));
     c->hfpcr = (u32)a; c->hfpsr = (u32)b;
-    a = 0; __asm__ volatile("msr fpcr, %0" :: "r"(a));
+    a = FNVNX_FPCR; __asm__ volatile("msr fpcr, %0" :: "r"(a));
 }
 
 extern "C" u32 fnvl_thread_main(u32 eip, u32 sp, u32 teb)

@@ -73,10 +73,10 @@ def make(td, ext, uses=True, imports=False, stage_ext=False):
     con = {"format": "fnvnx-recipe/1", "outputs": {"c": "c.txt"}, "uses": [{"root": T + "own", "output": "o"}] if uses else [],
            "generated": [{"tool": T + "con/g.py", "args": [], "inputs": [ref], "outputs": ["c.txt"]}]}
     w(repo, T + "con/build.json", json.dumps(con))
-    w(repo, T + "con/g.py", "open('/out/c.txt','w').write('x')\n")
+    w(repo, T + "con/g.py", ("import own.g\n" if imports else "") + "open('/out/c.txt','w').write('x')\n")   # the import of the owner root is derived from this line
     adm = {"format": "fnvnx-admit/1", "roots": [
         {"path": T + "own", "class": "product", "target": "host", "recipe": T + "own/build.json"},
-        dict({"path": T + "con", "class": "product", "target": "host", "recipe": T + "con/build.json"}, **({"imports": [T + "own"]} if imports else {}))]}
+        {"path": T + "con", "class": "product", "target": "host", "recipe": T + "con/build.json"}]}
     w(repo, T + "verify/admit.json", json.dumps(adm))
     w(repo, T + "verify/env.json", open(os.path.join(HERE, "..", "env.json")).read())
     git(repo, "add", "-A")
@@ -95,7 +95,7 @@ with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td:
     repo, ref = make(os.path.join(td, "a"), e1)
     check("declared through `uses`: green", errs(repo, ref) == [], errs(repo, ref))
     repo2, ref2 = make(os.path.join(td, "b"), e1, uses=False, imports=True)
-    check("declared through admit.json `imports`: green", errs(repo2, ref2) == [], errs(repo2, ref2))
+    check("declared by an import of the owner root (derived edge): green", errs(repo2, ref2) == [], errs(repo2, ref2))
     repo3, ref3 = make(os.path.join(td, "c"), e1, uses=False)
     check("an owner that is neither used nor imported is red", any("declare the dependency" in e for e in errs(repo3, ref3)), errs(repo3, ref3))
     check("an unknown external name is red", any("declares no external" in e for e in errs(repo, dict(ref, name="nope"))), errs(repo, dict(ref, name="nope")))

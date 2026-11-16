@@ -1311,11 +1311,11 @@ Rule. verify/admit.json ("fnvnx-admit/1") lists the roots of the port tree: {"pa
 import closure of these and of the `generated` tools of the recipes; a script only a gate driver runs is not an entry point.
 `trees` (optional): the list of the directories (or exact files) of one root, at least two, the first equal to "path"; the root's
 universe is their union, and its python is judged in one puregate run, so trees that import each other form ONE root with no
-file moved. Two roots never share or nest a tree. The root is named by "path" in `imports`.
-`imports` (a root's python cross-root imports): a list of paths of other admitted roots; "pure" (gate_pure.py) judges the root
-with its own directory and the parent directory of each imported root as import bases, so a root's python may import another
-root's modules only when it declares it. Each entry must be an admitted root other than the root itself, without repeats; the
-declared imports form no cycle (an error of the table: every file is uncertified).
+file moved. Two roots never share or nest a tree. The cross-root python imports of a root are DERIVED, never declared (`gate_admit.derived_imports`): by `ast` over every tracked .py of the root (any depth),
+each import is resolved by its qualified module path (`import_roots`: `render.total.x` is root render/total); the roots found are the root's imports, which the
+"pure" run (gate_pure.py) takes as import bases and the generator stage mounts at /imp. A dynamic import (importlib.import_module / __import__ with a non-literal
+argument) is an error of the table; an `imports` field in admit.json is an error ("imports are derived"). Cycles between roots are no error: a stage mounts the
+file closure of the tool, never a root.
 Universe: every file git tracks below ports/fnv-nx (`git ls-files -z`), an item is its repo-relative path.
 A file is certified iff ALL hold:
   1. exactly one root contains it (a root is a directory prefix or one exact file path; roots do not nest);
@@ -1784,8 +1784,8 @@ drivers (scripts the verdict runs on the host) is outside the universe: it is no
 is special (a file in `tests/` is in the universe iff a stage imports it).
 Certified: items with zero puregate violations that import no HOST-READER module. Each admitted root that names gate "pure" is
 checked in its own puregate run: project imports resolve below the importing file's directory, the root's directories (`trees`) or their
-parents, or the parent directory of a root it DECLARES in admit.json `imports`. An import of a module of another root that is not declared is
-`import-unlisted` (red); a declared-import cycle, an unknown or repeated import is an error of admit.json (red). HOST-READER modules:
+parents, or the parent directory of a root its sources import by the qualified name (derived, gate_admit.derived_imports). A bare import of a module of another root is
+`import-unlisted` (red); an `imports` field or a dynamic import is an error of admit.json (red). HOST-READER modules:
 every file below ports/fnv-nx/verify or ports/fnv-nx/farm (the sandbox, the recipe, the gate drivers, the farm scripts legitimately read
 the host: clock, processes, directory listings; their correctness is the business of the "selftests" gate); a universe file that
 imports one is uncertified, and so is a file that imports one that imports it (those are in the universe, so each is judged itself:
