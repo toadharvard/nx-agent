@@ -3067,3 +3067,5 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - rulings: test_store follows the full-list rule (w28 fixes it); the test_guest_flags fixture moves to the none-elf triplet (w28); runtime_cflags spelled in rt.sh and stage2.sh goes to L2; gmpy2 is env-only only if pinned.
   - The 8 new c5 test files must each be triaged.
   - a9325a76e: compiler facts come from a hermetic cfact stage. The remaining direct calls (print-prog-name ld, toolrt gcc_set) are to be converted.
+- 12:39: the dispatch.c:69 red was already fixed in cand5's toolchain (L2 ENTRY1-ATOMIC 67164ec5e). base3 lacks it, so w8 builds the loader with cand5's toolchain/.
+  - test_runtime_cflags: L2 a36b3c8f2 plus overlay 35e622293, 3 comment spellings removed, test passes. cand5 toolchain/ and rules/ = a36b3c8f2 + 5241e02c7 + c64609950 + 35e622293.
