@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """gen_env_const - bodies of the imports whose documented result is one constant in this environment.
 
-    gen_env_const.py env_const.tsv out.inc [--only PREFIX] [--probe] --declared <root>/declared_machine.tsv
+    gen_env_const.py env_const.tsv out.inc [--only PREFIX] --declared <root>/declared_machine.tsv
 
 A row of manifest/env_const.tsv states a fact of the contract, not code: for every argument, in the
 environment of ENV_TRUTH.md, the function returns `value`. Columns (TAB separated, header line required):
@@ -14,31 +14,34 @@ environment of ENV_TRUTH.md, the function returns `value`. Columns (TAB separate
     quals    optional: text after the parameter list of a member (const, noexcept)
     file     the source file (relative to platform/) that includes the generated bodies; --only selects by prefix
              (a .c file gets plain C definitions)
-Declared-machine citation (verify/VERDICT.md "Declared-machine bodies"): the table <root>/declared_machine.tsv (required argument; rows `id contract_name fact source kind value`) is read; a symbol that has a row there (contract_name ==
+Declared-machine citation (verify/VERDICT.md "Declared-machine bodies"): the table <root>/declared_machine.tsv (required argument; rows `id contract_name fact source kind value lasterror`) is read; a symbol that has a row there (contract_name ==
 symbol) gets `FNVNX_CITE(<symbol>, "<id>");` after its body (hostabi/include/fnvnx/cite.h: one record in the non-alloc section .fnvnx.cite, no call), and its row's kind/value must equal the row's constant; the symbol must have C linkage (the record names the assembler symbol)
 (false, NULL and 0 are 0). A row whose symbol has no body in this table is cited by a hand-written body (FNVNX_CITE there); the gate matches rows to records. A value `identity:<k>` means the function returns its argument k unchanged (body `return <name of parameter k>;`, the parameter named in the params column). One rule for every row: no list of functions here.
 Checks, each an error: a row without a source of one of the two forms, an empty value, a void return, a symbol
 given twice for one file, a column count other than 8. The output is a pure function of the table (rows in table order).
---probe writes the probe form instead (the recipe's `probe` stage compiles the includer with it): the same bodies, and after them one record per row
-in the non-alloc section `.fnvnx.const`: u32 row id (the line of env_const.tsv), u32 byte length, the value bytes (the row's expression evaluated by the
-compiler of the includer's own file, headers and flags, as an object of the row's type), padded to 4, little endian.
+After every body one record in the non-alloc section `.fnvnx.const` (an identity row: `.fnvnx.ident`): {a pointer-sized relocation to the function, u32 byte length, the value bytes
+(the row's expression evaluated by the compiler of the includer's own file, headers and flags, as an object of the row's type), padding to 4}, little endian. The relocation is
+R_AARCH64_P32_ABS32 in a guest object; for a member the symbol is the compiler's own (the address of the member cast to the function pointer type of its definition).
 """
 import os
 import re
 import sys
 
-# One record per row in the section .fnvnx.const (--probe): u32 row id (the line of env_const.tsv), u32 byte length, the value (the row's expression
-# evaluated by the compiler of the includer's own scope, as an object of the row's type), padded to 4 (little endian). The probe object is compiled by
-# the recipe's probe stage and read, never linked: its sections are plain.
+# One record per row in the section .fnvnx.const, always emitted after the row's body (no flag): {a pointer-sized relocation to the function; u32 byte length of the value;
+# the value, the row's expression evaluated by the compiler at the includer's own scope as an object of the row's type; padding to 4}, little endian. The section name
+# carries the non-alloc flags ("" %progbits) through the section directive, so no byte reaches the loaded image (the same class as FNVNX_CITE's .fnvnx.cite). The relocation
+# is the compiler's own: an ILP32 pointer field is R_AARCH64_P32_ABS32 (R_X86_64_32 on the host), against the symbol GCC emitted for the function: the member's own mangled
+# name comes from the cast of its address to the function pointer type of its definition (GCC's documented pmf-to-function-pointer conversion), never from Python.
 RECORD = (
-    '__attribute__((section(".fnvnx.const"), used, aligned(4))) static const struct __attribute__((packed)) { unsigned id; unsigned len; %(ret)s v; }\n'
-    '    fnvnx_const_%(n)d = { %(n)d, (unsigned)sizeof(%(ret)s), (%(value)s) };\n'
-    'FNVNX_SA(sizeof(fnvnx_const_%(n)d) == (8 + sizeof(%(ret)s)), "row %(n)d: the record is header + value");\n')
-SA_DEF = '#ifdef __cplusplus\n#define FNVNX_SA static_assert\n#else\n#define FNVNX_SA _Static_assert\n#endif\n\n'
-# An identity row (value `identity:<k>`): the function returns its argument k unchanged. Its probe record is in the non-alloc section .fnvnx.ident:
-# u32 row id, u32 k (little endian); the row has no .fnvnx.const record.
-IDENT_RECORD = ('__attribute__((section(".fnvnx.ident"), used, aligned(4))) static const struct __attribute__((packed)) { unsigned id; unsigned k; }\n'
-                '    fnvnx_ident_%(n)d = { %(n)d, %(k)d };\n')
+    '__attribute__((section(".fnvnx.const,\\"\\",%%progbits\\n#"), used, aligned(4))) static const struct __attribute__((packed, aligned(4))) { void *fn; unsigned len; %(ret)s v; }\n'
+    '    fnvnx_const_%(n)d = { (void *)(%(fnty)s)%(addr)s, (unsigned)sizeof(%(ret)s), (%(value)s) };\n'
+    'FNVNX_SA(sizeof(fnvnx_const_%(n)d) %% 4 == 0, "row %(n)d: the record is padded to 4");\n')
+SA_DEF = '#ifdef __cplusplus\n#define FNVNX_SA static_assert\n#pragma GCC diagnostic push\n#pragma GCC diagnostic ignored "-Wpmf-conversions"   /* the documented pmf-to-function-pointer conversion: the compiler\'s own symbol of a member */\n#else\n#define FNVNX_SA _Static_assert\n#endif\n\n'
+SA_END = '\n#ifdef __cplusplus\n#pragma GCC diagnostic pop\n#endif\n'
+# An identity row (value `identity:<k>`): the function returns its argument k unchanged; it has no value, so its one record is in the non-alloc section .fnvnx.ident:
+# {a pointer-sized relocation to the function; u32 k}, little endian.
+IDENT_RECORD = ('__attribute__((section(".fnvnx.ident,\\"\\",%%progbits\\n#"), used, aligned(4))) static const struct __attribute__((packed, aligned(4))) { void *fn; unsigned k; }\n'
+                '    fnvnx_ident_%(n)d = { (void *)(%(fnty)s)%(addr)s, %(k)d };\n')
 COLS = ["symbol", "linkage", "ret", "params", "value", "source", "quals", "file"]
 
 
@@ -51,8 +54,8 @@ def declared_rows(path):
         if not line or line.startswith("#"):
             continue
         r = line.split("\t")
-        if len(r) != 6 or not r[0].isdigit():
-            raise SystemExit("env_const: %s:%d: a declared-machine row has 6 columns and a decimal id" % (path, n))
+        if len(r) != 7 or not r[0].isdigit():
+            raise SystemExit("env_const: %s:%d: a declared-machine row has 7 columns (id contract_name fact source kind value lasterror) and a decimal id" % (path, n))
         if r[1] in rows:
             raise SystemExit("env_const: %s:%d: %s has two rows" % (path, n, r[1]))
         rows[r[1]] = (int(r[0]), r[4], r[5])
@@ -71,6 +74,17 @@ def param_name(params, k):
     return m[1] if m else None
 
 
+def fn_address(row):
+    """(function pointer type, address expression) of the row's function: the type is the one of its definition (ret, params, quals), so an overload resolves as the definition
+    does and a member's own symbol comes from the compiler. C/C++ function: `ret (*)(params)`; member Class::m: `ret (*)([const] Class *, params)`."""
+    sym, params = row["symbol"], row["params"].strip()
+    ps = [] if params in ("", "void") else [params]
+    cls = sym.rsplit("::", 1)[0] if "::" in sym else None
+    if cls:
+        ps = [("const " if re.search(r"\bconst\b", row["quals"]) else "") + cls + " *"] + ps
+    return "%s (*)(%s)" % (row["ret"], ", ".join(ps) if ps else "void"), "&" + sym
+
+
 def const_value(v):
     v = v.strip()
     if v in ("false", "NULL", "nullptr"):
@@ -87,10 +101,6 @@ def main(argv):
     dpath = argv[i + 1]
     del argv[i:i + 2]
     decl = declared_rows(dpath)
-    probe = "--probe" in argv
-    if probe:
-        argv.remove("--probe")
-    consts = []
     if "--only" in argv:
         i = argv.index("--only")
         only = argv[i + 1]
@@ -133,6 +143,7 @@ def main(argv):
                 errors.append("line %d: %s: a declared-machine row names a C-linkage symbol (the citation record names the assembler symbol)" % (n, row["symbol"]))
             cite = 'FNVNX_CITE(%s, "dm:%d");\n' % (row["symbol"], did)
             used.add(row["symbol"])
+        fnty, addr = fn_address(row)
         idm = IDENT.match(row["value"].strip())
         if idm:
             pn = param_name(row["params"], int(idm[1]))
@@ -141,11 +152,11 @@ def main(argv):
                 continue
             out.append("/* %s */\n%s%s %s(%s)%s\n{\n    return %s;\n}\n%s" % (
                 row["source"], head, row["ret"], row["symbol"], row["params"], quals, pn, cite))
-            consts.append(IDENT_RECORD % {"n": n, "k": int(idm[1])})
+            out.append(IDENT_RECORD % {"n": n, "k": int(idm[1]), "fnty": fnty, "addr": addr})
             continue
         out.append("/* %s */\n%s%s %s(%s)%s\n{\n    return %s;\n}\n%s" % (
             row["source"], head, row["ret"], row["symbol"], row["params"], quals, row["value"], cite))
-        consts.append(RECORD % {"n": n, "ret": row["ret"], "value": row["value"]})
+        out.append(RECORD % {"n": n, "ret": row["ret"], "value": row["value"], "fnty": fnty, "addr": addr})
     if errors:
         for e in errors:
             sys.stderr.write("env_const: %s\n" % e)
@@ -154,9 +165,8 @@ def main(argv):
         f.write("/* generated by manifest/gen_env_const.py from env_const.tsv - not a source file */\n\n")
         if used:
             f.write('#include <fnvnx/cite.h>\n\n')
-        f.write("\n".join(out))
-        if probe:
-            f.write(SA_DEF + "".join(consts))
+        f.write(SA_DEF)
+        f.write("\n".join(out) + SA_END)
     return 0
 
 
