@@ -1216,3 +1216,8 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - hostapi.h now takes the trunk's side, so FNVNX_HOST_HAS is dropped; nothing uses it. L5 was told.
 - Running (w8): the re-keyed d3dx9_31 factsimg against farm facts 6944080, and the compiles of the native test images.
 - bottleneck: the toolchain root's admit (L1/L2), then the relift at w7's memo fix.
+
+## 2026-11-16 00:10, correction
+- The ports/fnv-nx/toolchain red is not L2's vbase_bounds.cpp, and a2dc4ecf4 is not an L2 pin (L2's pin is 84f0883e). L2 measured it on cand3b 4c38d7265 and on base3 abbf9662a: 61 errors, made of 60 translation units (8 plugin sources and 52 test fixtures) plus the missing cxx_origin.
+- Cause: cand3b 8b0d9073c made toolchain/ a generated-only root by moving names/build.json up a level. L2 sent L1 the rule: the export stage moves to contract/facts with a `sources` line, and toolchain/build.json is deleted. Owner: L1.
+- bottleneck: L1's cand3b fixes (toolchain root, gen:file-escape for l2sections), then the relift at w7's memo fix.
