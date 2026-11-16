@@ -4,12 +4,13 @@
 The pinned translation has, in two_byte_opcode_execute, no arm for 188 (its last lines are the `Translation error: two-byte opcode 188 not translated` arm of the fall-through list) and, for 189, the arm
 `mandatory_prefix == 0x00 -> x86_model_error("Opcode Unimplemented in x86isa!")` (the 0xf3 arm, LZCNT, is decided by the declared CPU, below).
 F3 0F BC / F3 0F BD (TZCNT / LZCNT): Intel SDM Vol. 2B TZCNT and LZCNT pages: on a processor without BMI1 (CPUID.07H.0:EBX[3]) resp. LZCNT (CPUID.80000001H:ECX[5], ABM) the F3 form executes as BSF resp. BSR ("executed as BSF/BSR", F3 being ignored as REP).  Both bits are READ from the declared CPU (verify/cpuid_model.json via sdmfeat.declared_cpu; a leaf above the declared max leaf is absent): clear -> the arm goes to x86_bsf / x86_bsr, set -> it stays unimplemented (the model then has no semantics for it and the shape is a model-gap).  The script replaces exactly these two texts, each of which must occur exactly once in two_byte_opcode_execute."""
+import importlib.machinery
 import importlib.util
 import os
 import sys
 
 # argv: IN OUT SDMFEAT_PY BITS_PY CPUID_MODEL_JSON; the three files are named by apply.py (no sys.path, no location arithmetic: the module is loaded from the given file)
-_spec = importlib.util.spec_from_file_location('sdmfeat', sys.argv[3])
+_spec = importlib.util.spec_from_loader('sdmfeat', importlib.machinery.SourceFileLoader('sdmfeat', sys.argv[3]))   # explicit loader: the mounted file is /in/N, no .py suffix
 sdmfeat = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(sdmfeat)
 

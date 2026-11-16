@@ -165,8 +165,8 @@ def declared_cpu(bits_py=None, model_json=None):
     """{(leaf, reg): value} of the declared CPU, plus the two max leaves: the feature words are cpumodel_bits.model_words of verify/cpuid_model.json, the one derivation that tools/gen_cpuref.py
     (the generator of rt/cpumodel_tab.inc and fnvl_cpuref.h) and the lifter's feature gate call; the max leaves are that record's too.  Nothing is compiled.  Only the fields a feature flag can
     sit in are given (leaf 1 ECX/EDX, 0x80000001 ECX/EDX, the max leaves); a leaf above its range's max is absent (`present` tests it), and fields the platform owns (leaf 1 EBX, leaf 4 EAX) are not features."""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location('cpumodel_bits', bits_py or os.path.join(os.path.dirname(HERE), 'fnvlift', 'cpumodel_bits.py'))   # BITS_PY / MODEL_JSON: explicit files (the sailmodel root mounts them); the defaults are the tree's own
+    import importlib.machinery, importlib.util
+    spec = importlib.util.spec_from_loader('cpumodel_bits', importlib.machinery.SourceFileLoader('cpumodel_bits', bits_py or os.path.join(os.path.dirname(HERE), 'fnvlift', 'cpumodel_bits.py')))   # BITS_PY / MODEL_JSON: explicit files (the sailmodel root mounts them); the defaults are the tree's own
     cpumodel_bits = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(cpumodel_bits)
     mod = json.load(open(model_json or os.path.join(HERE, '..', '..', 'verify', 'cpuid_model.json')))
