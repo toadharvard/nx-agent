@@ -53,10 +53,29 @@ import runtime  # noqa: E402
 import sandbox  # noqa: E402
 import toolflags  # noqa: E402
 import unitstage  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the parent of the package `verify` (a stage mounts it at /imp)
+from verify import plugsem  # noqa: E402
+from verify import targets as _targets  # noqa: E402  (the declared targets: verify/targets.json)  (the guest compiler record's facts, one source)
+BuildRed = plugsem.BuildRed
+lifted_origin = plugsem.lifted_origin
+PLUGIN_SOURCES = plugsem.PLUGIN_SOURCES
+PLUGIN_ARGS = plugsem.PLUGIN_ARGS
+PLUGIN_OUT = plugsem.PLUGIN_OUT
+origin_class = plugsem.origin_class
+semantics_set = plugsem.semantics_set
+plugin_args = plugsem.plugin_args
+SEMANTICS_FLAGS = plugsem.SEMANTICS_FLAGS
+SEMANTICS_LIFTED = plugsem.SEMANTICS_LIFTED
+SDD_DEFINE = plugsem.SDD_DEFINE
+SDD_FLAGS = plugsem.SDD_FLAGS
+ANALYSIS_PLUGIN = plugsem.ANALYSIS_PLUGIN
+runtime_cflags = plugsem.runtime_cflags
+runtime_configure = plugsem.runtime_configure
+runtime_configure_patch = plugsem.runtime_configure_patch
 sandbox_src = unitstage.sandbox_src   # the one function that composes a unit's sandbox source path (the unit a plugin reports)
 
 FORMAT, OBJ_FORMAT = "fnvnx-recipe/1", "fnvnx-objects/1"
-TREE = "ports/fnv-nx"
+TREE = plugsem.TREE
 ADMIT = TREE + "/verify/admit.json"
 ENV_JSON = TREE + "/verify/env.json"   # the declared environment of the checkout (l1.py checks the same file)
 
@@ -105,26 +124,8 @@ VARIANT_DELTAS = {"flags_add", "defines_add"}   # appended to the base flags of 
 PROFILES = ("guest", "host")
 PLUGIN_FIXED = {"source": "PLUGIN_SOURCES", "inputs": "plugin_inputs, derived from the source", "args": "PLUGIN_ARGS"}   # what recipe.py fixes for a plugin: a root entry names only the plugin
 GUEST_LINK = TREE + "/link/guest.json"   # the guest link profile: {"script": path inside TREE, "libs": {LIBS_KEYS}}, one fact for every guest link (RECIPE.md, Link)
-GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
+GUEST_PIN = plugsem.GUEST_PIN
 GUEST_TARGETS = ("guest", "host")
-# The plugins every product root with native or decomp C++ loads, their only admitted sources and their fixed arguments (RECIPE.md,
-# "Plugins"). The arguments are the MSVC semantics (evaluation order of arguments, objects, operators, assignments; enum conversion
-# an error as for cl). The other values the plugins accept (ltr, first, cpp17) exist for A/B measurements and are no product.
-# The plugin fnvnx_order has no memory-ordering option: every access to shared memory is ordered (x86 TSO), whatever the arguments.
-# The set and the LOAD ORDER of compile.sh (fnv-l2-source): ftoi, order, sdd, pi, dispatch, addr, names, layout. A plugin that includes another source
-# (layout includes names' .cc) is mounted with it: plugin_inputs() derives the set from the #include closure of the source.
-_T = TREE + "/toolchain/"
-PLUGIN_SOURCES = {"fnvnx_ftoi": _T + "ftoi/fnvnx_ftoi.cc", "fnvnx_order": _T + "order/fnvnx_order.cc", "fnvnx_sdd": _T + "sdd/fnvnx_sdd.cc",
-                  "fnvnx_pi": _T + "pi/fnvnx_pi.cc", "fnvnx_dispatch": _T + "dispatch/fnvnx_dispatch.cc", "fnvnx_addr": _T + "addr/fnvnx_addr.cc",
-                  "fnvnx_names": _T + "names/fnvnx_names.cc", "fnvnx_layout": _T + "layout/fnvnx_layout.cc"}
-PLUGIN_ARGS = {n: {} for n in PLUGIN_SOURCES}
-ANALYSIS_PLUGIN = ("objstub_plugin", TREE + "/verify/objstub_plugin.cc")   # the gate objstub's plugin (RECIPE.md "Plugins"): built for every root with C/C++ units, loaded by no compile stage
-PLUGIN_ARGS["fnvnx_ftoi"] = {"mode": "native"}
-# fnvnx_ftoi is one plugin with two modes, chosen by the root's cxx_origin (no free choice): native C++ takes the MSVC rewrite, lifted C++ has
-# no rewrite and every float -> integer conversion outside an fnvnx_f2i function is an error. Both write their report (gate fpexact) to
-# PLUGIN_OUT of the CC stage's own /out; the recipe passes it, a build.json does not declare it.
-PLUGIN_OUT = {"fnvnx_ftoi": "/out/unit.f2i.json"}
-PLUGIN_ARGS["fnvnx_order"] = {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}
 
 
 _QINC = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', re.M)
@@ -186,38 +187,6 @@ def root_plugin_flags(built_plugins, origin, outdir):
     return [f for p in built_plugins for f in plugin_flags(p["name"], want[p["name"]], p["path"], os.path.join(outdir, os.path.basename(PLUGIN_OUT[p["name"]])) if p["name"] in PLUGIN_OUT else None)]
 
 
-def origin_class(origin):
-    """"lifted" iff the declared `cxx_origin` ORIGIN is a lifted declaration (lifted_origin: {"lifted_by", "pack"} or {"lifted_by", "stage"}), else "native" (also for no origin): the one
-    place the origin's class is read (the class name "lifted" itself is accepted, for the CLI); plugin_args and semantics_set are functions of it."""
-    return "lifted" if origin == "lifted" or lifted_origin(origin) else "native"
-
-
-def semantics_set(origin):
-    """The semantic flag set (before the per-language drop of semantics_for) of a root with `cxx_origin` ORIGIN: SEMANTICS_LIFTED for a lifted
-    root, SEMANTICS_FLAGS for every other."""
-    return SEMANTICS_LIFTED if origin_class(origin) == "lifted" else SEMANTICS_FLAGS
-
-
-def plugin_args(origin):
-    """{plugin name: its fixed arguments} for a root whose declared `cxx_origin` is ORIGIN ("native", a {"lifted_by", "pack"} dict, or None): the ONE
-    place the expected arguments are decided, used by plugin_errors, the gates and the fold of L2. A function of the root's declared fact only, no second
-    table: PLUGIN_ARGS, with fnvnx_ftoi's `mode` = the origin's class (lifted or native). No separate table for lifted roots."""
-    out = {n: dict(a) for n, a in PLUGIN_ARGS.items()}
-    out["fnvnx_ftoi"]["mode"] = origin_class(origin)
-    return out
-
-
-# The semantic flags of a guest root (data model, ABI, target, FP, aliasing, overflow, language model, calling convention): ONE ordered set. Its leading
-# run (ABI, architecture, tuning, code model) is generated from the declared targets (targets.json, targets.semantic_prefix); the rest is the guest
-# compiler pin's "flags"."semantics" (guest_compiler.json, next to this file). The RECIPE appends it to every guest compile stage, C, C++ and
-# assembler alike, minus what the pinned driver itself says does not apply to that language (semantics_for); a guest build.json carries none of them.
-with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "guest_compiler.json")) as _f:
-    _sem = json.load(_f)["flags"]["semantics"]
-import targets as _targets  # noqa: E402  (the declared targets: verify/targets.json)
-SEMANTICS_FLAGS = tuple(_targets.semantic_prefix(_targets.load())) + tuple(_sem["common"])   # every guest root (native, decomp, lifted)
-SEMANTICS_LIFTED = SEMANTICS_FLAGS + tuple(_sem["lifted_extra"])   # a root whose cxx_origin is a lifted declaration: the common set plus what the lifter's code is built under
-SDD_DEFINE = "-DFNVNX_SDD=1"   # per root: the plugin fnvnx_sdd needs it (and -fno-devirtualize, which is in the semantic set of a guest root)
-SDD_FLAGS = (SDD_DEFINE, "-fno-devirtualize")   # what a NATIVE C++ root of a host target holds itself
 LANG_X = {"c": "c", "cxx": "c++", "asm": "assembler-with-cpp"}   # the driver's -x language of each kind of unit
 # What a guest build.json may carry (per-root classes); every other -f/-m/... token comes from flags.semantics and is refused here. Warnings and
 # diagnostics, defines, the language standard, the optimisation level (-O0..-O3, -Os, -Og: not -Ofast, which switches FP semantics), debug info,
@@ -258,10 +227,6 @@ class RecipeError(Exception):
     def __init__(self, errors):
         Exception.__init__(self, "; ".join(errors))
         self.errors = list(errors)
-
-
-class BuildRed(Exception):
-    pass
 
 
 class EnvBlocked(RecipeError):
@@ -1028,38 +993,6 @@ def load_pin(repo="."):
     """verify/guest_compiler.json of the checkout, or None when the tree has none."""
     p = os.path.join(repo, GUEST_PIN)
     return json.load(open(p)) if os.path.exists(p) else None
-
-
-def runtime_cflags(pin):
-    """The flags the guest runtime (newlib, libstdc++) is built with beyond the semantic set: the `runtime_cflags` of the one guest compiler record.
-    They apply to every runtime translation unit: C, C++ and assembly (.S) alike. The runtime build reads them here (guest_flags.py --runtime); no build script spells them."""
-    v = pin.get("runtime_cflags") if isinstance(pin, dict) else None
-    if not isinstance(v, list) or not all(isinstance(x, str) and x.startswith("-") for x in v):
-        raise BuildRed("%s: runtime_cflags must be a list of compiler flags" % GUEST_PIN)
-    return list(v)
-
-
-def runtime_configure(pin):
-    """The gcc configure options of the guest compiler build (build.sh of toolchain/msvcmodel): the `runtime_configure` of the one guest compiler record.
-    The build reads them here; no build script spells them."""
-    v = pin.get("runtime_configure") if isinstance(pin, dict) else None
-    if not isinstance(v, list) or not all(isinstance(x, str) and x.startswith("--") for x in v):
-        raise BuildRed("%s: runtime_configure must be a list of configure options" % GUEST_PIN)
-    cite = pin.get("runtime_configure_cite")
-    missing = [o for o in v if not isinstance(cite, dict) or not isinstance(cite.get(o), str) or not cite[o].strip()]
-    if missing:
-        raise BuildRed("%s: runtime_configure options without a cite in runtime_configure_cite: %s" % (GUEST_PIN, ", ".join(missing)))
-    return list(v)
-
-
-def runtime_configure_patch(pin):
-    """The patch of the runtime subdirs' generated configure scripts (rule CFG-LINK): the `runtime_configure_patch` of the one guest compiler record.
-    The build reads the script, the subdirs and its two fact sources here; no build script spells them."""
-    v = pin.get("runtime_configure_patch") if isinstance(pin, dict) else None
-    keys = ("script", "subdirs", "protocol_source", "guest_script", "cite")
-    if not isinstance(v, dict) or any(k not in v for k in keys) or not isinstance(v["subdirs"], list) or not all(isinstance(v[k], str) and v[k].strip() for k in keys if k != "subdirs"):
-        raise BuildRed("%s: runtime_configure_patch needs %s (cite non-empty)" % (GUEST_PIN, ", ".join(keys)))
-    return dict(v)
 
 
 def guest_link_part(rec, root, pin, prof, files, roots):
@@ -1962,12 +1895,6 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     err += guest_errors(rec, root + "@" + variant if variant else root, roots, pin, load_guest_link(repo), files)
     err += plugin_errors(rec, root, files, roots, units, names, variant, repo)
     return err
-
-
-def lifted_origin(origin):
-    """cxx_origin of a lifted root: {"lifted_by": TOOL.py, "pack": EXTERNAL} (the lifted C++ is made from an external pack) or {"lifted_by": TOOL.py,
-    "stage": "gen:<root>:<i>"} (made by a generated step of this root's own recipe, no pack): exactly one of pack and stage."""
-    return isinstance(origin, dict) and (set(origin) == {"lifted_by", "pack"} or set(origin) == {"lifted_by", "stage"})
 
 
 def plugin_errors(rec, root, files, roots, units, ext_names, variant="", repo="."):
