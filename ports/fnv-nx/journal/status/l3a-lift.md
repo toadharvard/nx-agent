@@ -1349,3 +1349,10 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - Ruling, RULE T: indirect jmp and call target sets come from the value domain. That domain has origin-carrying values (the same change as (B)'s option (i)), interprocedural stack-slot inputs, and loads from identified tables. The whole ptr set is used only for TOP. The pop of an indirect call is the join of retn over the callee set. A vptr-slot residue, if it remains, gets its own ruling.
 - w7 order: decode_gap/BADDECODE/SHAPES → origin values (EH tables byte-identical, L3b told) → RULE T → recompute.
 - Bottlenecks: L2's K2 pin (lift/rt, contract/facts, lift/disp); pcsrc red at 75,171 (RULE T, w7).
+
+## 2026-11-16 02:55: base3 9405ea3bf, recipe check 53/53
+- base3 holds w28 2872f3ac8, w13 9a5206d73 (the contract/include header root) and L6 w6-root 7a75284ec (render/ and bridgefacts/ with their admit rows).
+- recipe check over all roots: 53 of 53 valid. render/gl4 builds green (17 objects, libnxgl4.so linked).
+- Red: only lift/rt, contract/facts and lift/disp, all on the old compiler pin (ENTRY1-CONT). The fix is L2's ENTRY1-ATOMIC 8b50252e7; waiting for the K2 pin rebuild.
+- Open: w13 on the abspath ×6 findings in lift/fnvlift (L1 275771a6f); w7 on decode_gap/BADDECODE/SHAPES → origin values → RULE T; w8 on the facts stages by image input.
+- bottleneck: L2's K2 pin.
