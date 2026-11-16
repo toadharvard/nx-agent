@@ -63,7 +63,7 @@ struct NxBound {
     NxViewport vp; NxScissor sc; float blend[4], bias[2]; uint8_t vp_ok, sc_ok, blend_ok, bias_ok;
     uint32_t pass_epoch; bool pass_ok; NxTarget col[4]; uint32_t nc; NxTarget dep; bool has_dep;   // the pass this module began
 };
-#include "const_fixme.h"   // fnvnx_wine_fixme and the NXW_ ids of verify/wine_fixme.tsv
+#include "const_fixme.h"   // fnvnx_wine_fixme and the NXW_ ids of render/d3d9/wine_fixme.tsv
 extern NxBound g_nxb;
 void nx_draw_shutdown();   // returns the process-wide memory of the draw path (the constant-block caches of g_nxb, the zero block of draw_bind.cpp) and forgets what the stream had bound: platform teardown, tests (with nxs_shutdown)
 struct NxDrawDev : NxDevLifeBase { NxD3D9Latch latch; NxDrawDev() { nx_d3d9_latch_init(&latch); } };
