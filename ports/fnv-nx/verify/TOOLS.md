@@ -1720,7 +1720,7 @@ Gate "assumptions" (fnvnx-gate/1): every assumption the rules rest on is in one 
 
 Registry: verify/ASSUMPTIONS.json ("fnvnx-assumptions/1"; the accepted entries are ASM-001 to ASM-009):
   {"format": "fnvnx-assumptions/1", "entries": [ENTRY...]}
-  ENTRY  {"id": "ASM-NNN", "text": STR, "used_by": [PATH...], "aliases": [STR...], "status": "OWNER" | "REMOVE", ...}
+  ENTRY  {"id": "ASM-NNN", "text": STR, "aliases": [STR...], "status": "OWNER" | "REMOVE", ...}
     OWNER   + "decision": {"file": "CLAUDE.md", "quote": STR}   the owner's acceptance, verbatim
     REMOVE  + "removed_by": STR, "owner": LEAD | LEAD+LEAD      the discharge and the stream lead(s) who owe it
     optional: "note": STR. The registry holds exactly the entries that files of THIS tree rely on: the entry of an unmerged
@@ -1737,7 +1737,7 @@ universe is (path, first line of the block). A mention is certified iff ALL hold
   2. every id in it is the id of an entry of the registry.
 The registry is certified iff ALL hold:
   3. ids are unique and well formed, aliases are unique across entries, text is not empty;
-  4. used_by is not empty and every path in it is a tracked file that contains the entry's id (the reliance is written at the
+  4. the entry has a user: at least one tracked text file other than the registry cites its id; the users are derived (users_of), never listed (the reliance is written at the
      place of reliance, so an entry nobody cites is dead and is red); 
   5. an OWNER entry has decision.file CLAUDE.md and decision.quote occurring verbatim inside exactly one numbered item under
      the line "OWNER, the only accepted ones:", no item serves two entries, and every item has an entry: the OWNER set is
