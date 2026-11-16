@@ -2,7 +2,7 @@
 """Gate "liftfacts" (fnvnx-gate/1, VERDICT.md class 5: a code address without a dispatcher entry): the lift facts certify every image's code map and every
 code-address source. It reads the GATES output of the lift/facts root and the loader root's MODULES_TSV, as published in GATE_CACHE (it never runs a producer).
     python3 -I gate_liftfacts.py        cwd = checkout root, env GATE_OUT, GATE_COMMIT, GATE_CACHE; writes GATE_OUT/liftfacts.json
-Input: GATE_CACHE/objects/<tree>/<root>/GATES/ with
+Input: the declared output GATES of the lift/facts root, as published in GATE_CACHE (gate_build.published_output), a directory with
     summary.tsv                      tab separated, header line starts "# ": image status universe certified uncertified entries_on_data pcsrc_red
                                      s4_violations; one row per image (exe first), then the row `total` (the assembler of the facts, tools/factsassemble.py)
     <dir>/gate_codemap.json          per image (modlift.py / universe.py): {"status", "universe", "certified", "uncertified" (bytes), "entries_on_data"}
@@ -138,22 +138,13 @@ def judge(gates, modules_text=None):
     return len(by), len(by) - len([b for b in bad if not b.startswith("total:")]), bad, None
 
 
-def modules_text_of(cache, tree, roots):
-    """(text, error) of the loader root's published MODULES_TSV: the path comes from the root's recipe `outputs`, the file from the published out dir; absent is an error."""
-    ent = next((r for r in roots if r.get("path") == LOADER_ROOT), None)
-    if ent is None or not isinstance(ent.get("recipe"), str):
-        return None, "no loader root %s in admit.json" % LOADER_ROOT
+def modules_text_of(cache):
+    """(text, error) of the loader root's published MODULES_TSV (gate_build.published_output); absent is an error."""
     try:
-        with open(ent["recipe"]) as f:
-            rel = json.load(f)["outputs"]["MODULES_TSV"]
-    except (OSError, ValueError, KeyError, TypeError):
-        return None, "the recipe of %s declares no output MODULES_TSV" % LOADER_ROOT
-    p = os.path.join(cache, "objects", tree, LOADER_ROOT.replace("/", "__"), rel)
-    try:
-        with open(p) as f:
+        with open(gate_build.published_output(cache, LOADER_ROOT, "MODULES_TSV")[0]) as f:
             return f.read(), None
-    except OSError:
-        return None, "MODULES_TSV of %s is not published in GATE_CACHE (%s)" % (LOADER_ROOT, p)
+    except (LookupError, OSError) as e:
+        return None, str(e)
 
 
 def main():
@@ -166,11 +157,14 @@ def main():
         u, c, bad, err, status = 0, 0, [], None, "green"
         detail = "no lifted root: universe 0"
     else:
-        tree = gate_build.tree_of(".")
-        g = os.path.join(cache, "objects", tree, FACTS_ROOT.replace("/", "__"), "GATES")
-        mt, merr = modules_text_of(cache, tree, roots)
-        if not os.path.isdir(g):
-            u, c, bad, err = 0, 0, [], "no published GATES output of %s in GATE_CACHE (%s)" % (FACTS_ROOT, g)
+        try:
+            g = gate_build.published_output(cache, FACTS_ROOT, "GATES")[0]
+        except LookupError as e:
+            g = None
+            gerr = str(e)
+        mt, merr = modules_text_of(cache)
+        if g is None or not os.path.isdir(g):
+            u, c, bad, err = 0, 0, [], (gerr if g is None else "the GATES output of %s is not a directory (%s)" % (FACTS_ROOT, g))
         elif merr:
             u, c, bad, err = 0, 0, [], merr   # the comparison is never skipped: without the table the gate is red
         else:

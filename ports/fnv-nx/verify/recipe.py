@@ -40,6 +40,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
 import elffacts  # noqa: E402
 import gate_admit  # noqa: E402
+import pathflow  # noqa: E402
 import envcheck  # noqa: E402
 import hostprofile  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "link"))
@@ -655,11 +656,12 @@ def link_candidates(roots, root, target, repo):
     return out
 
 
-def foreign_imports(tool, owner, files, inputs, repo="."):
+def foreign_imports(tool, owner, files, inputs, repo=".", closure=None):
     """[module] a generator tool imports that its stage cannot read: the stage mounts the tool's own root and the generator's declared inputs, plus the Python
     standard library and the pinned modules of env.json (envcheck.PY_MODULES). Every import of the tool, found by `ast` (any depth, relative imports included), and,
     transitively, of every module it resolves to, must be one of those; a module of another root that no declared input carries is foreign (the stage would die with
-    ModuleNotFoundError at run time, so the recipe is red before any run). INPUTS: the generator's input paths (repo-relative strings)."""
+    ModuleNotFoundError at run time, so the recipe is red before any run). INPUTS: the generator's input paths (repo-relative strings). CLOSURE: a list that receives
+    the tool's import closure (the repo paths of the files the walk read), for the file-escape rule."""
     import ast
     std, pinned = set(sys.stdlib_module_names) | {"__future__"}, set(envcheck.PY_MODULES.values())
     mine = [f for f in files if under(f, owner) and f.endswith(".py")]
@@ -679,26 +681,39 @@ def foreign_imports(tool, owner, files, inputs, repo="."):
         if f in seen:
             continue
         seen.add(f)
+        if closure is not None:
+            closure.append(f)
         try:
             tree = ast.parse(open(os.path.join(repo, f)).read())
         except (OSError, SyntaxError, ValueError):
             continue
         for n in ast.walk(tree):
             names = []
+            if isinstance(n, ast.ImportFrom) and n.level:
+                # Python's own resolution of `from <.. module> import names`: a relative import names a module beside the importing file, inside its root
+                base = posixpath.normpath(posixpath.join(posixpath.dirname(f), *([".."] * (n.level - 1))))
+                if n.module:
+                    mp = base + "/" + n.module.replace(".", "/")
+                    hit = [c for c in (mp + ".py", mp + "/__init__.py") if c in files]
+                    if not hit:
+                        bad.append("." * n.level + n.module)
+                        continue
+                    todo.append(hit[0])
+                    if hit[0].endswith("/__init__.py"):    # a name is a submodule only where the package holds the file; else it is an attribute of the module
+                        todo += [mp + "/" + a.name + ".py" for a in n.names if (mp + "/" + a.name + ".py") in files]
+                else:
+                    for a in n.names:
+                        hit = [c for c in (base + "/" + a.name + ".py", base + "/" + a.name + "/__init__.py") if c in files]
+                        if hit:
+                            todo.append(hit[0])
+                        else:
+                            bad.append("." * n.level + a.name)
+                continue
             if isinstance(n, ast.Import):
                 names = [(a.name, 0) for a in n.names]
             elif isinstance(n, ast.ImportFrom):
-                names = [((n.module or "") + ("." + a.name if n.module is None or True else ""), n.level) for a in n.names] if n.level else [(n.module or "", 0)]
+                names = [(n.module or "", 0)]
             for name, level in names:
-                if level:    # a relative import names a module beside the importing file, inside its root
-                    base = posixpath.normpath(posixpath.join(posixpath.dirname(f), *([".."] * (level - 1))))
-                    tail = name.lstrip(".").replace(".", "/")
-                    hit = [c for c in (base + "/" + tail + ".py", base + "/" + tail + "/__init__.py") if c in files]
-                    if not hit:
-                        bad.append(name)
-                    else:
-                        todo.append(hit[0])
-                    continue
                 top = name.split(".")[0]
                 if top in std or top in pinned or not top:
                     continue
@@ -1045,16 +1060,36 @@ def link_roots_cycle(root, roots, repo, seen=()):
 
 
 def source_lines(text):
-    """[(ext name, path)] of a `sources` file: one `<ext>:<path>` line per unit, '.' naming the root itself; blank lines skipped. ValueError for a bad line."""
+    """[(ext name, path)] of a `sources` file: one `<ext>:<path>` line per unit, '.' naming the root itself, an admitted ROOT path naming a tracked file of that
+    root (root_source); blank lines skipped. ValueError for a bad line."""
     out = []
     for n, ln in enumerate(text.splitlines(), 1):
         if not ln.strip():
             continue
-        m = re.fullmatch(r"([A-Za-z0-9._-]+):(.+)", ln.strip())
+        m = re.fullmatch(r"([A-Za-z0-9._/-]+):(.+)", ln.strip())
         if not m or not rel_ok(m.group(2)):
-            raise ValueError("line %d is not <external>:<path inside it>: %r" % (n, ln[:80]))
+            raise ValueError("line %d is not <external or root>:<path inside it>: %r" % (n, ln[:80]))
         out.append((m.group(1), m.group(2)))
     return out
+
+
+def root_source(roots, files, uses, root, other, p):
+    """The `sources` line `OTHER:P` where OTHER is an admitted root: -> (repo path, unit name). The file is a git-tracked file under the root OTHER (never a directory
+    or a glob; P is a normalized relative path, so it cannot leave OTHER), and OTHER is a root of ROOT's `uses` (the stage graph shows the edge and the
+    uses cycle check applies). ValueError with the reason otherwise. The unit is `<OTHER with / as __>/<P>`: the file is copied into the unit view as an
+    external's file is, so its content is in the unit's keys; it stays owned by OTHER (onedef and objstub judge each product separately)."""
+    if other not in roots:
+        raise ValueError("%s is not an admitted root" % other)
+    if other == root:
+        raise ValueError("%s is the root itself (use `.`)" % other)
+    if not rel_ok(p):
+        raise ValueError("%s is not a relative path inside %s" % (p, other))
+    full = other + "/" + p
+    if full not in files:
+        raise ValueError("%s is not a git-tracked file of %s" % (p, other))
+    if other not in {u.get("root") for u in uses if isinstance(u, dict)}:
+        raise ValueError("%s is not in `uses` of %s (list it as {root, output})" % (other, root))
+    return full, other.replace("/", "__") + "/" + p
 
 
 def dir_output(p, gen):
@@ -1467,8 +1502,22 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
         if not (isinstance(g["args"], list) and all(isinstance(a, str) for a in g["args"])):
             err.append("generated[%d].args must be strings" % i)
         if isinstance(t, str) and t in files and t.endswith(".py") and owner:
+            clo = []
             err += ["gen:foreign-import:%s:%s (generated[%d]: the stage mounts the tool's own root and the declared inputs; the module lies in another root and no input carries it)" % (t, m, i)
-                    for m in foreign_imports(t, owner, files, g["inputs"] if isinstance(g["inputs"], list) else [], repo)]
+                    for m in foreign_imports(t, owner, files, g["inputs"] if isinstance(g["inputs"], list) else [], repo, clo)]
+            # the file-escape rule (pathflow.escapes, the one implementation the abspath gate also runs): a read built from __file__, __path__ or sys.argv[0] that leaves the
+            # tree the stage mounts the file from, or that cannot be decided, is red; a resolved file inside the mounted tree and a read through require_mounted/require_under are green
+            for cf in sorted(set(clo)):
+                ot = tree_of(roots, cf)
+                if ot is None:
+                    continue
+                try:
+                    src = open(os.path.join(repo, cf)).read()
+                    esc = pathflow.escapes_of(cf, src, ot)
+                except (OSError, SyntaxError, ValueError):
+                    continue
+                err += ["gen:file-escape:%s:gen:%d:%s:%d:%s (the stage mounts only the tool's tree and the declared inputs: take data of another root through a declared `uses` input, passed as an argument or read through require_mounted)" % (root, i, cf, ln, d)
+                        for ln, d in esc]
         stg = [p for p in ins if isinstance(p, dict)] if isinstance(ins, list) else []
         ins = [p for p in ins if not isinstance(p, dict)] if isinstance(ins, list) else ins
         for p in stg:   # the declared output of an EARLIER generator of this recipe: {"stage": "<this root>:gen:I", "path": OUTPUT}, mounted at /stage/<OUTPUT>
@@ -1589,7 +1638,8 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant="", repo=".
     admit.json entry of the root, "cxx_origin": "native" | {"lifted_by": TOOL.py, "pack": EXTERNAL} | {"lifted_by": TOOL.py, "stage": "gen:ROOT:I"} (exactly
     one of pack and stage; see lifted_origin), required when the root has a C++ unit.
     Consistency of a lifted declaration: no tracked C++ unit in the root, every C++ unit is an output of a `generated` step whose tool is
-    `lifted_by` (a tracked .py of an admitted tool root), `pack` names an external of the recipe (declared inputs of every generator); with `stage` the
+    `lifted_by` (a tracked .py of an admitted tool root), `pack` names an external of the recipe or an admitted root in its `uses` (the provenance is the output of a
+    generated step of `lifted_by`, never a name: the units are checked against every such step of this recipe, whichever kind `pack` is); with `stage` the
     units are the outputs of that one generated step (gen:ROOT:I, I its index in `generated`), and its tool is `lifted_by`."""
     err, pl = [], rec.get("plugins", [])
     if not isinstance(pl, list):
@@ -1648,8 +1698,9 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant="", repo=".
         if not (isinstance(tool, str) and tool in files and tool.endswith(".py") and owner and roots[owner]["class"] == "tool"):
             err.append("cxx_origin.lifted_by %r is not a tracked .py of an admitted tool root" % (tool,))
         steps = rec.get("generated", []) if isinstance(rec.get("generated"), list) else []
-        if "pack" in origin and pack not in ext_names:
-            err.append("cxx_origin.pack %r names no external of the recipe" % (pack,))
+        uses_roots = {u.get("root") for u in rec.get("uses", []) if isinstance(u, dict)}
+        if "pack" in origin and pack not in ext_names and not (pack in uses_roots and pack in roots):
+            err.append("cxx_origin.pack %r names neither an external of the recipe nor an admitted root in its `uses`" % (pack,))
         if "stage" in origin:
             m = re.fullmatch(re.escape("gen:%s:" % root) + r"(0|[1-9][0-9]*)", stage) if isinstance(stage, str) else None
             if not (m and int(m.group(1)) < len(steps) and isinstance(steps[int(m.group(1))], dict) and steps[int(m.group(1))].get("tool") == tool):
@@ -2227,6 +2278,17 @@ class Job:
             if ext == ".":
                 if p not in mine:
                     raise BuildRed({"stage": "sources:" + self.root, "exit": None, "stderr": ["%s: %s is no tracked file of the root" % (sr, p)]})
+                continue
+            if ext not in self.ext and ext in self.roots:   # a tracked file of another admitted root of `uses`
+                try:
+                    full, unit = root_source(self.roots, set(self.files), self.rec.get("uses", []), self.root, ext, p)
+                except ValueError as e:
+                    raise BuildRed({"stage": "sources:" + self.root, "exit": None, "stderr": ["%s: %s" % (sr, e)]})
+                dest = os.path.join(ws, "root", unit)
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                shutil.copyfile(os.path.join(self.repo, full), dest)
+                if is_unit(unit):
+                    out.append(unit)
                 continue
             if ext not in self.ext:
                 raise BuildRed({"stage": "sources:" + self.root, "exit": None, "stderr": ["%s: %s names no external of the recipe" % (sr, ext)]})
@@ -3615,10 +3677,31 @@ def need_store(opt):
     return opt["--store"]
 
 
+def norm_root(repo, spec):
+    """The one normalization of a --root argument ROOT[@VARIANT]: an absolute path inside the checkout REPO becomes the relative root id; a path outside it is
+    RecipeError "root must be inside the checkout: PATH"; a spec that is not an admitted root with a recipe is RecipeError (never an uncaught KeyError)."""
+    if not isinstance(spec, str) or not spec:
+        raise RecipeError(["missing --root ROOT"])
+    path, sep, var = spec.partition("@")
+    if os.path.isabs(path):
+        top = os.path.realpath(repo)
+        rel = os.path.relpath(os.path.realpath(path), top)
+        if rel == ".." or rel.startswith("../") or rel == ".":
+            raise RecipeError(["root must be inside the checkout: %s" % path])
+        path = rel
+    path = os.path.normpath(path)
+    ent = load_admit(repo).get(path)
+    if not (isinstance(ent, dict) and ent.get("recipe")):
+        raise RecipeError(["root %s is not an admitted root with a recipe" % path])
+    return path + sep + var
+
+
 def main(argv):
     opt = dict(zip(argv[1::2], argv[2::2]))
     try:
         repo = "."
+        if "--root" in opt:
+            opt["--root"] = norm_root(repo, opt["--root"])
         if argv[:1] == ["store-merge"]:   # recipe store-merge SRC [--store DST]: --store DST is required
             dst = need_store(dict(zip(argv[2::2], argv[3::2])))
             print("store-merge: " + " ".join("%s %d" % kv for kv in sorted(store_merge(argv[1], dst).items())))
@@ -3631,9 +3714,9 @@ def main(argv):
                 print("store-import: " + " ".join("%s %d" % kv for kv in sorted(store_import(argv[1], st, argv[2]).items())))
             return 0
         if argv[:1] == ["timing"]:     # recipe timing --root R[@VARIANT] --store S [--ext E]: builds (every stage a hit when it was built before) and sums the sidecars
-            o = dict(zip(argv[1::2], argv[2::2]))
+            o = dict(zip(argv[1::2], argv[2::2]), **{"--root": opt["--root"]})
             with tempfile.TemporaryDirectory() as td:
-                res = build(repo, o["--root"], o["--store"], os.path.join(td, "out"), int(o.get("--jobs", 4)), o.get("--ext"))
+                res = build(repo, o["--root"], need_store(o), os.path.join(td, "out"), int(o.get("--jobs", 4)), o.get("--ext"))
             if res["status"] != "green":
                 print(json.dumps(res["failure"], indent=1))
                 return 2
