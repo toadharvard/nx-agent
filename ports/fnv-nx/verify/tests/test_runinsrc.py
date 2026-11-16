@@ -79,6 +79,31 @@ def main():
     check("a compiler with no plugin and no step using it is red (gonly:unused-compiler)", len(e) == 1 and "unused-compiler" in e[0], e)
     e = gu({}, [])
     check("a generated-only root that writes no compiler gets none counted as unused (the filled profile compiler is not a written one)", e == [], e)
+    # forms: {"plugins": "root"} and debs {"closure": [...]}
+    pl = {"plugins": [{"name": "p"}, {"name": "q"}]}
+    st = dict(rec(["x", {"plugins": "root"}])["run"][0])
+    check('{"plugins": "root"} expands to one plugin input per declared plugin, in declaration order',
+          recipe.step_inputs(pl, st) == ["x", {"plugin": "p"}, {"plugin": "q"}], recipe.step_inputs(pl, st))
+    check("a root that declares no plugins expands it to nothing", recipe.step_inputs({}, st) == ["x"], "")
+    def re_(r, ins=None, rc=pl):
+        r = dict(rc, **r)
+        return recipe.run_errors(r, ROOT, set(), {}, set(), set(), ".")
+    e = re_(dict(run=[dict(rec([{"plugins": "root"}])["run"][0], exec="/usr/bin/bash")]), rc={})
+    check('{"plugins": "root"} with no declared plugins is red', any("needs the root to declare" in x for x in e), e)
+    d = dict(rec([])["run"][0], debs={"closure": ["bash", "nosuchdeb"]})
+    e = re_(dict(run=[d]))
+    check("debs.closure: a top that env.json does not declare is red", any("nosuchdeb is not declared" in x for x in e), e)
+    check("debs.closure: the tops are declared, no debs error", not [x for x in re_(dict(run=[dict(d, debs={"closure": ["bash"]})])) if "debs" in x], "")
+    for bad in ({"closure": []}, {"closure": "bash"}, {"closure": ["bash"], "x": 1}, "bash"):
+        e = re_(dict(run=[dict(d, debs=bad)]))
+        check("debs form %r is red" % (bad,), any("debs is a list" in x for x in e), e)
+    c = recipe.step_debs({"debs": {"closure": ["bash", "sed"]}})
+    check("debs.closure resolves the Depends closure (tops and what they need, sorted)", c == sorted(set(c)) and {"bash", "sed", "libc6"} <= set(c), c)
+    try:
+        recipe.step_debs({"debs": {"closure": ["no-such-package-zz"]}})
+        check("a top that is not installed is refused by the build", False, "")
+    except ValueError as ex:
+        check("a top that is not installed is refused by the build", "not installed" in str(ex), ex)
     print("%d FAILED" % len(TR.FAILED) if TR.FAILED else "all passed")
     return 1 if TR.FAILED else 0
 
