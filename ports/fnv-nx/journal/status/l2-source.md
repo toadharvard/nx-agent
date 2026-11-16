@@ -697,3 +697,6 @@ After the first frame:
   - cpumodel.c is fixed at L3a base3 330e873c7. iob.c goes to L5.
   - Placement independence (a plugin attribute at PLUGIN_FINISH_UNIT) waits until after the first frame.
   - No L2 item.
+- 2026-11-16 04:55Z: w2 f819770fe: test_dispatch_entry 53/54. The header tests take their include dirs from the owning root.
+  - Last failure: fnvnx_fls.h is C++-only but is tested as C. Rule to w2: a header's test languages come from the recipe's PP deps (C if some C unit includes it).
+  - The generated NAMES code table is blocked: Microsoft's documentation has no letter table. Recommendation to the orchestrator: Wine 9.0 undname.c as source 2; waiting for its ruling. Off the path.
