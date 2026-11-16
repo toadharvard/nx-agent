@@ -1,0 +1,60 @@
+{
+ "format": "fnvnx-recipe/1",
+ "profile": "guest",
+ "flags": {
+  "c": [
+   "-O2",
+   "-g",
+   "-ffunction-sections",
+   "-fdata-sections",
+   "-Werror=attributes"
+  ],
+  "cxx": [
+   "-O2",
+   "-g",
+   "-ffunction-sections",
+   "-fdata-sections",
+   "-std=gnu++20",
+   "-DFNVNX_SDD=1",
+   "-Werror=attributes"
+  ],
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/platform/coremath/inc"
+ ],
+ "units": "all",
+ "sources": "units.list",
+ "external": [
+  {
+   "name": "core-math",
+   "repo": "fnv-nx-build",
+   "ref": "tools/core-math",
+   "commit": "1e8252b657f49ed2460fe3ce4e9579a4f28b8407",
+   "tree_sha256": "cc7009d090897e5b6dd835957a5482119779db093bc7fd207ae91388c1e9bf3b",
+   "at": "/ext/core-math"
+  }
+ ],
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/platform/coremath/gen_units.py",
+   "args": [
+    "/ext/core-math",
+    "/out",
+    "exp2m1",
+    "log2",
+    "log2p1",
+    "tan",
+    "atan2",
+    "sin",
+    "cos"
+   ],
+   "inputs": [],
+   "outputs": [
+    "units.list",
+    "inc/tint.h",
+    "inc/dint_log2p1.h"
+   ]
+  }
+ ]
+}
