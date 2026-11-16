@@ -20,7 +20,9 @@ Measured (tests/test_sandbox.py case 9), NOT closed, listed in result.json "open
   entropy              getrandom, /dev/urandom and /dev/random all return one sha256 stream that is a function of the stage key (stream(): so os.urandom,
                        OpenSSL and Python's multiprocessing return the same bytes when the stage runs again), but AT_RANDOM (the kernel
                        puts 16 fresh bytes in the auxiliary vector at exec; a program uses them for its stack canary and pointer guard) and RDRAND
-                       still give fresh bytes.
+                       still give fresh bytes. Source: the glibc documentation names the stack canary and the pointer guard as the only uses of
+                       AT_RANDOM (getauxval(3); sysdeps/unix/sysv/linux/dl-osinfo.h _dl_setup_stack_chk_guard / _dl_setup_pointer_guard); RDRAND is
+                       an instruction no stage tool executes for its output. The farm's byte-identical rebuild test (determinism gate) checks it.
   cpu_count_scheduling sched_getaffinity/nproc show the host CPUs; order of parallel children is not controlled.
   kernel_version       uname shows the host kernel release.
   memory_size          sysinfo shows the host memory size.
