@@ -2952,3 +2952,11 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Selftests (65 failing, 431 s of the 601 s): non-L1 trees go back to trunk content, and their items are dropped. L1-tree merge defects are fixed. No test is deleted while its code stays.
 - Farm 3, w28-exportrec-d9 f91b46425: contract/exports GREEN and bridgetable GREEN, with all 5 d3d9 errors gone. Loader gen 0-2 is done.
   - The build is now in lift/factsimg/exe:0, cold, 17+ min of CPU and 6 GB RSS. The result comes when it ends.
+- w28-c5 4eb5a2bd4: done. Tools run as `python -s -B -m fnvnx.<rel>.<tool>`, with no /tool, and a bare sibling import is red. There are 0 reds over the 13 generator and table tools, and no new test failures against 25acf9aac.
+  - Bare sibling imports left in other trees, 100 imports in 41 files, sent to their owners:
+    - manifest 36/19 (L5);
+    - rules 39/13 (L2);
+    - lift 18/7 (L3a);
+    - bridgefacts 6/1 and render 1/1 (L6, possibly a stale copy).
+  - S29's test-kind check is already judged on w28-c5.
+- w28 queue: per-root declared and Wine tables; the root_class for no-C++ guest roots; modules.py from declared_dlls; the reached stage.
