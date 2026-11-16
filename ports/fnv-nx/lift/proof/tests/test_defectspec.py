@@ -27,7 +27,7 @@ def run_main(records):
             for r in records: fh.write(json.dumps(r) + '\n')
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            rc = defectspec.main([td])
+            rc = defectspec.main([td, '--x86sys', declared_x86sys.PATH])
     return rc, {ln.split('\t')[0]: ln.split('\t')[2] for ln in out.getvalue().splitlines()}
 
 
