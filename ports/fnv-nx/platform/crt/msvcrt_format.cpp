@@ -1,8 +1,8 @@
 /* msvcrt_format.cpp - the ONE printf formatter and the ONE scanf scanner of the platform, with the semantics of
  * MSVCRT.DLL (the Windows system C runtime, not C99). Both are templates over an argument SOURCE: a reader of the
  * next int / 64-bit int / double / pointer / pointer-sized int.
- *   - VaSrc reads a native va_list: the variadic native entry points (c_sprintf, _snprintf, c_sscanf, the iob
- *     printf family) use it.
+ *   - VaSrc reads a native va_list: the iob
+ *     printf family use it.
  *   - WordSrc reads the 32-bit x86 stack words of a translated caller: int and pointers are one word, long long
  *     and double (a float is promoted to double; long double is double under MSVC) are two words, low first,
  *     in memory order with no alignment padding. A guest pointer is the zero-extended word (the guest address

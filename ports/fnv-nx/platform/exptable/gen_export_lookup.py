@@ -11,6 +11,7 @@ RULE (total): the rows are the union of the exports.tsv rows and the bridge `lin
 empty union is an error (exit 2). The system modules are the modules of that union and the `*.dll` modules of the bridge (a module with bridge rows but no export record, d3d9, is one).
 The generated unit defines, with the interface the platform's exports.cpp and input/register.cpp use today:
   fnvnx_export_rows[] / fnvnx_export_nrows   {module "x.dll", name, address} of every row whose module is not msvcrt.dll
+  fnvnx_export_ordinals[] / _nordinals   {module "x.dll", ordinal, name} of every bridge row that has an ordinal (the reference spec's ordinal of the import's own module); an import by ordinal resolves through it
   fnvnx_export_modules[] / _nmodules         the system modules, file names without `.dll`, sorted
   fnvnx_msvcrt_lookup(name)                  the rows of msvcrt.dll
 Every symbol is bound opaquely, under a private C++ name with an asm label (`extern char fnvnx_exp_<n>[] __asm__("symbol");`), so that this unit declares no name that a header declares and
@@ -39,8 +40,8 @@ def read_exports(text):
 
 
 def read_bridge(text):
-    """-> ({(dll, name): symbol} of the `link` rows of `*.dll` modules, set of those modules' names)"""
-    rows, mods = {}, set()
+    """-> ({(dll, name): symbol} of the `link` rows of `*.dll` modules, set of those modules' names, {(dll, ordinal): name} of every `*.dll` row with an ordinal)"""
+    rows, mods, ords = {}, set(), {}
     for n, ln in enumerate(text.split("\n"), 1):
         if not ln or ln.startswith("dll\t"):
             continue
@@ -51,6 +52,10 @@ def read_bridge(text):
         if not MODULE.match(dll):
             continue   # the interface tables (`!IName`) are not modules
         mods.add(dll)
+        if f[2]:
+            if not f[2].isdigit() or (dll, int(f[2])) in ords:
+                raise ValueError("bridge.tsv line %d: bad or repeated ordinal %r of %s" % (n, f[2], dll))
+            ords[(dll, int(f[2]))] = name
         if bind != "link":
             continue
         if not IDENT.match(sym):
@@ -58,7 +63,7 @@ def read_bridge(text):
         if (dll, name) in rows:
             raise ValueError("bridge.tsv line %d: %s!%s twice" % (n, dll, name))
         rows[(dll, name)] = sym
-    return rows, mods
+    return rows, mods, ords
 
 
 def union(exports, bridge):
@@ -75,7 +80,7 @@ def q(s):
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def generate(rows, bridge_mods):
+def generate(rows, bridge_mods, ords):
     syms = sorted(set(rows.values()))
     alias = {s: "fnvnx_exp_%d" % i for i, s in enumerate(syms)}
     mods = sorted({m[:-4] for m, _ in rows} | {m[:-4] for m in bridge_mods})
@@ -85,11 +90,15 @@ def generate(rows, bridge_mods):
     o += ['extern char %s[] __asm__("%s");' % (alias[s], s) for s in syms]
     o += ["", "struct fnvnx_export_row { const char *dll, *name; void *fn; };", 'extern "C" {',
           "extern const fnvnx_export_row fnvnx_export_rows[];", "extern const unsigned fnvnx_export_nrows;",
+          "struct fnvnx_export_ordinal { const char *dll; unsigned ordinal; const char *name; };",
+          "extern const fnvnx_export_ordinal fnvnx_export_ordinals[];", "extern const unsigned fnvnx_export_nordinals;",
           "extern const char *const fnvnx_export_modules[];", "extern const unsigned fnvnx_export_nmodules;", "}", "",
           "const fnvnx_export_row fnvnx_export_rows[] = {"]
     o += ["    { %s, %s, (void *)%s }," % (q(m), q(n), alias[rows[(m, n)]]) for m, n in other]
     o += ["};", "const unsigned fnvnx_export_nrows = %d;" % len(other), "",
-          "const char *const fnvnx_export_modules[] = {"] + ["    %s," % q(m) for m in mods]
+          "const fnvnx_export_ordinal fnvnx_export_ordinals[] = {"]
+    o += ["    { %s, %d, %s }," % (q(m), n, q(nm)) for (m, n), nm in sorted(ords.items())]
+    o += ["};", "const unsigned fnvnx_export_nordinals = %d;" % len(ords), "", "const char *const fnvnx_export_modules[] = {"] + ["    %s," % q(m) for m in mods]
     o += ["};", "const unsigned fnvnx_export_nmodules = %d;" % len(mods), "",
           "namespace {", "struct crt_row { const char *name; void *fn; };", "const crt_row g_crt[] = {"]
     o += ["    { %s, (void *)%s }," % (q(n), alias[rows[(m, n)]]) for m, n in crt]
@@ -110,8 +119,8 @@ def main():
         with open(a.exports) as fh:
             ex = read_exports(fh.read())
         with open(a.bridge) as fh:
-            br, mods = read_bridge(fh.read())
-        txt = generate(union(ex, br), mods)
+            br, mods, ords = read_bridge(fh.read())
+        txt = generate(union(ex, br), mods, ords)
     except (ValueError, OSError) as e:
         print("gen_export_lookup: %s" % e, file=sys.stderr)
         sys.exit(2)

@@ -276,30 +276,6 @@ extern "C" int c_wctomb(char *d, u16 wc)
     return 1;
 }
 
-/* ---------------------------------------------------------------- printf and scanf: the engine is msvcrt_format.cpp */
-extern "C" int c_sprintf(char *buf, const char *fmt, ...)
-{
-    if (!buf || !fmt) {
-        errno = EINVAL;
-        return -1;
-    }
-    va_list ap;
-    va_start(ap, fmt);
-    int r = fnvnx_msvc_format(buf, (size_t)-1, fmt, ap);
-    va_end(ap);
-    if (r >= 0)
-        buf[r] = 0;
-    return r;
-}
-extern "C" int c_sscanf(const char *in, const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    int r = fnvnx_msvc_scan(in, fmt, ap);
-    va_end(ap);
-    return r;
-}
-
 FNVNX_EXPORT("msvcrt.dll", "atof", c_atof, "func");
 /* ---------------------------------------------------------------- numbers */
 extern "C" double c_atof(const char *s) { return fnvnx_msvc_strtod(s, NULL); }

@@ -121,19 +121,3 @@ int _vsnprintf(char *buf, size_t n, const char *fmt, va_list ap)
     return fnvnx_msvc_bound(buf, n, fnvnx_msvc_format(buf, n, fmt, ap));
 }
 
-int _snprintf(char *buf, size_t n, const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    int r = _vsnprintf(buf, n, fmt, ap);
-    va_end(ap);
-    return r;
-}
-
-
-
-
-
-
-
-
