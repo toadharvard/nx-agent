@@ -110,6 +110,9 @@ class Fixture:
             os.makedirs(os.path.dirname(q), exist_ok=True)
             with open(q, 'w') as fh:
                 json.dump(doc, fh)
+        # the pin's checkout is a git repository: recipe.load_admit derives the roots' python imports from the tracked files (gate_admit.derived_imports, `git ls-files`)
+        for cmd in (['init', '-q'], ['add', '-A']):
+            subprocess.run(['git', '-C', root] + cmd, check=True, capture_output=True)
 
     def write(self, declare=('liftpack', 'certs'), **over):
         doc = {'format': 'fnvnx-forms-inputs/1', 'external': [self.ext[n] for n in declare], 'shapes': 'liftpack/shapes.tsv',
