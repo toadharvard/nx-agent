@@ -12,7 +12,7 @@ import json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.join(HERE, '..')); sys.path.insert(0, HERE)
 import z3
 from fnvlift import dsl
-from proof import bounds, forms, shape, symform, simdspec as S, simdsplit
+from proof import x86sys, bounds, forms, shape, symform, simdspec as S, simdsplit
 REG = ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi']
 
 
@@ -41,7 +41,11 @@ def _obligation(rep, F, sins_ops, imm, rlimit):
     except S.F.Uncertified as ex: return 'uncertified', 'uncertified: ' + str(ex)
     except KeyError: return 'no-row', None
     nf = P['fault'] == 0
-    spec_fault = z3.If(r.fault, z3.BitVecVal(S.AV, 8), z3.BitVecVal(0, 8))
+    sf = r.fault
+    if r.store and e.mem:      # a store through a segment register whose selector names a code descriptor is #GP(0): the SDM condition of sysspec_store (the one rule that proves the Form's code-store fault for every store Form), by the segment of the memory operand
+        import sysspec_store
+        op = sins_ops.operands[j]; sf = z3.Or(sf, sysspec_store.code_cond(x86sys.load(), sysspec_store.segment(sins_ops, op)))
+    spec_fault = z3.If(sf, z3.BitVecVal(S.AV, 8), z3.BitVecVal(0, 8))
     goals = [P['fault'] == spec_fault]
     eq = []
     for i in range(8):
@@ -248,20 +252,16 @@ def _by_cases(key, rep, rlimit):
 
 
 def main(a):
-    if '--cache' not in a: raise SystemExit('usage: simdcheck.py SHAPES.tsv --cache VERDICT_STORE [--only S] [--cleared F] [--cpufeat TABLE] [--progress]')
+    if '--cache' not in a: raise SystemExit('usage: simdcheck.py SHAPES.tsv --cache VERDICT_STORE [--only S] [--cpufeat TABLE] [--progress]')
     S.F.configure(a[a.index('--cache') + 1])
     if '--cpufeat' in a:
         from fnvlift import inputs; inputs.configure(cpufeat=a[a.index('--cpufeat') + 1])          # the CPUID feature-bit table: the class order (cleared) reads it
     only = a[a.index('--only') + 1] if '--only' in a else ''
-    ud = set()
-    if '--cleared' in a:                                   # the partition of sdmfeat.py (`partition`): the shapes of the cleared sites, #UD on the declared CPU (CPUREF), each by its SDM-derived reason
-        ud = {l.split('\t')[1] for l in open(a[a.index('--cleared') + 1]) if l.strip() and not l.startswith('#')}
     keys = [l.split()[0] for l in open(a[0]) if l.strip() and not l.startswith('#')]
     cnt = {}
     for k in keys:
         if only not in k: continue
         r, info = check(k)
-        if r == 'no-row' and k in ud: r = 'ud-class'                  # no spec row by rule: the opmap's cleared class (Form.fault(UD) is its own certificate), not a SIMD row
         cnt[r] = cnt.get(r, 0) + 1
         if '--progress' in a: print('PROGRESS', k, r, flush=True)
         if r in ('FAILED', bounds.BOUND): print(r, k, info)

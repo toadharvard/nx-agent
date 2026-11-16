@@ -340,7 +340,8 @@ def gs_guard(cx, ins):
     from . import f_sys
     if ins.mnemonic.split(' ')[-1] in NO_ACCESS:
         return
-    if any(o.type == X.X86_OP_MEM and o.mem.segment == X.X86_REG_CS and o.access & capstone.CS_AC_WRITE for o in ins.operands):
+    form = EMIT is not None and getattr(EMIT, 'covers', lambda i: False)(ins)      # emitted from its Form: the Form carries the code-segment store faults and the null-selector fault of the registers in carried_null (proof/forms.py)
+    if not form and any(o.type == X.X86_OP_MEM and o.mem.segment == X.X86_REG_CS and o.access & capstone.CS_AC_WRITE for o in ins.operands):
         # CS-store: CS is a readable, executable, not writable code segment, so a store through it is #GP(0) (SDM Vol 3 5.3.1 "Limit and Type Checking": writing to a code segment); a load through CS is legal.
         # TRANSITIONAL: "is a store" is taken from capstone's operand access here (hand path); on the DSL path it comes from the certified Form (an explicit AV fault that L3b's builder emits for a store with effective segment CS) once
         # item 23 moves the shape there, and this check then goes away.
@@ -359,6 +360,7 @@ def gs_guard(cx, ins):
             sg = o.mem.segment or (X.X86_REG_SS if o.mem.base in (X.X86_REG_ESP, X.X86_REG_EBP) else X.X86_REG_DS)
             if sg in SEGI: eff.add(SEGI[sg])
     if ins.mnemonic.split(' ')[-1] == 'xlatb': eff.add(3)             # implicit ds:[ebx+al]
+    if form: eff -= EMIT.carried_null()
     g = sorted(i for i in eff if may_null(i))
     if not g:
         return
@@ -372,7 +374,7 @@ def gs_guard(cx, ins):
         if not (r['exception_code'] == 0xC0000005 and r['parameters'] == [0, 0xffffffff] and r['flags'] == 0 and r['eip_advance'] == 0 and r['address'] == 'the faulting instruction'):
             raise Unsupported('null_seg_access row is not the access violation the runtime raises')
         cx.em(f_sys.gp_cond(cx, cond))
-    if any(o.type == X.X86_OP_MEM and o.mem.segment == X.X86_REG_GS and o.access & capstone.CS_AC_WRITE for o in ins.operands):
+    if not form and any(o.type == X.X86_OP_MEM and o.mem.segment == X.X86_REG_GS and o.access & capstone.CS_AC_WRITE for o in ins.operands):
         cx.em(f_sys.gp_cond(cx, 'SELK(c->sel[SEG_GS])==SELK(SEL_CS)'))
 
 

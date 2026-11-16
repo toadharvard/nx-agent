@@ -5,8 +5,27 @@ from proof.forms import AReg, Op, isvec, cond, dsa, ea, esa, handler, mload, mst
 
 LAHF_SDM = 'LAHF/SAHF: AH = SF:ZF:0:AF:0:PF:1:CF'
 MODIFIABLE = 0x00240100 | 0x4000      # EFLAGS bits (besides the six, DF) POPFD may change in user mode: TF, NT, AC, ID (IF/IOPL need privilege)
+def seg_load(c, reg, sel):
+    """the load of the segment register REG with the 32-bit value SEL (< 2^16): SDM Vol 2 MOV / POP Sreg.  CS is #UD ('#UD If attempting to load the CS register');
+    a selector the record's mov_to_sreg rows (fnvlift/x86sys.MOV_TO_SREG: the loadable non-null selectors by register, whether null loads) say cannot be loaded is #GP(selector), which
+    the runtime reports as the access violation (the fault kind AV, as every #GP of the declared machine); the other selectors load.  Nothing is written when the fault is raised.
+    A register for which the record leaves a selector undecided (mov_to_sreg.undecided: es ds fs gs; ss needs a writable data segment and so decides it) has no Form: UndecidedRow."""
+    from fnvlift import x86sys as xs
+    from proof.forms_sys import K_AV, K_UD
+    if reg == 'cs': c.F.fault(K_UD, C(1, 1)); return
+    sels, null = xs.MOV_TO_SREG[reg]; u = xs.REC['mov_to_sreg']['undecided']
+    if reg != 'ss' and u['selectors']: raise dsl.UndecidedRow('uncertified: mov_to_sreg.undecided (selectors %s): %s' % (u['selectors'], u['why']))
+    k = sel & C(0xfffc, 32); ok = C(0, 1)
+    for i in sorted({v & 0xfffc for v in sels}): ok = ok | eq(k, C(i, 32))
+    if null: ok = ok | eq(k, C(0, 32))
+    if reg == 'ss': ok = ok & eq(sel & C(3, 32), C(xs.SEL['cs'] & 3, 32))      # SS: RPL = CPL, the RPL of the record's cs selector
+    c.F.fault(K_AV, eq(ok, C(0, 1)))
+    c.F.sel(reg, extract(sel, 15, 0))
+
 @handler('mov')
 def mov(c):
+    if c.ops[0].k == 'r' and c.ops[0].name in dsl.SEGS:      # MOV Sreg, r/m16 (8E /r), claimed by the operand kind
+        o = c.ops[1]; return seg_load(c, c.ops[0].name, zext(rd(o, 16 if o.k == 'm' else o.w) if o.w <= 16 or o.k != 'r' else extract(rd(o), 15, 0), 32))
     if any(o.k == 'r' and o.name[:2] in ('cr', 'dr') for o in c.ops):      # MOV to/from CRn / DRn: CPL 0 only (0F 20..23), KiTrap0D's table decides the status
         from proof import forms_sys
         return forms_sys.privileged(c)
@@ -53,7 +72,10 @@ def push(c):
     F.reg('esp', V('esp', 32) - w // 8); sstore(F, V('esp', 32) - w // 8, v)
 @handler('pop')
 def pop(c):
-    F, o = c.F, c.ops[0]; esp = V('esp', 32); w = 16 if c.o16 else 32; F.reg('esp', esp + w // 8)
+    F, o = c.F, c.ops[0]; esp = V('esp', 32); w = 16 if c.o16 else 32
+    if o.k == 'r' and o.name in dsl.SEGS:      # POP Sreg: the word (a dword with operand size 32) at the stack top, its low 16 bits are the selector; ESP += operand size
+        seg_load(c, o.name, zext(extract(sload(esp, w), 15, 0), 32)); F.reg('esp', esp + w // 8); return
+    F.reg('esp', esp + w // 8)
     if o.k == 'm': store_op(F, o, ea(o, esp + w // 8), sload(esp, w))      # SDM POP: ESP as base of the destination is incremented before the address is computed
     else: wr(F, o, sload(esp, w))
 @handler('pushal', 'pushad', 'pushaw')
@@ -120,7 +142,7 @@ def string(c):
     g = lambda new, old: ite(act, new, old)
     S, D = (lambda: mload(dsa(c, esi), w)), (lambda: mload(esa(edi), w))     # the string source is DS-default (override applies), the destination ES (flat)
     if op in ('movs', 'stos'):
-        v = S() if op == 'movs' else rd(acc); mstore(F, esa(edi), g(v, D()))
+        v = S() if op == 'movs' else rd(acc); mstore(F, esa(edi), g(v, D()), fwhen=act)
     if op in ('movs', 'cmps', 'lods'): A['esi'].put(F, g(esi + step, esi))
     if op in ('movs', 'cmps', 'scas', 'stos'): A['edi'].put(F, g(edi + step, edi))
     if op == 'lods': wr(F, acc, g(S(), rd(acc)))
