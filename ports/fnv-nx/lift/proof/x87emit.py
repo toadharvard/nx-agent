@@ -5,9 +5,11 @@ One path: the text is what fnvlift.lift emits for a synthetic image of the key's
 TRACE line and the label of the next instruction.  They are wrapped as `static void frag(void){ DECL; ... }` (DECL is the lifter's own local-declaration macro of rt/fnvl.h) and preprocessed with the
 runtime headers' macros exactly as the helper closure is (FNVNX_PP's stock-cpp variant: mkdev); ctrans then executes `frag` on the symbolic state struct cpu.  Nothing of the text is restated or hand-translated.
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules
 import os, re, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path[:0] = [HERE, os.path.dirname(HERE), os.path.join(HERE, 'tests'), os.path.join(os.path.dirname(HERE), 'fnvlift', 'tests')]
+sys.path[:0] = [HERE, os.path.dirname(HERE)]
 RT = os.path.join(os.path.dirname(HERE), 'rt')
 BASE = 0x401000
 _CONF = [False]
@@ -15,7 +17,7 @@ _CONF = [False]
 
 def configure():
     if _CONF[0]: return
-    import declared_cpufeat, _inputs
+    import fnvnx.lift.proof.tests.declared_cpufeat as declared_cpufeat, fnvnx.lift.fnvlift.tests._inputs as _inputs
     cp, why = declared_cpufeat.path()
     if not cp: raise SystemExit(why)
     _inputs.configure(cpufeat=cp); _CONF[0] = True
@@ -24,8 +26,8 @@ def configure():
 def emitted(raw):
     """the instruction's emitted lines for the instruction bytes RAW (a key)"""
     configure()
-    import fnvlift as L
-    from fnvlift.image import Image
+    import fnvnx.lift.fnvlift as L
+    from fnvnx.lift.fnvlift.image import Image
     code = bytes(raw) + b'\xc3'
     t, _ = L.lift(Image.from_bytes(code, BASE), BASE, len(code))
     ls = t.split('\n'); i = next(j for j, l in enumerate(ls) if l.startswith('TRACE(')) + 1
@@ -45,7 +47,7 @@ def unit(body):
     decl = next(l for l in rd('fnvl.h').split('\n') if l.startswith('#define DECL '))
     segcs = next(l for l in rd('fnvl.h').split('\n') if l.startswith('#define SEG_CS '))
     txt = pre + '\n' + '\n'.join(_sc(rd(n)) for n in ('x87.h', 'fnvl_x87.h', 'x87.c'))
-    txt = re.sub(r'#include[^\n]*', '', txt)
+    txt = '#define FNVL_RA_T u32\n' + re.sub(r'#include[^\n]*', '', txt)       # the writer's view of struct cpu::ra (rt/fnvl.h: FNVL_PRELUDE_H)
     txt = re.sub(r'unsigned\s+__int128', 'u128', txt)
     txt += '\n' + decl + '\n' + segcs + '\nstatic void frag(void){ DECL;\n' + body + '\n}\n'
     p = subprocess.run(['cpp', '-E', '-x', 'c', '-DFNVL_TYPES=1', '-'], input=txt, capture_output=True, text=True)
@@ -59,7 +61,7 @@ def unit(body):
 # Execution of the emitted fragment under ctrans
 def _frag(raw, top):
     """-> (machine, result) of `frag` for the instruction bytes RAW on a symbolic state with TOP = top (0..7), the x87 sticky flags and the owner clear at entry; the registers c.fx[i] are free (kind, v, e)"""
-    import ctrans, x87carrier as XC, z3
+    import z3, fnvnx.lift.proof.ctrans as ctrans, fnvnx.lift.proof.x87carrier as XC
     body = emitted(raw); u = unit(body)
     fd, p = tempfile.mkstemp(suffix='.i'); os.write(fd, u.encode()); os.close(fd)
     try:
@@ -94,8 +96,8 @@ def emitted_de(raw, top):
 
 def class_reps(paths):
     """{class: representative key bytes}: x87class's classes over the shape files PATHS, the first key of each (the universe is the distinct keys of the files)"""
-    import x87class
-    from proof import shape
+    import fnvnx.lift.proof.x87class as x87class
+    from fnvnx.lift.proof import shape
     configure()
     dec = shape.decoder(); seen, reps = set(), {}
     for p in paths:
@@ -113,7 +115,7 @@ def class_reps(paths):
 
 def de_row(raw, budget_ms=120000, tops=(3,)):
     """-> {spec, emitted, note}: whether the spec can raise DE for the instruction bytes RAW (x87spec Out.raised bit 1 satisfiable under the spec's own precondition), and whether the EMITTED text can raise DE for any state of the kind domain"""
-    import z3, x87form as XF, x87kind as K
+    import z3, fnvnx.lift.proof.x87form as XF, fnvnx.lift.proof.x87kind as K
     configure()
     row = {}
     try:

@@ -13,11 +13,13 @@ Spec of the compare exception flags (cites are the pinned SDM text, FNVNX_SDM_TX
 The kind invariant (the constructors' postcondition, lemma (b) of the ruling): the fields that the kind does not use are 0, F32 holds a 32-bit value, I16/I32 are sign-extended, an M80 exponent word is 16 bits
 and a binary32/binary64 carrier holds no SNaN (fv_ld32 / fv_ld64 quiet what they load; `ctor_no_snan` proves it for them).
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules
 import os, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.dirname(HERE)]
 import z3
-import ctrans, x87carrier as XC
+import fnvnx.lift.proof.ctrans as ctrans, fnvnx.lift.proof.x87carrier as XC
 
 _KIND = None
 
@@ -109,8 +111,7 @@ def spec_fex(fex0, ops, q):
 
 def compare_obligations(budget_ms=240000):
     """-> {(kind a, kind b): {"codes": r, "IE+C1": r, "DE": r}} with r in unsat (proved) / sat (counterexample) / unknown; one solver query per field and kind pair, over every pair of the enum"""
-    sys.path.insert(0, os.path.join(HERE, 'tests'))
-    from test_x87ops import ref_x_cmp
+    from fnvnx.lift.proof.tests.test_x87ops import ref_x_cmp
     K = kinds(); A, (av, ae, ak), ia = fvvar('a'); B, (bv, be, bk), ib = fvvar('b'); q = z3.BitVec('q', 32)
     ret, outs, ub, dom = XC.call('fv_cmp', A, B, q)
     cpu = dict(XC.carrier()['machine'].G['c']); fex1 = cpu['fex'].e
