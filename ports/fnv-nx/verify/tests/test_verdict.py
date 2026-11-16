@@ -241,7 +241,7 @@ for rp, bj in ((EXE["path"], {"game": "game"}), (NOEXE["path"], {"link": None}))
     os.makedirs(os.path.join(rx, rp)); json.dump(bj, open(os.path.join(rx, rp, "build.json"), "w"))
 cl = gatesdir.root_classes({"roots": [EXE, NOEXE, LIFTED]}, rx)
 check("covers: a native guest root with a game dir is product-guest-exe, one without is only product-guest, a lifted root is neither",
-      cl == {EXE["path"]: {"product-guest", "product-guest-exe"}, NOEXE["path"]: {"product-guest"}, LIFTED["path"]: {"lifted"}}, cl)
+      cl == {EXE["path"]: {"product-guest", "product-guest-cxx", "product-guest-exe"}, NOEXE["path"]: {"product-guest", "product-guest-cxx"}, LIFTED["path"]: {"lifted"}}, cl)
 def covers_linked(name, link, want):
     r = with_admit([HOSTP])
     os.makedirs(os.path.join(r, "ports/fnv-nx/render"))
@@ -259,6 +259,8 @@ covers_case("a ref root with universe 0 is red for a gate that covers ref", [REF
 covers_case("a ref root does not make a product-only gate vacuous", [REFR], gate("g", universe=0, certified=0, covers=("linked",)), "green")
 covers_case("a covered class present with universe 0 is red", [GUEST], gate("g", universe=0, certified=0, covers=("product-guest",)), "red", "vacuous")
 covers_case("a covered class present with universe 0 is red (one of several classes)", [HOSTP], gate("g", universe=0, certified=0, covers=("product-guest", "host-product")), "red", "host-product")
+covers_case("a C-only guest root (no cxx_origin) is outside product-guest-cxx: a gate that judges native C++ units gives no vacuity red", [GUEST], gate("g", universe=0, certified=0, covers=("product-guest-cxx",)), "green")
+covers_case("a native C++ guest root with universe 0 is red for a product-guest-cxx gate", [NOEXE], gate("g", universe=0, certified=0, covers=("product-guest-cxx",)), "red", "vacuous")
 covers_case("a covered class present with a universe is green", [GUEST], gate("g", covers=("product-guest",)), "green")
 covers_case("no covered root and universe 0 is green", [GUEST], gate("g", universe=0, certified=0, covers=("lifted",)), "green")
 covers_case("no admit.json and universe 0 is green", [], gate("g", universe=0, certified=0, covers=("tool",)), "green")
