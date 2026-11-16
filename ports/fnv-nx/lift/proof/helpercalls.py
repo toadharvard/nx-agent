@@ -9,8 +9,11 @@ Not in the table, by rule: `uf` nodes (the declared platform functions, certifie
 `table(forms)` -> {callee: {"bits": the largest input bits of any call, "ops": sorted node ops that call it}}.
 `pack_forms(cache)` -> the Forms of every shape of the lifted pack of formgate_inputs.json that has a symbolic builder (the shapes that formgate judges);
 raises formgate.Red when the inputs are not declared.
-Classes (`classify`): "narrow" = input bits <= 32 (an exhaustive host check over the whole domain is possible); "wide" = anything else, which includes a helper
-whose width is not derived. The REMOVE record ASM-329 covers exactly the wide class."""
+Widths (`dwarf_bits`): ONE rule for every helper, whatever source named it: the input bits are the sum of the byte sizes of the DWARF formal_parameter types of the helper's
+own definition (DW_TAG_subprogram of that name) in the objects of the root that defines it, times 8. A parameter that carries the MXCSR or another register value is a
+parameter, so it is counted; global state read inside a body is not a parameter and is not derived here. A helper with no DWARF definition, a parameter type of unknown size,
+a variadic parameter, or two definitions that disagree has NO width: it is red (`helper-width-underived`), never wide.
+Classes (`classify`, over a derived width): "narrow" = input bits <= 32 (an exhaustive host check over the whole domain is possible); "wide" = more. The REMOVE record ASM-329 covers exactly the wide class."""
 import os
 import sys
 
@@ -59,7 +62,59 @@ def table(forms):
 
 
 def classify(bits):
-    return "narrow" if bits is not None and bits <= NARROW_BITS else "wide"
+    """bits: a derived width (int)"""
+    assert isinstance(bits, int)
+    return "narrow" if bits <= NARROW_BITS else "wide"
+
+
+_FOLLOW = ("DW_TAG_typedef", "DW_TAG_const_type", "DW_TAG_volatile_type", "DW_TAG_restrict_type", "DW_TAG_atomic_type")
+
+
+def _size(die):
+    """byte size of the type DIE's value, following typedefs and qualifiers; None when the DWARF does not give it"""
+    t = die
+    while t is not None:
+        if t.tag in _FOLLOW:
+            if "DW_AT_type" not in t.attributes:
+                return None
+            t = t.get_DIE_from_attribute("DW_AT_type")
+            continue
+        a = t.attributes.get("DW_AT_byte_size")
+        return a.value if a is not None else None
+    return None
+
+
+def dwarf_bits(paths):
+    """-> {helper name: input bits or None} over the object files PATHS: the width rule of the module docstring. None = underived (a definition without usable DWARF, or definitions that disagree)"""
+    from elftools.elf.elffile import ELFFile
+    out = {}
+    for p in paths:
+        with open(p, "rb") as fh:
+            elf = ELFFile(fh)
+            if not elf.has_dwarf_info():
+                continue
+            for cu in elf.get_dwarf_info().iter_CUs():
+                for d in cu.iter_DIEs():
+                    if d.tag != "DW_TAG_subprogram" or "DW_AT_name" not in d.attributes or d.get_parent() is None:
+                        continue
+                    name = d.attributes["DW_AT_name"].value.decode()
+                    kids = list(d.iter_children())
+                    if not kids and "DW_AT_abstract_origin" in d.attributes:
+                        continue      # a concrete instance: the abstract one carries the parameters
+                    total = 0
+                    for k in kids:
+                        if k.tag == "DW_TAG_unspecified_parameters":
+                            total = None
+                            break
+                        if k.tag != "DW_TAG_formal_parameter":
+                            continue
+                        sz = _size(k.get_DIE_from_attribute("DW_AT_type")) if "DW_AT_type" in k.attributes else None
+                        if sz is None:
+                            total = None
+                            break
+                        total += 8 * sz
+                    out[name] = total if out.get(name, total) == total else None
+    return out
 
 
 def pack_forms(cache):

@@ -181,15 +181,29 @@ class HelperTable(unittest.TestCase):
         self.assertEqual({n.op for n in H.nodes([dsl.cvt_val(c)])} >= {"cvt", "extract", "var"}, True)
 
     def test_classes_and_items(self):
-        self.assertEqual((H.classify(11), H.classify(32), H.classify(33), H.classify(None)), ("narrow", "narrow", "wide", "wide"))
+        self.assertEqual((H.classify(11), H.classify(32), H.classify(33)), ("narrow", "narrow", "wide"))
         tab = {"fx_dsl_cvt": {"bits": 96, "ops": ["cvt"]}, "fnvl_tab_rcp": {"bits": 11, "ops": ["tab"]}}
-        it = G.helper_items("r", tab, None, ["sse_f2i"], True)
+        w = {"fx_dsl_cvt": 224, "fnvl_tab_rcp": 32, "sse_f2i": 96, "u": None}
+        it = G.helper_items("r", tab, None, ["sse_f2i", "u"], True, w)
         self.assertEqual([c for c, _ in it["helper:r/fnvl_tab_rcp"]], ["helper-no-exhaustive-cert"])
+        self.assertEqual([c for c, _ in it["helper:r/u"]], ["helper-width-underived"])
         self.assertEqual((it["helper:r/fx_dsl_cvt"], it["helper:r/sse_f2i"], it["r:helper-record"]), ([], [], []))
-        self.assertEqual([c for c, _ in G.helper_items("r", tab, None, ["sse_f2i"], False)["r:helper-record"]], ["helper-record-missing"])
-        self.assertEqual(G.wide_scope(tab, ["sse_f2i"]), ["fx_dsl_cvt", "sse_f2i"])
-        self.assertEqual(G.helper_items("r", None, "why", ["x"], True), {"r:helper-table": [("helper-table-inputs", "why")]})
-        self.assertEqual(G.helper_items("r", tab, None, [], True), {})
+        self.assertEqual([c for c, _ in G.helper_items("r", tab, None, ["sse_f2i"], False, w)["r:helper-record"]], ["helper-record-missing"])
+        self.assertEqual(G.wide_scope(tab, ["sse_f2i", "u"], w), ["fx_dsl_cvt", "sse_f2i"])
+        self.assertEqual(G.helper_items("r", None, "why", ["x"], True, {}), {"r:helper-table": [("helper-table-inputs", "why")]})
+        self.assertEqual(G.helper_items("r", tab, None, [], True, {}), {})
+
+    def test_dwarf_width_of_a_real_object(self):
+        import subprocess, tempfile
+        d = tempfile.mkdtemp(prefix="dw-")
+        src, obj = os.path.join(d, "h.cc"), os.path.join(d, "h.o")
+        open(src, "w").write("typedef unsigned int u32; struct fv{unsigned long long v; u32 k;};\n"
+                             "u32 sse_f2i(double v, u32 rc){ return (u32)(int)v + rc; }\n"
+                             "unsigned long long fv_i(fv a, u32 b, const u32 c){ return a.v + b + c; }\n"
+                             "u32 nodw(u32 a, ...){ return a; }\n")
+        subprocess.check_call(["g++", "-g", "-O0", "-c", src, "-o", obj])
+        w = H.dwarf_bits([obj])
+        self.assertEqual((w["sse_f2i"], w["fv_i"], w["nodw"]), (96, 128 + 64, None))
 
     def test_record_is_in_the_registry(self):
         self.assertTrue(G.record_ok(os.path.normpath(os.path.join(LIFT, "..", "..", ".."))))

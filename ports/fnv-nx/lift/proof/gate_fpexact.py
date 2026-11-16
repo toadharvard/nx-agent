@@ -16,7 +16,7 @@ they stop at the call into a lift/rt helper, so the C body of a helper is NOT co
   the HELPER UNIVERSE is derived, never listed: (A) the Form -> helper call table of proof/helpercalls.py (the lifter's own emitter decides which Form node is a call; the Forms are
   those of the lifted pack of formgate_inputs.json), and (B) the functions that the plugin fnvnx_ftoi reports as `helpers` (attribute fnvnx_f2i) in the f2i files of the root's objects. A root has
   these items iff (B) is not empty there (the root of the lift/rt runtime holds the FNVL_F2I helpers; (A) is the table of that runtime).
-  Each helper is classified by INPUT BITS (A: the sum of the operand widths of the call, the largest over the Forms; B: not derived, so wide): narrow = at most 32 bits, wide = anything else.
+  Each helper is classified by INPUT BITS (helpercalls.dwarf_bits, one rule for A and B: the DWARF formal_parameter byte sizes of the helper's definition; underived = red `helper-width-underived`, never wide): narrow = at most 32 bits, wide = anything else.
   narrow: certified only by the exhaustive-compare output of the host-test root lift/proof/fpchost (L3a w13; libfpchost.so exporting fpc_cvt, fpc_fp, fpc_f2i): a run step that reports per helper 0 mismatches, the term sha and the object sha. That output does not exist yet and is read only when present (its reader is written with the step, no format is guessed here): the item is red, code `helper-no-exhaustive-cert`, "no exhaustive helper certificate".
   wide: not red. Its C body is tested, not proven, and is covered by the REMOVE record ASM-329 (verify/ASSUMPTIONS.json, owner L3b); the gate reports the wide helpers by name in its detail and computes
   that scope from the table, the record does not list them. The item `<root>:helper-record` is red (`helper-record-missing`) when a wide helper exists and ASM-329 is not a REMOVE record of L3b.
@@ -433,28 +433,32 @@ def object_result(oid, path, asm, unit, f2i_path, cache):
     return {k: [tuple(x) for x in items] for k, items in v.items()}
 
 
-def helper_items(root, tab, why, names, record_ok):
+def helper_items(root, tab, why, names, record_ok, widths):
     """-> {item id: [(code, text)]} of check 0 for one root. TAB: the call table (helpercalls.table) or None with WHY (reason string); NAMES: the helper names of the objects' f2i files
-    (empty: the root holds no f2i helper and has no item of check 0); RECORD_OK: ASM-329 is a REMOVE record of L3b. The detail of the wide class is `wide_scope`."""
+    (empty: the root holds no f2i helper and has no item of check 0); RECORD_OK: ASM-329 is a REMOVE record of L3b; WIDTHS: {name: input bits or None} (helpercalls.dwarf_bits, the one rule
+    for every helper). A helper without a derived width is red `helper-width-underived`."""
     if not names:
         return {}
     if tab is None:
         return {root + ":helper-table": [("helper-table-inputs", why)]}
-    bits = {k: v["bits"] for k, v in tab.items()}
-    bits.update({n: bits.get(n) for n in names})      # a B helper that no Form calls: width not derived (None) = wide
-    items = {}
-    for h in sorted(bits):
-        items["helper:%s/%s" % (root, h)] = [("helper-no-exhaustive-cert", "helper %s (%s input bits): no exhaustive helper certificate (certifier: root lift/proof/fpchost, exhaustive-compare output absent)" % (h, bits[h]))] if helpercalls.classify(bits[h]) == "narrow" else []
-    if any(helpercalls.classify(b) == "wide" for b in bits.values()):
+    items, wide = {}, False
+    for h in sorted(set(tab) | set(names)):
+        b = widths.get(h)
+        if b is None:
+            items["helper:%s/%s" % (root, h)] = [("helper-width-underived", "helper %s: input width not derivable from the DWARF of its definition in the root's objects" % h)]
+        elif helpercalls.classify(b) == "narrow":
+            items["helper:%s/%s" % (root, h)] = [("helper-no-exhaustive-cert", "helper %s (%d input bits): no exhaustive helper certificate (certifier: root lift/proof/fpchost, exhaustive-compare output absent)" % (h, b))]
+        else:
+            items["helper:%s/%s" % (root, h)] = []
+            wide = True
+    if wide:
         items[root + ":helper-record"] = [] if record_ok else [("helper-record-missing", "wide helpers exist and %s is not a REMOVE record of L3b in verify/ASSUMPTIONS.json" % RECORD)]
     return items
 
 
-def wide_scope(tab, names):
+def wide_scope(tab, names, widths):
     """the helpers that ASM-329 covers: the wide class of the derived universe, sorted"""
-    bits = {k: v["bits"] for k, v in (tab or {}).items()}
-    bits.update({n: bits.get(n) for n in names})
-    return sorted(h for h, b in bits.items() if helpercalls.classify(b) == "wide")
+    return sorted(h for h in set(tab or {}) | set(names) if widths.get(h) is not None and helpercalls.classify(widths[h]) == "wide")
 
 
 def record_ok(repo):
@@ -523,8 +527,9 @@ def judge_root(root, repo, cache, table):
         paths = read_f2i_paths(res)
         names = sorted({h for p in paths.values() if p for h in ((read_f2i(p)[0] or {}).get("helpers") or [])})
         tab, why = table() if names else (None, None)
-        WIDE[root] = wide_scope(tab, names)
-        coded = judge_objects_coded(root, read_inputs(res), image, helper_items(root, tab, why, names, record_ok(repo)), docs, paths, cache)
+        widths = helpercalls.dwarf_bits([o for _, o in read_inputs(res)]) if names else {}
+        WIDE[root] = wide_scope(tab, names, widths)
+        coded = judge_objects_coded(root, read_inputs(res), image, helper_items(root, tab, why, names, record_ok(repo), widths), docs, paths, cache)
         FINDINGS.extend(fixture_findings(root, coded))
         items = {k: [t for _, t in v] for k, v in coded.items()}
     except (OSError, ValueError, ELFError) as e:
