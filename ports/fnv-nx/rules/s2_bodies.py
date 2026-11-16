@@ -19,14 +19,12 @@ friend, a use in a member body) leaves the definition alone. `extern "C"` on the
 GCC gives an extern "C" function external linkage even in an anonymous namespace, and an internal function's
 language linkage changes nothing (no other unit names it). Line numbers stay.
 """
-import os as _q_os, sys as _q_sys
-_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import collections
 import os
 import re
 
-import fnvnx.rules.core as core                        # noqa: E402
-import fnvnx.rules.s1_compile as s1_compile                  # noqa: E402  (the units.json readers)
+from fnvnx.rules import core                        # noqa: E402
+from fnvnx.rules import s1_compile                  # noqa: E402  (the units.json readers)
 
 CLASS_HEAD = re.compile(r'^(?:template\s*<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>\s*)?(?:typedef\s+)?(?:class|struct|union)\s+'
                         r'(?:__declspec\s*\([^()]*\)\s*)?([A-Za-z_]\w*)')
@@ -287,8 +285,8 @@ def r_harness_internal(path, text, stats):
 # decomp's own. Line numbers stay. Families left alone are counted (POP2-SKIP-<why>) and listed with their reason
 # in <tree>/build/pop2_skipped.tsv, the sites done in <tree>/build/pop2_sites.tsv (derived, local only).
 
-import fnvnx.rules._msvcsig as _msvcsig                    # noqa: E402
-import fnvnx.rules._popgen as _popgen                     # noqa: E402
+from fnvnx.rules import _msvcsig                    # noqa: E402
+from fnvnx.rules import _popgen                     # noqa: E402
 
 POP2_NOTE = ' /* fnv-nx POP2: overloads with the words the callees pop */'
 pg = _popgen
