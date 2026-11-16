@@ -66,7 +66,7 @@ class Img:
             if mer and a <= mer[-1][1]: mer[-1][1] = max(mer[-1][1], b)
             else: mer.append([a, b])
         self.mer = mer; self.ms = [a for a, b in mer]; self.cache = {}
-        self.rd = rd; self.rset = rset or set(); self.inp = {}; self.allcode = set(); self.dirty = set(); self.refs = None; self.tabslots = set(); self.visited = set(); self.pops = pops or {}; self.imp = imp or {}; self.jtargets = set(); self.badarr = set(); self.ijbad = set(); self.ijall = set(); self.ijwhy = {}; self.pk = {}; self.wmemo = {}; self.calltg = {}; self.retsites = set(); self.callers = {}; self.summ = {}; self.busy = set(); self.fresh = set(); self.asm225 = 'ASM-225'; self.rows = []; self.info = Counter()
+        self.rd = rd; self.rset = rset or set(); self.inp = {}; self.allcode = set(); self.dirty = set(); self.refs = None; self.tabslots = set(); self.visited = set(); self.pops = pops or {}; self.imp = imp or {}; self.jtargets = set(); self.badarr = set(); self.ijbad = set(); self.ijall = set(); self.ijwhy = {}; self.ijret = set(); self.pk = {}; self.wmemo = {}; self.calltg = {}; self.retsites = set(); self.callers = {}; self.summ = {}; self.busy = set(); self.fresh = set(); self.asm225 = 'ASM-225'; self.rows = []; self.info = Counter()
     def reached(self, a):
         i = bisect.bisect_right(self.ms, a) - 1
         return i >= 0 and a < self.mer[i][1]
@@ -155,8 +155,16 @@ def new_fresh(esp, st, mark, e):
 
 
 ALLREGS = ('eax', 'ebx', 'ecx', 'edx', 'esi', 'edi', 'ebp')
-ARG_LIMIT = 256      # widening bound of feed(): 64 stack argument words
+ARG_LIMIT = 256      # widening bound of feed(): 64 stack argument words. 256 is a PRECISION parameter, not a correctness one: an input slot deeper than it goes to ALLCODE_INPUT, the top of the lattice (every register and slot possibly a code address), which is sound for any bound; with the bound the set of slot keys of an input is finite, so a join chain is finite and the argument pass terminates
 ALLCODE_INPUT = ({n: T_CODE for n in ALLREGS}, {}, True)      # an unknown input is possibly a code address: the sound value, not a fallback
+
+
+def ij_why(esp, st):
+    """why an indirect jmp is not a clean arrival (esp 0 and the entry's return address still at [esp]): the recorded reason of its residue row."""
+    if esp is None: return 'esp-lost'
+    if is_fresh(esp): return 'esp-fresh (esp loaded from a value that is not entry_esp + k)'
+    if esp != 0: return 'esp=%d' % esp
+    return 'ra-slot-%s' % ('absent' if 0 not in st else 'overwritten')
 
 
 def feed(img, t, regs_t, stk_t):
@@ -399,9 +407,11 @@ def analyse_entry(img, e, mode='owner', force=False):
         elif mn == 'jmp':
             o = ops[0]
             if o.type == X.X86_OP_REG:
-                if not anyra: img.ijall.add(a)
-                if not anyra and (esp != 0 or st.get(0) != ('ra', 0)): img.ijbad.add(a); img.ijwhy[a] = ('lost' if esp is None else 'esp=%d' % esp if esp != 0 else 'ra-slot-overwritten')
                 v = regs.get(R32.get(o.reg))
+                if not anyra and isinstance(v, tuple) and v[0] == 'ra': img.ijret.add(a)      # a jmp to this entry's own return-address symbol is a return to the caller's continuation: not an arrival at any entry (ruling 2026-11-16)
+                elif not anyra:
+                    img.ijall.add(a)
+                    if esp != 0 or st.get(0) != ('ra', 0): img.ijbad.add(a); img.ijwhy[a] = ij_why(esp, st)
                 if v == T_S4: emit(a, 's4', 'target-s4', 'jmp through a register holding arithmetic on a code address', True)
                 elif v == T_CODE: emit(a, 'code', 'code-target', 'jmp reg', False)
                 if tracked(v):
@@ -427,7 +437,7 @@ def analyse_entry(img, e, mode='owner', force=False):
                         if not anyra and (esp != 0 or st.get(0) != ('ra', 0)) and w in img.entries and owner(img, w): img.badarr.add(w)
                 else:       # an indirect jmp through memory that is not a table of relocated words: its targets are not enumerated
                     if not anyra: img.ijall.add(a)
-                    if not anyra and (esp != 0 or st.get(0) != ('ra', 0)): img.ijbad.add(a)
+                    if not anyra and (esp != 0 or st.get(0) != ('ra', 0)): img.ijbad.add(a); img.ijwhy[a] = ij_why(esp, st)
             else:
                 t = o.imm & M32
                 if t != e and t in img.entries and owner(img, t):
@@ -818,6 +828,9 @@ def run(text, T0, entries, ranges, outdir, name, rd=None, rset=None, parent=None
     res = dict(schema='fnvnx-gate/1', name='l3.pcsrc.' + name, status='red' if red else 'green', sources=sources, rows=len(rows), red=len(red), by_class={'%s/%s' % k: n for k, n in sorted(byc.items())},
                red_by_class={'%s/%s' % k: n for k, n in sorted(redc.items())}, s4_red=sum(1 for r in red if r[2] == 's4'), s4_target=sum(1 for r in red if r[2] == 's4' and not r[3].startswith('escape')), s4_escape_red=sum(1 for r in red if r[2] == 's4' and r[3].startswith('escape')), s4_red_proven=sum(1 for r in red if r[2] == 's4' and r[0] not in cand), s4_escapes=sum(1 for r in rows if r[2] == 's4' and not r[5]), code_sources=sum(1 for r in rows if r[2] == 'code'), red_candidate_entries=redcand, red_proven_entries=len(red) - redcand, esp_lost=img.info['esp-lost'], cond_fresh_entries=len(img.fresh), cond_fresh_list=['%08x' % x for x in sorted(img.fresh)], entries=len(entries), info=dict(img.info))
     json.dump(res, open(outdir + '/gate_pcsrc.json', 'w'), sort_keys=True)
+    with open(outdir + '/pcsrc_ijmp.tsv', 'w') as f:      # the indirect jmp sites of the owners' flow and how each arrives: clean, a return through the RA symbol, or the recorded reason it is not clean
+        f.write('# site, status (clean | return | not-clean), reason; a not-clean site gives the whole ptr set as its dispatcher targets (arrival join)\n')
+        for a in sorted(img.ijall | img.ijret): f.write('%08x\t%s\t%s\n' % (a, 'return' if a in img.ijret else 'not-clean' if a in img.ijbad else 'clean', img.ijwhy.get(a, '-')))
     json.dump({'s4_violations': res['s4_red']}, open(outdir + '/pcsrc_s4.json', 'w'), sort_keys=True)      # read by modlift's residual: no file = unchecked, N > 0 = violation
     return len(red), res
 
