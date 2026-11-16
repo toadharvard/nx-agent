@@ -2,8 +2,7 @@
 """mkunits.py BUILD SRC LOG OUT - the units of GMP's library from the compile list ccrec.py recorded.
 One unit per recorded compile, OUT/u/<object path>.c: the defines the Makefile gave that compile (-DNAME[=VALUE], as given, common ones first),
 then the source text (the srcdir's file, or the build directory's own generated file), with a #line naming it. The headers of both trees go to OUT/inc/build and
-OUT/inc/src with their layout (the recipe's include order is build, src, as `-I. -I../srcdir` was). A source that includes another C source is an error: the unit
-rule would compile that file twice.
+OUT/inc/src with their layout (the recipe's include order is build, src, as `-I. -I../srcdir` was).
 Every compile of the log must have the common flags of the first one (the -DOPERATION_x flags aside), else the tool stops."""
 import json
 import os
@@ -33,12 +32,11 @@ for r in rows:
     if r["out"] in units:
         sys.exit("mkunits: two different compiles write %s" % r["out"])
     units[r["out"]] = r
-INC_C = re.compile(rb'^\s*#\s*include\s*[<"][^>"]*\.(?:c|S|asm)[>"]', re.M)
+# A source that #includes a C source (mpn/generic/mul_fft.c under WANT_ADDSUB) is not examined: the unit's own preprocessing opens an included file only when its condition holds, and a
+# C source there is no header of OUT/inc, so an active include of one is a red preprocessing stage, never a silent difference.
 for o, r in sorted(units.items()):
     path = os.path.realpath(os.path.join(r["cwd"], r["src"]))
     text = open(path, "rb").read()
-    if INC_C.search(text):
-        sys.exit("mkunits: %s includes a C source" % path)
     where = ("src/" + os.path.relpath(path, src)) if path.startswith(src + "/") else ("build/" + os.path.relpath(path, build))
     defs = ["#define %s" % f[2:].replace("=", " ", 1) for f in r["flags"] if f.startswith("-D")]
     name = os.path.splitext(o)[0] + ".c"
