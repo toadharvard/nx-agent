@@ -16,6 +16,7 @@ sys.path.insert(0, HERE)
 import declared_x86sys; declared_x86sys.configure()
 from proof import forms, symform, shape as shp  # noqa: E402
 
+FAILURES_HEADER = '# fnvnx-form-equivalence-failures/1: shape_key<TAB>immediate value (hex)<TAB>why  (test_forms_immsel universe run; the aggregation withholds every listed shape key: certs_build --withheld)'
 PREFIXES = ('', '66', 'f2', 'f3'); MAPS = ('', '0f', '0f38', '0f3a'); MODRM = ('c0', '00', '40', '80')
 
 
@@ -54,22 +55,35 @@ def values(width):
     return sorted(out)
 
 
+FAILURES_HEADER = '# fnvnx-form-equivalence-failures/1: shape_key<TAB>immediate value (hex)<TAB>why  (test_forms_immsel universe run; the aggregation withholds every listed shape key, certs_build --withheld)'
+
+
+def run(failures=None):
+    """the universe run -> (shapes with a Form, shapes without, instances, not compared, [(key, v, why)] failing instances).  `failures`: a path; the failing instances are written there as the tsv the aggregation reads"""
+    uni, none = universe(); bad = n = noconc = 0; width = {}; fails = []
+    for k, sf in uni:
+        rep, f = symform.parse_key(k); off, sz = f['imm']; width[sz] = width.get(sz, 0) + 1
+        for v in values(sz):
+            raw = bytearray(rep); raw[off:off + sz] = v.to_bytes(sz, 'little'); n += 1
+            try: forms.build(list(shp.decoder().disasm(bytes(raw), 0x401000))[0], 0x401000)
+            except (KeyError, AssertionError): noconc += 1; continue          # no concrete Form at this value (cmpps imm >= 8 reserved, an int vector undecided on the declared OS): nothing to equal
+            try: ok, why = symform.link_ok(sf, bytes(raw), 0x401000)
+            except Exception as e: ok, why = False, repr(e)
+            if not ok: bad += 1; fails.append((k, '%x' % v, why)); print('FAIL', k, '%x' % v, why)
+    print('immediate shapes with a Form %d (field widths %s), without a Form %d, instances %d (no concrete Form at the value, not compared: %d), fails %d' % (len(uni), sorted(width.items()), none, n, noconc, bad))
+    if failures is not None:
+        with open(failures, 'w') as fh: fh.write(FAILURES_HEADER + '\n' + ''.join('%s\t%s\t%s\n' % (k, v, str(w).replace('\t', ' ').replace('\n', ' ')[:200]) for k, v, w in fails))
+    return len(uni), none, n, noconc, fails
+
+
 class T(unittest.TestCase):
     def test_every_immediate_shape_links_at_every_value(self):
-        uni, none = universe(); bad = n = noconc = 0; width = {}
-        for k, sf in uni:
-            rep, f = symform.parse_key(k); off, sz = f['imm']; width[sz] = width.get(sz, 0) + 1
-            for v in values(sz):
-                raw = bytearray(rep); raw[off:off + sz] = v.to_bytes(sz, 'little'); n += 1
-                try: forms.build(list(shp.decoder().disasm(bytes(raw), 0x401000))[0], 0x401000)
-                except (KeyError, AssertionError): noconc += 1; continue          # no concrete Form at this value (cmpps imm >= 8 reserved, an int vector undecided on the declared OS): nothing to equal
-                try: ok, why = symform.link_ok(sf, bytes(raw), 0x401000)
-                except Exception as e: ok, why = False, repr(e)
-                if not ok: bad += 1; print('FAIL', k, '%x' % v, why)
-        print('immediate shapes with a Form %d (field widths %s), without a Form %d, instances %d (no concrete Form at the value, not compared: %d), fails %d' % (len(uni), sorted(width.items()), none, n, noconc, bad))
-        self.assertGreater(len(uni), 0)
-        self.assertEqual(bad, 0)
+        nuni, _, _, _, fails = run()
+        self.assertGreater(nuni, 0)
+        self.assertEqual(len(fails), 0)
 
 
 if __name__ == '__main__':
+    if len(sys.argv) == 3 and sys.argv[1] == '--failures':       # write the failing instances (the Form-equivalence failures) for the aggregation; exit 0: the file is the result
+        run(sys.argv[2]); sys.exit(0)
     unittest.main()
