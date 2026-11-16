@@ -1635,3 +1635,9 @@ Paused: w3b, w4, farm; no other work.
     - w10 is archived. A new worker merges L1's prefix-aware w28-c5 head when it is named.
 - Pending: farm 3's claude/fnv-l1-contract-w28-exportrec-d9 (render/d3d9 build.json on contract/exporthdr) and its bridgetable result. The cand5 render head is w9-cand4 + w10 + w11 + that edit.
 - bottleneck: L1's prefix-aware gate and mount; farm 3's bridgetable run; reached.tsv (L1 w28). 0 of 4 workers busy.
+- 11:12Z, done: the cand5 render head is claude/fnv-l6-render-w12-cand5 b80203aca (w12 `session_01KmtZKQYU4Pc2Fc4W3RDq4W`, archived).
+    - It is w9-cand4 + w10 (fnvnx imports) + w11 (11 d3d9.dll records), merged with L1 w28-c5 e5685a6bf; render/d3d9 is on contract/exporthdr INCLUDE.
+    - Static checks: 0 bare or relative sibling imports over 53 .py; 0 uses of contract/include; gl4/gl4shim/nxgpu at 22/8/8 files.
+    - recipe check: 17 of 17 admitted L6 roots and variants valid. gate_admit: 0 L6 findings. gate_pure: 0 L6 findings (restricted run). The whole-tree run has universe 0 because of an L1 run_unit defect with roots that have no .py, which is reported.
+    - Not run: bridgetable (farm; needs contract/exports and bridgefacts/com).
+- bottleneck: L1's cand5 verdict and farm 3's bridgetable run; reached.tsv (L1 w28). 0 of 4 workers busy.
