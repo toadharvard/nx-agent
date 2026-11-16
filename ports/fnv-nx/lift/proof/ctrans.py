@@ -22,11 +22,38 @@ Semantics (ISO C11 as GCC implements it, ILP32/LP64-independent: the source uses
     (first, then second) is returned quieted, else the first quiet NaN operand, else the default NaN 0x7FF8000000000000 / 0x7FC00000.
   - builtins, one documented mapping (BUILTINS): GCC manual "Other Builtins".
 """
-import os, re, subprocess, sys
+import json, os, re, sys
 import z3
 from pycparser import c_parser, c_ast
 
-ARM_RMODE = z3.BitVec('fpcr_rmode', 2)     # Arm ARM FPCR.RMode: 00 RN, 01 RP, 10 RM, 11 RZ
+# The FPCR the terms are a function of.  RMode: Arm ARM (DDI 0487) FPCR.RMode encoding, an architecture constant (00 RN, 01 RP, 10 RM, 11 RZ).  DN and FZ are free inputs
+# `fpcr_dn`, `fpcr_fz`: every FP operation adds the obligation DN = 0 and FZ = 0 to `Result.dom` (the NaN rules and the denormal handling modelled are those of DN = FZ = 0), and
+# whoever uses a term discharges it from the declared guest thread FPCR (`fpcr_record`).  AH is RES0 on the console CPU (`ah_reserved`).
+ARM_RMODE = z3.BitVec('fpcr_rmode', 2)
+FPCR_DN = z3.BitVec('fpcr_dn', 1)
+FPCR_FZ = z3.BitVec('fpcr_fz', 1)
+TARGETS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'verify', 'targets.json')
+
+
+class Undecided(Exception):
+    """a declared-target row that the terms need and no record states"""
+
+
+def fpcr_record(path=TARGETS):
+    """the initial FPCR of a guest thread from the console CPU record: {"DN": 0|1, "FZ": 0|1, "RMode": 0..3}; Undecided when the record does not state it"""
+    with open(path) as fh: cpu = json.load(fh)['console_cpu']
+    rec = cpu.get('fpcr')
+    if not isinstance(rec, dict) or not {'DN', 'FZ', 'RMode'} <= set(rec):
+        raise Undecided('verify/targets.json console_cpu.fpcr (initial FPCR DN, FZ, RMode of a guest thread) is not declared; owner L5 / L1')
+    return rec
+
+
+def ah_reserved(path=TARGETS):
+    """FPCR.AH is RES0 below Armv8.7 (FEAT_AFP, Arm ARM): from console_cpu.arch"""
+    with open(path) as fh: arch = json.load(fh)['console_cpu']['arch']
+    m = re.match(r'armv8(?:\.(\d))?-a$', arch)
+    if not m: raise Undecided('console_cpu.arch %r is not armv8[.N]-a' % arch)
+    return int(m.group(1) or 0) < 7
 
 
 class Unsupported(Exception):
@@ -53,12 +80,6 @@ def strip_attrs(t):
     return ''.join(out)
 
 
-def cpp(text, defs=()):
-    p = subprocess.run(['cpp', '-E', '-P', '-x', 'c'] + ['-D' + d for d in defs] + ['-'], input=text, capture_output=True, text=True)
-    if p.returncode: raise RuntimeError(p.stderr)
-    return p.stdout
-
-
 def split_items(t):
     """top-level items of preprocessed text.  A definition ends at its balanced '}'; a declaration (typedef/struct/union/enum) at the next ';' at depth 0"""
     items, i, n = [], 0, len(t)
@@ -82,66 +103,64 @@ def split_items(t):
 FUNC_RE = re.compile(r'^((?:static\s+|inline\s+|extern\s+)*[A-Za-z_][\w\s\*]*?)\b([A-Za-z_]\w*)\s*\(([^{;]*)\)\s*\{', re.S)
 
 
-class Source:
-    """the C of lift/rt as items: functions (name -> text), type declarations, macros"""
+def user_text(path):
+    """the text of a preprocessed unit (.i) without its linemarkers and without the regions the preprocessor marks as system headers (linemarker flag 3, GNU cpp manual
+    'Preprocessor Output'): the source of the root itself"""
+    out, sysh = [], False
+    with open(path) as fh:
+        for line in fh:
+            m = re.match(r'# (\d+) "([^"]*)"((?: \d+)*)\s*$', line)
+            if m:
+                sysh = '3' in m.group(3).split(); continue
+            if line.startswith('#'): continue
+            if not sysh: out.append(line)
+    return ''.join(out)
 
-    def __init__(self, rt):
-        self.rt = rt
-        def rd(n):
-            with open(os.path.join(rt, n)) as fh: return fh.read()
-        fnvl = strip_comments(rd('fnvl.h'))
-        lines = fnvl.split('\n')
-        pre = [l for l in lines if l.startswith('typedef') or l.startswith('struct fv ') or l.startswith('struct cpu ') or l.startswith('struct fnvl_nframe;')]
-        self.f2i = set()
-        raw = {}
-        for n in ('x87.h', 'fnvl_x87.h', 'x87.c'):
-            t = strip_comments(rd(n))
-            raw[n] = t
-        for n, t in raw.items():
-            for m in re.finditer(r'FNVL_F2I\s+(?:static\s+inline\s+)?[\w\s\*]*?\b(\w+)\s*\(', t): self.f2i.add(m.group(1))
+
+class Source:
+    """the C of lift/rt as items, read from the PREPROCESSED units the recipe's PP stage makes with the guest compiler (`ipaths`, .i files): functions (name -> text), type
+    declarations.  `macro_files` (the headers' text) give the macro names and bodies the closure follows; the functions come from the .i, so their macros are expanded."""
+
+    def __init__(self, ipaths, macro_files):
         self.macros = {}
-        for n in ('fnvl.h', 'x87.h', 'fnvl_x87.h', 'x87.c'):
-            t = strip_comments(rd(n)).replace('\\\n', ' ')
+        for n in macro_files:
+            with open(n) as fh: t = strip_comments(fh.read()).replace('\\\n', ' ')
             for m in re.finditer(r'^[ \t]*#define[ \t]+(\w+)(\([^)]*\))?[ \t]*(.*)$', t, re.M): self.macros.setdefault(m.group(1), (m.group(2), m.group(3)))
-        defs = [m for m in self.macros]
-        text = '\n'.join(pre) + '\n' + '\n'.join(raw[n] for n in ('x87.h', 'fnvl_x87.h', 'x87.c'))
-        text = re.sub(r'#include[^\n]*', '', text)
-        text = re.sub(r'unsigned\s+__int128', 'u128', text)
-        text = cpp_defs_filter(text)
-        text = strip_attrs(text)
-        text = cpp(text, ['FNVL_TYPES=1'])
-        text = re.sub(r'\bregister\s+struct\s+cpu\s*\*\s*c\s+asm\s*\([^)]*\)\s*;', '', text)
-        self.items = split_items(text)
-        self.types = []          # declarations (typedef, struct, enum) in order
-        self.funcs = {}          # name -> function text
-        self.refused = {}        # name -> reason (non-C items by their head)
-        for it in self.items:
-            m = FUNC_RE.match(it) if it.rstrip().endswith('}') else None
-            if m and not it.lstrip().startswith(('typedef', 'struct', 'enum', 'union')) and 'template' not in it.split('{')[0] and 'extern "C"' not in it.split('{')[0]:
-                self.funcs[m.group(2)] = it
-            elif it.lstrip().startswith(('typedef', 'struct', 'enum', 'union')) and ('(' not in it.split('{')[0] or it.lstrip().startswith('typedef')):
-                self.types.append(it)
-            elif it.strip().startswith('template'):
-                mm = re.search(r'\b(\w+)\s*\(', it.split('{')[0]); self.refused[mm.group(1) if mm else it[:30]] = 'C++ template'
-            elif it.strip().startswith(('extern "C"', 'static_assert', '_Static_assert')) or it.strip() == '':
-                pass
-        self.proto = {}
+        self.types, self.funcs, self.refused = [], {}, {}
+        seen = set()
+        for p in ipaths:
+            text = user_text(p)
+            text = re.sub(r'unsigned\s+__int128', 'u128', text)       # grammar mapping: pycparser has no __int128 (GCC manual "__int128"); u128 is a typedef-name of ctrans
+            text = strip_attrs(text)
+            text = re.sub(r'\bregister\s+struct\s+cpu\s*\*\s*c\s+asm\s*\([^)]*\)\s*;', '', text)
+            for it in split_items(text):
+                head = it.split('{')[0]
+                m = FUNC_RE.match(it) if it.rstrip().endswith('}') else None
+                if m and not it.lstrip().startswith(('typedef', 'struct', 'enum', 'union')) and 'template' not in head and 'extern "C"' not in head:
+                    self.funcs.setdefault(m.group(2), it)
+                elif it.lstrip().startswith(('typedef', 'struct', 'enum', 'union')) and ('(' not in head or it.lstrip().startswith('typedef')):
+                    if it not in seen: seen.add(it); self.types.append(it)
+                elif it.strip().startswith('template'):
+                    mm = re.search(r'\b(\w+)\s*\(', head); self.refused[mm.group(1) if mm else it[:30]] = 'C++ template'
 
     def prelude(self):
-        return ('typedef int u128;\ntypedef struct fv fv;\nextern struct cpu *c;\n' + '\n'.join(t if t.rstrip().endswith(';') else t + ';' for t in self.types
-                if not re.match(r'typedef\s+u128\s+u128', t) and not t.lstrip().startswith('struct fnvl_nframe;')) + '\n')
-
-
-def cpp_defs_filter(t):
-    return t
+        """the type declarations that parse, in order (a C++ declaration of the unit is dropped); u128 and `c` are ctrans's own"""
+        pre = 'typedef int u128;\nextern struct cpu *c;\n'
+        for t in self.types:
+            if re.match(r'typedef\s+u128\s+u128', t) or t.lstrip().startswith('struct fnvl_nframe;'): continue
+            cand = pre + (t if t.rstrip().endswith(';') else t + ';') + '\n'
+            try: c_parser.CParser().parse(cand, 'prelude')
+            except Exception: continue
+            pre = cand
+            m = re.match(r'struct\s+(\w+)\s*\{', t)
+            if m: pre += 'typedef struct %s %s;\n' % (m.group(1), m.group(1))      # grammar mapping: in C++ a struct tag is a type name (ISO C++ [class.name])
+        return pre
 
 
 # ---------------------------------------------------------------- parse
 def parse_unit(src, names=None):
     """parse the type declarations and every function of `names` (all when None); -> (ast of types, {name: FuncDef}, {name: reason refused})"""
     pre = src.prelude()
-    for fname in src.funcs:      # prototypes so that calls type-check in the parser's eyes
-        pass
     tast = c_parser.CParser().parse(pre, 'types')
     protos = []
     funcs, refused = {}, {}
@@ -253,7 +272,7 @@ class Frame:
 
 
 class Result:
-    def __init__(self, ret, outs, ub): self.ret, self.outs, self.ub = ret, outs, ub
+    def __init__(self, ret, outs, ub, dom=()): self.ret, self.outs, self.ub, self.dom = ret, outs, ub, list(dom)
 
 
 class Lazy(dict):
@@ -275,6 +294,7 @@ class Machine:
         self.funcs, self.structs, self.typedefs, self.enums = funcs, {}, {}, {}
         self.G = {}               # globals: 'c' -> struct cpu (fields free inputs)
         self.ub = []
+        self.dom = []
         self.fresh = 0
         for e in tast.ext: self.declare(e)
 
@@ -370,6 +390,7 @@ class Machine:
             if t[1] == s[1]: return V(v.e, t)
             if t[1] < s[1]: return V(z3.Extract(t[1] - 1, 0, v.e), t)
             return V((z3.SignExt if s[2] else z3.ZeroExt)(t[1] - s[1], v.e), t)
+        if 'f' in (t[0], s[0]): self.fpdom(fr)
         if t[0] == 'f' and s[0] == 'i':
             x = (z3.fpSignedToFP if s[2] else z3.fpUnsignedToFP)(rm_term(), v.e, fpsort(t))
             return V(frombits(x), t)
@@ -387,6 +408,9 @@ class Machine:
             nanr = z3.Concat(z3.Extract(63, 63, v.e), z3.BitVecVal(0xFF, 8), z3.BitVecVal(1, 1), z3.Extract(50, 29, v.e))
             return V(z3.If(nan_(v.e, s), nanr, frombits(z3.fpToFP(rm_term(), tofp(v.e, s), z3.Float32()))), t)
         raise Unsupported('cast %s -> %s' % (s, t))
+
+    def fpdom(self, fr):
+        if fr is not None: self.dom.append(z3.Implies(fr.L, z3.And(FPCR_DN == 0, FPCR_FZ == 0)))
 
     def promote(self, v):
         if v.t[0] == 'i' and v.t[1] < 32: return self.cast(v, INT, None)
@@ -552,6 +576,7 @@ class Machine:
         a, b = self.usual(a, b, fr)
         t = a.t
         if t[0] == 'f':
+            self.fpdom(fr)
             if op in ('+', '-', '*', '/'): return V(fop({'+': 'add', '-': 'sub', '*': 'mul', '/': 'div'}[op], [a.e, b.e], t), t)
             x, y = tofp(a.e, t), tofp(b.e, t)
             c = {'<': z3.fpLT, '>': z3.fpGT, '<=': z3.fpLEQ, '>=': z3.fpGEQ, '==': z3.fpEQ}.get(op)
@@ -747,11 +772,11 @@ class Machine:
     # -- public
     def apply(self, name, args):
         """execute function `name` on `args` (V / dict / Ptr values); -> Result(ret, outs, ub), outs = the final contents of every pointer argument"""
-        self.ub = []
+        self.ub = []; self.dom = []
         fd = self.funcs[name]
         fr = Frame('top', z3.BoolVal(True))
         ret = self.call(fd, args, fr)
-        return Result(ret, None, list(self.ub))
+        return Result(ret, None, list(self.ub), self.dom)
 
     def inputs(self, name):
         """fresh symbolic arguments for `name`: scalars and structs by value, pointers to a fresh cell; -> (args, cells)"""
@@ -783,7 +808,7 @@ def b_clzll(m, a, fr, raw):
 
 def b_unary_fp(kind):
     def f(m, a, fr, raw):
-        x = m.cast(a[0], F64, fr)
+        x = m.cast(a[0], F64, fr); m.fpdom(fr)
         return V(fop(kind, [x.e], F64), F64)
     return f
 
@@ -815,10 +840,10 @@ BUILTINS = {'__builtin_expect': b_expect, '__builtin_clzll': b_clzll, '__builtin
             '__builtin_memcpy': b_memcpy}
 
 
-def load(rt, mutate=None):
-    """-> (Machine, Source, refused {name: reason}) over every function of rt/x87.c and rt/fnvl_x87.h.  mutate {function: (old, new)} edits a function's text first (the tests'
+def load(ipaths, macro_files, mutate=None):
+    """-> (Machine, Source, refused {name: reason}) over every function of the preprocessed units `ipaths`.  mutate {function: (old, new)} edits a function's text first (the tests'
     mutation check: an altered C body must change the term)"""
-    src = Source(rt)
+    src = Source(ipaths, macro_files)
     for fn, (old, new) in (mutate or {}).items():
         assert old in src.funcs[fn], (fn, old)
         src.funcs[fn] = src.funcs[fn].replace(old, new, 1)
@@ -829,7 +854,7 @@ def load(rt, mutate=None):
 
 
 if __name__ == '__main__':
-    mc, src, refused = load(sys.argv[1])
+    mc, src, refused = load(sys.argv[1].split(':'), sys.argv[2:])
     ok, bad = [], dict(refused)
     for name in sorted(mc.funcs):
         try:
