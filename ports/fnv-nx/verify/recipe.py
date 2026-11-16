@@ -1384,13 +1384,18 @@ DEBS_CLOSURE_ERR = 'debs is a list of env.json package names or {"closure": [top
 
 def step_debs(g, closure=True):
     """The debs of run step G as a sorted list of names: the written list, or for {"closure": [TOPS]} the Depends closure of TOPS (deb_closure), so a package that a
-    dependency adds is written in no build.json. ValueError on a form that is neither; CLOSURE False returns the tops themselves (the check does not read the machine)."""
+    dependency adds is written in no build.json; plus the machine's root layout package (envcheck.RUN_LAYOUT_DEB, base-files: the usr-merge links /lib /lib64 /bin /sbin
+    that every PT_INTERP and every program path resolves through), which is a fact of the declared machine and in every run step, never listed by a recipe.
+    ValueError on a form that is neither; CLOSURE False takes the tops themselves (the check does not read the machine)."""
+    import envcheck
     d = g.get("debs")
     if isinstance(d, list) and all(isinstance(x, str) for x in d):
-        return list(d)
-    if isinstance(d, dict) and set(d) == {"closure"} and isinstance(d["closure"], list) and d["closure"] and all(isinstance(x, str) for x in d["closure"]):
-        return deb_closure(d["closure"]) if closure else sorted(set(d["closure"]))
-    raise ValueError(DEBS_CLOSURE_ERR)
+        got = list(d)
+    elif isinstance(d, dict) and set(d) == {"closure"} and isinstance(d["closure"], list) and d["closure"] and all(isinstance(x, str) for x in d["closure"]):
+        got = deb_closure(d["closure"]) if closure else list(d["closure"])
+    else:
+        raise ValueError(DEBS_CLOSURE_ERR)
+    return sorted(set(got) | {envcheck.RUN_LAYOUT_DEB})
 
 
 def step_inputs(rec, g):
