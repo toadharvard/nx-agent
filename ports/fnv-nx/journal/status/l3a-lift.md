@@ -1854,3 +1854,8 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Doing (farm d3dx9): rerun of d3dx9_38 and d3dx9_31 at e9352af11.
   - Doing (w7): profile pass 1 and ehflow, fix by a complexity rule.
 - Farm 3: density rerun with 171ecb8c3 cherry-picked (doing).
+- pcsrc cost on d3dx9_38: about 3 h for pass 1.
+  - Cause (w7 profile at e9352af11): entries × reachable region. 38,853 entries, each re-walking a shared ~47 KB region; 21M visits in 7 min.
+  - Taken: per-instruction memo 51073b0d3, byte-identical on the 5 small images.
+  - After the first frame: a region walk memoised by (addr, state) across entries. It isn't blocking, because the stage is content-keyed and runs on farms.
+- recipe ROOTFS_MEMO aliasing: already fixed on the trunk by w28 3478d9f07. base3 and the relift have it; farm 3 cherry-picks it onto the 4 old density heads.
