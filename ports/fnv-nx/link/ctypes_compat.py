@@ -152,8 +152,7 @@ def parse(s):
     return t
 
 
-def compatible(a, b, seen=None):
-    seen = set() if seen is None else seen
+def compatible(a, b):
     if a[0] != b[0]:
         return False
     k = a[0]
@@ -162,15 +161,15 @@ def compatible(a, b, seen=None):
     if k == 'host':
         return a[1] == b[1]
     if k in ('vec', 'complex', 'ref'):
-        return a[1] == b[1] and compatible(a[2], b[2], seen)
+        return a[1] == b[1] and compatible(a[2], b[2])
     if k == 'q':
-        return a[1] == b[1] and compatible(a[2], b[2], seen)
+        return a[1] == b[1] and compatible(a[2], b[2])
     if k in ('ptr', 'entry'):
-        return compatible(a[1], b[1], seen)
+        return compatible(a[1], b[1])
     if k == 'arr':
-        return (a[1] is None or b[1] is None or a[1] == b[1]) and compatible(a[2], b[2], seen)
+        return (a[1] is None or b[1] is None or a[1] == b[1]) and compatible(a[2], b[2])
     if k == 'fn':
-        if not compatible(a[3], b[3], seen):
+        if not compatible(a[3], b[3]):
             return False
         if a[1] is None or b[1] is None:
             ps = b[1] if a[1] is None else a[1]
@@ -178,19 +177,16 @@ def compatible(a, b, seen=None):
                 return True
             va = b[2] if a[1] is None else a[2]
             return not va and all(not (p[0] == 'sc' and p[1] in PROMOTED) for p in ps)
-        return len(a[1]) == len(b[1]) and a[2] == b[2] and all(compatible(x, y, seen) for x, y in zip(a[1], b[1]))
+        return len(a[1]) == len(b[1]) and a[2] == b[2] and all(compatible(x, y) for x, y in zip(a[1], b[1]))
     if k in ('struct', 'union'):
         if a[1] != '-' and b[1] != '-' and a[1] != b[1]:
             return False
         if a[2] is None or b[2] is None:
             return a[1] == b[1] and a[1] != '-'
-        key = (id(a), id(b), a[1], b[1])
-        if key in seen:
-            return True
-        seen.add(key)
-        return len(a[2]) == len(b[2]) and all(x[0] == y[0] and x[2] == y[2] and compatible(x[1], y[1], seen) for x, y in zip(a[2], b[2]))
+        # a parsed type is a finite tree (a recursive reference is an incomplete struct, handled above), so the walk terminates with no memo
+        return len(a[2]) == len(b[2]) and all(x[0] == y[0] and x[2] == y[2] and compatible(x[1], y[1]) for x, y in zip(a[2], b[2]))
     if k == 'enum':
-        return a[1] == b[1] and compatible(a[2], b[2], seen)
+        return a[1] == b[1] and compatible(a[2], b[2])
     raise ValueError('unknown type %r' % (a,))
 
 
