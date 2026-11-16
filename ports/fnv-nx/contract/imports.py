@@ -5,7 +5,7 @@ Inputs (all values, no file): rows from bridgetable.derive; `syms` {symbol: [(bi
 (the root itself and every link candidate, recipe.link_candidates: the roots the pinned ld may take objects from; not "every root", and not the root's `uses`); `owner_of` {(dll, name): index} of rows taken from files that belong to another owner's build (the `external` rows).
 A row is certified iff its body is proven by the symbol table of a build product:
   sym/data  a GLOBAL (or UNIQUE) symbol of type FUNC (sym) or OBJECT (data) is defined in the row's root
-  link      (a row with an export record) and rows of another owner's file: such a symbol is defined (GLOBAL or UNIQUE, the right type) by EXACTLY ONE member of the link; no member:
+  link/entry (a row with an export record; entry: a guest-state body, FUNC like link) and rows of another owner's file: such a symbol is defined (GLOBAL or UNIQUE, the right type) by EXACTLY ONE member of the link; no member:
             `external`; several: `multiple-definers` (a name two members define is not a body, it is a link error)
 Classes of an uncertified row: none (no symbol of that name is defined or referenced), unresolved-symbol (referenced only), weak (defined weak
 only), not-a-function (defined global of the wrong type), external (a link or another owner's row that no member of the link defines), multiple-definers (more than one member defines it).
@@ -38,7 +38,7 @@ def judge(rows, syms, others, owner_of):
     out = []
     for dll, name, _, conv, _, _, sym, bind in rows:
         want = "OBJECT" if conv == "data" else "FUNC"
-        if bind == "link" or (dll, name) in owner_of:
+        if bind in ("link", "entry") or (dll, name) in owner_of:
             cls = member_class(others.get(sym, {}), want)
         elif bind == "none":
             cls = "none"
