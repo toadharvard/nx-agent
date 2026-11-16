@@ -3022,3 +3022,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - The token set is sent to L3a: status proven/candidate; attr call, first-ud, ptr, seh-handler, reloc-misfit=, ud=. L3a's generator emits it.
   - L5 adds the cite form to its table header.
   - w28 next: assemble cand5 on claude/fnv-l1-contract-c5 from the trunk, taking each tree whole from its source (lift/ waits for L3a), then recipe.check over every root.
+- 12:13: L5 platform-c5 21707263c: on w28 d22308ddc, platform build green (112 objects). The header has the steamworks-sdk form.
+  - dm:13-19 are the 7 constant galaxywrp bodies (no-galaxy, u32 0).
+  - The 4 real bodies (Shutdown, RunCallbacks, Register/UnregisterCallback: lock + registry) take no row, and I accepted that.
+  - test_env_const_rows is new, and 6 dead platform_host rows are deleted. L5's warm verdict is running.
