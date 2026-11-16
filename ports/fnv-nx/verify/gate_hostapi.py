@@ -24,7 +24,7 @@ The module ids (FNVNX_EXT_*) are not services and are not items: a module id nam
 which is the only table of the header. Models of machines below the product boundary (deko3d, libnx, kernel) are modules, not services."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import shutil
@@ -294,7 +294,7 @@ def main(argv):
     finally:
         if tmp and not os.environ.get("GATE_KEEP"):
             shutil.rmtree(tmp, ignore_errors=True)
-    res = {"format": "fnvnx-gate/1", "name": "hostapi", "status": status, "universe": u, "certified": c, "uncertified": ids[:50], "detail": detail[:900]}
+    res = {"format": "fnvnx-gate/1", "name": "hostapi", "status": status, "universe": u, "certified": c, "uncertified": ids, "detail": detail[:900]}
     with open(os.path.join(os.environ["GATE_OUT"], "hostapi.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)
     print("hostapi: %s %d/%d %s" % (status, c, u, detail[:200]))

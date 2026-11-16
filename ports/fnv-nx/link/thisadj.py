@@ -29,14 +29,14 @@ construction by string splicing (`thunk_name`), the symbol-to-vtable search by p
 """
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import argparse
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import abi_native as N
-from contract import exefacts
+from fnvnx.contract import exefacts
 import exevft
 
 NAME = 'thisadj'

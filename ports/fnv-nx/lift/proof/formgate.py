@@ -23,10 +23,7 @@ Pinned model: formgate_inputs.json model_sha256 must equal the `x86_proof.ir` pi
 RED with the reason (item `inputs`, universe 1, certified 0), never skipped: no inputs file; not JSON; wrong format or keys; a path key naming an
 external that is not declared; model_sha256 differing from sail_pins.txt; (with a lifted root) the certs external that does not fetch or whose tree does
 not match its hash, certs.tsv absent or malformed. Otherwise the items are the shapes (and `<root>:shapes`); uncertified = items without a
-certificate (first 50, sorted); detail keeps the certified/universe count per family."""
-import os
-import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+certificate (every one, sorted); detail keeps the certified/universe count per family."""
 import json
 import os
 import re
@@ -38,10 +35,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LIFT = os.path.dirname(HERE)
 VERIFY = os.path.normpath(os.path.join(LIFT, "..", "verify"))
 sys.path.insert(0, LIFT)
+sys.path.insert(0, os.path.join(VERIFY, "..", "contract"))
 sys.path.insert(0, VERIFY)
 from proof import shape, symform  # noqa: E402
-from contract import gatefile  # noqa: E402     (ports/fnv-nx/contract)
-from verify import recipe  # noqa: E402
+import gatefile  # noqa: E402     (ports/fnv-nx/contract)
+import recipe  # noqa: E402
 
 NAME = "forms"
 INPUTS = os.path.join(HERE, "formgate_inputs.json")
@@ -121,7 +119,7 @@ def fetch(exts, cache):
     os.makedirs(cache, exist_ok=True)
     ws = tempfile.mkdtemp(prefix="ws-", dir=cache)   # private scratch: a second process on the same cache never shares it
     try:
-        return recipe.fetch_externals(exts, os.path.join(cache, "store"), recipe.ext_dir(cache), ws)
+        return recipe.fetch_externals(exts, os.path.join(cache, "store"), os.path.join(cache, "external"), ws)
     except recipe.BuildRed as e:
         f = e.args[0]
         raise Red("external does not fetch or match its hash: stage %s: %s" % (f["stage"], " | ".join(f["stderr"][-3:])[:300]), "forms-fetch")

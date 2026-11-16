@@ -7,7 +7,7 @@ Run as `python3 -I verdict.py CMD ...`. Exit codes: 0 ok, 1 usage/format error, 
               given, GATE_CACHE (absolute path of a caller-owned directory that outlives the run). A gate may store results in
               GATE_CACHE only under a key that covers everything it reads (its inputs' content, the declared environment, its own
               arguments); it must work, and give the same verdict, without GATE_CACHE. A gate writes
-              {"format":"fnvnx-gate/1","name","status","universe","certified","uncertified":[<=50 ids],"detail"[,"reasons":{id: text}]} at GATE_OUT/<result>
+              {"format":"fnvnx-gate/1","name","status","universe","certified","uncertified":[every id],"uncertified_n","detail"[,"reasons":{id: text}]} at GATE_OUT/<result>
               (reasons: why an uncertified id is uncertified; the first 10, each cut to its last 400 characters, join the gate's red reason).
               TMPDIR: each gate gets a private empty directory inside the run's work dir, removed after the gate on any outcome. A gate
               that leaves entries in it, or any untracked or ignored file in its worktree (but Python's __pycache__/*.pyc), is red with the names.

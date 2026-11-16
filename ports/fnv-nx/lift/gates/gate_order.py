@@ -957,7 +957,7 @@ def main(argv):
         green, u, c, bad = verdict(g, rws[g], n)
         counts = ', '.join('%s %d' % kv for kv in sorted(n.items()))
         res = {'format': 'fnvnx-gate/1', 'name': g, 'status': 'green' if green else 'red', 'universe': u, 'certified': c,
-               'uncertified': ['%s %s: %s' % r for r in bad[:50]], 'counts': n,
+               'uncertified': ['%s %s: %s' % r for r in bad], 'counts': n,
                'detail': '%d objects; struct cpu %d bytes; %d of %d certified; %s' % (nfiles, CPUSIZE, c, u, counts) if nfiles else 'no object given'}
         with open(os.path.join(os.environ['GATE_OUT'], g + '.json'), 'w') as fh: json.dump(res, fh, sort_keys=True)
         print('%s %s %d/%d' % (g, res['status'], c, u), file=sys.stderr)

@@ -14,6 +14,19 @@
    "ports/fnv-nx/link/guest.json"
   ]
  },
+ "test_modpath.py": {
+  "references": [
+   {
+    "anchor": "### Declared imports of a generator's tool (`imports`)",
+    "kind": "spec",
+    "path": "ports/fnv-nx/verify/RECIPE.md"
+   }
+  ],
+  "subject": [
+   "ports/fnv-nx/verify/recipe.py",
+   "ports/fnv-nx/verify/gate_admit.py"
+  ]
+ },
  "test_synth_names.py": {
   "references": [
    {

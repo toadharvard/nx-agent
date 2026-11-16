@@ -7,7 +7,7 @@ missing `.fnvnx.sympair`; namegate and r7 on files (positive, mutated object red
 a root with `game` and no link result is red naming the input; a root without `game` is universe 0."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import subprocess
@@ -26,7 +26,7 @@ import gate_l2native as L  # noqa: E402
 import l2sections  # noqa: E402
 import gate_build  # noqa: E402
 import gate_names  # noqa: E402
-from contract import l2sections  # noqa: E402
+from fnvnx.contract import l2sections  # noqa: E402
 SYMPAIR_KINDS = l2sections.load_kinds(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'toolchain', 'names', 'sympair_kinds.inc'))
 import gate_r7  # noqa: E402
 import synth  # noqa: E402

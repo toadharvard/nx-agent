@@ -223,7 +223,7 @@ def seeds_of(files_all, git_show):
     rel = lambda p: os.path.relpath(p, os.getcwd()) if os.path.isabs(p) else p
     seeds.add(rel(recipe.GEN_LAUNCH))
     seeds.add(HERE_REL + "/unitstage.py")
-    for p in (recipe.LD_TOOLS[0] + "/ldcheck.py", recipe.LD_TOOLS[0] + "/gateids.py", recipe.LD_TOOLS[1] + "/gatefile.py"):
+    for p in (recipe.LD_TOOLS[0] + "/ldcheck.py", recipe.LD_TOOLS[1] + "/gatefile.py"):
         seeds.add(p)
     tools = set(seeds)
     for p in sorted(files_all):
@@ -265,7 +265,7 @@ def main():
         print("  " + r[:200])
     detail = "%d findings in %d of %d closure files at %s" % (len(rows), len(res["per_file"]), res["closure"], commit[:12])
     doc = {"format": "fnvnx-gate/1", "name": "abspath", "status": status, "universe": res["closure"], "certified": res["closure"] - len(res["per_file"]),
-           "uncertified": sorted(res["per_file"])[:50], "detail": detail, "reasons": {p: str(n) for p, n in sorted(res["per_file"].items())[:50]},
+           "uncertified": sorted(res["per_file"]), "detail": detail, "reasons": {p: str(n) for p, n in sorted(res["per_file"].items())[:50]},
            "errors": rows[:50], "findings": len(rows), "per_file": res["per_file"], "commit": commit}
     with open(os.path.join(out, "abspath.json"), "w") as fh:
         json.dump(doc, fh, indent=1, sort_keys=True)

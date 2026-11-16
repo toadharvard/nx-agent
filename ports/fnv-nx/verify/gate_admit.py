@@ -61,18 +61,35 @@ def trees(r):
     return list(t) if isinstance(t, list) else [r.get("path", "")]
 
 
+MODULE_TOP = "fnvnx"   # the one top-level module name of every project module (checked against the pinned host Python by recipe.module_top_errors)
+
+
+def module_name(path, tree):
+    """The ONE module path of a root or tree PATH: `fnvnx.` + its path relative to TREE with `/` replaced by `.` (render/total -> `fnvnx.render.total`), or None below/outside TREE."""
+    rel = os.path.relpath(os.path.normpath(path), tree)
+    if rel.startswith("..") or rel == ".":
+        return None
+    return ".".join([MODULE_TOP] + rel.split(os.sep))
+
+
+def module_file(name):
+    """The tree-relative path stem of the qualified module NAME (`fnvnx.render.total.x` -> `render/total/x`), or None when NAME is not under MODULE_TOP."""
+    parts = name.split(".")
+    return "/".join(parts[1:]) if parts[0] == MODULE_TOP and len(parts) > 1 else None
+
+
 def import_roots(imports, tree):
     """{module prefix: root path} of the roots a root DECLARES in admit.json `imports` (IMPORTS: their repo paths; TREE: the project tree, ports/fnv-nx): the ONE rule of
-    cross-root Python imports. A declared root R is importable under exactly one module path: its path relative to TREE with `/` replaced by `.` (render/total ->
-    `render.total`, so `import render.total.x`). Every consumer calls this: recipe.foreign_imports, the /imp mount (R is mounted at /imp/<that relative path>, /imp is
+    cross-root Python imports. A declared root R is importable under exactly one module path: `fnvnx.` + its path relative to TREE with `/` replaced by `.` (render/total ->
+    `fnvnx.render.total`, so `import fnvnx.render.total.x`; `fnvnx` is the one top-level name, so no project module can shadow a standard-library or pinned one: `platform`). Every consumer calls this: recipe.foreign_imports, the /imp mount (R is mounted at /imp/fnvnx/<that relative path>, /imp is
     the PYTHONPATH), gate_pure (the --base of the run is TREE) and gate_abspath. The packages are namespace packages (PEP 420): no __init__.py is invented. A bare
     import of a module of another root (`import x` for render/total/x.py) is not a spelling of this rule: it is red, with the qualified name as the hint."""
     out = {}
     for r in imports:
-        rel = os.path.relpath(os.path.normpath(r), tree)
-        if rel.startswith(".."):
-            raise ValueError("import root %s lies outside %s" % (r, tree))
-        out[".".join(rel.split(os.sep))] = r
+        nm = module_name(r, tree)
+        if nm is None:
+            raise ValueError("import root %s lies outside (or is) %s" % (r, tree))
+        out[nm] = r
     return out
 
 
@@ -133,9 +150,9 @@ def derived_imports(rows, files, repo="."):
     paths = sorted({r.get("path", "") for r in rows})
     prefixes = {}
     for p in paths:
-        rel = os.path.relpath(os.path.normpath(p), TREE)
-        if not rel.startswith("..") and rel != ".":
-            prefixes[".".join(rel.split(os.sep))] = p
+        nm = module_name(p, TREE)
+        if nm:
+            prefixes[nm] = p
     trees_of = sorted(((t, r["path"]) for r in rows for t in trees(r)), key=lambda x: -len(x[0]))
     edges = {p: set() for p in paths}
     errs = []

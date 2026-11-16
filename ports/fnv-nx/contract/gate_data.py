@@ -8,8 +8,8 @@ Several native copies of one address: each is judged, the worst verdict stands.
 import bisect, collections, os, re
 
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)
-from contract import store
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name (contract.X)
+from fnvnx.contract import store
 
 NAME = 'data'
 ORDER = ('none', 'equal', 'subset', 'superset', 'different')   # best .. worst

@@ -5,7 +5,7 @@ libc symbol is the archive member, a linker-defined name is `<linker>`, and ever
 Plain script: exit 0 on pass. Needs gcc, ld, readelf and the static libc.a on the machine; the layouts are those of binutils 2.42."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import os
 import struct
 import subprocess
@@ -139,7 +139,7 @@ def main():
 
     # the consumer of the ABS symbols (contract/pcrel_abs.py) reads the record, and agrees with nm
     import json
-    from contract import pcrel_abs
+    from fnvnx.contract import pcrel_abs
     json.dump(rec, open("facts.json", "w"))
     nm_abs = {f[2] for f in (l.split() for l in sh("nm", "x.elf").splitlines()) if len(f) == 3 and f[1] in "Aa"}
     check("pcrel_abs.absolute_symbols reads the record and equals nm's absolute symbols (and has the --defsym)",

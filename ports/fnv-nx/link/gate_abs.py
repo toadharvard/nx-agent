@@ -18,19 +18,18 @@ Red items:
     of the linker; the same id)
   - a symbol an input defines as SHN_ABS (not a file or section symbol)                      id `member:def:symbol`
 member is `file` for an object and `archive(member)` for an archive member (base names); offsets are 8 hex digits.
-Gate file `abs` ($GATE_OUT/abs.json, gatefile.py; full list in $GATE_OUT/abs.ids): universe = relocations + defined symbols;
+Gate file `abs` ($GATE_OUT/abs.json, gatefile.py: every id): universe = relocations + defined symbols;
 certified = universe - red.  Counts on stdout.  Exit status 1 when red.
 """
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import argparse
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from contract import gatefile
-import gateids
+from fnvnx.contract import gatefile
 import relocs
 
 SHN_UNDEF = 0
@@ -69,7 +68,6 @@ def main():
     uni, red = check(paths, relocs.abs_names(a.elf) if a.elf else frozenset())
     detail = 'absolute symbols in the link: %d of %d items, %d files' % (len(red), uni, len(paths))
     gatefile.write('abs', uni, uni - len(red), red, detail)
-    gateids.write_ids('abs', red)
     print(detail)
     sys.exit(1 if red else 0)
 

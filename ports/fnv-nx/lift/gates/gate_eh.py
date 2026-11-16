@@ -173,7 +173,7 @@ def main(argv):
     elif nred or unc:
         status = 'red'; detail = '%d red EH facts, %d of %d table targets are no lifted entry' % (nred, len(unc), uni)
     else: status, detail = 'green', '%d of %d table targets are lifted entries, no red EH fact' % (uni, uni)
-    res = {'format': 'fnvnx-gate/1', 'name': 'eh', 'status': status, 'universe': uni, 'certified': uni - len(unc), 'uncertified': unc[:50],
+    res = {'format': 'fnvnx-gate/1', 'name': 'eh', 'status': status, 'universe': uni, 'certified': uni - len(unc), 'uncertified': unc,
            'violations': {i: {k: {'count': len(x), 'first': x[:20]} for k, x in v.items()} for i, v in sorted(red.items())}, 'detail': detail}
     with open(os.path.join(os.environ['GATE_OUT'], 'eh.json'), 'w') as fh:
         json.dump(res, fh, sort_keys=True)

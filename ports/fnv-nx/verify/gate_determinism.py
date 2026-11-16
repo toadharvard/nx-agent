@@ -128,7 +128,7 @@ def main():
                                                                                      "2 cold builds, no GATE_CACHE so no warm build", secs)
                                       if items else "no product root (nothing to build yet)")
     res = {"format": "fnvnx-gate/1", "name": "determinism", "status": "red" if why else "green", "universe": len(items),
-           "certified": len(good), "uncertified": bad[:50], "detail": detail}
+           "certified": len(good), "uncertified": bad, "detail": detail}
     with open(os.path.join(os.environ["GATE_OUT"], "determinism.json"), "w") as f:
         json.dump(res, f, sort_keys=True)
     print("determinism: %s %d/%d %s" % (res["status"], res["certified"], res["universe"], detail[:200]))

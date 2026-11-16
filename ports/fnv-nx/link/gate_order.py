@@ -29,14 +29,14 @@ part of rule R9 (docs/ORDERING.md).
 Pure: a function of the object bytes."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import a64order  # noqa: E402
-from contract import gatefile  # noqa: E402
+from fnvnx.contract import gatefile  # noqa: E402
 
 NAME = 'order'
 

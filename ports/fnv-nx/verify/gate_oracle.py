@@ -429,8 +429,8 @@ def main():
     if dang:
         detail += "; %d dangling oracle.json keys: %s" % (len(dang), ", ".join(dang[:5]))
     res = {"format": "fnvnx-gate/1", "name": "oracle", "status": status, "universe": len(files) + len(dang), "certified": n,
-           "uncertified": (sorted(bad) + dang)[:50], "detail": "; ".join(errors + [detail]),
-           "reasons": dict({f: bad[f] for f in sorted(bad)[:50]}, **{d: "names no tracked test file" for d in dang[:50]}), "references": kinds}
+           "uncertified": (sorted(bad) + dang), "detail": "; ".join(errors + [detail]),
+           "reasons": dict({f: bad[f] for f in sorted(bad)}, **{d: "names no tracked test file" for d in dang}), "references": kinds}
     with open(os.path.join(out, "oracle.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)
     return 0 if status == "green" else 2

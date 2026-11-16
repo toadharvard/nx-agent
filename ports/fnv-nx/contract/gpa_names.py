@@ -36,12 +36,12 @@ import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)   # the gate runs it with -I: the script's directory is not on the path
-from contract import argflow
-from contract import imagerec
-from contract import gatefile
-from contract import iat
-from contract import memfx
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name (contract.X)   # the gate runs it with -I: the script's directory is not on the path
+from fnvnx.contract import argflow
+from fnvnx.contract import imagerec
+from fnvnx.contract import gatefile
+from fnvnx.contract import iat
+from fnvnx.contract import memfx
 
 
 def module_dlls(text):
@@ -268,7 +268,7 @@ def main(argv=None):
         with open(a.bridge) as fh:
             have, names, mset = platform_pairs(fh.read(), mods)
         miss = check_platform(results, have, names, mset)
-        print('not provided by the platform: %d %s' % (len(miss), miss[:20]))
+        print('not provided by the platform: %d %s' % (len(miss), miss))
     for h in a.handle:
         nm, va = h.split(':')
         r = handle_report(images[nm.lower()], int(va, 16))

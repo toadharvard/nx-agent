@@ -8,10 +8,10 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, '..', '..'))   # ports/fnv-nx: another root's module by its qualified name (verify.X, contract.X)
-from verify import cas
-from contract import imagerec
-from contract import treehash
+sys.path.insert(0, os.path.join(HERE, '..', '..', ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): another root's module by its qualified name (verify.X, contract.X)
+from fnvnx.verify import cas
+from fnvnx.contract import imagerec
+from fnvnx.contract import treehash
 
 PINNED = "0835a6860c2e6dbc1594a47f0a466680d789a8c931b496d8f016b1c632637255"   # tree_hash of the fixture below, as verify/cas.py computed it before the rule moved here
 OK = []

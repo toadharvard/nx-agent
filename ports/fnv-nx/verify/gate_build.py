@@ -59,7 +59,7 @@ def quantify(repo, judge_root):
             why.append("%s: %s" % (root, rd))
     if not roots:
         return 0, 0, [], NO_ROOT
-    return u, c, sorted(ids)[:50], ("; ".join(why) or "%d roots" % len(roots))[:900]
+    return u, c, sorted(ids), ("; ".join(why) or "%d roots" % len(roots))[:900]
 
 
 def tree_of(repo="."):
@@ -215,7 +215,7 @@ def main():
     detail = "; ".join(why) or ("%d units/ELF built from %d product and test roots" % (len(items), len(buildable_roots(repo))) if items else
                                 NO_ROOT)
     res = {"format": "fnvnx-gate/1", "name": "build", "status": "red" if why else "green", "universe": len(items),
-           "certified": len(set(done) & set(items)), "uncertified": bad[:50], "detail": detail[:900]}
+           "certified": len(set(done) & set(items)), "uncertified": bad, "detail": detail[:900]}
     with open(os.path.join(os.environ["GATE_OUT"], "build.json"), "w") as f:
         json.dump(res, f, sort_keys=True)
     print("build: %s %d/%d %s" % (res["status"], res["certified"], res["universe"], detail[:200]))
