@@ -673,6 +673,23 @@ The owner's words: "Что ещё так проебано? Перепровер�
 - **Residue.** A site that this rule does not close, for example with no dominating guard on the same cell, is traced and
   reported to the orchestrator with its address. Nothing is chosen for it.
 
+## Orchestrator decision of 2026-11-16 03:05Z: lift/rt FP helper bodies (binding for L3b, L3a, L1)
+
+- **The gap.** Shape certificates stop at the call into a lift/rt helper (`sse_f2i`, `fv_i` and every helper a Form
+  calls), so the helper's C body is not certified by them. gate_fpexact check 0 claimed otherwise. That was a false
+  claim, and it is corrected now: the check states exactly what is certified.
+- **Helpers with 32-bit inputs.** An exhaustive check in a recipe host-test root (L3a w13). That is a sound rule, done
+  now.
+- **Helpers with 64-bit inputs.** These are a REMOVE record in `verify/ASSUMPTIONS.json`: "the f64-input lift/rt FP
+  helpers equal their SDM instruction semantics", owner L3b. It is not an OWNER record and not red.
+  - It is removed by isla over the helper's host object, once the pinned Sail model covers cvttsd2si, ucomisd and the
+    other SSE FP instructions through the ACL2-derived patch that L3b owns for the model gaps. That is sound under
+    OWNER 1 and 9.
+  - The work comes after the first frame, since it blocks no step of the path.
+  - No new trusted tool (CBMC or ESBMC) is pinned for it.
+- **No new gaps.** A helper added after this decision enters the same rule. The REMOVE record covers exactly the f64-input
+  helpers, derived from the Form→helper call table and not from a list.
+
 ## Orchestrator decision of 2026-11-15 09:20Z: weekly budget (binding for every session)
 
 - The owner's usage page reads: weekly 29 % used, reset on Saturday 2026-11-21 18:00Z. At the pace so far the limit ends
