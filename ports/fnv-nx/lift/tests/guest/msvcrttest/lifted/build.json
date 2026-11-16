@@ -15,7 +15,8 @@
  },
  "include": [
   "ports/fnv-nx/lift/tests/guest/msvcrttest/lifted/inc",
-  "ports/fnv-nx/shim/include"
+  "ports/fnv-nx/shim/include",
+  "ports/fnv-nx/platform/include"
  ],
  "units": "all",
  "generated": [
@@ -112,6 +113,10 @@
   {
    "root": "ports/fnv-nx/platform",
    "output": "X86SYS"
+  },
+  {
+   "root": "ports/fnv-nx/platform",
+   "output": "INCLUDE"
   }
  ],
  "include_uses": [
