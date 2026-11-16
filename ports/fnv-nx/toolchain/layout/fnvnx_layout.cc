@@ -478,7 +478,16 @@ static void emit_decltype()
   }
   /* RULE DECLTYPE-REF: a referenced identifier that is not `_Z` has a line from exactly one of the sources above (a declaration of the unit, builtin_info's names, a libcall,
    * a plugin writer). `builtin` is only what builtin_info names; any other is an error (no default reason: that would be a guess). */
-  for (auto &nm : pending_refs) if (!rows.count(nm)) dl_error("a referenced symbol has no declaration line (no declaration, builtin_info entry, libcall or plugin writer names it)", nm);
+  /* the error names the symbol (its assembler name), its declaration and the location of that declaration when the tree has one (symtab_node::get_for_asmname:
+   * a symbol declared by a macro or written by a plugin has a decl with its own DECL_SOURCE_LOCATION); a symbol with no node is named by its assembler name alone */
+  for (auto &nm : pending_refs) if (!rows.count(nm)) {
+    tree id = get_identifier(nm.c_str());
+    symtab_node *sn = symtab_node::get_for_asmname(id);
+    std::string where = sn ? "declared at " + std::string(expand_location(DECL_SOURCE_LOCATION(sn->decl)).file ? expand_location(DECL_SOURCE_LOCATION(sn->decl)).file : "<builtin>") + ":" + std::to_string(expand_location(DECL_SOURCE_LOCATION(sn->decl)).line) + " as " + (DECL_NAME(sn->decl) ? IDENTIFIER_POINTER(DECL_NAME(sn->decl)) : "<unnamed>") : "no symbol table node";
+    if (sn) error_at(DECL_SOURCE_LOCATION(sn->decl), "%<.fnvnx.decltype%>: a referenced symbol has no declaration line (no declaration, builtin_info entry, libcall or plugin writer names it): asmname %qs, %s", nm.c_str(), where.c_str());
+    else dl_error("a referenced symbol has no declaration line (no declaration, builtin_info entry, libcall or plugin writer names it)", "asmname " + nm + ", " + where);
+    dl_failed = true;
+  }
   fprintf(asm_out_file, "\t.pushsection\t.fnvnx.decltype,\"\",%%progbits\n");
   for (auto &r : rows) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", escape(r.first + "\t" + r.second).c_str());
   fprintf(asm_out_file, "\t.popsection\n");
