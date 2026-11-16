@@ -138,6 +138,7 @@ def emit_form(cx, ins):
     if cx.macc == 'M' and not cx.pfx:
         cx.finfo[cx.a] = flaglive.info(F, dsl.InlineEmit(F.roots(), ()).used, succs(cx, F, ins), cx.a in cx.guarded)
     D = cx.drop.get(cx.a)
+    names = F.flag_names()
     if D:       # FLAGLIVE.md: the Form minus the writes of the flags that are dead after the instruction; the Form's own text is unchanged
         F = copy.copy(F)
         F.flags = [x for x in F.flags if x[0] not in D]
@@ -147,6 +148,7 @@ def emit_form(cx, ins):
     L, ref = F.to_c_inline(varc(cx), fault_fn(cx), flo_fn, force, cx.macc, S)
     nF = len(L)
     L += xfer(ref)
+    cx.fsw.append((cx.a, names, bool(L)))      # the flag-write record of this instruction: what its Form writes (before the drop) and whether a block `{ ... }` is emitted
     if L:
         if S is not None:
             cx.tag = 'form: block braces'

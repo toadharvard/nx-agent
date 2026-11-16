@@ -1,0 +1,13 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "flaglive",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_flaglive.py"
+ ],
+ "result": "flaglive.json",
+ "covers": [
+  "lifted"
+ ]
+}

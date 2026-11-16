@@ -95,6 +95,42 @@ def work(addrs):
     return texts, dict(forms), missing, [(f, r, x) for f, e in encs.items() for r, x in e.items()], dict(shapes), drops, pvs
 
 
+def check_work(addrs):
+    """--flagcheck: lift each entry and check it against the pack's text and flag-drop rows (tools/flagcheck.py) -> (blocks, differences)"""
+    from fnvlift import flaglive
+    import flagcheck
+    texts, rows = G['chk']; blocks, diffs = 0, []
+    for a in addrs:
+        t, ins = lift_one_rec(a)
+        if t is None: diffs.append('%08x: the entry does not lift (%s)' % (a, ins)); continue
+        if a not in texts: diffs.append('%08x: the pack has no text for it' % a); continue
+        fl = lifted.S['fl']
+        blocks += sum(1 for _, _, e in fl['fsw'] if e)
+        diffs += flagcheck.check_function(a, texts[a].decode(), fl, rows.get(a, {}), flaglive.mask, flaglive.dropped)
+    return blocks, diffs
+
+
+def lift_one_rec(a):
+    t, ins, _ = lifted.lift_with_paths(a)
+    return t, ins
+
+
+def flagcheck_shard(a):
+    import fnvlift as L, flagcheck
+    K, N = map(int, a.shard.split('/'))
+    ent = L.universe.load()[0]; mine = [x for x in sorted(ent) if bucket(x) % N == K]
+    texts = read_texts('%s/texts_%d.txt' % (a.flagcheck, K)); rows = flagcheck.read_rows('%s/flagdrop_%d.tsv' % (a.flagcheck, K))
+    extra = sorted((set(texts) | set(rows)) - set(mine))
+    chk = (texts, rows)
+    with mp.Pool(a.jobs, initializer=init, initargs=(a.exe, a.base, ent, a.emit, a.jtab, False, chk)) as p: got = list(p.imap(check_work, [mine[j:j + BATCH] for j in range(0, len(mine), BATCH)], 1))
+    diffs = ['%08x: in the pack files of shard %d/%d but not an entry of it' % (x, K, N) for x in extra] + [d for g in got for d in g[1]]
+    res = dict(shard=a.shard, entries=len(mine), blocks=sum(g[0] for g in got), rows=sum(len(v) for v in rows.values()), differences=len(diffs), first=diffs[:20])
+    json.dump(res, open('%s/flagcheck_%d.json' % (a.out, K), 'w'), sort_keys=True)
+    for d in diffs[:20]: print(d)
+    print('flagcheck shard %d/%d: entries %d, Form blocks %d, list rows %d, differences %d' % (K, N, len(mine), res['blocks'], res['rows'], len(diffs)))
+    return 1 if diffs else 0
+
+
 def text_records(texts):
     """the bytes of texts_K.txt, record by record (the one definition: write_texts writes them, texts_digest hashes them)"""
     for a, t in sorted(texts):
@@ -127,10 +163,12 @@ def read_texts(path):
             out[a] = f.read(int(m[2]))
 
 
-def init(exe, base, ent, emit, jtab, pv=False):
-    """the state of a lifting process (the parent and every pool worker), built from the arguments: the result does not depend on the start method"""
+def init(exe, base, ent, emit, jtab, pv=False, chk=None):
+    """the state of a lifting process (the parent and every pool worker), built from the arguments: the result does not depend on the start method.
+    chk: (texts, flag-drop rows) of the shard's pack files (--flagcheck)"""
     import fnvlift as L
     G.update(ent=ent, prov=pv)
+    if chk: G['chk'] = chk
     lifted.begin(L.Image(exe, base), emit, jtab)
 
 
@@ -309,6 +347,7 @@ def main():
     A('--exe', help='the exe (or, with --module, ignored: the module file is located in --moddirs)'); A('--universe', help='universe.tsv of the image (with --module: derived below --facts-out)')
     A('--module'); A('--modules', help='modules.tsv (the loader module table)'); A('--moddirs', help='DIR[:DIR...] that hold the module files'); A('--facts-out', help='where tools/universe.py --module wrote the module facts')
     A('--prov', action='store_true', help='shard mode: write ONLY prov_K.json, the provenance side table of the emitted bytes (fnvlift/prov.py) and the digest of the texts; every entry is lifted with the tag off and on and the two texts must be equal')
+    A('--flagcheck', metavar='DIR', help='shard mode: check DIR/texts_K.txt and DIR/flagdrop_K.tsv of the same shard against a fresh lift (tools/flagcheck.py); writes flagcheck_K.json, exit 1 on any difference')
     A('--emit', default='dsl', choices=['dsl'], help='dsl: integer instructions from the proven DSL forms (fnvlift/f_dsl.py) before the hand handlers')
     A('--jtab', default=None, help='ehtables.json of the module (tools/ehtables.py facts, `jtab_tables`)'); A('--l3', default=None)
     A('--lift', help='the lift/ directory (fnvlift/, rt/) when it is not the parent of this tool (a recipe stage mounts it as a declared input)')
@@ -325,6 +364,7 @@ def main():
     if not a.finish: fnvlift.inputs.configure(universe=a.universe, fpstate=a.fpstate, fpdepth=a.fpdepth, x86sys=a.x86sys, sdmrows=a.sdmrows, cpumodel=a.cpumodel, rcptab=a.rcptab, rcpcert=a.rcpcert, segwrites=a.segwrites, **({'udsail': a.udsail} if a.udsail else {}), image=os.path.splitext(a.module)[0].lower() if a.module else 'exe')      # finish merges texts: it reads no lifter input
     os.makedirs(a.out, exist_ok=True)
     if a.finish: finish(a)
+    elif a.shard and a.flagcheck: sys.exit(flagcheck_shard(a))
     elif a.shard: shard(a)
     else: ap.error('--shard K/N or --finish')
 

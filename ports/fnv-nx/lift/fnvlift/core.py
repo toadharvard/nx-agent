@@ -92,6 +92,7 @@ class Ctx:
         self.drop = {}                           # address -> the flags whose write is not emitted (second pass)
         self.polls = frozenset()                 # suspension points P (flaglive.poll_set): an FNVL_POLL is the first emission at each (second pass)
         self.succ = {}                           # address -> the addresses of this function that the instruction's emitted control flow reaches by goto or by its fall-through (the CFG of poll_set)
+        self.fsw = []                            # flag-write record (tools/flagcheck.py): one (address, the flags the Form writes in emission order, block emitted) per Form instruction, in emission order; never read by the emitter
         self.raises = set()                      # addresses of instructions that can raise: ContinueExecution resumes there, so they are labels of the loop
 
     def edge(self, t):
@@ -433,6 +434,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     assert meta2['paths'] == meta['paths'] and {a: cx2.succ.get(a, set()) for a in cx2.insns} == {a: cx.succ.get(a, set()) for a in cx.insns}
     meta2['flagdrop'] = {a: flaglive.mask(m) for a, m in sorted(drop.items())}
     meta2['poll'] = sorted(P)
+    meta2['fl'] = dict(finfo=cx.finfo, poll=sorted(P), fsw=cx2.fsw)       # the record of the lift (tools/flagcheck.py): pass 1's Forms and P, and the flag-write record of the pass whose text is returned
     return txt, meta2
 
 
