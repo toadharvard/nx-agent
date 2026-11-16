@@ -23,6 +23,7 @@ The output depends on the objects' bytes and relative paths only."""
 import argparse, os, re, sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)
+from contract import dllkind
 from contract import l2sections
 from link import ctypes_compat
 
@@ -37,8 +38,8 @@ IDENT = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\Z')
 
 
 def check_fields(mod, name, sym, kind, where, n):
-    if not MODULE.match(mod):
-        raise ValueError('%s: record %d: module %r is not a lower-case *.dll name' % (where, n, mod))
+    if mod != dllkind.RUNTIME and not MODULE.match(mod):
+        raise ValueError('%s: record %d: module %r is neither the runtime module %s nor a lower-case *.dll name' % (where, n, mod, dllkind.RUNTIME))
     l2sections._need(name, where, n, 'import name')
     if not IDENT.match(sym):
         raise ValueError('%s: record %d: symbol %r is not a C identifier' % (where, n, sym))
