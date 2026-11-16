@@ -11,7 +11,7 @@ does not model (ffree, fincstp, fdecstp: X87Dyn from the handlers)."""
 import os
 from capstone import x86 as X
 from .core import X87Dyn, Unsupported
-from . import sites, inputs
+from . import sites, inputs, prov
 
 TAB = None
 
@@ -288,6 +288,8 @@ def fix_lines(cx, a, n0):
             t = t.replace('SYNC_IN;', 'SYNC_IN;' + load(da))
         elif 'goto nonlocal;' in t and 'SYNC_IN;' not in t:
             t = t.replace('goto nonlocal;', store(cx, d) + 'goto nonlocal;')
+        if prov.ON and len(t) != len(L[i]):
+            cx.PX.append((i, ('f_x87_ctl.fix_lines', 'fix_lines: x87 static stack traffic at SYNC_OUT / SYNC_IN / goto nonlocal'), len(t) - len(L[i])))
         L[i] = t
 
 

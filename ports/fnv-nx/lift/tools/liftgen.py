@@ -40,12 +40,40 @@ def lift_one(a):
     """-> (text, (form counter, form rows, shape counter)) or (None, reason)"""
     from proof import shape
     import formcert
-    t, ins = lifted.lift_with_instructions(a)
-    if t is None: return None, ins
+    if G.get('prov'):      # --prov: the text is the tag-OFF text; the tag-ON lift of the same entry must give the same bytes (checked here for every entry of the universe)
+        from fnvlift import prov
+        prov.ON = False
+        t, ins = lifted.lift_with_instructions(a)
+        if t is None: return None, ins
+        prov.take(); prov.ON = True
+        try: t_on, _ = lifted.lift_with_instructions(a)
+        finally: prov.ON = False
+        if t_on != t: raise SystemExit('liftgen --prov: the text of entry %08x differs with the tag on' % a)
+    else:
+        t, ins = lifted.lift_with_instructions(a)
+        if t is None: return None, ins
+    t0 = t
     t = re.sub(r'extern "C" void (L_%08x\(void\)\n\{)' % a, r'extern "C" __attribute__((section(".text.fnvl"))) void \1', t, count=1)
     assert '.text.fnvl' in t
+    pv = prov_record(ins, t0, t) if G.get('prov') else None
     return t, (formcert.census(ins), [(formcert.form_key(i), bytes(i.bytes), x) for x, i in ins.items()],
-               collections.Counter((shape.shape_key(i), shape.family(i)) for i in ins.values()))
+               collections.Counter((shape.shape_key(i), shape.family(i)) for i in ins.values()), pv)
+
+
+def prov_record(ins, t0, t):
+    """the provenance record of the function just lifted (fnvlift/prov.py), with the section attribute liftgen adds and the bytes per form key / shape family"""
+    from fnvlift import prov
+    from proof import shape
+    import formcert
+    r = prov.take()
+    if r is None or r['text'] != len(t0): raise SystemExit('liftgen --prov: no provenance record for the text just lifted')
+    r['cats']['liftgen | section attribute (.text.fnvl)'] = [len(t) - len(t0), 0]
+    assert sum(v[0] for v in r['cats'].values()) == len(t)
+    forms, fams = collections.defaultdict(lambda: [0, 0]), collections.defaultdict(lambda: [0, 0])
+    for va, nb in r['insb'].items():
+        i = ins[va]; f = forms[formcert.form_key(i)]; f[0] += nb; f[1] += 1
+        g = fams[shape.family(i)]; g[0] += nb; g[1] += 1
+    return dict(cats=r['cats'], forms=dict(forms), fams=dict(fams), n=r['n'], text=len(t))
 
 
 def enc_add(encs, rows):
@@ -59,20 +87,31 @@ def enc_add(encs, rows):
 
 
 def work(addrs):
-    ent = G['ent']; texts, forms, missing, encs, shapes = [], collections.Counter(), [], {}, collections.Counter()
+    ent = G['ent']; texts, forms, missing, encs, shapes = [], collections.Counter(), [], {}, collections.Counter(); pvs = []
     for a in addrs:
         t, x = lift_one(a)
         if t is None: missing.append((a, ent[a][0], x))
-        else: texts.append((a, t)); forms.update(x[0]); enc_add(encs, x[1]); shapes.update(x[2])
-    return texts, dict(forms), missing, [(f, r, x) for f, e in encs.items() for r, x in e.items()], dict(shapes)
+        else: texts.append((a, t)); forms.update(x[0]); enc_add(encs, x[1]); shapes.update(x[2]); pvs.append(x[3])
+    return texts, dict(forms), missing, [(f, r, x) for f, e in encs.items() for r, x in e.items()], dict(shapes), pvs
+
+
+def text_records(texts):
+    """the bytes of texts_K.txt, record by record (the one definition: write_texts writes them, texts_digest hashes them)"""
+    for a, t in sorted(texts):
+        b = t.encode()
+        if not b.endswith(b'\n'): b += b'\n'
+        yield b'//@ %08x %d\n' % (a, len(b)); yield b
 
 
 def write_texts(path, texts):
     with open(path, 'wb') as f:
-        for a, t in sorted(texts):
-            b = t.encode()
-            if not b.endswith(b'\n'): b += b'\n'
-            f.write(b'//@ %08x %d\n' % (a, len(b))); f.write(b)
+        for r in text_records(texts): f.write(r)
+
+
+def texts_digest(texts):
+    h = hashlib.sha256()
+    for r in text_records(texts): h.update(r)
+    return h.hexdigest()
 
 
 def read_texts(path):
@@ -88,10 +127,10 @@ def read_texts(path):
             out[a] = f.read(int(m[2]))
 
 
-def init(exe, base, ent, emit, jtab):
+def init(exe, base, ent, emit, jtab, pv=False):
     """the state of a lifting process (the parent and every pool worker), built from the arguments: the result does not depend on the start method"""
     import fnvlift as L
-    G.update(ent=ent)
+    G.update(ent=ent, prov=pv)
     lifted.begin(L.Image(exe, base), emit, jtab)
 
 
@@ -99,8 +138,8 @@ def shard(a):
     import fnvlift as L, fnvlift.core as core, formcert
     K, N = map(int, a.shard.split('/')); out = a.out
     ent = L.universe.load()[0]; mine = [x for x in sorted(ent) if bucket(x) % N == K]      # shard K of N: the entries whose unit bucket is K mod N (the rule of the pack's units)
-    init(a.exe, a.base, ent, a.emit, a.jtab)
-    with mp.Pool(a.jobs, initializer=init, initargs=(a.exe, a.base, ent, a.emit, a.jtab)) as p: got = list(p.imap(work, [mine[j:j + BATCH] for j in range(0, len(mine), BATCH)], 1))
+    init(a.exe, a.base, ent, a.emit, a.jtab, a.prov)
+    with mp.Pool(a.jobs, initializer=init, initargs=(a.exe, a.base, ent, a.emit, a.jtab, a.prov)) as p: got = list(p.imap(work, [mine[j:j + BATCH] for j in range(0, len(mine), BATCH)], 1))
     texts = [t for g in got for t in g[0]]; miss = sorted(m for g in got for m in g[2])
     forms = collections.Counter()
     for g in got: forms.update(g[1])
@@ -108,6 +147,10 @@ def shard(a):
     for g in got: enc_add(encs, g[3])
     shapes = collections.Counter()
     for g in got: shapes.update(g[4])
+    if a.prov:      # the measurement: the side table of the emitted bytes and the digest of the texts (= sha256 of texts_K.txt of the same shard without --prov); no other output
+        write_prov('%s/prov_%d.json' % (out, K), [p for g in got for p in g[5]], dict(shard=a.shard, entries=len(mine), lifted=len(texts), missing=len(miss), texts_sha256=texts_digest(texts)))
+        print('shard %d/%d (prov): entries %d lifted %d missing %d; text bytes %d' % (K, N, len(mine), len(texts), len(miss), sum(len(t) for _, t in texts)))
+        return
     certs = formcert.Certs(a.certs)
     json.dump(inputs(a), open('%s/inputs_%d.json' % (out, K), 'w'), sort_keys=True)      # what this shard generated from (finish checks that every shard of an image agrees)
     write_texts('%s/texts_%d.txt' % (out, K), texts)
@@ -117,6 +160,18 @@ def shard(a):
     w('encs', [(f, r.hex(), '%08x' % x) for f, e in sorted(encs.items()) for r, x in sorted(e.items(), key=lambda t: (t[1], t[0]))])
     w('shapes', [(k, fam, n) for (k, fam), n in sorted(shapes.items(), key=lambda t: (t[0][0].encode(), t[0][1]))])    # shape_key, family, instruction count (L3b formgate)
     print('shard %d/%d: entries %d lifted %d missing %d; text bytes %d; forms %d' % (K, N, len(mine), len(texts), len(miss), sum(len(t) for _, t in texts), len(forms)))
+
+
+def write_prov(path, pvs, extra):
+    """--prov: the provenance side table of this shard (sums over its functions; fnvlift/prov.py categories, bytes per form key and per shape family). The texts are unchanged."""
+    cats, forms, fams = collections.defaultdict(lambda: [0, 0]), collections.defaultdict(lambda: [0, 0]), collections.defaultdict(lambda: [0, 0])
+    n = text = 0
+    for p in pvs:
+        for dst, src in ((cats, p['cats']), (forms, p['forms']), (fams, p['fams'])):
+            for k, v in src.items(): dst[k][0] += v[0]; dst[k][1] += v[1]
+        n += p['n']; text += p['text']
+    if sum(v[0] for v in cats.values()) != text: sys.exit('liftgen --prov: the categories do not add up to the text bytes')
+    json.dump(dict(format='fnvnx-lift-prov/1', functions=len(pvs), insns=n, text_bytes=text, cats=cats, forms=forms, fams=fams, **extra), open(path, 'w'), sort_keys=True)
 
 
 def sha(path):
@@ -248,6 +303,7 @@ def main():
     A('--shard'); A('--finish', action='store_true'); A('--out'); A('--jobs', type=int, default=3)
     A('--exe', help='the exe (or, with --module, ignored: the module file is located in --moddirs)'); A('--universe', help='universe.tsv of the image (with --module: derived below --facts-out)')
     A('--module'); A('--modules', help='modules.tsv (the loader module table)'); A('--moddirs', help='DIR[:DIR...] that hold the module files'); A('--facts-out', help='where tools/universe.py --module wrote the module facts')
+    A('--prov', action='store_true', help='shard mode: write ONLY prov_K.json, the provenance side table of the emitted bytes (fnvlift/prov.py) and the digest of the texts; every entry is lifted with the tag off and on and the two texts must be equal')
     A('--emit', default='dsl', choices=['dsl'], help='dsl: integer instructions from the proven DSL forms (fnvlift/f_dsl.py) before the hand handlers')
     A('--jtab', default=None, help='ehtables.json of the module (tools/ehtables.py facts, `jtab_tables`)'); A('--l3', default=None)
     A('--lift', help='the lift/ directory (fnvlift/, rt/) when it is not the parent of this tool (a recipe stage mounts it as a declared input)')

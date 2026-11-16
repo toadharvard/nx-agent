@@ -19,7 +19,7 @@ loop*, and the step repeat of rep string forms, whose eip is `ite(more, this add
 expression (indirect jmp / call, ret) -> f_flow.jmp_indirect / call_xfer / ret_xfer with the C text of the node, the kind chosen by the mnemonic."""
 from fnvlift.core import CC, SKIP, SUB, Unsupported
 from fnvlift import f_flow
-from fnvlift import dsl, faults
+from fnvlift import dsl, faults, prov
 
 from proof import forms, forms_alu, forms_flow, forms_move, forms_simd, forms_ssefp, forms_sys             # noqa: F401  (proof/forms.py: the Form builders; forms_* register their handlers in forms.H)
 
@@ -122,10 +122,19 @@ def emit_form(cx, ins):
         return SKIP
     F = forms.build(ins, cx.a)
     force, xfer = transfer(cx, ins, F)
-    L, ref = F.to_c_inline(varc(cx), fault_fn(cx), flo_fn, force, cx.macc)
+    S = [] if prov.ON else None      # provenance measurement (fnvlift/prov.py): the Form section of each line; the emitted lines are the same
+    L, ref = F.to_c_inline(varc(cx), fault_fn(cx), flo_fn, force, cx.macc, S)
+    nF = len(L)
     L += xfer(ref)
     if L:
+        if S is not None:
+            cx.tag = 'form: block braces'
         cx.em('{')
-        for l in L:
+        for i, l in enumerate(L):
+            if S is not None:
+                cx.tag = S[i] if i < nF else 'form: control transfer (f_flow)'
             cx.em(l)
+        if S is not None:
+            cx.tag = 'form: block braces'
         cx.em('}')
+        cx.tag = None

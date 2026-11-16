@@ -7,6 +7,8 @@ import bisect
 import re
 import capstone
 from capstone import x86 as X
+import sys
+from . import prov
 
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 md.detail = True
@@ -70,6 +72,10 @@ class Ctx:
         self.lo, self.hi = addr, addr + size
         self.insns, self.tables, self.taken = insns, tables, taken
         self.L = []
+        self.P = []                              # prov (off by default): the category of each line of L; PX: rewrites of lines after emission (index, category, added bytes); insb: bytes per instruction
+        self.PX = []
+        self.insb = {}
+        self.tag = None
         self.callrets = []
         self.usesfs = False
         self.kinds = set()
@@ -83,6 +89,8 @@ class Ctx:
 
     def em(self, t):
         self.L.append(t)
+        if prov.ON:
+            self.P.append(prov.classify(sys._getframe(1), self.tag))
 
     def lab(self, a):
         return 'L_%08x' % a
@@ -388,6 +396,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
         m = ins.mnemonic
         ops = ins.operands
         nxt = a + ins.size
+        i0 = len(cx.L)
         em('%s: ;' % cx.lab(a))
         if a == start or a in uent:
             em('TRACE(0x%xu);' % a)        # every pass over an entry address is a trace event (bench), wherever the function was entered
@@ -427,17 +436,23 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
                 f_flow.jump_out(cx, nxt)
         if cx.xm == 's':
             xc.fix_lines(cx, a, n0)
+        if prov.ON:
+            cx.insb[a] = sum(len(l) + 1 for l in cx.L[i0:])
     for a in sorted(bad):      # bytes that do not decode: the CPU raises #UD there
         cx.nonlocal_ = True
         em('%s: ; SYNC_OUT; REGS(); FNVL_RAISE(%s,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % (cx.lab(a), 'FNVL_UD', a))
     if not order or start != order[0]:       # also an entry whose first byte does not decode: its body is the #UD at that address
         cx.L.insert(0, 'goto %s;' % cx.lab(start))
+        if prov.ON:
+            cx.P.insert(0, ('lift2', 'lift2:entry goto'))
+            cx.PX[:] = [(i + 1, k, d) for i, k, d in cx.PX]
     if cx.nonlocal_:
         labs = sorted(set(x for x in cx.callrets + owns + list(tables_all(tables)) + taken + sorted(cx.raises | bad) if x in insns or x in bad))
         cases = ' '.join('case 0x%xu: %sgoto %s;' % (x, xc.case_pre(cx, x), cx.lab(x)) for x in labs)
         em('after_tail: ; if(esp>E){ SYNC_OUT; return; }')
         em('nonlocal: ; for(;;){ u32 t=c->ra; if(esp>E){ SYNC_OUT; return; } switch(t){ %s default: break; } SYNC_OUT; REGS(); fnvl_dispatch(t)(); REGS(); SYNC_IN; }' % cases)
     body = '\n'.join(cx.L)
+    body0 = body
     # R4 raise-site flush rule (rt/fnvl.h RAISE_OUT / RAISE_IN): every explicit call of the OS dispatcher flushes the EFLAGS and x87 condition-bit locals into struct cpu before it and reloads them after
     fl = 'SYNC_X_IN;' if 'sse' in kinds else ''
     body = body.replace('SYNC_OUT;', 'SYNC_OUT;' + ('SYNC_X_OUT;' if 'sse' in kinds else ''))
@@ -445,6 +460,8 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     decl = ''.join('extern "C" void L_%08x(void);\n' % t for t in sorted(cx.calls | cx.tails))
     txt = '%sextern "C" void L_%08x(void)\n{ DECL; SYNC_IN;%s%s%s u32 E=esp; %s\n%s\n}\n' % (
         decl, start, xc.decl(cx), fl, ' u32 fsb=c->fs;' if cx.usesfs else '', '', body)
+    if prov.ON:
+        prov.finish(cx, body0, body, txt, decl, xc.decl(cx))
     if cx.usesfs:
         kinds.add('fs')
     meta = dict(addr=start, size=size, selfcalls=cx.selfcalls, callrets=cx.callrets, kinds=sorted(kinds), n=len(order), tables=len(tables),
