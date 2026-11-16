@@ -730,7 +730,7 @@ def expand_foreach(rec, repo):
         return rec
     out, outputs, fan = [], {}, {}   # fan: {NAME: (template step, rows, key)}
     for g in rs:
-        if not (isinstance(g, dict) and "foreach" in g):
+        if not (isinstance(g, dict) and "foreach" in g) or isinstance(g["foreach"].get("table") if isinstance(g["foreach"], dict) else None, dict):
             continue
         rows, key = foreach_spec_rows(g, repo)
         fan[g.get("name")] = (g, rows, key)
@@ -741,22 +741,54 @@ def expand_foreach(rec, repo):
         if "foreach" not in g:
             out.append(foreach_consume(g, fan))
             continue
+        if isinstance(g["foreach"], dict) and isinstance(g["foreach"].get("table"), dict):
+            out.append(foreach_dynamic(g, rec))
+            for o in step_outputs(out[-1]):
+                outputs[o] = g.get("name")
+            continue
         name, (_, rows, key) = g.get("name"), fan[g.get("name")]
         for row in rows:
             where = "run %r row %s" % (name, row[key])
-            st = {k: v for k, v in g.items() if k != "foreach"}
-            st["name"] = "%s.%s" % (name, row[key])
-            for k in ("args", "outputs", "dirs"):
-                if isinstance(st.get(k), list):
-                    st[k] = [foreach_subst(x, row, where) if isinstance(x, str) else x for x in st[k]]
-            if isinstance(st.get("env"), dict):
-                st["env"] = {k: foreach_subst(v, row, where) if isinstance(v, str) else v for k, v in st["env"].items()}
+            st = foreach_row_step(g, row, key)
             for o in step_outputs(st):
                 if o in outputs:
                     raise ValueError("%s: output %s is also an output of %s (an output of a foreach step must name the row: {%s})" % (where, o, outputs[o], key))
                 outputs[o] = st["name"]
             out.append(foreach_consume(st, fan))
     return dict(rec, run=out)
+
+
+def foreach_row_step(g, row, key):
+    """The step of one row of foreach step G: G without `foreach`, named NAME.<key field>, {COLUMN} replaced in args, outputs, dirs and env values."""
+    where = "run %r row %s" % (g.get("name"), row[key])
+    st = {k: v for k, v in g.items() if k != "foreach"}
+    st["name"] = "%s.%s" % (g.get("name"), row[key])
+    for k in ("args", "outputs", "dirs"):
+        if isinstance(st.get(k), list):
+            st[k] = [foreach_subst(x, row, where) if isinstance(x, str) else x for x in st[k]]
+    if isinstance(st.get("env"), dict):
+        st["env"] = {k: foreach_subst(v, row, where) if isinstance(v, str) else v for k, v in st["env"].items()}
+    return st
+
+
+def foreach_dynamic(g, rec):
+    """The marker step of a foreach whose table is produced at build time: `foreach: {table: {stage, path} | {external, path}, key, into: DIR}`. Its rows are not known
+    until the table exists, so no row step is made here: the step stays ONE step that declares the directory DIR (`dirs: [DIR]`, no `outputs`); the row template (the step as
+    written) is kept under foreach.row, and Job.run_foreach runs one step per row of the table at build time, each writing under DIR. ValueError on a malformed form."""
+    fe, name = g["foreach"], g.get("name")
+    t = fe.get("table")
+    if not (set(fe) == {"table", "key", "into"} and isinstance(fe["key"], str) and isinstance(fe["into"], str) and rel_ok(fe["into"])
+            and isinstance(t, dict) and set(t) in ({"stage", "path"}, {"external", "path"}) and all(isinstance(v, str) for v in t.values())):
+        raise ValueError("run %r: a build-time foreach is {table: {stage, path} | {external, path}, key: column, into: directory}" % name)
+    if "external" in t and t["external"] not in [e.get("name") for e in rec.get("external", []) if isinstance(e, dict)]:
+        raise ValueError("run %r: foreach table external %r is not declared" % (name, t["external"]))
+    outs = g.get("outputs")
+    if not (isinstance(outs, list) and outs and all(isinstance(o, str) and under(o, fe["into"]) and ("{" + fe["key"] + "}") in o for o in outs)):
+        raise ValueError("run %r: the outputs of a build-time foreach step lie under `into` %s and name the row ({%s})" % (name, fe["into"], fe["key"]))
+    if g.get("dirs"):
+        raise ValueError("run %r: a build-time foreach step has `into`, not `dirs`" % name)
+    row = {k: v for k, v in g.items() if k != "foreach"}
+    return dict({k: v for k, v in g.items() if k != "outputs"}, outputs=[], dirs=[fe["into"]], foreach=dict(fe, row=row))
 
 
 def foreach_consume(g, fan):
@@ -1722,7 +1754,7 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
     for i, g in enumerate(rs):
         tool = isinstance(g, dict) and "exec" in g   # a tool step: runs a program of the declared debs in their root layout (RECIPE.md "Tool steps")
         base = {"name", "args", "inputs", "debs", "outputs"} | ({"exec"} if tool else {"artifact"})
-        if not (isinstance(g, dict) and base <= set(g) <= base | {"host_cpu"} | ({"dirs", "scratch", "timeout_s", "env"} if tool else set())):
+        if not (isinstance(g, dict) and base <= set(g) <= base | {"host_cpu"} | ({"dirs", "scratch", "timeout_s", "env", "foreach"} if tool else set())):
             err.append("run[%d] needs name, args, inputs, debs, outputs and exactly one of artifact | exec (and optionally host_cpu; a tool step also dirs, scratch, env)" % i)
             continue
         if "host_cpu" in g and not (g["host_cpu"] == "cpuref" and TREE + "/verify/cpuref.json" in files):
@@ -2963,8 +2995,29 @@ class Job:
                 for o in step_outputs(g):
                     self.blocked[o] = f["stage"]
 
-    def run_all(self, ws):
-        """The `run` stages of the recipe (RECIPE.md "Run stages"), after the generators; a red one blocks its outputs like a generator."""
+    def step_closure(self, steps, name):
+        """The steps that produce NAME's inputs, transitively, and NAME itself, in recipe order: an input that is a stage ref of this root names its producer
+        (`ROOT:run:STEP`), or is an output (file or directory) of one step; a step outside the closure cannot change what NAME reads."""
+        by_name = {g["name"]: g for g in steps}
+        if name not in by_name:
+            raise ValueError("%s: root declares no run step %r" % (self.root, name))
+        need, todo = set(), [name]
+        while todo:
+            n = todo.pop()
+            if n in need:
+                continue
+            need.add(n)
+            fe = by_name[n].get("foreach")
+            for ref in by_name[n]["inputs"] + ([fe["table"]] if isinstance(fe, dict) and isinstance(fe.get("table"), dict) else []):
+                if not (isinstance(ref, dict) and "stage" in ref and ref["stage"].partition(":")[0] == self.root):
+                    continue
+                kind, _, key = ref["stage"].partition(":")[2].partition(":")
+                todo += [key] if kind == "run" and key in by_name else [g["name"] for g in steps if ref["path"] in g["outputs"] or any(under(ref["path"], d) for d in g.get("dirs", []))]
+        return [g for g in steps if g["name"] in need]
+
+    def run_all(self, ws, only=None):
+        """The `run` stages of the recipe (RECIPE.md "Run stages"), after the generators; a red one blocks its outputs like a generator. ONLY = the name of one step: that
+        step and the steps its inputs come from run, no other."""
         try:
             steps = expand_run(self.rec).get("run", [])
         except ValueError as e:
@@ -2975,12 +3028,53 @@ class Job:
             return
         for i, g in enumerate(steps):
             try:
-                self.run_one(ws, i, g)
+                if "foreach" in g:
+                    self.run_foreach(ws, i, g)
+                else:
+                    self.run_one(ws, i, g)
             except BuildRed as r:
                 f = dict(r.args[0])
                 self.red.append(f)
                 for o in step_outputs(g):
                     self.blocked[o] = f["stage"]
+
+    def run_foreach(self, ws, i, g):
+        """A build-time foreach step (foreach_dynamic): read its table (an earlier step's output of this root, another root's stage output, or an external), make one step per
+        row and run each as an ordinary step; each writes under the step's directory `into`. The table is no input of the rows: a row step's key is a function of its own
+        row, tool and inputs, so an unchanged row is a hit whatever the other rows are. An empty table, a bad row, an output outside `into` or one two rows share is red."""
+        fe, nm = g["foreach"], "run:%s:%s" % (self.root, g["name"])
+        t = fe["table"]
+        if "stage" in t and t["stage"].partition(":")[0] == self.root:
+            if t["path"] in self.blocked:
+                raise BuildRed({"stage": nm, "exit": None, "stderr": ["table %s is not produced: %s is red" % (t["path"], self.blocked[t["path"]])]})
+            host = os.path.join(ws, "root", t["path"])
+        else:
+            host = resolve_input(self.root, t, self.repo, os.path.dirname(self.store), self.rec, self.extcache)[0]
+        try:
+            with open(host, encoding="utf-8") as f:
+                rows = foreach_rows(t["path"], fe["key"], f.read())
+            steps, seen = [], {}
+            for row in rows:
+                st = foreach_row_step(fe["row"], row, fe["key"])
+                for o in step_outputs(st):
+                    if not under(o, fe["into"]) or not rel_ok(o):
+                        raise ValueError("row %s: output %s is outside %s" % (row[fe["key"]], o, fe["into"]))
+                    if o in seen:
+                        raise ValueError("row %s: output %s is also an output of %s" % (row[fe["key"]], o, seen[o]))
+                    seen[o] = st["name"]
+                steps.append(st)
+        except (OSError, UnicodeDecodeError, ValueError) as e:
+            raise BuildRed({"stage": nm, "exit": None, "stderr": ["foreach table %s: %s" % (t["path"], e)]})
+        red = []
+        for st in expand_run(dict(self.rec, run=steps))["run"]:   # the forms and the debs closure of a step, as every other step
+            try:
+                self.run_one(ws, i, st)
+            except BuildRed as r:
+                red.append(r)
+                self.red.append(dict(r.args[0]))
+        if red:
+            raise BuildRed({"stage": nm, "exit": None, "stderr": ["%d of %d rows are red, first: %s" % (len(red), len(steps), red[0].args[0]["stage"])]})
+        os.makedirs(os.path.join(ws, "root", fe["into"]), exist_ok=True)
 
     def run_one(self, ws, i, g):
         """Stage `run:<root>:<name>`: executes the artifact (the linked output of an admitted root) in the sandbox. It sees the artifact at /art/<output>,
