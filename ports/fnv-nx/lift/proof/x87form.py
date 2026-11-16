@@ -362,8 +362,10 @@ def domain_terms(o, sub):
     """the domain of the instruction (the ruling after slice 1): no x87 exception is unmasked (FCW[5:0] all set: the masks fact, every FLDCW / FLDENV / FRSTOR / FXRSTOR site keeps them), so no FLT fault and
     no unmasked-PE store; the pending-exception trap (ES) is not set; the entry's own precondition Out.pre; the admissible range of its nondeterminism, nd_pre, at the resolution"""
     S = (lambda t: z3.substitute(t, *sub)) if sub else (lambda t: t)
+    s0 = X.from_dsl(pre_vars())
     fcw = z3.BitVec("fcw", 16)
-    return [("masks", z3.Extract(5, 0, fcw) == z3.BitVecVal(0x3f, 6)), ("not trap", z3.Not(S(o.trap))), ("pre", S(o.pre)), ("nd_pre", S(o.nd_pre))]
+    inv = (z3.Extract(X.ES, X.ES, s0.fsw) == X.K(1, 1)) == X.es_of(s0.fsw, s0.fcw)      # ES is stored state, recomputed by every writing instruction (sync_es): the invariant that it holds the derived value
+    return [("masks", z3.Extract(5, 0, fcw) == z3.BitVecVal(0x3f, 6)), ("ES invariant", inv), ("pre", S(o.pre)), ("nd_pre", S(o.nd_pre))]
 
 
 def effects(c, key, i):
@@ -474,11 +476,16 @@ def prove_form(F):
         want["xmm%d" % j] = (P["xmm"][j], z3.BitVec("xmm%d" % j, 128))
     want["mxcsr"] = (P["mxcsr"], z3.BitVec("mxcsr", 32))
     dom = z3.And(*[D.to_smt(n) == 1 for n in F.domain]) if F.domain else z3.BoolVal(True)
-    checks = [("nd_pre", dom, z3.Not(S(o.nd_pre)), z3.BoolVal(True)), ("faults", dom, P["fault"] != 0, z3.BoolVal(True))] + [(k, dom, x, y) for k, (x, y) in want.items()]
-    for name, hyp, x, y in checks:
+    from fnvlift import faults as FT
+    av = FT.BYNAME["AV"]["code"]      # the only fault a Form may carry: forms.mstore's code-segment store fault (selector-based, the state is then the pre-state)
+    nf = P["fault"] == 0
+    es_post = z3.Extract(X.ES, X.ES, P["fsw"]) == X.K(1, 1)
+    checks = [("nd_pre", dom, z3.Not(S(o.nd_pre))), ("trap", dom, S(o.trap)), ("faults", dom, z3.And(P["fault"] != 0, P["fault"] != av)),
+              ("ES invariant preserved", z3.And(dom, nf), es_post != X.es_of(P["fsw"], P["fcw"]))] + [(k, z3.And(dom, nf), x != y) for k, (x, y) in want.items()]
+    for name, hyp, bad in checks:
         sv = z3.Solver()
         sv.set("rlimit", bounds.Z3_RLIMIT)
-        sv.add(hyp, x != y if name not in ("nd_pre", "faults") else x)
+        sv.add(hyp, bad)
         r = sv.check()
         if r != z3.unsat:
             return ("FAILED(x87)" if r == z3.sat else bounds.BOUND), "x87 %s: the Form %s the spec on its domain (%s)" % (name, "differs from" if r == z3.sat else "is unknown against", r), {}

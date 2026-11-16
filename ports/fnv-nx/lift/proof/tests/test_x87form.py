@@ -8,15 +8,17 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path[:0] = [os.path.join(HERE, ".."), os.path.join(HERE, "..", ".."), os.path.join(HERE, "..", "..", "fnvlift", "tests")]
-import _inputs  # noqa: E402
+sys.path[:0] = [HERE, os.path.join(HERE, ".."), os.path.join(HERE, "..", "..")]
+import declared_cpufeat  # noqa: E402
+import declared_x86sys  # noqa: E402
 import x87spec as X  # noqa: E402
-from fnvlift import dsl  # noqa: E402
+from fnvlift import dsl, inputs  # noqa: E402
 from proof import forms, prove, shape, x87form as XF  # noqa: E402
 
-f = os.path.join(tempfile.mkdtemp(), "dummy")
-open(f, "w").write("{}")
-_inputs.configure(**{p: f for p in inspect.signature(_inputs.configure).parameters})
+CPUFEAT, WHY = declared_cpufeat.path()
+if CPUFEAT:
+    declared_x86sys.configure()
+    inputs.configure(cpufeat=CPUFEAT)
 DEC = shape.decoder()
 
 
@@ -24,6 +26,7 @@ def build(raw):
     return forms.build(next(DEC.disasm(raw, 0x1000)), 0x1000)
 
 
+@unittest.skipUnless(CPUFEAT, WHY)
 class T(unittest.TestCase):
     def test_part_one_is_derived(self):
         ent, p1 = XF.part_one()
@@ -73,10 +76,20 @@ class T(unittest.TestCase):
         F = build(b"\xd9\x28")                                 # fldcw m16
         self.assertIn("fcw", [k for k, _, _ in F.xs])
         self.assertEqual(len(F.domain), 4)                       # masks, not trap, pre, nd_pre
-        self.assertEqual(F.faults, [])                           # the domain excludes every x87 exception
+        self.assertEqual(F.faults, [])                           # the domain excludes every x87 exception; a store adds only forms.mstore's code-segment fault
+        self.assertEqual(len(build(b"\xdd\x30").faults), 1)
         self.assertEqual(len(build(b"\xdd\x30").stores), 7 + 8)  # fnsave: seven 32-bit words of the environment image, eight 80-bit registers
         self.assertEqual(len(build(b"\xd9\x30").stores), 7)
         self.assertEqual(dsl.xc_lines("fcw", None, None, lambda n: "w"), ["FLDCW(w);"])
+
+    def test_es_follows_from_the_invariant(self):
+        # ES is STORED state (a bit of the DSL fsw input), recomputed by every writing instruction (x87spec.sync_es); the masks alone do not give ES == 0, the masks and the invariant do
+        s0 = X.from_dsl(XF.pre_vars())
+        es = XF.z3.Extract(X.ES, X.ES, s0.fsw) == X.K(1, 1)
+        masks = XF.z3.Extract(5, 0, s0.fcw) == XF.z3.BitVecVal(0x3f, 6)
+        inv = es == X.es_of(s0.fsw, s0.fcw)
+        sv = XF.z3.Solver(); sv.add(masks, es); self.assertEqual(sv.check(), XF.z3.sat)
+        sv = XF.z3.Solver(); sv.add(masks, inv, es); self.assertEqual(sv.check(), XF.z3.unsat)
 
     def test_nd_table_is_keyed_by_spec_names(self):
         self.assertTrue(set(XF.NDRES) <= XF.nd_names())

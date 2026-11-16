@@ -18,7 +18,7 @@ import declared_x86sys; declared_x86sys.configure()
 sys.path.insert(0, LIFT)
 sys.path.insert(0, os.path.join(LIFT, "..", "verify"))     # cas, recipe: the trunk loader the gate itself uses (-I drops PYTHONPATH)
 import fakeext
-from proof import certbasis, formgate, prove, shape
+from proof import certbasis, formgate, forms, prove, shape
 import recipe
 
 WORK = os.environ.get('FNVNX_TEST_WORK') or __import__('tempfile').mkdtemp(prefix='fnvnx-proof-test-')     # declared input: the directory the fixtures are written below
@@ -47,7 +47,22 @@ IR_TEXT = 'fixture: the x86_proof.ir of the external x86ir\n'
 MODEL = hashlib.sha256(IR_TEXT.encode()).hexdigest()      # derived from the file, as formgate derives it
 # encodings with a DSL builder (add / xor / mov / push / ret / nop) and one without (x87 fadd st,st(1))
 GOOD = ['01c8', '31c0', '8b4510', '6a05', 'c3', '90']
-NOBUILD = ['d8c1']      # fadd st,st(1): an x87 class whose Form needs op symbols (X87FORMS.md slice 2), so it has none
+def first_nobuild():
+    """the encoding with no DSL builder, by a rule: the first, in sorted order of the hex text, of the x87 register-form escapes (D8..DF, ModRM 0xC0..0xFF: the universe of two-byte encodings of the
+    family) for which forms.build raises KeyError.  [] when every one has a Form (the case is then skipped, with the reason)."""
+    md = shape.decoder()
+    for h in sorted('%02x%02x' % (op, m) for op in range(0xd8, 0xe0) for m in range(0xc0, 0x100)):
+        ins = list(md.disasm(bytes.fromhex(h), 0))
+        if len(ins) != 1 or ins[0].size != 2:
+            continue
+        try:
+            forms.build(ins[0], 0x1000)
+        except KeyError:
+            return [h]
+    return []
+
+
+NOBUILD = first_nobuild()
 
 
 def key_of(h):
@@ -115,6 +130,7 @@ class Green(unittest.TestCase):
             self.assertIn('int %d/%d' % (len(GOOD), len(GOOD)), detail)
 
     def test_result_file_accepted_by_the_trunk_reader(self):
+        if not NOBUILD: self.skipTest('every x87 register-form escape (D8..DF, mod 3) has a Form: no key without a builder exists in this universe')
         for encs, status in ((GOOD, 'green'), (GOOD + NOBUILD, 'red')):
             with workdir() as td:
                 f = Fixture(td, encs)
@@ -193,6 +209,7 @@ class CertificationRule(unittest.TestCase):
             self.assertEqual(ids, ['link:undecodable:exe:401010'], detail)
 
     def test_shape_without_builder_is_uncertified(self):
+        if not NOBUILD: self.skipTest('every x87 register-form escape (D8..DF, mod 3) has a Form: no key without a builder exists in this universe')
         with workdir() as td:
             u, c, ids, detail = Fixture(td, GOOD + NOBUILD).judge()
             self.assertEqual((u, c, ids), (2 * len(GOOD) + 1, 2 * len(GOOD), [key_of(NOBUILD[0])[0]]))
@@ -329,6 +346,7 @@ class Cli(unittest.TestCase):
         return r, out
 
     def test_green_and_red_without_cache_and_without_z3(self):
+        if not NOBUILD: self.skipTest('every x87 register-form escape (D8..DF, mod 3) has a Form: no key without a builder exists in this universe')
         for encs, status, rc in ((GOOD, 'green', 0), (GOOD + NOBUILD, 'red', 2)):
             with workdir() as td:
                 f = Fixture(td, encs)

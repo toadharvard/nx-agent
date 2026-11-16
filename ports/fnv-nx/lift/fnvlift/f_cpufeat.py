@@ -102,3 +102,12 @@ def gates(ins):
         leaf, reg, bit = FEATURES[f]
         out.append((f, leaf, reg, bit, MODEL_BITS.get((leaf, reg), 0) >> bit & 1))
     return out
+
+
+def declared(feature):
+    """does the declared CPU (CPUREF) report the feature?  The feature's flag row comes from the same generated table as FEATURES (a feature without a flag row is an error, as at load)"""
+    row = FEATURES.get(feature) or _load_table({feature}).get(feature)
+    if row is None:
+        raise ValueError('cpufeat: the table has no flag row for %s' % feature)
+    leaf, reg, bit = row
+    return bool(MODEL_BITS.get((leaf, reg), 0) >> bit & 1)

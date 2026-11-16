@@ -81,11 +81,14 @@ v = ev(P, 'xmm', env, 0); L = [(v >> (32 * i)) & 0xffffffff for i in range(4)]
 check('rsqrtps lane 0 (1.0)', L[0] == 0x3f7ff000); check('rsqrtps lane 1 (-1.0): indefinite', L[1] == 0xffc00000)
 check('rsqrtps lane 2 (QNaN): quieted unchanged', L[2] == 0x7fc00000); check('rsqrtps lane 3 (+0): +inf', L[3] == 0x7f800000)
 # ---- MXCSR, hints, MMX state
+def selsub():
+    from fnvlift import x86sys
+    return [(z3.BitVec('sel_' + n, 16), z3.BitVecVal(x86sys.SEL[n], 16)) for n in dsl.SEGS]      # the declared machine's selectors (a store Form's code-segment fault reads sel_<seg>)
 def memval(P, key, mem_bytes, regs):
     """evaluate a post-state field with the memory array set to mem_bytes ({addr: byte}) and the registers regs"""
     M0 = dsl.mem_array(); st = M0
     for a, b in mem_bytes.items(): st = z3.Store(st, z3.BitVecVal(a, 32), z3.BitVecVal(b, 8))
-    sub = [(M0, st)] + [(z3.BitVec(k, 32), z3.BitVecVal(v, 32)) for k, v in regs.items()]
+    sub = [(M0, st)] + [(z3.BitVec(k, 32), z3.BitVecVal(v, 32)) for k, v in regs.items()] + selsub()
     return sub
 F = build(b'\x0f\xae\x10'); P = F.post()          # ldmxcsr [eax]
 RG = {r: 0 for r in ('ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi')}
@@ -98,7 +101,7 @@ sub = memval(P, 'mem', {}, dict(RG, eax=0x200)); sub.append((z3.BitVec('mxcsr', 
 w = z3.simplify(z3.substitute(z3.Concat(*[z3.Select(P['mem'], z3.BitVecVal(0x200 + i, 32)) for i in (3, 2, 1, 0)]), *sub)).as_long()
 check('stmxcsr [eax]: stores MXCSR', w == 0x1fa5)
 F = build(b'\x0f\x2b\x00'); P = F.post()
-check('movntps [eax], xmm0: faults (kind 7) iff eax is not 16-byte aligned', all(z3.simplify(z3.substitute(P['fault'], (z3.BitVec('eax', 32), z3.BitVecVal(a, 32)))).as_long() == (0 if a % 16 == 0 else 7) for a in (0x100, 0x104, 0x108, 0x10f, 0x110)))
+check('movntps [eax], xmm0: faults (kind 7) iff eax is not 16-byte aligned', all(z3.simplify(z3.substitute(P['fault'], (z3.BitVec('eax', 32), z3.BitVecVal(a, 32)), *selsub())).as_long() == (0 if a % 16 == 0 else 7) for a in (0x100, 0x104, 0x108, 0x10f, 0x110)))
 F = build(b'\x0f\x18\x00')
 check('prefetchnta [eax]: no store, no register / flag / x87 / SSE effect, no fault', not F.stores and not F.regs and not F.flags and not F.faults and not F.xs)
 F = build(b'\xf3\x90')

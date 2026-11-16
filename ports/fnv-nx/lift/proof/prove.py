@@ -206,7 +206,7 @@ def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     mm2 = {}; mm3 = {}; fx = lambda v: rewrite.div_norm(rewrite.pow2_mul(v, mm2), mm3)
     M = {k: (fx(v) if not isinstance(v, dict) else {n: fx(t) for n, t in v.items()}) for k, v in M.items()}; D = {k: (fx(v) if not isinstance(v, dict) else {n: fx(t) for n, t in v.items()}) for k, v in D.items()}
     assume = M.get('assume', z3.BoolVal(True))
-    side = M.pop('side', z3.BoolVal(True)); nofault = M.pop('nofault', None)
+    side = M.pop('side', z3.BoolVal(True)); nofault = M.pop('nofault', None); nowrite = M.pop('nowrite', None)
     assume_d = z3.And(assume, D['fault'] == 0, domain) if F.faults else z3.And(assume, domain)
     probe = z3.BitVec('probe', 32); diffs = []                     # (field, dsl, model, strict difference)
     declared = declared_outputs(F)                                # outputs the Form takes from a platform function (uf): the model is not their reference
@@ -244,9 +244,11 @@ def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     if r != z3.unsat: return bounds.BOUND, '', extra
     if F.faults:                                                 # the model faults exactly where the DSL does
         r1, _ = check([D['fault'] != 0], z3.And(assume, domain), args); has_mem = 'm' in key.split('|')[1].replace('imm', '')
-        r2 = z3.unsat if has_mem else check([z3.Not(assume if nofault is None else nofault)], z3.And(D['fault'] == 0, domain), args)[0]
+        cstore = has_mem and any(a.startswith('codestore:') for a in getattr(F, 'access', ()))      # the Form carries the code-segment store fault: the model takes :NON-WRITABLE-SEGMENT exactly where it fires (segment limits stay excluded: the declared descriptors are flat)
+        if cstore: r2 = z3.unknown if nowrite is None else check([z3.Not(nowrite)], z3.And(D['fault'] == 0, domain), args)[0]
+        else: r2 = z3.unsat if has_mem else check([z3.Not(assume if nofault is None else nofault)], z3.And(D['fault'] == 0, domain), args)[0]
         if not has_mem and nofault is not None and _bounded().check(side) != z3.sat: r2 = z3.unknown       # exists free values with `side` (closed): one satisfiability check
-        extra['fault_checks'] = 'assume=>no DSL fault: %s; no DSL fault=>assume: %s' % (r1, 'not applicable (memory operand: segment-limit faults)' if has_mem else r2)
+        extra['fault_checks'] = 'assume=>no DSL fault: %s; no DSL fault=>assume: %s' % (r1, 'not applicable (memory operand: segment-limit faults)' if has_mem and not cstore else r2)
         if r1 != z3.unsat or r2 != z3.unsat: return 'FAILED(dsl)', 'fault condition differs: ' + extra['fault_checks'], extra
     d0, dnote = def0(M, D, FLAGS, assume_d, side, args, extra, pre)      # DEF0: every architecturally undefined flag output is 0 in the lifted body; prove model[free := 0] == lifted
     if d0 != 'proved': return d0, dnote, extra

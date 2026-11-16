@@ -40,3 +40,10 @@ LEGACY = {
     'noundecided': 'the record decides mov_to_sreg: the Form must exist and does not',
     'retf': 'uncertified: far return proved over its domain (cases %s); %d GDT indexes of jmp_far.undecided_descriptors are outside it and the Form carries no domain',
 }
+CPUFEAT = {
+    'none': 'no cleared feature (or the cpufeat input is not configured)',
+    'noform': 'no Form for a key whose feature the declared CPU clears',
+    'ud': 'SDM Event 6: the declared CPU lacks %s: #UD, nothing else',
+    'nop': 'SDM Intel MPX (%s) is NOP on a CPU without the flag: no effect',
+    'diff': 'differs: %s',
+}

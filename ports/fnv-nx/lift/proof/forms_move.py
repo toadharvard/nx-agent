@@ -142,7 +142,7 @@ def string(c):
     g = lambda new, old: ite(act, new, old)
     S, D = (lambda: mload(dsa(c, esi), w)), (lambda: mload(esa(edi), w))     # the string source is DS-default (override applies), the destination ES (flat)
     if op in ('movs', 'stos'):
-        v = S() if op == 'movs' else rd(acc); mstore(F, esa(edi), g(v, D()))
+        v = S() if op == 'movs' else rd(acc); mstore(F, esa(edi), g(v, D()), fwhen=act)
     if op in ('movs', 'cmps', 'lods'): A['esi'].put(F, g(esi + step, esi))
     if op in ('movs', 'cmps', 'scas', 'stos'): A['edi'].put(F, g(edi + step, edi))
     if op == 'lods': wr(F, acc, g(S(), rd(acc)))
