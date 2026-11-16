@@ -39,7 +39,10 @@ def compare(shapes, exe, emit, jtab):
         assert ins.size == ln, (hex(va), ins.size, ln)
         cnt[(shape.shape_key(ins), shape.family(ins))] += 1; n += 1
     mine = ''.join('\t'.join(map(str, x)) + '\n' for x in [(k, fam, c) for (k, fam), c in sorted(cnt.items(), key=lambda t: (t[0][0].encode(), t[0][1]))])
-    want = open(shapes).read()
+    w = collections.Counter()      # liftgen's rows are (key, family, count, path): the census compares the counts of a (key, family) over all its paths
+    for l in open(shapes):
+        k, fam, c, _path = l.rstrip('\n').split('\t'); w[(k, fam)] += int(c)
+    want = ''.join('\t'.join(map(str, x)) + '\n' for x in [(k, fam, c) for (k, fam), c in sorted(w.items(), key=lambda t: (t[0][0].encode(), t[0][1]))])
     ok = mine == want
     print('lifted instructions %d, shape rows %d: %s' % (n, len(cnt), 'EQUAL to ' + shapes if ok else 'DIFFERENT from ' + shapes))
     if not ok:

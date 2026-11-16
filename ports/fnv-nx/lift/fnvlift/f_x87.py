@@ -107,8 +107,7 @@ def h_fwait(cx, ins):
 
 @op('fnclex')
 def h_fnclex(cx, ins):
-    """FNCLEX (DB E2): clears the x87 exception flags, ES, B and the stack fault (SDM Vol 2). f_int.py registers `fnclex` as a NOP (h_nop): this later registration replaces it, so the
-    instruction reaches the control-instruction table (ctl: FNCLEX, rt/fnvl_x87.h: the x87 sticky set := 0, the SSE set untouched)."""
+    """FNCLEX (DB E2): clears the x87 exception flags, ES, B and the stack fault (SDM Vol 2). The instruction reaches the control-instruction table (ctl: FNCLEX, rt/fnvl_x87.h: the x87 sticky set := 0, the SSE set untouched)."""
     h_x87(cx, ins)
 
 
