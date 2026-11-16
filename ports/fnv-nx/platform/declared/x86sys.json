@@ -265,8 +265,319 @@
    "0x03-0x04",
    "0x2a-0x2e"
   ],
+  "runtime_writes": {
+   "applied": {
+    "vector_0x13": "handler _KiTrap13 (Ki386EnableXMMIExceptions), access 0x8e00, selector 8 (the static entry has handler _KiTrap0F)",
+    "vector_2": "task gate (access 0x8500), selector KGDT_NMI_TSS",
+    "vector_8": "task gate (access 0x8500), selector KGDT_DF_TSS"
+   },
+   "external_writers": {
+    "status": "undecided",
+    "why": "kernel-mode code outside ntoskrnl/ntkrnlpa (hal.dll of the declared machine, drivers) reaches the IDT through KPCR.IDT; hal.dll is not a pinned source, so which gates it rewrites is not derived; blocker: pin the 7601 hal (halmacpi.dll) from the same Windows 7 SP1 package in tools/win7sp1-x86-kernel and extend the writer universe to it"
+   },
+   "kernels": {
+    "ntkrnlpa.exe": {
+     "classes": {
+      "Check486BStepping": {
+       "class": "patch6",
+       "patched": [
+        "0x51f2e0",
+        "0x51f2e7"
+       ],
+       "restored": [
+        "0x51f2f7",
+        "0x51f2fa"
+       ],
+       "saved": [
+        "0x51f2d5",
+        "0x51f2d8"
+       ],
+       "vector": 6
+      },
+      "GetMachineBootPointers@0": {
+       "class": "same_idtr"
+      },
+      "_KeStartAllProcessors@0": {
+       "class": "same_idtr"
+      },
+      "_Ki386EnableXMMIExceptions@4": {
+       "access": "0x8E00",
+       "class": "xmmi",
+       "handler": "_KiTrap13",
+       "handler_va": "0x441A80",
+       "selector": 8,
+       "stores": [
+        "0x51f07d",
+        "0x51f081",
+        "0x51f08e",
+        "0x51f094"
+       ],
+       "vector": 19
+      },
+      "_Ki386LoadTargetInt21Entry@16": {
+       "class": "int21",
+       "stores": [
+        "0x517c4c",
+        "0x517c55"
+       ],
+       "vector": 33
+      },
+      "_KiConnectVectorAndInterruptObject@8": {
+       "class": "handler_only",
+       "stores": [
+        "0x412d4d",
+        "0x412d5c"
+       ]
+      },
+      "_KiGetVectorInfo@8": {
+       "class": "readonly"
+      },
+      "_KiI386PentiumLockErrataFixup@0": {
+       "class": "relocate"
+      },
+      "_KiInitializeProcessorState@32": {
+       "class": "same_idtr"
+      },
+      "_KiProcessorStart@0": {
+       "class": "readonly"
+      },
+      "_KiRestoreProcessorControlState@4": {
+       "class": "same_idtr"
+      },
+      "_KiSaveProcessorControlState@4": {
+       "class": "same_idtr"
+      },
+      "_KiSetProcessorType@0": {
+       "class": "patch6",
+       "patched": [
+        "0x51f172",
+        "0x51f179"
+       ],
+       "restored": [
+        "0x51f18b",
+        "0x51f18e"
+       ],
+       "saved": [
+        "0x51f167",
+        "0x51f16a"
+       ],
+       "vector": 6
+      },
+      "_KiStartDynamicProcessor@16": {
+       "class": "same_idtr"
+      },
+      "_KiSwapIDT@0": {
+       "class": "boot"
+      },
+      "_KiSwapProcess@8": {
+       "class": "int21",
+       "stores": [
+        "0x477dda",
+        "0x477de3"
+       ],
+       "vector": 33
+      },
+      "_KiSystemStartup@4": {
+       "class": "boot"
+      },
+      "_KiTrap0E": {
+       "class": "readonly"
+      }
+     },
+     "universe": [
+      "Check486BStepping",
+      "GetMachineBootPointers@0",
+      "_KeStartAllProcessors@0",
+      "_Ki386EnableXMMIExceptions@4",
+      "_Ki386LoadTargetInt21Entry@16",
+      "_KiConnectVectorAndInterruptObject@8",
+      "_KiGetVectorInfo@8",
+      "_KiI386PentiumLockErrataFixup@0",
+      "_KiInitializeProcessorState@32",
+      "_KiProcessorStart@0",
+      "_KiRestoreProcessorControlState@4",
+      "_KiSaveProcessorControlState@4",
+      "_KiSetProcessorType@0",
+      "_KiStartDynamicProcessor@16",
+      "_KiSwapIDT@0",
+      "_KiSwapProcess@8",
+      "_KiSystemStartup@4",
+      "_KiTrap0E"
+     ],
+     "xmmi": {
+      "access": "0x8E00",
+      "class": "xmmi",
+      "handler": "_KiTrap13",
+      "handler_va": "0x441A80",
+      "selector": 8,
+      "stores": [
+       "0x51f07d",
+       "0x51f081",
+       "0x51f08e",
+       "0x51f094"
+      ],
+      "vector": 19
+     }
+    },
+    "ntoskrnl.exe": {
+     "classes": {
+      "Check486BStepping": {
+       "class": "patch6",
+       "patched": [
+        "0x5162e0",
+        "0x5162e7"
+       ],
+       "restored": [
+        "0x5162f7",
+        "0x5162fa"
+       ],
+       "saved": [
+        "0x5162d5",
+        "0x5162d8"
+       ],
+       "vector": 6
+      },
+      "GetMachineBootPointers@0": {
+       "class": "same_idtr"
+      },
+      "_KeStartAllProcessors@0": {
+       "class": "same_idtr"
+      },
+      "_Ki386EnableXMMIExceptions@4": {
+       "access": "0x8E00",
+       "class": "xmmi",
+       "handler": "_KiTrap13",
+       "handler_va": "0x439110",
+       "selector": 8,
+       "stores": [
+        "0x51607d",
+        "0x516081",
+        "0x51608e",
+        "0x516094"
+       ],
+       "vector": 19
+      },
+      "_Ki386LoadTargetInt21Entry@16": {
+       "class": "int21",
+       "stores": [
+        "0x50f9cc",
+        "0x50f9d5"
+       ],
+       "vector": 33
+      },
+      "_KiConnectVectorAndInterruptObject@8": {
+       "class": "handler_only",
+       "stores": [
+        "0x4143e8",
+        "0x4143f7"
+       ]
+      },
+      "_KiGetVectorInfo@8": {
+       "class": "readonly"
+      },
+      "_KiI386PentiumLockErrataFixup@0": {
+       "class": "relocate"
+      },
+      "_KiInitializeProcessorState@32": {
+       "class": "same_idtr"
+      },
+      "_KiProcessorStart@0": {
+       "class": "readonly"
+      },
+      "_KiRestoreProcessorControlState@4": {
+       "class": "same_idtr"
+      },
+      "_KiSaveProcessorControlState@4": {
+       "class": "same_idtr"
+      },
+      "_KiSetProcessorType@0": {
+       "class": "patch6",
+       "patched": [
+        "0x516172",
+        "0x516179"
+       ],
+       "restored": [
+        "0x51618b",
+        "0x51618e"
+       ],
+       "saved": [
+        "0x516167",
+        "0x51616a"
+       ],
+       "vector": 6
+      },
+      "_KiStartDynamicProcessor@16": {
+       "class": "same_idtr"
+      },
+      "_KiSwapIDT@0": {
+       "class": "boot"
+      },
+      "_KiSwapProcess@8": {
+       "class": "int21",
+       "stores": [
+        "0x45559a",
+        "0x4555a3"
+       ],
+       "vector": 33
+      },
+      "_KiSystemStartup@4": {
+       "class": "boot"
+      },
+      "_KiTrap0E": {
+       "class": "readonly"
+      }
+     },
+     "universe": [
+      "Check486BStepping",
+      "GetMachineBootPointers@0",
+      "_KeStartAllProcessors@0",
+      "_Ki386EnableXMMIExceptions@4",
+      "_Ki386LoadTargetInt21Entry@16",
+      "_KiConnectVectorAndInterruptObject@8",
+      "_KiGetVectorInfo@8",
+      "_KiI386PentiumLockErrataFixup@0",
+      "_KiInitializeProcessorState@32",
+      "_KiProcessorStart@0",
+      "_KiRestoreProcessorControlState@4",
+      "_KiSaveProcessorControlState@4",
+      "_KiSetProcessorType@0",
+      "_KiStartDynamicProcessor@16",
+      "_KiSwapIDT@0",
+      "_KiSwapProcess@8",
+      "_KiSystemStartup@4",
+      "_KiTrap0E"
+     ],
+     "xmmi": {
+      "access": "0x8E00",
+      "class": "xmmi",
+      "handler": "_KiTrap13",
+      "handler_va": "0x439110",
+      "selector": 8,
+      "stores": [
+       "0x51607d",
+       "0x516081",
+       "0x51608e",
+       "0x516094"
+      ],
+      "vector": 19
+     }
+    }
+   },
+   "no_net_change": {
+    "any_vector_handler_only": "KiConnectVectorAndInterruptObject stores only the offset words (+0, +6): present, DPL, type and selector are unchanged",
+    "vector_6": "KiSetProcessorType and Check486BStepping patch the offset words and restore them with push/pop of the same dwords"
+   },
+   "rule": "the table user code runs against = the static table with the stores of every function that can reach the IDT (found by rule over the kernel: KPCR.IDT via fs:[0x38] or fs:[0x1c]+0x38, sidt/lidt, the static table's address) applied; each is classified by the shape of its stores and asserted (runtime_idt_writers); a function the rule finds that is not classified is an error",
+   "undecided_vectors": {
+    "0x21": {
+     "status": "undecided",
+     "why": "KiSwapProcess loads IDT[0x21] from KPROCESS.Int21Descriptor of the process being switched to; the only store of that field is Ki386LoadTargetInt21Entry (the VDM path), so the entry is the zero entry unless a process set up an NTVDM int 0x21 target; no pinned source decides whether the declared program does; blocker: a reach certificate that no site calls the VDM setup API, or a row"
+    }
+   }
+  },
   "source": "Windows 7 SP1 ntoskrnl/ntkrnlpa 7601 (both give the same table): the static IDT in the INIT section, word-swapped by KiSwapIDT and copied by KiSystemStartup; access word 0xEE00 is a DPL-3 interrupt gate, 0x8E00 DPL 0, 0 is not a gate",
-  "table_sha256": "01fc99407437e4872c1f27035f8ea4d623d9abfdbcff648b1fe5bd2d7e80d053",
+  "static_table_sha256": "01fc99407437e4872c1f27035f8ea4d623d9abfdbcff648b1fe5bd2d7e80d053",
+  "table_sha256": "acc10ad3cf4c5ce2e4807ea7fd824118577512fc5d56f2a3999abf44484427df",
   "vector_0x29": {
    "access": 0,
    "dpl": 0,
@@ -283,6 +594,10 @@
  },
  "int_ring3": {
   "excluded": {
+   "33": {
+    "status": "undecided",
+    "why": "IDT[0x21] is loaded from KPROCESS.Int21Descriptor on every process switch (row idt.runtime_writes.undecided_vectors); blocker: a reach certificate that no site executes int 0x21 or sets up a VDM, or a row"
+   },
    "42": {
     "status": "undecided",
     "why": "the 7601 IDT has a present DPL-3 gate at this vector (row idt.ring3_gates) with no row in `vectors`: its behaviour is the kernel's handler, which no pinned source decides; blocker: a reach certificate that no site executes int 0x2a, or a row"
@@ -302,7 +617,7 @@
   },
   "other_vectors": {
    "address": "the int instruction",
-   "applies_to": "every vector that is not a present DPL-3 gate of the 7601 IDT (249 vectors: 0x00-0x02, 0x05-0x29, 0x2f-0xff): SDM Vol 2A INT n protected-mode, a descriptor that is not an interrupt, trap or task gate, or whose DPL < CPL, is #GP(vector*8+2); entries 0x20-0x29 are zero (type 0), every other such entry is a present DPL-0 gate; the present DPL-3 gates are decided by `vectors` or listed in `excluded`",
+   "applies_to": "every vector that is not a present DPL-3 gate of the 7601 IDT and not undecided (248 vectors: 0x00-0x02, 0x05-0x20, 0x22-0x29, 0x2f-0xff): SDM Vol 2A INT n protected-mode, a descriptor that is not an interrupt, trap or task gate, or whose DPL < CPL, is #GP(vector*8+2); entries 0x20-0x29 are zero (type 0), every other such entry is a present DPL-0 gate; the present DPL-3 gates are decided by `vectors` or listed in `excluded`",
    "eip_advance": 0,
    "error_code": "vector*8+2",
    "exception_code": 3221225477,

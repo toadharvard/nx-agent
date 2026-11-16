@@ -34,7 +34,13 @@ checks = [("x86sys.json is the generator's output", ok), ("precedence is in the 
           ("0x29 is decided from the 7601 IDT: not excluded, entry not present with gate type 0, result #GP(0x14a)",
            "41" not in rec["int_ring3"]["excluded"] and (lambda v: (v["present"], v["type"], v["dpl"], v["handler"], v["access"]) == (0, 0, 0, None, 0) and "0x14a" in v["result"])(rec["idt"]["vector_0x29"])
            and "0x29" not in rec["idt"]["ring3_gates"] and "other_vectors" in rec["idt"]["vector_0x29"]["result"]),
-          ("every excluded vector is a present DPL-3 gate with no vector row", all(int(k) not in rec["int_ring3"]["vectors"] for k in rec["int_ring3"]["excluded"])),
+          ("every excluded vector has no vector row; all but 0x21 are present DPL-3 gates", all(int(k) not in rec["int_ring3"]["vectors"] for k in rec["int_ring3"]["excluded"]) and sorted(int(k) for k in rec["int_ring3"]["excluded"]) == [0x21, 0x2a, 0x2b, 0x2c, 0x2e]),
+          ("idt is the runtime table: ring-3 gates unchanged (0x03-0x04, 0x2a-0x2e), not present 0x20-0x29, DPL-0 task gates 2 and 8 and the rewritten 0x13 inside the DPL-0 ranges, the table differs from the static one",
+           (lambda i: i["ring3_gates"] == ["0x03-0x04", "0x2a-0x2e"] and i["not_present"] == ["0x20-0x29"] and i["dpl0_present"] == ["0x00-0x02", "0x05-0x1f", "0x2f-0xff"] and i["table_sha256"] != i["static_table_sha256"])(rec["idt"])),
+          ("idt.runtime_writes: universe by rule = the 18 classified functions in both kernels, 0x13 -> _KiTrap13 (access 0x8e00, selector 8), vector 6 patch restored, 0x21 undecided, HAL undecided",
+           (lambda w: sorted(w["kernels"]) == ["ntkrnlpa.exe", "ntoskrnl.exe"] and all(len(k["universe"]) == 18 and k["xmmi"]["handler"] == "_KiTrap13" and k["xmmi"]["access"] == "0x8E00" and k["xmmi"]["selector"] == 8
+                                                                                         and k["classes"]["_KiSetProcessorType@0"]["class"] == "patch6" and k["classes"]["_KiConnectVectorAndInterruptObject@8"]["class"] == "handler_only" for k in w["kernels"].values())
+            and w["undecided_vectors"]["0x21"]["status"] == "undecided" and w["external_writers"]["status"] == "undecided" and "vector_2" in w["applied"] and "vector_8" in w["applied"])(rec["idt"]["runtime_writes"])),
           ("idt: limit 0x7ff, 256 entries, 0x2a-0x2e are ring-3 gates, both kernels' addresses", (rec["idt"]["limit"], rec["idt"]["entries"]) == (0x7ff, 256) and "0x2a-0x2e" in rec["idt"]["ring3_gates"] and sorted(rec["idt"]["addresses"]) == ["ntkrnlpa.exe", "ntoskrnl.exe"]),
           ("gdt: limit 0x3ff; ring-3 code 0x18 type 0xA DPL3, data 0x20 and TEB 0x38 type 2 DPL3, all present, S=1",
            rec["gdt"]["limit"] == 0x3ff and all((d["p"], d["s"], d["dpl"], d["type"]) == (1, 1, 3, t) for d, t in ((rec["gdt"]["descriptors"]["0x18"], 0xa), (rec["gdt"]["descriptors"]["0x20"], 2), (rec["gdt"]["descriptors"]["0x38"], 2)))),

@@ -1540,9 +1540,175 @@ def task_gate_stores(name, exe, pdb, kg, static_idt_types):
     return {"vector_8": out[8], "vector_2": out[2]}
 
 
+def idt_stores(cs, ins):
+    """The stores (and the pushes/pops of memory) that the function makes through a pointer to the processor's IDT, by dataflow over the straight-line decode: the IDT pointer is KPCR.IDT, read as
+    fs:[0x38] or as [KPCR + 0x38] with KPCR = fs:[0x1c] (KPCR.SelfPcr); lea/add/mov of it keep it a pointer with an offset. An index register added to it is a dynamic vector (its stores keep the
+    field offset in the disp, valid only for an index scaled by 8, checked by the caller). Returns [(va, entry | None, field, size, value | None, mnemonic text)]."""
+    X = cs.x86
+    pcr, idt, const, out = set(), {}, {}, []
+    sub = {"cx": "ecx", "dx": "edx", "ax": "eax", "bx": "ebx", "si": "esi", "di": "edi"}
+    for a in sorted(ins):
+        i = ins[a]
+        t = "%s %s" % (i.mnemonic, i.op_str)
+        ops = i.operands
+        wm = [o for o in ops if o.type == X.X86_OP_MEM and o.access & cs.CS_AC_WRITE]
+        for o in wm:
+            b = i.reg_name(o.mem.base) if o.mem.base else None
+            x = i.reg_name(o.mem.index) if o.mem.index else None
+            if b in idt or x in idt:
+                dyn = (b in idt and x is not None) or (x in idt and b is not None)
+                off = (idt[b] if b in idt else idt[x]) + o.mem.disp
+                v = None
+                if len(ops) > 1:
+                    src = ops[1]
+                    if src.type == X.X86_OP_IMM:
+                        v = src.imm
+                    elif src.type == X.X86_OP_REG:
+                        rn = i.reg_name(src.reg)
+                        v = const.get(sub.get(rn, rn))
+                        if v is not None and rn in sub:
+                            v &= 0xffff
+                out.append((a, None if dyn else off // 8, (o.mem.disp & 7) if dyn else off % 8, o.size, v, t))
+        rd, wr = i.regs_access()
+        if i.mnemonic == "mov" and len(ops) == 2 and ops[0].type == X.X86_OP_REG and ops[1].type == X.X86_OP_MEM:
+            d, m = i.reg_name(ops[0].reg), ops[1].mem
+            if m.segment and i.reg_name(m.segment) == "fs" and not m.base and not m.index and m.disp in (0x1c, 0x38):
+                pcr.discard(d)
+                idt.pop(d, None)
+                (pcr.add(d) if m.disp == 0x1c else idt.__setitem__(d, 0))
+                continue
+            if m.base and i.reg_name(m.base) in pcr and not m.index and not m.segment and m.disp == 0x38:
+                pcr.discard(d)
+                idt[d] = 0
+                continue
+        if i.mnemonic == "lea" and ops[1].mem.base and i.reg_name(ops[1].mem.base) in idt and not ops[1].mem.index:
+            d = i.reg_name(ops[0].reg)
+            idt[d] = idt[i.reg_name(ops[1].mem.base)] + ops[1].mem.disp
+            pcr.discard(d)
+            continue
+        if i.mnemonic == "mov" and len(ops) == 2 and ops[0].type == X.X86_OP_REG and ops[1].type == X.X86_OP_REG and i.reg_name(ops[1].reg) in idt:
+            idt[i.reg_name(ops[0].reg)] = idt[i.reg_name(ops[1].reg)]
+            continue
+        newc = None
+        if i.mnemonic == "mov" and len(ops) == 2 and ops[0].type == X.X86_OP_REG:
+            d = i.reg_name(ops[0].reg)
+            if ops[1].type == X.X86_OP_IMM and d in ("eax", "ebx", "ecx", "edx", "esi", "edi"):
+                newc = (d, ops[1].imm & 0xffffffff)
+            elif ops[1].type == X.X86_OP_REG and i.reg_name(ops[1].reg) in const:
+                newc = (d, const[i.reg_name(ops[1].reg)])
+        elif i.mnemonic == "shr" and ops[1].type == X.X86_OP_IMM and i.reg_name(ops[0].reg) in const:
+            newc = (i.reg_name(ops[0].reg), const[i.reg_name(ops[0].reg)] >> ops[1].imm)
+        for r in wr:
+            n = i.reg_name(r)
+            full = sub.get(n, n)
+            pcr.discard(n)
+            pcr.discard(full)
+            idt.pop(n, None)
+            idt.pop(full, None)
+            const.pop(full, None)
+        if newc:
+            const[newc[0]] = newc[1]
+    return out
+
+
+# What every function that can reach the IDT is, by the shape of its stores; the universe (below) must equal this set, so a function the rule finds that is not here is an error, not a silent omission.
+IDT_CLASSES = {
+    "_KiSystemStartup@4": "boot", "_KiSwapIDT@0": "boot",
+    "_Ki386EnableXMMIExceptions@4": "xmmi",
+    "_KiSetProcessorType@0": "patch6", "Check486BStepping": "patch6",
+    "_KiSwapProcess@8": "int21", "_Ki386LoadTargetInt21Entry@16": "int21",
+    "_KiConnectVectorAndInterruptObject@8": "handler_only",
+    "_KiI386PentiumLockErrataFixup@0": "relocate",
+    "_KiSaveProcessorControlState@4": "same_idtr", "_KiRestoreProcessorControlState@4": "same_idtr", "_KiInitializeProcessorState@32": "same_idtr",
+    "_KeStartAllProcessors@0": "same_idtr", "_KiStartDynamicProcessor@16": "same_idtr", "GetMachineBootPointers@0": "same_idtr",
+    "_KiTrap0E": "readonly", "_KiGetVectorInfo@8": "readonly", "_KiProcessorStart@0": "readonly",
+}
+
+
+def idt_universe(img, P, pub, dec, cs, tbl):
+    """Every function of the kernel that obtains the IDT: reads KPCR.IDT (fs:[0x38], or [KPCR + 0x38] with KPCR = fs:[0x1c]), executes sidt/lidt, or names the static table."""
+    X = cs.x86
+    out = {}
+    for n, v in sorted(pub.items()):
+        try:
+            ins = dec.cfg(img.base + P.rva(*v))[0]
+        except SystemExit:
+            continue
+        selfpcr = any(i.mnemonic == "mov" and "fs:[0x1c]" in i.op_str for i in ins.values())
+        for a, i in sorted(ins.items()):
+            hit = i.mnemonic in ("sidt", "lidt") or (i.mnemonic == "mov" and "fs:[0x38]" in i.op_str)
+            hit = hit or (selfpcr and i.mnemonic == "mov" and re.match(r"\w+, dword ptr \[\w+ \+ 0x38\]$", i.op_str) is not None and "esp" not in i.op_str and "ebp" not in i.op_str)
+            for o in i.operands:
+                hit = hit or (o.type == X.X86_OP_IMM and tbl <= o.imm < tbl + 0x800) or (o.type == X.X86_OP_MEM and not o.mem.base and not o.mem.index and tbl <= o.mem.disp < tbl + 0x800)
+            if hit:
+                out[n] = ins
+                break
+    return out
+
+
+def runtime_idt_writers(name, exe, pdb, static_gates):
+    """The IDT as it is when the kernel has finished booting and user code runs. Every function that can write the IDT is found by rule (idt_universe), classified by the shape of its stores, and asserted:
+      boot          KiSystemStartup/KiSwapIDT build the table (static + the task gates of task_gate_stores)
+      xmmi          Ki386EnableXMMIExceptions rewrites vector 0x13 with constants (applied below)
+      patch6        KiSetProcessorType / Check486BStepping patch vector 6 and restore it with push/pop of the same dwords (net no change), at processor start
+      int21         KiSwapProcess copies KPROCESS.Int21Descriptor into vector 0x21; the only store of Int21Descriptor is Ki386LoadTargetInt21Entry (VDM): the vector is undecided
+      handler_only  KiConnectVectorAndInterruptObject writes only the offset words (+0, +6) of any vector: present/DPL/type/selector unchanged
+      relocate/same_idtr/readonly  no store to an entry (sidt/lidt of the same table, a copy, loads)
+    Returns the facts; the gate application is done by the caller."""
+    import capstone as cs
+    img = Image(exe)
+    P = Pdb(pdb)
+    pub = P.publics()
+    dec = Dec(img, cs)
+    names = {}
+    for n, v in pub.items():
+        names.setdefault(img.base + P.rva(*v), []).append(n)
+    tbl = idt_facts(name, exe, pdb)[1]["table_va"]
+    uni = idt_universe(img, P, pub, dec, cs, tbl)
+    if set(uni) != set(IDT_CLASSES):
+        raise SystemExit("gen_x86sys: %s: the functions that reach the IDT are not the classified ones: unclassified %s, absent %s" % (name, sorted(set(uni) - set(IDT_CLASSES)), sorted(set(IDT_CLASSES) - set(uni))))
+    st = {n: idt_stores(cs, uni[n]) for n in uni}
+    ev = {}
+    for n, cl in sorted(IDT_CLASSES.items()):
+        s = st[n]
+        if cl in ("relocate", "same_idtr", "readonly") and s:
+            raise SystemExit("gen_x86sys: %s: %s is classed %s but stores through the IDT pointer: %s" % (name, n, cl, [(hex(a), t) for a, _e, _f, _z, _v, t in s]))
+        if cl == "handler_only":
+            if not s or any(e is not None or f not in (0, 6) or z != 2 for _a, e, f, z, _v, _t in s) or not any(i.mnemonic == "shl" and i.op_str.endswith(", 3") for i in uni[n].values()):
+                raise SystemExit("gen_x86sys: %s: %s does not store only the word-size offset fields (+0, +6) of a vector scaled by 8: %s" % (name, n, s))
+            ev[n] = {"class": cl, "stores": [hex(a) for a, *_ in s]}
+        elif cl == "xmmi":
+            f = {(e, fl, z): v for _a, e, fl, z, v, _t in s}
+            if {e for e, _f, _z in f} != {0x13} or set(f) != {(0x13, 5, 1), (0x13, 2, 2), (0x13, 0, 2), (0x13, 6, 2)} or any(v is None for v in f.values()):
+                raise SystemExit("gen_x86sys: %s: Ki386EnableXMMIExceptions does not store constants to the access byte, selector and offset words of vector 0x13 only: %s" % (name, s))
+            h = f[(0x13, 0, 2)] | (f[(0x13, 6, 2)] << 16)
+            ev[n] = {"class": cl, "vector": 0x13, "access": f[(0x13, 5, 1)] << 8, "selector": f[(0x13, 2, 2)], "handler_va": h, "handler": sorted(names.get(h, ["?"]))[0], "stores": [hex(a) for a, *_ in s]}
+        elif cl == "patch6":
+            ops = sorted(uni[n].items())
+            pushes = [a for a, i in ops if i.mnemonic == "push" and i.operands[0].type == cs.x86.X86_OP_MEM and i.operands[0].mem.disp in (0x30, 0x34) and i.operands[0].mem.base]
+            pops = [a for a, i in ops if i.mnemonic == "pop" and i.operands[0].type == cs.x86.X86_OP_MEM and i.operands[0].mem.disp in (0x30, 0x34) and i.operands[0].mem.base]
+            disp = lambda a: uni[n][a].operands[0].mem.disp
+            patch = [a for a, e, f, z, v, t in s if t.startswith("mov")]
+            if {e for _a, e, *_r in s} != {6} or [disp(a) for a in pushes] != [0x30, 0x34] or [disp(a) for a in pops] != [0x34, 0x30] or not patch or max(pushes) > min(patch) or min(pops) < max(patch) or any(f not in (0, 6) for _a, _e, f, _z, _v, t in s if t.startswith("mov")):
+                raise SystemExit("gen_x86sys: %s: %s is not `push [idt+0x30]; push [idt+0x34]; patch the offset words of vector 6; pop [idt+0x34]; pop [idt+0x30]`" % (name, n))
+            ev[n] = {"class": cl, "vector": 6, "saved": [hex(a) for a in pushes], "patched": [hex(a) for a in patch], "restored": [hex(a) for a in pops]}
+        elif cl == "int21":
+            if n == "_KiSwapProcess@8":
+                if sorted((e, f, z) for _a, e, f, z, _v, _t in s) != [(0x21, 0, 4), (0x21, 4, 4)] or [t for *_r, t in s] != ["mov dword ptr [ecx + 0x108], eax", "mov dword ptr [ecx + 0x10c], eax"]:
+                    raise SystemExit("gen_x86sys: %s: KiSwapProcess does not copy two dwords into vector 0x21: %s" % (name, s))
+            elif {e for _a, e, *_r in s} - {0x21} or any(i.mnemonic == "lea" and i.operands[1].mem.disp in range(0, 0x800) and False for i in uni[n].values()):
+                raise SystemExit("gen_x86sys: %s: %s stores outside vector 0x21: %s" % (name, n, s))
+            ev[n] = {"class": cl, "vector": 0x21, "stores": [hex(a) for a, *_ in s]}
+        elif cl == "boot":
+            ev[n] = {"class": cl}
+        else:
+            ev[n] = {"class": cl}
+    return {"classes": ev, "universe": sorted(uni), "xmmi": ev["_Ki386EnableXMMIExceptions@4"]}
+
+
 def kernel_extras(kdir, src, kg, idt_types):
     ks = src["win7sp1_x86_kernel"]
-    ap, tss, ldta, cr4 = {}, {}, {}, {}
+    ap, tss, ldta, cr4, rtw = {}, {}, {}, {}, {}
     for n, rec in sorted(ks["kernels"].items()):
         ex, pb = os.path.join(kdir, rec["exe"]["path"]), os.path.join(kdir, rec["pdb"]["path"])
         pinned_bin(ex, rec["exe"], n)
@@ -1552,12 +1718,16 @@ def kernel_extras(kdir, src, kg, idt_types):
         ldta[n] = ldt_descriptor_access(n, ex, pb)
         cr4[n] = cr4_writers(n, ex, pb)
         tss[n]['task_gates'] = task_gate_stores(n, ex, pb, kg, idt_types)
+        rtw[n] = runtime_idt_writers(n, ex, pb, None)
     if len({tuple(sorted(v["KiInitializeTSS"]["stores"])) for v in tss.values()}) != 1 or len({v["access_byte"] for v in ldta.values()}) != 1:
         raise SystemExit("gen_x86sys: the two kernels disagree on the TSS initial stores or the LDT descriptor access byte")
     wl = ks["loader"]["winload.exe"]
     wp, wpdb = os.path.join(kdir, wl["path"]), os.path.join(kdir, wl["pdb"]["path"])
     bsp = bsp_gdt_alloc(wp, wpdb, kg)
-    return bsp, ap, {"winload": addrs({"TSS_memset_call": bsp["TSS_memset_call"], "TssLength": kg["TssLength"]}), "kernels": addrs(tss)}, addrs(ldta), addrs(cr4)
+    logical = {n: {c: {k: v for k, v in e.items() if k not in ('stores', 'saved', 'patched', 'restored', 'handler_va')} for c, e in r['classes'].items()} for n, r in rtw.items()}
+    if len({json.dumps(v, sort_keys=True) for v in logical.values()}) != 1:
+        raise SystemExit("gen_x86sys: the two kernels disagree on the IDT writers")
+    return bsp, ap, {"winload": addrs({"TSS_memset_call": bsp["TSS_memset_call"], "TssLength": kg["TssLength"]}), "kernels": addrs(tss)}, addrs(ldta), addrs(cr4), rtw
 
 
 def build(osrec, src, mirror, wine, cpumodel, kernel):
@@ -1584,6 +1754,23 @@ def build(osrec, src, mirror, wine, cpumodel, kernel):
         if d is None or (d["type"], d["s"], d["dpl"], d["p"]) != want:
             raise SystemExit("gen_x86sys: the GDT descriptor of %s (%s = %#x) is not (type %#x, S 1, DPL 3, P 1): %r" % (r, k_, kg[k_], want[0], d))
     c3 = {v for v, g in idtg.items() if g["present"] and g["dpl"] == 3}
+    bsp, apg, tssf, ldta, cr4w, rtw = kernel_extras(kernel, src, kg, {g['type'] for g in idtg.values()})
+    # the IDT user code runs against: the static table with every store of the boot-time writers applied
+    rt = {k: dict(v) for k, v in idtg.items()}
+    tg = tssf["kernels"]
+    xm = next(iter(rtw.values()))["xmmi"]
+    for n_, r_ in tssf["kernels"].items():
+        for vv, key in ((8, "vector_8"), (2, "vector_2")):
+            rt[vv] = gate_row(None, r_["task_gates"][key]["selector"], 0x8500)
+    rt[xm["vector"]] = gate_row(rt[xm["vector"]]["handler"] if rt[xm["vector"]]["handler"] == xm["handler"] else xm["handler"], xm["selector"], xm["access"])
+    undec_idt = {0x21}   # KiSwapProcess copies KPROCESS.Int21Descriptor, which only the VDM path (Ki386LoadTargetInt21Entry) stores
+    if rt[0x21]["present"] or rt[0x21]["type"] != 0:
+        raise SystemExit("gen_x86sys: IDT entry 0x21 is not the zero entry the VDM-undecided row describes")
+    c3rt = {v for v, g in rt.items() if g["present"] and g["dpl"] == 3}
+    if c3rt != c3 or {v for v, g in rt.items() if not g["present"]} != {v for v, g in idtg.items() if not g["present"]}:
+        raise SystemExit("gen_x86sys: the boot-time IDT writers change which vectors are present DPL-3 gates; int_ring3 would change")
+    idt_static = idtg
+    idtg = rt
     for v, g in idtg.items():
         if g["present"] and g["kind"] is None:
             raise SystemExit("gen_x86sys: IDT entry %#x is present but not an interrupt, trap or task gate (type %#x)" % (v, g["type"]))
@@ -1646,8 +1833,8 @@ def build(osrec, src, mirror, wine, cpumodel, kernel):
     if not set(vec) <= c3:
         raise SystemExit("gen_x86sys: a vector of int_ring3.vectors has no present DPL-3 gate in the 7601 IDT: %s" % sorted(set(vec) - c3))
     undec_gates = sorted(c3 - set(vec))
-    other["applies_to"] = ("every vector that is not a present DPL-3 gate of the 7601 IDT (%d vectors: %s): SDM Vol 2A INT n protected-mode, a descriptor that is not an interrupt, trap or task gate, "
-                           "or whose DPL < CPL, is #GP(vector*8+2); entries 0x20-0x29 are zero (type 0), every other such entry is a present DPL-0 gate; the present DPL-3 gates are decided by `vectors` or listed in `excluded`") % (256 - len(c3), ", ".join(ranges(set(range(256)) - c3)))
+    other["applies_to"] = ("every vector that is not a present DPL-3 gate of the 7601 IDT and not undecided (%d vectors: %s): SDM Vol 2A INT n protected-mode, a descriptor that is not an interrupt, trap or task gate, "
+                           "or whose DPL < CPL, is #GP(vector*8+2); entries 0x20-0x29 are zero (type 0), every other such entry is a present DPL-0 gate; the present DPL-3 gates are decided by `vectors` or listed in `excluded`") % (256 - len(c3) - len(undec_idt), ", ".join(ranges(set(range(256)) - c3 - undec_idt)))
     # null_seg_access: a memory operand through a segment register that holds the null selector (reachable: mov_to_sreg lets es/ds/fs/gs load null). SDM Vol 3 3.4.2 and Wine 9.0 TRAP_x86_PROTFLT with err == 0.
     fnt = fn.group(0)
     pre = fnt.split("/* instruction prefixes */", 1)[1].split("case 0x0f:", 1)[0]
@@ -1708,7 +1895,6 @@ def build(osrec, src, mirror, wine, cpumodel, kernel):
     wl_ver = src["win7sp1_x86_kernel"]["loader"]["winload.exe"]["sha256"][:12]
     eflags0 = int(m.group(1), 16)
     sanit = kg["EFLAGS_USER_SANITIZE"]
-    bsp, apg, tssf, ldta, cr4w = kernel_extras(kernel, src, kg, {g['type'] for g in idtg.values()})
     task_targets = [kg["KGDT_DF_TSS"], kg["KGDT_NMI_TSS"]]
     lar_lsl = lar_lsl_row(ctx, ldta)
     iret = iret_row(ctx, kg, (eflags0 >> 12) & 3, tssf, ["0x%02x" % x for x in task_targets], cr4w)
@@ -1730,7 +1916,8 @@ def build(osrec, src, mirror, wine, cpumodel, kernel):
         "null_seg_access": null_row,
         "int_ring3": {"vectors": vec, "other_vectors": other,
                       "source": "%s: handle_interrupt cases %s; segv_handler / trap_handler map %s to #OF / #BP" % (wsrc, [hex(i) for i in ints], sorted(traps)),
-                      "excluded": {str(v): {"status": "undecided", "why": "the 7601 IDT has a present DPL-3 gate at this vector (row idt.ring3_gates) with no row in `vectors`: its behaviour is the kernel's handler, which no pinned source decides; blocker: a reach certificate that no site executes int 0x%x, or a row" % v} for v in undec_gates}},
+                      "excluded": dict({str(v): {"status": "undecided", "why": "the 7601 IDT has a present DPL-3 gate at this vector (row idt.ring3_gates) with no row in `vectors`: its behaviour is the kernel's handler, which no pinned source decides; blocker: a reach certificate that no site executes int 0x%x, or a row" % v} for v in undec_gates},
+                                   **{str(v): {"status": "undecided", "why": "IDT[0x%02x] is loaded from KPROCESS.Int21Descriptor on every process switch (row idt.runtime_writes.undecided_vectors); blocker: a reach certificate that no site executes int 0x%x or sets up a VDM, or a row" % (v, v)} for v in undec_idt})},
         "cr4": {"tsd": {"value": 0 if not {0x31, 0x33} & set(ext_ops) else None,
                         "source": "%s: is_privileged_instr intercepts only the 0F opcodes %s, so rdtsc (0F 31) runs in user mode; consistent with the owner's decision that rdtsc reads the platform timer" % (wsrc, [hex(o) for o in ext_ops])},
                 "umip": {"value": umip, "source": "Intel SDM Vol 3A 2.5 CR4.UMIP: the bit is reserved (setting it is #GP) unless CPUID.(EAX=07H,ECX=0):ECX[2] is enumerated; the declared CPU's max basic leaf is %d (%s max_basic, sha256 %s), below 7, so there is no leaf 7 and CR4.UMIP is 0" % (max_basic, cm["path"], cm["sha256"][:12])},
@@ -1758,6 +1945,13 @@ def build(osrec, src, mirror, wine, cpumodel, kernel):
                                                                             "result": "#GP(0x%x): the SDM INT n protected-mode check fails the gate-type test, so it joins int_ring3.other_vectors" % (0x29 * 8 + 2)},
                 "ring3_gates": ranges(c3), "not_present": ranges({v for v, g in idtg.items() if not g["present"]}), "dpl0_present": ranges({v for v, g in idtg.items() if g["present"] and g["dpl"] != 3}),
                 "table_sha256": hashlib.sha256("".join("%02x:%s:%x:%04x\n" % (v, g["handler"], g["selector"], g["access"]) for v, g in sorted(idtg.items())).encode()).hexdigest(),
+                "static_table_sha256": hashlib.sha256("".join("%02x:%s:%x:%04x\n" % (v, g["handler"], g["selector"], g["access"]) for v, g in sorted(idt_static.items())).encode()).hexdigest(),
+                "runtime_writes": {"rule": "the table user code runs against = the static table with the stores of every function that can reach the IDT (found by rule over the kernel: KPCR.IDT via fs:[0x38] or fs:[0x1c]+0x38, sidt/lidt, the static table's address) applied; each is classified by the shape of its stores and asserted (runtime_idt_writers); a function the rule finds that is not classified is an error",
+                                   "applied": {"vector_2": "task gate (access 0x8500), selector KGDT_NMI_TSS", "vector_8": "task gate (access 0x8500), selector KGDT_DF_TSS", "vector_0x13": "handler %s (Ki386EnableXMMIExceptions), access 0x8e00, selector 8 (the static entry has handler %s)" % (xm["handler"], idt_static[0x13]["handler"])},
+                                   "no_net_change": {"vector_6": "KiSetProcessorType and Check486BStepping patch the offset words and restore them with push/pop of the same dwords", "any_vector_handler_only": "KiConnectVectorAndInterruptObject stores only the offset words (+0, +6): present, DPL, type and selector are unchanged"},
+                                   "undecided_vectors": {"0x21": undec("KiSwapProcess loads IDT[0x21] from KPROCESS.Int21Descriptor of the process being switched to; the only store of that field is Ki386LoadTargetInt21Entry (the VDM path), so the entry is the zero entry unless a process set up an NTVDM int 0x21 target; no pinned source decides whether the declared program does; blocker: a reach certificate that no site calls the VDM setup API, or a row")},
+                                   "external_writers": undec("kernel-mode code outside ntoskrnl/ntkrnlpa (hal.dll of the declared machine, drivers) reaches the IDT through KPCR.IDT; hal.dll is not a pinned source, so which gates it rewrites is not derived; blocker: pin the 7601 hal (halmacpi.dll) from the same Windows 7 SP1 package in tools/win7sp1-x86-kernel and extend the writer universe to it"),
+                                   "kernels": addrs(rtw)},
                 "addresses": hexify(kaddr),
                 "source": "Windows 7 SP1 ntoskrnl/ntkrnlpa 7601 (both give the same table): the static IDT in the INIT section, word-swapped by KiSwapIDT and copied by KiSystemStartup; access word 0xEE00 is a DPL-3 interrupt gate, 0x8E00 DPL 0, 0 is not a gate"},
         "gdt": {"limit": wlim["gdt_limit"], "descriptors": {"0x%02x" % k: v for k, v in sorted(gdt_ents.items())}, "addresses": hexify(waddr),
