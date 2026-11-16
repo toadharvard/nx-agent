@@ -48,7 +48,7 @@ def comb(a, b):
 
 
 def entryval(F, loc):
-    if F.kind in ('inner', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler'):
+    if F.kind in ('eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler'):
         return {('?', 'funclet')}
     if loc[0] == 's':
         return {('arg',)} if loc[1] >= 4 else {('?', 'uninit')}
@@ -481,7 +481,6 @@ def main():
             if s[2] == 'pending':
                 s = (s[0], s[1]) + stat.get(s[1], ('status-escapes', 'undecided')) + ('',)
             sites.setdefault(s[1], (s, a))
-    crt = lambda a: kind[a] not in ('decomp', 'inner')
     L = []
     cnt = Counter(s[0] for s, a in sites.values())
     L.append('x87/SSE control writers (sites): ' + ' '.join('%s=%d' % (k, cnt[k]) for k in ('fldcw', 'fninit', 'finit', 'frstor', 'fldenv', 'fxrstor', 'ldmxcsr')))
@@ -521,7 +520,7 @@ def main():
     L.append('  of the unknown fldcw: %d are alias/partial/budget cases (pattern fnstcw..fistp..fldcw present in their function, unproven)' % len(bl))
     L.append('MXCSR ldmxcsr classes: ' + ' '.join('%s=%d' % kv for kv in sorted(mxc.items())) + '  constants: ' + ' '.join('%08x' % v for v in sorted(mconsts)))
     # CRT setters / readers and their callers
-    K = set(setters) | {a for s, a in sites.values() if s[0] in ('fnclex', 'fclex', 'fninit', 'finit') and crt(a)} | {a for s, a in sites.values() if s[2] == 'status-escapes' and crt(a) and ext[a] < 400}
+    K = set(setters) | {a for s, a in sites.values() if s[0] in ('fnclex', 'fclex', 'fninit', 'finit')} | {a for s, a in sites.values() if s[2] == 'status-escapes' and ext[a] < 400}
     L.append('CRT control/status entries (arg-derived fldcw/ldmxcsr, or CRT-range fnclex/fninit/escaping fnstsw, <400B): %d: %s' % (len(K), ' '.join('%08x' % a for a in sorted(K)[:12])))
     cs = []
     todo = sorted({c for k in K for c in callers.get(k, ())})
@@ -537,12 +536,12 @@ def main():
         if s[0] in ('fnstsw', 'fstsw'):
             sc[s[2]] += 1
             if s[2] == 'status-escapes':
-                esc.append((s[1], a, crt(a))); reasons[s[3].split('-')[0] + ('-' + s[3].split('-')[1] if s[3].startswith('use') else '')] += 1
+                esc.append((s[1], a)); reasons[s[3].split('-')[0] + ('-' + s[3].split('-')[1] if s[3].startswith('use') else '')] += 1
         elif s[2] == 'seen':
             misc[s[0].replace('fn', 'f').replace('fwait', 'wait')].append((s[1], a))
-    L.append('fnstsw/fstsw sites: %d  cc-only=%d status-escapes=%d (in CRT range %d, decomp %d)' % (sum(sc.values()), sc['cc-only'], sc['status-escapes'], sum(1 for e in esc if e[2]), sum(1 for e in esc if not e[2])))
+    L.append('fnstsw/fstsw sites: %d  cc-only=%d status-escapes=%d ' % (sum(sc.values()), sc['cc-only'], sc['status-escapes']))
     L.append('  escape reasons: ' + ' '.join('%s=%d' % kv for kv in sorted(reasons.items(), key=lambda kv: -kv[1])[:10]))
-    L.append('  escape examples: ' + ' '.join('%08x(%08x,%s)' % (x, a, 'crt' if c else 'game') for x, a, c in esc[:5]))
+    L.append('  escape examples: ' + ' '.join('%08x(%08x)' % (x, a) for x, a in esc[:5]))
     for k in ('fstenv', 'fsave', 'fxsave', 'fclex', 'wait', 'stmxcsr'):
         L.append('%s sites: %d in %d entries  e.g. %s' % (k, len(misc[k]), len({a for _, a in misc[k]}), ' '.join('%08x(%08x)' % v for v in misc[k][:3])))
     ds = {a: d for a, d in dep.items() if d['x87']}
@@ -561,7 +560,7 @@ def main():
     with open(OUT + '/sites.tsv', 'w') as f:
         for x in sorted(sites):
             s, a = sites[x]
-            f.write('%08x\t%s\t%s\t%s\t%s\t%s\tentry=%08x\t%s\n' % (x, s[0], s[2], s[3], s[4], 'crt' if crt(a) else 'game', a, kind[a]))
+            f.write('%08x\t%s\t%s\t%s\t%s\tentry=%08x\t%s\n' % (x, s[0], s[2], s[3], s[4], a, kind[a]))
     with open(OUT + '/depth.tsv', 'w') as f:
         for a in sorted(ds):
             d = ds[a]
