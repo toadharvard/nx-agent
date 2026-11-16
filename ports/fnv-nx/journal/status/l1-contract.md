@@ -3000,3 +3000,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Drops: the guest roots shim, hostabi/product, hostabi, lib/sha256 and verify/probes; tests/bootrt; test_sha256_isa and test_gate_publish; dm:1-12. shim and hostabi/product leave the trunk until cand5.
   - Still red locally: test_frame (the order plugin, L2), gate_hostapi, rtasm, compilerstage/objects_select, toolext, selftests_universe, envcheck, formgate_real/fpexact_host, gate_imports.
   - The final verdict is sent to the farm. Any item still red afterwards is dropped, and the rest merges.
+- 12:03: w28 b469563e2: modules is done. Real exe+redist: load-fails 0, so no native serving today, and 10 images.
+  - Ruling on Galaxy: platform/declared_modules.tsv (L5) with dll, kind=served-absent-service, and a cite to the CLAUDE.md section. served = declared with no file ∪ served-absent-service rows.
+  - Reds: a dll not declared, a bad or missing cite, a duplicate row, a reached export with no bridge row.
+  - Expected images 10 -> 8. L5 adds the 2 rows, then w28 goes on to reached + pins.
