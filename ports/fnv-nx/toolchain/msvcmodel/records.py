@@ -4,8 +4,8 @@ in a sandbox with no recipe.py, no repo python and no records of their own, so e
 declarations is the file this writes, mounted as an input and so in the key of exactly the step that reads it. The values are computed by the functions every other
 reader uses (recipe.runtime_configure, runtime_configure_patch, runtime_cflags, semantics_set, plugin_args, PLUGIN_SOURCES): one source, no copy.
 
-    records.py stage1 OUT [VERIFY]   the compiler's configure: T ABI CPUARCH MLFLAG GCC_RT_CONF[]
-    records.py stage2 OUT [VERIFY]   the runtime build: T ABI MLFLAG CFG_SUBDIRS[] RUNTIME_CFLAGS[] SEMANTICS[] PLUGIN_ORDER[] PLUGIN_ARGV_<name>[]
+    records.py stage1 OUT VERIFY   the compiler's configure: T ABI CPUARCH MLFLAG GCC_RT_CONF[]
+    records.py stage2 OUT VERIFY   the runtime build: T ABI MLFLAG CFG_SUBDIRS[] RUNTIME_CFLAGS[] SEMANTICS[] PLUGIN_ORDER[] PLUGIN_ARGV_<name>[]
                                      (the load order = recipe.PLUGIN_SOURCES; recipe.plugin_args("native") without PLUGIN_OUT, the recipe stage's report path: a runtime
                                      build has no /out report)
 Two files, not one: a plugin argument changes the stage-2 file only, so the compiler (stage 1) is not rebuilt for it. VERIFY: the verify directory (default: this
@@ -17,7 +17,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 mode, outpath = sys.argv[1], sys.argv[2]
-verify = sys.argv[3] if len(sys.argv) > 3 else os.path.join(HERE, "..", "..", "verify")
+verify = sys.argv[3]   # the mounted verify directory (a declared input of the generator), always passed
 sys.path.insert(0, verify)
 import recipe  # noqa: E402
 
