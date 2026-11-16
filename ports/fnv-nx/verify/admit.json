@@ -653,6 +653,14 @@
    "target": "host",
    "entry": [],
    "recipe": "ports/fnv-nx/lift/proof/shapeprove/build.json"
+  },
+  {
+   "path": "ports/fnv-nx/shim/include",
+   "class": "header"
+  },
+  {
+   "path": "ports/fnv-nx/hostabi/include",
+   "class": "header"
   }
  ]
 }

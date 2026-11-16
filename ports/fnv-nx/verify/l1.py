@@ -29,6 +29,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import envcheck  # noqa: E402
@@ -69,11 +70,11 @@ def _blocked_env(bad):
     print("\n".join(["blocked: env"] + bad))
     return 4
 
-def _check(repo, commit, vdir, budget, gates, td, env_id):
+def _check(repo, commit, vdir, budget, gates, td, env_id, started):
     """verdict.py run + store for COMMIT; returns the stored verdict dict."""
     outp = os.path.join(td, "verdict.json")
     args = ["--repo", repo, "--commit", commit, "--gates", gates, "--out", outp, "--env-id", env_id,
-            "--cache", os.path.join(vdir, "cache")]  # content-keyed gate results (verdict.py gate contract, GATE_CACHE)
+            "--cache", os.path.join(vdir, "cache"), "--started", repr(started)]  # content-keyed gate results (verdict.py gate contract, GATE_CACHE)
     if budget is not None:
         args += ["--budget-s", budget]
     verdict.cmd_run(args)
@@ -87,19 +88,19 @@ def _artifacts(o):
     recipe.set_artifacts(recipe.ext_dir(os.path.join(os.path.abspath(o["--verdicts"]), "cache")), o["--artifacts"])
 
 def cmd_verdict(a):
-    o = _opts(a, ("--commit", "--artifacts"))
-    _artifacts(o)
+    started = time.time()
+    o = _opts(a, ("--commit",))
     env_id, bad = _env(o["--repo"], o["--commit"])
     if bad:
         return _blocked_env(bad)
     with tempfile.TemporaryDirectory() as td:
-        v = _check(o["--repo"], o["--commit"], o["--verdicts"], o.get("--budget-s"), _gates_file(o["--repo"], o["--commit"], td), td, env_id)
+        v = _check(o["--repo"], o["--commit"], o["--verdicts"], o.get("--budget-s"), _gates_file(o["--repo"], o["--commit"], td), td, env_id, started)
     print(_line(v))
     return 0 if v["verdict"] == "green" else 2
 
 def cmd_merge(a):
-    o = _opts(a, ("--into", "--from", "--artifacts"), ("--remote",))
-    _artifacts(o)
+    started = time.time()
+    o = _opts(a, ("--into", "--from"), ("--remote",))
     o.setdefault("--remote", None)
     repo, vdir, remote, bname = o["--repo"], o["--verdicts"], o["--remote"], o["--into"]
     if remote:
@@ -136,7 +137,7 @@ def cmd_merge(a):
         # (it can turn green only by every gate passing), so a red verdict is never a permanent mark on a tree
         if stored is None or stored.get("verdict") != "green":
             cand = verdict._git_ok(repo, "commit-tree", tree, "-p", old, "-p", src, inp="l1 candidate merge of %s\n" % o["--from"])
-            v = _check(repo, cand, vdir, o.get("--budget-s"), gates, td, env_id)
+            v = _check(repo, cand, vdir, o.get("--budget-s"), gates, td, env_id, started)
         else:
             v = stored
         print(_line(v))

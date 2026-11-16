@@ -28,7 +28,9 @@ M32 = 0xffffffff
 _INSMEMO = {}; _RESMEMO = {}
 def _run(arg, cfg, XEX, REF=frozenset()):
     """cfg: modules (the module table), moddirs (list), facts_out: declared inputs, passed by universe.py"""
-    path, mrow = pemod.locate(arg, cfg.modules, cfg.moddirs)      # modules.tsv row (missing = KeyError) and the file (sha256 + size checked = ValueError)
+    if getattr(cfg, 'exe', None):      # the process image: no modules.tsv row, it is mapped at its preferred base (the loader maps it there; it has no assigned base)
+        path = cfg.exe; _m = pemod.load(path); mrow = SimpleNamespace(name='exe', base=None, size=len(_m.d), sizeimg=_m.sizeimg, pref=_m.base, entry=_m.entry, tls=1 if _m.dirent(9)[0] else 0)
+    else: path, mrow = pemod.locate(arg, cfg.modules, cfg.moddirs)      # modules.tsv row (missing = KeyError) and the file (sha256 + size checked = ValueError)
     name = os.path.splitext(mrow.name)[0]; outd = cfg.facts_out + '/' + name; os.makedirs(outd, exist_ok=True)
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
     import gapmd; md = gapmd.make(md, cfg.udsail)
@@ -39,7 +41,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     text = bytes(tx)
     def intext(a): return T0 <= a < T1 and V[a - T0] == 1
     rvals_all = [(r, v) for r, v in ((r, u32(r)) for r in relocs) if intext(v)]
-    rvals = [(r, v) for r, v in rvals_all if r not in XEX and v not in REF]          # R3 refined (residue.disp_only): the value sites; XEX = the displacement-only sites of the previous round
+    rvals = [(r, v) for r, v in rvals_all if r not in XEX]          # value occurrences root their target; XEX = the displacement-only sites of the previous round (see run())
     ent = {}; roots = set(); queue = deque(); dec = {}; cov = bytearray(TN); ud = set(); xf = set(); misfit = set(); callers = {}; calltg = {}; leaves = set(); jtab = {}; jins = []
     refhit = set()
     def add(a, kind, proven=False):
@@ -105,7 +107,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
             if fall: st.append(x + sz)
         return seen
     X_ = SimpleNamespace(d=M.d, secs=M.secs, text=text, T0=T0, T1=T1, cov=cov, insns=dec, rset=rset, u32=u32, sec=M.sec, intext=intext, callers=callers, isdata=lambda a: M.sec(a) is not None,
-                         indec=lambda a: None, emit=lambda t, k, s: add(t, k, True), relocs=relocs, extent_insns=extent_insns, rvals=rvals, fsize={}, mark=lambda *a: None, imports=imports,
+                         indec=lambda a: None, emit=lambda t, k, s: add(t, k, True), relocs=relocs, extent_insns=extent_insns, rvals=rvals, mark=lambda *a: None, imports=imports,
                          outdir=outd, cstr=M.cstr, strict=True, entry_of=entry_of)
     eh = ehtables.EH(X_)
     if M.entry: add(M.base + M.entry, 'entry', True)
@@ -141,7 +143,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
         ex = JT.exclusive(jt_ok, svals)
         def seeded(x):
             if x in callers: return True
-            if x in ent and (ent[x] - {'ptr', 'tail', 'inner'}): return True
+            if x in ent and (ent[x] - {'ptr', 'tail'}): return True
             return any(r not in ex for r in vrefs.get(x, ()))
         n = 0
         for a in sorted(jtab):
@@ -468,33 +470,33 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     open(outd + '/gate_codemap.json', 'w').write(json.dumps({'schema': 'fnvnx-gate/1', 'name': 'l3.codemap.' + name, 'status': 'green' if green else 'red', 'universe': TN - cc[7], 'certified': TN - cc[7] - nunx, 'uncertified': nunx, 'targets': len(targets), 'targets_certified': cert}) + '\n')
     print('gate %s red=%d sources=%d rows=%d' % (pcsrc_res['name'], pcsrc_red, pcsrc_res['sources'], pcsrc_res['rows']))
     print('gate l3.codemap.%s: %s (bytes %d, unexplained %d; targets %d, certified %d)%s' % (name, 'green' if green else 'red', TN - cc[7], nunx, len(targets), cert, ''.join('; RED: ' + w for w in why)))
-    return (0 if green else 1), {r for r, v in rvals_all if residue.disp_only(md, text, T0, cov, r, misfit)}, REFO, PMF, len(E), sum(1 for e in E if e not in proven), len(refhit)
+    Xs = {r for r, v in rvals_all if residue.disp_only(md, text, T0, cov, r, misfit)}
+    occ = Counter('displacement-only' if r in Xs else 'operand (imm or lea) of a decoded instruction' if T0 <= r < T1 and cov[r - T0] else 'relocated data word' for r, v in rvals_all)
+    tg_all = {v for r, v in rvals_all}; tg_val = {v for r, v in rvals_all if r not in Xs}
+    print('roots by occurrence: %s; relocation targets %d, rooted by a value occurrence %d, excluded (only displacement-only words) %d' % (dict(occ), len(tg_all), len(tg_val), len(tg_all - tg_val)))
+    return (0 if green else 1), Xs, REFO, PMF, len(E), sum(1 for e in E if e not in proven), len(refhit)
 
 
 def run(arg, cfg):
-    """R3 refined, to its fixed point: X = {relocation sites that are only the displacement of a non-lea memory operand of an instruction of the flow} (residue.disp_only); the flow depends on the entries,
-    the entries on the value sites (not in X). Round k runs the whole producer with X_k excluded and yields X_{k+1} = X(flow of round k); X_0 = empty. Done when X_{k+1} == X_k: every excluded site is a
-    displacement inside the final flow and every entry is justified by a value site or a root. A cycle is an error (never a result); the rounds are not capped (R grows, the states are finite)."""
+    """R3 refined to its fixed point, with ONE refinement (ruling 2026-11-16): X = {relocation sites that are only the displacement of a non-lea memory operand of an instruction of the flow} (residue.disp_only).
+    Soundness: if every relocated word targeting t is such a displacement, the CPU uses t only to address a load or store, so t is never a register or memory value and no transfer can receive it from that word.
+    Value occurrences (an imm operand, a lea displacement, a relocated data word) root their target. The flow depends on the entries and the entries on the value sites (not in X). Round k runs the producer with X_k excluded and
+    yields X_{k+1} = X(flow of round k); X_0 = empty. Done when X_{k+1} == X_k. A cycle is an error. The reloc-misfit refusal and the on-data drop are deleted: they were heuristics (a decoding that disagrees with the
+    relocations, or bytes of a relocation slot, is not proof that the bytes are never executed)."""
     import io, contextlib
-    X = frozenset(); R = frozenset(); DD = frozenset(); seen = []; refinfo = {}
-    k = -1
-    while True:      # terminates: R only grows and the states (X, R) are finite; a state seen twice is a cycle, which is an error (below); there is no round cap
+    X = frozenset(); seen = []; k = -1
+    while True:      # terminates: the states X are finite and a state seen twice is a cycle, an error (below); no round cap
         k += 1; buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            code, Xo, Ro, PMF, nE, nC, nh = _run(arg, cfg, X, R)
-        refinfo.update(Ro); print('round %d: X %d R %d (+%d refused, %d displacement-only sites)' % (k, len(X), len(R), len(set(Ro) - R), len(Xo)), file=sys.stderr, flush=True)
-        if frozenset(Xo) == X and set(Ro) <= R:
+            code, Xo, Ro, PMF, nE, nC, nh = _run(arg, cfg, X, frozenset())
+        print('round %d: X %d (%d displacement-only sites)' % (k, len(X), len(Xo)), file=sys.stderr, flush=True)
+        if frozenset(Xo) == X:
             sys.stdout.write(buf.getvalue()); print('R3 refinement: fixed point after %d rounds, %d displacement-only relocation sites excluded from the entry rule' % (k + 1, len(X)))
-            print('reloc-consistency: entries %d (candidates %d); refused (unproven, decoding has a relocation-misfit) %d; proven entries with a misfit %d%s' % (nE, nC, len(R), len(PMF), ' RED: ' + ' '.join('%08x' % a for a in PMF[:8]) if PMF else ''))
-            od = cfg.facts_out + '/' + os.path.splitext(pemod.locate(arg, cfg.modules, cfg.moddirs)[1].name)[0]
-            open(od + '/refused.tsv', 'w').write('# columns: entry, relocation-misfit instructions in its decoding, reason; unproven candidate entries refused by reloc-consistency (the bytes go to data, the relocated pointer is a data fact)\n' + ''.join('%08x\t%d\treloc-misfit\n' % (e, refinfo[e]) for e in sorted(R - DD)))
-            bad = residue.entries_on_data(od)
-            dn = frozenset(bad) - R - DD
-            if dn:      # the same invariant the gate reads: a pointer-only entry on proven data (codemap class data-reloc) is not an entry; it is refused, and the next round rebuilds the facts without it
-                DD = DD | dn; R = R | dn; seen.append((X, R)); continue
-            open(od + '/dropped_on_data.tsv', 'w').write('# columns: address, proof id; pointer-valued sites whose target is a byte of class data-reloc (the codemap invariant, residue.entries_on_data), so not an entry\n' + ''.join('%08x\t%s\n' % (a, residue.data_proof(od, a)) for a in sorted(DD)))
-            print('invariant entries on class-3 data bytes: %d%s' % (len(bad), ' RED: ' + ' '.join('%08x' % a for a in bad[:8]) if bad else ''))
-            return 0      # the facts are written; the verdict is gate_codemap.json / gate_pcsrc.json (status, entries_on_data), judged by the gate that reads them
-        seen.append((X, R)); X = frozenset(Xo); R = R | frozenset(Ro)          # a refusal is intrinsic to the bytes (the misfit) and the proven set only shrinks with the universe: R grows monotonically
-        if (X, R) in seen:
-            raise RuntimeError('R3 refinement does not converge (cycle at round %d)' % k)
+            print('universe: entries %d (candidates %d)' % (nE, nC))
+            od = cfg.facts_out + '/' + os.path.splitext('exe' if getattr(cfg, 'exe', None) else pemod.locate(arg, cfg.modules, cfg.moddirs)[1].name)[0]
+            bad = residue.entries_on_data(od)      # roots by rule whose bytes are also data-reloc words: reported, never dropped (the invariant is L1's to change)
+            open(od + '/entries_on_data.tsv', 'w').write('# columns: root address, proof id of the data-reloc byte; roots (by a value occurrence) whose bytes are also a relocation-named data word\n' + ''.join('%08x\t%s\n' % (a, residue.data_proof(od, a)) for a in bad))
+            print('entries on class-3 data bytes (roots by rule): %d' % len(bad))
+            return 0
+        seen.append(X); X = frozenset(Xo)
+        if X in seen: raise RuntimeError('R3 refinement does not converge (cycle at round %d)' % k)

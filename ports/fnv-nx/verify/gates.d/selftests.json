@@ -5,6 +5,8 @@
   "python3",
   "-I",
   "ports/fnv-nx/verify/gate_tests.py",
+  "--timeout-s",
+  "900",
   "--jobs",
   "3",
   "ports/fnv-nx/verify",

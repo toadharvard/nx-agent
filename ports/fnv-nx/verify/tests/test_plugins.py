@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/link
+# reads: ports/fnv-nx/shim/build.json
+# reads: ports/fnv-nx/toolchain/addr/fnvnx_addr.cc ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc ports/fnv-nx/toolchain/ftoi/f2i_builtins.inc
+# reads: ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc ports/fnv-nx/toolchain/gcc ports/fnv-nx/toolchain/layout/crossing_terms.inc
+# reads: ports/fnv-nx/toolchain/layout/decltype_spell.inc ports/fnv-nx/toolchain/layout/fnvnx_layout.cc ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json
+# reads: ports/fnv-nx/toolchain/msvcmodel/build.sh ports/fnv-nx/toolchain/msvcmodel/msvcmodel.patch ports/fnv-nx/toolchain/names/fnvnx_names.cc
+# reads: ports/fnv-nx/toolchain/order/atomic_order.inc ports/fnv-nx/toolchain/order/fnvnx_frame.h ports/fnv-nx/toolchain/order/fnvnx_order.cc
+# reads: ports/fnv-nx/toolchain/pi/fnvnx_pi.cc ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc ports/fnv-nx/verify
 """Tests for the plugin stage of verify/recipe.py (fnvnx_order, fnvnx_ftoi) on toy roots in temp git repos. Plain script: exit 0 on pass, one
 PASS/FAIL line per case. Needs root (sandbox) and the compilers of verify/env.json. Scratch: mkdtemp, removed at exit.
 Cases: (a) the .so is byte-equal in two cold stores and a warm build runs no stage; (b) a volatile access is ldar/stlr; (c) float -> int is
@@ -299,6 +307,7 @@ def main():
     # --- the CC stage mounts no external but the compiler's: a new commit of another external re-runs PP only; CC cannot read it
     def pack_commit(text):
         w(ext, "pack.txt", text)
+        w(ext, "pack.h", "/* %s */\n" % text.strip())    # the PP stage reads it (the unit names /ext/pack); a comment leaves the preprocessed text equal
         git(ext, "add", "-A")
         git(ext, "commit", "-q", "-m", text)
         c = git(ext, "rev-parse", "HEAD").strip()
@@ -307,8 +316,7 @@ def main():
         return c, cas.ingest(d, os.path.join(BASE, "ingest-store"))
 
     def xrec(c, t):
-        # the root names /ext/pack in its include path: PP names the external (a stage mounts and keys only the externals it names, recipe.named_ext), CC does not
-        r = mut(external=list(REC["external"]) + [{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": c, "tree_sha256": t, "at": "/ext/pack"}], include=["/ext/pack"])
+        r = mut(external=[{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": c, "tree_sha256": t, "at": "/ext/pack"}], include=REC["include"] + ["/ext/pack"])
         return r
 
     def kinds():
@@ -316,11 +324,12 @@ def main():
         return {k: ds.count(k) for k in ("pp", "cc")}
 
     c1, t1 = pack_commit("one\n")
-    x1 = make_repo("ext1", xrec(c1, t1), "native")
+    PK = {ROOT + "/a.cc": SRC + '#include "pack.h"\n'}     # a stage mounts the externals its include path and flags name: PP mounts the pack (-I /ext/pack)
+    x1 = make_repo("ext1", xrec(c1, t1), "native", PK)
     r1, _ = build(x1, "X")
     k1 = kinds()
     c2, t2 = pack_commit("two\n")
-    x2 = make_repo("ext2", xrec(c2, t2), "native")
+    x2 = make_repo("ext2", xrec(c2, t2), "native", PK)
     r2, _ = build(x2, "X", os.path.join(BASE, "out-X2"))
     k2 = kinds()
     check("external commit change: PP re-runs, CC runs nothing", r1["status"] == r2["status"] == "green" and k2["pp"] > k1["pp"] and k2["cc"] == k1["cc"]
@@ -340,7 +349,7 @@ def main():
     PR = T + "src"
     prod = {"path": PR, "class": "tool", "target": "host", "recipe": PR + "/build.json"}
     pfiles = {T + "gen/lift.py": lift, ROOT + "/a.cc": None, PR + "/build.json": json.dumps({"format": "fnvnx-recipe/1", "outputs": {"PACK": "pack"}}), PR + "/pack/x.txt": "x\n"}
-    urec = dict(lrec, external=list(REC["external"]), uses=[{"root": PR, "output": "PACK"}])
+    urec = dict(lrec, external=list(lrec["external"]), uses=[{"root": PR, "output": "PACK"}])
     def uerrs(repo, rec):   # the `uses` recipes are read from the toy checkout
         return recipe.check(rec, ROOT, recipe.tracked(repo), recipe.load_admit(repo), recipe.load_pin(repo), repo=repo)
     ug = make_repo("usesgood", urec, {"lifted_by": T + "gen/lift.py", "pack": PR}, pfiles, [prod])
@@ -369,16 +378,16 @@ def main():
     trec = dict(srec, generated=[dict(srec["generated"][0], tool=tt)])
     tr2 = make_repo("treeplain", trec, {"lifted_by": tt, "stage": st}, {tt: lift, ROOT + "/a.cc": None})
     check("the same file under no root or tree is red", any("not a tracked .py of an admitted tool" in x for x in errs(tr2, trec)), errs(tr2, trec))
-    # --- header home across roots: an include outside the root's own path lies in a directory output (`outputs: {INCLUDE: dir}`) of a root this root `uses`
+    # --- header home across roots: an include outside the root is a directory output of a root it `uses`; a product root that declares none is no home, whatever its target
     hh = T + "platform/include/fnvl_host.h"
-    hfiles = dict(sfiles, **{hh: "#define FNVL_HOST 1\n", T + "platform/build.json": json.dumps({"format": "fnvnx-recipe/1", "outputs": {"INCLUDE": "include"}})})
-    plat = {"path": T + "platform", "class": "product", "target": "host", "recipe": T + "platform/build.json"}
-    for what, rec_, want in (("declared through `uses`", dict(srec, include=[T + "platform/include"], uses=[{"root": T + "platform", "output": "INCLUDE"}]), False),
-                             ("with no `uses` of its home", dict(srec, include=[T + "platform/include"]), True)):
-        hr = make_repo("hh_" + what.split()[0], rec_, {"lifted_by": T + "gen/lift.py", "stage": st}, hfiles, extra_roots=[plat])
-        he = [x for x in recipe.check(rec_, ROOT, recipe.tracked(hr), recipe.load_admit(hr), recipe.load_pin(hr), repo=hr) if "include" in x]
-        check("a root including platform/include %s: %s" % (what, "red" if want else "no include error"),
-              bool(he) == want and (not want or any("in no directory output of a root that this root `uses`" in x for x in he)), he)
+    hrec = dict(srec, include=[T + "platform/include"])
+    hfiles = dict(sfiles, **{hh: "#define FNVL_HOST 1\n"})
+    for tg in ("guest", "host"):
+        hr = make_repo("hh_" + tg, hrec, {"lifted_by": T + "gen/lift.py", "stage": st}, hfiles,
+                       extra_roots=[{"path": T + "platform", "class": "product", "target": "guest"}], target=tg)
+        he = [x for x in errs(hr, hrec) if "include" in x]
+        check("lifted root of target %s including platform/include (a product root with no declared INCLUDE output): red, no home" % tg,
+              len(he) == 1 and "in no directory output of a root that this root `uses`" in he[0], he)
     for what, name in (("an index past the steps", "gen:%s:1" % ROOT), ("another root's step", "gen:%s:0" % (ROOT + "x")), ("a free name", "lift")):
         bs = make_repo("stagebad_" + what.replace(" ", "_").replace("'", ""), srec, {"lifted_by": T + "gen/lift.py", "stage": name}, sfiles)
         check("stage naming %s is red" % what, any("is not a generated step" in x for x in errs(bs, srec)), errs(bs, srec))

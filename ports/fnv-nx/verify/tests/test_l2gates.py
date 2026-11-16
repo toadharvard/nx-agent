@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/toolchain/names/sympair_kinds.inc ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/link
+# reads: ports/fnv-nx/shim/build.json
+# reads: ports/fnv-nx/toolchain/addr/fnvnx_addr.cc ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc ports/fnv-nx/toolchain/ftoi/f2i_builtins.inc
+# reads: ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc ports/fnv-nx/toolchain/layout/crossing_terms.inc ports/fnv-nx/toolchain/layout/decltype_spell.inc
+# reads: ports/fnv-nx/toolchain/layout/fnvnx_layout.cc ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/toolchain/names/fnvnx_names.cc
+# reads: ports/fnv-nx/toolchain/order/atomic_order.inc ports/fnv-nx/toolchain/order/fnvnx_frame.h ports/fnv-nx/toolchain/order/fnvnx_order.cc
+# reads: ports/fnv-nx/toolchain/pi/fnvnx_pi.cc ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc ports/fnv-nx/verify
 """Tests for the L2 per-root gates abi, namegate, r7 (verify/gate_abi.py, gate_namegate.py, gate_r7gate.py, gate_l2native.py). Plain script, needs root
 (sandbox) and the pinned guest compiler (as test_argorder.py). Objects are the real ones of a toy native guest root built by recipe.py; every negative case is
 a byte mutation of such an object. The only synthetic input is the cl REFERENCE side (COFF with the names / CodeView records of the same toy source, link/tests/synth.py):

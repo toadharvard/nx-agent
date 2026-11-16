@@ -613,8 +613,6 @@ class EH(Flow):
             live[ss[i]] = v
         for r, v in X.rvals: refs[v].append(r)
         def own(a):
-            f = X.indec(a)
-            if f: return f[0]
             i = bisect.bisect_right(es, a) - 1; return es[i] if i >= 0 else None
         owners = defaultdict(set); fiown = defaultdict(set)
         for a, (fi, tgt) in s.stubs.items():
@@ -675,7 +673,7 @@ class EH(Flow):
         L.append('SEH functions %d, non-constant trylevel stores %d, scope tables with err %d; stubs live %d unreferenced %d' % (len({x for sc in s.scopes.values() for x in sc['funcs']}), sum(len(sc['nonconst']) for sc in s.scopes.values()),
             sum(1 for sc in s.scopes.values() if sc['err']), len(live), len(s.stubs) - len(live)))
         L.append('frame-handler targets (stubs with FuncInfo): ' + ', '.join('%s x%d' % kv for kv in sorted(Counter(h(v[1]) for v in s.stubs.values()).items())) + '; mov-eax/jmp stubs whose target is not FuncInfo: ' + (', '.join('%x x%d' % kv for kv in s.noise.most_common(4)) or 'none'))
-        L.append('functions owning a FuncInfo %d, of which decomp %d; FuncInfo without a referenced stub %d' % (len(owners), sum(1 for o in owners if o in X.fsize), sum(1 for a in ok if not fiown[a])))
+        L.append('functions owning a FuncInfo %d; FuncInfo without a referenced stub %d' % (len(owners), sum(1 for a in ok if not fiown[a])))
         scan = set()
         for nm, va, vs, ro, rs in X.secs:
             if X.intext(va): continue

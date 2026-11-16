@@ -139,6 +139,17 @@ def flagcheck_stages(gen, fin):
     return out
 
 
+def provrecipe(modules, exts=EXTERNALS):
+    """lift/liftprov/build.json: the same shard stages as the lifted source, run with --prov (every entry lifted with the provenance tag off and on, texts compared, the side table written), and
+    one stage that merges the side tables into the density table (tools/provtable.py). Output TABLE. It produces no text: the pack is lift/liftsrc."""
+    gen, imgargs = shard_stages(modules, PROV_ROOT, True)
+    stage = lambda i, p: {'stage': '%s:gen:%d' % (PROV_ROOT, i), 'path': p}
+    ins = [stage(i, o) for i, g in enumerate(gen) if g['tool'] != SDMTOOL for o in g['outputs']]
+    gen.append({'tool': PROVTOOL, 'args': ['--stage', '/stage', '--out', '/out/table'], 'inputs': ins, 'outputs': ['table/' + o for o in ('categories.tsv', 'roots.tsv', 'forms.tsv', 'families.tsv', 'images.tsv', 'shards.tsv', 'summary.json')]})
+    for g in gen: g.pop('_image', None)
+    return {'format': 'fnvnx-recipe/1', 'external': exts, 'uses': USES, 'generated': gen, 'outputs': {'TABLE': 'table'}}
+
+
 def sdmroot_recipe():
     """lift/sdm/build.json: a generated-only root. The pinned Intel SDM pdf (external `sdm`, one file of it) through /usr/bin/pdftotext -layout of the pinned deb poppler-utils (RECIPE.md "Single file of an external"); its output SDM_TEXT is what the sdmrows generator of liftsrc reads"""
     return {'format': 'fnvnx-recipe/1', 'external': [SDM_EXTERNAL], 'run': [SDMTEXT], 'outputs': {'SDM_TEXT': 'sdm.txt'}}
