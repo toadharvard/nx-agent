@@ -5,7 +5,7 @@
 #   output $OUT_DIR   the compiler tree COMPILER: bin/, lib/, the plugin headers, the runtime libraries and crt, MANIFEST.json
 set -euo pipefail
 # a red stage names its failing command, the first error lines of every build log and its tail, the error lines last (the recipe keeps the last 20 stderr lines; the logs are redirected, a failure inside them is otherwise silent)
-trap 'rc=$?; echo "stage failed: line $LINENO: $BASH_COMMAND (exit $rc)" >&2; for l in /scratch/w/*.log /scratch/w/b-gcc/config.log; do [ -f "$l" ] && { echo "== $l: tail"; tail -n 30 "$l"; echo "== $l: first error lines"; grep -n -m 20 -i "error" "$l" || true; } >&2; done; exit $rc' ERR
+trap 'rc=$?; echo "stage failed: line $LINENO: $BASH_COMMAND (exit $rc)" >&2; for l in /scratch/w/b-*/config.log /scratch/w/*.log; do [ -f "$l" ] && { echo "== $l: tail"; tail -n 30 "$l"; echo "== $l: first error lines"; grep -n -m 20 -i "error" "$l" || true; } >&2; done; exit $rc' ERR
 # ---- the constants of this step: every path it touches; the mounts are the sandbox's (a change of the mounts is a change of these lines alone) ----
 STAGE1=/in/10                                # the compiler external (stage 1's output STAGE1): prefix/, b-gcc/, src/ (the absolute paths below are the ones stage 1 built at)
 RECORDS=/in/2                                     # input 2: records2.sh, the stage ref of the generator `records.py stage2` (T ABI MLFLAG, semantics, plugins)   (input 1 is this script)
@@ -39,7 +39,12 @@ note() { printf '%s\n' "$*" >> "$CONF"; }
 # stage 1's output goes back to the absolute paths it was built at (GCC's build tree and the compiler's configured paths are absolute)
 mkdir -p "$W"; cp -a --no-preserve=ownership "$STAGE1/prefix" "$P"; cp -a --no-preserve=ownership "$STAGE1/b-gcc" "$W/b-gcc"; cp -a --no-preserve=ownership "$STAGE1/src" "$SRC"
 chmod -R u+w "$P" "$W/b-gcc" "$SRC"   # the external is a read-only store tree: the copies are the step's own working trees
-export PATH=$P/bin:$PATH
+# the host (build) tools of the top-level configures (newlib's and the runtime libraries' own) are named by their real files, as in stage 1: the unversioned names are alternatives links a deb does not unpack
+HB=$SCRATCH/hostbin; mkdir -p "$HB"
+for pair in gcc:gcc-13 cc:gcc-13 g++:g++-13 c++:g++-13 awk:mawk nawk:mawk; do ln -sf "/usr/bin/${pair#*:}" "$HB/${pair%%:*}"; done
+for t in /usr/bin/x86_64-linux-gnu-*; do n=${t##*/x86_64-linux-gnu-}; case "$n" in *-[0-9]*) continue ;; esac; [ -e "/usr/bin/$n" ] || [ -e "$HB/$n" ] || ln -s "$t" "$HB/$n"; done
+export PATH=$P/bin:$HB:$PATH
+export CC=gcc-13 CXX=g++-13 CC_FOR_BUILD=gcc-13 CXX_FOR_BUILD=g++-13   # the build machine's compilers; the target's are CC_FOR_TARGET (the stage-1 compiler in $P/bin)
 cd "$W"
 note "# stage 2; newlib $NLV; devkitPro/buildscripts at $BS"
 mkdir -p "$W/tarballs"
