@@ -114,6 +114,7 @@ def cexpr(text, env):
         if isinstance(n, ast.Name):
             if n.id in env: return env[n.id]
             raise NotConst(n.id)
+        if isinstance(n, ast.Call): raise NotConst("call of a macro: a function-like macro has no value in env")   # MAKEFOURCC(...) and the like: not a constant of env
         if isinstance(n, ast.BinOp) and type(n.op) in _BIN: return _BIN[type(n.op)](ev(n.left), ev(n.right))
         if isinstance(n, ast.UnaryOp) and type(n.op) in _UN: return _UN[type(n.op)](ev(n.operand))
         raise SystemExit("d3d9_structs: constant expression node %s of %r is outside the grammar of cexpr" % (type(n).__name__, text))
