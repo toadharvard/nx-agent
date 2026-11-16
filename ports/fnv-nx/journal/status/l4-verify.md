@@ -464,3 +464,7 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - Blocked on L1 cand4 (w28): gamedata_fetch with .gamedata_pins, for boot_job.
   - w8 archived (idle).
 - bottleneck: L5 hostabi schema (gl4 link); L6 d3d9 inputs; L1 cand4; the L3a post-cand3 pack store | no workers, no farms
+- 06:10: found two render lineages. L6 8faa8175d (d3d9 escapes closed, bridgefacts D9_SPEC) and L6A decb62ead both change gl4, gl4shim and nxgpu, and neither contains the other. L6 and L6A are asked for one joined render head, each path at its owner's version, on the trunk. L4 keeps decb62ead until it arrives and builds no per-directory hybrid.
+  - L5 w37 session_01KmtZKR12EG3iYb37nQn9sQ is making the trunk-based head with hostabi in the trunk schema (for the gl4 link).
+  - L1: the shim INCLUDE comes in cand4 (2872f3ac8).
+- bottleneck: one render head (L6/L6A); L5 w37; L1 cand4; the L3a post-cand3 pack store | no workers, no farms
