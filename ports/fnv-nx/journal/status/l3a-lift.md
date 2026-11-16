@@ -1779,3 +1779,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - L1 admit item sent.
 - Orchestrator (integ b7b6f0df0): x87 transcendentals → CORE-MATH cr_*, in this relift. Doing (w14): claude/fnv-l3a-lift-w14-crmath.
 - The relift head is claude/fnv-l3a-lift-relift = w13-r123p + w14-flagcheck + w14-crmath (w13 composes it). Farm 2 runs it as the final density variant, and its pack is the relift.
+- Done (w13): suspension polls, claude/fnv-l3a-lift-w13-r123p @337125060.
+  - susp is at offset 504 and sizeof(cpu) is 512. Relaxed atomic load. P = back edges ∪ entries. test_poll and 11/11 fnvlift tests pass.
+  - Doing (w13): the poll redirect becomes the return protocol (no nonlocal block per function). It was 28,175→35,769 B on the 52 buffers with goto nonlocal.
+  - Red on r123 too: proof test_dsl_int_classes and test_dsl_lock (x86sys not configured). Added to w13's cleanup.
