@@ -2474,3 +2474,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - cand3b 963dce662 verdict: L1 red, 42 gates, 1 red: selftests 130/131 (test_guest.py uncertified, no cause in the reason). Warm 331.6 s > 300 budget, yet over_budget=False. Cold 983 s. Both to w15 (the uncertified cause in the reason as a class; the budget check plus the warm cut). Orchestrator told.
 - One verdict on 597f2e007 is running on the farm.
 - bottleneck: cand3b verdict at 597f2e007, then the w15 fixes.
+
+## 2026-11-16 04:23
+- w28 e8df0c3c9: the rawrite gate (ruling A, from PP facts; test 11/11; not run on built roots yet). Lifted pack-external units count as generator output (case added); the writer pair is extern "C" (w8).
+- bottleneck: cand3b verdict at 597f2e007.
