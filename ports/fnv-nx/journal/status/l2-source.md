@@ -771,3 +771,5 @@ After the first frame:
 - 2026-11-16 10:50Z: LAYOUT-CALLTRIVIAL done at cand4b 6f147b874: `!` on TREE_ADDRESSABLE records in decltype_spell.inc, and ctypes_compat accepts the suffix. test_layout 214 ok. Sent to L1 and w28; the platform `!` count comes from L1's relift.
 - 2026-11-16 10:55Z: LAYOUT-CALLTRIVIAL verified by L1 farm 3 on the real platform build: 0 marked export records, 13/13 callbacks get letters, contract/exports green.
   - New item, to w2: imports in toolchain/ use the `fnvnx.<rel>` package form (L1 class rule, mount /imp/fnvnx/<rel>). 3 files are uncertified at base3 a033e5cbe; census before and after; then merge w28-c5.
+- 2026-11-16 11:15Z: toolchain/ imports in the fnvnx form at cand4b 410ab9d13 (w2). Census: toolchain/ uncertified 3 -> 0. The c5 toolchain hunks and the ports/fnvnx symlink are taken; a full merge with c5 is not possible (~100 conflicts outside toolchain/). The toolchain stages run only under c5's recipe mount. Sent to L1 for cand5.
+- bottleneck: the recipe-path rt run (farm, w3) -> the pin commit with FNPARM.
