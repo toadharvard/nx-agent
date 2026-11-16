@@ -546,7 +546,7 @@ Tests: `tests/test_toolexec.py` (ELF resolution and the check forms; the sandbox
 
 ## Archive inputs (`{"archive": ROOT}`)
 An input of a tool step (`exec`) may be `{"archive": ROOT}`: the built objects of guest product root ROOT as one `ar` archive (`recipe.ar_bytes`, members in unit order), mounted
-at `/in/N/lib<last path component of ROOT>.a`, beside the root's declared directory outputs (`outputs: {NAME: dir}` of generated files, such as its generated headers) at `/in/N/NAME/` (root `.../gmp` is `libgmp.a`, the name `-lgmp` finds). It is how a configure stage links against a library of another root (autoconf's link probes) without taking a prebuilt artifact: the key is the content of the
+at `/in/N/lib<last path component of ROOT>.a` (root `.../gmp` is `libgmp.a`, the name `-lgmp` finds). The mount holds only the archive. The root's headers reach a run step through `include_uses` (a run step takes it exactly as a CC stage does: the trees at `/uses/<root>/<NAME>`, one resolver `use_inputs`). It is how a configure stage links against a library of another root (autoconf's link probes) without taking a prebuilt artifact: the key is the content of the
 archive, so a changed unit of ROOT is a changed input and a changed stage key. ROOT is built objects-only through the same stage cache a link uses. Red: a ref of another shape, ROOT
 is the root itself, is not an admitted root, is not in this recipe's `uses`, has no units, has another compiler record than this root (the objects of another compiler are no
 libraries of this one), is itself red (blocked, never an empty archive); a non-tool step (`artifact`) or any CC stage never takes it. The configure probes of the step may compile and

@@ -8,7 +8,7 @@
 set -euo pipefail
 trap 'rc=$?; for l in /scratch/w/b/config.log /scratch/w/make.log; do [ -f "$l" ] && { echo "== $l: tail"; tail -n 2 "$l"; } >&2; done; echo "stage failed: line $LINENO: $BASH_COMMAND (exit $rc)" >&2; exit $rc' ERR
 SCRIPT_DIR_IN=/in
-RECREC=/in/2; MKUNITS=/in/3; CFG_LINK_PY=/in/4; GUEST_LD=/in/5; PROTO_SRC=/in/6; RECORDS=/in/7; TARBALL=/in/8; GCC=/in/9; GMPDIR=/in/10
+RECREC=/in/2; MKUNITS=/in/3; CFG_LINK_PY=/in/4; GUEST_LD=/in/5; PROTO_SRC=/in/6; RECORDS=/in/7; TARBALL=/in/8; GCC=/in/9; GMPDIR=/in/10; GMPINC=/uses/ports/fnv-nx/platform/gmp/INC_BUILD   # libgmp.a: the archive input; gmp.h: gmp's include_uses (the one route headers take)
 PY=/usr/bin/python3.12
 SCRATCH=/scratch
 mkdir -p "$SCRATCH/tmp"; export TMPDIR=$SCRATCH/tmp
@@ -31,11 +31,11 @@ export FNVNX_CFG_NM=$GCC/bin/$T-nm FNVNX_CFG_LD=$GCC/bin/$T-ld FNVNX_CFG_EMUL=aa
 export FNVNX_CFG_GUEST_LD=$GUEST_LD FNVNX_CFG_PROTOCOL_SRC=$PROTO_SRC FNVNX_CFG_CACHE=$W/cfg-cache
 mkdir b; cd b
 export CC="$GCC/bin/$T-gcc ${SEMANTICS[*]}" LDFLAGS=-nostartfiles
-"$SRC/configure" --host=none-unknown-elf --disable-shared --enable-static --disable-float128 --with-gmp-include="$GMPDIR/INC_BUILD" --with-gmp-lib="$GMPDIR" > ../configure.log 2>&1
+"$SRC/configure" --host=none-unknown-elf --disable-shared --enable-static --disable-float128 --with-gmp-include="$GMPINC" --with-gmp-lib="$GMPDIR" > ../configure.log 2>&1
 cp "$RECREC" "$W/ccrec"; chmod +x "$W/ccrec"
 export CCREC_LOG=$W/compiles.log
 make -j"$JOBS" -C src CC="$W/ccrec" AR=true RANLIB=true libmpfr.la > ../make.log 2>&1
-"$PY" -I "$MKUNITS" "$W/b" "$SRC" "$CCREC_LOG" "$OUT_DIR" "$GMPDIR/INC_BUILD"
+"$PY" -I "$MKUNITS" "$W/b" "$SRC" "$CCREC_LOG" "$OUT_DIR" "$GMPINC"
 # the installed API headers are the Makefile's own include_HEADERS (mpfr.h, mpf2mpfr.h): the output `pub`, the include directory of the roots that use MPFR
 printf 'print-pub:\n\t@echo $(include_HEADERS)\n' > "$W/pub.mk"
 mkdir -p "$OUT_DIR/pub"

@@ -146,6 +146,13 @@ with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td:
     t3 = tree([("u/f.c", o1), ("u/g.c", o2b)], os.path.join(td, "s3"))
     check("the archive tree is a function of the objects' content (order of the list aside)", t1 == t2, (t1, t2))
     check("a changed lib unit is a changed archive: the consumer's stage key changes", t1 != t3, (t1, t3))
+    import glob
+    mt = os.path.join(td, "mt")
+    recipe.cas.materialize(t1, os.path.join(td, "s1"), mt)
+    check("an archive mount holds only the archive (no directory outputs of the root)", os.listdir(mt) == ["liblib.a"], os.listdir(mt))
+    # a run step takes include_uses as a CC stage does: the same trees, at /uses/<root>/<NAME>
+    src = open(os.path.join(HERE, "..", "recipe.py")).read()
+    check("run_one mounts the include_uses trees through use_inputs", 'self.use_inputs(ws) if t["at"] in iu' in src)
     red = recipe.Job(repo, T + "con", os.path.join(td, "s4"), 1, os.path.join(td, "ext"))
     red.archives = {}
     red.archives[T + "lib"] = {"status": "red", "failure": {"stage": "cc:u/f.c", "exit": 1, "stderr": ["boom"]}, "objects": [], "stage_keys": []}
