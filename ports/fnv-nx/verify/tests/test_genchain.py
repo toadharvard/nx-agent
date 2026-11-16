@@ -76,7 +76,7 @@ def build(repo, td, tag):
 
 def produced(repo, td, tag):
     """The root's generated outputs as the stages left them: the directory the consumers read (ws/root), after the same externals + generate steps a build runs."""
-    j = recipe.Job(repo, R, os.path.join(td, "store"), 2, os.path.join(td, "store", "external"))
+    j = recipe.Job(repo, R, os.path.join(td, "store"), 2, recipe.ext_of_store(os.path.join(td, "store")))
     ws = tempfile.mkdtemp(prefix="gc-" + tag, dir=td)
     recipe._copy(repo, [f for f in j.files if recipe.under(f, R)], R, os.path.join(ws, "root"))
     j.externals(ws)
@@ -146,7 +146,7 @@ def make2(td, name, in_txt="abc\n", noise="n\n", toolb=TOOLB):
 
 def b_keys(repo, td, tag):
     """(B's stage keys, B's produced b.txt or None, B's red stages): B built through the recipe machinery, A's output read through `uses`."""
-    j = recipe.Job(repo, B, os.path.join(td, "store"), 2, os.path.join(td, "store", "external"))
+    j = recipe.Job(repo, B, os.path.join(td, "store"), 2, recipe.ext_of_store(os.path.join(td, "store")))
     ws = tempfile.mkdtemp(prefix="gb-" + tag, dir=td)
     recipe._copy(repo, [f for f in j.files if recipe.under(f, B)], B, os.path.join(ws, "root"))
     j.externals(ws)

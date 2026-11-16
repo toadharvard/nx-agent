@@ -9,6 +9,8 @@
  "result": "determinism.json",
  "covers": [
   "test",
-  "compiled"
+  "product-guest",
+  "lifted",
+  "host-product"
  ]
 }

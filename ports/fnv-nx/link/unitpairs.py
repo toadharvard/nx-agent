@@ -82,8 +82,10 @@ def pairs(gcc, cl, units=None):
     return [(s, g[s], c.get(s, [])) for s in sorted(g)]
 
 
-def parse_args(argv, prog, doc):
+def parse_args(argv, prog, doc, extra=()):
     ap = argparse.ArgumentParser(prog=prog, description=doc.split('\n')[0])
+    for flag, kw in extra:
+        ap.add_argument(flag, **kw)
     ap.add_argument('--gcc', action='append', default=[], required=True, help='directory of GCC objects, or one .o (repeatable)')
     ap.add_argument('--cl', action='append', default=[], required=True, help='directory of cl objects, or one .obj (repeatable)')
     ap.add_argument('--units', help='build/units.json of the prepared tree: u<N>.obj stands for its unit N')

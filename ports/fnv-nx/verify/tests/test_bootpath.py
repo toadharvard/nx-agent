@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/verify
 """Tests of verify/bootpath.py (the guest-path rule). Plain script: exit 0 on pass, one line per case."""
 import atexit
 import errno

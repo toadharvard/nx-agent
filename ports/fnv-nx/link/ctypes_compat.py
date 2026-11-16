@@ -1,4 +1,3 @@
-# reads: ports/fnv-nx/toolchain/layout/decltype_spell.inc
 """ctypes_compat - C11 6.2.7 compatibility of the declared types of one external symbol across translation units (gate abi, the `c` records).
 
 C records have no linkage ([6.2.2]p6: a tag is never an entity with linkage), so they are never paired by tag name.  C's cross-unit rule is 6.2.7p2: all

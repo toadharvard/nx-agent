@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gate "abi" (fnvnx-gate/1, VERDICT.md class 8): a reference and the definition it binds to have one calling contract (rule, universe and proof:
 link/abi.py docstring RULE, UNIVERSE, PROOF).
-    python3 -I gate_abi.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/abi.json
+    python3 -I gate_abi.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/abi.json
 Universe: the rows abi.py defines (abi.check), over the C++ objects of every admitted product root with "target": "guest" and "cxx_origin": "native"
 (objects from gate_build.ensure; the contract names are the plugin's `.fnvnx.sympair` of each object), plus the input facts abi.py's PROOF rests on, as items
 of the same gate:
@@ -68,6 +68,7 @@ def read_objects(objs):
     """OBJS: [(id, path)] -> (store {(id, 'sympair'): rows}, {layout key: {id: layout tuple}}, red items {id: reason}, {id: {symbol: declared C type}}, {id: {symbol: crossing terms}})."""
     store, layouts, red, decls = {}, {}, {}, {}
     cross = {}
+    kinds = l2sections.load_kinds(l2sections.KINDS_INC)
     for oid, path in objs:
         try:
             elf = elfobj.read(path)
@@ -75,13 +76,16 @@ def read_objects(objs):
             if sp is None:
                 red[oid + ":sympair"] = "the object has no .fnvnx.sympair section"
                 continue
-            store[(oid, "sympair")] = l2sections.parse_sympair(sp, oid + ":.fnvnx.sympair")
+            store[(oid, "sympair")] = l2sections.parse_sympair(sp, oid + ":.fnvnx.sympair", kinds)
             lays = objsections.parse_layout(objsections.section(elf, ".fnvnx.layout"), oid + ":.fnvnx.layout")
-            dt = elf.section(".fnvnx.decltype")     # a C unit's declared types of external symbols, compared by C11 6.2.7 (link/ctypes_compat.py): the section's presence is the fact, whatever the linkage of the layout rows
-            if dt is not None:
-                decls[oid] = ctypes_compat.parse_decltype(dt, oid + ":.fnvnx.decltype")
-            elif any(lay.linkage == "c" for lay in lays):     # a unit of `c` records without its declared types: nothing to compare them with
-                red[oid + ":decltype"] = "a C unit has no .fnvnx.decltype section"
+            dt = elf.section(".fnvnx.decltype")     # RULE DECLTYPE-COMPLETE (link/ctypes_compat.py): every GLOBAL/WEAK symbol of the object has exactly one line, `sym<TAB>type` or `sym<TAB>-reason` (reason from the plugin's closed set); the typed lines are compared by C11 6.2.7
+            types, why = ctypes_compat.parse_decltype_lines(dt if dt is not None else b"", oid + ":.fnvnx.decltype")
+            have = {n for n, bind, _t, _sh, _v, _sz, _o in elf.symbols() if n and bind in (1, 2)}     # STB_GLOBAL, STB_WEAK
+            for n in sorted(have - set(types) - set(why)):
+                red[oid + ":decltype:missing:" + n] = "global/weak symbol %s has no .fnvnx.decltype line" % n
+            for n in sorted((set(types) | set(why)) - have):
+                red[oid + ":decltype:extra:" + n] = ".fnvnx.decltype line for %s, which is not a global/weak symbol of the object" % n
+            decls[oid] = types
             cr = elf.section(".fnvnx.crossing")
             if cr is not None:
                 cross[oid] = parse_crossing(cr, oid + ":.fnvnx.crossing")
@@ -188,13 +192,12 @@ def judge_root(repo, cache, root):
     objs = [(root + "/" + o["unit"], o["object"], o["sha256"]) for o in res["objects"] if o["unit"].endswith(recipe.CC_EXT + recipe.CXX_EXT)]
     asm = [(root + "/" + o["unit"], o["object"], o["sha256"]) for o in res["objects"] if o["unit"].endswith(recipe.ASM_EXT)]
     # the item is the root's C and C++ objects as a set (the ODR and layout joins read all of them): keyed by their ids and sha256 and the tools that read them
-    key = {"gate": "abi", "objects": [[i, h] for i, _, h in objs], "asm": [[i, h] for i, _, h in asm], "tools": gate_build.tool_digest(__file__, abi, odr, elfobj, l2sections, objsections), "env": envid()}
+    key = {"gate": "abi", "objects": [[i, h] for i, _, h in objs], "asm": [[i, h] for i, _, h in asm], "tools": gate_build.tool_digest(__file__, abi, odr, elfobj, l2sections, objsections), "kinds": sorted(l2sections.load_kinds(l2sections.KINDS_INC)), "env": envid()}
     v, _ = gate_build.memo(cache, "abi", key, lambda: list(judge_objects([(i, p) for i, p, _ in objs], [(i, p) for i, p, _ in asm])))
     return tuple(v)
 
 
 def main():
-    l2sections.set_kinds(l2sections.REPO_KINDS_INC)   # cwd = the checkout root: the table is a tracked file of it
     repo, tmp = ".", None
     cache = os.environ.get("GATE_CACHE")
     if not cache:

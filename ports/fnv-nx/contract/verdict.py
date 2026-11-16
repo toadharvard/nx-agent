@@ -22,7 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 def main():
     ap = argparse.ArgumentParser()
-    for k in ('exe', 'units', 'msvc', 'link', 'universe', 'nm', 'readelf', 'work'):
+    for k in ('exe', 'units', 'msvc', 'link', 'universe', 'nm', 'readelf', 'work', 'sympair-kinds'):
         ap.add_argument('--' + k, required=True)
     a = ap.parse_args()
     w = a.work
@@ -35,7 +35,7 @@ def main():
     stages = [
         ('exefacts', py('exefacts.py', '--exe', a.exe, '--units', a.units, '--out', w + '/facts.json'), False),
         ('n1', py('n1.py', '--exe', a.exe, '--units', a.units, '--msvc', a.msvc, '--out', w + '/n1.json'), False),
-        ('objfacts', py('objfacts.py', '--kinds', os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'toolchain', 'names', 'sympair_kinds.inc'), '--link', a.link, '--facts', w + '/facts.json', '--out', w + '/obj.json'), False),
+        ('objfacts', py('objfacts.py', '--link', a.link, '--facts', w + '/facts.json', '--sympair-kinds', a.sympair_kinds, '--out', w + '/obj.json'), False),
         ('gates', py('registry.py', '--facts', w + '/facts.json', '--obj', w + '/obj.json', '--n1', w + '/n1.json',
                      '--link', a.link, '--out', w + '/gates'), False),
         ('xunit', py('gate_xunit.py', '--objects', w + '/game', '--nm', a.nm), True),

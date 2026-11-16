@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gate "machine" (fnvnx-gate/1, class G of VERDICT.md): the product's registry hive holds exactly the keys that the exe and the modules read
 (rules: contract/hive.py).
-    python3 -I gate_machine.py     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/machine.json and machine.ids
+    python3 -I gate_machine.py     cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/machine.json and machine.ids
 Roots come only from verify/admit.json (class product). A root DECLARES its hive in `<root>/registry.in.json` ("fnvnx-registry-in/1"):
   {"format", "external": NAME of an entry of the root's recipe `external` (private: fnv-nx-build commit + tree_sha256),
    "sites": path of regsites.tsv inside it (the registry-API call sites of the exe and the modules),
@@ -41,10 +41,20 @@ def hive_names(res):
 
 
 def refs_of(res):
-    """{unit: set of undefined symbol names} of the objects of a build (objects.json `objects`)"""
+    """{unit: set of undefined symbol names} of the objects of a build (objects.json `objects`): every reference, for the reader class (hive_names)."""
     out = {}
     for o in res["objects"]:
         out.setdefault(o["unit"], set()).update(recipe.symbols(o["object"], o["unit"])[1])
+    return out
+
+
+def calls_of(res):
+    """{unit: set of undefined symbol names reached by a CALL relocation} (recipe.call_refs): the writers of the hive. A writer is code that stores
+    into the machine state, directly or through a call that reaches the store; taking a function's address (an export-table or vtable entry) is not a
+    write, and the calls that go through that pointer are judged at their call sites, so only a call relocation to a writer name counts."""
+    out = {}
+    for o in res["objects"]:
+        out.setdefault(o["unit"], set()).update(recipe.call_refs(o["object"]))
     return out
 
 
@@ -54,13 +64,13 @@ def root_items(root, rec, res, decl, repo, cache):
     def rp(ref):
         return recipe.resolve_input(root, ref, repo, cache, rec)[0]
     sites, declared, seed = (gate_imports.read(rp(decl[k])) for k in ("sites", "declared", "seed"))
-    return hive.judge(sites, declared, seed, refs_of(res), decl["seed_unit"])
+    return hive.judge(sites, declared, seed, calls_of(res), decl["seed_unit"])
 
 
 def judge_root(root, repo, cache, admit, bad):
     """One admitted product ROOT -> (universe, certified, ids, detail) (gate_build.quantify); input errors are red with the reason, never raised.
     BAD collects (id, class) of the uncertified items."""
-    p = os.path.join(repo, recipe.split_spec(root)[0], "registry.in.json")
+    p = os.path.join(repo, root, "registry.in.json")
     try:
         if not os.path.isfile(p):
             if gate_build.unitless(root, cache, repo):

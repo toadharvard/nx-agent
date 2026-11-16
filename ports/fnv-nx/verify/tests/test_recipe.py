@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/lib/sha256/build.json ports/fnv-nx/link
-# reads: ports/fnv-nx/loader/build.json ports/fnv-nx/platform/build.json ports/fnv-nx/render/gl4/build.json
-# reads: ports/fnv-nx/render/nxgpu/build.json ports/fnv-nx/render/pair/build.json ports/fnv-nx/render/shaders/translator/build.json
-# reads: ports/fnv-nx/render/smscan/build.json ports/fnv-nx/rt/guest/build.json ports/fnv-nx/rt/guest/crt0.s ports/fnv-nx/rt/guest_main/build.json
-# reads: ports/fnv-nx/shim/build.json ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for verify/recipe.py, gate_build.py, gate_determinism.py on a toy product root in a temp git repo. Plain script: exit 0 on
 pass, one PASS/FAIL line per case. Needs root (sandbox) and aarch64-linux-gnu-gcc-13/g++-13. Scratch: mkdtemp, removed at exit."""
 import hashlib
@@ -165,6 +160,8 @@ def gate(repo, name, out, cache=None):
     if cache:
         env["GATE_CACHE"] = cache
     os.makedirs(out, exist_ok=True)
+    if cache:
+        recipe.set_artifacts(recipe.ext_dir(cache), BASE + "/artifacts.git")   # the run's artifacts repository, beside the cache (l1.py does the same)
     t0 = time.time()
     p = subprocess.run(PY + [VERIFY + "/gate_%s.py" % name], cwd=repo, env=env, capture_output=True, text=True)
     r = json.load(open(out + "/%s.json" % name)) if os.path.exists(out + "/%s.json" % name) else None
@@ -229,7 +226,7 @@ def make_toolchain(dst):
 
 def publish(name, populate):
     """A work repo with one commit of the tree made by populate(dir), pushed to branch NAME of the bare artifacts repo (a stand-in for
-    fnv-nx-build, ARTIFACTS_URL) -> (commit, tree_sha256 of the checked-out tree)."""
+    fnv-nx-build, recipe.ARTIFACTS) -> (commit, tree_sha256 of the checked-out tree)."""
     d = os.path.join(BASE, "pub-" + name)
     os.makedirs(d)
     populate(d)
@@ -244,7 +241,7 @@ def publish(name, populate):
 def main():
     t_start = time.time()
     subprocess.run(["git", "init", "-q", "--bare", BASE + "/artifacts.git"], check=True)
-    os.environ["ARTIFACTS_URL"] = BASE + "/artifacts.git"
+    recipe.ARTIFACTS = BASE + "/artifacts.git"
     # Everything below that does not assert coldness shares ONE store (SS: the tool runtime is ingested once, stages are cached by
     # key) and one gate cache (GC). What asserts coldness runs in a fresh store or in the determinism gate (always two cold builds).
     SS, GC = BASE + "/store", BASE + "/cache"
@@ -354,7 +351,7 @@ def main():
         check("recipe.build on a mismatched env raises EnvBlocked naming the mismatch, before any stage", bool(raised) and any(k in l for l in raised), raised)
         check("nothing is stored by a blocked build (no stage result, red or green, in the store; no objects.json)",
               not os.path.exists(es) or not any(files for _, _, files in os.walk(es)) and not os.path.exists(BASE + "/env-out/objects.json"))
-        p = subprocess.run(PY + [VERIFY + "/recipe.py", "build", "--root", ROOT, "--store", BASE + "/env-store2", "--out", BASE + "/env-out2"],
+        p = subprocess.run(PY + [VERIFY + "/recipe.py", "build", "--root", ROOT, "--store", BASE + "/env-store2", "--out", BASE + "/env-out2", "--artifacts", BASE + "/artifacts.git"],
                            cwd=env, capture_output=True, text=True)
         check("recipe.py build on a mismatched env prints `blocked: env` and exits 4, storing nothing",
               p.returncode == 4 and p.stdout.startswith("blocked: env") and not os.path.exists(BASE + "/env-store2"), (p.returncode, p.stdout[:200], p.stderr[:200]))
@@ -966,7 +963,7 @@ def check_run(SS):
     check("host_cpu: pin microcode null matches a VM cpuinfo with no microcode line", recipe.cpu_mismatch(vpin, vm) == [], recipe.cpu_mismatch(vpin, vm))
     check("host_cpu: pin microcode null is NOT a wildcard: a host with a microcode line is a mismatch", len(recipe.cpu_mismatch(vpin, vm.replace("stepping", "microcode\t: 0x1\nstepping"))) == 1, recipe.cpu_mismatch(vpin, vm.replace("stepping", "microcode\t: 0x1\nstepping")))
     check("host_cpu: a pin with a microcode value is a mismatch on a host that has no microcode line", len(recipe.cpu_mismatch(dict(vpin, microcode=1), vm)) == 1)
-    jb = recipe.Job(good, ROOT, SS, 1, os.path.join(SS, "external"))
+    jb = recipe.Job(good, ROOT, SS, 1, recipe.ext_of_store(SS))
     ver = lambda n: {"version": subprocess.run(["dpkg-query", "-W", "-f=${Version}", n], capture_output=True, text=True).stdout}   # noqa: E731
     dtmp = BASE + "/un-debs"
     os.makedirs(dtmp)

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/verify/tests
 """Tests for verify/opentrace.py. Run: python3 -I ports/fnv-nx/verify/tests/test_opentrace.py"""
 import json, os, shutil, subprocess, sys, tempfile
 

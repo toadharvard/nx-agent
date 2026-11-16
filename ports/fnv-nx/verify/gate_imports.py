@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gate "imports" (fnvnx-gate/1, class 4 of VERDICT.md): every import of the manifest has a body, proven by the build products (rules: contract/imports.py).
-    python3 -I gate_imports.py      cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/imports.json and GATE_OUT/imports.ids
+    python3 -I gate_imports.py      cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/imports.json and GATE_OUT/imports.ids
 Roots come only from verify/admit.json (class product); for each the gate calls gate_build.ensure (build or cache hits) and reads the symbol
 tables the recipe wrote (objects.json: defined {symbol, bind, type}, undefined). No nm, no ELF parsing, no probe run.
 A product root DECLARES its imports in `<root>/imports.in.json` ("fnvnx-imports-in/1"):
@@ -28,6 +28,7 @@ import bridgetable  # noqa: E402
 import cas  # noqa: E402
 import gate_build  # noqa: E402
 import imports  # noqa: E402
+import linkset  # noqa: E402
 import recipe  # noqa: E402
 
 IN_KEYS = {"format", "names", "specs", "extra", "extra_other", "name_table", "va"}
@@ -110,7 +111,7 @@ def provider_item(root, repo, cache, admit, roots):
 def judge_root(root, repo, cache, admit, roots, bad):
     """One admitted product ROOT -> (universe, certified, ids, detail) (gate_build.quantify); input errors are red with the reason, never raised.
     BAD collects (id, class) of the uncertified rows."""
-    p = os.path.join(repo, recipe.split_spec(root)[0], "imports.in.json")
+    p = os.path.join(repo, root, "imports.in.json")
     try:
         if not os.path.isfile(p):
             if gate_build.unitless(root, cache, repo):
@@ -124,20 +125,16 @@ def judge_root(root, repo, cache, admit, roots, bad):
             return 1, 0, [root + ":imports.in.json"], "defines %d native symbols of the bridge table (%s) and declares no imports.in.json" % (len(members), ",".join(members[:3]))
         with open(p) as f:
             decl = json.load(f)
-        built = {}
-        for r2 in roots:
-            built[r2] = gate_build.ensure(r2, cache, repo)[0]
-            if built[r2]["status"] == "red":
-                raise ValueError("%s: build red at stage %s" % (r2, built[r2]["failure"]["stage"]))
+        built = gate_build.ensure(root, cache, repo)[0]
+        if built["status"] == "red":
+            raise ValueError("%s: build red at stage %s" % (root, built["failure"]["stage"]))
         rec = recipe.load_recipe(repo, admit, root)
-        others = {}
-        for r2 in roots:
-            if r2 != root:
-                for k, v in symbols(built[r2]).items():
-                    others.setdefault(k, []).extend(v)
-        rows = root_rows(root, rec, built[root], decl, repo, cache, others)
+        others = linkset.definers(root, admit, repo, cache)   # the members of the link the root enters, the pinned runtime and the script (linkset.py)
+        rows = root_rows(root, rec, built, decl, repo, cache, others)
     except recipe.RecipeError as e:
         return 1, 0, [root + ":recipe"], "recipe invalid: %s" % "; ".join(e.errors)[:200]
+    except recipe.BuildRed as e:
+        return 1, 0, [root + ":inputs"], "derivation red: %s" % (" | ".join(e.args[0].get("stderr", []))[:300] or str(e.args[0])[:300])
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError, cas.CasError) as e:
         return 1, 0, [root + ":inputs"], "input error: %s" % (str(e)[:300] or type(e).__name__)
     mine = sorted((rid, c) for rid, c in rows if c)

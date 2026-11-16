@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/include/fnvnx/placement.h ports/fnv-nx/verify
 """Tests of verify/bootinputs.py: the converters of the L1 contract branch files to boot.py inputs. Plain script, exit 0 on pass."""
 import hashlib
 import json
@@ -62,15 +61,18 @@ def main():
     case("join: not a manifest", good(raises(bi.join_elf, "{}", parts.__getitem__)))
     # reserved
     H = bi.MODULE_HEADER
-    row = lambda n, base, soi: "\t".join([n, "a" * 64, "10", "400000", base, soi, "0", "100", "1", "0"])
-    txt = H + "\n" + row("zz.dll", "02000000", "00010000") + "\n" + row("aa.dll", "01400000", "00020000") + "\n"
-    r = bi.reserved_rows(txt, pe(0x400000, 0x1000000))
-    case("reserved: lo..hi from assigned_base+size_of_image, exe from its PE, sorted",
+    row = lambda n, base, soi: "\t".join([n, "a" * 64, "10", "400000", base, soi, "0", "100", "1", "0", "1"])
+    EXE = pe(0x400000, 0x1000000)
+    exe_row = lambda raw=EXE: "\t".join(["FalloutNV.exe", hashlib.sha256(raw).hexdigest(), "10", "400000", "00400000", "01000000", "0", "100", "1", "", "0"])
+    txt = H + "\n" + exe_row() + "\n" + row("zz.dll", "02000000", "00010000") + "\n" + row("aa.dll", "01400000", "00020000") + "\n"
+    r = bi.reserved_rows(txt, EXE)
+    case("reserved: lo..hi from assigned_base+size_of_image, the exe row (dll 0) named exe, sorted",
          r == [("exe", 0x400000, 0x1400000), ("aa.dll", 0x1400000, 0x1420000), ("zz.dll", 0x2000000, 0x2010000)], r)
     for k, t in (("no header", row("a.dll", "1000", "10") + "\n"), ("9 fields", H + "\na\tb\n"), ("bad hex", H + "\n" + row("a.dll", "xx", "10") + "\n"),
-                 ("zero size", H + "\n" + row("a.dll", "1000", "0") + "\n"), ("stray comment", H + "\n# x\n")):
-        case("reserved error: " + k, good(raises(bi.reserved_rows, t, pe(0x400000, 0x1000))))
-    case("reserved error: exe not PE", good(raises(bi.reserved_rows, txt, b"nope")))
+                 ("zero size", H + "\n" + row("a.dll", "1000", "0") + "\n"), ("stray comment", H + "\n# x\n"),
+                 ("no exe row", H + "\n" + row("a.dll", "1000", "10") + "\n"), ("two exe rows", H + "\n" + exe_row() + "\n" + exe_row() + "\n")):
+        case("reserved error: " + k, good(raises(bi.reserved_rows, t, EXE)))
+    case("reserved error: the exe row is another exe", good(raises(bi.reserved_rows, txt, pe(0x400000, 0x2000))))
     # keys
     ent = "000ffff0\trt_a\timport\n00100000\tI_1\timport\n00401000\tL_1\tcode\n# table_id " + TID + "\n"
     kt = "# table_id " + TID + "\n00100000\tm.dll\tf\t1\tstdcall\ti\ti\tsym\n"
