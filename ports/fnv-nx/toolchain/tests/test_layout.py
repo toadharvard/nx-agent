@@ -442,6 +442,20 @@ def plugsym(td):
         check('DECLTYPE-PLUGINSYM: the C unit\'s dispatcher has the row of its prototype, once', rows.get('fnvnx_dispatch', '').startswith('(*void,*struct:fnvnx_site{'), (rows, why))
 
 
+    # a unit that DECLARES the plugin's symbol (platform/include/fnvl_host.h) and only makes an indirect call: the front end never uses the declaration, so it has no symbol-table
+    # node and no line; the rewritten call's symbol takes its line from the registry (C++: `plugin`; C: the declaration's own row)
+    hdr = os.path.join(HERE, '..', '..', 'platform', 'include', 'fnvl_host.h')
+    for ext, label in (('cpp', 'C++'), ('c', 'C')):
+        src = os.path.join(td, 'psh.' + ext)
+        open(src, 'w').write(open(hdr).read() + '\ntypedef int (*hfp)(int);\nint hcall(hfp f, int v) { return f(v); }\n')
+        o = os.path.join(td, 'psh_%s.o' % ext)
+        r = pb.compile(src, o, so, native=True)
+        check('DECLTYPE-PLUGINSYM: a %s unit that declares fnvnx_dispatch and only makes an indirect call compiles' % label, r.returncode == 0, r.stderr[-800:])
+        if r.returncode == 0:
+            rows, why = dt_all(o, 'psh.' + ext)
+            both = dict(rows, **why)
+            check('DECLTYPE-PLUGINSYM: ... and fnvnx_dispatch has its one line (%s)' % label, 'fnvnx_dispatch' in both, sorted(both))
+
 def main():
     td = tempfile.mkdtemp(prefix='test-layout-')
     try:
