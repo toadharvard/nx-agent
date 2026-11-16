@@ -72,6 +72,7 @@ static __attribute__((noinline)) double fxn_slow(double r,double x,double y){
   return r; }
 static inline double fxn(double r,double x,double y){ return __builtin_expect(r!=r,0)?fxn_slow(r,x,y):r; }
 #define FXN(r,x,y) fxn(r,x,y)
+#define FXD(A,B,R) FXF((c->fex&0x200u)|fx_de((A),(B),(R)!=(R)))      /* DE of an arithmetic result R from its source operands (C1 stays: the arithmetic helpers do not report it) */
 static inline double fx_round(double v,u32 rc){ return rc==0?__builtin_roundeven(v):rc==1?__builtin_floor(v):rc==2?__builtin_ceil(v):__builtin_trunc(v); }
 /* stores */
 static inline u32 fv_s32(fv a){ u32 f=0;
@@ -130,12 +131,12 @@ extern "C" u32 fnvl_trace_sw(u32 fsw);   /* test stand: reports the FSW delivere
    rounded up, or fprem's quotient bit Q0) is ASSIGNED (FM_FL) and cleared by FCMP, set by FXAM. C0/C2/C3 are the lifter's locals. fsin/fcos/fsincos/fptan:
    for finite |x| >= 2^63 C2 = 1 and the stack is left unchanged (SDM), otherwise C2 = 0. Data dependent stack depth (fptan, fsincos push only when C2 = 0)
    is why those two always use the dynamic stack. */
-#define FM_UN(FN,D,S) do{ u32 f_=0; double x_=fv_d(S); D=fv_f64(FN(x_,&f_)); FM_FL(f_); }while(0)                                   /* f2xm1 */
-#define FM_BIN(FN,D,A,B) do{ u32 f_=0; double a_=fv_d(A), b_=fv_d(B); D=fv_f64(FN(a_,b_,&f_)); FM_FL(f_); }while(0)               /* fpatan fyl2x fyl2xp1 fscale: FN(first, second) */
-#define FM_TRIG(FN,D,S) do{ u32 f_=0; double x_=fv_d(S); if(fnvl_m_trig_big(x_)) c2=1; else{ c2=0; D=fv_f64(FN(x_,&f_)); FM_FL(f_); } }while(0)      /* fsin fcos */
-#define FM_TAN(D,S) do{ u32 f_=0; double x_=fv_d(S); if(fnvl_m_trig_big(x_)) c2=1; else{ c2=0; D=fv_f64(fnvl_m_tan(x_,&f_)); dyn_push(fvmk(FK_F64,0x3ff0000000000000ull,0)); FM_FL(f_); } }while(0)
-#define FM_SINCOS(D,S) do{ u32 f_=0; double x_=fv_d(S), s_, k_; if(fnvl_m_trig_big(x_)) c2=1; else{ c2=0; fnvl_m_sincos(x_,&s_,&k_,&f_); D=fv_f64(s_); dyn_push(fv_f64(k_)); FM_FL(f_); } }while(0)
-#define FM_PREM(D,A,B,NEAR) do{ double a_=fv_d(A), b_=fv_d(B); u32 f_=0, k_=0; D=fv_f64(fnvl_m_fprem(a_,b_,(NEAR),&k_,&f_)); c0=(k_>>8)&1; c2=(k_>>10)&1; c3=(k_>>14)&1; FM_FL(f_|(k_&0x200u)); }while(0)
+#define FM_UN(FN,D,S) do{ u32 f_=0; fv s_=(S); double x_=fv_d(s_); D=fv_f64(FN(x_,&f_)); FM_FL(f_|fx_de(s_,s_,f_&1u)); }while(0)                                   /* f2xm1 */
+#define FM_BIN(FN,D,A,B) do{ u32 f_=0; fv sa_=(A), sb_=(B); double a_=fv_d(sa_), b_=fv_d(sb_); D=fv_f64(FN(a_,b_,&f_)); FM_FL(f_|fx_de(sa_,sb_,f_&1u)); }while(0)               /* fpatan fyl2x fyl2xp1 fscale: FN(first, second) */
+#define FM_TRIG(FN,D,S) do{ u32 f_=0; fv s_=(S); double x_=fv_d(s_); if(fnvl_m_trig_big(x_)) c2=1; else{ c2=0; D=fv_f64(FN(x_,&f_)); FM_FL(f_|fx_de(s_,s_,f_&1u)); } }while(0)      /* fsin fcos */
+#define FM_TAN(D,S) do{ u32 f_=0; fv s_=(S); double x_=fv_d(s_); if(fnvl_m_trig_big(x_)) c2=1; else{ c2=0; D=fv_f64(fnvl_m_tan(x_,&f_)); dyn_push(fvmk(FK_F64,0x3ff0000000000000ull,0)); FM_FL(f_|fx_de(s_,s_,f_&1u)); } }while(0)
+#define FM_SINCOS(D,S) do{ u32 f_=0; fv sv_=(S); double x_=fv_d(sv_), s_, k_; if(fnvl_m_trig_big(x_)) c2=1; else{ c2=0; fnvl_m_sincos(x_,&s_,&k_,&f_); D=fv_f64(s_); dyn_push(fv_f64(k_)); FM_FL(f_|fx_de(sv_,sv_,f_&1u)); } }while(0)
+#define FM_PREM(D,A,B,NEAR) do{ fv sa_=(A), sb_=(B); double a_=fv_d(sa_), b_=fv_d(sb_); u32 f_=0, k_=0; D=fv_f64(fnvl_m_fprem(a_,b_,(NEAR),&k_,&f_)); c0=(k_>>8)&1; c2=(k_>>10)&1; c3=(k_>>14)&1; FM_FL(f_|(k_&0x200u)|fx_de(sa_,sb_,f_&1u)); }while(0)
 /* control: fldcw keeps the word and synchronises the host rounding mode. The MSVC bracket `fnstcw [a]; or ah,0xc; fldcw [b]; fistp; fldcw [a]` is exact without any special case:
    FIST reads the rounding control from c->fcw at the fistp, FLDCW loads it and sets the host mode, the second FLDCW restores both. Folding it into one truncating store is a pure
    optimisation (it would save two control-word stores and two host-FPCR read-modify-writes per site), not a semantic requirement. */

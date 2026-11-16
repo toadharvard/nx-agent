@@ -61,6 +61,13 @@ for name, hx, mac, q in CASES:
 # 3. a non-compare op
 t = text(bytes.fromhex('d9442404d8442408d95c240cc3'))
 assert 'FOWN_X87' in t or 'fown' in t, t[:300]
+# 3b. DE of the arithmetic family (SDM 1:8.5.2, rt/fnvl_x87.h fx_de through FXD): every emitted FXN site carries the source operands as carriers into FXD; the fmath macros fold fx_de into their one FM_FL
+for name, hx in (('fadd m32', 'd8442404'), ('fmul m64', 'dc4c2404'), ('fiadd m32', 'da442404'), ('fsub st1', 'd8e1'), ('fdivrp', 'def1'), ('fsqrt', 'd9fa')):
+    t = text(bytes.fromhex(hx) + b'\x00' * 4 + b'\xc3')
+    assert t.count('FXN(') >= 1 and t.count('FXD(') == t.count('FXN('), (name, t[:400])
+for mac in ('FM_UN', 'FM_BIN', 'FM_TRIG', 'FM_TAN', 'FM_SINCOS', 'FM_PREM'):
+    body = next(p for p in parts if p.startswith('#define %s(' % mac))
+    assert 'fx_de(' in body and body.count('FM_FL(') == 1, mac
 # 4. C1 of the rounding instructions (FIST, FRNDINT): 1 iff the result rounded away from zero, |r| > |x| (SDM 8.5.1.1 / FIST "C1")
 assert '#define FX_UP(X,R) (__builtin_fabs(R)>__builtin_fabs(X)?0x200u:0u)' in hdr
 for fn in ('FNVL_F2I static inline u64 fv_i(', 'static inline fv fv_rnd('):
