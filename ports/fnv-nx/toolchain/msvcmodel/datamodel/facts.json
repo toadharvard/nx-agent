@@ -1,5 +1,21 @@
 {
  "target": "Microsoft Visual C++ 2008 (cl 15.00), x86, /Zc:wchar_t, /J off, /Zp8",
+ "types": [
+  {"type": "char", "row": "S01"},
+  {"type": "signed char", "row": "S03"},
+  {"type": "unsigned char", "row": "S03"},
+  {"type": "bool", "row": "S03"},
+  {"type": "short", "row": "S04"},
+  {"type": "int", "row": "S05"},
+  {"type": "long", "row": "S05"},
+  {"type": "long long", "row": "S06"},
+  {"type": "float", "row": "S07"},
+  {"type": "double", "row": "S08"},
+  {"type": "long double", "row": "S09"},
+  {"type": "pointer", "row": "S10", "size_as": "long"},
+  {"type": "enum", "row": "S14", "size_as": "int"},
+  {"type": "wchar_t", "row": "S02"}
+ ],
  "facts": [
   {
    "id": "S01",
