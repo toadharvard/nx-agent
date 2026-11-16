@@ -1440,3 +1440,9 @@ Paused: w3b, w4, farm; no other work.
     - the sibling rule: a file reached through a qualified import imports its siblings relative or qualified, and a tool's own files may import each other bare; the checker walks it;
     - L6 admit rows and wine_fixme row 25 are taken from w6-root.
   w6 moves to d2c0fe379 and does the per-target pass.
+- 02:40Z w6 b412d413d (w6-root, verify/ as of w28 018e4fac1) accepted.
+    - Per-target cleanup done: the smscan, pair and translator host recipes hold compiler, flags, plugins and link, plus include_uses/external/sources where those are target-dependent.
+    - gate_pure: render/bridgefacts 0 (whole set 85/94). gate_d3d9total green, 332/332.
+    - recipe check was valid for 8 roots plus 3 @host variants at 5c7b36289.
+    - At 018e4fac1, blocked: env. cargo and rustc are not installed (w6 runs setup_verdict_env.sh). 6 debs fall outside the declared closure (w28 defect, sent). Rebuild and test_env_ident follow the w28 fix.
+- bottleneck: w28 env closure (blocks every build and check); farm1 sm_link; the cand4 base.
