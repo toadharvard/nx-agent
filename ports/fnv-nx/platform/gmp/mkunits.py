@@ -35,6 +35,25 @@ def check_flags(r):
         if f.startswith("-I") and (f[2:] in supplied or real(r, f[2:]) in own_dirs(r) | {build, src}):
             continue
         sys.exit("mkunits: %s: the flag %s cannot be carried by a unit" % (r["out"], f))
+# A quoted #include of a C source (mpfr/jn.c includes "jyn_asympt.c", GMP's mul_fft.c "generic/add_n_sub_n.c") cannot name a file of the unit view: every C file there is a unit.
+# The included text is put in place of the line, exactly as the preprocessor does (the line's own #if context stays around it), with #line directives for both files. Searched as cc
+# searches a quoted include: the including file's directory, then the compile's -I directories (own directories, source tree, build tree).
+def where_of(p):
+    return ("src/" + os.path.relpath(p, src)) if p.startswith(src + "/") else ("build/" + os.path.relpath(p, build))
+INC_C = re.compile(rb'^[ \t]*#[ \t]*include[ \t]+"([^"]+\.c)"[^\n]*$', re.M)
+def inline_c(path, r, depth):
+    if depth > 8:
+        sys.exit("mkunits: C sources include each other too deep at %s" % path)
+    text = open(path, "rb").read()
+    def sub(m):
+        name = m.group(1).decode()
+        for d in [os.path.dirname(path)] + sorted(own_dirs(r)) + [src, build]:
+            cand = os.path.join(d, name)
+            if os.path.isfile(cand):
+                lineno = text.count(b"\n", 0, m.start()) + 2
+                return (b'#line 1 "%s"\n' % where_of(cand).encode() + inline_c(cand, r, depth + 1) + b'\n#line %d "%s"' % (lineno, where_of(path).encode()))
+        return m.group(0)
+    return INC_C.sub(sub, text)
 units, seen = {}, {}
 for r in rows:
     check_flags(r)
@@ -49,8 +68,8 @@ for r in rows:
 # C source there is no header of OUT/inc, so an active include of one is a red preprocessing stage, never a silent difference.
 for o, r in sorted(units.items()):
     path = os.path.realpath(os.path.join(r["cwd"], r["src"]))
-    text = open(path, "rb").read()
-    where = ("src/" + os.path.relpath(path, src)) if path.startswith(src + "/") else ("build/" + os.path.relpath(path, build))
+    text = inline_c(path, r, 0)
+    where = where_of(path)
     defs = ["#define %s" % (f[2:].replace("=", " ", 1) if "=" in f else f[2:] + " 1") for f in r["flags"] if f.startswith("-D")]   # -DNAME is NAME defined as 1 (C99 6.10.2 as cc documents it)
     name = os.path.splitext(o)[0] + ".c"
     dest = os.path.join(out, "u", name)
