@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""gen_env.py [OUTDIR]: env_handheld.tsv + env_docked.tsv (tests/l6/env/make_env.py: our measurement of Wine 9.0 + Mesa llvmpipe) -> env_table.gen.h/.cpp (not checked in).
+"""gen_env.py OUTDIR SPEC TSV_DIR D3DTYPES_H WINE_DIR D3D9_H D3D9CAPS_H ENV_PIN RULES_IN: env_handheld.tsv + env_docked.tsv (tests/l6/env/make_env.py: our measurement of Wine 9.0 + Mesa llvmpipe) -> env_table.gen.h/.cpp (not checked in).
 Every table cell is DERIVED from rows through the closing rules of README.md, and every rule's premise is asserted on all rows it covers (a violated rule stops the generator,
 exit 2, naming it): devtype / adapter-format independence, format classes, usage-bit conjunction, struct writes iff success. The lookup functions are in env_rules.cpp.in.
 Profiles differ only where reported by the `profile differences` line."""
-import os, re, struct, sys
-HERE = os.path.dirname(os.path.abspath(__file__)); sys.dont_write_bytecode = True
+import hashlib, os, re, struct, sys
+HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE); import envq  # noqa: E402
-PROFILES = ["handheld", "docked"]; X8, R5, X1, A2R10 = 22, 23, 24, 35; HRC = [0, 0x8876086A, 0x8876086C, 0x0876086F]; HRN = {v: i for i, v in enumerate(HRC)}
-NA, INV = 0x8876086A, 0x8876086C
+# OUT SPEC TSV_DIR D3DTYPES_H WINE_DIR D3D9_H D3D9CAPS_H ENV_PIN RULES_IN: the one place that parses the arguments (no default)
+envq.load(sys.argv[4], sys.argv[2], sys.argv[5], sys.argv[6], sys.argv[7])
+TSV_DIR = sys.argv[3]; ENV_PIN = sys.argv[8]; RULES_IN = sys.argv[9]   # ENV_PIN.txt and env_rules.cpp.in: stage arguments from the declared env directory
+PROFILES = ["handheld", "docked"]; X8, R5, X1, A2R10 = envq.X8, envq.R5, envq.X1, envq.A2R10; HRC = [0, envq.NA, envq.INV, envq.NOAUTOGEN];  # all by name from d3d9types.h / d3d9.h
+HRN = {v: i for i, v in enumerate(HRC)}
+NA, INV = envq.NA, envq.INV
 # CreateQuery (nx_env_query_supported). Rule: d3d9 query_init passes the type through (wined3d_query_type = D3DQUERYTYPE); wined3d GL adapter_gl_create_query implements EVENT (ARB_sync / fences),
 # OCCLUSION (ARB_occlusion_query), TIMESTAMP, TIMESTAMP_DISJOINT, TIMESTAMP_FREQ (ARB_timer_query) and answers WINED3DERR_NOTAVAILABLE for every other type (query.c wined3d_query_gl_create);
 # a recorded environment has the extension iff its core GL version has it: sync 3.2, occlusion 1.5, timer query 3.3. The version is the recorded GL_VERSION of ENV_PIN.txt (both profiles).
@@ -15,7 +19,7 @@ QUERY_GL = {8: 32, 9: 15, 10: 33, 11: 33, 12: 33}   # D3DQUERYTYPE -> core GL ve
 
 
 def gl_versions():
-    t = open(os.path.join(HERE, "ENV_PIN.txt")).read(); v = {int(a) * 10 + int(b) for a, b in re.findall(r'GL_VERSION: "(\d+)\.(\d+) \(Core Profile\)', t)}
+    t = open(ENV_PIN).read(); v = {int(a) * 10 + int(b) for a, b in re.findall(r'GL_VERSION: "(\d+)\.(\d+) \(Core Profile\)', t)}
     if len(v) != 1: die("ENV_PIN.txt records one core-profile GL_VERSION for both profiles")
     return v.pop()
 
@@ -23,9 +27,8 @@ def gl_versions():
 GLVER = gl_versions(); QMASK = sum(1 << t for t, need in QUERY_GL.items() if GLVER >= need)
 fcc = envq.fcc
 # d3d9/device.c wined3dformat_from_d3dformat: non-FOURCC values with a case; wined3d/utils.c get_format_idx: the known FOURCCs
-SWITCH = [20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 40, 41, 50, 51, 52, 60, 61, 62, 63, 64, 67, 70, 71, 73, 75, 77, 79, 80, 81, 82, 83, 101, 102, 110, 111, 112, 113, 114, 115, 116, 117]
-KNOWN_FCC = sorted(fcc(s) for s in ["UYVY", "YUY2", "YV12", "DXT1", "DXT2", "DXT3", "DXT4", "DXT5", "MET1", "GRGB", "RGBG", "ATI1", "ATI2", "INST", "NVDB", "NVHU", "NVHS", "INTZ",
-                                    "RESZ", "NULL", " R16", "AL16", "NV12", "ATOC"])
+SWITCH = envq.SWITCH   # derived by envq.load from the case labels of d3d9/device.c wined3dformat_from_d3dformat (Wine 9.0)
+KNOWN_FCC = envq.KNOWN_FCC   # derived by envq.load from wined3d/utils.c format_index_remap (Wine 9.0), sorted
 UNK0, UNKF = len(KNOWN_FCC) + len(SWITCH), len(KNOWN_FCC) + len(SWITCH) + 1; NC = UNKF + 1
 
 
@@ -41,11 +44,15 @@ def die(msg): sys.stderr.write("gen_env: RULE VIOLATED: " + msg + "\n"); sys.exi
 
 
 def load(path):
+    """the rows of one recorded profile. Pin: the sha256 of the file is the one ENV_PIN.txt records for it (the rows are exactly the recording made in the pinned environment, host CPU included;
+    an edited or re-recorded file stops the generator)"""
+    pin = re.findall(r"%s sha256 ([0-9a-f]{64})" % re.escape(os.path.basename(path)), open(ENV_PIN).read())
+    if len(pin) != 1 or pin[0] != hashlib.sha256(open(path, "rb").read()).hexdigest(): die(f"{os.path.basename(path)}: its sha256 is not the one ENV_PIN.txt records")
     R, DEV = {}, []
     for l in open(path):
         if l.startswith("#"): continue
-        q, ret, out = l.rstrip("\n").split("\t"); m = re.match(r"([\w.]+)\((.*)\)$", q); a = tuple(int(x, 16) for x in m.group(2).split(",")) if m.group(2) else (); k = (m.group(1), a)
-        if m.group(1).startswith("DEV."): DEV.append((k, int(ret, 16), out)); continue
+        q, ret, out = l.rstrip("\n").split("\t"); m = re.match(r"([\w.]+)\((.*)\)$", q); a = tuple(int(x, 16) for x in m[2].split(",")) if m[2] else (); k = (m[1], a)
+        if m[1].startswith("DEV."): DEV.append((k, int(ret, 16), out)); continue
         if k in R and R[k] != (int(ret, 16), out) and not k[0].startswith(("QueryInterface", "AddRef", "Release")) and k[0] != "GetAdapterDisplayMode": die(f"duplicate query {k} answered differently")
         R[k] = (int(ret, 16), out)
     return R, DEV
@@ -63,15 +70,15 @@ def image(st, out, size):
     im = bytearray(size); f = fields(out)
     for name, off, sz, kind in envq.leaves(ST, st):
         v = f[name]
-        if kind == "c": b = re.sub(r"\\x([0-9a-f]{2})", lambda m: chr(int(m.group(1), 16)), v).encode("latin-1"); im[off:off + len(b)] = b
+        if kind == "c": b = re.sub(r"\\x([0-9a-f]{2})", lambda m: chr(int(m[1], 16)), v).encode("latin-1"); im[off:off + len(b)] = b
         elif kind == "b": im[off:off + sz] = bytes.fromhex(v)
         else: im[off:off + sz] = int(v, 16).to_bytes(sz, "little")
     return bytes(im)
 
 
 import json  # noqa: E402
-envq.SPEC = sys.argv[2] if len(sys.argv) > 2 else envq.SPEC
 ST = json.load(open(envq.SPEC))["structs"]
+IDENT = ST["D3DADAPTER_IDENTIFIER9"]; IDENT_SIZE = IDENT["size"]; WHQL_OFF = next(f["off"] for f in IDENT["fields"] if f["name"] == "WHQLLevel")   # sizeof / offsetof of the spec
 
 
 def derive(R, DEV):
@@ -123,11 +130,11 @@ def derive(R, DEV):
     r, o = get("GetAdapterLUID", 0); f = fields(o); T["LUID"] = (int(f["LowPart"], 16), int(f["HighPart"], 16))
     if r or any(get("GetAdapterLUID", a) != (INV, "-") for a in oor): die("LUID")
     # identifier: one image, WHQLLevel = (flags & 2) != 0
-    base = image("D3DADAPTER_IDENTIFIER9", get("GetAdapterIdentifier", 0, 0)[1], 1100); T["IDENT"] = base
+    base = image("D3DADAPTER_IDENTIFIER9", get("GetAdapterIdentifier", 0, 0)[1], IDENT_SIZE); T["IDENT"] = base
     for (n, a), (r, o) in R.items():
         if n == "GetAdapterIdentifier":
             if a[0] == 0:
-                im = bytearray(image("D3DADAPTER_IDENTIFIER9", o, 1100)); im[1096:1100] = bytes(4); exp = bytearray(base); exp[1096:1100] = bytes(4)
+                im = bytearray(image("D3DADAPTER_IDENTIFIER9", o, IDENT_SIZE)); im[WHQL_OFF:WHQL_OFF + 4] = bytes(4); exp = bytearray(base); exp[WHQL_OFF:WHQL_OFF + 4] = bytes(4)
                 if r != 0 or im != exp or int(fields(o)["WHQLLevel"], 16) != (1 if a[1] & 2 else 0): die(f"GetAdapterIdentifier {a}")
             elif (r, o) != (INV, "-"): die(f"GetAdapterIdentifier {a} oor")
     # caps: image per device-type class (HAL / other), DeviceType field = 1 or 2
@@ -144,8 +151,8 @@ def derive(R, DEV):
     leaf = {n: (off, sz) for n, off, sz, k in envq.leaves(ST, "D3DCAPS9")}; capw = lambda img, n: int.from_bytes(img[leaf[n][0]:leaf[n][0] + leaf[n][1]], "little")
     T["DECLTYPES"] = capw(T["CAPS"][0], "DeclTypes")
     if capw(T["CAPS"][1], "DeclTypes") != T["DECLTYPES"]: die("DeclTypes is the same for every device type (nx_env_decltype_supported has no device argument)")
-    if capw(T["CAPS"][0], "DevCaps") & 0x01C00000: die("DevCaps has no RTPATCHES / RTPATCHHANDLEZERO / NPATCHES: the device promises no higher-order surfaces, so the bodies of dev/copy_misc.cpp are Wine 9.0's (dlls/d3d9/device.c d3d9_device_DrawRectPatch / d3d9_device_DrawTriPatch: FIXME + D3D_OK, d3d9_device_DeletePatch: FIXME + D3DERR_INVALIDCALL; rows 48-50 of verify/wine_fixme.tsv) and a recording that reports patch caps needs a real implementation instead")
-    if capw(T["CAPS"][0], "StretchRectFilterCaps") & ~0x03000300: die("StretchRectFilterCaps holds only MIN/MAG POINT/LINEAR bits (nxenv_stretch_filter)")
+    if capw(T["CAPS"][0], "DevCaps") & (envq.CAPS["D3DDEVCAPS_RTPATCHES"] | envq.CAPS["D3DDEVCAPS_RTPATCHHANDLEZERO"] | envq.CAPS["D3DDEVCAPS_NPATCHES"]): die("DevCaps has no RTPATCHES / RTPATCHHANDLEZERO / NPATCHES: the device promises no higher-order surfaces, so the bodies of dev/copy_misc.cpp are Wine 9.0's (dlls/d3d9/device.c d3d9_device_DrawRectPatch / d3d9_device_DrawTriPatch: FIXME + D3D_OK, d3d9_device_DeletePatch: FIXME + D3DERR_INVALIDCALL; rows 48-50 of verify/wine_fixme.tsv) and a recording that reports patch caps needs a real implementation instead")
+    if capw(T["CAPS"][0], "StretchRectFilterCaps") & ~(envq.CAPS["D3DPTFILTERCAPS_MINFPOINT"] | envq.CAPS["D3DPTFILTERCAPS_MINFLINEAR"] | envq.CAPS["D3DPTFILTERCAPS_MAGFPOINT"] | envq.CAPS["D3DPTFILTERCAPS_MAGFLINEAR"]): die("StretchRectFilterCaps holds only MIN/MAG POINT/LINEAR bits (nxenv_stretch_filter)")
     T["STRETCHCAPS"] = capw(T["CAPS"][0], "StretchRectFilterCaps")
     T["QMASK"] = QMASK
     # formats: classes
@@ -175,10 +182,11 @@ def derive(R, DEV):
         if len(v) != 1: die(f"CheckDeviceFormat (class, usage) not a function of (resource class, format class, usage): {k}")
     S = lambda rc, c, us: next(iter(cdf[(rc, c, us)]))
     M = [[0] * NC for _ in range(5)]
+    Q = lambda n: envq.WU["WINED3DUSAGE_QUERY_" + n]; RTU, DSU = envq.DU["D3DUSAGE_RENDERTARGET"], envq.DU["D3DUSAGE_DEPTHSTENCIL"]
     for rc in range(5):
         for c in range(NC):
-            bits = [S(rc, c, 0) == 0, S(rc, c, 1) == 0, S(rc, c, 2) == 0, S(rc, c, 0x20000) == 0, S(rc, c, 0x80000) == 0, S(rc, c, 0x10000) == 0,
-                    S(rc, c, 0x40000 | (1 if rc == 0 else 0)) == 0, S(rc, c, 0x100000) == 0, S(rc, c, 0x8000) == 0, S(rc, c, 0x400) != NA, S(rc, c, 0x400) == 0]
+            bits = [S(rc, c, 0) == 0, S(rc, c, RTU) == 0, S(rc, c, DSU) == 0, S(rc, c, Q("FILTER")) == 0, S(rc, c, Q("POSTPIXELSHADER_BLENDING")) == 0, S(rc, c, Q("SRGBREAD")) == 0,
+                    S(rc, c, Q("SRGBWRITE") | (RTU if rc == 0 else 0)) == 0, S(rc, c, Q("VERTEXTEXTURE")) == 0, S(rc, c, Q("LEGACYBUMPMAP")) == 0, S(rc, c, Q("GENMIPMAP")) != NA, S(rc, c, Q("GENMIPMAP")) == 0]
             M[rc][c] = sum(1 << i for i, b in enumerate(bits) if b)
     T["CDF"] = M
     # CheckDepthStencilMatch = RT-capable(rt) and DS-capable(ds); adapter format and device type are ignored
@@ -198,14 +206,14 @@ def derive(R, DEV):
     for (n, a), (r, o) in R.items():
         if n != "CheckDeviceMultiSampleType": continue
         ad, dev, fm, w, t = a
-        if ad != 0 or t > 16: (r, o) == (INV, "-") or die(f"CheckDeviceMultiSampleType {a} must be INVALIDCALL untouched"); continue
+        if ad != 0 or t > envq.MSAA_MAX: (r, o) == (INV, "-") or die(f"CheckDeviceMultiSampleType {a} must be INVALIDCALL untouched"); continue
         ms.setdefault((cls(fm), t), set()).add((r, o))
     mask = [0] * NC
     for c in range(NC):
         if c == UNK0:
-            if any(ms[(c, t)] != {(INV, "-")} for t in range(17) if (c, t) in ms): die("format UNKNOWN is INVALIDCALL")
+            if any(ms[(c, t)] != {(INV, "-")} for t in range(envq.MSAA_MAX + 1) if (c, t) in ms): die("format UNKNOWN is INVALIDCALL")
             continue
-        for t in range(17):
+        for t in range(envq.MSAA_MAX + 1):
             if len(ms[(c, t)]) != 1: die(f"CheckDeviceMultiSampleType not a function of (class, type) at {c},{t}")
         if ms[(c, 0)] != {(0, "q=1")}: die(f"MSAA type NONE at class {c}")
         for t in range(2, 17):
@@ -273,14 +281,14 @@ def carr(name, ct, vals, per_line=24):
 
 
 def main():
-    out = sys.argv[1] if len(sys.argv) > 1 else HERE; os.makedirs(out, exist_ok=True)
-    Ts = [derive(*load(os.path.join(os.environ.get("ENV_TSV_DIR", HERE), f"env_{p}.tsv"))) for p in PROFILES]
+    out = sys.argv[1]; os.makedirs(out, exist_ok=True)
+    Ts = [derive(*load(os.path.join(TSV_DIR, f"env_{p}.tsv"))) for p in PROFILES]
     if bytes(Ts[0]["IDENT"]) != bytes(Ts[1]["IDENT"]): die("the adapter identifier images of the profiles differ: one fact, one image (ident_*.bin)")
     diff = [k for k in Ts[0] if Ts[0][k] != Ts[1][k]]; print("profile differences (table entries): " + (", ".join(diff) or "none"))
     print("promises (profile 0):\n" + promises(Ts[0]))
     c = ["/* generated by gen_env.py from env_*.tsv; do not edit */", '#include "env_table.gen.h"', f"#define NC {NC}", f"#define UNK0 {UNK0}", f"#define UNKF {UNKF}",
          carr("SWITCH_FMT", "uint32_t", SWITCH), carr("KNOWN_FCC", "uint32_t", KNOWN_FCC), f"#define N_SWITCH {len(SWITCH)}", f"#define N_FCC {len(KNOWN_FCC)}",
-         "static const uint32_t HRC[4] = {0x0u, 0x8876086Au, 0x8876086Cu, 0x0876086Fu};"]
+         "static const uint32_t HRC[4] = {" + ", ".join(["0x0u"] + ["0x%08Xu" % v for v in HRC[1:]]) + "};"]
 
     def per(name, ct, f):   # table shared when both profiles agree, else indexed by profile
         v = [f(t) for t in Ts]
@@ -307,7 +315,7 @@ def main():
                 "int nxenv_stretch_filter_ok(int p, uint32_t filter)"]:
         h.append(sig + ";")
     h.append("#ifdef __cplusplus\n}\n#endif")
-    rules = open(os.path.join(HERE, "env_rules.cpp.in")).read()
+    rules = open(RULES_IN).read()
     for p, t in zip(PROFILES, Ts): open(os.path.join(out, f"ident_{p}.bin"), "wb").write(bytes(t["IDENT"]))   # the 1100-byte D3DADAPTER_IDENTIFIER9 image = T_IDENT of that profile
     open(os.path.join(out, "env_table.gen.h"), "w").write("\n".join(h) + "\n"); open(os.path.join(out, "env_table.gen.cpp"), "w").write("\n".join(c) + "\n" + rules)
     # the caps the backend ABI is checked against (one record: the tsv; nothing is restated in render/nxgpu): per profile and device-type class, the two fields of D3DCAPS9 that the

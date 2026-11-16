@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the packages and python modules of verify/env.json from the pinned mirror. Run as `python3 -I install_mirror.py [--env F] [--dry]`, as root.
+"""Install the packages and python modules of verify/env.json from the pinned mirror. Run as `python3 -I install_mirror.py [--env F] [--artifacts URL] [--dry]`, as root.
 The mirror (env.json "debs.mirror": repo, commit, tree_sha256; the private fnv-nx-build branch tools/verdict-debs) is fetched by its exact
 commit; the checkout's CAS tree hash of debs/ must equal tree_sha256 and of wheels/ wheels_tree_sha256; every deb of the closure must have the sha256 and the version of env.json "debs.packages" (the one version source; "packages", the declared top set, must be a subset with equal versions, else exit 2) (the same
 sha256 as the upstream's own index where it has one: see farm/mirror_debs.py). Any mismatch exits 2 before dpkg runs.
@@ -10,6 +10,9 @@ already present at the pinned version`. Then the python modules of python.module
 `pip install --no-index --no-deps --require-hashes --break-system-packages -r FILE` over the modules not installed at the pinned
 version, FILE holding `<wheel path> --hash=sha256:<python.wheel_sha256>`; output `install_mirror: M modules, W installed from the
 mirror`. Nothing is fetched from a package index (apt, PyPI): the mirror is the only source."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import shutil
@@ -18,8 +21,8 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), "verify"))
-import cas  # noqa: E402
+from verify import artifacts  # noqa: E402
+from verify import cas  # noqa: E402
 import hashlib  # noqa: E402
 
 def installed(pkg):
@@ -38,7 +41,7 @@ def run(a, work):
     env = a[a.index("--env") + 1] if "--env" in a else os.path.join(os.path.dirname(HERE), "verify", "env.json")
     doc = json.load(open(env))
     m, pk = doc["debs"]["mirror"], doc["debs"]["packages"]
-    url = os.environ.get("ARTIFACTS_URL", "https://github.com/toadharvard/fnv-nx-build")
+    url = a[a.index("--artifacts") + 1] if "--artifacts" in a else artifacts.pinned(env)   # the argument, else the repository env.json pins (verify/artifacts.py): never the environment
     genv = dict(os.environ, GIT_TERMINAL_PROMPT="0")
     bare = os.path.join(work, "bare")
     os.makedirs(bare)

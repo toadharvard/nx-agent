@@ -4,7 +4,7 @@
 // (UBO 2 of the pixel stage: vec4 fogcolor; vec4 fog (x mode 0 off / 1 vertex / 2 exp / 3 exp2 / 4 linear, y start, z end,
 // w density); ivec4 alpha (x = D3DCMPFUNC, 0 = off); vec4 alpharef (x); the rest of the 352 bytes is not read here).
 // The fog factor of the vertex stage is read at the canonical fog location 18 (.x). Included by ffp.frag.glsl.
-layout (std140, binding = 2) uniform ps_driver { vec4 ps_drv_fogcolor; vec4 ps_drv_fog; ivec4 ps_drv_alpha; vec4 ps_drv_alpharef; };
+layout (std140, binding = FNVNX_DK_UBO_DRIVER) uniform ps_driver { vec4 ps_drv_fogcolor; vec4 ps_drv_fog; ivec4 ps_drv_alpha; vec4 ps_drv_alpharef; };
 layout (location = 18) in vec4 dk_fog_in;
 
 vec4 d9_epilogue(vec4 c) {

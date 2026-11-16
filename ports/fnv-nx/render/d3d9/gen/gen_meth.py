@@ -4,7 +4,7 @@ from gen_expr import Ctx, GenError
 import gen_tab as T
 
 CLS = {"det": 0, "env": 1, "pix": 2}
-REFS = ("REFIID", "REFGUID")
+from gen_expr import REFS  # noqa: E402
 
 
 def isptr(p):

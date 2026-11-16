@@ -56,7 +56,8 @@ import sandbox  # noqa: E402
 FORMAT = "fnvnx-runtime/1"
 ENV = {"PYTHONHASHSEED": "0", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1"}
 X86_64 = (2, 1, 62)  # EI_CLASS ELFCLASS64, EI_DATA ELFDATA2LSB, EM_X86_64
-DEFAULT_DIRS = ["/lib", "/usr/lib", "/lib64", "/usr/lib64"]
+import hostprofile  # noqa: E402
+DEFAULT_DIRS = hostprofile.HOST["libdirs"]   # the host profile of env.json
 INFO = ("import sys,os,json,sysconfig,importlib.util\n"
         "import site,sysconfig as sc\n"
         "P=sc.get_paths()\n"
@@ -77,6 +78,12 @@ def ident(path):
     if h[:4] != b"\x7fELF" or len(h) < 20:
         return None
     return h[4], h[5], struct.unpack_from("<H" if h[5] == 1 else ">H", h, 18)[0]
+
+def loadable(p):
+    """Is P an x86-64 ELF executable or shared object (e_type ET_EXEC or ET_DYN): what the host loader can map."""
+    with open(p, "rb") as f:
+        h = f.read(20)
+    return ident(p) == X86_64 and struct.unpack_from("<H", h, 16)[0] in (2, 3)
 
 def elf(path):
     """None if not an ELF file; else (interp or None, needed [str], rpath [str], runpath [str]) of an x86-64 ELF64 LE file."""
@@ -258,9 +265,6 @@ def build(store, python, sites, paths=()):
 
 def build_tool(store, exes, trees):
     """Tool runtime (see the docstring): exes = [AT], trees = [DIR or HOST@AT]."""
-    def loadable(p):
-        h = open(p, "rb").read(20)
-        return ident(p) == X86_64 and struct.unpack_from("<H", h, 16)[0] in (2, 3)
     ats = sorted({os.path.normpath(os.path.abspath(e)) for e in exes})
     def hostat(t):
         h, sep, at = t.partition("@")

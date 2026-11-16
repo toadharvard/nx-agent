@@ -16,10 +16,11 @@
   "asm": []
  },
  "include": [
-  "ports/fnv-nx/loader/include",
+  "ports/fnv-nx/loader/hdr/include",
   "ports/fnv-nx/hostabi/include",
   "/ext/gcc/aarch64-none-elf/include",
-  "ports/fnv-nx/lib/sha256/include"
+  "ports/fnv-nx/lib/sha256/include",
+  "ports/fnv-nx/shim/include"
  ],
  "units": "all",
  "external": [
@@ -68,7 +69,7 @@
     "--exe",
     "/ext/exe/FalloutNV.exe",
     "--bridge",
-    "/uses/ports/fnv-nx/bridgefacts/BRIDGE",
+    "/uses/ports/fnv-nx/bridgetable/BRIDGE",
     "--dir",
     "/ext/exe",
     "--dir",
@@ -86,7 +87,9 @@
     "--keys-tsv-out",
     "/out/gen/keys.tsv",
     "--data-out",
-    "/out/gen/iat_data.tsv"
+    "/out/gen/iat_data.tsv",
+    "--imported-out",
+    "/out/gen/imported.tsv"
    ],
    "inputs": [
     {
@@ -100,6 +103,7 @@
     "gen/import_keys.h",
     "gen/keys.tsv",
     "gen/iat_data.tsv",
+    "gen/imported.tsv",
     "gen/modules.tsv"
    ]
   },
@@ -118,11 +122,11 @@
   }
  ],
  "outputs": {
-  "INCLUDE": "include",
   "IMPORT_KEYS_H": "gen/import_keys.h",
   "KEYS_TSV": "gen/keys.tsv",
   "MODULES_TSV": "gen/modules.tsv",
-  "IAT_DATA_TSV": "gen/iat_data.tsv"
+  "IAT_DATA_TSV": "gen/iat_data.tsv",
+  "IMPORTED_TSV": "gen/imported.tsv"
  },
  "uses": [
   {
@@ -134,8 +138,16 @@
    "output": "INCLUDE"
   },
   {
-   "root": "ports/fnv-nx/bridgefacts",
+   "root": "ports/fnv-nx/bridgetable",
    "output": "BRIDGE"
+  },
+  {
+   "root": "ports/fnv-nx/shim",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/loader/hdr",
+   "output": "INCLUDE"
   }
  ]
 }

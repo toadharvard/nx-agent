@@ -17,6 +17,7 @@
    machine has none set), reported and restored like Wine's x86_thread_data()->dr0..dr7. FloatSave is derived from the FXSAVE image by Wine's own function (dlls/ntdll/unix/thread.c fpux_to_fpu), and a restore without
    CONTEXT_EXTENDED_REGISTERS takes it back through fpu_to_fpux (same file); with CONTEXT_EXTENDED_REGISTERS the image is restored with StatusWord &= ControlWord | 0xff80 (dlls/ntdll/unix/signal_i386.c, the CONTEXT_EXTENDED_REGISTERS arm of the CONTEXT restore: "reset the current interrupt status"). */
 #include "fnvl.h"
+#include "fnvnx_export.h"
 #include "imp.h"
 extern "C" {
 u32 fnvl_os_unhandled(u32 record, u32 context);
@@ -26,7 +27,7 @@ void fnvl_raise_av(u32 access, u32 addr, u32 at);
 void fnvl_os_RtlUnwind(void);
 void fnvl_os_RaiseException(void);
 void fnvl_os_DebugBreak(void);
-int fnvl_raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 eip, u32 sp, u32 cxf, u32 ef);
+int fnvl_raise_rec_ctx(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 eip, u32 sp, u32 cxf, u32 ef);
 }
 enum { CTX_SIZE = 716, REC_SIZE = 80, RET_SENT = 0xDEADBEE0u, EXC_UNWINDING = 2, EXC_EXIT_UNWIND = 4, EXC_NONCONT = 1 };
 enum { C_FLAGS = 0, C_FLOAT = 28, C_GS = 140, C_FS = 144, C_ES = 148, C_DS = 152, C_EDI = 156, C_ESI = 160, C_EBX = 164, C_EDX = 168, C_ECX = 172, C_EAX = 176,
@@ -173,7 +174,7 @@ static int dispatch(u32 rec, u32 ctx) {
 }
 
 /* -> 1 execution continues from the CONTEXT (registers loaded, c->ra = Context.Eip), 0 a handler or the filter left by a non-local transfer */
-int fnvl_raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 eip, u32 sp, u32 cxf, u32 ef) {
+int fnvl_raise_rec_ctx(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 eip, u32 sp, u32 cxf, u32 ef) {
     u32 rec = sp - REC_SIZE; zero(rec, REC_SIZE);
     M32(rec) = code; M32(rec + 4) = flags; M32(rec + 12) = addr; M32(rec + 16) = np;
     for (u32 i = 0; i < np; i++) M32(rec + 20 + 4 * i) = info[i];
@@ -184,6 +185,12 @@ int fnvl_raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 e
         ctx_restore(ctx);
     }
     return d != 0;
+}
+
+/* A software raise (RaiseException): the record with the full context of a software raise, EFLAGS as a call leaves them (SW_EFL). The one declaration of every caller
+   outside this file is in rt/fnvl.h; the context flags and EFLAGS are this function's, not a caller's parameter. */
+extern "C" int fnvl_raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 eip, u32 sp) {
+    return fnvl_raise_rec_ctx(code, flags, addr, np, info, eip, sp, CX_EXCEPTION, SW_EFL);
 }
 
 /* Hardware exception -> NTSTATUS record, a TOTAL switch over the codes of rt/fnvl.h (the lifter emits no other value; there is no default arm, so a code outside the list is not
@@ -208,7 +215,7 @@ extern "C" void fnvl_raise(u32 code, u32 at) {
         break;
     }
     if (nt == 0) __builtin_unreachable();       /* not reached: every emitted code is a case above */
-    fnvl_raise_rec(nt, 0, addr, np, info, eip, sp, CX_EXCEPTION, c->eflags);   /* hardware: EFLAGS as the lifted site flushed it (RAISE_OUT) */
+    fnvl_raise_rec_ctx(nt, 0, addr, np, info, eip, sp, CX_EXCEPTION, c->eflags);   /* hardware: EFLAGS as the lifted site flushed it (RAISE_OUT) */
 }
 
 /* a transfer to an address without a body (the dispatcher's miss, rt/rt.c): #UD at that address */
@@ -216,27 +223,30 @@ extern "C" void fnvl_raise_ud(u32 at) { fnvl_raise(FNVL_UD, at); }
 
 extern "C" void fnvl_raise_av(u32 access, u32 addr, u32 at) {
     u32 info[2] = { access, addr };
-    fnvl_raise_rec(0xC0000005u, 0, at, 2, info, at, esp, CX_EXCEPTION, c->eflags);
+    fnvl_raise_rec_ctx(0xC0000005u, 0, at, 2, info, at, esp, CX_EXCEPTION, c->eflags);
 }
 
 /* guest entry, stdcall: RaiseException(code, flags, nargs, args) */
+FNVNX_EXPORT("kernel32.dll", "RaiseException", fnvl_os_RaiseException, "func");
 extern "C" void fnvl_os_RaiseException(void) {
     u32 ra = M32(esp), code = M32(esp + 4), fl = M32(esp + 8), n = M32(esp + 12), args = M32(esp + 16), sp = esp + 20, info[15];
     if (n > 15) n = 15;
     for (u32 i = 0; i < n; i++) info[i] = M32(args + 4 * i);
     esp = sp;                                              /* the caller's state after the call returns */
-    fnvl_raise_rec(code, fl, ra, n, info, ra, sp, CX_EXCEPTION, SW_EFL);
+    fnvl_raise_rec_ctx(code, fl, ra, n, info, ra, sp, CX_EXCEPTION, SW_EFL);
     c->ra = c->ra;                                         /* ContinueExecution: c->ra = Context.Eip (the return address), registers loaded */
 }
 
 /* guest entry, stdcall, no arguments: kernel32!DebugBreak = EXCEPTION_BREAKPOINT reported at the return address; continuing resumes there */
+FNVNX_EXPORT("kernel32.dll", "DebugBreak", fnvl_os_DebugBreak, "func");
 extern "C" void fnvl_os_DebugBreak(void) {
     u32 ra = M32(esp), sp = esp + 4, info[1] = { 0 };
     esp = sp;
-    fnvl_raise_rec(0x80000003u, 0, ra, 1, info, ra, sp, CX_EXCEPTION, SW_EFL);
+    fnvl_raise_rec_ctx(0x80000003u, 0, ra, 1, info, ra, sp, CX_EXCEPTION, SW_EFL);
 }
 
 /* guest entry, stdcall: RtlUnwind(TargetFrame, TargetIp, ExceptionRecord, ReturnValue) */
+FNVNX_EXPORT("kernel32.dll", "RtlUnwind", fnvl_os_RtlUnwind, "func");
 extern "C" void fnvl_os_RtlUnwind(void) {
     u32 ra = M32(esp), target = M32(esp + 4), rec = M32(esp + 12), rv = M32(esp + 16), sp0 = esp, sp = esp + 20;
     if (!rec) { rec = sp0 - REC_SIZE; zero(rec, REC_SIZE); M32(rec) = 0xC0000027u; M32(rec + 12) = ra; sp0 = rec; }

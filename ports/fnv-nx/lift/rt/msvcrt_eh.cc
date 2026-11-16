@@ -16,12 +16,12 @@
    Not here (no row, no body): the se_translator branch of Wine's cxx_frame_handler: `_set_se_translator` has no bridge row, so no translator can be installed
    (see the report). */
 #include "fnvl.h"
+#include "fnvnx_export.h"
 #include "imp.h"
 #include "msvcrt.h"
 
 extern "C" {
 void fnvl_os_RtlUnwind(void);
-int fnvl_raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 eip, u32 sp);
 void *fnvnx_win32_lookup_export(const char *dll, const char *name);      /* the platform's msvcrt exports free and abort (bridge rows bind lookup): the same lookup their import entries use */
 u32 fnvl_msvcrt_sighandlers[23];
 void fnvl_msvcrt_except_handler3(void);
@@ -155,6 +155,7 @@ static int except3(u32 rec, u32 frame, u32 ctx, u32 *res)
     esp = ptrs + 8;
     return 1;
 }
+FNVNX_EXPORT("msvcrt.dll", "_except_handler3", fnvl_msvcrt_except_handler3, "func");
 extern "C" void fnvl_msvcrt_except_handler3(void)
 {
     u32 sp0 = esp, res;
@@ -370,6 +371,7 @@ static int cxx_frame_handler(u32 rec, u32 frame, u32 ctx, u32 dispatch, u32 desc
 }
 
 /* __CxxFrameHandler: eax = the FuncInfo pointer (the thunk's `mov eax, offset FuncInfo; jmp`), cdecl (rec, frame, context, dispatch) */
+FNVNX_EXPORT("msvcrt.dll", "__CxxFrameHandler", fnvl_msvcrt_CxxFrameHandler, "func");
 extern "C" void fnvl_msvcrt_CxxFrameHandler(void)
 {
     u32 descr = eax, sp0 = esp, res;
@@ -398,17 +400,43 @@ extern "C" void fnvl_msvcrt_eh_nested_catch(void)
 /* _CxxThrowException(object, type), stdcall: RaiseException(CXX_EXCEPTION, EXCEPTION_NONCONTINUABLE, 3, {magic, object, type}). The record is raised at the
    thrower's return address with the thrower's esp after the `ret 8` (rt/seh.cc fnvl_raise_rec, what fnvl_os_RaiseException does for a direct call): the state
    after it returns -- a handler that continued, or a non-local transfer -- is whatever fnvl_raise_rec left. */
+static int cxx_throw(u32 obj, u32 ti, u32 ra, u32 sp)
+{
+    u32 info[3] = { CXX_MAGIC_VC6, obj, ti };
+    esp = sp;
+    return fnvl_raise_rec(CXX_EXCEPTION, EH_NONCONTINUABLE, ra, 3, info, ra, sp);
+}
+
+/* one body, two ABI entries. The guest entry (lifted code calls the import): stdcall, the arguments on the guest stack. */
+FNVNX_EXPORT("msvcrt.dll", "_CxxThrowException", fnvl_msvcrt_CxxThrowException, "func");
 extern "C" void fnvl_msvcrt_CxxThrowException(void)
 {
-    u32 ra = M32(esp), info[3] = { CXX_MAGIC_VC6, M32(esp + 4), M32(esp + 8) }, sp = esp + 12;
-    esp = sp;
-    fnvl_raise_rec(CXX_EXCEPTION, EH_NONCONTINUABLE, ra, 3, info, ra, sp);
+    cxx_throw(M32(esp + 4), M32(esp + 8), M32(esp), esp + 12);
+}
+
+/* The native entry: C++ of the platform (platform/crt/cxx_bodies.cpp throw_bad_alloc) running under an import entry calls the bare symbol with the AAPCS arguments (ILP32:
+   a pointer is a guest address). It raises at the guest call site of that import, the ra and esp the import entry recorded (fnvl_native_guest: the return address at the esp
+   of the call, as the raise backend of rt/unhandled.cc does for RaiseException). Windows' msvcrt raises from inside itself, and the dispatcher walks the fs:0 chain, so
+   only guest frames are searched: the guest call site is where that walk starts. Once the raise returns (a lifted catch took the transfer, or the context continues) the
+   native frames are left by the non-local exit of the entry (fnvl_native_exit): this function does not return. */
+/* The invariant that makes the exit total: native code runs only under an entry that linked its frame before the native call (c->nf != 0): tools/impgen.py generates every import
+   entry as `fnvl_native_in(&nf); if (__builtin_setjmp(nf.jb)) { c->nf = nf.prev; return; } <native call>` (impgen.py:68-70) and tools/exitgen.py every native body of a lifted exe function as
+   `fnvl_native_enter(&nf); if (__builtin_setjmp(nf.jb)) { c->nf = nf.prev; return; } ...` (exitgen.py:135-140); there is no other way for guest code to reach native code, so
+   the bare entry has no frameless case and fnvl_native_exit has the setjmp point of the entry on top of c->nf. */
+extern "C" __attribute__((noreturn)) void _CxxThrowException(void *obj, const void *ti)
+{
+    u32 o = (u32)(unsigned long)obj, t = (u32)(unsigned long)ti;
+    u32 base = fnvl_native_guest();
+    cxx_throw(o, t, M32(base), base);
+    fnvl_native_exit();
 }
 
 /* ?terminate@@YAXXZ (cdecl): Wine terminate() */
+FNVNX_EXPORT("msvcrt.dll", "?terminate@@YAXXZ", fnvl_msvcrt_terminate, "func");
 extern "C" void fnvl_msvcrt_terminate(void) { do_terminate(); }
 
 /* ??1type_info@@UAE@XZ (thiscall, this in ecx): Wine type_info_dtor frees the lazily allocated undecorated name */
+FNVNX_EXPORT("msvcrt.dll", "??1type_info@@UAE@XZ", fnvl_msvcrt_type_info_dtor, "func");
 extern "C" void fnvl_msvcrt_type_info_dtor(void)
 {
     ((void (*)(void *))fnvnx_win32_lookup_export("msvcrt.dll", "free"))((void *)(unsigned long)(u32)M32(ecx + 4));
@@ -459,6 +487,7 @@ static int xcpt_filter(u32 ptrs, u32 *res)
     return 1;
 }
 /* _XcptFilter(ex, ptrs), cdecl: Wine _XcptFilter (ex equals the record's code: ASM-229) */
+FNVNX_EXPORT("msvcrt.dll", "_XcptFilter", fnvl_msvcrt_XcptFilter, "func");
 extern "C" void fnvl_msvcrt_XcptFilter(void)
 {
     u32 sp0 = esp, res;
@@ -468,6 +497,7 @@ extern "C" void fnvl_msvcrt_XcptFilter(void)
 
 /* ---- setjmp / longjmp: Wine MSVCRT__setjmp3 (DEFINE_SETJMP_ENTRYPOINT + __regs_MSVCRT__setjmp3), MSVCRT_longjmp ---- */
 /* _setjmp3(jmp_buf, nb_args, ...), cdecl. The registers and the Esp / Eip of the call are saved as the entry does (Esp = the address of the return address). */
+FNVNX_EXPORT("msvcrt.dll", "_setjmp3", fnvl_msvcrt_setjmp3, "func");
 extern "C" void fnvl_msvcrt_setjmp3(void)
 {
     u32 sp0 = esp, jb = M32(sp0 + 4); s32 nb = (s32)M32(sp0 + 8);
@@ -486,6 +516,7 @@ extern "C" void fnvl_msvcrt_setjmp3(void)
 /* longjmp(jmp_buf, retval), cdecl. Unwind to the saved registration (RtlUnwind when it is not the current head), run the unwind function of the buffer (or
    _local_unwind2 for a buffer without the 'VC20' cookie), then the transfer: ebp, ebx, edi, esi, esp = Esp + 4 (the return address of the _setjmp3 call is
    popped, as that call's `ret` would), c->ra = Eip, eax = retval (1 for 0). The cookie word lies inside the 64-byte buffer the caller passes (IsBadReadPtr is false). */
+FNVNX_EXPORT("msvcrt.dll", "longjmp", fnvl_msvcrt_longjmp, "func");
 extern "C" void fnvl_msvcrt_longjmp(void)
 {
     u32 sp0 = esp, jb = M32(sp0 + 4), retval = M32(sp0 + 8), reg = M32(jb + 24);

@@ -1,4 +1,5 @@
 /* module.cpp - modules, command line, process exit, debugging and small kernel32 helpers. */
+#include <fnvnx_export.h>
 #include <fnvnx/cite.h>
 #include "w32.h"
 #include "fnvnx_boundary.h"
@@ -8,8 +9,7 @@
 
 /* ---- modules. ONE table, ONE rule: a module is (a) the exe, whose HMODULE is its original image base where the
  * loader (S3) maps the data image, (b) a system DLL - one per distinct DLL name of the export table
- * (fnvnx_win32_system_module), all "loaded" and pinned - or (c) a translated game module registered by the loader
- * with fnvnx_register_module, or (d) a translated game module / the exe, whose image the loader reports with
+ * (fnvnx_win32_system_module: fnvnx_export_modules[], the generated table), all "loaded" and pinned - or (d) a translated game module / the exe, whose image the loader reports with
  * fnvnx_win32_register_image: its HMODULE is its base address and its exports are read from the PE export directory
  * in memory. A translated module that is not loaded yet is loaded by the loader (fnvnx_bnd_module_load). Whatever is
  * not in the table and not loadable is not loaded: ERROR_MOD_NOT_FOUND.
@@ -22,7 +22,6 @@
 
 struct module {
     char file[64];                 /* "kernel32.dll", "atimgpud.dll" */
-    fnvnx_module_resolver resolve; /* registered resolver, or NULL */
     int refs;                      /* registered modules: the loader's own reference + one per LoadLibrary */
     int system;                    /* pinned */
     int image;                     /* a registered image: HMODULE = base, exports from its PE export directory */
@@ -97,42 +96,6 @@ static struct module *find_locked(const char *file)
     return NULL;
 }
 
-extern "C" void fnvnx_register_module(const char *dll, fnvnx_module_resolver resolve)
-{
-    char f[64];
-    int hp;
-    if (!normalize(base_name(dll), f, sizeof f, &hp))
-        return;
-    os_lock(&g_mod_lock);
-    init_locked();
-    struct module *m = find_locked(f);   /* a system DLL: its exports gain the resolver; the same name again: replaced */
-    if (!m && g_nmodules < MAX_MODULES) {
-        m = &g_modules[g_nmodules++];
-        snprintf(m->file, sizeof m->file, "%s", f);
-        m->refs = 1;
-    }
-    if (m)
-        m->resolve = resolve;
-    os_unlock(&g_mod_lock);
-}
-
-/* Resolver of a module registered with fnvnx_register_module (S7 audio/input, ...), for export lookups. */
-extern "C" void *fnvnx_registered_module_export(const char *dll, const char *proc)
-{
-    fnvnx_module_resolver r = NULL;
-    char f[64];
-    int hp;
-    if (dll && !normalize(base_name(dll), f, sizeof f, &hp))
-        return NULL;
-    os_lock(&g_mod_lock);
-    init_locked();
-    for (int i = 0; i < g_nmodules && !r; i++)
-        if (g_modules[i].resolve && (!dll || !w32_stricmp(f, g_modules[i].file)))
-            r = g_modules[i].resolve;
-    os_unlock(&g_mod_lock);
-    return r ? (void *)r(proc) : NULL;
-}
-
 /* the loaded module a name denotes; the exe, a table entry (taken with `take` references) or NULL */
 static HMODULE module_lookup(const char *name, int take)
 {
@@ -190,6 +153,7 @@ extern "C" HMODULE GetModuleHandleA(LPCSTR name)
         SetLastError(ERROR_MOD_NOT_FOUND);
     return h;
 }
+FNVNX_EXPORT("kernel32.dll", "GetModuleHandleA", GetModuleHandleA, "func");
 
 extern "C" HMODULE LoadLibraryA(LPCSTR name)
 {
@@ -242,6 +206,7 @@ extern "C" HMODULE LoadLibraryA(LPCSTR name)
     }
     return h;
 }
+FNVNX_EXPORT("kernel32.dll", "LoadLibraryA", LoadLibraryA, "func");
 
 extern "C" void fnvnx_resource_register_image(HMODULE m, const void *base, size_t size);   /* resource.cpp */
 
@@ -296,6 +261,7 @@ extern "C" BOOL FreeLibrary(HMODULE h)
     }
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "FreeLibrary", FreeLibrary, "func");
 
 /* The exe and the platform's own modules have no per-thread notifications to suppress: the handle is only validated. A
  * translated module (a registered image) is told to the loader (fnvnx_bnd_disable_thread_calls). */
@@ -319,6 +285,7 @@ extern "C" BOOL DisableThreadLibraryCalls(HMODULE h)
     }
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "DisableThreadLibraryCalls", DisableThreadLibraryCalls, "func");
 
 /* ---- the PE export directory of a registered image, read from memory (every offset bounds-checked against the
  * image: a malformed directory is "not found"). 0: found (*rva = the export's address, or *fwd = its forwarder string,
@@ -463,6 +430,7 @@ static FARPROC proc_address(HMODULE h, LPCSTR proc, int depth)
 }
 
 extern "C" FARPROC GetProcAddress(HMODULE h, LPCSTR proc) { return proc_address(h, proc, 0); }
+FNVNX_EXPORT("kernel32.dll", "GetProcAddress", GetProcAddress, "func");
 
 /* ---- images (fnvnx_win32_ext.h) */
 extern "C" HMODULE fnvnx_win32_exe_module(void) { return (HMODULE)(uintptr_t)g_exe_base; }
@@ -524,7 +492,7 @@ extern "C" void fnvnx_win32_register_image(const char *name, uint32_t base, uint
     } else {
         struct module *m = find_locked(f);   /* a system DLL's name, or the same module again: its image is replaced */
         for (int i = 0; i < g_nmodules && !m; i++)   /* a slot an unloaded module left */
-            if (!g_modules[i].file[0] && !g_modules[i].system && !g_modules[i].image && !g_modules[i].resolve) {
+            if (!g_modules[i].file[0] && !g_modules[i].system && !g_modules[i].image) {
                 m = &g_modules[i];
                 snprintf(m->file, sizeof m->file, "%s", f);
                 m->refs = 1;
@@ -579,6 +547,7 @@ extern "C" DWORD GetModuleFileNameA(HMODULE h, LPSTR buf, DWORD n)
     memcpy(buf, path, len + 1);
     return len;
 }
+FNVNX_EXPORT("kernel32.dll", "GetModuleFileNameA", GetModuleFileNameA, "func");
 
 /* ---- command line */
 static char *g_cmdline_a;
@@ -622,6 +591,7 @@ extern "C" LPSTR GetCommandLineA(void)
         fnvnx_set_command_line(0, NULL);
     return g_cmdline_a;
 }
+FNVNX_EXPORT("kernel32.dll", "GetCommandLineA", GetCommandLineA, "func");
 
 extern "C" LPWSTR GetCommandLineW(void)
 {
@@ -629,6 +599,7 @@ extern "C" LPWSTR GetCommandLineW(void)
         fnvnx_set_command_line(0, NULL);
     return g_cmdline_w;
 }
+FNVNX_EXPORT("kernel32.dll", "GetCommandLineW", GetCommandLineW, "func");
 
 /* CommandLineToArgvW: the shell32 rules. argv[0] ends at the next space or closing quote (no escapes); then
  * 2n backslashes + quote -> n backslashes and a quote toggles quoting; 2n+1 backslashes + quote -> n
@@ -719,6 +690,7 @@ extern "C" LPWSTR *CommandLineToArgvW(LPCWSTR cmd, int *argc)
     *argc = n;
     return argv;
 }
+FNVNX_EXPORT("shell32.dll", "CommandLineToArgvW", CommandLineToArgvW, "func");
 
 /* ---- process */
 extern "C" void ExitProcess(UINT code)
@@ -731,6 +703,7 @@ extern "C" void ExitProcess(UINT code)
     fnvnx_plat_flush();      /* the platform lane's counts and summary, when it is on */
     os_exit_process((int)code);
 }
+FNVNX_EXPORT("kernel32.dll", "ExitProcess", ExitProcess, "func");
 FNVNX_CITE(ExitProcess, "dm:2");
 
 extern "C" void OutputDebugStringA(LPCSTR s)
@@ -738,9 +711,8 @@ extern "C" void OutputDebugStringA(LPCSTR s)
     if (s)
         os_debug_print(s);
 }
+FNVNX_EXPORT("kernel32.dll", "OutputDebugStringA", OutputDebugStringA, "func");
 
-/* DebugBreak: EXCEPTION_BREAKPOINT raised by the platform; it returns when the exception was continued. */
-extern "C" void DebugBreak(void) { w32_raise(0x80000003u, 0, 0, NULL); }
 
 /* FatalAppExitA: Wine 9.0 dlls/kernelbase/debug.c FatalAppExitA, as it is there: user32's MessageBoxA when the module and the export exist
  * (MB_SYSTEMMODAL | MB_OK, no caption, the action argument unused), else the text goes to the log (Wine's ERR), then RtlExitUserProcess(1) = ExitProcess(1). */
@@ -758,13 +730,17 @@ extern "C" void FatalAppExitA(UINT action, LPCSTR msg)
         W32Log().s("err: ").s(msg ? msg : "(null)").emit();
     ExitProcess(1);
 }
+FNVNX_EXPORT("kernel32.dll", "FatalAppExitA", FatalAppExitA, "func");
 FNVNX_CITE(FatalAppExitA, "dm:11");
 
 /* answered from the page map for every byte of the range; a guard page makes the probe fail and consumes the guard
  * (the probe's own access is the first one). IsBadCodePtr probes one byte for read, as Windows does. */
 extern "C" BOOL IsBadCodePtr(FARPROC p) { return !w32_vm_probe((const void *)p, 1, 8); }
+FNVNX_EXPORT("kernel32.dll", "IsBadCodePtr", IsBadCodePtr, "func");
 extern "C" BOOL IsBadReadPtr(const void *p, UINT_PTR n) { return !w32_vm_probe(p, (size_t)n, 0); }
+FNVNX_EXPORT("kernel32.dll", "IsBadReadPtr", IsBadReadPtr, "func");
 extern "C" BOOL IsBadWritePtr(LPVOID p, UINT_PTR n) { return !w32_vm_probe(p, (size_t)n, 1); }
+FNVNX_EXPORT("kernel32.dll", "IsBadWritePtr", IsBadWritePtr, "func");
 
 extern "C" BOOL GetComputerNameA(LPSTR buf, LPDWORD n)
 {
@@ -779,6 +755,7 @@ extern "C" BOOL GetComputerNameA(LPSTR buf, LPDWORD n)
     *n = sizeof name - 1;
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "GetComputerNameA", GetComputerNameA, "func");
 
 /* GetEnvironmentVariableA: crt_kernel32.cpp, next to the environment block it reads */
 
@@ -1222,6 +1199,7 @@ extern "C" DWORD FormatMessageA(DWORD flags, LPCVOID src, DWORD id, DWORD lang, 
     free(wk);
     return ret;
 }
+FNVNX_EXPORT("kernel32.dll", "FormatMessageA", FormatMessageA, "func");
 
 static DWORD fm_message(DWORD flags, LPCVOID src, DWORD id, DWORD lang, LPSTR buf, DWORD n, void *args, char *text, char *out, char *tmp, char *conv, unsigned long width)
 {
@@ -1289,8 +1267,12 @@ static DWORD fm_message(DWORD flags, LPCVOID src, DWORD id, DWORD lang, LPSTR bu
 }
 
 extern "C" LPSTR lstrcpyA(LPSTR d, LPCSTR s) { return d && s ? strcpy(d, s) : NULL; }
+FNVNX_EXPORT("kernel32.dll", "lstrcpyA", lstrcpyA, "func");
+FNVNX_EXPORT("kernel32.dll", "lstrcpy", lstrcpyA, "func");
 extern "C" LPSTR lstrcatA(LPSTR d, LPCSTR s) { return d && s ? strcat(d, s) : NULL; }
+FNVNX_EXPORT("kernel32.dll", "lstrcatA", lstrcatA, "func");
 extern "C" int lstrlenA(LPCSTR s) { return s ? (int)strlen(s) : 0; }
+FNVNX_EXPORT("kernel32.dll", "lstrlenA", lstrlenA, "func");
 /* lstrcmpiA: the locale comparison CompareStringA(LOCALE_USER_DEFAULT, NORM_IGNORECASE) with word sort, minus 2
  * (less -1, equal 0, greater 1); a NULL string sorts before any string, two NULLs are equal */
 extern "C" int CompareStringA(LCID, DWORD, LPCSTR, int, LPCSTR, int);   /* nls.cpp */
@@ -1300,4 +1282,5 @@ extern "C" int lstrcmpiA(LPCSTR a, LPCSTR b)
         return a == b ? 0 : !a ? -1 : 1;
     return CompareStringA(0x0400 /* LOCALE_USER_DEFAULT */, 0x00000001 /* NORM_IGNORECASE */, a, -1, b, -1) - 2;
 }
+FNVNX_EXPORT("kernel32.dll", "lstrcmpiA", lstrcmpiA, "func");
 

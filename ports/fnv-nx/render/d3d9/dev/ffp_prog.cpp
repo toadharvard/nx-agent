@@ -7,13 +7,8 @@
 //     (256 consecutive D3DMATRIX = the std140 mat4[256] of the program, row-major bytes: ffp_vs_state.h).
 #include "ffp_dev.h"
 #include "nx_gl4shim.h"
+#include "nx_pair.h"
 
-namespace {
-enum nx_gl4shim_shader_id row(uint32_t stage, uint32_t flat) {
-    if (stage == NxStage_Vertex) return flat ? NX_GL4SHIM_SHADER_FFP_VS_FLAT : NX_GL4SHIM_SHADER_FFP_VS_SMOOTH;
-    return flat ? NX_GL4SHIM_SHADER_FFP_PS_FLAT : NX_GL4SHIM_SHADER_FFP_PS_SMOOTH;
-}
-}
 
 bool nx_ffp_flat(NxDeviceCore* d, uint32_t* flat) {
     NxDrawDev* dd = nx_draw_dev(d); if (!dd) return false;
@@ -26,34 +21,29 @@ bool nx_ffp_flat(NxDeviceCore* d, uint32_t* flat) {
     *flat = r; return true;
 }
 
-uint32_t nx_ffp_make_program(NxFfpDev*, uint32_t stage, uint32_t flat) {
-    return (uint32_t)row(stage, flat);                                  // P2: the reserved backend shader id of the stage row
-}
 
 uint32_t nx_ffp_vs_program(NxDeviceCore* d, NxFfpVsBind* out) {
     memset((void*)out, 0, sizeof *out);
     NxFfpDev* f = nx_ffp_dev(d); if (!f) return 0;
     NxFfpVsKey k; if (!nx_ffp_vs_key(d, &k)) return 0;
     uint32_t flat; if (!nx_ffp_flat(d, &flat)) return 0;
-    if (!f->vs[flat]) { uint32_t id = nx_ffp_make_program(f, NxStage_Vertex, flat); if (!id) return 0; f->vs[flat] = id; }
     if (!f->vs_ok || memcmp(&k, &f->key, sizeof k)) { f->vs_ok = false; f->key = k; nx_ffp_vs_block(k, &f->vsb); f->vs_ok = true; }   // F2
     nx_ffp_vs_inputs(k, out);
     out->n_ubo = 2;
     out->ubo[0] = {NX_FFP_VS_UBO_BINDING, sizeof f->vsb, &f->vsb};
     out->ubo[1] = {NX_FFP_VS_PALETTE_BINDING, NX_FFP_MAX_BLEND_MATRICES * 64u, &d->cur.xf[nx_dxf(D3DTS_WORLDMATRIX(0))]};   // P4
     d->dirty &= ~(NX_G_LIGHTS | NX_G_XFORM | NX_G_MATERIAL | NX_G_TESS);
-    return f->vs[flat];
+    return (uint32_t)nx_pair_ffp_vs_row(flat != 0);
 }
 
 uint32_t nx_ffp_ps_program(NxDeviceCore* d, NxFfpPsBind* out) {
     memset((void*)out, 0, sizeof *out);
     NxFfpDev* f = nx_ffp_dev(d); if (!f) return 0;
     uint32_t flat; if (!nx_ffp_flat(d, &flat)) return 0;
-    if (!f->ps[flat]) { uint32_t id = nx_ffp_make_program(f, NxStage_Fragment, flat); if (!id) return 0; f->ps[flat] = id; }
     uint8_t tt[8]; nx_ffp_tex_types(d, tt);
     nx_ffp_ps_block(d, tt, &f->psb);
-    out->tex_mask = nx_ffp_stage_mask(d->cur.tss, tt); out->n_in = nx_ffp_ps_pairs(out->tex_mask, out->in_pair);
+    out->tex_mask = nx_ffp_stage_mask(d->cur.tss, tt); out->n_in = nx_pair_ffp_ps_reads(out->in_pair);
     out->n_ubo = 1; out->ubo[0] = {NX_FFP_UBO_BINDING, sizeof f->psb, &f->psb};
     d->dirty &= ~NX_G_TEXFACTOR;
-    return f->ps[flat];
+    return (uint32_t)nx_pair_ffp_ps_row(flat != 0);
 }

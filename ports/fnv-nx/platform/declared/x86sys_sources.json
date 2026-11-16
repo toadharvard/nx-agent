@@ -1,6 +1,6 @@
 {
  "format": "fnvnx-x86sys-sources/1",
- "note": "The pinned sources of gen_x86sys.py. Trust chain (CLAUDE.md rule 7): documented Win32 (WDK 7.1 headers, MSDN), the Intel SDM, and Wine 9.0 under the owner's Wine rule. No other source. WDK mirror: fnv-nx-build tools/wdk71-headers (MANIFEST.json there records the ISO, cab and msi hashes). gen_x86sys.py checks the sha256 of every file it reads against this record.",
+ "note": "The pinned sources of gen_x86sys.py. Trust chain (CLAUDE.md rule 7): documented Win32 (WDK 7.1 headers, MSDN), the Intel SDM, and Wine 9.0 under the owner's Wine rule. No other source. WDK mirror: fnv-nx-build tools/wdk71-headers (MANIFEST.json there records the ISO, cab and msi hashes). gen_x86sys.py checks the sha256 of every file it reads against this record. The Windows 7 SP1 x86 kernels and their public PDBs (win7sp1_x86_kernel) are Microsoft-published binaries of the declared OS; they live only in fnv-nx-build, never in this repository.",
  "mirror": {
   "repo": "fnv-nx-build",
   "ref": "tools/wdk71-headers",
@@ -39,9 +39,7 @@
  },
  "cpumodel": {
   "path": "ports/fnv-nx/verify/cpuid_model.json",
-  "commit": "a3217cd2c6041b8cf455f8ef269e99747620e18f",
-  "branch": "claude/fnv-l3a-lift-int3",
-  "sha256": "91f9b38f04a89fc967c9121d3bdeb8342034e91cd1fe87b8c194cea9061aec3c",
+  "sha256": "e2686d03bf74e56ea57df58e8ca4518622a72b70cce690e91817459a9837daad",
   "origin": "the declared CPU's cpuid as data (CPUREF: verify/cpuref.json + verify/cpuid_model.json); lift/rt/cpumodel.c is generated from it, not a source"
  },
  "precedence": [
@@ -54,7 +52,62 @@
    "row": "int_ring3.vectors",
    "key": 41,
    "since_build": 9200,
-   "source": "MSDN __fastfail intrinsic: fast fail is supported from Windows 8 (build 9200); Windows 7 SP1 is build 7601, so int 0x29 is not a fast-fail gate there. What the instruction does on build 7601 is not stated by MSDN: undecided"
+   "source": "MSDN __fastfail intrinsic: fast fail is supported from Windows 8 (build 9200); Windows 7 SP1 is build 7601, so Wine 9.0's int 0x29 case (__fastfail) is not 7601 behaviour and is removed from the Wine set. What `int 0x29` does on build 7601 is derived from the 7601 kernel's IDT (row idt, vector_0x29)"
   }
- ]
+ ],
+ "win7sp1_x86_kernel": {
+  "repo": "fnv-nx-build",
+  "ref": "tools/win7sp1-x86-kernel",
+  "commit": "7229600b8dbb89fbb1ada6478b7fde3caee01434",
+  "package": {
+   "name": "windows6.1-KB976932-X86.exe",
+   "sha1": "c3516bc5c9e69fee6d9ac4f981f5b95977a8a2fa",
+   "sha256": "e5449839955a22fc4dd596291aff1433b998f9797e1c784232226aba1f8abd97",
+   "origin": "Windows 7 SP1 x86 standalone package, Microsoft Update Catalog (MANIFEST.json of the mirror records the URL and the inner cab)"
+  },
+  "capstone": "5.0.7",
+  "kernels": {
+   "ntkrnlpa.exe": {
+    "exe": {
+     "path": "kernel/ntkrnlpa.exe",
+     "sha256": "d44e8f8420ea50401d028f4e6de4f9e9d7dfa7de0601fba25e35c2cb581304e6"
+    },
+    "pdb": {
+     "path": "symbols/ntkrpamp.pdb",
+     "sha256": "abe00d22f2500615971864afc41ea381c152e22bbe25fe3ccaad582dd8d064f8",
+     "guid_age": "684DA42A30CC450F81C535B4D18944B12",
+     "url": "https://msdl.microsoft.com/download/symbols/ntkrpamp.pdb/684DA42A30CC450F81C535B4D18944B12/ntkrpamp.pdb"
+    }
+   },
+   "ntoskrnl.exe": {
+    "exe": {
+     "path": "kernel/ntoskrnl.exe",
+     "sha256": "d74e389d1a3ed4c79ffc7c0af1c092102f13e67168ab66a9296cdde62a2c6cf8"
+    },
+    "pdb": {
+     "path": "symbols/ntkrnlmp.pdb",
+     "sha256": "f0a8090d2138b26d9352eb4743b802dace5ecc6bbd26510fcf046f7825ce93f1",
+     "guid_age": "00625D7D36754CBEBA4533BA9A0F3FE22",
+     "url": "https://msdl.microsoft.com/download/symbols/ntkrnlmp.pdb/00625D7D36754CBEBA4533BA9A0F3FE22/ntkrnlmp.pdb"
+    }
+   }
+  },
+  "loader": {
+   "winload.exe": {
+    "path": "kernel/winload.exe",
+    "sha256": "1a516bc932b16ae132cc8a59791abd28b3b343f94b522e2491409dc689c4c8d4",
+    "origin": "the same package, inner directory x86_microsoft-windows-b..vironment-os-loader_31bf3856ad364e35_6.1.7601.17514_none_5d2e241dcae8f953 (the four winload.exe of the package are byte-identical)",
+    "pdb": {
+     "path": "symbols/winload_prod.pdb",
+     "sha256": "4b8ad365e10bd71dc3dcb5d3f030a00bc3d84de3f2bfa8bb00cd2d0eed1ff1c2",
+     "guid_age": "7BFC36F9FE254479B5448E113B3135B51",
+     "url": "https://msdl.microsoft.com/download/symbols/winload_prod.pdb/7BFC36F9FE254479B5448E113B3135B51/winload_prod.pdb"
+    }
+   }
+  },
+  "inner_cab": {
+   "sha256": "e63ad1698c79dd10fcc798c1188967837b9ae6506159fb2f434ea849726822d6",
+   "extract": "7z x package.exe -> file [0]; cabextract [0]"
+  }
+ }
 }

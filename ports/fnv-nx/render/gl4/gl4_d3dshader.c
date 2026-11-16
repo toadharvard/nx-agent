@@ -1,4 +1,5 @@
 /* fnv-nx L6 GL 4.5 backend v4.1: NXGPU_FN_SHADER_CREATE_D3D (nxgpu4_shader.h). D3D9 bytecode -> GLSL by libfnvnx_shaders (NO_DKSH | KEEP_GLSL, VS_COMPLETE per the variant bit, the link set L) ->
+ * ASM-626 ASM-627 (verify/ASSUMPTIONS.json)
  * the path of the v3 shader_create (gl4_shader_from_glsl: the nxgl v3 shim, compile, register).
  *  D1 every byte the call reads comes from nxgl4_guest_ptr over exactly the ranges the descriptor names (descriptor 40 bytes, bytecode `size` bytes, link set n_link_pairs bytes); the bytecode is copied
  *     before anything looks at it, so the guest cannot change it under the translator. Nothing beyond `size` is read.

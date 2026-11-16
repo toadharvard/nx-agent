@@ -52,7 +52,8 @@
     "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
-    "ports/fnv-nx/lift/fnvlift"
+    "ports/fnv-nx/lift/fnvlift",
+    "ports/fnv-nx/lift/proof"
    ],
    "outputs": [
     "fpdepth/sites.tsv",
@@ -77,7 +78,8 @@
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
-    "ports/fnv-nx/verify/cpuid_model.json"
+    "ports/fnv-nx/verify/cpuid_model.json",
+    "ports/fnv-nx/lift/proof"
    ],
    "outputs": [
     "fpstate/exe/fcw_loads.tsv",
@@ -103,7 +105,8 @@
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
-    "ports/fnv-nx/verify/cpuid_model.json"
+    "ports/fnv-nx/verify/cpuid_model.json",
+    "ports/fnv-nx/lift/proof"
    ],
    "outputs": [
     "fpstate/atimgpud/fcw_loads.tsv",
@@ -129,7 +132,8 @@
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
-    "ports/fnv-nx/verify/cpuid_model.json"
+    "ports/fnv-nx/verify/cpuid_model.json",
+    "ports/fnv-nx/lift/proof"
    ],
    "outputs": [
     "fpstate/binkw32/fcw_loads.tsv",
@@ -155,7 +159,8 @@
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
-    "ports/fnv-nx/verify/cpuid_model.json"
+    "ports/fnv-nx/verify/cpuid_model.json",
+    "ports/fnv-nx/lift/proof"
    ],
    "outputs": [
     "fpstate/d3dx9_31/fcw_loads.tsv",
@@ -181,7 +186,8 @@
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
-    "ports/fnv-nx/verify/cpuid_model.json"
+    "ports/fnv-nx/verify/cpuid_model.json",
+    "ports/fnv-nx/lift/proof"
    ],
    "outputs": [
     "fpstate/d3dx9_38/fcw_loads.tsv",
@@ -207,7 +213,8 @@
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
-    "ports/fnv-nx/verify/cpuid_model.json"
+    "ports/fnv-nx/verify/cpuid_model.json",
+    "ports/fnv-nx/lift/proof"
    ],
    "outputs": [
     "fpstate/gdffalloutnv/fcw_loads.tsv",
@@ -233,7 +240,8 @@
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
-    "ports/fnv-nx/verify/cpuid_model.json"
+    "ports/fnv-nx/verify/cpuid_model.json",
+    "ports/fnv-nx/lift/proof"
    ],
    "outputs": [
     "fpstate/libvorbis/fcw_loads.tsv",
@@ -259,7 +267,8 @@
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift",
-    "ports/fnv-nx/verify/cpuid_model.json"
+    "ports/fnv-nx/verify/cpuid_model.json",
+    "ports/fnv-nx/lift/proof"
    ],
    "outputs": [
     "fpstate/libvorbisfile/fcw_loads.tsv",
@@ -319,7 +328,8 @@
     {
      "stage": "ports/fnv-nx/lift/fpfacts:gen:8",
      "path": "fpstate/libvorbisfile/scan.tsv"
-    }
+    },
+    "ports/fnv-nx/lift/proof"
    ],
    "outputs": [
     "fpstate/invariants.tsv"

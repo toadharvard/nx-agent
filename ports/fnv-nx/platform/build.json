@@ -28,7 +28,8 @@
  },
  "include": [
   "ports/fnv-nx/platform/include",
-  "ports/fnv-nx/loader/include",
+  "ports/fnv-nx/contract/exporthdr/include",
+  "ports/fnv-nx/loader/hdr/include",
   "ports/fnv-nx/lib/sha256/include",
   "ports/fnv-nx/hostabi/include",
   "ports/fnv-nx/shim/include",
@@ -228,32 +229,19 @@
    ]
   },
   {
-   "tool": "ports/fnv-nx/platform/crt/gen_msvcrt_table.py",
-   "args": [
-    "/in/ports/fnv-nx/bridgefacts/crt/msvcrt_names.tsv",
-    "/out/crt/msvcrt_table.gen.cpp"
-   ],
-   "inputs": [
-    "ports/fnv-nx/bridgefacts/crt/msvcrt_names.tsv"
-   ],
-   "outputs": [
-    "crt/msvcrt_table.gen.cpp"
-   ]
-  },
-  {
    "tool": "ports/fnv-nx/platform/com/gen_combridge.py",
    "args": [
-    "/uses/ports/fnv-nx/bridgefacts/COM_SPEC",
-    "/uses/ports/fnv-nx/bridgefacts/COM_ROWS",
-    "/uses/ports/fnv-nx/bridgefacts/COM_WORDS",
+    "/uses/ports/fnv-nx/bridgefacts/com/COM_SPEC",
+    "/uses/ports/fnv-nx/bridgefacts/com/COM_ROWS",
+    "/uses/ports/fnv-nx/bridgefacts/com/COM_WORDS",
     "/out/com",
-    "/in/ports/fnv-nx/contract",
-    "/in/ports/fnv-nx/platform/crt/cxx_types.tsv"
+    "/in/ports/fnv-nx/platform/crt/cxx_types.tsv",
+    "/in/ports/fnv-nx/contract"
    ],
    "inputs": [
+    "ports/fnv-nx/platform/crt/cxx_types.tsv",
     "ports/fnv-nx/contract/proto.py",
-    "ports/fnv-nx/contract/store.py",
-    "ports/fnv-nx/platform/crt/cxx_types.tsv"
+    "ports/fnv-nx/contract/store.py"
    ],
    "outputs": [
     "com/combridge_cxx.gen.cpp",
@@ -546,10 +534,6 @@
  },
  "uses": [
   {
-   "root": "ports/fnv-nx/loader",
-   "output": "INCLUDE"
-  },
-  {
    "root": "ports/fnv-nx/lib/sha256",
    "output": "INCLUDE"
   },
@@ -558,20 +542,28 @@
    "output": "INCLUDE"
   },
   {
+   "root": "ports/fnv-nx/bridgefacts/com",
+   "output": "COM_SPEC"
+  },
+  {
+   "root": "ports/fnv-nx/bridgefacts/com",
+   "output": "COM_ROWS"
+  },
+  {
+   "root": "ports/fnv-nx/bridgefacts/com",
+   "output": "COM_WORDS"
+  },
+  {
+   "root": "ports/fnv-nx/contract/exporthdr",
+   "output": "INCLUDE"
+  },
+  {
    "root": "ports/fnv-nx/shim",
    "output": "INCLUDE"
   },
   {
-   "root": "ports/fnv-nx/bridgefacts",
-   "output": "COM_SPEC"
-  },
-  {
-   "root": "ports/fnv-nx/bridgefacts",
-   "output": "COM_ROWS"
-  },
-  {
-   "root": "ports/fnv-nx/bridgefacts",
-   "output": "COM_WORDS"
+   "root": "ports/fnv-nx/loader/hdr",
+   "output": "INCLUDE"
   }
  ]
 }

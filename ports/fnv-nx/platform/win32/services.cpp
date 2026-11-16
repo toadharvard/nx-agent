@@ -2,6 +2,7 @@
  *
  * Winsock is in winsock.cpp.
  * Steam / GOG Galaxy: the Steamworks API as it is without a running client (ENV_TRUTH M6), at the end. */
+#include <fnvnx_export.h>
 #include "w32.h"
 
 #include <stdio.h>
@@ -14,6 +15,7 @@ extern "C" HINSTANCE ShellExecuteA(HWND h, LPCSTR op, LPCSTR file, LPCSTR params
     W32Log().s("ShellExecuteA(").s(op ? op : "open").s(", ").s(file ? file : "").s(") not available").emit();
     return (HINSTANCE)(uintptr_t)31; /* SE_ERR_NOASSOC (<= 32 means failure) */
 }
+FNVNX_EXPORT("shell32.dll", "ShellExecuteA", ShellExecuteA, "func");
 
 /* SHGetFolderPathA. The CSIDL table is the Windows 7 default location of every folder id 0x00-0x3e (the shell's
  * known-folder defaults) in the ENV F2 profile tree; ENV P4/P1 make this a 32-bit Windows 7, so the x86 variants of the
@@ -106,6 +108,7 @@ extern "C" HRESULT SHGetFolderPathA(HWND h, int csidl, HANDLE tok, DWORD flags, 
     }
     return S_OK;
 }
+FNVNX_EXPORT("shell32.dll", "SHGetFolderPathA", SHGetFolderPathA, "func");
 
 /* ---- ole32
  * Apartments: every thread has an initialisation count and the apartment model of its first successful
@@ -165,11 +168,13 @@ extern "C" HRESULT CoInitializeEx(LPVOID reserved, DWORD model)
     g_co_count++;
     return hr;
 }
+FNVNX_EXPORT("ole32.dll", "CoInitializeEx", CoInitializeEx, "func");
 
 extern "C" HRESULT CoInitialize(LPVOID reserved)
 {
     return CoInitializeEx(reserved, W32_COINIT_STA);
 }
+FNVNX_EXPORT("ole32.dll", "CoInitialize", CoInitialize, "func");
 
 extern "C" void CoUninitialize(void)
 {
@@ -178,6 +183,7 @@ extern "C" void CoUninitialize(void)
     if (--g_co_count == 0 && !g_co_model)
         __atomic_sub_fetch(&g_mta_threads, 1, __ATOMIC_SEQ_CST);
 }
+FNVNX_EXPORT("ole32.dll", "CoUninitialize", CoUninitialize, "func");
 
 extern "C" void CoFreeUnusedLibraries(void)
 {
@@ -191,8 +197,11 @@ extern "C" void CoFreeUnusedLibraries(void)
     g_ncom = o;
     os_unlock(&g_com_lock);
 }
+FNVNX_EXPORT("ole32.dll", "CoFreeUnusedLibraries", CoFreeUnusedLibraries, "func");
 extern "C" LPVOID CoTaskMemAlloc(SIZE_T n) { return malloc(n ? n : 1); }
+FNVNX_EXPORT("ole32.dll", "CoTaskMemAlloc", CoTaskMemAlloc, "func");
 extern "C" void CoTaskMemFree(LPVOID p) { free(p); }
+FNVNX_EXPORT("ole32.dll", "CoTaskMemFree", CoTaskMemFree, "func");
 
 extern "C" HRESULT CoCreateInstance(const GUID *clsid, void *outer, DWORD ctx, const GUID *iid, LPVOID *out)
 {
@@ -217,6 +226,7 @@ extern "C" HRESULT CoCreateInstance(const GUID *clsid, void *outer, DWORD ctx, c
         return CLASS_E_NOAGGREGATION;
     return f(iid, out);
 }
+FNVNX_EXPORT("ole32.dll", "CoCreateInstance", CoCreateInstance, "func");
 
 /* advapi32!SystemFunction036 (= RtlGenRandom): fill len bytes of buf with random data, return TRUE. Contract:
  * Wine 9.0 dlls/advapi32/crypt.c (SystemFunction036 -> RtlGenRandom, which writes exactly len bytes and answers
@@ -239,6 +249,7 @@ extern "C" unsigned char SystemFunction036(void *buf, unsigned long len)
     }
     return 1;
 }
+FNVNX_EXPORT("advapi32.dll", "SystemFunction036", SystemFunction036, "func");
 
 extern "C" HRESULT CoCreateGuid(GUID *g)
 {
@@ -252,6 +263,7 @@ extern "C" HRESULT CoCreateGuid(GUID *g)
     g->Data4[0] = (unsigned char)((g->Data4[0] & 0x3F) | 0x80);
     return S_OK;
 }
+FNVNX_EXPORT("ole32.dll", "CoCreateGuid", CoCreateGuid, "func");
 
 
 /* ---- steam_api / galaxywrp.dll: GOG Galaxy is not lifted (CLAUDE.md "Owner order of 2026-11-11, 23:00"): the declared machine has no
@@ -279,6 +291,7 @@ extern "C" void SteamAPI_Shutdown(void)
     g_steam_pipe = 0;
     os_unlock(&g_steam_lock);
 }
+FNVNX_EXPORT("galaxywrp.dll", "SteamAPI_Shutdown", SteamAPI_Shutdown, "func");
 
 /* SteamAPI_RunCallbacks. steam_api.h / doc/api/steam_api#SteamAPI_RunCallbacks: "Dispatches callbacks and call results to all of the
  * registered listeners" - those come from the client over the pipe; without a pipe (SteamAPI_Init failed) nothing is queued, so nothing is
@@ -291,6 +304,7 @@ extern "C" void SteamAPI_RunCallbacks(void)
     if (!pipe)
         return;
 }
+FNVNX_EXPORT("galaxywrp.dll", "SteamAPI_RunCallbacks", SteamAPI_RunCallbacks, "func");
 
 /* SteamAPI_RegisterCallback (steam_api.h, steam_api_internal.h CCallbackBase: the Steamworks callback registry, the function the
  * STEAM_CALLBACK / CCallback<> constructors call): adds the (object, callback id) pair to the registry. The registry is independent of the
@@ -314,6 +328,7 @@ extern "C" void SteamAPI_RegisterCallback(void *cb, int id)
     g_steam_nregs++;
     os_unlock(&g_steam_lock);
 }
+FNVNX_EXPORT("galaxywrp.dll", "SteamAPI_RegisterCallback", SteamAPI_RegisterCallback, "func");
 
 /* SteamAPI_UnregisterCallback (steam_api.h; the CCallbackBase destructor calls it): removes every registration of the object; an object
  * with none is a no-op. */
@@ -327,6 +342,7 @@ extern "C" void SteamAPI_UnregisterCallback(void *cb)
     g_steam_nregs = o;
     os_unlock(&g_steam_lock);
 }
+FNVNX_EXPORT("galaxywrp.dll", "SteamAPI_UnregisterCallback", SteamAPI_UnregisterCallback, "func");
 
 extern "C" int fnvnx_steam_callback_count(void)
 {

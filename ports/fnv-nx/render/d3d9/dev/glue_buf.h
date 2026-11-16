@@ -7,3 +7,6 @@
 // the buffer has dirty bytes and was bound since the last submit.
 // Result 0 = the backend has no memory for the mirror (or for the stream ring): nothing changed, the dirty range is kept; the draw path returns D3DERR_OUTOFVIDEOMEMORY, PreLoad (void) leaves it for the next use.
 NX_MUST_USE uint32_t nx_buf_gpu_sync(NxBufCore* b);
+// The hazard-checked form (defined with the draw path's bound-buffer table, draw_bind.cpp B2): flushes the pending stream first when the rule above requires it, then nx_buf_gpu_sync. Every caller that writes a
+// mirror (the draw path, PreLoad) uses this one; nx_buf_gpu_sync itself is called only from it.
+NX_MUST_USE uint32_t nx_buf_mirror(NxBufCore* b);

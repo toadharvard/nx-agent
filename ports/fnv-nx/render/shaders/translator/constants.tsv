@@ -1,0 +1,7 @@
+mojoshader/profiles/mojoshader_profile_glsl.c	emit_GLSL_NOP	void		msdocs-win32-d3d9@3fb42a59:desktop-src/direct3dhlsl/nop---ps.md#nop - ps; msdocs-win32-d3d9@3fb42a59:desktop-src/direct3dhlsl/nop---vs.md#nop - vs
+mojoshader/profiles/mojoshader_profile_glsl.c	emit_GLSL_phase	void		msdocs-win32-d3d9@3fb42a59:desktop-src/direct3dhlsl/phase---ps.md#phase - ps
+mojoshader/profiles/mojoshader_profile_glsl.c	emit_GLSL_TEXM3X2PAD	void		msdocs-win32-d3d9@3fb42a59:desktop-src/direct3dhlsl/texm3x2pad---ps.md#texm3x2pad - ps
+mojoshader/profiles/mojoshader_profile_glsl.c	emit_GLSL_TEXM3X3PAD	void		msdocs-win32-d3d9@3fb42a59:desktop-src/direct3dhlsl/texm3x3pad---ps.md#texm3x3pad - ps
+mojoshader/profiles/mojoshader_profile_glsl.c	emit_GLSL_DCL	void		msdocs-win32-d3d9@3fb42a59:desktop-src/direct3dhlsl/dcl---ps.md#dcl - (sm2, sm3 - ps asm); definitions phase: mojoshader.c process_definitions (4098-4104), PATCHES.md 8th patch
+mojoshader/profiles/mojoshader_profile_glsl.c	dk_cfg.isra.0	identity	0	PATCHES.md 8th patch; mojoshader_profile_glsl.c:37-40 dk_cfg returns ctx->dk (ISRA reduced the parameter to the field)
+mojoshader/mojoshader.c	parse_args_NULL	u32	1	mojoshader.c parse_instruction_token: returns the instruction token itself (no operand tokens); not in msdocs-win32-d3d9@3fb42a59 (only desktop-src/direct3dhlsl/dx9-graphics-reference-asm.md#Shader Binary Format, which defers to d3d9types.h)

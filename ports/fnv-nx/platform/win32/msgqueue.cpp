@@ -3,6 +3,7 @@
  * SendInput), hooks, the cursor, and the application lifecycle (platform/win32/LIFECYCLE.md).
  * One lock (g_mql) guards queues, hooks and input state; it is never held across a window procedure, a hook or a
  * call into the window tree. */
+#include <fnvnx_export.h>
 #include "window_int.h"
 
 #include <stdint.h>
@@ -168,6 +169,7 @@ LRESULT send_cross(DWORD tid, HWND h, UINT m, WPARAM w, LPARAM l)
     }
     os_unlock(&g_mql);
     VT_MERGE(s.rck);   /* the reply takes the receiver's time */
+    w32_susp_point();  /* the exit of a blocking wait is a point of S (win32/THREADS.md) */
     return s.r;
 }
 int post_to(DWORD tid, HWND h, UINT m, WPARAM w, LPARAM l)   /* 0 ok, else the error */
@@ -228,6 +230,7 @@ extern "C" LRESULT SendMessageA(HWND h, UINT m, WPARAM w, LPARAM l)
     if (!h || !fnwin_info_get(h, &wi)) { SetLastError(1400); return 0; }
     return wi.tid == GetCurrentThreadId() ? deliver(h, m, w, l, 1) : send_cross(wi.tid, h, m, w, l);
 }
+FNVNX_EXPORT("user32.dll", "SendMessageA", SendMessageA, "func");
 extern "C" BOOL PostMessageA(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     HWND t[256];
@@ -242,6 +245,7 @@ extern "C" BOOL PostMessageA(HWND h, UINT m, WPARAM w, LPARAM l)
     if (err) SetLastError(err);
     return !err;
 }
+FNVNX_EXPORT("user32.dll", "PostMessageA", PostMessageA, "func");
 /* PostThreadMessage: a thread message (hwnd NULL) to the thread with id tid; 0 ok, else the error (waveOut CALLBACK_THREAD) */
 extern "C" int fnvnx_post_thread_message(DWORD tid, UINT m, WPARAM w, LPARAM l) { return post_to(tid, NULL, m, w, l); }
 extern "C" void fnvnx_post_message(HWND h, UINT m, WPARAM w, LPARAM l) { PostMessageA(h ? h : fnvnx_main_window(), m, w, l); }
@@ -252,6 +256,7 @@ extern "C" void PostQuitMessage(int code)
     if (q) { q->quit = 1; q->quit_code = code; }
     os_unlock(&g_mql);
 }
+FNVNX_EXPORT("user32.dll", "PostQuitMessage", PostQuitMessage, "func");
 
 /* GetMessage for the platform's own modal loops (MessageBox, SC_MOVE, caption buttons): waits for a message of the calling thread,
  * dispatching nothing; 0 when it is WM_QUIT (re-posted for the loop that is waiting for it) */
@@ -322,6 +327,7 @@ extern "C" BOOL PeekMessageA(LPMSG msg, HWND f, UINT lo, UINT hi, UINT flags)
         return TRUE;
     }
 }
+FNVNX_EXPORT("user32.dll", "PeekMessageA", PeekMessageA, "func");
 
 /* the characters of the US-English (en-US, code page 1252) layout; -1: the key makes none */
 static int to_1252(unsigned u)
@@ -378,6 +384,7 @@ extern "C" BOOL TranslateMessage(const MSG *m)
     }
     return TRUE;
 }
+FNVNX_EXPORT("user32.dll", "TranslateMessage", TranslateMessage, "func");
 extern "C" LRESULT DispatchMessageA(const MSG *m)
 {
     if (!m) { SetLastError(998); return 0; }
@@ -391,6 +398,7 @@ extern "C" LRESULT DispatchMessageA(const MSG *m)
     if (!fnwin_info_get(m->hwnd, &wi) || wi.tid != GetCurrentThreadId()) { SetLastError(1400); return 0; }
     return wi.hproc ? wi.hproc(m->hwnd, m->message, m->wParam, m->lParam) : wi.proc ? wi.proc(m->hwnd, m->message, m->wParam, m->lParam) : DefWindowProcA(m->hwnd, m->message, m->wParam, m->lParam);
 }
+FNVNX_EXPORT("user32.dll", "DispatchMessageA", DispatchMessageA, "func");
 
 /* ---- hooks */
 extern "C" HHOOK SetWindowsHookExA(int id, HOOKPROC f, HINSTANCE mod, DWORD tid)
@@ -406,6 +414,7 @@ extern "C" HHOOK SetWindowsHookExA(int id, HOOKPROC f, HINSTANCE mod, DWORD tid)
     os_unlock(&g_mql);
     return (HHOOK)k;
 }
+FNVNX_EXPORT("user32.dll", "SetWindowsHookExA", SetWindowsHookExA, "func");
 extern "C" BOOL UnhookWindowsHookEx(HHOOK h)
 {
     bool ok = false;
@@ -420,6 +429,7 @@ extern "C" BOOL UnhookWindowsHookEx(HHOOK h)
     if (!ok) SetLastError(1404);
     return ok;
 }
+FNVNX_EXPORT("user32.dll", "UnhookWindowsHookEx", UnhookWindowsHookEx, "func");
 extern "C" LRESULT CallNextHookEx(HHOOK h, int code, WPARAM w, LPARAM l)
 {
     hook *k = NULL;
@@ -430,6 +440,7 @@ extern "C" LRESULT CallNextHookEx(HHOOK h, int code, WPARAM w, LPARAM l)
     if (!k) { SetLastError(1404); return 0; }
     return call_from(id, k, code, w, l, false);
 }
+FNVNX_EXPORT("user32.dll", "CallNextHookEx", CallNextHookEx, "func");
 static RECT clip_rect_locked(void);   /* ClipCursor, below */
 
 
@@ -603,6 +614,7 @@ extern "C" UINT SendInput(UINT n, void *in, int sz)
     }
     return done;
 }
+FNVNX_EXPORT("user32.dll", "SendInput", SendInput, "func");
 
 /* ---- cursor */
 extern "C" HANDLE fnvnx_load_icon_resource(HINSTANCE, LPCSTR, int is_cursor);   /* resource.cpp */
@@ -621,11 +633,13 @@ extern "C" HCURSOR LoadCursorA(HINSTANCE i, LPCSTR n)
     static const uint16_t ids[17] = { 32512, 32513, 32514, 32515, 32516, 32640, 32641, 32642, 32643, 32644, 32645, 32646, 32648, 32649, 32650, 32651, 32652 };
     return sys_handle(g_cursors, 17, i, n, ids, 1);
 }
+FNVNX_EXPORT("user32.dll", "LoadCursorA", LoadCursorA, "func");
 extern "C" HICON LoadIconA(HINSTANCE i, LPCSTR n)
 {
     static const uint16_t ids[8] = { 32512, 32513, 32514, 32515, 32516, 32517, 32518, 32519 };
     return (HICON)sys_handle(g_icons, 8, i, n, ids, 0);
 }
+FNVNX_EXPORT("user32.dll", "LoadIconA", LoadIconA, "func");
 extern "C" HCURSOR fnmq_arrow_cursor(void) { return (HCURSOR)&g_cursors[0]; }
 extern "C" HCURSOR fnmq_set_cursor(HCURSOR c)
 {
@@ -637,6 +651,7 @@ extern "C" HCURSOR fnmq_set_cursor(HCURSOR c)
     return old;
 }
 extern "C" HCURSOR SetCursor(HCURSOR c) { return fnmq_set_cursor(c); }
+FNVNX_EXPORT("user32.dll", "SetCursor", SetCursor, "func");
 extern "C" int ShowCursor(BOOL show)
 {
     os_lock(&g_mql);
@@ -645,6 +660,7 @@ extern "C" int ShowCursor(BOOL show)
     os_unlock(&g_mql);
     return r;
 }
+FNVNX_EXPORT("user32.dll", "ShowCursor", ShowCursor, "func");
 /* the cursor clip rectangle (ClipCursor): the whole desktop while none is set; right and bottom are exclusive */
 static RECT g_clip;
 static bool g_clip_set;
@@ -690,6 +706,7 @@ extern "C" BOOL ClipCursor(const RECT *r)
     os_unlock(&g_mql);
     return TRUE;
 }
+FNVNX_EXPORT("user32.dll", "ClipCursor", ClipCursor, "func");
 extern "C" BOOL GetClipCursor(RECT *r)
 {
     if (!r) { SetLastError(998); return FALSE; }
@@ -698,7 +715,9 @@ extern "C" BOOL GetClipCursor(RECT *r)
     os_unlock(&g_mql);
     return TRUE;
 }
+FNVNX_EXPORT("user32.dll", "GetClipCursor", GetClipCursor, "func");
 extern "C" BOOL SetCursorPos(int x, int y) { fnvnx_set_cursor_pos(x, y); return TRUE; }
+FNVNX_EXPORT("user32.dll", "SetCursorPos", SetCursorPos, "func");
 extern "C" BOOL GetCursorPos(LPPOINT p)
 {
     if (!p) { SetLastError(998); return FALSE; }
@@ -707,8 +726,11 @@ extern "C" BOOL GetCursorPos(LPPOINT p)
     os_unlock(&g_mql);
     return TRUE;
 }
+FNVNX_EXPORT("user32.dll", "GetCursorPos", GetCursorPos, "func");
 extern "C" UINT GetDoubleClickTime(void) { return g_dbl_ms; }
+FNVNX_EXPORT("user32.dll", "GetDoubleClickTime", GetDoubleClickTime, "func");
 extern "C" BOOL SetDoubleClickTime(UINT ms) { g_dbl_ms = ms == 0 ? 500 : ms > 5000 ? 5000 : ms; return TRUE; }
+FNVNX_EXPORT("user32.dll", "SetDoubleClickTime", SetDoubleClickTime, "func");
 
 /* ---- lifecycle: Horizon applet events as the messages Windows sends for the same user action */
 static void to_all(UINT m, WPARAM w, LPARAM l)

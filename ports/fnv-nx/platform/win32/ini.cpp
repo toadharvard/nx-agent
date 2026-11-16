@@ -19,6 +19,7 @@
  * Allocation: every container allocates through w32_alloc (libc malloc); a failure throws std::bad_alloc, which the
  * entry points turn into their documented failure (0 / FALSE with ERROR_NOT_ENOUGH_MEMORY), the lock released.
  */
+#include <fnvnx_export.h>
 #include "w32.h"
 
 #include <stdio.h>
@@ -421,6 +422,7 @@ extern "C" DWORD GetPrivateProfileStringA(LPCSTR sec, LPCSTR key, LPCSTR def, LP
 {
     return guarded([&] { return get_string(sec, key, def, buf, size, file); }, (DWORD)0);
 }
+FNVNX_EXPORT("kernel32.dll", "GetPrivateProfileStringA", GetPrivateProfileStringA, "func");
 
 extern "C" UINT GetPrivateProfileIntA(LPCSTR sec, LPCSTR key, INT def, LPCSTR file)
 {
@@ -438,11 +440,13 @@ extern "C" UINT GetPrivateProfileIntA(LPCSTR sec, LPCSTR key, INT def, LPCSTR fi
         v = v * 10u + (uint32_t)(*p - '0');
     return (UINT)(neg ? 0u - v : v);
 }
+FNVNX_EXPORT("kernel32.dll", "GetPrivateProfileIntA", GetPrivateProfileIntA, "func");
 
 extern "C" DWORD GetPrivateProfileSectionNamesA(LPSTR buf, DWORD size, LPCSTR file)
 {
     return GetPrivateProfileStringA(NULL, NULL, NULL, buf, size, file);
 }
+FNVNX_EXPORT("kernel32.dll", "GetPrivateProfileSectionNamesA", GetPrivateProfileSectionNamesA, "func");
 
 extern "C" DWORD GetPrivateProfileSectionA(LPCSTR sec, LPSTR buf, DWORD size, LPCSTR file)
 {
@@ -461,6 +465,7 @@ extern "C" DWORD GetPrivateProfileSectionA(LPCSTR sec, LPSTR buf, DWORD size, LP
     return copy_list(items, buf, size);
     }, (DWORD)0);
 }
+FNVNX_EXPORT("kernel32.dll", "GetPrivateProfileSectionA", GetPrivateProfileSectionA, "func");
 
 static BOOL write_string(LPCSTR sec, LPCSTR key, LPCSTR val, LPCSTR file)
 {
@@ -526,6 +531,7 @@ extern "C" BOOL WritePrivateProfileStringA(LPCSTR sec, LPCSTR key, LPCSTR val, L
 {
     return guarded([&] { return write_string(sec, key, val, file); }, (BOOL)FALSE);
 }
+FNVNX_EXPORT("kernel32.dll", "WritePrivateProfileStringA", WritePrivateProfileStringA, "func");
 
 extern "C" BOOL WritePrivateProfileSectionA(LPCSTR sec, LPCSTR data, LPCSTR file)
 {
@@ -550,3 +556,4 @@ extern "C" BOOL WritePrivateProfileSectionA(LPCSTR sec, LPCSTR data, LPCSTR file
     return TRUE;
     }, (BOOL)FALSE);
 }
+FNVNX_EXPORT("kernel32.dll", "WritePrivateProfileSectionA", WritePrivateProfileSectionA, "func");

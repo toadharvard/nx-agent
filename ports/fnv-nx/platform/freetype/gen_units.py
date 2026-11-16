@@ -53,8 +53,11 @@ def refs_of(src):
     """the text of every tracked platform source (the root's own code; its freetype/ directory is the build, not a caller)"""
     out = []
     for d, ds, fs in os.walk(src):
-        ds[:] = sorted(x for x in ds if not (d == src and x == "freetype"))
-        out += [read(os.path.join(d, f)) for f in sorted(fs) if f.endswith((".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".inc"))]
+        ds.sort()
+        fs.sort()
+        if d == src and "freetype" in ds:
+            ds.remove("freetype")
+        out += [read(os.path.join(d, f)) for f in fs if f.endswith((".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".inc"))]
     return "\n".join(out)
 
 
@@ -66,7 +69,9 @@ def unreferenced(ext, names, base, src):
     text = refs_of(src)
     hdr = read(os.path.join(ext, "include/freetype/config/ftheader.h"))
     srcs = {}
-    for d, _, fs in os.walk(os.path.join(ext, "src")):
+    for d, ds, fs in os.walk(os.path.join(ext, "src")):
+        ds.sort()
+        fs.sort()
         for f in fs:
             if f.endswith(".c"):
                 srcs[os.path.relpath(os.path.join(d, f), ext)] = read(os.path.join(d, f))

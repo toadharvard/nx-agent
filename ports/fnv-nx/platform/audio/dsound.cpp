@@ -20,6 +20,7 @@
 #include "mixer.h"
 #include "reverb.h"
 #include "../os/os.h"
+#include <fnvnx_export.h>
 
 #include <math.h>
 #include <stddef.h>
@@ -1160,6 +1161,7 @@ extern "C" HRESULT WINAPI DirectSoundCreate8(LPCGUID guid, LPDIRECTSOUND8 *out, 
     *out = d;
     return DS_OK;
 }
+FNVNX_EXPORT("dsound.dll", "DirectSoundCreate8", DirectSoundCreate8, "func");
 
 extern "C" HRESULT WINAPI DirectSoundCreate(LPCGUID guid, LPDIRECTSOUND *out, LPUNKNOWN outer)
 {
@@ -1169,6 +1171,7 @@ extern "C" HRESULT WINAPI DirectSoundCreate(LPCGUID guid, LPDIRECTSOUND *out, LP
     *out = d8;   /* NULL on failure */
     return hr;
 }
+FNVNX_EXPORT("dsound.dll", "DirectSoundCreate", DirectSoundCreate, "func");
 
 extern "C" HRESULT WINAPI DirectSoundEnumerateA(LPDSENUMCALLBACKA cb, LPVOID ctx)
 {
@@ -1177,6 +1180,7 @@ extern "C" HRESULT WINAPI DirectSoundEnumerateA(LPDSENUMCALLBACKA cb, LPVOID ctx
         cb((LPGUID)&DSDEVID_DefaultPlayback, "Nintendo Switch audio", "audren", ctx);
     return DS_OK;
 }
+FNVNX_EXPORT("dsound.dll", "DirectSoundEnumerateA", DirectSoundEnumerateA, "func");
 
 /* CoCreateInstance(CLSID_DirectSound8) */
 extern "C" HRESULT fnvnx_dsound_com_factory(const GUID *iid, void **out)

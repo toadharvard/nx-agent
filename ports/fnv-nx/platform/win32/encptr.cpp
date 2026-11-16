@@ -9,6 +9,7 @@
  * (os_random32, seeded by the monotonic clock and the process id) and publishes it with one atomic compare-exchange,
  * so every thread sees the same value. Predictability of the cookie is NOT part of the contract (the environment states
  * no entropy requirement); it is never zero, so the encoding is never the identity. */
+#include <fnvnx_export.h>
 #include "w32.h"
 
 static uintptr_t g_cookie;
@@ -43,9 +44,11 @@ extern "C" LPVOID EncodePointer(LPVOID p)
     uintptr_t c = cookie();
     return (LPVOID)ror((uintptr_t)p ^ c, (unsigned)(c % W));
 }
+FNVNX_EXPORT("kernel32.dll", "EncodePointer", EncodePointer, "func");
 
 extern "C" LPVOID DecodePointer(LPVOID p)
 {
     uintptr_t c = cookie();
     return (LPVOID)(ror((uintptr_t)p, (unsigned)(W - c % W)) ^ c);
 }
+FNVNX_EXPORT("kernel32.dll", "DecodePointer", DecodePointer, "func");

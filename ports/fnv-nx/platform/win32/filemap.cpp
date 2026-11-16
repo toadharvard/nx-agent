@@ -8,6 +8,7 @@
  * caller's file handle, as on Windows); the bytes a writable shared view changed go back to the file at
  * UnmapViewOfFile / FlushViewOfFile. A SEC_IMAGE section is laid out as the PE sections say (headers and sections at
  * their RVAs, zero fill, per-section page protection). */
+#include <fnvnx_export.h>
 #include "filemap_backing.h"
 #include "fnvnx/hostvm.h"
 #include "w32_reach.h"
@@ -400,6 +401,7 @@ extern "C" HANDLE CreateFileMappingA(HANDLE file, void *sa, DWORD flprot, DWORD 
         SetLastError(ERROR_SUCCESS);
     return h;
 }
+FNVNX_EXPORT("kernel32.dll", "CreateFileMappingA", CreateFileMappingA, "func");
 
 /* ---- views */
 struct view {
@@ -562,6 +564,7 @@ out:
     SetLastError(err);
     return NULL;
 }
+FNVNX_EXPORT("kernel32.dll", "MapViewOfFile", MapViewOfFile, "func");
 
 extern "C" BOOL UnmapViewOfFile(LPCVOID addr)
 {
@@ -588,6 +591,7 @@ extern "C" BOOL UnmapViewOfFile(LPCVOID addr)
         SetLastError(err);
     return ok;
 }
+FNVNX_EXPORT("kernel32.dll", "UnmapViewOfFile", UnmapViewOfFile, "func");
 
 extern "C" BOOL FlushViewOfFile(LPCVOID addr, SIZE_T bytes)
 {
@@ -613,3 +617,4 @@ extern "C" BOOL FlushViewOfFile(LPCVOID addr, SIZE_T bytes)
         SetLastError(err);
     return ok;
 }
+FNVNX_EXPORT("kernel32.dll", "FlushViewOfFile", FlushViewOfFile, "func");

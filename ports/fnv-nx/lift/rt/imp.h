@@ -41,3 +41,10 @@ static inline __attribute__((always_inline)) void fnvl_native_out(struct fnvl_nf
 }
 /* x87 result of a native function: pushed as a binary64 carrier (the dynamic stack image every lifted call site syncs with) */
 static inline void fnvl_ret_st0(double d) { dyn_push(fv_f64(d)); }
+
+/* The two halves of a raise from native code under an import (rt/unhandled.cc, rt/enter.cc). Native code running under an import entry has c->nf set (fnvl_native_in links the frame
+   before the native call; every native entry from guest code is fnvl_native_in or fnvl_native_enter), so a non-local exit always has the setjmp point of that entry.
+   fnvl_native_guest: the guest state of the import call back in the registers (c->r[], FPCR/FPSR from the park) -> the esp of the call (it points at the return address).
+   fnvl_native_exit: leave the native frames by the non-local exit to the entry's __builtin_setjmp point; the entry returns to its lifted caller with c->ra pending. Does not return. */
+extern "C" u32 fnvl_native_guest(void);
+extern "C" __attribute__((noreturn)) void fnvl_native_exit(void);

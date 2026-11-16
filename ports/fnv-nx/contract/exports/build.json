@@ -1,0 +1,25 @@
+{
+ "format": "fnvnx-recipe/1",
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/contract/exportgen.py",
+   "args": [
+    "--reasons",
+    "/in/ports/fnv-nx/toolchain/layout/decltype_spell.inc"
+   ],
+   "inputs": [
+    "ports/fnv-nx/toolchain/layout/decltype_spell.inc"
+   ],
+   "objects_of": {
+    "target": "guest",
+    "section": ".fnvnx.export"
+   },
+   "outputs": [
+    "exports.tsv"
+   ]
+  }
+ ],
+ "outputs": {
+  "exports": "exports.tsv"
+ }
+}

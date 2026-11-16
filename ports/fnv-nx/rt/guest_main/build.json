@@ -29,7 +29,7 @@
  },
  "include": [
   "ports/fnv-nx/hostabi/include",
-  "ports/fnv-nx/loader/include",
+  "ports/fnv-nx/loader/hdr/include",
   "ports/fnv-nx/lib/sha256/include",
   "/ext/gcc/aarch64-none-elf/include/c++/13.3.0",
   "/ext/gcc/aarch64-none-elf/include/c++/13.3.0/aarch64-none-elf",
@@ -42,11 +42,11 @@
    "output": "INCLUDE"
   },
   {
-   "root": "ports/fnv-nx/loader",
+   "root": "ports/fnv-nx/lib/sha256",
    "output": "INCLUDE"
   },
   {
-   "root": "ports/fnv-nx/lib/sha256",
+   "root": "ports/fnv-nx/loader/hdr",
    "output": "INCLUDE"
   }
  ]

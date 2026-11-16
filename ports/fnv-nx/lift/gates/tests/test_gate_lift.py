@@ -2,8 +2,11 @@
 """Tests for verify/gate_lift.py (gates "order", "addr32", "eh", "flags") on tiny REAL product roots built through recipe.py in temp git repos: no double of any
 product symbol. Lifted roots: the lifted C++ unit is the output of a generator step (cxx_origin.lifted_by) that writes a file-scope asm body chosen by a
 tracked input; the runtime unit rt.S defines fnvnx_lift_cpu_bytes; the pack is a content-pinned external fetched from a stand-in of fnv-nx-build
-(ARTIFACTS_URL). Native roots: the pinned guest compiler of verify/guest_compiler.json (fetched; red with the reason when it cannot be).
+(recipe.ARTIFACTS). Native roots: the pinned guest compiler of verify/guest_compiler.json (fetched; red with the reason when it cannot be).
 Plain script: exit 0 on pass, one PASS/FAIL line per case. Needs root (sandbox) and the compilers of verify/env.json."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import atexit
 import copy
 import json
@@ -18,8 +21,8 @@ REAL = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.d
 VERIFY = os.path.join(REAL, "ports", "fnv-nx", "verify")
 sys.path.insert(0, VERIFY)
 sys.path.insert(0, os.path.join(VERIFY, "tests"))
-import cas  # noqa: E402
-import recipe  # noqa: E402
+from verify import cas  # noqa: E402
+from verify import recipe  # noqa: E402
 import test_guest as tg  # noqa: E402
 import test_plugins as tp  # noqa: E402
 from test_plugins import BASE, ROOT, T, check, git, w  # noqa: E402
@@ -109,6 +112,7 @@ def lifted_repo(name, body, pack, ehfacts=None, rts=(RT,), image=True):
 def gate(repo, name, cache):
     out = os.path.join(BASE, "out-%s-%s" % (os.path.basename(repo), name))
     os.makedirs(out, exist_ok=True)
+    recipe.set_artifacts(recipe.ext_dir(cache), recipe.ARTIFACTS)   # the run's repository, beside the cache
     p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "gate_lift.py"), "--gate", name], cwd=repo,
                        env=dict(os.environ, GATE_OUT=out, GATE_CACHE=cache), capture_output=True, text=True)
     f = os.path.join(out, name + ".json")
@@ -175,8 +179,9 @@ def flags_repo(name, code, cache, extra_entries=()):
 
 def main():
     subprocess.run(["git", "init", "-q", "--bare", ART], check=True)
-    os.environ["ARTIFACTS_URL"] = ART
-    cache = os.environ["GATE_CACHE"]      # the verdict's one store (l1.py sets it); no cache of this test's own
+    real_art = recipe.ARTIFACTS
+    recipe.ARTIFACTS = ART
+    cache = os.path.join(BASE, "cache")
     # --- no root of these kinds: universe 0, green, all three gates (a host root with C++ is no item either)
     host = tp.make_repo("host", tp.REC, "native")
     for n in ("order", "addr32", "eh", "flags"):
@@ -230,7 +235,7 @@ def main():
               and "tool" not in str(r.get("uncertified")), (rc, r, o))
     rc, r, o = gate(host, "flags", cache)
     check("flags: no lifted or native guest root: universe 0, green", rc == 0 and r.get("status") == G and r["universe"] == 0, o)
-    os.environ.pop("ARTIFACTS_URL")        # the native cases fetch the pinned compiler from the real artifacts repository
+    recipe.ARTIFACTS = real_art        # the native cases fetch the pinned compiler from the real artifacts repository
     # --- native guest roots: the plugin certificate (fnvnx_order for order, fnvnx_addr for addr32), no build needed to be red
     pin = json.load(open(os.path.join(REAL, T + "verify/guest_compiler.json")))
     rec = tg.guest_rec(pin["external"])

@@ -35,6 +35,12 @@
    "output": "INCLUDE"
   }
  ],
+ "include_uses": [
+  {
+   "root": "ports/fnv-nx/hostabi",
+   "output": "INCLUDE"
+  }
+ ],
  "link": {
   "output": "bootguest.elf",
   "flags": [

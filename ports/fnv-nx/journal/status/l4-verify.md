@@ -479,3 +479,15 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
     - It runs test_bootgpu on the recipe-built libnxgl4.so (the boot machine's GL from the recipe, path plan 2026-11-14), plus test_bootrt and test_boot.
   - Still on cand5 (L1 w28): .gamedata_pins and the shim INCLUDE (d3d9).
 - bottleneck: w10; L2 pin 67164ec5e into cand4 (lift/rt dispatch.c, loader red); L1 cand5; the L3a pack store | 1 worker, no farms
+- 07:15: done: w10 8587e273. The lead branch now takes w10's tree whole: L5 w39 0a3f9b767 (L1 cand4 62474771c, L6 render ce86bbd83) plus L4's own paths. One lineage, no hybrid.
+  - L4 fixes, each by its rule:
+    - verify/hostabirec.py restored (L4's own file, which the fea5bdc34 trunk take had deleted);
+    - the bootguest and icount include_uses for the hostabi INCLUDE;
+    - guest.c on the cand4 host ABI (FNVNX_HCALLN, 153 sites);
+    - the stale copies tests/bootguest/hostapi.h and fnvnx/sockwire.h deleted (rule 3).
+  - recipe.check at 8587e273: valid for tests/bootguest, tests/bootrt, verify/tests/icount, render/gl4, gl4shim, nxgpu and d3d9. boot is red: gen:foreign-import, link/milestones.py imports contract, and the L1 admit row of link lacks imports contract.
+  - render/gl4 built by recipe: libnxgl4.so sha256 134f7d63ceb25aad812d6b58a83046e74551cfef2ab93984e89e66bfdf76e73e. It replaces 7da199c1… because the render line changed to L6's head.
+  - test_bootrt: 7 cases, 0 failed.
+  - test_bootgpu: setup ok, the rest not run. test_boot: not run. Both stop because the tests/bootguest guest-image link is red on lift/rt dispatch.c ENTRY1-CONT (L3a, waiting on L2's 67164ec5e pin into cand4).
+  - w10 archived.
+- bottleneck: lift/rt ENTRY1-CONT (L3a/L2 pin); L1 link admit row; L1 cand5 (.gamedata_pins); the L3a pack store | no workers, no farms
