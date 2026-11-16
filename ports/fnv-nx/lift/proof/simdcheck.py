@@ -12,7 +12,7 @@ import json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.join(HERE, '..')); sys.path.insert(0, HERE)
 import z3
 from fnvlift import dsl
-from proof import bounds, forms, shape, symform, simdspec as S, simdsplit
+from proof import x86sys, bounds, forms, shape, symform, simdspec as S, simdsplit
 REG = ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi']
 
 
@@ -41,7 +41,11 @@ def _obligation(rep, F, sins_ops, imm, rlimit):
     except S.F.Uncertified as ex: return 'uncertified', 'uncertified: ' + str(ex)
     except KeyError: return 'no-row', None
     nf = P['fault'] == 0
-    spec_fault = z3.If(r.fault, z3.BitVecVal(S.AV, 8), z3.BitVecVal(0, 8))
+    sf = r.fault
+    if r.store and e.mem:      # a store through a segment register whose selector names a code descriptor is #GP(0): the SDM condition of sysspec_store (the one rule that proves the Form's code-store fault for every store Form), by the segment of the memory operand
+        import sysspec_store
+        op = sins_ops.operands[j]; sf = z3.Or(sf, sysspec_store.code_cond(x86sys.load(), sysspec_store.segment(sins_ops, op)))
+    spec_fault = z3.If(sf, z3.BitVecVal(S.AV, 8), z3.BitVecVal(0, 8))
     goals = [P['fault'] == spec_fault]
     eq = []
     for i in range(8):
