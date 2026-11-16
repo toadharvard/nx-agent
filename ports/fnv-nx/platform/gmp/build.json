@@ -31,7 +31,7 @@
    "repo": "fnv-nx-build",
    "ref": "tools/gmp",
    "commit": "e666faffef4cca56f9c6a4cf3fb71b2c0199180b",
-   "tree_sha256": "029e9a14d5f75324350a9a99aa896e2396087f27997d279341627132d3ea4583",
+   "tree_sha256": "e16c6dd52fc74c62f57b7a0f0e3c1b5cc3e91642264c4dc427c0f8201d5454f3",
    "at": "/ext/gmp"
   }
  ],
