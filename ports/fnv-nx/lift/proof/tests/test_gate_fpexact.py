@@ -24,7 +24,7 @@ from verify import gate_build  # noqa: E402
 import gate_fpexact as G  # noqa: E402
 from verify import recipe  # noqa: E402
 import test_recipe as TR  # noqa: E402
-from verify import unitstage  # noqa: E402   (the module object recipe.py itself imports: verify is on sys.path)
+unitstage = recipe.unitstage  # the module object recipe.py itself imports (a sibling of its own root, imported bare there)
 
 TMP = tempfile.mkdtemp(prefix="fpexact-")
 FAILED = []
