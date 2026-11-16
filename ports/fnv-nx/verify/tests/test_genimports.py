@@ -14,9 +14,9 @@ import test_link as TL  # noqa: E402
 
 recipe, T, ROOT, check = TR.recipe, TR.T, TR.ROOT, TR.check
 LIB = T + "lib"   # an admitted tool root the generator imports from
-GEN = "import sys\nimport libmod\nopen('/out/gen/o.c', 'w').write('int o;\\n')\n"
+GEN = "import sys\nimport lib.libmod\nopen('/out/gen/o.c', 'w').write('int o;\\n')\n"
 FILES = {"gen/g.py": GEN, "toy/b.c": "int f_b(void) { return 1; }\n"}
-LIBFILES = {"libmod.py": "import libdep\n", "libdep.py": "X = 1\n", "unused.py": "Y = 2\n"}
+LIBFILES = {"libmod.py": "import lib.libdep\n", "libdep.py": "X = 1\n", "unused.py": "Y = 2\n"}
 
 
 def errs(name, imports, gen=GEN, libfiles=LIBFILES, extra=None):
@@ -45,10 +45,20 @@ def main():
     e, _, _ = errs("gi2", [])
     fi = [x for x in e if "gen:foreign-import" in x]
     check("red: the same import with no declaration is a foreign import", len(fi) == 1 and "libmod" in fi[0], e)
+    e, _, _ = errs("gi2b", [LIB], gen="import sys\nimport libmod\nopen('/out/gen/o.c', 'w').write('int o;\\n')\n")
+    fi = [x for x in e if "gen:foreign-import" in x]
+    check("red: the bare name of a module of a declared root, with the qualified name as the hint", len(fi) == 1 and "libmod" in fi[0] and "lib.libmod" in fi[0], e)
+    e, _, _ = errs("gi2c", [LIB], libfiles=dict(LIBFILES, **{"libmod.py": "import libdep\n"}))
+    fi = [x for x in e if "gen:foreign-import" in x]
+    check("red: a file of a declared root imports its sibling bare (the mount has only /imp on the path)", len(fi) == 1 and "libdep" in fi[0] and "lib.libdep" in fi[0], e)
+    e, _, _ = errs("gi2d", [LIB], libfiles=dict(LIBFILES, **{"libmod.py": "from . import libdep\n"}))
+    check("green: a file of a declared root imports its sibling relative", [x for x in e if "gen:foreign-import" in x] == [], e)
+    e, _, _ = errs("gi2e", [LIB], gen="import sys\nfrom lib import libmod\nopen('/out/gen/o.c', 'w').write('int o;\\n')\n")
+    check("green: `from lib import libmod` (a namespace package of the declared root) resolves", [x for x in e if "gen:foreign-import" in x or "gen:unused-import" in x] == [], e)
     e, _, _ = errs("gi3", [LIB], gen="import sys\nopen('/out/gen/o.c', 'w').write('int o;\\n')\n")
     un = [x for x in e if "gen:unused-import" in x]
     check("red: a declared import root that no generator reaches", len(un) == 1 and LIB in un[0], e)
-    e, _, _ = errs("gi7", [LIB], gen="import sys\nopen('/out/gen/o.c', 'w').write('int o;\\n')\n", extra={"gen/h.py": "import libmod\n"})
+    e, _, _ = errs("gi7", [LIB], gen="import sys\nopen('/out/gen/o.c', 'w').write('int o;\\n')\n", extra={"gen/h.py": "import lib.libmod\n"})
     check("green: a root with two tools, only one of which imports the declared root (the declaration is per declaring root)", [x for x in e if "gen:unused-import" in x] == [], e)
     lf = dict(LIBFILES, **{"libmod.py": "import os\nopen(os.path.join(os.path.dirname(__file__), 'data.json'))\n", "data.json": "{}\n", "other.json": "{}\n"})
     e, repo4, roots4 = errs("gi4", [LIB], libfiles=lf)
