@@ -602,6 +602,204 @@
    "citations": []
   }
  ],
+ "types": [
+  {
+   "type": "char",
+   "size": 1,
+   "align": 1,
+   "signed": true,
+   "row": "S01",
+   "citations": [
+    {
+     "page": "docs/cpp/fundamental-types-cpp.md",
+     "line": 34,
+     "quote": "Variables of type **`char`** are promoted to **`int`** as if from type **`signed char`** by default"
+    }
+   ]
+  },
+  {
+   "type": "signed char",
+   "size": 1,
+   "align": 1,
+   "signed": true,
+   "row": "S03",
+   "citations": [
+    {
+     "page": "docs/cpp/fundamental-types-cpp.md",
+     "line": 100,
+     "quote": "**`__int8`** | 1 byte"
+    }
+   ]
+  },
+  {
+   "type": "unsigned char",
+   "size": 1,
+   "align": 1,
+   "signed": false,
+   "row": "S03",
+   "citations": [
+    {
+     "page": "docs/cpp/fundamental-types-cpp.md",
+     "line": 100,
+     "quote": "**`__int8`** | 1 byte"
+    }
+   ]
+  },
+  {
+   "type": "bool",
+   "size": 1,
+   "align": 1,
+   "signed": false,
+   "row": "S03",
+   "citations": [
+    {
+     "page": "docs/cpp/fundamental-types-cpp.md",
+     "line": 100,
+     "quote": "**`__int8`** | 1 byte"
+    }
+   ]
+  },
+  {
+   "type": "short",
+   "size": 2,
+   "align": 2,
+   "signed": true,
+   "row": "S04",
+   "citations": [
+    {
+     "page": "docs/cpp/fundamental-types-cpp.md",
+     "line": 101,
+     "quote": "**`short`**, **`unsigned short`**, **`wchar_t`**, **`__wchar_t`** | 2 bytes"
+    }
+   ]
+  },
+  {
+   "type": "int",
+   "size": 4,
+   "align": 4,
+   "signed": true,
+   "row": "S05",
+   "citations": [
+    {
+     "page": "docs/cpp/fundamental-types-cpp.md",
+     "line": 102,
+     "quote": "**`float`**, **`__int32`**, **`int`**, **`unsigned int`**, **`long`**, **`unsigned long`** | 4 bytes"
+    }
+   ]
+  },
+  {
+   "type": "long",
+   "size": 4,
+   "align": 4,
+   "signed": true,
+   "row": "S05",
+   "citations": [
+    {
+     "page": "docs/cpp/fundamental-types-cpp.md",
+     "line": 102,
+     "quote": "**`float`**, **`__int32`**, **`int`**, **`unsigned int`**, **`long`**, **`unsigned long`** | 4 bytes"
+    }
+   ]
+  },
+  {
+   "type": "long long",
+   "size": 8,
+   "align": 8,
+   "signed": true,
+   "row": "S06",
+   "citations": [
+    {
+     "page": "docs/cpp/fundamental-types-cpp.md",
+     "line": 103,
+     "quote": "**`double`**, **`__int64`**, **`long double`**, **`long long`**, **`unsigned long long`** | 8 bytes"
+    }
+   ]
+  },
+  {
+   "type": "float",
+   "size": 4,
+   "align": 4,
+   "signed": true,
+   "row": "S07",
+   "citations": [
+    {
+     "page": "docs/cpp/fundamental-types-cpp.md",
+     "line": 102,
+     "quote": "**`float`**, **`__int32`**, **`int`**, **`unsigned int`**, **`long`**, **`unsigned long`** | 4 bytes"
+    }
+   ]
+  },
+  {
+   "type": "double",
+   "size": 8,
+   "align": 8,
+   "signed": true,
+   "row": "S08",
+   "citations": [
+    {
+     "page": "docs/cpp/fundamental-types-cpp.md",
+     "line": 103,
+     "quote": "**`double`**, **`__int64`**, **`long double`**, **`long long`**, **`unsigned long long`** | 8 bytes"
+    }
+   ]
+  },
+  {
+   "type": "long double",
+   "size": 8,
+   "align": 8,
+   "signed": true,
+   "row": "S09",
+   "citations": [
+    {
+     "page": "docs/cpp/fundamental-types-cpp.md",
+     "line": 56,
+     "quote": "The representation of **`long double`** and **`double`** is identical. However, **`long double`** and **`double`** are treated as distinct types by the compiler."
+    }
+   ]
+  },
+  {
+   "type": "pointer",
+   "size": 4,
+   "align": 4,
+   "signed": false,
+   "row": "S10",
+   "citations": [
+    {
+     "page": "docs/c-runtime-library/standard-types.md",
+     "line": 55,
+     "quote": "Stores a pointer (or `HANDLE`) on both Win32 and Win64 platforms."
+    }
+   ]
+  },
+  {
+   "type": "enum",
+   "size": 4,
+   "align": 4,
+   "signed": true,
+   "row": "S14",
+   "citations": [
+    {
+     "page": "docs/build/reference/zc-enumtypes.md",
+     "line": 24,
+     "quote": "Previously, such enumeration types always had an underlying type of **`int`** in the Microsoft compiler, regardless of enumerator values."
+    }
+   ]
+  },
+  {
+   "type": "wchar_t",
+   "size": 2,
+   "align": 2,
+   "signed": false,
+   "row": "S02",
+   "citations": [
+    {
+     "page": "docs/build/reference/zc-wchar-t-wchar-t-is-native-type.md",
+     "line": 25,
+     "quote": "Microsoft implements **`wchar_t`** as a two-byte unsigned value"
+    }
+   ]
+  }
+ ],
  "tm": [
   {
    "entry": "ACCUM_TYPE_SIZE",
