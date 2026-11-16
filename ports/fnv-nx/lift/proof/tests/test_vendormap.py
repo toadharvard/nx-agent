@@ -102,7 +102,11 @@ class Pinned(unittest.TestCase):
                 vols.append((pdf, pdf[:-4] + '.txt'))
             f, cells = V.layer(vols)
             txt = vols[0][1]; p = pdfplumber.open(vols[0][0]); t31 = V.table31(txt); fn = V.gating(txt, f); sub = V.subsets(p, txt, fn)
-            S.Table(S.unify([], f, sorted({m for _, tx in vols for m in V.cpuid_mirrors(tx)})))     # the APM rows alone: address -> canonical a function, canonical -> address one-to-one (Table() raises otherwise)
+            recs = S.unify([], f, sorted({m for _, tx in vols for m in V.cpuid_mirrors(tx)}))     # the APM rows alone
+            addr = [(r['leaf'], r['sub'], r['reg'], r['bit']) for r in recs]
+            self.assertEqual(len(addr), len(set(addr)), 'address -> canonical is not a function: an address has two records')
+            canon = [r['canonical'] for r in recs if not r['mirror_of']]      # the only extra addresses of a name are the APM's own `Same as CPUID ...` mirrors
+            self.assertEqual(len(canon), len(set(canon)), 'canonical -> address is not one-to-one: a canonical name labels two addresses')
             got = V.dump(f) + ''.join('cell\t0F%02X\t%s\t%s\n' % (k[0], k[1], v[0]) for k, v in sorted(cells.items())) + ''.join('subset\t%s\t%s\n' % (m, v[0]) for m, v in sorted(sub.items()))
         self.assertEqual(got, open(os.path.join(HERE, 'vendor_cells.tsv')).read())
         self.assertEqual({k[0] for k, v in cells.items() if v[0] == '3DNow'}, {0x0e, 0x0f})            # 0F 0F from Vol. 3 Appendix A (map cell), 0F 0E FEMMS from Vol. 5 (instruction reference); no hand entry
