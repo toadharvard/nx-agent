@@ -1394,3 +1394,9 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - lift/proof/fpchost keeps libfpchost.so and its exports; it is recipe-green. fpcuniverse.py and the HELPERS output are deleted: L3b's lift/proof/helpercalls.py is the one helper universe.
 - No 2^32 compare step, because orchestrator a172a44b7 sets isla for every width. L3b's request for -g in lift/rt is declined: check 0 needs no width under the ruling ("every helpercalls helper is under ASM-329 or rcpcert"), and -g would rekey every product stage downstream.
 - bottleneck: L2's K2 pin; pcsrc red (w7 RULE T).
+
+## 2026-11-16 03:35: base3 d3c287860, 55/55 valid; rcpgen green
+- recipe check over all roots: 55 of 55 valid, with lift/proof/fpchost new. render/gl4 is green (17 objects).
+- rcpgen (L3b farm 4, 8abd1ab02, fresh store): its output is byte-identical to the GENERATED region of lift/rt/rcptab.c. rcptab.c sha256 is d2a3920e…a58f5, equal to the committed file.
+- Red: only lift/rt, contract/facts and lift/disp, on the old K2 pin. L2 was asked to start the farm rebuild.
+- bottleneck: L2's K2 pin; pcsrc red (w7 RULE T).
