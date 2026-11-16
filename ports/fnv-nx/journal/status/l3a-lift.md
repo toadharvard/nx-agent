@@ -1655,3 +1655,16 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - w7: publish shapes/baddecode per image (f5d49d6fa) for L3b's 2,664-key builder split.
 - L3b: the segment-register Forms first.
 - bottleneck: the L2 recipe-path pin and dispatch.c; the w7 universe engine; the handler->Form migration (size from the w8 census); the L5 rows; w12 density.
+
+## 2026-11-16 06:20 — exe on modlift: first numbers
+- w7 (modlift 90b46fee4). The exe decode stage was measured locally; the later stage was OOM-killed at 6.6 GB, so the full run goes to farm 2.
+  - 3,472,413 instructions (3,612,804 before);
+  - 14,856 shape keys (13,532 before);
+  - BADDECODE 140 rows (6 before);
+  - 3,304 gap sites (1,556 before).
+  The growth comes from ~1,400 rooted targets whose bytes are table words.
+- Ruled: no exclusion by table membership. A displacement inside any non-lea memory operand is never a value occurrence; if modlift's X does not exclude it, X is narrower than the rule and gets fixed.
+  - A residue with a real value occurrence (imm, lea or pointer word) stays a may-entry. Its #UD sites are emitted as #UD.
+  - w7 reports the rooting occurrences by kind.
+- w8: the path census, static part at 3fe7ea7ee (16 OPS handlers for 30 mnemonics, 6 shape handlers: segshapes, prefix_only, absent_ext, default, x87, sse). 2 dead registrations are deleted. The 8-image run is on farm 2.
+- bottleneck: the L2 recipe-path pin and dispatch.c; the w7 rooting-occurrence check and exe farm run; the handler->Form migration; the L5 rows; w12 density.
