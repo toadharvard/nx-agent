@@ -52,10 +52,10 @@ Target: Microsoft Visual C++ 2008 (cl 15.00), x86, /Zc:wchar_t, /J off, /Zp8. Pi
 | int | 4 | 4 | yes | S05 |
 | long | 4 | 4 | yes | S05 |
 | long long | 8 | 8 | yes | S06 |
-| float | 4 | 4 | yes | S07 |
-| double | 8 | 8 | yes | S08 |
-| long double | 8 | 8 | yes | S09 |
-| pointer | 4 | 4 | no | S10 |
+| float | 4 | 4 | - | S07 |
+| double | 8 | 8 | - | S08 |
+| long double | 8 | 8 | - | S09 |
+| pointer | 4 | 4 | - | S10 |
 | enum | 4 | 4 | yes | S14 |
 | wchar_t | 2 | 2 | no | S02 |
 

@@ -719,7 +719,6 @@
    "type": "float",
    "size": 4,
    "align": 4,
-   "signed": true,
    "row": "S07",
    "citations": [
     {
@@ -733,7 +732,6 @@
    "type": "double",
    "size": 8,
    "align": 8,
-   "signed": true,
    "row": "S08",
    "citations": [
     {
@@ -747,7 +745,6 @@
    "type": "long double",
    "size": 8,
    "align": 8,
-   "signed": true,
    "row": "S09",
    "citations": [
     {
@@ -761,7 +758,6 @@
    "type": "pointer",
    "size": 4,
    "align": 4,
-   "signed": false,
    "row": "S10",
    "citations": [
     {

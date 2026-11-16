@@ -133,7 +133,7 @@ def datamodel(td, so):
     tu = ['enum E { E0 };', 'template <class T> struct Sg { static const bool v = (T)-1 < (T)0; };']
     for t in doc['types']:
         T = spell.get(t['type'], t['type'])
-        sg = '' if t['type'] == 'pointer' else ' && Sg<%s>::v == %s' % (T, 'true' if t['signed'] else 'false')   # a pointer has no sign to test
+        sg = ' && Sg<%s>::v == %s' % (T, 'true' if t['signed'] else 'false') if 'signed' in t else ''   # only integral entries carry `signed`
         tu.append('static_assert(sizeof(%s) == %d && alignof(%s) == %d%s, "%s");' % (T, t['size'], T, t['align'], sg, t['type']))
     srcp = os.path.join(td, 'types.cpp')
     open(srcp, 'w').write('\n'.join(tu) + '\n')
