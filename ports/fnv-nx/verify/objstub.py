@@ -495,6 +495,131 @@ def is_const_store(w):
         (w >> 24) & 3 == 1 or ((w >> 24) & 3 == 0 and not (w >> 21) & 1 and (w >> 10) & 3 != 2))
 
 
+ADRP_REL = {False: 11, True: 275}   # R_AARCH64_P32_ADR_PREL_PG_HI21 / R_AARCH64_ADR_PREL_PG_HI21
+LDST_REL = {False: frozenset(range(13, 18)), True: frozenset((278, 284, 285, 286, 299))}   # R_AARCH64_(P32_)LDST{8,16,32,64,128}_ABS_LO12_NC (AAELF64)
+
+
+def const_cells(o):
+    """The constant cells of the object O: [(section, start, end, initializer bytes)] of every object with internal linkage (a LOCAL STT_OBJECT
+    symbol of a loaded data section) whose address does not escape the object and whose every store, in every function, writes the value that the
+    cell's static initializer already holds. Such a cell never changes, so a store to it is no effect and a load of it is the initializer.
+    Facts only from the object's own symbols, relocations and instructions. Not constant (the cell is left out):
+      - a relocation to the cell, in any loaded section, of another kind than ADRP page or LDST lo12 in code (an ADD lo12, a data pointer: the
+        address escapes; the cell may be reached by anything, also by a byte of the next cell, so the address one past the end counts too);
+      - an access to the cell that is not a plain load or a plain single-register store of a constant equal to the initializer (a pair, a SIMD
+        store, an atomic, a writeback, an access that leaves the cell, a stored value that is not that constant);
+      - a function that the flow analysis cannot take (unanalysable code that holds a relocation to the cell);
+      - two symbols that overlap partly.
+    Raises nothing for unanalysable code. Memoised in O."""
+    if "cells" in o.__dict__:
+        return o.cells
+    cs = {}
+    for n, v, sz, t, b, shn in o.syms:
+        if t == 1 and b == 0 and sz and 0 < shn < 0xFF00:
+            nm, ty, fl, off, ssz, _, _ = o.secs[shn]
+            if fl & 2 and not fl & 4:
+                cs.setdefault((shn, v, v + sz), [shn, v, v + sz, bytes(sz) if ty == 8 else o.data[off + v:off + v + sz], True])
+    cells = sorted(cs.values(), key=lambda c: (c[0], c[1], c[2]))
+    for x, y in zip(cells, cells[1:]):
+        if x[0] == y[0] and y[1] < x[2]:
+            x[4] = y[4] = False
+    keys = [(c[0], c[1]) for c in cells]
+
+    def find(shn, off):
+        k = bisect.bisect_right(keys, (shn, off)) - 1
+        return cells[k] if k >= 0 and cells[k][0] == shn and cells[k][1] <= off < cells[k][2] else None
+
+    allowed = LDST_REL[o.w64] | {ADRP_REL[o.w64]}
+    if cells:
+        for si, tbl in o.rela.items():
+            fl = o.secs[si][2]
+            if fl & 2:
+                for off, (sidx, t, ad) in tbl.items():
+                    k = o.canon(sidx, ad)
+                    if k[0] == "sec":
+                        if not (fl & 4 and t in allowed):
+                            for c in (find(k[1], k[2]), find(k[1], k[2] - 1)):
+                                if c:
+                                    c[4] = False
+        for si, (sname, stype, sflags, soff, ssize, _, _) in enumerate(o.secs):
+            if not sflags & 4 or stype != 1:
+                continue
+            buf, rel, kind, mkeys, funcs, dec = sec_info(o, si)
+            for a, sz, name in funcs:
+                b = a + sz
+                if not sz or b > ssize or (a % 4 or sz % 4):
+                    continue
+                hits = []
+                for ro, (sidx, t, ad) in rel.items():
+                    k = o.canon(sidx, ad)
+                    if a <= ro < b and k[0] == "sec" and find(k[1], k[2]) and t in allowed:
+                        hits.append((ro, find(k[1], k[2])))
+                if not hits:
+                    continue
+                words = {x: struct.unpack_from("<I", buf, x)[0] for x in range(a, b, 4) if kind(x) != "d"}
+                try:
+                    fl = _flow(words, a, b, rel, o, {x: dec.get(soff + x) for x in words})
+                except Unanalysable:
+                    fl = None
+                if fl is None:
+                    for ro, c in hits:
+                        c[4] = False
+                    continue
+                succ, inf, ins = fl
+                seen = set()
+                for x, (r, w, mem, wb) in inf.items():
+                    if not mem:
+                        continue
+                    base, index, disp, size = mem
+                    rl = rel.get(x)
+                    v = ins[x][base] if base is not None else ("I",)
+                    if rl and rl[1] in LDST_REL[o.w64]:
+                        k = o.canon(rl[0], rl[2])
+                    elif v[0] == "A" and v[1][0] == "sec":
+                        k = (v[1][0], v[1][1], v[1][2] + (disp or 0))
+                    else:
+                        continue
+                    c = k[0] == "sec" and find(k[1], k[2])
+                    if not c:
+                        continue
+                    seen.add(x)
+                    word, ok = words[x], False
+                    if index is None and wb is None and size and k[2] + size <= c[2]:
+                        if is_load(word):
+                            ok = True
+                        elif is_const_store(word):
+                            rt = word & 31
+                            val = ("K", 0) if rt == 31 else ins[x][rt]
+                            ok = val[0] == "K" and (val[1] & ((1 << 8 * size) - 1)).to_bytes(size, "little") == c[3][k[2] - c[1]:k[2] - c[1] + size]
+                    if not ok:
+                        c[4] = False
+                for ro, c in hits:
+                    if ro not in seen and rel[ro][1] in LDST_REL[o.w64]:
+                        c[4] = False
+    o.cells = [tuple(c[:4]) for c in cells if c[4]]
+    o.cell_keys = [(c[0], c[1]) for c in o.cells]
+    return o.cells
+
+
+def const_cell_at(o, w, rl, v, mem):
+    """The constant cell (const_cells) that the memory access of word W (relocation RL or None, base value V, memory operand MEM) lies in, or None."""
+    cells = const_cells(o)
+    base, index, disp, size = mem
+    if not cells or index is not None or not size:
+        return None
+    if rl and rl[1] in LDST_REL[o.w64]:
+        k = o.canon(rl[0], rl[2])
+    elif v[0] == "A" and v[1][0] == "sec" and disp is not None:
+        k = (v[1][0], v[1][1], v[1][2] + disp)
+    else:
+        return None
+    if k[0] != "sec":
+        return None
+    i = bisect.bisect_right(o.cell_keys, (k[1], k[2])) - 1
+    c = cells[i] if i >= 0 else None
+    return c if c and c[0] == k[1] and c[1] <= k[2] and k[2] + size <= c[2] else None
+
+
 def vanalyse(words, a, b, rels, obj, dec, wine=False, loads_ok=False, errno_ok=False):
     """-> {'x0'|'x1'|'v0': None (never written) | ('K',c) | ('A',addr) | ('U',)} if the function is V (no proof of dependence or
     effect), else None. Non-vacuity proofs: cfg() (i, iv), a memory access whose base is not provably the own frame (ii, iii), an
@@ -510,6 +635,8 @@ def vanalyse(words, a, b, rels, obj, dec, wine=False, loads_ok=False, errno_ok=F
         if mem:
             base, index, disp, size = mem
             v = ins[o][base] if base is not None else ("I",)
+            if const_cell_at(obj, words[o], rels.get(o), v, mem):   # a load or an initial-valued store of a constant cell (const_cells): no effect
+                continue
             if loads_ok and is_load(words[o]):
                 continue
             if errno_ok and v == ("N",) and is_const_store(words[o]) and index is None and (words[o] & 31 == 31 or ins[o][words[o] & 31][0] == "K"):
@@ -1344,6 +1471,22 @@ def const_matches(rec, v):
     return x0[0] == "K" and x0[1] & (2 ** (8 * rec["len"]) - 1) == rec["int"]
 
 
+def sec_info(o, si):
+    """(bytes, relocations {offset: (sym, type, addend)}, kind(x) 'x'|'d' at offset x, the mapping-symbol offsets, functions [(offset, size, name)],
+    decoder info {file offset: info}) of the executable section SI of O, computed once per object (the one decoder run over the code islands)."""
+    memo = o.__dict__.setdefault("_sec_info", {})
+    if si not in memo:
+        sname, stype, sflags, soff, ssize, _, _ = o.secs[si]
+        buf, rel = o.data[soff:soff + ssize], o.rela.get(si, {})
+        maps = sorted((s[1], s[0][1:2]) for s in o.syms if s[5] == si and s[3] == 0 and s[0][:2] in ("$x", "$d"))
+        mkeys = [m[0] for m in maps]  # kind(x): "x" code or "d" data at offset x
+        kind = lambda x: maps[bisect.bisect_right(mkeys, x) - 1][1] if bisect.bisect_right(mkeys, x) else "x"
+        funcs = sorted((s[1], s[2], s[0]) for s in o.syms if s[5] == si and s[3] == 2)
+        cuts0 = [0] + [m for m in mkeys if 0 < m < ssize] + [ssize]   # one decoder run over every code island of the section
+        memo[si] = (buf, rel, kind, mkeys, funcs, decode(o.data, [(soff + x, soff + y) for x, y in zip(cuts0, cuts0[1:]) if kind(x) != "d"]))
+    return memo[si]
+
+
 def check_obj(path, terms, os_layer, probe=None, machine=None):
     """-> (items [name], findings [(name, KIND, detail, V result as JSON or None)], extra {"reach": [[function, offset, constant|None]],
     "exit_ok": [function whose every path ends in a BLR tail]}). OS_LAYER: the object may contain SVC (a fact of the recipe). MACHINE: the e_machine
@@ -1372,14 +1515,8 @@ def check_obj(path, terms, os_layer, probe=None, machine=None):
     for si, (sname, stype, sflags, soff, ssize, _, _) in enumerate(o.secs):
         if not sflags & 4 or stype != 1:
             continue
-        buf, rel = o.data[soff:soff + ssize], o.rela.get(si, {})
-        maps = sorted((s[1], s[0][1:2]) for s in o.syms if s[5] == si and s[3] == 0 and s[0][:2] in ("$x", "$d"))
-        mkeys = [m[0] for m in maps]  # kind(x): "x" code or "d" data at offset x
-        kind = lambda x: maps[bisect.bisect_right(mkeys, x) - 1][1] if bisect.bisect_right(mkeys, x) else "x"
-        funcs = sorted((s[1], s[2], s[0]) for s in o.syms if s[5] == si and s[3] == 2)
+        buf, rel, kind, mkeys, funcs, dec = sec_info(o, si)
         fn_at = {fa: fnm for fa, fsz, fnm in funcs}
-        cuts0 = [0] + [m for m in mkeys if 0 < m < ssize] + [ssize]   # one decoder run over every code island of the section
-        dec = decode(o.data, [(soff + x, soff + y) for x, y in zip(cuts0, cuts0[1:]) if kind(x) != "d"])
         thits = sorted((off, sidx) for off, (sidx, t, ad) in rel.items() if sidx in tid)
         rch = {sym: sorted(off for off, (sidx, t, ad) in rel.items() if o.syms[sidx][0] == sym) for sym in (REACH, ASSUME) + CITE}
         tk, cover, last = [t[0] for t in thits], [], None
