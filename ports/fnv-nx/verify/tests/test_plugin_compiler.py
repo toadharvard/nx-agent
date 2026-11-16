@@ -40,7 +40,7 @@ def errs(rec, target, origin="native"):
 
 
 e = errs(dict(host, plugins=[{"name": n} for n in recipe.PLUGIN_SOURCES]), "host")
-check("host compiler declaring plugins is red", any("plugins are bound to the guest compiler" in x for x in e), e)
+check("host compiler declaring plugins is red", any("plugins need a compiler that targets the guest platform" in x for x in e), e)
 e = errs(host, "host")
 check("host native C++ root loads none and needs none", not e, e)
 e = errs(guest, "guest")
@@ -49,4 +49,27 @@ e = errs(dict(guest, plugins=[{"name": n} for n in list(recipe.PLUGIN_SOURCES)[:
 check("guest root without the full set is red", any("does not load plugin" in x for x in e), e)
 m = recipe.check({k: v for k, v in host.items() if k != "compiler"}, ROOT, files, {ROOT: {"path": ROOT, "class": "product", "target": "host", "recipe": ROOT + "/build.json"}}, pin, REAL)
 check("a root with a unit and no compiler is red", any("missing key 'compiler'" in x for x in m), m)
+other = dict(guest, compiler={"external": "stage1", "cc": "prefix/bin/aarch64-none-elf-gcc", "cxx": "prefix/bin/aarch64-none-elf-g++"}, external=[dict(ex, name="stage1")])
+e = errs(other, "guest")
+check("a guest-target external compiler other than the pin loads the full set", not e, e)
+import tempfile  # noqa: E402
+R = [c for c in vars(recipe).values() if isinstance(c, type) and hasattr(c, "plugin_env")][0]
+
+
+def env_err(rec, ext):
+    r = R.__new__(R)
+    r.rec, r.ext, r.root = rec, ext, ROOT
+    try:
+        r.plugin_env(tempfile.mkdtemp())
+    except recipe.BuildRed as x:
+        return " ".join(x.args[0]["stderr"])
+    return ""
+
+
+d = tempfile.mkdtemp()
+os.makedirs(d + "/bin")
+open(d + "/bin/cxx", "w").write("#!/bin/sh\n[ \"$1\" = -dumpmachine ] && echo x86_64-linux-gnu\n")
+os.chmod(d + "/bin/cxx", 0o755)
+check("a compiler whose -dumpmachine is not the guest triplet loads no plugin", "targets 'x86_64-linux-gnu'" in env_err({"compiler": {"external": "h", "cxx": "bin/cxx"}}, {"h": {"host": d, "at": "/ext/h"}}))
+check("a host-driver compiler has no plugin env", "external compiler" in env_err({"compiler": {"cxx": "g++"}}, {}))
 sys.exit(1 if fails else 0)

@@ -2283,14 +2283,14 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant="", repo=".
     cxx = [u for u in units if u.endswith(CXX_EXT)]
     ent = entry_of(roots, root + "@" + variant if variant else root)
     origin = ent.get("cxx_origin")
-    # RULE (L1, 2026-11-16): a GCC plugin is bound to the exact compiler that loads it, and every plugin is built against the guest compiler's plugin headers.
-    # So only a root whose expanded compiler is the guest pin's loads plugins; any other compiler (the host profile, or one named by hand) declaring `plugins` is red.
-    pin = load_pin(repo)
-    gc = (pin or {}).get("external", {}).get("name") if isinstance(pin, dict) else None
+    # RULE (L1, 2026-11-16, rule c): a GCC plugin is built against the plugin headers of the compiler that loads it, and only a compiler that targets the declared guest platform
+    # (targets.json: aarch64-none-elf, ILP32) loads plugins. That target is a fact of the compiler (`-dumpmachine`, read when the plugin stage is built: Recipe.plugin_env),
+    # never its name or path; the host profile (the distribution compiler of env.json, no external) is a host-target compiler, so declaring `plugins` there is red.
+    # A plugin's headers are the loading compiler's own, so their GCC version and plugin ABI equal the compiler's by construction.
     cc_ = rec.get("compiler") if isinstance(rec.get("compiler"), dict) else {}
-    guest_cc = cc_.get("external") == gc
+    guest_cc = "external" in cc_
     if pl and not guest_cc:
-        return err + ["plugins are bound to the guest compiler; root %s's compiler is %s" % (root, cc_.get("external") or "/".join(str(cc_.get(k)) for k in ("cc", "cxx")))]
+        return err + ["plugins need a compiler that targets the guest platform; root %s's compiler is the host driver %s" % (root, "/".join(str(cc_.get(k)) for k in ("cc", "cxx")))]
     # RULE (RECIPE.md "Plugins"): the plugin set and the SDD flags are a function of the target profile, whatever the language or the origin of the code:
     # guest = the full set of PLUGIN_SOURCES with its fixed arguments in the fixed order, host = the empty set. A guest root that misses one is red, and so is a host root that loads one.
     guest = ent.get("target") == "guest"
@@ -3623,19 +3623,22 @@ class Job:
         return out
 
     def plugin_env(self, ws):
-        """The common inputs of every plugin stage: the host driver `PLUGIN_CXX` (derived from env.json), the plugin headers of the GUEST compiler (the external of
-        verify/guest_compiler.json, `cxx -print-file-name=plugin`, whatever root asks: a plugin is bound to the exact compiler that loads it), the tool runtime and the
-        startup files -> dict. A plugin stage's key is f(source content, host compiler, flags, headers); the consuming root's driver is not in it."""
+        """The common inputs of every plugin stage: the host driver `PLUGIN_CXX` (derived from env.json), the plugin headers of the compiler of THIS root
+        (`cxx -print-file-name=plugin` of its external: a plugin is built against the headers of the exact compiler that loads it), the tool runtime and the startup files -> dict.
+        The compiler must target the declared guest platform: its `-dumpmachine` is the triplet of targets.json (a fact of the compiler, not its name). A plugin stage's key is
+        f(source content, host compiler, flags, headers, the loading compiler's tree): two roots with the same compiler share it."""
         host = os.path.join(hostprofile.HOST["bindir"], PLUGIN_CXX)
-        pin = (load_pin(self.repo) or {}).get("external")
-        if not isinstance(pin, dict):
-            raise BuildRed({"stage": "plugin", "exit": None, "stderr": ["%s is missing or has no external" % GUEST_PIN]})
-        if pin["name"] not in self.ext:
-            self.ext.update(fetch_externals([pin], self.store, self.extcache, ws))
-        cxx = self.ext[pin["name"]]["host"] + "/" + pin_drivers()[1]
+        c = self.rec.get("compiler") or {}
+        if "external" not in c or c["external"] not in self.ext:
+            raise BuildRed({"stage": "plugin", "exit": None, "stderr": ["root %s: plugins need an external compiler that targets the guest platform" % self.root]})
+        cxx = self.ext[c["external"]]["host"] + "/" + c["cxx"]
+        want = _targets.load()["guest_platform"]["triplet"]
+        got = subprocess.run([cxx, "-dumpmachine"], capture_output=True, text=True).stdout.strip()
+        if got != want:
+            raise BuildRed({"stage": "plugin", "exit": None, "stderr": ["compiler %s targets %r, not the guest platform %r (targets.json): it loads no plugin" % (cxx, got, want)]})
         pdir = subprocess.run([cxx, "-print-file-name=plugin"], capture_output=True, text=True).stdout.strip()
         if not os.path.isfile(os.path.join(pdir, "include", "gcc-plugin.h")):
-            raise BuildRed({"stage": "plugin", "exit": None, "stderr": ["no plugin headers of %s in %s (the guest compiler's tree)" % (cxx, pdir)]})
+            raise BuildRed({"stage": "plugin", "exit": None, "stderr": ["no plugin headers of %s in %s (the loading compiler's tree)" % (cxx, pdir)]})
         inc, trees = pdir, [pdir]
         for e in self.ext.values():   # headers inside an external compiler: its tree is a declared input at `at` already
             if under(pdir, e["host"]):

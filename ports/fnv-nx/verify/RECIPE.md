@@ -75,11 +75,15 @@ the hash of the stage document + tool code. All paths are root-relative unless m
 The sources of a root are its tracked files minus (1) every file under a root admitted inside it (nearest-root ownership, as `tree_of` resolves a tool file: `verify/probes` inside `verify`, `toolchain/tests` inside `toolchain`) and (2) every plugin source of `PLUGIN_SOURCES` and the files it includes (`plugin_files`): those are inputs of the plugin stage, keyed by it, never translation units of the root that holds them. One function, `recipe.own_sources(root, files, roots, repo)`; the unit list, `check` and the build all read it.
 
 ## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)
-**A plugin is bound to the compiler that loads it, and that compiler is the guest pin's.** Every plugin stage is built against the plugin headers of the guest compiler
-(`verify/guest_compiler.json`), whichever root consumes it; the consuming root's driver is not in its key, so a plugin's key is the same for every consumer. Only a root whose
-expanded compiler is the guest pin's loads plugins: a root with any other compiler (the host profile, or one named by hand) that declares `plugins` is red
-(`plugins are bound to the guest compiler; root R's compiler is X`). The full-set and native-C++ requirements below apply to roots of the guest compiler only; a host native C++ root loads
-no plugin, and no host flag stands for one (the SDD define is a guest root's). A root with a C, C++ or assembly unit and no `compiler` (nor `profile`) is red (`missing key 'compiler'`).
+**A plugin is bound to the compiler that loads it (rule c).** Every plugin stage is built against the plugin headers of the compiler of the root that loads it
+(`cxx -print-file-name=plugin` of that root's external), and that compiler's tree is a declared input of the stage, so it is in the plugin's key: two roots with the same compiler share
+one plugin key, a root with another compiler gets its own. The headers are the loading compiler's own, so their GCC version and plugin ABI equal its by construction.
+A root may load plugins iff its compiler targets the declared guest platform (`targets.json`: aarch64-none-elf, ILP32). That target is a fact of the compiler, its `-dumpmachine`
+output read when the plugin stage is built (`Recipe.plugin_env`; a different value is a red stage), never its name or path. Every such root loads the full set (`PLUGIN_SOURCES`, in order).
+Red: a root whose compiler is the host driver (the host profile, no external) that declares `plugins` (`plugins need a compiler that targets the guest platform; root R's compiler is the host driver X`).
+The full-set and native-C++ requirements below apply to guest-target roots; a host native C++ root loads no plugin, and no host flag stands for one (the SDD define is a guest root's).
+A root with a C, C++ or assembly unit and no `compiler` (nor `profile`) is red (`missing key 'compiler'`). The `toolchain` root (a generated-only root whose run step `rt` builds the guest
+runtime with `stage1`, the msvcmodel compiler) loads the full set built against `stage1`'s headers: that is how the runtime is built with every plugin.
 Selftest: `tests/test_plugin_compiler.py`.
 **The plugin set belongs to the target profile, not to the language.** The guest profile requires the full set (`PLUGIN_SOURCES`, in load order), for C and C++ alike. The host
 profile (`"profile": "host"`) has the empty set, and a host root is required to load none: the plugins enforce guest-ABI semantics (msvcmodel, x86 TSO as `ldar`/`stlr`, MSVC
@@ -99,8 +103,8 @@ root's `plugins` is `{"name": PLUGIN}` and nothing else, in the order of `PLUGIN
 `PLUGIN_SOURCES` is an error. So a change of an input of a plugin (for example `f2i_builtins.inc` of `fnvnx_ftoi`) changes the key of every root that loads it and no build.json needs editing. The host driver under `/usr/bin` that builds
 them is `recipe.PLUGIN_CXX`, DERIVED from env.json (the one pinned package `g++-N-x86-64-linux-gnu` provides `x86_64-linux-gnu-g++-N`; the bare `g++-N` prints no path for `as`/`ld`), the GCC version of `compiler.cxx`. A `plugin_cxx` in a build.json is red: no hand-typed compiler name.
 - Stage `plugin:<name>` (sandbox, class build): `recipe.PLUGIN_CXX -shared -nostdlib -fPIC -fno-rtti -fno-exceptions -O2 -I<compiler.cxx -print-file-name=plugin>/include
-  crti.o crtbeginS.o SOURCE crtendS.o crtn.o`. Declared inputs: the driver's tool runtime, the plugin headers of the GUEST compiler
-  (the external of guest_compiler.json: `cxx -print-file-name=plugin` of its tree, whatever root asks), the source, crti.o/crtn.o of libc6-dev. Key = content of these + driver + flags, like every stage.
+  crti.o crtbeginS.o SOURCE crtendS.o crtn.o`. Declared inputs: the driver's tool runtime, the plugin headers of the loading root's compiler
+  (`cxx -print-file-name=plugin` of its external's tree), the source, crti.o/crtn.o of libc6-dev. Key = content of these + driver + flags, like every stage.
   The `.so` is stored in `GATE_CACHE/store`, copied to `OUT/plugins/<name>.so`, listed in `objects.json` (`plugins`: name, sha256, path).
   It is linked against no library (symbols come from the compiler that loads it; `-fno-exceptions` because `_Unwind_Resume` is not exported by cc1plus).
 - CC stage of every C++ unit (only C++: C and assembler units load nothing): the `.so` of each plugin is a declared input at `/plug/<name>`,
