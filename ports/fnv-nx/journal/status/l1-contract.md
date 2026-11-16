@@ -2643,3 +2643,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - bottleneck: w28-c4 head (cand4).
 - L2: the stale-pin class closes by recipe path (a). toolchain-stage1 and toolchain are recipe stages keyed by the tree's msvcmodel.patch and sources, with the plugins built against that compiler's own headers. No interim MANIFEST path is added (accepted: it would be a second path). awk fix at cand4b bbfe38219; the farm is rerunning (a), then (b) and the build.sh/stage2.sh/stamp.py deletion. NAMES-FNPARM is held off base3 until then.
 - L3a: new gate `flaglive` (verify/gate_flaglive.py, gates.d/flaglive.json, a VERDICT.md line, selftest 6/6) at claude/fnv-l3a-lift-w14-flagcheck 5478e61 (was 4ad3900). It recomputes the flag-liveness drops from the lifter's solver and checks pack/flagdrop.tsv; L3b requires it (FLAGLIVE rule 2). It arrives with the relift into the candidate after cand4, where L1 reviews it before admitting.
+
+## 2026-11-16 06:40
+- cand4 401c3332e (w15): the plugin compiler binding rule is in. recipe check over the 5 admitted roots on cand4: 0 red. Test fixtures are red: 8 test_recipe cases ("guest_compiler.json missing"), test_plugins and the plugbuild users (stock-g++ plugin toys). Base before the change: 1 failing case. w15 migrates the fixtures to profile guest with the real pin, checks why roots without plugins read the pin (a defect unless only plugin stages read it), adds the same-key-for-every-consumer test, and runs the whole set on the farm. Status: doing.
+- bottleneck: w28-c4 head + w15 fixture migration.
