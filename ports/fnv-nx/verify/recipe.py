@@ -1463,8 +1463,8 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
     for i, g in enumerate(rs):
         tool = isinstance(g, dict) and "exec" in g   # a tool step: runs a program of the declared debs in their root layout (RECIPE.md "Tool steps")
         base = {"name", "args", "inputs", "debs", "outputs"} | ({"exec"} if tool else {"artifact"})
-        if not (isinstance(g, dict) and base <= set(g) <= base | {"host_cpu"} | ({"dirs", "scratch", "timeout_s"} if tool else set())):
-            err.append("run[%d] needs name, args, inputs, debs, outputs and exactly one of artifact | exec (and optionally host_cpu; a tool step also dirs, scratch, timeout_s)" % i)
+        if not (isinstance(g, dict) and base <= set(g) <= base | {"host_cpu"} | ({"dirs", "scratch", "timeout_s", "env"} if tool else set())):
+            err.append("run[%d] needs name, args, inputs, debs, outputs and exactly one of artifact | exec (and optionally host_cpu; a tool step also dirs, scratch, env)" % i)
             continue
         if "host_cpu" in g and not (g["host_cpu"] == "cpuref" and TREE + "/verify/cpuref.json" in files):
             err.append('run[%d].host_cpu must be "cpuref", with the tracked pin file %s/verify/cpuref.json' % (i, TREE))
@@ -1475,14 +1475,26 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
         ar, _, ao = a.partition(":") if isinstance(a, str) and not tool else ("", "", "")
         if tool:
             sc = g.get("scratch", [])
-            if not (isinstance(a, str) and a.startswith("/") and posixpath.normpath(a) == a):
-                err.append("run[%d].exec %r must be an absolute path of a program in the declared debs" % (i, a))
+            ex_ext = isinstance(a, dict) and set(a) == {"external", "path"} and all(isinstance(v, str) for v in a.values())
+            ex_root = isinstance(a, dict) and set(a) == {"root", "output"} and all(isinstance(v, str) for v in a.values())
+            if ex_ext:   # a file of a pinned external, mounted at /exec/<name> (RECIPE.md "A tool that is not a deb binary")
+                if a["external"] not in {x.get("name") for x in rec.get("external", []) if isinstance(x, dict)} or not rel_ok(a["path"]):
+                    err.append("run[%d].exec %r must name an external of this recipe and a path inside its tree" % (i, a))
+            elif ex_root:   # the output of a built root this root `uses`: the same resolution as the uses mount
+                if not any(isinstance(u, dict) and u.get("root") == a["root"] and u.get("output") == a["output"] for u in rec.get("uses", [])):
+                    err.append("run[%d].exec %r must be a root and output this recipe `uses`" % (i, a))
+            elif not (isinstance(a, str) and a.startswith("/") and posixpath.normpath(a) == a):
+                err.append("run[%d].exec %r must be an absolute path of a program in the declared debs, {external, path} or {root, output}" % (i, a))
+            if "timeout_s" in g:
+                err.append("run[%d].timeout_s is nondeterministic (a time limit decides red or green): bound the work with args" % i)
+            if "env" in g and not (isinstance(g["env"], dict) and all(isinstance(k, str) and re.fullmatch(r"[A-Z][A-Z0-9_]*", k) and isinstance(v, str) and k not in ("PATH", "TZ", "LC_ALL", "SOURCE_DATE_EPOCH", "FNVNX_DEBS", "JOBS") for k, v in g["env"].items())):
+                err.append("run[%d].env must map plain names to constant strings (not PATH, TZ, LC_ALL, SOURCE_DATE_EPOCH, FNVNX_DEBS, JOBS)" % i)
+            elif isinstance(g.get("env"), dict) and not all(isinstance(v, str) and (not v.startswith("/") or any(under(v, p) for p in (sc if isinstance(sc, list) else []))) for v in g["env"].values()):
+                err.append("run[%d].env: a path value must lie under a scratch directory of the step" % i)
             if not (isinstance(sc, list) and all(isinstance(p, str) and p.startswith("/") and posixpath.normpath(p) == p and p != "/"
                                                  and not any(under(p, r) or under(r, p) for r in ("/in", "/out", "/proc", "/dev", "/tmp", "/usr", "/etc", "/var", "/bin", "/lib", "/sbin"))
                                                  for p in sc)):
                 err.append("run[%d].scratch must be absolute paths of fresh directories (not /in, /out, /proc, /dev, /tmp or a system directory)" % i)
-            if "timeout_s" in g and not (isinstance(g["timeout_s"], int) and not isinstance(g["timeout_s"], bool) and g["timeout_s"] > 0):
-                err.append("run[%d].timeout_s must be a positive integer" % i)
             dd = g.get("dirs", [])
             if not (isinstance(dd, list) and all(rel_ok(d) for d in dd)):
                 err.append("run[%d].dirs must be root-relative directory paths" % i)
@@ -2693,7 +2705,23 @@ class Job:
                 ins.append({"at": "/deb/" + d, "tree": self._deb_tree(tmp, d, pk[d])})
         env = {"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "PATH": "/usr/bin:/bin" if tool else "/deb",
                "FNVNX_DEBS": ";".join("%s=%s" % (d, pk[d]["sha256"]) for d in sorted(g["debs"]))}   # the deb sha256s are in the key
-        argv = [g["exec"]] + g["args"] if tool else ["/art/" + aout] + g["args"]
+        env.update(g.get("env", {}))   # constant strings (check); the sandbox has no network namespace route, so nothing is fetched
+        xs = g["exec"] if tool else None
+        if isinstance(xs, dict):   # {external, path} | {root, output}: the tool file is a stage input (in the key by content), mounted executable at /exec/<name>
+            if "external" in xs:
+                host, _ = resolve_input(self.root, xs, self.repo, os.path.dirname(self.store), self.rec)
+                base = os.path.basename(xs["path"])
+            else:
+                at = "/uses/%s/%s" % (xs["root"], xs["output"])
+                host = os.path.join(tmp, "xroot")
+                cas.materialize(next(t["tree"] for t in self.use_inputs(ws) if t["at"] == at), self.store, host)
+                base = xs["output"]
+            bad = exec_unresolved(host, tmp, g["debs"])
+            if bad:
+                raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["exec-unresolved:%s: %s needs it and the declared debs do not provide it" % (b, base) for b in bad]})
+            ins.append({"at": "/exec", "tree": self._one_file(tmp, "exec", host, base)})
+            xs = "/exec/" + base
+        argv = [xs] + g["args"] if tool else ["/art/" + aout] + g["args"]
         interp = None if tool else elf_interp(r["elf"]["path"])
         if interp:   # started through the file at its PT_INTERP path inside a declared deb (the deb's own symlinks followed; no alias is relied on)
             home = deb_resolve(interp, tmp, g["debs"])
@@ -2708,7 +2736,7 @@ class Job:
         doc = {"format": "fnvnx-stage/1", "stage": "run:%s:%s" % (self.root, g["name"]), "class": "build", "tool": "run", "cwd": "/work",
                "argv": argv, "env": env, "inputs": sorted(ins, key=lambda x: x["at"]), "outputs": ["/out"], "ro_root": True}
         if tool:   # the declared debs' root layout: top-level symlinks are links, scratch is a tmpfs; the job count and the time limit are outside the key
-            doc.update(links=rootfs, scratch=list(g.get("scratch", [])), unkeyed={"env": {"JOBS": str(self.jobs)}, "timeout": g.get("timeout_s", 7200)})
+            doc.update(links=rootfs, scratch=list(g.get("scratch", [])), unkeyed={"env": {"JOBS": str(self.jobs)}, "timeout": 7200})
             if not doc["links"]:
                 del doc["links"]
             if not doc["scratch"]:
@@ -3683,6 +3711,43 @@ def elf_interp(path):
                 f.seek(po)
                 return f.read(fsz).rstrip(b"\0").decode()
     return None
+
+
+def elf_dyn(path):
+    """(PT_INTERP or None, [DT_NEEDED names], [DT_RPATH/DT_RUNPATH entries]) of an ELF64 file, read from its program headers and dynamic section (not ldd:
+    nothing is executed); None when the file is not an ELF64."""
+    with open(path, "rb") as f:
+        d = f.read()
+    if d[:4] != b"\x7fELF" or d[4] != 2:
+        return None
+    off, esz, n = struct.unpack_from("<Q", d, 32)[0], struct.unpack_from("<H", d, 54)[0], struct.unpack_from("<H", d, 56)[0]
+    ph = [struct.unpack_from("<IIQQQQ", d, off + i * esz) for i in range(n)]
+    cstr = lambda o: d[o:d.index(b"\0", o)].decode()   # noqa: E731
+    interp = next((cstr(po) for t, _, po, _, _, _ in ph if t == 3), None)
+    dyn = next((x for x in ph if x[0] == 2), None)
+    if dyn is None:
+        return interp, [], []
+    ents = [struct.unpack_from("<qQ", d, dyn[2] + k) for k in range(0, dyn[5], 16)]
+    strtab = next((v for t, v in ents if t == 5), None)
+    if strtab is None:
+        return interp, [], []
+    fo = next((po + strtab - va for t, _, po, va, _, fsz in ph if t == 1 and va <= strtab < va + fsz), None)
+    if fo is None:
+        return interp, [], []
+    return interp, [cstr(fo + v) for t, v in ents if t == 1], [x for t, v in ents if t in (15, 29) for x in cstr(fo + v).split(":") if x]
+
+
+def exec_unresolved(path, tmp, debs):
+    """The DT_NEEDED names and the interpreter of the ELF at PATH that the root layout of DEBS does not provide (deb_resolve over <tmp>/deb-<name>): the
+    loader's default directories and the file's absolute RPATH/RUNPATH entries are searched; an entry that is not absolute ($ORIGIN) finds nothing, because the
+    step mounts one file. A tool that is not an ELF64 (a script) has nothing to resolve. -> sorted names, each "interp:<path>" or the library name."""
+    dyn = elf_dyn(path)
+    if dyn is None:
+        return []
+    interp, need, rp = dyn
+    dirs = [x for x in rp if x.startswith("/")] + ["/lib/x86_64-linux-gnu", "/usr/lib/x86_64-linux-gnu", "/lib64", "/usr/lib64", "/lib", "/usr/lib"]
+    bad = ["interp:" + interp] if interp and not deb_resolve(interp, tmp, debs) else []
+    return sorted(bad + [n for n in need if not any(deb_resolve(posixpath.join(x, n), tmp, debs) for x in dirs)])
 
 
 def stage_output(root, ref, repo, cache):
