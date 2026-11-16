@@ -1844,3 +1844,6 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - Selftests universe defect (owner L1, sent): a hand-written directory list leaves 45 test files outside it, 13 of them red. Produced inputs can't be mounted.
   - Rules sent: the universe is derived from admit.json; a test input may be a stage output. w8 does the _inputs side once L1's change lands.
 - The lifter-inputs fix: d854aa57e on the 4 density heads, eb739d9ef on the relift (pushed), a907bc501 for base3.
+- relift @4a4a97aeb (w13): on base3 e88bc001b; 78 tests green, 6 red (5 lack recipe inputs, 1 is gate_lift's toy plugin build). Next: re-merge onto base3 6d67261ef (doing, w13).
+- base3 @6d67261ef (w8): recipe check 64 roots valid, 0 red; assumptions 152/152; lift tests 60/73, the 13 reds all lacking inputs.
+- recipe.py expand_foreach is not idempotent on a build-time foreach, reproduced on shapeprove, so the check verdict depends on the caller. Owner L1, sent with the repro and the projection rule.
