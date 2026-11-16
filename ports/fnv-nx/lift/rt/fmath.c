@@ -1,8 +1,9 @@
-/* fmath: correctly rounded x87 transcendentals and exact fprem/fprem1/fscale/fxtract (README "One reference CPU model", R8), and the msvcrt math library (acos asin atan cosh sinh tanh exp log pow, exact fmod sqrt).
-   Freestanding C (no libc, libm, malloc, errno, FPU instruction): doubles are only moved as bit patterns, every computation is integer arithmetic, so the
-   host rounding mode and FPSR are irrelevant. Builds natively (x86-64, for test/fmathtest.py) and as aarch64 ILP32.
+/* fmath: the x87 transcendentals over CORE-MATH (cr_*: sin cos tan atan2 2^x-1 log2 log2p1; the rule and the flags are at "the x87 transcendentals over CORE-MATH" below), exact
+   fprem/fprem1/fscale/fxtract (README "One reference CPU model", R8), and the msvcrt math library (acos asin atan cosh sinh tanh exp log pow, exact fmod sqrt).
+   The integer engine below (no libc, libm, malloc, errno, FPU instruction: doubles are only moved as bit patterns) serves the msvcrt functions only; the CORE-MATH wrappers
+   use the host FP environment through the asm of hfp_* only. Native-only for the integer engine: x86-64 (test/fmathtest.py); the wrappers are aarch64 ILP32.
 
-   RULE (one engine for sin cos tan atan2 2^x-1 y*log2(x) y*log2(x+1)): ZIV'S STRATEGY on multi-precision binary floats.
+   RULE (one engine for the msvcrt functions acos asin atan cosh sinh tanh exp log pow): ZIV'S STRATEGY on multi-precision binary floats.
      1. Special operands (zeros, infinities, NaN, out of domain) and the EXPLICITLY ENUMERATED EXACT CASES are decided before the loop by the x87 table / by
         exact integer arithmetic (listed per function below).
      2. For every other input the true value v is irrational (even transcendental: Lindemann-Weierstrass for sin/cos/tan/2^x-1 of a non-zero algebraic,
@@ -21,15 +22,6 @@
      recorded: n <= 2^15 limbs (4 MiB of mantissa), which no double input approaches (hard cases need ~ 200 bits).
    WIDE ARGUMENT STEPS are done in a second context cw with more limbs so that they are exact or carry an explicit absolute bound.
    PER FUNCTION (exact cases handled before the loop / evaluator and its error budget):
-     sin cos tan: x = 0, |x| < 2^-27 (sin, tan -> x; cos -> 1: proved at fnvl_m_sin) and non-finite operands by the table; else |x| = k pi/2 + r with the exact
-       integer k and pi/2 to 32 nw bits (nw = n + e_x/32 + 5, so the absolute error of r is <= 2^(-32n-63) for EVERY finite x, whatever |x|; r.e from the computed r
-       gives the relative error, r = 0 -> retry); sin/cos series of r (|r| < 1, no cancellation), tan = sin/cos; quadrant from k mod 4.
-     atan2: zeros / infinities (+-0, +-pi, +-pi/2, +-pi/4, +-3pi/4 by the SDM table, pi from the engine); else z = min/max in (0,1], j = round(8z), atan z = atan(j/8) +
-       atan(w) with w formed from EXACT numerator 8P - jQ and denominator 8Q + jP (cw holds every bit of a double), |w| <= 1/16 + 2^-30.
-     2^x - 1: x = 0, +-inf, x >= 1024 (inf), integer x >= 64 (2^x - 1 rounds to 2^x), x < -60 (-1), integer -60 <= x < 64 (exact bf of 2^x - 1, no series); else
-       2^k expm1(f ln 2) + (2^k - 1), k = nearest integer, f = x - k exact.
-     y log2(x), y log2(x+1): the table of FYL2X / FYL2XP1 for zero / infinite / NaN / out-of-domain operands and x = 1 (or x = +-0); u = x or 1 + x is formed EXACTLY in cw
-       (every bit between 2^-1074 and 2^1025 fits in 72 limbs), u = 2^k w, z = w - 1 exact; u a power of two (z = 0) gives y k exactly; else ln w = 2 atanh(z/(2+z)).
    MSVCRT LIBRARY FUNCTIONS (the 15 _CI* intrinsics, rt/msvcrt_ci.cc): acos asin atan cosh sinh tanh exp log pow by the same engine (start limb count n >= 2), fmod and sqrt exact. Same rule, same steps 1-3.
      Irrationality (step 2): for a non-zero algebraic x, e^x (Hermite-Lindemann) and so exp, sinh, cosh, tanh (sinh x = s algebraic gives e^x a root of E^2 - 2 s E - 1, cosh and tanh likewise) are transcendental;
        ln x for algebraic x > 0, x != 1 is transcendental (e^(ln x) = x algebraic); asin, acos, atan: sin / cos / tan of a non-zero algebraic number is transcendental, and tan(atan x) = x, sin(asin x) = x, cos(acos x) = x
@@ -38,7 +30,7 @@
      Out-of-range and tiny arguments are decided by proved bounds, never by sampling: sin-like |x| < 2^-27: atan x, tanh x in (x (1 - x^2/3), x) and asin x, sinh x in (x, x (1 + x^2/3)) round to x (x^2/3 < 2^-55 is below
        the half-spacing 2^-54 |x| of the nearer neighbour); cosh |x| < 2^-26: 1 < cosh x < 1 + 2^-53, rounds to 1 (below the half-way point); exp: 0 < x < 2^-54: 1 < e^x < 1 + 2^-53 -> 1; -2^-55 < x < 0: 1 - 2^-55 < e^x < 1 -> 1
        (above the half-way point 1 - 2^-54); x >= 710: e^x > 2^1024 -> inf; x <= -746: e^x < 2^-1076 -> +0; sinh / cosh |x| >= 711 > asinh(2^1024) = 710.4758: inf; tanh |x| >= 20: 1 - |tanh x| < 2 e^-40 < 2^-54: rounds to 1.
-     atan: atan x = atan2(x, 1) of the existing evaluator. asin / acos (ev_asin, ev_acos): asin |x| = atan(|x| / sqrt((1 - |x|)(1 + |x|))), acos x = 2 atan(sqrt((1 - x)/(1 + x))), asin(+-1) = +-pi/2, acos(-1) = pi; the
+     atan: atan x = atan2(x, 1) by fnvl_m_atan2 (CORE-MATH cr_atan2). asin / acos (ev_asin, ev_acos): asin |x| = atan(|x| / sqrt((1 - |x|)(1 + |x|))), acos x = 2 atan(sqrt((1 - x)/(1 + x))), asin(+-1) = +-pi/2, acos(-1) = pi; the
        bf_sqrt (Newton from a 32-bit integer square root, fixed iteration count, relative error <= 2^(4-32n)) and atan_core (pi/2 - atan(1/z) for z >= 1, atan(j/8) + atan(w), j = round(8 z), |w| <= 1/16 + d otherwise) carry
        the error budget derived at each function: B = 32 n - GUARD(n) - 12, worst measured error / budget ~ 2e-10.
      exp sinh cosh tanh (ev_hyp): X = |x| (tanh: 2|x|), k = round(X / ln 2) and R = X - k ln 2 in a context with n + 4 limbs (abs error <= 2^(-32n-51), then 2^(1-32n) from the truncation to n limbs), e^R by the series expm1;
@@ -207,11 +199,6 @@ static void bf_floor(cx *c, bf *r, const bf *a) {
     if (p >= 32) { r->m[i] = 0; p -= 32; } else { r->m[i] &= ~((1u << p) - 1); p = 0; }
   }
 }
-static u32 bf_intbit(const bf *a, int i, int n) {   /* bit i of the integer part of a (a integer valued, a.e >= 1) */
-  int pos = 32 * n - a->e + i;
-  if (a->z || pos < 0 || pos >= 32 * n) return 0;
-  return (a->m[pos >> 5] >> (pos & 31)) & 1;
-}
 static u32 bf_small(const bf *a, int n) {         /* integer valued a < 2^32 */
   if (a->z || a->e <= 0) return 0;
   return a->m[n - 1] >> (32 - a->e);
@@ -313,22 +300,6 @@ static void ser_atan_c(cx *c, bf *out, u32 j) {
     bf_mulu(c, &t, &t, 2 * m); bf_mulu(c, &t, &t, j * j); bf_divu(c, &t, &t, 2 * m + 1); bf_divu(c, &t, &t, 64 + j * j);
     if (t.z || t.e < sum.e - 32 * n - 4) break;
     bf_add(c, &sum, &sum, &t);
-  }
-  bf_cpy(c, out, &sum); c->p = mk;
-}
-/* sin r (cs = 0) and cos r (cs = 1), |r| < 1: sums of alternating decreasing terms, sum >= 0.54 (cos) / 0.84 |r| (sin): no cancellation beyond 2 bits */
-static void ser_sincos(cx *c, bf *out, const bf *r, int cs) {
-  u32 *mk = c->p; int n = c->n;
-  bf r2 = bnew(c), t = bnew(c), sum = bnew(c);
-  bf_mul(c, &r2, r, r);
-  if (cs) { bf_u64(c, &t, 1, 0, 0); } else bf_cpy(c, &t, r);
-  bf_cpy(c, &sum, &t);
-  for (u32 k = 1;; k++) {
-    bf_mul(c, &t, &t, &r2);
-    u32 a = cs ? 2 * k - 1 : 2 * k, b = cs ? 2 * k : 2 * k + 1;
-    bf_divu(c, &t, &t, a); bf_divu(c, &t, &t, b);
-    if (t.z || t.e < sum.e - 32 * n - 4) break;
-    if (k & 1) bf_sub(c, &sum, &sum, &t); else bf_add(c, &sum, &sum, &t);
   }
   bf_cpy(c, out, &sum); c->p = mk;
 }
@@ -435,172 +406,10 @@ static void unpack(u64 a, u64 *mant, int *e2) {
 }
 
 /* ================= evaluators ================= */
-enum { W_SIN, W_COS, W_TAN, W_2XM1, W_YL2X, W_YL2XP1, W_ATAN2, W_PIQ, W_ACOS, W_ASIN, W_EXP, W_SINH, W_COSH, W_TANH, W_LOG, W_POW };
+enum { W_ACOS, W_ASIN, W_EXP, W_SINH, W_COSH, W_TANH, W_LOG, W_POW };
 typedef struct { double x, y; int w; int q; } za;
 
-/* pi/2 into out (n limbs of context c) */
-static void bf_pi2(cx *c, bf *out) { bf_pi(c, out); out->e -= 1; }
 
-/* sin/cos/tan of x (finite, nonzero). Reduction: |x| = k pi/2 + r with the exact integer k = floor(|x|/(pi/2) + 1/2) taken from an approximation (any
-   k with |r| < 1 serves: |r| <= pi/4 + 2^-90). In cw (nw limbs, 32 nw >= 32 n + e_x + 129; e_x: |x| < 2^e_x): pi/2 has relative error <= 2^(64-32nw), the product
-   k pi/2 absolute error <= 2^(e_x+1) 2^(64-32 nw) <= 2^(-32n-64), the subtraction adds 2^(e_x+1-32nw) <= 2^(-32n-128): so |r_computed - r| <= 2^(-32n-63) and
-   the relative error of r is <= 2^-(32n+62+r.e) (r.e <= 0: |r| < 2^r.e). Evaluating the odd/even series on r keeps relative error (cond(sin r)<=1, cond(cos r)<=0.7). */
-static int ev_trig(cx *c, cx *cw, const za *a, bf *A, int *B) {
-  int n = c->n, nw = cw->n;
-  u64 u = d2u(a->x), mant; int e2, sx = (int)(u >> 63);
-  unpack(u, &mant, &e2);
-  u32 *mk = c->p, *mkw = cw->p;
-  bf R = bnew(c); int br; int q = 0;
-  bf Xm = bnew(c); bf_u64(c, &Xm, mant, e2, 0);
-  if (Xm.e <= 0) { bf_cpy(c, &R, &Xm); br = 32 * n; }
-  else {
-    bf X = bnew(cw), pi2 = bnew(cw), Z = bnew(cw), H = bnew(cw), K = bnew(cw), P = bnew(cw), Rw = bnew(cw), half = bnew(cw);
-    bf_u64(cw, &X, mant, e2, 0); bf_pi2(cw, &pi2);
-    bf_div(cw, &Z, &X, &pi2);
-    bf_u64(cw, &half, 1, -1, 0); bf_add(cw, &H, &Z, &half); bf_floor(cw, &K, &H);
-    q = (int)(bf_intbit(&K, 0, nw) | (bf_intbit(&K, 1, nw) << 1));
-    bf_mul(cw, &P, &K, &pi2); bf_sub(cw, &Rw, &X, &P);
-    if (Rw.z) { c->p = mk; cw->p = mkw; return 0; }
-    br = 32 * n + 62 + Rw.e;
-    bf_conv(c, nw, &R, &Rw);
-    cw->p = mkw;
-  }
-  if (br > 32 * n - GUARD(n)) br = 32 * n - GUARD(n);
-  if (br < 16) { c->p = mk; return 0; }
-  bf S = bnew(c), C = bnew(c);
-  int ws = a->w, neg;
-  int needs = (ws == W_SIN) ? !(q & 1) : (ws == W_COS) ? (q & 1) : 1, needc = (ws == W_SIN) ? (q & 1) : (ws == W_COS) ? !(q & 1) : 1;
-  if (needs) ser_sincos(c, &S, &R, 0);
-  if (needc) ser_sincos(c, &C, &R, 1);
-  if (ws == W_TAN) {
-    if (q & 1) { bf_div(c, A, &C, &S); neg = 1; } else { bf_div(c, A, &S, &C); neg = 0; }
-    neg ^= sx;
-    *B = br - 10;
-  } else {
-    int useS = (ws == W_SIN) ? !(q & 1) : (q & 1);
-    bf_cpy(c, A, useS ? &S : &C);
-    /* sin|x| = [S, C, -S, -C][q]; cos|x| = [C, -S, -C, S][q] */
-    neg = (ws == W_SIN) ? (q >= 2) ^ sx : (q == 1 || q == 2);
-    *B = br - 8;
-  }
-  if (!A->z) A->s ^= neg;
-  c->p = mk; /* keep A and R? A is allocated by the caller */
-  return 1;
-}
-
-/* 2^x - 1 for non-integer x in (-60, 1024) or integer -60 <= x < 64. 2^x - 1 = 2^k expm1(f ln2) + (2^k - 1), k = nearest integer, |f| <= 1/2 */
-static int ev_exp(cx *c, cx *cw, const za *a, bf *A, int *B) {
-  (void)cw;
-  u64 u = d2u(a->x), mant; int e2, sx = (int)(u >> 63);
-  unpack(u, &mant, &e2);
-  s64 ip, fnum; int fe = e2;
-  if (e2 >= 0) { ip = (s64)(mant << e2); fnum = 0; }
-  else {
-    int s = -e2;
-    if (s >= 64) { ip = 0; fnum = (s64)mant; }
-    else {
-      u64 ipu = mant >> s, fr = mant & ((1ull << s) - 1), half = 1ull << (s - 1);
-      if (fr > half || (fr == half && (ipu & 1))) ipu++;
-      ip = (s64)ipu; fnum = (s64)mant - (s64)(ipu << s);
-    }
-  }
-  int k = sx ? -(int)ip : (int)ip;
-  u32 *mk = c->p;
-  bf P2 = bnew(c), one = bnew(c), W = bnew(c);
-  bf_u64(c, &P2, 1, k, 0); bf_u64(c, &one, 1, 0, 1);
-  if (k) bf_add(c, &W, &P2, &one); else bzero_(&W);
-  if (!fnum) { bf_cpy(c, A, &W); c->p = mk; return 2; }                 /* integer x: 2^k - 1 exactly (n >= 6 limbs hold 64 bits) */
-  bf F = bnew(c), T = bnew(c), L2 = bnew(c), S = bnew(c);
-  bf_u64(c, &F, (u64)(fnum < 0 ? -fnum : fnum), fe, (fnum < 0) ^ sx);
-  bf_ln2(c, &L2); bf_mul(c, &T, &F, &L2);
-  ser_expm1(c, &S, &T);
-  S.e += k;
-  bf_add(c, A, &S, &W);
-  *B = 32 * c->n - GUARD(c->n) - 8;
-  c->p = mk;
-  return 1;
-}
-
-/* y log2(u), u = x (W_YL2X, x > 0) or 1 + x (W_YL2XP1, x > -1), y finite non-zero, u not 1. U = u is formed EXACTLY in cw (70+ limbs hold every bit
-   between 2^-1074 and 2^1025). u = 2^k w, w in [3/4, 3/2); z = w - 1 = (U - 2^k)/2^k exact in cw. ln w = 2 atanh(z/(2+z)), |z/(2+z)| <= 1/5. log2 u = k + ln w/ln 2:
-   |k + ln w/ln2| >= 0.4 for k != 0, so the cancellation costs <= 2 bits. u a power of two <=> z = 0: result y k, exactly (<= 64 bits). */
-static int ev_log(cx *c, cx *cw, const za *a, bf *A, int *B) {
-  u64 ux = d2u(a->x), mx, uy = d2u(a->y), my; int ex, ey;
-  unpack(ux, &mx, &ex); unpack(uy, &my, &ey);
-  u32 *mk = c->p, *mkw = cw->p;
-  bf U = bnew(cw), P2 = bnew(cw), N = bnew(cw), one = bnew(cw);
-  bf_u64(cw, &U, mx, ex, (int)(ux >> 63));
-  if (a->w == W_YL2XP1) { bf_u64(cw, &one, 1, 0, 0); bf_add(cw, &U, &U, &one); }
-  int k = U.e - 1;
-  if ((U.m[cw->n - 1] >> 30) == 3) k = U.e;
-  bf_u64(cw, &P2, 1, k, 0);
-  bf_sub(cw, &N, &U, &P2);
-  bf Y = bnew(c), Kb = bnew(c);
-  bf_u64(c, &Y, my, ey, (int)(uy >> 63));
-  bf_u64(c, &Kb, (u64)(k < 0 ? -k : k), 0, k < 0);
-  if (N.z) { bf_mul(c, A, &Y, &Kb); cw->p = mkw; c->p = mk; return 2; }
-  bf Z = bnew(c), D = bnew(c), Sx = bnew(c), Lw = bnew(c), L2 = bnew(c), Q = bnew(c), V = bnew(c), two = bnew(c);
-  N.e -= k;
-  bf_conv(c, cw->n, &Z, &N);
-  bf_u64(c, &two, 1, 1, 0); bf_add(c, &D, &Z, &two); bf_div(c, &Sx, &Z, &D);
-  ser_atanh2(c, &Lw, &Sx);
-  bf_ln2(c, &L2); bf_div(c, &Q, &Lw, &L2);
-  bf_add(c, &V, &Kb, &Q);
-  bf_mul(c, A, &Y, &V);
-  *B = 32 * c->n - GUARD(c->n) - 12;
-  cw->p = mkw; c->p = mk;
-  return 1;
-}
-
-/* atan2(y, x) of finite non-zero y, x. a = |y|, b = |x|; P/Q = min/max, z = P/Q in (0,1]; j = round(8 z) in 0..8, c = j/8,
-   atan z = atan c + atan w, w = (z - c)/(1 + z c) = (8P - jQ)/(8Q + jP): numerator and denominator are formed EXACTLY in cw (jQ: Q has 53 significant bits).
-   |w| <= 1/16 + 2^-30. atan c: Euler series (j < 8), pi/4 (j = 8), 0 (j = 0). If |y| > |x| the angle is pi/2 - atan(x/y). x < 0: pi - angle. The sign is that of y. */
-static int ev_atan(cx *c, cx *cw, const za *a, bf *A, int *B) {
-  u64 ux = d2u(a->x), mx, uy = d2u(a->y), my; int ex, ey;
-  unpack(ux, &mx, &ex); unpack(uy, &my, &ey);
-  u32 *mk = c->p, *mkw = cw->p;
-  bf ya = bnew(cw), xa = bnew(cw);
-  bf_u64(cw, &ya, my, ey, 0); bf_u64(cw, &xa, mx, ex, 0);
-  int swap = cmpmag(&ya, &xa, cw->n) > 0;
-  const bf *Pw = swap ? &xa : &ya, *Qw = swap ? &ya : &xa;
-  bf Pm = bnew(c), Qm = bnew(c), Zm = bnew(c), t8 = bnew(c), half = bnew(c), Hm = bnew(c), Jf = bnew(c);
-  bf_conv(c, cw->n, &Pm, Pw); bf_conv(c, cw->n, &Qm, Qw);
-  bf_div(c, &Zm, &Pm, &Qm);
-  t8 = Zm; t8.e += 3;
-  bf_u64(c, &half, 1, -1, 0); bf_add(c, &Hm, &t8, &half); bf_floor(c, &Jf, &Hm);
-  u32 j = bf_small(&Jf, c->n);
-  if (j > 8) j = 8;
-  bf Nj = bnew(cw), P8 = bnew(cw), Q8 = bnew(cw), Num = bnew(cw), Den = bnew(cw), Jp = bnew(cw);
-  bf_mulu(cw, &Nj, Qw, j); P8 = *Pw; P8.e += 3;
-  bf_sub(cw, &Num, &P8, &Nj);
-  Q8 = *Qw; Q8.e += 3; bf_mulu(cw, &Jp, Pw, j); bf_add(cw, &Den, &Q8, &Jp);
-  bf Wn = bnew(c), Wd = bnew(c), Wv = bnew(c), Ac = bnew(c), Aw = bnew(c), Th = bnew(c), pi = bnew(c), pi2 = bnew(c);
-  bf_conv(c, cw->n, &Wn, &Num); bf_conv(c, cw->n, &Wd, &Den);
-  bf_div(c, &Wv, &Wn, &Wd);
-  bf_pi(c, &pi); pi2 = pi; pi2.e -= 1;
-  if (j == 0) bzero_(&Ac); else if (j == 8) { Ac = pi; Ac.e -= 2; } else ser_atan_c(c, &Ac, j);
-  if (Wv.z) bzero_(&Aw); else ser_atan(c, &Aw, &Wv);
-  bf_add(c, &Th, &Ac, &Aw);
-  if (swap) { bf T2 = bnew(c); bf_sub(c, &T2, &pi2, &Th); Th = T2; }
-  if (ux >> 63) { bf T3 = bnew(c); bf_sub(c, &T3, &pi, &Th); Th = T3; }
-  bf_cpy(c, A, &Th); if (!A->z) A->s = (int)(uy >> 63);
-  *B = 32 * c->n - GUARD(c->n) - 12;
-  cw->p = mkw; c->p = mk;
-  return 1;
-}
-/* q pi / 4 (q = 1..4) with the sign of y (the infinite / zero operand cases of fpatan) */
-static int ev_piq(cx *c, cx *cw, const za *a, bf *A, int *B) {
-  (void)cw;
-  u32 *mk = c->p;
-  bf pi = bnew(c), t = bnew(c);
-  bf_pi(c, &pi);
-  if (a->q == 3) { bf_mulu(c, &t, &pi, 3); t.e -= 2; } else { t = pi; t.e -= (a->q == 1) ? 2 : (a->q == 2) ? 1 : 0; }
-  bf_cpy(c, A, &t);
-  A->s = (int)(d2u(a->y) >> 63);
-  *B = 32 * c->n - GUARD(c->n) - 4;
-  c->p = mk;
-  return 1;
-}
 
 /* ================= msvcrt library functions: evaluators (acos asin atan cosh sinh tanh exp log pow) ================= */
 /* floor(sqrt(v)) */
@@ -750,7 +559,7 @@ static int ev_hyp(cx *c, cx *cw, const za *a, bf *A, int *B) {
 /* ln |x| for a finite double x, |x| != 1 into *L (n limbs): |x| = M 2^e2 with M in [2^52, 2^53) normalised; |x| = 2^k w with w in [3/4, 3/2) (k = floor(log2|x|) or one more), z = w - 1 = N 2^-s
    (N = M - 2^s, s = 52 or 53) is an exact small integer times a power of two, ln w = 2 atanh(z / (2 + z)), |z/(2+z)| <= 1/5; ln|x| = k ln 2 + ln w. For k != 0, |ln|x|| >= ln 2 - ln(4/3) >= 0.4 against
    |k ln 2| <= 0.7 |k|... (k = -1: w < 3/2 so ln|x| <= -0.28; the sum k ln2 + ln w has |.| >= 0.28 and the terms <= 0.7 |k|, k = 1: >= 0.40; larger |k|: ln w is below 0.41, the sum is >= 0.28 |k|): cancellation <= 2.5 bits.
-   N = 0 (|x| a power of two, k != 0): ln|x| = k ln 2. Relative error <= 2^-(32 n - GUARD(n) - 12) (the existing ev_log budget). */
+   N = 0 (|x| a power of two, k != 0): ln|x| = k ln 2. Relative error <= 2^-(32 n - GUARD(n) - 12). */
 static void ln_core(cx *c, u64 ux, bf *L) {
   int n = c->n; (void)n;
   u64 mant; int e2; unpack(ux & ~SGNM, &mant, &e2);
@@ -859,10 +668,8 @@ void (*fm_hook)(int n, const u32 *m, int e, int s, int z, int B, int r);
 #define FM_NSTART 4
 #endif
 static double ziv(int w, double x, double y, int q, u32 *fl) {
-  u64 ux = d2u(x);
-  int ex = (int)((ux >> 52) & 0x7ff) - 1022, exx = ex > 0 ? ex : 0;
   for (int n = FM_NSTART;; n *= 2) {
-    int nw = (w <= W_TAN) ? n + (exx >> 5) + 5 : (w >= W_ACOS) ? n + 4 : 72;
+    int nw = n + 4;
     u32 arena[48 * n + 24 * nw];
 #ifdef FM_DEBUG
     for (int i = 0; i < 48 * n + 24 * nw; i++) arena[i] = 0x9e3779b9u * (u32)(i + 1);
@@ -871,16 +678,11 @@ static double ziv(int w, double x, double y, int q, u32 *fl) {
     za a; a.x = x; a.y = y; a.w = w; a.q = q;
     bf A = bnew(&c); int B = 0, r;
     switch (w) {
-    case W_SIN: case W_COS: case W_TAN: r = ev_trig(&c, &cw, &a, &A, &B); break;
-    case W_2XM1: r = ev_exp(&c, &cw, &a, &A, &B); break;
-    case W_YL2X: case W_YL2XP1: r = ev_log(&c, &cw, &a, &A, &B); break;
-    case W_ATAN2: r = ev_atan(&c, &cw, &a, &A, &B); break;
     case W_ACOS: r = ev_acos(&c, &cw, &a, &A, &B); break;
     case W_ASIN: r = ev_asin(&c, &cw, &a, &A, &B); break;
     case W_EXP: case W_SINH: case W_COSH: case W_TANH: r = ev_hyp(&c, &cw, &a, &A, &B); break;
     case W_LOG: r = ev_ln(&c, &cw, &a, &A, &B); break;
     case W_POW: r = ev_pow(&c, &cw, &a, &A, &B); break;
-    default: r = ev_piq(&c, &cw, &a, &A, &B); break;
     }
 #ifdef FM_DEBUG
     if (fm_hook) fm_hook(n, A.m, A.e, A.s, A.z, B, r);
@@ -890,100 +692,130 @@ static double ziv(int w, double x, double y, int q, u32 *fl) {
   }
 }
 
-/* ================= public: trigonometry ================= */
+/* ================= public: the x87 transcendentals over CORE-MATH ================= */
+/* RULE (README "One reference CPU model"; CLAUDE.md orchestrator decision 2026-11-16 05:50Z; ASM OWNER 8 and 10). x87_<fn> is the correctly rounded binary64 value CR(fn) of the
+   true function; the implementation is the pinned library CORE-MATH (cr_*, built by the runtime root with the game's compiler, taken by its documentation: OWNER 10). The
+   table is: sin cos tan atan2 -> cr_sin cr_cos cr_tan cr_atan2, 2^x - 1 -> cr_exp2m1, y log2(x) = y * cr_log2(x), y log2(x + 1) = y * cr_log2p1(x) (a binary64 multiply).
+   Everything around the call is the x87 table of the SDM: NaN operands, the zero / infinite / domain rows (below, unchanged), the exception bits and C1.
+   cr_* return a double only, correct in every rounding mode, and raise the HOST flags. So each call runs in a private host FP environment: FPCR RMode = nearest, FZ and the trap
+   enables clear; the calls repeated toward zero give the truncated value; FPCR and FPSR are restored afterwards (the instruction's own flags live in *fl, never in the host FPSR).
+   FLAGS (derived, no engine): inexact = the result is not the true value. For these functions that is decided by the arguments alone: sin cos tan are irrational at every
+   non-zero rational x (Lindemann), atan2 of non-zero finite operands is irrational and its zero results are the exact rows, 2^x - 1 is exact exactly at the integers |x| <= 53
+   (2^x is irrational at every other rational x and 2^x - 1 needs 54 bits beyond 53), log2(u) is exact exactly when u is a power of two (else irrational, u rational), and the
+   product y l is exact exactly when l is exact and the fused error fma(y, l, -p) is 0. PE = inexact; OE with PE = the result is infinite from finite operands; UE with PE = the
+   inexact result is below the smallest normal; C1 = inexact and |RN result| > |result computed toward zero| (the rounded-up bit; the toward-zero composition is the same calls
+   and product with the host mode RZ). Reads: IEEE 754 5.3, SDM vol. 1 ch. 8.5. Host FP instructions only through the asm below, so their order against the FPCR writes is the order
+   of the volatile statements. */
+#define FPCR_CLR ((0x3ull << 22) | (1ull << 24) | 0x9f00ull)     /* RMode, FZ, the trap enables IOE..IXE IDE */
+typedef struct { u64 cr, sr; } hfp;
+static inline u64 rd_fpcr(void) { u64 v; __asm__ volatile("mrs %0, fpcr" : "=r"(v)); return v; }
+static inline void wr_fpcr(u64 v) { __asm__ volatile("msr fpcr, %0" :: "r"(v) : "memory"); }
+static inline u64 rd_fpsr(void) { u64 v; __asm__ volatile("mrs %0, fpsr" : "=r"(v)); return v; }
+static inline void wr_fpsr(u64 v) { __asm__ volatile("msr fpsr, %0" :: "r"(v) : "memory"); }
+static inline hfp hfp_enter(void) { hfp s; s.cr = rd_fpcr(); s.sr = rd_fpsr(); wr_fpcr(s.cr & ~FPCR_CLR); return s; }      /* nearest */
+static inline void hfp_rm(const hfp *s, u64 rm) { wr_fpcr((s->cr & ~FPCR_CLR) | (rm << 22)); }                              /* 0 nearest, 3 toward zero */
+static inline void hfp_leave(const hfp *s) { wr_fpcr(s->cr); wr_fpsr(s->sr); }
+static inline double d_mul(double a, double b) { double r; __asm__ volatile("fmul %d0, %d1, %d2" : "=w"(r) : "w"(a), "w"(b)); return r; }
+static inline double d_add(double a, double b) { double r; __asm__ volatile("fadd %d0, %d1, %d2" : "=w"(r) : "w"(a), "w"(b)); return r; }
+static inline double d_sub(double a, double b) { double r; __asm__ volatile("fsub %d0, %d1, %d2" : "=w"(r) : "w"(a), "w"(b)); return r; }
+static inline double d_fma(double a, double b, double c) { double r; __asm__ volatile("fmadd %d0, %d1, %d2, %d3" : "=w"(r) : "w"(a), "w"(b), "w"(c)); return r; }   /* a b + c, one rounding */
+static inline u64 mag(double d) { return d2u(d) & ~SGNM; }
+/* the flags of an inexact result: rn nearest, rz toward zero */
+static double fin_inexact(double rn, double rz, u32 *fl) {
+  u64 a = mag(rn);
+  *fl |= PE;
+  if (a == EXPM) *fl |= OE; else if (mag(rz) < 0x0010000000000000ull) *fl |= UE;     /* tiny before rounding: the true value lies between rz and the next double up, which is <= 2^-1022 */
+  if (a > mag(rz)) *fl |= C1;
+  return rn;
+}
+/* x power of two (finite, non-zero): one bit set in the significand integer */
+static int is_pow2(u64 a) { u64 m; int e2; unpack(a, &m, &e2); return !(m & (m - 1)); }
+
 u32 fnvl_m_trig_big(double x) { u64 f = (d2u(x) >> 52) & 0x7ff; return f >= 1023 + 63 && f != 0x7ff; }
-/* sin x, tan x for |x| < 2^-27 round to x: sin x in (x(1 - x^2/6), x), tan x in (x, x(1 + x^2/3)), and x^2/3 < 2^-55 < the half spacing/x of the neighbour
-   on that side (>= 2^-54 relative); cos x in (1 - 2^-55, 1) rounds to 1 (spacing below 1 is 2^-53). */
-static double small_arg(double x, u64 a, u32 up, u32 *fl) { *fl |= PE | (up ? C1 : 0) | (a < 0x0010000000000000ull + up ? UE : 0); return x; }   /* sin: |true| < |x| (rounded up, tiny up to 2^-1022 itself); tan: |true| > |x| */
-double fnvl_m_sin(double x, u32 *fl) {
-  u64 a = d2u(x) & ~SGNM;
-  if (a > EXPM) return nan1(x, fl);
-  if (a == EXPM) return invalid(fl);
-  if (!a) return x;
-  if (a < 0x3e40000000000000ull) return small_arg(x, a, 1, fl);
-  return ziv(W_SIN, x, 0.0, 0, fl);
-}
-double fnvl_m_tan(double x, u32 *fl) {
-  u64 a = d2u(x) & ~SGNM;
-  if (a > EXPM) return nan1(x, fl);
-  if (a == EXPM) return invalid(fl);
-  if (!a) return x;
-  if (a < 0x3e40000000000000ull) return small_arg(x, a, 0, fl);
-  return ziv(W_TAN, x, 0.0, 0, fl);
-}
-double fnvl_m_cos(double x, u32 *fl) {
-  u64 a = d2u(x) & ~SGNM;
-  if (a > EXPM) return nan1(x, fl);
-  if (a == EXPM) return invalid(fl);
-  if (!a) return 1.0;
-  if (a < 0x3e40000000000000ull) { *fl |= PE | C1; return u2d(0x3ff0000000000000ull); }
-  return ziv(W_COS, x, 0.0, 0, fl);
-}
-void fnvl_m_sincos(double x, double *s, double *cs, u32 *fl) { *s = fnvl_m_sin(x, fl); *cs = fnvl_m_cos(x, fl); }
 
-/* ================= public: atan2 ================= */
-/* x87 FPATAN table: the results of zero / infinite operands are 0 and multiples of pi/4, the others come from the engine */
-double fnvl_m_atan2(double y, double x, u32 *fl) {
-  u64 uy = d2u(y), ux = d2u(x), sy = uy & SGNM;
-  if (isnan_(uy) || isnan_(ux)) return nan2(y, x, fl);
-  int q;                                                    /* result = sign(y) q pi/4, q = 0 -> +-0 */
-  int xneg = (int)(ux >> 63);
-  if (iszero_(uy)) q = xneg ? 4 : 0;
-  else if (iszero_(ux)) q = 2;
-  else if (isinf_(uy)) q = isinf_(ux) ? (xneg ? 3 : 1) : 2;
-  else if (isinf_(ux)) q = xneg ? 4 : 0;
-  else return ziv(W_ATAN2, x, y, 0, fl);
-  if (!q) return u2d(sy);
-  return ziv(W_PIQ, x, y, q, fl);
-}
-
-/* ================= public: 2^x - 1 ================= */
-double fnvl_m_2xm1(double x, u32 *fl) {
+/* sin cos tan 2^x - 1 (k = FMK_cr_*) */
+double fnvl_m_cr1(double (*cr)(double), u32 k, double x, u32 *fl) {
   u64 u = d2u(x), a = u & ~SGNM;
+  int exact = 0;
   if (a > EXPM) return nan1(x, fl);
-  if (!a) return x;
-  if (a == EXPM) return (u >> 63) ? u2d(0xBFF0000000000000ull) : x;     /* 2^-inf - 1 = -1, 2^inf - 1 = +inf */
-  if (!(u >> 63) && a >= 0x4090000000000000ull) { *fl |= OE | PE | C1; return u2d(EXPM); }                /* x >= 1024: >= 2^1024 - 1, past the half-way point to infinity */
-  if (!(u >> 63) && a >= 0x4050000000000000ull) {                      /* x >= 64: integer: 2^x - 1 rounds to 2^x (1 < half the spacing 2^(x-54)); else the engine */
-    u64 mant; int e2; unpack(a, &mant, &e2);
-    if (e2 >= 0 || !(mant & ((1ull << -e2) - 1))) { int k = (int)(e2 >= 0 ? (mant << e2) : (mant >> -e2)); *fl |= PE | C1; return u2d((u64)(k + 1023) << 52); }
+  if (k == FMK_cr_exp2m1) {
+    if (!a) return x;
+    if (a == EXPM) return (u >> 63) ? u2d(0xBFF0000000000000ull) : x;            /* 2^-inf - 1 = -1, 2^inf - 1 = +inf */
+    if (a >= 0x3ff0000000000000ull && a <= 0x404a800000000000ull) { u64 m; int e2; unpack(a, &m, &e2); exact = e2 >= 0 || !(m & ((1ull << -e2) - 1)); }   /* integer 1 <= |x| <= 53 */
+  } else {
+    if (a == EXPM) return invalid(fl);
+    if (!a) return k == FMK_cr_cos ? 1.0 : x;                                       /* sin 0 = 0, tan 0 = 0 (sign of x), cos 0 = 1 */
   }
-  if ((u >> 63) && a > 0x404e000000000000ull) { *fl |= PE | C1; return u2d(0xBFF0000000000000ull); }   /* x < -60: -1 + 2^x rounds to -1 (2^x < 2^-60 < 2^-54) */
-  return ziv(W_2XM1, x, 0.0, 0, fl);
+  hfp s = hfp_enter();
+  double rn = cr(x);
+  hfp_rm(&s, 3);
+  double rz = cr(x);
+  hfp_leave(&s);
+  return exact ? rn : fin_inexact(rn, rz, fl);
 }
+double fnvl_m_sin(double x, u32 *fl) { return fnvl_m_cr1(cr_sin, FMK_cr_sin, x, fl); }
+double fnvl_m_cos(double x, u32 *fl) { return fnvl_m_cr1(cr_cos, FMK_cr_cos, x, fl); }
+double fnvl_m_tan(double x, u32 *fl) { return fnvl_m_cr1(cr_tan, FMK_cr_tan, x, fl); }
 
-/* ================= public: y log2(x), y log2(x+1) ================= */
-/* x87 FYL2X / FYL2XP1 tables as y * log2(u) with log2(1) = +0, log2(0) = -inf (divide by zero when y is finite), log2(+inf) = +inf, u < 0 invalid; the
-   sign of a zero log2(1+x) is that of x (as in the FYL2XP1 table) */
+/* fpatan: atan2(y = ST(1), x = ST(0)). The zero / infinite operand rows are the C99 Annex F values cr_atan2 returns, the same as the x87 table (0 and multiples of pi/4);
+   exact exactly when the result is a true +-0: y = +-0 with x not negative, or x = +inf with y finite */
+double fnvl_m_cr2(double (*cr)(double, double), double y, double x, u32 *fl) {
+  u64 uy = d2u(y), ux = d2u(x);
+  if (isnan_(uy) || isnan_(ux)) return nan2(y, x, fl);
+  int xneg = (int)(ux >> 63);
+  int exact = !xneg && (iszero_(uy) || (isinf_(ux) && !isinf_(uy)));
+  hfp s = hfp_enter();
+  double rn = cr(y, x);
+  hfp_rm(&s, 3);
+  double rz = cr(y, x);
+  hfp_leave(&s);
+  return exact ? rn : fin_inexact(rn, rz, fl);
+}
+double fnvl_m_atan2(double y, double x, u32 *fl) { return fnvl_m_cr2(cr_atan2, y, x, fl); }
+
+/* fyl2x / fyl2xp1: y * log2(u), u = x or 1 + x. The zero / infinite / domain rows are the x87 tables as before (ylog_common); log2(1) = +0; the rest is the multiply */
 static double ylog_common(u64 uy, int lsgn, int linf, u32 *fl) {
   u64 sg = ((uy >> 63) ^ (u64)lsgn) ? SGNM : 0;
   if (linf) return iszero_(uy) ? invalid(fl) : u2d(sg | EXPM);        /* y * (+-inf) */
   return isinf_(uy) ? invalid(fl) : u2d(sg);                          /* y * (+-0) */
 }
-double fnvl_m_yl2x(double y, double x, u32 *fl) {
-  u64 uy = d2u(y), ux = d2u(x);
+double fnvl_m_crl(double (*cr)(double), u32 k, double y, double x, u32 *fl) {
+  u64 uy = d2u(y), ux = d2u(x), ax = ux & ~SGNM;
+  int p1 = k == FMK_cr_log2p1;
   if (isnan_(uy) || isnan_(ux)) return nan2(y, x, fl);
   int xn = (int)(ux >> 63);
-  if (!iszero_(ux) && xn) return invalid(fl);                     /* x < 0 incl. -inf */
-  if (iszero_(ux)) { double r = ylog_common(uy, 1, 1, fl); if (!isinf_(uy) && !iszero_(uy)) *fl |= ZE; return r; }
-  if (isinf_(ux)) return ylog_common(uy, 0, 1, fl);
-  if (ux == 0x3ff0000000000000ull) return ylog_common(uy, 0, 0, fl);   /* x = 1 */
-  int lneg = (ux >> 52) < 0x3ff;                                  /* x < 1 */
+  int lneg, lexact;
+  if (!p1) {
+    if (!iszero_(ux) && xn) return invalid(fl);                       /* x < 0 incl. -inf */
+    if (iszero_(ux)) { double r = ylog_common(uy, 1, 1, fl); if (!isinf_(uy) && !iszero_(uy)) *fl |= ZE; return r; }
+    if (isinf_(ux)) return ylog_common(uy, 0, 1, fl);
+    if (ux == 0x3ff0000000000000ull) return ylog_common(uy, 0, 0, fl);   /* x = 1 */
+    lneg = (ux >> 52) < 0x3ff;                                        /* x < 1 */
+    lexact = is_pow2(ax);
+  } else {
+    if (isinf_(ux)) return xn ? invalid(fl) : ylog_common(uy, 0, 1, fl);
+    if (iszero_(ux)) return ylog_common(uy, xn, 0, fl);               /* log2(1 + +-0) = +-0 */
+    if (xn && ax > 0x3ff0000000000000ull) return invalid(fl);         /* x < -1 */
+    if (xn && ax == 0x3ff0000000000000ull) { double r = ylog_common(uy, 1, 1, fl); if (!isinf_(uy) && !iszero_(uy)) *fl |= ZE; return r; }
+    lneg = xn;
+    hfp t = hfp_enter();                                              /* 1 + x exactly: TwoSum(x, 1) = s + e; a power of two iff e = 0 and s has one bit */
+    double s1 = d_add(x, 1.0), bb = d_sub(s1, x), e1 = d_add(d_sub(x, d_sub(s1, bb)), d_sub(1.0, bb));
+    hfp_leave(&t);
+    lexact = d2u(e1) << 1 == 0 && is_pow2(mag(s1));
+  }
   if (isinf_(uy)) return ylog_common(uy, lneg, 1, fl);
   if (iszero_(uy)) return ylog_common(uy, lneg, 0, fl);
-  return ziv(W_YL2X, x, y, 0, fl);
-}
-double fnvl_m_yl2xp1(double y, double x, u32 *fl) {
-  u64 uy = d2u(y), ux = d2u(x), ax = ux & ~SGNM;
-  if (isnan_(uy) || isnan_(ux)) return nan2(y, x, fl);
-  int xn = (int)(ux >> 63);
-  if (isinf_(ux)) return xn ? invalid(fl) : ylog_common(uy, 0, 1, fl);
-  if (iszero_(ux)) return ylog_common(uy, xn, 0, fl);       /* log2(1 + +-0) = +-0 */
-  if (xn && ax > 0x3ff0000000000000ull) return invalid(fl);        /* x < -1 */
-  if (xn && ax == 0x3ff0000000000000ull) { double r = ylog_common(uy, 1, 1, fl); if (!isinf_(uy) && !iszero_(uy)) *fl |= ZE; return r; }
-  if (isinf_(uy)) return ylog_common(uy, xn, 1, fl);
-  if (iszero_(uy)) return ylog_common(uy, xn, 0, fl);
-  return ziv(W_YL2XP1, x, y, 0, fl);
+  hfp s = hfp_enter();
+  double ln = cr(x);                                                  /* log2(u), nearest */
+  double pn = d_mul(y, ln);
+  double pe = d_fma(y, ln, -pn);                                      /* the multiply's error, exact (finite non-zero p; see below) */
+  hfp_rm(&s, 3);
+  double lz = cr(x);
+  double pz = d_mul(y, lz);
+  hfp_leave(&s);
+  int pfin = mag(pn) != EXPM && mag(pn) != 0;                         /* overflow / underflow to 0: the error term is not the multiply's error, the result is inexact anyway */
+  int exact = lexact && pfin && !(d2u(pe) << 1);
+  return exact ? pn : fin_inexact(pn, pz, fl);
 }
 
 /* ================= public: fscale ================= */
@@ -1071,6 +903,8 @@ double fnvl_m_fprem(double a, double b, u32 near, u32 *cf, u32 *fl) {
 /* ================= public: msvcrt math library (acos asin atan cosh sinh tanh exp log pow fmod sqrt) ================= */
 /* C99 Annex F values (what msvcrt / Wine's libm return), decided before the loop; the results of the engine are correctly rounded. NaN operand: the quiet NaN (IE for a signalling one). Invalid: the default NaN
    (0xFFF8...). The rounding of the "tiny argument" rules is proved at each function. */
+/* sin-like tiny arguments of the msvcrt functions: |x| < 2^-27 rounds to x (proved at the use sites) */
+static double small_arg(double x, u64 a, u32 up, u32 *fl) { *fl |= PE | (up ? C1 : 0) | (a < 0x0010000000000000ull + up ? UE : 0); return x; }   /* sin: |true| < |x| (rounded up, tiny up to 2^-1022 itself); tan: |true| > |x| */
 double fnvl_m_atan(double x, u32 *fl) {
   u64 u = d2u(x), a = u & ~SGNM;
   if (a > EXPM) return nan1(x, fl);
