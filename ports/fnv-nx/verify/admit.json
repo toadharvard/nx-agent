@@ -639,6 +639,13 @@
     "ports/fnv-nx/render/d3d9",
     "ports/fnv-nx/render/shaders/translator"
    ]
+  },
+  {
+   "path": "ports/fnv-nx/lift/proof/shapeprove",
+   "class": "tool",
+   "target": "host",
+   "entry": [],
+   "recipe": "ports/fnv-nx/lift/proof/shapeprove/build.json"
   }
  ]
 }
