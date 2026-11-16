@@ -468,3 +468,7 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - L5 w37 session_01KmtZKR12EG3iYb37nQn9sQ is making the trunk-based head with hostabi in the trunk schema (for the gl4 link).
   - L1: the shim INCLUDE comes in cand4 (2872f3ac8).
 - bottleneck: one render head (L6/L6A); L5 w37; L1 cand4; the L3a post-cand3 pack store | no workers, no farms
+- 06:15: decision: L4 takes the next owner heads together, once L1 cand4 (w28) is named, in one merge. Taking them before cand4 would turn green L4 roots red and gain nothing.
+  - The heads: L5 w37 c90e09e (platform 3x112 objects, hostabi, sha256, rt/guest_main green, all on the trunk) and L6's single render head (L6A's gl4link2 is retired).
+  - Both are blocked only on cand4: nxgpu delta recipes (w28 8666fb756), wine_fixme row 25, the shim INCLUDE (2872f3ac8), and .gamedata_pins.
+- bottleneck: L1 cand4; the L3a post-cand3 pack store | no workers, no farms
