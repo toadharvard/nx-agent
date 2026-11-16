@@ -119,7 +119,7 @@ def fetch(doc, cache):
     os.makedirs(cache, exist_ok=True)
     ws = tempfile.mkdtemp(prefix="ws-", dir=cache)   # private scratch: a second process on the same cache never shares it
     try:
-        return recipe.fetch_externals(doc["external"], os.path.join(cache, "store"), os.path.join(cache, "external"), ws)
+        return recipe.fetch_externals(doc["external"], os.path.join(cache, "store"), recipe.ext_dir(cache), ws)
     except recipe.BuildRed as e:
         f = e.args[0]
         raise Red("inputs: external does not fetch or match its hash: stage %s: %s" % (f["stage"], " | ".join(f["stderr"][-3:])[:300]))

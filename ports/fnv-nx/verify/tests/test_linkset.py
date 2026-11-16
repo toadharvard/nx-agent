@@ -7,6 +7,7 @@
 Run: python3 -I <this file> (needs the pinned env.json packages' files on this machine for the green case)."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -56,10 +57,28 @@ with tempfile.TemporaryDirectory() as td:
     check("a recipe with no link has no system definers", linkset.host_system_defs(R, root_with(None), td, owners) == {})
 
 calls = []
-recipe.synth_names = lambda repo, root, cache, kinds, script=None: calls.append((root, tuple(kinds), script)) or {k: {"_GLOBAL_OFFSET_TABLE_", "__toy"} for k in kinds}
+recipe.synth_names = lambda repo, root, cache, kinds, script=None, objs=(): calls.append((root, tuple(kinds), script, tuple(objs))) or {k: {"_GLOBAL_OFFSET_TABLE_", "__toy"} for k in kinds}
 adm = {"g": {"target": "guest"}, "h": {"target": "host"}}
 recipe.load_guest_link = lambda repo=".": {"script": "link/guest.ld"}
+recipe.link_candidates = lambda admit, spec, target, repo: []
+linkset.gate_build.ensure = lambda m, cache, repo=".": ({"status": "green", "objects": [{"unit": "u", "object": "/o/u.o"}]}, "")
+recipe.load_recipe = lambda repo, admit, m: {"link": {"kind": "shared"}} if m == "h" else {}
 dg, dh = linkset.synth_defs("g", adm, ".", "c"), linkset.synth_defs("h", adm, ".", "c")
-check("a guest root: kind pie with the guest script, source ld:pie", calls[0] == ("g", ("pie",), recipe.TREE + "/link/guest.ld") and set(dg["__toy"]) == {"ld:pie"}, calls)
-check("a host root: kinds shared and exe, no script", calls[1] == ("h", ("shared", "exe"), None) and set(dh["_GLOBAL_OFFSET_TABLE_"]) == {"ld:shared", "ld:exe"}, calls)
+check("a guest root: kind pie with the guest script and its own objects, source ld:<member>:pie", calls[0] == ("g", ("pie",), recipe.TREE + "/link/guest.ld", (("u", "/o/u.o"),)) and set(dg["__toy"]) == {"ld:g:pie"}, calls)
+check("a host root: the kind its recipe declares, no script", calls[1] == ("h", ("shared",), None, (("u", "/o/u.o"),)) and set(dh["_GLOBAL_OFFSET_TABLE_"]) == {"ld:h:shared"}, calls)
+
+# the derivation itself, with the host ld on toy x86_64 objects (cross case: the farm)
+if shutil.which("ld") and shutil.which("gcc"):
+    with tempfile.TemporaryDirectory() as td3:
+        def build(name, src):
+            open(os.path.join(td3, name + ".c"), "w").write(src)
+            subprocess.run(["gcc", "-c", "-fPIC", "-O1", os.path.join(td3, name + ".c"), "-o", os.path.join(td3, name + ".o")], check=True)
+            subprocess.run(["ld", "-shared", "-z", "now", "-m", "elf_x86_64", "--unresolved-symbols=ignore-all", "--no-gc-sections", "-o", os.path.join(td3, name + ".so"), os.path.join(td3, name + ".o")], check=True)
+            return open(os.path.join(td3, name + ".o"), "rb").read(), open(os.path.join(td3, name + ".so"), "rb").read()
+        oa, la = build("a", "extern int ext_v; int f(void){ return ext_v; }\n")
+        ob, lb = build("b", "int g(void){ return 3; }\n")
+        sa, sb = recipe.synth_set(la, [oa]), recipe.synth_set(lb, [ob])
+        check("an object with a GOT reference gets _GLOBAL_OFFSET_TABLE_ (and _DYNAMIC) as synthesised, not its own f", "_GLOBAL_OFFSET_TABLE_" in sa and "f" not in sa, sorted(sa))
+        check("the same without that reference does not", "_GLOBAL_OFFSET_TABLE_" not in sb and "g" not in sb, sorted(sb))
+        check("a name the script assigns is not synthesised", "_GLOBAL_OFFSET_TABLE_" not in recipe.synth_set(la, [oa], "_GLOBAL_OFFSET_TABLE_ = 0;\n"), sorted(recipe.synth_set(la, [oa], "_GLOBAL_OFFSET_TABLE_ = 0;\n")))
 sys.exit(1 if fails else 0)

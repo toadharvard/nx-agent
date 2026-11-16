@@ -4,7 +4,7 @@
         (the object id and the `unit` of a constants row are the path as given)
     objstub.py terminators --cc CC [--cflag F]... [--lang c|c++] --header H... -o FILE
 Inputs: ELF relocatable objects, ELF32 (ILP32; SHT_RELA with Elf32_Rela, R_AARCH64_P32_* kinds) or ELF64, AArch64, little endian. Decoder: ONE source, verify/a64access.cc (built with
-the host g++ against LLVM 18's MC layer; env var A64ACCESS names a prebuilt binary): per word the registers read and written
+the host g++ against LLVM 18's MC layer): per word the registers read and written
 (MCInstrDesc defs/uses/implicit, tied operands), the memory operand and the kind. Everything the T and V classes need beyond that
 is read from architectural encoding fields (Arm ARM A64 top-level table), never from mnemonics. Assumption: LLVM's AArch64 (ASM-043)
 instruction descriptions and disassembler are correct; the test cross-checks the decoded word set against objdump. Output: one line `obj:symbol: KIND detail`, sorted; exit 0 iff no finding.
@@ -207,12 +207,10 @@ A64_BUILD = "g++ -std=c++17 -O1 $(llvm-config-18 --cxxflags) a64access.cc -o OUT
 _TOOL = []
 
 def tool(cache=None):
-    """Path of the a64access binary: $A64ACCESS, else CACHE/objstub/a64access-<hash of the source, the build line and the LLVM and g++
+    """Path of the a64access binary: CACHE/objstub/a64access-<hash of the source, the build line and the LLVM and g++
     versions> (built once), else built once per process into a temporary directory (removed at exit)."""
     if not _TOOL:
-        if os.environ.get("A64ACCESS"):
-            _TOOL.append(os.environ["A64ACCESS"])
-        elif cache:
+        if cache:
             q = lambda *a: subprocess.run(list(a), capture_output=True, text=True).stdout
             h = hashlib.sha256((open(os.path.join(HERE, "a64access.cc")).read() + A64_BUILD + q("llvm-config-18", "--version") + q("g++", "--version")).encode()).hexdigest()
             p = os.path.join(cache, "objstub", "a64access-" + h)

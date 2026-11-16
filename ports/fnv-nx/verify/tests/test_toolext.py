@@ -61,7 +61,7 @@ recipe.env_blocked = lambda repo: None
 
 
 def publish(td, name, files):
-    """A commit of FILES {path: text} pushed to branch NAME of the bare artifacts repo (ARTIFACTS_URL, a stand-in for fnv-nx-build) -> (commit, tree_sha256 of the checkout)."""
+    """A commit of FILES {path: text} pushed to branch NAME of the bare artifacts repo (recipe.ARTIFACTS, a stand-in for fnv-nx-build) -> (commit, tree_sha256 of the checkout)."""
     bare = os.path.join(td, "artifacts.git")
     if not os.path.isdir(bare):
         subprocess.run(["git", "init", "-q", "--bare", bare], check=True)
@@ -96,7 +96,7 @@ def make(td, name, ext, path="doc.txt", declared=True):
 
 
 def produced(repo, td, tag):
-    j = recipe.Job(repo, R, os.path.join(td, "store"), 2, os.path.join(td, "store", "external"))
+    j = recipe.Job(repo, R, os.path.join(td, "store"), 2, recipe.ext_of_store(os.path.join(td, "store")))
     ws = tempfile.mkdtemp(prefix="te-" + tag, dir=td)
     recipe._copy(repo, [f for f in j.files if recipe.under(f, R)], R, os.path.join(ws, "root"))
     try:
@@ -109,7 +109,7 @@ def produced(repo, td, tag):
 
 
 with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td:
-    os.environ["ARTIFACTS_URL"] = os.path.join(td, "artifacts.git")
+    recipe.ARTIFACTS = os.path.join(td, "artifacts.git")
     c1, t1 = publish(td, "sdm1", {"doc.txt": "the document\n", "other.txt": "one\n", "sub/x.txt": "x\n"})
     ex1 = {"name": "sdm", "repo": "fnv-nx-build", "ref": "sdm1", "commit": c1, "tree_sha256": t1, "at": "/ext/sdm"}
     repo = make(td, "r1", ex1)
