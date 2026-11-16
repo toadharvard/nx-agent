@@ -1695,3 +1695,9 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Shapes/baddecode are in fnv-nx-build l3a-lift/shapesfacts/87b8dd3d2-<img>.
 - Doing (w8): merge into base3. Then the exe modlift run on farm 2; it OOMs at 6.6 GB in a worker.
 - Blocked (L1): contract/exefacts.py F['decomp'] and gate_xc 'missing_decomp' still read the decomp list. Asked L1 to remove or rebase them.
+- Done (w13): rule 2, inline xfer forms, claude/fnv-l3a-lift-w13-xfer @9c6de07bc (on 72d7bb259).
+  - Proof: 52 buffers, 13 shapes × 4 kinds, are token-identical after expansion. test_xfer_forms 60/60.
+  - Saving per site: call to an entry 56 B, call through the dispatcher 66 B, tail jmp 51 B, non-local jmp 14 B, ret 14 B.
+  - Global bytes: not measured yet. They come from one farm liftsrc run at before / +rule 1 / +rule 1+2.
+- Doing (w13): the tally and PP-diff tools for that run.
+- Waiting: w12, rule 1.
