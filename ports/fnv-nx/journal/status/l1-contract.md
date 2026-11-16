@@ -2690,3 +2690,10 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   3. Job.archives is created in __init__.
   4. The behavioural include_uses test for run steps.
 - bottleneck: the cand4 verdict (w15); L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
+
+### 2026-11-16: w28-c5 @ 5e187c810
+- pdfplumber 0.11.10 and its 8-wheel closure are pinned in env.json and mirrored to fnv-nx-build tools/verdict-debs 3768b733. Not yet checked: setup_verdict_env.sh plus envcheck on the declared machine (farm, with the cand5 verdict).
+- recipe.python_mounts: layout entries yield to runtime paths in both directions; a clashing declared input is BuildRed. 7 cases in test_runpython.py.
+- L3b told to rebase its PDF stage on w28-c5, drop the recipe.py hunk of 4f57cd0f5, and move to pdfplumber.
+- w28-c5 still open: derived Python imports (admit `imports` deleted), ROOTFS_MEMO copy selftest.
+- bottleneck: the cand4 verdict (w15); L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
