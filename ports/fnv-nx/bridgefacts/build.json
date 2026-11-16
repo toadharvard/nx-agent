@@ -1,34 +1,23 @@
 {
  "format": "fnvnx-recipe/1",
- "compiler": {
-  "cc": "aarch64-linux-gnu-gcc-13",
-  "cxx": "aarch64-linux-gnu-g++-13"
- },
- "flags": {
-  "c": [
-   "-mabi=ilp32"
-  ],
-  "cxx": [
-   "-mabi=ilp32"
-  ],
-  "asm": [
-   "-mabi=ilp32"
-  ]
- },
- "include": [],
- "units": "all",
  "generated": [
   {
    "tool": "ports/fnv-nx/bridgefacts/com/comrows.py",
    "args": [
-    "/in/ports/fnv-nx/bridgefacts/com/com_spec.json",
+    "/in/ports/fnv-nx/shim/include",
+    "/in/ports/fnv-nx/platform/audio",
+    "/out/com_spec.json",
     "/out/com_rows.tsv",
     "/out/com_words.tsv"
    ],
    "inputs": [
-    "ports/fnv-nx/bridgefacts/com/com_spec.json"
+    "ports/fnv-nx/shim/include/dsound.h",
+    "ports/fnv-nx/shim/include/dinput.h",
+    "ports/fnv-nx/platform/audio/dsound_fx.h",
+    "ports/fnv-nx/platform/audio/dshow_int.h"
    ],
    "outputs": [
+    "com_spec.json",
     "com_rows.tsv",
     "com_words.tsv"
    ]
@@ -50,11 +39,24 @@
     "d3d9_spec.json",
     "d9bridge_rows.tsv"
    ]
+  },
+  {
+   "tool": "ports/fnv-nx/bridgefacts/d3d9/d3d9_smwalk.py",
+   "args": [
+    "/out/d3d9_smwalk.json"
+   ],
+   "inputs": [],
+   "outputs": [
+    "d3d9_smwalk.json"
+   ]
   }
  ],
  "outputs": {
   "COM_ROWS": "com_rows.tsv",
+  "COM_SPEC": "com_spec.json",
   "COM_WORDS": "com_words.tsv",
-  "D9_ROWS": "d9bridge_rows.tsv"
+  "D9_ROWS": "d9bridge_rows.tsv",
+  "D9_SPEC": "d3d9_spec.json",
+  "D9_SMWALK": "d3d9_smwalk.json"
  }
 }
