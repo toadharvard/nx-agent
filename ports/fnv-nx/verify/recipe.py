@@ -25,6 +25,7 @@ import atexit
 import concurrent.futures
 import contextlib
 import errno
+import functools
 import hashlib
 import importlib.util
 import json
@@ -40,25 +41,26 @@ import tempfile
 import threading
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import artifacts  # noqa: E402
-import cas  # noqa: E402
-import elffacts  # noqa: E402
-import gate_admit  # noqa: E402
-import pathflow  # noqa: E402
-import envcheck  # noqa: E402
-import hostprofile  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import artifacts  # noqa: E402
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import elffacts  # noqa: E402
+from fnvnx.verify import gate_admit  # noqa: E402
+from fnvnx.verify import pathflow  # noqa: E402
+from fnvnx.verify import envcheck  # noqa: E402
+from fnvnx.verify import hostprofile  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "link"))
-import relocs  # noqa: E402
-import undefset  # noqa: E402
-from ldcheck import syms_any as ldcheck_syms  # noqa: E402
-import ldcheck  # noqa: E402
-import runtime  # noqa: E402
-import sandbox  # noqa: E402
-import toolflags  # noqa: E402
-import unitstage  # noqa: E402
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the parent of the package `verify` (a stage mounts it at /imp)
-from verify import plugsem  # noqa: E402
-from verify import targets as _targets  # noqa: E402  (the declared targets: verify/targets.json)  (the guest compiler record's facts, one source)
+from fnvnx.link import relocs  # noqa: E402
+from fnvnx.verify import undefset  # noqa: E402
+from fnvnx.link.ldcheck import syms_any as ldcheck_syms  # noqa: E402
+from fnvnx.link import ldcheck  # noqa: E402
+from fnvnx.verify import runtime  # noqa: E402
+from fnvnx.verify import sandbox  # noqa: E402
+from fnvnx.verify import toolflags  # noqa: E402
+from fnvnx.verify import unitstage  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the parent of the package `verify` (a stage mounts it at /imp)
+from fnvnx.verify import plugsem  # noqa: E402
+from fnvnx.verify import targets as _targets  # noqa: E402  (the declared targets: verify/targets.json)  (the guest compiler record's facts, one source)
 BuildRed = plugsem.BuildRed
 lifted_origin = plugsem.lifted_origin
 PLUGIN_SOURCES = plugsem.PLUGIN_SOURCES
@@ -217,7 +219,8 @@ AUX_FLAGS = ["-fstack-usage"]   # build --stack-usage 1: the CC stage also write
 LD_FIXED = ["--build-id=none", "-pie", "--no-dynamic-linker", "-z", "text", "-z", "now", "-z", "pack-relative-relocs", "-z", "max-page-size=0x1000",
             "-z", "common-page-size=0x1000"]
 LD_KIND = {"pie": LD_FIXED, "exe": ["--build-id=none", "-pie", "-z", "text", "-z", "now"], "shared": ["--build-id=none", "-shared", "-z", "text", "-z", "now"]}
-LD_TOOLS = (TREE + "/link", TREE + "/contract")   # tool roots of the ldcheck stage: link/ldcheck.py, and gatefile.py at /contract
+LD_TOOLS = (TREE + "/link", TREE + "/contract")   # the tool root of the ldcheck stage (link, its tool's own root) and the root of its one cross-root import (contract.gatefile): both reach the stage through the import closure
+LD_TOOL = TREE + "/link/ldcheck.py"
 WERROR_ATTR = "-Werror=attributes"   # required in flags.c and flags.cxx of every guest root
 EXT_KEYS = {"name", "repo", "ref", "commit", "tree_sha256", "at"}
 STAGE_EXT_KEYS = {"name", "root", "output", "at"}   # an external that is the declared output of another root's stages (the compiler stage): built, never fetched
@@ -914,6 +917,22 @@ def import_trees(roots, owner):
     return {r: gate_admit.trees(roots[r]) for r in (roots[owner].get("imports", []) if owner in roots and isinstance(roots[owner].get("imports", []), list) else []) if r in roots}
 
 
+@functools.lru_cache(maxsize=None)
+def module_top_errors():
+    """(error, ...): the one top-level module name of every project module (gate_admit.MODULE_TOP, `fnvnx`) must name nothing else on the host Python of a stage: it is not in
+    sys.stdlib_module_names, not one of the pinned modules of env.json (envcheck.PY_MODULES) and not a top-level name of any installed (pinned host) distribution. Checked here,
+    never assumed: a root's module path is unique because its top name is."""
+    top, out = gate_admit.MODULE_TOP, []
+    if top in sys.stdlib_module_names:
+        out.append("module top name %r is a standard-library module of the host Python" % top)
+    if top in set(envcheck.PY_MODULES.values()) | set(envcheck.PY_MODULES):
+        out.append("module top name %r is a pinned host module (env.json)" % top)
+    import importlib.metadata
+    if top in importlib.metadata.packages_distributions():
+        out.append("module top name %r is a top-level name of an installed host package" % top)
+    return tuple(out)
+
+
 def import_prefixes(roots, owner):
     """{module prefix: root} of the roots OWNER declares (gate_admit.import_roots over the declared roots that are admitted), and OWNER's own root: a module is
     one file under one module path whoever imports it (a root's tool and another root's tool that imports it both spell `contract.x`), so the stage mounts the
@@ -933,7 +952,7 @@ def import_mount(tool, owner, files, inputs, roots, repo="."):
     it = import_trees(roots, owner)
     clo = []
     bad = foreign_imports(tool, owner, files, inputs, repo, clo, import_roots_of(roots, owner), import_prefixes(roots, owner))
-    mods = sorted(f for f in set(clo) if any(under(f, t) for t in import_roots_of(roots, owner)) and f != tool)
+    mods = sorted(f for f in set(clo) if any(under(f, t) for t in import_roots_of(roots, owner)))   # the tool too: a sibling may import it by its module path (the entry also runs from /tool)
     data = set()
     for f in mods:   # the data a module reads by a path of its own location, resolved by pathflow inside its root's tree (a directory: every tracked file under it)
         try:
@@ -943,6 +962,15 @@ def import_mount(tool, owner, files, inputs, roots, repo="."):
             continue
         data |= {g for g in files if any(g == p or under(g, p) for p in ins)}
     return bad, sorted(set(mods) | data)
+
+
+def tool_module(tool):
+    """-> (module name, error): the module path of the generator TOOL, `fnvnx.<its path below ports/fnv-nx, without .py>`: the stage runs it as that module (genlaunch.py,
+    runpy.run_module), the one module path, with no /tool mount. A file whose stem is not an identifier cannot be a module name: an error."""
+    nm = gate_admit.module_name(tool[:-3], TREE) if tool.endswith(".py") else None
+    if nm is None or not all(p.isidentifier() for p in nm.split(".")):
+        return None, "%s has no module path: its path below %s must be identifiers (a tool is run as `python -m fnvnx.<path>`)" % (tool, TREE)
+    return nm, None
 
 
 def foreign_imports(tool, owner, files, inputs, repo=".", closure=None, imports=(), prefixes=None):
@@ -968,15 +996,15 @@ def foreign_imports(tool, owner, files, inputs, repo=".", closure=None, imports=
     def qualified(name):   # the tracked file of a module spelled by the one rule (prefix + path), inside its declared root
         for pre, rt in prefixes.items():
             if name == pre or name.startswith(pre + "."):
-                parts = name.split(".")
-                for suf in ("/".join(parts) + ".py", "/".join(parts) + "/__init__.py"):
+                stem = gate_admit.module_file(name)
+                for suf in (stem + ".py", stem + "/__init__.py"):
                     c = TREE + "/" + suf
                     if c in theirs_set:
                         return c
         return None
 
     def pkg_dir(name):   # a directory of a declared root that holds modules, named by the qualified rule: an implicit (PEP 420) namespace package, `from <it> import <module>`
-        d = TREE + "/" + name.replace(".", "/") + "/"
+        d = TREE + "/" + (gate_admit.module_file(name) or "\0") + "/"
         return any(name == pre or name.startswith(pre + ".") for pre in prefixes) and any(c.startswith(d) for c in theirs_set)
 
     def find(name, rel):    # the tracked file of module NAME (dotted): in the tool's own root, or carried by a declared input
@@ -988,7 +1016,7 @@ def foreign_imports(tool, owner, files, inputs, repo=".", closure=None, imports=
             return None
         if rel in theirs:   # a file of a declared root: its siblings are qualified or relative; the owner's own files are not on the path of the mount
             return None
-        for cand in (mine + [f for f in files if f.endswith(".py") and any(f == i or under(f, i) for i in ins)]):
+        for cand in [f for f in files if f.endswith(".py") and any(f == i or under(f, i) for i in ins)]:   # a bare name resolves only through a declared input: the tool's own root is one more module path (fnvnx.<rel>), never /tool
             for suf in ("/".join(parts) + ".py", "/".join(parts) + "/__init__.py"):
                 if cand == suf or cand.endswith("/" + suf):
                     return cand
@@ -1039,8 +1067,11 @@ def foreign_imports(tool, owner, files, inputs, repo=".", closure=None, imports=
                     continue
                 got = find(name, f) or find(top, f)
                 if got is None:
-                    hint = [pre for pre in prefixes for c in theirs if c.endswith("/" + "/".join(name.split(".")) + ".py") and under(c, prefixes[pre])]
-                    bad.append(name + (" (qualified: %s)" % ", ".join("%s.%s" % (h, name) for h in sorted(set(hint))) if hint else ""))
+                    hint = sorted({gate_admit.module_name(c[:-3], TREE) for c in set(theirs) | set(mine) if c.endswith("/" + "/".join(name.split(".")) + ".py") and any(under(c, rt) for rt in prefixes.values())} - {None})
+                    q = gate_admit.MODULE_TOP + "." + name   # an unprefixed spelling of a qualified module (`contract.x`): the prefixed name is the hint
+                    if qualified(q) or q in prefixes or q in ns or pkg_dir(q):
+                        hint.append(q)
+                    bad.append(name + (" (qualified: %s)" % ", ".join(sorted(set(hint))) if hint else ""))
                 else:
                     todo.append(got)
     return sorted(set(bad))
@@ -1613,6 +1644,12 @@ def link_errors(lk, root, mine, roots, ext_names, repo, files=(), variant="", se
             and len({t["unit"] for t in tb if isinstance(t, dict)}) == len(tb)):
         err.append("link.tables must be a list of {tool: a tracked .py file, args: [str], unit: a new root-relative C or C++ source path, section: \".name\"} with distinct units: "
                    "the tool runs over the objects of this link and writes the unit, which is compiled into the image (the table of a link, never a root of its own)")
+    for t in tb if isinstance(tb, list) else []:   # a link-table tool is run as its module with the closure of its imports mounted: the same rule as a generator's
+        if isinstance(t, dict) and isinstance(t.get("tool"), str) and t["tool"] in files and t["tool"].endswith(".py"):
+            owner = next((r for r in roots if tree_of({r: roots[r]}, t["tool"])), None)
+            nm, e = tool_module(t["tool"])
+            err += ([e] if e else []) + ["link.tables tool %s: gen:foreign-import:%s" % (t["tool"], m) for m in (
+                foreign_imports(t["tool"], owner, files, [], repo, [], import_roots_of(roots, owner), import_prefixes(roots, owner)) if owner else [])]
     if "roots" in lk:
         err.append("link.roots is derived, not written: the image links the definer closure of its undefined symbols over the admitted product roots (recipe.link_closure); remove it")
     if "loader" in lk:
@@ -1716,7 +1753,7 @@ def deb_profiles():
 def deb_closure(tops):
     """Sorted package names of TOPS and everything their Pre-Depends/Depends need on the declared machine (envcheck.dep_closure, the rule that defines the
     declared package set: what `dpkg -i` of the pins needs to be complete). A top that is not installed there is not in the result; the build refuses it."""
-    import envcheck
+    from fnvnx.verify import envcheck
     have = envcheck.dep_closure(list(tops))
     miss = sorted(set(tops) - set(have))
     if miss:
@@ -1733,7 +1770,7 @@ def step_debs(g, closure=True):
     that every PT_INTERP and every program path resolves through), which is a fact of the declared machine and in every run step: a recipe that lists it is red (as a
     duplicated declaration).
     ValueError on a form that is neither; CLOSURE False takes the tops themselves (the check does not read the machine)."""
-    import envcheck
+    from fnvnx.verify import envcheck
     d = g.get("debs")
     if isinstance(d, list) and all(isinstance(x, str) for x in d):
         got = list(d)
@@ -2022,6 +2059,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
                        % (d, root))
         elif not (any(under(f, d) for f in files) or any(under(root + "/" + o, d) for o in gen)):
             err.append("include %r holds no tracked or generated file" % d)
+    err += module_top_errors()
     # a path into a generated tree of another root is no include: the generated files of a root are its declared outputs, and a consumer takes them through `uses`
     for d in inc if isinstance(inc, list) else []:
         for r, g in generated_trees(roots, repo, files).items():
@@ -2057,6 +2095,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
         if not (isinstance(g["args"], list) and all(isinstance(a, str) for a in g["args"])):
             err.append("generated[%d].args must be strings" % i)
         if isinstance(t, str) and t in files and t.endswith(".py") and owner:
+            err += ["generated[%d]: %s" % (i, tool_module(t)[1])] if tool_module(t)[1] else []
             clo = []
             used.setdefault(owner, set())
             err += ["gen:foreign-import:%s:%s (generated[%d]: the stage mounts the tool's own root and the declared inputs; the module lies in another root and no input carries it)" % (t, m, i)
@@ -2183,7 +2222,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     if lk is not None:
         err += link_errors(lk, root, mine, roots, names, repo, files, variant, seen)
         err += ["link: the ldcheck stage needs %s (a tracked file of an admitted tool root)" % p for p in (
-            LD_TOOLS[0] + "/ldcheck.py", LD_TOOLS[0] + "/gateids.py", LD_TOOLS[1] + "/gatefile.py")
+            LD_TOOLS[0] + "/ldcheck.py", LD_TOOLS[1] + "/gatefile.py")
             if not tool_file(roots, files, p)]   # the one membership function (class tool, under a tree)
     err += guest_errors(rec, root + "@" + variant if variant else root, roots, pin, load_guest_link(repo), files)
     err += plugin_errors(rec, root, files, roots, units, names, variant, repo)
@@ -3492,12 +3531,10 @@ class Job:
     def generate_one(self, ws, i, g, py, xin):
         owner = tree_of(self.roots, g["tool"])
         tmp = tempfile.mkdtemp(dir=ws)
-        ins = [{"at": "/tool", "tree": self.ingest_files(tmp, "tool", [f for f in self.files if under(f, owner)], owner)},
-               {"at": "/launch/genlaunch.py", "tree": cas.ingest(GEN_LAUNCH, self.store)},
+        ins = [{"at": "/launch/genlaunch.py", "tree": cas.ingest(GEN_LAUNCH, self.store)},
                {"at": "/launch/mounts.json", "tree": self.mounts_file(tmp)}] + xin + self.use_inputs(ws)
         imp = import_mount(g["tool"], owner, set(self.files), [p for p in g["inputs"] if isinstance(p, str)], self.roots, self.repo)[1]
-        if imp:   # the import closure of the tool in the declared import roots, repo-relative, and nothing else of those roots
-            ins.append({"at": "/imp", "tree": self.ingest_files(tmp, "imp", imp, TREE)})   # at /imp/<path relative to the project tree>: the module path of gate_admit.import_roots
+        ins.append({"at": "/imp/" + gate_admit.MODULE_TOP, "tree": self.ingest_files(tmp, "imp", imp, TREE)})   # the tool and its import closure at /imp/fnvnx/<path relative to the project tree>: the one module path (gate_admit.import_roots); no /tool
         if "objects_of" in g:
             ins.append({"at": "/objs", "tree": self.objects_input(ws, tmp, g)})
         for p in g["inputs"]:
@@ -3519,10 +3556,9 @@ class Job:
                         self.ingest_files(tmp, "in%d" % len(ins), sub, p)})
         env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
         env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "FNVNX_PYMODS": self.pymods})
-        if imp:   # the directories of the mounted modules (sorted): a module of a declared import root imports its siblings
-            env["PYTHONPATH"] = "/imp"   # the one entry: a module of a declared root is imported by its qualified name (namespace packages, no __init__.py invented)
+        env["PYTHONPATH"] = "/imp"   # the one entry: every module is imported by its qualified name (namespace packages, no __init__.py invented)
         doc = {"format": "fnvnx-stage/1", "stage": "gen:%s:%d" % (self.root, i), "class": "build", "tool": "python", "cwd": "/work",
-               "argv": [py["python"], "-s", "-B", "/launch/genlaunch.py", "\n".join(g["outputs"] + ["dir:" + d for d in g.get("dirs", [])]), "/tool/" + g["tool"][len(owner) + 1:]] + g["args"] + (["--section", g["objects_of"]["section"]] if isinstance(g.get("objects_of"), dict) and g["objects_of"].get("section") else []), "env": env,
+               "argv": [py["python"], "-s", "-B", "/launch/genlaunch.py", "\n".join(g["outputs"] + ["dir:" + d for d in g.get("dirs", [])]), tool_module(g["tool"])[0]] + g["args"] + (["--section", g["objects_of"]["section"]] if isinstance(g.get("objects_of"), dict) and g["objects_of"].get("section") else []), "env": env,
                "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"], "ro_root": True}   # a generator writes only /out
         res = self.stage(doc)[1]
         got = sorted(r for r, e in cas.listing(res["outputs"]["/out"], self.store) if e["t"] != "d")
@@ -3551,13 +3587,14 @@ class Job:
                 dest = os.path.join(tmp, "objs", label, u + ".o")
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 shutil.copyfile(p, dest)
-        ins = [{"at": "/tool", "tree": self.ingest_files(tmp, "tool", [f for f in self.files if under(f, owner)], owner)},
+        imp = import_mount(t["tool"], owner, set(self.files), [], self.roots, self.repo)[1]
+        ins = [{"at": "/imp/" + gate_admit.MODULE_TOP, "tree": self.ingest_files(tmp, "imp", imp, TREE)},
                {"at": "/launch/genlaunch.py", "tree": cas.ingest(GEN_LAUNCH, self.store)},
                {"at": "/objs", "tree": cas.ingest(os.path.join(tmp, "objs"), self.store)}]
         env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
-        env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "FNVNX_PYMODS": self.pymods})
+        env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "FNVNX_PYMODS": self.pymods, "PYTHONPATH": "/imp"})
         doc = {"format": "fnvnx-stage/1", "stage": "table:%s:%d" % (self.root, ti), "class": "build", "tool": "python", "cwd": "/work",
-               "argv": [py["python"], "-s", "-B", "/launch/genlaunch.py", t["unit"], "/tool/" + t["tool"][len(owner) + 1:]] + t["args"] + ["--section", t["section"]],
+               "argv": [py["python"], "-s", "-B", "/launch/genlaunch.py", t["unit"], tool_module(t["tool"])[0]] + t["args"] + ["--section", t["section"]],
                "env": env, "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"], "ro_root": True}
         res = self.stage(doc)[1]
         got = sorted(r for r, e in cas.listing(res["outputs"]["/out"], self.store) if e["t"] != "d")
@@ -4106,14 +4143,14 @@ class Job:
 
     def ldcheck(self, ws, elf_tree, objs_tree, extra, loader_defs=None):
         """Stage `ldcheck:<root>`: link/ldcheck.py (python of the python runtime, a pure tool like `generated`) judges the linked ELF from ELF
-        symbol tables, writes the crt0 header words and the gate file `ld`. -> tree of /out (the final ELF, ld.json, ld.ids)."""
+        symbol tables, writes the crt0 header words and the gate file `ld`. -> tree of /out (the final ELF, ld.json)."""
         lk = self.rec["link"]
         name = lk["output"]
         _, py = self.cached_rt("python", lambda: runtime.build(self.store, sys.executable, []))
         tmp = tempfile.mkdtemp(dir=ws)
         ins = []
-        for at, owner in (("/tool", LD_TOOLS[0]), ("/contract", LD_TOOLS[1])):
-            ins.append({"at": at, "tree": self.ingest_files(tmp, at[1:], [f for f in self.files if under(f, owner)], owner)})
+        imp = import_mount(LD_TOOL, LD_TOOLS[0], set(self.files), [], self.roots, self.repo)[1]   # ldcheck and its import closure at /imp/fnvnx/<rel>: the one module path, no /tool and no /contract
+        ins.append({"at": "/imp/" + gate_admit.MODULE_TOP, "tree": self.ingest_files(tmp, "imp", imp, TREE)})
         if loader_defs is not None:      # the names the declared loader defines, one per line, a declared input at /loader (its content is in the key)
             ld = os.path.join(tmp, "loader")
             os.makedirs(ld)
@@ -4122,9 +4159,9 @@ class Job:
             ins.append({"at": "/loader", "tree": cas.ingest(ld, self.store)})
         ins += [{"at": "/linked", "tree": elf_tree}, {"at": "/objs", "tree": objs_tree}] + extra
         env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
-        env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"])})
+        env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "PYTHONPATH": "/imp"})
         doc = {"format": "fnvnx-stage/1", "stage": "ldcheck:" + self.root, "class": "build", "tool": "python", "cwd": "/work",
-               "argv": [py["python"], "-s", "-B", "/tool/ldcheck.py", "--elf", "/linked/" + name, "--objs", "/objs", "--out", "/out", "--name", name, "--kind", lk.get("kind", "pie")]
+               "argv": [py["python"], "-s", "-B", "-m", tool_module(LD_TOOL)[0], "--elf", "/linked/" + name, "--objs", "/objs", "--out", "/out", "--name", name, "--kind", lk.get("kind", "pie")]
                + (["--version-script", "/ld/" + os.path.basename(lk["version_script"])] if "version_script" in lk else [])
                + (["--script", "/ld/" + os.path.basename(lk["script"])] if "script" in lk else [])
                + (["--entry", lk["entry"]] if "entry" in lk else [])
@@ -4915,7 +4952,7 @@ def _build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=
                   os.chmod(os.path.join(out, name), 0o755)    # an executable image has the exec bit
               res["elf"] = {"path": os.path.abspath(os.path.join(out, name)), "sha256": ent[name]["h"]}
               res["ld_gate"] = {}
-              for f in ("ld.json", "ld.ids"):
+              for f in ("ld.json",):
                   shutil.copyfile(cas._obj(store, ent[f]), os.path.join(out, f))
                   res["ld_gate"][f] = {"path": os.path.abspath(os.path.join(out, f)), "sha256": ent[f]["h"]}
               facts = j.elf_facts(ws, fin, elf_tree, groups)     # the link record: sections, defined symbols, definers (consumers never run readelf or nm)

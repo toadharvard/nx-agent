@@ -14,21 +14,22 @@ a GCC twin is not a unit of the gate (nothing of it is certified).
   pairs(gcc, cl, units)  -> [(stem, gcc path, [cl paths])] sorted by stem, one per GCC object; the list is empty when no cl object
       belongs to the stem.  A source may be listed by several units: the cl side of a stem is then the SET of all `u<N>.obj` of
       those units, sorted by N (a plain `<stem>.obj` first); each gate says how it judges against the set
-  finish(name, universe, red, detail) -> exit status; writes $GATE_OUT/<name>.json (contract/gatefile.py) and the full
-      sorted list of the uncertified ids to $GATE_OUT/<name>.ids (one per line; the gate file keeps the first 50); prints detail
+  finish(name, universe, red, detail) -> exit status; writes $GATE_OUT/<name>.json (contract/gatefile.py: every uncertified id
+      and their count); prints detail
   fail(name, message) -> exit status: the gate file of a gate that could not read its inputs: red, universe 1, certified 0,
       the one id `error: <message>`
 Exit status of a gate: 0 green, 1 red (also an input error), 2 bad command line.
 """
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import argparse
 import json
 import os
 import sys
 
-from contract import gatefile
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract import gatefile
 
 
 class GateInputError(ValueError):
@@ -94,17 +95,8 @@ def parse_args(argv, prog, doc, extra=()):
     return ap.parse_args(argv)
 
 
-def _write_ids(name, ids):
-    out = os.environ.get('GATE_OUT')
-    if not out:
-        return
-    with open(os.path.join(out, name + '.ids'), 'w', newline='\n') as fh:
-        fh.write(''.join(i + '\n' for i in sorted(str(x) for x in ids)))
-
-
 def finish(name, universe, red, detail):
     gatefile.write(name, universe, universe - len(red), red, detail)
-    _write_ids(name, red)
     print(detail)
     return 1 if red else 0
 

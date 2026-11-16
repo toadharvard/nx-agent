@@ -21,9 +21,11 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import bootinput  # noqa: E402
-import bootmachine  # noqa: E402
-import bootpath  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import bootinput  # noqa: E402
+from fnvnx.verify import bootmachine  # noqa: E402
+from fnvnx.verify import bootpath  # noqa: E402
 
 U64 = (1 << 64) - 1
 WALL_EPOCH_US = 1_700_000_000_000_000

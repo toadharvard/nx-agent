@@ -12,7 +12,7 @@ version, FILE holding `<wheel path> --hash=sha256:<python.wheel_sha256>`; output
 mirror`. Nothing is fetched from a package index (apt, PyPI): the mirror is the only source."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import shutil
@@ -21,8 +21,9 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-from verify import artifacts  # noqa: E402
-from verify import cas  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import artifacts  # noqa: E402
+from fnvnx.verify import cas  # noqa: E402
 import hashlib  # noqa: E402
 
 def installed(pkg):

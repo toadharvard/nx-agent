@@ -7,7 +7,7 @@ a compiler that still has a 128-bit long double fails to compile. The MSVC names
 Run: python3 -I <this file> from the checkout root."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import re
@@ -18,7 +18,8 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import plugbuild as pb  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.toolchain.tests import plugbuild as pb  # noqa: E402
 
 check = pb.Checks('test_ldbl')
 
@@ -118,7 +119,7 @@ def datamodel(td, so):
     check('crossing_forbidden cites existing rows', all(c in rows for c in cf), cf)
     # regeneration: the pinned mirror (fnv-nx-build tools/cpp-docs, tree_sha256 checked by the recipe's own fetch) -> gen.py --check
     import subprocess
-    from verify import recipe
+    from fnvnx.verify import recipe
     gdir = os.path.join(root, 'msvcmodel', 'datamodel')
     mirror = json.load(open(os.path.join(gdir, 'sources.json')))['mirror']
     ext = {k: mirror[k] for k in ('name', 'repo', 'ref', 'commit', 'tree_sha256', 'at')}

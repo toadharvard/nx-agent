@@ -8,7 +8,7 @@ universes > 0 and certified; (3) the same with a byte mutation of g's N3 verdict
 and the universes of namegate and r7 shrink to the native-bearing units only (0 when no unit has a native body)."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import subprocess
@@ -16,22 +16,23 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import test_guest as tg
-import test_plugins as tp
-from test_plugins import BASE, ROOT, T, REAL, VERIFY, check
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify.tests import test_guest as tg
+from fnvnx.verify.tests import test_plugins as tp
+from fnvnx.verify.tests.test_plugins import BASE, ROOT, T, REAL, VERIFY, check
 sys.path.insert(0, VERIFY)
 sys.path.insert(0, os.path.join(REAL, T + "link"))
 sys.path.insert(0, os.path.join(REAL, T + "link", "tests"))
-import gate_build  # noqa: E402
-import gate_contract as gc  # noqa: E402
-import gate_l2native as L  # noqa: E402
-import gate_names  # noqa: E402
-from contract import l2sections  # noqa: E402
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import gate_contract as gc  # noqa: E402
+from fnvnx.verify import gate_l2native as L  # noqa: E402
+from fnvnx.link import gate_names  # noqa: E402
+from fnvnx.contract import l2sections  # noqa: E402
 SYMPAIR_KINDS = l2sections.load_kinds(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'toolchain', 'names', 'sympair_kinds.inc'))
-import gate_r7  # noqa: E402
-from contract import l2sections  # noqa: E402
-from contract import store  # noqa: E402
-import test_l2gates as tl  # noqa: E402
+from fnvnx.link import gate_r7  # noqa: E402
+from fnvnx.contract import l2sections  # noqa: E402
+from fnvnx.contract import store  # noqa: E402
+from fnvnx.verify.tests import test_l2gates as tl  # noqa: E402
 
 G, H = "?g@@YAHH@Z", "?h@@YAHXZ"
 

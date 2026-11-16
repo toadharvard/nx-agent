@@ -50,13 +50,15 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import cas  # noqa: E402
-import sandbox  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import sandbox  # noqa: E402
 
 FORMAT = "fnvnx-runtime/1"
 ENV = {"PYTHONHASHSEED": "0", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1"}
 X86_64 = (2, 1, 62)  # EI_CLASS ELFCLASS64, EI_DATA ELFDATA2LSB, EM_X86_64
-import hostprofile  # noqa: E402
+from fnvnx.verify import hostprofile  # noqa: E402
 DEFAULT_DIRS = hostprofile.HOST["libdirs"]   # the host profile of env.json
 INFO = ("import sys,os,json,sysconfig,importlib.util\n"
         "import site,sysconfig as sc\n"

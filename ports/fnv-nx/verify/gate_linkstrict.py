@@ -63,11 +63,13 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "link"))
-import comdat as comdat_id  # noqa: E402
-import gate_build  # noqa: E402
-import linkset  # noqa: E402
-import producers  # noqa: E402
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import comdat as comdat_id  # noqa: E402
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import linkset  # noqa: E402
+from fnvnx.verify import producers  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 COMMON, GLOBAL, WEAK, UNIQUE, IFUNC = 0xFFF2, 1, 2, 10, 10
 LOCAL, NOTYPE = 0, 0
@@ -364,7 +366,7 @@ def main():
     else:
         status, detail = "green", "%d items of %d roots: every reference has one strong definition" % (len(items), len(roots))
     res = {"format": "fnvnx-gate/1", "name": "linkstrict", "status": status, "universe": len(items), "certified": cert,
-           "uncertified": sorted("%s:%s" % x for x in bad)[:50], "detail": detail}
+           "uncertified": sorted("%s:%s" % x for x in bad), "detail": detail}
     with open(os.path.join(os.environ["GATE_OUT"], "linkstrict.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)
     print("linkstrict: %s %d/%d %s" % (status, cert, len(items), detail[:200]))

@@ -672,7 +672,7 @@ def main(argv):
     nof = [r for r in red if r[4] == 'no-form']
     out = dict(s, format='fnvnx-gate/1', name='flags', status='green' if not red and not s['undecodable_ranges'] else 'red',
                certified=s['flag_reads'] - s['red_flag_reads'], universe=s['flag_reads'],
-               uncertified=['%08x:%s' % (r[1], r[2]) for r in reads_red[:50]],
+               uncertified=['%08x:%s' % (r[1], r[2]) for r in reads_red],
                no_form_sites=sorted({'%08x' % r[1] for r in nof})[:50],
                pushf_sites=sorted({'%08x' % r[1] for r in red if r[4] == 'pushf'}),
                first_red=[{'entry': '%08x' % e, 'site': '%08x' % a, 'flag': f, 'origin': o, 'class': c, 'mnemonic': m} for e, a, f, o, c, m in reads_red[:50]])

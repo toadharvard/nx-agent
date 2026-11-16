@@ -19,7 +19,7 @@ Flow, computed from the syntax trees of all items together (call structure, not 
            (exepin.py is the one item allowed to open its own parameter: `load_exe` is the function named in the gate).
 A tool that gets the exe path any other way (not `--exe`, not the file name) is outside the rule: that is the stated assumption (ASM-102), and the
 sources are the only two ways the tools of this tree name the exe.
-Result: universe = items, certified = items without a violation, uncertified = the first 50 `path:line what`. Green iff all certified.
+Result: universe = items, certified = items without a violation, uncertified = every `path:line what`. Green iff all certified.
 """
 import ast
 import collections
@@ -30,7 +30,9 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import gate_build  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_build  # noqa: E402
 
 TREE = "ports/fnv-nx"
 SINK_NAMES = {"open", "Path", "PurePath", "system", "popen", "fromfile", "memmap", "mmap"}
@@ -250,7 +252,7 @@ def main():
     key = {"gate": "exepin", "sources": sorted((p, hashlib.sha256(t.encode("utf-8")).hexdigest()) for p, t in sources.items()), "tool": gate_build.tool_digest(__file__)}
     (bad, errors), _ = gate_build.memo(os.environ.get("GATE_CACHE"), "exepin", key, lambda: list(judge(sources)))
     red = bool(bad or errors)
-    uncert = ["%s:%s" % (p, bad[p]) for p in sorted(bad)][:50]
+    uncert = ["%s:%s" % (p, bad[p]) for p in sorted(bad)]
     detail = "; ".join(errors)[:400] if errors else (
         "exe path read only through exepin.load_exe" if not bad else "%d items read the exe without load_exe" % len(bad))
     res = {"format": "fnvnx-gate/1", "name": "exepin", "status": "red" if red else "green", "universe": len(files),

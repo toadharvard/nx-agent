@@ -16,12 +16,14 @@ from concurrent.futures import ThreadPoolExecutor
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import cas  # noqa: E402
-import recipe  # noqa: E402
-import unitstage  # noqa: E402
-import verdict  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
+from fnvnx.verify import unitstage  # noqa: E402
+from fnvnx.verify import verdict  # noqa: E402
 
-import scratch  # noqa: E402
+from fnvnx.verify import scratch  # noqa: E402
 
 scratch.install()  # removed synchronously at exit (the stores are ~50 MB)
 BASE = tempfile.mkdtemp(prefix="recipe-test-")
@@ -60,11 +62,11 @@ FILES = {
     "toy/os.S": CRT0 + ".text\n.globl os_svc\n.type os_svc,%function\nos_svc:\n svc #0\n ret\n.size os_svc,.-os_svc\n",
     "toy/inc/toy.h": "#define TOY 7\n",
     "toy/constants.tsv": "f_c\t1\nf_b\t2\n",
-    "verify/wine_fixme.tsv": "# id\tcontract_name\twine_ref\tkind\tvalue\n",
-    "verify/declared_machine.tsv": "# id\tcontract_name\tfact\tsource\tkind\tvalue\n# fact: no-network | time-zone | registry | no-galaxy (fixture); source: win-doc:<page>:<function> | wine-9.0:<path>:<function> | galaxy-sdk:<page>:<function>; kind void|u32\n",
+    "toy/wine_fixme.tsv": "# id\tcontract_name\twine_ref\tkind\tvalue\n",
+    "toy/declared_machine.tsv": "# id\tcontract_name\tfact\tsource\tkind\tvalue\n# fact: no-network | time-zone | registry | no-galaxy (fixture); source: win-doc:<page>:<function> | wine-9.0:<path>:<function> | galaxy-sdk:<page>:<function>; kind void|u32\n",
     "toy/link.ld": open(os.path.join(VERIFY, "..", "link", "guest.ld")).read(),
 }
-LINK_TOOLS = ("link/ldcheck.py", "link/gateids.py", "contract/gatefile.py", "verify/objstub_plugin.cc")   # the real files of the tree: the ldcheck stage mounts them; objstub_plugin.cc is the source of the analysis plugin every root with C/C++ units builds
+LINK_TOOLS = ("link/ldcheck.py", "contract/gatefile.py", "verify/objstub_plugin.cc")   # the real files of the tree: the ldcheck stage mounts them; objstub_plugin.cc is the source of the analysis plugin every root with C/C++ units builds
 
 
 def check(name, ok, detail=""):
@@ -583,7 +585,7 @@ def main():
     check("tests: each test is linked from every product unit plus its own units and has its own ELF",
           all(set(t["linked"]) == set(rt["units"]) | set(t["units"]) and t["elf"] for t in tl.values())
           and not any(d["object"].startswith("tests/") for d in rt["defined"]), tl)
-    import doubles
+    from fnvnx.verify import doubles
     items, finds, st = doubles.judge({ROOT: rt})
     check("tests + doubles.judge: the test that redefines product f_b is red; the clean one is not",
           [f[0] for f in finds] == [ROOT + ":test:dbl"] and "f_b" in finds[0][3] and st["tests_with_doubles"] == 1, (finds, st))
@@ -801,7 +803,7 @@ def main():
     m["flags"]["c"] = ["-Ifoo", "-o"]
     check("flags that change a stage's job rejected, all problems listed", len([e for e in errs(m)]) >= 2)
 
-    import toolflags
+    from fnvnx.verify import toolflags
     for st, mode, tail in (("drv:r", ["-pie"], ["-###", "/probe/x.cc", "-o", "/out/x"]), ("mld:r", [], ["-print-multi-directory"])):
         d = recipe.driver_doc(st, "/ext/a64/bin/g++", ["-mabi=ilp32"], mode, tail, [{"at": "/ext/a64", "tree": "t"}])
         check("driver stage %s: its argv passes toolflags (the one constructor carries PROBE_FLAGS)" % st, toolflags.check_doc(d) == [], toolflags.check_doc(d))

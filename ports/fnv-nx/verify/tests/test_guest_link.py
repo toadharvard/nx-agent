@@ -10,7 +10,9 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import recipe  # noqa: E402
 
 REPO = os.path.abspath(os.path.join(VERIFY, "..", "..", ".."))
 FAILED = []
@@ -77,7 +79,7 @@ check("version_script: an untracked file outside the root is red", any("link mus
 e = link_errs(rec("s.so", kind="shared", version_script="ports/fnv-nx/docs/ARCHITECTURE.md", flags=["-m", "aarch64linux"]), HOST)
 check("version_script: a tracked file of a doc root is red", any("link must be" in x for x in e), e)
 
-# the tools of the ldcheck stage (link/ldcheck.py, link/gateids.py, contract/gatefile.py): tracked files under a tree of an admitted tool root
+# the tools of the ldcheck stage (link/ldcheck.py, contract/gatefile.py): tracked files under a tree of an admitted tool root
 need = lambda rs: [e for e in recipe.check(rec("a.elf"), EXE, files, rs, pin, REPO) if "ldcheck stage needs" in e]  # noqa: E731
 check("link tools under the declared trees of the tool root (contract, link) are valid", need(roots) == [], need(roots))
 cr = next(r for r in roots.values() if r.get("class") == "tool" and "ports/fnv-nx/link" in (r.get("trees") or []))

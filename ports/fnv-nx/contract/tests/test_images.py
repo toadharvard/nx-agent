@@ -7,12 +7,13 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: contract.X by its qualified name
-from verify import scratch  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): contract.X by its qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import scratch  # noqa: E402
 
 scratch.install()
-from contract import images  # noqa: E402
-from contract import modules  # noqa: E402
+from fnvnx.contract import images  # noqa: E402
+from fnvnx.contract import modules  # noqa: E402
 
 FAILED = []
 
@@ -95,7 +96,7 @@ try:
     check("two files differing only in case are an error", False)
 except modules.StageError as e:
     check("two files differing only in case are an error", "differ only in case" in str(e), e)
-from contract import dllkind  # noqa: E402
+from fnvnx.contract import dllkind  # noqa: E402
 check("images_of: a cycle of images stays, a dll with an unresolved import and its dependents go",
       dllkind.images_of({"a.dll": ["b.dll"], "b.dll": ["a.dll", "k.dll"], "c.dll": ["a.dll"], "d.dll": ["x.dll"], "e.dll": ["d.dll"]}, {"k.dll"}) == {"a.dll", "b.dll", "c.dll"})
 check("images_of: the root's own name and bridge names satisfy an import", dllkind.images_of({"a.dll": ["exe.exe", "k.dll"]}, {"exe.exe", "k.dll"}) == {"a.dll"})
@@ -122,7 +123,7 @@ check("adding an image whose name sorts last moves no base", {m.name: m.base for
 c = [fake("atimgpud.dll", 0x29000)] + [fake(m.name, m.pe.size_of_image) for m in a]
 modules.assign_bases(exe, c)
 check("adding an image whose name sorts first moves the later ones (bases are a function of the name order)", c[1].base != before["binkw32.dll"])
-from contract import declareddlls  # noqa: E402
+from fnvnx.contract import declareddlls  # noqa: E402
 sd = tempfile.mkdtemp(prefix="specs-")
 for n in ("msvcp110.spec", "comdlg32.spec"):
     open(os.path.join(sd, n), "w").write("@ stdcall X()\n")

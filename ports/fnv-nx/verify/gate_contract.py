@@ -34,7 +34,7 @@ legal outcome); the invariant that closes the class is that EVERY row is turned 
 judged, certified = judged minus the rows whose address bodysel does not give LIFTED (the function would run a native body that fails its contract)."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import contextlib
 import hashlib
 import json
@@ -47,14 +47,15 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import cas  # noqa: E402
-from contract import l2sections  # noqa: E402
-from contract import exepin  # noqa: E402
-import gate_build  # noqa: E402
-from contract import iat  # noqa: E402
-from contract import images  # noqa: E402
-from contract import gatefile  # noqa: E402
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.contract import l2sections  # noqa: E402
+from fnvnx.contract import exepin  # noqa: E402
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.contract import iat  # noqa: E402
+from fnvnx.contract import images  # noqa: E402
+from fnvnx.contract import gatefile  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 INPUTS = "ports/fnv-nx/verify/contract_inputs.json"
 FORMAT = "fnvnx-contract-inputs/1"

@@ -13,9 +13,11 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import cas  # noqa: E402
-import gatesdir  # noqa: E402
-import sandbox  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import gatesdir  # noqa: E402
+from fnvnx.verify import sandbox  # noqa: E402
 
 BASE = "/root/l4/verdict-test"
 os.makedirs(BASE, exist_ok=True)
@@ -160,7 +162,7 @@ git(r, "checkout", "main"); commit_file(r, "feat.txt", "other\n", "m")
 blocked("block: merge conflict exit 3", r, 3, ["--verdicts", vd, "--gates", gp], "conflict")
 
 # CAS: another writer moves the branch between commit-tree and update-ref
-import verdict  # noqa: E402
+from fnvnx.verify import verdict  # noqa: E402
 r, d, gp, c, tree, v, vd, rc = prepared([gate("a")], "cas")
 tool("store", "--verdict", v, "--verdicts", vd)
 real = verdict._git

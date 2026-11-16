@@ -61,7 +61,7 @@ Where Wine 9.0 implements an API in a simplified way (it does nothing, or return
 Wine 9.0 does, with one log line at the call. The source of the behaviour is Wine 9.0's code for that function. The rule for the gates:
 
 - The log function is `fnvnx_wine_fixme(id)` (C linkage, defined by the runtime's owner; it writes one line and returns).
-- `objstub` accepts such a body only if `verify/wine_fixme.tsv` has the row of the `id` it passes, the function passes exactly one
+- `objstub` accepts such a body only if the table `<root>/wine_fixme.tsv` of an admitted root has the row of the `id` it passes, the function passes exactly one
   `id` on every path, the `id` is a constant at the call, the body is otherwise vacuous (class 2), and its result equals the row's kind
   and value. Each row names the contract method and its Wine 9.0 reference `wine-9.0:<path>:<function>`: data, not a list of places in
   code. A body that also does real work is `wine-fixme-in-real-body`; a wrong or unknown `id`, a non-constant `id` and a taken address
@@ -84,7 +84,7 @@ An environment query answered from the declared machine is a complete implementa
 the documented error for that state), a fixed time zone, registry values from static reads (an undeclared key is absent). The rule is the
 Wine rule with a second citation function, one rule for every function, no list of functions:
 
-- A body calls `fnvnx_declared_machine(id)` (C linkage, writes nothing, returns) with a constant `id`; `verify/declared_machine.tsv` has the row
+- A body calls `fnvnx_declared_machine(id)` (C linkage, writes nothing, returns) with a constant `id`; `<root>/declared_machine.tsv` of an admitted root has the row
   `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`. `fact` is `no-network`, `time-zone` or `registry`; `source` is the documented
   origin of the value, `win-doc:<documentation page or header path>:<function>` or `wine-9.0:<path>:<function>`; `kind`/`value` as for Wine rows.
 - `objstub` accepts the body iff it is otherwise vacuous, passes exactly one id of one citation function on every path, and its result equals the
@@ -92,6 +92,12 @@ Wine rule with a second citation function, one rule for every function, no list 
 - Limit (stated): the gate cannot tell which return value of a function is success, so it cannot reject a row that says success for a network
   call; it rejects a body whose result differs from its row. Row against documentation or Wine source is the oracle class (10), not done.
   A body that calls something or stores (SetLastError, a filled TIME_ZONE_INFORMATION) is not V and needs no citation.
+
+**Rows are owned by the root that cites them.** Each root that has citing bodies carries `<root>/declared_machine.tsv` and `<root>/wine_fixme.tsv`, in the columns above; a root
+without the file has no row of that class. `objstub` reads the union over the admitted roots (`objstub.read_root_tables`); there is no table in `verify/`. An id in two roots'
+tables of one class is red (an error of the gate: ids are one space per class). `<dm|wf>-orphan`: a row of an admitted root that no record of an object of that root
+cites (a `FNVNX_CITE` record, or for Wine rows a constant id passed to `fnvnx_wine_fixme`; `objstub.orphan_findings`). `-unknown-id`: an id that a record cites and that is in
+no admitted root's table. A table in a root that is not admitted is outside the universe. Tests: `tests/test_roottables.py`.
 
 ## Proven-unreachable branches (owner decision of 2026-11-11, option iii)
 

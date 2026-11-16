@@ -52,7 +52,9 @@ PY_MODULES = {"capstone": "capstone", "gmpy2": "gmpy2", "keystone-engine": "keys
               "pycparser": "pycparser"}   # distribution -> import name
 RENDER_LIBS = ["libEGL.so.1", "libEGL_mesa.so.0"]   # ldconfig names: the EGL loader the published libnxgl4.so links, and the Mesa vendor it dispatches to (NXGL4_HOST.md section 2); their loader closure (mesa-libgallium, libllvm, ...) is derived
 RUN_LAYOUT_DEB = "base-files"   # the machine's root layout (./lib -> usr/lib, ./lib64 -> usr/lib64, ./bin, ./sbin): every `run` stage of recipe.py mounts its symlink members
-import hostprofile  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import hostprofile  # noqa: E402
 HOST = hostprofile.HOST
 RENDER_FILES = HOST["egl_vendor_files"]   # read by libEGL.so.1 to find that vendor
 def HOST_GCC_PLUGIN_DIRS(gcc):
@@ -276,7 +278,7 @@ def wheel_digest(dist):
 
 def _root_compilers(repo=None):
     """Driver names of the distribution compilers (no external) of the admitted product roots of the checkout, from admit.json and the recipes."""
-    import recipe
+    from fnvnx.verify import recipe
     repo = repo or os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
     try:
         roots = recipe.load_admit(repo)
@@ -439,8 +441,8 @@ def wheel_pins(prev):
     return sha, files
 
 def snapshot(prev=None):
-    import runtime
-    import unitstage
+    from fnvnx.verify import runtime
+    from fnvnx.verify import unitstage
     own, pk = _owners(), set()
     def add(path, strict=True):
         real = os.path.realpath(path)

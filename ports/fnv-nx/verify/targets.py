@@ -46,7 +46,8 @@ def datamodel_flags(t, repo=None, datamodel=None):
         return [r["flag"] for r in json.load(f)["rows"] if r.get("flag")]
 
 
-from contract.target.fpcr import FPCR_FIELDS, fpcr_value, fpcr_errors  # noqa: E402,F401  (qualified: ports/fnv-nx is on the path of every importer of verify.targets)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract.target.fpcr import FPCR_FIELDS, fpcr_value, fpcr_errors  # noqa: E402,F401  (qualified: ports is on the path of every importer of verify.targets, `fnvnx` is ports/fnvnx)
 
 
 def abi_flag(t):

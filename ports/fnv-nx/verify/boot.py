@@ -62,13 +62,15 @@ import unicorn
 
 from unicorn.arm64_const import UC_ARM64_REG_LR, UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3
 
-import bootinput
-import bootdecl
-import bootgpu
-import bootlayout
-import bootmachine
-import bootmiles
-import boothost
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import bootinput
+from fnvnx.verify import bootdecl
+from fnvnx.verify import bootgpu
+from fnvnx.verify import bootlayout
+from fnvnx.verify import bootmachine
+from fnvnx.verify import bootmiles
+from fnvnx.verify import boothost
 
 FORMAT = "fnvnx-boot/1"
 HOST_PREFIX = "console."

@@ -5,7 +5,7 @@ address with known origins is judged for EVERY origin (F only if every one passe
 row naming the object (gate_order.scan_object). Hand-assembled ILP32 objects, no network. Run: python3 -I <this file>."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import os
 import subprocess
 import sys
@@ -13,8 +13,9 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
-import a64order as A
-from lift.gates import gate_order
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import a64order as A
+from fnvnx.lift.gates import gate_order
 
 fails = []
 tmp = tempfile.mkdtemp(prefix='ordertags-')
@@ -130,7 +131,7 @@ rows, o = scan('pn2', ['stp x29, x30, [sp, #-32]!', 'mov x29, sp', 'add x1, sp, 
 check('n: the same variable without :n, its access after the escape is red', bool(rows.get('f+0xc')), True)
 rows, o = scan('pn3', ['stp x29, x30, [sp, #-32]!', 'mov x29, sp', 'add x1, sp, #18', 'str x1, [x3]', 'ldr w2, [sp, #18]', 'ldp x29, x30, [sp], #32', 'ret'], 'f\t-16:2:n -14:4\n')
 check('n: an access overlapping an escaping pair is not certified by a :n pair', bool(rows.get('f+0x10')), True)
-import framesec as FS
+from fnvnx.link import framesec as FS
 check('parse :n', [(tuple(q), q.priv) for q in FS.parse_frame(b'f\t-16:8:n -8:4\n', 'x')[0][1]], [((-16, 8), True), ((-8, 4), False)])
 for bad in (b'f\t-16:8:m\n', b'f\t-16:8:n:n\n', b'f\t-16:8: \n'):
     try:

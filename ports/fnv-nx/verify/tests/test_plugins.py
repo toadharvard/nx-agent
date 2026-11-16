@@ -20,9 +20,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 REAL = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))   # checkout root
 sys.path.insert(0, VERIFY)
-import cas  # noqa: E402
-import recipe  # noqa: E402
-import scratch  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
+from fnvnx.verify import scratch  # noqa: E402
 
 scratch.install()   # BASE and every other mkdtemp is removed synchronously at exit
 BASE = tempfile.mkdtemp(prefix="plugin-test-")

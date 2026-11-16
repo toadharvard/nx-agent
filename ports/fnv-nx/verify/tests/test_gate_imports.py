@@ -13,10 +13,12 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
-import gate_imports as G  # noqa: E402
-import linkset  # noqa: E402
-import test_recipe as TR  # noqa: E402
-import verdict  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_imports as G  # noqa: E402
+from fnvnx.verify import linkset  # noqa: E402
+from fnvnx.verify.tests import test_recipe as TR  # noqa: E402
+from fnvnx.verify import verdict  # noqa: E402
 
 FAILED = []
 
