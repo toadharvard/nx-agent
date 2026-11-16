@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/verify @admitted-recipes
 """Selftest of the path rules of recipe.check (no build): an include into a generated tree of another root is a check error (`uses` is the way to a
-producer's declared output). Runs on the real admit table and recipes of the checkout: lib/sha256 (a guest root) plus one include entry."""
+producer's declared output). Runs on the real admit table and recipes of the checkout: bridgefacts (a tool root) plus one include entry; the owner of the generated tree is contract/facts."""
 import json, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -18,13 +19,13 @@ def check(what, ok, detail=None):
 
 
 roots, files, pin = recipe.load_admit("."), recipe.tracked("."), recipe.load_pin(".")
-R = "ports/fnv-nx/lib/sha256"
+R = "ports/fnv-nx/bridgefacts"
 rec = json.load(open(roots[R]["recipe"]))
-OWNER = "ports/fnv-nx/platform"
+OWNER = "ports/fnv-nx/contract/facts"
 trees = recipe.generated_trees(roots, ".")
-GEN = [t for t in trees.get(OWNER, []) if t.startswith(OWNER + "/freetype/gen")]
-check("the platform root has generated trees that hold no tracked file (derived from its recipe's outputs)", GEN, trees.get(OWNER))
-check("a directory that also holds tracked files is no generated tree", OWNER + "/audio" not in trees.get(OWNER, []), trees.get(OWNER))
+GEN = [t for t in trees.get(OWNER, []) if t.startswith(OWNER + "/gates")]
+check("the facts root has generated trees that hold no tracked file (derived from its recipe's outputs)", GEN, trees.get(OWNER))
+check("a directory that also holds tracked files is no generated tree", OWNER + "/tests" not in trees.get(OWNER, []), trees.get(OWNER))
 
 
 def gen_errs(**kw):

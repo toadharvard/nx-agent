@@ -42,12 +42,10 @@ n = len([l for l in open("/in/ports/fnv-nx/toy/ldin.tsv") if l.strip()])
 open("/out/gen/link.ld", "w").write(open("/in/ports/fnv-nx/link/guest.ld").read() + "\\n/* generated for %d rows */\\n" % n)
 '''
 # The toy root is a guest ELF in the sense of RECIPE.md "Link": ILP32, position independent, linked with the product's own link/guest.ld and
-# the product's own crt0 (rt/guest/crt0.s, read from the tree like guest.ld, so the fixture can never drift from the link contract): the
-# FNXG header at the first segment + 8, MOD0 behind it, the entry at the first segment. crt0 branches to __fnvnx_guest_entry, the entry every
-# guest program defines (in the product, runtime.c); the toy's program entry is f_a. The header is OS-layer code (os.S, an os_layer unit);
+# a crt0 fixture (tests/fixtures/toy_crt0.s: the header contract of link/guest.ld; the product crt0 is rt/guest's, a root of its own): the
+# FNXG header at the first segment + 8, MOD0 behind it, the entry at the first segment. crt0 branches to __fnvnx_image_entry, which the host toy root assigns itself (a host root has no link.entry): f_a. The header is OS-layer code (os.S, an os_layer unit);
 # HDR is the same as one assembler statement for the roots that have no os.S (MINI).
-CRT0 = (open(os.path.join(VERIFY, "..", "rt", "guest", "crt0.s")).read()
-        + "\n.text\n.global __fnvnx_guest_entry\n.set __fnvnx_guest_entry, f_a\n")
+CRT0 = open(os.path.join(VERIFY, "tests", "fixtures", "toy_crt0.s")).read() + "\n.text\n.set __fnvnx_image_entry, f_a\n"
 OS_NOLINK = ".text\n.globl os_svc\n.type os_svc,%function\nos_svc:\n svc #0\n ret\n.size os_svc,.-os_svc\n"
 HDR = "__asm__(%s);\n" % json.dumps(CRT0 + ".text\n")
 RECIPE = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},

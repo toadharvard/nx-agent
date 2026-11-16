@@ -116,11 +116,11 @@ def main():
     finally:
         sandbox.MAX_LINKS = old
     # (5) an OSError of the sandbox is a red stage naming the stage
-    real_exec = sandbox.execute
+    real_exec = sandbox.execute_timed
 
     def boom(store, doc, key):
         raise OSError(errno.EMLINK, "Too many links")
-    sandbox.execute = boom
+    sandbox.execute_timed = boom
     try:
         d2 = dict(doc, stage="pp:some/unit.cc")
         try:
@@ -131,7 +131,7 @@ def main():
         check("EMLINK of the sandbox is an SbxError naming the stage (a red stage, not a crash)",
               got is not None and getattr(got, "stage", None) == "pp:some/unit.cc" and "pp:some/unit.cc" in str(got) and "Too many links" in str(got), got)
     finally:
-        sandbox.execute = real_exec
+        sandbox.execute_timed = real_exec
     return 1 if FAILED else 0
 
 
