@@ -3534,7 +3534,7 @@ class Job:
         ins = [{"at": "/launch/genlaunch.py", "tree": cas.ingest(GEN_LAUNCH, self.store)},
                {"at": "/launch/mounts.json", "tree": self.mounts_file(tmp)}] + xin + self.use_inputs(ws)
         imp = import_mount(g["tool"], owner, set(self.files), [p for p in g["inputs"] if isinstance(p, str)], self.roots, self.repo)[1]
-        ins.append({"at": "/imp/" + gate_admit.MODULE_TOP, "tree": self.ingest_files(tmp, "imp", imp, TREE)})   # the tool and its import closure at /imp/fnvnx/<path relative to the project tree>: the one module path (gate_admit.import_roots); no /tool
+        ins.append({"at": toolflags.IMPORT_ROOT + "/" + gate_admit.MODULE_TOP, "tree": self.ingest_files(tmp, "imp", imp, TREE)})   # the tool and its import closure at /imp/fnvnx/<path relative to the project tree>: the one module path (gate_admit.import_roots); no /tool
         if "objects_of" in g:
             ins.append({"at": "/objs", "tree": self.objects_input(ws, tmp, g)})
         for p in g["inputs"]:
@@ -3556,7 +3556,7 @@ class Job:
                         self.ingest_files(tmp, "in%d" % len(ins), sub, p)})
         env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
         env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "FNVNX_PYMODS": self.pymods})
-        env["PYTHONPATH"] = "/imp"   # the one entry: every module is imported by its qualified name (namespace packages, no __init__.py invented)
+        env["PYTHONPATH"] = toolflags.IMPORT_ROOT   # the one entry: every module is imported by its qualified name (namespace packages, no __init__.py invented)
         doc = {"format": "fnvnx-stage/1", "stage": "gen:%s:%d" % (self.root, i), "class": "build", "tool": "python", "cwd": "/work",
                "argv": [py["python"], "-s", "-B", "/launch/genlaunch.py", "\n".join(g["outputs"] + ["dir:" + d for d in g.get("dirs", [])]), tool_module(g["tool"])[0]] + g["args"] + (["--section", g["objects_of"]["section"]] if isinstance(g.get("objects_of"), dict) and g["objects_of"].get("section") else []), "env": env,
                "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"], "ro_root": True}   # a generator writes only /out
@@ -3588,11 +3588,11 @@ class Job:
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 shutil.copyfile(p, dest)
         imp = import_mount(t["tool"], owner, set(self.files), [], self.roots, self.repo)[1]
-        ins = [{"at": "/imp/" + gate_admit.MODULE_TOP, "tree": self.ingest_files(tmp, "imp", imp, TREE)},
+        ins = [{"at": toolflags.IMPORT_ROOT + "/" + gate_admit.MODULE_TOP, "tree": self.ingest_files(tmp, "imp", imp, TREE)},
                {"at": "/launch/genlaunch.py", "tree": cas.ingest(GEN_LAUNCH, self.store)},
                {"at": "/objs", "tree": cas.ingest(os.path.join(tmp, "objs"), self.store)}]
         env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
-        env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "FNVNX_PYMODS": self.pymods, "PYTHONPATH": "/imp"})
+        env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "FNVNX_PYMODS": self.pymods, "PYTHONPATH": toolflags.IMPORT_ROOT})
         doc = {"format": "fnvnx-stage/1", "stage": "table:%s:%d" % (self.root, ti), "class": "build", "tool": "python", "cwd": "/work",
                "argv": [py["python"], "-s", "-B", "/launch/genlaunch.py", t["unit"], tool_module(t["tool"])[0]] + t["args"] + ["--section", t["section"]],
                "env": env, "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"], "ro_root": True}
@@ -4150,7 +4150,7 @@ class Job:
         tmp = tempfile.mkdtemp(dir=ws)
         ins = []
         imp = import_mount(LD_TOOL, LD_TOOLS[0], set(self.files), [], self.roots, self.repo)[1]   # ldcheck and its import closure at /imp/fnvnx/<rel>: the one module path, no /tool and no /contract
-        ins.append({"at": "/imp/" + gate_admit.MODULE_TOP, "tree": self.ingest_files(tmp, "imp", imp, TREE)})
+        ins.append({"at": toolflags.IMPORT_ROOT + "/" + gate_admit.MODULE_TOP, "tree": self.ingest_files(tmp, "imp", imp, TREE)})
         if loader_defs is not None:      # the names the declared loader defines, one per line, a declared input at /loader (its content is in the key)
             ld = os.path.join(tmp, "loader")
             os.makedirs(ld)
@@ -4159,7 +4159,7 @@ class Job:
             ins.append({"at": "/loader", "tree": cas.ingest(ld, self.store)})
         ins += [{"at": "/linked", "tree": elf_tree}, {"at": "/objs", "tree": objs_tree}] + extra
         env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
-        env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "PYTHONPATH": "/imp"})
+        env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "PYTHONPATH": toolflags.IMPORT_ROOT})
         doc = {"format": "fnvnx-stage/1", "stage": "ldcheck:" + self.root, "class": "build", "tool": "python", "cwd": "/work",
                "argv": [py["python"], "-s", "-B", "-m", tool_module(LD_TOOL)[0], "--elf", "/linked/" + name, "--objs", "/objs", "--out", "/out", "--name", name, "--kind", lk.get("kind", "pie")]
                + (["--version-script", "/ld/" + os.path.basename(lk["version_script"])] if "version_script" in lk else [])
