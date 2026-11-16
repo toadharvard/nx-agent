@@ -115,21 +115,18 @@ def check_far(key, fk, rec):
     """a far transfer: the cases the record decides (the selector of selectors.cs, the NULL selector) against the cited SDM text (sysspec_far.py); every other selector is defined by descriptor rows the record leaves undecided: the shape is
     uncertified, the undecided sites are counted by the caller (the selector of an immediate form is a site field, that of a memory form is data)"""
     call, imm = fk
-    try:
-        x86sys.get(rec, 'selectors', 'cs'); x86sys.get(rec, 'sgdt')
-        return 'uncertified', 'uncertified: far transfer to a selector other than selectors.cs: descriptor rows undecided (sgdt)'      # unreachable until sgdt is decided: kept to name the rule
-    except x86sys.Undecided as e:
-        why = str(e)
     import sysspec_far
     if not imm:      # composition of certificates: the effective address is the PUSH r/m32 Form's, valid only if that shape has a proved certificate (CERTS = the proved shape keys of certs.tsv)
         bk = sysspec_far.basis_key(key)
         if CERTS is None or bk not in CERTS: return 'uncertified', 'uncertified: ea-basis %s not certified' % bk
         if call and sysspec_far.esp_based(key): return 'uncertified', 'uncertified: esp-based effective address of a far CALL: the SDM states the pre-instruction ESP for PUSH (Vol. 2B 4-523) and the near CALL (Vol. 2A 3-122), not for the far CALL'
     try: cases = sysspec_far.check(key, call, rec, imm)
+    except x86sys.Undecided as e: return 'uncertified', 'uncertified: %s' % e
     except (KeyError, AttributeError, AssertionError) as e: return 'not-covered', 'no Form for the far transfer (%s)' % type(e).__name__
     bad = [c for c, r in cases if r != 'proved']
     if bad: return 'FAILED(dsl)', 'far transfer differs from the SDM in: %s' % ','.join(bad)
-    return 'uncertified', 'uncertified: far transfer to a selector other than selectors.cs / NULL (proved: %s): %s' % (','.join(c for c, _ in cases), why)
+    n = sysspec_far.domain(rec)
+    return 'uncertified', 'uncertified: far transfer proved over its domain (cases %s); %d GDT indexes of jmp_far.undecided_descriptors are outside it and the Form carries no domain (OutsideDomain: base3 80bd1328d, not merged here)' % (','.join(c for c, _ in cases), n)
 
 
 def crdr(ins):

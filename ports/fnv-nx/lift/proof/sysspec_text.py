@@ -25,3 +25,4 @@ INT = {
 }
 SEG = {'none': 'no spec', 'unc': 'uncertified: %s', 'undec': 'uncertified: mov_to_sreg.undecided: %s', 'spurious': 'the Form builder raised UndecidedRow where the record decides the row', 'noundecided': 'the record leaves a selector undecided: a Form must not exist',
        'ok': 'SDM %s Sreg: the segment register %s', 'diff': 'differs: %s'}
+FARROW = {'gp': 'gp_selector_descriptors', 'data': 'data_descriptors', 'und': 'undecided_descriptors'}

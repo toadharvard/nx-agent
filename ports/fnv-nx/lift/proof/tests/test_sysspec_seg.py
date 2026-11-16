@@ -35,13 +35,21 @@ class Seg(unittest.TestCase):
     def setUp(self): declared_x86sys.configure()
     def tearDown(self): inputs.reset()
 
-    def test_ss_and_cs_are_proved(self):
-        for h in ('8ed0', '8e5000', '17', '8ec8', '8e08', '16', '0e', '6616', '06', '1e', '8cd8', '668c0424'):
+    def test_every_segment_register_is_proved(self):
+        for h in ('8ed0', '8e5000', '17', '8ec8', '8e08', '16', '0e', '6616', '06', '1e', '8cd8', '668c0424', '8ec0', '8ed8', '8ee0', '8ee8', '07', '1f', '8e00'):
             r, n = sysspec.check(key(h)); self.assertEqual(r, 'proved', (h, n))
 
-    def test_the_other_registers_are_uncertified_on_the_undecided_row(self):
-        for h in ('8ec0', '8ed8', '8ee0', '8ee8', '07', '1f', '8e00'):
-            r, n = sysspec.check(key(h)); self.assertEqual(r, 'uncertified', h); self.assertIn('mov_to_sreg.undecided', n); self.assertIn('readable bit', n)
+    def test_an_undecided_selector_row_has_no_form(self):
+        from fnvlift import x86sys as lx
+        u = lx.REC['mov_to_sreg']['undecided']; old = list(u['selectors']); u['selectors'][:] = [27]
+        rec = copy.deepcopy(x86sys.load()); rec['mov_to_sreg']['undecided']['selectors'] = [27]
+        try:
+            import sysspec_seg
+            for h in ('8ec0', '8ed8', '07', '1f', '8e00'):
+                r, n = sysspec_seg.check(key(h), rec); self.assertEqual(r, 'uncertified', h)
+            self.assertRaises(core.Unsupported, emit, '8ec0')
+            self.assertEqual(sysspec_seg.check(key('8ed0'), rec)[0], 'proved')       # ss does not depend on it
+        finally: u['selectors'][:] = old
 
     def test_prefixes_outside_the_spec_are_uncertified(self):
         for h in ('2607', '671f', '261e'): self.assertEqual(sysspec.check(key(h))[0], 'uncertified', h)
@@ -60,9 +68,6 @@ class Seg(unittest.TestCase):
         t = emit('8ed0'); self.assertLess(t.index('FNVL_RAISE_AV'), t.index('fnvl_seg_set(c, 2,'))
         self.assertIn('FNVL_UD', emit('8ec8')); self.assertNotIn('fnvl_seg_set', emit('8ec8'))
         self.assertIn('fnvl_seg_get(c,3)', emit('8cd8'))
-
-    def test_an_undecided_row_has_no_body(self):
-        self.assertRaises(core.Unsupported, emit, '8ec0')
 
     def test_crdr_moves_are_privileged(self):
         for h in ('0f20c0', '0f22c0', '0f21c0', '0f23c0'):
@@ -91,6 +96,26 @@ class Cites(unittest.TestCase):
         r = subprocess.run([sys.executable, '-I', os.path.join(HERE, '..', 'sdm_cite_check.py'), sdm, py, tb], capture_output=True, text=True); self.assertEqual(r.returncode, 0, r.stdout)
         r = subprocess.run([sys.executable, '-I', os.path.join(HERE, '..', 'sdm_pages.py'), sdm, py], capture_output=True, text=True)
         with open(tb) as fh: self.assertEqual(r.stdout, fh.read())
+
+
+class Far(unittest.TestCase):
+    def setUp(self): declared_x86sys.configure()
+    def tearDown(self): inputs.reset()
+
+    def test_far_classes_of_the_record_are_proved_over_the_domain(self):
+        import sysspec_far
+        rec = x86sys.load()
+        for h, call in (('ea000000000000/1.6.0.0', False), ('9a000000000000/1.6.0.0', True)):
+            cases = sysspec_far.check(h, call, rec, True); self.assertTrue(all(r == 'proved' for _, r in cases), cases)
+            self.assertEqual({c for c, _ in cases} >= {'valid', 'null', 'ti1', 'beyond', 'gp', 'complete', 'cs-selector', 'eip'}, True)
+        r, n = sysspec.check('ea000000000000/1.6.0.0'); self.assertEqual(r, 'uncertified'); self.assertIn('OutsideDomain', n); self.assertIn('115 GDT indexes', n)
+
+    def test_a_record_that_differs_from_the_form_is_a_difference(self):
+        import sysspec_far
+        rec = copy.deepcopy(x86sys.load()); rec['jmp_far']['jumps']['selectors'].append(0x20)       # a selector the Form faults on is declared valid
+        cases = dict(sysspec_far.check('ea000000000000/1.6.0.0', False, rec, True)); self.assertEqual(cases['valid'], 'differs')
+        rec = copy.deepcopy(x86sys.load()); del rec['jmp_far']['data_descriptors']['0x20']          # a selector of no class: the partition is not complete
+        cases = dict(sysspec_far.check('ea000000000000/1.6.0.0', False, rec, True)); self.assertEqual(cases['complete'], 'differs')
 
 
 if __name__ == '__main__':

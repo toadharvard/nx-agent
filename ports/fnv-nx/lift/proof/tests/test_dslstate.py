@@ -30,7 +30,12 @@ class State(unittest.TestCase):
         f = dsl.Form('k', 0, 1); self.assertRaises(AssertionError, f.reg, 'ees', dsl.C(0, 32))
 
     def test_a_segment_register_destination_without_a_decided_row_has_no_form(self):
-        for k in ('8e00/0.0.0.0', '6607/0.0.0.0'): self.assertRaises(dsl.UndecidedRow, symform.symbuild, k)      # es: mov_to_sreg.undecided
+        from fnvlift import x86sys as lx
+        u = lx.REC['mov_to_sreg']['undecided']; old = list(u['selectors']); u['selectors'][:] = [27]
+        try:
+            for k in ('8e00/0.0.0.0', '6607/0.0.0.0'): self.assertRaises(dsl.UndecidedRow, symform.symbuild, k)      # es: mov_to_sreg.undecided
+        finally: u['selectors'][:] = old
+        symform.symbuild('8e00/0.0.0.0')
         self.assertEqual([x[:2] for x in symform.symbuild('8ed0/0.0.0.0').form.xs], [('sel', 2)])
 
     def test_mov_from_sreg_reads_the_selector_input(self):
