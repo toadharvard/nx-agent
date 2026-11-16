@@ -2710,3 +2710,13 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - Found by w28 and assigned to it: farm/header_owners.py imports a missing resolve_profile; manifest/funcfacts.py imports an unpinned dnfile.
 - Not yet run: the farm verdict on w28-c5 (part of cand5).
 - bottleneck: the cand4 verdict (w15); L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
+
+### 2026-11-16: L2 GMP/MPFR recipe forms accepted for cand5 (claude/fnv-l2-source-plugins-cand4b 67d1ae6fe)
+- All four items are in:
+  1. An archive input is a guest root only.
+  2. "Probes compile and link only", cited to the autoconf manual. It found a real gap: --build was missing, which left cross_compiling=maybe. gmpgen and mpfrgen now assert cross_compiling=yes.
+  3. Job.archives is created in __init__.
+  4. The behavioural include_uses test for run steps.
+- gmp 516 and mpfr 257 objects green, with cc stages unchanged (cache hits). test_archive_sources: 0 fails.
+- cand5 queue: trunk-after-cand4 + w28-c5 + L2 67d1ae6fe + L6 ce86bbd83 + the L5 c5 offer.
+- bottleneck: the cand4 verdict (w15); L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
