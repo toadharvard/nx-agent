@@ -26,7 +26,7 @@ def load_kinds(inc):
     m = re.search(r'#define FNVNX_SYMPAIR_KINDS\(X\)(.*?)\n\n|#define FNVNX_SYMPAIR_KINDS\(X\)(.*)\Z', text, re.S)
     if not m:
         raise ValueError('%s: no FNVNX_SYMPAIR_KINDS' % inc)
-    return frozenset(re.findall(r'X\(([^,()\s]+),', m.group(1) or m.group(2)))
+    return frozenset(re.findall(r'X\(([^,()\s]+),', m[1] or m[2]))
 
 
 NAMELESS = frozenset(('thunk', 'vtable', 'gcc', 'internal'))
