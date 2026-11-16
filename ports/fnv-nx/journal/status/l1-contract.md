@@ -2806,3 +2806,12 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - linkstrict on hostabi:pie;
   - objstub: 12 declared-machine bodies uncited.
   w15 triages all of them, with w28 for the roots it added. Citations come only from sources read, and each body owned by another layer goes to its lead.
+
+### 2026-11-16: recipe.py re-resolves roots without end (L3a farm 3, liftsrc at c4b557ed2d55)
+- 26,650 hits, 0 builds, 77 CPU-min. A sequence of about 223 stages repeats about 120 times, and the lifted_by stage gen:imptest/lifted:1 never runs.
+- Assigned to w28 (urgent):
+  - a per-process resolution memo for roots and outputs (diamonds resolve once);
+  - a re-entered root is red "cycle: A → … → A";
+  - a lifted_by stage missing from the expanded steps is red;
+  - selftests for all three, and a diagnosis: real cycle or recomputation.
+- bottleneck: the cand4 verdict at c35a5e6a4 (farm); recipe re-resolution (w28); L2 path (a) plugin pin; L3a facts2 universe pin.
