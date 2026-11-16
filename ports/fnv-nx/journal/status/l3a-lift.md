@@ -1911,3 +1911,9 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - Priority 1 (orchestrator, 09:10): lift/rt dispatch.c is red on the cand4/L5 line. It blocks loader, exports and bridgetable (L5) and the GPU test and boot (L4). On base3 4577ca607, lift/rt is green.
   - Doing: w15 (session_01KmtZKUTz38RgDfhd7k1M1W, branch claude/fnv-l3a-lift-w15-rt off L5 w39 0a3f9b76) reproduces it, names the cause, and fixes it by rule. Cause and commit to follow.
 - base3 @4577ca607 (+296144c9a). Doing (w8): platform trees from L5 0a3f9b76, plus 687182c85 (include_of counts as a declaration).
+- dispatch.c red: done (w15, archived).
+  - Cause: cand4's toolchain/ was copied whole from cand2 265c4ea4a, so its dispatch plugin lacked L3a's 67164ec5 (ENTRY1-ATOMIC in C). The error was ENTRY1-CONT at dispatch.c:69 __atomic_store.
+  - Fix: eea21fad on claude/fnv-l3a-lift-w15-rt off 0a3f9b76. lift/rt goes from 11 objects (red) to 12 (green). base3 already has 67164ec5.
+  - Next red on that line: imptest x86sys, which needs base3's lift/tools (6d67261e on top of f3a30208).
+  - Ruled for cand5 (sent to L1): L3a's lift/ and toolchain/dispatch are taken as whole trees from base3.
+- base3 @686f1d3cb (w8): L5 w39 platform trees. Platform builds green with 112 objects. Doing: 687182c85.
