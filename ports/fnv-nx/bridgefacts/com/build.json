@@ -2,13 +2,11 @@
  "format": "fnvnx-recipe/1",
  "generated": [
   {
-   "tool": "ports/fnv-nx/bridgefacts/com/comrows.py",
+   "tool": "ports/fnv-nx/bridgefacts/com/spec_extract.py",
    "args": [
     "/in/ports/fnv-nx/shim/include",
     "/in/ports/fnv-nx/platform/audio",
-    "/out/com_spec.json",
-    "/out/com_rows.tsv",
-    "/out/com_words.tsv"
+    "/out/com_spec.json"
    ],
    "inputs": [
     "ports/fnv-nx/shim/include/dsound.h",
@@ -17,7 +15,23 @@
     "ports/fnv-nx/platform/audio/dshow_int.h"
    ],
    "outputs": [
-    "com_spec.json",
+    "com_spec.json"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/bridgefacts/com/comrows.py",
+   "args": [
+    "/stage/com_spec.json",
+    "/out/com_rows.tsv",
+    "/out/com_words.tsv"
+   ],
+   "inputs": [
+    {
+     "stage": "ports/fnv-nx/bridgefacts/com:gen:0",
+     "path": "com_spec.json"
+    }
+   ],
+   "outputs": [
     "com_rows.tsv",
     "com_words.tsv"
    ]
