@@ -541,3 +541,10 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
     - (b) there is no console_cpu.fpcr row (DN/FZ/RMode), and enter.cc writes FPCR=0 without a record;
     - (c) there is no execution path for recipe-built aarch64 helper objects, so the agreement check is not run (L4, after the first frame).
   - Per-class x87 counts are unchanged: facts 27/92 classes, pack 34/122.
+- 2026-11-16: w-intsys merged (1d8bdc7c5, merge e13391e80).
+  - x86sys is back to L5 w35 4ec8cd2c1: LAR/LSL and IRETD are UndecidedRow until after the first frame.
+  - The 86acc4931 pdfplumber copy is reverted.
+  - test_gate_fpexact (L3a 36d3a8948) and test_simdcheck (code-store fault from sysspec_store's one rule) are green; 52/52 test files pass.
+  - Cleared-#UD partition tools are deleted (owner 07:50Z): udcert.py, cleared_join.py, factsites.py, undecided_sites.py, sdmfeat rows/partition.
+  - Relift check at L3a b6e52e004 vs base3 6d67261ef, over 26,637 keys (B plus 2,833 pack keys; FACTS is red so A is pack-only): 0 sha changes, 0 outcome changes. Both trees give 23,933 built, 2,691 KeyError, 12 AssertionError, 1 SymbolicBranch.
+  - Open: the 12 AssertionError keys are pop Sreg / mov Sreg shapes (07 17 1f 2607 261f 3607 6707 671f 8ecf 8edb 8ee4 8eee). These are reached-site classes; worker a3994 owns the fix.
