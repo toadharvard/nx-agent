@@ -8,12 +8,14 @@ completeness-checked summary), built by verify/recipe.py in GATE_CACHE; the summ
 {"stage": "ports/fnv-nx/render/shaders/sm_link_sum:run:summary", "path": "summary.json"}, the one reader of a stage output.
 Universe = the stage certificates (entry x translator flag set) plus the link certificates (program set); red = the summary's `red`
 (refusals, not-ok stages, signature disagreements, link failures, missing or unexpected certificates). Green iff universe > 0 and red = 0."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json, os, re, sys
 
 REPO = os.getcwd()
 sys.path.insert(0, os.path.join(REPO, "ports", "fnv-nx", "verify"))
-import recipe  # noqa: E402
-import gate_build  # noqa: E402
+import fnvnx.verify.recipe as recipe  # noqa: E402
+import fnvnx.verify.gate_build as gate_build  # noqa: E402
 
 ROOT = "ports/fnv-nx/render/shaders/sm_link_sum"
 

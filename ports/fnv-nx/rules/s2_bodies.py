@@ -23,8 +23,8 @@ import collections
 import os
 import re
 
-import core                        # noqa: E402
-import s1_compile                  # noqa: E402  (the units.json readers)
+from fnvnx.rules import core                        # noqa: E402
+from fnvnx.rules import s1_compile                  # noqa: E402  (the units.json readers)
 
 CLASS_HEAD = re.compile(r'^(?:template\s*<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>\s*)?(?:typedef\s+)?(?:class|struct|union)\s+'
                         r'(?:__declspec\s*\([^()]*\)\s*)?([A-Za-z_]\w*)')
@@ -285,8 +285,8 @@ def r_harness_internal(path, text, stats):
 # decomp's own. Line numbers stay. Families left alone are counted (POP2-SKIP-<why>) and listed with their reason
 # in <tree>/build/pop2_skipped.tsv, the sites done in <tree>/build/pop2_sites.tsv (derived, local only).
 
-import _msvcsig                    # noqa: E402
-import _popgen                     # noqa: E402
+from fnvnx.rules import _msvcsig                    # noqa: E402
+from fnvnx.rules import _popgen                     # noqa: E402
 
 POP2_NOTE = ' /* fnv-nx POP2: overloads with the words the callees pop */'
 pg = _popgen

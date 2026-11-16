@@ -97,7 +97,7 @@ import recipe
 pin = json.load(open(os.path.join(sys.argv[1], "guest_compiler.json")))
 sel = ["-fPIC"]   # the multilib adds the code model's selector
 c = [f for f in recipe.semantics_set(None) if f not in sel]
-print(" ".join(recipe.semantics_for(sys.argv[2], sys.argv[3], flags=c) + recipe.runtime_cflags(pin)))   # runtime_cflags: the guest_compiler.json field (newlib's -DPREFER_SIZE_OVER_SPEED), never spelled here
+print(" ".join(recipe.semantics_for(sys.argv[2], sys.argv[3], flags=c) + recipe.runtime_cflags(pin)))   # runtime_cflags: the guest_compiler.json field (the newlib size-over-speed define), never spelled here
 EOF
 }
 
@@ -201,7 +201,7 @@ if [ -n "${FNVNX_PLUGINS_JSON:-}" ]; then
   done < <(find "$P" -type l)
   [ -z "$(find "$P" -type l)" ] || { echo "build.sh: the prefix holds symlinks:" >&2; find "$P" -type l | head >&2; exit 5; }
   # Host programs (the compiler's own x86-64 executables under bin/ and libexec/) lose their .debug_* sections: a host program is not a guest object,
-  # and with -g cc1/cc1plus/lto1/lto-dump exceed the 100 MB file limit of the mirror. The class is every x86-64 ELF file in those two directories;
+  # and with debug info cc1/cc1plus/lto1/lto-dump exceed the 100 MB file limit of the mirror. The class is every x86-64 ELF file in those two directories;
   # the guest libraries and their members keep all their sections.
   while IFS= read -r f; do
     [ "$(head -c4 "$f" | od -An -c | tr -d ' ')" = '177ELF' ] || continue

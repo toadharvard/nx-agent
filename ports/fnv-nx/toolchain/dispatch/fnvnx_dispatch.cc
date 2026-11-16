@@ -401,17 +401,21 @@ static void emit_lines(const char *section, const std::set<std::string> &lines)
 static void finish_unit(void *, void *)
 {
   plugsym_writer_scope plugsym_scope;   /* RULE DECLTYPE-PLUGINSYM: reports on every way out */
-  /* RULE DECLTYPE-PLUGINSYM: fnvnx_dispatch is a symbol this plugin makes (a unit that declares it has its row from the front end's declaration). With the layout
-   * plugin loaded the registry gives it its line (a C unit: this prototype's row; a C++ unit: the reason `plugin`); without it (this plugin alone) the line is written here. */
+  /* RULE DECLTYPE-PLUGINSYM: fnvnx_dispatch is a symbol this plugin makes: its calls use this plugin's own artificial declaration, which is not the front end's. A unit
+   * that also declares it (a header) gives a source line only when the front end itself used it; a unit that declares it and never calls it has no symbol-table node
+   * for that declaration, and the rewritten call's symbol has no line from the declaration. So with the layout plugin loaded the symbol is ALWAYS registered
+   * (registry: a row the declaration gave is kept, else the writer's spelling, else the reason `plugin`; a C unit that has no declaration: this prototype's
+   * row). A unit that declares it gives the registry no spelling (the declaration's own row is its one line, and no second spelling can disagree with it).
+   * Without the layout plugin (this plugin alone) the line is written here, except where the unit's declaration gives it. */
   if (fp_var) {   /* the thread-local word of the call sequence (an artificial declaration of this plugin) */
     std::vector<tree> stk;
     plugsym_note("fnvnx_call_fp", dl_type(TREE_TYPE(fp_var), stk));
   }
-  if (site_count && !fe_declares_dispatch) {
+  if (site_count) {
     std::vector<tree> stk;
-    std::string ty = fnvnx_cxx_fe() ? "" : dl_type(TREE_TYPE(get_dispatch()), stk);
+    std::string ty = (fnvnx_cxx_fe() || fe_declares_dispatch) ? "" : dl_type(TREE_TYPE(get_dispatch()), stk);
     if (fnvnx_plugsym().reader) plugsym_note("fnvnx_dispatch", ty);
-    else if (!fnvnx_cxx_fe()) {
+    else if (!fnvnx_cxx_fe() && !fe_declares_dispatch) {
       std::set<std::string> row;
       row.insert("fnvnx_dispatch\t" + ty);
       emit_lines(".fnvnx.decltype", row);
@@ -574,6 +578,10 @@ static bool atomic_arg_type(tree a, std::vector<tree> &chain, tree &T)
     return TREE_TYPE(p) && POINTER_TYPE_P(TREE_TYPE(p)) && TYPE_MAIN_VARIANT(strip_array_types(TREE_TYPE(TREE_TYPE(p)))) == TYPE_MAIN_VARIANT(strip_array_types(T));
   }
   if (!TREE_TYPE(o)) return false;
+  /* the C front end folds the generic form's `*(U *)&obj` of an OBJECT into the object itself or a view conversion of it (same size): a value argument that is no
+   * constant and no pointer names the object it reads, and it moves that object's own type. A constant (an order, a flag, a size) moves nothing; a non-constant
+   * order is read as a moved value of its integer type, so the call is no same-type move: refused (never accepted wrongly). */
+  if (!POINTER_TYPE_P(TREE_TYPE(o)) && TREE_CODE(o) != INTEGER_CST && !entry_type(TREE_TYPE(o))) { T = TREE_TYPE(o); return true; }
   if (POINTER_TYPE_P(TREE_TYPE(o)) && POINTER_TYPE_P(TREE_TYPE(a)) && !entry_type(TREE_TYPE(o))) { T = TREE_TYPE(TREE_TYPE(o)); return true; }
   if (entry_type(TREE_TYPE(o)) && !POINTER_TYPE_P(TREE_TYPE(a))) { T = TREE_TYPE(o); return true; }   /* an entry VALUE moved as the value argument of a sized builtin */
   return false;

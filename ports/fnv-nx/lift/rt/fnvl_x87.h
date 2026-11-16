@@ -99,10 +99,6 @@ static inline fv fv_sg(fv a,u32 chs){ s64 x;
     case FK_I16: case FK_I32: case FK_I64: x=(s64)a.v; if(chs?x==0:0) return fv_f64(-0.0); if(!chs&&x>=0) return a;
       if(x==(s64)(1ull<<63)) return fv_f64(9223372036854775808.0); return fvmk(a.k,(u64)-x,0);
     default: return fvmk(FK_M80,a.v,chs?a.e^0x8000u:a.e&0x7fffu); } }
-/* frndint */
-static inline fv fv_rnd(fv a){ u32 f=0, rc=(c->fcw>>10)&3; fnvl_f80 r;
-  switch(a.k){ case FK_F64: case FK_F32: { double d=fv_d(a), q=fx_round(d,rc); FXF((d==d&&q!=d)?0x20u|FX_UP(d,q):0u); return fv_f64(q); } case FK_I16: case FK_I32: case FK_I64: FXF(0); return a;
-    default: r=fnvl_x_rndint(fv_x(a),c->fcw,&f); FXF(f); return fvmk(FK_M80,r.m,r.se); } }
 /* compares: C3<<14|C2<<10|C0<<8, exact. Q = 1: the unordered compares FUCOM FUCOMP FUCOMPP FUCOMI FUCOMIP (IE only for a signaling NaN); Q = 0: the ordered ones FCOM FCOMP FCOMPP FCOMI FCOMIP FICOM FTST
    (IE for any NaN), SDM 2A FCOM / FCOMI "Floating-Point Exceptions". Pairs of finite non-denormal F64/F32/I16/I32 are exact in double and raise nothing (C1 = 0); every other pair goes through the 80-bit core,
    whose IE and C1 reach c->fex through FXF. DE is NOT read from the host or from the core (the 80-bit image of a binary32/binary64 denormal is a normal number): it is fx_de, ONE rule, SDM 1:8.5.2 and 1:4.9.2:
@@ -116,6 +112,10 @@ static inline u32 fx_de(fv a,fv b,u32 ie){ return ((fx_den(a)|fx_den(b))&!ie&!(f
 static inline u32 fv_cmp(fv a,fv b,u32 q){ u32 f=0, r;
   if(__builtin_expect((0x1eu>>a.k)&(0x1eu>>b.k)&1,1)&&!fx_den(a)&&!fx_den(b)){ double x=fv_d(a),y=fv_d(b); if(x==x&&y==y){ FXF(0); return x==y?0x4000u:x<y?0x100u:0u; } }
   r=fnvl_x_cmp(fv_x(a),fv_x(b),q,&f); f=(f&~2u)|fx_de(a,b,f&1u); FXF(f); return r; }
+/* frndint: DE (SDM 1:8.5.2) from the source at its own type, by fx_de; the rounding PE / C1 as before, IE of an 80-bit operand from the core */
+static inline fv fv_rnd(fv a){ u32 f=0, rc=(c->fcw>>10)&3; fnvl_f80 r;
+  switch(a.k){ case FK_F64: case FK_F32: { double d=fv_d(a), q=fx_round(d,rc); FXF(((d==d&&q!=d)?0x20u|FX_UP(d,q):0u)|fx_de(a,a,0u)); return fv_f64(q); } case FK_I16: case FK_I32: case FK_I64: FXF(0); return a;
+    default: r=fnvl_x_rndint(fv_x(a),c->fcw,&f); FXF(f|fx_de(a,a,f&1u)); return fvmk(FK_M80,r.m,r.se); } }
 #define FCMP(A,B,Q) do{ u32 r_=fv_cmp((A),(B),(Q)); c0=(r_>>8)&1; c2=(r_>>10)&1; c3=(r_>>14)&1; }while(0)
 #define FCMPI(A,B,Q) do{ u32 r_=fv_cmp((A),(B),(Q)); zf=(r_>>14)&1; pf=(r_>>10)&1; cf=(r_>>8)&1; of=sf=af=0; }while(0)
 #define FXAM(F) do{ fv f_=(F); u32 r_=fnvl_x_xam(fv_x(f_),f_.k==0); c0=(r_>>8)&1; c2=(r_>>10)&1; c3=(r_>>14)&1; c->fex=(c->fex&~0x200u)|(r_&0x200u); }while(0)

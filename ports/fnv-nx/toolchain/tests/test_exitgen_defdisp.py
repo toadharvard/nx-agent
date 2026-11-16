@@ -17,8 +17,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'lift', 'tools'))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
-from fnvnx.toolchain.tests import plugbuild as pb  # noqa: E402
+import plugbuild as pb  # noqa: E402
 from fnvnx.lift.tools import exitgen  # noqa: E402
 
 check = pb.Checks('test_exitgen_defdisp')

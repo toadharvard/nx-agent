@@ -4,9 +4,11 @@
     python3 -I d3d9_spec.py --stdout INCDIR          print the table
 Inputs: shim/include/d3d9*.h (method order, types, structs, enums, constants) + d3d9_rules.py / d3d9_cls.py / d3d9_tables.py /
 d3d9_exports.py (the hand tables). Unknown types or invalid rules abort the run: nothing is guessed."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json, os, re, sys
 
-import d3d9_cls as C, d3d9_exports as EX, d3d9_expr as X, d3d9_rules as R, d3d9_structs as ST, d3d9_tables as T   # noqa: E402
+import fnvnx.bridgefacts.d3d9.d3d9_cls as C; import fnvnx.bridgefacts.d3d9.d3d9_exports as EX; import fnvnx.bridgefacts.d3d9.d3d9_expr as X; import fnvnx.bridgefacts.d3d9.d3d9_rules as R; import fnvnx.bridgefacts.d3d9.d3d9_structs as ST; import fnvnx.bridgefacts.d3d9.d3d9_tables as T   # noqa: E402
 
 IUNK = [("HRESULT", "QueryInterface", "REFIID riid, void** ppvObj"), ("ULONG", "AddRef", ""), ("ULONG", "Release", "")]
 
@@ -252,6 +254,6 @@ if __name__ == "__main__":
     out = render(Gen(inc).build())
     if "--stdout" in sys.argv: sys.stdout.buffer.write(out)
     else:
-        import d9rows
+        import fnvnx.bridgefacts.d3d9.d9rows as d9rows
         open(a[0], "wb").write(out)
         open(a[1], "w").write("".join("\t".join(r) + "\n" for r in d9rows.rows(json.loads(out))))

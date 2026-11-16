@@ -17,9 +17,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
-from fnvnx.toolchain.tests import plugbuild as pb  # noqa: E402
-sys.path.insert(0, os.path.join(HERE, '..', '..', 'link'))
+import plugbuild as pb  # noqa: E402
 from fnvnx.link import ctypes_compat as cc  # noqa: E402
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'layout', 'decltype_spell.inc')) as _f:
     REASONS = cc.decltype_reasons(_f.read())
@@ -284,8 +282,52 @@ CXX_ONLY = ('struct P { int a; };\nstruct Q : P { int b; };\nstruct V { virtual 
             'int cxxfn(int);\nint cxxuse() { return cxxfn(1); }\nint asmn(int) __asm__("plain_cxx");\nint asmuse() { return asmn(1); }\n')
 CXX_ONLY_ROWS = {
     'r1': '(ref:4:4:struct:P{a:int},ref:4:4:const:struct:Q{-:struct:P{a:int};b:int})int',
-    'r2': '(*struct:V{-:**(?)int;c:int},struct:ns__N{n:int},enum:EC=short_int,*struct:Top__In{i:int})int',
+    'r2': '(*struct:V{-:**(?)int;c:int}!,struct:ns__N{n:int},enum:EC=short_int,*struct:Top__In{i:int})int',
     'r3': '(nullptr_t)int', 'gq': 'struct:Q{-:struct:P{a:int};b:int}', 'gq2': 'struct:Q{-:struct:P{a:int};b:int}', 'r4': '(int)int', 'use': '()int'}
+
+
+CALLTRIVIAL_CXX = r'''#include <stdint.h>
+template <class Sig> class gfn;
+template <class R, class... A> class gfn<R(A...)> { public: constexpr gfn() = default; constexpr gfn(decltype(nullptr)) {} explicit constexpr gfn(uintptr_t v) : v_(v) {} private: uintptr_t v_ = 0; };
+struct CCopy { int a; CCopy(const CCopy &o) : a(o.a) {} };
+struct CDtor { int a; ~CDtor() {} };
+struct CDel { int a; CDel(const CDel &) = delete; CDel(CDel &&) = default; };
+struct CTriv { int a; int b; };
+union UTriv { int i; float f; };
+union UDtor { int i; struct M { ~M() {} } m; ~UDtor() {} };
+extern "C" {
+int ct_copy(CCopy x); int ct_dtor(CDtor x); int ct_del(CDel x); int ct_triv(CTriv x); int ct_union(UTriv x); int ct_udtor(UDtor *x, UTriv y);
+int ct_gfn(gfn<void(void *)> cb);
+int ct_ptr(CCopy *p);
+}
+int use_ct() { CCopy *c = 0; CDtor *d = 0; CDel *e = 0; CTriv t = {0, 0}; UTriv u = {0}; UDtor *ud = 0; return ct_copy(*c) + ct_dtor(*d) + ct_del(static_cast<CDel &&>(*e)) + ct_triv(t) + ct_union(u) + ct_udtor(ud, u) + ct_ptr(c) + ct_gfn(nullptr); }
+'''
+CALLTRIVIAL_C = 'struct CTriv { int a; int b; };\nint ct_triv(struct CTriv x);\nint use_ct(void) { return ct_triv((struct CTriv){0, 0}); }\n'
+
+
+def decltype_calltrivial(td, so):
+    """RULE LAYOUT-CALLTRIVIAL: a complete record whose compiler type is TREE_ADDRESSABLE (non-trivial for the purposes of calls, Itanium C++ ABI 3.1.2) is spelled
+    `struct:TAG{...}!`; every other record as before (no `!`); a C record never has it. The rows are read from the compiled objects, not typed."""
+    cx, cc_ = os.path.join(td, 'ct.cpp'), os.path.join(td, 'ct.c')
+    open(cx, 'w').write(CALLTRIVIAL_CXX)
+    open(cc_, 'w').write(CALLTRIVIAL_C)
+    got = {}
+    for src, o in ((cx, 'ct_cxx.o'), (cc_, 'ct_c.o')):
+        r = pb.compile(src, os.path.join(td, o), so)
+        check('calltrivial: %s compiles' % os.path.basename(src), r.returncode == 0, r.stderr[-800:])
+        if r.returncode:
+            return
+        got[o] = dt_all(os.path.join(td, o), o)[0]
+    g = got['ct_cxx.o']
+    bang = lambda k: g.get(k, '').count('}!')   # noqa: E731
+    check('calltrivial: a class with a user copy constructor, a user destructor, a deleted copy with a defaulted move... (the compiler decides, not the text)',
+          bang('ct_copy') == 1 and bang('ct_dtor') == 1, {k: g.get(k) for k in ('ct_copy', 'ct_dtor', 'ct_del')})
+    check('calltrivial: a deleted copy constructor with a defaulted (trivial) move constructor is trivial for calls (Itanium C++ ABI 3.1.2: a non-deleted trivial move constructor): no `!`', bang('ct_del') == 0 and 'struct:CDel{a:int}' in g.get('ct_del', ''), g.get('ct_del'))
+    check('calltrivial: a trivial struct, a trivial union and the guestfn-shaped class have no `!`', bang('ct_triv') == 0 and bang('ct_union') == 0 and bang('ct_gfn') == 0, {k: g.get(k) for k in ('ct_triv', 'ct_union', 'ct_gfn')})
+    check('calltrivial: a pointer to a non-trivial class is a pointer to a record: its row is as before (the record is spelled with `!` inside)', g.get('ct_ptr', '').startswith('(*struct:CCopy{a:int}!)'), g.get('ct_ptr'))
+    check('calltrivial: a union with a user destructor has `!`', g.get('ct_udtor', '').count('}!') >= 1 and 'union:UDtor' in g.get('ct_udtor', ''), g.get('ct_udtor'))
+    check('calltrivial: the C fixture with the same trivial struct is spelled with no `!` and equals the C++ row of ct_triv minus nothing',
+          '!' not in got['ct_c.o']['ct_triv'] and got['ct_c.o']['ct_triv'] == g['ct_triv'], (got['ct_c.o'].get('ct_triv'), g.get('ct_triv')))
 
 
 def decltype_cxx(td, so):
@@ -301,6 +343,19 @@ def decltype_cxx(td, so):
         rows[o] = dt_all(os.path.join(td, o), o)[0]
     check('extern "C" declarations and definitions of a C++ unit give the same rows as the same text in a C unit (%d symbols)' % len(rows['pair_c.o']),
           rows['pair_c.o'] == rows['pair_cxx.o'] and len(rows['pair_c.o']) >= 14 and '-' in rows['pair_c.o']['anf'] and '._anon' not in rows['pair_cxx.o']['anf'], (sorted(set(rows['pair_c.o'].items()) ^ set(rows['pair_cxx.o'].items()))))
+    # RULE DECLTYPE-BUILTIN: a record the target builds (its va_list) has one row whatever the front end: its own FIELD_DECL names on both.
+    BI = '#include <stdarg.h>\nint bi_fmt(const char *f, va_list ap) { return f[0]; }\nint bi_scan(const char *f, va_list *app) { return f[0] + (app != 0); }\n'
+    bc, bx = os.path.join(td, 'bi.c'), os.path.join(td, 'bi.cpp')
+    open(bc, 'w').write(BI)
+    open(bx, 'w').write('#include <stdarg.h>\nextern "C" {\nint bi_fmt(const char *f, va_list ap) { return f[0]; }\nint bi_scan(const char *f, va_list *app) { return f[0] + (app != 0); }\n}\n')
+    brow = {}
+    for src_, o in ((bc, 'bi_c.o'), (bx, 'bi_cxx.o')):
+        r = pb.compile(src_, os.path.join(td, o), so)
+        check('decltype builtin: %s compiles' % os.path.basename(src_), r.returncode == 0, r.stderr[-800:])
+        if r.returncode:
+            return
+        brow[o] = dt_all(os.path.join(td, o), o)[0]
+    check('a target-built record (va_list) has byte-identical rows in a C and a C++ unit, with its field names', brow['bi_c.o'] == brow['bi_cxx.o'] and 'bi_fmt' in brow['bi_c.o'] and '__stack' in str(brow['bi_cxx.o']), brow)
     src = os.path.join(td, 'cxxonly.cpp')
     open(src, 'w').write(CXX_ONLY)
     r = pb.compile(src, os.path.join(td, 'cxxonly.o'), so)
@@ -430,6 +485,20 @@ def plugsym(td):
         check('DECLTYPE-PLUGINSYM: the C unit\'s dispatcher has the row of its prototype, once', rows.get('fnvnx_dispatch', '').startswith('(*void,*struct:fnvnx_site{'), (rows, why))
 
 
+    # a unit that DECLARES the plugin's symbol (platform/include/fnvl_host.h) and only makes an indirect call: the front end never uses the declaration, so it has no symbol-table
+    # node and no line; the rewritten call's symbol takes its line from the registry (C++: `plugin`; C: the declaration's own row)
+    hdr = os.path.join(HERE, '..', '..', 'platform', 'include', 'fnvl_host.h')
+    for ext, label in (('cpp', 'C++'), ('c', 'C')):
+        src = os.path.join(td, 'psh.' + ext)
+        open(src, 'w').write(open(hdr).read() + '\ntypedef int (*hfp)(int);\nint hcall(hfp f, int v) { return f(v); }\n')
+        o = os.path.join(td, 'psh_%s.o' % ext)
+        r = pb.compile(src, o, so, native=True)
+        check('DECLTYPE-PLUGINSYM: a %s unit that declares fnvnx_dispatch and only makes an indirect call compiles' % label, r.returncode == 0, r.stderr[-800:])
+        if r.returncode == 0:
+            rows, why = dt_all(o, 'psh.' + ext)
+            both = dict(rows, **why)
+            check('DECLTYPE-PLUGINSYM: ... and fnvnx_dispatch has its one line (%s)' % label, 'fnvnx_dispatch' in both, sorted(both))
+
 def main():
     td = tempfile.mkdtemp(prefix='test-layout-')
     try:
@@ -452,6 +521,7 @@ def main():
         plugsym(td)
         decltype_errors(td, so)
         decltype_cxx(td, so)
+        decltype_calltrivial(td, so)
         obj = os.path.join(td, 'v.o')
         r = pb.compile(os.path.join(HERE, 'layout', 'vec.c'), obj, so, args=['-std=gnu2x'])
         check('vec.c compiles', r.returncode == 0, r.stderr[:2000])

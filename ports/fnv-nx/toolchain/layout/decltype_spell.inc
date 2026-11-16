@@ -154,7 +154,9 @@ static std::string dl_type(tree t, std::vector<tree> &stk)
       ms += (ms.empty() ? "" : ";") + m;
     }
     stk.pop_back();
-    return pre + head + "{" + ms + "}";
+    /* RULE LAYOUT-CALLTRIVIAL: a complete record whose compiler type is TREE_ADDRESSABLE (on the main variant) is non-trivial for the purposes of calls (Itanium C++ ABI
+     * 3.1.2, which the AAPCS64 C++ ABI follows): it is passed by invisible reference. The spelling says so by a trailing `!`; the fact is the compiler's, never the source text's. */
+    return pre + head + "{" + ms + "}" + (TREE_ADDRESSABLE(TYPE_MAIN_VARIANT(t)) ? "!" : "");
   }
   case ENUMERAL_TYPE:
     if (!TREE_TYPE(t)) { dl_error("an enumeration without a compatible integer type", dl_tag(t)); return "?"; }
