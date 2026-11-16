@@ -46,7 +46,10 @@ def jump_out(cx, t, cond=None):
 def jump_to(cx, t):
     """control transfer to the constant address t (jmp, jcc, loop, jecxz, rep step): a label of this function, else jump_stmt. -> C statement"""
     cx.xfer = True
-    return 'goto %s;' % cx.lab(t) if cx.lo <= t < cx.hi else jump_stmt(cx, t)
+    if cx.lo <= t < cx.hi:
+        cx.edge(t)
+        return 'goto %s;' % cx.lab(t)
+    return jump_stmt(cx, t)
 
 
 def call_xfer(cx, o, t):
@@ -78,6 +81,7 @@ def jmp_indirect(cx, o, t):
         cx.kinds.add('import' if is_import(cx, o) else 'jmp-indirect-untabled')
         return ['FNVL_JMPN(goto nonlocal;,%s)' % arg(t)]
     cx.kinds.add('jumptable')
+    for x in set(cands): cx.edge(x)
     return (['{ u32 t=%s; switch(t){' % t] + ['case 0x%xu: goto %s;' % (x, cx.lab(x)) for x in sorted(set(cands))] +
             ['default: c->ra=t; goto nonlocal; } }'])
 

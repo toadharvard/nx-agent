@@ -90,7 +90,13 @@ class Ctx:
         self.finfo = {}                          # flags liveness (fnvlift/flaglive.py): address -> the record of an instruction emitted from its Form
         self.guarded = set()                     # addresses whose gs_guard emitted a raise (the flags are all live there)
         self.drop = {}                           # address -> the flags whose write is not emitted (second pass)
+        self.polls = frozenset()                 # suspension points P (flaglive.poll_set): an FNVL_POLL is the first emission at each (second pass)
+        self.succ = {}                           # address -> the addresses of this function that the instruction's emitted control flow reaches by goto or by its fall-through (the CFG of poll_set)
         self.raises = set()                      # addresses of instructions that can raise: ContinueExecution resumes there, so they are labels of the loop
+
+    def edge(self, t):
+        """the instruction being emitted transfers to the address t of this function by a goto (f_flow.jump_to, a jump-table case)"""
+        self.succ.setdefault(self.a, set()).add(t)
 
     def em(self, t):
         self.L.append(t)
@@ -414,20 +420,23 @@ def prune_labels(cx):
 
 
 def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
-    """lift one function: pass 1 emits every flag write and records the Form instructions (cx.finfo); pass 2 omits the flag writes that flaglive proves dead (FLAGLIVE.md)"""
+    """lift one function in two passes. Pass 1 emits everything and records the CFG (cx.succ) and the Form instructions (cx.finfo). From them: P = flaglive.poll_set (back-edge targets and entries), the flags
+    whose write is dead (flaglive.dropped, with every point of P an escape). Pass 2 emits the polls at P and omits the dead flag writes (FLAGLIVE.md, P2')"""
     from . import flaglive
-    txt, meta, cx = _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, {})
-    drop = flaglive.dropped(cx.finfo)
-    meta['flagdrop'] = {a: flaglive.mask(m) for a, m in sorted(drop.items())}
-    if drop:
-        txt, meta2, cx = _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, drop)
-        assert meta2['paths'] == meta['paths']
-        meta2['flagdrop'] = meta['flagdrop']
-        meta = meta2
-    return txt, meta
+    txt, meta, cx = _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, {}, frozenset())
+    graph = {a: sorted(t for t in cx.succ.get(a, ()) if t in cx.insns) for a in cx.insns}
+    for a, r in cx.finfo.items():          # a Form instruction has two derivations of its successors (its eip node, the emitted gotos). Every edge the emitter wrote is one the solver follows, or the solver
+        assert set(graph[a]) <= set(r['succs']) or flaglive.EXIT in r['succs'], (hex(a), r['succs'], graph[a])      # treats the instruction as an exit (all flags live): the solver never misses a successor
+    P = flaglive.poll_set(graph, [start] + [a for a in cx.insns if a in cx.uent])
+    drop = flaglive.dropped(cx.finfo, P)
+    txt, meta2, cx2 = _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, drop, P)
+    assert meta2['paths'] == meta['paths'] and {a: cx2.succ.get(a, set()) for a in cx2.insns} == {a: cx.succ.get(a, set()) for a in cx.insns}
+    meta2['flagdrop'] = {a: flaglive.mask(m) for a, m in sorted(drop.items())}
+    meta2['poll'] = sorted(P)
+    return txt, meta2
 
 
-def _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, drop):
+def _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, drop, poll):
     from . import f_x87_ctl as xc, f_sys
     addr, size = lo, hi - lo
     fall_hi = hi          # a body is exactly its range: falling past it is a transfer to the next address (f_flow.jump_out), never a copy of the code that follows
@@ -440,7 +449,7 @@ def _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, drop):
     order = sorted(insns)
     cx = Ctx(addr, size, insns, tables, taken)
     cx.start = start
-    cx.drop = drop
+    cx.drop, cx.polls = drop, poll
     xc.prepass(cx, img, 'dyn' if x87 == 'dyn' else None, x87 if isinstance(x87, int) else 0)     # x87 stack-depth pre-pass: cx.xm 's' static / 'd' dynamic / None
     em = cx.em
     kinds = cx.kinds
@@ -468,6 +477,9 @@ def _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, drop):
         cx.term = False
         cx.xdp = cx.xd.get(a, 0)
         n0 = len(cx.L)
+        if a in poll:       # a suspension point: the poll is the first emission of the instruction (inside fix_lines' range: the x87 hooks extend its SYNC_OUT / SYNC_IN)
+            cx.nonlocal_ = True
+            em('FNVL_POLL(SYNC_OUT;,SYNC_IN;,0x%xu)' % a)
         cx.b0 = ins.opcode[0]
         cx.modrm = ins.modrm
         if bad_lock:
@@ -486,6 +498,7 @@ def _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, drop):
             gs_guard(cx, ins)
             if len(cx.L) != g0: cx.guarded.add(a)
             dispatch(cx, ins)
+        if not cx.term and nxt in insns: cx.succ.setdefault(a, set()).add(nxt)      # the fall-through is an edge, whether it is the next line or a goto
         if not cx.term and (idx + 1 == len(order) or order[idx + 1] != nxt):
             if nxt in insns or nxt in bad:
                 em('goto %s;' % cx.lab(nxt))
@@ -507,7 +520,7 @@ def _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, drop):
             cx.P.insert(0, ('lift2', 'lift2:entry goto'))
             cx.PX[:] = [(i + 1, k, d) for i, k, d in cx.PX]
     if cx.nonlocal_:
-        labs = sorted(set(x for x in cx.callrets + owns + list(tables_all(tables)) + taken + sorted(cx.raises | bad) if x in insns or x in bad))
+        labs = sorted(set(x for x in cx.callrets + owns + list(tables_all(tables)) + taken + sorted(cx.raises | bad) + sorted(poll) if x in insns or x in bad))
         cases = ' '.join('case 0x%xu: %sgoto %s;' % (x, xc.case_pre(cx, x), cx.lab(x)) for x in labs)
         em('after_tail: ; if(esp>E){ SYNC_OUT; return; }')
         em('nonlocal: ; for(;;){ u32 t=c->ra; if(esp>E){ SYNC_OUT; return; } switch(t){ %s default: break; } SYNC_OUT; REGS(); fnvl_dispatch(t)(); REGS(); SYNC_IN; }' % cases)
@@ -531,7 +544,7 @@ def _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, drop):
     return txt, meta, cx
 
 
-PLAIN_FORM = re.compile(r'\b(FNVL_(?:CALLX|CALLD|TAILX))\(SYNC_OUT;,SYNC_IN;,|\b(FNVL_RET)\(SYNC_OUT;,|\b(FNVL_JMPN)\(goto nonlocal;,')
+PLAIN_FORM = re.compile(r'\b(FNVL_(?:CALLX|CALLD|TAILX|POLL))\(SYNC_OUT;,SYNC_IN;,|\b(FNVL_RET)\(SYNC_OUT;,|\b(FNVL_JMPN)\(goto nonlocal;,')
 
 
 def tables_all(tables):

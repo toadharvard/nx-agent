@@ -284,7 +284,9 @@ def fix_lines(cx, a, n0):
         t = L[i]
         if 'SYNC_OUT;' in t:
             t = t.replace('SYNC_OUT;', store(cx, da if 'FNVL_RAISE(2,' in t else d) + 'SYNC_OUT;')
-        if 'SYNC_IN;' in t and 'FNVL_TAILX(' not in t and 'after_tail' not in t:
+        if 'FNVL_POLL(' in t:      # the poll is placed before the instruction: it leaves and re-enters with the instruction's pre-state (depth d)
+            t = t.replace('SYNC_IN;', 'SYNC_IN;' + load(d))
+        elif 'SYNC_IN;' in t and 'FNVL_TAILX(' not in t and 'after_tail' not in t:
             t = t.replace('SYNC_IN;', 'SYNC_IN;' + load(da))
         elif 'goto nonlocal;' in t and 'SYNC_IN;' not in t:
             t = t.replace('goto nonlocal;', store(cx, d) + 'goto nonlocal;')
