@@ -3034,3 +3034,5 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Item 2A: ENTRY is in guest_image.ld, and test_guest_scripts passes 8 of 8.
   - Items 2B and 3: their base lacked lift/rt and platform/win32. They are rebased onto L5 platform-c5 563e1273f as w29-c5.
   - Item 4 is in progress.
+- 12:18: L3a w8 base3 ac2c51094: lift/ bare imports 217 -> 0, gate_admit 1889/1889 (100 roots). Its non-lift reds are stale (base 4eb5a2bd4); w8 merges d22308ddc.
+  - Perf red: `recipe check --root lift/liftsrc` takes >16 min in pathflow.mentions_self (recursive ast.walk). To w28 first, with the rule: memoise by (node, idx, name), name sets computed in one bottom-up walk, a per-module cache by content hash, and equivalence with the old function over the whole set. Budget ≤300 s warm.
