@@ -2151,3 +2151,14 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - The platform re-measure needs L5's line merged with w28's verify/; L5 produces it.
 - w28 head 9affb1631: import_roots, exec libs, debs profile, ldsynth over the root's objects, mirror 0bc84222 (396/396).
 - bottleneck: cand3b (w15).
+
+## 2026-11-16: export tables (w28 3c7533723)
+- w28 3c7533723 (exportgen + fnvnx_export.h, 9 tests pass): accepted.
+  - Stage A keys stay names-only.
+  - exports.tsv is a generated output per implementing root, read in stage B (the imports gate).
+- The definition owners add the records:
+  - L3a: lift/rt fnvl_*, the msvcrt EH/_CI*/fp set and the kernel32 RaiseException/RtlUnwind/DebugBreak set;
+  - L5: ws2, msvcrt_names.tsv rows (that file becomes generated), kernel32/user32.
+- The hand lists (L3_MSVCRT, L3_NAMES, L3_KERNEL32, the _CI* rule, the ws2 prefix) are deleted once both tables are measured complete, with an old/new diff.
+- Next for w28: the RET/galaxywrp report, then gamedata_fetch.
+- bottleneck: cand3b warm verdict (w15).
