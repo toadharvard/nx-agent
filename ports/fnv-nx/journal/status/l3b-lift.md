@@ -518,3 +518,9 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
   - Form build over B, worker run at 0334d8b8d and at the merge: 23,983 ok, 2,507 KeyError, 7 UndecidedRow, 3 SymbolicBranch. This differs from the 24,325/2,165 recorded at 0334d8b8d above. The inputs of the two runs differ; to be settled by one recipe run.
   - Tests at the merge, per file: 46 of 47 exit 0. test_forms_simdclass is red at base: aaa…salc/retf/iret/les/lds are in both Forms and L3a hand handlers; worker a3994d45035f1f412 owns it.
   - The sys6b prover smoke keys go to the recipe re-prove (w4 shapeprove).
+- 2026-11-16: x87 slices 1 and 1b merged (w-x87f 706153d8a).
+  - x87 Forms are generated from x87spec: domain = FCW masks plus the invariant ES == es_of(FSW, FCW); fcw effect; wide stores split per SDM field; nd resolution table.
+  - Facts universe, 1,421 keys: 27/92 classes proved (141 keys).
+  - Pack universe, 303 keys: 34/122 classes proved (76 keys).
+  - test_codestore_universe over 14,810 keys: 2,237 proved, 0 differ (+9 x87 stores).
+  - Slice 2 boundary ruled: typed FP values over the runtime carrier kinds (fnvl_x87.h fv), each op a helper with its z3 term.
