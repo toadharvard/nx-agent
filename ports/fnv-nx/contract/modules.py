@@ -305,11 +305,11 @@ def platform_served(declared, dirs, absent_services=frozenset()):
 
 
 def read_served(declared_path, modules_path, claude_md_path, dirs):
-    """The served set from the three declared inputs (declared_dlls.tsv, declared_modules.tsv, CLAUDE.md) and the file directories."""
+    """The served set from the declared inputs (declared_dlls.tsv, declared_modules.tsv, CLAUDE.md or None) and the file directories. CLAUDE.md is read only by the contract gate (the cite check)."""
     declared = declareddlls.read(declared_path)
-    with open(modules_path) as f, open(claude_md_path) as g:
+    with open(modules_path) as f:
         try:
-            absent = declaredmods.read(f.read(), g.read())
+            absent = declaredmods.read(f.read(), None if claude_md_path is None else open(claude_md_path).read())
         except declaredmods.DeclaredModsError as e:
             raise StageError(str(e))
     redundant = sorted(n for n in absent if n in declared and find_file(dirs, n) is None)
@@ -574,7 +574,7 @@ def main():
     ap.add_argument('--dir', action='append', required=True, help='where module files are looked for; first match in list order')
     ap.add_argument('--declared', required=True, help='declared_dlls.tsv (contract/declareddlls.py): the dlls of the declared machine')
     ap.add_argument('--declared-modules', required=True, help='platform/declared_modules.tsv (contract/declaredmods.py): the dlls whose service the declared machine lacks, served even with a file')
-    ap.add_argument('--claude-md', required=True, help='CLAUDE.md: the cite of a declared_modules row is one of its headings')
+    ap.add_argument('--claude-md', help='CLAUDE.md: the cite of a declared_modules row is one of its headings (the contract gate passes it; a recipe stage cannot mount it)')
     ap.add_argument('--out-dir', help='modules.tsv, modules.c, exports/, tls, modules_declared.tsv, import_names.tsv')
     ap.add_argument('--c-out', help='modules.c: the loader module table (fnvnx_modules, fnvnx_module_count)')
     ap.add_argument('--modules-tsv-out', help='modules.tsv: the module set, bases and entries (the boot input of the emulator stage)')
