@@ -619,3 +619,11 @@ A cold build of a large root is split over farms by one rule, with no second bui
   by content. A name in both must hold the same bytes, else red `store-merge: key <k> differs` and DST is unchanged. It is the only import path.
 - The link is the normal `recipe build --root R` on the merged store: every unit is a hit; a missing unit builds.
 Tests: `tests/test_shard.py` (partition, merge, forged record, no compiler) and the `shard_merge` scenario of `tests/test_recipe.py` (toy root of 10 units).
+
+## One resolution per root (`resolved`, `entered`)
+
+A root that another root reaches (`uses`, an external produced by a root, a `pp` input, `objects_of`) is resolved once per process: `recipe.resolved(job, kind, root, output, make)` runs MAKE for the key (store, repo, repo signature, extcache, kind, root, output) and remembers its value, or its red, for every later consumer. A diamond (two roots that use one root) therefore starts the shared root's stages once, however many roots reach it. A value that points at files gone from disk (the objects of an `objects_of` build in a removed workspace) is made again; nothing else is.
+
+A root that is reached again from its own resolution (`build` and `resolved` mark it with `entered`) is a cycle: BuildRed `cycle: A -> B -> ... -> A`, with the full path. It is never recomputed.
+
+The root's own admit.json `cxx_origin` stage (`{lifted_by, stage: gen:ROOT:I}`) is judged by `lifted_stage`, the one rule that `check` uses too: a stage that the root's `generated` does not contain is red from `check` and from every resolution of the root, before any of its stages starts. Test: `tests/test_resolve_once.py` (the stage-level count of a diamond of generated stages needs the declared environment: the farm's verdict).
