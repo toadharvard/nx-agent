@@ -1589,3 +1589,11 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - privileged instructions at CPL 3 / IOPL 0 raise #GP via SEH (OWNER 3).
 - w7 (doing): per-key counts for exactly the x86isa-unimplemented rows, and the split by root kind. Decomp-only roots are not a rule source.
 - bottleneck: the L2 recipe-path pin; the w7 census split; the farm-2 runs.
+
+## 2026-11-16 05:22 — universe roots: recount by property
+- w7, udreach/f5d49d6fa @96ecded:
+  - The x86isa-unimplemented rows are exactly w4's 368 keys.
+  - In the current universe: arpl, bound, out e6 and call far have 0 sites; ins/outs 6 (exe); mov sreg 90; other 1,571.
+- Roots by discovery label (excluding `decomp`) leave 66.5 % of exe range bytes (7.89 MB of 11.86 MB) reached only through non-rooted entries. Rejected as a measurement: the roots must be taken by property (entry, every relocation target in code, exports, EH/SEH, TLS, import thunks) with the full closure (fallthrough, direct branches, call return, proven tables). The decomp list is not used.
+- w7 (doing): the recount by property.
+- bottleneck: the L2 recipe-path pin; the universe root recount (w7); the farm-2 runs.
