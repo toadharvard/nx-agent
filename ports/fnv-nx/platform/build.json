@@ -545,6 +545,7 @@
   "X86SYS": "declared/x86sys.export.json"
  },
  "uses": [
+  {"root": "ports/fnv-nx/contract/include", "output": "INCLUDE"},
   {
    "root": "ports/fnv-nx/loader",
    "output": "INCLUDE"
