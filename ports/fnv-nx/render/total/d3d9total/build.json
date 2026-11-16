@@ -1,0 +1,115 @@
+{
+ "format": "fnvnx-recipe/1",
+ "run": [
+  {
+   "name": "gate",
+   "exec": "/usr/bin/python3.12",
+   "args": [
+    "-I",
+    "-B",
+    "/in/1",
+    "--out",
+    "/out/d3d9total.json",
+    "--gcc",
+    "/usr/bin/x86_64-linux-gnu-gcc-13",
+    "--clang",
+    "/usr/lib/llvm-18/bin/clang",
+    "--treehash",
+    "/in/2",
+    "--wine",
+    "/in/3",
+    "--mojoshader",
+    "/in/4",
+    "--sm-table",
+    "/in/5",
+    "--sm-rows",
+    "/in/6",
+    "--work",
+    "/scratch/work",
+    "--tree",
+    "7=render/d3d9/front",
+    "--tree",
+    "8=render/d3d9/env",
+    "--tree",
+    "9=render/d3d9/build.json",
+    "--tree",
+    "10=render/d3d9/gen",
+    "--tree",
+    "11=bridgefacts/d3d9",
+    "--tree",
+    "12=render/shaders/translator/build.json",
+    "--tree",
+    "13=shim/include",
+    "--tree",
+    "14=render/nxgpu/include",
+    "--tree",
+    "15=render/shaders/translator/include",
+    "--tree",
+    "16=lib/sha256/include",
+    "--tree",
+    "17=render/pair/include",
+    "--tree",
+    "18=render/smscan/include",
+    "--tree",
+    "19=render/gl4shim/include"
+   ],
+   "inputs": [
+    "ports/fnv-nx/render/total/d3d9total/stage.py",
+    "ports/fnv-nx/contract/treehash.py",
+    {
+     "external_of": "ports/fnv-nx/render/d3d9",
+     "name": "wine-d3d9-formats",
+     "path": "."
+    },
+    {
+     "external_of": "ports/fnv-nx/render/shaders/translator",
+     "name": "mojoshader",
+     "path": "."
+    },
+    {
+     "stage": "ports/fnv-nx/render/shaders/total:gen:0",
+     "path": "gen/sm_table.json"
+    },
+    {
+     "stage": "ports/fnv-nx/render/shaders/total:gen:0",
+     "path": "gen/inc/fnvnx_sm_rows.h"
+    },
+    "ports/fnv-nx/render/d3d9/front",
+    "ports/fnv-nx/render/d3d9/env",
+    "ports/fnv-nx/render/d3d9/build.json",
+    "ports/fnv-nx/render/d3d9/gen",
+    "ports/fnv-nx/bridgefacts/d3d9",
+    "ports/fnv-nx/render/shaders/translator/build.json",
+    "ports/fnv-nx/shim/include",
+    "ports/fnv-nx/render/nxgpu/include",
+    "ports/fnv-nx/render/shaders/translator/include",
+    "ports/fnv-nx/lib/sha256/include",
+    "ports/fnv-nx/render/pair/include",
+    "ports/fnv-nx/render/smscan/include",
+    "ports/fnv-nx/render/gl4shim/include"
+   ],
+   "debs": {
+    "closure": [
+     "python3",
+     "gcc",
+     "gcc-13",
+     "clang",
+     "clang-18",
+     "libc6-dev",
+     "libc6-dev-i386",
+     "libgcc-13-dev",
+     "libclang-common-18-dev"
+    ]
+   },
+   "scratch": [
+    "/scratch"
+   ],
+   "outputs": [
+    "d3d9total.json"
+   ]
+  }
+ ],
+ "outputs": {
+  "D3D9TOTAL": "d3d9total.json"
+ }
+}
