@@ -1838,3 +1838,9 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - The 14 reds: 13 lack inputs (w8 checks they run as recipe stages); 1 is test_gate_fpexact, owner L3b.
 - Merge rule taken: an admitted root keeps its files. 132 trunk-deleted files were restored; shim and bridgefacts build.json stay base3's (the include-scheme move belongs to L1/L5).
 - d3dx9_38 universe stage: 6 h in, not red. Stack dumps requested (doing: farm).
+- d3dx9_38 universe stage does not terminate (at 5c12589f5): 6 h of CPU, 8041 passes at the same entry.
+  - Cause: the stack-slot domain has infinite height (offsets around 1 MB).
+  - The run is killed. Doing (w7, claude/fnv-l3a-lift-w7-widen): widening at back-edge targets (sp ⊤ ⇒ slots ⊤), with a termination and soundness argument, then a d3dx9_38 and d3dx9_31 rerun.
+- Selftests universe defect (owner L1, sent): a hand-written directory list leaves 45 test files outside it, 13 of them red. Produced inputs can't be mounted.
+  - Rules sent: the universe is derived from admit.json; a test input may be a stage output. w8 does the _inputs side once L1's change lands.
+- The lifter-inputs fix: d854aa57e on the 4 density heads, eb739d9ef on the relift (pushed), a907bc501 for base3.
