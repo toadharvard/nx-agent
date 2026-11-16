@@ -2295,3 +2295,12 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - The retired test_dsl_emit.py is to be deleted.
 - w28 2fe125d83: external_of. One validator, the owner's pin in the key, 18/18 tests pass, documented in RECIPE.md. Handed to L6 for the d3d9total stages.
   - test_toolstep is red on base-files (env.json), queued after stage B.
+
+## 2026-11-16: cand3b farm verdict @68c45b90c (verdict 81c4221a)
+- Red on one gate: selftests 129/131. 42 gates, 31 vacuous, everything else green.
+- Warm 296 s (within budget), cold 1023 s, peak disk about 24 GB.
+- The 2 reds:
+  - test_recipe.py:560 calls the removed recipe.include_closure;
+  - test_objstub_rules passes alone but fails in the selftests sandbox (an undeclared read).
+- Both fixes are assigned to w15; the farm sends the sandbox output. One more verdict, then the merge.
+- bottleneck: those 2 selftests.
