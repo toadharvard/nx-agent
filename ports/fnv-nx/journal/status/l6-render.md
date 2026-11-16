@@ -1374,3 +1374,4 @@ Paused: w3b, w4, farm; no other work.
     - D9_SPEC (71cb85a7…) and the d9bridge rows are byte-identical; d3d9total 332/332; test 45/45.
     - abspath: 0 in render and bridgefacts. The 7 findings left are contract/l2sections.py:22 (w28) and lift x3, an old copy that cand4 replaces from L3a.
     - Blocked, owner L2: BASE, the type-size table, needs a machine-typed `types` section in DATAMODEL.json; it is prose only today. Asked of L2.
+- 01:23Z L2 accepted DATAMODEL-TYPES (worker w2, cand4b line): a generated `types` section in toolchain/msvcmodel/DATAMODEL.json. bridgefacts declares it as a path input and reads .types; w6 then deletes BASE.
