@@ -2262,3 +2262,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - 6 in lift/fnvlift, envdefault plus /home/user/l3facts (L3a).
 - L6's admit rows enter with L6's candidate merge, not through w28.
 - L6 moves the d3d9total compiles onto recipe stages and reports any missing hook.
+- Farm detail at e7ca820:
+  - linkstrict, guestlink and tlsmodel: the contract.store import, fixed in a6773ff1f.
+  - assumptions: 38 used_by entries name untracked files. Rule to w28: used_by is derived from the tracked files that cite the id, and the hand field is deleted.
+  - abspath: 9 findings in 5 files.
+- The cand3b verdict @68c45b90c is running on the farm, cold then warm.
