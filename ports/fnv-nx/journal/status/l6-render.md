@@ -1417,3 +1417,12 @@ Paused: w3b, w4, farm; no other work.
 - 02:12Z L1 (w8 on base3 0127057f4 + w28 f3cbb982c) reported a render/d3d9 gen:3 file-escape at envq.py:16. It is already closed at w6-root: envq.load(hdr) since 42f2c238f, and gen_env passes and declares d3d9types.h. Check: w6-root 83e44f5f1 with verify/ of w28 f3cbb982c gives `recipe check` valid for render/d3d9, gl4, smscan and bridgefacts. base3 holds an older render copy.
 - 02:14Z L1 ruled on cross-root Python imports. Imports use the qualified module path (`from bridgefacts.d3d9 import d3d9_expr`). recipe mounts /imp/<path> as namespace packages. recipe, puregate and pathflow resolve through one function. A bare cross-root import is red. w28 implements it. w6 writes the qualified imports now, and they go green on w28's head.
 - 02:16Z w28 cb13571f5 (head 9affb1631) carries the import rule: qualified module paths, /imp-only PYTHONPATH, PEP 420 packages, and bare sibling imports are red. w6 takes verify/ from 9affb1631 into w6-root. Every generator import in render/ and bridgefacts/ becomes relative or qualified, and the d3d9_spec drivers run the way recipe runs them.
+- 02:22Z w6 9acd1223b (w6-root) accepted.
+    - (1) The gl4 JSONDecodeError came from w6's own bdb3ad1a2: render/smscan/build.host.json kept the old res_smgen argument. Fixed in 6c76a5fef; gl4 is green again with 17 objects.
+        - Cause: a per-target recipe restates the target-independent fields (`generated`, include, units). Same shape in pair and translator. Reported to L1 as a rule-2 format defect. Proposed: a per-target recipe holds only compiler, flags, plugins and link.
+    - (2) gen_bridge checks every thunk against D9_ROWS (7b8226176); output byte-identical.
+    - (4) CEval is an exact C constant evaluator (8090d9567): function-like macros expand, all 7 FOURCCs evaluate, an unknown name stops. D9_SPEC gains `enum_values` (51 enums, 641 members; sha256 7e64eeaa…).
+    - envq and gen_enums read D9_SPEC, so the second enum parser is deleted; env tables byte-identical.
+    - d3d9total 332/332, test 45/45, test_env_ident ok, gate_pure 83/94.
+    - Next for w6: the w28 import rule, then a rebuild of every render root.
+- bottleneck: w6 import migration; L1 per-target recipe rule; w28 PURE row; farm1 sm_link; the cand4 base.
