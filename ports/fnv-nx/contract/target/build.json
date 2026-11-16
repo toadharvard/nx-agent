@@ -1,0 +1,21 @@
+{
+ "format": "fnvnx-recipe/1",
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/contract/target/gen_header.py",
+   "args": [
+    "/in/ports/fnv-nx/verify/targets.json",
+    "/out/include/fnvnx_target.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/verify/targets.json"
+   ],
+   "outputs": [
+    "include/fnvnx_target.h"
+   ]
+  }
+ ],
+ "outputs": {
+  "INCLUDE": "include"
+ }
+}
