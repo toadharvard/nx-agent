@@ -501,7 +501,7 @@ def analyse_entry(img, e, mode='owner', force=False):
                 if v is not None and tracked(v):
                     if key is not None and key[0] == 'stk': st[key[1]] = v
                     else: emit(a, vsrc(v), 'store', 'mov to memory', True)
-                elif v in TYPES and key is not None and key[0] == 'stk': st[key[1]] = v
+                elif (v in TYPES or (isinstance(v, tuple) and v[0] == 'imp')) and key is not None and key[0] == 'stk': st[key[1]] = v      # an import value stays a value through a spill
                 elif v == T_S4: emit(a, 's4', 'escape-stored', 'mov to memory', True)
                 elif key is not None and key[0] == 'stk': st.pop(key[1], None)
                 for r_ in (d.mem.base, d.mem.index):
