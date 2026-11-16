@@ -6,6 +6,9 @@ import os, sys, unittest
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE)); sys.path.insert(0, os.path.join(HERE, '..', '..'))
 sys.path.insert(0, HERE)
 import declared_x86sys; declared_x86sys.configure()
+CPUFEAT = os.environ.get('FNVNX_CPUFEAT')      # declared input: the CPUID feature-bit table (sdmfeat.py features ...); simdcheck.check puts a cleared-feature shape in the ud class first
+if CPUFEAT:
+    from fnvlift import inputs; inputs.configure(cpufeat=CPUFEAT)
 import simdcheck as C
 S = C.S
 
@@ -13,6 +16,7 @@ KEYS = {'pxor': '0fef02/0.0.0.0', 'pxor_disp': '0fef0500000000/0.0.3.4', 'movaps
         'movd_g': '0f6ec1/0.0.0.0', 'movss_m': 'f30f1000/0.0.0.0', 'movups_st': '0f1100/0.0.0.0', 'pcmpgtw': '0f65c1/0.0.0.0', 'movmskps': '0f50c1/0.0.0.0'}
 
 
+@unittest.skipUnless(CPUFEAT, 'declared input not set: FNVNX_CPUFEAT (the CPUID feature-bit table, sdmfeat.py features)')
 class Check(unittest.TestCase):
     def test_proves(self):
         for n, k in KEYS.items(): self.assertEqual(C.check(k)[0], 'proved', n)
@@ -32,7 +36,10 @@ class Check(unittest.TestCase):
         self.assertEqual(self.mutate(('', 0x6E, None), lambda t: t._replace(fn=lambda e, d, m, a, g: S.Res(S.put_mm(d, e.reg, S.ZeroExt(32, g[3])))), KEYS['movd_g']), 'FAILED')
 
     def test_no_row_is_reported(self):
-        self.assertEqual(C.check('0f0e/0.0.0.0')[0], 'no-row')                      # femms (3DNow): no spec row
+        self.assertEqual(C.check('0f0b/0.0.0.0')[0], 'no-row')                      # ud2: no spec row, no feature
+
+    def test_cleared_feature_is_ud_class(self):
+        self.assertEqual(C.check('0f0e/0.0.0.0')[0], 'ud-class')                    # femms (3DNow): CPUREF denies the feature, so #UD before any row step
 
 
 if __name__ == '__main__': unittest.main()
