@@ -114,6 +114,45 @@ def main():
         d1 = recipe.resolved(j, "uses", A, "dia", make("a-dia", 1))
         check("after a cycle a later resolution is no cycle", d1 == 1)
 
+
+        # reachability of the root graph: one walk, memoised, cycle-safe
+        def toy(name, uses):
+            rp = os.path.join(td, name)
+            os.makedirs(os.path.join(rp, T + "verify"))
+            git(rp, "init", "-q")
+            rws = []
+            for r, us in uses.items():
+                os.makedirs(os.path.join(rp, r))
+                open(os.path.join(rp, r, "build.json"), "w").write(json.dumps({"format": "fnvnx-recipe/1", "uses": [{"root": u, "output": "o"} for u in us], "outputs": {"o": "o.txt"}}))
+                rws.append({"path": r, "class": "product", "target": "host", "recipe": r + "/build.json"})
+            open(os.path.join(rp, T + "verify/admit.json"), "w").write(json.dumps({"format": "fnvnx-admit/1", "roots": rws}))
+            git(rp, "add", "-A")
+            git(rp, "commit", "-q", "-m", "toy")
+            return rp
+        D = T + "d"
+        rp = toy("reach", {A: [B, C], B: [D], C: [D], D: []})
+        rr = recipe.load_admit(rp)
+        check("root_reach of a diamond A -> B, C -> D is {B, C, D}", recipe.root_reach(A, rr, rp) == {B, C, D}, recipe.root_reach(A, rr, rp))
+        check("depends_on: A reaches D, D does not reach A, a root reaches itself", recipe.depends_on(A, D, rr, rp) and not recipe.depends_on(D, A, rr, rp) and recipe.depends_on(B, B, rr, rp))
+        again = recipe.root_reach(A, rr, rp)
+        check("the second ask is the memoised set", again is recipe.root_reach(A, rr, rp))
+        rp = toy("reachcyc", {A: [B], B: [A]})
+        rr = recipe.load_admit(rp)
+        check("a use cycle terminates: each reaches the other", recipe.depends_on(A, B, rr, rp) and recipe.depends_on(B, A, rr, rp))
+
+        # objects_of: a diamond of two generate steps that read the same roots resolves each root once
+        rp = toy("objs", {A: [], B: [], C: []})
+        rr = recipe.load_admit(rp)
+        jo = recipe.Job(rp, A, os.path.join(td, "store-o"), 2, recipe.ext_of_store(os.path.join(td, "store-o")))
+        g = {"objects_of": {"target": "host"}, "tool": "x", "args": [], "inputs": [], "outputs": []}
+        before = len([k for k in recipe.RESOLVE_MEMO if k[4] == "objects"])
+        r1 = red_of(lambda: jo.objects_input(td, tempfile.mkdtemp(dir=td), g))
+        mid = len([k for k in recipe.RESOLVE_MEMO if k[4] == "objects"])
+        r2 = red_of(lambda: jo.objects_input(td, tempfile.mkdtemp(dir=td), g))
+        after = len([k for k in recipe.RESOLVE_MEMO if k[4] == "objects"])
+        check("objects_of: the second generate step that selects the same roots makes no new resolution", mid > before and after == mid and r1 == r2, (before, mid, after, r1, r2))
+        check("objects_of: the selection is a rule over the admitted set (B and C, never A itself)", recipe.objects_of_roots({"generated": [g]}, A, rr, rp) == [B, C])
+
         roots = recipe.load_admit(repo)
         rec = recipe.load_recipe(repo, roots, C)
         errs = recipe.origin_stage_errors(rec, C, roots)

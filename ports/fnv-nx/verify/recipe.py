@@ -1275,16 +1275,33 @@ def depends_on(cand, root, roots, repo, seen=()):
     that reads the objects of a root that uses ROOT depends on it too), transitively. `objects_of` edges are taken whole (every product root they could select,
     no selector exclusion: that is what keeps this function free of recursion), a superset. Read from the recipes at REPO; a root without a readable recipe has
     no edges."""
-    if cand == root:
-        return True
-    if cand in seen:
-        return False
-    ent = roots.get(cand)
-    try:
-        rec = json.load(open(os.path.join(repo, ent["recipe"]))) if ent and ent.get("recipe") else None
-    except (OSError, ValueError):
-        rec = None
-    return any(depends_on(d, root, roots, repo, tuple(seen) + (cand,)) for d in root_edges(rec, cand, roots) if d != cand) if isinstance(rec, dict) else False
+    return cand == root or root in root_reach(cand, roots, repo)
+
+
+REACH_MEMO = {}   # per process: {(repo, tracked-tree signature, root): (the roots dict it was read with, the set of roots it reaches)}
+
+
+def root_reach(cand, roots, repo):
+    """The set of admitted roots that CAND reaches through root_edges, transitively (CAND excluded unless a cycle returns to it), read from the recipes at REPO: one walk with one visited set,
+    memoised per process for (REPO's tracked tree, CAND), so a diamond of roots is read once however many paths lead to it. A root without a readable recipe has no edges."""
+    key = (os.path.realpath(repo), repo_signature(repo), cand)
+    m = REACH_MEMO.get(key)
+    if m is not None and m[0] is roots:
+        return m[1]
+    seen, todo = set(), [cand]
+    while todo:
+        n = todo.pop()
+        ent = roots.get(n)
+        try:
+            rec = json.load(open(os.path.join(repo, ent["recipe"]))) if ent and ent.get("recipe") else None
+        except (OSError, ValueError):
+            rec = None
+        for d in (root_edges(rec, n, roots) if isinstance(rec, dict) else []):
+            if d != n and d not in seen:
+                seen.add(d)
+                todo.append(d)
+    REACH_MEMO[key] = (roots, seen)
+    return seen
 
 
 def objects_of_roots(rec, root, roots, repo=None):
@@ -2692,12 +2709,10 @@ def resolved(job, kind, root, output, make, valid=None, enter=True):
     OUTPUT), a diamond resolves the shared root once, and a failure is remembered the same way (a red root is red for every consumer without being built again). ROOT is `entered`
     while MAKE runs, so a root reached again from its own resolution is a cycle. ENTER=False when MAKE enters ROOT itself (build). VALID(value) tells a remembered value that points at files gone from disk to be made again. The root's own
     admit.json origin stage is judged first (origin_stage_errors, the rule `check` uses). A memoised value is shared: callers copy what they mutate."""
-    key = (os.path.realpath(job.store), os.path.realpath(job.repo), repo_signature(job.repo), os.path.realpath(job.extcache) if job.extcache else "", kind, root, output)
+    key = (os.path.realpath(job.store), os.path.realpath(job.repo), job.signature(), os.path.realpath(job.extcache) if job.extcache else "", kind, root, output)
     m = RESOLVE_MEMO.get(key)
-    if m is not None and (m[0] == "red" or valid is None or valid(m[1])):
-        if m[0] == "red":
-            raise BuildRed(dict(m[1]))
-        return m[1]
+    if m is not None and (m[0] != "ok" or valid is None or valid(m[1])):
+        return _resolution(m)
     with (entered(job.repo, root) if enter else contextlib.nullcontext()):
         try:
             bad = origin_stage_errors(load_recipe(job.repo, job.roots, root), root, job.roots) if root in job.roots and job.roots[root].get("recipe") else []
@@ -2706,9 +2721,17 @@ def resolved(job, kind, root, output, make, valid=None, enter=True):
             m = ("ok", make())
         except BuildRed as r:
             m = ("red", dict(r.args[0]))
+        except RecipeError as x:   # an invalid recipe is invalid for every consumer of the root
+            m = ("err", x)
     RESOLVE_MEMO[key] = m
+    return _resolution(m)
+
+
+def _resolution(m):
     if m[0] == "red":
         raise BuildRed(dict(m[1]))
+    if m[0] == "err":
+        raise m[1]
     return m[1]
 
 
@@ -2728,6 +2751,12 @@ class Job:
         self.dukeys = {}   # {unit: key of its macro-fact stage (-dU, unitstage.DU_TAIL)}
         self.red, self.blocked, self.failed = [], {}, []   # KEEP GOING: red stages (failure dicts) and {unit: stage it is blocked by}; nothing is masked (see build)
         os.makedirs(os.path.join(store, "rt"), exist_ok=True)
+
+    def signature(self):
+        """repo_signature of this Job's checkout, read once per Job (the tracked tree does not change while a Job resolves)."""
+        if getattr(self, "_sig", None) is None:
+            self._sig = repo_signature(self.repo)
+        return self._sig
 
     def stage(self, doc):
         if self.variant:     # the variant name is in every stage key (the implicit variant adds nothing: its keys are those of a root without variants)
@@ -3153,7 +3182,8 @@ class Job:
             aroot, aout = g["artifact"].split(":", 1)
             if aroot not in self.arts:
                 Job.stats["artifact_builds"] += 1
-                self.arts[aroot] = build(self.repo, aroot, self.store, tempfile.mkdtemp(dir=ws), self.jobs, self.extcache)
+                self.arts[aroot] = resolved(self, "artifact", aroot, "", lambda: build(self.repo, aroot, self.store, tempfile.mkdtemp(dir=ws), self.jobs, self.extcache),
+                                            valid=lambda r: not r.get("elf") or os.path.exists(r["elf"]["path"]), enter=False)   # build() enters the root itself
             r = self.arts[aroot]
             if r["status"] != "green" or not r["elf"] or os.path.basename(r["elf"]["path"]) != aout:
                 raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["artifact %s is not produced (root status %s)" % (g["artifact"], r["status"])] + ([] if not r.get("failure") else ["its failure: stage %s: %s" % (r["failure"]["stage"], " | ".join(r["failure"].get("stderr") or [])[:600])])})
