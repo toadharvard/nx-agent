@@ -2324,3 +2324,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - test_recipe 179/179, peak 7.1 GB (one pool per directory).
   - Accepted as the next candidate. The merge candidate stays 963dce662 (farm verdict pending).
 - Stage B import: link becomes its own tool root (contract `imports: [link]`). One root, one tree: an admit row with more than one tree is red.
+- L6 w6-root 23884c5d0: d3d9total on recipe stages (new root render/total/d3d9total), 332/332, 45/45 mutations killed. Direct gcc/clang/git path deleted. assumptions 137/137.
+- Queued for w28 after stage B:
+  - one ext_dir accessor (the external_of --ext bug);
+  - the `{"include_of": ROOT}` input form (closes L6's rule-2 item);
+  - exec-mount deb symlinks followed within the closure.
