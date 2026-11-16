@@ -1392,3 +1392,8 @@ Paused: w3b, w4, farm; no other work.
     - The terminator-red row is an objstub defect: it runs the terminator plugin without the root's own plugins. w28 fixes it; it was neither L5's nor ours.
     - The res_smgen rule is accepted.
 - bottleneck: w6 res_smgen commit; w28 PURE/objstub head; farm1 sm_link numbers; the cand4 base.
+- 01:55Z w6 bdb3ad1a2 (w6-root) accepted: res_smgen.py reads SM1_PARAMS/SM_WALK as the bridgefacts stage output D9_SMWALK, a declared `uses`. sys.path and samefile are deleted, sets are sorted, and res_smgen has 0 puregate violations. res_smtab.gen.h is byte-identical (722c5fc5…). Recipe builds of smscan and bridgefacts are green.
+    - Whole-set gate_pure at bdb3ad1a2: red, 25 of 94 files uncertified. 16 are in render/ and bridgefacts/; gen_funcs.py among them waits for the w28 PURE row.
+    - Standalone puregate over the other 15 files: 36 host (.group), 15 import-unlisted, 8 dynamic (eval, sys.modules), 6 member-unlisted (sys.dont_write_bytecode), 1 unsorted-set.
+    - Next for w6, one rule per class: m[n] for re.Match; declared imports or outputs; an ast evaluator over the header constant grammar; delete sys.modules and dont_write_bytecode; sorted sets. Outputs must be byte-identical. Status: doing.
+- bottleneck: w6 pure items; w28 PURE/objstub head; farm1 sm_link numbers; the cand4 base.
