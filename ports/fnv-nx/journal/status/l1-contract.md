@@ -2720,3 +2720,9 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - gmp 516 and mpfr 257 objects green, with cc stages unchanged (cache hits). test_archive_sources: 0 fails.
 - cand5 queue: trunk-after-cand4 + w28-c5 + L2 67d1ae6fe + L6 ce86bbd83 + the L5 c5 offer.
 - bottleneck: the cand4 verdict (w15); L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
+
+### 2026-11-16: w28-c5 6461d118e: the {"pp": ROOT, "unit": PATH} run input
+- pp_errors is the one rule, used by check and by the mount. The PP loop is extracted from unitstage and shared with the build. pp_only compile. RECIPE.md section added.
+- Red cases pass locally. The key and stage cases need the declared env and are queued on the farm.
+- cand4 verdict: the farm (session_01KmtZKTV1mniUErarfUpdJZ) started it at about 06:45Z, and the session is now disconnected. Status was requested. The w28-c5 verdict at 6461d118e is queued after it.
+- bottleneck: the cand4 verdict (farm state unknown); L2 path (a) plugin pin -> 67164ec5e (toolchain rt stage was red, rerun queued at cand4b 6abb87678); L3a facts2 universe pin.
