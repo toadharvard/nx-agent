@@ -425,3 +425,19 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - Next for L3b: move the prover's wall-clock TIMEOUT to a pinned deterministic bound (z3 rlimit, isla step bound). Today's farm runs are measurements: only `proved` certifies.
 - 2.6 integer queue 257a93722adb: shard 1/4 is final, 129 rows: proved 1, model-defect 1, model-gap 126, timeout 1 (3450 s). The v3 model-gap keys stay model-gap. Next: w4 counts the 451 gaps by opcode, and a model patch follows from the pinned ACL2 source. Shards 2-4 are running. SIMD shard 1/4 runs on farm 1 at eb53b3aa7.
 - udsail (L3a w13 183e1ebef): rule accepted with 4 conditions. Farm 2 runs it after its shard, as a classifier check, not as an input.
+
+## 2026-11-16 03:25Z (claude/fnv-l3b-lift 472616f5f)
+- done (f1db9564f, dc9511205, fc6f17a43, e6ed32b7e, 472616f5f, worker a4fefc3884cbfe194): gate_fpexact check 0 certifies only what is proven.
+  - Universe: one source, lift/proof/helpercalls.universe(repo, cache, objects). It reads the Form -> helper calls from the lifter's emitter, plus the fnvnx_ftoi helpers record.
+  - Widths: only from the DWARF formal_parameter types of the defining object. Underived is red (helper-width-underived).
+  - Narrow (<= 32 bits): red helper-no-exhaustive-cert until lift/proof/fpchost (w13) reports 0 mismatches per helper over 2^32 inputs, with the Form term compiled to C by one op table as the reference.
+  - Wide: REMOVE record ASM-329 (owner L3b). Removal: isla over the host x86_64 object after the SSE FP model patch, with the four static conditions of integ e8faa4266. ASM-322 retired, replaced by 329.
+  - gate_assumptions findings: 23 at 4865c26a1, 23 at e6ed32b7e (pre-existing red, not raised).
+  - Nothing run end to end: the pinned env is absent here. The universe needs the liftpack declared in formgate_inputs.json.
+- blocked: lift/rt needs -g for the DWARF widths (asked the L3a lead).
+- blocked: w13's compare stage; fpcuniverse.py is to be deleted as a second copy.
+- doing (farm 4, session_01KmtZKTRYAYnFcNiHPpfXLr): at 4865c26a1:
+  - envcheck with the env.json rust profile (L1 bc9de3d83 -> 04a66bb77);
+  - the rcpgen check;
+  - the recipe builds of lift/proof/isla and lift/proof/sailmodel (isla debs = the closure of python3 and cargo).
+- doing: integer shards 2 and 3 (resuming), SIMD shard 1 (resuming).
