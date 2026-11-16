@@ -96,6 +96,16 @@ def ext_dir(cache):
     return os.path.join(cache, "external")
 
 
+def ext_bare(extc, commit):
+    """The bare fetch of the external at COMMIT in the external cache EXTC."""
+    return os.path.join(extc, commit)
+
+
+def ext_checkout(extc, commit):
+    """The checkout of the external fetched at COMMIT in the external cache EXTC (fetch_externals writes it, every reader names it through this function)."""
+    return os.path.join(extc, commit + ".co")
+
+
 def ext_of_store(store):
     """The external cache that belongs to the store STORE (CACHE/store -> CACHE/external)."""
     return ext_dir(os.path.dirname(os.path.abspath(store)))
@@ -2147,7 +2157,7 @@ def fetch_externals(exts, store, extcache, ws):
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
     os.makedirs(ws, exist_ok=True)   # the index files live in WS: every caller may name a fresh sub-path of its scratch directory
     for e in exts:
-        stage, bare, co = "external:" + e["name"], os.path.join(extcache, e["commit"]), os.path.join(extcache, e["commit"] + ".co")
+        stage, bare, co = "external:" + e["name"], ext_bare(extcache, e["commit"]), ext_checkout(extcache, e["commit"])
         fact = os.path.join(store, "external-facts", "%s-%s.json" % (e["commit"], e["tree_sha256"]))
         if os.path.isfile(fact) and os.path.isdir(co) and os.path.isfile(os.path.join(store, "tree", e["tree_sha256"][:2], e["tree_sha256"] + ".json")):
             out[e["name"]] = {"host": co, "tree": e["tree_sha256"], "at": e["at"]}

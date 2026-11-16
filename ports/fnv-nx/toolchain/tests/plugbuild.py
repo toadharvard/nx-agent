@@ -139,7 +139,7 @@ def driver():
     """-> the pinned guest C++ driver of the recipe's fetched external (the compiler the stages run), for the one test of a raw unit (test_odrdef: the recipe has no raw
     stage, every unit it builds is preprocessed first); the external is in STORE once a recipe build ran"""
     pin = json.load(open(os.path.join(REAL, T + 'verify/guest_compiler.json')))
-    return os.path.join(STORE, 'external', pin['external']['commit'] + '.co', recipe.pin_drivers()[1])
+    return os.path.join(recipe.ext_checkout(recipe.ext_of_store(STORE), pin['external']['commit']), recipe.pin_drivers()[1])
 
 
 def build(name, tmp, source=None):

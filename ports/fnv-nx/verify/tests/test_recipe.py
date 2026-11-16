@@ -630,7 +630,7 @@ def main():
     fdir = SS + "/external-facts"
     facts = sorted(os.listdir(fdir)) if os.path.isdir(fdir) else []
     check("external: one fact per (commit, tree_sha256) in the store, one checkout per commit in the external cache",
-          facts == ["%s-%s.json" % (commit, thash)] and os.path.isdir(ec + "/" + commit + ".co"), (facts, os.listdir(ec)))
+          facts == ["%s-%s.json" % (commit, thash)] and os.path.isdir(recipe.ext_checkout(ec, commit)), (facts, os.listdir(ec)))
     ingests, runs = [], []
     real_ingest, real_run = recipe.cas.ingest, recipe.subprocess.run
     recipe.cas.ingest = lambda p, st, exclude=(): ingests.append(p) or real_ingest(p, st, exclude)
@@ -1040,7 +1040,7 @@ def check_tc_gate(repo, tcc, tiny):
     print("INFO gate determinism, external compiler + external include tree (2 cold + warm) %.1f s: %s" % (td, g and g["detail"]))
     check("determinism gate with the compiler as an external tree at /opt/tc and a second external: green, accepted by verdict, each fetched once",
           rc == 0 and g["universe"] == 2 == g["certified"] and accepted("determinism", BASE + "/gtc")[0] == "green"
-          and sorted(os.listdir(BASE + "/tccache/external")) == sorted([tcc, tiny, tcc + ".co", tiny + ".co"]), (g, txt))
+          and sorted(os.listdir(recipe.ext_dir(BASE + "/tccache"))) == sorted([tcc, tiny, os.path.basename(recipe.ext_checkout("", tcc)), os.path.basename(recipe.ext_checkout("", tiny))]), (g, txt))
 
 
 if __name__ == "__main__":
