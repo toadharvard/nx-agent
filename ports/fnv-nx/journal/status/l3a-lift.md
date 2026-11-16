@@ -1668,3 +1668,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - w7 reports the rooting occurrences by kind.
 - w8: the path census, static part at 3fe7ea7ee (16 OPS handlers for 30 mnemonics, 6 shape handlers: segshapes, prefix_only, absent_ext, default, x87, sse). 2 dead registrations are deleted. The 8-image run is on farm 2.
 - bottleneck: the L2 recipe-path pin and dispatch.c; the w7 rooting-occurrence check and exe farm run; the handler->Form migration; the L5 rows; w12 density.
+- 06:25 w7 retracted the 06:20 exe numbers: the killed run was round 0 of the displacement-only fixed point, with X empty. residue.disp_only already implements the rule.
+  - Of 1,418 targets: 1,415 have only memory-displacement occurrences, so they are not roots. 3 are relocated .rdata words, so they are roots.
+  - All 140 BADDECODE starts are gone once X applies.
+  - The real numbers come from the farm-2 exe run of the modlift commit.
