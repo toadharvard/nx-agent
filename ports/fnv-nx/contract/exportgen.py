@@ -12,8 +12,8 @@ writes the union, sorted, as the same four columns.  RULE (total, nothing is ski
 The output depends on the objects' bytes and relative paths only."""
 import argparse, os, re, sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import l2sections
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)
+from contract import l2sections
 
 SECTION = '.fnvnx.export'
 MODULE = re.compile(r'[a-z0-9_.\-]+\.dll\Z')

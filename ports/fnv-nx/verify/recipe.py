@@ -700,8 +700,15 @@ def declared_import_uses(owner, imports, files, repo="."):
 
 
 def import_prefixes(roots, owner):
-    """{module prefix: root} of the roots OWNER declares (gate_admit.import_roots over the declared roots that are admitted)."""
-    return gate_admit.import_roots(list(import_trees(roots, owner)), TREE)
+    """{module prefix: root} of the roots OWNER declares (gate_admit.import_roots over the declared roots that are admitted), and OWNER's own root: a module is
+    one file under one module path whoever imports it (a root's tool and another root's tool that imports it both spell `contract.x`), so the stage mounts the
+    owner's closure at /imp/<its path> as well as at /tool, and a sibling of a root's own file is imported qualified or relative like any declared root's."""
+    return gate_admit.import_roots(list(import_trees(roots, owner)) + [owner], TREE)
+
+
+def import_roots_of(roots, owner):
+    """The trees whose modules the stage mounts under /imp: the declared import roots and the owner's own root."""
+    return [x for ts in import_trees(roots, owner).values() for x in ts] + [owner]
 
 
 def import_mount(tool, owner, files, inputs, roots, repo="."):
@@ -710,8 +717,8 @@ def import_mount(tool, owner, files, inputs, roots, repo="."):
     edit to any other file of an import root leaves the stage's key unchanged."""
     it = import_trees(roots, owner)
     clo = []
-    bad = foreign_imports(tool, owner, files, inputs, repo, clo, [t for ts in it.values() for t in ts], import_prefixes(roots, owner))
-    mods = sorted(f for f in set(clo) if any(under(f, t) for ts in it.values() for t in ts))
+    bad = foreign_imports(tool, owner, files, inputs, repo, clo, import_roots_of(roots, owner), import_prefixes(roots, owner))
+    mods = sorted(f for f in set(clo) if any(under(f, t) for t in import_roots_of(roots, owner)) and f != tool)
     data = set()
     for f in mods:   # the data a module reads by a path of its own location, resolved by pathflow inside its root's tree (a directory: every tracked file under it)
         try:
@@ -737,9 +744,9 @@ def foreign_imports(tool, owner, files, inputs, repo=".", closure=None, imports=
     std, pinned = set(sys.stdlib_module_names) | {"__future__"}, set(envcheck.PY_MODULES.values())
     mine = [f for f in files if under(f, owner) and f.endswith(".py")]
     ins = [i for i in inputs if isinstance(i, str)]
-    theirs = [f for f in files if f.endswith(".py") and any(under(f, t) for t in imports)]   # the modules of the declared import roots
+    theirs = [f for f in files if f.endswith(".py") and any(under(f, t) for t in imports if t != owner)]   # the modules of the declared import roots
     prefixes = prefixes or {}
-    theirs_set = set(theirs)
+    theirs_set = set(theirs) | {f for f in mine if owner in imports}   # qualified names also reach the owner's own root (import_prefixes)
     ns = gate_admit.import_namespaces(prefixes)
     by_path = {}
 
@@ -1786,7 +1793,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             used.setdefault(owner, set())
             err += ["gen:foreign-import:%s:%s (generated[%d]: the stage mounts the tool's own root and the declared inputs; the module lies in another root and no input carries it)" % (t, m, i)
                     for m in foreign_imports(t, owner, files, g["inputs"] if isinstance(g["inputs"], list) else [], repo, clo,
-                                             [x for ts in import_trees(roots, owner).values() for x in ts], import_prefixes(roots, owner))]
+                                             import_roots_of(roots, owner), import_prefixes(roots, owner))]
             # the file-escape rule (pathflow.escapes, the one implementation the abspath gate also runs): a read built from __file__, __path__ or sys.argv[0] that leaves the
             # tree the stage mounts the file from, or that cannot be decided, is red; a resolved file inside the mounted tree and a read through require_mounted are green
             for cf in sorted(set(clo)):
