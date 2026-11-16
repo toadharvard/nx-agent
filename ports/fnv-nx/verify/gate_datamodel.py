@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gate "datamodel" (fnvnx-gate/1, VERDICT.md class A: data model): every unit of a guest product root is compiled by the pinned game
 compiler in the exe's data model.
-    python3 -I gate_datamodel.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/datamodel.json
+    python3 -I gate_datamodel.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/datamodel.json
 Universe (through gate_build.quantify): the admitted product roots with "target": "guest" (a host root has none); per root one item
 `<root>:compiler` plus one item `<root>/<unit>` per unit of the build. No guest root: universe 0, green.
 Certificate, read from the build's own outputs (objects.json of the root, the CC stage documents of its units in GATE_CACHE/store/stage-docs,

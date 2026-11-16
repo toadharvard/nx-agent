@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gate "machine" (fnvnx-gate/1, class G of VERDICT.md): the product's registry hive holds exactly the keys that the exe and the modules read
 (rules: contract/hive.py).
-    python3 -I gate_machine.py     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/machine.json and machine.ids
+    python3 -I gate_machine.py     cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/machine.json and machine.ids
 Roots come only from verify/admit.json (class product). A root DECLARES its hive in `<root>/registry.in.json` ("fnvnx-registry-in/1"):
   {"format", "external": NAME of an entry of the root's recipe `external` (private: fnv-nx-build commit + tree_sha256),
    "sites": path of regsites.tsv inside it (the registry-API call sites of the exe and the modules),

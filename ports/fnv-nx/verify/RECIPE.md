@@ -495,7 +495,7 @@ as `-z X` or `-zX`, inside `-Wl,a,b` or after `-Xlinker`, or when it is an `@fil
 
 ## External inputs
 Real sources and toolchains that are not Debian packages of env.json live in the private `fnv-nx-build` repository (a mirror branch). An external
-is fetched ONLY by exact `commit` (`git fetch --depth 1 $ARTIFACTS_URL <commit>`, default https://github.com/toadharvard/fnv-nx-build) into
+is fetched ONLY by exact `commit` (`git fetch --depth 1 <artifacts URL> <commit>`; the URL is the argument `--artifacts` of recipe.py / l1.py, recorded as `<ext cache>/artifacts.url` (recipe.artifacts_url), else the pinned repository of env.json; never the process environment) into
 `<GATE_CACHE>/external/<commit>`, checked out, ingested into the CAS, and its tree hash must equal `tree_sha256` (get it with
 `cas.py ingest`). A mismatch or an unreachable commit makes the build red with stage `external:<name>`. The tree is a declared input at `at`
 of every stage, so a changed mirror changes every stage key. `ref` is documentation only; the commit decides. Validation: `repo` is `fnv-nx-build`,

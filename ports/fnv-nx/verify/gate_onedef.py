@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gate "onedef" (fnvnx-gate/1): one definition, one source. A name, a COMDAT group, a source file and a header each come from ONE place.
-    python3 -I gate_onedef.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/onedef.json
+    python3 -I gate_onedef.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/onedef.json
 Rules (by symbol tables and file content, never by a name's text):
   (a) Per linked image (a root with a `link`; its objects are those of the root itself and of every root of its derived link members, ld's archive selection, recipe.link_candidates): a GLOBAL or WEAK
       definition outside every COMDAT group comes from exactly ONE root. Two roots defining one name is `dup-def`, whatever the binding (strong, weak):

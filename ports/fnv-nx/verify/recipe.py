@@ -11,7 +11,7 @@ RULE refusal set R: an option of GNU ld's grammar that lets a link accept missin
   strip one or two leading dashes, cut at `=`; a name that is a prefix (getopt_long abbreviation) of a refused long name is refused (a
   single-dash name needs >= 2 chars); `-z undefs|muldefs` as `-z X` or `-zX`; `-Wl,a,b` and `-Xlinker a` are split into the options
   they pass; `@file` is refused (cannot be analysed). An ambiguous abbreviation is refused too (ld would reject it anyway).
-EXTERNAL inputs (key "external", RECIPE.md): fetched only by exact commit from ARTIFACTS_URL into a bare cache (--ext DIR, shared by
+EXTERNAL inputs (key "external", RECIPE.md): fetched only by exact commit from the artifacts repository (recipe.artifacts_url) into a bare cache (--ext DIR, shared by
   builds that must not share stores), checked out, ingested; the CAS tree hash must equal tree_sha256 (else the build is red naming
   the external). The tree is a declared input at "at" of EVERY stage (the tool runtime lists it), so stage keys cover its hash. A tree
   is the content-pinned INPUT, not a build output: sharing the fetch between two cold builds shares nothing that a build computes.
@@ -58,6 +58,45 @@ FORMAT, OBJ_FORMAT = "fnvnx-recipe/1", "fnvnx-objects/1"
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
 ENV_JSON = TREE + "/verify/env.json"   # the declared environment of the checkout (l1.py checks the same file)
+
+
+def _pinned_artifacts():
+    """The artifacts repository of env.json (debs.mirror.repo): the one pinned default of every external fetch."""
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "env.json")) as f:
+        return "https://github.com/%s" % json.load(f)["debs"]["mirror"]["repo"]
+
+
+ARTIFACTS = _pinned_artifacts()   # a test fixture may assign a toy repository (the same seam as deb_pins); no other code does
+ARTIFACTS_FILE = "artifacts.url"
+
+
+def ext_dir(cache):
+    """THE external cache of a verdict/run cache CACHE (bare fetches CACHE/external/<commit>, stage-ext records, artifacts.url): the sibling of CACHE/store.
+    Fetch, build, exttree, resolve_input and every gate name it through this one function."""
+    return os.path.join(cache, "external")
+
+
+def ext_of_store(store):
+    """The external cache that belongs to the store STORE (CACHE/store -> CACHE/external)."""
+    return ext_dir(os.path.dirname(os.path.abspath(store)))
+
+
+def artifacts_url(extcache):
+    """Where the externals of EXTCACHE come from: the record `EXTCACHE/artifacts.url` that the caller of a run wrote (set_artifacts: l1.py --artifacts,
+    recipe.py --artifacts), else the pinned repository of env.json. Never the process environment: a URL is an argument of the run, kept beside the
+    cache it fills, so a gate subprocess and a test read the same one."""
+    p = os.path.join(extcache, ARTIFACTS_FILE)
+    if os.path.isfile(p):
+        with open(p) as f:
+            return f.read().strip()
+    return ARTIFACTS
+
+
+def set_artifacts(extcache, url):
+    os.makedirs(extcache, exist_ok=True)
+    with open(os.path.join(extcache, ARTIFACTS_FILE), "w") as f:
+        f.write(url + "\n")
+
 
 def _plugin_cxx():
     """The host driver that builds the plugins, DERIVED from env.json: the pinned package `g++-N-x86-64-linux-gnu` (exactly one) provides
@@ -2093,7 +2132,7 @@ def fetch_externals(exts, store, extcache, ws):
     a variant of a root adds only its own stage keys. A mismatch stores nothing. Used by a recipe (Job.externals) and by gate_contract.py
     (the exe-derived inputs of the contract gates), one mechanism."""
     out = {}
-    url = os.environ["ARTIFACTS_URL"]   # a required input (recipe.py --artifacts URL, l1.py --artifacts URL; a test passes it explicitly)
+    url = artifacts_url(extcache)
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
     os.makedirs(ws, exist_ok=True)   # the index files live in WS: every caller may name a fresh sub-path of its scratch directory
     for e in exts:
@@ -3572,7 +3611,7 @@ def synth_names(repo, root, cache, kinds, script=None, objs=()):
     [(unit, path)] and the kind's fixed options. A guest kind is `pie` (emulation aarch64linux32, link/guest.json's SCRIPT); a host kind is `shared` or `exe` (elf_x86_64, no script).
     -> {kind: set of names}. BuildRed/RecipeError as the stage."""
     store = os.path.join(cache, "store")
-    j = Job(repo, root, store, 1, os.path.join(cache, "external"))
+    j = Job(repo, root, store, 1, ext_dir(cache))
     ws = tempfile.mkdtemp(prefix="synth-")
     try:
         j.externals(ws)
@@ -3660,14 +3699,14 @@ def exttree(e, cache):
     """Host directory of external E (a recipe `external` entry) checked out by its exact commit from the bare fetch the build made in
     CACHE/external, into CACHE/exttree/<commit> (shared, atomic). For gates that read what a build linked in."""
     if is_stage_ext(e):   # a root's output: the directory the build materialised (stage_external)
-        with open(os.path.join(cache, "external", "stage-ext", e["name"] + ".json")) as fh:
+        with open(os.path.join(ext_dir(cache), "stage-ext", e["name"] + ".json")) as fh:
             return json.load(fh)["host"]
     dest = os.path.join(cache, "exttree", e["commit"])
     if not os.path.isdir(dest):
         tmp = "%s.tmp%d-%s" % (dest, os.getpid(), os.urandom(4).hex())
         os.makedirs(tmp)
         env = dict(os.environ, GIT_INDEX_FILE=tmp + ".idx")
-        bare = os.path.join(cache, "external", e["commit"])
+        bare = os.path.join(ext_dir(cache), e["commit"])
         subprocess.run(["git", "--git-dir", bare, "read-tree", e["commit"]], env=env, check=True, capture_output=True)
         subprocess.run(["git", "--git-dir", bare, "--work-tree", tmp, "checkout-index", "-a", "-f"], env=env, check=True, capture_output=True)
         os.unlink(tmp + ".idx")
@@ -3714,7 +3753,7 @@ def resolve_input(root, ref, repo=".", cache=None, rec=None):
             raise ValueError("%s: input %r needs the gate cache to mount the external" % (root, ref))
         base = exttree(e, cache)
         if is_stage_ext(e):   # a root's output: its tree hash is what the build ingested (stage_external)
-            with open(os.path.join(cache, "external", "stage-ext", e["name"] + ".json")) as fh:
+            with open(os.path.join(ext_dir(cache), "stage-ext", e["name"] + ".json")) as fh:
                 etree = json.load(fh)["tree"]
         else:
             etree = e["tree_sha256"]
@@ -3926,7 +3965,7 @@ def stage_output(root, ref, repo, cache):
     if ref["path"] not in ent["outputs"]:
         raise ValueError("%s: stage %s of %s does not declare the output %r (declared: %s)" % (root, name, sroot, ref["path"], ent["outputs"]))
     store = os.path.join(cache, "store")
-    j = Job(repo, sroot, store, 1, os.path.join(store, "external"))
+    j = Job(repo, sroot, store, 1, ext_dir(cache))
     ws = tempfile.mkdtemp(prefix="stageref-")
     try:
         j.externals(ws)
@@ -3959,11 +3998,11 @@ def host_compilers(rec, cache):
 
 def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=None):
     """Build product ROOT of the checkout REPO into STORE; write OUT/objects.json and the files it names. EXT: bare cache dir of
-    externals (default STORE/external). SHARD: (i, N), build only the units of shard i (shard_of); root-level stages (tests, link, tables) do not run
+    externals (default: the sibling of STORE, ext_of_store). SHARD: (i, N), build only the units of shard i (shard_of); root-level stages (tests, link, tables) do not run
     in a shard build, its objects.json says `shard`. -> the objects dict; raises RecipeError for an invalid recipe."""
     env_blocked(repo)   # BEFORE any stage: nothing below runs or stores on a machine that is not the declared one
     spec = root
-    j = Job(repo, spec, store, jobs, ext or os.path.join(store, "external"))
+    j = Job(repo, spec, store, jobs, ext or ext_of_store(store))
     j.shard = shard
     if shard:
         link = False
@@ -4286,7 +4325,7 @@ def main(argv):
         unknown = set(opt) - {"--root", "--store", "--out", "--jobs", "--ext", "--stack-usage", "--shard", "--artifacts"}
         if "--artifacts" not in opt:
             raise RecipeError(["missing --artifacts URL (the artifacts repository of the externals)"])
-        os.environ["ARTIFACTS_URL"] = opt["--artifacts"]
+        set_artifacts(opt.get("--ext") or ext_of_store(opt["--store"]), opt["--artifacts"])
         if unknown or opt.get("--stack-usage", "1") != "1":
             raise RecipeError(["unknown or bad option: %s" % ", ".join(sorted(unknown) or ["--stack-usage"])])
         res = build(repo, opt["--root"], opt["--store"], opt["--out"], int(opt.get("--jobs", 4)), opt.get("--ext"), AUX_FLAGS if "--stack-usage" in opt else None, shard=shard_spec(opt["--shard"]) if "--shard" in opt else None)
