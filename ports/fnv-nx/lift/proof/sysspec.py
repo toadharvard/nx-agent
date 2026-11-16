@@ -184,9 +184,7 @@ def check(key):
         try: rec = x86sys.load()
         except x86sys.Undecided as e: return 'uncertified', 'uncertified: %s' % e
         return check_far(key, fk, rec)
-    import sysspec_gap, sysspec_legacy, sysspec_cpufeat
-    if sysspec_cpufeat.kind(sysspec_gap.decode(key)) is not None:      # a feature the declared CPU clears: #UD or the SDM's NOP (sysspec_cpufeat.py, quotes checked against sysspec_cpufeat_pages.tsv)
-        return sysspec_cpufeat.check(key)
+    import sysspec_gap, sysspec_legacy
     if sysspec_legacy.family(sysspec_gap.decode(key)) is not None:      # BCD adjusts, SALC, SLDT, LES/LDS, far RET: claimed by decoding (sysspec_legacy.py, quotes checked against sysspec_legacy_pages.tsv)
         try: return sysspec_legacy.check(key)
         except x86sys.Undecided as e: return 'uncertified', 'uncertified: %s' % e
