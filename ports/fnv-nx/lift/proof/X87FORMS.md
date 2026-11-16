@@ -77,15 +77,20 @@ The census shows that one DSL op per z3 decl kind is the wrong grain, for two re
 - **Entry proof.** Form equals execute() as before, with each op symbol instantiated by its function. This is true by
   construction, and it checks the translator.
 
-**Transcendentals** (F2XM1, FYL2X, FPTAN, FPATAN, FSIN, FCOS and FSINCOS: D9 reg /6 rm0-3, /7 rm3 rm6 rm7):
-- OWNER 8 says "correctly rounded at the operand type". The spec leaves them uninterpreted, so no Form can be proved
-  against it.
-- These classes stay uncertified with reason `spec: uninterpreted x87_<fn>`.
-- They are reported to the orchestrator: a proof route for correctly rounded transcendentals needs an owner decision, for
-  example CORE-MATH's published proofs under OWNER 9.
+**Transcendentals** (F2XM1, FYL2X, FPTAN, FPATAN, FSIN, FCOS, FSINCOS). Orchestrator ruling, CLAUDE.md integ
+b7b6f0df0:
+- The value of the spec's uninterpreted `x87_<fn>` is CR_binary64(fn), by OWNER 8.
+- The implementation is CORE-MATH (tools/core-math, built into the guest runtime by L2), taken by its documentation under
+  the owner's existing rule for external libraries. No proof is claimed for it.
+- The Form is the SDM machinery around the call: stack, tags, C1, C2 for an out-of-range |x| >= 2^63, the #IA domain when
+  unmasked. That part is certified against the spec, like every other entry.
+- The call of CR(fn) is one op symbol bound to the library symbol. The certificate states the binding, and the op proof
+  for it is the binding itself.
+- The lowering table of that section is L3a's to emit (for example FYL2X = y * cr_log2(x), an IEEE multiply).
 
 **Order.**
 1. Slice 1: the translator with the op-symbol mechanism, the Form entry point and the prover branch, for the classes whose
    DAG has no FP op and no Real (FLD m64, FILD m32, FLD ST(i), FXCH, FCHS, FABS, FFREE, the control and environment
    instructions).
 2. Slice 2: the op proofs of the rounding machinery, then FLD/FST m32 and m64, the arithmetic and the compares.
+3. Slice 3: the transcendental classes, with x87_<fn> bound to CORE-MATH.
