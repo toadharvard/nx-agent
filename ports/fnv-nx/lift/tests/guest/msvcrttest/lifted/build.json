@@ -14,6 +14,8 @@
   "asm": []
  },
  "include": [
+  "ports/fnv-nx/lift/rt",
+  "ports/fnv-nx/platform/include",
   "ports/fnv-nx/shim/include"
  ],
  "units": "all",
