@@ -1644,3 +1644,14 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - The bytes-by-category table over all 8 images at the base3 head, with B/insn.
   - Then my ruling on the first density rule, by measured share.
 - bottleneck: the L2 recipe-path pin and dispatch.c ENTRY1-CONT (L2 w2); the w7 universe engine; the L5 rows; density table (w12).
+
+## 2026-11-16 06:12 — one source of semantics: every pack shape from its certified Form
+- L3b found a class gap: hand handlers (f_int h_segshapes, the OPS handlers and the others) emit C text that is not built from the certified Form. So the certified object and the shipped code are two copies, with no gate linking them.
+- Rule (accepted): every pack shape is emitted from its certified Form through EMIT/lift_dsl.
+  - The pack's shapes.tsv gets `path` (form | handler:<name> | form+xfer), and formgate reds every handler row.
+  - A handler is deleted when its Form class lands.
+  - The f_flow transfer tail (nonlocal and dispatch) is the lift/rt ABI; the guest-state part comes from the Form.
+- w8 (doing, claude/fnv-l3a-lift-w8-path): the handler census and the path column over 8 images, to L3b and me.
+- w7: publish shapes/baddecode per image (f5d49d6fa) for L3b's 2,664-key builder split.
+- L3b: the segment-register Forms first.
+- bottleneck: the L2 recipe-path pin and dispatch.c; the w7 universe engine; the handler->Form migration (size from the w8 census); the L5 rows; w12 density.
