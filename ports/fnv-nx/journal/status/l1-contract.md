@@ -3073,3 +3073,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - 12:41: cand5 c5 ebf18a096 (w28): admit 1805/1805 files, 94 roots. recipe.check: 66 roots, 0 red, 100 s.
   - loader/ and bridgetable/ come from L5 563e1273f (lift `uses` them). contract/exporthdr is L1's.
   - Retakes before the verdict: lift/ from 407914779, and toolchain/ and rules/ from a36b3c8f2 + overlay. Then w28 sends the verdict to farm session_01KmtZKTV1mniUErarfUpdJZ.
+- 12:47: w29-c5: 51814aff (gatefile needs, topological order) and 1d5da7e2 (ldsynth adds the TLS-defining product objects through onedef; tls-undefined and tls-duplicate are red). test_gatesdir_needs and test_linkset TLS pass.
+  - The w29 items (const records, ext_units) break roots that still carry the deleted keys: L5 platform `external_errors` (fix 568d0049, L5 takes it) and L6 gl4 and translator `constants` (L6 converts to .fnvnx.const). The w29 items go into the next candidate, not cand5.
+  - Measuring lift/rt with the keys removed locally (a measurement only).
