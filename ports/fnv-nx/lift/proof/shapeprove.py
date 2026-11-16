@@ -79,9 +79,7 @@ def stale_reason(rec):
     if rec.get('model_sha') != model_sail.ir_sha(): return 'model'
     if rec.get('prover_sha') != certbasis.prover_sha(): return 'prover'
     if rec.get('obligations') != list(prove.OBLIGATIONS): return 'obligations'
-    try: cur = symform.shape_sha(rec['shape'])
-    except Exception: return 'dsl-undecidable'
-    if rec.get('dsl_sha') is None or rec.get('dsl_sha') != cur: return 'dsl'
+    if rec.get('dsl_sha') is None or rec.get('dsl_sha') != symform.shape_sha(rec['shape']): return 'dsl'      # a failing shape_sha is a defect: it raises
     return None
 
 def stamp(rec, xsha):
