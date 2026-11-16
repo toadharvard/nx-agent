@@ -14,7 +14,7 @@ files = {"a/build.json", "b/build.json"}
 roots = {"a": {"path": "a", "recipe": "a/build.json"}, "b": {"path": "b", "recipe": {"guest": "b/build.json", "host": "b/build.host.json"}},
          "c": {"path": "c", "recipe": "c/build.json"}, "d": {"path": "d", "variants": {"v": {"recipe": "d/v.json"}}}, "e": {"path": "e"}}
 e = recipe.missing_recipes(roots, files)
-check("missing recipes found: c (string), b host (map), d variant; none for tracked or for a row without a recipe", [x.split()[2] + ":" + x.split()[5] for x in e] == ["b:b/build.host.json", "c:c/build.json", "d:d/v.json"], e)
+check("missing recipes found: c (string), b host (map), d variant; none for tracked or for a row without a recipe", [x.split()[2] + ":" + x.split()[5].rstrip(",") for x in e] == ["b:b/build.host.json", "c:c/build.json", "d:d/v.json"], e)
 check("a table whose recipes are all tracked is green", recipe.missing_recipes({"a": roots["a"]}, files) == [], "")
 r = TL.main_rec()
 repo = TL.mk("mr1", r, dict(TL.BASE_FILES, **{"toy/b.c": "int f_b(void) { return 1; }\n"}))
