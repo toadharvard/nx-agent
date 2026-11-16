@@ -2876,3 +2876,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - The exportgen side is done: w28-exportrec 6a9465a57 sits on d884fe727 and adds the `!` parse and record_class (4 bytes gives i, 8 gives q; a bit-field, marked or float record is red), with tests.
   - It is held back from the farm head until L2's plugin marker lands, and the two land together.
 - bottleneck: L2's layout-plugin `!` marker; cand4 verdict; L3a base3 head.
+- L2's `!` marker landed at 6f147b874 (w2, test_layout 214 checks). w28 combines its toolchain hunks with exportrec, keeps L1's ctypes_compat parse as the one copy, and hands the result to farm 3 (doing).
+  - The farm report is to give the global `!` count over the platform export records, and to show the 13 exports green with any marked record red.
+- bottleneck: farm 3 relift on the combined head; cand4 verdict; L3a base3 head.
