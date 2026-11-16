@@ -35,13 +35,18 @@ def main():
     base = tempfile.mkdtemp(prefix="shard-test-")
     try:
         keys = {"u%d.c" % i: hashlib.sha256(b"k%d" % i).hexdigest() for i in range(40)}
-        for n in range(1, recipe.MAX_SHARDS + 1):
+        for n in list(range(1, 17)) + [32, 41, 100]:   # N is uncapped, also N above the unit count (empty shards)
             parts = recipe.shard_partition(keys, n)
             flat = [u for p in parts for u in p]
             check("shards N=%d: disjoint and covering" % n, len(parts) == n and len(flat) == len(set(flat)) and set(flat) == set(keys))
+        p32 = recipe.shard_partition(keys, 32)
+        check("N=32 partitions the units", len(p32) == 32 and sorted(u for q in p32 for u in q) == sorted(keys))
+        p100 = recipe.shard_partition(keys, 100)
+        check("N > units: some shards are empty, still a partition", any(not q for q in p100) and sorted(u for q in p100 for u in q) == sorted(keys))
+        check("shard_spec 31/32 and 0/1000 parse", recipe.shard_spec("31/32") == (31, 32) and recipe.shard_spec("0/1000") == (0, 1000))
         check("shard_of is int(key,16) mod N", recipe.shard_of("ff", 8) == 255 % 8 and recipe.shard_of("10", 3) == 16 % 3)
         check("shard_spec parses i/N", recipe.shard_spec("2/5") == (2, 5))
-        for bad in ("0/0", "3/3", "1/17", "x", "-1/2", "01/2"):
+        for bad in ("0/0", "3/3", "32/32", "x", "-1/2", "01/2"):
             try:
                 recipe.shard_spec(bad)
                 got = None
