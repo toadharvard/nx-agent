@@ -661,6 +661,13 @@
    "recipe": "ports/fnv-nx/platform/exptable/build.json"
   },
   {
+   "path": "ports/fnv-nx/render/total/d3d9exports",
+   "class": "tool",
+   "target": "host",
+   "entry": [],
+   "recipe": "ports/fnv-nx/render/total/d3d9exports/build.json"
+  },
+  {
    "path": "ports/fnv-nx/render/total/d3d9total",
    "class": "tool",
    "target": "host",
