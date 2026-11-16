@@ -1482,3 +1482,8 @@ Paused: w3b, w4, farm; no other work.
     - (2) The D9_SPEC and D9_SMWALK reds: base3 lacks w6-root's bridgefacts/, so it must take bridgefacts/ whole as well.
     - Per-target: smscan, pair and translator are clean at b412d413d. render/nxgpu/build.guest.json was missed and is now with w6 (doing).
 - bottleneck: w6 nxgpu guest per-target pass; base3 take of render/ and bridgefacts/; farm1 sm_link.
+- 03:04Z w6 472d6d56d accepted: nxgpu/build.guest.json keeps only flags, profile and link.
+    - recipe check valid for 9 render and bridgefacts roots, nxgpu@guest included.
+    - nxgpu builds 1+1 objects, byte-identical to 9acd1223b.
+    - Sent to L3a as the render head for base3: render/ and bridgefacts/ whole. gl4 builds on base3 with L3a's hostabi fix 8666fb756.
+- bottleneck: base3 retake; farm1 sm_link; the cand4 base.
