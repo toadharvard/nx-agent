@@ -384,6 +384,16 @@ non-constant part). A resolved file inside the mounted tree and a read through `
 declared `uses` input, passed to the tool as an argument (as `--lib` is) or read through `require_mounted`. One implementation: `pathflow.escapes` (the abspath gate's
 `abspath:escape` calls the same function). Tests: `tests/test_genescape.py`, `tests/test_gate_abspath.py`.
 
+### Declared imports of a generator's tool (`imports`)
+
+A generator tool may import modules of other admitted roots only through the `imports` of its own root's admit.json row (`{"imports": [root, ...]}`, the form `manifest` uses).
+`gen:foreign-import` accepts an import that resolves inside a tree of a declared import root. The generate stage mounts the tool's own root at `/tool` and, at `/imp` in
+the repo-relative layout, exactly the files of the declared import roots that the import closure (by `ast`, transitively) reaches, and nothing else of those roots;
+`PYTHONPATH` lists their directories. The stage key therefore covers only the closure: an edit to another file of an import root leaves the key unchanged. Red:
+an import of a root that is not declared (`gen:foreign-import`); a declared root that no generator of the recipe reaches (`gen:unused-import:<root>:<import root>`); a
+read by a path of its own location (`__file__`) in a module of an import root (only its `.py` closure is mounted, so the data is not there: pass the data as a declared
+input). Functions: `recipe.import_trees`, `recipe.import_mount`. Tests: `tests/test_genimports.py`.
+
 ### Generated `sources`
 `sources: PATH` (a path in generated[].outputs of the root) names a file a generate stage writes, one `<external>:<path>` line per unit; `.` names the root
 itself (a tracked file of it). Each listed file of a declared external is copied into the unit view as the unit `<external>/<path>`, so its content is in

@@ -196,7 +196,7 @@ STAGE_EXT_KEYS = {"name", "root", "output", "at"}   # an external that is the de
 def is_stage_ext(e):
     """E is an external produced by a root's stages (STAGE_EXT_KEYS), not a fetched commit."""
     return isinstance(e, dict) and set(e) == STAGE_EXT_KEYS
-SANDBOX_PATHS = ("/src", "/inc", "/in", "/uses", "/out", "/tool", "/objs", "/ld", "/syslib", "/linked", "/arch", "/contract", "/work", "/proc", "/dev", "/tmp", "/oldroot")
+SANDBOX_PATHS = ("/src", "/inc", "/in", "/uses", "/out", "/tool", "/objs", "/ld", "/syslib", "/linked", "/arch", "/imp", "/contract", "/work", "/proc", "/dev", "/tmp", "/oldroot")
 MOUNT_PREFIXES = SANDBOX_PATHS + ("/ext", "/launch", "/deb", "/plug", "/probe")   # every absolute path a stage can open: the stage paths above, the externals ("at": /ext/<name>) and the launcher (/launch/genlaunch.py), the debs of a run stage (/deb), the plugin objects (/plug) and the driver probe (/probe); gate_abspath.py reads this one constant
 def require_mounted(path):
     """PATH when it is under MOUNT_PREFIXES (the stage's own mount namespace), else ValueError: the one guard of a launcher that runs a tool by path (gate_abspath.py accepts a dynamic load only through it)."""
@@ -654,21 +654,38 @@ def link_candidates(roots, root, target, repo):
     return out
 
 
-def foreign_imports(tool, owner, files, inputs, repo=".", closure=None):
+def import_trees(roots, owner):
+    """{declared import root: [its trees]} of the admitted root OWNER (admit.json `imports`): the roots whose Python modules a tool of OWNER may import."""
+    return {r: gate_admit.trees(roots[r]) for r in (roots[owner].get("imports", []) if owner in roots and isinstance(roots[owner].get("imports", []), list) else []) if r in roots}
+
+
+def import_mount(tool, owner, files, inputs, roots, repo="."):
+    """([bad], [files of the declared import roots in the import closure of TOOL]): what the generate stage of TOOL mounts under /imp (repo-relative layout) next to its
+    own root's /tool. The key covers exactly these files: an edit to any other file of an import root leaves the stage's key unchanged."""
+    it = import_trees(roots, owner)
+    clo = []
+    bad = foreign_imports(tool, owner, files, inputs, repo, clo, [t for ts in it.values() for t in ts])
+    return bad, sorted(f for f in set(clo) if any(under(f, t) for ts in it.values() for t in ts))
+
+
+def foreign_imports(tool, owner, files, inputs, repo=".", closure=None, imports=()):
     """[module] a generator tool imports that its stage cannot read: the stage mounts the tool's own root and the generator's declared inputs, plus the Python
     standard library and the pinned modules of env.json (envcheck.PY_MODULES). Every import of the tool, found by `ast` (any depth, relative imports included), and,
     transitively, of every module it resolves to, must be one of those; a module of another root that no declared input carries is foreign (the stage would die with
     ModuleNotFoundError at run time, so the recipe is red before any run). INPUTS: the generator's input paths (repo-relative strings). CLOSURE: a list that receives
-    the tool's import closure (the repo paths of the files the walk read), for the file-escape rule."""
+    the tool's import closure (the repo paths of the files the walk read), for the file-escape rule.
+    IMPORTS: the trees (repo paths) of the roots the tool's root declares in admit.json `imports`: a module found there is no foreign import; the stage mounts exactly the
+    closure files of those trees (import_mount), never the whole tree."""
     import ast
     std, pinned = set(sys.stdlib_module_names) | {"__future__"}, set(envcheck.PY_MODULES.values())
     mine = [f for f in files if under(f, owner) and f.endswith(".py")]
     ins = [i for i in inputs if isinstance(i, str)]
+    theirs = [f for f in files if f.endswith(".py") and any(under(f, t) for t in imports)]   # the modules of the declared import roots
     by_path = {}
 
     def find(name, rel):    # the tracked file of module NAME (dotted): in the tool's own root, or carried by a declared input
         parts = name.split(".")
-        for cand in (mine + [f for f in files if f.endswith(".py") and any(f == i or under(f, i) for i in ins)]):
+        for cand in (mine + [f for f in files if f.endswith(".py") and any(f == i or under(f, i) for i in ins)] + theirs):
             for suf in ("/".join(parts) + ".py", "/".join(parts) + "/__init__.py"):
                 if cand == suf or cand.endswith("/" + suf):
                     return cand
@@ -1518,7 +1535,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
                 home.setdefault(f[len(d):].lstrip("/"), set()).add(f)
     err += ["header %r is in %d homes: %s (one home per header)" % (n, len(fs), ", ".join(sorted(fs)))
             for n, fs in sorted(home.items()) if len(fs) > 1]
-    seen = set()
+    seen, used = set(), {}   # USED: owner root -> declared import roots the import closures of this recipe's generators reach
     for i, g in enumerate(rec.get("generated", []) if isinstance(rec.get("generated", []), list) else err.append("generated is not a list") or []):
         if not (isinstance(g, dict) and {"tool", "args", "inputs", "outputs"} <= set(g) <= {"tool", "args", "inputs", "outputs", "objects_of", "dirs"}):
             err.append("generated[%d] needs exactly tool, args, inputs, outputs (and optionally objects_of, dirs)" % i)
@@ -1539,14 +1556,21 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             err.append("generated[%d].args must be strings" % i)
         if isinstance(t, str) and t in files and t.endswith(".py") and owner:
             clo = []
+            used.setdefault(owner, set())
             err += ["gen:foreign-import:%s:%s (generated[%d]: the stage mounts the tool's own root and the declared inputs; the module lies in another root and no input carries it)" % (t, m, i)
-                    for m in foreign_imports(t, owner, files, g["inputs"] if isinstance(g["inputs"], list) else [], repo, clo)]
+                    for m in foreign_imports(t, owner, files, g["inputs"] if isinstance(g["inputs"], list) else [], repo, clo,
+                                             [x for ts in import_trees(roots, owner).values() for x in ts])]
+            for ir, ts in import_trees(roots, owner).items():
+                if any(under(c, x) for c in clo for x in ts):
+                    used.setdefault(owner, set()).add(ir)
             # the file-escape rule (pathflow.escapes, the one implementation the abspath gate also runs): a read built from __file__, __path__ or sys.argv[0] that leaves the
             # tree the stage mounts the file from, or that cannot be decided, is red; a resolved file inside the mounted tree and a read through require_mounted are green
             for cf in sorted(set(clo)):
                 ot = tree_of(roots, cf)
                 if ot is None:
                     continue
+                if any(under(cf, x) for ts in import_trees(roots, owner).values() for x in ts):
+                    ot = "/imp"   # a module of a declared import root: only the .py closure is mounted (at /imp), so a data file read by a path of its own location is not there
                 try:
                     src = open(os.path.join(repo, cf)).read()
                     esc = pathflow.escapes_of(cf, src, ot)
@@ -1584,6 +1608,8 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             if o in seen:
                 err.append("generated output %s is produced twice" % o)
             seen.add(o)
+    err += ["gen:unused-import:%s:%s (admit.json `imports` of %s declares a root that no generator of this recipe imports from: remove the declaration)" % (o, ir, o)
+            for o in sorted(used) for ir in import_trees(roots, o) if ir not in used[o]]
     err += run_errors(rec, root, files, roots, mine, seen, repo)
     err += uses_errors(rec, root, roots, repo, files) + include_uses_errors(rec, roots, repo)
     ea, ident = rec.get("error_abi"), lambda x: isinstance(x, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", x)
@@ -2606,6 +2632,9 @@ class Job:
         ins = [{"at": "/tool", "tree": self.ingest_files(tmp, "tool", [f for f in self.files if under(f, owner)], owner)},
                {"at": "/launch/genlaunch.py", "tree": cas.ingest(GEN_LAUNCH, self.store)},
                {"at": "/launch/mounts.json", "tree": self.mounts_file(tmp)}] + xin + self.use_inputs(ws)
+        imp = import_mount(g["tool"], owner, set(self.files), [p for p in g["inputs"] if isinstance(p, str)], self.roots, self.repo)[1]
+        if imp:   # the import closure of the tool in the declared import roots, repo-relative, and nothing else of those roots
+            ins.append({"at": "/imp", "tree": self.ingest_files(tmp, "imp", imp, "")})
         if "objects_of" in g:
             ins.append({"at": "/objs", "tree": self.objects_input(ws, tmp, g)})
         for p in g["inputs"]:
@@ -2619,6 +2648,8 @@ class Job:
                         self.ingest_files(tmp, "in%d" % len(ins), sub, p)})
         env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
         env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "FNVNX_PYMODS": self.pymods})
+        if imp:   # the directories of the mounted modules (sorted): a module of a declared import root imports its siblings
+            env["PYTHONPATH"] = ":".join(sorted({"/imp/" + posixpath.dirname(f) for f in imp}))
         doc = {"format": "fnvnx-stage/1", "stage": "gen:%s:%d" % (self.root, i), "class": "build", "tool": "python", "cwd": "/work",
                "argv": [py["python"], "-s", "-B", "/launch/genlaunch.py", "\n".join(g["outputs"] + ["dir:" + d for d in g.get("dirs", [])]), "/tool/" + g["tool"][len(owner) + 1:]] + g["args"] + (["--section", g["objects_of"]["section"]] if isinstance(g.get("objects_of"), dict) and g["objects_of"].get("section") else []), "env": env,
                "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"], "ro_root": True}   # a generator writes only /out
