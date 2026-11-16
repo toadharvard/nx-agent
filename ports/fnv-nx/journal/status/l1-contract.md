@@ -2851,3 +2851,9 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - The report sits next to its object, at <-o path>.f2i.json.
   - Each archive member is paired with its object by sha256 of its bytes, not by name. An ambiguous or unmatched member is red, and a member that occurs twice in one archive gets the suffix .<n>.
   - A member is null exactly when no report sits next to its object.
+- cand5's toolchain/ source is fixed: L2 cand4b d9eb80fde (w2). It is 67d1ae6fe plus the names -Wformat-diag fixes, the plugbuild scratch hunk, the FNPARM revert 896a97fac and w3's rt.sh commits.
+- Open item, L1 and L2: msvcmodel/rt.sh still writes the runtime's ftoi reports to /dev/null.
+  - No gate reads them yet, so the reports are accepted for cand5.
+  - Until the item closes, the runtime's float-to-int sites are outside fpexact's universe.
+  - It closes when L2's pin commit gives FTOI/ (pairing by sha256) and L1's reader adds the runtime rows to objects.json.
+- bottleneck: cand4 verdict; cand5 waits on the L3a base3 head (it must include 687182c85).
