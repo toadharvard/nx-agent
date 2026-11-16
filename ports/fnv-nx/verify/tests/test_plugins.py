@@ -287,7 +287,7 @@ def main():
         return c, cas.ingest(d, os.path.join(BASE, "ingest-store"))
 
     def xrec(c, t):
-        r = mut(external=[{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": c, "tree_sha256": t, "at": "/ext/pack"}])
+        r = mut(external=[{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": c, "tree_sha256": t, "at": "/ext/pack"}], include=REC["include"] + ["/ext/pack"])
         return r
 
     def kinds():
@@ -295,7 +295,7 @@ def main():
         return {k: ds.count(k) for k in ("pp", "cc")}
 
     c1, t1 = pack_commit("one\n")
-    PK = {ROOT + "/a.cc": SRC + '#include "/ext/pack/pack.h"\n'}     # a stage mounts the externals its unit names: PP mounts the pack
+    PK = {ROOT + "/a.cc": SRC + '#include "pack.h"\n'}     # a stage mounts the externals its include path and flags name: PP mounts the pack (-I /ext/pack)
     x1 = make_repo("ext1", xrec(c1, t1), "native", PK)
     r1, _ = build(x1, "X")
     k1 = kinds()
