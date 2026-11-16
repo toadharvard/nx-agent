@@ -2660,3 +2660,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   (1) `sources: <step>:<dir>`: units from a declared dirs output of the same root, sorted, content keys, no per-file flags (GMP's -DOPERATION_* compiles become wrapper units);
   (2) the run-step input {"archive": ROOT}: ROOT must be in uses and a guest root, the input is the link's ar_bytes, configure probes are compile/link only.
   w2 implements; L1 reviews for cand5.
+- L3a/w8: the selftests gate universe was a hand DIR list (45 test files outside it at base3 e9e145363, 13 of them red), and produced files could not be test inputs. Assigned to w28 (claude/fnv-l1-contract-w28-c5, from cand4 62474771c) for cand5: the universe is derived from admit.json (tests/test_*.py of every root), and inputs.json gains {"root","output"} mounted as FNVNX_INPUT_<NAME>. Also queued for cand5: L3a's admit.json lifted_by gen:...:1 change for guestgen_imptest and guestgen_msvcrttest.
