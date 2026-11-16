@@ -23,9 +23,13 @@
     "--objects",
     "/objs",
     "--out",
-    "/out/obj.json"
+    "/out/obj.json",
+    "--kinds",
+    "/in/ports/fnv-nx/toolchain/names/sympair_kinds.inc"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/toolchain/names/sympair_kinds.inc"
+   ],
    "outputs": [
     "obj.json"
    ],

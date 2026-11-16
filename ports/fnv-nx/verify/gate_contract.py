@@ -201,7 +201,7 @@ def stages(w, doc, ext, rp, only=None):
     st = {
         "exefacts": (py("exefacts.py", "--exe", P("exe"), "--units", rp["units"], "--out", w + "/facts.json"), ["facts.json"]),
         "n1": (py("n1.py", "--exe", P("exe"), "--units", rp["units"], "--msvc", P("msvc"), "--out", w + "/n1.json"), ["n1.json", "gate/n1.json"]),
-        "objfacts": (py("objfacts.py", "--link", link, "--facts", w + "/facts.json", "--out", w + "/obj.json"), ["obj.json"]),
+        "objfacts": (py("objfacts.py", "--kinds", "ports/fnv-nx/toolchain/names/sympair_kinds.inc", "--link", link, "--facts", w + "/facts.json", "--out", w + "/obj.json"), ["obj.json"]),
         "registry": (py("registry.py", "--facts", w + "/facts.json", "--obj", w + "/obj.json", "--n1", w + "/n1.json", "--link", link,
                         "--out", w + "/gates"), ["gates/gates.json", "gates/bodysel.tsv"]),
         "xunit": (py("gate_xunit.py", "--objects", link + "/game", "--nm", NM), ["gate/xunit.json"]),

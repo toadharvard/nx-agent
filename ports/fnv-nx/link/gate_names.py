@@ -126,6 +126,7 @@ def check(gcc, cl, units=None):
 
 
 def main(argv):
+    l2sections.set_kinds(l2sections.REPO_KINDS_INC)   # cwd = the checkout root: the table is a tracked file of it
     a = unitpairs.parse_args(argv, 'gate_names.py', __doc__)
     try:
         uni, red = check(a.gcc, a.cl, a.units)

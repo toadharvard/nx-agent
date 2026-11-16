@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/toolchain/names/sympair_kinds.inc
 """l2sections - the three non-loaded ELF sections that L2's compiler plugins put into every game object (L1 CONTRACT).
 
     parse_sympair(data, where) -> [(symbol, msvc_name, kind, 'def'|'ref')]            .fnvnx.sympair (plugin NAMES1)
@@ -17,7 +16,7 @@ Pure: bytes in, tuples out (rows keep the section's order).
 """
 import os, re, sys
 
-DEFAULT_KINDS_INC = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'toolchain', 'names', 'sympair_kinds.inc')
+REPO_KINDS_INC = 'ports/fnv-nx/toolchain/names/sympair_kinds.inc'   # the table's tracked path: for a caller whose cwd is the checkout root; a recipe stage passes the mounted input it declares
 _kinds = None
 
 
@@ -31,15 +30,14 @@ def sympair_kinds(inc):
 
 
 def set_kinds(inc):
-    """The one table the kind set is read from, for this process: a recipe stage names the declared output of toolchain/names (/uses/.../sympair_kinds.inc), a caller in a
-    checkout reads the table of its own tree (the default)."""
+    """The one table the kind set is read from, for this process: a recipe stage names the declared output of toolchain/names (/uses/.../sympair_kinds.inc), a caller at the checkout root passes REPO_KINDS_INC."""
     global _kinds
     _kinds = sympair_kinds(inc)
 
 
 def kinds():
     if _kinds is None:
-        set_kinds(DEFAULT_KINDS_INC)
+        raise RuntimeError('l2sections: no sympair kind table loaded (set_kinds(path) first: the table is the stage input toolchain/names/sympair_kinds.inc)')
     return _kinds
 
 

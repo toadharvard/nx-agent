@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/lib/sha256/build.json ports/fnv-nx/link
+# reads: ports/fnv-nx/toolchain/names/sympair_kinds.inc ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/lib/sha256/build.json ports/fnv-nx/link
 # reads: ports/fnv-nx/loader/build.json ports/fnv-nx/platform/build.json ports/fnv-nx/render/d3d9/build.json ports/fnv-nx/render/gl4/build.json
 # reads: ports/fnv-nx/render/nxgpu/build.json ports/fnv-nx/render/pair/build.json ports/fnv-nx/render/shaders/translator/build.json
 # reads: ports/fnv-nx/render/smscan/build.json ports/fnv-nx/rt/guest/build.json ports/fnv-nx/rt/guest_main/build.json ports/fnv-nx/shim/build.json
@@ -35,6 +35,7 @@ import gate_l2native as L  # noqa: E402
 import gate_names  # noqa: E402
 import gate_r7  # noqa: E402
 import l2sections  # noqa: E402
+l2sections.set_kinds(os.path.join(REAL, T + "toolchain", "names", "sympair_kinds.inc"))
 import store  # noqa: E402
 import test_l2gates as tl  # noqa: E402
 
