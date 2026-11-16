@@ -46,6 +46,14 @@ def load_keys():
     return out
 
 
+def import_pop(conv, types):
+    """the bytes an imported function's ret pops (Win32 as documented, ASM-003): a cdecl or vararg callee 0, a stdcall callee its argument bytes, any other convention not decided -> None. THE ONE RULE:
+    ehflow.import_effect and pcsrc both call it."""
+    if conv in ('cdecl', 'vararg'): return 0
+    if conv == 'stdcall': return sum(8 if t in 'dq' else 4 for t in types)
+    return None
+
+
 def sext(b): return b - (1 << 32) if b >= 1 << 31 else b
 
 
@@ -299,10 +307,8 @@ class Flow:
         if s.keys is None: s.keys = load_keys()
         r = s.keys.get(nm.lower())
         if r is None: return None
-        conv, types = r
-        if conv in ('cdecl', 'vararg'): bal = 0
-        elif conv == 'stdcall': bal = sum(8 if t in 'dq' else 4 for t in types)
-        else: return None
+        bal = import_pop(*r)
+        if bal is None: return None
         return (frozenset(CALLEE), bal, {})
 
     def inline(s, C, st, site):
