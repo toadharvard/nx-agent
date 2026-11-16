@@ -1893,3 +1893,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Fix 8b1dfbab9 (w7): stop at a fixed point or a 2-cycle and take the smaller L, which satisfies L ⊆ G(L), so the universe is a sound superset. Test test_r3_refine.
   - Doing (farm d3dx9): exe, d3dx9_38 and d3dx9_31 in parallel at 8b1dfbab9. Then w7 publishes the all-7 universe pin for L1.
 - base3 @2841c8abf (w8): C1 = |r|>|x| on the fist/frndint fast paths.
+- Blocker for the pack publish (owner L3b, claude/fnv-l3b-lift-w-sha): the Form sha is not canonical across processes. The dsl.py serialization depends on node serial order.
+  - The fix makes the sha and the emitted unit text a function of structure alone, tested cold per process against one shuffled process.
+  - Pack publish and certificate pins wait for it.
+- Archived the stale d3dx9_31 farm (session_01KmtZKSXJfEfpDazdv43Dkf), which was at 5c12589f5.
