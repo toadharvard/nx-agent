@@ -18,7 +18,7 @@ The platform never stops a thread by the kernel for a user suspension. `os_threa
 
 ## ABI
 
-- `uint32_t susp` is a field of the lift/rt `struct cpu` (append-only, offset 504). Only the platform writes it, with a release
+- `uint32_t susp` is a field of the lift/rt `struct cpu` (append-only, offset 504; sizeof(struct cpu) is 512 by alignment). Only the platform writes it, with a release
   store while holding `w32_wait_lock` (the suspend lock of every thread object). Nonzero means the suspend count is above 0.
 - `fnvnx_susp_attach(c, &c->susp, &c->ra)` / `fnvnx_susp_detach(c)` are called by `fnvl_thread_main` (lift/rt/enter.cc) on
   the thread itself, around the life of its `struct cpu`. After detach, no other thread writes the word, so `c` may go away.

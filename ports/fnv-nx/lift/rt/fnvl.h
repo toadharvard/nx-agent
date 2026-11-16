@@ -21,7 +21,7 @@ static_assert(__builtin_offsetof(struct cpu, ra) == FNVL_CPU_RA_OFF, "rt/fnvl_ab
 static_assert(__builtin_offsetof(struct cpu, fex) == 252 && __builtin_offsetof(struct cpu, fx) == 256 && __builtin_offsetof(struct cpu, eflx) == 384 && __builtin_offsetof(struct cpu, nf) == 388 &&
               __builtin_offsetof(struct cpu, hfpcr) == 392 && __builtin_offsetof(struct cpu, sel) == 400 && __builtin_offsetof(struct cpu, teb) == 424 && __builtin_offsetof(struct cpu, fip) == 428 &&
               __builtin_offsetof(struct cpu, fdp) == 432 && __builtin_offsetof(struct cpu, msvcrt) == 436 && __builtin_offsetof(struct cpu, eflags) == 460 && __builtin_offsetof(struct cpu, dr) == 464 &&
-              __builtin_offsetof(struct cpu, fsw) == 488 && __builtin_offsetof(struct cpu, fop) == 492 && __builtin_offsetof(struct cpu, fcs) == 496 && __builtin_offsetof(struct cpu, fds) == 500 && __builtin_offsetof(struct cpu, susp) == 504 && sizeof(struct cpu) == 508,
+              __builtin_offsetof(struct cpu, fsw) == 488 && __builtin_offsetof(struct cpu, fop) == 492 && __builtin_offsetof(struct cpu, fcs) == 496 && __builtin_offsetof(struct cpu, fds) == 500 && __builtin_offsetof(struct cpu, susp) == 504 && sizeof(struct cpu) == 512,
               "struct cpu: earlier offsets hold; fsw fop fcs fds and susp are appended");
 /* New x87 state (appended): fsw = the ES (bit 7) and B (bit 15) bits of the FSW, loaded verbatim by FRSTOR / FLDENV / a CONTEXT restore and cleared by FNINIT / FNCLEX; the FSW image the program or a CONTEXT sees is
    TOP | C0..C3 | the sticky bits | (fsw | ES/B derived from the flags and FCW), where ES = B = ((flags & ~FCW & 0x3f) != 0) (SDM Vol 1 8.5: ES is set when an unmasked exception flag is set). fop (FOP, 11 bits), fcs (FCS),
