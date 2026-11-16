@@ -1616,3 +1616,4 @@ Paused: w3b, w4, farm; no other work.
     - gl4 has 22 files, the same as 8faa8175d; render/ differs only by the `plugins` removal in the pair/smscan host recipes.
     - Sent to L1, L4 and L5. w9 is archived.
 - bottleneck: L1 w28-c5 (shim INCLUDE) and the cand5 verdict. No build of gl4 has run yet, so there is no libnxgl4.so sha. d3d9exports waits on lift/rt (L3a). 0 of 4 workers busy.
+- 07:00Z: L5 merged the L6 head into claude/fnv-l5-platform-w39 0a3f9b76. There, render/d3d9 (69 objects) and render/gl4 (17 objects, 4 ld stages) are green, and bridgefacts/com and bridgetable are admitted with the platform root. L5's fix bd245f6ca is accepted: a spec_extract stage now feeds comrows. The cause was the w9 split, which dropped the spec producer when the tracked com_spec.json was deleted. Cherry-picked onto the L6 head: w9-cand4 b35a0f090.
