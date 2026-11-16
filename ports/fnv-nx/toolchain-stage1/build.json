@@ -46,41 +46,14 @@
      "path": "gcc-13.3.0.tar.xz"
     }
    ],
-   "debs": {
-    "closure": [
-     "base-files",
-     "bash",
-     "dash",
-     "coreutils",
-     "sed",
-     "grep",
-     "patch",
-     "xz-utils",
-     "tar",
-     "gzip",
-     "findutils",
-     "diffutils",
-     "mawk",
-     "make",
-     "m4",
-     "perl",
-     "python3",
-     "binutils-aarch64-linux-gnu",
-     "g++-13",
-     "g++",
-     "gcc",
-     "binutils",
-     "gcc-13"
-    ]
-   },
+   "debs": {"profile": "compiler-build"},
    "outputs": [],
    "dirs": [
     "STAGE1"
    ],
    "scratch": [
     "/scratch"
-   ],
-   "timeout_s": 14400
+   ]
   }
  ],
  "outputs": {
