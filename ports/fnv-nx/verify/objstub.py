@@ -297,6 +297,12 @@ def tclass(w):
         return "sys" if (w >> 21) & 7 == 0 and w & 3 else "trap"
     return "trap" if (w >> 25 == 0b1101011 and (w >> 21) & 15 == 4) or w >> 16 == 0 else None
 
+def plain_ordered(w):
+    """LDAR/LDLAR/STLR/STLLR (B, H, W, X): a single register access through [Xn] that only orders (acquire/release). The game's compiler emits every x86-ordered access
+    so (the order plugin), so for the rules here (what a body reads, writes and returns) it is the plain load or store; exclusives (o2 = 0) and CAS (o1 = 1) are not."""
+    return (w >> 24) & 0x3F == 0b001000 and (w >> 23) & 1 == 1 and (w >> 21) & 1 == 0 and (w >> 16) & 31 == 31 and (w >> 10) & 31 == 31
+
+
 def lastkind(w):
     """'call' (BL, BLR*), 'b', 'end' (cannot fall through: BR*, RET*, ERET*, exception generation, UDF), else None."""
     opc = (w >> 21) & 15
@@ -383,7 +389,7 @@ def cfg(words, a, b, rels, obj):
             return None  # BL (except of WINE: transparent), BR/BLR/ERET, SVC/HVC/SMC/BRK/HLT
         if w >> 22 == 0b1101010100 and (w >> 21 & 1 or w >> 19 & 3 or (w >> 12) & 15 not in (2, 3)):
             return None  # system instruction other than hint/barrier (MRS, MSR, SYS)
-        if (w >> 27) & 1 and not (w >> 25) & 1 and ((w >> 24) & 0x3F == 0b001000 or ((w >> 24) & 0x3F == 0b111000 and (w >> 21) & 1 and not (w >> 10) & 3)):
+        if not plain_ordered(w) and (w >> 27) & 1 and not (w >> 25) & 1 and ((w >> 24) & 0x3F == 0b001000 or ((w >> 24) & 0x3F == 0b111000 and (w >> 21) & 1 and not (w >> 10) & 3)):
             return None  # exclusive/ordered/CAS or LSE atomic
         if (w >> 27) & 7 == 0b011 and (w >> 24) & 3 == 0 and not a <= o + 4 * sx((w >> 5) & 0x7FFFF, 19) < b:
             return None  # LDR literal outside the function
@@ -475,12 +481,16 @@ def _flow(words, a, b, rels, obj, dec):
 def is_load(w):
     """A plain load word: LDR/LDP/LDUR/LDRSW and the SIMD forms (the load/store groups 0b101 pair and 0b111 single, with the L bit 22 set).
     Exclusive and atomic words (group 0b001 / the 0b111 register-offset LSE class) are not loads here: they are refused by the T rules."""
+    if plain_ordered(w):
+        return (w >> 22) & 1 == 1
     g = (w >> 27) & 7
     return g in (0b101, 0b111) and (w >> 22) & 1 == 1 and not (g == 0b111 and (w >> 24) & 3 == 0 and (w >> 21) & 1 and (w >> 10) & 3 == 0)
 
 
 def is_const_store(w):
     """A single-register store (STR/STUR/STRB/STRH, immediate forms, not SIMD, not unprivileged, not exclusive/ordered) of the integer register Rt."""
+    if plain_ordered(w):
+        return (w >> 22) & 1 == 0
     return (w >> 27) & 7 == 0b111 and not (w >> 26) & 1 and not (w >> 22) & 1 and (
         (w >> 24) & 3 == 1 or ((w >> 24) & 3 == 0 and not (w >> 21) & 1 and (w >> 10) & 3 != 2))
 

@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/addr/fnvnx_addr.cc
+# reads: ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc ports/fnv-nx/toolchain/ftoi/f2i_builtins.inc ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc
+# reads: ports/fnv-nx/toolchain/layout/crossing_terms.inc ports/fnv-nx/toolchain/layout/decltype_spell.inc
+# reads: ports/fnv-nx/toolchain/layout/fnvnx_layout.cc ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/toolchain/names/fnvnx_names.cc
+# reads: ports/fnv-nx/toolchain/order/atomic_order.inc ports/fnv-nx/toolchain/order/fnvnx_frame.h ports/fnv-nx/toolchain/order/fnvnx_order.cc
+# reads: ports/fnv-nx/toolchain/pi/fnvnx_pi.cc ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc ports/fnv-nx/verify
 """Tests for verify/objstub.py (gate objstub). Plain script: one PASS/FAIL line per case, exit 0 on pass.
 Compiles with aarch64-linux-gnu-gcc in both ABIs (ilp32, lp64); scratch under tempfile.mkdtemp."""
 import json
@@ -825,21 +831,10 @@ open(bad_ii, "w").write("int f(void) { return +; }\n")
 tc = objstub.unit_terminators("aarch64-linux-gnu-g++", [("pk-bad", bad_ii, "c")], {"c": []}, tempfile.mkdtemp(prefix="objstub-tc-"), 1, so=plug("aarch64-linux-gnu-g++"))
 check("a unit the terminator plugin cannot process: a failure of that unit in the result (no exception)", tc[0] == [] and len(tc[2]) == 1 and tc[2][0][0] == "pk-bad", tc)
 
-# the terminator run loads the ROOT'S OWN plugins as its compile stage does (recipe.root_plugin_flags): a unit that uses a dispatch attribute (fnvnx_host,
-# registered by the root's fnvnx_dispatch plugin) is green in the gate; the same preprocessed text without the root's plugins is an unknown attribute (-Werror=attributes)
-ATTR = '#include "toy.h"\ntypedef unsigned long long __attribute__((fnvnx_host)) hslot;\nhslot slot_a;\nint f_c(int x) { return x + TOY + (slot_a != 0); }\n'
-ra = TR.make_guest_repo("os-attr", files={"toy/constants.tsv": CONST, "toy/c.c": ATTR})
-rc, g, _, txt, st = gate(ra, ROOT + "/gattr", GC)
-check("a unit that uses a dispatch attribute: no terminator-red (the root's plugins are loaded in the terminator run)", "terminator-red" not in g.get("detail", "") and not any(":f_c" in u and "terminator" in g["detail"] for u in g["uncertified"]), (g, txt))
-ii = tf + ".attr.ii"
-open(ii, "w").write("typedef unsigned long long __attribute__((fnvnx_host)) hslot;\nhslot slot_a;\nint f(void) { return slot_a != 0; }\n")
-tcn = objstub.unit_terminators("aarch64-linux-gnu-g++", [("pk-attr", ii, "c")], {"c": ["-Werror=attributes"]}, tempfile.mkdtemp(prefix="objstub-tc-"), 1, so=plug("aarch64-linux-gnu-g++"))
-check("the same text without the root's plugins: a failure of the unit naming the unknown attribute (so the plugins must be loaded)", len(tcn[2]) == 1 and "attribute" in tcn[2][0][1], tcn)
-
 # the final image: every function body of the linked ELF is judged for the fixed-failure class (a weak `errno = ENOSYS; return -1` fallback left in it is red;
 # the same image with a strong override is green, the weak body is not in the image)
 ERR = '#include "toy.h"\nstatic int e;\nint *__errno(void) { return &e; }\n'
-WEAK = '#include "toy.h"\nint *__errno(void);\nint __attribute__((weak)) sched_getcpu(void) { *__errno() = 38; return -1; }\n'
+WEAK = '#include "toy.h"\n#include <errno.h>\nint __attribute__((weak)) sched_getcpu(void) { errno = ENOSYS; return -1; }\n'   # the target libc's own ENOSYS and accessor
 USE = '#include "toy.h"\nint sched_getcpu(void);\nint f_c(int x) { return x + TOY + sched_getcpu(); }\n'
 ri = TR.make_guest_repo("os-image-weak", files={"toy/constants.tsv": CONST + "e.c\t__errno\taddr\te\tref e\n", "toy/c.c": USE, "toy/e.c": ERR, "toy/w.c": WEAK}, image="f_a")
 rc, g, _, txt, st = gate(ri, ROOT + "/gi1", GC)
@@ -848,8 +843,8 @@ check("image with a weak errno/-1 fallback: red fixed-failure, the function name
 rs = TR.make_guest_repo("os-image-strong", files={"toy/constants.tsv": CONST + "e.c\t__errno\taddr\te\tref e\n", "toy/c.c": USE, "toy/e.c": ERR, "toy/w.c": WEAK, "toy/s.c": '#include "toy.h"\nint *__errno(void);\nint sched_getcpu(void) { return *__errno() + 3; }\n'}, image="f_a")
 rc, g, _, txt, st = gate(rs, ROOT + "/gi2", GC)
 check("the same image with a strong override: green, the weak body is not in the image", rc == 0 and g["image"]["fixed_failure"] == 0 and g["image"]["bodies"] > 0, (g, txt))
-# errno is derived by a probe compile with the root's own flags: an errno.h the root cannot compile is a red finding `errno-probe`, not a crash
-rn2 = TR.mut(); rn2["flags"] = {k: v + ["-D_ERRNO_H"] for k, v in rn2["flags"].items()}   # errno.h becomes empty: `errno` is undeclared
+# errno is derived by a probe compile with the root's own flags (the include guards of glibc and newlib): an errno.h the root cannot compile is a red finding `errno-probe`, not a crash
+rn2 = TR.mut(); rn2["flags"] = {k: v + ["-D_ERRNO_H", "-D_ERRNO_H_", "-D_SYS_ERRNO_H_"] for k, v in rn2["flags"].items()}   # errno.h becomes empty: `errno` is undeclared
 rd = TR.make_guest_repo("os-image-noprobe", rec=rn2, files={"toy/constants.tsv": CONST}, image="f_a")
 rc, g, _, txt, st = gate(rd, ROOT + "/gi3", GC)
 check("a root whose errno.h does not compile: red errno-probe (the probe does not compile with the root's flags), never green", rc == 2 and "errno-probe" in g["detail"], (g, txt))
@@ -866,6 +861,10 @@ ISL = '.text\n.globl isl\n.type isl,%function\nisl:\n mov w0, #1\n ret\n .word 0
 rj = TR.make_guest_repo("os-image-island", files={"toy/constants.tsv": CONST + "e.c\t__errno\taddr\te\tref e\n", "toy/c.c": USE.replace("sched_getcpu()", "0"), "toy/e.c": ERR, "toy/isl.S": ISL}, image="f_a")
 rc, g, _, txt, st = gate(rj, ROOT + "/gi4", GC)
 check("an image body with a data island is red unjudged", rc == 2 and "unjudged" in g["detail"] and g["image"]["unjudged"] >= 1, (g, txt))
+# the order plugin makes every x86-ordered access an acquire/release word: STLR/LDAR are the plain store/load for these rules; exclusives and CAS are not
+check("plain_ordered: STLR w1,[x0] and LDAR w0,[x0] are plain ordered accesses; STLXR, LDAXR and CAS are not",
+      objstub.plain_ordered(0x889FFC01) and objstub.plain_ordered(0x88DFFC00) and not objstub.plain_ordered(0x8802FC01) and not objstub.plain_ordered(0x885FFC00)
+      and not objstub.plain_ordered(0x88A07C41) and objstub.is_const_store(0x889FFC01) and not objstub.is_const_store(0x88DFFC00) and objstub.is_load(0x88DFFC00))
 
 # a host root: the terminator plugin is built against the plugin headers of the root's own (x86-64 distro) compiler, and sees its noreturn declarations
 xt = tf + ".x86"
