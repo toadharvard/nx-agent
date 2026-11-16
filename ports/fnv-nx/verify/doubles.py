@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """doubles: the rule "no doubles in tests" (CLAUDE.md, owner order of 2026-11-11 night) as a pure function over the results of the
 product roots' builds (objects.json of recipe.py, RECIPE.md "tests"). Called by gate_objstub.py: the check is part of the stub gate.
-Rule, per test binary T of a root R: (symbols defined by T's own objects) INTERSECT (symbols defined by the objects of ALL admitted
-product roots) = EMPTY. A symbol is any global, weak or unique definition of the ELF .symtab of an object (recipe.symbols). No allow-list,
+Rule, per test binary T of a root R, per link target X: (symbols defined by T's own objects of target X) INTERSECT (symbols defined by the objects of
+ALL admitted product roots of target X) = EMPTY. X is the object's own (ELF class, e_machine), read from its header (`target` of a `defined` row,
+recipe.symbols): the target the link checks (RECIPE.md "Target of the link"); two objects of different targets are never linked into one image, so one
+name in both is no double. A symbol is any global, weak or unique definition of the ELF .symtab of an object (recipe.symbols). No allow-list,
 no exclusion by name. Also red:
   - a test link that omits a product unit of its root (`linked` must contain every unit of the root);
   - a declared test without a linked ELF in the result;
@@ -16,13 +18,18 @@ Depends only on the accepted OWNER item 1 (the compiler is correct): the symbol 
 import os
 
 
+def clashes(defined, product):
+    """[(symbol, product objects)] of the symbols DEFINED (rows with `target`) that a product object of the SAME target defines."""
+    return [(s, sorted(product[(t, s)])) for t, s in sorted({(tuple(d["target"]), d["symbol"]) for d in defined}) if (t, s) in product]
+
+
 def judge(results, test_roots=()):
     """RESULTS {root: objects dict of a green build} -> (items [(id, "test")], findings [(id, "test", kind, detail)], stats dict).
     TEST_ROOTS: the keys of RESULTS that are roots of admit class `test` (the whole root is a test: every object of it is test code); every other key is a
     product root. One item per declared test, one `<root>:product-units` item per product root and one `<root>:test-root` item per test root; stats:
     tests_total, tests_with_doubles, double_symbols. A test root is judged like a declared test: (symbols its objects define) INTERSECT (symbols the objects of
     all product roots define) = EMPTY (`test-double`); its objects are not product objects, so they never count in the product set."""
-    product = {}   # symbol -> sorted product objects (repo-relative) defining it, over all product roots
+    product = {}   # (target, symbol) -> sorted product objects (repo-relative) defining it, over all product roots
     items, finds, doubles, with_doubles, total = [], [], 0, 0, 0
     for root in sorted(r for r in results if r not in test_roots):
         res, strong = results[root], {}
@@ -30,15 +37,15 @@ def judge(results, test_roots=()):
         items.append((pid, "test"))
         for d in res["defined"]:
             obj = "%s/%s" % (root, d["object"])
-            product.setdefault(d["symbol"], set()).add(obj)
+            product.setdefault((tuple(d["target"]), d["symbol"]), set()).add(obj)
             if d["bind"] == "GLOBAL":
-                strong.setdefault(d["symbol"], set()).add(obj)
-        for sym in sorted(s for s, o in strong.items() if len(o) > 1):
-            finds.append((pid, "test", "product-duplicate", "%s is defined by %s" % (sym, ", ".join(sorted(strong[sym])))))
+                strong.setdefault((tuple(d["target"]), d["symbol"]), set()).add(obj)
+        for key in sorted(k for k, o in strong.items() if len(o) > 1):
+            finds.append((pid, "test", "product-duplicate", "%s is defined by %s" % (key[1], ", ".join(sorted(strong[key])))))
     for root in sorted(r for r in results if r in test_roots):
         tid, total = root + ":test-root", total + 1
         items.append((tid, "test"))
-        bad = [(s, sorted(product[s])) for s in sorted({d["symbol"] for d in results[root]["defined"]}) if s in product]
+        bad = clashes(results[root]["defined"], product)
         doubles += len(bad)
         with_doubles += bool(bad)
         for s, objs in bad:
@@ -49,7 +56,7 @@ def judge(results, test_roots=()):
         for t in res.get("tests", []):
             tid, total = "%s:test:%s" % (root, t["name"]), total + 1
             items.append((tid, "test"))
-            bad = [(s, sorted(product[s])) for s in sorted({d["symbol"] for d in t["defined"]}) if s in product]
+            bad = clashes(t["defined"], product)
             doubles += len(bad)
             with_doubles += bool(bad)
             for s, objs in bad:
