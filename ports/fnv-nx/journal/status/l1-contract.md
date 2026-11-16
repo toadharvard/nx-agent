@@ -1993,3 +1993,11 @@ bottleneck: the cand3 head on the trunk (w12), then its verdict and merge (w15).
   - and a cut by the graph.
   The head goes to L3a w8 as soon as it builds.
 bottleneck: cand3 (w15).
+- 01:05 Items since 00:45:
+  - w28, for cand4:
+    - ee66191a0: --root normalized, plus per-stage progress lines;
+    - 82ff5eb86: `sources: <root>:<path>`, for L3b's rcp host root;
+    - 094b62a1e: foreign_imports follows Python's relative from-import resolution; lift/liftsrc has 0 at base3, measured by w8. It also goes to cand3 through w15.
+  - jtab-guard (w13's fnvnx-jtabcert/1): w28 writes the gate side.
+  - cand3b 4c38d7265 is red on toolchain: L2's pin a2dc4ecf4 adds tests/sdd/vbase_bounds.cpp. Ruling: the unit gets its own test root (compiler, flags, cxx_origin native, admit row), landed by L2; toolchain stays generated-only.
+bottleneck: cand3b (w15: the toolchain sdd split from L2).
