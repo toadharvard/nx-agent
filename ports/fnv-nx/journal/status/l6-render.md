@@ -1361,3 +1361,9 @@ Paused: w3b, w4, farm; no other work.
         - base-files is hand-written in 18 run stages. The rule (PT_INTERP owner joins the closure) is asked of w28, and the entries are deleted when it lands.
         - checker.c's 64-dir cap goes; it iterates exactly the mounted debs.
 - bottleneck: the farm1 sm_link result; the w28 PT_INTERP rule; the w28-on-final-cand3 head.
+- 01:19Z w6-root moved to claude/fnv-l6-render-w6-b28 dfcdc9f67 (on w28 2bcbe1598).
+    - The 18 base-files entries are deleted (w28 fe8a24533 derives them). checker.c iterates exactly the mounted debs; the stage shard output is byte-identical (shard 0/8, 14,528 certificates).
+    - Every render root builds green; d3d9total 332/332; test 45/45.
+    - abspath: render 0. The 8 findings outside render are lift/fnvlift x6, bridgefacts/d3d9/d3d9_structs.py:54 (owner asked of L1) and contract/l2sections.py:22.
+    - The sm_link gate runs on farm1.
+- bottleneck: the farm1 sm_link numbers; the w28-on-final-cand3 head for cand4.
