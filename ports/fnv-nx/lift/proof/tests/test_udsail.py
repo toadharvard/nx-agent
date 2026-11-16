@@ -22,7 +22,8 @@ assert c(OK + ERR, f(UD))[0] == 'VALID'                                      # a
 assert c(ERR, f('Opcode Unimplemented in x86isa!', 'model_error'))[0] == 'GAP'
 assert c(ERR + ERR, f(UD) + f('(:GP)'))[0] == 'GAP'                          # a path that is not a #UD
 assert c(ERR + ERR, f(UD))[0] == 'GAP'                                       # a path without its model exception text: not decided
-assert c('', '')[0] == 'GAP'
+try: c('', ''); assert False, 'no path at all must be a stage error'
+except SystemExit as e: assert 'no path at all' in str(e)      # no isla path is a tool failure (red), not a GAP verdict that reads as data
 # verdict: the least extent with the tail free; the feature rule short-circuits; the model's default-arm opcodes are DEFAULT; every system variant must say #UD
 runs = []
 def run(code, free, ctrs):

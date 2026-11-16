@@ -48,7 +48,7 @@ def classify(out, err, split_blocks):
     ok = [b for b in blocks if b[0] and b[0].startswith('Result: (_ unit)')]
     bad = [b for b in blocks if b not in ok]
     if ok: return 'VALID', '%d of %d paths complete' % (len(ok), len(blocks))
-    if not bad: return 'GAP', 'isla returned no path: ' + err[-120:].replace('\n', ' ')
+    if not bad: raise SystemExit('udsail: isla produced no path at all (a tool-input or tool failure, never a verdict about the bytes); isla stderr tail: ' + err[-600:].replace('\n', ' '))
     msgs = messages(err)
     if len(msgs) != len(bad): return 'GAP', '%d paths, %d model exception calls: %s' % (len(bad), len(msgs), (bad[0][0] or '')[:80])
     if all(k == 'fault' and UD_TEXT.search(t) for k, t in msgs): return 'UD', sorted(set(t for _, t in msgs))[0]
