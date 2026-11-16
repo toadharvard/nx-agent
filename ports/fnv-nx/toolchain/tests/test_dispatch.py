@@ -38,9 +38,12 @@ def body(dis, name):
 
 
 def calls(b, target='fnvnx_dispatch'):
-    if target.startswith('_Z'):
-        return len(re.findall(r'R_AARCH64_P32_(?:CALL|JUMP)26 %s\b' % re.escape(target), b))
-    return len(re.findall(r'R_AARCH64_P32_(?:CALL|JUMP)26 _Z%d%s\w*' % (len(target), re.escape(target)), b))
+    return len(re.findall(r'R_AARCH64_P32_(?:CALL|JUMP)26 %s\b' % re.escape(target), b))
+
+
+def calls_src(b, name):
+    """calls of the source function NAME (its symbol in the object starts _Z<len><name>)"""
+    return len(re.findall(r'R_AARCH64_P32_(?:CALL|JUMP)26 _Z%d%s\w*' % (len(name), re.escape(name)), b))
 
 
 def checks(obj):
@@ -56,7 +59,7 @@ def checks(obj):
           re.search(r'ldar x(\d+), \[x\d+\].*? cmp (?:w\d+, w\1|w\1, w\d+) [0-9a-f]+: [0-9a-f]+ b\.ne .*? lsr x\d+, x\1, #32', c1.replace('\n', ' '))
           and len(re.findall(r'ldar x\d+, \[x\d+\]', c1)) == 1 and len(re.findall(r'R_AARCH64_P32_ADD_ABS_LO12_NC \.bss', c1)) == 1, c1)
     c6 = body(dis, 'c6')
-    check('a direct call is untouched', calls(c6, 'direct') == 1 and 'fnvnx_dispatch' not in c6, c6)
+    check('a direct call is untouched', calls_src(c6, 'direct') == 1 and 'fnvnx_dispatch' not in c6, c6)
     n = sum(calls(body(dis, src_name(f))) for f in dis)
     sz = pb.section_size(obj, '.bss')
     check('one 8-byte zero site per indirect call', sz == 8 * n and n == 11, '.bss %s bytes, %d dispatch relocations' % (sz, n))
