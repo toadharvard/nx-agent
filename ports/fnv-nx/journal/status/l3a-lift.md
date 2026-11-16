@@ -1297,3 +1297,12 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - Finding: guestgen_{imptest,citest,msvcrttest} call the lifter directly, without its inputs (x86sys, sdmrows, cpumodel, image facts). They fail at run time on base3 (`inputs: x86sys was not configured`), so none of the 3 guest test images builds.
 - Ruling: a generator that lifts is a second path. A generator emits only the PE, the expected trace and the bridge rows. The image is lifted by the pack's own stages (the fact tools over the PE, then liftgen). One PE emitter is shared with w7's synthetic-PE modlift test.
 - bottleneck: L2's two plugin rules (lift/rt); the test images, through w8's pipeline rework.
+
+## 2026-11-16 02:15: udsail stage inputs (w13 b4b7bd58c)
+- proof/udsail.py takes --sdmrows and --cpumodel and no longer parses SDM text.
+- Its inputs are assigned to the facts stage (w7):
+  - BADDECODE: per-image refused sequences, from f_sys.decode_gap.
+  - SHAPES: the decoded-shape universe per image, published with the relift for L3b.
+- The udsail stage computes SHAPES minus sdmrows itself, with sdmgate's match_rows.
+- isla: L3b's root, waiting on w28's recipe.py. The sail tarball and patches are extracted in the stage driver.
+- bottleneck: L2's two plugin rules (lift/rt).
