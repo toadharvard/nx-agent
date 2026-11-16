@@ -30,7 +30,7 @@ import types
 _pkg = sys.modules.setdefault("fnvnx", types.ModuleType("fnvnx")); _pkg.__path__ = [PORT]   # a host-run driver: `fnvnx` is ports/fnv-nx (the stage mounts it at /imp/fnvnx)
 from fnvnx.verify import recipe  # noqa: E402
 from fnvnx.render.total.d3d9total import stage as G  # noqa: E402
-G.ARGS = argparse.Namespace(treehash=os.path.join(PORT, "contract", "treehash.py"), wine=None)
+G.ARGS = argparse.Namespace(wine=None)
 URL = os.environ.get("ARTIFACTS_URL")
 if not URL:
     raise SystemExit("ARTIFACTS_URL (the artifacts repository of the externals) is required")

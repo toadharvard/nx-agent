@@ -3,7 +3,7 @@
 It runs inside the recipe's sandbox (verify/RECIPE.md "Tool steps") with only what the recipe mounts: the programs gcc and clang of the declared env.json debs
 (python3, gcc-13, clang-18, libc6-dev, libc6-dev-i386), the tracked trees named by `--tree N=PATH` (copied to PATH of a scratch tree), the pinned
 externals of the d3d9 and translator roots (`external_of`: --wine, --mojoshader), and the output of the generator of render/shaders/total (--sm-table, --sm-rows).
-    python3 -I -B stage.py --out OUT --gcc GCC --clang CLANG --treehash FILE --wine DIR --mojoshader DIR --sm-table F --sm-rows F --work DIR --tree N=PATH ...
+    python3 -I -B stage.py --out OUT --gcc GCC --clang CLANG --wine DIR --mojoshader DIR --sm-table F --sm-rows F --work DIR --tree N=PATH ...
 The rule is the gate's (render/total/gate_d3d9total.py reads this stage's output through recipe.resolve_input and writes the gate result):
 Universe = every (enumeration, enumerator) of the enumerations the translation consumes by switch (SWITCHED of render/d3d9/env/gen_enums.py, enumerators from the
 D9_SPEC the generator bridgefacts/d3d9/d3d9_spec.py writes in this stage, plus the vendor FOURCC of gen_enums.vendor_fourcc over the pinned Wine mirror for
@@ -21,7 +21,7 @@ TOKEN: NAME renamed. Each mutated compile must give an error located on that row
 compiles and every mutation of every line of K is killed.
 Every directory an include of the two recipes names under ports/fnv-nx/ must be one of the mounted trees (a recipe include that is not mounted is red: the stage reads
 no include that its key does not hold). Nothing is decided from names, text matching of messages, runs or samples."""
-import argparse, ast, hashlib, importlib.machinery, importlib.util, json, os, shutil, stat, subprocess, sys
+import argparse, ast, hashlib, json, os, shutil, stat, subprocess, sys
 
 D3D9_REC, TRANSLATOR_REC = "render/d3d9/build.json", "render/shaders/translator/build.json"
 PORT_PFX = "ports/fnv-nx/"
@@ -82,9 +82,7 @@ SM_CC_BASE = []
 
 
 def tree_hash(path):
-    spec = importlib.util.spec_from_file_location("treehash", ARGS.treehash, loader=importlib.machinery.SourceFileLoader("treehash", ARGS.treehash))
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
+    from fnvnx.contract import treehash as m
     try:
         return m.tree_hash(path)
     except m.CasError as e:
@@ -423,7 +421,7 @@ def main():
     """The stage ends in a result file with reasons whatever happens: an exception of any part is a red result that names it, never an exit without a file."""
     global ARGS, GCC, CLANG, SM_CC_BASE
     ap = argparse.ArgumentParser()
-    for a in ("out", "gcc", "clang", "treehash", "wine", "mojoshader", "sm-table", "sm-rows", "work"):
+    for a in ("out", "gcc", "clang", "wine", "mojoshader", "sm-table", "sm-rows", "work"):
         ap.add_argument("--" + a, required=True)
     ap.add_argument("--tree", action="append", required=True)
     ap.add_argument("--include-of", action="append", required=True)
