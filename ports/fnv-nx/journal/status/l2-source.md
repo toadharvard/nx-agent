@@ -641,3 +641,7 @@ After the first frame:
   - ORDER-RTLBUILTIN hole: closed by the D1 proof. A no-library builtin with vops, no pointer operand and only constant operands touches only its own registers and frame chain, so it gets no fence. With a run-time operand it gets the fences. Only __builtin_apply is refused.
   - test_plugins: 80 checks, locally, with the bypass.
   - The cand4b farm build carries NAMES-FNPARM, ENTRY1-ATOMIC, ORDER-RTLBUILTIN, CTYPE-FE and COMPILER-STAGE.
+- 2026-11-16 03:20Z: the cand4b pin is the only red on base3 d3c287860 (55/55 roots valid; L3a). It blocks lift/rt, contract/facts and lift/disp, and so the ELF.
+  - Decision: the L2 farm builds the pin now through the proven build.sh/stage2.sh path from cand4b 000dfcb89+ (K1 changes, about 13 min), with the toolchain tests. The pin goes to w8, L3a, L1, w2 and w3.
+  - w3's recipe-path build must equal it (proof b) before the old path is deleted.
+- bottleneck: the cand4b pin build (farm), then the cand2/cand3 merges (L1). Workers: w2, w3 + farm.
