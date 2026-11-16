@@ -376,6 +376,12 @@
    "aliases": [
     "L6:QUEUE-ABI-frontbuffer"
    ]
+  },
+  {
+   "id": "ASM-640",
+   "aliases": [
+    "L6:census#70"
+   ]
   }
  ],
  "entries": [
@@ -1424,7 +1430,7 @@
     "L3b:A-RCPPURE"
    ],
    "status": "REMOVE",
-   "removed_by": "planned: the exhaustive 2^32 run is repeated under every MXCSR RC\u00d7FTZ\u00d7DAZ combination (16) and every result recorded in the cert; rcpcert is red unless all 16 tables are equal",
+   "removed_by": "planned: the exhaustive 2^32 run is repeated under every MXCSR RC×FTZ×DAZ combination (16) and every result recorded in the cert; rcpcert is red unless all 16 tables are equal",
    "owner": "L3b"
   },
   {
@@ -1543,19 +1549,6 @@
     "file": "CLAUDE.md",
     "quote": "10. the x86 ISA as documented in the Intel SDM, for the parts that no pinned formal model covers"
    }
-  },
-  {
-   "id": "ASM-640",
-   "text": "The undocumented d3d9 exports have Wine's signatures.",
-   "used_by": [
-    "ports/fnv-nx/bridgefacts/d3d9/d3d9_exports.py"
-   ],
-   "aliases": [
-    "L6:census#70"
-   ],
-   "status": "REMOVE",
-   "removed_by": "planned: an import fact from the exe and modules. Any export that nothing imports gets a reach-violation certificate; the others need a source.",
-   "owner": "L6+L1"
   }
  ]
 }
