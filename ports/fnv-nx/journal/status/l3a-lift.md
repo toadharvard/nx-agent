@@ -1818,3 +1818,5 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Lift tests: 58/73 OK; 11 of the reds only lack inputs.
   - root_graph is fixed on w13-clean (which w8 merges next).
   - gate_fpexact and gate_flags went to L3b.
+- L2 w2: CORE-MATH mirror fnv-nx-build tools/core-math 1e8252b65 (upstream a44b8b08, tree cc7009d0…). Root platform/coremath on cand4b ebfd99e9e: green, 7 objects defining cr_*.
+  - Blocked (L1/L2): -frounding-math is refused as a per-root flag. Until it is in, the RZ call for C1 is not valid.
