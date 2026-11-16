@@ -84,7 +84,9 @@
    },
    "outputs": [],
    "dirs": [
-    "gen"
+    "u",
+    "inc/build",
+    "inc/src"
    ],
    "scratch": [
     "/scratch"
