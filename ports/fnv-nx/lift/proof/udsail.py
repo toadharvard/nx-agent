@@ -152,14 +152,14 @@ def verdict(raw, run, split_blocks, feature_ud, defaults, variants):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--sail-work', required=True); ap.add_argument('--sail-ir', required=True); ap.add_argument('--isla', required=True)
-    ap.add_argument('--x86sys', required=True); ap.add_argument('--cpufeat', required=True)
-    ap.add_argument('--sdm', required=True, help='pdftotext -layout of the Intel SDM combined volumes (proof/sdmfeat.py): the opcode rows and their CPUID flags')
+    ap.add_argument('--x86sys', required=True); ap.add_argument('--cpumodel', required=True)
+    ap.add_argument('--sdmrows', required=True, help='the sdmrows stage output (proof/sdmfeat.py dumprows): the SDM opcode rows, their flag table and NOP flags')
     ap.add_argument('--model-src', required=True, help='the pinned sail-x86-from-acl2 model/ directory (default arms, bit fields)')
     ap.add_argument('--bad', action='append', required=True, help='an image baddecode.tsv (entry, address, 8 bytes)')
     ap.add_argument('--out', required=True)
     a = ap.parse_args(argv)
     from fnvlift import inputs
-    inputs.configure(x86sys=os.path.abspath(a.x86sys), cpufeat=os.path.abspath(a.cpufeat))
+    inputs.configure(x86sys=os.path.abspath(a.x86sys), cpumodel=os.path.abspath(a.cpumodel))
     from proof import model_sail as M
     from fnvlift import f_sys
     M.configure(a.sail_work, a.sail_ir, a.isla)
@@ -168,8 +168,8 @@ def main(argv=None):
     import json
     model = os.path.abspath(a.model_src); record = json.load(open(a.x86sys)); defaults = default_opcodes(model); variants = sysvariants(record, model)
     from proof import sdmfeat
-    lines = sdmfeat.load(a.sdm); table = sdmfeat.flag_table(lines); cpu = sdmfeat.declared_cpu(); allrows = sdmfeat.sdm_rows(lines, table)
-    nopflags = frozenset(re.findall(r'are NOP on processors that report CPUID\.\w+H?\.\w+H?:\w+\.(\w+)\[', ' '.join(l.strip() for l in lines)))
+    from fnvlift import f_cpufeat
+    allrows, table, nopflags = sdmfeat.load_rows(a.sdmrows); cpu = f_cpufeat._cpu()
     def feature_ud(r):
         kd = f_sys.encoding(B(r))[0]
         return kd if kd in ('vex', 'evex', 'xop', 'map38', 'map3a', 'map0f') else sdm_feature(r, allrows, table, cpu, nopflags)
