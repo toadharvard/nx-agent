@@ -1387,3 +1387,8 @@ Paused: w3b, w4, farm; no other work.
         - gen_funcs.py:12 is xml.etree.ElementTree unlisted in the PURE table (verify/, L1). Asked L1 to list it under ASM-032. Status: blocked (L1).
     - terminator-red platform/win32/render_hooks.cpp belongs to L5.
 - bottleneck: w6 res_smgen fix; L1 on xml.etree PURE row; farm1 sm_link numbers; the cand4 base.
+- 01:48Z L1 answers:
+    - xml.etree.ElementTree goes into PURE. w28 adds it and sends the head. gen_funcs.py needs no render change.
+    - The terminator-red row is an objstub defect: it runs the terminator plugin without the root's own plugins. w28 fixes it; it was neither L5's nor ours.
+    - The res_smgen rule is accepted.
+- bottleneck: w6 res_smgen commit; w28 PURE/objstub head; farm1 sm_link numbers; the cand4 base.
