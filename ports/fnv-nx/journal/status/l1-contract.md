@@ -2061,3 +2061,21 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - L1 selftests are fixed (toy fixtures vs cand3 recipe.py, the pathrules fixture, the views store dependency, the objstub_owner read); tests of cut roots leave with them.
   - pure: contract/gatecert.py is fixed by L1.
 - bottleneck: cand3b (w15).
+
+## 2026-11-16: platform re-entry routing; SDM stage; l2sections
+
+- done:
+  - w28 03fa3561d: l2sections reads sympair_kinds.inc as a declared input argument; abspath L1 is 0.
+  - The 8 lift/fnvlift abspath findings were an older lift/ copy in L6's tree; L3a's line has 0.
+- w28 queue:
+  1. The SDM stage for L3a liftsrc: poppler-utils pinned; the exec/tool-step form; the single-file external form.
+  2. gate_machine: an address taken in a table is not a write (exports.cpp:232-233).
+  3. The no-doubles check catches a test definition of a product symbol (fnvnx_reach_violation in tests/bootrt/rt.c); report the global count.
+- Platform reds at e8e54dcea (L5 lists, claude/fnv-l5-platform-w18 cf0ff24), by owner:
+  - L5 (w19-w21): abi ctype and va, machine seed, pure, rtasm setjmp.h, the linkstrict classification.
+  - L2: terminator attribute registration (objstub 65); names fnparmform (abi 24).
+  - L3a: the CRT/EH definer root for 32 symbols per root.
+  - L6: render pure and objstub V.
+  - w15: gatecert.py and the selftests.
+- L6 w6-root dfcdc9f67 is the cand4 render candidate: all render roots green; d3d9total 332/332.
+- bottleneck: cand3b (w15).
