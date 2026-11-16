@@ -172,7 +172,11 @@ def ij_why(esp, st, fpe=None):
 
 
 def feed(img, t, regs_t, stk_t):
-    """the state of one call site (typed registers, typed stack slots at the callee's offsets; None = esp unknown) joins into the input of callee t."""
+    """the state of one call site (typed registers, typed stack slots at the callee's offsets; None = esp unknown) joins into the input of callee t.
+    Termination of the argument fixpoint (analyse): an input is (registers, slots). A value is None < T_CODE < T_S4 and j() is the least upper bound on that chain, so an input only grows.
+    The slot keys are bounded: a call site with an unknown esp, or with any slot deeper than ARG_LIMIT bytes above the callee's esp, makes the input ALLCODE_INPUT, the top (every register and slot possibly a code address). An entry in img.allcode returns at once and is never dirty again.
+    So each entry's input has at most 7 registers + ARG_LIMIT slots, each on a chain of height 2: it changes finitely often, and the outer loop reanalyses an entry only when its input changed.
+    Soundness: the top is the over-approximation 'possibly code'. Every consumer of an input (analyse_entry, line 'inr, ins, anycode') reads a typed value as 'may be a code address' and the top as every value may be one, so the universe stays a superset."""
     if t in img.allcode: return
     if regs_t is None or any(k > ARG_LIMIT for k in stk_t):      # widening: slots deeper than ARG_LIMIT bytes above the callee's esp (a recursive call chain deepens them without bound) make the input unknown (possibly code), the sound top; each input then changes finitely often
 
@@ -337,7 +341,7 @@ def analyse_entry(img, e, mode='owner', force=False):
                     key = memkey(img, g, o, esp, regs)
                     if key is not None and key[0] == 'stk': st[key[1]] = T_S4
                     else: emit(a, 's4', 'escape-stored', 'arithmetic result stored to memory', True)
-            if X.X86_REG_ESP in g.regs_access()[1]:
+            if X.X86_REG_ESP in rw(g)[1]:
                 img.info['esp-lost'] += 1
                 if esp is not None: fpe[ESPLOST] = (a, 'esp written by an arithmetic form')
                 esp = None
@@ -605,7 +609,7 @@ def analyse_entry(img, e, mode='owner', force=False):
         else:
             for o in ops:
                 if o.type == X.X86_OP_MEM and o.access & capstone.CS_AC_READ: read_mem(o)
-            rd, wr = g.regs_access(); written = set()
+            rd, wr = rw(g); written = set()
             for r in wr:
                 n = R32.get(r)
                 if n and n != 'esp': written.add(n)
@@ -630,6 +634,7 @@ def analyse_entry(img, e, mode='owner', force=False):
             if t not in states: states[t] = ns; work.append(t)
             else:
                 o = states[t]
+                if o == ns: continue      # an equal state joins to itself (j(x, x) = x, every other component equal): nothing to rebuild or requeue
                 r2 = {k: j(o[0].get(k), regs.get(k)) for k in set(o[0]) | set(regs)}
                 r2 = {k: v for k, v in r2.items() if v is not None}
                 s2 = {k: j(o[1].get(k), st.get(k)) for k in set(o[1]) | set(st)}
@@ -676,7 +681,7 @@ def writes_of_unused(img, e, _memo={}):
             while a not in vis and img.reached(a):
                 vis.add(a); g = img.dec(a)
                 if not g: break
-                rd, wr = g.regs_access()
+                rd, wr = rw(g)
                 for r in wr:
                     n = R32.get(r)
                     if n: out.add(n)
@@ -704,9 +709,22 @@ def writes_of_unused(img, e, _memo={}):
 FULL32 = {X.X86_REG_EAX: 'eax', X.X86_REG_EBX: 'ebx', X.X86_REG_ECX: 'ecx', X.X86_REG_EDX: 'edx', X.X86_REG_ESI: 'esi', X.X86_REG_EDI: 'edi', X.X86_REG_EBP: 'ebp'}
 
 
+def rw(g):
+    """g.regs_access(), computed once per decoded instruction (a pure function of its bytes; the memo lives on the instruction object, so it is dropped with the decode cache). The analysis visits an instruction once per worklist round of every entry that contains it and once per argument pass."""
+    r = getattr(g, '_rw', None)
+    if r is None: r = g._rw = g.regs_access()
+    return r
+
+
 def access(g):
-    """(registers read at all, registers fully overwritten) by one instruction; a partial write or a conditional write does not kill."""
-    rd, wr = g.regs_access(); mn = g.mnemonic
+    """(registers read at all, registers fully overwritten) by one instruction; a partial write or a conditional write does not kill. Memoised on the instruction like rw(); the sets are never mutated by a caller."""
+    r = getattr(g, '_acc', None)
+    if r is None: r = g._acc = _access(g)
+    return r
+
+
+def _access(g):
+    rd, wr = rw(g); mn = g.mnemonic
     rn = {R32[r] for r in rd if r in R32}; wn = {FULL32[r] for r in wr if r in FULL32}
     o = g.operands
     if mn in ('xor', 'sub') and len(o) == 2 and o[0].type == o[1].type == X.X86_OP_REG and o[0].reg == o[1].reg: rn -= wn
