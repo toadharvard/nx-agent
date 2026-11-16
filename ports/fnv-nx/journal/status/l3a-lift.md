@@ -1724,3 +1724,4 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - L3b certified the segment-register Forms (claude/fnv-l3b-lift 82a488a89): 52 keys, 45 proved, 7 waiting on sys4.
   - Doing (w7): the 2,664-key family split for L3b, then the move to path=form and the deletion of h_segshapes.
   - Blocked (L5): the initial gs selector in x86sys.
+- Unblocked (L5): initial gs = 0, x86sys.json at claude/fnv-l5-platform-w35 @4ec8cd2c1, from both 7601 kernels. Pinned until the L5 candidate merges.
