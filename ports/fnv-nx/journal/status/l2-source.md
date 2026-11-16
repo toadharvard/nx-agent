@@ -598,3 +598,4 @@ After the first frame:
 - 2026-11-16 00:30Z: COMPILER-STAGE (w3) on claude/fnv-l2-source-plugins-cand4 @1f0f0fd0b, from plugins 74c32c454 with DECLTYPE-REF and the stage scripts.
   - Roots: toolchain is the compiler root (the plugins feed the `rt` step); toolchain-stage1 holds gcc1. Its admit.json rows are L1's.
   - Blocked by: w28's step-input rule (L1); the env.json debs bash, sed, grep, patch, xz-utils, findutils, diffutils and gzip (w12, L1); the 52 test fixtures wait on w28's wording for test steps.
+- 2026-11-16 00:15Z: COMPILER-STAGE unblocked on the L1 side. claude/fnv-l1-contract-w28 22af0d841 carries w12L2 5fb4374ee (the exec step form), the run-input rule a7eed7718, generator imports of declared roots (the closure is mounted at /imp), and the toolchain (product) and toolchain-stage1 admit rows. w3 builds cand4 on it. Still open: the env.json debs (w12).
