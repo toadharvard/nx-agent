@@ -2674,3 +2674,10 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   (1) pdfplumber plus its full closure pinned in env.json python.modules, mirrored in tools/verdict-debs, checked by envcheck. It is the one PDF reader, so L3b's pdftotext moves to it.
   (2) python exec with a nested runtime path. L3b's 4f57cd0f5 hunk is not taken as is, because it silently drops declared step inputs. Rule: rootfs layout entries yield to runtime inputs, and a declared input that clashes is red. Both cases go into test_runpython.
 - L4: link/milestones.py imports contract, but link's admit row lacks the imports field, so the boot root is red. Rule for w28-c5: cross-root Python imports are derived by ast through import_roots, and the admit `imports` field is deleted (red if present). Dynamic and unresolved imports are red.
+
+### 2026-11-16: ROOTFS_MEMO report from L3a (farm 3)
+- L3a reported that run_one appends to the memoized rootfs input list, which nests /in/N.
+- Not a defect on the trunk. Since 02f26b3de the memo stores and returns copies (fac693694 verify/recipe.py:2537 and :2576; cand4 :3247 and :3286). The L3a relift b6e52e004 runs an older recipe.py and should take verify/ from the trunk.
+- Selftest for the copy rule assigned to w28-c5 (session_01KmtZKTR5tjvvZFgA3EKYuZ), for cand5.
+- Waiting: the cand4 verdict at 62474771c (w15).
+- bottleneck: the cand4 verdict; L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
