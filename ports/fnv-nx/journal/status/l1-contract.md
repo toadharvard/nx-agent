@@ -2224,3 +2224,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - w28 8e917f591: gamedata_fetch fetches the declared gamedata/ externals by commit and tree. `.gamedata_heads` is replaced by `.gamedata_pins`, and 6 tests pass.
   - Undeclared consumers are now red: the farm/boot_job.sh BOOT_DATA_ITEMS, tests/s5/farm_boot.sh, gamedata/shaders and gamedata/gog. The boot root's owner (L4) declares the data items it needs as externals.
 - bottleneck: the cand3b farm verdict.
+- L5 w25 cbc2b5b30: 511 FNVNX_EXPORT records (adds the dsound, dinput8 and xinput resolvers, diff empty). The platform recipe check is red only on contract/proto.py's bare `import store` (L1's). The fix and a sweep of contract/ are assigned to w28.
