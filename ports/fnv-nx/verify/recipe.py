@@ -2692,6 +2692,21 @@ def timing_report(store, keys):
     return {"kinds": kinds, "units": units, "passes": passes, "untimed": untimed}
 
 
+def python_mounts(layout_ins, links, own_ins, scratch, rt_inputs):
+    """The mounts of a `run` step with `exec: {"python": true}`: -> (inputs, links, errors). The runtime brings its own paths, as the host resolves them (/lib/x86_64-linux-gnu,
+    /usr/local/bin), and a sandbox mount may not nest in or repeat another (sandbox.paths). Two rules, each over the whole class:
+    (a) an entry of the root layout of the mounted debs (LAYOUT_INS: a top-level directory; LINKS: a usr-merge link) that a runtime path lies under or over yields to the runtime input,
+        in both directions: it is not mounted;
+    (b) a declared input of the step (OWN_INS: its files, stage refs, plugins, externals) or a scratch directory that clashes with a runtime path is an error, never dropped:
+        "step input X overlaps the python runtime path Y"."""
+    clash = lambda a, b: under(a, b) or under(b, a)
+    rt = [i["at"] for i in rt_inputs]
+    keep_ins = [i for i in layout_ins if not any(clash(i["at"], r) for r in rt)]
+    keep_links = [l for l in links if not any(clash(l["at"], r) for r in rt)]
+    errs = ["step input %s overlaps the python runtime path %s" % (a, r) for a in [i["at"] for i in own_ins] + list(scratch) for r in rt if clash(a, r)]
+    return keep_ins + list(own_ins) + list(rt_inputs), keep_links, errs
+
+
 class Job:
     stats = {"run_one": 0, "artifact_builds": 0}   # evaluations of `run` steps and builds of artifact roots in this process: what the regression tests count (never a stub of run_one)
 
@@ -3121,6 +3136,7 @@ class Job:
         tool = "exec" in g
         if tool:
             ins, rootfs = self._rootfs(tmp, g)
+            n_rootfs = len(ins)   # the first n_rootfs inputs are the layout of the declared debs; the step's own inputs follow
         else:
             aroot, aout = g["artifact"].split(":", 1)
             if aroot not in self.arts:
@@ -3173,7 +3189,9 @@ class Job:
         pyargv = None
         if xs == {"python": True}:   # the one python runtime of generate_one (pyrt): its inputs, env and PATH; the step's own inputs/scratch/stage refs as any tool step
             py = self.pyrt()
-            ins += py["inputs"]
+            ins, rootfs, clashes = python_mounts(ins[:n_rootfs], rootfs, ins[n_rootfs:], g.get("scratch", []), py["inputs"])
+            if clashes:
+                raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": clashes})
             env.update({k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"})
             env.update({"COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "FNVNX_PYMODS": self.pymods})
             env.update(g.get("env", {}))
