@@ -198,6 +198,14 @@ r = make_repo(); d = tmp("budget"); gp = gates_file(d, [gate("a")]); v = os.path
 rc, _, _ = run_verdict(r, head(r), gp, v, "--budget-s", "0")
 vj = json.load(open(v))
 check("over_budget reported, verdict stays green", rc == 0 and vj["over_budget"] is True and vj["verdict"] == "green", vj)
+import time  # noqa: E402
+v2 = os.path.join(d, "v2.json")
+rc, _, _ = run_verdict(r, head(r), gp, v2, "--budget-s", "300", "--started", repr(time.time() - 400))
+vj2 = json.load(open(v2))
+check("the budget is the whole check: a start 400 s ago is over a 300 s budget though the gates took no time", vj2["over_budget"] is True and vj2["seconds"] >= 400, vj2)
+v3 = os.path.join(d, "v3.json")
+rc, _, _ = run_verdict(r, head(r), gp, v3, "--budget-s", "300", "--started", repr(time.time()))
+check("a start now is within the budget", json.load(open(v3))["over_budget"] is False)
 
 # no vacuous green: `covers` and the universe-0 rule (gatesdir.py)
 def with_admit(roots):
