@@ -1339,3 +1339,5 @@ Paused: w3b, w4, farm; no other work.
     - Builds green and byte-identical; d3d9total 332/332; test 45/45.
     - sm_link is still red on "dest exists …/merge1", the second link-workspace collision. Routed to L1 as the whole class: a private mkdtemp for every Job.link path.
 - bottleneck: L1's merge1 fix; the w28-on-final-cand3 head.
+- 00:16Z L1 w28 1aa024320: the merge1 collision is fixed (a private mkdtemp in merge_inputs). w28 was asked to extend its ast rule to every fixed-name workspace path.
+    - w6 (doing): merge it, build sm_link, then run the sm_link gate. Expected: 1,818, red 0, 115,776 stage and 121,394 link certificates.
