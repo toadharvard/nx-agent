@@ -1443,7 +1443,7 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
             if not any(isinstance(x, dict) for x in (rec.get("plugins") if isinstance(rec.get("plugins"), list) else [])):
                 err.append('run[%d].inputs: {"plugins": "root"} needs the root to declare `plugins`' % i)
     raw = rs
-    rs = expand_run(rec, closure=False)["run"]
+    rs = expand_run(rec, closure=False).get("run", [])
     pk = deb_pins()
     names = set()
     for i, g in enumerate(rs):
