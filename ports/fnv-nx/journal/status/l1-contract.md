@@ -3062,3 +3062,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Follow-up: the dumpmachine and print-file-name reads become a hermetic `compilerfacts` stage per compiler; the direct calls are deleted. Next is the FAIL-set diff (trunk sweep at 44/148).
 - 12:34: L3a w8 base3 c5d3cc6dd (+06d28e319: lift/cpufeat and the sdmfeat layer removed; admit 1885). cand5 takes lift/ whole from it. w8's edits outside lift/ are not taken. verify/ has 34 bare imports, all in host scripts or tests outside any stage closure, so they are judged by module_top_errors (0 on c5). The loader build is red at contract/exports <- lift/rt dispatch.c ENTRY1-CONT; the detail is pending.
 - 12:35: loader build red at lift/rt dispatch.c:69. The dispatch plugin's ENTRY1-CONT rejects the volatile void * conversion that GCC inserts when it lowers a generic __atomic_store, where both operands are of the same type. Sent to L2 with the rule: judge the type-generic atomic builtin's operands (T* on every pointer), not the lowered call.
+- 12:36: c5-vs-trunk sweep (c5 e68e7cb3d: 97 of 176 pass; trunk 84 of 148; the rest env-only on both). 8 tests fail only on c5:
+  - fixed in w28 b44ed9f7e: gate_pure, guest_link, compilerstage, objects_select. The last was a real regression: repo_signature crashed on a non-git directory.
+  - rulings: test_store follows the full-list rule (w28 fixes it); the test_guest_flags fixture moves to the none-elf triplet (w28); runtime_cflags spelled in rt.sh and stage2.sh goes to L2; gmpy2 is env-only only if pinned.
+  - The 8 new c5 test files must each be triaged.
+  - a9325a76e: compiler facts come from a hermetic cfact stage. The remaining direct calls (print-prog-name ld, toolrt gcc_set) are to be converted.
