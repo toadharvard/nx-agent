@@ -45,7 +45,7 @@ def lift_one(a):
     t = re.sub(r'extern "C" void (L_%08x\(void\)\n\{)' % a, r'extern "C" __attribute__((section(".text.fnvl"))) void \1', t, count=1)
     assert '.text.fnvl' in t
     return t, (formcert.census(ins), [(formcert.form_key(i), bytes(i.bytes), x) for x, i in ins.items()],
-               collections.Counter((shape.shape_key(i), shape.family(i), paths[x]) for x, i in ins.items()))
+               collections.Counter((shape.shape_key(i), shape.family(i), paths[x]) for x, i in ins.items()), sorted(lifted.S['flagdrop'].items()))
 
 
 def enc_add(encs, rows):
@@ -59,12 +59,12 @@ def enc_add(encs, rows):
 
 
 def work(addrs):
-    ent = G['ent']; texts, forms, missing, encs, shapes = [], collections.Counter(), [], {}, collections.Counter()
+    ent = G['ent']; texts, forms, missing, encs, shapes, drops = [], collections.Counter(), [], {}, collections.Counter(), []
     for a in addrs:
         t, x = lift_one(a)
         if t is None: missing.append((a, ent[a][0], x))
-        else: texts.append((a, t)); forms.update(x[0]); enc_add(encs, x[1]); shapes.update(x[2])
-    return texts, dict(forms), missing, [(f, r, x) for f, e in encs.items() for r, x in e.items()], dict(shapes)
+        else: texts.append((a, t)); forms.update(x[0]); enc_add(encs, x[1]); shapes.update(x[2]); drops += [(a, ia, m) for ia, m in x[3]]
+    return texts, dict(forms), missing, [(f, r, x) for f, e in encs.items() for r, x in e.items()], dict(shapes), drops
 
 
 def write_texts(path, texts):
@@ -115,6 +115,7 @@ def shard(a):
     w('missing', [('%08x' % ad, k, why) for ad, k, why in miss])
     w('forms', [(f, n, certs.status(f)) for f, n in sorted(forms.items())])
     w('encs', [(f, r.hex(), '%08x' % x) for f, e in sorted(encs.items()) for r, x in sorted(e.items(), key=lambda t: (t[1], t[0]))])
+    w('flagdrop', [('%08x' % e, '%08x' % ia, '%02x' % m) for e, ia, m in sorted(d for g in got for d in g[5])])      # entry, instruction address, the dropped flags' mask (fnvlift/flaglive.FL bit order): what L3b checks against FLAGLIVE.md
     w('shapes', [(k, fam, n, path) for (k, fam, path), n in sorted(shapes.items(), key=lambda t: (t[0][0].encode(), t[0][2]))])    # shape_key, family, instruction count, emission path (core.dispatch: form, form+xfer, handler:<module>.<name>)
     print('shard %d/%d: entries %d lifted %d missing %d; text bytes %d; forms %d' % (K, N, len(mine), len(texts), len(miss), sum(len(t) for _, t in texts), len(forms)))
 
@@ -194,7 +195,7 @@ def finish(a):
     images = [(d, L.universe.load(u)[0]) for d, u in (x.split('=', 1) for x in a.image)]      # every image: its shard directory and its universe (the exe's included)
     table_sha, table = module_table(a.modules)
     check_images(images, table, sha(a.exe))
-    texts, forms, encs, shapes, shape_fam = {}, collections.defaultdict(lambda: [0, 'none']), {}, collections.Counter(), {}
+    texts, forms, encs, shapes, shape_fam, fdrop = {}, collections.defaultdict(lambda: [0, 'none']), {}, collections.Counter(), {}, []
     for d, ent in images:
         t = image(d, ent)
         if set(t) & set(texts): sys.exit('finish: %s shares entry addresses with another image' % d)
@@ -207,6 +208,9 @@ def finish(a):
         for f in sorted(glob.glob(d + '/texts_*.txt')):      # completeness: every shard that has texts has its shapes
             sf = os.path.join(os.path.dirname(f), 'shapes_' + os.path.basename(f)[len('texts_'):-len('.txt')] + '.tsv')
             if not os.path.isfile(sf): sys.exit('finish: %s: no shapes list beside %s' % (d, os.path.basename(f)))
+            fd = os.path.join(os.path.dirname(f), 'flagdrop_' + os.path.basename(f)[len('texts_'):-len('.txt')] + '.tsv')
+            if not os.path.isfile(fd): sys.exit('finish: %s: no flagdrop list beside %s' % (d, os.path.basename(f)))
+            fdrop += tsv(fd)
             for k, fam, n, path in tsv(sf):
                 if shape_fam.setdefault(k, fam) != fam: sys.exit('finish: shape %s has two families (%s, %s)' % (k, shape_fam[k], fam))
                 shapes[(k, path)] += int(n)
@@ -221,6 +225,7 @@ def finish(a):
     w('entries', [('%08x' % x, sy, kind[x]) for x, sy in sorted(syms.items())])      # lifted and runtime rows
     open(pk + '/entries.tsv', 'a').write('# module_table sha256 %s\n' % table_sha)      # the loader's modules.tsv this pack was lifted against (the stage packentries.py checks it)
     w('shapes', [(k, shape_fam[k], n, path) for (k, path), n in sorted(shapes.items(), key=lambda t: (t[0][0].encode(), t[0][1]))])      # one row per (shape key, path); a key with one path is one row      # the universe of formgate: exactly what was lifted
+    w('flagdrop', sorted(fdrop))
     w('forms', [(f, v[0], v[1]) for f, v in sorted(forms.items())])
     w('encs', [(f, r.hex(), '%08x' % x) for f, e in sorted(encs.items()) for r, x in sorted(e.items(), key=lambda t: (t[1], t[0]))])
     nc = sum(1 for v in forms.values() if v[1] == 'sail')

@@ -81,6 +81,9 @@ class Ctx:
         self.imports = False
         self.paths = {}                          # instruction address -> its emission path (the rule of dispatch: `form`, `form+xfer`, `handler:<module>.<name>`); the generate driver writes it as the path column of shapes.tsv
         self.xfer = False                        # set by f_flow when the current instruction's control-transfer tail was emitted
+        self.finfo = {}                          # flags liveness (fnvlift/flaglive.py): address -> the record of an instruction emitted from its Form
+        self.guarded = set()                     # addresses whose gs_guard emitted a raise (the flags are all live there)
+        self.drop = {}                           # address -> the flags whose write is not emitted (second pass)
         self.raises = set()                      # addresses of instructions that can raise: ContinueExecution resumes there, so they are labels of the loop
 
     def em(self, t):
@@ -377,6 +380,20 @@ def may_null(i):
 
 
 def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
+    """lift one function: pass 1 emits every flag write and records the Form instructions (cx.finfo); pass 2 omits the flag writes that flaglive proves dead (FLAGLIVE.md)"""
+    from . import flaglive
+    txt, meta, cx = _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, {})
+    drop = flaglive.dropped(cx.finfo)
+    meta['flagdrop'] = {a: flaglive.mask(m) for a, m in sorted(drop.items())}
+    if drop:
+        txt, meta2, cx = _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, drop)
+        assert meta2['paths'] == meta['paths']
+        meta2['flagdrop'] = meta['flagdrop']
+        meta = meta2
+    return txt, meta
+
+
+def _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, drop):
     from . import f_x87_ctl as xc, f_sys
     addr, size = lo, hi - lo
     fall_hi = hi          # a body is exactly its range: falling past it is a transfer to the next address (f_flow.jump_out), never a copy of the code that follows
@@ -389,6 +406,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     order = sorted(insns)
     cx = Ctx(addr, size, insns, tables, taken)
     cx.start = start
+    cx.drop = drop
     xc.prepass(cx, img, 'dyn' if x87 == 'dyn' else None, x87 if isinstance(x87, int) else 0)     # x87 stack-depth pre-pass: cx.xm 's' static / 'd' dynamic / None
     em = cx.em
     kinds = cx.kinds
@@ -429,7 +447,9 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
             cx.macc = 'M'
             em('if(!lk_commit<0x%xu>(lk_)){ LK_RESTORE; goto lk_%x; } }' % (a, a))
         else:
+            g0 = len(cx.L)
             gs_guard(cx, ins)
+            if len(cx.L) != g0: cx.guarded.add(a)
             dispatch(cx, ins)
         if not cx.term and (idx + 1 == len(order) or order[idx + 1] != nxt):
             if nxt in insns or nxt in bad:
@@ -464,7 +484,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
         kinds.add('fs')
     meta = dict(addr=start, size=size, selfcalls=cx.selfcalls, callrets=cx.callrets, kinds=sorted(kinds), n=len(order), tables=len(tables),
                 calls=sorted(cx.calls), tails=sorted(cx.tails), noentry=sorted(cx.noentry), tabtails=tab_tails(img, insns, lo, hi), paths=dict(cx.paths))
-    return txt, meta
+    return txt, meta, cx
 
 
 PLAIN_FORM = re.compile(r'\b(FNVL_(?:CALLX|CALLD|TAILX))\(SYNC_OUT;,SYNC_IN;,|\b(FNVL_RET)\(SYNC_OUT;,|\b(FNVL_JMPN)\(goto nonlocal;,')

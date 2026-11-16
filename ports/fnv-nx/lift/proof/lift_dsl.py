@@ -18,7 +18,8 @@ Control transfer is derived from the Form's eip node by structure: constant == n
 loop*, and the step repeat of rep string forms, whose eip is `ite(more, this address, next)`: a goto to the instruction's own label); any other
 expression (indirect jmp / call, ret) -> f_flow.jmp_indirect / call_xfer / ret_xfer with the C text of the node, the kind chosen by the mnemonic."""
 from fnvlift.core import CC, SKIP, SUB, Unsupported
-from fnvlift import f_flow
+import copy
+from fnvlift import f_flow, flaglive
 from fnvlift import dsl, faults
 
 from proof import forms, forms_alu, forms_flow, forms_move, forms_simd, forms_ssefp, forms_sys             # noqa: F401  (proof/forms.py: the Form builders; forms_* register their handlers in forms.H)
@@ -116,12 +117,32 @@ def transfer(cx, ins, F):
     raise Unsupported('eip form of ' + m)
 
 
+def succs(cx, F, ins):
+    """the successors of an instruction in the CFG that the lifter emits as gotos (transfer's cases); flaglive.EXIT for everything else"""
+    n, nxt, m = F.eip, cx.nxt, ins.mnemonic.split()[-1]
+    fall = nxt if nxt in cx.insns else flaglive.EXIT
+    tgt = lambda t: t if cx.lo <= t < cx.hi and t in cx.insns else flaglive.EXIT
+    if n.op == 'const' and m not in ('call', 'lcall'):
+        return [fall] if n.x == nxt else [tgt(n.x)]
+    if n.op == 'ite' and n.a[1].op == 'const' and n.a[2].op == 'const' and n.a[2].x == nxt and m not in ('call', 'lcall'):
+        return [tgt(n.a[1].x), fall]
+    return [flaglive.EXIT]
+
+
 def emit_form(cx, ins):
     """emit the C of one instruction from its Form -> None, or SKIP when the forms do not cover it. A build error propagates."""
     if not supported(ins):
         return SKIP
     F = forms.build(ins, cx.a)
     force, xfer = transfer(cx, ins, F)
+    if cx.macc == 'M' and not cx.pfx:
+        cx.finfo[cx.a] = flaglive.info(F, dsl.InlineEmit(F.roots(), ()).used, succs(cx, F, ins), cx.a in cx.guarded)
+    D = cx.drop.get(cx.a)
+    if D:       # FLAGLIVE.md: the Form minus the writes of the flags that are dead after the instruction; the Form's own text is unchanged
+        F = copy.copy(F)
+        F.flags = [x for x in F.flags if x[0] not in D]
+        F.undef = type(F.undef)(f for f in F.undef if f not in D)
+        F.uwhen = {f: c for f, c in F.uwhen.items() if f not in D}
     L, ref = F.to_c_inline(varc(cx), fault_fn(cx), flo_fn, force, cx.macc)
     L += xfer(ref)
     if L:
