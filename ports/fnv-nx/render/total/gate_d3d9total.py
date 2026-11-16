@@ -58,7 +58,7 @@ INCLUDES = recipe_includes(D3D9_REC)
 TR_GEN = {os.path.dirname(os.path.dirname(TRANSLATOR_REC) + "/" + o) for g in json.load(open(os.path.join(PORT, TRANSLATOR_REC))).get("generated", []) for o in g["outputs"]}   # build outputs: no tracked files
 TR_INCLUDES = [i for i in recipe_includes(TRANSLATOR_REC) if i not in TR_GEN]   # the translator's own tracked include dirs (the patched MojoShader includes fnvnx_dk_layout.h from them)
 INPUTS = ["render/d3d9/front", "render/d3d9/env", "bridgefacts/d3d9", D3D9_REC, TRANSLATOR_REC,
-          "contract/treehash.py"] + INCLUDES + [i for i in TR_INCLUDES if i not in INCLUDES]
+          "contract/treehash.py", "toolchain/msvcmodel/DATAMODEL.json"] + INCLUDES + [i for i in TR_INCLUDES if i not in INCLUDES]
 STRICT = ["-Wall", "-Wextra", "-Werror", "-Werror=switch", "-Werror=switch-enum"]
 PLAIN = ["-Wall", "-Wextra", "-Werror", "-Wno-switch", "-Wno-switch-enum"]
 SM_CC_BASE = [GCC, "-fsyntax-only", "-Wall", "-fmax-errors=0", "-fdiagnostics-format=json"]
@@ -247,7 +247,7 @@ def enum_part(inp, work, cache):
     gen["VENDOR_FOURCC"], wine_hash = vendor_fourcc(inp, work, cache)
     # the interface table is a build output (bridgefacts D9_SPEC): the gate runs the same generator on the same tree
     specp = os.path.join(work, "d3d9_spec.json")
-    if run([sys.executable, "-I", os.path.join(inp, "bridgefacts", "d3d9", "d3d9_spec.py"), specp, os.path.join(work, "d9bridge_rows.tsv"), os.path.join(inp, "shim", "include")]).returncode:
+    if run([sys.executable, "-I", os.path.join(inp, "bridgefacts", "d3d9", "d3d9_spec.py"), specp, os.path.join(work, "d9bridge_rows.tsv"), os.path.join(inp, "shim", "include"), os.path.join(inp, "toolchain", "msvcmodel", "DATAMODEL.json")]).returncode:
         raise Red("d3d9_spec.py failed")
     spec = json.load(open(specp))["enums"]
     names = gen["SWITCHED"] + gen["INDEXED"]

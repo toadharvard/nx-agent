@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """d3d9_spec.py: builds the D3D9 interface table, the one table that describes every method of every D3D9 COM interface (RD1), and the bridge rows of d3d9.dll.
-    python3 -I d3d9_spec.py OUT_SPEC OUT_ROWS INCDIR   the stage of the tool root bridgefacts: outputs D9_SPEC and D9_ROWS (INCDIR = shim/include); no file of the table is tracked
-    python3 -I d3d9_spec.py --stdout INCDIR          print the table
+    python3 -I d3d9_spec.py OUT_SPEC OUT_ROWS INCDIR DATAMODEL   the stage of the tool root bridgefacts: outputs D9_SPEC and D9_ROWS (INCDIR = shim/include); no file of the table is tracked
+    python3 -I d3d9_spec.py --stdout INCDIR DATAMODEL   print the table
 Inputs: shim/include/d3d9*.h (method order, types, structs, enums, constants) + d3d9_rules.py / d3d9_cls.py / d3d9_tables.py /
 d3d9_exports.py (the hand tables). Unknown types or invalid rules abort the run: nothing is guessed."""
 import json, os, re, sys
@@ -64,8 +64,9 @@ def split_params(args, mname):
 
 
 class Gen:
-    def __init__(self, inc):
-        self.db = ST.load(inc)
+    def __init__(self, inc, dm):
+        self.db = ST.load(inc, dm)
+        self.base = self.db["base"]
         self.structs = ST.layout(self.db)
         self.enums = self.db["enums"]
         self.consts = self.db["consts"]
@@ -98,7 +99,7 @@ class Gen:
             elif base.startswith("IDirect3D") or base == "IUnknown": spec = {"kind": "handle"}
             elif base in self.structs: spec = {"kind": "struct"}
             elif base in self.enums: spec = {"kind": "enum"}
-            elif base in ST.BASE: spec = {"kind": "float" if ST.BASE[base][2] == "float" else "ohandle" if ST.BASE[base][2] == "ohandle" else "value"}
+            elif base in self.base: spec = {"kind": "float" if self.base[base][2] == "float" else "ohandle" if self.base[base][2] == "ohandle" else "value"}
             else: die(f"{iface}.{mname}.{name}: no rule and unknown type {ctype!r}")
         k = spec["kind"]
         d = spec.get("d")
@@ -136,8 +137,8 @@ class Gen:
             elif k == "float": p["size"] = 4
             elif k == "ohandle": p["size"], p["os"] = 4, spec.get("os") or base
             else:
-                p["size"] = spec.get("size") or ST.BASE[base][0]
-                if base in ST.BASE: p["signed"] = ST.BASE[base][1]
+                p["size"] = spec.get("size") or self.base[base][0]
+                if base in self.base: p["signed"] = self.base[base][1]
             if spec.get("in_when"): p["in_when"] = spec["in_when"]
             if k in ("ohandle",) and "null" in spec: p["null"] = spec["null"]
         if p["dir"] != "in":
@@ -248,10 +249,10 @@ def render(spec):
 
 if __name__ == "__main__":
     a = [x for x in sys.argv[1:] if x != "--stdout"]
-    if "--stdout" in sys.argv and len(a) == 1: inc = a[0]
-    elif "--stdout" not in sys.argv and len(a) == 3: inc = a[2]
-    else: die("usage: d3d9_spec.py OUT_SPEC OUT_ROWS INCDIR | --stdout INCDIR")
-    out = render(Gen(inc).build())
+    if "--stdout" in sys.argv and len(a) == 2: inc, dmp = a
+    elif "--stdout" not in sys.argv and len(a) == 4: inc, dmp = a[2], a[3]
+    else: die("usage: d3d9_spec.py OUT_SPEC OUT_ROWS INCDIR DATAMODEL.json | --stdout INCDIR DATAMODEL.json")
+    out = render(Gen(inc, json.load(open(dmp))).build())
     if "--stdout" in sys.argv: sys.stdout.buffer.write(out)
     else:
         import d9rows

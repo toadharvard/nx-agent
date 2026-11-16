@@ -123,7 +123,7 @@ def run_gate(base, cache, extra=None):
 
 
 def enum_ids(e):
-    spec = json.loads(subprocess.run([sys.executable, "-I", os.path.join(PORT, "bridgefacts", "d3d9", "d3d9_spec.py"), "--stdout", os.path.join(PORT, "shim", "include")],
+    spec = json.loads(subprocess.run([sys.executable, "-I", os.path.join(PORT, "bridgefacts", "d3d9", "d3d9_spec.py"), "--stdout", os.path.join(PORT, "shim", "include"), os.path.join(PORT, "toolchain", "msvcmodel", "DATAMODEL.json")],
                                      check=True, capture_output=True).stdout)["enums"][e]
     if e == "D3DFORMAT":
         spec = spec + ["D3DFMT_" + s.strip() for s in VENDOR]

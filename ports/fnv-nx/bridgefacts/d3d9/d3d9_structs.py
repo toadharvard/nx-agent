@@ -6,18 +6,6 @@ import os, re
 
 HDRS = ("d3d9types.h", "d3d9caps.h", "d3d9.h")
 WIN_STRUCTS = ("GUID", "POINT", "RECT", "PALETTEENTRY", "RGNDATAHEADER", "RGNDATA", "LUID")
-# base type -> (size, signed, kind)
-BASE = {}
-for _n in ("char", "signed char"): BASE[_n] = (1, True, "int")
-for _n in ("unsigned char", "BYTE"): BASE[_n] = (1, False, "int")
-for _n in ("short", "SHORT"): BASE[_n] = (2, True, "int")
-for _n in ("unsigned short", "WORD"): BASE[_n] = (2, False, "int")
-for _n in ("int", "INT", "LONG", "long", "BOOL"): BASE[_n] = (4, True, "int")
-for _n in ("unsigned int", "UINT", "DWORD", "ULONG", "unsigned long", "D3DCOLOR", "UINT32", "DWORD_PTR"): BASE[_n] = (4, False, "int")   # DWORD_PTR: pointer-sized, 4 bytes on x86 / ILP32
-BASE["float"] = (4, True, "float")
-for _n in ("LONGLONG", "__int64"): BASE[_n] = (8, True, "int")
-for _n in ("ULONGLONG", "UINT64"): BASE[_n] = (8, False, "int")
-for _n in ("HWND", "HANDLE", "HDC", "HMONITOR"): BASE[_n] = (4, False, "ohandle")
 # (struct, field) -> flags family; the family prefix table is FAMILIES
 CAPS_FLAGS = {"Caps": "D3DCAPS", "Caps2": "D3DCAPS2", "Caps3": "D3DCAPS3", "PresentationIntervals": "D3DPRESENT_INTERVAL",
               "CursorCaps": "D3DCURSORCAPS", "DevCaps": "D3DDEVCAPS", "PrimitiveMiscCaps": "D3DPMISCCAPS", "RasterCaps": "D3DPRASTERCAPS",
@@ -37,11 +25,85 @@ FAMILIES = {"D3DCLEAR": "D3DCLEAR_", "D3DCREATE": "D3DCREATE_", "D3DCURSOR": "D3
             "D3DPRESENT": "D3DPRESENT_", "D3DPRESENTFLAG": "D3DPRESENTFLAG_", "D3DPV": "D3DPV_", "D3DSGR": "D3DSGR_",
             "D3DSPD": "D3DSPD_", "D3DUSAGE": "D3DUSAGE_"}
 FAMILIES.update({v: v + "_" for v in set(CAPS_FLAGS.values())})
-HAND = {  # shapes the C parser does not read: anonymous unions / flexible arrays / the SDK's 64-bit union
-    "LARGE_INTEGER": (8, 8, [("LowPart", 0, 4, "int", False), ("HighPart", 4, 4, "int", True)]),
-    "ULARGE_INTEGER": (8, 8, [("LowPart", 0, 4, "int", False), ("HighPart", 4, 4, "int", False)]),
-    "D3DMATRIX": (64, 4, [("m", 0, 64, "float", True)]),
+# shapes the C parser does not read (a union with a 64-bit member, a 4x4 float matrix): fields are (name, type, count), laid out sequentially under the member
+# alignment of their struct; UNION_WITH names the type of the member the SDK overlays on them, whose size and alignment the record gives.
+HAND = {
+    "LARGE_INTEGER": ([("LowPart", "DWORD", 1), ("HighPart", "LONG", 1)], "LONGLONG"),
+    "ULARGE_INTEGER": ([("LowPart", "DWORD", 1), ("HighPart", "DWORD", 1)], "ULONGLONG"),
+    "D3DMATRIX": ([("m", "float", 16)], None),
 }
+FLOATS = ("float", "double", "long double")
+
+
+class Base:
+    """The base types of the headers, derived and not stated: the record is DATAMODEL.json `types` (size, align, and signed for the integral types, of each fundamental type, pointer and enum:
+    the one data model); a name of the headers is a typedef chain (`typedef <type> NAME`, a pointer declarator or a handle macro `#define M(n) ... typedef ... *n`)
+    that ends in one of them. `unsigned T` is T's size and alignment, unsigned. A name that has no chain is not a base type (`in` is False; `[]` raises)."""
+
+    def __init__(self, dm, td, ptr):
+        self.types = {t["type"]: t for t in dm["types"]}
+        self.td, self.ptr, self.memo = td, ptr, {}
+
+    def entry(self, kind):
+        t = self.types[kind]
+        return t["size"], t["align"]
+
+    def resolve(self, name, seen=()):
+        if name in self.memo: return self.memo[name]
+        r = None
+        if name in self.ptr:
+            r = (self.types["pointer"]["size"], self.types["pointer"]["align"], False, "ohandle")
+        elif name in self.td and name not in seen:
+            r = self.words(self.td[name].split(), seen + (name,))
+        else:
+            r = self.words(name.split(), seen)
+        self.memo[name] = r
+        return r
+
+    def words(self, ws, seen):
+        ws = [w for w in ws if w != "const"]
+        if len(ws) == 1 and (ws[0] in self.td or ws[0] in self.ptr): return self.resolve(ws[0], seen)
+        uns = "unsigned" in ws
+        rest = [w for w in ws if w not in ("unsigned", "signed")]
+        base = " ".join(rest) if rest else "int"
+        if "signed" in ws and base == "char": base = "signed char"
+        t = self.types.get(base)
+        if t is None or t["type"] in ("pointer", "enum"): return None
+        kind = "float" if base in FLOATS else "int"
+        return t["size"], t["align"], (kind == "float" or (not uns and t["signed"])), kind   # `signed` is in the record for the integral types only; a floating type is signed by its kind
+
+    def __contains__(self, name):
+        return self.resolve(name) is not None
+
+    def __getitem__(self, name):
+        r = self.resolve(name)
+        if r is None: raise SystemExit("d3d9_structs: %r has no typedef chain to a base type of DATAMODEL.json types" % name)
+        return r[0], r[2], r[3]   # (size, signed, kind)
+
+    def align(self, name):
+        return self.resolve(name)[1]
+
+
+def typedefs(srcs):
+    """(typedef name -> its target type words, the names that are pointers) of the comment-stripped SRCS: `typedef <type> N1, *N2, ...;` without a struct body, an enum
+    body or a function declarator, and every use `M(NAME)` of a macro whose definition ends in `typedef ... *n` (a handle declaration)."""
+    td, ptr = {}, set()
+    for src in srcs:
+        for m in re.finditer(r"#\s*define\s+(\w+)\(\s*(\w+)\s*\)[^\n]*typedef[^\n;]*\*\s*\2\s*$", src, re.M):
+            ptr.update(x.group(1) for x in re.finditer(r"^\s*%s\(\s*(\w+)\s*\)\s*;" % m.group(1), src, re.M))
+        for m in re.finditer(r"(?m)^\s*typedef\s+([^;{}()#]+);", src):
+            parts = [p.strip() for p in m.group(1).split(",")]
+            h = re.match(r"^(.*?)\s*(\*?)\s*(\w+)$", parts[0])
+            if not h or not h.group(1):
+                continue
+            ty = h.group(1)
+            if h.group(2): ptr.add(h.group(3))
+            else: td[h.group(3)] = ty
+            for p in parts[1:]:
+                dd = re.match(r"^(\*?)\s*(\w+)$", p)
+                if dd and dd.group(1): ptr.add(dd.group(2))
+                elif dd: td[dd.group(2)] = ty
+    return td, ptr
 
 
 def strip(t):
@@ -94,7 +156,7 @@ def split_top(t):
     return out + ["".join(cur)]
 
 
-def load(inc):
+def load(inc, dm):
     t = {f: text(inc, f) for f in HDRS + ("fnvnx_win32.h",)}
     allt = "\n".join(t[h] for h in HDRS)
     consts = {}
@@ -129,7 +191,7 @@ def load(inc):
             nm = names[0]
             if (filt is None or nm in filt) and nm not in raw and "{" not in body and nm not in HAND:
                 raw[nm] = (body, pack_at(pm, m.start()))
-    return {"enums": enums, "consts": consts, "raw": raw}
+    return {"enums": enums, "consts": consts, "raw": raw, "base": Base(dm, *typedefs(list(t.values())))}
 
 
 def decl_fields(body):
@@ -151,7 +213,7 @@ def decl_fields(body):
 
 def layout(db):
     """-> {name: {size, align, fields[]}} for every parsed struct plus HAND ones"""
-    enums, consts, raw = db["enums"], db["consts"], db["raw"]
+    enums, consts, raw, base = db["enums"], db["consts"], db["raw"], db["base"]
     done = {}
 
     def dims(arr):
@@ -163,8 +225,14 @@ def layout(db):
     def build(name):
         if name in done: return done[name]
         if name in HAND:
-            size, al, fl = HAND[name]
-            done[name] = {"size": size, "align": al, "fields": [dict(name=a, off=b, size=c, kind=k, **({"signed": s} if k != "float" else {})) for a, b, c, k, s in fl]}
+            hf, union = HAND[name]
+            pos, al, fl = 0, 1, []
+            for fname, ty, cnt in hf:
+                sz, sg, k = base[ty]
+                fl.append(dict(name=fname, off=pos, size=sz * cnt, kind=k, **({"signed": sg} if k != "float" else {})))
+                pos, al = pos + sz * cnt, max(al, base.align(ty))
+            if union: pos, al = max(pos, base[union][0]), max(al, base.align(union))
+            done[name] = {"size": pos + (-pos) % al, "align": al, "fields": fl}
             return done[name]
         body, pack = raw[name]
         pos, al, fields = 0, 1, []
@@ -173,15 +241,15 @@ def layout(db):
             f = {"name": fname}
             ty = ty.replace("const ", "").strip()
             if "*" in ty:
-                esz, ea, f["kind"] = 4, 4, "ptr"
+                (esz, ea), f["kind"] = base.entry("pointer"), "ptr"
             elif ty in enums:
-                esz, ea, f["kind"], f["enum"] = 4, 4, "enum", ty
+                (esz, ea), f["kind"], f["enum"] = base.entry("enum"), "enum", ty
             elif ty in raw or ty in HAND:
                 sub = build(ty)
                 esz, ea, f["kind"], f["struct"] = sub["size"], sub["align"], "struct", ty
-            elif ty in BASE:
-                esz, sg, k = BASE[ty]
-                ea = esz
+            elif ty in base:
+                esz, sg, k = base[ty]
+                ea = base.align(ty)
                 f["kind"] = "char" if (ty == "char" and arr) else k
                 if f["kind"] == "int": f["signed"] = sg
                 fam = FLAG_FIELDS.get((name, fname))
