@@ -775,3 +775,4 @@ After the first frame:
 - bottleneck: the recipe-path rt run (farm, w3) -> the pin commit with FNPARM.
 - 2026-11-16 11:50Z: L1 asks for the rules/ bare sibling imports (13 in 5 tools, 26 in 8 tests, on w28-c5 4eb5a2bd4) in the fnvnx form for cand5 -> w2, doing. S29 needs no change (c5's gate_datamodel judges the structured form).
 - 2026-11-16 11:55Z: rules/ fnvnx imports done: 045fe3d4d (cand4b head c8a00b66a, with w3 rt.sh 165619a86). Bare sibling imports 39 -> 0; the 7 rules tests pass. Sent to L1. Follow-up to w2: support.check must exit non-zero on failure (prepare_pure exited 0 on failed cases).
+- 2026-11-16 11:53Z: rules test runner follow-up closed with no change. support.finish() already exits 1 on any failure; w2's report came from a shell `$?` error. Head stays c8a00b66a.
