@@ -1,3 +1,4 @@
+# reads: ports/fnv-nx/verify/guest_compiler.json ports/fnv-nx/verify/targets.json
 """plugsem - the declared facts of the guest compiler record that a tool of another root reads: the plugin set and its fixed arguments, the semantic flag sets,
 the runtime's configure and cflags options (L1 CONTRACT; split out of recipe.py so that a generator tool (toolchain/msvcmodel/records.py) imports these facts
 without the whole of recipe.py: its import closure is this file and verify/targets.py only).  recipe.py takes every name from here (one source).

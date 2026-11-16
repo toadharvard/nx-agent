@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/verify/targets.json ports/fnv-nx/verify/ASSUMPTIONS.json ports/fnv-nx/verify/guest_compiler.json
 """verify/targets.json: the declared targets, one record each (owner order 2026-11-15, rule 5): guest_platform (a Horizon process over newlib) and
 console_cpu (the Cortex-A57 feature set). Every field is cited: to a file and line of a pinned external (libnx, the game compiler tree of guest_compiler.json), to a section of a
 pinned vendor document (the Arm TRM, pinned by sha256 in the arm-a57-docs external), or to an OWNER record id of verify/ASSUMPTIONS.json (ASM-004 for the console).

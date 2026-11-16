@@ -116,6 +116,12 @@
    "entry": []
   },
   {
+   "path": "ports/fnv-nx/verify/probes",
+   "class": "product",
+   "target": "guest",
+   "recipe": "ports/fnv-nx/verify/probes/build.json"
+  },
+  {
    "path": "ports/fnv-nx/shim",
    "class": "product",
    "target": "guest",
