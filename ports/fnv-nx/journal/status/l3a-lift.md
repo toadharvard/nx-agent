@@ -1820,3 +1820,6 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - gate_fpexact and gate_flags went to L3b.
 - L2 w2: CORE-MATH mirror fnv-nx-build tools/core-math 1e8252b65 (upstream a44b8b08, tree cc7009d0…). Root platform/coremath on cand4b ebfd99e9e: green, 7 objects defining cr_*.
   - Blocked (L1/L2): -frounding-math is refused as a per-root flag. Until it is in, the RZ call for C1 is not valid.
+- Orchestrator: -frounding-math is ruled (integ d4397e9a3), so it is not a blocker. Priority 1 stays the bytes before/after.
+- Moved the density run off farm 2's queue onto a new farm 3 (session_01KmtZKUSRn7hAupzBX9N5mD): B/R1/R12/R123P (ae2d9438b), all images.
+  - Farm 2 keeps the path census and the exe modlift.
