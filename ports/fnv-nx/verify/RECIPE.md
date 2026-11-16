@@ -373,6 +373,14 @@ consumers: a later step's `inputs` ref `{"stage": "<root>:gen:I", "path": DIR}` 
 root reads it through `uses`. A directory output does not overlap another output or a tracked file. A stage whose stage-ref input is an output of a
 red generator is blocked by it (never run on a missing path). Tests: `tests/test_genchain.py` (a 3-stage chain, unmounted paths fail, the re-key rule).
 
+### Generator tool reads (`gen:file-escape`)
+
+`recipe check` is red with `gen:file-escape:<root>:gen:<I>:<FILE>:<LINE>:<PATH>` when a generator tool, or a module of its import closure, reads a file by a path
+built from `__file__`, `__path__` or `sys.argv[0]` that leaves the tree the stage mounts the file from (a `..` above the tree), or that the rule cannot decide (a
+non-constant part). A resolved file inside the mounted tree and a read through `require_mounted`/`require_under` are green. Data of another root comes only through a
+declared `uses` input, passed to the tool as an argument (as `--lib` is) or read through `require_mounted`. One implementation: `pathflow.escapes` (the abspath gate's
+`abspath:escape` calls the same function). Tests: `tests/test_genescape.py`, `tests/test_gate_abspath.py`.
+
 ### Generated `sources`
 `sources: PATH` (a path in generated[].outputs of the root) names a file a generate stage writes, one `<external>:<path>` line per unit; `.` names the root
 itself (a tracked file of it). Each listed file of a declared external is copied into the unit view as the unit `<external>/<path>`, so its content is in
