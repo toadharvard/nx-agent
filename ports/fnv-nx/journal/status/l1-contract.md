@@ -2681,3 +2681,12 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - Selftest for the copy rule assigned to w28-c5 (session_01KmtZKTR5tjvvZFgA3EKYuZ), for cand5.
 - Waiting: the cand4 verdict at 62474771c (w15).
 - bottleneck: the cand4 verdict; L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
+
+### 2026-11-16: review of L2 w2's GMP/MPFR recipe forms (claude/fnv-l2-source-plugins-cand4b 7bedd49a8)
+- Accepted: the `<step>:<dir>` sources; generated_dirs; the archive bytes (ar_bytes in unit order, content as the key); the archive mount holds only lib.a, with headers through include_uses; --disable-float128.
+- Required before cand5:
+  1. The archive root must have the guest pin's compiler (today two host roots pass).
+  2. A structural, cited rule that probes only compile and link (cross_compiling=yes plus no guest executor in the sandbox). Today it rests on one measurement.
+  3. Job.archives is created in __init__.
+  4. The behavioural include_uses test for run steps.
+- bottleneck: the cand4 verdict (w15); L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
