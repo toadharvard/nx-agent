@@ -42,7 +42,8 @@ u = copy.deepcopy(t)
 u["references"]["x"] = "no/such/file.json"
 check("a reference to a missing file is red", any("no/such" in b for b in targets.check(u, repo=repo)), targets.check(u, repo=repo))
 import tempfile  # noqa: E402
-from contract.target import gen_header as targets_header  # noqa: E402
+sys.path.insert(0, os.path.join(HERE, "..", "..", "contract", "target"))   # gen_header imports its sibling fpcr by its plain name, as the stage runs it
+import gen_header as targets_header  # noqa: E402
 check("fpcr: DN=0 FZ=0 RMode=RN, AHP=0: the derived integer is 0", targets.fpcr_value(t) == 0 and "FNVNX_FPCR 0x0ull" in targets_header.render(t), targets_header.render(t))
 u = copy.deepcopy(t)
 u["console_cpu"]["fpcr"]["RMode"] = 3

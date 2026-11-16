@@ -47,7 +47,7 @@ class Parse:
         if not m:
             raise ValueError('expected a word at %d of %r' % (self.i, self.s))
         self.i = m.end()
-        return m.group(0)
+        return m[0]
 
     def tag(self):
         if self.peek() == '-':
@@ -105,7 +105,7 @@ class Parse:
                 if not m:
                     raise ValueError('expected a size at %d of %r' % (self.i, self.s))
                 self.i = m.end()
-                fields.append(m.group(0))
+                fields.append(m[0])
                 self.eat(':')
             return (w, tuple(fields), self.ty())
         if w in ('const', 'volatile', 'restrict', 'atomic') and self.peek() == ':':
@@ -199,7 +199,7 @@ def decltype_reasons(inc_text):
     m = re.search(r'#define FNVNX_DECLTYPE_REASONS\(X\)((?: X\(\w+\))+)', inc_text)
     if not m:
         raise ValueError('no FNVNX_DECLTYPE_REASONS')
-    return frozenset(re.findall(r'X\((\w+)\)', m.group(1)))
+    return frozenset(re.findall(r'X\((\w+)\)', m[1]))
 
 
 def parse_decltype_lines(data, where, reasons):
