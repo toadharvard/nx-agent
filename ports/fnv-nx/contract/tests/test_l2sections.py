@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # reads: ports/fnv-nx/toolchain/names/sympair_kinds.inc
-# reads: ports/fnv-nx/toolchain/names/sympair_kinds.inc
 """Synthetic check of l2sections.py: every parser branch and error, and the ELF read when the cross tools exist."""
 import os, shutil, subprocess, sys, tempfile
 
