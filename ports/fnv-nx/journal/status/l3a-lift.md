@@ -1628,3 +1628,11 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - The exe moves to the property-rooted modlift engine. The exe decomp engine, funcsfacts.py and the funcs.tsv stage are deleted, together with every consumer of the decomp ranges, in one commit.
 - w7 (doing): the 5 small images, then the exe (farm 2 if it takes more than 10 min).
 - bottleneck: the L2 recipe-path pin; the w7 universe engine; w8 assumptions gate to 0.
+
+## 2026-11-16 05:58 — assumptions gate at 0 on base3
+- w8 (done, base3 30030c1e8): the assumptions gate is at 148/148 mentions certified, 0 findings.
+  - L6 render d98bb7faa is taken whole (14 roots recipe-valid).
+  - ASM-329 replaces ASM-322 (the shared alias).
+  - L3b's gate_fpexact, helpercalls, x86sys and genout come from a1caba273.
+- L3b bases its later handover on 30030c1e8.
+- bottleneck: the L2 recipe-path pin and dispatch.c ENTRY1-CONT (L2 w2); the w7 universe engine (modlift for every image); the int 0x29 / far-selector rows (L5).
