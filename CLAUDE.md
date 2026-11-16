@@ -740,6 +740,25 @@ The owner's words: "Что ещё так проебано? Перепровер�
 - **Candidate-root sites stay out.** The 1,580 sites with only candidate roots are outside this decision until L3a's
   code-range rule decides their reachability. Once it does, they enter by this same rule.
 
+## Orchestrator decision of 2026-11-16 07:40Z: declared-machine rows only for reached sites; no Windows media, no PDF scraping (binding for L5, L3b, L1)
+
+The owner asked: "А винду зачем скачали?" and "Зачем пдф ридер."
+- **Scope of the x86sys rows.** A row is written only when a site reached from a proven root reads it. At IR 257a93722adb,
+  that is the selector values that the 78 `mov r/m16,Sreg` sites read, and the int3/rdtsc values above.
+  - Ring-3 selector values come from the WDK 7.1 headers (source 1). The pinned 7601 kernel is used only where the
+    headers say nothing.
+  - These wait until after the first frame, unless a reached site reads them:
+    - drivers, HALs and boot drivers;
+    - IDT gates other than the documented user vectors;
+    - LAR and accessed bits;
+    - iret task returns.
+  - **No Windows installation media.** Nothing is downloaded or pinned from a Windows ISO or wim. The 154 driver and HAL
+    pins already made are not extended.
+- **CPU feature of an instruction.** The CPU feature that each instruction belongs to (for the cleared-#UD partition)
+  comes from Intel's machine-readable tables, the pinned XED (intelxed/xed) ISA_SET and CPUID data. XED is built as a
+  host recipe stage. It is not scraped from the SDM PDF, because reading a PDF's text layout is a heuristic. No PDF
+  reader enters env.json.
+
 ## Owner order of 2026-11-16 05:15Z: less generated code before the cold build (binding for L3a, L3b, L1)
 
 The owner's words: "не будем тратить так время... уменьшим количество генерируемого кода".
