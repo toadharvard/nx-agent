@@ -723,3 +723,6 @@ After the first frame:
   - Blocked: -frounding-math, which the recipe refuses as a per-root flag. Recommendation to L1: a per-root semantic flag only when cited from the root's external. Until then the objects are not valid for the RZ calls.
   - Open: atan2's printf/exit failure path is a trap path; w2 is listing the sites for the orchestrator.
 - 2026-11-16 06:12Z: L1: -frounding-math is already in flags.semantics.common of guest_compiler.json, so every guest CC stage has it; the per-root restatement is rightly refused. The coremath block is cleared, and w2 checks the argv and adds the RZ test.
+- 2026-11-16 06:20Z: CORE-MATH trap sites: one live site, atan2/tint.h:413 (printf + exit when the rounding cannot be decided). Unreachability is not certifiable (the 2-argument worst-case search is not exhaustive). Went to the orchestrator; recommendation: (a) a Ziv fallback to mpfr_atan2 on that branch via a declared stage patch, with MPFR/GMP as guest roots.
+  - The per-function .wc tests wait on the product ELF root (the boot machine runs only full ELFs). No harness.
+- bottleneck: the L2 farm's recipe-path gcc1/rt -> w3's pin commit.
