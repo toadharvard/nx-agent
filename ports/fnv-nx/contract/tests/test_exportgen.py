@@ -119,6 +119,34 @@ with tempfile.TemporaryDirectory() as td:
     check('a function export carries the argument letters of its declared type', ('m.dll', 'two', 'two', 'func', 'i', 'id') in (rows or []), (rows, err))
 
 
+# the relocation form: the definer is `&symbol`, so a typo is a compile error and the symbol is the object's own symbol (C++ as well as C)
+with tempfile.TemporaryDirectory() as td:
+    try:
+        obj(td, 'a/t.o', 'int real_fn(void){return 0;}\nFNVNX_EXPORT("m.dll","typo",real_fnn,"func");\n')
+        check('a symbol that is not declared is a compile error', False)
+    except subprocess.CalledProcessError:
+        check('a symbol that is not declared is a compile error', True)
+    src = ('#include "fnvnx_export.h"\nextern "C" {\nint cf(int a){return a;}\nvoid ce(void){}\nint cd[2];\n}\n'
+           + decl('cf', '(int)int') + decl('ce', '()void')
+           + 'FNVNX_EXPORT("m.dll","CF",cf,"func");\nFNVNX_EXPORT("m.dll","CE",ce,"entry");\nFNVNX_EXPORT("m.dll","CD",cd,"data");\n')
+    os.makedirs(td + '/b')
+    open(td + '/b/x.cc', 'w').write(src)
+    subprocess.run(['g++', '-c', '-fPIC', '-I', os.path.join(C, 'include'), td + '/b/x.cc', '-o', td + '/b/x.o'], check=True)
+    rows, err = collect(td)
+    check('C++: func, entry and data records round-trip through the relocations', rows == [('m.dll', 'CD', 'cd', 'data', '-', '-'), ('m.dll', 'CE', 'ce', 'entry', '-', '-'), ('m.dll', 'CF', 'cf', 'func', 'i', 'i')], (rows, err))
+# parse_records on bytes: a missing relocation, a section symbol, an addend, an empty field, an unterminated string are errors; padding between records is skipped
+R = exportgen.parse_records
+good = b'a.dll\0F\0func\0'.ljust(24, b'\0') + b'b.dll\0G\0data\0'.ljust(24, b'\0')
+ok1 = R(good, {16: ('sym_a', 0), 40: ('sym_b', 0)}, 8, 'w')
+check('parse_records: two records with padding', ok1 == [('a.dll', 'F', 'sym_a', 'func'), ('b.dll', 'G', 'sym_b', 'data')], ok1)
+for why, data, rel in (('no relocation', good, {16: ('sym_a', 0)}), ('a section symbol', good, {16: (None, 0), 40: ('sym_b', 0)}), ('an addend', good, {16: ('sym_a', 4), 40: ('sym_b', 0)}),
+                       ('a relocation belonging to no record', good, {16: ('sym_a', 0), 40: ('sym_b', 0), 8: ('x', 0)}), ('an unterminated string', b'a.dll\0F\0func', {})):
+    try:
+        R(data, rel, 8, 'w')
+        check('parse_records: %s is an error' % why, False)
+    except ValueError:
+        check('parse_records: %s is an error' % why, True)
+
 names = 'msvcrt.dll\tfree\nmsvcrt.dll\t_iob\nwsock32.dll\tsocket\n'
 spec = {'msvcrt': '1 cdecl free(ptr)\n2 extern _iob\n', 'wsock32': '1 stdcall socket(long long long) ws2_32.socket\n', 'ws2_32': '1 stdcall socket(long long long)\n'}
 ex = {('msvcrt.dll', 'free'): ('my_free', 'func', 'v', 'i'), ('msvcrt.dll', '_iob'): ('my_iob', 'data', '-', '-'), ('ws2_32.dll', 'socket'): ('whatever_sock', 'func', 'i', 'iii')}
