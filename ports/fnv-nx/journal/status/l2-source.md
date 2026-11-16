@@ -709,3 +709,4 @@ After the first frame:
   - sympair: 23117 / 23117 / 23149 (69383 over 336 objects). nodecor: 500 per root, 1500 in total (real16 494, extern-in-internal 6).
   - w2 has no open path item and waits; the NAMES table is held until after the first frame.
 - bottleneck: the L2 farm's recipe-path gcc1/rt (a) at 3f1036631 -> w3's pin commit. It blocks lift/rt on base3 and the ELF.
+- 2026-11-16 05:45Z: L1 cand4 needs DATAMODEL `types` (L6 w6-dm depends on it). Sent to L1 w15: cherry-pick f7b5d9b3b + badb397be (DATAMODEL.json/.md, datamodel/facts.json, gen.py, test_ldbl). They pick cleanly onto cand4, the result is identical to cand4b, and the only new key is `types`.
