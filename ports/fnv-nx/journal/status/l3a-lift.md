@@ -1768,3 +1768,6 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - fnvnx_safepoint(c, pc) is L5's (platform/win32/thread.cpp).
   - P = back-edge targets ∪ function entries. Every p ∈ P is an escape in flaglive.
   - L5 deletes the arbitrary-instruction kernel pause.
+- L3b correction: the 1,098 ValueError came from reading encs.tsv's form_key as a shape key. Corrected universe A is 16,032 keys: 14,335 with a Form, 1,683 KeyError, 13 AssertionError, 1 SymbolicBranch.
+  - Rules 1+2 are still Form-neutral on all 16,032.
+  - shapes.tsv in the relifted pack removes the re-derivation path.
