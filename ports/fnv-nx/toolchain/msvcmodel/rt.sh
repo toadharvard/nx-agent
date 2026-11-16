@@ -38,6 +38,7 @@ CONF=$P/CONFIGURE.txt
 note() { printf '%s\n' "$*" >> "$CONF"; }
 # stage 1's output goes back to the absolute paths it was built at (GCC's build tree and the compiler's configured paths are absolute)
 mkdir -p "$W"; cp -a --no-preserve=ownership "$STAGE1/prefix" "$P"; cp -a --no-preserve=ownership "$STAGE1/b-gcc" "$W/b-gcc"; cp -a --no-preserve=ownership "$STAGE1/src" "$SRC"
+chmod -R u+w "$P" "$W/b-gcc" "$SRC"   # the external is a read-only store tree: the copies are the step's own working trees
 export PATH=$P/bin:$PATH
 cd "$W"
 note "# stage 2; newlib $NLV; devkitPro/buildscripts at $BS"
