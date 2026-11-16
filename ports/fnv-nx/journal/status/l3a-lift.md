@@ -1431,3 +1431,14 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - The TOP register calls: measure their value sources.
 - w8: one recipe emitter, lift/tools/imagechain.py (the pack chain per image). The guestgen_* scripts are reduced to PE emitters.
 - bottleneck: L2 ENTRY1-ATOMIC for C, the L1 w28 export-record form, the L2 recipe-path pin; pcsrc (the vtable join measurement).
+
+## 2026-11-16 04:00 — pcsrc: IAT register rule accepted, vptr sites go to class narrowing
+- Measured by w7 on exe facts 30757c325 / efdd8262f (retn.tsv of the exe, 96,873 entries):
+  - The IAT is read-only by the loader's layout (loader/src/start.c:137-146). All 280 exe IAT slots are in .rdata (0x40000040, no WRITE). (ii) stands.
+  - The all-vtables join gives no single pop: 3,274 RTTI vtables, 56,416 slots. Slots 1, 2, 14, 35, 38, 42, 43 and 47 have between 4 and 11 distinct pop values each. That join is rejected as the rule.
+  - The 4 "TOP" register calls (a3072f, a34b80, a357fe, a48019) are registers loaded from IAT slot 0xfdf1c4.
+- Ruled:
+  - (C) The IAT register rule: a register loaded from a read-only IAT slot holds the import, with the same proof as (ii). `call reg` takes the import's pop. This closes the 4 register calls and the 2 import-slot jmps.
+  - (B) The 7 vptr sites go to RTTI-structural class narrowing. The receiver's origin must reach a dominating vptr store, which gives the static class. The callee set is that class and its derived classes, per the CHD BaseClassArray at the COL offset, and the pop is the join of retn over that set. Otherwise the site stays red and is reported with a reason. No names, no frame-balance assumption.
+- w7: (C), then the recompute of the exe and the 5 images, then (B).
+- bottleneck: L2 ENTRY1-ATOMIC for C, the L1 w28 export-record form, the L2 recipe-path pin; pcsrc (the 7 vptr sites).
