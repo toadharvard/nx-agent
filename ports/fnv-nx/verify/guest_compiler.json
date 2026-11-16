@@ -70,6 +70,9 @@
   "--disable-libstdcxx-verbose",
   "--enable-libstdcxx-time=yes"
  ],
+ "semantics_cite": {
+  "-frounding-math": "CORE-MATH README.md:173 (mirror fnv-nx-build tools/core-math 1e8252b657f4, upstream a44b8b08c3e3): \"The CORE-MATH code assumes all computations are rounded at runtime with the given rounding mode ... This requires the option -frounding-math on some compilers.\" Documented semantics of a pinned library; it changes neither the data model nor the ABI"
+ },
  "runtime_configure_cite": {
   "--disable-decimal-float": "DATAMODEL.json (toolchain/msvcmodel) has no decimal-float row: the guest compiler offers no type the data model lacks, so the gcc configure of the guest compiler and its libgcc does not build the decimal-float runtime (libbid)",
   "--disable-libstdcxx-pch": "libstdc++-v3/acinclude.m4 GLIBCXX_ENABLE_PCH (GCC 13.3.0): --disable-libstdcxx-pch turns off attempts to use or build stdc++.h.gch; the guest has no precompiled header (the recipe compiles each unit hermetically from sources). Present in the devkitPro buildscripts' configure line this runtime follows (build-gcc-stage1.sh)",
