@@ -50,4 +50,16 @@ assert udsail.default_opcodes(d) == {'1': {0xd6}, '0f': {4, 0xff}}
 rec = {'cr0': {'em': {'status': 'undecided'}, 'ts': {'status': 'undecided'}}, 'cr4': {'tsd': {'value': 1}}, 'cr4_sse': {'osfxsr': {'status': 'undecided'}}}
 vs = udsail.sysvariants(rec, d)
 assert vs[0][0] == 0 and vs[0][4] == 4 and any(v[4] == 4 | 0x200 for v in vs) and any(v[0] == 4 for v in vs) and any(v[0] == 8 for v in vs) and all(len(v) == 17 for v in vs), vs
+# class (a) from the SDM rows: xbegin (C7 F8, flag RTM), an unflagged row, an `executed as` row, an ambiguous match
+from proof import sdmfeat
+def row(op, flag, modc='any', exec_as=()): return {'op': op, 'p': sdmfeat.parse_opcode(op), 'flag': flag, 'modc': modc, 'exec_as': list(exec_as)}
+TABLE = {'RTM': [(7, 0, 'EBX', 11)], 'SSE2': [(1, 0, 'EDX', 26)]}
+CPU = {(0, 'EAX'): 0x16, (0x80000000, 'EAX'): 0x80000008, (7, 'EBX'): 0, (1, 'EDX'): 1 << 26}
+ROWS = [row('C7 F8', 'RTM'), row('C7 /0', ''), row('0F 28 /r', 'SSE2'), row('0F BC /r', 'RTM', exec_as=('BSF',))]
+assert udsail.sdm_feature(bytes.fromhex('c7f8aabbccdd'), ROWS, TABLE, CPU) == ('RTM', 2)
+assert udsail.sdm_feature(bytes.fromhex('c7c0'), ROWS, TABLE, CPU) is None             # C7 /0: no flag
+assert udsail.sdm_feature(bytes.fromhex('0f28c0'), ROWS, TABLE, CPU) is None           # SSE2 present on the declared CPU
+assert udsail.sdm_feature(bytes.fromhex('0fbcc0'), ROWS, TABLE, CPU) is None           # executed as another instruction
+assert udsail.sdm_feature(bytes.fromhex('c7f8'), ROWS, TABLE, CPU, nopflags={'RTM'}) is None
+assert udsail.sdm_feature(bytes.fromhex('f3c7f8'), ROWS, TABLE, CPU)[1] == 3           # the prefix is part of the extent
 print('ok')
