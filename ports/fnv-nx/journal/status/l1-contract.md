@@ -2795,3 +2795,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - Ruling on ctypes_compat id(): the memo is keyed by struct/union tag (recursion only through named tags), with no memo for anonymous ones.
 - One farm verdict on the merged head replaces both the a48d7f60a run and the separate w28-c5 run.
 - bottleneck: cand4+c5 merge (w15), then one farm verdict; L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
+- cand4 head 5e9f645ae: w28-c5 merged with no conflicts; CLAUDE.md from integ 3bd5022ed.
+- ctypes_compat: the memo is deleted, not re-keyed. My tag key was wrong: it called two different inner definitions of the same tag equal. The proof that it terminates without a memo: a parsed type is a finite tree, and a recursive reference is an incomplete struct that returns before recursing. Two cases added, and test_ctypes passes.
+- The farm verdict is requested at 5e9f645ae.
