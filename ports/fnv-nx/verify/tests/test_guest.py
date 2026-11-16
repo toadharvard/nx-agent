@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/addr/fnvnx_addr.cc ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc
-# reads: ports/fnv-nx/toolchain/ftoi/f2i_builtins.inc ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc ports/fnv-nx/toolchain/layout/crossing_terms.inc
-# reads: ports/fnv-nx/toolchain/layout/decltype_spell.inc ports/fnv-nx/toolchain/layout/fnvnx_layout.cc ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json
-# reads: ports/fnv-nx/toolchain/names/fnvnx_names.cc ports/fnv-nx/toolchain/order/atomic_order.inc ports/fnv-nx/toolchain/order/fnvnx_frame.h
-# reads: ports/fnv-nx/toolchain/order/fnvnx_order.cc ports/fnv-nx/toolchain/pi/fnvnx_pi.cc ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc ports/fnv-nx/verify
 """Tests for the guest-root rule of verify/recipe.py: a product root with "target": "guest" is compiled, C and C++, by the external compiler of
 verify/guest_compiler.json (GCC with msvcmodel.patch, toolchain/msvcmodel), the plugins are built against ITS plugin headers, and the whole
 chain is deterministic and cached. The compiler is fetched by the pin of verify/guest_compiler.json (exact commit of fnv-nx-build from
@@ -21,6 +16,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import test_plugins as tp
 from test_plugins import BASE, ROOT, T, REC, PLUGS, SRC, check, git, w, make_repo, errs, build, disasm, mut, recipe, cas, REAL, VERIFY
 
+
+
+PIN = json.load(open(os.path.join(REAL, T + "verify/guest_compiler.json")))   # the drivers are the pin's: no test types them
 
 
 def guest_rec(ext, **kw):
@@ -147,7 +145,7 @@ def main():
     print("TIME guest cold A %.1fs, cold B %.1fs, warm %.1fs" % (ta, tb, tw))
     # per-target recipes: one root, one set of units, a recipe per target; the host recipe is a variant keyed by its target
     pt = guest_repo("pt", rec, pin, files={ROOT + "/a.cc": src})
-    w(pt, ROOT + "/host.json", json.dumps(REC))
+    w(pt, ROOT + "/host.json", json.dumps({k: v for k, v in REC.items() if k not in recipe.INHERITED or v != rec.get(k)}))   # units and include are the base's: inherited, never copied
     ad = json.load(open(os.path.join(pt, T + "verify/admit.json")))
     for r in ad["roots"]:
         if r["path"] == ROOT:

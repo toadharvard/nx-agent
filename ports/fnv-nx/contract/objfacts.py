@@ -26,8 +26,8 @@ import capstone
 from elftools.elf.elffile import ELFFile
 from elftools.elf.relocation import RelocationSection
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import store, l2sections
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)
+from contract import store, l2sections
 
 IM = re.compile(r'__fnv_([0-9a-f]{8})$')
 R_GOT_PAGE, R_GOT_LO12, R_CALL26, R_JUMP26 = 26, 27, 20, 21   # R_AARCH64_P32_*
@@ -169,7 +169,7 @@ def scan_function(code, relocs, vftset):
     return vt, data, calls, other, vcall
 
 
-def scan_object(path, amap, vftset):
+def scan_object(path, amap, vftset, kinds):
     ob = os.path.basename(path)
     out = {}
     with open(path, 'rb') as fh:
@@ -220,7 +220,7 @@ def scan_object(path, amap, vftset):
                     pt[2] = [rel.get((shndx, v + o)) for o in range(pt[0], end, 4)]
                 ztv[name] = [tuple(pt) for pt in pts]
         out[(ob, 'ztv')] = ztv
-        for kind, rows in sorted(l2sections.read(path).items()):
+        for kind, rows in sorted(l2sections.read(path, kinds).items()):
             out[(ob, kind)] = rows
         # functions with an address but no relocations still need a vcall list and an entry
         for k, d in fb.items():
@@ -233,8 +233,9 @@ def scan_object(path, amap, vftset):
     return out
 
 
-def _init(link, vftset):
-    global _amap, _vft
+def _init(link, vftset, kinds):
+    global _amap, _vft, _kinds
+    _kinds = kinds
     init_disasm()
     _amap = load_addrmap(link)
     _vft = vftset
@@ -243,22 +244,22 @@ def _init(link, vftset):
 def _run(paths):
     r = {}
     for p in paths:
-        r.update(scan_object(p, _amap, _vft))
+        r.update(scan_object(p, _amap, _vft, _kinds))
     return r
 
 
-def build(link, vftset, jobs=4):
+def build(link, vftset, kinds, jobs=4):
     import multiprocessing
     paths = sorted(glob.glob(os.path.join(link, 'fixed', '*.o')))
     chunks = [paths[i:i + 40] for i in range(0, len(paths), 40)]
     out = {}
-    with multiprocessing.Pool(jobs, _init, (link, vftset)) as pool:
+    with multiprocessing.Pool(jobs, _init, (link, vftset, kinds)) as pool:
         for r in pool.imap(_run, chunks):
             out.update(r)
     return out
 
 
-from objfacts_merge import summary   # one definition; the merge stage must not need the disassembler
+from contract.objfacts_merge import summary   # one definition; the merge stage must not need the disassembler
 
 
 def main():
@@ -266,10 +267,11 @@ def main():
     ap.add_argument('--link', required=True)
     ap.add_argument('--facts', required=True)
     ap.add_argument('--out', required=True)
+    ap.add_argument('--sympair-kinds', required=True, help='toolchain/names/sympair_kinds.inc (the kinds of .fnvnx.sympair)')
     ap.add_argument('--jobs', type=int, default=4)
     a = ap.parse_args()
     F = store.load(a.facts, 'facts')
-    out = build(a.link, set(F['vft']), a.jobs)
+    out = build(a.link, set(F['vft']), l2sections.load_kinds(a.sympair_kinds), a.jobs)
     store.save(a.out, 'obj', out)
     print(summary(out))
 

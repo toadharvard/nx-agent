@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gate "objstub" (fnvnx-gate/1, classes 1 and 2 of VERDICT.md): no built function holds a trap/abort path or is vacuous (rules and proofs: objstub.py).
-    python3 -I gate_objstub.py [--jobs N]     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/objstub.json
+    python3 -I gate_objstub.py [--jobs N]     cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/objstub.json
 Roots come from verify/admit.json, never from arguments: for every product root the gate calls gate_build.ensure(root, GATE_CACHE) (build or
 cache hits) and judges what the recipe says (RECIPE.md): the objects (os_layer ones may hold SVC), the constants table (key (unit, symbol))
 and the terminator set DERIVED from the recipe's compiler: objstub.unit_terminators runs the compiler's own plugin over the preprocessed text
@@ -76,10 +76,13 @@ def root_check(root, repo, cache, jobs, built=None):
     pin = recipe.load_pin(repo)   # a guest root's libc headers are the pinned compiler tree's (guest_compiler.json "external": the one tree holds the runtime); a host root's the distribution's
     rt_at = ((pin or {}).get("external") or {}).get("at")
     sjdirs = (rt_at,) if rt_at and recipe.entry_of(roots, root).get("target") == "guest" else objstub.SYSTEM_SJ
+    origin, plugs = recipe.entry_of(roots, root).get("cxx_origin"), res.get("plugins", [])
+    rootplug = ([[[p["name"], p["sha256"]] for p in plugs], recipe.origin_class(origin)], lambda d: recipe.root_plugin_flags(plugs, origin, d)) if plugs else None   # the root's own plugins, as its CC stage loads them
     for lang, ext in (("c", recipe.CC_EXT), ("c++", recipe.CXX_EXT)):
         us = [(k, unitstage.result_file(store, k, "unit.ii"), lang) for u, k in sorted(res["pp_keys"].items()) if u.endswith(ext)]
         if us:
-            ns, _, errs = objstub.unit_terminators(drv[lang], us, {"c": recipe.unit_flags(rec, roots, root, drv["c"], "c"), "c++": recipe.unit_flags(rec, roots, root, drv["c++"], "cxx")}, cache, jobs, rets, sjdirs, (res.get("analysis_plugin") or {}).get("path"))
+            ns, _, errs = objstub.unit_terminators(drv[lang], us, {"c": recipe.unit_flags(rec, roots, root, drv["c"], "c"), "c++": recipe.unit_flags(rec, roots, root, drv["c++"], "cxx")}, cache, jobs, rets, sjdirs, (res.get("analysis_plugin") or {}).get("path"),
+                                            rootplug)
             names |= set(ns)
             unit_of = {k: u for u, k in res["pp_keys"].items()}
             bad += [(base + unit_of[k], unit_of[k], "terminator-red", "root %s: %s" % (root, e)[:300]) for k, e in errs]
@@ -118,7 +121,7 @@ def declared_pins(repo, cache):
     def tree(key):
         e = pin[key]
         return recipe.fetch_externals([{"name": key, "commit": e["commit"], "tree_sha256": e["tree_sha256"], "at": key}], os.path.join(cache, "store"),
-                                      os.path.join(cache, "external"), os.path.join(cache, "ws-declared"))[key]["host"]
+                                      recipe.ext_dir(cache), os.path.join(cache, "ws-declared"))[key]["host"]
     return (lambda: objstub.std_index_load(tree("std_index"), pin["std_index"])), (lambda: objstub.winerror_load(tree("wdk"), pin["wdk"]))
 
 
@@ -154,7 +157,8 @@ def main(argv):
         registry = {e["id"]: e["status"] for e in json.load(open(rp))["entries"]} if os.path.exists(rp) else {}
         its, fs = objstub.judge(results, rows, facts, wine, declared, fails, handlers, stats, extconv, (registry, gen_ids), owners)
         items, finds = items + its, finds + fs
-        dit, dfs, dstats = doubles.judge(built)   # no doubles in tests (doubles.py)
+        adm = recipe.load_admit(repo)
+        dit, dfs, dstats = doubles.judge(built, {r for r in built if adm[recipe.split_spec(r)[0]]["class"] == "test"})   # no doubles in tests (doubles.py)
         items, finds = items + dit, finds + dfs
     except (ValueError, KeyError, OSError, recipe.BuildRed) as e:
         why = "input error: %s" % (str(e)[:300] or type(e).__name__)
