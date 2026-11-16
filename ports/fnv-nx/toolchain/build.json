@@ -2,7 +2,7 @@
  "format": "fnvnx-recipe/1",
  "compiler": {
   "name": "stage1",
-  "root": "ports/fnv-nx/toolchain/stage1",
+  "root": "ports/fnv-nx/toolchain-stage1",
   "output": "STAGE1",
   "at": "/ext/stage1"
  },
@@ -92,7 +92,7 @@
    "inputs": [
     "ports/fnv-nx/toolchain/msvcmodel/rt.sh",
     {
-     "stage": "ports/fnv-nx/toolchain/compiler:gen:0",
+     "stage": "ports/fnv-nx/toolchain:gen:0",
      "path": "records2.sh"
     },
     "ports/fnv-nx/toolchain/msvcmodel/msvcmodel.patch",

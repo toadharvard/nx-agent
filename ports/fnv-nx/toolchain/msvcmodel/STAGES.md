@@ -33,7 +33,7 @@ mount points changes those lines only.
 
 
 ## Roots (build.json) and externals
-- `toolchain/stage1` (step `gcc1`, output `STAGE1`) and `toolchain/compiler` (compiler = stage external `{root toolchain/stage1, output STAGE1, at /ext/stage1}`, the eight `plugins` in load order,
+- `toolchain-stage1` (step `gcc1`, output `STAGE1`) and `toolchain` (build.json at its top) (compiler = stage external `{root toolchain/stage1, output STAGE1, at /ext/stage1}`, the eight `plugins` in load order,
   step `rt`, output `COMPILER`). Mounts are exactly the constants at the top of `stage1.sh` / `rt.sh`; `records.py stage1|stage2` are the generators (input: the verify directory, mounted at `/in/ports/fnv-nx/verify`).
 - Externals (fnv-nx-build, orphan mirror branches): gcc `tools/gcc-src-13.3.0` f445876d (tree f50e0b05...), newlib `tools/newlib-4.6.0.20260123` 2fb73524 (af2b544d...), autotools `tools/autotools-src` 2dee1098 (6dbd091d...),
   buildscripts `tools/devkitpro-buildscripts-5740da9b` f34068c8 (f0923ebe...); full hashes in the two build.json files.

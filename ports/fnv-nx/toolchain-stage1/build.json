@@ -37,7 +37,7 @@
     "ports/fnv-nx/toolchain/msvcmodel/stage1.sh",
     "ports/fnv-nx/toolchain/msvcmodel/msvcmodel.patch",
     {
-     "stage": "ports/fnv-nx/toolchain/stage1:gen:0",
+     "stage": "ports/fnv-nx/toolchain-stage1:gen:0",
      "path": "records1.sh"
     }
    ],
