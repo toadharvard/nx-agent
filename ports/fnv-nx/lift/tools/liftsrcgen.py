@@ -153,7 +153,7 @@ def provrecipe(modules, exts=EXTERNALS):
 def sdmrows_recipe():
     """lift/sdmrows/build.json: the one producer of the lifter's `sdmrows` input (sdmfeat.py dumprows of the SDM text of lift/sdm); output SDMROWS"""
     return {'format': 'fnvnx-recipe/1', 'uses': [{'root': SDM_ROOT, 'output': 'SDM_TEXT'}],
-            'generated': [{'tool': SDMTOOL, 'args': ['--sdm', '/uses/' + SDM_ROOT + '/SDM_TEXT', '--out', '/out'], 'inputs': [LIFT + '/proof/sdmfeat.py', LIFT + '/proof/__init__.py'], 'outputs': ['sdmrows/sdmrows.json']}],
+            'generated': [{'tool': SDMTOOL, 'args': ['--sdm', '/uses/' + SDM_ROOT + '/SDM_TEXT', '--out', '/out', '--lift', '/in/' + LIFT], 'inputs': [LIFT + '/proof/sdmfeat.py', LIFT + '/proof/__init__.py'], 'outputs': ['sdmrows/sdmrows.json']}],
             'outputs': {'SDMROWS': 'sdmrows/sdmrows.json'}}
 
 
