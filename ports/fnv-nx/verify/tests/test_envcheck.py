@@ -134,6 +134,7 @@ check("tree digest ignores foreign files and sees counted ones",
 
 fr = os.path.join(TD, "fakerepo")
 os.makedirs(os.path.join(fr, "ports/fnv-nx/verify"))
+subprocess.run(["git", "init", "-q", fr], check=True)   # load_admit derives the imports from the tracked files
 os.makedirs(os.path.join(fr, "ports/fnv-nx/hroot"))
 json.dump({"roots": [{"path": "ports/fnv-nx/hroot", "class": "product", "target": "host", "recipe": "ports/fnv-nx/hroot/build.json"},
                      {"path": "ports/fnv-nx/gext", "class": "product", "target": "guest", "recipe": "ports/fnv-nx/gext/build.json"}]},
