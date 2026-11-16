@@ -69,8 +69,9 @@ def rows(path):
                 yield ln.split("\t")
 
 
-def load_inputs(path=INPUTS):
-    """-> the inputs document; raises Red naming the problem"""
+def load_externals(path=INPUTS):
+    """-> the inputs document with its externals validated (format, keys, every external, x86ir declared); raises Red naming the problem.
+    The prover reads only this part (ir_path): the pinned IR does not depend on which pack the forms gate checks."""
     if not os.path.isfile(path):
         raise Red("inputs: no %s: the pack's shapes.tsv and certs.tsv are not declared as content-pinned externals of fnv-nx-build" % os.path.basename(path))
     try:
@@ -94,14 +95,21 @@ def load_inputs(path=INPUTS):
     names = [e["name"] for e in exts]
     if len(set(names)) != len(names):
         raise Red("inputs: external names are not unique")
+    if IR_EXT not in names:
+        raise Red("inputs: external %s (the pinned x86_proof.ir) not declared" % IR_EXT)
+    return doc
+
+
+def load_inputs(path=INPUTS):
+    """-> the inputs document of the forms gate: the externals (load_externals) plus the pack's shapes, certs and instrs inside declared externals; raises Red"""
+    doc = load_externals(path)
+    names = [e["name"] for e in doc["external"]]
     for k in ("shapes", "certs", "instrs"):
         v = doc[k]
         if not isinstance(v, str) or "/" not in v or ".." in v.split("/"):
             raise Red("inputs: %s must be NAME/path inside a declared external" % k)
         if v.split("/", 1)[0] not in names:
             raise Red("inputs: external %s not declared" % v.split("/", 1)[0])
-    if IR_EXT not in names:
-        raise Red("inputs: external %s (the pinned x86_proof.ir) not declared" % IR_EXT)
     return doc
 
 
@@ -133,7 +141,7 @@ def path_in(ext, v, what):
 
 def ir_path(cache):
     """the path of the pinned x86_proof.ir: the external x86ir of the inputs file, fetched by the loader of the trunk into `cache` (commit + tree_sha256); the farm script passes it to the prover as --sail-ir"""
-    doc = load_inputs()
+    doc = load_externals()
     ext = fetch({"external": [e for e in doc["external"] if e["name"] == IR_EXT]}, cache)
     return path_in(ext, IR_EXT + "/ir/x86_proof.ir", "x86_proof.ir")
 
