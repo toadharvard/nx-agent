@@ -144,9 +144,10 @@ The owner's words: "Транк никогда красный. Всегда зе�
       whose every instruction is lifted. That is MMX, SSE and SSE2; SSE3 and up, 3DNow and AVX are clear.
     - An instruction of a cleared feature is #UD, as on a real CPU with that feature set. This is read from CPUREF,
       not from a list.
-    - Every #UD shape site must be certified unreachable on the declared machine: dominated by the exe's own cpuid
-      test whose declared answer excludes it, with a call-graph certificate. If a site is not certified, the build is
-      red; the feature is then lifted or the site is reported.
+    - A site of a cleared feature is lowered to exactly that: a synchronous #UD at the instruction, raised through the
+      SEH path with its precise CONTEXT, as the declared CPU does. There is no unreachability certificate and no
+      feature partition. The feature of an instruction is the group that the lifter's own pinned decoder (capstone,
+      env.json) gives it, so there is no second source (owner, 2026-11-16 07:50Z: "Это все не приближает к кадру").
     - Processors: one count holds for the whole declared machine, 3. These are the console cores an application
       gets, one thread each. cpuid leaf 1 EBX/HTT and leaf 4 (L3a), GetSystemInfo, GetLogicalProcessorInformation and
       the affinity masks 0b111 (L5), and the emulator's core count (L4) all report it. Guest threads run in parallel
@@ -754,10 +755,10 @@ The owner asked: "А винду зачем скачали?" and "Зачем пд
     - iret task returns.
   - **No Windows installation media.** Nothing is downloaded or pinned from a Windows ISO or wim. The 154 driver and HAL
     pins already made are not extended.
-- **CPU feature of an instruction.** The CPU feature that each instruction belongs to (for the cleared-#UD partition)
-  comes from Intel's machine-readable tables, the pinned XED (intelxed/xed) ISA_SET and CPUID data. XED is built as a
-  host recipe stage. It is not scraped from the SDM PDF, because reading a PDF's text layout is a heuristic. No PDF
-  reader enters env.json.
+- **CPU feature of an instruction (owner, 07:50Z).** There is no XED, no SDM reading and no #UD certificate. See "The
+  declared CPU": the site is lowered to #UD by the decoder's own group.
+- **Rule for every lead.** Work on the declared machine is done only when a site on the path to the frame needs its
+  answer. Everything else waits until after the first frame.
 
 ## Owner order of 2026-11-16 05:15Z: less generated code before the cold build (binding for L3a, L3b, L1)
 
