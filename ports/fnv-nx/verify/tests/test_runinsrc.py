@@ -104,6 +104,12 @@ def main():
         check("a top that is not installed is refused by the build", False, "")
     except ValueError as ex:
         check("a top that is not installed is refused by the build", "not installed" in str(ex), ex)
+    check("the machine's root layout deb (base-files) is in every run step's debs, listed or not",
+          recipe.step_debs({"debs": ["libc6"]}) == ["base-files", "libc6"] and "base-files" in recipe.step_debs({"debs": {"closure": ["sed"]}}, closure=False), recipe.step_debs({"debs": ["libc6"]}))
+    e = re_(dict(run=[dict(d, debs=["base-files", "libc6"])]))
+    check("a recipe that lists base-files in debs is red (duplicated declaration)", any("do not list it" in x for x in e), e)
+    e = recipe.run_errors({"units": []}, ROOT, set(), {}, set(), set(), ".")
+    check("a recipe without run steps has no run errors (and run_errors does not fail on it)", e == [], e)
     print("%d FAILED" % len(TR.FAILED) if TR.FAILED else "all passed")
     return 1 if TR.FAILED else 0
 

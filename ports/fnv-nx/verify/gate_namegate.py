@@ -14,10 +14,12 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gate_l2native as L  # noqa: E402
 import gate_names  # noqa: E402
+import l2sections  # noqa: E402
 
 
 def judge_root(repo, cache, root):
-    return L.judge_native_root("namegate", repo, cache, root, gate_names.rows,
+    kinds = l2sections.load_kinds(l2sections.KINDS_INC)   # the one definition of the sympair kinds, a tracked file of the names plugin
+    return L.judge_native_root("namegate", repo, cache, root, lambda gcc, cl, units: gate_names.rows(gcc, cl, kinds, units),
                                lambda rows, native: L.select(rows, lambda r: r[0], lambda r: r[1], native),
                                lambda r: not r[3], gate_names.row_id)
 

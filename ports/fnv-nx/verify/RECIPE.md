@@ -273,7 +273,7 @@ Readers of the record: gate_tlsmodel (the relocations of the linked ELF), contra
   `{stage, path}`, read by resolve_input) at `/in/1`, `/in/2`, ... in list order; the union of the installed files of the declared debs at `/deb/<absolute path>` (`base-files`, the machine's root layout, is implicit in every run stage; two debs shipping one path with different content are red); its `/out`.
   The root is read-only, `/tmp` and `/work` are not writable. `debs` are names of `env.json` `debs.packages`; an undeclared name is red (check).
 - An artifact with a PT_INTERP is started through the file at that path inside a declared deb (`/deb/<name>/<PT_INTERP>`, the deb's own symlinks
-  followed across the union of the declared debs by `deb_resolve`: the usr-merge links are a fact of the declared system, shipped by `base-files`, so a run stage lists `base-files` in `debs`; without it a PT_INTERP such as `/lib64/ld-linux-x86-64.so.2` is red), with `--library-path` over the declared debs'
+  followed across the union of the declared debs by `deb_resolve`: the usr-merge links are a fact of the declared system, shipped by `base-files`, so `base-files` (envcheck.RUN_LAYOUT_DEB, the machine's root layout) joins the debs of every run step automatically, never listed (a recipe that lists it is red); a PT_INTERP such as `/lib64/ld-linux-x86-64.so.2` resolves through it), with `--library-path` over the declared debs'
   `lib/x86_64-linux-gnu` and `usr/lib/x86_64-linux-gnu`. A PT_INTERP that the declared debs do not provide is red; no loader path is hard-coded.
 - `"host_cpu": "cpuref"` (optional): the pin `verify/cpuref.json` {vendor_id, family, model, stepping, microcode, model_name} (the /proc/cpuinfo fields,
   ints as numbers; a null value means the field is ABSENT from /proc/cpuinfo (a VM has no microcode line), never a wildcard) is in the stage key. Before a stage that is not a cache hit runs, every processor of /proc/cpuinfo must equal the pin, else the stage
@@ -503,6 +503,15 @@ cc1, as, ld relative to itself). It is declared `HOST@AT` to `runtime.py tool`: 
 loader resolves it INSIDE the sandbox (paths under `at` are files of the checked-out tree, other paths are host libraries that become declared
 inputs); a library that cannot be resolved is a red build naming the object and the name. `include` may name a directory inside an external:
 it is passed as `-I<that path>` (the external is a declared input of every stage, so keys stay content-addressed).
+
+## Single file of an external (a document through a tool step)
+A run step's `inputs` entry `{"external": NAME, "path": FILE}` mounts ONE file of a declared external at `/in/N`. The external is pinned as above, by
+`{commit, tree_sha256}` over its whole checkout; `resolve_input` checks that hash, then reads FILE from the checked-out tree (red: the file is not in
+the tree, the path is absolute, has `..` or leaves the tree through a link, the external is not declared, `tree_sha256` is not the checkout's). The step
+key holds the file's content, not the tree's, so a commit that changes other files of the external does not re-key the step.
+Pattern for a document turned into data (the Intel SDM): the external is `tools/intel-sdm` (a pinned PDF); the step is `exec` of `/usr/bin/pdftotext`
+from the pinned deb `poppler-utils` (with its dependency closure in `env.json` `debs.packages`), `args` `["-layout", "/in/1", "/out/sdm.txt"]`, `outputs`
+`["sdm.txt"]`; a later generator or step reads the text through its stage ref. The binary's content is in the key through `debs`. Test: `tests/test_toolext.py`.
 
 ## Result (`objects.json`, "fnvnx-objects/1")
 `objects` [{unit, object, sha256, os_layer}] (product units), `tests`, `elf` {path, sha256}|null, `constants`, `contract_names` (paths of the copies or null),
