@@ -1397,3 +1397,7 @@ Paused: w3b, w4, farm; no other work.
     - Standalone puregate over the other 15 files: 36 host (.group), 15 import-unlisted, 8 dynamic (eval, sys.modules), 6 member-unlisted (sys.dont_write_bytecode), 1 unsorted-set.
     - Next for w6, one rule per class: m[n] for re.Match; declared imports or outputs; an ast evaluator over the header constant grammar; delete sys.modules and dont_write_bytecode; sorted sets. Outputs must be byte-identical. Status: doing.
 - bottleneck: w6 pure items; w28 PURE/objstub head; farm1 sm_link numbers; the cand4 base.
+- 01:58Z L1 asked which guest GL/EGL archives gl4 links (w28 84bc327a9, verify/linkset.py boundary).
+    - Answer: none. render/gl4 is a host root (admit target host, x86_64 gcc-13, libnxgl4.so loaded by the L4 boot machine). Its EGL definer is the declared link.libs.system /usr/lib/x86_64-linux-gnu/libEGL.so.1, from the env.json debs (libegl1 plus libegl-mesa0/mesa-libgallium).
+    - Rule proposed: a host root's definers are the dynamic exports of its link.libs.system files, plus ld's linker-defined symbols (`_GLOBAL_OFFSET_TABLE_`).
+    - No guest object may reference egl*.
