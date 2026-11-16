@@ -31,6 +31,8 @@ struct fnvnx_guest_ret { u32 eax, edx; double st0; };
 extern "C" {
 void fnvl_raise_ud(u32 addr);
 struct cpu **fnvl_host_tls_slot(void);
+void fnvnx_susp_attach(void *cpu, volatile u32 *susp, u32 *ra);   /* platform/win32/thread.cpp: the thread's suspension word and ra, for the life of its frame */
+void fnvnx_susp_detach(void *cpu);
 u32 fnvl_thread_main(u32 eip, u32 sp, u32 teb) __attribute__((noinline));
 void fnvl_attach_main(void *mem, u32 sp, u32 teb) __attribute__((noinline));
 void fnvl_detach_main(void) __attribute__((noinline));
@@ -62,6 +64,7 @@ extern "C" u32 fnvl_thread_main(u32 eip, u32 sp, u32 teb)
     struct cpu cpu;
     cpu_reset(&cpu, sp, teb);
     c = &cpu; *fnvl_host_tls_slot() = c;
+    fnvnx_susp_attach(c, &c->susp, &c->ra);
     eax = ecx = edx = ebx = ebp = esi = edi = 0; esp = sp;
     fp_set(0, 0);
     M32(sp) = FNVL_SENT;
@@ -69,6 +72,7 @@ extern "C" u32 fnvl_thread_main(u32 eip, u32 sp, u32 teb)
     do { u32 t = c->ra; REGS(); fnvl_dispatch(t)(); REGS(); } while (!(c->ra == FNVL_SENT && esp > sp));
     u32 r = eax;
     fp_set(0, 0);
+    fnvnx_susp_detach(c);
     *fnvl_host_tls_slot() = 0;
     return r;
 }

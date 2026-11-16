@@ -566,6 +566,7 @@ static DWORD wait_entry(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32_t 
     DWORD r = wait_multiple(n, hs, all, ms, pc);
     if (unboost)
         os_cpu_boost(1);
+    w32_susp_point();   /* the exit of the wait core is a point of S (THREADS.md): a suspension that came meanwhile takes effect before lifted code runs */
     return r;
 }
 

@@ -113,8 +113,6 @@ int os_thread_set_priority(os_thread *t, int prio);   /* t == NULL: calling thre
 int os_thread_set_cpu(os_thread *t, int cpu);         /* t == NULL: calling thread; best effort; that core only */
 /* ideal core (< 0: keep) and affinity mask over the logical processors (0: keep); t == NULL: calling thread */
 int os_thread_set_affinity(os_thread *t, int ideal, unsigned mask);
-int os_thread_suspend(os_thread *t);        /* user reason (SuspendThread), synchronous, os_world.c; -1: calling thread / already suspended */
-int os_thread_resume(os_thread *t);
 void os_thread_exit(void) __attribute__((noreturn, nothrow));
 void os_yield(void);
 

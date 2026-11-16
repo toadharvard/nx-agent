@@ -275,7 +275,12 @@ struct w32_thread_obj {
     uint64_t clk_parent;           /* the creator's clock stamp at CreateThread (fnvnx_clock.h) */
     void *tls_block;               /* the image's TLS block of the new thread, until the thread adopts it */
     fnvnx_bnd_thread *gt;          /* the game thread context (fnvnx_boundary.h); NULL once released */
-    os_cond_t resumed;             /* a thread that suspended itself waits here until its count is 0 */
+    os_cond_t resumed;             /* a thread that suspended itself, or is parked at a safepoint, waits here until its count is 0 */
+    /* The observed-context fields, named obs_*: the functions that touch them are the ones THREADS.md lists (platform/test_threads_rule.py
+     * checks it), all under w32_wait_lock. */
+    volatile uint32_t *obs_susp;   /* the thread's c->susp while its lifted frame exists (attach..detach), else NULL */
+    uint32_t *obs_ra;              /* the thread's c->ra, same lifetime */
+    void *obs_cpu;                 /* the thread's `struct cpu *`, same lifetime: identifies the frame */
 };
 
 int w32_thread_signaled(struct w32_obj *o) { return ((struct w32_thread_obj *)o)->done; }
@@ -419,6 +424,87 @@ static struct w32_thread_obj *thread_of(HANDLE h)
     return thread_resolve(h, &bad);
 }
 
+/* ---- Suspension, rule S (THREADS.md). A suspension is observed only at a point of S: the target's safepoints
+ * (fnvnx_safepoint, polled by lifted code at function entries and loop back-edge targets when c->susp is nonzero), the
+ * exits of its wait core (w32_susp_point) and its own calls. SuspendThread and ResumeThread only change the count and the
+ * c->susp word under w32_wait_lock; they never stop a thread by the kernel.
+ * Windows: SuspendThread "increments a thread's suspend count... when the suspend count is greater than zero, the thread
+ * is not scheduled" and returns the previous count (MSDN, SuspendThread / ResumeThread); the suspension is asynchronous
+ * (MSDN: "this function is primarily designed for use by debuggers"; the call returns before the target stops).
+ * Wine 9.0 dlls/ntdll/thread.c NtSuspendThread / server/thread.c suspend_thread: count++ and return the previous count. */
+
+/* the word the lifted poll reads: nonzero while suspend_count > 0 (w32_wait_lock held) */
+static void susp_publish(struct w32_thread_obj *t)
+{
+    if (t->obs_susp)
+        __atomic_store_n(t->obs_susp, t->suspend_count > 0 ? 1u : 0u, __ATOMIC_RELEASE);
+}
+
+/* The calling thread's lifted frame came into being (fnvl_thread_main): its c->susp and c->ra are registered. A thread
+ * of CreateThread only; the main thread has no thread object and is never suspended (see SuspendThread). */
+extern "C" void fnvnx_susp_attach(void *cpu, volatile uint32_t *susp, uint32_t *ra)
+{
+    struct w32_thread_obj *t = (struct w32_thread_obj *)w32_self()->self_obj;
+    if (!t)
+        return;
+    os_lock(&w32_wait_lock);
+    t->obs_cpu = cpu;
+    t->obs_ra = ra;
+    t->obs_susp = susp;
+    susp_publish(t);   /* a SuspendThread that came before the frame existed is delivered at the first poll */
+    os_unlock(&w32_wait_lock);
+}
+
+/* The frame is about to end: after this no other thread writes the word, so c may go out of scope. */
+extern "C" void fnvnx_susp_detach(void *cpu)
+{
+    struct w32_thread_obj *t = (struct w32_thread_obj *)w32_self()->self_obj;
+    if (!t)
+        return;
+    os_lock(&w32_wait_lock);
+    if (t->obs_cpu == cpu) {
+        t->obs_susp = NULL;
+        t->obs_ra = NULL;
+        t->obs_cpu = NULL;
+    }
+    os_unlock(&w32_wait_lock);
+}
+
+/* the calling thread parks while its suspend count is above 0. w32_wait_lock held. */
+static void park_locked(struct w32_thread_obj *t)
+{
+    while (t->suspend_count > 0)
+        os_cond_wait(&t->resumed, &w32_wait_lock);
+}
+
+/* a point of S inside the platform: the calling thread's own calls and the exits of the wait core */
+void w32_susp_point(void)
+{
+    struct w32_thread_obj *t = (struct w32_thread_obj *)w32_self()->self_obj;
+    if (!t)
+        return;
+    os_lock(&w32_wait_lock);
+    park_locked(t);
+    os_unlock(&w32_wait_lock);
+}
+
+/* The safepoint of lifted code (lift FLAGLIVE.md P2'): called when c->susp is nonzero. Parks
+ * while the suspend count is above 0, returns the Eip to continue at and stores it in c->ra. */
+extern "C" uint32_t fnvnx_safepoint(void *cpu, uint32_t pc)
+{
+    struct w32_thread_obj *t = (struct w32_thread_obj *)w32_self()->self_obj;
+    if (!t)
+        return pc;
+    os_lock(&w32_wait_lock);
+    if (t->obs_cpu == cpu) {
+        park_locked(t);
+        if (t->obs_ra)
+            *t->obs_ra = pc;
+    }
+    os_unlock(&w32_wait_lock);
+    return pc;
+}
+
 extern "C" DWORD ResumeThread(HANDLE h)
 {
     int bad;
@@ -432,15 +518,13 @@ extern "C" DWORD ResumeThread(HANDLE h)
     int start = prev == 1 && !t->started;
     if (start)
         t->started = 1;
-    if (prev == 1)
-        os_cond_broadcast(&t->resumed);   /* a self-suspended thread goes on */
-    os_unlock(&w32_wait_lock);
-    if (start) {
-        if (os_thread_start(t->os))
-            return (DWORD)-1;
-    } else if (prev == 1) {
-        os_thread_resume(t->os);
+    if (prev == 1) {
+        susp_publish(t);
+        os_cond_broadcast(&t->resumed);   /* a parked or self-suspended thread goes on */
     }
+    os_unlock(&w32_wait_lock);
+    if (start && os_thread_start(t->os))
+        return (DWORD)-1;
     return (DWORD)prev;
 }
 FNVNX_EXPORT("kernel32.dll", "ResumeThread", ResumeThread, "func");
@@ -455,19 +539,14 @@ extern "C" DWORD SuspendThread(HANDLE h)
     int prev = t->suspend_count++;
     int running = t->started && !t->done;
     if (running && w32_self()->self_obj == &t->o) {
-        /* the calling thread: no kernel pauses itself (Horizon refuses), so it waits until ResumeThread from
-         * another thread brings the count back to 0, which is what the caller observes on Windows */
-        while (t->suspend_count > 0)
-            os_cond_wait(&t->resumed, &w32_wait_lock);
+        /* the calling thread (its own call is a point of S): it waits until ResumeThread from another thread brings
+         * the count back to 0, which is what the caller observes on Windows */
+        park_locked(t);
         os_unlock(&w32_wait_lock);
         return (DWORD)prev;
     }
+    susp_publish(t);   /* the target parks at its next point of S */
     os_unlock(&w32_wait_lock);
-    if (prev == 0 && running && os_thread_suspend(t->os)) {
-        static int warned;
-        if (!warned++)
-            W32Log().s("SuspendThread: this backend cannot pause a running thread").emit();
-    }
     return (DWORD)prev;
 }
 FNVNX_EXPORT("kernel32.dll", "SuspendThread", SuspendThread, "func");
@@ -601,9 +680,10 @@ extern "C" void Sleep(DWORD ms)
     ms = W32_DW(ms);
     if (ms == INFINITE)
         for (;;)
-            clk_rt_sleep_ns(3600ull * 1000000000ull);   /* never returns: no time passes for the thread */
+            clk_rt_sleep_ns(3600ull * 1000000000ull);   /* never returns: no exit of the wait, so no point of S after it */
     else
         clk_sleep_ns((uint64_t)ms * 1000000ull);   /* Sleep(0) yields; the virtual clock advances by ms (0: one quantum) */
+    w32_susp_point();   /* the exit of the wait core is a point of S (THREADS.md) */
 }
 FNVNX_EXPORT("kernel32.dll", "Sleep", Sleep, "func");
 
