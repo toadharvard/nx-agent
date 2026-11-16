@@ -21,6 +21,7 @@ Universe: every function of every object of every product root, every uncovered 
 red (one item `root`, uncertified). Certified: items with no finding. uncertified: every `unit path:symbol`, sorted. Per object results
 are cached by (object sha256, os_layer flag, analysis version, the terminators the object mentions) under GATE_CACHE/objstub/<key>.json;
 uncached objects run in --jobs processes (default os.cpu_count()). Exit 0 iff green; unreadable input is red with the reason in detail."""
+import hashlib
 import json
 import os
 import shutil
@@ -74,6 +75,8 @@ def root_check(root, repo, cache, jobs, built=None):
     if finds:
         return {}, {}, set(), finds, None, None, {}, {}
     drv = dict(zip(("c", "c++"), recipe.host_compilers(rec, cache)))
+    _cc = rec["compiler"]
+    ctree = next(x for x in rec["external"] if x["name"] == _cc["external"])["tree_sha256"] if "external" in _cc else hashlib.sha256(open(drv["c"], "rb").read()).hexdigest()   # the compiler tree's hash: the key of every host probe
     store, names, bad, rets = os.path.join(cache, "store"), set(), [], {}
     pin = recipe.load_pin(repo)   # a guest root's libc headers are the pinned compiler tree's (guest_compiler.json "external": the one tree holds the runtime); a host root's the distribution's
     rt_at = ((pin or {}).get("external") or {}).get("at")
@@ -100,7 +103,7 @@ def root_check(root, repo, cache, jobs, built=None):
     finds = []
     if res.get("elf"):   # the final image: every function body of it, judged for the fixed-failure class (objstub.image_check)
         try:
-            errno = objstub.errno_probe(drv["c"], recipe.unit_flags(rec, roots, root, drv["c"], "c"), cache)
+            errno = objstub.errno_probe(drv["c"], recipe.unit_flags(rec, roots, root, drv["c"], "c"), cache, ctree)
             n, ff = objstub.image_check(res["elf"]["path"], errno)
         except ValueError as e:
             n, ff = 0, [(rec["link"]["output"], "errno-probe", str(e)[:300])]

@@ -870,9 +870,11 @@ check("a root whose errno.h does not compile: red errno-probe (the probe does no
 # the accessor is derived, no root declares it: a host root and a target root get theirs from their own libc's errno.h, and the key is no recipe key any more
 ec = tempfile.mkdtemp(prefix="objstub-errno-")
 check("errno accessor derived for a host compiler (x86-64 glibc: the call of __errno_location), no declaration",
-      objstub.errno_probe("x86_64-linux-gnu-gcc-13", [], ec) == ("call", "__errno_location"), objstub.errno_probe("x86_64-linux-gnu-gcc-13", [], ec))
+      objstub.errno_probe("x86_64-linux-gnu-gcc-13", [], ec, "t0") == ("call", "__errno_location"), objstub.errno_probe("x86_64-linux-gnu-gcc-13", [], ec, "t0"))
 check("errno accessor derived for the AArch64 compiler (a call of the libc's accessor), no declaration",
-      objstub.errno_probe("aarch64-linux-gnu-gcc-13", ["-mabi=lp64"], ec) == ("call", "__errno_location"), objstub.errno_probe("aarch64-linux-gnu-gcc-13", ["-mabi=lp64"], ec))
+      objstub.errno_probe("aarch64-linux-gnu-gcc-13", ["-mabi=lp64"], ec, "t1") == ("call", "__errno_location"), objstub.errno_probe("aarch64-linux-gnu-gcc-13", ["-mabi=lp64"], ec, "t1"))
+from fnvnx.verify import unitstage as _us
+check("objstub's probe environment is the one PROBE_ENV of unitstage", objstub.PROBE_ENV == _us.PROBE_ENV, (objstub.PROBE_ENV, _us.PROBE_ENV))
 rk = TR.mut(); rk["errno_accessor"] = "__errno"
 check("a recipe that declares errno_accessor is rejected (the accessor is derived, the key does not exist)", any("errno_accessor" in e_ for e_ in TR.errs(rk)), TR.errs(rk))
 # a body with a data island in the final image is unjudged, and unjudged is red

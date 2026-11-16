@@ -206,18 +206,19 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 HERE, NOP = os.path.dirname(os.path.abspath(__file__)), 0xD503201F
 A64_BUILD = "g++ -std=c++17 -O1 $(llvm-config-18 --cxxflags) a64access.cc -o OUT $(llvm-config-18 --ldflags --libs aarch64 mc mcdisassembler support)"
 _TOOL = []
+PROBE_ENV = {"LC_ALL": "C", "LANGUAGE": "C", "PATH": "/usr/bin:/bin"}   # = unitstage.PROBE_ENV (this file imports nothing of fnvnx); tests/test_objstub pins the equality
 
 def tool(cache=None):
     """Path of the a64access binary: CACHE/objstub/a64access-<hash of the source, the build line and the LLVM and g++
     versions> (built once), else built once per process into a temporary directory (removed at exit)."""
     if not _TOOL:
         if cache:
-            q = lambda *a: subprocess.run(list(a), capture_output=True, text=True).stdout
+            q = lambda *a: subprocess.run(list(a), capture_output=True, text=True, env=dict(PROBE_ENV)).stdout
             h = hashlib.sha256((open(os.path.join(HERE, "a64access.cc")).read() + A64_BUILD + q("llvm-config-18", "--version") + q("g++", "--version")).encode()).hexdigest()
             p = os.path.join(cache, "objstub", "a64access-" + h)
             if not os.path.exists(p):
                 with tempfile.TemporaryDirectory() as td:
-                    r = subprocess.run(["bash", "-c", A64_BUILD.replace("OUT", td + "/a64access")], cwd=HERE, capture_output=True, text=True)
+                    r = subprocess.run(["bash", "-c", A64_BUILD.replace("OUT", td + "/a64access")], cwd=HERE, capture_output=True, text=True, env=dict(PROBE_ENV))
                     if r.returncode:
                         raise ValueError("a64access build failed: " + r.stderr[-300:])
                     _atomic(p, open(td + "/a64access", "rb").read())
@@ -226,7 +227,7 @@ def tool(cache=None):
         else:
             td = tempfile.mkdtemp(prefix="a64access")
             atexit.register(lambda: subprocess.run(["rm", "-rf", td]))
-            r = subprocess.run(["bash", "-c", A64_BUILD.replace("OUT", td + "/a64access")], cwd=HERE, capture_output=True, text=True)
+            r = subprocess.run(["bash", "-c", A64_BUILD.replace("OUT", td + "/a64access")], cwd=HERE, capture_output=True, text=True, env=dict(PROBE_ENV))
             if r.returncode:
                 raise ValueError("a64access build failed: " + r.stderr[-300:])
             _TOOL.append(td + "/a64access")
@@ -965,22 +966,22 @@ class Image:
 AARCH64_TLS = frozenset(range(512, 576)) | frozenset(range(80, 127))   # AAELF64: R_AARCH64_TLSGD/TLSLD/TLSIE/TLSLE/TLSDESC (512-575) and their P32 forms (80-126)
 
 
-def errno_probe(cc, flags, cache):
+def errno_probe(cc, flags, cache, tree):
     """How the root's libc reaches errno, DERIVED from the libc header of the declared target: the C compiler CC with the root's unit FLAGS preprocesses
     `#include <errno.h>` / `int f(void){return errno;}` and the expansion of `errno` is read from the text (no object is read, so the rule is the same for every
     target): `(*NAME ())` -> ("call", NAME), the function that returns the address of errno; a bare identifier NAME -> ("tls", NAME), a thread-local or
     plain object. Any other expansion raises ValueError: the way errno is reached is not known, nothing is guessed. Cached CACHE/objstub/e-<key>,
-    key = compiler, flags, source."""
+    key = the compiler's tree hash TREE (an external's tree_sha256, else the sha256 of the driver binary), flags, source; the probe runs under the fixed PROBE_ENV."""
     src = "#include <errno.h>\nint f(void){return errno;}\n"
-    key = hashlib.sha256(json.dumps([cc, subprocess.run([cc, "--version"], capture_output=True, text=True).stdout, list(flags), src, 2]).encode()).hexdigest()
+    key = hashlib.sha256(json.dumps([tree, list(flags), src, 3]).encode()).hexdigest()
     cp = os.path.join(cache, "objstub", "e-%s.txt" % key)
     if not os.path.exists(cp):
         with tempfile.TemporaryDirectory() as td:
             open(td + "/p.c", "w").write(src)
-            r = subprocess.run([cc, "-E", "-P"] + list(flags) + ["-x", "c", td + "/p.c"], capture_output=True, text=True)
+            r = subprocess.run([cc, "-E", "-P"] + list(flags) + ["-x", "c", td + "/p.c"], capture_output=True, text=True, env=dict(PROBE_ENV))
             if r.returncode:
                 raise ValueError("errno probe does not compile: %s" % r.stderr[-300:])
-            d = subprocess.run([cc, "-E", "-dM"] + list(flags) + ["-x", "c", td + "/p.c"], capture_output=True, text=True).stdout
+            d = subprocess.run([cc, "-E", "-dM"] + list(flags) + ["-x", "c", td + "/p.c"], capture_output=True, text=True, env=dict(PROBE_ENV)).stdout
         if not re.search(r"^#define errno\b", d, re.M):   # ISO C: errno is a macro of <errno.h>; an unexpanded identifier is no derivation
             raise ValueError("errno probe: <errno.h> of the root's flags defines no macro `errno`")
         body = re.findall(r"int\s+f\s*\(\s*void\s*\)\s*\{\s*return\s+(.*?);\s*\}", r.stdout, re.S)
