@@ -2491,3 +2491,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:26
 - w28 a3a850652: render/ etc. taken from L6 a3683a468; chkall 0 reds; rawrite covers the lifted-origin case; the include_of doc is fixed. foreach changes to build-time expansion (the table comes from a stage output or external, since it is exe-derived under Legal): row key = f(row, tool, inputs), DIR key = the sorted row keys, an empty table is red. Approved. The ASSUMPTIONS.json id-level diff against L6 is requested.
 - bottleneck: cand3b verdict at 597f2e007.
+
+## 2026-11-16 04:28
+- L6 found a recipe.py defect: resolve_input of a run stage costs 4,754 step evaluations instead of 18 (run_all of the whole owner, per-step artifact rebuild, recursion); on the farm sm_link never finishes. w28's top item: requested-step-only evaluation, a content-key memo, one artifact build per Job, plus a regression test counting through Job.stats (no stub). Head goes to w15 for cand3b, together with the test_guest and budget fixes.
+- bottleneck: the recipe walk fix, then the cand3b verdict.
