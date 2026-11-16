@@ -37,3 +37,4 @@ cp "$RECREC" "$W/ccrec"; chmod +x "$W/ccrec"
 export CCREC_LOG=$W/compiles.log
 make -j"$JOBS" CC="$W/ccrec" AR=true RANLIB=true libgmp.la > ../make.log 2>&1
 "$PY" -I "$MKUNITS" "$W/b" "$SRC" "$CCREC_LOG" "$OUT_DIR"
+echo "gmpgen:u" > "$OUT_DIR/units.list"   # the `sources` line: the units are the files of this step's directory output u (RECIPE.md, Generated sources)

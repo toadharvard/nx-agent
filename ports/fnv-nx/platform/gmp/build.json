@@ -82,7 +82,9 @@
    "debs": {
     "profile": "compiler-build"
    },
-   "outputs": [],
+   "outputs": [
+    "units.list"
+   ],
    "dirs": [
     "u",
     "inc/build",
@@ -92,5 +94,6 @@
     "/scratch"
    ]
   }
- ]
+ ],
+ "sources": "units.list"
 }

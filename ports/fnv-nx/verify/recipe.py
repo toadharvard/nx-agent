@@ -2694,7 +2694,20 @@ class Job:
             lines = source_lines(open(os.path.join(ws, "root", sr)).read())
         except (OSError, ValueError) as e:
             raise BuildRed({"stage": "sources:" + self.root, "exit": None, "stderr": ["%s: %s" % (sr, e)]})
+        steps = {g["name"]: g for g in (self.rec.get("run") if isinstance(self.rec.get("run"), list) else []) if isinstance(g, dict) and isinstance(g.get("name"), str)}
         for ext, p in lines:
+            if ext in steps and ext not in self.ext:   # `<run step>:<dir>`: the C/C++/asm files of one declared directory output of a run step of this root are its units
+                if p not in (steps[ext].get("dirs") or []):
+                    raise BuildRed({"stage": "sources:" + self.root, "exit": None, "stderr": ["%s: %s is not a declared dirs output of run step %s" % (sr, p, ext)]})
+                found = sorted(os.path.relpath(os.path.join(d, f), os.path.join(ws, "root")) for d, _ds, fs in os.walk(os.path.join(ws, "root", p)) for f in fs)
+                found = [u for u in found if is_unit(u)]
+                if not found:
+                    raise BuildRed({"stage": "sources:" + self.root, "exit": None, "stderr": ["%s: the directory %s of run step %s holds no unit" % (sr, p, ext)]})
+                clash = [u for u in found if u in mine]
+                if clash:
+                    raise BuildRed({"stage": "sources:" + self.root, "exit": None, "stderr": ["%s: %s is a tracked unit of the root and also a file of the step's directory" % (sr, clash[0])]})
+                out += found
+                continue
             if ext == ".":
                 if p not in mine:
                     raise BuildRed({"stage": "sources:" + self.root, "exit": None, "stderr": ["%s: %s is no tracked file of the root" % (sr, p)]})
