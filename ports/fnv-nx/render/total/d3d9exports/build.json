@@ -1,0 +1,42 @@
+{
+ "format": "fnvnx-recipe/1",
+ "run": [
+  {
+   "name": "gate",
+   "exec": "/usr/bin/python3",
+   "args": [
+    "-I",
+    "-B",
+    "/in/1",
+    "--spec",
+    "/in/2",
+    "--exports",
+    "/in/3",
+    "--out",
+    "/out/d3d9exports.json"
+   ],
+   "inputs": [
+    "ports/fnv-nx/render/total/d3d9exports/stage.py",
+    {
+     "stage": "ports/fnv-nx/bridgefacts:gen:1",
+     "path": "d3d9_spec.json"
+    },
+    {
+     "stage": "ports/fnv-nx/contract/exports:gen:0",
+     "path": "exports.tsv"
+    }
+   ],
+   "debs": {
+    "closure": [
+     "python3"
+    ]
+   },
+   "outputs": [
+    "d3d9exports.json"
+   ]
+  }
+ ],
+ "outputs": {
+  "D3D9EXPORTS": "d3d9exports.json"
+ }
+}

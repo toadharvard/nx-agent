@@ -288,6 +288,18 @@
    "recipe": "ports/fnv-nx/render/shaders/sm_link/build.json"
   },
   {
+   "path": "ports/fnv-nx/render/total/d3d9exports",
+   "class": "tool",
+   "target": "host",
+   "entry": [],
+   "recipe": "ports/fnv-nx/render/total/d3d9exports/build.json",
+   "imports": [
+    "ports/fnv-nx/render/d3d9",
+    "ports/fnv-nx/bridgefacts",
+    "ports/fnv-nx/contract/exports"
+   ]
+  },
+  {
    "path": "ports/fnv-nx/render/total/d3d9total",
    "class": "tool",
    "target": "host",
