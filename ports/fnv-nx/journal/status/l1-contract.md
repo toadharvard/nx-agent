@@ -2552,3 +2552,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:51
 - L6: ASM-617/619/621 are cited since w6-root 680ff849a; base3's render/ is stale. L6 head d98bb7faa has 0 ASM-6xx findings; base3 takes render/ and bridgefacts/ from it (L6 told L3a).
 - bottleneck: the cand3b head with the content-keyed memo, then the verdict.
+
+## 2026-11-16 04:52
+- cand3b 099681332 (w15): w28's tree-content memo 65bfa6f16 taken (no stat/mtime in keys), plus the pool helper, the cause-first reasons, the budget from --started. test_gates 0 failed. The farm runs the verdict at it, cold then warm. The c3bwalk branch is dropped.
+- bottleneck: cand3b verdict at 099681332.
