@@ -37,6 +37,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import artifacts  # noqa: E402
 import cas  # noqa: E402
 import elffacts  # noqa: E402
 import gate_admit  # noqa: E402
@@ -60,14 +61,8 @@ ADMIT = TREE + "/verify/admit.json"
 ENV_JSON = TREE + "/verify/env.json"   # the declared environment of the checkout (l1.py checks the same file)
 
 
-def _pinned_artifacts():
-    """The artifacts repository of env.json (debs.mirror.repo): the one pinned default of every external fetch."""
-    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "env.json")) as f:
-        return "https://github.com/%s" % json.load(f)["debs"]["mirror"]["repo"]
-
-
-ARTIFACTS = _pinned_artifacts()   # a test fixture may assign a toy repository (the same seam as deb_pins); no other code does
-ARTIFACTS_FILE = "artifacts.url"
+ARTIFACTS = artifacts.pinned()   # the pinned repository of env.json (artifacts.py, the one source); a test fixture may assign a toy repository (the same seam as deb_pins); no other code does
+ARTIFACTS_FILE = artifacts.FILE
 
 
 def ext_dir(cache):
@@ -85,17 +80,11 @@ def artifacts_url(extcache):
     """Where the externals of EXTCACHE come from: the record `EXTCACHE/artifacts.url` that the caller of a run wrote (set_artifacts: l1.py --artifacts,
     recipe.py --artifacts), else the pinned repository of env.json. Never the process environment: a URL is an argument of the run, kept beside the
     cache it fills, so a gate subprocess and a test read the same one."""
-    p = os.path.join(extcache, ARTIFACTS_FILE)
-    if os.path.isfile(p):
-        with open(p) as f:
-            return f.read().strip()
-    return ARTIFACTS
+    return artifacts.recorded(extcache) or ARTIFACTS
 
 
 def set_artifacts(extcache, url):
-    os.makedirs(extcache, exist_ok=True)
-    with open(os.path.join(extcache, ARTIFACTS_FILE), "w") as f:
-        f.write(url + "\n")
+    artifacts.record(extcache, url)
 
 
 def _plugin_cxx():
