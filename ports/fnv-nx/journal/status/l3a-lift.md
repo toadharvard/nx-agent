@@ -1619,3 +1619,12 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - w7 (doing): ranges/entries become that closure, and the decomp root input is deleted. Then recompute and report to L3b.
 - w8: L6 render head d98bb7faa into base3 (it clears ASM-617/619/621).
 - bottleneck: the L2 recipe-path pin; the w7 universe recompute; the farm-2 runs.
+
+## 2026-11-16 05:45 — universe rule refined: roots by value occurrence; one engine
+- Ruled to w7:
+  - A relocation target is a root only through a value occurrence: an imm operand, a lea displacement or a relocated data word. A target addressed only as a memory-operand displacement is not a root, and that is refinement X, which is sound and kept.
+  - R and DD are kept only if they are the same kind of fact; otherwise they are deleted.
+  - entries_on_data > 0 by rule goes to L1 with the sites.
+  - The exe moves to the property-rooted modlift engine. The exe decomp engine, funcsfacts.py and the funcs.tsv stage are deleted, together with every consumer of the decomp ranges, in one commit.
+- w7 (doing): the 5 small images, then the exe (farm 2 if it takes more than 10 min).
+- bottleneck: the L2 recipe-path pin; the w7 universe engine; w8 assumptions gate to 0.
