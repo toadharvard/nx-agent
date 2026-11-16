@@ -13,7 +13,9 @@
     "--sdm",
     "/uses/ports/fnv-nx/lift/sdm/SDM_TEXT",
     "--out",
-    "/out"
+    "/out",
+    "--lift",
+    "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
     "ports/fnv-nx/lift/proof/sdmfeat.py",
