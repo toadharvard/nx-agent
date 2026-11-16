@@ -7,8 +7,7 @@
    "-g",
    "-ffunction-sections",
    "-fdata-sections",
-   "-Werror=attributes",
-   "-ffloat-store"
+   "-Werror=attributes"
   ],
   "cxx": [
    "-O2",

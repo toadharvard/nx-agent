@@ -35,5 +35,5 @@ export CC="$GCC/bin/$T-gcc ${SEMANTICS[*]}" LDFLAGS=-nostartfiles
 cp "$RECREC" "$W/ccrec"; chmod +x "$W/ccrec"
 export CCREC_LOG=$W/compiles.log
 make -j"$JOBS" -C src CC="$W/ccrec" AR=true RANLIB=true libmpfr.la > ../make.log 2>&1
-"$PY" -I "$MKUNITS" "$W/b" "$SRC" "$CCREC_LOG" "$OUT_DIR" "$GMPDIR/INC_BUILD" -ffloat-store
+"$PY" -I "$MKUNITS" "$W/b" "$SRC" "$CCREC_LOG" "$OUT_DIR" "$GMPDIR/INC_BUILD"
 echo "mpfrgen:u" > "$OUT_DIR/units.list"   # the `sources` line: the units are the files of this step's directory output u (RECIPE.md, Generated sources)
