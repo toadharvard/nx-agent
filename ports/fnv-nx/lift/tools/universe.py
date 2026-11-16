@@ -394,6 +394,14 @@ def uni(I):
         if o and a <= o[-1][1]: o[-1][1] = max(o[-1][1], e)
         else: o.append([a, e])
     return o
+# ---- no entry on proven data: the SAME predicate as the invariant (residue.entries_on_data reads codemap.tsv's class `data-reloc` = classify() class 3: bytes that a relocation names as data and
+# that no decoded instruction covers). tbl/cov/dmap do not change from here (R3 and closure bodies are not committed), so one classify() answers for every entry made below. An R3 or closure entry
+# on such a byte is not an entry: its pointer is a data address, the proof is the class and the relocation that names the byte, recorded in dropped_on_data.tsv.
+C3 = classify(); DROP = {}
+def on_data(a): return T0 <= a < T1 and C3[a - T0] == 3
+for a in sorted(r3set):
+    if on_data(a) and not (kinds[a] - {'ptr', 'inner'}):
+        DROP[a] = 'data-reloc:%08x' % tref[a - T0]; del entries[a]; kinds.pop(a, None); esite.pop(a, None); parent.pop(a, None); scx.pop(a, None); udset.discard(a); r3set.discard(a)
 # ---- closure under direct targets (rule C): the entry set is the least fixed point of R3 and of "every direct call target, and every direct jmp/jcc/loop target that leaves
 # the lifter's range [lo,hi), of the body of every entry is an entry". The body and the range are the lifter's own (fnvlift.core.explore from the entry over the range
 # entry_args gives: [parent, parent+size) for an entry with parent=, else [entry, entry+extent)); a call target is an entry even inside the range (the lifter emits
@@ -443,6 +451,7 @@ while True:
     if not miss: break
     cl_rounds += 1
     for t in sorted(miss):
+        if on_data(t): DROP[t] = 'data-reloc:%08x' % tref[t - T0]; continue
         kds, a = miss[t]; f = indec(t); entries[t] = None; kinds[t] = set(kds); esite[t] = a; r3set.add(t); cl_add['+'.join(sorted(kds)), 'inner' if f else 'free'] += 1
         if f: parent[t] = f[0]; kinds[t].add('inner')
         if cov[t - T0] == 1: continue
@@ -487,6 +496,7 @@ open(OUT, 'w').write(HD + '; columns: entry, kind, extent, flags; extent is the 
 open(OUTD + '/ranges.tsv', 'w').write(HD + '; columns: entry, half-open ranges start-end (hex) of the instruction bytes reached\n' + '\n'.join(rgs) + '\n')
 rc = residue.write_retn(OUTD, HD, residue.retn_rows(RI)); print('retn.tsv %d rows: %s' % (len(RI), dict(sorted(rc.items()))))
 print('invariant ranges: instructions the lifter reaches outside the entry ranges, other than the dead tail after a call to a never-returning entry: %d (entries %d of %d); dead tails after NORETURN calls: %d instructions in %d entries' % (sum(LOX.values()), sum(1 for v in LOX.values() if v), len(LOX), sum(LOT.values()), sum(1 for v in LOT.values() if v)))
+open(OUTD + '/dropped_on_data.tsv', 'w').write(HD + '; columns: address, proof id; pointer-valued sites whose target is a byte of class data-reloc (classify() class 3, the codemap invariant), so not an entry\n' + ''.join('%08x\t%s\n' % kv for kv in sorted(DROP.items())))
 open(OUTD + '/noreturn.tsv', 'w').write(HD + '; columns: entry, reason\n' + ''.join('%08x\t%s\n' % kv for kv in NRR))
 print('R3 pointer entries: %d new (%d insn-start of decoded code, %d bodies re-read from their first byte, %d of them hit undecodable bytes #UD, %d inside decomp functions); direct targets of those bodies: %s' % (
     len(r3set), len(r3set) - len(scx), len(scx), len(udset), sum(1 for a in r3set if a in parent), dict(sorted(r3call.items()))))
