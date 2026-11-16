@@ -2949,6 +2949,7 @@ class Job:
             try:
                 p.externals(pws)
                 p.generate(pws)
+                p.run_all(pws)    # the `run` steps too: a producer whose output is a run step's (lift/sdm: pdftotext) is built by the same machinery
                 if p.red:   # the output this root uses is not produced
                     raise BuildRed({"stage": "uses:" + u["root"], "exit": None, "stderr": ["producer %s is red: %s" % (u["root"], p.red[0]["stage"])] + list(p.red[0]["stderr"])[-18:]})
                 path = os.path.join(pws, "root", p.rec["outputs"][u["output"]])
