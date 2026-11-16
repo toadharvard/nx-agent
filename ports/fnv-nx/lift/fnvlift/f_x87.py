@@ -52,11 +52,11 @@ def pop(cx, n=1):
     return '' if cx.xm == 's' else ' dyn_pop();' * n
 
 
-def arith(cx, dst, x, y, o):
-    """st(dst) = x o y; x and y are C double expressions ('r' suffix: operands swapped)"""
+def arith(cx, dst, x, y, o, fx, fy):
+    """st(dst) = x o y; x and y are C double expressions ('r' suffix: operands swapped), fx and fy the source operands as carriers (fv): DE is read from them at their own type (rt/fnvl_x87.h fx_de through FXD)"""
     if o.endswith('r'):
-        x, y, o = y, x, o[0]
-    cx.em('{ double x_=(%s), y_=(%s); %s=fv_f64(FXN(x_%sy_,x_,y_)); }' % (x, y, wr(cx, dst), o))
+        x, y, o, fx, fy = y, x, o[0], fy, fx
+    cx.em('{ fv da_=(%s), db_=(%s); double x_=(%s), y_=(%s), r_=FXN(x_%sy_,x_,y_); %s=fv_f64(r_); FXD(da_,db_,r_); }' % (fx, fy, x, y, o, wr(cx, dst)))
 
 
 def control(b0, mr):
@@ -115,9 +115,9 @@ def x87_reg(cx, ins, b0, mr, g):
     em, i = cx.em, mr & 7
     R = lambda k: rd(cx, k)
     if b0 == 0xd8 and g in AR:
-        arith(cx, 0, 'fv_d(%s)' % R(0), 'fv_d(%s)' % R(i), AR[g])
+        arith(cx, 0, 'fv_d(%s)' % R(0), 'fv_d(%s)' % R(i), AR[g], R(0), R(i))
     elif b0 in (0xdc, 0xde) and g in ARD:
-        arith(cx, i, 'fv_d(%s)' % R(i), 'fv_d(%s)' % R(0), ARD[g])
+        arith(cx, i, 'fv_d(%s)' % R(i), 'fv_d(%s)' % R(0), ARD[g], R(i), R(0))
         em(pop(cx) if b0 == 0xde else '')
     elif b0 == 0xd8 and g in (2, 3) or b0 == 0xdd and g in (4, 5):                 # fcom fcomp / fucom fucomp st(i)
         em('FCMP(%s,%s,%du);%s' % (R(0), R(i), b0 == 0xdd, pop(cx) if g in (3, 5) else ''))
@@ -145,7 +145,7 @@ def x87_reg(cx, ins, b0, mr, g):
     elif b0 == 0xd9 and mr in CONST:
         em(push(cx, 'fvmk(FK_F64,%s,0)' % CONST[mr]))
     elif b0 == 0xd9 and mr == 0xfa:                                                # fsqrt
-        em('{ double x_=fv_d(%s); %s=fv_f64(FXN(__builtin_sqrt(x_),x_,x_)); }' % (R(0), wr(cx, 0)))
+        em('{ fv da_=(%s); double x_=fv_d(da_), r_=FXN(__builtin_sqrt(x_),x_,x_); %s=fv_f64(r_); FXD(da_,da_,r_); }' % (R(0), wr(cx, 0)))
     elif b0 == 0xd9 and mr == 0xfc:                                                # frndint
         em('%s=fv_rnd(%s);' % (wr(cx, 0), R(0)))
     elif b0 == 0xd9 and mr in FM:
@@ -169,7 +169,7 @@ def fmath(cx, mr):
     elif nm in ('fprem', 'fprem1'):
         em('FM_PREM(%s,%s,%s,%d);' % (W(0), R(0), R(1), nm == 'fprem1'))
     elif nm == 'fxtract':                                                          # ST0 = exponent, push the significand
-        em('{ u32 f_=0; double e_, s_; fnvl_m_xtract(fv_d(%s),&e_,&s_,&f_); %s=fv_f64(e_); %s FM_FL(f_); }' % (R(0), W(0), push(cx, 'fv_f64(s_)')))
+        em('{ u32 f_=0; double e_, s_; fv sv_=(%s); fnvl_m_xtract(fv_d(sv_),&e_,&s_,&f_); %s=fv_f64(e_); %s FM_FL(f_|fx_de(sv_,sv_,f_&1u)); }' % (R(0), W(0), push(cx, 'fv_f64(s_)')))
     else:                                                                          # fptan fsincos: push only when C2 = 0: data dependent depth
         if cx.xm == 's':
             raise X87Dyn()
@@ -186,7 +186,7 @@ def x87_mem(cx, ins, b0, mr, g):
                0xda: ('(double)(s32)M32(a_)', 'fv_ldi(FK_I32,(s32)M32(a_))'), 0xde: ('(double)(s16)M16(a_)', 'fv_ldi(FK_I16,(s16)M16(a_))')}[b0]
         if g in AR:
             em(a + '')
-            arith(cx, 0, 'fv_d(%s)' % r0(), src[0], AR[g])
+            arith(cx, 0, 'fv_d(%s)' % r0(), src[0], AR[g], r0(), src[1])
             em('}')
         elif g in (2, 3):
             em(a + 'FCMP(%s,%s,0u); }%s' % (r0(), src[1], pop(cx) if g == 3 else ''))
