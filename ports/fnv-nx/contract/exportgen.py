@@ -5,7 +5,7 @@
                                                                               section its recipe names: contract/exports/build.json, `objects_of` guest + section: the objects of
                                                                               every guest product root outside the consumers of the table, the link set)
 
-Every object may carry the section `.fnvnx.export` (contract/include/fnvnx_export.h): one record per FNVNX_EXPORT: the strings module, import name, kind (func|entry|data), each NUL-terminated, then a
+Every object may carry the section `.fnvnx.export` (contract/exporthdr/include/fnvnx_export.h): one record per FNVNX_EXPORT: the strings module, import name, kind (func|entry|data), each NUL-terminated, then a
 pointer-sized field that carries a RELOCATION against the definer's symbol (`&symbol` in the C/C++ source, so the compiler resolves the identity: an undeclared name is a compile error, and
 the symbol is named by the object's own symbol table, never read from text); records are separated by zero padding.  The tool
 writes the union, sorted, as six columns: the four fields, `ret` (the return class of a function export) and `args` (the argument classes, `-` for none), both read from the definer's own

@@ -1,7 +1,7 @@
 #ifndef FNVNX_IMPORT_KEY_H
 #define FNVNX_IMPORT_KEY_H
 /* The one declaration of the import-key API: the table is the generated root (contract/iat.py, built by recipe.py); a root that
- * uses it lists contract/include and the table root.
+ * uses it lists contract/exporthdr/include and the table root.
  * The one import-key table (contract/iat.py, PLAN_FIRST_ELF A9).
  * Generated from the platform's bridge.tsv into import_keys.c; the loader (import slots), the lifter's import stubs
  * (dispatcher entries) and the platform's GetProcAddress all resolve (dll, name | ordinal) through the functions

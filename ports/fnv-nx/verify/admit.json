@@ -204,6 +204,10 @@
    "class": "test",
    "target": "host",
    "recipe": "ports/fnv-nx/tests/bootrt/build.json"
+  },
+  {
+   "path": "ports/fnv-nx/contract/exporthdr/include",
+   "class": "header"
   }
  ]
 }
