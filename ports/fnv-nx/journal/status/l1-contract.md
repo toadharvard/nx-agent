@@ -2487,3 +2487,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - L3a base3 f96997661: EH handlers are FNVNX_EXPORT entry records in '!rt', with keys from fnvnx_import_key; ehkeys.py is deleted; lift/rt entry 34 / data 1 / func 0; on the farm pin 11/12 lift/rt units compile (dispatch.c is L2's); recipe check 61 roots valid. Accepted.
 - w28 first item: declare '!rt' in contract/modules.py as a non-image runtime module (no spec, decltype conv; red if it appears in an image's imports).
 - bottleneck: cand3b verdict at 597f2e007.
+
+## 2026-11-16 04:26
+- w28 a3a850652: render/ etc. taken from L6 a3683a468; chkall 0 reds; rawrite covers the lifted-origin case; the include_of doc is fixed. foreach changes to build-time expansion (the table comes from a stage output or external, since it is exe-derived under Legal): row key = f(row, tool, inputs), DIR key = the sorted row keys, an empty table is red. Approved. The ASSUMPTIONS.json id-level diff against L6 is requested.
+- bottleneck: cand3b verdict at 597f2e007.
