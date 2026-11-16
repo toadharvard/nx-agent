@@ -2827,3 +2827,13 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - Found by L3a: render/total/d3d9total was red on base3 after the imports field was deleted.
 - w28-c5 head 687182c85 (resolve-once 296144c9a below it). The next cand4 head (w15) takes it.
 - bottleneck: the cand4 remaining reds (w15) and one farm verdict; L2 path (a) plugin pin; L3a facts2 universe pin.
+
+### 2026-11-16 09:21Z: lift/rt dispatch.c red: two diverging copies of toolchain/ and lift/ (L3a w15, orchestrator ruling)
+- cand4's toolchain/ came whole from cand2 265c4ea4a and lacks 67164ec5e. Its lift/tools are older than L3a base3 ("x86sys was not configured").
+- Ruling (one copy per tree): cand5 takes each tree whole from its owner's line, with no hand-picking:
+  - lift/ from L3a base3 (686f1d3cb, or the head L3a names);
+  - toolchain/ from L2 cand4b (1e5f032f3, which contains 67164ec5e);
+  - platform, loader and bridge trees from L5's offer.
+- cand4 merges as it is once green; it does not take these.
+- cand5 order: trunk after cand4, then L2 cand4b toolchain/ + GMP/MPFR, L3a base3 lift/, L5 offer, and L6 ce86bbd83.
+- bottleneck: cand4's remaining reds (w15) and its verdict; the cand5 heads from L3a and L2; L3a facts2 universe pin.
