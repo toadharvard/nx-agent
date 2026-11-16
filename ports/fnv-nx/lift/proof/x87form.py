@@ -376,12 +376,22 @@ def domain_terms(o, sub):
     return d
 
 
+def carrier_de_refusal(o):
+    """the reason an Out has no Form (ruling 3b), or None: its DE is evaluated on a register image, whose carrier kind the spec state does not hold (x87spec CARRIER_DE)"""
+    if getattr(o, "carrier_de", False):
+        return "x87 DE of a register operand is defined at its carrier type (OWNER 8): the carrier kind is not in the spec state (x87spec CARRIER_DE)"
+    return None
+
+
 def effects(c, key, i):
     """fill c.F from the spec entry (class KEY, register index I).  Raises Unsupported naming the first thing outside the Form"""
     from proof import forms
     F = c.F
     c.x87_mem = (None, None)
     d, o, pcs, ef, m = run(key, i)
+    why = carrier_de_refusal(o)
+    if why:
+        raise Unsupported(why)
     env = {n: V(n, w) for n, w in X.DSL_WIDTH.items()}
     a = None
     if pcs is not None:

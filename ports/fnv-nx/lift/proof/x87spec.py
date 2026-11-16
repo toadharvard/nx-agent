@@ -505,6 +505,9 @@ def round_exact(pc, rm, exact):
 
 
 # --- finishing an instruction: unmasked exceptions, ES/B ---------------------------------------
+# CARRIER_DE (ruling 3b, OWNER 8): the values of the x87 stack are IEEE values at the CARRIER type, so DE of a register operand means "denormal at its carrier type" (binary64 for a binary64 carrier).  The spec
+# state holds only the 80-bit image, in which a binary64 denormal is a normal number, so an instruction whose DE is evaluated on a register image (`Out.carrier_de`) has no Form until the carrier
+# kind is part of the state.  x87form.effects refuses it with that reason.
 class Out:
     """Result of one instruction.  undef: 16-bit mask of FSW bits the SDM lists as 'Undefined' (the model
     leaves them unchanged; a comparison ignores them).  mem_undef: mask of memory-image bits the SDM leaves
@@ -1076,6 +1079,7 @@ def _compare(s, b, src_empty, ordered, pops, de_extra=FALSE, ie_extra=FALSE, efl
         s2 = do_pop(s2)
     flags = If(uf, fl(IE), fv(ie=ie, de=de))
     o = finish(s, s2, flags)
+    o.carrier_de = True      # DE is evaluated on the register image (is_den80): see CARRIER_DE
     if eflags:
         abort = (flags & ~Extract(5, 0, s.fcw) & fl(IE, DE)) != K(0, 6)
         o.eflags = (c3, c2, c0, Not(abort), uf)
@@ -1325,6 +1329,7 @@ def frndint(s):
     s_ok = _c1(write_img(s, 0, r), up)
     o = finish(s, St.ite(uf, _uf_state(s, 0, False), s_ok),
                If(uf, fl(IE), fv(ie=ie, de=And(Not(ie), is_den80(m)), pe=pe)))
+    o.carrier_de = True      # DE is evaluated on the register image (is_den80): see CARRIER_DE
     o.undef = UNDEF_C023
     return o
 

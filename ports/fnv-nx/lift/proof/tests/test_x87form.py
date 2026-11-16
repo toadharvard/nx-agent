@@ -105,28 +105,55 @@ class T(unittest.TestCase):
 
 
     COMPARES = ((b"\xd8\xd1", "fcom st(1)"), (b"\xd8\xd9", "fcomp st(1)"), (b"\xd9\xe4", "ftst"), (b"\xda\xe9", "fucompp"), (b"\xdd\xe1", "fucom st(1)"),
-                (b"\xdd\xe9", "fucomp st(1)"), (b"\xde\xd9", "fcompp"), (b"\xdb\xe9", "fucomi"), (b"\xdb\xf1", "fcomi"), (b"\xdf\xe9", "fucomip"), (b"\xdf\xf1", "fcomip"))
+                (b"\xdd\xe9", "fucomp st(1)"), (b"\xde\xd9", "fcompp"), (b"\xdb\xe9", "fucomi"), (b"\xdb\xf1", "fcomi"), (b"\xdf\xe9", "fucomip"), (b"\xdf\xf1", "fcomip"),
+                (b"\xdc\x10", "fcom m64"), (b"\xda\x10", "ficom m32"), (b"\xde\x10", "ficom m16"))
 
-    def test_compare_classes_prove(self):
+    def test_compares_are_uncertified_until_the_carrier_kind(self):
+        """ruling 3b: DE of a register operand is at its carrier type; the spec state has no carrier kind, so every compare (DE on ST(0)'s image) is refused with that reason"""
         for raw, name in self.COMPARES:
-            r = prove.prove_one(None, build(raw), None, None, None)
+            self.assertIn("carrier type", self.reason(raw), name)
+
+    def with_carrier_de_open(self, f):
+        """the rest of a compare's proof, with only the carrier-DE refusal lifted (what the carrier-kind state will lift by rule)"""
+        old = XF.carrier_de_refusal
+        XF.carrier_de_refusal = lambda o: None
+        try: return f()
+        finally: XF.carrier_de_refusal = old
+
+    def test_compare_classes_prove_but_for_the_carrier_de(self):
+        for raw, name in self.COMPARES:
+            r = self.with_carrier_de_open(lambda: prove.prove_one(None, build(raw), None, None, None))
             self.assertEqual(r[0], "proved", (name, r))
 
-    def test_compare_emits_the_carrier_op(self):
-        txt = "\n".join(build(b"\xdb\xe9").to_c_inline(lambda n: "v_" + n, lambda c, n, r: "", lambda v: "", (), "M")[0])
+    def test_compare_emits_the_carrier_op_and_no_handler(self):
+        """the emitted C of a compare Form is the DSL text (the SDM IE / DE / C1 terms and the carrier op): no FCMP, FCMPI, fv_cmp or FXF of the handler routing is called"""
+        txt = "\n".join(self.with_carrier_de_open(lambda: build(b"\xdb\xe9")).to_c_inline(lambda n: "v_" + n, lambda c, n, r: "", lambda v: "", (), "M")[0])
         self.assertIn("fx_dsl_x_cmp(", txt)
+        for h in ("FCMP", "fv_cmp", "FXF"): self.assertNotIn(h, txt)
 
     def test_eflags_translation_defect_is_caught(self):
         # a defect of the flag order: the Form writes PF where the spec says CF
-        F = build(b"\xdb\xe9")
+        F = self.with_carrier_de_open(lambda: build(b"\xdb\xe9"))
         flag = type(F).flag
         swap = {"pf": "cf", "cf": "pf"}
         type(F).flag = lambda self, f, t: flag(self, swap.get(f, f), t)
         try:
-            F = build(b"\xdb\xe9")
+            F = self.with_carrier_de_open(lambda: build(b"\xdb\xe9"))
             r = prove.prove_one(None, F, None, None, None)
         finally:
             type(F).flag = flag
+        self.assertNotEqual(r[0], "proved")
+
+    def test_dropped_ie_is_caught(self):
+        """a compare Form whose FSW lacks IE (bit 0) does not prove: the proof compares the whole FSW with the spec's"""
+        F = self.with_carrier_de_open(lambda: build(b"\xd8\xd1"))
+        fsw = type(F).fsw
+        type(F).fsw = lambda self, n: fsw(self, dsl.bin_("and", n, dsl.C(0xfffe, 16)))
+        try:
+            F2 = self.with_carrier_de_open(lambda: build(b"\xd8\xd1"))
+            r = prove.prove_one(None, F2, None, None, None)
+        finally:
+            type(F).fsw = fsw
         self.assertNotEqual(r[0], "proved")
 
 
