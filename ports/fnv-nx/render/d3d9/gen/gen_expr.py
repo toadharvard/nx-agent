@@ -11,7 +11,7 @@ def use_spec(d):
 
 
 def _x():
-    if X is None: use_spec(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "bridgefacts", "d3d9"))   # the offline tools: the tracked directory
+    if X is None: raise GenError("gen_expr: use_spec(dir) was not called: the spec directory is an argument of the caller")
     return X
 
 

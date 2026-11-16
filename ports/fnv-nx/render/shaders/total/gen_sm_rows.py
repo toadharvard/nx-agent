@@ -9,7 +9,6 @@ Comparison controls are D3DSHADER_COMPARISON (d3d9types.h): GT 1, EQ 2, GE 3, LT
 Tokens >= 0xFFF0 (the D3D9 non-instruction tokens COMMENT 0xFFFE, PHASE 0xFFFD, END 0xFFFF) are token rows; the translator consumes PHASE only,
 any other token row is an error here."""
 import json, os, sys
-HERE = os.path.dirname(os.path.abspath(__file__))
 ALIAS = {"TEXCOORD": "TEXCRD", "TEX": "TEXLD"}
 CMP = {"gt": 1, "eq": 2, "ge": 3, "lt": 4, "ne": 5, "le": 6}
 STAGE = {"ps": "MOJOSHADER_TYPE_PIXEL", "vs": "MOJOSHADER_TYPE_VERTEX"}
