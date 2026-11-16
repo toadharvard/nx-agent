@@ -38,6 +38,15 @@ export CCREC_LOG=$W/compiles.log
 # the generated headers and tables (fib_table.h, mp_bases.h, ...) are the Makefile's own BUILT_SOURCES, made by its gen-* programs with the build compiler: all of them first, by the Makefile's own variable
 printf 'print-built-sources:\n\t@echo $(BUILT_SOURCES)\n' > "$W/bs.mk"
 make -j"$JOBS" $(make -s -f Makefile -f "$W/bs.mk" print-built-sources) > ../bs.log 2>&1
-make -j"$JOBS" CC="$W/ccrec" AR=true RANLIB=true libgmp.la > ../make.log 2>&1
+# GMP's own build order: the subdirectories' convenience libraries first (their Makefiles give each compile its own defines, mpn's -DOPERATION_<name>), then libgmp.la from them.
+# The libraries are the Makefiles' own noinst_LTLIBRARIES of the SUBDIRS, read by the same variable trick.
+printf 'print-subdirs:\n\t@echo $(SUBDIRS)\n' > "$W/sd.mk"
+printf 'print-libs:\n\t@echo $(noinst_LTLIBRARIES)\n' > "$W/lb.mk"
+: > ../make.log
+for d in $(make -s -f Makefile -f "$W/sd.mk" print-subdirs); do
+  libs=$(make -s -C "$d" -f Makefile -f "$W/lb.mk" print-libs)
+  [ -n "$libs" ] && make -j"$JOBS" -C "$d" CC="$W/ccrec" AR=true RANLIB=true $libs >> ../make.log 2>&1
+done
+make -j"$JOBS" CC="$W/ccrec" AR=true RANLIB=true libgmp.la >> ../make.log 2>&1
 "$PY" -I "$MKUNITS" "$W/b" "$SRC" "$CCREC_LOG" "$OUT_DIR"
 echo "gmpgen:u" > "$OUT_DIR/units.list"   # the `sources` line: the units are the files of this step's directory output u (RECIPE.md, Generated sources)
