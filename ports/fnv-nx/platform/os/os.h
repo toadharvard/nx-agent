@@ -108,6 +108,7 @@ void os_text_script_reset(void);
 int os_display_docked(void);
 int os_thread_start(os_thread *t);
 int os_thread_join(os_thread *t);           /* waits for exit; does not free */
+os_thread *os_thread_current(void);       /* the calling thread's record, if it is registered (os_world.c: every thread of the process is) */
 void os_thread_free(os_thread *t);          /* after join, or to detach a running thread */
 int os_thread_set_priority(os_thread *t, int prio);   /* t == NULL: calling thread */
 int os_thread_set_cpu(os_thread *t, int cpu);         /* t == NULL: calling thread; best effort; that core only */

@@ -18,7 +18,7 @@ The platform never stops a thread by the kernel for a user suspension. `os_threa
 
 ## ABI
 
-- `uint32_t susp` is a field of the lift/rt `struct cpu` (append-only, offset 504; sizeof(struct cpu) is 512 by alignment). Only the platform writes it, with a release
+- `uint32_t susp` is a field of the lift/rt `struct cpu` (append-only, offset 504; sizeof(struct cpu) is 512 by alignment). Only the platform writes it (lifted code reads it with a relaxed atomic load), with a release
   store while holding `w32_wait_lock` (the suspend lock of every thread object). Nonzero means the suspend count is above 0.
 - `fnvnx_susp_attach(c, &c->susp, &c->ra)` / `fnvnx_susp_detach(c)` are called by `fnvl_thread_main` (lift/rt/enter.cc) on
   the thread itself, around the life of its `struct cpu`. After detach, no other thread writes the word, so `c` may go away.
@@ -27,8 +27,11 @@ The platform never stops a thread by the kernel for a user suspension. `os_threa
 
 ## Delivery argument
 
-1. Every thread of the game has a thread object, except the process's first thread, which is never suspended (`SuspendThread`
-   returns previous count 0 on it, as before).
+1. Every guest thread has a thread object and attaches, the first thread included: `fnvnx_susp_attach` (called by `fnvl_thread_main`
+   and `fnvl_attach_main`) makes the first thread's object (its tid, `started`, its OS thread). The pseudo handle resolves to it, so
+   `SuspendThread(GetCurrentThread())` and a suspension of the first thread from another thread work like on any thread. A platform
+   service thread runs no guest code and has no handle. A safepoint on an unattached thread cannot happen, so `fnvnx_safepoint` stores
+   `c->ra` on every path.
 2. `SuspendThread(other)` increments the count and publishes `susp = 1` under the lock, then returns the previous count. It
    is asynchronous, as Windows documents.
 3. A running lifted thread reaches a point of P after a bounded number of instructions (every cycle of the CFG contains a back-edge

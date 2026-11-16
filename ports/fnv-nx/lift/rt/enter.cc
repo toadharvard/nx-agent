@@ -82,9 +82,10 @@ extern "C" void fnvl_attach_main(void *mem, u32 sp, u32 teb)
     struct cpu *p = (struct cpu *)mem;
     cpu_reset(p, sp, teb);
     *fnvl_host_tls_slot() = p;
+    fnvnx_susp_attach(p, &p->susp, &p->ra);
 }
 
-extern "C" void fnvl_detach_main(void) { *fnvl_host_tls_slot() = 0; }
+extern "C" void fnvl_detach_main(void) { fnvnx_susp_detach(*fnvl_host_tls_slot()); *fnvl_host_tls_slot() = 0; }
 
 /* esp and TEB of the guest thread this host thread carries: during an import call, the esp of the call (it points at the return address) */
 extern "C" void fnvl_current_main(u32 *sp, u32 *teb) { struct cpu *p = *fnvl_host_tls_slot(); *sp = p->r[4]; *teb = p->teb; }

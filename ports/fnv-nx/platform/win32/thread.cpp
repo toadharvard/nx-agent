@@ -407,14 +407,16 @@ extern "C" HANDLE CreateThread(void *sa, SIZE_T stack, LPTHREAD_START_ROUTINE fn
 }
 FNVNX_EXPORT("kernel32.dll", "CreateThread", CreateThread, "func");
 
-/* handle -> thread object. NULL with *bad == 0: the pseudo handle of a thread CreateThread did not start (the
- * main thread); NULL with *bad == 1: invalid handle (ERROR_INVALID_HANDLE set) */
+/* handle -> thread object; NULL only with *bad == 1: invalid handle (ERROR_INVALID_HANDLE set). Every guest thread has an
+ * object, the first thread included (fnvnx_susp_attach makes it), so the pseudo handle always resolves on a guest thread. */
 static struct w32_thread_obj *thread_resolve(HANDLE h, int *bad)
 {
     *bad = 0;
+    struct w32_thread_obj *t;
     if (h == W32_PSEUDO_THREAD)
-        return (struct w32_thread_obj *)w32_self()->self_obj;
-    struct w32_thread_obj *t = (struct w32_thread_obj *)w32_obj_get(h, W32_THREAD);
+        t = (struct w32_thread_obj *)w32_self()->self_obj;
+    else
+        t = (struct w32_thread_obj *)w32_obj_get(h, W32_THREAD);
     *bad = t == NULL;
     return t;
 }
@@ -440,13 +442,25 @@ static void susp_publish(struct w32_thread_obj *t)
         __atomic_store_n(t->obs_susp, t->suspend_count > 0 ? 1u : 0u, __ATOMIC_RELEASE);
 }
 
-/* The calling thread's lifted frame came into being (fnvl_thread_main): its c->susp and c->ra are registered. A thread
- * of CreateThread only; the main thread has no thread object and is never suspended (see SuspendThread). */
+/* The calling thread's lifted frame came into being (fnvl_thread_main, fnvl_attach_main): its c->susp and c->ra are registered.
+ * Every guest thread has a thread object. The first thread, which CreateThread did not start, gets its object here: it is a
+ * thread like any other, started, with its own id and OS thread (Windows: SuspendThread on a handle of the first thread, or on
+ * GetCurrentThread() of the caller, suspends it). The object holds the thread's own reference for the life of the process. */
 extern "C" void fnvnx_susp_attach(void *cpu, volatile uint32_t *susp, uint32_t *ra)
 {
-    struct w32_thread_obj *t = (struct w32_thread_obj *)w32_self()->self_obj;
-    if (!t)
-        return;
+    struct w32_thread *self = w32_self();
+    struct w32_thread_obj *t = (struct w32_thread_obj *)self->self_obj;
+    if (!t) {
+        t = (struct w32_thread_obj *)w32_obj_new(W32_THREAD, sizeof(struct w32_thread_obj), thread_destroy);
+        if (!t)
+            os_thread_exit();   /* no memory for the first thread's object: nothing can run without it */
+        t->os = os_thread_current();
+        t->tid = self->tid;
+        t->exit_code = STILL_ACTIVE;
+        t->cpu = -1;
+        t->started = 1;
+        self->self_obj = &t->o;
+    }
     os_lock(&w32_wait_lock);
     t->obs_cpu = cpu;
     t->obs_ra = ra;
@@ -459,8 +473,6 @@ extern "C" void fnvnx_susp_attach(void *cpu, volatile uint32_t *susp, uint32_t *
 extern "C" void fnvnx_susp_detach(void *cpu)
 {
     struct w32_thread_obj *t = (struct w32_thread_obj *)w32_self()->self_obj;
-    if (!t)
-        return;
     os_lock(&w32_wait_lock);
     if (t->obs_cpu == cpu) {
         t->obs_susp = NULL;
@@ -477,7 +489,8 @@ static void park_locked(struct w32_thread_obj *t)
         os_cond_wait(&t->resumed, &w32_wait_lock);
 }
 
-/* a point of S inside the platform: the calling thread's own calls and the exits of the wait core */
+/* a point of S inside the platform: the calling thread's own calls and the exits of the wait core. A platform service thread
+ * (audio pump, clock pump) runs no guest code, has no thread object and has no handle, so nothing can suspend it. */
 void w32_susp_point(void)
 {
     struct w32_thread_obj *t = (struct w32_thread_obj *)w32_self()->self_obj;
@@ -492,15 +505,10 @@ void w32_susp_point(void)
  * while the suspend count is above 0, returns the Eip to continue at and stores it in c->ra. */
 extern "C" uint32_t fnvnx_safepoint(void *cpu, uint32_t pc)
 {
-    struct w32_thread_obj *t = (struct w32_thread_obj *)w32_self()->self_obj;
-    if (!t)
-        return pc;
+    struct w32_thread_obj *t = (struct w32_thread_obj *)w32_self()->self_obj;   /* a thread that runs lifted code has attached */
     os_lock(&w32_wait_lock);
-    if (t->obs_cpu == cpu) {
-        park_locked(t);
-        if (t->obs_ra)
-            *t->obs_ra = pc;
-    }
+    park_locked(t);
+    *t->obs_ra = pc;   /* on every path: nothing redirects the thread, so it continues at pc */
     os_unlock(&w32_wait_lock);
     return pc;
 }
@@ -510,7 +518,7 @@ extern "C" DWORD ResumeThread(HANDLE h)
     int bad;
     struct w32_thread_obj *t = thread_resolve(h, &bad);
     if (!t)
-        return bad ? (DWORD)-1 : 0;   /* the main thread is never suspended: previous count 0 */
+        return (DWORD)-1;
     os_lock(&w32_wait_lock);
     int prev = t->suspend_count;
     if (prev > 0)
@@ -534,7 +542,7 @@ extern "C" DWORD SuspendThread(HANDLE h)
     int bad;
     struct w32_thread_obj *t = thread_resolve(h, &bad);
     if (!t)
-        return bad ? (DWORD)-1 : 0;   /* the main thread: no suspension state, previous count 0 */
+        return (DWORD)-1;
     os_lock(&w32_wait_lock);
     int prev = t->suspend_count++;
     int running = t->started && !t->done;
@@ -560,10 +568,6 @@ extern "C" BOOL GetExitCodeThread(HANDLE h, LPDWORD code)
     if (!code) {                         /* Windows probes the output in the kernel */
         SetLastError(ERROR_NOACCESS);
         return FALSE;
-    }
-    if (!t) {   /* a thread the game did not start (the main thread): running */
-        *code = STILL_ACTIVE;
-        return TRUE;
     }
     os_lock(&w32_wait_lock);
     *code = t->done ? t->exit_code : STILL_ACTIVE;
@@ -593,10 +597,6 @@ extern "C" void ExitThread(DWORD code)
 FNVNX_EXPORT("kernel32.dll", "ExitThread", ExitThread, "func");
 FNVNX_CITE(ExitThread, "dm:7");
 
-/* priority/ideal processor of threads CreateThread did not start (per host thread) */
-static __thread int g_main_prio;
-static __thread int g_main_cpu = -1;
-
 extern "C" BOOL SetThreadPriority(HANDLE h, int prio)
 {
     int bad;
@@ -607,14 +607,11 @@ extern "C" BOOL SetThreadPriority(HANDLE h, int prio)
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
-    if (os_thread_set_priority(t ? t->os : NULL, prio)) {
+    if (os_thread_set_priority(t->os, prio)) {
         SetLastError(ERROR_ACCESS_DENIED);
         return FALSE;
     }
-    if (t)
-        t->prio = prio;
-    else
-        g_main_prio = prio;
+    t->prio = prio;
     return TRUE;
 }
 FNVNX_EXPORT("kernel32.dll", "SetThreadPriority", SetThreadPriority, "func");
@@ -625,7 +622,7 @@ extern "C" int GetThreadPriority(HANDLE h)
     struct w32_thread_obj *t = thread_resolve(h, &bad);
     if (bad)
         return 0x7FFFFFFF;   /* THREAD_PRIORITY_ERROR_RETURN */
-    return t ? t->prio : g_main_prio;
+    return t->prio;
 }
 FNVNX_EXPORT("kernel32.dll", "GetThreadPriority", GetThreadPriority, "func");
 
@@ -642,12 +639,10 @@ extern "C" DWORD_PTR SetThreadAffinityMask(HANDLE h, DWORD_PTR mask)
     DWORD_PTR all = os_cpu_mask();
     if (!(mask & all))
         return 0;
-    if (h == W32_PSEUDO_THREAD)
-        os_thread_set_affinity(NULL, -1, (unsigned)(mask & all));
-    else if (struct w32_thread_obj *t = thread_of(h))
-        os_thread_set_affinity(t->os, -1, (unsigned)(mask & all));
-    else
+    struct w32_thread_obj *t = thread_of(h);
+    if (!t)
         return 0;
+    os_thread_set_affinity(t->os, -1, (unsigned)(mask & all));
     return all; /* previous mask: "all" */
 }
 FNVNX_EXPORT("kernel32.dll", "SetThreadAffinityMask", SetThreadAffinityMask, "func");
@@ -658,7 +653,7 @@ extern "C" DWORD SetThreadIdealProcessor(HANDLE h, DWORD cpu)
     struct w32_thread_obj *t = thread_resolve(h, &bad);
     if (bad)
         return (DWORD)-1;
-    int cur = t ? t->cpu : g_main_cpu;
+    int cur = t->cpu;
     DWORD prev = cur >= 0 ? (DWORD)cur : 0;
     if (cpu == 32)   /* MAXIMUM_PROCESSORS: a query */
         return prev;
@@ -666,11 +661,8 @@ extern "C" DWORD SetThreadIdealProcessor(HANDLE h, DWORD cpu)
         SetLastError(ERROR_INVALID_PARAMETER);
         return (DWORD)-1;
     }
-    if (t)
-        t->cpu = (int)cpu;
-    else
-        g_main_cpu = (int)cpu;
-    os_thread_set_affinity(t ? t->os : NULL, (int)cpu, 0); /* a preference: the mask stays */
+    t->cpu = (int)cpu;
+    os_thread_set_affinity(t->os, (int)cpu, 0); /* a preference: the mask stays */
     return prev;
 }
 FNVNX_EXPORT("kernel32.dll", "SetThreadIdealProcessor", SetThreadIdealProcessor, "func");

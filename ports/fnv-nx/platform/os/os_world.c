@@ -75,6 +75,8 @@ void os_world_register(os_wslot *s, os_thread *t)
     world_unlock();
 }
 
+os_thread *os_thread_current(void) { return g_self ? g_self->t : NULL; }
+
 void os_world_unregister(os_wslot *s)
 {
     world_lock();
