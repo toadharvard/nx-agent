@@ -132,7 +132,7 @@ def main():
         if tmp and not os.environ.get("GATE_KEEP"):
             shutil.rmtree(tmp, ignore_errors=True)
     status = "green" if u == c else "red"
-    doc = {"format": "fnvnx-gate/1", "name": "machine", "status": status, "universe": u, "certified": c, "uncertified": ids[:50],
+    doc = {"format": "fnvnx-gate/1", "name": "machine", "status": status, "universe": u, "certified": c, "uncertified": ids,
            "detail": detail}
     out = os.environ["GATE_OUT"]
     with open(os.path.join(out, "machine.json"), "w") as fh:

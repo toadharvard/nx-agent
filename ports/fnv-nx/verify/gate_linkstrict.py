@@ -364,7 +364,7 @@ def main():
     else:
         status, detail = "green", "%d items of %d roots: every reference has one strong definition" % (len(items), len(roots))
     res = {"format": "fnvnx-gate/1", "name": "linkstrict", "status": status, "universe": len(items), "certified": cert,
-           "uncertified": sorted("%s:%s" % x for x in bad)[:50], "detail": detail}
+           "uncertified": sorted("%s:%s" % x for x in bad), "detail": detail}
     with open(os.path.join(os.environ["GATE_OUT"], "linkstrict.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)
     print("linkstrict: %s %d/%d %s" % (status, cert, len(items), detail[:200]))

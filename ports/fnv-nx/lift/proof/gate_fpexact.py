@@ -75,7 +75,7 @@ object-level necessary condition:
 
 Universe: per product root: `<root>:rcpcert` (per image, when it uses the table), `<root>:forms`, and for every object `rcp:<root>/<unit>` and `f2i:<root>/<unit>`; a root that does not
 build or whose recipe is invalid is the one item `<root>:inputs` (uncertified, reason in detail: never skipped). Certified: items with no finding.
-uncertified: the first 50 ids sorted. Exit 0 iff green."""
+uncertified: every id, sorted. Exit 0 iff green."""
 import hashlib
 import json
 from fractions import Fraction

@@ -655,8 +655,8 @@ def main(argv):
     if blocked:
         detail += "; blocked: env (declared input not available) for " + ", ".join(blocked)
     res = {"format": "fnvnx-gate/1", "name": "selftests", "status": status, "universe": len(files), "certified": n,
-           "uncertified": unc[:50], "detail": detail, "files": rows,
-           "reasons": {r["name"]: r["reason"] for r in rows if r["status"] in ("failed", "blocked-env") and r.get("reason") and r["name"] in unc[:50]}}
+           "uncertified": unc, "detail": detail, "files": rows,
+           "reasons": {r["name"]: r["reason"] for r in rows if r["status"] in ("failed", "blocked-env") and r.get("reason") and r["name"] in unc}}
     out = os.environ["GATE_OUT"]
     with open(os.path.join(out, "selftests.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)

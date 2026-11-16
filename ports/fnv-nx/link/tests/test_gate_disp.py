@@ -142,8 +142,7 @@ def run(elfbytes=None, rows=None, text=None, universe=None, extra=(), elf_file=T
         sys.exit('gate_disp failed: ' + r.stderr[-600:])
     with open(os.path.join(go, 'disp.json')) as fh:
         j = json.load(fh)
-    with open(os.path.join(go, 'disp.ids')) as fh:
-        j['ids'] = fh.read().split('\n')[:-1]
+    j['ids'] = list(j['uncertified'])
     os.remove(os.path.join(go, 'disp.json'))
     return r.returncode, j
 

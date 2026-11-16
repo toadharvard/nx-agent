@@ -72,7 +72,7 @@ def main():
     detail = "; ".join(why) or ("%d C++ units of %d native guest roots load fnvnx_order in the rule's order" % (u, len(roots)) if roots else
                                 "no native guest root (universe 0)")
     res = {"format": "fnvnx-gate/1", "name": "argordergate", "status": "red" if why else "green", "universe": u, "certified": c,
-           "uncertified": sorted(ids)[:50], "detail": detail[:900]}
+           "uncertified": sorted(ids), "detail": detail[:900]}
     with open(os.path.join(os.environ["GATE_OUT"], "argordergate.json"), "w") as f:
         json.dump(res, f, sort_keys=True)
     print("argordergate: %s %d/%d %s" % (res["status"], c, u, detail[:200]))

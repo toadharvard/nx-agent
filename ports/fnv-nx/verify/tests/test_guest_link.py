@@ -77,7 +77,7 @@ check("version_script: an untracked file outside the root is red", any("link mus
 e = link_errs(rec("s.so", kind="shared", version_script="ports/fnv-nx/docs/ARCHITECTURE.md", flags=["-m", "aarch64linux"]), HOST)
 check("version_script: a tracked file of a doc root is red", any("link must be" in x for x in e), e)
 
-# the tools of the ldcheck stage (link/ldcheck.py, link/gateids.py, contract/gatefile.py): tracked files under a tree of an admitted tool root
+# the tools of the ldcheck stage (link/ldcheck.py, contract/gatefile.py): tracked files under a tree of an admitted tool root
 need = lambda rs: [e for e in recipe.check(rec("a.elf"), EXE, files, rs, pin, REPO) if "ldcheck stage needs" in e]  # noqa: E731
 check("link tools under the declared trees of the tool root (contract, link) are valid", need(roots) == [], need(roots))
 cr = next(r for r in roots.values() if r.get("class") == "tool" and "ports/fnv-nx/link" in (r.get("trees") or []))

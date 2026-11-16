@@ -149,7 +149,7 @@ def run_gate(name, judge_root):
         if tmp and not os.environ.get("GATE_KEEP"):
             shutil.rmtree(tmp, ignore_errors=True)
     res = {"format": "fnvnx-gate/1", "name": name, "status": "green" if u == c else "red", "universe": u, "certified": c,
-           "uncertified": sorted(ids)[:50], "detail": detail[:900]}
+           "uncertified": sorted(ids), "detail": detail[:900]}
     with open(os.path.join(os.environ["GATE_OUT"], name + ".json"), "w") as f:
         json.dump(res, f, sort_keys=True)
     print("%s: %s %d/%d %s" % (name, res["status"], c, u, detail[:200]))

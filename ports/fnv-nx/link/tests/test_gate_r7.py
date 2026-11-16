@@ -260,10 +260,9 @@ try:
     rc, doc, out = go(tmp + '/a/g', tmp + '/a/c', tmp + '/o1')
     check('red file', (rc, doc['format'], doc['name'], doc['status'], doc['universe'], doc['certified']),
           (1, 'fnvnx-gate/1', 'r7', 'red', len(keys), len([k for k, v in WANT.items() if not v])))
-    check('red file lists at most 50, sorted', doc['uncertified'], sorted(doc['uncertified'])[:50])
+    check('red file lists every id, sorted', doc['uncertified'], sorted(doc['uncertified']))
     check('detail', doc['detail'].startswith('r7: %d of %d records certified; ' % (len(keys) - len(want), len(keys))), True)
-    with open(tmp + '/o1/r7.ids') as fh:
-        check('ids file has all', len(fh.read().split('\n')) - 1, len(want))
+    check('the file has all ids and their count', (len(doc['uncertified']), doc['uncertified_n']), (len(want), len(want)))
     rc, doc, _ = go(gu, cu, tmp + '/o2', ['--units', units])
     check('green file', (rc, doc['status'], doc['universe'], doc['certified'], doc['uncertified']), (0, 'green', 1, 1, []))
     rc, doc, _ = go(ge, tmp + '/a/c', tmp + '/o3')

@@ -268,7 +268,7 @@ def main(argv=None):
         with open(a.bridge) as fh:
             have, names, mset = platform_pairs(fh.read(), mods)
         miss = check_platform(results, have, names, mset)
-        print('not provided by the platform: %d %s' % (len(miss), miss[:20]))
+        print('not provided by the platform: %d %s' % (len(miss), miss))
     for h in a.handle:
         nm, va = h.split(':')
         r = handle_report(images[nm.lower()], int(va, 16))

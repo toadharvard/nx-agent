@@ -2204,7 +2204,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     if lk is not None:
         err += link_errors(lk, root, mine, roots, names, repo, files, variant, seen)
         err += ["link: the ldcheck stage needs %s (a tracked file of an admitted tool root)" % p for p in (
-            LD_TOOLS[0] + "/ldcheck.py", LD_TOOLS[0] + "/gateids.py", LD_TOOLS[1] + "/gatefile.py")
+            LD_TOOLS[0] + "/ldcheck.py", LD_TOOLS[1] + "/gatefile.py")
             if not tool_file(roots, files, p)]   # the one membership function (class tool, under a tree)
     err += guest_errors(rec, root + "@" + variant if variant else root, roots, pin, load_guest_link(repo), files)
     err += plugin_errors(rec, root, files, roots, units, names, variant, repo)
@@ -4127,7 +4127,7 @@ class Job:
 
     def ldcheck(self, ws, elf_tree, objs_tree, extra, loader_defs=None):
         """Stage `ldcheck:<root>`: link/ldcheck.py (python of the python runtime, a pure tool like `generated`) judges the linked ELF from ELF
-        symbol tables, writes the crt0 header words and the gate file `ld`. -> tree of /out (the final ELF, ld.json, ld.ids)."""
+        symbol tables, writes the crt0 header words and the gate file `ld`. -> tree of /out (the final ELF, ld.json)."""
         lk = self.rec["link"]
         name = lk["output"]
         _, py = self.cached_rt("python", lambda: runtime.build(self.store, sys.executable, []))
@@ -4936,7 +4936,7 @@ def _build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=
                   os.chmod(os.path.join(out, name), 0o755)    # an executable image has the exec bit
               res["elf"] = {"path": os.path.abspath(os.path.join(out, name)), "sha256": ent[name]["h"]}
               res["ld_gate"] = {}
-              for f in ("ld.json", "ld.ids"):
+              for f in ("ld.json",):
                   shutil.copyfile(cas._obj(store, ent[f]), os.path.join(out, f))
                   res["ld_gate"][f] = {"path": os.path.abspath(os.path.join(out, f)), "sha256": ent[f]["h"]}
               facts = j.elf_facts(ws, fin, elf_tree, groups)     # the link record: sections, defined symbols, definers (consumers never run readelf or nm)

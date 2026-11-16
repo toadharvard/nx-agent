@@ -171,8 +171,8 @@ def main():
             u, c, bad, err = judge(g, mt)
         status = "green" if not err and not bad and u else "red"
         detail = err or ("%d of %d images certified" % (c, u) + ("; " + "; ".join(bad[:5]) if bad else ""))
-    doc = {"format": "fnvnx-gate/1", "name": "liftfacts", "status": status, "universe": u, "certified": c, "uncertified": [b.split(":")[0] for b in bad][:50],
-           "detail": detail[:2000], "reasons": {b.split(":")[0]: b for b in bad[:50]}, "errors": [err] if err else []}
+    doc = {"format": "fnvnx-gate/1", "name": "liftfacts", "status": status, "universe": u, "certified": c, "uncertified": [b.split(":")[0] for b in bad],
+           "detail": detail[:2000], "reasons": {b.split(":")[0]: b for b in bad}, "errors": [err] if err else []}
     with open(os.path.join(out, "liftfacts.json"), "w") as fh:
         json.dump(doc, fh, indent=1, sort_keys=True)
         fh.write("\n")

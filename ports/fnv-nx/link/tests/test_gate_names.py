@@ -209,8 +209,7 @@ try:
     rc, doc = run(['--gcc', g, '--cl', c], os.path.join(tmp, 'o1'))
     check('red exit', rc, 1)
     check('red file', (doc['format'], doc['name'], doc['status'], doc['universe'], doc['certified'], len(doc['uncertified'])), ('fnvnx-gate/1', 'names', 'red', 7, 4, 3))
-    with open(os.path.join(tmp, 'o1', 'names.ids')) as fh:
-        check('ids file', fh.read().split('\n')[:-1], sorted(doc['uncertified']))
+    check('the file has every id and their count', (doc['uncertified'] == sorted(doc['uncertified']), doc['uncertified_n']), (True, len(doc['uncertified'])))
     rc, doc = run(['--gcc', gok, '--cl', c], os.path.join(tmp, 'o2'))
     check('green', (rc, doc['status'], doc['universe'], doc['certified'], doc['uncertified']), (0, 'green', 3, 3, []))
     rc, doc = run(['--gcc', gempty, '--cl', c], os.path.join(tmp, 'o3'))

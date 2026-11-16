@@ -24,7 +24,7 @@ def derive(specs):
         with open(p, "rb") as fh:
             rows.append((f[:-5] + ".dll", hashlib.sha256(fh.read()).hexdigest()))
     if bad or not rows:
-        raise ValueError("not a Wine spec directory: " + (", ".join(bad[:10]) or "empty"))
+        raise ValueError("not a Wine spec directory: " + (", ".join(bad) or "empty"))
     return rows
 
 

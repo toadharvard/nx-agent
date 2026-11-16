@@ -23,7 +23,7 @@ Pinned model: formgate_inputs.json model_sha256 must equal the `x86_proof.ir` pi
 RED with the reason (item `inputs`, universe 1, certified 0), never skipped: no inputs file; not JSON; wrong format or keys; a path key naming an
 external that is not declared; model_sha256 differing from sail_pins.txt; (with a lifted root) the certs external that does not fetch or whose tree does
 not match its hash, certs.tsv absent or malformed. Otherwise the items are the shapes (and `<root>:shapes`); uncertified = items without a
-certificate (first 50, sorted); detail keeps the certified/universe count per family."""
+certificate (every one, sorted); detail keeps the certified/universe count per family."""
 import json
 import os
 import re

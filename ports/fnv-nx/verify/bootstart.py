@@ -484,7 +484,7 @@ def check(doc, console, pe, expect_sha, iat, modules, modfacts, tls=None, iat_da
         v.fail.append('no "fnvnx-start: image mapped"')
     bad = failure_lines(cl)
     if bad:
-        v.fail.append("the loader logged failure lines: %s" % "; ".join(bad[:5]))
+        v.fail.append("the loader logged failure lines: %s" % "; ".join(bad))
     out.append(v)
     st = None
     # S3

@@ -11,7 +11,7 @@ Gate: 0 sites.  A "pinned" guest (one that may only run at its link base) is not
 Exit status 1 otherwise.  Counts only on stdout.
 --work: a directory for the response file and the site list (nothing is read from TMPDIR or the process id).
 Gate file `pcrel` ($GATE_OUT/pcrel.json, gatefile.py): universe = the PC-relative relocations examined (second summary line
-of the tool), certified = examined - offending sites, uncertified = `object:section+offset:symbol` of the first 50 (sorted).
+of the tool), certified = examined - offending sites, uncertified = every `object:section+offset:symbol` (sorted).
 """
 import argparse, glob, os, re, subprocess, sys
 

@@ -294,7 +294,7 @@ def main(argv):
     finally:
         if tmp and not os.environ.get("GATE_KEEP"):
             shutil.rmtree(tmp, ignore_errors=True)
-    res = {"format": "fnvnx-gate/1", "name": "hostapi", "status": status, "universe": u, "certified": c, "uncertified": ids[:50], "detail": detail[:900]}
+    res = {"format": "fnvnx-gate/1", "name": "hostapi", "status": status, "universe": u, "certified": c, "uncertified": ids, "detail": detail[:900]}
     with open(os.path.join(os.environ["GATE_OUT"], "hostapi.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)
     print("hostapi: %s %d/%d %s" % (status, c, u, detail[:200]))

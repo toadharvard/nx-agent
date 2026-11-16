@@ -264,7 +264,7 @@ def main():
             shutil.rmtree(tmp, ignore_errors=True)
     detail = "; ".join(why) or ("%d items of %d native guest roots" % (u, len(roots)) if roots else "no native guest root (universe 0)")
     res = {"format": "fnvnx-gate/1", "name": "abi", "status": "red" if why else "green", "universe": u, "certified": c,
-           "uncertified": sorted(ids)[:50], "detail": detail[:900]}
+           "uncertified": sorted(ids), "detail": detail[:900]}
     with open(os.path.join(os.environ["GATE_OUT"], "abi.json"), "w") as f:
         json.dump(res, f, sort_keys=True)
     print("abi: %s %d/%d %s" % (res["status"], c, u, detail[:200]))

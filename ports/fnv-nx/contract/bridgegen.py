@@ -35,7 +35,7 @@ def main():
                                          [read(p) for p in a.extra],
                                          bridgetable.read_va(read(a.va)), exportgen.read(read(a.exports)))
     if errors:
-        sys.exit('bridgegen: %d errors, first: %s' % (len(errors), errors[0]))
+        sys.exit('bridgegen: %d errors:\n%s' % (len(errors), '\n'.join(errors)))
     with open(a.out, 'w', newline='\n') as fh:
         fh.write('dll\tname\tordinal\tconv\tret\targs\tnative_symbol\tbind\n')
         for r in rows:
