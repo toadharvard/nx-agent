@@ -402,32 +402,6 @@ def may_null(i):
     return _SEGW[path][inputs.get('image')][n]['guard']
 
 
-_LABEL_LINE = re.compile(r'L_[0-9a-f]{8}: ;')
-_GOTO = re.compile(r'goto (L_[0-9a-f]{8});')
-
-
-def prune_labels(cx):
-    """RULE (density 1): an instruction keeps its label line `L_<addr>: ;` iff some emitted `goto L_<addr>;` names it. Every goto the emitter writes is one of: a direct branch / jcc /
-    loop target or the fall-through to a non-adjacent successor inside the function, an entry of a jump table, or a case of the nonlocal switch (`labs` above: the return address of a call, the
-    EH continuations, the jump-table targets, the relocation-target roots and the universe entries in the range: the arrival addresses that the facts name); a label no goto names is never
-    the target of any control transfer of the body (a label is only ever entered by `goto`), so dropping it changes no behaviour and leaves every label that a goto names. Not a list: the set is
-    exactly the labels that the body's own gotos need."""
-    refs = set(_GOTO.findall('\n'.join(cx.L)))
-    keep = [not (_LABEL_LINE.fullmatch(l) and l[:-3] not in refs) for l in cx.L]
-    if all(keep):
-        return
-    if prov.ON:
-        new, n = {}, 0
-        for i, k in enumerate(keep):
-            new[i] = n; n += k
-        for i, l in enumerate(cx.L):
-            if not keep[i]:
-                cx.insb[int(l[2:10], 16)] -= len(l) + 1
-        cx.PX[:] = [(new[i], k, d) for i, k, d in cx.PX]
-        cx.P[:] = [c for c, k in zip(cx.P, keep) if k]
-    cx.L[:] = [l for l, k in zip(cx.L, keep) if k]
-
-
 def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     """lift one function in two passes. Pass 1 emits everything and records the CFG (cx.succ) and the Form instructions (cx.finfo). From them: P = flaglive.poll_set (back-edge targets and entries), the flags
     whose write is dead (flaglive.dropped, with every point of P an escape). Pass 2 emits the polls at P and omits the dead flag writes (FLAGLIVE.md, P2')"""
@@ -533,7 +507,6 @@ def _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, drop, poll):
         cases = ' '.join('case 0x%xu: %sgoto %s;' % (x, xc.case_pre(cx, x), cx.lab(x)) for x in labs)
         em('after_tail: ; if(esp>E){ SYNC_OUT; return; }')
         em('nonlocal: ; for(;;){ u32 t=c->ra; if(esp>E){ SYNC_OUT; return; } switch(t){ %s default: break; } SYNC_OUT; REGS(); fnvl_dispatch(t)(); REGS(); SYNC_IN; }' % cases)
-    prune_labels(cx)
     body = '\n'.join(cx.L)
     body0 = body
     # R4 raise-site flush rule (rt/fnvl.h RAISE_OUT / RAISE_IN): every explicit call of the OS dispatcher flushes the EFLAGS and x87 condition-bit locals into struct cpu before it and reloads them after

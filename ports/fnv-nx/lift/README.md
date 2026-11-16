@@ -43,16 +43,6 @@ of the image is ever rewritten (vtable slots, EH tables and jump tables included
   `image address -> X_<addr>`, a minimal perfect hash over the entry set with a last-target cache per call site.
   The table is total by construction; native code reaches the same dispatcher through L2's plugin at every indirect
   call and jump.
-
-### Labels exist only where a goto names them (density rule 1)
-
-An instruction's label line `L_<addr>: ;` is emitted only if the body contains `goto L_<addr>;` (core.prune_labels). The gotos of a body are: a direct branch / jcc / loop target or the
-fall-through to a non-adjacent successor inside the function (f_flow), the entries of a jump table, and the cases of the nonlocal switch, whose address set is derived from the facts: the
-return address of every call in the body, the EH continuations (`raises`), the jump-table targets, the relocation-target roots (`taken`) and the universe entries inside the range.
-Proof: a C label is entered only by `goto` (the emitter writes no computed goto and no `&&label`), so a label that no emitted goto names is the target of no control transfer; dropping it
-removes no behaviour. An address that is not a label of the body and reaches the switch takes `default:` to the dispatcher, unchanged. No Form text changes: labels are emitter structure.
-The set is the labels that the body's own gotos need, so it follows a change of any fact by construction (no list). Test: fnvlift/tests/test_prov.py (every goto has its label, every label is named).
-
 ### Guest registers and control transfer (the rule every lifted body follows)
 
 - The eight guest registers live in fixed callee-saved host registers (GCC global register variables, w19..w26), the
