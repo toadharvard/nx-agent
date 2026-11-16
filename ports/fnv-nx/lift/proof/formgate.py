@@ -42,11 +42,12 @@ VERIFY = os.path.normpath(os.path.join(LIFT, "..", "verify"))
 sys.path.insert(0, LIFT)
 sys.path.insert(0, os.path.join(VERIFY, "..", "contract"))
 sys.path.insert(0, VERIFY)
-from proof import certbasis, codeuniverse, eaaudit, shape, symcheck, symform  # noqa: E402
+from proof import certbasis, codeuniverse, eaaudit, shape, symcheck, symform, x86sys  # noqa: E402
 import gatefile  # noqa: E402     (ports/fnv-nx/contract)
 import recipe  # noqa: E402
 
 NAME = "forms"
+X86SYS = os.path.normpath(os.path.join(LIFT, "..", "platform", "declared", "x86sys.json"))      # the declared x86 system record of this tree: the one input of every Form build (fnvlift/inputs.py), passed explicitly by this program, the one that builds the Forms
 INPUTS = os.path.join(HERE, "formgate_inputs.json")
 FORMAT = "fnvnx-forms-inputs/1"
 EXT_KEYS = recipe.EXT_KEYS
@@ -222,6 +223,7 @@ def analyse(shapes_path, certs_path, model_sha):
 
 def judge(cache, inputs=INPUTS):
     """-> (universe, certified, uncertified ids, detail); never raises for an input problem"""
+    x86sys.configure(X86SYS)
     try:
         doc = load_inputs(inputs)
         ext = fetch(doc, cache)

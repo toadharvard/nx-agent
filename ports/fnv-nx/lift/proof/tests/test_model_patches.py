@@ -15,13 +15,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32
 from proof import forms, model_sail, prove
 
-model_sail.configure(os.environ['FNVNX_SAIL_WORK'], os.environ['FNVNX_SAIL_IR'], os.environ['FNVNX_ISLA'])   # the declared inputs of this test
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import declared_sail; declared_sail.configure()      # the declared inputs of this test (declared_sail.py); the classes are skipped without them
 
 def run(hexbytes):
     code = bytes.fromhex(hexbytes); cs = Cs(CS_ARCH_X86, CS_MODE_32); cs.detail = True; ins = list(cs.disasm(code, prove.ADDR)); assert len(ins) == 1 and ins[0].size == len(code), hexbytes
     F = forms.build(ins[0], prove.ADDR)
     return prove.prove_one(model_sail, F, code, forms.form_key(ins[0]), argparse.Namespace(timeout=300))
 
+@declared_sail.needs_sail
 class ModelPatches(unittest.TestCase):
     def proved(self, h):
         r, note, _ = run(h); self.assertEqual(r, 'proved', '%s: %s %s' % (h, r, note))
@@ -42,6 +43,7 @@ class ModelPatches(unittest.TestCase):
         for h in ROWS['push_segment_register']:
             self.proved(h)
 
+@declared_sail.needs_sail
 class Def0(unittest.TestCase):
     """DEF0: the lifter writes 0 to every architecturally undefined flag; the prover proves model[free := 0] == lifted"""
     def test_undefined_flags_are_zero_witness(self):
@@ -54,6 +56,7 @@ class Def0(unittest.TestCase):
         r, note, _ = prove.prove_one(model_sail, F, code, forms.form_key(ins), argparse.Namespace(timeout=300))
         self.assertEqual(r, 'FAILED(def0)', note)
 
+@declared_sail.needs_sail
 class DefPrior(unittest.TestCase):
     """DEFPRIOR: a free (undefined) value that feeds ONE register output and no flag gets that register's pre-state value; the rest are classes, never chosen for"""
     import z3 as _z

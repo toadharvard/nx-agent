@@ -291,6 +291,8 @@ class Cli(unittest.TestCase):
         shutil.copytree(LIFT, os.path.join(co, 'ports', 'fnv-nx', 'lift'), ignore=skip_cache, copy_function=shutil.copyfile)
         os.symlink(os.path.abspath(fakeext.VERIFY), os.path.join(co, 'ports', 'fnv-nx', 'verify'))
         os.symlink(os.path.abspath(os.path.join(fakeext.VERIFY, '..', 'contract')), os.path.join(co, 'ports', 'fnv-nx', 'contract'))
+        os.symlink(os.path.abspath(os.path.join(fakeext.VERIFY, '..', 'toolchain')), os.path.join(co, 'ports', 'fnv-nx', 'toolchain'))      # recipe.py reads the DATAMODEL table that verify/targets.json references (references.datamodel)
+        os.symlink(os.path.abspath(os.path.join(fakeext.VERIFY, '..', 'platform')), os.path.join(co, 'ports', 'fnv-nx', 'platform'))      # the declared x86 system record (formgate.X86SYS)
         shutil.copyfile(f.inputs, os.path.join(co, 'ports', 'fnv-nx', 'lift', 'proof', 'formgate_inputs.json'))
         out = os.path.join(td, 'out')
         os.makedirs(out)

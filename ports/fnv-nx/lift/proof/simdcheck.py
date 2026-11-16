@@ -73,7 +73,9 @@ def _components(e, bits=False):
 
 
 _EXP = {32: (8, 23), 64: (11, 52)}
-_TAC = z3.Then('simplify', 'propagate-values', 'solve-eqs', 'fpa2bv', 'simplify', 'bit-blast', 'sat')
+# the pipeline ends in the complete `smt` solver, not the bare `sat` core: after bit-blasting, a query that reads memory still holds array terms (Select over the free memory array), which the SAT core cannot decide.  It answers
+# 'unknown' at once on a SATISFIABLE query (a refutation) there, so a refuted Form read as a timeout.  Every unsat is still a proof (smt is complete over arrays and bit-vectors); the bit-blasted FP part is decided by the same SAT core.
+_TAC = z3.Then('simplify', 'propagate-values', 'solve-eqs', 'fpa2bv', 'simplify', 'bit-blast', 'smt')
 
 
 def _classes(x, w):

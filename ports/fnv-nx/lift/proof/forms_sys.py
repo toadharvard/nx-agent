@@ -31,7 +31,7 @@ handler(*_PRIV)(privileged)
 
 @handler('int')
 def int_(c):
-    v = c.ops[0].val & 0xff
+    v = int(c.ops[0].val) & 0xff                          # the vector decides which row: a symbolic vector (a shape's field) raises SymbolicBranch here (symform.SV.__int__), never falls through to the 'other vectors' row by a failed dict lookup; the vector 0x29 of int_ring3.excluded is undecided, so no Form covers every value of the field
     if v in INT_KIND:                                     # a gate of the record: its trap row
         c.F.fault(INT_KIND[v], C(1, 1)); return
     assert v not in x86sys.INT_EXCLUDED, 'int 0x%x: undecided on the declared OS (x86sys int_ring3)' % v
