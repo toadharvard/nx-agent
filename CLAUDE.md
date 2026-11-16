@@ -193,13 +193,13 @@ The owner's words: "Транк никогда красный. Всегда зе�
 The owner's words: "Я буквально сказал, что я использую только конкретный компилятор... Мы нахуя инструменты подготавливали? Чтобы потом просто игнорить?"
 
 - **Compiler:** only the one pinned in `verify/env.json` (g++-13-aarch64-linux-gnu 13.3.0-6ubuntu2~24.04.1cross1, binutils 2.42-4ubuntu2.10), installed by `farm/setup_verdict_env.sh` and checked by `envcheck.py`. No unpinned apt, no other gcc.
-- **Our own compiler (the game's compiler)** is `toolchain/msvcmodel` (MSVCMODEL1). It is GCC 13.3.0 built from the sha256-pinned GNU tarball, with `msvcmodel.patch` applied. Under `-mabi=ilp32` it has the exe's Visual C++ 2008 data model: `size_t` = `unsigned int`, `ptrdiff_t` = `int`, and MSVC's new[] cookie and delete[] size. The headers and binutils come from the pinned distribution cross packages in `env.json`.
+- **Our own compiler (the game's compiler)** is `toolchain/msvcmodel` (MSVCMODEL1). It is GCC 13.3.0 built from the sha256-pinned GNU tarball, with `msvcmodel.patch` applied. Under `-mabi=ilp32` it has the exe's Visual C++ 2008 data model. That model is one table, DATAMODEL, derived from Microsoft's documentation with a test per row: `size_t` = `unsigned int`, `ptrdiff_t` = `int`, signed `char`, 16-bit `wchar_t`, binary64 `long double`, MSVC's new[] cookie and delete[] size, and every other row of the table. **Target (orchestrator decision, 2026-11-15):** it is configured `--target=aarch64-none-elf --with-newlib` with the ILP32 multilib, because the guest is a Horizon process over newlib, not Linux. It is built in one build together with its target libraries (libgcc, crt, newlib from the pinned fnvnx-a64 devkit sources, GCC 13.3's own libstdc++), and the configure line is recorded. That one mirror is both the compiler of every guest root and the guest runtime. The headers are newlib's and its own. Binutils are the env.json 2.42 package when its ld has the aarch64elf32 emulations; otherwise binutils 2.42 are built from the pinned GNU sources in the same build.
   - It enters every guest product root as the recipe's external compiler (`{"external", "cc", "cxx"}`, RECIPE.md): a fnv-nx-build mirror `tools/gcc-ilp32-msvcmodel`, pinned by commit and `tree_sha256`.
   - Our GCC plugins are built against its own plugin headers, as hermetic recipe stages; each `.so` is a declared input, so it is in every key. They are `fnvnx_order` (x86 TSO and MSVC volatile become `ldar`/`stlr`; MSVC argument order), `fnvnx_ftoi` (MSVC `_ftol`), and L2's `addr`, `dispatch`, `names`, `sdd` and `pi` (plus the clang `vtnames`).
   - Native and decomp C++ load them all.
   - Lifted C++ is compiled by the same compiler; the lifter emits the memory ordering itself (R9 (б)).
   - The stock `g++-13` of `env.json` is the base the compiler is built from. It is not the game's compiler.
-  - The guest runtime is built by the game's own compiler: `tools/fnvnx-a64-msvcmodel13` (L5 w14, with a MANIFEST.json the recipe compares against the compiler before any unit runs). Its libstdc++ (headers and library) is GCC 13.3's own, the same version as the compiler. newlib and libnx come from the fnvnx-a64 devkit sources, rebuilt with msvcmodel. The gcc 15 libstdc++ headers of fnvnx-a64 are not used for guest code: they do not parse under gcc 13 (orchestrator decision, 2026-11-12).
+  - The guest runtime is built by the game's own compiler, in the same none-elf build (2026-11-15). Until that build lands, it is `tools/fnvnx-a64-msvcmodel13` (L5 w14, with a MANIFEST.json the recipe compares against the compiler before any unit runs). Its libstdc++ (headers and library) is GCC 13.3's own, the same version as the compiler. newlib and libnx come from the fnvnx-a64 devkit sources, rebuilt with msvcmodel. The gcc 15 libstdc++ headers of fnvnx-a64 are not used for guest code: they do not parse under gcc 13 (orchestrator decision, 2026-11-12).
 - **Build:** `verify/recipe.py` (`verify/RECIPE.md`). A product root has `build.json` and is admitted in `verify/admit.json`. Each unit is two hermetic stages (`unitstage.py`: PP, then CC), keyed by the content of what they read plus compiler and flags.
 - **Cache:** the verdict's own store, `GATE_CACHE` (`l1.py` gives `VDIR/cache`; objects in `GATE_CACHE/store`). An unchanged unit is never compiled again. Do not add another cache or call the compiler directly.
 - **Private sources** (lifted C++, decomp trees) enter a recipe only as an `external`: a fnv-nx-build commit plus `tree_sha256`.
@@ -214,7 +214,7 @@ The owner's words: "Ты когда пишешь че-то агентом они
   orchestrator and pushed to the trunk and the integration branch. A message only points to it.
   - Every lead merges the trunk's `CLAUDE.md` into its branch when told, and re-reads this file after every compaction.
   - If an orchestrator message and this file disagree, this file wins; report the conflict.
-- **Assumptions: one registry, nine accepted.** The owner asked "Сколько допущений?", and no one could answer.
+- **Assumptions: one registry, ten accepted.** The owner asked "Сколько допущений?", and no one could answer.
   - Every assumption has an id in `verify/ASSUMPTIONS.json`. The `assumptions` gate makes the trunk red for:
     - an "Assumption"/"допущение" in code or docs without an id;
     - an id without a record;
@@ -230,6 +230,9 @@ The owner's words: "Ты когда пишешь че-то агентом они
     8. IEEE floating point;
     9. the pinned formal tools and published theorems are correct: the Sail CPU model at its pinned patch, isla and z3,
        the published proof of the x86-TSO to Arm memory mapping (owner decision, 2026-11-11).
+    10. the x86 ISA as documented in the Intel SDM, for the parts that no pinned formal model covers (owner decision, 2026-11-15: "Тогда согласен делай");
+        today the x87 machinery: TOP and stack indexing, tags, FSW C0-C3 and exception bits, FCW, the fcomi/fucomi EFLAGS,
+        fld/fst conversions. It is transcribed as a z3 spec with an SDM citation on every line, owner L3b; values stay IEEE (8).
   - Every other assumption is REMOVE. Its record names the fact or gate that removes it and the owner of that work.
     Examples: callee-saved registers, `ret n`, no PIC and complete code ranges are checked from the exe's code; kernel
     result codes come from the pinned libnx headers; guard zones are a fact of the loader's layout.
@@ -406,8 +409,13 @@ The owner's words: "делегируй остаток работы аккура�
   - **Shaders.**
     - The game's shaders are a static set from its gamedata. The translator's link check (`sm_link`) over that whole
       set is a gate at 0 failures.
-    - The backends' link-failure branch becomes `fnvnx_reach_violation`, with that gate's certificate as its fact.
-      So neither GL nor deko3d has a run-time link-failure path.
+    - **GL keeps its branch "the shader did not compile or link" (owner, 2026-11-15 20:20Z: "В бэкенде GL есть ветка
+      «шейдер не собрался». Оставь.").** It is not converted to `fnvnx_reach_violation`, and no assumption about the GL
+      library's GLSL compiler is added. The stub gate accepts this branch with this owner decision cited.
+      <!-- fnvnx-owner-decision: gl-shader-failure | class: GL shader compile/link failure | root: ports/fnv-nx/render/gl4 -->
+    - The deko3d backend's link-failure branch becomes `fnvnx_reach_violation`, with the `sm_link` certificate as its fact.
+    - The translator-totality proof over the SM 1-3 grammar (L6, 2026-11-15) waits until after the first frame. `sm_link`
+      over the gamedata set stays the gate.
   - **The product ELF root.**
     - Owner: L3a, with a worker.
     - L1 supplies the link stage (`link/guest.json`) and the onedef and link-root rules.
@@ -446,3 +454,288 @@ The owner's words: "делегируй остаток работы аккура�
     every explicit target float→int builtin (vcvtq_s32_f32, vcvtq_u32_f32 and their family) lane-exact. In range it
     converts; out of range or NaN it gives x86 integer-indefinite (cvttps2dq semantics). Then fpexact certifies the
     NEON path and the switch is removed.
+
+## Owner order of 2026-11-15: parallel loops and deviations, after the first frame (binding)
+
+The owner's words: "Делаем, так как данные уже будут для анализа этого" and "Это не должно быть так, что мы просто решили
+исправить все баги. Это разрешено только если решает конкретную задачу, например, позволяет добиться большей
+производительности за счет улучшения корректности."
+
+- **Parallel-loop rule (speed, after the first frame).** A loop of the main thread runs its iterations on several cores
+  only when it is proven statically, by the one points-to/write-set model, that:
+  - the iterations write disjoint memory and read nothing another iteration writes;
+  - they touch no shared state (allocator, reference counts, shared lists), or that state is made thread-safe natively first;
+  - there is no floating-point reduction across iterations.
+
+  Execution is fork-join, so the result is bit-identical to the sequential loop. A loop that is not proven stays sequential.
+  Which loops to try comes from the per-function instructions-per-frame data; the proof decides.
+- **Deviations (`verify/DEVIATIONS.json`).** A change of the exe's behaviour is allowed only when it serves a stated
+  goal on the path (for example a speed rule), never as bug-fixing for its own sake. Each entry gives:
+  - the original behaviour and why it is undefined or a defect (a data race, a crash, an out-of-bounds access);
+  - the new behaviour;
+  - the proof that every behaviour of the new program is one the original program could already show on its defined
+    inputs. For example, adding synchronization to a race only removes interleavings;
+  - the goal it unlocks, such as a rule id or a PERFDEBT/speed item;
+  - its owner.
+
+  A deviation without a goal, or without that proof, is red.
+  - Example (owner): a worker thread writes UI state concurrently with the main thread. That is a race. Making the write
+    ordered through the main thread lets the worker run on its own core.
+
+## Owner order of 2026-11-15: defects impossible by construction (binding)
+
+The owner's words: "Надо закрыть те проблемы которые мы обсуждали на корню. Чтобы новых подобных просто не могло
+возникнуть."
+
+The defects of 2026-11-14/15 had one cause: a fact was enumerated from memory, copied, or reachable by a second path,
+instead of derived once from a complete source. Examples: `long double` missing from the data model; a linux-gnu target
+for a Horizon guest; data lifted as code; a test compiling with stock g++; a dead second ftoi plugin; numbers counted on
+a stale tree. The rules below make that class impossible. Adding checks on top of checks does not.
+
+1. **Derive, never enumerate.**
+   - Every set or table that defines behaviour or coverage is generated by a recipe stage from one complete, pinned
+     source, with the source cited per row. Examples: the data model, the ISA spec, the Win32 bodies, the shader set,
+     the image set, code ranges, thread kinds and gate universes.
+   - The source is one of: the exe and module bytes, the owner's gamedata, or a pinned edition of the vendor's
+     documentation (Microsoft, Intel, Arm, the Horizon/libnx headers).
+   - A set written by hand from memory is red, even when it is complete today.
+2. **One source of truth, everything else generated.**
+   - A fact lives in exactly one file.
+   - Whatever follows from it is produced by a recipe stage and is never written a second time. Examples: compiler flags
+     from DATAMODEL, the dispatcher from the facts, the bridges from the descriptors.
+   - A second copy of a fact is deleted, not gated.
+3. **One path, alternatives deleted.**
+   - There is no second compiler call, plugin, cache, build script or test runner.
+   - When one is found, it is deleted in the same commit that reports it. It is never kept behind a check.
+4. **Universes by one rule.** Every universe is defined by one rule over the tree or the exe, so a new item is inside
+   automatically. Examples: files, tests, functions, sites, threads. "Every test file by the naming rule" counts;
+   "these 12 tests" does not.
+5. **The declared target is one record each, and everything reads it.** These are:
+   - the guest platform (Horizon process over newlib, aarch64-none-elf, ILP32);
+   - the console CPU (Cortex-A57 feature set);
+   - the game's data model (DATAMODEL);
+   - the declared x86 CPU (CPUREF);
+   - the declared machine.
+
+   No root or tool restates any of them.
+6. **Numbers come only from a run at a commit.** A reported number is the output of a recipe or gate run, given with its
+   commit and command, read from the cached facts. It is never retold from memory or counted on another tree.
+7. **The trust chain ends at the OWNER registry.** A gate is ordinary code. Its lead checks it against its rule, and it is
+   tested against its references. No gate checks another gate, and below the OWNER entries nothing is checked.
+8. **A found defect closes its cause.**
+   - Every defect report names the enumeration, copy or second path that let it happen.
+   - The fix replaces that with a derivation, a generation or a deletion (rules 1-3).
+   - A fix of the single item alone is not accepted.
+
+## Orchestrator decision of 2026-11-15: memory ordering of runtime calls (binding for L1, L2)
+
+- The guest runtime (newlib, libstdc++, libgcc, libnx) is compiled by the game's compiler with every plugin. So a callee
+  whose body is C or C++ orders its own accesses, and a call to it is a plain call.
+  - There is no fenced call and no libcall or string-op record.
+  - Membership of a fold set never assigns a class.
+- newlib is built with `-DPREFER_SIZE_OVER_SPEED`, read from the one guest compiler record. With it, its aarch64 `.S`
+  string routines use their C sources.
+- The remaining assembly is derived from the built runtime objects: every object assembled from `.S` or `.s`. Each one
+  is closed by a stated class:
+  - it touches only jmp_buf and the frame (D1);
+  - it runs before threads;
+  - it is a kernel call;
+  - it is an atomic with its documented ordering.
+  An assembly object with a memory access outside these classes makes the runtime stage red. There is no allow-list.
+- The ordered C string loops switch off a fast path. They are `PD-RT-STRING-ORDERED` in `verify/PERFDEBT.json`
+  (owner L2), 0 at the first frame. The restoring rule gives each string routine a body whose ordering is proven equal
+  to the x86 semantics of the call in the source:
+  - where the exe's own CRT routine uses `rep movs`/`stos`, SDM §8.2.4 fast-string semantics (fenced at entry and
+    exit, unordered inside);
+  - elsewhere, ordering per x86 store, by size path.
+
+## Orchestrator decision of 2026-11-15: sources of the declared machine (binding for L3a, L3b, L5)
+
+- Every row of the declared-machine records (`platform/declared/os.json`, `x86sys.json`) takes its value from these
+  sources, in order:
+  1. Microsoft documentation and the WDK 7.1 headers for Windows 7;
+  2. Wine 9.0's code, only where it contradicts neither source 1 nor the declared OS version (Windows 7). For example,
+     vector 0x29 (`__fastfail`, Windows 8 and later) is not in the set.
+- No other source counts; ReactOS is not one. A row with no source stays undecided and names its blocker.
+- A site in the exe or a module whose answer depends on an undecided row gets a call-graph reach certificate and goes
+  to `fnvnx_reach_violation`. Without the certificate the build is red, and the row is reported to the orchestrator.
+- Other code reads these records and never restates them (rule 2). seh.cc's trap rows are an example.
+- **gs on Windows 7 (7601) x86, orchestrator decision 2026-11-15 22:15Z (it replaces the 22:05Z text).**
+  - No pinned document states the initial user-mode gs selector (L5: the whole WDK 7.1 ISO and Wine 9.0). Register dumps
+    of other NT builds do not count.
+  - The source is a Microsoft-published 7601 artefact: the Windows 7 SP1 x86 kernel (`ntkrnlpa.exe`/`ntoskrnl.exe` of
+    build 7601), with its public PDB from Microsoft's symbol server. Both are pinned by sha256 and mirrored in
+    fnv-nx-build `tools/win7sp1-x86-kernel` (private, never in this repository).
+  - The row's value is derived from that binary: the store of `KTRAP_FRAME.SegGs` (offset from the PDB) on the
+    user-thread initialization path. The function and the instruction address are cited in the row. Source 1 above
+    covers this ("the exe and module bytes" class, applied to the declared OS's own binary).
+  - The `null_seg_access` row and the 24 `mov m16, gs` reads then follow by the existing method. They are one row each,
+    with no per-site work.
+  - The gs-prefixed operands that the code universe reaches only by decoding data are a defect of the universe rule.
+    L3a fixes it in the facts stage. A site is never certified around it.
+  - Owner: L5 (a worker, now; it blocks the pack finish). L3a consumes the row.
+- **Where the Microsoft page is narrower (orchestrator, 2026-11-15 13:45Z; it applies to D3D9 and its shader models as well).**
+  - Microsoft does not list a case, but Wine 9.0 accepts it. That case is a silence, not a contradiction, so source 2
+    fills it and the accepted set is the union.
+  - Each such case is a cited conflict row: the Microsoft page and section, and the Wine 9.0 file and line. Examples are
+    `ps_3_0:vFace_src`, `ps:47` and `vs_3_0:v[a0.x]`.
+  - Where Microsoft states the opposite, Microsoft holds.
+  - "The opposite" means a Microsoft statement of what the system itself does: a result, an error code, a behaviour.
+    A rule addressed to the application ("applications may not use vs_3_0 with the fixed function pipeline") names no
+    result of the system, so it is a silence on that result, and Wine 9.0 fills it as above (orchestrator, 2026-11-15 16:00Z).
+
+## Owner order of 2026-11-15 20:25Z: no rework that gives no progress (binding)
+
+The owner's words: "Это переделка хуйни не дающей прогресса. Вот пересборка компилятора быстрая это важно. Все
+остальное что нужно по счету это важно. А это похуй. Уже корректно почти и хуй с ним."
+
+- Work counts only when it moves the next step in order: root, packs as roots, ELF, boot, first frame.
+- **Important now:**
+  - a fast compiler rebuild: the compiler stage and the plugins+runtime stage are separate;
+  - fast builds and verdicts;
+  - the items each step needs, taken in order.
+- **Not now:** reworking or re-proving something that already works and is nearly correct, when it does not block a step.
+  Examples: the shader-failure branch, a stronger proof of an already green gate, a cleaner form of a working rule.
+  - Such an item is written into the lead's status as "after the first frame" and left.
+- A lead asks itself before starting an item: "which step does this unblock, and when?" If it unblocks none, the item
+  waits.
+
+## Owner order of 2026-11-15 21:00Z: the compiler key cannot be wrong (binding for L1, L2)
+
+The owner's words: "По построению не должно быть неправильного ключа".
+
+- **The guest compiler is a recipe stage, like any unit.**
+  - Stage 1 is the compiler; stage 2 is the plugins and the runtime.
+  - Each stage runs in the hermetic sandbox (`sandbox.py`). Its key is the content of exactly what the sandbox mounts for
+    it.
+  - The stage cannot read anything outside its key, so a key that misses an input is impossible.
+  - There are no input lists kept by hand in `stamp.py` or `build.sh`: no env flags, no dpkg versions, no patch hashes.
+    Rule 1 forbids them.
+- **No pin is handed over.**
+  - A candidate names no compiler commit to wait for.
+  - Its recipe computes the stage keys from its own tree. It takes the compiler from `GATE_CACHE` on a hit and builds it
+    on a miss: one farm build, stage 2 only when only a plugin changed.
+  - A mirror in fnv-nx-build is a copy of that cache entry under its key.
+  - "The candidate needs a pin with key X" is therefore no longer a state. A changed plugin is a cache miss, built
+    once.
+- **Owners:** L2 (stages, PINKEY becomes this) and L1 (the recipe takes the compiler by stage key, `admit`, envcheck).
+  Lands with cand3. The cand2 pin 56a4d09c stands; cand2 is not reopened.
+
+## Owner order of 2026-11-15 21:00Z: every generator is a recipe stage; no path outside the key (binding for every layer)
+
+The owner's words: "Что ещё так проебано? Перепроверь. Пересобери."
+
+- **The defect.** The published pack 7b2faae276b2/db2aaf6d4a08 was lifted from a stale module table: galaxy.dll was
+  still a static image, so libvorbis and libvorbisfile were lifted at a base 0x450000 too high, and d3dx9_31, atimgpud
+  and gdffalloutnv were not lifted at all.
+- **The cause.** `lift/tools/pemod.py:7` read `/home/user/wt-l1/modules/modules.tsv`, a container-local copy, outside
+  any key. The same class holds across the whole lift input chain, at L3a 217cb3ce0: the facts and universe under
+  `/home/user/l3facts*`, `funcs.tsv`, `exe_mnemonics.tsv`, the bridges `/home/user/wt-l5/manifest/bridge.tsv`, and the
+  exe and module directories. It holds in other layers too, for example `render/shaders/total/sm_table.py` REF
+  `/home/user/work/l6/ref` and the `/home/user/fnv-nx-build` defaults of `tools/gates/ready.py`.
+- **The rule.**
+  - Every step that produces an input of a product root or a gate is a hermetic recipe stage: facts, universe, module
+    table, bridges, the lifted pack, the shader table and every other generated table.
+  - Its key is the content of what it mounts:
+    - the exe and module bytes from the gamedata external;
+    - modules.tsv and bridge.tsv from the tree at the commit;
+    - facts from their own stage's output.
+  - A stage that opens a path outside its mounts fails. So a stale copy cannot enter.
+  - No tool on a product or gate path has a default absolute path or an environment default. A missing input is an
+    argument error.
+  - The lifted image set is every module of modules.tsv that has code. The pack carries the sha256 of the table it was
+    lifted from, and the pack stage is red when it differs from the loader's.
+- **Owners.**
+  - L3a: the whole lift chain, done in this relift.
+  - L1: generator stages in recipe.py, and a gate that reds on any absolute path (or `os.environ.get` default)
+    reaching a product or gate input, over every tracked tool, by rule.
+  - L5 and L6: their tools of this class.
+  - Tools used only by tests (X11 locks) and scratch notes are outside the product and gate paths; L1's rule decides that
+    from the stage graph, not by a list.
+- **The cold pack build** of the relifted pack runs on up to 16 farms (orchestrator, 2026-11-15 21:00Z, for this one
+  build). It is sharded by the recipe, with N up to 16, and the shards' stores are merged by key.
+
+## Orchestrator decision of 2026-11-15 09:20Z: weekly budget (binding for every session)
+
+- The owner's usage page reads: weekly 29 % used, reset on Saturday 2026-11-21 18:00Z. At the pace so far the limit ends
+  on 2026-11-16 at night, five days early. The budget is at most about 11 % of the week per day until the reset.
+- Until the orchestrator lifts this:
+  - **Workers:** at most 4 per lead (owner, 2026-11-15 20:00Z: "Разреши лидерам большее количество саб-агентов
+    реализаторов"; it was 2). Each runs only a path item that blocks the next step: first root, packs as roots, ELF, boot.
+    - A lead splits each path item into independent pieces and runs them in parallel, one worker each. While a build runs,
+      its worker prepares the next piece rather than waiting.
+    - A worker whose piece is done, or waits on another layer, is archived, not left idle.
+  - **Farms:** at most 4 per layer. Never rerun on unchanged content; a farm stops as soon as its queue is done.
+    - Exception (orchestrator, 2026-11-15 20:15Z, from the leads' bottleneck lines): up to 8 farms for the L3b proof queue
+      (each shard is 3,400-4,400 s), and up to 8 farms for the cold lifted-pack build (4,096 units, about 10 h on one
+      4-core farm).
+    - The pack build is sharded by the recipe itself: each farm builds the unit subset that one rule over the unit key
+      gives it, into the one content-keyed store, and the shards' stores are merged by key. There is no second build path.
+  - **Leads:**
+    - one message per finished item, no interim reports;
+    - no re-reading of large files already read;
+    - compact the context before 250k tokens;
+    - an idle lead with nothing on the path waits; it does not invent work.
+  - **Off the path:** no verifier, census, refactor or proof waits for nothing else. Everything that does not block one of
+    the four steps waits until after the first frame.
+
+## Orchestrator decision of 2026-11-15 09:45Z: message discipline (binding for every session)
+
+Measured (fleet study, 09:20Z): 87 % of the orchestrator's turns were started by messages from other sessions, and half
+of those turns did nothing. Each turn re-reads the whole context, 200-300k tokens. That is where the weekly limit goes.
+
+- Send a message only when the receiver must act on it now: a ruling it needs, a blocker, or a finished item it takes
+  over.
+  - No acknowledgements, no "resumed", no "kept N workers", no FYI, no progress reports.
+  - A reply that only says "accepted" is not sent.
+- Status lives only in `journal/status/<layer>.md`, pushed when an item is finished. The orchestrator reads the status
+  files in its hourly check. A status commit is not a message.
+- One message per finished item, carrying everything in it: the commit, the global numbers, what is next. A worker
+  reports to its lead once per item, not per step.
+- Send with `priority: "later"`, unless it unblocks the receiver now.
+- Farm prompts do not tell the farm to read CLAUDE.md: it is loaded automatically.
+
+## Orchestrator decision of 2026-11-15 10:20Z: a candidate is frozen (binding for L1 and its workers)
+
+- The trunk last moved on 2026-11-12. The candidate cand2 is 620 commits ahead of it, and every new item resets its
+  verdict, so nothing merges. That is the cause.
+- Rule:
+  - A candidate's scope is frozen when its verdict starts.
+  - It takes only fixes for the reds of its own verdict.
+  - Every new item goes to the next candidate (cand3), which opens from the trunk right after the merge.
+  - Small candidates, merged often: at least one trunk merge a day while anything is open.
+
+## Orchestrator decision of 2026-11-15 10:30Z: call economy (binding for every session)
+
+Measured by the research session: spend = API calls × the whole context, because every tool call re-reads the full
+context. Mail made up 89 % of L1's calls; re-reading sources made up about 38 % of the workers' calls. So make fewer
+calls, not smaller ones.
+
+- **Calls:**
+  - Run independent tool calls in parallel, in one response.
+  - Chain dependent shell steps in one Bash call (`a && b`).
+  - Read a file once, in full, and re-read only a range that changed. To find a symbol, use one `rg -n` with context,
+    not a series of `sed -n` slices.
+  - Put a script you run more than once in a file instead of retyping it.
+- **Mail:**
+  - Send a message only when the receiver must act or decide, or when a stage is finished. Blockers go at once.
+  - One message per stage: collect the points and send them together.
+  - Read all queued notifications in one ReadNotifications call. Decide, then send every reply in one response, as
+    parallel send_message calls. Never send an acknowledgement.
+  - Use priority "next", unless the receiver must stop what it is doing.
+  - To learn a worker's state, read its status file or call list_sessions with children: true. Do not ask the worker.
+  - Commit the status file once per stage, not after each message.
+- **Code reading goes to a subagent (workers and leads).**
+  - Use the Agent tool, type Explore, when an answer needs more than 3 read or search calls: tracing a function,
+    comparing files, finding every user of a symbol.
+  - The brief gives the question, the paths, what you already know and the output you want: file:line references and
+    identifiers quoted verbatim, under 300 words.
+  - Check every hash, address or id it returns with one targeted command before you commit or send it.
+  - When you know the file and the place, do the one read or grep yourself.
+- **Addendum, 12:45Z (cand2 cannot go green on its own reds).** The candidate merges cut, under the trunk rule "code that
+  does not pass is removed from the trunk whole".
+  - admit.json keeps only the roots that are green over every gate.
+  - A test without a certified reference, and an uncertified generator together with the roots that use it, leave the
+    candidate. Their completion stays on the lead's branch.
+  - A gate's own failing selftest is fixed, not cut.
+  - The warm verdict stays at most 300 s.
