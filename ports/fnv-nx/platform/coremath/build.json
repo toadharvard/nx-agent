@@ -20,7 +20,9 @@
   ],
   "asm": []
  },
- "include": [],
+ "include": [
+  "ports/fnv-nx/platform/coremath/inc"
+ ],
  "units": "all",
  "sources": "units.list",
  "external": [
@@ -49,7 +51,9 @@
    ],
    "inputs": [],
    "outputs": [
-    "units.list"
+    "units.list",
+    "inc/tint.h",
+    "inc/dint_log2p1.h"
    ]
   }
  ]
