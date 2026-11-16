@@ -180,7 +180,9 @@ check("tests: a test file does not see the gate's GATE_* variables", rc == 0 and
 
 # ---- gates.d
 sys.path.insert(0, VERIFY)
-import gatesdir  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gatesdir  # noqa: E402
 spec = gatesdir.load_dir(os.path.join(VERIFY, "gates.d"))
 files_d = sorted(f[:-5] for f in os.listdir(os.path.join(VERIFY, "gates.d")))
 check("gates.d: no gates.json is tracked and every file is one gate named like it", not os.path.exists(os.path.join(VERIFY, "gates.json"))
@@ -323,7 +325,7 @@ check("l1 merge: dropping a gate is blocked by the ratchet", rc == 2 and "ratche
 # ---- environment of the verdict (envcheck first, env_id in the verdict, merge needs the same env_id)
 ENVF = os.path.join(VERIFY, "env.json")
 sys.path.insert(0, VERIFY)
-import envcheck  # noqa: E402
+from fnvnx.verify import envcheck  # noqa: E402
 want_id = envcheck.env_id(json.load(open(ENVF)))
 r = small_repo()
 vd = tmp("verdicts")
@@ -554,7 +556,7 @@ check("l1 verdict: gates get GATE_CACHE=VDIR/cache; same tree again reuses the k
 # ---- l1 merge --remote: the remote branch moves only from BASE to the judged merge commit, atomically
 import contextlib  # noqa: E402
 import io  # noqa: E402
-import l1 as l1mod  # noqa: E402
+from fnvnx.verify import l1 as l1mod  # noqa: E402
 
 def l1_inproc(*a, hook=None):
     """l1.main in this process (so a hook can stand in for the verdict step); returns (rc, stdout)."""

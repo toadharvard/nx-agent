@@ -11,11 +11,12 @@ Gate: 0 sites.  A "pinned" guest (one that may only run at its link base) is not
 Exit status 1 otherwise.  Counts only on stdout.
 --work: a directory for the response file and the site list (nothing is read from TMPDIR or the process id).
 Gate file `pcrel` ($GATE_OUT/pcrel.json, gatefile.py): universe = the PC-relative relocations examined (second summary line
-of the tool), certified = examined - offending sites, uncertified = `object:section+offset:symbol` of the first 50 (sorted).
+of the tool), certified = examined - offending sites, uncertified = every `object:section+offset:symbol` (sorted).
 """
 import argparse, glob, os, re, subprocess, sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name (contract.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 from fnvnx.contract import gatefile
 
 HERE = os.path.dirname(os.path.abspath(__file__))

@@ -15,7 +15,7 @@ The pull-in closure that ld.py modelled before the link is gone: the linker's ow
 linker took or dropped differently from a model cannot make the output pass with an undefined reference.
 On success it writes the three words of the crt0 header into the ELF (the same rule as elf2nso.py `patch_guest_header`): +16 the link
 address of the first PT_LOAD, +20 the bytes from there to the end of the last PT_LOAD (memsz), page aligned, +24 bit 0 = relocatable (DF_1_PIE).
-Outputs in --out: NAME.elf (the final ELF; none when a rule fails) and the gate file `ld` ($GATE_OUT/ld.json, full id list in $GATE_OUT/ld.ids,
+Outputs in --out: NAME.elf (the final ELF; none when a rule fails) and the gate file `ld` ($GATE_OUT/ld.json, every id in the file,
 GATE_OUT = --out): universe = the input names + the dynamic relocation entries (RELA entries, RELR words) + 2 (the PIE mark, the crt0 header);
 certified = those that hold.  Ids: `cover:<name>` (an input name the output does not define; `weak:<name>` when the inputs only reference it
 weakly: the linker resolves such a reference to 0 and drops it from the symbol table, so only the inputs' tables show it), `output-undefined:<name>`, `dynreloc:..`, `pie`,
@@ -28,8 +28,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import argparse, os, re, shutil, struct, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 from fnvnx.contract import gatefile
-import gateids
 
 EM_AARCH64, SHT_SYMTAB, SHN_UNDEF = 183, 2, 0
 PT_LOAD, PT_DYNAMIC = 1, 2
@@ -431,7 +431,6 @@ def host_main(a):
     universe = len(defs | strong | weak) + nexp + 2
     detail = '%s image, %d input names, %d library definitions, %d exports' % (a.kind, len(defs | strong | weak), len(libdef), nexp)
     gatefile.write('ld', universe, universe - len(ids), ids, detail)
-    gateids.write_ids('ld', ids)
     for i in ids:
         print('ldcheck: %s' % i, file=sys.stderr)
     print('ldcheck: %s' % detail, file=sys.stderr)
@@ -491,7 +490,6 @@ def main():
     if hdr:
         detail += '; header base %#x size %#x flags %d' % hdr
     gatefile.write('ld', universe, universe - len(ids), ids, detail)
-    gateids.write_ids('ld', ids)
     for i in ids:
         print('ldcheck: %s' % i, file=sys.stderr)
     print('ldcheck: %s' % detail, file=sys.stderr)

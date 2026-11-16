@@ -9,6 +9,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..', ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): another root's module by its qualified name (verify.X, contract.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 from fnvnx.verify import cas
 from fnvnx.contract import imagerec
 from fnvnx.contract import treehash

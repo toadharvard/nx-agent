@@ -16,9 +16,11 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..'))
-import gate_r7
-import synth
-from synth import member, bclass, vbclass, vfunctab, cstr, num
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import gate_r7
+from fnvnx.link.tests import synth
+from fnvnx.link.tests.synth import member, bclass, vbclass, vfunctab, cstr, num
 
 fails = []
 
@@ -196,7 +198,7 @@ try:
         g, c = fixture(tmp + '/m_' + what.replace(' ', '_'), text, synth.debug_object(SERIES))
         u, r, _ = gate_r7.check(g, c)
         check('malformed ' + what, (u, len(r), r[0].startswith('u:error: ')), (1, 1, True))
-    import objsections
+    from fnvnx.link import objsections
     for v in ('none', 'internal', 'external', 'c'):
         rows = objsections.parse_layout(line('k', 1, 1, linkage=v).encode(), 'x')
         check('linkage %s is accepted' % v, [r.linkage for r in rows], [v])
@@ -260,10 +262,9 @@ try:
     rc, doc, out = go(tmp + '/a/g', tmp + '/a/c', tmp + '/o1')
     check('red file', (rc, doc['format'], doc['name'], doc['status'], doc['universe'], doc['certified']),
           (1, 'fnvnx-gate/1', 'r7', 'red', len(keys), len([k for k, v in WANT.items() if not v])))
-    check('red file lists at most 50, sorted', doc['uncertified'], sorted(doc['uncertified'])[:50])
+    check('red file lists every id, sorted', doc['uncertified'], sorted(doc['uncertified']))
     check('detail', doc['detail'].startswith('r7: %d of %d records certified; ' % (len(keys) - len(want), len(keys))), True)
-    with open(tmp + '/o1/r7.ids') as fh:
-        check('ids file has all', len(fh.read().split('\n')) - 1, len(want))
+    check('the file has all ids and their count', (len(doc['uncertified']), doc['uncertified_n']), (len(want), len(want)))
     rc, doc, _ = go(gu, cu, tmp + '/o2', ['--units', units])
     check('green file', (rc, doc['status'], doc['universe'], doc['certified'], doc['uncertified']), (0, 'green', 1, 1, []))
     rc, doc, _ = go(ge, tmp + '/a/c', tmp + '/o3')

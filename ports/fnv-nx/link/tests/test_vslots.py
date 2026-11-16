@@ -13,9 +13,10 @@ atexit.register(shutil.rmtree, tempfile.tempdir, True)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.join(HERE, '..')]
-import abi_fixture as F
-import abi_gaterun
-import vslots as G
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link.tests import abi_fixture as F
+from fnvnx.link.tests import abi_gaterun
+from fnvnx.link import vslots as G
 
 fails = []
 

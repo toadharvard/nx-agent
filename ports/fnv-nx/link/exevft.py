@@ -43,7 +43,8 @@ import capstone
 from capstone import x86_const as X
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import abi_msvcname
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import abi_msvcname
 from fnvnx.contract import exefacts
 
 FORMAT = 'fnvnx-exevft/2'

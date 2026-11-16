@@ -9,7 +9,7 @@ its flags and every header the unit really includes (a function of the compiler 
 key). The set is cached per unit under GATE_CACHE/objstub.
 No doubles in tests (doubles.py, owner order of 2026-11-11 night): per declared test of every root (RECIPE.md "tests"), symbols its own objects define INTERSECT
 symbols the objects of ALL product roots define = EMPTY, the test link holds every product unit, no GLOBAL symbol twice among a root's product objects.
-Result fields: tests_total, tests_with_doubles, double_symbols, doubles (first 50). No product root: universe 0, green.
+Result fields: tests_total, tests_with_doubles, double_symbols, doubles. No product root: universe 0, green.
 Wine rows: verify/wine_fixme.tsv of the tree under test (objstub.read_wine_table; missing or malformed is a gate error, red); the result
 holds "wine_fixme": {id: call sites} so growth of the simplified bodies is visible.
 Declared-machine rows: verify/declared_machine.tsv of the tree under test (objstub.read_declared_table; missing or malformed is a gate error, red),
@@ -18,7 +18,7 @@ judged by the same rule as the Wine rows through `fnvnx_declared_machine(id)`; t
 Reach facts: GATE_CACHE/reach/<git tree>/reach.facts.tsv (rows fact_id<TAB>sha256, written by the gate `reach`, which does not exist yet).
 While the file is absent, every call of fnvnx_reach_violation is the finding `reach-uncertified`.
 Universe: every function of every object of every product root, every uncovered gap, and a root whose recipe is invalid or whose build is
-red (one item `root`, uncertified). Certified: items with no finding. uncertified: the first 50 `unit path:symbol`, sorted. Per object results
+red (one item `root`, uncertified). Certified: items with no finding. uncertified: every `unit path:symbol`, sorted. Per object results
 are cached by (object sha256, os_layer flag, analysis version, the terminators the object mentions) under GATE_CACHE/objstub/<key>.json;
 uncached objects run in --jobs processes (default os.cpu_count()). Exit 0 iff green; unreadable input is red with the reason in detail."""
 import json
@@ -28,11 +28,13 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import doubles  # noqa: E402
-import gate_build  # noqa: E402
-import objstub  # noqa: E402
-import recipe  # noqa: E402
-import unitstage  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import doubles  # noqa: E402
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import objstub  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
+from fnvnx.verify import unitstage  # noqa: E402
 
 
 def profile_findings(root, target, objs):
@@ -180,13 +182,13 @@ def main(argv):
     else:
         status, detail = "green", "%d functions in %d objects of %d roots, no trap path, no vacuous body" % (len(items), len(results), len(roots))
     res = {"format": "fnvnx-gate/1", "name": "objstub", "status": status, "universe": len(items), "certified": cert,
-           "uncertified": bad[:50], "detail": detail, "wine_fixme": {str(k): v for k, v in objstub.wine_counts(results).items()},
+           "uncertified": bad, "detail": detail, "wine_fixme": {str(k): v for k, v in objstub.wine_counts(results).items()},
            "declared_machine": {str(k): v for k, v in objstub.declared_counts(results).items()},
            "tests_total": dstats["tests_total"], "tests_with_doubles": dstats["tests_with_doubles"], "double_symbols": dstats["double_symbols"],
            "doubles": sorted("%s: %s" % (o, d) for o, _, k, d in finds if k in ("test-double", "test-omits-unit", "test-not-linked", "product-duplicate"))[:50],
            "image": image, "trap_body": stats.get("trap_body", 0), "handler_justified": {k[8:]: v for k, v in sorted(stats.items()) if k.startswith("handler_")},
            "assume_calls": objstub.assume_counts(results, (registry, gen_ids) if not why else None)}
-    with open(os.path.join(os.environ["GATE_OUT"], "objstub.findings.tsv"), "w") as fh:   # the whole list (the result JSON holds the first 50 ids)
+    with open(os.path.join(os.environ["GATE_OUT"], "objstub.findings.tsv"), "w") as fh:   # the whole list
         fh.write("object\tfunction\tkind\tdetail\n" + "".join("%s\t%s\t%s\t%s\n" % (o, n, k, d.replace("\t", " ").replace("\n", " ")) for o, n, k, d in sorted(finds)))
     with open(os.path.join(os.environ["GATE_OUT"], "objstub.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)

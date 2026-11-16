@@ -22,12 +22,13 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import cas  # noqa: E402
-import gate_build  # noqa: E402
-import gate_imports  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import gate_imports  # noqa: E402
 from fnvnx.contract import exportgen  # noqa: E402
 from fnvnx.contract import hive  # noqa: E402
-import recipe  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 IN_KEYS = {"format", "sites", "declared", "seed", "seed_unit"}
 
@@ -132,7 +133,7 @@ def main():
         if tmp and not os.environ.get("GATE_KEEP"):
             shutil.rmtree(tmp, ignore_errors=True)
     status = "green" if u == c else "red"
-    doc = {"format": "fnvnx-gate/1", "name": "machine", "status": status, "universe": u, "certified": c, "uncertified": ids[:50],
+    doc = {"format": "fnvnx-gate/1", "name": "machine", "status": status, "universe": u, "certified": c, "uncertified": ids,
            "detail": detail}
     out = os.environ["GATE_OUT"]
     with open(os.path.join(out, "machine.json"), "w") as fh:

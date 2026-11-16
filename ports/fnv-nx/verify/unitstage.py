@@ -48,11 +48,13 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import cas  # noqa: E402
-import sandbox  # noqa: E402
-import toolflags  # noqa: E402
-import unitview  # noqa: E402
-from unitview import UnitError, parse_deps  # noqa: E402,F401
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import sandbox  # noqa: E402
+from fnvnx.verify import toolflags  # noqa: E402
+from fnvnx.verify import unitview  # noqa: E402
+from fnvnx.verify.unitview import UnitError, parse_deps  # noqa: E402,F401
 
 
 def sandbox_src(rel):

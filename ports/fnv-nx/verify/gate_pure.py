@@ -15,7 +15,7 @@ the host: clock, processes, directory listings; their correctness is the busines
 imports one is uncertified, and so is a file that imports one that imports it (those are in the universe, so each is judged itself:
 a module that imports recipe or gate_build lies in verify/ or is red). An entry point or a reached file that is not in a root
 naming gate "pure" is uncertified (nothing judged it).
-uncertified: the first 50 uncertified paths, sorted. Zero items: green, universe 0, said in "detail". Exit 0 iff the result is green."""
+uncertified: every uncertified path, sorted. Zero items: green, universe 0, said in "detail". Exit 0 iff the result is green."""
 import json
 import os
 import shutil
@@ -25,9 +25,11 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import gate_admit  # noqa: E402
-import gatesdir  # noqa: E402
-from gate_admit import imports_errors  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_admit  # noqa: E402
+from fnvnx.verify import gatesdir  # noqa: E402
+from fnvnx.verify.gate_admit import imports_errors  # noqa: E402
 
 ADMIT = "ports/fnv-nx/verify/admit.json"
 TREE = "ports/fnv-nx"
@@ -143,7 +145,7 @@ def main(argv):
     else:
         status, detail = "green", "%d of %d files accepted by puregate" % (len(universe), len(universe))
     res = {"format": "fnvnx-gate/1", "name": "pure", "status": status, "universe": len(universe), "certified": len(universe) - len(unc),
-           "uncertified": unc[:50], "detail": detail}
+           "uncertified": unc, "detail": detail}
     with open(os.path.join(os.environ["GATE_OUT"], "pure.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)
     return 0 if status == "green" else 2

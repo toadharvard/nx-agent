@@ -32,9 +32,11 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import gate_build  # noqa: E402
-import gate_linkstrict  # noqa: E402
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import gate_linkstrict  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 READELF = "aarch64-linux-gnu-readelf"
 ROW = re.compile(r"^\s*([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+(R_\w+)\s*(.*)$")
@@ -168,7 +170,7 @@ def main():
     else:
         status, detail = "green", "%d items of %d guest roots; relocations by family: %s" % (len(items), len(groups), cnt)
     res = {"format": "fnvnx-gate/1", "name": "tlsmodel", "status": status, "universe": len(items), "certified": cert,
-           "uncertified": sorted("%s:%s" % x for x in bad)[:50], "detail": detail}
+           "uncertified": sorted("%s:%s" % x for x in bad), "detail": detail}
     with open(os.path.join(os.environ["GATE_OUT"], "tlsmodel.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)
     print("tlsmodel: %s %d/%d %s" % (status, cert, len(items), detail[:300]))

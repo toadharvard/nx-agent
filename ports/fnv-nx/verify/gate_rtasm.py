@@ -48,9 +48,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "link"))
 sys.path.insert(0, os.path.join(HERE, "..", "contract"))
-import a64obj  # noqa: E402
-import a64order as A  # noqa: E402
-import relocs  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import a64obj  # noqa: E402
+from fnvnx.link import a64order as A  # noqa: E402
+from fnvnx.link import relocs  # noqa: E402
 from capstone import arm64_const as K  # noqa: E402
 
 JB_BASE = 1 << 20          # the synthetic frame offset that x0 of a jmp_buf routine holds at entry (far above any real frame)
@@ -578,8 +580,8 @@ PROBE_ROOT = "ports/fnv-nx/verify/probes"   # the admitted root of the jmp_buf p
 def jmpbuf_facts(repo, cache):
     """(routine names, sizeof(jmp_buf)) of the guest runtime: the size from the probe root's object (built by the recipe with the pinned compiler), the routines
     from the one setjmp.h of the pinned runtime external (guest_compiler.json). Raises ValueError when the probe is red or the header is not exactly one file."""
-    import gate_build  # noqa: E402
-    import recipe  # noqa: E402
+    from fnvnx.verify import gate_build  # noqa: E402
+    from fnvnx.verify import recipe  # noqa: E402
     res, _ = gate_build.ensure(PROBE_ROOT, cache, repo)
     if res["status"] != "green":
         raise ValueError("jmp_buf probe root: build %s" % res["status"])
@@ -595,8 +597,8 @@ def jmpbuf_facts(repo, cache):
 
 def judge_root_objects(repo, cache, root, jb=((), 0)):
     """the root's built objects (every unit of a guest product root) -> (Report | None, why)"""
-    import gate_build  # noqa: E402
-    import recipe  # noqa: E402
+    from fnvnx.verify import gate_build  # noqa: E402
+    from fnvnx.verify import recipe  # noqa: E402
     try:
         res, _ = gate_build.ensure(root, cache, repo)
     except recipe.RecipeError as e:
@@ -623,8 +625,8 @@ def report_items(rep):
 
 def gate_main():
     import shutil  # noqa: E402
-    import gate_build  # noqa: E402
-    import recipe  # noqa: E402
+    from fnvnx.verify import gate_build  # noqa: E402
+    from fnvnx.verify import recipe  # noqa: E402
     repo, tmp = ".", None
     cache = os.environ.get("GATE_CACHE")
     if not cache:
@@ -658,7 +660,7 @@ def gate_main():
             shutil.rmtree(tmp, ignore_errors=True)
     detail = "; ".join(why) or ("%d items of %d guest roots" % (u, len(roots)) if roots else "no guest root (universe 0)")
     res = {"format": "fnvnx-gate/1", "name": "rtasm", "status": "red" if why else "green", "universe": u, "certified": c,
-           "uncertified": sorted(ids)[:50], "detail": detail[:900]}
+           "uncertified": sorted(ids), "detail": detail[:900]}
     with open(os.path.join(os.environ["GATE_OUT"], "rtasm.json"), "w") as f:
         json.dump(res, f, sort_keys=True)
     print("rtasm: %s %d/%d %s" % (res["status"], c, u, detail[:200]))
@@ -692,7 +694,7 @@ def cli_main():
     jbn = jmpbuf_size(a.jmpbuf_probe, a.jmpbuf_symbol) if a.jmpbuf_probe else 0
     prefer = None
     if a.guest_pin:
-        import recipe
+        from fnvnx.verify import recipe
         prefer = '-DPREFER_SIZE_OVER_SPEED' in recipe.runtime_cflags(json.load(open(a.guest_pin)))
         print('runtime_cflags carries -DPREFER_SIZE_OVER_SPEED: %s' % prefer)
     lse = lse_models(open(a.lse_source).read()) if a.lse_source else None

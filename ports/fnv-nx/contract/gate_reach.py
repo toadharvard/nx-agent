@@ -71,7 +71,7 @@ that the facts' ranges contain every executed instruction of the images (A4).  T
 (sha256 of the PE and of the ranges file), the request, the GetProcAddress rows used, the assumptions and the per-site proof chain.
 
 Outputs ($GATE_OUT, gatefile.py): reach.json (gate `reach`; universe = facts, certified = certified facts; uncertified ids
-`<fact_id>:<reason>:<image>:<address>`, reason `assumption:A7` etc. may contain a colon: split the last two fields off), reach.ids (ASM-016)
+`<fact_id>:<reason>:<image>:<address>`, reason `assumption:A7` etc. may contain a colon: split the last two fields off), reach.json lists every id (ASM-016)
 (all of them, sorted), reach.facts.tsv (`fact_id<TAB>sha256 of the certificate`, certified facts only, sorted by id).  --out: per
 fact status, sites examined and reasons.  --facts-h: the C header (FNVNX_REACH_<DLL>_<NAME>_<n> with n the 1-based position among
 the requests of the same dll!name in canonical order; FNVNX_<request id> for the platform's own names; FNVNX_REACH_TABLE_ID).
@@ -98,11 +98,11 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): contract.X
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 from fnvnx.contract import argflow
 from fnvnx.contract import imagerec
 from fnvnx.contract import gatefile
 from fnvnx.contract import memfx
-from fnvnx.link import gateids
 from fnvnx.contract import gpa_names
 from fnvnx.contract import gatecert
 from fnvnx.contract import iat
@@ -454,7 +454,6 @@ def gate(facts, certs, g, nimages):
         open_note += '; %d closure_key facts are measurement only (open dynamic loads: not valid yet)' % meas
     detail = '%d facts, %d certified over %d images; %s' % (len(facts), len(facts) - uf, nimages, open_note)
     gatefile.write('reach', len(facts), len(facts) - uf, unc, detail)
-    gateids.write_ids('reach', unc)
     out = os.environ.get('GATE_OUT')
     if out:
         write(os.path.join(out, 'reach.facts.tsv'), ''.join('%d\t%s\n' % (i, certs[i]) for i in sorted(certs)))
@@ -616,7 +615,6 @@ def main_objects(a):
     uni, red = link_check(paths, nids, certified)
     detail = '%s references: %d of %d red over %d files' % (SYMBOL, len(red), uni, len(paths))
     gatefile.write('reachlink', uni, uni - len(red), red, detail)
-    gateids.write_ids('reachlink', red)
     if a.out:
         write(a.out, ''.join(r + '\n' for r in red))
     print(detail)

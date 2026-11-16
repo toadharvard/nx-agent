@@ -12,7 +12,7 @@ A product root DECLARES its imports in `<root>/imports.in.json` ("fnvnx-imports-
    (a tracked path of the root, {root, path} of a tool root such as bridgefacts, {root, output} of a root the recipe `uses`, {external, path} or {stage, path})}
 The external is checked out from the build's own fetch (GATE_CACHE/external/<commit>) and its tree hash must equal tree_sha256.
 Universe (gate_build.quantify, the convention of build/objstub): the admitted product roots; per root every row of the bridge table (contract/bridgetable.derive). A root without imports.in.json is one red item, unless it is header-only (gate_build.unitless: no unit, no link; it holds no code, so it has no imports by construction): 0 items, or outside the class `import-provider`: the symbol table of its build defines no native symbol of the bridge table (natives_of: the table the declaring roots derive), so it has no import body: 0 items. A root that defines one enters the class and is the one red item. If no root declares imports the table is not known and the root is the one red item. Certified: rows with no class
-(contract/imports.py). uncertified: the first 50 ids `dll!name`; imports.ids lists `id TAB class`, sorted. No product root: universe 0, green. Bad input, a red build, an invalid recipe or an
+(contract/imports.py). uncertified: every id `dll!name`; imports.ids lists `id TAB class`, sorted. No product root: universe 0, green. Bad input, a red build, an invalid recipe or an
 external that fails its hash is red with the reason in detail. Exit 0 iff green."""
 import os
 import sys
@@ -26,13 +26,14 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 from fnvnx.contract import bridgetable  # noqa: E402
 from fnvnx.contract import exportgen  # noqa: E402
-import cas  # noqa: E402
-import gate_build  # noqa: E402
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import gate_build  # noqa: E402
 from fnvnx.contract import imports  # noqa: E402
-import linkset  # noqa: E402
-import recipe  # noqa: E402
+from fnvnx.verify import linkset  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 IN_KEYS = {"format", "names", "specs", "extra", "extra_other", "va"}
 EXPORTS_ROOT = "ports/fnv-nx/contract/exports"   # the producer of exports.tsv: the `.fnvnx.export` records of the link set (contract/exports/build.json)
@@ -82,7 +83,7 @@ def root_rows(root, rec, res, decl, repo, cache, others):
     """-> [(id, class)] of one root that declares imports"""
     rows, errors, extra_of, syms = bridge_of(root, rec, res, decl, repo, cache)
     if errors:
-        raise ValueError("%d bridge errors, first: %s" % (len(errors), errors[0]))
+        raise ValueError("%d bridge errors: %s" % (len(errors), "; ".join(errors)))
     other = {k for k, i in sorted(extra_of.items()) if i >= len(decl["extra"])}
     return imports.judge(rows, syms, others, other)
 
@@ -104,7 +105,7 @@ def natives_of(repo, cache, admit, roots):
             raise ValueError("%s: build red at stage %s" % (r2, res["failure"]["stage"]))
         rows, errors, _, _ = bridge_of(r2, recipe.load_recipe(repo, admit, r2), res, decl, repo, cache)
         if errors:
-            raise ValueError("%d bridge errors, first: %s" % (len(errors), errors[0]))
+            raise ValueError("%d bridge errors: %s" % (len(errors), "; ".join(errors)))
         out |= {r[6] for r in rows if r[6] != "-"}
     if not declared:
         raise ValueError("no root declares imports: the bridge table is not known")
@@ -168,7 +169,7 @@ def main():
         if tmp and not os.environ.get("GATE_KEEP"):
             shutil.rmtree(tmp, ignore_errors=True)
     status = "green" if u == c else "red"
-    doc = {"format": "fnvnx-gate/1", "name": "imports", "status": status, "universe": u, "certified": c, "uncertified": ids[:50],
+    doc = {"format": "fnvnx-gate/1", "name": "imports", "status": status, "universe": u, "certified": c, "uncertified": ids,
            "detail": detail}
     out = os.environ["GATE_OUT"]
     with open(os.path.join(out, "imports.json"), "w") as fh:

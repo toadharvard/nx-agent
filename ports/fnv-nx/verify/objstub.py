@@ -201,6 +201,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 
 HERE, NOP = os.path.dirname(os.path.abspath(__file__)), 0xD503201F
 A64_BUILD = "g++ -std=c++17 -O1 $(llvm-config-18 --cxxflags) a64access.cc -o OUT $(llvm-config-18 --ldflags --libs aarch64 mc mcdisassembler support)"
@@ -1003,7 +1004,7 @@ def image_check(path, errno):
     skipped: a size that is not a multiple of 4 or leaves the file, a word LLVM rejects, a data island ($d mapping symbol inside the range), a load/store
     word without a memory operand. errno reached through a TLS symbol (form "tls") is kind `unjudged` for the root: its stores are not read."""
     if open(path, "rb").read(20)[18:20] == (62).to_bytes(2, "little"):   # the host profile's image: the same rule over x86-64 (objstub_x64.image_check)
-        import objstub_x64
+        from fnvnx.verify import objstub_x64
         return objstub_x64.image_check(path, errno)
     form, sym = errno
     im = Image(path, sym)
@@ -1294,7 +1295,7 @@ def check_obj(path, terms, os_layer, probe=None, machine=None):
     if machine is not None and o.machine != machine:
         raise ValueError("%s: e_machine %d, the root's profile requires %d" % (path, o.machine, machine))
     if o.machine == 62:
-        import objstub_x64
+        from fnvnx.verify import objstub_x64
         return objstub_x64.check_obj(o, path, terms, os_layer, probe, vjson, read_cites, assume_id)
     items, finds, exit_ok, extra = [], [], set(), {"reach": [], "wine": [], "wine_id": {}, "wine_nz": {}, "cite_sym": {}, "cite": {}, "terms": [], "term_def": [], "alias": {}, "tb": {}, "globals": [], "dref": [], "nr": {}, "nr_tail": {}, "flag": None, "tabs": {}, "assume": []}
     pw = {}   # the probe (recipe error_abi kind flag): name -> (words, a, b, stores, calls) of every function

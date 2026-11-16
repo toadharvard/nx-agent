@@ -12,11 +12,13 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path[:0] = [VERIFY, HERE, os.path.join(VERIFY, "..", "link"), os.path.join(VERIFY, "..", "contract")]
-import gate_build  # noqa: E402
-import odr  # noqa: E402
-import recipe  # noqa: E402
-import test_plugins as TP  # noqa: E402
-import test_recipe as TR  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.link import odr  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
+from fnvnx.verify.tests import test_plugins as TP  # noqa: E402
+from fnvnx.verify.tests import test_recipe as TR  # noqa: E402
 
 FAILED = []
 

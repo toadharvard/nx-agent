@@ -12,7 +12,9 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import cas  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas  # noqa: E402
 
 ROOT = tempfile.mkdtemp(dir="/root/l4/sbx-test" if os.path.isdir("/root/l4/sbx-test") else os.path.expanduser("~"),
                         prefix="sbx-")
@@ -124,7 +126,7 @@ def main():
     if os.geteuid() != 0 or not shutil.which("busybox") or not shutil.which("gcc"):
         print("FAIL prerequisites: need root, busybox, gcc")
         return 1
-    import sandbox  # noqa: E402  (case 0: importable)
+    from fnvnx.verify import sandbox  # noqa: E402  (case 0: importable)
     check("importable", hasattr(sandbox, "main"))
     bb = fresh("bb")
     shutil.copy(shutil.which("busybox"), os.path.join(bb, "busybox"))

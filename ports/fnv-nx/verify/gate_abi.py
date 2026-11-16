@@ -28,17 +28,18 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "link"))
-import abi  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import abi  # noqa: E402
 from fnvnx.contract import bridgetable  # noqa: E402
-import elfobj  # noqa: E402
-import gate_argorder  # noqa: E402
-import gate_build  # noqa: E402
-import gate_imports  # noqa: E402
+from fnvnx.link import elfobj  # noqa: E402
+from fnvnx.verify import gate_argorder  # noqa: E402
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import gate_imports  # noqa: E402
 from fnvnx.contract import l2sections  # noqa: E402
-import objsections  # noqa: E402
-import odr  # noqa: E402
-import ctypes_compat  # noqa: E402
-import recipe  # noqa: E402
+from fnvnx.link import objsections  # noqa: E402
+from fnvnx.link import odr  # noqa: E402
+from fnvnx.link import ctypes_compat  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 
 DATAMODEL = os.path.join(HERE, "..", "toolchain", "msvcmodel", "DATAMODEL.json")
@@ -264,7 +265,7 @@ def main():
             shutil.rmtree(tmp, ignore_errors=True)
     detail = "; ".join(why) or ("%d items of %d native guest roots" % (u, len(roots)) if roots else "no native guest root (universe 0)")
     res = {"format": "fnvnx-gate/1", "name": "abi", "status": "red" if why else "green", "universe": u, "certified": c,
-           "uncertified": sorted(ids)[:50], "detail": detail[:900]}
+           "uncertified": sorted(ids), "detail": detail[:900]}
     with open(os.path.join(os.environ["GATE_OUT"], "abi.json"), "w") as f:
         json.dump(res, f, sort_keys=True)
     print("abi: %s %d/%d %s" % (res["status"], c, u, detail[:200]))

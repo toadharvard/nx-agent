@@ -269,10 +269,10 @@ gatefile - the result file of a gate, in the shape the L4 merge verdict reads (v
 
     write(name, universe, certified, uncertified_ids, detail)  ->  $GATE_OUT/<name>.json, or nothing if GATE_OUT is unset
 
-    {"certified":C,"detail":"...","format":"fnvnx-gate/1","name":N,"status":"green"|"red","uncertified":[<=50 ids],"universe":U}
+    {"certified":C,"detail":"...","format":"fnvnx-gate/1","name":N,"status":"green"|"red","uncertified":[every id],"uncertified_n":N,"universe":U}
 
 status is green exactly when certified == universe (completeness of certificates, not a run counter); `uncertified`
-is the first 50 of the sorted ids (strings), so the file is a function of its arguments.  Ids of game data are written
+is every uncertified id, sorted (strings), and `uncertified_n` its count, so the file is a function of its arguments.  Ids of game data are written
 to $GATE_OUT only, never committed.  The only environment variable read is the declared GATE_OUT.
 ```
 
@@ -1406,7 +1406,7 @@ A product root DECLARES its imports in `<root>/imports.in.json` ("fnvnx-imports-
    "extra": [row files inside it, judged against this root], "extra_other": [row files of another owner's build, judged against the other roots]}
 The external is checked out from the build's own fetch (GATE_CACHE/external/<commit>) and its tree hash must equal tree_sha256.
 Universe (gate_build.quantify, the convention of build/objstub): the admitted product roots; per root every row of the bridge table (contract/bridgetable.derive). A root without imports.in.json is one red item. Certified: rows with no class
-(contract/imports.py). uncertified: the first 50 ids `dll!name`; imports.ids lists `id TAB class`, sorted. No product root: universe 0, green. Bad input, a red build, an invalid recipe or an
+(contract/imports.py). uncertified: every id `dll!name`; imports.ids lists `id TAB class`, sorted. No product root: universe 0, green. Bad input, a red build, an invalid recipe or an
 external that fails its hash is red with the reason in detail. Exit 0 iff green.
 ```
 
@@ -1624,7 +1624,7 @@ holds "wine_fixme": {id: call sites} so growth of the simplified bodies is visib
 Reach facts: GATE_CACHE/reach/<git tree>/reach.facts.tsv (rows fact_id<TAB>sha256, written by the gate `reach`, which does not exist yet).
 While the file is absent, every call of fnvnx_reach_violation is the finding `reach-uncertified`.
 Universe: every function of every object of every product root, every uncovered gap, and a root whose recipe is invalid or whose build is
-red (one item `root`, uncertified). Certified: items with no finding. uncertified: the first 50 `unit path:symbol`, sorted. Per object results
+red (one item `root`, uncertified). Certified: items with no finding. uncertified: every `unit path:symbol`, sorted. Per object results
 are cached by (object sha256, os_layer flag, analysis version, the terminators the object mentions) under GATE_CACHE/objstub/<key>.json;
 uncached objects run in --jobs processes (default os.cpu_count()). Exit 0 iff green; unreadable input is red with the reason in detail.
 ```
@@ -1652,7 +1652,7 @@ Flow, computed from the syntax trees of all items together (call structure, not 
            (exepin.py is the one item allowed to open its own parameter: `load_exe` is the function named in the gate).
 A tool that gets the exe path any other way (not `--exe`, not the file name) is outside the rule: that is the stated assumption (ASM-102), and the
 sources are the only two ways the tools of this tree name the exe.
-Result: universe = items, certified = items without a violation, uncertified = the first 50 `path:line what`. Green iff all certified.
+Result: universe = items, certified = items without a violation, uncertified = every `path:line what`. Green iff all certified.
 ```
 
 ## verify/gate_oracle.py
@@ -1791,7 +1791,7 @@ the host: clock, processes, directory listings; their correctness is the busines
 imports one is uncertified, and so is a file that imports one that imports it (those are in the universe, so each is judged itself:
 a module that imports recipe or gate_build lies in verify/ or is red). An entry point or a reached file that is not in a root
 naming gate "pure" is uncertified (nothing judged it).
-uncertified: the first 50 uncertified paths, sorted. Zero items: green, universe 0, said in "detail". Exit 0 iff the result is green.
+uncertified: every uncertified path, sorted. Zero items: green, universe 0, said in "detail". Exit 0 iff the result is green.
 ```
 
 ## verify/gate_tests.py
@@ -2382,7 +2382,7 @@ Run as `python3 -I verdict.py CMD ...`. Exit codes: 0 ok, 1 usage/format error, 
               given, GATE_CACHE (absolute path of a caller-owned directory that outlives the run). A gate may store results in
               GATE_CACHE only under a key that covers everything it reads (its inputs' content, the declared environment, its own
               arguments); it must work, and give the same verdict, without GATE_CACHE. A gate writes
-              {"format":"fnvnx-gate/1","name","status","universe","certified","uncertified":[<=50 ids],"detail"} at GATE_OUT/<result>.
+              {"format":"fnvnx-gate/1","name","status","universe","certified","uncertified":[every id],"detail"} at GATE_OUT/<result>.
               Gate green iff exit 0, valid result, name equal, status green and certified == universe (completeness of
               certificates, not a run counter; certified > universe is invalid). Verdict green iff >=1 gate and all gates green.
               over_budget is reported only; it never changes the verdict.
@@ -2741,3 +2741,11 @@ loader's stage A reads COM_ROWS through `uses`; the gate `imports` names the sam
 files, L6 the d3d9 rows (still taken from the manifest external's d9bridge_rows.tsv until its generator moves here).
 Test: verify/tests/test_bridgefacts.py.
 ```
+
+## contract/reached.py
+
+reached - the (dll, name) pairs the image set reaches (L1 CONTRACT): `reached.tsv`, columns dll, name, how (`iat` | `gpa`), site (`<image>@<VA>`).
+
+    reached.py --sites dynsites.tsv --image NAME=pe ... --imports NAME=imports.tsv ... --facts DIR --facts-tree SHA --declared declared_dlls.tsv --specs DIR [--modules modules.tsv] --out reached.tsv
+
+`iat` rows: every import slot of every image (the imports/<name>.tsv of modules.py). `gpa` rows: every (module, name) pair a GetProcAddress site can ask for (gpa_names.py's derivation, `analyse`; a module the facts cannot place is `*`). The universe is the images; nothing filters it, and an export nothing reaches is no row. The signature input of the derivation (stack bytes, argument letters of an import) is the reference spec's, through `bridgetable.resolve`, and the may-load set is the images, modules.tsv and declared_dlls.tsv: no bridge.tsv row is an input, so the table that L6's bridgefacts filter by reached.tsv cannot be one (no cycle). An import without a signature is an error and the stage lists every one. Test: `contract/tests/test_reached.py` (a toy image: one IAT import, one resolved GPA name, one unreached export).

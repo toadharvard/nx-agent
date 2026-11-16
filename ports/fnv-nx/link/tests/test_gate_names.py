@@ -16,10 +16,11 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..'))
-import gate_names
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import gate_names
 from fnvnx.contract import l2sections
-import synth
-import unitpairs
+from fnvnx.link.tests import synth
+from fnvnx.link import unitpairs
 KINDS_INC = os.path.join(HERE, '..', '..', 'toolchain', 'names', 'sympair_kinds.inc')
 KINDS = l2sections.load_kinds(KINDS_INC)
 
@@ -209,8 +210,7 @@ try:
     rc, doc = run(['--gcc', g, '--cl', c], os.path.join(tmp, 'o1'))
     check('red exit', rc, 1)
     check('red file', (doc['format'], doc['name'], doc['status'], doc['universe'], doc['certified'], len(doc['uncertified'])), ('fnvnx-gate/1', 'names', 'red', 7, 4, 3))
-    with open(os.path.join(tmp, 'o1', 'names.ids')) as fh:
-        check('ids file', fh.read().split('\n')[:-1], sorted(doc['uncertified']))
+    check('the file has every id and their count', (doc['uncertified'] == sorted(doc['uncertified']), doc['uncertified_n']), (True, len(doc['uncertified'])))
     rc, doc = run(['--gcc', gok, '--cl', c], os.path.join(tmp, 'o2'))
     check('green', (rc, doc['status'], doc['universe'], doc['certified'], doc['uncertified']), (0, 'green', 3, 3, []))
     rc, doc = run(['--gcc', gempty, '--cl', c], os.path.join(tmp, 'o3'))

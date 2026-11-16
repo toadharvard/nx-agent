@@ -5,8 +5,9 @@ a literal. The row is judged by `fpcr.fpcr_errors` before it is written; a row t
 import json
 import os
 import sys
-
-import fpcr   # the one definition of the FPCR row, beside this file
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract.target import fpcr   # the one definition of the FPCR row, beside this file
 
 
 def render(t):
