@@ -611,6 +611,18 @@ check("declared table: header comment and three valid rows (win-doc and wine-9.0
 GAL = "34\tGalaxyInit\tno-galaxy\tgalaxy-sdk:IGalaxy/Init:Init\tu32\t1\t-"
 open(tf_, "w").write(HDR_REAL + "\n" + GAL + "\n")
 check("declared table: a galaxy-sdk row with fact no-galaxy is accepted", rdt(tf_).get(34, ("",))[1:3] == ("no-galaxy", "galaxy-sdk:IGalaxy/Init:Init"), "")
+HDR_STEAM = HDR_REAL.replace(" | galaxy-sdk:<page>:<function>", " | galaxy-sdk:<page>:<function> | steamworks-sdk:<header>#<function>")
+for what, row, want in (("accepted", "36\tSteamAPI_Init\tno-galaxy\tsteamworks-sdk:public/steam/steam_api.h#SteamAPI_Init\tu32\t0\t-", True),
+                        ("malformed: the function after a colon", "36\tSteamAPI_Init\tno-galaxy\tsteamworks-sdk:steam_api.h:SteamAPI_Init\tu32\t0\t-", False),
+                        ("malformed: no function", "36\tSteamAPI_Init\tno-galaxy\tsteamworks-sdk:steam_api.h#\tu32\t0\t-", False),
+                        ("malformed: no header", "36\tSteamAPI_Init\tno-galaxy\tsteamworks-sdk:#SteamAPI_Init\tu32\t0\t-", False)):
+    open(tf_, "w").write(HDR_STEAM + "\n" + row + "\n")
+    try:
+        rdt(tf_)
+        got = True
+    except ValueError:
+        got = False
+    check("declared table: a steamworks-sdk source, " + what, got, want)
 for what, row in (("an undeclared fact", "35\tx\tno-wifi\twin-doc:a/b:f\tu32\t1\t-"), ("an undeclared source prefix", "35\tx\tno-galaxy\tgog-sdk:a/b:f\tu32\t1\t-")):
     open(tf_, "w").write(HDR_REAL + "\n" + row + "\n")
     try:

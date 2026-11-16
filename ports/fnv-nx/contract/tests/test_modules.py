@@ -239,5 +239,21 @@ with tempfile.TemporaryDirectory() as t2:
           and modules.platform_served({"galaxy.dll"}, [t2]) == frozenset(), None)
     k = dllkind.classify(([("galaxy.dll",)][0], []), lambda p: ([], []), lambda n: os.path.join(t2, n) if n == "galaxy.dll" else None, frozenset({"galaxy.dll"}))[1]
     check("classify: a served name with a file is served, never read from its file", k["galaxy.dll"] == "served", k)
+with tempfile.TemporaryDirectory() as t4:
+    dd, mm, cc = (os.path.join(t4, n) for n in ("d.tsv", "m.tsv", "c.md"))
+    open(dd, "w").write("# n\nkernel32.dll\t0\n")
+    open(cc, "w").write(CM)
+
+    def served(row):
+        open(mm, "w").write(row)
+        try:
+            return modules.read_served(dd, mm, cc, [t4])
+        except modules.StageError as e:
+            return str(e)
+    check("declared_modules: a row for a name with no file in the declared file set is red", "no file in the declared file set" in served("galaxy.dll\tserved-absent-service\tGOG Galaxy is not lifted\n"), True)
+    open(os.path.join(t4, "galaxy.dll"), "wb").write(b"x")
+    check("declared_modules: a row for a module of the declared install is accepted", served("galaxy.dll\tserved-absent-service\tGOG Galaxy is not lifted\n") == {"kernel32.dll", "galaxy.dll"}, None)
+    check("declared_modules: orphan rows (no import edge) are listed", modules.orphan_rows({"galaxy.dll", "galaxywrp.dll"}, {"galaxy.dll"}) == ["galaxywrp.dll"], None)
+    check("declared_modules: no orphan when every row is imported", modules.orphan_rows({"galaxy.dll"}, {"galaxy.dll", "x.dll"}) == [], None)
 print("FAILED: %d" % len(FAILED) if FAILED else "all passed")
 sys.exit(1 if FAILED else 0)

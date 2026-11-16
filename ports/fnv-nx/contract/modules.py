@@ -304,6 +304,16 @@ def platform_served(declared, dirs, absent_services=frozenset()):
     return frozenset(n for n in declared if not dllkind.is_runtime(n) and find_file(dirs, n) is None) | frozenset(absent_services)
 
 
+def declared_rows(modules_path):
+    with open(modules_path) as f:
+        return declaredmods.read(f.read(), None)
+
+
+def orphan_rows(rows, imported):
+    """The declared_modules rows (names) that no import directory of the exe or of a module file names: an orphan row (red, all listed)."""
+    return sorted(n for n in rows if n not in imported)
+
+
 def read_served(declared_path, modules_path, claude_md_path, dirs):
     """The served set from the declared inputs (declared_dlls.tsv, declared_modules.tsv, CLAUDE.md or None) and the file directories. CLAUDE.md is read only by the contract gate (the cite check)."""
     declared = declareddlls.read(declared_path)
@@ -312,9 +322,10 @@ def read_served(declared_path, modules_path, claude_md_path, dirs):
             absent = declaredmods.read(f.read(), None if claude_md_path is None else open(claude_md_path).read())
         except declaredmods.DeclaredModsError as e:
             raise StageError(str(e))
-    redundant = sorted(n for n in absent if n in declared and find_file(dirs, n) is None)
-    if redundant:
-        raise StageError('declared_modules.tsv: %s: already served (declared with no file): the row is redundant' % ', '.join(redundant))
+    errs = ['%s: declared with no file: it is served already, the row is redundant' % n if n in declared else '%s: no file in the declared file set: a row names a module of the declared install' % n
+            for n in sorted(absent) if find_file(dirs, n) is None]
+    if errs:
+        raise StageError('declared_modules.tsv: ' + '; '.join(errs))
     return platform_served(declared, dirs, absent)
 
 
@@ -469,6 +480,10 @@ def plan(exe_path, declared_path, dirs, modules_path, claude_md_path):
     exe = PE(exe_bytes, exepin.NAME)
     served = read_served(declared_path, modules_path, claude_md_path, dirs)
     mods = scan(dirs, served)
+    imported = {iat.norm_dll(d) for d, _ in exe.import_directory()} | {iat.norm_dll(d) for m in scan(dirs, frozenset()).values() for d, _ in m.imports}   # every import edge of the declared file set
+    orphans = orphan_rows(declared_rows(modules_path), imported)
+    if orphans:
+        raise StageError('declared_modules.tsv: no import directory of the exe or of a file of the declared set names: ' + ', '.join(orphans) + ' (an orphan row)')
     me = lower(exepin.NAME)
     image = dllkind.images_of({n: [iat.norm_dll(d) for d, _ in m.imports] for n, m in mods.items()}, served | {me})
     load_fails = {n: m for n, m in mods.items() if n not in image}
