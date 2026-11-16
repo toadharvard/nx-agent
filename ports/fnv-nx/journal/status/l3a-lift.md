@@ -1459,3 +1459,11 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - dispatch.c: ENTRY1-ATOMIC for C.
   - msvcrt_ci.cc and msvcrt_eh.cc: `.fnvnx.decltype: a referenced symbol has no declaration line`, at the end of the TU, with no symbol named. It is new with cand4b b51ad22ee. L2 was asked to print the symbol and to close the gap.
 - bottleneck: L2 (dispatch.c, the decltype diagnostic, the recipe-path pin); w8 class A/B rework; pcsrc 7 vptr sites (w7).
+
+## 2026-11-16 04:12 — IAT register rule built; ra writer set accepted by L1
+- w7 (done, claude/fnv-l3a-lift-w7-facts2, the commit after efdd8262f): `mov r,[IAT]` gives ('imp', slot). A call through it takes the import's pop, and an import call preserves ebx/esi/edi/ebp (Win32 ABI, OWNER 3).
+  - Exe: esp-lost goes from 8,339 to 8,213. Red goes from 75,171 to 75,192, because the preserved registers expose reads that were hidden.
+  - The not-clean jmps stay at 11, which are 8 vptr and 3 EH sites. The 4 InterlockedDecrement functions also contain an earlier slot-1 vptr call on a path that merges before the tail jmp.
+  - Next: RTTI class narrowing (ruled 04:00).
+- L1 accepted the ra writer set: the generated bridges plus `fnvl_native_transfer`, both in the bridge TU. w8 proceeds with class A and class B.
+- bottleneck: L2 (dispatch.c, the decltype diagnostic, the recipe-path pin); w8 rework; pcsrc 8 vptr + 3 EH (w7).
