@@ -16,7 +16,7 @@ with open(SPEC, "wb") as _f:
 
 
 def gen(out, tsv_dir=None):
-    return subprocess.run([sys.executable, "-I", os.path.join(ENV, "gen_env.py"), out, SPEC, tsv_dir or ENV, os.path.join(PORT, "shim", "include", "d3d9types.h"), WINE, os.path.join(PORT, "shim", "include", "d3d9.h"), os.path.join(PORT, "shim", "include", "d3d9caps.h")], capture_output=True, text=True)
+    return subprocess.run([sys.executable, "-I", os.path.join(ENV, "gen_env.py"), out, SPEC, tsv_dir or ENV, os.path.join(PORT, "shim", "include", "d3d9types.h"), WINE, os.path.join(PORT, "shim", "include", "d3d9.h"), os.path.join(PORT, "shim", "include", "d3d9caps.h"), os.path.join(ENV, "ENV_PIN.txt"), os.path.join(ENV, "env_rules.cpp.in")], capture_output=True, text=True)
 
 
 def t_ident(cpp):
