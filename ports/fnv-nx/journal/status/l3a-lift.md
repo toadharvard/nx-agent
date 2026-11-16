@@ -1728,3 +1728,8 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - L1 took universe.tsv as its one function set (w28 791dfc7e0 / f3632f357), with extent as the span.
   - Doing (w7): publish the facts2 universe of all images in the span schema, with commit and tree_sha256, after the farm-2 exe run.
   - This blocks L1's cand4 pin.
+- w7 (A): KeyError split at fnv-nx-build l3a-lift/facts-keysplit/20e32ecc7.
+  - 1,683 keys over the exe (round 0), the 5 small images and the pack. x87 1,534 (exe: 1,248 keys / 258,324 sites), 3dnow 86, avx 1, int 54, sys 8.
+  - Not global yet: d3dx9_31/38 are being added.
+  - 3dnow and avx go to udcert as #UD sites.
+- Doing (w7): (B), off base3 be2f01990 plus L3b 82a488a89.
