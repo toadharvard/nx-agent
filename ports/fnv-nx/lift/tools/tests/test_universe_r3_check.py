@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Gate R3 (exe universe):  universe_r3_check.py [FACTS_DIR] [--exe PATH] [--base HEX] [--fpstate DIR] [--fpdepth FILE] [--no-c]
+"""Gate R3 (exe universe):  universe_r3_check.py [FACTS_DIR] [--exe PATH] [--base HEX] [--no-c]
 Defaults: FACTS_DIR and the exe are the declared inputs of this test (inputs.json: the gate gives them as FNVNX_INPUT_FACTS / FNVNX_INPUT_EXE, the checkouts pinned in
-verify/contract_inputs.json); --exe/--base name the image under test (modules_check passes a module and the base the loader assigned); fpstate and fpdepth default to
-FACTS_DIR/fpstate and FACTS_DIR/fpmodes/depth.tsv; (c) reads the tracked platform/declared/x86sys.json.
+verify/contract_inputs.json); --exe/--base name the image under test (modules_check passes a module and the base the loader assigned);
+(c) takes the lifter's inputs from the mounts FNVNX_INPUT_FPSTATE, FPDEPTH, SEGWRITES, SDMROWS (fnvlift/tests/_inputs.configure_image) and the tracked platform/declared/x86sys.json.
 Recomputes from the exe alone the set of relocated pointer targets in executable sections (PE .reloc HIGHLOW fixups whose stored value lies
 in an executable section) and checks (a) every target is an entry of universe.tsv; (b) gate_codemap.json is green and codemap.tsv classifies
 every byte of the executable sections exactly once (contiguous runs, no UNEXPLAINED); (c) closure under direct targets: lifting every entry with fnvlift
@@ -10,21 +10,21 @@ every byte of the executable sections exactly once (contiguous runs, no UNEXPLAI
 (entries whose lift raises Unsupported are counted by reason class and do not enter (c); --no-c skips it). Prints counts only. Exit 0 iff all hold."""
 import os, sys, re, multiprocessing as mp
 from collections import Counter
-HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE))
+HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE)); sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))      # tools/ (pemod) and lift/ (fnvlift)
 import json, pemod
 def opt(name, default=None):
     a = sys.argv; return a[a.index(name) + 1] if name in a else default
 def conf():
     """(exe path, base or None, facts dir) from argv, else the declared inputs of the gate"""
-    pos = [x for i, x in enumerate(sys.argv[1:], 1) if not x.startswith('-') and sys.argv[i - 1] not in ('--exe', '--base', '--fpstate', '--fpdepth')]
+    pos = [x for i, x in enumerate(sys.argv[1:], 1) if not x.startswith('-') and sys.argv[i - 1] not in ('--exe', '--base')]
     fd = pos[0] if pos else os.environ['FNVNX_INPUT_FACTS']      # declared input of this test (inputs.json)
     exe = opt('--exe') or os.path.join(os.environ['FNVNX_INPUT_EXE'], 'FalloutNV.exe')
     b = opt('--base'); return exe, int(b, 16) if b else None, fd
 def lift_part(arg):
     """worker: lift entries[k::n] -> (missing target -> number of entries naming it, reason class -> count, entries lifted, direct targets seen)"""
-    exe, base, fd, x86sys, fps, fpd, cf, k, n = arg; sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
+    exe, base, fd, image, k, n = arg; sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
     import fnvlift as L
-    L.inputs.configure(universe=fd + '/universe.tsv', fpstate=fps or fd + '/fpstate', fpdepth=fpd or fd + '/fpmodes/depth.tsv', x86sys=x86sys, sdmrows=cf, cpumodel=__import__('fnvlift.tests._inputs', fromlist=['CPUMODEL']).CPUMODEL)
+    from fnvlift.tests import _inputs; _inputs.configure_image(fd + '/universe.tsv', image)      # the image: the exe, or the module whose facts dir fd is
     img = L.Image(exe, base); ent = [int(l.split('\t')[0], 16) for l in open(fd + '/universe.tsv') if l.strip() and not l.startswith('#')]; es = set(ent)
     miss = Counter(); why = Counter(); ne = Counter(); ok = seen = 0
     for a in ent[k::n]:
@@ -36,8 +36,7 @@ def lift_part(arg):
         ne.update(m['noentry'])
     return miss, why, ok, seen, ne
 def check_c(exe, base, fd, ix):
-    from fnvlift.tests._inputs import X86SYS as x86sys
-    with mp.Pool(2) as p: rs = p.map(lift_part, [(exe, base, fd, x86sys, opt('--fpstate'), opt('--fpdepth'), opt('--sdmrows'), k, 2) for k in range(2)])
+    with mp.Pool(2) as p: rs = p.map(lift_part, [(exe, base, fd, 'exe' if base is None else os.path.basename(fd.rstrip('/')).lower(), k, 2) for k in range(2)])
     miss = Counter(); why = Counter(); ne = Counter()
     for m, w, o, s, n in rs: miss.update(m); why.update(w); ne.update(n)
     ok = sum(r[2] for r in rs); seen = sum(r[3] for r in rs)

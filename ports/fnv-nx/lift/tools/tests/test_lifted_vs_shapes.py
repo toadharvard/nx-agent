@@ -9,7 +9,6 @@ HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.pat
 for p in ('tools', ''):
     sys.path.insert(0, os.path.join(LIFT, p))
 import fnvlift as L, lifted
-from fnvlift.tests._inputs import X86SYS, CPUMODEL, sdmrows_arg
 from proof import shape
 
 
@@ -17,17 +16,17 @@ def main():
     import argparse, tempfile, liftgen
     exe = os.path.join(os.environ['FNVNX_INPUT_EXE'], 'FalloutNV.exe'); facts = os.environ['FNVNX_INPUT_FACTS']
     import fnvlift
-    fnvlift.inputs.configure(universe=facts + '/universe.tsv', fpstate=facts + '/fpstate', fpdepth=facts + '/fpmodes/depth.tsv', x86sys=X86SYS, sdmrows=sdmrows_arg(), cpumodel=CPUMODEL)      # the facts external holds fpstate/ and fpmodes/; X86SYS is the tracked platform/declared/x86sys.json
+    from fnvlift.tests import _inputs; _inputs.configure_image(facts + '/universe.tsv', 'exe')      # the facts external holds fpstate/ and fpmodes/; X86SYS is the tracked platform/declared/x86sys.json
     emit, jtab = 'dsl', None
     out = tempfile.mkdtemp(); shapes = out + '/shapes_0.tsv'
     try:
-        liftgen.shard(argparse.Namespace(shard='0/1', out=out, jobs=os.cpu_count() or 1, exe=exe, base=None, universe=facts + '/universe.tsv', emit=emit, jtab=jtab))
-        return compare(shapes, exe, emit, jtab)
+        liftgen.shard(argparse.Namespace(shard='0/1', out=out, jobs=os.cpu_count() or 1, exe=exe, base=None, universe=facts + '/universe.tsv', emit=emit, jtab=jtab, prov=False))
+        return compare(shapes, exe, emit, jtab, facts)
     finally:
         import shutil; shutil.rmtree(out, ignore_errors=True)
 
 
-def compare(shapes, exe, emit, jtab):
+def compare(shapes, exe, emit, jtab, facts):
     img = L.Image(exe)
     got = lifted.lifted(img, facts + '/universe.tsv', emit, jtab)
     cnt = collections.Counter(); n = 0

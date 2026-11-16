@@ -19,22 +19,6 @@
  "units": "all",
  "generated": [
   {
-   "tool": "ports/fnv-nx/lift/tools/sdmrows_stage.py",
-   "args": [
-    "--sdm",
-    "/uses/ports/fnv-nx/lift/sdm/SDM_TEXT",
-    "--out",
-    "/out"
-   ],
-   "inputs": [
-    "ports/fnv-nx/lift/proof/sdmfeat.py",
-    "ports/fnv-nx/lift/proof/__init__.py"
-   ],
-   "outputs": [
-    "sdmrows/sdmrows.json"
-   ]
-  },
-  {
    "tool": "ports/fnv-nx/lift/tools/guestgen_imptest.py",
    "args": [
     "/out/gen",
@@ -42,7 +26,7 @@
     "--x86sys",
     "/uses/ports/fnv-nx/platform/X86SYS",
     "--sdmrows",
-    "/stage/sdmrows/sdmrows.json",
+    "/uses/ports/fnv-nx/lift/sdmrows/SDMROWS",
     "--cpumodel",
     "/in/ports/fnv-nx/verify/cpuid_model.json",
     "--rcptab",
@@ -55,11 +39,7 @@
     "ports/fnv-nx/verify/cpuid_model.json",
     "ports/fnv-nx/lift/proof",
     "ports/fnv-nx/lift/rt/rcptab.c",
-    "ports/fnv-nx/lift/rt/rcptab.cert.json",
-    {
-     "stage": "ports/fnv-nx/lift/tests/guest/imptest/lifted:gen:0",
-     "path": "sdmrows/sdmrows.json"
-    }
+    "ports/fnv-nx/lift/rt/rcptab.cert.json"
    ],
    "outputs": [
     "gen/guest.cc",
@@ -85,8 +65,8 @@
    "output": "INCLUDE"
   },
   {
-   "root": "ports/fnv-nx/lift/sdm",
-   "output": "SDM_TEXT"
+   "root": "ports/fnv-nx/lift/sdmrows",
+   "output": "SDMROWS"
   },
   {
    "root": "ports/fnv-nx/platform",
