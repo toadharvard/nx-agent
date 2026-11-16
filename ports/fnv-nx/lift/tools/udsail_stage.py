@@ -1,15 +1,16 @@
 """udsail stage driver (a recipe run step, `exec /usr/bin/python3 -I`): reads the patched Sail model (the lift/proof/sailmodel root output MODEL, the model of the pinned IR), runs proof/udsail.py over the image BADDECODE and SHAPES files, writes the `udsail` input file.
-usage: python3 -I udsail_stage.py --lift-root DIR --isla ISLA --z3lib Z3LIB --model MODEL --sail-ir X86IR --x86sys X86SYS.json --sdmrows SDMROWS.json --cpumodel CPUMODEL.json --out UDSAIL.tsv [--bad F]... [--shapes F]...
+usage: python3 -I udsail_stage.py --lift-root DIR --isla ISLA --z3lib Z3LIB --model MODEL --sail-ir X86IR --x86sys X86SYS.json --sdmrows SDMROWS.json --cpumodel CPUMODEL.json --work SCRATCHDIR --out UDSAIL.tsv [--bad F]... [--shapes F]...
 Every path is an argument (the recipe mounts them); nothing is read from the environment or the filesystem outside them.  The step bound is isla's own (model_sail), not a wall clock."""
-import os, sys, tempfile, argparse
+import os, sys, argparse
 
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    for n in ('lift-root', 'isla', 'z3lib', 'model', 'sail-ir', 'x86sys', 'sdmrows', 'cpumodel', 'out'): ap.add_argument('--' + n, required=True)
+    for n in ('lift-root', 'isla', 'z3lib', 'model', 'sail-ir', 'x86sys', 'sdmrows', 'cpumodel', 'out', 'work'): ap.add_argument('--' + n, required=True)
     ap.add_argument('--bad', action='append', default=[]); ap.add_argument('--shapes', action='append', default=[])
     a = ap.parse_args(argv)
     sys.path.insert(0, os.path.abspath(a.lift_root))
-    work = tempfile.mkdtemp(prefix='udsail')
+    work = os.path.abspath(a.work)      # the step's scratch directory (RECIPE run `scratch`): the stage has no other writable path
+    os.makedirs(work, exist_ok=True)
     md = os.path.join(os.path.abspath(a.model), 'model')
     if not os.path.isfile(os.path.join(md, 'step.sail')): raise SystemExit('udsail_stage: %s has no model/step.sail' % a.model)
     os.environ['LD_LIBRARY_PATH'] = os.path.join(os.path.abspath(a.z3lib), 'lib')      # isla's libz3 (the lift/proof/isla root output)
