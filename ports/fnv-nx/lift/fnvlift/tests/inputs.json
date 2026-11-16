@@ -25,6 +25,12 @@
     "output": "SDMROWS"
    }
   ],
+  "test_lift_canonical.py": [
+   {
+    "root": "ports/fnv-nx/lift/sdmrows",
+    "output": "SDMROWS"
+   }
+  ],
   "test_null_seg.py": [
    {
     "root": "ports/fnv-nx/lift/sdmrows",
