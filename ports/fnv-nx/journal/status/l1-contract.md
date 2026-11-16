@@ -2502,3 +2502,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - w28 queue: walk fix, gamedata fetch, '!rt', foreach (+range).
 - cand4 base = the trunk head after the cand3b merge.
 - bottleneck: the recipe walk fix, then the cand3b verdict.
+
+## 2026-11-16 04:32
+- w28 741e4a5e8: '!rt' declared as a runtime module (dllkind.RUNTIME; no handle, 126; an image import of it is red). Accepted.
+- w28 3817734d7: stage_output evaluates only the step closure, one artifact build per Job, Job.stats counter, test_stageref_cost. The memo key must be the content key, not file stat; _rootfs gets one per deb-set key. Then to w15 for cand3b.
+- bottleneck: the recipe walk fix into cand3b, then its verdict.
