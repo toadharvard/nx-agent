@@ -4657,10 +4657,14 @@ def declared_externals(repo, prefix=""):
 
 
 def externals_cmd(repo, opt):
-    """recipe externals --ref-prefix P [--fetch --store S --ext E --ws W --artifacts URL]: the declared externals with the ref prefix P, one `ref TAB commit TAB
+    """recipe externals --ref-prefix P [--ref R] [--fetch --store S --ext E --ws W --artifacts URL]: the declared externals with the ref prefix P, one `ref TAB commit TAB
     tree_sha256` line each; with --fetch, each is fetched by its commit and checked against its tree_sha256 by fetch_externals (the one mechanism of every
     external: BuildRed on a mismatch), and the line is `ref TAB checkout dir`. A branch head is never fetched."""
     rows = declared_externals(repo, opt.get("--ref-prefix", ""))
+    if "--ref" in opt:   # exactly one ref (a prefix names Voices1 and Voices10 alike): its declared row, or an error
+        rows = [r for r in rows if r[0] == opt["--ref"]]
+        if not rows:
+            raise RecipeError(["external %s is declared by no recipe" % opt["--ref"]])
     if "--fetch" not in opt:
         return ["%s\t%s\t%s" % r for r in rows]
     store, ext = need_store(opt), opt.get("--ext") or ext_of_store(need_store(opt))
