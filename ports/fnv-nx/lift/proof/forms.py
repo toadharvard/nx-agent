@@ -9,7 +9,7 @@ import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 from fnvlift.dsl import C, Form, V, bit, concat, eq, extract, load, mm, msb, trunc, xmm, zext
 from capstone import x86 as X
-from fnvlift import faults
+from fnvlift import faults, dsl
 
 R8 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh']; R16 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di']
 SEGPFX = {0x64: 'fs', 0x65: 'gs', 0x2e: 'cs', 0x26: None, 0x36: None, 0x3e: None}
@@ -83,12 +83,23 @@ def esa(a):
 def dsa(c, a):
     """an implicit DS-default operand (string source (E)SI, XLAT [(E)BX + AL]): the effective segment is the LAST override prefix (c.dseg); FS and GS have a base, the flat segments none"""
     ACC.add('ds'); return tag(a + V(c.dseg + '_base', 32) if c.dseg in ('fs', 'gs') else a)
+def _via_gs(a):
+    """does the address read the GS base (an explicit gs override or an implicit DS access under a gs override)? Decided from the address expression, so lea and every non-accessing use of an operand never count"""
+    seen = set(); st = [a]
+    while st:
+        n = st.pop()
+        if n.u in seen: continue
+        seen.add(n.u); st.extend(n.a)
+        if n.op == 'var' and n.x == 'gs_base': return True
+    return False
 def mload(a, w):
     """the one load of the Form builders: the address must come from an address function (ea / addoff / ssa / esa / dsa); tests/test_forms_mem.py also checks that no builder calls dsl.load"""
     assert a.u in _OK, 'load through an address not made by an address function'
+    if _via_gs(a): ACC.add('gs')
     return load(a, w)
 def mstore(F, a, v, when=None):
     assert a.u in _OK, 'store through an address not made by an address function'
+    if _via_gs(a): ACC.add('gs')
     F.store(a, v, when)
 def sload(a, w): return mload(ssa(a), w)
 def sstore(F, a, v): mstore(F, ssa(a), v)
@@ -155,6 +166,16 @@ def handler(*names):
         return fn
     return d
 
+def null_seg_fault(c):
+    """an access through GS while the selector is null: the record's null_seg_access row (x86sys.NULL_SEG, owner L5), a fault at the instruction before any effect.  PRIV or AV by the row's own
+    privileged_check_first over the instruction bytes (f_sys.row_privileged).  The row is read, never restated; a record without it leaves the Form undecided."""
+    from fnvlift import x86sys, f_sys
+    r = getattr(x86sys, 'NULL_SEG', None)
+    if not r: raise dsl.UndecidedRow('null_seg_access: no row in the declared x86sys record')
+    name = 'PRIV' if f_sys.row_privileged(c.ins.bytes, r) else 'AV'
+    assert name == 'PRIV' or (r['exception_code'] == 0xC0000005 and r['parameters'] == [0, 0xffffffff] and r['flags'] == 0 and r['eip_advance'] == 0), 'null_seg_access row is not the access violation the runtime raises'
+    c.F.faults.insert(0, (faults.BYNAME[name]['code'], eq(extract(V('sel_gs', 16), 15, 2), 0)))
+
 def build(ins, addr):
     """Form for a decoded instruction at addr; key = form_key(ins).  Raises KeyError for mnemonics outside the covered set."""
     from proof import forms_alu, forms_move, forms_flow, forms_sys, forms_simd, forms_ssefp      # noqa: F401  (register their handlers)
@@ -179,5 +200,6 @@ def build(ins, addr):
     if fn is None: raise KeyError(c.m)
     fn(c)
     if c.F.mmw or any(isvec(o) and o.name.startswith('mm') for o in c.ops): c.F.mmx(c.F.mmw)      # every MMX instruction but EMMS: SDM Vol 1 9.5.1 (the handler of emms calls F.mmx(emms=True) itself)
+    if 'gs' in ACC: null_seg_fault(c)
     c.F.access = frozenset(ACC)        # the address kinds the builder used: what claims a prefix (sysspec_gap.unclaimed_prefix)
     return c.F.check_state()
