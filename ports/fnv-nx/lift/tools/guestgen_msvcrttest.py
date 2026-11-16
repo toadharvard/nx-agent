@@ -9,11 +9,12 @@ lifted (fnvlift, capstone); the stage writes
   labels.txt                case number, root, what it tests
 There is no x86 oracle for msvcrt.dll: every expected value is derived by hand from the MSVC / Wine 9.0 semantics and stated at its case.
 Trace convention: a guest event EV(k) appends the hex digit k to the word TR; a case that ends in a return gives TR in eax. Output words O0.. hold values a case stores.
-usage: gen.py <out dir>"""
+usage: gen.py OUT_DIR LIFT_DIR --x86sys F --sdmrows F --cpumodel F --rcptab F --rcpcert F      (the lifter's declared inputs: lifted.buffer_arguments)"""
 import json, os, re, struct, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.join(HERE, '..', '..', '..')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the tool root (/tool)
 sys.path.insert(0, sys.argv[2])   # lift/, whose fnvlift package is a declared input
+import argparse, lifted
 import fnvlift as L, phf, impgen
 from keystone import Ks, KS_ARCH_X86, KS_MODE_32
 
@@ -309,7 +310,9 @@ def ident(n): return re.sub(r'[^0-9A-Za-z]', '_', n)
 
 
 def main():
-    w = sys.argv[1]; os.makedirs(w, exist_ok=True)
+    ap = argparse.ArgumentParser(); ap.add_argument('out'); ap.add_argument('lift'); lifted.buffer_arguments(ap); a = ap.parse_args()
+    w = a.out; os.makedirs(w, exist_ok=True)
+    lifted.configure_buffer(a, tempfile.mkdtemp(dir='/dev/shm'))      # the lifter's inputs: the one way (tools/lifted.py)
     P = program(); P.build()
     labels = [(P.addr[n], l) for n in P.order for l in P.owns[n]]
     img = Fake(P.code); starts = {P.addr[n] for n in P.order} | {l for _, l in labels}; img.entries = set(starts)
