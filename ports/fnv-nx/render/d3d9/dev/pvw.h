@@ -32,4 +32,4 @@ struct PvInfo { uint32_t use_map; PvElem e[PVW_FFP_COUNT]; };
 void pvw_stream_info(PvInfo* si, const NxDeviceCore* d, uint32_t start);   // wined3d_stream_info_from_declaration with the vertex shader hidden (fixed-function inputs only)
 enum { PVW_LIGHT_PARALLELPOINT = 4 };                            // WINED3D_LIGHT_PARALLELPOINT (GLSPOT = 5)
 HRESULT pvw_process(NxDeviceCore* d, UINT start, UINT dst_idx, UINT count, NxBufCore* dst);   // wined3d_device_process_vertices (after its FIXME for the declaration argument)
-#include "const_fixme.h"   // fnvnx_wine_fixme and the NXW_ ids of verify/wine_fixme.tsv
+#include "const_fixme.h"   // fnvnx_wine_fixme and the NXW_ ids of render/d3d9/wine_fixme.tsv

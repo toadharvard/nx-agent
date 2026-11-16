@@ -12,8 +12,9 @@ or whose result is not a fnvnx-gate/1 record of this gate is red with the reason
 import json, os, sys
 
 REPO = os.getcwd()
-sys.path.insert(0, os.path.join(REPO, "ports", "fnv-nx", "verify"))
-import recipe  # noqa: E402
+import types
+_pkg = sys.modules.setdefault("fnvnx", types.ModuleType("fnvnx")); _pkg.__path__ = [os.path.join(REPO, "ports", "fnv-nx")]   # a host-run driver: `fnvnx` is ports/fnv-nx (the stage mounts it at /imp/fnvnx)
+from fnvnx.verify import recipe  # noqa: E402
 
 ROOT = "ports/fnv-nx/render/total/d3d9total"
 

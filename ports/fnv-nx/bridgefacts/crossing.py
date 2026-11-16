@@ -14,14 +14,13 @@ A source that is not given or does not exist is a stage error `crossing:source-m
 Output: `# sources <name> <sha256 of the source>` lines (name order, a --disp file as `disp:<basename>`), then the symbols, sorted and unique, one per line."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import argparse
 import hashlib
 import os
 import sys
 
-from contract import store  # noqa: E402
-from contract.iat import norm_dll  # noqa: E402
+from fnvnx.contract import store  # noqa: E402
+from fnvnx.contract.iat import norm_dll  # noqa: E402
 
 
 def read(path, name):

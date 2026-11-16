@@ -1,5 +1,5 @@
 """gen_expr.py: compiles the closed length-rule language (d3d9_expr.py) to C++ uint64_t expressions. Unknown names/functions raise GenError."""
-import bridgefacts.d3d9.d3d9_expr as X   # the length-rule language of bridgefacts (a declared import root of render/d3d9; qualified module path)
+import fnvnx.bridgefacts.d3d9.d3d9_expr as X   # the length-rule language of bridgefacts (a declared import root of render/d3d9; qualified module path)
 
 
 def _x(): return X

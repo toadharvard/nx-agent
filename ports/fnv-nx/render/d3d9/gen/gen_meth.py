@@ -1,10 +1,10 @@
 """gen_meth.py: emits one wrapped method / export of d9wrap.gen.cpp from its spec entry (kinds, rules, effects exactly as d3d9_spec.json defines them)."""
 import re
-from gen_expr import Ctx, GenError
-import gen_tab as T
+from fnvnx.render.d3d9.gen.gen_expr import Ctx, GenError
+from fnvnx.render.d3d9.gen import gen_tab as T
 
 CLS = {"det": 0, "env": 1, "pix": 2}
-from gen_expr import REFS  # noqa: E402
+from fnvnx.render.d3d9.gen.gen_expr import REFS  # noqa: E402
 
 
 def isptr(p):

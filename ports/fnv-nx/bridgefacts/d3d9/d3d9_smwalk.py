@@ -3,7 +3,7 @@
 document, the declared input of the generator of render/smscan. Nothing is chosen here: the tables are written as they are."""
 import json, sys
 
-import d3d9_tables as T   # noqa: E402
+from fnvnx.bridgefacts.d3d9 import d3d9_tables as T  # noqa: E402
 
 with open(sys.argv[1], "w") as f:
     json.dump({"SM1_PARAMS": T.SM1_PARAMS, "SM_WALK": T.SM_WALK}, f, sort_keys=True, indent=1)
