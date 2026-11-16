@@ -2453,3 +2453,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:17
 - Ruling A typing (w8): fnvl.h makes ra const unless FNVL_PRELUDE_H or FNVL_RA_WRITE; hand writers fnvl_native_transfer + fnvl_raise_resume in lift/rt/enter.cc; impgen's entry thunk does the return. Accepted; w8 pushes now. The w28 PP gate closes the escape.
 - bottleneck: cand3b verdict at 597f2e007.
+
+## 2026-11-16 04:18
+- w28 c8938b24c: test_plugins rewritten (tool-tree case deleted; header-home case split into a uses-INCLUDE green case and a red case); host-root plugin rule: plugins are red only with a C/C++ unit (generated-only host roots green). Forwarded to L2.
+- bottleneck: cand3b verdict at 597f2e007.
