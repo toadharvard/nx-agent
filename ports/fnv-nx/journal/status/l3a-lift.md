@@ -1556,3 +1556,10 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - Exports in lift/rt: entry 32, data 1, func 0, plus 2 ehkeys bridge-only entries.
 - lift/rt at 8c8d9b247 is red: every unit is blocked at the plugin:fnvnx_names stage, because the cand4b plugin sources do not build against the old 84f0883e compiler headers. On the farm pin (local, the same code before the EH-bridge commit) it is 18 of 21, and the 3 reds are L2's.
 - bottleneck: the L2 recipe-path pin (it blocks every lift/rt unit on base3); L2 w2 (3 units); w7 pcsrc reclassification; the farm-2 runs on 8c8d9b247.
+
+## 2026-11-16 05:00 — base3 f96997661: 61 of 61 roots valid
+- w8 (done, base3 f96997661, old pin): merged cand4b 3f1036631 (the host-root plugin fix).
+  - The EH nested handlers are FNVNX_EXPORT records in pseudo-module '!rt', keyed by fnvnx_import_key per L1's rule. tools/ehkeys.py is deleted. L1 declares '!rt' in contract/modules.py.
+  - Recipe check over all admitted roots: 61 valid, 0 red.
+- lift/rt: on the old pin every unit is blocked at plugin:fnvnx_names. On the farm pin (an uncommitted overlay) 11 of 12 units build, and only dispatch.c (L2 ENTRY1-CONT) is red; the decltype reds are gone.
+- bottleneck: the L2 recipe-path pin; L2 dispatch.c; w7 pcsrc reclassification; the farm-2 runs.
