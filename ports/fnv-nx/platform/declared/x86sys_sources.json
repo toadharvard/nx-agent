@@ -58,7 +58,7 @@
  "win7sp1_x86_kernel": {
   "repo": "fnv-nx-build",
   "ref": "tools/win7sp1-x86-kernel",
-  "commit": "7229600b8dbb89fbb1ada6478b7fde3caee01434",
+  "commit": "37a093812863015ae6d8da1c65f91d5146cae3d9",
   "package": {
    "name": "windows6.1-KB976932-X86.exe",
    "sha1": "c3516bc5c9e69fee6d9ac4f981f5b95977a8a2fa",
@@ -108,6 +108,44 @@
   "inner_cab": {
    "sha256": "e63ad1698c79dd10fcc798c1188967837b9ae6506159fb2f434ea849726822d6",
    "extract": "7z x package.exe -> file [0]; cabextract [0]"
+  },
+  "hals": {
+   "halmacpi.dll": {
+    "exe": {
+     "path": "kernel/halmacpi.dll",
+     "sha256": "f8b007e41157452e8c2d262f37260eb662cb2099e22acffdf9d89836a6290264"
+    },
+    "pdb": {
+     "path": "symbols/halmacpi.pdb",
+     "sha256": "3ab043e2b91fa823d25bddf0e90a723c12784fbdfbe8e5211d1ce005fb9146d5",
+     "guid_age": "AE605D6C59454802AE1D485E0B089A571",
+     "url": "https://msdl.microsoft.com/download/symbols/halmacpi.pdb/AE605D6C59454802AE1D485E0B089A571/halmacpi.pdb"
+    },
+    "origin": "the same package, inner directory x86_microsoft-windows-hal_31bf3856ad364e35_6.1.7601.17514_none_ad305c8fb7ec5060"
+   },
+   "halacpi.dll": {
+    "exe": {
+     "path": "kernel/halacpi.dll",
+     "sha256": "778d2c3afd587a2750a941cd98db4c51a7a9460e056c2cd3c432a7942e9524ce"
+    },
+    "pdb": {
+     "path": "symbols/halacpi.pdb",
+     "sha256": "acd70f55629d04d2310260dc68a9fe7530f05ffc73826e3164c6c7ed3dc91674",
+     "guid_age": "91622BAE6BA748EDACB711C581C8050C1",
+     "url": "https://msdl.microsoft.com/download/symbols/halacpi.pdb/91622BAE6BA748EDACB711C581C8050C1/halacpi.pdb"
+    },
+    "origin": "the same package, inner directory x86_microsoft-windows-hal_31bf3856ad364e35_6.1.7601.17514_none_ad305c8fb7ec5060"
+   }
+  },
+  "trees": {
+   "drivers": {
+    "list": "drivers.sha256",
+    "sha256": "3cd914e98b17c417fce4578d68bbdb007d55570539bf044d3fdf95fff9c33e4e"
+   },
+   "infs": {
+    "list": "infs.sha256",
+    "sha256": "6ae8c88e1b18e6cf993e8528919828c40922a372f503e14080e0c85eb8c316d0"
+   }
   }
  }
 }

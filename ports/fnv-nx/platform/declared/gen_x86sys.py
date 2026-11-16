@@ -227,6 +227,16 @@ class Dec:
     def cfg(self, entry, follow_calls=False, cut=None):
         """cut: a set of (from_va, to_va) edges not taken. Returns ({va: insn}, preds, indirect jmp VAs)."""
         cs = self.cs
+        memo = self.__dict__.setdefault("memo", {})
+        if not cut and not follow_calls and entry in memo:
+            return memo[entry]
+        r = self._cfg(entry, follow_calls, cut)
+        if not cut and not follow_calls:
+            memo[entry] = r
+        return r
+
+    def _cfg(self, entry, follow_calls=False, cut=None):
+        cs = self.cs
         ins, preds, ind = {}, {}, []
         work = [entry]
         while work:
@@ -1381,13 +1391,63 @@ def sel_classes(ctx):
     return cl
 
 
+def sq(key, quote, supports, page_offset=0):
+    """One quotation of the pinned Intel SDM (fnv-nx-build tools/intel-sdm, PDF sha256 a4a62e6a...f321): `key` is `SDM <vol>:<id>` (L3b's sdm_pages.py resolves it to the PDF page of the instruction or section heading), `quote` the
+    literal text (whitespace-normalised), found on that page or the next two counted from page_offset (the SDM Operation and Exceptions text of IRET lies five to seven pages after its heading). test_gen_x86sys.py checks every
+    quote with L3b's sdm_cite_check.py; a row that rests on the SDM carries its quotes in `sdm_quotes`."""
+    d = {"key": key, "quote": quote, "supports": supports}
+    if page_offset:
+        d["page_offset"] = page_offset
+    return d
+
+
+# LAR Table 1-49 and LSL Table 1-53 (SDM Vol 2A, protected-mode columns), one row each as the SDM prints it; the valid sets below are parsed from these rows, not retyped.
+SDM_LAR_TYPES = ["0 Reserved No Reserved No", "1 Available 16-bit TSS Yes Reserved No", "2 LDT Yes LDT Yes", "3 Busy 16-bit TSS Yes Reserved No", "4 16-bit call gate Yes Reserved No", "5 16-bit/32-bit task gate Yes Reserved No",
+                 "6 16-bit interrupt gate No Reserved No", "7 16-bit trap gate No Reserved No", "8 Reserved No Reserved No", "9 Available 32-bit TSS Yes Available 64-bit TSS Yes", "A Reserved No Reserved No",
+                 "B Busy 32-bit TSS Yes Busy 64-bit TSS Yes", "C 32-bit call gate Yes 64-bit call gate Yes", "D Reserved No Reserved No", "E 32-bit interrupt gate No 64-bit interrupt gate No", "F 32-bit trap gate No 64-bit trap gate No"]
+SDM_LSL_TYPES = ["0 Reserved No Reserved No", "1 Available 16-bit TSS Yes Reserved No", "2 LDT Yes LDT1 Yes", "3 Busy 16-bit TSS Yes Reserved No", "4 16-bit call gate No Reserved No", "5 16-bit/32-bit task gate No Reserved No",
+                 "6 16-bit interrupt gate No Reserved No", "7 16-bit trap gate No Reserved No", "8 Reserved No Reserved No", "9 Available 32-bit TSS Yes 64-bit TSS1 Yes", "A Reserved No Reserved No",
+                 "B Busy 32-bit TSS Yes Busy 64-bit TSS1 Yes", "C 32-bit call gate No 64-bit call gate No", "D Reserved No Reserved No", "E 32-bit interrupt gate No 64-bit interrupt gate No", "F 32-bit trap gate No 64-bit trap gate No"]
+
+
+def sdm_valid_types(rows):
+    """The system-descriptor types a type table marks valid in the protected-mode column, parsed from its quoted rows (16 rows, types 0-F in order)."""
+    out = set()
+    for n, q in enumerate(rows):
+        m = re.match(r"([0-9A-F]) (.+?) (Yes|No) ", q + " ")
+        if not m or int(m.group(1), 16) != n:
+            raise SystemExit("gen_x86sys: SDM type-table row %d is not `<type> <name> Yes|No ...`: %r" % (n, q))
+        if m.group(3) == "Yes":
+            out.add(n)
+    return out
+
+
 def lar_lsl_row(ctx, ldta):
     """LAR / LSL at CPL 3 for every 16-bit selector, by SDM Vol 2A: the descriptor-type table, DPL >= max(CPL, RPL) for non-conforming segments, null selector, TI = 1 against the null LDTR,
     index beyond the GDT limit. The 115 descriptors whose content is not derived stay outside the domain (as in jmp_far)."""
     known, limit = ctx["known"], ctx["limit"]
     cl = sel_classes(ctx)
-    LAR_SYS, LSL_SYS = {1, 2, 3, 4, 5, 9, 0xb, 0xc}, {1, 2, 3, 9, 0xb}
-    sdm = "Intel SDM Vol 2A LAR and LSL (Operation; table of segment and gate types valid for each)"
+    LAR_SYS, LSL_SYS = sdm_valid_types(SDM_LAR_TYPES), sdm_valid_types(SDM_LSL_TYPES)
+    sdm = "Intel SDM Vol 2A LAR and LSL (quoted in sdm_quotes, each checked against the pinned SDM text)"
+    lar_q = [sq("SDM 2A:LAR", "Checks that the segment selector is not NULL.", "a null selector gives ZF = 0"),
+             sq("SDM 2A:LAR", "Checks that the segment selector points to a descriptor that is within the limits of the GDT or LDT being accessed", "an index beyond the table limit (the GDT limit; the null LDTR for TI = 1) gives ZF = 0"),
+             sq("SDM 2A:LAR", "Checks that the descriptor type is valid for this instruction. All code and data segment descriptors are valid for (can be accessed with) the LAR instruction.", "S = 1 descriptors are valid; a system descriptor is valid only per the type table"),
+             sq("SDM 2A:LAR", "If the segment is not a conforming code segment, it checks that the specified segment descriptor is visible at the CPL (that is, if the CPL and the RPL of the segment selector are less than or equal to the DPL of the segment selector).", "the DPL test, for every non-conforming descriptor (system descriptors included)"),
+             sq("SDM 2A:LAR", "If the segment descriptor cannot be accessed or is an invalid type for the instruction, the ZF flag is cleared and no access rights are loaded in the destination operand.", "ZF = 0 leaves the destination unchanged"),
+             sq("SDM 2A:LAR", "Bits 7:0 are returned as 0", "result bits 7:0"), sq("SDM 2A:LAR", "Bits 11:8 return the segment type.", "result bits 11:8"), sq("SDM 2A:LAR", "Bit 12 returns the S flag.", "result bit 12"),
+             sq("SDM 2A:LAR", "Bits 14:13 return the DPL.", "result bits 14:13"), sq("SDM 2A:LAR", "Bit 15 returns the P flag.", "result bit 15"), sq("SDM 2A:LAR", "Bits 19:16 are undefined.", "result bits 19:16 (undefined_mask)"),
+             sq("SDM 2A:LAR", "Bit 20 returns the software-available bit in the descriptor.", "result bit 20"), sq("SDM 2A:LAR", "Bit 21 returns the L flag.", "result bit 21"), sq("SDM 2A:LAR", "Bit 22 returns the D/B flag.", "result bit 22"),
+             sq("SDM 2A:LAR", "Bit 23 returns the G flag.", "result bit 23"), sq("SDM 2A:LAR", "Bits 31:24 are returned as 0.", "result bits 31:24"),
+             sq("SDM 2A:LAR", "When the operand size is 16 bits, only the low 16 bits identified above are returned", "operand_16")] + [sq("SDM 2A:LAR", r_, "Table 1-49, the validity of type %s (the valid set is parsed from these rows)" % r_[0]) for r_ in SDM_LAR_TYPES]
+    lsl_q = [sq("SDM 2A:LSL", "Checks that the segment selector is not NULL.", "a null selector gives ZF = 0"),
+             sq("SDM 2A:LSL", "Checks that the segment selector points to a descriptor that is within the limits of the GDT or LDT being accessed", "an index beyond the table limit gives ZF = 0"),
+             sq("SDM 2A:LSL", "If the segment is not a conforming code segment, the instruction checks that the specified segment descriptor is visible at the CPL (that is, if the CPL and the RPL of the segment selector are less than or equal to the DPL of the segment selector).", "the DPL test"),
+             sq("SDM 2A:LSL", "If the segment descriptor cannot be accessed or is an invalid type for the instruction, the ZF flag is cleared and no value is loaded in the destination operand.", "ZF = 0 leaves the destination unchanged"),
+             sq("SDM 2A:LSL", "The segment limit is a 20-bit value contained in bytes 0 and 1 and in the first 4 bits of byte 6 of the segment descriptor.", "limit_bytes is derived from these descriptor fields"),
+             sq("SDM 2A:LSL", "If the descriptor has a page granular segment limit (the granularity flag is set to 1), the LSL instruction will translate the page granular limit (page limit) into a byte limit before loading it into the destination operand.", "G = 1: limit << 12 | 0xFFF"),
+             sq("SDM 2A:LSL", "When the operand size is 16 bits, a valid 32-bit byte limit is computed; however, the upper 16 bits are truncated and only the low-order 16 bits are loaded into the destination operand", "operand_16")] + [sq("SDM 2A:LSL", r_, "Table 1-53, the validity of type %s (the valid set is parsed from these rows)" % r_[0]) for r_ in SDM_LSL_TYPES]
+    acc_q = [sq("SDM 3A:3.4.5.1", "The processor sets this bit whenever it loads a segment selector for the segment into a segment register, assuming that the type of memory that contains the segment descriptor supports processor writes.", "the Accessed bit is processor state"),
+             sq("SDM 2B:SYSEXIT", "the CS and SS descriptor caches are not loaded from the descriptors (in GDT or LDT) referenced by those selectors.", "a SYSEXIT return loads no descriptor, so the Accessed bit is not set by it")]
     def verdict(d, sysok):
         if d["s"] == 0 and d["type"] not in sysok:
             return 0, "descriptor type %#x is not valid for the instruction" % d["type"]
@@ -1413,13 +1473,13 @@ def lar_lsl_row(ctx, ldta):
                 e[nm]["dest"] = "unchanged"
         if e["lar"]["zf"]:
             flags = (d["g"] << 23) | (d["d_b"] << 22) | (d["l"] << 21) | (d["avl"] << 20) | (d["p"] << 15) | (d["dpl"] << 13) | (d["s"] << 12) | ((d["type"] & ~1) << 8)
-            e["lar"]["dest"] = {"value_with_accessed_clear": flags, "mask": 0x00FFFF00, "undefined_mask": 0x000F0000, "accessed_mask": 0x100,
+            e["lar"]["dest"] = {"accessed": ctx["accessed"].get(int(k, 16)) if d["s"] == 1 else "not a code/data descriptor: the type's bit 0 is part of the type", "value_with_accessed_clear": flags, "mask": 0x00FFFF00, "undefined_mask": 0x000F0000, "accessed_mask": 0x100,
                                 "operand_16": "the low 16 bits of the 32-bit value (bits 15:8 = access rights); the upper half of the register is not written"}
         if e["lsl"]["zf"]:
             e["lsl"]["dest"] = {"limit": d["limit_bytes"], "g": d["g"], "operand_16": "the low 16 bits of the limit"}
         descs[k] = e
     zf1 = sorted(k for k, e in descs.items() if e["lar"]["zf"])
-    return {"cpl": 3, "source": sdm,
+    return {"cpl": 3, "source": sdm, "sdm_quotes": lar_q + lsl_q + acc_q,
             "null_selector": {"selectors": cl["null"], "lar": {"zf": 0, "dest": "unchanged"}, "lsl": {"zf": 0, "dest": "unchanged"},
                               "source": "%s: the null selector's descriptor is the null descriptor (type 0, not valid for LAR or LSL): ZF = 0" % sdm},
             "ti1": {"selectors": "every selector value with bit 2 (TI) set (%d values)" % len(cl["ti1"]), "lar": {"zf": 0, "dest": "unchanged"}, "lsl": {"zf": 0, "dest": "unchanged"},
@@ -1427,8 +1487,8 @@ def lar_lsl_row(ctx, ldta):
             "beyond_gdt_limit": {"selectors": "every selector value with TI = 0 and index >= 0x%x (%d values)" % ((limit + 1) // 8, len(cl["beyond"])), "lar": {"zf": 0, "dest": "unchanged"}, "lsl": {"zf": 0, "dest": "unchanged"},
                                  "source": "%s: the descriptor lies outside the GDT limit (row gdt.limit): ZF = 0" % sdm},
             "descriptors": descs, "zf1_descriptors": zf1,
-            "access_rights": {"accessed_bit": "bit 8 of the LAR result (type bit 0) is the descriptor's Accessed bit; the processor sets it when the selector is loaded into a segment register (SDM Vol 3A 3.4.5.1); "
-                                              "the GDT is per processor and shared by all threads, and a SYSEXIT return loads no descriptor (SDM Vol 2B SYSEXIT), so its value is processor state, not a fixed input: besides the SDM-undefined bits 19:16 it is the only bit of a ZF=1 LAR result that is not a function of the derived descriptors",
+            "access_rights": {"accessed_bit": "bit 8 of the LAR result (type bit 0) is the descriptor's Accessed bit; the processor sets it when the selector is loaded into a segment register (sdm_quotes, SDM 3A:3.4.5.1); "
+                                              "the GDT is per processor and shared by all threads, and a SYSEXIT return loads no descriptor (sdm_quotes, SDM 2B:SYSEXIT), so its value is processor state, not a fixed input: besides the SDM-undefined bits 19:16 it is the only bit of a ZF=1 LAR result that is not a function of the derived descriptors",
                               "ldt_descriptor_access": ldta},
             "undecided_descriptors": {"indexes": ["0x%02x" % (i * 8) for i in ctx["undec_idx"]], "status": "OutsideDomain", "selectors": len(cl["undecided"]),
                                       "why": "inside the GDT limit but not built by winload nor written by a decoded kernel path (the same descriptors as jmp_far.undecided_descriptors): their content is not derived"},
@@ -1439,7 +1499,39 @@ def iret_row(ctx, kg, iopl, tss, task_targets, cr4):
     """IRETD at CPL 3 in protected mode, SDM Vol 2A IRET: NT = 1 is a task return through the TSS back link; with NT = 0 the return is to the same privilege level (CPL 3 to CPL 3: no SS:ESP pops)."""
     known, limit = ctx["known"], ctx["limit"]
     cl = sel_classes(ctx)
-    sdm = "Intel SDM Vol 2A IRET (protected mode; RETURN-TO-SAME-PRIVILEGE-LEVEL)"
+    sdm = "Intel SDM Vol 2A IRET (protected mode; RETURN-TO-SAME-PRIVILEGE-LEVEL); every statement is quoted in sdm_quotes and checked against the pinned SDM text"
+    I = "SDM 2A:IRET"
+    iret_q = [
+        sq(I, "If the NT flag is set, the IRET instruction performs a task switch (return) from a nested task (a task called with a CALL instruction, an interrupt, or an exception) back to the calling or interrupted task.", "NT = 1 is a task return"),
+        sq(I, "If the return is to another privilege level, the IRET instruction also pops the stack pointer and SS from the stack, before resuming program execution.", "same-privilege return pops no SS:ESP"),
+        sq(I, "IF NT = 1 THEN GOTO TASK-RETURN; (* PE = 1, VM = 0, NT = 1 *)", "NT is tested first, before the pops", 2),
+        sq(I, "EIP := Pop(); CS := Pop(); (* 32-bit pop, high-order 16 bits discarded *) tempEFLAGS := Pop();", "pops: EIP, CS, EFLAGS (12 bytes)", 2),
+        sq(I, "IF tempEFLAGS(VM) = 1 and CPL = 0 THEN GOTO RETURN-TO-VIRTUAL-8086-MODE; ELSE GOTO PROTECTED-MODE-RETURN;", "the popped VM = 1 matters only at CPL 0", 2),
+        sq(I, "SWITCH-TASKS (without nesting) to TSS specified in link field of current TSS;", "the task return switches to the TSS named by the link field", 2),
+        sq(I, "IF CS(RPL) > CPL THEN GOTO RETURN-TO-OUTER-PRIVILEGE-LEVEL; ELSE GOTO RETURN-TO-SAME-PRIVILEGE-LEVEL; FI;", "RPL = CPL = 3 is the same-privilege return", 3),
+        sq(I, "IF EIP is not within CS limit THEN #GP(0); FI;", "EIP beyond the CS limit (4 GB for the derived code descriptors)", 5),
+        sq(I, "EFLAGS (CF, PF, AF, ZF, SF, TF, DF, OF, NT) := tempEFLAGS;", "loaded flags", 5),
+        sq(I, "IF OperandSize = 32 or OperandSize = 64 THEN EFLAGS(RF, AC, ID) := tempEFLAGS; FI;", "RF, AC, ID are loaded for a 32-bit operand", 5),
+        sq(I, "IF CPL ≤ IOPL THEN EFLAGS(IF) := tempEFLAGS; FI;", "IF only if CPL <= IOPL", 5),
+        sq(I, "IF CPL = 0 THEN EFLAGS(IOPL) := tempEFLAGS;", "IOPL only at CPL 0", 5),
+        sq(I, "IF OperandSize = 32 or OperandSize = 64 THEN EFLAGS(VIF, VIP) := tempEFLAGS; FI; FI;", "VIF, VIP only at CPL 0", 5),
+        sq(I, "#GP(0) If the return code or stack segment selector is NULL.", "null CS: #GP(0)", 7),
+        sq(I, "#GP(selector) If a segment selector index is outside its descriptor table limits.", "TI = 1 (null LDTR) or beyond the GDT limit: #GP(selector)", 7),
+        sq(I, "If the return code segment selector RPL is less than the CPL.", "RPL < CPL: #GP(selector)", 7),
+        sq(I, "If the DPL of a conforming-code segment is greater than the return code segment selector RPL.", "conforming with DPL > RPL: #GP(selector)", 7),
+        sq(I, "If the DPL for a nonconforming-code segment is not equal to the RPL of the code segment selector.", "non-conforming with DPL != RPL: #GP(selector)", 7),
+        sq(I, "If the segment descriptor for a code segment does not indicate it is a code segment.", "not a code segment: #GP(selector)", 7),
+        sq(I, "#NP (selector) If the return code segment is not present.", "not present: #NP(selector)", 7),
+        sq(I, "If the segment selector for a TSS has its local/global bit set for local.", "a task-return link selector with TI = 1: #GP(selector)", 7),
+        sq(I, "If a TSS segment descriptor specifies that the TSS is not busy.", "a TSS descriptor that is not busy (the available double-fault and NMI TSS): #GP(selector)", 7),
+        sq("SDM 3A:10.3", "Checks that the new task is available (call, jump, exception, or interrupt) or busy (IRET return).", "an IRET return needs a busy TSS", 0),
+        sq("SDM 3A:10.4", "If software uses an IRET instruction to suspend the new task, the processor checks for EFLAGS.NT = 1; it then uses the value in the previous task link field to return to the previous task.", "the link field is the return target"),
+        sq("SDM 3A:10.4", "When a CALL instruction, an interrupt, or an exception causes a task switch: the processor copies the segment selector for the current TSS to the previous task link field of the TSS for the new task; it then sets EFLAGS.NT = 1.", "the only hardware store of the link field (backlink)"),
+        sq("SDM 3A:10.4", "To keep such spurious task switches from succeeding, the operating system should initialize the previous task link field in every TSS that it creates to 0.", "the OS convention for the link field"),
+        sq("SDM 2B:POPF", "If a POPF/POPFD instruction is executed with ... privilege, an exception does not occur but privileged bits do not change.", "POPFD at CPL 3: the privileged bits (IF, IOPL) stay; NT is not one of them"),
+        sq("SDM 2B:POPF", "32, 64 1-3 <CPL S N N S N 0 S N S S N S S S S S S", "Table 1-12: protected mode, 32-bit operand, CPL 1-3 with IOPL < CPL: NT (7th flag column) is S (modified)"),
+        sq("SDM 1:3.4.3", "Bits 1, 3, 5, 15, and 22 through 31 of this register are reserved.", "bit 1 is reserved; IRET loads only the flags it names"),
+    ]
     ok = []
     gp_desc = {}
     for k in sorted(c for c in cl if c.startswith("0x")):
@@ -1467,10 +1559,10 @@ def iret_row(ctx, kg, iopl, tss, task_targets, cr4):
         raise SystemExit("gen_x86sys: the CS selectors IRETD can return to at CPL 3 are not exactly [0x1b]: %s" % [hex(x) for x in ok])
     cpl = 3
     loaded = [b for b in SEL_BITS if b != "IF"] + (["IF"] if cpl <= iopl else [])
-    mask = 2 | sum(1 << SEL_BITS[b] for b in loaded)
+    mask = sum(1 << SEL_BITS[b] for b in loaded)   # exactly the flags the SDM names; bit 1 (reserved) is not loaded
     nt_settable = bool(kg["EFLAGS_USER_SANITIZE"] & (1 << 14))
     return {
-        "cpl": 3, "operand_size": 32, "source": sdm,
+        "cpl": 3, "operand_size": 32, "source": sdm, "sdm_quotes": iret_q,
         "same_privilege_return": {
             "applies_when": "EFLAGS.NT = 0 and EFLAGS.VM = 0 (protected mode)",
             "pops": "EIP, CS, EFLAGS (12 bytes): the target CS has RPL = CPL = 3, so SS:ESP are not popped (SS and ESP are unchanged)",
@@ -1486,7 +1578,8 @@ def iret_row(ctx, kg, iopl, tss, task_targets, cr4):
         "eflags_restored": {
             "cpl": cpl, "iopl": iopl, "iopl_source": "row eflags.iopl",
             "loaded_bits": sorted(b for b in SEL_BITS if (mask >> SEL_BITS[b]) & 1), "loaded_mask": mask,
-            "bit1": "always 1",
+            "fixed_one": {"mask": 2, "source": "bit 1 is reserved and reads 1 (SDM 1:3.4.3, EFLAGS is 00000002H at init); IRET does not load it (it is not in loaded_mask), it keeps its value"},
+            "bit1": "not loaded: the SDM names no bit 1 among the flags IRET loads (sdm_quotes, SDM 1:3.4.3: bit 1 is reserved); it keeps its value",
             "not_loaded": {"IF": "loaded only if CPL <= IOPL; CPL 3 > IOPL %d" % iopl, "IOPL": "loaded only if CPL = 0", "VM": "changed only by a return at CPL 0 (the popped VM = 1 at CPL 3 is ignored: the return is the protected-mode one)",
                            "VIF": "loaded only if CPL = 0", "VIP": "loaded only if CPL = 0"},
             "unchanged_bits": "every bit not in loaded_mask keeps its current value (reserved bits included)",
@@ -1496,20 +1589,21 @@ def iret_row(ctx, kg, iopl, tss, task_targets, cr4):
             "source": "%s: EFLAGS(CF, PF, AF, ZF, SF, TF, DF, OF, NT) and, for a 32-bit operand, RF, AC, ID are loaded; IF only if CPL <= IOPL; IOPL, VM, VIF, VIP only at CPL 0. IOPL is taken from row eflags.iopl" % sdm},
         "task_return": {
             "applies_when": "EFLAGS.NT = 1 (tested before every other check: the popped CS and EFLAGS do not matter)",
-            "nt_set_at_cpl3": {"value": nt_settable, "source": "POPFD at CPL 3 loads NT (SDM Vol 2B POPF: NT is modified at every CPL); WDK 7.1 ks386.inc EFLAGS_USER_SANITIZE = 0x%X includes bit 14 (NT), so the OS does not clear it for user code" % kg["EFLAGS_USER_SANITIZE"]},
+            "nt_set_at_cpl3": {"value": nt_settable, "source": "POPFD at CPL 3 loads NT (sdm_quotes, SDM 2B:POPF Table 1-12 row for a 32-bit operand, CPL 1-3, IOPL < CPL: NT is S, modified); WDK 7.1 ks386.inc EFLAGS_USER_SANITIZE = 0x%X includes bit 14 (NT), so the OS does not clear it for user code" % kg["EFLAGS_USER_SANITIZE"]},
             "tr_selector": 0x28, "tss_backlink_offset": 0,
             "link_selector_rule": {
-                "ti1_or_beyond_gdt_limit": {"fault": "#TS", "error_code": "link & 0xfffc"},
-                "descriptor_not_a_tss": {"applies_to": "the null descriptor and every derived descriptor that is not a 32-bit TSS (0x08 0x10 0x18 0x20 0x30 0x38 0x40 0x48 0x70)", "fault": "#TS", "error_code": "link & 0xfffc"},
-                "available_tss_not_busy": {"selectors": ["0x50", "0x58"], "fault": "#TS", "error_code": "link & 0xfffc", "why": "the double-fault and NMI TSS descriptors are type 9 (available): the return needs a busy TSS"},
+                "ti1_or_beyond_gdt_limit": {"fault": "#GP", "error_code": "link & 0xfffc"},
+                "descriptor_not_a_tss": {"status": "undecided", "applies_to": "the null descriptor and every derived descriptor that is not a 32-bit TSS (0x08 0x10 0x18 0x20 0x30 0x38 0x40 0x48 0x70)",
+                                         "why": "the pinned SDM's IRET Protected Mode Exceptions list the cases `the segment selector for a TSS has its local/global bit set for local`, `a TSS segment descriptor specifies that the TSS is not busy` and `not available` (all #GP(selector)), and Vol 3A 10.3 lists the present/limit/busy checks of a task switch, but no statement says what a link selector naming a descriptor that is not a TSS does; blocker: an SDM statement, or a reach certificate that no site executes IRETD with EFLAGS.NT = 1"},
+                "available_tss_not_busy": {"selectors": ["0x50", "0x58"], "fault": "#GP", "error_code": "link & 0xfffc", "why": "the double-fault and NMI TSS descriptors are type 9 (available): the return needs a busy TSS, and a TSS descriptor that is not busy is #GP(selector)"},
                 "current_tss_0x28": {"status": "OutsideDomain", "why": "a link to the busy current TSS is a task switch to itself: the new state is the TSS contents at that time"},
                 "undecided_descriptors": "OutsideDomain, exactly the descriptors of jmp_far.undecided_descriptors",
-                "source": "Intel SDM Vol 2A IRET task return (read the link field of the current TSS; selector in the LDT or beyond the GDT limit: #TS(TSS selector); descriptor not a TSS, or a TSS not marked busy: #TS(TSS selector)) and Vol 3A 7.3 task switching"},
+                "source": "Intel SDM Vol 2A IRET Protected Mode Exceptions (a TSS selector with the local bit set, an index outside the table limit, a TSS descriptor that is not busy: #GP(selector)) and Vol 3A 10.3 / 10.4 task switching and task linking; every statement is in sdm_quotes"},
             "backlink": {
                 "initial_value": 0, "status": "undecided",
                 "why": "the Backlink of the TSS at TR (0x28) is zero after boot: winload memsets the TSS to zero for TssLength bytes, KiInitializeTSS stores only IoMapBase, Flags, LDT and Ss0, KiInitializeTSS2 only the I/O map, and the static IDT has no task gate and KiSystemStartup makes only vectors 8 and 2 task gates, to the double-fault and NMI TSS (0x50, 0x58), so the hardware's nested-switch store of the old TR selector never lands in the TSS at 0x28; "
                        "that no other kernel store reaches TSS+0 is NOT enumerated (a store through any pointer to the TSS needs a points-to proof over the kernel), so the invariant is not decided. blocker: such a proof, or a reach certificate that no site executes IRETD with EFLAGS.NT = 1",
-                "if_zero": {"fault": "#TS", "error_code": 0, "why": "link selector 0: GDT index 0 within the limit, the null descriptor is not a TSS"},
+                "if_zero": {"status": "undecided", "why": "link selector 0 names the null descriptor, a descriptor that is not a TSS: undecided as descriptor_not_a_tss"},
                 "evidence": tss, "idt_task_gate_targets": task_targets}}}
 
 
@@ -1540,12 +1634,13 @@ def task_gate_stores(name, exe, pdb, kg, static_idt_types):
     return {"vector_8": out[8], "vector_2": out[2]}
 
 
-def idt_stores(cs, ins):
+def idt_stores(cs, ins, ptr=0x38, report=None):
     """The stores (and the pushes/pops of memory) that the function makes through a pointer to the processor's IDT, by dataflow over the straight-line decode: the IDT pointer is KPCR.IDT, read as
     fs:[0x38] or as [KPCR + 0x38] with KPCR = fs:[0x1c] (KPCR.SelfPcr); lea/add/mov of it keep it a pointer with an offset. An index register added to it is a dynamic vector (its stores keep the
     field offset in the disp, valid only for an index scaled by 8, checked by the caller). Returns [(va, entry | None, field, size, value | None, mnemonic text)]."""
     X = cs.x86
     pcr, idt, const, out = set(), {}, {}, []
+    slots, followed = {}, set()   # sidt/sgdt memory operands (base register, disp) -> address; the ones a later `mov reg, [slot + 2]` turned into a pointer
     sub = {"cx": "ecx", "dx": "edx", "ax": "eax", "bx": "ebx", "si": "esi", "di": "edi"}
     for a in sorted(ins):
         i = ins[a]
@@ -1558,6 +1653,10 @@ def idt_stores(cs, ins):
             if b in idt or x in idt:
                 dyn = (b in idt and x is not None) or (x in idt and b is not None)
                 off = (idt[b] if b in idt else idt[x]) + o.mem.disp
+                if b in idt and x in const:
+                    off, dyn = off + const[x] * o.mem.scale, False
+                elif x in idt and b in const and o.mem.scale == 1:
+                    off, dyn = off + const[b], False
                 v = None
                 if len(ops) > 1:
                     src = ops[1]
@@ -1570,14 +1669,21 @@ def idt_stores(cs, ins):
                             v &= 0xffff
                 out.append((a, None if dyn else off // 8, (o.mem.disp & 7) if dyn else off % 8, o.size, v, t))
         rd, wr = i.regs_access()
+        if i.mnemonic == ("sidt" if ptr == 0x38 else "sgdt") and ops[0].type == X.X86_OP_MEM and ops[0].mem.base and not ops[0].mem.index:
+            slots[(i.reg_name(ops[0].mem.base), ops[0].mem.disp)] = a
         if i.mnemonic == "mov" and len(ops) == 2 and ops[0].type == X.X86_OP_REG and ops[1].type == X.X86_OP_MEM:
             d, m = i.reg_name(ops[0].reg), ops[1].mem
-            if m.segment and i.reg_name(m.segment) == "fs" and not m.base and not m.index and m.disp in (0x1c, 0x38):
+            if m.base and not m.index and not m.segment and (i.reg_name(m.base), m.disp - 2) in slots:
+                followed.add((i.reg_name(m.base), m.disp - 2))
+                pcr.discard(d)
+                idt[d] = 0
+                continue
+            if m.segment and i.reg_name(m.segment) == "fs" and not m.base and not m.index and m.disp in (0x1c, ptr):
                 pcr.discard(d)
                 idt.pop(d, None)
                 (pcr.add(d) if m.disp == 0x1c else idt.__setitem__(d, 0))
                 continue
-            if m.base and i.reg_name(m.base) in pcr and not m.index and not m.segment and m.disp == 0x38:
+            if m.base and i.reg_name(m.base) in pcr and not m.index and not m.segment and m.disp == ptr:
                 pcr.discard(d)
                 idt[d] = 0
                 continue
@@ -1608,6 +1714,8 @@ def idt_stores(cs, ins):
             const.pop(full, None)
         if newc:
             const[newc[0]] = newc[1]
+    if report is not None:
+        report.extend(sorted(slots[k] for k in set(slots) - followed))   # sidt/sgdt whose base dword is not loaded in the straight-line decode (the limit alone is read, or the slot is esp-relative past a push)
     return out
 
 
@@ -1625,7 +1733,7 @@ IDT_CLASSES = {
 }
 
 
-def idt_universe(img, P, pub, dec, cs, tbl):
+def idt_universe(img, P, pub, dec, cs, tbl, ptr=0x38, insn=('sidt', 'lidt')):
     """Every function of the kernel that obtains the IDT: reads KPCR.IDT (fs:[0x38], or [KPCR + 0x38] with KPCR = fs:[0x1c]), executes sidt/lidt, or names the static table."""
     X = cs.x86
     out = {}
@@ -1636,8 +1744,8 @@ def idt_universe(img, P, pub, dec, cs, tbl):
             continue
         selfpcr = any(i.mnemonic == "mov" and "fs:[0x1c]" in i.op_str for i in ins.values())
         for a, i in sorted(ins.items()):
-            hit = i.mnemonic in ("sidt", "lidt") or (i.mnemonic == "mov" and "fs:[0x38]" in i.op_str)
-            hit = hit or (selfpcr and i.mnemonic == "mov" and re.match(r"\w+, dword ptr \[\w+ \+ 0x38\]$", i.op_str) is not None and "esp" not in i.op_str and "ebp" not in i.op_str)
+            hit = i.mnemonic in insn or (i.mnemonic == "mov" and "fs:[0x%x]" % ptr in i.op_str)
+            hit = hit or (selfpcr and i.mnemonic == "mov" and re.match(r"\w+, dword ptr \[\w+ \+ 0x%x\]$" % ptr, i.op_str) is not None and "esp" not in i.op_str and "ebp" not in i.op_str)
             for o in i.operands:
                 hit = hit or (o.type == X.X86_OP_IMM and tbl <= o.imm < tbl + 0x800) or (o.type == X.X86_OP_MEM and not o.mem.base and not o.mem.index and tbl <= o.mem.disp < tbl + 0x800)
             if hit:
@@ -1706,9 +1814,205 @@ def runtime_idt_writers(name, exe, pdb, static_gates):
     return {"classes": ev, "universe": sorted(uni), "xmmi": ev["_Ki386EnableXMMIExceptions@4"]}
 
 
-def kernel_extras(kdir, src, kg, idt_types):
+def gdt_a_stores(name, exe, pdb, s1):
+    """No store of the kernel can clear the Accessed bit of a code or data descriptor of the GDT (`s1` = their entry indexes). Every function that reads KPCR.GDT (fs:[0x3c], or [KPCR + 0x3c] with KPCR = fs:[0x1c]) is scanned with the same dataflow as the IDT writers; each store
+    through the GDT pointer has a known entry and field, and none of them covers byte 5 (the access byte) of an entry of `s1`. Stores through a pointer the scan cannot follow are not seen: SwapContext receives KPCR in a register, so its stores are the ones gdt_writes asserts (base bytes of 0x38 only)."""
+    import capstone as cs
+    img = Image(exe)
+    P = Pdb(pdb)
+    pub = P.publics()
+    dec = Dec(img, cs)
+    out = {}
+    for n, v in sorted(pub.items()):
+        try:
+            ins = dec.cfg(img.base + P.rva(*v))[0]
+        except SystemExit:
+            continue
+        if not any("fs:[0x3c]" in i.op_str or "fs:[0x1c]" in i.op_str for i in ins.values()):
+            continue
+        try:
+            st = idt_stores(cs, ins, 0x3c)
+        except SystemExit as ex:
+            raise SystemExit("%s (function %s of %s)" % (ex, n, name))
+        if st:
+            out[n] = st
+    for n, st in out.items():
+        for a, e, f, z, _v, t in st:
+            if e is None or (e in s1 and f <= 5 < f + z):
+                raise SystemExit("gen_x86sys: %s: %s stores through the GDT pointer at %#x (%s) in a way that may clear the Accessed bit of a code/data descriptor" % (name, n, a, t))
+    return {n: [{"va": a, "entry": e, "field": f, "size": z} for a, e, f, z, _v, _t in st] for n, st in sorted(out.items())}
+
+
+def hal_selection(wp, wpdb, hal_names):
+    """Which HAL image the loader picks, from winload itself: _OslpDetermineKernelHal appends the kernel name, then calls _BlUtlGetAcpiTable with the signature 'APIC' (0x43495041) and appends `halmacpi.dll` or, when it fails, `halacpi.dll`; the BCD boot options that can name another file are read after that. The set of HAL file names the function references must be exactly the pinned images."""
+    import capstone as cs, bisect
+    img = Image(wp)
+    P = Pdb(wpdb)
+    va = {n: img.base + P.rva(*v) for n, v in P.publics().items()}
+    names = {}
+    for n, v in va.items():
+        names.setdefault(v, n)
+    a = va["_OslpDetermineKernelHal@8"]
+    ends = sorted(set(va.values()))
+    e = ends[bisect.bisect_right(ends, a)]
+    md = cs.Cs(cs.CS_ARCH_X86, cs.CS_MODE_32)
+    md.detail = True
+    strs, calls, pushes = [], [], []
+    for i in md.disasm(img.read(a, e - a), a):
+        if i.mnemonic == "push" and i.operands[0].type == cs.x86.X86_OP_IMM:
+            v = i.operands[0].imm
+            pushes.append((i.address, v))
+            if v > img.base:
+                try:
+                    t = img.read(v, 48).decode("utf-16le", errors="ignore").split("\0")[0]
+                except SystemExit:
+                    continue
+                if t.lower().endswith((".dll", ".exe")) and t.isprintable():
+                    strs.append((i.address, t))
+        if i.mnemonic == "call" and i.operands[0].type == cs.x86.X86_OP_IMM:
+            calls.append((i.address, names.get(i.operands[0].imm)))
+    hal = sorted(t for _a, t in strs if t.lower().startswith("hal"))
+    apic = [x for x, n in calls if n == "_BlUtlGetAcpiTable@8"]
+    if hal != sorted(hal_names) or len(apic) != 1 or not any(v == 0x43495041 and 0 < apic[0] - x < 16 for x, v in pushes):
+        raise SystemExit("gen_x86sys: winload's HAL selection is not `_BlUtlGetAcpiTable('APIC') ? one of %s`: found %s, acpi call %s" % (sorted(hal_names), hal, apic))
+    return {"function": "_OslpDetermineKernelHal@8", "va": a, "rule": "the kernel name is appended first; then _BlUtlGetAcpiTable('APIC') succeeds: halmacpi.dll, fails: halacpi.dll; a BCD boot option can override the HAL file name afterwards",
+            "references": [{"va": x, "string": t} for x, t in strs if t.lower().startswith("hal")], "acpi_call": apic[0], "candidates": sorted(hal_names),
+            "bcd_override": {"status": "undecided", "why": "_BlGetBootOptionString is called after the choice (boot options for the HAL file name); the declared machine's BCD store is not a pinned source; blocker: the BCD of the declared installation"}}
+
+
+def hal_idt_writers(name, exe, pdb):
+    """The stores that a HAL makes into the IDT, by the same rule as the kernel's (idt_universe + idt_stores, now also following sidt results). A store through a dynamic vector must be one of the two offset words (+0, +6) of a vector scaled by 8
+    (the gate's selector, access byte and type are unchanged); a store with a known vector is a whole gate (constant selector and access word, the offset words free). The HAL must not execute lidt (another IDT)."""
+    import capstone as cs
+    img = Image(exe)
+    P = Pdb(pdb)
+    pub = P.publics()
+    dec = Dec(img, cs)
+    uni = idt_universe(img, P, pub, dec, cs, 1 << 40)
+    bad = sorted(n for n, ins in uni.items() if any(i.mnemonic == "lidt" for i in ins.values()))
+    if bad:
+        raise SystemExit("gen_x86sys: %s: %s load another IDT (lidt)" % (name, bad))
+    fns, gates, unfollowed = {}, {}, []
+    for n, ins in sorted(uni.items()):
+        st = idt_stores(cs, ins, 0x38, unfollowed)
+        if not st:
+            continue
+        dyn = [x for x in st if x[1] is None]
+        if dyn and (any(f not in (0, 6) or z != 2 for _a, _e, f, z, _v, _t in dyn) or not any(i.mnemonic == "shl" and i.op_str.endswith(", 3") for i in ins.values())):
+            raise SystemExit("gen_x86sys: %s: %s stores into a dynamic IDT vector other than the offset words of an index scaled by 8: %s" % (name, n, dyn))
+        per = {}
+        for a, e, f, z, v, t in st:
+            if e is not None:
+                per.setdefault(e, {})[(f, z)] = (v, a)
+        whole = False
+        for e, fl in sorted(per.items()):
+            if set(fl) - {(0, 2), (2, 2), (4, 2), (6, 2)} or any(v is None for v, _a in fl.values()):
+                raise SystemExit("gen_x86sys: %s: %s stores into IDT[%#x] other than constant words of one gate: %s" % (name, n, e, fl))
+            if (2, 2) in fl or (4, 2) in fl:
+                if (2, 2) not in fl or (4, 2) not in fl:
+                    raise SystemExit("gen_x86sys: %s: %s stores only one of selector/access of IDT[%#x]" % (name, n, e))
+                whole = True
+                gates.setdefault(e, []).append({"function": n, "selector": fl[(2, 2)][0], "access": fl[(4, 2)][0], "stores": [a for _v, a in fl.values()]})
+        fns[n] = {"class": "gate" if whole else "handler_only", "stores": [a for a, *_r in st]}
+    return {"universe_size": len(uni), "lidt": [], "sidt_without_base_load": unfollowed, "functions": fns, "gates": {e: g for e, g in sorted(gates.items())}}
+
+
+def inf_services(text):
+    """(service, StartType, ServiceBinary) of every AddService of one INF; %strings% are substituted from its [Strings] section."""
+    secs, cur = {}, None
+    for l in text.splitlines():
+        l = l.split(";")[0].strip()
+        if not l:
+            continue
+        m = re.match(r"\[(.+)\]$", l)
+        if m:
+            cur = m.group(1).lower()
+            secs[cur] = []
+        elif cur is not None:
+            secs[cur].append(l)
+    strs = {}
+    for l in secs.get("strings", []):
+        m = re.match(r'(\S+)\s*=\s*"?(.*?)"?$', l)
+        if m:
+            strs[m.group(1).lower()] = m.group(2)
+    sub = lambda x: re.sub(r"%([^%]+)%", lambda m: strs.get(m.group(1).lower(), m.group(0)), x)
+    out = []
+    for ls in secs.values():
+        for l in ls:
+            m = re.match(r"AddService\s*=\s*([^,]+),\s*([^,]*),\s*([^,;]+)", l, re.I)
+            if not m:
+                continue
+            st = bn = None
+            for q in secs.get(m.group(3).strip().lower(), []):
+                a = re.match(r"StartType\s*=\s*(\S+)", q, re.I)
+                b = re.match(r"ServiceBinary\s*=\s*(.+)", q, re.I)
+                st = int(sub(a.group(1)), 0) if a else st
+                bn = sub(b.group(1).strip()).split("\\")[-1].lower() if b else bn
+            out.append((sub(m.group(1).strip().strip('"')).lower(), st, bn))
+    return out
+
+
+def ring0_scan(kdir, src):
+    """Every ring-0 image of the package other than the kernels and the HALs, by one rule: every *.sys of the package's inner cab (mirror drivers/, pinned by the sha256 list). The boot-start and system-start services are the AddService entries
+    with StartType 0 or 1 of the package's INFs (infs/, pinned the same way). Each image is scanned for the three ways to reach the IDT: a read of fs:[0x38] (KPCR.IDT), a read of fs:[0x1c] (KPCR.SelfPcr), and sidt/lidt (decoded at an instruction
+    boundary of the linear sweep of each executable section; a byte match that is not an instruction is not a site)."""
+    import capstone as cs
+    ks = src["win7sp1_x86_kernel"]["trees"]
+    files = {}
+    for tree in ("drivers", "infs"):
+        lst = os.path.join(kdir, ks[tree]["list"])
+        if sha(lst) != ks[tree]["sha256"]:
+            raise SystemExit("gen_x86sys: %s: sha256 is not the pinned one" % ks[tree]["list"])
+        for l in open(lst).read().splitlines():
+            h, p = l.split("  ", 1)
+            fp = os.path.join(kdir, tree, p)
+            if sha(fp) != h:
+                raise SystemExit("gen_x86sys: %s/%s: sha256 is not the listed one" % (tree, p))
+            files.setdefault(tree, {})[p] = fp
+    svc = {}
+    for p, fp in sorted(files["infs"].items()):
+        t = open(fp, "rb").read()
+        t = t.decode("utf-16") if t[:2] in (b"\xff\xfe", b"\xfe\xff") else t.decode("latin-1")
+        for n, st, bn in inf_services(t):
+            svc.setdefault((n, st, bn), p)
+    start = sorted({(n, bn) for (n, st, bn) in svc if st in (0, 1)})
+    have = {os.path.basename(p).lower() for p in files["drivers"]}
+    pat = {"fs:[0x38]": re.compile(rb"\x64(?:\xa1|[\x8b\x03\x2b\x3b\x33\x0b\x23\x13\x1b\x89\x01\x29\x39\x31\x09\x21\x11\x19\x8d\xff][\x05\x0d\x15\x1d\x25\x2d\x35\x3d])\x38\x00\x00\x00", re.S),
+           "fs:[0x1c]": re.compile(rb"\x64(?:\xa1|[\x8b\x03\x2b\x3b\x33\x0b\x23\x13\x1b\x89\x01\x29\x39\x31\x09\x21\x11\x19\x8d\xff][\x05\x0d\x15\x1d\x25\x2d\x35\x3d])\x1c\x00\x00\x00", re.S),
+           "sidt/lidt": re.compile(rb"\x0f\x01[\x08-\x0f\x18-\x1f\x48-\x4f\x58-\x5f\x88-\x8f\x98-\x9f]", re.S)}
+    md = cs.Cs(cs.CS_ARCH_X86, cs.CS_MODE_32)
+    sites = {}
+    for p, fp in sorted(files["drivers"].items()):
+        d = open(fp, "rb").read()
+        pe = struct.unpack_from("<I", d, 0x3c)[0]
+        ns, so = struct.unpack_from("<H", d, pe + 6)[0], struct.unpack_from("<H", d, pe + 20)[0]
+        if struct.unpack_from("<H", d, pe + 24 + 68)[0] != 1:
+            raise SystemExit("gen_x86sys: %s is not a native-subsystem image" % p)
+        for i in range(ns):
+            n, vs, va, rs, rp, _a, _b, _c, _d, ch = struct.unpack_from("<8sIIIIIIHHI", d, pe + 24 + so + i * 40)
+            if not ch & 0x20000000:
+                continue
+            blob = d[rp:rp + rs]
+            bounds = {i_.address for i_ in md.disasm(blob, 0)}
+            for k, r in pat.items():
+                for m in r.finditer(blob):
+                    if m.start() not in bounds:
+                        continue
+                    ins = list(md.disasm(blob[m.start():m.start() + 8], 0))
+                    if k == "sidt/lidt" and not (ins and ins[0].mnemonic in ("sidt", "lidt")):
+                        continue
+                    sites.setdefault(p, []).append({"va": va + m.start(), "kind": k if k != "sidt/lidt" else ins[0].mnemonic})
+    started = {bn for _n, bn in start}
+    return {"images_scanned": len(files["drivers"]), "inf_files": len(files["infs"]),
+            "boot_system_start_services": [{"service": n, "binary": bn, "in_package": bn in have} for n, bn in start],
+            "boot_system_start_missing": sorted(bn for n, bn in start if bn not in have),
+            "sites": {p: v for p, v in sorted(sites.items())},
+            "sites_in_start_set": sorted(p for p in sites if os.path.basename(p).lower() in started)}
+
+
+def kernel_extras(kdir, src, kg, idt_types, s1=()):
     ks = src["win7sp1_x86_kernel"]
-    ap, tss, ldta, cr4, rtw = {}, {}, {}, {}, {}
+    ap, tss, ldta, cr4, rtw, gdtw = {}, {}, {}, {}, {}, {}
     for n, rec in sorted(ks["kernels"].items()):
         ex, pb = os.path.join(kdir, rec["exe"]["path"]), os.path.join(kdir, rec["pdb"]["path"])
         pinned_bin(ex, rec["exe"], n)
@@ -1719,15 +2023,24 @@ def kernel_extras(kdir, src, kg, idt_types):
         cr4[n] = cr4_writers(n, ex, pb)
         tss[n]['task_gates'] = task_gate_stores(n, ex, pb, kg, idt_types)
         rtw[n] = runtime_idt_writers(n, ex, pb, None)
+        gdtw[n] = gdt_a_stores(n, ex, pb, set(s1))
     if len({tuple(sorted(v["KiInitializeTSS"]["stores"])) for v in tss.values()}) != 1 or len({v["access_byte"] for v in ldta.values()}) != 1:
         raise SystemExit("gen_x86sys: the two kernels disagree on the TSS initial stores or the LDT descriptor access byte")
     wl = ks["loader"]["winload.exe"]
     wp, wpdb = os.path.join(kdir, wl["path"]), os.path.join(kdir, wl["pdb"]["path"])
+    hal = {}
+    for n, rec in sorted(ks["hals"].items()):
+        ex, pb = os.path.join(kdir, rec["exe"]["path"]), os.path.join(kdir, rec["pdb"]["path"])
+        pinned_bin(ex, rec["exe"], n)
+        pinned_bin(pb, rec["pdb"], rec["pdb"]["path"])
+        hal[n] = hal_idt_writers(n, ex, pb)
+        gdtw[n] = gdt_a_stores(n, ex, pb, set(s1))
+    hal_sel = hal_selection(wp, wpdb, list(ks["hals"]))
     bsp = bsp_gdt_alloc(wp, wpdb, kg)
     logical = {n: {c: {k: v for k, v in e.items() if k not in ('stores', 'saved', 'patched', 'restored', 'handler_va')} for c, e in r['classes'].items()} for n, r in rtw.items()}
     if len({json.dumps(v, sort_keys=True) for v in logical.values()}) != 1:
         raise SystemExit("gen_x86sys: the two kernels disagree on the IDT writers")
-    return bsp, ap, {"winload": addrs({"TSS_memset_call": bsp["TSS_memset_call"], "TssLength": kg["TssLength"]}), "kernels": addrs(tss)}, addrs(ldta), addrs(cr4), rtw
+    return bsp, ap, {"winload": addrs({"TSS_memset_call": bsp["TSS_memset_call"], "TssLength": kg["TssLength"]}), "kernels": addrs(tss)}, addrs(ldta), addrs(cr4), rtw, addrs(gdtw), hal, hal_sel, ring0_scan(kdir, src)
 
 
 def build(osrec, src, mirror, wine, cpumodel, kernel):
@@ -1754,7 +2067,7 @@ def build(osrec, src, mirror, wine, cpumodel, kernel):
         if d is None or (d["type"], d["s"], d["dpl"], d["p"]) != want:
             raise SystemExit("gen_x86sys: the GDT descriptor of %s (%s = %#x) is not (type %#x, S 1, DPL 3, P 1): %r" % (r, k_, kg[k_], want[0], d))
     c3 = {v for v, g in idtg.items() if g["present"] and g["dpl"] == 3}
-    bsp, apg, tssf, ldta, cr4w, rtw = kernel_extras(kernel, src, kg, {g['type'] for g in idtg.values()})
+    bsp, apg, tssf, ldta, cr4w, rtw, gdtw, hal, hal_sel, ring0 = kernel_extras(kernel, src, kg, {g['type'] for g in idtg.values()}, {k // 8 for k, d in gdt_ents.items() if d['s'] == 1})
     # the IDT user code runs against: the static table with every store of the boot-time writers applied
     rt = {k: dict(v) for k, v in idtg.items()}
     tg = tssf["kernels"]
@@ -1766,6 +2079,12 @@ def build(osrec, src, mirror, wine, cpumodel, kernel):
     undec_idt = {0x21}   # KiSwapProcess copies KPROCESS.Int21Descriptor, which only the VDM path (Ki386LoadTargetInt21Entry) stores
     if rt[0x21]["present"] or rt[0x21]["type"] != 0:
         raise SystemExit("gen_x86sys: IDT entry 0x21 is not the zero entry the VDM-undecided row describes")
+    for hn, h_ in sorted(hal.items()):
+        for e_, gl_ in h_["gates"].items():
+            for g_ in gl_:
+                ng_ = gate_row(None, g_["selector"], g_["access"])
+                if ng_["kind"] is None or (ng_["present"], ng_["dpl"]) != (rt[e_]["present"], rt[e_]["dpl"]):
+                    raise SystemExit("gen_x86sys: %s: %s writes IDT[%#x] as %r, which is not a gate with the Present and DPL of the static entry" % (hn, g_["function"], e_, ng_))
     c3rt = {v for v, g in rt.items() if g["present"] and g["dpl"] == 3}
     if c3rt != c3 or {v for v, g in rt.items() if not g["present"]} != {v for v, g in idtg.items() if not g["present"]}:
         raise SystemExit("gen_x86sys: the boot-time IDT writers change which vectors are present DPL-3 gates; int_ring3 would change")
@@ -1780,6 +2099,25 @@ def build(osrec, src, mirror, wine, cpumodel, kernel):
     if g29["present"] or g29["type"] != 0 or g29["handler"] is not None or g29["access"] != 0:
         raise SystemExit("gen_x86sys: IDT entry 0x29 is not the zero entry (not present, gate type 0) the row idt.vector_0x29 describes")
     mov, jmpf, ctx = segment_load_rows(kg, sel, gdt_ents, ldtf, wlim, ks)
+    # Accessed bit (type bit 0, SDM 3A:3.4.5.1: set by the processor when it loads the selector) of every code/data descriptor, by rule:
+    # (a) initial A from winload's bytes; (b) A = 1 stays 1 (gdt_a_stores: no kernel store clears it); (c) A = 0 becomes 1 when the declared
+    # machine loads the selector at or before guest thread start (the `sel` roles); (d) otherwise it is state, no constant.
+    started = {v["value"] & 0xfff8: r for r, v in sorted(sel.items())}
+    gdt_acc = {}
+    for k, d in sorted(gdt_ents.items()):
+        if d["s"] != 1:
+            continue
+        if d["type"] & 1:
+            gdt_acc[k] = {"value": 1, "why": "(a)+(b) A = 1 in winload's descriptor bytes and no kernel store through KPCR.GDT clears it (gdt_a_stores)"}
+        elif k in started:
+            gdt_acc[k] = {"value": 1, "why": "(c) A = 0 in winload's bytes; the processor sets it when the declared machine loads this selector into %s at thread start (SDM 3A:3.4.5.1, quoted in row lar_lsl.sdm_quotes); no kernel store clears it (gdt_a_stores)" % started[k]}
+        elif d["dpl"] < 3:
+            gdt_acc[k] = {"value": None, "why": "DPL %d: LAR at CPL 3 gives ZF = 0, the bit is not observable by guest code" % d["dpl"]}
+        else:
+            gdt_acc[k] = "state: set by the first segment load of this descriptor"
+    for k, a in gdt_acc.items():
+        gdt_ents[k]["accessed"] = a
+    ctx["accessed"] = gdt_acc
     wf = src["wine"]["files"]["signal_i386"]
     wt = pinned(os.path.join(wine, wf["path"]), wf, wf["path"])
     wsrc = "Wine 9.0 %s @ %s" % (wf["path"], src["wine"]["commit"][:12])
@@ -1950,7 +2288,14 @@ def build(osrec, src, mirror, wine, cpumodel, kernel):
                                    "applied": {"vector_2": "task gate (access 0x8500), selector KGDT_NMI_TSS", "vector_8": "task gate (access 0x8500), selector KGDT_DF_TSS", "vector_0x13": "handler %s (Ki386EnableXMMIExceptions), access 0x8e00, selector 8 (the static entry has handler %s)" % (xm["handler"], idt_static[0x13]["handler"])},
                                    "no_net_change": {"vector_6": "KiSetProcessorType and Check486BStepping patch the offset words and restore them with push/pop of the same dwords", "any_vector_handler_only": "KiConnectVectorAndInterruptObject stores only the offset words (+0, +6): present, DPL, type and selector are unchanged"},
                                    "undecided_vectors": {"0x21": undec("KiSwapProcess loads IDT[0x21] from KPROCESS.Int21Descriptor of the process being switched to; the only store of that field is Ki386LoadTargetInt21Entry (the VDM path), so the entry is the zero entry unless a process set up an NTVDM int 0x21 target; no pinned source decides whether the declared program does; blocker: a reach certificate that no site calls the VDM setup API, or a row")},
-                                   "external_writers": undec("kernel-mode code outside ntoskrnl/ntkrnlpa (hal.dll of the declared machine, drivers) reaches the IDT through KPCR.IDT; hal.dll is not a pinned source, so which gates it rewrites is not derived; blocker: pin the 7601 hal (halmacpi.dll) from the same Windows 7 SP1 package in tools/win7sp1-x86-kernel and extend the writer universe to it"),
+                                   "external_writers": {"rule": "ring-0 code outside the kernel that reaches the IDT through KPCR.IDT (fs:[0x38], fs:[0x1c] + 0x38) or sidt: the HAL images, found by the same rule as the kernel's writers (hal_idt_writers); a whole-gate store must keep Present and DPL of the static entry (asserted below), so which vectors are present DPL-3 gates, and which are not present, is the same whichever HAL path runs; an offset-word store changes only the handler",
+                                                        "hal_selection": hal_sel, "images": {n: {"universe_size": h["universe_size"], "functions": addrs(h["functions"]), "gates": addrs(h["gates"])} for n, h in sorted(hal.items())},
+                                                        "gates_may_change": {"0x%02x" % e: [dict(g_, state="the entry is this gate once the function ran (it runs only on the HAL path the machine takes); the static entry otherwise", present=gate_row(None, g_["selector"], g_["access"])["present"], dpl=gate_row(None, g_["selector"], g_["access"])["dpl"], kind=gate_row(None, g_["selector"], g_["access"])["kind"]) for g_ in gl] for e, gl in sorted({e: [g_ for h in hal.values() for g_ in h["gates"].get(e, [])] for h in hal.values() for e in h["gates"]}.items())},
+                                                        "drivers": {"rule": "ring0_scan: every *.sys of the package (mirror drivers/), scanned for fs:[0x38], fs:[0x1c] and sidt/lidt at an instruction boundary; the boot-start and system-start services are the INF AddService entries with StartType 0/1 (mirror infs/)",
+                                                                    "images_scanned": ring0["images_scanned"], "reads_of_kpcr_idt_or_selfpcr": {p: v for p, v in ring0["sites"].items() if any(x["kind"] != "sidt" and x["kind"] != "lidt" for x in v)},
+                                                                    "sidt_lidt_sites": {p: addrs(v) for p, v in ring0["sites"].items() if any(x["kind"] in ("sidt", "lidt") for x in v)}, "sites_in_boot_system_start_services": ring0["sites_in_start_set"],
+                                                                    "boot_system_start_services": ring0["boot_system_start_services"],
+                                                                    "undecided": undec("the package is an update package: it holds the binaries it changed only, and the INFs of those; a boot-start or system-start service whose binary is not in it (boot_system_start_missing of the INF set, and every service that is in the SYSTEM hive of the installation instead of an INF) is not scanned; blocker: the Windows 7 SP1 x86 installation media (install.wim: Windows/System32/drivers and config/SYSTEM), a Microsoft-published source that is not pinned")}},
                                    "kernels": addrs(rtw)},
                 "addresses": hexify(kaddr),
                 "source": "Windows 7 SP1 ntoskrnl/ntkrnlpa 7601 (both give the same table): the static IDT in the INIT section, word-swapped by KiSwapIDT and copied by KiSystemStartup; access word 0xEE00 is a DPL-3 interrupt gate, 0x8E00 DPL 0, 0 is not a gate"},

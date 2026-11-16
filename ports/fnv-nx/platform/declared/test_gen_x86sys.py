@@ -1,21 +1,68 @@
 #!/usr/bin/env python3 -I
 """test_gen_x86sys: x86sys.json is exactly what gen_x86sys.py gives from os.json and the pinned sources (a pure function), and the rows carry
-their sources. Usage: test_gen_x86sys.py MIRROR_DIR WINE_DIR CPUID_MODEL_JSON KERNEL_DIR"""
+their sources. Usage: test_gen_x86sys.py MIRROR_DIR WINE_DIR CPUID_MODEL_JSON KERNEL_DIR SDM_TXT PROOF_DIR
+(SDM_TXT = `pdftotext -layout` of the pinned Intel SDM, fnv-nx-build tools/intel-sdm PDF sha256 a4a62e6a...f321; PROOF_DIR = lift/proof of L3b, holding sdm_pages.py and sdm_cite_check.py)"""
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 
 H = os.path.dirname(os.path.abspath(__file__))
-mirror, wine, cpum, kernel = sys.argv[1:5]
+mirror, wine, cpum, kernel, sdm_txt, proof = sys.argv[1:7]
 out = os.path.join(tempfile.mkdtemp(), "x86sys.json")
 subprocess.run([sys.executable, "-I", os.path.join(H, "gen_x86sys.py"), "--os", os.path.join(H, "os.json"), "--sources", os.path.join(H, "x86sys_sources.json"),
                 "--mirror", mirror, "--wine", wine, "--cpumodel", cpum, "--kernel", kernel, "--out", out], check=True)
 ok = open(out).read() == open(os.path.join(H, "x86sys.json")).read()
 rec = json.load(open(out))
 fp = rec["thread_fp_initial"]
-checks = [("x86sys.json is the generator's output", ok), ("precedence is in the header", bool(rec.get("precedence"))),
+
+
+def quotes(o, out):
+    """every `sdm_quotes` entry of the record (the rows that rest on the Intel SDM carry them)"""
+    if isinstance(o, dict):
+        for k, v in o.items():
+            if k == "sdm_quotes":
+                out.extend(v)
+            else:
+                quotes(v, out)
+    elif isinstance(o, list):
+        for v in o:
+            quotes(v, out)
+    return out
+
+
+def cite_check(rec):
+    """Every quote of the record is found in the pinned SDM text by L3b's sdm_cite_check.py (pages by its sdm_pages.py; a quote with page_offset n is checked against the pages n..n+2 after its key's page, by a pseudo key whose page is the key's page + n)."""
+    qs = quotes(rec, [])
+    d = tempfile.mkdtemp()
+    keys = sorted({q["key"] for q in qs})
+    kf, sf = os.path.join(d, "keys.txt"), os.path.join(d, "quotes.txt")
+    open(kf, "w").write("\n".join(keys) + "\n")
+    tsv = subprocess.run([sys.executable, "-I", os.path.join(proof, "sdm_pages.py"), sdm_txt, kf], check=True, capture_output=True, text=True).stdout
+    pages = {l.split("\t")[0]: l.split("\t")[1] for l in tsv.split("\n")[1:] if l.count("\t") >= 2}
+    if any(not pages.get(k, "?").isdigit() for k in keys):
+        return False
+    rows, lines = [tsv.rstrip("\n")], []
+    for q in qs:
+        if '"' in q["quote"] or "'" in q["quote"] or len(q["quote"]) < 15:
+            return False
+        key = q["key"]
+        if q.get("page_offset"):
+            key = "%sp%d" % (q["key"], q["page_offset"])
+            rows.append("%s\t%d\t" % (key, int(pages[q["key"]]) + q["page_offset"]))
+        lines.append("%s\n\"%s\"\n" % (key, q["quote"]))
+    open(sf, "w").write("\n".join(lines))
+    tf = os.path.join(d, "pages.tsv")
+    open(tf, "w").write("\n".join(dict.fromkeys(rows)) + "\n")
+    r = subprocess.run([sys.executable, "-I", os.path.join(proof, "sdm_cite_check.py"), sdm_txt, sf, tf], capture_output=True, text=True)
+    out = r.stdout.strip().split("\n")
+    sys.stderr.write("".join(l + "\n" for l in out if not l.startswith("OK")))
+    return r.returncode == 0 and len(out) == len([q for q in qs if re.search(r"[A-Za-z]{4}", q["quote"])]) and all(l.startswith("OK") for l in out)
+
+
+checks = [("every sdm_quotes entry of the record (%d: LAR, LSL, IRET, task return) is found on its page of the pinned SDM by sdm_cite_check.py" % len(quotes(rec, [])), cite_check(rec)), ("x86sys.json is the generator's output", ok), ("precedence is in the header", bool(rec.get("precedence"))),
           ("initial MXCSR 0x1F80 / x87 CW 0x27F", (fp["mxcsr"]["value"], fp["x87_control_word"]["value"]) == (0x1f80, 0x27f)),
           ("other_vectors is decided: #GP vector*8+2, access violation {0, 0xffffffff}, flags 0, eip_advance 0, Wine line numbers cited",
            (lambda o: o.get("status") is None and (o["fault"], o["error_code"], o["exception_code"], o["flags"], o["parameters"], o["eip_advance"]) == ("#GP", "vector*8+2", 0xC0000005, 0, [0, 0xffffffff], 0)
@@ -40,7 +87,10 @@ checks = [("x86sys.json is the generator's output", ok), ("precedence is in the 
           ("idt.runtime_writes: universe by rule = the 18 classified functions in both kernels, 0x13 -> _KiTrap13 (access 0x8e00, selector 8), vector 6 patch restored, 0x21 undecided, HAL undecided",
            (lambda w: sorted(w["kernels"]) == ["ntkrnlpa.exe", "ntoskrnl.exe"] and all(len(k["universe"]) == 18 and k["xmmi"]["handler"] == "_KiTrap13" and k["xmmi"]["access"] == "0x8E00" and k["xmmi"]["selector"] == 8
                                                                                          and k["classes"]["_KiSetProcessorType@0"]["class"] == "patch6" and k["classes"]["_KiConnectVectorAndInterruptObject@8"]["class"] == "handler_only" for k in w["kernels"].values())
-            and w["undecided_vectors"]["0x21"]["status"] == "undecided" and w["external_writers"]["status"] == "undecided" and "vector_2" in w["applied"] and "vector_8" in w["applied"])(rec["idt"]["runtime_writes"])),
+            and w["undecided_vectors"]["0x21"]["status"] == "undecided" and w["external_writers"]["drivers"]["undecided"]["status"] == "undecided" and w["external_writers"]["hal_selection"]["candidates"] == ["halacpi.dll", "halmacpi.dll"]
+            and sorted(w["external_writers"]["gates_may_change"]) == ["0x12", "0x1f", "0x37"] and all(g["dpl"] == 0 and g["present"] == 1 for gl in w["external_writers"]["gates_may_change"].values() for g in gl)
+            and w["external_writers"]["drivers"]["images_scanned"] == 154 and w["external_writers"]["drivers"]["reads_of_kpcr_idt_or_selfpcr"] == {} and w["external_writers"]["drivers"]["sites_in_boot_system_start_services"] == []
+            and len(w["external_writers"]["drivers"]["sidt_lidt_sites"]) == 1 and "vector_2" in w["applied"] and "vector_8" in w["applied"])(rec["idt"]["runtime_writes"])),
           ("idt: limit 0x7ff, 256 entries, 0x2a-0x2e are ring-3 gates, both kernels' addresses", (rec["idt"]["limit"], rec["idt"]["entries"]) == (0x7ff, 256) and "0x2a-0x2e" in rec["idt"]["ring3_gates"] and sorted(rec["idt"]["addresses"]) == ["ntkrnlpa.exe", "ntoskrnl.exe"]),
           ("gdt: limit 0x3ff; ring-3 code 0x18 type 0xA DPL3, data 0x20 and TEB 0x38 type 2 DPL3, all present, S=1",
            rec["gdt"]["limit"] == 0x3ff and all((d["p"], d["s"], d["dpl"], d["type"]) == (1, 1, 3, t) for d, t in ((rec["gdt"]["descriptors"]["0x18"], 0xa), (rec["gdt"]["descriptors"]["0x20"], 2), (rec["gdt"]["descriptors"]["0x38"], 2)))),
@@ -68,13 +118,19 @@ checks = [("x86sys.json is the generator's output", ok), ("precedence is in the 
             and all(l["descriptors"][k]["lar"]["zf"] == 0 and l["descriptors"][k]["lsl"]["zf"] == 0 for k in ("0x08", "0x10", "0x28", "0x30", "0x48", "0x50", "0x58", "0x70"))
             and l["null_selector"]["lar"]["zf"] == 0 and l["ti1"]["lsl"]["zf"] == 0 and l["beyond_gdt_limit"]["lar"]["zf"] == 0
             and all(v["access_byte"] == 0x82 for v in l["access_rights"]["ldt_descriptor_access"].values()))(rec["lar_lsl"])),
+          ("iret fixed_one: bit 1 is outside loaded_mask and listed as fixed_one 2; gdt descriptors carry `accessed` by the rule (1 for the thread-start selectors 0x18 0x20 0x38 with no clearing store in gdt_a_stores, value None for DPL 0, a state string for 0x40), mirrored in the LAR dests",
+           (lambda r, g, l: r["eflags_restored"]["fixed_one"]["mask"] == 2 and not (r["eflags_restored"]["loaded_mask"] & 2)
+            and all(g[k]["accessed"]["value"] == 1 for k in ("0x18", "0x20", "0x38")) and all(g[k]["accessed"]["value"] is None for k in ("0x08", "0x10", "0x30"))
+            and g["0x40"]["accessed"] == "state: set by the first segment load of this descriptor"
+            and all(l[k]["lar"]["dest"]["accessed"] == g[k]["accessed"] for k in ("0x18", "0x20", "0x38", "0x40")))(rec["iret"], rec["gdt"]["descriptors"], rec["lar_lsl"]["descriptors"])),
           ("iret at CPL 3: returns only to CS 0x1b; loaded EFLAGS bits NT RF AC ID and the arithmetic/TF/DF flags, not IF IOPL VM VIF VIP; NT=1 is a task return whose back link is undecided with its evidence",
            (lambda r: r["same_privilege_return"]["cs_selector_checks"]["returns_to"] == [0x1b] and r["same_privilege_return"]["cs_selector_checks"]["null_selector"]["error_code"] == 0
-            and r["eflags_restored"]["loaded_mask"] == 0x254dd7
+            and r["eflags_restored"]["loaded_mask"] == 0x254dd5
             and sorted(r["eflags_restored"]["loaded_bits"]) == sorted(["CF", "PF", "AF", "ZF", "SF", "TF", "DF", "OF", "NT", "RF", "AC", "ID"]) and sorted(r["eflags_restored"]["not_loaded"]) == ["IF", "IOPL", "VIF", "VIP", "VM"]
             and r["eflags_restored"]["iopl"] == rec["eflags"]["iopl"]["value"] == 0 and r["eflags_restored"]["pvi_vme"]["status"] == "undecided"
             and r["task_return"]["nt_set_at_cpl3"]["value"] is True and r["task_return"]["backlink"]["status"] == "undecided" and r["task_return"]["backlink"]["initial_value"] == 0
-            and r["task_return"]["backlink"]["if_zero"]["fault"] == "#TS" and r["task_return"]["tr_selector"] == rec["selectors"]["tr"]["value"]
+            and r["task_return"]["backlink"]["if_zero"]["status"] == "undecided" and r["task_return"]["link_selector_rule"]["descriptor_not_a_tss"]["status"] == "undecided"
+            and (r["task_return"]["link_selector_rule"]["ti1_or_beyond_gdt_limit"]["fault"], r["task_return"]["link_selector_rule"]["available_tss_not_busy"]["fault"]) == ("#GP", "#GP") and r["task_return"]["tr_selector"] == rec["selectors"]["tr"]["value"]
             and r["task_return"]["backlink"]["evidence"]["winload"]["TssLength"] == "0x20AC"
             and all(k["task_gates"]["vector_8"]["selector"] == 0x50 and k["task_gates"]["vector_2"]["selector"] == 0x58 for k in r["task_return"]["backlink"]["evidence"]["kernels"].values()))(rec["iret"])),
           ("0x29 is not a ring-3 vector", 0x29 not in rec["int_ring3"]["vectors"]), ("no opcode list in tss_io_bitmap", "opcodes" not in rec["tss_io_bitmap"]),

@@ -81,6 +81,10 @@
   },
   "descriptors": {
    "0x08": {
+    "accessed": {
+     "value": null,
+     "why": "DPL 0: LAR at CPL 3 gives ZF = 0, the bit is not observable by guest code"
+    },
     "avl": 0,
     "base": 0,
     "base_is": "a constant",
@@ -97,6 +101,10 @@
     "type": 10
    },
    "0x10": {
+    "accessed": {
+     "value": null,
+     "why": "DPL 0: LAR at CPL 3 gives ZF = 0, the bit is not observable by guest code"
+    },
     "avl": 0,
     "base": 0,
     "base_is": "a constant",
@@ -113,6 +121,10 @@
     "type": 2
    },
    "0x18": {
+    "accessed": {
+     "value": 1,
+     "why": "(c) A = 0 in winload's bytes; the processor sets it when the declared machine loads this selector into cs at thread start (SDM 3A:3.4.5.1, quoted in row lar_lsl.sdm_quotes); no kernel store clears it (gdt_a_stores)"
+    },
     "avl": 0,
     "base": 0,
     "base_is": "a constant",
@@ -129,6 +141,10 @@
     "type": 10
    },
    "0x20": {
+    "accessed": {
+     "value": 1,
+     "why": "(c) A = 0 in winload's bytes; the processor sets it when the declared machine loads this selector into ss at thread start (SDM 3A:3.4.5.1, quoted in row lar_lsl.sdm_quotes); no kernel store clears it (gdt_a_stores)"
+    },
     "avl": 0,
     "base": 0,
     "base_is": "a constant",
@@ -161,6 +177,10 @@
     "type": 9
    },
    "0x30": {
+    "accessed": {
+     "value": null,
+     "why": "DPL 0: LAR at CPL 3 gives ZF = 0, the bit is not observable by guest code"
+    },
     "avl": 0,
     "base": 4292866048,
     "base_is": "a constant",
@@ -177,6 +197,10 @@
     "type": 2
    },
    "0x38": {
+    "accessed": {
+     "value": 1,
+     "why": "(c) A = 0 in winload's bytes; the processor sets it when the declared machine loads this selector into fs at thread start (SDM 3A:3.4.5.1, quoted in row lar_lsl.sdm_quotes); no kernel store clears it (gdt_a_stores)"
+    },
     "avl": 0,
     "base": 0,
     "base_is": "a constant",
@@ -193,6 +217,7 @@
     "type": 2
    },
    "0x40": {
+    "accessed": "state: set by the first segment load of this descriptor",
     "avl": 0,
     "base": 1024,
     "base_is": "a constant",
@@ -209,6 +234,10 @@
     "type": 2
    },
    "0x70": {
+    "accessed": {
+     "value": null,
+     "why": "DPL 0: LAR at CPL 3 gives ZF = 0, the bit is not observable by guest code"
+    },
     "avl": 0,
     "base": null,
     "base_is": "the GDT page itself",
@@ -272,8 +301,446 @@
     "vector_8": "task gate (access 0x8500), selector KGDT_DF_TSS"
    },
    "external_writers": {
-    "status": "undecided",
-    "why": "kernel-mode code outside ntoskrnl/ntkrnlpa (hal.dll of the declared machine, drivers) reaches the IDT through KPCR.IDT; hal.dll is not a pinned source, so which gates it rewrites is not derived; blocker: pin the 7601 hal (halmacpi.dll) from the same Windows 7 SP1 package in tools/win7sp1-x86-kernel and extend the writer universe to it"
+    "drivers": {
+     "boot_system_start_services": [
+      {
+       "binary": "acpi.sys",
+       "in_package": true,
+       "service": "acpi"
+      },
+      {
+       "binary": "aliide.sys",
+       "in_package": false,
+       "service": "aliide"
+      },
+      {
+       "binary": "amdide.sys",
+       "in_package": false,
+       "service": "amdide"
+      },
+      {
+       "binary": "amdsata.sys",
+       "in_package": true,
+       "service": "amdsata"
+      },
+      {
+       "binary": "amdxata.sys",
+       "in_package": true,
+       "service": "amdxata"
+      },
+      {
+       "binary": "atapi.sys",
+       "in_package": false,
+       "service": "atapi"
+      },
+      {
+       "binary": "cdrom.sys",
+       "in_package": true,
+       "service": "cdrom"
+      },
+      {
+       "binary": "cmdide.sys",
+       "in_package": false,
+       "service": "cmdide"
+      },
+      {
+       "binary": "hpsamd.sys",
+       "in_package": false,
+       "service": "hpsamd"
+      },
+      {
+       "binary": "iastorv.sys",
+       "in_package": true,
+       "service": "iastorv"
+      },
+      {
+       "binary": "intelide.sys",
+       "in_package": false,
+       "service": "intelide"
+      },
+      {
+       "binary": "isapnp.sys",
+       "in_package": false,
+       "service": "isapnp"
+      },
+      {
+       "binary": "mpio.sys",
+       "in_package": true,
+       "service": "mpio"
+      },
+      {
+       "binary": "msahci.sys",
+       "in_package": true,
+       "service": "msahci"
+      },
+      {
+       "binary": "msdsm.sys",
+       "in_package": true,
+       "service": "msdsm"
+      },
+      {
+       "binary": "msisadrv.sys",
+       "in_package": false,
+       "service": "msisadrv"
+      },
+      {
+       "binary": "mssmbios.sys",
+       "in_package": false,
+       "service": "mssmbios"
+      },
+      {
+       "binary": "nvraid.sys",
+       "in_package": true,
+       "service": "nvraid"
+      },
+      {
+       "binary": "nvstor.sys",
+       "in_package": true,
+       "service": "nvstor"
+      },
+      {
+       "binary": "pci.sys",
+       "in_package": true,
+       "service": "pci"
+      },
+      {
+       "binary": "pciide.sys",
+       "in_package": false,
+       "service": "pciide"
+      },
+      {
+       "binary": "sbp2port.sys",
+       "in_package": true,
+       "service": "sbp2port"
+      },
+      {
+       "binary": "vmstorfl.sys",
+       "in_package": true,
+       "service": "storflt"
+      },
+      {
+       "binary": "storvsc.sys",
+       "in_package": true,
+       "service": "storvsc"
+      },
+      {
+       "binary": "termdd.sys",
+       "in_package": true,
+       "service": "termdd"
+      },
+      {
+       "binary": "vdrvroot.sys",
+       "in_package": false,
+       "service": "vdrvroot"
+      },
+      {
+       "binary": "viaide.sys",
+       "in_package": false,
+       "service": "viaide"
+      },
+      {
+       "binary": "vmbus.sys",
+       "in_package": true,
+       "service": "vmbus"
+      },
+      {
+       "binary": "volmgr.sys",
+       "in_package": true,
+       "service": "volmgr"
+      },
+      {
+       "binary": "volsnap.sys",
+       "in_package": true,
+       "service": "volsnap"
+      },
+      {
+       "binary": "vpcnfltr.sys",
+       "in_package": true,
+       "service": "vpcnfltr"
+      },
+      {
+       "binary": "wanarp.sys",
+       "in_package": true,
+       "service": "wanarpv6"
+      }
+     ],
+     "images_scanned": 154,
+     "reads_of_kpcr_idt_or_selfpcr": {},
+     "rule": "ring0_scan: every *.sys of the package (mirror drivers/), scanned for fs:[0x38], fs:[0x1c] and sidt/lidt at an instruction boundary; the boot-start and system-start services are the INF AddService entries with StartType 0/1 (mirror infs/)",
+     "sidt_lidt_sites": {
+      "x86_microsoft-windows-virtualpc-vmm_31bf3856ad364e35_7.1.7601.17514_none_3bb1b0024217166b/vpcvmm.sys": [
+       {
+        "kind": "sidt",
+        "va": 1600
+       },
+       {
+        "kind": "lidt",
+        "va": 1829
+       },
+       {
+        "kind": "lidt",
+        "va": 1916
+       },
+       {
+        "kind": "lidt",
+        "va": 2487
+       },
+       {
+        "kind": "lidt",
+        "va": 2497
+       }
+      ]
+     },
+     "sites_in_boot_system_start_services": [],
+     "undecided": {
+      "status": "undecided",
+      "why": "the package is an update package: it holds the binaries it changed only, and the INFs of those; a boot-start or system-start service whose binary is not in it (boot_system_start_missing of the INF set, and every service that is in the SYSTEM hive of the installation instead of an INF) is not scanned; blocker: the Windows 7 SP1 x86 installation media (install.wim: Windows/System32/drivers and config/SYSTEM), a Microsoft-published source that is not pinned"
+     }
+    },
+    "gates_may_change": {
+     "0x12": [
+      {
+       "access": 34048,
+       "dpl": 0,
+       "function": "_HalpMcaCurrentProcessorSetTSS@4",
+       "kind": "task gate",
+       "present": 1,
+       "selector": 160,
+       "state": "the entry is this gate once the function ran (it runs only on the HAL path the machine takes); the static entry otherwise",
+       "stores": [
+        2147643413,
+        2147643418,
+        2147643424,
+        2147643430
+       ]
+      },
+      {
+       "access": 34048,
+       "dpl": 0,
+       "function": "_HalpMcaCurrentProcessorSetTSS@4",
+       "kind": "task gate",
+       "present": 1,
+       "selector": 160,
+       "state": "the entry is this gate once the function ran (it runs only on the HAL path the machine takes); the static entry otherwise",
+       "stores": [
+        2147680277,
+        2147680282,
+        2147680288,
+        2147680294
+       ]
+      }
+     ],
+     "0x1f": [
+      {
+       "access": 36352,
+       "dpl": 0,
+       "function": "_HalInitApicInterruptHandlers@0",
+       "kind": "interrupt gate (32-bit)",
+       "present": 1,
+       "selector": 8,
+       "state": "the entry is this gate once the function ran (it runs only on the HAL path the machine takes); the static entry otherwise",
+       "stores": [
+        2147655909,
+        2147655913,
+        2147655920,
+        2147655930
+       ]
+      }
+     ],
+     "0x37": [
+      {
+       "access": 36352,
+       "dpl": 0,
+       "function": "_HalInitApicInterruptHandlers@0",
+       "kind": "interrupt gate (32-bit)",
+       "present": 1,
+       "selector": 8,
+       "state": "the entry is this gate once the function ran (it runs only on the HAL path the machine takes); the static entry otherwise",
+       "stores": [
+        2147655873,
+        2147655877,
+        2147655884,
+        2147655894
+       ]
+      }
+     ]
+    },
+    "hal_selection": {
+     "acpi_call": 4202809,
+     "bcd_override": {
+      "status": "undecided",
+      "why": "_BlGetBootOptionString is called after the choice (boot options for the HAL file name); the declared machine's BCD store is not a pinned source; blocker: the BCD of the declared installation"
+     },
+     "candidates": [
+      "halacpi.dll",
+      "halmacpi.dll"
+     ],
+     "function": "_OslpDetermineKernelHal@8",
+     "references": [
+      {
+       "string": "halmacpi.dll",
+       "va": 4202824
+      },
+      {
+       "string": "halacpi.dll",
+       "va": 4202975
+      }
+     ],
+     "rule": "the kernel name is appended first; then _BlUtlGetAcpiTable('APIC') succeeds: halmacpi.dll, fails: halacpi.dll; a BCD boot option can override the HAL file name afterwards",
+     "va": 4202757
+    },
+    "images": {
+     "halacpi.dll": {
+      "functions": {
+       "_HalpEnableInterruptHandler@28": {
+        "class": "handler_only",
+        "stores": [
+         "0x8003278D",
+         "0x8003279E"
+        ]
+       },
+       "_HalpMcaCurrentProcessorSetTSS@4": {
+        "class": "gate",
+        "stores": [
+         "0x80027015",
+         "0x8002701A",
+         "0x80027020",
+         "0x80027026"
+        ]
+       }
+      },
+      "gates": {
+       "18": [
+        {
+         "access": "0x8500",
+         "function": "_HalpMcaCurrentProcessorSetTSS@4",
+         "selector": 160,
+         "stores": [
+          "0x80027015",
+          "0x8002701A",
+          "0x80027020",
+          "0x80027026"
+         ]
+        }
+       ]
+      },
+      "universe_size": 2
+     },
+     "halmacpi.dll": {
+      "functions": {
+       "_HalInitApicInterruptHandlers@0": {
+        "class": "gate",
+        "stores": [
+         "0x8002A0C1",
+         "0x8002A0C5",
+         "0x8002A0CC",
+         "0x8002A0D6",
+         "0x8002A0E5",
+         "0x8002A0E9",
+         "0x8002A0F0",
+         "0x8002A0FA"
+        ]
+       },
+       "_HalInitSystem@8": {
+        "class": "handler_only",
+        "stores": [
+         "0x800331A1",
+         "0x800331B0",
+         "0x8003333B",
+         "0x8003334A"
+        ]
+       },
+       "_HalpInitSystem@8": {
+        "class": "handler_only",
+        "stores": [
+         "0x800331A1",
+         "0x800331B0",
+         "0x8003333B",
+         "0x8003334A"
+        ]
+       },
+       "_HalpInitializeLocalUnit@0": {
+        "class": "handler_only",
+        "stores": [
+         "0x8003403F",
+         "0x80034058",
+         "0x8003408E",
+         "0x800340A8"
+        ]
+       },
+       "_HalpMcaCurrentProcessorSetTSS@4": {
+        "class": "gate",
+        "stores": [
+         "0x80030015",
+         "0x8003001A",
+         "0x80030020",
+         "0x80030026"
+        ]
+       },
+       "_HalpSetInternalVector@16": {
+        "class": "handler_only",
+        "stores": [
+         "0x800219DF",
+         "0x800219EE"
+        ]
+       },
+       "_HalpSetupSystemClockSupport@0": {
+        "class": "handler_only",
+        "stores": [
+         "0x8001C5E8",
+         "0x8001C5F7",
+         "0x8001C621",
+         "0x8001C632",
+         "0x8001C722",
+         "0x8001C731"
+        ]
+       }
+      },
+      "gates": {
+       "18": [
+        {
+         "access": "0x8500",
+         "function": "_HalpMcaCurrentProcessorSetTSS@4",
+         "selector": 160,
+         "stores": [
+          "0x80030015",
+          "0x8003001A",
+          "0x80030020",
+          "0x80030026"
+         ]
+        }
+       ],
+       "31": [
+        {
+         "access": "0x8E00",
+         "function": "_HalInitApicInterruptHandlers@0",
+         "selector": 8,
+         "stores": [
+          "0x8002A0E5",
+          "0x8002A0E9",
+          "0x8002A0F0",
+          "0x8002A0FA"
+         ]
+        }
+       ],
+       "55": [
+        {
+         "access": "0x8E00",
+         "function": "_HalInitApicInterruptHandlers@0",
+         "selector": 8,
+         "stores": [
+          "0x8002A0C1",
+          "0x8002A0C5",
+          "0x8002A0CC",
+          "0x8002A0D6"
+         ]
+        }
+       ]
+      },
+      "universe_size": 8
+     }
+    },
+    "rule": "ring-0 code outside the kernel that reaches the IDT through KPCR.IDT (fs:[0x38], fs:[0x1c] + 0x38) or sidt: the HAL images, found by the same rule as the kernel's writers (hal_idt_writers); a whole-gate store must keep Present and DPL of the static entry (asserted below), so which vectors are present DPL-3 gates, and which are not present, is the same whichever HAL path runs; an offset-word store changes only the handler"
    },
    "kernels": {
     "ntkrnlpa.exe": {
@@ -639,8 +1106,12 @@
  "iret": {
   "cpl": 3,
   "eflags_restored": {
-   "bit1": "always 1",
+   "bit1": "not loaded: the SDM names no bit 1 among the flags IRET loads (sdm_quotes, SDM 1:3.4.3: bit 1 is reserved); it keeps its value",
    "cpl": 3,
+   "fixed_one": {
+    "mask": 2,
+    "source": "bit 1 is reserved and reads 1 (SDM 1:3.4.3, EFLAGS is 00000002H at init); IRET does not load it (it is not in loaded_mask), it keeps its value"
+   },
    "iopl": 0,
    "iopl_source": "row eflags.iopl",
    "loaded_bits": [
@@ -657,7 +1128,7 @@
     "TF",
     "ZF"
    ],
-   "loaded_mask": 2444759,
+   "loaded_mask": 2444757,
    "not_loaded": {
     "IF": "loaded only if CPL <= IOPL; CPL 3 > IOPL 0",
     "IOPL": "loaded only if CPL = 0",
@@ -747,7 +1218,7 @@
     "status": "undecided",
     "why": "with CR4.PVI = 1 (or CR4.VME = 1) the SDM changes how IRET treats IF and VIF at CPL 3 with IOPL < 3 (Vol 3B 20.4 protected-mode virtual interrupts); the rows above are for CR4.PVI = CR4.VME = 0. No pinned source states these CR4 bits of the declared machine: the kernels write CR4 only at the sites in `cr4_writers`, and Ki386VdmEnablePentiumExtentions (the only writer named for VME/PVI) is the VDM path; blocker: a reach certificate that no guest path executes it, or an owner decision to take CR4 from the CPUID record"
    },
-   "source": "Intel SDM Vol 2A IRET (protected mode; RETURN-TO-SAME-PRIVILEGE-LEVEL): EFLAGS(CF, PF, AF, ZF, SF, TF, DF, OF, NT) and, for a 32-bit operand, RF, AC, ID are loaded; IF only if CPL <= IOPL; IOPL, VM, VIF, VIP only at CPL 0. IOPL is taken from row eflags.iopl",
+   "source": "Intel SDM Vol 2A IRET (protected mode; RETURN-TO-SAME-PRIVILEGE-LEVEL); every statement is quoted in sdm_quotes and checked against the pinned SDM text: EFLAGS(CF, PF, AF, ZF, SF, TF, DF, OF, NT) and, for a 32-bit operand, RF, AC, ID are loaded; IF only if CPL <= IOPL; IOPL, VM, VIF, VIP only at CPL 0. IOPL is taken from row eflags.iopl",
    "unchanged_bits": "every bit not in loaded_mask keeps its current value (reserved bits included)",
    "vm_in_popped_eflags": "ignored at CPL 3: EFLAGS.VM stays 0 and the return is to protected-mode code"
   },
@@ -790,13 +1261,180 @@
     "returns_to": [
      27
     ],
-    "source": "Intel SDM Vol 2A IRET (protected mode; RETURN-TO-SAME-PRIVILEGE-LEVEL): null CS selector #GP(0); beyond the table limit, not a code segment, RPL < CPL, conforming with DPL > RPL, non-conforming with DPL != RPL: #GP(selector); not present: #NP(selector) (no code descriptor of the derived GDT is not present); GDT descriptors from rows gdt.descriptors",
+    "source": "Intel SDM Vol 2A IRET (protected mode; RETURN-TO-SAME-PRIVILEGE-LEVEL); every statement is quoted in sdm_quotes and checked against the pinned SDM text: null CS selector #GP(0); beyond the table limit, not a code segment, RPL < CPL, conforming with DPL > RPL, non-conforming with DPL != RPL: #GP(selector); not present: #NP(selector) (no code descriptor of the derived GDT is not present); GDT descriptors from rows gdt.descriptors",
     "undecided_descriptors": "OutsideDomain, exactly the descriptors of jmp_far.undecided_descriptors"
    },
    "pops": "EIP, CS, EFLAGS (12 bytes): the target CS has RPL = CPL = 3, so SS:ESP are not popped (SS and ESP are unchanged)",
    "stack_access": "the three dwords are read through SS:ESP (limit 4 GB): an unmapped stack is a memory access fault (OWNER 6), not modelled here"
   },
-  "source": "Intel SDM Vol 2A IRET (protected mode; RETURN-TO-SAME-PRIVILEGE-LEVEL)",
+  "sdm_quotes": [
+   {
+    "key": "SDM 2A:IRET",
+    "quote": "If the NT flag is set, the IRET instruction performs a task switch (return) from a nested task (a task called with a CALL instruction, an interrupt, or an exception) back to the calling or interrupted task.",
+    "supports": "NT = 1 is a task return"
+   },
+   {
+    "key": "SDM 2A:IRET",
+    "quote": "If the return is to another privilege level, the IRET instruction also pops the stack pointer and SS from the stack, before resuming program execution.",
+    "supports": "same-privilege return pops no SS:ESP"
+   },
+   {
+    "key": "SDM 2A:IRET",
+    "page_offset": 2,
+    "quote": "IF NT = 1 THEN GOTO TASK-RETURN; (* PE = 1, VM = 0, NT = 1 *)",
+    "supports": "NT is tested first, before the pops"
+   },
+   {
+    "key": "SDM 2A:IRET",
+    "page_offset": 2,
+    "quote": "EIP := Pop(); CS := Pop(); (* 32-bit pop, high-order 16 bits discarded *) tempEFLAGS := Pop();",
+    "supports": "pops: EIP, CS, EFLAGS (12 bytes)"
+   },
+   {
+    "key": "SDM 2A:IRET",
+    "page_offset": 2,
+    "quote": "IF tempEFLAGS(VM) = 1 and CPL = 0 THEN GOTO RETURN-TO-VIRTUAL-8086-MODE; ELSE GOTO PROTECTED-MODE-RETURN;",
+    "supports": "the popped VM = 1 matters only at CPL 0"
+   },
+   {
+    "key": "SDM 2A:IRET",
+    "page_offset": 2,
+    "quote": "SWITCH-TASKS (without nesting) to TSS specified in link field of current TSS;",
+    "supports": "the task return switches to the TSS named by the link field"
+   },
+   {
+    "key": "SDM 2A:IRET",
+    "page_offset": 3,
+    "quote": "IF CS(RPL) > CPL THEN GOTO RETURN-TO-OUTER-PRIVILEGE-LEVEL; ELSE GOTO RETURN-TO-SAME-PRIVILEGE-LEVEL; FI;",
+    "supports": "RPL = CPL = 3 is the same-privilege return"
+   },
+   {
+    "key": "SDM 2A:IRET",
+    "page_offset": 5,
+    "quote": "IF EIP is not within CS limit THEN #GP(0); FI;",
+    "supports": "EIP beyond the CS limit (4 GB for the derived code descriptors)"
+   },
+   {
+    "key": "SDM 2A:IRET",
+    "page_offset": 5,
+    "quote": "EFLAGS (CF, PF, AF, ZF, SF, TF, DF, OF, NT) := tempEFLAGS;",
+    "supports": "loaded flags"
+   },
+   {
+    "key": "SDM 2A:IRET",
+    "page_offset": 5,
+    "quote": "IF OperandSize = 32 or OperandSize = 64 THEN EFLAGS(RF, AC, ID) := tempEFLAGS; FI;",
+    "supports": "RF, AC, ID are loaded for a 32-bit operand"
+   },
+   {
+    "key": "SDM 2A:IRET",
+    "page_offset": 5,
+    "quote": "IF CPL \u2264 IOPL THEN EFLAGS(IF) := tempEFLAGS; FI;",
+    "supports": "IF only if CPL <= IOPL"
+   },
+   {
+    "key": "SDM 2A:IRET",
+    "page_offset": 5,
+    "quote": "IF CPL = 0 THEN EFLAGS(IOPL) := tempEFLAGS;",
+    "supports": "IOPL only at CPL 0"
+   },
+   {
+    "key": "SDM 2A:IRET",
+    "page_offset": 5,
+    "quote": "IF OperandSize = 32 or OperandSize = 64 THEN EFLAGS(VIF, VIP) := tempEFLAGS; FI; FI;",
+    "supports": "VIF, VIP only at CPL 0"
+   },
+   {
+    "key": "SDM 2A:IRET",
+    "page_offset": 7,
+    "quote": "#GP(0) If the return code or stack segment selector is NULL.",
+    "supports": "null CS: #GP(0)"
+   },
+   {
+    "key": "SDM 2A:IRET",
+    "page_offset": 7,
+    "quote": "#GP(selector) If a segment selector index is outside its descriptor table limits.",
+    "supports": "TI = 1 (null LDTR) or beyond the GDT limit: #GP(selector)"
+   },
+   {
+    "key": "SDM 2A:IRET",
+    "page_offset": 7,
+    "quote": "If the return code segment selector RPL is less than the CPL.",
+    "supports": "RPL < CPL: #GP(selector)"
+   },
+   {
+    "key": "SDM 2A:IRET",
+    "page_offset": 7,
+    "quote": "If the DPL of a conforming-code segment is greater than the return code segment selector RPL.",
+    "supports": "conforming with DPL > RPL: #GP(selector)"
+   },
+   {
+    "key": "SDM 2A:IRET",
+    "page_offset": 7,
+    "quote": "If the DPL for a nonconforming-code segment is not equal to the RPL of the code segment selector.",
+    "supports": "non-conforming with DPL != RPL: #GP(selector)"
+   },
+   {
+    "key": "SDM 2A:IRET",
+    "page_offset": 7,
+    "quote": "If the segment descriptor for a code segment does not indicate it is a code segment.",
+    "supports": "not a code segment: #GP(selector)"
+   },
+   {
+    "key": "SDM 2A:IRET",
+    "page_offset": 7,
+    "quote": "#NP (selector) If the return code segment is not present.",
+    "supports": "not present: #NP(selector)"
+   },
+   {
+    "key": "SDM 2A:IRET",
+    "page_offset": 7,
+    "quote": "If the segment selector for a TSS has its local/global bit set for local.",
+    "supports": "a task-return link selector with TI = 1: #GP(selector)"
+   },
+   {
+    "key": "SDM 2A:IRET",
+    "page_offset": 7,
+    "quote": "If a TSS segment descriptor specifies that the TSS is not busy.",
+    "supports": "a TSS descriptor that is not busy (the available double-fault and NMI TSS): #GP(selector)"
+   },
+   {
+    "key": "SDM 3A:10.3",
+    "quote": "Checks that the new task is available (call, jump, exception, or interrupt) or busy (IRET return).",
+    "supports": "an IRET return needs a busy TSS"
+   },
+   {
+    "key": "SDM 3A:10.4",
+    "quote": "If software uses an IRET instruction to suspend the new task, the processor checks for EFLAGS.NT = 1; it then uses the value in the previous task link field to return to the previous task.",
+    "supports": "the link field is the return target"
+   },
+   {
+    "key": "SDM 3A:10.4",
+    "quote": "When a CALL instruction, an interrupt, or an exception causes a task switch: the processor copies the segment selector for the current TSS to the previous task link field of the TSS for the new task; it then sets EFLAGS.NT = 1.",
+    "supports": "the only hardware store of the link field (backlink)"
+   },
+   {
+    "key": "SDM 3A:10.4",
+    "quote": "To keep such spurious task switches from succeeding, the operating system should initialize the previous task link field in every TSS that it creates to 0.",
+    "supports": "the OS convention for the link field"
+   },
+   {
+    "key": "SDM 2B:POPF",
+    "quote": "If a POPF/POPFD instruction is executed with ... privilege, an exception does not occur but privileged bits do not change.",
+    "supports": "POPFD at CPL 3: the privileged bits (IF, IOPL) stay; NT is not one of them"
+   },
+   {
+    "key": "SDM 2B:POPF",
+    "quote": "32, 64 1-3 <CPL S N N S N 0 S N S S N S S S S S S",
+    "supports": "Table 1-12: protected mode, 32-bit operand, CPL 1-3 with IOPL < CPL: NT (7th flag column) is S (modified)"
+   },
+   {
+    "key": "SDM 1:3.4.3",
+    "quote": "Bits 1, 3, 5, 15, and 22 through 31 of this register are reserved.",
+    "supports": "bit 1 is reserved; IRET loads only the flags it names"
+   }
+  ],
+  "source": "Intel SDM Vol 2A IRET (protected mode; RETURN-TO-SAME-PRIVILEGE-LEVEL); every statement is quoted in sdm_quotes and checked against the pinned SDM text",
   "task_return": {
    "applies_when": "EFLAGS.NT = 1 (tested before every other check: the popped CS and EFLAGS do not matter)",
    "backlink": {
@@ -863,9 +1501,8 @@
      "0x58"
     ],
     "if_zero": {
-     "error_code": 0,
-     "fault": "#TS",
-     "why": "link selector 0: GDT index 0 within the limit, the null descriptor is not a TSS"
+     "status": "undecided",
+     "why": "link selector 0 names the null descriptor, a descriptor that is not a TSS: undecided as descriptor_not_a_tss"
     },
     "initial_value": 0,
     "status": "undecided",
@@ -874,12 +1511,12 @@
    "link_selector_rule": {
     "available_tss_not_busy": {
      "error_code": "link & 0xfffc",
-     "fault": "#TS",
+     "fault": "#GP",
      "selectors": [
       "0x50",
       "0x58"
      ],
-     "why": "the double-fault and NMI TSS descriptors are type 9 (available): the return needs a busy TSS"
+     "why": "the double-fault and NMI TSS descriptors are type 9 (available): the return needs a busy TSS, and a TSS descriptor that is not busy is #GP(selector)"
     },
     "current_tss_0x28": {
      "status": "OutsideDomain",
@@ -887,18 +1524,18 @@
     },
     "descriptor_not_a_tss": {
      "applies_to": "the null descriptor and every derived descriptor that is not a 32-bit TSS (0x08 0x10 0x18 0x20 0x30 0x38 0x40 0x48 0x70)",
-     "error_code": "link & 0xfffc",
-     "fault": "#TS"
+     "status": "undecided",
+     "why": "the pinned SDM's IRET Protected Mode Exceptions list the cases `the segment selector for a TSS has its local/global bit set for local`, `a TSS segment descriptor specifies that the TSS is not busy` and `not available` (all #GP(selector)), and Vol 3A 10.3 lists the present/limit/busy checks of a task switch, but no statement says what a link selector naming a descriptor that is not a TSS does; blocker: an SDM statement, or a reach certificate that no site executes IRETD with EFLAGS.NT = 1"
     },
-    "source": "Intel SDM Vol 2A IRET task return (read the link field of the current TSS; selector in the LDT or beyond the GDT limit: #TS(TSS selector); descriptor not a TSS, or a TSS not marked busy: #TS(TSS selector)) and Vol 3A 7.3 task switching",
+    "source": "Intel SDM Vol 2A IRET Protected Mode Exceptions (a TSS selector with the local bit set, an index outside the table limit, a TSS descriptor that is not busy: #GP(selector)) and Vol 3A 10.3 / 10.4 task switching and task linking; every statement is in sdm_quotes",
     "ti1_or_beyond_gdt_limit": {
      "error_code": "link & 0xfffc",
-     "fault": "#TS"
+     "fault": "#GP"
     },
     "undecided_descriptors": "OutsideDomain, exactly the descriptors of jmp_far.undecided_descriptors"
    },
    "nt_set_at_cpl3": {
-    "source": "POPFD at CPL 3 loads NT (SDM Vol 2B POPF: NT is modified at every CPL); WDK 7.1 ks386.inc EFLAGS_USER_SANITIZE = 0x3F4DD7 includes bit 14 (NT), so the OS does not clear it for user code",
+    "source": "POPFD at CPL 3 loads NT (sdm_quotes, SDM 2B:POPF Table 1-12 row for a 32-bit operand, CPL 1-3, IOPL < CPL: NT is S, modified); WDK 7.1 ks386.inc EFLAGS_USER_SANITIZE = 0x3F4DD7 includes bit 14 (NT), so the OS does not clear it for user code",
     "value": true
    },
    "tr_selector": 40,
@@ -1085,7 +1722,7 @@
  },
  "lar_lsl": {
   "access_rights": {
-   "accessed_bit": "bit 8 of the LAR result (type bit 0) is the descriptor's Accessed bit; the processor sets it when the selector is loaded into a segment register (SDM Vol 3A 3.4.5.1); the GDT is per processor and shared by all threads, and a SYSEXIT return loads no descriptor (SDM Vol 2B SYSEXIT), so its value is processor state, not a fixed input: besides the SDM-undefined bits 19:16 it is the only bit of a ZF=1 LAR result that is not a function of the derived descriptors",
+   "accessed_bit": "bit 8 of the LAR result (type bit 0) is the descriptor's Accessed bit; the processor sets it when the selector is loaded into a segment register (sdm_quotes, SDM 3A:3.4.5.1); the GDT is per processor and shared by all threads, and a SYSEXIT return loads no descriptor (sdm_quotes, SDM 2B:SYSEXIT), so its value is processor state, not a fixed input: besides the SDM-undefined bits 19:16 it is the only bit of a ZF=1 LAR result that is not a function of the derived descriptors",
    "ldt_descriptor_access": {
     "ntkrnlpa.exe": {
      "Ke386SetLdtProcess": "0x517A11",
@@ -1111,7 +1748,7 @@
     "zf": 0
    },
    "selectors": "every selector value with TI = 0 and index >= 0x80 (32256 values)",
-   "source": "Intel SDM Vol 2A LAR and LSL (Operation; table of segment and gate types valid for each): the descriptor lies outside the GDT limit (row gdt.limit): ZF = 0"
+   "source": "Intel SDM Vol 2A LAR and LSL (quoted in sdm_quotes, each checked against the pinned SDM text): the descriptor lies outside the GDT limit (row gdt.limit): ZF = 0"
   },
   "coverage": {
    "per_class": {
@@ -1182,6 +1819,10 @@
     "dpl": 3,
     "lar": {
      "dest": {
+      "accessed": {
+       "value": 1,
+       "why": "(c) A = 0 in winload's bytes; the processor sets it when the declared machine loads this selector into cs at thread start (SDM 3A:3.4.5.1, quoted in row lar_lsl.sdm_quotes); no kernel store clears it (gdt_a_stores)"
+      },
       "accessed_mask": 256,
       "mask": 16776960,
       "operand_16": "the low 16 bits of the 32-bit value (bits 15:8 = access rights); the upper half of the register is not written",
@@ -1213,6 +1854,10 @@
     "dpl": 3,
     "lar": {
      "dest": {
+      "accessed": {
+       "value": 1,
+       "why": "(c) A = 0 in winload's bytes; the processor sets it when the declared machine loads this selector into ss at thread start (SDM 3A:3.4.5.1, quoted in row lar_lsl.sdm_quotes); no kernel store clears it (gdt_a_stores)"
+      },
       "accessed_mask": 256,
       "mask": 16776960,
       "operand_16": "the low 16 bits of the 32-bit value (bits 15:8 = access rights); the upper half of the register is not written",
@@ -1286,6 +1931,10 @@
     "dpl": 3,
     "lar": {
      "dest": {
+      "accessed": {
+       "value": 1,
+       "why": "(c) A = 0 in winload's bytes; the processor sets it when the declared machine loads this selector into fs at thread start (SDM 3A:3.4.5.1, quoted in row lar_lsl.sdm_quotes); no kernel store clears it (gdt_a_stores)"
+      },
       "accessed_mask": 256,
       "mask": 16776960,
       "operand_16": "the low 16 bits of the 32-bit value (bits 15:8 = access rights); the upper half of the register is not written",
@@ -1317,6 +1966,7 @@
     "dpl": 3,
     "lar": {
      "dest": {
+      "accessed": "state: set by the first segment load of this descriptor",
       "accessed_mask": 256,
       "mask": 16776960,
       "operand_16": "the low 16 bits of the 32-bit value (bits 15:8 = access rights); the upper half of the register is not written",
@@ -1440,9 +2090,301 @@
     2,
     3
    ],
-   "source": "Intel SDM Vol 2A LAR and LSL (Operation; table of segment and gate types valid for each): the null selector's descriptor is the null descriptor (type 0, not valid for LAR or LSL): ZF = 0"
+   "source": "Intel SDM Vol 2A LAR and LSL (quoted in sdm_quotes, each checked against the pinned SDM text): the null selector's descriptor is the null descriptor (type 0, not valid for LAR or LSL): ZF = 0"
   },
-  "source": "Intel SDM Vol 2A LAR and LSL (Operation; table of segment and gate types valid for each)",
+  "sdm_quotes": [
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "Checks that the segment selector is not NULL.",
+    "supports": "a null selector gives ZF = 0"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "Checks that the segment selector points to a descriptor that is within the limits of the GDT or LDT being accessed",
+    "supports": "an index beyond the table limit (the GDT limit; the null LDTR for TI = 1) gives ZF = 0"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "Checks that the descriptor type is valid for this instruction. All code and data segment descriptors are valid for (can be accessed with) the LAR instruction.",
+    "supports": "S = 1 descriptors are valid; a system descriptor is valid only per the type table"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "If the segment is not a conforming code segment, it checks that the specified segment descriptor is visible at the CPL (that is, if the CPL and the RPL of the segment selector are less than or equal to the DPL of the segment selector).",
+    "supports": "the DPL test, for every non-conforming descriptor (system descriptors included)"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "If the segment descriptor cannot be accessed or is an invalid type for the instruction, the ZF flag is cleared and no access rights are loaded in the destination operand.",
+    "supports": "ZF = 0 leaves the destination unchanged"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "Bits 7:0 are returned as 0",
+    "supports": "result bits 7:0"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "Bits 11:8 return the segment type.",
+    "supports": "result bits 11:8"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "Bit 12 returns the S flag.",
+    "supports": "result bit 12"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "Bits 14:13 return the DPL.",
+    "supports": "result bits 14:13"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "Bit 15 returns the P flag.",
+    "supports": "result bit 15"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "Bits 19:16 are undefined.",
+    "supports": "result bits 19:16 (undefined_mask)"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "Bit 20 returns the software-available bit in the descriptor.",
+    "supports": "result bit 20"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "Bit 21 returns the L flag.",
+    "supports": "result bit 21"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "Bit 22 returns the D/B flag.",
+    "supports": "result bit 22"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "Bit 23 returns the G flag.",
+    "supports": "result bit 23"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "Bits 31:24 are returned as 0.",
+    "supports": "result bits 31:24"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "When the operand size is 16 bits, only the low 16 bits identified above are returned",
+    "supports": "operand_16"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "0 Reserved No Reserved No",
+    "supports": "Table 1-49, the validity of type 0 (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "1 Available 16-bit TSS Yes Reserved No",
+    "supports": "Table 1-49, the validity of type 1 (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "2 LDT Yes LDT Yes",
+    "supports": "Table 1-49, the validity of type 2 (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "3 Busy 16-bit TSS Yes Reserved No",
+    "supports": "Table 1-49, the validity of type 3 (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "4 16-bit call gate Yes Reserved No",
+    "supports": "Table 1-49, the validity of type 4 (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "5 16-bit/32-bit task gate Yes Reserved No",
+    "supports": "Table 1-49, the validity of type 5 (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "6 16-bit interrupt gate No Reserved No",
+    "supports": "Table 1-49, the validity of type 6 (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "7 16-bit trap gate No Reserved No",
+    "supports": "Table 1-49, the validity of type 7 (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "8 Reserved No Reserved No",
+    "supports": "Table 1-49, the validity of type 8 (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "9 Available 32-bit TSS Yes Available 64-bit TSS Yes",
+    "supports": "Table 1-49, the validity of type 9 (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "A Reserved No Reserved No",
+    "supports": "Table 1-49, the validity of type A (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "B Busy 32-bit TSS Yes Busy 64-bit TSS Yes",
+    "supports": "Table 1-49, the validity of type B (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "C 32-bit call gate Yes 64-bit call gate Yes",
+    "supports": "Table 1-49, the validity of type C (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "D Reserved No Reserved No",
+    "supports": "Table 1-49, the validity of type D (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "E 32-bit interrupt gate No 64-bit interrupt gate No",
+    "supports": "Table 1-49, the validity of type E (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LAR",
+    "quote": "F 32-bit trap gate No 64-bit trap gate No",
+    "supports": "Table 1-49, the validity of type F (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LSL",
+    "quote": "Checks that the segment selector is not NULL.",
+    "supports": "a null selector gives ZF = 0"
+   },
+   {
+    "key": "SDM 2A:LSL",
+    "quote": "Checks that the segment selector points to a descriptor that is within the limits of the GDT or LDT being accessed",
+    "supports": "an index beyond the table limit gives ZF = 0"
+   },
+   {
+    "key": "SDM 2A:LSL",
+    "quote": "If the segment is not a conforming code segment, the instruction checks that the specified segment descriptor is visible at the CPL (that is, if the CPL and the RPL of the segment selector are less than or equal to the DPL of the segment selector).",
+    "supports": "the DPL test"
+   },
+   {
+    "key": "SDM 2A:LSL",
+    "quote": "If the segment descriptor cannot be accessed or is an invalid type for the instruction, the ZF flag is cleared and no value is loaded in the destination operand.",
+    "supports": "ZF = 0 leaves the destination unchanged"
+   },
+   {
+    "key": "SDM 2A:LSL",
+    "quote": "The segment limit is a 20-bit value contained in bytes 0 and 1 and in the first 4 bits of byte 6 of the segment descriptor.",
+    "supports": "limit_bytes is derived from these descriptor fields"
+   },
+   {
+    "key": "SDM 2A:LSL",
+    "quote": "If the descriptor has a page granular segment limit (the granularity flag is set to 1), the LSL instruction will translate the page granular limit (page limit) into a byte limit before loading it into the destination operand.",
+    "supports": "G = 1: limit << 12 | 0xFFF"
+   },
+   {
+    "key": "SDM 2A:LSL",
+    "quote": "When the operand size is 16 bits, a valid 32-bit byte limit is computed; however, the upper 16 bits are truncated and only the low-order 16 bits are loaded into the destination operand",
+    "supports": "operand_16"
+   },
+   {
+    "key": "SDM 2A:LSL",
+    "quote": "0 Reserved No Reserved No",
+    "supports": "Table 1-53, the validity of type 0 (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LSL",
+    "quote": "1 Available 16-bit TSS Yes Reserved No",
+    "supports": "Table 1-53, the validity of type 1 (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LSL",
+    "quote": "2 LDT Yes LDT1 Yes",
+    "supports": "Table 1-53, the validity of type 2 (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LSL",
+    "quote": "3 Busy 16-bit TSS Yes Reserved No",
+    "supports": "Table 1-53, the validity of type 3 (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LSL",
+    "quote": "4 16-bit call gate No Reserved No",
+    "supports": "Table 1-53, the validity of type 4 (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LSL",
+    "quote": "5 16-bit/32-bit task gate No Reserved No",
+    "supports": "Table 1-53, the validity of type 5 (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LSL",
+    "quote": "6 16-bit interrupt gate No Reserved No",
+    "supports": "Table 1-53, the validity of type 6 (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LSL",
+    "quote": "7 16-bit trap gate No Reserved No",
+    "supports": "Table 1-53, the validity of type 7 (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LSL",
+    "quote": "8 Reserved No Reserved No",
+    "supports": "Table 1-53, the validity of type 8 (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LSL",
+    "quote": "9 Available 32-bit TSS Yes 64-bit TSS1 Yes",
+    "supports": "Table 1-53, the validity of type 9 (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LSL",
+    "quote": "A Reserved No Reserved No",
+    "supports": "Table 1-53, the validity of type A (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LSL",
+    "quote": "B Busy 32-bit TSS Yes Busy 64-bit TSS1 Yes",
+    "supports": "Table 1-53, the validity of type B (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LSL",
+    "quote": "C 32-bit call gate No 64-bit call gate No",
+    "supports": "Table 1-53, the validity of type C (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LSL",
+    "quote": "D Reserved No Reserved No",
+    "supports": "Table 1-53, the validity of type D (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LSL",
+    "quote": "E 32-bit interrupt gate No 64-bit interrupt gate No",
+    "supports": "Table 1-53, the validity of type E (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 2A:LSL",
+    "quote": "F 32-bit trap gate No 64-bit trap gate No",
+    "supports": "Table 1-53, the validity of type F (the valid set is parsed from these rows)"
+   },
+   {
+    "key": "SDM 3A:3.4.5.1",
+    "quote": "The processor sets this bit whenever it loads a segment selector for the segment into a segment register, assuming that the type of memory that contains the segment descriptor supports processor writes.",
+    "supports": "the Accessed bit is processor state"
+   },
+   {
+    "key": "SDM 2B:SYSEXIT",
+    "quote": "the CS and SS descriptor caches are not loaded from the descriptors (in GDT or LDT) referenced by those selectors.",
+    "supports": "a SYSEXIT return loads no descriptor, so the Accessed bit is not set by it"
+   }
+  ],
+  "source": "Intel SDM Vol 2A LAR and LSL (quoted in sdm_quotes, each checked against the pinned SDM text)",
   "ti1": {
    "lar": {
     "dest": "unchanged",
@@ -1453,7 +2395,7 @@
     "zf": 0
    },
    "selectors": "every selector value with bit 2 (TI) set (32768 values)",
-   "source": "Intel SDM Vol 2A LAR and LSL (Operation; table of segment and gate types valid for each): a selector in the LDT beyond the LDT limit gives ZF = 0 (no fault); the LDTR is null for a new process (row ldt.rule), so every TI=1 selector is beyond the limit"
+   "source": "Intel SDM Vol 2A LAR and LSL (quoted in sdm_quotes, each checked against the pinned SDM text): a selector in the LDT beyond the LDT limit gives ZF = 0 (no fault); the LDTR is null for a new process (row ldt.rule), so every TI=1 selector is beyond the limit"
   },
   "undecided_descriptors": {
    "indexes": [
@@ -2296,7 +3238,35 @@
   },
   "kernel": {
    "capstone": "5.0.7",
-   "commit": "7229600b8dbb89fbb1ada6478b7fde3caee01434",
+   "commit": "37a093812863015ae6d8da1c65f91d5146cae3d9",
+   "hals": {
+    "halacpi.dll": {
+     "exe": {
+      "path": "kernel/halacpi.dll",
+      "sha256": "778d2c3afd587a2750a941cd98db4c51a7a9460e056c2cd3c432a7942e9524ce"
+     },
+     "origin": "the same package, inner directory x86_microsoft-windows-hal_31bf3856ad364e35_6.1.7601.17514_none_ad305c8fb7ec5060",
+     "pdb": {
+      "guid_age": "91622BAE6BA748EDACB711C581C8050C1",
+      "path": "symbols/halacpi.pdb",
+      "sha256": "acd70f55629d04d2310260dc68a9fe7530f05ffc73826e3164c6c7ed3dc91674",
+      "url": "https://msdl.microsoft.com/download/symbols/halacpi.pdb/91622BAE6BA748EDACB711C581C8050C1/halacpi.pdb"
+     }
+    },
+    "halmacpi.dll": {
+     "exe": {
+      "path": "kernel/halmacpi.dll",
+      "sha256": "f8b007e41157452e8c2d262f37260eb662cb2099e22acffdf9d89836a6290264"
+     },
+     "origin": "the same package, inner directory x86_microsoft-windows-hal_31bf3856ad364e35_6.1.7601.17514_none_ad305c8fb7ec5060",
+     "pdb": {
+      "guid_age": "AE605D6C59454802AE1D485E0B089A571",
+      "path": "symbols/halmacpi.pdb",
+      "sha256": "3ab043e2b91fa823d25bddf0e90a723c12784fbdfbe8e5211d1ce005fb9146d5",
+      "url": "https://msdl.microsoft.com/download/symbols/halmacpi.pdb/AE605D6C59454802AE1D485E0B089A571/halmacpi.pdb"
+     }
+    }
+   },
    "inner_cab": {
     "extract": "7z x package.exe -> file [0]; cabextract [0]",
     "sha256": "e63ad1698c79dd10fcc798c1188967837b9ae6506159fb2f434ea849726822d6"
@@ -2347,7 +3317,17 @@
     "sha256": "e5449839955a22fc4dd596291aff1433b998f9797e1c784232226aba1f8abd97"
    },
    "ref": "tools/win7sp1-x86-kernel",
-   "repo": "fnv-nx-build"
+   "repo": "fnv-nx-build",
+   "trees": {
+    "drivers": {
+     "list": "drivers.sha256",
+     "sha256": "3cd914e98b17c417fce4578d68bbdb007d55570539bf044d3fdf95fff9c33e4e"
+    },
+    "infs": {
+     "list": "infs.sha256",
+     "sha256": "6ae8c88e1b18e6cf993e8528919828c40922a372f503e14080e0c85eb8c316d0"
+    }
+   }
   },
   "ks386": {
    "origin": "Windows Driver Kit 7.1.0 (7600.16385.1), ks386.inc",
