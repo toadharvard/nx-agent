@@ -2891,3 +2891,12 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - The 12 L1 files from w8's census were base3's stale copies; cand5 takes link/ and verify/ from w28-c5.
 - Class to close (w28, doing): contract/gatefile.MAX_IDS=50 truncates every gate's uncertified list. Every gate is to list the whole set plus uncertified_n, and link/gateids.py is deleted if it only made the full list.
 - bottleneck: farm 3 relift; cand4 verdict; L3a base3 head.
+- Farm 3 relift on exportrec 0430a1863 (2m44s; 420 stages hit, 223 run):
+  - contract/exports is GREEN, with 544 rows and 0 marked records; all 13 callback and LARGE_INTEGER exports are lettered.
+  - Next red: bridgetable has 5 d3d9 exports without an FNVNX_EXPORT definer (first: D3DPERF_SetOptions, which is in wine_fixme). Sent to L6; the definers carry the Wine 9.0 citation.
+- Ruling, One module path revised as a class rule: every root is importable as `fnvnx.<rel>`, mounted at /imp/fnvnx/<rel>.
+  - Cause: a PEP 420 portion loses to a regular module of the same name, and the root `platform` collides with the stdlib's platform.py.
+  - The gate asserts that `fnvnx` is no importable host top-level name.
+  - w28 implements it on w28-c5 (doing). L2, L3a, L5 and L6 rewrite their trees' qualified imports.
+- bridgegen is to list all of its errors, the same class as gatefile MAX_IDS (w28).
+- bottleneck: the w28 fnvnx-prefix head; the L6 d3d9 definers; cand4 verdict; L3a base3 head.
