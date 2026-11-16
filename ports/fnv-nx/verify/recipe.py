@@ -40,6 +40,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
 import elffacts  # noqa: E402
 import gate_admit  # noqa: E402
+import pathflow  # noqa: E402
 import envcheck  # noqa: E402
 import hostprofile  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "link"))
@@ -655,11 +656,12 @@ def link_candidates(roots, root, target, repo):
     return out
 
 
-def foreign_imports(tool, owner, files, inputs, repo="."):
+def foreign_imports(tool, owner, files, inputs, repo=".", closure=None):
     """[module] a generator tool imports that its stage cannot read: the stage mounts the tool's own root and the generator's declared inputs, plus the Python
     standard library and the pinned modules of env.json (envcheck.PY_MODULES). Every import of the tool, found by `ast` (any depth, relative imports included), and,
     transitively, of every module it resolves to, must be one of those; a module of another root that no declared input carries is foreign (the stage would die with
-    ModuleNotFoundError at run time, so the recipe is red before any run). INPUTS: the generator's input paths (repo-relative strings)."""
+    ModuleNotFoundError at run time, so the recipe is red before any run). INPUTS: the generator's input paths (repo-relative strings). CLOSURE: a list that receives
+    the tool's import closure (the repo paths of the files the walk read), for the file-escape rule."""
     import ast
     std, pinned = set(sys.stdlib_module_names) | {"__future__"}, set(envcheck.PY_MODULES.values())
     mine = [f for f in files if under(f, owner) and f.endswith(".py")]
@@ -679,6 +681,8 @@ def foreign_imports(tool, owner, files, inputs, repo="."):
         if f in seen:
             continue
         seen.add(f)
+        if closure is not None:
+            closure.append(f)
         try:
             tree = ast.parse(open(os.path.join(repo, f)).read())
         except (OSError, SyntaxError, ValueError):
@@ -1498,8 +1502,22 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
         if not (isinstance(g["args"], list) and all(isinstance(a, str) for a in g["args"])):
             err.append("generated[%d].args must be strings" % i)
         if isinstance(t, str) and t in files and t.endswith(".py") and owner:
+            clo = []
             err += ["gen:foreign-import:%s:%s (generated[%d]: the stage mounts the tool's own root and the declared inputs; the module lies in another root and no input carries it)" % (t, m, i)
-                    for m in foreign_imports(t, owner, files, g["inputs"] if isinstance(g["inputs"], list) else [], repo)]
+                    for m in foreign_imports(t, owner, files, g["inputs"] if isinstance(g["inputs"], list) else [], repo, clo)]
+            # the file-escape rule (pathflow.escapes, the one implementation the abspath gate also runs): a read built from __file__, __path__ or sys.argv[0] that leaves the
+            # tree the stage mounts the file from, or that cannot be decided, is red; a resolved file inside the mounted tree and a read through require_mounted/require_under are green
+            for cf in sorted(set(clo)):
+                ot = tree_of(roots, cf)
+                if ot is None:
+                    continue
+                try:
+                    src = open(os.path.join(repo, cf)).read()
+                    esc = pathflow.escapes_of(cf, src, ot)
+                except (OSError, SyntaxError, ValueError):
+                    continue
+                err += ["gen:file-escape:%s:gen:%d:%s:%d:%s (the stage mounts only the tool's tree and the declared inputs: take data of another root through a declared `uses` input, passed as an argument or read through require_mounted)" % (root, i, cf, ln, d)
+                        for ln, d in esc]
         stg = [p for p in ins if isinstance(p, dict)] if isinstance(ins, list) else []
         ins = [p for p in ins if not isinstance(p, dict)] if isinstance(ins, list) else ins
         for p in stg:   # the declared output of an EARLIER generator of this recipe: {"stage": "<this root>:gen:I", "path": OUTPUT}, mounted at /stage/<OUTPUT>
