@@ -595,3 +595,6 @@ After the first frame:
   - The fix is w15's, on cand3b: 8b0d9073c is reverted, and contract/facts declares sympair_kinds.inc as a stage input.
   - Rule for cand4: a C/C++ file that is a declared input of a root's `run` step is that step's input, not a unit; any other file is a unit or red. w28 implements it in recipe.py.
   - w3 builds the COMPILER-STAGE toolchain recipe against it. Its check is `recipe.py check --root ports/fnv-nx/toolchain`: 61 errors today, "recipe valid" required.
+- 2026-11-16 00:30Z: COMPILER-STAGE (w3) on claude/fnv-l2-source-plugins-cand4 @1f0f0fd0b, from plugins 74c32c454 with DECLTYPE-REF and the stage scripts.
+  - Roots: toolchain is the compiler root (the plugins feed the `rt` step); toolchain-stage1 holds gcc1. Its admit.json rows are L1's.
+  - Blocked by: w28's step-input rule (L1); the env.json debs bash, sed, grep, patch, xz-utils, findutils, diffutils and gzip (w12, L1); the 52 test fixtures wait on w28's wording for test steps.
