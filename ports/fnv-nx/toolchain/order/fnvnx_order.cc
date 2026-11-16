@@ -680,13 +680,21 @@ static void order_builtin_call(gimple_stmt_iterator *gsi, gcall *call) {
     if (!known || spec.arg_maybe_written_p(i)) wr = true;
   }
   const char *asmname = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fn));
-  // A builtin with no library function, with virtual operands (not NOVOPS) and no pointer operand at all (__builtin_return_address,
-  // __builtin_frame_address, __builtin_trap...): GCC's flags say it touches memory and no operand says which. Nothing is assumed: its
-  // effect is unknown, so it is ordered as an unknown-spec builtin (read when ECF_PURE, else read and write), by the fences below. A
-  // fence is sound for any effect; no builtin is proven frame-only, so none is exempt, and there is no name list.
+  // A builtin with no library function and with virtual operands (not NOVOPS), none of whose operands is a pointer: __builtin_return_address,
+  // __builtin_frame_address, __builtin_eh_pointer, __builtin_eh_filter...
+  //  - every operand an integer constant: no operand designates an address and none is computed, so the expansion (RTL emitted by GCC for a
+  //    builtin that has no library function and no pointer) can reach only the state the call itself denotes: the registers and the frame chain of
+  //    the calling thread, which are private to it (the D1 class: frame and registers; an unshared local is no shared access). No fence.
+  //  - an operand that is a value computed at run time (an integer that can hold an address, a frame level): nothing says it is not an address, so
+  //    the builtin is ordered as one of unknown effect (read when ECF_PURE, else read and write), by the fences below. A fence is sound for any effect.
   if (nptr == 0 && strncmp(asmname, "__builtin_", 10) == 0 && !(gimple_call_flags(call) & ECF_NOVOPS)) {
-    rd = true;
-    wr = !(gimple_call_flags(call) & ECF_PURE);
+    bool all_const = true;
+    for (unsigned i = 0; i < gimple_call_num_args(call); i++)
+      if (TREE_CODE(gimple_call_arg(call, i)) != INTEGER_CST) all_const = false;
+    if (!all_const) {
+      rd = true;
+      wr = !(gimple_call_flags(call) & ECF_PURE);
+    }
   }
   if (!rd && !wr) return;
   if (strncmp(asmname, "__builtin_", 10) != 0) {
