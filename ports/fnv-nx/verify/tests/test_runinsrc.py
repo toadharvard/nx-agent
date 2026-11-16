@@ -24,10 +24,27 @@ def main():
     check("a directory input holds its sources as inputs", ris([ROOT + "/gen"]) == ["gen/in.cc"], ris([ROOT + "/gen"]))
     check("a header or a file nobody declares is not a run-input source", ris([ROOT + "/h.h"]) == [] and ris([]) == [], "")
     check("{external, path} and {stage, path} inputs name no source of the root", ris([{"external": "e", "path": "a.cc"}, {"stage": "r:gen:0", "path": "a.cc"}]) == [], "")
-    au = recipe.all_units_of(rec([ROOT + "/a.cc"]), ROOT, files)
+    au = recipe.all_units_of(rec([ROOT + "/a.cc"]), ROOT, files, {})
     check("all_units_of leaves the run input out and keeps every other source: green", au == ["b.c", "gen/in.cc", "tool/x.cc"], au)
-    check("without run steps every source is a unit (unchanged)", recipe.all_units_of({}, ROOT, files) == ["a.cc", "b.c", "gen/in.cc", "tool/x.cc"], "")
-    check("units_of follows all_units_of", recipe.units_of(rec([ROOT + "/a.cc"]), ROOT, files) == au, "")
+    check("without run steps every source is a unit (unchanged)", recipe.all_units_of({}, ROOT, files, {}) == ["a.cc", "b.c", "gen/in.cc", "tool/x.cc"], "")
+    check("units_of follows all_units_of", recipe.units_of(rec([ROOT + "/a.cc"]), ROOT, files, {}) == au, "")
+    # nested admitted roots and plugin sources are not units of the outer root (own_sources)
+    nroot = ROOT + "/sub"
+    nf = [ROOT + "/a.cc", ROOT + "/sub/n.cc", ROOT + "/sub/m/o.cc"]
+    nu = recipe.all_units_of({}, ROOT, nf, {ROOT: {}, nroot: {}})
+    check("a file under a root admitted inside the root is not a unit of the outer root (nearest-root ownership)", nu == ["a.cc"], nu)
+    check("the nested root keeps its own files", recipe.all_units_of({}, nroot, nf, {ROOT: {}, nroot: {}}) == ["m/o.cc", "n.cc"], "")
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        ps = recipe.PLUGIN_SOURCES["fnvnx_ftoi"]
+        pd = os.path.dirname(ps)
+        os.makedirs(os.path.join(td, pd))
+        open(os.path.join(td, ps), "w").write('#include "inc.cc"\n')
+        open(os.path.join(td, pd, "inc.cc"), "w").write("int x;\n")
+        troot = os.path.dirname(pd)
+        pf = [ps, pd + "/inc.cc", troot + "/other/u.cc"]
+        pu = recipe.all_units_of({}, troot, pf, {troot: {}}, td)
+        check("a plugin source and the files it includes are inputs of the plugin stage, not units", pu == ["other/u.cc"], pu)
     # generated-only roots: a run-only recipe compiles nothing; an undeclared source is red, a declared run input is green
     def tu(inputs, extra):
         r = rec(inputs)

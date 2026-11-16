@@ -70,6 +70,10 @@ the hash of the stage document + tool code. All paths are root-relative unless m
 - `external`: content-pinned inputs (see below).
 - `plugins`: GCC plugins of the C++ front end (see "Plugins"). `flags` may not hold any `-fplugin*` token.
 
+## Sources of a root (`own_sources`)
+
+The sources of a root are its tracked files minus (1) every file under a root admitted inside it (nearest-root ownership, as `tree_of` resolves a tool file: `verify/probes` inside `verify`, `toolchain/tests` inside `toolchain`) and (2) every plugin source of `PLUGIN_SOURCES` and the files it includes (`plugin_files`): those are inputs of the plugin stage, keyed by it, never translation units of the root that holds them. One function, `recipe.own_sources(root, files, roots, repo)`; the unit list, `check` and the build all read it.
+
 ## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)
 **The plugin set belongs to the target profile, not to the language.** The guest profile requires the full set (`PLUGIN_SOURCES`, in load order), for C and C++ alike. The host
 profile (`"profile": "host"`) has the empty set, and a host root is required to load none: the plugins enforce guest-ABI semantics (msvcmodel, x86 TSO as `ldar`/`stlr`, MSVC
