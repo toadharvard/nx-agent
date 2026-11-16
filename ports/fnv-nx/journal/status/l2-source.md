@@ -611,3 +611,8 @@ After the first frame:
   - The pin 84f0883e runtime defines all 4 (nm on its libstdc++.a, ELF32: class, si_class and vmi_class type_info, bad_alloc).
   - Over its archive: 1,072 fnvnx_ap mentions, 0 undefined.
   - Rule: the guest link takes its runtime from the one pinned compiler external. Sent to L1, for L5.
+- 2026-11-16 02:05Z: NAMES-FNPARM: no plugin-only rule closes it.
+  - Cause: GCC hash-conses FUNCTION_TYPE, so `int*`, `int[]` and `int*const` parameters (and a function-typed parameter) are one node. cl 15.00 encodes them as `QAH` / full `P6…` with their own back-references. f8 vs names.expect shows both.
+  - Ruling: a msvcmodel.patch hunk in grokdeclarator cdk_function adds the type attribute fnvnx_parmform, only for non-plain forms. The names plugin encodes from it, and forms without a recorded cl reference are a compile error.
+  - On the cand4b line, in COMPILER-STAGE's farm build (K1 changes). Owner w2.
+  - The 24 platform rows (3 functions × 8 roots) re-measure after that build.
