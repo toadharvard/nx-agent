@@ -1847,3 +1847,10 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - relift @4a4a97aeb (w13): on base3 e88bc001b; 78 tests green, 6 red (5 lack recipe inputs, 1 is gate_lift's toy plugin build). Next: re-merge onto base3 6d67261ef (doing, w13).
 - base3 @6d67261ef (w8): recipe check 64 roots valid, 0 red; assumptions 152/152; lift tests 60/73, the 13 reds all lacking inputs.
 - recipe.py expand_foreach is not idempotent on a build-time foreach, reproduced on shapeprove, so the check verdict depends on the caller. Owner L1, sent with the repro and the projection rule.
+- relift @b6e52e004 (w13) = 4a4a97aeb + base3 6d67261ef + L1 171ecb8c3 (expand idempotence).
+  - Recipe check: 64 roots, 0 bad. Lift tests: 61 OK, 6 red (gate_lift toy; 5 tools tests waiting for recipe inputs).
+  - Sent to L3b for shape_sha/formgate and the P2' check.
+- d3dx9_38 hang: the run was on a stale tree (5c12589f5). The widening is 8fa62a67a (ARG_LIMIT to ⊤), already in base3 and the relift.
+  - Doing (farm d3dx9): rerun of d3dx9_38 and d3dx9_31 at e9352af11.
+  - Doing (w7): profile pass 1 and ehflow, fix by a complexity rule.
+- Farm 3: density rerun with 171ecb8c3 cherry-picked (doing).
