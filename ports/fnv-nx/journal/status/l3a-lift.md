@@ -1683,3 +1683,9 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - The report to the orchestrator: bytes before and after rules 1 and 2, plus a cold-compile estimate at the new size.
 - Workers 4: w7 universe engine, w8 path census, w12 rule 1, w13 rule 2.
 - bottleneck: the density rules (w12, w13); the L2 recipe-path pin and dispatch.c; the w7 exe farm run.
+
+## 2026-11-16 05:20 — base3 be2f01990 (w8)
+- w4's claude/fnv-l3b-lift-w4 @66ca7e58a merged into base3 as a fast-forward; udcert.py:10 reworded, pins row updated.
+- Assumptions gate: 152/152, 0 findings at be2f01990.
+- Doing (w8): the recipe check over all admitted roots at be2f01990 (was 61/61 valid at f96997661); the path census on farm 2.
+- bottleneck: the density rules (w12 rule 1, w13 rule 2); the L2 recipe-path pin and dispatch.c; the w7 exe farm run.
