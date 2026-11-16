@@ -38,3 +38,9 @@ mount points changes those lines only.
 - Externals (fnv-nx-build, orphan mirror branches): gcc `tools/gcc-src-13.3.0` f445876d (tree f50e0b05...), newlib `tools/newlib-4.6.0.20260123` 2fb73524 (af2b544d...), autotools `tools/autotools-src` 2dee1098 (6dbd091d...),
   buildscripts `tools/devkitpro-buildscripts-5740da9b` f34068c8 (f0923ebe...); full hashes in the two build.json files.
 - Debs: the lists name `bash sed grep patch xz-utils findutils diffutils gzip` which env.json does not pin yet (all others are pinned); the roots are not admitted until they are.
+
+## The inputs of `rt` that are not plugins
+Inputs 3-9 are read as DATA by rt.sh, never compiled by it: the msvcmodel patch and the three runtime patches (applied to the newlib and libstdc++ sources), `cfg_link.py` (the CFG-LINK patch of the runtime subdirectories),
+`link/guest.ld` and `dispatch/fnvnx_dispatch.cc`. The last two are the two files that patch embeds in the runtime's configure (the guest link script and the dispatch protocol source named by
+`guest_compiler.json` `runtime_configure_patch`), so a change of either is a change of the runtime build. `fnvnx_dispatch.cc` is also the source of the plugin `fnvnx_dispatch`; the two uses are
+independent (the plugin stage compiles it into a `.so`; rt copies the text), and both are declared, so both are in the key.
