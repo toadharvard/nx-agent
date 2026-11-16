@@ -66,7 +66,7 @@ def writer_bodies(res):
     implementations of the writers. Exempt from the writer rule by the record, never by a name."""
     out = set()
     for o in res["objects"]:
-        recs, _ = exportgen.scan(o["object"])
+        recs = exportgen.records(o["object"])
         if any(n in hive.WRITERS for _, n, _, _ in recs):
             out.add(o["unit"])
     return out

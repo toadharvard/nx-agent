@@ -18,7 +18,7 @@
  "units": "all",
  "uses": [
   {
-   "root": "ports/fnv-nx/bridgefacts",
+   "root": "ports/fnv-nx/bridgetable",
    "output": "BRIDGE"
   },
   {
@@ -4153,7 +4153,7 @@
    "args": [
     "imp",
     "--bridge",
-    "/uses/ports/fnv-nx/bridgefacts/BRIDGE",
+    "/uses/ports/fnv-nx/bridgetable/BRIDGE",
     "--imported",
     "/uses/ports/fnv-nx/loader/IMPORTED_TSV",
     "--prelude",
@@ -4174,7 +4174,7 @@
     "entries",
     "/ext/liftpack/entries.tsv",
     "/stage/imp_entries.tsv",
-    "/uses/ports/fnv-nx/bridgefacts/BRIDGE",
+    "/uses/ports/fnv-nx/bridgetable/BRIDGE",
     "/uses/ports/fnv-nx/loader/MODULES_TSV",
     "/out/entries.tsv"
    ],

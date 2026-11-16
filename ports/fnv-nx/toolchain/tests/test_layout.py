@@ -20,6 +20,8 @@ sys.path.insert(0, HERE)
 import plugbuild as pb  # noqa: E402
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'link'))
 import ctypes_compat as cc  # noqa: E402
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'layout', 'decltype_spell.inc')) as _f:
+    REASONS = cc.decltype_reasons(_f.read())
 from verify import gate_abi  # noqa: E402
 import json  # noqa: E402
 import subprocess  # noqa: E402
@@ -129,7 +131,7 @@ DECLTYPE = {
 def dt_all(obj, label):
     """RULE DECLTYPE-COMPLETE: every global or weak symbol of the object's symbol table has exactly one line of .fnvnx.decltype (a type, or `-reason` of the closed set
     that link/ctypes_compat.py reads from the plugin), and every line is a symbol of the table; -> ({symbol: type}, {symbol: reason})"""
-    rows, why = cc.parse_decltype_lines(pb.section(obj, '.fnvnx.decltype').encode(), label)
+    rows, why = cc.parse_decltype_lines(pb.section(obj, '.fnvnx.decltype').encode(), label, REASONS)
     # the pinned binutils' nm -g: the global and weak symbols, defined or not (readelf's column layout shifts for a symbol with a st_other flag such as an SVE variant-PCS one)
     nm = os.path.join(os.path.dirname(pb.driver()), 'aarch64-none-elf-nm')
     syms = {l.split()[-1] for l in subprocess.run([nm, '-g', obj], capture_output=True, text=True, check=True).stdout.splitlines() if len(l.split()) >= 2}
@@ -263,7 +265,7 @@ def decltype_errors(td, so):
         src = os.path.join(td, name + '.c')
         open(src, 'w').write(text)
         r = pb.compile(src, os.path.join(td, name + '.o'), so)
-        got = cc.parse_decltype(pb.section(os.path.join(td, name + '.o'), '.fnvnx.decltype').encode(), name) if r.returncode == 0 else None
+        got = cc.parse_decltype(pb.section(os.path.join(td, name + '.o'), '.fnvnx.decltype').encode(), name, REASONS) if r.returncode == 0 else None
         check('decltype: declarations of one symbol compose to one line (%s)' % name, got == want, (got, r.stderr[-300:]))
 
 
@@ -359,7 +361,7 @@ def decltype_cxx(td, so):
         check('incompatible pair: %s compiles' % name, r.returncode == 0, r.stderr[-400:])
         if r.returncode:
             return
-    per = {n: cc.parse_decltype(pb.section(os.path.join(td, n + '.o'), '.fnvnx.decltype').encode(), n) for n in ('pc.c', 'pcx.cpp')}
+    per = {n: cc.parse_decltype(pb.section(os.path.join(td, n + '.o'), '.fnvnx.decltype').encode(), n, REASONS) for n in ('pc.c', 'pcx.cpp')}
     items, red = cc.check(per)
     check('a C declaration and an extern "C" declaration of one symbol with an incompatible parameter: ctypes_compat is red', 'pf' in red and 'pf' in items, (items, red))
     per2 = {'pair_c': rows['pair_c.o'], 'pair_cxx': rows['pair_cxx.o']}
