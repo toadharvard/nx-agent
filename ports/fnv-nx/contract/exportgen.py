@@ -3,7 +3,7 @@
 
     exportgen.py --objects <dir of <root>/<unit>.o> --out exports.tsv
 
-Every object may carry the section `.fnvnx.export` (contract/exporthdr/include/fnvnx_export.h): lines `module TAB import name TAB symbol TAB func|data`.  The tool
+Every object may carry the section `.fnvnx.export` (contract/include/fnvnx_export.h): lines `module TAB import name TAB symbol TAB func|data`.  The tool
 writes the union, sorted, as the same four columns.  RULE (total, nothing is skipped or guessed):
   - a line that is not exactly four fields, with a module that is not a lower-case `*.dll` name, a symbol that is not a C identifier or a kind other than
     func|data is an error;
