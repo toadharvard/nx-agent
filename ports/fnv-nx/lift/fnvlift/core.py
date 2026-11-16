@@ -8,7 +8,7 @@ import re
 import capstone
 from capstone import x86 as X
 import sys
-from . import prov
+from . import prov, density
 
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 md.detail = True
@@ -437,7 +437,11 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     for a, r in cx.finfo.items():          # a Form instruction has two derivations of its successors (its eip node, the emitted gotos). Every edge the emitter wrote is one the solver follows, or the solver
         assert set(graph[a]) <= set(r['succs']) or flaglive.EXIT in r['succs'], (hex(a), r['succs'], graph[a])      # treats the instruction as an exit (all flags live): the solver never misses a successor
     P = flaglive.poll_set(graph, [start] + [a for a in cx.insns if a in cx.uent])
-    drop = flaglive.dropped(cx.finfo, P)
+    drop = flaglive.dropped(cx.finfo, P)       # computed with P in every configuration: the dead-flag analysis treats every poll point as an escape
+    if not density.on('polls'):
+        P = frozenset()                         # configuration: the lifter emits no poll (the runtime's declarations stay)
+    if not density.on('flaglive'):
+        drop = {}
     txt, meta2, cx2 = _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, drop, P)
     assert meta2['paths'] == meta['paths'] and {a: cx2.succ.get(a, set()) for a in cx2.insns} == {a: cx.succ.get(a, set()) for a in cx.insns}
     meta2['flagdrop'] = {a: flaglive.mask(m) for a, m in sorted(drop.items())}
@@ -533,13 +537,16 @@ def _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, drop, poll):
         cases = ' '.join('case 0x%xu: %sgoto %s;' % (x, xc.case_pre(cx, x), cx.lab(x)) for x in labs)
         em('after_tail: ; if(esp>E){ SYNC_OUT; return; }')
         em('nonlocal: ; for(;;){ u32 t=c->ra; if(esp>E){ SYNC_OUT; return; } switch(t){ %s default: break; } SYNC_OUT; REGS(); fnvl_dispatch(t)(); REGS(); SYNC_IN; }' % cases)
-    prune_labels(cx)
+    if density.on('labels'):
+        prune_labels(cx)
     body = '\n'.join(cx.L)
     body0 = body
     # R4 raise-site flush rule (rt/fnvl.h RAISE_OUT / RAISE_IN): every explicit call of the OS dispatcher flushes the EFLAGS and x87 condition-bit locals into struct cpu before it and reloads them after
     fl = 'SYNC_X_IN;' if 'sse' in kinds else ''
     body = body.replace('SYNC_OUT;', 'SYNC_OUT;' + ('SYNC_X_OUT;' if 'sse' in kinds else ''))
     body = body.replace('SYNC_IN;', 'SYNC_IN;' + fl)
+    if not density.on('forms'):         # a measurement configuration (fnvlift/density.py): the forms' expansions written in place
+        body = density.expand_forms(body)
     body = PLAIN_FORM.sub(lambda m: (m[1] or m[2] or m[3]) + 'P(', body)      # a transfer form whose hooks stayed the plain ones is emitted by its short name (rt/fnvl.h FNVL_*P): the same expansion
     decl = ''.join('extern "C" void L_%08x(void);\n' % t for t in sorted(cx.calls | cx.tails))
     txt = '%sextern "C" void L_%08x(void)\n{ DECL; SYNC_IN;%s%s%s u32 E=esp; %s\n%s\n}\n' % (
