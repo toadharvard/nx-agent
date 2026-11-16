@@ -455,6 +455,7 @@ class Machine:
         if t[0] == 's': return {n: self.zero(ft) for n, ft in self.structs[t[1]]}
         if t[0] == 'a': return [self.zero(t[1]) for _ in range(t[2])]
         if t[0] == 'p': return None
+        if t[0] == 'u': return None       # an uninitialised union local (the lifter's xmm_t x0..x7): reading it is an error of the executor, never a value
         raise Unsupported('zero of ' + str(t))
 
     def fresh_val(self, t, name):
@@ -667,6 +668,7 @@ class Machine:
     def e_Cast(self, n, fr):
         t = self.ctype(n.to_type.type)
         v = self.eval(n.expr, fr)
+        if t == ('v',): return None                          # (void)e: evaluated for its effects, no value
         if isinstance(v, Ptr) or t[0] == 'p': raise Unsupported('pointer cast')
         return self.cast(v, t, fr)
 
@@ -804,6 +806,7 @@ class Machine:
         fr.rett = rett
         fr.ret = self.zero(rett) if rett != ('v',) else None
         self.run(fd.body, fr)
+        self.last_vars = fr.vars          # the callee's final locals (the fragment executor reads the lifter's own flag locals c0 c2 c3 zf pf cf ...)
         return fr.ret
 
     def run(self, n, fr):
@@ -835,6 +838,7 @@ class Machine:
 
     def s_Assignment(self, n, fr): self.eval(n, fr)
     def s_FuncCall(self, n, fr): self.eval(n, fr)
+    def s_Cast(self, n, fr): self.eval(n, fr)           # `(void)x;`: the value is dropped
     def s_UnaryOp(self, n, fr): self.eval(n, fr)
     def s_ExprList(self, n, fr): self.eval(n, fr)
 
@@ -884,6 +888,17 @@ class Machine:
             fall = fr.L
         fr.L = z3.Or(fall, fr.pend.pop('__break', z3.BoolVal(False)), z3.And(L0, z3.Not(z3.Or(anyc, z3.BoolVal(any(isinstance(i, c_ast.Default) for i in items))))))
         if saved_break is not None: fr.pend['__break'] = saved_break if not z3.is_false(z3.simplify(saved_break)) else fr.pend.get('__break', saved_break)
+
+    def s_DoWhile(self, n, fr):
+        # the body runs, then the condition decides; the bound must be constant (the macro idiom do{...}while(0) runs once)
+        nloop = 0
+        while True:
+            self.run(n.stmt, fr); nloop += 1
+            Lc = fr.L; fr.L = z3.BoolVal(True)
+            c = z3.simplify(self.truth(self.eval(n.cond, fr), fr)); fr.L = Lc
+            if not (z3.is_true(c) or z3.is_false(c)): raise Unsupported('do-while bound not constant')
+            if z3.is_false(c): break
+            if nloop > 4096: raise Unsupported('loop too long')
 
     def s_For(self, n, fr):
         # induction variable: assigned a constant in init; the bound is evaluated on constants after every step

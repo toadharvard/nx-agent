@@ -29,6 +29,21 @@ def kinds():
     return _KIND
 
 
+def kind_invariant(v, e, k):
+    """the constructors' postcondition on one register (v, e, k): see the module docstring"""
+    K = kinds(); c = lambda name: z3.BitVecVal(K[name], 32)
+    f64e, f64f, f64q = z3.Extract(62, 52, v), z3.Extract(51, 0, v), z3.Extract(51, 51, v)
+    f32e, f32f, f32q = z3.Extract(30, 23, v), z3.Extract(22, 0, v), z3.Extract(22, 22, v)
+    snan64 = z3.And(f64e == 0x7ff, f64f != 0, f64q == 0)
+    snan32 = z3.And(f32e == 0xff, f32f != 0, f32q == 0)
+    return z3.And(z3.ULE(k, max(K.values())), z3.Implies(k != c('FK_M80'), e == 0),
+                  z3.Implies(k == c('FK_F32'), z3.And(z3.Extract(63, 32, v) == 0, z3.Not(snan32))),
+                  z3.Implies(k == c('FK_F64'), z3.Not(snan64)),
+                  z3.Implies(k == c('FK_I16'), z3.SignExt(48, z3.Extract(15, 0, v)) == v),
+                  z3.Implies(k == c('FK_I32'), z3.SignExt(32, z3.Extract(31, 0, v)) == v),
+                  z3.Implies(k == c('FK_M80'), z3.Extract(31, 16, e) == 0))
+
+
 def fvvar(n):
     """-> (the fv as one bit-vector k:e:v, (v, e, k), the invariant over every kind)"""
     K = kinds(); mc = XC.carrier()['machine']
