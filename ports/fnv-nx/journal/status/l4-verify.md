@@ -436,3 +436,7 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - 01:05: w8 took lift/ from base3 78d46bc07 (new test entry `entry(uint64_t api)`, no argv). L4 passes no argv to any guest image (bootmachine sets x0 = host_page only). recipe.check is 0 on boot, bootguest and icount.
   - Decision: bootguest's sdmc:/mode stays. It is a declared-machine input read through the product fs, not an argv selector. A runner for the lifted citest, imptest and msvcrttest images is off the first-frame path.
 - 03:40: L1 w28 8e917f591: gamedata_fetch installs only externals that recipes declare. w8 is doing it: the boot root declares every gamedata/data/<slug> branch of fnv-nx-build (the whole installed title, the declared machine's game directory), BOOT_DATA_ITEMS is deleted, and the tests/s5 owner is to be reported.
+- 03:55: done: w8 3e51a5ce1 (L1 w28 merged).
+  - boot/build.json declares 11 gamedata/data externals (one per fnv-nx-build branch, taken from ls-remote and cas ingest) plus exe; the fetch lists 13 pins with redist. BOOT_DATA_ITEMS is deleted, and meta.json items come from .gamedata_pins. recipe.check(boot) = 0.
+  - gamedata_fetch: exe, redist and 7 of 11 data items installed, sha checked. It ran out of disk at Voices1.bsa on a 22 GB container, so the full install runs on a large-disk farm with the boot.
+  - tests/s5/farm_boot.sh was already removed (a41f9a42e).
