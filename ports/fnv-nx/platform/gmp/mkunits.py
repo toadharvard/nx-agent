@@ -21,12 +21,14 @@ for r in rows:   # the object's path in the build tree, whatever directory the s
 # directory of its source: the headers of the last two are written beside the unit below, the first two are the recipe's `include`, or a directory the recipe supplies); -g and -O2 are
 # the recipe's own flags. Anything else would be lost, so it is an error.
 real = lambda r, d: os.path.realpath(os.path.join(r["cwd"], d))
+def own_dirs(r):   # the compile's own directory in the build tree and in the source tree, and the directory of its source file
+    rel = os.path.relpath(os.path.realpath(r["cwd"]), build)
+    return {os.path.realpath(r["cwd"]), os.path.realpath(os.path.join(src, rel)), os.path.dirname(real(r, r["src"]))}
 def check_flags(r):
-    srcdir = os.path.dirname(real(r, r["src"]))
     for f in r["flags"]:
         if f.startswith("-D") or f in ("-g", "-O2"):
             continue
-        if f.startswith("-I") and (f[2:] in supplied or real(r, f[2:]) in (build, src, os.path.realpath(r["cwd"]), srcdir)):
+        if f.startswith("-I") and (f[2:] in supplied or real(r, f[2:]) in own_dirs(r) | {build, src}):
             continue
         sys.exit("mkunits: %s: the flag %s cannot be carried by a unit" % (r["out"], f))
 units, seen = {}, {}
@@ -56,7 +58,7 @@ for o, r in sorted(units.items()):
 sib = {}
 for o, r in sorted(units.items()):
     udir = os.path.join(out, "u", os.path.dirname(o))
-    for sdir in sorted({os.path.dirname(os.path.realpath(os.path.join(r["cwd"], r["src"]))), os.path.realpath(r["cwd"])}):
+    for sdir in sorted(d for d in own_dirs(r) if os.path.isdir(d)):
       for fn in sorted(os.listdir(sdir)):
         if fn.endswith(".h"):
             data = open(os.path.join(sdir, fn), "rb").read()
