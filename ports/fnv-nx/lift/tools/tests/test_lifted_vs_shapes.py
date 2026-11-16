@@ -35,7 +35,7 @@ def compare(shapes, exe, emit, jtab):
         ins = next(iter(L.core.md.disasm(img.bytes(va, 16), va, 1)), None)
         if ins is None:
             from fnvlift import f_sys
-            ins = f_sys.nop_gap(img.bytes(va, 16))
+            ins = f_sys.decode_gap(img.bytes(va, 16))
         assert ins.size == ln, (hex(va), ins.size, ln)
         cnt[(shape.shape_key(ins), shape.family(ins))] += 1; n += 1
     mine = ''.join('\t'.join(map(str, x)) + '\n' for x in [(k, fam, c) for (k, fam), c in sorted(cnt.items(), key=lambda t: (t[0][0].encode(), t[0][1]))])

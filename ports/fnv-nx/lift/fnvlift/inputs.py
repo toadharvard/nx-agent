@@ -8,10 +8,11 @@ configure(). A name that was not configured is an error at the point of use: the
   x86sys     the declared x86 system record (platform X86SYS output)
   cpufeat    the CPUID feature-bit table (L3b cpuid_feature_bits.tsv: feature, leaf, sub, reg, bit, citation)
   segwrites  the per-image write-site counts of the data segment registers (lift/facts SEGWRITES output, tools/segwrites.py): a file
+  udsail     the Sail #UD verdicts of the byte sequences capstone refuses (proof/udsail.py output): a file; read only when such a sequence is met
   image      the key of the image being lifted in that file ('exe', or the module name without .dll, lower case)
 The load base of a module is not an input of this kind: it is the argument `base` of Image(path, base), taken from the module table row.
 Proof: a lookup is get(name); configure() accepts only these names; a second configure() of a name with another value is an error (one process, one input set)."""
-NAMES = ('universe', 'fpstate', 'fpdepth', 'x86sys', 'cpufeat', 'segwrites', 'image')
+NAMES = ('universe', 'fpstate', 'fpdepth', 'x86sys', 'cpufeat', 'segwrites', 'udsail', 'image')
 _I = {}
 
 
