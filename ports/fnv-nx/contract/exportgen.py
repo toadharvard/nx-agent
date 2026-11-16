@@ -5,12 +5,14 @@
                                                                               section its recipe names: contract/exports/build.json, `objects_of` guest + section: the objects of
                                                                               every guest product root outside the consumers of the table, the link set)
 
-Every object may carry the section `.fnvnx.export` (contract/include/fnvnx_export.h): lines `module TAB import name TAB symbol TAB func|entry|data`.  The tool
+Every object may carry the section `.fnvnx.export` (contract/include/fnvnx_export.h): one record per FNVNX_EXPORT: the strings module, import name, kind (func|entry|data), each NUL-terminated, then a
+pointer-sized field that carries a RELOCATION against the definer's symbol (`&symbol` in the C/C++ source, so the compiler resolves the identity: an undeclared name is a compile error, and
+the symbol is named by the object's own symbol table, never read from text); records are separated by zero padding.  The tool
 writes the union, sorted, as six columns: the four fields, `ret` (the return class of a function export) and `args` (the argument classes, `-` for none), both read from the definer's own
 `.fnvnx.decltype` record (`-` for data and for an entry).  The kinds: `func` is a native function the bridge marshals by its type; `entry` is a body that works on the guest state itself (the bridge jumps
 to it, nothing is marshalled, the return and argument slots do not apply); `data` is an object.  RULE (total, nothing is skipped or guessed):
-  - a line that is not exactly four fields, with a module that is not a lower-case `*.dll` name, a symbol that is not a C identifier or a kind other than
-    func|entry|data is an error;
+  - a record that is malformed (a string not NUL-terminated, a missing or extra relocation, a relocation that is not against a named symbol with addend 0, an empty field), with a module that is not a
+    lower-case `*.dll` name, a symbol that is not a C identifier or a kind other than func|entry|data is an error;
   - the definer of an `entry` has the type `void(void)` in its `.fnvnx.decltype` (it takes and returns nothing: its operands are the guest state); any other type is an error;
   - a (module, name) given twice (in one object or two) is an error;
   - the symbol must be defined (global, in a section) by the object that carries the record, and by no other object of the tree: exactly one definer;
@@ -34,18 +36,74 @@ MODULE = re.compile(r'[a-z0-9_.\-]+\.dll\Z')
 IDENT = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\Z')
 
 
+def check_fields(mod, name, sym, kind, where, n):
+    if not MODULE.match(mod):
+        raise ValueError('%s: record %d: module %r is not a lower-case *.dll name' % (where, n, mod))
+    l2sections._need(name, where, n, 'import name')
+    if not IDENT.match(sym):
+        raise ValueError('%s: record %d: symbol %r is not a C identifier' % (where, n, sym))
+    if kind not in KINDS:
+        raise ValueError('%s: record %d: kind %r is none of func, entry, data' % (where, n, kind))
+
+
 def parse_export(data, where):
+    """The text form `module TAB name TAB symbol TAB kind` LF-terminated (exports.tsv's first four columns): [(module, name, symbol, kind)]"""
     out = []
     for n, ln in enumerate(l2sections._lines(data, where), 1):
         mod, name, sym, kind = l2sections._fields(ln, where, n, 4, 4)
-        if not MODULE.match(mod):
-            raise ValueError('%s: line %d: module %r is not a lower-case *.dll name' % (where, n, mod))
-        l2sections._need(name, where, n, 'import name')
-        if not IDENT.match(sym):
-            raise ValueError('%s: line %d: symbol %r is not a C identifier' % (where, n, sym))
-        if kind not in KINDS:
-            raise ValueError('%s: line %d: kind %r is none of func, entry, data' % (where, n, kind))
+        check_fields(mod, name, sym, kind, where, n)
         out.append((mod, name, sym, kind))
+    return out
+
+
+def parse_records(data, relocs, psize, where):
+    """-> [(module, name, symbol, kind)] of the section bytes DATA of an object. RELOCS {offset: (symbol name or None, addend)} are the section's relocations, PSIZE the pointer size of the object's ELF class.
+    A record: three NUL-terminated strings (module, name, kind), then a pointer-sized field aligned to PSIZE, whose relocation names the definer; zero padding follows up to the next record."""
+    out, off, n, seen = [], 0, 0, set()
+    while True:
+        while off < len(data) and data[off] == 0:
+            off += 1
+        if off >= len(data):
+            break
+        n += 1
+        strs = []
+        for what in ('module', 'import name', 'kind'):
+            e = data.find(b'\0', off)
+            if e < 0:
+                raise ValueError('%s: record %d: the %s is not NUL-terminated' % (where, n, what))
+            if e == off:
+                raise ValueError('%s: record %d: the %s is empty' % (where, n, what))
+            strs.append(data[off:e].decode('latin1'))
+            off = e + 1
+        po = -(-off // psize) * psize
+        r = relocs.get(po)
+        if r is None or r[0] is None or r[1] != 0:
+            raise ValueError('%s: record %d (%s!%s): the pointer field at offset %d has no relocation against a named symbol with addend 0 (got %r)' % (where, n, strs[0], strs[1], po, r))
+        if po + psize > len(data):
+            raise ValueError('%s: record %d: the pointer field is cut off' % (where, n))
+        seen.add(po)
+        check_fields(strs[0], strs[1], r[0], strs[2], where, n)
+        out.append((strs[0], strs[1], r[0], strs[2]))
+        off = po + psize
+    extra = sorted(set(relocs) - seen)
+    if extra:
+        raise ValueError('%s: relocation at offset %d belongs to no record' % (where, extra[0]))
+    return out
+
+
+def relocs_of(e, section):
+    """{offset: (symbol name or None, addend)} of the relocations of SECTION of the ELFFile E (.rela<section> or .rel<section>); a section symbol has no name (None); an implicit addend (REL) is read as 0
+    only when the pointer bytes are zero (checked by the caller's data: the field is zero in the object)."""
+    out = {}
+    for pre in ('.rela', '.rel'):
+        rs = e.get_section_by_name(pre + section)
+        if rs is None:
+            continue
+        sy = e.get_section(rs['sh_link'])
+        for r in rs.iter_relocations():
+            sym = sy.get_symbol(r['r_info_sym'])
+            named = sym.name and sym['st_info']['type'] != 'STT_SECTION'
+            out[r['r_offset']] = (sym.name if named else None, r['r_addend'] if 'r_addend' in r.entry else 0)
     return out
 
 
@@ -91,8 +149,9 @@ def records(path, section=SECTION):
     """-> the export records [(module, name, symbol, kind)] of the object at PATH (no decltype)"""
     from elftools.elf.elffile import ELFFile
     with open(path, 'rb') as fh:
-        s = ELFFile(fh).get_section_by_name(section)
-        return parse_export(s.data(), os.path.basename(path) + ':' + section) if s is not None else []
+        e = ELFFile(fh)
+        s = e.get_section_by_name(section)
+        return parse_records(s.data(), relocs_of(e, section), e.elfclass // 8, os.path.basename(path) + ':' + section) if s is not None else []
 
 
 def scan(path, reasons, section=SECTION):
@@ -101,7 +160,7 @@ def scan(path, reasons, section=SECTION):
     with open(path, 'rb') as fh:
         e = ELFFile(fh)
         s = e.get_section_by_name(section)
-        recs = parse_export(s.data(), os.path.basename(path) + ':' + section) if s is not None else []
+        recs = parse_records(s.data(), relocs_of(e, section), e.elfclass // 8, os.path.basename(path) + ':' + section) if s is not None else []
         dt = e.get_section_by_name(DECLTYPE)
         types, why = ctypes_compat.parse_decltype_lines(dt.data(), os.path.basename(path) + ':' + DECLTYPE, reasons) if dt is not None else ({}, {})
         st = e.get_section_by_name('.symtab')
