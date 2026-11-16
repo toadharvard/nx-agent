@@ -62,8 +62,14 @@ def headers(td, so, outs, store):
     owner = json.load(open(os.path.join(HERE, '..', '..', 'platform', 'build.json')))
     repo = os.path.abspath(os.path.join(HERE, '..', '..', '..', '..'))   # a directory the root generates (a stage output) is not a repository directory: it is no header home here
     for i, d in enumerate(x for x in owner['include'] if x.startswith('ports/fnv-nx/') and os.path.isdir(os.path.join(repo, x))):
-        pb.EXTRA['copy'].append((d, 'inc%d' % i))
-        pb.EXTRA['include'].append(pb.ROOT + '/inc%d' % i)
+        if d == 'ports/fnv-nx/platform/include':   # the root's own include dir lives inside a copy of the root: its relative quotes (`../os/os.h`) resolve as in the root
+            hdrs = os.path.join(td, 'platform-headers')   # the root's header files only, in the root's layout (a unit of the root is no unit of the toy root)
+            shutil.copytree(os.path.join(repo, 'ports/fnv-nx/platform'), hdrs, ignore=lambda d, names: [n for n in names if not (n.endswith('.h') or os.path.isdir(os.path.join(d, n)))])
+            pb.EXTRA['copy'].append((hdrs, 'plat'))
+            pb.EXTRA['include'].append(pb.ROOT + '/plat/include')
+        else:
+            pb.EXTRA['copy'].append((d, 'inc%d' % i))
+            pb.EXTRA['include'].append(pb.ROOT + '/inc%d' % i)
     print('header universe: %d headers; C %d, C++ %d' % (len(uni), sum('C' in v for v in uni.values()), sum('C++' in v for v in uni.values())))
     try:
         for h in sorted(uni):
