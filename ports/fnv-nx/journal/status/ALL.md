@@ -12,6 +12,12 @@ Updated 2026-11-14 23:30Z (path plan). Older sections below are from 2026-11-12 
 - Goal path: product roots -> lifted packs as roots -> ELF -> boot -> WinMain -> menu -> first frame (GL in the emulator).
 
 
+**2026-11-16 00:10Z (orchestrator).**
+- Trunk fb9dd044f.
+- cand3: w12 stalled at 8fc4c58b9, so w15 took it over as cand3b 4c38d7265 on fb9dd044f.
+  - Red on toolchain: 61 errors from making toolchain/ a generated-only root (8b0d9073c). w15 is reverting that and adding the facts input.
+- Decided 23:30Z (CLAUDE.md 11db7476e): the jump-table index is bounded under OWNER 6. This covers 326/1005 JTAB_RED at w7 facts2 b9261cd85.
+
 **2026-11-15 23:10Z (orchestrator).** Trunk fb9dd044f. gs is closed: L5 w17 ad3af10c5 has selectors.gs=0, derived by the generator from both pinned 7601 kernels and their PDBs (fnv-nx-build tools/win7sp1-x86-kernel cc8376f55; KeContextToKframes stores 0 to KTRAP_FRAME.SegGs on SegCs==0x1b, cross-checked with PspCreateUserContext). null_seg_access is 766ddb401. L3a consumes them in the relift. cand3 is being rebased on fb9dd044f (head 8fc4c58b9).
 
 **2026-11-15 22:35Z (orchestrator).** TRUNK MOVED: cand2 merged as fb9dd044f.
