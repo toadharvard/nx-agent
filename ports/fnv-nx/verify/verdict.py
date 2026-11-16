@@ -105,10 +105,10 @@ def _gate_result(g, out_dir, rc):
         why = r.get("reasons") if isinstance(r.get("reasons"), dict) else {}   # optional {id: text}: why a test/item is uncertified
         more = "".join("\n  %s: %s" % (x, str(why[x]).replace("\n", " ")[-400:]) for x in r["uncertified"][:10] if isinstance(why.get(x), str))
         return "red", u, c, "certified %d < universe %d; uncertified: %s%s" % (c, u, ",".join(r["uncertified"][:50]), more)
+    if r["status"] != "green":   # the gate's own detail first: a red gate exits nonzero by contract, and the reason is what it found, not the exit code
+        return "red", u, c, "gate status red: " + r["detail"] + ("" if rc == 0 else " (exit %d)" % rc)
     if rc != 0:
-        return "red", u, c, "exit %d" % rc
-    if r["status"] != "green":
-        return "red", u, c, "gate status red: " + r["detail"]
+        return "red", u, c, "exit %d with a green result" % rc
     return "green", u, c, ""
 
 def _stderr_tail(path, n=1200):
@@ -184,7 +184,9 @@ def cmd_run(a):
                     # a gate that ends without a verdict with reasons (a crash, a missing or invalid result file, a nonzero exit) is red WITH the gate's own stderr:
                     # an exception inside a gate is a finding that names itself, never a bare exit code
                     st = "red"
-                    why = (why + "; " if why else "") + "stderr tail: " + _stderr_tail(errf)
+                    tail = _stderr_tail(errf)
+                    if tail != "(empty)" or not os.path.isfile(os.path.join(out, g["result"])):
+                        why = (why + "; " if why else "") + "stderr tail: " + tail
                     os.makedirs(os.path.dirname(detail + "/" + g["name"]), exist_ok=True)
                     shutil.copyfile(errf, detail + "/" + g["name"] + ".stderr")
             except OSError as e:

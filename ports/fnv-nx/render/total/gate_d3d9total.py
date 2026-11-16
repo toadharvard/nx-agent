@@ -438,6 +438,21 @@ def sm_part(inp, work, cache):
 
 
 def main():
+    """The gate ends in a result file with reasons whatever happens: an exception of any part (a tool that cannot run, a file that cannot be read) is a red result
+    that names it, never an exit without a file (the verdict runner turns a missing result into red too, but the reason belongs here)."""
+    try:
+        return run()
+    except Exception:   # noqa: BLE001  the total rule: every failure is a finding
+        import traceback
+        out = os.environ["GATE_OUT"]
+        shutil.rmtree(os.path.join(out, "d3d9total.work"), ignore_errors=True)
+        write(os.path.join(out, "d3d9total.json"), json.dumps({
+            "format": "fnvnx-gate/1", "name": "d3d9total", "status": "red", "universe": 0, "certified": 0, "uncertified": [],
+            "detail": ("gate crashed: " + " | ".join(traceback.format_exc().strip().splitlines()[-6:]))[:900]}, sort_keys=True, indent=1) + "\n")
+        return 2
+
+
+def run():
     out = os.environ["GATE_OUT"]
     work = os.path.join(out, "d3d9total.work")
     if os.path.isdir(work):
