@@ -762,3 +762,8 @@ After the first frame:
   - Caveat sent to L1: our toolchain/ carries FNPARM, which needs the patched compiler. So it enters with the recipe-path pin, or else with ba2aa4dcb on top until the pin lands.
 - 2026-11-16 09:45Z: L1 decision: cand5 does not wait for the pin. On cand4b, w2 adds the 3 base3 commits plus ba2aa4dcb (the FNPARM revert), and that head goes to L1. FNPARM returns as one unit with w3's recipe-path pin commit, after its toolchain run is green (rt is still red: write into a copied input).
 - 2026-11-16 09:55Z: the head cand5 takes for toolchain/ is cand4b d9eb80fde: the base3 -Wformat-diag fixes, the plugbuild scratch.store hunk, the FNPARM revert 896a97fac, and w3's rt.sh. test_names 29 ok, test_layout 204 ok, test_archive_sources 0 fails, all on the 84f0883e pin. Sent to L1.
+- 2026-11-16 10:00Z: L1 takes toolchain/ whole from d9eb80fde into cand5; the verdict builds the toolchain roots.
+  - The interim ftoi out=/dev/null in rt.sh is accepted for cand5 (no gate reads the runtime's f2i reports today). Open L1/L2 item:
+    - the pin commit gives /out/FTOI/ (each report next to its object, paired by sha256, with index.json);
+    - L1's reader adds the runtime rows to objects.json.
+  - The pin head goes to L1 once rt is green.
