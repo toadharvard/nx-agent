@@ -180,10 +180,11 @@ the function or into a data island; (c) no SVC/atomic/system word (not in the wh
 of x19..x30 into the frame and RET of x30 = E(30): no argument, x8 or vector argument is read, loads read only frame slots stored
 earlier; (e) at every reachable RET each of x0, x1, v0 is never written (void) or is K or A. So effects stay in the frame and the
 result is a function of immediates and link-time addresses: V => result and effects are input-independent (merges give I or D,
-never K). Limits: (1) never-written x0 means void OR identity (`ret` is both), so such a function is V-flagged and needs a LEN 0
-record; (2) not complete: a body that logs and returns a constant is not V (class `oracle`). DECLARED CONSTANTS come from the compile itself: the object's
+never K). Limits: (1) never-written x0 means void OR identity of argument 0 (`ret` is both), so such a function is V-flagged and needs a LEN 0
+record (void) or an `.fnvnx.ident` record (k=0); an identity of another argument k reads x_k, so it is V only through its `.fnvnx.ident` record k (vanalyse ident=k); (2) not complete: a body that logs and returns a constant is not V (class `oracle`). DECLARED CONSTANTS come from the compile itself: the object's
 non-alloc section `.fnvnx.const` (contract/l2consts.py; no constants table). A record is an ABS relocation to the function, u32 LEN and LEN bytes holding the
-value as an object of the row's type (LEN 0: void; a relocation at the value: the address of that symbol). A V function is certified iff it has exactly one
+value as an object of the row's type (LEN 0: void; a relocation at the value: the address of that symbol), or an `.fnvnx.ident` record {ABS relocation to the function, u32 k}: the function returns its argument k
+unchanged (hostabi/include/fnvnx/const.h writes both). A V function is certified iff it has exactly one
 record and it equals the result bit for bit (the low 8*LEN bits of x0; x1 and v0 unwritten): `const-missing`, `const-duplicate`, `const-mismatch` (also a
 record on a body that is not V), `const-malformed` (a record with no relocation, a bad length, a relocation of another kind: with its offset)."""
 import atexit
@@ -439,7 +440,7 @@ def step(off, w, st, rel, obj, inf):
         elif (w & 0x1F000000) == 0x10000000:  # ADR/ADRP: known only when relocated
             new[rd_] = ("A", obj.canon(rel[0], rel[2])) if rel else ("I",)
         elif (w >> 24) & 0x1F == 0b01010 and (w >> 29) & 3 == 1 and rn == 31 and not (w >> 21) & 1 and (w >> 10) & 63 == 0 and (w >> 22) & 3 == 0:
-            new[rd_] = g(rm) if sf or g(rm)[0] == "K" or (g(rm) == ("N",) and not getattr(obj, "w64", True)) else ("I",)  # orr rd, zr, rm = mov (ILP32: the 32-bit mov of a pointer keeps it)
+            new[rd_] = g(rm) if sf or g(rm)[0] == "K" or (g(rm) == ("N",) and not getattr(obj, "w64", True)) else ("T", g(rm)[1]) if g(rm)[0] == "E" else ("I",)  # orr rd, zr, rm = mov (ILP32: the 32-bit mov of a pointer keeps it; of an entry register: T, its low 32 bits)
     except Fail:
         pass
     for i in range(64):
@@ -620,12 +621,14 @@ def const_cell_at(o, w, rl, v, mem):
     return c if c and c[0] == k[1] and c[1] <= k[2] and k[2] + size <= c[2] else None
 
 
-def vanalyse(words, a, b, rels, obj, dec, wine=False, loads_ok=False, errno_ok=False):
+def vanalyse(words, a, b, rels, obj, dec, wine=False, loads_ok=False, errno_ok=False, ident=None):
     """-> {'x0'|'x1'|'v0': None (never written) | ('K',c) | ('A',addr) | ('U',)} if the function is V (no proof of dependence or
     effect), else None. Non-vacuity proofs: cfg() (i, iv), a memory access whose base is not provably the own frame (ii, iii), an
     input register live at entry (v). LOADS_OK (the trap shape (T-B), which is defined by output effect alone): a load from any address
     is not an effect, only stores must be based on the own frame. ERRNO_OK (the image rule, fixed-failure): a store of a constant through the errno
-    pointer (x0 after a call of obj.errno_fn, the value N) is no effect that makes the body non-vacuous; it is counted in obj.errno_stores. Raises Unanalysable."""
+    pointer (x0 after a call of obj.errno_fn, the value N) is no effect that makes the body non-vacuous; it is counted in obj.errno_stores. IDENT = k (the function has an
+    `.fnvnx.ident` record for argument k): the one input register that the body may read is x_k, and the result carries "id" = k iff x0 at every return is the entry value
+    of x_k (E, or T: its low 32 bits, the 32-bit mov) and x1 and v0 are unwritten. Raises Unanalysable."""
     fl = _flow(words, a, b, rels, obj, dec)
     if fl is None:
         return None
@@ -651,7 +654,7 @@ def vanalyse(words, a, b, rels, obj, dec, wine=False, loads_ok=False, errno_ok=F
             n = (inf[o][0] & INP) | (functools.reduce(operator.or_, (live[s] for s in set(succ[o])), 0) & ~inf[o][1])
             if n != live[o]:
                 live[o], ch = n, True
-    if live[a] and not wine:   # WINE: the input rule (v) is replaced by the result rule (the result must be constant, wine_sim)
+    if live[a] and not wine and not (ident is not None and live[a] == 1 << ident):   # IDENT: the argument the record names may be read; WINE: the input rule (v) is replaced by the result rule (the result must be constant, wine_sim)
         return None
     rets = [o for o in succ if not succ[o] and not is_stop(words[o], rels.get(o), obj)]   # a call of a declared-noreturn callee ends its path without a result
     fin = {o: step(o, words[o], ins[o], rels.get(o), obj, inf[o]) if is_tail(words[o], rels.get(o), obj) else ins[o] for o in rets}   # a tail B returns after the call
@@ -659,6 +662,8 @@ def vanalyse(words, a, b, rels, obj, dec, wine=False, loads_ok=False, errno_ok=F
     for name, r in (("x0", 0), ("x1", 1), ("v0", 32)):
         vals = {fin[o][r] for o in rets}
         res[name] = None if vals == {("E", r)} else sorted(vals)[0] if len(vals) == 1 and sorted(vals)[0][0] in "KA" else ("U",)
+        if name == "x0" and ident is not None:
+            res["id"] = ident if vals in ({("E", ident)}, {("T", ident)}) else None
     return res
 
 
@@ -1413,40 +1418,47 @@ def read_cites(o):
     return at, bad
 
 
+IDENT_SEC = ".fnvnx.ident"   # the argument a function returns unchanged (contract/l2consts.py)
 CONST_SEC = ".fnvnx.const"   # the declared constant a function returns (contract/l2consts.py)
 ABSPTR = {(183, True): 257, (183, False): 1, (62, True): 1}   # the pointer-width absolute relocation of each ABI: R_AARCH64_ABS64, R_AARCH64_P32_ABS32, R_X86_64_64
 
 
 def read_consts(o):
-    """The `.fnvnx.const` records of the object O (contract/l2consts.py) -> ({(section index, function offset): [record]}, [(item name, detail)] of
-    malformed records). A record is {"len": n, "int": value or None, "addr": [names of the address, as addr_names] or None}. The function is named by the ABS relocation of the
-    record's pointer field, and must resolve to the start of a function DEFINED in this object, as for a cite."""
+    """The `.fnvnx.const` and `.fnvnx.ident` records of the object O (contract/l2consts.py) -> ({(section index, function offset): [record]}, [(item name, detail)] of
+    malformed records). A const record is {"len": n, "int": value or None, "addr": [names of the address, as addr_names] or None}, an identity record {"ident": k}. The function is
+    named by the ABS relocation of the record's pointer field, and must resolve to the start of a function DEFINED in this object, as for a cite."""
     from fnvnx.contract import l2consts
     at, bad = {}, []
     fn = {(s[5], s[1]) for s in o.syms if s[3] == 2 and 0 < s[5] < 0xFF00}
     ptr, absr = (8 if o.w64 else 4), ABSPTR[(o.machine, o.w64)]
     for si, (sname, stype, sflags, soff, ssize, _, _) in enumerate(o.secs):
-        if sname != CONST_SEC:
+        if sname not in (CONST_SEC, IDENT_SEC):
             continue
         if stype != 1 or sflags & 2:
-            bad.append((CONST_SEC, "the section must be PROGBITS without SHF_ALLOC (type %d, flags %#x)" % (stype, sflags)))
+            bad.append((sname, "the section must be PROGBITS without SHF_ALLOC (type %d, flags %#x)" % (stype, sflags)))
             continue
         rel = o.rela.get(si, {})
         odd = [off for off, (_, t, _) in rel.items() if t != absr]
         if odd:
-            bad.append(("%s+0x%x" % (CONST_SEC, min(odd)), "a relocation of type %d, not the pointer-width absolute relocation %d of the ABI" % (rel[min(odd)][1], absr)))
+            bad.append(("%s+0x%x" % (sname, min(odd)), "a relocation of type %d, not the pointer-width absolute relocation %d of the ABI" % (rel[min(odd)][1], absr)))
             continue
         try:
-            recs = l2consts.parse_consts(o.data[soff:soff + ssize], rel, CONST_SEC, ptr)
+            if sname == IDENT_SEC:
+                recs = [(off, sidx, add, k, None) for off, sidx, add, k in l2consts.parse_idents(o.data[soff:soff + ssize], rel, sname, ptr)]
+            else:
+                recs = l2consts.parse_consts(o.data[soff:soff + ssize], rel, sname, ptr)
         except ValueError as e:
-            bad.append((CONST_SEC, str(e)))
+            bad.append((sname, str(e)))
             continue
         for off, sidx, add, value, target in recs:
-            nm = "%s+0x%x" % (CONST_SEC, off)
+            nm = "%s+0x%x" % (sname, off)
             sy = o.syms[sidx]
             key = (sy[5], sy[1] + add) if 0 < sy[5] < 0xFF00 else None
             if key not in fn:
                 bad.append((nm, "the record's relocation does not name the start of a function defined in this object (symbol %s)" % sy[0]))
+                continue
+            if sname == IDENT_SEC:
+                at.setdefault(key, []).append({"ident": value})
                 continue
             rec = {"len": len(value), "int": int.from_bytes(value, "little") if target is None else None, "addr": None}
             if target is not None:
@@ -1462,6 +1474,8 @@ def const_matches(rec, v):
     x0 = v["x0"]
     if v["x1"] or v["v0"]:
         return False
+    if "ident" in rec:   # the identity of argument k: x0 is the entry value of that register on every path (vanalyse ident=k)
+        return v.get("id") == rec["ident"]
     if rec["len"] == 0:
         return x0 is None
     if x0 is None:
@@ -1608,7 +1622,8 @@ def check_obj(path, terms, os_layer, probe=None, machine=None):
                 # returning paths are judged by the V rules (a constant or vacuous result needs a record or a citation)
                 o.stop = stops if (nrv is None and nterm) else frozenset()
                 try:
-                    v = vanalyse(words, a, b, rel, o, {x: dec.get(soff + x) for x in words}, bool(wsites) or bool(ids))
+                    idk = [r["ident"] for r in consts_at.get((si, a), []) if "ident" in r]   # an `.fnvnx.ident` record: the one input register that the body may read
+                    v = vanalyse(words, a, b, rel, o, {x: dec.get(soff + x) for x in words}, bool(wsites) or bool(ids), ident=idk[0] if len(set(idk)) == 1 and 0 <= idk[0] < 8 else None)
                 except Unanalysable as e:
                     v = None
                     fnd.append((name, "unanalysable", str(e), None))
@@ -1713,7 +1728,7 @@ def check_obj(path, terms, os_layer, probe=None, machine=None):
 
 def vjson(v, o):
     """V result -> JSON: None | ["K", c] | ["A", [names of the symbols at that address (the row's `value` must be one of them)]] | ["U"]."""
-    return {k: (None if x is None else list(x) if x[0] != "A" else ["A", addr_names(o, x[1])]) for k, x in v.items()}
+    return {k: (x if k == "id" else None if x is None else list(x) if x[0] != "A" else ["A", addr_names(o, x[1])]) for k, x in v.items()}
 
 
 def addr_names(o, c):

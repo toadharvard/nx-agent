@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""l2consts - the non-loaded ELF section `.fnvnx.const`: the declared constant that a function returns (L1 CONTRACT).
+"""l2consts - the non-loaded ELF sections `.fnvnx.const` and `.fnvnx.ident`: the declared constant that a function returns, and the argument that
+it returns unchanged (L1 CONTRACT). The producer is hostabi/include/fnvnx/const.h (FNVNX_CONST, FNVNX_CONST_VOID, FNVNX_CONST_IDENT).
 
     parse_consts(data, relocs, where, ptr) -> [(offset, function, fn_addend, value_bytes, value_target)]
+    parse_idents(data, relocs, where, ptr) -> [(offset, function, fn_addend, k)]
 
 One record, aligned to 4 and padded to 4:
     +0      PTR bytes (4 for ILP32, 8 for LP64): the function. Its bytes are zero; a relocation (ABS32 / ABS64 of the object's ABI) at this
@@ -9,6 +11,9 @@ One record, aligned to 4 and padded to 4:
     +PTR    u32 LEN, little endian
     +PTR+4  LEN bytes: the value as an object of the row's type (little endian). If a relocation at the value's offset covers it (LEN == PTR),
             the value is an address: (symbol, addend) goes into value_target and the bytes are zero.
+LEN 0 is VOID: the function returns nothing and the record has no value bytes. An identity function has no value, so it has no `.fnvnx.const` record: its
+record is in `.fnvnx.ident`, one record aligned to 4: PTR bytes (the function, as above), then u32 K (little endian), the index of the argument that the function
+returns unchanged. A function that has both a const and an ident record is an error of the consumer (const-duplicate).
 RELOCS = {offset in the section: (symbol name, relocation type is already checked by the caller as ABS, addend)}; the caller (objstub) maps an ELF
 symbol index to a name and passes only absolute-data relocations, so a record whose function relocation is of another kind is simply missing it.
 Pure: bytes in, tuples out. Every malformed record is a ValueError `<where>: offset 0x..: <what>`; a record whose function relocation is missing is
@@ -51,4 +56,29 @@ def parse_consts(data, relocs, where, ptr):
     stray = sorted(set(relocs) - used)
     if stray:
         raise ValueError("%s: offset 0x%x: a relocation that is neither a record's function nor a whole-value address" % (where, stray[0]))
+    return out
+
+
+def parse_idents(data, relocs, where, ptr):
+    out, p, n, used = [], 0, len(data), set()
+    while p < n:
+        at = "%s: offset 0x%x" % (where, p)
+        if p + ptr + 4 > n:
+            raise ValueError("%s: an identity record is a %d-byte function pointer and a u32 argument index" % (at, ptr))
+        if p not in relocs:
+            raise ValueError("%s: the function pointer has no relocation" % at)
+        if data[p:p + ptr] != b"\0" * ptr:
+            raise ValueError("%s: the function pointer bytes are not zero (the relocation carries the addend)" % at)
+        sym, _, add = relocs[p]
+        used.add(p)
+        out.append((p, sym, add, struct.unpack_from("<I", data, p + ptr)[0]))
+        end = (p + ptr + 4 + 3) & ~3
+        if end > n:
+            raise ValueError("%s: the padding to 4 leaves the section" % at)
+        if any(data[p + ptr + 4:end]):
+            raise ValueError("%s: the padding is not zero" % at)
+        p = end
+    stray = sorted(set(relocs) - used)
+    if stray:
+        raise ValueError("%s: offset 0x%x: a relocation that is not an identity record's function" % (where, stray[0]))
     return out
