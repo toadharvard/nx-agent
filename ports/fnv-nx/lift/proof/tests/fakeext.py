@@ -1,4 +1,4 @@
-"""Test helper: local bare git repos as fake externals (a stand-in for fnv-nx-build, selected by ARTIFACTS_URL, no network) and the overlay of the
+"""Test helper: local bare git repos as fake externals (a stand-in for fnv-nx-build, selected through recipe.ARTIFACTS, no network) and the overlay of the
 trunk's verify/ (the real directory of this tree is the one the gates import)."""
 import os
 import subprocess
@@ -42,19 +42,18 @@ class Artifacts:
 
 
 class use_artifacts:
-    """sets ARTIFACTS_URL (read by recipe.fetch_externals) for the block"""
+    """the artifacts repository of the externals for the block: recipe.ARTIFACTS (what recipe.artifacts_url answers when the cache has no artifacts.url); never the process environment"""
     def __init__(self, art):
         self.art = art
 
     def __enter__(self):
-        self.old = os.environ.get('ARTIFACTS_URL')
-        os.environ['ARTIFACTS_URL'] = self.art.url
+        import recipe
+        self.old = recipe.ARTIFACTS
+        recipe.ARTIFACTS = self.art.url
 
     def __exit__(self, *exc):
-        if self.old is None:
-            del os.environ['ARTIFACTS_URL']
-        else:
-            os.environ['ARTIFACTS_URL'] = self.old
+        import recipe
+        recipe.ARTIFACTS = self.old
 
 
 def accepted(gate, out_dir, rc):

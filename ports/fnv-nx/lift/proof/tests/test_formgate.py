@@ -296,7 +296,9 @@ class Cli(unittest.TestCase):
         shutil.copyfile(f.inputs, os.path.join(co, 'ports', 'fnv-nx', 'lift', 'proof', 'formgate_inputs.json'))
         out = os.path.join(td, 'out')
         os.makedirs(out)
-        env = {'PATH': os.environ['PATH'], 'GATE_OUT': out, 'ARTIFACTS_URL': f.art.url, 'HOME': td, 'GIT_TERMINAL_PROMPT': '0'}
+        import recipe
+        recipe.set_artifacts(recipe.ext_dir(os.path.join(out, 'forms-cache')), f.art.url)    # the artifacts repository is a record beside the cache the gate fills (formgate.cache_dir), never an environment variable
+        env = {'PATH': os.environ['PATH'], 'GATE_OUT': out, 'HOME': td, 'GIT_TERMINAL_PROMPT': '0'}
         r = subprocess.run([sys.executable, '-I', 'ports/fnv-nx/lift/proof/formgate.py'], cwd=co, env=env, capture_output=True, text=True)
         return r, out
 
