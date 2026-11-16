@@ -27,3 +27,16 @@ INT = {
 SEG = {'none': 'no spec', 'unc': 'uncertified: %s', 'undec': 'uncertified: mov_to_sreg.undecided: %s', 'spurious': 'the Form builder raised UndecidedRow where the record decides the row', 'noundecided': 'the record leaves a selector undecided: a Form must not exist',
        'ok': 'SDM %s Sreg: the segment register %s', 'diff': 'differs: %s'}
 FARROW = {'gp': 'gp_selector_descriptors', 'data': 'data_descriptors', 'und': 'undecided_descriptors'}
+LEGACY = {
+    'ok': 'SDM %s: the Form equals the Operation',
+    'diff': 'differs: %s',
+    'unc': 'uncertified: %s',
+    'cond': 'conditional store / floating point state / selector write',
+    'rep': 'LOCK/REP prefix 0x%02x',
+    'cleared': 'uncertified: cleared-#UD class, no cell in the SDM opcode map: %s; the Form is fault(UD) under the site certificate of L3a',
+    'nospec': 'no spec: the record now decides the rows of this Form',
+    'o16': 'uncertified: operand-size prefix 0x66 on a BCD adjust: the SDM states no effect of it',
+    'sldt16': 'uncertified: 16-bit register destination (the upper bits are not specified for it)',
+    'noundecided': 'the record decides mov_to_sreg: the Form must exist and does not',
+    'retf': 'uncertified: far return proved over its domain (cases %s); %d GDT indexes of jmp_far.undecided_descriptors are outside it and the Form carries no domain',
+}
