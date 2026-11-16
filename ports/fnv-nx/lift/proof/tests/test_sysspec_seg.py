@@ -52,7 +52,7 @@ class Seg(unittest.TestCase):
         finally: u['selectors'][:] = old
 
     def test_prefixes_outside_the_spec_are_uncertified(self):
-        for h in ('2607', '671f', '261e'): self.assertEqual(sysspec.check(key(h))[0], 'uncertified', h)
+        for h in ('671f', '6707'): self.assertEqual(sysspec.check(key(h))[0], 'uncertified', h)
 
     def test_a_record_that_differs_from_the_form_is_a_difference(self):
         import sysspec_seg
@@ -96,6 +96,27 @@ class Cites(unittest.TestCase):
         r = subprocess.run([sys.executable, '-I', os.path.join(HERE, '..', 'sdm_cite_check.py'), sdm, py, tb], capture_output=True, text=True); self.assertEqual(r.returncode, 0, r.stdout)
         r = subprocess.run([sys.executable, '-I', os.path.join(HERE, '..', 'sdm_pages.py'), sdm, py], capture_output=True, text=True)
         with open(tb) as fh: self.assertEqual(r.stdout, fh.read())
+
+
+class Prefix(unittest.TestCase):
+    def setUp(self): declared_x86sys.configure()
+    def tearDown(self): inputs.reset()
+
+    def test_segment_override_on_stack_access_is_claimed_by_scope(self):
+        for h in ('2607', '261e', '3606', '3607', '2e1e', '6407', '651f'):
+            r, n = sysspec.check(key(h)); self.assertEqual(r, 'proved', (h, n))
+
+    def test_address_size_prefix_without_memory_operand_stays_unclaimed(self):
+        for h in ('6707', '671e', '671f'):
+            r, n = sysspec.check(key(h)); self.assertEqual(r, 'uncertified', h); self.assertIn('reserved', n)
+
+    def test_forms_record_their_address_kinds(self):
+        import symform
+        self.assertEqual(symform.symbuild(key('1e')).form.access, frozenset({'stack'}))
+        self.assertIn('explicit', symform.symbuild('8b00/0.0.0.0').form.access)
+
+    def test_a_segment_override_on_an_explicit_memory_operand_is_not_claimed(self):
+        r, n = sysspec.check(key('268c00')); self.assertNotEqual(r, 'proved')
 
 
 class Far(unittest.TestCase):

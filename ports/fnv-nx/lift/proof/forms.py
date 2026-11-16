@@ -48,12 +48,14 @@ class Op:
         if s.w == 32: return n, 0
         if s.w == 16: return 'e' + n, 0
         return 'e' + n[0] + 'x', (8 if n[1] == 'h' else 0)
+ACC = set()      # the address KINDS this build made (ea explicit, ssa stack, esa es, dsa ds, areg address-size register): which prefixes the Form consumed; build() resets it and gives it to the Form as .access
 _OK = set()      # the u-serials of the address nodes made by the address functions below (the registry mload / mstore check)
 def tag(n): _OK.add(n.u); return n
 def ea(op, esp=None, seg=True, off=0):
     """effective address of a memory operand.  Address-size attribute 16 (prefix 0x67 in a 32-bit code segment, SDM Vol. 2 2.1.5 / Table 2-1, Vol. 1 3.7.5):
     the offset is base16 + index16 + disp, computed modulo 2^16 and zero-extended to 32 bits; the segment base is added after.  Capstone names the 16-bit
     registers (bx, bp, si, di): their values are the low words of ebx, ebp, esi, edi, so the sum of the 32-bit registers has the same low 16 bits."""
+    ACC.add('explicit')
     if op.a16:
         sub16 = lambda n: V('e' + n, 32)
         a = (C(op.disp, 32) + C(off, 32) if off else C(op.disp, 32))
@@ -74,13 +76,13 @@ def addoff(a, d):
     return tag(a + d)
 def ssa(a):
     """an implicit stack address (SS: flat, no base variable; ESP / EBP based) -- the stack of PUSH, POP, CALL, RET, ENTER, LEAVE, PUSHA, POPA, PUSHF, POPF"""
-    return tag(a)
+    ACC.add('stack'); return tag(a)
 def esa(a):
     """the implicit string destination ES:(E)DI (ES is flat whatever the override, SDM Vol. 2 MOVS, STOS, SCAS, CMPS)"""
-    return tag(a)
+    ACC.add('es'); return tag(a)
 def dsa(c, a):
     """an implicit DS-default operand (string source (E)SI, XLAT [(E)BX + AL]): the effective segment is the LAST override prefix (c.dseg); FS and GS have a base, the flat segments none"""
-    return tag(a + V(c.dseg + '_base', 32) if c.dseg in ('fs', 'gs') else a)
+    ACC.add('ds'); return tag(a + V(c.dseg + '_base', 32) if c.dseg in ('fs', 'gs') else a)
 def mload(a, w):
     """the one load of the Form builders: the address must come from an address function (ea / addoff / ssa / esa / dsa); tests/test_forms_mem.py also checks that no builder calls dsl.load"""
     assert a.u in _OK, 'load through an address not made by an address function'
@@ -139,7 +141,7 @@ class AReg:
     SCAS, LOOP, JCXZ).  .val = the register as an unsigned 32-bit value (zero-extended CX/SI/DI under a16); .put(F, v, when) writes v to it: the low
     word only under a16 (the upper half of the 32-bit register is kept: SDM 'the 16-bit register is written, bits 31:16 are not modified')."""
     def __init__(s, c, name):
-        s.name, s.a16 = name, c.a16; s.cur = V(name, 32)
+        ACC.add('areg'); s.name, s.a16 = name, c.a16; s.cur = V(name, 32)
         s.val = zext(trunc(s.cur, 16), 32) if s.a16 else s.cur
     def put(s, F, v, when=None):
         F.reg(s.name, concat(extract(s.cur, 31, 16), trunc(v, 16)) if s.a16 else v, when)
@@ -156,7 +158,7 @@ def handler(*names):
 def build(ins, addr):
     """Form for a decoded instruction at addr; key = form_key(ins).  Raises KeyError for mnemonics outside the covered set."""
     from proof import forms_alu, forms_move, forms_flow, forms_sys, forms_simd, forms_ssefp      # noqa: F401  (register their handlers)
-    c = Ctx(); c.ins, c.addr = ins, addr; c.F = Form(form_key(ins), addr, ins.size)
+    ACC.clear(); c = Ctx(); c.ins, c.addr = ins, addr; c.F = Form(form_key(ins), addr, ins.size)
     words = ins.mnemonic.split(); c.rep = words[0] if len(words) > 1 else ''; c.m = words[-1]
     c.ops = [Op(ins, o) for o in ins.operands]
     raw = bytes(ins.bytes); i = 0; c.o16 = False; c.a16 = False
@@ -177,4 +179,5 @@ def build(ins, addr):
     if fn is None: raise KeyError(c.m)
     fn(c)
     if c.F.mmw or any(isvec(o) and o.name.startswith('mm') for o in c.ops): c.F.mmx(c.F.mmw)      # every MMX instruction but EMMS: SDM Vol 1 9.5.1 (the handler of emms calls F.mmx(emms=True) itself)
+    c.F.access = frozenset(ACC)        # the address kinds the builder used: what claims a prefix (sysspec_gap.unclaimed_prefix)
     return c.F.check_state()

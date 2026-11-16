@@ -59,7 +59,7 @@ def same(a, b):
 def check(key, rec=None):
     ins = G.decode(key); fam = family(ins)
     if fam is None: return 'not-covered', TEXT['none']
-    why = G.unclaimed_prefix(ins)
+    why = G.unclaimed_prefix(ins, key)
     if why: return 'uncertified', TEXT['unc'] % why
     rec = rec or x86sys.load()
     fields = symform.parse_key(key)[1]
