@@ -2923,3 +2923,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Ruling: a bare sibling import through /tool is a second module path. Tools run as `python -m fnvnx.<rel>.<tool>` and /tool is deleted (w28, doing, before item C). Owners rewrite their own trees from w28's global list.
 - w28-c5 25acf9aac: done. contract/reached.py writes reached.tsv (dll, name, iat|gpa, site) from the IAT and gpa_names.analyse, using Wine specs instead of bridge.tsv rows. test_reached is green and admit is 1064 of 1064.
   - Next: modules.py classifies bridged versus module dlls from declared_dlls.tsv and the may-load closure, with no bridge.tsv. Then reached becomes a hermetic stage pinned to fnv-nx-build externals. The python -m commit is pending.
+- Orchestrator order: cand4 is FROZEN at 4fa00a7cb, taking only fixes for its own reds; everything new goes to cand5.
+  - The farm runs the verdict now (ETA about 30 min). The merge follows at once if green. An item whose red cannot be fixed inside cand4's scope is dropped.
+- bottleneck: the cand4 verdict on 4fa00a7cb.
