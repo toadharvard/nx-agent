@@ -2304,3 +2304,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - test_objstub_rules passes alone but fails in the selftests sandbox (an undeclared read).
 - Both fixes are assigned to w15; the farm sends the sandbox output. One more verdict, then the merge.
 - bottleneck: those 2 selftests.
+- test_objstub_rules sandbox red: its `# reads:` lacks bridgefacts (comrows.py and d9rows.py). w15 declares it, and derives reads if that is possible this round.
