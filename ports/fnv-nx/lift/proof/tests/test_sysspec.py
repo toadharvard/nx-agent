@@ -87,9 +87,10 @@ class T(unittest.TestCase):
         finally: del REC['cpuid_faulting']
 
     def test_lar_is_decided_by_the_descriptor_rows(self):
-        REC['lar_lsl'] = {'status': 'undecided', 'why': 'type blocker'}
-        try: open(self.f.name, 'w').write(json.dumps(_complete(REC))); r, n = sysspec.check(key('0f0302')); self.assertEqual(r, 'uncertified'); self.assertIn('type blocker', n)
-        finally: del REC['lar_lsl']
+        from fnvlift import x86sys as fx      # the Form builder reads fnvlift.x86sys.REC, loaded once per process: this test hands it the fixture's record
+        REC['lar_lsl'] = {'status': 'undecided', 'why': 'type blocker'}; saved = fx.REC
+        try: open(self.f.name, 'w').write(json.dumps(_complete(REC))); fx.REC = _complete(REC); r, n = sysspec.check(key('0f0302')); self.assertEqual(r, 'uncertified'); self.assertIn('type blocker', n)
+        finally: del REC['lar_lsl']; fx.REC = saved
 
     def test_str_proved_against_the_cited_sdm_operation(self):
         self.assertEqual(sysspec.check(key('0f000f'))[0], 'proved')
