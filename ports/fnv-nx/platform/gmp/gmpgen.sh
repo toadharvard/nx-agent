@@ -1,8 +1,8 @@
 #!/bin/bash
 # gmpgen.sh - the generate stage of the gmp root (build.json run step `gmpgen`): GMP's configure and its generated headers and tables, as one hermetic stage, and
 # the compile list of GMP's own Makefiles turned into units (mkunits.py). It reads ONLY what the sandbox mounts (the constants below): no network, no host path.
-#   output $OUT/gen/u/**.c      one unit per compile of libgmp (mpn/*.c once per operation)
-#   output $OUT/gen/inc/{build,src}/**.h   the headers of the configured build directory and of the source tree
+#   output $OUT/u/**.c      one unit per compile of libgmp (mpn/*.c once per operation)
+#   output $OUT/inc/{build,src}/**.h   the headers of the configured build directory and of the source tree
 # Rules: generic C (--disable-assembly with the "none" host: GMP's configure.ac has no aarch64 ILP32 assembly), the guest compiler's semantic flags
 # (records.py cc), configure's link tests answered by rule CFG-LINK (toolchain/gcc/cfg_link.py: the linker's own archive closure over the runtime; no start files: the
 # product link has its own entry, so the test link line has none: -nostartfiles).
@@ -36,4 +36,4 @@ export CC="$GCC/bin/$T-gcc ${SEMANTICS[*]}" LDFLAGS=-nostartfiles
 cp "$RECREC" "$W/ccrec"; chmod +x "$W/ccrec"
 export CCREC_LOG=$W/compiles.log
 make -j"$JOBS" CC="$W/ccrec" AR=true RANLIB=true libgmp.la > ../make.log 2>&1
-"$PY" -I "$MKUNITS" "$W/b" "$SRC" "$CCREC_LOG" "$OUT_DIR/gen"
+"$PY" -I "$MKUNITS" "$W/b" "$SRC" "$CCREC_LOG" "$OUT_DIR"

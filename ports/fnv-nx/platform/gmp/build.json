@@ -21,8 +21,8 @@
   "asm": []
  },
  "include": [
-  "ports/fnv-nx/platform/gmp/gen/inc/build",
-  "ports/fnv-nx/platform/gmp/gen/inc/src"
+  "ports/fnv-nx/platform/gmp/inc/build",
+  "ports/fnv-nx/platform/gmp/inc/src"
  ],
  "units": "all",
  "external": [
