@@ -1,0 +1,752 @@
+{
+ "entries": 118,
+ "format": "fnvnx-x87ops/1",
+ "inputs": [
+  "in_ef1 Bool",
+  "in_ef2 Bool",
+  "in_fcs (_ BitVec 16)",
+  "in_fcw (_ BitVec 16)",
+  "in_fdp (_ BitVec 32)",
+  "in_fds (_ BitVec 16)",
+  "in_fip (_ BitVec 32)",
+  "in_fop (_ BitVec 11)",
+  "in_fr0 (_ BitVec 80)",
+  "in_fr1 (_ BitVec 80)",
+  "in_fr2 (_ BitVec 80)",
+  "in_fr3 (_ BitVec 80)",
+  "in_fr4 (_ BitVec 80)",
+  "in_fr5 (_ BitVec 80)",
+  "in_fr6 (_ BitVec 80)",
+  "in_fr7 (_ BitVec 80)",
+  "in_fsw (_ BitVec 16)",
+  "in_ftag (_ BitVec 16)",
+  "in_ftop (_ BitVec 3)",
+  "in_m (_ BitVec 16)",
+  "in_m (_ BitVec 224)",
+  "in_m (_ BitVec 32)",
+  "in_m (_ BitVec 64)",
+  "in_m (_ BitVec 80)",
+  "in_m (_ BitVec 864)",
+  "nd.f2xm1.out (_ BitVec 80)",
+  "nd.fbld.img (_ BitVec 80)",
+  "nd.fcmov.uf_false Bool",
+  "nd.nan.tie Bool",
+  "nd.prem.N (_ BitVec 16)",
+  "nd.trig.c2 Bool",
+  "nd.trig.push Bool"
+ ],
+ "ops": {
+  "ADD": {
+   "entries": 8,
+   "nodes": 29,
+   "sorts": [
+    "Real Real -> Real"
+   ]
+  },
+  "AND": {
+   "entries": 110,
+   "nodes": 11343,
+   "sorts": [
+    "Bool Bool -> Bool",
+    "Bool Bool Bool -> Bool",
+    "Bool Bool Bool Bool -> Bool",
+    "Bool Bool Bool Bool Bool -> Bool",
+    "Bool Bool Bool Bool Bool Bool -> Bool",
+    "Bool Bool Bool Bool Bool Bool Bool Bool Bool Bool Bool Bool Bool Bool Bool Bool Bool Bool -> Bool"
+   ]
+  },
+  "ANUM": {
+   "entries": 63,
+   "nodes": 795,
+   "sorts": [
+    " -> Int",
+    " -> Real"
+   ]
+  },
+  "BADD": {
+   "entries": 110,
+   "nodes": 3852,
+   "sorts": [
+    "(_ BitVec 15) (_ BitVec 15) -> (_ BitVec 15)",
+    "(_ BitVec 3) (_ BitVec 3) -> (_ BitVec 3)",
+    "(_ BitVec 64) (_ BitVec 64) -> (_ BitVec 64)"
+   ]
+  },
+  "BAND": {
+   "entries": 118,
+   "nodes": 4713,
+   "sorts": [
+    "(_ BitVec 16) (_ BitVec 16) -> (_ BitVec 16)",
+    "(_ BitVec 6) (_ BitVec 6) -> (_ BitVec 6)",
+    "(_ BitVec 80) (_ BitVec 80) -> (_ BitVec 80)"
+   ]
+  },
+  "BLSHR": {
+   "entries": 109,
+   "nodes": 560,
+   "sorts": [
+    "(_ BitVec 16) (_ BitVec 16) -> (_ BitVec 16)"
+   ]
+  },
+  "BMUL": {
+   "entries": 110,
+   "nodes": 1061,
+   "sorts": [
+    "(_ BitVec 16) (_ BitVec 16) -> (_ BitVec 16)",
+    "(_ BitVec 64) (_ BitVec 64) -> (_ BitVec 64)"
+   ]
+  },
+  "BNEG": {
+   "entries": 10,
+   "nodes": 10,
+   "sorts": [
+    "(_ BitVec 16) -> (_ BitVec 16)",
+    "(_ BitVec 32) -> (_ BitVec 32)",
+    "(_ BitVec 64) -> (_ BitVec 64)"
+   ]
+  },
+  "BNOT": {
+   "entries": 113,
+   "nodes": 2861,
+   "sorts": [
+    "(_ BitVec 16) -> (_ BitVec 16)",
+    "(_ BitVec 6) -> (_ BitVec 6)"
+   ]
+  },
+  "BNUM": {
+   "entries": 118,
+   "nodes": 18872,
+   "sorts": [
+    " -> (_ BitVec 1)",
+    " -> (_ BitVec 11)",
+    " -> (_ BitVec 15)",
+    " -> (_ BitVec 16)",
+    " -> (_ BitVec 2)",
+    " -> (_ BitVec 224)",
+    " -> (_ BitVec 23)",
+    " -> (_ BitVec 29)",
+    " -> (_ BitVec 3)",
+    " -> (_ BitVec 32)",
+    " -> (_ BitVec 4)",
+    " -> (_ BitVec 52)",
+    " -> (_ BitVec 6)",
+    " -> (_ BitVec 63)",
+    " -> (_ BitVec 64)",
+    " -> (_ BitVec 7)",
+    " -> (_ BitVec 79)",
+    " -> (_ BitVec 8)",
+    " -> (_ BitVec 80)",
+    " -> (_ BitVec 864)"
+   ]
+  },
+  "BOR": {
+   "entries": 118,
+   "nodes": 7229,
+   "sorts": [
+    "(_ BitVec 16) (_ BitVec 16) -> (_ BitVec 16)",
+    "(_ BitVec 224) (_ BitVec 224) -> (_ BitVec 224)",
+    "(_ BitVec 6) (_ BitVec 6) -> (_ BitVec 6)",
+    "(_ BitVec 64) (_ BitVec 64) -> (_ BitVec 64)",
+    "(_ BitVec 80) (_ BitVec 80) -> (_ BitVec 80)",
+    "(_ BitVec 864) (_ BitVec 864) -> (_ BitVec 864)"
+   ]
+  },
+  "BSHL": {
+   "entries": 118,
+   "nodes": 4032,
+   "sorts": [
+    "(_ BitVec 16) (_ BitVec 16) -> (_ BitVec 16)",
+    "(_ BitVec 224) (_ BitVec 224) -> (_ BitVec 224)",
+    "(_ BitVec 64) (_ BitVec 64) -> (_ BitVec 64)",
+    "(_ BitVec 864) (_ BitVec 864) -> (_ BitVec 864)"
+   ]
+  },
+  "BSUB": {
+   "entries": 76,
+   "nodes": 1171,
+   "sorts": [
+    "(_ BitVec 15) (_ BitVec 15) -> (_ BitVec 15)",
+    "(_ BitVec 16) (_ BitVec 16) -> (_ BitVec 16)",
+    "(_ BitVec 3) (_ BitVec 3) -> (_ BitVec 3)",
+    "(_ BitVec 64) (_ BitVec 64) -> (_ BitVec 64)"
+   ]
+  },
+  "BUDIV": {
+   "entries": 1,
+   "nodes": 17,
+   "sorts": [
+    "(_ BitVec 64) (_ BitVec 64) -> (_ BitVec 64)"
+   ]
+  },
+  "BUREM": {
+   "entries": 1,
+   "nodes": 18,
+   "sorts": [
+    "(_ BitVec 64) (_ BitVec 64) -> (_ BitVec 64)"
+   ]
+  },
+  "BXOR": {
+   "entries": 2,
+   "nodes": 3,
+   "sorts": [
+    "(_ BitVec 64) (_ BitVec 64) -> (_ BitVec 64)",
+    "(_ BitVec 80) (_ BitVec 80) -> (_ BitVec 80)"
+   ]
+  },
+  "CONCAT": {
+   "entries": 108,
+   "nodes": 6552,
+   "sorts": [
+    "(_ BitVec 1) (_ BitVec 11) -> (_ BitVec 12)",
+    "(_ BitVec 1) (_ BitVec 15) -> (_ BitVec 16)",
+    "(_ BitVec 1) (_ BitVec 63) -> (_ BitVec 64)",
+    "(_ BitVec 1) (_ BitVec 7) -> (_ BitVec 8)",
+    "(_ BitVec 1) (_ BitVec 79) -> (_ BitVec 80)",
+    "(_ BitVec 1) (_ BitVec 8) -> (_ BitVec 9)",
+    "(_ BitVec 10) (_ BitVec 2) -> (_ BitVec 12)",
+    "(_ BitVec 12) (_ BitVec 2) -> (_ BitVec 14)",
+    "(_ BitVec 12) (_ BitVec 23) -> (_ BitVec 35)",
+    "(_ BitVec 12) (_ BitVec 4) -> (_ BitVec 16)",
+    "(_ BitVec 12) (_ BitVec 52) -> (_ BitVec 64)",
+    "(_ BitVec 14) (_ BitVec 2) -> (_ BitVec 16)",
+    "(_ BitVec 16) (_ BitVec 1) -> (_ BitVec 17)",
+    "(_ BitVec 16) (_ BitVec 4) -> (_ BitVec 20)",
+    "(_ BitVec 16) (_ BitVec 64) -> (_ BitVec 80)",
+    "(_ BitVec 17) (_ BitVec 63) -> (_ BitVec 80)",
+    "(_ BitVec 2) (_ BitVec 2) -> (_ BitVec 4)",
+    "(_ BitVec 2) (_ BitVec 3) -> (_ BitVec 5)",
+    "(_ BitVec 20) (_ BitVec 4) -> (_ BitVec 24)",
+    "(_ BitVec 24) (_ BitVec 4) -> (_ BitVec 28)",
+    "(_ BitVec 28) (_ BitVec 4) -> (_ BitVec 32)",
+    "(_ BitVec 32) (_ BitVec 4) -> (_ BitVec 36)",
+    "(_ BitVec 35) (_ BitVec 29) -> (_ BitVec 64)",
+    "(_ BitVec 36) (_ BitVec 4) -> (_ BitVec 40)",
+    "(_ BitVec 4) (_ BitVec 2) -> (_ BitVec 6)",
+    "(_ BitVec 4) (_ BitVec 4) -> (_ BitVec 8)",
+    "(_ BitVec 40) (_ BitVec 4) -> (_ BitVec 44)",
+    "(_ BitVec 44) (_ BitVec 4) -> (_ BitVec 48)",
+    "(_ BitVec 48) (_ BitVec 4) -> (_ BitVec 52)",
+    "(_ BitVec 5) (_ BitVec 11) -> (_ BitVec 16)",
+    "(_ BitVec 52) (_ BitVec 11) -> (_ BitVec 63)",
+    "(_ BitVec 52) (_ BitVec 4) -> (_ BitVec 56)",
+    "(_ BitVec 56) (_ BitVec 4) -> (_ BitVec 60)",
+    "(_ BitVec 6) (_ BitVec 2) -> (_ BitVec 8)",
+    "(_ BitVec 60) (_ BitVec 4) -> (_ BitVec 64)",
+    "(_ BitVec 64) (_ BitVec 4) -> (_ BitVec 68)",
+    "(_ BitVec 68) (_ BitVec 4) -> (_ BitVec 72)",
+    "(_ BitVec 8) (_ BitVec 2) -> (_ BitVec 10)",
+    "(_ BitVec 8) (_ BitVec 4) -> (_ BitVec 12)",
+    "(_ BitVec 8) (_ BitVec 72) -> (_ BitVec 80)",
+    "(_ BitVec 9) (_ BitVec 23) -> (_ BitVec 32)"
+   ]
+  },
+  "CONST_ARRAY": {
+   "entries": 118,
+   "nodes": 356,
+   "sorts": [
+    "(_ BitVec 80) -> (Array (_ BitVec 3) (_ BitVec 80))"
+   ]
+  },
+  "DISTINCT": {
+   "entries": 112,
+   "nodes": 4664,
+   "sorts": [
+    "(_ BitVec 1) (_ BitVec 1) -> Bool",
+    "(_ BitVec 15) (_ BitVec 15) -> Bool",
+    "(_ BitVec 2) (_ BitVec 2) -> Bool",
+    "(_ BitVec 23) (_ BitVec 23) -> Bool",
+    "(_ BitVec 52) (_ BitVec 52) -> Bool",
+    "(_ BitVec 6) (_ BitVec 6) -> Bool",
+    "(_ BitVec 63) (_ BitVec 63) -> Bool",
+    "(_ BitVec 64) (_ BitVec 64) -> Bool",
+    "Real Real -> Bool"
+   ]
+  },
+  "DIV": {
+   "entries": 56,
+   "nodes": 427,
+   "sorts": [
+    "Real Real -> Real"
+   ]
+  },
+  "EQ": {
+   "entries": 114,
+   "nodes": 16095,
+   "sorts": [
+    "(_ BitVec 1) (_ BitVec 1) -> Bool",
+    "(_ BitVec 11) (_ BitVec 11) -> Bool",
+    "(_ BitVec 15) (_ BitVec 15) -> Bool",
+    "(_ BitVec 16) (_ BitVec 16) -> Bool",
+    "(_ BitVec 2) (_ BitVec 2) -> Bool",
+    "(_ BitVec 32) (_ BitVec 32) -> Bool",
+    "(_ BitVec 4) (_ BitVec 4) -> Bool",
+    "(_ BitVec 52) (_ BitVec 52) -> Bool",
+    "(_ BitVec 63) (_ BitVec 63) -> Bool",
+    "(_ BitVec 64) (_ BitVec 64) -> Bool",
+    "(_ BitVec 8) (_ BitVec 8) -> Bool",
+    "Bool Bool -> Bool",
+    "Int Int -> Bool",
+    "Real Real -> Bool"
+   ]
+  },
+  "EXTRACT": {
+   "entries": 118,
+   "nodes": 18046,
+   "sorts": [
+    "(_ BitVec 16) -> (_ BitVec 1)",
+    "(_ BitVec 16) -> (_ BitVec 11)",
+    "(_ BitVec 16) -> (_ BitVec 15)",
+    "(_ BitVec 16) -> (_ BitVec 2)",
+    "(_ BitVec 16) -> (_ BitVec 3)",
+    "(_ BitVec 16) -> (_ BitVec 6)",
+    "(_ BitVec 224) -> (_ BitVec 11)",
+    "(_ BitVec 224) -> (_ BitVec 16)",
+    "(_ BitVec 224) -> (_ BitVec 32)",
+    "(_ BitVec 3) -> (_ BitVec 1)",
+    "(_ BitVec 32) -> (_ BitVec 1)",
+    "(_ BitVec 32) -> (_ BitVec 16)",
+    "(_ BitVec 32) -> (_ BitVec 23)",
+    "(_ BitVec 32) -> (_ BitVec 8)",
+    "(_ BitVec 6) -> (_ BitVec 1)",
+    "(_ BitVec 64) -> (_ BitVec 1)",
+    "(_ BitVec 64) -> (_ BitVec 11)",
+    "(_ BitVec 64) -> (_ BitVec 15)",
+    "(_ BitVec 64) -> (_ BitVec 16)",
+    "(_ BitVec 64) -> (_ BitVec 2)",
+    "(_ BitVec 64) -> (_ BitVec 32)",
+    "(_ BitVec 64) -> (_ BitVec 4)",
+    "(_ BitVec 64) -> (_ BitVec 52)",
+    "(_ BitVec 64) -> (_ BitVec 64)",
+    "(_ BitVec 64) -> (_ BitVec 8)",
+    "(_ BitVec 79) -> (_ BitVec 1)",
+    "(_ BitVec 79) -> (_ BitVec 15)",
+    "(_ BitVec 79) -> (_ BitVec 63)",
+    "(_ BitVec 80) -> (_ BitVec 1)",
+    "(_ BitVec 80) -> (_ BitVec 15)",
+    "(_ BitVec 80) -> (_ BitVec 23)",
+    "(_ BitVec 80) -> (_ BitVec 4)",
+    "(_ BitVec 80) -> (_ BitVec 52)",
+    "(_ BitVec 80) -> (_ BitVec 63)",
+    "(_ BitVec 80) -> (_ BitVec 64)",
+    "(_ BitVec 864) -> (_ BitVec 16)",
+    "(_ BitVec 864) -> (_ BitVec 224)",
+    "(_ BitVec 864) -> (_ BitVec 80)"
+   ]
+  },
+  "FALSE": {
+   "entries": 118,
+   "nodes": 356,
+   "sorts": [
+    " -> Bool"
+   ]
+  },
+  "FPA_ABS": {
+   "entries": 1,
+   "nodes": 1,
+   "sorts": [
+    "(_ FloatingPoint 15 64) -> (_ FloatingPoint 15 64)"
+   ]
+  },
+  "FPA_ADD": {
+   "entries": 7,
+   "nodes": 28,
+   "sorts": [
+    "RoundingMode (_ FloatingPoint 11 53) (_ FloatingPoint 11 53) -> (_ FloatingPoint 11 53)"
+   ]
+  },
+  "FPA_DIV": {
+   "entries": 14,
+   "nodes": 56,
+   "sorts": [
+    "RoundingMode (_ FloatingPoint 11 53) (_ FloatingPoint 11 53) -> (_ FloatingPoint 11 53)"
+   ]
+  },
+  "FPA_EQ": {
+   "entries": 19,
+   "nodes": 75,
+   "sorts": [
+    "(_ FloatingPoint 15 64) (_ FloatingPoint 15 64) -> Bool"
+   ]
+  },
+  "FPA_FP": {
+   "entries": 83,
+   "nodes": 463,
+   "sorts": [
+    "(_ BitVec 1) (_ BitVec 15) (_ BitVec 63) -> (_ FloatingPoint 15 64)"
+   ]
+  },
+  "FPA_IS_INF": {
+   "entries": 54,
+   "nodes": 181,
+   "sorts": [
+    "(_ FloatingPoint 11 53) -> Bool",
+    "(_ FloatingPoint 8 24) -> Bool"
+   ]
+  },
+  "FPA_IS_NAN": {
+   "entries": 1,
+   "nodes": 1,
+   "sorts": [
+    "(_ FloatingPoint 11 53) -> Bool"
+   ]
+  },
+  "FPA_IS_ZERO": {
+   "entries": 3,
+   "nodes": 3,
+   "sorts": [
+    "(_ FloatingPoint 11 53) -> Bool"
+   ]
+  },
+  "FPA_LT": {
+   "entries": 19,
+   "nodes": 75,
+   "sorts": [
+    "(_ FloatingPoint 15 64) (_ FloatingPoint 15 64) -> Bool"
+   ]
+  },
+  "FPA_MINUS_INF": {
+   "entries": 1,
+   "nodes": 1,
+   "sorts": [
+    " -> (_ FloatingPoint 11 53)"
+   ]
+  },
+  "FPA_MUL": {
+   "entries": 8,
+   "nodes": 29,
+   "sorts": [
+    "RoundingMode (_ FloatingPoint 11 53) (_ FloatingPoint 11 53) -> (_ FloatingPoint 11 53)"
+   ]
+  },
+  "FPA_PLUS_INF": {
+   "entries": 1,
+   "nodes": 1,
+   "sorts": [
+    " -> (_ FloatingPoint 11 53)"
+   ]
+  },
+  "FPA_PLUS_ZERO": {
+   "entries": 1,
+   "nodes": 1,
+   "sorts": [
+    " -> (_ FloatingPoint 11 53)"
+   ]
+  },
+  "FPA_RM_NEAREST_TIES_TO_EVEN": {
+   "entries": 67,
+   "nodes": 193,
+   "sorts": [
+    " -> RoundingMode"
+   ]
+  },
+  "FPA_RM_TOWARD_NEGATIVE": {
+   "entries": 64,
+   "nodes": 190,
+   "sorts": [
+    " -> RoundingMode"
+   ]
+  },
+  "FPA_RM_TOWARD_POSITIVE": {
+   "entries": 64,
+   "nodes": 190,
+   "sorts": [
+    " -> RoundingMode"
+   ]
+  },
+  "FPA_RM_TOWARD_ZERO": {
+   "entries": 64,
+   "nodes": 190,
+   "sorts": [
+    " -> RoundingMode"
+   ]
+  },
+  "FPA_ROUND_TO_INTEGRAL": {
+   "entries": 7,
+   "nodes": 7,
+   "sorts": [
+    "RoundingMode (_ FloatingPoint 15 64) -> (_ FloatingPoint 15 64)"
+   ]
+  },
+  "FPA_SQRT": {
+   "entries": 1,
+   "nodes": 1,
+   "sorts": [
+    "RoundingMode (_ FloatingPoint 11 53) -> (_ FloatingPoint 11 53)"
+   ]
+  },
+  "FPA_SUB": {
+   "entries": 14,
+   "nodes": 56,
+   "sorts": [
+    "RoundingMode (_ FloatingPoint 11 53) (_ FloatingPoint 11 53) -> (_ FloatingPoint 11 53)"
+   ]
+  },
+  "FPA_TO_FP": {
+   "entries": 60,
+   "nodes": 1377,
+   "sorts": [
+    "(_ BitVec 32) -> (_ FloatingPoint 8 24)",
+    "(_ BitVec 64) -> (_ FloatingPoint 11 53)",
+    "RoundingMode (_ BitVec 16) -> (_ FloatingPoint 11 53)",
+    "RoundingMode (_ BitVec 32) -> (_ FloatingPoint 11 53)",
+    "RoundingMode (_ FloatingPoint 11 53) -> (_ FloatingPoint 8 24)",
+    "RoundingMode (_ FloatingPoint 15 64) -> (_ FloatingPoint 11 53)",
+    "RoundingMode (_ FloatingPoint 15 64) -> (_ FloatingPoint 30 24)",
+    "RoundingMode (_ FloatingPoint 15 64) -> (_ FloatingPoint 30 53)",
+    "RoundingMode (_ FloatingPoint 15 64) -> (_ FloatingPoint 8 24)",
+    "RoundingMode (_ FloatingPoint 8 24) -> (_ FloatingPoint 11 53)",
+    "RoundingMode Real -> (_ FloatingPoint 11 53)",
+    "RoundingMode Real -> (_ FloatingPoint 30 24)",
+    "RoundingMode Real -> (_ FloatingPoint 30 53)",
+    "RoundingMode Real -> (_ FloatingPoint 8 24)"
+   ]
+  },
+  "FPA_TO_IEEE_BV": {
+   "entries": 61,
+   "nodes": 517,
+   "sorts": [
+    "(_ FloatingPoint 11 53) -> (_ BitVec 64)",
+    "(_ FloatingPoint 15 64) -> (_ BitVec 79)",
+    "(_ FloatingPoint 8 24) -> (_ BitVec 32)"
+   ]
+  },
+  "FPA_TO_REAL": {
+   "entries": 64,
+   "nodes": 881,
+   "sorts": [
+    "(_ FloatingPoint 11 53) -> Real",
+    "(_ FloatingPoint 15 64) -> Real",
+    "(_ FloatingPoint 30 24) -> Real",
+    "(_ FloatingPoint 30 53) -> Real",
+    "(_ FloatingPoint 8 24) -> Real"
+   ]
+  },
+  "FPA_TO_SBV": {
+   "entries": 7,
+   "nodes": 7,
+   "sorts": [
+    "RoundingMode (_ FloatingPoint 11 53) -> (_ BitVec 32)",
+    "RoundingMode (_ FloatingPoint 15 64) -> (_ BitVec 16)",
+    "RoundingMode (_ FloatingPoint 15 64) -> (_ BitVec 32)",
+    "RoundingMode (_ FloatingPoint 15 64) -> (_ BitVec 64)"
+   ]
+  },
+  "GE": {
+   "entries": 9,
+   "nodes": 10,
+   "sorts": [
+    "Real Real -> Bool"
+   ]
+  },
+  "GT": {
+   "entries": 62,
+   "nodes": 188,
+   "sorts": [
+    "Real Real -> Bool"
+   ]
+  },
+  "IDIV": {
+   "entries": 2,
+   "nodes": 4,
+   "sorts": [
+    "Int Int -> Int"
+   ]
+  },
+  "IS_INT": {
+   "entries": 1,
+   "nodes": 1,
+   "sorts": [
+    "Real -> Bool"
+   ]
+  },
+  "ITE": {
+   "entries": 112,
+   "nodes": 25644,
+   "sorts": [
+    "Bool (Array (_ BitVec 3) (_ BitVec 80)) (Array (_ BitVec 3) (_ BitVec 80)) -> (Array (_ BitVec 3) (_ BitVec 80))",
+    "Bool (_ BitVec 1) (_ BitVec 1) -> (_ BitVec 1)",
+    "Bool (_ BitVec 11) (_ BitVec 11) -> (_ BitVec 11)",
+    "Bool (_ BitVec 15) (_ BitVec 15) -> (_ BitVec 15)",
+    "Bool (_ BitVec 16) (_ BitVec 16) -> (_ BitVec 16)",
+    "Bool (_ BitVec 2) (_ BitVec 2) -> (_ BitVec 2)",
+    "Bool (_ BitVec 3) (_ BitVec 3) -> (_ BitVec 3)",
+    "Bool (_ BitVec 32) (_ BitVec 32) -> (_ BitVec 32)",
+    "Bool (_ BitVec 52) (_ BitVec 52) -> (_ BitVec 52)",
+    "Bool (_ BitVec 6) (_ BitVec 6) -> (_ BitVec 6)",
+    "Bool (_ BitVec 64) (_ BitVec 64) -> (_ BitVec 64)",
+    "Bool (_ BitVec 8) (_ BitVec 8) -> (_ BitVec 8)",
+    "Bool (_ BitVec 80) (_ BitVec 80) -> (_ BitVec 80)",
+    "Bool (_ FloatingPoint 11 53) (_ FloatingPoint 11 53) -> (_ FloatingPoint 11 53)",
+    "Bool Bool Bool -> Bool",
+    "Bool Real Real -> Real",
+    "Bool RoundingMode RoundingMode -> RoundingMode"
+   ]
+  },
+  "LE": {
+   "entries": 11,
+   "nodes": 11,
+   "sorts": [
+    "Real Real -> Bool"
+   ]
+  },
+  "LT": {
+   "entries": 63,
+   "nodes": 741,
+   "sorts": [
+    "Real Real -> Bool"
+   ]
+  },
+  "MOD": {
+   "entries": 2,
+   "nodes": 6,
+   "sorts": [
+    "Int Int -> Int"
+   ]
+  },
+  "MUL": {
+   "entries": 13,
+   "nodes": 78,
+   "sorts": [
+    "Real Real -> Real"
+   ]
+  },
+  "NOT": {
+   "entries": 100,
+   "nodes": 3017,
+   "sorts": [
+    "Bool -> Bool"
+   ]
+  },
+  "OR": {
+   "entries": 109,
+   "nodes": 3354,
+   "sorts": [
+    "Bool Bool -> Bool",
+    "Bool Bool Bool -> Bool",
+    "Bool Bool Bool Bool -> Bool"
+   ]
+  },
+  "SELECT": {
+   "entries": 118,
+   "nodes": 3377,
+   "sorts": [
+    "(Array (_ BitVec 3) (_ BitVec 80)) (_ BitVec 3) -> (_ BitVec 80)"
+   ]
+  },
+  "SGT": {
+   "entries": 1,
+   "nodes": 1,
+   "sorts": [
+    "(_ BitVec 32) (_ BitVec 32) -> Bool"
+   ]
+  },
+  "SLEQ": {
+   "entries": 2,
+   "nodes": 2,
+   "sorts": [
+    "(_ BitVec 16) (_ BitVec 16) -> Bool"
+   ]
+  },
+  "SLT": {
+   "entries": 3,
+   "nodes": 6,
+   "sorts": [
+    "(_ BitVec 16) (_ BitVec 16) -> Bool",
+    "(_ BitVec 32) (_ BitVec 32) -> Bool"
+   ]
+  },
+  "STORE": {
+   "entries": 118,
+   "nodes": 3362,
+   "sorts": [
+    "(Array (_ BitVec 3) (_ BitVec 80)) (_ BitVec 3) (_ BitVec 80) -> (Array (_ BitVec 3) (_ BitVec 80))"
+   ]
+  },
+  "SUB": {
+   "entries": 16,
+   "nodes": 61,
+   "sorts": [
+    "Real Real -> Real"
+   ]
+  },
+  "TO_INT": {
+   "entries": 2,
+   "nodes": 9,
+   "sorts": [
+    "Real -> Int"
+   ]
+  },
+  "TO_REAL": {
+   "entries": 2,
+   "nodes": 7,
+   "sorts": [
+    "Int -> Real"
+   ]
+  },
+  "TRUE": {
+   "entries": 118,
+   "nodes": 356,
+   "sorts": [
+    " -> Bool"
+   ]
+  },
+  "UGEQ": {
+   "entries": 2,
+   "nodes": 2,
+   "sorts": [
+    "(_ BitVec 16) (_ BitVec 16) -> Bool"
+   ]
+  },
+  "UGT": {
+   "entries": 47,
+   "nodes": 173,
+   "sorts": [
+    "(_ BitVec 52) (_ BitVec 52) -> Bool"
+   ]
+  },
+  "ULEQ": {
+   "entries": 3,
+   "nodes": 20,
+   "sorts": [
+    "(_ BitVec 16) (_ BitVec 16) -> Bool",
+    "(_ BitVec 4) (_ BitVec 4) -> Bool"
+   ]
+  },
+  "UMINUS": {
+   "entries": 63,
+   "nodes": 565,
+   "sorts": [
+    "Real -> Real"
+   ]
+  },
+  "UNINTERPRETED": {
+   "entries": 7,
+   "nodes": 8,
+   "sorts": [
+    "Real -> Real",
+    "Real Real -> Real"
+   ]
+  },
+  "ZERO_EXT": {
+   "entries": 118,
+   "nodes": 3158,
+   "sorts": [
+    "(_ BitVec 11) -> (_ BitVec 15)",
+    "(_ BitVec 11) -> (_ BitVec 16)",
+    "(_ BitVec 11) -> (_ BitVec 224)",
+    "(_ BitVec 16) -> (_ BitVec 224)",
+    "(_ BitVec 16) -> (_ BitVec 64)",
+    "(_ BitVec 2) -> (_ BitVec 16)",
+    "(_ BitVec 224) -> (_ BitVec 864)",
+    "(_ BitVec 3) -> (_ BitVec 16)",
+    "(_ BitVec 32) -> (_ BitVec 224)",
+    "(_ BitVec 32) -> (_ BitVec 64)",
+    "(_ BitVec 4) -> (_ BitVec 64)",
+    "(_ BitVec 52) -> (_ BitVec 64)",
+    "(_ BitVec 6) -> (_ BitVec 16)",
+    "(_ BitVec 64) -> (_ BitVec 64)",
+    "(_ BitVec 80) -> (_ BitVec 864)"
+   ]
+  }
+ }
+}
