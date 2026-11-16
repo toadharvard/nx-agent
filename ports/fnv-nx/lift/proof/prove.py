@@ -51,16 +51,16 @@ PRE = pre_state()
 def subst(t): return z3.substitute(t, *SUBS)
 # x87/MMX/SSE state of the Form's post (dsl.Form.post): the pre-state variables are the DSL's own (fr<i> 80, xmm<i> 128, ftop 3, ftag 16, fsw 16, mxcsr 32, fip fdp 32, fop 11, fcs fds 16)
 XPRE = {**{'fr%d' % i: z3.BitVec('fr%d' % i, 80) for i in range(8)}, **{'xmm%d' % i: z3.BitVec('xmm%d' % i, 128) for i in range(8)},
-        'ftop': z3.BitVec('ftop', 3), 'ftag': z3.BitVec('ftag', 16), 'fsw': z3.BitVec('fsw', 16), 'mxcsr': z3.BitVec('mxcsr', 32),
+        'ftop': z3.BitVec('ftop', 3), 'ftag': z3.BitVec('ftag', 16), 'fsw': z3.BitVec('fsw', 16), 'fcw': z3.BitVec('fcw', 16), 'mxcsr': z3.BitVec('mxcsr', 32),
         'fip': z3.BitVec('fip', 32), 'fdp': z3.BitVec('fdp', 32), 'fop': z3.BitVec('fop', 11), 'fcs': z3.BitVec('fcs', 16), 'fds': z3.BitVec('fds', 16)}
-XKEYS = ('fr', 'xmm', 'ftop', 'ftag', 'fsw', 'mxcsr', 'fptr')
+XKEYS = ('fr', 'xmm', 'ftop', 'ftag', 'fsw', 'fcw', 'mxcsr', 'fptr')
 
 def x_post(D):
     """{name: post term} of the x87/MMX/SSE state of a Form's post (empty for a Form of an older DSL)"""
     xs = {}
     for k in ('fr', 'xmm'):
         for i, v in enumerate(D.get(k, ())): xs['%s%d' % (k, i)] = v
-    for k in ('ftop', 'ftag', 'fsw', 'mxcsr'):
+    for k in ('ftop', 'ftag', 'fsw', 'fcw', 'mxcsr'):
         if k in D: xs[k] = D[k]
     if 'fptr' in D: xs.update(zip(('fip', 'fdp', 'fop', 'fcs', 'fds'), D['fptr']))
     return xs
@@ -194,6 +194,7 @@ def declared_findings(F):
 def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     """-> (result, note, certificate extras).  Shape proofs (shapeprove.py) pass pre = a pre-state with a symbolic eip, model = a thunk returning the model
     post-state of the shape, fields = {name: (offset, size)} of the symbolic encoding bytes (z3 variables fld_<name>, free = universally quantified)"""
+    if getattr(F, 'x87', None): from proof import x87form; return x87form.prove_form(F)      # an x87 Form is proved against its spec entry (x87spec), the Sail model has no x87
     pre = PRE if pre is None else pre
     model_sail.SYMSEL = any(n.op == 'var' and n.x.startswith('sel_') for n in _nodes(F.roots()))
     base = getattr(mod, 'FAULT_OK_ORIG', None) or set(mod.FAULT_OK); mod.FAULT_OK_ORIG = base; mod.FAULT_OK = Perm(base, {k for k, _ in F.faults}) if F.faults else base

@@ -389,6 +389,7 @@ def xc_lines(kind, i, x, ref):
         return ['c->%s = %s;' % (f, ref(n) if f != 'fop' else '(%s) & 0x7ffu' % ref(n)) for f, n in zip(('fip', 'fdp', 'fop', 'fcs', 'fds'), x)]
     if kind == 'xmm': return ['fx_dsl_xmm_set(%d, %s);' % (i, ref(x))]
     if kind == 'mxcsr': return ['fx_dsl_mxcsr_set(%s);' % ref(x)]
+    if kind == 'fcw': return ['FLDCW(%s);' % ref(x)]      # c->fcw = the word and the host rounding mode follows (rt/fnvl_x87.h FLDCW, the one place that derives the host state from the control word)
     if kind == 'sel': return ['fnvl_seg_set(c, %d, %s);' % (i, ref(x))] + (['fsb = c->fs;'] if i == SEGS.index('fs') else [])
     raise ValueError(kind)
 
@@ -408,7 +409,8 @@ class Form:
         s.eip = C(addr + size, 32); s.pend = {}; s.flo = None
         s.mmw = []        # MMX register writes of a builder, (N, 64-bit value): proof/forms.build hands them to mmx() once the handler is done
         s.fxm = False     # fault_xm(): on the SIMD floating-point exception fault the Form's MXCSR effect (the exception flags) still happens, every other effect does not (SDM Vol 1 11.5.2, Vol 3 6.15)
-        s.xs = []         # x87 / MMX / SSE state effects, in order: (kind, index or None, node, ...); the later effect on one target wins (kinds: fr ftop ftag fsw fptr xmm mxcsr)
+        s.domain = []     # 1-bit nodes over the fields that hold on the values at which the shape has a Form (a field value outside it has no Form: the concrete builder asserts there); empty for a concrete Form
+        s.xs = []         # x87 / MMX / SSE state effects, in order: (kind, index or None, node, ...); the later effect on one target wins (kinds: fr ftop ftag fsw fcw fptr xmm mxcsr)
     def cur(s, name): return s.pend.get(name, V(name, 32))      # pending value, only for composing partial-register writes
     def reg(s, name, v, when=None): assert v.w == 32 and name in REGS, ('a register write names a GPR', name); s.regs.append((name, v, when)); s.pend[name] = v
     def flag(s, name, v, when=None): assert v.w == 1 and name in FLAGS + ('df',); s.flags.append((name, v, when))
@@ -432,6 +434,7 @@ class Form:
     def store(s, addr, v, when=None):
         if when is not None: assert when.w == 1; s.swhen[len(s.stores)] = when
         s.stores.append((addr, v))
+    def require(s, cond): assert cond.w == 1; s.domain.append(cond)
     def fault(s, code, cond): assert cond.w == 1; s.faults.append((code, cond))
     def fault_xm(s, cond):
         """the SIMD floating-point exception (#XM, fault kind XM; Wine 9.0 fpe_handler STATUS_FLOAT_MULTIPLE_TRAPS) when `cond` (an exception flag set whose MXCSR mask bit is clear).
@@ -447,6 +450,7 @@ class Form:
         assert (fip.w, fdp.w, fop.w, fcs.w, fds.w) == (32, 32, 11, 16, 16); s.xs.append(('fptr', None, (fip, fdp, fop, fcs, fds)))
     def xmm(s, i, e): assert 0 <= i < 8 and e.w == 128; s.xs.append(('xmm', i, e))
     def mxcsr(s, e): assert e.w == 32; s.xs.append(('mxcsr', None, e))
+    def fcw(s, e): assert e.w == 16; s.xs.append(('fcw', None, e))
     def sel(s, reg, e):
         """the segment register REG (a name of SEGS) takes the 16-bit selector e (kind sel; for FS the base input fs_base takes the model of fnvl_seg_set too: flat selector of the record -> the TEB, any other -> 0)"""
         assert reg in SEGS and e.w == 16; s.xs.append(('sel', SEGS.index(reg), e))
@@ -493,6 +497,7 @@ class Form:
         for f in sorted(s.undef): out.append('undef ' + f + (' when n%d' % go(s.uwhen[f]) if f in s.uwhen else ''))
         for i, (a, v) in enumerate(s.stores): out.append('store n%d n%d' % (go(a), go(v)) + (' when n%d' % go(s.swhen[i]) if i in s.swhen else ''))
         for k, c in s.faults: out.append('fault %d n%d' % (k, go(c)))
+        for c in s.domain: out.append('domain n%d' % go(c))
         if s.fxm: out.append('fault_xm')
         if s.flo is not None: out.append('flo n%d' % go(s.flo))
         for k, i, e in s.xs: out.append('x %s %s %s' % (k, '-' if i is None else i, ' '.join('n%d' % go(x) for x in (e if k == 'fptr' else (e,)))))
@@ -522,7 +527,7 @@ class Form:
             for i in range(v.w // 8): m2 = z3.Store(m2, to_smt(a) + i, z3.Extract(8 * i + 7, 8 * i, sv))
             mem = z3.If(to_smt(s.swhen[k]) == 1, m2, mem) if k in s.swhen else m2
         fr_ = [z3.BitVec('fr%d' % i, 80) for i in range(8)]; xm_ = [z3.BitVec('xmm%d' % i, 128) for i in range(8)]
-        x = {'ftop': z3.BitVec('ftop', 3), 'ftag': z3.BitVec('ftag', 16), 'fsw': z3.BitVec('fsw', 16), 'mxcsr': z3.BitVec('mxcsr', 32),
+        x = {'ftop': z3.BitVec('ftop', 3), 'ftag': z3.BitVec('ftag', 16), 'fsw': z3.BitVec('fsw', 16), 'fcw': z3.BitVec('fcw', 16), 'mxcsr': z3.BitVec('mxcsr', 32),
              'fptr': tuple(z3.BitVec(n, w) for n, w in (('fip', 32), ('fdp', 32), ('fop', 11), ('fcs', 16), ('fds', 16)))}
         x.update({'sel_' + g_: z3.BitVec('sel_' + g_, 16) for g_ in SEGS}); x['fs_base'] = z3.BitVec('fs_base', 32)
         pre_x = (list(fr_), list(xm_), dict(x))
@@ -543,7 +548,7 @@ class Form:
             x = {k: (tuple(g(a, b) for a, b in zip(v, pre_x[2][k])) if k == 'fptr' else z3.If(nf, v, z3.If(ft == _FBY['XM']['code'], v, pre_x[2][k])) if k == 'mxcsr' and s.fxm else g(v, pre_x[2][k])) for k, v in x.items()}
             eip = g(eip, z3.BitVecVal(s.addr, 32) if isinstance(s.addr, int) else to_smt(s.addr))
         return {'regs': regs, 'flags': flags, 'flo': flo, 'mem': mem, 'eip': eip, 'defined': defined, 'rdefined': rdef, 'fault': ft,
-                'fr': fr_, 'xmm': xm_, 'ftop': x['ftop'], 'ftag': x['ftag'], 'fsw': x['fsw'], 'fptr': x['fptr'], 'mxcsr': x['mxcsr'],
+                'fr': fr_, 'xmm': xm_, 'ftop': x['ftop'], 'ftag': x['ftag'], 'fsw': x['fsw'], 'fcw': x['fcw'], 'fptr': x['fptr'], 'mxcsr': x['mxcsr'],
                 'sel': {g_: x['sel_' + g_] for g_ in SEGS}, 'fs_base': x['fs_base']}
     def writes_unobserved(s): return s.flo is not None or any(f == 'df' for f, _, _ in s.flags)
     def to_c_inline(s, varc, fault_fn, flo_fn, force=(), macc='M'):
