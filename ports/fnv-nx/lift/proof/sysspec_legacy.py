@@ -60,7 +60,7 @@ LSL, SDM 2A:LSL
 Accessed bit (a type bit of a code or data descriptor)
   SDM 3A:P3249 'the three low-order bits of the type field are interpreted as accessed (A), read enable (R), and conforming (C)'
   SDM 3A:P3249 'The processor sets this bit whenever it loads a segment selector for the segment into a segment register'
-  so bit 8 of a LAR result for a code or data segment is processor state: the Form reads it as the declared function gdt_accessed of the descriptor's selector offset (never a constant).
+  so bit 8 of a LAR result for a code or data segment is processor state: the Form reads it from the record's descriptor.accessed, the value after every load the declared machine does (UndecidedRow while the record has none).
 IRETD at CPL 3 (the Operation, PROTECTED-MODE and RETURN-TO-SAME-PRIVILEGE-LEVEL)
   SDM 2A:P1196 'IF NT = 1 THEN GOTO TASK-RETURN'   'CS := Pop(); (* 32-bit pop, high-order 16 bits discarded *)'
   SDM 2A:P1196 'IF tempEFLAGS(VM) = 1 and CPL = 0 THEN GOTO RETURN-TO-VIRTUAL-8086-MODE;'
@@ -301,15 +301,14 @@ def selector_zf(rec, row, sel):
 
 
 def lar_value(rec, sel):
-    """z3 32-bit LAR result for a ZF = 1 selector: the descriptor's fields in the positions of the Description, Accessed = the declared function of the descriptor's selector offset; bits 19:16 are undefined (0 here, compared apart)"""
+    """z3 32-bit LAR result for a ZF = 1 selector: the descriptor's fields in the positions of the Description, Accessed = the record's descriptor.accessed; bits 19:16 are undefined (0 here, compared apart)"""
     r = x86sys.get(rec, 'lar_lsl'); ds = descriptors(rec)
-    acc = z3.Function(LR['uf'], z3.BitVecSort(16), z3.BitVecSort(1))(sel & 0xfff8)
     v = z3.BitVecVal(0, 32)
     for off, (s, t, dpl) in sorted(ds.items()):
         e = r['descriptors']['0x%02x' % off]
         if e['lar']['zf'] != 1: continue
         a = e['lar']['dest']; rest = a[LR['val']] & ~(0xf << 8 | 1 << 12 | 3 << 13) & ~a['undefined_mask']      # P, AVL, L, D/B, G: bits of the descriptor the record states only inside its value
-        val = z3.BitVecVal(rest | (t & 0xe if s else t) << 8 | s << 12 | dpl << 13, 32) | (z3.ZeroExt(31, acc) << 8)
+        val = z3.BitVecVal(rest | (t & 0xe if s else t) << 8 | s << 12 | dpl << 13, 32) | z3.BitVecVal(e[LR['acc']] << 8, 32)
         v = z3.If(sel & 0xfffc == off, val, v)
     return v
 

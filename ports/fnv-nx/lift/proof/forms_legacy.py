@@ -10,7 +10,7 @@ shape is then uncertified, never given an invented answer).
   SGDT                      the record's sgdt limit and base rows.
   LAR IRETD                 rows the record does not have (a descriptor's access rights for LAR; the NT / VM cases of IRET): UndecidedRow."""
 from fnvlift import dsl, x86sys
-from fnvlift.dsl import C, V, bit, concat, eq, extract, ite, trunc, udiv, uf, ult, urem, zext
+from fnvlift.dsl import C, V, bit, concat, eq, extract, ite, trunc, udiv, ult, urem, zext
 from proof.forms import addoff, ea, handler, mload, pzs, rd, sload, store_op, undef, wr
 from fnvlift.faults import BYNAME as _FT
 from proof.forms_sys import K_AV, K_UD, store16
@@ -105,9 +105,6 @@ def _rec(*keys):
     except px.Undecided as e: raise dsl.UndecidedRow(str(e))
 
 
-UF_ACCESSED = 'gdt_accessed'      # the Accessed bit of a GDT descriptor is processor state (the record, lar_lsl.access_rights.accessed_bit): a value the declared machine supplies, a function of the descriptor's selector offset
-
-
 def lar_lsl_rows(row):
     """-> [(descriptor selector base, dest rule)] of the descriptors whose lar / lsl answer is ZF = 1.  Every other decided selector class (null, TI = 1, beyond the GDT limit, a descriptor the check refuses) is ZF = 0 with the
     destination unchanged: a record whose such class has another answer is not this Form's rule and is a build error"""
@@ -118,25 +115,29 @@ def lar_lsl_rows(row):
         a = d[row]; base = d['selectors'][0]
         assert d['selectors'] == [base, base + 1, base + 2, base + 3] and base == int(off, 16), ('lar_lsl.descriptors.%s.selectors' % off, d['selectors'])
         if a['zf'] == 0: assert a['dest'] == 'unchanged', ('lar_lsl.descriptors.%s.%s' % (off, row), a)
-        else: assert a['zf'] == 1 and isinstance(a['dest'], dict), ('lar_lsl.descriptors.%s.%s' % (off, row), a); out.append((base, a['dest']))
+        else:
+            assert a['zf'] == 1 and isinstance(a['dest'], dict), ('lar_lsl.descriptors.%s.%s' % (off, row), a)
+            if row == 'lar' and 'accessed' not in d: raise dsl.UndecidedRow('x86sys descriptor.accessed')      # the Accessed bit is a property of the declared GDT: the record's value per descriptor
+            out.append((base, a['dest'], d.get('accessed')))
     return out
 
 
 @handler('lar', 'lsl')
 def lar_lsl(c):
     """SDM 2A:LAR / LSL (protected mode, CPL 3, the record's lar_lsl rows).  ZF := 1 and DEST := the access rights (LAR) or the byte limit (LSL) of the descriptor, for the selectors of the record's ZF = 1 descriptors; every other selector
-    is ZF := 0 with DEST unchanged.  LAR bit 8 is the Accessed bit, processor state: uf gdt_accessed of the descriptor's selector offset (never a constant); bits 19:16 are SDM-undefined and written 0 (DEF0).  The source is the
+    is ZF := 0 with DEST unchanged.  LAR bit 8 is the Accessed bit, a property of the declared GDT: the record's descriptor.accessed (UndecidedRow while the record has none); bits 19:16 are SDM-undefined and written 0 (DEF0).  The source is the
     selector, 16 bits of a register or of memory; a 16-bit operand writes the low 16 bits of the result only."""
     F = c.F; lar = c.m == 'lar'; o = c.ops[1]
     sel = trunc(rd(o), 16) if o.k == 'r' else mload(ea(o), 16)
     rows = lar_lsl_rows('lar' if lar else 'lsl'); w = 16 if c.o16 else 32
     zf, val = C(0, 1), C(0, 32)
-    for base, d in rows:
+    for base, d, accessed in rows:
         hit = eq(sel & C(0xfffc, 16), C(base, 16))
         if lar:
             assert d['mask'] & d['undefined_mask'] == d['undefined_mask'] and d['value_with_accessed_clear'] & ~d['mask'] == 0 and d['value_with_accessed_clear'] & d['accessed_mask'] == 0, d
-            acc = uf(UF_ACCESSED, 1, sel & C(0xfff8, 16))
-            v = C(d['value_with_accessed_clear'] & ~d['undefined_mask'], 32) | (zext(acc, 32) << 8)
+            assert accessed in (0, 1), accessed
+            # the CPU sets the Accessed bit when a segment is loaded (SDM 3A:P3249 'The processor sets this bit whenever it loads a segment selector for the segment into a segment register'), so the record's value must already be the value after every load the declared machine does
+            v = C((d['value_with_accessed_clear'] & ~d['undefined_mask']) | accessed << 8, 32)
             assert d['accessed_mask'] == 0x100
         else: v = C(d['limit'], 32)
         zf, val = zf | hit, ite(hit, v, val)

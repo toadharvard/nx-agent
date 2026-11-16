@@ -22,17 +22,24 @@ def key(h):
 
 
 class LarLsl(unittest.TestCase):
-    def setUp(self): declared_x86sys.configure(); self.rec = x86sys.load()
-    def tearDown(self): inputs.reset()
+    def setUp(self):
+        declared_x86sys.configure(); self.rec = x86sys.load()
+        global fx
+        from fnvlift import x86sys as fx
+        self.saved = fx.REC; r = copy.deepcopy(self.rec)      # a record that carries descriptor.accessed (the field L5 has still to add): a test input, one value per descriptor
+        for i, d in enumerate(r['lar_lsl']['descriptors'].values()): d['accessed'] = i & 1
+        fx.REC = r; self.load = x86sys.load; x86sys.load = lambda p=None: r
+    def tearDown(self): fx.REC = self.saved; x86sys.load = self.load; inputs.reset()
 
     def test_every_shape_is_proved_over_its_domain_and_outside_domain_is_named(self):
         for h in ('0f02c1', '0f0300', '660f02c1', '660f0300', '0f020424', '0f02808000000000', '0f0305aabbccdd', '0f02c6', '660f03d3'):
             r, n = sysspec.check(key(h)); self.assertEqual(r, 'uncertified', (h, n)); self.assertIn('OutsideDomain', n); self.assertIn('115 GDT indexes', n)
 
-    def test_the_accessed_bit_is_the_declared_function_never_a_constant(self):
-        f = symform.symbuild(key('0f02c1')).form
-        self.assertIn('uf_gdt_accessed', str(dsl.to_smt(f.regs[0][1])))
-        self.assertNotIn('uf_gdt_accessed', str(dsl.to_smt(symform.symbuild(key('0f03c1')).form.regs[0][1])))      # LSL does not read it
+    def test_the_accessed_bit_is_undecided_until_the_record_has_it(self):
+        fx.REC = self.saved
+        with self.assertRaises(dsl.UndecidedRow) as e: symform.symbuild(key('0f02c1'))
+        self.assertIn('descriptor.accessed', str(e.exception))
+        symform.symbuild(key('0f03c1'))      # LSL does not read it
 
     def test_zf_is_the_only_flag_and_the_destination_is_conditional(self):
         for h in ('0f02c1', '0f0300', '660f02c1'):
@@ -54,9 +61,9 @@ class LarLsl(unittest.TestCase):
 
     def test_a_wrong_form_is_a_difference(self):
         k = key('0f02c1'); f = symform.symbuild(k).form; ins = L.G.decode(k)
-        good = L.check_larlsl(ins, f, symform.parse_key(k)[1], self.rec); self.assertEqual(good[0], 'uncertified')
+        good = L.check_larlsl(ins, f, symform.parse_key(k)[1], fx.REC); self.assertEqual(good[0], 'uncertified')
         g = copy.copy(f); g.flags = []
-        self.assertEqual(L.check_larlsl(ins, g, symform.parse_key(k)[1], self.rec)[0], 'FAILED(dsl)')
+        self.assertEqual(L.check_larlsl(ins, g, symform.parse_key(k)[1], fx.REC)[0], 'FAILED(dsl)')
 
 
 class Iret(unittest.TestCase):
