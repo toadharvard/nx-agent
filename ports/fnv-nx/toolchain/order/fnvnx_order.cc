@@ -668,8 +668,10 @@ static void order_builtin_call(gimple_stmt_iterator *gsi, gcall *call) {
   }
   attr_fnspec spec = gimple_call_fnspec(call);
   bool rd = false, wr = false;
+  unsigned nptr = 0;
   for (unsigned i = 0; i < gimple_call_num_args(call); i++) {
     tree a = gimple_call_arg(call, i);
+    if (POINTER_TYPE_P(TREE_TYPE(a))) nptr++;
     if (!POINTER_TYPE_P(TREE_TYPE(a)) || pointer_to_constant(a)) continue;
     // the address of an unshared local (the scan left it unshared because this argument does not escape)
     if (TREE_CODE(a) == ADDR_EXPR && local_unshared(ref_base(TREE_OPERAND(a, 0)))) continue;
@@ -677,8 +679,16 @@ static void order_builtin_call(gimple_stmt_iterator *gsi, gcall *call) {
     if (!known || spec.arg_maybe_read_p(i)) rd = true;
     if (!known || spec.arg_maybe_written_p(i)) wr = true;
   }
-  if (!rd && !wr) return;
   const char *asmname = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fn));
+  // A builtin with no library function, with virtual operands (not NOVOPS) and no pointer operand at all (__builtin_return_address,
+  // __builtin_frame_address, __builtin_trap...): GCC's flags say it touches memory and no operand says which. Nothing is assumed: its
+  // effect is unknown, so it is ordered as an unknown-spec builtin (read when ECF_PURE, else read and write), by the fences below. A
+  // fence is sound for any effect; no builtin is proven frame-only, so none is exempt, and there is no name list.
+  if (nptr == 0 && strncmp(asmname, "__builtin_", 10) == 0 && !(gimple_call_flags(call) & ECF_NOVOPS)) {
+    rd = true;
+    wr = !(gimple_call_flags(call) & ECF_PURE);
+  }
+  if (!rd && !wr) return;
   if (strncmp(asmname, "__builtin_", 10) != 0) {
     // LIBRARY CALL. Every GCC rewrite of a call into memory accesses is keyed on the callee being a built-in declaration
     // (DECL_BUILT_IN_CLASS: gimple_fold_builtin, match.pd, expand_builtin); the library declaration has none, so the call
