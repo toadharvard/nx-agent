@@ -115,3 +115,15 @@ b7b6f0df0:
 - **Undefined bits:** `Out.undef` / `Out.mem_undef` name bits the SDM leaves undefined. The Form takes the spec's own value for them, a refinement of "any value"; the proof compares exactly.
 - **Proof:** `x87form.prove_form`, called from `prove.prove_one` for a Form with `.x87`. On the Form's domain: `nd_pre` at the resolution holds, the Form raises no fault, and every field (x87 registers, TOP, tags, FSW, FCW,
   pointers, memory, EAX, the other registers, flags, EIP, SSE state) equals `execute()[nd := resolution]`. The proof caught a translator defect (z3's n-ary bvadd), now a test.
+
+
+## Slice 2 part (i): the carrier ops from the C (ctrans.py, x87carrier.py)
+
+Rule (CLAUDE.md "Derive, never enumerate"): the value semantics of the x87 carrier is the C of `rt/fnvl_x87.h` and `rt/x87.c`, so the z3 terms are produced from that C, not written
+beside it.  `ctrans.py` parses the C (pycparser, after the pinned cpp-13 expands the macros) and executes it symbolically with exact C semantics: integer promotions and conversions,
+shifts, switch with fall-through, forward goto, constant-bound loops, pointers into the store, struct values.  Every undefined behaviour (shift count, division by zero, signed
+overflow, float to int out of range, clz 0) is an obligation `Result.ub` and never an approximation; a construct outside the subset is `Unsupported`.  Doubles are BV64: the FPA operation
+on non-NaN operands under the host `fpcr_rmode`; NaN results follow the Arm ARM (FPProcessNaNs, FPDefaultNaN, FPConvertNaN; FPCR.DN = 0).  `fxn_slow`'s own payload rule is translated
+as ordinary C.  `x87carrier.py` derives the helper set: every identifier of every string literal of the emitters (ast), macros expanded, call graph through the C.  A Form's op symbol is the
+helper's name.  Tests: `tests/test_ctrans.py` (closure, host agreement on boundary inputs against the C compiled by the pinned g++-13 with the same text, mutations, NaN rules).
+Not translated (outside the value boundary, with the executor's reason): asm over the host FPSR, memory macros, the register file indexed by a symbolic TOP, a C++ template.

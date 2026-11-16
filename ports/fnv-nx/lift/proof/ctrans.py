@@ -1,0 +1,904 @@
+#!/usr/bin/env python3
+"""ctrans: z3 terms with exact C semantics for the C of lift/rt (the x87 value boundary), derived from the source text.
+
+Why (CLAUDE.md "Derive, never enumerate", rule 2): the value semantics of the x87 carrier ops are the C bodies of rt/fnvl_x87.h and rt/x87.c.  A second hand-written
+term next to them would be a second copy of the fact.  This module reads the C, parses it (pycparser) and symbolically executes it into z3 bit-vector terms.
+
+Source.  `Source(root)` reads rt/fnvl.h (typedefs, struct fv, struct cpu: the lines up to the `register struct cpu *c` declaration), rt/x87.h, rt/fnvl_x87.h and rt/x87.c.
+Comments are removed, `__attribute__((..))` groups are removed (aligned / may_alias / noinline / fnvnx_f2i do not change the value of any expression; FNVL_F2I is recorded per
+function before it is removed), `unsigned __int128` is the typedef-name `u128` (GCC manual, "__int128"), and the preprocessor (cpp from the pinned cpp-13) expands the macros.
+Top-level items are split by brace matching.  A function whose text does not parse (C++ templates, inline asm, references ...) is REFUSED with the parser's message: the
+subset is whatever pycparser accepts of the source, there is no list.
+
+Semantics (ISO C11 as GCC implements it, ILP32/LP64-independent: the source uses only the fixed-width typedefs and int):
+  - integer types are bit-vectors with signedness; usual arithmetic conversions and integer promotions (C11 6.3.1.1, 6.3.1.8); `/ % >> <<` follow 6.5.5-6.5.7.
+  - every operation whose C behaviour is undefined (shift count >= width, division by zero, signed overflow, float->int out of range, clz of 0) adds a proof obligation
+    `Result.ub` (a z3 Bool that must hold); the term itself is then a defined bit-vector value.  Nothing is approximated.
+  - control flow: if / ?: / && / || / switch (with fall-through and break) / return / forward goto / `for` whose induction variable has a constant bound (the unrolled
+    trip count must be a z3 literal).  Anything else raises Unsupported.
+  - pointers are references into the symbolic store (locals, struct members, array elements); `c->field` reads the field of the global `struct cpu *c` as a free input.
+  - double and float are bit-vectors (BV64, BV32).  An operation is the FPA operation on non-NaN operands under the rounding mode `fpcr_rmode`; NaN results follow the
+    Arm Architecture Reference Manual (DDI 0487, FPProcessNaNs / FPDefaultNaN / FPConvertNaN, FPCR.DN = 0, AH = 0, FZ = 0 as the console runs): a signalling NaN operand
+    (first, then second) is returned quieted, else the first quiet NaN operand, else the default NaN 0x7FF8000000000000 / 0x7FC00000.
+  - builtins, one documented mapping (BUILTINS): GCC manual "Other Builtins".
+"""
+import json, os, re, sys
+import z3
+from pycparser import c_parser, c_ast
+
+# The FPCR the terms are a function of.  RMode: Arm ARM (DDI 0487) FPCR.RMode encoding, an architecture constant (00 RN, 01 RP, 10 RM, 11 RZ).  DN and FZ are free inputs
+# `fpcr_dn`, `fpcr_fz`: every FP operation adds the obligation DN = 0 and FZ = 0 to `Result.dom` (the NaN rules and the denormal handling modelled are those of DN = FZ = 0), and
+# whoever uses a term discharges it from the declared guest thread FPCR (`fpcr_record`).  AH is RES0 on the console CPU (`ah_reserved`).
+ARM_RMODE = z3.BitVec('fpcr_rmode', 2)
+FPCR_DN = z3.BitVec('fpcr_dn', 1)
+FPCR_FZ = z3.BitVec('fpcr_fz', 1)
+TARGETS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'verify', 'targets.json')
+
+
+class Undecided(Exception):
+    """a declared-target row that the terms need and no record states"""
+
+
+def fpcr_record(path=TARGETS):
+    """the initial FPCR of a guest thread from the console CPU record: {"DN": 0|1, "FZ": 0|1, "RMode": 0..3}; Undecided when the record does not state it"""
+    with open(path) as fh: cpu = json.load(fh)['console_cpu']
+    rec = cpu.get('fpcr')
+    if not isinstance(rec, dict) or not {'DN', 'FZ', 'RMode'} <= set(rec):
+        raise Undecided('verify/targets.json console_cpu.fpcr (initial FPCR DN, FZ, RMode of a guest thread) is not declared; owner L5 / L1')
+    return rec
+
+
+def ah_reserved(path=TARGETS):
+    """FPCR.AH is RES0 below Armv8.7 (FEAT_AFP, Arm ARM): from console_cpu.arch"""
+    with open(path) as fh: arch = json.load(fh)['console_cpu']['arch']
+    m = re.match(r'armv8(?:\.(\d))?-a$', arch)
+    if not m: raise Undecided('console_cpu.arch %r is not armv8[.N]-a' % arch)
+    return int(m.group(1) or 0) < 7
+
+
+class Unsupported(Exception):
+    pass
+
+
+# ---------------------------------------------------------------- source
+def strip_comments(t):
+    t = re.sub(r'/\*.*?\*/', ' ', t, flags=re.S)
+    return re.sub(r'//[^\n]*', '', t)
+
+
+def strip_attrs(t):
+    out, i = [], 0
+    while True:
+        j = t.find('__attribute__', i)
+        if j < 0:
+            out.append(t[i:]); break
+        out.append(t[i:j]); k = t.index('(', j); d = 0
+        while True:
+            d += {'(': 1, ')': -1}.get(t[k], 0); k += 1
+            if d == 0: break
+        i = k
+    return ''.join(out)
+
+
+def split_items(t):
+    """top-level items of preprocessed text.  A definition ends at its balanced '}'; a declaration (typedef/struct/union/enum) at the next ';' at depth 0"""
+    items, i, n = [], 0, len(t)
+    while i < n:
+        while i < n and t[i] in ' \t\r\n': i += 1
+        if i >= n: break
+        decl = t.startswith(('typedef', 'struct', 'union', 'enum'), i)
+        j, d = i, 0
+        while j < n:
+            ch = t[j]
+            if ch == '{': d += 1
+            elif ch == '}':
+                d -= 1
+                if d == 0 and not decl: break
+            elif ch == ';' and d == 0: break
+            j += 1
+        items.append(t[i:j + 1]); i = j + 1
+    return items
+
+
+FUNC_RE = re.compile(r'^((?:static\s+|inline\s+|extern\s+)*[A-Za-z_][\w\s\*]*?)\b([A-Za-z_]\w*)\s*\(([^{;]*)\)\s*\{', re.S)
+
+
+def user_text(path):
+    """the text of a preprocessed unit (.i) without its linemarkers and without the regions the preprocessor marks as system headers (linemarker flag 3, GNU cpp manual
+    'Preprocessor Output'): the source of the root itself"""
+    out, sysh = [], False
+    with open(path) as fh:
+        for line in fh:
+            m = re.match(r'# (\d+) "([^"]*)"((?: \d+)*)\s*$', line)
+            if m:
+                sysh = '3' in m.group(3).split(); continue
+            if line.startswith('#'): continue
+            if not sysh: out.append(line)
+    return ''.join(out)
+
+
+class Source:
+    """the C of lift/rt as items, read from the PREPROCESSED units the recipe's PP stage makes with the guest compiler (`ipaths`, .i files): functions (name -> text), type
+    declarations.  `macro_files` (the headers' text) give the macro names and bodies the closure follows; the functions come from the .i, so their macros are expanded."""
+
+    def __init__(self, ipaths, macro_files):
+        self.macros = {}
+        for n in macro_files:
+            with open(n) as fh: t = strip_comments(fh.read()).replace('\\\n', ' ')
+            for m in re.finditer(r'^[ \t]*#define[ \t]+(\w+)(\([^)]*\))?[ \t]*(.*)$', t, re.M): self.macros.setdefault(m.group(1), (m.group(2), m.group(3)))
+        self.types, self.funcs, self.refused = [], {}, {}
+        seen = set()
+        for p in ipaths:
+            text = user_text(p)
+            text = re.sub(r'unsigned\s+__int128', 'u128', text)       # grammar mapping: pycparser has no __int128 (GCC manual "__int128"); u128 is a typedef-name of ctrans
+            text = strip_attrs(text)
+            text = re.sub(r'\bregister\s+struct\s+cpu\s*\*\s*c\s+asm\s*\([^)]*\)\s*;', '', text)
+            for it in split_items(text):
+                head = it.split('{')[0]
+                m = FUNC_RE.match(it) if it.rstrip().endswith('}') else None
+                if m and not it.lstrip().startswith(('typedef', 'struct', 'enum', 'union')) and 'template' not in head and 'extern "C"' not in head:
+                    self.funcs.setdefault(m.group(2), it)
+                elif it.lstrip().startswith(('typedef', 'struct', 'enum', 'union')) and ('(' not in head or it.lstrip().startswith('typedef')):
+                    if it not in seen: seen.add(it); self.types.append(it)
+                elif it.strip().startswith('template'):
+                    mm = re.search(r'\b(\w+)\s*\(', head); self.refused[mm.group(1) if mm else it[:30]] = 'C++ template'
+
+    def prelude(self):
+        """the type declarations that parse, in order (a C++ declaration of the unit is dropped); u128 and `c` are ctrans's own"""
+        pre = 'typedef int u128;\nextern struct cpu *c;\n'
+        for t in self.types:
+            if re.match(r'typedef\s+u128\s+u128', t) or t.lstrip().startswith('struct fnvl_nframe;'): continue
+            cand = pre + (t if t.rstrip().endswith(';') else t + ';') + '\n'
+            try: c_parser.CParser().parse(cand, 'prelude')
+            except Exception: continue
+            pre = cand
+            m = re.match(r'struct\s+(\w+)\s*\{', t)
+            if m: pre += 'typedef struct %s %s;\n' % (m.group(1), m.group(1))      # grammar mapping: in C++ a struct tag is a type name (ISO C++ [class.name])
+        return pre
+
+
+# ---------------------------------------------------------------- parse
+def parse_unit(src, names=None):
+    """parse the type declarations and every function of `names` (all when None); -> (ast of types, {name: FuncDef}, {name: reason refused})"""
+    pre = src.prelude()
+    tast = c_parser.CParser().parse(pre, 'types')
+    protos = []
+    funcs, refused = {}, {}
+    for fname, ftxt in src.funcs.items():
+        if names is not None and fname not in names: continue
+        try:
+            u = c_parser.CParser().parse(pre + '\n'.join(protos) + '\n' + ftxt, fname)
+            fd = [e for e in u.ext if isinstance(e, c_ast.FuncDef) and e.decl.name == fname]
+            funcs[fname] = fd[0]
+        except Exception as e:
+            refused[fname] = 'parse: ' + str(e).split('\n')[0][:160]
+    return tast, funcs, refused
+
+
+# ---------------------------------------------------------------- types and values
+class T(tuple):
+    pass
+
+
+def I(bits, signed): return ('i', bits, signed)
+
+
+INTS = {'u8': I(8, 0), 'u16': I(16, 0), 'u32': I(32, 0), 'u64': I(64, 0), 'u128': I(128, 0), 's8': I(8, 1), 's16': I(16, 1), 's32': I(32, 1), 's64': I(64, 1)}
+F64, F32 = ('f', 64), ('f', 32)
+INT = I(32, 1)
+
+
+class V:
+    __slots__ = ('e', 't')
+
+    def __init__(self, e, t): self.e, self.t = e, t
+
+    def __repr__(self): return 'V(%s,%s)' % (self.e, self.t)
+
+
+class Ptr:
+    __slots__ = ('cont', 'key', 'et')
+
+    def __init__(self, cont, key, et): self.cont, self.key, self.et = cont, key, et
+
+
+def width(t): return t[1]
+
+
+def kindof(spec_names):
+    s = ' '.join(spec_names)
+    return s
+
+
+def rm_term():
+    r = ARM_RMODE
+    return z3.If(r == 0, z3.RNE(), z3.If(r == 1, z3.RTP(), z3.If(r == 2, z3.RTN(), z3.RTZ())))
+
+
+def fpsort(t): return z3.Float64() if t[1] == 64 else z3.Float32()
+
+
+def tofp(e, t): return z3.fpBVToFP(e, fpsort(t))
+
+
+def frombits(fp): return z3.fpToIEEEBV(fp)
+
+
+def nan_(e, t):
+    eb, mb = (11, 52) if t[1] == 64 else (8, 23)
+    return z3.And(z3.Extract(eb + mb - 1, mb, e) == (1 << eb) - 1, z3.Extract(mb - 1, 0, e) != 0)
+
+
+def snan_(e, t):
+    mb = 52 if t[1] == 64 else 23
+    return z3.And(nan_(e, t), z3.Extract(mb - 1, mb - 1, e) == 0)
+
+
+def quiet(e, t):
+    mb = 52 if t[1] == 64 else 23
+    return e | z3.BitVecVal(1 << (mb - 1), t[1])
+
+
+def defnan(t): return z3.BitVecVal(0x7FF8000000000000 if t[1] == 64 else 0x7FC00000, t[1])
+
+
+def fop(kind, args, t):
+    """one FP operation `kind` (a z3 FPA constructor name) on operand bit patterns of type t: FPA when no operand is NaN, else Arm FPProcessNaNs; a NaN FPA result is the
+    default NaN (invalid operation).  Arm ARM DDI 0487 'FPProcessNaNs', 'FPDefaultNaN'; FPCR.DN = 0."""
+    fps = [tofp(a, t) for a in args]
+    rm = rm_term()
+    if kind == 'add': r = z3.fpAdd(rm, *fps)
+    elif kind == 'sub': r = z3.fpSub(rm, *fps)
+    elif kind == 'mul': r = z3.fpMul(rm, *fps)
+    elif kind == 'div': r = z3.fpDiv(rm, *fps)
+    elif kind == 'sqrt': r = z3.fpSqrt(rm, *fps)
+    elif kind in ('roundeven', 'floor', 'ceil', 'trunc'):
+        r = z3.fpRoundToIntegral({'roundeven': z3.RNE(), 'floor': z3.RTN(), 'ceil': z3.RTP(), 'trunc': z3.RTZ()}[kind], *fps)
+    else: raise Unsupported('fop ' + kind)
+    res = z3.If(z3.fpIsNaN(r), defnan(t), frombits(r))
+    for a in reversed(args):
+        pass
+    out = res
+    # NaN operands: first signalling (quieted), else first quiet
+    for a in reversed(args): out = z3.If(z3.And(nan_(a, t), z3.Not(snan_(a, t))), a, out)
+    for a in reversed(args): out = z3.If(snan_(a, t), quiet(a, t), out)
+    return out
+
+
+# ---------------------------------------------------------------- the executor
+class Frame:
+    def __init__(self, name, L):
+        self.name, self.vars, self.L, self.pend, self.ret, self.rett = name, {}, L, {}, None, None
+
+
+class Result:
+    def __init__(self, ret, outs, ub, dom=()): self.ret, self.outs, self.ub, self.dom = ret, outs, ub, list(dom)
+
+
+class Lazy(dict):
+    """a struct input whose members are free symbolic inputs created on first use (struct cpu: the register file the lifted code runs on)"""
+    def __init__(self, m, sname, name):
+        super().__init__(); self.m, self.sname, self.name = m, sname, name
+        self.ft = dict(m.structs[sname])
+
+    def __missing__(self, k):
+        if k not in self.ft: raise KeyError(k)
+        v = self.m.fresh_val(self.ft[k], self.name + '.' + k) if not self.m.has_union(self.ft[k]) else None
+        if v is None: raise Unsupported('union member ' + k)
+        self[k] = v
+        return v
+
+
+class Machine:
+    def __init__(self, tast, funcs, f2i=()):
+        self.funcs, self.structs, self.typedefs, self.enums = funcs, {}, {}, {}
+        self.G = {}               # globals: 'c' -> struct cpu (fields free inputs)
+        self.ub = []
+        self.dom = []
+        self.fresh = 0
+        for e in tast.ext: self.declare(e)
+
+    # -- declarations
+    def declare(self, e):
+        if isinstance(e, c_ast.Typedef):
+            self.typedefs[e.name] = self.ctype(e.type)
+        elif isinstance(e, c_ast.Decl) and isinstance(e.type, (c_ast.Struct, c_ast.Union, c_ast.Enum)):
+            self.ctype(e.type)
+
+    def ctype(self, n):
+        if isinstance(n, c_ast.TypeDecl): return self.ctype(n.type)
+        if isinstance(n, c_ast.IdentifierType):
+            nm = ' '.join(n.names)
+            if nm in INTS: return INTS[nm]
+            if nm in self.typedefs: return self.typedefs[nm]
+            return {'int': INT, 'unsigned int': I(32, 0), 'unsigned': I(32, 0), 'long long': I(64, 1), 'unsigned long long': I(64, 0), 'double': F64, 'float': F32,
+                    'unsigned char': I(8, 0), 'signed char': I(8, 1), 'char': I(8, 1), 'short': I(16, 1), 'unsigned short': I(16, 0), 'long long int': I(64, 1),
+                    'long long unsigned int': I(64, 0), 'void': ('v',)}.get(nm) or (_ for _ in ()).throw(Unsupported('type ' + nm))
+        if isinstance(n, c_ast.Struct):
+            if n.decls is not None:
+                self.structs[n.name or id(n)] = [(d.name, self.ctype(d.type)) for d in n.decls]
+            return ('s', n.name or id(n))
+        if isinstance(n, c_ast.Union):
+            return ('u', n.name or id(n))   # a union is declared but no value of it is ever built: using one is refused where it is read
+        if isinstance(n, c_ast.Enum):
+            v = 0
+            for en in n.values.enumerators:
+                if en.value is not None: v = self.const_int(en.value)
+                self.enums[en.name] = v; v += 1
+            return INT
+        if isinstance(n, c_ast.PtrDecl): return ('p', self.ctype(n.type))
+        if isinstance(n, c_ast.ArrayDecl): return ('a', self.ctype(n.type), self.const_int(n.dim) if n.dim is not None else None)
+        if isinstance(n, c_ast.FuncDecl): return ('v',)
+        raise Unsupported('type node ' + type(n).__name__)
+
+    def const_int(self, n):
+        v = self.eval(n, Frame('const', z3.BoolVal(True)))
+        s = z3.simplify(v.e)
+        if not z3.is_bv_value(s): raise Unsupported('non-constant integer expression')
+        return s.as_long()
+
+    # -- values
+    def zero(self, t):
+        if t[0] == 'i': return V(z3.BitVecVal(0, t[1]), t)
+        if t[0] == 'f': return V(z3.BitVecVal(0, t[1]), t)
+        if t[0] == 's': return {n: self.zero(ft) for n, ft in self.structs[t[1]]}
+        if t[0] == 'a': return [self.zero(t[1]) for _ in range(t[2])]
+        if t[0] == 'p': return None
+        raise Unsupported('zero of ' + str(t))
+
+    def fresh_val(self, t, name):
+        if t[0] in ('i', 'f'): return V(z3.BitVec(name, t[1]), t)
+        if t[0] == 's':
+            if any(self.has_union(ft) for _, ft in self.structs[t[1]]): return Lazy(self, t[1], name)       # struct cpu: members are created when read
+            return {n: self.fresh_val(ft, name + '.' + n) for n, ft in self.structs[t[1]]}
+        if t[0] == 'a': return [self.fresh_val(t[1], '%s[%d]' % (name, i)) for i in range(t[2])]
+        raise Unsupported('input of type ' + str(t))
+
+    def has_union(self, t):
+        if t[0] == 'u': return True
+        if t[0] == 'a': return self.has_union(t[1])
+        if t[0] == 's': return any(self.has_union(ft) for _, ft in self.structs[t[1]])
+        return False
+
+    def tyof(self, v):
+        return v.t
+
+    def guard(self, fr, old, new):
+        if old is None: return new
+        if isinstance(new, V): return V(z3.If(fr.L, new.e, old.e), new.t)
+        if isinstance(new, dict): return {k: self.guard(fr, old[k], new[k]) for k in new}
+        if isinstance(new, list): return [self.guard(fr, o, n) for o, n in zip(old, new)]
+        return new
+
+    def ite(self, c, a, b):
+        if isinstance(a, V): return V(z3.If(c, a.e, b.e), a.t)
+        if isinstance(a, dict): return {k: self.ite(c, a[k], b[k]) for k in a}
+        if isinstance(a, list): return [self.ite(c, x, y) for x, y in zip(a, b)]
+        raise Unsupported('?: on pointers')
+
+    def copy(self, v):
+        if isinstance(v, dict): return {k: self.copy(x) for k, x in v.items()}
+        if isinstance(v, list): return [self.copy(x) for x in v]
+        return v
+
+    # -- conversions
+    def cast(self, v, t, fr):
+        if not isinstance(v, V): raise Unsupported('cast of non-scalar')
+        s = v.t
+        if s == t: return v
+        if t[0] == 'i' and s[0] == 'i':
+            if t[1] == s[1]: return V(v.e, t)
+            if t[1] < s[1]: return V(z3.Extract(t[1] - 1, 0, v.e), t)
+            return V((z3.SignExt if s[2] else z3.ZeroExt)(t[1] - s[1], v.e), t)
+        if 'f' in (t[0], s[0]): self.fpdom(fr)
+        if t[0] == 'f' and s[0] == 'i':
+            x = (z3.fpSignedToFP if s[2] else z3.fpUnsignedToFP)(rm_term(), v.e, fpsort(t))
+            return V(frombits(x), t)
+        if t[0] == 'i' and s[0] == 'f':
+            x = tofp(v.e, s); b = t[1]; sig = s[1] == 64
+            lo = -(1 << (b - 1)) - 1 if t[2] else -1
+            hi = (1 << (b - 1)) if t[2] else (1 << b)
+            ok = z3.And(z3.Not(z3.fpIsNaN(x)), z3.fpGT(x, z3.FPVal(float(lo), fpsort(s))), z3.fpLT(x, z3.FPVal(float(hi), fpsort(s))))
+            self.ub.append(z3.Implies(fr.L, ok))
+            return V((z3.fpToSBV if t[2] else z3.fpToUBV)(z3.RTZ(), x, z3.BitVecSort(b)), t)
+        if t[0] == 'f' and s[0] == 'f':
+            if s[1] == 32 and t[1] == 64:          # Arm FCVT: NaN keeps its payload, quieted
+                nanr = z3.Concat(z3.Extract(31, 31, v.e), z3.BitVecVal(0x7FF, 11), z3.BitVecVal(1, 1), z3.Extract(21, 0, v.e), z3.BitVecVal(0, 29))
+                return V(z3.If(nan_(v.e, s), nanr, frombits(z3.fpToFP(z3.RNE(), tofp(v.e, s), z3.Float64()))), t)
+            nanr = z3.Concat(z3.Extract(63, 63, v.e), z3.BitVecVal(0xFF, 8), z3.BitVecVal(1, 1), z3.Extract(50, 29, v.e))
+            return V(z3.If(nan_(v.e, s), nanr, frombits(z3.fpToFP(rm_term(), tofp(v.e, s), z3.Float32()))), t)
+        raise Unsupported('cast %s -> %s' % (s, t))
+
+    def fpdom(self, fr):
+        if fr is not None: self.dom.append(z3.Implies(fr.L, z3.And(FPCR_DN == 0, FPCR_FZ == 0)))
+
+    def promote(self, v):
+        if v.t[0] == 'i' and v.t[1] < 32: return self.cast(v, INT, None)
+        return v
+
+    def usual(self, a, b, fr):
+        a, b = self.promote(a), self.promote(b)
+        if a.t[0] == 'f' or b.t[0] == 'f':
+            t = F64 if F64 in (a.t, b.t) else F32
+            return self.cast(a, t, fr), self.cast(b, t, fr)
+        ta, tb = a.t, b.t
+        if ta == tb: return a, b
+        if ta[1] != tb[1]: t = ta if ta[1] > tb[1] else tb
+        else: t = I(ta[1], 0)
+        return self.cast(a, t, fr), self.cast(b, t, fr)
+
+    def truth(self, v):
+        if v.t[0] == 'i': return v.e != 0
+        return z3.Not(z3.fpIsZero(tofp(v.e, v.t)))
+
+    def bool_(self, c): return V(z3.If(c, z3.BitVecVal(1, 32), z3.BitVecVal(0, 32)), INT)
+
+    # -- expressions
+    def lval(self, n, fr):
+        """-> (container, key, type) of an lvalue"""
+        if isinstance(n, c_ast.ID):
+            if n.name in fr.vars: return fr.vars, n.name, None
+            raise Unsupported('lvalue ' + n.name)
+        if isinstance(n, c_ast.StructRef):
+            if n.type == '->':
+                p = self.eval(n.name, fr)
+                if not isinstance(p, Ptr): raise Unsupported('-> of non-pointer')
+                if p.cont is self.G and p.key == 'c': self.cpu()
+                base = self.load(p)
+            else:
+                cont, key, _ = self.lval(n.name, fr); base = cont[key]
+            if isinstance(base, str) and base == 'cpu':
+                pass
+            if not isinstance(base, dict): raise Unsupported('member of non-struct')
+            return base, n.field.name, None
+        if isinstance(n, c_ast.ArrayRef):
+            p = self.eval(n.name, fr); i = self.eval(n.subscript, fr)
+            s = z3.simplify(i.e)
+            if not z3.is_bv_value(s): raise Unsupported('non-constant array index')
+            return p.cont, p.key + (s.as_signed_long() if i.t[2] else s.as_long()), None
+        if isinstance(n, c_ast.UnaryOp) and n.op == '*':
+            p = self.eval(n.expr, fr)
+            if not isinstance(p, Ptr): raise Unsupported('deref of non-pointer')
+            return p.cont, p.key, None
+        raise Unsupported('lvalue ' + type(n).__name__)
+
+    def load(self, p): return p.cont[p.key]
+
+    def eval(self, n, fr):
+        m = getattr(self, 'e_' + type(n).__name__, None)
+        if m is None: raise Unsupported('expression ' + type(n).__name__)
+        return m(n, fr)
+
+    def e_Constant(self, n, fr):
+        s = n.value
+        if n.type in ('int', 'long int', 'long long int', 'unsigned int', 'unsigned long int', 'unsigned long long int'):
+            m = re.match(r'^(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9]\d*)([uUlL]*)$', s)
+            digs, suf = m.group(1), m.group(2).lower()
+            v = int(digs, 0) if not (digs.startswith('0') and len(digs) > 1 and not digs.lower().startswith('0x')) else int(digs, 8)
+            u, ll = 'u' in suf, 'll' in suf or suf.count('l') > 0
+            if ll:
+                t = I(64, 0) if u or v >= 1 << 63 else I(64, 1)
+            elif u: t = I(32, 0) if v < 1 << 32 else I(64, 0)
+            else:
+                dec = not digs.lower().startswith('0')
+                if v < 1 << 31: t = INT
+                elif not dec and v < 1 << 32: t = I(32, 0)
+                elif v < 1 << 63: t = I(64, 1)
+                else: t = I(64, 0)
+            return V(z3.BitVecVal(v, t[1]), t)
+        if n.type == 'char': return V(z3.BitVecVal(ord(s[1:-1]), 32), INT)
+        if n.type == 'string': return V(z3.BitVecVal(0, 32), INT)      # only __builtin_nan("") takes one; its argument is not read
+        if n.type in ('double', 'float'):
+            import struct
+            f32 = s[-1] in 'fF'
+            fv = float.fromhex(s.rstrip('fFlL')) if 'x' in s.lower() else float(s.rstrip('fFlL'))
+            if f32: return V(z3.BitVecVal(struct.unpack('<I', struct.pack('<f', fv))[0], 32), F32)
+            return V(z3.BitVecVal(struct.unpack('<Q', struct.pack('<d', fv))[0], 64), F64)
+        raise Unsupported('constant ' + n.type)
+
+    def e_ID(self, n, fr):
+        if n.name in fr.vars:
+            v = fr.vars[n.name]
+            if isinstance(v, list): return Ptr(v, 0, None)
+            return v
+        if n.name in self.enums: return V(z3.BitVecVal(self.enums[n.name], 32), INT)
+        if n.name == 'c': return Ptr(self.G, 'c', ('s', 'cpu'))
+        raise Unsupported('identifier ' + n.name)
+
+    def cpu(self):
+        if 'c' not in self.G: self.G['c'] = self.fresh_val(('s', 'cpu'), 'c')
+        return self.G['c']
+
+    def e_StructRef(self, n, fr):
+        if n.type == '->':
+            p = self.eval(n.name, fr)
+            if not isinstance(p, Ptr): raise Unsupported('-> of non-pointer')
+            if p.cont is self.G and p.key == 'c': self.cpu()
+            base = self.load(p)
+        else:
+            base = self.eval(n.name, fr)
+        if not isinstance(base, dict): raise Unsupported('member of non-struct')
+        v = base[n.field.name]
+        if isinstance(v, list): return Ptr(v, 0, None)
+        return v
+
+    def e_ArrayRef(self, n, fr):
+        cont, key, _ = self.lval(n, fr)
+        return cont[key]
+
+    def e_Cast(self, n, fr):
+        t = self.ctype(n.to_type.type)
+        v = self.eval(n.expr, fr)
+        if isinstance(v, Ptr) or t[0] == 'p': raise Unsupported('pointer cast')
+        return self.cast(v, t, fr)
+
+    def e_ExprList(self, n, fr):
+        r = None
+        for e in n.exprs: r = self.eval(e, fr)
+        return r
+
+    def e_UnaryOp(self, n, fr):
+        op = n.op
+        if op == '&':
+            if isinstance(n.expr, c_ast.ID) and n.expr.name in fr.vars and isinstance(fr.vars[n.expr.name], list): return Ptr(fr.vars[n.expr.name], 0, None)
+            cont, key, _ = self.lval(n.expr, fr); return Ptr(cont, key, None)
+        if op == '*':
+            cont, key, _ = self.lval(n, fr); return cont[key]
+        if op in ('p++', 'p--', '++', '--'):
+            cont, key, _ = self.lval(n.expr, fr); old = cont[key]
+            one = V(z3.BitVecVal(1, old.t[1]), old.t) if old.t[0] == 'i' else None
+            new = V(old.e + one.e if '+' in op else old.e - one.e, old.t)
+            cont[key] = self.guard(fr, old, new)
+            return old if op.startswith('p') else new
+        v = self.eval(n.expr, fr)
+        if op == '!': return self.bool_(z3.Not(self.truth(v)))
+        v = self.promote(v)
+        if op == '-':
+            if v.t[0] == 'f': return V(v.e ^ z3.BitVecVal(1 << (v.t[1] - 1), v.t[1]), v.t)
+            if v.t[2]: self.ub.append(z3.Implies(fr.L, v.e != z3.BitVecVal(1 << (v.t[1] - 1), v.t[1])))
+            return V(-v.e, v.t)
+        if op == '+': return v
+        if op == '~': return V(~v.e, v.t)
+        if op == 'sizeof': raise Unsupported('sizeof')
+        raise Unsupported('unary ' + op)
+
+    def arith(self, op, a, b, fr):
+        if op in ('<<', '>>'):
+            a = self.promote(a); b = self.promote(b)
+            bw = a.t[1]
+            cnt = self.cast(b, I(bw, 0), fr).e if b.t[1] != bw else b.e
+            if b.t[2] and b.t[1] <= bw: self.ub.append(z3.Implies(fr.L, b.e >= 0)) if b.t[1] == bw else None
+            self.ub.append(z3.Implies(fr.L, z3.ULT(cnt, z3.BitVecVal(bw, bw))))
+            if op == '<<':
+                if a.t[2]: self.ub.append(z3.Implies(fr.L, a.e >= 0))
+                return V(a.e << cnt, a.t)
+            return V(a.e >> cnt if a.t[2] else z3.LShR(a.e, cnt), a.t)
+        a, b = self.usual(a, b, fr)
+        t = a.t
+        if t[0] == 'f':
+            self.fpdom(fr)
+            if op in ('+', '-', '*', '/'): return V(fop({'+': 'add', '-': 'sub', '*': 'mul', '/': 'div'}[op], [a.e, b.e], t), t)
+            x, y = tofp(a.e, t), tofp(b.e, t)
+            c = {'<': z3.fpLT, '>': z3.fpGT, '<=': z3.fpLEQ, '>=': z3.fpGEQ, '==': z3.fpEQ}.get(op)
+            if op == '!=': return self.bool_(z3.Not(z3.fpEQ(x, y)))
+            if c: return self.bool_(c(x, y))
+            raise Unsupported('float op ' + op)
+        s = t[2]; bw = t[1]
+        if op in ('<', '>', '<=', '>=', '==', '!='):
+            c = {'<': (lambda x, y: x < y) if s else z3.ULT, '>': (lambda x, y: x > y) if s else z3.UGT, '<=': (lambda x, y: x <= y) if s else z3.ULE,
+                 '>=': (lambda x, y: x >= y) if s else z3.UGE, '==': lambda x, y: x == y, '!=': lambda x, y: x != y}[op]
+            return self.bool_(c(a.e, b.e))
+        if op in ('+', '-', '*'):
+            if s:
+                ex = {'+': z3.BVAddNoOverflow, '-': z3.BVSubNoUnderflow, '*': z3.BVMulNoOverflow}[op]
+                ok = z3.And(ex(a.e, b.e, True), {'+': z3.BVAddNoUnderflow, '-': z3.BVSubNoOverflow, '*': z3.BVMulNoUnderflow}[op](a.e, b.e))
+                self.ub.append(z3.Implies(fr.L, ok))
+            return V({'+': a.e + b.e, '-': a.e - b.e, '*': a.e * b.e}[op], t)
+        if op in ('/', '%'):
+            self.ub.append(z3.Implies(fr.L, b.e != 0))
+            if s: return V(z3.SRem(a.e, b.e) if op == '%' else a.e / b.e, t)
+            return V(z3.URem(a.e, b.e) if op == '%' else z3.UDiv(a.e, b.e), t)
+        if op == '&': return V(a.e & b.e, t)
+        if op == '|': return V(a.e | b.e, t)
+        if op == '^': return V(a.e ^ b.e, t)
+        raise Unsupported('binary ' + op)
+
+    def e_BinaryOp(self, n, fr):
+        op = n.op
+        if op in ('&&', '||'):
+            a = self.truth(self.eval(n.left, fr)); save = fr.L
+            fr.L = z3.And(save, a if op == '&&' else z3.Not(a))
+            b = self.truth(self.eval(n.right, fr)); fr.L = save
+            return self.bool_(z3.And(a, b) if op == '&&' else z3.Or(a, b))
+        a, b = self.eval(n.left, fr), self.eval(n.right, fr)
+        if isinstance(a, Ptr) and isinstance(b, V) and op in ('+', '-'):
+            s = z3.simplify(b.e)
+            if not z3.is_bv_value(s): raise Unsupported('non-constant pointer offset')
+            d = s.as_signed_long()
+            return Ptr(a.cont, a.key + (d if op == '+' else -d), a.et)
+        return self.arith(op, a, b, fr)
+
+    def e_TernaryOp(self, n, fr):
+        c = self.truth(self.eval(n.cond, fr)); save = fr.L
+        fr.L = z3.And(save, c); a = self.eval(n.iftrue, fr)
+        fr.L = z3.And(save, z3.Not(c)); b = self.eval(n.iffalse, fr); fr.L = save
+        if isinstance(a, V) and isinstance(b, V):
+            a, b = self.usual(a, b, fr) if a.t != b.t else (a, b)
+            return V(z3.If(c, a.e, b.e), a.t)
+        return self.ite(c, a, b)
+
+    def e_Assignment(self, n, fr):
+        cont, key, _ = self.lval(n.lvalue, fr)
+        old = cont[key]
+        r = self.eval(n.rvalue, fr)
+        if n.op != '=':
+            op = n.op[:-1]
+            r = self.arith(op, old, r, fr)
+        if isinstance(old, V):
+            if not isinstance(r, V): raise Unsupported('assign non-scalar to scalar')
+            r = self.cast(r, old.t, fr)
+        elif isinstance(old, dict): r = self.copy(r)
+        cont[key] = self.guard(fr, old, r)
+        return r
+
+    def e_FuncCall(self, n, fr):
+        name = n.name.name if isinstance(n.name, c_ast.ID) else None
+        args = n.args.exprs if n.args else []
+        if name in BUILTINS: return BUILTINS[name](self, [self.eval(a, fr) for a in args], fr, args)
+        if name in self.funcs:
+            return self.call(self.funcs[name], [self.eval(a, fr) for a in args], fr)
+        raise Unsupported('call of ' + str(name))
+
+    # -- calls and statements
+    def call(self, fd, args, caller):
+        fr = Frame(fd.decl.name, caller.L)
+        ft = fd.decl.type
+        params = ft.args.params if ft.args else []
+        rett = self.ctype(ft.type)
+        if len(params) == 1 and isinstance(params[0].type, c_ast.TypeDecl) and params[0].name is None: params = []
+        for p, a in zip(params, args):
+            t = self.ctype(p.type)
+            fr.vars[p.name] = self.cast(a, t, caller) if isinstance(a, V) and t[0] in 'if' else (a if isinstance(a, Ptr) else self.copy(a))
+        fr.rett = rett
+        fr.ret = self.zero(rett) if rett != ('v',) else None
+        self.run(fd.body, fr)
+        return fr.ret
+
+    def run(self, n, fr):
+        m = getattr(self, 's_' + type(n).__name__, None)
+        if m is None: raise Unsupported('statement ' + type(n).__name__)
+        m(n, fr)
+
+    def s_Compound(self, n, fr):
+        for s in (n.block_items or []): self.run(s, fr)
+
+    def s_EmptyStatement(self, n, fr): pass
+
+    def s_Decl(self, n, fr):
+        t = self.ctype(n.type)
+        if isinstance(n.type, c_ast.FuncDecl): return
+        v = self.zero(t)
+        if n.init is not None:
+            if isinstance(n.init, c_ast.InitList): raise Unsupported('initializer list')
+            r = self.eval(n.init, fr)
+            v = self.cast(r, t, fr) if isinstance(r, V) and t[0] in 'if' else r
+            if isinstance(v, dict): v = self.copy(v)
+        fr.vars[n.name] = v
+
+    def s_Assignment(self, n, fr): self.eval(n, fr)
+    def s_FuncCall(self, n, fr): self.eval(n, fr)
+    def s_UnaryOp(self, n, fr): self.eval(n, fr)
+    def s_ExprList(self, n, fr): self.eval(n, fr)
+
+    def s_If(self, n, fr):
+        c = self.truth(self.eval(n.cond, fr)); L0 = fr.L
+        fr.L = z3.And(L0, c); self.run(n.iftrue, fr); Lt = fr.L
+        fr.L = z3.And(L0, z3.Not(c))
+        if n.iffalse is not None: self.run(n.iffalse, fr)
+        fr.L = z3.Or(Lt, fr.L)
+
+    def s_Return(self, n, fr):
+        if n.expr is not None:
+            r = self.eval(n.expr, fr)
+            if isinstance(r, V): r = self.cast(r, fr.rett, fr)
+            else: r = self.copy(r)
+            fr.ret = self.guard(fr, fr.ret, r)
+        fr.L = z3.BoolVal(False)
+
+    def s_Goto(self, n, fr):
+        fr.pend[n.name] = z3.Or(fr.pend.get(n.name, z3.BoolVal(False)), fr.L); fr.L = z3.BoolVal(False)
+
+    def s_Label(self, n, fr):
+        if n.name in fr.pend: fr.L = z3.Or(fr.L, fr.pend.pop(n.name))
+        self.run(n.stmt, fr)
+
+    def s_Break(self, n, fr):
+        fr.pend['__break'] = z3.Or(fr.pend.get('__break', z3.BoolVal(False)), fr.L); fr.L = z3.BoolVal(False)
+
+    def s_Switch(self, n, fr):
+        tag = self.promote(self.eval(n.cond, fr)); L0 = fr.L
+        saved_break = fr.pend.pop('__break', z3.BoolVal(False))
+        items = n.stmt.block_items
+        labels = []
+        for it in items:
+            if isinstance(it, c_ast.Case): labels.append(self.eval(it.expr, fr))
+        anyc = z3.Or(*[tag.e == self.cast(l, tag.t, fr).e for l in labels]) if labels else z3.BoolVal(False)
+        fall = z3.BoolVal(False)
+        for it in items:
+            if isinstance(it, c_ast.Case):
+                hit = tag.e == self.cast(self.eval(it.expr, fr), tag.t, fr).e
+                body = it.stmts
+            elif isinstance(it, c_ast.Default):
+                hit = z3.Not(anyc); body = it.stmts
+            else: raise Unsupported('switch item ' + type(it).__name__)
+            fr.L = z3.Or(fall, z3.And(L0, hit))
+            for s in body: self.run(s, fr)
+            fall = fr.L
+        fr.L = z3.Or(fall, fr.pend.pop('__break', z3.BoolVal(False)), z3.And(L0, z3.Not(z3.Or(anyc, z3.BoolVal(any(isinstance(i, c_ast.Default) for i in items))))))
+        if saved_break is not None: fr.pend['__break'] = saved_break if not z3.is_false(z3.simplify(saved_break)) else fr.pend.get('__break', saved_break)
+
+    def s_For(self, n, fr):
+        # induction variable: assigned a constant in init; the bound is evaluated on constants after every step
+        if n.init is None or n.cond is None: raise Unsupported('for without init/cond')
+        Lsave = fr.L
+        inits = n.init.decls if isinstance(n.init, c_ast.DeclList) else (n.init.exprs if isinstance(n.init, c_ast.ExprList) else [n.init])
+        iv = []
+        for it in inits:
+            if isinstance(it, c_ast.Decl):
+                self.s_Decl(it, fr); iv.append(it.name)
+            elif isinstance(it, c_ast.Assignment) and isinstance(it.lvalue, c_ast.ID) and it.op == '=':
+                r = self.eval(it.rvalue, fr); old = fr.vars[it.lvalue.name]
+                fr.vars[it.lvalue.name] = self.cast(r, old.t, fr); iv.append(it.lvalue.name)      # unguarded: the induction variable is loop-local
+            else: raise Unsupported('for init')
+        nloop = 0
+        step = n.next.exprs if isinstance(n.next, c_ast.ExprList) else [n.next]
+        while True:
+            Lc = fr.L; fr.L = z3.BoolVal(True)
+            c = z3.simplify(self.truth(self.eval(n.cond, fr))); fr.L = Lc
+            if not (z3.is_true(c) or z3.is_false(c)): raise Unsupported('loop bound not constant')
+            if z3.is_false(c): break
+            nloop += 1
+            if nloop > 4096: raise Unsupported('loop too long')
+            Lb = fr.pend.pop('__break', None)
+            self.run(n.stmt, fr)
+            fr.pend['__break'] = z3.Or(Lb, fr.pend.get('__break', z3.BoolVal(False))) if Lb is not None else fr.pend.get('__break', z3.BoolVal(False))
+            for s in step:
+                if isinstance(s, c_ast.UnaryOp) and isinstance(s.expr, c_ast.ID) and s.expr.name in iv:
+                    old = fr.vars[s.expr.name]; fr.vars[s.expr.name] = V(old.e + 1 if '+' in s.op else old.e - 1, old.t)
+                else: self.eval(s, fr)
+        fr.L = z3.Or(fr.L, fr.pend.pop('__break', z3.BoolVal(False))) if '__break' in fr.pend and not z3.is_false(z3.simplify(fr.pend['__break'])) else fr.L
+        fr.pend.pop('__break', None)
+
+    # -- public
+    def apply(self, name, args):
+        """execute function `name` on `args` (V / dict / Ptr values); -> Result(ret, outs, ub), outs = the final contents of every pointer argument"""
+        self.ub = []; self.dom = []
+        fd = self.funcs[name]
+        fr = Frame('top', z3.BoolVal(True))
+        ret = self.call(fd, args, fr)
+        return Result(ret, None, list(self.ub), self.dom)
+
+    def inputs(self, name):
+        """fresh symbolic arguments for `name`: scalars and structs by value, pointers to a fresh cell; -> (args, cells)"""
+        fd = self.funcs[name]; ft = fd.decl.type; args, cells = [], []
+        for p in (ft.args.params if ft.args else []):
+            if p.name is None: continue
+            t = self.ctype(p.type)
+            if t[0] == 'p':
+                et = t[1]
+                if et[0] == 'i' and et[1] == 8: cell = [V(z3.BitVec('%s[%d]' % (p.name, i), 8), et) for i in range(16)]
+                else: cell = [self.fresh_val(et, p.name + '*')]
+                cells.append((p.name, cell)); args.append(Ptr(cell, 0, et))
+            else: args.append(self.fresh_val(t, p.name))
+        return args, cells
+
+
+# ---------------------------------------------------------------- builtins (GCC manual "Other Builtins" / "Integer Overflow Builtins")
+def b_expect(m, a, fr, raw): return a[0]
+
+
+def b_clzll(m, a, fr, raw):
+    """__builtin_clzll(x): the number of leading 0-bits in x, starting at the most significant bit; undefined if x is 0 (GCC manual)"""
+    x = a[0]; x = m.cast(x, I(64, 0), fr)
+    m.ub.append(z3.Implies(fr.L, x.e != 0))
+    r = z3.BitVecVal(64, 32)
+    for i in range(64): r = z3.If(z3.Extract(i, i, x.e) == 1, z3.BitVecVal(63 - i, 32), r)
+    return V(r, INT)
+
+
+def b_unary_fp(kind):
+    def f(m, a, fr, raw):
+        x = m.cast(a[0], F64, fr); m.fpdom(fr)
+        return V(fop(kind, [x.e], F64), F64)
+    return f
+
+
+def b_nan(m, a, fr, raw):
+    """__builtin_nan(""): a quiet NaN with a zero payload: 0x7FF8000000000000 (GCC manual: 'Return a quiet NaN')"""
+    return V(z3.BitVecVal(0x7FF8000000000000, 64), F64)
+
+
+def b_memcpy(m, a, fr, raw):
+    """__builtin_memcpy(dst, src, n): little-endian byte copy between scalar cells and byte arrays (GCC manual; AArch64 and x86 are little endian)"""
+    dst, src, n = a[0], a[1], z3.simplify(a[2].e).as_long()
+    def bits(p):
+        v = p.cont[p.key]
+        if isinstance(v, V) and v.t == I(8, 0) and (p.et is None or True) and (isinstance(p.cont, list)):
+            return z3.Concat(*[p.cont[p.key + j].e for j in reversed(range(n))]) if n > 1 else p.cont[p.key].e
+        return v.e
+    s = bits(src); d = dst.cont[dst.key]
+    if isinstance(dst.cont, list) and isinstance(d, V) and d.t == I(8, 0):
+        for j in range(n): dst.cont[dst.key + j] = m.guard(fr, dst.cont[dst.key + j], V(z3.Extract(8 * j + 7, 8 * j, s), I(8, 0)))
+    else:
+        if d.t[1] != 8 * n: raise Unsupported('memcpy size mismatch')
+        dst.cont[dst.key] = m.guard(fr, d, V(s, d.t))
+    return V(z3.BitVecVal(0, 32), INT)
+
+
+BUILTINS = {'__builtin_expect': b_expect, '__builtin_clzll': b_clzll, '__builtin_roundeven': b_unary_fp('roundeven'), '__builtin_floor': b_unary_fp('floor'),
+            '__builtin_ceil': b_unary_fp('ceil'), '__builtin_trunc': b_unary_fp('trunc'), '__builtin_sqrt': b_unary_fp('sqrt'), '__builtin_nan': b_nan,
+            '__builtin_memcpy': b_memcpy}
+
+
+def load(ipaths, macro_files, mutate=None):
+    """-> (Machine, Source, refused {name: reason}) over every function of the preprocessed units `ipaths`.  mutate {function: (old, new)} edits a function's text first (the tests'
+    mutation check: an altered C body must change the term)"""
+    src = Source(ipaths, macro_files)
+    for fn, (old, new) in (mutate or {}).items():
+        assert old in src.funcs[fn], (fn, old)
+        src.funcs[fn] = src.funcs[fn].replace(old, new, 1)
+    tast, funcs, refused = parse_unit(src)
+    mc = Machine(tast, funcs)
+    refused = dict(refused); refused.update(src.refused)
+    return mc, src, refused
+
+
+if __name__ == '__main__':
+    mc, src, refused = load(sys.argv[1].split(':'), sys.argv[2:])
+    ok, bad = [], dict(refused)
+    for name in sorted(mc.funcs):
+        try:
+            args, _ = mc.inputs(name); mc.apply(name, args); ok.append(name)
+        except (Unsupported, KeyError, RecursionError, AttributeError, TypeError, IndexError) as e:
+            bad[name] = '%s: %s' % (type(e).__name__, e)
+    print('translated', len(ok), 'refused', len(bad))
+    for k, v in sorted(bad.items()): print(' refused', k, v)
+
+
+# ---------------------------------------------------------------- the helper closure of the emission
+IDENT = re.compile(r'[A-Za-z_]\w*')
+
+
+def emitted_identifiers(pyfiles):
+    """every identifier inside a string literal of the emitter sources (ast: Constant str and the literal parts of f-strings / % formats)"""
+    import ast
+    ids = set()
+    for pf in pyfiles:
+        for n in ast.walk(ast.parse(open(pf).read())):
+            if isinstance(n, ast.Constant) and isinstance(n.value, str): ids.update(IDENT.findall(n.value))
+    return ids
+
+
+def closure(src, roots):
+    """-> (functions, macros): the functions of the C sources reachable from the emitted identifiers: macro bodies are expanded, then the call graph over function bodies"""
+    seen_m, seen_f, work = set(), set(), list(roots)
+    while work:
+        x = work.pop()
+        if x in src.macros and x not in seen_m:
+            seen_m.add(x); work.extend(IDENT.findall(src.macros[x][1]))
+        if x in src.funcs and x not in seen_f:
+            seen_f.add(x); work.extend(IDENT.findall(src.funcs[x]))
+        if x in src.refused and x not in seen_f:
+            seen_f.add(x)
+    return seen_f, seen_m
+
+
+def translate_all(mc, names):
+    """-> (translated names, {refused name: reason}): each function executed on fresh symbolic inputs"""
+    ok, bad = [], {}
+    for name in sorted(names):
+        try:
+            args, _ = mc.inputs(name); mc.G.pop('c', None); mc.apply(name, args); ok.append(name)
+        except (Unsupported, KeyError, RecursionError, AttributeError, TypeError, IndexError) as e:
+            bad[name] = '%s: %s' % (type(e).__name__, e)
+    return ok, bad
