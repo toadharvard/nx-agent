@@ -6,7 +6,7 @@ KiTrap0D / Wine 9.0), the machine constants are rt/fnvl.h's.  Fault kinds (dsl.F
   INT n / INTO / INT1   the int_vector column of faults.json
   STR   the record's TR selector (SLDT SMSW SGDT SIDT SLDT LAR LSL VERR VERW: undecided fields, no Form)
   CPUID RDTSC   the reference CPU's fixed answer / the platform timer: uf nodes (dsl.uf)"""
-from fnvlift.dsl import C, V, extract, ite, slt, uf, ult, zext
+from fnvlift.dsl import C, V, eq, extract, ite, slt, uf, ult, zext
 from proof.forms import Op, ea, handler, rd, store_op, wr
 
 from fnvlift import x86sys
@@ -32,13 +32,30 @@ handler(*_PRIV)(privileged)
 @handler('int')
 def int_(c):
     v = c.ops[0].val & 0xff
-    if v in INT_KIND:                                     # a gate of the record: its trap row
-        c.F.fault(INT_KIND[v], C(1, 1)); return
-    assert v not in x86sys.INT_EXCLUDED, 'int 0x%x: undecided on the declared OS (x86sys int_ring3)' % v
+    if isinstance(v, int):                                # the concrete instruction: the record's row of its vector
+        if v in INT_KIND:                                 # a gate of the record: its trap row
+            c.F.fault(INT_KIND[v], C(1, 1)); return
+        assert v not in x86sys.INT_EXCLUDED, 'int 0x%x: undecided on the declared OS (x86sys int_ring3)' % v
+        _other(c, 'int 0x%x' % v, C(1, 1))
+        return
+    # a SHAPE: the vector is the symbolic immediate byte.  One row per vector of the record, selected by v == k (the mux of forms_simd.selidx): each gate its trap row, and the access violation of
+    # other_vectors for every vector that is neither a gate nor excluded.  An excluded vector is undecided: the Form carries the domain v not in int_ring3.excluded, and instantiating it there raises OutsideDomain (red at lift, as the concrete builder asserts).
+    v = C(v, 8)
+    for k, kind in INT_KIND.items(): c.F.fault(kind, eq(v, C(k, 8)))
+    named = [eq(v, C(k, 8)) for k in sorted(set(INT_KIND) | set(x86sys.INT_EXCLUDED))]
+    hit = named[0]
+    for n in named[1:]: hit = hit | n
+    _other(c, 'int n', ~hit)
+    exc = [eq(v, C(k, 8)) for k in sorted(x86sys.INT_EXCLUDED)]      # the domain: the vector is not in the record's int_ring3.excluded (a vector there is undecided on the declared OS: the instance is red at lift, as the concrete path asserts)
+    if exc:
+        e = exc[0]
+        for n in exc[1:]: e = e | n
+        c.F.require(~e)
+def _other(c, what, cond):
     o = x86sys.INT_OTHER                                  # every other vector: the record's other_vectors row is the access violation {0, 0xffffffff} at the int (error code vector*8+2)
     assert (o['fault'] == '#GP' and o['exception_code'] == int(_FT['AV']['status'], 16) and o['flags'] == 0 and o['eip_advance'] == 0 and o['address'] == 'the int instruction'
-            and o['error_code'] == 'vector*8+2' and o['parameters'] == [0, 0xffffffff]), 'int 0x%x: the other_vectors row of x86sys int_ring3 is not the access violation the runtime raises' % v
-    c.F.fault(K_AV, C(1, 1))
+            and o['error_code'] == 'vector*8+2' and o['parameters'] == [0, 0xffffffff]), '%s: the other_vectors row of x86sys int_ring3 is not the access violation the runtime raises' % what
+    c.F.fault(K_AV, cond)
 @handler('into')
 def into(c): c.F.fault(K_INTO, V('of', 1))
 @handler('int1')
