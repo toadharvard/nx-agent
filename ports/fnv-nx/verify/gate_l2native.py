@@ -17,7 +17,7 @@ red item `<root>:inputs` naming it and its owner, never skipped. Stated limit: n
 bodysel gives no NATIVE and the universe is 0 until L1/L2 wire the N3 verdicts (reported, not worked around)."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import os
 import shutil
 import sys
@@ -43,7 +43,7 @@ def stem_of(unit):
 
 def load_addrmap(path):
     """{(object basename, symbol): exe address} (contract/objfacts.py load_addrmap_tsv)."""
-    from contract import objfacts
+    from fnvnx.contract import objfacts
     return objfacts.load_addrmap_tsv(path)
 
 

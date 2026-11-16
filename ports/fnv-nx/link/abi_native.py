@@ -24,14 +24,14 @@ plugin's own statements about the symbols, not names.  Open (REMOVE, owner L2): 
 """
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import collections
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from contract import gatefile
-from contract import store
+from fnvnx.contract import gatefile
+from fnvnx.contract import store
 
 Point = collections.namedtuple('Point', 'object ztv ap d slots claim msvc vfptr vft')
 

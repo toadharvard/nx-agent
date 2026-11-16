@@ -3,7 +3,7 @@
 external of a stand-in artifacts repository; the pure rules are tested by contract/tests/test_hive.py. Plain script: exit 0 on pass."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import sys
@@ -12,7 +12,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 import gate_machine as G  # noqa: E402
-from contract import hive  # noqa: E402
+from fnvnx.contract import hive  # noqa: E402
 import test_recipe as TR  # noqa: E402
 
 FAILED = []

@@ -7,7 +7,7 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports: `fnvnx` is ports/fnvnx -> fnv-nx
 
 TREE = "ports/fnv-nx"
 GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
@@ -72,7 +72,7 @@ def plugin_args(origin):
 # assembler alike, minus what the pinned driver itself says does not apply to that language (semantics_for); a guest build.json carries none of them.
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "guest_compiler.json")) as _f:
     _sem = json.load(_f)["flags"]["semantics"]
-from verify import targets as _targets  # noqa: E402  (the declared targets: verify/targets.json)
+from fnvnx.verify import targets as _targets  # noqa: E402  (the declared targets: verify/targets.json)
 
 
 def semantic_flags(datamodel=None):

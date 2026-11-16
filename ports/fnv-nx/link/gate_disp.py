@@ -33,14 +33,14 @@ uncertified = the ids above `:<reason>`.  Counts only on stdout.  Exit 1 when re
 """
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import argparse
 import os
 import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from contract import gatefile
+from fnvnx.contract import gatefile
 import gateids
 
 SHT_SYMTAB, SHT_RELA, SHT_REL, SHT_RELR, PT_LOAD, SHN_UNDEF = 2, 4, 9, 19, 1, 0

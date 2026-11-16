@@ -97,17 +97,17 @@ import struct
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, ".."))   # ports/fnv-nx: contract.X
-from contract import argflow
-from contract import imagerec
-from contract import gatefile
-from contract import memfx
-from link import gateids
-from contract import gpa_names
-from contract import gatecert
-from contract import iat
-from link import relocs
-from contract.reachreq import (COLUMNS, KINDS, M32, FormatError, num, parse_clause, parse_values, parse_ret, parse_requests, canon, sha,
+sys.path.insert(0, os.path.join(HERE, "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): contract.X
+from fnvnx.contract import argflow
+from fnvnx.contract import imagerec
+from fnvnx.contract import gatefile
+from fnvnx.contract import memfx
+from fnvnx.link import gateids
+from fnvnx.contract import gpa_names
+from fnvnx.contract import gatecert
+from fnvnx.contract import iat
+from fnvnx.link import relocs
+from fnvnx.contract.reachreq import (COLUMNS, KINDS, M32, FormatError, num, parse_clause, parse_values, parse_ret, parse_requests, canon, sha,
                       table_id, macro_part, header, write_facts_h, write)   # the request table and the one header emitter (reachreq.py)
 
 BASE_ASSUMPTIONS = ('A1', 'A2', 'A3', 'A4', 'A5', 'A6')

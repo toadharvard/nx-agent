@@ -25,6 +25,7 @@ import atexit
 import concurrent.futures
 import contextlib
 import errno
+import functools
 import hashlib
 import importlib.util
 import json
@@ -56,9 +57,9 @@ import runtime  # noqa: E402
 import sandbox  # noqa: E402
 import toolflags  # noqa: E402
 import unitstage  # noqa: E402
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the parent of the package `verify` (a stage mounts it at /imp)
-from verify import plugsem  # noqa: E402
-from verify import targets as _targets  # noqa: E402  (the declared targets: verify/targets.json)  (the guest compiler record's facts, one source)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the parent of the package `verify` (a stage mounts it at /imp)
+from fnvnx.verify import plugsem  # noqa: E402
+from fnvnx.verify import targets as _targets  # noqa: E402  (the declared targets: verify/targets.json)  (the guest compiler record's facts, one source)
 BuildRed = plugsem.BuildRed
 lifted_origin = plugsem.lifted_origin
 PLUGIN_SOURCES = plugsem.PLUGIN_SOURCES
@@ -914,6 +915,22 @@ def import_trees(roots, owner):
     return {r: gate_admit.trees(roots[r]) for r in (roots[owner].get("imports", []) if owner in roots and isinstance(roots[owner].get("imports", []), list) else []) if r in roots}
 
 
+@functools.lru_cache(maxsize=None)
+def module_top_errors():
+    """(error, ...): the one top-level module name of every project module (gate_admit.MODULE_TOP, `fnvnx`) must name nothing else on the host Python of a stage: it is not in
+    sys.stdlib_module_names, not one of the pinned modules of env.json (envcheck.PY_MODULES) and not a top-level name of any installed (pinned host) distribution. Checked here,
+    never assumed: a root's module path is unique because its top name is."""
+    top, out = gate_admit.MODULE_TOP, []
+    if top in sys.stdlib_module_names:
+        out.append("module top name %r is a standard-library module of the host Python" % top)
+    if top in set(envcheck.PY_MODULES.values()) | set(envcheck.PY_MODULES):
+        out.append("module top name %r is a pinned host module (env.json)" % top)
+    import importlib.metadata
+    if top in importlib.metadata.packages_distributions():
+        out.append("module top name %r is a top-level name of an installed host package" % top)
+    return tuple(out)
+
+
 def import_prefixes(roots, owner):
     """{module prefix: root} of the roots OWNER declares (gate_admit.import_roots over the declared roots that are admitted), and OWNER's own root: a module is
     one file under one module path whoever imports it (a root's tool and another root's tool that imports it both spell `contract.x`), so the stage mounts the
@@ -968,15 +985,15 @@ def foreign_imports(tool, owner, files, inputs, repo=".", closure=None, imports=
     def qualified(name):   # the tracked file of a module spelled by the one rule (prefix + path), inside its declared root
         for pre, rt in prefixes.items():
             if name == pre or name.startswith(pre + "."):
-                parts = name.split(".")
-                for suf in ("/".join(parts) + ".py", "/".join(parts) + "/__init__.py"):
+                stem = gate_admit.module_file(name)
+                for suf in (stem + ".py", stem + "/__init__.py"):
                     c = TREE + "/" + suf
                     if c in theirs_set:
                         return c
         return None
 
     def pkg_dir(name):   # a directory of a declared root that holds modules, named by the qualified rule: an implicit (PEP 420) namespace package, `from <it> import <module>`
-        d = TREE + "/" + name.replace(".", "/") + "/"
+        d = TREE + "/" + (gate_admit.module_file(name) or "\0") + "/"
         return any(name == pre or name.startswith(pre + ".") for pre in prefixes) and any(c.startswith(d) for c in theirs_set)
 
     def find(name, rel):    # the tracked file of module NAME (dotted): in the tool's own root, or carried by a declared input
@@ -1039,8 +1056,11 @@ def foreign_imports(tool, owner, files, inputs, repo=".", closure=None, imports=
                     continue
                 got = find(name, f) or find(top, f)
                 if got is None:
-                    hint = [pre for pre in prefixes for c in theirs if c.endswith("/" + "/".join(name.split(".")) + ".py") and under(c, prefixes[pre])]
-                    bad.append(name + (" (qualified: %s)" % ", ".join("%s.%s" % (h, name) for h in sorted(set(hint))) if hint else ""))
+                    hint = ["%s.%s" % (pre, name) for pre in prefixes for c in theirs if c.endswith("/" + "/".join(name.split(".")) + ".py") and under(c, prefixes[pre])]
+                    q = gate_admit.MODULE_TOP + "." + name   # an unprefixed spelling of a qualified module (`contract.x`): the prefixed name is the hint
+                    if qualified(q) or q in prefixes or q in ns or pkg_dir(q):
+                        hint.append(q)
+                    bad.append(name + (" (qualified: %s)" % ", ".join(sorted(set(hint))) if hint else ""))
                 else:
                     todo.append(got)
     return sorted(set(bad))
@@ -2022,6 +2042,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
                        % (d, root))
         elif not (any(under(f, d) for f in files) or any(under(root + "/" + o, d) for o in gen)):
             err.append("include %r holds no tracked or generated file" % d)
+    err += module_top_errors()
     # a path into a generated tree of another root is no include: the generated files of a root are its declared outputs, and a consumer takes them through `uses`
     for d in inc if isinstance(inc, list) else []:
         for r, g in generated_trees(roots, repo, files).items():
@@ -3497,7 +3518,7 @@ class Job:
                {"at": "/launch/mounts.json", "tree": self.mounts_file(tmp)}] + xin + self.use_inputs(ws)
         imp = import_mount(g["tool"], owner, set(self.files), [p for p in g["inputs"] if isinstance(p, str)], self.roots, self.repo)[1]
         if imp:   # the import closure of the tool in the declared import roots, repo-relative, and nothing else of those roots
-            ins.append({"at": "/imp", "tree": self.ingest_files(tmp, "imp", imp, TREE)})   # at /imp/<path relative to the project tree>: the module path of gate_admit.import_roots
+            ins.append({"at": "/imp/" + gate_admit.MODULE_TOP, "tree": self.ingest_files(tmp, "imp", imp, TREE)})   # at /imp/fnvnx/<path relative to the project tree>: the module path of gate_admit.import_roots
         if "objects_of" in g:
             ins.append({"at": "/objs", "tree": self.objects_input(ws, tmp, g)})
         for p in g["inputs"]:

@@ -16,7 +16,7 @@ Universe (gate_build.quantify, the convention of build/objstub): the admitted pr
 external that fails its hash is red with the reason in detail. Exit 0 iff green."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import shutil
@@ -26,11 +26,11 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from contract import bridgetable  # noqa: E402
-from contract import exportgen  # noqa: E402
+from fnvnx.contract import bridgetable  # noqa: E402
+from fnvnx.contract import exportgen  # noqa: E402
 import cas  # noqa: E402
 import gate_build  # noqa: E402
-from contract import imports  # noqa: E402
+from fnvnx.contract import imports  # noqa: E402
 import linkset  # noqa: E402
 import recipe  # noqa: E402
 

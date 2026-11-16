@@ -18,7 +18,7 @@ Red iff an item is uncertified, the root's build is not green, an object has no 
 unit is an object of the root's recipe (recipe.CXX_EXT). No such root: universe 0, green."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import shutil
@@ -29,12 +29,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "link"))
 import abi  # noqa: E402
-from contract import bridgetable  # noqa: E402
+from fnvnx.contract import bridgetable  # noqa: E402
 import elfobj  # noqa: E402
 import gate_argorder  # noqa: E402
 import gate_build  # noqa: E402
 import gate_imports  # noqa: E402
-from contract import l2sections  # noqa: E402
+from fnvnx.contract import l2sections  # noqa: E402
 import objsections  # noqa: E402
 import odr  # noqa: E402
 import ctypes_compat  # noqa: E402

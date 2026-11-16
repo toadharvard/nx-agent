@@ -38,12 +38,12 @@ import struct
 
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)
-from contract import imagerec
-from contract.imagerec import X
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name (contract.X)
+from fnvnx.contract import imagerec
+from fnvnx.contract.imagerec import X
 
-from contract import argflow
-from contract.argflow import rn
+from fnvnx.contract import argflow
+from fnvnx.contract.argflow import rn
 
 ANY = 'A'
 FRAME = 'F'
