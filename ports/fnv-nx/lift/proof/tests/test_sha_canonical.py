@@ -1,6 +1,6 @@
 """shape_sha is a pure function of the Form's structure: the same in every process, whatever was built before it.
-The universe is a declared input (FNVNX_SHAPE_KEYS, one shape key per line).  Two fresh processes compute the sha of every key of it: one in sorted order, one in reversed order after an unrelated batch of other keys
-(so node serials, z3 AST ids and the hash-cons table all differ); every sha must be equal.  FNVNX_SHA_STRIDE (default 50) takes every STRIDE-th key by sorted position; 1 is the full universe."""
+The universe is a declared input (FNVNX_SHAPE_KEYS, one shape key per line).  Two fresh processes compute the sha of every key of it: one in sorted order, one in reversed order
+(so node serials, z3 AST ids and the hash-cons table all differ); every sha must be equal.  The whole universe is compared (no sampling)."""
 import os
 import subprocess
 import sys
@@ -17,14 +17,7 @@ def child(order, out):
     declared_x86sys.configure()
     from proof import symform
     keys = sorted(set(l.strip() for l in open(os.environ['FNVNX_SHAPE_KEYS']) if l.strip()))
-    stride = int(os.environ.get('FNVNX_SHA_STRIDE', '50'))
-    sample = keys[::stride]
-    if order == 'reversed':
-        ss = set(sample)
-        for k in [k for k in keys if k not in ss][::3]:      # an unrelated batch, built first
-            try: symform.symbuild(k)
-            except Exception: pass
-        sample = sample[::-1]
+    sample = keys[::-1] if order == 'reversed' else keys      # the other order is the unrelated batch of every key
     with open(out, 'w') as f:
         for k in sample:
             try: r = symform.shape_sha(k)

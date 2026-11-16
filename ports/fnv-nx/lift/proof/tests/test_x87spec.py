@@ -20,8 +20,27 @@ def rows(kind):
         if f[0] == kind: out.append([f[1]] + f[2].split() + [f[3]] if len(f[2].split()) == 3 else f[1:])
     return out
 
+def _ref_x_cmp(a, b):
+    """the meaning of the carrier op fx_dsl_x_cmp, SDM 1:T8-6 (the op lemma of test_x87ops binds the emitted helper to it): ST(0) > src 000, < 001, equal 100, unordered or unsupported 111"""
+    un = z3.Or(X.is_nan80(a), X.is_nan80(b), X.is_unsup80(a), X.is_unsup80(b))
+    lt, eq = z3.fpLT(X.fp80(a), X.fp80(b)), z3.fpEQ(X.fp80(a), X.fp80(b))
+    bit = lambda c, v: z3.If(c, z3.BitVecVal(v, 32), z3.BitVecVal(0, 32))
+    return bit(z3.Or(un, eq), 0x4000) | bit(un, 0x400) | bit(z3.Or(un, z3.And(z3.Not(un), lt)), 0x100)
+
+def _meaning(e, memo=None):
+    """e with every application of a carrier op replaced by its reference (x87spec.CARRIER_OPS: fx_dsl_x_cmp)"""
+    memo = {} if memo is None else memo
+    r = memo.get(e.get_id())
+    if r is not None: return r
+    if not z3.is_app(e) or e.num_args() == 0: r = e
+    else:
+        args = [_meaning(e.arg(j), memo) for j in range(e.num_args())]
+        r = _ref_x_cmp(*args) if e.decl().name() == 'fx_dsl_x_cmp' else e.decl()(*args)
+    memo[e.get_id()] = r
+    return r
+
 def val(e):
-    r = z3.simplify(e)
+    r = z3.simplify(_meaning(e))
     assert z3.is_bv_value(r) or z3.is_true(r) or z3.is_false(r), r
     return r.as_long() if z3.is_bv_value(r) else bool(z3.is_true(r))
 

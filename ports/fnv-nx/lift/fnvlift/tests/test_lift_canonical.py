@@ -1,13 +1,13 @@
 """The lifter's output is a pure function of the unit: the same text in every process (the children run with -P -s and a PYTHONHASHSEED of their own, since -I would ignore it), whatever was lifted before it (no node serial, id() or hash order reaches the emitter).
 Universe by rule: every one-instruction unit [opcode map (one byte, 0F), opcode byte, ModRM byte, four zero bytes, RET] of the synthetic image Image.from_bytes at 0x401000 (the buffers of test_sites).
-A unit's text is its lift (or 'UNSUPPORTED reason').  Process A lifts the universe in sorted order, process B (another PYTHONHASHSEED) in a seeded shuffle after an unrelated batch;
-FNVNX_LIFT_STRIDE (default 97) takes every STRIDE-th unit by sorted position, 1 is the whole universe.  Further, COLD units are lifted one per fresh process and compared with A.
+A unit's text is its lift (or 'UNSUPPORTED reason').  Process A lifts the universe in sorted order, process B (another PYTHONHASHSEED) in a seeded shuffle;
+The whole universe is compared (no sampling).  Further, COLD units are lifted one per fresh process and compared with A.
     python3 -I test_lift_canonical.py --cpufeat PATH"""
 import hashlib, os, random, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE); import _inputs
 CF = _inputs.cpufeat_arg() if '--child' not in sys.argv else None
-STRIDE = int(os.environ.get('FNVNX_LIFT_STRIDE', '97')); COLD = int(os.environ.get('FNVNX_LIFT_COLD', '6'))
+COLD = 20
 
 
 def universe():
@@ -33,11 +33,8 @@ def lift_units(units, cpufeat):
 
 
 def child(mode, outp, cpufeat):
-    U = universe()[::STRIDE]
-    if mode == 'shuffled':
-        rest = [u for u in universe() if u not in set(U)]; random.Random(7).shuffle(rest)
-        lift_units(rest[::5][:3000], cpufeat)                       # an unrelated batch first
-        random.Random(11).shuffle(U)
+    U = universe()
+    if mode == 'shuffled': random.Random(11).shuffle(U)
     elif mode.startswith('cold'): U = [U[int(mode[4:])]]
     res = lift_units(U, cpufeat)
     with open(outp, 'w') as f:
@@ -55,7 +52,7 @@ if __name__ == '__main__':
         child(sys.argv[2], sys.argv[3], sys.argv[4]); sys.exit(0)
     a = run('sorted', '1'); b = run('shuffled', '2')
     diff = [u for u in a if a[u] != b.get(u)]
-    n = len(universe()[::STRIDE]); cold = 0; cdiff = []
+    n = len(universe()); cold = 0; cdiff = []
     for i in range(COLD):
         k = i * (n // max(COLD, 1)); c = run('cold%d' % k, str(10 + i)); (u, h), = c.items(); cold += 1
         if a[u] != h: cdiff.append(u)

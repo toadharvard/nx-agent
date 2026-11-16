@@ -64,14 +64,14 @@ def differs(fn, old, new):
 class Mutation(unittest.TestCase):
     def test_altered_bodies_change_the_term(self):
         for fn, old, new in (('fnvl_x_to_i64', 'x.s ? mag > lim : mag >= lim', 'mag >= lim'),
-                             ('fv_i', 'return (r>=-(double)ind&&r<(double)ind)', 'return (r>-(double)ind&&r<(double)ind)'),
+                             ('fv_i', ':!(r>=-(double)ind&&r<(double)ind)', ':!(r>-(double)ind&&r<(double)ind)'),
                              ('fnvl_x_cmp', 'else if (x.s != y.s) r = x.s ? 0x100 : 0;', 'else if (x.s != y.s) r = x.s ? 0 : 0x100;'),
                              ('fx_round', 'rc==0?__builtin_roundeven(v)', 'rc==0?__builtin_floor(v)')):
             with self.subTest(fn=fn):
                 self.assertIn(old, C['source'].funcs[fn])
                 self.assertEqual(differs(fn, old, new), z3.sat)
         # an alteration that cannot change any value leaves the term equal (the check is not vacuous): the redundant NaN test of fv_i
-        self.assertEqual(differs('fv_i', 'if(d!=d) return ind;', ''), z3.unsat)
+        self.assertEqual(differs('fv_i', 'if(d!=d){ (c->fex=(c->fex&~0x200u)|((0x1u)&0x23fu)); return ind; }', ''), z3.unsat)
 
 
 @unittest.skipIf(NOINPUT, NOINPUT or '')

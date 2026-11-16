@@ -13,8 +13,9 @@ inline asm over the host FPSR (fnvl_fp_*), memory macros (M16 ...), the register
 """
 import hashlib, json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path[:0] = [HERE]
+sys.path[:0] = [HERE, os.path.dirname(HERE)]
 import ctrans
+import x87spec
 
 RT = os.path.join(os.path.dirname(HERE), 'rt')
 EMITTERS = [os.path.join(os.path.dirname(HERE), 'fnvlift', n) for n in ('f_x87.py', 'f_x87_ctl.py')]
@@ -40,7 +41,7 @@ def carrier(ipaths=None, macro_files=MACRO_FILES, emitters=EMITTERS, mutate=None
     k = (tuple(ipaths), tuple(macro_files), tuple(emitters), tuple(sorted((mutate or {}).items())))
     if k not in _C:
         mc, src, refused = ctrans.load(ipaths, macro_files, mutate)
-        fs, ms = ctrans.closure(src, ctrans.emitted_identifiers(emitters))
+        fs, ms = ctrans.closure(src, set(ctrans.emitted_identifiers(emitters)) | set(x87spec.CARRIER_OPS))      # the roots: what the emitters name, and the carrier ops the spec applies (the DSL's `cop`)
         parsed = sorted(f for f in fs if f in mc.funcs)
         ok, bad = ctrans.translate_all(mc, parsed)
         bad = dict(bad)
@@ -65,6 +66,33 @@ def table(c):
         for x in outs + list(r.ub) + list(r.dom): h.update(z3.simplify(x).sexpr().encode())
         rows[fn] = h.hexdigest()
     return rows, hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()
+
+
+def call(fn, *bvs, c=None):
+    """the z3 terms of the helper `fn` applied to the bit-vectors BVS, one per parameter in C order: a scalar parameter takes a bit-vector of its width, a struct by value one bit-vector that is the
+    concatenation of its fields (the first field the low bits: fnvl_f80 = se:m), a pointer parameter a fresh cell (its final contents are the outputs).  -> (return value as a bit-vector or None,
+    [(parameter name, final cell contents as bit-vectors)], obligations (Result.ub), FP domain obligations (Result.dom))"""
+    import z3
+    c = c or carrier(); assert fn in c['translated'], fn
+    mc = c['machine']; fd = mc.funcs[fn]; ps = [p for p in (fd.decl.type.args.params if fd.decl.type.args else []) if p.name is not None]
+    assert len(ps) == len(bvs) + sum(1 for p in ps if mc.ctype(p.type)[0] == 'p'), (fn, len(ps), len(bvs))
+    args, cells, it = [], [], iter(bvs)
+    for p in ps:
+        t = mc.ctype(p.type)
+        if t[0] == 'p':
+            cell = [mc.fresh_val(t[1], p.name + '*')]; cells.append((p.name, cell)); args.append(ctrans.Ptr(cell, 0, t[1])); continue
+        b = next(it)
+        if t[0] == 's':
+            fields, lo, d = mc.structs[t[1]], 0, {}
+            for n, ft in fields:
+                d[n] = ctrans.V(z3.Extract(lo + ft[1] - 1, lo, b), ft); lo += ft[1]
+            assert lo == b.size(), (fn, p.name, lo, b.size()); args.append(d)
+        else:
+            assert b.size() <= t[1], (fn, p.name, b.size(), t[1]); args.append(ctrans.V(b if b.size() == t[1] else z3.ZeroExt(t[1] - b.size(), b), t))      # a narrower value is zero-extended (the C passes it in the wider type)
+    mc.G.pop('c', None); r = mc.apply(fn, args)
+    ret = r.ret.e if isinstance(r.ret, ctrans.V) else None
+    outs = [(n, [x.e for x in cell]) for n, cell in cells]
+    return ret, outs, list(r.ub), list(r.dom)
 
 
 def term(fn, args):
