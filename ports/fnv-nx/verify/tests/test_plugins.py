@@ -304,7 +304,8 @@ def main():
         return c, cas.ingest(d, os.path.join(BASE, "ingest-store"))
 
     def xrec(c, t):
-        r = mut(external=list(REC["external"]) + [{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": c, "tree_sha256": t, "at": "/ext/pack"}])
+        # the root names /ext/pack in its include path: PP names the external (a stage mounts and keys only the externals it names, recipe.named_ext), CC does not
+        r = mut(external=list(REC["external"]) + [{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": c, "tree_sha256": t, "at": "/ext/pack"}], include=["/ext/pack"])
         return r
 
     def kinds():
@@ -331,7 +332,7 @@ def main():
     tracked = make_repo("liftedbad", lrec, {"lifted_by": T + "gen/lift.py", "pack": "pack"}, {T + "gen/lift.py": lift, ROOT + "/b.cc": "int b;\n", ROOT + "/a.cc": None})
     check("lifted root with a tracked C++ unit is red", any("is not an output" in x for x in errs(tracked, lrec)), errs(tracked, lrec))
     nopack = make_repo("nopack", lrec, {"lifted_by": T + "gen/lift.py", "pack": "nope"}, {T + "gen/lift.py": lift, ROOT + "/a.cc": None})
-    check("lifted root naming no external is red", any("names no external" in x for x in errs(nopack, lrec)), errs(nopack, lrec))
+    check("lifted root naming no external is red", any("names neither an external" in x for x in errs(nopack, lrec)), errs(nopack, lrec))
     # --- the pack is a root in `uses` (its declared PACK output) instead of an external: the units are still checked against the generated steps of lifted_by
     PR = T + "src"
     prod = {"path": PR, "class": "tool", "target": "host", "recipe": PR + "/build.json"}
