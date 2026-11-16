@@ -2431,3 +2431,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:12
 - cand3b verdict at 963dce662 (tree fb31f7ec) finished with selftests red (test_guest.py); the farm is asked for the full red list. One verdict now on cand3b head 597f2e007 (the merge candidate), warm over the same VDIR. Farm alive (session_01KmtZKTV1mniUErarfUpdJZ).
 - bottleneck: cand3b verdict at 597f2e007.
+
+## 2026-11-16 04:13
+- L6 w7 3d93234: 11 d3d9.dll records (every spec-signed export; 3 undocumented ones have no signature, so they are red if imported); the g_exports hand table is deleted; new check root render/total/d3d9exports (row set = spec set). Accepted.
+- Blocked: contract/exports gen:0 is red on lift/rt cpumodel.c:59 "fnvl_msvcrt_adjust_fdiv undeclared" (record before declaration). Owner L3a, sent now.
+- bottleneck: cand3b verdict at 597f2e007.
