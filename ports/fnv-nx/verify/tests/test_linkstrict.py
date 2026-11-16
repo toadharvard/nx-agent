@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/rt/guest/crt0.s ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for verify/gate_linkstrict.py (class 3): the rules on synthetic objects (compiled with aarch64-linux-gnu-gcc) and the gate on the
 toy product root of test_recipe.py (reused by import). Plain script: PASS/FAIL lines, exit 0 on pass."""
 import json
@@ -16,6 +17,9 @@ import gate_linkstrict as L  # noqa: E402
 import test_recipe as TR  # noqa: E402
 import verdict  # noqa: E402
 
+import scratch  # noqa: E402
+
+scratch.install()
 ROOT = tempfile.mkdtemp(prefix="linkstrict-")
 FAILED, N, T0 = [], [0], time.time()
 
@@ -77,6 +81,8 @@ for ABI[0] in ("lp64", "ilp32"):
     k, _, _ = kinds([], elf, {("r", "x.elf"): [("nope", "B1"), ("z", "B2")], ("q", None): [("a", "B1")]})
     check("(c) a name missing from the ELF, a name of size 0, a table with no ELF -> not certified",
           {("contract:nope", "contract-undefined"), ("contract:z", "contract-undefined"), ("contract:a", "contract-no-elf")} <= k, k)
+    k, _, _ = kinds([], {"l.elf": [("loc", 0, 0, 0, 0, 0)]})
+    check("(a) a LOCAL undefined symbol (a target a relocation could name) is red", ("<elf>", "elf-undefined") in k, k)
     k, _, _ = kinds([], {"u.elf": [("g", 0, 0, 0, 1, 0), ("h", 0, 0, 0, 2, 0), ("i", 0x10, 4, 10, 1, 1)]})
     check("(a) ELF with an undefined, a weak undefined and an IFUNC symbol; and one without .symtab", {("<elf>", "elf-undefined"), ("<elf>", "elf-weak-undefined"),
           ("<elf>", "elf-ifunc")} <= k and ("<elf>", "elf-no-symtab") in kinds([], {"n.elf": None})[0], k)
@@ -92,27 +98,27 @@ for ABI[0] in ("lp64", "ilp32"):
           not {x for x in k if x[0] == "_Z2sqi"} and ("<comdat>", "_Z2sqi") in {(i, n) for i, n in items}, (k, items))
     cd = build("#define K 2\n" + INL + "int fb(int v) { return sq(v) + 1; }\n", "cc")
     k, _, f = kinds([ca, cd, cc_])
-    check("(b1) the same inline function with another macro value in one unit: comdat-differs on the signature, the symbol and the reference",
-          {("_Z2sqi", "comdat-differs")} <= k and any(i == "<comdat>" and n == "_Z2sqi" and kd == "comdat-differs" for i, n, kd, _ in f)
+    check("(b1) the same inline function with another macro value in one unit: byte-different copies on the signature, the symbol and the reference",
+          {("_Z2sqi", "undecidable: no definition record")} <= k and any(i == "<comdat>" and n == "_Z2sqi" and kd == "undecidable: no definition record" for i, n, kd, _ in f)
           and any(i == cc_ and n == "_Z2sqi" for i, n, _, _ in f), (k, f))
     VT = "struct B { virtual ~B() {} virtual int f() { return 1; } };\nB *%s() { return new B; }\n"
     v1, v2 = build(VT % "mk1", "cc"), build(VT % "mk2", "cc")
     k, _, f = kinds([v1, v2])
     check("(b1) a class with a virtual destructor in two units: vtable, typeinfo and member groups are identical, no finding of vague linkage",
-          not {x for x in k if x[1] in ("weak-only", "comdat-differs")} and any(n == "_ZTV1B" for _, n, _, _ in f) is False, (k, f))
+          not {x for x in k if x[1] in ("weak-only", "undecidable: no definition record")} and any(n == "_ZTV1B" for _, n, _, _ in f) is False, (k, f))
     v3 = build(VT.replace("return 1", "return 3") % "mk3", "cc")
     k, _, _ = kinds([v1, v3])
-    check("(b1) the same class with another inline body: its member function and vtable group differ", {("_ZN1B1fEv", "comdat-differs"), ("<defs>", "_ZN1B1fEv")} & k
-          and ("_ZN1B1fEv", "comdat-differs") in k, k)
+    check("(b1) the same class with another inline body: its member function and vtable group differ", {("_ZN1B1fEv", "undecidable: no definition record"), ("<defs>", "_ZN1B1fEv")} & k
+          and ("_ZN1B1fEv", "undecidable: no definition record") in k, k)
     SL = "const char *%s() { return \"zzzz-%s\"; }\n__attribute__((noinline)) inline const char *nm() { return \"hello\"; }\nconst char *u%s() { return nm(); }\n"
     s1, s2 = build(SL % ("p", "p", "1"), "cc"), build(SL % ("q", "q-longer", "2"), "cc")
     k, _, f = kinds([s1, s2])
-    check("(b1) a string literal in an inline function certifies wherever the object laid it out (SHF_MERGE entity, not offset)", not {x for x in k if x[1] == "comdat-differs"}, (k, f))
+    check("(b1) a string literal in an inline function certifies wherever the object laid it out (SHF_MERGE entity, not offset)", not {x for x in k if x[1] == "undecidable: no definition record"}, (k, f))
     wk = build("__attribute__((weak)) int wk() { return 1; }\n", "cc")
     k, _, _ = kinds([wk])
     check("(b1) a weak definition outside every COMDAT group stays weak-only in C++", ("wk", "weak-only") in k or ("_Z2wkv", "weak-only") in k, k)
-    mem, grp = L.elf_comdat(ca)
-    check("elf_comdat: signature -> digest, member section indices; no group in a C object", "_Z2sqi" in grp and mem and not any(L.elf_comdat(build("int x(void){return 1;}")))
+    mem, grp = L.elf_comdat(ca)[:2]
+    check("elf_comdat: signature -> digest, member section indices; no group in a C object", "_Z2sqi" in grp and mem and not any(L.elf_comdat(build("int x(void){return 1;}"))[:3])
           , (mem, grp))
     # (b2) script symbols
     ref = build("extern char __image_end[];\nchar *e(void) { return __image_end; }")
@@ -133,19 +139,30 @@ LS = lambda repo, name, cache=None: (lambda r: (r, verdict._gate_result({"name":
     TR.gate(repo, "linkstrict", TR.BASE + "/" + name, cache))
 GC = ROOT + "/cache"
 empty = TR.make_repo("ls-empty")
-TR.w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": TR.T + "toy", "class": "doc", "gates": []}]}))
+TR.w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": TR.T + "toy", "class": "doc"}]}))
 (rc, g, _, txt), st = LS(empty, "e")
 check("no product root: universe 0, green, accepted by the verdict", rc == 0 and g["universe"] == 0 and st[0] == "green", (g, txt))
+# The toy's items: references a.c->f_b; definitions f_a, f_b, f_c, os_svc; the ELF of a linked root. A linked root also carries the product's
+# crt0 (test_recipe.CRT0): its items are its GLOBAL/WEAK symbols (definitions and references), read from the assembled crt0 itself.
+def crt0_items():
+    d = TR.tempfile.mkdtemp(dir=TR.BASE)
+    open(d + "/c.S", "w").write(TR.CRT0)
+    TR.subprocess.run([TR.CC_DRV, "-mabi=ilp32", "-c", "-o", d + "/c.o", d + "/c.S"], check=True)
+    return len({(n, shn == 0) for n, val, size, typ, bind, shn in L.elf_symbols(d + "/c.o") if bind in (L.GLOBAL, L.WEAK)})
+
+
+N_NOLINK = 5
+N_LINK = N_NOLINK + 1 + crt0_items()
 repo = TR.make_repo("ls-toy")
 t0 = time.time()
 (rc, g, _, txt), st = LS(repo, "t1", GC)
-check("toy root: every reference resolved, ELF closed: green, accepted (2 references + 5 definitions + the ELF)", rc == 0 and g["universe"] == 8 == g["certified"]
+check("toy root: every reference resolved, ELF closed: green, accepted (the toy's items, crt0's and the ELF: %d)" % N_LINK, rc == 0 and g["universe"] == N_LINK == g["certified"]
       and st[0] == "green", (g, txt))
 print("INFO toy gate (incl. build) %.1f s" % (time.time() - t0))
 t0 = time.time()
 (rc, g, _, txt), st = LS(repo, "t2", GC)
 print("INFO toy gate warm %.1f s" % (time.time() - t0))
-WK = '#include "inc/toy.h"\nint wk(void) __attribute__((weak));\nint f_c(int x) { return wk ? wk() : x + TOY; }\n'
+WK = '#include "toy.h"\nint wk(void) __attribute__((weak));\nint f_c(int x) { return wk ? wk() : x + TOY; }\n'
 (rc, g, _, txt), st = LS(TR.make_repo("ls-weak", rec=TR.mut(link=None), files={"toy/c.c": WK}), "t3", GC)
 check("weak undefined symbol, root without a link: rule (b) on the object is red",
       rc == 2 and st[0] == "red" and g["uncertified"] == [TR.ROOT + "/c.c:wk"] and "undefined 1" in g["detail"], (g, txt))
@@ -154,7 +171,7 @@ check("weak undefined symbol, root with a link: the link's ldcheck stage is red 
       rc == 2 and st[0] == "red" and g["uncertified"] == [TR.ROOT + ":<build>"], (g, txt))
 (rc, g, _, txt), st = LS(TR.make_repo("ls-nolink", rec=TR.mut(link=None), files={"toy/b.c": None}), "t4", GC)
 check("root without a link: an undefined reference (f_b, no definition anywhere) is red", rc == 2 and g["uncertified"] == [TR.ROOT + "/a.c:f_b"], (g, txt))
-ALIAS = '#include "inc/toy.h"\nint f_b(void) { return TOY * 2; }\nint f_b2(void) __attribute__((alias("f_b")));\n'
+ALIAS = '#include "toy.h"\nint f_b(void) { return TOY * 2; }\nint f_b2(void) __attribute__((alias("f_b")));\n'
 for tag, rows, ok in (("different body ids", "f_b\tB1\nf_b2\tB2\n", False), ("one body id", "f_b\tB1\nf_b2\tB1\n", True)):
     rr = TR.make_repo("ls-alias-" + str(ok), rec=TR.mut(contract_names="contract.tsv"), files={"toy/b.c": ALIAS, "toy/contract.tsv": rows})
     (rc, g, _, txt), st = LS(rr, "t5" + str(ok), GC)
@@ -166,7 +183,7 @@ for abi in ("ilp32", "lp64"):
     ABI[0] = abi
     t0 = time.time()
     (rc, g, _, txt), st = LS(TR.make_repo("ls-toy-" + abi, rec=TR.abi_rec(abi)), "ta" + abi, GC)
-    n = 8 if abi == "ilp32" else 7      # LP64: no ELF (a link is the ILP32 guest ELF)
+    n = N_LINK if abi == "ilp32" else N_NOLINK      # LP64: no ELF (a link is the ILP32 guest ELF), so no crt0
     check("toy root: green %d/%d and accepted" % (n, n), rc == 0 and g["universe"] == n == g["certified"] and st[0] == "green", (g, txt))
     print("INFO %s toy gate %.1f s" % (abi, time.time() - t0))
     IE = {"toy/a.c": TR.FILES["toy/a.c"].replace("int f_a(void) {", "extern char __image_end[];\nint f_a(void) { (void)*(volatile char *)__image_end;"),
@@ -176,6 +193,41 @@ for abi in ("ilp32", "lp64"):
         check("link script defines __image_end, the root links an ELF: the reference is certified", rc == 0 and g["certified"] == g["universe"] and st[0] == "green", (g, txt))
     (rc, g, _, txt), st = LS(TR.make_repo("ls-ie0-" + abi, rec=TR.abi_rec(abi, TR.mut(link=None, os_layer=["os.S"])), files=IE), "ie0" + abi, GC)
     check("the same objects, the recipe links no ELF: __image_end is undefined", rc == 2 and g["uncertified"] == [TR.ROOT + "/a.c:__image_end"], (g, txt))
+# (d) the host boundary: the exports of the pinned host runtime (libc6, libgcc-s1, libstdc++6)
+exp, hk = L.host_exports(GC)
+check("(d) host_exports: the pinned runtime's exports hold libc, libstdc++ and libgcc_s names and no local name", {"printf", "memcpy", "sqrt", "__cxa_throw", "_Unwind_Resume"} <= set(exp)
+      and "fnvnx_nothing" not in exp and len(hk) == 64 and L.host_exports(GC)[1] == hk, (len(exp), hk))
+href = build("int printf(const char *, ...);\nint nothere(void);\nint u(void) { return printf(\"x\") + nothere(); }\n")
+hs = L.elf_symbols(href)
+items, finds = L.judge({"h/o.o": hs}, {}, {}, {}, (["h/"], set(exp)))
+check("(d) an object of a host root: printf is certified (exported by the host runtime), the name nothing defines stays undefined", [(o, n, k) for o, n, k, _ in finds] == [("h/o.o", "nothere", "undefined")], finds)
+items, finds = L.judge({"g/o.o": hs}, {}, {}, {}, (["h/"], set(exp)))
+check("(d) the same object in a guest root (not a host prefix): printf is undefined too, no boundary", sorted(n for _, n, _, _ in finds) == ["nothere", "printf"], finds)
+items, finds = L.judge({"h/o.o": hs}, {}, {}, {}, None)
+check("(d) without host roots the rule does not exist: printf and nothere are undefined", sorted(n for _, n, _, _ in finds) == ["nothere", "printf"], finds)
+HB = '#include "toy.h"\nint printf(const char *, ...);\nint f_b(void) { return printf("x") + TOY; }\n'
+(rc, g, _, txt), st = LS(TR.make_repo("ls-host", rec=TR.mut(link=None), files={"toy/b.c": HB}), "t6", GC)
+check("gate on a host-target root without a link: a reference to printf is certified, accepted", rc == 0 and g["certified"] == g["universe"] and st[0] == "green", (g, txt))
+HW = HB.replace("printf", "nothere_zz")
+(rc, g, _, txt), st = LS(TR.make_repo("ls-host2", rec=TR.mut(link=None), files={"toy/b.c": HW}), "t7", GC)
+check("gate on a host-target root: a name the host runtime does not export is red", rc == 2 and g["uncertified"] == [TR.ROOT + "/b.c:nothere_zz"], (g, txt))
+# (e) outline atomics in guest objects
+AT = "int v;\nint f(void) { return __atomic_fetch_add(&v, 1, __ATOMIC_RELAXED); }\n"
+ao = build(AT, "c", ["-moutline-atomics"])
+an = build(AT, "c", ["-mno-outline-atomics"])
+items, finds = L.judge({"g/o.o": L.elf_symbols(ao)}, {}, {}, {}, None, ["g/"])
+check("(e) a guest object compiled with -moutline-atomics references __aarch64_ldadd*: finding outline-atomic", [(n, k) for _, n, k, _ in finds if k == "outline-atomic"] == [("__aarch64_ldadd4_relax", "outline-atomic")], finds)
+items, finds = L.judge({"g/o.o": L.elf_symbols(an)}, {}, {}, {}, None, ["g/"])
+check("(e) the same code with -mno-outline-atomics: no reference, no finding", not finds, finds)
+items, finds = L.judge({"h/o.o": L.elf_symbols(ao)}, {}, {}, {}, None, ["g/"])
+check("(e) outside a guest root the clause does not apply (an undefined name only)", [k for _, _, k, _ in finds] == ["undefined"], finds)
+# (g) the pinned runtime and the link script define names for the guest root's references
+items, finds = L.judge({"g/o.o": hs}, {}, {}, {}, None, ["g/"], {"printf"})
+check("(g) a guest reference that the runtime defines (printf) is certified, the name nothing defines stays undefined", [(o, n, k) for o, n, k, _ in finds] == [("g/o.o", "nothere", "undefined")], finds)
+items, finds = L.judge({"g/o.o": hs}, {}, {}, {}, None, ["g/"], set())
+check("(g) with no runtime name both stay undefined", sorted(n for _, n, _, _ in finds) == ["nothere", "printf"], finds)
+items, finds = L.judge({"h/o.o": hs}, {}, {}, {}, None, ["g/"], {"printf", "nothere"})
+check("(g) outside a guest root the runtime does not apply", sorted(n for _, n, _, _ in finds) == ["nothere", "printf"], finds)
 ABI[0] = "lp64"
 print("%d failed, wall %.1f s" % (len(FAILED), time.time() - T0))
 sys.exit(1 if FAILED else 0)

@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/addr/fnvnx_addr.cc ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc
+# reads: ports/fnv-nx/toolchain/ftoi/f2i_builtins.inc ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc ports/fnv-nx/toolchain/layout/crossing_terms.inc
+# reads: ports/fnv-nx/toolchain/layout/decltype_spell.inc ports/fnv-nx/toolchain/layout/fnvnx_layout.cc ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json
+# reads: ports/fnv-nx/toolchain/names/fnvnx_names.cc ports/fnv-nx/toolchain/order/atomic_order.inc ports/fnv-nx/toolchain/order/fnvnx_frame.h
+# reads: ports/fnv-nx/toolchain/order/fnvnx_order.cc ports/fnv-nx/toolchain/pi/fnvnx_pi.cc ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc ports/fnv-nx/verify
+"""Tests for verify/gate_datamodel.py (gate "datamodel"): guest roots only; the compiler pin, -mabi=ilp32 and the plugins are read from the CC stage
+documents of the build. Real-compiler case: the pinned external of verify/guest_compiler.json (fetched by commit; red with the reason when it
+cannot be). Plain script, needs root (sandbox)."""
+import copy
+import json
+import os
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import test_plugins as tp
+import test_guest as tg
+from test_plugins import BASE, ROOT, T, REAL, VERIFY, check, REC
+
+sys.path.insert(0, VERIFY)
+import gate_datamodel as gd  # noqa: E402
+import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: `verify` is imported by its qualified name
+from verify import targets  # noqa: E402
+
+
+DM_JSON = gd.DATAMODEL
+
+
+def gate(repo, cache):
+    out = os.path.join(BASE, "gate-out-" + os.path.basename(repo))
+    os.makedirs(out, exist_ok=True)
+    p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "gate_datamodel.py")], cwd=repo,
+                       env=dict(os.environ, GATE_OUT=out, GATE_CACHE=cache), capture_output=True, text=True)
+    f = os.path.join(out, "datamodel.json")
+    return p.returncode, (json.load(open(f)) if os.path.exists(f) else {}), p.stdout + p.stderr
+
+
+def main():
+    pin = json.load(open(os.path.join(REAL, T + "verify/guest_compiler.json")))
+    ext = pin["external"]
+    cache = os.path.join(BASE, "gate-cache-dm")
+    rec = tg.guest_rec(ext)
+    host = tg.guest_repo("d1", REC, pin, target="host")
+    rc, r, o = gate(host, cache)
+    check("no guest root: universe 0, green", rc == 0 and r["status"] == "green" and r["universe"] == 0, o)
+    stock = tg.guest_repo("d2", dict(REC, compiler={"cc": "gcc", "cxx": "g++"}), pin)
+    rc, r, o = gate(stock, cache)
+    check("guest root on the stock g++: red, compiler item uncertified", rc == 2 and r["certified"] == 0 and ROOT + ":compiler" in r["uncertified"], r)
+    other = tg.guest_repo("d3", tg.guest_rec(dict(ext, commit="c" * 40)), pin)
+    rc, r, o = gate(other, cache)
+    check("guest root on another commit of the external: red", rc == 2 and ROOT + ":compiler" in r["uncertified"], r)
+    check("the semantics flags of the recipe rule are the declared targets' prefix then the pin's (one source each)",
+          tuple(targets.semantic_prefix(targets.load())) + tuple(pin["flags"]["semantics"]["common"]) == recipe.SEMANTICS_FLAGS and "-mabi=ilp32" in recipe.SEMANTICS_FLAGS
+          and "-mno-outline-atomics" in recipe.SEMANTICS_FLAGS and "-ffp-contract=off" in recipe.SEMANTICS_FLAGS, pin["flags"])
+    # the certificate of a unit, on a CC stage document (pure function of the document and the semantic set of the unit's language)
+    sem = list(recipe.SEMANTICS_FLAGS)
+    doc = {"argv": [ext["at"] + "/bin/g"] + sem + ["-O2", "-Werror=attributes"] + ["-fplugin=/plug/%s/%s.so" % (n, n) for n in recipe.PLUGIN_SOURCES] +
+           ["-frandom-seed=x", "-Werror=date-time"],
+           "inputs": [{"at": ext["at"], "tree": ext["tree_sha256"]}] + [{"at": "/plug/" + n, "tree": "t"} for n in recipe.PLUGIN_SOURCES]}
+    check("complete CC document certifies a C++ unit", gd.unit_why("a.cc", doc, sem, pin) == [], gd.unit_why("a.cc", doc, sem, pin))
+    miss = copy.deepcopy(doc)
+    miss["argv"] = [a for a in miss["argv"] if "fnvnx_ftoi" not in a]
+    miss["inputs"] = [i for i in miss["inputs"] if i["at"] != "/plug/fnvnx_ftoi"]
+    w = gd.unit_why("a.cc", miss, sem, pin)
+    check("C++ unit missing a plugin is red", len(w) == 2 and all("fnvnx_ftoi" in x for x in w), w)
+    cp = ["fnvnx_ftoi", "fnvnx_order", "fnvnx_dispatch", "fnvnx_addr"]   # what cc1 can load (the real answer is checked in test_guest from the ELF files)
+    cdoc = copy.deepcopy(doc)
+    cdoc["argv"] = [a for a in cdoc["argv"] if not any("/%s/" % n in a for n in recipe.PLUGIN_SOURCES if n not in cp)]
+    cdoc["inputs"] = [i for i in cdoc["inputs"] if not any(i["at"] == "/plug/" + n for n in recipe.PLUGIN_SOURCES if n not in cp)]
+    check("C unit with the plugins cc1 can load is green", gd.unit_why("a.c", cdoc, sem, pin, cp) == [], gd.unit_why("a.c", cdoc, sem, pin, cp))
+    check("C unit that lacks a loadable plugin is red", len(gd.unit_why("a.c", miss, sem, pin, cp)) == 2 or any("fnvnx_ftoi" in x for x in gd.unit_why("a.c", miss, sem, pin, cp)))
+    check("C unit that loads a plugin cc1 cannot load is red", any("fnvnx_sdd" in x and "cannot load" in x for x in gd.unit_why("a.c", doc, sem, pin, cp)), gd.unit_why("a.c", doc, sem, pin, cp))
+    check("every plugin of the set is required, one by one", all(len(gd.unit_why("a.c", dict(doc, argv=[x for x in doc["argv"] if "/%s/" % n not in x], inputs=[
+        i for i in doc["inputs"] if i["at"] != "/plug/" + n]), sem, pin)) == 2 for n in recipe.PLUGIN_SOURCES))
+    noabi = copy.deepcopy(doc)
+    noabi["argv"] = [a for a in noabi["argv"] if a != "-mabi=ilp32"]
+    check("unit without -mabi=ilp32 is red", "argv lacks -mabi=ilp32" in gd.unit_why("a.cc", noabi, sem, pin), gd.unit_why("a.cc", noabi, sem, pin))
+    for f in sem:   # every flag of the set is required, one by one (the gate keeps no list of its own)
+        d = copy.deepcopy(doc)
+        d["argv"] = [a for a in d["argv"] if a != f]
+        check("unit without %s is red" % f, any(f in x for x in gd.unit_why("a.cc", d, sem, pin)), gd.unit_why("a.cc", d, sem, pin))
+    swapped = copy.deepcopy(doc)
+    swapped["argv"][1], swapped["argv"][2] = swapped["argv"][2], swapped["argv"][1]
+    check("the semantic flags out of order are red", gd.unit_why("a.cc", swapped, sem, pin) != [])
+    for f in ("-moutline-atomics", "-fno-fp-contract", "-ffast-math", "-fno-signed-char", "-march=native", "-Ofast", "-fPIE"):
+        d = copy.deepcopy(doc)
+        d["argv"].insert(-2, f)
+        check("a foreign semantic flag %s is red" % f, "argv holds " + f in gd.unit_why("a.cc", d, sem, pin), gd.unit_why("a.cc", d, sem, pin))
+    csem = [f for f in sem if f != "-fno-sized-deallocation"]   # a language the driver says a flag does not apply to: the set, minus it
+    cdoc = copy.deepcopy(doc)
+    cdoc["argv"] = [a for a in cdoc["argv"] if a != "-fno-sized-deallocation"]
+    check("a C document with the driver's C subset is green", gd.unit_why("a.c", cdoc, csem, pin) == [], gd.unit_why("a.c", cdoc, csem, pin))
+    check("a C document that still holds the C++-only flag is red", "argv holds -fno-sized-deallocation" in gd.unit_why("a.c", doc, csem, pin))
+    rows = [dict(id="S01", flag="-fsigned-char", check='static_assert DM("S01") in toolchain/tests/x.cpp'), dict(id="S02", flag=None, check='static_assert DM("S02") in toolchain/tests/x.cpp')]
+    ok = gd.row_why(rows, ["-fsigned-char"], 0, [], {"S01", "S02"})
+    check("rows with their cases, accepted by the compiler, are certified", ok == {"S01": [], "S02": []}, ok)
+    bad = gd.row_why(rows, ["-fsigned-char"], 1, ["x.cpp:3:1: error: static assertion failed: S02"], {"S01", "S02"})
+    check("a row whose case the compiler rejects is red, the other stays green", bad["S02"] and not bad["S01"], bad)
+    check("a row with no case is red", gd.row_why(rows, ["-fsigned-char"], 0, [], {"S01"})["S02"] != [], 0)
+    check("a case with no row is an item of its own", gd.row_why(rows, ["-fsigned-char"], 0, [], {"S01", "S02", "S09"}).get("case:S09"), 0)
+    check("a flag row whose site flag is not in the semantic set is red", gd.row_why(rows, [], 0, [], {"S01", "S02"})["S01"] != [], 0)
+    odd = rows + [dict(id="S29", flag=None, check="ldbl/model.cpp cases (test_ldbl model() step)")]
+    check("a row whose check is not a static_assert case is red", gd.row_why(odd, ["-fsigned-char"], 0, [], {"S01", "S02"})["S29"] != [], 0)
+    check("a case file that does not compile marks every row red", all(gd.row_why(rows, ["-fsigned-char"], 1, ["x.cpp:1: error: expected ;"], {"S01", "S02"}).values()), 0)
+    check("unit without a CC document is red", gd.unit_why("a.cc", None, sem, pin) == ["no CC stage document"])
+    # the real compiler: green
+    g = tg.guest_repo("d4", rec, pin, files={DM_JSON: json.dumps({"rows": [dict(id="S01", flag="-fsigned-char", check='static_assert DM("S01") in toolchain/tests/x.cpp'), dict(id="S05", flag=None, check='static_assert DM("S05") in toolchain/tests/x.cpp')]}),
+                                                     "ports/fnv-nx/toolchain/tests/x.cpp": '#define DM(id, ...) static_assert((__VA_ARGS__), id)\nDM("S01", (char)-1 < 0);\nDM("S05", sizeof(int) == 4);\n',
+                                                     ROOT + "/b.cc": "int b() { return 2; }\n", ROOT + "/c.c": "int c(float f) { return (int)f; }\n",
+                                                     ROOT + "/s.S": ".text\n.globl sx\nsx: ret\n"})
+    rc, r, o = gate(g, cache)
+    check("native guest root on the pinned compiler: green, compiler + C++, C and asm units", rc == 0 and r["status"] == "green" and (r["certified"], r["universe"]) == (7, 7), (rc, r, o))
+
+    # a (root, variant) spec is judged by the variant's own record; an unknown variant is red, never a crash
+    vrec = dict(rec, variants={"vv": {"flags_add": {"cxx": ["-DFNVNX_VARIANT=1"]}}})
+    vg = tg.guest_repo("d5", vrec, pin, files={DM_JSON: json.dumps({"rows": [dict(id="S05", flag=None, check='static_assert DM("S05") in toolchain/tests/x.cpp')]}),
+                                                "ports/fnv-nx/toolchain/tests/x.cpp": '#define DM(id, ...) static_assert((__VA_ARGS__), id)\nDM("S05", sizeof(int) == 4);\n',
+                                                ROOT + "/b.cc": "int b() { return 2; }\n"})
+    vc = os.path.join(BASE, "gate-cache-dm")
+    jb = gd.judge_root(ROOT, vg, vc)
+    jv = gd.judge_root(ROOT + "@vv", vg, vc)
+    ju = gd.judge_root(ROOT + "@nope", vg, vc)
+    check("root@variant: judged by the variant record (own units, same universe as the base), green", jv[0] == jb[0] and jv[1] == jv[0] and jb[1] == jb[0], (jb, jv))
+    check("root@unknown variant: red item, 'no variant' reason, no crash", ju[1] == 0 and ju[0] >= 1 and "no variant" in ju[3], ju)
+
+
+if __name__ == "__main__":
+    main()
+    print("FAILED: %s" % tp.FAILED if tp.FAILED else "all passed")
+    sys.exit(1 if tp.FAILED else 0)

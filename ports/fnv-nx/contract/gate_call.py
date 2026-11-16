@@ -10,7 +10,7 @@ Two conditions; a function with a row of either is not N2 (bodysel takes LIFTED)
    symbol name of Y in the pristine MSVC objects (facts['pristine'], built from the N1 certificate by `pristine_names`), and
    that name is decorated (starts with `?`).  Not provable, by rule and with no name table: no sympair section in the object;
    Y has no pristine COFF symbol; the pristine symbol is undecorated (extern "C", every asm/x87/register CRT helper such as
-   _ftol2 or _CI*: `_f` carries no types); no `ref` row of a named kind (not `unnamed:*`) has the pristine name; a covering
+   _ftol2 or _CI*: `_f` carries no types); no `ref` row of a named kind (not `nodecor:*`) has the pristine name; a covering
    row with an undecorated name.  Edge and row are matched by the exe address (objfacts keeps no ELF symbol of an edge): the
    rows that "cover" Y are the ref rows whose name is a pristine name of Y; all of them must be decorated and one must exist.
    Proof argument: proto.py (R5) derives cc, stack words, varargs, sret and the argument classes of a boundary only from the
@@ -19,8 +19,8 @@ Two conditions; a function with a row of either is not N2 (bodysel takes LIFTED)
    by-value/sret shape the caller compiled against are the callee's exe contract.  A name that carries no types gives no such
    equality: the edge is not provable and the caller is LIFTED, never guessed.  Several native copies of one address: each is
    judged, the worst verdict stands.
-Assumptions: the `names` plugin ran on every native unit (the recipe's guest-compiler/plugin rule); the pristine cl symbol
-names are the exe's contract (N1: byte-equal, one symbol map); an external decorated name denotes one entity link-wide.
+Assumptions: the `names` plugin ran on every native unit (the recipe's guest-compiler/plugin rule) (ASM-050); the pristine cl symbol
+names are the exe's contract (N1: byte-equal, one symbol map) (ASM-053); an external decorated name denotes one entity link-wide (ASM-054).
 Zero edges: provable.  An object with no sympair section: every function of it with an edge is not N2.
 """
 import collections, re
@@ -57,7 +57,7 @@ def edges(v, x, cookie):
 
 def undeclared(ob, v, pristine, objs, x, cookie, own):
     """None when every edge of the copy is declared as the rule says, else (address, reason) of the lowest failing edge."""
-    refs = [(ms, k) for _, ms, k, d in objs.get((ob, 'sympair'), ()) if d == 'ref']
+    refs = [(ms, k) for _, ms, k, d in objs.get((ob, 'sympair'), ()) if d == 'ref' and k != 'noemit']   # a noemit row is the unit's own definition with no symbol (sympair_kinds.inc), not a reference to a body elsewhere
     for y in sorted(e for e in edges(v, x, cookie) if e not in own):
         if (ob, 'sympair') not in objs:
             return y, 'object has no .fnvnx.sympair section'
@@ -67,9 +67,9 @@ def undeclared(ob, v, pristine, objs, x, cookie, own):
         if not any(n[:1] == '?' for n in names):
             return y, 'pristine symbol is undecorated (carries no types): %s' % sorted(names)[0]
         cover = [(ms, k) for ms, k in refs if ms in names]
-        named = [ms for ms, k in cover if k[:8] != 'unnamed:']
+        named = [ms for ms, k in cover if k[:8] != 'nodecor:']
         if not named:
-            return y, ('only an unnamed:* ref row has the pristine name' if cover else
+            return y, ('only a nodecor:* ref row has the pristine name' if cover else
                        'no ref row has the pristine name %s' % sorted(names)[0])
         if any(ms[:1] != '?' for ms in named):
             return y, 'a ref row for the target has an undecorated name'

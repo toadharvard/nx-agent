@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/include/fnvnx/placement.h ports/fnv-nx/verify
 """Tests of verify/bootinputs.py: the converters of the L1 contract branch files to boot.py inputs. Plain script, exit 0 on pass."""
 import hashlib
 import json
@@ -61,15 +62,18 @@ def main():
     case("join: not a manifest", good(raises(bi.join_elf, "{}", parts.__getitem__)))
     # reserved
     H = bi.MODULE_HEADER
-    row = lambda n, base, soi: "\t".join([n, "a" * 64, "10", "400000", base, soi, "0", "100", "1", "0"])
-    txt = H + "\n" + row("zz.dll", "02000000", "00010000") + "\n" + row("aa.dll", "01400000", "00020000") + "\n"
-    r = bi.reserved_rows(txt, pe(0x400000, 0x1000000))
-    case("reserved: lo..hi from assigned_base+size_of_image, exe from its PE, sorted",
+    row = lambda n, base, soi: "\t".join([n, "a" * 64, "10", "400000", base, soi, "0", "100", "1", "0", "1"])
+    EXE = pe(0x400000, 0x1000000)
+    exe_row = lambda raw=EXE: "\t".join(["FalloutNV.exe", hashlib.sha256(raw).hexdigest(), "10", "400000", "00400000", "01000000", "0", "100", "1", "", "0"])
+    txt = H + "\n" + exe_row() + "\n" + row("zz.dll", "02000000", "00010000") + "\n" + row("aa.dll", "01400000", "00020000") + "\n"
+    r = bi.reserved_rows(txt, EXE)
+    case("reserved: lo..hi from assigned_base+size_of_image, the exe row (dll 0) named exe, sorted",
          r == [("exe", 0x400000, 0x1400000), ("aa.dll", 0x1400000, 0x1420000), ("zz.dll", 0x2000000, 0x2010000)], r)
     for k, t in (("no header", row("a.dll", "1000", "10") + "\n"), ("9 fields", H + "\na\tb\n"), ("bad hex", H + "\n" + row("a.dll", "xx", "10") + "\n"),
-                 ("zero size", H + "\n" + row("a.dll", "1000", "0") + "\n"), ("stray comment", H + "\n# x\n")):
-        case("reserved error: " + k, good(raises(bi.reserved_rows, t, pe(0x400000, 0x1000))))
-    case("reserved error: exe not PE", good(raises(bi.reserved_rows, txt, b"nope")))
+                 ("zero size", H + "\n" + row("a.dll", "1000", "0") + "\n"), ("stray comment", H + "\n# x\n"),
+                 ("no exe row", H + "\n" + row("a.dll", "1000", "10") + "\n"), ("two exe rows", H + "\n" + exe_row() + "\n" + exe_row() + "\n")):
+        case("reserved error: " + k, good(raises(bi.reserved_rows, t, EXE)))
+    case("reserved error: the exe row is another exe", good(raises(bi.reserved_rows, txt, pe(0x400000, 0x2000))))
     # keys
     ent = "000ffff0\trt_a\timport\n00100000\tI_1\timport\n00401000\tL_1\tcode\n# table_id " + TID + "\n"
     kt = "# table_id " + TID + "\n00100000\tm.dll\tf\t1\tstdcall\ti\ti\tsym\n"
@@ -79,6 +83,14 @@ def main():
     case("keys error: key not an import row", good(raises(bi.key_range, ent, kt.replace("00100000", "00100010"))))
     case("keys error: 7 columns", good(raises(bi.key_range, ent, kt.replace("\tsym", ""))))
     case("keys error: unaligned key", good(raises(bi.key_range, ent.replace("00100000", "00100004"), kt)))
+    # stage-output: the generator is found by the output it declares (exactly one)
+    gr = {"generated": [{"outputs": ["gen/a.tsv"]}, {"outputs": ["gen/m.c", "gen/keys.tsv"]}]}
+    case("stage-output: the one generator declaring the output", bi.generator_index(gr, "gen/keys.tsv") == 1)
+    case("stage-output error: no generator declares it", good(raises(bi.generator_index, gr, "gen/x.tsv")))
+    case("stage-output error: two generators declare it", good(raises(bi.generator_index, {"generated": [{"outputs": ["o"]}, {"outputs": ["o"]}]}, "o")))
+    case("stage-output error: a recipe without generated", good(raises(bi.generator_index, {}, "o")))
+    case("stage-output error: an output NAME the root does not declare", good(raises(bi.stage_output_table, os.path.join(HERE, "..", "..", ".."), "ports/fnv-nx/loader", "NOPE", "/nonexistent")))
+    case("stage-output error: an unadmitted root", good(raises(bi.stage_output_table, os.path.join(HERE, "..", "..", ".."), "ports/fnv-nx/nonexistent", "gen/keys.tsv", "/nonexistent")))
     # milestones
     ROW = lambda name, kind, v, src, extra=None: "\t".join([name, kind, v, src] + ([extra] if extra is not None else [])) + "\n"
     EXE = ROW("exe_entry", "exe_entry", "00ecc4db", "exe PE ImageBase+AddressOfEntryPoint")
@@ -87,10 +99,11 @@ def main():
     run = "header\n   fnvnx-start: identity ok\n   fnvnx-start: image mapped\n   [fnvnx] other\n"
     t = bi.milestone_table(mt, run, TID)
     tab = bi.bootmiles.load_table(t)
-    case("milestones: console lines in order, then exe-entry", [m["name"] for m in tab.milestones] == ["start-01", "start-02", "exe-entry"]
+    case("milestones: console lines in order, then exe-entry", [m["name"] for m in tab.milestones] == ["start-01", "start-02", "exe-entry", "first-frame"]
          and tab.milestones[0]["parts"][0]["target"] == boot.console_part("fnvnx-start: identity ok")
-         and tab.milestones[2]["parts"][0]["target"] == 0xecc4db, t)
-    case("milestones: no run.txt -> exe-entry only", [m["name"] for m in bi.bootmiles.load_table(bi.milestone_table(mt, "", TID)).milestones] == ["exe-entry"])
+         and tab.milestones[2]["parts"][0]["target"] == 0xecc4db
+         and [(p["kind"], p["target"]) for p in tab.milestones[3]["parts"]] == [("host", "present")], t)
+    case("milestones: no run.txt -> exe-entry, first-frame", [m["name"] for m in bi.bootmiles.load_table(bi.milestone_table(mt, "", TID)).milestones] == ["exe-entry", "first-frame"])
     OLD = "# table_id " + TID + "\nexe_entry_va\t0x00ecc4db\n"
     mu = lambda name, v="00001000", extra="1": ROW("module_entry:" + name, "module_entry", v, "modules.tsv assigned_base+entry_rva", extra)
     PR = lambda dll, v: ROW("import:%s!Present" % dll, "import", v, "keys.tsv import key")
@@ -115,11 +128,11 @@ def main():
     t2 = bi.milestone_table(mt2, "", TID, None, man)
     tab2 = bi.bootmiles.load_table(t2)
     case("contract kinds: exe-entry, static module -> module-entry-<name> in file order, dynamic skipped, import rows -> ONE first-present any",
-         [m["name"] for m in tab2.milestones] == ["exe-entry", "module-entry-a.dll", "first-present"]
+         [m["name"] for m in tab2.milestones] == ["exe-entry", "module-entry-a.dll", "first-present", "first-frame"]
          and [(p["group"], p["kind"], p["target"]) for p in tab2.milestones[2]["parts"]] == [("any", "call", 0x100e40), ("any", "call", 0x100e50)], t2)
     mt2w = EXE3 + mu("a.dll") + WM + PR("d3d9.dll", "00100e40") + TRAIL
     tw = bi.bootmiles.load_table(bi.milestone_table(mt2w, "", TID, None, man))
-    case("contract kinds: winmain row -> milestone winmain (call) in file order", [m["name"] for m in tw.milestones] == ["exe-entry", "module-entry-a.dll", "winmain", "first-present"]
+    case("contract kinds: winmain row -> milestone winmain (call) in file order", [m["name"] for m in tw.milestones] == ["exe-entry", "module-entry-a.dll", "winmain", "first-present", "first-frame"]
          and tw.milestones[2]["parts"][0]["target"] == 0x1000)
     for k, a in (("module flag 2", mt2.replace("assigned_base+entry_rva\t1", "assigned_base+entry_rva\t2")), ("module without flag", EXE3 + mu("a.dll", extra=None) + TRAIL),
                  ("module twice", mt2.replace(TRAIL, "") + mu("a.dll") + TRAIL), ("bad module name", EXE3 + mu("x y") + TRAIL),
@@ -138,6 +151,7 @@ def main():
     case("stage error: name also from the contract", good(sterr("exe-entry any call 0x1000\n")))
     case("stage error: a stage winmain next to the contract's winmain row (the contract does not win silently)",
          good(raises(bi.milestone_table, mt2w, "", TID, st, man)))
+    case("stage error: a stage first-frame (the generated row owns the name)", good(sterr("first-frame any host present\n")))
     case("stage error: address without a code entry", good(sterr("w any call 0x4000\n")))
     case("stage error: address of an import row is not code", good(sterr("w any call 0x100e40\n")))
     case("stage error: bootmiles rejects the table", good(sterr("w any bogus 0x1000\n")))
@@ -159,6 +173,31 @@ def main():
          and "# dropped-milestone: winmain" not in ol and "# dropped-milestone: m" not in ol, ot)
     case("stage-table: output loads in bootmiles", [m["name"] for m in bi.bootmiles.load_table(ot).milestones] == ["winmain", "r", "m", "k"], ot)
     case("stage-table error: unknown kind", good(raises(bi.stage_table, "a call2 0x1\n")) and good(raises(bi.stage_table, "a any call zz\n")))
+    # boot.store_frame: the content-addressed frame store (every presented frame, once per distinct content)
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        def lib_writes(n, rgba, txt=b"2 2\n"):   # what the renderer library leaves for present n
+            open(os.path.join(d, "frame_%06u.rgba" % n), "wb").write(rgba)
+            open(os.path.join(d, "frame_%06u.txt" % n), "wb").write(txt)
+        A, B = bytes(range(16)), bytes(range(1, 17))
+        keys = []
+        for n, (rgba, txt) in enumerate([(A, b"2 2\n"), (A, b"2 2\n"), (B, b"2 2\n"), (A, b"2 2\n"), (A, b"4 1\n")]):
+            lib_writes(n, rgba, txt)
+            keys.append(boot.store_frame(d, n))
+        h = lambda txt, rgba: hashlib.sha256(txt + rgba).hexdigest()
+        case("store_frame: key = sha256(.txt bytes + .rgba bytes); repeated identical frames give the same key, distinct ones distinct keys, "
+             "the same pixels with another size is another frame",
+             keys == [h(b"2 2\n", A), h(b"2 2\n", A), h(b"2 2\n", B), h(b"2 2\n", A), h(b"4 1\n", A)] and len(set(keys)) == 3, keys)
+        case("store_frame: 5 presents, 3 distinct frames -> 3 file pairs and nothing of the library's names left",
+             sorted(os.listdir(d)) == sorted(k + e for k in set(keys) for e in (".rgba", ".txt")), sorted(os.listdir(d)))
+        case("store_frame: the stored files hold the frame's bytes", open(os.path.join(d, keys[2] + ".rgba"), "rb").read() == B
+             and open(os.path.join(d, keys[4] + ".txt"), "rb").read() == b"4 1\n")
+        try:
+            boot.store_frame(d, 99)
+            miss = False
+        except OSError:
+            miss = True   # boot.py's INPUT_ERRORS holds OSError
+        case("store_frame: a missing library file is an error, nothing is invented", miss and sorted(os.listdir(d)) == sorted(k + e for k in set(keys) for e in (".rgba", ".txt")))
     print("%s: %d failed" % ("FAIL" if FAILS else "PASS", len(FAILS)))
     return 1 if FAILS else 0
 

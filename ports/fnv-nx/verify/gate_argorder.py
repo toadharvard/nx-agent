@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gate "argordergate" (fnvnx-gate/1, VERDICT.md class: calling convention / argument order): every native C++ unit of a guest root is compiled with
 the fnvnx_order plugin (MSVC evaluation order of arguments, objects, operators, assignments) loaded in the rule's order.
-    python3 -I gate_argorder.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/argordergate.json
+    python3 -I gate_argorder.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/argordergate.json
 Universe: the C++ units of every admitted product root with "target": "guest" and "cxx_origin": "native" (admit.json; the lifter emits the order
 itself, a lifted root has none). No such root: universe 0, green.
 Certificate of a unit, all of: (1) the recipe of its root validates (recipe.check, which holds the plugin rule); (2) the recipe's plugin list is
@@ -22,14 +22,15 @@ ORDER = "fnvnx_order"
 
 def native_guest(repo):
     roots = recipe.load_admit(repo)
-    return [r for r in gate_build.product_roots(repo) if roots[recipe.split_spec(r)[0]].get("target") == "guest" and roots[recipe.split_spec(r)[0]].get("cxx_origin") == "native"]
+    return [r for r in gate_build.product_roots(repo) if recipe.entry_of(roots, r).get("target") == "guest" and recipe.entry_of(roots, r).get("cxx_origin") == "native"]
 
 
-def judge_root(root, repo, cache):
-    """-> (universe, certified, ids, detail) of one native guest root."""
+def judge_root(root, repo, cache, plugin=ORDER):
+    """-> (universe, certified, ids, detail) of one native guest root. PLUGIN: the plugin whose certificate is judged (default fnvnx_order;
+    gate_lift.py asks for fnvnx_order (gate order) and fnvnx_addr (gate addr32), the same rule: a plugin of the rule's list, rule's arguments)."""
     roots, files = recipe.load_admit(repo), recipe.tracked(repo)
     rec = recipe.load_recipe(repo, roots, root)
-    cxx = sorted(root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files) if u.endswith(recipe.CXX_EXT)) if isinstance(rec, dict) else []
+    cxx = sorted(root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files, roots, repo) if u.endswith(recipe.CXX_EXT)) if isinstance(rec, dict) else []
     errs = recipe.check(rec, recipe.split_spec(root)[0], files, roots, recipe.load_pin(repo), repo)
     if errs:
         return len(cxx), 0, cxx, "invalid recipe: %s" % "; ".join(errs)[:300]
@@ -37,14 +38,11 @@ def judge_root(root, repo, cache):
     want = list(recipe.PLUGIN_SOURCES)
     if names != want:
         return len(cxx), 0, cxx, "plugins %s are not the rule's %s in the rule's order" % (names, want)
-    od = next(p for p in rec["plugins"] if p["name"] == ORDER)
-    if od["args"] != recipe.PLUGIN_ARGS[ORDER]:
-        return len(cxx), 0, cxx, "%s arguments %s are not the rule's %s" % (ORDER, od["args"], recipe.PLUGIN_ARGS[ORDER])
     try:
         res, _ = gate_build.ensure(root, cache, repo)
     except recipe.RecipeError as e:
         return len(cxx), 0, cxx, "invalid recipe: %s" % "; ".join(e.errors)[:300]
-    if res["status"] != "green" or ORDER not in [p["name"] for p in res["plugins"]]:
+    if res["status"] != "green" or plugin not in [p["name"] for p in res["plugins"]]:
         return len(cxx), 0, cxx, "build %s, plugins %s" % (res["status"], [p["name"] for p in res["plugins"]])
     built = {root + "/" + o["unit"] for o in res["objects"]}
     bad = [u for u in cxx if u not in built]

@@ -440,3 +440,7 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - boot/build.json declares 11 gamedata/data externals (one per fnv-nx-build branch, taken from ls-remote and cas ingest) plus exe; the fetch lists 13 pins with redist. BOOT_DATA_ITEMS is deleted, and meta.json items come from .gamedata_pins. recipe.check(boot) = 0.
   - gamedata_fetch: exe, redist and 7 of 11 data items installed, sha checked. It ran out of disk at Voices1.bsa on a 22 GB container, so the full install runs on a large-disk farm with the boot.
   - tests/s5/farm_boot.sh was already removed (a41f9a42e).
+- 05:10: merged w8 3e51a5ce1 into the lead branch. It is the one L4 line: cand3 41a8855d4, base3 78d46bc07, L5 adba10d8e, L6A decb62ead, L1 w28. recipe.check: boot, bootguest, icount and gl4 all 0; gl4 sha 7da199c1…d4ba.
+  - farm1 session_01KmtZKSy2ykkoDJ6ctHodUe: doing. It runs the full boot gamedata install of 13 pins, measuring disk first.
+  - Open at L1: contract/facts gen:2 (sympair_kinds.inc not mounted), and w12's head (link.entry, archive closure, bootguest admit row).
+- bottleneck: L1 contract/facts and the w12 head; farm1 install | w8 idle, farm1 working

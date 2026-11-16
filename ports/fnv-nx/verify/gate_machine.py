@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gate "machine" (fnvnx-gate/1, class G of VERDICT.md): the product's registry hive holds exactly the keys that the exe and the modules read
 (rules: contract/hive.py).
-    python3 -I gate_machine.py     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/machine.json and machine.ids
+    python3 -I gate_machine.py     cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/machine.json and machine.ids
 Roots come only from verify/admit.json (class product). A root DECLARES its hive in `<root>/registry.in.json` ("fnvnx-registry-in/1"):
   {"format", "external": NAME of an entry of the root's recipe `external` (private: fnv-nx-build commit + tree_sha256),
    "sites": path of regsites.tsv inside it (the registry-API call sites of the exe and the modules),
@@ -9,7 +9,7 @@ Roots come only from verify/admit.json (class product). A root DECLARES its hive
    "seed_unit": the recipe unit that applies the seed (the only unit allowed to reference a hive-writing API)}
 Universe, classes and certification: contract/hive.py. Writers are read from the objects of the build (recipe.symbols per object: undefined
 names). A dynamic site (root, key or value not statically resolved) is class `dynamic`: the gate is red and its detail says MEASUREMENT, as the reach
-gate treats a dynamic-name GetProcAddress site; there is no allow-list. Universe: gate_build.quantify (the admitted product roots; a root without registry.in.json is one red item). No product root: universe 0, green. Bad input, a red build, an invalid recipe or an external that fails its hash is red. Exit 0 iff green."""
+gate treats a dynamic-name GetProcAddress site; there is no allow-list. Universe: gate_build.quantify (the admitted product roots; a root without registry.in.json is one red item, unless it is header-only (gate_build.unitless): 0 items, or outside the class `registry-reader`: its build's symbol table defines and references no registry API and no GetProcAddress / LoadLibrary* (hive_names): 0 items; a root that has one enters the class and is the one red item). No product root: universe 0, green. Bad input, a red build, an invalid recipe or an external that fails its hash is red. Exit 0 iff green."""
 import json
 import os
 import shutil
@@ -26,24 +26,45 @@ import gate_imports  # noqa: E402
 import hive  # noqa: E402
 import recipe  # noqa: E402
 
-IN_KEYS = {"format", "external", "sites", "declared", "seed", "seed_unit"}
+IN_KEYS = {"format", "sites", "declared", "seed", "seed_unit"}
+
+
+DYNAMIC = {"GetProcAddress", "LoadLibraryA", "LoadLibraryW", "LoadLibraryExA", "LoadLibraryExW"}
+
+
+def hive_names(res):
+    """The names that make a root a registry-reader, by its build's symbol table (defined or referenced): a registry API (hive.ROLES: Reg*/SH*
+    names, A and W), or, conservatively, GetProcAddress / LoadLibrary* (the root can reach a Reg* body by a name it resolves itself). A root
+    with none can read no key, by a static call or by a name."""
+    names = {d["symbol"] for d in res["defined"]} | set(res["undefined"])
+    return sorted(names & (set(hive.ROLES) | DYNAMIC))
 
 
 def refs_of(res):
-    """{unit: set of undefined symbol names} of the objects of a build (objects.json `objects`)"""
+    """{unit: set of undefined symbol names} of the objects of a build (objects.json `objects`): every reference, for the reader class (hive_names)."""
     out = {}
     for o in res["objects"]:
         out.setdefault(o["unit"], set()).update(recipe.symbols(o["object"], o["unit"])[1])
     return out
 
 
-def root_items(root, rec, res, decl, ext, repo, cache):
+def calls_of(res):
+    """{unit: set of undefined symbol names reached by a CALL relocation} (recipe.call_refs): the writers of the hive. A writer is code that stores
+    into the machine state, directly or through a call that reaches the store; taking a function's address (an export-table or vtable entry) is not a
+    write, and the calls that go through that pointer are judged at their call sites, so only a call relocation to a writer name counts."""
+    out = {}
+    for o in res["objects"]:
+        out.setdefault(o["unit"], set()).update(recipe.call_refs(o["object"]))
+    return out
+
+
+def root_items(root, rec, res, decl, repo, cache):
     if set(decl) != IN_KEYS or decl["format"] != "fnvnx-registry-in/1":
         raise ValueError("%s/registry.in.json: need exactly the keys %s and format fnvnx-registry-in/1" % (root, sorted(IN_KEYS)))
-    sites = gate_imports.read(os.path.join(ext, decl["sites"]))
-    declared = gate_imports.read(os.path.join(repo, root, decl["declared"]))
-    seed = gate_imports.read(os.path.join(repo, root, decl["seed"]))
-    return hive.judge(sites, declared, seed, refs_of(res), decl["seed_unit"])
+    def rp(ref):
+        return recipe.resolve_input(root, ref, repo, cache, rec)[0]
+    sites, declared, seed = (gate_imports.read(rp(decl[k])) for k in ("sites", "declared", "seed"))
+    return hive.judge(sites, declared, seed, calls_of(res), decl["seed_unit"])
 
 
 def judge_root(root, repo, cache, admit, bad):
@@ -52,14 +73,25 @@ def judge_root(root, repo, cache, admit, bad):
     p = os.path.join(repo, root, "registry.in.json")
     try:
         if not os.path.isfile(p):
-            return 1, 0, [root + ":registry.in.json"], "declares no registry.in.json (the root's hive is undeclared)"
+            if gate_build.unitless(root, cache, repo):
+                return 0, 0, [], "header-only root: no code, so no hive (by construction)"
+            try:
+                built = gate_build.ensure(root, cache, repo)[0]
+                if built["status"] == "red":
+                    raise ValueError("build red at stage %s" % built["failure"]["stage"])
+            except (ValueError, KeyError, OSError, subprocess.CalledProcessError, cas.CasError, recipe.RecipeError) as e:
+                return 1, 0, [root + ":registry.in.json"], "declares no registry.in.json, and the class registry-reader cannot be decided: %s" % (str(e)[:200] or type(e).__name__)
+            hit = hive_names(built)
+            if not hit:
+                return 0, 0, [], "outside the class registry-reader: neither defines nor references a registry API"
+            return 1, 0, [root + ":registry.in.json"], "uses %s (a registry API, or GetProcAddress/LoadLibrary) and declares no registry.in.json" % ",".join(hit[:3])
         with open(p) as f:
             decl = json.load(f)
         built = gate_build.ensure(root, cache, repo)[0]
         if built["status"] == "red":
             raise ValueError("build red at stage %s" % built["failure"]["stage"])
         rec = recipe.load_recipe(repo, admit, root)
-        items = root_items(root, rec, built, decl, gate_imports.ext_tree(rec, decl["external"], cache), repo, cache)
+        items = root_items(root, rec, built, decl, repo, cache)
     except recipe.RecipeError as e:
         return 1, 0, [root + ":recipe"], "recipe invalid: %s" % "; ".join(e.errors)[:200]
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError, cas.CasError) as e:

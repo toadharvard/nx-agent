@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for verify/gate_contract.py: inputs validation, missing input is RED (never green by absence), the n2 rule. No game data."""
 import json
 import os
@@ -9,6 +10,9 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
+import scratch  # noqa: E402
+
+scratch.install()
 import gate_contract as gc  # noqa: E402
 
 FAILED = []
@@ -55,7 +59,7 @@ check("root_results needs the three result names", "root_results" in (raises(dic
 check("root key is gone (the universe is admit.json)", "keys must be" in (raises(dict(good, root="r")) or ""))
 check("images key is gone (derived, no hand list)", "keys must be" in (raises(dict(good, images=[])) or ""))
 check("ranges shape", "ranges needs" in (raises(dict(good, ranges={"exe": "x/r"})) or "") and "ranges needs" in (raises(dict(good, ranges={"exe": "x/r", "module": "x/r"})) or ""))
-check("optional keys accepted", raises(dict(good, root_results=dict(RR, entries="e"))) is None)
+check("optional keys accepted", raises(dict(good, root_results=dict(RR, disp_rows="e", native_disp_rows="e2"))) is None)
 
 # the shared universe convention (gate_build.quantify)
 import gate_build as gb  # noqa: E402
@@ -92,7 +96,23 @@ check("quantify: two roots, one red", res[:3] == (5, 4, ["ports/fnv-nx/b:x"]) an
 # an admitted root without its outputs is red with the reason, for every gate; no inputs file at all as well
 admit([{"path": "ports/fnv-nx/p", "class": "product", "recipe": "ports/fnv-nx/p/build.json"}])
 os.makedirs(repo + "/ports/fnv-nx/p")
+# universe rule of the per-root gates: a root without game and link (e.g. a runtime root) has no items: green 0, for every gate, even with no inputs file
 rec = {"format": "x"}
+json.dump(rec, open(repo + "/ports/fnv-nx/p/build.json", "w"))
+for g in gc.GATES:
+    p, r = run(g)
+    check("%s: root with neither game nor link -> green 0 (no inputs needed)" % g,
+          p.returncode == 0 and r["status"] == "green" and (r["universe"], r["certified"], r["uncertified"]) == (0, 0, []), (p.returncode, r))
+# a root with game but no link: its game units are judged where they are linked, so it is red for the game gates and 0 for the link gates
+json.dump(dict(rec, game="game"), open(repo + "/ports/fnv-nx/p/build.json", "w"))
+for g in gc.GATES:
+    p, r = run(g)
+    if g in gc.LINK_GATES:
+        check("%s: game but no link -> link gate universe 0, green" % g, p.returncode == 0 and (r["universe"], r["certified"]) == (0, 0), (p.returncode, r))
+    else:
+        check("%s: game but no link -> red naming the missing link" % g, p.returncode == 2 and "links no ELF" in r["detail"] and r["uncertified"] == ["ports/fnv-nx/p:inputs"], (p.returncode, r))
+# an image root (link) with game: judged as before; the image root without a link or game is covered above
+rec = {"format": "x", "link": {"script": "l.ld"}, "game": "game"}
 json.dump(rec, open(repo + "/ports/fnv-nx/p/build.json", "w"))
 for g in gc.GATES:
     p, r = run(g)
@@ -102,11 +122,11 @@ open(repo + "/ports/fnv-nx/verify/contract_inputs.json", "w").write(json.dumps(g
 for g, key in (("reach", "reach_requests"), ("reachlink", "reach_requests"), ("gpa", "dynsites")):
     p, r = run(g)
     check("%s: inputs without %s -> red naming it" % (g, key), r["status"] == "red" and "no " + key in r["detail"], r)
-p, r = run("n1")
-check("root without a link -> red", r["status"] == "red" and "links no ELF" in r["detail"], r)
-json.dump(dict(rec, link={"script": "l.ld"}), open(repo + "/ports/fnv-nx/p/build.json", "w"))
-p, r = run("n1")
-check("root without game -> red naming build.json", r["status"] == "red" and '"game"' in r["detail"], r)
+json.dump({k: v for k, v in rec.items() if k != "game"}, open(repo + "/ports/fnv-nx/p/build.json", "w"))
+for g in gc.GATES:
+    p, r = run(g)
+    check("%s: image root (link) without game -> red naming build.json" % g, p.returncode == 2 and r["status"] == "red" and '"game"' in r["detail"]
+          and r["uncertified"] == ["ports/fnv-nx/p:inputs"], (p.returncode, r))
 
 # built root without the link stage's result files (ensure stubbed in-process: the compiler is not needed to test the rule)
 outd = tempfile.mkdtemp(prefix="gc-ens-")
@@ -119,9 +139,9 @@ for g in gc.GATES:
     keyed = g in ("disp", "reach", "reachlink", "gpa")           # these name their missing shared key first
     check("%s: root without units/addrmap/aliases -> red naming them, owner L1 link stage" % g,
           r[:3] == (1, 0, ["ports/fnv-nx/p:inputs"]) and (keyed or ("units.json" in r[3] and "addrmap.tsv" in r[3] and "L1 link stage" in r[3])), r)
-open(repo + "/ports/fnv-nx/verify/contract_inputs.json", "w").write(json.dumps(dict(good, root_results=dict(RR, entries="entries.tsv"))))
+open(repo + "/ports/fnv-nx/verify/contract_inputs.json", "w").write(json.dumps(dict(good, root_results=dict(RR, disp_rows="disp_rows.tsv", native_disp_rows="native_disp_rows.tsv"))))
 r = gc.judge_root("disp", repo, outd, "ports/fnv-nx/p")
-check("disp: entries.tsv named when missing", r[1] == 0 and "entries.tsv" in r[3], r)
+check("disp: disp_rows.tsv named when missing", r[1] == 0 and "disp_rows.tsv" in r[3], r)
 p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "gate_contract.py"), "--gate", "zz"], capture_output=True, text=True)
 check("unknown gate rejected", p.returncode == 1)
 print("FAILED: %d" % len(FAILED) if FAILED else "all passed")

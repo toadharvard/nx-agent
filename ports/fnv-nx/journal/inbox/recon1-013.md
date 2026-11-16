@@ -12,7 +12,7 @@
     - 4 are real and now fixed (GCC-only REC1-REPL, try.py all-equal, gcc tail-returns the value):
       - 0x00d943d0, 0x00d94c40, 0x00d947e0: Havok job handlers that return LunaOwner::ProcessCallback's status
         (0x00d04e80). The dispatcher 0x00d01e50 returns it. Each is on its own `recon/<unit>_void` branch.
-      - 0x00660230: returns FUN_006603a0's end pointer, which itself returns CopyConstructRange's. Added to
+      - <va>: returns FUN_006603a0's end pointer, which itself returns CopyConstructRange's. Added to
         recon/staging_blk_00660000_od_void (11 pairs).
     - 21 are false. The enclosing caller is a void wrapper or thunk, eax at the join is reset (`xor eax, eax`), or
       the enclosing function returns float in ST0. Several enclosing decomp declarations (`int`/`_N`/`PAX`) are

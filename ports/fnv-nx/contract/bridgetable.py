@@ -3,7 +3,10 @@
 A pure function of its arguments (no file, no process): the driver verify/gate_imports.py reads the declared inputs and calls derive().
   names       text of sys_names.tsv (dll TAB name per line) from the private manifest
   spec_text   function dll -> text of the export specification of the reference environment (Wine 9.0 dlls/<dll>/<dll>.spec)
-  syms        the set of symbol names that the product objects define or reference (objects.json defined + undefined)
+  syms        the set of symbol names that the product objects define or reference (objects.json defined + undefined); None = the rows table
+              (stage A): every row binds by rule alone (sym, data, lookup, l3), no symbol table is read and none is judged; the table is then a
+              function of the names, the specs, the name table and the extra rows only, so the import keys (contract/iat.py) are too.  The
+              symbols are judged against the rows by the gate `imports` (stage B: contract/imports.judge over derive(syms=the objects' symbols))
   name_table  {msvcrt name: (symbol, kind)} of the name table the product serves msvcrt names from (read_name_table)
   extra       texts of rows in this 8-column format (other owners' rows: COM interfaces); a row of the same (dll, name) replaces the derived one
 bind  sym    native_symbol is a symbol of the product objects     lookup  msvcrt name served by the name table (native_symbol `-`)
@@ -32,9 +35,6 @@ L3_MSVCRT = frozenset("__CxxFrameHandler _CxxThrowException _except_handler3 _se
                       "_isnan".split())
 L3_NAMES = {"?terminate@@YAXXZ": "terminate", "??1type_info@@UAE@XZ": "type_info_dtor"}
 L3_KERNEL32 = ("RaiseException", "RtlUnwind", "DebugBreak")
-DATA_SYMS = {"_iob": "fnvnx_iob"}
-VA_MSVCRT = {"sprintf": "fnvnx_msvcrt_va_sprintf", "_snprintf": "fnvnx_msvcrt_va_snprintf",
-             "sscanf": "fnvnx_msvcrt_va_sscanf", "_vsnprintf": "fnvnx_msvcrt_va_vsnprintf"}
 SPEC_LINE = re.compile(r"(@|\d+)\s+(stdcall|cdecl|varargs|thiscall|extern|stub|fastcall)\s+((?:-\w+(?:=\S+)?\s+)*)"
                        r"(\S+?)\s*(?:\(([^)]*)\))?(?:\s+(\S+))?$")
 
@@ -51,6 +51,22 @@ def read_name_table(text):
         if f[0] in out:
             raise ValueError("name table: %s given twice" % f[0])
         out[f[0]] = (f[1], f[2])
+    return out
+
+
+def read_va(text):
+    """{msvcrt name: native symbol} from `name TAB symbol` lines of the va record (the exports whose native body reads the x86 stack words of the
+    call); a duplicate name, a bad line or a symbol that is not a C identifier is an error."""
+    out = {}
+    for ln, line in enumerate(text.split("\n"), 1):
+        if not line.strip():
+            continue
+        f = line.split("\t")
+        if len(f) != 2 or not all(f) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", f[1]):
+            raise ValueError("va record line %d: need name TAB symbol" % ln)
+        if f[0] in out:
+            raise ValueError("va record: %s given twice" % f[0])
+        out[f[0]] = f[1]
     return out
 
 
@@ -98,14 +114,17 @@ def native(dll, name):
         return "fnvl_os_" + name
     if dll == "wsock32.dll":
         return "fnvnx_ws2_" + {"__WSAFDIsSet": "fdisset"}.get(name, name)
-    if dll == "msvcrt.dll" and name.startswith("?"):
-        return {"??2@YAPAXI@Z": "fnvnx_msvcrt_operator_new", "??3@YAXPAX@Z": "fnvnx_msvcrt_operator_delete"}[name]
     return name
 
 
-def derive(names, spec_text, syms, name_table, extra):
-    """-> (rows sorted by (dll lower, name), errors [str], extra_of {(dll, name): index into `extra`})"""
+def derive(names, spec_text, syms, name_table, extra, va=None, exports=None):
+    """-> (rows sorted by (dll lower, name), errors [str], extra_of {(dll, name): index into `extra`})
+    exports: {(dll, name): (symbol, kind)} of exports.tsv (contract/exportgen.py: the `.fnvnx.export` records of the product objects).  Given, a row's native
+    symbol comes from it alone (the constants of `native` are not read); an export the table lacks keeps its own name as the symbol, so the gate `imports`
+    judges it against the objects.  None = the constructed path (`native`), kept as the measurement until every root carries its records."""
     rows, errors, extra_of, cache = [], [], {}, {}
+    va = va or {}
+    has = (lambda sym: True) if syms is None else (lambda sym: sym in syms)
     for line in names.split("\n"):
         if not line:
             continue
@@ -114,26 +133,51 @@ def derive(names, spec_text, syms, name_table, extra):
             sig = {"SteamAPI_RegisterCallback": "ii", "SteamAPI_UnregisterCallback": "i"}.get(name, "")
             ret = "v" if name in ("SteamAPI_Shutdown", "SteamAPI_RunCallbacks", "SteamAPI_RegisterCallback",
                                   "SteamAPI_UnregisterCallback") else "i"
-            rows.append((dll, name, "", "cdecl", ret, sig, name, "sym" if name in syms else "none"))
+            rows.append((dll, name, "", "cdecl", ret, sig, name, "sym" if has(name) else "none"))
             continue
         try:
             real, ordn, conv, args = resolve(spec_text, dll, name, cache)
         except (KeyError, ValueError, OSError) as e:
             errors.append("%s!%s: %s" % (dll, name, e))
             continue
-        ret, sym = RET.get((dll, real), "i"), native(dll, real)
-        if sym.startswith("fnvl_"):
+        ret = RET.get((dll, real), "i")
+        if exports is not None:
+            ent = exports.get((dll, real))
+            sym = ent[0] if ent else real
+            if ent and ent[1] == "data" and conv != "data":
+                errors.append("%s!%s: exports.tsv says data, the reference spec says %s" % (dll, name, conv))
+                continue
+        else:
+            sym = native(dll, real)
+        if exports is None and sym.startswith("fnvl_"):
             bind = "l3"
+        elif exports is not None and (dll, real) in exports and conv != "data":
+            bind = "sym" if has(sym) else "none"
         elif conv == "data":
-            dsym = DATA_SYMS.get(real, real)
-            sym, bind = (dsym, "data") if dsym in syms else ("-", "none")
-        elif dll == "msvcrt.dll" and real in VA_MSVCRT:
-            sym = VA_MSVCRT[real]
-            bind = "sym" if sym in syms else "none"
+            if exports is not None and (dll, real) in exports:
+                if exports[(dll, real)][1] != "data":
+                    errors.append("%s!%s: the reference spec says data, exports.tsv says %s" % (dll, name, exports[(dll, real)][1]))
+                    continue
+                dsym = exports[(dll, real)][0]
+            elif dll == "msvcrt.dll":
+                ent = name_table.get(real)
+                if ent is None or ent[1] != "data":
+                    errors.append("%s!%s: a data export of the reference spec has no `data` row in the name table" % (dll, name))
+                    continue
+                dsym = ent[0]
+            else:
+                dsym = real
+            sym, bind = (dsym, "data") if has(dsym) else ("-", "none")
+        elif dll == "msvcrt.dll" and real in va:
+            sym = va[real]
+            bind = "sym" if has(sym) else "none"
+        elif dll == "msvcrt.dll" and conv == "vararg":
+            errors.append("%s!%s: a varargs export has no forwarder in the va record" % (dll, name))
+            continue
         elif dll == "msvcrt.dll":
             sym, bind = "-", ("lookup" if name in name_table else "none")
         else:
-            bind = "sym" if sym in syms else "none"
+            bind = "sym" if has(sym) else "none"
         rows.append((dll, real, ordn, conv, ret, args, sym, bind))
     for i, text in enumerate(extra):
         for line in text.split("\n"):

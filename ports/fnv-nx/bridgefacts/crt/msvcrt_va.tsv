@@ -1,0 +1,4 @@
+sprintf	fnvnx_msvcrt_va_sprintf
+_snprintf	fnvnx_msvcrt_va_snprintf
+sscanf	fnvnx_msvcrt_va_sscanf
+_vsnprintf	fnvnx_msvcrt_va_vsnprintf

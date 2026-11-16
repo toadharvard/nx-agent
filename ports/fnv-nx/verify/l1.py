@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """L1: the one command a merger runs. Run as `python3 -I l1.py CMD ...`. Exit codes: 0 green/merged, 2 red/blocked, 3 conflict, 4 blocked: env, 1 error.
   verdict  --repo R --commit C --verdicts VDIR [--budget-s 300]
-           verdict.py run with the gates file OF THAT COMMIT (ports/fnv-nx/verify/gates.json read from C's tree), then store.
+           verdict.py run with the gates file OF THAT COMMIT (the files of ports/fnv-nx/verify/gates.d read from C's tree, assembled by gatesdir.py), then store.
   merge    --repo R --into BRANCH --from REF --verdicts VDIR [--budget-s 300]
            Computes the merge tree as verdict.py merge does. If VDIR has no verdict for it, makes the merge commit object with
            commit-tree (no ref moves) to have something to check out, runs `verdict` on it and stores it. Then verdict.py merge
@@ -32,24 +32,29 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import envcheck  # noqa: E402
+import cas  # noqa: E402
+import gatesdir  # noqa: E402
 import verdict  # noqa: E402
 
-GATES = "ports/fnv-nx/verify/gates.json"
+GATES = "ports/fnv-nx/verify/gates.d"
 ENV = "ports/fnv-nx/verify/env.json"
 
 def _opts(a, extra=(), optional=()):
     return verdict._opts(a, dict({"--repo": 0, "--verdicts": 0, "--budget-s": 1}, **{k: 0 for k in extra}, **{k: 1 for k in optional}))
 
 def _line(v):
-    return "L1 %s %s %ss gates:%d over_budget:%s" % (v["verdict"], v["tree"], v["seconds"], len(v["gates"]), v["over_budget"])
+    return "L1 %s %s %ss gates:%d over_budget:%s vacuous:%d" % (v["verdict"], v["tree"], v["seconds"], len(v["gates"]), v["over_budget"],
+                                                               sum(1 for g in v["gates"] if g.get("status") == "green" and str(g.get("reason", "")).startswith("vacuous:")))
 
 def _gates_file(repo, rev, td):
-    p = subprocess.run(["git", "-C", repo, "show", "%s:%s" % (rev, GATES)], capture_output=True)
-    if p.returncode:
-        raise verdict.Err("blocked: no %s in %s" % (GATES, rev), 2)
+    """The gates document of REV's verify/gates.d (one file per gate, gatesdir.py), written canonically into TD: a value of this run, never a tracked file."""
+    try:
+        doc = gatesdir.from_git(repo, rev)
+    except gatesdir.Bad as e:
+        raise verdict.Err("blocked: %s" % e, 2)
     path = os.path.join(td, "gates.json")
     with open(path, "wb") as fh:
-        fh.write(p.stdout)
+        fh.write(cas.canon(doc) + b"\n")
     return path
 
 def _env(repo, rev):
@@ -76,8 +81,14 @@ def _check(repo, commit, vdir, budget, gates, td, env_id):
         verdict.cmd_store(["--verdict", outp, "--verdicts", vdir])
     return json.load(open(outp))
 
+def _artifacts(o):
+    """The artifacts repository is a required argument; it is recorded beside the verdict's external cache (recipe.set_artifacts), where every gate reads it."""
+    import recipe
+    recipe.set_artifacts(recipe.ext_dir(os.path.join(os.path.abspath(o["--verdicts"]), "cache")), o["--artifacts"])
+
 def cmd_verdict(a):
-    o = _opts(a, ("--commit",))
+    o = _opts(a, ("--commit", "--artifacts"))
+    _artifacts(o)
     env_id, bad = _env(o["--repo"], o["--commit"])
     if bad:
         return _blocked_env(bad)
@@ -87,7 +98,8 @@ def cmd_verdict(a):
     return 0 if v["verdict"] == "green" else 2
 
 def cmd_merge(a):
-    o = _opts(a, ("--into", "--from"), ("--remote",))
+    o = _opts(a, ("--into", "--from", "--artifacts"), ("--remote",))
+    _artifacts(o)
     o.setdefault("--remote", None)
     repo, vdir, remote, bname = o["--repo"], o["--verdicts"], o["--remote"], o["--into"]
     if remote:

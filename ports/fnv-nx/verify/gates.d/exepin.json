@@ -1,0 +1,13 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "exepin",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_exepin.py"
+ ],
+ "result": "exepin.json",
+ "covers": [
+  "linked"
+ ]
+}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""oraclecheck: verification of the assumption of gate "oracle" - the declaration of a test is true.
+"""oraclecheck: verification of the assumption of gate "oracle" - the declaration of a test is true. (ASM-042)
     python3 -I oraclecheck.py [--jobs N] [--timeout-s N] --out REPORT.json [TEST...]      cwd = checkout root
 
 Runs each test file of the oracle universe (or the TESTs named, repo-relative) as `python3 -I FILE` under
@@ -21,7 +21,6 @@ This is a verifier (after-merge, farm/runner.sh job `oraclecheck`), not a gate: 
 import concurrent.futures
 import json
 import os
-import signal
 import subprocess
 import sys
 import tempfile
@@ -63,7 +62,7 @@ def judge(test, entry, got, tracked, read):
     clo, why = gate_oracle.closure(subject, tracked, read)
     if why:
         clo = set(subject)
-    refs = set(r["path"] for r in entry.get("references", []) if isinstance(r, dict) and isinstance(r.get("path"), str))
+    refs = set(r["path"] for r in entry.get("references", []) if isinstance(r, dict) and r.get("kind") in gate_oracle.TREE_KINDS and isinstance(r.get("path"), str))
     tdir = os.path.dirname(test) + "/"
     allowed = clo | refs | {test} | set(f for f in tracked if f.startswith(tdir))
     return {"undeclared": sorted(got - allowed), "unopened": sorted(set(subject) - got), "refs_in_run": sorted(refs & got)}
@@ -74,15 +73,8 @@ def run_one(test, root, timeout):
     tmp = tempfile.mkdtemp(prefix="oraclecheck-")
     trace = os.path.join(tmp, "trace")
     env = {k: v for k, v in os.environ.items() if not k.startswith("GATE_")}
-    p = subprocess.Popen(["strace", "-f", "-y", "-qq", "-e", "trace=" + opentrace.TRACE_SET, "-o", trace, sys.executable, "-I", test],
-                         cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True, env=env)
-    try:
-        rc = p.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        os.killpg(p.pid, signal.SIGKILL)
-        p.wait()
-        rc = None
+    rc = opentrace.strace_run([sys.executable, "-I", test], trace, timeout, cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL, env=env)
     try:
         with open(trace, errors="surrogateescape") as fh:
             lines = fh.readlines()
@@ -116,10 +108,10 @@ def main(argv):
     root = os.getcwd()
     ls = subprocess.run(["git", "ls-files", "-z", "--", gate_oracle.TREE], capture_output=True, check=True).stdout
     tracked = set(p for p in ls.decode("utf-8", "surrogateescape").split("\0") if p)
-    gates = gate_oracle.load(gate_oracle.GATES) or {}
+    gates = gate_oracle.gatesdir.load_dir_or_empty()
     argv_t = next((g["argv"] for g in gates.get("gates", []) if g.get("name") == "selftests"), None)
     if argv_t is None:
-        print("oraclecheck: gates.json has no selftests gate", file=sys.stderr)
+        print("oraclecheck: verify/gates.d has no selftests gate", file=sys.stderr)
         return 1
     universe = gate_tests.universe(gate_tests.parse(argv_t[argv_t.index(gate_oracle.TREE + "/verify/gate_tests.py") + 1:])[1])
     unknown = [t for t in tests if t not in universe]

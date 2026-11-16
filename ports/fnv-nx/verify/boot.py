@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """The boot stage CLI: runs the guest ELF under bootmachine.Machine, watches the milestone table, counts instructions.
 
-  boot.py run --elf GUEST.elf --reserved modules.tsv --keys LO:HI --heap-size N --root SDROOT [--game DIR]
+  boot.py run --elf GUEST.elf --facts elffacts.json --reserved modules.tsv --keys LO:HI --heap-size N --root SDROOT [--game DIR]
               --milestones TABLE --manifest entries.tsv [--icount-spec SPEC.json] [--limit-instructions N]
-              [--hc-slice N] [--profile handheld|docked] [--watch-log SYMS] --out OUT.json
+              --quantum N [--declared-inputs PIN] [--profile handheld|docked] [--watch-log SYMS] --out OUT.json
 
 plan = bootlayout (same rules as its CLI), watch points = bootmiles.resolve(table, manifest, ELF symbols, bias = image
 base). OUT.json ("fnvnx-boot/1", sorted keys, indent 1, no wall time) holds the plan, the run record, the milestone state
@@ -24,26 +24,47 @@ has the section .text.fnvl): a BL/BLR whose source is outside the section and wh
 instruction word, no names). A name that is absent or not STT_FUNC is an input error naming it.
 Without the option the key is absent.
 
+Cores: the machine is the declared N-core machine (bootmachine.py rule 3). --quantum N (required, no default) is the instructions per slice of a core's
+thread; OUT.json "machine" = {app_cores, cores, quantum, unicorn} and run.cores = per-core {slices, instructions, switches, pairs}.
+
 Host parts: the table's `host` target is an ID word, so the exact console line a part waits for is spelled
 `console.<hex>` (hex of the line's UTF-8 bytes, no newline; helper console_part(line)). The part fires when the guest
 writes exactly that line. Two more host events exist: `present` (every present of the renderer) and `gpu-first-call` (the first
 guest call of ext module 10); they only fire with --gpu. Any other host name is an input error listing the known forms.
 
-Renderer: --gpu LIB registers ext module 10 and forwards it to the host library LIB (bootgpu.py); --frames DIR is its
+Renderer: --gpu registers ext module 10 and forwards it to the host library libnxgl4.so, the recipe product of render/gl4 in $GATE_CACHE (bootgpu.py; no other source); --frames DIR is its
 $NXGL4_FRAMES (the library writes frame_%06u.rgba/.txt there). The three GL variables for software rendering are set for it.
-Without --gpu module 10 is not registered (a guest call answers NO_MODULE). The first 3 presents are icount marks `frame-<n>`;
-OUT.json "gpu" = {library_sha256, presents, first_module10_call, last_error}.
+Without --gpu module 10 is not registered (a guest call answers NO_MODULE). EVERY present of the renderer is a record of OUT.json "frames" = [{n (from 1), t_ns (virtual clock
+at the present), per_tid: {thread name: instructions}, sha256 (with --frames)}] (Icount.frames(): frame n counts every instruction since
+frame n-1, frame 1 since the start of the run). A frame is NOT an icount interval: the icount intervals are the milestones' only, the
+per-frame counts live only in "frames" (running totals, O(threads) per frame; the block hook is not touched). OUT.json "gpu" =
+{library_sha256, presents, first_module10_call, last_error}. Every present is also dumped as an image, losslessly and by content (no cap, no sampling): the library writes frame_%06u.rgba + .txt
+(width x height x 4 bytes + "w h\n") into --frames for each present, and store_frame() turns the pair at once into --frames/<key>.rgba +
+<key>.txt with key = sha256(.txt bytes followed by .rgba bytes) (the size is part of the identity); a key already there is the same frame and
+is not stored again (a static menu is one file).
+Requirement on the gl4 root (item 4.3; L6A keeps it for the deko3d backend too): the renderer writes the frame_%06u.rgba/.txt pair COMPLETELY
+before it calls nxgl4_on_present(frame) (render/gl4/gl4_present.c: "called after the image is complete ... after the files are written");
+store_frame() reads the pair inside that callback and relies on it. Each frames record carries its "sha256" = key. farm/boot_job.sh publishes every distinct file.
+Two "present" facts, not to be mixed: milestone first-present = the exe's own call of D3D9 Present (the contract's import:DLL!Present
+rows, `call` parts, observed in the guest); milestone first-frame = the first `present` host event of the GL backend (bootgpu on_present,
+the table row `first-frame any host present` that bootinputs.py milestones always generates; it needs --gpu). They are different
+milestones in the milestone log.
 """
 import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 
-from unicorn.arm64_const import UC_ARM64_REG_LR, UC_ARM64_REG_X0
+import unicorn
+
+from unicorn.arm64_const import UC_ARM64_REG_LR, UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3
 
 import bootinput
+import bootdecl
+import bootfacts
 import bootgpu
 import bootlayout
 import bootmachine
@@ -54,9 +75,28 @@ FORMAT = "fnvnx-boot/1"
 HOST_PREFIX = "console."
 HOST_EVENTS = ("present", "gpu-first-call")
 GPU_ENV = {"LIBGL_ALWAYS_SOFTWARE": "1", "GALLIUM_DRIVER": "llvmpipe", "EGL_PLATFORM": "surfaceless"}
-FRAME_MARKS = 3   # presents that get an icount mark; later ones are only counted
-INPUT_ERRORS = (bootlayout.LayoutError, bootmiles.TableError, bootmiles.ManifestError, bootmiles.ResolveError,
-                bootmiles.ElfError, bootmachine.MachineError, bootgpu.GpuError, ValueError, OSError)
+INPUT_ERRORS = (bootdecl.InputError, bootlayout.LayoutError, bootmiles.TableError, bootmiles.ManifestError, bootmiles.ResolveError,
+                bootmiles.ElfError, bootfacts.FactError, bootmachine.MachineError, bootgpu.GpuError, ValueError, OSError)
+
+
+def store_frame(directory, frame):
+    """The content-addressed frame store: the library's frame_%06u.rgba + .txt of the present just made (it writes them before it calls
+    nxgl4_on_present) become <key>.rgba + <key>.txt, key = sha256(.txt bytes followed by .rgba bytes), so a frame is identified with its size.
+    A key already in the store means the same frame: the library's files are deleted, nothing is written twice. Returns the key."""
+    base = os.path.join(directory, "frame_%06u" % frame)
+    with open(base + ".rgba", "rb") as f:
+        rgba = f.read()
+    with open(base + ".txt", "rb") as f:
+        txt = f.read()
+    key = hashlib.sha256(txt + rgba).hexdigest()
+    dst = os.path.join(directory, key)
+    if os.path.exists(dst + ".rgba"):
+        os.remove(base + ".rgba")
+        os.remove(base + ".txt")
+    else:
+        os.replace(base + ".txt", dst + ".txt")
+        os.replace(base + ".rgba", dst + ".rgba")
+    return key
 
 
 def console_part(line):
@@ -81,7 +121,7 @@ def _host_lines(host):
     return lines
 
 
-def _plan(a, raw):
+def _plan(a, raw, facts):
     rows = bootlayout.normalize_reserved(bootlayout.read_tsv(a.reserved))
     try:
         lo, hi = (int(x, 16) for x in a.keys.split(":"))
@@ -90,42 +130,151 @@ def _plan(a, raw):
     if not lo < hi or lo < bootlayout.MIN_ADDR:
         raise bootlayout.LayoutError("--keys: need %x <= lo < hi, got 0x%x..0x%x" % (bootlayout.MIN_ADDR, lo, hi))
     rows.append(("keys", lo // 4096 * 4096, (hi + 4095) // 4096 * 4096))
-    return bootlayout.plan(bootlayout.parse_elf(raw), sorted(rows, key=lambda r: r[1]), a.heap_size, n_stacks=a.threads)
+    return bootlayout.plan(bootlayout.parse_elf(raw), sorted(rows, key=lambda r: r[1]), a.heap_size, entry=bootfacts.entry(facts), n_stacks=a.threads)
+
+
+MEM_SPEC = re.compile(r"^(x[0-7])((?:->(?:0x[0-9a-fA-F]+|[0-9]+))*):(0x[0-9a-fA-F]+|[0-9]+)$")
+MEM_MAX = 1 << 16
+
+
+def parse_mem_spec(spec):
+    """`REG(->OFF)*:LEN` -> (reg index, [offsets], len). The address is the 32-bit value of REG (x0..x7); each `->OFF` loads the 32-bit
+    little-endian word at address+OFF and takes it as the new address; LEN bytes (at most 65536) are read there"""
+    m = MEM_SPEC.match(spec)
+    if not m:
+        raise bootmiles.ResolveError("--watch-log: memory spec %r is not REG(->OFF)*:LEN with REG x0..x7" % spec)
+    offs = [int(t, 0) for t in m.group(2).split("->")[1:]]
+    n = int(m.group(3), 0)
+    if not 0 < n <= MEM_MAX:
+        raise bootmiles.ResolveError("--watch-log: memory spec %r: LEN must be 1..%d" % (spec, MEM_MAX))
+    return int(m.group(1)[1:]), offs, n
+
+
+def parse_until(tok):
+    """`REG=VALUE` (REG x0..x7, VALUE an integer) -> (reg index, value)"""
+    m = re.match(r"^x([0-7])=(0x[0-9a-fA-F]+|[0-9]+)$", tok)
+    if not m:
+        raise bootmiles.ResolveError("--watch-log: `until` needs REG=VALUE with REG x0..x7, got %r" % tok)
+    return int(m.group(1)), int(m.group(2), 0)
 
 
 def _watch_names(path, syms):
-    """-> (names in file order, the names marked `ret`); a line is `NAME` or `NAME ret`"""
-    names, rets = [], set()
+    """-> (names in file order, the names marked `ret`, {name: [memory specs]}, {name: (reg, value)}); a line is
+    `NAME [ret] [mem SPEC... [until REG=VALUE]]`: after the first call whose register REG (32-bit) equals VALUE, the name records no more `mem`"""
+    names, rets, mems, untils = [], set(), {}, {}
     with open(path) as f:
         for line in f:
             t = line.split("#", 1)[0].split()
             if not t:
                 continue
-            if len(t) > 2 or (len(t) == 2 and t[1] != "ret"):
-                raise bootmiles.ResolveError("--watch-log: a line is `NAME` or `NAME ret`, got: %s" % line.strip())
+            rest = t[1:]
+            ret = bool(rest) and rest[0] == "ret"
+            if ret:
+                rest = rest[1:]
+            until = None
+            if "until" in rest:
+                k = rest.index("until")
+                if k < 2 or len(rest) != k + 2:
+                    raise bootmiles.ResolveError("--watch-log: a line is `NAME [ret] [mem SPEC... [until REG=VALUE]]`, got: %s" % line.strip())
+                until = parse_until(rest[k + 1])
+                rest = rest[:k]
+            if rest and (rest[0] != "mem" or len(rest) < 2):
+                raise bootmiles.ResolveError("--watch-log: a line is `NAME [ret] [mem SPEC... [until REG=VALUE]]`, got: %s" % line.strip())
+            for spec in rest[1:]:
+                parse_mem_spec(spec)
             names.append(t[0])
-            if len(t) == 2:
+            if ret:
                 rets.add(t[0])
+            if rest:
+                mems.setdefault(t[0], []).extend(rest[1:])
+            if until:
+                untils[t[0]] = until
     bad = [n for n in names if n not in syms or n not in syms.funcs]
     if bad:
         raise bootmiles.ResolveError("--watch-log: not a function symbol of the ELF: %s" % ", ".join(sorted(set(bad))))
-    return names, rets
+    return names, rets, mems, untils
+
+
+def read_chain(m, regs, spec):
+    """the bytes `spec` (parse_mem_spec) names, or None when a page on the way is not mapped"""
+    reg, offs, n = spec
+    addr = regs[reg] & 0xFFFFFFFF
+    for o in offs:
+        w = m.peek((addr + o) & 0xFFFFFFFF, 4)
+        if w is None:
+            return None
+        addr = int.from_bytes(w, "little")
+    return m.peek(addr, n)
+
+
+def load_state_request(path):
+    """the snapshot request: {"hash": [{"name", "lo", "hi"}], "dump": [{"name", "addr", "len"}]}, every number an integer (hex strings allowed)"""
+    with open(path) as f:
+        d = json.load(f)
+    if not isinstance(d, dict) or set(d) - {"hash", "dump"}:
+        raise bootmiles.ResolveError("--state-request: an object with keys hash and dump only")
+    out = {"hash": [], "dump": []}
+    for k, fields in (("hash", ("lo", "hi")), ("dump", ("addr", "len"))):
+        for e in d.get(k, ()):
+            if not isinstance(e, dict) or set(e) != {"name", *fields} or not isinstance(e["name"], str):
+                raise bootmiles.ResolveError("--state-request: %s entries are {name, %s}" % (k, ", ".join(fields)))
+            v = {f: int(e[f], 0) if isinstance(e[f], str) else e[f] for f in fields}
+            if not all(isinstance(x, int) and 0 <= x <= 0xFFFFFFFF for x in v.values()):
+                raise bootmiles.ResolveError("--state-request: %s %s: 32-bit integers" % (k, e["name"]))
+            if k == "hash" and not v["lo"] < v["hi"]:
+                raise bootmiles.ResolveError("--state-request: hash %s: lo < hi" % e["name"])
+            if k == "dump" and not 0 < v["len"] <= MEM_MAX * 16:
+                raise bootmiles.ResolveError("--state-request: dump %s: len 1..%d" % (e["name"], MEM_MAX * 16))
+            out[k].append(dict(v, name=e["name"]))
+    return out
+
+
+def take_state(m, req, at, base):
+    """the machine's state when `at` is entered: registers, the page table, the sha256 of every page of each hash range (null: unmapped) and
+    the raw bytes of each dump range (null: unmapped). Everything is read by the observer, protection ignored"""
+    regs = {"x%d" % i: m.uc.reg_read(UC_ARM64_REG_X0 + i) & 0xFFFFFFFF for i in range(29)}
+    regs["x30"] = (m.uc.reg_read(UC_ARM64_REG_LR) - base) & 0xFFFFFFFF
+    regs["sp"] = m.sp()
+    pages = {}
+    for h in req["hash"]:
+        out = []
+        for a in range(h["lo"] // 4096 * 4096, (h["hi"] + 4095) // 4096 * 4096, 4096):
+            b = m.peek(a, 4096)
+            out.append(hashlib.sha256(b).hexdigest() if b is not None else None)
+        pages[h["name"]] = {"lo": h["lo"] // 4096 * 4096, "sha256": out}
+    dump = {}
+    for d in req["dump"]:
+        b = m.peek(d["addr"], d["len"])
+        dump[d["name"]] = {"addr": d["addr"], "hex": b.hex() if b is not None else None}
+    return {"at": at, "t_ns": m.clock.now_ns(), "regs": regs, "runs": m.page_runs(), "pages": pages, "dump": dump}
 
 
 def run(a):
     t0 = time.time()
     with open(a.elf, "rb") as f:
         raw = f.read()
-    plan = _plan(a, raw)
+    facts = bootfacts.load(a.facts)   # the link record of the ELF: the one source of its entry, sections and symbols
+    plan = _plan(a, raw, facts)
+    declared, ro = [], []
+    if a.declared_inputs:
+        declared = bootdecl.mount_all(a.declared_inputs, a.root)   # fetched through the recipe's external mechanism, tree-hash verified, mounted read-only on the SD root before anything runs; a mismatch is an input error
+        ro = [bootdecl.mount_point()]                               # read-only on the guest's card (bootpath.BootPath)
     base = plan["image"]["base"]
     with open(a.milestones) as f:
         table = bootmiles.load_table(f.read())
     with open(a.manifest) as f:
         manifest = bootmiles.load_manifest(f.read())
-    syms = bootmiles.read_symtab(a.elf)
+    syms = bootmiles.symbols(facts)
     watch = bootmiles.resolve(table, manifest, syms, base)
     host = _host_lines(watch["host"])
-    wl, wl_ret = _watch_names(a.watch_log, syms) if a.watch_log else (None, set())
+    wl, wl_ret, wl_mem, wl_until = _watch_names(a.watch_log, syms) if a.watch_log else (None, set(), {}, {})
+    mem_off = set()   # names whose `until` condition has been met
+    state_req = load_state_request(a.state_request) if a.state_request else None
+    if bool(a.state_at) != bool(a.state_request):
+        raise bootmiles.ResolveError("--state-at and --state-request go together")
+    if a.state_at and (a.state_at not in syms or a.state_at not in syms.funcs):
+        raise bootmiles.ResolveError("--state-at: not a function symbol of the ELF: %s" % a.state_at)
+    state = []
     sc, text_entries = None, a.text_entry
     if a.scenario:
         try:
@@ -142,9 +291,9 @@ def run(a):
                 f.write(json.dumps(doc, sort_keys=True, indent=1) + "\n")
             print("boot: reason=scenario-error %s" % e)
             return 2
-    kw = {"hc_slice": a.hc_slice} if a.hc_slice else {}
-    m = bootmachine.Machine(raw, plan, boothost.Services(a.root, a.game, sc, watch_reads=wl is not None), limit_instructions=a.limit_instructions,
-                            profile=a.profile, text_entries=text_entries, n_stacks=a.threads, **kw)
+    svc = boothost.Services(a.root, a.game, sc, watch_reads=wl is not None, read_only=ro)
+    m = bootmachine.Machine(raw, plan, svc, limit_instructions=a.limit_instructions,
+                            profile=a.profile, text_entries=text_entries, n_stacks=a.threads, quantum=a.quantum)
     ic = m.attach_icount(a.icount_spec if a.icount_spec else {}, base)
     prog, log = bootmiles.Progress(table), []
 
@@ -196,19 +345,33 @@ def run(a):
         def logged(tid, pc, name=name):
             unwind(tid)
             x0, x30 = m.uc.reg_read(UC_ARM64_REG_X0), m.uc.reg_read(UC_ARM64_REG_LR) & 0xFFFFFFFF
-            rec(tid, "call", sym=name, pc=pc - base, sp=m.sp(), x0=x0, x30=(x30 - base) & 0xFFFFFFFF)
+            regs = [m.uc.reg_read(r) & 0xFFFFFFFF for r in (UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3)]
+            extra = {}
+            if name in wl_mem:   # a name with a `mem` capture also records its first four argument registers (w0..w3)
+                extra["args"] = regs
+            if name in wl_mem and name not in mem_off:
+                if name in wl_until and regs[wl_until[name][0]] == wl_until[name][1]:
+                    mem_off.add(name)   # this call is the last one captured
+                extra["mem"] = {spec: (lambda b: b.hex() if b is not None else None)(read_chain(m, regs, parse_mem_spec(spec)))
+                                for spec in wl_mem[name]}
+            rec(tid, "call", sym=name, pc=pc - base, sp=m.sp(), x0=x0, x30=(x30 - base) & 0xFFFFFFFF, **extra)
             if name in wl_ret:
                 frames.setdefault(tid, []).append({"sym": name, "pc": pc - base, "sp": m.sp(), "ret": x30, "x0": x0, "x30": (x30 - base) & 0xFFFFFFFF})
                 if x30 not in rets_hooked:
                     rets_hooked.add(x30)
                     m.watch_pc(x30, lambda tid_, pc_, x30=x30: returned(x30))
         m.watch_pc(syms[name] + base, logged)
-    fnvl = bootmiles.read_section(a.elf, ".text.fnvl") if wl is not None else []
+    fnvl = bootmiles.alloc_sections(facts, ".text.fnvl") if wl is not None else []
     for lo, size in fnvl:   # game entry: a call from outside the lifted section into it (the section's own range, no list of functions)
         def entered(tid, src, dst):
             unwind(tid)
             rec(tid, "game-entry", pc=dst - base, sp=m.sp(), src=src - base, dst=dst - base)
         m.watch_calls_into(lo + base, lo + base + size, entered)
+    if a.state_at:
+        def at_state(tid, pc):
+            if not state:
+                state.append(take_state(m, state_req, a.state_at, base))
+        m.watch_pc(syms[a.state_at] + base, at_state)
     m.on_console(lambda line: [fire(i, m.tid()) for i in host.get(line, ())])
     gpu = None
     if a.gpu:
@@ -220,62 +383,85 @@ def run(a):
             os.environ.pop("NXGL4_FRAMES", None)
 
         def presented(frame):
-            n = gpu.presents
-            if n <= FRAME_MARKS:
-                ic.mark("frame-%d" % n)
+            ic.mark_frame(gpu.presents, m.clock.now_ns(), {"sha256": store_frame(a.frames, frame)} if a.frames else None)
             for i in watch["host"].get("present", ()):
                 fire(i, m.tid())
-        gpu = bootgpu.Gpu(a.gpu, m, a.profile, on_present=presented,
+        def host_exit(code):   # fnvnx_reach_violation in a host object (bootrt): the run ends here, OUT.json as for any end
+            rc = finish(m.host_exit(code), gpu.report())
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os._exit(rc)
+        gpu = bootgpu.Gpu(m, a.profile, on_present=presented, on_exit=host_exit,
                           on_first_call=lambda: [fire(i, m.tid()) for i in watch["host"].get("gpu-first-call", ())])
+
+    def finish(r, gpu_report):
+        """the end of a run: icount, OUT.json, the console file, the summary line; the process's exit code"""
+        ic.stop(r["reason"])
+        console = r.pop("console")
+        rep = ic.report()
+        doc = {"elf_sha256": hashlib.sha256(raw).hexdigest(), "plan": plan, "run": r,
+               "console_sha256": hashlib.sha256(console.encode()).hexdigest(), "milestones": prog.state(),
+               "milestone_log": log, "inputs": {"text_entry": list(text_entries)},
+               "machine": {"app_cores": bootmachine.APP_CORES, "cores": m.cores, "quantum": a.quantum, "unicorn": unicorn.__version__}, "manifest_id": manifest.table_id, "last_reached": prog.last_reached(), "icount": rep}
+        if declared:
+            doc["inputs"]["declared"] = declared
+        dif = svc.declared_faults   # a write under a declared input: L5's static fact is wrong, the verdict is failed whatever the guest did next
+        if dif:
+            doc["declared_input_faults"] = dif
+            doc["run"]["verdict"] = "failed"
+        if sc:
+            doc["inputs"]["scenario"] = {"sha256": sc.sha256, "content": sc.text}
+        diff = sc.check_expect(r["events"]) if sc else []
+        if sc:
+            doc["inputs"]["expect_events"] = {"ok": not diff, "diff": diff}
+        if wl is not None:
+            doc["watch_log"] = wlog
+            doc["watch_schema"] = "fnvnx-watch/2"
+            doc["watch_spec"] = {"names": sorted(set(wl)), "ret": sorted(wl_ret)}
+        if a.state_at:
+            doc["start_state"] = state[0] if state else None   # null: the symbol was never entered
+        if gpu:
+            doc["gpu"] = gpu_report
+            doc["frames"] = ic.frames()
+        with open(a.out, "w") as f:
+            f.write(json.dumps(doc, sort_keys=True, indent=1) + "\n")
+        with open(os.path.splitext(a.out)[0] + ".console.txt", "w", encoding="utf-8") as f:
+            f.write(console)
+        tot = rep["totals"]
+        print("boot: reason=%s last=%s instr=%d main=%d threads=%d vns=%d wall=%.1f" % (
+            r["reason"], prog.last_reached() or "none", tot["all"]["total"], tot.get("1", {"total": 0})["total"],
+            r["threads"], r["virtual_ns"], time.time() - t0))
+        if diff:
+            print("boot: expect_events differ: %s" % "; ".join(diff))
+            return 2
+        if dif:
+            print("boot: declared_input_faults=%d first=%s %s" % (len(dif), dif[0]["call"], dif[0]["sd"]))
+            return 2
+        return 0 if r["reason"] == "limit" or (r["reason"] == "exit" and r["exit_code"] == 0) else 2
+
+    gpu_report = None
     try:
         r = m.run()
     finally:
         if gpu:
             gpu_report = gpu.report()
             gpu.close()
-    ic.stop(r["reason"])
-    console = r.pop("console")
-    rep = ic.report()
-    doc = {"elf_sha256": hashlib.sha256(raw).hexdigest(), "plan": plan, "run": r,
-           "console_sha256": hashlib.sha256(console.encode()).hexdigest(), "milestones": prog.state(),
-           "milestone_log": log, "inputs": {"text_entry": list(text_entries)}, "manifest_id": manifest.table_id, "last_reached": prog.last_reached(), "icount": rep}
-    if sc:
-        doc["inputs"]["scenario"] = {"sha256": sc.sha256, "content": sc.text}
-    diff = sc.check_expect(r["events"]) if sc else []
-    if sc:
-        doc["inputs"]["expect_events"] = {"ok": not diff, "diff": diff}
-    if wl is not None:
-        doc["watch_log"] = wlog
-        doc["watch_schema"] = "fnvnx-watch/2"
-        doc["watch_spec"] = {"names": sorted(set(wl)), "ret": sorted(wl_ret)}
-    if gpu:
-        doc["gpu"] = gpu_report
-    with open(a.out, "w") as f:
-        f.write(json.dumps(doc, sort_keys=True, indent=1) + "\n")
-    with open(os.path.splitext(a.out)[0] + ".console.txt", "w", encoding="utf-8") as f:
-        f.write(console)
-    tot = rep["totals"]
-    print("boot: reason=%s last=%s instr=%d main=%d threads=%d vns=%d wall=%.1f" % (
-        r["reason"], prog.last_reached() or "none", tot["all"]["total"], tot.get("1", {"total": 0})["total"],
-        r["threads"], r["virtual_ns"], time.time() - t0))
-    if diff:
-        print("boot: expect_events differ: %s" % "; ".join(diff))
-        return 2
-    return 0 if r["reason"] == "limit" or (r["reason"] == "exit" and r["exit_code"] == 0) else 2
+    return finish(r, gpu_report)
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     sp = sub.add_parser("run", help="run the guest and write OUT.json (format %s)" % FORMAT)
-    for opt in ("--elf", "--reserved", "--keys", "--root", "--milestones", "--manifest", "--out"):
+    for opt in ("--elf", "--facts", "--reserved", "--keys", "--root", "--milestones", "--manifest", "--out"):
         sp.add_argument(opt, required=True)
     sp.add_argument("--heap-size", required=True, type=lambda s: int(s, 0))
     sp.add_argument("--game")
     sp.add_argument("--icount-spec")
     sp.add_argument("--limit-instructions", type=lambda s: int(s, 0))
-    sp.add_argument("--hc-slice", type=lambda s: int(s, 0))
-    sp.add_argument("--gpu", help="host renderer library libnxgl4.so: registers ext module 10 (bootgpu.py)")
+    sp.add_argument("--quantum", required=True, type=lambda s: int(s, 0),
+                    help="instructions per slice of a core's thread (bootmachine.py rule 3); a declared parameter of the run, no default; recorded in OUT.json machine")
+    sp.add_argument("--gpu", action="store_true", help="registers ext module 10, forwarded to the recipe-built render/gl4 library libnxgl4.so (bootgpu.py; needs GATE_CACHE)")
     sp.add_argument("--frames", help="directory for the library's frame files ($NXGL4_FRAMES); needs --gpu")
     sp.add_argument("--threads", type=int, default=256,
                     help="guest thread stacks the stage provides (a number of the run, not of the contract; beyond it "
@@ -283,10 +469,16 @@ def main(argv=None):
     sp.add_argument("--profile", choices=("handheld", "docked"), default="handheld",
                     help="what FNVNX_PLAT_DISPLAY_DOCKED answers: docked 1, handheld 0 (default handheld)")
     sp.add_argument("--watch-log", metavar="SYMS", help="text file of ELF function names (NAME or NAME ret); OUT.json gets watch_log (fnvnx-watch/2), every hit of each")
+    sp.add_argument("--state-at", metavar="SYM", help="ELF function: when it is first entered OUT.json start_state gets the registers, the page table, the page "
+                    "hashes and the dumps of --state-request (the observation of the loader's start rules, bootstart.py)")
+    sp.add_argument("--state-request", metavar="JSON", help="what the snapshot hashes and dumps: {hash: [{name, lo, hi}], dump: [{name, addr, len}]}")
     sp.add_argument("--scenario", metavar="FILE", help="device states over virtual time, schema fnvnx-scenario/1 (bootinput.py, rule R-INPUT)")
     sp.add_argument("--text-entry", action="append", default=[], metavar="TEXT",
                     help="the answer of one TEXT_ENTRY call (the system keyboard), repeatable, consumed in order; none left: the call "
                          "is cancelled (0); a text longer than the call's max_len ends the run as scenario-error")
+    sp.add_argument("--declared-inputs", metavar="PIN", help="manifest/fonts_mirror.json: the pinned font mirror is fetched by the recipe's external mechanism "
+                    "(commit, tree_sha256; the cache is $GATE_CACHE) and mounted read-only at FNVNX_SD_FONTS under --root (bootdecl.py); a mismatch is an "
+                    "input error and nothing runs; OUT.json inputs.declared holds {name, commit, tree_sha256, files}")
     a = ap.parse_args(argv)
     if a.frames and not a.gpu:
         ap.error("--frames needs --gpu")

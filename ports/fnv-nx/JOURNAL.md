@@ -958,7 +958,7 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   GetSaveDirectory now and stops at WinMain+0x1cc on untranslated 0x00af3020 (`blk_00ae0000_od.cpp`, 13 errors). WinMain
   path units: blk_00c20000_od (WPARAM typedef), blk_004a0000_od (operator new(sizetype, char*)), MSVC
   StandardLibrarySingletonObject ctor, blk_00ae0000_od. Top hit counts: actormover (1,786), nitarray_h_unit (1,000),
-  nicontrollermanager (329). Memory manager: only InitHolder 0x00aa2020 writes the heap pointer 0x011f6080, called from
+  nicontrollermanager (329). Memory manager: only InitHolder <va> writes the heap pointer <va>, called from
   the MemoryManager ctor 0x00aa3880 which **no decompiled code calls** -> an initializer missing from the decomp; its
   unit blk_00aa0000_od_ob1_variant fails (9 errors), FormHeap_Allocate's middlehighprocess.cpp fails (7). 200
   PC-relative relocations to absolute `__fnv_` symbols in 87 objects are right only at the link address (S2 apply).
@@ -1119,8 +1119,8 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **found** - 7,307 undefined (f10 7,502); relocatable (0 PC-relative absolute references); `GAME_NEW=runtime` weakens
   0 objects. Independent check of J-0056: 0/6,265 dyninit and 0/4,692 dynexit functions hold a `brk`, and the skip
   summary has no trap group. Emulated boot: WinMain passes +0x1c8; +0x1d0 -> FUN_00aa20b0 -> FUN_00aa3050 (run-once
-  Gamebryo memory init) -> InitHolder 0x00aa2020 stores the holder at 0x011f6080, then CBaseList::GetHeadPositionI
-  0x009fd0f0 is untranslated (blk_009e0000_o2: VirtualAlloc C declaration conflict) -> first fault InitHolder+0x54.
+  Gamebryo memory init) -> InitHolder <va> stores the holder at <va>, then CBaseList::GetHeadPositionI
+  <va> is untranslated (blk_009e0000_o2: VirtualAlloc C declaration conflict) -> first fault InitHolder+0x54.
   Skipped initializers 2,889: 1,679 memory manager (FUN_00aa1070), 767 null function pointers, 338 `.text` writes
   (RegisterFloatKeyOps), 105 null reads in constructors. Frontier: 122 keys / 3,300 hits in 35 units; 24 of the 29
   units that failed in fresh8 are clean in census c18 (109 keys), among them the memory-manager constructor unit and
@@ -1453,7 +1453,7 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
       stand-ins, 45 vftables without an original COL).
   - **Defined addresses:** 9,266 of the 48,664 referenced in the window are fully defined, 13,956 have no object.
   - **Memory manager:** the four globals and the run-once flag are .bss zero, and the flag is 0 at WinMain+0x1d0, as
-    on x86. The x86 path is: constructor 0x00aa3880 -> InitializeGlobal -> InitHolder once, then WinMain's
+    on x86. The x86 path is: constructor <va> -> InitializeGlobal -> InitHolder once, then WinMain's
     FUN_00aa20b0(0) -> InitHolder again.
   - **BSNiAllocator's vftable 0x010a2528 has 10 slots**, and the decomp's stand-in declares 1 (-> S1, J-0073).
 * **metrics** - synth_objects=2987 synth_known_bytes=246924 synth_addr_defined=9266/48664 synth_addr_missing=13956

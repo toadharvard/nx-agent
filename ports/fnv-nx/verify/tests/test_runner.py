@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/farm/runner.sh ports/fnv-nx/verify/tests
 """Host test of farm/runner.sh. A clone of this checkout's HEAD stands in for the trunk (farm/runner.sh of the working
 tree is committed on top, so the script under test is the one of this tree), a local bare git repository for the
 artifacts repository, a scratch directory for FARM_HOME. The verified commits are made in the clone: the HEAD tree, the
@@ -42,7 +43,7 @@ git(repo, "commit", "-q", "--allow-empty", "-m", "the tree under test")
 good = git(repo, "rev-parse", "HEAD")
 decl = os.path.join(repo, T, "verify/tests/oracle.json")
 doc = json.load(open(decl))
-doc["tests"]["test_cas.py"]["subject"].append(T + "/verify/graph.py")
+doc["tests"]["test_cas.py"]["subject"].append(T + "/verify/sdcheck.py")
 json.dump(doc, open(decl, "w"), indent=1, sort_keys=True)
 git(repo, "commit", "-qam", "untrue declaration")
 untrue = git(repo, "rev-parse", "HEAD")
@@ -59,8 +60,8 @@ bare = os.path.join(SCRATCH, "artifacts.git")
 subprocess.run(["git", "init", "-q", "--bare", bare], check=True)
 art = os.path.join(SCRATCH, "artifacts")
 subprocess.run(["git", "clone", "-q", bare, art], check=True, capture_output=True)
-ENV = dict({k: v for k, v in os.environ.items() if not k.startswith("GATE_")}, FARM_HOME=os.path.join(SCRATCH, "farm"),
-           ARTIFACTS=art, RUNNER_JOBS="1")
+ENV = dict({k: v for k, v in os.environ.items() if not k.startswith("GATE_") and k != "ARTIFACTS_URL"}, FARM_HOME=os.path.join(SCRATCH, "farm"),
+           FNVNX_BUILD=art, RUNNER_JOBS="1")
 FINAL = re.compile(r"^AFTERMERGE commit=([0-9a-f]{12}) jobs=(\d+) violated=(\S+) published=(\S+)@([0-9a-f]{12})$")
 
 
@@ -115,5 +116,5 @@ if m and ref2 in branches():
     oc = json.loads(git(bare, "show", ref2 + ":oraclecheck.json"))
     rep = json.loads(git(bare, "show", ref2 + ":report.json"))
     check("the published result names the unopened subject", oc["tests"][0]["pass"] is False
-          and oc["tests"][0]["unopened"] == [T + "/verify/graph.py"] and rep["jobs"][0]["rc"] == 2, oc)
+          and oc["tests"][0]["unopened"] == [T + "/verify/sdcheck.py"] and rep["jobs"][0]["rc"] == 2, oc)
 sys.exit(1 if fails else 0)

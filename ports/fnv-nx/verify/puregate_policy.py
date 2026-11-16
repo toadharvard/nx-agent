@@ -1,4 +1,4 @@
-"""puregate policy tables: DATA ONLY (the rules that read them are in puregate.py, which documents the assumptions).
+"""puregate policy tables: DATA ONLY (the rules that read them are in puregate.py, which documents the assumptions). (ASM-032, ASM-033)
 
 Rule classes: clock (wall/monotonic time, file times), inode (inode/device/link identity), entropy (random, id, hash),
 unsorted-listing (directory order), unsorted-set (set iteration order), host (machine identity/load), completion-order
@@ -41,11 +41,15 @@ ORDER_ATTRS = "join extend fromkeys".split()
 SETOPS = "union intersection difference symmetric_difference copy".split()
 # gzip/zipfile/tarfile members whose call is analysed for read/write mode (writing embeds mtime)
 MODECALLS = "gzip.open gzip.GzipFile gzip.compress zipfile.ZipFile tarfile.open tarfile.TarFile".split()
-# (a) PURE: stdlib modules whose documented behaviour is a function of their arguments (assumption A-stdlib)
+# (a) PURE: stdlib modules whose documented behaviour is a function of their arguments (assumption A-stdlib) (ASM-032)
 PURE = set(("ast json hashlib re struct collections itertools functools dataclasses typing enum abc math bisect heapq "
             "array binascii base64 zlib io string textwrap shlex fnmatch posixpath copy contextlib types argparse errno "
             "stat csv difflib bz2 lzma codecs unicodedata decimal fractions traceback warnings keyword "
-            "tokenize token __future__ ntpath genericpath").split())
+            "tokenize token __future__ ntpath genericpath "
+            # xml.etree.ElementTree (and its own imports xml.etree.ElementPath, xml.etree.cElementTree is gone in 3.9+): its documented behaviour is a function of the bytes it
+            # parses or the tree it serialises; the expat backend fetches no external entity or DTD and reads no environment, clock or file beyond the file object or path
+            # handed to it. NOT listed, so still red: xml.etree.ElementInclude (its loader opens files and URLs), xml.dom.*, xml.sax.*, xml.parsers.* (ASM-032).
+            "xml.etree.ElementTree xml.etree.ElementPath").split())
 # (b) RESTRICTED: module -> allowed members ("*" all, "P_*" prefix, dotted "a.b" entries); rules above apply first
 RESTRICTED = {
     "os": "path sep linesep pathsep environ getenv makedirs mkdir remove unlink rename replace rmdir link symlink readlink "
@@ -72,6 +76,6 @@ RESTRICTED = {
 }
 # modules every member of which is ruled: importing is harmless, any use is reported by its rule
 BANNED = set("random secrets tempfile platform socket getpass pwd grp importlib builtins".split())
-# (d) EXTERNAL-PURE: third-party modules assumed pure (assumption A-ext)
-EXTERNAL = set("capstone elftools unicorn mako".split())
+# (d) EXTERNAL-PURE: third-party modules assumed pure (assumption A-ext) (ASM-033)
+EXTERNAL = set("capstone elftools unicorn mako z3 keystone gmpy2".split())   # the pinned python.modules of env.json the tools import; z3, keystone, gmpy2: pinned formal tools (assumption ASM-009)
 LISTED = PURE | set(RESTRICTED) | BANNED | EXTERNAL

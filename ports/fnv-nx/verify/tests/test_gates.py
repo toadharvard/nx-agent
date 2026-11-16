@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Tests for verify/gate_pure.py, verify/gate_tests.py, verify/gates.json and verify/l1.py.
+# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/lib/sha256/build.json ports/fnv-nx/link
+# reads: ports/fnv-nx/loader/build.json ports/fnv-nx/platform/build.json ports/fnv-nx/render/d3d9/build.json ports/fnv-nx/render/gl4/build.json
+# reads: ports/fnv-nx/render/nxgpu/build.json ports/fnv-nx/render/pair/build.json ports/fnv-nx/render/shaders/translator/build.json
+# reads: ports/fnv-nx/render/smscan/build.json ports/fnv-nx/rt/guest/build.json ports/fnv-nx/rt/guest_main/build.json ports/fnv-nx/shim/build.json
+# reads: ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
+"""Tests for verify/gate_pure.py, verify/gate_tests.py, verify/gates.d and verify/l1.py.
 Plain script: exit 0 on pass, one PASS/FAIL line per case. Uses temp git repositories."""
 import json
 import os
@@ -20,7 +25,7 @@ ENV = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@e", GIT_COMMITTE
 _n = [0]
 # the tool files the gate machinery itself needs in a checkout (verdict.py/l1.py run from VERIFY, on the repos built here);
 # the synthetic repos hold only tiny test files, never this directory's tests (no nested run of the real test suite)
-SMALL = ("gate_pure.py", "gate_tests.py", "puregate.py", "puregate_policy.py", "cas.py", "envcheck.py")
+SMALL = ("gate_admit.py", "gatesdir.py", "verdict.py", "gate_pure.py", "gate_tests.py", "puregate.py", "puregate_policy.py", "cas.py", "envcheck.py", "opentrace.py")
 CLEAN = "import sys\n\ndef f(x):\n    return sorted(x)\n"
 BAD = "import random\n\nx = random.random()\n"
 
@@ -52,59 +57,78 @@ def put(d, rel, text, mode=None):
 def gate(script, cwd, args):
     out = tempfile.mkdtemp(dir=ROOT, prefix="out-")
     p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, script)] + args, cwd=cwd, capture_output=True, text=True,
-                       env=dict(os.environ, GATE_OUT=out, GATE_COMMIT="0" * 40))
+                       env=dict(os.environ, GATE_OUT=out))
     res = None
     for f in sorted(x for x in os.listdir(out) if not x.endswith(".times.json")):
         res = json.load(open(os.path.join(out, f)))
     return p.returncode, res, p.stderr
 
-def pure(d, dirs=("link", "rules")):
-    return gate("gate_pure.py", d, list(dirs))
+V = "ports/fnv-nx/"
 
-# ---- gate_pure
+def adm(*entries, extra=()):
+    """admit.json of a toy tree: tool roots link and rules naming gate pure; ENTRIES are repo-relative stage entry points (of link/)."""
+    roots = [{"path": V + "link", "class": "tool", "entry": [V + "link/" + e for e in entries]},
+             {"path": V + "rules", "class": "tool", "entry": [V + "rules/" + e for e in extra]}]
+    return json.dumps({"format": "fnvnx-admit/1", "roots": roots})
+
+def pure(d, *entries, extra=()):
+    put(d, V + "verify/admit.json", adm(*entries, extra=extra))
+    return gate("gate_pure.py", d, [])
+
+# ---- gate_pure (the universe is the import closure of the stage entry points)
 d = tmp("pure-none")
 rc, r, e = pure(d)
-check("pure: no dirs -> green, universe 0", rc == 0 and r and r["name"] == "pure" and r["format"] == "fnvnx-gate/1"
+check("pure: no entry points -> green, universe 0", rc == 0 and r and r["name"] == "pure" and r["format"] == "fnvnx-gate/1"
       and r["status"] == "green" and r["universe"] == 0 and r["certified"] == 0 and "nothing to certify" in r["detail"], (rc, r, e))
 
 d = tmp("pure-clean")
-put(d, "link/a.py", CLEAN)
-put(d, "rules/b.py", CLEAN)
-rc, r, e = pure(d)
-check("pure: clean files certified", rc == 0 and r["status"] == "green" and (r["universe"], r["certified"]) == (2, 2), (rc, r, e))
+put(d, V + "link/a.py", CLEAN)
+put(d, V + "rules/b.py", CLEAN)
+rc, r, e = pure(d, "a.py", extra=["b.py"])
+check("pure: clean entry points certified", rc == 0 and r["status"] == "green" and (r["universe"], r["certified"]) == (2, 2), (rc, r, e))
 
 d = tmp("pure-bad")
-put(d, "link/a.py", CLEAN)
-put(d, "link/bad.py", BAD)
-rc, r, e = pure(d)
+put(d, V + "link/a.py", CLEAN)
+put(d, V + "link/bad.py", BAD)
+rc, r, e = pure(d, "a.py", "bad.py")
 check("pure: random -> red, path listed", rc != 0 and r["status"] == "red" and (r["universe"], r["certified"]) == (2, 1)
-      and r["uncertified"] == ["link/bad.py"], (rc, r, e))
+      and r["uncertified"] == [V + "link/bad.py"], (rc, r, e))
 
 d = tmp("pure-sh")
-put(d, "link/run.sh", "#!/bin/sh\necho hi\n", 0o755)
-rc, r, e = pure(d)
-check("pure: shell file is an uncertified item", rc != 0 and r["status"] == "red" and r["universe"] == 1
-      and r["certified"] == 0 and r["uncertified"] == ["link/run.sh"], (rc, r, e))
+put(d, V + "link/run.sh", "#!/bin/sh\necho hi\n", 0o755)
+put(d, V + "link/a.py", CLEAN)
+rc, r, e = pure(d, "a.py")
+check("pure: a shell file that no entry point imports is outside the universe", rc == 0 and r["status"] == "green" and r["universe"] == 1, (rc, r, e))
 
 d = tmp("pure-tests")
-put(d, "link/a.py", CLEAN)
-put(d, "link/tests/test_a.py", BAD)
-rc, r, e = pure(d)
-check("pure: files below tests/ are outside the universe", rc == 0 and r["status"] == "green"
+put(d, V + "link/a.py", CLEAN)
+put(d, V + "link/tests/test_a.py", BAD)
+rc, r, e = pure(d, "a.py")
+check("pure: files nobody imports (tests/) are outside the universe", rc == 0 and r["status"] == "green"
       and (r["universe"], r["certified"]) == (1, 1), (rc, r, e))
 
+d = tmp("pure-gate-driver")
+put(d, V + "link/a.py", CLEAN)
+put(d, V + "link/gate_x.py", BAD)
+rc, r, e = pure(d, "a.py")
+check("pure: a gate driver that is no entry point is outside the universe", rc == 0 and r["universe"] == 1, (rc, r, e))
+
 d = tmp("pure-import")
-put(d, "link/a.py", "import b\n")
-put(d, "link/b.py", CLEAN)
-rc, r, e = pure(d)
-check("pure: project imports resolve across the run", rc == 0 and (r["universe"], r["certified"]) == (2, 2), (rc, r, e))
+put(d, V + "link/a.py", "import b\n")
+put(d, V + "link/b.py", CLEAN)
+rc, r, e = pure(d, "a.py")
+check("pure: the closure follows project imports", rc == 0 and (r["universe"], r["certified"]) == (2, 2), (rc, r, e))
+
+d = tmp("pure-missing-entry")
+rc, r, e = pure(d, "gone.py")
+check("pure: an entry point that does not exist is red", rc != 0 and r["status"] == "red" and r["uncertified"] == [V + "link/gone.py"], (rc, r, e))
 
 d = tmp("pure-cap")
 for i in range(60):
-    put(d, "link/m%02d.py" % i, BAD)
-rc, r, e = pure(d)
+    put(d, V + "link/m%02d.py" % i, BAD)
+rc, r, e = pure(d, *["m%02d.py" % i for i in range(60)])
 check("pure: uncertified capped at 50, sorted", r["universe"] == 60 and len(r["uncertified"]) == 50
-      and r["uncertified"] == sorted(r["uncertified"]) and r["uncertified"][0] == "link/m00.py", r)
+      and r["uncertified"] == sorted(r["uncertified"]) and r["uncertified"][0] == V + "link/m00.py", r)
 
 # ---- gate_tests
 def tests(d, dirs=("verify",), extra=()):
@@ -149,34 +173,45 @@ put(d, "verify/tests/test_leaves.py", "import tempfile\nd = tempfile.mkdtemp(pre
 put(d, "verify/tests/test_leaves_fails.py", "import sys, tempfile\nopen(%r, 'a').write(tempfile.mkdtemp(prefix='left-') + '\\n')\nsys.exit(3)\n" % log)
 rc, r, e = tests(d)
 left = open(log).read().split()
-check("tests: the scratch a file leaves in its temporary directory is removed, passed or failed", rc != 0 and r["certified"] == 1
-      and len(left) == 2 and not any(os.path.exists(x) or os.path.exists(os.path.dirname(x)) for x in left)
-      and all(os.path.basename(os.path.dirname(x)).startswith("selftest-") for x in left), (rc, r, left))
+rows = {x["name"].rsplit("/", 1)[-1]: x for x in r["files"]}
+check("tests: the scratch a file leaves in its temporary directory is removed, passed or failed; the leak is uncertified and named",
+      rc != 0 and r["certified"] == 0 and len(left) == 2 and not any(os.path.exists(x) or os.path.exists(os.path.dirname(x)) for x in left)
+      and "leaked in TMPDIR: left-" in rows["test_leaves.py"]["reason"] and "exit 3" in rows["test_leaves_fails.py"]["reason"], (rc, r, left))
 
 d = tmp("tests-env")
 put(d, "verify/tests/test_env.py", "import os, sys\nsys.exit(1 if [k for k in os.environ if k.startswith('GATE_')] else 0)\n")
 rc, r, e = tests(d)
 check("tests: a test file does not see the gate's GATE_* variables", rc == 0 and r["certified"] == 1, (rc, r, e))
 
-# ---- gates.json
-spec = json.load(open(os.path.join(VERIFY, "gates.json")))
+# ---- gates.d
+sys.path.insert(0, VERIFY)
+import gatesdir  # noqa: E402
+spec = gatesdir.load_dir(os.path.join(VERIFY, "gates.d"))
+files_d = sorted(f[:-5] for f in os.listdir(os.path.join(VERIFY, "gates.d")))
+check("gates.d: no gates.json is tracked and every file is one gate named like it", not os.path.exists(os.path.join(VERIFY, "gates.json"))
+      and [g["name"] for g in spec["gates"]] == files_d and len(files_d) == len(set(files_d)), files_d)
+check("gates.d: every gate file declares valid covers", all(isinstance(g.get("covers"), list) and g["covers"] and all(c in gatesdir.ROOT_CLASSES for c in g["covers"])
+                                                          for g in spec["gates"]), spec)
 byname = {g["name"]: g for g in spec["gates"]}
 CONTRACT = ["n1", "n2_data", "n2_call", "n2_vcall", "xc", "xunit", "rtti", "pcrel", "bodysel", "abs", "disp", "reach", "reachlink", "gpa"]
-dirs_pure = [a.rsplit("/", 1)[-1] for a in byname["pure"]["argv"][3:]]
+dirs_pure = byname["pure"]["argv"][3:]
 dirs_tests = [a.rsplit("/", 1)[-1] for a in byname["selftests"]["argv"][5:]]
-check("gates.json: contract gates run gate_contract.py --gate NAME", all(byname[n]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_contract.py", "--gate", n] and byname[n]["result"] == n + ".json" for n in CONTRACT), spec)
-check("gates.json: format and the gates", spec["format"] == "fnvnx-gates/1" and [g["name"] for g in spec["gates"]] == ["pure", "selftests", "admit", "oracle", "build", "objstub", "linkstrict", "determinism", "fixtures"] + CONTRACT + ["argordergate", "imports", "machine", "hostapi"]
+check("gates.d: contract gates run gate_contract.py --gate NAME", all(byname[n]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_contract.py", "--gate", n] and byname[n]["result"] == n + ".json" for n in CONTRACT), spec)
+check("gates.d: format and the gates", spec["format"] == "fnvnx-gates/1" and {"pure", "selftests", "admit", "oracle", "exepin", "assumptions", "build", "objstub", "linkstrict", "determinism", "argordergate", "imports", "machine", "hostapi", "datamodel", "d3d9total", "abi", "namegate", "r7"}.union(CONTRACT) <= set(byname) and {"order", "addr32", "eh"} <= set(byname)
       and all(byname[n]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_%s.py" % n] and byname[n]["result"] == n + ".json"
               for n in ("build", "objstub", "linkstrict", "determinism", "hostapi"))
       and byname["argordergate"]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_argorder.py"] and byname["argordergate"]["result"] == "argordergate.json"
+      and byname["datamodel"]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_datamodel.py"] and byname["datamodel"]["result"] == "datamodel.json"
+      and byname["d3d9total"]["argv"] == ["python3", "-I", "ports/fnv-nx/render/total/gate_d3d9total.py"] and byname["d3d9total"]["result"] == "d3d9total.json"
       and byname["pure"]["result"] == "pure.json" and byname["selftests"]["result"] == "selftests.json"
-      and dirs_pure == ["contract", "link", "rules", "lift"] and dirs_tests == ["verify", "farm", "contract", "link", "rules", "lift"]
+      and dirs_pure == [] and dirs_tests == ["verify", "farm", "contract", "link", "rules", "lift", "gates", "total", "manifest"]
+      and all(byname[n]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_lift.py", "--gate", n] and byname[n]["result"] == n + ".json" for n in ("order", "addr32", "eh"))
       and byname["pure"]["argv"][:3] == ["python3", "-I", "ports/fnv-nx/verify/gate_pure.py"]
       and byname["selftests"]["argv"][:5] == ["python3", "-I", "ports/fnv-nx/verify/gate_tests.py", "--jobs", "3"], spec)
 
 # ---- l1
 def l1(*a):
-    p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "l1.py")] + list(a), capture_output=True, text=True, env=ENV)
+    p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "l1.py"), a[0], "--artifacts", ENV.get("ARTIFACTS_URL", "file:///none")] + list(a[1:]), capture_output=True, text=True, env=ENV)
     lines = [x for x in p.stdout.splitlines() if x.startswith("L1 ")]
     return p.returncode, lines[-1] if lines else "", p.stdout, p.stderr
 
@@ -187,9 +222,14 @@ def small_repo(gates=None, link=None):
     os.makedirs(os.path.join(r, "ports/fnv-nx/verify"))
     for f in SMALL:
         shutil.copy(os.path.join(VERIFY, f), os.path.join(r, "ports/fnv-nx/verify", f))
-    put(r, "ports/fnv-nx/verify/gates.json", json.dumps(gates or two_gates()))
+    for g in (gates or two_gates())["gates"]:
+        put(r, "ports/fnv-nx/verify/gates.d/%s.json" % g["name"], json.dumps(dict(g, format="fnvnx-gatefile/1")))
     shutil.copy(os.path.join(VERIFY, "env.json"), os.path.join(r, "ports/fnv-nx/verify/env.json"))
+    os.makedirs(os.path.join(r, "ports/fnv-nx/contract"), exist_ok=True)   # cas.py reads the tree-hash rule from ../contract
+    shutil.copy(os.path.join(VERIFY, "..", "contract", "treehash.py"), os.path.join(r, "ports/fnv-nx/contract/treehash.py"))
     put(r, "ports/fnv-nx/link/tests/test_ok.py", "import sys\nsys.exit(0)\n")
+    put(r, V + "link/stage.py", CLEAN)  # one stage entry point: a pure gate over an empty universe is vacuous (verdict.py)
+    put(r, V + "verify/admit.json", adm("stage.py", *[k.rsplit("/", 1)[-1] for k in (link or {}) if k.endswith("/bad.py")]))
     for k, v in (link or {}).items():
         put(r, k, v)
     git(r, "add", "-A")
@@ -199,8 +239,8 @@ def small_repo(gates=None, link=None):
 def two_gates():
     v = "ports/fnv-nx/verify/"
     return {"format": "fnvnx-gates/1", "gates": [
-        {"name": "pure", "argv": ["python3", "-I", v + "gate_pure.py", "ports/fnv-nx/link"], "result": "pure.json"},
-        {"name": "selftests", "argv": ["python3", "-I", v + "gate_tests.py", "ports/fnv-nx/link"], "result": "selftests.json"}]}
+        {"name": "pure", "argv": ["python3", "-I", v + "gate_pure.py"], "result": "pure.json", "covers": ["tool"]},
+        {"name": "selftests", "argv": ["python3", "-I", v + "gate_tests.py", "ports/fnv-nx/link"], "result": "selftests.json", "covers": ["tool"]}]}
 
 def branch(r, name, files, base="main", delete=()):
     git(r, "checkout", "-b", name, base)
@@ -212,7 +252,7 @@ def branch(r, name, files, base="main", delete=()):
     git(r, "commit", "-m", name)
     git(r, "checkout", "main")
 
-LINE = r"^L1 (green|red) [0-9a-f]{40} [0-9.]+s gates:\d+ over_budget:(True|False)$"
+LINE = r"^L1 (green|red) [0-9a-f]{40} [0-9.]+s gates:\d+ over_budget:(True|False) vacuous:\d+$"
 
 r = small_repo()
 vd = tmp("verdicts")
@@ -226,6 +266,36 @@ r2 = small_repo(link={"ports/fnv-nx/link/bad.py": BAD})
 rc, line, out, err = l1("verdict", "--repo", r2, "--commit", "main", "--verdicts", vd)
 check("l1 verdict: red file -> red, exit 2", rc == 2 and line.startswith("L1 red "), (rc, line, out, err))
 
+vd = tmp("verdicts")
+r3 = small_repo(link={"ports/fnv-nx/link/tests/test_x.py": "import sys\nprint('boom: [Errno 28] No space left on device')\nsys.exit(1)\n"})
+rc, line, out, err = l1("verdict", "--repo", r3, "--commit", "main", "--verdicts", vd)
+tree3 = git(r3, "rev-parse", "main^{tree}")
+stored = json.load(open(os.path.join(vd, tree3 + ".json")))
+gt = [g for g in stored["gates"] if g["name"] == "selftests"][0]
+check("l1 verdict: the reason of an uncertified test (exit status, errno text) is in the stored verdict and the printed gate line",
+      rc == 2 and "test_x.py" in gt["reason"] and "exit 1" in gt["reason"] and "[Errno 28] No space left on device" in gt["reason"]
+      and "[Errno 28]" in out, (rc, gt, out))
+
+# gate TMPDIR rule: private empty TMPDIR per gate, removed on any outcome; leftovers in it or in the worktree make the gate red
+LEAKY = ("import json, os, sys\nk = sys.argv[1]\n"
+         "if k == 'tmp': open(os.path.join(os.environ['TMPDIR'], 'junk'), 'w').write('x')\n"
+         "if k == 'wt': open('stray.txt', 'w').write('x')\n"
+         "json.dump({'format': 'fnvnx-gate/1', 'name': 'leaky', 'status': 'green', 'universe': 1, 'certified': 1, 'uncertified': [],\n"
+         "           'detail': os.environ['TMPDIR']}, open(os.path.join(os.environ['GATE_OUT'], 'leaky.json'), 'w'))\n")
+def leaky_run(kind):
+    r = small_repo(gates={"format": "fnvnx-gates/1", "gates": [
+        {"name": "leaky", "argv": ["python3", "-I", "ports/fnv-nx/verify/leaky.py", kind], "result": "leaky.json", "covers": ["tool"]}]},
+        link={"ports/fnv-nx/verify/leaky.py": LEAKY})
+    vd = tmp("verdicts")
+    rc, line, out, err = l1("verdict", "--repo", r, "--commit", "main", "--verdicts", vd)
+    return rc, out, err
+rc, out, err = leaky_run("clean")
+check("gate tmpdir: a gate that leaves nothing is green", rc == 0, (rc, out, err))
+rc, out, err = leaky_run("tmp")
+check("gate tmpdir: a gate that leaves a file in its TMPDIR is red and the file is named", rc == 2 and "in its TMPDIR: junk" in out, (rc, out, err))
+rc, out, err = leaky_run("wt")
+check("gate tmpdir: a gate that leaves a file in the worktree is red and the file is named", rc == 2 and "in the worktree: stray.txt" in out, (rc, out, err))
+
 # merge: bootstrap
 r = small_repo()
 vd = tmp("verdicts")
@@ -237,7 +307,7 @@ check("l1 merge: bootstrap merges on green", rc == 0 and re.match(LINE, line) an
       and "merged " + new in out and new != old and git(r, "rev-parse", new + "^1") == old, (rc, line, out, err))
 
 # red branch blocked
-branch(r, "bad", {"ports/fnv-nx/link/bad.py": BAD})
+branch(r, "bad", {"ports/fnv-nx/link/bad.py": BAD, V + "verify/admit.json": adm("stage.py", "bad.py")})
 before = git(r, "rev-parse", "main")
 rc, line, out, err = l1("merge", "--repo", r, "--into", "main", "--from", "bad", "--verdicts", vd)
 check("l1 merge: red file in link/ is blocked, ref does not move", rc == 2 and line.startswith("L1 red ")
@@ -249,9 +319,7 @@ rc, line, out, err = l1("merge", "--repo", r, "--into", "main", "--from", "feat2
 check("l1 merge: second green merge, previous verdict used", rc == 0 and "bootstrap" not in out and "merged " in out, (rc, line, out, err))
 
 # ratchet: gate dropped
-g1 = two_gates()
-g1["gates"] = g1["gates"][:1]
-branch(r, "drop", {"ports/fnv-nx/verify/gates.json": json.dumps(g1)})
+branch(r, "drop", {}, delete=["ports/fnv-nx/verify/gates.d/selftests.json"])
 before = git(r, "rev-parse", "main")
 rc, line, out, err = l1("merge", "--repo", r, "--into", "main", "--from", "drop", "--verdicts", vd)
 check("l1 merge: dropping a gate is blocked by the ratchet", rc == 2 and "ratchet" in out + err and "selftests" in out + err
@@ -314,6 +382,31 @@ def mk(d, **files):
 def tests_c(d, cache, extra=(), dirs=("verify",)):
     return gate("gate_tests.py", d, ["--cache", cache] + list(extra) + list(dirs))
 
+# TMPDIR rule: private TMPDIR per test file, removed whatever the outcome; leftovers are red; the reason is in the result
+def gate_tmp(d, extra=()):
+    """gate_tests.py over verify/ in D with the gate's TMPDIR in a fresh directory; -> (rc, result, entries left there afterwards)"""
+    gt = tempfile.mkdtemp(dir=ROOT, prefix="gt-")
+    out = tempfile.mkdtemp(dir=ROOT, prefix="out-")
+    p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "gate_tests.py")] + list(extra) + ["verify"], cwd=d,
+                       env=dict(os.environ, GATE_OUT=out, TMPDIR=gt), capture_output=True, text=True)
+    return p.returncode, json.load(open(os.path.join(out, "selftests.json"))), sorted(os.listdir(gt)), p.stderr
+
+d = tmp("tests-tmpdir")
+mk(d, test_a="import tempfile\nd = tempfile.mkdtemp()\nopen(d + '/x', 'w').write('x' * 1000)\nimport shutil\nshutil.rmtree(d)\n",
+   test_b="import tempfile\ntempfile.mkdtemp(prefix='leak-')\n",
+   test_c="import os, sys, time\nopen(os.path.join(os.environ['TMPDIR'], 'big'), 'w').write('y')\ntime.sleep(60)\n",
+   test_d="import sys\nprint('boom: [Errno 28] No space left on device')\nsys.exit(1)\n")
+rc, r, left, e = gate_tmp(d, ("--timeout-s", "3"))
+rows = {f["name"].rsplit("/", 1)[-1]: f for f in r["files"]}
+check("tests tmpdir: a clean test passes; a test leaving an entry in its TMPDIR is uncertified and names it", rc != 0
+      and rows["test_a.py"]["status"] == "passed" and rows["test_b.py"]["status"] == "failed"
+      and "leaked in TMPDIR: leak-" in rows["test_b.py"]["reason"], (rc, r, e))
+check("tests tmpdir: a timeout kill is a failure with the reason, and its scratch is removed", rows["test_c.py"]["status"] == "failed"
+      and "timeout" in rows["test_c.py"]["reason"] and "leaked in TMPDIR: big" in rows["test_c.py"]["reason"], r)
+check("tests tmpdir: the exit status and the tail of the output (errno text) are the reason", rows["test_d.py"]["status"] == "failed"
+      and "exit 1" in rows["test_d.py"]["reason"] and "[Errno 28] No space left on device" in rows["test_d.py"]["reason"], r)
+check("tests tmpdir: after the run the gate's TMPDIR holds no new entry, whatever the outcomes", left == [], left)
+
 d = tmp("tests-jobs")
 # concurrency is proved by a rendezvous, not by the clock: each file leaves a marker and passes only once all three exist,
 # which can happen only while all three run at the same time (a sequential run would hit the 3600 s limit instead)
@@ -336,38 +429,89 @@ check("tests: per-file seconds in selftests.times.json", [(t["name"], t["status"
 
 d = tmp("tests-cache")
 cache = os.path.join(d, "cache")
-mk(d, test_a="open('ran.log', 'a').write('a\\n')\n", test_b="open('ran.log', 'a').write('b\\n')\n")
+mk(d, test_a="open('ran.log', 'a').write('a\\n')\nopen('verify/data_a.txt').read()\n", test_b="open('ran.log', 'a').write('b\\n')\nopen('verify/data_b.txt').read()\n")
+put(d, "verify/data_a.txt", "1\n")
+put(d, "verify/data_b.txt", "1\n")
 ran = lambda: open(os.path.join(d, "ran.log")).read().split() if os.path.exists(os.path.join(d, "ran.log")) else []
+entries = lambda: sorted(os.listdir(os.path.join(cache, "selftests"))) if os.path.isdir(os.path.join(cache, "selftests")) else []
 rc, r, e = tests_c(d, cache)
-check("tests cache: first run executes every file and stores one key", rc == 0 and sorted(ran()) == ["a", "b"] and "cached" not in r["detail"]
-      and len([f for f in os.listdir(cache) if f.endswith(".json")]) == 1, (rc, r, e, ran()))
+check("tests cache: first run executes every file and stores one entry per file", rc == 0 and sorted(ran()) == ["a", "b"] and "cached" not in r["detail"].replace("0 cached", "")
+      and len(entries()) == 2, (rc, r, e, ran(), entries()))
 rc, r, e = tests_c(d, cache)
-check("tests cache: unchanged inputs -> certified without running", rc == 0 and len(ran()) == 2 and r["certified"] == 2
-      and re.match(r"^2 of 2 test files pass, cached key [0-9a-f]{12}, ", r["detail"]) and all(f["status"] == "cached" for f in r["files"]), (rc, r, e, ran()))
+check("tests cache: unchanged inputs -> every file certified without running", rc == 0 and len(ran()) == 2 and r["certified"] == 2
+      and re.match(r"^2 of 2 test files pass, 2 cached, ", r["detail"]) and all(f["status"] == "cached" for f in r["files"]), (rc, r, e, ran()))
 rc, r, e = gate("gate_tests.py", d, ["verify"])
 check("tests cache: no --cache and no GATE_CACHE -> always runs", rc == 0 and len(ran()) == 4 and "cached" not in r["detail"], (r, ran()))
 os.utime(os.path.join(d, "verify/tests/test_a.py"), (5, 5))
 rc, r, e = tests_c(d, cache)
-check("tests cache: an mtime change is not a change of content", "cached key" in r["detail"] and len(ran()) == 4, (r, ran()))
+check("tests cache: an mtime change is not a change of content", r["detail"].startswith("2 of 2 test files pass, 2 cached") and len(ran()) == 4, (r, ran()))
 put(d, "verify/helper.py", "X = 1\n")
 rc, r, e = tests_c(d, cache)
-check("tests cache: new content in a key dir -> miss, everything re-runs", rc == 0 and "cached" not in r["detail"] and len(ran()) == 6, (r, ran()))
+check("tests cache: new content that no test reads re-runs nothing", rc == 0 and r["detail"].startswith("2 of 2 test files pass, 2 cached") and len(ran()) == 4, (r, ran()))
+put(d, "verify/data_a.txt", "2\n")
+rc, r, e = tests_c(d, cache)
+check("tests cache: a file that only test_a reads changes -> exactly test_a re-runs", rc == 0 and ran()[4:] == ["a"]
+      and {os.path.basename(f["name"]): f["status"] for f in r["files"]} == {"test_a.py": "passed", "test_b.py": "cached"}, (r, ran()))
+put(d, "verify/tests/test_b.py", "open('ran.log', 'a').write('b\\n')\nopen('verify/data_b.txt').read()\n# edited\n")
+rc, r, e = tests_c(d, cache)
+check("tests cache: a test file's own content is part of its read set", ran()[5:] == ["b"], (r, ran()))
 rc, r, e = tests_c(d, cache, extra=("--timeout-s", "200"))
-check("tests cache: another argv is another key", "cached" not in r["detail"] and len(ran()) == 8, (r, ran()))
-put(d, "other/data.txt", "1\n")
-rc, r, e = tests_c(d, cache, extra=("--key-dirs", "verify", "other", "--"))
-n8 = len(ran())
-put(d, "other/data.txt", "2\n")
-rc, r, e = tests_c(d, cache, extra=("--key-dirs", "verify", "other", "--"))
-check("tests cache: --key-dirs content change (a dir that holds no tests) -> miss", n8 == 10 and len(ran()) == 12 and "cached" not in r["detail"], (r, ran()))
-rc, r, e = tests_c(d, cache, extra=("--key-dirs", "verify", "other", "--"))
-check("tests cache: same key dirs and content again -> hit", "cached key" in r["detail"] and len(ran()) == 12, (r, ran()))
+check("tests cache: another argv is another key", "cached" not in r["detail"].replace("0 cached", "") and len(ran()) == 8, (r, ran()))
+# a test reads what it sees of the checkout besides file content: whether a path exists, what a directory lists
+d3 = tmp("tests-cache-view")
+c3 = os.path.join(d3, "cache")
+mk(d3, test_e="import os\nopen('ran.log', 'a').write('e\\n')\nassert not os.path.exists('verify/flag.txt')\n",
+   test_l="import os\nopen('ran.log', 'a').write('l\\n')\nos.listdir('verify/lst')\n")
+put(d3, "verify/lst/x.txt", "1\n")
+ran3 = lambda: open(os.path.join(d3, "ran.log")).read().split() if os.path.exists(os.path.join(d3, "ran.log")) else []
+tests_c(d3, c3)
+tests_c(d3, c3)
+check("tests cache (view): unchanged -> nothing re-runs", sorted(ran3()) == ["e", "l"], ran3())
+put(d3, "verify/lst/y.txt", "1\n")
+tests_c(d3, c3)
+check("tests cache (view): a new name in a listed directory re-runs exactly the file that listed it", sorted(ran3()) == ["e", "l", "l"], ran3())
+put(d3, "verify/flag.txt", "1\n")
+rc, r, e = tests_c(d3, c3)
+check("tests cache (view): a path the test saw as absent now exists -> that file re-runs (and now fails)", rc != 0 and sorted(ran3()) == ["e", "e", "l", "l"] and r["uncertified"] == ["verify/tests/test_e.py"], (r, ran3()))
+# a test whose import closure reaches a module that runs strace is untraced (derived, no list) and keyed by whole directories
+d4 = tmp("tests-cache-untraced")
+c4 = os.path.join(d4, "cache")
+LOG4 = os.path.join(d4, "ran.log")   # an untraced test runs in its own mount directory: the log is an absolute path
+mk(d4, test_u="# reads: other\nopen(%r, 'a').write('u\\n')\nCHILD = \"\"\"\nimport envcheck\n\"\"\"\n" % LOG4, test_t="open(%r, 'a').write('t\\n')\n" % LOG4)
+put(d4, "other/data.txt", "1\n")
+ran4 = lambda: open(os.path.join(d4, "ran.log")).read().split() if os.path.exists(os.path.join(d4, "ran.log")) else []
+ex4 = ()   # the untraced file declares its data (`# reads: other`); no key-dirs
+tests_c(d4, c4, extra=ex4)
+tests_c(d4, c4, extra=ex4)
+check("tests cache (untraced): unchanged -> both cached", sorted(ran4()) == ["t", "u"], ran4())
+put(d4, "other/data.txt", "2\n")
+tests_c(d4, c4, extra=ex4)
+check("tests cache (untraced): a --key-dirs content change re-runs the untraced file only", sorted(ran4()) == ["t", "u", "u"], ran4())
+# the checkout's git state: a test that asks git is keyed by the tree hash as well
+d5 = tmp("tests-cache-git")
+c5 = os.path.join(d5, "cache")
+git(d5, "init", "-q")
+mk(d5, test_g="import subprocess\nopen('ran.log', 'a').write('g\\n')\nsubprocess.run(['git', 'ls-files'], check=True, capture_output=True)\n", test_p="open('ran.log', 'a').write('p\\n')\n")
+put(d5, ".gitignore", "ran.log\ncache\n")
+git(d5, "add", "-A")
+git(d5, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "one")
+ran5 = lambda: open(os.path.join(d5, "ran.log")).read().split() if os.path.exists(os.path.join(d5, "ran.log")) else []
+tests_c(d5, c5)
+tests_c(d5, c5)
+check("tests cache (git): unchanged tree -> both cached", sorted(ran5()) == ["g", "p"], ran5())
+put(d5, "verify/other.txt", "1\n")
+git(d5, "add", "-A")
+git(d5, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "two")
+tests_c(d5, c5)
+check("tests cache (git): a new tree re-runs the file that asked git, not the one that did not", sorted(ran5()) == ["g", "g", "p"], ran5())
 # env.json of the checkout is part of the key
 e1 = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "env.json")
 d2 = tmp("tests-cache-env")
 mk(d2, test_a="pass\n")
-for n in ("gate_tests.py", "cas.py", "envcheck.py"):
+for n in ("gate_tests.py", "cas.py", "envcheck.py", "opentrace.py"):
     shutil.copy(os.path.join(VERIFY, n), os.path.join(d2, n))
+os.makedirs(os.path.join(d2, "..", "contract"), exist_ok=True)   # cas.py reads the tree-hash rule from ../contract (its one home)
+shutil.copy(os.path.join(VERIFY, "..", "contract", "treehash.py"), os.path.join(d2, "..", "contract", "treehash.py"))
 def gate_in(dirpath, cache):
     out = tempfile.mkdtemp(dir=ROOT, prefix="out-")
     subprocess.run([sys.executable, "-I", os.path.join(dirpath, "gate_tests.py"), "--cache", cache, "verify"], cwd=d2,
@@ -381,26 +525,27 @@ doc = json.load(open(e1))
 doc["packages"]["coreutils"] = "0.0-other"
 json.dump(doc, open(os.path.join(d2, "env.json"), "w"))
 r2 = gate_in(d2, c2)
-check("tests cache: another env.json is another key", "cached key" in r["detail"] and "cached" not in r2["detail"], (r, r2))
+check("tests cache: another env.json is another key", "1 cached" in r["detail"] and "1 cached" not in r2["detail"], (r, r2))
 
 d = tmp("tests-cache-fail")
 cache = os.path.join(d, "cache")
 mk(d, test_ok="pass\n", test_bad="import sys\nsys.exit(1)\n")
 rc1, r1, _ = tests_c(d, cache)
 rc2, r2, _ = tests_c(d, cache)
-check("tests cache: a failing file is never certified from the cache; the key re-runs everything", rc1 != 0 and rc2 != 0
-      and "cached" not in r2["detail"] and r2["uncertified"] == ["verify/tests/test_bad.py"] and r2["certified"] == 1, (r1, r2))
+check("tests cache: a failing file is never certified from the cache; the passing file is", rc1 != 0 and rc2 != 0
+      and r2["uncertified"] == ["verify/tests/test_bad.py"] and r2["certified"] == 1
+      and {f["name"][-11:]: f["status"] for f in r2["files"]} == {"test_bad.py": "failed", "/test_ok.py": "cached"}, (r1, r2))
 put(d, "verify/tests/test_bad.py", "pass\n")
 rc3, r3, _ = tests_c(d, cache)
 rc4, r4, _ = tests_c(d, cache)
-check("tests cache: fixed file is a new key, passes, then is cached", rc3 == 0 and "cached" not in r3["detail"] and rc4 == 0 and "cached key" in r4["detail"], (r3, r4))
+check("tests cache: fixed file passes, then is cached", rc3 == 0 and "1 cached" in r3["detail"] and rc4 == 0 and "2 cached" in r4["detail"], (r3, r4))
 
 d = tmp("tests-cache-timeout")
 cache = os.path.join(d, "cache")
 mk(d, test_slow="import time\ntime.sleep(3600)\n")
 rc, r, e = tests_c(d, cache, extra=("--timeout-s", "1"))
 rc2, r2, e = tests_c(d, cache, extra=("--timeout-s", "1"))
-check("tests cache: a timeout is never cached as passed", rc != 0 and rc2 != 0 and "cached" not in r2["detail"], (r, r2))
+check("tests cache: a timeout is never cached as passed", rc != 0 and rc2 != 0 and ", 0 cached" in r2["detail"], (r, r2))
 
 # l1 passes VDIR/cache as GATE_CACHE: the second verdict of an unchanged tree finds the selftests keyed result
 r = small_repo()
@@ -489,7 +634,7 @@ check("push: retry after exit 5 merges onto the new tip and judges the new tree"
 
 r, bare, other = remote_setup()
 vd = tmp("verdicts")
-branch(r, "bad", {"ports/fnv-nx/link/bad.py": BAD})
+branch(r, "bad", {"ports/fnv-nx/link/bad.py": BAD, V + "verify/admit.json": adm("stage.py", "bad.py")})
 base = git(r, "rev-parse", "main")
 rc, out = l1_inproc("merge", "--repo", r, "--into", "main", "--from", "bad", "--verdicts", vd, "--remote", "origin")
 check("push: red verdict -> remote and local untouched", rc == 2 and git(bare, "rev-parse", "main") == base and git(r, "rev-parse", "main") == base, (rc, out))

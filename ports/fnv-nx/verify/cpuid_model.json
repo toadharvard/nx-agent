@@ -1,0 +1,50 @@
+{
+ "_doc": "The declared CPU's cpuid, as DATA: the raw leaves of the pinned reference host (identity: verify/cpuref.json) and the declared-machine masks applied to them. lift/tools/gen_cpuref.py generates lift/rt/fnvl_cpuref.h, lift/rt/rcpref.h and lift/rt/cpumodel_tab.inc from cpuref.json + this file; nothing restates these values by hand. Provenance of `raw`: transcribed from the table recorded in lift/rt/cpumodel.c at 286fdc93 (a `cpuid` run on the pinned host); tools/cpuid_dump.c regenerates it on that host (not run on this machine: it is family 6 model 173, not the reference model 207). Fields the platform owns (leaf 1 EBX [23:16], leaf 4 EAX [31:26] and the L3 share field [25:14]) are zero in `raw` and filled by rt/cpumodel.c from FNVNX_NPROC.",
+ "mxcsr_mask": "0x0000ffbf",
+ "mxcsr_mask_doc": "DERIVED, not transcribed (orchestrator ruling 2026-11-15): FXSAVE's MXCSR_MASK = host ∩ lifted. The lifted Forms have no DAZ (MXCSR bit 6), so the mask is 0xFFBF; SDM Vol 1 11.6.6: a processor without DAZ has the default mask 0xFFBF; the leaf-1 EDX SSE2 bit above (26) is the model's SSE. LDMXCSR of a value with a bit outside the mask is #GP(0) (SDM Vol 2 LDMXCSR, Exceptions).",
+ "max_basic": 4,
+ "max_ext": "0x80000004",
+ "leaf1_edx_clear": "0x08000000",
+ "leaf1_edx_raw": "0x1f8bfbff",
+ "leaf1_ecx_raw": "0xfffa3203",
+ "leaf1_ecx_keep": "0x00000000",
+ "ext1_edx_raw": "0x2c100800",
+ "ext1_edx_keep": "0x00100000",
+ "ext1_ecx_raw": "0x00000121",
+ "ext1_ecx_keep": "0x00000000",
+ "masks_doc": "leaf1 EDX = raw & ~clear: SS (27) cleared (kept HTT 28, FXSR SSE SSE2 ...); leaf1 ECX = raw & keep (everything cleared: the lifter implements MMX/SSE/SSE2 only); 0x80000001 EDX = raw & keep (NX only); ECX = raw & keep (LAHF64, LZCNT/ABM, PREFETCHW cleared). max leaves: a 2010-era game asks leaves 0 1 2 4 and 0x80000000..4.",
+ "raw": {
+  "2": [
+   "0x00feff01",
+   "0x000000f0",
+   "0x00000000",
+   "0x00000000"
+  ],
+  "4": [
+   [
+    "0x00000121",
+    "0x02c0003f",
+    "0x0000003f",
+    "0x00000000"
+   ],
+   [
+    "0x00000122",
+    "0x01c0003f",
+    "0x0000003f",
+    "0x00000000"
+   ],
+   [
+    "0x00000143",
+    "0x03c0003f",
+    "0x000007ff",
+    "0x00000000"
+   ],
+   [
+    "0x00000163",
+    "0x04c0003f",
+    "0x00033fff",
+    "0x00000004"
+   ]
+  ]
+ }
+}

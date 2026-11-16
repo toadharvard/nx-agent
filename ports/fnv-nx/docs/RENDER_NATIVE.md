@@ -694,7 +694,7 @@ image + vtable rewrite), S4 (boot), S5 (toolchain/deko3d linkage).
 * S2-link: `--override <tsv>` with precedence over decomp definitions at the same address; report of shadowed
   definitions; overrides also rewrite vtable-slot and data-image code pointers through the address map.
 * S1-compile: rule `NATIVE1`, drop listed units from the build (from `render/native/drop_units.txt`).
-* S5-toolchain: decide deko3d ILP32 vs LP64 worker; the front only assumes "submit one packet arena per frame".
+* S5-toolchain: decide deko3d ILP32 vs LP64 worker; the front only assumes "submit one packet arena per frame". (ASM-026)
 * S6b-shaders: keep `sdp2dksh` as the parity reference; add a mode that dumps CTAB name->register per blob (the
   family constant structs are checked against it).
 

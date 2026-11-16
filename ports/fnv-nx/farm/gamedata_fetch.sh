@@ -1,85 +1,79 @@
 #!/usr/bin/env bash
 # gamedata_fetch.sh - assemble a game install for the emulated boot from the private artifacts repository: FalloutNV.exe
-# and the INIs from branch gamedata/exe, the Data/ items from gamedata/data/<slug> (the publishing job), each
-# checked against its MANIFEST.tsv (every part's sha256 and the whole item's). The result is a directory to boot with
-# FARM_GAME=<out> tests/s5/farm_boot.sh. Game data: <out> must be outside any git checkout, never committed.
+# and the INIs from gamedata/exe, the d3dx9 DLLs from gamedata/redist, the Data/ items from gamedata/data/<slug>. The set is
+# exactly the gamedata externals that the admitted recipes declare (`recipe.py externals --ref-prefix gamedata/`): each is fetched
+# BY ITS COMMIT and its tree is checked against the recipe's tree_sha256 by the recipe's own fetch (BuildRed on a mismatch), then
+# checked against its MANIFEST.tsv (every part's sha256 and the whole item's). A branch head is never fetched, so ARTIFACTS_URL
+# changes where the bytes come from, never which bytes. An item that no recipe declares is red: the consumer declares the ref as
+# an external of its root. The result is a directory to boot with FARM_GAME=<out> tests/s5/farm_boot.sh.
+# Game data: <out> must be outside any git checkout, never committed.
 #
-#   farm/gamedata_fetch.sh <out dir> [item...]      default: every gamedata/data/* branch
+#   farm/gamedata_fetch.sh <out dir> [item...]      default: every declared gamedata/data/* external
 #   farm/gamedata_fetch.sh <out dir> --no-data      only the exe, the INIs, the static modules (gamedata/exe) and the d3dx9 DLLs
 #                                                   (gamedata/redist): what a start to WinMain needs
 #
-# Env: ARTIFACTS (a clone of the artifacts repository to fetch into; default /home/user/fnv-nx-build if it exists),
-#      ARTIFACTS_URL (fetched over directly when there is no clone).
-# A finished fetch writes <out>/.gamedata_heads (the branch heads it took); when the heads have not moved, the next
-# run with the same items does nothing ("up to date"), so farms can call it before every boot.
-# Exit: 0 ok, 1 a missing branch or a checksum mismatch, 2 usage.
+# Env: ARTIFACTS_URL (default: verify/artifacts.py url, the repository env.json pins). GAMEDATA_CACHE (default $TMPDIR/gamedata-cache): the
+# recipe's store and external cache, content-keyed, reused by the next run. No host path is read.
+# A finished fetch writes <out>/.gamedata_pins (the declared pins it installed); when they have not changed, the next run with the same
+# items does nothing ("up to date"), so farms can call it before every boot.
+# Exit: 0 ok, 1 an undeclared item, a failed fetch, a tree mismatch or a checksum mismatch, 2 usage.
 set -euo pipefail
 OUT=${1:?usage: farm/gamedata_fetch.sh <out dir> [--no-data | item...]}; shift
 NODATA=0; if [ "${1:-}" = --no-data ]; then NODATA=1; shift; [ $# -eq 0 ] || { echo "gamedata_fetch: --no-data takes no items" >&2; exit 2; }; fi
-URL=${ARTIFACTS_URL:-https://github.com/toadharvard/fnv-nx-build}
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+URL=${ARTIFACTS_URL:-$(python3 -I "$HERE/../verify/artifacts.py" url)}   # the pinned repository of env.json: one accessor (verify/artifacts.py)
 mkdir -p "$OUT/Data"; OUT=$(cd "$OUT" && pwd)
 if top=$(git -C "$OUT" rev-parse --show-toplevel 2>/dev/null); then
   echo "gamedata_fetch: $OUT is inside the git checkout $top; game data must stay out of git" >&2; exit 2
 fi
-# The proxy cuts long transfers now and then ("Connection reset by peer", "RPC failed": sw36, 2026-11-07, on the
-# 1.6 GB Voices1 item): every remote call is retried with backoff (GAMEDATA_TRIES, default 5: 2, 4, 8, 16 s).
-retry() { local i=1 n=${GAMEDATA_TRIES:-5}; while :; do "$@" && return 0; [ $i -ge $n ] && return 1
-  echo "gamedata_fetch: retry $i of $((n - 1)) in $((2 ** i)) s: ${*: -1}" >&2; sleep $((2 ** i)); i=$((i + 1)); done; }
-lsr() { git ls-remote "$URL" "$@" > "$TMPL" && [ -s "$TMPL" ]; }
-TMPL=$(mktemp "${TMPDIR:-/tmp}/gamedata-ls.XXXXXX")
-retry lsr refs/heads/gamedata/exe refs/heads/gamedata/redist 'refs/heads/gamedata/data/*' || { echo "gamedata_fetch: ls-remote $URL failed" >&2; rm -f "$TMPL"; exit 1; }
-heads=$(sort "$TMPL"; echo "items: $*"; echo "no-data: $NODATA")
-if [ -f "$OUT/.gamedata_heads" ] && [ "$(cat "$OUT/.gamedata_heads")" = "$heads" ] && [ -f "$OUT/FalloutNV.exe" ]; then
+REPO=$(git -C "$HERE" rev-parse --show-toplevel)
+CACHE=${GAMEDATA_CACHE:-${TMPDIR:-/tmp}/gamedata-cache}; mkdir -p "$CACHE"
+rcp() { ( cd "$REPO" && python3 -I ports/fnv-nx/verify/recipe.py externals --ref-prefix gamedata/ "$@" ); }
+# the declared pins: the only refs this script may read
+PINS=$(rcp) || { echo "gamedata_fetch: the recipes' gamedata externals could not be read" >&2; exit 1; }
+slugs=()
+if [ $NODATA = 0 ]; then
+  if [ $# -gt 0 ]; then for i in "$@"; do slugs+=("${i// /_}"); done
+  else mapfile -t slugs < <(printf '%s\n' "$PINS" | awk -F'\t' '$1 ~ /^gamedata\/data\//{sub(/^gamedata\/data\//,"",$1); print $1}'); fi
+fi
+for slug in "${slugs[@]}"; do
+  printf '%s\n' "$PINS" | awk -F'\t' -v r="gamedata/data/$slug" '$1==r{f=1} END{exit !f}' || { echo "gamedata_fetch: gamedata/data/$slug is declared by no recipe: declare it as an external of the root that reads it" >&2; exit 1; }
+done
+want=$(printf '%s\n' "$PINS" | awk -F'\t' -v nd=$NODATA '$1=="gamedata/exe"||$1=="gamedata/redist"||(!nd&&$1 ~ /^gamedata\/data\//)' ; echo "items: ${slugs[*]:-}"; echo "no-data: $NODATA")
+if [ -f "$OUT/.gamedata_pins" ] && [ "$(cat "$OUT/.gamedata_pins")" = "$want" ] && [ -f "$OUT/FalloutNV.exe" ]; then
   echo "gamedata_fetch: $OUT up to date"; exit 0
 fi
-rm -f "$OUT/.gamedata_heads"
-TMP=$(mktemp -d "${TMPDIR:-/tmp}/gamedata-fetch.XXXXXX")
-trap 'rm -rf "$TMP" "$TMPL"' EXIT
-# one fresh repository per item ($G, replaced by the next fetch): the items' objects (6.5 GB in all) never pile up
-G=$TMP/repo
-fetch1() { rm -rf "$G"; git init -q "$G" && git -C "$G" fetch -q --depth 1 "$URL" "refs/heads/$1"; }
-fetch() { retry fetch1 "$1" && git -C "$G" rev-parse FETCH_HEAD; }
+rm -f "$OUT/.gamedata_pins"
+# The proxy cuts long transfers now and then ("Connection reset by peer", "RPC failed": sw36, 2026-11-07, on the
+# 1.6 GB Voices1 item): the fetch is retried with backoff (GAMEDATA_TRIES, default 5: 2, 4, 8, 16 s); the recipe's cache keeps what arrived.
+retry() { local i=1 n=${GAMEDATA_TRIES:-5}; while :; do "$@" && return 0; [ $i -ge $n ] && return 1
+  echo "gamedata_fetch: retry $i of $((n - 1)) in $((2 ** i)) s" >&2; sleep $((2 ** i)); i=$((i + 1)); done; }
+GOT=$(mktemp "${TMPDIR:-/tmp}/gamedata-got.XXXXXX"); trap 'rm -f "$GOT"' EXIT
+fetchall() { rcp --fetch --store "$CACHE/store" --ext "$CACHE/external" --artifacts "$URL" > "$GOT"; }
+retry fetchall || { echo "gamedata_fetch: fetch of the declared externals failed or a tree_sha256 did not match" >&2; exit 1; }
+dir_of() { awk -F'\t' -v r="$1" '$1==r{print $2}' "$GOT"; }
 
-# the exe and the INIs (gamedata/exe)
-c=$(fetch gamedata/exe) || { echo "gamedata_fetch: no gamedata/exe" >&2; exit 1; }
-git -C "$G" archive "$c" | tar -x -C "$OUT"
+d=$(dir_of gamedata/exe); [ -n "$d" ] || { echo "gamedata_fetch: no gamedata/exe declared" >&2; exit 1; }
+cp -a "$d"/. "$OUT"/
 echo "gamedata_fetch: gamedata/exe -> $(cd "$OUT" && ls | grep -v '^Data$' | tr '\n' ' ')"
-
-# the d3dx9 DLLs the exe's static modules need (gamedata/redist)
-c=$(fetch gamedata/redist) || { echo "gamedata_fetch: no gamedata/redist" >&2; exit 1; }
-git -C "$G" archive "$c" | tar -x -C "$OUT"
+d=$(dir_of gamedata/redist); [ -n "$d" ] || { echo "gamedata_fetch: no gamedata/redist declared" >&2; exit 1; }
+cp -a "$d"/. "$OUT"/
 ( cd "$OUT" && sha256sum -c --quiet SHA256SUMS ) || { echo "gamedata_fetch: gamedata/redist checksum mismatch" >&2; exit 1; }
-if [ $NODATA = 1 ]; then slugs=()
-elif [ $# -gt 0 ]; then
-  slugs=(); for i in "$@"; do slugs+=("${i// /_}"); done
-else
-  mapfile -t slugs < <(grep 'refs/heads/gamedata/data/' "$TMPL" | sed 's|.*refs/heads/gamedata/data/||')
-fi
 bad=0
-mkdir -p "$OUT/.gamedata_items"
 for slug in "${slugs[@]}"; do
-  # an item whose branch head has not moved since it was installed here is skipped (only the exe branch moved, say)
-  h=$(printf '%s\n' "$heads" | awk -v r="refs/heads/gamedata/data/$slug" '$2==r{print $1}')
-  if [ -n "$h" ] && [ "$(cat "$OUT/.gamedata_items/$slug" 2>/dev/null)" = "$h" ]; then
-    echo "gamedata_fetch: $slug unchanged ($h)"; continue
-  fi
-  rm -f "$OUT/.gamedata_items/$slug"
-  c=$(fetch "gamedata/data/$slug") || { echo "gamedata_fetch: no branch gamedata/data/$slug" >&2; bad=1; continue; }
-  d=$TMP/$slug; mkdir -p "$d"; git -C "$G" archive "$c" | tar -x -C "$d"; rm -rf "$G"
+  d=$(dir_of "gamedata/data/$slug")
   name=$(awk -F'\t' '$1=="name"{print $2}' "$d/MANIFEST.tsv"); kind=$(awk -F'\t' '$1=="kind"{print $2}' "$d/MANIFEST.tsv")
-  want=$(awk -F'\t' '$1=="sha256"{print $2}' "$d/MANIFEST.tsv")
+  sum_want=$(awk -F'\t' '$1=="sha256"{print $2}' "$d/MANIFEST.tsv")
   while IFS=$'\t' read -r tag f size sum; do
     [ "$tag" = part ] || continue
     [ "$(sha256sum "$d/$f" | cut -c1-64)" = "$sum" ] || { echo "gamedata_fetch: $f: sha256 mismatch" >&2; bad=1; }
   done < "$d/MANIFEST.tsv"
-  cat "$d/$slug".part* > "$d/whole"
-  got=$(sha256sum "$d/whole" | cut -c1-64)
-  if [ "$got" != "$want" ]; then echo "gamedata_fetch: $name: sha256 $got, manifest says $want" >&2; bad=1; continue; fi
-  if [ "$kind" = tar ]; then tar -C "$OUT/Data" -xf "$d/whole"; else mv "$d/whole" "$OUT/Data/$name"; fi
-  rm -rf "$d"
-  [ -n "$h" ] && echo "$h" > "$OUT/.gamedata_items/$slug"
+  w=$(mktemp "${TMPDIR:-/tmp}/gamedata-whole.XXXXXX"); cat "$d/$slug".part* > "$w"
+  got=$(sha256sum "$w" | cut -c1-64)
+  if [ "$got" != "$sum_want" ]; then echo "gamedata_fetch: $name: sha256 $got, manifest says $sum_want" >&2; bad=1; rm -f "$w"; continue; fi
+  if [ "$kind" = tar ]; then tar -C "$OUT/Data" -xf "$w"; rm -f "$w"; else mv "$w" "$OUT/Data/$name"; fi
   echo "gamedata_fetch: $name ok ($kind, sha256 $got)"
 done
 [ $bad = 0 ] || exit 1
-printf '%s\n' "$heads" > "$OUT/.gamedata_heads"
+printf '%s\n' "$want" > "$OUT/.gamedata_pins"
 echo "gamedata_fetch: $OUT ready: FARM_GAME=$OUT tests/s5/farm_boot.sh <c12> <out>"

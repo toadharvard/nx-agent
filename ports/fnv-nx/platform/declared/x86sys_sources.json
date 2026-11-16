@@ -1,0 +1,60 @@
+{
+ "format": "fnvnx-x86sys-sources/1",
+ "note": "The pinned sources of gen_x86sys.py. Trust chain (CLAUDE.md rule 7): documented Win32 (WDK 7.1 headers, MSDN), the Intel SDM, and Wine 9.0 under the owner's Wine rule. No other source. WDK mirror: fnv-nx-build tools/wdk71-headers (MANIFEST.json there records the ISO, cab and msi hashes). gen_x86sys.py checks the sha256 of every file it reads against this record.",
+ "mirror": {
+  "repo": "fnv-nx-build",
+  "ref": "tools/wdk71-headers",
+  "commit": "09a54d413da7a42d1956b5d675033e71941ae4da",
+  "tree_sha256": "301fc827dd66a386a425a67cdf586bdd81fac68168c114bc6d8e2b833e302770"
+ },
+ "files": {
+  "ks386": {
+   "path": "headers/_ks386.inc_00858",
+   "sha256": "21b726611a5608bcd21072901667fddca99bbbeb3eb4b944cf9c438b50bbab23",
+   "origin": "Windows Driver Kit 7.1.0 (7600.16385.1), ks386.inc"
+  },
+  "winnt": {
+   "path": "headers/_winnt.h_01105",
+   "sha256": "9fc5347c7451bb3c7433cc36b4d2f0260c6eea9a8ce0cbd7e426fbf2ed898a00",
+   "origin": "Windows Driver Kit 7.1.0 winnt.h"
+  },
+  "ntddk": {
+   "path": "headers/_ntddk.h_00413",
+   "sha256": "5e2f8a81e82ae74bbbafaaf4e0ab9712e123d13ee751e4dee55c0941eff1e39c",
+   "origin": "Windows Driver Kit 7.1.0 ntddk.h"
+  }
+ },
+ "wine": {
+  "repo": "fnv-nx-build",
+  "ref": "tools/wine-9.0",
+  "commit": "c8373ee49fb674f3fe535904d24c5670513c56e1",
+  "upstream": "Wine 9.0 (fd1153552d77)",
+  "files": {
+   "signal_i386": {
+    "path": "dlls/ntdll/unix/signal_i386.c",
+    "sha256": "70245021f17fae5002aaf3f2ea76f2151eb4c900a83e8ee05225e74ebf9afd0d",
+    "origin": "Wine 9.0 dlls/ntdll/unix/signal_i386.c (initial thread context, is_privileged_instr)"
+   }
+  }
+ },
+ "cpumodel": {
+  "path": "ports/fnv-nx/verify/cpuid_model.json",
+  "commit": "a3217cd2c6041b8cf455f8ef269e99747620e18f",
+  "branch": "claude/fnv-l3a-lift-int3",
+  "sha256": "91f9b38f04a89fc967c9121d3bdeb8342034e91cd1fe87b8c194cea9061aec3c",
+  "origin": "the declared CPU's cpuid as data (CPUREF: verify/cpuref.json + verify/cpuid_model.json); lift/rt/cpumodel.c is generated from it, not a source"
+ },
+ "precedence": [
+  "(1) documented Win32 for Windows 7 SP1 build 7601: MSDN and WDK 7.1",
+  "(2) Wine 9.0, only where it contradicts neither (1) nor the declared OS",
+  "(3) nothing else (ReactOS is not a source)"
+ ],
+ "doc_gates": [
+  {
+   "row": "int_ring3.vectors",
+   "key": 41,
+   "since_build": 9200,
+   "source": "MSDN __fastfail intrinsic: fast fail is supported from Windows 8 (build 9200); Windows 7 SP1 is build 7601, so int 0x29 is not a fast-fail gate there. What the instruction does on build 7601 is not stated by MSDN: undecided"
+  }
+ ]
+}

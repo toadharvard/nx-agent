@@ -1,0 +1,13 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "imports",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_imports.py"
+ ],
+ "result": "imports.json",
+ "covers": [
+  "import-provider"
+ ]
+}

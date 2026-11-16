@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""The host services of the boot stage: the 50 h_<slot> methods of the FnvnxHostApi v3 table. Policy (address space, scheduling, ext modules) lives in bootmachine.Machine; these
+"""The host services of the boot stage: the 46 h_<slot> methods of the FnvnxHostApi v3 table. Policy (address space, scheduling, ext modules) lives in bootmachine.Machine; these
 methods do the argument decoding and the host-side effect. A blocking call returns (wait spec, result when resumed).
 
 Files: guest paths go through bootpath.BootPath (sdmc: prefix, case-folded components, the game mounts; its rule is
 stated in bootpath.py). BootPath(root) creates <root>/switch/fnv, as the device always has it.
 
 Host slots whose effect is not modelled (the observable contract is kept; see HOST SLOTS in the stage report):
- output_debug_string (kept in .debug, no sink), console_flush, main_loop (always 1), buttons_down (always 0),
- thread_free, thread_set_priority / thread_set_cpu (recorded in .placement only, no placement effect),
- wall_time_us (fixed epoch + virtual ns), tz_offset_minutes (VC1's zone: UTC, 0), random64 (deterministic splitmix64, seed 0),
- memory_info (4 GiB / 3 GiB), cpu_count (3), audio_open / audio_submit / audio_close (frames counted, samples
+ output_debug_string (kept in .debug, no sink),
+ thread_free, thread_set_priority / thread_set_cpu (recorded in .placement as ideal and mask, checked as hostapi.h says; THREAD_CPU answers the ideal),
+ wall_time_us (fixed epoch + virtual ns), random64 (deterministic splitmix64, seed 0),
+ memory_info (4 GiB / 3 GiB), audio_open / audio_submit / audio_close (frames counted, samples
  dropped, submit sleeps the period in virtual time), pad_read / pad_vibrate / input_poll (the declared device states of a scenario, bootinput.py; none: nothing attached), module 11 CPU_BOOST (recorded in .boosts, returns 0: no platform config), MESSAGE (caption and text recorded in
  .messages, returns 0: the dialog is closed at once). The rest of module 11 (thread_activity, vm_*) is the machine's.
 """
+import errno
 import os
 import stat as S
 import struct
@@ -26,8 +27,9 @@ import bootpath  # noqa: E402
 
 U64 = (1 << 64) - 1
 WALL_EPOCH_US = 1_700_000_000_000_000
-INT64_MAX = (1 << 63) - 1
-HE_NOTFOUND, HE_BADINPUT, HE_ADDR, HE_RANGE = bootmachine.FNVNX_HE_NOTFOUND, bootmachine.LIBNX_BAD_INPUT, 0xCC01, 0xD401
+INT64_MAX = bootmachine.INT64_MAX
+HE_NOTFOUND, HE_BADINPUT, HE_ADDR, HE_RANGE = (bootmachine.FNVNX_HE_NOTFOUND, bootmachine.LIBNX_BAD_INPUT, bootmachine.ERR_INVALID_ADDRESS,
+                                               bootmachine.ERR_INVALID_CURRENT_MEMORY)
 
 
 def neg(e):
@@ -35,11 +37,12 @@ def neg(e):
 
 
 class Services:
-    def __init__(self, root, game=None, scenario=None, watch_reads=False):
+    def __init__(self, root, game=None, scenario=None, watch_reads=False, read_only=()):
         self.m = None
         self.input = bootinput.InputModel(scenario, watch_reads)   # R-INPUT: the declared device states, read as host_v3.inc does
-        self.dp = bootpath.BootPath(root, game)
+        self.dp = bootpath.BootPath(root, game, read_only)
         self.debug, self.fds = [], {}
+        self.ro_fds, self.declared_faults = set(), []   # fds opened below a read-only mount; refused writes (a run failure, see _refuse)
         self.audio_period, self.audio_frames, self.boosts, self.placement, self.messages = 0, 0, [], {}, []
         self.rng = 0
 
@@ -59,7 +62,16 @@ class Services:
 
     def path(self, addr):
         self.last_sd = self.cstr(addr)
+        self.last_ro = self.dp.read_only(self.last_sd)
         return self.dp.resolve(self.last_sd)
+
+    def _refuse(self, call, sd):
+        """a create/change/remove under a read-only declared input. L5 declares the mount read-only (L4 item 17); a call is recorded as a
+        fault (OUT.json declared_input_faults) and fails the verdict (boot.py), and answers EACCES, which the platform maps to
+        ERROR_ACCESS_DENIED (platform/win32/handles.cpp:208 w32_os_error: OS_EACCES -> ERROR_ACCESS_DENIED; os.h:160 OS_EACCES 13)"""
+        self.declared_faults.append({"kind": "declared-input-write", "call": call, "sd": sd, "t_ns": self.m.clock.now_ns(), "tid": self.m.tid()})
+        self.dp.fault(call, sd, errno.EACCES)
+        return neg(errno.EACCES)
 
     # -- v1
     def h_output_debug_string(self, s, n, *_):
@@ -76,15 +88,6 @@ class Services:
     def h_console_write(self, b, n, *_):
         return self.m.console_write(bytes(self.m.uc.mem_read(b, n)))
 
-    def h_console_flush(self, *_):
-        return 0
-
-    def h_main_loop(self, *_):
-        return 1
-
-    def h_buttons_down(self, *_):
-        return 0
-
     def h_system_tick(self, *_):
         return self.m.clock.read()
 
@@ -92,10 +95,37 @@ class Services:
         return self.m.clock.FREQ
 
     # -- v2 threads
+    def _cpu_spec(self, spec, cur=None):
+        """the thread_create / thread_set_cpu cpu argument (hostapi.h) -> (ideal, mask), or None when it is refused (FNVNX_HE_BADINPUT).
+        thread_create (cur None): FNVNX_CPU_SPEC(ideal, mask) only, ideal in mask, mask within the application cores. thread_set_cpu
+        (cur = (ideal, mask)): additionally a plain core 0..63 (that core only); FNVNX_CPU_KEEP ideal and mask 0 keep the current value; the
+        ideal core joins the mask; the result's mask must lie within the application cores."""
+        app = bootmachine.APP_CORES
+        if spec >> 63 == 0:   # not a spec: one core
+            if cur is None or spec > 63 or spec >= 32 or not app >> spec & 1:
+                return None
+            return spec, 1 << spec
+        if spec >> 40 & 0x7FFFFF:
+            return None
+        ideal, mask = spec & 0xFF, spec >> 8 & 0xFFFFFFFF
+        if cur is None:
+            return (ideal, mask) if ideal < 32 and mask >> ideal & 1 and not mask & ~app else None
+        ideal = cur[0] if ideal == bootmachine.FNVNX_CPU_KEEP else ideal
+        mask = mask or cur[1]
+        if ideal >= 32:
+            return None
+        mask |= 1 << ideal
+        return (ideal, mask) if not mask & ~app else None
+
     def h_thread_create(self, entry, arg, stack, prio, cpu, *_):
+        pl = self._cpu_spec(cpu)
+        if pl is None:   # refused: nothing is created, the id is 0
+            self.m._event("thread_create-refused", cpu=cpu, why="cpu is not FNVNX_CPU_SPEC(ideal, mask) with ideal in mask within the "
+                          "application cores", result=bootmachine.LIBNX_BAD_INPUT)
+            return 0
         h = self.m.thread_create(entry, arg)
         if h:
-            self.placement[self.m.ids.get("thread", h).tid] = {"prio": prio, "cpu": cpu}
+            self.placement[self.m.ids.get("thread", h).tid] = {"prio": prio, "ideal": pl[0], "mask": pl[1]}
         return h
 
     def h_thread_start(self, h, *_):
@@ -124,7 +154,10 @@ class Services:
         t = self.m.cur if h == 0 else self.m.ids.get("thread", h)
         if isinstance(t, bootmachine.SelfRecord):
             t = t.t
-        return None if t is None else self.placement.setdefault(t.tid, {})
+        if t is None:
+            return None   # the main thread starts at FNVNX_DEFAULT_CORE, mask 1 << FNVNX_DEFAULT_CORE; every other thread was placed at create
+        d = bootmachine.FNVNX_DEFAULT_CORE
+        return self.placement.setdefault(t.tid, {"ideal": d, "mask": 1 << d})
 
     def h_thread_set_priority(self, h, prio, *_):
         p = self._placed(h)
@@ -139,8 +172,15 @@ class Services:
             return HE_NOTFOUND
         if spec >> 40 & 0x7FFFFF == 0x7FFFFF:   # a negative spec (bits 40..62 set): nothing changed
             return 0
-        p["cpu"] = spec
+        pl = self._cpu_spec(spec, (p["ideal"], p["mask"]))
+        if pl is None:
+            return self.m._refuse("thread_set_cpu", h, spec, "not a placement within the application cores", HE_BADINPUT)
+        p["ideal"], p["mask"] = pl
         return 0
+
+    def plat_thread_cpu(self, args):
+        """FNVNX_PLAT_THREAD_CPU() -> the calling thread's current ideal core (this machine's deterministic thread model; hostapi.h)"""
+        return self._placed(0)["ideal"]
 
     def h_wait_on_address(self, addr, expected, timeout, *_):
         if addr % 4:
@@ -165,10 +205,6 @@ class Services:
     def h_wall_time_us(self, *_):
         return WALL_EPOCH_US + self.m.clock.now_ns() // 1000
 
-    def h_tz_offset_minutes(self, *_):
-        """hostapi.h: off_s / 60 (C division) of TZ_AT at this call's instant"""
-        return int(self.m.tz_at(self.h_wall_time_us() // 1_000_000)[0] / 60) & U64
-
     def h_random64(self, *_):
         """splitmix64 from seed 0 (the old driver used os.urandom, which no deterministic run can use)"""
         self.rng = (self.rng + 0x9E3779B97F4A7C15) & U64
@@ -180,9 +216,6 @@ class Services:
     def h_memory_info(self, out, *_):
         self.m.uc.mem_write(out, struct.pack("<QQ", 4 << 30, 3 << 30))
         return 0
-
-    def h_cpu_count(self, *_):
-        return 3
 
     # -- v2 files
     def fs(self, fn, call, sd=None):
@@ -197,11 +230,15 @@ class Services:
         fl = os.O_RDWR if flags & 3 == 3 else os.O_WRONLY if flags & 2 else os.O_RDONLY
         fl |= (os.O_CREAT if flags & 4 else 0) | (os.O_EXCL if flags & 8 else 0) | (os.O_TRUNC if flags & 0x10 else 0)
         fl |= os.O_APPEND if flags & 0x20 else 0
-        path, sd = self.path(p), self.last_sd
+        path, sd, ro = self.path(p), self.last_sd, self.last_ro
+        if self.last_ro and fl & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND):
+            return self._refuse("open", sd)
 
         def op():
             fd = os.open(path, fl, 0o666)
             self.fds[fd] = path
+            if ro:
+                self.ro_fds.add(fd)
             if fl & os.O_CREAT:
                 self.dp.changed()
             return fd
@@ -221,15 +258,21 @@ class Services:
         return self._rd("pread", fd, b, n, off)
 
     def h_fs_write(self, fd, b, n, *_):
+        if fd in self.ro_fds:
+            return self._refuse("write", self.fds.get(fd))
         return self.fs(lambda: os.write(fd, bytes(self.m.uc.mem_read(b, n))), "write", self.fds.get(fd))
 
     def h_fs_pwrite(self, fd, b, n, off, *_):
+        if fd in self.ro_fds:
+            return self._refuse("pwrite", self.fds.get(fd))
         return self.fs(lambda: os.pwrite(fd, bytes(self.m.uc.mem_read(b, n)), off), "pwrite", self.fds.get(fd))
 
     def h_fs_seek(self, fd, off, whence, *_):
         return self.fs(lambda: os.lseek(fd, struct.unpack("<q", struct.pack("<Q", off))[0], whence), "seek")
 
     def h_fs_truncate(self, fd, size, *_):
+        if fd in self.ro_fds:
+            return self._refuse("truncate", self.fds.get(fd))
         return self.fs(lambda: os.ftruncate(fd, size), "truncate")
 
     def h_fs_sync(self, fd, *_):
@@ -245,6 +288,7 @@ class Services:
 
     def h_fs_close(self, fd, *_):
         self.fds.pop(fd, None)
+        self.ro_fds.discard(fd)
         return self.fs(lambda: os.close(fd), "close")
 
     def h_fs_stat(self, p, out, *_):
@@ -258,19 +302,27 @@ class Services:
 
     def h_fs_mkdir(self, p, *_):
         path = self.path(p)
+        if self.last_ro:
+            return self._refuse("mkdir", self.last_sd)
         return self._mutate(lambda: os.mkdir(path), "mkdir", self.last_sd)
 
     def h_fs_rmdir(self, p, *_):
         path = self.path(p)
+        if self.last_ro:
+            return self._refuse("rmdir", self.last_sd)
         return self._mutate(lambda: os.rmdir(path), "rmdir", self.last_sd)
 
     def h_fs_remove(self, p, *_):
         path = self.path(p)
+        if self.last_ro:
+            return self._refuse("remove", self.last_sd)
         return self._mutate(lambda: os.remove(path), "remove", self.last_sd)
 
     def h_fs_rename(self, a, b, *_):
-        pa, sa = self.path(a), self.last_sd
+        pa, sa, ra = self.path(a), self.last_sd, self.last_ro
         pb = self.path(b)
+        if ra or self.last_ro:
+            return self._refuse("rename", sa if ra else self.last_sd)
         return self._mutate(lambda: os.replace(pa, pb), "rename", sa)
 
     def h_fs_dir_open(self, p, *_):

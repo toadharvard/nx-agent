@@ -237,6 +237,18 @@ def main():
     write("inc0/c.h", "#define C_VAL 3\n")
     write("inc0/e.h", "#error boom_from_header\n")
     write("src/u/e.cpp", '#include "e.h"\nint e;\n')
+    # hints are per root: two roots with a unit of the same name, built in one store alternately, keep their own closures (no hint thrash)
+    write("src/u/h2.cpp", '#include "a.h"\nint h2 = A_VAL;\n')
+    rc, h1, _ = build(["u/h2.cpp"], name="h1", extra=["--hint-ns", "rootA"])
+    write("src/u/h2.cpp", '#include "b.h"\nint h2 = B_VAL + C_VAL;\n')
+    rc, h2, _ = build(["u/h2.cpp"], name="h2", extra=["--hint-ns", "rootB"])
+    write("src/u/h2.cpp", '#include "a.h"\nint h2 = A_VAL;\n')
+    rc, h3, _ = build(["u/h2.cpp"], name="h3", extra=["--hint-ns", "rootA"])
+    e3 = unit(h3, "u/h2.cpp") if h3 else {}
+    check("hints per root: root A's unit after root B's unit of the same name: all hits, one PP iteration", rc == 0
+          and e3.get("pp_status") == "hit" and e3.get("cc_status") == "hit" and e3.get("pp_iterations") == 1, e3)
+    os.unlink(WORK + "/src/u/h2.cpp")
+
     write("src/u/e2.cpp", "#error boom_in_unit\n")
     rc, r13, _ = build(["u/e.cpp", "u/e2.cpp"], name="r13")
     e, e2_ = (unit(r13, "u/e.cpp"), unit(r13, "u/e2.cpp")) if r13 else ({}, {})
@@ -343,6 +355,9 @@ def main():
     ii = open(unitstage.result_file(STORE, a["pp_key"], "unit.ii"), "rb").read()
     obj = syms(a["object"], "a") and open(BASE + "/obj-a/unit.o", "rb").read()
     check("unit.ii and unit.o hold no host path", all(x.encode() not in blob for blob in (ii, obj) for x in (WORK, BASE, "/root/")) and b'"/src/u/a.cpp"' in ii)
+    du = open(unitstage.result_file(STORE, a["du_key"], "unit.du"), "rb").read()
+    check("macro-use fact: a stage of its own (unit.du from -dU); the CC input unit.ii is the plain preprocessed text (no #define/#undef line)",
+          a["du_key"] != a["pp_key"] and not any(l.startswith((b"#define", b"#undef")) for l in ii.splitlines()) and b"#define" in du)
     shutil.rmtree(WORK, ignore_errors=True)
     print("%d failed" % len(FAILED))
     return 1 if FAILED else 0

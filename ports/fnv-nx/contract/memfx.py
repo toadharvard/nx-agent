@@ -28,7 +28,7 @@ reaches memory only through an ESCAPE).  For a global, additionally (W1) no dire
 (exact for [disp]; [disp+idx*s] covers [disp, disp+max*s+size) when the index maximum is proven (and-mask, movzx, constant)
 and else the whole section), no relocated data word points into the section (that word is a pointer stored in memory: an
 ESCAPE of the section's closure), and the loader does not write L (base relocations, import slots, IAT / TLS-index of the
-PE directories).  Assumptions (stated, not proven): P; the image's code ranges are instruction-aligned and complete (A4); a
+PE directories).  Assumptions (stated, not proven): P; the image's code ranges are instruction-aligned and complete (A4); a (ASM-010, ASM-013, ASM-017, ASM-022)
 callee preserves ebx/esi/edi/ebp (A1) and reads no register of an import call (the platform's calling convention); the
 platform implementation writes through a pointer argument only when ImportInfo says so (default: every pointer argument
 may be written); no code outside the images (the loader, the OS) writes L except through those imports.
@@ -36,8 +36,8 @@ may be written); no code outside the images (the loader, the OS) writes L except
 import bisect
 import struct
 
-import capstone
-from capstone import x86_const as X
+import imagerec
+from imagerec import X
 
 import argflow
 from argflow import rn
@@ -140,13 +140,8 @@ class Scan:
             else:
                 merged.append([a, b])
         self.code = merged
-        cs = img.cs
         for a, b in merged:
-            try:
-                data = img.pe.rd(a - img.base, b - a)
-            except Exception:
-                continue
-            for i in cs.disasm(data, a):
+            for i in img.rec.decode_range(a, b):
                 self.nins += 1
                 self.one(i)
         starts = [a for a, b in merged]
@@ -882,13 +877,13 @@ class Memfx:
         for slot in img.imports:
             if slot < hi and slot + 4 > lo:
                 out.append('import slot %x' % slot)
-        pe = img.pe
+        pe = img.rec
         for k, (rva, size) in enumerate(pe.dirs):
             if size and k not in (5,) and img.base + rva < hi and img.base + rva + size > lo:
                 out.append('PE directory %d [%x,%x)' % (k, img.base + rva, img.base + rva + size))
         if len(pe.dirs) > 9 and pe.dirs[9][1]:
             try:
-                t = struct.unpack('<IIIIII', pe.rd(pe.dirs[9][0], 24))
+                t = struct.unpack('<IIIIII', pe.read(img.base + pe.dirs[9][0], 24))
                 if lo <= t[2] < hi:
                     out.append('TLS index %x' % t[2])
             except Exception:
@@ -960,7 +955,7 @@ class Memfx:
         return Verdict(not why, why, cnt)
 
     def exe_exports(self):
-        return self.img.pe.dirs[0][1] if self.img.pe.dirs else 0
+        return self.img.rec.dirs[0][1] if self.img.rec.dirs else 0
 
     # ---- case: a call between a store and a load through the pointer register R
     def origins(self, fn, at, reg, depth=0, seen=None):

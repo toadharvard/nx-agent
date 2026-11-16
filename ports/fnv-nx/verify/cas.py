@@ -3,6 +3,9 @@
 
 Layout: STORE/obj/<aa>/<sha256>      file contents, mode 0444, mtime 0
         STORE/obj/<aa>/<sha256>.x    same content with exec bit, mode 0555 (separate object)
+        STORE/obj/<aa>/<name>.r<n>   replica n >= 1 of an object: the same bytes and mode in a new inode, made when the inode before it
+                                     is full (MAX_LINKS names): an inode serves at most MAX_LINKS hard links (EMLINK of ext4 is closed
+                                     by rule), so materialize places any number of files of one content. Identity is unchanged.
         STORE/tree/<aa>/<hash>.json  canonical manifests (<aa> = first two hex digits)
 
 Tree hash definition:
@@ -16,30 +19,26 @@ Tree hash definition:
   Empty directories are kept. Nothing else (mtime, owner, mode other than exec) is part of the hash.
 """
 import errno
+import fcntl
 import hashlib
 import json
 import os
+import shutil
 import stat
 import sys
 
-FORMAT = "fnvnx-tree/1"
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "contract"))
+import treehash  # noqa: E402  (the one home of the tree-hash rule; stdlib only)
 
-class CasError(Exception):
-    pass
+FORMAT = treehash.FORMAT
+MAX_LINKS = 60000  # hard links one inode of the store serves (ext4: 65000); past it a replica is made
 
-def canon(obj):
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
-                      allow_nan=False).encode("ascii")
+CasError = treehash.CasError
+canon = treehash.canon
+tree_hash = treehash.tree_hash
 
 def stage_key(doc):
     return hashlib.sha256(canon(doc)).hexdigest()
-
-def _text(s, what):
-    try:
-        s.encode("utf-8")
-    except UnicodeEncodeError:
-        raise CasError("non-UTF-8 %s: %r" % (what, s))
-    return s
 
 def _publish(tmp, final):
     """Atomically give tmp its final name unless it exists already (never replaces)."""
@@ -49,6 +48,25 @@ def _publish(tmp, final):
         pass
     finally:
         os.unlink(tmp)
+
+def publish_file(final, data=None, src=None):
+    """The one rule that makes a FILE of a shared cache visible (recipe.publish_dir is the directory form): the content is written completely to a private
+    sibling of FINAL (same directory, same filesystem), then rename(2) gives it the name. A reader sees FINAL only complete; two writers of one key
+    publish the same bytes (a function of the key), and the later rename replaces an identical file. DATA: bytes, or SRC: a file to copy."""
+    os.makedirs(os.path.dirname(final), exist_ok=True)
+    tmp = "%s.tmp-%d-%s" % (final, os.getpid(), os.urandom(4).hex())
+    try:
+        if src is not None:
+            shutil.copyfile(src, tmp)
+        else:
+            with open(tmp, "wb") as f:
+                f.write(data)
+        os.replace(tmp, final)
+    except BaseException:
+        if os.path.lexists(tmp):
+            os.unlink(tmp)
+        raise
+    return final
 
 def _put(store, kind, name, data=None, mode=0o444):
     d = os.path.join(store, kind, name[:2])
@@ -67,12 +85,6 @@ def _put(store, kind, name, data=None, mode=0o444):
 
 def _ingest_file(path, store, x):
     st = os.lstat(path)
-    if store is None:  # hash only: nothing is written
-        h = hashlib.sha256()
-        with open(path, "rb") as f:
-            for b in iter(lambda: f.read(1 << 20), b""):
-                h.update(b)
-        return h.hexdigest()
     d = os.path.join(store, "obj")
     os.makedirs(d, exist_ok=True)
     tmp = os.path.join(d, ".tmp-%d-%s" % (os.getpid(), os.urandom(6).hex()))
@@ -107,35 +119,21 @@ def _ingest_file(path, store, x):
             os.unlink(tmp)
         raise
 
-def _entry(path, rel, store, excl, used, skip=()):
-    st = os.lstat(path)
-    m = st.st_mode
-    if stat.S_ISLNK(m):
-        return {"t": "l", "to": _text(os.readlink(path), "link text: " + path)}
-    if stat.S_ISREG(m):
-        x = 1 if m & 0o111 else 0
-        return {"t": "f", "h": _ingest_file(path, store, x), "x": x}
-    if stat.S_ISDIR(m):
-        entries = {}
-        for name in sorted(os.listdir(path)):
-            r = rel + "/" + name if rel else name
-            if r in excl:
-                used.add(r)
-                continue
-            if name in skip:
-                continue
-            entries[_text(name, "file name in " + path)] = _entry(os.path.join(path, name), r, store, excl, used, skip)
-        data = canon({"format": FORMAT, "entries": entries})
-        h = hashlib.sha256(data).hexdigest()
-        if store is not None:
-            _put(store, "tree", h + ".json", data)
-        return {"t": "d", "h": h}
-    raise CasError("unsupported file type (not file/dir/symlink): %s" % path)
+class _StoreVisitor(treehash.Visitor):
+    """the one traversal (treehash.walk) plus the store writes"""
+    def __init__(self, store):
+        self.store = store
+
+    def file_hash(self, path, x):
+        return _ingest_file(path, self.store, x)
+
+    def tree(self, h, data):
+        _put(self.store, "tree", h + ".json", data)
 
 def ingest(path, store, exclude=()):
     excl = set(exclude)
     used = set()
-    e = _entry(path, "", store, excl, used)
+    e = treehash.walk(path, _StoreVisitor(store), "", excl, used)
     if excl - used:
         raise CasError("exclude paths not found: %s" % sorted(excl - used))
     if e["t"] == "d":
@@ -143,12 +141,6 @@ def ingest(path, store, exclude=()):
     data = canon(e)
     _put(store, "tree", hashlib.sha256(data).hexdigest() + ".json", data)
     return hashlib.sha256(data).hexdigest()
-
-def tree_hash(path, skip=()):
-    """The hash ingest(path, STORE) returns, computed without a store (nothing is written, so no mtime or object is involved).
-    SKIP: entry names left out wherever they occur (e.g. "__pycache__"); the result then differs from ingest's by design."""
-    e = _entry(path, "", None, set(), set(), frozenset(skip))
-    return e["h"] if e["t"] == "d" else hashlib.sha256(canon(e)).hexdigest()
 
 def manifest(h, store):
     p = os.path.join(store, "tree", h[:2], h + ".json")
@@ -179,11 +171,41 @@ def listing(h, store):
 def _obj(store, e):
     return os.path.join(store, "obj", e["h"][:2], e["h"] + (".x" if e["x"] else ""))
 
+def _replica(src, n):
+    """Path of replica N of object SRC (N 0 is the object); a missing replica is a copy (a reflink where the filesystem has it)."""
+    r = src if n == 0 else "%s.r%d" % (src, n)
+    if n and not os.path.exists(r):
+        tmp = os.path.join(os.path.dirname(src), ".tmp-%d-%s" % (os.getpid(), os.urandom(6).hex()))
+        with open(src, "rb") as a, open(tmp, "wb") as b:
+            try:
+                fcntl.ioctl(b.fileno(), 0x40049409, a.fileno())  # FICLONE
+            except OSError:
+                shutil.copyfileobj(a, b)
+        os.chmod(tmp, os.stat(src).st_mode & 0o777)
+        os.utime(tmp, (0, 0))
+        _publish(tmp, r)
+    return r
+
+def _link_obj(src, dest):
+    """Hard-link the content of object SRC at DEST from the first replica whose inode has room (MAX_LINKS) and does not refuse."""
+    n = 0
+    while True:
+        r = _replica(src, n)
+        if os.stat(r).st_nlink < MAX_LINKS:
+            try:
+                return os.link(r, dest)
+            except FileExistsError:
+                raise
+            except OSError as ex:
+                if ex.errno != errno.EMLINK:
+                    raise
+        n += 1
+
 def _place(e, store, dest, dest_top):
     if e["t"] == "f":
         src = _obj(store, e)
         try:
-            os.link(src, dest)
+            _link_obj(src, dest)
         except OSError as ex:
             if ex.errno == errno.EXDEV:
                 raise CasError("cannot hardlink across filesystems: store %s -> dest %s" % (store, dest_top))

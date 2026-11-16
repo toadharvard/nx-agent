@@ -7,7 +7,7 @@ recompiled when nothing it reads changed.
     unitstage.py gcc-set --cxx /abs/g++       print the --exe/--tree arguments of `runtime.py tool` for that compiler
 RULE: what a preprocessor run reads is exactly (1) the CONTENT of the files it opens and (2) the EXISTENCE answers for the paths it
   probes (#include search, __has_include, __has_include_next). A stage is given both, exactly.
-  PP stage  `g++ FLAGS -E -dU -MD -MT x -MF /out/deps.d -o /out/unit.ii /src/UNIT`, inputs: the tool runtime (runtime.py tool) and VIEWS
+  PP stage  `g++ FLAGS -E -MD -MT x -MF /out/deps.d -o /out/unit.ii /src/UNIT`, inputs: the tool runtime (runtime.py tool) and VIEWS
             of the source root (/src) and the include roots (/inc/0..), see unitview.py: every name of the real tree, real content
             only for the files of a set C (the closure), every other file a placeholder `#error fnvnx: file outside the declared
             closure`. The key is f(name trees, content of C, compiler, flags).
@@ -22,7 +22,7 @@ Closure discovery (this runner, outside the sandbox, a pure function of stage re
   hashes); the accepted result is the run on the view of D. ARGUMENT that the hint never changes the result: the accepted run opened
   only files of D, all real, and saw the true name tree, so every include search and probe got the answer it gets on the real tree and
   every opened file had its real content; its output equals the output on the real trees. A different hint only changes how many runs
-  lead to D. ASSUMED about GCC: it reads the content of a file only by lexing it (then the file is in deps.d) or it fails; (a
+  lead to D. ASSUMED about GCC: it reads the content of a file only by lexing it (then the file is in deps.d) or it fails; (a (ASM-040)
   #pragma-once identity check on a file that is not included would not be caught by the placeholder, only by the equality assert).
 Languages by suffix (LANG): .c gets `-x c` (PP) and `-x c -fpreprocessed` (CC); .S gets `-x assembler-with-cpp` and `-x assembler` (CC on the
   preprocessed text, the same two stages); .s has no PP stage (its CC stage reads the unit alone, a `.include` fails). `--include` may also be
@@ -53,51 +53,43 @@ import sandbox  # noqa: E402
 import toolflags  # noqa: E402
 import unitview  # noqa: E402
 from unitview import UnitError, parse_deps  # noqa: E402,F401
+
+
+def sandbox_src(rel):
+    """The path of the source of unit REL inside the sandbox (the source root is mounted at /src): the one function that composes it. The CC
+    stage compiles the preprocessed text, whose first line marker names this path, so a plugin that reports the compiler's input (fnvnx_ftoi:
+    `unit`) reports exactly sandbox_src(unit)."""
+    return "/src/" + rel
 FORMAT = "fnvnx-unitstage/2"
 ENV = {"TZ": "UTC", "LC_ALL": "C", "PYTHONHASHSEED": "0", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80"}
 # language options by the unit's suffix (what the driver itself does by suffix, made explicit so that the stage's input name does not matter):
 # (PP stage, CC stage). .s has no preprocessing: its CC stage reads the unit alone (a `.include` there fails: use .S and #include).
 LANG = {".c": (["-x", "c"], ["-x", "c", "-fpreprocessed"]), ".S": (["-x", "assembler-with-cpp"], ["-x", "assembler"]),
         ".s": ([], ["-x", "assembler"])}
-PP_TAIL = ["-E", "-dU", "-MD", "-MT", "x", "-MF", "/out/deps.d", "-o", "/out/unit.ii"]
+PP_TAIL = ["-E", "-MD", "-MT", "x", "-MF", "/out/deps.d", "-o", "/out/unit.ii"]
+# The macro-use fact is a stage of its own (same inputs, `-dU`: GCC writes `#define NAME VALUE` for exactly the macros the unit expands or tests):
+# its output is never an input of CC, so an object does not depend on a fact-collection flag.
+DU_TAIL = ["-E", "-dU", "-o", "/out/unit.du"]
 
 
 def result_file(store, key, name):
     return cas._obj(store, cas.manifest(sandbox._load(store, key)["outputs"]["/out"], store)["entries"][name])
 
 
-def hint_path(store, rel):
-    return os.path.join(store, "hints", hashlib.sha256(rel.encode()).hexdigest() + ".json")
+def hint_path(store, rel, ns=""):
+    """The closure hint of unit REL in namespace NS: the identity of the root that owns the unit (recipe.py passes the root spec). The store is
+    shared by every root and every build, so a hint named by the unit's path alone is overwritten by any other root's unit of that name
+    (`main.cpp`): each one then starts from the other's closure, runs one extra PP iteration, and reports `run` on an unchanged tree."""
+    return os.path.join(store, "hints", *([hashlib.sha256(ns.encode()).hexdigest()] if ns else []), hashlib.sha256(rel.encode()).hexdigest() + ".json")
 
 
-def write_hint(store, rel, paths):
-    p = hint_path(store, rel)
+def write_hint(store, rel, paths, ns=""):
+    p = hint_path(store, rel, ns)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     tmp = "%s.tmp-%d-%s" % (p, os.getpid(), os.urandom(4).hex())
     open(tmp, "w").write(json.dumps(sorted(paths)))
     os.replace(tmp, p)
 
-
-def prog(cxx, name, path=None):
-    """Absolute path of program NAME as the gcc driver CXX finds it: an absolute `-print-prog-name` answer is taken as it is; a bare name
-    (the driver found no file of that name itself) is searched the way the driver searches, in the `programs:` list of `-print-search-dirs`
-    in order, then in PATH (default: the directory of the driver, the PATH of the stage environment). The first executable regular file
-    wins; none -> UnitError naming the program."""
-    env = dict(os.environ, LC_ALL="C")
-    q = lambda *a: subprocess.run([cxx] + list(a), env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).stdout  # noqa: E731
-    got = q("-print-prog-name=" + name).strip()
-    if os.path.isabs(got):
-        return posixpath.normpath(got)
-    dirs = []
-    for ln in q("-print-search-dirs").splitlines():
-        if ln.startswith("programs:"):
-            dirs += [d[1:] if d.startswith("=") else d for d in ln[len("programs:"):].strip().lstrip("=").split(":") if d]
-    dirs += [os.path.dirname(os.path.abspath(cxx))] if path is None else path
-    for d in dirs:
-        p = os.path.join(d, name)
-        if os.path.isfile(p) and os.access(p, os.X_OK):
-            return posixpath.normpath(p)
-    raise UnitError("%s: program %s is in no `programs:` directory of -print-search-dirs and not in PATH (%s)" % (cxx, name, ":".join(dirs)))
 
 def gcc_set(cxx):
     """(exes, trees) for runtime.py tool, defined by the compiler's own answers: -print-prog-name=cc1plus (libexec dir),
@@ -116,29 +108,56 @@ def gcc_set(cxx):
     cands += [norm(ln) for ln in inc.splitlines() if ln.startswith(" /")]
     trees = sorted({t for t in cands if os.path.isdir(t)})
     trees = [t for t in trees if not any(u != t and (t + "/").startswith(u.rstrip("/") + "/") for u in trees)]
-    return [norm(cxx), prog(cxx, "as")], trees
+    return [norm(cxx), prog(norm(q("-print-prog-name=as")))], trees
+
+
+def prog(p):
+    """A program name the compiler answered with: the answer of a native compiler for a tool it finds on PATH is the bare name, which is
+    resolved on the host PATH the way the compiler would exec it (a cross compiler answers its absolute path)."""
+    return p if os.path.isabs(p) else (shutil.which(p) or p)
+
+def progress(stage, key, what, sec=None):
+    """One flushed line on stderr per stage start and end: `stage ID KEY start` / `stage ID KEY hit|built|failed SECONDS`. A line is in no key and changes no
+    output: a long build shows where it is."""
+    sys.stderr.write("stage %s %s %s%s\n" % (stage, key, what, "" if sec is None else " %.2fs" % sec))
+    sys.stderr.flush()
+
 
 def run_stage(store, doc, cold):
     sandbox.check_doc(doc)
     key = sandbox.key_of(doc)
     cas._put(store, "stage-docs", key + ".json", cas.canon(doc) + b"\n")
     old = sandbox._load(store, key)
+    progress(doc["stage"], key, "start")
     if old is not None and not cold:
+        progress(doc["stage"], key, "hit" if not old.get("rc") else "failed", 0.0)
         return key, old, "hit", 0.0
     t0 = time.time()
-    res = sandbox.execute(store, doc, key)
+    try:
+        res, tm = sandbox.execute_timed(store, doc, key)
+    except OSError as e:   # EMLINK, ENOSPC, EXDEV ... of the store or the sandbox set-up: a red stage naming the stage, never a crash
+        progress(doc["stage"], key, "failed", time.time() - t0)
+        x = sandbox.SbxError("stage %s: %s (errno %s)" % (doc["stage"], e.strerror or e, e.errno))
+        x.stage = doc["stage"]
+        raise x
+    except BaseException:
+        progress(doc["stage"], key, "failed", time.time() - t0)
+        raise
     sec = time.time() - t0
+    progress(doc["stage"], key, "built" if not res.get("rc") else "failed", sec)
+    sandbox.write_time(store, key, tm)    # the timing sidecar of an execution (a miss); a hit wrote none
     if old is None:
         sandbox._store_result(store, key, res)
         return key, res, "run", sec
-    if any(res[k] != old[k] for k in ("rc", "stdout", "stderr", "outputs")):
+    if any(res[k] != old[k] for k in sandbox.compared(doc)):
         raise UnitError("NOT A FUNCTION OF THE KEY: stage %s differs between two runs" % doc["stage"])
     return key, old, "run", sec
 
 class Build:
     def __init__(self, a):
         self.store, self.cold, self.cxx, self.cache = a.store, a.cold, a.cxx, {}
-        self.prefix = getattr(a, "prefix", "") or ""   # repo path of the root inside the mirrored /src tree (units live at /src/PREFIX/UNIT)
+        self.hint_ns = getattr(a, "hint_ns", "")   # the root that owns the units (hint_path); "" for a caller with a store of its own
+        self.compiler_key = ""   # stage key of the compiler stage (recipe.Job.compiler_key): in the env, so in every PP and CC key
         self.variant = ""   # recipe variant: its name is in the env, so in every stage key ("" adds nothing)
         self.cc_drop = set()   # `at` of tool-runtime inputs the CC stage does not mount (externals other than the compiler's)
         self.cc_flags, self.cc_inputs = [], []   # plugins: flags and declared inputs [(at, tree)] of the CC stage only (a plugin is part of its key)
@@ -150,13 +169,11 @@ class Build:
         if bad:
             raise UnitError("caller flags that change a stage's job (use --include for -I): %s" % bad)
         self.roots, self.iargs = [], []
+        mounted = set(getattr(a, "mounted", ()))   # `at` of the stage inputs the caller adds to the tool runtime (the directory outputs of other roots, include_uses)
         for spec in [a.src_root] + a.include:
             host, sep, at = spec.rpartition("@")
-            if not sep and spec is not a.src_root and spec.startswith("/src/"):   # -I of a directory of the root's own view: one path, so #pragma once identity holds
-                self.iargs.append("-I" + spec)
-                continue
             if not sep and spec is not a.src_root:   # -I of a sandbox path inside a declared input of the tool runtime (an external)
-                if not any(spec == i["at"] or spec.startswith(i["at"].rstrip("/") + "/") for i in self.rt["inputs"]):
+                if not any(spec == i["at"] or spec.startswith(i["at"].rstrip("/") + "/") for i in self.rt["inputs"] + [{"at": m} for m in mounted]):
                     raise UnitError("--include %s: not HOST@/inc/N and inside no input of the tool runtime" % spec)
                 self.iargs.append("-I" + spec)
                 continue
@@ -169,15 +186,13 @@ class Build:
         names = [(at, unitview.view(self.store, t, (), self.cache)) for at, t in self.roots]
         self.name_tree_id = hashlib.sha256(cas.canon(names)).hexdigest()
 
-    def sp(self, rel):
-        return "/src/" + (self.prefix + "/" if self.prefix else "") + rel
-
     def doc(self, kind, rel, inputs, tail, src, inc=True):
         seed = hashlib.sha256(rel.encode()).hexdigest()
         argv = [self.cxx] + (self.iargs if inc else []) + self.flags + (self.cc_flags if kind == "cc" else []) + ["-frandom-seed=" + seed, "-Werror=date-time"]
         argv += ["-ffile-prefix-map=%s=%s" % (at, at[1:]) for at, _ in self.roots] + tail + [src]
         doc = {"format": "fnvnx-stage/1", "stage": "%s:%s" % (kind, rel), "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
-               "env": dict(ENV, PATH=os.path.dirname(self.cxx), **({"FNVNX_VARIANT": self.variant} if self.variant else {})), "outputs": ["/out"],
+               "env": dict(ENV, PATH=os.path.dirname(self.cxx), **({"FNVNX_VARIANT": self.variant} if self.variant else {}),
+                                                                  **({"FNVNX_COMPILER_KEY": self.compiler_key} if self.compiler_key else {})), "outputs": ["/out"],
                "inputs": sorted([i for i in self.rt["inputs"] if kind != "cc" or i["at"] not in self.cc_drop] +
                                 [{"at": at, "tree": t} for at, t in inputs + (self.cc_inputs if kind == "cc" else [])],
                                 key=lambda i: i["at"])}
@@ -197,11 +212,30 @@ class Build:
                         raise
         return None
 
-    def pp(self, rel, files):
-        """One PP run on the views of FILES (set of sandbox paths of real files; None = the real trees)."""
+    def pp_doc(self, rel, files):
+        """The PP stage document of unit REL on the views of FILES (set of sandbox paths of real files; None = the real trees)."""
         ins = [(at, t if files is None else unitview.view(self.store, t, [p[len(at) + 1:] for p in files if p.startswith(at + "/")],
                                                           self.cache)) for at, t in self.roots]
-        return run_stage(self.store, self.doc("pp", rel, ins, self.lang(rel)[0] + PP_TAIL, self.sp(rel)), self.cold)
+        return self.doc("pp", rel, ins, self.lang(rel)[0] + PP_TAIL, sandbox_src(rel))
+
+    def pp(self, rel, files):
+        """One PP run on the views of FILES (set of sandbox paths of real files; None = the real trees)."""
+        return run_stage(self.store, self.pp_doc(rel, files), self.cold)
+
+    def first_key(self, rel):
+        """The key of the first stage of unit REL, computed and not run (the shard rule, recipe.shard_of): the PP stage on the whole trees, which is a
+        function of the unit name, the flags and the content of the declared trees only (no hint, no store state). A .s unit has no PP: its one stage."""
+        if rel.endswith(".s"):
+            real = unitview.resolve(self.store, self.roots[0][1], rel, self.cache)
+            v = unitview.view(self.store, self.roots[0][1], [real], self.cache)
+            return sandbox.key_of(self.doc("cc", rel, [("/src", v)], self.lang(rel)[1] + ["-c", "-o", "/out/unit.o"], sandbox_src(rel), inc=False))
+        return sandbox.key_of(self.pp_doc(rel, None))
+
+    def du(self, rel, files):
+        """The macro-use fact of the unit: a `-dU` run on the same minimal view as the last PP run -> (key, result)."""
+        ins = [(at, unitview.view(self.store, t, [p[len(at) + 1:] for p in files if p.startswith(at + "/")], self.cache)) for at, t in self.roots]
+        key, res, _, _ = run_stage(self.store, self.doc("pu", rel, ins, self.lang(rel)[0] + DU_TAIL, sandbox_src(rel)), self.cold)
+        return key, res
 
     def stderr(self, res):
         return open(cas._obj(self.store, cas.manifest(res["stderr"], self.store)), errors="replace").read()
@@ -227,8 +261,8 @@ class Build:
             return self.assemble(e, rel)
         files, expect, ran = None, None, False
         try:
-            hint = json.load(open(hint_path(self.store, rel)))
-            files = {r for r in (self.real(p, False) for p in hint) if r} | {self.sp(rel)}
+            hint = json.load(open(hint_path(self.store, rel, self.hint_ns)))
+            files = {r for r in (self.real(p, False) for p in hint) if r} | {sandbox_src(rel)}
         except (OSError, ValueError, TypeError):
             pass
         while True:
@@ -254,6 +288,10 @@ class Build:
                 break
             expect, files = (d, h), d
         e["closure"], e["files"] = sorted(files), len(files)
+        e["du_key"], dres = self.du(rel, files)
+        if dres["rc"]:
+            e["status"], e["error"] = "pp-failed", "macro-fact stage: " + self.last(dres)
+            return e
         ii = cas.manifest(res["outputs"]["/out"], self.store)["entries"]["unit.ii"]
         e["ii_bytes"] = os.path.getsize(cas._obj(self.store, ii))
         tdata = cas.canon({"format": cas.FORMAT, "entries": {"unit.ii": dict(ii, x=0)}})
@@ -273,15 +311,15 @@ class Build:
             return e
         e["object"] = res["outputs"]["/out"]
         if files:
-            write_hint(self.store, rel, files)
+            write_hint(self.store, rel, files, self.hint_ns)
         return e
 
     def assemble(self, e, rel):
         """A .s unit: no preprocessing, one stage on the /src view that holds this file alone (every other name is a placeholder)."""
-        real = unitview.resolve(self.store, self.roots[0][1], self.sp(rel)[5:], self.cache)
+        real = unitview.resolve(self.store, self.roots[0][1], rel, self.cache)
         v = unitview.view(self.store, self.roots[0][1], [real], self.cache)
-        e["closure"], e["files"] = ["/src/" + real], 1
-        return self.compile(e, rel, self.doc("cc", rel, [("/src", v)], self.lang(rel)[1] + ["-c", "-o", "/out/unit.o"], self.sp(rel), inc=False), set())
+        e["closure"], e["files"] = [sandbox_src(real)], 1
+        return self.compile(e, rel, self.doc("cc", rel, [("/src", v)], self.lang(rel)[1] + ["-c", "-o", "/out/unit.o"], sandbox_src(rel), inc=False), set())
 
 
 def build_cmd(a):
@@ -307,11 +345,11 @@ def main(argv):
         p.add_argument("--cxx")
         if argv[:1] == ["build"]:
             [p.add_argument("--" + n, required=True) for n in ("store", "toolrt", "src-root", "flags-file", "report")]
-            p.add_argument("--prefix", default="")
             p.add_argument("--include", action="append", default=[])
             p.add_argument("--unit", action="append", required=True)
             p.add_argument("--jobs", type=int, default=1)
             p.add_argument("--cold", action="store_true")
+            p.add_argument("--hint-ns", default="")   # the root that owns the units: closure hints are per root (hint_path)
         a = p.parse_args(argv)
         if a.cmd == "build":
             return build_cmd(a)

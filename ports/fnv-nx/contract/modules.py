@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """modules - the lifted PE modules of the exe's static import closure (L1 CONTRACT, loader contract M1).
 
-    modules.py --exe FalloutNV.exe --bridge bridge.tsv --dir DIR [--dir DIR ...] --out-dir OUT
+    modules.py --exe FalloutNV.exe --bridge bridge.tsv --declared declared_dlls.tsv --dir DIR [--dir DIR ...] --out-dir OUT
 
 Rules (each violated precondition is a stage error that lists everything it found; nothing gets a made-up value):
 
@@ -19,7 +19,7 @@ Rules (each violated precondition is a stage error that lists everything it foun
             its slots are reported as without provider and its LoadLibrary fails).  `static` = in the exe's closure; the others
             are loadable on demand (loader: fnvnx_module_load).
   order     The Windows rule for static imports: depth first over the import directories in directory order, a module is
-            initialised after all modules it imports from.  Assumption (documented Windows behaviour): in a dependency
+            initialised after all modules it imports from.  Assumption (documented Windows behaviour): in a dependency (ASM-003)
             cycle the module visited first is initialised last, i.e. an edge back to a module still being visited is not
             followed.  The table order is this order for the static modules, followed by the on-demand ones sorted by name; it is the mapping order, the init order and the TLS-index order (the
             Windows loader numbers TLS indices in map order, which differs; the number is private to the loader and the
@@ -35,8 +35,13 @@ Rules (each violated precondition is a stage error that lists everything it foun
             export), address at the assigned base (empty for a forwarder), forwarder (empty otherwise), ordinal; one row per
             (export, name) sorted by ordinal then name.  A named export is also reachable as #ordinal (iat.py).
 
+Kinds (dllkind.py, the one rule shared with images.py): a dll with bridge rows, or a found dll whose normal import closure needs a dll that is neither found nor
+bridged, is DECLARED: it gets no base and no row of modules.tsv, and is listed in modules_declared.tsv (name, kind bridge|unloadable, sha256, size, missing imports as dll:provider, provider = wine when the dll is in declared_dlls.tsv (the declared machine has it: the gap is
+L5's bridge rows) or absent (not on the declared machine));
+its entries are served by bridge rows.  Only images are lifted modules.
+
 Outputs in OUT: modules.tsv (sorted by name: name, sha256, size, preferred base, assigned base, SizeOfImage, has TLS, entry rva, static,
-load index; hex for addresses), modules.c (`fnvnx_modules[]` + `fnvnx_module_count` for loader/src/modules.c), exports/<name>.tsv per module,
+load index, dll; hex for addresses; the exe has a row too (assigned base = ImageBase, static 1, no load index); `dll` is the PE characteristics bit IMAGE_FILE_DLL, the kind of a row), tls.tsv + tls/<name>.bin (the TLS directory facts of the exe and of every image of modules.tsv with has TLS = 1; see tls_rows), modules.c (`fnvnx_modules[]` + `fnvnx_module_count` for loader/src/modules.c), exports/<name>.tsv per module,
 iat.tsv (the exe's import slots through iat.py with these modules), imports/<name>.tsv per module (that module's own
 import slots through iat.py: slot, dll, name, kind, value; empty value + kind `none` = no provider).  Exit 1 when an exe
 slot has no value (gate `iat`).  A module's own slots without provider are listed on stdout (the platform's work list):
@@ -49,6 +54,9 @@ import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import declareddlls
+import dllkind
+import exepin
 import gatefile
 import iat
 
@@ -144,6 +152,39 @@ class PE:
 
     def inside_mapping(self, rva, n):
         return any(lo <= rva and rva + n <= lo + size for lo, size in self.mapped)
+
+    def tls(self):
+        """The TLS directory of this image (data directory 9) as the facts L4's rule S5 compares, or None when the directory is absent (size 0, the has_tls rule of modules.tsv).
+        IMAGE_TLS_DIRECTORY32 = StartAddressOfRawData, EndAddressOfRawData, AddressOfIndex, AddressOfCallBacks, SizeOfZeroFill, Characteristics, all
+        raw (VAs at the PREFERRED base).  Red, never clamped: a directory shorter than its 24 bytes or outside the image (already refused for every
+        directory in __init__), end < start, a template outside the image, a callback array that has no null terminator inside the image, a callback
+        outside the image.  -> dict(start_va, end_va, index_va, callbacks_va, template_rva, template_size, zero_fill, align, template, callbacks [rva])."""
+        rva, size = self.dirs[9]
+        if not size:      # the rule of has_tls in modules.tsv: the directory size is nonzero
+            return None
+        if size < 24:
+            raise StageError('%s: TLS directory is %d bytes, an IMAGE_TLS_DIRECTORY32 has 24' % (self.what, size))
+        start, end, index, cbs, zero, chars = struct.unpack('<6I', self.rd(rva, 24))
+        if end < start:
+            raise StageError('%s: TLS EndAddressOfRawData 0x%08x is below StartAddressOfRawData 0x%08x' % (self.what, end, start))
+        t_rva = start - self.base
+        if t_rva < 0 or t_rva > self.size_of_image or end - start > self.size_of_image - t_rva:
+            raise StageError('%s: TLS template 0x%08x..0x%08x is outside the image' % (self.what, start, end))
+        callbacks = []
+        if cbs:
+            a = cbs - self.base
+            while True:
+                if a < 0 or a > self.size_of_image or 4 > self.size_of_image - a:
+                    raise StageError('%s: TLS callback array at 0x%08x has no null terminator inside the image' % (self.what, cbs))
+                v = self.u32(a)
+                if not v:
+                    break
+                if not 0 <= v - self.base < self.size_of_image:
+                    raise StageError('%s: TLS callback 0x%08x is outside the image' % (self.what, v))
+                callbacks.append(v - self.base)
+                a += 4
+        return {'start_va': start, 'end_va': end, 'index_va': index, 'callbacks_va': cbs, 'template_rva': t_rva, 'template_size': end - start,
+                'zero_fill': zero, 'align': (chars >> 20) & 0xf, 'template': self.rd(t_rva, end - start), 'callbacks': callbacks}
 
     def import_directory(self):
         """[(dll name, [(slot rva, "name" | "#ordinal")])] in directory order (loader/src/imports.c walk_imports)."""
@@ -281,7 +322,7 @@ def scan(dirs, system):
     return mods
 
 
-def closure(exe, system, mods):
+def closure(exe, system, mods, declared=frozenset()):
     """-> (static modules in init order, dependencies first; the rest sorted by name).  Every import of a STATIC module that
     is not a system dll must be a module of `mods` (all missing ones are listed); an on-demand module whose dll is
     missing simply has slots without provider (its LoadLibrary fails; listed in the import report)."""
@@ -290,7 +331,7 @@ def closure(exe, system, mods):
     def visit(dll_names):
         for raw in dll_names:
             name = iat.norm_dll(raw)
-            if name in system or name in seen:   # a module still being visited: the cycle edge is not followed
+            if name in system or name in declared or name in seen:   # a module still being visited: the cycle edge is not followed
                 continue
             if name not in mods:
                 missing.add(name)
@@ -335,40 +376,120 @@ def tsv(path, text):
         fh.write(text)
 
 
+def tls_rows(exe, order, load_index):
+    """[(name, load_index or '', facts)] of every image that has a TLS directory: the exe first, then the images of modules.tsv sorted by name.
+    The universe of the DLL rows is `order` (= the rows of modules.tsv), so their number equals the count of has_tls = 1 there."""
+    rows = []
+    t = exe.tls()
+    if t is not None:
+        rows.append((exepin.NAME, '', t))
+    for m in sorted(order, key=lambda m: m.name):
+        t = m.pe.tls()
+        if t is not None:
+            rows.append((m.name, load_index.get(m.name, ''), t))
+    return rows
+
+
+def tls_slots(rows):
+    """{name: TLS index the loader assigns} of the rows of tls_rows: the exe 0 (loader/src/start.c:301, fnvnx_loaded_tls(p, &p->exe, 0)), then each
+    static image with a TLS directory 1, 2, ... in table order = load_index order (fnvnx_modules_prepare_tls, loader/src/modules.c:273-278: the
+    modules of fnvnx_modules[] in order, `next` starting at 1, incremented per image whose directory is present).  An image that is not static
+    (empty load_index) is loaded on demand and gets no slot (loader/src/modules.c:396): its slot is empty."""
+    out = {rows[0][0]: 0} if rows and rows[0][0] == exepin.NAME else {}
+    static = sorted((int(i), n) for n, i, _ in rows if i != '')
+    out.update({n: k for k, (_, n) in enumerate(static, 1)})
+    return out
+
+
+def align_bytes(raw):
+    """The alignment in bytes the loader applies for the raw IMAGE_SCN_ALIGN field RAW (bits 20-23 of the directory's Characteristics): 1 for 0,
+    else 1 << (RAW - 1) (loader/src/tls.c:38, `out->align = n ? 1 << (n - 1) : 1`)."""
+    return 1 << (raw - 1) if raw else 1
+
+
+def write_tls(out, rows):
+    """OUT/tls.tsv (columns below, hex for addresses and rvas, decimal for sizes) and OUT/tls/<name>.bin (the template bytes of each row).
+    tls_slot: the TLS index the loader assigns (tls_slots; empty for an image loaded on demand); align_bytes: align as the loader applies it (align_bytes)."""
+    os.makedirs(os.path.join(out, 'tls'), exist_ok=True)
+    slots = tls_slots(rows)
+    tsv(os.path.join(out, 'tls.tsv'), '# name\tload_index\tstart_va\tend_va\tindex_va\tcallbacks_va\ttemplate_rva\ttemplate_size\tzero_fill\talign\ttemplate_sha256\tcallbacks\ttls_slot\talign_bytes\n' +
+        ''.join('%s\t%s\t%08x\t%08x\t%08x\t%08x\t%08x\t%d\t%d\t%d\t%s\t%s\t%s\t%d\n' % (
+            n, i, t['start_va'], t['end_va'], t['index_va'], t['callbacks_va'], t['template_rva'], t['template_size'], t['zero_fill'], t['align'],
+            hashlib.sha256(t['template']).hexdigest(), ';'.join('%08x' % c for c in t['callbacks']), slots.get(n, ''), align_bytes(t['align'])) for n, i, t in rows))
+    for n, _, t in rows:
+        with open(os.path.join(out, 'tls', n + '.bin'), 'wb') as fh:
+            fh.write(t['template'])
+
+
 def exe_slots(exe):
     return {exe.base + slot: (dll, name) for dll, items in exe.import_directory() for slot, name in items}
 
 
-def run(exe_path, bridge_path, dirs, out):
-    with open(exe_path, 'rb') as fh:
-        exe = PE(fh.read(), os.path.basename(exe_path))
+def modules_text(exe_name, exe_bytes, exe, order, load_index):
+    """modules.tsv: the exe row and one row per image of ORDER, sorted by name, all from the one PE parse of this file (PE: the parse that maps an image).
+    Columns: name, sha256, size, preferred_base, assigned_base, SizeOfImage, has_tls, entry_rva, static, load_index, dll. `dll` is the PE characteristics
+    bit IMAGE_FILE_DLL of the row's own image: the kind of a row is that bit, never its name. The exe is placed at its ImageBase (assigned = preferred),
+    is static, and has no load index (it is not an entry of fnvnx_modules[])."""
+    rows = [(exe_name, hashlib.sha256(exe_bytes).hexdigest(), len(exe_bytes), exe, exe.base, True, '')]
+    rows += [(m.name, m.sha256, m.size, m.pe, m.base, m.static, load_index.get(m.name, '')) for m in order]
+    return ('# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index\tdll\n' +
+            ''.join('%s\t%s\t%d\t%08x\t%08x\t%08x\t%d\t%08x\t%d\t%s\t%d\n' % (
+                n, sha, size, pe.base, base, pe.size_of_image, 1 if pe.dirs[9][1] else 0, pe.entry_rva,
+                int(static), idx, 1 if pe.characteristics & FILE_DLL else 0) for n, sha, size, pe, base, static, idx in sorted(rows)))
+
+
+def run(exe_path, bridge_path, dirs, out, declared_path, c_out=None, keys_out=None, keys_tsv_out=None, data_out=None, keys_h_out=None, modules_tsv_out=None, imported_out=None):
+    exe_bytes = exepin.load_exe(exe_path)
+    exe = PE(exe_bytes, exepin.NAME)
     brows, _ = iat.bridge_rows(bridge_path)
     bridge = [(r['dll'], r['name'], r['conv'], r['ordinal']) for r in brows]
     system = {r['dll'] for r in brows}
-    order = closure(exe, system, scan(dirs, system))
+    wine = declareddlls.read(declared_path)         # the dlls of the declared machine (Wine 9.0)
+    mods = scan(dirs, system)
+    me = lower(exepin.NAME)
+    image = dllkind.images_of({n: [iat.norm_dll(d) for d, _ in m.imports] for n, m in mods.items()}, system | {me})
+    declared_mods = {n: m for n, m in mods.items() if n not in image}   # found, no bridge row, the declared machine cannot load them
+    order = closure(exe, system, {n: m for n, m in mods.items() if n in image}, set(declared_mods))
     end = assign_bases(exe, order)
-    os.makedirs(os.path.join(out, 'exports'), exist_ok=True)
-    os.makedirs(os.path.join(out, 'imports'), exist_ok=True)
+    if out:   # no OUT: only the requested outputs are written (a hermetic stage has no scratch directory)
+        os.makedirs(os.path.join(out or '', 'exports'), exist_ok=True)
+        os.makedirs(os.path.join(out or '', 'imports'), exist_ok=True)
+    put = lambda path, text: tsv(path, text) if out else None   # noqa: E731
+    write_table = lambda path, rows: iat.write_table(path, rows) if out else None   # noqa: E731
     load_index = {m.name: i for i, m in enumerate(m for m in order if m.static)}
-    tsv(os.path.join(out, 'modules.tsv'), '# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index\n' +
-        ''.join('%s\t%s\t%d\t%08x\t%08x\t%08x\t%d\t%08x\t%d\t%s\n' % (
-            m.name, m.sha256, m.size, m.pe.base, m.base, m.pe.size_of_image, 1 if m.pe.dirs[9][1] else 0, m.pe.entry_rva,
-            int(m.static), load_index.get(m.name, '')) for m in sorted(order, key=lambda m: m.name)))
-    tsv(os.path.join(out, 'modules.c'), c_source(order))
+    mtext = modules_text(me, exe_bytes, exe, order, load_index)
+    put(os.path.join(out or '', 'modules.tsv'), mtext)
+    if modules_tsv_out:   # modules.tsv as a declared stage output (the boot input of the emulator stage)
+        tsv(modules_tsv_out, mtext)
+    if out:
+        write_tls(out, tls_rows(exe, order, load_index))
+    put(os.path.join(out or '', 'modules.c'), c_source(order))
+    bridged = []                  # bridge dlls that have a file: the platform serves them, nothing of the file is lifted
+    for n in sorted(system):
+        p = find_file(dirs, n)
+        if p:
+            with open(p, 'rb') as fh:
+                data = fh.read()
+            bridged.append((n, 'bridge', hashlib.sha256(data).hexdigest(), len(data), ''))
+    dec = bridged + [(n, 'unloadable', m.sha256, m.size, ','.join(sorted('%s:%s' % (x, 'wine' if x in wine else 'absent') for x in dict.fromkeys(iat.norm_dll(d) for d, _ in m.imports
+                                                                    if iat.norm_dll(d) not in system and iat.norm_dll(d) not in image))))
+                     for n, m in sorted(declared_mods.items())]
+    put(os.path.join(out or '', 'modules_declared.tsv'), '# name\tkind\tsha256\tsize\tmissing_imports\n' + ''.join('%s\t%s\t%s\t%d\t%s\n' % r for r in sorted(dec)))
     raw = {}
     for m in order:
         rows = m.pe.exports()
         raw[m.name] = [(k, None if r is None else m.base + r, f, o) for k, r, f, o in rows]
-        tsv(os.path.join(out, 'exports', m.name + '.tsv'), ''.join(
+        put(os.path.join(out or '', 'exports', m.name + '.tsv'), ''.join(
             '%s\t%s\t%s\t%d\n' % (k, '' if a is None else '%08x' % a, f or '', o) for k, a, f, o in raw[m.name]))
     values = iat.resolve_exports(raw, bridge)
     rows, bad = iat.table(exe_slots(exe), bridge, values)
-    iat.write_table(os.path.join(out, 'iat.tsv'), rows)
+    write_table(os.path.join(out or '', 'iat.tsv'), rows)
     gatefile.write('iat', len(rows) + len(bad), len(rows), ['%08x %s!%s: %s' % b for b in bad],
                    '%d slots, %d without a value' % (len(rows) + len(bad), len(bad)))
     summary = ['modules %d: range 0x%08x..0x%08x' % (len(order), order and min(m.base for m in order) or 0, end)]
     summary += ['  %d %s base 0x%08x preferred 0x%08x size 0x%x relocs %d static %d' % (i, m.name, m.base, m.pe.base, m.pe.size_of_image, m.relocs, int(m.static))
                 for i, m in enumerate(order)]
+    summary += ['declared %s (%s) sha256 %s missing imports: %s' % (n, k, h[:12], miss or '-') for n, k, h, _, miss in sorted(dec)]
     summary.append('exe slots with a value %d of %d' % (len(rows), len(rows) + len(bad)))
     for b in bad:
         summary.append('exe slot %08x %s!%s: %s' % b)
@@ -376,7 +497,7 @@ def run(exe_path, bridge_path, dirs, out):
     for m in order:
         slots = {m.base + slot: (dll, name) for dll, items in m.imports for slot, name in items}
         mrows, mbad = iat.table(slots, bridge, values)
-        iat.write_table(os.path.join(out, 'imports', m.name + '.tsv'), sorted(
+        write_table(os.path.join(out or '', 'imports', m.name + '.tsv'), sorted(
             mrows + [(s, d, n, 'none', None) for s, d, n, _ in mbad]))
         k = mkinds.setdefault(m.name, {'system': 0, 'module': 0, 'none': 0})
         for r in mrows:
@@ -384,6 +505,17 @@ def run(exe_path, bridge_path, dirs, out):
         k['none'] = len(mbad)
         summary += ['module import slots %s: via bridge %d, via modules %d, no provider %d' % (m.name, k['system'], k['module'], k['none'])]
         summary += ['  no provider: %s!%s' % (d, n) for _, d, n, _ in mbad]
+    if c_out:   # the loader's module table, one file (loader/src/modules.c reads fnvnx_modules, fnvnx_module_count)
+        with open(c_out, 'w', newline='\n') as fh:
+            fh.write(c_source(order))
+    if keys_out or keys_tsv_out or data_out or keys_h_out or imported_out:   # the one key table (iat.py's rules): the loader's C table, the lifter stubs' keys.tsv, the loader start rule S4's iat_data.tsv
+        brows, table_id = iat.bridge_rows(bridge_path)
+        imported = iat.imported_set(brows, list(exe_slots(exe).values()) + [(d, n) for m in order for d, items in m.imports for _, n in items])
+        txt, datarows, _ = iat.c_source(brows, table_id, imported)
+        for path, text in ((keys_out, txt), (keys_tsv_out, iat.keys_tsv(brows, table_id)), (data_out, iat.data_tsv(datarows, table_id)), (keys_h_out, iat.key_header(brows, table_id)), (imported_out, iat.imported_tsv(brows, table_id, imported))):
+            if path:
+                with open(path, 'w', newline='\n') as fh:
+                    fh.write(text)
     return '\n'.join(summary), bool(bad)
 
 
@@ -392,11 +524,23 @@ def main():
     ap.add_argument('--exe', required=True)
     ap.add_argument('--bridge', required=True)
     ap.add_argument('--dir', action='append', required=True, help='where module files are looked for; first match in list order')
-    ap.add_argument('--out-dir', required=True)
+    ap.add_argument('--declared', required=True, help='declared_dlls.tsv (contract/declareddlls.py): the dlls of the declared machine')
+    ap.add_argument('--out-dir', help='the tables of the contract (modules.tsv, exports/, imports/, tls, iat.tsv ...); without it only --c-out and --keys-c-out are written')
+    ap.add_argument('--c-out', help='modules.c: the loader module table (fnvnx_modules, fnvnx_module_count)')
+    ap.add_argument('--keys-c-out', help='import_keys.c: the loader import table (fnvnx_import_rows, fnvnx_import_row_count, fnvnx_import_key_count, fnvnx_import_by_key_idx)')
+    ap.add_argument('--keys-h-out', help='import_keys.h: FNVNX_KEY(dll, name), the key of every function row as a compile-time constant (iat.key_header)')
+    ap.add_argument('--modules-tsv-out', help='modules.tsv: the module set, bases and entries (the boot input of the emulator stage)')
+    ap.add_argument('--keys-tsv-out', help='keys.tsv: the import keys for the lifter stubs (iat.keys_tsv)')
+    ap.add_argument('--imported-out', help='imported.tsv: the keys.tsv rows that an import slot of a loaded image (the exe and every module) binds to (iat.imported_tsv)')
+    ap.add_argument('--data-out', help='iat_data.tsv: the data rows of the import table (build fact of the loader start rule S4, iat.data_tsv)')
     a = ap.parse_args()
+    if not (a.out_dir or a.c_out or a.keys_c_out or a.keys_tsv_out or a.data_out or a.keys_h_out or a.modules_tsv_out or a.imported_out):
+        ap.error('one of --out-dir, --c-out, --keys-c-out, --keys-tsv-out, --data-out, --keys-h-out, --modules-tsv-out is required')
     try:
-        text, bad = run(a.exe, a.bridge, a.dir, a.out_dir)
-    except (StageError, ValueError, OSError) as e:
+        text, bad = run(a.exe, a.bridge, a.dir, a.out_dir, a.declared, a.c_out, a.keys_c_out, a.keys_tsv_out, a.data_out, a.keys_h_out, a.modules_tsv_out, a.imported_out)
+        if not a.out_dir:   # tables-only mode: a slot without a provider is the `iat` gate's finding (it needs the tables), not a failure of the generator
+            bad = False
+    except (StageError, ValueError, OSError, exepin.ExePinError) as e:
         sys.exit('modules: %s' % e)
     print(text)
     sys.exit(1 if bad else 0)

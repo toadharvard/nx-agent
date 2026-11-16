@@ -2,7 +2,7 @@
 # runner.sh - L4 farm job: the after-merge verification of one commit of the trunk. It reports facts; it decides nothing
 # and blocks nothing (a commit that a report shows broke something is reverted by the merger).
 #
-#   [ARTIFACTS=...] bash <checkout>/ports/fnv-nx/farm/runner.sh <commit> <job>[=<arg>[,<arg>...]] ...
+#   FNVNX_BUILD=<clone of fnv-nx-build> bash <checkout>/ports/fnv-nx/farm/runner.sh <commit> <job>[=<arg>[,<arg>...]] ...
 #
 # Steps:
 #  1 <commit> (40 hex) of the checkout's repository is fetched from its origin when the object is absent, and checked out
@@ -22,7 +22,7 @@
 #  5 final line: AFTERMERGE commit=<commit12> jobs=<n> violated=<names joined by ","|none> published=<branch>@<commit12>
 #    exit 0 = every job exited 0; 2 = at least one job reports a violation (the result is published either way);
 #    1 = usage, environment, tool or publishing error
-# Env: FARM_HOME (~/fnvnx-farm), ARTIFACTS (/home/user/fnv-nx-build; a checkout whose origin is the artifacts repository),
+# Env: FARM_HOME (~/fnvnx-farm), FNVNX_BUILD (required, no default: a checkout of fnv-nx-build whose origin is the artifacts repository),
 #      ARTIFACTS_URL (default: that checkout's origin), RUNNER_JOBS.
 set -uo pipefail
 die() { echo "runner: FAILED: $*" >&2; exit 1; }
@@ -37,7 +37,7 @@ for j in "$@"; do
 done
 SELF_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO=$(git -C "$SELF_DIR" rev-parse --show-toplevel) || die "$SELF_DIR is not inside a git checkout"
-FARM_HOME=${FARM_HOME:-$HOME/fnvnx-farm}; ARTIFACTS=${ARTIFACTS:-/home/user/fnv-nx-build}
+FARM_HOME=${FARM_HOME:-$HOME/fnvnx-farm}; ARTIFACTS=${FNVNX_BUILD:?FNVNX_BUILD (clone of fnv-nx-build) is required}
 ARTIFACTS_URL=${ARTIFACTS_URL:-$(git -C "$ARTIFACTS" remote get-url origin)} || die "$ARTIFACTS has no origin"
 JOBS_N=${RUNNER_JOBS:-$(nproc)}
 C12=${COMMIT:0:12}; W=$FARM_HOME/runner/$C12; SRC=$W/src; OUT=$W/out

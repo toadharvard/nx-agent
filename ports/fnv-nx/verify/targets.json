@@ -1,0 +1,219 @@
+{
+ "format": "fnvnx-targets/1",
+ "externals": {
+  "libnx": {
+   "repo": "fnv-nx-build",
+   "ref": "tools/libnx",
+   "commit": "518bf11ad6a52149e43fbd0fa83b0087a430f446"
+  },
+  "a64-runtime": {
+   "repo": "fnv-nx-build",
+   "ref": "tools/fnvnx-a64-msvcmodel",
+   "commit": "00e3d42acd10593d534b9a70bb8940cee7991436"
+  },
+  "arm-a57-docs": {
+   "repo": "fnv-nx-build",
+   "ref": "tools/arm-a57-docs",
+   "commit": "ffadc5c252ba771455dea7f04919849704f4f244"
+  },
+  "khronos-glxml": {
+   "repo": "fnv-nx-build",
+   "ref": "tools/khronos-glxml",
+   "commit": "f4894d73bf8e40c85a20a61408179c9898ec3340"
+  }
+ },
+ "guest_platform": {
+  "os": "horizon",
+  "libc": "newlib",
+  "triplet": "aarch64-none-elf",
+  "process": {
+   "is_64bit": false,
+   "address_space": "32bit"
+  },
+  "abi": "ilp32",
+  "code": [
+   "-fPIC",
+   "-ftls-model=local-exec"
+  ],
+  "cite": {
+   "os": [
+    {
+     "external": "libnx",
+     "path": "nx/include/switch/kernel/svc.h",
+     "line": 349,
+     "quote": "CreateProcessFlagAddressSpace_32bit"
+    }
+   ],
+   "libc": [
+    {
+     "external": "a64-runtime",
+     "path": "README.md",
+     "line": 1,
+     "quote": "fnvnx-a64"
+    },
+    {
+     "external": "a64-runtime",
+     "path": "README.md",
+     "line": 10,
+     "quote": "newlib"
+    }
+   ],
+   "triplet": [
+    {
+     "external": "a64-runtime",
+     "path": "README.md",
+     "line": 4,
+     "quote": "Target `aarch64-none-elf`"
+    }
+   ],
+   "process": [
+    {
+     "external": "libnx",
+     "path": "nx/include/switch/kernel/svc.h",
+     "line": 364,
+     "quote": "is_64bit"
+    },
+    {
+     "external": "libnx",
+     "path": "nx/include/switch/kernel/svc.h",
+     "line": 349,
+     "quote": "CreateProcessFlagAddressSpace_32bit"
+    }
+   ],
+   "abi": [
+    {
+     "external": "a64-runtime",
+     "path": "README.md",
+     "line": 4,
+     "quote": "ilp32"
+    },
+    {
+     "assumption": "ASM-007"
+    }
+   ],
+   "code": [
+    {
+     "external": "libnx",
+     "path": "nx/Makefile",
+     "line": 27,
+     "quote": "-fPIC -ftls-model=local-exec"
+    }
+   ]
+  }
+ },
+ "console_cpu": {
+  "core": "Cortex-A57",
+  "arch": "armv8-a",
+  "features": [
+   "crc",
+   "crypto"
+  ],
+  "cite": {
+   "core": [
+    {
+     "external": "libnx",
+     "path": "nx/Makefile",
+     "line": 27,
+     "quote": "-mtune=cortex-a57"
+    },
+    {
+     "doc": "DDI0488H",
+     "section": "1.1 About the Cortex-A57 processor"
+    }
+   ],
+   "arch": [
+    {
+     "external": "libnx",
+     "path": "nx/Makefile",
+     "line": 27,
+     "quote": "-march=armv8-a"
+    },
+    {
+     "doc": "DDI0488H",
+     "section": "1.1 About the Cortex-A57 processor",
+     "quote": "Support for both AArch32 and AArch64 Execution states"
+    }
+   ],
+   "crc": [
+    {
+     "doc": "DDI0488H",
+     "section": "4.3.20 ID_AA64ISAR0_EL1",
+     "quote": "[19:16] CRC32 Returns 0x1 to indicate that CRC32 instructions are implemented in AArch64 state"
+    }
+   ],
+   "crypto": [
+    {
+     "external": "libnx",
+     "path": "nx/Makefile",
+     "line": 27,
+     "quote": "+crc+crypto"
+    },
+    {
+     "doc": "DDI0514G",
+     "section": "Cortex-A57 Cryptography Extension (optional in DDI0488H 1.1; present on the console's SoC: assumption ASM-004)"
+    },
+    {
+     "assumption": "ASM-004"
+    }
+   ]
+  }
+ },
+ "references": {
+  "cpuref": "ports/fnv-nx/verify/cpuref.json",
+  "datamodel": "ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json"
+ },
+ "docs": {
+  "DDI0488H": {
+   "external": "arm-a57-docs",
+   "path": "DDI0488H_cortex_a57_mpcore_r1p3_trm.pdf",
+   "sha256": "30c47dac07e432b706e1d938dbab9668a1cab461bce2340007a612df1042e8e5",
+   "title": "ARM Cortex-A57 MPCore Processor Technical Reference Manual, Revision r1p3"
+  },
+  "DDI0514G": {
+   "external": "arm-a57-docs",
+   "path": "DDI0514G_cortex_a57_crypto_r1p3_trm.pdf",
+   "sha256": "0a5997cdfa697f5776a7f405298091e09a13fc644e3eabeb9de04631b246dc7b",
+   "title": "ARM Cortex-A57 MPCore Processor Cryptography Extension Technical Reference Manual, Revision r1p3"
+  }
+ },
+ "host_gl": {
+  "api": "gl",
+  "version": "4.5",
+  "profile": "core",
+  "registry": "khronos-glxml:xml/gl.xml",
+  "cite": {
+   "api": [
+    {
+     "external": "khronos-glxml",
+     "path": "xml/gl.xml",
+     "line": 33588,
+     "quote": "<feature api=\"gl\""
+    }
+   ],
+   "version": [
+    {
+     "external": "khronos-glxml",
+     "path": "xml/gl.xml",
+     "line": 33588,
+     "quote": "number=\"4.5\""
+    }
+   ],
+   "profile": [
+    {
+     "external": "khronos-glxml",
+     "path": "xml/gl.xml",
+     "line": 31735,
+     "quote": "<remove profile=\"core\""
+    }
+   ],
+   "registry": [
+    {
+     "external": "khronos-glxml",
+     "path": "xml/gl.xml",
+     "line": 33588,
+     "quote": "GL_VERSION_4_5"
+    }
+   ]
+  }
+ }
+}
