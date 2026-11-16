@@ -16,6 +16,9 @@ of the same gate:
 Crossing universe (crossing_universe): a term is judged only for a symbol the x86 boundary binds (IAT natives of the bridge table, the facts root's dispatch rows); a va_list term on such a symbol is red unless the symbol is the native end of a msvcrt_va row. A source that cannot be derived is a red item.
 Red iff an item is uncertified, the root's build is not green, an object has no `.fnvnx.sympair` section or cannot be parsed (red item naming the object). A C++
 unit is an object of the root's recipe (recipe.CXX_EXT). No such root: universe 0, green."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import shutil
@@ -25,14 +28,13 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "link"))
-sys.path.insert(0, os.path.join(HERE, "..", "contract"))
 import abi  # noqa: E402
-import bridgetable  # noqa: E402
+from contract import bridgetable  # noqa: E402
 import elfobj  # noqa: E402
 import gate_argorder  # noqa: E402
 import gate_build  # noqa: E402
 import gate_imports  # noqa: E402
-import l2sections  # noqa: E402
+from contract import l2sections  # noqa: E402
 import objsections  # noqa: E402
 import odr  # noqa: E402
 import ctypes_compat  # noqa: E402

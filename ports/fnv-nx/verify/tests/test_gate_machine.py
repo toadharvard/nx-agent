@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Tests for verify/gate_machine.py (class G): the driver on the toy product root of test_recipe.py with a synthetic regsites.tsv published as an
 external of a stand-in artifacts repository; the pure rules are tested by contract/tests/test_hive.py. Plain script: exit 0 on pass."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import sys
@@ -8,9 +11,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "contract"))
 import gate_machine as G  # noqa: E402
-import hive  # noqa: E402
+from contract import hive  # noqa: E402
 import test_recipe as TR  # noqa: E402
 
 FAILED = []

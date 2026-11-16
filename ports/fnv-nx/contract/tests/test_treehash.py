@@ -3,12 +3,13 @@
 computed (pinned), it equals ingest's hash, and imagerec reads it from here (not from verify/)."""
 import os
 import sys
+import os
+import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
-sys.path.insert(0, os.path.join(HERE, '..', '..', 'verify'))
-import cas
+from verify import cas
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: contract.X by its qualified name
 from contract import imagerec
 from contract import treehash

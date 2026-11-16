@@ -27,14 +27,16 @@ rest uncertified.  Open (REMOVE, owner L2): the plugin's kinds (abi_native), rem
 vftables.  Input fact: N1 pins (the n1 certificate) certify the bind addresses.  Dropped from the legacy tool: `secondary_entries` taking min() of several offsets, the `_ZThn` name
 construction by string splicing (`thunk_name`), the symbol-to-vtable search by parsing the object a second time (`slot_otts`).
 """
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import argparse
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'contract'))
 import abi_native as N
-import exefacts
+from contract import exefacts
 import exevft
 
 NAME = 'thisadj'
