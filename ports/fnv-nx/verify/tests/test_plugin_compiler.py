@@ -76,4 +76,18 @@ ins = [{"at": "/ext/h", "tree": "t1"}]
 d1, d2 = recipe.compilerfact_doc("h", "/ext/h/bin/cxx", "-dumpmachine", ins), recipe.compilerfact_doc("h", "/ext/h/bin/cxx", "-dumpmachine", list(ins))
 check("the same compiler and query make the same stage doc, hence the same key: a cached answer is reused, no second compiler run", d1 == d2 and d1["stage"] == "cfact:h:-dumpmachine" and d1["argv"][-1] == "-dumpmachine", d1)
 check("another compiler tree makes another stage", recipe.compilerfact_doc("h", "/ext/h/bin/cxx", "-dumpmachine", [{"at": "/ext/h", "tree": "t2"}]) != d1)
+td = tempfile.mkdtemp()
+os.makedirs(td + "/inc")
+open(td + "/as", "w").write("x")
+open(td + "/inc/a.h", "w").write("x")
+open(td + "/inc/b.h", "w").write("x")
+own = {td + "/as": {"binutils"}, td + "/inc/a.h": {"libc-dev"}, td + "/inc/b.h": {"libc-dev"}}
+real = lambda p: p  # noqa: E731
+check("discovered: a program of a pinned package and a tree of pinned packages are green", recipe.discovered_errors([td + "/as"], [td + "/inc"], ["binutils", "libc-dev"], own, real) == [])
+e = recipe.discovered_errors([td + "/as"], [], ["libc-dev"], own, real)
+check("discovered: a program owned by a package env.json does not pin is red", len(e) == 1 and "owned by no package" in e[0], e)
+e = recipe.discovered_errors([td + "/as"], [], ["binutils"], {}, real)
+check("discovered: a program owned by no package is red", len(e) == 1, e)
+e = recipe.discovered_errors([], [td + "/inc"], ["libc-dev"], dict(own, **{td + "/inc/b.h": {"other"}}), real)
+check("discovered: a tree holding a file of an unpinned package is red", len(e) == 1 and "b.h" in e[0], e)
 sys.exit(1 if fails else 0)

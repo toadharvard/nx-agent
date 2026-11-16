@@ -2511,6 +2511,18 @@ def plugin_languages(prog, sos):
     return {k: [n for n in sos if not (refs[n] & only["cxx" if k == "c" else "c"])] for k in ("c", "cxx")}
 
 
+def discovered_errors(exes, trees, packages, owners, real=os.path.realpath, isfile=os.path.isfile):
+    """[str]: what a compiler named OUTSIDE its declared tree that is no file of a package env.json pins (the bootstrap of the sandbox mounts: the programs and directories
+    `unitstage.gcc_set` and `toolrt` take from the compiler's own answers). EXES: each must be a file owned by a pinned package (envcheck.system_lib_errors, the rule of link.libs.system);
+    TREES: no file of a tree may be owned by a package that env.json does not pin (envcheck.tree_files: `foreign`). PACKAGES: env.json's `packages`; OWNERS: envcheck.file_owners()."""
+    err = envcheck.system_lib_errors(exes, packages, owners, real, isfile)
+    pk = set(packages)
+    for t in trees:
+        _, foreign = envcheck.tree_files(t, pk, owners)
+        err += ["%s: owned by %s, no package that env.json pins" % (p, ",".join(sorted(o))) for _, p, o in foreign[:5]]
+    return err
+
+
 def front_end_progs(cc, cxx):
     """{kind: path of the front end program} of the HOST compilers CC and CXX (`-print-prog-name=cc1` / `cc1plus`): for the gates and tests that run a compiler on the host over the
     cache's external tree (gate_datamodel, test_guest). The build itself asks its compiler through the stage cfact (Recipe.compiler_fact), never through this."""
@@ -2521,7 +2533,7 @@ def predefined(driver, kind, flags):
     """The macros the pinned DRIVER predefines for a unit of KIND under FLAGS (`-dM -E` on an empty input) -> {name: value}: the compiler's own
     statement of the data model (__SIZE_TYPE__, __PTRDIFF_TYPE__, __CHAR_UNSIGNED__, ...), the same macros the unit's preprocessing stage sees."""
     r = subprocess.run([driver, "-x", LANG_X[kind], "-dM", "-E", "-o", "/dev/stdout"] + list(flags) + ["/dev/null"], capture_output=True, text=True,
-                       env=dict(os.environ, LC_ALL="C", LANGUAGE="C"))
+                       env=dict(unitstage.PROBE_ENV))
     if r.returncode:
         raise BuildRed({"stage": "predefined:" + kind, "exit": r.returncode, "stderr": r.stderr.splitlines()[-20:]})
     return {l.split(" ", 2)[1]: (l.split(" ", 2) + [""])[2] for l in r.stdout.splitlines() if l.startswith("#define ")}
@@ -2531,7 +2543,7 @@ def diagnostics(driver, kind, flags, source):
     """The diagnostics (stderr lines) of the pinned DRIVER compiling SOURCE (a file) for a unit of KIND under FLAGS, syntax only: the compiler's own
     answer on a translation unit whose static_asserts state the data model (gate "datamodel").  -> (exit code, [lines])."""
     r = subprocess.run([driver, "-x", LANG_X[kind], "-fsyntax-only"] + list(flags) + [source], capture_output=True, text=True,
-                       env=dict(os.environ, LC_ALL="C", LANGUAGE="C"))
+                       env=dict(unitstage.PROBE_ENV))
     return r.returncode, r.stderr.splitlines()
 
 
@@ -2543,7 +2555,7 @@ def semantics_for(driver, kind, flags=None, origin=None):
     `cxx_origin` declaration of the root; None = native)."""
     flags = semantics_set(origin) if flags is None else flags
     r = subprocess.run([driver, "-x", LANG_X[kind], "-E", "-o", "/dev/null"] + list(flags) + ["/dev/null"], capture_output=True, text=True,
-                       env=dict(os.environ, LC_ALL="C", LANGUAGE="C"))
+                       env=dict(unitstage.PROBE_ENV))
     if r.returncode:
         raise BuildRed({"stage": "semantics:" + kind, "exit": r.returncode, "stderr": r.stderr.splitlines()[-20:]})
     drop = set(re.findall(r"command-line option '([^']+)' is valid for [^\n]* but not for", r.stderr))
@@ -3071,11 +3083,16 @@ class Job:
                 q = lambda n, _q=q: unitstage.prog(_q(n))  # noqa: E731
                 exes += [p for p in xs[1:] + [q("ld")] if os.path.isabs(p) and out(p)]
                 trees += sorted({r for t in ts for r in (t, os.path.realpath(t)) if out(r) and os.path.isdir(r)})
+                found = ([p for p in exes if not any(under(p, e["at"]) for e in self.ext.values())], [t for t in trees if "@" not in t])   # what the compiler named outside its external
             else:
                 exes, trees = [], []
                 for p in paths:
                     xs, ts = unitstage.gcc_set(p)
                     exes, trees = exes + xs, trees + ts
+                found = (exes, trees)
+            bad = discovered_errors(found[0], found[1], json.load(open(os.path.join(self.repo, ENV_JSON)))["packages"], envcheck.file_owners())
+            if bad:   # RULE (bootstrap of the sandbox mounts): a program or directory the compiler names is a file of a package env.json pins, else red
+                raise BuildRed({"stage": "toolrt", "exit": None, "stderr": ["compiler %s names %s" % (c["cxx"], x) for x in bad[:20]]})
             return self.plus(runtime.build_tool(self.store, sorted(set(exes)), sorted(set(trees))), names)
         return self.cached_rt("tool-" + tag, make)
 
