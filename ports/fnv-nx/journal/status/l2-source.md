@@ -624,3 +624,7 @@ After the first frame:
   - Rule: order_builtin_call extends to the class of builtins with no library function whose effect goes through their pointer arguments, derived from GCC's builtin facts.
   - Fences: release before a write; after the call, an ordering fence (full when it writes); none after noreturn; for returns_twice, at the join.
   - Owner w2, in the same commit as ENTRY1-ATOMIC. Status: doing.
+- 2026-11-16 02:15Z: NAMES-FNPARM written, unverified: cand4b ae8d87972.
+  - The msvcmodel.patch hunk in grokdeclarator cdk_function adds fnvnx_parmform; it applies cleanly with --dry-run.
+  - names: the back-reference key now includes the form; the f8 domain is certified; outside it the result is nodecor:fnparmform:<form>.
+  - It goes with COMPILER-STAGE's farm build (w3 told); proofs f8, test_plugins and the 24 rows come after that build.
