@@ -44,3 +44,7 @@ Inputs 3-9 are read as DATA by rt.sh, never compiled by it: the msvcmodel patch 
 `link/guest.ld` and `dispatch/fnvnx_dispatch.cc`. The last two are the two files that patch embeds in the runtime's configure (the guest link script and the dispatch protocol source named by
 `guest_compiler.json` `runtime_configure_patch`), so a change of either is a change of the runtime build. `fnvnx_dispatch.cc` is also the source of the plugin `fnvnx_dispatch`; the two uses are
 independent (the plugin stage compiles it into a `.so`; rt copies the text), and both are declared, so both are in the key.
+
+## Externals are inputs
+A run step sees only its declared inputs, so the source tarballs and the stage-1 tree are `{"external", "path"}` inputs (RECIPE.md "Run stages"), not paths under /ext. gcc1: input 4 is the GNU tarball. rt: inputs 10-15 are the stage-1 tree (`.`), the GNU tarball,
+the newlib tarball, the two autotools tarballs and the devkitPro buildscripts tree (`.`); the plugins follow from input 16 (`{"plugins": "root"}`). The numbers are the constants at the top of rt.sh.

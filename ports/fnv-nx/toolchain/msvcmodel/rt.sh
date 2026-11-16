@@ -5,7 +5,7 @@
 #   output $OUT_DIR   the compiler tree COMPILER: bin/, lib/, the plugin headers, the runtime libraries and crt, MANIFEST.json
 set -euo pipefail
 # ---- the constants of this step: every path it touches; the mounts are the sandbox's (a change of the mounts is a change of these lines alone) ----
-STAGE1=/ext/stage1                                # the compiler external (stage 1's output STAGE1): prefix/, b-gcc/, src/ (the absolute paths below are the ones stage 1 built at)
+STAGE1=/in/10                                # the compiler external (stage 1's output STAGE1): prefix/, b-gcc/, src/ (the absolute paths below are the ones stage 1 built at)
 RECORDS=/in/2                                     # input 2: records2.sh, the stage ref of the generator `records.py stage2` (T ABI MLFLAG, semantics, plugins)   (input 1 is this script)
 MSVC_PATCH=/in/3                                  # inputs 3-9: the repo files, in this order (build.json)
 P_X19=/in/4                                       #   toolchain/gcc/x19-x27.patch
@@ -14,12 +14,12 @@ P_NLGUEST=/in/6                                   #   toolchain/gcc/newlib-guest
 CFG_LINK_PY=/in/7                                 #   toolchain/gcc/cfg_link.py
 CFG_GUEST_LD=/in/8                                #   link/guest.ld
 CFG_PROTOCOL_SRC=/in/9                            #   toolchain/dispatch/fnvnx_dispatch.cc
-PLUGIN_IN=10                                      # inputs 10.. : {"plugin": NAME} in the records' PLUGIN_ORDER; plugin i is /in/$((PLUGIN_IN+i))/<name>.so
-GCC_TARBALL=/ext/gcc/gcc-13.3.0.tar.xz            # external `gcc` (only the MANIFEST's source_sha256: the source tree is STAGE1/src)
-NEWLIB_TARBALL=/ext/newlib/newlib-4.6.0.20260123.tar.gz
-AUTOCONF_TARBALL=/ext/autotools/autoconf-2.69.tar.xz   # the autotools newlib's own generated files state (configure: Autoconf 2.69, Makefile.in: automake 1.15.1)
-AUTOMAKE_TARBALL=/ext/autotools/automake-1.15.1.tar.xz
-BS=/ext/buildscripts                              # devkitPro/buildscripts at its pinned commit: patches/newlib-$NLV-4.patch
+PLUGIN_IN=16                                      # inputs 10.. : {"plugin": NAME} in the records' PLUGIN_ORDER; plugin i is /in/$((PLUGIN_IN+i))/<name>.so
+GCC_TARBALL=/in/11            # external `gcc` (only the MANIFEST's source_sha256: the source tree is STAGE1/src)
+NEWLIB_TARBALL=/in/12
+AUTOCONF_TARBALL=/in/13   # the autotools newlib's own generated files state (configure: Autoconf 2.69, Makefile.in: automake 1.15.1)
+AUTOMAKE_TARBALL=/in/14
+BS=/in/15                              # devkitPro/buildscripts at its pinned commit: patches/newlib-$NLV-4.patch
 SCRATCH=/scratch                                  # the same absolute path as in stage 1
 WORK=$SCRATCH/w; PREFIX=$SCRATCH/prefix
 OUT_DIR=/out

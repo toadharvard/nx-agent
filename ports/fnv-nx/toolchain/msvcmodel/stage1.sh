@@ -6,8 +6,8 @@
 #   output $OUT_DIR/STAGE1/src      the patched GCC source tree     (all three stay at the absolute paths of $PREFIX, $WORK/b-gcc, $SRC: GCC's Makefiles and the
 #                            compiler's configured paths are absolute; stage 2 puts them back at the same paths, see rt.sh)
 set -euo pipefail
-# ---- the constants of this step: every path the step touches (the sandbox's mounts: inputs /in/N in the order of build.json, externals /ext/<at>); a change of the mounts is a change of these lines alone ----
-GCC_TARBALL=/ext/gcc/gcc-13.3.0.tar.xz          # external `gcc` (`at` /ext/gcc): the GNU tarball
+# ---- the constants of this step: every path the step touches (the sandbox's mounts: inputs /in/N in the order of build.json, externals are declared inputs too, {external, path}); a change of the mounts is a change of these lines alone ----
+GCC_TARBALL=/in/4                               # input 4: {external gcc-src, path gcc-13.3.0.tar.xz}, the GNU tarball
 MSVC_PATCH=/in/2                                # input 2: toolchain/msvcmodel/msvcmodel.patch   (input 1 is this script)
 RECORDS=/in/3                                   # input 3: records1.sh, the stage ref of the generator `records.py stage1` (compiler configure: T ABI CPUARCH MLFLAG GCC_RT_CONF)
 SCRATCH=/scratch                                # the writable scratch directory, the same absolute path on every run

@@ -109,6 +109,30 @@
     "ports/fnv-nx/link/guest.ld",
     "ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc",
     {
+     "external": "stage1",
+     "path": "."
+    },
+    {
+     "external": "gcc-src",
+     "path": "gcc-13.3.0.tar.xz"
+    },
+    {
+     "external": "newlib-src",
+     "path": "newlib-4.6.0.20260123.tar.gz"
+    },
+    {
+     "external": "autotools-src",
+     "path": "autoconf-2.69.tar.xz"
+    },
+    {
+     "external": "autotools-src",
+     "path": "automake-1.15.1.tar.xz"
+    },
+    {
+     "external": "devkitpro-buildscripts",
+     "path": "."
+    },
+    {
      "plugins": "root"
     }
    ],
