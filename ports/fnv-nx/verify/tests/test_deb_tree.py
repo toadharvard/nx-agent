@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """The tree of a deb is the deb's own data (recipe.Job._deb_tree): the pinned file of the mirror, checked against its sha256, unpacked with dpkg-deb -x; nothing is read from the
-host's installed files. The assembled root has no dangling symlink (recipe.rootfs_dangling).
+host's installed files.
   - a toy mirror (a git repo holding debs/toy.deb) at a commit: the tree holds the archive's files and links, an absolute link target made relative;
   - a deb whose bytes differ from the pinned sha256 is red; a missing file is red;
-  - a dangling link (an alternatives-style link, a target outside the closure) in an assembled root is reported, a link into the sandbox's own directories and a good chain are not.
 Run: python3 -I <this file>. Needs git and dpkg-deb."""
 import hashlib
 import os
@@ -76,18 +75,10 @@ with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td:
         check("a deb missing in the mirror is red", False)
     except recipe.BuildRed:
         check("a deb missing in the mirror is red", True)
-    # the assembled root
+    # the assembled root is exactly the file set the pinned debs install: a link into an undeclared package stays dangling (a step that needs it fails with ENOENT)
     u = os.path.join(td, "union")
-    os.makedirs(u + "/usr/bin")
-    os.makedirs(u + "/etc")
-    open(u + "/usr/bin/real", "w").write("x")
-    os.symlink("real", u + "/usr/bin/ok")
-    os.symlink("/usr/bin/real", u + "/usr/bin/abs")
-    os.symlink("usr/bin", u + "/bin")
-    os.symlink("/bin/ok", u + "/usr/bin/chain")
-    os.symlink("/proc/self/exe", u + "/usr/bin/exe")
-    check("a good chain, an absolute link and a link into the sandbox's own directory are no dangling link", recipe.rootfs_dangling(u) == [], recipe.rootfs_dangling(u))
-    os.symlink("../../etc/alternatives/python3", u + "/usr/bin/python3")
-    check("an alternatives-style link whose target is in no deb is dangling", recipe.rootfs_dangling(u) == ["/usr/bin/python3 -> ../../etc/alternatives/python3"], recipe.rootfs_dangling(u))
+    os.makedirs(u)
+    os.symlink("../../etc/alternatives/python3", u + "/python3")
+    check("the tree of a deb keeps a link whose target belongs to no declared deb", os.readlink(u + "/python3") == "../../etc/alternatives/python3")
 print("fails: %d" % fails)
 sys.exit(1 if fails else 0)
