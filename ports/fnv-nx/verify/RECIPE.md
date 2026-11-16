@@ -455,6 +455,13 @@ an import of a root that is not declared (`gen:foreign-import`); a
 read by a path of its own location (`__file__`) in a module of an import root that leaves that root's tree or that the rule cannot decide. A data file such a module reads by a
 constant path of its own location inside its root's tree (decided by `pathflow`, a directory: every tracked file under it) is mounted with the closure and so is in the key. Functions: `recipe.import_trees`, `recipe.import_mount`. Tests: `tests/test_genimports.py`.
 
+### Generated `sources`: a directory output of a run step (`<step>:<dir>`)
+A `sources` line may also be `<step>:<dir>`: `<step>` is a `run` step of the SAME root and `<dir>` is one of its declared `dirs` outputs. The units are the files there with a C,
+C++ or assembly extension (`is_unit`), sorted, each at its path in the unit view, so each is keyed by its own content; a header is no unit. A unit is its text alone: the step turns
+every per-file compiler flag its upstream build gave into text (`#define NAME` before the source's own text), so the recipe's flags stay the root's. Red (stage `sources:<root>`):
+a name that is no run step of this root (a step of another root is never reached by name), a directory that is no declared `dirs` output of that step (a path outside it, a
+subdirectory), an empty unit set, a file that has the name of a tracked unit of the root. Test: `tests/test_archive_sources.py`.
+
 ### Generated `sources`
 `sources: PATH` (a path in generated[].outputs of the root) names a file a generate stage writes, one `<external>:<path>` line per unit; `.` names the root
 itself (a tracked file of it). Each listed file of a declared external is copied into the unit view as the unit `<external>/<path>`, so its content is in
