@@ -29,7 +29,7 @@
  "include": [
   "ports/fnv-nx/platform/include",
   "ports/fnv-nx/contract/exporthdr/include",
-  "ports/fnv-nx/loader/include",
+  "ports/fnv-nx/loader/hdr/include",
   "ports/fnv-nx/lib/sha256/include",
   "ports/fnv-nx/hostabi/include",
   "ports/fnv-nx/shim/include",
@@ -558,11 +558,11 @@
    "output": "INCLUDE"
   },
   {
-   "root": "ports/fnv-nx/loader",
+   "root": "ports/fnv-nx/shim",
    "output": "INCLUDE"
   },
   {
-   "root": "ports/fnv-nx/shim",
+   "root": "ports/fnv-nx/loader/hdr",
    "output": "INCLUDE"
   }
  ]
