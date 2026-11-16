@@ -36,12 +36,12 @@ import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the gate runs it with -I: the script's directory is not on the path
-import argflow
-import imagerec
-import gatefile
-import iat
-import memfx
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)   # the gate runs it with -I: the script's directory is not on the path
+from contract import argflow
+from contract import imagerec
+from contract import gatefile
+from contract import iat
+from contract import memfx
 
 
 def module_dlls(text):

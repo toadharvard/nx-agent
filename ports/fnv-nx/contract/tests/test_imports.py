@@ -6,8 +6,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-import bridgetable as B  # noqa: E402
-import imports as I  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: contract.X by its qualified name
+from contract import bridgetable as B  # noqa: E402
+from contract import imports as I  # noqa: E402
 
 FAILED = []
 
@@ -70,8 +71,10 @@ check("judge: none (no symbol of that name anywhere)", I.judge(rows2, {}, {}, {}
 l3rows, _, _ = derive(names="msvcrt.dll\t_CIpow\n", specs={"msvcrt": "1 cdecl _CIpow()\n"}, syms={}, table={})
 check("derive: l3 symbol", l3rows[0][6] == "fnvl_msvcrt_CIpow" and l3rows[0][7] == "l3", l3rows)
 check("judge: l3 without a providing root is external", I.judge(l3rows, {}, {}, {}, {}) == [("msvcrt.dll!_CIpow", "external")])
-check("judge: l3 provided by another root", I.judge(l3rows, {}, {}, {"fnvl_msvcrt_CIpow": [("GLOBAL", "FUNC")]}, {}) == [("msvcrt.dll!_CIpow", None)])
-check("judge: l3 defined weak elsewhere is external", I.judge(l3rows, {}, {}, {"fnvl_msvcrt_CIpow": [("WEAK", "FUNC")]}, {}) == [("msvcrt.dll!_CIpow", "external")])
+check("judge: l3 provided by another root", I.judge(l3rows, {}, {}, {"fnvl_msvcrt_CIpow": {"lift/rt": [("GLOBAL", "FUNC")]}}, {}) == [("msvcrt.dll!_CIpow", None)])
+check("judge: l3 defined by two members is multiple-definers", I.judge(l3rows, {}, {}, {"fnvl_msvcrt_CIpow": {"a": [("GLOBAL", "FUNC")], "b": [("GLOBAL", "FUNC")]}}, {}) == [("msvcrt.dll!_CIpow", "multiple-definers")])
+check("judge: l3 defined by one member and weak in another is green", I.judge(l3rows, {}, {}, {"fnvl_msvcrt_CIpow": {"a": [("GLOBAL", "FUNC")], "b": [("WEAK", "FUNC")]}}, {}) == [("msvcrt.dll!_CIpow", None)])
+check("judge: l3 defined weak elsewhere is external", I.judge(l3rows, {}, {}, {"fnvl_msvcrt_CIpow": {"a": [("WEAK", "FUNC")]}}, {}) == [("msvcrt.dll!_CIpow", "external")])
 
 # extra rows: replace, own and other-owner, duplicates and bad columns are errors
 ex = "d3d9.dll\tDirect3DCreate9\t\tstdcall\ti\ti\tD3D\tsym\n"
@@ -79,7 +82,7 @@ r3, e3, of3 = derive(extra=[ex])
 check("derive: extra row added", ("d3d9.dll", "Direct3DCreate9") in {(r[0], r[1]) for r in r3} and e3 == [] and of3 == {("d3d9.dll", "Direct3DCreate9"): 0})
 check("judge: row of another owner needs the other root", I.judge([r for r in r3 if r[0] == "d3d9.dll"], SYMS, TABLE, {}, of3) == [("d3d9.dll!Direct3DCreate9", "external")])
 check("judge: row of another owner certified by the other root",
-      I.judge([r for r in r3 if r[0] == "d3d9.dll"], SYMS, TABLE, {"D3D": [("GLOBAL", "FUNC")]}, of3) == [("d3d9.dll!Direct3DCreate9", None)])
+      I.judge([r for r in r3 if r[0] == "d3d9.dll"], SYMS, TABLE, {"D3D": {"a": [("GLOBAL", "FUNC")]}}, of3) == [("d3d9.dll!Direct3DCreate9", None)])
 check("derive: duplicate extra row is an error", derive(extra=[ex, ex])[1] != [])
 check("derive: extra row with a bad column count is an error", derive(extra=["a\tb\n"])[1] != [])
 check("derive: stub in the spec is an error", derive(names="kernel32.dll\tFoo\n", specs={"kernel32": "1 stub Foo\n"})[1] != [])
@@ -110,7 +113,7 @@ check("judge: green case", I.judge(g, {"F": [("GLOBAL", "FUNC")]}, {}, {}, {}) =
 check("judge: UNIQUE counts as global", I.judge(g, {"F": [("UNIQUE", "FUNC")]}, {}, {}, {}) == [("a.dll!F", None)])
 
 # the rows table (stage A): syms=None binds by rule, never reads a symbol table, and its keys equal the keys of every judged derivation
-import iat  # noqa: E402
+from contract import iat  # noqa: E402
 ra, ea, _ = B.derive(NAMES, lambda d: SPECS[d], None, TABLE, [], VA)
 check("rows table: no errors", ea == [], ea)
 check("rows table: every symbol row binds sym, data binds data (iob), msvcrt binds lookup by the name table, a name outside it is none",

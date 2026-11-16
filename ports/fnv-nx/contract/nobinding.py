@@ -10,8 +10,8 @@ proof, not by omission.  Section entries of such objects (sympair, ...) are not 
 binding to an exe address would put a row in the table."""
 import argparse, os, sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import store
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)
+from contract import store
 
 
 def judge(obj, bind):
