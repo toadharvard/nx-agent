@@ -1628,3 +1628,10 @@ Paused: w3b, w4, farm; no other work.
     - Measured, not a fact run (exe 0948da1e8, redist c53729e3b): 11/11 documented with a record, 0 undoc reached, 3 undoc unreached.
 - w10, doing: 8cacf9e has the `fnvnx.` imports (23 files). Path-loaded modules are being converted; waiting for L1's prefix-aware gate and the env check.
 - bottleneck: L1's prefix-aware gate (w28-c5); the owner of the reached.tsv stage. 1 of 4 workers busy.
+- 11:00Z: w10 done, at claude/fnv-l6-render-w10-imports 60c5ba7.
+    - Every import in render/ and bridgefacts/ uses `fnvnx.<rel>`, and the only code load by path (d3d9total stage.py treehash) is now a qualified import. That is 0 path loads in the git grep over render/ and bridgefacts/.
+    - recipe check: 13 of 16 specs valid. render/shaders/total, bridgefacts and render/d3d9 are red only on `gen:foreign-import` of their own root under the prefix: w28-c5 c36feec does not mount the tool's own root at /imp/fnvnx.
+    - gate_admit: 0 findings in L6. gate_pure: 7 L6 files red, from the same gap.
+    - w10 is archived. A new worker merges L1's prefix-aware w28-c5 head when it is named.
+- Pending: farm 3's claude/fnv-l1-contract-w28-exportrec-d9 (render/d3d9 build.json on contract/exporthdr) and its bridgetable result. The cand5 render head is w9-cand4 + w10 + w11 + that edit.
+- bottleneck: L1's prefix-aware gate and mount; farm 3's bridgetable run; reached.tsv (L1 w28). 0 of 4 workers busy.
