@@ -1356,3 +1356,11 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - Red: only lift/rt, contract/facts and lift/disp, all on the old compiler pin (ENTRY1-CONT). The fix is L2's ENTRY1-ATOMIC 8b50252e7; waiting for the K2 pin rebuild.
 - Open: w13 on the abspath ×6 findings in lift/fnvlift (L1 275771a6f); w7 on decode_gap/BADDECODE/SHAPES → origin values → RULE T; w8 on the facts stages by image input.
 - bottleneck: L2's K2 pin.
+
+## 2026-11-16 03:05: test second paths deleted; the fpc root (w13)
+- w13 6b50d628e (abspath 0, accepted by L1) and 5297ac9d0 are going into base3 through w8:
+  - fpc_host.py is deleted (a direct g++ build plus the removed rtgen);
+  - test_dsl_emit.py is deleted (emission only, superseded by the pack root build).
+- L3b: shape certification stops at the call. rcptab.c is covered by rcpcert (2^32 on the reference CPU). The fnvl.h FP and conversion helpers are NOT covered; gate_fpexact check 0 falsely says they are.
+- w13: a recipe host-test root over lift/rt's fnvl.h output, with the helper universe derived from the Forms and 32-bit inputs exhaustive. The 64-bit helpers' proof method gets a ruling before it is built. Then L3b points check 0 at that root.
+- bottleneck: L2's K2 pin.
