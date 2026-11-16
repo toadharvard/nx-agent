@@ -2412,7 +2412,7 @@ class Job:
             aroot, aout = g["artifact"].split(":", 1)
             r = build(self.repo, aroot, self.store, os.path.join(tmp, "art"), self.jobs, self.extcache)
             if r["status"] != "green" or not r["elf"] or os.path.basename(r["elf"]["path"]) != aout:
-                raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["artifact %s is not produced (root status %s)" % (g["artifact"], r["status"])]})
+                raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["artifact %s is not produced (root status %s)" % (g["artifact"], r["status"])] + ([] if not r.get("failure") else ["its failure: stage %s: %s" % (r["failure"]["stage"], " | ".join(r["failure"].get("stderr") or [])[:600])])})
             ins = [{"at": "/art", "tree": self._one_file(tmp, "art", r["elf"]["path"], aout)}]
         n = 0
         for ref in g["inputs"]:
