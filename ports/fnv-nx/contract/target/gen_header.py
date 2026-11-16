@@ -5,8 +5,7 @@ a literal. The row is judged by `targets.fpcr_errors` before it is written; a ro
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (verify.X)
-from verify import targets  # noqa: E402
+from verify import targets   # qualified: the derived edge contract/target -> verify; the stage mounts that closure at /imp (PYTHONPATH)
 
 
 def render(t):
