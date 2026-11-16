@@ -794,6 +794,17 @@ The owner's words: "не будем тратить так время... умен
     (|x| ≥ 2^63 leaves the operand unchanged, C2=1), the domain errors and their #IA when unmasked.
 - **The certificate (L3b).** The Form equals the SDM machinery plus a call of CR(fn) on the operand. It is proved
   against the spec with `x87_<fn>` bound to the library symbol. The library body is not part of the proof.
+- **An undecided rounding takes Ziv's last step (06:10Z).** CORE-MATH's cr_atan2 has one branch, in tint.h's
+  tint_tod, for a result too close to a rounding boundary to decide. Upstream prints a message and exits there. No
+  certificate can prove that branch unreachable: there are 2^128 binary64 pairs, and no search covers them. So the
+  branch computes `mpfr_atan2` at 53 bits in the current rounding mode.
+  - MPFR is correctly rounded by its documentation, and it is taken under the same external-library rule.
+  - The result is therefore correctly rounded for every input, with no trap. This is an exact algorithm step, not a
+    fallback on a failure.
+  - MPFR and GMP are mirrored in fnv-nx-build `tools/*` and built as guest roots by the recipe, with the game's
+    compiler. Owner: L2.
+  - The redirect is a declared stage patch (`core-math.patch` in the root), never an edit of the mirror.
+  - Every other CORE-MATH exit or printf on the path is closed the same way, or shown dead by the preprocessor.
 - **No other libm on the path.** A lifted call to newlib's sin, cos or log is not correctly rounded, so it does not meet
   OWNER 8. The same table applies to it.
 
