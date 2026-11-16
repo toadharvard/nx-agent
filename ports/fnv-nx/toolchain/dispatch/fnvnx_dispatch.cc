@@ -530,6 +530,106 @@ static void entry_flow(tree src, tree dst, tree operand, location_t loc)
     error_at(loc, "ENTRY1-CONT: a conversion between %qT and %qT: a native entry type converts only to itself", src, dst);
 }
 
+
+/* ENTRY1-ATOMIC: the generic atomic builtins (and their sized and __sync forms) that MOVE A VALUE between objects are same-type copies, like memcpy: load, store,
+ * exchange, compare-exchange, val/bool compare-and-swap and lock-test-and-set. The set is read from GCC's own sync-builtins.def, the one definition of every
+ * such builtin and of its prototype (BT_FN_<result>_<arguments>: a data-pointer argument is a PTR or VPTR token, so the builtins with pointer arguments are
+ * the ones whose prototype says so); the families that move a value are the stems of the rule, with the sizes the def lists for each. An arithmetic builtin
+ * (fetch_add and the like, which the def lists with the same prototype shape as exchange) is not among them: an entry is no number. */
+struct sync_row { int code; const char *name; const char *type; };
+static const sync_row sync_rows[] = {
+#define DEF_SYNC_BUILTIN(ENUM, NAME, TYPE, ATTRS) { ENUM, #ENUM, #TYPE },
+#include "sync-builtins.def"
+#undef DEF_SYNC_BUILTIN
+};
+static bool value_mover(int code)
+{
+  static const char *const stems[] = { "BUILT_IN_ATOMIC_LOAD", "BUILT_IN_ATOMIC_STORE", "BUILT_IN_ATOMIC_EXCHANGE", "BUILT_IN_ATOMIC_COMPARE_EXCHANGE",
+                                       "BUILT_IN_SYNC_VAL_COMPARE_AND_SWAP", "BUILT_IN_SYNC_BOOL_COMPARE_AND_SWAP", "BUILT_IN_SYNC_LOCK_TEST_AND_SET" };
+  for (const sync_row &r : sync_rows) {
+    if (r.code != code) continue;
+    if (!strstr(r.type, "PTR")) return false;          /* the prototype has no data-pointer argument */
+    for (const char *st : stems) {
+      size_t n = strlen(st);
+      if (strncmp(r.name, st, n)) continue;
+      const char *rest = r.name + n;                    /* "", "_N", "_1" .. "_16": the same family; another stem (STORE vs STORE_N...) never continues with a letter */
+      if (!*rest || (rest[0] == '_' && (rest[1] == 'N' || ISDIGIT(rest[1])))) return true;
+    }
+    return false;
+  }
+  return false;
+}
+
+/* the origin of an argument of such a call: conversions stripped (NOP, CONVERT, NON_LVALUE, VIEW_CONVERT, collected in CHAIN); a value read of an object
+ * (the INDIRECT_REF the front end writes for `*val` of the generic form) goes on to its address. Sets T to the entry-holding type the argument moves:
+ * the pointee of a pointer argument, the type of a value argument. Returns false for an argument that moves nothing of the kind (an order, a size, a flag). */
+static bool atomic_arg_type(tree a, std::vector<tree> &chain, tree &T)
+{
+  tree o = a;
+  auto strip = [&](tree x) { while (CONVERT_EXPR_P(x) || TREE_CODE(x) == NON_LVALUE_EXPR || TREE_CODE(x) == VIEW_CONVERT_EXPR) { chain.push_back(x); x = TREE_OPERAND(x, 0); } return x; };
+  o = strip(o);
+  if (TREE_CODE(o) == INDIRECT_REF) {
+    T = TREE_TYPE(o);
+    tree p = strip(TREE_OPERAND(o, 0));
+    return TREE_TYPE(p) && POINTER_TYPE_P(TREE_TYPE(p)) && TYPE_MAIN_VARIANT(strip_array_types(TREE_TYPE(TREE_TYPE(p)))) == TYPE_MAIN_VARIANT(strip_array_types(T));
+  }
+  if (!TREE_TYPE(o)) return false;
+  if (POINTER_TYPE_P(TREE_TYPE(o)) && POINTER_TYPE_P(TREE_TYPE(a)) && !entry_type(TREE_TYPE(o))) { T = TREE_TYPE(TREE_TYPE(o)); return true; }
+  if (entry_type(TREE_TYPE(o)) && !POINTER_TYPE_P(TREE_TYPE(a))) { T = TREE_TYPE(o); return true; }   /* an entry VALUE moved as the value argument of a sized builtin */
+  return false;
+}
+
+/* ENTRY1-ATOMIC: the entry-holding type T that a call to a value-moving atomic builtin moves, or NULL (not such a call, or not one type). Every argument that moves a
+ * value (a pointer to an object, the value read from one, an entry value) names ONE type T; an integer argument (an order, a size, a flag) moves nothing; a pointer
+ * or object argument that is not of the shape, or of another type, makes the call no move. CHAIN gets the conversions on the way (they are no flow then). */
+static void strip_conv(tree &x, std::vector<tree> *chain)
+{
+  while (x && (CONVERT_EXPR_P(x) || TREE_CODE(x) == NON_LVALUE_EXPR || TREE_CODE(x) == VIEW_CONVERT_EXPR)) { if (chain) chain->push_back(x); x = TREE_OPERAND(x, 0); }
+}
+static tree atomic_move_type(tree call, std::vector<tree> *chain_out)
+{
+  if (!call || TREE_CODE(call) != CALL_EXPR || !CALL_EXPR_FN(call)) return NULL_TREE;
+  tree fd = get_callee_fndecl(call);
+  if (!fd || !fndecl_built_in_p(fd, BUILT_IN_NORMAL) || !value_mover(DECL_FUNCTION_CODE(fd))) return NULL_TREE;
+  std::vector<tree> chain;
+  tree T0 = NULL_TREE; bool any = false;
+  for (int i = 0; i < call_expr_nargs(call); i++) {
+    tree T = NULL_TREE;
+    if (!atomic_arg_type(CALL_EXPR_ARG(call, i), chain, T)) {
+      tree o = CALL_EXPR_ARG(call, i);
+      strip_conv(o, NULL);
+      if (TREE_TYPE(o) && (POINTER_TYPE_P(TREE_TYPE(o)) || AGGREGATE_TYPE_P(TREE_TYPE(o)))) return NULL_TREE;   /* a pointer or object that is not of the shape */
+      continue;
+    }
+    any = true;
+    if (!T0) T0 = T;
+    else if (TYPE_MAIN_VARIANT(strip_array_types(T0)) != TYPE_MAIN_VARIANT(strip_array_types(T))) return NULL_TREE;
+  }
+  if (!any || !contains_entry(strip_array_types(T0))) return NULL_TREE;
+  if (chain_out) chain_out->insert(chain_out->end(), chain.begin(), chain.end());
+  return T0;
+}
+/* the value of such a call (conversions stripped, collected in CHAIN) goes to a destination: of the moved type T, or an object of that type reached through a pointer
+ * of that type; anything else is storage of another type. Returns true when VALUE is such a call (then the destination is judged here, as an error or as accepted). */
+static bool atomic_result(tree value, tree dst_type, tree dst_obj, location_t loc)
+{
+  std::vector<tree> ch;
+  tree v = value;
+  strip_conv(v, &ch);
+  tree T = atomic_move_type(v, NULL);
+  if (!T || TREE_CODE(TREE_TYPE(v)) == BOOLEAN_TYPE || VOID_TYPE_P(TREE_TYPE(v))) return false;   /* a flag (compare-exchange, bool compare-and-swap) or nothing is no moved value */
+  tree d = dst_type;
+  if (dst_obj && TREE_CODE(dst_obj) == INDIRECT_REF) {      /* the generic forms store the result through `*(U *)ptr` */
+    tree p = TREE_OPERAND(dst_obj, 0);
+    strip_conv(p, NULL);
+    d = p && TREE_TYPE(p) && POINTER_TYPE_P(TREE_TYPE(p)) ? TREE_TYPE(TREE_TYPE(p)) : NULL_TREE;
+  }
+  if (!d || TYPE_MAIN_VARIANT(strip_array_types(d)) != TYPE_MAIN_VARIANT(strip_array_types(T)))
+    error_at(loc, "ENTRY1-CONT: an atomic move of storage that holds entry values (%qT) into storage of another type", T);
+  else for (tree x : ch) copy_args.insert(x);
+  return true;
+}
+
 /* CONT-P: the explicit conversions of a function body, walked before genericization */
 static tree contp_walk(tree *tp, int *walk_subtrees, void *)
 {
@@ -539,6 +639,7 @@ static tree contp_walk(tree *tp, int *walk_subtrees, void *)
   const enum tree_code c = TREE_CODE(e);
   if (c == DECL_EXPR && TREE_CODE(DECL_EXPR_DECL(e)) == VAR_DECL && DECL_INITIAL(DECL_EXPR_DECL(e)))
     entry_flow(TREE_TYPE(DECL_INITIAL(DECL_EXPR_DECL(e))), TREE_TYPE(DECL_EXPR_DECL(e)), DECL_INITIAL(DECL_EXPR_DECL(e)), EXPR_LOCATION(e));
+  if ((c == INIT_EXPR || c == MODIFY_EXPR) && atomic_result(TREE_OPERAND(e, 1), TREE_TYPE(TREE_OPERAND(e, 0)), TREE_OPERAND(e, 0), EXPR_LOCATION(e))) return NULL_TREE;
   if (c == INIT_EXPR || c == MODIFY_EXPR) { entry_flow(TREE_TYPE(TREE_OPERAND(e, 1)), TREE_TYPE(TREE_OPERAND(e, 0)), TREE_OPERAND(e, 1), EXPR_LOCATION(e)); return NULL_TREE; }
   if (c == CALL_EXPR && CALL_EXPR_FN(e)) {
     /* __builtin_memcpy/memmove/mempcpy between storage of ONE type that holds entry values copies entry values: its two pointer conversions to `void *` are no flow */
@@ -558,6 +659,8 @@ static tree contp_walk(tree *tp, int *walk_subtrees, void *)
           break;
         default: break;
       }
+    /* ENTRY1-ATOMIC: the conversions on the arguments of an atomic move of ONE entry-holding type are no flow (the same rule as the memcpy above) */
+    { std::vector<tree> ch; if (atomic_move_type(e, &ch)) for (tree x : ch) copy_args.insert(x); }
     tree ft = TREE_TYPE(TREE_TYPE(CALL_EXPR_FN(e)));
     tree parm = ft && (TREE_CODE(ft) == FUNCTION_TYPE || TREE_CODE(ft) == METHOD_TYPE) ? TYPE_ARG_TYPES(ft) : NULL_TREE;
     for (int i = 0; i < call_expr_nargs(e) && parm && parm != void_list_node; i++, parm = TREE_CHAIN(parm))
@@ -565,6 +668,8 @@ static tree contp_walk(tree *tp, int *walk_subtrees, void *)
     return NULL_TREE;
   }
   if (c != NOP_EXPR && c != CONVERT_EXPR && c != VIEW_CONVERT_EXPR) return NULL_TREE;
+  if (!copy_args.count(e) && atomic_result(e, TREE_TYPE(e), NULL_TREE, EXPR_LOCATION(e))) return NULL_TREE;   /* the value of an atomic move, converted */
+  if (copy_args.count(e)) return NULL_TREE;         /* a conversion of an argument of a same-type builtin copy or atomic move (the CALL_EXPR case) */
   tree src = TREE_TYPE(TREE_OPERAND(e, 0)), dst = TREE_TYPE(e);
   if (src && dst && (entry_type(src) || entry_type(dst))) { entry_flow(src, dst, TREE_OPERAND(e, 0), EXPR_LOCATION(e)); return NULL_TREE; }
   if (src && dst && POINTER_TYPE_P(src) && contains_entry(TREE_TYPE(src))) {

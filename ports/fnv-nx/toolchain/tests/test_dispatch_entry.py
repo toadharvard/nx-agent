@@ -76,6 +76,11 @@ def main():
                        ('union', 'ENTRY1-UNION'), ('union_nested', 'ENTRY1-UNION'), ('memcpy_other', 'ENTRY1-CONT'), ('memset', 'ENTRY1-CONT'), ('memmove_cast', 'ENTRY1-CONT')):
             r = pb.compile(os.path.join(FIX, 'bad_%s.cpp' % n), os.path.join(td, n + '.o'), so)
             check('%s is an error (%s)' % (n, tag), r.returncode != 0 and tag in r.stderr, r.stderr[:900])
+        r = pb.compile(os.path.join(FIX, 'ok_atomic.cpp'), os.path.join(td, 'at.o'), so)
+        check('ENTRY1-ATOMIC: generic and sized atomic load, store, exchange and compare-exchange, and the __sync movers, of one entry-holding type are same-type copies', r.returncode == 0, r.stderr[:1500])
+        for n in ('atomic_store_other', 'atomic_load_other', 'atomic_fetch_add'):
+            r = pb.compile(os.path.join(FIX, 'bad_%s.cpp' % n), os.path.join(td, n + '.o'), so)
+            check('%s is the error ENTRY1-CONT (an atomic move of another type, an arithmetic builtin on an entry)' % n, r.returncode != 0 and 'ENTRY1-CONT' in r.stderr, r.stderr[:900])
         headers(td, so)
         r = pb.compile(os.path.join(FIX, 'bad_attr.cpp'), os.path.join(td, 'a.o'), so)
         check('the attribute on a function type (not a pointer) is an error', r.returncode != 0 and 'applies to a pointer-to-function type' in r.stderr, r.stderr[:900])
