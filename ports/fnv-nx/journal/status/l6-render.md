@@ -1466,3 +1466,9 @@ Paused: w3b, w4, farm; no other work.
     - bridgefacts 0 (0/4)
     - gl4 blocked on hostabi@host (w28).
   Outputs vs 9acd1223b are identical except: (a) the pair.c object hash, fa113600… vs aa46608a…; (b) D9_SPEC enum_values, which should already be in the base. w6 is tracing both from stage keys and disassembly, then runs test_env_ident.
+- 02:52Z Both differences traced and closed:
+    - pair.c.o is byte-identical at 9acd1223b and b412d413d. Only the stage keys moved, because the env.json pin is in every key by design. Plugins and include are unchanged.
+    - D9_SPEC 7e64eeaa… is byte-identical once the base is rebuilt at 9acd1223b (the earlier base was a stale store entry).
+    - test_env_ident ok with wine-d3d9-formats @348f306e.
+  w6-root b412d413d is the render head for cand4: every render output byte-identical, render/bridgefacts pure uncertified 0, d3d9total 332/332, 7 of 8 roots green; gl4 waits on hostabi@host (w28).
+- bottleneck: w28 hostabi@host per-target cleanup (gl4); farm1 sm_link; the cand4 base.
