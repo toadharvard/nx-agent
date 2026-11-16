@@ -80,7 +80,8 @@
     "/in/ports/fnv-nx/verify"
    ],
    "inputs": [
-    "ports/fnv-nx/verify"
+    "ports/fnv-nx/verify",
+    "ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json"
    ],
    "outputs": [
     "records2.sh"
