@@ -1442,3 +1442,13 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - (B) The 7 vptr sites go to RTTI-structural class narrowing. The receiver's origin must reach a dominating vptr store, which gives the static class. The callee set is that class and its derived classes, per the CHD BaseClassArray at the COL offset, and the pop is the join of retn over that set. Otherwise the site stays red and is reported with a reason. No names, no frame-balance assumption.
 - w7: (C), then the recompute of the exe and the 5 images, then (B).
 - bottleneck: L2 ENTRY1-ATOMIC for C, the L1 w28 export-record form, the L2 recipe-path pin; pcsrc (the 7 vptr sites).
+
+## 2026-11-16 04:05 — entry return: typed ownership of ra, one transfer primitive
+- w28 08109b9ce (FNVNX_EXPORT = the relocated `&symbol` plus a kind) is merged into base3 by w8 (2d1fc6f80).
+- Ruled with L1 ruling A:
+  - The ra field is writable only by the bridge TU, so an ra write from any entry definer is a compile error.
+  - Class A, plain returns: the return lines are deleted (CI1/CI2, fp, EH, seh RtlUnwind), and the bridge does the return from the reference conv and args.
+  - Class B, non-local transfers: 5 sites (msvcrt_eh.cc:149, :338, longjmp :529, seh.cc:144, :213). Each calls the single `fnvl_native_transfer(eip, esp)` in the bridge TU, which leaves through fnvl_native_exit; the bridge's return code is skipped.
+  - Every FNVNX_EXPORT follows its symbol's definition.
+- w8 (doing): the rework on base3 through the recipe; counts per kind with the commit to L1.
+- bottleneck: L2 ENTRY1-ATOMIC for C, the L2 recipe-path pin; w8's entry rework; pcsrc (the 7 vptr sites, w7).
