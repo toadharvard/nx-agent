@@ -2478,3 +2478,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:23
 - w28 e8df0c3c9: the rawrite gate (ruling A, from PP facts; test 11/11; not run on built roots yet). Lifted pack-external units count as generator output (case added); the writer pair is extern "C" (w8).
 - bottleneck: cand3b verdict at 597f2e007.
+
+## 2026-11-16 04:24
+- The w28 test_gate_imports stage-B rewrite waits for the trunk (after cand3b merges; rebase w28 onto the trunk head). Meanwhile: rawrite pack case, a farm job for test_sandbox 9a + test_runpython, the include_of doc fix, the render/ take from L6 a3683a468.
+- bottleneck: cand3b verdict at 597f2e007.
