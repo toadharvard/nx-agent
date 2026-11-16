@@ -615,7 +615,98 @@ def read_recipe(repo, path):
     reported by check(), which reads the same file through expand_profile; a reader that only needs the values takes the expanded recipe."""
     with open(os.path.join(repo, path)) as f:
         rec = json.load(f)
-    return expand_profile(rec, load_pin(repo))[0]
+    return expand_foreach(expand_profile(rec, load_pin(repo))[0], repo)
+
+
+FOREACH_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
+FOREACH_KEY = re.compile(r"[A-Za-z0-9_.-]+")
+FOREACH_TOKEN = re.compile(r"\{\{|\}\}|\{([A-Za-z][A-Za-z0-9_]*)\}")
+
+
+def foreach_rows(table, key, text):
+    """The rows of a foreach table (RECIPE.md "foreach"): TSV, a header line of column names, then one row per line, each with exactly the header's fields. KEY is a column
+    whose values are unique plain names (FOREACH_KEY). -> [{column: field}]; ValueError for any malformed, empty or duplicate row."""
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    if not lines:
+        raise ValueError("foreach %s: the table is empty (it needs a header line)" % table)
+    head = lines[0].split("\t")
+    if not all(FOREACH_NAME.fullmatch(c) for c in head) or len(set(head)) != len(head):
+        raise ValueError("foreach %s: the header must be unique column names [A-Za-z][A-Za-z0-9_]*, tab separated" % table)
+    if key not in head:
+        raise ValueError("foreach %s: the key column %r is not in the header %s" % (table, key, head))
+    rows, seen = [], set()
+    for n, ln in enumerate(lines[1:], 2):
+        f = ln.split("\t")
+        if len(f) != len(head):
+            raise ValueError("foreach %s: line %d has %d fields, the header has %d" % (table, n, len(f), len(head)))
+        r = dict(zip(head, f))
+        if not FOREACH_KEY.fullmatch(r[key]):
+            raise ValueError("foreach %s: line %d: key %r is not a plain name (letters, digits, _ . -)" % (table, n, r[key]))
+        if r[key] in seen:
+            raise ValueError("foreach %s: line %d: key %r twice" % (table, n, r[key]))
+        seen.add(r[key])
+        rows.append(r)
+    if not rows:
+        raise ValueError("foreach %s: the table has no row" % table)
+    return rows
+
+
+def foreach_subst(text, row, where):
+    """TEXT with every {COLUMN} replaced by the row's field ({{ and }} are literal braces); a name that is no column, or a lone brace, is ValueError."""
+    def one(m):
+        if m.group(0) in ("{{", "}}"):
+            return m.group(0)[0]
+        if m.group(1) not in row:
+            raise ValueError("%s: {%s} is no column of the table (%s)" % (where, m.group(1), sorted(row)))
+        return row[m.group(1)]
+    out = FOREACH_TOKEN.sub(one, text)
+    rest = FOREACH_TOKEN.sub("", text)
+    if "{" in rest or "}" in rest:
+        raise ValueError("%s: a lone brace in %r (write {COLUMN}, {{ or }})" % (where, text))
+    return out
+
+
+def expand_foreach(rec, repo):
+    """REC with every `run` step that has `foreach: {table, key}` replaced by one step per row of the table (a tracked TSV file of the checkout REPO): the step is the
+    template with {COLUMN} replaced in its `args`, `outputs`, `dirs` and `env` values, named NAME.<key field>. The table is read here and is no stage input, so a changed
+    row changes only the steps whose expanded text changed, and the key of a step is a function of its own row, tool and inputs. This is the one place a foreach is
+    expanded: read_recipe and check call it, so every other reader sees plain static steps. ValueError on a malformed form, table or duplicate output."""
+    rs = rec.get("run")
+    if not isinstance(rs, list) or not any(isinstance(g, dict) and "foreach" in g for g in rs):
+        return rec
+    out, outputs = [], {}
+    for g in rs:
+        if not (isinstance(g, dict) and "foreach" in g):
+            out.append(g)
+            continue
+        fe = g["foreach"]
+        name = g.get("name")
+        if not (isinstance(fe, dict) and set(fe) == {"table", "key"} and isinstance(fe["table"], str) and isinstance(fe["key"], str) and rel_ok(fe["table"])):
+            raise ValueError("run %r: foreach must be {table: tracked file path, key: column}" % name)
+        if repo is None:
+            raise ValueError("run %r: foreach needs the checkout to read its table" % name)
+        try:
+            with open(os.path.join(repo, fe["table"]), encoding="utf-8") as f:
+                text = f.read()
+        except (OSError, UnicodeDecodeError) as e:
+            raise ValueError("run %r: foreach table %s cannot be read: %s" % (name, fe["table"], e))
+        for row in foreach_rows(fe["table"], fe["key"], text):
+            where = "run %r row %s" % (name, row[fe["key"]])
+            st = {k: v for k, v in g.items() if k != "foreach"}
+            st["name"] = "%s.%s" % (name, row[fe["key"]])
+            for k in ("args", "outputs", "dirs"):
+                if isinstance(st.get(k), list):
+                    st[k] = [foreach_subst(x, row, where) if isinstance(x, str) else x for x in st[k]]
+            if isinstance(st.get("env"), dict):
+                st["env"] = {k: foreach_subst(v, row, where) if isinstance(v, str) else v for k, v in st["env"].items()}
+            for o in step_outputs(st):
+                if o in outputs:
+                    raise ValueError("%s: output %s is also an output of %s (an output of a foreach step must name the row: {%s})" % (where, o, outputs[o], fe["key"]))
+                outputs[o] = st["name"]
+            out.append(st)
+    return dict(rec, run=out)
 
 
 def effective(rec, name):
@@ -1687,6 +1778,13 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             err.append("profile %r: the admit.json target of %s is %r (a root names the profile of its own target)" % (rec["profile"], root, want))
     rec, perr = expand_profile(rec, pin)
     err += perr
+    try:   # a foreach step becomes one static step per row of its tracked table: every rule below judges the expanded steps
+        fe_tables = [g["foreach"]["table"] for g in (rec.get("run") if isinstance(rec.get("run"), list) else []) if isinstance(g, dict) and isinstance(g.get("foreach"), dict) and isinstance(g["foreach"].get("table"), str)]
+        err += ["run foreach table %s is not a tracked file" % t for t in fe_tables if t not in files]
+        rec = expand_foreach(rec, repo)
+    except ValueError as e:
+        err.append(str(e))
+        rec = dict(rec, run=[g for g in (rec.get("run") if isinstance(rec.get("run"), list) else []) if not (isinstance(g, dict) and "foreach" in g)])
     vs = rec.get("variants")
     if vs is not None:
         if not (isinstance(vs, dict) and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9_.-]+", n) and isinstance(v, dict) and v and set(v) <= VARIANT_KEYS
