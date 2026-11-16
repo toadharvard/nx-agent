@@ -144,7 +144,7 @@ class Tr:
     """translates the z3 terms of one execute() run; ENV maps a z3 variable name to its DSL node (the DSL state inputs by their own names, the memory operand, the EFLAGS booleans)"""
 
     def __init__(s, env):
-        s.env, s.memo = env, {}
+        s.env, s.memo, s.keep = env, {}, []      # keep: the z3 terms stay alive, so that an id is never reused for another term
 
     def arr(s, t):
         """an array term over BV3 -> a list of eight DSL nodes (the value at physical index 0..7)"""
@@ -171,6 +171,7 @@ class Tr:
     def t(s, e):
         r = s.memo.get(e.get_id())
         if r is None:
+            s.keep.append(e)
             r = s.memo[e.get_id()] = s.one(e)
         return r
 
@@ -195,7 +196,10 @@ class Tr:
         if k == Z.Z3_OP_FALSE:
             return C(0, 1)
         if k in _BIN:
-            return bin_(_BIN[k], a(0), a(1))
+            r = bin_(_BIN[k], a(0), a(1))
+            for j in range(2, e.num_args()):      # z3's simplifier makes bvadd, bvmul, bvand, bvor and bvxor n-ary: left fold
+                r = bin_(_BIN[k], r, a(j))
+            return r
         if k in (Z.Z3_OP_AND, Z.Z3_OP_OR):
             r = a(0)
             for j in range(1, e.num_args()):
@@ -208,7 +212,10 @@ class Tr:
         if k == Z.Z3_OP_BNEG:
             return -a(0)
         if k == Z.Z3_OP_XOR:
-            return a(0) ^ a(1)
+            r = a(0)
+            for j in range(1, e.num_args()):
+                r = r ^ a(j)
+            return r
         if k == Z.Z3_OP_EQ:
             x, y = a(0), a(1)
             return eq(x, y)
@@ -251,7 +258,30 @@ class Tr:
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # The Form of an x87 class.
-FLTS = ("FLT_SF", "FLT_IE", "FLT_DE", "FLT_ZE", "FLT_OE", "FLT_UE", "FLT_PE")
+# Nondeterminism: the SDM leaves some results to the implementation (x87spec: Out.nd, the free variables, Out.nd_pre their admissible range).  The Form resolves each one to the value its
+# implementation produces, ONE table keyed by the spec's nd names: NDRES[name] = (resolution(m), source).  `nd_names()` derives the names from the spec (every REGISTRY entry on a symbolic
+# state); a name without a row leaves its classes uncertified, naming it.  The resolution is proved admissible (nd_pre(res) valid on the domain) and the Form equals spec[nd := res].
+NDRES = {
+    # SDM 2A:FCMOVcc Operation reads ST(i) only inside THEN, so a false condition with an empty ST(i) does nothing: no underflow.  The implementation's own definition is the same: fnvlift/f_x87.py
+    # emits `if(cond) st0 = sti;` and the host registers are carriers that never fault.
+    "nd.fcmov.uf_false": (lambda m: z3.BoolVal(False), "SDM 2A:FCMOVcc Operation (ST(i) is read only inside THEN); fnvlift/f_x87.py fcmovcc: if(cond) ST0=STi"),
+    # SDM 2A:FBLD: a digit above 9 gives an undefined result.  rt/x87.c fnvl_x_from_bcd (ASM-216) computes the sum of d_k*10^k (digits taken as 0..15, sign from bit 79, -0 keeps the sign):
+    # exactly x87spec.bcd_to_img, whose Horner form is the same arithmetic on every digit value.
+    "nd.fbld.img": (lambda m: X.bcd_to_img(m), "rt/x87.c fnvl_x_from_bcd (ASM-216: digits above 9 follow d*10^k) = x87spec.bcd_to_img"),
+}
+
+
+def nd_names():
+    """the nd variable names of every REGISTRY entry, derived by running the spec"""
+    out = set()
+    for key in X.REGISTRY:
+        e = X.REGISTRY[key]
+        m = z3.BitVec("nm", e["mem_bits"]) if e["mem_bits"] else None
+        ef = tuple(z3.Bool("ne%d" % j) for j in range(3)) if e["uses_ef"] else None
+        for i in (range(8) if e["uses_i"] else (None,)):
+            o = X.execute(key, X.from_dsl(pre_vars()), m, i, ef)
+            out.update(str(v) for v in o.nd)
+    return out
 
 
 def spec_key(raw):
@@ -272,100 +302,119 @@ def pre_vars():
     return {n: z3.BitVec(n, w) for n, w in X.DSL_WIDTH.items()}
 
 
+def mem_pieces(bits):
+    """[(bit offset, width)] of the memory operand: one piece when it fits the DSL's 128-bit values; otherwise the layout of the SDM figure the spec follows (1:8.1.10, Figure 8-9, x87spec.ENV_BITS):
+    the 32-bit words of the environment image, then the 80-bit registers that follow it (FRSTOR / FNSAVE, x87spec.SAVE_BITS)"""
+    if bits <= 128:
+        return [(0, bits)]
+    return [(o, 32) for o in range(0, X.ENV_BITS, 32)] + [(o, 80) for o in range(X.ENV_BITS, bits, 80)]
+
+
 _RUN = {}
 
 
 def run(key, i):
-    """-> (pre-state vars, Out, memory var or None, ef vars or None) of the spec entry on the symbolic DSL pre-state; one run per (class, i), with the op symbols in place"""
+    """-> (pre-state vars, Out, memory pieces [(offset, width, z3 var)] or None, ef vars or None) of the spec entry on the symbolic DSL pre-state; one run per (class, i), op symbols in place"""
     r = _RUN.get((key, i))
     if r is None:
         e = X.REGISTRY[key]
         d = pre_vars()
-        m = z3.BitVec(MEM_VAR, e["mem_bits"]) if e["mem_bits"] else None
+        pcs = [(o, w, z3.BitVec("%s_%d" % (MEM_VAR, o), w)) for o, w in mem_pieces(e["mem_bits"])] if e["mem_bits"] else None
+        m = None if pcs is None else (pcs[0][2] if len(pcs) == 1 else z3.Concat(*[v for _, _, v in reversed(pcs)]))
         ef = tuple(z3.Bool(n) for n in EF_VARS) if e["uses_ef"] else None
         with instrument():
             o = X.execute(key, X.from_dsl(d), m, i, ef)
-            fk = X.fault_kind(o) if o.fcw_in is not None else z3.BitVecVal(0, 8)
-            s0 = X.from_dsl(d)
-
-            class P:      # the pending exception of a waiting instruction: the flags and SF in FSW, under the control word in force (fault_kind's docstring)
-                raised = z3.Extract(5, 0, s0.fsw)
-                sf_raised = z3.Extract(X.SF, X.SF, s0.fsw) == X.K(1, 1)
-                fcw_in = s0.fcw
-            tk = X.fault_kind(P)
-        r = _RUN[(key, i)] = (d, o, m, ef, z3.If(o.trap, tk, fk))
+        r = _RUN[(key, i)] = (d, o, pcs, ef, m)
     return r
 
 
-def mem_node(c, bits):
-    """the DSL value of the memory operand of BITS bits: loads of 64/32/16/8 bits, the lowest address first (little endian)"""
+def resolve(o, m):
+    """-> (substitution list nd := resolution, names without a row)"""
+    sub, miss = [], []
+    for v in o.nd:
+        row = NDRES.get(str(v))
+        if row is None:
+            miss.append(str(v))
+        else:
+            sub.append((v, row[0](m)))
+    return sub, miss
+
+
+def mem_nodes(c, pcs):
+    """the DSL node of every memory piece: loads of 64/32/16/8 bits, the lowest address first.  -> (address node, [node])"""
     from proof import forms
     a = forms.ea(c.ops[0])
-    parts, off, left = [], 0, bits
-    while left:
-        w = next(w for w in (64, 32, 16, 8) if w <= left)
-        parts.append(forms.mload(a if off == 0 else forms.addoff(a, C(off // 8, 32)), w))
-        off, left = off + w, left - w
-    n = parts[0]
-    for p in parts[1:]:
-        n = concat(p, n)
-    return a, n
+    out = []
+    for off, w, _ in pcs:
+        parts, o2, left = [], off, w
+        while left:
+            k = next(k for k in (64, 32, 16, 8) if k <= left)
+            parts.append(forms.mload(a if o2 == 0 else forms.addoff(a, C(o2 // 8, 32)), k))
+            o2, left = o2 + k, left - k
+        n = parts[0]
+        for p in parts[1:]:
+            n = concat(p, n)
+        out.append(n)
+    return a, out
+
+
+def domain_terms(o, sub):
+    """the domain of the instruction (the ruling after slice 1): no x87 exception is unmasked (FCW[5:0] all set: the masks fact, every FLDCW / FLDENV / FRSTOR / FXRSTOR site keeps them), so no FLT fault and
+    no unmasked-PE store; the pending-exception trap (ES) is not set; the entry's own precondition Out.pre; the admissible range of its nondeterminism, nd_pre, at the resolution"""
+    S = (lambda t: z3.substitute(t, *sub)) if sub else (lambda t: t)
+    fcw = z3.BitVec("fcw", 16)
+    return [("masks", z3.Extract(5, 0, fcw) == z3.BitVecVal(0x3f, 6)), ("not trap", z3.Not(S(o.trap))), ("pre", S(o.pre)), ("nd_pre", S(o.nd_pre))]
 
 
 def effects(c, key, i):
-    """fill c.F from the spec entry (class KEY, register index I).  Raises Unsupported naming the first thing outside this slice"""
+    """fill c.F from the spec entry (class KEY, register index I).  Raises Unsupported naming the first thing outside the Form"""
     from proof import forms
     F = c.F
     c.x87_mem = (None, None)
-    d, o, m, ef, tk = run(key, i)
-    e = X.REGISTRY[key]
+    d, o, pcs, ef, m = run(key, i)
     env = {n: V(n, w) for n, w in X.DSL_WIDTH.items()}
     a = None
-    if m is not None:
-        if e["mem_bits"] > 128 and o.mem is not None:
-            raise Unsupported("x87 store of %d bits: the DSL value type holds 128" % e["mem_bits"])
-        a, env[MEM_VAR] = mem_node(c, e["mem_bits"])
-        c.x87_mem = (a, env[MEM_VAR])
+    if pcs is not None:
+        a, nodes = mem_nodes(c, pcs)
+        env.update({v.decl().name(): n for (_, _, v), n in zip(pcs, nodes)})
+        c.x87_mem = (a, [(v, n) for (_, _, v), n in zip(pcs, nodes)])
     if ef is not None:
         env.update(zip(EF_VARS, (V("zf", 1), V("pf", 1), V("cf", 1))))
     tr = Tr(env)
-    if o.nd:
-        raise Unsupported("x87 nondeterminism (the SDM leaves a choice: %s)" % ",".join(str(v) for v in o.nd))
-    if not z3.is_true(z3.simplify(o.pre)):
-        raise Unsupported("x87 domain: the entry has a precondition the Form does not carry")
-    # o.undef / o.mem_undef (the bits the SDM leaves Undefined / reserved): the Form takes the spec's own value for them, a refinement of "any value"; the proof compares exactly
+    sub, miss = resolve(o, m)
+    if miss:
+        raise Unsupported("x87 nondeterminism without a resolution: %s" % ",".join(miss))
+    S = (lambda t: z3.substitute(t, *sub)) if sub else (lambda t: t)
     if o.eflags is not None:
         raise Unsupported("x87 EFLAGS effect (fcomi): not in this slice")
-    post = X.to_dsl(o.s)
-    unch = {k: z3.eq(z3.simplify(v), d[k]) for k, v in post.items()}      # the field the instruction leaves as it was (z3's own simplifier: the spec's finish() ites)
-    if not unch["fcw"]:
-        raise Unsupported("x87 effect fcw: the Form has no control-word effect")
+    # o.undef / o.mem_undef (the bits the SDM leaves Undefined / reserved): the Form takes the spec's own value for them, a refinement of "any value"; the proof compares exactly
+    post = {k: z3.simplify(S(v)) for k, v in X.to_dsl(o.s).items()}
+    unch = {k: z3.eq(v, d[k]) for k, v in post.items()}      # the field the instruction leaves as it was (z3's own simplifier: the spec's finish() ites)
     node = {k: tr.t(v) for k, v in post.items() if not unch[k]}
-    same = lambda k: unch[k]
+    if "fcw" in node:
+        F.fcw(node["fcw"])
     for j in range(8):
-        if not same("fr%d" % j):
+        if "fr%d" % j in node:
             F.fr(j, node["fr%d" % j])
-    if not same("ftop"):
-        F.ftop(node["ftop"])
-    if not same("ftag"):
-        F.ftag(node["ftag"])
-    if not same("fsw"):
-        F.fsw(node["fsw"])
-    if not all(same(k) for k in ("fip", "fdp", "fop", "fcs", "fds")):
-        F.fptr(*[node[k] for k in ("fip", "fdp", "fop", "fcs", "fds")])
+    for k, f in (("ftop", F.ftop), ("ftag", F.ftag), ("fsw", F.fsw)):
+        if k in node:
+            f(node[k])
+    if any(k in node for k in ("fip", "fdp", "fop", "fcs", "fds")):
+        F.fptr(*[node[k] if k in node else V(k, X.DSL_WIDTH[k]) for k in ("fip", "fdp", "fop", "fcs", "fds")])
     if o.mem is not None:
-        w = tr.t(o.wr)
-        forms.mstore(F, a, tr.t(o.mem), None if w.op == "const" and w.x == 1 else w)
+        w = tr.t(z3.simplify(S(o.wr)))
+        wn = None if w.op == "const" and w.x == 1 else w
+        mv = z3.simplify(S(o.mem))
+        for off, wd in mem_pieces(o.mem.size()):
+            forms.mstore(F, a if off == 0 else forms.addoff(a, C(off // 8, 32)), tr.t(z3.simplify(z3.Extract(off + wd - 1, off, mv))), wn)
     if o.ax is not None:
-        F.reg("eax", concat(extract(V("eax", 32), 31, 16), tr.t(o.ax)))
-    T = tr.t(tk)
-    for name in FLTS:
-        code = dsl._FBY[name]["code"]
-        F.fault(code, eq(T, C(code, 8)))
+        F.reg("eax", concat(extract(V("eax", 32), 31, 16), tr.t(z3.simplify(S(o.ax)))))
+    for _, t in domain_terms(o, sub):
+        F.require(tr.t(z3.simplify(t)))
 
 
 def build(c):
-    """the Form of the x87 instruction of the build context C (proof/forms.build), or None when the instruction is not x87.  Raises Unsupported when the class has no Form in this slice"""
+    """the Form of the x87 instruction of the build context C (proof/forms.build), or None when the instruction is not x87.  Raises Unsupported when the class has no Form"""
     r = spec_key(c.raw)
     if r is None:
         return None
@@ -378,23 +427,26 @@ def build(c):
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-# Proof: the Form's post-state (dsl.Form.post, z3) equals execute() on every field.
+# Proof: on the Form's domain, the Form's post-state (dsl.Form.post, z3) equals execute()[nd := resolution] on every field; the resolution is admissible; the domain is satisfiable.
 def prove_form(F):
-    """-> (result, note, extras).  F.x87 = (class key, i, address node or None, memory-operand node or None).  The Form's z3 post-state is compared with the spec's, field by field,
-    each one an unsat query at bounds.Z3_RLIMIT: the fault kind always (the trap first); every other field when the Form raises no fault (dsl.Form.post: on a fault the state is the
-    pre-state): the x87 registers, TOP, tags, FSW, FCW, the pointers, memory, EAX, the other registers, the flags, EIP, the SSE state.  The spec's own state under an unmasked exception
-    (the flags set in FSW, an unmasked PE stores the result) is outside that semantics: it is not proved here (see the report)."""
+    """-> (result, note, extras).  F.x87 = (class key, i, address node or None, [(piece var, piece node)] or None).  Every query is unsat at bounds.Z3_RLIMIT, under the Form's own domain
+    (F.domain, translated by dsl.to_smt): nd_pre at the resolution holds; then each field of the Form's z3 post-state equals the spec's: the x87 registers, TOP, tags, FSW, FCW, the pointers,
+    memory, EAX, the other registers, the flags, EIP, the SSE state.  The Form has no fault: the domain excludes every x87 exception (domain_terms)."""
     from fnvlift import dsl as D
     from proof import bounds
-    key, i, a, mn = F.x87
-    d, o, m, ef, tk = run(key, i)
+    key, i, a, pn = F.x87
+    d, o, pcs, ef, m = run(key, i)
     P = F.post()
-    sub = []
-    if m is not None:
-        sub.append((m, D.to_smt(mn)))
+    sub0, _ = resolve(o, m)
+    sub = list(sub0)
+    if pn is not None:
+        sub.extend((v, D.to_smt(n)) for v, n in pn)
     if ef is not None:
         sub.extend((v, z3.BitVec(n, 1) == 1) for v, n in zip(ef, ("zf", "pf", "cf")))
-    S = lambda t: z3.substitute(t, *sub) if sub else t
+    rest = sub[len(sub0):]      # the resolution may mention the memory variable: substitute the resolution first, then the pieces and the EFLAGS booleans
+    def S(t):
+        t = z3.substitute(t, *sub0) if sub0 else t
+        return z3.substitute(t, *rest) if rest else t
     post = {k: S(v) for k, v in X.to_dsl(o.s).items()}
     mem0 = D.mem_array()
     mem = mem0
@@ -408,11 +460,10 @@ def prove_form(F):
     want = {}
     for j in range(8):
         want["fr%d" % j] = (P["fr"][j], post["fr%d" % j])
-    for k in ("ftop", "ftag", "fsw"):
+    for k in ("ftop", "ftag", "fsw", "fcw"):
         want[k] = (P[k], post[k])
     for k, v in zip(("fip", "fdp", "fop", "fcs", "fds"), P["fptr"]):
         want[k] = (v, post[k])
-    want["fcw"] = (pre("fcw"), post["fcw"])
     want["mem"] = (P["mem"], mem)
     for r in D.REGS:
         want[r] = (P["regs"][r], z3.Concat(z3.Extract(31, 16, z3.BitVec(r, 32)), S(o.ax)) if (r == "eax" and o.ax is not None) else z3.BitVec(r, 32))
@@ -422,13 +473,13 @@ def prove_form(F):
     for j in range(8):
         want["xmm%d" % j] = (P["xmm"][j], z3.BitVec("xmm%d" % j, 128))
     want["mxcsr"] = (P["mxcsr"], z3.BitVec("mxcsr", 32))
-    nf = P["fault"] == 0
-    checks = [("fault", z3.BoolVal(True), P["fault"], S(tk))] + [(k, nf, x, y) for k, (x, y) in want.items()]
+    dom = z3.And(*[D.to_smt(n) == 1 for n in F.domain]) if F.domain else z3.BoolVal(True)
+    checks = [("nd_pre", dom, z3.Not(S(o.nd_pre)), z3.BoolVal(True)), ("faults", dom, P["fault"] != 0, z3.BoolVal(True))] + [(k, dom, x, y) for k, (x, y) in want.items()]
     for name, hyp, x, y in checks:
         sv = z3.Solver()
         sv.set("rlimit", bounds.Z3_RLIMIT)
-        sv.add(hyp, x != y)
+        sv.add(hyp, x != y if name not in ("nd_pre", "faults") else x)
         r = sv.check()
         if r != z3.unsat:
-            return ("FAILED(x87)" if r == z3.sat else bounds.BOUND), "x87 field %s: the Form %s the spec (%s)" % (name, "differs from" if r == z3.sat else "is unknown against", r), {}
+            return ("FAILED(x87)" if r == z3.sat else bounds.BOUND), "x87 %s: the Form %s the spec on its domain (%s)" % (name, "differs from" if r == z3.sat else "is unknown against", r), {}
     return "proved", "", {"x87_fields": len(checks)}

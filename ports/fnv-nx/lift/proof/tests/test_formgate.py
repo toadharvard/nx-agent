@@ -45,9 +45,9 @@ REAL = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(fakeext.VER
 MD = shape.decoder()
 IR_TEXT = 'fixture: the x86_proof.ir of the external x86ir\n'
 MODEL = hashlib.sha256(IR_TEXT.encode()).hexdigest()      # derived from the file, as formgate derives it
-# encodings with a DSL builder (add / xor / mov / push / ret / nop) and one without (x87 fld st(1))
+# encodings with a DSL builder (add / xor / mov / push / ret / nop) and one without (x87 fadd st,st(1))
 GOOD = ['01c8', '31c0', '8b4510', '6a05', 'c3', '90']
-NOBUILD = ['d9c1']
+NOBUILD = ['d8c1']      # fadd st,st(1): an x87 class whose Form needs op symbols (X87FORMS.md slice 2), so it has none
 
 
 def key_of(h):

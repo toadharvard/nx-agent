@@ -95,6 +95,7 @@ b7b6f0df0:
 2. Slice 2: the op proofs of the rounding machinery, then FLD/FST m32 and m64, the arithmetic and the compares.
 
 3. Slice 3: the transcendental classes, with x87_<fn> bound to CORE-MATH.
+
 ## Slice 1 (x87form.py)
 
 - **Entry:** `forms.build` calls `x87form.build` first for an instruction whose opcode byte is D8..DF or 9B. The class is `x87class.x87_class(raw)` in the spec's key spelling; the register index `i` is ModRM.rm.
@@ -103,10 +104,14 @@ b7b6f0df0:
   is eight DSL nodes; `Select`/`Store` with a symbolic TOP index is an `ite` chain over fr0..fr7. Any other kind raises `Unsupported('x87 op <KIND>')`; an op symbol raises `Unsupported('x87 op symbol <name>')`.
 - **Op symbols:** only part (i) functions with a floating-point or Real expansion (`introduces_fp`). A BV-only part (i) function stays inline: its kinds are the DSL's own ops, already proved by opmap, and a
   symbol would state the same fact a second time. No op symbol is implemented in this slice, so there is no new C helper and no op proof; the classes that need one are slice 2.
-- **Form effects:** `fr`, `ftop`, `ftag`, `fsw`, `fptr`, one `store`, `eax` (fnstsw ax), and the faults (the trap's kind first, then `fault_kind`, one fault per FLT code).
-  Out of the Form's effects (Unsupported, reason names it): a control-word effect (fldcw, fldenv, frstor), a store wider than the DSL's 128-bit value (fnstenv, fnsave), EFLAGS (fcomi family),
-  the SDM's nondeterminism (`nd`), and an entry precondition (`Out.pre`): the Form has no domain slot.
+- **Form effects:** `fr`, `ftop`, `ftag`, `fsw`, `fcw` (slice 1b; C line `FLDCW(w);`, the runtime's one place that sets c->fcw and the host rounding mode), `fptr`, `store`, `eax` (fnstsw ax).
+  A memory operand wider than 128 bits is `mem_pieces`: the 32-bit words of the environment image (x87spec.ENV_BITS), then the 80-bit registers after it (SAVE_BITS); one load or store per piece.
+  Out of the Form (Unsupported, the reason names it): EFLAGS (fcomi family), a nondeterminism without a row in `NDRES`, FP / Real kinds and op symbols (slice 2).
+- **Domain (slice 1b):** `Form.domain` (base3 80bd1328d's field, `require`): FCW[5:0] all set (the masks fact: every FLDCW/FLDENV/FRSTOR/FXRSTOR site keeps them), no pending-exception trap (ES clear), `Out.pre`,
+  and `nd_pre` at the resolution. The Form has no FLT fault: every x87 exception is unmasked-only and outside the domain. Instantiating the Form where the domain is not proved is L3a's masks fact's obligation.
+  ES clear is a state invariant (ES is derived from the sticky flags and FCW) that the domain states; it is not a separate fact.
+- **Nondeterminism (slice 1b):** `NDRES`, one table keyed by the spec's nd names (`nd_names()` derives them): resolution term and source. Rows: nd.fcmov.uf_false = False (SDM 2A:FCMOVcc reads ST(i) only inside THEN; f_x87.py
+  `if(cond) ST0=STi`), nd.fbld.img = bcd_to_img(m) (rt/x87.c fnvl_x_from_bcd, ASM-216). Every other nd (nan.tie, prem.N, trig.*, f2xm1.out) belongs to a class that needs op symbols: slice 2 / 3.
 - **Undefined bits:** `Out.undef` / `Out.mem_undef` name bits the SDM leaves undefined. The Form takes the spec's own value for them, a refinement of "any value"; the proof compares exactly.
-- **Proof:** `x87form.prove_form`, called from `prove.prove_one` for a Form with `.x87`. The fault kind equals the spec's always; every other field (x87 registers, TOP, tags, FSW, FCW, pointers, memory, EAX,
-  the other registers, flags, EIP, SSE state) equals the spec's when the Form raises no fault, because `Form.post` leaves the state unchanged on a fault. The spec's own state under an unmasked exception
-  (sticky flags in FSW, an unmasked PE stores) is not that semantics and is not proved here.
+- **Proof:** `x87form.prove_form`, called from `prove.prove_one` for a Form with `.x87`. On the Form's domain: `nd_pre` at the resolution holds, the Form raises no fault, and every field (x87 registers, TOP, tags, FSW, FCW,
+  pointers, memory, EAX, the other registers, flags, EIP, SSE state) equals `execute()[nd := resolution]`. The proof caught a translator defect (z3's n-ary bvadd), now a test.
