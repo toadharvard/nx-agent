@@ -15,8 +15,8 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-import iat
+sys.path.insert(0, os.path.join(HERE, ".."))   # ports/fnv-nx: contract.X
+from contract import iat
 
 COLUMNS = ['request', 'dll', 'name', 'arg_index', 'kind', 'values', 'note']
 
