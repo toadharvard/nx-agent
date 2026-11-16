@@ -1897,3 +1897,6 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - The fix makes the sha and the emitted unit text a function of structure alone, tested cold per process against one shuffled process.
   - Pack publish and certificate pins wait for it.
 - Archived the stale d3dx9_31 farm (session_01KmtZKSXJfEfpDazdv43Dkf), which was at 5c12589f5.
+- Density measurement re-planned: the old w12 heads are retired. On them the liftsrc build loops through loader → bridgetable → exports → imptest/lifted (about 120 repeats, 0 built); L1 has the recipe cycle guard.
+  - New plan (w13): four measurement branches claude/fnv-l3a-lift-dens-{b,r1,r12,r123p} on the relift head, differing only by reverts of rules 1, 2, 3 and the polls. Never merged.
+  - Then farm 3 measures bytes per head and the CPU time.
