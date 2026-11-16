@@ -1262,3 +1262,10 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - Bad decode: 4 exe entries are undecided. w13 is assigned the #UD decision via the pinned Sail model's decoder on the declared features, not a hand table.
 - Farms at 5c12589f5: exe facts green, 2,171 s; the universe stage 2,132 s; peak RSS ≤ 5.95 GB, summed over the container. d3dx9_31 and d3dx9_38 are pending.
 - bottleneck: w7's join, typed arguments and module drop, then one farm round, then the relift.
+
+## 2026-11-16 01:55: lift/rt / lift/disp split (w8, merge3)
+- w8: split done. lift/disp is a new root (dispgen only). lift/rt no longer uses contract/facts. The universe rule includes lift/rt automatically.
+- Both roots are red on a real defect that the forbid gate had hidden: ENTRY1-CONT at lift/rt dispatch.c:69 (`__atomic_store` on `fnvnx_site_t*`, converted to `volatile void*`).
+- Ruling: this is a class fix in the L2 plugin (toolchain/dispatch contp_walk). The generic and sized `__atomic_*` / `__sync_*` builtins whose pointer arguments are all of one entry-holding type T count as a same-type copy, like memcpy. Every other flow stays red. The test has positive and negative cases. No source rewrite. Owner: L2.
+- Next for w8: the CC errors of enter.cc and unhandled.cc, then the 7-symbol definer table to L1 after the rebuild. bare `_CxxThrowException`: waiting for w8's nm -u of the referencing object.
+- bottleneck: the L2 ENTRY1-CONT atomic rule, which blocks lift/rt → the 7-symbol table → the ELF.
