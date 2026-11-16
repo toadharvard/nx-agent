@@ -6,7 +6,7 @@
 # Agreed contracts, not referenced by the platform archive yet (add the line when a platform source starts
 # to reference the symbol):
 #   fnvnx_import_by_key                    loader (L1)
-#   nx_d3d9_export                         render (L6)
+#   (d3d9.dll exports are FNVNX_EXPORT records in render/d3d9/dev/d3d9_exports.cpp; no resolver symbol)
 
 # Referenced by platform/boundary/boundary_guest.cpp (declarations: the loader's own headers, loader/include, included as they are;
 # the lifter runtime's two are declared in boundary_guest.cpp).

@@ -20,6 +20,7 @@
   "asm": []
  },
  "include": [
+  "ports/fnv-nx/contract/include",
   "ports/fnv-nx/shim/include",
   "ports/fnv-nx/render/nxgpu/include",
   "ports/fnv-nx/render/shaders/translator/include",
@@ -140,6 +141,10 @@
   "ident_docked.bin": "gen/ident_docked.bin"
  },
  "uses": [
+  {
+   "root": "ports/fnv-nx/contract/include",
+   "output": "INCLUDE"
+  },
   {
    "root": "ports/fnv-nx/bridgefacts",
    "output": "D9_SPEC"
