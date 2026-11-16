@@ -2903,3 +2903,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - d3d9 definers: L6 w11 moves w7's 11 FNVNX_EXPORT records (8bf1aefda, 3d932349e) onto the L6 head.
   - Ruling for the 3 `_undoc` exports (DebugSetLevel, PSGPError, PSGPSampleTexture; Wine 9.0 `@ stub`): a body is required only for a reached export (IAT, or a resolved GetProcAddress name). An unreached one is no bridge row, with the reach fact as the reason.
   - This is a measurement until the dynamic GetProcAddress sites are resolved.
+- L6 w11 96fcecc has the 11 d3d9 FNVNX_EXPORT records with their Wine citations. Farm 3 runs 0430a1863 merged with 96fcecc and reports the full bridgetable stderr (doing).
+- The `reached.tsv` stage is L1's, queued as w28's item C: (dll, name, how=iat|gpa, site) from the IAT facts and gpa_names, with the dll set as its only bridge input, so there is no cycle with D9_ROWS.
+  - Interim record (L6, a measurement): 11 of 11 documented have a record, 0 undoc reached, 3 undoc unreached (exe 0948da1e8, redist c53729e3b).
+- bottleneck: farm 3 bridgetable; the w28 prefix head; cand4 verdict; L3a base3 head.
