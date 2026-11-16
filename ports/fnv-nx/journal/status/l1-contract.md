@@ -2656,3 +2656,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 07:05
 - cand4 head 62474771c (base fac693694) contains: shard cap, DATAMODEL types, the plugin-compiler rule, w28-c4 f5b99b007, CLAUDE.md from integ f1f7b4d7e, and objstub limited to guest roots (34e4aa5ad; host tool roots are not product code). test_plugin_compiler is 5/5 locally; the rest needs the farm. The farm verdict is running. L6 is joining render onto it for cand5. The qualified-imports rule goes to cand5.
 - bottleneck: the cand4 farm verdict at 62474771c.
+- L2 (GMP/MPFR roots for atan2's Ziv fallback, integ 5009d67dd), two recipe rulings, both accepted with conditions:
+  (1) `sources: <step>:<dir>`: units from a declared dirs output of the same root, sorted, content keys, no per-file flags (GMP's -DOPERATION_* compiles become wrapper units);
+  (2) the run-step input {"archive": ROOT}: ROOT must be in uses and a guest root, the input is the link's ar_bytes, configure probes are compile/link only.
+  w2 implements; L1 reviews for cand5.
