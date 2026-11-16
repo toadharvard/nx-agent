@@ -1507,3 +1507,6 @@ Paused: w3b, w4, farm; no other work.
     - The crash is a rule-3 class: gate_d3d9total calls gcc/clang directly with the host include set. w6 moves every compile of the gate onto recipe stages with the pinned debs and deletes the direct path. Status: doing.
     - w6 also resyncs verify/ to 275771a6f as a union, keeping w28's contract rows and L6's render rows plus wine_fixme row 25, and reports the recipe-check counts.
 - bottleneck: w6 d3d9total-on-stages; w28 carrying the L6 admit/wine_fixme rows; base3 retake; farm1 sm_link; the cand4 base.
+- 03:28Z L1 accepted render 0 abspath findings at w6-root 7a75284ec (the 17 are withdrawn).
+    - L6's admit rows enter with L6's candidate merge, not through w28. The verify/ sync becomes a git three-way merge of w28 into w6-root, so rows are kept by construction.
+    - A missing recipe hook for gate compiles goes to w28 as an exact stage form.
