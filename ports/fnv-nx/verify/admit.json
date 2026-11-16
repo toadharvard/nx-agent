@@ -342,6 +342,13 @@
    "recipe": "ports/fnv-nx/lift/factsimg/libvorbisfile/build.json"
   },
   {
+   "path": "ports/fnv-nx/lift/factsimg/ssce5432",
+   "class": "tool",
+   "target": "host",
+   "entry": [],
+   "recipe": "ports/fnv-nx/lift/factsimg/ssce5432/build.json"
+  },
+  {
    "path": "ports/fnv-nx/lift/retn",
    "class": "tool",
    "target": "host",

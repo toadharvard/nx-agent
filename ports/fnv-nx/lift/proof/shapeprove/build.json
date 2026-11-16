@@ -71,6 +71,10 @@
    "output": "SHAPES"
   },
   {
+   "root": "ports/fnv-nx/lift/factsimg/ssce5432",
+   "output": "SHAPES"
+  },
+  {
    "root": "ports/fnv-nx/lift/proof/isla",
    "output": "ISLA"
   },
@@ -247,6 +251,10 @@
     {
      "stage": "ports/fnv-nx/lift/factsimg/libvorbisfile:gen:0",
      "path": "shapes_libvorbisfile.tsv"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/factsimg/ssce5432:gen:0",
+     "path": "shapes_ssce5432.tsv"
     },
     {
      "stage": "ports/fnv-nx/lift/proof/isla:run:isla",

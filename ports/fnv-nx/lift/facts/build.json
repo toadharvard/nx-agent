@@ -38,6 +38,10 @@
    "output": "IMG"
   },
   {
+   "root": "ports/fnv-nx/lift/factsimg/ssce5432",
+   "output": "IMG"
+  },
+  {
    "root": "ports/fnv-nx/platform",
    "output": "X86SYS"
   }
@@ -64,6 +68,8 @@
     "libvorbis=/uses/ports/fnv-nx/lift/factsimg/libvorbis/IMG",
     "--module",
     "libvorbisfile=/uses/ports/fnv-nx/lift/factsimg/libvorbisfile/IMG",
+    "--module",
+    "ssce5432=/uses/ports/fnv-nx/lift/factsimg/ssce5432/IMG",
     "--out",
     "/out/facts",
     "--gates",
