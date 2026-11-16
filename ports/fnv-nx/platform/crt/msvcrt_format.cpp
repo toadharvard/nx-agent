@@ -17,6 +17,7 @@
  *     precision, subnormals and overflow included; digits beyond 801 significant ones only matter as a nonzero
  *     tail (a tie of a double has at most 770 significant digits), so the working size is bounded;
  *   - wide <-> narrow conversions go through the layer's NLS code page (msvcrt_exports.cpp). */
+#include <fnvnx_export.h>
 #include <errno.h>
 #include <cmath>
 #include <ctype.h>
@@ -885,6 +886,7 @@ extern "C" int fnvnx_msvcrt_va_sprintf(char *dst, const char *fmt, const uint32_
         dst[r] = 0;
     return r;
 }
+FNVNX_EXPORT("msvcrt.dll", "_vsnprintf", fnvnx_msvcrt_va_vsnprintf, "func");
 extern "C" int fnvnx_msvcrt_va_vsnprintf(char *dst, size_t count, const char *fmt, const uint32_t *args)
 {
     if (!fmt || (!dst && count)) {
@@ -902,6 +904,7 @@ extern "C" int fnvnx_msvcrt_va_sscanf(const char *src, const char *fmt, const ui
     return fnvnx_msvc_scan_words(src, fmt, args);
 }
 
+FNVNX_EXPORT("msvcrt.dll", "strtod", fnvnx_msvc_strtod, "func");
 /* strtod: leading white space, then the longest decimal float prefix; ERANGE on overflow and on a nonzero value
  * that rounds to 0 */
 extern "C" double fnvnx_msvc_strtod(const char *s, char **end)

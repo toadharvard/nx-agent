@@ -2,12 +2,10 @@
 """Gate "admit" (fnvnx-gate/1): nothing is in the trunk without the gates that close its classes of failure.
     python3 -I gate_admit.py        run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/admit.json
 
-Rule. verify/admit.json ("fnvnx-admit/1") lists the roots of the port tree: {"path", "class", ["recipe"], ["imports"], ["trees"], ["entry"]}; the gate set of a root is derived: the gates of verify/gates.d whose `covers` holds the root class (gatesdir.root_class), so no table here restates it.
+Rule. verify/admit.json ("fnvnx-admit/1") lists the roots of the port tree: {"path", "class", ["recipe"], ["imports"], ["entry"]}; the gate set of a root is derived: the gates of verify/gates.d whose `covers` holds the root class (gatesdir.root_class), so no table here restates it.
 `entry` (class tool: required, may be empty): the stage entry points of the root, .py files inside its trees. gate_pure's universe is the
 import closure of these and of the `generated` tools of the recipes; a script only a gate driver runs is not an entry point.
-`trees` (optional): the list of the directories (or exact files) of one root, at least two, the first equal to "path"; the root's
-universe is their union, and its python is judged in one puregate run, so trees that import each other form ONE root with no
-file moved. Two roots never share a tree; a root may lie inside another (a header root of a product root's include directory, a generated-only product root inside
+A row is one root with one tree, its "path"; a `trees` list is red (a second tree is a second root that the first declares in `imports`). Two roots never share a tree; a root may lie inside another (a header root of a product root's include directory, a generated-only product root inside
 a tool root): a file belongs to the NEAREST root, the deepest one that contains it. The root is named by "path" in `imports`.
 `imports` (a root's python cross-root imports): a list of paths of other admitted roots; "pure" (gate_pure.py) judges the root
 with its own directory and the parent directory of each imported root as import bases, so a root's python may import another
@@ -56,9 +54,8 @@ HOST_READERS = (TREE + "/verify", TREE + "/farm")
 
 
 def trees(r):
-    """The trees of an admit root: its `trees` list, else [path]."""
-    t = r.get("trees")
-    return list(t) if isinstance(t, list) else [r.get("path", "")]
+    """The tree of an admit root, as a list of one: its path."""
+    return [r.get("path", "")]
 
 
 def import_roots(imports, tree):
@@ -175,9 +172,8 @@ def judge(files, admit, exists, ref_paths=frozenset(), read=None):
         why = []
         if "gates" in r:
             why.append('a row lists "gates": the gate set is derived from gates.d `covers`; a row names root and class only')
-        if "trees" in r and not (isinstance(r["trees"], list) and len(r["trees"]) >= 2 and r["trees"][0] == path
-                                 and len(set(r["trees"])) == len(r["trees"]) and all(isinstance(t, str) for t in r["trees"])):
-            why.append("trees is not a list of at least two distinct paths starting with path")
+        if "trees" in r:
+            why.append('a row names one tree, its "path": a second tree is a second root, with the import declared in `imports`')
         if cls == "tool":
             en = r.get("entry")
             if not isinstance(en, list) or any(not isinstance(e, str) or not e.endswith(".py") or not exists(e)

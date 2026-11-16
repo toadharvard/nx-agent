@@ -27,6 +27,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from contract import bridgetable  # noqa: E402
+from contract import exportgen  # noqa: E402
 import cas  # noqa: E402
 import gate_build  # noqa: E402
 from contract import imports  # noqa: E402
@@ -34,6 +35,17 @@ import linkset  # noqa: E402
 import recipe  # noqa: E402
 
 IN_KEYS = {"format", "names", "specs", "extra", "extra_other", "name_table", "va"}
+EXPORTS_ROOT = "ports/fnv-nx/contract/exports"   # the producer of exports.tsv: the `.fnvnx.export` records of the link set (contract/exports/build.json)
+
+
+def exports_of(repo, cache):
+    """{(module, name): (symbol, kind, ret)} of the published exports.tsv of the link set at this commit (the stage B input of the bridge table: gate_build.ensure builds or hits the cache, then
+    published_output reads what was published; a red or missing producer is the caller's red)."""
+    res = gate_build.ensure(EXPORTS_ROOT, cache, repo)[0]
+    if res["status"] == "red":
+        raise ValueError("%s: build red at stage %s" % (EXPORTS_ROOT, res["failure"]["stage"]))
+    path, _ = gate_build.published_output(cache, EXPORTS_ROOT, "exports", repo)
+    return exportgen.read(read(path))
 
 
 def symbols(res):
@@ -63,7 +75,7 @@ def bridge_of(root, rec, res, decl, repo, cache):
     specs = rp(decl["specs"])
     rows, errors, extra_of = bridgetable.derive(
         read(rp(decl["names"])), lambda d: read(os.path.join(specs, d + ".spec")), set(syms), table,
-        [read(rp(p)) for p in decl["extra"] + decl["extra_other"]], bridgetable.read_va(read(rp(decl["va"]))))
+        [read(rp(p)) for p in decl["extra"] + decl["extra_other"]], bridgetable.read_va(read(rp(decl["va"]))), exports_of(repo, cache))
     return rows, errors, extra_of, table, syms
 
 
@@ -73,7 +85,7 @@ def root_rows(root, rec, res, decl, repo, cache, others):
     if errors:
         raise ValueError("%d bridge errors, first: %s" % (len(errors), errors[0]))
     other = {k for k, i in sorted(extra_of.items()) if i >= len(decl["extra"])}
-    return imports.judge(rows, syms, table, others, other)
+    return imports.judge(rows, syms, others, other)
 
 
 def natives_of(repo, cache, admit, roots):

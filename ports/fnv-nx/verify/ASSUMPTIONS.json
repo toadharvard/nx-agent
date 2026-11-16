@@ -48,6 +48,10 @@
    ]
   },
   {
+   "id": "ASM-231",
+   "aliases": []
+  },
+  {
    "id": "ASM-302",
    "aliases": []
   },
@@ -136,6 +140,19 @@
   {
    "id": "ASM-800",
    "aliases": []
+  },
+  {
+   "id": "ASM-213",
+   "aliases": [
+    "L3b:A-FDS"
+   ]
+  },
+  {
+   "id": "ASM-214",
+   "aliases": [
+    "L3b:A-FOP"
+
+   ]
   },
   {
    "id": "ASM-628",
@@ -746,6 +763,19 @@
    "owner": "L1"
   },
   {
+   "id": "ASM-102",
+   "text": "The tools of this tree name the player's exe only through their `--exe` option or the file name FalloutNV.exe, and the gate's sink list is the class of ways Python opens a path.",
+   "used_by": [
+    "ports/fnv-nx/verify/RULES.md",
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/gate_exepin.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: gate exepin taints every path value that enters a tool from argv or the environment (sys.argv, argparse, os.environ), not only `--exe`, so no exe path is outside the flow",
+   "owner": "L1"
+  },
+  {
    "id": "ASM-200",
    "text": "A callee in a hand-written assembler object preserves x19-x30 and sp and writes the caller's frame only through an address it was given (ORDERING A1 for .S).",
    "aliases": [
@@ -809,6 +839,39 @@
    "owner": "L3a"
   },
   {
+   "id": "ASM-206",
+   "text": "GCC keeps an FP operation before the FPSR read that follows it in program order (GCC has no FENV_ACCESS).",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h",
+    "ports/fnv-nx/lift/test/fpflags.py"
+   ],
+   "aliases": [
+    "ASM-307",
+    "L3b:A-ORDER"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: not compiler correctness: GCC is allowed to reorder. Closing rule: FPSR read through an operation the compiler must order (asm with FP operand dependency), then gate on objects",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-207",
+   "text": "Host code between guest instructions (imports, native bodies) runs with the guest FPSR parked or raises nothing the guest sees.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/journal/inbox/l3a-w8-native-fp.md",
+    "ports/fnv-nx/journal/status/l3a-lift.md",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "aliases": [
+    "ASM-308",
+    "L3b:A-NATIVE"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: rt/imp.h parks FPSR for import bodies; bridgegen (L3a w8) parks FPSR on every lifted->native transfer",
+   "owner": "L3a"
+  },
+  {
    "id": "ASM-208",
    "text": "A handler resuming by ContinueExecution does not change the FP flag owner nor leave the x87/MMX register file in another carrier format.",
    "aliases": [
@@ -816,6 +879,21 @@
    ],
    "status": "REMOVE",
    "removed_by": "no gate yet: closable by canonicalising on resume in rt/seh.c (L3a)",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-209",
+   "text": "An MMX read of a register popped by a static-stack function, with no MMX write since, reads data undefined on the CPU too.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "aliases": [
+    "ASM-310",
+    "L3b:A-STALE"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the CPU value is defined (old bits); closing = write back on pop or prove no such read statically",
    "owner": "L3a"
   },
   {
@@ -899,6 +977,36 @@
    "owner": "L3a"
   },
   {
+   "id": "ASM-219",
+   "text": "Every guest thread starts with FCW 0x027F and MXCSR 0x1F80.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/lift/tools/fpstate.py"
+   ],
+   "aliases": [
+    "ASM-327",
+    "L3b:A-START"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: set by the runtime at thread entry (rt/enter.c); being verified against the code with the FP-mask fact",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-220",
+   "text": "The CONTEXT image handed to guest SEH handlers is only read back by the runtime restore, which restores a reachable control state.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/lift/tools/fpstate.py"
+   ],
+   "aliases": [
+    "ASM-328",
+    "L3b:A-CTX"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: a handler may write the FP control words in CONTEXT; being checked against rt/seh.c with the FP-mask fact",
+   "owner": "L3a"
+  },
+  {
    "id": "ASM-221",
    "text": "The lowest index of a jump table is below 16: the table starts at most 16 dwords above the displacement (TAB_BIAS, fnvlift/core.py).",
    "aliases": [],
@@ -936,6 +1044,83 @@
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: the affine esp-minus-size domain plus the probe-loop relation (L3a w4)",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-226",
+   "text": "A handler's change to the CONTEXT of an exception raised inside an import does not reach the native body.",
+   "used_by": [
+    "ports/fnv-nx/lift/rt/unhandled.cc"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: a static fact from the EH tables and flow that no reachable filter returning EXCEPTION_CONTINUE_EXECUTION for an import-raised exception writes CONTEXT",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-227",
+   "text": "Only the C++ frame handler reads the FuncInfo IP-to-state key list.",
+   "used_by": [
+    "ports/fnv-nx/lift/tools/ehtables.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: the consumer fact of the IP-to-state list from the points-to (L3a w4)",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-228",
+   "text": "A callee does not read eax at a call.",
+   "used_by": [
+    "ports/fnv-nx/lift/tools/fpmodes.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: the callee read set from the code (pcsrc)",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-229",
+   "text": "The ex argument of _XcptFilter equals the exception record's code.",
+   "used_by": [
+    "ports/fnv-nx/lift/rt/msvcrt_eh.cc"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: a call-site fact that every caller of _XcptFilter passes GetExceptionCode() of the same record",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-230",
+   "text": "The truncation error of the generated pi/ln2 table is within its stated bound.",
+   "used_by": [
+    "ports/fnv-nx/lift/rt/fmath.c"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: the table generator checks the bound in exact rational arithmetic",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-232",
+   "text": "The precision of Ziv's strategy in rt/fmath.c never exceeds 2^15 limbs (4 MiB of mantissa).",
+   "used_by": [
+    "ports/fnv-nx/lift/rt/fmath.c"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: a static bound on the precision schedule from the published worst cases for correct rounding of each function at binary32/binary64 (OWNER 9, published theorems), checked by the generator",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-233",
+   "text": "A relocated dword in the middle of an instruction's bytes is table data and is never executed (lift/tools/ehtables.py code-vs-data decode).",
+   "used_by": [
+    "ports/fnv-nx/lift/tools/ehtables.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: the reloc-consistency rule of L3a w7's facts commit after a0f3d8e, plus data_in_code.tsv per image. A decoding is code only if every relocation lands on an imm32/disp32 field; a misfit refuses candidates and is red under proven flow in all images; jtab, EH and class-3 consumer ranges are data by their rule; the L2 code/data classification is an input",
    "owner": "L3a"
   },
   {
@@ -987,6 +1172,19 @@
    "status": "REMOVE",
    "removed_by": "planned: closable in the plugin: constant operand of a conversion = finding",
    "owner": "L3b"
+  },
+  {
+   "id": "ASM-331",
+   "aliases": [
+    "L3a:A3"
+   ],
+   "status": "REMOVE",
+   "owner": "L3b",
+   "text": "The sdm-class reference (float->int E1, compare flag mapping E2, fnstsw/fldcw/fnstenv/fnsave/frstor, cpuid, rdtsc) was transcribed from SDM prose and compared with the host; prose transcription is not a formal source.",
+   "removed_by": "planned: each sdm-class mnemonic is certified against a formal source instead: E1/E2 and the SSE conversions against the K x86-64 semantics or ACL2 x86isa master (transcription, ASM-009 class); x87 control/state against ACL2 x86isa master where defined; cpuid and rdtsc are declared-machine facts (owner: one fixed reference CPU; reference cpuid answer, platform monotonic timer), not model semantics. Whatever has no formal source is reported to the orchestrator. Owner L3b, after the first frame unless it blocks the pack roots.",
+   "used_by": [
+    "ports/fnv-nx/lift/README.md"
+   ]
   },
   {
    "id": "ASM-801",

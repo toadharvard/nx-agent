@@ -1,0 +1,64 @@
+{
+ "format": "fnvnx-recipe/1",
+ "profile": "guest",
+ "flags": {
+  "c": [
+   "-O2",
+   "-Werror=attributes"
+  ],
+  "cxx": [
+   "-std=gnu++17",
+   "-O2",
+   "-Werror=attributes"
+  ],
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/shim/include"
+ ],
+ "units": "all",
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/lift/tools/guestgen_msvcrttest.py",
+   "args": [
+    "/out/gen",
+    "/in/ports/fnv-nx/lift"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift",
+    "ports/fnv-nx/verify/cpuid_model.json",
+    "ports/fnv-nx/lift/proof"
+   ],
+   "outputs": [
+    "gen/guest.cc",
+    "gen/imp.cc",
+    "gen/tab.cc",
+    "gen/image.inc",
+    "gen/labels.txt",
+    "gen/terminal.json"
+   ]
+  }
+ ],
+ "outputs": {
+  "image.inc": "gen/image.inc",
+  "labels.txt": "gen/labels.txt",
+  "terminal.json": "gen/terminal.json"
+ },
+ "external": [],
+ "uses": [
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
+  },
+  {
+   "root": "ports/fnv-nx/shim",
+   "output": "INCLUDE"
+  }
+ ],
+ "include_uses": [
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
+  }
+ ]
+}

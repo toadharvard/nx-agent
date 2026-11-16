@@ -58,7 +58,7 @@ def _macros(code):
     the `\\` continuation lines; a body keeps its line structure by line count only"""
     out = []
     for m in re.finditer(r"^[ \t]*#[ \t]*define[ \t]+([A-Za-z_][A-Za-z0-9_]*)(?:\(([^)]*)\))?((?:\\\n|[^\n])*)", code, re.M):
-        out.append((m.group(1), [p.strip() for p in (m.group(2) or "").split(",") if p.strip()], m.group(3).replace("\\\n", "\n"),
+        out.append((m[1], [p.strip() for p in (m[2] or "").split(",") if p.strip()], m[3].replace("\\\n", "\n"),
                     code.count("\n", 0, m.start()) + 1))
     return out
 
@@ -110,7 +110,7 @@ def definition(text, name, siblings=()):
                 return line
         for i, p in enumerate(params):
             for m in re.finditer(r"(?<![A-Za-z0-9_])" + re.escape(p) + r"[ \t]*##[ \t]*([A-Za-z0-9_]+)[ \t]*\(", body):
-                suffix = m.group(1)
+                suffix = m[1]
                 e = _balanced(body, m.end())
                 if not (name.endswith(suffix) and len(name) > len(suffix) and e >= 0 and body[e:e + 200].lstrip().startswith("{")):
                     continue
@@ -142,7 +142,7 @@ def main():
         except (UnicodeDecodeError, IsADirectoryError):
             continue
         for m in CITE.finditer(text):
-            cites.setdefault((m.group(1), m.group(2)), set()).add(f)
+            cites.setdefault((m[1], m[2]), set()).add(f)
     rows, cache = [], {}
     for (p, fn), users in sorted(cites.items()):
         full = os.path.realpath(os.path.join(tree, p))

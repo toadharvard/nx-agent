@@ -1,0 +1,100 @@
+{
+ "format": "fnvnx-recipe/1",
+ "profile": "guest",
+ "flags": {
+  "c": [
+   "-O2",
+   "-Werror=attributes"
+  ],
+  "cxx": [
+   "-std=gnu++17",
+   "-O2",
+   "-DFNVNX_SDD=1",
+   "-Werror=attributes"
+  ],
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/shim/include"
+ ],
+ "units": "all",
+ "uses": [
+  {
+   "root": "ports/fnv-nx/lift/tests/guest/msvcrttest/lifted",
+   "output": "image.inc"
+  },
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
+  },
+  {
+   "root": "ports/fnv-nx/shim",
+   "output": "INCLUDE"
+  }
+ ],
+ "link": {
+  "output": "msvcrttest.elf",
+  "flags": [
+   "-m",
+   "aarch64linux32"
+  ],
+  "entry": "fnvl_msvcrttest_entry"
+ },
+ "variants": {
+  "term1": {
+   "defines_add": [
+    "FNVL_TERMINAL_CASE=1"
+   ],
+   "link": {
+    "output": "msvcrttest_term1.elf",
+    "flags": [
+     "-m",
+     "aarch64linux32"
+    ],
+    "entry": "fnvl_msvcrttest_entry"
+   }
+  },
+  "term2": {
+   "defines_add": [
+    "FNVL_TERMINAL_CASE=2"
+   ],
+   "link": {
+    "output": "msvcrttest_term2.elf",
+    "flags": [
+     "-m",
+     "aarch64linux32"
+    ],
+    "entry": "fnvl_msvcrttest_entry"
+   }
+  },
+  "term3": {
+   "defines_add": [
+    "FNVL_TERMINAL_CASE=3"
+   ],
+   "link": {
+    "output": "msvcrttest_term3.elf",
+    "flags": [
+     "-m",
+     "aarch64linux32"
+    ],
+    "entry": "fnvl_msvcrttest_entry"
+   }
+  }
+ },
+ "external": [
+  {
+   "name": "fnvnx-a64-msvcmodel",
+   "repo": "fnv-nx-build",
+   "ref": "tools/fnvnx-a64-msvcmodel",
+   "commit": "00e3d42acd10593d534b9a70bb8940cee7991436",
+   "tree_sha256": "3f25152cbc5a729d9e0a12fc5c62b6b912b6ab1571b6b3494de8f35e3904207d",
+   "at": "/ext/a64"
+  }
+ ],
+ "include_uses": [
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
+  }
+ ]
+}

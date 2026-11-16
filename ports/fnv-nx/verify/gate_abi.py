@@ -42,6 +42,7 @@ import recipe  # noqa: E402
 
 
 DATAMODEL = os.path.join(HERE, "..", "toolchain", "msvcmodel", "DATAMODEL.json")
+REASONS_INC = os.path.join(HERE, "..", "toolchain", "layout", "decltype_spell.inc")
 
 
 def crossing_terms():
@@ -69,6 +70,11 @@ def envid():
     return gate_build.file_sha(os.path.join(HERE, "env.json"))
 
 
+def reasons():
+    with open(REASONS_INC) as f:
+        return ctypes_compat.decltype_reasons(f.read())
+
+
 def read_objects(objs):
     """OBJS: [(id, path)] -> (store {(id, 'sympair'): rows}, {layout key: {id: layout tuple}}, red items {id: reason}, {id: {symbol: declared C type}}, {id: {symbol: crossing terms}})."""
     store, layouts, red, decls = {}, {}, {}, {}
@@ -84,7 +90,7 @@ def read_objects(objs):
             store[(oid, "sympair")] = l2sections.parse_sympair(sp, oid + ":.fnvnx.sympair", kinds)
             lays = objsections.parse_layout(objsections.section(elf, ".fnvnx.layout"), oid + ":.fnvnx.layout")
             dt = elf.section(".fnvnx.decltype")     # RULE DECLTYPE-COMPLETE (link/ctypes_compat.py): every GLOBAL/WEAK symbol of the object has exactly one line, `sym<TAB>type` or `sym<TAB>-reason` (reason from the plugin's closed set); the typed lines are compared by C11 6.2.7
-            types, why = ctypes_compat.parse_decltype_lines(dt if dt is not None else b"", oid + ":.fnvnx.decltype")
+            types, why = ctypes_compat.parse_decltype_lines(dt if dt is not None else b"", oid + ":.fnvnx.decltype", reasons())
             have = {n for n, bind, _t, _sh, _v, _sz, _o in elf.symbols() if n and bind in (1, 2)}     # STB_GLOBAL, STB_WEAK
             for n in sorted(have - set(types) - set(why)):
                 red[oid + ":decltype:missing:" + n] = "global/weak symbol %s has no .fnvnx.decltype line" % n
@@ -239,6 +245,7 @@ def judge_root(repo, cache, root):
 
 
 def main():
+    l2sections.set_kinds(l2sections.REPO_KINDS_INC)   # cwd = the checkout root: the table is a tracked file of it
     repo, tmp = ".", None
     cache = os.environ.get("GATE_CACHE")
     if not cache:

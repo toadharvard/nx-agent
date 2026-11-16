@@ -65,17 +65,18 @@ A pure function of its arguments (no file, no process): the driver verify/gate_i
   names       text of sys_names.tsv (dll TAB name per line) from the private manifest
   spec_text   function dll -> text of the export specification of the reference environment (Wine 9.0 dlls/<dll>/<dll>.spec)
   syms        the set of symbol names that the product objects define or reference (objects.json defined + undefined); None = the rows table
-              (stage A): every row binds by rule alone (sym, data, lookup, l3), no symbol table is read and none is judged; the table is then a
-              function of the names, the specs, the name table and the extra rows only, so the import keys (contract/iat.py) are too.  The
-              symbols are judged against the rows by the gate `imports` (stage B: contract/imports.judge over derive(syms=the objects' symbols))
-  name_table  {msvcrt name: (symbol, kind)} of the name table the product serves msvcrt names from (read_name_table)
+              (stage A, the root `bridgetable`): every row binds by rule alone (link, data, sym), no symbol table is read and none is judged; the
+              table is then a function of the names, the specs, the name table, the extra rows and exports.tsv only, so the import keys (contract/iat.py)
+              are too.  The symbols are judged against the rows by the gate `imports` (contract/imports.judge over the members of the link)
+  name_table  {msvcrt name: (symbol, kind)} of the name table that serves msvcrt data names (read_name_table)
   extra       texts of rows in this 8-column format (other owners' rows: COM interfaces); a row of the same (dll, name) replaces the derived one
-bind  sym    native_symbol is a symbol of the product objects     lookup  msvcrt name served by the name table (native_symbol `-`)
-      l3     provided by the lifter runtime under native_symbol   data    the slot holds the address of the object native_symbol
+  exports     {(module, name): (symbol, kind, ret)} of exports.tsv (contract/exportgen.py: the `.fnvnx.export` records of the link set, ret from the definer's `.fnvnx.decltype`)
+bind  link   native_symbol is the symbol of the export record; exactly one member of the link defines it (imports.judge)
+      sym    native_symbol is a symbol of the root's own objects (rows of another owner's file)      data  the same for a data row without a record
       none   no implementation: the gate `imports` is red for the row
 conv  stdcall | cdecl | vararg | thiscall | fastcall | data;  ret v|i|q|f|d;  args: x86 stack slots i|q|f|d.
-A name missing from its spec, a stub in the spec, a forward that cannot be followed or an unknown argument type is an error: total or failing.
-`lookup` is decided by the name table, a declared input (a name is in it or not), not by a run.
+A function name with no export record, a name missing from its spec, a stub in the spec, a forward that cannot be followed, a struct or vector return or an unknown
+argument type is an error: total or failing.
 ```
 
 ## contract/gate_call.py

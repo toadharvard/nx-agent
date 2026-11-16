@@ -137,6 +137,8 @@ NOACC = {'prfm', 'prfum'}
 COND_Z = {'eq': True, 'ne': False}
 
 
+JOBS_DEFAULT = 4      # worker processes when the stage does not set JOBS (a count, not a path)
+
 def elf(path):
     """-> [(section name, bytes, {offset: reloc type}, [function offsets], [data ranges], [(offset, name, size) of the STT_FUNC symbols])] for the executable sections."""
     b = open(path, 'rb').read()
@@ -896,7 +898,7 @@ def run(rtobj, lifted, asm=(), sites=None):
     for f in files: funcs |= deffuncs(f)[0]
     init(cpusize(rtobj), asm, frozenset(funcs))
     rows = {g: [] for g in GATES}; n = {k: 0 for k in ('x27_writes', 'cpu_outside_struct', 'cpu_accesses_inside_struct', 'rule_violations')}     # the global counts of the two CPU-class checks are always reported
-    with multiprocessing.Pool(int(os.environ.get('JOBS', '4')), init, (CPUSIZE, asm, FUNCS)) as pool:
+    with multiprocessing.Pool(int(os.environ.get('JOBS', str(JOBS_DEFAULT))), init, (CPUSIZE, asm, FUNCS)) as pool:
         recs = []; fswrecs = []
         for r in pool.imap(analyse, files, chunksize=4):
             recs += r['locks']; fswrecs.append(r['fsw'])
@@ -934,6 +936,9 @@ def verdict(g, rws, n):
 
 
 def main(argv):
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools'))
+    import cli
+    cli.parse('usage: gate_order.py IMAGE [OBJ...] [--asm FILE]... [--sites FILE]   memory-ordering completeness gate over the objects', argv, (1, 10**9), {'--asm': True, '--sites': True})
     objs, asm, k, locks = [], [], 1, None
     while k < len(argv):
         if argv[k] == '--asm': asm.append(argv[k + 1]); k += 2

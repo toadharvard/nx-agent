@@ -8,6 +8,7 @@
  * caller's file handle, as on Windows); the bytes a writable shared view changed go back to the file at
  * UnmapViewOfFile / FlushViewOfFile. A SEC_IMAGE section is laid out as the PE sections say (headers and sections at
  * their RVAs, zero fill, per-section page protection). */
+#include <fnvnx_export.h>
 #include "filemap_backing.h"
 #include "fnvnx/hostvm.h"
 #include "w32_reach.h"
@@ -244,6 +245,7 @@ static DWORD image_load(struct w32_map *m, uint64_t fsize, uint32_t *preferred_b
     return err;
 }
 
+FNVNX_EXPORT("kernel32.dll", "CreateFileMappingA", CreateFileMappingA, "func");
 /* ---- CreateFileMappingA */
 extern "C" HANDLE CreateFileMappingA(HANDLE file, void *sa, DWORD flprot, DWORD maxhi, DWORD maxlo, LPCSTR name)
 {
@@ -443,6 +445,7 @@ static bool writeback(struct view *v, uintptr_t from, size_t n)   /* [from, from
     return fm_file_io(v->m->fh, (void *)from, off, n, true, NULL);
 }
 
+FNVNX_EXPORT("kernel32.dll", "MapViewOfFile", MapViewOfFile, "func");
 extern "C" LPVOID MapViewOfFile(HANDLE hmap, DWORD access, DWORD offhi, DWORD offlo, SIZE_T bytes)
 {
     access = W32_DW(access);
@@ -563,6 +566,7 @@ out:
     return NULL;
 }
 
+FNVNX_EXPORT("kernel32.dll", "UnmapViewOfFile", UnmapViewOfFile, "func");
 extern "C" BOOL UnmapViewOfFile(LPCVOID addr)
 {
     struct view *v = NULL;
@@ -589,6 +593,7 @@ extern "C" BOOL UnmapViewOfFile(LPCVOID addr)
     return ok;
 }
 
+FNVNX_EXPORT("kernel32.dll", "FlushViewOfFile", FlushViewOfFile, "func");
 extern "C" BOOL FlushViewOfFile(LPCVOID addr, SIZE_T bytes)
 {
     BOOL ok = TRUE;

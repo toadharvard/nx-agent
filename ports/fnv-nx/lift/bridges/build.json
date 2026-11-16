@@ -1,0 +1,68 @@
+{
+ "format": "fnvnx-recipe/1",
+ "profile": "guest",
+ "flags": {
+  "c": [
+   "-O2",
+   "-Werror=attributes"
+  ],
+  "cxx": [
+   "-std=gnu++17",
+   "-O2",
+   "-DFNVNX_SDD=1",
+   "-Werror=attributes"
+  ],
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/platform/include"
+ ],
+ "units": "all",
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/lift/tools/bridgegen.py",
+   "args": [
+    "--descs",
+    "/uses/ports/fnv-nx/lift/descs/descs",
+    "--out",
+    "/out/gen/bridges.cc",
+    "--map",
+    "/out/gen/bridges.tsv"
+   ],
+   "inputs": [],
+   "outputs": [
+    "gen/bridges.cc",
+    "gen/bridges.tsv"
+   ]
+  }
+ ],
+ "uses": [
+  {
+   "root": "ports/fnv-nx/lift/descs",
+   "output": "descs"
+  },
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
+  },
+  {
+   "root": "ports/fnv-nx/platform",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/hostabi",
+   "output": "INCLUDE"
+  }
+ ],
+ "outputs": {
+  "bridges.tsv": "gen/bridges.tsv"
+ },
+ "link": null,
+ "external": [],
+ "include_uses": [
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
+  }
+ ]
+}

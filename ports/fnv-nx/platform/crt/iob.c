@@ -11,6 +11,7 @@
  * The MSVC-visible buffer fields (_ptr, _cnt, _base) stay NULL / 0, so inline MSVC code (basic_filebuf) always
  * calls the functions. The standard streams (descriptors 0-2) report text mode but pass bytes to the host's
  * stdout / stderr unchanged (the host console uses LF); stdin is always at end of file. */
+#include <fnvnx_export.h>
 #include "fnvnx_crt_config.h"
 #include "fnvnx_iobuf.h"
 #include "fnvnx_msvcrt.h"
@@ -28,15 +29,9 @@ void fnvnx_plat_open_failed(const char *win, const char *host, unsigned err, uns
 
 #include "../os/os.h"
 
-unsigned long fnvnx_path_map(const char *win, char *host, size_t n); /* win32/path.cpp */
 
-/* kernel32 (platform/win32), the objects a descriptor holds: HANDLE = void * (ILP32) */
-typedef void *HANDLE;
-int ReadFile(HANDLE h, void *buf, unsigned n, unsigned *got, void *overlapped);
-int WriteFile(HANDLE h, const void *buf, unsigned n, unsigned *put, void *overlapped);
-int SetFilePointerEx(HANDLE h, long long dist, long long *newpos, unsigned method);
-unsigned GetFileType(HANDLE h);
-unsigned GetLastError(void);
+/* kernel32 (platform/win32), the objects a descriptor holds: HANDLE = void * (ILP32); one declaration, the platform header */
+#include "../include/fnvnx_win32_ext.h"
 #define MSVCRT_NO_CONSOLE_FD (-2)
 #define MSVCRT_NO_CONSOLE ((HANDLE)MSVCRT_NO_CONSOLE_FD)
 #define INVALID_HANDLE ((HANDLE)(intptr_t)-1)
@@ -97,6 +92,7 @@ static struct fnvnx_ioinfo g_info[MSVCRT_MAX_FILES] = {
     [0] = IOINFO_STD, [1] = IOINFO_STD, [2] = IOINFO_STD,
     [3 ... MSVCRT_MAX_FILES - 1] = IOINFO_FREE,
 };
+FNVNX_EXPORT("msvcrt.dll", "__pioinfo", __pioinfo, "data");
 struct fnvnx_ioinfo *__pioinfo[MSVCRT_MAX_FILES / MSVCRT_FD_BLOCK_SIZE] = {   /* every block exists: MAX_FD == MSVCRT_MAX_FILES */
     g_info + 0, g_info + 32, g_info + 64, g_info + 96,
     g_info + 128, g_info + 160, g_info + 192, g_info + 224,
@@ -116,6 +112,7 @@ struct fnvnx_ioinfo *__pioinfo[MSVCRT_MAX_FILES / MSVCRT_FD_BLOCK_SIZE] = {   /*
     g_info + 1920, g_info + 1952, g_info + 1984, g_info + 2016
 };
 _Static_assert(MAX_FD == MSVCRT_MAX_FILES, "one block pointer per MSVCRT_FD_BLOCK_SIZE descriptors");
+FNVNX_EXPORT("msvcrt.dll", "__badioinfo", __badioinfo, "data");
 struct fnvnx_ioinfo __badioinfo = { 0xFFFFFFFFu, WX_TEXT, { 0 }, 0, { 0 }, 0, 0, { 0 }, { 0 }, 0, { 0 }, 0 };
 /* Wine 9.0 dlls/msvcrt/errno.c msvcrt_set_errno: the CRT errno of a Win32 error (the cases of that switch, grouped as its fallthroughs group them) */
 static int win_errno(unsigned err)
@@ -142,6 +139,7 @@ static int win_errno(unsigned err)
     }
 }
 
+FNVNX_EXPORT("msvcrt.dll", "_isatty", fnvnx_isatty, "func");
 /* _isatty (file.c): the descriptor is open and its wxflag says a character device */
 int fnvnx_isatty(int fd) { return fd >= 0 && fd < MAX_FD && (g_info[fd].wxflag & (WX_OPEN | WX_TTY)) == (WX_OPEN | WX_TTY); }
 
@@ -182,6 +180,7 @@ static int alloc_fd(HANDLE h, unsigned flag)
     return -1;
 }
 
+FNVNX_EXPORT("msvcrt.dll", "_get_osfhandle", fnvnx_get_osfhandle, "func");
 /* _get_osfhandle (Wine 9.0 file.c 2082): the descriptor's HANDLE; INVALID_HANDLE_VALUE with EBADF when it has none */
 intptr_t fnvnx_get_osfhandle(int fd)
 {
@@ -201,11 +200,12 @@ intptr_t fnvnx_get_osfhandle(int fd)
 #define MSVCRT_O_BINARY 0x8000
 #define FILE_TYPE_UNKNOWN 0
 #define FILE_TYPE_CHAR 2
+FNVNX_EXPORT("msvcrt.dll", "_open_osfhandle", fnvnx_open_osfhandle, "func");
 int fnvnx_open_osfhandle(intptr_t handle, int oflags)
 {
     if (!(oflags & (MSVCRT_O_BINARY | MSVCRT_O_TEXT)))
         oflags |= MSVCRT_O_BINARY;
-    unsigned type = GetFileType((HANDLE)handle);
+    DWORD type = GetFileType((HANDLE)handle);
     if (type == FILE_TYPE_UNKNOWN && GetLastError() != 0)
         return fail(win_errno(GetLastError()));
     unsigned flags = type == FILE_TYPE_CHAR ? WX_TTY : 0;
@@ -221,13 +221,14 @@ static int64_t raw_write(struct fnvnx_ioinfo *d, const void *p, size_t n)
 {
     HANDLE h = fd_handle(d);
     if (d->wxflag & WX_APPEND) {
-        long long np;
-        SetFilePointerEx(h, 0, &np, 2 /* FILE_END */);
+        LARGE_INTEGER zero, np;
+        zero.QuadPart = 0;
+        SetFilePointerEx(h, zero, &np, FILE_END);
     }
     size_t done = 0;
     while (done < n) {
-        unsigned w = 0;
-        if (!WriteFile(h, (const char *)p + done, (unsigned)(n - done), &w, NULL))
+        DWORD w = 0;
+        if (!WriteFile(h, (const char *)p + done, (DWORD)(n - done), &w, NULL))
             return -(int64_t)GetLastError();
         if (!w)
             return -(int64_t)112; /* ERROR_DISK_FULL */
@@ -255,6 +256,7 @@ static size_t lf_to_crlf(const unsigned char *in, size_t n, unsigned char *out)
 
 
 
+FNVNX_EXPORT("msvcrt.dll", "_write", fnvnx_write, "func");
 int fnvnx_write(int fd, const void *buf, unsigned int n)
 {
     struct fnvnx_ioinfo *d = fd_get(fd);
@@ -282,6 +284,7 @@ int fnvnx_write(int fd, const void *buf, unsigned int n)
     return (int)n;
 }
 
+FNVNX_EXPORT("msvcrt.dll", "_lseeki64", fnvnx_lseeki64, "func");
 long long fnvnx_lseeki64(int fd, long long off, int whence)
 {
     struct fnvnx_ioinfo *d = fd_get(fd);
@@ -290,13 +293,15 @@ long long fnvnx_lseeki64(int fd, long long off, int whence)
     if (whence < 0 || whence > 2)
         return fail(EINVAL);
     os_lock(fd_lock(d));
-    long long pos = 0;
-    int ok = SetFilePointerEx(fd_handle(d), off, &pos, (unsigned)whence);   /* FILE_BEGIN / CURRENT / END are 0 / 1 / 2 */
+    LARGE_INTEGER dist, pos;
+    dist.QuadPart = off;
+    pos.QuadPart = 0;
+    int ok = SetFilePointerEx(fd_handle(d), dist, &pos, (DWORD)whence);   /* FILE_BEGIN / CURRENT / END are 0 / 1 / 2 */
     unsigned err = ok ? 0 : GetLastError();
     if (ok)
         d->wxflag &= (uint8_t)~WX_ATEOF;
     os_unlock(fd_lock(d));
-    return ok ? pos : fail(win_errno(err));
+    return ok ? pos.QuadPart : fail(win_errno(err));
 }
 
 /* ---- streams */
@@ -319,6 +324,7 @@ struct stream {
     struct stream *next;
 };
 
+FNVNX_EXPORT("msvcrt.dll", "_iob", fnvnx_iob, "data");
 struct _iobuf fnvnx_iob[FNVNX_IOB_COUNT] = {
     /* _file = MSVCRT_NO_CONSOLE_FD: file.c msvcrt_init_io sets it for a standard stream whose handle is MSVCRT_NO_CONSOLE (descriptors 0-2 above) */
     { NULL, 0, NULL, FNVNX_IOREAD, MSVCRT_NO_CONSOLE_FD, 0, 0, NULL },
@@ -385,7 +391,11 @@ static int wflush(struct _iobuf *f, struct sext *x)
 static void rdrop(struct sext *x, struct fnvnx_ioinfo *d)
 {
     if (x->rlen > x->rpos && d && !(d->wxflag & WX_TTY))
-        SetFilePointerEx(fd_handle(d), -(long long)(x->rlen - x->rpos), NULL, 1 /* FILE_CURRENT */);
+    {
+            LARGE_INTEGER back;
+            back.QuadPart = -(long long)(x->rlen - x->rpos);
+            SetFilePointerEx(fd_handle(d), back, NULL, FILE_CURRENT);
+        }
     x->rpos = x->rlen = 0;
     x->nungot = 0;
 }
@@ -430,7 +440,7 @@ static int rfill(struct _iobuf *f, struct sext *x, struct fnvnx_ioinfo *d)
         errno = ENOMEM;
         return -1;
     }
-    unsigned got = 0;
+    DWORD got = 0;
     int ok = ReadFile(fd_handle(d), x->rbuf, BUFSZ, &got, NULL);
     unsigned err = ok ? 0 : GetLastError();
     x->rpos = 0;
@@ -498,8 +508,8 @@ static size_t sread(struct _iobuf *f, struct sext *x, struct fnvnx_ioinfo *d, un
                 continue;
             }
             if (n - o >= BUFSZ && !(d->wxflag & WX_TTY)) { /* large binary read: straight from the file */
-                unsigned got = 0;
-                int ok = ReadFile(fd_handle(d), out + o, (unsigned)(n - o), &got, NULL);
+                DWORD got = 0;
+                int ok = ReadFile(fd_handle(d), out + o, (DWORD)(n - o), &got, NULL);
                 unsigned err = ok ? 0 : GetLastError();
                 int64_t r = ok ? (int64_t)got : (err == 109 ? 0 : -1);
                 if (r < 0) {
@@ -601,6 +611,7 @@ static int swrite(struct _iobuf *f, struct sext *x, struct fnvnx_ioinfo *d, cons
 
 
 
+FNVNX_EXPORT("msvcrt.dll", "fread", fnvnx_iob_fread, "func");
 /* ---- reading and writing */
 size_t fnvnx_iob_fread(void *buf, size_t size, size_t count, struct _iobuf *f)
 {
@@ -621,6 +632,7 @@ size_t fnvnx_iob_fread(void *buf, size_t size, size_t count, struct _iobuf *f)
     return got / size;
 }
 
+FNVNX_EXPORT("msvcrt.dll", "fwrite", fnvnx_iob_fwrite, "func");
 size_t fnvnx_iob_fwrite(const void *buf, size_t size, size_t count, struct _iobuf *f)
 {
     if (!size || !count)
@@ -654,6 +666,7 @@ size_t fnvnx_iob_fwrite(const void *buf, size_t size, size_t count, struct _iobu
 
 
 
+FNVNX_EXPORT("msvcrt.dll", "fflush", fnvnx_iob_fflush, "func");
 /* fflush: writes pending output; on a stream that is reading, keeps the logical position (MSVC 2008 discarded
  * the read buffer, which skipped buffered input - nothing in the game relies on that) */
 int fnvnx_iob_fflush(struct _iobuf *f)
@@ -683,5 +696,6 @@ int fnvnx_iob_fflush(struct _iobuf *f)
     return r ? EOF : 0;
 }
 
+FNVNX_EXPORT("msvcrt.dll", "_fileno", fnvnx_iob_fileno, "func");
 int fnvnx_iob_fileno(struct _iobuf *f) { return ext_of(f) ? f->_file : -1; }
 

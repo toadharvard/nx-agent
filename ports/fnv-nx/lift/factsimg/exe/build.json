@@ -1,0 +1,73 @@
+{
+ "format": "fnvnx-recipe/1",
+ "external": [
+  {
+   "name": "exe",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/exe",
+   "commit": "0948da1e89ab719dcf8471e45b67bc60575f6b93",
+   "tree_sha256": "ba933b684b5e221e74b8a841a0ebb35ea8599c78a4d582ca0c376ef5a424ef2b",
+   "at": "/ext/exe"
+  },
+  {
+   "name": "decomp",
+   "repo": "fnv-nx-build",
+   "ref": "tools/fnv_decomp",
+   "commit": "d79b1949cf6aaf6841f8477329280e863287663f",
+   "tree_sha256": "8aab0f0c963fb188ddb3b152c716580f0fced8ecab93f61ff1a5851e1530f278",
+   "at": "/ext/decomp"
+  }
+ ],
+ "uses": [
+  {
+   "root": "ports/fnv-nx/loader",
+   "output": "KEYS_TSV"
+  }
+ ],
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/lift/tools/funcsfacts.py",
+   "args": [
+    "--units",
+    "/ext/decomp/build/units.json",
+    "--out",
+    "/out/funcs.tsv"
+   ],
+   "inputs": [],
+   "outputs": [
+    "funcs.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/universe.py",
+   "args": [
+    "--out",
+    "/out/exe",
+    "--exe",
+    "/ext/exe/FalloutNV.exe",
+    "--funcs",
+    "/stage/funcs.tsv",
+    "--keys",
+    "/uses/ports/fnv-nx/loader/KEYS_TSV",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift",
+    {
+     "stage": "ports/fnv-nx/lift/factsimg/exe:gen:0",
+     "path": "funcs.tsv"
+    },
+    "ports/fnv-nx/lift/proof"
+   ],
+   "outputs": [],
+   "dirs": [
+    "exe"
+   ]
+  }
+ ],
+ "outputs": {
+  "IMG": "exe",
+  "FUNCS": "funcs.tsv"
+ }
+}

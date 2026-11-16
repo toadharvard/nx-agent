@@ -1,0 +1,220 @@
+{
+ "format": "fnvnx-recipe/1",
+ "external": [
+  {
+   "name": "exe",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/exe",
+   "commit": "0948da1e89ab719dcf8471e45b67bc60575f6b93",
+   "tree_sha256": "ba933b684b5e221e74b8a841a0ebb35ea8599c78a4d582ca0c376ef5a424ef2b",
+   "at": "/ext/exe"
+  },
+  {
+   "name": "redist",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/redist",
+   "commit": "c53729e3bac168798fddcf4312f5a64a9b5eb08f",
+   "tree_sha256": "fe7d3b56dba13c2bb236bdd3f7681dab41029f192283b7d4ba0c81105878bfd2",
+   "at": "/ext/redist"
+  }
+ ],
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/lift/tools/retnfacts.py",
+   "args": [
+    "--exe",
+    "/ext/exe/FalloutNV.exe",
+    "--universe",
+    "/uses/ports/fnv-nx/lift/facts/FACTS/universe.tsv",
+    "--table",
+    "/uses/ports/fnv-nx/loader/MODULES_TSV",
+    "--image",
+    "exe",
+    "--out",
+    "/out/retn/exe.tsv",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
+   "outputs": [
+    "retn/exe.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/retnfacts.py",
+   "args": [
+    "--exe",
+    "/ext/exe/atimgpud.dll",
+    "--universe",
+    "/uses/ports/fnv-nx/lift/facts/FACTS/atimgpud/universe.tsv",
+    "--table",
+    "/uses/ports/fnv-nx/loader/MODULES_TSV",
+    "--image",
+    "atimgpud",
+    "--out",
+    "/out/retn/atimgpud.tsv",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
+   "outputs": [
+    "retn/atimgpud.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/retnfacts.py",
+   "args": [
+    "--exe",
+    "/ext/exe/binkw32.dll",
+    "--universe",
+    "/uses/ports/fnv-nx/lift/facts/FACTS/binkw32/universe.tsv",
+    "--table",
+    "/uses/ports/fnv-nx/loader/MODULES_TSV",
+    "--image",
+    "binkw32",
+    "--out",
+    "/out/retn/binkw32.tsv",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
+   "outputs": [
+    "retn/binkw32.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/retnfacts.py",
+   "args": [
+    "--exe",
+    "/ext/redist/d3dx9_31.dll",
+    "--universe",
+    "/uses/ports/fnv-nx/lift/facts/FACTS/d3dx9_31/universe.tsv",
+    "--table",
+    "/uses/ports/fnv-nx/loader/MODULES_TSV",
+    "--image",
+    "d3dx9_31",
+    "--out",
+    "/out/retn/d3dx9_31.tsv",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
+   "outputs": [
+    "retn/d3dx9_31.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/retnfacts.py",
+   "args": [
+    "--exe",
+    "/ext/redist/d3dx9_38.dll",
+    "--universe",
+    "/uses/ports/fnv-nx/lift/facts/FACTS/d3dx9_38/universe.tsv",
+    "--table",
+    "/uses/ports/fnv-nx/loader/MODULES_TSV",
+    "--image",
+    "d3dx9_38",
+    "--out",
+    "/out/retn/d3dx9_38.tsv",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
+   "outputs": [
+    "retn/d3dx9_38.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/retnfacts.py",
+   "args": [
+    "--exe",
+    "/ext/exe/GDFFalloutNV.dll",
+    "--universe",
+    "/uses/ports/fnv-nx/lift/facts/FACTS/gdffalloutnv/universe.tsv",
+    "--table",
+    "/uses/ports/fnv-nx/loader/MODULES_TSV",
+    "--image",
+    "gdffalloutnv",
+    "--out",
+    "/out/retn/gdffalloutnv.tsv",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
+   "outputs": [
+    "retn/gdffalloutnv.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/retnfacts.py",
+   "args": [
+    "--exe",
+    "/ext/exe/libvorbis.dll",
+    "--universe",
+    "/uses/ports/fnv-nx/lift/facts/FACTS/libvorbis/universe.tsv",
+    "--table",
+    "/uses/ports/fnv-nx/loader/MODULES_TSV",
+    "--image",
+    "libvorbis",
+    "--out",
+    "/out/retn/libvorbis.tsv",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
+   "outputs": [
+    "retn/libvorbis.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/retnfacts.py",
+   "args": [
+    "--exe",
+    "/ext/exe/libvorbisfile.dll",
+    "--universe",
+    "/uses/ports/fnv-nx/lift/facts/FACTS/libvorbisfile/universe.tsv",
+    "--table",
+    "/uses/ports/fnv-nx/loader/MODULES_TSV",
+    "--image",
+    "libvorbisfile",
+    "--out",
+    "/out/retn/libvorbisfile.tsv",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift"
+   ],
+   "outputs": [
+    "retn/libvorbisfile.tsv"
+   ]
+  }
+ ],
+ "outputs": {
+  "RETN": "retn"
+ },
+ "uses": [
+  {
+   "root": "ports/fnv-nx/lift/facts",
+   "output": "FACTS"
+  },
+  {
+   "root": "ports/fnv-nx/loader",
+   "output": "MODULES_TSV"
+  }
+ ]
+}
