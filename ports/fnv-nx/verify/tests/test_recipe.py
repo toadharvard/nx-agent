@@ -638,9 +638,9 @@ def main():
         rw = recipe.build(xrepo, ROOT, SS, BASE + "/xo2w", ext=ec)
     finally:
         recipe.cas.ingest, recipe.subprocess.run = real_ingest, real_run
-    check("external: a warm build makes 0 ingests of the external and runs no git read-tree/checkout/fetch",
-          rw["status"] == "green" and not [i for i in ingests if ec in i] and not [c for c in runs if c[:1] == ["git"] and ("checkout-index" in c or "read-tree" in c or "fetch" in c)],
-          (rw.get("failure"), [i for i in ingests if ec in i]))
+    check("external: a warm build ingests no whole external checkout (only the include subtrees a PP stage names) and runs no git read-tree/checkout/fetch",
+          rw["status"] == "green" and not [i for i in ingests if i.rstrip("/") == ec + "/" + commit + ".co"] and not [c for c in runs if c[:1] == ["git"] and ("checkout-index" in c or "read-tree" in c or "fetch" in c)],
+          (rw.get("failure"), [i for i in ingests if ec in i]))   # a PP stage ingests the subtrees its tokens name (pp_subtrees), never the whole checkout
     rv = recipe.build(xrepo, ROOT, BASE + "/store-v", BASE + "/xo2v", ext=ec)   # another store, same external cache: ingests once, no checkout
     check("external: a new store with the same cache ingests the checkout once and stores its own fact", rv["status"] == "green"
           and os.path.isfile(BASE + "/store-v/external-facts/%s-%s.json" % (commit, thash)), rv.get("failure"))
@@ -788,7 +788,7 @@ def main():
     for tgt in ("guest", "host"):
         ent = dict(hr[ROOT], target=tgt)
         er = [e for e in recipe.check(mut(include=RECIPE["include"] + [T + "hdr_hdr"]), ROOT, hf, dict(hr, **{ROOT: ent}), None, rk) if "in no directory output of a root that this root `uses`" in e]
-        check("include dir in a header-class root accepted from a %s includer" % tgt, not er, er)
+        check("include dir in a header-class root, without a declared INCLUDE output and `uses`, rejected from a %s includer (the home is the declared output)" % tgt, len(er) == 1, er)
         check("header_dirs of a %s root holds the header root" % tgt, T + "hdr_hdr" in recipe.header_dirs(mut(), ROOT, dict(hr, **{ROOT: ent}), rk))
     # one name, one file: two include dirs of one recipe holding a header of the same include-relative path are red
     rr2 = dict(rr, **{T + "hdr_prod2": {"path": T + "hdr_prod2", "class": "product", "target": own}})
