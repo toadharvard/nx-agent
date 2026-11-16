@@ -1502,3 +1502,8 @@ Paused: w3b, w4, farm; no other work.
     - gate_d3d9total green, 332/332.
     - gate_pure whole set 85/94; render/bridgefacts uncertified 0. The 9 others are contract/ (L1), manifest/ and platform/ (L5).
 - bottleneck: base3 retake (L3a); farm1 sm_link; the cand4 base.
+- 03:25Z L1 reported, from w28 275771a6f: 17 abspath findings in L6, 23 render recipe-check errors, and a d3d9total crash (clang -m32 `bits/libc-header-start.h`).
+    - Lead check: w28's gate_abspath over w6-root 7a75284ec's tree finds 0 render/bridgefacts findings. The 7 findings are in contract/ and lift/. L1's 17 are sites of an older render copy; L1 has been told.
+    - The crash is a rule-3 class: gate_d3d9total calls gcc/clang directly with the host include set. w6 moves every compile of the gate onto recipe stages with the pinned debs and deletes the direct path. Status: doing.
+    - w6 also resyncs verify/ to 275771a6f as a union, keeping w28's contract rows and L6's render rows plus wine_fixme row 25, and reports the recipe-check counts.
+- bottleneck: w6 d3d9total-on-stages; w28 carrying the L6 admit/wine_fixme rows; base3 retake; farm1 sm_link; the cand4 base.
