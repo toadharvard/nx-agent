@@ -1610,3 +1610,9 @@ Paused: w3b, w4, farm; no other work.
     - Red: bridgefacts, because its COM generator reads platform/audio, which cand4 cut.
     - w9 is doing: split bridgefacts by input closure (D9_* stay; COM_* go to bridgefacts/com) and delete the tracked com_spec.json, which duplicates COM_SPEC. L1 is asked to rule on admitting bridgefacts/com and bridgetable.
 - bottleneck: shim INCLUDE (L1/L2) for d3d9; the bridgefacts split (w9). 1 of 4 workers busy.
+- 06:45Z, done: the L6 head for cand5 is claude/fnv-l6-render-w9-cand4 ce86bbd83.
+    - It is 8faa8175d merged with cand4 62474771c, plus the bridgefacts split: bridgefacts keeps D9_*; the new root bridgefacts/com takes COM_* and is not admitted until L5's platform root returns. The tracked com_spec.json is deleted.
+    - recipe check: 11 of 12 admitted L6 roots valid. render/d3d9 is red only on shim INCLUDE (L1 w28-c5).
+    - gl4 has 22 files, the same as 8faa8175d; render/ differs only by the `plugins` removal in the pair/smscan host recipes.
+    - Sent to L1, L4 and L5. w9 is archived.
+- bottleneck: L1 w28-c5 (shim INCLUDE) and the cand5 verdict. No build of gl4 has run yet, so there is no libnxgl4.so sha. d3d9exports waits on lift/rt (L3a). 0 of 4 workers busy.
