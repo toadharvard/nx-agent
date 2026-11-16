@@ -228,7 +228,6 @@ void fnvnx_waveout_service(void)
 #include "waveout.env_const.gen.inc"   /* waveOutGetNumDevs: manifest/env_const.tsv */
 FNVNX_EXPORT("winmm.dll", "waveOutGetNumDevs", waveOutGetNumDevs, "func");
 
-FNVNX_EXPORT("winmm.dll", "waveOutGetDevCapsA", waveOutGetDevCapsA, "func");
 UINT waveOutGetDevCapsA(uintptr_t id, void *out, UINT cb)
 {
     os_lock(&g_lock);
@@ -243,8 +242,8 @@ UINT waveOutGetDevCapsA(uintptr_t id, void *out, UINT cb)
     memcpy(out, &c, cb < sizeof c ? cb : sizeof c);
     return OK;
 }
+FNVNX_EXPORT("winmm.dll", "waveOutGetDevCapsA", waveOutGetDevCapsA, "func");
 
-FNVNX_EXPORT("winmm.dll", "waveOutGetErrorTextA", waveOutGetErrorTextA, "func");
 UINT waveOutGetErrorTextA(UINT e, char *text, UINT cch)
 {
     static const char *const t[] = {
@@ -275,8 +274,8 @@ UINT waveOutGetErrorTextA(UINT e, char *text, UINT cch)
     }
     return OK;
 }
+FNVNX_EXPORT("winmm.dll", "waveOutGetErrorTextA", waveOutGetErrorTextA, "func");
 
-FNVNX_EXPORT("winmm.dll", "waveOutOpen", waveOutOpen, "func");
 UINT waveOutOpen(void **phwo, UINT dev, const void *pwfx, uintptr_t cb, uintptr_t inst, DWORD fl)
 {
     if (fl & ~0x7000Fu) return INVALFLAG;
@@ -312,8 +311,8 @@ UINT waveOutOpen(void **phwo, UINT dev, const void *pwfx, uintptr_t cb, uintptr_
     os_unlock(&g_lock);
     return OK;
 }
+FNVNX_EXPORT("winmm.dll", "waveOutOpen", waveOutOpen, "func");
 
-FNVNX_EXPORT("winmm.dll", "waveOutClose", waveOutClose, "func");
 UINT waveOutClose(void *h)
 {
     os_lock(&g_lock);
@@ -332,8 +331,8 @@ UINT waveOutClose(void *h)
     free(w);
     return OK;
 }
+FNVNX_EXPORT("winmm.dll", "waveOutClose", waveOutClose, "func");
 
-FNVNX_EXPORT("winmm.dll", "waveOutPrepareHeader", waveOutPrepareHeader, "func");
 UINT waveOutPrepareHeader(void *h, void *hdr, UINT cb)
 {
     os_lock(&g_lock);
@@ -345,8 +344,8 @@ UINT waveOutPrepareHeader(void *h, void *hdr, UINT cb)
     os_unlock(&g_lock);
     return rc;
 }
+FNVNX_EXPORT("winmm.dll", "waveOutPrepareHeader", waveOutPrepareHeader, "func");
 
-FNVNX_EXPORT("winmm.dll", "waveOutUnprepareHeader", waveOutUnprepareHeader, "func");
 UINT waveOutUnprepareHeader(void *h, void *hdr, UINT cb)
 {
     os_lock(&g_lock);
@@ -358,8 +357,8 @@ UINT waveOutUnprepareHeader(void *h, void *hdr, UINT cb)
     os_unlock(&g_lock);
     return rc;
 }
+FNVNX_EXPORT("winmm.dll", "waveOutUnprepareHeader", waveOutUnprepareHeader, "func");
 
-FNVNX_EXPORT("winmm.dll", "waveOutWrite", waveOutWrite, "func");
 UINT waveOutWrite(void *h, void *hdr, UINT cb)
 {
     os_lock(&g_lock);
@@ -389,8 +388,8 @@ UINT waveOutWrite(void *h, void *hdr, UINT cb)
     os_unlock(&g_lock);
     return rc;
 }
+FNVNX_EXPORT("winmm.dll", "waveOutWrite", waveOutWrite, "func");
 
-FNVNX_EXPORT("winmm.dll", "waveOutPause", waveOutPause, "func");
 UINT waveOutPause(void *h)
 {
     os_lock(&g_lock);
@@ -399,8 +398,8 @@ UINT waveOutPause(void *h)
     os_unlock(&g_lock);
     return w ? OK : INVALHANDLE;
 }
+FNVNX_EXPORT("winmm.dll", "waveOutPause", waveOutPause, "func");
 
-FNVNX_EXPORT("winmm.dll", "waveOutRestart", waveOutRestart, "func");
 UINT waveOutRestart(void *h)
 {
     os_lock(&g_lock);
@@ -414,8 +413,8 @@ UINT waveOutRestart(void *h)
     os_unlock(&g_lock);
     return w ? OK : INVALHANDLE;
 }
+FNVNX_EXPORT("winmm.dll", "waveOutRestart", waveOutRestart, "func");
 
-FNVNX_EXPORT("winmm.dll", "waveOutReset", waveOutReset, "func");
 UINT waveOutReset(void *h)
 {
     os_lock(&g_lock);
@@ -438,8 +437,8 @@ UINT waveOutReset(void *h)
     os_unlock(&g_lock);
     return w ? OK : INVALHANDLE;
 }
+FNVNX_EXPORT("winmm.dll", "waveOutReset", waveOutReset, "func");
 
-FNVNX_EXPORT("winmm.dll", "waveOutGetPosition", waveOutGetPosition, "func");
 UINT waveOutGetPosition(void *h, void *out, UINT cb)
 {
     os_lock(&g_lock);
@@ -458,8 +457,8 @@ UINT waveOutGetPosition(void *h, void *out, UINT cb)
     os_unlock(&g_lock);
     return rc;
 }
+FNVNX_EXPORT("winmm.dll", "waveOutGetPosition", waveOutGetPosition, "func");
 
-FNVNX_EXPORT("winmm.dll", "waveOutSetVolume", waveOutSetVolume, "func");
 UINT waveOutSetVolume(void *h, DWORD vol)
 {
     os_lock(&g_lock);
@@ -473,8 +472,8 @@ UINT waveOutSetVolume(void *h, DWORD vol)
     os_unlock(&g_lock);
     return rc;
 }
+FNVNX_EXPORT("winmm.dll", "waveOutSetVolume", waveOutSetVolume, "func");
 
-FNVNX_EXPORT("winmm.dll", "waveOutGetVolume", waveOutGetVolume, "func");
 UINT waveOutGetVolume(void *h, DWORD *vol)
 {
     os_lock(&g_lock);
@@ -486,5 +485,6 @@ UINT waveOutGetVolume(void *h, DWORD *vol)
     os_unlock(&g_lock);
     return rc;
 }
+FNVNX_EXPORT("winmm.dll", "waveOutGetVolume", waveOutGetVolume, "func");
 
 }   // extern "C"

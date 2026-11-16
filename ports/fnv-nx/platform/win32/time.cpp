@@ -8,7 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-FNVNX_EXPORT("kernel32.dll", "QueryPerformanceCounter", QueryPerformanceCounter, "func");
 extern "C" BOOL QueryPerformanceCounter(LARGE_INTEGER *c)
 {
     if (!c) {
@@ -18,8 +17,8 @@ extern "C" BOOL QueryPerformanceCounter(LARGE_INTEGER *c)
     c->QuadPart = (LONGLONG)clk_read_ticks();
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "QueryPerformanceCounter", QueryPerformanceCounter, "func");
 
-FNVNX_EXPORT("kernel32.dll", "QueryPerformanceFrequency", QueryPerformanceFrequency, "func");
 extern "C" BOOL QueryPerformanceFrequency(LARGE_INTEGER *f)
 {
     if (!f) {
@@ -29,11 +28,12 @@ extern "C" BOOL QueryPerformanceFrequency(LARGE_INTEGER *f)
     f->QuadPart = (LONGLONG)clk_tick_freq();
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "QueryPerformanceFrequency", QueryPerformanceFrequency, "func");
 
-FNVNX_EXPORT("kernel32.dll", "GetTickCount", GetTickCount, "func");
 extern "C" DWORD GetTickCount(void) { return W32_DW((DWORD)clk_read_tick_ms()); }
-FNVNX_EXPORT("winmm.dll", "timeGetTime", timeGetTime, "func");
+FNVNX_EXPORT("kernel32.dll", "GetTickCount", GetTickCount, "func");
 extern "C" DWORD timeGetTime(void) { return GetTickCount(); }
+FNVNX_EXPORT("winmm.dll", "timeGetTime", timeGetTime, "func");
 /* timer resolution: the device range is 1..1000000 ms (timeGetDevCaps); timeBeginPeriod(p) adds one reference to
  * period p, timeEndPeriod(p) removes one of the same p (TIMERR_NOCANDO when there is none); the effective
  * resolution is the smallest period with references, else the default 15.6 ms. */
@@ -54,7 +54,6 @@ extern "C" UINT timeGetDevCaps(void *ptc, UINT cbtc)
     return TIMERR_NOERROR_;
 }
 
-FNVNX_EXPORT("winmm.dll", "timeBeginPeriod", timeBeginPeriod, "func");
 extern "C" UINT timeBeginPeriod(UINT p)
 {
     if (p < TIME_PERIOD_MIN || p > TIME_PERIOD_MAX)
@@ -73,8 +72,8 @@ extern "C" UINT timeBeginPeriod(UINT p)
     os_unlock(&g_tp_lock);
     return rc;
 }
+FNVNX_EXPORT("winmm.dll", "timeBeginPeriod", timeBeginPeriod, "func");
 
-FNVNX_EXPORT("winmm.dll", "timeEndPeriod", timeEndPeriod, "func");
 extern "C" UINT timeEndPeriod(UINT p)
 {
     UINT rc = TIMERR_NOCANDO_;
@@ -89,6 +88,7 @@ extern "C" UINT timeEndPeriod(UINT p)
     os_unlock(&g_tp_lock);
     return rc;
 }
+FNVNX_EXPORT("winmm.dll", "timeEndPeriod", timeEndPeriod, "func");
 
 /* effective sleep/timer granularity in microseconds, for Sleep-style waits */
 extern "C" unsigned fnvnx_timer_resolution_us(void)
@@ -223,7 +223,6 @@ static bool st_to_time(const SYSTEMTIME *st, int64_t *out)
     return true;
 }
 
-FNVNX_EXPORT("kernel32.dll", "SystemTimeToFileTime", SystemTimeToFileTime, "func");
 /* wine-9.0:dlls/kernelbase/file.c:SystemTimeToFileTime */
 extern "C" BOOL SystemTimeToFileTime(const SYSTEMTIME *st, LPFILETIME ft)
 {
@@ -235,34 +234,35 @@ extern "C" BOOL SystemTimeToFileTime(const SYSTEMTIME *st, LPFILETIME ft)
     w32_set_ft(ft, (ULONGLONG)t);
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "SystemTimeToFileTime", SystemTimeToFileTime, "func");
 
-FNVNX_EXPORT("kernel32.dll", "FileTimeToSystemTime", FileTimeToSystemTime, "func");
 extern "C" BOOL FileTimeToSystemTime(const FILETIME *ft, LPSYSTEMTIME st) { return ft_to_st((int64_t)w32_ft64(ft), st); }
+FNVNX_EXPORT("kernel32.dll", "FileTimeToSystemTime", FileTimeToSystemTime, "func");
 
-FNVNX_EXPORT("kernel32.dll", "GetSystemTimeAsFileTime", GetSystemTimeAsFileTime, "func");
 /* wine-9.0:dlls/kernelbase/file.c:GetSystemTimeAsFileTime */
 extern "C" void GetSystemTimeAsFileTime(LPFILETIME ft) { w32_set_ft(ft, (ULONGLONG)clk_read_filetime()); }
+FNVNX_EXPORT("kernel32.dll", "GetSystemTimeAsFileTime", GetSystemTimeAsFileTime, "func");
 
-FNVNX_EXPORT("kernel32.dll", "GetSystemTime", GetSystemTime, "func");
 /* wine-9.0:dlls/kernelbase/file.c:GetSystemTime (the result of FileTimeToSystemTime is not used there) */
 extern "C" void GetSystemTime(LPSYSTEMTIME st) { ft_to_st(clk_read_filetime(), st); }
+FNVNX_EXPORT("kernel32.dll", "GetSystemTime", GetSystemTime, "func");
 
 /* the local time of a UTC FILETIME: wine-9.0:dlls/ntdll/time.c:RtlSystemTimeToLocalTime = utc - TimeZoneBias, the
  * bias of the declared machine's zone now (TZ_AT through clk_zone_offset_minutes: east positive, so minus the bias is
  * plus the offset); 64-bit wrapping */
 static int64_t ft_utc_to_local(int64_t utc) { return (int64_t)((uint64_t)utc + (uint64_t)((int64_t)clk_zone_offset_minutes() * 600000000ll)); }
 
-FNVNX_EXPORT("kernel32.dll", "GetLocalTime", GetLocalTime, "func");
 /* wine-9.0:dlls/kernelbase/file.c:GetLocalTime */
 extern "C" void GetLocalTime(LPSYSTEMTIME st) { ft_to_st(ft_utc_to_local(clk_read_filetime()), st); }
+FNVNX_EXPORT("kernel32.dll", "GetLocalTime", GetLocalTime, "func");
 
-FNVNX_EXPORT("kernel32.dll", "FileTimeToLocalFileTime", FileTimeToLocalFileTime, "func");
 /* wine-9.0:dlls/kernelbase/file.c:FileTimeToLocalFileTime (always TRUE: RtlSystemTimeToLocalTime is STATUS_SUCCESS) */
 extern "C" BOOL FileTimeToLocalFileTime(const FILETIME *in, LPFILETIME out)
 {
     w32_set_ft(out, (ULONGLONG)ft_utc_to_local((int64_t)w32_ft64(in)));
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "FileTimeToLocalFileTime", FileTimeToLocalFileTime, "func");
 
 /* a TIME_ZONE_INFORMATION transition date as local seconds since 1970 in `year`: wYear != 0 is an absolute date,
  * else wDay 1..5 is the n-th (5 = last) wDayOfWeek of wMonth */
@@ -329,7 +329,6 @@ static bool tz_current(TIME_ZONE_INFORMATION *tz)
     return true;
 }
 
-FNVNX_EXPORT("kernel32.dll", "GetTimeZoneInformation", GetTimeZoneInformation, "func");
 extern "C" DWORD GetTimeZoneInformation(LPTIME_ZONE_INFORMATION tz)
 {
     if (!tz) {
@@ -344,6 +343,7 @@ extern "C" DWORD GetTimeZoneInformation(LPTIME_ZONE_INFORMATION tz)
         return TIME_ZONE_ID_UNKNOWN;
     return tz_is_dst(tz, (clk_peek_filetime() - FT_UNIX_EPOCH) / 10000000) ? 2 /* TIME_ZONE_ID_DAYLIGHT */ : 1 /* TIME_ZONE_ID_STANDARD */;
 }
+FNVNX_EXPORT("kernel32.dll", "GetTimeZoneInformation", GetTimeZoneInformation, "func");
 
 #ifndef TIME_ZONE_ID_STANDARD
 #define TIME_ZONE_ID_STANDARD 1
@@ -409,7 +409,6 @@ static DWORD get_timezone_id(const TIME_ZONE_INFORMATION *info, int64_t time)
     return TIME_ZONE_ID_STANDARD;
 }
 
-FNVNX_EXPORT("kernel32.dll", "SystemTimeToTzSpecificLocalTime", SystemTimeToTzSpecificLocalTime, "func");
 /* wine-9.0:dlls/kernelbase/locale.c:SystemTimeToTzSpecificLocalTime. A NULL zone is the declared machine's current
  * zone (RtlQueryTimeZoneInformation there). */
 extern "C" BOOL SystemTimeToTzSpecificLocalTime(LPTIME_ZONE_INFORMATION tz, const SYSTEMTIME *utc, LPSYSTEMTIME local)
@@ -439,8 +438,8 @@ extern "C" BOOL SystemTimeToTzSpecificLocalTime(LPTIME_ZONE_INFORMATION tz, cons
     ft = (int64_t)((uint64_t)ft - (uint64_t)(bias_min * 600000000ll));
     return ft_to_st(ft, local);
 }
+FNVNX_EXPORT("kernel32.dll", "SystemTimeToTzSpecificLocalTime", SystemTimeToTzSpecificLocalTime, "func");
 
-FNVNX_EXPORT("kernel32.dll", "CompareFileTime", CompareFileTime, "func");
 /* wine-9.0:dlls/kernelbase/file.c:CompareFileTime (NULL on either side is -1; the parts compare unsigned, high first) */
 extern "C" LONG CompareFileTime(const FILETIME *a, const FILETIME *b)
 {
@@ -449,4 +448,5 @@ extern "C" LONG CompareFileTime(const FILETIME *a, const FILETIME *b)
     ULONGLONG x = w32_ft64(a), y = w32_ft64(b);
     return x < y ? -1 : x > y ? 1 : 0;
 }
+FNVNX_EXPORT("kernel32.dll", "CompareFileTime", CompareFileTime, "func");
 

@@ -46,7 +46,6 @@ static bool bit(const uint32_t *m, DWORD i) { return (__atomic_load_n(&m[i / 32]
 static void bit_set(uint32_t *m, DWORD i) { __atomic_or_fetch(&m[i / 32], 1u << (i % 32), __ATOMIC_RELEASE); }
 static void bit_clear(uint32_t *m, DWORD i) { __atomic_and_fetch(&m[i / 32], ~(1u << (i % 32)), __ATOMIC_RELEASE); }
 
-FNVNX_EXPORT("kernel32.dll", "FlsAlloc", FlsAlloc, "func");
 extern "C" DWORD FlsAlloc(fls_callback cb)
 {
     os_lock(&g_fls_lock);
@@ -61,8 +60,8 @@ extern "C" DWORD FlsAlloc(fls_callback cb)
     SetLastError(ERROR_NOT_ENOUGH_MEMORY);
     return FLS_OUT_OF_INDEXES_;
 }
+FNVNX_EXPORT("kernel32.dll", "FlsAlloc", FlsAlloc, "func");
 
-FNVNX_EXPORT("kernel32.dll", "FlsGetValue", FlsGetValue, "func");
 extern "C" LPVOID FlsGetValue(DWORD i)
 {
     struct w32_thread *t = w32_self();
@@ -74,8 +73,8 @@ extern "C" LPVOID FlsGetValue(DWORD i)
     struct fls_data *d = t_fls;
     return d ? __atomic_load_n(&d->val[i], __ATOMIC_ACQUIRE) : NULL;
 }
+FNVNX_EXPORT("kernel32.dll", "FlsGetValue", FlsGetValue, "func");
 
-FNVNX_EXPORT("kernel32.dll", "FlsSetValue", FlsSetValue, "func");
 extern "C" BOOL FlsSetValue(DWORD i, LPVOID v)
 {
     if (i == 0 || i >= FLS_SLOTS) {
@@ -106,6 +105,7 @@ extern "C" BOOL FlsSetValue(DWORD i, LPVOID v)
     os_unlock(&g_fls_lock);
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "FlsSetValue", FlsSetValue, "func");
 
 /* the first thread (registration order) holding a value in slot i; the value is taken (cell cleared). NULL: none.
  * Caller holds g_fls_lock. */
@@ -119,7 +119,6 @@ static void *take_first(DWORD i)
     return NULL;
 }
 
-FNVNX_EXPORT("kernel32.dll", "FlsFree", FlsFree, "func");
 extern "C" BOOL FlsFree(DWORD i)
 {
     os_lock(&g_fls_lock);
@@ -145,6 +144,7 @@ extern "C" BOOL FlsFree(DWORD i)
     os_unlock(&g_fls_lock);
     return TRUE;
 }
+FNVNX_EXPORT("kernel32.dll", "FlsFree", FlsFree, "func");
 
 /* The calling thread ends (thread.cpp ExitThread / thread start return, module.cpp ExitProcess): callbacks in ascending
  * index order for its non-NULL values, then its cells are released. */

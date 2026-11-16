@@ -476,10 +476,6 @@
    "cxx_origin": "native"
   },
   {
-   "path": "ports/fnv-nx/contract/include",
-   "class": "header"
-  },
-  {
    "path": "ports/fnv-nx/render/d3d9",
    "class": "product",
    "target": "guest",
@@ -618,7 +614,13 @@
    "recipe": "ports/fnv-nx/contract/target/build.json"
   },
   {
-   "path": "ports/fnv-nx/loader/include",
+   "path": "ports/fnv-nx/loader/hdr",
+   "class": "product",
+   "target": "guest",
+   "recipe": "ports/fnv-nx/loader/hdr/build.json"
+  },
+  {
+   "path": "ports/fnv-nx/loader/hdr/include",
    "class": "header"
   },
   {
@@ -670,6 +672,23 @@
   },
   {
    "path": "ports/fnv-nx/hostabi/include",
+   "class": "header"
+  },
+  {
+   "path": "ports/fnv-nx/bridgefacts/com",
+   "class": "tool",
+   "target": "host",
+   "entry": [],
+   "recipe": "ports/fnv-nx/bridgefacts/com/build.json"
+  },
+  {
+   "path": "ports/fnv-nx/contract/exporthdr",
+   "class": "product",
+   "target": "guest",
+   "recipe": "ports/fnv-nx/contract/exporthdr/build.json"
+  },
+  {
+   "path": "ports/fnv-nx/contract/exporthdr/include",
    "class": "header"
   }
  ]
