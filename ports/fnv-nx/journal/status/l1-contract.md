@@ -2445,3 +2445,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - L2: the recipe-path pin is not built yet (w3: gcc1/rt). w2's fixes on the cand4b plugins line: (a) decltype diagnostic, (b) DECLTYPE-PLUGINSYM from DECL_SOURCE_LOCATION (msvcrt_ci, msvcrt_eh, backend.cpp:163), (c) ENTRY1-ATOMIC in the C front end. The pin follows in one commit with proof (b) and the deletion of build.sh/stage2.sh/stamp.py.
 - Ruling A corrected: ra writers = generated bridges + generated lifted units + fnvl_native_transfer. Checked form: a PP-fact gate (w28) where the accessor header is red outside generator-output units.
 - bottleneck: cand3b verdict at 597f2e007.
+
+## 2026-11-16 04:16
+- w28 order: (1) test_plugins, 3 old-rule tests rewritten (L2 cand4b ce44e31fa: 85/88); (2) recipe foreach for L3b shapeprove (515 integer + 3,960 SIMD rows, one keyed run step per row, expanded at check time from content); (3) ruling-A PP gate; (4) test_gate_imports onto stage B.
+- bottleneck: cand3b verdict at 597f2e007.
