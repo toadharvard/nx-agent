@@ -2482,3 +2482,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:24
 - The w28 test_gate_imports stage-B rewrite waits for the trunk (after cand3b merges; rebase w28 onto the trunk head). Meanwhile: rawrite pack case, a farm job for test_sandbox 9a + test_runpython, the include_of doc fix, the render/ take from L6 a3683a468.
 - bottleneck: cand3b verdict at 597f2e007.
+
+## 2026-11-16 04:25
+- L3a base3 f96997661: EH handlers are FNVNX_EXPORT entry records in '!rt', with keys from fnvnx_import_key; ehkeys.py is deleted; lift/rt entry 34 / data 1 / func 0; on the farm pin 11/12 lift/rt units compile (dispatch.c is L2's); recipe check 61 roots valid. Accepted.
+- w28 first item: declare '!rt' in contract/modules.py as a non-image runtime module (no spec, decltype conv; red if it appears in an image's imports).
+- bottleneck: cand3b verdict at 597f2e007.
