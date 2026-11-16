@@ -2926,3 +2926,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - Orchestrator order: cand4 is FROZEN at 4fa00a7cb, taking only fixes for its own reds; everything new goes to cand5.
   - The farm runs the verdict now (ETA about 30 min). The merge follows at once if green. An item whose red cannot be fixed inside cand4's scope is dropped.
 - bottleneck: the cand4 verdict on 4fa00a7cb.
+- cand5 toolchain/ head: L2 cand4b 410ab9d13 (on 6f147b874), with fnvnx imports and no sys.path inserts; toolchain/ is at 0 under c5's gate.
+  - It runs only under c5's recipe, so the cand5 verdict is its first run.
+  - L2 counted 131 bare imports outside toolchain/ on the c5 tree, against w28's 0 uncertified (1064 files). The two are to be reconciled at the cand5 verdict.
