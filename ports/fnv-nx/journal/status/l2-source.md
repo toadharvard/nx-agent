@@ -666,3 +666,7 @@ After the first frame:
 - 2026-11-16 04:10Z: L3a reports that the decltype error at lift/rt msvcrt_ci.cc:69 and msvcrt_eh.cc:530 points to the end of the TU and names no symbol. It is absent on 84f0883e and present from cand4b on. To w2, first under item 1:
   - every decltype error names the symbol and the referencing location; the commit goes straight to w8;
   - then a rebuild with L1 w28 08109b9ce (the FNVNX_EXPORT `&symbol` form). If still red, w2 closes the cand4b gap as a class.
+- 2026-11-16 04:15Z: L1 asked whether the recipe-path pin closes the 3 lift/rt reds. Not yet: the pin is not built.
+  - At L3a base3 330e873c7, all three decltype sites are fnvnx_dispatch.
+  - L1's rule: the writer takes the declaration from the tree (DECL_SOURCE_LOCATION). It goes to w2 together with ENTRY1-ATOMIC in C.
+  - The recipe-path pin (w3) is built from the plugins head that has them, and goes to L1 with proof (b) and the deletion of the old path.
