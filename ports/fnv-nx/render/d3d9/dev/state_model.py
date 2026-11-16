@@ -4,8 +4,6 @@ Table lines: NAME default blocks group.  default = C++ expr (F0/F1 = float bit p
 blocks = P pixel / V vertex / - none (every state is in D3DSBT_ALL by rule); group = dirty group the draw path reads.
 Block lists: MS D3DSTATEBLOCKTYPE pages "Saving Pixel/Vertex States With a StateBlock" (primary); where MS lists omit a state, Wine stateblock.c decides (FOGENABLE, NORMALIZENORMALS).
 Defaults: MS D3DRENDERSTATETYPE / D3DSAMPLERSTATETYPE / D3DTEXTURESTAGESTATETYPE pages; deviations are reported by the test against nx_d3d9_default_rs."""
-import os as _q_os, sys as _q_sys
-_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 RS = """
 ZENABLE @zenable P DEPTH
 FILLMODE D3DFILL_SOLID P RASTER
@@ -184,5 +182,5 @@ HAND_SB = ["Capture", "Apply"]
 GROUPS_EXTRA = ["LIGHTS"]   # dirty groups of state that lives outside the slot families (sparse lights)
 if __name__ == "__main__":
     import sys
-    import fnvnx.render.d3d9.dev.state_gen as state_gen; import fnvnx.render.d3d9.dev.state_model as state_model   # the model is its own module: this run is the script, state_model the same text as an imported module
+    from fnvnx.render.d3d9.dev import state_gen, state_model  # the model is its own module: this run is the script, state_model the same text as an imported module
     state_gen.emit(state_model, sys.argv[1], sys.argv[2])

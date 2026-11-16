@@ -230,7 +230,6 @@ extern "C" BOOL TerminateProcess(HANDLE h, UINT code)
     return FALSE;
 }
 FNVNX_EXPORT("kernel32.dll", "TerminateProcess", TerminateProcess, "func");
-FNVNX_CITE(TerminateProcess, "dm:1");   /* verify/declared_machine.tsv row 1: the non-self path is the declared machine's answer */
 
 void w32_log_unhandled(const void *ep, const char *tail);   /* thread.cpp: next to the record layout */
 

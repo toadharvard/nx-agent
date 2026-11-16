@@ -132,9 +132,8 @@ void *fnvnx_win32_lookup_import(const char *dll, const char *name, unsigned ordi
 typedef void (*fnvnx_raise_fn)(uint32_t code, uint32_t flags, uint32_t nargs, const uintptr_t *args);
 void fnvnx_win32_set_raise_backend(fnvnx_raise_fn fn);
 /* Test hooks. Module table: -1 for a system DLL (pinned), the reference count of a registered module, 0 for a
- * handle that is no module. Steam: the number of (object, id) registrations of SteamAPI_RegisterCallback. */
+ * handle that is no module. */
 int fnvnx_module_load_count(HMODULE);
-int fnvnx_steam_callback_count(void);
 /* The i-th system module (the distinct DLL names of the export table, as the exe imports them), NULL past the last */
 const char *fnvnx_win32_system_module(unsigned i);
 /* window/input plumbing for S6/S7 */

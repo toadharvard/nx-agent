@@ -12,8 +12,6 @@ Rules (total over the spec's item kinds; an item this file has no rule for stops
   buffer with canon `ohandle` (private data D3DSPD_IUNKNOWN)        the bytes are a GUEST object pointer: passed through unchanged. The calls our
                             object model makes on it (AddRef / Release) go through nxd3d_app_* (dev/app_unk_guest.cpp -> fnvnx_guest_invoke of L3a)
   ret: void `v`, float `f` (x87 ST0 on the guest side), everything else one 32-bit `i` (HRESULT, counts, enums, opaque handles)."""
-import os as _q_os, sys as _q_sys
-_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json, os, sys
 def die(msg): sys.stderr.write("gen_bridge: " + msg + "\n"); sys.exit(2)
 

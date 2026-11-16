@@ -37,15 +37,12 @@ No other assumption: where the closure needs a fact that none of these gives, th
 String rule: the string at D is "" when every store that covers byte D writes the constant 0 and the class has no leak; any other
 writer (a copy of a longer string, a call that receives the address) leaves it unresolved, so no extent of the array is assumed.
 """
-import os as _q_os, sys as _q_sys
-_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import collections
 import os
 import struct
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import fnvnx.manifest.funcfacts as funcfacts
+from fnvnx.manifest import funcfacts
 X = funcfacts.X
 
 MAXJOBS = 6000

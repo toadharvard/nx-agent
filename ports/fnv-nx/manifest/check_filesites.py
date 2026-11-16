@@ -11,12 +11,10 @@ The image holds, at 16-aligned entries:
 Then the classes of fileset_classes.py are checked, and the domain gate on an import without a ROLES row.
 Usage: check_filesites.py
 """
-import os as _q_os, sys as _q_sys
-_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, struct, sys, tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import fnvnx.manifest.funcfacts as funcfacts; import fnvnx.manifest.pemanifest as pemanifest; import fnvnx.manifest.filesites as filesites; import fnvnx.manifest.fileset_classes as fileset_classes
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.manifest import funcfacts, pemanifest, filesites, fileset_classes
 
 BASE = 0x400000
 IMP = {"CreateFileA": 0x403000, "DeleteFileA": 0x403004, "GetModuleFileNameA": 0x403008, "CreateDirectoryA": 0x40300c,

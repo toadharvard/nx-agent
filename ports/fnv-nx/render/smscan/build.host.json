@@ -15,6 +15,5 @@
   "cxx": [],
   "asm": []
  },
- "link": null,
- "plugins": []
+ "link": null
 }

@@ -1,4 +1,4 @@
-# id	condition	multiplicity	(the Wine function of an id is its row in verify/wine_fixme.tsv; only the condition and multiplicity are written here)
+# id	condition	multiplicity	(the Wine function of an id is its row in render/d3d9/wine_fixme.tsv; only the condition and multiplicity are written here)
 2	always (owner: pv_exit.cpp)	per call
 3	always (owner: pv_exit.cpp)	per call
 10	D3DRS_CLIPPING enabled ("Clipping is not implemented")	per call

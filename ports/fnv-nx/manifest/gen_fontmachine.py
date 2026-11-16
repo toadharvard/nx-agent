@@ -16,14 +16,12 @@ Inputs are the pinned files of fnv-nx-build tools/fonts-wine9 (inputs/ and fonts
 Refusals (exit 1): the row is absent or has fewer than the ten string fields; no substitute line is found; the fonts directory holds no font file.
 Assumptions: Wine 9.0 and fontconfig as documented (ASM-003); the compiler is correct (ASM-001).
 """
-import os as _q_os, sys as _q_sys
-_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import re
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import fnvnx.manifest.fontfamilies as fontfamilies
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.manifest import fontfamilies
 
 inf, fontc, conf, fdir, out = sys.argv[1:6]
 src = open(fontc).read()

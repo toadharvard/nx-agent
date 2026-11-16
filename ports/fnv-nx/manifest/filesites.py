@@ -20,12 +20,10 @@ Assumptions: those of regsites.py (ASM-001, ASM-003, ASM-006, ASM-012, ASM-013; 
 Usage: filesites.py <dir-with-modules> <root.exe> <out.tsv> --bridge bridge.tsv --dllkind dllkind.py --dllkind-sha SHA256 [--facts DIR]
 Image set: the root and the dlls of dllkind role `image` (pemanifest.closure); no name list.
 """
-import os as _q_os, sys as _q_sys
-_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import collections, os, re, sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import fnvnx.manifest.funcfacts as funcfacts; import fnvnx.manifest.pemanifest as pemanifest; import fnvnx.manifest.regsites as regsites
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.manifest import funcfacts, pemanifest, regsites
 from fnvnx.manifest.regsites import Analyzer, NOPUSH
 
 # (nargs, None (no key argument), name arg index, extra name arg index, out buffer arg index, kind)
