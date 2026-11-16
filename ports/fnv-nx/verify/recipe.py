@@ -1365,13 +1365,26 @@ def fact_sections(root, roots, repo):
     return sorted(out)
 
 
+def input_roots(rec):
+    """The roots that a recipe names in its run and generate inputs: {include_of: ROOT} and {external_of: ROOT, ...}. Writing the input in the recipe is the declaration of the edge (nothing else
+    declares it); it is an edge of the root graph like `uses`, so a cycle through it is red (link_roots_cycle) and root_reach follows it."""
+    out = []
+    for g in [g for k in ("generated", "run") for g in (rec.get(k) if isinstance(rec, dict) and isinstance(rec.get(k), list) else [])]:
+        for i in (g.get("inputs") if isinstance(g, dict) and isinstance(g.get("inputs"), list) else []):
+            if is_include_of(i):
+                out.append(split_spec(i["include_of"])[0])
+            elif is_external_of(i):
+                out.append(split_spec(i["external_of"])[0])
+    return out
+
+
 def root_edges(rec, root=None, roots=None, repo=None):
     """The roots a recipe depends on besides its own files: the declared loader, `uses` (outputs) and, with ROOTS, the roots `objects_of`
     reads, variants cut off."""
     lk = rec.get("link") if isinstance(rec, dict) else None
     ds = [split_spec(lk["loader"])[0]] if isinstance(lk, dict) and isinstance(lk.get("loader"), str) else []   # the declared loader: its defined names are inputs of the link check
     us = rec.get("uses") if isinstance(rec, dict) else None
-    return ds + [u["root"] for u in (us if isinstance(us, list) else []) if isinstance(u, dict) and isinstance(u.get("root"), str)] + (
+    return ds + [u["root"] for u in (us if isinstance(us, list) else []) if isinstance(u, dict) and isinstance(u.get("root"), str)] + input_roots(rec) + (
         objects_of_roots(rec, root, roots, repo) if isinstance(rec, dict) and roots else [])
 
 
@@ -4337,8 +4350,7 @@ def include_of_dirs(owner, roots, repo="."):
 
 
 def include_of_errors(where, ref, root, rec, roots, repo="."):
-    """[str]: the ONE rule of the `include_of` form (check, every step kind, and the mount). Red: a ref of another shape; ROOT is this root; not an admitted root; neither a root this
-    recipe `uses` nor a declared import of this root (the dependency is declared); its recipe cannot be read or holds no repository include directory."""
+    """[str]: the ONE rule of the `include_of` form (check, every step kind, and the mount). Red: a ref of another shape; ROOT is this root; not an admitted root; its recipe cannot be read or holds no repository include directory."""
     if not is_include_of(ref):
         return ["%s: %r is not {include_of: ROOT}" % (where, ref)]
     owner, me = ref["include_of"], split_spec(root)[0]
@@ -4346,9 +4358,6 @@ def include_of_errors(where, ref, root, rec, roots, repo="."):
         return ["%s: include_of names this root itself: its include dirs are its own sources" % where]
     if owner not in roots:
         return ["%s: include_of %s is not an admitted root" % (where, owner)]
-    declared = {u.get("root") for u in (rec.get("uses") or []) if isinstance(u, dict)} | set(roots[me].get("imports") or [] if isinstance(roots.get(me, {}).get("imports", []), list) else [])
-    if owner not in declared:
-        return ["%s: include_of %s is not a root this recipe `uses` nor a declared import of %s (declare the dependency)" % (where, owner, me)]
     try:
         dirs = include_of_dirs(owner, roots, repo)
     except ValueError as e:
@@ -4359,7 +4368,7 @@ def include_of_errors(where, ref, root, rec, roots, repo="."):
 def external_of_errors(where, ref, root, rec, roots, repo="."):
     """[str]: the ONE rule of the `external_of` form, called by check (every step kind), by resolve_input (key and mount). The form names the owner root OWNER, the
     external NAME of OWNER's own recipe and a path inside its tree. Red: a ref of another shape; OWNER is this root (that is the {external, path} form), is not an admitted root
-    or has no recipe; OWNER is neither a root this recipe `uses` nor a declared import (admit.json `imports`) of ROOT (the dependency is declared, never reached by name alone);
+    or has no recipe; (the input written in the recipe is the declaration of the edge: input_roots, root_edges);
     OWNER's recipe declares no external NAME; the external is a root's built output (a stage external: take it through `uses`); the path is absolute or leaves the tree.
     The pin is OWNER's (commit and tree_sha256): the mount is checked against it, so a changed pin is a changed tree in the key."""
     if not is_external_of(ref):
@@ -4370,9 +4379,6 @@ def external_of_errors(where, ref, root, rec, roots, repo="."):
         return ["%s: external_of names this root itself: use {external, path}" % where]
     if owner not in roots:
         return ["%s: external_of %s is not an admitted root" % (where, owner)]
-    declared = {u.get("root") for u in (rec.get("uses") or []) if isinstance(u, dict)} | set(roots[me].get("imports") or [] if isinstance(roots.get(me, {}).get("imports", []), list) else [])
-    if owner not in declared:
-        return ["%s: external_of %s is not a root this recipe `uses` nor a declared import of %s (declare the dependency)" % (where, owner, me)]
     try:
         orec = load_recipe(repo, roots, owner)
     except (OSError, ValueError, RecipeError) as e:
