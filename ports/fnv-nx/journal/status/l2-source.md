@@ -703,3 +703,9 @@ After the first frame:
 - 2026-11-16 05:00Z: orchestrator ruling on the NAMES type-letter table: option (c), Wine 9.0 dlls/msvcrt/undname.c, as source 2 for __unDName.
   - It is pinned in fnv-nx-build tools/*. A recipe stage generates the table from undname.c's type switch, citing the source line per row.
   - Open rule-1 item, after the first frame. It is done earlier only if a gate on a candidate turns the table red, and then only this minimal fix. w2 holds it.
+- 2026-11-16 05:05Z: w2 cand4b 63502c768.
+  - test_dispatch_entry: ok, 50/50. The header language universe comes from the recipe's PP deps: 11 headers, 5 compiled as C and 11 as C++.
+  - On L5 w33 7eafe53b5 + cand4b (d1a92e26 scratch): platform, @time and @vclock each build green, 112/112 objects.
+  - sympair: 23117 / 23117 / 23149 (69383 over 336 objects). nodecor: 500 per root, 1500 in total (real16 494, extern-in-internal 6).
+  - w2 has no open path item and waits; the NAMES table is held until after the first frame.
+- bottleneck: the L2 farm's recipe-path gcc1/rt (a) at 3f1036631 -> w3's pin commit. It blocks lift/rt on base3 and the ELF.
