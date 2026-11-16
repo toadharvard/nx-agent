@@ -1,22 +1,94 @@
 {
  "format": "fnvnx-recipe/1",
- "compiler": {"cc": "x86_64-linux-gnu-gcc-13", "cxx": "x86_64-linux-gnu-g++-13"},
- "flags": {"c": [], "cxx": [], "asm": []},
+ "compiler": {
+  "cc": "x86_64-linux-gnu-gcc-13",
+  "cxx": "x86_64-linux-gnu-g++-13"
+ },
+ "flags": {
+  "c": [],
+  "cxx": [],
+  "asm": []
+ },
  "include": [],
  "units": "all",
  "external": [
-  {"name": "sail", "repo": "fnv-nx-build", "ref": "tools/sail-mirror", "commit": "b4cf9ee3a15f99037e7a28a91e0494d1a8cb7fc2",
-   "tree_sha256": "1ba45588e2824da0cca9d9ec3e04ec9b4e1fa06a3a20db04e22bdc4966991631", "at": "/ext/sail"}
+  {
+   "name": "sail",
+   "repo": "fnv-nx-build",
+   "ref": "tools/sail-mirror",
+   "commit": "b4cf9ee3a15f99037e7a28a91e0494d1a8cb7fc2",
+   "tree_sha256": "1ba45588e2824da0cca9d9ec3e04ec9b4e1fa06a3a20db04e22bdc4966991631",
+   "at": "/ext/sail"
+  }
  ],
  "run": [
-  {"name": "isla", "exec": "/usr/bin/python3", "args": ["-I", "/in/2", "/in/3", "/in/4", "/in/5"],
-   "inputs": ["ports/fnv-nx/lift/proof/sail_pins.txt", "ports/fnv-nx/lift/proof/isla/build_isla.py",
-              {"external": "sail", "path": "isla-e9b5d9453942.tar.gz"}, {"external": "sail", "path": "isla-vendor.tar.gz"},
-              {"external": "sail", "path": "z3_solver-5.4.0.0-py3-none-manylinux_2_27_x86_64.whl"}],
-   "debs": ["python3", "python3-minimal", "python3.12", "python3.12-minimal", "libpython3.12-stdlib", "libpython3.12-minimal",
-            "cargo", "rustc", "gcc-13", "gcc-13-x86-64-linux-gnu", "cpp-13-x86-64-linux-gnu", "binutils", "binutils-x86-64-linux-gnu", "libc6-dev", "libgcc-13-dev",
-            "libstdc++-13-dev", "linux-libc-dev", "libc6"],
-   "outputs": ["isla-execute-function"], "scratch": ["/scratch"]}
+  {
+   "name": "isla",
+   "exec": "/usr/bin/python3",
+   "args": [
+    "-I",
+    "/in/2",
+    "/in/3",
+    "/in/4",
+    "/in/5"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/proof/sail_pins.txt",
+    "ports/fnv-nx/lift/proof/isla/build_isla.py",
+    {
+     "external": "sail",
+     "path": "isla-e9b5d9453942.tar.gz"
+    },
+    {
+     "external": "sail",
+     "path": "isla-vendor.tar.gz"
+    },
+    {
+     "external": "sail",
+     "path": "z3_solver-5.4.0.0-py3-none-manylinux_2_27_x86_64.whl"
+    }
+   ],
+   "debs": [
+    "python3",
+    "python3-minimal",
+    "python3.12",
+    "python3.12-minimal",
+    "libpython3.12-stdlib",
+    "libpython3.12-minimal",
+    "cargo",
+    "rustc",
+    "gcc-13",
+    "gcc-13-x86-64-linux-gnu",
+    "cpp-13-x86-64-linux-gnu",
+    "binutils",
+    "binutils-x86-64-linux-gnu",
+    "libc6-dev",
+    "libgcc-13-dev",
+    "libstdc++-13-dev",
+    "linux-libc-dev",
+    "libc6",
+    "rustc",
+    "cargo",
+    "libstd-rust-dev",
+    "libstd-rust-1.75",
+    "libgit2-1.7",
+    "libhttp-parser2.9",
+    "libllvm17t64",
+    "libssh2-1t64"
+   ],
+   "outputs": [
+    "isla-execute-function"
+   ],
+   "scratch": [
+    "/scratch"
+   ],
+   "dirs": [
+    "z3lib"
+   ]
+  }
  ],
- "outputs": {"ISLA": "isla-execute-function"}
+ "outputs": {
+  "ISLA": "isla-execute-function",
+  "Z3LIB": "z3lib"
+ }
 }

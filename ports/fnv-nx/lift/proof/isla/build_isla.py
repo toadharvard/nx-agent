@@ -54,3 +54,4 @@ if r.returncode:
     die("cargo build failed (%d)" % r.returncode)
 shutil.copyfile(os.path.join(W, "target", "release", "isla-execute-function"), "/out/isla-execute-function")
 os.chmod("/out/isla-execute-function", 0o755)
+shutil.copytree(os.path.join(z3, "lib"), "/out/z3lib")
