@@ -2867,3 +2867,9 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Open: ctypes_compat:187 takes w15's 5e9f645ae (no memo). The L5 lead re-runs on this head.
 - w28-c5 99f6eb846: done. ctypes_compat takes 5e9f645ae, so there is one link/ copy. gate_pure is green at 44 of 44 (local run at 99f6eb846).
 - bottleneck: cand4 verdict; L5's re-run on w28-c5; L3a's base3 head for cand5.
+- Ruling: the exportgen bridge letters of by-value records. Farm 3's relift of d884fe727 has 13 export records red: 12 fnvnx_guestfn callbacks and LARGE_INTEGER.
+  - A struct or union gets a letter when it is trivial for calls (Itanium §3.1.2), has only integer, enum or pointer members (no HFA, no mixed class) and is 4 or 8 bytes: 4 gives i, 8 gives q. This matches MSVC x86's stack words with eax/edx:eax, and AAPCS64 §6.8.2's general registers.
+  - The fact that a record is non-trivial for calls comes from L2's layout plugin, which appends `!` to a TREE_ADDRESSABLE record.
+  - w28 takes exportgen and ctypes_compat (doing), and L2 takes the plugin marker (asked).
+  - L5 changes nothing: fnvnx_guestfn.h:186 already static-asserts that the type is trivially copyable and trivially destructible.
+- bottleneck: cand4 verdict; farm 3 waits on the exportgen and marker heads; L3a base3 head.
