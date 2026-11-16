@@ -124,6 +124,18 @@
     "ports/fnv-nx/link/gate_r7.py"
    ]
   },
+  "test_ice_poly_byvalue.py": {
+   "references": [
+    {
+     "anchor": "## Resumption points, register objects, one-thread objects (ORDER-CONT, HARDREG, LOCAL, FENCE-MERGE)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/docs/ORDERING.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/toolchain/order/fnvnx_order.cc"
+   ]
+  },
   "test_milestones.py": {
    "references": [
     {
@@ -146,6 +158,18 @@
    ],
    "subject": [
     "ports/fnv-nx/link/odr.py"
+   ]
+  },
+  "test_order_cont.py": {
+   "references": [
+    {
+     "anchor": "## Resumption points, register objects, one-thread objects (ORDER-CONT, HARDREG, LOCAL, FENCE-MERGE)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/docs/ORDERING.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/toolchain/order/fnvnx_order.cc"
    ]
   },
   "test_order_tags.py": {
