@@ -2376,3 +2376,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - bottleneck: the cand3b verdict (farm) and this pathflow fix.
 - w28 35cdcd88f: pathflow counts parameter defaults as reads (6 tests pass); targets.py mounts targets.json, ASSUMPTIONS.json and guest_compiler.json. Handed to L2 for the recipe-path compiler build.
 - The udsail stage (L3a w13) needs z3/capstone, the isla stage binary and scratch together. Ruling: a `run` step with the pinned python runtime mounts python.modules the same way generated steps do, with one function for both. Assigned to w28 after the entry kind.
+- The FNVNX_EXPORT lines fail L2's decltype writer (the symbol is named as text in asm). Ruling: the macro emits a relocated address of the declared entity plus the kind (func/entry/data), and exportgen reads the relocation. The L2 writer is unchanged. Top item for w28.
