@@ -193,10 +193,14 @@ def build(ins, addr):
         if o.k == 'm': o.seg = None if o.cseg == X.X86_REG_ES else sp      # the string destination is ES:EDI whatever the override (SDM Vol. 2, MOVS / STOS / SCAS / CMPS)
     c.dseg = sp                      # the effective segment of the implicit DS-default operands (string source, XLAT): the last override prefix
     c.opc = raw[i + 1] if raw[i] == 0x0f else raw[i]; c.raw = raw; c.nprefix = i
-    from proof import intud, forms_legacy
+    from proof import intud, forms_legacy, forms_cpufeat
     fn = H.get(c.m)
     if raw[i] != 0x0f and i + 1 < len(raw) and (raw[i], (raw[i + 1] >> 3) & 7) in intud.CLEARED_UD:      # no cell in the SDM opcode map: by encoding, whatever mnemonic the decoder gives
         c.F.fault(forms_legacy.K_UD, C(1, 1)); c.F.access = frozenset(); return c.F.check_state()
+    cf = forms_cpufeat.decide(ins, raw, i)      # a feature the declared CPU clears: #UD, or the SDM's NOP (forms_cpufeat.py)
+    if cf:
+        if cf == 'ud': c.F.fault(forms_legacy.K_UD, C(1, 1))
+        c.F.access = frozenset(); return c.F.check_state()
     if fn is None and c.m[0] == 'j': fn = H['jcc']
     if fn is None and c.m.startswith('set'): fn = H['setcc']
     if fn is None and c.m.startswith('cmov'): fn = H['cmovcc']

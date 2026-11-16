@@ -26,7 +26,7 @@ def page_volume(p):
     """the volume named by the page's own footer (its last or second-to-last non-empty line: "FPREM—Partial Remainder    Vol. 2A 3-366" or "9-8 Vol. 1"), else None"""
     ls = [l.strip() for l in p.split('\n') if l.strip()]
     for l in ls[-2:]:
-        m = re.search(r'Vol\. (1|2A|2B|2C|2D|3A|3B|3C|3D|4) \d+-\d+$', l) or re.match(r'\d+-\d+ Vol\. (1|2A|2B|2C|2D|3A|3B|3C|3D|4)$', l)
+        m = re.search(r'Vol\. (1|2A|2B|2C|2D|3A|3B|3C|3D|4) (?:[A-Z]|\d+)-\d+$', l) or re.match(r'(?:[A-Z]|\d+)-\d+ Vol\. (1|2A|2B|2C|2D|3A|3B|3C|3D|4)$', l)
         if m: return m.group(1)
     return None
 
