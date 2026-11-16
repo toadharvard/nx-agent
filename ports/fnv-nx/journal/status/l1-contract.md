@@ -2838,3 +2838,12 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - cand5 order: trunk after cand4, then L2 cand4b toolchain/ + GMP/MPFR, L3a base3 lift/, L5 offer, and L6 ce86bbd83.
 - bottleneck: cand4's remaining reds (w15) and its verdict; the cand5 heads from L3a and L2; L3a facts2 universe pin.
 - toolchain/ for cand5: L2 cand4b with the FNPARM revert ba2aa4dcb on top, plus the three base3 names/plugbuild commits (w2 sends the head). FNPARM returns with the recipe-path pin once its toolchain run is green end to end (rt stage still red). Reason: cand5 does not wait on path (a), because it carries the dispatch fix for the platform/loader link.
+
+## 2026-11-16: ruling on the f2i layout for the runtime (L2 w3)
+- The fnvnx_ftoi reports of runtime objects:
+  - one per object, at FTOI/<archive>/<member>.f2i.json;
+  - plus FTOI/index.json, which covers every archive member, with null for a member built without the plugin;
+  - probe reports go to scratch;
+  - FTOI/ is a declared output of the rt step.
+- The recipe adds one objects.json row per member, with "f2i" in the same form as the CC rows. That reader extension is L1's and follows when the rt step lands.
+- bottleneck: cand4 verdict (w15/farm); cand5 waits on the L3a base3 head and the L2 w2 toolchain head.
