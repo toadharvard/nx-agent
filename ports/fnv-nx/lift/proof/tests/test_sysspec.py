@@ -87,7 +87,7 @@ class T(unittest.TestCase):
         finally: del REC['cpuid_faulting']
 
     def test_lar_is_decided_by_the_descriptor_rows(self):
-        REC['lar_lsl'] = {'cs': {'lar': {'status': 'undecided', 'why': 'type blocker'}}}
+        REC['lar_lsl'] = {'status': 'undecided', 'why': 'type blocker'}
         try: open(self.f.name, 'w').write(json.dumps(_complete(REC))); r, n = sysspec.check(key('0f0202')); self.assertEqual(r, 'uncertified'); self.assertIn('type blocker', n)
         finally: del REC['lar_lsl']
 

@@ -45,6 +45,32 @@ checks = [("x86sys.json is the generator's output", ok), ("precedence is in the 
            (lambda j: j["jumps"]["selectors"] == [0x18, 0x19, 0x1a, 0x1b] and j["null_selector"]["error_code"] == 0 and j["ti1"]["fault"] == "#GP" and j["beyond_gdt_limit"]["fault"] == "#GP"
             and j["gp_selector_descriptors"]["fault"] == "#GP" and "0x08" in j["gp_selector_descriptors"]["descriptors"] and "0x18" not in j["gp_selector_descriptors"]["descriptors"])(rec["jmp_far"])),
           ("ldt: a new process has the null LDTR (sldt 0)", rec["sldt"]["value"] == 0 and "rule" in rec["ldt"] and rec["idtr_limit"]["value"] == 0x7ff and rec["sgdt"]["limit"]["value"] == 0x3ff and rec["sgdt"]["base"]["status"] == "undecided"),
+          ("sgdt.base is not decided: allocation-dependent, with the winload BSP and both kernels' AP evidence and 3 processors",
+           (lambda b: b["status"] == "undecided" and b["decided"] is False and b["processors"]["count"] == 3 and b["why"] and b["blocker"]
+            and sorted(b["application_processors"]["facts"]) == ["ntkrnlpa.exe", "ntoskrnl.exe"]
+            and all(f["call_MmAllocateIndependentPages"].startswith("0x") and f["call_KiInitializeProcessorState"].startswith("0x") and f["gdt_offset_in_block"] in ("0x8BA0", "0x8C20") and f["KiInitializeProcessorState"]["Gdtr_offset_in_KPROCESSOR_STATE"] == 0x2f4
+                    and f["MiReservePtes_reached"].startswith("0x") for f in b["application_processors"]["facts"].values())
+            and b["bsp"]["facts"]["BlMmAllocatePages_call"].startswith("0x") and "_MmMdFindSatisfyingRegion@40" in b["bsp"]["facts"]["allocator_closure"]["functions"]
+            and "_MmPaAllocatePages@20" in b["bsp"]["facts"]["allocator_closure"]["functions"])(rec["sgdt"]["base"])),
+          ("lar_lsl partitions all 65536 selectors; ZF=1 only for the DPL-3 descriptors 0x18 0x20 0x38 0x40; 115 undecided descriptors (460 selectors) outside the domain",
+           (lambda l: l["coverage"]["selectors_total"] == 0x10000 and sum(l["coverage"]["per_class"].values()) == 0x10000 and l["zf1_descriptors"] == ["0x18", "0x20", "0x38", "0x40"]
+            and l["coverage"]["per_class"]["undecided"] == 460 and len(l["undecided_descriptors"]["indexes"]) == 115 and l["undecided_descriptors"]["status"] == "OutsideDomain"
+            and len(l["undecided_descriptors"]["indexes"]) == len(set(l["undecided_descriptors"]["indexes"]))
+            and l["undecided_descriptors"]["indexes"] == rec["jmp_far"]["undecided_descriptors"]["indexes"]
+            and l["descriptors"]["0x18"]["lar"]["dest"]["value_with_accessed_clear"] == 0xC0FA00 and l["descriptors"]["0x18"]["lsl"]["dest"]["limit"] == 0xffffffff
+            and l["descriptors"]["0x38"]["lsl"]["dest"]["limit"] == 0xfff and l["descriptors"]["0x40"]["lsl"]["dest"]["limit"] == 0xffff
+            and all(l["descriptors"][k]["lar"]["zf"] == 0 and l["descriptors"][k]["lsl"]["zf"] == 0 for k in ("0x08", "0x10", "0x28", "0x30", "0x48", "0x50", "0x58", "0x70"))
+            and l["null_selector"]["lar"]["zf"] == 0 and l["ti1"]["lsl"]["zf"] == 0 and l["beyond_gdt_limit"]["lar"]["zf"] == 0
+            and all(v["access_byte"] == 0x82 for v in l["access_rights"]["ldt_descriptor_access"].values()))(rec["lar_lsl"])),
+          ("iret at CPL 3: returns only to CS 0x1b; loaded EFLAGS bits NT RF AC ID and the arithmetic/TF/DF flags, not IF IOPL VM VIF VIP; NT=1 is a task return whose back link is undecided with its evidence",
+           (lambda r: r["same_privilege_return"]["cs_selector_checks"]["returns_to"] == [0x1b] and r["same_privilege_return"]["cs_selector_checks"]["null_selector"]["error_code"] == 0
+            and r["eflags_restored"]["loaded_mask"] == 0x254dd7
+            and sorted(r["eflags_restored"]["loaded_bits"]) == sorted(["CF", "PF", "AF", "ZF", "SF", "TF", "DF", "OF", "NT", "RF", "AC", "ID"]) and sorted(r["eflags_restored"]["not_loaded"]) == ["IF", "IOPL", "VIF", "VIP", "VM"]
+            and r["eflags_restored"]["iopl"] == rec["eflags"]["iopl"]["value"] == 0 and r["eflags_restored"]["pvi_vme"]["status"] == "undecided"
+            and r["task_return"]["nt_set_at_cpl3"]["value"] is True and r["task_return"]["backlink"]["status"] == "undecided" and r["task_return"]["backlink"]["initial_value"] == 0
+            and r["task_return"]["backlink"]["if_zero"]["fault"] == "#TS" and r["task_return"]["tr_selector"] == rec["selectors"]["tr"]["value"]
+            and r["task_return"]["backlink"]["evidence"]["winload"]["TssLength"] == "0x20AC"
+            and all(k["task_gates"]["vector_8"]["selector"] == 0x50 and k["task_gates"]["vector_2"]["selector"] == 0x58 for k in r["task_return"]["backlink"]["evidence"]["kernels"].values()))(rec["iret"])),
           ("0x29 is not a ring-3 vector", 0x29 not in rec["int_ring3"]["vectors"]), ("no opcode list in tss_io_bitmap", "opcodes" not in rec["tss_io_bitmap"]),
           ("every CR0/CR4 SSE row is undecided with a why", all(v.get("status") == "undecided" and v.get("why") for k in ("cr0", "cr4_sse") for v in rec[k].values()))]
 for n, c in checks:

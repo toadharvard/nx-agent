@@ -45,8 +45,6 @@ class Legacy(unittest.TestCase):
 
     def test_rows_the_record_does_not_decide_are_uncertified_with_the_row(self):
         r, n = sysspec.check(key('0f0100')); self.assertEqual(r, 'uncertified'); self.assertIn('sgdt.base', n)
-        r, n = sysspec.check(key('cf')); self.assertEqual(r, 'uncertified'); self.assertIn('no row iret', n)
-        r, n = sysspec.check(key('0f0202')); self.assertEqual(r, 'uncertified'); self.assertIn('lar_lsl', n)
 
     def test_a_wrong_effect_is_a_difference(self):
         k = key('3ed6')      # SALC with a segment prefix: not used elsewhere, so the Form cache holds no other

@@ -32,6 +32,49 @@ RETF, SDM 2B:RET and SDM 2B:P1860, SDM 2B:P1861
   'IF return code segment selector RPL < CPL'   'EIP := Pop();'   'CS := Pop(); (* 32-bit pop, high-order 16 bits discarded *)'   'ESP := ESP + SRC;'   'IF return code segment selector is NULL'
   'IF return code segment descriptor is not a code segment'   'IF return code segment selector addresses descriptor beyond descriptor table limit'
   The descriptor classes are the record's (rows jmp_far, gdt, ldt through sysspec_far.rows): a #GP is the access violation of the declared machine (fault kind AV).
+
+LAR, SDM 2A:LAR
+  SDM 2A:LAR 'Bits 11:8 return the segment type.'   'Bit 12 returns the S flag.'   'Bits 14:13 return the DPL.'   'Bit 15 returns the P flag.'   'Bits 19:16 are undefined.'
+  SDM 2A:LAR 'Bit 20 returns the software-available bit in the descriptor.'   'Bit 21 returns the L flag.'   'Bit 22 returns the D/B flag.'   'Bit 23 returns the G flag.'
+  SDM 2A:LAR 'Bits 31:24 are returned as 0.'   'Bits 7:0 are returned as 0'   'only the low 16 bits identified above are returned'
+  SDM 2A:LAR 'When the operand size is 32 bits, the 32-bit value identified above is loaded into the destina'
+  SDM 2A:LAR 'Checks that the segment selector is not NULL.'
+  SDM 2A:LAR 'If the segment is not a conforming code segment, it checks that the specified segment descriptor is visible at the CPL'
+  SDM 2A:LAR 'If the segment descriptor cannot be accessed or is an invalid type for the instruction, the ZF flag is cleared and no access rights are loaded in the destination operand.'
+  Table 1-49, protected mode, the system descriptor types (S = 0) the SDM calls valid (types 1 2 3 4 5 9 B C) and not valid (types 0 6 7 8 A D E F):
+  SDM 2A:LAR 'Available 16-bit TSS Yes'   '2 LDT Yes LDT Yes'   'Busy 16-bit TSS Yes'   '16-bit call gate Yes'   '16-bit/32-bit task gate Yes'
+  SDM 2A:LAR 'Available 32-bit TSS Yes'   'Busy 32-bit TSS Yes'   '32-bit call gate Yes'
+  SDM 2A:LAR 'Reserved No Reserved No'   '16-bit interrupt gate No'   '16-bit trap gate No'   '32-bit interrupt gate No'   '32-bit trap gate No'
+  SDM 2A:LAR 'IF SegmentDescriptor(Type) ≠ conforming code segment and (CPL > DPL) or (RPL > DPL) or SegmentDescriptor(Type) is not valid for instruction THEN ZF := 0;'
+  SDM 2A:LAR 'DEST := access rights from SegmentDescriptor as given in Description section;'
+  SDM 2A:LAR 'The ZF flag is set to 1 if the access rights are loaded successfully; otherwise, it is cleared to 0.'
+LSL, SDM 2A:LSL
+  SDM 2A:LSL 'The segment limit is a 20-bit value contained in bytes 0 and 1 and in the first 4 bits of byte 6'   'filling the low-order 12 bits with 1s'
+  SDM 2A:LSL 'only the low-order 16 bits are loaded into the destination operand; the upper bits of the destination are unmodified'
+  SDM 2A:LSL 'the ZF flag is cleared and no value is loaded in the destination operand'   'The ZF flag is set to 1 if the segment limit is loaded successfully; otherwise, it is set to 0.'
+  SDM 2A:LSL 'All code and data segment descriptors are valid for'
+  Table 1-53, protected mode, valid for the system descriptors (types 1 2 3 9 B) and not valid (4 5 and the others):
+  SDM 2A:LSL 'Available 16-bit TSS Yes'   '2 LDT Yes LDT Yes'   'Busy 16-bit TSS Yes'   'Available 32-bit TSS Yes'   'Busy 32-bit TSS Yes'
+  SDM 2A:LSL '16-bit call gate No'   '16-bit/32-bit task gate No'   '32-bit call gate No'   '16-bit interrupt gate No'
+  SDM 2A:LSL 'IF SegmentDescriptor(Type) ≠ conforming code segment and (CPL > DPL) OR (RPL > DPL) or Segment type is not valid for instruction THEN ZF := 0;'
+Accessed bit (a type bit of a code or data descriptor)
+  SDM 3A:P3249 'the three low-order bits of the type field are interpreted as accessed (A), read enable (R), and conforming (C)'
+  SDM 3A:P3249 'The processor sets this bit whenever it loads a segment selector for the segment into a segment register'
+  so bit 8 of a LAR result for a code or data segment is processor state: the Form reads it as the declared function gdt_accessed of the descriptor's selector offset (never a constant).
+IRETD at CPL 3 (the Operation, PROTECTED-MODE and RETURN-TO-SAME-PRIVILEGE-LEVEL)
+  SDM 2A:P1196 'IF NT = 1 THEN GOTO TASK-RETURN'   'CS := Pop(); (* 32-bit pop, high-order 16 bits discarded *)'
+  SDM 2A:P1196 'IF tempEFLAGS(VM) = 1 and CPL = 0 THEN GOTO RETURN-TO-VIRTUAL-8086-MODE;'
+  SDM 2A:P1197 'IF CS(RPL) > CPL THEN GOTO RETURN-TO-OUTER-PRIVILEGE-LEVEL;'
+  SDM 2A:P1197 'EFLAGS (CF, PF, AF, ZF, SF, TF, DF, OF, NT) := tempEFLAGS;'
+  SDM 2A:P1197 'THEN EFLAGS(RF, AC, ID) := tempEFLAGS; FI;'
+  SDM 2A:P1197 'IF CPL ≤ IOPL THEN EFLAGS(IF) := tempEFLAGS; FI;'
+  SDM 2A:P1197 'IF CPL = 0 THEN EFLAGS(IOPL) := tempEFLAGS;'
+  SDM 2A:P1201 (IRET, Protected Mode Exceptions) '#GP(0) If the return code or stack segment selector is NULL.'
+  SDM 2A:P1201 'If a segment selector index is outside its descriptor table limits.'   'If the return code segment selector RPL is less than the CPL.'
+  SDM 2A:P1201 'If the DPL for a nonconforming-code segment is not equal to the RPL of the code segment selector.'
+  SDM 2A:P1201 'If the segment descriptor for a code segment does not indicate it is a code segment.'
+  Every #GP is the access violation of the declared machine (fault kind AV).  The Form's domain is EFLAGS.NT = 0, CR4.PVI = CR4.VME = 0 and the 32-bit operand; the rows for NT = 1 (task return) and PVI/VME are
+  undecided in the record, so the proof is uncertified for them (never proved).
 """
 import os
 import sys
@@ -44,11 +87,11 @@ from fnvlift import dsl  # noqa: E402
 from fnvlift.faults import BYNAME as FT  # noqa: E402
 from proof import intud, shape, symform, x86sys  # noqa: E402
 import sysspec_gap as G  # noqa: E402
-from sysspec_text import LEGACY as TEXT  # noqa: E402
+from sysspec_text import LEGACY as TEXT, LR  # noqa: E402
 
 V = G.V
 LEGACY_PFX = (0x66, 0x67, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65, 0xf0, 0xf2, 0xf3)
-ROWS = {'sgdt': (('sgdt', 'limit'), ('sgdt', 'base')), 'iretd': (('iret',),), 'iret': (('iret',),)}      # the record rows the Form of each needs (iret: no row exists today; the Form builder names the same blockers)
+ROWS = {'sgdt': (('sgdt', 'limit'), ('sgdt', 'base'))}      # the record rows the Form of each needs (the Form builder names the same blockers)
 BCD = ('daa', 'das', 'aaa', 'aas', 'aam', 'aad')
 K_DE, K_AV = FT['DE0']['code'], FT['AV']['code']
 
@@ -62,7 +105,9 @@ def family(ins):
     if m in BCD or m in ('salc', 'sldt'): return m
     if m in ('les', 'lds') and len(o) == 2 and o[1].type == X.X86_OP_MEM: return m
     if m in ('retf', 'lret'): return 'retf'
-    if m in ('sgdt', 'iretd', 'iret'): return 'row'
+    if m == 'sgdt': return 'row'
+    if m in ('iretd', 'iret'): return 'iret'
+    if m in ('lar', 'lsl') and len(o) == 2 and o[0].type == X.X86_OP_REG: return 'larlsl'
     return None
 
 
@@ -193,6 +238,171 @@ def check_retf(ins, f, fields, rec):
     return 'uncertified', TEXT['retf'] % (','.join(n for n, _ in out), sysspec_far.domain(rec))
 
 
+# ---- LAR / LSL ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+LAR_SYS = {1, 2, 3, 4, 5, 9, 0xb, 0xc}      # the system descriptor types (S = 0) that Table 1-49 of SDM 2A:LAR calls valid in protected mode (types 1 2 3 4 5 9 B C); the others are 0 6 7 8 A D E F: No
+LSL_SYS = {1, 2, 3, 9, 0xb}                  # the same for Table 1-53 of SDM 2A:LSL (types 1 2 3 9 B)
+CPL = 3
+
+
+def descriptors(rec):
+    """-> {offset: (S, type, DPL)} of the decided GDT descriptors of the record's lar_lsl rows.  The LDT descriptor (0x48) states its forms as text; its numbers are the access byte Ke386SetLdtProcess builds (the record's
+    ldt_descriptor_access, the same in both kernels: P=1, DPL = bits 6:5, S = bit 4, type = bits 3:0) or the zero descriptor (type 0, invalid)"""
+    r = x86sys.get(rec, 'lar_lsl'); out = {}
+    for off, d in r['descriptors'].items():
+        if 'type' in d: out[int(off, 16)] = (d['s'], d['type'], d['dpl'])
+        else:
+            ab = {k: v['access_byte'] for k, v in r[LR['access']][LR['ldt']].items()}
+            assert len(set(ab.values())) == 1, ab
+            a = next(iter(ab.values())); out[int(off, 16)] = (a >> 4 & 1, a & 15, a >> 5 & 3)
+    return out
+
+
+def zf_rule(row, s, t, dpl, rpl):
+    """the SDM Operation of LAR / LSL for one descriptor and one RPL (CPL 3): ZF := 1 unless the type is not valid or the descriptor is not visible (a conforming code segment is exempt from the visibility test)"""
+    valid = True if s else t in (LAR_SYS if row == 'lar' else LSL_SYS)
+    conforming = bool(s and t & 8 and t & 4)
+    return int(valid and (conforming or (CPL <= dpl and rpl <= dpl)))
+
+
+def record_vs_spec(rec):
+    """-> [difference] of the record's lar_lsl rows against the SDM rule: ZF of every descriptor for every RPL; the LAR value fields (type with the Accessed bit clear, S, DPL, G) against the descriptor's own numbers; the LSL
+    limit against G; the masks"""
+    r = x86sys.get(rec, 'lar_lsl'); ds = descriptors(rec); d = []
+    lim = x86sys.get(rec, 'gdt', 'limit')
+    if (lim + 1) // 8 != 0x80 or LR['idx80'] not in r[LR['beyond']]['selectors']: d.append(TEXT['m_beyond'] % lim)
+    if x86sys.get(rec, 'sldt') != 0: d.append(TEXT['m_ti1'] % x86sys.get(rec, 'sldt'))
+    zf1 = sorted('0x%02x' % o for o, (s, t, dpl) in ds.items() if zf_rule('lar', s, t, dpl, 0) and zf_rule('lar', s, t, dpl, 3))
+    if sorted(r[LR['zf1']]) != zf1: d.append(TEXT['m_zf1'] % (sorted(r[LR['zf1']]), zf1))
+    for off, (s, t, dpl) in sorted(ds.items()):
+        e = r['descriptors']['0x%02x' % off]
+        for row in ('lar', 'lsl'):
+            for rpl in range(4):
+                if zf_rule(row, s, t, dpl, rpl) != e[row]['zf']: d.append(TEXT['m_zf'] % (row, off, rpl, e[row]['zf'], zf_rule(row, s, t, dpl, rpl)))
+        if e['lar']['zf'] != 1: continue
+        a, b = e['lar']['dest'], e['lsl']['dest']; v = a[LR['val']]
+        if (a['mask'], a['undefined_mask'], a['accessed_mask']) != (0xffff00, 0xf0000, 0x100): d.append(TEXT['m_masks'] % (off, a['mask'], a['undefined_mask'], a['accessed_mask']))
+        if v & ~a['mask'] or v & a['undefined_mask'] or v & a['accessed_mask']: d.append(TEXT['m_valbits'] % (off, v))
+        if v >> 8 & 15 != (t & 0xe if s else t) or v >> 12 & 1 != s or v >> 13 & 3 != dpl: d.append(TEXT['m_valfields'] % (off, v, (s, t, dpl)))
+        if v >> 23 & 1 != b['g']: d.append(TEXT['m_g'] % (off, v >> 23 & 1, b['g']))
+        lim = b['limit']
+        if (b['g'] == 0 and lim > 0xfffff) or (b['g'] == 1 and lim & 0xfff != 0xfff): d.append(TEXT['m_lim'] % (off, lim, b['g']))
+    return d
+
+
+def selector_zf(rec, row, sel):
+    """z3: ZF of LAR / LSL for the 16-bit selector SEL by the SDM rule over the record's descriptors (null, TI = 1 and beyond-the-limit selectors are ZF = 0 by the checks of the Description)"""
+    z = z3.BoolVal(False); lim = x86sys.get(rec, 'gdt', 'limit')
+    for off, (s, t, dpl) in descriptors(rec).items():
+        assert off + 7 <= lim
+        valid = True if s else t in (LAR_SYS if row == 'lar' else LSL_SYS); conforming = bool(s and t & 8 and t & 4)
+        ok = z3.BoolVal(True) if conforming else z3.And(z3.BoolVal(valid and CPL <= dpl), z3.ULE(sel & 3, dpl))
+        z = z3.Or(z, z3.And(sel & 0xfffc == off, ok))
+    return z
+
+
+def lar_value(rec, sel):
+    """z3 32-bit LAR result for a ZF = 1 selector: the descriptor's fields in the positions of the Description, Accessed = the declared function of the descriptor's selector offset; bits 19:16 are undefined (0 here, compared apart)"""
+    r = x86sys.get(rec, 'lar_lsl'); ds = descriptors(rec)
+    acc = z3.Function(LR['uf'], z3.BitVecSort(16), z3.BitVecSort(1))(sel & 0xfff8)
+    v = z3.BitVecVal(0, 32)
+    for off, (s, t, dpl) in sorted(ds.items()):
+        e = r['descriptors']['0x%02x' % off]
+        if e['lar']['zf'] != 1: continue
+        a = e['lar']['dest']; rest = a[LR['val']] & ~(0xf << 8 | 1 << 12 | 3 << 13) & ~a['undefined_mask']      # P, AVL, L, D/B, G: bits of the descriptor the record states only inside its value
+        val = z3.BitVecVal(rest | (t & 0xe if s else t) << 8 | s << 12 | dpl << 13, 32) | (z3.ZeroExt(31, acc) << 8)
+        v = z3.If(sel & 0xfffc == off, val, v)
+    return v
+
+
+def lsl_value(rec, sel):
+    r = x86sys.get(rec, 'lar_lsl'); v = z3.BitVecVal(0, 32)
+    for off, d in r['descriptors'].items():
+        e = d['lsl']
+        if e['zf'] == 1: v = z3.If(sel & 0xfffc == int(off, 16), z3.BitVecVal(e['dest']['limit'], 32), v)
+    return v
+
+
+def check_larlsl(ins, f, fields, rec):
+    row = ins.mnemonic.split()[-1]; w16 = ins.prefix[2] == 0x66; src = ins.operands[1]
+    bad = record_vs_spec(rec)
+    if bad: return 'FAILED(dsl)', TEXT['recdiff'] % '; '.join(bad)
+    r32 = lambda o: ins.reg_name(o.reg) if o.size == 4 else 'e' + ins.reg_name(o.reg)      # the 32-bit register holding a 16- or 32-bit register operand
+    if src.type == X.X86_OP_REG: sel = z3.Extract(15, 0, V(r32(src)))
+    else:
+        a = G.ea(ins, fields); m = dsl.mem_array(); sel = z3.Concat(z3.Select(m, a + 1), z3.Select(m, a))
+    zf = selector_zf(rec, row, sel); one = z3.BitVecVal(1, 1); zero = z3.BitVecVal(0, 1); d = []
+    dst = r32(ins.operands[0])
+    val = lar_value(rec, sel) if row == 'lar' else lsl_value(rec, sel)
+    new = z3.Concat(z3.Extract(31, 16, V(dst)), z3.Extract(15, 0, val)) if w16 else val
+    keep = 0xfff0ffff if (row == 'lar' and not w16) else 0xffffffff      # LAR bits 19:16 are SDM-undefined: not compared; the Form writes them 0 (DEF0), checked apart
+    if f.faults or f.stores or f.swhen or f.flo is not None or f.xs: d.append(TEXT['cond'])
+    pf = {x[0]: (dsl.to_smt(x[1]), x[2]) for x in f.flags}
+    if list(pf) != ['zf'] or pf['zf'][1] is not None or not same(pf['zf'][0], z3.If(zf, one, zero)): d.append('zf')
+    if [x[0] for x in f.regs] != [dst] or f.regs[0][2] is None or not same(dsl.to_smt(f.regs[0][2]), z3.If(zf, one, zero)): d.append(dst + '(when)')
+    else:
+        got = dsl.to_smt(f.regs[0][1])
+        if not same(z3.If(zf, got & keep, z3.BitVecVal(0, 32)), z3.If(zf, new & keep, z3.BitVecVal(0, 32))): d.append(dst)
+        if keep != 0xffffffff and not same(z3.Extract(19, 16, got), z3.BitVecVal(0, 4)): d.append('DEF0')
+    if not same(dsl.to_smt(f.eip), V('eip') + ins.size): d.append('eip')
+    if d: return 'FAILED(dsl)', TEXT['diff'] % ','.join(d)
+    import sysspec_far
+    return 'uncertified', TEXT['larlsl'] % (row.upper(), len(sysspec_far.rows(rec)['undecided']))
+
+
+# ---- IRETD at CPL 3 ----------------------------------------------------------------------------------------------------------------------------------------------------------
+EFL_NAMED = {'CF': 0, 'PF': 2, 'AF': 4, 'ZF': 6, 'SF': 7, 'TF': 8, 'DF': 10, 'OF': 11, 'NT': 14, 'RF': 16, 'AC': 18, 'ID': 21}      # the flags the Operation loads (the named list, and RF, AC, ID for a 32-bit operand) at their EFLAGS bit numbers (SDM 1:3.4.3)
+SIX = (0, 2, 4, 6, 7, 11)
+
+
+def iret_cs_valid(rec):
+    """the CS selector values a return to CPL 3 accepts, from the SDM rule over the record's descriptors (a code segment with DPL = RPL if non-conforming, DPL <= RPL if conforming; RPL >= CPL, and RPL = CPL: same-privilege), RPL = 3"""
+    out = []
+    for off, (s, t, dpl) in sorted(descriptors(rec).items()):
+        if s and t & 8:
+            for rpl in range(CPL, 4):
+                if (dpl <= rpl) if t & 4 else dpl == rpl: out.append(off | rpl)
+    return out
+
+
+def iret_record_diffs(rec):
+    """-> [difference] of the record's iret rows against the SDM rule (the CS selectors a return to CPL 3 accepts, the code descriptors, the EFLAGS bits the Operation loads)"""
+    r = x86sys.get(rec, 'iret'); d = []
+    ret = iret_cs_valid(rec)
+    if sorted(r[LR['spr']][LR['csc']]['returns_to']) != ret: d.append(TEXT['m_ret'] % (r[LR['spr']][LR['csc']]['returns_to'], ret))
+    cr = r[LR['spr']][LR['csc']][LR['gp']]; code = sorted('0x%02x' % o for o, (s, t, dpl) in descriptors(rec).items() if s and t & 8)
+    if sorted(cr[LR['code']]) != code: d.append(TEXT['m_code'] % (sorted(cr[LR['code']]), code))
+    if sorted(cr[LR['ncode']]) != sorted('0x%02x' % o for o in descriptors(rec) if '0x%02x' % o not in code): d.append(TEXT['m_ncode'])
+    if set(r[LR['efl']]['loaded_bits']) != set(EFL_NAMED): d.append(TEXT['m_bits'] % (sorted(r[LR['efl']]['loaded_bits']), sorted(EFL_NAMED)))
+    mask = r[LR['efl']]['loaded_mask']; spec = sum(1 << b for b in EFL_NAMED.values())
+    if mask != spec: d.append(TEXT['m_mask'] % (mask, spec, mask ^ spec))
+    return d
+
+
+def check_iret(ins, f, fields, rec):
+    d = iret_record_diffs(rec); r = x86sys.get(rec, 'iret'); ret = iret_cs_valid(rec); spec = sum(1 << b for b in EFL_NAMED.values())
+    if d: return 'FAILED(dsl)', TEXT['recdiff'] % '; '.join(d)
+    m = dsl.mem_array(); esp = V('esp'); ld = lambda a, n: z3.Concat(*[z3.Select(m, a + i) for i in reversed(range(n))])
+    eip, cs, ef = ld(esp, 4), z3.Extract(15, 0, ld(esp + 4, 4)), ld(esp + 8, 4)
+    good = z3.Or([cs == x for x in ret]); fault = z3.Not(good)
+    if len(f.faults) != 1 or f.faults[0][0] != K_AV or not same(dsl.to_smt(f.faults[0][1]) == 1, fault): d.append('fault')
+    if f.stores or f.swhen or f.xs: d.append(TEXT['cond'])
+    pr = {x[0]: dsl.to_smt(x[1]) for x in f.regs}
+    if list(pr) != ['esp'] or not same(pr['esp'], esp + 12): d.append('esp')
+    if not same(dsl.to_smt(f.eip), eip): d.append('eip')
+    pf = {x[0]: dsl.to_smt(x[1]) for x in f.flags}
+    want = {n: z3.Extract(b, b, ef) for n, b in (('cf', 0), ('pf', 2), ('af', 4), ('zf', 6), ('sf', 7), ('of', 11), ('df', 10))}
+    for n in sorted(want):
+        if n not in pf or not same(pf[n], want[n]): d.append(n)
+    if set(pf) - set(want): d.append('flags(written)')
+    rest = spec & ~sum(1 << b for b in SIX) & ~(1 << 10)      # TF NT RF AC ID: the stored bits of the other-EFLAGS word 'flo'
+    wflo = (V('flo') & ~rest) | (ef & rest)
+    if f.flo is None or not same(dsl.to_smt(f.flo), wflo): d.append('eflags')
+    if d: return 'FAILED(dsl)', TEXT['diff'] % ','.join(d)
+    import sysspec_far
+    return 'uncertified', TEXT['iret'] % len(sysspec_far.rows(rec)['undecided'])
+
+
+
 def opcode(key):
     """(the opcode byte, ModRM.reg) of a one-byte-opcode shape key, after its legacy prefixes"""
     b = shape.rep_bytes(key); i = 0
@@ -229,4 +439,6 @@ def check(key, rec=None):
     if fam == 'salc': return check_salc(ins, f)
     if fam == 'sldt': return check_sldt(ins, f, fields, rec)
     if fam in ('les', 'lds'): return check_lseg(ins, f, fields, rec)
+    if fam == 'larlsl': return check_larlsl(ins, f, fields, rec)
+    if fam == 'iret': return check_iret(ins, f, fields, rec)
     return check_retf(ins, f, fields, rec)
