@@ -1563,3 +1563,12 @@ Paused: w3b, w4, farm; no other work.
     - One summary read costs 4,754 run-step evaluations instead of 18. Measured by w6 at a3683a468.
     - Reported to L1/w28 with the fix: evaluate only the requested step plus a content-keyed memo. The gate side is already a single resolve_input.
 - bottleneck: L1/w28 recipe stage_output fix (sm_link and the verdict budget); lift/rt red (L3a) for d3d9exports; base3 retake; the cand4 base.
+- 06:25Z w6-root 21872d6be: sm_link is GREEN.
+    - gate_sm_link: 0 red; universe c316025b16628726.
+    - 1,809 unique bytecodes (443 VS, 1,366 PS); 115,776 stage certificates, 0 not ok; 121,394 link programs, 0 failed, 0 missing.
+    - One root, sm_link_sum (foreach stage/link plus named rows). sm_link_stage, sm_link_prog and count_stage_evals.py are deleted.
+    - Walk: 18 run-step evaluations (4,754 before; w28's walk fix). Cold 37.5 min, warm summary about 51 s.
+    - My earlier "1,818" was not a run output and is void.
+- 06:25Z ASM-617, ASM-619 and ASM-621 are cited at w6-root since 680ff849a. base3 3e035ada1 has the older render. L3a has been told to take render/, bridgefacts/ and the L6 ids from d98bb7faa or later.
+- Next: inventory of the backends' link-failure branches (w6). The fnvnx_reach_violation certificate form has been asked of L1. w6 also writes N once.
+- bottleneck: L1 certificate form for sm_link; lift/rt red (L3a) for d3d9exports; base3 retake; cand3b → cand4 base.
