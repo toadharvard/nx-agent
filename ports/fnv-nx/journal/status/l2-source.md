@@ -679,3 +679,4 @@ After the first frame:
   - New for w2: NAMES-INTN, sized-integer MSVC codes keyed by (precision, signedness) through DATAMODEL. The count of nodecor rows the exe or a module names must be 0.
   - Still owed: the named decltype diagnostic, msvcrt on w28, ENTRY1-ATOMIC in C.
 - 2026-11-16 04:25Z: the base3 merge check (L3a w8, 0dedb050e, 60 roots) has 1 red: the toolchain host root loads plugins, and the host plugin set is empty. To w3 inside COMPILER-STAGE: the plugins are outputs of the root; units compiled with plugins go in a guest-target root.
+- 2026-11-16 04:28Z: L1 w28 c8938b24c: the 3 old-rule test_plugins tests are rewritten or deleted, and a host root loads plugins only when it has a C/C++ unit, so the toolchain root goes green. w3 and w2 merge it into cand4b.
