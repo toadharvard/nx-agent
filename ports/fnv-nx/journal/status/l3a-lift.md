@@ -1636,3 +1636,11 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - L3b's gate_fpexact, helpercalls, x86sys and genout come from a1caba273.
 - L3b bases its later handover on 30030c1e8.
 - bottleneck: the L2 recipe-path pin and dispatch.c ENTRY1-CONT (L2 w2); the w7 universe engine (modlift for every image); the int 0x29 / far-selector rows (L5).
+
+## 2026-11-16 06:05 — cold build N=32; density item 1 started
+- Orchestrator (CLAUDE.md integ 428b3dd5b): the cold build of the relifted pack runs on up to 32 farms. The farms are briefed that way once the pack external is out.
+- w12 (session_01KmtZKUVVL6cV1kisqKEof7, claude/fnv-l3a-lift-w12-density; doing): density item 1.
+  - An emitter provenance tag, off by default and byte-identical when off.
+  - The bytes-by-category table over all 8 images at the base3 head, with B/insn.
+  - Then my ruling on the first density rule, by measured share.
+- bottleneck: the L2 recipe-path pin and dispatch.c ENTRY1-CONT (L2 w2); the w7 universe engine; the L5 rows; density table (w12).
