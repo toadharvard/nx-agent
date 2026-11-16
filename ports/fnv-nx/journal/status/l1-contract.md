@@ -2556,3 +2556,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:52
 - cand3b 099681332 (w15): w28's tree-content memo 65bfa6f16 taken (no stat/mtime in keys), plus the pool helper, the cause-first reasons, the budget from --started. test_gates 0 failed. The farm runs the verdict at it, cold then warm. The c3bwalk branch is dropped.
 - bottleneck: cand3b verdict at 099681332.
+
+## 2026-11-16 04:53
+- cand3b 02f26b3de (w15 = w28 c3bwalk 3478d9f07): tree-content memo, and the rootfs memo hands out copies (fixes the shared-input-list bug of 65bfa6f16 that w28 found). Supersedes 099681332. The farm runs the verdict at 02f26b3de, cold then warm.
+- bottleneck: cand3b verdict at 02f26b3de.
