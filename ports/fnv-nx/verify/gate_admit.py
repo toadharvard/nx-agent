@@ -261,7 +261,7 @@ def main():
     detail = "%d files, %d roots; %s" % (len(files), len(admit.get("roots", [])),
                                          "; ".join(sorted(errors))[:400] if errors else "every file under a gated root")
     res = {"format": "fnvnx-gate/1", "name": "admit", "status": "red" if red else "green", "universe": len(files),
-           "certified": certified, "uncertified": sorted(bad)[:50], "detail": detail}
+           "certified": certified, "uncertified": sorted(bad), "uncertified_n": len(bad), "detail": detail}
     with open(os.path.join(out, "admit.json"), "w") as f:
         json.dump(res, f, indent=1, sort_keys=True)
         f.write("\n")
