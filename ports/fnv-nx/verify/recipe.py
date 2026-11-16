@@ -950,7 +950,7 @@ def import_mount(tool, owner, files, inputs, roots, repo="."):
     it = import_trees(roots, owner)
     clo = []
     bad = foreign_imports(tool, owner, files, inputs, repo, clo, import_roots_of(roots, owner), import_prefixes(roots, owner))
-    mods = sorted(f for f in set(clo) if any(under(f, t) for t in import_roots_of(roots, owner)) and f != tool)
+    mods = sorted(f for f in set(clo) if any(under(f, t) for t in import_roots_of(roots, owner)))   # the tool too: a sibling may import it by its module path (the entry also runs from /tool)
     data = set()
     for f in mods:   # the data a module reads by a path of its own location, resolved by pathflow inside its root's tree (a directory: every tracked file under it)
         try:
