@@ -8,14 +8,14 @@
 #   farm/gamedata_fetch.sh <out dir> --no-data      only the exe, the INIs, the static modules (gamedata/exe) and the d3dx9 DLLs
 #                                                   (gamedata/redist): what a start to WinMain needs
 #
-# Env: ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build; the repository fetched over directly). No host path is read.
+# Env: ARTIFACTS_URL (default: verify/artifacts.py url, the repository env.json pins; the repository fetched over directly). No host path is read.
 # A finished fetch writes <out>/.gamedata_heads (the branch heads it took); when the heads have not moved, the next
 # run with the same items does nothing ("up to date"), so farms can call it before every boot.
 # Exit: 0 ok, 1 a missing branch or a checksum mismatch, 2 usage.
 set -euo pipefail
 OUT=${1:?usage: farm/gamedata_fetch.sh <out dir> [--no-data | item...]}; shift
 NODATA=0; if [ "${1:-}" = --no-data ]; then NODATA=1; shift; [ $# -eq 0 ] || { echo "gamedata_fetch: --no-data takes no items" >&2; exit 2; }; fi
-URL=${ARTIFACTS_URL:-https://github.com/toadharvard/fnv-nx-build}
+URL=${ARTIFACTS_URL:-$(python3 -I "$(dirname "${BASH_SOURCE[0]}")/../verify/artifacts.py" url)}   # the pinned repository of env.json: one accessor (verify/artifacts.py)
 mkdir -p "$OUT/Data"; OUT=$(cd "$OUT" && pwd)
 if top=$(git -C "$OUT" rev-parse --show-toplevel 2>/dev/null); then
   echo "gamedata_fetch: $OUT is inside the git checkout $top; game data must stay out of git" >&2; exit 2
