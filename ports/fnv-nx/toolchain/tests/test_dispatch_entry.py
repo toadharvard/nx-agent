@@ -66,7 +66,7 @@ def headers(td, so, outs, store):
             hdrs = os.path.join(td, 'platform-headers')   # the root's header files only, in the root's layout (a unit of the root is no unit of the toy root)
             shutil.copytree(os.path.join(repo, 'ports/fnv-nx/platform'), hdrs, ignore=lambda d, names: [n for n in names if not (n.endswith('.h') or os.path.isdir(os.path.join(d, n)))])
             pb.EXTRA['copy'].append((hdrs, 'plat'))
-            pb.EXTRA['include'].append(pb.ROOT + '/plat/include')
+            pb.EXTRA['include'].append(pb.ROOT + '/plat/include')   # the root's include list, first entry, as well as its relative path
         else:
             pb.EXTRA['copy'].append((d, 'inc%d' % i))
             pb.EXTRA['include'].append(pb.ROOT + '/inc%d' % i)
@@ -77,7 +77,7 @@ def headers(td, so, outs, store):
                 if lang not in uni[h]:
                     continue
                 src = os.path.join(td, 'hdr_%s.%s' % (h[:-2], ext))
-                open(src, 'w').write('#include "%s"\n' % h)
+                open(src, 'w').write('#include "../plat/include/%s"\n' % h)   # by the root's own relative path, as its units reach it: the header's relative quotes resolve in the root's tree
                 r = pb.compile(src, os.path.join(td, 'hdr_%s_%s.o' % (h[:-2], ext)), so)
                 check('platform/include/%s compiles as %s' % (h, lang), r.returncode == 0, r.stderr[:900])
     finally:
