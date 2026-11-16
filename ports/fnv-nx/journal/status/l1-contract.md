@@ -2389,3 +2389,11 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - include_of in, the rule-2 item closed;
   - no L6 host root loads plugins;
   - render merges keep the render tree, resolved as L6's.
+
+## 2026-11-16 04:00
+- w28 08109b9ce: dangling-link red deleted; FNVNX_EXPORT relocation form (`&symbol` in .fnvnx.export, exportgen reads the relocation). Accepted.
+- w28 3ac52dd53: entropy = SHA-256 counter stream over the stage key (needed by L3b lift/proof/isla). AT_RANDOM/RDRAND open_channels with glibc citation. Accepted; test_sandbox 9a on farm.
+- Ruling A closed by type: ra writable only from the bridge TU (L3a). The w28 object gate is dropped.
+- Record placement after declaration: L5 platform/*.cpp (worker), L3a lift/rt macro-in-macro records.
+- w28 queue: run+python -> ext_dir -> farm (test_gate_imports, test_sandbox 9a).
+- bottleneck: cand3b farm verdict at 963dce662.
