@@ -2050,3 +2050,14 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - L5: imports 3021/3132, with 32 'external' CRT/EH symbols; machine foreign-writer; abi msvcrt_va for `_vsnprintf` and `fnvnx_msvc_format`; objstub on platform/audio.
   - L1 (loader): objstub on loader/guest/boot.c, and linkstrict. The worker will be assigned when w15 sends the full lists.
 - bottleneck: cand3b (w15) warm verdict.
+
+## 2026-11-16: cand3b ruling after the first cut (f536286ff)
+
+- Verdict at f536286ff: cold, 789 s, `L1 red`, 42 gates (20 vacuous). Red: hostapi 36/62, imports 0/11, linkstrict 1519/1655, objstub 416/430, pure 40/42, rtasm jmpbuf:probe, selftests 119/137.
+- Finding: cand3b had re-admitted roots that cand2 cut: gl4, nxgpu, pair, translator, lib/sha256, rt/guest, tests/bootrt and render/total. It also added hostabi, verify/probes, lift/descs, contract/facts and contract/factscheck.
+- Ruling:
+  - Cut every root not on fb9dd044f that is not green, by the graph.
+  - No gate is dropped; a gate with no rows is recorded as vacuous.
+  - L1 selftests are fixed (toy fixtures vs cand3 recipe.py, the pathrules fixture, the views store dependency, the objstub_owner read); tests of cut roots leave with them.
+  - pure: contract/gatecert.py is fixed by L1.
+- bottleneck: cand3b (w15).
