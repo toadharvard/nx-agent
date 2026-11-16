@@ -2913,3 +2913,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - L6 w10 60c5ba7: all render/ and bridgefacts/ imports use fnvnx.<rel>.
   - The remaining reds come from the stage not mounting the tool's own root under /imp/fnvnx. That is added to w28's item A, with /tool replaced by `python -m` if possible.
 - bottleneck: the w28 prefix head (it unblocks L5, L6 and L2); farm 3 bridgetable; cand4 verdict; L3a base3 head.
+- w28-c5 8f25aa926: done. One module path is `fnvnx.<rel>`, at /imp/fnvnx, and module_top_errors checks the name `fnvnx`.
+  - 183 imports were rewritten in 113 L1 files. ports/fnvnx is a symlink for host runs. test_modpath is green.
+  - The head was sent to L5, L2 and L3a. The own-root mount follows, and L6 waits on it.
