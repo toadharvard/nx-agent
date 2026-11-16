@@ -297,10 +297,10 @@ def decltype_cxx(td, so):
     check('extern "C" declarations and definitions of a C++ unit give the same rows as the same text in a C unit (%d symbols)' % len(rows['pair_c.o']),
           rows['pair_c.o'] == rows['pair_cxx.o'] and len(rows['pair_c.o']) >= 14 and '-' in rows['pair_c.o']['anf'] and '._anon' not in rows['pair_cxx.o']['anf'], (sorted(set(rows['pair_c.o'].items()) ^ set(rows['pair_cxx.o'].items()))))
     # RULE DECLTYPE-BUILTIN: a record the target builds (its va_list) has one row whatever the front end: its own FIELD_DECL names on both.
-    BI = '#include <stdarg.h>\nint bi_fmt(const char *f, va_list ap);\nint bi_scan(const char *f, va_list *app);\n'
+    BI = '#include <stdarg.h>\nint bi_fmt(const char *f, va_list ap) { return f[0]; }\nint bi_scan(const char *f, va_list *app) { return f[0] + (app != 0); }\n'
     bc, bx = os.path.join(td, 'bi.c'), os.path.join(td, 'bi.cpp')
     open(bc, 'w').write(BI)
-    open(bx, 'w').write('#include <stdarg.h>\nextern "C" {\nint bi_fmt(const char *f, va_list ap);\nint bi_scan(const char *f, va_list *app);\n}\n')
+    open(bx, 'w').write('#include <stdarg.h>\nextern "C" {\nint bi_fmt(const char *f, va_list ap) { return f[0]; }\nint bi_scan(const char *f, va_list *app) { return f[0] + (app != 0); }\n}\n')
     brow = {}
     for src_, o in ((bc, 'bi_c.o'), (bx, 'bi_cxx.o')):
         r = pb.compile(src_, os.path.join(td, o), so)

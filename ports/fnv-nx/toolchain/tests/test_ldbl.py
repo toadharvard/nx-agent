@@ -119,7 +119,7 @@ def datamodel(td, so):
     gdir = os.path.join(root, 'msvcmodel', 'datamodel')
     mirror = json.load(open(os.path.join(gdir, 'sources.json')))['mirror']
     ext = {k: mirror[k] for k in ('name', 'repo', 'ref', 'commit', 'tree_sha256', 'at')}
-    got = pb.recipe.fetch_externals([ext], pb.STORE, os.path.join(pb.STORE, 'external'), os.path.join(td, 'ext-ws'))
+    got = pb.recipe.fetch_externals([ext], pb.STORE, pb.recipe.ext_of_store(pb.STORE), os.path.join(td, 'ext-ws'))
     g = subprocess.run([sys.executable, '-I', os.path.join(gdir, 'gen.py'), '--mirror', got[ext['name']]['host'],
                         '--out', os.path.join(root, 'msvcmodel', 'DATAMODEL.json'), '--check'], capture_output=True, text=True)
     check('DATAMODEL.json and .md are what gen.py writes from the pinned mirror (--check)', g.returncode == 0, g.stdout + g.stderr)
@@ -174,7 +174,7 @@ def main():
             check('no undefined symbol of the object is a libgcc TFmode soft-float entry (arithmetic, comparisons, conversions, varargs, complex)',
                   not (und & tf), sorted(und & tf))
             ext = json.load(open(os.path.join(pb.REAL, pb.T + 'verify/guest_compiler.json')))
-            co = os.path.join(pb.STORE, 'external', ext['external']['commit'] + '.co')
+            co = os.path.join(pb.recipe.ext_of_store(pb.STORE), ext['external']['commit'] + '.co')
             pd = predefines(os.path.join(co, pb.recipe.pin_drivers()[1]))
             dbl = {k[len('__DBL_'):]: v for k, v in pd.items() if k.startswith('__DBL_')}
             ldbl = {k[len('__LDBL_'):]: v for k, v in pd.items() if k.startswith('__LDBL_')}
