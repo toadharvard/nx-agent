@@ -2940,3 +2940,5 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - Orchestrator ruling: cand4 gets one fix round. Whatever is still red at the next verdict is dropped, and the green rest merges.
   - Vacuous gates: by VERDICT.md:118-119, an admitted root with universe 0 is red. The gate reads its roots this round, or the roots are dropped. It is never made green over a universe it does not read.
   - objstub: L5 gets the 12 findings (sent raw by the farm) and the citation format, with 30 minutes, on claude/fnv-l5-platform-cand4-cite.
+- objstub on cand4: the 12 findings are orphan rows dm:1-12 of verify/declared_machine.tsv, the exit paths, which no body cites.
+  - Exit is real work, so no citation is needed. w15 deletes the rows (L1), and L5 confirms that the 12 bodies are non-vacuous.
