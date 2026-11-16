@@ -1,5 +1,5 @@
 """sm_rules2.py - curated register / modifier / declaration / flow-control / caps facts with sources (see sm_rules.py)."""
-from sm_rules import *
+from sm_rules import MS, P11, P12, P13, P14, P20, P2X, P30, PS, V1, V2, V2X, V3, VS
 R1, R2, R3 = MS + "vs-registers-vs-1-1", MS + "vs-registers-vs-2-0/2-x", MS + "vs-registers-vs-3-0"
 Q1, Q2, Q3 = MS + "ps-registers-ps-1-x (Register Types)", MS + "ps-registers-ps-2-0/2-x", MS + "ps-registers-ps-3-0"
 NT = lambda c: dict(min=12, max=32, cap=c)

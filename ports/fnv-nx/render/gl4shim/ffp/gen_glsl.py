@@ -23,7 +23,7 @@ def version(headers):
     """the `#version` line of the backend: NX_GL4SHIM_GLSL_VERSION of nx_gl4shim.h (the sources carry no version line)"""
     for h in headers:
         m = re.search(r'^#define\s+NX_GL4SHIM_GLSL_VERSION\s+"(#version [^"]+)"\s*$', open(h).read(), re.M)
-        if m: return m.group(1)
+        if m: return m[1]
     raise SystemExit("gen_glsl: NX_GL4SHIM_GLSL_VERSION is defined in no header")
 
 
@@ -31,9 +31,9 @@ def consts(headers):
     v = {}
     for h in headers:
         for m in re.finditer(r"^#define\s+(\w+)\s+(\d+)\s*(?:/\*.*)?$", open(h).read(), re.M):
-            if m.group(1) in CONSTS:
-                if m.group(1) in v: raise SystemExit("gen_glsl: %s defined twice" % m.group(1))
-                v[m.group(1)] = int(m.group(2))
+            if m[1] in CONSTS:
+                if m[1] in v: raise SystemExit("gen_glsl: %s defined twice" % m[1])
+                v[m[1]] = int(m[2])
     for c in CONSTS:
         if c not in v: raise SystemExit("gen_glsl: %s is defined in no header" % c)
     return v
@@ -49,11 +49,11 @@ def structs(headers, defs):
     out = {}
     for h in headers:
         for m in re.finditer(r"typedef\s+struct\s+(\w+)\s*\{([^}]*)\}\s*(\w+)\s*;", strip_comments(open(h).read())):
-            if m.group(1) != m.group(3): raise SystemExit("gen_glsl: struct %s is typedef'd as %s" % (m.group(1), m.group(3)))
+            if m[1] != m[3]: raise SystemExit("gen_glsl: struct %s is typedef'd as %s" % (m[1], m[3]))
             mem = []
-            try: mem = read_members(m.group(1), m.group(2), defs)
+            try: mem = read_members(m[1], m[2], defs)
             except SystemExit as e: mem = e   # a struct that is no UBO record may have any members; its error is raised when a record needs it
-            out[m.group(1)] = mem
+            out[m[1]] = mem
     return out
 
 
@@ -65,11 +65,11 @@ def read_members(name, body, defs):
                 st = st.strip()
                 if not st: continue
                 t = re.match(r"(float|uint32_t|\w+)\s+(.*)$", st, re.S)
-                for d in t.group(2).split(","):
+                for d in t[2].split(","):
                     dm = re.match(r"\s*(\w+)((?:\s*\[\s*\w+\s*\])*)\s*$", d)
                     if not dm: raise SystemExit("gen_glsl: cannot read member '%s' of %s" % (d.strip(), name))
-                    dims = [defs[x] if x in defs else int(x) for x in re.findall(r"\[\s*(\w+)\s*\]", dm.group(2))]
-                    mem.append((dm.group(1), t.group(1), dims))
+                    dims = [defs[x] if x in defs else int(x) for x in re.findall(r"\[\s*(\w+)\s*\]", dm[2])]
+                    mem.append((dm[1], t[1], dims))
             return mem
 
 
@@ -141,7 +141,7 @@ def expand(path, seen=()):
     for line in open(path).read().split("\n"):
         m = re.match(r'\s*#include\s+"([^"]+)"\s*$', line)
         if m:
-            inc = os.path.normpath(os.path.join(os.path.dirname(path), m.group(1)))
+            inc = os.path.normpath(os.path.join(os.path.dirname(path), m[1]))
             if inc in seen: raise SystemExit("gen_glsl: include cycle at " + inc)
             out.append(expand(inc, seen + (inc,)))
         else:
@@ -163,7 +163,7 @@ def carray(name, data):
 
 def varying_locations(text, direction):
     """the sorted locations of the `layout(location = N) [FFP_FLAT] <direction> vec4 name;` declarations of an expanded stage source (a stage's varyings are exactly these)"""
-    locs = [int(m.group(1)) for m in re.finditer(r"layout\s*\(\s*location\s*=\s*(\d+)\s*\)\s*(?:FFP_FLAT\s+)?%s\s+vec4\s+\w+\s*;" % direction, text)]
+    locs = [int(m[1]) for m in re.finditer(r"layout\s*\(\s*location\s*=\s*(\d+)\s*\)\s*(?:FFP_FLAT\s+)?%s\s+vec4\s+\w+\s*;" % direction, text)]
     if len(set(locs)) != len(locs): raise SystemExit("gen_glsl: a varying location is declared twice")
     return sorted(locs)
 
@@ -195,5 +195,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.dont_write_bytecode = True
     main()

@@ -4,7 +4,7 @@ Every table cell is DERIVED from rows through the closing rules of README.md, an
 exit 2, naming it): devtype / adapter-format independence, format classes, usage-bit conjunction, struct writes iff success. The lookup functions are in env_rules.cpp.in.
 Profiles differ only where reported by the `profile differences` line."""
 import hashlib, os, re, struct, sys
-HERE = os.path.dirname(os.path.abspath(__file__)); sys.dont_write_bytecode = True
+HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE); import envq  # noqa: E402
 # OUT SPEC TSV_DIR D3DTYPES_H WINE_DIR D3D9_H D3D9CAPS_H ENV_PIN RULES_IN: the one place that parses the arguments (no default)
 envq.load(sys.argv[4], sys.argv[2], sys.argv[5], sys.argv[6], sys.argv[7])
@@ -51,8 +51,8 @@ def load(path):
     R, DEV = {}, []
     for l in open(path):
         if l.startswith("#"): continue
-        q, ret, out = l.rstrip("\n").split("\t"); m = re.match(r"([\w.]+)\((.*)\)$", q); a = tuple(int(x, 16) for x in m.group(2).split(",")) if m.group(2) else (); k = (m.group(1), a)
-        if m.group(1).startswith("DEV."): DEV.append((k, int(ret, 16), out)); continue
+        q, ret, out = l.rstrip("\n").split("\t"); m = re.match(r"([\w.]+)\((.*)\)$", q); a = tuple(int(x, 16) for x in m[2].split(",")) if m[2] else (); k = (m[1], a)
+        if m[1].startswith("DEV."): DEV.append((k, int(ret, 16), out)); continue
         if k in R and R[k] != (int(ret, 16), out) and not k[0].startswith(("QueryInterface", "AddRef", "Release")) and k[0] != "GetAdapterDisplayMode": die(f"duplicate query {k} answered differently")
         R[k] = (int(ret, 16), out)
     return R, DEV
@@ -70,7 +70,7 @@ def image(st, out, size):
     im = bytearray(size); f = fields(out)
     for name, off, sz, kind in envq.leaves(ST, st):
         v = f[name]
-        if kind == "c": b = re.sub(r"\\x([0-9a-f]{2})", lambda m: chr(int(m.group(1), 16)), v).encode("latin-1"); im[off:off + len(b)] = b
+        if kind == "c": b = re.sub(r"\\x([0-9a-f]{2})", lambda m: chr(int(m[1], 16)), v).encode("latin-1"); im[off:off + len(b)] = b
         elif kind == "b": im[off:off + sz] = bytes.fromhex(v)
         else: im[off:off + sz] = int(v, 16).to_bytes(sz, "little")
     return bytes(im)

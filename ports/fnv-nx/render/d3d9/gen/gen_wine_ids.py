@@ -17,8 +17,8 @@ def main(argv):
         if len(f) != 5 or not f[0].isdigit(): raise SystemExit("gen_wine_ids: bad row %r" % l[:80])
         m = re.fullmatch(r"wine-9\.0:[A-Za-z0-9_./+-]+:([A-Za-z_][A-Za-z0-9_@]*)", f[2])
         if not m: raise SystemExit("gen_wine_ids: bad wine_ref %r" % f[2])
-        n = "NXW_" + m.group(1)
-        if n in names: raise SystemExit("gen_wine_ids: wine function %s of ids %d and %s" % (m.group(1), names[n], f[0]))
+        n = "NXW_" + m[1]
+        if n in names: raise SystemExit("gen_wine_ids: wine function %s of ids %d and %s" % (m[1], names[n], f[0]))
         names[n] = int(f[0]); rows.append((int(f[0]), n, f[1], f[2]))
     ids = [r[0] for r in rows]
     if len(set(ids)) != len(ids): raise SystemExit("gen_wine_ids: duplicate id")

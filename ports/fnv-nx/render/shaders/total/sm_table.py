@@ -4,10 +4,10 @@
 Opcode model sets: MS version tables (per instruction page); cross-checked against wine wined3d + vkd3d d3dbc (set, operand counts);
 registers: MS register tables vs wine d3dcompiler asmparser tables.  Disagreements -> `conflicts`; facts nobody states -> `undetermined`."""
 import argparse, json, os, sys
-HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import sm_docs, sm_xref, sm_decisions
-from sm_rules import *
-from sm_rules2 import *
+from sm_rules import ALL, ALU, CMPS, FLOW, MANUAL_MODELS, MS, P30, PAGES, SETP, TEX1, TEX2
+from sm_rules2 import (CAPS, DCL_SRC, DSTMOD, DST_OK, ENV_DEFAULT, FLOW_LIM, INSTR_LIMITS, REG, REG_SRC, SAMPLER_TYPES, SAT_EXCEPT_VS, SRCMOD,
+                       SRCMOD_SRC, SRC_OK, SWZ, SWZ_FORMS, USAGES)
 from sm_legacy import legacy_rows
 
 S1 = MS

@@ -9,7 +9,6 @@ Outputs (not checked in):
 Hooks (dev/d9impl_hooks.h): `NX_BASES_<Class>` = the one non-interface base of a class (default NxObj).
 Exit 2 naming the item when a spec method listed in COMMON has a signature other than the one NxObj implements."""
 import json, os, re, sys
-sys.dont_write_bytecode = True
 RES_TYPES = {"IDirect3DSurface9": "SURFACE", "IDirect3DVolume9": None, "IDirect3DTexture9": "TEXTURE", "IDirect3DVolumeTexture9": "VOLUMETEXTURE",
              "IDirect3DCubeTexture9": "CUBETEXTURE", "IDirect3DVertexBuffer9": "VERTEXBUFFER", "IDirect3DIndexBuffer9": "INDEXBUFFER"}
 DEV = ["struct IDirect3DDevice9**"]

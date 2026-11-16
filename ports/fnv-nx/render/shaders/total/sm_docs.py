@@ -35,7 +35,7 @@ def version_table(page, cache):
     m = re.search(r'(Pixel|Vertex) shader versions \|\s*\n', t)
     if not m: return None
     ln = [x.strip() for x in t[m.end():].split("\n")]
-    cols = PSV if m.group(1) == "Pixel" else VSV
+    cols = PSV if m[1] == "Pixel" else VSV
     hdr = [c.rstrip(" |").strip() for c in ln[:len(cols)]]
     assert hdr == [c[3:] for c in cols], (page, hdr)
     out, i = {}, len(cols)

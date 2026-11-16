@@ -2,7 +2,7 @@
 x86 SDK rules, which AArch64-ILP32 reproduces: every pointer/HANDLE/HWND/long is 4 bytes, the d3d9 headers are
 `#pragma pack(push, 4)` (member alignment = min(natural, 4)), win32 types are laid out at their natural alignment
 (LARGE_INTEGER 8). The result is cross-checked by tests/l6/test_spec.py against a g++ -m32 probe of the headers."""
-import os, re
+import ast, os, re
 
 HDRS = ("d3d9types.h", "d3d9caps.h", "d3d9.h")
 WIN_STRUCTS = ("GUID", "POINT", "RECT", "PALETTEENTRY", "RGNDATAHEADER", "RGNDATA", "LUID")
@@ -36,7 +36,7 @@ FAMILIES = {"D3DCLEAR": "D3DCLEAR_", "D3DCREATE": "D3DCREATE_", "D3DCURSOR": "D3
             "D3DFVF": "D3DFVF_", "D3DGETDATA": "D3DGETDATA_", "D3DISSUE": "D3DISSUE_", "D3DLOCK": "D3DLOCK_",
             "D3DPRESENT": "D3DPRESENT_", "D3DPRESENTFLAG": "D3DPRESENTFLAG_", "D3DPV": "D3DPV_", "D3DSGR": "D3DSGR_",
             "D3DSPD": "D3DSPD_", "D3DUSAGE": "D3DUSAGE_"}
-FAMILIES.update({v: v + "_" for v in set(CAPS_FLAGS.values())})
+FAMILIES.update({v: v + "_" for v in sorted(set(CAPS_FLAGS.values()))})
 HAND = {  # shapes the C parser does not read: anonymous unions / flexible arrays / the SDK's 64-bit union
     "LARGE_INTEGER": (8, 8, [("LowPart", 0, 4, "int", False), ("HighPart", 4, 4, "int", True)]),
     "ULARGE_INTEGER": (8, 8, [("LowPart", 0, 4, "int", False), ("HighPart", 4, 4, "int", False)]),
@@ -58,7 +58,7 @@ def pack_map(src):
     alignment). The member alignment of a struct is min(natural, pack) at its position (pack_at), read from the headers, stated nowhere else."""
     st, out = [None], []
     for m in re.finditer(r"#\s*pragma\s+pack\s*\(([^)]*)\)", src):
-        a = [x.strip() for x in m.group(1).split(",") if x.strip()]
+        a = [x.strip() for x in m[1].split(",") if x.strip()]
         if a and a[0] == "push": st.append(int(a[1]) if len(a) > 1 else st[-1])
         elif a and a[0] == "pop": st.pop()
         elif a: st[-1] = int(a[0])
@@ -94,32 +94,58 @@ def split_top(t):
     return out + ["".join(cur)]
 
 
+class NotConst(ValueError):
+    """the text is not a constant expression over the known names (a syntax error or a name without a value): the define is not a constant"""
+
+
+_BIN = {ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b, ast.Mult: lambda a, b: a * b, ast.LShift: lambda a, b: a << b,
+        ast.RShift: lambda a, b: a >> b, ast.BitOr: lambda a, b: a | b, ast.BitAnd: lambda a, b: a & b, ast.BitXor: lambda a, b: a ^ b}
+_UN = {ast.USub: lambda a: -a, ast.UAdd: lambda a: a, ast.Invert: lambda a: ~a}
+
+
+def cexpr(text, env):
+    """The value of a C integer constant expression: integer literals, names of env, + - * << >> | & ^, unary - + ~ and parentheses (the grammar the SDK headers use, the
+    Python operators have the C relative precedence for exactly these). A node of any other kind stops the generator."""
+    try: tree = ast.parse(text.strip(), mode="eval")
+    except SyntaxError: raise NotConst(text)
+    def ev(n):
+        if isinstance(n, ast.Expression): return ev(n.body)
+        if isinstance(n, ast.Constant) and type(n.value) is int: return n.value
+        if isinstance(n, ast.Name):
+            if n.id in env: return env[n.id]
+            raise NotConst(n.id)
+        if isinstance(n, ast.BinOp) and type(n.op) in _BIN: return _BIN[type(n.op)](ev(n.left), ev(n.right))
+        if isinstance(n, ast.UnaryOp) and type(n.op) in _UN: return _UN[type(n.op)](ev(n.operand))
+        raise SystemExit("d3d9_structs: constant expression node %s of %r is outside the grammar of cexpr" % (type(n).__name__, text))
+    return ev(tree)
+
+
 def load(inc):
     t = {f: text(inc, f) for f in HDRS + ("fnvnx_win32.h",)}
     allt = "\n".join(t[h] for h in HDRS)
     consts = {}
     for m in re.finditer(r"#define\s+(\w+)\s+([0-9xXa-fA-F() <>|+*-]+?)[LlUu]*\s*$", allt, re.M):
-        try: consts[m.group(1)] = int(eval(re.sub(r"(?<=[0-9a-fA-F])[LlUu]+\b", "", m.group(2)), {}, {}))
-        except Exception: pass
+        try: consts[m[1]] = cexpr(re.sub(r"(?<=[0-9a-fA-F])[LlUu]+\b", "", m[2]), {})
+        except NotConst: pass
     enums, nextv = {}, 0
     for m in re.finditer(r"typedef\s+enum\s*\w*\s*\{", allt):
         body, end = body_of(allt, m.end() - 1)
-        name = re.match(r"\s*(\w+)", allt[end:]).group(1)
+        name = re.match(r"\s*(\w+)", allt[end:])[1]
         names, v = [], -1
         for item in split_top(re.sub(r"#\w+[^\n]*", " ", body)):
             item = item.strip()
             if not item: continue
             if "=" in item:
                 n, e = [x.strip() for x in item.split("=", 1)]
-                try: v = int(eval(re.sub(r"(?<=[0-9a-fA-F])[LlUu]+\b", "", e), {}, dict(consts)))
-                except Exception: v += 1
+                try: v = cexpr(re.sub(r"(?<=[0-9a-fA-F])[LlUu]+\b", "", e), consts)
+                except NotConst: v += 1
             else:
                 n = item; v += 1
             names.append(n); consts[n] = v
         enums[name] = names
     for m in re.finditer(r"#define\s+(\w+)\s+\(([A-Za-z0-9_ +*-]+)\)\s*$", allt, re.M):
-        try: consts.setdefault(m.group(1), int(eval(m.group(2), {}, dict(consts))))
-        except Exception: pass
+        try: consts.setdefault(m[1], cexpr(m[2], consts))
+        except NotConst: pass
     raw = {}
     for src, filt in ((allt, None), (t["fnvnx_win32.h"], WIN_STRUCTS)):
         pm = pack_map(src)
@@ -140,10 +166,10 @@ def decl_fields(body):
         parts = [p.strip() for p in stmt.split(",")]
         head = parts[0]
         m = re.match(r"(.*?)\s*(\w+)((?:\[[^\]]+\])*)$", head)
-        ty, names = m.group(1).strip(), [(m.group(2), m.group(3))]
+        ty, names = m[1].strip(), [(m[2], m[3])]
         for p in parts[1:]:
             mm = re.match(r"(\w+)((?:\[[^\]]+\])*)$", p)
-            names.append((mm.group(1), mm.group(2)))
+            names.append((mm[1], mm[2]))
         for n, arr in names:
             out.append((ty, n, arr))
     return out

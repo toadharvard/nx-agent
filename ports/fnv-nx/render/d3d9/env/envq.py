@@ -5,8 +5,7 @@ Domains are COMPLETE finite sets: every D3DFORMAT enum value of d3d9types.h + th
 D3DMULTISAMPLE_TYPE enum value + invalid ones; every single usage bit of the 32-bit word + all pairs of the bits that are not masked by Wine
 (see render/d3d9/env/README.md for why single bits + pairs cover the usage function)."""
 import json, os, re, sys
-HERE = os.path.dirname(os.path.abspath(__file__)); sys.dont_write_bytecode = True
-sys.path.insert(0, HERE); import wine_fourcc  # noqa: E402
+import wine_fourcc
 fcc = wine_fourcc.fcc
 
 
@@ -17,7 +16,7 @@ def enum_items(hdr, typedef):
     for item in t.split(","):
         m = re.fullmatch(r"\s*(\w+)\s*(?:=\s*(0x[0-9A-Fa-f]+|\d+))?\s*", item)
         if not m: continue
-        v = int(m.group(2), 0) if m.group(2) else v + 1; out.append((m.group(1), v))
+        v = int(m[2], 0) if m[2] else v + 1; out.append((m[1], v))
     return out
 
 
@@ -33,13 +32,13 @@ def d3dformat_enum(hdr):
     """{name: value} of the D3DFORMAT enumerators of the header (MAKEFOURCC ones evaluated)"""
     t = open(hdr).read(); t = t[t.index("typedef enum _D3DFORMAT"):]; t = t[:t.index("} D3DFORMAT;")]; out = {}
     for m in re.finditer(r"(D3DFMT_\w+)\s*=\s*(?:MAKEFOURCC\('(.)',\s*'(.)',\s*'(.)',\s*'(.)'\)|(0x[0-9A-Fa-f]+|\d+))", t):
-        out[m.group(1)] = fcc("".join(m.group(i) for i in range(2, 6))) if m.group(2) else int(m.group(6), 0)
+        out[m[1]] = fcc("".join(m[i] for i in range(2, 6))) if m[2] else int(m[6], 0)
     return out
 
 
 def d3d_results(d3d9h):
     """{name: value} of the D3DERR_* / D3DOK_* defines of d3d9.h: MAKE_D3DHRESULT(code) / MAKE_D3DSTATUS(code) with _FACD3D, evaluated as the header's MAKE_HRESULT does"""
-    t = open(d3d9h).read(); fac = int(re.search(r"#define _FACD3D\s+(0x[0-9A-Fa-f]+)", t).group(1), 16)
+    t = open(d3d9h).read(); fac = int(re.search(r"#define _FACD3D\s+(0x[0-9A-Fa-f]+)", t)[1], 16)
     return {n: ((1 if k == "HRESULT" else 0) << 31 | fac << 16 | int(c)) for n, k, c in re.findall(r"#define (D3D(?:ERR|OK)_\w+)\s+MAKE_D3D(HRESULT|STATUS)\(\s*(\d+)\s*\)", t)}
 
 

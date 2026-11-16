@@ -5,10 +5,7 @@
 Inputs: shim/include/d3d9*.h (method order, types, structs, enums, constants) + d3d9_rules.py / d3d9_cls.py / d3d9_tables.py /
 d3d9_exports.py (the hand tables). Unknown types or invalid rules abort the run: nothing is guessed."""
 import json, os, re, sys
-sys.dont_write_bytecode = True
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
 import d3d9_cls as C, d3d9_exports as EX, d3d9_expr as X, d3d9_rules as R, d3d9_structs as ST, d3d9_tables as T   # noqa: E402
 
 IUNK = [("HRESULT", "QueryInterface", "REFIID riid, void** ppvObj"), ("ULONG", "AddRef", ""), ("ULONG", "Release", "")]
@@ -22,13 +19,13 @@ def parse_headers(inc):
     ifs = {"IUnknown": ("", [(i, r, n, a) for i, (r, n, a) in enumerate(IUNK)])}
     for m in re.finditer(r"struct (IDirect3D\w+)\s*:\s*public (\w+)\s*\{(.*?)\n\};", text, re.S):
         name, base, body = m.groups()
-        ms = [(int(x.group(1)), x.group(2).strip(), x.group(3), " ".join(x.group(4).split()))
+        ms = [(int(x[1]), x[2].strip(), x[3], " ".join(x[4].split()))
               for x in re.finditer(r"/\*\s*(\d+)\s*\*/\s*FNVNX_D3D_METHOD\(([^,]+),\s*(\w+)\)\((.*?)\)\s*=\s*0;", body, re.S)]
         ifs[name] = (base, ms)
     iids = {}
     for m in re.finditer(r"FNVNX_D3D_GUID\(IID_(\w+),\s*(0x\w+),\s*(0x\w+),\s*(0x\w+),\s*\{([^}]*)\}\)", text):
-        b = [int(x, 16) for x in m.group(5).split(",")]
-        iids[m.group(1)] = "%08x-%04x-%04x-%02x%02x-%s" % (int(m.group(2), 16), int(m.group(3), 16), int(m.group(4), 16), b[0], b[1], "".join("%02x" % x for x in b[2:]))
+        b = [int(x, 16) for x in m[5].split(",")]
+        iids[m[1]] = "%08x-%04x-%04x-%02x%02x-%s" % (int(m[2], 16), int(m[3], 16), int(m[4], 16), b[0], b[1], "".join("%02x" % x for x in b[2:]))
     iids["IUnknown"] = "00000000-0000-0000-c000-000000000046"
     return ifs, iids
 
@@ -57,7 +54,7 @@ def split_params(args, mname):
     out = []
     for i, p in enumerate(parts):
         m = re.match(r"^(.*?)(\w+)$", p)
-        if m and m.group(1).strip() not in ("", "const", "struct"): ty, nm = m.group(1).strip(), m.group(2)
+        if m and m[1].strip() not in ("", "const", "struct"): ty, nm = m[1].strip(), m[2]
         else: ty, nm = p, (fix[i] if i < len(fix) and fix[i] else f"arg{i}")
         out.append((" ".join(ty.split()), nm))
     return out
@@ -170,7 +167,7 @@ class Gen:
             hit = hit or ("det", None)
             m["ret_cls"] = hit[0]
             if hit[1]: m["ret_why"] = hit[1]
-        eff = [x.group(0) for t in T.TAINT if t[0] == name for x in re.finditer(r"(pix|copy)\([^)]*\)", t[1])]
+        eff = [x[0] for t in T.TAINT if t[0] == name for x in re.finditer(r"(pix|copy)\([^)]*\)", t[1])]
         if eff: m["effects"] = eff
         return m
 

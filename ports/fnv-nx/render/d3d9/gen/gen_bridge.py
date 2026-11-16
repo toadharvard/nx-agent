@@ -12,8 +12,6 @@ Rules (total over the spec's item kinds; an item this file has no rule for stops
                             object model makes on it (AddRef / Release) go through nxd3d_app_* (dev/app_unk_guest.cpp -> fnvnx_guest_invoke of L3a)
   ret: void `v`, float `f` (x87 ST0 on the guest side), everything else one 32-bit `i` (HRESULT, counts, enums, opaque handles)."""
 import json, os, sys
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
 sys.path.insert(0, sys.argv[3])   # the directory of bridgefacts/d3d9 (the spec json, d9rows.py): an input of the stage
 from d9rows import die, slot_of, ret_of  # noqa: E402
 from gen_impl import cname  # noqa: E402
