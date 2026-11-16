@@ -2815,3 +2815,9 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - a lifted_by stage missing from the expanded steps is red;
   - selftests for all three, and a diagnosis: real cycle or recomputation.
 - bottleneck: the cand4 verdict at c35a5e6a4 (farm); recipe re-resolution (w28); L2 path (a) plugin pin; L3a facts2 universe pin.
+- Fixed at w28-c5 cd5d432fa. The cause was recomputation through diamonds, not a cycle: 63 roots, 0 cycles, and from liftsrc 38 distinct roots took 18,854 resolutions (lift/fpfacts 6,340).
+  - recipe.resolved: one resolution per (store, repo, kind, root, output) per process. Failures are memoized, and a value whose files are gone is remade.
+  - recipe.entered: a re-entered root is red "cycle: A -> ... -> A".
+  - The lifted_by stage check is one function for check and for resolution.
+  - test_resolve_once 12/12. The stage-start count needs the farm env.
+- It goes into the next cand4 head (w15).
