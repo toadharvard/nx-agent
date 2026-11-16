@@ -48,6 +48,12 @@
     "root": "ports/fnv-nx/lift/sdmrows",
     "output": "SDMROWS"
    }
+  ],
+  "test_x87_exc_routing.py": [
+   {
+    "root": "ports/fnv-nx/lift/sdmrows",
+    "output": "SDMROWS"
+   }
   ]
  }
 }
