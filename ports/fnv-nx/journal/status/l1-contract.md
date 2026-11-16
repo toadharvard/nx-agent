@@ -2837,3 +2837,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - cand4 merges as it is once green; it does not take these.
 - cand5 order: trunk after cand4, then L2 cand4b toolchain/ + GMP/MPFR, L3a base3 lift/, L5 offer, and L6 ce86bbd83.
 - bottleneck: cand4's remaining reds (w15) and its verdict; the cand5 heads from L3a and L2; L3a facts2 universe pin.
+- toolchain/ for cand5: L2 cand4b with the FNPARM revert ba2aa4dcb on top, plus the three base3 names/plugbuild commits (w2 sends the head). FNPARM returns with the recipe-path pin once its toolchain run is green end to end (rt stage still red). Reason: cand5 does not wait on path (a), because it carries the dispatch fix for the platform/loader link.
