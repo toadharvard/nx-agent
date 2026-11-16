@@ -2879,3 +2879,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - L2's `!` marker landed at 6f147b874 (w2, test_layout 214 checks). w28 combines its toolchain hunks with exportrec, keeps L1's ctypes_compat parse as the one copy, and hands the result to farm 3 (doing).
   - The farm report is to give the global `!` count over the platform export records, and to show the 13 exports green with any marked record red.
 - bottleneck: farm 3 relift on the combined head; cand4 verdict; L3a base3 head.
+- Admit census (L3a w8, base3 a033e5cbe): 26 files are uncertified, none in lift/. w8 named 20 of them; the full list comes from w28's untruncated run.
+  - L1 has 12 (link/, plus verify/gate_abi and gate_linkstrict), assigned to w28, who also removes gate_admit's [:50] truncation.
+  - L2 has 3 (toolchain/tests, s23_codeview), L6 has 4 (render/total) and L5 has 1 (gen_combridge). Each is sent to its owner.
+  - The admit `imports` field was deleted from 4 rows on base3. In cand5, verify/admit.json comes from w28-c5, and w28 confirms that file has none.
+- bottleneck: farm 3 relift; cand4 verdict; L3a base3 head; the owner heads of the import fixes.
