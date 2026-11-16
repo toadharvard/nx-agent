@@ -2507,3 +2507,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - w28 741e4a5e8: '!rt' declared as a runtime module (dllkind.RUNTIME; no handle, 126; an image import of it is red). Accepted.
 - w28 3817734d7: stage_output evaluates only the step closure, one artifact build per Job, Job.stats counter, test_stageref_cost. The memo key must be the content key, not file stat; _rootfs gets one per deb-set key. Then to w15 for cand3b.
 - bottleneck: the recipe walk fix into cand3b, then its verdict.
+
+## 2026-11-16 04:38
+- cand3b 597f2e007 verdict 94f85ab2: L1 red, selftests 128/131 (test_gate_addr, test_gate_order, test_rtasm leave the cas pool in TMPDIR). test_guest is green. Cold 1006 s; warm not measured. To w15: one temporary-store helper for all tests, the cause first in the reason; then one head with w28's walk fix and the budget check, verdict cold then warm. Orchestrator told.
+- bottleneck: the cand3b head with the pool, walk and budget fixes.
