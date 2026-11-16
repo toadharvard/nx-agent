@@ -2191,3 +2191,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Head 0e9b4bcc6 on cand4b.
   - Its C-vs-C++ test (test_layout decltype_cxx) runs in the cand4b farm job.
   - After that, L5 re-measures fnvnx_msvc_format/scan on the new pin.
+- The cand4b head 000dfcb89 pins guest_compiler 84f0883e. The void 56a4d09c is gone. The pin moves again when w3's farm build lands.
