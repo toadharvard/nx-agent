@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/lib/sha256/build.host.json ports/fnv-nx/lib/sha256/build.json
-# reads: ports/fnv-nx/link ports/fnv-nx/loader/build.json ports/fnv-nx/platform/build.json ports/fnv-nx/render/d3d9/build.json
+# reads: ports/fnv-nx/link ports/fnv-nx/loader/build.json ports/fnv-nx/platform/build.json
 # reads: ports/fnv-nx/render/gl4/build.json ports/fnv-nx/render/nxgpu/build.guest.json ports/fnv-nx/render/nxgpu/build.json
 # reads: ports/fnv-nx/render/pair/build.host.json ports/fnv-nx/render/pair/build.json ports/fnv-nx/render/shaders/translator/build.host.json
 # reads: ports/fnv-nx/render/shaders/translator/build.json ports/fnv-nx/render/smscan/build.host.json ports/fnv-nx/render/smscan/build.json
