@@ -2726,3 +2726,10 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - Red cases pass locally. The key and stage cases need the declared env and are queued on the farm.
 - cand4 verdict: the farm (session_01KmtZKTV1mniUErarfUpdJZ) started it at about 06:45Z, and the session is now disconnected. Status was requested. The w28-c5 verdict at 6461d118e is queued after it.
 - bottleneck: the cand4 verdict (farm state unknown); L2 path (a) plugin pin -> 67164ec5e (toolchain rt stage was red, rerun queued at cand4b 6abb87678); L3a facts2 universe pin.
+
+### 2026-11-16: w28-c5 e26b70863
+- RECIPE.md now states the boundary of the derived-imports rule.
+- farm/header_owners.py deleted: nothing references it, resolve_profile never existed in history, and it fetched over the network.
+- funcfacts/dnfile: only the hand-run manifest/test_import_escape.sh reaches it. Sent to L5: make it a stage of the manifest root (winmd external, dnfile pin from L1) or delete it.
+- w28-c5 head: e26b70863 (on top of 6461d118e); the farm verdict is queued after cand4.
+- bottleneck: the cand4 verdict (farm state unknown); L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
