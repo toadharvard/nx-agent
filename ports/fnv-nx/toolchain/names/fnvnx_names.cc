@@ -25,8 +25,8 @@
  *       noemit                a function this unit defines whose body GCC wrote nowhere in the object (inlined at every use): a cl name, no symbol, def=ref
  *
  * THE closed set of kinds is FNVNX_SYMPAIR_KINDS in sympair_kinds.inc (with a meaning per kind); the plugin refuses a row outside it.
- *       nodecor:<reason>      a typed fact: the decoration source has no name for the symbol (localscope: cl's local scope numbering, fnparmform: the
- *                             declared form of a function-type parameter, vtordisp: the exe's vbptr layout, or a tree code). Not a fallback: a gate
+ *       nodecor:<reason>      a typed fact: the decoration source has no name for the symbol (localscope: cl's local scope numbering, fnparmform:<form>: a declared
+ *                             form of a function-type parameter that cl 15.00 has no recorded name for, vtordisp: the exe's vbptr layout, or a tree code). Not a fallback: a gate
  *                             is red only for a symbol the exe's or a module's own facts reach (the crossing join), never for a row
  *
  * .fnvnx.names: `<symbol>\t<MSVC name>` of every function and object the unit named, also those the object has no
@@ -200,7 +200,7 @@ static char ptr_letter(int q)
  * does not matter). GCC keeps only the last declaration's PARM_DECLs, so the first is recorded when it is declared, by the
  * uid of the declaration that survives the merge (a template instance: of its most general template's pattern). A function
  * whose first declaration is its definition, or that was never declared before (no record), has its own. */
-struct ParmForm { int quals; bool array; };
+struct ParmForm { int quals; bool array; bool fn; };
 static std::map<UidKey, std::vector<ParmForm>> first_parms;
 static UidKey parm_key(tree f)
 {
@@ -215,10 +215,10 @@ static std::vector<ParmForm> parm_forms(tree f)
 {
   std::vector<ParmForm> v;
   for (tree p = DECL_ARGUMENTS(f) ? FUNCTION_FIRST_USER_PARM(f) : NULL_TREE; p; p = DECL_CHAIN(p))
-    v.push_back({cp_type_quals(TREE_TYPE(p)), (bool)DECL_ARRAY_PARAMETER_P(p)});
+    v.push_back({cp_type_quals(TREE_TYPE(p)), (bool)DECL_ARRAY_PARAMETER_P(p), (bool)DECL_FUNCTION_PARAMETER_P(p)});
   return v;
 }
-struct ArgKey { tree type; int quals; bool array; };
+struct ArgKey { tree type; int quals; bool array; bool fn; std::string enc; };
 
 struct M {
   std::string out;
@@ -451,22 +451,31 @@ struct M {
     return !strcmp(c, "this") ? 'E' : !strcmp(c, "std") ? 'G' : !strcmp(c, "fast") ? 'I' : 'A';
   }
 
-  void arg(tree t, int q, bool is_array)
+  /* cl's back-reference key of a parameter is its DECLARED type: pointer, array (`int a[]`) and function (`void g(int)`) forms of one encoding are three
+   * keys (checked: names.expect f8, the third parameter `void g(int)` is written out beside the first `void (*)(int)`), and two declared types are one key
+   * when cl's own types are equal. For a function type that equality is the encoding: `void (*)(int [])` and `void (*)(int *const)` are one cl type
+   * (names.expect f8, the fifth parameter is the back-reference of the fourth) although GCC has one node for both and for `void (*)(int *)`, which
+   * cl keeps apart. So the key is the form (is_array, fn), the qualifiers, GCC's type AND the encoding text. */
+  void arg(tree t, int q, bool is_array, bool fn)
   {
     q &= TYPE_QUAL_CONST | TYPE_QUAL_VOLATILE | TYPE_QUAL_RESTRICT;
     if (TYPE_REF_P(t)) q &= ~TYPE_QUAL_RESTRICT;      /* cl ignores a qualifier on a reference, also as a back-reference key */
+    size_t before = out.size();
+    std::string enc;
+    {
+      M k;   /* the parameter's encoding by itself, with no back-reference of the table it is written into: the same type written twice is the same text */
+      if (is_array) { k.out += 'Q'; k.type(TREE_TYPE(t), MANGLE); }
+      else k.type(t, DROP, q);
+      if (!k.why.empty()) { fail(k.why); return; }
+      enc = k.out;
+    }
     for (size_t i = 0; i < args.size(); i++)
-      if (args[i].quals == q && args[i].array == is_array && same_type_p(args[i].type, t)) {
-        /* cl keys the back-reference on the declared type: `void g(int)` (a function) and `void (*g)(int)` (a pointer) are different keys for it, and the front
-           end has adjusted the first to the second before any plugin sees it, so a repeated function-pointer parameter cannot be told which */
-        if (TREE_CODE(t) == POINTER_TYPE && TREE_CODE(TREE_TYPE(t)) == FUNCTION_TYPE)
-          fail("fnparmform");
+      if (args[i].quals == q && args[i].array == is_array && args[i].fn == fn && args[i].enc == enc && same_type_p(args[i].type, t)) {
         out += (char)('0' + i); return;
       }
-    size_t before = out.size();
     if (is_array) { out += 'Q'; type(TREE_TYPE(t), MANGLE); }
     else type(t, DROP, q);
-    if (out.size() - before > 1 && args.size() < 10) args.push_back({TYPE_MAIN_VARIANT(t), q, is_array});
+    if (out.size() - before > 1 && args.size() < 10) args.push_back({TYPE_MAIN_VARIANT(t), q, is_array, fn, enc});
   }
 
   void function_type(tree ft, tree d, DtorKind dk)
@@ -486,23 +495,38 @@ struct M {
       auto fp = first_parms.find(parm_key(d));
       if (fp != first_parms.end() && fp->second.size() == parm_forms(d).size()) first = &fp->second;
     }
+    /* a function type with no declaration says how each parameter was written in the type attribute fnvnx_parmform (msvcmodel.patch, decl.cc
+       grokdeclarator cdk_function): per parameter `p` plain, `a` array, `f` function, then the digit of its top-level cv-qualifiers (CONST 1,
+       VOLATILE 2, RESTRICT 4). No attribute is the positive fact that every parameter is plain. The forms that cl 15.00 has a recorded name for are the
+       certified domain (names.expect f8: plain, array, const pointer, and a function-typed parameter of a declaration); a form outside it is a typed
+       fact `nodecor:fnparmform:<form>`, never a guessed name */
+    const char *pf = NULL;
+    if (!d)
+      if (tree a = lookup_attribute("fnvnx_parmform", TYPE_ATTRIBUTES(ft))) pf = TREE_STRING_POINTER(TREE_VALUE(TREE_VALUE(a)));
     size_t pi = 0;
     bool var = variadic(ft), any = false;
-    for (; p && p != void_list_node; p = TREE_CHAIN(p)) {
+    for (; p && p != void_list_node; p = TREE_CHAIN(p), pi++) {
       any = true;
       tree t = TREE_VALUE(p);
-      /* a function type that is itself a parameter or a member has no declaration to say what each parameter was written as: `int *` and `int []` are one type to GCC,
-         `PAH` and `QAH` to cl */
-      if (!d && TREE_CODE(t) == POINTER_TYPE) fail("fnparmform");
-      int q = 0; bool is_array = false;
+      int q = 0; bool is_array = false, fn = false;
       if (parm) {
         q = cp_type_quals(TREE_TYPE(parm));
         is_array = DECL_ARRAY_PARAMETER_P(parm);
-        if (first) { q = (*first)[pi].quals; is_array = (*first)[pi].array; }
-        pi++;
+        fn = DECL_FUNCTION_PARAMETER_P(parm);
+        if (first) { q = (*first)[pi].quals; is_array = (*first)[pi].array; fn = (*first)[pi].fn; }
         parm = DECL_CHAIN(parm);
+      } else if (pf) {
+        if (strlen(pf) <= 2 * pi + 1) { fail("fnparmform:the forms of the parameters are not those of the type"); return; }
+        char f = pf[2 * pi];
+        q = pf[2 * pi + 1] - '0';
+        is_array = f == 'a';
+        fn = f == 'f';
+        if (fn) { fail("fnparmform:a parameter written as a function inside a function type"); return; }
+        if (q && !(q == TYPE_QUAL_CONST && TREE_CODE(t) == POINTER_TYPE && !is_array)) {
+          fail("fnparmform:a cv-qualifier other than const on a pointer parameter inside a function type"); return;
+        }
       }
-      arg(t, q, is_array);
+      arg(t, q, is_array, fn);
     }
     if (!any && !var) out += 'X';
     else out += var ? 'Z' : '@';
