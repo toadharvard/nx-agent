@@ -6,7 +6,7 @@ PACKDIR: the pack (u/*.cpp).  Every lifted instruction has one label line `L_<8 
 (a parent range shared by several entries is lifted once per entry: the same address under several entries is one instruction).  No form name, no census, no facts list is consulted.
 IMAGES.tsv: `module<TAB>image path<TAB>load base<TAB>preferred base` (hex), one row per image of the pack; a label address a belongs to the image with load <= a < load + image size,
 and the bytes of the instruction are those of the image at the preferred base (a - load + preferred; the relocation patches only fields, which the shape key masks).
-The site list of the #UD classification is not produced here (it is derived from the lift facts: factsites.py); this tool writes the shape census only.
+This tool writes the shape census only.
 A label whose whole body is `fnvl_raise(KIND, ...)` (undecodable bytes, an invalid LOCK) is not a lifted instruction: it is counted in the header (raise_only, by kind) and not in the universe.
 Every other label address must belong to exactly one image and decode to one instruction (capstone, or the reserved-NOP gap fnvlift.f_sys.nop_gap, counted separately as family `nop-gap`); otherwise the run fails.
 OUT.tsv: the format of census.py (`shape<TAB>family<TAB>form_key<TAB>count<TAB>first_address`, count = distinct label addresses), header with the sha256 of every input."""

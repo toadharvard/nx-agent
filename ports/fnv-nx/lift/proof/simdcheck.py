@@ -252,20 +252,16 @@ def _by_cases(key, rep, rlimit):
 
 
 def main(a):
-    if '--cache' not in a: raise SystemExit('usage: simdcheck.py SHAPES.tsv --cache VERDICT_STORE [--only S] [--cleared F] [--cpufeat TABLE] [--progress]')
+    if '--cache' not in a: raise SystemExit('usage: simdcheck.py SHAPES.tsv --cache VERDICT_STORE [--only S] [--cpufeat TABLE] [--progress]')
     S.F.configure(a[a.index('--cache') + 1])
     if '--cpufeat' in a:
         from fnvlift import inputs; inputs.configure(cpufeat=a[a.index('--cpufeat') + 1])          # the CPUID feature-bit table: the class order (cleared) reads it
     only = a[a.index('--only') + 1] if '--only' in a else ''
-    ud = set()
-    if '--cleared' in a:                                   # the partition of sdmfeat.py (`partition`): the shapes of the cleared sites, #UD on the declared CPU (CPUREF), each by its SDM-derived reason
-        ud = {l.split('\t')[1] for l in open(a[a.index('--cleared') + 1]) if l.strip() and not l.startswith('#')}
     keys = [l.split()[0] for l in open(a[0]) if l.strip() and not l.startswith('#')]
     cnt = {}
     for k in keys:
         if only not in k: continue
         r, info = check(k)
-        if r == 'no-row' and k in ud: r = 'ud-class'                  # no spec row by rule: the opmap's cleared class (Form.fault(UD) is its own certificate), not a SIMD row
         cnt[r] = cnt.get(r, 0) + 1
         if '--progress' in a: print('PROGRESS', k, r, flush=True)
         if r in ('FAILED', bounds.BOUND): print(r, k, info)
