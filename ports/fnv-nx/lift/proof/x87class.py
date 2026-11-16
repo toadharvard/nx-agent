@@ -42,14 +42,15 @@ def x87_class(raw):
 
 def main(paths):
     from collections import Counter, defaultdict
-    import inspect
-    import tempfile
-    sys.path.insert(0, os.path.join(os.path.dirname(HERE), "fnvlift", "tests"))
-    import _inputs
-    d = tempfile.mkdtemp()
-    f = os.path.join(d, "dummy")
-    open(f, "w").write("{}")
-    _inputs.configure(**{p: f for p in inspect.signature(_inputs.configure).parameters})
+    sys.path.insert(0, os.path.join(HERE, "tests"))
+    import declared_cpufeat
+    import declared_x86sys
+    from fnvlift import inputs
+    cpufeat, why = declared_cpufeat.path()
+    if not cpufeat:
+        raise SystemExit(why)
+    declared_x86sys.configure()
+    inputs.configure(cpufeat=cpufeat)
     from proof import forms
     dec = shape.decoder()
     cls, outcome, cres, proved, seen = defaultdict(set), Counter(), {}, {}, set()

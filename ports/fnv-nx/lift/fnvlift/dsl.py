@@ -129,6 +129,12 @@ def tab(name, idx):
     (only when sha256(rcptab.c) is the certificate's source_sha256 and the certificate has 0 mismatches, else ValueError); C: fnvl_tab_rcp / fnvl_tab_rsqrt (rt/fnvl.h), which read the same file's own function fnvl_rcp32 / fnvl_rsqrt32."""
     assert name in RCPTAB and idx.w == 11
     return mk('tab', 12, (idx,), name)
+def cop(name, w, *args):
+    """a carrier op (x87): the value of the runtime helper `name` (rt/fnvl_x87.h, the fx_dsl_* wrappers) on the architectural values ARGS, of width w.  The op symbol is the helper's name: z3 has the uninterpreted function of
+    that name and the argument and result sorts (proof/x87spec.py CARRIER_OPS declares it once, proof/x87carrier.py derives its meaning from the C of the helper), C calls the helper.  Two reads of the same name and
+    arguments in one Form are one value (hash-consed)."""
+    assert name.startswith('fx_dsl_') and w in (8, 16, 32, 64, 128) and args and all(a.w <= 128 for a in args)
+    return mk('cop', w, tuple(_unwrap(a) for a in args), name)
 def msb(a): return extract(a, a.w - 1, a.w - 1)
 def bit(a, i): return extract(a, i, i)
 
@@ -167,6 +173,7 @@ def to_smt(n):
     elif o == 'fp': r = _fp_smt(n.x[0], n.x[1], *A)
     elif o == 'cvt': r = _cvt_smt(*n.x, *A)
     elif o == 'tab': r = _tab_smt(n.x, A[0])
+    elif o == 'cop': r = z3.Function(n.x, *[z3.BitVecSort(c.w) for c in n.a], z3.BitVecSort(n.w))(*A)
     elif o == 'load':
         m = mem_array(); bs = [z3.Select(m, A[0] + i) for i in range(n.w // 8)]
         r = z3.Concat(*reversed(bs)) if len(bs) > 1 else bs[0]
@@ -346,6 +353,7 @@ class Emit:
         if o == 'uf': return UF_C[n.x](*a)
         if o == 'cvt': return 'fx_dsl_cvt(%d, %d, %d, %d, %s, %s)' % (0 if n.x[0] == 'i2f' else 1, n.x[1], n.x[2], int(n.x[3]), a[0], a[1])
         if o == 'tab': return 'fnvl_tab_%s(%s)' % (n.x, a[0])
+        if o == 'cop': return '((%s)%s(%s))' % (t, n.x, ', '.join(a))
         if o == 'fp': return 'fx_dsl_fp(%d, %d, %s, %s, %s)' % (FPOPS.index(n.x[0]), n.x[1], a[0], a[1], a[2])
         raise ValueError(o)
 

@@ -127,3 +127,10 @@ on non-NaN operands under the host `fpcr_rmode`; NaN results follow the Arm ARM 
 as ordinary C.  `x87carrier.py` derives the helper set: every identifier of every string literal of the emitters (ast), macros expanded, call graph through the C.  A Form's op symbol is the
 helper's name.  Tests: `tests/test_ctrans.py` (closure, host agreement on boundary inputs against the C compiled by the pinned g++-13 with the same text, mutations, NaN rules).
 Not translated (outside the value boundary, with the executor's reason): asm over the host FPSR, memory macros, the register file indexed by a symbolic TOP, a C++ template.
+
+## Slice 2 part (ii): carrier ops in the spec, the compare family
+
+- Mechanism. `x87spec.CARRIER_OPS` declares value ops that the spec applies by the runtime helper's own name (`fx_dsl_*`, rt/fnvl_x87.h). `x87form.Tr` translates them to the DSL node `cop`; `to_smt` gives the same `z3.Function`; the C emitter calls the helper by that name. Their meaning is bound by an op lemma (tests/test_x87ops.py): the ctrans term of the C wrapper has no UB on any input and equals a z3 formula read from the SDM, one reference per op (`set(REFERENCE) == set(CARRIER_OPS)`).
+- Compare slice. FCOM/FUCOM/FTST/FCOMPP/FUCOMPP take C3/C2/C0 from `fx_dsl_x_cmp` (bits 14, 10, 8); FCOMI/FUCOMI/FCOMIP/FUCOMIP also write ZF, PF, CF from the compare and clear OF, SF, AF (SDM 2A FCOMI). The "eflags written" obligation is in `domain_terms`. FPCR DN=0 and FZ=0 stay as obligations in Result.dom until a `console_cpu.fpcr` row exists.
+- Lemma proved on the dev .i: the UB of fnvl_x_cmp and fx_dsl_x_cmp is valid, and the FP-theory condition codes equal fnvl_x_cmp bits & 0x4500 on all 80-bit inputs.
+- Open gaps (no class-closing rule yet, blocks the arithmetic, conversion and transcendental classes): rt/x87.c is an exact integer core, but the arithmetic flags of the fv_* path come from the host FPSR (asm), which ctrans cannot model; the handler FCMP drops the fnvl_x_cmp IE/DE flags and does not raise IE for a QNaN FCOM; Arm IDC/DE under FZ=0 is unmodelled. The memory-form compares (from_m32, from_m64, ...) stay uncertified.

@@ -64,7 +64,6 @@ class T(unittest.TestCase):
         self.assertIn("without a resolution: nd.trig.c2", self.reason(b"\xd9\xfe"))      # fsin: the SDM leaves a choice, no sourced resolution (slice 3)
         self.assertIn("nd.nan.tie", self.reason(b"\xd8\xc1"))                          # fadd: a NaN tie, and it needs op symbols (slice 2)
         self.assertIn("FPA_", self.reason(b"\xdd\x10"))                                # fst m64: floating-point kind
-        self.assertIn("EFLAGS", self.reason(b"\xdb\xf1"))                              # fcomi
 
     def test_slice_1b_classes(self):
         for raw, name in ((b"\xd9\x28", "fldcw"), (b"\xd9\x20", "fldenv"), (b"\xd9\x30", "fnstenv"), (b"\xdd\x20", "frstor"), (b"\xdd\x30", "fnsave"), (b"\xdf\x20", "fbld"),
@@ -103,6 +102,32 @@ class T(unittest.TestCase):
         sv = XF.z3.Solver()
         sv.add(dsl.to_smt(n) != t)
         self.assertEqual(sv.check(), XF.z3.unsat)
+
+
+    COMPARES = ((b"\xd8\xd1", "fcom st(1)"), (b"\xd8\xd9", "fcomp st(1)"), (b"\xd9\xe4", "ftst"), (b"\xda\xe9", "fucompp"), (b"\xdd\xe1", "fucom st(1)"),
+                (b"\xdd\xe9", "fucomp st(1)"), (b"\xde\xd9", "fcompp"), (b"\xdb\xe9", "fucomi"), (b"\xdb\xf1", "fcomi"), (b"\xdf\xe9", "fucomip"), (b"\xdf\xf1", "fcomip"))
+
+    def test_compare_classes_prove(self):
+        for raw, name in self.COMPARES:
+            r = prove.prove_one(None, build(raw), None, None, None)
+            self.assertEqual(r[0], "proved", (name, r))
+
+    def test_compare_emits_the_carrier_op(self):
+        txt = "\n".join(build(b"\xdb\xe9").to_c_inline(lambda n: "v_" + n, lambda c, n, r: "", lambda v: "", (), "M")[0])
+        self.assertIn("fx_dsl_x_cmp(", txt)
+
+    def test_eflags_translation_defect_is_caught(self):
+        # a defect of the flag order: the Form writes PF where the spec says CF
+        F = build(b"\xdb\xe9")
+        flag = type(F).flag
+        swap = {"pf": "cf", "cf": "pf"}
+        type(F).flag = lambda self, f, t: flag(self, swap.get(f, f), t)
+        try:
+            F = build(b"\xdb\xe9")
+            r = prove.prove_one(None, F, None, None, None)
+        finally:
+            type(F).flag = flag
+        self.assertNotEqual(r[0], "proved")
 
 
 if __name__ == "__main__":

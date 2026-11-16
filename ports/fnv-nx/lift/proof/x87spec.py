@@ -58,6 +58,22 @@ def K(v, n):
     return BitVecVal(v, n)
 
 
+# CARRIER OPS.  A value computation that the runtime's carrier (rt/fnvl_x87.h, rt/x87.c) defines is not restated here (CLAUDE.md "Floating point uses plain IEEE semantics", OWNER 8; one source of truth, rule 2): the
+# spec applies the op by its helper's name, as a z3 uninterpreted function of the declared sorts, and the machinery around it (TOP, tags, the status and control words, the exception masks) stays as transcribed
+# (OWNER 10).  CARRIER_OPS maps the name to (argument widths, result width); the translator turns each application into the DSL node `cop` of the same name, proof/x87carrier.py derives the meaning of the name
+# from the C of the helper, and tests/test_x87ops.py proves that meaning against the SDM's own reading of the value (the FP theory) on every input.
+CARRIER_OPS = {}
+
+
+def carrier_op(name, in_widths, out_width):
+    f = z3.Function(name, *[z3.BitVecSort(w) for w in in_widths], z3.BitVecSort(out_width))
+    CARRIER_OPS[name] = (tuple(in_widths), out_width)
+    return f
+
+
+X_CMP = carrier_op("fx_dsl_x_cmp", (80, 80), 32)      # C3<<14 | C2<<10 | C0<<8 of two register images (SDM 1:T8-6), unordered and unsupported operands 111
+
+
 # --------------------------------------------------------------------------------------------
 # Part (i).  Shared machinery
 # --------------------------------------------------------------------------------------------
@@ -585,11 +601,10 @@ def compare(a, b, ordered):
     of SDM 1:T8-10 is the condition code 111)."""
     ua, ub = is_unsup80(a), is_unsup80(b)
     unordered = Or(is_nan80(a), is_nan80(b), ua, ub)
-    lt = z3.fpLT(fp80(a), fp80(b))
-    eq = z3.fpEQ(fp80(a), fp80(b))       # +0 == -0 (IEEE), SDM 2A:FCOM Op 'ST(0) = SRC'
-    c3 = Or(unordered, eq)
-    c2 = unordered
-    c0 = Or(unordered, And(Not(unordered), lt))
+    r = X_CMP(a, b)      # the condition codes: the carrier's op (ST(0) = SRC is IEEE equality, so +0 = -0, SDM 2A:FCOM Op)
+    c3 = Extract(14, 14, r) == K(1, 1)
+    c2 = Extract(10, 10, r) == K(1, 1)
+    c0 = Extract(8, 8, r) == K(1, 1)
     ie = Or(is_snan80(a), is_snan80(b), ua, ub) if not ordered else unordered
     de = And(Not(unordered), Or(is_den80(a), is_den80(b)))
     return c3, c2, c0, ie, de
